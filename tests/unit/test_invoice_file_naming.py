@@ -2,7 +2,7 @@
 """電子發票檔的資料夾與檔名規則（owner 2026-08-19 拍板）。
 
 規則一旦上線就會產生幾百個檔案，改名等於要人回頭搬檔 —— 所以釘死在測試裡。
-正本：routers/crm/finance.py::_invoice_file_name / upload_invoice_file。
+正本：routers/crm/invoice_files.py::_invoice_file_name / upload_invoice_file。
 
     {invoices_root}/{YYYY}/{YYYY-MM}/{YYYYMMDD}_{發票號碼}_{抬頭前20字}_{含稅金額}[_作廢].ext
 
@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from routers.crm.finance import _invoice_file_name, _safe_part
+from routers.crm.invoice_files import _invoice_file_name, _safe_part
 
 TPE = timezone(timedelta(hours=8))
 

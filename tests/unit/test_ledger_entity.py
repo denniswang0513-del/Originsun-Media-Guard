@@ -242,6 +242,9 @@ def test_load_inputs_filters_each_flow_source(model):
 
 
 AF_SRC = _src("routers/api_finance.py")
+# 對帳單匯入 2026-08-21 從 api_finance.py 尾端搬成獨立檔（純搬家）。守衛的釘
+# 要跟著涵蓋它 —— 只掃原檔的話，搬過去的 10 個 _guard 就從此不受任何釘子管。
+AFS_SRC = _src("routers/api_finance_stmt.py")
 
 
 def test_api_finance_has_no_bare_check_money_call():
@@ -262,6 +265,13 @@ def test_api_finance_view_endpoints_exactly_seven():
     assert n == 7, f"不帶 level 的 _guard(request, entity) 有 {n} 處（應為 7）"
 
 
+def test_statement_import_has_no_view_level_endpoint():
+    """對帳單匯入整段都是記帳寫入面，一支報表端點都沒有 —— 不帶 level 的
+    `_guard` 一處都不該出現。出現了＝合夥人（唯讀）摸得到匯入這條路。"""
+    n = len(re.findall(r"_guard\(request(?:, [a-z_.\"]+)?\)(?!\s*#)", AFS_SRC))
+    assert n == 0, f"api_finance_stmt 有 {n} 處沒指定 level 的 _guard"
+
+
 def test_api_finance_full_level_floor():
     """其餘端點全部 level="full"（銀行/對帳/明細/調整/貸款/bulk-assign/
     category-map 寫入/setup-wizard；含帳戶推導的二次驗證）。地板取 40 ——
@@ -270,20 +280,33 @@ def test_api_finance_full_level_floor():
     assert n >= 40, f'api_finance 的 level="full" 只出現 {n} 次（< 40）'
 
 
+def test_statement_import_full_level_floor():
+    """對帳單匯入（分類規則 CRUD／預覽／匯入／草稿 CRUD）全部 level="full"。
+    地板取 9（搬家當下是 10）。"""
+    n = AFS_SRC.count('level="full"')
+    assert n >= 9, f'api_finance_stmt 的 level="full" 只出現 {n} 次（< 9）'
+
+
 CF_SRC = _src("routers/crm/finance.py")
 
 
-def test_crm_finance_require_entity_all_full_level():
+# 🔴 帳務域的守衛掃描要蓋**兩個**檔案：2026-08-21 把發票檔那 500 行搬到
+# invoice_files.py 時，有 4 處 require_entity 跟著搬過去 —— 只掃 finance.py 的話
+# 那 4 處從此沒人看著，而且下限 >= 12 還是會過，看不出少了東西。
+@pytest.mark.parametrize("rel,floor", [("routers/crm/finance.py", 12),
+                                       ("routers/crm/invoice_files.py", 3)])
+def test_crm_finance_require_entity_all_full_level(rel, floor):
     """CRM 帳務逐筆端點（invoices/payments/cash-entries）的 require_entity
     一律 level="full"：這裡是原始帳列，合夥人的 view scope 不可及（plan §2.4）。
     漏帶 level＝預設 view＝合夥人拿得到母公司原始帳列。"""
-    calls = [m.start() for m in re.finditer(r"require_entity\(request", CF_SRC)]
-    assert len(calls) >= 12, \
-        f"只掃到 {len(calls)} 處 require_entity 呼叫，掃描器八成壞了"
+    src = _src(rel)
+    calls = [m.start() for m in re.finditer(r"require_entity\(request", src)]
+    assert len(calls) >= floor, \
+        f"{rel} 只掃到 {len(calls)} 處 require_entity 呼叫，掃描器八成壞了"
     for pos in calls:
-        window = CF_SRC[pos:pos + 120]
+        window = src[pos:pos + 120]
         assert 'level="full"' in window, \
-            f"這處 require_entity 沒帶 level=\"full\"：{window.splitlines()[0]!r}"
+            f"{rel} 這處 require_entity 沒帶 level=\"full\"：{window.splitlines()[0]!r}"
 
 
 def test_crm_finance_month_open_calls_all_carry_entity():
@@ -450,8 +473,10 @@ OWN_BAN_FILES = [
     "db/models.py",
     "services/finance_statements.py",
     "routers/api_finance.py",
+    "routers/api_finance_stmt.py",
     "routers/api_cashflow.py",
     "routers/crm/finance.py",
+    "routers/crm/invoice_files.py",
     "routers/crm/_shared.py",
 ]
 

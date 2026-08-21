@@ -112,7 +112,7 @@ def test_set_primary_invoice_writes_and_clears_all_three_columns():
 
 def test_statement_text_decodes_big5_bank_exports():
     """台灣網銀匯出的 CSV 幾乎都是 big5 —— 解錯就整份對帳單變亂碼、一列都解析不出來。"""
-    from routers.api_finance import _statement_text
+    from routers.api_finance_stmt import _statement_text
     line = "2026/08/01 跨行轉入 500,000.00 1,500,000.00"
     assert _statement_text("a.csv", line.encode("big5")) == line
     assert _statement_text("a.csv", line.encode("utf-8-sig")) == line

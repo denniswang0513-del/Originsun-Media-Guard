@@ -68,7 +68,7 @@ class TestKeywordShape:
     """
 
     def _check(self, kw):
-        from routers.api_finance import _assert_usable_keyword
+        from routers.api_finance_stmt import _assert_usable_keyword
         import pytest
         from fastapi import HTTPException
         with pytest.raises(HTTPException) as ei:
@@ -94,6 +94,6 @@ class TestKeywordShape:
         assert "兩個字" in self._check("中")
 
     def test_real_keywords_pass(self):
-        from routers.api_finance import _assert_usable_keyword
+        from routers.api_finance_stmt import _assert_usable_keyword
         for kw in ("電信費", "中小７月", "ATM跨行轉入", "網路轉帳", "攤還本息"):
             _assert_usable_keyword(kw)     # 不該拋

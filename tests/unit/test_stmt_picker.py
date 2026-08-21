@@ -71,7 +71,7 @@ def test_picker_reads_the_field_names_the_backend_actually_sends():
     每張發票的「面額」全都是 $0（而「已收」「尚欠」是對的，更難看出不對勁）。
     """
     import re
-    api = repo_src('routers/api_finance.py')
+    api = repo_src('routers/api_finance_stmt.py')
     i = api.index('open_invs.append({')
     sent = set(re.findall(r'"(\w+)":', api[i:api.index('open_invs.sort')]))
     # collection_fields 攤平進來的四欄（collected/outstanding/settled/last_paid_date）
@@ -86,7 +86,7 @@ def test_picker_reads_the_field_names_the_backend_actually_sends():
 
 def test_project_picker_reads_the_right_fields():
     import re
-    api = repo_src('routers/api_finance.py')
+    api = repo_src('routers/api_finance_stmt.py')
     i = api.index('projects = [{')
     sent = set(re.findall(r'"(\w+)":', api[i:i + 500]))
 

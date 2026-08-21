@@ -10,6 +10,7 @@ from . import quotes     # noqa: F401  報價 + 報價範本
 from . import staff      # noqa: F401  人力 + 履歷 + 派工
 from . import costs      # noqa: F401  雜支 + 收據 + 成本估算 + 子表
 from . import finance    # noqa: F401  發票 + 請款 + 收支 + 應付/應收
+from . import invoice_files  # noqa: F401  電子發票檔（上傳/下載/分享連結）＋發票根目錄設定
 from . import showcase   # noqa: F401  Showcase + token 編輯 + Site API
 from . import works      # noqa: F401  1:N 作品子端點（依賴 projects/showcase，須在其後）
 from . import media_log  # noqa: F401  影像紀錄（路徑獨立 /media-log，順序無關）

@@ -6,7 +6,7 @@ owner 2026-08-19：「電子發票上傳之後可以選擇自動更新發票號�
 座標解析。
 
 🔴 抽到的號碼只**回報**、不自動寫入：發票號碼是法定識別，套不套用由人按一下決定
-（見 routers/crm/finance.upload_invoice_file 的回應 detected_invoice_number）。
+（見 routers/crm/invoice_files.upload_invoice_file 的回應 detected_invoice_number）。
 """
 import io
 import os
@@ -15,7 +15,8 @@ import pytest
 
 BS = chr(92)
 
-from routers.crm.finance import _detect_invoice_number, _INVOICE_NO_LABELLED
+from routers.crm.invoice_files import (_INVOICE_NO_LABELLED,
+                                       _detect_invoice_number)
 
 
 # ── 標籤正則（真 PDF 的抽取結果會長成什麼樣）──────────────
@@ -92,7 +93,7 @@ def test_upload_reports_but_does_not_apply():
     """上傳端點只回報偵測結果，不自己寫進 invoice_number。"""
     import re
     src = io.open(os.path.join(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__)))), "routers/crm/finance.py"),
+        os.path.dirname(os.path.abspath(__file__)))), "routers/crm/invoice_files.py"),
         encoding="utf-8").read()
     i = src.index("async def upload_invoice_file(")
     body = src[i:i + 3000]
@@ -103,10 +104,14 @@ def test_upload_reports_but_does_not_apply():
 
 # ── 上傳後的兩個連帶行為（owner 2026-08-19 回報）──────────
 
-def _finance_src():
+def _repo_src(rel):
     return io.open(os.path.join(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__)))), "routers/crm/finance.py"),
-        encoding="utf-8").read()
+        os.path.dirname(os.path.abspath(__file__)))), rel), encoding="utf-8").read()
+
+
+def _finance_src():
+    """發票檔那一套（2026-08-21 從 finance.py 搬到 invoice_files.py）。"""
+    return _repo_src("routers/crm/invoice_files.py")
 
 
 def _func_body(src, header):
@@ -165,8 +170,10 @@ def test_file_name_resyncs_on_update():
     檔名還停在 `20260806_42ec03d2_…`。"""
     src = _finance_src()
     assert "def _resync_invoice_file(" in src
-    i = src.index("async def update_invoice(")
-    assert "_resync_invoice_file" in src[i:i + 2500], "update_invoice 沒有重新對齊檔名"
+    # 🔴 這條跨兩個檔案：helper 在 invoice_files、update_invoice 還在 finance
+    fin = _repo_src("routers/crm/finance.py")
+    i = fin.index("async def update_invoice(")
+    assert "_resync_invoice_file" in fin[i:i + 2500], "update_invoice 沒有重新對齊檔名"
     helper = _func_body(src, "def _resync_invoice_file(")
     assert "os.path.exists(target)" in helper, \
         "目標同名檔已存在時不可覆蓋 —— 那是別人的稅務憑證"

@@ -32,7 +32,7 @@ _ROUTER_MODULES = [
     'api_backup', 'api_verify', 'api_proxy', 'api_concat',
     'api_report', 'api_transcribe', 'api_system', 'api_ota', 'api_utils', 'api_tts',
     'api_job_history', 'api_queue', 'api_schedules', 'api_agents', 'api_bookmarks',
-    'api_api_keys', 'api_timesheets', 'api_cashflow', 'api_finance', 'api_locations', 'api_proposals',
+    'api_api_keys', 'api_timesheets', 'api_cashflow', 'api_finance', 'api_finance_stmt', 'api_locations', 'api_proposals',
     'api_references',
     'api_intel',
     'api_portal',
@@ -1292,11 +1292,11 @@ async def _short_invoice_file(code: str):
 
     掛在根路徑是為了**短** —— 走 router 前綴會變成 /api/v1/crm/... 又長回去
     （owner 要求：原本整條 287 字元，現在約 49）。實作在
-    routers/crm/finance.py，這裡只是把根路徑接過去。
+    routers/crm/invoice_files.py，這裡只是把根路徑接過去。
 
     註冊在 `app.mount("/")` 之前才會贏 —— StaticFiles 掛在根，順序決定誰接。
     """
-    from routers.crm.finance import serve_invoice_by_share_token
+    from routers.crm.invoice_files import serve_invoice_by_share_token
     return await serve_invoice_by_share_token(code)
 
 

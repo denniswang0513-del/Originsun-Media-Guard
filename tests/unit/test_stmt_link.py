@@ -12,7 +12,7 @@ SRC = 'routers/crm/finance.py'
 
 
 def _body(fn):
-    return code_only(func_body(repo_src('routers/api_finance.py'), fn))
+    return code_only(func_body(repo_src('routers/api_finance_stmt.py'), fn))
 
 
 def test_schema_carries_project_and_invoice():
@@ -52,7 +52,8 @@ def test_invoice_goes_through_the_allocation_table():
     """
     import re
     hits = []
-    for path in ('routers/crm/finance.py', 'routers/api_finance.py'):
+    for path in ('routers/crm/finance.py', 'routers/crm/invoice_files.py',
+                 'routers/api_finance.py', 'routers/api_finance_stmt.py'):
         body = code_only(repo_src(path))
         hits += [(path, m.start()) for m in re.finditer(r'CrmCashInvoiceLink\(', body)]
     assert len(hits) == 1, f'分配表有 {len(hits)} 個寫入點（應該只有 1 個）：{hits}'

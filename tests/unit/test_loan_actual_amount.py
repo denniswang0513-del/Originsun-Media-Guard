@@ -11,8 +11,10 @@ from types import SimpleNamespace
 from tests.unit._srcscan import code_only, func_body, repo_src  # noqa: E402
 
 
-def _body(fn):
-    return code_only(func_body(repo_src('routers/api_finance.py'), fn))
+def _body(fn, rel='routers/api_finance.py'):
+    # 🔴 跨兩個檔案：_record_loan_payment 在 api_finance，對帳單匯入 2026-08-21
+    # 搬去 api_finance_stmt（純搬家）。兩邊都要掃得到，別只留一個檔名。
+    return code_only(func_body(repo_src(rel), fn))
 
 
 class FakeSession:
@@ -63,13 +65,13 @@ def test_principal_interest_split_still_comes_from_the_schedule():
 
 def test_statement_import_passes_the_bank_amount_through():
     """匯入那條路真的有把銀行金額傳下去（不然上面幾條都白測）。"""
-    body = _body('async def apply_bank_statement(')
+    body = _body('async def apply_bank_statement(', 'routers/api_finance_stmt.py')
     assert 'actual_amount=abs(int(r.amount or 0))' in body, \
         '對帳單匯入又改回記攤還表金額了'
 
 
 def test_statement_import_also_fills_the_bank_side_of_the_workbench():
     """匯入要同時建對帳單明細並自動配對 —— 否則工作台會顯示「銀行 0 筆」。"""
-    body = _body('async def apply_bank_statement(')
+    body = _body('async def apply_bank_statement(', 'routers/api_finance_stmt.py')
     assert 'BankStatementLine(' in body, '匯入沒有填工作台的銀行側'
     assert 'matched_entry_id=ce.id' in body, '建了卻沒配對，等於留一堆待處理給人'

@@ -13,7 +13,7 @@
 """
 from tests.unit._srcscan import repo_src  # noqa: E402
 
-API = repo_src('routers/api_finance.py')
+API = repo_src('routers/api_finance_stmt.py')
 JS = repo_src('frontend/tabs/finance/subviews/banking.js')
 
 
