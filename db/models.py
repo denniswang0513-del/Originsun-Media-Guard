@@ -1504,7 +1504,10 @@ class BankAccount(Base):
     name = Column(String(64), nullable=False)                    # 帳戶顯示名（XX 銀行活存）
     bank_name = Column(String(64), nullable=True)                # 銀行名稱
     account_no = Column(String(32), nullable=True)               # 帳號（後幾碼即可）
-    acct_kind = Column(String(16), nullable=False, default="bank")  # bank / cash=零用金
+    acct_kind = Column(String(16), nullable=False, default="bank")  # bank / cash=零用金 / shareholder_*=股東往來
+    # 股東往來帳戶綁到哪位人員（soft FK → crm_staff.id）。只有 shareholder_* 用得到 ——
+    # 綁了之後那位股東登入 /my.html 就看得到自己的往來餘額（own-scope，看不到別人的）。
+    staff_id = Column(String(32), nullable=True, index=True)
     opening_balance = Column(Integer, nullable=False, default=0)  # 期初餘額（基準日）
     opening_date = Column(DateTime(timezone=True), nullable=True)  # 期初基準日
     is_default = Column(Boolean, default=False)                  # 預設帳戶（新收支預設掛這）

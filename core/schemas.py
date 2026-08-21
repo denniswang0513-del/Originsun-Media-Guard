@@ -1055,7 +1055,10 @@ class BankAccountPayload(BaseModel):
     name: Optional[str] = None
     bank_name: Optional[str] = None
     account_no: Optional[str] = None
-    acct_kind: Optional[str] = None        # bank / cash=零用金
+    acct_kind: Optional[str] = None        # bank / cash / shareholder_*
+    staff_id: Optional[str] = None         # 股東往來綁的人員
+    # 前端「不綁」送的是空字串；存 "" 會讓 own-scope 查詢配到一堆空字串帳戶
+    _blank_staff = field_validator("staff_id")(lambda v: (v or "").strip() or None)
     opening_balance: Optional[int] = None
     opening_date: Optional[str] = None     # 'YYYY-MM-DD'
     is_default: Optional[bool] = None

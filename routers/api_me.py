@@ -35,7 +35,8 @@ router = APIRouter(prefix="/api/v1/me", tags=["me"])
 
 ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_leave",
                   "me_petty",     # 零用金卡（2026-08-19 從 me_finance 拆出）
-                  "me_benefits")  # 福委會卡（2026-08-21，員工自己登記快樂/進修）
+                  "me_benefits",  # 福委會卡（2026-08-21，員工自己登記快樂/進修）
+                  "me_shareholder")  # 股東往來卡（2026-08-21，股東看自己的餘額）
 
 # 提案企劃卡的閘門 — 對齊 routers/api_proposals._check 的守衛集合（owner 2026-08-11
 # 拍板「權限全通」：打得開 /project.html 的人，工作台就有入口卡）。

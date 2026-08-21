@@ -178,6 +178,9 @@ ALL_MODULES = [
     # 認的就是這個 key。刻意獨立成一把鑰匙而不是沿用 transcode/drone_meta：
     # ComfyUI 的自訂節點等於那台機器上的任意程式碼執行，不該隨後期製作權限外溢。
     'comfyui',
+    # 股東看自己的往來（/my.html 卡片）。帳戶要先在銀行帳戶那邊綁到這個人
+    # （bank_accounts.staff_id），沒綁就是空的。同樣只管 UI 入口。
+    'me_shareholder',
 ]
 
 

@@ -30,6 +30,7 @@ const LOAN_GROUP_KEY = 'finance_loan_groups_open';   // 展開中的銀行（依
 let _c = null;
 let _isCurrent = () => true;
 let _accounts = [];      // 銀行帳戶
+let _staffOpts = [];     // 人員清單（股東往來綁定用；只在開表單時抓一次）
 let _drafts = [];        // 對帳單匯入草稿（掛到一半的）
 let _unassigned = 0;
 let _adjustments = [];
@@ -367,7 +368,10 @@ function _renderShell() {
                         <div class="crm-field"><label>帳號</label>
                             <input id="finbank-f-account_no" type="text" class="crm-input"></div>
                         <div class="crm-field"><label>種類</label>
-                            <select id="finbank-f-acct_kind" class="crm-input">${ACCT_KIND_OPTIONS.map(k => `<option value="${k.v}">${esc(k.label)}</option>`).join('')}</select></div>
+                            <select id="finbank-f-acct_kind" class="crm-input" onchange="window._finBank.kindChanged()">${ACCT_KIND_OPTIONS.map(k => `<option value="${k.v}">${esc(k.label)}</option>`).join('')}</select></div>
+                        <!-- 綁定股東：只有股東往來用得到，選了之後那位登入 /my.html 就看得到自己的餘額 -->
+                        <div class="crm-field" id="finbank-f-staff-wrap" style="display:none;"><label>綁定股東</label>
+                            <select id="finbank-f-staff_id" class="crm-input"><option value="">不綁定</option></select></div>
                         <div class="crm-field"><label>期初餘額</label>
                             <input id="finbank-f-opening_balance" type="number" step="any" class="crm-input" value="0"></div>
                         <div class="crm-field"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
@@ -477,6 +481,8 @@ function _openModal(a, defaultKind) {
     g('bank_name').value = a ? (a.bank_name || '') : '';
     g('account_no').value = a ? (a.account_no || '') : '';
     g('acct_kind').value = a ? (a.acct_kind || 'bank') : (defaultKind || 'bank');
+    _fillStaffSelect(a ? (a.staff_id || '') : '');
+    _fb.kindChanged();
     g('opening_balance').value = a ? (a.opening_balance ?? 0) : 0;
     g('is_default').checked = !!(a && a.is_default);
     g('note').value = a ? (a.note || '') : '';
@@ -486,6 +492,27 @@ function _openModal(a, defaultKind) {
 }
 
 // 從股東往來那一區按新增時預選「股東往來－借款」—— 少一次選錯的機會
+/** 綁定股東的下拉：只在種類是股東往來時出現。 */
+_fb.kindChanged = () => {
+    const kind = _c.querySelector('#finbank-f-acct_kind').value;
+    const wrap = _c.querySelector('#finbank-f-staff-wrap');
+    if (wrap) wrap.style.display = isShareholderAcct(kind) ? '' : 'none';
+};
+
+function _fillStaffSelect(selected) {
+    const sel = _c.querySelector('#finbank-f-staff_id');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">不綁定</option>' + _staffOpts.map(x =>
+        `<option value="${esc(x.id)}"${String(x.id) === String(selected) ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
+    if (!_staffOpts.length) {
+        // 還沒抓過就抓一次（開表單才抓 —— 平常看帳戶清單用不到這份資料）
+        finFetch('/crm/staff?limit=300').then(d => {
+            _staffOpts = (d.items || d.staff || []).map(x => ({ id: x.id, name: x.name }));
+            _fillStaffSelect(selected);
+        }).catch(() => { /* 抓不到就維持「不綁定」一個選項 */ });
+    }
+}
+
 _fb.openAdd = (defaultKind) => _openModal(null, defaultKind);
 
 _fb.edit = (id) => {
@@ -506,6 +533,7 @@ _fb.saveAcct = async (btn) => {
         bank_name: g('bank_name').value.trim(),
         account_no: g('account_no').value.trim(),
         acct_kind: g('acct_kind').value,
+        staff_id: g('staff_id') ? g('staff_id').value : '',
         opening_balance: parseFloat(g('opening_balance').value) || 0,
         is_default: g('is_default').checked,
         note: g('note').value.trim(),
