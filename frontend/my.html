@@ -602,24 +602,47 @@ function cardBenefits() {
         }
         const today = new Date().toLocaleDateString("sv-SE");   // 本地日期，不是 UTC
         const opts = pools.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+        // 兩種數字要分清楚：池餘額是**全公司共用**的那一份，我已用是我自己的。
+        // 只顯示池餘額的話，員工會以為那是自己的額度。
         const stats = pools.map(p => `<div class="stat">
-            <div class="num">${money(p.balance)}</div><div class="lbl">${esc(p.name)} 餘額</div></div>`).join("");
+            <div class="num">${money(p.balance)}</div>
+            <div class="lbl">${esc(p.name)} 池餘額</div></div>
+            <div class="stat">
+            <div class="num">${money(p.mine_used || 0)}</div>
+            <div class="lbl">我在${esc(p.name)}已用${
+                p.mine_pending ? `（審核中 ${money(p.mine_pending)}）` : ""}</div></div>`).join("");
         // 單據與心得都是**選填**（owner）—— 這裡只標示有沒有，沒有也不擋。
         // 還在待審/退回的可以補傳單據。
-        const mine = (d.entries || []).slice(0, 8).map(e => {
+        // 🔴 不截斷。原本只畫 8 筆而且沒說被截掉 —— 有人有 22 筆，
+        //    「我上個月那筆呢」在畫面上直接消失。多的用捲軸，不是砍掉。
+        const all = d.entries || [];
+        const mine = all.map(e => {
             const editable = e.status === "待審" || e.status === "退回";
+            // 🔴 退回是唯一需要員工動手的狀態，原因一定要看得到，
+            //    不然他只知道被退、不知道要改什麼。
+            const why = (e.status === "退回" && e.notes)
+                ? `<div class="meta" style="color:#b91c1c;">${esc(e.notes)}</div>` : "";
             return `
             <div class="row">
                 <div class="grow">
                     <div class="title">${esc(e.title)}　${money(e.amount)}</div>
                     <div class="meta">${esc(e.pool_name)}　${esc(e.spend_date)}
                         ${e.has_receipt ? "・單據 ✓" : ""}${e.has_reflection ? "・心得 ✓" : ""}</div>
+                    ${why}
                 </div>
-                ${editable && !e.has_receipt
-                    ? `<button class="mini-btn" data-up="${esc(e.id)}">傳單據</button>` : ""}
+                ${editable ? `<button class="mini-btn" data-up="${esc(e.id)}"
+                    >${e.has_receipt ? "換單據" : "傳單據"}</button>
+                    <button class="mini-btn" data-note="${esc(e.id)}"
+                    >${e.has_reflection ? "改心得" : "寫心得"}</button>` : ""}
                 <span class="pill${e.status === "待審" ? " hot" : ""}">${esc(e.status)}</span>
             </div>`;
         }).join("");
+        const listWrap = all.length
+            ? `<div style="max-height:340px;overflow-y:auto;margin-top:12px;">${mine}</div>
+               <div class="meta" style="margin-top:6px;">共 ${all.length} 筆。
+                   待審＝等審核；已核准＝進公司請款；已付款＝錢已經匯出。
+                   單據與心得都是選填。</div>`
+            : `<div class="meta" style="margin-top:12px;">你還沒有登記過。</div>`;
         body.innerHTML = `
             <div class="stats">${stats}</div>
             <div class="pf-edit" style="border-top:1px solid #f5f5f5;padding-top:12px;padding-bottom:4px;">
@@ -636,7 +659,7 @@ function cardBenefits() {
                 <button class="mini-btn" id="mb-add">送出登記</button>
                 <span class="err" id="mb-err" style="margin-left:8px;"></span>
             </div>
-            ${mine || `<div class="meta" style="margin-top:12px;">你還沒有登記過。</div>`}`;
+            ${listWrap}`;
         body.querySelector("#mb-add").onclick = async () => {
             const errEl = body.querySelector("#mb-err");
             errEl.textContent = "";
@@ -689,6 +712,52 @@ function cardBenefits() {
         };
         body.querySelectorAll("[data-up]").forEach(btn => {
             btn.onclick = () => { target = btn.dataset.up; fileInput.click(); };
+        });
+        // 補／改心得。走 me 那支 PUT（own-scope），所以要把原本的欄位一起送回去
+        // —— 那支是整筆覆蓋，只送 reflection 會把項目與金額洗成空的。
+        body.querySelectorAll("[data-note]").forEach(btn => {
+            btn.onclick = async () => {
+                const e = all.find(x => x.id === btn.dataset.note);
+                if (!e) return;
+                const row = btn.closest(".row");
+                if (row.querySelector("[data-noteedit]")) return;   // 已經開著
+                const box = document.createElement("div");
+                box.dataset.noteedit = "1";
+                // 掛進 .grow 而不是 .row —— .row 是 flex 但沒有 flex-wrap，
+                // 直接塞進去會被擠在同一列（flex-basis:100% 沒有換行效果）。
+                box.style.cssText = "margin-top:8px;";
+                box.innerHTML = `
+                    <textarea rows="3" style="width:100%;"
+                              placeholder="心得筆記（選填）"></textarea>
+                    <div style="margin-top:6px;">
+                        <button class="mini-btn" data-save>儲存</button>
+                        <button class="mini-btn" data-cancel>取消</button>
+                        <span class="err" data-err style="margin-left:8px;"></span>
+                    </div>`;
+                const ta = box.querySelector("textarea");
+                ta.value = e.reflection || "";
+                row.querySelector(".grow").appendChild(box);
+                ta.focus();
+                box.querySelector("[data-cancel]").onclick = () => box.remove();
+                box.querySelector("[data-save]").onclick = async () => {
+                    // 🔴 me 那支 PUT 是**整筆覆蓋** —— 只送 reflection 會把
+                    //    項目與金額洗成空的（然後被 422 擋下來）。原欄位一起送回去。
+                    const r = await mfetch(`/api/v1/crm/benefits/me/entries/${e.id}`, {
+                        method: "PUT",
+                        body: JSON.stringify({
+                            pool_id: e.pool_id, title: e.title, amount: e.amount,
+                            spend_date: e.spend_date, reflection: ta.value,
+                        }),
+                    });
+                    if (!r.ok) {
+                        let msg = r.status;
+                        try { msg = (await r.json()).detail || msg; } catch (_) { /* 非 JSON */ }
+                        box.querySelector("[data-err]").textContent = "儲存失敗：" + msg;
+                        return;
+                    }
+                    load();
+                };
+            };
         });
     };
 

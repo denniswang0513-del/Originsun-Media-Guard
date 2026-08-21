@@ -287,8 +287,21 @@ async def my_benefits(request: Request):
             select(HrBenefitEntry).where(HrBenefitEntry.staff_id == staff.id)
             .order_by(HrBenefitEntry.spend_date.desc().nullslast())
             .limit(200))).scalars().all()
-    return {"staff_name": staff.name,
-            "pools": [_pool_dict(p, *roll.get(p.id, ([], []))) for p in pools],
+    mine_by_pool = {}
+    for e in mine:
+        mine_by_pool.setdefault(e.pool_id, []).append((e.status, e.amount))
+    pools_out = []
+    for p in pools:
+        d = _pool_dict(p, *roll.get(p.id, ([], [])))
+        # 「池餘額」是全公司共用的那一份，回答不了「我用了多少」——
+        # 用同一支純規則算（fundings 傳空），前端不自己加總。
+        rows = mine_by_pool.get(p.id, [])
+        m = benefit_pool_balance([], rows)
+        d["mine_used"] = m["used"]
+        d["mine_pending"] = m["pending"]
+        d["mine_count"] = len(rows)
+        pools_out.append(d)
+    return {"staff_name": staff.name, "pools": pools_out,
             "entries": [_entry_dict(e, names.get(e.pool_id, "")) for e in mine]}
 
 

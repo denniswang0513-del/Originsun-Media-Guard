@@ -9,6 +9,7 @@ import asyncio
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -142,6 +143,61 @@ try:
         pg.wait_for_timeout(600)
         check(pg.locator("#mb-err").inner_text().strip() != "", "有錯誤提示",
               pg.locator("#mb-err").inner_text())
+        print("")
+        print("[6] 退回原因看得到 —— 退回是唯一需要員工動手的狀態")
+        eid = rows[0]["id"]
+        # 🔴 reason 是 **query 參數**不是 body（第一次寫成 body：端點回 200、
+        #    原因卻沒被記下來，畫面自然空的 —— 看起來像前端壞了）
+        why_text = "ZZ 請補一下發票"
+        st, _ = api("POST", f"/crm/benefits/entries/{eid}/reject"
+                            f"?reason={urllib.parse.quote(why_text)}")
+        check(st == 200, "管理端退回", st)
+        pg.reload(wait_until="domcontentloaded")
+        pg.wait_for_timeout(5000)
+        txt3 = pg.locator('[data-card="benefits"]').inner_text()
+        check("退回" in txt3, "狀態變退回")
+        check(why_text in txt3, "🔴 原因真的畫在畫面上", txt3[:200])
+
+        print("")
+        print("[7] 我用了多少（池餘額是全公司共用的，回答不了這題）")
+        check("池餘額" in txt3, "餘額標示成「池」的")
+        check("我在" in txt3 and "已用" in txt3, "看得到自己用了多少")
+        _, me2 = api("GET", "/crm/benefits/me", tok=EMP)
+        p0 = me2["pools"][0]
+        for k in ("mine_used", "mine_pending", "mine_count"):
+            check(k in p0, f"後端帶了 {k}")
+
+        print("")
+        print("[8] 補心得（退回的可以改，改完自動重新送審）")
+        pg.locator('[data-card="benefits"] [data-note]').first.click()
+        pg.wait_for_selector('[data-noteedit] textarea', timeout=5000)
+        pg.fill('[data-noteedit] textarea', "很好看\n第二行")
+        pg.locator('[data-noteedit] [data-save]').click()
+        pg.wait_for_timeout(2500)
+        check(not errs, "存心得沒有 JS 例外", errs[:2])
+        _, me3 = api("GET", "/crm/benefits/me", tok=EMP)
+        row = next(e for e in me3["entries"] if e["id"] == eid)
+        check(row["has_reflection"] is True, "心得存進去了")
+        check("第二行" in (row["reflection"] or ""), "換行沒被吃掉（prompt 會吃掉）",
+              repr(row["reflection"])[:50])
+        # 🔴 me 那支 PUT 是整筆覆蓋 —— 項目與金額不可以被洗掉
+        check(row["title"] == "ZZ 我的電影", "項目沒被洗掉", row["title"])
+        check(row["amount"] == 420, "金額沒被洗掉", row["amount"])
+        check(row["status"] == "待審", "退回的改完自動重新送審", row["status"])
+
+        print("")
+        print("[9] 已付款的不給按鈕（按了才被 409 拒是最差的）")
+        api("POST", f"/crm/benefits/entries/{eid}/approve")
+        api("POST", f"/crm/benefits/entries/{eid}/pay?payment_date=2026-08-21")
+        pg.reload(wait_until="domcontentloaded")
+        pg.wait_for_timeout(5000)
+        card2 = pg.locator('[data-card="benefits"]')
+        check("已付款" in card2.inner_text(), "狀態是已付款")
+        check(card2.locator("[data-up]").count() == 0, "沒有傳單據鈕",
+              card2.locator("[data-up]").count())
+        check(card2.locator("[data-note]").count() == 0, "沒有寫心得鈕",
+              card2.locator("[data-note]").count())
+
         b.close()
 finally:
     print("\n[清理]")
