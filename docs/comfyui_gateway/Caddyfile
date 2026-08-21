@@ -1,0 +1,25 @@
+{
+	admin off
+	auto_https off
+}
+
+:8188 {
+	# the gateway serves its own login page, so the cookie is scoped to whatever
+	# origin you arrived on - the tailnet IP and the public hostname each get
+	# their own, and neither needs cross-domain cookie handling.
+	handle /_auth/* {
+		reverse_proxy 127.0.0.1:8190
+	}
+
+	handle {
+		# /_auth/verify answers 200 (allowed) or 302 (go log in). forward_auth
+		# copies a non-2xx response straight back to the browser, so the 302
+		# is what sends an unauthenticated visitor to the login page.
+		forward_auth 127.0.0.1:8190 {
+			uri /_auth/verify
+		}
+		reverse_proxy 127.0.0.1:8189 {
+			flush_interval -1
+		}
+	}
+}
