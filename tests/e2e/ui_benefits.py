@@ -5,6 +5,7 @@
 而且新 tab 少了 index.html 的 section 殼時 API 全綠也看不出來。只有真的點下去才知道。
 """
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -19,6 +20,7 @@ TOK = create_token({"sub": "admin", "username": "admin",
 H = {"Authorization": "Bearer " + TOK, "Content-Type": "application/json"}
 POOL_NAME = "ZZ_UI 快樂"
 fails = []
+LEFTOVER = []      # 刪不掉的單據 —— 結尾要出聲，不能靜默略過
 
 
 def check(ok, label, extra=""):
@@ -158,6 +160,55 @@ try:
         out = pg.inner_text("#hb-k-out")
         check("撥款" in out and "餘額" in out, "彙總畫出來")
         check("$3,000" in out, "已用金額出現")
+        print("")
+        print("[9] 在**已付款**那列補單據與心得（owner：「需要有地方可以")
+        print("    上傳單據寫心得」—— 匯進來的歷史紀錄就是這個狀態）")
+        row = pg.locator("#hb-content tr", has_text="ZZ 部門聚餐").first
+        check(row.locator("button:has-text('＋單據')").count() == 1,
+              "已付款的列上看得到「＋單據」")
+        check(row.locator("button:has-text('＋心得')").count() == 1,
+              "已付款的列上看得到「＋心得」")
+
+        fix = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "fixtures", "einvoice_full.pdf")   # tests/fixtures/，不在 e2e/ 底下
+        assert os.path.isfile(fix), fix
+        with pg.expect_file_chooser() as fc:
+            row.locator("button:has-text('＋單據')").first.click()
+        fc.value.set_files(fix)
+        pg.wait_for_timeout(3000)
+        check(not errs, "上傳沒有 JS 例外", errs[:2])
+        _, det = api("GET", "/crm/benefits/pools/" + pool["id"])
+        ent = det["entries"][0]
+        check(ent["has_receipt"] is True, "後端真的收到單據了",
+              ent.get("receipt_url"))
+        uploaded = ent.get("receipt_url") or ""
+
+        row = pg.locator("#hb-content tr", has_text="ZZ 部門聚餐").first
+        row.locator("button:has-text('＋心得')").first.click()
+        pg.wait_for_selector("#hb-note-text", timeout=5000)
+        pg.fill("#hb-note-text", "大家吃得很開心\n下次換一家")
+        pg.click("#hb-note-save")
+        pg.wait_for_timeout(3000)
+        check(not errs, "存心得沒有 JS 例外", errs[:2])
+        _, det = api("GET", "/crm/benefits/pools/" + pool["id"])
+        ent = det["entries"][0]
+        check(ent["has_reflection"] is True, "後端真的收到心得了")
+        check("下次換一家" in (ent.get("reflection") or ""),
+              "換行沒被吃掉（prompt 會吃掉，所以才改小視窗）",
+              repr(ent.get("reflection"))[:60])
+        check(ent["amount"] == 3000, "金額沒被順手改掉", ent["amount"])
+        check(ent["status"] == "已付款", "狀態沒被動到", ent["status"])
+
+        txt = pg.inner_text("#hb-content")
+        check("單據" in txt and "心得" in txt, "畫面上標示成有了")
+
+        if uploaded:
+            try:
+                os.remove(uploaded)
+            except OSError as err:
+                LEFTOVER.append(f"{uploaded}（{err.__class__.__name__}）")
+
         b.close()
 finally:
     print("\n[清理]")
@@ -165,6 +216,7 @@ finally:
     st, d = api("GET", "/crm/benefits/pools")
     check(not [x for x in d.get("items", []) if x["name"].startswith("ZZ_UI")],
           "測試池清光")
+    check(not LEFTOVER, "磁碟上的測試單據也清光", LEFTOVER)
 
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

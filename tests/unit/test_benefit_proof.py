@@ -97,10 +97,15 @@ def test_admin_ui_shows_both_indicators():
     assert ".hb-proof" in css, "標示沒有樣式（會變成看不見的純文字）"
 
 
-def test_missing_proof_is_shown_as_dash_not_an_error():
-    """沒有不是錯誤 —— 淡色的「—」，不是紅字警告。"""
+def test_missing_proof_is_a_quiet_affordance_not_an_error():
+    """沒有不是錯誤 —— 是一顆淡的「補上去」，不是紅字警告。"""
     js = repo_src("frontend/tabs/hr_benefits/hr_benefits.js")
-    assert "單據 —" in js and "心得 —" in js
+    assert "＋單據" in js and "＋心得" in js
+    assert "danger" not in js.split("function _proof(")[1].split("}")[0], \
+        "缺單據/心得被畫成了警告"
+    css = repo_src("frontend/tabs/hr_benefits/hr_benefits.html")
+    assert "button.hb-proof" in css and "dashed" in css, \
+        "「補」的按鈕沒有做成次要樣式（虛線），會搶走注意力"
 
 
 def test_employee_ui_can_write_and_upload():
@@ -113,18 +118,69 @@ def test_employee_ui_can_write_and_upload():
 
 # ── 單據上傳的守衛 ────────────────────────────────────────────────
 
-def test_receipt_upload_checks_ownership_or_approver():
-    """本人可以傳自己的；不是自己的要有審核權。少了這道，任何登入者
-    都能覆蓋別人的憑證。"""
+def test_receipt_upload_checks_ownership_or_manager():
+    """管理者不限；其餘只能傳自己的。少了這道，任何登入者都能覆蓋別人的憑證。
+
+    審核權的判定收斂在 `_can_manage`（帳本 scope + finance_approve），
+    這裡釘的是「兩道都在」。"""
     body = _body("async def upload_benefit_receipt(")
     assert "e.staff_id == ident[\"staff\"].id" in body, "沒有判斷是不是自己的"
-    assert "_check_approver(request)" in body, "別人的沒有要求審核權"
+    assert "_can_manage(request, p)" in body, "沒有管理權那一條路"
+    assert "403" in body, "不是自己的又不是管理者，沒有擋下來"
+    mgr = code_only(func_body(repo_src(SRC), "def _can_manage("))
+    assert "_check_approver(request)" in mgr and "require_entity" in mgr, \
+        "_can_manage 沒有真的檢查審核權與帳本 scope"
 
 
-def test_receipt_upload_locked_after_approval():
-    """已核准／已付款之後不再開放換單據 —— 那時帳上掛著應付款，換單據＝換憑證。"""
+def test_receipt_upload_locked_after_approval_for_the_person():
+    """**本人**在已核准之後不再開放換單據 —— 那時帳上掛著應付款，換單據＝換憑證。"""
     body = _body("async def upload_benefit_receipt(")
     assert "BENEFIT_EDITABLE" in body and "409" in body
+
+
+def test_manager_can_backfill_regardless_of_status():
+    """🔴 管理者**不限狀態** —— 匯進來的歷史紀錄（已付款）本來就沒有單據與心得，
+    要能補（owner 2026-08-21：「需要有地方可以上傳單據寫心得」）。"""
+    body = _body("async def upload_benefit_receipt(")
+    assert "if not _can_manage(request, p):" in body, \
+        "沒有先判管理權 —— 管理者會落進員工那條狀態限制"
+    # 狀態檢查必須在「不是管理者」那個分支**裡面**
+    tail = body[body.index("if not _can_manage(request, p):"):]
+    assert "BENEFIT_EDITABLE" in tail
+
+
+def test_manager_check_comes_before_ownership():
+    """🔴 判定順序：先問管理權、再問是不是自己的。反過來的話，同時是管理者
+    又是當事人的人（owner 自己就是股東兼員工）會被自己的員工身分擋住 ——
+    實測就是這樣補不了自己歷史紀錄的單據。"""
+    body = _body("async def upload_benefit_receipt(")
+    i = body.index("_can_manage(request, p)")
+    j = body.index("e.staff_id == ident")
+    assert i < j, "先判了「是不是自己的」才判管理權"
+
+
+def test_reflection_can_be_edited_by_manager_any_status():
+    body = _body("async def set_entry_reflection(")
+    assert "_can_manage(request, p)" in body
+    assert "BENEFIT_EDITABLE" not in body, "管理端補心得不該受狀態限制"
+    # 只動心得 —— 金額/項目在已核准後改了，帳上那張應付款不會跟著動
+    assert "e.amount" not in body and "e.title" not in body
+
+
+def test_admin_ui_has_upload_and_write_entry_points():
+    """owner：「需要有地方可以上傳單據寫心得」—— 標示看得到還不夠，要能動手。"""
+    js = repo_src("frontend/tabs/hr_benefits/hr_benefits.js")
+    assert "_hbPickReceipt" in js and "_hbEditNote" in js
+    assert "＋單據" in js and "＋心得" in js, "沒有補上去的入口"
+    assert "/reflection" in js, "心得沒有送到後端"
+    # 🔴 FormData 不能走 bfetch（它固定塞 application/json，會蓋掉 boundary）。
+    #    斷言要**框在上傳那支函式裡** —— 全檔找 "Authorization" 是空的，
+    #    bfetch 自己那行就會讓它永遠成立。
+    # [-1]：前面 onclick 字串裡也叫得到這個名字，[1] 會切到那裡去
+    up = js.split("window._hbPickReceipt")[-1][:1400]
+    assert "new FormData()" in up, "上傳不是用 FormData"
+    assert "bfetch(" not in up, "上傳走了 bfetch —— Content-Type 會蓋掉 boundary"
+    assert "Authorization" in up, "上傳沒有自己帶 token"
 
 
 def test_receipt_upload_has_the_two_upload_guards():

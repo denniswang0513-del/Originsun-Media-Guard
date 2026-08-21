@@ -64,6 +64,14 @@
     }
     #hb-root .hb-proof.ok { color: #93c5fd; background: #17273d; }
     #hb-root a.hb-proof.ok:hover { background: #1e3a5f; text-decoration: underline; }
+    /* 「補」是次要動作 —— 沒有單據/心得不是錯誤，按鈕不該搶眼 */
+    #hb-root button.hb-proof {
+        border: 1px dashed #3a3a3a; background: transparent; cursor: pointer;
+        font-family: inherit;
+    }
+    #hb-root button.hb-proof:hover { border-color: #555; color: #aaa; }
+    #hb-root button.hb-proof.ok { border-style: solid; border-color: #17273d; }
+    #hb-root button.hb-proof.ok:hover { background: #1e3a5f; color: #bfdbfe; }
     /* 池的用量條 */
     #hb-root .hb-bar { height: 6px; background: #1a1a1a; border-radius: 3px; overflow: hidden; margin-top: 6px; }
     #hb-root .hb-bar > i { display: block; height: 100%; background: #3b82f6; }

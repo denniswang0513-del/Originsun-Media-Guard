@@ -74,19 +74,30 @@ async function _loadDetail() {
     render();
 }
 
-/** 單據／心得的標示（owner 2026-08-21：「有心得跟有單據讓我知道就好」）。
- *  🔴 兩者都是**選填** —— 沒有就是淡色的「—」，不是紅字警告。
- *  有單據 → 點得開；有心得 → 滑過去看得到全文。 */
+/** 單據／心得（owner 2026-08-21：「有心得跟有單據讓我知道就好」、
+ *  「需要有地方可以上傳單據寫心得」）。
+ *  🔴 兩者都是**選填** —— 沒有不是錯誤，所以「補」是淡色的次要動作。
+ *  管理端**不限狀態**都能補：匯進來的歷史紀錄（已付款）本來就沒有這兩樣。 */
 function _proof(e) {
-    const parts = [];
-    parts.push(e.has_receipt
+    const receipt = e.has_receipt
         ? `<a class="hb-proof ok" href="/api/v1/crm/receipt-file?path=${encodeURIComponent(e.receipt_url)}"
-              target="_blank" rel="noopener" title="開啟單據">單據</a>`
-        : `<span class="hb-proof">單據 —</span>`);
-    parts.push(e.has_reflection
-        ? `<span class="hb-proof ok" title="${esc(e.reflection)}">心得</span>`
-        : `<span class="hb-proof">心得 —</span>`);
-    return parts.join(' ');
+              target="_blank" rel="noopener" title="開啟單據">單據</a>
+           <button class="hb-proof act" title="換一張"
+                   onclick="window._hbPickReceipt('${esc(e.id)}')">換</button>`
+        : `<button class="hb-proof act" title="上傳單據"
+                   onclick="window._hbPickReceipt('${esc(e.id)}')">＋單據</button>`;
+    const note = e.has_reflection
+        ? `<button class="hb-proof ok" title="${esc(e.reflection)}"
+                   onclick="window._hbEditNote('${esc(e.id)}')">心得</button>`
+        : `<button class="hb-proof act" title="寫心得"
+                   onclick="window._hbEditNote('${esc(e.id)}')">＋心得</button>`;
+    return receipt + ' ' + note;
+}
+
+/** 所有登記的索引（待審佇列與選中池的明細合起來）—— 補心得時要拿舊值回填。 */
+function _entryById(id) {
+    return _pending.find(x => x.id === id)
+        || ((_detail && _detail.entries) || []).find(x => x.id === id) || null;
 }
 
 /* ── 池 ── */
@@ -260,6 +271,78 @@ function render() {
 /* ── 動作 ── */
 
 window._hbSelectPool = async (id) => { _sel = id; await _loadDetail(); };
+
+/** 上傳單據：一個隱藏 input 重複用，記住是哪一筆。 */
+let _upTarget = null;
+window._hbPickReceipt = (id) => {
+    _upTarget = id;
+    let inp = el('hb-receipt-input');
+    if (!inp) {
+        inp = document.createElement('input');
+        inp.type = 'file';
+        inp.id = 'hb-receipt-input';
+        inp.accept = 'image/*,.pdf';
+        inp.style.display = 'none';
+        inp.onchange = async () => {
+            if (!inp.files[0] || !_upTarget) return;
+            const fd = new FormData();
+            fd.append('file', inp.files[0]);
+            // 🔴 FormData 不能自己設 Content-Type（會蓋掉 multipart boundary），
+            // 所以這裡不用 bfetch —— 它固定塞 application/json。
+            const tok = localStorage.getItem('auth_token');
+            const r = await fetch(
+                `/api/v1/crm/benefits/entries/${_upTarget}/receipt`,
+                { method: 'POST', body: fd,
+                  headers: tok ? { Authorization: 'Bearer ' + tok } : {} });
+            inp.value = '';
+            if (!r.ok) {
+                let msg = r.status;
+                try { msg = (await r.json()).detail || msg; } catch (_) { /* 非 JSON */ }
+                alert('單據上傳失敗：' + msg);
+                return;
+            }
+            await _load();
+        };
+        document.body.appendChild(inp);
+    }
+    inp.click();
+};
+
+/** 寫／改心得。用 prompt 會把換行吃掉，所以走一個小視窗。 */
+window._hbEditNote = (id) => {
+    const e = _entryById(id);
+    if (!e) return;
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;'
+        + 'display:flex;align-items:center;justify-content:center;';
+    wrap.innerHTML = `
+      <div style="background:#232323;border:1px solid #3a3a3a;border-radius:8px;padding:16px;width:min(560px,92vw);">
+        <div style="color:#eee;font-size:14px;font-weight:600;margin-bottom:2px;">心得筆記</div>
+        <div style="color:#888;font-size:12px;margin-bottom:10px;">
+          ${esc(e.staff_name)}　${esc(e.title)}　${esc(e.spend_date)}（選填）</div>
+        <textarea id="hb-note-text" rows="6"
+                  style="width:100%;background:#1a1a1a;border:1px solid #333;color:#ddd;
+                         border-radius:4px;padding:8px;font-size:12.5px;resize:vertical;"
+        >${esc(e.reflection || '')}</textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+          <button class="hb-btn ghost" id="hb-note-cancel">取消</button>
+          <button class="hb-btn" id="hb-note-save">儲存</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const close = () => wrap.remove();
+    wrap.onclick = (ev) => { if (ev.target === wrap) close(); };
+    wrap.querySelector('#hb-note-cancel').onclick = close;
+    wrap.querySelector('#hb-note-save').onclick = async () => {
+        const text = wrap.querySelector('#hb-note-text').value;
+        const r = await call(`/api/v1/crm/benefits/entries/${id}/reflection`, {
+            method: 'PUT', body: { reflection: text },
+        });
+        close();
+        if (r) await _load();
+    };
+    wrap.querySelector('#hb-note-text').focus();
+};
 
 window._hbCreatePool = async () => {
     const name = (el('hb-p-name').value || '').trim();

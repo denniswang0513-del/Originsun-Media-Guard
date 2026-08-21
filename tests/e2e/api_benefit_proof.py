@@ -204,6 +204,36 @@ try:
           "兩個旗標都帶出來了")
     check(row and row["has_reflection"] is True and row["has_receipt"] is False,
           "旗標值正確", row and (row["has_receipt"], row["has_reflection"]))
+    print("")
+    print("[9] 管理者補歷史紀錄的單據與心得 —— bare 這筆已經付款了")
+    print("    （owner 2026-08-21：「需要有地方可以上傳單據寫心得」）")
+    st, d = call("GET", f"/crm/benefits/entries?pool_id={pool_id}")
+    row = next(x for x in d["items"] if x["id"] == bare)
+    check(row["status"] == "已付款", "前提：這筆是已付款", row["status"])
+    check(row["has_receipt"] is False and row["has_reflection"] is False,
+          "前提：本來什麼都沒有")
+
+    st, r = upload(bare, ADMIN)
+    check(st == 200, "管理者補得了已付款的單據（本人在這個狀態會是 409）", st)
+    check(r["entry"]["has_receipt"] is True, "單據補上去了")
+
+    st, r = call("PUT", f"/crm/benefits/entries/{bare}/reflection",
+                 {"title": "x", "amount": 1, "reflection": "補寫的心得"})
+    check(st == 200, "管理者補得了已付款的心得", st)
+    check(r["entry"]["has_reflection"] is True, "心得標示亮了")
+    check(r["entry"]["reflection"] == "補寫的心得", "內容正確",
+          r["entry"]["reflection"])
+    # 只准動心得 —— payload 順手帶了 title/amount 也不准生效，
+    # 那兩欄動了，帳上那張應付款就跟登記對不起來
+    check(r["entry"]["amount"] == 300, "金額沒被 payload 洗掉", r["entry"]["amount"])
+    check(r["entry"]["title"] == "ZZ 沒單據沒心得", "項目沒被洗掉",
+          r["entry"]["title"])
+
+    print("")
+    print("[10] 沒有管理權的人補不了別人的心得")
+    st, r = call("PUT", f"/crm/benefits/entries/{bare}/reflection",
+                 {"title": "x", "amount": 1, "reflection": "亂寫"}, tok=tok["乙"])
+    check(st == 403, "被擋", (st, r.get("detail") if isinstance(r, dict) else r))
 finally:
     print("\n[清理]")
     asyncio.run(teardown())

@@ -62,6 +62,21 @@ def _check_approver(request: Request):
     check_admin_or_module(request, APPROVE_MODULE)
 
 
+def _can_manage(request: Request, pool) -> bool:
+    """這個人管得動這個池嗎（帳本 scope + 審核權）。布林版，不丟例外。
+
+    🔴 判定順序很重要：要**先問管理權**再問「是不是自己的」。反過來的話，
+    同時是管理者又是當事人的人（owner 自己就是股東兼員工）會落進員工那條
+    狀態限制 —— 於是他補不了自己歷史紀錄的單據與心得（owner 2026-08-21 回報）。
+    """
+    try:
+        require_entity(request, pool.entity or "parent", level="full")
+        _check_approver(request)
+        return True
+    except HTTPException:
+        return False
+
+
 async def _my_staff(request: Request):
     """本人 —— staff_id 只從 token 解，永不收 client 傳的值。"""
     ident = await resolve_current_staff(request)
@@ -353,8 +368,9 @@ async def upload_benefit_receipt(entry_id: str, request: Request,
     """上傳這筆登記的單據。**非必填**（owner 2026-08-21：「並不是一定要上傳
     才能請款，這樣才符合各種使用情境」）—— 沒傳照樣送得出去、照樣核得了。
 
-    誰能傳：本人（自己的、還在待審／退回時）或審核者。已核准／已付款之後
-    不再開放 —— 那時帳上已經掛著一張應付款，換單據等於換憑證。
+    誰能傳：**管理者不限狀態**（要補歷史紀錄的單據 —— 匯進來的舊資料本來就
+    沒有，owner 2026-08-21）；本人只能傳自己的、而且限待審／退回
+    （已核准之後帳上掛著應付款，本人再換單據等於換憑證）。
 
     存到收據根目錄底下 `_福委會/{年月}/`，與零用金收據同一個 root
     （settings.receipts_root，要集中到 NAS 就指 NAS）。取檔走既有的
@@ -371,16 +387,16 @@ async def upload_benefit_receipt(entry_id: str, request: Request,
     async with _crm_session() as session:
         e = await _entry_or_404(session, entry_id)
         p = await _pool_or_404(session, e.pool_id)
-        ident = await resolve_current_staff(request)
-        mine = ident["staff"] is not None and e.staff_id == ident["staff"].id
-        if not mine:
-            # 不是自己的 → 要審核權（管理端代傳）
-            require_entity(request, p.entity or "parent", level="full")
-            _check_approver(request)
-        elif e.status not in BENEFIT_EDITABLE:
-            raise HTTPException(
-                status_code=409,
-                detail=f"{e.status}的登記不能換單據（要換請先退回）")
+        if not _can_manage(request, p):
+            # 不是管理者 → 只能傳自己的，而且限還在自己手上的狀態
+            ident = await resolve_current_staff(request)
+            mine = ident["staff"] is not None and e.staff_id == ident["staff"].id
+            if not mine:
+                raise HTTPException(status_code=403, detail="這不是你的登記")
+            if e.status not in BENEFIT_EDITABLE:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{e.status}的登記不能換單據（要換請先退回）")
 
         day = _fmt_day(e.spend_date) or _fmt_day(_now())
         base = os.path.join(_receipts_root(), "_福委會", day[:7] or "nodate")
@@ -398,6 +414,26 @@ async def upload_benefit_receipt(entry_id: str, request: Request,
                 status_code=413,
                 detail=f"單據超過 {_MAX_RECEIPT_BYTES // (1024 * 1024)}MB")
         e.receipt_url = filepath
+        e.updated_at = _now()
+        await session.commit()
+        return {"status": "ok", "entry": _entry_dict(e, p.name)}
+
+
+@router.put("/benefits/entries/{entry_id}/reflection")
+async def set_entry_reflection(entry_id: str, body: BenefitEntryPayload,
+                               request: Request):
+    """管理端補／改心得筆記。**不限狀態** —— 匯進來的歷史紀錄本來就沒有心得，
+    要能補上（owner 2026-08-21）。
+
+    刻意只動 `reflection` 一欄：金額與項目在已核准之後改了，帳上那張應付款
+    不會跟著動，兩邊就對不起來。要改那些請先退回。
+    """
+    async with _crm_session() as session:
+        e = await _entry_or_404(session, entry_id)
+        p = await _pool_or_404(session, e.pool_id)
+        if not _can_manage(request, p):
+            raise HTTPException(status_code=403, detail="沒有福委會的管理權限")
+        e.reflection = (body.reflection or "").strip() or None
         e.updated_at = _now()
         await session.commit()
         return {"status": "ok", "entry": _entry_dict(e, p.name)}
