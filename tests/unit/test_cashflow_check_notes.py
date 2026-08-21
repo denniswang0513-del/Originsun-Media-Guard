@@ -35,8 +35,43 @@ def test_diff_is_closing_minus_opening_plus_net():
 def test_unassigned_entries_are_excluded_from_flow():
     """未掛帳戶的收支不影響任何帳戶餘額，計入就會破壞恆等式。"""
     body = _cf()
-    assert 'if not e.get("bank_account_id"):' in body
+    assert "if not acct:" in body
     assert "unassigned += 1" in body and "continue" in body
+
+
+def test_noncash_accounts_are_excluded_from_flow():
+    """🔴 期初/期末只算現金類帳戶（split_bank_lines 的 ["cash"]），
+    迭代這邊也必須一致 —— 不然股東往來上的每一筆都會製造勾稽差額。
+    這是 owner 2026-08-22 正要開始用股東往來記帳前抓到的（還沒爆）。"""
+    body = _cf()
+    assert "cash_ids is not None and acct not in cash_ids" in body
+    assert "noncash += 1" in body
+    assert "非現金帳戶（股東往來）" in body, "排除了但沒告訴人"
+
+
+def test_official_path_passes_the_cash_account_ids():
+    """算得出來還要真的傳進去 —— 沒傳就退回舊行為（等於沒修）。"""
+    from tests.unit._srcscan import repo_src
+    src = repo_src("services/finance_statements.py")
+    assert "cash_account_ids=cash_ids" in src
+    assert "not is_shareholder_kind(b.get(\"acct_kind\"))" in src
+
+
+def test_missing_ids_falls_back_to_old_behaviour():
+    """沒傳清單時只擋未掛帳戶（舊呼叫端與單元測試不一定傳得出帳戶清單）。"""
+    from core.finance_logic import build_cashflow
+    ents = [{"entry_date": "2026-01-05", "bank_account_id": "X",
+             "deposit": 100, "category": "其他收入"}]
+    r = build_cashflow(["2026-01"], opening={"total": 0}, closing={"total": 100},
+                       cash_entries=ents, cat_map={("cash", "其他收入"):
+                                                   {"treatment": "direct_income"}})
+    assert r["net"] == 100, "沒傳 cash_account_ids 時不該把它擋掉"
+    r2 = build_cashflow(["2026-01"], opening={"total": 0}, closing={"total": 0},
+                        cash_entries=ents,
+                        cat_map={("cash", "其他收入"): {"treatment": "direct_income"}},
+                        cash_account_ids=["別的帳戶"])
+    assert r2["net"] == 0, "傳了清單就該擋掉不在清單裡的帳戶"
+    assert any("非現金帳戶" in n for n in r2["check"]["notes"])
 
 
 def test_transfer_principal_is_tracked_for_the_note():

@@ -56,6 +56,7 @@ from core.finance_logic import (
     invoice_vat_side,
     iter_expense_items,
     iter_loan_interest,
+    is_shareholder_kind,
     iter_revenue_invoices,
     passthrough_fee_income,
     loan_outstanding_rows,
@@ -302,10 +303,15 @@ async def compute_live(session, months, inputs=None, adv=None,
     opening_lines = split_bank_lines(inputs["bank_accounts"], bank_balances_asof(
         inputs["bank_accounts"], inputs["cash_entries"],
         shift_month(months[0], -1)))["cash"]
+    # 🔴 現金帳戶清單要傳進去 —— 期初/期末只算現金類帳戶，迭代那邊也必須一致，
+    #    否則股東往來上的每一筆都會製造勾稽差額。
+    cash_ids = [b["id"] for b in inputs["bank_accounts"]
+                if not is_shareholder_kind(b.get("acct_kind"))]
     cf = build_cashflow(months, opening=_cf_side(opening_lines),
                         closing=_cf_side(bank_lines),
                         cash_entries=inputs["cash_entries"],
-                        cat_map=inputs["cat_map"], accounts=inputs["accounts"])
+                        cat_map=inputs["cat_map"], accounts=inputs["accounts"],
+                        cash_account_ids=cash_ids)
     return {"pnl": pnl, "bs": bs, "cf": cf, "baseline_month": baseline,
             "warnings": warn}
 

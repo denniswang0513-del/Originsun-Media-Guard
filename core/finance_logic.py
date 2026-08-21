@@ -1474,13 +1474,19 @@ def cash_entry_activity(entry: dict, cat_map: dict, accounts: dict):
 
 
 def build_cashflow(months, *, opening, closing, cash_entries=(),
-                   cat_map=None, accounts=None) -> dict:
+                   cat_map=None, accounts=None, cash_account_ids=None) -> dict:
     """現金流量表（直接法）。opening/closing = {"total", "by_account":[{name,amount}]}
     由 caller 以 bank_balances_asof 算（期間前一月月底 / 期末月月底）。
 
     規則：
-    - 只計「有掛銀行帳戶」的收支（未掛帳戶者不影響任何帳戶餘額，計入會
-      破壞恆等式 — 排除 + note 提醒；損益表則照計）。
+    - 只計「有掛**現金類**帳戶」的收支。兩種都要排除，理由相同 ——
+      它們不影響 opening/closing 的現金總額，計入就破壞恆等式：
+        · 未掛帳戶（不影響任何帳戶餘額）→ 排除 + note 提醒；損益表則照計。
+        · 🔴 掛在**非現金帳戶**上的（股東往來 shareholder_loan/capital）——
+          期初/期末只取 split_bank_lines(...)["cash"]，這些帳戶根本不在裡面。
+          `cash_account_ids` 沒給時退回舊行為（只擋未掛帳戶），因為單元測試與
+          舊呼叫端不一定傳得出帳戶清單；正式路徑（services/finance_statements）
+          一定要傳。
     - transfer/advance 本金不列入活動（規格：內部移動）；其 bank_fee 是真實
       流出 → 計入 operating。轉存若兩邊成對登記，本金跨帳戶互抵不影響總額；
       未成對差額與預支往來淨流都寫進 check.notes 解釋 diff 來源。
@@ -1497,11 +1503,17 @@ def build_cashflow(months, *, opening, closing, cash_entries=(),
     acts = {"operating": 0, "investing": 0, "financing": 0}
     advance_net = transfer_net = 0
     unassigned = 0
+    noncash = 0
+    cash_ids = set(cash_account_ids) if cash_account_ids is not None else None
     for e in cash_entries:
         if month_of(e.get("entry_date")) not in mset:
             continue
-        if not e.get("bank_account_id"):
+        acct = e.get("bank_account_id")
+        if not acct:
             unassigned += 1
+            continue
+        if cash_ids is not None and acct not in cash_ids:
+            noncash += 1        # 股東往來等非現金帳戶：不在現金總額裡
             continue
         t = classify_cash_entry(e, cat_map)
         if t in ("advance", "transfer"):
@@ -1525,6 +1537,8 @@ def build_cashflow(months, *, opening, closing, cash_entries=(),
         notes.append(f"帳戶間轉存未完全成對，差額 {transfer_net:+,} 元")
     if unassigned:
         notes.append(f"{unassigned} 筆未掛帳戶收支未列入")
+    if noncash:
+        notes.append(f"{noncash} 筆掛在非現金帳戶（股東往來）的收支未列入現金流")
     return {"opening": opening, "closing": closing,
             "operating": acts["operating"], "investing": acts["investing"],
             "financing": acts["financing"], "net": net,
