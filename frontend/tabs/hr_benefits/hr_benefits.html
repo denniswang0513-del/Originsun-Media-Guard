@@ -1,20 +1,24 @@
 <!--
-    hr_benefits.html — 人事管理 › 福利池 Tab 殼（docs/BENEFIT_POOL_PLAN.md）
+    hr_benefits.html — 人事管理 › 福委會 Tab 殼（docs/BENEFIT_POOL_PLAN.md）
     內容由 hr_benefits.js render 進 #hb-content。設計鐵則：UI 無 emoji（owner 2026-07-17）。
     樣式刻意抄 hr_leave（同一個群組的兩個 tab 長得不一樣會很怪）。
 -->
 <div id="hb-root">
-    <div id="hb-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+    <!-- 🔴 置中放在佔位文字自己身上，不要放在這個永久容器上：容器的 inline
+         text-align 在 innerHTML 換成真內容後還在，表格的 td 沒自己指定就會繼承
+         它 → 表頭靠左、儲存格置中，兩邊對不齊（2026-08-21 owner 回報）。 -->
+    <div id="hb-content"><div class="hb-empty" style="padding:40px;">載入中…</div></div>
 </div>
 
 <style>
-    #hb-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
-    #hb-root .hb-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    /* 置中是逐個元素指定的（見上方註解）—— 表格要靠左，所以不能靠容器繼承 */
+    #hb-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; text-align: center; }
+    #hb-root .hb-sub { color: #777; font-size: 12px; margin-bottom: 16px; text-align: center; }
     #hb-root .hb-card {
         background: #232323; border: 1px solid #333; border-radius: 8px;
         padding: 14px 16px; margin-bottom: 14px;
     }
-    #hb-root .hb-card h3 { color: #ddd; font-size: 14px; margin: 0 0 10px 0; font-weight: 600; }
+    #hb-root .hb-card h3 { color: #ddd; font-size: 14px; margin: 0 0 10px 0; font-weight: 600; text-align: center; }
     #hb-root table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
     #hb-root th {
         text-align: left; color: #888; font-weight: 500; padding: 6px 8px;
@@ -50,7 +54,7 @@
     }
     #hb-root input[type="number"] { width: 110px; }
     #hb-root .hb-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    #hb-root .hb-note { color: #777; font-size: 11.5px; margin-top: 8px; line-height: 1.6; }
+    #hb-root .hb-note { color: #777; font-size: 11.5px; margin-top: 8px; line-height: 1.6; text-align: center; }
     #hb-root .hb-empty { color: #666; padding: 14px 0; text-align: center; font-size: 12.5px; }
     /* 池的用量條 */
     #hb-root .hb-bar { height: 6px; background: #1a1a1a; border-radius: 3px; overflow: hidden; margin-top: 6px; }
@@ -59,7 +63,7 @@
     #hb-root .hb-pools { display: flex; flex-wrap: wrap; gap: 10px; }
     #hb-root .hb-pool {
         background: #1e1e1e; border: 1px solid #333; border-radius: 6px;
-        padding: 10px 12px; min-width: 210px; cursor: pointer;
+        padding: 10px 12px; min-width: 210px; cursor: pointer; text-align: center;
     }
     #hb-root .hb-pool.sel { border-color: #3b82f6; background: #1a2436; }
     #hb-root .hb-pool .n { color: #ddd; font-size: 13px; font-weight: 600; }

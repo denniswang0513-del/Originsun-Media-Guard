@@ -1,5 +1,7 @@
-from pydantic import BaseModel, Field  # type: ignore
+from pydantic import BaseModel, Field, field_validator  # type: ignore
 from typing import List, Optional, Tuple
+
+from core.crm_logic import normalize_tax_id
 
 
 class BackupRequest(BaseModel):
@@ -447,6 +449,10 @@ class ClientPayload(BaseModel):
     full_name: str = ""
     tax_id: str = ""
     am_username: Optional[str] = None
+
+    # 🔴 統編補回前導 0：Excel/Sheets 把 00973926 存成數字 973926，匯出 CSV 就少了
+    # 兩個 0。規則正本 core.crm_logic.normalize_tax_id（有單元測試）。
+    _norm_tax_id = field_validator("tax_id")(lambda v: normalize_tax_id(v))
     source_channel: str = ""
     contact_person: str = ""
     contact_method: str = ""
@@ -797,6 +803,10 @@ class InvoicePayload(BaseModel):
     company_name: str = ""
     tax_id: str = ""
     item_type: str = ""
+
+    # 🔴 統編補回前導 0：Excel/Sheets 把 00973926 存成數字 973926，匯出 CSV 就少了
+    # 兩個 0。規則正本 core.crm_logic.normalize_tax_id（有單元測試）。
+    _norm_tax_id = field_validator("tax_id")(lambda v: normalize_tax_id(v))
     project_id: Optional[str] = None
     recipient: str = ""
     recipient_phone: str = ""

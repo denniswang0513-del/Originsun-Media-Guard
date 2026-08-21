@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
+from core.crm_logic import normalize_tax_id
 from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 INVOICE_PASSTHROUGH_COLLECTED,
                                 INVOICE_PENDING_REMIT, INVOICE_REMITTED,
@@ -781,6 +782,10 @@ def _map_invoice_row(header_map: dict, row: dict) -> dict:
     # 🔴「未收款」裡也有一個「收」字：只判 '收' in pt 會把未收的發票標成**已收款**，
     #    應收帳款憑空消失、收入被提前認列。2026-08-19 匯 394 筆歷史發票時實測到
     #    44 張未收款發票中招。判「已/未」必須先於或同時於判「收/付」。
+    # 統編補回前導 0 —— 這條路 CrmInvoice(**data) 直接建、繞過 InvoicePayload
+    # 的驗證器（規則同一支 core.crm_logic.normalize_tax_id）
+    if "tax_id" in data:
+        data["tax_id"] = normalize_tax_id(data["tax_id"])
     pt = data.get("payment_type", "")
     unpaid = "未" in pt
     if "收" in pt:

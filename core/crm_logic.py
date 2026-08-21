@@ -274,3 +274,28 @@ def project_works_summary(works) -> dict:
         "pending": max(0, denominator - live),
         "all_live": bool(denominator > 0 and live >= denominator),
     }
+
+
+# ── 統一編號 ──────────────────────────────────────────────────────
+
+TAX_ID_LEN = 8          # 統編**定義上就是 8 碼**，這是規則不是慣例
+
+
+def normalize_tax_id(raw) -> str:
+    """把統編補回 8 碼（前導 0）。
+
+    🔴 為什麼需要這支：Excel／Google Sheets 會把 `00973926` 存成**數字** 973926，
+    匯出 CSV 就少了兩個 0。後端從頭到尾只做 `.strip()`（欄位是 String(16)、
+    schema 是 str），所以不是我們吃掉的 —— 是來源就已經缺了，系統忠實地匯了進來。
+    生產實測 23 筆缺 0，全是 0 開頭的政府／學術機構（國家兩廳院 00973926、
+    中央研究院 03811209、公視 01012145…），開發票會直接開錯。
+
+    只補**純數字且不足 8 碼**的。刻意不碰：
+      · 含英文字母的（別名有「統編/身分證」，個人是 A123456789 那種 10 碼）
+      · 已經 8 碼或更長的（不猜、不截斷）
+      · 空值
+    """
+    s = str(raw or "").strip()
+    if not s or not s.isdigit() or len(s) >= TAX_ID_LEN:
+        return s
+    return s.zfill(TAX_ID_LEN)

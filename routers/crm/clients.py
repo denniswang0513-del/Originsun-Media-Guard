@@ -10,6 +10,7 @@ import uuid
 
 from fastapi import HTTPException, Request, UploadFile, File, Query
 
+from core.crm_logic import normalize_tax_id
 from core.schemas import ClientPayload
 
 from ._shared import (router, _check_auth, _require_db, _get_factory,
@@ -225,7 +226,10 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
         for row in reader:
             data = _map_row(header_map, row)
             full_name = data.get("full_name", "").strip()
-            tax_id = data.get("tax_id", "").strip()
+            # 統編補回前導 0 —— 這條路是 Client(**data) 直接建、繞過
+            # ClientPayload 的驗證器，所以要自己過一次（規則同一支）
+            tax_id = normalize_tax_id(data.get("tax_id"))
+            data["tax_id"] = tax_id
 
             if not full_name and not tax_id:
                 skipped += 1
