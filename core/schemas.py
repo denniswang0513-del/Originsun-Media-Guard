@@ -1345,4 +1345,6 @@ class BenefitEntryPayload(BaseModel):
     title: str = ""                 # 電影名／餐廳／課程名
     amount: int = 0                 # 正數
     spend_date: str = ""            # YYYY-MM-DD，空 → 今天
+    # 心得筆記（非必填）。與 notes 分開 —— notes 裝退回原因
+    reflection: str = ""
     notes: str = ""

@@ -26,11 +26,14 @@ owner 2026-08-21 的原話：「我有幾個福利池，一個是快樂、一個
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
+import os
+import re
 import uuid
 
-from fastapi import Depends, HTTPException, Query, Request
+from fastapi import Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 
@@ -78,11 +81,17 @@ def _pool_dict(p, fundings=None, entries=None) -> dict:
 
 
 def _entry_dict(e, pool_name="") -> dict:
+    """owner 2026-08-21：「有心得跟有單據讓我知道就好」—— 所以清單帶
+    has_receipt / has_reflection 兩個旗標讓畫面標示，內容也一起帶
+    （心得就幾行字、收據只是路徑，不值得為它多一支詳情端點）。"""
+    reflection = (e.reflection or "").strip()
     return {"id": e.id, "pool_id": e.pool_id, "pool_name": pool_name,
             "staff_id": e.staff_id or "", "staff_name": e.staff_name or "",
             "title": e.title, "amount": int(e.amount or 0),
             "spend_date": _fmt_day(e.spend_date),
             "receipt_url": e.receipt_url or "", "status": e.status,
+            "has_receipt": bool(e.receipt_url),
+            "reflection": reflection, "has_reflection": bool(reflection),
             "payment_request_id": e.payment_request_id or "",
             "notes": e.notes or ""}
 
@@ -285,7 +294,8 @@ async def add_my_entry(body: BenefitEntryPayload, request: Request):
             staff_name=staff.name or "",           # 快照
             title=body.title.strip(), amount=int(body.amount),
             spend_date=_parse_day(body.spend_date) or _now(),
-            status="待審", notes=body.notes or None)
+            status="待審", reflection=(body.reflection or "").strip() or None,
+            notes=body.notes or None)
         session.add(e)
         await session.commit()
         return {"status": "ok", "entry": _entry_dict(e, p.name)}
@@ -311,6 +321,7 @@ async def update_my_entry(entry_id: str, body: BenefitEntryPayload,
         e.amount = int(body.amount)
         if body.spend_date:
             e.spend_date = _parse_day(body.spend_date) or e.spend_date
+        e.reflection = (body.reflection or "").strip() or None
         e.notes = body.notes or None
         e.status = "待審"          # 退回後改完自動重新送審
         e.updated_at = _now()
@@ -332,6 +343,64 @@ async def delete_my_entry(entry_id: str, request: Request):
         await session.delete(e)
         await session.commit()
     return {"status": "ok"}
+
+
+# ── 單據上傳 ──────────────────────────────────────────────────────
+
+@router.post("/benefits/entries/{entry_id}/receipt")
+async def upload_benefit_receipt(entry_id: str, request: Request,
+                                 file: UploadFile = File(...)):
+    """上傳這筆登記的單據。**非必填**（owner 2026-08-21：「並不是一定要上傳
+    才能請款，這樣才符合各種使用情境」）—— 沒傳照樣送得出去、照樣核得了。
+
+    誰能傳：本人（自己的、還在待審／退回時）或審核者。已核准／已付款之後
+    不再開放 —— 那時帳上已經掛著一張應付款，換單據等於換憑證。
+
+    存到收據根目錄底下 `_福委會/{年月}/`，與零用金收據同一個 root
+    （settings.receipts_root，要集中到 NAS 就指 NAS）。取檔走既有的
+    `GET /api/v1/crm/receipt-file?path=` —— 那支已經有路徑白名單守衛。
+    """
+    from core.identity import resolve_current_staff
+    from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
+    from .costs import _MAX_RECEIPT_BYTES, _receipts_root
+
+    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+    if ext.lower() in BLOCKED_UPLOAD_EXTS:
+        raise HTTPException(status_code=400, detail=f"不接受的檔案格式：{ext}")
+
+    async with _crm_session() as session:
+        e = await _entry_or_404(session, entry_id)
+        p = await _pool_or_404(session, e.pool_id)
+        ident = await resolve_current_staff(request)
+        mine = ident["staff"] is not None and e.staff_id == ident["staff"].id
+        if not mine:
+            # 不是自己的 → 要審核權（管理端代傳）
+            require_entity(request, p.entity or "parent", level="full")
+            _check_approver(request)
+        elif e.status not in BENEFIT_EDITABLE:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{e.status}的登記不能換單據（要換請先退回）")
+
+        day = _fmt_day(e.spend_date) or _fmt_day(_now())
+        base = os.path.join(_receipts_root(), "_福委會", day[:7] or "nodate")
+        try:
+            os.makedirs(base, exist_ok=True)
+        except OSError as err:
+            raise HTTPException(status_code=422, detail=f"資料夾無法使用：{err}")
+        safe = re.sub(r'[\/:*?"<>|]', "", f"{p.name}_{e.staff_name}_{e.title}")[:60]
+        fname = f"{day.replace('-', '')}_{safe}_{e.id[:8]}{ext}"
+        filepath = os.path.join(base, fname)
+        written = await asyncio.to_thread(stream_to_disk, file.file, filepath,
+                                          _MAX_RECEIPT_BYTES)
+        if written < 0:
+            raise HTTPException(
+                status_code=413,
+                detail=f"單據超過 {_MAX_RECEIPT_BYTES // (1024 * 1024)}MB")
+        e.receipt_url = filepath
+        e.updated_at = _now()
+        await session.commit()
+        return {"status": "ok", "entry": _entry_dict(e, p.name)}
 
 
 # ── 管理端：代登 + 審核 + 匯款 ────────────────────────────────────
@@ -376,7 +445,8 @@ async def add_entry_for(body: BenefitEntryPayload, request: Request):
             staff_name=(staff.name if staff else "") or "（未指定）",
             title=body.title.strip(), amount=int(body.amount),
             spend_date=_parse_day(body.spend_date) or _now(),
-            status="待審", notes=body.notes or None)
+            status="待審", reflection=(body.reflection or "").strip() or None,
+            notes=body.notes or None)
         session.add(e)
         await session.commit()
         return {"status": "ok", "entry": _entry_dict(e, p.name)}

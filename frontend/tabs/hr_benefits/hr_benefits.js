@@ -74,6 +74,21 @@ async function _loadDetail() {
     render();
 }
 
+/** 單據／心得的標示（owner 2026-08-21：「有心得跟有單據讓我知道就好」）。
+ *  🔴 兩者都是**選填** —— 沒有就是淡色的「—」，不是紅字警告。
+ *  有單據 → 點得開；有心得 → 滑過去看得到全文。 */
+function _proof(e) {
+    const parts = [];
+    parts.push(e.has_receipt
+        ? `<a class="hb-proof ok" href="/api/v1/crm/receipt-file?path=${encodeURIComponent(e.receipt_url)}"
+              target="_blank" rel="noopener" title="開啟單據">單據</a>`
+        : `<span class="hb-proof">單據 —</span>`);
+    parts.push(e.has_reflection
+        ? `<span class="hb-proof ok" title="${esc(e.reflection)}">心得</span>`
+        : `<span class="hb-proof">心得 —</span>`);
+    return parts.join(' ');
+}
+
 /* ── 池 ── */
 
 function poolsHtml() {
@@ -117,6 +132,7 @@ function pendingHtml() {
         <td>${esc(e.staff_name)}</td>
         <td>${esc(e.title)}</td>
         <td class="num">${fmt(e.amount)}</td>
+        <td>${_proof(e)}</td>
         <td>
             <button class="hb-btn ok" onclick="window._hbApprove('${e.id}')">核准</button>
             <button class="hb-btn ghost" onclick="window._hbReject('${e.id}')">退回</button>
@@ -128,7 +144,7 @@ function pendingHtml() {
                 合計 ${fmt(_pending.reduce((s, e) => s + e.amount, 0))}</span></h3>
         <table>
             <thead><tr><th>日期</th><th>池</th><th>員工</th><th>項目</th>
-                <th class="num">金額</th><th>操作</th></tr></thead>
+                <th class="num">金額</th><th>單據／心得</th><th>操作</th></tr></thead>
             <tbody>${rows}</tbody>
         </table>
         <div class="hb-note">核准後會自動產一張應付款進<b>應付帳款</b>（＝進公司請款），
@@ -166,11 +182,12 @@ function detailHtml() {
                 <td>${esc(e.staff_name)}</td>
                 <td>${esc(e.title)}</td>
                 <td class="num">${fmt(e.amount)}</td>
+                <td>${_proof(e)}</td>
                 <td><span class="hb-pill ${STATUS_PILL[e.status] || ''}">${esc(e.status)}</span></td>
                 <td>${acts.join(' ')}</td>
             </tr>`;
         }).join('')
-        : '<tr><td colspan="6" class="hb-empty">這個池還沒有登記</td></tr>';
+        : '<tr><td colspan="7" class="hb-empty">這個池還沒有登記</td></tr>';
 
     const staffOpts = _staff.map(s =>
         `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
@@ -195,7 +212,7 @@ function detailHtml() {
         <h3>${esc(p.name)} — 登記明細</h3>
         <table>
             <thead><tr><th>日期</th><th>員工</th><th>項目</th>
-                <th class="num">金額</th><th>狀態</th><th>操作</th></tr></thead>
+                <th class="num">金額</th><th>單據／心得</th><th>狀態</th><th>操作</th></tr></thead>
             <tbody>${entRows}</tbody>
         </table>
         <div class="hb-form" style="margin-top:12px;">

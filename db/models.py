@@ -1822,6 +1822,10 @@ class HrBenefitEntry(Base):
     amount = Column(Integer, nullable=False, default=0)        # 正數（花掉多少）
     spend_date = Column(DateTime(timezone=True), nullable=True, index=True)
     receipt_url = Column(String(512), nullable=True)
+    # 心得筆記（員工寫的）。🔴 不共用 notes —— 那一欄裝退回原因（append [退回] xxx），
+    # 混在一起兩邊都讀不乾淨。單據與心得**都不是必填**（owner 2026-08-21：
+    # 「並不是一定要上傳才能請款，這樣才符合各種使用情境」），有就標示給 owner 看。
+    reflection = Column(Text, nullable=True)
     status = Column(String(16), nullable=False, default="待審")  # 待審/已核准/已付款/退回
     # 核准時產的那張應付款。冪等與退回時的「撤掉幽靈負債」都靠這個硬連結
     payment_request_id = Column(String(32), nullable=True, index=True)

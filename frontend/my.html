@@ -604,14 +604,22 @@ function cardBenefits() {
         const opts = pools.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
         const stats = pools.map(p => `<div class="stat">
             <div class="num">${money(p.balance)}</div><div class="lbl">${esc(p.name)} 餘額</div></div>`).join("");
-        const mine = (d.entries || []).slice(0, 8).map(e => `
+        // 單據與心得都是**選填**（owner）—— 這裡只標示有沒有，沒有也不擋。
+        // 還在待審/退回的可以補傳單據。
+        const mine = (d.entries || []).slice(0, 8).map(e => {
+            const editable = e.status === "待審" || e.status === "退回";
+            return `
             <div class="row">
                 <div class="grow">
                     <div class="title">${esc(e.title)}　${money(e.amount)}</div>
-                    <div class="meta">${esc(e.pool_name)}　${esc(e.spend_date)}</div>
+                    <div class="meta">${esc(e.pool_name)}　${esc(e.spend_date)}
+                        ${e.has_receipt ? "・單據 ✓" : ""}${e.has_reflection ? "・心得 ✓" : ""}</div>
                 </div>
+                ${editable && !e.has_receipt
+                    ? `<button class="mini-btn" data-up="${esc(e.id)}">傳單據</button>` : ""}
                 <span class="pill${e.status === "待審" ? " hot" : ""}">${esc(e.status)}</span>
-            </div>`).join("");
+            </div>`;
+        }).join("");
         body.innerHTML = `
             <div class="stats">${stats}</div>
             <div class="pf-edit" style="border-top:1px solid #f5f5f5;padding-top:12px;padding-bottom:4px;">
@@ -623,6 +631,8 @@ function cardBenefits() {
                 <div class="inline-row" style="margin-bottom:8px;">
                     <input type="date" id="mb-date" value="${today}">
                 </div>
+                <div class="field"><textarea id="mb-reflection" rows="2"
+                    placeholder="心得筆記（選填）"></textarea></div>
                 <button class="mini-btn" id="mb-add">送出登記</button>
                 <span class="err" id="mb-err" style="margin-left:8px;"></span>
             </div>
@@ -639,6 +649,7 @@ function cardBenefits() {
                     pool_id: body.querySelector("#mb-pool").value,
                     title, amount,
                     spend_date: body.querySelector("#mb-date").value || "",
+                    reflection: body.querySelector("#mb-reflection").value || "",
                 }),
             });
             if (!r.ok) {            // 🔴 失敗一定要出聲，不能靜默
@@ -649,6 +660,36 @@ function cardBenefits() {
             }
             load();
         };
+        // 補傳單據：一個隱藏 input 重複用，記住是哪一筆
+        let target = null;
+        const fileInput = document.createElement("input");
+        fileInput.type = "file";
+        fileInput.accept = "image/*,.pdf";
+        fileInput.style.display = "none";
+        body.appendChild(fileInput);
+        fileInput.onchange = async () => {
+            if (!fileInput.files[0] || !target) return;
+            const fd = new FormData();
+            fd.append("file", fileInput.files[0]);
+            // 🔴 FormData 不能自己設 Content-Type（會蓋掉 multipart boundary），
+            // 所以這裡不走 mfetch —— 它固定塞 application/json。
+            const tok = localStorage.getItem(TOKEN_KEY);
+            const r = await fetch(`/api/v1/crm/benefits/entries/${target}/receipt`, {
+                method: "POST", body: fd,
+                headers: tok ? { Authorization: "Bearer " + tok } : {},
+            });
+            fileInput.value = "";
+            if (!r.ok) {
+                let msg = r.status;
+                try { msg = (await r.json()).detail || msg; } catch (_) { /* 非 JSON */ }
+                alert("單據上傳失敗：" + msg);
+                return;
+            }
+            load();
+        };
+        body.querySelectorAll("[data-up]").forEach(btn => {
+            btn.onclick = () => { target = btn.dataset.up; fileInput.click(); };
+        });
     };
 
     const load = async () => {
