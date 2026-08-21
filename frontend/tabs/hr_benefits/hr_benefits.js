@@ -141,7 +141,7 @@ function pendingHtml() {
         <td>${esc(e.spend_date)}</td>
         <td>${esc(e.pool_name)}</td>
         <td>${esc(e.staff_name)}</td>
-        <td>${esc(e.title)}</td>
+        <td class="wrap">${esc(e.title)}</td>
         <td class="num">${fmt(e.amount)}</td>
         <td>${_proof(e)}</td>
         <td>
@@ -154,6 +154,9 @@ function pendingHtml() {
             <span style="color:#777;font-size:12px;font-weight:400;">
                 合計 ${fmt(_pending.reduce((s, e) => s + e.amount, 0))}</span></h3>
         <table>
+            <colgroup><col style="width:104px;"><col style="width:80px;">
+                <col style="width:92px;"><col style="width:280px;">
+                <col style="width:96px;"><col style="width:150px;"><col></colgroup>
             <thead><tr><th>日期</th><th>池</th><th>員工</th><th>項目</th>
                 <th class="num">金額</th><th>單據／心得</th><th>操作</th></tr></thead>
             <tbody>${rows}</tbody>
@@ -172,7 +175,7 @@ function detailHtml() {
         ? _detail.fundings.map(f => `<tr>
             <td>${f.year}</td><td>${esc(f.fund_date)}</td>
             <td class="num">${fmt(f.amount)}</td>
-            <td>${esc(f.notes)}</td>
+            <td class="wrap">${esc(f.notes)}</td>
             <td><button class="hb-btn danger" onclick="window._hbDelFunding('${f.id}')">刪除</button></td>
           </tr>`).join('')
         : '<tr><td colspan="5" class="hb-empty">還沒有撥款紀錄</td></tr>';
@@ -191,7 +194,7 @@ function detailHtml() {
             return `<tr>
                 <td>${esc(e.spend_date)}</td>
                 <td>${esc(e.staff_name)}</td>
-                <td>${esc(e.title)}</td>
+                <td class="wrap">${esc(e.title)}</td>
                 <td class="num">${fmt(e.amount)}</td>
                 <td>${_proof(e)}</td>
                 <td><span class="hb-pill ${STATUS_PILL[e.status] || ''}">${esc(e.status)}</span></td>
@@ -207,6 +210,8 @@ function detailHtml() {
     <div class="hb-card">
         <h3>${esc(p.name)} — 撥款</h3>
         <table>
+            <colgroup><col style="width:64px;"><col style="width:104px;">
+                <col style="width:104px;"><col style="width:240px;"><col></colgroup>
             <thead><tr><th>年度</th><th>日期</th><th class="num">金額</th>
                 <th>備註</th><th>操作</th></tr></thead>
             <tbody>${fundRows}</tbody>
@@ -222,6 +227,9 @@ function detailHtml() {
     <div class="hb-card">
         <h3>${esc(p.name)} — 登記明細</h3>
         <table>
+            <colgroup><col style="width:104px;"><col style="width:92px;">
+                <col style="width:280px;"><col style="width:96px;">
+                <col style="width:150px;"><col style="width:80px;"><col></colgroup>
             <thead><tr><th>日期</th><th>員工</th><th>項目</th>
                 <th class="num">金額</th><th>單據／心得</th><th>狀態</th><th>操作</th></tr></thead>
             <tbody>${entRows}</tbody>
@@ -418,6 +426,8 @@ window._hbPreview = async () => {
         <td class="num">${s.count}</td></tr>`).join('');
     el('hb-k-out').innerHTML = `
         <table style="margin-top:6px;">
+            <colgroup><col style="width:160px;"><col style="width:120px;">
+                <col style="width:120px;"><col style="width:120px;"><col></colgroup>
             <thead><tr><th>池</th><th class="num">撥款</th><th class="num">已用</th>
                 <th class="num">餘額</th><th class="num">筆數</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="5" class="hb-empty">這個區間沒有</td></tr>'}</tbody>

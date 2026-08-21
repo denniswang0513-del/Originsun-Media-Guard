@@ -11,20 +11,42 @@
 </div>
 
 <style>
+    /* 🔴 整個 tab 給寬度上限並置中。不設的話在寬螢幕上，彈性那一欄會一路撐到
+       1500px 去裝五個字，中間留一大片空白 —— 欄位其實對齊了，看起來還是很亂
+       （2026-08-21 owner）。這個上限只框住福委會，不動其他 tab。 */
+    #hb-root { max-width: 1240px; margin: 0 auto; }
     /* 置中是逐個元素指定的（見上方註解）—— 表格要靠左，所以不能靠容器繼承 */
     #hb-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; text-align: center; }
     #hb-root .hb-sub { color: #777; font-size: 12px; margin-bottom: 16px; text-align: center; }
     #hb-root .hb-card {
         background: #232323; border: 1px solid #333; border-radius: 8px;
         padding: 14px 16px; margin-bottom: 14px;
+        overflow-x: auto;          /* 配合 table 的 min-width */
     }
     #hb-root .hb-card h3 { color: #ddd; font-size: 14px; margin: 0 0 10px 0; font-weight: 600; text-align: center; }
-    #hb-root table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    /* 🔴 固定欄寬（配各表的 <colgroup>）。用 auto 的話欄寬會按「內容多寡」
+       分：螢幕一寬，「項目」就拿去 876px 裝五個字，「操作」只剩 127px 把
+       核准／退回擠成上下兩行，日期也折行（2026-08-21 owner：「很不整齊」）。
+       只留「項目／備註／池名」一欄彈性吃掉多餘寬度。 */
+    #hb-root table {
+        width: 100%; border-collapse: collapse; font-size: 12.5px;
+        table-layout: fixed;
+        /* 🔴 量過的下限：「登記匯款＋退回」要 142px、「單據＋換＋心得」要 117px。
+           不設 min-width 的話，視窗一窄「操作」就被壓到 134px，按鈕又疊成上下兩行
+           （就是 owner 說的不整齊）。窄螢幕改成卡片內橫向捲，不擠壓欄位。 */
+        min-width: 960px;
+    }
     #hb-root th {
         text-align: left; color: #888; font-weight: 500; padding: 6px 8px;
         border-bottom: 1px solid #333; white-space: nowrap;
     }
-    #hb-root td { padding: 6px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc; }
+    #hb-root td {
+        padding: 6px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* 項目／備註 定寬，太長就折行（切掉的話看不出是哪一筆）。
+       多餘寬度一律留給最後一欄 —— 擺在中間會變成一條空白的河。 */
+    #hb-root td.wrap { white-space: normal; overflow-wrap: anywhere; }
     #hb-root td.num, #hb-root th.num { text-align: right; font-variant-numeric: tabular-nums; }
     #hb-root .hb-btn {
         background: #3b82f6; color: #fff; border: none; padding: 6px 12px;
