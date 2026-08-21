@@ -112,12 +112,19 @@ function poolsHtml() {
         return `
         <div class="hb-pool${p.id === _sel ? ' sel' : ''}"
              onclick="window._hbSelectPool('${esc(p.id)}')">
-            <div class="n">${esc(p.name)}${p.status === 'closed' ? '（已關閉）' : ''}</div>
-            <div class="m">累計撥款 ${fmt(p.funded)}　已用 ${fmt(p.used)}</div>
-            <div class="m">餘額 <b class="${p.over ? 'over' : ''}">${fmt(p.balance)}</b>${
-                p.pending ? `　審核中 ${fmt(p.pending)}` : ''}</div>
-            <div class="hb-bar"><i class="${p.over ? 'over' : ''}"
-                 style="width:${p.over ? 100 : pct}%"></i></div>
+            <div class="n">${esc(p.name)}${p.status === 'closed' ? '（已關閉）' : ''}
+                <span class="hb-kind">${p.quota === 'per_person' ? '每人' : '共用'}</span></div>
+            ${p.quota === 'per_person'
+                ? `<div class="m">已用 ${fmt(p.used)}${
+                     p.pending ? `　審核中 ${fmt(p.pending)}` : ''}</div>
+                   <div class="m">${p.valid_from || p.valid_to
+                       ? `${esc(p.valid_from || '不限')} ~ ${esc(p.valid_to || '不限')}`
+                       : '期間不限'}</div>`
+                : `<div class="m">累計撥款 ${fmt(p.funded)}　已用 ${fmt(p.used)}</div>
+                   <div class="m">餘額 <b class="${p.over ? 'over' : ''}">${fmt(p.balance)}</b>${
+                       p.pending ? `　審核中 ${fmt(p.pending)}` : ''}</div>
+                   <div class="hb-bar"><i class="${p.over ? 'over' : ''}"
+                        style="width:${p.over ? 100 : pct}%"></i></div>`}
         </div>`;
     }).join('') + '</div>';
 }
@@ -125,9 +132,13 @@ function poolsHtml() {
 function poolFormHtml() {
     return `
     <div class="hb-form" style="margin-top:12px;">
-        <input id="hb-p-name" placeholder="池名稱（例：快樂、進修）" style="width:220px;">
-        <button class="hb-btn" onclick="window._hbCreatePool()">新增福利池</button>
-        ${_sel ? `<button class="hb-btn danger" onclick="window._hbDeletePool()">刪除選中的池</button>` : ''}
+        <input id="hb-p-name" placeholder="名稱（例：快樂、進修、2026 LAZY KIT）" style="width:260px;">
+        <select id="hb-p-quota" title="額度怎麼配">
+            <option value="shared">共用桶（全公司一起花）</option>
+            <option value="per_person">每人一份（年度活動）</option>
+        </select>
+        <button class="hb-btn" onclick="window._hbCreatePool()">新增項目</button>
+        ${_sel ? `<button class="hb-btn danger" onclick="window._hbDeletePool()">刪除選中的項目</button>` : ''}
     </div>
     <div class="hb-note">餘額 ＝ 累計撥款 − 已核准 − 已付款。<b>待審不扣餘額</b>（退件後就不用回沖），
         另外顯示「審核中」。花超了餘額會是負的並轉紅 —— 那是刻意的，藏起來只會更晚發現。</div>`;
@@ -168,6 +179,82 @@ function pendingHtml() {
 
 /* ── 選中池的明細 ── */
 
+/** 說明與附件 —— owner 2026-08-21：健檢方案「可以就是一個可以打字、
+ *  附上文件的說明」。共用桶的項目也用得到（券的圖就是附件）。 */
+function aboutHtml(p) {
+    const files = (p.attachments || []).map(f => `
+        <div class="hb-file">
+            <a href="/api/v1/crm/receipt-file?path=${encodeURIComponent(f.path)}"
+               target="_blank" rel="noopener">${esc(f.name)}</a>
+            <span class="m">${Math.round((f.size || 0) / 1024)} KB</span>
+            <button class="hb-btn ghost" onclick="window._hbDelFile('${esc(f.id)}')">移除</button>
+        </div>`).join('');
+    return `
+    <div class="hb-card">
+        <h3>${esc(p.name)} — 說明與附件</h3>
+        <textarea id="hb-p-desc" rows="4" placeholder="說明（員工在 /my.html 會看到這段）"
+                  style="width:100%;">${esc(p.description || '')}</textarea>
+        <div class="hb-form" style="margin-top:10px;">
+            <label class="m">有效期間</label>
+            <input type="date" id="hb-p-from" value="${esc(p.valid_from || '')}">
+            <span class="m">~</span>
+            <input type="date" id="hb-p-to" value="${esc(p.valid_to || '')}">
+            <button class="hb-btn" onclick="window._hbSaveAbout()">儲存說明與期間</button>
+        </div>
+        <div class="hb-note">期間留空＝不限。每人額度的活動，員工超出期間或超過
+            額度時會被擋下來（共用桶只轉紅不擋 —— 那是公司該知道的事實）。</div>
+        <div style="margin-top:10px;">${files || '<span class="m">還沒有附件</span>'}</div>
+        <div class="hb-form" style="margin-top:8px;">
+            <button class="hb-btn" onclick="window._hbPickFile()">上傳附件</button>
+            <span class="m">健檢方案的 PDF、活動的券⋯⋯</span>
+        </div>
+    </div>`;
+}
+
+/** 每人額度表（年度活動）。 */
+function allowanceHtml(p) {
+    const rows = (_detail.allowances || []).length
+        ? _detail.allowances.map(a => `<tr>
+            <td>${esc(a.staff_name)}</td>
+            <td class="num">${fmt(a.amount)}</td>
+            <td class="num">${fmt(a.used)}</td>
+            <td class="num"><b class="${a.over ? 'over' : ''}">${fmt(a.balance)}</b></td>
+            <td>${a.valid_from || a.valid_to
+                ? `${esc(a.valid_from || '—')} ~ ${esc(a.valid_to || '—')}`
+                : '<span class="m">同活動</span>'}</td>
+            <td class="wrap">${esc(a.notes)}</td>
+            <td>
+                <button class="hb-btn ghost" onclick="window._hbEditAllowance('${a.id}')">改額度</button>
+                <button class="hb-btn danger" onclick="window._hbDelAllowance('${a.id}')">刪除</button>
+            </td></tr>`).join('')
+        : '<tr><td colspan="7" class="hb-empty">還沒有發額度給任何人</td></tr>';
+    const r = p.allowance_rollup || {};
+    const staffOpts = _staff.map(x =>
+        `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+    return `
+    <div class="hb-card">
+        <h3>${esc(p.name)} — 每人額度</h3>
+        <table>
+            <colgroup><col style="width:100px;"><col style="width:96px;">
+                <col style="width:96px;"><col style="width:96px;">
+                <col style="width:180px;"><col style="width:220px;"><col></colgroup>
+            <thead><tr><th>員工</th><th class="num">額度</th><th class="num">已用</th>
+                <th class="num">剩餘</th><th>期間</th><th>備註</th><th>操作</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+        <div class="hb-note">已配 ${fmt(r.granted || 0)}　已用 ${fmt(r.used || 0)}
+            ${r.people || 0} 人，其中 <b>${r.untouched || 0}</b> 人還沒動用。</div>
+        <div class="hb-form" style="margin-top:12px;">
+            <select id="hb-a-staff"><option value="">選員工</option>${staffOpts}</select>
+            <input type="number" id="hb-a-amount" placeholder="額度">
+            <button class="hb-btn" onclick="window._hbAddAllowance()">發給這個人</button>
+            <button class="hb-btn ghost" onclick="window._hbBulkAllowance()">全部在職員工各發一份</button>
+        </div>
+        <div class="hb-note">資格不做成規則，做成名單 —— 誰在這張表上就是誰有資格。
+            批次那顆只補沒有額度的人，不會覆蓋已經發過的。</div>
+    </div>`;
+}
+
 function detailHtml() {
     if (!_detail) return '';
     const p = _detail.pool;
@@ -206,7 +293,10 @@ function detailHtml() {
     const staffOpts = _staff.map(s =>
         `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
 
+    const perPerson = (p.quota || 'shared') === 'per_person';
     return `
+    ${aboutHtml(p)}
+    ${perPerson ? allowanceHtml(p) : `
     <div class="hb-card">
         <h3>${esc(p.name)} — 撥款</h3>
         <table>
@@ -222,7 +312,7 @@ function detailHtml() {
             <input id="hb-f-date" type="date">
             <button class="hb-btn" onclick="window._hbAddFunding()">撥款進池</button>
         </div>
-    </div>
+    </div>`}
 
     <div class="hb-card">
         <h3>${esc(p.name)} — 登記明細</h3>
@@ -279,6 +369,116 @@ function render() {
 /* ── 動作 ── */
 
 window._hbSelectPool = async (id) => { _sel = id; await _loadDetail(); };
+
+/* ── 年度活動：說明／附件／每人額度（docs/BENEFIT_POOL_PLAN.md §9）── */
+
+/** 儲存說明與期間。🔴 整包送回 —— PUT 是整筆覆蓋，少送一欄那欄就被清掉。
+ *  附件**不在 payload 裡**（後端也刻意不收），所以存說明不會清掉附件。 */
+window._hbSaveAbout = async () => {
+    const p = _detail && _detail.pool;
+    if (!p) return;
+    const r = await call('/api/v1/crm/benefits/pools/' + p.id, {
+        method: 'PUT',
+        body: {
+            name: p.name, status: p.status, sort_order: p.sort_order,
+            notes: p.notes, quota: p.quota,
+            description: el('hb-p-desc').value || '',
+            valid_from: el('hb-p-from').value || '',
+            valid_to: el('hb-p-to').value || '',
+        },
+    });
+    if (r) await _load();
+};
+
+let _fileInput = null;
+window._hbPickFile = () => {
+    const p = _detail && _detail.pool;
+    if (!p) return;
+    if (!_fileInput) {
+        _fileInput = document.createElement('input');
+        _fileInput.type = 'file';
+        _fileInput.style.display = 'none';
+        _fileInput.onchange = async () => {
+            if (!_fileInput.files[0]) return;
+            const fd = new FormData();
+            fd.append('file', _fileInput.files[0]);
+            // 🔴 FormData 不走 bfetch（它固定塞 application/json，會蓋掉 boundary）
+            const tok = localStorage.getItem('auth_token');
+            const res = await fetch(
+                `/api/v1/crm/benefits/pools/${_detail.pool.id}/files`,
+                { method: 'POST', body: fd,
+                  headers: tok ? { Authorization: 'Bearer ' + tok } : {} });
+            _fileInput.value = '';
+            if (!res.ok) {
+                let msg = res.status;
+                try { msg = (await res.json()).detail || msg; } catch (_) { /* 非 JSON */ }
+                alert('附件上傳失敗：' + msg);
+                return;
+            }
+            await _load();
+        };
+        document.body.appendChild(_fileInput);
+    }
+    _fileInput.click();
+};
+
+window._hbDelFile = async (fid) => {
+    const p = _detail && _detail.pool;
+    if (!p || !confirm('移除這個附件？')) return;
+    const r = await call(`/api/v1/crm/benefits/pools/${p.id}/files/${fid}`,
+                         { method: 'DELETE' });
+    if (r && r.note) alert('已從清單移除，但 ' + r.note);
+    if (r) await _load();
+};
+
+window._hbAddAllowance = async () => {
+    const p = _detail && _detail.pool;
+    const sid = el('hb-a-staff').value;
+    const amount = parseInt(el('hb-a-amount').value || '0', 10);
+    if (!p || !sid) { alert('請選員工'); return; }
+    if (!amount) { alert('請填額度'); return; }
+    const r = await call(`/api/v1/crm/benefits/pools/${p.id}/allowances`, {
+        method: 'POST', body: { staff_id: sid, amount },
+    });
+    if (r) await _load();
+};
+
+window._hbBulkAllowance = async () => {
+    const p = _detail && _detail.pool;
+    if (!p) return;
+    const amount = parseInt(el('hb-a-amount').value || '0', 10);
+    if (!amount) { alert('請先在「額度」欄填金額'); return; }
+    if (!confirm(`全部在職員工各發 ${amount.toLocaleString()}？已經有額度的人會跳過。`)) return;
+    const r = await call(
+        `/api/v1/crm/benefits/pools/${p.id}/allowances/bulk?amount=${amount}`,
+        { method: 'POST' });
+    if (r) {
+        alert(`發了 ${r.added} 份，跳過 ${r.skipped} 位（已經有額度）。`);
+        await _load();
+    }
+};
+
+window._hbEditAllowance = async (id) => {
+    const a = (_detail.allowances || []).find(x => x.id === id);
+    if (!a) return;
+    const v = prompt(`${a.staff_name} 的額度：`, a.amount);
+    if (v === null) return;
+    const amount = parseInt(v || '0', 10);
+    if (!amount) { alert('額度要大於 0'); return; }
+    const r = await call('/api/v1/crm/benefits/allowances/' + id, {
+        method: 'PUT',
+        body: { amount, valid_from: a.valid_from, valid_to: a.valid_to,
+                notes: a.notes },
+    });
+    if (r) await _load();
+};
+
+window._hbDelAllowance = async (id) => {
+    const a = (_detail.allowances || []).find(x => x.id === id);
+    if (!a || !confirm(`刪掉 ${a.staff_name} 的額度？`)) return;
+    const r = await call('/api/v1/crm/benefits/allowances/' + id, { method: 'DELETE' });
+    if (r) await _load();
+};
 
 /** 上傳單據：一個隱藏 input 重複用，記住是哪一筆。 */
 let _upTarget = null;
@@ -354,9 +554,10 @@ window._hbEditNote = (id) => {
 
 window._hbCreatePool = async () => {
     const name = (el('hb-p-name').value || '').trim();
-    if (!name) { alert('請填池名稱'); return; }
+    if (!name) { alert('請填名稱'); return; }
+    const quota = (el('hb-p-quota') || {}).value || 'shared';
     const r = await call('/api/v1/crm/benefits/pools',
-                         { method: 'POST', body: { name } });
+                         { method: 'POST', body: { name, quota } });
     if (r) { _sel = r.pool.id; await _load(); }
 };
 

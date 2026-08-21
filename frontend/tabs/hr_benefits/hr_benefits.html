@@ -94,6 +94,24 @@
     #hb-root button.hb-proof:hover { border-color: #555; color: #aaa; }
     #hb-root button.hb-proof.ok { border-style: solid; border-color: #17273d; }
     #hb-root button.hb-proof.ok:hover { background: #1e3a5f; color: #bfdbfe; }
+    /* 年度活動：類型標籤、附件列 */
+    #hb-root .hb-kind {
+        font-size: 10px; color: #888; border: 1px solid #3a3a3a;
+        border-radius: 3px; padding: 0 4px; margin-left: 6px; font-weight: 400;
+    }
+    #hb-root .hb-file {
+        display: flex; align-items: center; gap: 10px; padding: 5px 0;
+        border-bottom: 1px solid #2c2c2c; font-size: 12.5px;
+    }
+    #hb-root .hb-file a { color: #93c5fd; text-decoration: none; }
+    #hb-root .hb-file a:hover { text-decoration: underline; }
+    #hb-root .hb-file .m { color: #777; font-size: 11px; }
+    #hb-root textarea {
+        background: #1a1a1a; border: 1px solid #333; color: #ddd;
+        border-radius: 4px; padding: 8px; font-size: 12.5px;
+        font-family: inherit; resize: vertical;
+    }
+    #hb-root .hb-form label.m, #hb-root .hb-form span.m { color: #888; font-size: 12px; }
     /* 池的用量條 */
     #hb-root .hb-bar { height: 6px; background: #1a1a1a; border-radius: 3px; overflow: hidden; margin-top: 6px; }
     #hb-root .hb-bar > i { display: block; height: 100%; background: #3b82f6; }

@@ -42,7 +42,8 @@ def test_my_usage_uses_the_shared_rule_not_a_second_formula():
     """🔴 用同一支純規則算。另寫一份加總 ＝ 前端／後端各講一套，
     而「已核准＋已付款算用掉、待審不算」這條規則只該有一個正本。"""
     body = code_only(func_body(repo_src(SRC), "async def my_benefits("))
-    assert "benefit_pool_balance([], rows)" in body, "沒有重用 benefit_pool_balance"
+    assert "benefit_pool_balance([]," in body, "沒有重用 benefit_pool_balance"
+    assert "staff_allowance_balance" not in body, "每人額度也不該在端點裡自己算"
     assert "BENEFIT_COMMITTED" not in body, "在端點裡自己重算了一次狀態判定"
 
 

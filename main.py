@@ -1049,6 +1049,14 @@ async def _on_startup():
                         "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS staff_id VARCHAR(32)",
                         # 福委會登記的心得筆記（2026-08-21，非必填）
                         "ALTER TABLE hr_benefit_entries ADD COLUMN IF NOT EXISTS reflection TEXT",
+                        # 福委會：年度活動（每人額度＋期間）與說明／附件
+                        # （2026-08-21，docs/BENEFIT_POOL_PLAN.md §9）。
+                        # 既有兩個池走預設值 shared ＝ 行為完全不變。
+                        "ALTER TABLE hr_benefit_pools ADD COLUMN IF NOT EXISTS quota VARCHAR(16) NOT NULL DEFAULT 'shared'",
+                        "ALTER TABLE hr_benefit_pools ADD COLUMN IF NOT EXISTS description TEXT",
+                        "ALTER TABLE hr_benefit_pools ADD COLUMN IF NOT EXISTS attachments JSONB",
+                        "ALTER TABLE hr_benefit_pools ADD COLUMN IF NOT EXISTS valid_from TIMESTAMPTZ",
+                        "ALTER TABLE hr_benefit_pools ADD COLUMN IF NOT EXISTS valid_to TIMESTAMPTZ",
                         "CREATE INDEX IF NOT EXISTS idx_bank_acct_staff ON bank_accounts (staff_id)",
                         "ALTER TABLE finance_adjustments ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
                         "ALTER TABLE finance_loans ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",

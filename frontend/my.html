@@ -604,13 +604,51 @@ function cardBenefits() {
         const opts = pools.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
         // 兩種數字要分清楚：池餘額是**全公司共用**的那一份，我已用是我自己的。
         // 只顯示池餘額的話，員工會以為那是自己的額度。
-        const stats = pools.map(p => `<div class="stat">
-            <div class="num">${money(p.balance)}</div>
-            <div class="lbl">${esc(p.name)} 池餘額</div></div>
-            <div class="stat">
-            <div class="num">${money(p.mine_used || 0)}</div>
-            <div class="lbl">我在${esc(p.name)}已用${
-                p.mine_pending ? `（審核中 ${money(p.mine_pending)}）` : ""}</div></div>`).join("");
+        // 年度活動（每人一份）就直接顯示我的額度 —— 那本來就是我自己的。
+        const stats = pools.map(p => {
+            if ((p.quota || "shared") === "per_person") {
+                const a = p.mine_allowance;
+                if (!a) {
+                    return `<div class="stat">
+                        <div class="num">—</div>
+                        <div class="lbl">${esc(p.name)}（沒有發給你）</div></div>`;
+                }
+                // 顯示 available（額度 − 已用 − 審核中）而不是 balance ——
+                // 那才是「我還能再申請多少」，也才跟後端擋不擋是同一個數字。
+                return `<div class="stat">
+                    <div class="num">${money(a.available)}</div>
+                    <div class="lbl">${esc(p.name)} 我還可以用${
+                        a.pending ? `（審核中 ${money(a.pending)}）` : ""}</div></div>
+                    <div class="stat">
+                    <div class="num">${money(a.quota)}</div>
+                    <div class="lbl">我的額度${
+                        a.valid_from || a.valid_to
+                            ? `　${esc(a.valid_from || "不限")} ~ ${esc(a.valid_to || "不限")}`
+                            : ""}</div></div>`;
+            }
+            return `<div class="stat">
+                <div class="num">${money(p.balance)}</div>
+                <div class="lbl">${esc(p.name)} 池餘額</div></div>
+                <div class="stat">
+                <div class="num">${money(p.mine_used || 0)}</div>
+                <div class="lbl">我在${esc(p.name)}已用${
+                    p.mine_pending ? `（審核中 ${money(p.mine_pending)}）` : ""}</div></div>`;
+        }).join("");
+
+        // 說明與附件（owner 2026-08-21：健檢方案「可以就是一個可以打字、
+        // 附上文件的說明」）。沒有說明也沒有附件的項目就不畫。
+        const about = pools.filter(p => p.description || (p.attachments || []).length)
+            .map(p => `
+            <div style="border-top:1px solid #f5f5f5;padding-top:10px;margin-top:10px;">
+                <div class="title">${esc(p.name)}</div>
+                ${p.description
+                    ? `<div class="meta" style="white-space:pre-wrap;">${esc(p.description)}</div>`
+                    : ""}
+                ${(p.attachments || []).map(f => `
+                    <div class="meta" style="margin-top:4px;">
+                        <a href="/api/v1/crm/receipt-file?path=${encodeURIComponent(f.path)}"
+                           target="_blank" rel="noopener">${esc(f.name)}</a></div>`).join("")}
+            </div>`).join("");
         // 單據與心得都是**選填**（owner）—— 這裡只標示有沒有，沒有也不擋。
         // 還在待審/退回的可以補傳單據。
         // 🔴 不截斷。原本只畫 8 筆而且沒說被截掉 —— 有人有 22 筆，
@@ -645,6 +683,7 @@ function cardBenefits() {
             : `<div class="meta" style="margin-top:12px;">你還沒有登記過。</div>`;
         body.innerHTML = `
             <div class="stats">${stats}</div>
+            ${about}
             <div class="pf-edit" style="border-top:1px solid #f5f5f5;padding-top:12px;padding-bottom:4px;">
                 <div class="inline-row" style="margin-bottom:8px;">
                     <select id="mb-pool">${opts}</select>

@@ -1783,9 +1783,21 @@ class HrBenefitPool(Base):
 
     id = Column(String(32), primary_key=True)
     entity = Column(String(16), nullable=False, server_default="parent")  # 兩本帳
-    name = Column(String(128), nullable=False)                   # 快樂 / 進修
+    name = Column(String(128), nullable=False)                   # 快樂 / 進修 / LAZY KIT / 健檢
     status = Column(String(16), nullable=False, default="open")  # open/closed
     sort_order = Column(Integer, nullable=False, default=0)
+    # 額度怎麼配（docs/BENEFIT_POOL_PLAN.md §9）：
+    #   shared      = 全公司共用一桶（快樂／進修，現況）
+    #   per_person  = 每人一份（LAZY KIT 那種年度活動；超額與期間外都**擋**）
+    quota = Column(String(16), nullable=False, server_default="shared")
+    # 說明（給員工看的）＋ 附件（廠商 PDF、券的圖）。健檢方案就是靠這兩欄被看到
+    # （owner 2026-08-21：「可以就是一個可以打字、附上文件的說明」）。
+    # 🔴 說明不共用 notes —— 那欄是管理者備註，混在一起兩邊都讀不乾淨。
+    description = Column(Text, nullable=True)
+    attachments = Column(JSONB, nullable=True)      # [{name, path, size}]
+    # 有效期間。**留空＝不限**（共用池就是兩邊留空）
+    valid_from = Column(DateTime(timezone=True), nullable=True)
+    valid_to = Column(DateTime(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -1807,6 +1819,35 @@ class HrBenefitFunding(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class HrBenefitAllowance(Base):
+    """發給某個人的額度（LAZY KIT 那種年度活動）。
+
+    🔴 **資格不做成規則，做成名單**（docs/BENEFIT_POOL_PLAN.md §9.3）：
+    「到職滿一年」「每兩年一次」這種條件寫進程式就要永遠維護它的例外。
+    這張表本來就一列一個人 —— 誰在名單上就是誰有資格。
+
+    期間放在列上而不是只放在池上：同一個活動有人年中才到職、效期不同，
+    放在列上才表達得出來。留空＝繼承池的期間。
+    """
+    __tablename__ = "hr_benefit_allowances"
+
+    id = Column(String(32), primary_key=True)
+    pool_id = Column(String(32), nullable=False, index=True)   # soft FK → hr_benefit_pools.id
+    staff_id = Column(String(32), nullable=False, index=True)  # soft FK → crm_staff.id
+    staff_name = Column(String(64), nullable=False)            # 快照，同 HrBenefitEntry
+    amount = Column(Integer, nullable=False, default=0)
+    valid_from = Column(DateTime(timezone=True), nullable=True)
+    valid_to = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # 一個人在一個活動裡只有一份額度 —— 重複發是帳對不起來的起點
+        Index("uq_benefit_allowance", "pool_id", "staff_id", unique=True),
+    )
 
 
 class HrBenefitEntry(Base):

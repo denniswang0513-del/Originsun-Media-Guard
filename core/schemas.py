@@ -1323,6 +1323,23 @@ class BenefitPoolPayload(BaseModel):
     sort_order: int = 0
     notes: str = ""
     entity: Optional[str] = None
+    # 年度活動（docs/BENEFIT_POOL_PLAN.md §9）
+    quota: str = "shared"           # shared（共用桶）/ per_person（每人一份）
+    description: str = ""           # 說明（給員工看的，健檢方案就是這欄）
+    valid_from: str = ""            # YYYY-MM-DD，空＝不限
+    valid_to: str = ""
+    # 🔴 attachments **刻意不在 payload 裡**：附件只能走上傳／刪除那兩支端點。
+    #    放進來的話，任何一個沒帶這欄的舊表單整包寫回就會把附件清空
+    #    （「整包 model_dump 寫回會被預設值洗掉」的老坑）。
+
+
+class BenefitAllowancePayload(BaseModel):
+    """發給某個人的額度。`staff_id` 由管理端指定（這不是 own-scope 端點）。"""
+    staff_id: str = ""
+    amount: int = 0
+    valid_from: str = ""            # 空＝繼承池的期間
+    valid_to: str = ""
+    notes: str = ""
 
 
 class BenefitFundingPayload(BaseModel):

@@ -38,19 +38,24 @@ from fastapi.responses import Response
 from sqlalchemy import select
 
 from core.auth import check_admin_or_module
+from core.finance_logic import local_day
 from core.hr_logic import (BENEFIT_COMMITTED, BENEFIT_EDITABLE,
-                           benefit_pool_balance, validate_benefit_entry)
+                           benefit_pool_balance, in_window,
+                           pool_allowance_rollup, staff_allowance_balance,
+                           validate_against_allowance, validate_benefit_entry)
 from core.identity import resolve_current_staff
 from core.ledger import require_entity
-from core.schemas import (BenefitEntryPayload, BenefitFundingPayload,
-                          BenefitPoolPayload)
+from core.schemas import (BenefitAllowancePayload, BenefitEntryPayload,
+                          BenefitFundingPayload, BenefitPoolPayload)
 from db.models import (CrmCashEntry, CrmPaymentRequest, CrmStaff,
-                       HrBenefitEntry, HrBenefitFunding, HrBenefitPool)
+                       HrBenefitAllowance, HrBenefitEntry, HrBenefitFunding,
+                       HrBenefitPool)
 
 from ._shared import (_assert_month_open, _crm_session, _fmt_day, _now,
                       _parse_day, money_dep, router)
 
 # 審核／匯款要的模組（與零用金同一把 —— 審的都是別人的錢，沒理由分兩把鑰匙）
+QUOTA_MODES = ("shared", "per_person")
 APPROVE_MODULE = "finance_approve"
 # 應付款的科目軸：cat_map 查的就是 CrmPaymentRequest.category
 AP_CATEGORY = "員工福利"
@@ -89,10 +94,47 @@ async def _my_staff(request: Request):
 def _pool_dict(p, fundings=None, entries=None) -> dict:
     d = {"id": p.id, "entity": p.entity or "parent", "name": p.name,
          "status": p.status or "open", "sort_order": int(p.sort_order or 0),
-         "notes": p.notes or ""}
+         "notes": p.notes or "",
+         "quota": p.quota or "shared",
+         "description": p.description or "",
+         "attachments": list(p.attachments or []),
+         "valid_from": _fmt_day(p.valid_from), "valid_to": _fmt_day(p.valid_to)}
     if fundings is not None:
+        # 每人額度的池也算一份 shared 版的數字 —— 前端要顯示「已用」，
+        # 而「已用」在兩種模式下是同一個意思（已核准＋已付款的合計）。
         d.update(benefit_pool_balance(fundings, entries or []))
     return d
+
+
+def _allowance_dict(a) -> dict:
+    return {"id": a.id, "pool_id": a.pool_id, "staff_id": a.staff_id,
+            "staff_name": a.staff_name, "amount": int(a.amount or 0),
+            "valid_from": _fmt_day(a.valid_from), "valid_to": _fmt_day(a.valid_to),
+            "notes": a.notes or ""}
+
+
+def _window_of(al, pool):
+    """這份額度的有效期間 —— 列上沒填就繼承池的（§9.3）。回 (date, date)。"""
+    lo = local_day(al.valid_from if al is not None and al.valid_from else pool.valid_from)
+    hi = local_day(al.valid_to if al is not None and al.valid_to else pool.valid_to)
+    return (lo.date() if lo else None, hi.date() if hi else None)
+
+
+def _allowance_state(al, pool, entries) -> dict:
+    """一份額度目前的樣子（含餘額）。`entries` 是這個人在這個池的所有登記。
+
+    期間判定在這裡做完再交給純規則 —— hr_logic 保持無日期、無時區
+    （時區邏輯只該有一份，見 _shared._fmt_day 的註解）。
+    """
+    lo, hi = _window_of(al, pool)
+    rows = []
+    for e in entries:
+        d = local_day(e.spend_date)
+        inside = in_window(d.date() if d else None, lo, hi)
+        rows.append((e.status, e.amount, inside))
+    st = staff_allowance_balance(al.amount if al is not None else 0, rows)
+    st.update({"valid_from": lo, "valid_to": hi})
+    return st
 
 
 def _entry_dict(e, pool_name="") -> dict:
@@ -175,9 +217,14 @@ async def create_pool(body: BenefitPoolPayload, request: Request):
     if not name:
         raise HTTPException(status_code=422, detail="池要有名字")
     async with _crm_session() as session:
+        quota = body.quota if body.quota in QUOTA_MODES else "shared"
         p = HrBenefitPool(id=uuid.uuid4().hex[:16], entity=ent, name=name,
                           status=body.status or "open",
                           sort_order=int(body.sort_order or 0),
+                          quota=quota,
+                          description=body.description or None,
+                          valid_from=_parse_day(body.valid_from),
+                          valid_to=_parse_day(body.valid_to),
                           notes=body.notes or None)
         session.add(p)
         await session.commit()
@@ -199,6 +246,13 @@ async def update_pool(pool_id: str, body: BenefitPoolPayload, request: Request):
             p.status = body.status
         p.sort_order = int(body.sort_order or 0)
         p.notes = body.notes or None
+        if body.quota in QUOTA_MODES:
+            p.quota = body.quota
+        p.description = body.description or None
+        p.valid_from = _parse_day(body.valid_from)
+        p.valid_to = _parse_day(body.valid_to)
+        # 🔴 attachments 不在這裡寫 —— 它不在 payload 裡，只能走上傳／刪除
+        #    那兩支端點（否則舊表單整包寫回會把附件清空）。
         p.updated_at = _now()
         roll = await _pool_rollup(session, [p])
         await session.commit()
@@ -212,10 +266,13 @@ async def delete_pool(pool_id: str, request: Request):
         p = await _pool_or_404(session, pool_id)
         require_entity(request, p.entity or "parent", level="full")
         funds, ents = (await _pool_rollup(session, [p])).get(p.id, ([], []))
-        if funds or ents:
+        als = (await session.execute(select(HrBenefitAllowance).where(
+            HrBenefitAllowance.pool_id == p.id))).scalars().all()
+        if funds or ents or als:
             raise HTTPException(
                 status_code=409,
-                detail=f"這個池底下還有 {len(funds)} 筆撥款、{len(ents)} 筆登記，不能刪")
+                detail=f"這個項目底下還有 {len(funds)} 筆撥款、{len(ents)} 筆登記、"
+                       f"{len(als)} 份額度，不能刪")
         await session.delete(p)
         await session.commit()
     return {"status": "ok"}
@@ -232,10 +289,245 @@ async def pool_detail(pool_id: str, request: Request):
         ents = (await session.execute(
             select(HrBenefitEntry).where(HrBenefitEntry.pool_id == pool_id)
             .order_by(HrBenefitEntry.spend_date.desc().nullslast()))).scalars().all()
-        return {"pool": _pool_dict(p, [f.amount for f in funds],
-                                   [(e.status, e.amount) for e in ents]),
+        als = (await session.execute(
+            select(HrBenefitAllowance).where(HrBenefitAllowance.pool_id == pool_id)
+            .order_by(HrBenefitAllowance.staff_name))).scalars().all()
+        by_staff = {}
+        for e in ents:
+            by_staff.setdefault(e.staff_id or "", []).append(e)
+        rows = []
+        for a in als:
+            st = _allowance_state(a, p, by_staff.get(a.staff_id, []))
+            d = _allowance_dict(a)
+            d.update({"used": st["used"], "pending": st["pending"],
+                      "balance": st["balance"], "over": st["over"]})
+            rows.append(d)
+        d = _pool_dict(p, [f.amount for f in funds],
+                       [(e.status, e.amount) for e in ents])
+        d["allowance_rollup"] = pool_allowance_rollup(
+            [r["amount"] for r in rows], [r["used"] for r in rows])
+        return {"pool": d,
                 "fundings": [_funding_dict(f) for f in funds],
+                "allowances": rows,
                 "entries": [_entry_dict(e, p.name) for e in ents]}
+
+
+# ── 每人額度（年度活動，docs/BENEFIT_POOL_PLAN.md §9）────────────
+
+async def _guard_allowance(session, p, staff_id, amount, spend_dt,
+                           exclude_id=None):
+    """每人額度模式下，這筆登記過得了嗎。共用池直接放行。
+
+    🔴 這裡**要擋**（422），跟共用池不同：共用池超支只轉紅（那是公司該知道
+    的事實），個人額度超額是「這張券本來就沒這麼多」，放過去只是把問題推到
+    請款那一關才爆 —— 那時人已經花掉了。
+    """
+    if (p.quota or "shared") != "per_person":
+        return
+    al = (await session.execute(select(HrBenefitAllowance).where(
+        HrBenefitAllowance.pool_id == p.id,
+        HrBenefitAllowance.staff_id == staff_id))).scalars().first()
+    if al is None:
+        raise HTTPException(status_code=422,
+                            detail="這個活動沒有發給你額度，請找管理員")
+    ents = [x for x in (await session.execute(select(HrBenefitEntry).where(
+        HrBenefitEntry.pool_id == p.id,
+        HrBenefitEntry.staff_id == staff_id))).scalars().all()
+        if x.id != exclude_id]     # 改自己那筆時，它不能吃自己的額度
+    st = _allowance_state(al, p, ents)
+    d = local_day(spend_dt)
+    err = validate_against_allowance(
+        amount, d.date() if d else None,
+        {"amount": st["quota"], "valid_from": st["valid_from"],
+         "valid_to": st["valid_to"], "available": st["available"]})
+    if err:
+        raise HTTPException(status_code=422, detail=err)
+
+
+async def _allowance_or_404(session, allowance_id: str):
+    a = await session.get(HrBenefitAllowance, allowance_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="找不到這份額度")
+    return a
+
+
+@router.post("/benefits/pools/{pool_id}/allowances", dependencies=[Depends(money_dep)])
+async def add_allowance(pool_id: str, body: BenefitAllowancePayload,
+                        request: Request):
+    """發一份額度給某個人。🔴 一個人在一個活動裡只有一份 —— 重複發是
+    帳對不起來的起點（DB 也有 unique index 兜底）。"""
+    async with _crm_session() as session:
+        p = await _pool_or_404(session, pool_id)
+        require_entity(request, p.entity or "parent", level="full")
+        _check_approver(request)
+        st = await session.get(CrmStaff, (body.staff_id or "").strip())
+        if st is None:
+            raise HTTPException(status_code=422, detail="找不到這個人員")
+        if int(body.amount or 0) <= 0:
+            raise HTTPException(status_code=422, detail="額度要大於 0")
+        dup = (await session.execute(select(HrBenefitAllowance).where(
+            HrBenefitAllowance.pool_id == pool_id,
+            HrBenefitAllowance.staff_id == st.id))).scalars().first()
+        if dup is not None:
+            raise HTTPException(status_code=409,
+                                detail=f"{st.name} 在這個活動裡已經有一份額度了")
+        a = HrBenefitAllowance(
+            id=uuid.uuid4().hex[:16], pool_id=pool_id, staff_id=st.id,
+            staff_name=st.name, amount=int(body.amount),
+            valid_from=_parse_day(body.valid_from),
+            valid_to=_parse_day(body.valid_to), notes=body.notes or None)
+        session.add(a)
+        await session.commit()
+        return {"status": "ok", "allowance": _allowance_dict(a)}
+
+
+@router.post("/benefits/pools/{pool_id}/allowances/bulk",
+             dependencies=[Depends(money_dep)])
+async def add_allowances_bulk(pool_id: str, request: Request,
+                              amount: int = Query(0)):
+    """全部在職員工各發一份（同額）。
+
+    這顆按鈕就是 §9.3 說的「資格不做成規則，做成名單」的實作 —— 名單一次
+    生出來，之後 owner 手動增刪。已經有額度的人**跳過不覆蓋**（改額度請走
+    PUT，不要靠重跑這支）。
+    """
+    async with _crm_session() as session:
+        p = await _pool_or_404(session, pool_id)
+        require_entity(request, p.entity or "parent", level="full")
+        _check_approver(request)
+        if int(amount or 0) <= 0:
+            raise HTTPException(status_code=422, detail="額度要大於 0")
+        have = {a.staff_id for a in (await session.execute(
+            select(HrBenefitAllowance).where(
+                HrBenefitAllowance.pool_id == pool_id))).scalars().all()}
+        staff = (await session.execute(select(CrmStaff).where(
+            CrmStaff.status == "在職").order_by(CrmStaff.name))).scalars().all()
+        added = 0
+        for st in staff:
+            if st.id in have:
+                continue
+            session.add(HrBenefitAllowance(
+                id=uuid.uuid4().hex[:16], pool_id=pool_id, staff_id=st.id,
+                staff_name=st.name, amount=int(amount)))
+            added += 1
+        await session.commit()
+        return {"status": "ok", "added": added,
+                "skipped": len(staff) - added, "total_staff": len(staff)}
+
+
+@router.put("/benefits/allowances/{allowance_id}", dependencies=[Depends(money_dep)])
+async def update_allowance(allowance_id: str, body: BenefitAllowancePayload,
+                           request: Request):
+    async with _crm_session() as session:
+        a = await _allowance_or_404(session, allowance_id)
+        p = await _pool_or_404(session, a.pool_id)
+        require_entity(request, p.entity or "parent", level="full")
+        _check_approver(request)
+        if int(body.amount or 0) <= 0:
+            raise HTTPException(status_code=422, detail="額度要大於 0")
+        # 🔴 不換人 —— 換了等於把已經花掉的錢算到別人頭上。要換請刪了重發。
+        a.amount = int(body.amount)
+        a.valid_from = _parse_day(body.valid_from)
+        a.valid_to = _parse_day(body.valid_to)
+        a.notes = body.notes or None
+        a.updated_at = _now()
+        await session.commit()
+        return {"status": "ok", "allowance": _allowance_dict(a)}
+
+
+@router.delete("/benefits/allowances/{allowance_id}", dependencies=[Depends(money_dep)])
+async def delete_allowance(allowance_id: str, request: Request):
+    """已經用過的額度不准刪 —— 刪了那些登記就變成沒有額度依據的孤兒
+    （同「只有空池能刪」的理由）。"""
+    async with _crm_session() as session:
+        a = await _allowance_or_404(session, allowance_id)
+        p = await _pool_or_404(session, a.pool_id)
+        require_entity(request, p.entity or "parent", level="full")
+        _check_approver(request)
+        used = (await session.execute(select(HrBenefitEntry).where(
+            HrBenefitEntry.pool_id == a.pool_id,
+            HrBenefitEntry.staff_id == a.staff_id))).scalars().all()
+        if used:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{a.staff_name} 在這個活動已經登記了 {len(used)} 筆，不能刪額度")
+        await session.delete(a)
+        await session.commit()
+    return {"status": "ok"}
+
+
+# ── 說明附件（健檢方案的 PDF、券的圖）────────────────────────────
+
+_MAX_ATTACH_BYTES = 20 * 1024 * 1024
+
+
+@router.post("/benefits/pools/{pool_id}/files", dependencies=[Depends(money_dep)])
+async def upload_pool_file(pool_id: str, request: Request,
+                           file: UploadFile = File(...)):
+    """項目說明的附件（owner 2026-08-21：健檢方案「可以打字、附上文件」）。
+
+    🔴 存放與取檔沿用既有那一條路，不另造：收據 root 底下 `_福委會/_說明文件/`，
+    取檔走既有的 `GET /api/v1/crm/receipt-file?path=`（已有路徑白名單守衛）。
+    護欄也照抄零用金那兩道：副檔名黑名單＋串流上限。
+    """
+    from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
+    from .costs import _receipts_root
+
+    ext = os.path.splitext(file.filename or "")[1] or ".pdf"
+    if ext.lower() in BLOCKED_UPLOAD_EXTS:
+        raise HTTPException(status_code=400, detail=f"不接受的檔案格式：{ext}")
+
+    async with _crm_session() as session:
+        p = await _pool_or_404(session, pool_id)
+        require_entity(request, p.entity or "parent", level="full")
+        _check_approver(request)
+        base = os.path.join(_receipts_root(), "_福委會", "_說明文件")
+        try:
+            os.makedirs(base, exist_ok=True)
+        except OSError as err:
+            raise HTTPException(status_code=422, detail=f"資料夾無法使用：{err}")
+        fid = uuid.uuid4().hex[:8]
+        safe = re.sub(r'[\/:*?"<>|]', "", os.path.splitext(file.filename or "")[0])[:60]
+        filepath = os.path.join(base, f"{p.name[:20]}_{safe}_{fid}{ext}")
+        written = await asyncio.to_thread(stream_to_disk, file.file, filepath,
+                                          _MAX_ATTACH_BYTES)
+        # 🔴 JSONB 欄要**整個換掉**才會被 SQLAlchemy 偵測到有變（in-place append
+        #    不會進 dirty set，commit 之後檔案在磁碟上、清單裡卻沒有它）。
+        p.attachments = list(p.attachments or []) + [
+            {"id": fid, "name": file.filename or f"{fid}{ext}",
+             "path": filepath, "size": int(written or 0)}]
+        p.updated_at = _now()
+        await session.commit()
+        return {"status": "ok", "pool": _pool_dict(p)}
+
+
+@router.delete("/benefits/pools/{pool_id}/files/{file_id}",
+               dependencies=[Depends(money_dep)])
+async def delete_pool_file(pool_id: str, file_id: str, request: Request):
+    """用 id 刪不用索引 —— 索引會隨著別人刪檔而位移，刪錯的是另一個檔。"""
+    async with _crm_session() as session:
+        p = await _pool_or_404(session, pool_id)
+        require_entity(request, p.entity or "parent", level="full")
+        _check_approver(request)
+        keep, gone = [], None
+        for f in (p.attachments or []):
+            (keep.append(f) if f.get("id") != file_id else None)
+            if f.get("id") == file_id:
+                gone = f
+        if gone is None:
+            raise HTTPException(status_code=404, detail="找不到這個附件")
+        p.attachments = keep
+        p.updated_at = _now()
+        await session.commit()
+        # 磁碟上的檔刪不掉不算失敗（NAS 權限），但要留下訊息不靜默
+        left = ""
+        try:
+            os.remove(gone.get("path") or "")
+        except FileNotFoundError:
+            pass
+        except OSError as err:
+            left = f"（磁碟上的檔沒刪掉：{err.__class__.__name__}）"
+        return {"status": "ok", "note": left, "pool": _pool_dict(p)}
 
 
 # ── 撥款（每年放一筆進池）────────────────────────────────────────
@@ -287,19 +579,38 @@ async def my_benefits(request: Request):
             select(HrBenefitEntry).where(HrBenefitEntry.staff_id == staff.id)
             .order_by(HrBenefitEntry.spend_date.desc().nullslast())
             .limit(200))).scalars().all()
+        allow_by_pool = {a.pool_id: a for a in (await session.execute(
+            select(HrBenefitAllowance).where(
+                HrBenefitAllowance.staff_id == staff.id))).scalars().all()}
     mine_by_pool = {}
     for e in mine:
-        mine_by_pool.setdefault(e.pool_id, []).append((e.status, e.amount))
+        mine_by_pool.setdefault(e.pool_id, []).append(e)
     pools_out = []
     for p in pools:
         d = _pool_dict(p, *roll.get(p.id, ([], [])))
         # 「池餘額」是全公司共用的那一份，回答不了「我用了多少」——
         # 用同一支純規則算（fundings 傳空），前端不自己加總。
-        rows = mine_by_pool.get(p.id, [])
-        m = benefit_pool_balance([], rows)
+        ents = mine_by_pool.get(p.id, [])
+        m = benefit_pool_balance([], [(x.status, x.amount) for x in ents])
         d["mine_used"] = m["used"]
         d["mine_pending"] = m["pending"]
-        d["mine_count"] = len(rows)
+        d["mine_count"] = len(ents)
+        # 年度活動：我這一份額度的樣子（沒發給我就是 None，畫面要講出來）
+        if (p.quota or "shared") == "per_person":
+            al = allow_by_pool.get(p.id)
+            if al is None:
+                d["mine_allowance"] = None
+            else:
+                st = _allowance_state(al, p, ents)
+                d["mine_allowance"] = {
+                    "quota": st["quota"], "used": st["used"],
+                    "pending": st["pending"], "balance": st["balance"],
+                    "available": st["available"], "over": st["over"],
+                    # 🔴 走 _fmt_day，不自己 strftime —— 時區處理只該有一份
+                    #    （repo 的 test_expense_dates_are_formatted_in_taipei
+                    #    就是在守這條，我這次真的被它攔下來過）
+                    "valid_from": _fmt_day(al.valid_from or p.valid_from),
+                    "valid_to": _fmt_day(al.valid_to or p.valid_to)}
         pools_out.append(d)
     return {"staff_name": staff.name, "pools": pools_out,
             "entries": [_entry_dict(e, names.get(e.pool_id, "")) for e in mine]}
@@ -317,11 +628,13 @@ async def add_my_entry(body: BenefitEntryPayload, request: Request):
         p = await _pool_or_404(session, body.pool_id)
         if (p.status or "open") != "open":
             raise HTTPException(status_code=409, detail="這個福利池已關閉")
+        spend = _parse_day(body.spend_date) or _now()
+        await _guard_allowance(session, p, staff.id, int(body.amount), spend)
         e = HrBenefitEntry(
             id=uuid.uuid4().hex[:16], pool_id=p.id, staff_id=staff.id,
             staff_name=staff.name or "",           # 快照
             title=body.title.strip(), amount=int(body.amount),
-            spend_date=_parse_day(body.spend_date) or _now(),
+            spend_date=spend,
             status="待審", reflection=(body.reflection or "").strip() or None,
             notes=body.notes or None)
         session.add(e)
@@ -346,9 +659,15 @@ async def update_my_entry(entry_id: str, body: BenefitEntryPayload,
                 status_code=409,
                 detail=f"只有{EDITABLE_TEXT}可以修改（目前：{e.status}）")
         e.title = body.title.strip()
-        e.amount = int(body.amount)
         if body.spend_date:
             e.spend_date = _parse_day(body.spend_date) or e.spend_date
+        # 🔴 改金額／改日期也要重驗 —— 只在建立時擋的話，登記 1 元再改成
+        #    99999 就整個繞過去了。先把這筆排除再算餘額（它自己不能吃自己）。
+        if int(body.amount) != int(e.amount or 0) or body.spend_date:
+            p2 = await _pool_or_404(session, e.pool_id)
+            await _guard_allowance(session, p2, staff.id, int(body.amount),
+                                   e.spend_date, exclude_id=e.id)
+        e.amount = int(body.amount)
         e.reflection = (body.reflection or "").strip() or None
         e.notes = body.notes or None
         e.status = "待審"          # 退回後改完自動重新送審
@@ -488,12 +807,20 @@ async def add_entry_for(body: BenefitEntryPayload, request: Request):
         staff = await session.get(CrmStaff, body.staff_id) if body.staff_id else None
         if body.staff_id and staff is None:
             raise HTTPException(status_code=404, detail="找不到這位員工")
+        spend = _parse_day(body.spend_date) or _now()
+        # 代登也走同一道守衛 —— 管理端繞過去的話，畫面上的餘額會跟實際
+        # 對不起來，而且沒有任何跡象。要超額請去把額度調高（那是刻意的動作）。
+        if (p.quota or "shared") == "per_person":
+            if staff is None:
+                raise HTTPException(status_code=422,
+                                    detail="這是每人額度的活動，要指定是誰")
+            await _guard_allowance(session, p, staff.id, int(body.amount), spend)
         e = HrBenefitEntry(
             id=uuid.uuid4().hex[:16], pool_id=p.id,
             staff_id=staff.id if staff else None,
             staff_name=(staff.name if staff else "") or "（未指定）",
             title=body.title.strip(), amount=int(body.amount),
-            spend_date=_parse_day(body.spend_date) or _now(),
+            spend_date=spend,
             status="待審", reflection=(body.reflection or "").strip() or None,
             notes=body.notes or None)
         session.add(e)

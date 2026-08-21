@@ -31,7 +31,8 @@ def _tables(src):
 def test_every_table_has_a_colgroup():
     src = repo_src(JS)
     n_tables = len(re.findall(r"<thead>", src))
-    assert n_tables == 4, f"表數變了（{n_tables}）—— 新表也要補 colgroup"
+    # 5 張：待審佇列／說明附件無表／撥款／每人額度／登記明細／送會計彙總
+    assert n_tables == 5, f"表數變了（{n_tables}）—— 新表也要補 colgroup"
     assert len(_tables(src)) == n_tables, "有表沒有 colgroup（或 colgroup 不在 thead 前）"
 
 
