@@ -1314,7 +1314,7 @@ async def loan_schedule(loan_id: str, request: Request):
 
 
 def _record_loan_payment(session, loan, row, paid_date, acct_id, note: str = None,
-                         actual_amount: int = None):
+                         actual_amount: int = None, split_total: int = None):
     """標某一期已繳 + 建對應的收支明細（**手動按繳款與對帳單匯入共用這一條路**）。
 
     🔴 `loan_payment_id` 這個硬連結是關鍵：classify 靠它回 'loan' —— 不進損益
@@ -1329,13 +1329,28 @@ def _record_loan_payment(session, loan, row, paid_date, acct_id, note: str = Non
     要求金額完全相等才勾得掉，那些列會永遠配不上、每個月都要人工處理。
 
     本金／利息的拆分仍照攤還表（貸款餘額的推進以它為準）；差額只落在現金那一側。
+
+    🔴 `split_total`＝**銀行把這一期拆成幾列扣時，那幾列的合計**（一銀 150 萬每月
+    扣 29,418 + 3,269 兩列、50 萬扣 9,806 + 1,090 兩列）。有給就拿它跟攤還表比對
+    寫註記，並且第二列起用累加的方式記 —— 沒有它的話，第二列會看到「這期已經
+    paid」而被整列丟掉：錢真的從銀行出去了，帳上卻一毛沒記（實測一銀兩筆合計
+    每月憑空少 4,359，而 owner 剛把三個帳戶餘額對到分毫不差）。單列扣款不給這個
+    參數，行為與從前一字不差。
     """
     from db.models import CrmCashEntry
     total = int(row.principal_due or 0) + int(row.interest_due or 0)
     paid = int(actual_amount) if actual_amount else total
-    diff = paid - total
+    # 這一期銀行總共扣了多少（分筆扣時是那幾列的合計）—— 跟攤還表比對的就是它
+    covered = int(split_total) if split_total else paid
+    # 只有這期**還掛在 paid**時，舊金額才算數：unpay 過的期別留著的舊值不能拿來加
+    already = int(row.paid_amount or 0) if (row.status or "") == "paid" else 0
+    diff = covered - total
     memo = note or ""
-    if diff:
+    if covered != paid:          # 分筆扣：說清楚本筆多少、本期合計多少
+        memo = (memo + " " if memo else "") + (
+            f"（本期銀行分筆扣款，本筆 {paid:,}；本期合計 {covered:,}，"
+            f"攤還表 {total:,}" + (f"，差 {diff:+,}）" if diff else "）"))
+    elif diff:
         memo = (memo + " " if memo else "") + (
             f"（銀行實扣 {paid:,}，攤還表 {total:,}，差 {diff:+,}）")
     entry = CrmCashEntry(
@@ -1345,9 +1360,14 @@ def _record_loan_payment(session, loan, row, paid_date, acct_id, note: str = Non
         loan_payment_id=row.id, entity=loan.entity or "parent")  # 繳款收支繼承貸款帳本
     session.add(entry)
     row.status = "paid"
-    row.paid_at = paid_date
-    row.paid_amount = paid
-    row.cash_entry_id = entry.id
+    # 分筆扣的第二列起：日期與 cash_entry_id 留第一筆的（那是這期的代表），
+    # 金額用累加 —— 直接覆蓋的話這期會只記得最後那一筆（3,269）。
+    if already:
+        row.paid_amount = already + paid
+    else:
+        row.paid_at = paid_date
+        row.paid_amount = paid
+        row.cash_entry_id = entry.id
     return entry
 
 
@@ -1399,14 +1419,25 @@ async def unpay_loan_period(loan_id: str, period_no: int, request: Request):
         _guard(request, loan_ent, level="full")  # 這筆貸款所屬帳本要在 scope 內
         if (row.status or "") != "paid":
             raise HTTPException(status_code=409, detail=f"第 {period_no} 期尚未繳款")
-        if row.cash_entry_id:
-            entry = await session.get(CrmCashEntry, row.cash_entry_id)
-            if entry:
-                await _assert_month_open(session, entry.entry_date, entity=loan_ent)
-                await session.delete(entry)
+        # 🔴 用 loan_payment_id 找回**所有**關聯收支，不是只看 cash_entry_id ——
+        # 銀行把一期拆成兩列扣時（一銀 150 萬 = 29,418 + 3,269）這期有兩筆收支，
+        # cash_entry_id 只記得第一筆。只刪那一筆的話，取消繳款後帳上會留著零頭
+        # 那筆孤兒（期別已回 scheduled，下次匯入又記一遍 → 那筆變雙份）。
+        from sqlalchemy import select as _sel
+        entries = (await session.execute(
+            _sel(CrmCashEntry).where(CrmCashEntry.loan_payment_id == row.id))).scalars().all()
+        if not entries and row.cash_entry_id:      # 舊資料沒有硬連結時的退路
+            one = await session.get(CrmCashEntry, row.cash_entry_id)
+            entries = [one] if one else []
+        for entry in entries:
+            await _assert_month_open(session, entry.entry_date, entity=loan_ent)
+            await session.delete(entry)
         row.status = "scheduled"
         row.paid_at = None
         row.cash_entry_id = None
+        # 🔴 paid_amount 也要清 —— 留著的話這期下次被記時會從舊數字往上加，
+        # 一下就超過攤還表金額而被當成「已記滿」跳過（實測就是這樣吃掉一列）。
+        row.paid_amount = None
         await session.commit()
     return {"ok": True}
 

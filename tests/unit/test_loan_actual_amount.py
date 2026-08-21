@@ -66,8 +66,10 @@ def test_principal_interest_split_still_comes_from_the_schedule():
 def test_statement_import_passes_the_bank_amount_through():
     """匯入那條路真的有把銀行金額傳下去（不然上面幾條都白測）。"""
     body = _body('async def apply_bank_statement(', 'routers/api_finance_stmt.py')
-    assert 'actual_amount=abs(int(r.amount or 0))' in body, \
-        '對帳單匯入又改回記攤還表金額了'
+    # 釘的是「傳下去的是對帳單那一列的金額」，不是某個變數叫什麼名字
+    assert 'amt = abs(int(r.amount or 0))' in body, '沒有取對帳單那列的絕對值'
+    assert 'actual_amount=amt' in body, '對帳單匯入又改回記攤還表金額了'
+    assert 'actual_amount=total' not in body
 
 
 def test_statement_import_also_fills_the_bank_side_of_the_workbench():

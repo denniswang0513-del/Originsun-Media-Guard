@@ -675,6 +675,8 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
     _guard(request, level="full")
     if not payload.rows:
         raise HTTPException(status_code=422, detail="沒有要匯入的列")
+    from collections import Counter
+
     from db.models import CrmCashEntry
     # 專案／發票的寫入規則只有一套正本，在 crm/finance —— 這裡借用，不另寫
     from routers.crm.finance import (_enforce_cash_project_link,
@@ -724,19 +726,46 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
         # 自己那條匯入路徑只填左欄不寫帳，兩邊各做一半，誰都沒說完整的話。
         # 這裡兩欄一起填，並且直接把兩邊配起來（matched_entry_id）：帳本來就是
         # 從這份對帳單記的，本來就是同一件事，不需要人再去勾一次。
+        # 🔴 銀行常把「一期」拆成好幾列扣：一銀 150 萬每月是 29,418 + 3,269 兩列、
+        # 50 萬是 9,806 + 1,090 兩列（分兩次撥款的關係，貸款備註裡就寫著）。先把
+        # 同一期的列加總，逐列記帳時才知道這一期銀行到底扣了多少。
+        split_totals = Counter()
+        for r in payload.rows:
+            if r.loan_id and r.period_no:
+                split_totals[(r.loan_id, r.period_no)] += abs(int(r.amount or 0))
+
         stmt_lines = []
         for r, (_label, d) in zip(payload.rows, dated):
             if r.loan_id and r.period_no:
                 loan, row = await _get_loan_and_period(session, r.loan_id, r.period_no)
                 if (loan.entity or "parent") != ent:
                     raise HTTPException(status_code=409, detail="貸款與帳戶分屬不同帳本")
-                if (row.status or "") == "paid":
-                    continue          # 已繳過就跳過（重跑不重複記）
                 # r.amount 是帶號的（支出為負）→ 取絕對值當實扣。
                 # 這才是銀行真的扣的錢，攤還表只決定本息拆分。
+                amt = abs(int(r.amount or 0))
+                total_due = int(row.principal_due or 0) + int(row.interest_due or 0)
+                # 同上：unpay 過的期別 paid_amount 可能還留著舊數字，不能拿來判定
+                already = (int(row.paid_amount or 0)
+                           if (row.status or "") == "paid" else 0)
+                key = (r.date, -amt)
+                # 重跑防護分兩層，缺一不可：
+                #  ① 帳上已經有同日同額的列 → 這份對帳單匯過了，跳過。
+                #  ② 這一期已經記滿攤還表的金額 → 不管日期金額對不對都別再加
+                #     （例如先手動按過繳款、之後才匯對帳單）。
+                # 🔴 從前這裡是「status == paid 就整列跳過」，於是分筆扣的第二列
+                # 被無聲丟掉 —— 沒建收支、連 skipped_duplicates 都不會提一句，
+                # 而錢真的從銀行出去了（一銀兩筆合計每月憑空少 4,359）。
+                if seen[key] > 0:
+                    seen[key] -= 1
+                    skipped_dup.append(f"{r.date} {int(r.amount or 0):+,}")
+                    continue
+                if already and already >= total_due:
+                    skipped_dup.append(f"{r.date} {int(r.amount or 0):+,}（該期已記滿）")
+                    continue
                 ent_line = _record_loan_payment(
                     session, loan, row, d, payload.bank_account_id,
-                    note="銀行對帳單匯入", actual_amount=abs(int(r.amount or 0)))
+                    note="銀行對帳單匯入", actual_amount=amt,
+                    split_total=split_totals[(r.loan_id, r.period_no)])
                 made_payments += 1
                 stmt_lines.append((r, ent_line))
             else:
