@@ -190,18 +190,26 @@ def test_upload_returns_warnings_and_does_not_block():
     assert body.count("_read_invoice_pdf") == 1
 
 
-def test_frontend_shows_the_warning():
-    """後端算出來沒人看得到等於沒做（這個 repo 咬過『按了沒反應』兩次）。"""
+def test_frontend_shows_the_match_result():
+    """後端算出來沒人看得到等於沒做（這個 repo 咬過『按了沒反應』兩次）。
+
+    owner 2026-08-21 指定位置：結果掛在「電子發票」標題旁邊的徽章。
+    🔴 **相符也要顯示** —— 只在不符時出聲的話，「檢查過沒問題」與「根本沒檢查」
+    在畫面上長得一樣，使用者無從知道這個防呆有沒有在運作。"""
     from tests.unit._srcscan import repo_src
     js = repo_src("frontend/tabs/crm/crm-invoices.js")
-    assert "up.warnings" in js, "前端沒接警示"
-    assert "inv-file-warn" in js, "沒有渲染警示條"
+    assert "up.warnings" in js, "前端沒接比對結果"
+    assert "up.checked" in js, "沒接 checked —— 分不出「相符」與「讀不到」"
+    assert "_matchBadge()" in js and "電子發票${_matchBadge()}" in js,         "徽章沒掛在標題旁（owner 指定的位置）"
+    assert "inv-match ok" in js and "inv-match bad" in js and "inv-match none" in js,         "三態沒有分別呈現"
     css = repo_src("frontend/tabs/crm/crm.css")
-    assert ".inv-file-warn" in css, "警示條沒有樣式（會變成看不見的純文字）"
+    for cls in (".inv-match.ok", ".inv-match.bad", ".inv-match.none",
+                ".inv-file-warn"):
+        assert cls in css, f"{cls} 沒有樣式（會變成看不見的純文字）"
 
 
-def test_warning_is_cleared_when_switching_invoice():
-    """🔴 切到別張發票要清掉 —— 不然 A 的警示會掛在 B 上，比沒有警示更糟。"""
+def test_match_result_is_cleared_when_switching_invoice():
+    """🔴 切到別張發票要清掉 —— 不然 A 的比對結果會掛在 B 上，比沒有更糟。"""
     from tests.unit._srcscan import repo_src
     js = repo_src("frontend/tabs/crm/crm-invoices.js")
-    assert "_pendingNumber = null; _fileWarnings = []" in js
+    assert "_fileMatch = null" in js and "_matchOpen = false" in js

@@ -843,8 +843,21 @@
   font-size: 11px; color: #93c5fd; line-height: 1.6;
 }
 .inv-file-detected b { font-size: 13px; color: #fff; letter-spacing: .04em; }
-/* 「這張 PDF 跟表單對不上」的警示（Soca 2026-08-21：一次多張怕傳錯張）。
-   用橘不用紅：檔案已經存好了、也不是錯誤，是要人去看一眼。紅色會讓人以為上傳失敗。 */
+/* PDF 與表單的比對結果徽章 —— 掛在「電子發票」標題右邊（owner 2026-08-21 指定）。
+   三態分色：相符綠、不符橘、讀不到灰。相符也要顯示，不然使用者無從知道
+   這個防呆有沒有在運作。 */
+.inv-match {
+  margin-left: 8px; font-size: 10px; font-weight: 500;
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  vertical-align: middle;
+}
+.inv-match.ok   { background: #052e16; border: 1px solid #166534; color: #4ade80; }
+.inv-match.bad  { background: #2a1f0a; border: 1px solid #a16207; color: #fbbf24; cursor: pointer; }
+.inv-match.bad:hover { background: #3a2b0d; }
+.inv-match.none { background: #262626; border: 1px solid #3a3a3a; color: #888; }
+
+/* 展開後的不符明細。用橘不用紅：檔案已經存好了、也不是錯誤，是要人去看一眼。
+   紅色會讓人以為上傳失敗。 */
 .inv-file-warn {
   margin-bottom: 10px; padding: 8px 10px;
   background: #2a1f0a; border: 1px solid #a16207; border-radius: 6px;

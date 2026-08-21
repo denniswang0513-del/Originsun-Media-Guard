@@ -489,25 +489,45 @@ function _wireEditDynamics() {
 let _fileBusy = false;
 // 上傳後從電子發票 PDF 抽到、但還沒經人確認的發票號碼（見 _renderFilePane 的提示條）
 let _pendingNumber = null;
-// 上傳時比對 PDF 與表單發現的不一致（Soca 2026-08-21：「一次多張，怕會傳錯張」）。
+// 上傳時 PDF 與表單的比對結果（Soca 2026-08-21：「一次多張，怕會傳錯張」）。
 // 🔴 是警示不是閘門 —— 檔案已經存好了，這裡只是提醒去看一眼。
-let _fileWarnings = [];
+// 三態都要能表達：相符 / 不符 / 讀不到 PDF —— 只存 warnings 的話，
+// 「檢查過而且沒問題」跟「根本沒檢查」在畫面上長得一樣。
+let _fileMatch = null;   // { checked: bool, warnings: string[] }
+let _matchOpen = false;  // 不符時的明細有沒有展開
+
+/** 比對結果徽章 —— 掛在「電子發票」標題右邊（owner 2026-08-21 指定位置）。
+ *  相符也要出聲：不然「檢查過沒問題」跟「根本沒檢查」在畫面上一樣，
+ *  使用者無從知道這個防呆到底有沒有在運作。 */
+function _matchBadge() {
+    if (!_fileMatch) return '';
+    if (!_fileMatch.checked) {
+        return `<span class="inv-match none" title="這個檔抽不到文字（掃描件或圖片），沒辦法比對">未比對</span>`;
+    }
+    const n = (_fileMatch.warnings || []).length;
+    if (!n) return `<span class="inv-match ok" title="PDF 上的統編／金額／號碼／抬頭都與表單一致">與表單相符</span>`;
+    return `<span class="inv-match bad" onclick="window._invToggleMatch()"
+                  title="點一下看哪裡不一樣">${n} 項對不上 ${_matchOpen ? '▴' : '▾'}</span>`;
+}
+
+/** 不符時的明細，點徽章才展開 —— 平常不佔位置。 */
+function _matchDetail() {
+    const ws = (_fileMatch && _fileMatch.warnings) || [];
+    if (!ws.length || !_matchOpen) return '';
+    return `
+      <div class="inv-file-warn">
+        <b>確認一下是不是傳錯張</b>
+        <ul>${ws.map(w => `<li>${_esc(w)}</li>`).join('')}</ul>
+      </div>`;
+}
 
 function _renderFilePane(inv) {
     const pane = document.getElementById('inv-file-pane');
     if (!pane) return;
     const hasFile = !!inv.file_url;
     pane.innerHTML = `
-      <h4>電子發票</h4>
-      ${_fileWarnings.length ? `
-        <div class="inv-file-warn">
-          <b>這張 PDF 跟表單對不上，確認一下是不是傳錯張</b>
-          <ul>${_fileWarnings.map(w => `<li>${_esc(w)}</li>`).join('')}</ul>
-          <div class="inv-file-actions">
-            <button class="crm-btn crm-btn-secondary crm-btn-sm"
-                    onclick="window._invDismissWarn()">知道了</button>
-          </div>
-        </div>` : ''}
+      <h4>電子發票${_matchBadge()}</h4>
+      ${_matchDetail()}
       ${hasFile ? `
         <div class="inv-file-card">
           <div class="fn">${_esc(inv.file_name || inv.file_url)}</div>
@@ -589,7 +609,8 @@ window._invFileUpload = async function (file) {
         // 偵測到的號碼與現值不同才問 —— 一樣的話沒有打擾的理由。
         // 🔴 不自動套用：發票號碼是法定識別，改它要人點頭（owner 要的是「可以選擇」）。
         if (up.detected_differs) _pendingNumber = up.detected_invoice_number;
-        _fileWarnings = up.warnings || [];
+        _fileMatch = { checked: !!up.checked, warnings: up.warnings || [] };
+        _matchOpen = (up.warnings || []).length > 0;   // 有問題就先展開給人看
         const fresh = await _fetch('/invoices/' + _selectedId);
         renderDetail(fresh);
     } catch (e) {
@@ -604,8 +625,8 @@ window._invFileUpload = async function (file) {
  *  那個連結不該失效。 */
 /** 套用偵測到的發票號碼。走既有的 PUT（與種類切換同一條路），所以
  *  「有編號→已開立」那條自動規則、月結守衛都照常生效。 */
-window._invDismissWarn = function () {
-    _fileWarnings = [];
+window._invToggleMatch = function () {
+    _matchOpen = !_matchOpen;
     const inv = _invoices.find(i => i.id === _selectedId);
     if (inv) _renderFilePane(inv);
 };
@@ -863,7 +884,7 @@ function renderDetail(inv) {
 async function selectInvoice(id) {
     // 🔴 切到別張發票一定要清掉上一張還沒確認的偵測號碼 —— 留著的話那個「套用」
     // 會把 A 的發票號碼寫進 B。
-    if (_selectedId !== id) { _pendingNumber = null; _fileWarnings = []; }
+    if (_selectedId !== id) { _pendingNumber = null; _fileMatch = null; _matchOpen = false; }
     _selectedId = id;
     renderList();
     document.getElementById('inv-detail-panel').style.display = 'flex';

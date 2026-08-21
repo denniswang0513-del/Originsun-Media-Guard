@@ -88,17 +88,29 @@ try:
         pg.wait_for_timeout(5000)
         check(not errs, "沒有 JS 例外", errs[:2])
 
-        print("\n[3] 🔴 警示要真的看得見")
-        warn = pg.locator(".inv-file-warn")
-        check(warn.count() > 0, "警示條出現了", warn.count())
-        check(warn.first.is_visible() if warn.count() else False,
+        print("\n[3] 🔴 比對結果的徽章要在標題旁而且看得見")
+        badge = pg.locator(".inv-match")
+        check(badge.count() > 0, "徽章出現了", badge.count())
+        check(badge.first.is_visible() if badge.count() else False,
               "🔴 看得見（不是有節點但沒樣式）")
+        btxt = badge.first.inner_text() if badge.count() else ""
+        check("對不上" in btxt, "徽章寫了幾項對不上", btxt)
+        in_h4 = pg.evaluate(
+            "() => !!document.querySelector('#inv-file-pane h4 .inv-match')")
+        check(in_h4, "🔴 徽章掛在標題列（owner 指定的位置，不是另起一塊）")
+
+        print("\n[3b] 明細：有問題時預設展開，點徽章可收合")
+        warn = pg.locator(".inv-file-warn")
+        check(warn.count() > 0 and warn.first.is_visible(), "明細看得見")
         txt = warn.first.inner_text() if warn.count() else ""
         for word in ("傳錯張", "統編", "金額", "抬頭"):
             check(word in txt, f"寫了「{word}」")
         print("     畫面上的文字：")
         for ln in [x for x in txt.split("\n") if x.strip()]:
             print("       " + ln)
+        badge.first.click()
+        pg.wait_for_timeout(800)
+        check(pg.locator(".inv-file-warn").count() == 0, "點徽章可以收起明細")
 
         print("\n[4] 檔案照樣存好（警示不是閘門）")
         st, g = call("GET", f"/crm/invoices/{bad_id}")
@@ -109,9 +121,9 @@ try:
         print("\n[5] 🔴 切到別張發票，警示要消失")
         pg.evaluate(f"window._invSelect('{other_id}')")
         pg.wait_for_timeout(2500)
-        left = pg.locator(".inv-file-warn")
+        left = pg.locator(".inv-match")
         check(left.count() == 0 or not left.first.is_visible(),
-              "A 的警示沒有掛在 B 上", left.count())
+              "A 的比對結果沒有掛在 B 上", left.count())
         b.close()
 finally:
     print("\n[清理]")

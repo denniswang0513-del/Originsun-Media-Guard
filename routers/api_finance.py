@@ -58,7 +58,7 @@ from core.schemas import (BankAccountPayload,
                           StatementLineMatchPayload,
                           StatementLinesBulkPayload,
                           StatementLineUpdatePayload)
-from routers.crm._shared import (_assert_month_open, _fmt_day, _parse_day,
+from routers.crm._shared import (_assert_month_open, _parse_day,
                                  _username, _validate_month)
 
 router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
@@ -300,68 +300,6 @@ async def list_bank_accounts(request: Request, with_balances: int = 1,
                                 if with_balances else None)
         items.append(d)
     return {"items": items, "unassigned_count": int(unassigned)}
-
-
-# ── 股東自己看自己的往來（own-scope）────────────────────────────
-#
-# owner 2026-08-21：「這三位股東也各有各自的登入帳號 需要綁定」。
-# 綁定＝bank_accounts.staff_id → crm_staff.id；那位股東登入 /my.html 就看得到
-# 自己的往來餘額與明細。
-#
-# 🔴 這一支**刻意不掛 _guard／money_dep**：股東是 Lv1、沒有 money_view，
-# 掛上去他連自己的錢都看不到。安全靠 **scope** ——
-# staff_id 只從 token 解（resolve_current_staff），查詢一律
-# `WHERE bank_accounts.staff_id = 我`，所以「看得到的都是自己的」是查詢的性質，
-# 不是抹除層的恩賜（同零用金 PETTY_CASH_PLAN §4 的作法）。
-
-@router.get("/shareholder/me")
-async def my_shareholder_account(request: Request, limit: int = 50):
-    """我的股東往來：餘額 + 最近的往來明細。沒綁帳戶就回空。"""
-    from sqlalchemy import select
-
-    from core.identity import resolve_current_staff
-    from db.models import BankAccount, CrmCashEntry
-    ident = await resolve_current_staff(request)
-    # 未登入與「登入了但沒綁人員」是兩件事 —— 分開回，不然匿名訪客會收到
-    # 一句看不懂的「尚未綁定人員檔案」
-    if not ident.get("username"):
-        raise HTTPException(status_code=401, detail="請先登入")
-    staff = ident["staff"]
-    if staff is None:
-        raise HTTPException(status_code=409,
-                            detail="帳號尚未綁定人員檔案，請聯絡管理員")
-    factory = _factory_or_503()
-    async with factory() as session:
-        accts = (await session.execute(
-            select(BankAccount).where(BankAccount.staff_id == staff.id)
-            .order_by(BankAccount.sort_order))).scalars().all()
-        out = []
-        for a in accts:
-            sums = await _flow_sums_by_account(session, account_id=a.id)
-            rows = (await session.execute(
-                select(CrmCashEntry)
-                .where(CrmCashEntry.bank_account_id == a.id)
-                .order_by(CrmCashEntry.entry_date.desc().nullslast())
-                .limit(max(1, min(limit, 200))))).scalars().all()
-            out.append({
-                "id": a.id, "name": a.name,
-                "acct_kind": a.acct_kind or "bank",
-                # 餘額語意＝公司欠這位股東多少（正數＝還欠著、負數＝股東多領了）
-                "owed": bank_running_balance(a.opening_balance or 0,
-                                             [sums.get(a.id, {})]),
-                "opening_balance": a.opening_balance or 0,
-                "opening_date": (a.opening_date.strftime("%Y-%m-%d")
-                                 if a.opening_date else None),
-                "entries": [{
-                    "id": e.id, "date": _fmt_day(e.entry_date),
-                    "summary": e.summary or "",
-                    # 用「公司欠款 +/−」講，不用會計的收入/支出 ——
-                    # 股東要看的是「這筆讓公司欠我變多還是變少」
-                    "delta": int(e.deposit or 0) - int(e.expense or 0),
-                    "note": e.note or "",
-                } for e in rows],
-            })
-    return {"staff_name": staff.name, "accounts": out}
 
 
 @router.post("/bank-accounts")

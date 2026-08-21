@@ -504,7 +504,7 @@ function renderWorkspace() {
     $("btn-logout").style.display = "";
     $("hdr-hr").style.display = ws.hr_manager ? "" : "none";
 
-    const staffSections = ["me_profile", "me_projects", "me_finance", "me_leave", "me_petty", "me_benefits", "me_shareholder"];
+    const staffSections = ["me_profile", "me_projects", "me_finance", "me_leave", "me_petty", "me_benefits"];
     $("ws-notice").innerHTML = (!ws.bound && ws.allowed.some(k => staffSections.includes(k)))
         ? `<div class="notice">此帳號尚未綁定人員檔案 — 專案／個人資料／工時卡片暫無資料，請管理員在「使用者管理」完成綁定。</div>` : "";
 
@@ -517,7 +517,6 @@ function renderWorkspace() {
     if (ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
     if (ws.allowed.includes("me_petty"))    grid.appendChild(cardPettyCash());
     if (ws.allowed.includes("me_benefits")) grid.appendChild(cardBenefits());
-    if (ws.allowed.includes("me_shareholder")) grid.appendChild(cardShareholder());
     if (ws.allowed.includes("media_log"))   grid.appendChild(cardMediaLog());
     if (ws.allowed.includes("proposal_plan")) grid.appendChild(cardProposalPlan());
     // 週誌在 grid 之外自成一區（見 #ws-journal 註解）：只建一次，之後只切顯示
@@ -662,53 +661,6 @@ function cardBenefits() {
         }
     };
     load();
-    return card;
-}
-
-// ── 卡：股東往來 —— 股東看自己的餘額（owner 2026-08-21「這三位股東也各有
-// 各自的登入帳號 需要綁定」）──
-// 綁定在銀行帳戶那邊做（bank_accounts.staff_id）；沒綁到這個人就顯示空態。
-// 🔴 只看得到自己的 —— 後端查詢是 WHERE staff_id = 我（從 token 解），
-// 不是靠這張卡少畫幾筆。
-function cardShareholder() {
-    const card = makeCard("Shareholder", "股東往來", "", "shareholder");
-    const body = card.querySelector(".card-body");
-    body.innerHTML = `<div class="meta">載入中…</div>`;
-
-    mfetch("/api/v1/finance/shareholder/me").then(async (r) => {
-        if (!r.ok) {
-            body.innerHTML = `<div class="meta">載入失敗（${r.status}）</div>`;
-            return;
-        }
-        const d = await r.json();
-        const accts = d.accounts || [];
-        if (!accts.length) {
-            body.innerHTML = `<div class="meta">還沒有綁定的股東往來帳戶。</div>`;
-            return;
-        }
-        body.innerHTML = accts.map(a => {
-            const owed = a.owed || 0;
-            const rows = (a.entries || []).slice(0, 10).map(e => `
-                <div class="row">
-                    <div class="grow">
-                        <div class="title">${esc(e.summary || "（無摘要）")}</div>
-                        <div class="meta">${esc(e.date)}</div>
-                    </div>
-                    <span class="${e.delta >= 0 ? "accent" : ""}">${e.delta >= 0 ? "+" : "−"}${money(Math.abs(e.delta))}</span>
-                </div>`).join("");
-            return `
-            <div class="stats">
-                <div class="stat">
-                    <div class="num ${owed < 0 ? "" : "accent"}">${money(Math.abs(owed))}</div>
-                    <div class="lbl">${owed < 0 ? "你欠公司" : "公司欠你"}</div>
-                </div>
-            </div>
-            <div class="meta" style="margin:10px 0 6px;">
-                你墊付或把錢放進公司 → 數字變大；公司匯還你 → 變小。
-            </div>
-            ${rows || `<div class="meta">還沒有往來紀錄。</div>`}`;
-        }).join("");
-    }).catch(() => { body.innerHTML = `<div class="meta">載入失敗</div>`; });
     return card;
 }
 
