@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""福利池 Tab：真的在瀏覽器按過一輪（建池 → 動支 → 送審 → 核准 → 匯款）。
+"""福委會 Tab：真的在瀏覽器按過一輪（建池 → 撥款 → 代登 → 核准 → 匯款 → 送會計）。
 
-為什麼要有這一支：這個 repo 咬過「按鈕點了沒反應」兩次（401 靜默失敗、
-暫時死區）。API 全綠不代表那顆按鈕接得上 —— 只有真的點下去才知道。
+為什麼要有這一支：這個 repo 咬過「按鈕點了沒反應」兩次（401 靜默失敗、暫時死區），
+而且新 tab 少了 index.html 的 section 殼時 API 全綠也看不出來。只有真的點下去才知道。
 """
 import json
 import sys
@@ -17,7 +17,7 @@ BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001"
 TOK = create_token({"sub": "admin", "username": "admin",
                     "access_level": 3, "modules": []})
 H = {"Authorization": "Bearer " + TOK, "Content-Type": "application/json"}
-POOL_NAME = "ZZ_UI 福利池測試"
+POOL_NAME = "ZZ_UI 快樂"
 fails = []
 
 
@@ -40,33 +40,36 @@ def api(m, path, body=None):
 def _purge():
     """只刪自己建的（名字前綴 ZZ_UI）—— 金絲雀鐵則。
 
-    走 DB 而不是 API：已付款的動支**照設計就是刪不掉的**（錢真的出去了，
+    走 DB 而不是 API：已付款的登記**照設計就是刪不掉的**（錢真的出去了，
     產品要求走沖銷）。那是對的行為，不該為了讓測試好收尾去開一個後門端點。
+    開頭也要跑一次 —— 上一次跑到一半炸掉的殘留會讓斷言互咬（實戰教訓）。
     """
     import asyncio
 
     async def _do():
         from db.session import init_db, get_session_factory
         from sqlalchemy import select
-        from db.models import (CrmCashEntry, CrmPaymentRequest, HrBenefitGrant,
-                               HrBenefitPool)
+        from db.models import (CrmCashEntry, CrmPaymentRequest, HrBenefitEntry,
+                               HrBenefitFunding, HrBenefitPool)
         await init_db()
         async with get_session_factory()() as s:
             pools = (await s.execute(select(HrBenefitPool).where(
                 HrBenefitPool.name.like("ZZ\\_UI%", escape="\\")))).scalars().all()
             for pool in pools:
-                gs = (await s.execute(select(HrBenefitGrant).where(
-                    HrBenefitGrant.pool_id == pool.id))).scalars().all()
-                for g in gs:
-                    if g.payment_request_id:
+                for e in (await s.execute(select(HrBenefitEntry).where(
+                        HrBenefitEntry.pool_id == pool.id))).scalars().all():
+                    if e.payment_request_id:
                         for c in (await s.execute(select(CrmCashEntry).where(
                                 CrmCashEntry.payment_request_id
-                                == g.payment_request_id))).scalars().all():
+                                == e.payment_request_id))).scalars().all():
                             await s.delete(c)
-                        ap = await s.get(CrmPaymentRequest, g.payment_request_id)
+                        ap = await s.get(CrmPaymentRequest, e.payment_request_id)
                         if ap:
                             await s.delete(ap)
-                    await s.delete(g)
+                    await s.delete(e)
+                for f in (await s.execute(select(HrBenefitFunding).where(
+                        HrBenefitFunding.pool_id == pool.id))).scalars().all():
+                    await s.delete(f)
                 await s.delete(pool)
             await s.commit()
 
@@ -86,77 +89,80 @@ try:
         pg.goto(BASE + "/", wait_until="domcontentloaded")
         pg.wait_for_timeout(4000)
 
-        print("[1] 進得了福利池 tab")
+        print("[1] 進得了福委會 tab")
         pg.evaluate("window.switchTab('tab_hr_benefits')")
         pg.wait_for_timeout(3500)
         check(pg.locator("#hb-root").count() > 0, "tab 載入了")
         check("載入失敗" not in pg.inner_text("#hb-content"), "沒有載入失敗訊息")
 
-        print("\n[2] 建池")
-        pg.select_option("#hb-year", "2026")
-        pg.wait_for_timeout(1500)
+        print("\n[2] 開池")
         pg.fill("#hb-p-name", POOL_NAME)
-        pg.fill("#hb-p-budget", "50000")
         pg.click("button:has-text('新增福利池')")
         pg.wait_for_timeout(2500)
         check(POOL_NAME in pg.inner_text("#hb-content"), "池出現在畫面上")
-        check("$50,000" in pg.inner_text("#hb-content"), "編列金額顯示")
-
-        st, d = api("GET", "/crm/benefits/pools?year=2026")
+        st, d = api("GET", "/crm/benefits/pools")
         pool = next((x for x in d["items"] if x["name"] == POOL_NAME), None)
         check(pool is not None, "後端真的建了", pool and pool["id"])
 
-        print("\n[3] 新增一筆動支（併入個人所得）")
-        pg.select_option("#hb-g-cat", "生日禮金")
-        pg.fill("#hb-g-amount", "3000")
-        pg.fill("#hb-g-date", "2026-08-21")
-        pg.check("#hb-g-taxable")
-        pg.click("button:has-text('新增動支')")
+        print("\n[3] 撥款進池")
+        pg.fill("#hb-f-year", "2026")
+        pg.fill("#hb-f-amount", "50000")
+        pg.click("button:has-text('撥款進池')")
+        pg.wait_for_timeout(2500)
+        check(not errs, "沒有 JS 例外", errs[:2])
+        check("$50,000" in pg.inner_text("#hb-content"), "撥款金額顯示")
+        _, det = api("GET", "/crm/benefits/pools/" + pool["id"])
+        check(det["pool"]["funded"] == 50000, "後端記了 50,000",
+              det["pool"]["funded"])
+
+        print("\n[4] 代員工登記一筆")
+        pg.fill("#hb-e-title", "ZZ 部門聚餐")
+        pg.fill("#hb-e-amount", "3000")
+        pg.fill("#hb-e-date", "2026-08-21")
+        pg.click("button:has-text('代員工登記')")
         pg.wait_for_timeout(2500)
         check(not errs, "沒有 JS 例外", errs[:2])
         _, det = api("GET", "/crm/benefits/pools/" + pool["id"])
-        g = (det.get("grants") or [{}])[0]
-        check(g.get("amount") == 3000, "後端收到 3,000", g.get("amount"))
-        check(g.get("taxable") == 1, "🔴 併入個人所得的勾有送出去", g.get("taxable"))
-        check(g.get("status") == "草稿", "落在草稿", g.get("status"))
+        e = (det.get("entries") or [{}])[0]
+        check(e.get("amount") == 3000, "後端收到 3,000", e.get("amount"))
+        check(e.get("status") == "待審", "登記即待審", e.get("status"))
 
-        print("\n[4] 送審 → 待審不扣餘額（畫面上）")
-        pg.click("button:has-text('送審')")
-        pg.wait_for_timeout(2500)
+        print("\n[5] 待審不扣餘額（畫面上）")
         txt = pg.inner_text("#hb-content")
         check("審核中 $3,000" in txt, "畫面顯示審核中", "審核中" in txt)
         check("餘額 $50,000" in txt, "🔴 餘額沒被待審扣掉",
               [ln for ln in txt.split("\n") if "餘額" in ln][:1])
+        check("待審" in txt and "1 筆" in txt, "待審佇列出現在最上面")
 
-        print("\n[5] 核准 → 應付帳款")
-        pg.click("button:has-text('核准')")
+        print("\n[6] 核准 → 進公司請款")
+        pg.locator("button:has-text('核准')").first.click()
         pg.wait_for_timeout(2800)
         check(not errs, "核准沒有 JS 例外", errs[:2])
         _, det = api("GET", "/crm/benefits/pools/" + pool["id"])
-        g = det["grants"][0]
-        check(g["status"] == "已核准", "轉已核准", g["status"])
-        check(bool(g["payment_request_id"]), "產了應付款", g["payment_request_id"])
+        e = det["entries"][0]
+        check(e["status"] == "已核准", "轉已核准", e["status"])
+        check(bool(e["payment_request_id"]), "產了應付款", e["payment_request_id"])
         check("餘額 $47,000" in pg.inner_text("#hb-content"), "餘額扣掉 3,000")
 
-        print("\n[6] 登記匯款 → 落帳")
-        pg.click("button:has-text('登記匯款')")
+        print("\n[7] 登記匯款 → 落帳")
+        pg.locator("button:has-text('登記匯款')").first.click()
         pg.wait_for_timeout(2800)
         _, det = api("GET", "/crm/benefits/pools/" + pool["id"])
-        check(det["grants"][0]["status"] == "已付款", "轉已付款",
-              det["grants"][0]["status"])
+        check(det["entries"][0]["status"] == "已付款", "轉已付款",
+              det["entries"][0]["status"])
         check(not errs, "整輪都沒有 JS 例外", errs[:3])
 
-        print("\n[7] 會計交付包預覽")
+        print("\n[8] 送會計預覽")
         pg.click("button:has-text('預覽')")
         pg.wait_for_timeout(2500)
         out = pg.inner_text("#hb-k-out")
-        check("併入個人所得" in out and "公司費用" in out, "兩區都畫出來")
-        check("$3,000" in out, "金額出現在併入所得區")
+        check("撥款" in out and "餘額" in out, "彙總畫出來")
+        check("$3,000" in out, "已用金額出現")
         b.close()
 finally:
     print("\n[清理]")
     _purge()
-    st, d = api("GET", "/crm/benefits/pools?year=2026")
+    st, d = api("GET", "/crm/benefits/pools")
     check(not [x for x in d.get("items", []) if x["name"].startswith("ZZ_UI")],
           "測試池清光")
 

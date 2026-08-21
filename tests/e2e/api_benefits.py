@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
-"""福利池端到端：建池 → 動支 → 送審 → 核准（進應付帳款）→ 匯款（落帳）
-→ 會計交付包。全部自己建的資料，跑完刪光。"""
+"""福委會端到端：撥款進池 → 員工自己登記 → owner 審核 → 進公司請款 → 匯款落帳。
+
+owner 的流程原話：「幾個福利池（快樂／進修），員工登記 → 我審核通過 → 進公司
+請款；每年撥一筆錢進池。」這支就照那句話走一遍，並驗到帳上。
+全部自己建的資料，跑完刪光（開頭也先清 —— 上一次跑到一半炸掉的殘留會讓斷言互咬）。
+"""
 import json
 import sys
 import urllib.error
@@ -10,9 +14,11 @@ sys.path.insert(0, r"E:\Dev\Originsun-Media-Guard")
 from core.auth import create_token  # noqa: E402
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001") + "/api/v1"
+IS_DEV = BASE.startswith("http://127.0.0.1:8001")
 TOK = create_token({"sub": "admin", "username": "admin",
                     "access_level": 3, "modules": []})
 H = {"Authorization": "Bearer " + TOK, "Content-Type": "application/json"}
+PREFIX = "ZZ_測試池"
 fails = []
 
 
@@ -37,162 +43,166 @@ def call(m, path, body=None, raw=False):
             return e.code, b.decode("utf-8", "replace")
 
 
-print("[0] 選項")
-st, opts = call("GET", "/crm/benefits/options")
-check(st == 200 and opts.get("categories"), "選項端點", st)
-staff_id = (opts.get("staff") or [{}])[0].get("id", "")
-staff_name = (opts.get("staff") or [{}])[0].get("name", "")
-print("     拿第一位員工當受款人:", staff_name or "(沒有員工資料)")
+def purge():
+    """只刪自己建的（名字前綴）—— 金絲雀鐵則。已付款的登記走 DB
+    （照設計就是刪不掉的，不該為了測試好收尾去開後門端點）。"""
+    import asyncio
 
-print("\n[1] 建池")
-st, r = call("POST", "/crm/benefits/pools",
-             {"name": "ZZ測試 2026 員工福利", "budget": 100000, "year": 2026})
-check(st == 200, "建立成功", st)
-pool = r.get("pool", {})
-pid = pool.get("id")
-check(pool.get("balance") == 100000, "空池餘額＝編列", pool.get("balance"))
+    async def _do():
+        from db.session import init_db, get_session_factory
+        from sqlalchemy import select
+        from db.models import (CrmCashEntry, CrmPaymentRequest, HrBenefitEntry,
+                               HrBenefitFunding, HrBenefitPool)
+        await init_db()
+        async with get_session_factory()() as s:
+            pools = (await s.execute(select(HrBenefitPool).where(
+                HrBenefitPool.name.like(PREFIX + "%")))).scalars().all()
+            for pool in pools:
+                for e in (await s.execute(select(HrBenefitEntry).where(
+                        HrBenefitEntry.pool_id == pool.id))).scalars().all():
+                    if e.payment_request_id:
+                        for c in (await s.execute(select(CrmCashEntry).where(
+                                CrmCashEntry.payment_request_id
+                                == e.payment_request_id))).scalars().all():
+                            await s.delete(c)
+                        ap = await s.get(CrmPaymentRequest, e.payment_request_id)
+                        if ap:
+                            await s.delete(ap)
+                    await s.delete(e)
+                for f in (await s.execute(select(HrBenefitFunding).where(
+                        HrBenefitFunding.pool_id == pool.id))).scalars().all():
+                    await s.delete(f)
+                await s.delete(pool)
+            await s.commit()
 
-print("\n[2] 三筆動支（併入所得 / 公司費用 / 之後要退回的）")
-gids = []
-for cat, amount, taxable, kind in (("生日禮金", 2000, 1, "給付"),
-                                   ("健康檢查", 8000, 0, "核銷"),
-                                   ("員工旅遊", 5000, 0, "核銷")):
-    st, r = call("POST", f"/crm/benefits/pools/{pid}/grants",
-                 {"staff_id": staff_id, "category": cat, "amount": amount,
-                  "taxable": taxable, "kind": kind, "grant_date": "2026-08-21"})
-    check(st == 200, f"建立 {cat} {amount}", st)
-    gids.append(r.get("grant", {}).get("id"))
+    asyncio.run(_do())
 
-st, r = call("GET", f"/crm/benefits/pools/{pid}")
-check(r["pool"]["used"] == 0, "草稿不吃預算", r["pool"]["used"])
-check(r["pool"]["balance"] == 100000, "餘額還是滿的", r["pool"]["balance"])
 
-print("\n[3] 欄位守衛")
-st, r = call("POST", f"/crm/benefits/pools/{pid}/grants",
-             {"staff_id": staff_id, "category": "加薪", "amount": 100})
-check(st == 422, "沒有的項目被擋", (st, r.get("detail")))
-st, r = call("POST", f"/crm/benefits/pools/{pid}/grants",
-             {"staff_id": staff_id, "category": "生日禮金", "amount": 0})
+if IS_DEV:
+    purge()
+
+print("[1] 開兩個池（快樂 / 進修）")
+pids = {}
+for name in ("快樂", "進修"):
+    st, r = call("POST", "/crm/benefits/pools", {"name": f"{PREFIX}{name}"})
+    check(st == 200, f"建立「{name}」", st)
+    pids[name] = r["pool"]["id"]
+
+print("\n[2] 每年撥一筆錢進池")
+for year, amount in ((2025, 20000), (2026, 20000)):
+    st, r = call("POST", f"/crm/benefits/pools/{pids['快樂']}/fundings",
+                 {"year": year, "amount": amount, "fund_date": f"{year}-07-01"})
+    check(st == 200, f"{year} 撥款 {amount:,}", st)
+st, r = call("POST", f"/crm/benefits/pools/{pids['快樂']}/fundings",
+             {"year": 2026, "amount": -5000})
+check(st == 422, "負數撥款被擋", (st, r.get("detail")))
+
+st, r = call("GET", f"/crm/benefits/pools/{pids['快樂']}")
+check(r["pool"]["funded"] == 40000, "累計撥款 40,000（跨年度滾動）",
+      r["pool"]["funded"])
+check(r["pool"]["balance"] == 40000, "還沒花，餘額＝撥款", r["pool"]["balance"])
+
+print("\n[3] 員工自己登記（own-scope，staff_id 從 token 解）")
+st, me = call("GET", "/crm/benefits/me")
+if st == 409:
+    print("  SKIP admin 沒綁人員檔案 —— 改用管理端代登驗流程")
+    st, r = call("POST", "/crm/benefits/entries",
+                 {"pool_id": pids["快樂"], "title": "ZZ 部門聚餐", "amount": 4130,
+                  "spend_date": "2026-08-01"})
+    check(st == 200, "代登一筆 4,130", st)
+    eid = r["entry"]["id"]
+else:
+    check(st == 200, "自助端點通", st)
+    check(any(p["name"].endswith("快樂") for p in me["pools"]), "看得到開放中的池")
+    st, r = call("POST", "/crm/benefits/me/entries",
+                 {"pool_id": pids["快樂"], "title": "ZZ 部門聚餐", "amount": 4130,
+                  "spend_date": "2026-08-01"})
+    check(st == 200, "自己登記一筆 4,130", st)
+    eid = r["entry"]["id"]
+check(r["entry"]["status"] == "待審", "登記即待審（不用再按送出）",
+      r["entry"]["status"])
+
+st, r = call("POST", "/crm/benefits/entries",
+             {"pool_id": pids["快樂"], "title": "", "amount": 100})
+check(st == 422, "空項目被擋", (st, r.get("detail")))
+st, r = call("POST", "/crm/benefits/entries",
+             {"pool_id": pids["快樂"], "title": "X", "amount": 0})
 check(st == 422, "金額 0 被擋", (st, r.get("detail")))
 
-print("\n[4] 送審 → 待審不扣餘額")
-for g in gids:
-    call("POST", f"/crm/benefits/grants/{g}/submit")
-st, r = call("GET", f"/crm/benefits/pools/{pid}")
-check(r["pool"]["pending"] == 15000, "審核中 15,000", r["pool"]["pending"])
+print("\n[4] 待審不扣餘額")
+st, r = call("GET", f"/crm/benefits/pools/{pids['快樂']}")
+check(r["pool"]["pending"] == 4130, "審核中 4,130", r["pool"]["pending"])
 check(r["pool"]["used"] == 0, "🔴 待審不扣餘額", r["pool"]["used"])
-check(r["pool"]["balance"] == 100000, "餘額不動", r["pool"]["balance"])
+check(r["pool"]["balance"] == 40000, "餘額不動", r["pool"]["balance"])
 
-print("\n[5] 核准 → 產應付款進應付帳款")
-st, r = call("POST", f"/crm/benefits/grants/{gids[0]}/approve")
+print("\n[5] 待審佇列（owner 每天要看的）")
+st, q = call("GET", "/crm/benefits/entries?status=" + "%E5%BE%85%E5%AF%A9")
+check(any(x["id"] == eid for x in q["items"]), "那一筆在待審清單裡")
+
+print("\n[6] 核准 → 進公司請款")
+st, r = call("POST", f"/crm/benefits/entries/{eid}/approve")
 check(st == 200, "核准成功", st)
-ap_id = r["grant"]["payment_request_id"]
+ap_id = r["entry"]["payment_request_id"]
 check(bool(ap_id), "產了應付款", ap_id)
 st, ap = call("GET", f"/crm/payments/{ap_id}")
 ap = ap.get("payment") or ap
-check(ap.get("payment_status") == "應付款", "應付款狀態", ap.get("payment_status"))
+check(ap.get("payment_status") == "應付款", "進了應付帳款", ap.get("payment_status"))
 check(ap.get("category") == "員工福利", "科目軸＝員工福利", ap.get("category"))
-check("併入個人所得" in (ap.get("notes") or ""), "備註標了併入所得", ap.get("notes"))
+check("福委會" in (ap.get("summary") or ""), "摘要看得出是福委會", ap.get("summary"))
 
-st, r2 = call("POST", f"/crm/benefits/grants/{gids[0]}/approve")
-check(r2.get("detail") is not None or st == 409, "重按核准被擋（狀態機）", st)
+st, r2 = call("POST", f"/crm/benefits/entries/{eid}/approve")
+check(r2.get("detail") is not None or st == 409, "重按核准被擋", st)
 
-st, r = call("GET", f"/crm/benefits/pools/{pid}")
-check(r["pool"]["used"] == 2000, "已核准開始吃預算", r["pool"]["used"])
-check(r["pool"]["balance"] == 98000, "餘額 98,000", r["pool"]["balance"])
-
-print("\n[6] 已核准不准改 / 不准刪")
-st, r = call("PUT", f"/crm/benefits/grants/{gids[0]}",
-             {"category": "生日禮金", "amount": 999999, "kind": "給付", "taxable": 1})
-check(st == 409, "已核准不能改金額", (st, r.get("detail")))
-st, r = call("DELETE", f"/crm/benefits/grants/{gids[0]}")
-check(st == 409, "已核准不能刪", st)
+st, r = call("GET", f"/crm/benefits/pools/{pids['快樂']}")
+check(r["pool"]["used"] == 4130, "核准後才扣餘額", r["pool"]["used"])
+check(r["pool"]["balance"] == 35870, "餘額 35,870", r["pool"]["balance"])
 
 print("\n[7] 退回 → 撤掉幽靈負債")
-call("POST", f"/crm/benefits/grants/{gids[2]}/approve")
-st, r = call("GET", f"/crm/benefits/pools/{pid}")
-before = r["pool"]["used"]
-st, g2 = call("GET", "/crm/benefits/pools/" + pid)
-ap2 = next(x["payment_request_id"] for x in g2["grants"] if x["id"] == gids[2])
-st, r = call("POST", f"/crm/benefits/grants/{gids[2]}/reject?reason=ZZ%E6%B8%AC%E8%A9%A6%E9%80%80%E5%9B%9E")
+st, r = call("POST", "/crm/benefits/entries",
+             {"pool_id": pids["進修"], "title": "ZZ 奧德賽", "amount": 380})
+eid2 = r["entry"]["id"]
+call("POST", f"/crm/benefits/entries/{eid2}/approve")
+st, d = call("GET", f"/crm/benefits/pools/{pids['進修']}")
+ap2 = next(x["payment_request_id"] for x in d["entries"] if x["id"] == eid2)
+st, r = call("POST", f"/crm/benefits/entries/{eid2}/reject?reason=ZZ")
 check(st == 200, "退回成功", st)
 st, gone = call("GET", f"/crm/payments/{ap2}")
-check(gone == 404 or st == 404, "🔴 應付款被撤掉（沒留幽靈負債）", st)
-st, r = call("GET", f"/crm/benefits/pools/{pid}")
-check(r["pool"]["used"] == before - 5000, "餘額跟著回來", r["pool"]["used"])
+check(st == 404, "🔴 應付款被撤掉（沒留幽靈負債）", st)
+st, d = call("GET", f"/crm/benefits/pools/{pids['進修']}")
+check(d["pool"]["used"] == 0, "餘額跟著回來", d["pool"]["used"])
 
 print("\n[8] 匯款 → 落帳成收支明細（冪等）")
-st, r = call("POST", f"/crm/benefits/grants/{gids[0]}/pay?payment_date=2026-08-21")
+st, r = call("POST", f"/crm/benefits/entries/{eid}/pay?payment_date=2026-08-21")
 check(st == 200 and r.get("cash_entries") == 1, "落帳 1 筆", r.get("cash_entries"))
-st, r2 = call("POST", f"/crm/benefits/grants/{gids[0]}/pay?payment_date=2026-08-21")
+st, r2 = call("POST", f"/crm/benefits/entries/{eid}/pay?payment_date=2026-08-21")
 check(st == 409, "重按匯款被狀態機擋", st)
-
 st, ap = call("GET", f"/crm/payments/{ap_id}")
 ap = ap.get("payment") or ap
 check(ap.get("payment_status") == "已付款", "應付款轉已付款", ap.get("payment_status"))
 
-print("\n[9] 會計交付包")
-call("POST", f"/crm/benefits/grants/{gids[1]}/approve")
+print("\n[9] 送會計")
 st, pkg = call("GET", "/crm/benefits/accounting-package?year=2026")
 check(st == 200, "交付包端點", st)
-pi = pkg["personal_income"]
-ce = pkg["company_expense"]
-mine_pi = [r for r in pi["rows"] if r["pool_name"].startswith("ZZ測試")]
-mine_ce = [r for r in ce["rows"] if r["pool_name"].startswith("ZZ測試")]
-check(len(mine_pi) == 1 and mine_pi[0]["amount"] == 2000,
-      "併入所得區＝生日禮金 2,000", [r["amount"] for r in mine_pi])
-check(len(mine_ce) == 1 and mine_ce[0]["amount"] == 8000,
-      "公司費用區＝健檢 8,000", [r["amount"] for r in mine_ce])
-check(mine_pi[0].get("id_number") is not None, "併入所得帶身分證欄（扣繳憑單用）")
-check("id_number" not in json.dumps(
-    [x for x in call("GET", f"/crm/benefits/pools/{pid}")[1]["grants"]]),
-    "🔴 一般清單不帶身分證（PII 單一正本）")
-check(all(r["status"] in ("已核准", "已付款") for r in mine_pi + mine_ce),
+mine = [s for s in pkg["summary"] if s["pool"].startswith(PREFIX)]
+happy = next(s for s in mine if s["pool"].endswith("快樂"))
+check(happy["funded"] == 20000, "2026 撥款 20,000（只算該年度）", happy["funded"])
+check(happy["used"] == 4130, "2026 已用 4,130", happy["used"])
+check(happy["balance"] == 15870, "2026 餘額 15,870", happy["balance"])
+check(all(e["status"] in ("已核准", "已付款")
+          for e in pkg["entries"] if e["pool_name"].startswith(PREFIX)),
       "只收已核准/已付款")
 
 st, csv_text = call("GET", "/crm/benefits/accounting-package.csv?year=2026", raw=True)
-check(st == 200 and "併入個人所得" in csv_text and "公司費用" in csv_text,
-      "CSV 兩區都在", st)
+check(st == 200 and "撥款" in csv_text and "支出" in csv_text, "CSV 兩區都在", st)
 check(csv_text.startswith("\ufeff"), "CSV 有 BOM（Excel 中文才不亂碼）")
 
 print("\n[清理]")
-st, r = call("DELETE", f"/crm/benefits/pools/{pid}")
-check(st == 409, "有動支的池刪不掉（守衛）", st)
-# 逐筆退回→刪除；已付款那筆連同它的收支列一起收
-st, d = call("GET", f"/crm/benefits/pools/{pid}")
-import asyncio  # noqa: E402
-
-
-async def _purge(pool_id):
-    from db.session import init_db, get_session_factory
-    from sqlalchemy import select
-    from db.models import (CrmCashEntry, CrmPaymentRequest, HrBenefitGrant,
-                           HrBenefitPool)
-    await init_db()
-    async with get_session_factory()() as s:
-        gs = (await s.execute(select(HrBenefitGrant).where(
-            HrBenefitGrant.pool_id == pool_id))).scalars().all()
-        for g in gs:
-            if g.payment_request_id:
-                ce = (await s.execute(select(CrmCashEntry).where(
-                    CrmCashEntry.payment_request_id == g.payment_request_id))).scalars().all()
-                for c in ce:
-                    await s.delete(c)
-                ap = await s.get(CrmPaymentRequest, g.payment_request_id)
-                if ap:
-                    await s.delete(ap)
-            await s.delete(g)
-        p = await s.get(HrBenefitPool, pool_id)
-        if p:
-            await s.delete(p)
-        await s.commit()
-        left = (await s.execute(select(HrBenefitGrant).where(
-            HrBenefitGrant.pool_id == pool_id))).scalars().all()
-        return len(left)
-
-
-if BASE.startswith("http://127.0.0.1:8001"):
-    check(asyncio.run(_purge(pid)) == 0, "測試資料清光")
+st, r = call("DELETE", f"/crm/benefits/pools/{pids['快樂']}")
+check(st == 409, "有錢的池刪不掉（守衛）", st)
+if IS_DEV:
+    purge()
+    st, d = call("GET", "/crm/benefits/pools")
+    check(not [x for x in d["items"] if x["name"].startswith(PREFIX)], "測試資料清光")
 else:
     print("  (生產：清理另外跑)")
 

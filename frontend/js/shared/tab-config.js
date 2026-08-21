@@ -128,7 +128,7 @@ export const TAB_GROUPS = [
         { key: 'crm_staff',    label: '員工檔案' },
         { key: 'timesheets',   label: '專案工時' },
         { key: 'hr_leave',     label: '請補修' },
-        { key: 'hr_benefits',  label: '福利池' },
+        { key: 'hr_benefits',  label: '福委會' },
         { key: 'journal',      label: '工作日誌' },
     ] },
     // 財務管理（2026-07 起）：帳務六視圖自業務管理搬入；沿用 crm_invoices 單一
@@ -197,7 +197,7 @@ export const PERMISSION_GROUPS = [
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
     // N0 個人工作台 — 獨立頁 /my.html 的卡片（無 SPA tab，僅權限編輯器用；
     // groupKeys 會因 TAB_MAP 無此 key 而自動不進側欄）。
-    { id: 'me',         label: '🙋 個人工作台', modules: ['me_projects', 'me_profile', 'me_todos', 'me_finance', 'me_leave', 'me_petty'] },
+    { id: 'me',         label: '🙋 個人工作台', modules: ['me_projects', 'me_profile', 'me_todos', 'me_finance', 'me_leave', 'me_petty', 'me_benefits'] },
 ];
 
 // Flat list of every assignable RBAC module key — derived from PERMISSION_GROUPS

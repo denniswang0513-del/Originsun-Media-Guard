@@ -82,94 +82,58 @@ def manual_dup_key(staff_name: str, work_date: Optional[datetime],
             (project_name or "").strip())
 
 
-# ── 福利池（docs/BENEFIT_POOL_PLAN.md）純規則 ────────────────────────
+# ── 福委會（docs/BENEFIT_POOL_PLAN.md）純規則 ────────────────────────
+#
+# owner 2026-08-21：「我有幾個福利池，一個是快樂、一個是進修，這兩塊員工都可以
+# 登記，他們登記後我審核通過，就進公司請款。我每年會撥一筆錢進這個池。」
+# 池的名字是資料不是程式碼 —— 不寫死成枚舉，owner 想再開一個池就自己開。
 
-BENEFIT_CATEGORIES = ("生日禮金", "三節獎金", "婚喪喜慶", "健康檢查",
-                      "教育訓練", "員工旅遊", "其他")
-BENEFIT_KINDS = ("給付", "核銷")
-# 狀態字刻意與零用金同一組（docs/PETTY_CASH_PLAN.md）—— 同一個心智模型，
-# UI 的顏色/排序/文案都能沿用，使用者不用學第二套。
-BENEFIT_STATUSES = ("草稿", "待審", "已核准", "已付款", "退回")
-# 只有這兩個狀態還在本人手上（同零用金 EDITABLE）
-BENEFIT_EDITABLE = ("草稿", "退回")
-# 已經吃掉預算的狀態。🔴 待審**不算** —— 待審就扣，退件後餘額要回沖，
-# 那是一種很容易對不起來的帳（畫面另外顯示「審核中」金額就夠了）。
+BENEFIT_STATUSES = ("待審", "已核准", "已付款", "退回")
+# 還在本人手上、可以自己改自己刪的（送出去之前 owner 還沒看過）
+BENEFIT_EDITABLE = ("待審", "退回")
+# 已經確定要花的錢 —— 餘額扣的是它。🔴 待審**不算**：待審就扣的話退件之後
+# 餘額要回沖，那是一種很容易對不起來的帳（畫面另外顯示「審核中」就夠了）。
 BENEFIT_COMMITTED = ("已核准", "已付款")
-# 進了應付帳款之後就不該再讓人改金額（改了帳上那張應付款會對不起來）
-BENEFIT_LOCKED = ("已核准", "已付款")
+# （「不能改」是 BENEFIT_EDITABLE 的補集 —— 已核准／已付款進了公司請款，
+#   帳上掛著一張應付款，這裡改金額兩邊會對不起來。不另立一個常數。）
 
 
-def benefit_pool_balance(budget, grants) -> dict:
-    """池的用量。`grants` 是 (status, amount) 序列。
+def benefit_pool_balance(fundings, entries) -> dict:
+    """池的用量。`fundings` 是金額序列（每年撥進來的），`entries` 是
+    (status, amount) 序列（員工登記的花費，金額一律正數）。
 
-    三個數字分開回，因為它們回答不同的問題：
+    四個數字分開回，因為它們回答不同的問題：
+      funded   歷年撥進來的總額
       used     已經確定要花的（已核准＋已付款）→ 餘額扣的是它
-      pending  審核中 → 不扣餘額，但主管要看得到「還有多少在路上」
-      balance  budget − used，**可以是負的** —— 超支要看得見，
-               夾成 0 等於把問題藏起來（真的超編了，畫面就該是紅的）。
+      pending  審核中 → 不扣餘額，但 owner 要看得到「還有多少在路上」
+      balance  funded − used，**可以是負的** —— 超支要看得見，
+               夾成 0 等於把問題藏起來（真的花超了，畫面就該是紅的）。
     """
+    funded = sum(int(a or 0) for a in fundings)
     used = pending = 0
-    for status, amount in grants:
+    for status, amount in entries:
         a = int(amount or 0)
         if status in BENEFIT_COMMITTED:
             used += a
         elif status == "待審":
             pending += a
-    budget = int(budget or 0)
-    return {"budget": budget, "used": used, "pending": pending,
-            "balance": budget - used, "over": budget - used < 0}
+    return {"funded": funded, "used": used, "pending": pending,
+            "balance": funded - used, "over": funded - used < 0}
 
 
-def validate_benefit_grant(category, kind, amount, taxable) -> str:
-    """建立/修改一筆動支的欄位檢查。回錯誤訊息字串，空字串＝過關。"""
-    if category not in BENEFIT_CATEGORIES:
-        return f"福利項目不在清單裡：{category}"
-    if kind not in BENEFIT_KINDS:
-        return f"動支方式只能是 {' / '.join(BENEFIT_KINDS)}"
+def validate_benefit_entry(title, amount) -> str:
+    """員工登記一筆的欄位檢查。回錯誤訊息字串，空字串＝過關。
+
+    項目是自由文字（電影名／餐廳／課程名）—— 不做枚舉。分類這件事由**池**
+    承擔（快樂／進修），再加一層項目分類只是逼人每次多選一格。
+    """
+    if not (title or "").strip():
+        return "請填項目（花在什麼上）"
     if int(amount or 0) <= 0:
         return "金額要大於 0"
-    if int(taxable or 0) not in (0, 1):
-        return "是否併入個人所得只能是 0 或 1"
     return ""
 
 
-def benefit_accounting_split(grants) -> dict:
-    """會計交付的兩區分法。`grants` 是 dict 序列（要有 taxable/amount/staff_name/
-    category/staff_id）。
-
-    分區的唯一依據是 `taxable` —— 併入個人所得的那些，會計年底要開扣繳憑單，
-    所以按**人**彙總；不併的是公司費用，按**項目**彙總（會計要的是科目）。
-    兩區的分母不同，這也是為什麼不能只給一張總表。
-    """
-    taxed, company = [], []
-    for g in grants:
-        (taxed if int(g.get("taxable") or 0) == 1 else company).append(g)
-
-    by_staff: dict = {}
-    for g in taxed:
-        k = g.get("staff_id") or g.get("staff_name") or ""
-        row = by_staff.setdefault(k, {"staff_id": g.get("staff_id") or "",
-                                      "staff_name": g.get("staff_name") or "",
-                                      "count": 0, "total": 0})
-        row["count"] += 1
-        row["total"] += int(g.get("amount") or 0)
-
-    by_category: dict = {}
-    for g in company:
-        k = g.get("category") or "其他"
-        row = by_category.setdefault(k, {"category": k, "count": 0, "total": 0})
-        row["count"] += 1
-        row["total"] += int(g.get("amount") or 0)
-
-    return {
-        "personal_income": {
-            "summary": sorted(by_staff.values(), key=lambda r: -r["total"]),
-            "rows": taxed,
-            "total": sum(int(g.get("amount") or 0) for g in taxed),
-        },
-        "company_expense": {
-            "summary": sorted(by_category.values(), key=lambda r: -r["total"]),
-            "rows": company,
-            "total": sum(int(g.get("amount") or 0) for g in company),
-        },
-    }
+def benefit_can_edit(status: str) -> bool:
+    """這筆還在本人手上嗎（可以自己改／自己刪）。"""
+    return (status or "") in BENEFIT_EDITABLE

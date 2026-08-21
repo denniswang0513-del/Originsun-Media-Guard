@@ -1762,49 +1762,64 @@ class JournalOther(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-# ── 福利池（docs/BENEFIT_POOL_PLAN.md）──────────────────────────────
+# ── 福委會（docs/BENEFIT_POOL_PLAN.md）──────────────────────────────
 #
-# 為什麼不塞進零用金那兩張表：零用金的形狀是「員工先墊、憑收據核銷」，
-# 而福利有一半是公司**直接發給**員工（生日禮金／三節／婚喪喜慶），沒有單據可貼；
-# 而且福利多兩件零用金不管的事 —— 額度（先編預算再花）與 taxable（要不要併入
-# 員工個人所得，會計年底開扣繳憑單就看它）。
+# owner 2026-08-21 的原話：「我有幾個福利池，一個是快樂、一個是進修，這兩塊員工
+# 都可以登記，他們登記後我審核通過，就進公司請款。我每年會撥一筆錢進這個池。」
+#
+# 所以是三張表：池（快樂／進修）、撥款（每年進池的那筆）、登記（員工花的那筆）。
+# 餘額 ＝ Σ撥款 − Σ已核准的登記。
+#
+# 為什麼撥款自己一張表、不跟登記混在同一本帶號流水帳（Notion 原本是那樣）：
+# 撥款沒有請款人、不需要審核、也不該進公司請款 —— 跟員工登記是兩種東西。
+# 混在一起的話，員工登記時把金額填成正數就變成一筆「撥款」，池憑空多錢。
 
 class HrBenefitPool(Base):
-    """一筆編列好的福利預算。一年可以有多個（年度福利／尾牙／旅遊…）。"""
+    """一個福利池（快樂／進修）。跨年度滾動 —— 每年撥款進來，餘額往下扣。"""
     __tablename__ = "hr_benefit_pools"
 
     id = Column(String(32), primary_key=True)
     entity = Column(String(16), nullable=False, server_default="parent")  # 兩本帳
-    year = Column(Integer, nullable=False, index=True)
-    name = Column(String(128), nullable=False)
-    budget = Column(Integer, nullable=False, default=0)          # 編列金額
+    name = Column(String(128), nullable=False)                   # 快樂 / 進修
     status = Column(String(16), nullable=False, default="open")  # open/closed
+    sort_order = Column(Integer, nullable=False, default=0)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        Index("idx_benefit_pool_year", "entity", "year"),
+        Index("idx_benefit_pool_entity", "entity", "status"),
     )
 
 
-class HrBenefitGrant(Base):
-    """從池裡撥給某位員工的一筆錢。狀態機與零用金同一組字（刻意）。"""
-    __tablename__ = "hr_benefit_grants"
+class HrBenefitFunding(Base):
+    """撥款：每年公司放進池裡的那筆錢。"""
+    __tablename__ = "hr_benefit_fundings"
+
+    id = Column(String(32), primary_key=True)
+    pool_id = Column(String(32), nullable=False, index=True)   # soft FK → hr_benefit_pools.id
+    year = Column(Integer, nullable=False, index=True)
+    amount = Column(Integer, nullable=False, default=0)
+    fund_date = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class HrBenefitEntry(Base):
+    """員工登記的一筆花費。登記即待審 —— owner 審核通過就進公司請款。"""
+    __tablename__ = "hr_benefit_entries"
 
     id = Column(String(32), primary_key=True)
     pool_id = Column(String(32), nullable=False, index=True)   # soft FK → hr_benefit_pools.id
     staff_id = Column(String(32), nullable=True, index=True)   # soft FK → crm_staff.id
     # 快照：人員改名不該讓歷史單跟著變（同 CrmReimbursement.staff_name）
     staff_name = Column(String(64), nullable=False)
-    category = Column(String(32), nullable=False)              # 生日禮金/三節獎金/...
-    kind = Column(String(8), nullable=False, default="給付")    # 給付（直接發）/核銷（憑收據）
-    amount = Column(Integer, nullable=False, default=0)
-    grant_date = Column(DateTime(timezone=True), nullable=True, index=True)
-    # 🔴 會計交付分區的唯一依據 —— 併入個人所得的年底要開扣繳憑單
-    taxable = Column(Integer, nullable=False, default=0)       # 0/1
-    receipt_url = Column(String(512), nullable=True)           # 核銷型才有
-    status = Column(String(16), nullable=False, default="草稿")  # 草稿/待審/已核准/已付款/退回
+    title = Column(String(255), nullable=False)                # 項目：電影名／餐廳／課程名
+    amount = Column(Integer, nullable=False, default=0)        # 正數（花掉多少）
+    spend_date = Column(DateTime(timezone=True), nullable=True, index=True)
+    receipt_url = Column(String(512), nullable=True)
+    status = Column(String(16), nullable=False, default="待審")  # 待審/已核准/已付款/退回
     # 核准時產的那張應付款。冪等與退回時的「撤掉幽靈負債」都靠這個硬連結
     payment_request_id = Column(String(32), nullable=True, index=True)
     notes = Column(Text, nullable=True)
@@ -1812,6 +1827,6 @@ class HrBenefitGrant(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        Index("idx_benefit_grant_pool_status", "pool_id", "status"),
-        Index("idx_benefit_grant_staff", "staff_id", "status"),
+        Index("idx_benefit_entry_pool_status", "pool_id", "status"),
+        Index("idx_benefit_entry_staff", "staff_id", "status"),
     )

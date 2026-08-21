@@ -504,7 +504,7 @@ function renderWorkspace() {
     $("btn-logout").style.display = "";
     $("hdr-hr").style.display = ws.hr_manager ? "" : "none";
 
-    const staffSections = ["me_profile", "me_projects", "me_finance", "me_leave", "me_petty"];
+    const staffSections = ["me_profile", "me_projects", "me_finance", "me_leave", "me_petty", "me_benefits"];
     $("ws-notice").innerHTML = (!ws.bound && ws.allowed.some(k => staffSections.includes(k)))
         ? `<div class="notice">此帳號尚未綁定人員檔案 — 專案／個人資料／工時卡片暫無資料，請管理員在「使用者管理」完成綁定。</div>` : "";
 
@@ -516,6 +516,7 @@ function renderWorkspace() {
     if (ws.allowed.includes("me_profile"))  grid.appendChild(cardProfile(ws.profile));
     if (ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
     if (ws.allowed.includes("me_petty"))    grid.appendChild(cardPettyCash());
+    if (ws.allowed.includes("me_benefits")) grid.appendChild(cardBenefits());
     if (ws.allowed.includes("media_log"))   grid.appendChild(cardMediaLog());
     if (ws.allowed.includes("proposal_plan")) grid.appendChild(cardProposalPlan());
     // 週誌在 grid 之外自成一區（見 #ws-journal 註解）：只建一次，之後只切顯示
@@ -579,6 +580,87 @@ function cardPettyCash() {
         <div class="meta" style="margin-bottom:12px;">自己墊的錢：現場登記金額與收據、掛專案與會計項目、送出請款，並查看公司要匯給你多少。</div>
         <a class="mini-btn" href="/petty-cash.html"
            style="display:inline-block;text-decoration:none;line-height:1.5;">開啟零用金 ↗</a>`;
+    return card;
+}
+
+// ── 卡：福委會 —— 員工自己登記（owner 2026-08-21「這兩塊員工都可以登記，
+// 他們登記後我審核通過，就進公司請款」）──
+// 直接做在卡片裡而不是另開一頁：只有三個欄位（池／項目／金額），
+// 為它開一頁反而讓人多點一次。版式沿用請假卡（.pf-edit + .inline-row + .row/.pill）
+// —— 這一頁沒有 .mini-input/.mini-table 那種 class，自己發明等於畫面空白。
+// 餘額由後端算（前端自己算會跟後端講不同的話）。
+function cardBenefits() {
+    const card = makeCard("Welfare", "福委會", "", "benefits");
+    const body = card.querySelector(".card-body");
+    body.innerHTML = `<div class="meta">載入中…</div>`;
+
+    const render = (d) => {
+        const pools = d.pools || [];
+        if (!pools.length) {
+            body.innerHTML = `<div class="meta">還沒有開放的福利池。</div>`;
+            return;
+        }
+        const today = new Date().toLocaleDateString("sv-SE");   // 本地日期，不是 UTC
+        const opts = pools.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+        const stats = pools.map(p => `<div class="stat">
+            <div class="num">${money(p.balance)}</div><div class="lbl">${esc(p.name)} 餘額</div></div>`).join("");
+        const mine = (d.entries || []).slice(0, 8).map(e => `
+            <div class="row">
+                <div class="grow">
+                    <div class="title">${esc(e.title)}　${money(e.amount)}</div>
+                    <div class="meta">${esc(e.pool_name)}　${esc(e.spend_date)}</div>
+                </div>
+                <span class="pill${e.status === "待審" ? " hot" : ""}">${esc(e.status)}</span>
+            </div>`).join("");
+        body.innerHTML = `
+            <div class="stats">${stats}</div>
+            <div class="pf-edit" style="border-top:1px solid #f5f5f5;padding-top:12px;padding-bottom:4px;">
+                <div class="inline-row" style="margin-bottom:8px;">
+                    <select id="mb-pool">${opts}</select>
+                    <input type="number" id="mb-amount" placeholder="金額" min="1">
+                </div>
+                <div class="field"><input id="mb-title" placeholder="項目（電影／餐廳／課程）"></div>
+                <div class="inline-row" style="margin-bottom:8px;">
+                    <input type="date" id="mb-date" value="${today}">
+                </div>
+                <button class="mini-btn" id="mb-add">送出登記</button>
+                <span class="err" id="mb-err" style="margin-left:8px;"></span>
+            </div>
+            ${mine || `<div class="meta" style="margin-top:12px;">你還沒有登記過。</div>`}`;
+        body.querySelector("#mb-add").onclick = async () => {
+            const errEl = body.querySelector("#mb-err");
+            errEl.textContent = "";
+            const title = (body.querySelector("#mb-title").value || "").trim();
+            const amount = parseInt(body.querySelector("#mb-amount").value || "0", 10);
+            if (!title || !amount) { errEl.textContent = "請填項目與金額"; return; }
+            const r = await mfetch("/api/v1/crm/benefits/me/entries", {
+                method: "POST",
+                body: JSON.stringify({
+                    pool_id: body.querySelector("#mb-pool").value,
+                    title, amount,
+                    spend_date: body.querySelector("#mb-date").value || "",
+                }),
+            });
+            if (!r.ok) {            // 🔴 失敗一定要出聲，不能靜默
+                let msg = r.status;
+                try { msg = (await r.json()).detail || msg; } catch (_) { /* 非 JSON */ }
+                errEl.textContent = "送出失敗：" + msg;
+                return;
+            }
+            load();
+        };
+    };
+
+    const load = async () => {
+        try {
+            const r = await mfetch("/api/v1/crm/benefits/me");
+            if (!r.ok) { body.innerHTML = `<div class="meta">載入失敗（${r.status}）</div>`; return; }
+            render(await r.json());
+        } catch (_) {
+            body.innerHTML = `<div class="meta">載入失敗</div>`;
+        }
+    };
+    load();
     return card;
 }
 
