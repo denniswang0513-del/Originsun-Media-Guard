@@ -225,6 +225,37 @@ const _HTTP_WHY = {
  * （哪個檔、超過多少）。沒有 detail 就表示回應不是我們送的（多半是中途的
  * 代理層），這時才查表。
  */
+/**
+ * Tab 載入失敗時要顯示什麼。
+ *
+ * 🔴 不要把所有失敗都寫成「需要 X 權限」。2026-08-21 福委會 tab 出現
+ * 「載入失敗（503）— 需要「福委會」與「金額檢視」權限」，實際上是 NAS
+ * Postgres 連線數滿了（`max_connections=50`，機隊把它用光），跟權限完全
+ * 無關 —— 那句話把人（包括我）整整帶偏一輪。狀態碼各有各的意思，講清楚。
+ *
+ * `need` 是這個 tab 真正需要的權限文字，只在 401/403 時才拿出來講。
+ */
+export function tabLoadError(status, need = '') {
+    if (status === 0) {
+        return '連不到伺服器 —— 請確認自己在公司區網，或稍後再試。';
+    }
+    if (status === 401) {
+        return '登入已經過期，請重新整理頁面再登入一次。';
+    }
+    if (status === 403) {
+        return need ? `沒有權限 —— 需要「${need}」，請找管理員開通。`
+                    : '沒有權限，請找管理員開通。';
+    }
+    if (status === 503) {
+        return '資料庫暫時不可用（不是權限問題）—— 通常是連線數滿了，'
+             + '稍等一下重新整理就會恢復。一直不好請告訴管理員。';
+    }
+    if (status >= 500) {
+        return `伺服器錯誤（${status}）—— 這不是你的權限問題，請告訴管理員。`;
+    }
+    return `載入失敗（${status}）`;
+}
+
 export function httpError(status, data) {
     const d = data && data.detail;
     const detail = typeof d === 'string' ? d : (d && d.reason) || '';

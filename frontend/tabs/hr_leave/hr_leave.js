@@ -3,6 +3,7 @@
 // API: /api/v1/hr/leave*（管理端）；員工自助在 /my.html 走 /api/v1/me/leave。
 
 import { createSortable, sortableTh, enumIndex } from '../crm/crm-utils.js';
+import { tabLoadError } from '../../js/shared/utils.js';
 
 const LEAVE_TYPES = ['特休', '病假', '事假', '公假', '婚假', '喪假', '其他'];
 const STATUS_PILL = { '待審': 'pending', '已核准': 'approved', '已退回': 'rejected' };
@@ -32,7 +33,8 @@ async function _load() {
         hfetch('/api/v1/hr/leave/quota?year=' + _filters.year),
     ]);
     if (!lr.ok || !qr.ok) {
-        el('hl-content').innerHTML = `<div class="hl-empty">載入失敗（${lr.status}/${qr.status}）— 需要「請補修」權限</div>`;
+        el('hl-content').innerHTML =
+            `<div class="hl-empty">${tabLoadError(lr.ok ? qr.status : lr.status, '請補修')}</div>`;
         return;
     }
     _items = (await lr.json()).items || [];

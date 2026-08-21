@@ -7,6 +7,8 @@
 // （core.hr_logic.benefit_pool_balance，有單元測試）。前端自己算一份的話，
 // 「待審算不算」這種判定就會有兩個答案，而畫面上那個一定是錯的那個。
 
+import { tabLoadError } from '../../js/shared/utils.js';
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const el = (id) => document.getElementById(id);
@@ -54,7 +56,7 @@ async function _load() {
     ]);
     if (!pr.ok) {
         el('hb-content').innerHTML =
-            `<div class="hb-empty">載入失敗（${pr.status}）— 需要「福委會」與「金額檢視」權限</div>`;
+            `<div class="hb-empty">${esc(tabLoadError(pr.status, '福委會」與「金額檢視'))}</div>`;
         return;
     }
     _pools = (await pr.json()).items || [];

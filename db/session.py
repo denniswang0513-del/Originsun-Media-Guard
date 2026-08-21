@@ -39,6 +39,31 @@ def get_database_url() -> str:
         return _DEFAULT_DB_URL
 
 
+def _pool_sizes():
+    """(pool_size, max_overflow)。**master 才需要大池，機隊不需要。**
+
+    🔴 這是 2026-08-21 那次 503 的根因：NAS Postgres `max_connections=50`，
+    實測常態 46 條在用 —— 機隊 9 台每台常態握 5 條閒置（尖峰可到 15），
+    加上 master、dev、NAS 官網容器，一有突發就
+    `asyncpg.TooManyConnectionsError: sorry, too many clients already`，
+    而使用者在畫面上看到的是 503（還被前端寫成「需要權限」）。
+
+    機隊 agent 對 DB 的用量是「狀態回報 + 任務歷史」等級，本來就不需要
+    五條熱連線；master 要服務整個 UI（CRM／財務／官網），維持原本的 5/10。
+
+    判定用 `core.topology.is_master_machine()`（同一個權威來源，不要另立
+    第二套判準）。任何例外都落到小池 —— 猜錯方向要往「省連線」猜，
+    猜成大池會把整個機隊一起拖垮。
+    """
+    try:
+        from core.topology import is_master_machine
+        if is_master_machine():
+            return 5, 10
+    except Exception:
+        pass
+    return 2, 3
+
+
 async def init_db() -> bool:
     """Initialize the async engine and session factory.
 
@@ -49,10 +74,11 @@ async def init_db() -> bool:
     global _engine, _session_factory
     try:
         url = get_database_url()
+        pool, overflow = _pool_sizes()
         _engine = create_async_engine(
             url,
-            pool_size=5,
-            max_overflow=10,
+            pool_size=pool,
+            max_overflow=overflow,
             pool_timeout=5,
             pool_recycle=180,        # recycle idle conns >3min old, BEFORE a NAT/router
                                      # silently drops them (the black-hole that wedged 8000).
