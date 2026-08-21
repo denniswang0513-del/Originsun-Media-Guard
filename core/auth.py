@@ -172,6 +172,12 @@ ALL_MODULES = [
     # 員工自助登記（/my.html 的福委會卡片）。own-scope 後端本來就只認登入＋
     # 綁定人員，這把鑰匙管的是 UI 入口 —— 同 me_petty 的作法。
     'me_benefits',
+    # ComfyUI（GPU 機 originsun/100.125.114.5 上的影像生成）。橫切能力鍵、非 tab
+    # —— 服務不在這個 app 裡，是 GPU 機上的獨立行程，前面掛一支閘門
+    # （D:\AI\authgate\authgate.py）用同一把 jwt_secret 離線驗 cookie 裡的 token，
+    # 認的就是這個 key。刻意獨立成一把鑰匙而不是沿用 transcode/drone_meta：
+    # ComfyUI 的自訂節點等於那台機器上的任意程式碼執行，不該隨後期製作權限外溢。
+    'comfyui',
 ]
 
 
