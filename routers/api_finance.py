@@ -69,7 +69,10 @@ TREATMENTS = {"direct_expense", "direct_income", "ap_settlement", "ar_settlement
               "transfer", "tax_vat", "tax_income", "advance", "passthrough", "loan"}
 ADJ_TYPES = {"opening", "correction", "owner_in", "owner_out",
              "accountant", "writeoff", "other"}
-ACCT_KINDS = {"bank", "cash"}
+# bank=銀行帳戶 / cash=零用金 / shareholder_*=股東往來（owner 2026-08-21）。
+# 股東往來的兩種在報表上落點不同：借款→負債、投資款→權益
+# （規則正本 core.finance_logic.SHAREHOLDER_KINDS + split_bank_lines）。
+ACCT_KINDS = {"bank", "cash", "shareholder_loan", "shareholder_capital"}
 LOAN_PAY_CATEGORY = "貸款繳款"  # 對映 (cash, 貸款繳款) → 2400/loan（seed_finance）
 
 

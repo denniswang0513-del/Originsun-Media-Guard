@@ -39,6 +39,7 @@ from core.finance_logic import (
     ar_open_invoices,
     ar_overdue_amount,
     bank_balances_asof,
+    split_bank_lines,
     bank_fee_total,
     build_balance_sheet,
     build_cashflow,
@@ -273,8 +274,13 @@ async def compute_live(session, months, inputs=None, adv=None,
     cum_pnl = pnl if cum_months == months else build_pnl(cum_months, **kw)
     warn = statement_warnings(inputs["cash_entries"], inputs["payments"],
                               inputs["cat_map"], months)
-    bank_lines = bank_balances_asof(inputs["bank_accounts"],
-                                    inputs["cash_entries"], as_of)
+    # 🔴 股東往來帳戶不是現金 —— 拆出來分別進負債（借款）與權益（投資款）。
+    # 混在 bank_lines 裡的話，現金會憑空多出股東墊付的錢（那些錢從來沒進過
+    # 公司的銀行帳戶），資產負債表與現金流量表全部失真。
+    _split = split_bank_lines(
+        inputs["bank_accounts"],
+        bank_balances_asof(inputs["bank_accounts"], inputs["cash_entries"], as_of))
+    bank_lines = _split["cash"]
     ar_rows = ar_open_invoices(inputs["invoices"], baseline, as_of)
     ap_rows = ap_open_payments(inputs["payments"], inputs["cat_map"],
                                baseline, as_of)
@@ -289,10 +295,12 @@ async def compute_live(session, months, inputs=None, adv=None,
         vat_payable=vat_cum["net"],
         loan_rows=loan_outstanding_rows(inputs["loans"],
                                         inputs["loan_payments"], as_of),
-        cumulative_net=cum_pnl["net"]["amount"], note_counts=warn)
-    opening_lines = bank_balances_asof(inputs["bank_accounts"],
-                                       inputs["cash_entries"],
-                                       shift_month(months[0], -1))
+        cumulative_net=cum_pnl["net"]["amount"], note_counts=warn,
+        shareholder_loan_lines=_split["shareholder_loan"],
+        shareholder_capital_lines=_split["shareholder_capital"])
+    opening_lines = split_bank_lines(inputs["bank_accounts"], bank_balances_asof(
+        inputs["bank_accounts"], inputs["cash_entries"],
+        shift_month(months[0], -1)))["cash"]
     cf = build_cashflow(months, opening=_cf_side(opening_lines),
                         closing=_cf_side(bank_lines),
                         cash_entries=inputs["cash_entries"],
@@ -334,10 +342,11 @@ async def statements_for_period(session, months, entity: str = "parent") -> dict
         cf_parts.append(live["cf"])
     pnl = merge_pnl(pnl_parts, len(months))
     # CF 期初/期末餘額永遠 live 重算（推導餘額不受鎖月影響）
-    opening = _cf_side(bank_balances_asof(
-        inputs["bank_accounts"], inputs["cash_entries"], shift_month(months[0], -1)))
-    closing = _cf_side(bank_balances_asof(
-        inputs["bank_accounts"], inputs["cash_entries"], months[-1]))
+    def _cash_only(m):
+        return split_bank_lines(inputs["bank_accounts"], bank_balances_asof(
+            inputs["bank_accounts"], inputs["cash_entries"], m))["cash"]
+    opening = _cf_side(_cash_only(shift_month(months[0], -1)))
+    closing = _cf_side(_cash_only(months[-1]))
     cf = merge_cf(cf_parts, opening, closing)
     if months[-1] in snaps:
         bs = snaps[months[-1]]["bs"]
@@ -687,8 +696,9 @@ async def dashboard_summary(session, months, period: str = "",
     trend = {"months": trend_months, "series": series}
 
     # cash：期末各帳戶推導餘額 + 近 3 月 net 均 → runway
-    bank_lines = bank_balances_asof(inputs["bank_accounts"],
-                                    inputs["cash_entries"], as_of)
+    # 🔴 股東往來不算現金 —— 算進去 runway 會虛長（那些錢不在公司帳上）
+    bank_lines = split_bank_lines(inputs["bank_accounts"], bank_balances_asof(
+        inputs["bank_accounts"], inputs["cash_entries"], as_of))["cash"]
     cash_total = sum(int(b.get("amount") or 0) for b in bank_lines)
     recent = series[-3:]  # 近 3 月（不足取現有月）
     avg_net = round(sum(s["net"] for s in recent) / len(recent)) if recent else 0

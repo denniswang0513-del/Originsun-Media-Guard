@@ -6,7 +6,7 @@
  *       → 月底對帳（POST /reconciliations + 歷史表）→ 進階摺疊：帳務調整。
  * 後端 API prefix /api/v1/finance（fin-utils.finFetch）。
  */
-import { finFetch, finEntity, esc, fmtNum, finToast, finSubviewBoot, todayStr, metricCard, ACCT_KIND_OPTIONS } from '../fin-utils.js';
+import { finFetch, finEntity, esc, fmtNum, finToast, finSubviewBoot, todayStr, metricCard, ACCT_KIND_OPTIONS, isShareholderAcct } from '../fin-utils.js';
 import { createSortable, sortableTh, enumIndex } from '../../crm/crm-utils.js';   // 點欄頭排序（通用排序器）
 import { bearerHeader } from '../../../js/shared/utils.js';   // 送 FormData 時不能自帶 Content-Type
 
@@ -191,14 +191,67 @@ function _card(a) {
     </div>`;
 }
 
-/** 預設帳戶：is_default 且啟用中；沒有就取第一個啟用帳戶；都沒有回 null */
+/** 股東往來卡：語意跟銀行帳戶相反 —— 數字是**公司欠這位股東多少**，不是公司有多少錢。
+ *  正數＝還欠著、負數＝股東反而欠公司（多領了）。顏色刻意不用綠（綠會讀成「有錢」）。 */
+function _shCard(a) {
+    const inactive = a.active === false;
+    const owed = a.current_balance || 0;
+    return `
+    <div style="background:#241f18;border:1px solid #4a3a20;border-radius:8px;padding:14px 16px;min-width:230px;flex:0 1 280px;${inactive ? 'opacity:.55;' : ''}">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <span style="font-weight:600;color:#eee;">${esc(a.name)}</span>
+            <span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#3a2d14;color:#fbbf24;">${esc(KIND_LABEL[a.acct_kind] || '')}</span>
+            ${inactive ? '<span style="font-size:10px;color:#f87171;border:1px solid #7f1d1d;border-radius:8px;padding:1px 6px;">已停用</span>' : ''}
+        </div>
+        <div style="font-size:22px;font-weight:700;color:${owed < 0 ? '#93c5fd' : '#fbbf24'};margin-top:8px;">$${fmtNum(owed)}</div>
+        <div style="color:#888;font-size:11px;margin-top:2px;">${owed < 0 ? '股東欠公司' : '公司欠股東'}</div>
+        <div style="color:#666;font-size:11px;margin-top:2px;">期初 $${fmtNum(a.opening_balance)}${a.opening_date ? '（' + esc(String(a.opening_date).substring(0, 10)) + '）' : ''}</div>
+        ${a.note ? `<div style="color:#777;font-size:11px;margin-top:4px;">${esc(a.note)}</div>` : ''}
+        <div style="display:flex;gap:6px;margin-top:10px;">
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finBank.edit('${esc(a.id)}')">編輯</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finBank.toggleActive('${esc(a.id)}')">${inactive ? '啟用' : '停用'}</button>
+        </div>
+    </div>`;
+}
+
+function _shareholderSection() {
+    const rows = _accounts.filter(a => isShareholderAcct(a.acct_kind));
+    const owed = rows.reduce((n, a) => n + (a.current_balance || 0), 0);
+    return `
+    <div style="background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:16px;margin-bottom:16px;">
+        <h3 style="margin:0 0 4px;color:#eee;font-size:15px;">🤝 股東往來</h3>
+        <p style="color:#888;font-size:12px;margin:0 0 12px;">
+            公司跟股東之間的錢。<b>股東墊付或把錢放進公司 → 數字變大</b>（公司欠款增加）；
+            <b>公司匯還股東 → 數字變小</b>。這裡的錢<b>不算公司現金</b> ——
+            報表上借款進負債、投資款進權益。
+        </p>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:stretch;">
+            ${rows.length ? rows.map(_shCard).join('')
+              : '<div style="color:#666;font-size:12px;padding:10px 0;">還沒有股東往來帳戶 —— 用右邊那顆新增，類型選「股東往來」。</div>'}
+            <button class="crm-btn crm-btn-secondary" style="min-width:150px;min-height:120px;border-style:dashed;"
+                    onclick="window._finBank.openAdd('shareholder_loan')">+ 新增股東往來</button>
+        </div>
+        ${rows.length ? `<div style="color:#888;font-size:12px;margin-top:10px;">
+            合計 公司欠股東 <b style="color:#fbbf24;">$${fmtNum(owed)}</b></div>` : ''}
+    </div>`;
+}
+
+/** 啟用中的**真銀行**帳戶（排除股東往來）。
+ *  對帳單匯入、分類規則、貸款扣款、對帳工作台都只該看到這些 ——
+ *  股東往來沒有銀行對帳單、也不會拿來扣貸款。收支明細那邊的帳戶下拉不受此限
+ *  （股東墊付的費用本來就要掛到股東帳戶上）。 */
+function _bankOnly() {
+    return _accounts.filter(a => a.active !== false && !isShareholderAcct(a.acct_kind));
+}
+
+/** 預設帳戶：is_default 且啟用中；沒有就取第一個啟用的銀行帳戶；都沒有回 null */
 function _defaultAcct() {
-    const actives = _accounts.filter(a => a.active !== false);
-    return _accounts.find(a => a.is_default && a.active !== false) || actives[0] || null;
+    const banks = _bankOnly();
+    return banks.find(a => a.is_default) || banks[0] || null;
 }
 
 function _renderShell() {
-    const actives = _accounts.filter(a => a.active !== false);
+    const actives = _bankOnly();
     const def = _defaultAcct();
 
     const unassignedBar = (_unassigned > 0) ? `
@@ -222,10 +275,14 @@ function _renderShell() {
         ${unassignedBar}
 
         <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:stretch;margin-bottom:20px;">
-            ${_accounts.map(_card).join('')}
+            ${_accounts.filter(a => !isShareholderAcct(a.acct_kind)).map(_card).join('')}
             <button class="crm-btn crm-btn-secondary" style="min-width:150px;min-height:120px;border-style:dashed;"
                     onclick="window._finBank.openAdd()">+ 新增帳戶</button>
         </div>
+
+        <!-- 股東往來：跟銀行帳戶分開列，因為它**不是現金**而是公司欠股東的錢。
+             混在上面那排的話，「公司有多少錢」這個問題會被答錯。 -->
+        ${_shareholderSection()}
 
         <!-- 銀行貸款（階段四） -->
         <div id="finbank-loans-section" style="background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:16px;margin-bottom:16px;">
@@ -411,14 +468,15 @@ function _renderShell() {
 
 // ── 帳戶 CRUD ───────────────────────────────────────────────
 
-function _openModal(a) {
+function _openModal(a, defaultKind) {
     _editingId = a ? a.id : null;
     const g = (id) => _c.querySelector('#finbank-f-' + id);
-    _c.querySelector('#finbank-modal-title').textContent = a ? '編輯帳戶' : '新增帳戶';
+    _c.querySelector('#finbank-modal-title').textContent =
+        a ? '編輯帳戶' : (defaultKind ? '新增股東往來帳戶' : '新增帳戶');
     g('name').value = a ? (a.name || '') : '';
     g('bank_name').value = a ? (a.bank_name || '') : '';
     g('account_no').value = a ? (a.account_no || '') : '';
-    g('acct_kind').value = a ? (a.acct_kind || 'bank') : 'bank';
+    g('acct_kind').value = a ? (a.acct_kind || 'bank') : (defaultKind || 'bank');
     g('opening_balance').value = a ? (a.opening_balance ?? 0) : 0;
     g('is_default').checked = !!(a && a.is_default);
     g('note').value = a ? (a.note || '') : '';
@@ -427,7 +485,8 @@ function _openModal(a) {
     _c.querySelector('#finbank-modal').style.display = 'flex';
 }
 
-_fb.openAdd = () => _openModal(null);
+// 從股東往來那一區按新增時預選「股東往來－借款」—— 少一次選錯的機會
+_fb.openAdd = (defaultKind) => _openModal(null, defaultKind);
 
 _fb.edit = (id) => {
     const a = _accounts.find(x => String(x.id) === String(id));
@@ -498,7 +557,7 @@ function _loanById(id) {
 
 /** 啟用中帳戶下拉選項（貸款扣款帳戶 / 記繳款帳戶共用） */
 function _loanAcctOptions(selectedId, emptyLabel) {
-    const actives = _accounts.filter(a => a.active !== false);
+    const actives = _bankOnly();
     return `<option value="">${esc(emptyLabel)}</option>` + actives.map(a =>
         `<option value="${esc(a.id)}"${String(a.id) === String(selectedId) ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
 }
@@ -1475,7 +1534,7 @@ _fb.adjDel = async (id) => {
 
 _fb.stmtOpen = async () => {
     _stmtPreview = null;
-    const opts = _accounts.filter(a => a.active !== false).map(a =>
+    const opts = _bankOnly().map(a =>
         `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
     _wbModal('匯入銀行對帳單', `
         <p style="color:#888;font-size:12px;margin:0 0 10px;">
@@ -1783,8 +1842,7 @@ _fb.rulesOpen = async () => {
 };
 
 function _rulesRender() {
-    const acctOpts = '<option value="">所有帳戶</option>' + _accounts
-        .filter(a => a.active !== false)
+    const acctOpts = '<option value="">所有帳戶</option>' + _bankOnly()
         .map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
     const catOpts = '<option value="">— 選類別 —</option>'
         + (_cashCats || []).map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');

@@ -77,7 +77,15 @@ export const TREATMENT_OPTIONS = [
 export const ACCT_KIND_OPTIONS = [
     { v: 'bank', label: '銀行帳戶' },
     { v: 'cash', label: '零用金' },
+    // 股東往來（owner 2026-08-21）。餘額＝公司欠該股東多少。
+    // 🔴 這兩種**不是現金** —— 報表上借款進負債、投資款進權益
+    //    （規則正本 core.finance_logic.split_bank_lines）。
+    { v: 'shareholder_loan', label: '股東往來－借款' },
+    { v: 'shareholder_capital', label: '股東往來－投資款' },
 ];
+// 哪些 acct_kind 是股東往來（鏡射 core.finance_logic.SHAREHOLDER_KINDS）
+export const SHAREHOLDER_KINDS = ['shareholder_loan', 'shareholder_capital'];
+export const isShareholderAcct = (k) => SHAREHOLDER_KINDS.includes(k || '');
 
 /**
  * 子視圖開場殼：loading → Promise.all → isCurrent 防競態 → 失敗畫重試鈕。

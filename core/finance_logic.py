@@ -983,6 +983,43 @@ def ap_open_payments(payments, cat_map=None, baseline_month=None, as_of_month=No
     return out
 
 
+# ── 股東往來（owner 2026-08-21）─────────────────────────────────
+#
+# owner：「多三個帳戶，是股東向的借款或是股東放在公司裡的錢。需要股東支付的費用
+# 可以從這裡扣款，匯給股東的費用這裡則會增加。」方向已與 owner 確認：
+#
+#     餘額 ＝ **公司欠股東多少**
+#     股東墊付／把錢放進公司 → deposit → 餘額增加（公司欠款變多）
+#     公司匯還股東           → expense → 餘額減少
+#
+# 🔴 這種帳戶**不是現金**。混進 bank_lines 的話，資產負債表的現金會憑空多出
+# 股東墊付的錢（那些錢從來沒進過公司的銀行帳戶），三表全部失真。
+#
+# 借款與投資款分兩種（owner「分開沒問題」），因為它們在報表上落在不同區塊：
+#     shareholder_loan    股東借款   → **負債**（其他應付款－股東往來）
+#     shareholder_capital 股東投資款 → **權益**（股東投入的資本）
+# 分不清楚時用借款 —— 未經增資登記的錢本來就還是往來，不是股本。
+SHAREHOLDER_KINDS = ("shareholder_loan", "shareholder_capital")
+
+
+def is_shareholder_kind(kind) -> bool:
+    return (kind or "") in SHAREHOLDER_KINDS
+
+
+def split_bank_lines(bank_accounts, lines) -> dict:
+    """把 bank_balances_asof 的結果依帳戶性質拆三堆。
+
+    現金／股東借款／股東投資款 落在資產負債表的**三個不同區塊**，
+    一起丟進現金就是把負債與權益當成資產。
+    """
+    kind_of = {b.get("id"): (b.get("acct_kind") or "bank") for b in bank_accounts}
+    out = {"cash": [], "shareholder_loan": [], "shareholder_capital": []}
+    for ln in lines:
+        k = kind_of.get(ln.get("id"), "bank")
+        out[k if k in SHAREHOLDER_KINDS else "cash"].append(ln)
+    return out
+
+
 def bank_balances_asof(bank_accounts, cash_entries, as_of_month: str) -> list:
     """各帳戶推導餘額（期初 + entry_date 月 ≤ as_of 的掛帳流水）。
 
@@ -1248,7 +1285,9 @@ def merge_pnl(parts, n_months: int) -> dict:
 def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
                         advance_balance=0, equipment=(), adjustments=(),
                         payable_total=0, vat_payable=0, loan_rows=(),
-                        cumulative_net=0, note_counts=None) -> dict:
+                        cumulative_net=0, note_counts=None,
+                        shareholder_loan_lines=(),
+                        shareholder_capital_lines=()) -> dict:
     """資產負債表（as_of = 期末月月底；推導式，非複式簿記）。
 
     - 資產：各銀行帳戶推導餘額分列 + 應收帳款 + 員工往來-預支（未結清預支
@@ -1287,6 +1326,12 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
          "amount": int(payable_total or 0), "drill": "payable"},
         {"key": "vat_payable", "label": "應付營業稅", "amount": int(vat_payable or 0)},
     ]
+    # 股東借款逐筆分列（owner 2026-08-21）。餘額＝公司欠該股東多少 —— 是負債，
+    # 🔴 不可以混進上面的 bank_lines（那會讓現金憑空多出股東墊付的錢）。
+    liab_current += [{"key": f"sh_loan:{x.get('id')}",
+                      "label": f"股東往來－{x.get('name') or '?'}",
+                      "amount": int(x.get("amount") or 0)}
+                     for x in shareholder_loan_lines]
     # 非流動負債：銀行貸款逐筆分列（loan_outstanding_rows 已保證 key/label/amount；
     # BS 行為推導值無明細 drill）
     liab_noncurrent = [{"key": x["key"], "label": x["label"], "amount": x["amount"]}
@@ -1312,6 +1357,11 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
         else:
             other += amt
     equity_lines = [
+        # 股東投資款＝股東投入的資本，落在權益不是負債（與借款的差別就在這裡）
+        *[{"key": f"sh_cap:{x.get('id')}",
+           "label": f"股東投資款－{x.get('name') or '?'}",
+           "amount": int(x.get("amount") or 0)}
+          for x in shareholder_capital_lines],
         {"key": "opening", "label": "期初調整", "amount": opening},
         {"key": "owner", "label": "業主往來", "amount": owner},
         {"key": "retained", "label": "累積損益", "amount": int(cumulative_net or 0)},
