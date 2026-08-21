@@ -90,6 +90,13 @@ MONEY_FIELDS = frozenset({
     "bank_fee", "annual_rate",
     # 器材（api_equipment，同上理由）
     "purchase_cost",
+    # 福利池編列金額（hr_benefit_pools.budget）。整個 /benefits 端點群本來就有
+    # money_dep（沒 money_view 直接 403），列在這裡是為了那句「錢的欄位名有一份
+    # 完整清單」。⚠ 只加 budget（model 欄位、掃描器要求表態的那個）；池的
+    # used/pending/balance 是算出來的鍵，刻意不進這份清單 —— "balance" 太通用，
+    # 預支款結算（crm_logic）與對帳單解析都在用同一個字，加進去會抹到不相干的
+    # 回應。那幾個鍵的保護靠端點層：/benefits 全族都有 money_dep。
+    "budget",
 })
 
 # ── 名字像錢、但**刻意不抹**的欄位 ────────────────────────────

@@ -165,6 +165,10 @@ ALL_MODULES = [
     # ⚠ 一律 append 在尾端 — modules[0] 決定 admin 落地頁。
     'finance_partner',
     'finance_mine',
+    # 福利池（人事管理 › 福利池；docs/BENEFIT_POOL_PLAN.md）。
+    # 這把只管 tab 入口 —— 池與動支的金額本來就受 money_view 抹除層管，
+    # 審核／匯款另外要 finance_approve（審的是別人的錢，同零用金）。
+    'hr_benefits',
 ]
 
 

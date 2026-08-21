@@ -1294,3 +1294,36 @@ class BankImportRulePayload(BaseModel):
 class CashInvoiceLinksPayload(BaseModel):
     """整組取代某筆收款的發票分配 —— 送空 items 就是全部解除。"""
     items: List[CashInvoiceLink] = []
+
+
+# ── 福利池（docs/BENEFIT_POOL_PLAN.md）───────────────────────────────
+
+class BenefitPoolPayload(BaseModel):
+    """福利池：一筆編列好的預算。
+
+    `entity` 預設 **None** 不是 'parent' —— 給實體值當預設的話，舊前端整包
+    model_dump 寫回會把另一本帳的列洗過去（docs/LEDGER_ENTITY_PLAN.md §2.3
+    的教訓，兩本帳的 payload 一律這樣）。
+    """
+    year: int = 0                   # 0 → 今年
+    name: str = ""
+    budget: int = 0
+    status: str = "open"            # open/closed
+    notes: str = ""
+    entity: Optional[str] = None
+
+
+class BenefitGrantPayload(BaseModel):
+    """福利動支：從池裡撥給某位員工的一筆錢。
+
+    `staff_id` 在這裡是**可以**帶的（與零用金 PettyExpensePayload 相反）——
+    福利多半是 HR 代所有人登記，不是每個人自己來。本人自助那條路另有端點，
+    在那裡才會忽略這欄、只從 token 解。
+    """
+    staff_id: str = ""
+    category: str = "其他"           # core.hr_logic.BENEFIT_CATEGORIES
+    kind: str = "給付"               # 給付（直接發）/核銷（憑收據）
+    amount: int = 0
+    grant_date: str = ""            # YYYY-MM-DD，空 → 今天
+    taxable: int = 0                # 0/1 是否併入個人所得
+    notes: str = ""

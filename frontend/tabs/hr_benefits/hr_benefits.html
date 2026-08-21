@@ -1,0 +1,69 @@
+<!--
+    hr_benefits.html — 人事管理 › 福利池 Tab 殼（docs/BENEFIT_POOL_PLAN.md）
+    內容由 hr_benefits.js render 進 #hb-content。設計鐵則：UI 無 emoji（owner 2026-07-17）。
+    樣式刻意抄 hr_leave（同一個群組的兩個 tab 長得不一樣會很怪）。
+-->
+<div id="hb-root">
+    <div id="hb-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+</div>
+
+<style>
+    #hb-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #hb-root .hb-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    #hb-root .hb-card {
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        padding: 14px 16px; margin-bottom: 14px;
+    }
+    #hb-root .hb-card h3 { color: #ddd; font-size: 14px; margin: 0 0 10px 0; font-weight: 600; }
+    #hb-root table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    #hb-root th {
+        text-align: left; color: #888; font-weight: 500; padding: 6px 8px;
+        border-bottom: 1px solid #333; white-space: nowrap;
+    }
+    #hb-root td { padding: 6px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc; }
+    #hb-root td.num, #hb-root th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    #hb-root .hb-btn {
+        background: #3b82f6; color: #fff; border: none; padding: 6px 12px;
+        border-radius: 4px; font-size: 12px; cursor: pointer;
+    }
+    #hb-root .hb-btn:hover { background: #2563eb; }
+    #hb-root .hb-btn.ok { background: #16a34a; }
+    #hb-root .hb-btn.ok:hover { background: #15803d; }
+    #hb-root .hb-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    #hb-root .hb-btn.ghost:hover { background: #333; }
+    #hb-root .hb-btn.danger { background: transparent; border: 1px solid rgba(239,68,68,.4); color: #f87171; }
+    #hb-root .hb-btn.danger:hover { background: rgba(239,68,68,.08); }
+    #hb-root .hb-pill {
+        display: inline-block; font-size: 11px; border-radius: 999px; padding: 2px 10px;
+        border: 1px solid #444; color: #aaa; white-space: nowrap;
+    }
+    #hb-root .hb-pill.draft { border-color: #444; color: #999; }
+    #hb-root .hb-pill.pending { border-color: #a16207; color: #fbbf24; }
+    #hb-root .hb-pill.approved { border-color: #1d4ed8; color: #93c5fd; }
+    #hb-root .hb-pill.paid { border-color: #166534; color: #4ade80; }
+    #hb-root .hb-pill.rejected { border-color: #7f1d1d; color: #f87171; }
+    /* 併入個人所得的標記 —— 會計最在意的一欄，要一眼看得到 */
+    #hb-root .hb-tax { border-color: #7c3aed; color: #c4b5fd; }
+    #hb-root select, #hb-root input, #hb-root textarea {
+        background: #1a1a1a; border: 1px solid #333; color: #ddd; border-radius: 4px;
+        padding: 6px 8px; font-size: 12.5px;
+    }
+    #hb-root input[type="number"] { width: 110px; }
+    #hb-root .hb-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    #hb-root .hb-note { color: #777; font-size: 11.5px; margin-top: 8px; line-height: 1.6; }
+    #hb-root .hb-empty { color: #666; padding: 14px 0; text-align: center; font-size: 12.5px; }
+    /* 池的用量條 */
+    #hb-root .hb-bar { height: 6px; background: #1a1a1a; border-radius: 3px; overflow: hidden; margin-top: 6px; }
+    #hb-root .hb-bar > i { display: block; height: 100%; background: #3b82f6; }
+    #hb-root .hb-bar > i.over { background: #ef4444; }
+    #hb-root .hb-pools { display: flex; flex-wrap: wrap; gap: 10px; }
+    #hb-root .hb-pool {
+        background: #1e1e1e; border: 1px solid #333; border-radius: 6px;
+        padding: 10px 12px; min-width: 210px; cursor: pointer;
+    }
+    #hb-root .hb-pool.sel { border-color: #3b82f6; background: #1a2436; }
+    #hb-root .hb-pool .n { color: #ddd; font-size: 13px; font-weight: 600; }
+    #hb-root .hb-pool .m { color: #888; font-size: 11.5px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+    #hb-root .hb-pool .m b { color: #eee; font-weight: 600; }
+    #hb-root .hb-pool .m b.over { color: #f87171; }
+</style>

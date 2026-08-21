@@ -22,6 +22,7 @@ from . import briefs         # noqa: F401  提案的企劃書（多版；路徑�
 from . import proposal_quotes  # noqa: F401  提案的報價單分頁（上傳多版 + AI 分析；依賴 proposal_assets）
 from . import proposal_meetings  # noqa: F401  提案的會議記錄分頁（純人寫，無 AI）
 from . import petty          # noqa: F401  零用金請款（路徑獨立 /petty，順序無關）
+from . import benefits       # noqa: F401  福利池（路徑獨立 /benefits，順序無關）
 
 from fastapi import APIRouter  # noqa: E402
 

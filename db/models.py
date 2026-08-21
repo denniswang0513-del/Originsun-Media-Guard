@@ -1760,3 +1760,58 @@ class JournalOther(Base):
     content = Column(Text)
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── 福利池（docs/BENEFIT_POOL_PLAN.md）──────────────────────────────
+#
+# 為什麼不塞進零用金那兩張表：零用金的形狀是「員工先墊、憑收據核銷」，
+# 而福利有一半是公司**直接發給**員工（生日禮金／三節／婚喪喜慶），沒有單據可貼；
+# 而且福利多兩件零用金不管的事 —— 額度（先編預算再花）與 taxable（要不要併入
+# 員工個人所得，會計年底開扣繳憑單就看它）。
+
+class HrBenefitPool(Base):
+    """一筆編列好的福利預算。一年可以有多個（年度福利／尾牙／旅遊…）。"""
+    __tablename__ = "hr_benefit_pools"
+
+    id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="parent")  # 兩本帳
+    year = Column(Integer, nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    budget = Column(Integer, nullable=False, default=0)          # 編列金額
+    status = Column(String(16), nullable=False, default="open")  # open/closed
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_benefit_pool_year", "entity", "year"),
+    )
+
+
+class HrBenefitGrant(Base):
+    """從池裡撥給某位員工的一筆錢。狀態機與零用金同一組字（刻意）。"""
+    __tablename__ = "hr_benefit_grants"
+
+    id = Column(String(32), primary_key=True)
+    pool_id = Column(String(32), nullable=False, index=True)   # soft FK → hr_benefit_pools.id
+    staff_id = Column(String(32), nullable=True, index=True)   # soft FK → crm_staff.id
+    # 快照：人員改名不該讓歷史單跟著變（同 CrmReimbursement.staff_name）
+    staff_name = Column(String(64), nullable=False)
+    category = Column(String(32), nullable=False)              # 生日禮金/三節獎金/...
+    kind = Column(String(8), nullable=False, default="給付")    # 給付（直接發）/核銷（憑收據）
+    amount = Column(Integer, nullable=False, default=0)
+    grant_date = Column(DateTime(timezone=True), nullable=True, index=True)
+    # 🔴 會計交付分區的唯一依據 —— 併入個人所得的年底要開扣繳憑單
+    taxable = Column(Integer, nullable=False, default=0)       # 0/1
+    receipt_url = Column(String(512), nullable=True)           # 核銷型才有
+    status = Column(String(16), nullable=False, default="草稿")  # 草稿/待審/已核准/已付款/退回
+    # 核准時產的那張應付款。冪等與退回時的「撤掉幽靈負債」都靠這個硬連結
+    payment_request_id = Column(String(32), nullable=True, index=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_benefit_grant_pool_status", "pool_id", "status"),
+        Index("idx_benefit_grant_staff", "staff_id", "status"),
+    )
