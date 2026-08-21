@@ -234,11 +234,11 @@ window._payableSaveMonth = async (paymentId) => {
 
 window._payableSinglePay = async (btn, paymentId) => {
     if (!confirm('確定標記此筆為已付款？')) return;
-    const today = today();
+    const payDay = today();
     try {
         await _fetch('/payments/batch-pay', {
             method: 'PATCH',
-            body: JSON.stringify({ payment_ids: [paymentId], payment_date: today })
+            body: JSON.stringify({ payment_ids: [paymentId], payment_date: payDay })
         });
         await loadPayables();
     } catch (e) { alert(e.message); }
@@ -310,11 +310,11 @@ window._payablePayAll = async (name, month) => {
     const unpaidIds = p.items.filter(it => it.payment_status !== '已付款').map(it => it.id);
     if (!unpaidIds.length) return;
     if (!confirm(`確定將 ${name} 的 ${unpaidIds.length} 筆全部標記為已付款？`)) return;
-    const today = today();
+    const payDay = today();
     try {
         await _fetch('/payments/batch-pay', {
             method: 'PATCH',
-            body: JSON.stringify({ payment_ids: unpaidIds, payment_date: today })
+            body: JSON.stringify({ payment_ids: unpaidIds, payment_date: payDay })
         });
         await loadPayables();
     } catch (e) { alert(e.message); }
