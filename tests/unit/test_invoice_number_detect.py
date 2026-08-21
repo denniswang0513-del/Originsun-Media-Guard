@@ -15,8 +15,10 @@ import pytest
 
 BS = chr(92)
 
-from routers.crm.invoice_files import (_INVOICE_NO_LABELLED,
-                                       _detect_invoice_number)
+# 正則的正本 2026-08-21 搬到 core/invoice_pdf.py（號碼／統編／金額共用一份）；
+# router 只留讀檔那半。
+from core.invoice_pdf import INVOICE_NO_LABELLED as _INVOICE_NO_LABELLED
+from routers.crm.invoice_files import _detect_invoice_number
 
 
 # ── 標籤正則（真 PDF 的抽取結果會長成什麼樣）──────────────

@@ -75,13 +75,29 @@ def _invoice_file_name(inv, ext: str) -> str:
     return "_".join(p for p in parts if p) + ext
 
 
-# 統一發票號碼＝2 碼英文 + 8 碼數字（財政部格式，例 DQ45891570）
-_TW_INVOICE_NO = r"[A-Z]{2}\d{8}"
-# 「發票號碼：」的標籤。電子發票證明聯常把字距拉開（買　　方 / 統 一 編 號），
-# 所以每個字之間都允許空白；冒號全形半形都收 —— core.doc_text 的 NFKC 會把
-# 全形「：」轉成半形，但直接讀別處來的文字時不一定經過那層。
-_INVOICE_NO_LABELLED = re.compile(
-    r"發\s*票\s*號\s*碼\s*[:：]?\s*(" + _TW_INVOICE_NO + r")")
+# 證明聯的解析規則（號碼／統編／金額的正則與比對）全在 core/invoice_pdf.py ——
+# 純函式、有單元測試。這裡刻意**不留第二份**：同一條規則兩個地方寫，
+# 遲早會有兩個答案。
+
+
+def _read_invoice_pdf(path: str) -> tuple:
+    """PDF → (全文, 解析出來的欄位)。抽不到就 ("", {})。
+
+    **同步**（呼叫端要丟 asyncio.to_thread）—— pypdf 是 CPU-bound 純同步解析。
+    圖片檔（JPG/PNG）走到這裡會被 extract_text 判成不支援 → 空的，不做 OCR。
+    解析規則在 core/invoice_pdf.py（純函式、有單元測試），這裡只負責讀檔。
+    """
+    if os.path.splitext(path)[1].lower() != ".pdf":
+        return "", {}
+    try:
+        from core.doc_text import extract_text
+        text, err = extract_text(path)
+    except Exception:
+        return "", {}
+    if err or not text:
+        return "", {}
+    from core.invoice_pdf import parse_invoice_text
+    return text, parse_invoice_text(text)
 
 
 def _detect_invoice_number(path: str) -> str:
@@ -96,20 +112,7 @@ def _detect_invoice_number(path: str) -> str:
 
     圖片檔（JPG/PNG）走到這裡會被 extract_text 判成不支援 → 回 ""，不做 OCR。
     """
-    if os.path.splitext(path)[1].lower() != ".pdf":
-        return ""
-    try:
-        from core.doc_text import extract_text
-        text, err = extract_text(path)
-    except Exception:
-        return ""
-    if err or not text:
-        return ""
-    m = _INVOICE_NO_LABELLED.search(text)
-    if m:
-        return m.group(1)
-    hits = set(re.findall(_TW_INVOICE_NO, text))
-    return hits.pop() if len(hits) == 1 else ""
+    return (_read_invoice_pdf(path)[1] or {}).get("invoice_number") or ""
 
 
 def _resync_invoice_file(inv) -> str:
@@ -186,12 +189,24 @@ async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFil
         inv.updated_at = _now()
         await session.commit()
         current_number = inv.invoice_number or ""
+        snapshot = {"invoice_number": current_number, "tax_id": inv.tax_id,
+                    "amount_total": inv.amount_total,
+                    "company_name": inv.company_name}
+    # 一次讀檔，號碼與比對共用（讀兩次等於把 pypdf 跑兩遍）
+    text, parsed = await asyncio.to_thread(_read_invoice_pdf, filepath)
     # 偵測到的號碼只**回報**、不自動寫入 —— 發票號碼是法定識別，套不套用由人決定
-    detected = await asyncio.to_thread(_detect_invoice_number, filepath)
+    detected = (parsed or {}).get("invoice_number") or ""
+    # 「傳錯張」的警示（Soca 2026-08-21）：比對 PDF 上的統編／金額／號碼／抬頭。
+    # 🔴 是警示不是閘門 —— 抽不到就安靜。擋下來會變成「明明是對的卻傳不上去」，
+    #    那比偶爾漏警示更糟（掃描件、字型把字拆開、版面不同都會抽不到）。
+    from core.invoice_pdf import compare_invoice_pdf
+    warnings = compare_invoice_pdf(parsed, snapshot, text)
     return {"status": "ok", "file_url": filepath, "file_name": os.path.basename(filepath),
             "detected_invoice_number": detected,
             # 與現有值相同就不用麻煩使用者
-            "detected_differs": bool(detected and detected != current_number)}
+            "detected_differs": bool(detected and detected != current_number),
+            "warnings": warnings,
+            "checked": bool(parsed)}
 
 
 @router.delete("/invoices/{invoice_id}/file")

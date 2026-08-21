@@ -489,6 +489,9 @@ function _wireEditDynamics() {
 let _fileBusy = false;
 // 上傳後從電子發票 PDF 抽到、但還沒經人確認的發票號碼（見 _renderFilePane 的提示條）
 let _pendingNumber = null;
+// 上傳時比對 PDF 與表單發現的不一致（Soca 2026-08-21：「一次多張，怕會傳錯張」）。
+// 🔴 是警示不是閘門 —— 檔案已經存好了，這裡只是提醒去看一眼。
+let _fileWarnings = [];
 
 function _renderFilePane(inv) {
     const pane = document.getElementById('inv-file-pane');
@@ -496,6 +499,15 @@ function _renderFilePane(inv) {
     const hasFile = !!inv.file_url;
     pane.innerHTML = `
       <h4>電子發票</h4>
+      ${_fileWarnings.length ? `
+        <div class="inv-file-warn">
+          <b>這張 PDF 跟表單對不上，確認一下是不是傳錯張</b>
+          <ul>${_fileWarnings.map(w => `<li>${_esc(w)}</li>`).join('')}</ul>
+          <div class="inv-file-actions">
+            <button class="crm-btn crm-btn-secondary crm-btn-sm"
+                    onclick="window._invDismissWarn()">知道了</button>
+          </div>
+        </div>` : ''}
       ${hasFile ? `
         <div class="inv-file-card">
           <div class="fn">${_esc(inv.file_name || inv.file_url)}</div>
@@ -577,6 +589,7 @@ window._invFileUpload = async function (file) {
         // 偵測到的號碼與現值不同才問 —— 一樣的話沒有打擾的理由。
         // 🔴 不自動套用：發票號碼是法定識別，改它要人點頭（owner 要的是「可以選擇」）。
         if (up.detected_differs) _pendingNumber = up.detected_invoice_number;
+        _fileWarnings = up.warnings || [];
         const fresh = await _fetch('/invoices/' + _selectedId);
         renderDetail(fresh);
     } catch (e) {
@@ -591,6 +604,12 @@ window._invFileUpload = async function (file) {
  *  那個連結不該失效。 */
 /** 套用偵測到的發票號碼。走既有的 PUT（與種類切換同一條路），所以
  *  「有編號→已開立」那條自動規則、月結守衛都照常生效。 */
+window._invDismissWarn = function () {
+    _fileWarnings = [];
+    const inv = _invoices.find(i => i.id === _selectedId);
+    if (inv) _renderFilePane(inv);
+};
+
 window._invApplyNumber = async function () {
     if (!_selectedId || !_pendingNumber) return;
     const num = _pendingNumber;
@@ -844,7 +863,7 @@ function renderDetail(inv) {
 async function selectInvoice(id) {
     // 🔴 切到別張發票一定要清掉上一張還沒確認的偵測號碼 —— 留著的話那個「套用」
     // 會把 A 的發票號碼寫進 B。
-    if (_selectedId !== id) _pendingNumber = null;
+    if (_selectedId !== id) { _pendingNumber = null; _fileWarnings = []; }
     _selectedId = id;
     renderList();
     document.getElementById('inv-detail-panel').style.display = 'flex';
