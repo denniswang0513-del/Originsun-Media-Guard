@@ -68,12 +68,18 @@ def main():
     name = sys.argv[1]
     token = create_token({'sub': 'bench', 'access_level': 3, 'modules': ['comfyui']})
 
-    # pull the template off the box
-    local = os.path.join(os.environ['TEMP'], name + '.json')
-    subprocess.run([r'C:\Program Files\Git\usr\bin\scp.exe',
-                    '%s:%s/%s.json' % (BOX, TPL_DIR, name), local],
-                   capture_output=True, timeout=180)
-    wf = json.load(io.open(local, encoding='utf-8'))
+    # a local .json path runs that file directly; a bare name is fetched from
+    # the box's template dir
+    if os.path.exists(name):
+        wf = json.load(io.open(name, encoding='utf-8'))
+    else:
+
+        # pull the template off the box
+        local = os.path.join(os.environ['TEMP'], name + '.json')
+        subprocess.run([r'C:\Program Files\Git\usr\bin\scp.exe',
+                        '%s:%s/%s.json' % (BOX, TPL_DIR, name), local],
+                       capture_output=True, timeout=180)
+        wf = json.load(io.open(local, encoding='utf-8'))
 
     if len(sys.argv) >= 5:
         w, h, f = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
@@ -132,6 +138,10 @@ def main():
                 node['widgets_values'][0] = src
                 print('LoadVideo ->', src)
 
+    return _run(name, wf, token)
+
+
+def _run(name, wf, token):
     with sync_playwright() as p:
         b = p.chromium.launch()
         ctx = b.new_context()
