@@ -124,8 +124,17 @@ def amount_is_settled(paid: int, total: int) -> bool:
     🔴 名字刻意是中性的：付款側（一筆匯款掛多張請款單）用的是**同一條**規則。
     2026-08-22 那批本來在 router 裡 inline 寫了第二份 —— 落在沒有單元測試的
     地方，容差改成百分比時 tests/unit 會照樣綠燈，付款側靜靜用舊規則。
+
+    🔴「一毛都沒收到」不算收齊 —— 這個守衛本來散在呼叫端（三處寫
+    `got > 0 and amount_is_settled(...)`、collection_fields 那處忘了寫），
+    所以一張面額 30 元、實收 0 的發票在應收帳款那側會顯示**已收齊**
+    （0 + 50 >= 30）。容差是為了吸收匯費，不是為了讓沒收到錢的單據結案。
+    面額 ≤ 0 的單據沒有東西要收，仍算結清。
     """
-    return int(paid or 0) + FEE_TOLERANCE >= int(total or 0)
+    paid, total = int(paid or 0), int(total or 0)
+    if total <= 0:
+        return True
+    return paid > 0 and paid + FEE_TOLERANCE >= total
 
 
 def statement_line_status(line: dict) -> str:

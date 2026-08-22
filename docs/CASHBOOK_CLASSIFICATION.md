@@ -138,11 +138,35 @@ owner 2026-08-22 決定：**歷史不回頭勾，九月起才勾**。這對現�
 付款是「分配比實付少 ≤ 容差 ＝ 我們付了手續費」。共用同一支判讀會把手續費
 判成「還有單沒掛」。
 
+## 6.5 這幾條規則各自只有一份（2026-08-22 /simplify 五輪之後）
+
+改任何一條之前先確認你改的是正本，不是複本：
+
+| 規則 | 正本 | 兩側／多處呼叫 |
+|---|---|---|
+| 收付齊了沒（含匯費容差＋「一毛沒收不算收齊」） | `amount_is_settled` | 發票、請款單共用 |
+| 分配判讀（empty/ok/fee/over/under） | `alloc_verdict(actual, allocated, side=)` | `side="receipt"` / `"payment"` |
+| 認列匯費（不變量＝總流出不變） | `recognize_bank_fee` | 收支寫入路徑 |
+| 什麼算現金帳戶 | `cash_account_ids` | `build_cashflow` 與現金流鑽取 |
+| 內部移動（本金不列入活動） | `INTERNAL_MOVEMENT_TREATMENTS` | 三處判定 |
+| 分配列驗證（四條寫入路徑） | `resolve_allocs(kind=)` | 收付兩側 |
+| 分配寫入流程 | `_write_allocs(kind=)` | 兩支 PUT 端點 |
+| 分配面板（前端） | `_ALLOC_SIDES` ＋ `_renderAllocs` | 關聯發票／關聯請款單 |
+
+🔴 這些本來全是「兩份」。它們**在同一次 commit 裡就漂開過**：狀態列的
+`msg` vs `message`、預帶面額 vs 尚欠、跨帳本一邊回 409 一邊回 422、
+現金流鑽取比它鑽的那個數字多 777,000。
+
 ## 7. 相關
 
 - `core/finance_logic.py` — `classify_cash_entry` / `cash_entry_flow` /
-  `payment_alloc_verdict` / `passthrough_fee_income`（純規則，有單元測試）
+  `alloc_verdict` / `amount_is_settled` / `recognize_bank_fee` /
+  `cash_account_ids` / `passthrough_fee_income`（純規則，有單元測試）
 - `core/bank_statement.py` — `_classify`（規則比對）
 - `docs/PETTY_CASH_PLAN.md` / `docs/BENEFIT_POOL_PLAN.md` — 共用同一條應付帳款管線
 - 測試：`tests/unit/test_payment_alloc.py`、`test_import_rule_direction.py`、
-  `test_passthrough_fee.py`、`test_cashflow_check_notes.py`
+  `test_passthrough_fee.py`、`test_cashflow_check_notes.py`、
+  `test_cash_invoice_alloc.py`
+- e2e：`api_payment_alloc.py`、`ui_payment_alloc.py`、`ui_invoice_alloc.py`、
+  `api_cashflow_drilldown.py`（每條現金流線 vs 它的鑽取明細）、
+  `ui_cashbook_recon_button.py`

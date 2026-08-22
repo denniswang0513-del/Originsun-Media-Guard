@@ -700,16 +700,19 @@ export async function initCrmCashbookTab() {
     // active 狀態切換，一行導覽而已。
     const recon = document.getElementById('cash-btn-recon');
     if (recon) {
-        recon.addEventListener('click', () => {
-            const btn = document.querySelector('.finance-nav-btn[data-subview="banking"]');
-            if (btn) {
-                btn.click();
-                btn.scrollIntoView({ block: 'nearest' });
-            } else {
-                // 不在財務管理 tab 裡（例如未來被別處嵌入）—— 出聲，不要靜默沒反應
-                alert('找不到「銀行帳戶」子視圖 —— 請從財務管理 › 銀行與設定進入。');
-            }
-        });
+        // 走 finance.js 匯出的導覽入口 —— 不要 querySelector 別人的 class
+        //（那是實作細節不是介面：側欄改結構，這顆會靜靜壞掉）。
+        // 這個檔案也會被 CRM tab 掛起來，那裡根本沒有財務側欄 → 直接把入口藏掉，
+        // 不要留一顆按了會跳 alert 的按鈕。
+        if (window.financeNav) {
+            recon.addEventListener('click', () => {
+                if (!window.financeNav.show('banking')) {
+                    alert('找不到「銀行帳戶」子視圖 —— 請從財務管理 › 銀行與設定進入。');
+                }
+            });
+        } else {
+            recon.style.display = 'none';
+        }
     }
     document.getElementById('cash-btn-save').addEventListener('click', saveEntry);
     document.getElementById('cash-detail-close').addEventListener('click', closeDetail);

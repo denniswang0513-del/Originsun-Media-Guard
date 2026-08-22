@@ -136,11 +136,17 @@ def test_settlement_rule_has_exactly_one_definition():
     # 收款狀態一律由分配表那條路收尾：三個寫入端點走 _sync_single_alloc /
     # replace_invoice_allocs（兩者最終都是 replace_invoice_allocs），刪除那條
     # 沒有分配可寫，直接呼叫 _resettle_invoice。
-    ok = ('resettle_invoices', 'replace_invoice_allocs', '_sync_single_alloc')
+    # 分配面板那條現在走共用的 _write_allocs（收付兩側同一條寫入流程），
+    # 它裡面呼叫的是 _ALLOC_KINDS 綁進去的 replace_invoice_allocs。
+    ok = ('resettle_invoices', 'replace_invoice_allocs', '_sync_single_alloc',
+          '_write_allocs')
     for fn in ('async def create_cash_entry(', 'async def update_cash_entry(',
                'async def delete_cash_entry(', 'async def set_cash_entry_invoices('):
         body = code_only(func_body(src, fn))
         assert any(h in body for h in ok), f'{fn} 沒有走統一的收款狀態規則'
+    writer_body = code_only(func_body(src, 'async def _write_allocs('))
+    assert 'k["replace"](' in writer_body, '共用寫入者沒有走 per-kind 的 replace'
+    assert '_bind_alloc_ops()' in src, 'replace/load/verdict 沒有綁進 _ALLOC_KINDS'
     # 共用寫入者一定要收尾狀態 —— 它是三條路的交會點，漏了就三條一起錯
     writer = code_only(func_body(src, 'async def replace_invoice_allocs_bulk('))
     assert writer.count('resettle_invoices(') == 2, \
@@ -156,3 +162,32 @@ def test_edit_form_cannot_flatten_a_multi_invoice_allocation():
                                'async def _sync_single_alloc('))
     assert 'len(existing) > 1' in body and '409' in body, \
         '_sync_single_alloc 又會把多張分配壓成一張了'
+
+
+def test_nothing_collected_is_never_settled():
+    """🔴 容差是為了吸收匯費，不是為了讓沒收到錢的單據結案。
+
+    面額 30、實收 0 → 0 + 50 >= 30 → 舊規則說「收齊了」。這個守衛本來散在
+    呼叫端（三處寫 `got > 0 and ...`、collection_fields 那處忘了寫），所以
+    同一張小額發票在應收帳款那側會憑空消失。現在守衛住在規則裡，四個呼叫點
+    只有一份定義。
+    """
+    from core.finance_logic import FEE_TOLERANCE, amount_is_settled
+    assert not amount_is_settled(0, 30), "一毛沒收卻說收齊了"
+    assert not amount_is_settled(0, FEE_TOLERANCE)
+    assert amount_is_settled(1, 30), "收到錢又在容差內就是收齊"
+    # 沒有東西要收的單據仍算結清
+    assert amount_is_settled(0, 0)
+    assert amount_is_settled(0, -5)
+    # 容差本身沒變
+    assert amount_is_settled(144900 - FEE_TOLERANCE, 144900)
+    assert not amount_is_settled(111050, 144900), "差 33,850 不能蒙混過關"
+
+
+def test_the_settled_rule_has_exactly_one_definition():
+    """呼叫端不准再自己補一次 `got > 0`。"""
+    from tests.unit._srcscan import code_only, repo_src
+    src = code_only(repo_src("routers/crm/finance.py"))
+    assert "got > 0 and amount_is_settled" not in src
+    assert "got and amount_is_settled" not in src
+

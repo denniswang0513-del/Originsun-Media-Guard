@@ -35,7 +35,7 @@ import core.state as state
 from core.finance_logic import month_of
 
 try:
-    from sqlalchemy import select, or_, delete, update as sa_update
+    from sqlalchemy import select, or_, delete, func, update as sa_update
     from sqlalchemy.exc import IntegrityError
     from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
                            CrmQuotationTemplate, CrmStaff, CrmStaffPortfolio,

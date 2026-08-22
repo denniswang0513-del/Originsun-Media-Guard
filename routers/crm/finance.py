@@ -41,7 +41,7 @@ from ._shared import (router, _check_auth, money_dep, _require_db,
 from .invoice_files import _resync_invoice_file
 
 try:
-    from ._shared import (select, or_,
+    from ._shared import (select, or_, func,
                           Client, CrmProject, CrmStaff, CrmInvoice,
                           CrmPaymentRequest, CrmCashEntry, CrmProjectExpense,
                           CrmCashInvoiceLink, CrmCashPaymentLink)
@@ -324,7 +324,7 @@ async def _resettle_invoice(session, invoice_id, when=None,
     if coll is None:                    # 批次呼叫端會把讀好的結果帶進來
         coll = (await _invoice_collections(session, [invoice_id])).get(invoice_id, {})
     got = coll.get("collected", 0)
-    if got and amount_is_settled(got, inv.amount_total):
+    if amount_is_settled(got, inv.amount_total):
         # 代開發票的「已轉撥」是比已收款更後面的階段（錢已匯給代開人）——
         # 收款重算不可以把它降回已收款，那會讓匯出去的紀錄看起來像沒發生。
         if not (inv.payment_status == INVOICE_REMITTED
@@ -351,6 +351,14 @@ _ALLOC_KINDS = {
                 "dup": "同一張請款單重複出現",
                 "label": lambda o: o.summary or o.payee_name},
 }
+# replace / load / verdict 定義在檔案後段 —— 這裡延後綁定（模組載入完才填），
+# 免得為了湊順序把三組相關的函式拆散。
+def _bind_alloc_ops():
+    _ALLOC_KINDS["invoice"].update(
+        replace=replace_invoice_allocs, load=_load_allocs, verdict=_alloc_verdict)
+    _ALLOC_KINDS["payment"].update(
+        replace=replace_payment_allocs, load=_load_payment_allocs,
+        verdict=_payment_verdict)
 
 
 async def resolve_allocs(session, items, ent, kind, by_id=None):
@@ -406,13 +414,12 @@ async def _payment_allocated(session, request_ids):
     ids = [i for i in dict.fromkeys(request_ids) if i]
     if not ids:
         return {}
-    out = {}
-    for pid, amt in (await session.execute(
-            select(CrmCashPaymentLink.payment_request_id,
-                   CrmCashPaymentLink.amount)
-            .where(CrmCashPaymentLink.payment_request_id.in_(ids)))).all():
-        out[pid] = out.get(pid, 0) + int(amt or 0)
-    return out
+    # 加總交給 DB —— 一張單掛十筆匯款就是十列搬到 Python 再自己加。
+    return {pid: int(total or 0) for pid, total in (await session.execute(
+        select(CrmCashPaymentLink.payment_request_id,
+               func.sum(CrmCashPaymentLink.amount))
+        .where(CrmCashPaymentLink.payment_request_id.in_(ids))
+        .group_by(CrmCashPaymentLink.payment_request_id))).all()}
 
 
 async def resettle_payment_requests(session, request_ids, when=None) -> None:
@@ -436,7 +443,7 @@ async def resettle_payment_requests(session, request_ids, when=None) -> None:
             continue
         got = paid_map.get(pid, 0)
         # 結清判準走 core 的唯一正本（本來在這裡 inline 寫了第二份）
-        full = got > 0 and amount_is_settled(got, ap.amount)
+        full = amount_is_settled(got, ap.amount)
         if full:
             ap.payment_status = "已付款"
             ap.payment_date = when or ap.payment_date or _now()
@@ -1963,7 +1970,7 @@ async def _load_payment_allocs(session, entry):
             #    （collection_fields）就是為了這個才把布林算好送過去的。
             "request_total": total, "request_paid": got,
             "request_open": max(0, total - got),
-            "request_settled": got > 0 and amount_is_settled(got, total),
+            "request_settled": amount_is_settled(got, total),
             "summary": (ap.summary if ap else "") or "",
             "payee_name": (ap.payee_name if ap else "") or "",
             "request_date": _fmt_day(ap.request_date) if ap else "",
@@ -1984,6 +1991,39 @@ async def get_cash_entry_payments(entry_id: str, request: Request):
     return {"items": items, "check": _payment_verdict(e, allocated)}
 
 
+async def _write_allocs(request, entry_id: str, kind: str, items, fee=None):
+    """整組取代某筆收支的分配。兩側**同一條**寫入流程。
+
+    驗帳本 → 擋鎖月 → 驗每一列 → 整組取代（連帶同步主要單據欄與相關單據的
+    收付狀態）→ 有匯費就認列 → 回最新的明細與判讀。
+
+    🔴 兩側本來各寫一遍這十二行，於是「存檔後回什麼」「commit 之前還做了什麼」
+    要對兩處看。差別只剩 fee 那一步 —— 收款側的 payload 根本沒有那個欄位。
+    """
+    k = _ALLOC_KINDS[kind]
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        e, ent = await _entry_for_alloc(session, entry_id, request,
+                                        month_guard=True)
+        rows = await resolve_allocs(
+            session, [(getattr(it, k["id_field"]), it.amount) for it in (items or [])],
+            ent, kind)
+        await k["replace"](session, e, rows)
+        if fee is not None:
+            # 不變量（總流出不變）與冪等性在 core.finance_logic.recognize_bank_fee
+            # —— 那是錢的規則，要有自己的單元測試，不該住在端點裡。
+            try:
+                e.expense, bf = recognize_bank_fee(e.expense, e.bank_fee, fee)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc))
+            e.bank_fee = bf or None
+        await session.commit()
+        items_out, allocated = await k["load"](session, e)
+    return {"ok": True, "items": items_out, "check": k["verdict"](e, allocated)}
+
+
 @router.put("/cash-entries/{entry_id}/payments")
 async def set_cash_entry_payments(entry_id: str, req: CashPaymentLinksPayload,
                                   request: Request):
@@ -2000,29 +2040,8 @@ async def set_cash_entry_payments(entry_id: str, req: CashPaymentLinksPayload,
         連結被拿光退回未付款並清掉付款日）。
       · `fee` 有給就寫進 bank_fee —— 那 10 元從此是管理費用，不是對不起來的差額。
     """
-    _check_auth(request)
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
-        e, ent = await _entry_for_alloc(session, entry_id, request,
-                                        month_guard=True)
-
-        rows = await resolve_payment_allocs(
-            session, [(it.payment_request_id, it.amount) for it in (req.items or [])],
-            ent)
-        await replace_payment_allocs(session, e, rows)
-        if req.fee is not None:
-            # 不變量（總流出不變）與冪等性在 core.finance_logic.recognize_bank_fee
-            # —— 那是錢的規則，要有自己的單元測試，不該住在端點裡。
-            try:
-                e.expense, bf = recognize_bank_fee(e.expense, e.bank_fee, req.fee)
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail=str(exc))
-            e.bank_fee = bf or None
-        await session.commit()
-
-        items, allocated = await _load_payment_allocs(session, e)
-    return {"ok": True, "items": items, "check": _payment_verdict(e, allocated)}
+    return await _write_allocs(request, entry_id, "payment", req.items,
+                               fee=req.fee)
 
 
 @router.put("/cash-entries/{entry_id}/invoices")
@@ -2036,17 +2055,7 @@ async def set_cash_entry_invoices(entry_id: str, req: CashInvoiceLinksPayload,
     副作用（刻意）：`invoice_id` / `invoice_number` / `has_invoice` 同步成金額最大
     的那張發票 —— 列表與舊查詢都讀這幾欄，不同步的話畫面會跟明細對不起來。
     """
-    _check_auth(request)
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
-        e, ent = await _entry_for_alloc(session, entry_id, request,
-                                        month_guard=True)
+    return await _write_allocs(request, entry_id, "invoice", req.items)
 
-        rows = await resolve_invoice_allocs(
-            session, [(it.invoice_id, it.amount) for it in (req.items or [])], ent)
-        await replace_invoice_allocs(session, e, rows)
-        await session.commit()
 
-        items, allocated = await _load_allocs(session, e)
-    return {"ok": True, "items": items, "check": _alloc_verdict(e, allocated)}
+_bind_alloc_ops()

@@ -181,17 +181,31 @@ def test_both_sides_answer_the_same_error_the_same_way():
 
 
 def test_fee_is_written_to_bank_fee():
-    """手續費要進 bank_fee —— 那條路本來就把匯費算成管理費用與現金流出。"""
-    body = _body("async def set_cash_entry_payments(")
-    assert "recognize_bank_fee(e.expense, e.bank_fee, req.fee)" in body
+    """手續費要進 bank_fee —— 那條路本來就把匯費算成管理費用與現金流出。
+
+    認列那一步住在共用的 _write_allocs 裡（收付兩側同一條寫入流程），端點只
+    負責把 payload 的 fee 傳下去 —— 收款側的 payload 根本沒有那個欄位。
+    """
+    assert "fee=req.fee" in _body("async def set_cash_entry_payments(")
+    body = _body("async def _write_allocs(")
+    assert "recognize_bank_fee(e.expense, e.bank_fee, fee)" in body
     assert "e.bank_fee = bf or None" in body
+    assert "fee" not in _body("async def set_cash_entry_invoices("),         "收款側也送了 fee（那個 payload 沒有這個欄位）"
 
 
 def test_month_close_is_respected():
     """月結鎖帳要擋 —— 前言（取列＋驗帳本＋擋鎖月）四個端點共用一支。"""
-    body = _body("async def set_cash_entry_payments(")
-    assert "month_guard=True" in body, "沒有擋已鎖月的月份"
+    assert "month_guard=True" in _body("async def _write_allocs("), "沒有擋已鎖月的月份"
     assert "_assert_month_open" in _body("async def _entry_for_alloc(")
+
+
+def test_the_two_put_endpoints_are_one_body():
+    """🔴 兩支 PUT 本來各寫一遍十二行，於是「存檔後回什麼」要對兩處看。"""
+    for fn in ("async def set_cash_entry_payments(",
+               "async def set_cash_entry_invoices("):
+        body = _body(fn)
+        assert "_write_allocs(" in body, f"{fn} 又自己寫了一遍"
+        assert "session" not in body, f"{fn} 自己開了 session"
 
 
 def test_the_four_alloc_endpoints_share_one_prologue():
@@ -277,3 +291,20 @@ def test_ui_shares_one_status_line():
     seg = seg[:seg.index(chr(10) + "function ")]
     assert "FEE_TOLERANCE" not in seg, "前端重寫了容差規則"
     assert "check.message" in seg
+
+
+def test_recon_button_uses_the_exported_nav_not_someone_elses_dom():
+    """🔴 別的 tab 的 CSS class 不是介面。
+
+    本來是 `querySelector('.finance-nav-btn[data-subview="banking"]').click()` ——
+    側欄改名或改結構，這顆會靜靜壞掉：沒有 build 訊號、沒有測試訊號，
+    只有使用者按了沒反應。而且這個檔案也會被 CRM tab 掛起來，那裡根本沒有
+    財務側欄，等於長期擺一顆永遠跳 alert 的按鈕。
+    """
+    js = repo_src(JS)
+    assert "finance-nav-btn" not in js, "又去 querySelector 別人的 class 了"
+    assert "window.financeNav.show('banking')" in js
+    assert "recon.style.display = 'none'" in js, "沒有側欄時要把入口藏掉"
+    fin = repo_src("frontend/tabs/finance/finance.js")
+    assert "window.financeNav" in fin, "finance.js 沒有匯出導覽入口"
+
