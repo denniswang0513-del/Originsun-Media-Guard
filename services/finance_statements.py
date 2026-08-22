@@ -44,10 +44,9 @@ from core.finance_logic import (
     build_balance_sheet,
     build_cashflow,
     build_pnl,
-    INTERNAL_MOVEMENT_TREATMENTS,
     cash_account_ids,
-    cash_entry_activity,
     cash_entry_flow,
+    cashflow_lines,
     classify_cash_entry,
     client_concentration,
     depreciation_rows,
@@ -563,25 +562,22 @@ async def drilldown(session, kind: str, months, entity: str = "parent") -> dict:
 
     else:  # cash.<operating|investing|financing>（值域已由 VALID_DRILL_KINDS 把關）
         act = kind.split(".", 1)[1]
-        # 🔴 這裡的「哪幾列算數」必須跟 build_cashflow 完全一致，否則鑽取的
-        #    合計與它鑽的那個數字對不起來。本來漏了非現金帳戶那一條（股東往來
-        #    的收支已經不進淨流，卻還會出現在明細裡）。兩邊現在共用同一個述詞。
-        cash_ids = cash_account_ids(inputs["bank_accounts"])
-        for e in inputs["cash_entries"]:
-            if month_of(e.get("entry_date")) not in mset:
+        # 🔴 「哪幾列算數、各算多少」不在這裡判 —— 走 build_cashflow 用的同一支
+        #    迭代器。各自判過兩次，各自漏過一次（非現金帳戶差 777,000、
+        #    轉存手續費差 150）。現在鑽取合計恆等於表上那格。
+        rows, _stats = cashflow_lines(inputs["cash_entries"], months,
+                                      cat_map=cat_map, accounts=accounts,
+                                      bank_accounts=inputs["bank_accounts"])
+        for r in rows:
+            if r["activity"] != act:
                 continue
-            acct = e.get("bank_account_id")
-            if not acct:
-                continue
-            if cash_ids is not None and acct not in cash_ids:
-                continue
-            t = classify_cash_entry(e, cat_map)
-            if t in INTERNAL_MOVEMENT_TREATMENTS:
-                continue
-            if cash_entry_activity(e, cat_map, accounts) == act:
-                items.append(_row("cash", e["id"], e.get("entry_date"),
-                                  e.get("summary"), cash_entry_flow(e),
-                                  e.get("category"), t))
+            e = r["entry"]
+            label = (e.get("summary") or "")
+            if r["is_fee"]:
+                label += "（跨行手續費）"   # 本金是內部移動，這一列只有手續費
+            items.append(_row("cash", e["id"], e.get("entry_date"),
+                              label, r["amount"], e.get("category"),
+                              r["treatment"]))
 
     items.sort(key=lambda x: (x["date"] or "", x["id"] or ""))
     total = sum(x["amount"] for x in items)

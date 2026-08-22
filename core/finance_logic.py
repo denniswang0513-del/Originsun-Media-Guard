@@ -1571,6 +1571,51 @@ def cash_account_ids(bank_accounts):
             if not is_shareholder_kind(b.get("acct_kind"))}
 
 
+def cashflow_lines(cash_entries, months, *, cat_map=None, accounts=None,
+                   bank_accounts=None):
+    """現金流量表「哪幾列算數、各算多少」的**唯一正本** → (rows, stats)。
+
+    rows：[{"entry", "activity", "amount", "treatment", "is_fee"}]
+    stats：{"advance_net", "transfer_net", "unassigned", "noncash"}（給註記用）
+
+    🔴 為什麼要有這一支：表上的數字（build_cashflow）與點進去的明細
+    （statements_drilldown）本來各跑一次同一座階梯，於是每補一條規則就得記得
+    改兩個地方。實際發生過兩次 ——
+      · 非現金帳戶（股東往來）那條只加在表上 → 兩邊差 777,000（v2.4.146 修）
+      · **轉存/預支的跨行手續費**：本金不算活動、但手續費是真的流出去的錢，
+        表上算了、鑽取整筆跳過 → 2026 年兩邊差 150（十筆各 15 元）。
+    這支存在之後，「哪幾列算數」只有一個答案，鑽取合計恆等於表上那格。
+    """
+    cat_map = cat_map or {}
+    accounts = accounts or {}
+    mset = set(months)
+    cash_ids = cash_account_ids(bank_accounts)
+    rows = []
+    stats = {"advance_net": 0, "transfer_net": 0, "unassigned": 0, "noncash": 0}
+    for e in cash_entries:
+        if month_of(e.get("entry_date")) not in mset:
+            continue
+        if not e.get("bank_account_id"):
+            stats["unassigned"] += 1        # 不影響任何帳戶餘額
+            continue
+        if cash_ids is not None and e["bank_account_id"] not in cash_ids:
+            stats["noncash"] += 1           # 股東往來等：不在現金總額裡
+            continue
+        t = classify_cash_entry(e, cat_map)
+        if t in INTERNAL_MOVEMENT_TREATMENTS:
+            principal = in_amount(e) - out_amount(e)
+            stats["advance_net" if t == "advance" else "transfer_net"] += principal
+            fee = int(e.get("bank_fee") or 0)
+            if fee:
+                # 本金是內部移動，手續費不是 —— 那筆錢真的離開公司了
+                rows.append({"entry": e, "activity": "operating", "amount": -fee,
+                             "treatment": t, "is_fee": True})
+            continue
+        rows.append({"entry": e, "activity": cash_entry_activity(e, cat_map, accounts),
+                     "amount": cash_entry_flow(e), "treatment": t, "is_fee": False})
+    return rows, stats
+
+
 def build_cashflow(months, *, opening, closing, cash_entries=(),
                    cat_map=None, accounts=None, bank_accounts=None) -> dict:
     """現金流量表（直接法）。opening/closing = {"total", "by_account":[{name,amount}]}
@@ -1598,36 +1643,15 @@ def build_cashflow(months, *, opening, closing, cash_entries=(),
       investing；直接用 equipment 表另計會與收支重複。
     - 自檢：check.diff = closing.total − opening.total − net，≠0 誠實外顯。
     """
-    cat_map = cat_map or {}
-    accounts = accounts or {}
-    mset = set(months)
     acts = {"operating": 0, "investing": 0, "financing": 0}
-    advance_net = transfer_net = 0
-    unassigned = 0
-    noncash = 0
-    cash_ids = cash_account_ids(bank_accounts)
-    for e in cash_entries:
-        if month_of(e.get("entry_date")) not in mset:
-            continue
-        acct = e.get("bank_account_id")
-        if not acct:
-            unassigned += 1
-            continue
-        if cash_ids is not None and acct not in cash_ids:
-            noncash += 1        # 股東往來等非現金帳戶：不在現金總額裡
-            continue
-        t = classify_cash_entry(e, cat_map)
-        if t in INTERNAL_MOVEMENT_TREATMENTS:
-            principal = in_amount(e) - out_amount(e)
-            if t == "advance":
-                advance_net += principal
-            else:
-                transfer_net += principal
-            fee = int(e.get("bank_fee") or 0)
-            if fee:
-                acts["operating"] -= fee
-            continue
-        acts[cash_entry_activity(e, cat_map, accounts)] += cash_entry_flow(e)
+    rows, stats = cashflow_lines(cash_entries, months, cat_map=cat_map,
+                                 accounts=accounts, bank_accounts=bank_accounts)
+    for r in rows:
+        acts[r["activity"]] += r["amount"]
+    advance_net = stats["advance_net"]
+    transfer_net = stats["transfer_net"]
+    unassigned = stats["unassigned"]
+    noncash = stats["noncash"]
     net = acts["operating"] + acts["investing"] + acts["financing"]
     # closing − (opening + net)：正 = 期末實際比活動推算多
     diff = int(closing.get("total") or 0) - (int(opening.get("total") or 0) + net)

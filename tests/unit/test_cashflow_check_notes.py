@@ -17,6 +17,12 @@ def _cf():
     return code_only(func_body(repo_src(SRC), "def build_cashflow("))
 
 
+def _cfl():
+    """「哪幾列算數、各算多少」自 2026-08-22 起住在 cashflow_lines
+    —— build_cashflow 與鑽取共用同一支（見該函式 docstring）。"""
+    return code_only(func_body(repo_src(SRC), "def cashflow_lines("))
+
+
 # ── 後端本來就算得出原因 ──────────────────────────────────────────
 
 def test_backend_explains_all_three_causes():
@@ -34,19 +40,18 @@ def test_diff_is_closing_minus_opening_plus_net():
 
 def test_unassigned_entries_are_excluded_from_flow():
     """未掛帳戶的收支不影響任何帳戶餘額，計入就會破壞恆等式。"""
-    body = _cf()
-    assert "if not acct:" in body
-    assert "unassigned += 1" in body and "continue" in body
+    body = _cfl()
+    assert 'if not e.get("bank_account_id"):' in body
+    assert 'stats["unassigned"] += 1' in body and "continue" in body
 
 
 def test_noncash_accounts_are_excluded_from_flow():
     """🔴 期初/期末只算現金類帳戶（split_bank_lines 的 ["cash"]），
     迭代這邊也必須一致 —— 不然股東往來上的每一筆都會製造勾稽差額。
     這是 owner 2026-08-22 正要開始用股東往來記帳前抓到的（還沒爆）。"""
-    body = _cf()
-    assert "cash_ids is not None and acct not in cash_ids" in body
-    assert "noncash += 1" in body
-    assert "非現金帳戶（股東往來）" in body, "排除了但沒告訴人"
+    assert 'cash_ids is not None and e["bank_account_id"] not in cash_ids' in _cfl()
+    assert 'stats["noncash"] += 1' in _cfl()
+    assert "非現金帳戶（股東往來）" in _cf(), "排除了但沒告訴人"
 
 
 def test_official_path_passes_the_accounts():
@@ -84,8 +89,56 @@ def test_missing_accounts_falls_back_to_old_behaviour():
 
 def test_transfer_principal_is_tracked_for_the_note():
     """轉存本金不列入活動，但差額要能歸因到它。"""
-    body = _cf()
-    assert "transfer_net += principal" in body
+    assert 'stats["advance_net" if t == "advance" else "transfer_net"] += principal' in _cfl()
+
+
+def test_transfer_fee_is_real_money_leaving():
+    """🔴 轉存的**本金**是內部移動，**跨行手續費**不是 —— 那筆錢真的出去了。
+
+    2026 年生產有十筆「網路跨轉」各 15 元手續費：表上算進營運（對），
+    鑽取整筆跳過（錯）→ 兩邊差 150。差得少所以更難發現。
+    """
+    from core.finance_logic import build_cashflow, cashflow_lines
+    ents = [{"id": "t1", "entry_date": "2026-01-10", "bank_account_id": "A",
+             "expense": 5000, "bank_fee": 15, "category": "轉存"}]
+    cm = {("cash", "轉存"): {"treatment": "transfer"}}
+    accts = [{"id": "A", "acct_kind": "bank"}]
+    r = build_cashflow(["2026-01"], opening={"total": 0}, closing={"total": 0},
+                       cash_entries=ents, cat_map=cm, bank_accounts=accts)
+    assert r["operating"] == -15, "手續費沒算進營運"
+    rows, _s = cashflow_lines(ents, ["2026-01"], cat_map=cm, bank_accounts=accts)
+    assert [(x["amount"], x["is_fee"]) for x in rows] == [(-15, True)], \
+        "明細沒有把手續費列出來（本金則不該出現）"
+
+
+def test_the_table_and_the_drilldown_cannot_disagree():
+    """表上每一格 == 該格明細的合計。這是 cashflow_lines 存在的唯一理由。"""
+    from core.finance_logic import build_cashflow, cashflow_lines
+    months = ["2026-01"]
+    ents = [
+        {"id": "a", "entry_date": "2026-01-02", "bank_account_id": "A",
+         "deposit": 100000, "category": "設計服務收入"},
+        {"id": "b", "entry_date": "2026-01-03", "bank_account_id": "A",
+         "expense": 5000, "bank_fee": 15, "category": "轉存"},      # 內部移動＋手續費
+        {"id": "c", "entry_date": "2026-01-04", "bank_account_id": "A",
+         "expense": 8000, "category": "行政費用"},
+        {"id": "d", "entry_date": "2026-01-05", "bank_account_id": "S",
+         "deposit": 700000, "category": "設計服務收入"},            # 股東往來 → 不算
+        {"id": "e", "entry_date": "2026-01-06", "deposit": 999,
+         "category": "設計服務收入"},                               # 未掛帳戶 → 不算
+    ]
+    cm = {("cash", "設計服務收入"): {"treatment": "direct_income"},
+          ("cash", "行政費用"): {"treatment": "direct_expense"},
+          ("cash", "轉存"): {"treatment": "transfer"}}
+    accts = [{"id": "A", "acct_kind": "bank"},
+             {"id": "S", "acct_kind": "shareholder_loan"}]
+    table = build_cashflow(months, opening={"total": 0}, closing={"total": 0},
+                           cash_entries=ents, cat_map=cm, bank_accounts=accts)
+    rows, _s = cashflow_lines(ents, months, cat_map=cm, bank_accounts=accts)
+    for act in ("operating", "investing", "financing"):
+        drill = sum(r["amount"] for r in rows if r["activity"] == act)
+        assert drill == table[act], f"{act}：表 {table[act]} vs 明細 {drill}"
+    assert table["operating"] == 100000 - 8000 - 15
 
 
 # ── 前端要把原因講出來 ────────────────────────────────────────────
@@ -119,15 +172,18 @@ def test_ui_says_so_when_there_is_no_known_cause():
 def test_drilldown_uses_the_same_eligibility_as_the_number_it_drills_into():
     """🔴 鑽取的合計要等於它鑽的那個數字 —— 判準必須是同一組。
 
-    本來鑽取只擋「未掛帳戶」，沒有跟上非現金帳戶那條：股東往來的收支已經
-    不進淨流，卻還會列在明細裡。使用者點進去看到的加總 ≠ 表上那個數字，
-    而這種不一致沒有任何錯誤訊號。
+    兩次都栽在「各自判一遍」：第一次漏了非現金帳戶（差 777,000），第二次漏了
+    轉存的跨行手續費（差 150）。所以現在鑽取**不准自己判** —— 只能走
+    cashflow_lines，判準沒有第二份可以漂。
     """
     from tests.unit._srcscan import code_only, func_body, repo_src
     src = repo_src("services/finance_statements.py")
     body = code_only(func_body(src, "async def drilldown("))
-    assert "cash_account_ids(" in body, "鑽取沒有排除非現金帳戶"
-    assert "INTERNAL_MOVEMENT_TREATMENTS" in body, "又寫死一次 advance/transfer"
+    # 只框 cash.* 那一段 —— 同一支函式的 revenue/cost 分支本來就要自己 classify
+    seg = body[body.index('act = kind.split(".", 1)[1]'):]
+    assert "cashflow_lines(" in seg, "鑽取沒有走共用的那支迭代器"
+    for own in ("cash_account_ids(", "classify_cash_entry(", "cash_entry_activity("):
+        assert own not in seg, f"鑽取又自己判了一次（{own}）"
     # 兩邊都用具名的那一份，不准再出現字面
     cf = code_only(repo_src("core/finance_logic.py"))
     assert '("advance", "transfer")' not in cf, "core 裡還有字面的內部移動清單"
