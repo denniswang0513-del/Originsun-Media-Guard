@@ -154,6 +154,33 @@ try:
         aps = {x["id"]: x for x in (d.get("payments") or d.get("items") or [])}
         check(aps.get(ap_id, {}).get("payment_status") == "已付款", "標成已付款",
               aps.get(ap_id, {}).get("payment_status"))
+
+        print("")
+        print("[5] 🔴 掛過的列重開要載得回來（閘門的另一條路）")
+        # 現在這筆已經有 payment_request_id → renderDetail 會真的去要分配；
+        # 上一段開的時候還沒有，走的是就地畫空狀態那條。兩條都要走過。
+        pg.reload(wait_until="domcontentloaded")
+        pg.wait_for_timeout(4000)
+        pg.evaluate("window.switchTab('tab_crm_invoices')")
+        pg.wait_for_timeout(3000)
+        pg.evaluate("""() => {
+            const el = document.querySelector('[data-inv-view="cashbook"]');
+            if (el) el.click();
+        }""")
+        pg.wait_for_selector("#cash-list-body .crm-row", timeout=30000)
+        pg.locator("#cash-list-body .crm-row", has_text="ZZUI匯款").first.click()
+        pg.wait_for_timeout(3000)
+        txt2 = pg.inner_text("#cash-pay-box")
+        check("ZZUI分配測試" in txt2, "掛著的那張載回來了", txt2[:80])
+        # 🔴 那張現在是「已付款」，而候選清單只跟後端要「還沒付的」——
+        #    移掉之後必須還選得回來。真的按 ✕ 再搜一次，不要用探針空跑。
+        pg.click("#cash-pay-box [data-pay-del=\"0\"]")
+        pg.wait_for_timeout(600)
+        pg.fill("#cash-pay-search", "ZZUI收款人")
+        pg.wait_for_timeout(900)
+        hits = pg.inner_text("#cash-pay-results")
+        check("ZZUI分配測試" in hits, "移掉後還選得回來", hits[:80])
+        check(not errs, "重開沒有 JS 例外", errs[:2])
         b.close()
 finally:
     print("")

@@ -17,7 +17,7 @@ def _entry(deposit):
 
 def test_exact_match():
     v = _alloc_verdict(_entry(42000), 42000)
-    assert v["state"] == "ok" and v["diff"] == 0
+    assert v["state"] == "ok" and v["gap"] == 0
 
 
 def test_merged_transfer_three_invoices_sum_exactly():
@@ -37,7 +37,7 @@ def test_partial_payment_reads_as_over_allocation():
     """分期：發票 100,000 這次只收 40,000 —— 提示「沒收齊」而不是報錯。"""
     v = _alloc_verdict(_entry(40000), 100000)
     assert v["state"] == "over"
-    assert v["diff"] == 60000
+    assert v["gap"] == 60000
     assert "分期" in v["message"]
 
 
@@ -45,7 +45,7 @@ def test_under_allocation_flags_missing_invoice():
     """實收 126,000 只掛了一張 42,000 —— 還有發票沒掛上。"""
     v = _alloc_verdict(_entry(126000), 42000)
     assert v["state"] == "under"
-    assert v["diff"] == -84000
+    assert v["gap"] == -84000
 
 
 def test_no_allocation_is_empty_not_under():
@@ -56,7 +56,7 @@ def test_no_allocation_is_empty_not_under():
 def test_expense_row_has_zero_received():
     """支出列 deposit 是 None —— 不可以炸，received 當 0。"""
     v = _alloc_verdict(SimpleNamespace(deposit=None), 0)
-    assert v["received"] == 0 and v["state"] == "empty"
+    assert v["actual"] == 0 and v["state"] == "empty"
 
 
 def test_boundary_50_is_still_fee_51_is_over():

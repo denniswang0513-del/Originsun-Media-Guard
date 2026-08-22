@@ -1857,6 +1857,16 @@ _fb.stmtSaveRule = async (i) => {
 let _rules = [];
 
 /** 帳戶 id → 名稱（找不到就顯示 id 前 8 碼，不要靜靜變空白）。 */
+// 方向條件的詞彙只有這一份 —— 下拉與表格欄位都從它生。
+// （CLAUDE.md 規則 D 點名的那個陷阱：選項寫在 .js、標籤寫在模板，各一份，
+//  加一個值時漏改哪一邊都不會有任何失敗訊號。）
+const _DIR_OPTS = [[0, '不限'], [1, '只存入'], [-1, '只支出']];
+
+function _dirLabel(v) {
+    const hit = _DIR_OPTS.find(([x]) => x === (parseInt(v, 10) || 0));
+    return hit ? hit[1] : '不限';
+}
+
 function _acctName(id) {
     const a = _accounts.find(x => String(x.id) === String(id));
     return a ? (a.name || '') : String(id).slice(0, 8);
@@ -1881,7 +1891,7 @@ function _rulesRender() {
             <td style="padding:4px 6px;color:#9ca3af;font-size:11px;">${
                 r.bank_account_id ? esc(_acctName(r.bank_account_id)) : '所有帳戶'}</td>
             <td style="padding:4px 6px;color:#9ca3af;font-size:11px;">${
-                { '-1': '只支出', '1': '只存入' }[String(r.only_direction || 0)] || '不限'}</td>
+                _dirLabel(r.only_direction)}</td>
             <td style="padding:4px 6px;text-align:right;">
                 <button class="crm-btn crm-btn-secondary crm-btn-sm"
                         onclick="window._finBank.ruleToggle('${r.id}', ${r.active ? 'false' : 'true'})">${
@@ -1907,10 +1917,8 @@ function _rulesRender() {
             <div><div style="color:#9ca3af;font-size:11px;">適用帳戶</div>
                 <select id="rule-acct" class="crm-select">${acctOpts}</select></div>
             <div><div style="color:#9ca3af;font-size:11px;">方向</div>
-                <select id="rule-dir" class="crm-select">
-                    <option value="0">不限</option>
-                    <option value="1">只存入</option>
-                    <option value="-1">只支出</option></select></div>
+                <select id="rule-dir" class="crm-select">${_DIR_OPTS.map(
+                    ([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></div>
             <button class="crm-btn crm-btn-primary" onclick="window._finBank.ruleAdd(this)">新增</button>
         </div>
         <div id="rule-err" style="display:none;color:#fca5a5;font-size:12px;margin-bottom:6px;"></div>
@@ -1941,7 +1949,7 @@ _fb.ruleAdd = async (btn) => {
         await finFetch('/import-rules', { method: 'POST', body: JSON.stringify({
             keyword: kw, category: cat,
             bank_account_id: document.getElementById('rule-acct').value || null,
-            only_direction: parseInt((document.getElementById('rule-dir') || {}).value || '0', 10),
+            only_direction: parseInt(document.getElementById('rule-dir').value, 10),
             sort_order: 50, active: true, note: '手動新增' }) });
         await _fb.rulesOpen();
     } catch (e) {

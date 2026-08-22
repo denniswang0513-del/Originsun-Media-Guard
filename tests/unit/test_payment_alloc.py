@@ -14,18 +14,20 @@
 """
 import pytest
 
-from core.finance_logic import (FEE_TOLERANCE, alloc_verdict,
-                                payment_alloc_verdict)
+from core.finance_logic import FEE_TOLERANCE, alloc_verdict
+
+
+def _pay(paid, allocated):
+    return alloc_verdict(paid, allocated, side="payment")
 
 
 def test_exact_match():
-    r = payment_alloc_verdict(8000, 8000)
-    assert r["state"] == "ok" and r["diff"] == 0 and r["fee"] == 0
+    r = _pay(8000, 8000)
+    assert r["state"] == "ok" and r["gap"] == 0 and r["fee"] == 0
 
 
 def test_nothing_allocated():
-    r = payment_alloc_verdict(8010, 0)
-    assert r["state"] == "empty"
+    assert _pay(8010, 0)["state"] == "empty"
 
 
 @pytest.mark.parametrize("paid,alloc,fee", [
@@ -36,56 +38,60 @@ def test_nothing_allocated():
 ])
 def test_small_shortfall_is_a_transfer_fee(paid, alloc, fee):
     """🔴 這就是 87% 配不到的原因 —— 差的是手續費不是漏掛。"""
-    r = payment_alloc_verdict(paid, alloc)
+    r = _pay(paid, alloc)
     assert r["state"] == "fee"
     assert r["fee"] == fee, "沒把手續費金額算出來（呼叫端要拿它寫 bank_fee）"
     assert "手續費" in r["message"]
 
 
 def test_big_shortfall_means_another_request_is_unlinked():
-    r = payment_alloc_verdict(130109, 8000)
+    r = _pay(130109, 8000)
     assert r["state"] == "under"
     assert r["fee"] == 0, "差這麼多不能當成手續費吞掉"
     assert "122,109" in r["message"], "沒告訴人還差多少"
 
 
 def test_over_allocation():
-    r = payment_alloc_verdict(8000, 9000)
+    r = _pay(8000, 9000)
     assert r["state"] == "over" and r["fee"] == 0
     assert "1,000" in r["message"]
 
 
-def test_direction_is_opposite_to_the_receipt_side():
-    """🔴 兩支不能共用。同一組數字，兩側的判讀必須相反。"""
-    # 付 8,010、掛 8,000 → 付款側是「手續費」
-    assert payment_alloc_verdict(8010, 8000)["state"] == "fee"
-    # 收 8,010、掛 8,000 → 收款側不是 fee（是少掛了）
+def test_the_two_sides_put_the_tolerance_on_opposite_edges():
+    """🔴 同一組數字，兩側的判讀必須相反 —— 這是 side 參數存在的**唯一**理由。"""
+    # 付 8,010、掛 8,000 → 付款側是「手續費」（我們付了跨行費）
+    assert _pay(8010, 8000)["state"] == "fee"
+    # 收 8,010、掛 8,000 → 收款側不是 fee（是少掛了一張）
     assert alloc_verdict(8010, 8000)["state"] != "fee"
-    # 收 8,000、掛 8,010 → 收款側才是 fee
+    # 收 8,000、掛 8,010 → 收款側才是 fee（收款方代扣）
     assert alloc_verdict(8000, 8010)["state"] == "fee"
 
 
-def test_return_shape_matches_the_receipt_side():
-    """🔴 規則方向刻意相反，但**回傳形狀沒有理由分家**。
+def test_one_ladder_not_two():
+    """🔴 兩側是**同一座階梯**，只換容差方向與措辭。
 
-    分家的代價是前端得為兩側各寫一份狀態列（實際發生過：
-    `_payStatusLine` 只是 `_allocStatusLine` 的複本，差在 msg vs message）。
+    本來是兩支各寫一遍五個分支，於是同一個 key（diff）在兩側正負號相反，
+    前端得靠 `check.received != null ? … : check.paid != null ? …` 猜自己
+    在哪一側。這裡釘住：形狀完全一致、gap 語意一致（分配 − 實際）。
     """
-    a = set(alloc_verdict(8000, 8010))
-    p = set(payment_alloc_verdict(8010, 8000))
-    assert "message" in p and "msg" not in p, "又漂回 msg 了"
-    assert p >= {"state", "allocated", "diff", "message"}, p
-    assert (a - p) <= {"received"}, f"收款側有、付款側沒有的 key：{a - p}"
-    assert "paid" in p, "付款側要有實付金額（畫面要顯示在跟什麼比）"
+    a, p = alloc_verdict(8000, 8010), _pay(8010, 8000)
+    assert set(a) == set(p), f"兩側 key 不一致：{set(a) ^ set(p)}"
+    assert a["gap"] == 10 and p["gap"] == -10, "gap 的語意兩側必須同向"
+    assert (a["actual_label"], p["actual_label"]) == ("實收", "實付")
+    assert "msg" not in p, "又漂回 msg 了"
+    # state 的語意兩側一致：over ＝ 分配比實際多
+    assert alloc_verdict(8000, 9000)["state"] == "over"
+    assert _pay(8000, 9000)["state"] == "over"
 
 
 def test_tolerance_comes_from_the_shared_constant():
     """容差只有一個正本 —— 兩側各寫死一個數字，調的時候一定漏一邊。"""
     from tests.unit._srcscan import code_only, func_body, repo_src
-    body = code_only(func_body(repo_src("core/finance_logic.py"),
-                               "def payment_alloc_verdict("))
+    src = repo_src("core/finance_logic.py")
+    body = code_only(func_body(src, "def alloc_verdict("))
     assert "FEE_TOLERANCE" in body
     assert "50" not in body, "又寫死了一個容差數字"
+    assert "def payment_alloc_verdict(" not in src, "付款側又長回自己那支"
 
 
 # ── 連結表 ────────────────────────────────────────────────────────
@@ -176,9 +182,24 @@ def test_month_close_is_respected():
 def test_ui_has_the_payment_box_on_expense_rows_only():
     js = repo_src(JS)
     assert "loadCashPaymentAllocs" in js and "cash-pay-box" in js
-    assert "if (e.expense) loadCashPaymentAllocs(e.id);" in js, \
-        "收入列也載入了付款分配（那是發票那區的事）"
-    assert "if (e.deposit) loadCashInvoiceAllocs(e.id);" in js, "動到了發票那側"
+    seg = func_body(js, "function renderDetail(")
+    assert "e.expense" in seg, "收入列也載入了付款分配（那是發票那區的事）"
+    assert "if (e.deposit) loadCashInvoiceAllocs(e.id);" in seg, "動到了發票那側"
+
+
+def test_ui_does_not_fetch_allocs_for_rows_that_have_none():
+    """🔴 沒掛過就不要打那一趟。
+
+    實測生產 907 筆支出列、有硬連結的是 **0 筆** —— 沒有這個閘門的話，
+    每點一列支出就是一次白往返 ＋ 兩個查詢（連線池只有 50，這個月已經被
+    用光過一次）。payment_request_id 的不變量由 replace_payment_allocs
+    維持（有連結才非空），所以它就是「這列有沒有分配」。
+    """
+    js = repo_src(JS)
+    seg = func_body(js, "function renderDetail(")
+    assert "e.payment_request_id" in seg, "沒有閘門，每列都會去要一次分配"
+    assert "_renderEmptyPayBox" in seg, "沒掛過的列要就地畫空狀態，不是留著載入中"
+
 
 
 def test_ui_offers_to_book_the_fee():

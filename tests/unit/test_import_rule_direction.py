@@ -96,21 +96,49 @@ def test_it_is_not_confused_with_direction():
 
 
 def test_endpoint_validates_and_returns_it():
-    from tests.unit._srcscan import repo_src
+    """亂填的方向要擋，而且欄位要出現在 payload 裡（前端要畫那一欄）。"""
+    from tests.unit._srcscan import code_only, func_body, repo_src
     src = repo_src("routers/api_finance_stmt.py")
-    assert '"only_direction": int(getattr(r, "only_direction", 0) or 0)' in src
+    assert "only_direction" in code_only(func_body(src, "def _rule_dict("))
     assert "方向條件只能是 -1／0／+1" in src, "沒有擋掉亂填的值"
 
 
 def test_rules_are_passed_through_with_direction():
-    """規則從 DB 撈出來要帶著第四個欄位，不然引擎收不到。"""
-    from tests.unit._srcscan import repo_src
-    src = repo_src("routers/api_finance_stmt.py")
-    assert 'int(getattr(r, "only_direction", 0) or 0)) for r in rows]' in src
+    """規則從 DB 撈出來要帶著第四個欄位，不然引擎收不到。
+
+    釘的是**形狀**（四元組）不是那一行怎麼寫 —— 本來斷言整串
+    `int(getattr(r, "only_direction", 0) or 0)) for r in rows]`，
+    連把多餘的 getattr 防禦拿掉都會紅。
+    """
+    from tests.unit._srcscan import code_only, func_body, repo_src
+    body = code_only(func_body(repo_src("routers/api_finance_stmt.py"),
+                               "async def _load_import_rules("))
+    assert "only_direction" in body
+    assert body.count(",") >= 3, "回傳的 tuple 少了欄位"
 
 
-def test_row_classification_passes_the_sign():
-    """算完方向才分類 —— 不傳 signed 的話方向條件永遠不會生效。"""
-    from tests.unit._srcscan import repo_src
-    src = repo_src("core/bank_statement.py")
-    assert '_classify(r["words"], rules, signed=r["signed"])' in src
+def test_every_classify_call_site_passes_the_sign():
+    """🔴 **每個**呼叫點都要傳 signed，不是只有匯入預覽那一個。
+
+    不傳的話帶方向條件的規則會被整批跳過（_classify 刻意不猜方向）——
+    功能看起來上線了、在那條路上其實是死的。實際踩過：
+    「套用規則到未分類」（api_finance_stmt）漏傳，而「薪資」兩側都有、
+    正是要靠方向分成代收／代發的那一批。
+
+    真的沒有方向的那個呼叫點（第一列推導）要**明寫** `signed=None` ——
+    省略跟「忘了傳」長得一模一樣，這條測試分不出來，人也分不出來。
+    """
+    from tests.unit._srcscan import code_only, repo_src
+    for path in ("core/bank_statement.py", "routers/api_finance_stmt.py"):
+        src = code_only(repo_src(path))
+        i = 0
+        while True:
+            i = src.find("_classify(", i)
+            if i < 0:
+                break
+            if src[i - 4:i] == "def ":
+                i += 10
+                continue
+            call = src[i:src.index(")", i) + 1]
+            assert "signed=" in call, f"{path} 有一個 _classify 呼叫沒傳 signed：{call}"
+            i += 10

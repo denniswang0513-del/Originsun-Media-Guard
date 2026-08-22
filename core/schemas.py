@@ -1312,6 +1312,24 @@ class CashInvoiceLinksPayload(BaseModel):
     items: List[CashInvoiceLink] = []
 
 
+class CashPaymentLinkItem(BaseModel):
+    """對映 CashInvoiceLink（收款側的雙生子）—— 兩者要一起改。"""
+    payment_request_id: str
+    amount: int
+
+
+class CashPaymentLinksPayload(BaseModel):
+    """一筆匯款掛哪幾張請款單（整組取代）—— 送空 items 就是全部解除。
+
+    `fee` 由呼叫端決定要不要把差額認成匯費：alloc_verdict 的 payment 側判為
+    fee 時前端會把它一起送回來，寫進 crm_cash_entries.bank_fee（見
+    recognize_bank_fee —— 那條路把匯費算成管理費用與現金流出）。
+    None ＝ 不動既有的 bank_fee。
+    """
+    items: List[CashPaymentLinkItem] = []
+    fee: Optional[int] = None
+
+
 # ── 福委會（docs/BENEFIT_POOL_PLAN.md）───────────────────────────────
 
 class BenefitPoolPayload(BaseModel):
@@ -1334,22 +1352,6 @@ class BenefitPoolPayload(BaseModel):
     # 🔴 attachments **刻意不在 payload 裡**：附件只能走上傳／刪除那兩支端點。
     #    放進來的話，任何一個沒帶這欄的舊表單整包寫回就會把附件清空
     #    （「整包 model_dump 寫回會被預設值洗掉」的老坑）。
-
-
-class CashPaymentLinkItem(BaseModel):
-    payment_request_id: str = ""
-    amount: int = 0
-
-
-class CashPaymentLinksPayload(BaseModel):
-    """一筆匯款掛哪幾張請款單（整組取代）。
-
-    `fee` 由呼叫端決定要不要把差額認成匯費：payment_alloc_verdict 判為 fee 時
-    前端會把它一起送回來，寫進 crm_cash_entries.bank_fee（那條路本來就把匯費
-    算成管理費用與現金流出）。None ＝ 不動既有的 bank_fee。
-    """
-    items: List[CashPaymentLinkItem] = []
-    fee: Optional[int] = None
 
 
 class BenefitAllowancePayload(BaseModel):

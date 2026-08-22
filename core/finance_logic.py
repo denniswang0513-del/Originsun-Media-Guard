@@ -677,39 +677,6 @@ def passthrough_commission(amount_total, category: str, rates: dict | None = Non
     return round(total * (1 - pct / 100))
 
 
-def payment_alloc_verdict(paid: int, allocated: int) -> dict:
-    """一筆匯款分配到請款單之後的判讀（付款側）。
-
-    🔴 方向跟收款那支相反，不能共用：收款是「分配比實收**多** ≤ 容差 ＝ 收款方
-    代扣匯費」；付款是「分配比實付**少** ≤ 容差 ＝ **我們**付了跨行手續費」。
-    實測生產：「陳良君英配」8,010 對 8,000 的請款單、「邱靜右日配」7,010 對
-    7,000 —— 那 10 元就是手續費，不是少付。共用同一支會把它判成「還有單沒掛」。
-
-    回 fee 時附 `fee` 金額，呼叫端可以直接寫進 bank_fee（那條路本來就把匯費
-    算成管理費用與現金流出）。
-    """
-    paid, allocated = int(paid or 0), int(allocated or 0)
-    short = paid - allocated          # 正 = 實付比分配多（多出來的多半是匯費）
-    fee = 0
-    if not allocated:
-        state, msg = "empty", "還沒分配任何請款單"
-    elif short == 0:
-        state, msg = "ok", "分配金額與實付相符"
-    elif 0 < short <= FEE_TOLERANCE:
-        state, fee = "fee", short
-        msg = f"實付比分配多 {short} 元 —— 多半是跨行手續費，可認列為匯費"
-    elif short > 0:
-        state = "under"
-        msg = f"還有 {short:,} 元沒分配 —— 這筆匯款可能還結清了別張請款單"
-    else:
-        state = "over"
-        msg = f"分配比實付多 {-short:,} 元 —— 掛太多張了"
-    # 🔴 key 與 alloc_verdict 對齊（message / 實際金額）—— 規則方向刻意相反，
-    #    但**回傳形狀沒有理由分家**。分家的代價是前端得為兩側各寫一份狀態列。
-    return {"state": state, "paid": paid, "allocated": allocated,
-            "diff": short, "fee": fee, "message": msg}
-
-
 def recognize_bank_fee(expense, bank_fee, fee) -> tuple:
     """認列匯費：從 expense **搬**進 bank_fee，回 (新 expense, 新 bank_fee)。
 
@@ -733,30 +700,68 @@ def recognize_bank_fee(expense, bank_fee, fee) -> tuple:
     return total_out - fee, fee
 
 
-def alloc_verdict(received: int, allocated: int) -> dict:
-    """分配金額 vs 這筆收款 → 給人看的判讀。
+# 兩側只差三件事：容差站哪一邊、名詞、實際金額怎麼稱呼。
+# 🔴 階梯（empty / ok / fee / over / under）刻意只有一份 —— 之前是兩支各寫一遍，
+#    於是同一個 key（diff）在兩側是相反的正負號，前端得靠 `check.received != null
+#    ? … : check.paid != null ? …` 猜自己在哪一側。容差政策一改（例如改成百分比）
+#    兩份也一定會漂。
+#    state 的語意兩側本來就一致：over ＝ 分配比實際**多**、under ＝ 分配比實際**少**。
+_ALLOC_SIDES = {
+    # fee_sign：差額往哪個方向偏、而且在容差內時，算「匯費」而不是「掛錯」
+    #   收款 +1：分配比實收多 ≤ 容差 ＝ 收款方代扣了匯費
+    #   付款 -1：分配比實付少 ≤ 容差 ＝ **我們**付了跨行手續費
+    "receipt": {
+        "noun": "發票", "actual_label": "實收", "fee_sign": +1,
+        "empty": "還沒分配任何發票",
+        "ok": "分配金額與實收金額相符",
+        "fee": "分配比實收多 {n} 元 —— 常見於收款方代扣匯費",
+        "over": "分配金額比實收多 {n:,} 元 —— 可能是這幾張發票沒有全部收齊"
+                "（分期），或多掛了一張",
+        "under": "分配金額比實收少 {n:,} 元 —— 還有沒掛上的發票，"
+                 "或這筆收款有一部分不屬於發票",
+    },
+    "payment": {
+        "noun": "請款單", "actual_label": "實付", "fee_sign": -1,
+        "empty": "還沒分配任何請款單",
+        "ok": "分配金額與實付相符",
+        "fee": "實付比分配多 {n} 元 —— 多半是跨行手續費，可認列為匯費",
+        "over": "分配比實付多 {n:,} 元 —— 掛太多張了",
+        "under": "還有 {n:,} 元沒分配 —— 這筆匯款可能還結清了別張請款單",
+    },
+}
 
-    容差用 FEE_TOLERANCE（同 invoice_is_settled）—— 本來這裡寫死兩個 50，
-    調容差時會漏掉其中一邊。
+
+def alloc_verdict(actual: int, allocated: int, side: str = "receipt") -> dict:
+    """分配金額 vs 這筆錢的實際金額 → 給人看的判讀。
+
+    `side="receipt"`（收款掛發票）／`"payment"`（匯款掛請款單）。
+
+    🔴 兩側的容差方向相反，這是實測出來的：
+      · 收款：客戶匯 300,000、發票開 300,030 —— 收款方代扣了 30 元匯費
+      · 付款：我們匯出 8,010、請款單 8,000（「陳良君英配」）—— 那 10 元是
+        跨行手續費。用收款那套判會說「還有單沒掛」，害人去找一張不存在的單。
+
+    但**只有方向與措辭不同**，階梯是同一座。容差用 FEE_TOLERANCE（同
+    amount_is_settled）—— 本來這裡寫死兩個 50，調容差時會漏掉其中一邊。
+
+    回 `fee` 時附差額金額，呼叫端可以直接寫進 bank_fee
+    （見 recognize_bank_fee —— 那條路把匯費算成管理費用與現金流出）。
     """
-    received, allocated = int(received or 0), int(allocated or 0)
-    diff = allocated - received
+    t = _ALLOC_SIDES[side]
+    actual, allocated = int(actual or 0), int(allocated or 0)
+    gap = allocated - actual          # 正 = 分配比實際多（兩側同義）
+    fee = 0
     if not allocated:
-        state, msg = "empty", "還沒分配任何發票"
-    elif diff == 0:
-        state, msg = "ok", "分配金額與實收金額相符"
-    elif 0 < diff <= FEE_TOLERANCE:
-        state, msg = "fee", f"分配比實收多 {diff} 元 —— 常見於收款方代扣匯費"
-    elif diff > FEE_TOLERANCE:
-        state = "over"
-        msg = (f"分配金額比實收多 {diff:,} 元 —— 可能是這幾張發票沒有全部收齊"
-               f"（分期），或多掛了一張")
+        state = "empty"
+    elif gap == 0:
+        state = "ok"
+    elif 0 < gap * t["fee_sign"] <= FEE_TOLERANCE:
+        state, fee = "fee", abs(gap)
     else:
-        state = "under"
-        msg = (f"分配金額比實收少 {-diff:,} 元 —— 還有沒掛上的發票，"
-               f"或這筆收款有一部分不屬於發票")
-    return {"received": received, "allocated": allocated, "diff": diff,
-            "state": state, "message": msg}
+        state = "over" if gap > 0 else "under"
+    return {"state": state, "actual": actual, "actual_label": t["actual_label"],
+            "allocated": allocated, "gap": gap, "fee": fee,
+            "message": t[state].format(n=abs(gap))}
 
 
 def initial_invoice_status(payment_type: str, unpaid: bool = False) -> str:

@@ -163,7 +163,7 @@ def _rule_priority_key(bank_account_id: str = ""):
 
 
 async def _load_import_rules(session, bank_account_id: str = ""):
-    """回 [(關鍵字, category, 方向)]，已照優先序排好給 _classify 用。"""
+    """回 [(關鍵字, category, 方向, 只在哪個方向)]，已照優先序排好給 _classify 用。"""
     from sqlalchemy import select
 
     from db.models import BankImportRule
@@ -174,14 +174,14 @@ async def _load_import_rules(session, bank_account_id: str = ""):
             if not r.bank_account_id or r.bank_account_id == bank_account_id]
     rows.sort(key=_rule_priority_key(bank_account_id))
     return [(r.keyword, r.category, int(r.direction or 0),
-             int(getattr(r, "only_direction", 0) or 0)) for r in rows]
+             int(r.only_direction or 0)) for r in rows]
 
 
 def _rule_dict(r) -> dict:
     return {"id": r.id, "keyword": r.keyword, "category": r.category,
             "bank_account_id": r.bank_account_id or "",
             "sort_order": r.sort_order, "active": bool(r.active),
-            "only_direction": int(getattr(r, "only_direction", 0) or 0),
+            "only_direction": int(r.only_direction or 0),
             "note": r.note or ""}
 
 
@@ -338,6 +338,7 @@ async def apply_rules_to_unclassified(request: Request, entity: str = ""):
     from sqlalchemy import or_, select
 
     from core.bank_statement import _classify
+    from core.finance_logic import cash_entry_flow
     from db.models import CrmCashEntry
     factory = _factory_or_503()
     changed, by_cat = 0, {}
@@ -353,7 +354,12 @@ async def apply_rules_to_unclassified(request: Request, entity: str = ""):
             acct = e.bank_account_id or ""
             if acct not in cache:
                 cache[acct] = await _load_import_rules(session, acct)
-            cat, _d = _classify(f"{e.summary or ''} {e.note or ''}", cache[acct])
+            # 🔴 一定要傳 signed，否則帶方向條件的規則會被整批跳過
+            #    （_classify：不知道方向就不假裝知道）。「薪資」兩側都有、
+            #    靠方向分成代收／代發 —— 那正是這條路要分的東西。
+            #    正負號用 cash_entry_flow 的定義（正=流入、負=流出）。
+            cat, _d = _classify(f"{e.summary or ''} {e.note or ''}", cache[acct],
+                                signed=cash_entry_flow(e))
             if cat:
                 e.category = cat
                 e.updated_at = datetime.now()

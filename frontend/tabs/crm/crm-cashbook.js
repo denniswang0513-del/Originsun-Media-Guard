@@ -45,22 +45,23 @@ async function loadEntries({ render = true } = {}) {
     if (render) renderList();
 }
 
-async function _loadInvoiceList() {
-    // 發票是帶 entity 的表 — 關聯選單只列同一本帳的發票
-    // 兩支互不相干 —— 串行 await 等於把外層的 Promise.all 自己拆掉，
-    // 白白多一趟往返在開 tab 的關鍵路徑上。
+/** 兩份關聯選單的來源（發票／請款單）。開 tab 與每次存檔後各載一次。 */
+async function _loadLinkLists() {
+    // 兩支互不相干 —— 串行 await 等於把外層的 Promise.all 自己拆掉。
+    //
+    // 🔴 請款單只抓**還沒付的**（後端 payment_status=應付款 會一起帶未付款）。
+    //    實測生產 810 張裡 805 張已付款 —— 全抓回來只為了讓下拉列出 5 個候選，
+    //    而且每存一筆收支就重抓一次。篩選條件端點本來就吃（finance.py:1027）。
+    //    發票側的候選規則在 _invoiceCandidates（判準是 outstanding 不是狀態字串），
+    //    請款單目前沒有對應的欄位可用，先用狀態篩 —— 見 _payCandidates。
     const ent = _pinEntity();
     const [inv, pay] = await Promise.all([
         _fetch('/invoices?entity=' + ent).then(r => r.invoices || []).catch(() => []),
-        _fetch('/payments?entity=' + ent).then(r => r.payments || []).catch(() => []),
+        _fetch('/payments?entity=' + ent + '&payment_status=應付款')
+            .then(r => r.payments || []).catch(() => []),
     ]);
     _invoiceList = inv;
     _paymentList = pay;
-    // 搜尋用的比對字串算一次就好（每敲一鍵重建 800 筆 × 4 個小寫字串是白工）
-    _paymentList.forEach((p) => {
-        p._hay = [p.payee_name, p.summary, p.project_label, p.category]
-            .join(' ').toLowerCase();
-    });
 }
 
 async function _loadProjectList() {
@@ -299,7 +300,14 @@ function renderDetail(e) {
     document.getElementById('cash-detail-content').innerHTML = html;
     if (_LINKABLE.includes(e.category || '')) _renderQuickLink(e);
     if (e.deposit) loadCashInvoiceAllocs(e.id);
-    if (e.expense) loadCashPaymentAllocs(e.id);
+    // 🔴 沒掛過任何請款單就不用打那一趟：payment_request_id 的不變量由
+    //    replace_payment_allocs 維持（有連結才非空、清空就設回 null），所以它
+    //    等於「這列有沒有分配」。實測生產 907 筆支出列，有硬連結的是 0 筆 ——
+    //    等於每點一列支出就白花一次往返 ＋ 兩個查詢（連線池只有 50）。
+    if (e.expense) {
+        if (e.payment_request_id) loadCashPaymentAllocs(e.id);
+        else _renderEmptyPayBox(e.id);
+    }
 
     const actions = document.getElementById('cash-bar-actions');
     if (actions) {
@@ -570,7 +578,7 @@ async function saveEntry() {
         else await _fetch('/cash-entries', { method: 'POST', body: JSON.stringify(payload) });
         // 發款/收款狀態由後端自動計算，不需手動更新
         document.getElementById('cash-modal').style.display = 'none';
-        await Promise.all([loadEntries(), _loadInvoiceList()]);
+        await Promise.all([loadEntries(), _loadLinkLists()]);
     } catch (e) { _showErr(e.message); }
     finally { btn.disabled = false; btn.textContent = '儲存'; }
 }
@@ -734,7 +742,7 @@ export async function initCrmCashbookTab() {
     // 🔴 loadEntries 這裡**不畫**：這幾支是並行的，它內部的 renderList 幾乎一定跑在
     // _loadBankAccounts 回來之前 —— 那時 _bankAccounts 還是 null，帳戶切換列畫不出來、
     // 列表的「帳戶」欄也是空的。等全部到齊再畫一次就好（畫兩次是 1,600 列 ×2）。
-    await Promise.all([loadEntries({ render: false }), _loadInvoiceList(), _loadProjectList(),
+    await Promise.all([loadEntries({ render: false }), _loadLinkLists(), _loadProjectList(),
                        _loadClientList(), _loadBankAccounts(), _loadCashOptions()]);
     // 🔴 這裡要連 _syncFilterOptions 一起補畫，不是只有 renderList。
     // 帳戶切換列由 _syncFilterOptions → _renderAcctTabs 畫，而 loadEntries 內部那次
@@ -763,11 +771,11 @@ function _allocStatusLine(check, items) {
     const dirty = live !== check.allocated;
     const color = dirty ? '#fbbf24' : _allocColor(check.state);
     const tail = dirty ? '尚未儲存 —— 存檔後才會重新檢查' : _esc(check.message);
-    // 收款側回 received、付款側回 paid —— 兩側共用這一支，差別只有這個標籤。
-    // 本來付款側有一份自己的複本（差在 check.msg vs check.message），
-    // 那個差別是後端兩支 verdict 回傳形狀漂開造成的；形狀對齊之後複本就不需要了。
-    const actual = check.received != null ? ` / 實收 $${_fmtNum(check.received)}`
-        : check.paid != null ? ` / 實付 $${_fmtNum(check.paid)}` : '';
+    // 「實收」還是「實付」由後端的 side 決定並隨判讀一起送過來 —— 前端不必
+    // 也不該猜自己在哪一側（本來是 `check.received != null ? … : check.paid …`，
+    // 那個三元式存在的唯一理由是後端兩支 verdict 的回傳形狀漂開了）。
+    const actual = check.actual_label
+        ? ` / ${check.actual_label} $${_fmtNum(check.actual)}` : '';
     return `<div style="margin-top:8px;font-size:12px;color:${color};">`
         + `分配 $${_fmtNum(live)}${actual} —— ${tail}</div>`;
 }
@@ -842,15 +850,35 @@ function _renderCashAllocs() {
 
 const _CASH_PAY = { entryId: null, items: [], check: null };
 
+/** 沒掛過任何請款單的支出列 —— 空狀態不必跟後端要（見 renderDetail 的註解）。 */
+function _renderEmptyPayBox(entryId) {
+    _CASH_PAY.entryId = entryId;
+    _CASH_PAY.items = [];
+    _CASH_PAY.check = null;
+    _renderCashPayAllocs();
+}
+
 async function loadCashPaymentAllocs(entryId) {
     _CASH_PAY.entryId = entryId;
     try {
         const r = await _fetch(`/cash-entries/${entryId}/payments`);
         _CASH_PAY.items = r.items || [];
         _CASH_PAY.check = r.check || null;
+        // 🔴 已經掛上的那幾張要補進候選清單：_paymentList 只裝「還沒付的」，
+        //    而掛上去之後那張多半已經變成已付款。不補的話，使用者把它移掉就
+        //    再也選不回來（發票側用 _invoiceCandidates(keepId) 解同一個問題）。
+        const known = new Set(_paymentList.map(p => p.id));
+        _CASH_PAY.items.forEach((it) => {
+            if (it.missing || known.has(it.payment_request_id)) return;
+            _paymentList.push({
+                id: it.payment_request_id, amount: it.request_total,
+                summary: it.summary, payee_name: it.payee_name,
+                project_label: '', category: '',
+            });
+        });
     } catch (e) {
         _CASH_PAY.items = [];
-        _CASH_PAY.check = { state: 'error', msg: '讀取失敗：' + e.message };
+        _CASH_PAY.check = { state: 'error', message: '讀取失敗：' + e.message };
     }
     _renderCashPayAllocs();
 }
@@ -920,12 +948,12 @@ function _paySearch(q) {
     if (!out) return;
     q = (q || '').trim().toLowerCase();
     if (q.length < 1) { out.innerHTML = ''; return; }
+    // 已付款的在 _loadLinkLists 就被後端篩掉了（不是在這裡濾 800 筆），
+    // 這裡只排掉已經選進來的。
     const picked = new Set(_CASH_PAY.items.map(x => x.payment_request_id));
-    // 🔴 已付款的不列出來 —— 全留著等於在已結案名單裡大海撈針（發票側同理）。
-    //    比對字串在載入時就算好（_hay），不要每敲一鍵重建 800 筆小寫字串。
-    const hits = _paymentList.filter(
-        p => !picked.has(p.id) && p.payment_status !== '已付款'
-             && (p._hay || '').includes(q)).slice(0, 12);
+    const hits = _paymentList.filter(p => !picked.has(p.id) && [
+        p.payee_name, p.summary, p.project_label, p.category,
+    ].some(v => (v || '').toLowerCase().includes(q))).slice(0, 12);
     out.innerHTML = hits.length ? hits.map(p => `
         <div data-pay-add="${_esc(p.id)}"
              style="padding:4px 6px;cursor:pointer;font-size:12px;color:#ccc;border-bottom:1px solid #262626;">

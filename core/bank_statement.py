@@ -269,7 +269,10 @@ def parse_statement(text: str, opening_balance: int = None,
         if solved is not None:
             first["signed"] = solved
         else:
-            cat, direction = _classify(first["words"], rules)
+            # signed=None 是**刻意**的：這裡正在推導方向，還沒有方向可傳。
+            # 明寫出來而不是省略 —— 省略的話跟「忘了傳」長得一模一樣
+            #（api_finance_stmt 就忘過，方向規則在那條路上整批失效）。
+            cat, direction = _classify(first["words"], rules, signed=None)
             amt = first["amounts"][0] if first["amounts"] else 0
             first["signed"] = amt * (direction if direction else -1)
             inferred_first = True

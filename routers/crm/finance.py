@@ -19,7 +19,7 @@ from core.crm_logic import normalize_tax_id
 from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 INVOICE_PASSTHROUGH_COLLECTED,
                                 INVOICE_PENDING_REMIT, INVOICE_REMITTED,
-                                INVOICE_RECEIVED, alloc_verdict, payment_alloc_verdict,
+                                INVOICE_RECEIVED, alloc_verdict,
                                 initial_invoice_status,
                                 amount_is_settled, invoice_direction,
                                 recognize_bank_fee,
@@ -377,7 +377,7 @@ async def resolve_payment_allocs(session, items, ent):
     """(請款單 id, 金額) → [(單, 金額)]，逐項驗證。形狀照 resolve_invoice_allocs。
 
     擋的是**一定錯**的三件事：單不存在／不同帳本／金額 ≤ 0。
-    金額對不對得上實付**不擋** —— 那是提示（見 payment_alloc_verdict）。
+    金額對不對得上實付**不擋** —— 那是提示（見 alloc_verdict 的 payment 側）。
     """
     pairs = [((pid or "").strip(), amt) for pid, amt in items if (pid or "").strip()]
     ids = [pid for pid, _a in pairs]
@@ -1882,7 +1882,7 @@ async def batch_receive(request: Request):
 
 def _alloc_verdict(entry, allocated: int) -> dict:
     """分配判讀 —— 規則在 core.finance_logic（純函式、有測試、共用容差）。"""
-    return alloc_verdict(int(entry.deposit or 0), allocated)
+    return alloc_verdict(int(entry.deposit or 0), allocated, side="receipt")
 
 
 async def _load_allocs(session, entry):
@@ -1926,8 +1926,8 @@ async def list_cash_entry_invoices(entry_id: str, request: Request):
 
 
 def _payment_verdict(entry, allocated: int) -> dict:
-    """付款側判讀 —— 規則在 core.finance_logic（純函式、有測試、共用容差）。"""
-    return payment_alloc_verdict(int(entry.expense or 0), allocated)
+    """付款側判讀 —— 同一支 alloc_verdict，只是換一側（容差方向與措辭）。"""
+    return alloc_verdict(int(entry.expense or 0), allocated, side="payment")
 
 
 async def _load_payment_allocs(session, entry):
