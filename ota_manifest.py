@@ -96,6 +96,11 @@ LOCAL_MODULES = {
     "patch_ui", "debug_compare",
     "backup_source", "env_setup", "extract_frames", "remove_all_emojis",
     "aligner",  # root-level WIP module — align job 用，附在 AGENT_FILES
+    # 🔴 一次性腳本目錄。漏了它 → 發版的依賴掃描把 `scripts` 當成 PyPI 套件寫進
+    #    requirements_agent.txt（v2.4.149 真的發生過）。那一行不會讓已在線的機器
+    #    出事（OTA 不重跑 pip），但**新機安裝**跑 pip install -r 會裝到不相干的
+    #    同名套件或直接失敗。同一類坑之前咬過 zoneinfo 與 pptx。
+    "scripts",
 }
 
 # ── Import name → pip package name mapping ──
