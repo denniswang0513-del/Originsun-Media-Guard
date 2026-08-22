@@ -674,6 +674,23 @@ export async function initCrmCashbookTab() {
 
     document.getElementById('cash-btn-add').addEventListener('click', () => openModal());
     document.getElementById('cash-btn-import').addEventListener('click', openImportModal);
+    // 對帳系統：整套（上傳對帳單／分類規則／對帳工作台／核對餘額）都在
+    // finance 的 banking 子視圖裡。這裡**不複製一份** —— 複製就會有兩個畫面
+    // 各講各的（分類規則尤其致命）。直接點側欄那顆，走既有的 lazy-load 與
+    // active 狀態切換，一行導覽而已。
+    const recon = document.getElementById('cash-btn-recon');
+    if (recon) {
+        recon.addEventListener('click', () => {
+            const btn = document.querySelector('.finance-nav-btn[data-subview="banking"]');
+            if (btn) {
+                btn.click();
+                btn.scrollIntoView({ block: 'nearest' });
+            } else {
+                // 不在財務管理 tab 裡（例如未來被別處嵌入）—— 出聲，不要靜默沒反應
+                alert('找不到「銀行帳戶」子視圖 —— 請從財務管理 › 銀行與設定進入。');
+            }
+        });
+    }
     document.getElementById('cash-btn-save').addEventListener('click', saveEntry);
     document.getElementById('cash-detail-close').addEventListener('click', closeDetail);
     document.getElementById('cash-btn-do-import').addEventListener('click', doImport);
