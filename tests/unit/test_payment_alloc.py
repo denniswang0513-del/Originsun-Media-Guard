@@ -202,6 +202,35 @@ def test_ui_does_not_fetch_allocs_for_rows_that_have_none():
 
 
 
+def test_ui_has_one_alloc_panel_not_two():
+    """🔴 兩側（掛發票／掛請款單）是同一個面板，差異收在 _ALLOC_SIDES 裡。
+
+    本來是兩份 ~150 行的複本，在**同一次 commit 裡**就漂開三處：
+    狀態列的 msg vs message、預帶面額 vs 尚欠、候選有沒有濾掉結清的。
+    代價不是多打一次字，是同一個詳情面板裡的兩塊長得不一樣。
+    """
+    js = repo_src(JS)
+    for gone in ("_renderCashPayAllocs", "_renderCashAllocs",
+                 "function _paySearch(", "async function _paySave("):
+        assert gone not in js, f"付款側又長回自己的 {gone}"
+    assert js.count("function _renderAllocs(") == 1
+    assert js.count("function _allocSearch(") == 1
+    assert js.count("async function _allocSave(") == 1
+    # 兩側都要在表裡，而且各自的端點路徑不同
+    seg = js[js.index("const _ALLOC_SIDES = {"):js.index("const _CASH_PAY =")]
+    assert "invoice: {" in seg and "payment: {" in seg
+    assert "path: 'invoices'" in seg and "path: 'payments'" in seg
+
+
+def test_ui_only_the_payment_side_books_a_fee():
+    """收款側的 PUT payload 沒有 fee 欄 —— 兩側都畫按鈕的話，收款側會出現
+    一顆按了什麼都不會發生的按鈕。"""
+    js = repo_src(JS)
+    seg = js[js.index("const _ALLOC_SIDES = {"):js.index("const _CASH_PAY =")]
+    assert seg.count("canBookFee") == 1, "匯費按鈕的開關不是只有一側"
+    assert "canBookFee" in js[js.index("payment: {"):js.index("const _CASH_PAY =")]
+
+
 def test_ui_offers_to_book_the_fee():
     js = repo_src(JS)
     assert "認列成匯費" in js

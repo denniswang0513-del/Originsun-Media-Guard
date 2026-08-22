@@ -119,7 +119,7 @@ try:
         print("[2] 搜尋並掛上請款單")
         pg.fill("#cash-pay-search", "ZZUI收款人")
         pg.wait_for_timeout(1200)
-        hit = pg.locator("#cash-pay-results [data-pay-add]").first
+        hit = pg.locator("#cash-pay-results [data-alloc-add]").first
         check(hit.count() > 0, "搜得到那張請款單")
         hit.click()
         pg.wait_for_timeout(600)
@@ -174,7 +174,7 @@ try:
         check("ZZUI分配測試" in txt2, "掛著的那張載回來了", txt2[:80])
         # 🔴 那張現在是「已付款」，而候選清單只跟後端要「還沒付的」——
         #    移掉之後必須還選得回來。真的按 ✕ 再搜一次，不要用探針空跑。
-        pg.click("#cash-pay-box [data-pay-del=\"0\"]")
+        pg.click("#cash-pay-box [data-alloc-del=\"0\"]")
         pg.wait_for_timeout(600)
         pg.fill("#cash-pay-search", "ZZUI收款人")
         pg.wait_for_timeout(900)

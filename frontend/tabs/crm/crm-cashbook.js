@@ -785,32 +785,142 @@ function _allocColor(state) {
              under: '#fca5a5', empty: '#888' }[state] || '#888';
 }
 
-async function loadCashInvoiceAllocs(entryId) {
-    _CASH_ALLOC.entryId = entryId;
-    try {
-        const r = await _fetch(`/cash-entries/${entryId}/invoices`);
-        _CASH_ALLOC.items = r.items || [];
-        _CASH_ALLOC.check = r.check || null;
-    } catch (e) {
-        _CASH_ALLOC.items = [];
-        _CASH_ALLOC.check = { state: 'error', message: '讀取失敗：' + e.message };
-    }
-    _renderCashAllocs();
+// 兩側（收款掛發票／匯款掛請款單）是**同一個面板**，只是換掉九樣東西。
+//
+// 🔴 本來是兩份複本，~150 行對 ~150 行，差別只有端點、id key、標籤、預帶
+//    規則和一顆額外的按鈕。它們在同一次 commit 裡就已經漂開三處：狀態列
+//    的 msg vs message、預帶面額 vs 尚欠、候選有沒有濾掉結清的。兩份的
+//    代價不是「多打一次字」，是**同一個詳情面板裡的兩塊長得不一樣**。
+//
+// 差異全部收在這張表裡；新增第三種分配（預支結算、零用金整批）＝ 加一筆。
+const _ALLOC_SIDES = {
+    invoice: {
+        state: () => _CASH_ALLOC,
+        prefix: 'alloc', path: 'invoices', idKey: 'invoice_id', noun: '發票',
+        placeholder: '輸入發票號碼／抬頭／專案名稱找發票…',
+        emptyText: '還沒掛任何發票',
+        missingText: '（發票已刪除）',
+        itemTitle: it => it.title || '(無標題)',
+        itemMeta: it => `${_esc(it.invoice_number || '無號碼')} · 發票 $${_fmtNum(it.amount_total)}`
+            + (it.collected != null ? ` · 這張總共已收 $${_fmtNum(it.collected)}` : '')
+            + ((it.outstanding || 0) > 0
+                ? `<span style="color:#fbbf24;">，尚欠 $${_fmtNum(it.outstanding)}</span>` : ''),
+        // 🔴 刻意**不**改成 _invoiceCandidates（那支會濾掉已收齊的）：兩側的
+        //    候選規則本來就不一樣，那是產品決定不是重構決定。這裡統一的是
+        //    結構，不是規則 —— 想收斂的話要先問 owner 收齊的發票還要不要能搜到。
+        candidates: (q, picked) => _invoiceList.filter(
+            i => !picked.has(i.id) && [i.invoice_number, i.title, i.company_name, i.project_name]
+                .some(v => (v || '').toLowerCase().includes(q))),
+        hitLine: i => `${_esc(i.invoice_number || '無號碼')} · ${_esc((i.title || '').substring(0, 26))}`
+            + `<span style="color:#fbbf24;"> $${_fmtNum(i.amount_total || 0)}</span>`
+            + ((i.collected || 0) > 0
+                ? `<span style="color:#86efac;"> · 已收 $${_fmtNum(i.collected)}${
+                    (i.outstanding || 0) > 0 ? `，尚欠 $${_fmtNum(i.outstanding)}` : '（收齊）'}</span>` : '')
+            + (i.company_name ? `<span style="color:#666;"> · ${_esc(i.company_name)}</span>` : ''),
+        // 預帶「還沒收的部分」而不是面額 —— 分期收款時面額是錯的（發票 100,000
+        // 已收 60,000，第三期預帶 100,000 只會讓人重打一次）。沒收過時兩者相同。
+        toItem: i => ({
+            invoice_id: i.id, amount: _outstanding(i),
+            invoice_number: i.invoice_number || '', title: i.title || '',
+            amount_total: i.amount_total || 0,
+            payment_status: i.payment_status || '', missing: false,
+        }),
+    },
+    payment: {
+        state: () => _CASH_PAY,
+        prefix: 'pay', path: 'payments', idKey: 'payment_request_id', noun: '請款單',
+        canBookFee: true,
+        placeholder: '輸入收款人／摘要找請款單…',
+        emptyText: '還沒掛任何請款單',
+        missingText: '（請款單已刪除）',
+        itemTitle: it => it.summary || '(無摘要)',
+        itemMeta: it => `${_esc(it.payee_name || '無收款人')} · 單據 $${_fmtNum(it.request_total)}`
+            + (it.request_paid ? ` · 這張總共已付 $${_fmtNum(it.request_paid)}` : '')
+            + (!it.request_settled && (it.request_open || 0) > 0
+                ? `<span style="color:#fbbf24;">，尚欠 $${_fmtNum(it.request_open)}</span>` : ''),
+        // 已付款的在 _loadLinkLists 就被後端篩掉了（不是在這裡濾 800 筆）。
+        candidates: (q, picked) => _paymentList.filter(
+            p => !picked.has(p.id) && [p.payee_name, p.summary, p.project_label, p.category]
+                .some(v => (v || '').toLowerCase().includes(q))),
+        hitLine: p => `${_esc(p.payee_name || '無收款人')} · ${_esc((p.summary || '').substring(0, 26))}`
+            + `<span style="color:#fbbf24;"> $${_fmtNum(p.amount || 0)}</span>`
+            + `<span style="color:#666;"> · ${_esc(p.payment_status || '')}</span>`,
+        // 預帶面額。收款側預帶的是「未收部分」，但 /payments 清單沒有回已付金額
+        //（只有 payment_status），這裡算不出來 —— 與其憑空猜，不如帶面額讓人改；
+        // 已付清的那些已經被候選篩掉了。
+        toItem: p => ({
+            payment_request_id: p.id, amount: Number(p.amount) || 0,
+            summary: p.summary || '', payee_name: p.payee_name || '',
+            request_total: Number(p.amount) || 0, request_paid: 0,
+            request_open: Number(p.amount) || 0,
+            payment_status: p.payment_status || '', missing: false,
+        }),
+        // 🔴 已經掛上的那幾張要補進候選：_paymentList 只裝「還沒付的」，而掛上去
+        //    之後那張多半已經變成已付款。不補的話，使用者把它移掉就再也選不回來
+        //    （收款側用 _invoiceCandidates(keepId) 解同一個問題）。
+        absorbLinked: (items) => {
+            const known = new Set(_paymentList.map(p => p.id));
+            items.forEach((it) => {
+                if (it.missing || known.has(it.payment_request_id)) return;
+                _paymentList.push({
+                    id: it.payment_request_id, amount: it.request_total,
+                    summary: it.summary, payee_name: it.payee_name,
+                    payment_status: '已付款', project_label: '', category: '',
+                });
+            });
+        },
+    },
+};
+
+const _CASH_PAY = { entryId: null, items: [], check: null };
+
+function _sideOf(side) {
+    return _ALLOC_SIDES[side];
 }
 
-function _renderCashAllocs() {
-    const box = document.getElementById('cash-alloc-box');
+async function _loadAllocs(side, entryId) {
+    const c = _sideOf(side);
+    const st = c.state();
+    st.entryId = entryId;
+    try {
+        const r = await _fetch(`/cash-entries/${entryId}/${c.path}`);
+        st.items = r.items || [];
+        st.check = r.check || null;
+        if (c.absorbLinked) c.absorbLinked(st.items);
+    } catch (e) {
+        st.items = [];
+        st.check = { state: 'error', message: '讀取失敗：' + e.message };
+    }
+    _renderAllocs(side);
+}
+
+/** 沒掛過任何請款單的支出列 —— 空狀態不必跟後端要（見 renderDetail 的註解）。 */
+function _renderEmptyPayBox(entryId) {
+    _CASH_PAY.entryId = entryId;
+    _CASH_PAY.items = [];
+    _CASH_PAY.check = null;
+    _renderAllocs('payment');
+}
+
+async function loadCashInvoiceAllocs(entryId) {
+    return _loadAllocs('invoice', entryId);
+}
+
+async function loadCashPaymentAllocs(entryId) {
+    return _loadAllocs('payment', entryId);
+}
+
+function _renderAllocs(side) {
+    const c = _sideOf(side);
+    const box = document.getElementById(`cash-${c.prefix}-box`);
     if (!box) return;
-    const { items, check } = _CASH_ALLOC;
+    const { items, check } = c.state();
     const rows = items.map((it, i) => `
         <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #2a2a2a;">
             <div style="flex:1;min-width:0;">
                 <div style="color:#ddd;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                    ${_esc(it.title || '(無標題)')}${it.missing ? ' <span style="color:#fca5a5;">（發票已刪除）</span>' : ''}</div>
-                <div style="color:#888;font-size:11px;">
-                    ${_esc(it.invoice_number || '無號碼')} · 發票 $${_fmtNum(it.amount_total)}
-                    ${it.collected != null ? ` · 這張總共已收 $${_fmtNum(it.collected)}` : ''}
-                    ${(it.outstanding || 0) > 0 ? `<span style="color:#fbbf24;">，尚欠 $${_fmtNum(it.outstanding)}</span>` : ''}</div>
+                    ${_esc(c.itemTitle(it))}${it.missing ? ` <span style="color:#fca5a5;">${c.missingText}</span>` : ''}</div>
+                <div style="color:#888;font-size:11px;">${c.itemMeta(it)}</div>
             </div>
             <input type="number" value="${it.amount}" data-alloc-i="${i}"
                    style="width:96px;text-align:right;background:#1a1a1a;border:1px solid #333;
@@ -818,189 +928,97 @@ function _renderCashAllocs() {
             <button data-alloc-del="${i}" title="移除這張"
                     style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;">✕</button>
         </div>`).join('');
+    // 判為手續費時給一顆「認列成匯費」—— 那幾元本來只是對不起來的差額，寫進
+    // bank_fee 之後就是管理費用（見 recognize_bank_fee 的「總流出不變」）。
+    // 🔴 只有付款側有：收款側的 PUT payload 沒有 fee 欄（CashInvoiceLinksPayload），
+    //    兩側都畫的話收款側會出現一顆按了什麼都不會發生的按鈕。
+    const feeBtn = (c.canBookFee && check && check.state === 'fee' && check.fee)
+        ? `<button id="cash-${c.prefix}-fee" class="crm-btn crm-btn-sm"
+                   style="margin-left:8px;">把 $${_fmtNum(check.fee)} 認列成匯費</button>`
+        : '';
     box.innerHTML = `
-        ${rows || '<div style="color:#666;font-size:12px;padding:4px 0;">還沒掛任何發票</div>'}
+        ${rows || `<div style="color:#666;font-size:12px;padding:4px 0;">${c.emptyText}</div>`}
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-            <input id="cash-alloc-search" placeholder="輸入發票號碼／抬頭／專案名稱找發票…"
+            <input id="cash-${c.prefix}-search" placeholder="${c.placeholder}"
                    style="flex:1;background:#1a1a1a;border:1px solid #333;color:#eee;
                           border-radius:4px;padding:4px 8px;font-size:12px;">
         </div>
-        <div id="cash-alloc-results" style="max-height:150px;overflow:auto;"></div>
+        <div id="cash-${c.prefix}-results" style="max-height:150px;overflow:auto;"></div>
         ${_allocStatusLine(check, items)}
         <div style="margin-top:8px;">
-            <button id="cash-alloc-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存發票分配</button>
+            <button id="cash-${c.prefix}-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存${c.noun}分配</button>
+            ${feeBtn}
         </div>`;
 
     box.querySelectorAll('[data-alloc-i]').forEach((inp) => {
         inp.addEventListener('change', () => {
-            _CASH_ALLOC.items[Number(inp.dataset.allocI)].amount = Number(inp.value) || 0;
+            c.state().items[Number(inp.dataset.allocI)].amount = Number(inp.value) || 0;
         });
     });
     box.querySelectorAll('[data-alloc-del]').forEach((btn) => {
         btn.addEventListener('click', () => {
-            _CASH_ALLOC.items.splice(Number(btn.dataset.allocDel), 1);
-            _renderCashAllocs();
+            c.state().items.splice(Number(btn.dataset.allocDel), 1);
+            _renderAllocs(side);
         });
     });
-    const search = box.querySelector('#cash-alloc-search');
-    if (search) search.addEventListener('input', () => _allocSearch(search.value));
-    const save = box.querySelector('#cash-alloc-save');
-    if (save) save.addEventListener('click', () => _allocSave(save));
+    const search = box.querySelector(`#cash-${c.prefix}-search`);
+    if (search) search.addEventListener('input', () => _allocSearch(side, search.value));
+    // id 保持 per-side（cash-alloc-* / cash-pay-*）—— 兩塊可能同時在畫面上
+    // （一列同時有收入與支出），共用 id 會撞。列內的 data-alloc-* 則是共用的，
+    // 因為那些查詢都框在自己的 box 裡。
+    const save = box.querySelector(`#cash-${c.prefix}-save`);
+    if (save) save.addEventListener('click', () => _allocSave(side, save, null));
+    const fee = box.querySelector(`#cash-${c.prefix}-fee`);
+    if (fee) fee.addEventListener('click', () => _allocSave(side, fee, check.fee));
 }
 
-const _CASH_PAY = { entryId: null, items: [], check: null };
-
-/** 沒掛過任何請款單的支出列 —— 空狀態不必跟後端要（見 renderDetail 的註解）。 */
-function _renderEmptyPayBox(entryId) {
-    _CASH_PAY.entryId = entryId;
-    _CASH_PAY.items = [];
-    _CASH_PAY.check = null;
-    _renderCashPayAllocs();
-}
-
-async function loadCashPaymentAllocs(entryId) {
-    _CASH_PAY.entryId = entryId;
-    try {
-        const r = await _fetch(`/cash-entries/${entryId}/payments`);
-        _CASH_PAY.items = r.items || [];
-        _CASH_PAY.check = r.check || null;
-        // 🔴 已經掛上的那幾張要補進候選清單：_paymentList 只裝「還沒付的」，
-        //    而掛上去之後那張多半已經變成已付款。不補的話，使用者把它移掉就
-        //    再也選不回來（發票側用 _invoiceCandidates(keepId) 解同一個問題）。
-        const known = new Set(_paymentList.map(p => p.id));
-        _CASH_PAY.items.forEach((it) => {
-            if (it.missing || known.has(it.payment_request_id)) return;
-            _paymentList.push({
-                id: it.payment_request_id, amount: it.request_total,
-                summary: it.summary, payee_name: it.payee_name,
-                project_label: '', category: '',
-            });
-        });
-    } catch (e) {
-        _CASH_PAY.items = [];
-        _CASH_PAY.check = { state: 'error', message: '讀取失敗：' + e.message };
-    }
-    _renderCashPayAllocs();
-}
-
-function _renderCashPayAllocs() {
-    const box = document.getElementById('cash-pay-box');
-    if (!box) return;
-    const { items, check } = _CASH_PAY;
-    const rows = items.map((it, i) => `
-        <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #2a2a2a;">
-            <div style="flex:1;min-width:0;">
-                <div style="color:#ddd;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                    ${_esc(it.summary || '(無摘要)')}${it.missing ? ' <span style="color:#fca5a5;">（請款單已刪除）</span>' : ''}</div>
-                <div style="color:#888;font-size:11px;">
-                    ${_esc(it.payee_name || '無收款人')} · 單據 $${_fmtNum(it.request_total)}
-                    ${it.request_paid ? ` · 這張總共已付 $${_fmtNum(it.request_paid)}` : ''}
-                    ${!it.request_settled && (it.request_open || 0) > 0
-                        ? `<span style="color:#fbbf24;">，尚欠 $${_fmtNum(it.request_open)}</span>` : ''}</div>
-            </div>
-            <input type="number" value="${it.amount}" data-pay-i="${i}"
-                   style="width:96px;text-align:right;background:#1a1a1a;border:1px solid #333;
-                          color:#eee;border-radius:4px;padding:3px 6px;font-size:12px;">
-            <button data-pay-del="${i}" title="移除這張"
-                    style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;">✕</button>
-        </div>`).join('');
-    // 判為手續費時給一顆「認列成匯費」—— 那 10 元本來只是對不起來的差額，
-    // 寫進 bank_fee 之後就是管理費用（bank_fee_total 那條路）。
-    const feeBtn = (check && check.state === 'fee' && check.fee)
-        ? `<button id="cash-pay-fee" class="crm-btn crm-btn-sm"
-                   style="margin-left:8px;">把 $${_fmtNum(check.fee)} 認列成匯費</button>`
-        : '';
-    box.innerHTML = `
-        ${rows || '<div style="color:#666;font-size:12px;padding:4px 0;">還沒掛任何請款單</div>'}
-        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-            <input id="cash-pay-search" placeholder="輸入收款人／摘要找請款單…"
-                   style="flex:1;background:#1a1a1a;border:1px solid #333;color:#eee;
-                          border-radius:4px;padding:4px 8px;font-size:12px;">
-        </div>
-        <div id="cash-pay-results" style="max-height:150px;overflow:auto;"></div>
-        ${_allocStatusLine(check, items)}
-        <div style="margin-top:8px;">
-            <button id="cash-pay-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存請款單分配</button>
-            ${feeBtn}
-        </div>`;
-
-    box.querySelectorAll('[data-pay-i]').forEach((inp) => {
-        inp.addEventListener('change', () => {
-            _CASH_PAY.items[Number(inp.dataset.payI)].amount = Number(inp.value) || 0;
-        });
-    });
-    box.querySelectorAll('[data-pay-del]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            _CASH_PAY.items.splice(Number(btn.dataset.payDel), 1);
-            _renderCashPayAllocs();
-        });
-    });
-    const search = box.querySelector('#cash-pay-search');
-    if (search) search.addEventListener('input', () => _paySearch(search.value));
-    const save = box.querySelector('#cash-pay-save');
-    if (save) save.addEventListener('click', () => _paySave(save, null));
-    const fee = box.querySelector('#cash-pay-fee');
-    if (fee) fee.addEventListener('click', () => _paySave(fee, check.fee));
-}
-
-function _paySearch(q) {
-    const out = document.getElementById('cash-pay-results');
+function _allocSearch(side, q) {
+    const c = _sideOf(side);
+    const out = document.getElementById(`cash-${c.prefix}-results`);
     if (!out) return;
     q = (q || '').trim().toLowerCase();
     if (q.length < 1) { out.innerHTML = ''; return; }
-    // 已付款的在 _loadLinkLists 就被後端篩掉了（不是在這裡濾 800 筆），
-    // 這裡只排掉已經選進來的。
-    const picked = new Set(_CASH_PAY.items.map(x => x.payment_request_id));
-    const hits = _paymentList.filter(p => !picked.has(p.id) && [
-        p.payee_name, p.summary, p.project_label, p.category,
-    ].some(v => (v || '').toLowerCase().includes(q))).slice(0, 12);
-    out.innerHTML = hits.length ? hits.map(p => `
-        <div data-pay-add="${_esc(p.id)}"
+    const st = c.state();
+    const picked = new Set(st.items.map(x => x[c.idKey]));
+    const hits = c.candidates(q, picked).slice(0, 12);
+    out.innerHTML = hits.length ? hits.map(x => `
+        <div data-alloc-add="${_esc(x.id)}"
              style="padding:4px 6px;cursor:pointer;font-size:12px;color:#ccc;border-bottom:1px solid #262626;">
-            ${_esc(p.payee_name || '無收款人')} · ${_esc((p.summary || '').substring(0, 26))}
-            <span style="color:#fbbf24;">$${_fmtNum(p.amount || 0)}</span>
-            <span style="color:#666;"> · ${_esc(p.payment_status || '')}</span>
-        </div>`).join('') : '<div style="color:#666;font-size:12px;padding:4px;">找不到符合的請款單</div>';
-    out.querySelectorAll('[data-pay-add]').forEach((el) => {
+            ${c.hitLine(x)}
+        </div>`).join('')
+        : `<div style="color:#666;font-size:12px;padding:4px;">找不到符合的${c.noun}</div>`;
+    out.querySelectorAll('[data-alloc-add]').forEach((el) => {
         el.addEventListener('click', () => {
-            const ap = _paymentList.find(x => x.id === el.dataset.payAdd);
-            if (!ap) return;
-            // 預帶面額。發票側預帶的是「未收部分」，但 /payments 清單沒有回
-            // 已付金額（只有 payment_status），這裡算不出來 —— 與其憑空猜，
-            // 不如帶面額讓人改；已付清的那些已經被上面的候選篩掉了。
-            _CASH_PAY.items.push({
-                payment_request_id: ap.id, amount: Number(ap.amount) || 0,
-                summary: ap.summary || '', payee_name: ap.payee_name || '',
-                request_total: Number(ap.amount) || 0, request_paid: 0,
-                request_open: Number(ap.amount) || 0,
-                payment_status: ap.payment_status || '', missing: false,
-            });
-            _renderCashPayAllocs();
+            const hit = hits.find(x => x.id === el.dataset.allocAdd);
+            if (!hit) return;
+            st.items.push(c.toItem(hit));
+            _renderAllocs(side);
         });
     });
 }
 
-async function _paySave(btn, fee) {
+async function _allocSave(side, btn, fee) {
+    const c = _sideOf(side);
+    const st = c.state();
     const label = btn.textContent;
     btn.disabled = true;
     btn.textContent = '儲存中…';
     try {
         const body = {
-            items: _CASH_PAY.items.map(x => ({
-                payment_request_id: x.payment_request_id,
-                amount: Number(x.amount) || 0,
+            items: st.items.map(x => ({
+                [c.idKey]: x[c.idKey], amount: Number(x.amount) || 0,
             })),
         };
         if (fee != null) body.fee = fee;
-        const r = await _fetch(`/cash-entries/${_CASH_PAY.entryId}/payments`, {
+        const r = await _fetch(`/cash-entries/${st.entryId}/${c.path}`, {
             method: 'PUT', body: JSON.stringify(body),
         });
-        _CASH_PAY.items = r.items || [];
-        _CASH_PAY.check = r.check || null;
-        _renderCashPayAllocs();
-        await loadEntries();      // 主要請款單欄與匯費可能變了
+        st.items = r.items || [];
+        st.check = r.check || null;
+        _renderAllocs(side);
+        await loadEntries();      // 主要發票／請款單欄與匯費可能都變了
     } catch (e) {
-        const box = document.getElementById('cash-pay-box');
+        const box = document.getElementById(`cash-${c.prefix}-box`);
         if (box) {
             const err = document.createElement('div');
             err.style.cssText = 'color:#fca5a5;font-size:12px;margin-top:6px;';
@@ -1010,71 +1028,5 @@ async function _paySave(btn, fee) {
     } finally {
         btn.disabled = false;
         btn.textContent = label;
-    }
-}
-
-function _allocSearch(q) {
-    const out = document.getElementById('cash-alloc-results');
-    if (!out) return;
-    q = (q || '').trim().toLowerCase();
-    if (q.length < 1) { out.innerHTML = ''; return; }
-    const picked = new Set(_CASH_ALLOC.items.map(x => x.invoice_id));
-    const hits = _invoiceList.filter(i => !picked.has(i.id) && [
-        i.invoice_number, i.title, i.company_name, i.project_name,
-    ].some(v => (v || '').toLowerCase().includes(q))).slice(0, 12);
-    out.innerHTML = hits.length ? hits.map(i => `
-        <div data-alloc-add="${_esc(i.id)}"
-             style="padding:4px 6px;cursor:pointer;font-size:12px;color:#ccc;border-bottom:1px solid #262626;">
-            ${_esc(i.invoice_number || '無號碼')} · ${_esc((i.title || '').substring(0, 26))}
-            <span style="color:#fbbf24;">$${_fmtNum(i.amount_total || 0)}</span>
-            ${(i.collected || 0) > 0 ? `<span style="color:#86efac;"> · 已收 $${_fmtNum(i.collected)}${(i.outstanding || 0) > 0 ? `，尚欠 $${_fmtNum(i.outstanding)}` : '（收齊）'}</span>` : ''}
-            ${i.company_name ? `<span style="color:#666;"> · ${_esc(i.company_name)}</span>` : ''}
-        </div>`).join('') : '<div style="color:#666;font-size:12px;padding:4px;">找不到符合的發票</div>';
-    out.querySelectorAll('[data-alloc-add]').forEach((el) => {
-        el.addEventListener('click', () => {
-            const inv = _invoiceList.find(x => x.id === el.dataset.allocAdd);
-            if (!inv) return;
-            // 預設帶「還沒收的部分」而不是面額 —— 分期收款時面額會是錯的
-            // （發票 100,000 已收 60,000，第三期預帶 100,000 只會讓人重打一次）。
-            // 沒有收款紀錄時 outstanding 就等於面額，行為與原本一致。
-            const remain = _outstanding(inv);
-            _CASH_ALLOC.items.push({
-                invoice_id: inv.id, amount: remain,
-                invoice_number: inv.invoice_number || '', title: inv.title || '',
-                amount_total: inv.amount_total || 0,
-                payment_status: inv.payment_status || '', missing: false,
-            });
-            _renderCashAllocs();
-        });
-    });
-}
-
-async function _allocSave(btn) {
-    btn.disabled = true;
-    btn.textContent = '儲存中…';
-    try {
-        const r = await _fetch(`/cash-entries/${_CASH_ALLOC.entryId}/invoices`, {
-            method: 'PUT',
-            body: JSON.stringify({
-                items: _CASH_ALLOC.items.map(x => ({
-                    invoice_id: x.invoice_id, amount: Number(x.amount) || 0,
-                })),
-            }),
-        });
-        _CASH_ALLOC.items = r.items || [];
-        _CASH_ALLOC.check = r.check || null;
-        _renderCashAllocs();
-        await loadEntries();          // 主要發票欄可能變了，列表要跟著更新
-    } catch (e) {
-        const box = document.getElementById('cash-alloc-box');
-        if (box) {
-            const err = document.createElement('div');
-            err.style.cssText = 'color:#fca5a5;font-size:12px;margin-top:6px;';
-            err.textContent = e.message;
-            box.appendChild(err);
-        }
-    } finally {
-        btn.disabled = false;
-        btn.textContent = '儲存發票分配';
     }
 }
