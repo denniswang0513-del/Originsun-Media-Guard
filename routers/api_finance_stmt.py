@@ -173,13 +173,15 @@ async def _load_import_rules(session, bank_account_id: str = ""):
     rows = [r for r in rows
             if not r.bank_account_id or r.bank_account_id == bank_account_id]
     rows.sort(key=_rule_priority_key(bank_account_id))
-    return [(r.keyword, r.category, int(r.direction or 0)) for r in rows]
+    return [(r.keyword, r.category, int(r.direction or 0),
+             int(getattr(r, "only_direction", 0) or 0)) for r in rows]
 
 
 def _rule_dict(r) -> dict:
     return {"id": r.id, "keyword": r.keyword, "category": r.category,
             "bank_account_id": r.bank_account_id or "",
             "sort_order": r.sort_order, "active": bool(r.active),
+            "only_direction": int(getattr(r, "only_direction", 0) or 0),
             "note": r.note or ""}
 
 
@@ -216,6 +218,10 @@ async def _apply_rule_payload(r, payload, *, require_all: bool, session):
     r.keyword = kw or r.keyword
     r.category = cat or r.category
     r.bank_account_id = payload.bank_account_id or None
+    od = int(payload.only_direction or 0)
+    if od not in (-1, 0, 1):
+        raise HTTPException(status_code=422, detail="方向條件只能是 -1／0／+1")
+    r.only_direction = od
     r.sort_order = payload.sort_order
     r.active = payload.active
     r.note = (payload.note or "")[:255]

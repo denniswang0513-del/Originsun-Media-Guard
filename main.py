@@ -1047,6 +1047,10 @@ async def _on_startup():
                         "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
                         # 股東往來帳戶綁人員（2026-08-21）：綁了那位股東登入就看得到自己的往來
                         "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS staff_id VARCHAR(32)",
+                        # 對帳單匯入規則的方向條件（2026-08-22）：
+                        # 「薪資」兩側都有（收＝代收薪資、支＝代發薪資），
+                        # 光靠關鍵字分不出來，要能限定方向。
+                        "ALTER TABLE bank_import_rules ADD COLUMN IF NOT EXISTS only_direction INTEGER NOT NULL DEFAULT 0",
                         # 福委會登記的心得筆記（2026-08-21，非必填）
                         "ALTER TABLE hr_benefit_entries ADD COLUMN IF NOT EXISTS reflection TEXT",
                         # 福委會：年度活動（每人額度＋期間）與說明／附件

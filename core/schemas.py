@@ -1300,6 +1300,9 @@ class BankImportRulePayload(BaseModel):
     category: str
     bank_account_id: Optional[str] = None    # 空 = 套用到所有帳戶
     sort_order: int = 100
+    # 只在這個方向的列上套用：-1 只支出 / +1 只存入 / 0 不限。
+    # 跟 direction（推方向的提示）是兩件事 —— 見 BankImportRule 的註解。
+    only_direction: int = 0
     active: bool = True
     note: str = ""
 

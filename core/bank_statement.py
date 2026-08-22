@@ -111,17 +111,34 @@ def _to_int(tok: str):
     return int(round(v))
 
 
-def _classify(text: str, rules=None):
+def _classify(text: str, rules=None, signed=None):
     """摘要文字 → (category, 方向提示)。沒中回 ('', 0)。
 
-    rules = [(關鍵字, category, 方向)]，由呼叫端給（正式路徑是 DB 的
-    bank_import_rules，使用者可編）。不給就用模組內建的 KEYWORD_RULES ——
-    那份現在的角色是**種子與離線預設**，不是唯一真相。
+    rules = [(關鍵字, category, 方向)] 或 [(關鍵字, category, 方向, 只在哪個方向)]，
+    由呼叫端給（正式路徑是 DB 的 bank_import_rules，使用者可編）。不給就用模組
+    內建的 KEYWORD_RULES —— 那份現在的角色是**種子與離線預設**，不是唯一真相。
     順序即優先序：先命中的先贏，所以呼叫端要照 sort_order 排好再傳進來。
+
+    `signed` 是這一列的金額（正=存入、負=支出）。有給的話，帶
+    `only_direction` 的規則只在方向相符時才算命中。
+
+    🔴 為什麼需要方向條件（owner 2026-08-22 實測）：「薪水」105 筆全在收入側、
+    「發票」365 筆全在收入側，這些關鍵字自己就分得出方向；但「薪資」10 收 /
+    79 支兩側都有 —— 股東匯進來是「代收薪資」、公司發出去是「代發薪資」，
+    同一個字兩種類別。沒有方向條件就只能猜，而猜錯的那一半會靜靜錯下去。
+
+    🔴 `signed=None`（第一列還推不出方向那種邊緣情況）時**跳過**帶方向條件的
+    規則 —— 不知道方向就不要假裝知道，讓它落到通用規則或未分類，由人確認。
     """
-    for kw, cat, direction in (rules if rules is not None else KEYWORD_RULES):
-        if kw and kw in text:
-            return cat, direction
+    for r in (rules if rules is not None else KEYWORD_RULES):
+        kw, cat, direction = r[0], r[1], r[2]
+        only = r[3] if len(r) > 3 else 0
+        if not kw or kw not in text:
+            continue
+        if only:
+            if signed is None or (signed > 0) != (only > 0):
+                continue
+        return cat, direction
     return "", 0
 
 
@@ -281,7 +298,7 @@ def parse_statement(text: str, opening_balance: int = None,
                 f"{r['amounts']} 對不上：{r['raw'][:70]}")
 
     for r in rows:
-        cat, _ = _classify(r["words"], rules)
+        cat, _ = _classify(r["words"], rules, signed=r["signed"])
         res.rows.append(StmtRow(
             line_no=r["line_no"], date=r["date"], amount=r["signed"] or 0,
             balance=r["balance"], note=r["words"], category=cat,

@@ -1463,6 +1463,14 @@ class BankImportRule(Base):
     bank_account_id = Column(String(32), nullable=True)          # soft FK；空=所有帳戶
     category = Column(String(32), nullable=False)                # 命中後填的收支類別
     direction = Column(Integer, nullable=False, default=0)       # -1 支出 / +1 存入 / 0 不確定
+    # 🔴 跟 direction 是兩件事，不要混：
+    #   direction     = 推方向用的提示（只在餘額鏈推不出方向時才用到）
+    #   only_direction = **篩選條件**：這條規則只在該方向的列上套用
+    # 為什麼需要它（owner 2026-08-22 的實測）：「薪水」105 筆全在收入側、
+    # 「發票」365 筆全在收入側 —— 這些關鍵字本身就分得出方向。但「薪資」
+    # 10 收 / 79 支兩側都有：股東匯薪水進來是「代收薪資」、公司發給員工是
+    # 「代發薪資」，同一個字兩種類別，光靠關鍵字分不出來。
+    only_direction = Column(Integer, nullable=False, server_default="0")  # -1 只支出 / +1 只存入 / 0 不限
     sort_order = Column(Integer, nullable=False, default=100)    # 小的先比（多條命中時誰贏）
     active = Column(Boolean, default=True)
     note = Column(String(255), nullable=True)

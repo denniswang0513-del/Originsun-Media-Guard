@@ -1880,6 +1880,8 @@ function _rulesRender() {
             <td style="padding:4px 6px;color:#bbb;">${esc(r.category)}</td>
             <td style="padding:4px 6px;color:#9ca3af;font-size:11px;">${
                 r.bank_account_id ? esc(_acctName(r.bank_account_id)) : '所有帳戶'}</td>
+            <td style="padding:4px 6px;color:#9ca3af;font-size:11px;">${
+                { '-1': '只支出', '1': '只存入' }[String(r.only_direction || 0)] || '不限'}</td>
             <td style="padding:4px 6px;text-align:right;">
                 <button class="crm-btn crm-btn-secondary crm-btn-sm"
                         onclick="window._finBank.ruleToggle('${r.id}', ${r.active ? 'false' : 'true'})">${
@@ -1893,7 +1895,10 @@ function _rulesRender() {
             對帳單的摘要包含「關鍵字」就自動歸到那個類別。
             <b>綁定帳戶的規則優先於「所有帳戶」</b> —— 合庫寫「攤還本息」、一銀寫
             「中小７月」，同一件事兩種寫法，綁帳戶才不會互相誤觸。
-            由上而下比對，先命中的先贏。</p>
+            由上而下比對，先命中的先贏。<br>
+            <b>方向</b>：同一個關鍵字兩個方向是不同類別時用它 —— 例如「薪資」，
+            股東匯進來是<b>代收薪資</b>、公司發給員工是<b>代發薪資</b>。
+            不限的規則排在前面會蓋掉方向規則，所以方向規則的順序要排前面。</p>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;">
             <div><div style="color:#9ca3af;font-size:11px;">關鍵字</div>
                 <input id="rule-kw" class="crm-input" style="width:130px;" placeholder="摘要含這串"></div>
@@ -1901,6 +1906,11 @@ function _rulesRender() {
                 <select id="rule-cat" class="crm-select">${catOpts}</select></div>
             <div><div style="color:#9ca3af;font-size:11px;">適用帳戶</div>
                 <select id="rule-acct" class="crm-select">${acctOpts}</select></div>
+            <div><div style="color:#9ca3af;font-size:11px;">方向</div>
+                <select id="rule-dir" class="crm-select">
+                    <option value="0">不限</option>
+                    <option value="1">只存入</option>
+                    <option value="-1">只支出</option></select></div>
             <button class="crm-btn crm-btn-primary" onclick="window._finBank.ruleAdd(this)">新增</button>
         </div>
         <div id="rule-err" style="display:none;color:#fca5a5;font-size:12px;margin-bottom:6px;"></div>
@@ -1908,6 +1918,7 @@ function _rulesRender() {
             <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">關鍵字</th>
             <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">類別</th>
             <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">適用帳戶</th>
+            <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">方向</th>
             <th></th></tr></thead><tbody>${rows}</tbody>`, 300)}
         <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid #2a2a2a;">
             <button class="crm-btn crm-btn-secondary" onclick="window._finBank.rulesApplyUnclassified(this)"
@@ -1930,6 +1941,7 @@ _fb.ruleAdd = async (btn) => {
         await finFetch('/import-rules', { method: 'POST', body: JSON.stringify({
             keyword: kw, category: cat,
             bank_account_id: document.getElementById('rule-acct').value || null,
+            only_direction: parseInt((document.getElementById('rule-dir') || {}).value || '0', 10),
             sort_order: 50, active: true, note: '手動新增' }) });
         await _fb.rulesOpen();
     } catch (e) {
