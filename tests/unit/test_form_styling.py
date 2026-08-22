@@ -11,6 +11,7 @@ from tests.unit._srcscan import repo_src  # noqa: E402
 
 FILES = [
     'frontend/tabs/finance/subviews/banking.js',
+    'frontend/tabs/finance/subviews/recon.js',
     'frontend/tabs/crm/crm-cashbook.js',
     'frontend/tabs/crm/crm-payments.js',
     'frontend/tabs/crm/crm-invoices.js',

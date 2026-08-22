@@ -152,10 +152,28 @@ owner 2026-08-22 決定：**歷史不回頭勾，九月起才勾**。這對現�
 | 分配列驗證（四條寫入路徑） | `resolve_allocs(kind=)` | 收付兩側 |
 | 分配寫入流程 | `_write_allocs(kind=)` | 兩支 PUT 端點 |
 | 分配面板（前端） | `_ALLOC_SIDES` ＋ `_renderAllocs` | 關聯發票／關聯請款單 |
+| 對帳系統（前端整套） | `frontend/tabs/finance/subviews/recon.js` | 掛在收支明細的對帳面板 |
+| 什麼算「真銀行帳戶」（排除股東往來） | `fin-utils.bankOnly` | banking.js（貸款扣款）／recon.js（三處下拉） |
 
 🔴 這些本來全是「兩份」。它們**在同一次 commit 裡就漂開過**：狀態列的
 `msg` vs `message`、預帶面額 vs 尚欠、跨帳本一邊回 409 一邊回 422、
 現金流鑽取比它鑽的那個數字多 777,000。
+
+## 6.6 對帳系統住在哪裡（2026-08-22）
+
+owner：「對帳系統按了之後就直接在收支表這裡對帳，不要跳轉至銀行帳戶。」
+
+於是整段（上傳對帳單／分類規則／對帳工作台／核對餘額）從 `banking.js`
+**搬**成 `subviews/recon.js` —— 一個 `render(container, ctx)` 的模組，
+目前掛在收支明細的「🔍 對帳／匯入」面板裡（`#cash-recon-mount`，第一次點才
+動態 import）。收支明細的「匯入 CSV」也收進同一個面板：對使用者來說
+「上傳對帳單」跟「匯入 CSV」是同一件事——把外面的帳弄進來。
+
+- `banking.js` 只剩帳戶卡片／股東往來／貸款／帳務調整，命名空間仍是 `window._finBank`
+- `recon.js` 用 `window._finRecon`（**別合併**：`_fb.reload()` 在對帳裡的意思是
+  「重畫這一台」，在銀行帳戶那邊是「重畫那一頁」，共用會按了沒反應且不報錯）
+- 刻意**不留一份**在銀行帳戶頁：分類規則有兩份 → 使用者在 A 改完到 B 看不到
+  效果，錯帳而且無聲。`tests/unit/test_cashbook_recon_panel.py` 釘住這件事
 
 ## 7. 相關
 

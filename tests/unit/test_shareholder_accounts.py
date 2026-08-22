@@ -164,23 +164,34 @@ def test_frontend_mirrors_the_kinds():
 
 def test_bank_only_dropdowns_exclude_shareholder():
     """🔴 對帳單匯入／分類規則／貸款扣款／對帳工作台只該看到真銀行帳戶
-    （股東往來沒有銀行對帳單，也不會拿來扣貸款）。"""
+    （股東往來沒有銀行對帳單，也不會拿來扣貸款）。
+
+    2026-08-22 對帳整段搬去 recon.js，四個呼叫點因此散在兩支檔案：
+    貸款扣款留在 banking.js，另外三個跟著對帳走。規則本身收進 fin-utils.bankOnly。
+    """
     from tests.unit._srcscan import repo_src
-    js = repo_src("frontend/tabs/finance/subviews/banking.js")
-    assert "function _bankOnly()" in js
+    utils = repo_src("frontend/tabs/finance/fin-utils.js")
+    assert "export const bankOnly" in utils, "規則正本不見了"
+
+    banking = repo_src("frontend/tabs/finance/subviews/banking.js")
+    recon = repo_src("frontend/tabs/finance/subviews/recon.js")
+    for js in (banking, recon):
+        assert "function _bankOnly()" in js
+        assert "return bankOnly(_accounts);" in js, "沒有走共用那條規則"
     # 🔴 逐一釘四個呼叫點，不要只數次數 —— 數次數時拿掉一個仍然過
     #    （定義那行自己也含 "_bankOnly()"，破壞測試實測沒咬到）。
-    for site in ("const actives = _bankOnly();",           # 對帳工作台 / 貸款扣款
+    assert "const actives = _bankOnly();" in banking, "貸款扣款下拉沒換成 _bankOnly"
+    for site in ("const actives = _bankOnly();",           # 對帳工作台
                  "const opts = _bankOnly().map(a =>",       # 對帳單匯入
                  "+ _bankOnly()"):                          # 分類規則
-        assert site in js, f"這個下拉沒換成 _bankOnly：{site}"
-    assert js.count("const actives = _bankOnly();") == 2
-    assert "_accounts.filter(a => a.active !== false)" not in js, (
-        "還有地方在用未過濾的啟用帳戶清單")
+        assert site in recon, f"這個下拉沒換成 _bankOnly：{site}"
+    for js in (banking, recon):
+        assert "_accounts.filter(a => a.active !== false)" not in js, (
+            "還有地方在用未過濾的啟用帳戶清單")
 
 
 def test_cashbook_can_still_charge_to_shareholder_accounts():
     """收支明細那邊**不受限** —— 股東墊付的費用本來就要掛到股東帳戶上。"""
     from tests.unit._srcscan import repo_src
-    js = repo_src("frontend/tabs/finance/subviews/banking.js")
+    js = repo_src("frontend/tabs/finance/fin-utils.js")   # 規則與取捨都住這裡
     assert "收支明細那邊的帳戶下拉不受此限" in js, "這個取捨要寫下來，不然下一個人會一起濾掉"

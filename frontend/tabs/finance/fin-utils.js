@@ -87,6 +87,14 @@ export const ACCT_KIND_OPTIONS = [
 export const SHAREHOLDER_KINDS = ['shareholder_loan', 'shareholder_capital'];
 export const isShareholderAcct = (k) => SHAREHOLDER_KINDS.includes(k || '');
 
+/** 啟用中的**真銀行**帳戶（排除股東往來）。
+ *  對帳單匯入、分類規則、貸款扣款、對帳工作台都只該看到這些 —— 股東往來沒有
+ *  銀行對帳單、也不會拿來扣貸款。收支明細那邊的帳戶下拉不受此限（股東墊付的
+ *  費用本來就要掛到股東帳戶上）。
+ *  住在這裡而不是各自寫一份：banking.js 與 recon.js 拆開後兩邊都要問這句話。 */
+export const bankOnly = (accounts) =>
+    (accounts || []).filter(a => a.active !== false && !isShareholderAcct(a.acct_kind));
+
 /**
  * 子視圖開場殼：loading → Promise.all → isCurrent 防競態 → 失敗畫重試鈕。
  *

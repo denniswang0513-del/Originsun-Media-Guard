@@ -291,20 +291,3 @@ def test_ui_shares_one_status_line():
     seg = seg[:seg.index(chr(10) + "function ")]
     assert "FEE_TOLERANCE" not in seg, "前端重寫了容差規則"
     assert "check.message" in seg
-
-
-def test_recon_button_uses_the_exported_nav_not_someone_elses_dom():
-    """🔴 別的 tab 的 CSS class 不是介面。
-
-    本來是 `querySelector('.finance-nav-btn[data-subview="banking"]').click()` ——
-    側欄改名或改結構，這顆會靜靜壞掉：沒有 build 訊號、沒有測試訊號，
-    只有使用者按了沒反應。而且這個檔案也會被 CRM tab 掛起來，那裡根本沒有
-    財務側欄，等於長期擺一顆永遠跳 alert 的按鈕。
-    """
-    js = repo_src(JS)
-    assert "finance-nav-btn" not in js, "又去 querySelector 別人的 class 了"
-    assert "window.financeNav.show('banking')" in js
-    assert "recon.style.display = 'none'" in js, "沒有側欄時要把入口藏掉"
-    fin = repo_src("frontend/tabs/finance/finance.js")
-    assert "window.financeNav" in fin, "finance.js 沒有匯出導覽入口"
-

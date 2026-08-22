@@ -36,3 +36,14 @@ def code_only(body: str) -> str:
     """剝掉 docstring 與 # 註解，只留程式碼。"""
     body = re.sub(r'"""[\s\S]*?"""', "", body)
     return "\n".join(ln.split("#")[0] for ln in body.splitlines())
+
+
+def js_code_only(src: str) -> str:
+    """JS 版的 code_only —— 剝掉 /* */ 與 // 註解。
+
+    同一個坑：`assert "financeNav" not in js` 會被「註解正好在說為什麼不用它」
+    打敗。Python 版切的是 '#'，對 JS 沒用，所以這裡另備一支。
+    網址裡的 `//` 會被誤切，故只在行首或前面不是 ':' 時才當註解。
+    """
+    src = re.sub(r"/\*[\s\S]*?\*/", "", src)
+    return "\n".join(re.sub(r"(?<!:)//.*$", "", ln) for ln in src.splitlines())

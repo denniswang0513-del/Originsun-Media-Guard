@@ -6,7 +6,7 @@
 """
 from tests.unit._srcscan import repo_src  # noqa: E402
 
-SRC = repo_src('frontend/tabs/finance/subviews/banking.js')
+SRC = repo_src('frontend/tabs/finance/subviews/recon.js')   # 2026-08-22 從 banking.js 搬來
 
 
 def test_the_two_cells_are_buttons_not_selects():
@@ -33,8 +33,8 @@ def test_frontend_does_not_re_derive_the_primary_invoice():
     assert 'b.amount > a.amount' not in SRC, '前端又自己推了一次主要發票'
     assert 'r.invoices = allocs' in SRC
     # 只有 invoices 一種表示法，連 invoice_id 都不再寫
-    i = SRC.index('_fb.stmtPickInv')
-    assert 'r.invoice_id =' not in SRC[i:SRC.index('_fb.pickInvToggle')]
+    i = SRC.index('_fr.stmtPickInv')
+    assert 'r.invoice_id =' not in SRC[i:SRC.index('_fr.pickInvToggle')]
 
 
 def test_save_and_apply_send_the_same_row_shape():
@@ -46,7 +46,7 @@ def test_save_and_apply_send_the_same_row_shape():
     進去，兩條路各講各的。
     """
     assert 'const _stmtRowPayload = (x) => ({' in SRC
-    for fn, what in (('_fb.stmtSaveDraft', '存草稿'), ('_fb.stmtApply', '匯入')):
+    for fn, what in (('_fr.stmtSaveDraft', '存草稿'), ('_fr.stmtApply', '匯入')):
         i = SRC.index(fn)
         body = SRC[i:i + 1600]
         assert '_stmtRowPayload' in body, f'{what}沒有走共用的投影'
@@ -57,8 +57,8 @@ def test_save_and_apply_send_the_same_row_shape():
 
 
 def test_invoice_picker_can_multi_select():
-    i = SRC.index('_fb.stmtPickInv')
-    body = SRC[i:SRC.index('_fb.pickInvToggle')]
+    i = SRC.index('_fr.stmtPickInv')
+    body = SRC[i:SRC.index('_fr.pickInvToggle')]
     assert 'type="checkbox"' in body, '發票挑選不是複選'
     # 金額接近的排前面：一筆入帳最可能就是「尚欠剛好等於這個數」的那張
     assert 'a.outstanding || 0) - target' in body
@@ -78,8 +78,8 @@ def test_picker_reads_the_field_names_the_backend_actually_sends():
     from routers.crm.finance import collection_fields
     sent |= set(collection_fields(0, None, with_detail=True))
 
-    j = SRC.index('_fb.stmtPickInv')
-    picker = SRC[j:SRC.index('_fb.pickInvToggle')]
+    j = SRC.index('_fr.stmtPickInv')
+    picker = SRC[j:SRC.index('_fr.pickInvToggle')]
     used = set(re.findall(r'\bv\.(\w+)\b', picker))
     assert used <= sent, f"前端讀了後端沒送的欄位：{sorted(used - sent)}（後端送 {sorted(sent)}）"
 
@@ -90,8 +90,8 @@ def test_project_picker_reads_the_right_fields():
     i = api.index('projects = [{')
     sent = set(re.findall(r'"(\w+)":', api[i:i + 500]))
 
-    j = SRC.index('_fb.stmtPickProj')
-    picker = SRC[j:SRC.index('_fb.pickProjTake')]
+    j = SRC.index('_fr.stmtPickProj')
+    picker = SRC[j:SRC.index('_fr.pickProjTake')]
     used = set(re.findall(r'\bp\.(\w+)\b', picker))
     assert used <= sent, f"前端讀了後端沒送的欄位：{sorted(used - sent)}（後端送 {sorted(sent)}）"
 
@@ -103,9 +103,9 @@ def test_editing_a_row_does_not_redraw_the_whole_table():
     每改一次就被彈回第 1 列（實測 scrollTop 1443 → 0）。改分類、挑專案、挑發票
     影響到的都只有那一列，逐列換就夠。
     """
-    for sig, what in (('_fb.stmtCatChanged', '改分類'),
-                      ('_fb.stmtPickProj', '挑專案'),
-                      ('_fb.stmtPickInv', '挑發票')):
+    for sig, what in (('_fr.stmtCatChanged', '改分類'),
+                      ('_fr.stmtPickProj', '挑專案'),
+                      ('_fr.stmtPickInv', '挑發票')):
         i = SRC.index(sig)
         body = SRC[i:i + 4200]
         assert '_stmtRenderPreview()' not in body, f'{what}還在整表重畫 —— 捲軸會跳回頂端'
@@ -122,6 +122,6 @@ def test_workbench_keeps_its_scroll_across_redraws():
     """對帳工作台每配對／註記／補記一列就整塊重畫（那些動作真的改了伺服器狀態，
     不能像匯入預覽那樣只換一列）→ 只能重畫前記位置、重畫後放回去。"""
     i = SRC.index('function _wbRender()')
-    body = SRC[i:SRC.index('\n_fb.', i + 10)]
+    body = SRC[i:SRC.index('\n_fr.', i + 10)]
     assert "querySelectorAll('[data-wb-scroll]')" in body
     assert 'x.scrollTop = keep[i]' in body, '工作台重畫後沒有把捲軸放回去'

@@ -99,29 +99,6 @@ function _bindSideNav() {
     }
 }
 
-/** 跨模組的導覽入口。
- *
- * 🔴 別的 tab 想切到某個財務子視圖時走這裡，**不要**去
- * `querySelector('.finance-nav-btn[data-subview=...]').click()` —— 那是別人的
- * 實作細節不是介面：class 改名或側欄改結構，呼叫端會靜靜壞掉（沒有 build 訊號、
- * 沒有測試訊號，只有使用者按了沒反應）。
- *
- * 回 false ＝ 這個畫面沒有財務側欄（例如收支明細被 CRM tab 掛起來的時候），
- * 由呼叫端決定要藏起入口還是出聲。
- */
-window.financeNav = {
-    show(name) {
-        const nav = document.getElementById('finance-nav');
-        const btn = nav && nav.querySelector(`.finance-nav-btn[data-subview="${name}"]`);
-        if (!btn) return false;
-        _showSubview(name);
-        nav.querySelectorAll('.finance-nav-btn').forEach(
-            (b) => b.classList.toggle('active', b === btn));
-        btn.scrollIntoView({ block: 'nearest' });
-        return true;
-    },
-};
-
 function _showInvoicesMode() {
     _currentSubview = null;
     const sub = document.getElementById('finance-subview');

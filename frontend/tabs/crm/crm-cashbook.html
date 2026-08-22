@@ -12,15 +12,30 @@
     <option value="out">只看支出</option>
   </select>
   <div class="crm-toolbar-right">
+    <!-- 對帳與匯入 CSV 本來是兩顆 —— 對使用者是同一件事（把外面的帳弄進來），
+         合成一個入口，兩者都在展開的面板裡。 -->
     <button id="cash-btn-recon" class="crm-btn crm-btn-secondary"
-            title="上傳對帳單、分類規則、對帳工作台、核對餘額">🔍 對帳系統</button>
-    <button id="cash-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
+            title="上傳對帳單、分類規則、對帳工作台、核對餘額、匯入 CSV">🔍 對帳／匯入</button>
     <button id="cash-btn-add" class="crm-btn crm-btn-primary">+ 新增</button>
   </div>
 </div>
 
 <!-- Body -->
 <div class="crm-body">
+  <!-- 對帳／匯入面板：就地展開，**不跳到銀行帳戶**（owner 2026-08-22：
+       「對帳系統按了之後就直接在收支表這裡對帳」）。整套對帳系統由
+       finance/subviews/recon.js 掛進 #cash-recon-mount —— 這裡只出外框，
+       一行對帳邏輯都不複製（分類規則有兩份就會靜默錯帳）。 -->
+  <div class="crm-list-panel" id="cash-recon-panel" style="display:none;">
+    <div class="crm-toolbar">
+      <button id="cash-recon-back" class="crm-btn crm-btn-secondary crm-btn-sm">← 回收支明細</button>
+      <div class="crm-toolbar-right">
+        <button id="cash-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV（收支明細）</button>
+      </div>
+    </div>
+    <div id="cash-recon-mount" style="flex:1;overflow:auto;padding:16px;"></div>
+  </div>
+
   <div class="crm-list-panel" id="cash-list-panel">
     <!-- 帳戶切換列：總表／各銀行，每個都標當下餘額。放這裡而不是塞進工具列的
          下拉 —— 餘額是每天要看的數字，藏在下拉裡等於沒有。 -->

@@ -632,6 +632,37 @@ function _showErr(msg) { const el = document.getElementById('cash-modal-error');
 
 // ── CSV Import ──────────────────────────────────────────────
 
+// ── 對帳／匯入面板 ───────────────────────────────────────────
+// recon.js 有 1,500 行 —— 第一次點才載，不放在開 tab 的關鍵路徑上。
+let _reconMod = null;
+
+async function openRecon() {
+    const panel = document.getElementById('cash-recon-panel');
+    const mount = document.getElementById('cash-recon-mount');
+    if (!panel || !mount) return;
+    closeDetail();
+    document.getElementById('cash-list-panel').style.display = 'none';
+    panel.style.display = 'flex';
+    mount.innerHTML = '<div style="color:#888;padding:20px;">載入中…</div>';
+    try {
+        if (!_reconMod) _reconMod = await import('../finance/subviews/recon.js');
+        // isCurrent：面板關掉之後才回來的 fetch 不要再動 DOM
+        await _reconMod.default(mount, { isCurrent: () => panel.style.display !== 'none' });
+    } catch (e) {
+        mount.innerHTML = '<div style="color:#f87171;padding:20px;">對帳系統載入失敗：'
+            + _esc(e.message) + '</div>';
+    }
+}
+
+function closeRecon() {
+    const panel = document.getElementById('cash-recon-panel');
+    if (panel) panel.style.display = 'none';
+    const list = document.getElementById('cash-list-panel');
+    if (list) list.style.display = '';
+    // 對帳會寫帳（工作台「補記入帳」、對帳單匯入）→ 回來要看得到新的那幾筆
+    loadEntries();
+}
+
 function openImportModal() {
     _csvFile = null;
     document.getElementById('cash-drop-filename').textContent = '';
@@ -694,26 +725,12 @@ export async function initCrmCashbookTab() {
 
     document.getElementById('cash-btn-add').addEventListener('click', () => openModal());
     document.getElementById('cash-btn-import').addEventListener('click', openImportModal);
-    // 對帳系統：整套（上傳對帳單／分類規則／對帳工作台／核對餘額）都在
-    // finance 的 banking 子視圖裡。這裡**不複製一份** —— 複製就會有兩個畫面
-    // 各講各的（分類規則尤其致命）。直接點側欄那顆，走既有的 lazy-load 與
-    // active 狀態切換，一行導覽而已。
-    const recon = document.getElementById('cash-btn-recon');
-    if (recon) {
-        // 走 finance.js 匯出的導覽入口 —— 不要 querySelector 別人的 class
-        //（那是實作細節不是介面：側欄改結構，這顆會靜靜壞掉）。
-        // 這個檔案也會被 CRM tab 掛起來，那裡根本沒有財務側欄 → 直接把入口藏掉，
-        // 不要留一顆按了會跳 alert 的按鈕。
-        if (window.financeNav) {
-            recon.addEventListener('click', () => {
-                if (!window.financeNav.show('banking')) {
-                    alert('找不到「銀行帳戶」子視圖 —— 請從財務管理 › 銀行與設定進入。');
-                }
-            });
-        } else {
-            recon.style.display = 'none';
-        }
-    }
+    // 對帳／匯入：**就地展開**，不跳頁（owner 2026-08-22：「對帳系統按了之後
+    // 就直接在收支表這裡對帳」）。整套對帳系統住在 finance/subviews/recon.js，
+    // 這裡只負責讓位與掛載 —— 一行對帳邏輯都不複製（分類規則有兩份，使用者
+    // 在 A 改完到 B 看不到效果，是最容易靜默錯帳的一種重複）。
+    document.getElementById('cash-btn-recon').addEventListener('click', openRecon);
+    document.getElementById('cash-recon-back').addEventListener('click', closeRecon);
     document.getElementById('cash-btn-save').addEventListener('click', saveEntry);
     document.getElementById('cash-detail-close').addEventListener('click', closeDetail);
     document.getElementById('cash-btn-do-import').addEventListener('click', doImport);

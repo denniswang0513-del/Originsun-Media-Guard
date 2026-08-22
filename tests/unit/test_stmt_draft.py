@@ -14,7 +14,7 @@
 from tests.unit._srcscan import repo_src  # noqa: E402
 
 API = repo_src('routers/api_finance_stmt.py')
-JS = repo_src('frontend/tabs/finance/subviews/banking.js')
+JS = repo_src('frontend/tabs/finance/subviews/recon.js')   # 2026-08-22 從 banking.js 搬來
 
 
 def _fn(src, sig, stop='\n@router.'):
@@ -54,7 +54,7 @@ def test_decisions_are_restored_by_content_and_allow_twins():
 def test_saving_twice_updates_instead_of_piling_up():
     body = _fn(API, 'async def save_statement_draft(')
     assert 'if payload.id:' in body, '存草稿沒有更新既有那份 → 會越存越多份'
-    body_js = JS[JS.index('_fb.stmtSaveDraft'):]
+    body_js = JS[JS.index('_fr.stmtSaveDraft'):]
     assert 'd.draft_id || null' in body_js, '前端沒把 draft_id 送回去'
 
 
