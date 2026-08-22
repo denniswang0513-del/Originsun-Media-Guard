@@ -48,6 +48,12 @@ _LINK_PRIORITY = (
 # 費用側迭代（iter_expense_items）與現金流活動判定共用此單一來源。
 NON_PNL_TREATMENTS = frozenset({"transfer", "passthrough", "loan"})
 
+# 本金是**內部移動**、不算任何一種現金流量活動的那一類。
+# 🔴 本來是三個地方各寫一次字面 ("advance", "transfer")：cash_entry_activity、
+#    build_cashflow 的迭代、以及現金流鑽取。多一個內部移動桶（跨帳本調撥、
+#    零用金週轉）時要找三處字面，漏掉一處＝現金流量表靜靜不平（不是報錯）。
+INTERNAL_MOVEMENT_TREATMENTS = frozenset({"advance", "transfer"})
+
 
 def classify_cash_entry(entry: dict, cat_map: dict) -> str:
     """單筆收支明細 → 會計處理方式（treatment）。
@@ -1528,7 +1534,7 @@ def cash_entry_activity(entry: dict, cat_map: dict, accounts: dict):
     unmapped → operating（最不錯的預設，unmapped 另由 statement_warnings 計數）。
     """
     t = classify_cash_entry(entry, cat_map or {})
-    if t in ("advance", "transfer"):
+    if t in INTERNAL_MOVEMENT_TREATMENTS:
         return None
     if t in ("direct_expense", "direct_income", "loan"):
         acct = map_account(cat_map or {}, accounts or {}, "cash", entry.get("category"))
@@ -1536,6 +1542,24 @@ def cash_entry_activity(entry: dict, cat_map: dict, accounts: dict):
         if act in ("investing", "financing"):
             return act
     return "operating"
+
+
+def cash_account_ids(bank_accounts):
+    """哪些銀行帳戶算「現金」。None 進 → None 出（呼叫端沒給就別擋）。
+
+    🔴 跟 split_bank_lines 是**同一條規則**：期初／期末只取 ["cash"]，迭代那側
+    必須一致，否則股東往來上每記一筆就多一筆勾稽差額（v2.4.142 修過一次）。
+    具名之後兩邊指向同一個述詞，加一個非現金桶（票據存款、履約保證專戶）時
+    不會只改到一半。認不得的性質落到現金（同 split_bank_lines 的預設）。
+
+    唯一的差別是**帳戶已被刪掉**的情況：那個 id 不在集合裡 → 迭代這側當非現金
+    跳過。這是對的，因為餘額那側（bank_balances_asof）也是從 bank_accounts 生的，
+    刪掉的帳戶連期初期末都不會出現 —— 兩側一起消失才平。
+    """
+    if bank_accounts is None:
+        return None
+    return {b.get("id") for b in bank_accounts
+            if not is_shareholder_kind(b.get("acct_kind"))}
 
 
 def build_cashflow(months, *, opening, closing, cash_entries=(),
@@ -1572,9 +1596,7 @@ def build_cashflow(months, *, opening, closing, cash_entries=(),
     advance_net = transfer_net = 0
     unassigned = 0
     noncash = 0
-    cash_ids = ({b.get("id") for b in bank_accounts
-                 if not is_shareholder_kind(b.get("acct_kind"))}
-                if bank_accounts is not None else None)
+    cash_ids = cash_account_ids(bank_accounts)
     for e in cash_entries:
         if month_of(e.get("entry_date")) not in mset:
             continue
@@ -1586,7 +1608,7 @@ def build_cashflow(months, *, opening, closing, cash_entries=(),
             noncash += 1        # 股東往來等非現金帳戶：不在現金總額裡
             continue
         t = classify_cash_entry(e, cat_map)
-        if t in ("advance", "transfer"):
+        if t in INTERNAL_MOVEMENT_TREATMENTS:
             principal = in_amount(e) - out_amount(e)
             if t == "advance":
                 advance_net += principal

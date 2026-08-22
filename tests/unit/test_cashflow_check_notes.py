@@ -114,3 +114,47 @@ def test_ui_no_longer_guesses_a_single_cause():
 def test_ui_says_so_when_there_is_no_known_cause():
     """notes 空的時候不能沉默 —— 那代表系統自己也不知道，要講出來。"""
     assert "系統找不到已知原因" in _cf_html()
+
+
+def test_drilldown_uses_the_same_eligibility_as_the_number_it_drills_into():
+    """🔴 鑽取的合計要等於它鑽的那個數字 —— 判準必須是同一組。
+
+    本來鑽取只擋「未掛帳戶」，沒有跟上非現金帳戶那條：股東往來的收支已經
+    不進淨流，卻還會列在明細裡。使用者點進去看到的加總 ≠ 表上那個數字，
+    而這種不一致沒有任何錯誤訊號。
+    """
+    from tests.unit._srcscan import code_only, func_body, repo_src
+    src = repo_src("services/finance_statements.py")
+    body = code_only(func_body(src, "async def drilldown("))
+    assert "cash_account_ids(" in body, "鑽取沒有排除非現金帳戶"
+    assert "INTERNAL_MOVEMENT_TREATMENTS" in body, "又寫死一次 advance/transfer"
+    # 兩邊都用具名的那一份，不准再出現字面
+    cf = code_only(repo_src("core/finance_logic.py"))
+    assert '("advance", "transfer")' not in cf, "core 裡還有字面的內部移動清單"
+
+
+def test_cash_account_rule_has_one_name():
+    """「什麼算現金帳戶」跟 split_bank_lines 是同一條規則。"""
+    from core.finance_logic import cash_account_ids
+    accts = [{"id": "A", "acct_kind": "bank"},
+             {"id": "B", "acct_kind": "shareholder_loan"},
+             {"id": "C", "acct_kind": "shareholder_capital"},
+             {"id": "D", "acct_kind": None}]
+    assert cash_account_ids(accts) == {"A", "D"}, "股東往來被算成現金了"
+    assert cash_account_ids(None) is None, "沒給帳戶時不該擋"
+    # 認不得的性質落到現金 —— 跟 split_bank_lines 的預設一致
+    assert "E" in cash_account_ids(accts + [{"id": "E", "acct_kind": "新桶"}])
+
+
+def test_the_two_cash_rules_agree():
+    """cash_account_ids 與 split_bank_lines 對同一份帳戶必須給同一個答案。"""
+    from core.finance_logic import cash_account_ids, split_bank_lines
+    accts = [{"id": "A", "acct_kind": "bank"},
+             {"id": "B", "acct_kind": "shareholder_loan"},
+             {"id": "C", "acct_kind": "shareholder_capital"},
+             {"id": "D", "acct_kind": None},
+             {"id": "E", "acct_kind": "新桶"}]
+    lines = [{"id": b["id"]} for b in accts]
+    by_split = {ln["id"] for ln in split_bank_lines(accts, lines)["cash"]}
+    assert by_split == cash_account_ids(accts), "兩條規則講出不同的話"
+

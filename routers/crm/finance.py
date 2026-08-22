@@ -339,69 +339,66 @@ async def _resettle_invoice(session, invoice_id, when=None,
     await _sync_passthrough_request(session, inv, when=when, existing=kai)
 
 
-async def resolve_invoice_allocs(session, items, ent, by_id=None):
-    """把 [(invoice_id, 金額)] 驗成 [(CrmInvoice, 金額)]。三條寫入路徑共用。
+# 兩種分配（收款掛發票／匯款掛請款單）驗的是同樣四件事，差別只有查哪張表
+# 與訊息裡的名詞。本來各寫一份，於是同一個錯誤在兩邊回不同的 HTTP 碼
+#（跨帳本 409 vs 422）、空 id 一邊擋一邊靜靜丟掉。
+_ALLOC_KINDS = {
+    "invoice": {"model": CrmInvoice, "noun": "發票", "id_field": "invoice_id",
+                "dup": "同一張發票不可重複掛在同一筆收款",
+                "label": lambda o: o.invoice_number or o.title},
+    "payment": {"model": CrmPaymentRequest, "noun": "請款單",
+                "id_field": "payment_request_id",
+                "dup": "同一張請款單重複出現",
+                "label": lambda o: o.summary or o.payee_name},
+}
 
-    擋的是**一定錯**而不是可能錯的三件事：發票不存在／不同帳本／同一張重複，
-    外加金額 ≤ 0（0 元的分配列在分配表裡就是一個看不出用途的鬼列）。
-    金額對不對得上入帳金額**不擋** —— 客戶少匯、多匯、匯費都會讓它對不齊。
 
-    一次把發票撈回來，不要逐列 session.get：一份月對帳單掛 25 張就是 25 個往返。
+async def resolve_allocs(session, items, ent, kind, by_id=None):
+    """把 [(id, 金額)] 驗成 [(物件, 金額)]。收付兩側、四條寫入路徑共用。
+
+    擋的是**一定錯**而不是可能錯的四件事：id 空／單據不存在／不同帳本／
+    金額 ≤ 0（0 元的分配列在分配表裡就是一個看不出用途的鬼列）。
+    金額對不對得上入帳金額**不擋** —— 客戶少匯、多匯、匯費都會讓它對不齊，
+    那是提示（見 alloc_verdict），硬擋只會逼人亂填。
+
+    一次把單據撈回來，不要逐列 session.get：一份月對帳單掛 25 張就是 25 個往返。
+    `by_id` 給整批呼叫端用（自己撈一次，這裡不再撈）。
     """
-    pairs = [((iid or "").strip(), int(amt or 0)) for iid, amt in items]
-    if any(not iid for iid, _a in pairs):
-        raise HTTPException(status_code=422, detail="invoice_id 不可為空")
-    ids = [iid for iid, _a in pairs]
+    k = _ALLOC_KINDS[kind]
+    model = k["model"]
+    pairs = [((i or "").strip(), int(amt or 0)) for i, amt in items]
+    if any(not i for i, _a in pairs):
+        raise HTTPException(status_code=422,
+                            detail=f"{k['id_field']} 不可為空")
+    ids = [i for i, _a in pairs]
     if len(set(ids)) != len(ids):
-        raise HTTPException(status_code=422, detail="同一張發票不可重複掛在同一筆收款")
-    if by_id is None:      # 呼叫端逐列進來時各自撈；整批進來時由呼叫端撈一次
-        by_id = {i.id: i for i in (await session.execute(
-            select(CrmInvoice).where(CrmInvoice.id.in_(ids)))).scalars().all()} if ids else {}
+        raise HTTPException(status_code=422, detail=k["dup"])
+    if by_id is None:
+        by_id = {o.id: o for o in (await session.execute(
+            select(model).where(model.id.in_(ids)))).scalars().all()} if ids else {}
 
     rows = []
-    for iid, amt in pairs:
-        inv = by_id.get(iid)
-        if not inv:
-            raise HTTPException(status_code=404, detail=f"發票不存在：{iid}")
-        if (inv.entity or "parent") != ent:
-            raise HTTPException(status_code=409, detail="收款與發票分屬不同帳本")
+    for i, amt in pairs:
+        obj = by_id.get(i)
+        if obj is None:
+            raise HTTPException(status_code=404, detail=f"{k['noun']}不存在：{i}")
+        if (obj.entity or "parent") != ent:
+            raise HTTPException(status_code=409,
+                                detail=f"收支與{k['noun']}分屬不同帳本")
         if amt <= 0:
             raise HTTPException(
                 status_code=422,
-                detail=f"分配金額要大於 0（{inv.invoice_number or inv.title}）")
-        rows.append((inv, amt))
+                detail=f"分配金額要大於 0（{k['label'](obj) or i}）")
+        rows.append((obj, amt))
     return rows
+
+
+async def resolve_invoice_allocs(session, items, ent, by_id=None):
+    return await resolve_allocs(session, items, ent, "invoice", by_id)
 
 
 async def resolve_payment_allocs(session, items, ent):
-    """(請款單 id, 金額) → [(單, 金額)]，逐項驗證。形狀照 resolve_invoice_allocs。
-
-    擋的是**一定錯**的三件事：單不存在／不同帳本／金額 ≤ 0。
-    金額對不對得上實付**不擋** —— 那是提示（見 alloc_verdict 的 payment 側）。
-    """
-    pairs = [((pid or "").strip(), amt) for pid, amt in items if (pid or "").strip()]
-    ids = [pid for pid, _a in pairs]
-    if len(set(ids)) != len(ids):
-        raise HTTPException(status_code=422, detail="同一張請款單重複出現")
-    # 🔴 一次撈回來，不要逐列 session.get —— 出納把三張單併成一筆匯出就是 3 個
-    #    往返，全在寫交易裡。發票側的 resolve_invoice_allocs 早就這樣做了。
-    by_id = {p.id: p for p in (await session.execute(
-        select(CrmPaymentRequest).where(
-            CrmPaymentRequest.id.in_(ids)))).scalars().all()} if ids else {}
-    rows = []
-    for pid, amt in pairs:
-        ap = by_id.get(pid)
-        if ap is None:
-            raise HTTPException(status_code=404, detail=f"請款單不存在：{pid}")
-        if (ap.entity or "parent") != ent:
-            raise HTTPException(status_code=422, detail="請款單屬於另一本帳")
-        amt = int(amt or 0)
-        if amt <= 0:
-            raise HTTPException(
-                status_code=422,
-                detail=f"分配金額要大於 0（{ap.summary or ap.payee_name or pid}）")
-        rows.append((ap, amt))
-    return rows
+    return await resolve_allocs(session, items, ent, "payment")
 
 
 async def _payment_allocated(session, request_ids):
@@ -1880,6 +1877,21 @@ async def batch_receive(request: Request):
 # 金額檢查是**提示不是閘門**：實收常比發票少幾十元（收款方扣匯費）、也常見分期
 # 只收一半。硬擋會逼人亂填，所以後端算出差額與判讀，由人決定要不要理。
 
+async def _entry_for_alloc(session, entry_id: str, request, *, month_guard=False):
+    """取這筆收支 ＋ 驗帳本（＋ 需要時擋已鎖月）。四個分配端點共用這段前言。
+
+    level="full"：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，
+    這裡刻意雙保險（plan §2.4）。
+    """
+    e = await session.get(CrmCashEntry, entry_id)
+    if not e:
+        raise HTTPException(status_code=404, detail="收支明細不存在")
+    ent = require_entity(request, e.entity or "parent", level="full")
+    if month_guard:
+        await _assert_month_open(session, e.entry_date, entity=ent)
+    return e, ent
+
+
 def _alloc_verdict(entry, allocated: int) -> dict:
     """分配判讀 —— 規則在 core.finance_logic（純函式、有測試、共用容差）。"""
     return alloc_verdict(int(entry.deposit or 0), allocated, side="receipt")
@@ -1917,10 +1929,7 @@ async def list_cash_entry_invoices(entry_id: str, request: Request):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        e = await session.get(CrmCashEntry, entry_id)
-        if not e:
-            raise HTTPException(status_code=404, detail="收支明細不存在")
-        require_entity(request, e.entity or "parent", level="full")
+        e, _ent = await _entry_for_alloc(session, entry_id, request)
         items, allocated = await _load_allocs(session, e)
     return {"items": items, "check": _alloc_verdict(e, allocated)}
 
@@ -1970,10 +1979,7 @@ async def get_cash_entry_payments(entry_id: str, request: Request):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        e = await session.get(CrmCashEntry, entry_id)
-        if not e:
-            raise HTTPException(status_code=404, detail="收支明細不存在")
-        require_entity(request, e.entity or "parent", level="full")
+        e, _ent = await _entry_for_alloc(session, entry_id, request)
         items, allocated = await _load_payment_allocs(session, e)
     return {"items": items, "check": _payment_verdict(e, allocated)}
 
@@ -1998,11 +2004,8 @@ async def set_cash_entry_payments(entry_id: str, req: CashPaymentLinksPayload,
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        e = await session.get(CrmCashEntry, entry_id)
-        if not e:
-            raise HTTPException(status_code=404, detail="收支明細不存在")
-        ent = require_entity(request, e.entity or "parent", level="full")
-        await _assert_month_open(session, e.entry_date, entity=ent)
+        e, ent = await _entry_for_alloc(session, entry_id, request,
+                                        month_guard=True)
 
         rows = await resolve_payment_allocs(
             session, [(it.payment_request_id, it.amount) for it in (req.items or [])],
@@ -2037,11 +2040,8 @@ async def set_cash_entry_invoices(entry_id: str, req: CashInvoiceLinksPayload,
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        e = await session.get(CrmCashEntry, entry_id)
-        if not e:
-            raise HTTPException(status_code=404, detail="收支明細不存在")
-        ent = require_entity(request, e.entity or "parent", level="full")
-        await _assert_month_open(session, e.entry_date, entity=ent)
+        e, ent = await _entry_for_alloc(session, entry_id, request,
+                                        month_guard=True)
 
         rows = await resolve_invoice_allocs(
             session, [(it.invoice_id, it.amount) for it in (req.items or [])], ent)

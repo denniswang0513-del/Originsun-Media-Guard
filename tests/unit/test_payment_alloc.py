@@ -160,11 +160,24 @@ def test_partial_payment_does_not_mark_paid():
 
 def test_amount_mismatch_is_not_a_gate():
     """金額對不上不擋（出納合併匯款＋手續費，硬擋會逼人亂填）。
-    擋的只有一定錯的三件事。"""
-    body = _body("async def resolve_payment_allocs(")
-    for must in ("請款單不存在", "屬於另一本帳", "分配金額要大於 0", "重複出現"):
+    擋的只有一定錯的四件事，而且兩側是**同一支**在擋。
+    """
+    body = _body("async def resolve_allocs(")
+    for must in ("不存在", "不同帳本", "分配金額要大於 0", "不可為空"):
         assert must in body, f"少擋了：{must}"
-    assert "expense" not in body, "把實付金額拿來當閘門了"
+    assert "重複出現" in _body("_ALLOC_KINDS = {")
+    assert "expense" not in body and "deposit" not in body,         "把實際入帳金額拿來當閘門了"
+
+
+def test_both_sides_answer_the_same_error_the_same_way():
+    """🔴 本來兩支各寫一份，於是同一個錯誤在兩邊回不同的 HTTP 碼
+    （跨帳本 409 vs 422），空 id 一邊擋一邊靜靜丟掉。"""
+    src = repo_src("routers/crm/finance.py")
+    for wrapper in ("async def resolve_invoice_allocs(",
+                    "async def resolve_payment_allocs("):
+        body = code_only(func_body(src, wrapper))
+        assert "resolve_allocs(" in body, f"{wrapper} 又自己驗了一遍"
+        assert "HTTPException" not in body, f"{wrapper} 自己長出第二套錯誤碼"
 
 
 def test_fee_is_written_to_bank_fee():
@@ -175,8 +188,21 @@ def test_fee_is_written_to_bank_fee():
 
 
 def test_month_close_is_respected():
+    """月結鎖帳要擋 —— 前言（取列＋驗帳本＋擋鎖月）四個端點共用一支。"""
     body = _body("async def set_cash_entry_payments(")
-    assert "_assert_month_open" in body
+    assert "month_guard=True" in body, "沒有擋已鎖月的月份"
+    assert "_assert_month_open" in _body("async def _entry_for_alloc(")
+
+
+def test_the_four_alloc_endpoints_share_one_prologue():
+    """取列 → 404 → 驗帳本 → 擋鎖月，本來在四個端點各抄一遍。
+
+    抄四遍的代價：同一個 404 在別處寫成「找不到此收支紀錄」、在這裡寫成
+    「收支明細不存在」，而 level="full" 那個雙保險漏掉一處就是權限缺口。
+    """
+    src = code_only(repo_src("routers/crm/finance.py"))
+    seg = src[src.index("async def _entry_for_alloc("):]
+    assert seg.count("session.get(CrmCashEntry, entry_id)") == 1,         "分配端點又自己去撈收支列了"
 
 
 def test_ui_has_the_payment_box_on_expense_rows_only():
