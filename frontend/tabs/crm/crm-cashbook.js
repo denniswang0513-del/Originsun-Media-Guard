@@ -47,8 +47,20 @@ async function loadEntries({ render = true } = {}) {
 
 async function _loadInvoiceList() {
     // 發票是帶 entity 的表 — 關聯選單只列同一本帳的發票
-    try { _invoiceList = (await _fetch('/invoices?entity=' + _pinEntity())).invoices || []; } catch(_) { _invoiceList = []; }
-    try { _paymentList = (await _fetch('/payments?entity=' + _pinEntity())).payments || []; } catch(_) { _paymentList = []; }
+    // 兩支互不相干 —— 串行 await 等於把外層的 Promise.all 自己拆掉，
+    // 白白多一趟往返在開 tab 的關鍵路徑上。
+    const ent = _pinEntity();
+    const [inv, pay] = await Promise.all([
+        _fetch('/invoices?entity=' + ent).then(r => r.invoices || []).catch(() => []),
+        _fetch('/payments?entity=' + ent).then(r => r.payments || []).catch(() => []),
+    ]);
+    _invoiceList = inv;
+    _paymentList = pay;
+    // 搜尋用的比對字串算一次就好（每敲一鍵重建 800 筆 × 4 個小寫字串是白工）
+    _paymentList.forEach((p) => {
+        p._hay = [p.payee_name, p.summary, p.project_label, p.category]
+            .join(' ').toLowerCase();
+    });
 }
 
 async function _loadProjectList() {
@@ -751,8 +763,13 @@ function _allocStatusLine(check, items) {
     const dirty = live !== check.allocated;
     const color = dirty ? '#fbbf24' : _allocColor(check.state);
     const tail = dirty ? '尚未儲存 —— 存檔後才會重新檢查' : _esc(check.message);
+    // 收款側回 received、付款側回 paid —— 兩側共用這一支，差別只有這個標籤。
+    // 本來付款側有一份自己的複本（差在 check.msg vs check.message），
+    // 那個差別是後端兩支 verdict 回傳形狀漂開造成的；形狀對齊之後複本就不需要了。
+    const actual = check.received != null ? ` / 實收 $${_fmtNum(check.received)}`
+        : check.paid != null ? ` / 實付 $${_fmtNum(check.paid)}` : '';
     return `<div style="margin-top:8px;font-size:12px;color:${color};">`
-        + `分配 $${_fmtNum(live)} / 實收 $${_fmtNum(check.received)} —— ${tail}</div>`;
+        + `分配 $${_fmtNum(live)}${actual} —— ${tail}</div>`;
 }
 
 function _allocColor(state) {
@@ -838,17 +855,6 @@ async function loadCashPaymentAllocs(entryId) {
     _renderCashPayAllocs();
 }
 
-/** 狀態列。判讀語只在畫面與後端一致時才顯示（同發票那側的理由）。 */
-function _payStatusLine(check, items) {
-    if (!check) return '';
-    const live = items.reduce((n, x) => n + (Number(x.amount) || 0), 0);
-    const dirty = live !== check.allocated;
-    const color = dirty ? '#fbbf24' : _allocColor(check.state);
-    const tail = dirty ? '尚未儲存 —— 存檔後才會重新檢查' : _esc(check.msg || '');
-    return `<div style="margin-top:8px;font-size:12px;color:${color};">`
-        + `分配 $${_fmtNum(live)} —— ${tail}</div>`;
-}
-
 function _renderCashPayAllocs() {
     const box = document.getElementById('cash-pay-box');
     if (!box) return;
@@ -861,7 +867,8 @@ function _renderCashPayAllocs() {
                 <div style="color:#888;font-size:11px;">
                     ${_esc(it.payee_name || '無收款人')} · 單據 $${_fmtNum(it.request_total)}
                     ${it.request_paid ? ` · 這張總共已付 $${_fmtNum(it.request_paid)}` : ''}
-                    ${(it.request_open || 0) > 0 ? `<span style="color:#fbbf24;">，尚欠 $${_fmtNum(it.request_open)}</span>` : ''}</div>
+                    ${!it.request_settled && (it.request_open || 0) > 0
+                        ? `<span style="color:#fbbf24;">，尚欠 $${_fmtNum(it.request_open)}</span>` : ''}</div>
             </div>
             <input type="number" value="${it.amount}" data-pay-i="${i}"
                    style="width:96px;text-align:right;background:#1a1a1a;border:1px solid #333;
@@ -883,7 +890,7 @@ function _renderCashPayAllocs() {
                           border-radius:4px;padding:4px 8px;font-size:12px;">
         </div>
         <div id="cash-pay-results" style="max-height:150px;overflow:auto;"></div>
-        ${_payStatusLine(check, items)}
+        ${_allocStatusLine(check, items)}
         <div style="margin-top:8px;">
             <button id="cash-pay-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存請款單分配</button>
             ${feeBtn}
@@ -914,9 +921,11 @@ function _paySearch(q) {
     q = (q || '').trim().toLowerCase();
     if (q.length < 1) { out.innerHTML = ''; return; }
     const picked = new Set(_CASH_PAY.items.map(x => x.payment_request_id));
-    const hits = _paymentList.filter(p => !picked.has(p.id) && [
-        p.payee_name, p.summary, p.project_label, p.category,
-    ].some(v => (v || '').toLowerCase().includes(q))).slice(0, 12);
+    // 🔴 已付款的不列出來 —— 全留著等於在已結案名單裡大海撈針（發票側同理）。
+    //    比對字串在載入時就算好（_hay），不要每敲一鍵重建 800 筆小寫字串。
+    const hits = _paymentList.filter(
+        p => !picked.has(p.id) && p.payment_status !== '已付款'
+             && (p._hay || '').includes(q)).slice(0, 12);
     out.innerHTML = hits.length ? hits.map(p => `
         <div data-pay-add="${_esc(p.id)}"
              style="padding:4px 6px;cursor:pointer;font-size:12px;color:#ccc;border-bottom:1px solid #262626;">
@@ -928,6 +937,9 @@ function _paySearch(q) {
         el.addEventListener('click', () => {
             const ap = _paymentList.find(x => x.id === el.dataset.payAdd);
             if (!ap) return;
+            // 預帶面額。發票側預帶的是「未收部分」，但 /payments 清單沒有回
+            // 已付金額（只有 payment_status），這裡算不出來 —— 與其憑空猜，
+            // 不如帶面額讓人改；已付清的那些已經被上面的候選篩掉了。
             _CASH_PAY.items.push({
                 payment_request_id: ap.id, amount: Number(ap.amount) || 0,
                 summary: ap.summary || '', payee_name: ap.payee_name || '',

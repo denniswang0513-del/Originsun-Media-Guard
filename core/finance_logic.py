@@ -105,8 +105,8 @@ def reconciliation_diff(system_balance: int, statement_balance: int) -> dict:
 FEE_TOLERANCE = 50
 
 
-def invoice_is_settled(collected: int, amount_total: int) -> bool:
-    """這張發票收齊了沒？
+def amount_is_settled(paid: int, total: int) -> bool:
+    """這張單據（發票／請款單）收付齊了沒？
 
     🔴 唯一正本 —— 這個判斷同時決定三件事：發票的 payment_status、它出不出現在
     應收帳款、以及分配面板顯示綠燈還是「沒收齊」。分開寫必然漂：2026-08-20 實測，
@@ -114,8 +114,12 @@ def invoice_is_settled(collected: int, amount_total: int) -> bool:
     33,850）整張從應收帳款消失，同一畫面的發票列表卻照實顯示 outstanding。
 
     容差是為了匯費，不是為了讓沒收齊的發票蒙混過關 —— 差 33,850 不會過，差 30 會。
+
+    🔴 名字刻意是中性的：付款側（一筆匯款掛多張請款單）用的是**同一條**規則。
+    2026-08-22 那批本來在 router 裡 inline 寫了第二份 —— 落在沒有單元測試的
+    地方，容差改成百分比時 tests/unit 會照樣綠燈，付款側靜靜用舊規則。
     """
-    return int(collected or 0) + FEE_TOLERANCE >= int(amount_total or 0)
+    return int(paid or 0) + FEE_TOLERANCE >= int(total or 0)
 
 
 def statement_line_status(line: dict) -> str:
@@ -686,22 +690,47 @@ def payment_alloc_verdict(paid: int, allocated: int) -> dict:
     """
     paid, allocated = int(paid or 0), int(allocated or 0)
     short = paid - allocated          # 正 = 實付比分配多（多出來的多半是匯費）
+    fee = 0
     if not allocated:
-        return {"state": "empty", "allocated": 0, "diff": 0, "fee": 0,
-                "msg": "還沒分配任何請款單"}
-    if short == 0:
-        return {"state": "ok", "allocated": allocated, "diff": 0, "fee": 0,
-                "msg": "分配金額與實付相符"}
-    if 0 < short <= FEE_TOLERANCE:
-        return {"state": "fee", "allocated": allocated, "diff": short,
-                "fee": short,
-                "msg": f"實付比分配多 {short} 元 —— 多半是跨行手續費，可認列為匯費"}
-    if short > FEE_TOLERANCE:
-        return {"state": "under", "allocated": allocated, "diff": short,
-                "fee": 0,
-                "msg": f"還有 {short:,} 元沒分配 —— 這筆匯款可能還結清了別張請款單"}
-    return {"state": "over", "allocated": allocated, "diff": short, "fee": 0,
-            "msg": f"分配比實付多 {-short:,} 元 —— 掛太多張了"}
+        state, msg = "empty", "還沒分配任何請款單"
+    elif short == 0:
+        state, msg = "ok", "分配金額與實付相符"
+    elif 0 < short <= FEE_TOLERANCE:
+        state, fee = "fee", short
+        msg = f"實付比分配多 {short} 元 —— 多半是跨行手續費，可認列為匯費"
+    elif short > 0:
+        state = "under"
+        msg = f"還有 {short:,} 元沒分配 —— 這筆匯款可能還結清了別張請款單"
+    else:
+        state = "over"
+        msg = f"分配比實付多 {-short:,} 元 —— 掛太多張了"
+    # 🔴 key 與 alloc_verdict 對齊（message / 實際金額）—— 規則方向刻意相反，
+    #    但**回傳形狀沒有理由分家**。分家的代價是前端得為兩側各寫一份狀態列。
+    return {"state": state, "paid": paid, "allocated": allocated,
+            "diff": short, "fee": fee, "message": msg}
+
+
+def recognize_bank_fee(expense, bank_fee, fee) -> tuple:
+    """認列匯費：從 expense **搬**進 bank_fee，回 (新 expense, 新 bank_fee)。
+
+    🔴 不變量是「總流出不變」。bank_fee 是**外加**在 expense 之上的
+    （cash_entry_flow = deposit − expense − bank_fee − claim；收支明細列表的
+    支出欄顯示 expense + bank_fee），所以只把 fee 寫上去而不從 expense 扣，
+    帳上就會多流出一筆 —— 反而製造新的勾稽差額。
+
+    2026-08-22 我就是這樣寫錯的（v2.4.143 上線一小時後才發現，v2.4.144 修）。
+    當時的 e2e 只斷言 bank_fee == 10，錯的實作照樣過 —— **要釘不變量，
+    不是釘單一欄位**。所以這條規則現在住在這裡，有自己的單元測試。
+
+    用總流出當基準也讓重複呼叫是冪等的。
+    """
+    total_out = int(expense or 0) + int(bank_fee or 0)
+    fee = int(fee or 0)
+    if fee < 0:
+        raise ValueError("匯費不能是負的")
+    if fee > total_out:
+        raise ValueError(f"匯費 {fee:,} 比這筆的總流出 {total_out:,} 還大")
+    return total_out - fee, fee
 
 
 def alloc_verdict(received: int, allocated: int) -> dict:
@@ -1505,7 +1534,7 @@ def cash_entry_activity(entry: dict, cat_map: dict, accounts: dict):
 
 
 def build_cashflow(months, *, opening, closing, cash_entries=(),
-                   cat_map=None, accounts=None, cash_account_ids=None) -> dict:
+                   cat_map=None, accounts=None, bank_accounts=None) -> dict:
     """現金流量表（直接法）。opening/closing = {"total", "by_account":[{name,amount}]}
     由 caller 以 bank_balances_asof 算（期間前一月月底 / 期末月月底）。
 
@@ -1515,9 +1544,12 @@ def build_cashflow(months, *, opening, closing, cash_entries=(),
         · 未掛帳戶（不影響任何帳戶餘額）→ 排除 + note 提醒；損益表則照計。
         · 🔴 掛在**非現金帳戶**上的（股東往來 shareholder_loan/capital）——
           期初/期末只取 split_bank_lines(...)["cash"]，這些帳戶根本不在裡面。
-          `cash_account_ids` 沒給時退回舊行為（只擋未掛帳戶），因為單元測試與
-          舊呼叫端不一定傳得出帳戶清單；正式路徑（services/finance_statements）
-          一定要傳。
+          🔴 帳戶清單直接吃 `bank_accounts`，**「什麼算現金」的判定就只有這一份**
+          （跟 split_bank_lines 同一個述詞）。本來是呼叫端自己再做一次
+          `not is_shareholder_kind(...)` 的 comprehension —— 那等於同一條規則
+          兩份，之後多一個非現金桶（票據存款、履約保證專戶）時它會從期初期末
+          消失、卻不會從迭代裡消失，差額靜靜長出來。
+          不給 `bank_accounts` 時退回舊行為（只擋未掛帳戶），給舊呼叫端與單元測試用。
     - transfer/advance 本金不列入活動（規格：內部移動）；其 bank_fee 是真實
       流出 → 計入 operating。轉存若兩邊成對登記，本金跨帳戶互抵不影響總額；
       未成對差額與預支往來淨流都寫進 check.notes 解釋 diff 來源。
@@ -1535,7 +1567,9 @@ def build_cashflow(months, *, opening, closing, cash_entries=(),
     advance_net = transfer_net = 0
     unassigned = 0
     noncash = 0
-    cash_ids = set(cash_account_ids) if cash_account_ids is not None else None
+    cash_ids = ({b.get("id") for b in bank_accounts
+                 if not is_shareholder_kind(b.get("acct_kind"))}
+                if bank_accounts is not None else None)
     for e in cash_entries:
         if month_of(e.get("entry_date")) not in mset:
             continue

@@ -113,7 +113,9 @@ try:
     chk = r.get("check") or {}
     check(chk.get("state") == "fee", "判為 fee", chk.get("state"))
     check(chk.get("fee") == 10, "算出 10 元", chk.get("fee"))
-    check("手續費" in (chk.get("msg") or ""), "訊息講得出來", chk.get("msg"))
+    check("手續費" in (chk.get("message") or ""), "訊息講得出來", chk.get("message"))
+    # 回傳形狀與收款側對齊（前端才能共用同一支狀態列）
+    check(chk.get("paid") == 13010, "有實付金額", chk.get("paid"))
 
     print("")
     print("[3] 掛滿的請款單自動標已付款")

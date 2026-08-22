@@ -19,9 +19,10 @@ from core.crm_logic import normalize_tax_id
 from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 INVOICE_PASSTHROUGH_COLLECTED,
                                 INVOICE_PENDING_REMIT, INVOICE_REMITTED,
-                                INVOICE_RECEIVED, FEE_TOLERANCE, alloc_verdict, payment_alloc_verdict,
+                                INVOICE_RECEIVED, alloc_verdict, payment_alloc_verdict,
                                 initial_invoice_status,
-                                invoice_direction, invoice_is_settled,
+                                amount_is_settled, invoice_direction,
+                                recognize_bank_fee,
                                 is_passthrough_category, month_of,
                                 normalize_invoice_status, passthrough_commission)
 from core.ledger import require_entity
@@ -306,7 +307,7 @@ async def _resettle_invoice(session, invoice_id, when=None,
     另一頭同樣要修：合併匯款用「關聯發票」面板掛三張時，舊碼**完全不動**發票
     狀態，三張全留在應收帳款裡 → 錢收了應收卻沒減。
 
-    收齊與否走 core.finance_logic.invoice_is_settled（含匯費容差），與分配面板
+    收齊與否走 core.finance_logic.amount_is_settled（含匯費容差），與分配面板
     的綠燈判讀同一條規則。
 
     🔴 `unmark_if_empty`：帳上**一筆收款紀錄都沒有**時，預設什麼都不做。因為
@@ -323,7 +324,7 @@ async def _resettle_invoice(session, invoice_id, when=None,
     if coll is None:                    # 批次呼叫端會把讀好的結果帶進來
         coll = (await _invoice_collections(session, [invoice_id])).get(invoice_id, {})
     got = coll.get("collected", 0)
-    if got and invoice_is_settled(got, inv.amount_total):
+    if got and amount_is_settled(got, inv.amount_total):
         # 代開發票的「已轉撥」是比已收款更後面的階段（錢已匯給代開人）——
         # 收款重算不可以把它降回已收款，那會讓匯出去的紀錄看起來像沒發生。
         if not (inv.payment_status == INVOICE_REMITTED
@@ -378,15 +379,18 @@ async def resolve_payment_allocs(session, items, ent):
     擋的是**一定錯**的三件事：單不存在／不同帳本／金額 ≤ 0。
     金額對不對得上實付**不擋** —— 那是提示（見 payment_alloc_verdict）。
     """
-    seen, rows = set(), []
-    for pid, amt in items:
-        pid = (pid or "").strip()
-        if not pid:
-            continue
-        if pid in seen:
-            raise HTTPException(status_code=422, detail="同一張請款單重複出現")
-        seen.add(pid)
-        ap = await session.get(CrmPaymentRequest, pid)
+    pairs = [((pid or "").strip(), amt) for pid, amt in items if (pid or "").strip()]
+    ids = [pid for pid, _a in pairs]
+    if len(set(ids)) != len(ids):
+        raise HTTPException(status_code=422, detail="同一張請款單重複出現")
+    # 🔴 一次撈回來，不要逐列 session.get —— 出納把三張單併成一筆匯出就是 3 個
+    #    往返，全在寫交易裡。發票側的 resolve_invoice_allocs 早就這樣做了。
+    by_id = {p.id: p for p in (await session.execute(
+        select(CrmPaymentRequest).where(
+            CrmPaymentRequest.id.in_(ids)))).scalars().all()} if ids else {}
+    rows = []
+    for pid, amt in pairs:
+        ap = by_id.get(pid)
         if ap is None:
             raise HTTPException(status_code=404, detail=f"請款單不存在：{pid}")
         if (ap.entity or "parent") != ent:
@@ -424,16 +428,21 @@ async def resettle_payment_requests(session, request_ids, when=None) -> None:
     if not ids:
         return
     paid_map = await _payment_allocated(session, ids)
+    # 🔴 先整批載進 identity map，底下就變成記憶體命中 —— 逐張 session.get 的話，
+    #    被解除連結的那些（prev）每一張都是一個冷往返（同 resettle_invoices）。
+    aps = {a.id: a for a in (await session.execute(
+        select(CrmPaymentRequest).where(
+            CrmPaymentRequest.id.in_(ids)))).scalars().all()}
     for pid in ids:
-        ap = await session.get(CrmPaymentRequest, pid)
+        ap = aps.get(pid)
         if ap is None:
             continue
         got = paid_map.get(pid, 0)
-        full = got + FEE_TOLERANCE >= int(ap.amount or 0) and got > 0
+        # 結清判準走 core 的唯一正本（本來在這裡 inline 寫了第二份）
+        full = got > 0 and amount_is_settled(got, ap.amount)
         if full:
             ap.payment_status = "已付款"
-            w = (when.get(pid) if isinstance(when, dict) else when)
-            ap.payment_date = w or ap.payment_date or _now()
+            ap.payment_date = when or ap.payment_date or _now()
         elif got:
             ap.payment_status = "應付款"      # 付了一部分，還沒結清
         else:
@@ -443,7 +452,7 @@ async def resettle_payment_requests(session, request_ids, when=None) -> None:
         ap.updated_at = _now()
 
 
-async def replace_payment_allocs(session, entry, rows, when=None):
+async def replace_payment_allocs(session, entry, rows):
     """整組取代這筆匯款的請款單分配 —— **唯一**寫 crm_cash_payment_links 的地方。
 
     一次動三樣（少做一樣就會有兩個畫面各講各的）：
@@ -460,7 +469,7 @@ async def replace_payment_allocs(session, entry, rows, when=None):
     if prev:
         await session.execute(sa_delete(CrmCashPaymentLink).where(
             CrmCashPaymentLink.cash_entry_id == entry.id))
-    w = when or entry.entry_date or _now()
+    w = entry.entry_date or _now()
     for ap, amt in rows:
         session.add(CrmCashPaymentLink(
             id=uuid.uuid4().hex, cash_entry_id=entry.id,
@@ -635,7 +644,7 @@ def collection_fields(amount_total, coll: dict | None = None,
 
     🔴 `settled` 是關鍵那一欄。以前只回 collected 與 outstanding，於是前端三個地方
     各自用 `outstanding > 0` / `<= 0` 判「收齊了沒」—— 但真正的規則是
-    invoice_is_settled（含 NT$50 匯費容差，394 張歷史發票裡有 42 張靠它）。
+    amount_is_settled（含 NT$50 匯費容差，394 張歷史發票裡有 42 張靠它）。
     結果同一張被匯費短收 30 元的發票：應收帳款說收齊了，發票列表說「尚欠 $30」。
     容差是後端的事，不該複製到瀏覽器 —— 後端算好一個布林送過去。
     """
@@ -643,7 +652,7 @@ def collection_fields(amount_total, coll: dict | None = None,
     got = int(c.get("collected", 0) or 0)
     total = int(amount_total or 0)
     d = {"collected": got, "outstanding": total - got,
-         "settled": invoice_is_settled(got, total),
+         "settled": amount_is_settled(got, total),
          "last_paid_date": c.get("last_paid_date")}
     if with_detail:
         d["payments"] = c.get("payments", [])
@@ -1939,8 +1948,13 @@ async def _load_payment_allocs(session, entry):
             "payment_request_id": link.payment_request_id,
             "amount": int(link.amount or 0),
             # 這張單**整體**付了多少（跨所有匯款）—— 分次支付要看得到全貌
+            # 🔴 settled 是關鍵那一欄。少了它，前端只能用 request_open > 0 判
+            #    「尚欠」—— 7,010 的單付了 7,000（那 10 元是跨行手續費），
+            #    後端標「已付款」、同一個面板同一列標「尚欠 $10」。發票側
+            #    （collection_fields）就是為了這個才把布林算好送過去的。
             "request_total": total, "request_paid": got,
             "request_open": max(0, total - got),
+            "request_settled": got > 0 and amount_is_settled(got, total),
             "summary": (ap.summary if ap else "") or "",
             "payee_name": (ap.payee_name if ap else "") or "",
             "request_date": _fmt_day(ap.request_date) if ap else "",
@@ -1995,22 +2009,13 @@ async def set_cash_entry_payments(entry_id: str, req: CashPaymentLinksPayload,
             ent)
         await replace_payment_allocs(session, e, rows)
         if req.fee is not None:
-            fee = int(req.fee or 0)
-            if fee < 0:
-                raise HTTPException(status_code=422, detail="匯費不能是負的")
-            # 🔴 bank_fee 是**外加**在 expense 之上的（cash_entry_flow =
-            #    deposit − expense − bank_fee − claim；列表的支出欄也是顯示
-            #    expense + bank_fee）。所以認列匯費要從 expense 裡**搬**出來，
-            #    不能只是寫上去 —— 只寫的話銀行少 8,010、帳上卻記成流出 8,020，
-            #    當場多一筆 10 元的勾稽差額。
-            #    用「總流出不變」當不變量，順便讓重複呼叫是冪等的。
-            total_out = int(e.expense or 0) + int(e.bank_fee or 0)
-            if fee > total_out:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"匯費 {fee:,} 比這筆的總流出 {total_out:,} 還大")
-            e.bank_fee = fee or None
-            e.expense = total_out - fee
+            # 不變量（總流出不變）與冪等性在 core.finance_logic.recognize_bank_fee
+            # —— 那是錢的規則，要有自己的單元測試，不該住在端點裡。
+            try:
+                e.expense, bf = recognize_bank_fee(e.expense, e.bank_fee, req.fee)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc))
+            e.bank_fee = bf or None
         await session.commit()
 
         items, allocated = await _load_payment_allocs(session, e)

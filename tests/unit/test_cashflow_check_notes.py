@@ -49,29 +49,37 @@ def test_noncash_accounts_are_excluded_from_flow():
     assert "非現金帳戶（股東往來）" in body, "排除了但沒告訴人"
 
 
-def test_official_path_passes_the_cash_account_ids():
+def test_official_path_passes_the_accounts():
     """算得出來還要真的傳進去 —— 沒傳就退回舊行為（等於沒修）。"""
-    from tests.unit._srcscan import repo_src
+    from tests.unit._srcscan import code_only, repo_src
     src = repo_src("services/finance_statements.py")
-    assert "cash_account_ids=cash_ids" in src
-    assert "not is_shareholder_kind(b.get(\"acct_kind\"))" in src
+    assert 'bank_accounts=inputs["bank_accounts"]' in src
+    # 🔴 要看**程式碼**，不是全檔找字串 —— 我在那裡寫的註解就提到
+    #    is_shareholder_kind，全檔比對會被自己的註解餵飽（今天第三次踩）。
+    assert "is_shareholder_kind" not in code_only(src),         "呼叫端又自己判了一次什麼算現金"
 
 
-def test_missing_ids_falls_back_to_old_behaviour():
+def test_missing_accounts_falls_back_to_old_behaviour():
     """沒傳清單時只擋未掛帳戶（舊呼叫端與單元測試不一定傳得出帳戶清單）。"""
     from core.finance_logic import build_cashflow
     ents = [{"entry_date": "2026-01-05", "bank_account_id": "X",
              "deposit": 100, "category": "其他收入"}]
+    cm = {("cash", "其他收入"): {"treatment": "direct_income"}}
     r = build_cashflow(["2026-01"], opening={"total": 0}, closing={"total": 100},
-                       cash_entries=ents, cat_map={("cash", "其他收入"):
-                                                   {"treatment": "direct_income"}})
-    assert r["net"] == 100, "沒傳 cash_account_ids 時不該把它擋掉"
+                       cash_entries=ents, cat_map=cm)
+    assert r["net"] == 100, "沒傳 bank_accounts 時不該把它擋掉"
+    # 傳了帳戶：股東往來那個帳戶上的收支不進淨流
     r2 = build_cashflow(["2026-01"], opening={"total": 0}, closing={"total": 0},
-                        cash_entries=ents,
-                        cat_map={("cash", "其他收入"): {"treatment": "direct_income"}},
-                        cash_account_ids=["別的帳戶"])
-    assert r2["net"] == 0, "傳了清單就該擋掉不在清單裡的帳戶"
+                        cash_entries=ents, cat_map=cm,
+                        bank_accounts=[{"id": "X", "acct_kind": "shareholder_loan"},
+                                       {"id": "Y", "acct_kind": "bank"}])
+    assert r2["net"] == 0, "股東往來上的收支被算進淨流了"
     assert any("非現金帳戶" in n for n in r2["check"]["notes"])
+    # 一般銀行帳戶照算
+    r3 = build_cashflow(["2026-01"], opening={"total": 0}, closing={"total": 100},
+                        cash_entries=ents, cat_map=cm,
+                        bank_accounts=[{"id": "X", "acct_kind": "bank"}])
+    assert r3["net"] == 100
 
 
 def test_transfer_principal_is_tracked_for_the_note():

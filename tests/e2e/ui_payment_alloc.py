@@ -135,6 +135,10 @@ try:
         print("[3] 🔴「認列成匯費」那顆真的按得到")
         txt = pg.inner_text("#cash-pay-box")
         check("認列成匯費" in txt, "按鈕出現了", txt[:100])
+        # 🔴 狀態列也要斷言。前一版只看按鈕，結果狀態列整條是空的
+        #    （後端 msg→message 改名後前端沒跟上）也照樣 ALL PASS。
+        check("實付 $8,010" in txt, "狀態列有實付金額")
+        check("跨行手續費" in txt, "狀態列有判讀語")
         pg.click("#cash-pay-fee")
         pg.wait_for_timeout(3000)
         check(not errs, "認列沒有 JS 例外", errs[:2])

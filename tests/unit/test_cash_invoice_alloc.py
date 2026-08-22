@@ -94,11 +94,11 @@ def test_both_write_paths_sync_the_allocation_table():
 
 
 class TestInvoiceSettled:
-    """「這張發票收齊了沒」的唯一正本（core.finance_logic.invoice_is_settled）。"""
+    """「這張發票收齊了沒」的唯一正本（core.finance_logic.amount_is_settled）。"""
 
     def test_exact_amount_is_settled(self):
-        from core.finance_logic import invoice_is_settled
-        assert invoice_is_settled(42000, 42000)
+        from core.finance_logic import amount_is_settled
+        assert amount_is_settled(42000, 42000)
 
     def test_bank_fee_shortfall_still_counts_as_settled(self):
         """實收比面額少 30 元＝跨行匯費，不是欠款。
@@ -106,10 +106,10 @@ class TestInvoiceSettled:
         394 張歷史發票裡有 42 張正好差 30 —— 如果這裡判成沒收齊，應收帳款會
         憑空長出 42 筆三十元的鬼債。
         """
-        from core.finance_logic import invoice_is_settled
-        assert invoice_is_settled(41970, 42000)
-        assert invoice_is_settled(41950, 42000)      # 邊界：差 50 還算
-        assert not invoice_is_settled(41949, 42000)  # 差 51 就不算
+        from core.finance_logic import amount_is_settled
+        assert amount_is_settled(41970, 42000)
+        assert amount_is_settled(41950, 42000)      # 邊界：差 50 還算
+        assert not amount_is_settled(41949, 42000)  # 差 51 就不算
 
     def test_real_partial_payment_is_not_settled(self):
         """面額 144,900 只收 111,050（實際資料）—— 尚欠 33,850 必須留在應收帳款。
@@ -117,12 +117,12 @@ class TestInvoiceSettled:
         🔴 舊規則「收到任何一毛就標已收款」讓這張整個從應收帳款消失，
         而同一畫面的發票列表照實顯示 outstanding 33,850。
         """
-        from core.finance_logic import invoice_is_settled
-        assert not invoice_is_settled(111050, 144900)
+        from core.finance_logic import amount_is_settled
+        assert not amount_is_settled(111050, 144900)
 
     def test_nothing_collected_is_not_settled(self):
-        from core.finance_logic import invoice_is_settled
-        assert not invoice_is_settled(0, 42000)
+        from core.finance_logic import amount_is_settled
+        assert not amount_is_settled(0, 42000)
 
 
 def test_settlement_rule_has_exactly_one_definition():

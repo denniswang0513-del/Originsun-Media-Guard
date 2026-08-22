@@ -39,20 +39,20 @@ def test_small_shortfall_is_a_transfer_fee(paid, alloc, fee):
     r = payment_alloc_verdict(paid, alloc)
     assert r["state"] == "fee"
     assert r["fee"] == fee, "沒把手續費金額算出來（呼叫端要拿它寫 bank_fee）"
-    assert "手續費" in r["msg"]
+    assert "手續費" in r["message"]
 
 
 def test_big_shortfall_means_another_request_is_unlinked():
     r = payment_alloc_verdict(130109, 8000)
     assert r["state"] == "under"
     assert r["fee"] == 0, "差這麼多不能當成手續費吞掉"
-    assert "122,109" in r["msg"], "沒告訴人還差多少"
+    assert "122,109" in r["message"], "沒告訴人還差多少"
 
 
 def test_over_allocation():
     r = payment_alloc_verdict(8000, 9000)
     assert r["state"] == "over" and r["fee"] == 0
-    assert "1,000" in r["msg"]
+    assert "1,000" in r["message"]
 
 
 def test_direction_is_opposite_to_the_receipt_side():
@@ -63,6 +63,20 @@ def test_direction_is_opposite_to_the_receipt_side():
     assert alloc_verdict(8010, 8000)["state"] != "fee"
     # 收 8,000、掛 8,010 → 收款側才是 fee
     assert alloc_verdict(8000, 8010)["state"] == "fee"
+
+
+def test_return_shape_matches_the_receipt_side():
+    """🔴 規則方向刻意相反，但**回傳形狀沒有理由分家**。
+
+    分家的代價是前端得為兩側各寫一份狀態列（實際發生過：
+    `_payStatusLine` 只是 `_allocStatusLine` 的複本，差在 msg vs message）。
+    """
+    a = set(alloc_verdict(8000, 8010))
+    p = set(payment_alloc_verdict(8010, 8000))
+    assert "message" in p and "msg" not in p, "又漂回 msg 了"
+    assert p >= {"state", "allocated", "diff", "message"}, p
+    assert (a - p) <= {"received"}, f"收款側有、付款側沒有的 key：{a - p}"
+    assert "paid" in p, "付款側要有實付金額（畫面要顯示在跟什麼比）"
 
 
 def test_tolerance_comes_from_the_shared_constant():
@@ -130,7 +144,10 @@ def test_removed_links_are_resettled_too():
 def test_partial_payment_does_not_mark_paid():
     """分次支付不能一碰到就標已付款 —— 那條規則會讓尾款靜默消失。"""
     body = _body("async def resettle_payment_requests(")
-    assert "got + FEE_TOLERANCE >= int(ap.amount or 0) and got > 0" in body
+    # 🔴 判準走 core 的唯一正本，不在 router 裡 inline 一份 —— inline 的那份
+    #    落在沒有單元測試的地方，容差規則一改就會靜靜分岔。
+    assert "amount_is_settled(got, ap.amount)" in body
+    assert "FEE_TOLERANCE" not in body, "又在 router 裡自己算容差了"
     assert '"應付款"' in body, "付了一部分沒有中間狀態"
     assert "ap.payment_date = None" in body, "連結拿光了沒有清掉付款日"
 
@@ -147,8 +164,8 @@ def test_amount_mismatch_is_not_a_gate():
 def test_fee_is_written_to_bank_fee():
     """手續費要進 bank_fee —— 那條路本來就把匯費算成管理費用與現金流出。"""
     body = _body("async def set_cash_entry_payments(")
-    assert "e.bank_fee = fee or None" in body
-    assert "匯費不能是負的" in body
+    assert "recognize_bank_fee(e.expense, e.bank_fee, req.fee)" in body
+    assert "e.bank_fee = bf or None" in body
 
 
 def test_month_close_is_respected():
@@ -170,25 +187,17 @@ def test_ui_offers_to_book_the_fee():
     assert "check.state === 'fee'" in js, "沒有只在判為手續費時才出現"
 
 
-def test_ui_does_not_reimplement_the_verdict():
-    """判讀規則的正本在後端 —— 前端重寫一份就會有兩個答案。"""
-    js = repo_src(JS)
-    i = js.index("function _payStatusLine(")
-    seg = js[i:js.index("\nfunction ", i + 10)]
-    assert "FEE_TOLERANCE" not in seg and "check.msg" in seg
+def test_ui_shares_one_status_line():
+    """🔴 兩側共用同一支狀態列。
 
-
-def test_fee_is_moved_out_of_expense_not_added_on_top():
-    """🔴 我第一版寫錯的地方（2.4.143 上線一小時後才發現）。
-
-    bank_fee 是**外加**在 expense 之上的：
-        cash_entry_flow = deposit − expense − bank_fee − claim
-        列表的支出欄也是顯示 expense + bank_fee
-    只寫 bank_fee=10 而不動 expense=8,010，帳上就變成流出 8,020 ——
-    銀行只少了 8,010，當場多一筆 10 元的勾稽差額（正好是我這幾天在追的那種）。
-    正解是從 expense 裡**搬**出來，用「總流出不變」當不變量（順便冪等）。
+    本來付款側有一支 `_payStatusLine`，是 `_allocStatusLine` 的複本，差別只在
+    `check.msg` vs `check.message` —— 那個差別本身就是後端兩支 verdict 回傳
+    形狀漂開造成的。形狀對齊之後，複本沒有存在的理由。
     """
-    body = _body("async def set_cash_entry_payments(")
-    assert "total_out = int(e.expense or 0) + int(e.bank_fee or 0)" in body
-    assert "e.expense = total_out - fee" in body, "只寫了 bank_fee 沒有從 expense 扣掉"
-    assert "比這筆的總流出" in body, "匯費比總流出還大時沒有擋"
+    js = repo_src(JS)
+    assert "_payStatusLine" not in js, "付款側又長出一份自己的狀態列"
+    assert js.count("function _allocStatusLine(") == 1
+    seg = js[js.index("function _allocStatusLine("):]
+    seg = seg[:seg.index(chr(10) + "function ")]
+    assert "FEE_TOLERANCE" not in seg, "前端重寫了容差規則"
+    assert "check.message" in seg
