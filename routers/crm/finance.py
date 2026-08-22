@@ -1998,7 +1998,19 @@ async def set_cash_entry_payments(entry_id: str, req: CashPaymentLinksPayload,
             fee = int(req.fee or 0)
             if fee < 0:
                 raise HTTPException(status_code=422, detail="匯費不能是負的")
+            # 🔴 bank_fee 是**外加**在 expense 之上的（cash_entry_flow =
+            #    deposit − expense − bank_fee − claim；列表的支出欄也是顯示
+            #    expense + bank_fee）。所以認列匯費要從 expense 裡**搬**出來，
+            #    不能只是寫上去 —— 只寫的話銀行少 8,010、帳上卻記成流出 8,020，
+            #    當場多一筆 10 元的勾稽差額。
+            #    用「總流出不變」當不變量，順便讓重複呼叫是冪等的。
+            total_out = int(e.expense or 0) + int(e.bank_fee or 0)
+            if fee > total_out:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"匯費 {fee:,} 比這筆的總流出 {total_out:,} 還大")
             e.bank_fee = fee or None
+            e.expense = total_out - fee
         await session.commit()
 
         items, allocated = await _load_payment_allocs(session, e)

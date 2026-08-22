@@ -135,6 +135,23 @@ try:
                 if x["id"] == e1), None)
     check(row and int(row.get("bank_fee") or 0) == 10, "bank_fee = 10",
           row and row.get("bank_fee"))
+    # 🔴 總流出不能變 —— bank_fee 是外加在 expense 之上的，只寫 bank_fee 不從
+    #    expense 扣掉的話，帳上會變成流出 8,020 而銀行只少 8,010（我第一版就是
+    #    這樣，而且原本的斷言只看 bank_fee 所以抓不到）。
+    check(row and int(row.get("expense") or 0) == 13000,
+          "expense 從 13,010 搬成 13,000", row and row.get("expense"))
+    check(row and int(row.get("expense") or 0) + int(row.get("bank_fee") or 0) == 13010,
+          "🔴 總流出仍然是 13,010（銀行實際少的錢）",
+          row and (row.get("expense"), row.get("bank_fee")))
+    # 再按一次要冪等（總流出還是一樣，不會被扣兩次）
+    call("PUT", f"/crm/cash-entries/{e1}/payments", {"items": [
+        {"payment_request_id": ap8, "amount": 8000},
+        {"payment_request_id": ap5, "amount": 5000}], "fee": 10})
+    st, d = call("GET", "/crm/cash-entries?limit=3000")
+    row = next((x for x in (d.get("items") or d.get("entries") or [])
+                if x["id"] == e1), None)
+    check(row and int(row.get("expense") or 0) + int(row.get("bank_fee") or 0) == 13010,
+          "重複認列是冪等的", row and (row.get("expense"), row.get("bank_fee")))
     check(row and row.get("payment_request_id") == ap8,
           "主要請款單 = 金額最大那張", row and row.get("payment_request_id"))
 

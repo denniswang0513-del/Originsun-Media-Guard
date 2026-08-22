@@ -176,3 +176,19 @@ def test_ui_does_not_reimplement_the_verdict():
     i = js.index("function _payStatusLine(")
     seg = js[i:js.index("\nfunction ", i + 10)]
     assert "FEE_TOLERANCE" not in seg and "check.msg" in seg
+
+
+def test_fee_is_moved_out_of_expense_not_added_on_top():
+    """🔴 我第一版寫錯的地方（2.4.143 上線一小時後才發現）。
+
+    bank_fee 是**外加**在 expense 之上的：
+        cash_entry_flow = deposit − expense − bank_fee − claim
+        列表的支出欄也是顯示 expense + bank_fee
+    只寫 bank_fee=10 而不動 expense=8,010，帳上就變成流出 8,020 ——
+    銀行只少了 8,010，當場多一筆 10 元的勾稽差額（正好是我這幾天在追的那種）。
+    正解是從 expense 裡**搬**出來，用「總流出不變」當不變量（順便冪等）。
+    """
+    body = _body("async def set_cash_entry_payments(")
+    assert "total_out = int(e.expense or 0) + int(e.bank_fee or 0)" in body
+    assert "e.expense = total_out - fee" in body, "只寫了 bank_fee 沒有從 expense 扣掉"
+    assert "比這筆的總流出" in body, "匯費比總流出還大時沒有擋"
