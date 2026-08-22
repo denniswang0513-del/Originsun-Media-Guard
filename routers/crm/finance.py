@@ -19,7 +19,7 @@ from core.crm_logic import normalize_tax_id
 from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 INVOICE_PASSTHROUGH_COLLECTED,
                                 INVOICE_PENDING_REMIT, INVOICE_REMITTED,
-                                INVOICE_RECEIVED, alloc_verdict,
+                                INVOICE_RECEIVED, FEE_TOLERANCE, alloc_verdict, payment_alloc_verdict,
                                 initial_invoice_status,
                                 invoice_direction, invoice_is_settled,
                                 is_passthrough_category, month_of,
@@ -28,7 +28,7 @@ from core.ledger import require_entity
 from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES
 from core.project_link import PAYMENT_CATEGORIES as _PAYMENT_LINK_CATEGORIES
 from core.schemas import (InvoicePayload, PaymentRequestPayload, CashEntryPayload,
-                          CashInvoiceLinksPayload)
+                          CashInvoiceLinksPayload, CashPaymentLinksPayload)
 
 from ._shared import (router, _check_auth, money_dep, _require_db,
                       cash_category_texts,
@@ -43,7 +43,7 @@ try:
     from ._shared import (select, or_,
                           Client, CrmProject, CrmStaff, CrmInvoice,
                           CrmPaymentRequest, CrmCashEntry, CrmProjectExpense,
-                          CrmCashInvoiceLink)
+                          CrmCashInvoiceLink, CrmCashPaymentLink)
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
     pass
 
@@ -370,6 +370,107 @@ async def resolve_invoice_allocs(session, items, ent, by_id=None):
                 detail=f"分配金額要大於 0（{inv.invoice_number or inv.title}）")
         rows.append((inv, amt))
     return rows
+
+
+async def resolve_payment_allocs(session, items, ent):
+    """(請款單 id, 金額) → [(單, 金額)]，逐項驗證。形狀照 resolve_invoice_allocs。
+
+    擋的是**一定錯**的三件事：單不存在／不同帳本／金額 ≤ 0。
+    金額對不對得上實付**不擋** —— 那是提示（見 payment_alloc_verdict）。
+    """
+    seen, rows = set(), []
+    for pid, amt in items:
+        pid = (pid or "").strip()
+        if not pid:
+            continue
+        if pid in seen:
+            raise HTTPException(status_code=422, detail="同一張請款單重複出現")
+        seen.add(pid)
+        ap = await session.get(CrmPaymentRequest, pid)
+        if ap is None:
+            raise HTTPException(status_code=404, detail=f"請款單不存在：{pid}")
+        if (ap.entity or "parent") != ent:
+            raise HTTPException(status_code=422, detail="請款單屬於另一本帳")
+        amt = int(amt or 0)
+        if amt <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"分配金額要大於 0（{ap.summary or ap.payee_name or pid}）")
+        rows.append((ap, amt))
+    return rows
+
+
+async def _payment_allocated(session, request_ids):
+    """每張請款單**跨所有匯款**已經分配到多少（分次支付要看全貌）。"""
+    ids = [i for i in dict.fromkeys(request_ids) if i]
+    if not ids:
+        return {}
+    out = {}
+    for pid, amt in (await session.execute(
+            select(CrmCashPaymentLink.payment_request_id,
+                   CrmCashPaymentLink.amount)
+            .where(CrmCashPaymentLink.payment_request_id.in_(ids)))).all():
+        out[pid] = out.get(pid, 0) + int(amt or 0)
+    return out
+
+
+async def resettle_payment_requests(session, request_ids, when=None) -> None:
+    """依**帳上實付**重算請款單的付款狀態。
+
+    🔴 跟發票那側同一條規則：不是「碰到就標已付款」—— 分次支付會被那條規則
+    靜默吃掉。付滿（含 FEE_TOLERANCE 容差）才標已付款；不足退回應付款。
+    """
+    ids = [i for i in dict.fromkeys(request_ids) if i]
+    if not ids:
+        return
+    paid_map = await _payment_allocated(session, ids)
+    for pid in ids:
+        ap = await session.get(CrmPaymentRequest, pid)
+        if ap is None:
+            continue
+        got = paid_map.get(pid, 0)
+        full = got + FEE_TOLERANCE >= int(ap.amount or 0) and got > 0
+        if full:
+            ap.payment_status = "已付款"
+            w = (when.get(pid) if isinstance(when, dict) else when)
+            ap.payment_date = w or ap.payment_date or _now()
+        elif got:
+            ap.payment_status = "應付款"      # 付了一部分，還沒結清
+        else:
+            # 連結被拿光了 → 退回未付款，並清掉付款日（否則帳上永遠是已付）
+            ap.payment_status = "未付款"
+            ap.payment_date = None
+        ap.updated_at = _now()
+
+
+async def replace_payment_allocs(session, entry, rows, when=None):
+    """整組取代這筆匯款的請款單分配 —— **唯一**寫 crm_cash_payment_links 的地方。
+
+    一次動三樣（少做一樣就會有兩個畫面各講各的）：
+      1. 分配表（多對多的正本）
+      2. 收支列的 payment_request_id（主要請款單 = 金額最大那張）——
+         classify_cash_entry 的硬連結優先序讀它，不同步的話分類會漂
+      3. 相關請款單的付款狀態（**被移除的那些也要重算**，否則錢退掉了
+         卻永遠掛已付款 —— 發票那側踩過同一個坑）
+    """
+    from sqlalchemy import delete as sa_delete
+    prev = {pid for (pid,) in (await session.execute(
+        select(CrmCashPaymentLink.payment_request_id)
+        .where(CrmCashPaymentLink.cash_entry_id == entry.id))).all()}
+    if prev:
+        await session.execute(sa_delete(CrmCashPaymentLink).where(
+            CrmCashPaymentLink.cash_entry_id == entry.id))
+    w = when or entry.entry_date or _now()
+    for ap, amt in rows:
+        session.add(CrmCashPaymentLink(
+            id=uuid.uuid4().hex, cash_entry_id=entry.id,
+            payment_request_id=ap.id, amount=amt))
+    entry.payment_request_id = (max(rows, key=lambda x: x[1])[0].id
+                                if rows else None)
+    entry.updated_at = _now()
+    await session.flush()
+    await resettle_payment_requests(
+        session, list(prev | {ap.id for ap, _a in rows}), when=w)
 
 
 async def replace_invoice_allocs(session, entry, rows, when=None, set_primary=True):
@@ -1813,6 +1914,95 @@ async def list_cash_entry_invoices(entry_id: str, request: Request):
         require_entity(request, e.entity or "parent", level="full")
         items, allocated = await _load_allocs(session, e)
     return {"items": items, "check": _alloc_verdict(e, allocated)}
+
+
+def _payment_verdict(entry, allocated: int) -> dict:
+    """付款側判讀 —— 規則在 core.finance_logic（純函式、有測試、共用容差）。"""
+    return payment_alloc_verdict(int(entry.expense or 0), allocated)
+
+
+async def _load_payment_allocs(session, entry):
+    """回 (連結列 dict 清單, 分配合計)。"""
+    rows = (await session.execute(
+        select(CrmCashPaymentLink, CrmPaymentRequest)
+        .outerjoin(CrmPaymentRequest,
+                   CrmPaymentRequest.id == CrmCashPaymentLink.payment_request_id)
+        .where(CrmCashPaymentLink.cash_entry_id == entry.id)
+        .order_by(CrmCashPaymentLink.created_at))).all()
+    paid = await _payment_allocated(session, [x.payment_request_id for x, _a in rows])
+    items, allocated = [], 0
+    for link, ap in rows:
+        allocated += int(link.amount or 0)
+        total = int((ap.amount if ap else 0) or 0)
+        got = paid.get(link.payment_request_id, 0)
+        items.append({
+            "payment_request_id": link.payment_request_id,
+            "amount": int(link.amount or 0),
+            # 這張單**整體**付了多少（跨所有匯款）—— 分次支付要看得到全貌
+            "request_total": total, "request_paid": got,
+            "request_open": max(0, total - got),
+            "summary": (ap.summary if ap else "") or "",
+            "payee_name": (ap.payee_name if ap else "") or "",
+            "request_date": _fmt_day(ap.request_date) if ap else "",
+            "payment_status": (ap.payment_status if ap else "") or "",
+            "missing": ap is None,      # 請款單被刪了，連結變孤兒
+        })
+    return items, allocated
+
+
+@router.get("/cash-entries/{entry_id}/payments", dependencies=[Depends(money_dep)])
+async def get_cash_entry_payments(entry_id: str, request: Request):
+    """這筆匯款掛了哪些請款單、各分配多少、與實付差多少。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        e = await session.get(CrmCashEntry, entry_id)
+        if not e:
+            raise HTTPException(status_code=404, detail="收支明細不存在")
+        require_entity(request, e.entity or "parent", level="full")
+        items, allocated = await _load_payment_allocs(session, e)
+    return {"items": items, "check": _payment_verdict(e, allocated)}
+
+
+@router.put("/cash-entries/{entry_id}/payments")
+async def set_cash_entry_payments(entry_id: str, req: CashPaymentLinksPayload,
+                                  request: Request):
+    """整組取代這筆匯款的請款單分配（owner 2026-08-22）。
+
+    金額對不對得上實付**不擋**（跟發票那側同一個道理：出納合併匯款、跨行
+    手續費 10~15 元，硬擋會逼人亂填）。擋的是一定錯的：單不存在／不同帳本／
+    重複／金額 ≤ 0。
+
+    副作用（刻意）：
+      · `payment_request_id` 同步成金額最大的那張 —— classify_cash_entry 的
+        硬連結優先序讀它。
+      · 相關請款單的付款狀態重算（付滿才標已付款，分次支付標應付款，
+        連結被拿光退回未付款並清掉付款日）。
+      · `fee` 有給就寫進 bank_fee —— 那 10 元從此是管理費用，不是對不起來的差額。
+    """
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        e = await session.get(CrmCashEntry, entry_id)
+        if not e:
+            raise HTTPException(status_code=404, detail="收支明細不存在")
+        ent = require_entity(request, e.entity or "parent", level="full")
+        await _assert_month_open(session, e.entry_date, entity=ent)
+
+        rows = await resolve_payment_allocs(
+            session, [(it.payment_request_id, it.amount) for it in (req.items or [])],
+            ent)
+        await replace_payment_allocs(session, e, rows)
+        if req.fee is not None:
+            fee = int(req.fee or 0)
+            if fee < 0:
+                raise HTTPException(status_code=422, detail="匯費不能是負的")
+            e.bank_fee = fee or None
+        await session.commit()
+
+        items, allocated = await _load_payment_allocs(session, e)
+    return {"ok": True, "items": items, "check": _payment_verdict(e, allocated)}
 
 
 @router.put("/cash-entries/{entry_id}/invoices")

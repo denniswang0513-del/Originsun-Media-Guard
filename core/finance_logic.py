@@ -673,6 +673,37 @@ def passthrough_commission(amount_total, category: str, rates: dict | None = Non
     return round(total * (1 - pct / 100))
 
 
+def payment_alloc_verdict(paid: int, allocated: int) -> dict:
+    """一筆匯款分配到請款單之後的判讀（付款側）。
+
+    🔴 方向跟收款那支相反，不能共用：收款是「分配比實收**多** ≤ 容差 ＝ 收款方
+    代扣匯費」；付款是「分配比實付**少** ≤ 容差 ＝ **我們**付了跨行手續費」。
+    實測生產：「陳良君英配」8,010 對 8,000 的請款單、「邱靜右日配」7,010 對
+    7,000 —— 那 10 元就是手續費，不是少付。共用同一支會把它判成「還有單沒掛」。
+
+    回 fee 時附 `fee` 金額，呼叫端可以直接寫進 bank_fee（那條路本來就把匯費
+    算成管理費用與現金流出）。
+    """
+    paid, allocated = int(paid or 0), int(allocated or 0)
+    short = paid - allocated          # 正 = 實付比分配多（多出來的多半是匯費）
+    if not allocated:
+        return {"state": "empty", "allocated": 0, "diff": 0, "fee": 0,
+                "msg": "還沒分配任何請款單"}
+    if short == 0:
+        return {"state": "ok", "allocated": allocated, "diff": 0, "fee": 0,
+                "msg": "分配金額與實付相符"}
+    if 0 < short <= FEE_TOLERANCE:
+        return {"state": "fee", "allocated": allocated, "diff": short,
+                "fee": short,
+                "msg": f"實付比分配多 {short} 元 —— 多半是跨行手續費，可認列為匯費"}
+    if short > FEE_TOLERANCE:
+        return {"state": "under", "allocated": allocated, "diff": short,
+                "fee": 0,
+                "msg": f"還有 {short:,} 元沒分配 —— 這筆匯款可能還結清了別張請款單"}
+    return {"state": "over", "allocated": allocated, "diff": short, "fee": 0,
+            "msg": f"分配比實付多 {-short:,} 元 —— 掛太多張了"}
+
+
 def alloc_verdict(received: int, allocated: int) -> dict:
     """分配金額 vs 這筆收款 → 給人看的判讀。
 

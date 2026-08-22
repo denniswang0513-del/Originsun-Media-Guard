@@ -788,6 +788,36 @@ class CrmCashInvoiceLink(Base):
     )
 
 
+class CrmCashPaymentLink(Base):
+    """匯款 ↔ 請款單的分配明細（多對多，帶金額）。
+
+    形狀完全照 CrmCashInvoiceLink —— 收款那側早就有同樣的兩種一對多，付款這側
+    一模一樣（owner 2026-08-22）：
+      合併匯款：出納同一天把某人的三張請款單併成一筆匯出 → 一筆匯款掛多張單
+      分次支付：一張請款單分兩次付 → 一張單掛多筆匯款
+
+    🔴 為什麼不是 crm_cash_entries.payment_request_id 一個欄位就好：它是一對一。
+    實測生產 322 筆結清請款單的收支，硬連結**一筆都沒有** —— 因為掛不上去。
+    於是「哪一筆匯款結清哪一張請款單」在系統裡是空的，只能靠人工對帳。
+
+    `crm_cash_entries.payment_request_id` 保留為「主要請款單」（既有查詢與
+    classify_cash_entry 的硬連結優先序都靠它），寫入連結時同步成金額最大的那張。
+    """
+    __tablename__ = "crm_cash_payment_links"
+
+    id = Column(String(32), primary_key=True)
+    cash_entry_id = Column(String(32), nullable=False, index=True)       # soft FK → crm_cash_entries.id
+    payment_request_id = Column(String(32), nullable=False, index=True)  # soft FK → crm_payment_requests.id
+    amount = Column(Integer, nullable=False, default=0)                  # 這筆匯款分配到這張單的金額
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # 同一筆匯款不會對同一張請款單分配兩次（要改金額就改那一列）
+        UniqueConstraint("cash_entry_id", "payment_request_id",
+                         name="uq_cashpay_entry_request"),
+    )
+
+
 class ApiKey(Base):
     """API Key for programmatic access (OpenClaw, scripts, CI/CD)."""
     __tablename__ = "api_keys"

@@ -1333,6 +1333,22 @@ class BenefitPoolPayload(BaseModel):
     #    （「整包 model_dump 寫回會被預設值洗掉」的老坑）。
 
 
+class CashPaymentLinkItem(BaseModel):
+    payment_request_id: str = ""
+    amount: int = 0
+
+
+class CashPaymentLinksPayload(BaseModel):
+    """一筆匯款掛哪幾張請款單（整組取代）。
+
+    `fee` 由呼叫端決定要不要把差額認成匯費：payment_alloc_verdict 判為 fee 時
+    前端會把它一起送回來，寫進 crm_cash_entries.bank_fee（那條路本來就把匯費
+    算成管理費用與現金流出）。None ＝ 不動既有的 bank_fee。
+    """
+    items: List[CashPaymentLinkItem] = []
+    fee: Optional[int] = None
+
+
 class BenefitAllowancePayload(BaseModel):
     """發給某個人的額度。`staff_id` 由管理端指定（這不是 own-scope 端點）。"""
     staff_id: str = ""

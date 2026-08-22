@@ -12,6 +12,7 @@ import { finEntity as _pinEntity, finFetch as _finFetch } from '../finance/fin-u
 
 let _entries = [];
 let _invoiceList = [];
+let _paymentList = [];   // 請款單（付款側的分配用）
 let _projectList = [];
 let _clientList = [];
 let _bankAccounts = null;   // 財務模組銀行帳戶；null = 載入失敗/未啟用（優雅降級：不顯示帳戶欄）
@@ -47,6 +48,7 @@ async function loadEntries({ render = true } = {}) {
 async function _loadInvoiceList() {
     // 發票是帶 entity 的表 — 關聯選單只列同一本帳的發票
     try { _invoiceList = (await _fetch('/invoices?entity=' + _pinEntity())).invoices || []; } catch(_) { _invoiceList = []; }
+    try { _paymentList = (await _fetch('/payments?entity=' + _pinEntity())).payments || []; } catch(_) { _paymentList = []; }
 }
 
 async function _loadProjectList() {
@@ -274,10 +276,18 @@ function renderDetail(e) {
         html += section('關聯發票');
         html += '<div id="cash-alloc-box" style="font-size:12px;color:#888;">載入中…</div>';
     }
+    // 關聯請款單（合併匯款 / 分次支付）—— 只有支出列有。出納統一匯款時一個人的
+    // 多張請款單常併成一筆匯出，payment_request_id 一對一掛不上去（實測生產
+    // 322 筆結清請款單的收支，硬連結一筆都沒有）。
+    if (e.expense) {
+        html += section('關聯請款單');
+        html += '<div id="cash-pay-box" style="font-size:12px;color:#888;">載入中…</div>';
+    }
 
     document.getElementById('cash-detail-content').innerHTML = html;
     if (_LINKABLE.includes(e.category || '')) _renderQuickLink(e);
     if (e.deposit) loadCashInvoiceAllocs(e.id);
+    if (e.expense) loadCashPaymentAllocs(e.id);
 
     const actions = document.getElementById('cash-bar-actions');
     if (actions) {
@@ -794,6 +804,156 @@ function _renderCashAllocs() {
     if (search) search.addEventListener('input', () => _allocSearch(search.value));
     const save = box.querySelector('#cash-alloc-save');
     if (save) save.addEventListener('click', () => _allocSave(save));
+}
+
+const _CASH_PAY = { entryId: null, items: [], check: null };
+
+async function loadCashPaymentAllocs(entryId) {
+    _CASH_PAY.entryId = entryId;
+    try {
+        const r = await _fetch(`/cash-entries/${entryId}/payments`);
+        _CASH_PAY.items = r.items || [];
+        _CASH_PAY.check = r.check || null;
+    } catch (e) {
+        _CASH_PAY.items = [];
+        _CASH_PAY.check = { state: 'error', msg: '讀取失敗：' + e.message };
+    }
+    _renderCashPayAllocs();
+}
+
+/** 狀態列。判讀語只在畫面與後端一致時才顯示（同發票那側的理由）。 */
+function _payStatusLine(check, items) {
+    if (!check) return '';
+    const live = items.reduce((n, x) => n + (Number(x.amount) || 0), 0);
+    const dirty = live !== check.allocated;
+    const color = dirty ? '#fbbf24' : _allocColor(check.state);
+    const tail = dirty ? '尚未儲存 —— 存檔後才會重新檢查' : _esc(check.msg || '');
+    return `<div style="margin-top:8px;font-size:12px;color:${color};">`
+        + `分配 $${_fmtNum(live)} —— ${tail}</div>`;
+}
+
+function _renderCashPayAllocs() {
+    const box = document.getElementById('cash-pay-box');
+    if (!box) return;
+    const { items, check } = _CASH_PAY;
+    const rows = items.map((it, i) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #2a2a2a;">
+            <div style="flex:1;min-width:0;">
+                <div style="color:#ddd;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    ${_esc(it.summary || '(無摘要)')}${it.missing ? ' <span style="color:#fca5a5;">（請款單已刪除）</span>' : ''}</div>
+                <div style="color:#888;font-size:11px;">
+                    ${_esc(it.payee_name || '無收款人')} · 單據 $${_fmtNum(it.request_total)}
+                    ${it.request_paid ? ` · 這張總共已付 $${_fmtNum(it.request_paid)}` : ''}
+                    ${(it.request_open || 0) > 0 ? `<span style="color:#fbbf24;">，尚欠 $${_fmtNum(it.request_open)}</span>` : ''}</div>
+            </div>
+            <input type="number" value="${it.amount}" data-pay-i="${i}"
+                   style="width:96px;text-align:right;background:#1a1a1a;border:1px solid #333;
+                          color:#eee;border-radius:4px;padding:3px 6px;font-size:12px;">
+            <button data-pay-del="${i}" title="移除這張"
+                    style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;">✕</button>
+        </div>`).join('');
+    // 判為手續費時給一顆「認列成匯費」—— 那 10 元本來只是對不起來的差額，
+    // 寫進 bank_fee 之後就是管理費用（bank_fee_total 那條路）。
+    const feeBtn = (check && check.state === 'fee' && check.fee)
+        ? `<button id="cash-pay-fee" class="crm-btn crm-btn-sm"
+                   style="margin-left:8px;">把 $${_fmtNum(check.fee)} 認列成匯費</button>`
+        : '';
+    box.innerHTML = `
+        ${rows || '<div style="color:#666;font-size:12px;padding:4px 0;">還沒掛任何請款單</div>'}
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+            <input id="cash-pay-search" placeholder="輸入收款人／摘要找請款單…"
+                   style="flex:1;background:#1a1a1a;border:1px solid #333;color:#eee;
+                          border-radius:4px;padding:4px 8px;font-size:12px;">
+        </div>
+        <div id="cash-pay-results" style="max-height:150px;overflow:auto;"></div>
+        ${_payStatusLine(check, items)}
+        <div style="margin-top:8px;">
+            <button id="cash-pay-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存請款單分配</button>
+            ${feeBtn}
+        </div>`;
+
+    box.querySelectorAll('[data-pay-i]').forEach((inp) => {
+        inp.addEventListener('change', () => {
+            _CASH_PAY.items[Number(inp.dataset.payI)].amount = Number(inp.value) || 0;
+        });
+    });
+    box.querySelectorAll('[data-pay-del]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            _CASH_PAY.items.splice(Number(btn.dataset.payDel), 1);
+            _renderCashPayAllocs();
+        });
+    });
+    const search = box.querySelector('#cash-pay-search');
+    if (search) search.addEventListener('input', () => _paySearch(search.value));
+    const save = box.querySelector('#cash-pay-save');
+    if (save) save.addEventListener('click', () => _paySave(save, null));
+    const fee = box.querySelector('#cash-pay-fee');
+    if (fee) fee.addEventListener('click', () => _paySave(fee, check.fee));
+}
+
+function _paySearch(q) {
+    const out = document.getElementById('cash-pay-results');
+    if (!out) return;
+    q = (q || '').trim().toLowerCase();
+    if (q.length < 1) { out.innerHTML = ''; return; }
+    const picked = new Set(_CASH_PAY.items.map(x => x.payment_request_id));
+    const hits = _paymentList.filter(p => !picked.has(p.id) && [
+        p.payee_name, p.summary, p.project_label, p.category,
+    ].some(v => (v || '').toLowerCase().includes(q))).slice(0, 12);
+    out.innerHTML = hits.length ? hits.map(p => `
+        <div data-pay-add="${_esc(p.id)}"
+             style="padding:4px 6px;cursor:pointer;font-size:12px;color:#ccc;border-bottom:1px solid #262626;">
+            ${_esc(p.payee_name || '無收款人')} · ${_esc((p.summary || '').substring(0, 26))}
+            <span style="color:#fbbf24;">$${_fmtNum(p.amount || 0)}</span>
+            <span style="color:#666;"> · ${_esc(p.payment_status || '')}</span>
+        </div>`).join('') : '<div style="color:#666;font-size:12px;padding:4px;">找不到符合的請款單</div>';
+    out.querySelectorAll('[data-pay-add]').forEach((el) => {
+        el.addEventListener('click', () => {
+            const ap = _paymentList.find(x => x.id === el.dataset.payAdd);
+            if (!ap) return;
+            _CASH_PAY.items.push({
+                payment_request_id: ap.id, amount: Number(ap.amount) || 0,
+                summary: ap.summary || '', payee_name: ap.payee_name || '',
+                request_total: Number(ap.amount) || 0, request_paid: 0,
+                request_open: Number(ap.amount) || 0,
+                payment_status: ap.payment_status || '', missing: false,
+            });
+            _renderCashPayAllocs();
+        });
+    });
+}
+
+async function _paySave(btn, fee) {
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '儲存中…';
+    try {
+        const body = {
+            items: _CASH_PAY.items.map(x => ({
+                payment_request_id: x.payment_request_id,
+                amount: Number(x.amount) || 0,
+            })),
+        };
+        if (fee != null) body.fee = fee;
+        const r = await _fetch(`/cash-entries/${_CASH_PAY.entryId}/payments`, {
+            method: 'PUT', body: JSON.stringify(body),
+        });
+        _CASH_PAY.items = r.items || [];
+        _CASH_PAY.check = r.check || null;
+        _renderCashPayAllocs();
+        await loadEntries();      // 主要請款單欄與匯費可能變了
+    } catch (e) {
+        const box = document.getElementById('cash-pay-box');
+        if (box) {
+            const err = document.createElement('div');
+            err.style.cssText = 'color:#fca5a5;font-size:12px;margin-top:6px;';
+            err.textContent = e.message;
+            box.appendChild(err);
+        }
+    } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+    }
 }
 
 function _allocSearch(q) {
