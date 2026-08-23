@@ -38,7 +38,8 @@ from routers.crm._shared import (_assert_rows_open, _fmt_minute, _parse_day,
 
 # 前半的東西：守門一支、貸款三支（對帳單裡認出來的繳款要寫進既有的攤還表）
 from .api_finance import (_acct_and_entity, _get_loan_and_period, _guard,
-                          _load_loans_with_payments, _record_loan_payment)
+                          _load_loans_with_payments, _record_loan_payment,
+                          recognize_transfer_fees_in)
 
 router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
 
@@ -937,14 +938,27 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
             # 整批一次寫 —— 逐筆呼叫時，每列都要「查舊連結、刪、flush、重算」，
             # 而這些收支列是剛建出來的，舊連結必定是空的
             await replace_invoice_allocs_bulk(session, linked, fees=alloc_fees)
+        # 帳戶間轉存的跨行手續費：這一批匯進來的轉出列，如果能跟帳上既有的
+        # 轉入列配對、而且差幾十塊，那幾十塊就是手續費 —— 當場拆出來
+        # （總流出不變）。owner 2026-08-24：「不太可能每次都逐一填寫」。
+        # ⚠ 只補得到**對手已經在帳上**的：兩邊常來自不同銀行的對帳單、不同時間
+        #   匯入。補不到的留給對帳系統那張卡片（同一支規則）。
         for ce, rows_ in pay_linked:
             # ⚠ 付款側目前只有單筆版（沒有 *_bulk）。一份對帳單的支出列通常個位數，
             #    而收入列動輒幾十列 —— 發票那側是因為量級才做了 bulk。真的變慢再收，
             #    先不為了對稱而多一支平行實作。
             await replace_payment_allocs(session, ce, rows_)
+        await session.flush()
+        try:
+            fees_done = await recognize_transfer_fees_in(session, ent,
+                                                         month_guard=False)
+        except Exception as e:      # noqa: BLE001 — 收尾失敗不該讓整批匯入白做
+            print(f"[stmt apply] 轉存手續費認列跳過: {type(e).__name__}: {e}")
+            fees_done = []
         await session.commit()
     return {"ok": True, "entries": made_entries, "loan_payments": made_payments,
             "statement_lines": len(stmt_lines),
             "linked_invoices": sum(len(v) for _ce, v in linked),
             "linked_payments": sum(len(v) for _ce, v in pay_linked),
+            "transfer_fees": len(fees_done),
             "skipped_duplicates": skipped_dup}

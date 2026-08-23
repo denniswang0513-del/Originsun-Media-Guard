@@ -25,6 +25,7 @@ let _c = null;
 let _isCurrent = () => true;
 let _accounts = [];       // 銀行帳戶（這一台自己抓，不跟 banking.js 共用狀態）
 let _drafts = [];         // 對帳單匯入草稿（掛到一半的）
+let _xfer = null;     // 帳戶間轉存的配對狀況（/transfer-pairs）
 let _wb = null;           // 對帳工作台：{acct, month, data}；null=未開
 let _wbImportRows = null; // 匯入流程暫存：貼上解析後的儲存格陣列
 let _stmtPreview = null;  // 對帳單匯入：preview 回來的列（確認後才寫入）
@@ -102,9 +103,122 @@ export default async function render(container, ctx = {}) {
     _renderShell();
     const sel = _c.querySelector('#finbank-recon-acct');
     if (sel && sel.value) _loadReconHistory(sel.value);
+    _loadTransferPairs();
 }
 
 _fr.reload = () => { if (_c) render(_c, { isCurrent: _isCurrent }); };
+
+// ── 帳戶間轉存：把還埋在支出裡的跨行手續費拆出來 ──────────────
+//
+// 判準的正本在 core.finance_logic.transfer_pairs（跟現金流量表那句
+// 「帳戶間轉存未完全成對」同一支）—— 這裡只負責畫與按。
+//
+// 🔴 前端**不算**該拆多少：後端按下去時會用當下的帳重算一次。2026-08-24 差點
+//    出事的第一版判準是「支出裡看起來有零頭就減掉」，那會把 37 筆早就拆好的
+//    歷史各再減 15。畫面顯示的數字只是預覽。
+
+async function _loadTransferPairs() {
+    const box = document.getElementById('finbank-xfer-body');
+    if (!box) return;
+    let d;
+    try {
+        d = await finFetch('/transfer-pairs');
+    } catch (e) {
+        box.innerHTML = `<span style="color:#fca5a5;">讀不到轉存配對：${esc(e.message)}</span>`;
+        return;
+    }
+    _xfer = d;
+    const todo = d.fee_inside || [];
+    const un = (d.unpaired_out || []).length + (d.unpaired_in || []).length;
+    const unLine = un
+        ? `<div style="color:#9ca3af;font-size:11px;margin-top:8px;">
+             另有 ${fmtNum(un)} 筆轉存<b>配不到對手</b>（金額差太多、或本來就只有單邊）——
+             系統不猜，需要人看：<a href="#" onclick="window._finRecon.xferShowUnpaired();return false;"
+             style="color:#60a5fa;">列出來</a></div>` : '';
+    if (!todo.length) {
+        box.innerHTML = `<div style="color:#86efac;font-size:13px;">
+            ✓ ${fmtNum(d.paired || 0)} 組轉存都配好了，手續費也都拆過 —— 沒有待處理的。</div>${unLine}`;
+        return;
+    }
+    const total = todo.reduce((n, x) => n + (x.fee || 0), 0);
+    box.innerHTML = `
+        <div style="color:#fbbf24;font-size:13px;margin-bottom:8px;">
+            ${fmtNum(todo.length)} 組的手續費還埋在支出裡，合計 <b>$${fmtNum(total)}</b>
+        </div>
+        <div style="border:1px solid #2e2e2e;border-radius:6px;overflow:hidden;margin-bottom:10px;">
+            <div style="display:grid;grid-template-columns:96px minmax(0,1fr) 110px 110px 76px;
+                        gap:8px;padding:6px 10px;background:#242424;color:#9ca3af;font-size:11px;">
+                <div>日期</div><div>摘要</div>
+                <div style="text-align:right;">目前支出</div>
+                <div style="text-align:right;">對方收到</div>
+                <div style="text-align:right;">手續費</div>
+            </div>
+            ${todo.slice(0, 50).map(p => `
+                <div style="display:grid;grid-template-columns:96px minmax(0,1fr) 110px 110px 76px;
+                            gap:8px;padding:5px 10px;border-top:1px solid #2a2a2a;font-size:12px;">
+                    <div style="color:#9ca3af;">${esc(p.out.date)}</div>
+                    <div style="color:#ddd;overflow:hidden;text-overflow:ellipsis;
+                                white-space:nowrap;">${esc(p.out.summary)}</div>
+                    <div style="text-align:right;color:#ccc;">$${fmtNum(p.out.expense)}</div>
+                    <div style="text-align:right;color:#9ca3af;">$${fmtNum(p.in.deposit)}</div>
+                    <div style="text-align:right;color:#fbbf24;">$${fmtNum(p.fee)}</div>
+                </div>`).join('')}
+            ${todo.length > 50 ? `<div style="padding:6px 10px;color:#6b7280;font-size:11px;
+                border-top:1px solid #2a2a2a;">還有 ${fmtNum(todo.length - 50)} 組沒列出來
+                （按下去會一起處理）</div>` : ''}
+        </div>
+        <button class="crm-btn crm-btn-primary" onclick="window._finRecon.xferRecognize(this)">
+            把這 ${fmtNum(todo.length)} 組的手續費認列出來</button>
+        <span style="color:#6b7280;font-size:11px;margin-left:8px;">
+            支出減、手續費加，<b>總流出不變</b> —— 帳戶餘額不會動</span>
+        ${unLine}`;
+}
+
+_fr.xferRecognize = async (btn) => {
+    const n = ((_xfer && _xfer.fee_inside) || []).length;
+    if (!n) return;
+    if (!confirm(`把 ${n} 組轉存的手續費從「支出」搬進「匯費」？\n`
+        + '總流出不變，帳戶餘額不會變 —— 變的是現金流量表看得到那筆費用。')) return;
+    btn.disabled = true;
+    btn.textContent = '處理中…';
+    try {
+        // 不送 entry_ids ＝ 後端自己重算一次、把當下所有可認列的都做
+        const r = await finFetch('/transfer-pairs/recognize-fee', {
+            method: 'POST', body: JSON.stringify({}),
+        });
+        finToast(r.message || '已認列');
+        _loadTransferPairs();
+    } catch (e) {
+        finToast(e.message, true);
+        btn.disabled = false;
+    }
+};
+
+_fr.xferShowUnpaired = () => {
+    const d = _xfer || {};
+    const row = (x, dir) => `<div style="display:flex;gap:10px;padding:3px 0;font-size:12px;">
+        <span style="color:#9ca3af;width:88px;">${esc(x.date)}</span>
+        <span style="color:${dir === 'out' ? '#fca5a5' : '#86efac'};width:88px;text-align:right;">
+            $${fmtNum(dir === 'out' ? x.expense : x.deposit)}</span>
+        <span style="color:#ddd;flex:1;overflow:hidden;text-overflow:ellipsis;
+                     white-space:nowrap;">${esc(x.summary)}</span></div>`;
+    _pickModal('配不到對手的轉存', `
+        <p style="color:#888;font-size:12px;margin:0 0 10px;">
+            這些列被歸成「轉存」，但找不到金額相近、日期相近、不同帳戶的另一半。
+            常見原因：另一邊的對帳單還沒匯入、被沖正、或這筆其實不是帳戶間轉存
+            （分類選錯）。<b>系統不猜</b> —— 請自己看過再決定。</p>
+        <div style="max-height:50vh;overflow:auto;">
+            <div style="color:#fca5a5;font-size:12px;margin:6px 0 2px;">轉出（找不到對應的轉入）</div>
+            ${(d.unpaired_out || []).map(x => row(x, 'out')).join('')
+                || '<div style="color:#666;font-size:12px;">無</div>'}
+            <div style="color:#86efac;font-size:12px;margin:12px 0 2px;">轉入（找不到對應的轉出）</div>
+            ${(d.unpaired_in || []).map(x => row(x, 'in')).join('')
+                || '<div style="color:#666;font-size:12px;">無</div>'}
+        </div>
+        <div style="text-align:right;margin-top:10px;">
+            <button class="crm-btn crm-btn-secondary"
+                    onclick="window._finRecon.pickClose()">關閉</button></div>`, { width: 720 });
+};
 
 function _renderShell() {
     const actives = _bankOnly();
@@ -143,6 +257,18 @@ function _renderShell() {
             </div>
             <div id="finbank-recon-result" style="margin-top:10px;font-size:13px;"></div>
             <div id="finbank-recon-history" style="margin-top:12px;"></div>`}
+        </div>
+
+        <!-- 帳戶間轉存（跨行手續費）—— owner 2026-08-24：「不太可能每次都逐一填寫」 -->
+        <div id="finbank-xfer-card"
+             style="background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:16px;margin-bottom:16px;">
+            <h3 style="color:#eee;margin:0 0 4px;font-size:14px;">🔁 帳戶間轉存</h3>
+            <p style="color:#888;font-size:12px;margin:0 0 10px;">
+                一筆跨行轉存在帳上是<b>兩列</b>（轉出一列、轉入一列）。本金是內部搬錢、
+                不算現金流量活動，但銀行收的<b>跨行手續費是真的離開公司了</b> ——
+                沒拆出來的話，現金流量表就會出現「期初＋淨流 ≠ 期末」的零頭。
+                下面幫你把還沒拆的找出來，一鍵認列（<b>總流出不變</b>）。</p>
+            <div id="finbank-xfer-body" style="color:#666;font-size:12px;">載入中…</div>
         </div>
 
         <!-- 對帳工作台共用 Modal（匯入/手動列/配對/補記/註記 動態換內容） -->

@@ -474,6 +474,42 @@ function _cfRows(cf) {
     return rows;
 }
 
+/** 差額的原因後面接一顆「去處理」—— 問題在哪裡出現，就在哪裡能解決。
+ *
+ *  🔴 只對**有地方可去**的原因加。轉存未成對有專門的卡片（對帳系統 › 帳戶間
+ *     轉存，一鍵把埋在支出裡的跨行手續費拆出來）；預支往來與未掛帳戶目前沒有
+ *     對應的入口，加一顆按了沒事的按鈕比沒有按鈕更糟。 */
+function _cfNoteAction(note) {
+    if (!String(note || '').includes('轉存')) return '';
+    return ' <a href="#" onclick="window._finStmt.gotoTransferCard();return false;"'
+        + ' style="color:#60a5fa;">去處理 →</a>';
+}
+
+_fs.gotoTransferCard = () => {
+    // 🔴 對帳系統**不是**財務的子視圖 —— 它是從「收支明細 › 對帳／匯入」就地
+    //    展開的面板（見 crm-cashbook.openRecon），而且 recon.js 是第一次點才
+    //    lazy-load。所以路徑是：收支明細 → 那顆按鈕 → 等卡片畫出來再捲過去。
+    const inv = document.querySelector("[data-inv-view='cashbook']");
+    if (inv) inv.click();
+    let tries = 0;
+    const tick = setInterval(() => {
+        const card = document.getElementById('finbank-xfer-card');
+        if (card) {
+            clearInterval(tick);
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            card.style.transition = 'box-shadow .4s';
+            card.style.boxShadow = '0 0 0 2px #3b82f6';
+            setTimeout(() => { card.style.boxShadow = ''; }, 2200);
+            return;
+        }
+        // 收支明細載好了才點得到「對帳／匯入」
+        const btn = document.getElementById('cash-btn-recon');
+        const panel = document.getElementById('cash-recon-panel');
+        if (btn && panel && panel.style.display === 'none') btn.click();
+        if (++tries > 60) clearInterval(tick);
+    }, 250);
+};
+
 function _cfHtml(cf) {
     const rows = _cfRows(cf).map(r => _trow(r.label, _amt(r.amount), r));
     const chk = cf.check || {};
@@ -488,7 +524,7 @@ function _cfHtml(cf) {
              ⚠ 現金流勾稽差額 $${fmtNum(diff)}（期初＋淨流 ≠ 期末）
              ${notes.length
                 ? `<div style="margin-top:4px;color:#fca5a5;">${
-                     notes.map(n => `• ${esc(n)}`).join('<br>')}</div>`
+                     notes.map(n => `• ${esc(n)}${_cfNoteAction(n)}`).join('<br>')}</div>`
                 : `<div style="margin-top:4px;color:#888;">
                      系統找不到已知原因（不是預支、轉存或未掛帳戶）—— 請告訴管理員。</div>`}
            </div>`

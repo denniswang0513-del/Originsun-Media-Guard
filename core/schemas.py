@@ -1418,3 +1418,12 @@ class BenefitEntryPayload(BaseModel):
     # 心得筆記（非必填）。與 notes 分開 —— notes 裝退回原因
     reflection: str = ""
     notes: str = ""
+
+
+class TransferFeeRecognize(BaseModel):
+    """把帳戶間轉存的配對差額認列成跨行手續費（總流出不變）。
+
+    `entry_ids` 空 ＝ 全部可認列的都做。後端一律重算判準，不信這裡送來的金額
+    （見 routers/api_finance.recognize_transfer_fees 的說明）。
+    """
+    entry_ids: List[str] = []

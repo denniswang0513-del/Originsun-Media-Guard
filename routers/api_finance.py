@@ -52,6 +52,7 @@ from core.finance_logic import (BOOKKEEPING_EXTRA_ON_MONTH,
 from core.schemas import (BankAccountPayload,
                           BookkeepingFeePut,
                           BulkAssignAccountPayload,
+                          TransferFeeRecognize,
                           FinanceAdjustmentPayload, FinanceCategoryMapPut,
                           FinanceSetupWizardPayload, LoanPayload,
                           LoanPayPayload, ReconciliationPayload,
@@ -166,6 +167,96 @@ def _map_dict(m) -> dict:
     return {"id": m.id, "source": m.source, "category_text": m.category_text,
             "account_id": m.account_id, "treatment": m.treatment,
             "active": bool(m.active)}
+
+
+@router.get("/transfer-pairs")
+async def list_transfer_pairs(request: Request, entity: str = ""):
+    """帳戶間轉存的配對狀況（owner 2026-08-24：「不太可能每次都逐一填寫」）。
+
+    一筆跨行轉存在帳上是兩列。本金是內部移動，但跨行手續費是真的離開公司了 ——
+    沒拆出來的話，現金流量表的「期初＋淨流 ≠ 期末」就差那幾十塊。
+    這支把「哪些已經拆好、哪些還埋在支出裡、哪些根本配不到」攤開來。
+
+    🔴 level="full"，不是報表層：它列的是**逐筆收支的金額與摘要**，比三表細得多。
+       合夥人的 scope 是母公司報表唯讀（見 docs/LEDGER_ENTITY_PLAN.md §2.4），
+       這種明細不在裡面。tests/unit/test_ledger_entity.py 會盯著 view 層的數量。
+    """
+    ent = _guard(request, entity or "parent", level="full")
+    from core.finance_logic import classify_cash_entry, transfer_pairs
+    from services.finance_statements import _load_inputs
+    factory = _factory_or_503()
+    async with factory() as session:
+        inputs = await _load_inputs(session, entity=ent)
+    cat_map = inputs["cat_map"]
+    rows = [e for e in inputs["cash_entries"]
+            if classify_cash_entry(e, cat_map) == "transfer"]
+    pairs, un_o, un_i = transfer_pairs(rows)
+
+    def _brief(e):
+        return {"id": e.get("id"), "date": str(e.get("entry_date") or "")[:10],
+                "summary": e.get("summary") or "",
+                "deposit": int(e.get("deposit") or 0),
+                "expense": int(e.get("expense") or 0),
+                "bank_fee": int(e.get("bank_fee") or 0),
+                "bank_account_id": e.get("bank_account_id") or ""}
+
+    todo = [p for p in pairs if p["fee_inside"]]
+    return {
+        "paired": len(pairs),
+        "fee_inside": [{"out": _brief(p["out"]), "in": _brief(p["in"]),
+                        "fee": p["gap"]} for p in todo],
+        "unpaired_out": [_brief(e) for e in un_o],
+        "unpaired_in": [_brief(e) for e in un_i],
+    }
+
+
+async def recognize_transfer_fees_in(session, ent: str, only_ids=None,
+                                     *, month_guard: bool = True) -> list:
+    """把可認列的轉存差額搬進 bank_fee（總流出不變）→ 回做了哪幾筆。
+
+    對帳系統的按鈕與對帳單匯入的收尾**共用這一支**。`only_ids` 空 ＝ 全部。
+    呼叫端負責 commit。
+
+    🔴 一律拿**當下的帳**重算判準，不信任何人送來的金額：判準是
+       「支出 − 配對的存入」。2026-08-24 差點出事的第一版判準是「支出裡看起來
+       有零頭就減掉」—— 那會把 37 筆早就拆好的歷史各再減 15（一路改到 2024 年）。
+    """
+    from core.finance_logic import (classify_cash_entry, recognize_bank_fee,
+                                    transfer_pairs)
+    from db.models import CrmCashEntry
+    from services.finance_statements import _load_inputs
+    inputs = await _load_inputs(session, entity=ent)
+    rows = [e for e in inputs["cash_entries"]
+            if classify_cash_entry(e, inputs["cat_map"]) == "transfer"]
+    pairs, _o, _i = transfer_pairs(rows)
+    todo = {p["out"]["id"]: p["gap"] for p in pairs if p["fee_inside"]}
+    want = set(only_ids or ()) or set(todo)
+    done = []
+    for eid in sorted(want & set(todo)):
+        e = await session.get(CrmCashEntry, eid)
+        if e is None:
+            continue
+        if month_guard:
+            await _assert_month_open(session, e.entry_date, entity=ent)
+        e.expense, bf = recognize_bank_fee(e.expense, e.bank_fee, todo[eid])
+        e.bank_fee = bf or None
+        done.append({"id": eid, "fee": todo[eid], "expense": e.expense})
+    return done
+
+
+@router.post("/transfer-pairs/recognize-fee")
+async def recognize_transfer_fees(payload: TransferFeeRecognize, request: Request):
+    """把配對差額認列成跨行手續費（總流出不變）。規則見 recognize_transfer_fees_in。"""
+    ent = _guard(request, "parent", level="full")
+    factory = _factory_or_503()
+    async with factory() as session:
+        done = await recognize_transfer_fees_in(session, ent, payload.entry_ids)
+        await session.commit()
+    asked = len(payload.entry_ids or ())
+    skipped = max(0, asked - len(done)) if asked else 0
+    return {"ok": True, "recognized": done, "skipped": skipped,
+            "message": f"{len(done)} 組已認列成手續費"
+                       + (f"；{skipped} 組已經拆好或配不到，沒有動" if skipped else "")}
 
 
 @router.get("/bookkeeping-fee")

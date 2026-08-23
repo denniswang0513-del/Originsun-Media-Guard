@@ -1689,6 +1689,78 @@ def cash_account_ids(bank_accounts):
             if not is_shareholder_kind(b.get("acct_kind"))}
 
 
+#: 轉存配對允許的日期差。跨行當天到，但兩邊的對帳單常各記各的日期
+#: （實測 2026-08：轉出記 08-09、轉入記 08-10）。
+TRANSFER_PAIR_WINDOW_DAYS = 3
+
+#: 沒有日期的列排最前面（舊資料有 entry_date 為空的）
+_EPOCH = date(1970, 1, 1)
+
+
+def transfer_pairs(entries, *, window_days=TRANSFER_PAIR_WINDOW_DAYS,
+                   tolerance=FEE_TOLERANCE):
+    """帳戶間轉存的配對 → (pairs, unpaired_out, unpaired_in)。
+
+    一筆跨行轉存在帳上是**兩列**：轉出帳戶一列支出、轉入帳戶一列存入。本金是
+    內部移動（不算現金流量活動），但銀行收的跨行手續費是真的離開公司了。
+
+    🔴 判準是「支出 vs 配對的存入」，不是「支出裡看起來有沒有零頭」：
+      · 支出 == 存入            → 已經對了（手續費若有，已經分開記在 bank_fee）
+      · 0 < 支出 − 存入 ≤ 容差   → 手續費**還埋在支出裡**，要拆出來
+      · 其他                     → 配不到，交給人看，別猜
+
+    這條規則被四個地方共用（對帳系統的卡片、一鍵認列、對帳單匯入的預帶、
+    現金流量表那句提示）—— 各寫一份的話，畫面說「未成對」而按鈕說「沒事」。
+
+    ⚠ 2026-08-24 差點出事：第一版判準是「支出裡含著手續費」，那只對**剛被手動
+      加過匯費**的列成立；歷史 37 筆早就是支出＝本金、匯費分開記，照那個判準會
+      被各減 15。所以一定要跟配對的那一列比。
+
+    entries：dict 清單，要有 entry_date / deposit / expense / bank_fee /
+    bank_account_id / id。呼叫端負責只傳 treatment=='transfer' 的列。
+    """
+    def _d(e):
+        return local_day(e.get("entry_date")) if e.get("entry_date") else None
+
+    outs = [e for e in entries if int(e.get("expense") or 0) > 0]
+    ins = [e for e in entries if int(e.get("deposit") or 0) > 0]
+    outs.sort(key=lambda e: (_d(e) or _EPOCH, int(e.get("expense") or 0)))
+    used, pairs, unpaired_out = set(), [], []
+
+    for o in outs:
+        exp, od = int(o.get("expense") or 0), _d(o)
+        best = None
+        for i, cand in enumerate(ins):
+            if i in used:
+                continue
+            dep, idt = int(cand.get("deposit") or 0), _d(cand)
+            if od and idt and abs((idt - od).days) > window_days:
+                continue
+            # 同一個帳戶不會轉給自己（帳戶沒填就不擋 —— 舊資料很多沒填）
+            if (o.get("bank_account_id") and cand.get("bank_account_id")
+                    and o["bank_account_id"] == cand["bank_account_id"]):
+                continue
+            gap = exp - dep
+            if not 0 <= gap <= tolerance:
+                continue
+            # 差額小的優先；同差額取日期近的
+            key = (gap, abs(((idt - od).days if od and idt else 0)))
+            if best is None or key < best[0]:
+                best = (key, i, cand, gap)
+        if best is None:
+            unpaired_out.append(o)
+            continue
+        _k, idx, cand, gap = best
+        used.add(idx)
+        pairs.append({
+            "out": o, "in": cand, "gap": gap,
+            # 手續費還埋在支出裡 → 可以一鍵拆出來（總流出不變）
+            "fee_inside": gap > 0,
+        })
+    unpaired_in = [c for i, c in enumerate(ins) if i not in used]
+    return pairs, unpaired_out, unpaired_in
+
+
 def cashflow_lines(cash_entries, months, *, cat_map=None, accounts=None,
                    bank_accounts=None):
     """現金流量表「哪幾列算數、各算多少」的**唯一正本** → (rows, stats)。

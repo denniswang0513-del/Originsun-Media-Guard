@@ -153,6 +153,49 @@ function _renderAcctTabs() {
     });
 }
 
+/** 編輯視窗填「匯費」時，自動從「支出」扣掉同額（總流出不變）。
+ *
+ *  🔴 owner 2026-08-24 實際踩到：轉存那列銀行實扣 35,015（本金 35,000 + 手續費 15），
+ *     他在匯費填 15，支出還是 35,015 → 系統認為流出 35,030，富邦餘額憑空少了 30。
+ *     匯費不是「另外再扣一筆」，是**把已經扣掉的那筆錢從本金裡標示出來**。
+ *
+ *  這條規則在關聯面板那顆「認列成匯費」早就是對的（recognize_bank_fee，總流出
+ *  不變）—— 手動編輯這條路沒有，於是同一件事兩個入口兩種結果。這裡補上。
+ *
+ *  只在**改匯費**時搬；改支出時不動匯費（那時使用者是在改本金）。
+ */
+function _wireBankFeeSplit() {
+    const fee = document.getElementById('cash-f-bank_fee');
+    const exp = document.getElementById('cash-f-expense');
+    if (!fee || !exp) return;
+    let prevFee = Number(fee.value) || 0;
+    const hint = document.createElement('div');
+    hint.id = 'cash-f-fee-hint';
+    hint.style.cssText = 'color:#6b7280;font-size:11px;margin-top:3px;';
+    fee.parentNode.appendChild(hint);
+
+    const paint = () => {
+        const e = Number(exp.value) || 0;
+        const f = Number(fee.value) || 0;
+        hint.innerHTML = f
+            ? `銀行實扣 <b style="color:#ccc;">$${_fmtNum(e + f)}</b>`
+              + ` ＝ 支出 $${_fmtNum(e)} ＋ 匯費 $${_fmtNum(f)}`
+              + '<br>（填匯費會自動從支出扣掉 —— 那筆錢本來就包在銀行扣的金額裡）'
+            : '';
+    };
+    fee.addEventListener('input', () => {
+        const f = Math.max(0, Math.round(Number(fee.value) || 0));
+        const e = Number(exp.value) || 0;
+        // 總流出不變：搬多少過來，支出就減多少（跟 recognize_bank_fee 同一條規則）
+        const moved = f - prevFee;
+        if (moved && e - moved >= 0) exp.value = String(e - moved);
+        prevFee = f;
+        paint();
+    });
+    exp.addEventListener('input', paint);
+    paint();
+}
+
 /** 沒填分類的那一列給一個小紅點（owner 2026-08-24）。
  *
  *  🔴 為什麼要標：沒分類的列在三表裡會落到「未歸類」，而清單上那一格只是**空白**
@@ -756,6 +799,7 @@ export async function initCrmCashbookTab() {
         if (el) el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input',
             _updateClientMatch);
     }
+    _wireBankFeeSplit();
 
     document.getElementById('cash-csv-file').addEventListener('change', e => _setCsvFile(e.target.files[0] || null));
     const zone = document.getElementById('cash-drop-zone');
