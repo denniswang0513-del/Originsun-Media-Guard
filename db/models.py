@@ -780,6 +780,15 @@ class CrmCashInvoiceLink(Base):
     cash_entry_id = Column(String(32), nullable=False, index=True)  # soft FK → crm_cash_entries.id
     invoice_id = Column(String(32), nullable=False, index=True)     # soft FK → crm_invoices.id
     amount = Column(Integer, nullable=False, default=0)             # 這筆收款分配到這張發票的金額
+    # 這張發票的匯款被匯出行扣掉、沒進到我們帳戶的那幾十塊（owner 2026-08-24）。
+    #
+    # 🔴 為什麼要逐張存而不是只留 crm_cash_entries.bank_fee 的加總：關聯面板
+    #    重新打開時要**畫得出來**。原本沒有這欄 → 面板每次載入那格都是空的，
+    #    按一下儲存就送 fee=0，deposit 退回去、bank_fee 被清掉（2026-08-24
+    #    實測確認：帶 fee 存完 deposit=149,900/bank_fee=30，不帶 fee 重存一次
+    #    就變回 149,870/None）。那是使用者完全看不出來的靜默回退。
+    #    entries.bank_fee 仍是這一筆的加總（現金流與報表讀它），這欄是歸屬。
+    fee = Column(Integer, nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (

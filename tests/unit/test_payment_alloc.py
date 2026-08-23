@@ -97,11 +97,21 @@ def test_tolerance_comes_from_the_shared_constant():
 # ── 連結表 ────────────────────────────────────────────────────────
 
 def test_link_table_shape_mirrors_the_invoice_one():
+    """兩張連結表除了「指向誰」與匯費之外要一模一樣。
+
+    🔴 `fee` 是**刻意只有收款側有**，不是漏做（owner 2026-08-24）：
+       · 收款：匯出行對**每一張發票的匯款**各扣一次 → 逐張存得下歸屬
+       · 付款：跨行手續費是對**那一筆匯出**收一次，涵蓋幾張請款單都一樣
+         → 掛在 crm_cash_entries.bank_fee，逐張存反而會被填成三倍
+       付款側若哪天真的要逐張，先想清楚那筆錢是怎麼被扣的，再改這條測試。
+    """
     from db.models import CrmCashInvoiceLink, CrmCashPaymentLink
     a = set(CrmCashInvoiceLink.__table__.c.keys())
     b = set(CrmCashPaymentLink.__table__.c.keys())
-    assert a - {"invoice_id"} == b - {"payment_request_id"}, \
+    assert a - {"invoice_id", "fee"} == b - {"payment_request_id"}, \
         f"欄位形狀跟收款那張不一致：{a ^ b}"
+    assert "fee" in a, "收款側的逐張匯費不見了 —— 面板重開會畫不出那格"
+    assert "fee" not in b, "付款側長出了逐張匯費（那筆錢是整筆匯出收一次的）"
 
 
 def test_one_allocation_per_pair():

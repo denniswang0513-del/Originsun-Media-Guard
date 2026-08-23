@@ -17,7 +17,8 @@
  * 命名空間 window._finRecon（banking.js 仍是 window._finBank，兩邊不重疊）。
  */
 import { finFetch, finEntity, esc, fmtNum, finToast, bankOnly } from '../fin-utils.js';
-import { createSortable, sortableTh, enumIndex } from '../../crm/crm-utils.js';
+import { createSortable, sortableTh, enumIndex, autoFee as _autoFee }
+    from '../../crm/crm-utils.js';   // 匯費容差的正本在共用層（見 crm-utils）
 import { bearerHeader } from '../../../js/shared/utils.js';   // 送 FormData 時不能自帶 Content-Type
 
 let _c = null;
@@ -1266,19 +1267,6 @@ const _SIDES = {
 
 /** 這一列該用哪一側？金額的方向決定，沒有第二個判準。 */
 const _sideOf = (r) => (r.amount > 0 ? _SIDES.inv : r.amount < 0 ? _SIDES.pay : null);
-
-/** 分配比實收多幾塊錢時，算「匯費」而不是「還沒收齊」的門檻。
- *  🔴 正本是 core.finance_logic.FEE_TOLERANCE —— 前端沒辦法 import Python，
- *     所以這裡是複本。兩個數字必須一樣（tests/unit/test_receipt_fee.py 釘住）：
- *     不一樣的話，畫面自動填了匯費、後端的判讀卻說「還有發票沒掛上」。 */
-const _FEE_TOLERANCE = 50;
-
-/** 這張發票該自動帶多少匯費：尚欠 − 分配，只在容差內才算匯費。
- *  差 30 元是匯出行扣的手續費；差 30,000 是分期收款，自動填就是亂填。 */
-function _autoFee(outstanding, amt) {
-    const gap = Math.round((outstanding || 0) - (amt || 0));
-    return gap > 0 && gap <= _FEE_TOLERANCE ? gap : 0;
-}
 
 /** 搜尋框輸入 → 只重畫清單（不重畫整個視窗，不然游標會跳掉）。 */
 _fr.pickSearch = (q) => {

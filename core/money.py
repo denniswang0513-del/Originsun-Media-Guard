@@ -87,7 +87,9 @@ MONEY_FIELDS = frozenset({
     # 財務管理／對帳／貸款（api_finance；那支 router 整個 403，列在這裡是為了
     # 「錢的欄位名有一份完整清單」，將來哪支端點搬進 CRM router 也自動受保護）
     "opening_balance", "statement_balance", "system_balance",
-    "bank_fee", "annual_rate",
+    # `fee` ＝ crm_cash_invoice_links.fee（這張發票的匯款被匯出行扣掉多少）。
+    # 跟 bank_fee 是同一筆錢的兩種視角：bank_fee 是那一列的加總，這個是逐張歸屬。
+    "bank_fee", "fee", "annual_rate",
     # 器材（api_equipment，同上理由）
     "purchase_cost",
     # 福利池編列金額（hr_benefit_pools.budget）。整個 /benefits 端點群本來就有

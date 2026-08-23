@@ -698,3 +698,21 @@ export const NO_MONEY_HTML =
  */
 export const moneyGate = (el) =>
     canSeeMoney() ? false : (el.innerHTML = NO_MONEY_HTML, true);
+
+/** 分配比實收多幾塊錢時，算「匯費」而不是「還沒收齊」的門檻。
+ *
+ *  🔴 正本是 core.finance_logic.FEE_TOLERANCE —— 前端沒辦法 import Python，
+ *     所以這裡是複本。兩個數字必須一樣（tests/unit/test_receipt_fee.py 釘住）：
+ *     不一樣的話，畫面自動填了匯費、後端的判讀卻說「還有發票沒掛上」。
+ *
+ *  住在共用層而不是各頁一份：對帳單挑發票視窗（recon）與收支明細的關聯面板
+ *  （cashbook）都要用它，各抄一份的話容差一改就只會改到一邊。
+ */
+export const FEE_TOLERANCE = 50;
+
+/** 這張發票該自動帶多少匯費：尚欠 − 分配，只在容差內才算匯費。
+ *  差 30 元是匯出行扣的手續費；差 30,000 是分期收款，自動填就是亂填。 */
+export function autoFee(outstanding, amt) {
+    const gap = Math.round((outstanding || 0) - (amt || 0));
+    return gap > 0 && gap <= FEE_TOLERANCE ? gap : 0;
+}

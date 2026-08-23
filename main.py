@@ -510,6 +510,10 @@ async def _on_startup():
                         ("preprod_references", "archive_error", "TEXT"),
                         ("preprod_references", "archived_at", "TIMESTAMPTZ"),
                         ("preprod_references", "archive_tries", "INTEGER"),
+                        # 收款↔發票分配的逐張匯費（owner 2026-08-24）。沒有這欄的話
+                        # 關聯面板每次載入那格都是空的 → 按一下儲存就送 fee=0，
+                        # deposit 退回去、bank_fee 被清掉（靜默回退，畫面看不出來）。
+                        ("crm_cash_invoice_links", "fee", "INTEGER NOT NULL DEFAULT 0"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

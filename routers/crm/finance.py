@@ -351,7 +351,10 @@ _ALLOC_KINDS = {
     "invoice": {"model": CrmInvoice, "noun": "發票", "id_field": "invoice_id",
                 "dup": "同一張發票不可重複掛在同一筆收款",
                 "label": lambda o: o.invoice_number or o.title,
-                "fee": apply_receipt_fee},
+                "fee": apply_receipt_fee,
+                # 逐張匯費：匯出行對每一張發票的匯款各扣一次。付款側沒有這個
+                # （跨行手續費是對「那一筆匯出」收一次，涵蓋幾張請款單都一樣）。
+                "per_item_fee": True},
     "payment": {"model": CrmPaymentRequest, "noun": "請款單",
                 "id_field": "payment_request_id",
                 "dup": "同一張請款單重複出現",
@@ -493,13 +496,15 @@ async def replace_payment_allocs(session, entry, rows):
         session, list(prev | {ap.id for ap, _a in rows}), when=w)
 
 
-async def replace_invoice_allocs(session, entry, rows, when=None, set_primary=True):
+async def replace_invoice_allocs(session, entry, rows, when=None, set_primary=True,
+                                 fees=None):
     """單筆版 —— 規則正本在 replace_invoice_allocs_bulk（一筆也是一批）。"""
     await replace_invoice_allocs_bulk(session, [(entry, rows)], when=when,
-                                      set_primary=set_primary)
+                                      set_primary=set_primary, fees=fees)
 
 
-async def replace_invoice_allocs_bulk(session, pairs, when=None, set_primary=True):
+async def replace_invoice_allocs_bulk(session, pairs, when=None, set_primary=True,
+                                      fees=None):
     """整組取代 N 筆收款的發票分配 —— **唯一**寫 crm_cash_invoice_links 的地方。
 
     一次動三樣東西，少做一樣就會有兩個畫面各講各的：
@@ -519,6 +524,14 @@ async def replace_invoice_allocs_bulk(session, pairs, when=None, set_primary=Tru
     當場擋掉，不要留給日後某個呼叫端去踩。
 
     rows 已經過 resolve_invoice_allocs 驗證。呼叫端負責 commit。
+
+    `fees` ＝ {(收支 id, 發票 id): 匯費}（只有收款側有；付款側的手續費是整筆
+    匯出收一次）。key 要帶收支 id —— 同一張發票分兩次收款、兩次各被扣一次匯費時，
+    只用 invoice_id 當 key 會互相蓋掉。
+    🔴 逐張存下來是為了**關聯面板重開時畫得出來** —— 沒存的話那格永遠是空的，
+       使用者按一下儲存就送 fee=0，deposit 退回去、bank_fee 被清掉，而且完全
+       看不出來（2026-08-24 實測確認過這個回退）。
+       entries.bank_fee 仍是加總（報表讀它），這裡存的是歸屬。
     """
     pairs = list(pairs)
     if not pairs:
@@ -544,7 +557,8 @@ async def replace_invoice_allocs_bulk(session, pairs, when=None, set_primary=Tru
         for inv, amt in rows:
             session.add(CrmCashInvoiceLink(
                 id=uuid.uuid4().hex, cash_entry_id=entry.id,
-                invoice_id=inv.id, amount=amt))
+                invoice_id=inv.id, amount=amt,
+                fee=int((fees or {}).get((entry.id, inv.id)) or 0)))
             cur = kept_when.get(inv.id)
             # 同一張發票被這批的兩列分次收款 → 到款日取**最後**那筆（收齊的那天）。
             # 逐筆呼叫時是「第 1 列先算一次（沒收齊）、第 2 列再算一次（收齊）」，
@@ -2025,6 +2039,8 @@ async def _load_allocs(session, entry):
         items.append({
             "invoice_id": link.invoice_id,
             "amount": int(link.amount or 0),
+            # 逐張的匯費 —— 面板重開時要能把那格畫回來（見 models 那欄的 docstring）
+            "fee": int(getattr(link, "fee", 0) or 0),
             # 這張發票**整體**收了多少（跨所有收款）—— 分期時要看得到全貌，
             # 不能只看眼前這一筆分配了多少
             **collection_fields(inv.amount_total if inv else 0,
@@ -2105,7 +2121,8 @@ async def _write_allocs(request, entry_id: str, kind: str, items, fee=None):
     收付狀態）→ 有匯費就認列 → 回最新的明細與判讀。
 
     🔴 兩側本來各寫一遍這十二行，於是「存檔後回什麼」「commit 之前還做了什麼」
-    要對兩處看。差別只剩 fee 那一步 —— 收款側的 payload 根本沒有那個欄位。
+    要對兩處看。差別只剩匯費的**形狀**：收款側逐張（存進連結表，面板重開畫得回來），
+    付款側整筆一個（跨行手續費對一次匯出收一次）。
     """
     k = _ALLOC_KINDS[kind]
     _check_auth(request)
@@ -2117,7 +2134,14 @@ async def _write_allocs(request, entry_id: str, kind: str, items, fee=None):
         rows = await resolve_allocs(
             session, [(getattr(it, k["id_field"]), it.amount) for it in (items or [])],
             ent, kind)
-        await k["replace"](session, e, rows)
+        # 逐張匯費只有收款側有（見 _ALLOC_KINDS 的 perItemFee 那段說明）——
+        # 存下來，關聯面板重開時才畫得回來
+        if k.get("per_item_fee"):
+            fees = {(e.id, getattr(it, k["id_field"])): int(getattr(it, "fee", 0) or 0)
+                    for it in (items or [])}
+            await k["replace"](session, e, rows, fees=fees)
+        else:
+            await k["replace"](session, e, rows)
         if fee is not None:
             # 不變量與冪等性在 core.finance_logic 的兩支 recognize_*_fee ——
             # 那是錢的規則，要有自己的單元測試，不該住在端點裡。

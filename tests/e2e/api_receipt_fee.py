@@ -184,6 +184,25 @@ try:
     check(not zero["bank_fee"], "bank_fee 清掉了", str(zero["bank_fee"]))
 
     print("")
+    print("[2d] 🔴 匯費要能**往返**：重新載入 → 原樣存回去，不能掉")
+    # 這是 owner 2026-08-24 要「有個地方調整銀行匯費」時挖出來的真 bug：
+    # crm_cash_invoice_links 沒有 fee 欄 → 面板每次載入那格都是空的 →
+    # 按一下儲存就送 fee=0，deposit 退回去、bank_fee 被清掉，畫面上完全看不出來。
+    # 實測過的回退：帶 fee 存完 149,900/30，不帶 fee 重存一次變回 149,870/None。
+    call(f"/cash-entries/{eid}/invoices", "PUT",
+         {"items": [{"invoice_id": inv_id, "amount": 149900, "fee": 30}]})
+    got = call(f"/cash-entries/{eid}/invoices")
+    fees = [x.get("fee") for x in (got.get("items") or [])]
+    check(fees == [30], "重新載入時那格帶得回來", str(fees))
+    # 面板重存＝把載回來的原樣送回去
+    call(f"/cash-entries/{eid}/invoices", "PUT",
+         {"items": [{"invoice_id": x["invoice_id"], "amount": x["amount"],
+                     "fee": x.get("fee", 0)} for x in got["items"]]})
+    again2, _s2, _l2 = asyncio.run(read_back(eid, inv_id))
+    check(again2["deposit"] == 149900, "deposit 沒退回去", str(again2["deposit"]))
+    check(again2["bank_fee"] == 30, "bank_fee 沒被清掉", str(again2["bank_fee"]))
+
+    print("")
     print("[3] 沒有匯費的列不受影響（回歸）")
     call("/bank-statement/apply", "POST", {
         "bank_account_id": acct_id,

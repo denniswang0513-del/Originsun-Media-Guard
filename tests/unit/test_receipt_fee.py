@@ -76,18 +76,27 @@ def test_it_mirrors_the_payment_side():
 
 # ── 前端那格自動填多少 ────────────────────────────────────────
 
+UTIL = "frontend/tabs/crm/crm-utils.js"
+
+
 def test_frontend_tolerance_matches_the_backend():
     """🔴 前端沒辦法 import Python，所以容差有兩份。數字漂開的話：畫面自動填了
-    匯費、後端的判讀卻說「還有發票沒掛上」—— 兩邊對同一筆講不同的話。"""
-    js = js_code_only(repo_src(JS))
-    assert f"const _FEE_TOLERANCE = {FEE_TOLERANCE};" in js, \
-        f"recon.js 的容差跟 core.finance_logic.FEE_TOLERANCE（{FEE_TOLERANCE}）不一致"
+    匯費、後端的判讀卻說「還有發票沒掛上」—— 兩邊對同一筆講不同的話。
+
+    前端那份**只能有一份**：對帳單挑發票視窗與收支明細的關聯面板都要用它。
+    """
+    util = js_code_only(repo_src(UTIL))
+    assert f"export const FEE_TOLERANCE = {FEE_TOLERANCE};" in util, \
+        f"共用層的容差跟 core.finance_logic.FEE_TOLERANCE（{FEE_TOLERANCE}）不一致"
+    for path in (JS, "frontend/tabs/crm/crm-cashbook.js"):
+        src = js_code_only(repo_src(path))
+        assert "FEE_TOLERANCE = " not in src, f"{path} 又自己留了一份容差"
 
 
 def test_autofill_only_inside_the_tolerance():
     """差 30 元是匯費；差 30,000 是分期收款，自動填就是亂填。"""
-    js = js_code_only(repo_src(JS))
-    assert "gap > 0 && gap <= _FEE_TOLERANCE ? gap : 0" in js, \
+    util = js_code_only(repo_src(UTIL))
+    assert "gap > 0 && gap <= FEE_TOLERANCE ? gap : 0" in util, \
         "匯費自動填沒有上限 —— 分期收款會被填成一筆天價匯費"
 
 

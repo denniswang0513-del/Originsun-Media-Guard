@@ -778,6 +778,7 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
         skipped_dup = []
         linked = []          # 有掛發票的收款列 → commit 前要進分配表並重算發票狀態
         pay_linked = []      # 有掛請款單的支出列 → 同上（付款狀態走同一條容差規則）
+        alloc_fees: dict = {}   # (收支 id, 發票 id) → 逐張匯費（收款側才有）
         # 對帳工作台的「銀行說發生了什麼」那一欄。
         #
         # 🔴 這支端點原本只寫帳（右欄），左欄留白 —— 用它匯完一整年，打開工作台
@@ -886,6 +887,11 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                 if allocs and amt > 0:
                     linked.append((ce, await resolve_invoice_allocs(
                         session, allocs, ent, by_id=inv_by_id)))
+                    # 逐張匯費也要進連結表 —— 不存的話關聯面板重開時那格是空的，
+                    # 按一次儲存就把 deposit 的補回值抹掉（見 models 那欄的說明）
+                    for x in (r.invoices or []):
+                        if int(x.fee or 0):
+                            alloc_fees[(ce.id, x.invoice_id)] = int(x.fee)
                 if pay_allocs and amt < 0:
                     pay_linked.append((ce, await resolve_payment_allocs(
                         session, pay_allocs, ent)))
@@ -930,7 +936,7 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
         if linked:
             # 整批一次寫 —— 逐筆呼叫時，每列都要「查舊連結、刪、flush、重算」，
             # 而這些收支列是剛建出來的，舊連結必定是空的
-            await replace_invoice_allocs_bulk(session, linked)
+            await replace_invoice_allocs_bulk(session, linked, fees=alloc_fees)
         for ce, rows_ in pay_linked:
             # ⚠ 付款側目前只有單筆版（沒有 *_bulk）。一份對帳單的支出列通常個位數，
             #    而收入列動輒幾十列 —— 發票那側是因為量級才做了 bulk。真的變慢再收，

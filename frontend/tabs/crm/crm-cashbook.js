@@ -1,7 +1,7 @@
 /**
  * crm-cashbook.js — 收支明細子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today, autoFee } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
@@ -153,6 +153,17 @@ function _renderAcctTabs() {
     });
 }
 
+/** 沒填分類的那一列給一個小紅點（owner 2026-08-24）。
+ *
+ *  🔴 為什麼要標：沒分類的列在三表裡會落到「未歸類」，而清單上那一格只是**空白**
+ *     —— 空白看起來像「這欄本來就沒東西」，不像「這裡要處理」。對帳單匯入一次
+ *     進來幾十列，摘要沒中任何關鍵字的就是空的，很容易整批漏掉。
+ *  用 title 講原因，不要只放一個沒人看得懂的點。 */
+const _NO_CAT_DOT =
+    '<span title="還沒填分類 —— 三表會把它歸到「未歸類」，點開這一列補上"'
+    + ' style="display:inline-block;width:7px;height:7px;border-radius:50%;'
+    + 'background:#ef4444;vertical-align:middle;"></span>';
+
 function renderList() {
     const body = document.getElementById('cash-list-body');
     if (!body) return;
@@ -167,7 +178,7 @@ function renderList() {
             <div class="crm-row-name">${_esc(e.summary)}</div>
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div style="color:#fca5a5;">${((e.expense || 0) + (e.bank_fee || 0)) ? '$' + _fmtNum((e.expense || 0) + (e.bank_fee || 0)) : ''}</div>
-            <div>${_esc(e.category || '')}</div>
+            <div>${e.category ? _esc(e.category) : _NO_CAT_DOT}</div>
             <div title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}</div>
             <div>${_esc(e.project_name || '')}</div>
             <div>${_esc(e.invoice_title || '')}</div>
@@ -817,6 +828,12 @@ const _ALLOC_SIDES = {
     invoice: {
         state: () => _CASH_ALLOC,
         prefix: 'alloc', path: 'invoices', idKey: 'invoice_id', noun: '發票',
+        // 🔴 收款側的匯費是**逐張**的：匯出行對每一張發票的匯款各扣一次
+        //    （客戶匯三張的錢，可能只有其中一張被扣了 30）。付款側相反 ——
+        //    跨行手續費是對「那一筆匯出」收一次，所以那邊是整筆一顆按鈕。
+        perItemFee: true,
+        // 這張還欠多少 —— 自動帶匯費要用它（發票面額 − 已收）
+        outstandingOf: it => it.outstanding || 0,
         placeholder: '輸入發票號碼／抬頭／專案名稱找發票…',
         emptyText: '還沒掛任何發票',
         missingText: '（發票已刪除）',
@@ -943,15 +960,21 @@ function _renderAllocs(side) {
                 <div style="color:#888;font-size:11px;">${c.itemMeta(it)}</div>
             </div>
             <input type="number" value="${it.amount}" data-alloc-i="${i}"
+                   title="分配到這張的現金（加總要對上這筆的實收）"
                    style="width:96px;text-align:right;background:#1a1a1a;border:1px solid #333;
                           color:#eee;border-radius:4px;padding:3px 6px;font-size:12px;">
+            ${c.perItemFee ? `<input type="number" value="${it.fee || ''}" data-alloc-fee="${i}"
+                   placeholder="匯費"
+                   title="被匯出行扣掉、沒進到我們帳戶的那幾十塊。面額減分配還有餘額時會自動帶，可以改。"
+                   style="width:74px;text-align:right;background:#1a1a1a;border:1px solid #333;
+                          color:${it.fee ? '#fbbf24' : '#eee'};border-radius:4px;padding:3px 6px;font-size:12px;">` : ''}
             <button data-alloc-del="${i}" title="移除這張"
                     style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;">✕</button>
         </div>`).join('');
     // 判為手續費時給一顆「認列成匯費」—— 那幾元本來只是對不起來的差額，寫進
     // bank_fee 之後就是管理費用（見 recognize_bank_fee 的「總流出不變」）。
-    // 🔴 只有付款側有：收款側的 PUT payload 沒有 fee 欄（CashInvoiceLinksPayload），
-    //    兩側都畫的話收款側會出現一顆按了什麼都不會發生的按鈕。
+    // 🔴 只有付款側有這顆：收款側改用**逐張一格**的匯費輸入（見 perItemFee）——
+    //    匯出行是對每一張發票的匯款各扣一次，一顆整筆的按鈕表達不了。
     const feeBtn = (c.canBookFee && check && check.state === 'fee' && check.fee)
         ? `<button id="cash-${c.prefix}-fee" class="crm-btn crm-btn-sm"
                    style="margin-left:8px;">把 $${_fmtNum(check.fee)} 認列成匯費</button>`
@@ -972,7 +995,18 @@ function _renderAllocs(side) {
 
     box.querySelectorAll('[data-alloc-i]').forEach((inp) => {
         inp.addEventListener('change', () => {
-            c.state().items[Number(inp.dataset.allocI)].amount = Number(inp.value) || 0;
+            const it = c.state().items[Number(inp.dataset.allocI)];
+            it.amount = Number(inp.value) || 0;
+            // 改分配金額 → 匯費重算（手動填好的要留住就別再動這格）
+            if (c.perItemFee) it.fee = autoFee(c.outstandingOf(it), it.amount);
+            _renderAllocs(side);
+        });
+    });
+    box.querySelectorAll('[data-alloc-fee]').forEach((inp) => {
+        inp.addEventListener('change', () => {
+            c.state().items[Number(inp.dataset.allocFee)].fee =
+                Math.max(0, Math.round(Number(inp.value) || 0));
+            _renderAllocs(side);
         });
     });
     box.querySelectorAll('[data-alloc-del]').forEach((btn) => {
@@ -1027,6 +1061,8 @@ async function _allocSave(side, btn, fee) {
         const body = {
             items: st.items.map(x => ({
                 [c.idKey]: x[c.idKey], amount: Number(x.amount) || 0,
+                // 收款側逐張帶 fee；後端加總後補回 deposit（淨流入不變）
+                ...(c.perItemFee ? { fee: Math.max(0, Math.round(Number(x.fee) || 0)) } : {}),
             })),
         };
         if (fee != null) body.fee = fee;
