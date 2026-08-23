@@ -138,3 +138,43 @@ def test_switching_project_reloads_an_open_invoice_tab():
     seg = main[i:main.index("callbacks.renderDetail", i)]
     assert "invoices" in seg and "loadInvoicesTab" in seg, \
         "換專案時發票分頁不會跟著換 —— 會看到上一個案子的發票"
+
+
+# ── 發票本這一側：綁了就要看得見（owner 2026-08-23）──────────
+
+INV_HTML = "frontend/tabs/crm/crm-invoices.html"
+
+
+def test_the_invoice_book_list_shows_which_project_a_row_belongs_to():
+    """🔴 owner：「在專案表填的發票，在發票裡自動綁定好」。實測發現：綁**是**綁上了
+    （project_id 存對），但發票本的清單 11 欄裡沒有一欄是專案 —— 從那一頁完全
+    看不出來這張票屬於哪個案子。只驗 DB 的測試會漏掉這種「存對了但看不到」。
+
+    ⚠ 這條是**結構檢查**，不是主要防線：源碼掃描抓不到「條件被改成永假」
+    （實測把 `inv.project_name ?` 換成 `false ?`，字串還在，這條照樣過）。
+    真正證明它畫得出來的是 tests/e2e/ui_project_invoice_create.py —— 那支
+    真的開一張票再切到發票本看得到案名，而且它確實抓到過這個洞。
+    """
+    src = repo_src(INV)
+    # 錨在**資料列**的模板上 —— 第一個 crm-row-name 出現在快速新增列裡（實測）
+    i = src.index('class="crm-row-name" title="${_esc(inv.title)}')
+    seg = src[i:i + 600]
+    assert "\n                inv.project_name\n" in seg, "名稱欄的專案判斷被改掉了"
+    assert "· ${_esc(inv.project_name)}</span>" in seg, "沒有把專案名畫出來"
+
+
+def test_the_invoice_book_can_filter_by_project():
+    """GET /invoices 早就收 project_id，工具列一直沒有那顆 —— 綁好了卻沒地方按
+    「只看這個案子的票」。"""
+    assert 'id="inv-filter-project"' in repo_src(INV_HTML), "工具列沒有專案篩選"
+    js = js_code_only(repo_src(INV))
+    assert "params.set('project_id', _filters.project_id)" in js, "篩選沒送出去"
+    assert "_filters.project_id = e.target.value" in js, "下拉沒接上"
+
+
+def test_the_project_filter_keeps_its_selection_across_reloads():
+    """重畫時不保留選取，載入一次就跳回「全部專案」—— 使用者以為篩掉了其實沒有。"""
+    js = js_code_only(repo_src(INV))
+    i = js.index("function _populateProjectFilter(")
+    seg = js[i:i + 500]
+    assert "const cur = sel.value;" in seg and "selected" in seg

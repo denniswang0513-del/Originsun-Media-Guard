@@ -19,7 +19,7 @@ let _selectedId = null;
 let _editingId = null;
 let _editingPaymentStatus = null;
 let _editingPaymentType = null;
-let _filters = { q: '', issue_status: '', category: '' };
+let _filters = { q: '', issue_status: '', category: '', project_id: '' };
 let _csvFile = null;
 
 // ── 代開手續費率 ────────────────────────────────────────────
@@ -97,6 +97,7 @@ async function loadInvoices() {
     if (_filters.q)            params.set('q', _filters.q);
     if (_filters.issue_status) params.set('issue_status', _filters.issue_status);
     if (_filters.category)     params.set('category', _filters.category);
+    if (_filters.project_id)   params.set('project_id', _filters.project_id);
     params.set('entity', _pinEntity());
     try {
         const data = await _fetch(`/invoices?${params}`);
@@ -107,6 +108,7 @@ async function loadInvoices() {
 
 async function loadProjects() {
     try { _projects = (await crmCacheFetch('projects', '/projects')).projects || []; } catch(_) { _projects = []; }
+    _populateProjectFilter();
 }
 
 async function loadClients() {
@@ -116,6 +118,17 @@ async function loadClients() {
 // ── Rendering ────────────────────────────────────────────────
 
 /** 開立狀態 badge。class 是語意 token（同 _payBadge）—— 中文只出現在顯示的字。 */
+/** 工具列的專案篩選下拉。重畫時保留目前選的值 —— 不然載入一次就跳回「全部專案」。 */
+function _populateProjectFilter() {
+    const sel = document.getElementById('inv-filter-project');
+    if (!sel) return;
+    const cur = sel.value;
+    const opt = (p) => '<option value="' + p.id + '"'
+        + (p.id === cur ? ' selected' : '') + '>' + _esc(p.name) + '</option>';
+    sel.innerHTML = '<option value="">全部專案</option>' + _projects.map(opt).join('');
+}
+
+
 function _statusBadge(status) {
     const cls = status === '作廢' ? 'void'
         : status === '已開立' ? 'collected' : 'unpaid';
@@ -365,7 +378,13 @@ function renderList() {
         <div class="crm-row${inv.id === _selectedId ? ' selected' : ''}" onclick="window._invSelect('${inv.id}')">
             <div class="crm-row-date">${inv.invoice_date ? inv.invoice_date.substring(0, 10) : '—'}</div>
             <div title="${_esc(inv.applicant)}">${_esc(inv.applicant)}</div>
-            <div class="crm-row-name" title="${_esc(inv.title)}">${_esc(inv.title)}</div>
+            <!-- 名稱後接專案：清單 11 欄本來沒有一欄看得到「這張是哪個案子的」，
+                 從專案頁開的票綁好了也看不出來（owner 2026-08-23）。名稱欄是彈性欄，
+                 接在後面不動任何 CSS 寬度。 -->
+            <div class="crm-row-name" title="${_esc(inv.title)}${inv.project_name ? '　（' + _esc(inv.project_name) + '）' : ''}">${_esc(inv.title)}${
+                inv.project_name
+                    ? `<span style="color:#6b7280;font-size:11px;"> · ${_esc(inv.project_name)}</span>`
+                    : ''}</div>
             <div class="crm-row-amount">$${_fmtNum(inv.amount_total)}</div>
             <div class="crm-row-client" title="${_esc(inv.company_name)}">${_esc(inv.company_name)}</div>
             <div>${_esc(inv.tax_id)}</div>
@@ -1281,6 +1300,9 @@ export async function initCrmInvoicesTab() {
     });
     document.getElementById('inv-filter-type').addEventListener('change', e => { _filters.issue_status = e.target.value; loadInvoices(); });
     document.getElementById('inv-filter-cat').addEventListener('change', e => { _filters.category = e.target.value; loadInvoices(); });
+    // 專案篩選：/invoices 早就收 project_id，工具列一直沒有那顆 —— 從專案頁
+    // 開的票綁好了，卻沒地方按「只看這個案子的」（owner 2026-08-23）。
+    document.getElementById('inv-filter-project').addEventListener('change', e => { _filters.project_id = e.target.value; loadInvoices(); });
 
     _initInvoicesRootCard();   // 管理員限定，非管理員入口保持隱藏（不 await，別擋住 tab 載入）
     document.getElementById('inv-btn-add').addEventListener('click', () => openModal());
