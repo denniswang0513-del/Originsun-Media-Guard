@@ -447,6 +447,47 @@ async def _assert_statement_belongs_to(session, acct, ent, text) -> None:
                 "請改選對的帳戶再匯一次。"))
 
 
+async def _balance_before(session, acct, text):
+    """這個帳戶在對帳單**第一列的前一天**是多少錢。抓不到就回 None。
+
+    🔴 為什麼要算這個：第一列沒有前一列的餘額可減，銀行又不一定印總計，
+       解析器只好用關鍵字猜方向並標 inferred（預覽預設不勾）。但這個數字系統
+       本來就有 —— 期初餘額 ＋ 那天以前的所有流水。傳進去，第一列就是**算出來**
+       的而不是猜的（2026-08-24 實測：一銀那份第一列本來被推成支出 −2,000，
+       實際是存入 +2,000）。
+
+    ⚠ 只在**那天以前確實有資料**或帳戶有期初餘額時才給。全新帳戶（第一筆交易
+      就在這份對帳單裡）餘額 0 也是正確答案 —— 那正是一銀 2025-05-12 的情況。
+    """
+    from sqlalchemy import and_, func, select
+
+    from core.bank_statement import _DATE
+    from core.finance_logic import bank_running_balance
+    from db.models import CrmCashEntry
+    m = _DATE.search(text or "")
+    if not m:
+        return None
+    y = int(m.group(1))
+    if y < 1000:
+        y += 1911
+    try:
+        first_day = _parse_day(f"{y:04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}")
+    except Exception:
+        return None
+    row = (await session.execute(
+        select(func.coalesce(func.sum(CrmCashEntry.deposit), 0),
+               func.coalesce(func.sum(CrmCashEntry.expense), 0),
+               func.coalesce(func.sum(CrmCashEntry.bank_fee), 0),
+               func.coalesce(func.sum(CrmCashEntry.claim), 0))
+        .where(and_(CrmCashEntry.bank_account_id == acct.id,
+                    CrmCashEntry.entry_date < first_day)))).one()
+    dep, exp, fee, claim = (int(x or 0) for x in row)
+    # 聚合值包成一筆餵進共用公式 —— 餘額的定義只有那一份
+    return bank_running_balance(int(acct.opening_balance or 0),
+                                [{"deposit": dep, "expense": exp,
+                                  "bank_fee": fee, "claim": claim}])
+
+
 async def _build_statement_preview(session, acct, ent, text):
     """解析對帳單 → 逐列建議 + 選項清單。**只讀不寫**。
 
@@ -458,7 +499,16 @@ async def _build_statement_preview(session, acct, ent, text):
                                      parse_statement)
     acct_id = acct.id
     # 分類規則走 DB（使用者可編），不是寫死那 14 條
-    res = parse_statement(text, rules=await _load_import_rules(session, acct_id))
+    rules = await _load_import_rules(session, acct_id)
+    # 🔴 期初餘額是**提示不是約束**：帶著跑一次，對不上就退回原本的行為。
+    #    parse_statement 拿 opening_balance 當硬條件 —— 第一列跟它對不上就整份
+    #    解析失敗。而它對不上是很常見的（帳上那段期間有缺漏、重疊匯入、
+    #    對帳單不是從帳上資料的斷點開始）。擋掉一份有效的對帳單，比讓第一列
+    #    多打一個勾嚴重得多。
+    opening = await _balance_before(session, acct, text)
+    res = parse_statement(text, rules=rules, opening_balance=opening)
+    if opening is not None and not res.ok:
+        res = parse_statement(text, rules=rules)
     if not res.ok:
         return {"ok": False, "errors": res.errors,
                 "warnings": res.warnings, "rows": []}
