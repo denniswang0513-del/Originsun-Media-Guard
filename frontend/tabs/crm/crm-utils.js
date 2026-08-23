@@ -595,6 +595,25 @@ export function withInputsPreserved(container, rerender) {
 
 
 /** 輕量 toast — 沿用 crm.css 既有 .cg-toast 樣式（cost-groups / media-log 等子視圖共用）。 */
+const TAX_RATE = 1.05;
+
+/** 一個金額 + 它是未稅還是含稅 → 推出三個金額欄。
+ *
+ * 兩個方向都收在這裡：來源有時記未稅、有時記含稅，若讓兩條輸入路徑各自進位，
+ * 同一筆錢會產生尾差。含稅→未稅用 round(total / 1.05)（166,950 → 159,000，
+ * 回推 159,000×1.05 = 166,950 ✓），稅額一律取兩者之差，保證三欄自洽。
+ *
+ * 🔴 從 crm-invoices.js 搬上來（2026-08-23）—— 專案頁的「開發票」也要用它。
+ * 稅率不是永恆的 5%，複製一份的話兩個入口開出來的發票尾差會不一樣，而且是
+ * 那種對帳時才會發現的差。 */
+export function invoiceAmounts(value, mode) {
+    const n = parseInt(value) || 0;
+    if (!n) return { amount_ex_tax: null, amount_total: null, tax_amount: null };
+    const total = mode === 'total' ? n : Math.round(n * TAX_RATE);
+    const ex = mode === 'total' ? Math.round(n / TAX_RATE) : n;
+    return { amount_ex_tax: ex, amount_total: total, tax_amount: total - ex };
+}
+
 export function crmToast(msg, ms = 2000) {
     let el = document.getElementById('cg-toast');
     if (el) el.remove();

@@ -34,6 +34,7 @@ import { loadDeliveryTab, initDeliveryHandlers } from '../proposals/delivery-vie
 const _openDelivery = (pid) => loadDeliveryTab(pid, {
     host: document.getElementById('proj-detail-delivery'), fetcher: _fetch });
 import { loadProjectTypes } from './crm-projects-core.js';
+import { loadInvoicesTab } from './crm-projects-invoices.js';
 import { loadCostGroups, renderGroupSwitcher, initCostGroupsHandlers } from './crm-projects-cost-groups.js';
 
 // ── 回呼串接（解耦跨模組依賴） ──────────────────────────────
@@ -49,6 +50,7 @@ function _reloadActiveDetailTab(projectId) {
     else if (tab === 'refs') _loadRefsTab(projectId);
     else if (tab === 'delivery') _openDelivery(projectId);
     else if (tab === 'team') { _loadCostStaff(projectId); _loadAdvances(projectId); }
+    else if (tab === 'invoices') loadInvoicesTab(projectId);
     // info/finance 由 renderDetail 涵蓋、quotes 由 selectProject 的 loadQuotations 涵蓋
 }
 
@@ -314,6 +316,8 @@ export async function initCrmProjectsTab() {
             document.getElementById('proj-detail-team').classList.toggle('hidden', tab !== 'team');
             if (tab === 'quotes' && state.selectedId) { loadProjectQuotes(state.selectedId); }
             if (tab === 'team' && state.selectedId) { _loadCostStaff(state.selectedId); _loadAdvances(state.selectedId); }
+            document.getElementById('proj-detail-invoices').classList.toggle('hidden', tab !== 'invoices');
+            if (tab === 'invoices' && state.selectedId) { loadInvoicesTab(state.selectedId); }
             document.getElementById('proj-detail-finance').classList.toggle('hidden', tab !== 'finance');
             document.getElementById('proj-detail-delivery').classList.toggle('hidden', tab !== 'delivery');
             if (tab === 'delivery' && state.selectedId) { _openDelivery(state.selectedId); }

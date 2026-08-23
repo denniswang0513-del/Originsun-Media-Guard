@@ -1,7 +1,7 @@
 /**
  * crm-invoices.js — 帳務管理 Tab
  */
-import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, invoiceAmounts } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
@@ -924,20 +924,8 @@ function _populateClientSelect(selectedName) {
         _clients.map(c => `<option value="${_esc(c.short_name)}" data-taxid="${_esc(c.tax_id || '')}"${c.short_name === selectedName ? ' selected' : ''}>${_esc(c.short_name)}${c.tax_id ? ' (' + c.tax_id + ')' : ''}</option>`).join('');
 }
 
-const TAX_RATE = 1.05;
-
-/** 一個金額 + 它是未稅還是含稅 → 推出三個金額欄。
- *
- * 兩個方向都收在這裡：來源有時記未稅、有時記含稅，若讓兩條輸入路徑各自進位，
- * 同一筆錢會產生尾差。含稅→未稅用 round(total / 1.05)（166,950 → 159,000，
- * 回推 159,000×1.05 = 166,950 ✓），稅額一律取兩者之差，保證三欄自洽。 */
-function _amountsFrom(value, mode) {
-    const n = parseInt(value) || 0;
-    if (!n) return { amount_ex_tax: null, amount_total: null, tax_amount: null };
-    const total = mode === 'total' ? n : Math.round(n * TAX_RATE);
-    const ex = mode === 'total' ? Math.round(n / TAX_RATE) : n;
-    return { amount_ex_tax: ex, amount_total: total, tax_amount: total - ex };
-}
+// 稅率規則住在 crm-utils.invoiceAmounts —— 專案頁的「開發票」也走同一支。
+const _amountsFrom = invoiceAmounts;
 
 /** 金額三欄 + 客戶 → 統編 + 類別 → 代開匯款。
  *
