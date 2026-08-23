@@ -27,6 +27,7 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 normalize_invoice_status, passthrough_commission)
 from core.ledger import require_entity
 from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES
+from core.project_match import suggest_project
 from core.project_link import PAYMENT_CATEGORIES as _PAYMENT_LINK_CATEGORIES
 from core.schemas import (InvoicePayload, PaymentRequestPayload, CashEntryPayload,
                           CashInvoiceLinksPayload, CashPaymentLinksPayload)
@@ -1011,7 +1012,8 @@ async def list_payments(
     request: Request,
     q: str = Query(""), category: str = Query(""),
     payment_status: str = Query(""), project_id: str = Query(""),
-    unassigned: str = Query(""), entity: str = Query(""),
+    unassigned: str = Query(""), suggest: str = Query(""),
+    entity: str = Query(""),
 ):
     # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
     # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
@@ -1050,11 +1052,28 @@ async def list_payments(
             ))
         rows = (await session.execute(query)).all()
         links = await _invoice_link_for(session, [r[0] for r in rows], ent)
-    return {
-        "payments": [_to_payment_dict(r[0], r[1] or "", *links.get(r[0].id, ("", "")))
-                     for r in rows],
-        "total": len(rows),
-    }
+        # 未掛專案的列附一個**建議**（owner 2026-08-23：「手動掛，精準為主」）——
+        # 人要做的從「翻 238 個專案找一個」變成「看一眼對不對」。
+        # 🔴 只在有人問的時候算（suggest=1）：238 專案 × 800 張的子字串比對不該
+        #    每次列清單都跑一次。
+        sugg = {}
+        if suggest:
+            need = [r[0] for r in rows if not (r[0].project_id or "")]
+            if need:
+                projs = [(p.id, p.name) for p in (await session.execute(
+                    select(CrmProject).where(CrmProject.name.isnot(None))
+                )).scalars().all()]
+                for pay in need:
+                    hit = suggest_project(pay.summary or "", projs)
+                    if hit:
+                        sugg[pay.id] = hit
+    out = []
+    for r in rows:
+        d = _to_payment_dict(r[0], r[1] or "", *links.get(r[0].id, ("", "")))
+        if r[0].id in sugg:
+            d["suggested"] = sugg[r[0].id]
+        out.append(d)
+    return {"payments": out, "total": len(out)}
 
 
 @router.post("/payments")

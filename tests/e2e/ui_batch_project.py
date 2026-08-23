@@ -6,12 +6,17 @@
   2. Shift 點第二列＝把中間整段一起選起來（而且是加選，不是 toggle）
   3. 操作列會算出「已選幾張 / 合計多少」
   4. 「只看未掛專案」真的縮小清單
-  5. 離開批次模式回到原本的行為
+  5. 「建議：」欄與「選同建議」（owner 要的是確認，不是自動套用）
+  6. 離開批次模式回到原本的行為
 
 不實際寫入 —— 掛專案那條路由已經有 api_batch_project.py 打真的端點驗過。
+種一組保證配得到的資料（案名與摘要共用一段字），否則 dev 庫的命中是浮動的。
 """
+import asyncio
 import io
 import sys
+import uuid
+from datetime import datetime
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
 sys.path.insert(0, r"E:\Dev\Originsun-Media-Guard")
@@ -24,7 +29,43 @@ if ":8000" in BASE:
     sys.path.insert(0, r"C:\OriginsunAgent")
 T = create_token({"sub": "admin", "username": "admin", "access_level": 3,
                   "modules": ["money_view", "crm_invoices"]})
+TAG = "ZZSUG"
+SUGG_NAME = TAG + "太赫茲年度大會紀錄"
 fails = []
+
+
+async def seed():
+    """一個案子 ＋ 三張摘要帶「ZZSUG太赫茲」的請款單 —— 建議必中。"""
+    from db.models import CrmPaymentRequest, CrmProject
+    from db.session import get_session_factory, init_db
+    await init_db()
+    async with get_session_factory()() as s:
+        s.add(CrmProject(id=uuid.uuid4().hex, name=SUGG_NAME, status="製作"))
+        for i in range(3):
+            s.add(CrmPaymentRequest(
+                id=uuid.uuid4().hex, entity="parent",
+                request_date=datetime(2026, 8, 20), amount=10000 + i,
+                summary=TAG + "太赫茲", category="專案外包",
+                payee_name=TAG + "廠商", payment_status="應付款"))
+        await s.commit()
+
+
+async def clean():
+    from sqlalchemy import select
+
+    from db.models import CrmPaymentRequest, CrmProject
+    from db.session import get_session_factory, init_db
+    await init_db()
+    async with get_session_factory()() as s:
+        for m, col in ((CrmPaymentRequest, CrmPaymentRequest.summary),
+                       (CrmProject, CrmProject.name)):
+            for r in (await s.execute(select(m).where(col.like(TAG + "%")))).scalars().all():
+                await s.delete(r)
+        await s.commit()
+
+
+asyncio.run(clean())
+asyncio.run(seed())
 
 
 def check(ok, label, extra=""):
@@ -107,6 +148,34 @@ with sync_playwright() as p:
     check(toast, "提示「先選一個專案」出現了（crmToast 真的接上）")
 
     print("")
+    print("[5b] 🔴 建議欄：機器排候選，人確認（不是自動套用）")
+    pg.check("#pay-filter-unassigned")
+    pg.wait_for_timeout(3500)
+    pg.fill("#pay-search", TAG + "太赫茲")
+    pg.wait_for_timeout(3000)
+    body = pg.locator("#pay-list-body").inner_text()
+    check("建議：" in body, "有標示成「建議：」", body[:80])
+    check(SUGG_NAME in body, "建議的是種好的那個案子", body[:120])
+    n_sugg = pg.locator(rows).count()
+    check(n_sugg == 3, "三張都給了建議", str(n_sugg))
+
+    print("")
+    print("[5c] 「選同建議」把同一個建議的整組選起來")
+    pg.locator(rows).nth(0).click()
+    pg.wait_for_timeout(400)
+    pg.click("#pay-batch-samesugg")
+    pg.wait_for_timeout(700)
+    txt = pg.locator("#pay-batch-count").inner_text()
+    check("已選 3 張" in txt, "三張一起選起來了", txt)
+    picked = pg.evaluate("() => document.getElementById('pay-batch-project').value")
+    check(bool(picked), "專案下拉也帶好了（仍要人自己按「掛上去」）", str(bool(picked)))
+    pg.fill("#pay-search", "")
+    pg.wait_for_timeout(2500)
+    pg.click("#pay-batch-none")
+    pg.uncheck("#pay-filter-unassigned")
+    pg.wait_for_timeout(2500)
+
+    print("")
     print("[6] 只看未掛專案")
     pg.click("#pay-batch-exit")
     pg.wait_for_timeout(500)
@@ -126,6 +195,10 @@ with sync_playwright() as p:
     check(shown(pg, "#pay-detail-panel"), "詳情面板打開了")
     check(not errs, "整輪都沒有 JS 例外", str(errs[:3]))
     b.close()
+
+asyncio.run(clean())
+print("")
+print("[已清理種進去的測試資料]")
 
 print("")
 print("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}")

@@ -22,6 +22,8 @@ async function loadPayments() {
     if (_filters.payment_status) params.set('payment_status', _filters.payment_status);
     if (_filters.project_id)     params.set('project_id', _filters.project_id);
     if (_filters.unassigned)     params.set('unassigned', '1');
+    // 建議只在批次模式要 —— 那是唯一會看它的地方，平常列清單不必付這個計算成本
+    if (_batch.on)               params.set('suggest', '1');
     try { _payments = (await _fetch('/payments?' + params)).payments || []; }
     catch (_) { _payments = []; }
     renderList();
@@ -64,7 +66,10 @@ const _sorter = createSortable({
         category: p => (p.category || '').toLowerCase(),
         payee:    p => (p.payee_name || '').toLowerCase(),
         invoice:  p => (p.invoice_number || '').toLowerCase(),
-        project:  p => (p.project_name || p.project_label || '').toLowerCase(),
+        // 沒掛專案時用**建議**排序 —— 同一個建議的列會聚在一起，Shift 選一段
+        // 就掛完一個案子。這是這顆建議真正的用處（不是自動套用）。
+        project:  p => (p.project_name || p.suggested?.project_name
+                        || p.project_label || '').toLowerCase(),
         status:   p => enumIndex(_PAY_STATUS_ORDER, p.payment_status, '應付款'),
     },
 });
@@ -91,7 +96,13 @@ function renderList() {
             <span>${_esc(p.category || '')}</span>
             <span>${_esc(p.payee_name)}</span>
             <span title="${_esc(p.invoice_number || '')}">${_esc(p.invoice_title || p.invoice_number || '')}</span>
-            <span>${_esc(p.project_name || p.project_label || '')}</span>
+            <span>${p.project_name
+                ? _esc(p.project_name)
+                : (p.suggested
+                    ? `<span style="color:${p.suggested.strong ? '#93c5fd' : '#6b7280'};"
+                             title="機器建議（相似度 ${p.suggested.score}）—— 要你確認，不會自動掛">
+                         建議：${_esc(p.suggested.project_name)}</span>`
+                    : _esc(p.project_label || ''))}</span>
             <span>${_statusBadge(p.payment_status)}</span>
             ${kebabMenuHtml(p.id, { onEdit: '_payEdit', onDuplicate: '_payDup', onDelete: '_payDelete' })}
         </div>
@@ -720,6 +731,19 @@ export async function initCrmPaymentsTab() {
     });
     document.getElementById('pay-batch-none').addEventListener('click', () => {
         _batch.sel.clear(); _batch.last = null; renderList();
+    });
+    document.getElementById('pay-batch-samesugg').addEventListener('click', () => {
+        // 選起「跟剛才點的那張同一個建議」的所有列，並把那個專案帶進下拉。
+        // 使用者仍然要自己看過清單再按「掛上去」—— 這裡只省找的功夫。
+        const last = _payments.find(p => p.id === _batch.last);
+        const name = last?.suggested?.project_name;
+        if (!name) { crmToast('先點一張有建議的列'); return; }
+        _payments.forEach(p => {
+            if (!p.project_name && p.suggested?.project_name === name) _batch.sel.add(p.id);
+        });
+        const sel = document.getElementById('pay-batch-project');
+        if (sel) sel.value = last.suggested.project_id;
+        renderList();
     });
     document.getElementById('pay-batch-apply').addEventListener('click', () => {
         const pid = document.getElementById('pay-batch-project').value;
