@@ -1127,7 +1127,7 @@ class FinanceAdjustmentPayload(BaseModel):
     adj_date: Optional[str] = None         # 'YYYY-MM-DD'（create 必填由端點檢查）
     account_id: Optional[str] = None       # create 必填由端點檢查
     amount: Optional[int] = None           # 有號金額
-    adj_type: Optional[str] = None         # opening/correction/owner_in/owner_out/accountant/writeoff/other
+    adj_type: Optional[str] = None         # opening/correction/owner_in/owner_out/accountant/writeoff/other/vat（vat→應付營業稅，其餘→權益）
     description: Optional[str] = None      # create 必填由端點檢查
     # 兩本帳：None＝建立時落 'parent'、更新時維持既有值；🔴 不可給 "parent" 當預設——整包 model_dump 寫回會把我的帳列洗回母公司
     entity: Optional[str] = None

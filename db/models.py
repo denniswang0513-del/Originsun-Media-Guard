@@ -1615,7 +1615,8 @@ class FinanceAdjustment(Base):
     adj_date = Column(DateTime(timezone=True), nullable=False)   # 調整生效日（月結守衛看這個月）
     account_id = Column(String(32), nullable=False)              # soft FK → finance_accounts.id
     amount = Column(Integer, nullable=False)                     # 有號金額（新台幣整數）
-    # opening/correction/owner_in/owner_out/accountant/writeoff/other
+    # opening/correction/owner_in/owner_out/accountant/writeoff/other/vat
+    # （vat 是唯一不落權益的 —— 它加在應付營業稅上，見 build_balance_sheet）
     adj_type = Column(String(24), nullable=False)
     description = Column(String(255), nullable=False)            # 說明（必填 — 稽核可讀）
     created_by = Column(String(64), nullable=True)

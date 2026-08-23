@@ -1406,13 +1406,20 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
     - 資產：各銀行帳戶推導餘額分列 + 應收帳款 + 員工往來-預支（未結清預支
       餘額，caller 以 compute_advance_status 即時算 — 為即時值非期末歷史值）
       + 器材淨值（除役者出表）。
-    - 負債：流動 = 應付帳款 + 應付營業稅（caller 傳 baseline 起累計 net）；
+    - 負債：流動 = 應付帳款 + 應付營業稅（caller 傳 baseline 起累計 net，
+      再加 adj_type='vat' 的調整列 —— 見下）；
       非流動 = 銀行貸款逐筆分列（loan_rows 由 loan_outstanding_rows 算，
       階段四）。流動比率分母只算流動負債；負債比率吃負債總計。
     - 權益：期初調整（opening）+ 業主往來（owner_in − owner_out，amount 取
       正值填寫）+ 累積損益（baseline..as_of 累計淨利，caller 算）+ 其他調整
       （correction/accountant/writeoff/other 合計）。調整列按 adj_date ≤ as_of
       過濾（不設 baseline 下限 — 期初列本來就開在基準月）。
+    - 🔴 adj_type='vat' 是唯一**不落權益**的調整型別：它加在應付營業稅上。
+      為什麼要有它：vat_payable 是從發票推出來的（銷項−進項−已繳），發票沒記
+      全的年份會算出「繳的比該繳的多」→ 負數負債。那不是政府欠你，是帳的缺口。
+      補發票不可行時（owner 2026-08-23：2024–2025 帳沒記好但稅都有繳好），
+      用一筆具名、有日期、有說明的調整沖平那個年代 —— 比讓報表掛著一個
+      解釋不了的負數誠實，也比偷偷把負數夾成 0 誠實（那會連真的溢繳都看不見）。
     - 檢核誠實外顯：diff = 資產 −（負債+權益），≠0 時附可能原因清單
       （note_counts 來自 statement_warnings）。推導式三表在器材購置已費用化、
       預支即時值等情況天生會有 diff — 掩蓋比外顯危險。
@@ -1434,10 +1441,31 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
     for x in current + noncurrent:
         x["pct"] = _pct(x["amount"], assets_total)
 
+    # 調整列先算 —— 其中 vat 型別要進負債側的應付營業稅，不是權益。
+    # （按 adj_date ≤ as_of 過濾；期初列本來就開在基準月，不設下限。）
+    opening = owner = other = vat_adj = 0
+    for a in adjustments:
+        m = month_of(a.get("adj_date"))
+        if not m or (as_of_month and m > as_of_month):
+            continue
+        amt = int(a.get("amount") or 0)
+        t = a.get("adj_type") or ""
+        if t == "opening":
+            opening += amt
+        elif t == "owner_in":
+            owner += amt
+        elif t == "owner_out":
+            owner -= amt
+        elif t == "vat":
+            vat_adj += amt
+        else:
+            other += amt
+
     liab_current = [
         {"key": "payable", "label": "應付帳款",
          "amount": int(payable_total or 0), "drill": "payable"},
-        {"key": "vat_payable", "label": "應付營業稅", "amount": int(vat_payable or 0)},
+        {"key": "vat_payable", "label": "應付營業稅",
+         "amount": int(vat_payable or 0) + vat_adj},
     ]
     # 股東借款逐筆分列（owner 2026-08-21）。餘額＝公司欠該股東多少 —— 是負債，
     # 🔴 不可以混進上面的 bank_lines（那會讓現金憑空多出股東墊付的錢）。
@@ -1454,21 +1482,6 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
     for x in liab_current + liab_noncurrent:
         x["pct"] = _pct(x["amount"], assets_total)
 
-    opening = owner = other = 0
-    for a in adjustments:
-        m = month_of(a.get("adj_date"))
-        if not m or (as_of_month and m > as_of_month):
-            continue
-        amt = int(a.get("amount") or 0)
-        t = a.get("adj_type") or ""
-        if t == "opening":
-            opening += amt
-        elif t == "owner_in":
-            owner += amt
-        elif t == "owner_out":
-            owner -= amt
-        else:
-            other += amt
     equity_lines = [
         # 股東投資款＝股東投入的資本，落在權益不是負債（與借款的差別就在這裡）
         *[{"key": f"sh_cap:{x.get('id')}",

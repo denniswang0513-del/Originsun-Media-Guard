@@ -67,8 +67,11 @@ MAP_SOURCES = {"cash", "payment", "invoice"}
 # ⚠ 改 TREATMENTS / ACCT_KINDS 值域要同步 frontend/tabs/finance/fin-utils.js 的 *_OPTIONS
 TREATMENTS = {"direct_expense", "direct_income", "ap_settlement", "ar_settlement",
               "transfer", "tax_vat", "tax_income", "advance", "passthrough", "loan"}
+# 🔴 vat 不落權益 —— 它加在資產負債表的「應付營業稅」上（core.finance_logic
+#    .build_balance_sheet）。發票沒記全的年份會把 vat_payable 算成負數，那是帳的
+#    缺口不是政府欠你；補不回發票時用一筆具名調整沖平那個年代。
 ADJ_TYPES = {"opening", "correction", "owner_in", "owner_out",
-             "accountant", "writeoff", "other"}
+             "accountant", "writeoff", "other", "vat"}
 # bank=銀行帳戶 / cash=零用金 / shareholder_*=股東往來（owner 2026-08-21）。
 # 股東往來的兩種在報表上落點不同：借款→負債、投資款→權益
 # （規則正本 core.finance_logic.SHAREHOLDER_KINDS + split_bank_lines）。

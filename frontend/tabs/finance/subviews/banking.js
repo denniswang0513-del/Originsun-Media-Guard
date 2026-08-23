@@ -19,6 +19,7 @@ const ADJ_TYPES = [
     { v: 'owner_in', label: '業主投入（老闆拿錢進公司）' },
     { v: 'owner_out', label: '業主提領（老闆從公司拿錢）' },
     { v: 'accountant', label: '會計師調整' },
+    { v: 'vat', label: '營業稅調整（沖平應付營業稅）' },
     { v: 'other', label: '其他調整' },
 ];
 // ⚠ 值域對齊後端 /loans 的 method — 下拉只給白話，不裸露「攤提/年金法」術語
