@@ -130,14 +130,22 @@ async function _loadTransferPairs() {
     _xfer = d;
     const todo = d.fee_inside || [];
     const un = (d.unpaired_out || []).length + (d.unpaired_in || []).length;
+    const nRev = (d.reversals || []).length;
+    // 沖正是「銀行把匯款退回」—— 互相抵銷、帳沒錯，但要講出來，不然使用者會
+    // 一直在別的地方找那兩筆去哪了
+    const revLine = nRev
+        ? `<div style="color:#6b7280;font-size:11px;margin-top:6px;">
+             另外認出 ${fmtNum(nRev)} 組<b>沖正</b>（匯出去又被退回）——
+             一進一出互相抵銷，帳沒有錯，不用處理。</div>` : '';
     const unLine = un
         ? `<div style="color:#9ca3af;font-size:11px;margin-top:8px;">
-             另有 ${fmtNum(un)} 筆轉存<b>配不到對手</b>（金額差太多、或本來就只有單邊）——
-             系統不猜，需要人看：<a href="#" onclick="window._finRecon.xferShowUnpaired();return false;"
+             另有 ${fmtNum(un)} 筆轉存<b>配不到對手</b>（對方帳戶的對帳單還沒匯入、
+             金額差太多、或本來就只有單邊）—— 系統不猜，需要人看：
+             <a href="#" onclick="window._finRecon.xferShowUnpaired();return false;"
              style="color:#60a5fa;">列出來</a></div>` : '';
     if (!todo.length) {
         box.innerHTML = `<div style="color:#86efac;font-size:13px;">
-            ✓ ${fmtNum(d.paired || 0)} 組轉存都配好了，手續費也都拆過 —— 沒有待處理的。</div>${unLine}`;
+            ✓ ${fmtNum(d.paired || 0)} 組轉存都配好了，手續費也都拆過 —— 沒有待處理的。</div>${revLine}${unLine}`;
         return;
     }
     const total = todo.reduce((n, x) => n + (x.fee || 0), 0);
@@ -171,7 +179,7 @@ async function _loadTransferPairs() {
             把這 ${fmtNum(todo.length)} 組的手續費認列出來</button>
         <span style="color:#6b7280;font-size:11px;margin-left:8px;">
             支出減、手續費加，<b>總流出不變</b> —— 帳戶餘額不會動</span>
-        ${unLine}`;
+        ${revLine}${unLine}`;
 }
 
 _fr.xferRecognize = async (btn) => {

@@ -190,7 +190,7 @@ async def list_transfer_pairs(request: Request, entity: str = ""):
     cat_map = inputs["cat_map"]
     rows = [e for e in inputs["cash_entries"]
             if classify_cash_entry(e, cat_map) == "transfer"]
-    pairs, un_o, un_i = transfer_pairs(rows)
+    pairs, un_o, un_i, revs = transfer_pairs(rows)
 
     def _brief(e):
         return {"id": e.get("id"), "date": str(e.get("entry_date") or "")[:10],
@@ -207,6 +207,9 @@ async def list_transfer_pairs(request: Request, entity: str = ""):
                         "fee": p["gap"]} for p in todo],
         "unpaired_out": [_brief(e) for e in un_o],
         "unpaired_in": [_brief(e) for e in un_i],
+        # 銀行退回的那種一進一出：互相抵銷，不是問題 —— 但要列出來讓人知道
+        # 系統看到了，不然它會永遠掛在「配不到」裡讓人以為有事沒處理。
+        "reversals": [{"out": _brief(p["out"]), "in": _brief(p["in"])} for p in revs],
     }
 
 
@@ -228,7 +231,7 @@ async def recognize_transfer_fees_in(session, ent: str, only_ids=None,
     inputs = await _load_inputs(session, entity=ent)
     rows = [e for e in inputs["cash_entries"]
             if classify_cash_entry(e, inputs["cat_map"]) == "transfer"]
-    pairs, _o, _i = transfer_pairs(rows)
+    pairs, _o, _i, _rev = transfer_pairs(rows)
     todo = {p["out"]["id"]: p["gap"] for p in pairs if p["fee_inside"]}
     want = set(only_ids or ()) or set(todo)
     done = []

@@ -1696,6 +1696,17 @@ TRANSFER_PAIR_WINDOW_DAYS = 3
 #: 沒有日期的列排最前面（舊資料有 entry_date 為空的）
 _EPOCH = date(1970, 1, 1)
 
+#: 銀行把一筆匯款退回時的字樣。認出來才不會被當成「配不到對手」一直叫 ——
+#: 沖正的一進一出在**同一個帳戶**，本來就配不到轉出/轉入的對，但它們互相抵銷，
+#: 數字沒有被扭曲。要有這個字樣才算，不能只看「同帳戶、同金額、方向相反」——
+#: 那個形狀在真實帳上很常見（同日收一筆付一筆），亂認會把兩筆無關的錢抵掉。
+REVERSAL_MARKERS = ("沖正", "退匯", "退回", "更正")
+
+
+def _is_reversal(e) -> bool:
+    return any(m in ((e.get("summary") or "") + (e.get("note") or ""))
+               for m in REVERSAL_MARKERS)
+
 
 def transfer_pairs(entries, *, window_days=TRANSFER_PAIR_WINDOW_DAYS,
                    tolerance=FEE_TOLERANCE):
@@ -1716,14 +1727,42 @@ def transfer_pairs(entries, *, window_days=TRANSFER_PAIR_WINDOW_DAYS,
       加過匯費**的列成立；歷史 37 筆早就是支出＝本金、匯費分開記，照那個判準會
       被各減 15。所以一定要跟配對的那一列比。
 
+    回的是 (pairs, unpaired_out, unpaired_in, reversals)。`reversals` ＝銀行把
+    匯款退回的那種一進一出（同帳戶、同金額、摘要寫著沖正）—— 它們互相抵銷，
+    不是問題，先撿出來才不會混在「配不到」裡一直叫。
+
     entries：dict 清單，要有 entry_date / deposit / expense / bank_fee /
-    bank_account_id / id。呼叫端負責只傳 treatment=='transfer' 的列。
+    bank_account_id / id / summary。呼叫端負責只傳 treatment=='transfer' 的列。
     """
     def _d(e):
         return local_day(e.get("entry_date")) if e.get("entry_date") else None
 
     outs = [e for e in entries if int(e.get("expense") or 0) > 0]
     ins = [e for e in entries if int(e.get("deposit") or 0) > 0]
+
+    # 0. 先撿沖正：同帳戶、同金額、方向相反，而且**有沖正字樣**（任一側寫著就算）
+    reversals, rev_out, rev_in = [], set(), set()
+    for oi, o in enumerate(outs):
+        if oi in rev_out:
+            continue
+        for ii, cand in enumerate(ins):
+            if ii in rev_in:
+                continue
+            if int(o.get("expense") or 0) != int(cand.get("deposit") or 0):
+                continue
+            if o.get("bank_account_id") != cand.get("bank_account_id"):
+                continue
+            od, idt = _d(o), _d(cand)
+            if od and idt and abs((idt - od).days) > window_days:
+                continue
+            if not (_is_reversal(o) or _is_reversal(cand)):
+                continue
+            reversals.append({"out": o, "in": cand})
+            rev_out.add(oi)
+            rev_in.add(ii)
+            break
+    outs = [o for i, o in enumerate(outs) if i not in rev_out]
+    ins = [c for i, c in enumerate(ins) if i not in rev_in]
     outs.sort(key=lambda e: (_d(e) or _EPOCH, int(e.get("expense") or 0)))
     used, pairs, unpaired_out = set(), [], []
 
@@ -1758,7 +1797,7 @@ def transfer_pairs(entries, *, window_days=TRANSFER_PAIR_WINDOW_DAYS,
             "fee_inside": gap > 0,
         })
     unpaired_in = [c for i, c in enumerate(ins) if i not in used]
-    return pairs, unpaired_out, unpaired_in
+    return pairs, unpaired_out, unpaired_in, reversals
 
 
 def cashflow_lines(cash_entries, months, *, cat_map=None, accounts=None,
