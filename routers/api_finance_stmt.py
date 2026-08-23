@@ -487,6 +487,37 @@ async def _build_statement_preview(session, acct, ent, text):
     # 排序交給前端 —— 它要依「跟該列入帳金額的接近程度」排，而那是逐列不同的
     open_invs.sort(key=lambda x: (x["date"] or "", x["invoice_number"]), reverse=True)
 
+    # 支出列的鏡像：請款單只列**還沒付滿**的（owner 2026-08-23：「項目勾請款單時，
+    # 可以讓我勾是哪一筆請款單的項目來對帳，像是勾發票那樣」）。
+    # 🔴「付滿了沒」走 amount_is_settled（同一條 NT$50 容差）—— 被跨行手續費短付
+    #    30 元的那些，用 `已付 < 金額` 判會一直冒出來引人再掛一次款。判準跟
+    #    resettle_payment_requests 是同一支，不然挑選視窗與請款單狀態會各講各的。
+    from routers.crm.finance import _payment_allocated
+    from core.finance_logic import amount_is_settled
+    from db.models import CrmPaymentRequest
+    aps = (await session.execute(
+        select(CrmPaymentRequest).where(
+            CrmPaymentRequest.entity == ent))).scalars().all()
+    paid_map = await _payment_allocated(session, [a.id for a in aps])
+    open_pays = []
+    for a in aps:
+        got = paid_map.get(a.id, 0)
+        if amount_is_settled(got, a.amount):
+            continue
+        open_pays.append({
+            "id": a.id, "summary": a.summary or "",
+            "payee_name": a.payee_name or "",
+            "category": a.category or "",
+            "date": str(a.request_date)[:10] if a.request_date else "",
+            "amount_total": int(a.amount or 0),
+            # 欄名刻意跟發票那側一致（paid/outstanding）—— 兩個挑選視窗才有
+            # 共用同一份 render 的可能，不必為了欄名各寫一份
+            "paid": got, "outstanding": int(a.amount or 0) - got,
+            "is_advance": int(a.is_advance or 0),
+            "planned_month": a.planned_month or "",
+        })
+    open_pays.sort(key=lambda x: (x["date"] or "", x["summary"]), reverse=True)
+
     out_rows = []
     for r in res.rows:
         m = by_line.get(r.line_no)
@@ -522,6 +553,9 @@ async def _build_statement_preview(session, acct, ent, text):
         "bank_account_id": acct.id,
         "projects": projects,
         "invoices": open_invs,
+        # 支出列用的候選（還沒付滿的請款單）。跟 invoices 是同一個位置的兩側 ——
+        # 一列不可能同時掛發票與請款單（方向互斥），前端也就共用同一格。
+        "payment_requests": open_pays,
         # 哪些類別收得下專案 —— 前端拿它決定專案下拉何時可用（規則同收支明細）
         "project_categories": list(CASH_CATEGORIES),
         # 有科目對映的類別。前端改分類時要用同一條規則判「會不會落到未歸類」，
@@ -578,8 +612,15 @@ async def save_statement_draft(payload: StatementDraftPayload, request: Request)
             "category": r.category or "",
             "loan_id": r.loan_id, "period_no": r.period_no,
             "project_id": r.project_id,
-            "invoices": [{"invoice_id": x.invoice_id, "amount": x.amount}
+            # 🔴 fee 要一起存：原本只存 invoice_id/amount，於是存草稿再打開，
+            #    填好的匯費就沒了（重開後那列變成「還差 30」，人再填一次）。
+            "invoices": [{"invoice_id": x.invoice_id, "amount": x.amount,
+                          "fee": int(x.fee or 0)}
                          for x in (r.invoices or [])],
+            "payments": [{"payment_request_id": x.payment_request_id,
+                          "amount": x.amount}
+                         for x in (r.payments or [])],
+            "payment_fee": r.payment_fee,
             "selected": bool(r.selected),
         } for r in payload.rows]
 
@@ -653,6 +694,8 @@ async def open_statement_draft(draft_id: str, request: Request):
             r["category"] = x.get("category") or r["category"]
             r["project_id"] = x.get("project_id")
             r["invoices"] = x.get("invoices") or []
+            r["payments"] = x.get("payments") or []
+            r["payment_fee"] = x.get("payment_fee")
             # 🔴 重複的列一律不勾，即使草稿裡勾了 —— 存草稿之後才被匯進去的列，
             # 使用者當初勾的時候還不重複。這裡以「現在的帳」為準。
             r["selected"] = bool(x.get("selected")) and not r["duplicate"]
@@ -689,12 +732,14 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
         raise HTTPException(status_code=422, detail="沒有要匯入的列")
     from collections import Counter
 
-    from core.finance_logic import apply_receipt_fee
+    from core.finance_logic import apply_payment_fee, apply_receipt_fee
     from db.models import CrmCashEntry
-    # 專案／發票的寫入規則只有一套正本，在 crm/finance —— 這裡借用，不另寫
+    # 專案／發票／請款單的寫入規則只有一套正本，在 crm/finance —— 這裡借用，不另寫
     from routers.crm.finance import (_enforce_cash_project_link,
                                      replace_invoice_allocs_bulk,
-                                     resolve_invoice_allocs)
+                                     replace_payment_allocs,
+                                     resolve_invoice_allocs,
+                                     resolve_payment_allocs)
 
     factory = _factory_or_503()
     async with factory() as session:
@@ -732,6 +777,7 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
         made_entries = made_payments = 0
         skipped_dup = []
         linked = []          # 有掛發票的收款列 → commit 前要進分配表並重算發票狀態
+        pay_linked = []      # 有掛請款單的支出列 → 同上（付款狀態走同一條容差規則）
         # 對帳工作台的「銀行說發生了什麼」那一欄。
         #
         # 🔴 這支端點原本只寫帳（右欄），左欄留白 —— 用它匯完一整年，打開工作台
@@ -825,12 +871,24 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                 #    則是因為只有收款側有 deposit 可補。
                 if fee_total and amt > 0:
                     apply_receipt_fee(ce, fee_total)
+                # 支出列的鏡像：掛請款單（出納統一匯款，一個人的多張常併成一筆匯出）。
+                # 🔴 匯費在這一側是**整列一個**（跨行手續費對「這筆匯出」收一次，
+                #    不管涵蓋幾張請款單），所以不是把逐項的 fee 加總 —— 兩側形狀
+                #    刻意不同，見 core.schemas.StatementImportRow.payment_fee。
+                #    方向也相反：付款側守「總流出不變」，從 expense 搬進 bank_fee。
+                pay_allocs = [(x.payment_request_id, int(x.amount or 0))
+                              for x in (r.payments or [])]
+                if r.payment_fee and amt < 0:
+                    apply_payment_fee(ce, int(r.payment_fee))
                 session.add(ce)
                 made_entries += 1
                 stmt_lines.append((r, ce))
                 if allocs and amt > 0:
                     linked.append((ce, await resolve_invoice_allocs(
                         session, allocs, ent, by_id=inv_by_id)))
+                if pay_allocs and amt < 0:
+                    pay_linked.append((ce, await resolve_payment_allocs(
+                        session, pay_allocs, ent)))
 
         # 工作台可能已經自己匯過同一個月（它那條路只填左欄不寫帳）。那些列就是
         # 這幾筆交易，不該再建一份 —— 找同日同額且還沒配對的，直接拿來配。
@@ -867,13 +925,20 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                 matched_entry_id=ce.id,
                 created_by="銀行對帳單匯入"))
         # 分配表與發票收款狀態 —— 要等收支列有 id（flush）之後才做得了
-        if linked:
+        if linked or pay_linked:
             await session.flush()
+        if linked:
             # 整批一次寫 —— 逐筆呼叫時，每列都要「查舊連結、刪、flush、重算」，
             # 而這些收支列是剛建出來的，舊連結必定是空的
             await replace_invoice_allocs_bulk(session, linked)
+        for ce, rows_ in pay_linked:
+            # ⚠ 付款側目前只有單筆版（沒有 *_bulk）。一份對帳單的支出列通常個位數，
+            #    而收入列動輒幾十列 —— 發票那側是因為量級才做了 bulk。真的變慢再收，
+            #    先不為了對稱而多一支平行實作。
+            await replace_payment_allocs(session, ce, rows_)
         await session.commit()
     return {"ok": True, "entries": made_entries, "loan_payments": made_payments,
             "statement_lines": len(stmt_lines),
             "linked_invoices": sum(len(v) for _ce, v in linked),
+            "linked_payments": sum(len(v) for _ce, v in pay_linked),
             "skipped_duplicates": skipped_dup}

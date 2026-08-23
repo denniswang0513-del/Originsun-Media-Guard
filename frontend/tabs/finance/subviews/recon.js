@@ -913,7 +913,7 @@ function _stmtRow(r, i) {
                     style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:12px;padding:0 2px;">＋規則</button>
         </td>
         <td style="padding:4px 6px;">${_stmtProjCell(r, i)}</td>
-        <td style="padding:4px 6px;">${_stmtInvCell(r, i)}</td>
+        <td style="padding:4px 6px;">${_stmtAllocCell(r, i)}</td>
         <td style="padding:4px 6px;">${loanCell}</td>
         <td style="padding:4px 6px;">${status}</td>
     </tr>`;
@@ -1195,11 +1195,77 @@ const _pickHay = (...parts) => parts.filter(Boolean).join(' ').toLowerCase();
 // 一次最多畫幾列。清單都是「最可能的排前面」，看不到的那些靠搜尋。
 const _PICK_MAX = 100;
 
-/** 發票清單的欄寬 —— 表頭與資料列**共用同一組**，各寫一份一定會歪。
+/** 挑選清單的欄寬 —— 表頭與資料列**共用同一組**，各寫一份一定會歪。
  *  原本一列是兩行、欄位用「·」串起來，數字沒有對齊，一頁十幾張很難掃。 */
-const _INV_GRID = 'display:grid;grid-template-columns:'
-    + '20px 112px minmax(0,1fr) 84px 140px 92px 88px 88px 100px 88px;'
-    + 'align-items:center;gap:7px;';
+const _GRID = (cols) => 'display:grid;grid-template-columns:'
+    + cols + ';align-items:center;gap:7px;';
+const _INV_GRID = _GRID('20px 112px minmax(0,1fr) 84px 140px 92px 88px 88px 100px 88px');
+const _PAY_GRID = _GRID('20px minmax(0,1fr) 110px 84px 96px 96px 92px 92px 100px');
+
+/* ── 兩側：收入列掛發票、支出列掛請款單 ────────────────────────────────
+ *
+ * 一列的方向決定它能掛什麼（發票是收入側、請款單是支出側，互斥），所以兩者
+ * 共用同一格、同一個挑選視窗 —— 差異全部收在這張表裡。後端 _ALLOC_KINDS 與
+ * 收支明細的關聯面板都是同一個做法。
+ *
+ * 🔴 `perItemFee` 是兩側**唯一真正的結構差異**，不是還沒做完：
+ *    · 收款：匯出行對「每一張發票的匯款」各扣一次 → 逐列一格匯費
+ *    · 付款：跨行手續費對「這一筆匯出」收一次，涵蓋幾張請款單都一樣
+ *      → 整列一個（欄位在 r.payment_fee，同 CashPaymentLinksPayload.fee）
+ */
+const _SIDES = {
+    inv: {
+        noun: '發票', dir: 1, field: 'invoices', idKey: 'invoice_id',
+        src: 'invoices', idx: 'inv', grid: _INV_GRID, perItemFee: true,
+        empty: '＋ 選發票', hint: '挑發票（可複選：一筆匯款拆給多張）',
+        heads: [['發票號'], ['名稱'], ['日期'], ['公司'],
+            ['面額', 1], ['已收', 1], ['尚欠', 1]],
+        hay: v => [v.invoice_number, v.title, v.company_name],
+        code: v => v.invoice_number || '無號',
+        name: v => v.title || '',
+        cells: (v, hit) => [
+            [esc(v.invoice_number || '無號'), 'color:#ddd;'],
+            [esc(v.title || '') + hit, 'color:#eee;'],
+            [esc(v.date || ''), 'color:#9ca3af;'],
+            [esc(v.company_name || ''), 'color:#9ca3af;'],
+            ['$' + fmtNum(v.amount_total || 0), 'color:#ccc;text-align:right;'],
+            ['$' + fmtNum(v.collected || 0), 'color:#9ca3af;text-align:right;'],
+            ['$' + fmtNum(v.outstanding || 0), 'color:#fbbf24;text-align:right;'],
+        ],
+        searchHint: '搜尋發票號／抬頭／客戶…',
+        blurb: '一筆匯款可以拆給多張發票（合併匯款）。金額接近這筆入帳的排在前面。<br>'
+            + '面額減掉分配金額還有幾十塊時會自動填進「匯費」（被匯出行扣走的），'
+            + '發票照樣算收齊 —— 那格可以自己改。',
+    },
+    pay: {
+        noun: '請款單', dir: -1, field: 'payments', idKey: 'payment_request_id',
+        src: 'payment_requests', idx: 'pay', grid: _PAY_GRID, perItemFee: false,
+        empty: '＋ 選請款單', hint: '挑請款單（可複選：出納把一個人的多張併成一筆匯出）',
+        heads: [['摘要'], ['收款人'], ['日期'], ['類別'],
+            ['金額', 1], ['已付', 1], ['未付', 1]],
+        hay: v => [v.summary, v.payee_name, v.category],
+        code: v => v.summary || '無摘要',
+        name: v => v.payee_name || '',
+        cells: (v, hit) => [
+            [esc(v.summary || '') + hit, 'color:#eee;'],
+            [esc(v.payee_name || ''), 'color:#ddd;'],
+            [esc(v.date || ''), 'color:#9ca3af;'],
+            [esc(v.category || '') + (v.is_advance
+                ? ' <span style="color:#c084fc;font-size:10px;">預支</span>' : ''),
+                'color:#9ca3af;'],
+            ['$' + fmtNum(v.amount_total || 0), 'color:#ccc;text-align:right;'],
+            ['$' + fmtNum(v.paid || 0), 'color:#9ca3af;text-align:right;'],
+            ['$' + fmtNum(v.outstanding || 0), 'color:#fbbf24;text-align:right;'],
+        ],
+        searchHint: '搜尋摘要／收款人／類別…',
+        blurb: '一筆匯出可以拆給多張請款單（出納統一匯款）。金額接近這筆支出的排在前面。<br>'
+            + '跨行手續費是對<b>整筆匯出</b>收一次（不是每張請款單各一筆），'
+            + '所以匯費那格在下面只有一個。',
+    },
+};
+
+/** 這一列該用哪一側？金額的方向決定，沒有第二個判準。 */
+const _sideOf = (r) => (r.amount > 0 ? _SIDES.inv : r.amount < 0 ? _SIDES.pay : null);
 
 /** 分配比實收多幾塊錢時，算「匯費」而不是「還沒收齊」的門檻。
  *  🔴 正本是 core.finance_logic.FEE_TOLERANCE —— 前端沒辦法 import Python，
@@ -1301,10 +1367,11 @@ _fr.pickProjTake = (id) => { if (_pick) _pick.take(id); };
 let _stmtIdx = null;
 function _stmtIndex() {
     if (_stmtIdx && _stmtIdx.src === _stmtPreview) return _stmtIdx;
-    const inv = {}, proj = {};
+    const inv = {}, proj = {}, pay = {};
     ((_stmtPreview && _stmtPreview.invoices) || []).forEach(v => { inv[v.id] = v; });
     ((_stmtPreview && _stmtPreview.projects) || []).forEach(x => { proj[x.id] = x; });
-    _stmtIdx = { src: _stmtPreview, inv, proj };
+    ((_stmtPreview && _stmtPreview.payment_requests) || []).forEach(x => { pay[x.id] = x; });
+    _stmtIdx = { src: _stmtPreview, inv, proj, pay };
     return _stmtIdx;
 }
 
@@ -1320,67 +1387,80 @@ const _stmtRowPayload = (x) => ({
     category: x.category, loan_id: x.loan_id, period_no: x.period_no,
     project_id: x.project_id || null,
     invoices: x.invoices || [],
+    // 支出列的鏡像。同樣用 `|| []` —— 後端那兩欄是 List 不收 null（見上面那段
+    // 已經發生過一次的事故）。payment_fee 則相反：null ＝不認列，不能寫成 0
+    // （0 在關聯面板那條路是「把匯費清掉」的意思）。
+    payments: x.payments || [],
+    payment_fee: (x.payment_fee === 0 || x.payment_fee) ? x.payment_fee : null,
 });
 
-/** 發票格：只有收入列有意義（支出掛發票是代開付出去那側，語意不同）。 */
-function _stmtInvCell(r, i) {
-    if (!(r.amount > 0)) {
-        return '<span style="color:#4b5563;font-size:11px;">—</span>';
-    }
-    const allocs = r.invoices || [];
-    const byId = _stmtIndex().inv;
-    let label = '＋ 選發票';
-    let title = '挑發票（可複選：一筆匯款拆給多張）';
+/** 分配格：收入列掛發票、支出列掛請款單、零元列兩者皆非。
+ *  兩側共用同一格 —— 方向互斥，永遠不會兩個都要顯示。 */
+function _stmtAllocCell(r, i) {
+    const S = _sideOf(r);
+    if (!S) return '<span style="color:#4b5563;font-size:11px;">—</span>';
+    const allocs = r[S.field] || [];
+    const byId = _stmtIndex()[S.idx];
+    let label = S.empty;
+    let title = S.hint;
     if (allocs.length === 1) {
-        const v = byId[allocs[0].invoice_id];
-        label = esc((v && (v.title || v.invoice_number)) || '已選 1 張');
-        title = v ? `${v.invoice_number || '無號'} ${v.title || ''}` : '';
+        const v = byId[allocs[0][S.idKey]];
+        label = esc((v && (S.name(v) || S.code(v))) || `已選 1 張`);
+        title = v ? `${S.code(v)} ${S.name(v)}` : '';
     } else if (allocs.length > 1) {
         label = `${allocs.length} 張　$${fmtNum(allocs.reduce((t, a) => t + a.amount, 0))}`;
         title = allocs.map(a => {
-            const v = byId[a.invoice_id];
-            return `${(v && v.invoice_number) || '無號'} $${fmtNum(a.amount)}`;
+            const v = byId[a[S.idKey]];
+            return `${v ? S.code(v) : '？'} $${fmtNum(a.amount)}`;
         }).join('\n');
     }
     return `<button type="button" class="crm-btn crm-btn-secondary"
-            onclick="window._finRecon.stmtPickInv(${i})" title="${esc(title)}"
+            onclick="window._finRecon.stmtPickAlloc(${i})" title="${esc(title)}"
             style="width:100%;text-align:left;font-size:11px;padding:3px 6px;
                    ${allocs.length ? '' : 'color:#6b7280;'}overflow:hidden;
                    text-overflow:ellipsis;white-space:nowrap;">${label}</button>`;
 }
 
-_fr.stmtPickInv = (i) => {
+_fr.stmtPickAlloc = (i) => {
     const r = _stmtPreview && _stmtPreview.rows[i];
     if (!r) return;
+    const S = _sideOf(r);
+    if (!S) return;
     const target = Math.abs(r.amount);
-    const list = (_stmtPreview.invoices || []).slice();
+    const list = (_stmtPreview[S.src] || []).slice();
     // 金額接近的排前面 —— 對一筆入帳來說，「尚欠剛好等於這個數」的那張幾乎
     // 一定就是答案，讓它不用搜尋就在第一行。同差距時日期近的優先。
     list.sort((a, b) => (Math.abs((a.outstanding || 0) - target)
                        - Math.abs((b.outstanding || 0) - target))
                      || String(b.date || '').localeCompare(String(a.date || '')));
     // sel: id -> { amt, fee }
-    //   amt = 這張發票分到多少**現金**（加總後要對上這列入帳金額）
-    //   fee = 被匯出行扣掉、沒進帳戶的那幾十塊
+    //   amt = 這張分到多少**現金**（加總後要對上這列的金額）
+    //   fee = 被銀行扣掉、沒有真的進出帳戶的那幾十塊（只有收款側逐張有）
     // 存回去時發票拿到的是 amt + fee（那才是客戶實際付的），見 take()。
-    const sel = new Map((r.invoices || []).map(
-        a => [a.invoice_id, { amt: (a.amount || 0) - (a.fee || 0), fee: a.fee || 0 }]));
+    const sel = new Map((r[S.field] || []).map(
+        a => [a[S.idKey], { amt: (a.amount || 0) - (a.fee || 0), fee: a.fee || 0 }]));
 
     _pick = {
+        S,
         q: '',
         sel,
-        /** k='amt' ＝分到的現金（要對上這列入帳）、k='fee' ＝被匯出行扣掉的。 */
+        // 付款側的匯費是整列一個（跨行手續費對這筆匯出收一次）—— 收款側不用這個欄位
+        fee: S.perItemFee ? 0 : Math.max(0, Math.round(Number(r.payment_fee) || 0)),
+        /** k='amt' ＝分到的現金（要對上這列金額）、k='fee' ＝被銀行扣掉的。 */
         total(k = 'amt') { let t = 0; this.sel.forEach(a => { t += (a[k] || 0); }); return t; },
+        /** 這一列總共認列多少匯費 —— 兩側的形狀不同，只有這裡要知道差別。 */
+        feeTotal() { return this.S.perItemFee ? this.total('fee') : this.fee; },
         remain() { return Math.max(0, target - this.total()); },
         render() {
+            const S2 = this.S;
             const all = list.filter(v => !this.q
-                || _pickHay(v.invoice_number, v.title, v.company_name).includes(this.q));
+                || _pickHay(...S2.hay(v)).includes(this.q));
             if (!all.length) {
-                return '<div style="color:#6b7280;font-size:12px;padding:14px;">找不到符合的發票</div>';
+                return `<div style="color:#6b7280;font-size:12px;padding:14px;">找不到符合的${S2.noun}</div>`;
             }
-            // 只畫前 100 張。清單已經照「跟這筆入帳的金額差距」排好，第 100 名
-            // 之後不可能是答案；而每列是九格 grid，四百張要拼 ~280KB 的字串、
-            // 生幾千個節點 —— 打一個字就重來一次。
+            // 只畫前 100 張。清單已經照「跟這筆金額的差距」排好，第 100 名之後
+            // 不可能是答案；而每列是多格 grid，四百張要拼幾百 KB 的字串、生幾千個
+            // 節點 —— 打一個字就重來一次。
             const rows = all.slice(0, _PICK_MAX);
             const more = all.length - rows.length;
             const tail = more > 0
@@ -1389,49 +1469,56 @@ _fr.stmtPickInv = (i) => {
                 : '';
             return rows.map(v => {
                 const on = this.sel.has(v.id);
-                const hit = (v.outstanding || 0) === target;
-                const cell = (html, extra = '') =>
-                    `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${extra}">${html}</div>`;
-                return `<div style="${_INV_GRID}padding:5px 10px;border-bottom:1px solid #2a2a2a;
-                        cursor:pointer;${on ? 'background:#1e3a2a;' : ''}"
-                        onclick="window._finRecon.pickInvToggle('${esc(v.id)}', ${on ? 'false' : 'true'})">
-                    <input type="checkbox" ${on ? 'checked' : ''} style="pointer-events:none;">
-                    ${cell(esc(v.invoice_number || '無號'), 'color:#ddd;')}
-                    ${cell(esc(v.title || '') + (hit
-                        ? ' <span style="color:#86efac;font-size:10px;">◀ 金額吻合</span>' : ''),
-                        'color:#eee;')}
-                    ${cell(esc(v.date || ''), 'color:#9ca3af;')}
-                    ${cell(esc(v.company_name || ''), 'color:#9ca3af;')}
-                    ${cell('$' + fmtNum(v.amount_total || 0), 'color:#ccc;text-align:right;')}
-                    ${cell('$' + fmtNum(v.collected || 0), 'color:#9ca3af;text-align:right;')}
-                    ${cell('$' + fmtNum(v.outstanding || 0), 'color:#fbbf24;text-align:right;')}
-                    <input class="crm-input" type="number" ${on ? '' : 'disabled'}
-                        value="${on ? this.sel.get(v.id).amt : ''}"
-                        onclick="event.stopPropagation();"
-                        onchange="window._finRecon.pickInvAmt('${esc(v.id)}', this.value)"
-                        title="這張發票分到多少現金（加總要對上這列入帳金額）"
-                        style="text-align:right;font-size:12px;padding:3px 6px;min-width:0;">
+                const hit = (v.outstanding || 0) === target
+                    ? ' <span style="color:#86efac;font-size:10px;">◀ 金額吻合</span>' : '';
+                const cell = ([html, extra]) =>
+                    `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${extra || ''}">${html}</div>`;
+                const feeCell = S2.perItemFee ? `
                     <input class="crm-input" type="number" ${on ? '' : 'disabled'}
                         value="${on ? (this.sel.get(v.id).fee || '') : ''}"
                         onclick="event.stopPropagation();"
-                        onchange="window._finRecon.pickInvFee('${esc(v.id)}', this.value)"
+                        onchange="window._finRecon.pickFee('${esc(v.id)}', this.value)"
                         title="被匯出行扣掉、沒進帳戶的部分。面額減分配金額有餘額時自動帶入，可以改。"
                         placeholder="0"
                         style="text-align:right;font-size:12px;padding:3px 6px;min-width:0;
-                               ${on && this.sel.get(v.id).fee ? 'color:#fbbf24;' : ''}">
+                               ${on && this.sel.get(v.id).fee ? 'color:#fbbf24;' : ''}">` : '';
+                return `<div style="${S2.grid}padding:5px 10px;border-bottom:1px solid #2a2a2a;
+                        cursor:pointer;${on ? 'background:#1e3a2a;' : ''}"
+                        onclick="window._finRecon.pickToggle('${esc(v.id)}', ${on ? 'false' : 'true'})">
+                    <input type="checkbox" ${on ? 'checked' : ''} style="pointer-events:none;">
+                    ${S2.cells(v, hit).map(cell).join('')}
+                    <input class="crm-input" type="number" ${on ? '' : 'disabled'}
+                        value="${on ? this.sel.get(v.id).amt : ''}"
+                        onclick="event.stopPropagation();"
+                        onchange="window._finRecon.pickAmt('${esc(v.id)}', this.value)"
+                        title="這張分到多少現金（加總要對上這列的金額）"
+                        style="text-align:right;font-size:12px;padding:3px 6px;min-width:0;">
+                    ${feeCell}
                 </div>`;
             }).join('') + tail;
         },
         foot() {
+            const S2 = this.S;
             const t = this.total();
             const diff = target - t;
-            const fee = this.total('fee');
+            const fee = this.feeTotal();
+            // 付款側的匯費是一格輸入（整筆匯出收一次），收款側是逐列、這裡只顯示合計
+            const feeBox = S2.perItemFee ? '' : `
+                <span style="margin-left:10px;">匯費
+                <input class="crm-input" type="number" id="finbank-pick-fee"
+                       value="${this.fee || ''}" placeholder="0"
+                       onchange="window._finRecon.pickRowFee(this.value)"
+                       title="這筆匯出被扣的跨行手續費。總流出不變 —— 從支出搬進手續費欄。"
+                       style="width:82px;text-align:right;font-size:12px;padding:2px 6px;
+                              ${this.fee ? 'color:#fbbf24;' : ''}"></span>`;
             return `已分配 <b style="color:#eee;">$${fmtNum(t)}</b>
-                ／ 這列入帳 $${fmtNum(target)}
+                ／ 這列${S2.dir > 0 ? '入帳' : '支出'} $${fmtNum(target)}
                 ${diff === 0
                     ? '<span style="color:#86efac;">　剛好對上</span>'
                     : `<span style="color:#fbbf24;">　${diff > 0 ? '還差' : '超出'} $${fmtNum(Math.abs(diff))}</span>`}
-                ${fee ? `<span style="color:#fbbf24;">　＋匯費 $${fmtNum(fee)}（發票認列 $${fmtNum(t + fee)}）</span>` : ''}`;
+                ${fee && S2.perItemFee
+                    ? `<span style="color:#fbbf24;">　＋匯費 $${fmtNum(fee)}（${S2.noun}認列 $${fmtNum(t + fee)}）</span>`
+                    : ''}${feeBox}`;
         },
         redraw() {
             const el = document.getElementById('finbank-pick-list');
@@ -1439,46 +1526,50 @@ _fr.stmtPickInv = (i) => {
             const f = document.getElementById('finbank-pick-foot');
             if (f) f.innerHTML = this.foot();
         },
-        // 🔴 允許不等於入帳金額就關掉 —— 客戶少匯、多匯、匯款手續費都會讓它對不齊，
+        // 🔴 允許不等於這列金額就關掉 —— 少匯、多匯、手續費都會讓它對不齊，
         // 擋下來只會逼人亂填。差額用顏色提醒，寫進去的是使用者填的數。
         take() {
+            const S2 = this.S;
             const allocs = [];
-            // 🔴 送出去的 amount 是 amt + fee —— 那是**客戶實際付的**，也是發票
-            //    該被認列收到的金額（被扣掉的匯費不該讓發票變成沒收齊）。
-            //    真正進帳戶的現金是 amount − fee，後端據此把 deposit 補回去
-            //    並寫 bank_fee（recognize_receipt_fee，淨流入不變）。
-            // 這裡的 a 是 sel 的值（{amt, fee}），不是後端送的發票物件 ——
-            // 名字刻意不叫 v：這一段裡 v 一律指發票，混用會讓「前端讀了後端
-            // 沒送的欄位」那條測試看不出差別（tests/unit/test_stmt_picker.py）。
+            // 🔴 收款側送出去的 amount 是 amt + fee —— 那是**客戶實際付的**，也是
+            //    發票該被認列收到的金額（被扣掉的匯費不該讓發票變成沒收齊）。
+            //    付款側沒有逐張的 fee，amt 就是分配額。
+            // 這裡的 a 是 sel 的值（{amt, fee}），不是後端送的物件 —— 名字刻意
+            // 不叫 v：這一段裡 v 一律指候選物件，混用會讓「前端讀了後端沒送的
+            // 欄位」那條測試看不出差別（tests/unit/test_stmt_picker.py）。
             this.sel.forEach((a, id) => {
-                const amount = Math.round((a.amt || 0) + (a.fee || 0));
+                const amount = Math.round((a.amt || 0) + (S2.perItemFee ? (a.fee || 0) : 0));
                 if (amount > 0) {
-                    allocs.push({ invoice_id: id, amount, fee: Math.round(a.fee || 0) });
+                    const one = { amount };
+                    one[S2.idKey] = id;
+                    if (S2.perItemFee) one.fee = Math.round(a.fee || 0);
+                    allocs.push(one);
                 }
             });
-            // 只有 invoices 一種表示法 —— 主要發票（金額最大那張）由後端從
-            // 分配表推，前端不留一份推導值
-            r.invoices = allocs;
+            // 只有分配表一種表示法 —— 主要那張（金額最大）由後端從分配表推，
+            // 前端不留一份推導值
+            r[S2.field] = allocs;
+            if (!S2.perItemFee) {
+                // null ＝不認列（不動 bank_fee）。0 在關聯面板那條路是「清掉」，
+                // 這裡是新建的列、沒有舊值要清，所以沒掛任何單就送 null。
+                r.payment_fee = allocs.length && this.fee ? this.fee : null;
+            }
             _fr.pickClose();
             _stmtRefreshRow(i);
         },
     };
-    const th = (t, right) =>
+    const th = ([t, right]) =>
         `<div style="color:#9ca3af;font-size:11px;${right ? 'text-align:right;' : ''}">${t}</div>`;
-    _pickModal(`挑發票　—　${r.date}　入帳 $${fmtNum(target)}`, `
-        <input id="finbank-pick-search" class="crm-input" placeholder="搜尋發票號／抬頭／客戶…"
+    _pickModal(`挑${S.noun}　—　${r.date}　${S.dir > 0 ? '入帳' : '支出'} $${fmtNum(target)}`, `
+        <input id="finbank-pick-search" class="crm-input" placeholder="${S.searchHint}"
                oninput="window._finRecon.pickSearch(this.value)"
                style="width:100%;margin-bottom:8px;">
-        <div style="color:#6b7280;font-size:11px;margin-bottom:6px;">
-            一筆匯款可以拆給多張發票（合併匯款）。金額接近這筆入帳的排在前面。<br>
-            面額減掉分配金額還有幾十塊時會自動填進「匯費」（被匯出行扣走的），
-            發票照樣算收齊 —— 那格可以自己改。
-        </div>
+        <div style="color:#6b7280;font-size:11px;margin-bottom:6px;">${S.blurb}</div>
         <div style="border:1px solid #2e2e2e;border-radius:6px;overflow:hidden;">
-            <div style="${_INV_GRID}padding:6px 10px;background:#242424;
+            <div style="${S.grid}padding:6px 10px;background:#242424;
                         border-bottom:1px solid #2e2e2e;">
-                <div></div>${th('發票號')}${th('名稱')}${th('日期')}${th('公司')}
-                ${th('面額', 1)}${th('已收', 1)}${th('尚欠', 1)}${th('分配金額', 1)}${th('匯費', 1)}
+                <div></div>${S.heads.map(th).join('')}${th(['分配金額', 1])}${
+                    S.perItemFee ? th(['匯費', 1]) : ''}
             </div>
             <div style="max-height:46vh;overflow:auto;"
                  id="finbank-pick-list">${_pick.render()}</div>
@@ -1489,21 +1580,28 @@ _fr.stmtPickInv = (i) => {
                 <button class="crm-btn crm-btn-secondary"
                         onclick="window._finRecon.pickClose()">取消</button>
                 <button class="crm-btn crm-btn-primary"
-                        onclick="window._finRecon.pickInvTake()">確定</button>
+                        onclick="window._finRecon.pickTake()">確定</button>
             </div>
-        </div>`, { width: 1180 });
+        </div>`, { width: S.perItemFee ? 1180 : 1080 });
 };
 
-const _pickInv = (id) => (_stmtPreview.invoices || []).find(x => x.id === id) || {};
+/** 目前這一側的候選物件（挑選視窗開著時才有意義）。 */
+const _pickCand = (id) => {
+    const S = _pick && _pick.S;
+    return (S && (_stmtPreview[S.src] || []).find(x => x.id === id)) || {};
+};
 
-_fr.pickInvToggle = (id, on) => {
+_fr.pickToggle = (id, on) => {
     if (!_pick || !_pick.sel) return;
     if (on) {
-        const v = _pickInv(id);
+        const v = _pickCand(id);
         // 預設帶「這張還欠多少」與「這列還沒分配掉多少」的較小者 ——
         // 兩個都是使用者本來就要算的數，先算好比留空白省事。
         const amt = Math.min(v.outstanding || 0, _pick.remain()) || (v.outstanding || 0);
-        _pick.sel.set(id, { amt, fee: _autoFee(v.outstanding, amt) });
+        _pick.sel.set(id, {
+            amt,
+            fee: _pick.S.perItemFee ? _autoFee(v.outstanding, amt) : 0,
+        });
     } else {
         _pick.sel.delete(id);
     }
@@ -1519,17 +1617,29 @@ const _setSel = (id, patch) => {
     _pick.redraw();
 };
 
-_fr.pickInvAmt = (id, v) => {
+_fr.pickAmt = (id, v) => {
     const amt = Math.max(0, Math.round(Number(v) || 0));
     // 改分配金額 -> 匯費重算。手動填的匯費要留住的話別再動這格
     //（owner 2026-08-23：「自動幫我填寫匯費，格子我可以修改調整」）。
-    _setSel(id, { amt, fee: _autoFee(_pickInv(id).outstanding, amt) });
+    // 付款側沒有逐張匯費，只更新金額。
+    _setSel(id, _pick && _pick.S.perItemFee
+        ? { amt, fee: _autoFee(_pickCand(id).outstanding, amt) }
+        : { amt });
 };
 
-_fr.pickInvFee = (id, v) =>
+_fr.pickFee = (id, v) =>
     _setSel(id, { fee: Math.max(0, Math.round(Number(v) || 0)) });
 
-_fr.pickInvTake = () => { if (_pick) _pick.take(); };
+/** 付款側：整列一個的匯費（跨行手續費）。 */
+_fr.pickRowFee = (v) => {
+    if (!_pick) return;
+    _pick.fee = Math.max(0, Math.round(Number(v) || 0));
+    const f = document.getElementById('finbank-pick-foot');
+    // 只重畫 foot —— 重畫整個視窗會讓正在打字的那格失焦
+    if (f) f.innerHTML = _pick.foot();
+};
+
+_fr.pickTake = () => { if (_pick) _pick.take(); };
 
 /** 整張預覽表。改一列請用 _stmtRefreshRow，不要整表重畫（捲軸會跳回頂端）。
  *  `#finbank-stmt-scroll` 那個 id 是捲軸測試用來量位置的。 */
@@ -1551,7 +1661,7 @@ function _stmtRenderPreview() {
                 </colgroup>
                 <thead style="position:sticky;top:0;background:#1b1b1b;"><tr>
                     ${th('<input type="checkbox" id="finbank-stmt-all">')}${th('日期')}${th('摘要')}
-                    ${th('金額', 'right')}${th('分類')}${th('專案')}${th('發票')}${th('貸款期別')}${th('')}
+                    ${th('金額', 'right')}${th('分類')}${th('專案')}${th('發票／請款單')}${th('貸款期別')}${th('')}
                 </tr></thead>
                 <tbody id="finbank-stmt-tbody">${(d.rows || []).map(_stmtRow).join('')}</tbody>
             </table>

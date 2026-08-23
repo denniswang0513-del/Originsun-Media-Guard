@@ -91,10 +91,13 @@ with sync_playwright() as p:
     check("rule-dir" in pg.content(), "新增表單有方向下拉")
 
     print("")
-    print("[4b] 挑發票視窗的匯費欄有掛上（owner 2026-08-23）")
+    print("[4b] 挑發票／請款單視窗的 handler 有掛上（owner 2026-08-23）")
     # 開不到那個視窗（要先傳一份對帳單），但 handler 掛不掛得上是整支模組有沒有
     # 順利跑完的證據 —— 語法錯 / 名字打錯的話這裡就是 undefined。
-    for fn in ("pickInvAmt", "pickInvFee", "pickInvToggle", "pickInvTake"):
+    # 收付兩側共用同一組（pickAmt/pickFee/pickToggle/pickTake），外加付款側
+    # 整列一個的匯費 pickRowFee。
+    for fn in ("pickAmt", "pickFee", "pickToggle", "pickTake",
+               "pickRowFee", "stmtPickAlloc"):
         check(pg.evaluate(f"() => typeof (window._finRecon || {{}}).{fn}") == "function",
               f"window._finRecon.{fn} 掛上了")
 

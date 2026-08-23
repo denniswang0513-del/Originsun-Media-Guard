@@ -1248,6 +1248,17 @@ class CashInvoiceLink(BaseModel):
     fee: int = 0
 
 
+class CashPaymentLinkItem(BaseModel):
+    """對映 CashInvoiceLink（收款側的雙生子）—— 兩者要一起改。
+
+    沒有 `fee`：付款側的匯費是**整筆匯出**收一次（跨行手續費），不是逐張請款單
+    被扣，所以它掛在 payload 層（CashPaymentLinksPayload.fee /
+    StatementImportRow.payment_fee）而不是這裡。
+    """
+    payment_request_id: str
+    amount: int
+
+
 class StatementImportRow(BaseModel):
     """對帳單匯入 apply 的一列 —— 前端把 preview 回來的列原樣送回（可改分類/
     可取消勾選）。金額帶號：正=存入、負=支出。"""
@@ -1266,6 +1277,15 @@ class StatementImportRow(BaseModel):
     # 只有這一種表示法 —— 「主要發票」是從分配表推出來的（金額最大那張），
     # 推導規則只放在 replace_invoice_allocs，前端不留第二份。
     invoices: List[CashInvoiceLink] = []
+    # 支出列的鏡像：一筆匯出常常是**一個人的好幾張請款單併著發**（出納統一匯款）。
+    # 🔴 只有支出列有意義，由寫入端再驗一次（同 invoices 只認收入列）。
+    payments: List[CashPaymentLinkItem] = []
+    # 🔴 匯費在兩側的形狀**刻意不同**，不是漏寫：
+    #   · 收款側逐張（CashInvoiceLink.fee）—— 匯出行是對每張發票的匯款各扣一次
+    #   · 付款側整列一個 —— 跨行手續費是對「這一筆匯出」收的，涵蓋幾張請款單
+    #     都一樣。所以它跟 CashPaymentLinksPayload.fee 同形狀，不另立第二種表示法。
+    # None ＝ 不認列（不動 bank_fee）。
+    payment_fee: Optional[int] = None
 
 
 class StatementDraftRow(StatementImportRow):
@@ -1318,12 +1338,6 @@ class BankImportRulePayload(BaseModel):
 class CashInvoiceLinksPayload(BaseModel):
     """整組取代某筆收款的發票分配 —— 送空 items 就是全部解除。"""
     items: List[CashInvoiceLink] = []
-
-
-class CashPaymentLinkItem(BaseModel):
-    """對映 CashInvoiceLink（收款側的雙生子）—— 兩者要一起改。"""
-    payment_request_id: str
-    amount: int
 
 
 class CashPaymentLinksPayload(BaseModel):

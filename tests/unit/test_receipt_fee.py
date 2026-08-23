@@ -92,10 +92,14 @@ def test_autofill_only_inside_the_tolerance():
 
 
 def test_the_invoice_alloc_carries_gross_plus_fee():
-    """送出去的 amount 必須是 amt + fee，否則發票永遠差那幾十塊收不齊。"""
+    """送出去的 amount 必須是 amt + fee，否則發票永遠差那幾十塊收不齊。
+
+    ⚠ 只有**收款側**這樣（perItemFee）—— 請款單那側沒有逐張的匯費，加上去會
+    讓分配額比實際多（見 test_stmt_picker 的那兩條）。"""
     js = js_code_only(repo_src(JS))
-    assert "const amount = Math.round((a.amt || 0) + (a.fee || 0));" in js
-    assert "fee: Math.round(a.fee || 0)" in js, "匯費沒有一起送回後端"
+    assert "(a.amt || 0) + (S2.perItemFee ? (a.fee || 0) : 0)" in js, \
+        "分配金額不再是「分到的現金＋被扣的匯費」"
+    assert "one.fee = Math.round(a.fee || 0)" in js, "匯費沒有一起送回後端"
 
 
 def test_the_write_path_grosses_up_the_deposit():
@@ -177,17 +181,34 @@ def test_clearing_the_fee_puts_the_amount_back(apply_fee, kw):
 
 
 def test_the_grid_header_and_rows_all_have_the_same_number_of_columns():
-    """🔴 多一欄就要改三個地方：grid-template-columns、表頭、資料列。
+    """🔴 多一欄就要改三個地方：grid-template-columns、表頭（heads）、資料列（cells）。
     漏掉任一個，整張表會從那一欄開始錯位 —— 而且不會有任何錯誤訊息，
-    只是「已收」的數字跑到「尚欠」底下。"""
+    只是「已收」的數字跑到「尚欠」底下。
+
+    兩側各有自己的欄數（付款側少一欄匯費，它的匯費是整列一個），所以逐側算 ——
+    表頭與資料列都是從 `_SIDES` 那張表推出來的，這條就是在釘那張表自己一致。
+    """
     import re
     src = repo_src(JS)
-    grid = re.search(r"grid-template-columns:'\s*\+\s*'([^']+);", src).group(1)
-    n_cols = len(grid.split())
-    head = re.search(r"<div></div>\$\{th\('發票號'\).*?\n.*?匯費', 1\)\}", src, re.S).group(0)
-    n_head = 1 + head.count("${th(")
-    i = src.index("<input type=\"checkbox\" ${on ? 'checked' : ''}")
-    row = src[i:src.index("</div>`;", i)]
-    n_row = 1 + row.count("${cell(") + row.count('<input class="crm-input"')
-    assert n_cols == n_head == n_row == 10, \
-        f"欄數對不上：grid {n_cols} / 表頭 {n_head} / 資料列 {n_row}"
+    sides = src[src.index('const _SIDES = {'):src.index('const _sideOf =')]
+
+    for key, grid_name in (('inv', '_INV_GRID'), ('pay', '_PAY_GRID')):
+        i = sides.index(f'    {key}: {{')
+        nxt = sides.find('\n    pay: {', i + 1) if key == 'inv' else -1
+        block = sides[i:nxt if nxt > 0 else len(sides)]
+
+        cols = re.search(rf"{grid_name} = _GRID\('([^']+)'\)", src).group(1)
+        n_cols = len(cols.split())
+        # 收到外層陣列的 `]],`（heads 是跨行寫的，抓到第一個 `],` 只會數到一半）
+        n_heads = len(re.findall(r"\['[^']+'", re.search(
+            r"heads: \[(.*?)\]\],\n", block, re.S).group(1)))
+        # cells 陣列裡每一項自成一行、以 12 個空白 + '[' 開頭
+        n_cells = len(re.findall(r"\n            \[", re.search(
+            r"cells: \(v, hit\) => \[(.*?)\n        \],", block, re.S).group(1)))
+        fee_col = 1 if 'perItemFee: true' in block else 0
+        # 勾選框 + 各欄 + 分配金額 + （收款側才有的）匯費
+        want = 1 + n_heads + 1 + fee_col
+        assert n_heads == n_cells, \
+            f"_SIDES.{key}：表頭 {n_heads} 欄、資料列 {n_cells} 欄 —— 會整排錯位"
+        assert n_cols == want, \
+            f"_SIDES.{key}：grid {n_cols} 欄，但表頭+輸入格共 {want} 欄"
