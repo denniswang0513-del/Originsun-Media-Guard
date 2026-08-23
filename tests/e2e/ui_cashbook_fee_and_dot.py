@@ -82,12 +82,19 @@ def in_thread(coro_fn, *a):
 
 
 async def read_entry(eid):
-    from db.models import CrmCashEntry
+    """收支列 + 這筆分配給發票多少（發票有沒有真的收齊才是重點）。"""
+    from sqlalchemy import select
+
+    from db.models import CrmCashEntry, CrmCashInvoiceLink
     from db.session import get_session_factory, init_db
     await init_db()
     async with get_session_factory()() as s:
         e = await s.get(CrmCashEntry, eid)
-        return {"deposit": e.deposit, "bank_fee": e.bank_fee} if e else None
+        links = [(int(x.amount or 0), int(x.fee or 0)) for x in (await s.execute(
+            select(CrmCashInvoiceLink).where(
+                CrmCashInvoiceLink.cash_entry_id == eid))).scalars().all()]
+        return {"deposit": e.deposit, "bank_fee": e.bank_fee,
+                "links": links} if e else None
 
 
 try:
@@ -145,21 +152,33 @@ try:
         check("匯出行" in tip, "那格說得出它是什麼", tip[:40])
 
         print("")
-        print("[3] 填 30 存下去 → deposit 補成 149,900、淨流不變")
-        pg.evaluate("""() => {
-            const a = document.querySelector('#cash-alloc-box [data-alloc-i]');
-            a.value = '149900'; a.dispatchEvent(new Event('change'));
+        print("[3] 🔴 掛上就自動帶好：分配 149,900、匯費 30（都不用打字）")
+        # 金額格 ＝ **這張發票被認列收到多少**（客戶實際付的，含被扣的匯費）。
+        # 匯費在掛上的當下預帶一次：「還沒收的 149,900」比「這筆還剩多少可分的
+        # 149,870」多 30 → 那 30 就是被匯出行扣走的。
+        #
+        # 🔴 owner 2026-08-24 踩到的是另一版：只把 30 填進匯費、分配卻停在
+        #    149,870 → deposit 被補成 149,900、分配沒跟上，那 30 元繞一圈變成
+        #    「還有沒掛上的發票」，發票也還是尚欠 30。
+        amt = pg.evaluate(
+            "() => document.querySelector('#cash-alloc-box [data-alloc-i]')?.value || ''")
+        fee = pg.evaluate(
+            "() => document.querySelector('#cash-alloc-box [data-alloc-fee]')?.value || ''")
+        check(amt == "149900", "分配預帶成 149,900（發票該被認列的全額）", repr(amt))
+        check(fee == "30", "匯費自動帶了 30（沒有叫人自己算）", repr(fee))
+        line = pg.evaluate("""() => {
+            const b = document.getElementById('cash-alloc-box');
+            return [...b.querySelectorAll('div')]
+                .map(d => d.innerText).find(t => t.startsWith('分配 $')) || '';
         }""")
-        pg.wait_for_timeout(600)
-        pg.evaluate("""() => {
-            const f = document.querySelector('#cash-alloc-box [data-alloc-fee]');
-            f.value = '30'; f.dispatchEvent(new Event('change'));
-        }""")
-        pg.wait_for_timeout(600)
+        print("    狀態列:", line[:90])
+        check("被匯出行扣走" in line, "狀態列講得出那 30 元去哪了", line[:60])
         pg.click("#cash-alloc-save")
         pg.wait_for_timeout(3500)
         e1 = in_thread(read_entry, ids["got"])
         print("    entry =", e1)
+        check(e1["links"] == [(149900, 30)],
+              "🔴 發票被認列收到 149,900（含被扣的 30）", str(e1["links"]))
         check(e1["deposit"] == 149900, "deposit 補成客戶實付的 149,900", str(e1["deposit"]))
         check(e1["bank_fee"] == 30, "匯費掛上了", str(e1["bank_fee"]))
         check((e1["deposit"] or 0) - (e1["bank_fee"] or 0) == 149870,
@@ -174,12 +193,18 @@ try:
         shown = pg.evaluate(
             "() => document.querySelector('#cash-alloc-box [data-alloc-fee]')?.value || ''")
         check(shown == "30", "重開時那格還是 30", repr(shown))
+        amt2 = pg.evaluate(
+            "() => document.querySelector('#cash-alloc-box [data-alloc-i]')?.value || ''")
+        check(amt2 == "149900", "分配金額也畫得回來", repr(amt2))
         pg.click("#cash-alloc-save")
         pg.wait_for_timeout(3500)
         e2 = in_thread(read_entry, ids["got"])
         print("    entry =", e2)
         check(e2["deposit"] == 149900 and e2["bank_fee"] == 30,
               "原樣重存一次，匯費沒被抹掉", str(e2))
+        check(e2["links"] == [(149900, 30)],
+              "🔴 重存也沒有把總額疊成 149,930（現金/總額換算不能重複套）",
+              str(e2["links"]))
         check(not errs, "整輪都沒有 JS 例外", errs[:3])
         b.close()
 

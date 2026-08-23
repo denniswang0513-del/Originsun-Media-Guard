@@ -798,7 +798,10 @@ const _CASH_ALLOC = { entryId: null, items: [], check: null };
  *  正本在後端（_alloc_verdict），前端不重寫一份。 */
 function _allocStatusLine(check, items) {
     if (!check) return '';
+    // 分配＝**總額**加總（跟後端 check.allocated 同一把尺 —— 用現金比的話，
+    // 有匯費時畫面永遠顯示「少 30」而後端說相符，兩邊各講各的）
     const live = items.reduce((n, x) => n + (Number(x.amount) || 0), 0);
+    const feeSum = items.reduce((n, x) => n + (Number(x.fee) || 0), 0);
     const dirty = live !== check.allocated;
     const color = dirty ? '#fbbf24' : _allocColor(check.state);
     const tail = dirty ? '尚未儲存 —— 存檔後才會重新檢查' : _esc(check.message);
@@ -807,13 +810,28 @@ function _allocStatusLine(check, items) {
     // 那個三元式存在的唯一理由是後端兩支 verdict 的回傳形狀漂開了）。
     const actual = check.actual_label
         ? ` / ${check.actual_label} $${_fmtNum(check.actual)}` : '';
+    // 有匯費就講清楚那幾十塊去哪了 —— 不然使用者只看到「分配 149,900 /
+    // 實收 149,900」，會以為帳戶真的多收了 30
+    const feeNote = feeSum
+        ? `<span style="color:#fbbf24;">（其中 $${_fmtNum(feeSum)} 被匯出行扣走，`
+          + `實際入帳 $${_fmtNum(live - feeSum)}）</span>` : '';
     return `<div style="margin-top:8px;font-size:12px;color:${color};">`
-        + `分配 $${_fmtNum(live)}${actual} —— ${tail}</div>`;
+        + `分配 $${_fmtNum(live)}${feeNote}${actual} —— ${tail}</div>`;
 }
 
 function _allocColor(state) {
     return { ok: '#86efac', fee: '#fbbf24', over: '#fca5a5',
              under: '#fca5a5', empty: '#888' }[state] || '#888';
+}
+
+/** 這筆收款還沒被分配掉的入帳金額。掛上一張發票時拿它預帶匯費：
+ *  「還沒收的部分」比「還剩多少錢可分」多幾十塊 → 那幾十塊就是被匯出行扣走的。
+ *  check.actual 是後端送來的實收（收付兩側同一個欄位，見 _allocStatusLine）。 */
+function _allocRemainCash() {
+    const st = _CASH_ALLOC;
+    const actual = (st && st.check && st.check.actual) || 0;
+    const used = ((st && st.items) || []).reduce((n, x) => n + (Number(x.amount) || 0), 0);
+    return Math.max(0, actual - used);
 }
 
 // 兩側（收款掛發票／匯款掛請款單）是**同一個面板**，只是換掉九樣東西。
@@ -832,8 +850,6 @@ const _ALLOC_SIDES = {
         //    （客戶匯三張的錢，可能只有其中一張被扣了 30）。付款側相反 ——
         //    跨行手續費是對「那一筆匯出」收一次，所以那邊是整筆一顆按鈕。
         perItemFee: true,
-        // 這張還欠多少 —— 自動帶匯費要用它（發票面額 − 已收）
-        outstandingOf: it => it.outstanding || 0,
         placeholder: '輸入發票號碼／抬頭／專案名稱找發票…',
         emptyText: '還沒掛任何發票',
         missingText: '（發票已刪除）',
@@ -856,8 +872,13 @@ const _ALLOC_SIDES = {
             + (i.company_name ? `<span style="color:#666;"> · ${_esc(i.company_name)}</span>` : ''),
         // 預帶「還沒收的部分」而不是面額 —— 分期收款時面額是錯的（發票 100,000
         // 已收 60,000，第三期預帶 100,000 只會讓人重打一次）。沒收過時兩者相同。
+        //
+        // 匯費也預帶一次（只在掛上的當下算，之後不再自己動）：這筆收款還沒分配掉
+        // 的入帳金額比「還沒收的部分」少幾十塊時，那就是被匯出行扣走的
+        // （owner 2026-08-23：「自動幫我填寫匯費，格子我可以修改調整」）。
         toItem: i => ({
             invoice_id: i.id, amount: _outstanding(i),
+            fee: autoFee(_outstanding(i), _allocRemainCash()),
             invoice_number: i.invoice_number || '', title: i.title || '',
             amount_total: i.amount_total || 0,
             payment_status: i.payment_status || '', missing: false,
@@ -960,7 +981,7 @@ function _renderAllocs(side) {
                 <div style="color:#888;font-size:11px;">${c.itemMeta(it)}</div>
             </div>
             <input type="number" value="${it.amount}" data-alloc-i="${i}"
-                   title="分配到這張的現金（加總要對上這筆的實收）"
+                   title="這張發票被認列收到多少（含被匯出行扣掉的那幾十塊）"
                    style="width:96px;text-align:right;background:#1a1a1a;border:1px solid #333;
                           color:#eee;border-radius:4px;padding:3px 6px;font-size:12px;">
             ${c.perItemFee ? `<input type="number" value="${it.fee || ''}" data-alloc-fee="${i}"
@@ -997,8 +1018,9 @@ function _renderAllocs(side) {
         inp.addEventListener('change', () => {
             const it = c.state().items[Number(inp.dataset.allocI)];
             it.amount = Number(inp.value) || 0;
-            // 改分配金額 → 匯費重算（手動填好的要留住就別再動這格）
-            if (c.perItemFee) it.fee = autoFee(c.outstandingOf(it), it.amount);
+            // 🔴 **不**從金額格反推匯費。試過「現金 ↔ 總額」互相換算，結果是
+            //    改一格另一格跟著動、存一次就把總額疊成 149,930。匯費是使用者
+            //    知道、系統猜不準的數字（掛上時預帶一次就夠，見 toItem）。
             _renderAllocs(side);
         });
     });
@@ -1059,9 +1081,14 @@ async function _allocSave(side, btn, fee) {
     btn.textContent = '儲存中…';
     try {
         const body = {
+            // 🔴 amount ＝**發票被認列收到多少**（客戶實際付的，含被扣的匯費），
+            //    不是進到帳戶的現金。真正入帳的是 amount − fee，後端據此把
+            //    deposit 補上去並寫 bank_fee（recognize_receipt_fee，淨流入不變）。
+            //    2026-08-24 owner 踩到的就是這裡：只把 30 填進匯費、amount 還停在
+            //    149,870 → deposit 被補成 149,900、分配卻沒跟上，那 30 元繞一圈
+            //    變成「還有沒掛上的發票」，發票也還是尚欠 30。
             items: st.items.map(x => ({
                 [c.idKey]: x[c.idKey], amount: Number(x.amount) || 0,
-                // 收款側逐張帶 fee；後端加總後補回 deposit（淨流入不變）
                 ...(c.perItemFee ? { fee: Math.max(0, Math.round(Number(x.fee) || 0)) } : {}),
             })),
         };
