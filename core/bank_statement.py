@@ -145,6 +145,61 @@ def _classify(text: str, rules=None, signed=None):
 _TOTAL_LABEL = re.compile(r"[^\s]*?(?:總筆數|總金額|金額總計)")
 
 
+def normalize_delimited(text: str) -> str:
+    """逗號分隔的匯出 → 空白分隔。不像 CSV 就原樣回傳。
+
+    🔴 為什麼非做不可（2026-08-24 owner 上傳一銀網銀的 .txt，回「找不到任何
+       交易列」）：`_AMOUNT` 兩側有 `(?<![\\d.,])` / `(?![\\d,])` 看守，那是為了
+       不把千分位逗號切壞。但 CSV 裡金額**前後都是逗號**（`,2000.00,`），
+       兩個看守同時失敗 → 整行一個金額都抓不到 → 那一行不算交易列。
+
+    走 csv 模組而不是 `replace(",", " ")`：帶千分位的金額在 CSV 裡是被引號包起來
+    的（`"35,000.00"`），直接取代會把它切成兩半，一筆三萬五變成三十五。
+    """
+    lines = [ln for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return text
+    # 逗號夠多的行佔多數才算 CSV —— 備註裡帶一兩個逗號的空白分隔對帳單不該被動
+    csvish = sum(1 for ln in lines if ln.count(",") >= 4)
+    if csvish < max(2, len(lines) * 0.6):
+        return text
+    import csv as _csv
+    out = []
+    for row in _csv.reader((text or "").splitlines()):
+        # 欄位間用兩個空白 —— 空欄位在這裡就自然消失，跟合庫「空欄直接不見」
+        # 的版面一致，逐行解析那套規則照樣適用
+        out.append("  ".join(f.strip() for f in row if f.strip()))
+    return "\n".join(out)
+
+
+#: 對帳單表頭上的帳號。合庫印「帳號：0070717559515」，有些銀行會加分隔符
+#: 或空白。一銀的 CSV 匯出**完全沒有**這一行 —— 抓不到就是抓不到，不硬猜。
+_ACCOUNT_NO = re.compile(r"帳\s*號\s*[:：]?\s*([0-9][0-9\-\s]{6,})")
+
+
+def extract_account_no(text: str) -> str | None:
+    """對帳單表頭的帳號 → 只留數字；抓不到回 None。
+
+    用途是**擋掉匯錯帳戶**：owner 2026-08-24 拿合庫的對帳單、在下拉選了第一銀行，
+    幸好那份解析失敗才沒寫進去。匯錯帳戶比解析失敗嚴重得多 —— 解析失敗你會看到，
+    匯錯帳戶會安靜地讓兩個帳戶的餘額同時錯掉。
+
+    只留數字是因為各家印法不同（有的加 `-`、有的加空白），但數字序列是一樣的。
+    """
+    m = _ACCOUNT_NO.search(text or "")
+    if not m:
+        return None
+    digits = re.sub(r"\D", "", m.group(1))
+    # 太短的多半是誤抓（分行代號、票號），寧可回 None 也不要擋錯人
+    return digits if len(digits) >= 8 else None
+
+
+def same_account_no(a, b) -> bool:
+    """兩個帳號是不是同一個。只比數字，兩邊都有值才比得了。"""
+    da, db = re.sub(r"\D", "", a or ""), re.sub(r"\D", "", b or "")
+    return bool(da) and bool(db) and da == db
+
+
 def _find_totals(text: str):
     """抓銀行自己印的總計。回 (out_total, in_total)，抓不到回 (None, None)。
 
@@ -224,6 +279,8 @@ def parse_statement(text: str, opening_balance: int = None,
     opening_balance：知道對帳單期初餘額就傳，第一列的方向會由它決定（最準）。
     rules：分類規則 [(關鍵字, category, 方向)]，不給就用內建 KEYWORD_RULES。
     """
+    # CSV 匯出先轉成空白分隔 —— 否則整份一列都認不出來（見 normalize_delimited）
+    text = normalize_delimited(text)
     res = ParseResult()
     parsed = []
     for i, raw in enumerate(text.splitlines(), start=1):

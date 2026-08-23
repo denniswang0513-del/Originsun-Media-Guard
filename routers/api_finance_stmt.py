@@ -407,8 +407,44 @@ async def preview_bank_statement(
     factory = _factory_or_503()
     async with factory() as session:
         acct, ent = await _acct_and_entity(session, request, acct_id)
-
+        await _assert_statement_belongs_to(session, acct, ent, text)
         return await _build_statement_preview(session, acct, ent, text)
+
+
+async def _assert_statement_belongs_to(session, acct, ent, text) -> None:
+    """對帳單表頭的帳號 vs 使用者選的帳戶 —— 對不上就擋，並說出它其實是誰的。
+
+    🔴 owner 2026-08-24 拿**合庫**的對帳單、在下拉選了第一銀行。那次是解析失敗
+       才沒寫進去 —— 純屬僥倖。匯錯帳戶比解析失敗嚴重得多：解析失敗你看得到，
+       匯錯帳戶會安靜地讓兩個帳戶的餘額同時錯掉，而且每一列看起來都很正常。
+
+    只在**兩邊都有帳號**時才擋。抓不到（一銀的 CSV 匯出就沒印帳號）或帳戶沒登記
+    帳號 → 放行，不能因為驗不了就擋人做事。
+    """
+    from sqlalchemy import select
+
+    from core.bank_statement import extract_account_no, same_account_no
+    from db.models import BankAccount
+    found = extract_account_no(text)
+    if not found:
+        return                                  # 這份沒印帳號，驗不了
+    if same_account_no(found, acct.account_no):
+        return
+    if not (acct.account_no or "").strip():
+        return                                  # 這個帳戶沒登記帳號，驗不了
+    # 對不上 —— 看看它其實是哪個帳戶的，講出來比只說「不對」有用得多
+    others = (await session.execute(
+        select(BankAccount).where(BankAccount.entity == ent))).scalars().all()
+    owner_acct = next((a for a in others
+                       if same_account_no(found, a.account_no)), None)
+    whose = (f"是「{owner_acct.name}」的" if owner_acct
+             else "不屬於系統裡任何一個帳戶")
+    raise HTTPException(
+        status_code=422,
+        detail=(f"這份對帳單的帳號是 {found}，{whose}；"
+                f"但你選的是「{acct.name}」（登記帳號 {acct.account_no}）。"
+                "選錯帳戶會讓兩邊的餘額同時錯掉，所以先擋下來 —— "
+                "請改選對的帳戶再匯一次。"))
 
 
 async def _build_statement_preview(session, acct, ent, text):
