@@ -715,6 +715,28 @@ def recognize_bank_fee(expense, bank_fee, fee) -> tuple:
     return total_out - fee, fee
 
 
+def recognize_receipt_fee(deposit, bank_fee, fee) -> tuple:
+    """收款側認列匯費：把 fee **補回** deposit，回 (新 deposit, 新 bank_fee)。
+
+    🔴 不變量是「淨流入不變」（deposit − bank_fee）。銀行實際入帳多少，不會因為
+    我們認不認列匯費而改變 —— 客戶匯 149,900、銀行只入 149,870，那 30 元是匯出行
+    扣走的：發票要算收齊（149,870 + 30），帳戶只能增加 149,870。
+
+    所以要把 deposit 補成**客戶實際付的金額**，再把 fee 掛上 bank_fee；
+    只寫 bank_fee 不補 deposit 的話（cash_entry_flow = deposit − expense
+    − bank_fee − claim）帳戶餘額會少 30，而對帳工作台比的就是淨流
+    （/statement-lines/{id}/match），那一列從此永遠配不上。
+
+    這是 recognize_bank_fee 的鏡像：付款側守「總流出不變」（從 expense 搬出來），
+    收款側守「淨流入不變」（往 deposit 補回去）。兩邊都用淨額當基準 → 冪等。
+    """
+    net_in = int(deposit or 0) - int(bank_fee or 0)
+    fee = int(fee or 0)
+    if fee < 0:
+        raise ValueError("匯費不能是負的")
+    return net_in + fee, fee
+
+
 # 兩側只差三件事：容差站哪一邊、名詞、實際金額怎麼稱呼。
 # 🔴 階梯（empty / ok / fee / over / under）刻意只有一份 —— 之前是兩支各寫一遍，
 #    於是同一個 key（diff）在兩側是相反的正負號，前端得靠 `check.received != null

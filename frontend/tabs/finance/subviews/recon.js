@@ -1198,8 +1198,21 @@ const _PICK_MAX = 100;
 /** 發票清單的欄寬 —— 表頭與資料列**共用同一組**，各寫一份一定會歪。
  *  原本一列是兩行、欄位用「·」串起來，數字沒有對齊，一頁十幾張很難掃。 */
 const _INV_GRID = 'display:grid;grid-template-columns:'
-    + '20px 116px minmax(0,1fr) 88px 168px 92px 92px 96px 104px;'
-    + 'align-items:center;gap:8px;';
+    + '20px 112px minmax(0,1fr) 84px 140px 92px 88px 88px 100px 88px;'
+    + 'align-items:center;gap:7px;';
+
+/** 分配比實收多幾塊錢時，算「匯費」而不是「還沒收齊」的門檻。
+ *  🔴 正本是 core.finance_logic.FEE_TOLERANCE —— 前端沒辦法 import Python，
+ *     所以這裡是複本。兩個數字必須一樣（tests/unit/test_receipt_fee.py 釘住）：
+ *     不一樣的話，畫面自動填了匯費、後端的判讀卻說「還有發票沒掛上」。 */
+const _FEE_TOLERANCE = 50;
+
+/** 這張發票該自動帶多少匯費：尚欠 − 分配，只在容差內才算匯費。
+ *  差 30 元是匯出行扣的手續費；差 30,000 是分期收款，自動填就是亂填。 */
+function _autoFee(outstanding, amt) {
+    const gap = Math.round((outstanding || 0) - (amt || 0));
+    return gap > 0 && gap <= _FEE_TOLERANCE ? gap : 0;
+}
 
 /** 搜尋框輸入 → 只重畫清單（不重畫整個視窗，不然游標會跳掉）。 */
 _fr.pickSearch = (q) => {
@@ -1346,12 +1359,18 @@ _fr.stmtPickInv = (i) => {
     list.sort((a, b) => (Math.abs((a.outstanding || 0) - target)
                        - Math.abs((b.outstanding || 0) - target))
                      || String(b.date || '').localeCompare(String(a.date || '')));
-    const sel = new Map((r.invoices || []).map(a => [a.invoice_id, a.amount]));
+    // sel: id -> { amt, fee }
+    //   amt = 這張發票分到多少**現金**（加總後要對上這列入帳金額）
+    //   fee = 被匯出行扣掉、沒進帳戶的那幾十塊
+    // 存回去時發票拿到的是 amt + fee（那才是客戶實際付的），見 take()。
+    const sel = new Map((r.invoices || []).map(
+        a => [a.invoice_id, { amt: (a.amount || 0) - (a.fee || 0), fee: a.fee || 0 }]));
 
     _pick = {
         q: '',
         sel,
-        sum() { let t = 0; this.sel.forEach(v => { t += (v || 0); }); return t; },
+        sum() { let t = 0; this.sel.forEach(a => { t += (a.amt || 0); }); return t; },
+        feeSum() { let t = 0; this.sel.forEach(a => { t += (a.fee || 0); }); return t; },
         remain() { return Math.max(0, target - this.sum()); },
         render() {
             const all = list.filter(v => !this.q
@@ -1387,22 +1406,32 @@ _fr.stmtPickInv = (i) => {
                     ${cell('$' + fmtNum(v.collected || 0), 'color:#9ca3af;text-align:right;')}
                     ${cell('$' + fmtNum(v.outstanding || 0), 'color:#fbbf24;text-align:right;')}
                     <input class="crm-input" type="number" ${on ? '' : 'disabled'}
-                        value="${on ? this.sel.get(v.id) : ''}"
+                        value="${on ? this.sel.get(v.id).amt : ''}"
                         onclick="event.stopPropagation();"
                         onchange="window._finRecon.pickInvAmt('${esc(v.id)}', this.value)"
-                        title="分配給這張的金額"
+                        title="這張發票分到多少現金（加總要對上這列入帳金額）"
                         style="text-align:right;font-size:12px;padding:3px 6px;min-width:0;">
+                    <input class="crm-input" type="number" ${on ? '' : 'disabled'}
+                        value="${on ? (this.sel.get(v.id).fee || '') : ''}"
+                        onclick="event.stopPropagation();"
+                        onchange="window._finRecon.pickInvFee('${esc(v.id)}', this.value)"
+                        title="被匯出行扣掉、沒進帳戶的部分。面額減分配金額有餘額時自動帶入，可以改。"
+                        placeholder="0"
+                        style="text-align:right;font-size:12px;padding:3px 6px;min-width:0;
+                               ${on && this.sel.get(v.id).fee ? 'color:#fbbf24;' : ''}">
                 </div>`;
             }).join('') + tail;
         },
         foot() {
             const t = this.sum();
             const diff = target - t;
+            const fee = this.feeSum();
             return `已分配 <b style="color:#eee;">$${fmtNum(t)}</b>
                 ／ 這列入帳 $${fmtNum(target)}
                 ${diff === 0
                     ? '<span style="color:#86efac;">　剛好對上</span>'
-                    : `<span style="color:#fbbf24;">　${diff > 0 ? '還差' : '超出'} $${fmtNum(Math.abs(diff))}</span>`}`;
+                    : `<span style="color:#fbbf24;">　${diff > 0 ? '還差' : '超出'} $${fmtNum(Math.abs(diff))}</span>`}
+                ${fee ? `<span style="color:#fbbf24;">　＋匯費 $${fmtNum(fee)}（發票認列 $${fmtNum(t + fee)}）</span>` : ''}`;
         },
         redraw() {
             const el = document.getElementById('finbank-pick-list');
@@ -1414,8 +1443,18 @@ _fr.stmtPickInv = (i) => {
         // 擋下來只會逼人亂填。差額用顏色提醒，寫進去的是使用者填的數。
         take() {
             const allocs = [];
-            this.sel.forEach((amt, id) => {
-                if ((amt || 0) > 0) allocs.push({ invoice_id: id, amount: Math.round(amt) });
+            // 🔴 送出去的 amount 是 amt + fee —— 那是**客戶實際付的**，也是發票
+            //    該被認列收到的金額（被扣掉的匯費不該讓發票變成沒收齊）。
+            //    真正進帳戶的現金是 amount − fee，後端據此把 deposit 補回去
+            //    並寫 bank_fee（recognize_receipt_fee，淨流入不變）。
+            // 這裡的 a 是 sel 的值（{amt, fee}），不是後端送的發票物件 ——
+            // 名字刻意不叫 v：這一段裡 v 一律指發票，混用會讓「前端讀了後端
+            // 沒送的欄位」那條測試看不出差別（tests/unit/test_stmt_picker.py）。
+            this.sel.forEach((a, id) => {
+                const amount = Math.round((a.amt || 0) + (a.fee || 0));
+                if (amount > 0) {
+                    allocs.push({ invoice_id: id, amount, fee: Math.round(a.fee || 0) });
+                }
             });
             // 只有 invoices 一種表示法 —— 主要發票（金額最大那張）由後端從
             // 分配表推，前端不留一份推導值
@@ -1431,13 +1470,15 @@ _fr.stmtPickInv = (i) => {
                oninput="window._finRecon.pickSearch(this.value)"
                style="width:100%;margin-bottom:8px;">
         <div style="color:#6b7280;font-size:11px;margin-bottom:6px;">
-            一筆匯款可以拆給多張發票（合併匯款）。金額接近這筆入帳的排在前面。
+            一筆匯款可以拆給多張發票（合併匯款）。金額接近這筆入帳的排在前面。<br>
+            面額減掉分配金額還有幾十塊時會自動填進「匯費」（被匯出行扣走的），
+            發票照樣算收齊 —— 那格可以自己改。
         </div>
         <div style="border:1px solid #2e2e2e;border-radius:6px;overflow:hidden;">
             <div style="${_INV_GRID}padding:6px 10px;background:#242424;
                         border-bottom:1px solid #2e2e2e;">
                 <div></div>${th('發票號')}${th('名稱')}${th('日期')}${th('公司')}
-                ${th('面額', 1)}${th('已收', 1)}${th('尚欠', 1)}${th('分配金額', 1)}
+                ${th('面額', 1)}${th('已收', 1)}${th('尚欠', 1)}${th('分配金額', 1)}${th('匯費', 1)}
             </div>
             <div style="max-height:46vh;overflow:auto;"
                  id="finbank-pick-list">${_pick.render()}</div>
@@ -1450,16 +1491,19 @@ _fr.stmtPickInv = (i) => {
                 <button class="crm-btn crm-btn-primary"
                         onclick="window._finRecon.pickInvTake()">確定</button>
             </div>
-        </div>`, { width: 1080 });
+        </div>`, { width: 1180 });
 };
+
+const _pickInv = (id) => (_stmtPreview.invoices || []).find(x => x.id === id) || {};
 
 _fr.pickInvToggle = (id, on) => {
     if (!_pick || !_pick.sel) return;
     if (on) {
-        const v = (_stmtPreview.invoices || []).find(x => x.id === id) || {};
+        const v = _pickInv(id);
         // 預設帶「這張還欠多少」與「這列還沒分配掉多少」的較小者 ——
         // 兩個都是使用者本來就要算的數，先算好比留空白省事。
-        _pick.sel.set(id, Math.min(v.outstanding || 0, _pick.remain()) || (v.outstanding || 0));
+        const amt = Math.min(v.outstanding || 0, _pick.remain()) || (v.outstanding || 0);
+        _pick.sel.set(id, { amt, fee: _autoFee(v.outstanding, amt) });
     } else {
         _pick.sel.delete(id);
     }
@@ -1468,7 +1512,18 @@ _fr.pickInvToggle = (id, on) => {
 
 _fr.pickInvAmt = (id, v) => {
     if (!_pick || !_pick.sel) return;
-    _pick.sel.set(id, Math.max(0, Math.round(Number(v) || 0)));
+    const amt = Math.max(0, Math.round(Number(v) || 0));
+    // 改分配金額 -> 匯費重算。手動填的匯費要留住的話別再動這格
+    //（owner 2026-08-23：「自動幫我填寫匯費，格子我可以修改調整」）。
+    _pick.sel.set(id, { amt, fee: _autoFee(_pickInv(id).outstanding, amt) });
+    _pick.redraw();
+};
+
+_fr.pickInvFee = (id, v) => {
+    if (!_pick || !_pick.sel) return;
+    const cur = _pick.sel.get(id);
+    if (!cur) return;
+    _pick.sel.set(id, { amt: cur.amt, fee: Math.max(0, Math.round(Number(v) || 0)) });
     _pick.redraw();
 };
 

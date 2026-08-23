@@ -689,6 +689,7 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
         raise HTTPException(status_code=422, detail="沒有要匯入的列")
     from collections import Counter
 
+    from core.finance_logic import recognize_receipt_fee
     from db.models import CrmCashEntry
     # 專案／發票的寫入規則只有一套正本，在 crm/finance —— 這裡借用，不另寫
     from routers.crm.finance import (_enforce_cash_project_link,
@@ -811,6 +812,15 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                 # 驗證與寫入都走 crm/finance 的共用兩支 —— 分配表有三條寫入路徑
                 # （這裡、關聯面板、編輯視窗），各寫一份的話規則遲早分岔。
                 allocs = [(x.invoice_id, int(x.amount or 0)) for x in (r.invoices or [])]
+                # 匯費：客戶匯 149,900、銀行只入 149,870 → 那 30 元是匯出行扣的。
+                # 發票要算收齊（分配 149,900），現金只能增加 149,870 —— 所以把
+                # deposit 補成客戶實付、fee 掛 bank_fee，淨流入維持銀行說的數字
+                # （對帳工作台比的就是淨流，補錯這一列就永遠配不上）。
+                fee_total = sum(int(x.fee or 0) for x in (r.invoices or []))
+                if fee_total and amt > 0:
+                    ce.deposit, bf = recognize_receipt_fee(ce.deposit, ce.bank_fee,
+                                                           fee_total)
+                    ce.bank_fee = bf or None
                 session.add(ce)
                 made_entries += 1
                 stmt_lines.append((r, ce))

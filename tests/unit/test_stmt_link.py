@@ -20,7 +20,8 @@ def test_schema_carries_project_and_invoice():
     d = StatementImportRow(date="2026-09-01", amount=100, project_id="p1",
                            invoices=[{"invoice_id": "i1", "amount": 100}]).model_dump()
     assert d["project_id"] == "p1"
-    assert d["invoices"] == [{"invoice_id": "i1", "amount": 100}]
+    # fee＝被匯出行扣掉、沒進帳戶的部分（預設 0，見 CashInvoiceLink）
+    assert d["invoices"] == [{"invoice_id": "i1", "amount": 100, "fee": 0}]
     # 沒給時：專案是 None 不是空字串（soft FK 用 '' 會讓 IS NULL 查詢漏列）；
     # 發票是空 list 不是 None（🔴 那欄是 List，送 null 會 422 —— 前端曾經這樣送，
     # 只要對帳單有一列沒掛發票就整批匯不進去）

@@ -1235,9 +1235,17 @@ class ChunkFinishRequest(BaseModel):
 
 
 class CashInvoiceLink(BaseModel):
-    """一筆收款分配到一張發票的金額（合併匯款 / 分期收款）。"""
+    """一筆收款分配到一張發票的金額（合併匯款 / 分期收款）。
+
+    `amount` ＝ **這張發票被認列收到多少**（含被匯費吃掉的部分）—— 它直接寫進
+    crm_cash_invoice_links.amount，發票的「已收／尚欠」讀的就是它。
+    `fee` ＝ 其中被匯出行扣走、沒有真的進到我們帳戶的那幾十塊。
+    所以真正入帳的現金 = amount − fee，而 Σfee 會寫進 crm_cash_entries.bank_fee
+    並把 deposit 補回去（見 core.finance_logic.recognize_receipt_fee —— 淨流入不變）。
+    """
     invoice_id: str
     amount: int
+    fee: int = 0
 
 
 class StatementImportRow(BaseModel):
