@@ -689,7 +689,7 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
         raise HTTPException(status_code=422, detail="沒有要匯入的列")
     from collections import Counter
 
-    from core.finance_logic import recognize_receipt_fee
+    from core.finance_logic import apply_receipt_fee
     from db.models import CrmCashEntry
     # 專案／發票的寫入規則只有一套正本，在 crm/finance —— 這裡借用，不另寫
     from routers.crm.finance import (_enforce_cash_project_link,
@@ -817,10 +817,14 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                 # deposit 補成客戶實付、fee 掛 bank_fee，淨流入維持銀行說的數字
                 # （對帳工作台比的就是淨流，補錯這一列就永遠配不上）。
                 fee_total = sum(int(x.fee or 0) for x in (r.invoices or []))
+                # 認列走 core.finance_logic 的 apply_receipt_fee —— deposit 與
+                # bank_fee 必須一起動，寫回的動作留在呼叫端就會有第二種寫法。
+                # ⚠ 這裡的守衛比關聯面板嚴（那邊是 `fee is not None`，fee=0 會把
+                #    bank_fee 清掉，因為它在改一列**既有**的資料）。ce 是這一圈
+                #    當場新建的，bank_fee 本來就是 None，沒有舊值要清；amt > 0
+                #    則是因為只有收款側有 deposit 可補。
                 if fee_total and amt > 0:
-                    ce.deposit, bf = recognize_receipt_fee(ce.deposit, ce.bank_fee,
-                                                           fee_total)
-                    ce.bank_fee = bf or None
+                    apply_receipt_fee(ce, fee_total)
                 session.add(ce)
                 made_entries += 1
                 stmt_lines.append((r, ce))

@@ -32,16 +32,21 @@ def e2e_admin_token():
 
 @pytest.fixture(scope="module")
 def dev_db_only():
-    """🔴 自建自刪的測試會寫真資料庫 —— 只允許 dev / test 庫。
+    """🔴 自建自刪的測試會寫真資料庫 —— 只允許 dev 庫。
 
     **這道閘只有這一份。** 之前每支測試各抄一份，而抄壞的後果是把測試資料
     寫進生產庫 —— 這種東西不該有第二個定義。
+
+    規則本體在 `_guard.seed_blocked_reason()`，跟獨立 e2e 腳本共用同一條；
+    這裡只是把後果換成 skip（pytest 不該因為在生產機上跑就整批 exit）。
+    本來這裡自己讀 `load_settings()["database_url"]` —— 那看不到 env 的
+    `DATABASE_URL`，NAS 容器上會判錯，而那正是 `_guard` 改走
+    `get_database_url()` 的理由。
     """
-    from config import load_settings
-    url = (load_settings().get("database_url") or "")
-    db = url.rsplit("/", 1)[-1].split("?")[0].lower()
-    if not db or not (db.endswith("_dev") or "test" in db):
-        pytest.skip(f"只在 dev/test 資料庫上跑（目前 {db or '未設定'}）")
+    from tests.e2e._guard import seed_blocked_reason
+    reason = seed_blocked_reason()
+    if reason:
+        pytest.skip(reason.splitlines()[0])
 
 
 @pytest.fixture(scope="session")

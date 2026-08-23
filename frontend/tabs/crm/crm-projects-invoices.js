@@ -53,6 +53,12 @@ function _summaryHtml() {
     const rows = _receipts();
     const issued = _sum(rows, 'amount_total');
     const got = _sum(rows, 'collected');
+    // 🔴 尚欠不能寫成 issued - got。「收齊了沒」的規則是後端的 `settled`
+    //    （含 NT$50 匯費容差，394 張歷史發票裡有 42 張靠它）—— 自己相減的話，
+    //    那 42 張被匯費短收 30 元的票會在這裡顯示琥珀色「尚欠 $30」，而發票本
+    //    與應收帳款都說收齊了。同一個畫面兩個答案，正是 collection_fields 把
+    //    布林算好送過來要消滅的東西（見 routers/crm/finance.py 的 docstring）。
+    const owed = _sum(rows.filter(i => !i.settled), 'outstanding');
     const contract = Number(_cur?.contract_amount) || 0;
     const left = _remaining();
     // val 收「已經格式化好的字串」—— 「還能開」在合約沒填時要顯示文字而不是金額，
@@ -68,7 +74,7 @@ function _summaryHtml() {
         ${contract ? cell('合約金額', money(contract)) : ''}
         ${cell('已開發票', money(issued))}
         ${cell('已收', money(got), '#86efac')}
-        ${cell('尚欠', money(issued - got), issued - got > 0 ? '#fbbf24' : '#6b7280')}
+        ${cell('尚欠', money(owed), owed > 0 ? '#fbbf24' : '#6b7280')}
         ${left === null
             ? cell('還能開', '<span style="font-size:12px;">合約金額未填</span>', '#6b7280')
             : cell('還能開', money(left), left < 0 ? '#fca5a5' : '#93c5fd')}

@@ -11,7 +11,6 @@
 """
 import asyncio
 import json
-import os
 import sys
 import urllib.error
 import urllib.request
@@ -21,10 +20,6 @@ sys.path.insert(0, r"E:\Dev\Originsun-Media-Guard")
 from core.auth import create_token  # noqa: E402
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001") + "/api/v1"
-if ":8000" in BASE:
-    sys.path.insert(0, r"C:\OriginsunAgent")
-
-    os.chdir(r"C:\OriginsunAgent")
 
 from tests.e2e._guard import refuse_prod_seed  # noqa: E402
 

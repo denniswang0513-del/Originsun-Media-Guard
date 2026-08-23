@@ -16,14 +16,13 @@ from datetime import datetime, timezone
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
 from core.crm_logic import normalize_tax_id
-from core.finance_logic import recognize_receipt_fee
 from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 INVOICE_PASSTHROUGH_COLLECTED,
                                 INVOICE_PENDING_REMIT, INVOICE_REMITTED,
                                 INVOICE_RECEIVED, alloc_verdict,
                                 initial_invoice_status,
                                 amount_is_settled, invoice_direction,
-                                recognize_bank_fee,
+                                apply_payment_fee, apply_receipt_fee,
                                 is_passthrough_category, month_of,
                                 normalize_invoice_status, passthrough_commission)
 from core.ledger import require_entity
@@ -352,12 +351,12 @@ _ALLOC_KINDS = {
     "invoice": {"model": CrmInvoice, "noun": "發票", "id_field": "invoice_id",
                 "dup": "同一張發票不可重複掛在同一筆收款",
                 "label": lambda o: o.invoice_number or o.title,
-                "fee": ("deposit", recognize_receipt_fee)},
+                "fee": apply_receipt_fee},
     "payment": {"model": CrmPaymentRequest, "noun": "請款單",
                 "id_field": "payment_request_id",
                 "dup": "同一張請款單重複出現",
                 "label": lambda o: o.summary or o.payee_name,
-                "fee": ("expense", recognize_bank_fee)},
+                "fee": apply_payment_fee},
 }
 # replace / load / verdict 定義在檔案後段 —— 這裡延後綁定（模組載入完才填），
 # 免得為了湊順序把三組相關的函式拆散。
@@ -1070,15 +1069,22 @@ async def list_payments(
                 select(CrmProject.id, CrmProject.name)
                 .where(CrmProject.name.isnot(None)))).all())
     out = []
+    #: 摘要 → 建議。同一個摘要算出來一定是同一個答案（projs 這一輪不變），而
+    #: 摘要重複得很兇：實測 406 列只有 189 個相異值（外包請款常常整批同名）。
+    #: 省掉一半的比對 —— 量到 222ms → 108ms。
+    #: ⚠ 只在這一次請求裡有效，不要升級成模組級快取：專案清單會變。
+    memo: dict[str, dict | None] = {}
     for pay, pname in rows:
         d = _to_payment_dict(pay, pname or "", *links.get(pay.id, ("", "")))
         # 只算掛得上的類別 —— 行政／薪資本來就會被 batch-project 擋下來（409），
         # 給了建議只是讓人點下去才發現不行
         if projs and not (pay.project_id or "") \
                 and (pay.category or "") in _PAYMENT_LINK_CATEGORIES:
-            hit = suggest_project(pay.summary or "", projs)
-            if hit:
-                d["suggested"] = hit
+            summary = pay.summary or ""
+            if summary not in memo:
+                memo[summary] = suggest_project(summary, projs)
+            if memo[summary]:
+                d["suggested"] = memo[summary]
         out.append(d)
     return {"payments": out, "total": len(out)}
 
@@ -2119,12 +2125,10 @@ async def _write_allocs(request, entry_id: str, kind: str, items, fee=None):
             #    那條路先做了），這裡若還只認 recognize_bank_fee，關聯面板重存一次
             #    就會把 deposit 的補回值抹掉 —— 帳戶淨流悄悄變回含匯費的數字，
             #    那一列從此在對帳工作台配不上，而且畫面上完全看不出來。
-            col, recognize = k["fee"]
             try:
-                setattr(e, col, recognize(getattr(e, col), e.bank_fee, fee)[0])
+                k["fee"](e, fee)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc))
-            e.bank_fee = int(fee) or None
         await session.commit()
         items_out, allocated = await k["load"](session, e)
     return {"ok": True, "items": items_out, "check": k["verdict"](e, allocated)}

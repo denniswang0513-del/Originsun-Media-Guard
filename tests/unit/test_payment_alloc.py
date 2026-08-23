@@ -193,12 +193,13 @@ def test_fee_is_written_to_bank_fee():
     """
     assert "fee=req.fee" in _body("async def set_cash_entry_payments(")
     src = repo_src(SRC)
-    # 兩側的規則收在 _ALLOC_KINDS 的 fee 欄（欄位 + 認列函式）
-    assert '"fee": ("expense", recognize_bank_fee)' in src, "付款側沒走總流出不變那支"
-    assert '"fee": ("deposit", recognize_receipt_fee)' in src, "收款側沒走淨流入不變那支"
+    # 兩側的規則收在 _ALLOC_KINDS 的 fee 欄。值是**一支吃 entry 的函式**，不是
+    # (欄名, 純函式) —— 寫回的動作留在呼叫端的話，兩個呼叫端就寫成了兩種樣子
+    # （實測過：一處用回傳的 bank_fee、一處丟掉回傳值自己再推一次）。
+    assert '"fee": apply_payment_fee' in src, "付款側沒走總流出不變那支"
+    assert '"fee": apply_receipt_fee' in src, "收款側沒走淨流入不變那支"
     body = _body("async def _write_allocs(")
-    assert 'col, recognize = k["fee"]' in body, "認列又寫死成單一側了"
-    assert "e.bank_fee = int(fee) or None" in body
+    assert 'k["fee"](e, fee)' in body, "認列又寫死成單一側了"
     # 收款側要把各列的 fee 加總送下去（單一欄位表達不了逐張的匯費）
     inv = _body("async def set_cash_entry_invoices(")
     assert "int(it.fee or 0) for it in" in inv, "收款側沒有把逐張的匯費加總"

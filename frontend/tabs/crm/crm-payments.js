@@ -185,9 +185,9 @@ function _batchSetMode(on) {
         //    才把 _batch.on 打開。只 renderList() 的話手上這份沒有 suggested，
         //    「建議：」要等使用者改一次篩選才出現，看起來像功能壞了。
         loadPayments();
-        return;
+    } else {
+        renderList();
     }
-    renderList();
 }
 
 async function _batchApply(projectId) {

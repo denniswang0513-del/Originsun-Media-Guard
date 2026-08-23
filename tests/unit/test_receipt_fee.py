@@ -13,7 +13,8 @@
 """
 import pytest
 
-from core.finance_logic import FEE_TOLERANCE, recognize_receipt_fee
+from core.finance_logic import (FEE_TOLERANCE, apply_payment_fee,
+                                apply_receipt_fee, recognize_receipt_fee)
 from tests.unit._srcscan import js_code_only, repo_src
 
 JS = "frontend/tabs/finance/subviews/recon.js"
@@ -98,17 +99,81 @@ def test_the_invoice_alloc_carries_gross_plus_fee():
 
 
 def test_the_write_path_grosses_up_the_deposit():
-    """後端要真的補 deposit —— 只收下 fee 不補的話帳戶餘額會少掉。"""
+    """後端要真的補 deposit —— 只收下 fee 不補的話帳戶餘額會少掉。
+
+    寫回的動作收在 `apply_receipt_fee`（deposit 與 bank_fee 一起動），這裡只確認
+    對帳單匯入那條路確實借用它、沒有自己再寫一份 —— 三條寫入路徑（這裡、關聯
+    面板、編輯視窗）各寫一份的話，規則遲早漂開。不變量本身由上面那幾條
+    `apply_*` 的行為測試釘住。
+    """
     from tests.unit._srcscan import code_only
     src = code_only(repo_src("routers/api_finance_stmt.py"))
-    assert "recognize_receipt_fee(ce.deposit, ce.bank_fee," in src, \
-        "apply 沒走共用的那支規則（自己寫一份遲早跟付款側漂開）"
+    assert "apply_receipt_fee(ce, fee_total)" in src, \
+        "沒走共用的那支規則（自己寫一份遲早跟付款側漂開）"
+    assert "ce.bank_fee =" not in src, "又在呼叫端自己寫回 bank_fee 了"
 
 
 def test_schema_accepts_the_fee():
     from core.schemas import CashInvoiceLink
     assert CashInvoiceLink(invoice_id="x", amount=149900, fee=30).fee == 30
     assert CashInvoiceLink(invoice_id="x", amount=100).fee == 0, "舊呼叫端要還能用"
+
+
+class _Entry:
+    """收支明細列的替身 —— 只要有這四欄就夠了。"""
+
+    def __init__(self, **kw):
+        self.deposit = self.expense = self.bank_fee = self.claim = None
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+    @property
+    def flow(self):
+        """cash_entry_flow = deposit − expense − bank_fee − claim。"""
+        return ((self.deposit or 0) - (self.expense or 0)
+                - (self.bank_fee or 0) - (self.claim or 0))
+
+
+def test_applying_a_receipt_fee_moves_both_fields_and_keeps_net_inflow():
+    """🔴 兩個欄位**必須一起動**。這條釘的是不變量（淨流入不變），
+    不是單一欄位 —— 只斷言 bank_fee == 30 的話，忘了補 deposit 也會過。"""
+    e = _Entry(deposit=149870)
+    apply_receipt_fee(e, 30)
+    assert e.deposit == 149900, "deposit 沒補成客戶實付的金額"
+    assert e.bank_fee == 30
+    assert e.flow == 149870, "淨流入變了 —— 那一列在對帳工作台就配不上了"
+
+
+def test_applying_a_payment_fee_moves_both_fields_and_keeps_total_outflow():
+    """付款側的鏡像：守「總流出不變」，從 expense 搬進 bank_fee。"""
+    e = _Entry(expense=5000)
+    apply_payment_fee(e, 10)
+    assert e.expense == 4990, "沒有從 expense 搬出來（帳上會多流出一筆）"
+    assert e.bank_fee == 10
+    assert e.flow == -5000, "總流出變了"
+
+
+@pytest.mark.parametrize("apply_fee, kw", [(apply_receipt_fee, {"deposit": 149870}),
+                                           (apply_payment_fee, {"expense": 5000})])
+def test_applying_the_same_fee_twice_changes_nothing(apply_fee, kw):
+    """重存一次不能疊加 —— 關聯面板每次儲存都會再跑一遍這一步。"""
+    e = _Entry(**kw)
+    apply_fee(e, 30)
+    first = (e.deposit, e.expense, e.bank_fee)
+    apply_fee(e, 30)
+    assert (e.deposit, e.expense, e.bank_fee) == first
+
+
+@pytest.mark.parametrize("apply_fee, kw", [(apply_receipt_fee, {"deposit": 149900}),
+                                           (apply_payment_fee, {"expense": 5000})])
+def test_clearing_the_fee_puts_the_amount_back(apply_fee, kw):
+    """改成 0 要退回銀行原本說的數字，而且 bank_fee 要變回 None（不是 0）——
+    列表用 `or None` 判有沒有匯費。"""
+    e = _Entry(**kw)
+    apply_fee(e, 30)
+    apply_fee(e, 0)
+    assert e.bank_fee is None
+    assert (e.deposit, e.expense) == (kw.get("deposit"), kw.get("expense"))
 
 
 def test_the_grid_header_and_rows_all_have_the_same_number_of_columns():

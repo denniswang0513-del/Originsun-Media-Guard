@@ -116,6 +116,22 @@ def test_it_does_not_pretend_a_missing_contract_amount_is_zero():
     assert "合約金額未填" in repo_src(JS), "沒填時沒有講出來"
 
 
+def test_the_amount_owed_uses_the_backends_settled_flag():
+    """🔴 尚欠寫成 `issued - got` 就繞過了 NT$50 匯費容差。
+
+    394 張歷史發票裡有 42 張是被匯費短收 30 元、靠容差才算收齊的。自己相減的話
+    那 42 張會在專案頁顯示琥珀色「尚欠 $30」，而發票本與應收帳款都說收齊了 ——
+    同一個畫面兩個答案，正是 collection_fields 把 `settled` 布林算好送過來要
+    消滅的東西。容差是後端的事，不該複製到瀏覽器。
+    """
+    js = _js()
+    i = js.index("function _summaryHtml(")
+    seg = js[i:i + 1600]
+    assert "!i.settled" in seg, "尚欠沒有用後端算好的 settled"
+    assert "'outstanding'" in seg, "尚欠沒有用後端算好的 outstanding"
+    assert "issued - got" not in seg, "尚欠又自己相減了（會繞過匯費容差）"
+
+
 def test_voided_and_payable_invoices_stay_out_of_the_summary():
     """作廢的、代開的（付款方向）不能算進這個案子的收入。"""
     js = _js()

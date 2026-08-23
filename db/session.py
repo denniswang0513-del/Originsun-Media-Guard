@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import AsyncGenerator
 
 _DEFAULT_DB_URL = "postgresql+asyncpg://originsun:originsun2026@192.168.1.132:5432/mediaguard"
@@ -37,6 +38,19 @@ def get_database_url() -> str:
         return load_settings().get("database_url", _DEFAULT_DB_URL)
     except Exception:
         return _DEFAULT_DB_URL
+
+
+def database_name(url: str | None = None) -> str:
+    """DSN → 庫名。不給 url 就用 `get_database_url()`。
+
+    庫名是 `mediaguard`（生產）還是 `mediaguard_dev` 決定了很多事：e2e 能不能
+    種資料、告警要標哪個庫、這台算不算 master。之前 repo 裡有四份各寫一次的
+    `rsplit("/", 1)`，差別在有沒有剝 `?query`／`#fragment`、以及讀不讀得到 env
+    的 `DATABASE_URL` —— 於是 NAS 容器（DSN 從 env 來）上有些地方會判錯。
+    正本放這裡，跟 `get_database_url()` 同一個地方。
+    """
+    raw = get_database_url() if url is None else url
+    return re.sub(r"[?#].*$", "", (raw or "")).rstrip("/").rsplit("/", 1)[-1]
 
 
 def _pool_sizes():

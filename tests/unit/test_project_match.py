@@ -9,9 +9,11 @@
    「2026 節能減碳觀摩活動紀錄」（0.67，靠「活動紀錄」四個字撞上），那是
    兩個不同的案子。分數高只代表「值得看一眼」。
 """
+import re
+
 from core.project_match import (MIN_SCORE, STRONG_SCORE, normalize, similarity,
                                 suggest_project)
-from tests.unit._srcscan import js_code_only, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
 
 JS = "frontend/tabs/crm/crm-payments.js"
 
@@ -99,9 +101,31 @@ def test_the_suggestion_never_writes_itself_in():
 
 
 def test_suggestions_are_only_fetched_in_batch_mode():
-    """238 專案 × 800 張的子字串比對不該每次列清單都跑。"""
+    """238 專案 × 800 張的子字串比對不該每次列清單都跑。
+
+    釘的是「條件」不是排版 —— 原本連中間那 15 個對齊空白都一起釘死，
+    那個 params.set 區塊重排一次就會無故變紅。
+    """
     js = js_code_only(repo_src(JS))
-    assert "if (_batch.on)               params.set('suggest', '1');" in js
+    assert re.search(r"if \(_batch\.on\)\s+params\.set\('suggest'", js), \
+        "suggest 不是只在批次模式下才帶"
+
+
+def test_the_suggestion_memo_does_not_outlive_the_request():
+    """同一個摘要算出來一定是同一個答案，所以一輪裡只算一次（實測 406 列只有
+    189 個相異摘要，222ms → 108ms）。
+
+    🔴 但快取**不能**升級成模組級：專案清單會變，新增一個專案之後建議就永遠
+    停在舊答案，而且是那種「看起來只是沒配到」的靜默錯。
+    """
+    src = repo_src("routers/crm/finance.py")
+    body = code_only(func_body(src, "async def list_payments("))
+    # 釘機制不是變數名 —— 只找 "memo" 的話，宣告留著、實際又每列各算一次
+    # 也會過（實測：破壞驗證時就是這樣逃掉的）。
+    assert "memo[summary] = suggest_project(" in body, "重複的摘要沒有收起來"
+    assert body.count("suggest_project(") == 1, "還有第二個地方直接算（繞過快取）"
+    assert not re.search(r"^(memo|_SUGGEST_CACHE|_MATCH_CACHE)\b", code_only(src), re.M), \
+        "建議的快取跑到模組層了 —— 專案清單一變就永遠給舊答案"
 
 
 def test_sorting_falls_back_to_the_suggestion():

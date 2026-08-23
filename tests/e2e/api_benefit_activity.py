@@ -30,10 +30,7 @@ from tests.e2e._guard import refuse_prod_seed  # noqa: E402
 refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
 
 # DB helper 要跟 API 打同一個庫（生產跑時把生產的 settings 插到最前面）
-if ":8000" in BASE:
-    sys.path.insert(0, r"C:\OriginsunAgent")
 
-    os.chdir(r"C:\OriginsunAgent")
 ADMIN = create_token({"sub": "admin", "username": "admin",
                       "access_level": 3, "modules": []})
 FIX = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

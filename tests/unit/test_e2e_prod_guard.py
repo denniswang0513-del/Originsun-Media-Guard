@@ -10,22 +10,34 @@
 
 清乾淨了，但「清乾淨」不是修好。修好是讓它不可能再發生。
 
-🔴 第二輪審查抓到第一版的防護**還有一個洞**：它只認 BASE 裡有沒有 :8000，但生產
-還有一個入口 foundry.originsun-studio.com（cloudflared → master 8000）。從那個
-網址跑的話防護放行，而上面那個 sys.path.insert 也不會觸發 —— API 打生產、種子寫
-dev，兩邊分裂，比原本的事故更難查（畫面全對，只是資料不在同一個庫）。
+🔴 第二輪審查抓到第一版的防護只認 BASE 裡有沒有 :8000，但生產還有一個入口
+foundry.originsun-studio.com（cloudflared → master 8000）。
 
-所以真正的閘門改成**解析出「等一下會連到哪個庫」**（`assert_dev_db`），網址檢查
-降級成第一道便宜的攔截。下面的測試也跟著釘庫名那一道，不再只釘字串。
+🔴 第三輪量測到更根本的一件事：**那個 sys.path.insert 從來沒做到它宣稱的事**。
+每支腳本都在它之前就 import 了 create_token（綁的是 dev 的函式物件），而且
+dev 與 master 的 jwt_secret 本來就是同一把 —— 它唯一的實際作用，就是把
+db.session 指向生產，也就是事故成因本身。所以那一行已經整批刪除，不是修好它。
+
+因此這一版的測試分兩層：
+  · **行為**（真的呼叫、真的期待 SystemExit）—— 閘門本身用這個驗
+  · **原始碼掃描** —— 只留給「跨 15 個檔案的結構事實」這種執行不出來的東西
 """
 import re
 import sys
 from pathlib import Path
 
+import pytest
+
+from tests.unit._srcscan import code_only, func_body
+
 E2E = Path(__file__).resolve().parents[1] / "e2e"
 
 #: 種資料的訊號 —— 用 db.session 直接寫庫
 SEED_MARKS = ("from db.session import", "get_session_factory")
+
+DEV = "postgresql+asyncpg://u:p@192.168.1.132:5432/mediaguard_dev"
+PROD = "postgresql+asyncpg://u:p@192.168.1.132:5432/mediaguard"
+DEV_BASE = "http://127.0.0.1:8001"
 
 
 def _seeding_scripts():
@@ -42,9 +54,75 @@ def _seeding_scripts():
     return out
 
 
-def _guard_src():
-    return (E2E / "_guard.py").read_text(encoding="utf-8")
+def _guard():
+    sys.path.insert(0, str(E2E.parents[1]))
+    from tests.e2e import _guard as g
+    return g
 
+
+def _dsn(monkeypatch, url):
+    """讓防護「以為」等一下會連到 url 那個庫。
+
+    patch 的是 `db.session.get_database_url` 本身 —— 防護在函式內才
+    `from db.session import`，所以每次呼叫都會重讀模組屬性，patch 得到。
+    """
+    monkeypatch.setattr("db.session.get_database_url", lambda: url)
+
+
+# ── 閘門本身：用行為驗，不是掃字串 ────────────────────────────
+
+def test_it_refuses_a_production_database(monkeypatch):
+    """🔴 這條就是事故那一次。網址是 dev、庫是生產 —— 必須中止。"""
+    _dsn(monkeypatch, PROD)
+    with pytest.raises(SystemExit) as e:
+        _guard().refuse_prod_seed(DEV_BASE)
+    assert e.value.code, "只印訊息不中止＝沒有防護（實測那次就是「跑下去了」）"
+
+
+def test_it_lets_the_dev_database_through(monkeypatch):
+    """防護要**能放行**。只會擋的閘門會被人拿掉。"""
+    _dsn(monkeypatch, DEV)
+    assert _guard().seed_blocked_reason(DEV_BASE) is None
+
+
+def test_the_cloudflared_production_entrance_is_refused(monkeypatch):
+    """🔴 foundry.originsun-studio.com → master 8000。庫名那道故意放行，
+    證明擋下來的是網址那道。"""
+    _dsn(monkeypatch, DEV)
+    assert _guard().seed_blocked_reason("https://foundry.originsun-studio.com")
+
+
+def test_an_unrecognised_origin_is_refused_by_default(monkeypatch):
+    """🔴 allowlist 的重點：**還沒想到的**生產入口是預設擋下。
+    denylist 對下一個入口是預設放行 —— 那正是上一版的洞。"""
+    _dsn(monkeypatch, DEV)
+    g = _guard()
+    for base in ("https://newtunnel.example.com", "http://127.0.0.1:8000",
+                 "http://192.168.1.107:8000"):
+        assert g.seed_blocked_reason(base), f"{base} 沒被擋下來"
+
+
+def test_the_allowed_database_is_read_at_call_time(monkeypatch):
+    """MG_E2E_DB 讓別的開發機用自己的庫名 —— 但要在呼叫時讀才可能被覆寫，
+    而且沒設時只認 mediaguard_dev（不能退成什麼都放行）。"""
+    _dsn(monkeypatch, "postgresql+asyncpg://u:p@h/mediaguard_qa")
+    g = _guard()
+    assert g.seed_blocked_reason(DEV_BASE), "沒設 MG_E2E_DB 時不該放行別的庫"
+    monkeypatch.setenv("MG_E2E_DB", "mediaguard_qa")
+    assert g.seed_blocked_reason(DEV_BASE) is None, "MG_E2E_DB 是 import 時讀的（改不動）"
+
+
+def test_database_name_parses_real_dsns():
+    """庫名要從真的 DSN 解得出來（含 query string 的那種）。"""
+    sys.path.insert(0, str(E2E.parents[1]))
+    from db.session import database_name
+    assert database_name(DEV) == "mediaguard_dev"
+    assert database_name(PROD) == "mediaguard"
+    assert database_name("postgresql://u:p@h/mediaguard_dev?sslmode=require") \
+        == "mediaguard_dev"
+
+
+# ── 跨檔案的結構事實：執行不出來，只能掃 ──────────────────────
 
 def test_there_is_at_least_one_such_script():
     """守衛測試自己要先確定掃得到東西 —— 掃不到的話它永遠綠，什麼都沒守。"""
@@ -71,42 +149,32 @@ def test_the_guard_runs_before_anything_touches_the_db():
                 assert gi < j, f"{name}: 防護排在 `{later}` 後面才跑"
 
 
-def test_the_guard_actually_exits():
-    """🔴 只印訊息不中止＝沒有防護。實測那次就是「跑下去了」。"""
-    assert re.search(r"sys\.exit\([1-9]", _guard_src()), \
-        "沒有真的中止（只印訊息會被忽略）"
+def test_the_production_path_hack_is_gone():
+    """🔴 那一行不准回來。
+
+    它宣稱「用生產那份 code 產 token」，但 create_token 在它之前就 import 了
+    （綁 dev 的函式物件），而且 dev 與 master 的 jwt_secret 是同一把 ——
+    它從來沒產生過任何效果，除了把 db.session 指向生產庫。
+    """
+    offenders = [p.name for p in sorted(E2E.glob("*.py"))
+                 if p.name != "_guard.py"
+                 and "OriginsunAgent" in p.read_text(encoding="utf-8")]
+    assert not offenders, (
+        "這幾支 e2e 又把生產路徑塞回 sys.path / os.chdir 了：" + "、".join(offenders)
+        + "。那一行沒有任何正面作用，只會讓 db.session 連上生產庫。")
 
 
-def test_the_real_gate_is_the_database_not_the_url():
-    """🔴 網址檢查擋不住 foundry.originsun-studio.com（cloudflared → 生產 8000）：
-    那條路上連 sys.path.insert 都不會觸發，於是 API 打生產、種子寫 dev ——
-    兩邊分裂，比原本的事故更難查。
-
-    所以保證必須來自「等一下會連到哪個庫」，不是網址長什麼樣。"""
-    src = _guard_src()
-    assert "def assert_dev_db(" in src, "沒有以庫名為準的閘門"
-    gate = src[src.index("def assert_dev_db("):]
-    assert "get_database_url" in gate, "沒有去解析真正會連到的 DSN"
-    assert "_ALLOWED_DB" in gate, "沒有把允許的庫名收成一個常數"
-    # refuse_prod_seed 必須把庫名那道也走過 —— 只擋網址等於沒補到洞
-    rp = src[src.index("def refuse_prod_seed("):]
-    assert "assert_dev_db()" in rp, "refuse_prod_seed 沒有回頭走庫名那一道"
-    assert "foundry." in rp, "網址那道漏了 cloudflared 的生產入口"
-
-
-def test_the_allowed_database_is_not_defaulted_open():
-    """MG_E2E_DB 沒設時只認 mediaguard_dev —— 不能退成「什麼都放行」。"""
-    assert 'os.environ.get("MG_E2E_DB", "mediaguard_dev")' in _guard_src()
-
-
-def test_db_name_parsing_handles_real_dsns():
-    """庫名要從真的 DSN 解得出來（含 query string 的那種）。"""
-    sys.path.insert(0, str(E2E.parents[1]))
-    from tests.e2e._guard import _db_name
-    assert _db_name("postgresql+asyncpg://u:p@192.168.1.132:5432/mediaguard_dev") \
-        == "mediaguard_dev"
-    assert _db_name("postgresql+asyncpg://u:p@h:5432/mediaguard") == "mediaguard"
-    assert _db_name("postgresql://u:p@h/mediaguard_dev?sslmode=require") == "mediaguard_dev"
+def test_the_rule_has_exactly_one_definition():
+    """🔴 conftest 的 dev_db_only 以前自己讀 settings 再 rsplit 一次 ——
+    兩份規則對「哪些庫算 dev」講的話不一樣，而且那一份看不到 env 的
+    DATABASE_URL（NAS 容器上會判錯）。現在它只能借用同一支。"""
+    src = (E2E / "conftest.py").read_text(encoding="utf-8")
+    # code_only：docstring 裡**講**了為什麼不再讀 settings，那不算違規
+    seg = code_only(func_body(src, "def dev_db_only("))
+    assert "seed_blocked_reason" in seg, "conftest 沒有借用共用那條規則"
+    assert "rsplit" not in seg, "conftest 又自己解析了一次 DSN"
+    assert "load_settings" not in seg, \
+        "conftest 又自己讀 settings —— 那看不到 env 的 DATABASE_URL"
 
 
 def test_readonly_scripts_are_not_forced_to_carry_the_guard():
@@ -118,3 +186,12 @@ def test_readonly_scripts_are_not_forced_to_carry_the_guard():
             continue
         assert "refuse_prod_seed" not in src, \
             f"{p.name} 不寫 DB，不該擋掉生產驗證"
+
+
+def test_the_guard_does_not_import_db_at_module_level():
+    """🔴 防護必須在**呼叫時**才解析 DSN —— module 層 import 的話，
+    「在 db.session 被載入前先判斷」這件事就沒意義了。"""
+    src = (E2E / "_guard.py").read_text(encoding="utf-8")
+    head = src[:src.index("def seed_blocked_reason(")]
+    assert not re.search(r"^from db\.|^import db\b", head, re.M), \
+        "_guard 在 module 層就 import 了 db —— 解析時機會提前到 import 那一刻"

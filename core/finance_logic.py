@@ -737,6 +737,26 @@ def recognize_receipt_fee(deposit, bank_fee, fee) -> tuple:
     return net_in + fee, fee
 
 
+def apply_payment_fee(entry, fee) -> None:
+    """把匯費認列到一列收支明細上（付款側）。就地改 expense + bank_fee。"""
+    entry.expense, bf = recognize_bank_fee(entry.expense, entry.bank_fee, fee)
+    entry.bank_fee = bf or None
+
+
+def apply_receipt_fee(entry, fee) -> None:
+    """把匯費認列到一列收支明細上（收款側）。就地改 deposit + bank_fee。
+
+    🔴 為什麼收到「一支吃 entry 的函式」而不是留 (欄名, 純函式) 給呼叫端自己
+    搬：兩個欄位**必須一起動**，而「哪兩個欄位」是這條規則的一部分。之前是
+    呼叫端各自 read → call → write back，兩處就寫成了兩種樣子（一處用回傳的
+    bank_fee、一處丟掉回傳值自己再推一次）。規則有兩個呼叫端就會有第三個，
+    寫回的動作留在外面遲早分岔 —— recognize_* 保持純函式（好測不變量），
+    「怎麼落到 entry 上」收在這裡。
+    """
+    entry.deposit, bf = recognize_receipt_fee(entry.deposit, entry.bank_fee, fee)
+    entry.bank_fee = bf or None
+
+
 # 兩側只差三件事：容差站哪一邊、名詞、實際金額怎麼稱呼。
 # 🔴 階梯（empty / ok / fee / over / under）刻意只有一份 —— 之前是兩支各寫一遍，
 #    於是同一個 key（diff）在兩側是相反的正負號，前端得靠 `check.received != null

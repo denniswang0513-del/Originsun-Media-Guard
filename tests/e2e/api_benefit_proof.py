@@ -30,10 +30,7 @@ refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
 # 🔴 DB helper 要跟 API 打同一個庫。第一次跑生產時忘了這件事：臨時帳號建在 dev、
 # API 打 8000 → 生產不認得那個人（409），而且 teardown 清的是 dev、
 # 生產真的留下一個 ZZ 池。BASE 指到 8000 就把生產的 settings 插到 sys.path 最前面。
-if ":8000" in BASE:
-    sys.path.insert(0, r"C:\OriginsunAgent")
 
-    os.chdir(r"C:\OriginsunAgent")
 ADMIN = create_token({"sub": "admin", "username": "admin",
                       "access_level": 3, "modules": []})
 FIX = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

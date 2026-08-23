@@ -6,7 +6,6 @@ API 全綠但畫面沒接上，這個 repo 咬過兩次。所以搜尋、挑選�
 """
 import asyncio
 import json
-import os
 import sys
 import urllib.error
 import urllib.request
@@ -18,10 +17,6 @@ from core.auth import create_token  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001"
-if ":8000" in BASE:
-    sys.path.insert(0, r"C:\OriginsunAgent")
-
-    os.chdir(r"C:\OriginsunAgent")
 
 from tests.e2e._guard import refuse_prod_seed  # noqa: E402
 
