@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
 
 from ota_manifest import (
@@ -356,13 +357,31 @@ def sync_redirects_to_nas() -> bool:
     sync_nginx_conf_to_nas()
 
     # 1. 從 NAS website-api 拉 redirect map
-    try:
-        with urllib.request.urlopen(f"{NAS_LAN_API}/api/website/redirects", timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        items = data.get("items") or {}
-    except (urllib.error.URLError, json.JSONDecodeError) as e:
-        print(f"[redirects sync] 拉 redirects 失敗: {e}（軟 301 fallback 仍生效）")
-        return False
+    #
+    # 🔴 要重試：這支就跑在 `docker restart website-api` 之後，容器還在起來的話
+    #    Website_Nginx 會回 **502**（實測 2026-08-24 的 v2.4.159 發版就是這樣）。
+    #    那次剛好轉址集沒變、NAS 上那份還是對的，所以零影響 —— 但下次集合真的
+    #    變了，同一個 race 會讓 NAS **靜默留著舊的 301**，而訊息只說「軟 301
+    #    fallback 仍生效」，讀起來像沒事。這是那種一年後才會有人發現的錯。
+    items = None
+    for attempt in range(6):          # 最多約 60 秒，容器冷啟通常 10~20 秒
+        try:
+            with urllib.request.urlopen(
+                    f"{NAS_LAN_API}/api/website/redirects", timeout=10) as resp:
+                items = (json.loads(resp.read().decode("utf-8")).get("items") or {})
+            break
+        except (urllib.error.URLError, json.JSONDecodeError) as e:
+            transient = isinstance(e, urllib.error.HTTPError) and e.code in (502, 503, 504)
+            if not isinstance(e, urllib.error.HTTPError):
+                transient = True      # 連不上／逾時：容器多半還沒開始聽
+            if not transient or attempt == 5:
+                print(f"[redirects sync] 拉 redirects 失敗: {e}")
+                print("[redirects sync] ⚠ NAS 上維持**上一次**同步的硬 301（不是沒有轉址，"
+                      "是可能過期）；軟 301 fallback 仍生效")
+                return False
+            print(f"[redirects sync] website-api 還沒起來（{e}），10 秒後重試 "
+                  f"{attempt + 1}/5")
+            time.sleep(10)
 
     # 2. 生成 nginx snippet
     lines = [
