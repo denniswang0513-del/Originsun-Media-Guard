@@ -120,9 +120,10 @@ with sync_playwright() as p:
     txt = pg.locator("#pay-batch-count").inner_text()
     check("已選 4 張" in txt, "第 2~5 列共 4 張", txt)
     check("合計 $" in txt, "有算金額合計", txt)
+    # 選取狀態是 CSS class（.crm-row.batch-picked），不是 inline style ——
+    # 斷言 style.background 的話，把高亮搬進 CSS 就會無聲失效
     picked = pg.evaluate(
-        "() => [...document.querySelectorAll('#pay-list-body .pay-row')]"
-        ".filter(r => r.style.background).length")
+        "() => document.querySelectorAll('#pay-list-body .pay-row.batch-picked').length")
     check(picked == 4, "畫面上 4 列被標起來", str(picked))
 
     print("")

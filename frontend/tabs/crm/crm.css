@@ -176,6 +176,9 @@
 }
 .crm-row:hover { background: #333; }
 .crm-row.selected { background: #1e3a5f; }
+/* 批次掛專案的選取狀態（crm-payments 的批次模式）—— 跟 .selected 分開：
+   一個是「正在看這一列」，一個是「這一列在待處理的那批裡」。 */
+.crm-row.batch-picked { background: #1e3a2a; box-shadow: inset 3px 0 0 #22c55e; }
 
 .crm-row-name { flex: 1.5; min-width: 60px; font-weight: 600; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .crm-row-status { flex: 0.6; min-width: 50px; }

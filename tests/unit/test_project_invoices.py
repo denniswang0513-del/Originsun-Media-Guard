@@ -76,18 +76,20 @@ def test_the_invoice_title_comes_from_the_client_full_name_not_the_short_name():
     js = _js()
     assert "_client?.full_name" in js, "抬頭沒用客戶全名"
     assert "client_short_name" not in js, "拿代稱當抬頭了"
-    assert "/clients/" in js, "沒有去撈客戶主檔（全名與統編只在那裡）"
+    # 客戶主檔走 crm-utils 的共用快取（列表本來就帶 full_name / tax_id）——
+    # 換掉逐次 GET /clients/{id} 之後，規則不變：抬頭只能來自客戶主檔
+    assert "crmCacheFetch('clients'" in js, "沒有去拿客戶主檔（全名與統編只在那裡）"
 
 
 def test_a_missing_client_leaves_the_fields_blank_instead_of_guessing():
     """客戶被刪或沒權限 → 欄位留空讓人自己填，不要猜。"""
     js = _js()
-    # 🔴 要釘「客戶那一段自己有 try」，不是「附近有 catch」——
-    #    loadInvoicesTab 外層本來就有一個 catch，寬鬆的寫法把 try 拆掉也照樣過
-    #    （實測，第一版就是這樣漏掉的）。撈不到客戶時整頁會變成「載入失敗」。
-    i = js.index("_cur.client_id")
-    seg = js[i:js.index("/clients/", i)]
-    assert "try {" in seg, "客戶撈取沒有自己的 try —— 客戶被刪掉會讓整個發票分頁打不開"
+    # 🔴 客戶那一支要**自己**接住失敗，不能靠 loadInvoicesTab 外層那個 catch ——
+    #    靠外層的話，客戶清單掛掉會讓整個發票分頁變成「載入失敗」，而其實只是
+    #    抬頭帶不出來而已（欄位留空讓人自己填就好）。
+    i = js.index("crmCacheFetch('clients'")
+    seg = js[i:i + 120]
+    assert ".catch(" in seg, "客戶撈取沒有自己的 catch —— 客戶清單掛掉會讓整個發票分頁打不開"
 
 
 def test_project_and_category_are_pinned_not_chosen():
@@ -176,5 +178,7 @@ def test_the_project_filter_keeps_its_selection_across_reloads():
     """重畫時不保留選取，載入一次就跳回「全部專案」—— 使用者以為篩掉了其實沒有。"""
     js = js_code_only(repo_src(INV))
     i = js.index("function _populateProjectFilter(")
-    seg = js[i:i + 500]
-    assert "const cur = sel.value;" in seg and "selected" in seg
+    seg = js[i:i + 400]
+    # 改走共用的 projectOptionsHtml 之後，「保留選取」＝把目前的值當 selectedId 傳進去
+    assert "projectOptionsHtml(" in seg, "沒走共用的專案下拉（又手抄了一份 option）"
+    assert "sel.value" in seg, "沒有把目前選的值帶進去 —— 重畫一次就跳回全部專案"

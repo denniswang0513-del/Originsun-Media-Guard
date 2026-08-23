@@ -27,6 +27,7 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 normalize_invoice_status, passthrough_commission)
 from core.ledger import require_entity
 from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES
+from core.project_match import prepare as prepare_projects
 from core.project_match import suggest_project
 from core.project_link import PAYMENT_CATEGORIES as _PAYMENT_LINK_CATEGORIES
 from core.schemas import (InvoicePayload, PaymentRequestPayload, CashEntryPayload,
@@ -1055,23 +1056,23 @@ async def list_payments(
         # 未掛專案的列附一個**建議**（owner 2026-08-23：「手動掛，精準為主」）——
         # 人要做的從「翻 238 個專案找一個」變成「看一眼對不對」。
         # 🔴 只在有人問的時候算（suggest=1）：238 專案 × 800 張的子字串比對不該
-        #    每次列清單都跑一次。
-        sugg = {}
+        #    每次列清單都跑一次。只撈 id/name 兩欄 —— CrmProject 有八十幾個欄位、
+        #    好幾個 TEXT，整包從 NAS 拉回來只為了讀名字太貴。
+        projs = []
         if suggest:
-            need = [r[0] for r in rows if not (r[0].project_id or "")]
-            if need:
-                projs = [(p.id, p.name) for p in (await session.execute(
-                    select(CrmProject).where(CrmProject.name.isnot(None))
-                )).scalars().all()]
-                for pay in need:
-                    hit = suggest_project(pay.summary or "", projs)
-                    if hit:
-                        sugg[pay.id] = hit
+            projs = prepare_projects((await session.execute(
+                select(CrmProject.id, CrmProject.name)
+                .where(CrmProject.name.isnot(None)))).all())
     out = []
-    for r in rows:
-        d = _to_payment_dict(r[0], r[1] or "", *links.get(r[0].id, ("", "")))
-        if r[0].id in sugg:
-            d["suggested"] = sugg[r[0].id]
+    for pay, pname in rows:
+        d = _to_payment_dict(pay, pname or "", *links.get(pay.id, ("", "")))
+        # 只算掛得上的類別 —— 行政／薪資本來就會被 batch-project 擋下來（409），
+        # 給了建議只是讓人點下去才發現不行
+        if projs and not (pay.project_id or "") \
+                and (pay.category or "") in _PAYMENT_LINK_CATEGORIES:
+            hit = suggest_project(pay.summary or "", projs)
+            if hit:
+                d["suggested"] = hit
         out.append(d)
     return {"payments": out, "total": len(out)}
 

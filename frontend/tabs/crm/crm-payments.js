@@ -1,7 +1,7 @@
 /**
  * crm-payments.js — 請款管理子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, today, crmToast } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, today, crmToast, projectOptionsHtml } from './crm-utils.js';
 
 let _payments = [];
 let _projects = [];
@@ -86,9 +86,9 @@ function renderList() {
     const rows = _sorter.sorted(_payments);
     _batch.order = rows.map(p => p.id);
     body.innerHTML = (_batch.on ? '' : _quickAddRow()) + rows.map(p => `
-        <div class="crm-row pay-row${p.id === _selectedId && !_batch.on ? ' selected' : ''}"
-             style="${_batch.on && _batch.sel.has(p.id)
-                 ? 'background:#1e3a2a;box-shadow:inset 3px 0 0 #22c55e;' : ''}"
+        <div class="crm-row pay-row${p.id === _selectedId && !_batch.on ? ' selected' : ''}${
+            _batch.on && _batch.sel.has(p.id) ? ' batch-picked' : ''}"
+             data-pay-id="${p.id}"
              onclick="window._payRowClick(event, '${p.id}')">
             <span>${p.request_date ? p.request_date.substring(0, 10) : '—'}</span>
             <span style="font-weight:600;color:#e0e0e0;">${_esc(p.summary)}</span>
@@ -129,8 +129,19 @@ window._payRowClick = (ev, id) => {
         _batch.sel.add(id);
     }
     _batch.last = id;
-    renderList();
+    _batchPaint();
 };
+
+/** 只把選取狀態刷到既有的列上 —— 不重建 DOM。
+ *
+ * 🔴 renderList() 會重排 810 列、重建約一萬兩千個節點；選一列就跑一次，
+ *    Shift 選一段更是每次都跑。真正變的只有 class。 */
+function _batchPaint() {
+    document.querySelectorAll('#pay-list-body .pay-row[data-pay-id]').forEach(el => {
+        el.classList.toggle('batch-picked', _batch.sel.has(el.dataset.payId));
+    });
+    _batchRefreshBar();
+}
 
 function _batchRefreshBar() {
     const bar = document.getElementById('pay-batch-bar');
@@ -148,10 +159,15 @@ function _batchRefreshBar() {
 function _batchPopulateProjects() {
     const sel = document.getElementById('pay-batch-project');
     if (!sel) return;
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">— 掛到哪個專案 —</option>'
-        + _projects.map(p => `<option value="${p.id}"${p.id === cur ? ' selected' : ''}>`
-            + `${_esc(p.name)}${p.client_short_name ? ' (' + _esc(p.client_short_name) + ')' : ''}</option>`).join('');
+    sel.innerHTML = projectOptionsHtml(_projects, '— 掛到哪個專案 —', sel.value);
+}
+
+/** 清掉選取並重刷 —— 三個呼叫點本來各寫一遍。 */
+function _batchReset(repaintOnly = true) {
+    _batch.sel.clear();
+    _batch.last = null;
+    if (repaintOnly) _batchPaint();
+    else renderList();
 }
 
 function _batchSetMode(on) {
@@ -179,9 +195,20 @@ async function _batchApply(projectId) {
         crmToast(projectId
             ? `${r.updated} 張已掛到「${r.project_name}」`
             : `${r.updated} 張已解除專案連結`);
+        // 🔴 就地更新，不要 loadPayments() —— 批次模式下那會再跑一次 suggest
+        //    （生產實測 2.4 秒），而剛掛好的這幾張本來就不該再有建議。
+        //    補歷史時一個下午要按幾十次，每次都等一輪是沒有道理的。
+        const done = new Set(ids);
+        _payments.forEach(p => {
+            if (!done.has(p.id)) return;
+            p.project_id = projectId || null;
+            p.project_name = projectId ? r.project_name : '';
+            if (projectId) delete p.suggested;
+        });
+        if (_filters.unassigned) _payments = _payments.filter(p => !done.has(p.id) || !projectId);
         _batch.sel.clear();
         _batch.last = null;
-        await loadPayments();
+        renderList();
     } catch (e) {
         // 後端是整批擋下並說明原因（例如類別不能連結專案）—— 原話顯示，
         // 不要吞成「操作失敗」，那會讓人不知道要取消勾選哪幾張
@@ -727,11 +754,9 @@ export async function initCrmPaymentsTab() {
     document.getElementById('pay-btn-batch').addEventListener('click', () => _batchSetMode(!_batch.on));
     document.getElementById('pay-batch-exit').addEventListener('click', () => _batchSetMode(false));
     document.getElementById('pay-batch-all').addEventListener('click', () => {
-        _batch.order.forEach(id => _batch.sel.add(id)); renderList();
+        _batch.order.forEach(id => _batch.sel.add(id)); _batchPaint();
     });
-    document.getElementById('pay-batch-none').addEventListener('click', () => {
-        _batch.sel.clear(); _batch.last = null; renderList();
-    });
+    document.getElementById('pay-batch-none').addEventListener('click', () => _batchReset());
     document.getElementById('pay-batch-samesugg').addEventListener('click', () => {
         // 選起「跟剛才點的那張同一個建議」的所有列，並把那個專案帶進下拉。
         // 使用者仍然要自己看過清單再按「掛上去」—— 這裡只省找的功夫。
@@ -743,7 +768,7 @@ export async function initCrmPaymentsTab() {
         });
         const sel = document.getElementById('pay-batch-project');
         if (sel) sel.value = last.suggested.project_id;
-        renderList();
+        _batchPaint();
     });
     document.getElementById('pay-batch-apply').addEventListener('click', () => {
         const pid = document.getElementById('pay-batch-project').value;

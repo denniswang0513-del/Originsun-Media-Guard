@@ -595,6 +595,28 @@ export function withInputsPreserved(container, rerender) {
 
 
 /** 輕量 toast — 沿用 crm.css 既有 .cg-toast 樣式（cost-groups / media-log 等子視圖共用）。 */
+export const INV_PENDING_REMIT = '待撥款';
+export const INV_REMITTED = '已撥款';
+
+/** 發票款項狀態 → badge。
+ *
+ * 🔴 從 crm-invoices.js 提上來（2026-08-23）—— 專案頁的發票分頁本來自己寫了一份
+ * `_statusPill`，而且一出生就漂了：它把「待撥款」「已撥款」「未收款」全部收進同一個
+ * 黃色，空值畫成「—」。同一張發票在兩頁看到不同顏色，比沒有顏色更糟。
+ *
+ * 三段各一個顏色 —— 共用綠色的話一整欄看起來都一樣，分不出哪些還沒撥款。
+ * 待撥款＝紫（還有一筆錢要出去）、已撥款＝藍（收尾了）、已收款＝綠。
+ * 🔴 class 用語意 token 不用中文狀態字：拿中文當 class 名的話，改一次用詞就得
+ * 連 CSS 一起改（已轉撥→已撥款那次就是），而顯示的字只該住在這一行。 */
+export function invoicePayBadge(status) {
+    const s = (status || '').trim();
+    if (!s) return '<span class="crm-badge crm-pay-badge-unset">未設定</span>';
+    const cls = s === INV_REMITTED ? 'remitted'
+        : s === INV_PENDING_REMIT ? 'pending-remit'
+        : s === '已收款' ? 'collected' : s === '作廢' ? 'void' : 'unpaid';
+    return `<span class="crm-badge crm-pay-badge-${cls}">${esc(s)}</span>`;
+}
+
 const TAX_RATE = 1.05;
 
 /** 一個金額 + 它是未稅還是含稅 → 推出三個金額欄。

@@ -20,8 +20,8 @@
  *    開出來的發票尾差會不一樣，而且是對帳時才會發現的那種差。
  */
 
-import { crmFetch as _fetch, esc as _esc, fmtNum, invoiceAmounts, crmToast, today }
-    from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum, invoiceAmounts,
+         invoicePayBadge, crmToast, today } from './crm-utils.js';
 
 let _cur = null;          // 目前這個專案（渲染與預填都要）
 let _client = null;       // 這個案子的客戶 —— 抬頭與統編從這裡來
@@ -37,12 +37,6 @@ function _sum(list, key) {
     return list.reduce((n, x) => n + (Number(x[key]) || 0), 0);
 }
 
-function _statusPill(inv) {
-    const st = inv.payment_status || '';
-    const color = st === '已收款' ? '#86efac' : (st === '作廢' ? '#6b7280' : '#fbbf24');
-    return `<span style="color:${color};">${_esc(st || '—')}</span>`;
-}
-
 /** 摘要列：合約 / 已開 / 已收 / 尚欠 / 還能開。
  *
  * 「還能開」是這一頁存在的第二個理由 —— 分期請款時最重要的數字，而發票本
@@ -54,23 +48,23 @@ function _summaryHtml() {
     const got = _sum(rows, 'collected');
     const contract = Number(_cur?.contract_amount) || 0;
     const left = contract ? contract - issued : null;
+    // val 收「已經格式化好的字串」—— 「還能開」在合約沒填時要顯示文字而不是金額，
+    // 讓 cell 只管排版就不用為那個情況抄一份 markup。
     const cell = (label, val, color) => `
         <div style="min-width:110px;">
           <div style="color:#6b7280;font-size:11px;">${label}</div>
-          <div style="color:${color || '#e0e0e0'};font-size:15px;font-weight:600;">$${fmtNum(val)}</div>
+          <div style="color:${color || '#e0e0e0'};font-size:15px;font-weight:600;">${val}</div>
         </div>`;
+    const money = (n) => '$' + fmtNum(n);
     return `<div style="display:flex;gap:22px;flex-wrap:wrap;padding:12px 14px;
                  background:#1b1b1b;border:1px solid #2e2e2e;border-radius:6px;margin-bottom:12px;">
-        ${contract ? cell('合約金額', contract) : ''}
-        ${cell('已開發票', issued)}
-        ${cell('已收', got, '#86efac')}
-        ${cell('尚欠', issued - got, issued - got > 0 ? '#fbbf24' : '#6b7280')}
+        ${contract ? cell('合約金額', money(contract)) : ''}
+        ${cell('已開發票', money(issued))}
+        ${cell('已收', money(got), '#86efac')}
+        ${cell('尚欠', money(issued - got), issued - got > 0 ? '#fbbf24' : '#6b7280')}
         ${left === null
-            ? `<div style="min-width:110px;">
-                 <div style="color:#6b7280;font-size:11px;">還能開</div>
-                 <div style="color:#6b7280;font-size:12px;padding-top:4px;">合約金額未填</div>
-               </div>`
-            : cell('還能開', left, left < 0 ? '#fca5a5' : '#93c5fd')}
+            ? cell('還能開', '<span style="font-size:12px;">合約金額未填</span>', '#6b7280')
+            : cell('還能開', money(left), left < 0 ? '#fca5a5' : '#93c5fd')}
     </div>`;
 }
 
@@ -94,7 +88,7 @@ function _listHtml() {
             <td style="padding:5px 8px;color:#eee;">${_esc(i.title || '')}</td>
             <td style="padding:5px 8px;text-align:right;color:#eee;">$${fmtNum(i.amount_total || 0)}</td>
             <td style="padding:5px 8px;text-align:right;color:#9ca3af;">$${fmtNum(i.collected || 0)}</td>
-            <td style="padding:5px 8px;">${_statusPill(i)}</td>
+            <td style="padding:5px 8px;">${invoicePayBadge(i.payment_status)}</td>
           </tr>`).join('')}</tbody>
       </table>
     </div>
@@ -107,16 +101,16 @@ function _listHtml() {
 /** 開發票視窗：欄位刻意少。客戶、抬頭、統編、專案、類別全部從專案帶，
  *  PM 只要填品名和金額。那正是這個入口跟發票本的差別 —— 發票本每次都要重選一次，
  *  而且選錯了沒有人會知道。 */
-function _openCreate() {
+_P.create = function _openCreate() {
     if (!_cur) return;
     const host = document.getElementById('proj-inv-modal');
     if (!host) return;
     const rows = _receipts();
     const contract = Number(_cur.contract_amount) || 0;
     const left = contract ? contract - _sum(rows, 'amount_total') : null;
+    host.className = 'crm-modal-overlay';   // 背景、置中、z-index 都交給 crm.css
     host.innerHTML = `
-      <div style="background:#1b1b1b;border:1px solid #2e2e2e;border-radius:8px;
-                  width:min(560px,92vw);padding:18px;">
+      <div class="crm-modal" style="max-width:560px;padding:18px;">
         <div style="font-size:15px;color:#eee;margin-bottom:4px;">開發票</div>
         <div style="color:#6b7280;font-size:11px;margin-bottom:14px;">
           ${_esc(_cur.name || '')}${_client?.full_name ? '　·　' + _esc(_client.full_name) : ''}
@@ -152,7 +146,7 @@ function _openCreate() {
           <button class="crm-btn crm-btn-primary" onclick="window._projInv.save(this)">開立</button>
         </div>
       </div>`;
-    host.style.display = 'flex';
+    host.style.display = '';
     const recalc = () => {
         const a = invoiceAmounts(document.getElementById('proj-inv-amount').value,
                                  document.getElementById('proj-inv-mode').value);
@@ -164,7 +158,7 @@ function _openCreate() {
     document.getElementById('proj-inv-amount').addEventListener('input', recalc);
     document.getElementById('proj-inv-mode').addEventListener('change', recalc);
     document.getElementById('proj-inv-title').focus();
-}
+};
 
 _P.close = () => {
     const host = document.getElementById('proj-inv-modal');
@@ -200,7 +194,10 @@ _P.save = async (btn) => {
         });
         _P.close();
         crmToast('發票已開立');
-        await loadInvoicesTab(_cur.id);
+        // 只有發票變了 —— 專案與客戶沒動，不必重跑整個分頁的三個請求
+        const inv = await _fetch('/invoices?project_id=' + encodeURIComponent(_cur.id));
+        _invoices = inv.invoices || [];
+        _renderTab();
     } catch (e) {
         show(e.message || '開立失敗');
     } finally {
@@ -215,28 +212,32 @@ export async function loadInvoicesTab(projectId) {
     if (!host || !projectId) return;
     host.innerHTML = '<div style="color:#888;padding:20px;">載入中…</div>';
     try {
-        const [proj, inv] = await Promise.all([
-            _fetch('/projects/' + projectId),
-            _fetch('/invoices?project_id=' + encodeURIComponent(projectId)),
-        ]);
-        _cur = proj.project || proj;
-        _invoices = inv.invoices || [];
         // 🔴 專案回應只有 client_short_name（代稱），發票要的是**全名抬頭**與統編
         //    —— 那兩個只在客戶主檔裡。撈不到就留空讓人自己填，不要拿代稱當抬頭
         //    （代稱是「泛亞」，抬頭是「泛亞工程顧問股份有限公司」，開錯要作廢重開）。
-        _client = null;
-        if (_cur && _cur.client_id) {
-            try {
-                const c = await _fetch('/clients/' + _cur.client_id);
-                _client = c.client || c;
-            } catch (_) { /* 客戶被刪或沒權限 → 欄位留空 */ }
-        }
+        //    走 crmCacheFetch 的共用快取（列表本來就帶 full_name / tax_id），
+        //    比逐次 GET /clients/{id} 少一趟序列往返，也不會跟別頁的客戶資料分岔。
+        const [proj, inv, cli] = await Promise.all([
+            _fetch('/projects/' + projectId),
+            _fetch('/invoices?project_id=' + encodeURIComponent(projectId)),
+            crmCacheFetch('clients', '/clients').catch(() => ({ clients: [] })),
+        ]);
+        _cur = proj.project || proj;
+        _invoices = inv.invoices || [];
+        _client = (cli.clients || []).find(c => c.id === _cur?.client_id) || null;
     } catch (e) {
         host.innerHTML = `<div style="color:#fca5a5;padding:20px;">載入失敗：${_esc(e.message || '')}
             <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:8px;"
                 onclick="window._projInv.reload()">重試</button></div>`;
         return;
     }
+    _renderTab();
+}
+
+/** 只重畫，不重抓 —— 開完票之後用得到。 */
+function _renderTab() {
+    const host = document.getElementById('proj-detail-invoices');
+    if (!host) return;
     host.innerHTML = `
       <div style="padding:14px;">
         <div style="display:flex;align-items:center;margin-bottom:12px;">
@@ -248,9 +249,7 @@ export async function loadInvoicesTab(projectId) {
         ${_summaryHtml()}
         ${_listHtml()}
       </div>
-      <div id="proj-inv-modal" style="display:none;position:fixed;inset:0;z-index:900;
-           background:rgba(0,0,0,.6);align-items:center;justify-content:center;"></div>`;
+      <div id="proj-inv-modal" class="crm-modal-overlay" style="display:none;"></div>`;
 }
 
-_P.create = _openCreate;
 _P.reload = () => { if (_cur) loadInvoicesTab(_cur.id); };

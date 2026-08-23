@@ -1,7 +1,8 @@
 /**
  * crm-invoices.js — 帳務管理 Tab
  */
-import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, invoiceAmounts } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, invoiceAmounts as _amountsFrom, invoicePayBadge as _payBadge,
+         INV_PENDING_REMIT, INV_REMITTED, projectOptionsHtml } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
@@ -123,9 +124,7 @@ function _populateProjectFilter() {
     const sel = document.getElementById('inv-filter-project');
     if (!sel) return;
     const cur = sel.value;
-    const opt = (p) => '<option value="' + p.id + '"'
-        + (p.id === cur ? ' selected' : '') + '>' + _esc(p.name) + '</option>';
-    sel.innerHTML = '<option value="">全部專案</option>' + _projects.map(opt).join('');
+    sel.innerHTML = projectOptionsHtml(_projects, '全部專案', cur);
 }
 
 
@@ -142,25 +141,11 @@ const _INV_STATUS_ORDER = ['開立中', '已開立', '作廢'];
 //   未收款 ──客戶匯錢進來──▶ 待撥款 ──應付帳款把請款單付掉──▶ 已撥款
 // 代開不用「已收款」是因為收到錢只是換公司欠代開人 —— 「待撥款」一眼就看得出
 // 還有一筆錢要出去。跟請款單的「已付款」（我們真的付掉一筆費用）是兩件事。
-const INV_PENDING_REMIT = '待撥款';
-const INV_REMITTED = '已撥款';
 const _INV_PAY_ORDER = ['未收款', '未付款', INV_PENDING_REMIT, '已收款',
                         INV_REMITTED, '作廢', ''];
 
 /** 款項狀態 badge。🔴 空白就顯示空白 —— 舊寫法 `payment_status || '未收款'` 會把
  *  「來源沒填」畫成「未收款」，等於替沒表態的資料表態（匯入歷史發票時有 21 張）。 */
-function _payBadge(status) {
-    const s = (status || '').trim();
-    if (!s) return '<span class="crm-badge crm-pay-badge-unset">未設定</span>';
-    // 三段各一個顏色 —— 共用綠色的話一整欄看起來都一樣，分不出哪些還沒撥款。
-    // 待撥款＝紫（還有一筆錢要出去）、已撥款＝藍（收尾了）、已收款＝綠。
-    // 🔴 class 用語意 token 不用中文狀態字：拿中文當 class 名的話，改一次用詞
-    // 就得連 CSS 一起改（已轉撥→已撥款那次就是），而顯示的字只該住在這一行。
-    const cls = s === INV_REMITTED ? 'remitted'
-        : s === INV_PENDING_REMIT ? 'pending-remit'
-        : s === '已收款' ? 'collected' : s === '作廢' ? 'void' : 'unpaid';
-    return `<span class="crm-badge crm-pay-badge-${cls}">${_esc(s)}</span>`;
-}
 const _sorter = createSortable({
     storageKey: 'crm_invoices_sort',
     defaultSort: { key: 'date', dir: 'desc' },
@@ -943,8 +928,6 @@ function _populateClientSelect(selectedName) {
         _clients.map(c => `<option value="${_esc(c.short_name)}" data-taxid="${_esc(c.tax_id || '')}"${c.short_name === selectedName ? ' selected' : ''}>${_esc(c.short_name)}${c.tax_id ? ' (' + c.tax_id + ')' : ''}</option>`).join('');
 }
 
-// 稅率規則住在 crm-utils.invoiceAmounts —— 專案頁的「開發票」也走同一支。
-const _amountsFrom = invoiceAmounts;
 
 /** 金額三欄 + 客戶 → 統編 + 類別 → 代開匯款。
  *

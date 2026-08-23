@@ -54,18 +54,30 @@ def similarity(a: str, b: str) -> float:
     return best / min(len(a), len(b))
 
 
+def prepare(projects) -> list:
+    """[(id, name)] → [(id, name, 正規化後的名字)]，**一份請求算一次**。
+
+    🔴 沒有這支的話，`suggest_project` 會在候選迴圈裡呼叫 `normalize(name)` ——
+    400 張未掛請款單 × 238 個專案 ＝ 95,200 次（每次兩個 regex），而實際只需要
+    238 次。這是那 2.4 秒裡最沒必要的一段。
+    """
+    return [(pid, name, normalize(name)) for pid, name in projects]
+
+
 def suggest_project(summary: str, projects) -> dict | None:
     """{project_id, project_name, score, strong} 或 None（沒有值得看的候選）。
 
-    `projects` 是 [(id, name)]。同分時取**案名較短**的 —— 長案名容易靠一段
+    `projects` 吃 `prepare()` 的輸出；也收舊的 [(id, name)]（會就地正規化，
+    單元測試與一次性腳本方便）。同分時取**案名較短**的 —— 長案名容易靠一段
     通用字（「活動紀錄」「形象影片」）撞上一堆不相干的摘要。
     """
     s = normalize(summary)
     if len(s) < 2:            # 一個字的摘要配什麼都像
         return None
     best = None
-    for pid, name in projects:
-        sc = similarity(s, normalize(name))
+    for row in projects:
+        pid, name, npn = row if len(row) == 3 else (row[0], row[1], normalize(row[1]))
+        sc = similarity(s, npn)
         if sc < MIN_SCORE:
             continue
         if best is None or (sc, -len(name or "")) > (best[0], -len(best[2] or "")):

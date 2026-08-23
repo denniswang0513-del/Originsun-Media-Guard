@@ -112,7 +112,9 @@ def test_toast_is_imported_not_taken_off_window():
     講清楚的 409 原因，使用者一個字都看不到。（我第一版就是這樣寫的。）"""
     js = js_code_only(repo_src(JS))
     assert "window.crmToast" not in js, "又從 window 抓 crmToast 了"
-    assert "crmToast } from './crm-utils.js'" in js, "沒有 import crmToast"
+    import re
+    imp = re.search(r"import \{([^}]*)\} from './crm-utils.js'", js).group(1)
+    assert "crmToast" in imp, "沒有從 crm-utils import crmToast"
 
 
 def test_batch_mode_hides_the_quick_add_row():

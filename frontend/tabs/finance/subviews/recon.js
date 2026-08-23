@@ -1369,9 +1369,9 @@ _fr.stmtPickInv = (i) => {
     _pick = {
         q: '',
         sel,
-        sum() { let t = 0; this.sel.forEach(a => { t += (a.amt || 0); }); return t; },
-        feeSum() { let t = 0; this.sel.forEach(a => { t += (a.fee || 0); }); return t; },
-        remain() { return Math.max(0, target - this.sum()); },
+        /** k='amt' ＝分到的現金（要對上這列入帳）、k='fee' ＝被匯出行扣掉的。 */
+        total(k = 'amt') { let t = 0; this.sel.forEach(a => { t += (a[k] || 0); }); return t; },
+        remain() { return Math.max(0, target - this.total()); },
         render() {
             const all = list.filter(v => !this.q
                 || _pickHay(v.invoice_number, v.title, v.company_name).includes(this.q));
@@ -1423,9 +1423,9 @@ _fr.stmtPickInv = (i) => {
             }).join('') + tail;
         },
         foot() {
-            const t = this.sum();
+            const t = this.total();
             const diff = target - t;
-            const fee = this.feeSum();
+            const fee = this.total('fee');
             return `已分配 <b style="color:#eee;">$${fmtNum(t)}</b>
                 ／ 這列入帳 $${fmtNum(target)}
                 ${diff === 0
@@ -1510,22 +1510,24 @@ _fr.pickInvToggle = (id, on) => {
     _pick.redraw();
 };
 
-_fr.pickInvAmt = (id, v) => {
-    if (!_pick || !_pick.sel) return;
-    const amt = Math.max(0, Math.round(Number(v) || 0));
-    // 改分配金額 -> 匯費重算。手動填的匯費要留住的話別再動這格
-    //（owner 2026-08-23：「自動幫我填寫匯費，格子我可以修改調整」）。
-    _pick.sel.set(id, { amt, fee: _autoFee(_pickInv(id).outstanding, amt) });
-    _pick.redraw();
-};
-
-_fr.pickInvFee = (id, v) => {
+/** 改一列的 {amt, fee}。三個 handler 本來各自 guard 一次 _pick 又各自重建整個 pair。 */
+const _setSel = (id, patch) => {
     if (!_pick || !_pick.sel) return;
     const cur = _pick.sel.get(id);
     if (!cur) return;
-    _pick.sel.set(id, { amt: cur.amt, fee: Math.max(0, Math.round(Number(v) || 0)) });
+    _pick.sel.set(id, { ...cur, ...patch });
     _pick.redraw();
 };
+
+_fr.pickInvAmt = (id, v) => {
+    const amt = Math.max(0, Math.round(Number(v) || 0));
+    // 改分配金額 -> 匯費重算。手動填的匯費要留住的話別再動這格
+    //（owner 2026-08-23：「自動幫我填寫匯費，格子我可以修改調整」）。
+    _setSel(id, { amt, fee: _autoFee(_pickInv(id).outstanding, amt) });
+};
+
+_fr.pickInvFee = (id, v) =>
+    _setSel(id, { fee: Math.max(0, Math.round(Number(v) || 0)) });
 
 _fr.pickInvTake = () => { if (_pick) _pick.take(); };
 

@@ -89,9 +89,13 @@ def test_empty_inputs_do_not_explode():
 def test_the_suggestion_never_writes_itself_in():
     """🔴 建議不可以自己變成 project_id 送出去。owner 要的是確認，不是自動。"""
     js = js_code_only(repo_src(JS))
-    i = js.index("_batchApply")
-    seg = js[i:i + 1200]
-    assert "suggested" not in seg, "送出時碰到了 suggested —— 那就變成自動套用了"
+    # 🔴 只框**送出的那一段**（到 _fetch 為止）。整支 _batchApply 現在會在成功之後
+    #    把已掛好的列的 suggested 清掉 —— 那是對的，寬鬆地掃整支會誤判。
+    i = js.index("async function _batchApply(")
+    seg = js[i:js.index("_fetch('/payments/batch-project'", i)]
+    assert "suggested" not in seg, "送出前碰到了 suggested —— 那就變成自動套用了"
+    body = js[i:js.index("\n}", i)]
+    assert "project_id: projectId" in body, "送出的專案不是使用者選的那個"
 
 
 def test_suggestions_are_only_fetched_in_batch_mode():
