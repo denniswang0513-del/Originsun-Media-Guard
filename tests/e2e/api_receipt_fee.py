@@ -25,13 +25,16 @@ from core.auth import create_token  # noqa: E402
 TOK = create_token({'sub': 'admin', 'username': 'admin', 'access_level': 3,
                     'modules': ['finance', 'crm_invoices']})
 BASE = "http://localhost:8001/api/v1/finance"
+#: 關聯面板那組端點掛在 /crm 底下（同一個 app，不同前綴）
+CRM = "http://localhost:8001/api/v1/crm"
 TAG = "ZZFEE"
 fails = []
 
 
 def call(path, method="GET", body=None):
     r = urllib.request.Request(
-        BASE + path, method=method,
+        (BASE if path.startswith("/bank-statement") or path.startswith("/cash-entries") is False
+         else CRM) + path, method=method,
         data=json.dumps(body).encode("utf-8") if body is not None else None,
         headers={"Authorization": "Bearer " + TOK, "Content-Type": "application/json"})
     try:
@@ -155,6 +158,30 @@ try:
     check(entry["bank_fee"] == 30, "那 30 元落在 bank_fee", str(entry["bank_fee"]))
     check(link_amts == [149900], "發票認列收到 149,900", str(link_amts))
     check(status in ("已收款", "已收"), "發票標成收齊，不是尚欠 30", str(status))
+
+    print("")
+    print("[2b] 🔴 關聯面板重存一次，匯費不能被抹掉")
+    # 對帳單匯入那條路先做了收款側匯費，但 PUT /cash-entries/{id}/invoices
+    # （關聯面板／編輯視窗）當時還把 fee 靜默丟掉 —— 重存一次 deposit 的補回值
+    # 就沒了，帳戶淨流悄悄變回含匯費的數字，而那一列從此在對帳工作台配不上。
+    call(f"/cash-entries/{eid}/invoices", "PUT",
+         {"items": [{"invoice_id": inv_id, "amount": 149900, "fee": 30}]})
+    again, status2, links2 = asyncio.run(read_back(eid, inv_id))
+    print("    entry =", again)
+    flow2 = ((again["deposit"] or 0) - (again["expense"] or 0)
+             - (again["bank_fee"] or 0) - (again["claim"] or 0))
+    check(again["deposit"] == 149900, "deposit 還是 149,900", str(again["deposit"]))
+    check(again["bank_fee"] == 30, "bank_fee 還是 30", str(again["bank_fee"]))
+    check(flow2 == 149870, "淨流仍是銀行說的 149,870", f"{flow2:,}")
+    check(links2 == [149900], "分配沒變", str(links2))
+
+    print("")
+    print("[2c] 重存時把匯費改成 0 → deposit 要退回銀行原本的數字")
+    call(f"/cash-entries/{eid}/invoices", "PUT",
+         {"items": [{"invoice_id": inv_id, "amount": 149870, "fee": 0}]})
+    zero, _s, _l = asyncio.run(read_back(eid, inv_id))
+    check(zero["deposit"] == 149870, "deposit 退回 149,870", str(zero["deposit"]))
+    check(not zero["bank_fee"], "bank_fee 清掉了", str(zero["bank_fee"]))
 
     print("")
     print("[3] 沒有匯費的列不受影響（回歸）")

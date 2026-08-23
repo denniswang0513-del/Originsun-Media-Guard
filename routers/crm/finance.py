@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
 from core.crm_logic import normalize_tax_id
+from core.finance_logic import recognize_receipt_fee
 from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 INVOICE_PASSTHROUGH_COLLECTED,
                                 INVOICE_PENDING_REMIT, INVOICE_REMITTED,
@@ -344,14 +345,19 @@ async def _resettle_invoice(session, invoice_id, when=None,
 # 兩種分配（收款掛發票／匯款掛請款單）驗的是同樣四件事，差別只有查哪張表
 # 與訊息裡的名詞。本來各寫一份，於是同一個錯誤在兩邊回不同的 HTTP 碼
 #（跨帳本 409 vs 422）、空 id 一邊擋一邊靜靜丟掉。
+# `fee` ＝那一側怎麼認列匯費。兩側方向相反（見 core.finance_logic 兩支的
+# docstring）：付款守「總流出不變」從 expense 搬出來、收款守「淨流入不變」往
+# deposit 補回去。放在這張表裡，_write_allocs 就只有一條路。
 _ALLOC_KINDS = {
     "invoice": {"model": CrmInvoice, "noun": "發票", "id_field": "invoice_id",
                 "dup": "同一張發票不可重複掛在同一筆收款",
-                "label": lambda o: o.invoice_number or o.title},
+                "label": lambda o: o.invoice_number or o.title,
+                "fee": ("deposit", recognize_receipt_fee)},
     "payment": {"model": CrmPaymentRequest, "noun": "請款單",
                 "id_field": "payment_request_id",
                 "dup": "同一張請款單重複出現",
-                "label": lambda o: o.summary or o.payee_name},
+                "label": lambda o: o.summary or o.payee_name,
+                "fee": ("expense", recognize_bank_fee)},
 }
 # replace / load / verdict 定義在檔案後段 —— 這裡延後綁定（模組載入完才填），
 # 免得為了湊順序把三組相關的函式拆散。
@@ -2107,13 +2113,18 @@ async def _write_allocs(request, entry_id: str, kind: str, items, fee=None):
             ent, kind)
         await k["replace"](session, e, rows)
         if fee is not None:
-            # 不變量（總流出不變）與冪等性在 core.finance_logic.recognize_bank_fee
-            # —— 那是錢的規則，要有自己的單元測試，不該住在端點裡。
+            # 不變量與冪等性在 core.finance_logic 的兩支 recognize_*_fee ——
+            # 那是錢的規則，要有自己的單元測試，不該住在端點裡。
+            # 🔴 依 kind 取，不要寫死付款側：收款側加上 fee 欄位之後（對帳單匯入
+            #    那條路先做了），這裡若還只認 recognize_bank_fee，關聯面板重存一次
+            #    就會把 deposit 的補回值抹掉 —— 帳戶淨流悄悄變回含匯費的數字，
+            #    那一列從此在對帳工作台配不上，而且畫面上完全看不出來。
+            col, recognize = k["fee"]
             try:
-                e.expense, bf = recognize_bank_fee(e.expense, e.bank_fee, fee)
+                setattr(e, col, recognize(getattr(e, col), e.bank_fee, fee)[0])
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc))
-            e.bank_fee = bf or None
+            e.bank_fee = int(fee) or None
         await session.commit()
         items_out, allocated = await k["load"](session, e)
     return {"ok": True, "items": items_out, "check": k["verdict"](e, allocated)}
@@ -2149,8 +2160,14 @@ async def set_cash_entry_invoices(entry_id: str, req: CashInvoiceLinksPayload,
 
     副作用（刻意）：`invoice_id` / `invoice_number` / `has_invoice` 同步成金額最大
     的那張發票 —— 列表與舊查詢都讀這幾欄，不同步的話畫面會跟明細對不起來。
+
+    🔴 `fee` 從**各列加總**來，不是 payload 上的單一欄：收款側的匯費是逐張發票
+    被扣的（客戶匯三張的錢，可能只有其中一張被扣了 30），前端也是那樣填的。
+    加總後才是這筆收款要補回 deposit 的金額。
     """
-    return await _write_allocs(request, entry_id, "invoice", req.items)
+    fee = sum(int(it.fee or 0) for it in (req.items or []))
+    return await _write_allocs(request, entry_id, "invoice", req.items,
+                               fee=fee if req.items else None)
 
 
 _bind_alloc_ops()

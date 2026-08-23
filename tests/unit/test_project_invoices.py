@@ -108,7 +108,11 @@ def test_it_does_not_pretend_a_missing_contract_amount_is_zero():
     """🔴 238 個專案裡只有 21 個填了 contract_amount。沒填就不顯示「還能開」，
     不要拿 0 當上限 —— 那會讓每個案子都顯示「還能開 -500,000」。"""
     js = _js()
-    assert "const left = contract ? contract - issued : null;" in js
+    # 推導收在 _remaining()（摘要列與開票視窗共用，兩邊各推一次就會漂）
+    i = js.index("function _remaining(")
+    seg = js[i:i + 300]
+    assert "contract ? contract - _sum(_receipts(), 'amount_total') : null" in seg, \
+        "沒填合約時沒有回 null —— 拿 0 當上限會讓每個案子都顯示「還能開 -500,000」"
     assert "合約金額未填" in repo_src(JS), "沒填時沒有講出來"
 
 

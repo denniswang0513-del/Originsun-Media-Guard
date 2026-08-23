@@ -42,12 +42,19 @@ function _sum(list, key) {
  * 「還能開」是這一頁存在的第二個理由 —— 分期請款時最重要的數字，而發票本
  * 永遠算不出來（它不知道合約金額）。⚠ 合約沒填就不顯示那一格，不要拿 0 當
  * 上限硬算（238 個專案裡只有 21 個填了 contract_amount）。 */
+/** 還能開＝合約 − 已開；合約沒填回 null（不是 0 —— 那會讓每個案子都顯示
+ *  「還能開 -500,000」）。摘要列與開票視窗都要這個數，兩邊各推一次就會漂。 */
+function _remaining() {
+    const contract = Number(_cur?.contract_amount) || 0;
+    return contract ? contract - _sum(_receipts(), 'amount_total') : null;
+}
+
 function _summaryHtml() {
     const rows = _receipts();
     const issued = _sum(rows, 'amount_total');
     const got = _sum(rows, 'collected');
     const contract = Number(_cur?.contract_amount) || 0;
-    const left = contract ? contract - issued : null;
+    const left = _remaining();
     // val 收「已經格式化好的字串」—— 「還能開」在合約沒填時要顯示文字而不是金額，
     // 讓 cell 只管排版就不用為那個情況抄一份 markup。
     const cell = (label, val, color) => `
@@ -105,9 +112,7 @@ _P.create = function _openCreate() {
     if (!_cur) return;
     const host = document.getElementById('proj-inv-modal');
     if (!host) return;
-    const rows = _receipts();
-    const contract = Number(_cur.contract_amount) || 0;
-    const left = contract ? contract - _sum(rows, 'amount_total') : null;
+    const left = _remaining();
     host.className = 'crm-modal-overlay';   // 背景、置中、z-index 都交給 crm.css
     host.innerHTML = `
       <div class="crm-modal" style="max-width:560px;padding:18px;">
@@ -226,9 +231,11 @@ export async function loadInvoicesTab(projectId) {
         _invoices = inv.invoices || [];
         _client = (cli.clients || []).find(c => c.id === _cur?.client_id) || null;
     } catch (e) {
+        // 🔴 重試要帶**這次要載的 id**，不能靠 _cur —— 第一次就失敗時 _cur 還是
+        //    null（或上一個專案），按下去不是沒反應就是載到別的案子。
         host.innerHTML = `<div style="color:#fca5a5;padding:20px;">載入失敗：${_esc(e.message || '')}
             <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:8px;"
-                onclick="window._projInv.reload()">重試</button></div>`;
+                onclick="window._projInv.reload('${_esc(projectId)}')">重試</button></div>`;
         return;
     }
     _renderTab();
@@ -252,4 +259,4 @@ function _renderTab() {
       <div id="proj-inv-modal" class="crm-modal-overlay" style="display:none;"></div>`;
 }
 
-_P.reload = () => { if (_cur) loadInvoicesTab(_cur.id); };
+_P.reload = (id) => { const pid = id || _cur?.id; if (pid) loadInvoicesTab(pid); };

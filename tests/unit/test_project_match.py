@@ -116,3 +116,25 @@ def test_the_suggestion_is_visually_marked_as_a_guess():
     js = repo_src(JS)
     assert "建議：" in js
     assert "不會自動掛" in js, "沒有告訴使用者這只是建議"
+
+
+def test_full_width_characters_are_folded():
+    """🔴 人打的案名混著全形英數是常態（「ＩＧＥＲ」「２０２５」），而全形與半形
+    在字串比對裡完全不同 —— 連年份前綴那條 regex 都不會匹配全形數字。
+
+    沒折的話那些案子相似度是 0，而「0 分」跟「沒有夠像的候選」在畫面上長得
+    一模一樣：使用者只會看到沒有建議，永遠不知道是這個原因。"""
+    assert normalize("ＩＧＥＲ") == normalize("IGER")
+    assert normalize("２０２５ 王道週年影片") == normalize("2025王道週年影片")
+    hit = suggest_project("ＩＧＥＲ 成果影片", [("a", "IGER 成果影片")])
+    assert hit is not None and hit["project_id"] == "a", "全形摘要配不到半形案名"
+
+
+def test_entering_batch_mode_actually_fetches_the_suggestions():
+    """🔴 `suggest=1` 只有在 _batch.on 為真時才會帶。進入批次模式如果只
+    renderList()，手上那份資料沒有 suggested —— 「建議：」要等使用者改一次篩選
+    才出現，第一次用起來像功能壞了（e2e 沒抓到，因為它先勾了篩選）。"""
+    js = js_code_only(repo_src(JS))
+    i = js.index("function _batchSetMode(")
+    seg = js[i:js.index("async function _batchApply(", i)]
+    assert "loadPayments()" in seg, "進批次模式沒有重抓 —— 建議不會出現"

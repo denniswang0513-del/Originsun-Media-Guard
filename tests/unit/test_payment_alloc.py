@@ -184,13 +184,24 @@ def test_fee_is_written_to_bank_fee():
     """手續費要進 bank_fee —— 那條路本來就把匯費算成管理費用與現金流出。
 
     認列那一步住在共用的 _write_allocs 裡（收付兩側同一條寫入流程），端點只
-    負責把 payload 的 fee 傳下去 —— 收款側的 payload 根本沒有那個欄位。
+    負責把 fee 傳下去。
+
+    🔴 2026-08-23 起**兩側都有** fee：收款側加了逐張發票的匯費（客戶匯三張的錢，
+    可能只有其中一張被扣 30）。所以 _write_allocs 不能再寫死付款側那支 ——
+    寫死的話，關聯面板重存一次就會把收款側補回 deposit 的值抹掉，帳戶淨流悄悄
+    變回含匯費的數字，那一列從此在對帳工作台配不上而且畫面上看不出來。
     """
     assert "fee=req.fee" in _body("async def set_cash_entry_payments(")
+    src = repo_src(SRC)
+    # 兩側的規則收在 _ALLOC_KINDS 的 fee 欄（欄位 + 認列函式）
+    assert '"fee": ("expense", recognize_bank_fee)' in src, "付款側沒走總流出不變那支"
+    assert '"fee": ("deposit", recognize_receipt_fee)' in src, "收款側沒走淨流入不變那支"
     body = _body("async def _write_allocs(")
-    assert "recognize_bank_fee(e.expense, e.bank_fee, fee)" in body
-    assert "e.bank_fee = bf or None" in body
-    assert "fee" not in _body("async def set_cash_entry_invoices("),         "收款側也送了 fee（那個 payload 沒有這個欄位）"
+    assert 'col, recognize = k["fee"]' in body, "認列又寫死成單一側了"
+    assert "e.bank_fee = int(fee) or None" in body
+    # 收款側要把各列的 fee 加總送下去（單一欄位表達不了逐張的匯費）
+    inv = _body("async def set_cash_entry_invoices(")
+    assert "int(it.fee or 0) for it in" in inv, "收款側沒有把逐張的匯費加總"
 
 
 def test_month_close_is_respected():

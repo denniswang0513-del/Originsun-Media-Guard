@@ -162,25 +162,31 @@ function _batchPopulateProjects() {
     sel.innerHTML = projectOptionsHtml(_projects, '— 掛到哪個專案 —', sel.value);
 }
 
-/** 清掉選取並重刷 —— 三個呼叫點本來各寫一遍。 */
-function _batchReset(repaintOnly = true) {
+/** 清掉選取。要不要重畫由呼叫端決定 —— 有的接著 _batchPaint()、有的接著
+ *  renderList()、進批次模式那條接著 loadPayments()，用布林參數表達不了。 */
+function _batchClearSel() {
     _batch.sel.clear();
     _batch.last = null;
-    if (repaintOnly) _batchPaint();
-    else renderList();
 }
 
 function _batchSetMode(on) {
     _batch.on = on;
-    _batch.sel.clear();
-    _batch.last = null;
+    _batchClearSel();
     const btn = document.getElementById('pay-btn-batch');
     if (btn) {
         btn.textContent = on ? '離開批次模式' : '批次掛專案';
         btn.classList.toggle('crm-btn-primary', on);
         btn.classList.toggle('crm-btn-secondary', !on);
     }
-    if (on) { closeDetail(); _batchPopulateProjects(); }
+    if (on) {
+        closeDetail();
+        _batchPopulateProjects();
+        // 🔴 要重抓 —— loadPayments 的 suggest=1 只有在批次模式下才會帶，而剛剛
+        //    才把 _batch.on 打開。只 renderList() 的話手上這份沒有 suggested，
+        //    「建議：」要等使用者改一次篩選才出現，看起來像功能壞了。
+        loadPayments();
+        return;
+    }
     renderList();
 }
 
@@ -196,8 +202,10 @@ async function _batchApply(projectId) {
             ? `${r.updated} 張已掛到「${r.project_name}」`
             : `${r.updated} 張已解除專案連結`);
         // 🔴 就地更新，不要 loadPayments() —— 批次模式下那會再跑一次 suggest
-        //    （生產實測 2.4 秒），而剛掛好的這幾張本來就不該再有建議。
-        //    補歷史時一個下午要按幾十次，每次都等一輪是沒有道理的。
+        //    （生產實測：帶 suggest 272ms vs 不帶 43ms，前端再重畫 810 列約
+        //    126ms），而剛掛好的這幾張本來就不該再有建議。補歷史時一個下午要按
+        //    幾十次。⚠ 先前這裡寫「2.4 秒」是誤植 —— 那是量到 CRM 分頁初始化的
+        //    wall-clock，不是這支端點。
         const done = new Set(ids);
         _payments.forEach(p => {
             if (!done.has(p.id)) return;
@@ -206,8 +214,7 @@ async function _batchApply(projectId) {
             if (projectId) delete p.suggested;
         });
         if (_filters.unassigned) _payments = _payments.filter(p => !done.has(p.id) || !projectId);
-        _batch.sel.clear();
-        _batch.last = null;
+        _batchClearSel();
         renderList();
     } catch (e) {
         // 後端是整批擋下並說明原因（例如類別不能連結專案）—— 原話顯示，
@@ -756,7 +763,8 @@ export async function initCrmPaymentsTab() {
     document.getElementById('pay-batch-all').addEventListener('click', () => {
         _batch.order.forEach(id => _batch.sel.add(id)); _batchPaint();
     });
-    document.getElementById('pay-batch-none').addEventListener('click', () => _batchReset());
+    document.getElementById('pay-batch-none').addEventListener('click',
+        () => { _batchClearSel(); _batchPaint(); });
     document.getElementById('pay-batch-samesugg').addEventListener('click', () => {
         // 選起「跟剛才點的那張同一個建議」的所有列，並把那個專案帶進下拉。
         // 使用者仍然要自己看過清單再按「掛上去」—— 這裡只省找的功夫。

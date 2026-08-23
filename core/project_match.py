@@ -20,6 +20,7 @@ token 化後幾乎沒有共同詞，子字串抓得到「當代繪畫獎」）�
 from __future__ import annotations
 
 import re
+import unicodedata
 
 #: 低於這個分數不給建議 —— 給了只會讓人多讀一行沒用的字
 MIN_SCORE = 0.35
@@ -35,8 +36,14 @@ def normalize(name: str) -> str:
 
     「2025 王道週年影片」與「王道週年影片」是同一個案子；請款單那側幾乎都帶
     年份前綴（29 種 project_label 全部都有），專案主檔那側則不一定。
+
+    🔴 先 NFKC 折全形。人打的案名混著全形英數是常態（「ＩＧＥＲ」「２０２５」），
+    而全形與半形在字串比對裡完全不同 —— 連年份前綴那條 regex 都不會匹配全形數字。
+    沒折的話那些案子的相似度是 0，而「0 分」跟「沒有夠像的候選」在畫面上長得
+    一模一樣：使用者只會看到沒有建議，永遠不知道是這個原因。
     """
-    return _NOISE.sub("", _YEAR_PREFIX.sub("", (name or "").strip()))
+    folded = unicodedata.normalize("NFKC", (name or "").strip())
+    return _NOISE.sub("", _YEAR_PREFIX.sub("", folded))
 
 
 def similarity(a: str, b: str) -> float:
