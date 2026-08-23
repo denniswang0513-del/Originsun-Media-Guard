@@ -1011,7 +1011,7 @@ async def list_payments(
     request: Request,
     q: str = Query(""), category: str = Query(""),
     payment_status: str = Query(""), project_id: str = Query(""),
-    entity: str = Query(""),
+    unassigned: str = Query(""), entity: str = Query(""),
 ):
     # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
     # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
@@ -1034,6 +1034,14 @@ async def list_payments(
                 query = query.where(CrmPaymentRequest.payment_status == payment_status)
         if project_id:
             query = query.where(CrmPaymentRequest.project_id == project_id)
+        # 「還沒掛專案的」—— 補歷史時最常用的一刀。只看**該掛而未掛**的
+        # （類別在 project_link.PAYMENT_CATEGORIES 裡），行政/薪資那種本來就不該掛，
+        # 混進來只會讓待辦清單看起來永遠做不完。
+        if unassigned:
+            query = query.where(
+                or_(CrmPaymentRequest.project_id.is_(None),
+                    CrmPaymentRequest.project_id == ""),
+                CrmPaymentRequest.category.in_(_PAYMENT_LINK_CATEGORIES))
         if q:
             ql = f"%{q}%"
             query = query.where(or_(
@@ -1168,6 +1176,73 @@ async def list_advance_payments(request: Request, returned: int = -1,
     elif returned == 1:
         result = [r for r in result if r["is_settled"]]
     return {"advances": result}
+
+
+@router.patch("/payments/batch-project")
+async def batch_assign_project(request: Request):
+    """批次把請款單掛到專案（owner 2026-08-23：「專案我可以手動掛，精準為主」）。
+
+    為什麼要有它：817 張請款單裡「專案外包」371 張／1,101 萬，一張都沒掛專案，
+    而那是營收的 73.5%。逐張開視窗掛得掛到天荒地老；但自動比對又不可靠
+    （project_label 只有 140 張有填、29 種值，跟專案名精確吻合 0 筆）。
+    所以：人來判斷、機器只負責一次寫很多筆。
+
+    F1 月結守衛判準：改的是「這筆錢屬於哪個案子」的歸屬，金額、request_date、
+    payment_date 都沒動 —— 帳沒變，不掛守衛（與 batch-month 同一判準）。
+
+    🔴 但**類別守衛照掛**（core.project_link.PAYMENT_CATEGORIES，本檔以 _PAYMENT_LINK_CATEGORIES 引入）：行政／薪資
+    那種公司層級支出掛到專案上，專案毛利就會多算一筆不屬於它的錢。批次一次
+    幾十張，錯起來比逐張更難發現 —— 所以這裡是整批擋下、把違規的列出來，
+    不是默默跳過（默默跳過＝使用者以為掛好了）。
+    """
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    body = await request.json()
+    ids = body.get("payment_ids") or []
+    project_id = (body.get("project_id") or "").strip() or None
+    if not ids:
+        raise HTTPException(status_code=400, detail="請提供 payment_ids")
+
+    async with factory() as session:
+        ent = require_entity(request, body.get("entity") or "", level="full")
+        proj = None
+        if project_id:
+            proj = await session.get(CrmProject, project_id)
+            if not proj:
+                raise HTTPException(status_code=404, detail="找不到此專案")
+
+        rows = (await session.execute(
+            select(CrmPaymentRequest).where(
+                CrmPaymentRequest.id.in_(ids)))).scalars().all()
+        found = {r.id for r in rows}
+        missing = [i for i in ids if i not in found]
+        if missing:
+            raise HTTPException(status_code=404,
+                                detail=f"{len(missing)} 張請款單不存在（可能剛被刪掉）")
+
+        cross = [r for r in rows if (r.entity or "parent") != ent]
+        if cross:
+            raise HTTPException(status_code=409,
+                                detail=f"{len(cross)} 張請款單屬於另一本帳，不可跨帳本掛專案")
+
+        # 掛上去才需要驗類別；解除連結（project_id=None）永遠合法
+        if project_id:
+            bad = [r for r in rows if (r.category or "") not in _PAYMENT_LINK_CATEGORIES]
+            if bad:
+                names = "、".join(sorted({r.category or "未分類" for r in bad}))
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"其中 {len(bad)} 張的類別（{names}）不能連結專案 —— "
+                           f"可連結的類別：{'、'.join(_PAYMENT_LINK_CATEGORIES)}。"
+                           "請先取消勾選那幾張，或改掉它們的類別。")
+
+        for r in rows:
+            r.project_id = project_id
+            r.updated_at = _now()
+        await session.commit()
+    return {"status": "ok", "updated": len(rows),
+            "project_name": (proj.name if proj else "")}
 
 
 @router.patch("/payments/batch-month")

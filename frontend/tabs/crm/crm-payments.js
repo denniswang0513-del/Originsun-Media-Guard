@@ -1,14 +1,18 @@
 /**
  * crm-payments.js — 請款管理子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, today } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, today, crmToast } from './crm-utils.js';
 
 let _payments = [];
 let _projects = [];
 let _staffList = [];
 let _selectedId = null;
 let _editingId = null;
-let _filters = { q: '', category: '', payment_status: '', project_id: '' };
+let _filters = { q: '', category: '', payment_status: '', project_id: '', unassigned: false };
+/** 批次掛專案（owner 2026-08-23：「專案我可以手動掛，精準為主」）。
+ *  `order` 是**畫面上的順序**，Shift 範圍選要靠它 —— 用 _payments 的原順序會在
+ *  排序過之後選到完全不相干的一段。 */
+let _batch = { on: false, sel: new Set(), order: [], last: null };
 let _csvFile = null;
 
 async function loadPayments() {
@@ -17,6 +21,7 @@ async function loadPayments() {
     if (_filters.category)       params.set('category', _filters.category);
     if (_filters.payment_status) params.set('payment_status', _filters.payment_status);
     if (_filters.project_id)     params.set('project_id', _filters.project_id);
+    if (_filters.unassigned)     params.set('unassigned', '1');
     try { _payments = (await _fetch('/payments?' + params)).payments || []; }
     catch (_) { _payments = []; }
     renderList();
@@ -28,6 +33,7 @@ async function loadProjects() {
 }
 
 function _populateProjectFilter() {
+    _batchPopulateProjects();
     const sel = document.getElementById('pay-filter-project');
     if (!sel) return;
     const current = sel.value;
@@ -72,8 +78,13 @@ function renderList() {
             + `<div class="crm-empty">尚無請款${_filters.q ? '，請調整搜尋' : ''}</div>`;
         return;
     }
-    body.innerHTML = _quickAddRow() + _sorter.sorted(_payments).map(p => `
-        <div class="crm-row pay-row${p.id === _selectedId ? ' selected' : ''}" onclick="window._paySelect('${p.id}')">
+    const rows = _sorter.sorted(_payments);
+    _batch.order = rows.map(p => p.id);
+    body.innerHTML = (_batch.on ? '' : _quickAddRow()) + rows.map(p => `
+        <div class="crm-row pay-row${p.id === _selectedId && !_batch.on ? ' selected' : ''}"
+             style="${_batch.on && _batch.sel.has(p.id)
+                 ? 'background:#1e3a2a;box-shadow:inset 3px 0 0 #22c55e;' : ''}"
+             onclick="window._payRowClick(event, '${p.id}')">
             <span>${p.request_date ? p.request_date.substring(0, 10) : '—'}</span>
             <span style="font-weight:600;color:#e0e0e0;">${_esc(p.summary)}</span>
             <span style="font-weight:600;color:#e0e0e0;">$${_fmtNum(p.amount)}</span>
@@ -85,6 +96,87 @@ function renderList() {
             ${kebabMenuHtml(p.id, { onEdit: '_payEdit', onDuplicate: '_payDup', onDelete: '_payDelete' })}
         </div>
     `).join('');
+    _batchRefreshBar();
+}
+
+// ── 批次掛專案 ────────────────────────────────────────────────
+
+/** 批次模式時點列＝選取，否則照舊開詳情。
+ *  Shift＋點＝從上一次點的那列選到這列（照畫面順序）。 */
+window._payRowClick = (ev, id) => {
+    if (!_batch.on) { window._paySelect(id); return; }
+    const order = _batch.order;
+    if (ev && ev.shiftKey && _batch.last && order.includes(_batch.last)) {
+        const a = order.indexOf(_batch.last), b = order.indexOf(id);
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        // 範圍一律**加選**（不是 toggle）—— toggle 會讓中間已選的被取消，
+        // 那是使用者最不想要的結果
+        for (let i = lo; i <= hi; i++) _batch.sel.add(order[i]);
+    } else if (_batch.sel.has(id)) {
+        _batch.sel.delete(id);
+    } else {
+        _batch.sel.add(id);
+    }
+    _batch.last = id;
+    renderList();
+};
+
+function _batchRefreshBar() {
+    const bar = document.getElementById('pay-batch-bar');
+    if (!bar) return;
+    bar.style.display = _batch.on ? 'flex' : 'none';
+    const el = document.getElementById('pay-batch-count');
+    if (!el) return;
+    const picked = _payments.filter(p => _batch.sel.has(p.id));
+    const sum = picked.reduce((n, p) => n + (Number(p.amount) || 0), 0);
+    el.innerHTML = picked.length
+        ? `已選 <b style="color:#eee;">${picked.length}</b> 張 ／ 合計 <b style="color:#eee;">$${_fmtNum(sum)}</b>`
+        : '<span style="color:#6b7280;">點列選取，按住 Shift 可以選一整段</span>';
+}
+
+function _batchPopulateProjects() {
+    const sel = document.getElementById('pay-batch-project');
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— 掛到哪個專案 —</option>'
+        + _projects.map(p => `<option value="${p.id}"${p.id === cur ? ' selected' : ''}>`
+            + `${_esc(p.name)}${p.client_short_name ? ' (' + _esc(p.client_short_name) + ')' : ''}</option>`).join('');
+}
+
+function _batchSetMode(on) {
+    _batch.on = on;
+    _batch.sel.clear();
+    _batch.last = null;
+    const btn = document.getElementById('pay-btn-batch');
+    if (btn) {
+        btn.textContent = on ? '離開批次模式' : '批次掛專案';
+        btn.classList.toggle('crm-btn-primary', on);
+        btn.classList.toggle('crm-btn-secondary', !on);
+    }
+    if (on) { closeDetail(); _batchPopulateProjects(); }
+    renderList();
+}
+
+async function _batchApply(projectId) {
+    const ids = [..._batch.sel];
+    if (!ids.length) { crmToast('還沒選任何一張'); return; }
+    try {
+        const r = await _fetch('/payments/batch-project', {
+            method: 'PATCH',
+            body: JSON.stringify({ payment_ids: ids, project_id: projectId || null }),
+        });
+        crmToast(projectId
+            ? `${r.updated} 張已掛到「${r.project_name}」`
+            : `${r.updated} 張已解除專案連結`);
+        _batch.sel.clear();
+        _batch.last = null;
+        await loadPayments();
+    } catch (e) {
+        // 後端是整批擋下並說明原因（例如類別不能連結專案）—— 原話顯示，
+        // 不要吞成「操作失敗」，那會讓人不知道要取消勾選哪幾張
+        // 後端的 409 訊息很長而且是行動指示（要取消勾選哪幾張）—— 給久一點
+        crmToast(e.message || '批次掛專案失敗', 8000);
+    }
 }
 
 function _buildEditFields() {
@@ -618,6 +710,23 @@ export async function initCrmPaymentsTab() {
     document.getElementById('pay-filter-cat').addEventListener('change', e => { _filters.category = e.target.value; loadPayments(); });
     document.getElementById('pay-filter-status').addEventListener('change', e => { _filters.payment_status = e.target.value; loadPayments(); });
     document.getElementById('pay-filter-project').addEventListener('change', e => { _filters.project_id = e.target.value; loadPayments(); });
+    document.getElementById('pay-filter-unassigned').addEventListener('change', e => {
+        _filters.unassigned = e.target.checked; loadPayments();
+    });
+    document.getElementById('pay-btn-batch').addEventListener('click', () => _batchSetMode(!_batch.on));
+    document.getElementById('pay-batch-exit').addEventListener('click', () => _batchSetMode(false));
+    document.getElementById('pay-batch-all').addEventListener('click', () => {
+        _batch.order.forEach(id => _batch.sel.add(id)); renderList();
+    });
+    document.getElementById('pay-batch-none').addEventListener('click', () => {
+        _batch.sel.clear(); _batch.last = null; renderList();
+    });
+    document.getElementById('pay-batch-apply').addEventListener('click', () => {
+        const pid = document.getElementById('pay-batch-project').value;
+        if (!pid) { crmToast('先選一個專案'); return; }
+        _batchApply(pid);
+    });
+    document.getElementById('pay-batch-clear').addEventListener('click', () => _batchApply(''));
 
     document.getElementById('pay-btn-add').addEventListener('click', () => openModal());
 

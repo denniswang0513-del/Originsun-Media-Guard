@@ -20,7 +20,14 @@
   <select id="pay-filter-project" class="crm-select">
     <option value="">全部專案</option>
   </select>
+  <label style="display:flex;align-items:center;gap:5px;color:#9ca3af;font-size:12px;
+                white-space:nowrap;cursor:pointer;"
+         title="只列出「專案外包／專案雜支」裡還沒掛專案的 —— 行政、薪資那種本來就不該掛，不會出現">
+    <input type="checkbox" id="pay-filter-unassigned"> 只看未掛專案
+  </label>
   <div class="crm-toolbar-right">
+    <button id="pay-btn-batch" class="crm-btn crm-btn-secondary"
+            title="開啟後點列＝選取（可按住 Shift 選一整段），再一次掛到同一個專案">批次掛專案</button>
     <button id="pay-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
     <button id="pay-btn-add" class="crm-btn crm-btn-primary">+ 新增請款</button>
   </div>
@@ -41,6 +48,21 @@
       <span style="flex:0 0 36px;"></span>
     </div>
     <div id="pay-list-body"><div class="crm-empty">載入中...</div></div>
+    <!-- 批次掛專案的操作列：只在批次模式出現 -->
+    <div id="pay-batch-bar" style="display:none;align-items:center;gap:10px;padding:8px 12px;
+         border-top:1px solid #2e2e2e;background:#1b1b1b;flex-wrap:wrap;">
+      <span id="pay-batch-count" style="color:#9ca3af;font-size:12px;"></span>
+      <button id="pay-batch-all" class="crm-btn crm-btn-secondary crm-btn-sm">全選目前清單</button>
+      <button id="pay-batch-none" class="crm-btn crm-btn-secondary crm-btn-sm">清除選取</button>
+      <select id="pay-batch-project" class="crm-select" style="min-width:220px;">
+        <option value="">— 掛到哪個專案 —</option>
+      </select>
+      <button id="pay-batch-apply" class="crm-btn crm-btn-primary crm-btn-sm">掛上去</button>
+      <button id="pay-batch-clear" class="crm-btn crm-btn-secondary crm-btn-sm"
+              title="把選取的這幾張從專案上拿下來">解除連結</button>
+      <span style="flex:1;"></span>
+      <button id="pay-batch-exit" class="crm-btn crm-btn-secondary crm-btn-sm">結束批次</button>
+    </div>
   </div>
 
   <div class="crm-resize-handle" id="pay-resize-handle" style="display:none;"></div>
