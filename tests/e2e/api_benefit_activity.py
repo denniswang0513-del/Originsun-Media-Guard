@@ -24,9 +24,15 @@ sys.path.insert(0, r"E:\Dev\Originsun-Media-Guard")
 from core.auth import create_token  # noqa: E402
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001") + "/api/v1"
+
+from tests.e2e._guard import refuse_prod_seed  # noqa: E402
+
+refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
+
 # DB helper 要跟 API 打同一個庫（生產跑時把生產的 settings 插到最前面）
 if ":8000" in BASE:
     sys.path.insert(0, r"C:\OriginsunAgent")
+
     os.chdir(r"C:\OriginsunAgent")
 ADMIN = create_token({"sub": "admin", "username": "admin",
                       "access_level": 3, "modules": []})
@@ -35,12 +41,10 @@ FIX = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 fails = []
 LEFTOVER = []
 
-
 def check(ok, label, extra=""):
     print(("  PASS " if ok else "  FAIL ") + label + (f" — {extra}" if extra != "" else ""))
     if not ok:
         fails.append(label)
-
 
 def call(m, path, body=None, tok=ADMIN):
     d = json.dumps(body).encode() if body is not None else None
@@ -55,7 +59,6 @@ def call(m, path, body=None, tok=ADMIN):
             return e.code, json.loads(b or b"{}")
         except Exception:
             return e.code, b.decode("utf-8", "replace")
-
 
 def upload(pool_id, tok=ADMIN):
     bd = "----zzact"
@@ -72,7 +75,6 @@ def upload(pool_id, tok=ADMIN):
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read() or b"{}")
 
-
 async def setup():
     from db.session import init_db, get_session_factory
     from db.models import CrmStaff, User
@@ -87,7 +89,6 @@ async def setup():
             out[who] = st.id
         await s.commit()
         return out
-
 
 async def teardown():
     from db.session import init_db, get_session_factory
@@ -126,7 +127,6 @@ async def teardown():
                 CrmStaff.name.like("ZZ活動%")))).scalars().all():
             await s.delete(st)
         await s.commit()
-
 
 asyncio.run(teardown())
 staff = asyncio.run(setup())

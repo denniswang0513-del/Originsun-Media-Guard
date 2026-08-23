@@ -20,17 +20,21 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001"
 if ":8000" in BASE:
     sys.path.insert(0, r"C:\OriginsunAgent")
+
     os.chdir(r"C:\OriginsunAgent")
+
+from tests.e2e._guard import refuse_prod_seed  # noqa: E402
+
+refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
+
 T = create_token({"sub": "admin", "username": "admin", "access_level": 3,
                   "modules": ["money_view", "crm_invoices"]})
 fails = []
-
 
 def check(ok, label, extra=""):
     print(("  PASS " if ok else "  FAIL ") + label + (f" — {extra}" if extra != "" else ""))
     if not ok:
         fails.append(label)
-
 
 def api(m, p, body=None):
     d = json.dumps(body).encode() if body is not None else None
@@ -41,7 +45,6 @@ def api(m, p, body=None):
             return f.status, json.loads(f.read() or b"{}")
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read() or b"{}")
-
 
 async def setup():
     from db.session import init_db, get_session_factory
@@ -60,7 +63,6 @@ async def setup():
         await s.commit()
         return ap.id, e.id
 
-
 async def teardown():
     from db.session import init_db, get_session_factory
     from sqlalchemy import select
@@ -77,7 +79,6 @@ async def teardown():
                 CrmPaymentRequest.summary.like("ZZUI%")))).scalars().all():
             await s.delete(a)
         await s.commit()
-
 
 asyncio.run(teardown())
 ap_id, entry_id = asyncio.run(setup())

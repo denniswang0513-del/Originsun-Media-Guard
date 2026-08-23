@@ -23,17 +23,21 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001"
 if ":8000" in BASE:
     sys.path.insert(0, r"C:\OriginsunAgent")
+
     os.chdir(r"C:\OriginsunAgent")
+
+from tests.e2e._guard import refuse_prod_seed  # noqa: E402
+
+refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
+
 T = create_token({"sub": "admin", "username": "admin", "access_level": 3,
                   "modules": ["money_view", "crm_invoices"]})
 fails = []
-
 
 def check(ok, label, extra=""):
     print(("  PASS " if ok else "  FAIL ") + label + (f" — {extra}" if extra != "" else ""))
     if not ok:
         fails.append(label)
-
 
 def api(m, p, body=None):
     d = json.dumps(body).encode() if body is not None else None
@@ -44,7 +48,6 @@ def api(m, p, body=None):
             return f.status, json.loads(f.read() or b"{}")
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read() or b"{}")
-
 
 async def setup():
     """一張 100,000 的發票、已收 60,000（靠一筆舊收款掛上去），
@@ -72,7 +75,6 @@ async def setup():
         await s.commit()
         return inv.id, new.id
 
-
 async def teardown():
     from db.session import init_db, get_session_factory
     from sqlalchemy import select
@@ -93,7 +95,6 @@ async def teardown():
             await s.delete(i)
         await s.commit()
 
-
 def open_cashbook(pg):
     pg.evaluate("window.switchTab('tab_crm_invoices')")
     pg.wait_for_timeout(3000)
@@ -104,7 +105,6 @@ def open_cashbook(pg):
     # 🔴 列是 div.crm-row 不是 <tr>，而且一定要框在 #cash-list-body 裡
     #    （這個 SPA 有一堆隱藏表格，全頁找會抓到別的 tab 的列）。
     pg.wait_for_selector("#cash-list-body .crm-row", timeout=30000)
-
 
 asyncio.run(teardown())
 inv_id, entry_id = asyncio.run(setup())

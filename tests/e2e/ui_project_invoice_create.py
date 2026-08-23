@@ -24,12 +24,17 @@ from core.auth import create_token  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001"
+
+
+from tests.e2e._guard import refuse_prod_seed  # noqa: E402
+
+refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
+
 T = create_token({"sub": "admin", "username": "admin", "access_level": 3,
                   "modules": ["crm_projects", "crm_invoices", "crm_clients", "money_view"]})
 TAG = "ZZBIND"
 PROJ_NAME = TAG + " 綁定測試專案"
 fails = []
-
 
 def arun(coro):
     """在**獨立執行緒**跑 async —— playwright 的同步 API 佔著這條執行緒的
@@ -40,12 +45,10 @@ def arun(coro):
     t.join()
     return box.get("v")
 
-
 def check(ok, label, extra=""):
     print(("  PASS " if ok else "  FAIL ") + label + (f" — {extra}" if extra != "" else ""))
     if not ok:
         fails.append(label)
-
 
 async def seed():
     from db.models import Client as CrmClient
@@ -62,7 +65,6 @@ async def seed():
         s.add(proj)
         await s.commit()
         return proj.id
-
 
 async def read_back():
     from sqlalchemy import select
@@ -81,7 +83,6 @@ async def read_back():
                 "tax_amount": inv.tax_amount, "company_name": inv.company_name,
                 "tax_id": inv.tax_id, "number": inv.invoice_number}
 
-
 async def clean():
     from sqlalchemy import select
 
@@ -96,7 +97,6 @@ async def clean():
             for r in (await s.execute(select(m).where(col.like(TAG + "%")))).scalars().all():
                 await s.delete(r)
         await s.commit()
-
 
 asyncio.run(clean())
 PID = asyncio.run(seed())

@@ -19,7 +19,13 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001"
 if ":8000" in BASE:
     sys.path.insert(0, r"C:\OriginsunAgent")
+
     os.chdir(r"C:\OriginsunAgent")
+
+from tests.e2e._guard import refuse_prod_seed  # noqa: E402
+
+refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
+
 ADMIN = create_token({"sub": "admin", "username": "admin",
                       "access_level": 3, "modules": []})
 NAME = "ZZ_UI 年度活動"
@@ -28,12 +34,10 @@ FIX = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 fails = []
 LEFTOVER = []
 
-
 def check(ok, label, extra=""):
     print(("  PASS " if ok else "  FAIL ") + label + (f" — {extra}" if extra != "" else ""))
     if not ok:
         fails.append(label)
-
 
 def api(m, path, body=None, tok=ADMIN):
     d = json.dumps(body).encode() if body is not None else None
@@ -44,7 +48,6 @@ def api(m, path, body=None, tok=ADMIN):
             return f.status, json.loads(f.read() or b"{}")
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read() or b"{}")
-
 
 async def _setup():
     from db.session import init_db, get_session_factory
@@ -57,7 +60,6 @@ async def _setup():
                    modules=["me_benefits"], staff_id=st.id))
         await s.commit()
         return st.id
-
 
 async def _teardown():
     from db.session import init_db, get_session_factory
@@ -89,7 +91,6 @@ async def _teardown():
                 CrmStaff.name == "ZZ活動員工"))).scalars().all():
             await s.delete(st)
         await s.commit()
-
 
 asyncio.run(_teardown())
 staff_id = asyncio.run(_setup())

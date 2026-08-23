@@ -27,12 +27,17 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001"
 if ":8000" in BASE:
     sys.path.insert(0, r"C:\OriginsunAgent")
+
+
+from tests.e2e._guard import refuse_prod_seed  # noqa: E402
+
+refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
+
 T = create_token({"sub": "admin", "username": "admin", "access_level": 3,
                   "modules": ["money_view", "crm_invoices"]})
 TAG = "ZZSUG"
 SUGG_NAME = TAG + "太赫茲年度大會紀錄"
 fails = []
-
 
 async def seed():
     """一個案子 ＋ 三張摘要帶「ZZSUG太赫茲」的請款單 —— 建議必中。"""
@@ -49,7 +54,6 @@ async def seed():
                 payee_name=TAG + "廠商", payment_status="應付款"))
         await s.commit()
 
-
 async def clean():
     from sqlalchemy import select
 
@@ -63,22 +67,18 @@ async def clean():
                 await s.delete(r)
         await s.commit()
 
-
 asyncio.run(clean())
 asyncio.run(seed())
-
 
 def check(ok, label, extra=""):
     print(("  PASS " if ok else "  FAIL ") + label + (f" — {extra}" if extra != "" else ""))
     if not ok:
         fails.append(label)
 
-
 def shown(pg, sel):
     return pg.evaluate(
         "(s) => { const e = document.querySelector(s);"
         " return !!e && getComputedStyle(e).display !== 'none'; }", sel)
-
 
 with sync_playwright() as p:
     b = p.chromium.launch()

@@ -18,18 +18,22 @@ from core.auth import create_token  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001"
+
+
+from tests.e2e._guard import refuse_prod_seed  # noqa: E402
+
+refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
+
 ADMIN = create_token({"sub": "admin", "username": "admin",
                       "access_level": 3, "modules": []})
 POOL_NAME = "ZZ_my 快樂"
 fails = []
 LEFTOVER = []      # 清不掉的檔案 —— 收尾要出聲
 
-
 def check(ok, label, extra=""):
     print(("  PASS " if ok else "  FAIL ") + label + (f" — {extra}" if extra != "" else ""))
     if not ok:
         fails.append(label)
-
 
 def api(m, path, body=None, tok=ADMIN):
     d = json.dumps(body).encode() if body is not None else None
@@ -40,7 +44,6 @@ def api(m, path, body=None, tok=ADMIN):
             return f.status, json.loads(f.read() or b"{}")
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read() or b"{}")
-
 
 async def _setup():
     from db.session import init_db, get_session_factory
@@ -54,7 +57,6 @@ async def _setup():
         await s.commit()
         return st.id
 
-
 async def _teardown():
     """清理走共用的 purge —— 七張表一次刪完（含**收支明細**與請款單）。
 
@@ -65,7 +67,6 @@ async def _teardown():
     from _benefit_residue import purge
     LEFTOVER.extend(await purge("ZZ\_my%"))
     LEFTOVER.extend(await purge("ZZ臨時員工"))
-
 
 asyncio.run(_teardown())      # 先清上一次的殘留
 staff_id = asyncio.run(_setup())

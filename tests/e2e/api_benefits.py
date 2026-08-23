@@ -15,6 +15,12 @@ sys.path.insert(0, r"E:\Dev\Originsun-Media-Guard")
 from core.auth import create_token  # noqa: E402
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001") + "/api/v1"
+
+
+from tests.e2e._guard import refuse_prod_seed  # noqa: E402
+
+refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
+
 IS_DEV = BASE.startswith("http://127.0.0.1:8001")
 TOK = create_token({"sub": "admin", "username": "admin",
                     "access_level": 3, "modules": []})
@@ -22,12 +28,10 @@ H = {"Authorization": "Bearer " + TOK, "Content-Type": "application/json"}
 PREFIX = "ZZ_測試池"
 fails = []
 
-
 def check(ok, label, extra=""):
     print(("  PASS " if ok else "  FAIL ") + label + (f" — {extra}" if extra != "" else ""))
     if not ok:
         fails.append(label)
-
 
 def call(m, path, body=None, raw=False):
     d = json.dumps(body).encode() if body is not None else None
@@ -42,7 +46,6 @@ def call(m, path, body=None, raw=False):
             return e.code, json.loads(b or b"{}")
         except Exception:
             return e.code, b.decode("utf-8", "replace")
-
 
 def purge():
     """只刪自己建的（名字前綴）—— 金絲雀鐵則。已付款的登記走 DB
@@ -77,7 +80,6 @@ def purge():
             await s.commit()
 
     asyncio.run(_do())
-
 
 if IS_DEV:
     purge()

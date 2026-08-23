@@ -27,11 +27,16 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001"
 if ":8000" in BASE:
     sys.path.insert(0, r"C:\OriginsunAgent")
+
+
+from tests.e2e._guard import refuse_prod_seed  # noqa: E402
+
+refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
+
 T = create_token({"sub": "admin", "username": "admin", "access_level": 3,
                   "modules": ["crm_projects", "crm_invoices", "crm_clients", "money_view"]})
 TAG = "ZZPI"
 fails = []
-
 
 async def seed():
     from db.models import Client as CrmClient, CrmInvoice, CrmProject
@@ -62,7 +67,6 @@ async def seed():
         await s.commit()
         return proj.id, other.id, cli.short_name
 
-
 async def clean():
     from sqlalchemy import select
 
@@ -77,16 +81,13 @@ async def clean():
                 await s.delete(r)
         await s.commit()
 
-
 asyncio.run(clean())
 PID, OTHER_ID, SHORT = asyncio.run(seed())
-
 
 def check(ok, label, extra=""):
     print(("  PASS " if ok else "  FAIL ") + label + (f" — {extra}" if extra != "" else ""))
     if not ok:
         fails.append(label)
-
 
 with sync_playwright() as p:
     b = p.chromium.launch()

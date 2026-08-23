@@ -16,6 +16,12 @@ from core.auth import create_token  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001"
+
+
+from tests.e2e._guard import refuse_prod_seed  # noqa: E402
+
+refuse_prod_seed(BASE)   # 這支會種資料 —— 絕不可打到生產
+
 TOK = create_token({"sub": "admin", "username": "admin",
                     "access_level": 3, "modules": []})
 H = {"Authorization": "Bearer " + TOK, "Content-Type": "application/json"}
@@ -23,12 +29,10 @@ POOL_NAME = "ZZ_UI 快樂"
 fails = []
 LEFTOVER = []      # 刪不掉的單據 —— 結尾要出聲，不能靜默略過
 
-
 def check(ok, label, extra=""):
     print(("  PASS " if ok else "  FAIL ") + label + (f" — {extra}" if extra != "" else ""))
     if not ok:
         fails.append(label)
-
 
 def api(m, path, body=None):
     d = json.dumps(body).encode() if body is not None else None
@@ -38,7 +42,6 @@ def api(m, path, body=None):
             return f.status, json.loads(f.read() or b"{}")
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read() or b"{}")
-
 
 def _purge():
     """只刪自己建的（名字前綴 ZZ_UI）—— 金絲雀鐵則。
@@ -77,7 +80,6 @@ def _purge():
             await s.commit()
 
     asyncio.run(_do())
-
 
 _purge()
 try:
