@@ -511,7 +511,8 @@ async def _finance_calendar_check() -> None:
     async def _body(factory, now):
         if now.day != 1:  # 只有每月 1 號有事，其餘日 body 空轉 → 底座標記當日完成
             return
-        from core.finance_logic import period_months, shift_month, vat_position
+        from core.finance_logic import (bookkeeping_fee, period_months,
+                                        shift_month, vat_position)
         cur_month = f"{now.year:04d}-{now.month:02d}"
         events: list = []  # [(template_key, kwargs)]，一次收齊當天該發的全部再統一送
 
@@ -549,9 +550,14 @@ async def _finance_calendar_check() -> None:
                                    inputs["cat_map"], vm)
                 net = int(vat["net"])
                 estimate = f"{net:,}" if net > 0 else "0（本期留抵）"
+                # 記帳費一起講：那筆稅是外部會計代繳的，記帳費跟稅款走**同一筆
+                # 匯出**，對帳時要拆成兩列。費率會變（2026-09 起調漲），而它以前
+                # 只活在人的記憶裡 —— 已經記錯過兩次、兩次都寫進了生產帳。
+                # 規則正本在 core.finance_logic.bookkeeping_fee（有單元測試）。
                 events.append(("vat_filing_due", {
                     "period": f"{vm[0]}~{vm[1]}",
                     "estimate": estimate,
+                    "fee": f"{bookkeeping_fee(cur_month):,}",
                 }))
             except Exception as e:
                 _log.warning("營業稅提醒計算失敗: %s", e)
