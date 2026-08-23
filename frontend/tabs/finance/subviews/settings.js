@@ -15,6 +15,7 @@ let _bankAccounts = [];
 let _coa = [];        // 會計科目
 let _map = [];        // 類別對映列
 let _unmapped = [];   // 待歸類
+let _fee = null;      // 記帳費費率（含歷史 + 未來幾期預覽）
 
 // 精靈帳戶列狀態（re-render 前先 _syncWizRows 保住已輸入值）
 let _wizRows = [];
@@ -77,10 +78,12 @@ export default async function render(container, ctx = {}) {
             () => finFetch('/accounts'),
             () => finFetch('/category-map'),
             () => finFetch('/category-map/unmapped').catch(() => ({ items: [] })),
+            () => finFetch('/bookkeeping-fee').catch(() => null),
         ],
     });
     if (!results) return;
-    const [bank, coa, map, unmapped] = results;
+    const [bank, coa, map, unmapped, fee] = results;
+    _fee = fee;
     _bankAccounts = bank.items || [];
     _coa = coa.items || [];
     _map = map.items || [];
@@ -129,6 +132,7 @@ function _renderShell() {
         <p style="color:#888;font-size:12px;margin:0 0 14px;">期初設定 + 收支類別 → 財務科目的對映，是三表與儀表板的地基。</p>
         ${_bankAccounts.length === 0 ? _wizardHtml() : ''}
         ${_unmappedHtml()}
+        ${_feeHtml()}
         ${_mapHtml()}
     `;
     if (_bankAccounts.length === 0) _renderWizRows();
@@ -303,6 +307,94 @@ _fs.addMap = async (btn) => {
             }),
         });
         finToast(`「${row.dataset.cat}」已加入對映`);
+        _fs.reload();
+    } catch (e) {
+        finToast(e.message, true);
+        btn.disabled = false;
+    }
+};
+
+// ── 記帳費 ──────────────────────────────────────────────────
+//
+// owner 2026-08-24：「寫一個按鈕設定會計費用來解決這件事，之後換會計調整這個
+// 按鈕就好」。費率是會變的商業決定 —— 之前只活在人的記憶裡，被講錯兩次、
+// 兩次都寫進了生產帳（2024/2025/2026 的 5 月期各被記成 8,000）。
+//
+// 🔴 舊費率**留著**：歷史期別要用當時的費率算。但使用者只填「從哪個月開始、
+//    多少錢」，那張生效日期表由後端自己維護 —— 不要求人去管它。
+
+function _feeHtml() {
+    if (!_fee) return '';
+    const cur = _fee.current || {};
+    const nextMonth = () => {
+        const d = new Date();
+        d.setMonth(d.getMonth() + 1);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    };
+    const hist = (_fee.rates || []).slice(0, -1).reverse();
+    return `
+    <div id="finset-fee-card" style="background:#1b1b1b;border:1px solid #2e2e2e;border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+        <h3 style="color:#eee;margin:0 0 4px;font-size:14px;">記帳費（外部會計）</h3>
+        <p style="color:#888;font-size:12px;margin:0 0 12px;">
+            會計代繳營業稅，記帳費跟稅款是<b>同一筆匯出</b> —— 對帳時要拆成兩列。
+            雙月收一次；一年超過 12 個月的部分，併在 <b>${_fee.extra_on_month || 5} 月</b>那期收。
+            換會計或調價就改這裡，<b>舊的會留著</b>（歷史期別要用當時的費率算）。
+        </p>
+
+        <div style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:14px;">
+            <div><div style="color:#6b7280;font-size:11px;">目前月費</div>
+                 <div style="color:#eee;font-size:16px;font-weight:600;">$${fmtNum(cur.monthly || 0)}</div></div>
+            <div><div style="color:#6b7280;font-size:11px;">一年計</div>
+                 <div style="color:#eee;font-size:16px;font-weight:600;">${cur.months_per_year || 12} 個月</div></div>
+            <div><div style="color:#6b7280;font-size:11px;">自</div>
+                 <div style="color:#9ca3af;font-size:16px;">${esc(cur.effective_from === '0000-00' ? '一開始' : (cur.effective_from || '—'))}</div></div>
+        </div>
+
+        <div style="color:#6b7280;font-size:11px;margin-bottom:5px;">接下來幾期會收</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+            ${(_fee.upcoming || []).map(u => `
+                <span style="background:#242424;border:1px solid #2e2e2e;border-radius:6px;
+                             padding:4px 9px;font-size:12px;color:#ccc;">
+                    ${esc(u.month)}　<b style="color:#eee;">$${fmtNum(u.fee)}</b></span>`).join('')}
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;
+                    border-top:1px solid #2a2a2a;padding-top:12px;">
+            <div><label style="display:block;color:#9ca3af;font-size:11px;margin-bottom:3px;">從哪一期開始</label>
+                 <input id="finset-fee-from" class="crm-input" type="month"
+                        value="${esc(nextMonth())}" style="width:150px;"></div>
+            <div><label style="display:block;color:#9ca3af;font-size:11px;margin-bottom:3px;">月費</label>
+                 <input id="finset-fee-monthly" class="crm-input" type="number" min="1"
+                        value="${cur.monthly || ''}" style="width:110px;text-align:right;"></div>
+            <div><label style="display:block;color:#9ca3af;font-size:11px;margin-bottom:3px;">一年計幾個月</label>
+                 <input id="finset-fee-months" class="crm-input" type="number" min="12" max="24"
+                        value="${cur.months_per_year || 12}" style="width:110px;text-align:right;"></div>
+            <button class="crm-btn crm-btn-primary" onclick="window._finSet.saveFee(this)">儲存</button>
+        </div>
+
+        ${hist.length ? `<div style="margin-top:12px;border-top:1px solid #2a2a2a;padding-top:10px;">
+            <div style="color:#6b7280;font-size:11px;margin-bottom:5px;">過去的費率（歷史期別會用它們算）</div>
+            ${hist.map(r => `<div style="color:#9ca3af;font-size:12px;padding:2px 0;">
+                ${esc(r.effective_from === '0000-00' ? '一開始' : r.effective_from)} 起
+                月費 $${fmtNum(r.monthly)}　一年 ${r.months_per_year} 個月</div>`).join('')}
+        </div>` : ''}
+    </div>`;
+}
+
+_fs.saveFee = async (btn) => {
+    const from = document.getElementById('finset-fee-from')?.value || '';
+    const monthly = Number(document.getElementById('finset-fee-monthly')?.value || 0);
+    const months = Number(document.getElementById('finset-fee-months')?.value || 0);
+    if (!/^\d{4}-\d{2}$/.test(from)) { finToast('請選生效的年月', true); return; }
+    if (!(monthly > 0)) { finToast('月費要大於 0', true); return; }
+    if (!(months >= 12)) { finToast('一年至少 12 個月', true); return; }
+    btn.disabled = true;
+    try {
+        await finFetch('/bookkeeping-fee', {
+            method: 'PUT',
+            body: JSON.stringify({ effective_from: from, monthly, months_per_year: months }),
+        });
+        finToast(`${from} 起改為月費 $${fmtNum(monthly)}、一年 ${months} 個月`);
         _fs.reload();
     } catch (e) {
         finToast(e.message, true);

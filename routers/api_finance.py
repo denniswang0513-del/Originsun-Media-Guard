@@ -42,13 +42,15 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
 from config import load_settings, save_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
-from core.finance_logic import (amortization_schedule,
+from core.finance_logic import (BOOKKEEPING_EXTRA_ON_MONTH,
+                                amortization_schedule,
                                 auto_match_statement_lines,
                                 bank_running_balance, cash_entry_flow,
                                 local_day, period_months, reconciliation_diff,
                                 statement_line_status, today_start,
                                 workbench_summary)
 from core.schemas import (BankAccountPayload,
+                          BookkeepingFeePut,
                           BulkAssignAccountPayload,
                           FinanceAdjustmentPayload, FinanceCategoryMapPut,
                           FinanceSetupWizardPayload, LoanPayload,
@@ -164,6 +166,67 @@ def _map_dict(m) -> dict:
     return {"id": m.id, "source": m.source, "category_text": m.category_text,
             "account_id": m.account_id, "treatment": m.treatment,
             "active": bool(m.active)}
+
+
+@router.get("/bookkeeping-fee")
+async def get_bookkeeping_fee(request: Request):
+    """記帳費費率 + 未來幾期會收多少。
+
+    owner 2026-08-24：「寫一個按鈕設定會計費用來解決這件事，之後換會計調整這個
+    按鈕就好」。費率是會變的商業決定 —— 之前只活在人的記憶裡，被講錯兩次、
+    兩次都寫進了生產帳。
+    """
+    _guard(request, "parent")
+    from core.finance_logic import bookkeeping_fee, load_bookkeeping_fee_rates
+    rates = load_bookkeeping_fee_rates()
+    rates.sort(key=lambda r: str(r.get("effective_from") or ""))
+    now = datetime.now()
+    # 接下來六個申報期（單數月）各收多少 —— 把規則算給人看，比讓人自己推可靠
+    upcoming, y, m = [], now.year, now.month
+    while len(upcoming) < 6:
+        if m % 2 == 1:
+            key = f"{y:04d}-{m:02d}"
+            upcoming.append({"month": key, "fee": bookkeeping_fee(key, rates)})
+        m += 1
+        if m > 12:
+            y, m = y + 1, 1
+    return {"rates": rates, "current": rates[-1] if rates else None,
+            "upcoming": upcoming,
+            "extra_on_month": BOOKKEEPING_EXTRA_ON_MONTH}
+
+
+@router.put("/bookkeeping-fee")
+async def set_bookkeeping_fee(payload: BookkeepingFeePut, request: Request):
+    """調整記帳費（換會計、漲價都走這裡）。
+
+    🔴 舊費率**留著不刪**：歷史期別要用當時的費率算，砍掉的話回頭對舊帳會全錯。
+    使用者只填「從哪個月開始、多少錢」，歷史由這裡自己維護 —— 不要求人去管
+    一張生效日期表。同一個生效月再存一次 ＝ 修正打錯的那筆（取代，不疊加）。
+    """
+    _guard(request, "parent", level="full")
+    eff = (payload.effective_from or "").strip()
+    if len(eff) != 7 or eff[4] != "-" or not eff[:4].isdigit() or not eff[5:7].isdigit():
+        raise HTTPException(status_code=422, detail="生效年月要是 YYYY-MM")
+    if not 1 <= int(eff[5:7]) <= 12:
+        raise HTTPException(status_code=422, detail=f"月份不對：{eff}")
+    if payload.monthly <= 0:
+        raise HTTPException(status_code=422, detail="月費要大於 0")
+    if payload.months_per_year < 12:
+        raise HTTPException(status_code=422, detail="一年至少 12 個月")
+
+    from core.finance_logic import load_bookkeeping_fee_rates
+    rates = [r for r in load_bookkeeping_fee_rates()
+             if str(r.get("effective_from") or "") != eff]
+    rates.append({"effective_from": eff, "monthly": int(payload.monthly),
+                  "months_per_year": int(payload.months_per_year)})
+    rates.sort(key=lambda r: str(r.get("effective_from") or ""))
+
+    settings = load_settings()
+    fin = settings.get("finance") or {}
+    fin["bookkeeping_fee"] = rates
+    settings["finance"] = fin
+    save_settings(settings)
+    return {"ok": True, "rates": rates}
 
 
 @router.get("/category-map")

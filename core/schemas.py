@@ -1050,6 +1050,16 @@ class FinanceCategoryMapPut(BaseModel):
     items: List[FinanceCategoryMapItem] = []
 
 
+class BookkeepingFeePut(BaseModel):
+    """調整記帳費（換會計、漲價）。使用者只填這三格，歷史由後端自己留。
+
+    `months_per_year` ＝ 一年計幾個月（雙月收一次，超過 12 的部分併在 5 月那期）。
+    """
+    effective_from: str                    # "YYYY-MM"，從哪一期開始用新價
+    monthly: int                           # 月費
+    months_per_year: int = 12
+
+
 class BankAccountPayload(BaseModel):
     """銀行帳戶新增/更新 — create 時 name 必填由端點檢查。"""
     name: Optional[str] = None

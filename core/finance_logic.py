@@ -737,29 +737,38 @@ def recognize_receipt_fee(deposit, bank_fee, fee) -> tuple:
     return net_in + fee, fee
 
 
-#: 記帳費費率。外部會計代繳營業稅，記帳費跟稅款走**同一筆匯出**（雙月一次），
-#: 所以每期對帳時都要把那一筆拆成「營業稅 + 記帳費」兩列 —— 拆錯就進錯科目。
-#: (生效年月, 月費, 一年計幾個月)，由舊到新。
+#: 記帳費費率的**出廠預設**。外部會計代繳營業稅，記帳費跟稅款走**同一筆匯出**
+#: （雙月一次），所以每期對帳都要把那一筆拆成「營業稅 + 記帳費」兩列。
 #:
-#: 🔴 owner 前後給過三個版本（2026-08-23 一天之內），這是他說「這個才是確定的」
-#:    那一版。作廢的兩版：① 一期 4,000／一年 14 個月 ② 單月 2,500／一年 14 個月。
-#:    第 ① 版害 2024/2025/2026 的 5 月期各被記成 8,000（實際應為 6,000）。
-#:    費率本來只活在人的記憶裡，所以才會一錯再錯 —— 現在它住在這裡。
-BOOKKEEPING_FEE_RATES = (
-    ("0000-00", 2000, 13),      # 一直到 2026-08
-    ("2026-09", 2500, 14),      # owner 2026-08-23 預告的調漲
+#: 🔴 正本是**設定**（settings `finance.bookkeeping_fee`），不是這裡 ——
+#:    owner 2026-08-24：「寫一個按鈕設定會計費用來解決這件事，之後換會計調整
+#:    這個按鈕就好」。費率是會變的商業決定，不該要改程式 + 發版。
+#:    這張表只在「還沒設定過」時當種子用。
+#:
+#: 沿革：owner 一天之內給過三個版本（2026-08-23）。作廢的兩版是
+#: ① 一期 4,000／一年 14 個月 ② 單月 2,500／一年 14 個月。第 ① 版害
+#: 2024/2025/2026 的 5 月期各被記成 8,000（實際應為 6,000）—— 費率當時只活在
+#: 人的記憶裡，所以才會一錯再錯。
+DEFAULT_BOOKKEEPING_FEE_RATES = (
+    {"effective_from": "0000-00", "monthly": 2000, "months_per_year": 13},
+    {"effective_from": "2026-09", "monthly": 2500, "months_per_year": 14},
 )
 
 #: 一年多收的那幾個月跟哪一期同收 —— 5 月那期（年度結算）。
 BOOKKEEPING_EXTRA_ON_MONTH = 5
 
 
-def bookkeeping_fee(pay_month: str) -> int:
+def bookkeeping_fee(pay_month: str, rates=None) -> int:
     """那一期的記帳費。`pay_month` ＝**實際付款**的年月（"YYYY-MM"）。
 
     雙月收一次 → 一期本來就是 2 個月；一年多收的那幾個月併在 5 月那期收。
-      · 2026-09 前：月費 2,000 × 一年 13 個月 → 一般期 4,000、5 月期 6,000
-      · 2026-09 起：月費 2,500 × 一年 14 個月 → 一般期 5,000、5 月期 10,000
+    所以「一般期」與「5 月期」是同一條規則推出來的，不是兩個各自寫死的數字
+    （之前錯的版本正是那個形狀：一般期對、5 月期多 2,000）。
+
+    `rates` ＝ 費率表（由舊到新的 dict 清單）。不給就去讀設定
+    `finance.bookkeeping_fee`，沒設定過才退回 DEFAULT_BOOKKEEPING_FEE_RATES。
+    🔴 讀設定收在這支裡，不是叫每個呼叫端自己讀 —— 漏讀的那個會靜默用到
+       出廠預設，而那正是這整件事要防的錯。
 
     對得上生產實際資料：2025 整年六期合計 26,000 ＝ 13 × 2,000（唯一乾淨的
     完整年度，改費率後拿它驗）。
@@ -767,13 +776,28 @@ def bookkeeping_fee(pay_month: str) -> int:
     m = (pay_month or "").strip()
     if len(m) < 7 or m[4] != "-" or not m[:4].isdigit() or not m[5:7].isdigit():
         raise ValueError(f"pay_month 要是 'YYYY-MM'，收到 {pay_month!r}")
-    monthly, per_year = 2000, 13
-    for eff, mo, yr in BOOKKEEPING_FEE_RATES:
-        if m >= eff:
-            monthly, per_year = mo, yr
+    if rates is None:
+        rates = load_bookkeeping_fee_rates()
+    monthly, per_year = 0, 12
+    for r in sorted(rates, key=lambda x: str(x.get("effective_from") or "")):
+        if m >= str(r.get("effective_from") or ""):
+            monthly = int(r.get("monthly") or 0)
+            per_year = int(r.get("months_per_year") or 12)
     # 一般期 2 個月；5 月那期再加上一年多收的（per_year − 12）
     months = 2 + (per_year - 12 if int(m[5:7]) == BOOKKEEPING_EXTRA_ON_MONTH else 0)
     return monthly * months
+
+
+def load_bookkeeping_fee_rates() -> list:
+    """設定裡的費率表；沒設定過就回出廠預設（**複本**，呼叫端改不到原件）。"""
+    try:
+        from config import load_settings
+        saved = (load_settings().get("finance") or {}).get("bookkeeping_fee")
+    except Exception:
+        saved = None
+    if not saved:
+        return [dict(r) for r in DEFAULT_BOOKKEEPING_FEE_RATES]
+    return [dict(r) for r in saved]
 
 
 def apply_payment_fee(entry, fee) -> None:
