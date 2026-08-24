@@ -1335,6 +1335,29 @@ class StatementImportApply(BaseModel):
     rows: List[StatementImportRow] = []
 
 
+class CardImportRow(BaseModel):
+    """信用卡帳單匯入的一列（api_finance_card）。amount 帶號：正=消費、負=退款。"""
+    date: str
+    amount: int
+    note: str = ""
+    category: Optional[str] = None
+
+
+class CardImportApply(BaseModel):
+    """卡單確認後寫入。不掛銀行帳戶（刷卡當下不動銀行 — status='card'）。"""
+    rows: List[CardImportRow] = []
+
+
+class CardAiSuggestRow(BaseModel):
+    note: str = ""
+    amount: int = 0
+
+
+class CardAiSuggestPayload(BaseModel):
+    """規則/歷史都沒答案的列 → claude 整批建議分類。"""
+    rows: List[CardAiSuggestRow] = []
+
+
 class BankImportRulePayload(BaseModel):
     """對帳單摘要 → 收支類別 的分類規則（使用者可編）。
 

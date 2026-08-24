@@ -246,6 +246,7 @@ function _renderShell() {
                 分類規則自己設，用久了幾乎不用手動改。</p>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px;">
                 <button class="crm-btn crm-btn-primary" onclick="window._finRecon.stmtOpen()">📄 上傳對帳單</button>
+                <button class="crm-btn crm-btn-primary" onclick="window._finRecon.cardOpen()">💳 上傳信用卡帳單</button>
                 <button class="crm-btn crm-btn-secondary" onclick="window._finRecon.rulesOpen()">⚙️ 分類規則</button>
             </div>
             ${_draftsStrip()}
@@ -1856,5 +1857,155 @@ _fr.stmtApply = async (btn) => {
         btn.disabled = false;
         btn.textContent = '匯入勾選的列';
     }
+};
+
+// ── 信用卡帳單匯入（上傳/貼上 → 三層分類建議 → 逐列確認 → 寫帳）──────────
+//
+// 卡單沒有餘額欄（銀行對帳單那條的餘額鏈在這裡不存在），每列金額取面值、
+// 方向靠關鍵字 —— 所以「預覽逐列確認」在這裡比銀行側更是必要而非禮貌。
+// 分類建議三層由後端給（規則 → 商家歷史一致 → AI 按鈕），人只改沒把握的。
+// 消費列寫進收支時不掛銀行帳戶（status='card'）：刷卡當下不動銀行，月底
+// 繳款由銀行對帳單那側以「信用卡」transfer 清償 —— 卡單裡的繳款列後端
+// 已排除（重複支出防線）。
+
+let _cardPreview = null;
+
+_fr.cardOpen = () => {
+    _cardPreview = null;
+    _wbModal('匯入信用卡帳單', `
+        <p style="color:#888;font-size:12px;margin:0 0 10px;">
+            上傳卡單（PDF / CSV / TXT），或把網銀的消費明細整塊複製貼上。
+            系統先用分類規則與消費歷史自動分類，剩下沒把握的可以一鍵丟 AI 判讀 ——
+            最後由你逐列確認才寫進帳。繳款列會自動排除（那筆走銀行對帳單那側）。</p>
+        <div class="crm-field"><label>上傳檔案</label>
+            <input type="file" id="fincard-file" accept=".pdf,.csv,.txt" class="crm-file"></div>
+        <div class="crm-field"><label>或：貼上消費明細</label>
+            <textarea id="fincard-text" rows="6" class="crm-input"
+                placeholder="從網銀/帳單整塊選取複製，直接貼在這裡"
+                style="font-family:ui-monospace,monospace;font-size:12px;"></textarea></div>
+        <div id="fincard-err" style="display:none;color:#fca5a5;font-size:12px;margin:6px 0;white-space:pre-wrap;"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+            <button class="crm-btn crm-btn-secondary" onclick="window._finRecon.wbCloseModal()">取消</button>
+            <button class="crm-btn crm-btn-primary" onclick="window._finRecon.cardParse(this)">解析看看</button>
+        </div>`);
+};
+
+_fr.cardParse = async (btn) => {
+    const err = document.getElementById('fincard-err');
+    const show = (m) => { err.textContent = m; err.style.display = 'block'; };
+    err.style.display = 'none';
+    const file = document.getElementById('fincard-file').files[0];
+    const text = document.getElementById('fincard-text').value.trim();
+    if (!file && !text) return show('請上傳檔案或貼上消費明細');
+    const fd = new FormData();
+    if (file) fd.append('file', file);
+    if (text) fd.append('text', text);
+    btn.disabled = true; btn.textContent = '解析中…';
+    try {
+        const res = await fetch(`/api/v1/finance/card-statement/preview?entity=${finEntity()}`,
+            { method: 'POST', body: fd, headers: bearerHeader() });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || '解析失敗');
+        if (!d.ok) { show('這份卡單解析不出來：\n• ' + (d.errors || []).join('\n• ')); return; }
+        _cardPreview = d;
+        await _ensureCashCats();
+        _cardRenderPreview();
+    } catch (e) { show(e.message); }
+    finally { btn.disabled = false; btn.textContent = '解析看看'; }
+};
+
+function _cardRenderPreview() {
+    const d = _cardPreview;
+    const s = d.summary || {};
+    const srcBadge = (r) => r.source === 'rule' ? '<span style="color:#93c5fd;">規則</span>'
+        : r.source === 'history' ? '<span style="color:#86efac;">歷史</span>'
+        : r.source === 'fee' ? '<span style="color:#c4b5fd;">跟前筆</span>'
+        : r.source === 'ai' ? '<span style="color:#fbbf24;">AI</span>' : '';
+    const rows = d.rows.map((r, i) => `
+        <tr${r.duplicate ? ' style="opacity:.55;"' : ''}>
+            <td><input type="checkbox" class="fincard-pick" data-i="${i}" ${r.duplicate ? '' : 'checked'}></td>
+            <td style="white-space:nowrap;">${esc(r.date)}</td>
+            <td>${esc(r.note)}${r.duplicate ? ' <span style="color:#fbbf24;font-size:11px;">已匯過</span>' : ''}</td>
+            <td style="text-align:right;color:${r.amount < 0 ? '#86efac' : '#eee'};">${fmtNum(r.amount)}</td>
+            <td><select class="crm-select fincard-cat" data-i="${i}" style="min-width:150px;">${_stmtCatOptions(r.category)}</select></td>
+            <td style="font-size:11px;" id="fincard-src-${i}">${srcBadge(r)}</td>
+        </tr>`).join('');
+    const payments = (d.payments || []).length
+        ? `<div style="color:#888;font-size:12px;margin:6px 0;">已排除 ${d.payments.length} 筆繳款列（走銀行對帳單那側）：${d.payments.map(p => `${esc(p.date)} ${fmtNum(p.amount)}`).join('、')}</div>` : '';
+    const warn = (d.warnings || []).length
+        ? `<div style="color:#fbbf24;font-size:12px;margin:6px 0;white-space:pre-wrap;">⚠ ${d.warnings.map(esc).join('\n⚠ ')}</div>` : '';
+    _wbModal('信用卡帳單 — 確認明細', `
+        <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:#ccc;margin-bottom:6px;">
+            <span>共 <b>${fmtNum(s.count)}</b> 筆</span>
+            <span>消費 <b style="color:#fca5a5;">$${fmtNum(s.total_spend)}</b></span>
+            ${s.total_refund ? `<span>退款 <b style="color:#86efac;">$${fmtNum(s.total_refund)}</b></span>` : ''}
+            <span>已建議 <b>${fmtNum(s.suggested)}</b>／未分類 <b style="color:#fbbf24;">${fmtNum(s.unsuggested)}</b></span>
+        </div>
+        ${warn}${payments}
+        <div style="max-height:46vh;overflow:auto;border:1px solid #2e2e2e;border-radius:6px;">
+        <table class="crm-table" style="width:100%;font-size:12px;">
+            <thead><tr><th><input type="checkbox" checked onclick="document.querySelectorAll('.fincard-pick').forEach(c=>c.checked=this.checked)"></th>
+                <th>日期</th><th>商家/摘要</th><th style="text-align:right;">金額</th><th>分類</th><th></th></tr></thead>
+            <tbody>${rows}</tbody></table></div>
+        <div id="fincard-apply-err" style="display:none;color:#fca5a5;font-size:12px;margin:6px 0;white-space:pre-wrap;"></div>
+        <div style="display:flex;gap:8px;justify-content:space-between;margin-top:10px;">
+            <button class="crm-btn crm-btn-secondary" onclick="window._finRecon.cardAiSuggest(this)">🤖 AI 判讀未分類的列</button>
+            <div style="display:flex;gap:8px;">
+                <button class="crm-btn crm-btn-secondary" onclick="window._finRecon.wbCloseModal()">取消</button>
+                <button class="crm-btn crm-btn-primary" onclick="window._finRecon.cardApply(this)">匯入勾選的列</button>
+            </div>
+        </div>`, { width: 880 });
+}
+
+_fr.cardAiSuggest = async (btn) => {
+    const d = _cardPreview; if (!d) return;
+    const sels = [...document.querySelectorAll('.fincard-cat')];
+    const blank = sels.map((sel, i) => ({ sel, i })).filter(x => !x.sel.value);
+    if (!blank.length) return finToast('沒有未分類的列');
+    btn.disabled = true; btn.textContent = `AI 判讀中（${blank.length} 列）…`;
+    try {
+        const r = await finFetch(`/card-statement/ai-suggest?entity=${finEntity()}`, {
+            method: 'POST',
+            body: JSON.stringify({ rows: blank.map(x => ({ note: d.rows[x.i].note, amount: d.rows[x.i].amount })) }),
+        });
+        let applied = 0;
+        blank.forEach((x, bi) => {
+            const cat = (r.suggestions || {})[String(bi)];
+            if (!cat) return;
+            x.sel.value = cat;
+            if (x.sel.value === cat) {   // 選項存在才算套上
+                applied += 1;
+                const badge = document.getElementById(`fincard-src-${x.i}`);
+                if (badge) badge.innerHTML = '<span style="color:#fbbf24;">AI</span>';
+            }
+        });
+        finToast(`AI 給出 ${applied} 個建議（其餘沒把握 — 請自行分類）`);
+    } catch (e) { finToast('AI 判讀失敗：' + e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = '🤖 AI 判讀未分類的列'; }
+};
+
+_fr.cardApply = async (btn) => {
+    const d = _cardPreview; if (!d) return;
+    const err = document.getElementById('fincard-apply-err');
+    const picked = [...document.querySelectorAll('.fincard-pick')].filter(c => c.checked)
+        .map(c => {
+            const i = Number(c.dataset.i);
+            const r = d.rows[i];
+            const cat = document.querySelector(`.fincard-cat[data-i="${i}"]`)?.value || null;
+            return { date: r.date, amount: r.amount, note: r.note, category: cat };
+        });
+    if (!picked.length) { err.textContent = '沒有勾選任何列'; err.style.display = 'block'; return; }
+    btn.disabled = true; btn.textContent = '匯入中…';
+    try {
+        const r = await finFetch(`/card-statement/apply?entity=${finEntity()}`, {
+            method: 'POST', body: JSON.stringify({ rows: picked }),
+        });
+        _wbCloseModal();
+        finToast(`已匯入 ${r.made} 筆卡單消費`
+            + (r.skipped_duplicates ? `；跳過 ${r.skipped_duplicates} 筆重複（帳上已有）` : ''));
+        _fr.reload();
+    } catch (e) {
+        err.textContent = e.message; err.style.display = 'block';
+    } finally { btn.disabled = false; btn.textContent = '匯入勾選的列'; }
 };
 
