@@ -236,18 +236,26 @@ async def money_dep(request: Request):
     check_money(request)
     pid = request.path_params.get("project_id")
     if pid and not viewer_has_mine_scope(request):
-        from sqlalchemy import select
+        # 🔴 DB 不可用就**跳過**這一段，不准在守衛層丟 503：
+        # 這條檢查只是加牆，403 與否的其他判定（模組守衛）在端點層 ——
+        # 守衛搶先 503 會把「沒模組該 403」的請求變 503（test_petty_cash
+        # 2026-08-24 當場抓到）。沒 DB 時端點自己會 503，也沒有東西可洩。
+        import core.state as state
+        factory = None
+        if state.db_online:
+            from db.session import get_session_factory
+            factory = get_session_factory()
+        if factory is not None:
+            from sqlalchemy import select
 
-        from core.db_guard import db_factory_or_503  # 延遲 import（同檔其他慣例）
-        from db.models import CrmProject
-        factory = db_factory_or_503()   # DB 離線 → 503（這些端點沒 DB 本來也做不了事）
-        async with factory() as session:
-            ent = (await session.execute(
-                select(CrmProject.entity)
-                .where(CrmProject.id == pid))).scalar_one_or_none()
-        if ent == "mine":
-            raise HTTPException(status_code=403,
-                                detail="這是私帳專案 —— 財務資料需要「我的帳」權限")
+            from db.models import CrmProject
+            async with factory() as session:
+                ent = (await session.execute(
+                    select(CrmProject.entity)
+                    .where(CrmProject.id == pid))).scalar_one_or_none()
+            if ent == "mine":
+                raise HTTPException(status_code=403,
+                                    detail="這是私帳專案 —— 財務資料需要「我的帳」權限")
     return True
 
 
