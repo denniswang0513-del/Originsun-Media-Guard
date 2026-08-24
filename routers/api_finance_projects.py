@@ -29,6 +29,9 @@ entity 的帳本頁（刻意沒有 CRM 專案管理），但它缺的正是 owne
 from fastapi import APIRouter, HTTPException, Request
 
 from core.db_guard import db_factory_or_503 as _factory_or_503
+# 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
+from core.ledger_project import (COST_FIELDS, SUM_KEYS, compute,
+                                 income_items as _income_items, norm_detail)
 from core.schemas import LedgerDetailPayload
 from routers.crm._shared import _fmt_day
 
@@ -36,59 +39,45 @@ from .api_finance import _guard
 
 router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
 
-# 工項（收入拆分）預設清單 —— 對齊 owner 原 Sheet 的欄序。
-# settings `my_ledger.income_items` 可覆寫（owner 要自己加工項時改那裡）。
-DEFAULT_INCOME_ITEMS = ["前期製作", "動態攝影", "剪輯", "調光", "動態效果",
-                        "平面攝影", "諮詢", "教學", "錄混音", "其他"]
-
-# ledger_detail 的費用欄（鍵 → 中文標籤，UI 照這個順序畫）
-COST_FIELDS = [
-    ("outsource", "委外費用"),
-    ("tax_fee", "稅金"),
-    ("buy_invoice", "買發票"),
-    ("invoice_fee", "發票代辦費"),
-    ("personal_tax", "個人稅款"),
-    ("misc", "雜支"),
-    ("shareholder", "股東往來"),
-]
-
 
 def income_items() -> list:
+    """工項清單（讀 settings 的薄殼；規則正本在 core.ledger_project）。"""
     from config import load_settings
-    items = (load_settings().get("my_ledger") or {}).get("income_items")
-    return [str(x) for x in items if str(x).strip()] if items else list(DEFAULT_INCOME_ITEMS)
+    return _income_items(load_settings())
 
 
-def norm_detail(raw) -> dict:
-    """ledger_detail → 固定形狀（缺鍵補 0、split 只留數字）。"""
-    d = raw if isinstance(raw, dict) else {}
-    out = {k: int(d.get(k) or 0) for k, _label in COST_FIELDS}
-    split = d.get("split") if isinstance(d.get("split"), dict) else {}
-    out["split"] = {str(k): int(v) for k, v in split.items()
-                    if isinstance(v, (int, float)) and int(v)}
-    return out
+async def _owned_project(session, project_id: str, ent: str):
+    """載入專案 → 404 → 驗它真的屬於這本帳。
 
-
-def compute(contract: int, d: dict) -> tuple:
-    """(實收, 檢查)。算式正本 —— 前端只顯示，不自己算第二份。
-
-    實收 = 營收(含稅) − 委外 − 發票代辦費 − 個人稅款 − 雜支 − 股東往來
-    檢查 = 實收 − Σ工項（應為 0；Sheet 本來就有幾案不為 0，照實顯示）
+    query 的 entity 只驗得了「人有沒有這本帳的權限」，驗不了「這一列是誰的」
+    —— 兩支端點都要，抽一份免得第三支忘記。
     """
-    net = (contract - d["outsource"] - d["invoice_fee"]
-           - d["personal_tax"] - d["misc"] - d["shareholder"])
-    return net, net - sum(d["split"].values())
+    from db.models import CrmProject
+    p = await session.get(CrmProject, project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="找不到此專案")
+    if (p.entity or "parent") != ent:
+        raise HTTPException(status_code=403, detail="這個專案不屬於目前的帳本")
+    return p
 
 
-async def _rollups(session, ent: str, project_ids=None):
-    """{project_id: (掛帳支出, 掛帳收入, 未付應付)}。一次聚合，不逐案 N+1。"""
+async def _rollups(session, ent: str, narrowed: bool, project_ids=None):
+    """({project_id: 掛帳支出}, {project_id: 未付應付})。一次聚合，不逐案 N+1。
+
+    🔴 未付應付**排除預支款**（is_advance）—— 對齊 core.finance_logic
+    ap_open_payments 與「應付帳款」視圖的口徑。預支不是應付（那是先給出去的
+    週轉金，核銷後才變成成本），混進來會讓同一個專案在逐案損益與應付帳款上
+    出現兩個數字，那正是這套帳要消滅的東西（/simplify 2026-08-25）。
+
+    narrowed：清單有沒有被搜尋/篩選縮過。沒縮的話 entity 條件本身就等價，
+    再帶 402 個 id 進 IN 是零選擇性的白工。
+    """
     from sqlalchemy import func as fn
     from sqlalchemy import select
 
     from db.models import CrmCashEntry, CrmPaymentRequest
     cash_q = (select(CrmCashEntry.project_id,
-                     fn.coalesce(fn.sum(CrmCashEntry.expense), 0),
-                     fn.coalesce(fn.sum(CrmCashEntry.deposit), 0))
+                     fn.coalesce(fn.sum(CrmCashEntry.expense), 0))
               .where(CrmCashEntry.entity == ent,
                      CrmCashEntry.project_id.isnot(None))
               .group_by(CrmCashEntry.project_id))
@@ -96,13 +85,13 @@ async def _rollups(session, ent: str, project_ids=None):
                    fn.coalesce(fn.sum(CrmPaymentRequest.amount), 0))
             .where(CrmPaymentRequest.entity == ent,
                    CrmPaymentRequest.project_id.isnot(None),
+                   CrmPaymentRequest.is_advance == 0,
                    CrmPaymentRequest.payment_status != "已付款")
             .group_by(CrmPaymentRequest.project_id))
-    if project_ids is not None:
+    if narrowed and project_ids:
         cash_q = cash_q.where(CrmCashEntry.project_id.in_(project_ids))
         ap_q = ap_q.where(CrmPaymentRequest.project_id.in_(project_ids))
-    cash = {pid: (int(e or 0), int(d or 0))
-            for pid, e, d in (await session.execute(cash_q)).all()}
+    cash = {pid: int(e or 0) for pid, e in (await session.execute(cash_q)).all()}
     ap = {pid: int(a or 0) for pid, a in (await session.execute(ap_q)).all()}
     return cash, ap
 
@@ -131,40 +120,38 @@ async def project_ledger(request: Request, entity: str = "", q: str = "",
         if unpaid_only:
             query = query.where(CrmProject.payment_status != "全額到帳")
         rows = (await session.execute(query)).all()
-        cash, ap = await _rollups(session, ent, [p.id for p, _ in rows] or None)
+        cash, ap = await _rollups(session, ent, bool(q or unpaid_only),
+                                  [p.id for p, _ in rows])
 
     items, tot = [], {"contract": 0, "received": 0, "receivable": 0,
                       "spent": 0, "ap_open": 0, "net": 0,
                       "outsource": 0, "invoice_fee": 0, "unbalanced": 0}
     for p, cname in rows:
-        spent, _cash_in = cash.get(p.id, (0, 0))
+        spent = cash.get(p.id, 0)
         ap_open = ap.get(p.id, 0)
         contract = int(p.contract_amount or 0)
         detail = norm_detail(p.ledger_detail)
         net, check = compute(contract, detail)
-        items.append({
+        item = {
             "id": p.id, "name": p.name, "client": cname or "",
             "status": p.status or "", "type": p.project_type or "",
             "close_date": _fmt_day(p.completion_date),
-            "close_month": _fmt_day(p.completion_date)[:7] if p.completion_date else "",
             "contract": contract,
             "received": int(p.amount_received or 0),
             "receivable": int(p.amount_receivable or 0),
             "payment_status": p.payment_status or "",
             "spent": spent, "ap_open": ap_open,
             "detail": detail, "net": net, "check": check,
-        })
-        for k, v in (("contract", contract), ("received", int(p.amount_received or 0)),
-                     ("receivable", int(p.amount_receivable or 0)),
-                     ("spent", spent), ("ap_open", ap_open), ("net", net),
-                     ("outsource", detail["outsource"]),
-                     ("invoice_fee", detail["invoice_fee"])):
-            tot[k] += v
+        }
+        items.append(item)
+        # 加總只從 item 取 —— 上面已經算好的數字不要在這裡再算一次
+        for k in SUM_KEYS:
+            tot[k] += item[k]
+        tot["outsource"] += detail["outsource"]
+        tot["invoice_fee"] += detail["invoice_fee"]
         if check:
             tot["unbalanced"] += 1
-    return {"projects": items, "totals": tot, "count": len(items),
-            "income_items": income_items(),
-            "cost_fields": [{"key": k, "label": lb} for k, lb in COST_FIELDS]}
+    return {"projects": items, "totals": tot, "count": len(items)}
 
 
 @router.get("/project-ledger/{project_id}")
@@ -177,11 +164,7 @@ async def project_ledger_detail(project_id: str, request: Request,
     from db.models import Client, CrmCashEntry, CrmPaymentRequest, CrmProject
     factory = _factory_or_503()
     async with factory() as session:
-        p = await session.get(CrmProject, project_id)
-        if not p:
-            raise HTTPException(status_code=404, detail="找不到此專案")
-        if (p.entity or "parent") != ent:
-            raise HTTPException(status_code=403, detail="這個專案不屬於目前的帳本")
+        p = await _owned_project(session, project_id, ent)
         client = await session.get(Client, p.client_id) if p.client_id else None
         entries = (await session.execute(
             select(CrmCashEntry)
@@ -200,7 +183,6 @@ async def project_ledger_detail(project_id: str, request: Request,
             "id": p.id, "name": p.name, "client": client.short_name if client else "",
             "status": p.status or "", "type": p.project_type or "",
             "close_date": _fmt_day(p.completion_date),
-            "close_month": _fmt_day(p.completion_date)[:7] if p.completion_date else "",
             "contract": int(p.contract_amount or 0),
             "received": int(p.amount_received or 0),
             "receivable": int(p.amount_receivable or 0),
@@ -235,15 +217,10 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
     等於「把這個工項刪掉」，那正是使用者把格子清空的意思。
     """
     ent = _guard(request, entity, level="full")
-    from db.models import CrmProject
     from routers.crm._shared import _now, _parse_shoot_date
     factory = _factory_or_503()
     async with factory() as session:
-        p = await session.get(CrmProject, project_id)
-        if not p:
-            raise HTTPException(status_code=404, detail="找不到此專案")
-        if (p.entity or "parent") != ent:
-            raise HTTPException(status_code=403, detail="這個專案不屬於目前的帳本")
+        p = await _owned_project(session, project_id, ent)
         data = payload.model_dump(exclude_unset=True)
         contract = data.pop("contract_amount", None)
         if contract is not None:
@@ -259,8 +236,6 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
                 p.completion_date = d
             else:
                 p.completion_date = None
-        else:
-            data.pop("close_date", None)
         d = norm_detail(p.ledger_detail)
         for k, v in data.items():
             if v is None:

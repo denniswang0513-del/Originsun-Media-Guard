@@ -262,23 +262,21 @@ async def card_summary(request: Request, entity: str = ""):
     from db.models import CrmCashEntry
     factory = _factory_or_503()
     async with factory() as session:
-        charges = int((await session.execute(
-            select(fn.coalesce(fn.sum(CrmCashEntry.expense), 0))
-            .where(CrmCashEntry.entity == ent,
-                   CrmCashEntry.status == "card"))).scalar_one() or 0)
-        n_charges = int((await session.execute(
-            select(fn.count()).select_from(CrmCashEntry)
-            .where(CrmCashEntry.entity == ent,
-                   CrmCashEntry.status == "card"))).scalar_one() or 0)
-        repay_out = repay_in = 0
-        if cfg["repay_categories"]:
-            row = (await session.execute(
-                select(fn.coalesce(fn.sum(CrmCashEntry.expense), 0),
-                       fn.coalesce(fn.sum(CrmCashEntry.deposit), 0))
-                .where(CrmCashEntry.entity == ent,
-                       CrmCashEntry.status.is_distinct_from("card"),
-                       CrmCashEntry.category.in_(cfg["repay_categories"])))).one()
-            repay_out, repay_in = int(row[0] or 0), int(row[1] or 0)
+        # 一次掃過去，用 FILTER 分三個聚合 —— 原本是三支 WHERE 幾乎相同的
+        # 查詢各跑一次（刷卡合計／刷卡筆數／還款），對 NAS Postgres 就是三個
+        # 來回。這支每次開收支表都會被呼叫。
+        is_card = CrmCashEntry.status == "card"
+        is_repay = (CrmCashEntry.status.is_distinct_from("card")
+                    & CrmCashEntry.category.in_(cfg["repay_categories"]))
+        row = (await session.execute(
+            select(
+                fn.coalesce(fn.sum(CrmCashEntry.expense).filter(is_card), 0),
+                fn.count().filter(is_card),
+                fn.coalesce(fn.sum(CrmCashEntry.expense).filter(is_repay), 0),
+                fn.coalesce(fn.sum(CrmCashEntry.deposit).filter(is_repay), 0),
+            ).where(CrmCashEntry.entity == ent))).one()
+        charges, n_charges = int(row[0] or 0), int(row[1] or 0)
+        repay_out, repay_in = int(row[2] or 0), int(row[3] or 0)
     repayments = repay_out - repay_in
     return {
         "opening": cfg["opening"], "charges": charges, "charge_count": n_charges,
@@ -303,11 +301,14 @@ async def update_card_summary(payload: CardLedgerConfig, request: Request,
     if "repay_categories" in data and data["repay_categories"] is not None:
         book["repay_categories"] = [str(x).strip() for x in data["repay_categories"]
                                     if str(x).strip()]
+    cur = await card_summary(request, entity=ent)
     if data.get("derive_opening_from") is not None:
-        cur = await card_summary(request, entity=ent)
         # 目標未繳 = 期初 + 刷卡 − 還款 → 期初 = 目標 − (刷卡 − 還款)
         book["opening"] = int(data["derive_opening_from"]) - (cur["charges"] - cur["repayments"])
     elif data.get("opening") is not None:
         book["opening"] = int(data["opening"])
     save_settings(settings)
-    return await card_summary(request, entity=ent)
+    # 刷卡與還款不會因為改期初而變 —— 就地重算未繳，不再跑一次整組聚合
+    return {**cur, "opening": book["opening"],
+            "repay_categories": book.get("repay_categories", cur["repay_categories"]),
+            "outstanding": book["opening"] + cur["charges"] - cur["repayments"]}

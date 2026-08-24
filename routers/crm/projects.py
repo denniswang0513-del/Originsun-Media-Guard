@@ -76,7 +76,8 @@ async def list_projects(
     私帳 402 案匯入後全帶新的 updated_at，不篩就整片壓在列表最上面、把公司的
     案子埋掉（2026-08-24 owner 回報「沒有看到專案管理」的真正症狀）。
     """
-    if entity and entity not in ("parent", "mine"):
+    from core.ledger import ENTITIES
+    if entity and entity not in ENTITIES:
         raise HTTPException(status_code=422, detail=f"未知的帳本: {entity}")
     _require_db()
     factory = await _get_factory()

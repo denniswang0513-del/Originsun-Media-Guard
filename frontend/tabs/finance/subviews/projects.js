@@ -23,6 +23,9 @@ let _unpaidOnly = false;
 let _dirty = false;
 let _resizeBound = false;
 
+// 表頭與資料列共用一份欄寬 —— 分開寫的話改一邊就整排對不齊
+const _GRID = 'display:grid;grid-template-columns:92px 1.5fr 1fr 92px 92px 74px;align-items:center;gap:8px;';
+
 export default async function render(container, ctx = {}) {
     _c = container;
     if (ctx.isCurrent) _isCurrent = ctx.isCurrent;
@@ -30,12 +33,11 @@ export default async function render(container, ctx = {}) {
     await _load();
 }
 
+/** 整份拉一次就好 —— 402 列連同工項明細約 180KB，搜尋每敲一個字重抓一次
+ *  是純白工（後端還要再跑兩個 group-by 聚合）。篩選改在前端做。 */
 async function _load() {
     try {
-        const p = new URLSearchParams();
-        if (_q) p.set('q', _q);
-        if (_unpaidOnly) p.set('unpaid_only', 'true');
-        const d = await finFetch(`/project-ledger${p.toString() ? '?' + p : ''}`);
+        const d = await finFetch('/project-ledger');
         if (!_isCurrent()) return;
         _data = d;
         _renderShell();
@@ -44,30 +46,63 @@ async function _load() {
     }
 }
 
-function _renderShell() {
+/** 目前畫面上的列（前端篩選：402 列已經在手上，不必回伺服器）。 */
+function _visible() {
+    const q = _q.toLowerCase();
+    return (_data.projects || []).filter(p =>
+        (!q || (p.name + ' ' + p.client).toLowerCase().includes(q))
+        && (!_unpaidOnly || p.payment_status !== '全額到帳'));
+}
+
+/** 合計列。存檔後就地更新走同一份，不重畫整個殼。 */
+function _renderTotals() {
+    const el = document.getElementById('fpl-totals');
+    if (!el) return;
     const t = _data.totals || {};
+    const cell = (label, key, color) =>
+        `<span>${label} <b style="color:${color};">$${fmtNum(t[key])}</b></span>`;
+    el.innerHTML = cell('營收', 'contract', '#eee')
+        + cell('委外', 'outsource', '#fca5a5')
+        + cell('代辦費', 'invoice_fee', '#fca5a5')
+        + cell('實收', 'net', '#eee')
+        + cell('已收', 'received', '#86efac')
+        + cell('應收', 'receivable', '#fbbf24')
+        + cell('未付應付', 'ap_open', '#fca5a5');
+}
+
+function _renderCount() {
+    const el = document.getElementById('fpl-count');
+    if (!el) return;
+    const n = _visible().length;
+    const t = _data.totals || {};
+    el.innerHTML = `${fmtNum(n)}${n === _data.count ? '' : ' / ' + fmtNum(_data.count)} 案`
+        + (t.unbalanced ? `｜<span style="color:#fbbf24;">${t.unbalanced} 案檢查≠0</span>` : '');
+}
+
+/** 只切 selected class —— 重建整份 innerHTML 會重新解析約 2,800 個節點，
+ *  而且把清單的捲動位置歸零（點第 300 列就跳回頂端）。 */
+function _markSelected() {
+    const body = document.getElementById('fpl-list-body');
+    if (!body) return;
+    body.querySelector('.crm-row.selected')?.classList.remove('selected');
+    body.querySelector(`.crm-row[data-id="${_sel}"]`)?.classList.add('selected');
+}
+
+function _renderShell() {
     _c.innerHTML = `
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
             <input id="fpl-q" class="crm-input" placeholder="搜尋專案 / 客戶" style="width:200px;" value="${esc(_q)}">
             <label style="font-size:12px;color:#ccc;display:flex;align-items:center;gap:5px;">
                 <input type="checkbox" id="fpl-unpaid" ${_unpaidOnly ? 'checked' : ''}> 只看未收清</label>
             <div style="flex:1;"></div>
-            <span style="font-size:12px;color:#888;">${fmtNum(_data.count)} 案${
-                t.unbalanced ? `｜<span style="color:#fbbf24;">${t.unbalanced} 案檢查≠0</span>` : ''}</span>
+            <span id="fpl-count" style="font-size:12px;color:#888;"></span>
         </div>
-        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#ccc;margin-bottom:10px;
-                    background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:10px 14px;">
-            <span>營收 <b style="color:#eee;">$${fmtNum(t.contract)}</b></span>
-            <span>委外 <b style="color:#fca5a5;">$${fmtNum(t.outsource)}</b></span>
-            <span>代辦費 <b style="color:#fca5a5;">$${fmtNum(t.invoice_fee)}</b></span>
-            <span>實收 <b style="color:#eee;">$${fmtNum(t.net)}</b></span>
-            <span>已收 <b style="color:#86efac;">$${fmtNum(t.received)}</b></span>
-            <span>應收 <b style="color:#fbbf24;">$${fmtNum(t.receivable)}</b></span>
-            <span>未付應付 <b style="color:#fca5a5;">$${fmtNum(t.ap_open)}</b></span>
-        </div>
+        <div id="fpl-totals" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#ccc;
+                    margin-bottom:10px;background:#202020;border:1px solid #2e2e2e;
+                    border-radius:8px;padding:10px 14px;"></div>
         <div class="crm-body" id="fpl-body" style="min-height:320px;">
             <div class="crm-list-panel" id="fpl-list-panel">
-                <div class="crm-list-header" style="display:grid;grid-template-columns:92px 1.5fr 1fr 92px 92px 74px;align-items:center;gap:8px;">
+                <div class="crm-list-header" style="${_GRID}">
                     <span>結案日</span><span>專案</span><span>客戶</span>
                     <span style="text-align:right;">營收</span>
                     <span style="text-align:right;">實收</span>
@@ -78,17 +113,18 @@ function _renderShell() {
             <div class="crm-resize-handle" id="fpl-resize"></div>
             <div class="crm-detail-panel" id="fpl-detail" style="display:none;width:46%;"></div>
         </div>`;
+    _renderTotals();
     _renderList();
     const qEl = document.getElementById('fpl-q');
     let timer;
     qEl.addEventListener('input', (e) => {
         _q = e.target.value.trim();
         clearTimeout(timer);
-        timer = setTimeout(_load, 300);
+        timer = setTimeout(_renderList, 150);   // 前端篩選，不用回伺服器
     });
     document.getElementById('fpl-unpaid').addEventListener('change', (e) => {
         _unpaidOnly = e.target.checked;
-        _load();
+        _renderList();
     });
     setupResizeHandle('fpl-resize', 'fpl-list-panel');
     _fitBody();
@@ -122,10 +158,12 @@ function _fitBody() {
 }
 
 function _renderList() {
-    document.getElementById('fpl-list-body').innerHTML =
-        (_data.projects || []).map((p) => `
-        <div class="crm-row${p.id === _sel ? ' selected' : ''}"
-             style="display:grid;grid-template-columns:92px 1.5fr 1fr 92px 92px 74px;align-items:center;gap:8px;"
+    const body = document.getElementById('fpl-list-body');
+    const keepScroll = body.scrollTop;
+    body.innerHTML =
+        _visible().map((p) => `
+        <div class="crm-row${p.id === _sel ? ' selected' : ''}" data-id="${p.id}"
+             style="${_GRID}"
              onclick="window._finProjLedger.open('${p.id}')">
             <span style="color:${p.close_date ? '#9ca3af' : '#6b7280'};white-space:nowrap;">${esc(p.close_date || '未結案')}</span>
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e0e0e0;"
@@ -137,6 +175,8 @@ function _renderList() {
             <span style="text-align:right;color:${p.check ? '#fbbf24' : '#4b5563'};">${p.check ? fmtNum(p.check) : '0'}</span>
         </div>`).join('')
         || '<div class="crm-empty">沒有符合的專案</div>';
+    body.scrollTop = keepScroll;   // 重畫不該把使用者彈回列表頂端
+    _renderCount();
 }
 
 // ── 右側詳情（可編輯）──────────────────────────────────────
@@ -145,9 +185,11 @@ const _fp = (window._finProjLedger = window._finProjLedger || {});
 _fp.open = async (id) => {
     if (_dirty && id !== _sel
         && !confirm('這一案有未儲存的修改，要放棄嗎？')) return;
+    const same = _sel === id;
     _sel = id;
     _dirty = false;
-    _renderList();
+    _markSelected();
+    if (same && _detail) { _renderDetail(); return; }   // 同一案不用再拉一次
     const panel = document.getElementById('fpl-detail');
     panel.style.display = '';
     panel.innerHTML = '<div style="color:#888;padding:30px;text-align:center;">載入中…</div>';
@@ -278,7 +320,7 @@ _fp.close = () => {
     _sel = null;
     _dirty = false;
     document.getElementById('fpl-detail').style.display = 'none';
-    _renderList();
+    _markSelected();
 };
 
 _fp.save = async (btn) => {
@@ -303,7 +345,8 @@ _fp.save = async (btn) => {
         });
         _dirty = false;
         finToast(r.check ? `已儲存 —— 檢查 ${fmtNum(r.check)}（工項與實收對不上）` : '已儲存');
-        await _load();          // 清單的實收/檢查/合計跟著更新
+        // PUT 已經回了這一列重算後的值 —— 就地更新那一列與合計，不重抓 402 列
+        _applySaved(r);
     } catch (e) {
         finToast('儲存失敗：' + e.message, 'error');
     } finally {
@@ -311,3 +354,33 @@ _fp.save = async (btn) => {
         btn.textContent = '儲存';
     }
 };
+
+
+/** 存檔後就地更新一列與合計（PUT 已回傳重算的 detail/net/check）。
+ *
+ *  原本是 `await _load()`：重跑 402 列查詢 + 兩個聚合、重建整個殼，然後
+ *  `_renderShell` 尾端又把詳情重拉一次 —— 一次存檔三個往返。
+ */
+function _applySaved(r) {
+    const i = (_data.projects || []).findIndex(p => p.id === _sel);
+    if (i < 0) { _load(); return; }
+    const old = _data.projects[i];
+    const next = {
+        ...old,
+        detail: r.detail, net: r.net, check: r.check,
+        contract: r.contract != null ? r.contract : old.contract,
+        close_date: r.close_date != null ? r.close_date : old.close_date,
+    };
+    const t = _data.totals;
+    t.contract += next.contract - old.contract;
+    t.net += next.net - old.net;
+    t.outsource += next.detail.outsource - old.detail.outsource;
+    t.invoice_fee += next.detail.invoice_fee - old.detail.invoice_fee;
+    t.unbalanced += (next.check ? 1 : 0) - (old.check ? 1 : 0);
+    _data.projects[i] = next;
+    if (_detail) _detail.project = { ..._detail.project, ...next };
+    _renderTotals();
+    _renderList();
+    _markSelected();
+    _renderDetail();
+}

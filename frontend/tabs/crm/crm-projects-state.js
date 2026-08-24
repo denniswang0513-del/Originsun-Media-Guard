@@ -2,6 +2,7 @@
  * crm-projects-state.js — 共享狀態 + 回呼登記
  * 所有 crm-projects-* 模組 import 此檔案存取共享狀態
  */
+import { hasModule } from './crm-utils.js';
 
 // 工作流順序 — 點欄頭以「狀態」排序時走這個 index,而非字串比較。
 // 未列出的狀態(自訂)排在最後。新增狀態時請同步更新 crm-projects.html 的下拉選單。
@@ -16,9 +17,7 @@ export const CLOSED_STATUSES = ['結案', '歸檔'];
 /** 我的帳 scope？（鏡射後端 core/ledger：Lv3 或持有 finance_mine）
  *  ⚠ 這只決定「預設看哪本」，不是授權 —— 錢的牆在後端。 */
 function _defaultEntity() {
-    const lv = window._accessLevel || 0;
-    const mods = window._modules || [];
-    return (lv >= 3 || mods.includes('finance_mine')) ? '' : 'parent';
+    return hasModule('finance_mine') ? '' : 'parent';
 }
 
 // ── Shared State ────────────────────────────────────────────

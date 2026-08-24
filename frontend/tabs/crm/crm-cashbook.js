@@ -8,7 +8,8 @@ import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, 
 // pin 值；payload 只在 'mine' 才帶 entity:'mine'（後端 None 語意：建立落 parent、
 // 更新維持既有值 —— 不洗欄位）。pin 與 /api/v1/finance 的 fetch 都用財務模組那份，
 // 不在這裡複寫（finFetch 會自己附 entity）。
-import { finEntity as _pinEntity, finFetch as _finFetch } from '../finance/fin-utils.js';
+import { finEntity as _pinEntity, finFetch as _finFetch,
+         bankOnly as _bankOnly } from '../finance/fin-utils.js';
 
 let _entries = [];
 let _invoiceList = [];
@@ -32,17 +33,20 @@ function _toggleAdvanceFields(isAdv) {
 
 // ── Data Loading ────────────────────────────────────────────
 
-async function loadEntries({ render = true } = {}) {
+async function loadEntries({ render = true, cards = true } = {}) {
     const params = new URLSearchParams();
     if (_filters.q)               params.set('q', _filters.q);
     if (_filters.category)        params.set('category', _filters.category);
     if (_filters.bank_account_id) params.set('bank_account_id', _filters.bank_account_id);
     if (_filters.direction)       params.set('direction', _filters.direction);
     params.set('entity', _pinEntity());
-    // 卡片摘要與收支併行拉 —— 兩支互不相干，串行等於白等一個往返
+    // 🔴 卡片摘要只跟 entity 有關，與 q/類別/帳戶/方向這些篩選無關 ——
+    // loadEntries 綁在搜尋框、兩個下拉、每個帳戶頁籤與 8 條存檔後路徑上，
+    // 每次篩選都重算一次卡片（三個聚合）而數字永遠一樣。只在真的可能變的
+    // 時候拉：第一次載入與異動之後。
     const [entries] = await Promise.all([
         _fetch('/cash-entries?' + params).then(r => r.entries || []).catch(() => []),
-        loadCardSummary(),
+        cards ? loadCardSummary() : Promise.resolve(),
     ]);
     _entries = entries;
     _syncFilterOptions();     // 資料換了才要重算選項（不放 renderList —— 那支連點一列都會跑）
@@ -154,7 +158,7 @@ function _renderAcctTabs() {
     box.querySelectorAll('[data-acct]').forEach(btn => {
         btn.addEventListener('click', () => {
             _filters.bank_account_id = btn.dataset.acct;
-            loadEntries();
+            loadEntries({ cards: false });   // 換帳戶頁籤不影響卡片餘額
         });
     });
 }
@@ -816,10 +820,12 @@ export async function initCrmCashbookTab() {
 
     let _t;
     document.getElementById('cash-search').addEventListener('input', e => {
-        _filters.q = e.target.value; clearTimeout(_t); _t = setTimeout(loadEntries, 300);
+        _filters.q = e.target.value; clearTimeout(_t);
+        _t = setTimeout(() => loadEntries({ cards: false }), 300);   // 搜尋不影響卡片餘額
     });
-    document.getElementById('cash-filter-cat').addEventListener('change', e => { _filters.category = e.target.value; loadEntries(); });
-    document.getElementById('cash-filter-dir').addEventListener('change', e => { _filters.direction = e.target.value; loadEntries(); });
+    // 兩個篩選下拉同理 —— 卡片餘額只跟 entity 有關
+    document.getElementById('cash-filter-cat').addEventListener('change', e => { _filters.category = e.target.value; loadEntries({ cards: false }); });
+    document.getElementById('cash-filter-dir').addEventListener('change', e => { _filters.direction = e.target.value; loadEntries({ cards: false }); });
 
     document.getElementById('cash-btn-add').addEventListener('click', () => openModal());
     document.getElementById('cash-btn-import').addEventListener('click', openImportModal);
@@ -1207,7 +1213,9 @@ async function _allocSave(side, btn, fee) {
 window._cashCardPanel = function () {
     const c = _cardSummary;
     if (!c) return;
-    const accts = (_bankAccounts || []).filter(a => (a.acct_kind || 'bank') === 'bank');
+    // bankOnly：'哪些算真銀行帳戶' 的正本（fin-utils）—— 自己 filter 會漏掉
+    // active 的判斷，停用帳戶就會出現在還款下拉裡
+    const accts = _bankOnly(_bankAccounts || []);
     let ov = document.getElementById('cash-card-overlay');
     if (ov) ov.remove();
     ov = document.createElement('div');

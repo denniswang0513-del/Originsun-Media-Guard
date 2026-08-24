@@ -30,20 +30,13 @@ from scripts._common import resolve_db_url  # noqa: E402
 
 import asyncpg  # noqa: E402
 
-# 工項欄（順序即 UI 顯示順序）。可由 settings my_ledger.income_items 覆寫。
-DEPT_COLS = ["前期製作", "動態攝影", "剪輯", "調光", "動態效果",
-             "平面攝影", "諮詢", "教學", "錄混音", "其他"]
+# 🔴 欄位清單與算式一律從 core 取 —— 這支原本各複製了一份（工項十項、費用七欄、
+# computed_net），正是 core/ledger_project 檔頭記的那個「第一天就有兩份」。
+from core.ledger_project import (COST_FIELDS,  # noqa: E402
+                                 DEFAULT_INCOME_ITEMS as DEPT_COLS, compute)
 
-# Sheet 欄名 → ledger_detail 鍵
-COST_COLS = {
-    "委外費用": "outsource",
-    "稅金": "tax_fee",
-    "買發票": "buy_invoice",
-    "發票代辦費": "invoice_fee",
-    "個人稅款": "personal_tax",
-    "雜支": "misc",
-    "股東往來": "shareholder",
-}
+# Sheet 欄名 → ledger_detail 鍵（COST_FIELDS 的反向）
+COST_COLS = {label: key for key, label in COST_FIELDS}
 
 
 def money(s: str) -> int:
@@ -77,16 +70,10 @@ def load_by_code(csv_path: str) -> dict:
         if not code:
             continue
         detail = {key: money(col(r, sheet)) for sheet, key in COST_COLS.items()}
-        detail["split"] = {d: money(col(r, d)) for d in DEPT_COLS
-                           if money(col(r, d))}
-        out[code] = (detail, money(col(r, "實收")), money(col(r, "檢查")),
-                     money(col(r, "營收(含稅)")))
+        detail["split"] = {d: v for d, v in
+                           ((d, money(col(r, d))) for d in DEPT_COLS) if v}
+        out[code] = (detail, money(col(r, "實收")), money(col(r, "檢查")))
     return out
-
-
-def computed_net(contract: int, d: dict) -> int:
-    return (contract - d["outsource"] - d["invoice_fee"]
-            - d["personal_tax"] - d["misc"] - d["shareholder"])
 
 
 async def run(csv_path: str, apply: bool, prod: bool):
@@ -108,12 +95,12 @@ async def run(csv_path: str, apply: bool, prod: bool):
             if code not in by_code:
                 missing.append(r["name"])
                 continue
-            detail, sheet_net, sheet_chk, sheet_contract = by_code[code]
+            detail, sheet_net, sheet_chk = by_code[code]
             contract = int(r["contract_amount"] or 0)
-            net = computed_net(contract, detail)
+            net, chk = compute(contract, detail)
             if net == sheet_net:
                 net_ok += 1
-            if (net - sum(detail["split"].values())) == sheet_chk:
+            if chk == sheet_chk:
                 chk_ok += 1
             matched.append((r["id"], detail))
         print(f"對到案碼: {len(matched)}／未對到: {len(missing)} {missing[:3]}")

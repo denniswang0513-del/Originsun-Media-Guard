@@ -138,7 +138,7 @@ def test_pin_project_ledger_router_guarded():
 
 def test_ledger_compute_formula():
     """實收/檢查算式（Sheet 反推、402 案驗證過）——正本只有後端這一份。"""
-    from routers.api_finance_projects import compute, norm_detail
+    from core.ledger_project import compute, norm_detail
     d = norm_detail({"outsource": 12000, "tax_fee": 3905, "buy_invoice": 2655,
                      "invoice_fee": 6560, "split": {"剪輯": 28000, "調光": 29440,
                                                     "動態攝影": 6000}})
@@ -152,7 +152,7 @@ def test_ledger_compute_formula():
 
 def test_norm_detail_drops_zero_items_and_junk():
     """0 值工項＝使用者把格子清空＝刪掉；非數字不進庫。"""
-    from routers.api_finance_projects import norm_detail
+    from core.ledger_project import norm_detail
     d = norm_detail({"outsource": 5, "split": {"剪輯": 0, "調光": 100, "壞的": "x"}})
     assert d["split"] == {"調光": 100}
     assert d["outsource"] == 5
