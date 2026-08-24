@@ -39,8 +39,12 @@ async function loadEntries({ render = true } = {}) {
     if (_filters.bank_account_id) params.set('bank_account_id', _filters.bank_account_id);
     if (_filters.direction)       params.set('direction', _filters.direction);
     params.set('entity', _pinEntity());
-    try { _entries = (await _fetch('/cash-entries?' + params)).entries || []; }
-    catch (_) { _entries = []; }
+    // 卡片摘要與收支併行拉 —— 兩支互不相干，串行等於白等一個往返
+    const [entries] = await Promise.all([
+        _fetch('/cash-entries?' + params).then(r => r.entries || []).catch(() => []),
+        loadCardSummary(),
+    ]);
+    _entries = entries;
     _syncFilterOptions();     // 資料換了才要重算選項（不放 renderList —— 那支連點一列都會跑）
     if (render) renderList();
 }
@@ -92,7 +96,8 @@ const _sorter = createSortable({
         date:     e => e.entry_date || '',
         summary:  e => (e.summary || '').toLowerCase(),
         deposit:  e => e.deposit || 0,
-        expense:  e => (e.expense || 0) + (e.bank_fee || 0),
+        expense:  e => _bankOut(e),
+        card:     e => _cardAmt(e),
         category: e => (e.category || '').toLowerCase(),
         project:  e => (e.project_name || '').toLowerCase(),
         invoice:  e => (e.invoice_title || '').toLowerCase(),
@@ -144,13 +149,41 @@ function _renderAcctTabs() {
         <button type="button" class="cash-acct-tab${String(id) === _filters.bank_account_id ? ' active' : ''}"
                 data-acct="${_esc(id)}">${_esc(name)}<b>${money(bal)}</b></button>`;
     box.innerHTML = tab('', '總表', total)
-        + _bankAccounts.map(a => tab(a.id, a.name, a.current_balance)).join('');
+        + _bankAccounts.map(a => tab(a.id, a.name, a.current_balance)).join('')
+        + _cardChipHtml();
     box.querySelectorAll('[data-acct]').forEach(btn => {
         btn.addEventListener('click', () => {
             _filters.bank_account_id = btn.dataset.acct;
             loadEntries();
         });
     });
+}
+
+/* ── 信用卡：未繳餘額 + 還款記帳 ─────────────────────────────
+ *
+ * 刷卡不動銀行（列在「信用卡」欄），月底繳款才是銀行支出 —— 所以「現在欠多少」
+ * 不是任何一個帳戶餘額看得出來的，要另外算：期初 + 刷卡 − 還款。
+ * 🔴 期初不可省：owner 的資料從 2023/10 起，卡片在那之前就有餘額（實測不給
+ * 期初會算出 −36,988，而當時實際是 +2,428）。設定裡可以直接填「現在實際欠
+ * 多少」讓後端反推期初 —— 對帳單上的未繳金額是手上唯一可信的數字。
+ */
+let _cardSummary = null;
+
+function _cardChipHtml() {
+    if (!_cardSummary || !_cardSummary.charge_count) return '';
+    const n = _cardSummary.outstanding;
+    return `<button type="button" class="cash-acct-tab" title="期初 ${_fmtNum(_cardSummary.opening)}
+ + 刷卡 ${_fmtNum(_cardSummary.charges)} − 還款 ${_fmtNum(_cardSummary.repayments)}"
+            onclick="window._cashCardPanel()">💳 信用卡未繳<b class="${n < 0 ? 'pos' : 'neg'}">$${_fmtNum(n)}</b></button>`;
+}
+
+export async function loadCardSummary() {
+    try {
+        _cardSummary = await _finFetch('/card-summary');   // finFetch 自帶 entity + token
+    } catch (_) { _cardSummary = null; }
+    // 有刷卡列才顯示信用卡欄（母公司帳 0 筆 → 永遠空的欄是雜訊）
+    const panel = document.getElementById('cash-list-panel');
+    if (panel) panel.classList.toggle('has-card', !!(_cardSummary && _cardSummary.charge_count));
 }
 
 /** 編輯視窗填「匯費」時，自動從「支出」扣掉同額（總流出不變）。
@@ -220,7 +253,8 @@ function renderList() {
             <div class="crm-row-date">${e.entry_date ? e.entry_date.substring(0, 10) : '—'}</div>
             <div class="crm-row-name">${_esc(e.summary)}</div>
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
-            <div style="color:#fca5a5;">${((e.expense || 0) + (e.bank_fee || 0)) ? '$' + _fmtNum((e.expense || 0) + (e.bank_fee || 0)) : ''}</div>
+            <div class="cash-col-card" style="color:#c4b5fd;">${_cardAmt(e) ? '$' + _fmtNum(_cardAmt(e)) : ''}</div>
+            <div style="color:#fca5a5;">${_bankOut(e) ? '$' + _fmtNum(_bankOut(e)) : ''}</div>
             <div>${e.category ? _esc(e.category) : _NO_CAT_DOT}</div>
             <div title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}</div>
             <div>${_esc(e.project_name || '')}</div>
@@ -229,6 +263,16 @@ function renderList() {
             ${kebabMenuHtml(e.id, { onEdit: '_cashEdit', onDuplicate: '_cashDup', onDelete: '_cashDelete' })}
         </div>
     `).join('');
+}
+
+/** 刷卡金額：status='card' 的列（刷卡當下不動銀行，所以不算銀行支出）。 */
+function _cardAmt(e) {
+    return e.status === 'card' ? ((e.expense || 0) + (e.bank_fee || 0)) : 0;
+}
+
+/** 銀行支出：卡費列不算（那筆錢還在卡上，月底繳款才真的離開帳戶）。 */
+function _bankOut(e) {
+    return e.status === 'card' ? 0 : ((e.expense || 0) + (e.bank_fee || 0));
 }
 
 // ── Detail Panel ────────────────────────────────────────────
@@ -1157,3 +1201,96 @@ async function _allocSave(side, btn, fee) {
         btn.textContent = label;
     }
 }
+
+
+/** 信用卡面板：算式攤開 + 記還款 + 設期初。 */
+window._cashCardPanel = function () {
+    const c = _cardSummary;
+    if (!c) return;
+    const accts = (_bankAccounts || []).filter(a => (a.acct_kind || 'bank') === 'bank');
+    let ov = document.getElementById('cash-card-overlay');
+    if (ov) ov.remove();
+    ov = document.createElement('div');
+    ov.id = 'cash-card-overlay';
+    ov.className = 'crm-modal-overlay';
+    ov.style.display = 'flex';
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    ov.innerHTML = `
+      <div class="crm-modal" style="max-width:460px;">
+        <div class="crm-modal-header"><h3>💳 信用卡</h3>
+          <button onclick="document.getElementById('cash-card-overlay').remove()" class="crm-detail-close">✕</button>
+        </div>
+        <div class="crm-modal-body">
+          <table class="crm-table" style="width:100%;font-size:12px;">
+            <tr><td style="color:#bbb;">期初（資料起點前的卡債）</td><td style="text-align:right;">${_fmtNum(c.opening)}</td></tr>
+            <tr><td style="color:#bbb;">＋ 刷卡（${_fmtNum(c.charge_count)} 筆）</td><td style="text-align:right;color:#c4b5fd;">${_fmtNum(c.charges)}</td></tr>
+            <tr><td style="color:#bbb;">− 還款（類別：${_esc(c.repay_categories.join('、') || '未設定')}）</td><td style="text-align:right;color:#86efac;">${_fmtNum(c.repayments)}</td></tr>
+            <tr><td style="color:#ddd;font-weight:600;">＝ 未繳</td><td style="text-align:right;font-weight:600;color:#eee;">$${_fmtNum(c.outstanding)}</td></tr>
+          </table>
+
+          <div class="crm-form-section" style="margin-top:14px;">記一筆還款</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <input type="date" id="cash-card-date" class="crm-input" value="${today()}" style="width:150px;">
+            <input type="number" id="cash-card-amt" class="crm-input" placeholder="金額"
+                   value="${c.outstanding > 0 ? c.outstanding : ''}" style="width:120px;text-align:right;">
+            <select id="cash-card-acct" class="crm-input" style="flex:1;min-width:140px;">
+              ${accts.map(a => `<option value="${_esc(a.id)}">${_esc(a.name)}</option>`).join('')}
+            </select>
+            <button class="crm-btn crm-btn-primary" onclick="window._cashCardRepay(this)">記還款</button>
+          </div>
+          <div style="color:#666;font-size:11px;margin-top:4px;">
+            會建一筆「支出」掛在選定帳戶、類別「${_esc(c.repay_categories[0] || '信用卡')}」——
+            那筆錢是這時候才真的離開銀行的。</div>
+
+          <div class="crm-form-section" style="margin-top:16px;">校準期初</div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="number" id="cash-card-actual" class="crm-input" placeholder="對帳單上現在實際欠多少" style="flex:1;">
+            <button class="crm-btn crm-btn-secondary" onclick="window._cashCardCalib(this)">反推期初</button>
+          </div>
+          <div style="color:#666;font-size:11px;margin-top:4px;">
+            資料從 2023/10 起，卡片在那之前已有餘額 —— 填對帳單上的未繳金額，
+            系統回推期初，之後就會自己對得上。</div>
+          <div id="cash-card-err" style="display:none;color:#fca5a5;font-size:12px;margin-top:8px;"></div>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+};
+
+window._cashCardRepay = async function (btn) {
+    const err = document.getElementById('cash-card-err');
+    const show = (m) => { err.textContent = m; err.style.display = 'block'; };
+    const amt = Number(document.getElementById('cash-card-amt').value) || 0;
+    const acct = document.getElementById('cash-card-acct').value;
+    if (amt <= 0) return show('請填還款金額');
+    if (!acct) return show('請選擇從哪個帳戶扣款');
+    btn.disabled = true;
+    try {
+        await _fetch('/cash-entries', {
+            method: 'POST',
+            body: JSON.stringify({
+                entry_date: document.getElementById('cash-card-date').value,
+                summary: '信用卡還款', expense: amt,
+                category: (_cardSummary.repay_categories[0] || '信用卡'),
+                bank_account_id: acct,
+            }),
+        });
+        document.getElementById('cash-card-overlay').remove();
+        await loadEntries();
+    } catch (e) { show(e.message); }
+    finally { btn.disabled = false; }
+};
+
+window._cashCardCalib = async function (btn) {
+    const err = document.getElementById('cash-card-err');
+    const v = document.getElementById('cash-card-actual').value;
+    if (v === '') { err.textContent = '請填現在實際欠多少'; err.style.display = 'block'; return; }
+    btn.disabled = true;
+    try {
+        await _finFetch('/card-summary', {
+            method: 'PUT', body: JSON.stringify({ derive_opening_from: Number(v) }),
+        });
+        document.getElementById('cash-card-overlay').remove();
+        await loadEntries();
+    } catch (e) { err.textContent = e.message; err.style.display = 'block'; }
+    finally { btn.disabled = false; }
+};

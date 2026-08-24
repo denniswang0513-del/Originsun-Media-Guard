@@ -53,3 +53,39 @@ def test_project_ledger_table_is_height_bounded():
     assert "getBoundingClientRect" in fn
     assert "finance-content" in fn
     assert "addEventListener('resize', _fitBody)" in js, "視窗縮放要重算"
+
+
+def test_cashbook_card_column_separates_card_from_bank_expense():
+    """刷卡與銀行支出是兩欄，同一筆錢只能出現在其中一欄。
+
+    刷卡當下不動銀行（月底繳款才是銀行支出）—— 兩者混在「支出」欄裡，
+    看不出「這個月刷了多少、實際從帳戶出去多少」。
+    """
+    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    for fn_name in ("_cardAmt", "_bankOut"):
+        assert f"function {fn_name}(e)" in js
+    card = js.split("function _cardAmt(e)")[1].split("\n}")[0]
+    bank = js.split("function _bankOut(e)")[1].split("\n}")[0]
+    assert "'card'" in card and "'card'" in bank
+    # 互斥：卡費列的銀行支出必須是 0
+    assert "? 0 :" in bank
+
+
+def test_cashbook_card_column_hidden_when_book_has_no_cards():
+    """母公司帳 0 筆刷卡 —— 永遠空的欄是雜訊。
+
+    🔴 用 display:none 而不是不渲染：nth-child 數 DOM 位置，抽掉節點會讓
+    後面每一欄的欄寬規則整排錯位。
+    """
+    css = _read("frontend/tabs/crm/crm.css")
+    assert "#cash-list-panel:not(.has-card) .cash-col-card { display: none; }" in css
+    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    assert "classList.toggle('has-card'" in js
+
+
+def test_card_summary_needs_opening_balance():
+    """卡片未繳＝期初＋刷卡−還款。期初不可省 —— 資料起點前的卡債沒有它就對不平
+    （2026-08-25 實測：不給期初算出 −36,988，實際是 +2,428；反推期初 39,416）。"""
+    src = _read("routers/api_finance_card.py")
+    assert "derive_opening_from" in src, "要能從『現在實際欠多少』反推期初"
+    assert 'status.is_distinct_from("card")' in src, "還款不能把刷卡列也算進去"

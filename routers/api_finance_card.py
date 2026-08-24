@@ -28,10 +28,12 @@ import uuid
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
+from config import load_settings, save_settings
 from core.card_statement import (merchant_key, parse_card_statement,
                                  suggest_rows)
 from core.db_guard import db_factory_or_503 as _factory_or_503
-from core.schemas import CardAiSuggestPayload, CardImportApply
+from core.schemas import (CardAiSuggestPayload, CardImportApply,
+                          CardLedgerConfig)
 from routers.crm._shared import _assert_rows_open, _parse_shoot_date
 
 from .api_finance import _guard
@@ -219,3 +221,93 @@ async def ai_suggest_categories(payload: CardAiSuggestPayload, request: Request,
                    if isinstance(v, str) and v in ok_set
                    and str(k).isdigit() and int(k) < len(payload.rows)}
     return {"suggestions": suggestions, "options": options}
+
+
+# ── 卡片餘額與還款記帳 ────────────────────────────────────────
+#
+# 為什麼不把信用卡做成 bank_accounts 的一種 acct_kind：
+# core/finance_logic.split_bank_lines 把「不是股東往來」的帳戶一律歸進 cash，
+# 卡債（負債）會變成資產負債表上的負現金 —— 靜默弄壞三表。所以卡片餘額用
+# 收支列推導，不進 bank_accounts。
+#
+# 口徑：未繳卡費 = 期初 + Σ刷卡 − Σ還款淨額
+#   刷卡    = status='card' 的列（expense；退刷為負）
+#   還款淨額 = 還款類別的列（expense − deposit），且**不是**刷卡列
+#   期初    = 資料起點之前就存在的卡債。owner 的資料從 2023/10 起，
+#            卡片在那之前已有餘額 —— 不給期初就永遠對不平（2026-08-25 實測：
+#            刷卡 3,720,973 − 還款 3,757,961 = −36,988，而 Sheet 當時是 +2,428）。
+#
+# 期初與還款類別存 settings['card_ledger'][entity]，每本帳各自一份。
+
+_CARD_DEFAULT_REPAY_CATEGORIES = ["信用卡"]
+
+
+def _card_cfg(ent: str) -> dict:
+    cfg = ((load_settings().get("card_ledger") or {}).get(ent) or {})
+    return {
+        "opening": int(cfg.get("opening") or 0),
+        "repay_categories": [str(x) for x in (cfg.get("repay_categories")
+                                              or _CARD_DEFAULT_REPAY_CATEGORIES) if str(x).strip()],
+    }
+
+
+@router.get("/card-summary")
+async def card_summary(request: Request, entity: str = ""):
+    """卡片餘額：期初 + 刷卡 − 還款。回傳各分項供 UI 說明數字怎麼來的。"""
+    ent = _guard(request, entity, level="full")
+    cfg = _card_cfg(ent)
+    from sqlalchemy import func as fn
+    from sqlalchemy import select
+
+    from db.models import CrmCashEntry
+    factory = _factory_or_503()
+    async with factory() as session:
+        charges = int((await session.execute(
+            select(fn.coalesce(fn.sum(CrmCashEntry.expense), 0))
+            .where(CrmCashEntry.entity == ent,
+                   CrmCashEntry.status == "card"))).scalar_one() or 0)
+        n_charges = int((await session.execute(
+            select(fn.count()).select_from(CrmCashEntry)
+            .where(CrmCashEntry.entity == ent,
+                   CrmCashEntry.status == "card"))).scalar_one() or 0)
+        repay_out = repay_in = 0
+        if cfg["repay_categories"]:
+            row = (await session.execute(
+                select(fn.coalesce(fn.sum(CrmCashEntry.expense), 0),
+                       fn.coalesce(fn.sum(CrmCashEntry.deposit), 0))
+                .where(CrmCashEntry.entity == ent,
+                       CrmCashEntry.status.is_distinct_from("card"),
+                       CrmCashEntry.category.in_(cfg["repay_categories"])))).one()
+            repay_out, repay_in = int(row[0] or 0), int(row[1] or 0)
+    repayments = repay_out - repay_in
+    return {
+        "opening": cfg["opening"], "charges": charges, "charge_count": n_charges,
+        "repayments": repayments,
+        "outstanding": cfg["opening"] + charges - repayments,
+        "repay_categories": cfg["repay_categories"],
+    }
+
+
+@router.put("/card-summary")
+async def update_card_summary(payload: CardLedgerConfig, request: Request,
+                              entity: str = ""):
+    """設定卡片期初／還款類別。
+
+    `derive_opening_from`：給「現在實際欠多少」，反推期初 —— 對帳單上的未繳
+    金額是使用者手上唯一可信的數字，要他自己回推 2023 年的期初不合理。
+    """
+    ent = _guard(request, entity, level="full")
+    settings = load_settings()
+    book = settings.setdefault("card_ledger", {}).setdefault(ent, {})
+    data = payload.model_dump(exclude_unset=True)
+    if "repay_categories" in data and data["repay_categories"] is not None:
+        book["repay_categories"] = [str(x).strip() for x in data["repay_categories"]
+                                    if str(x).strip()]
+    if data.get("derive_opening_from") is not None:
+        cur = await card_summary(request, entity=ent)
+        # 目標未繳 = 期初 + 刷卡 − 還款 → 期初 = 目標 − (刷卡 − 還款)
+        book["opening"] = int(data["derive_opening_from"]) - (cur["charges"] - cur["repayments"])
+    elif data.get("opening") is not None:
+        book["opening"] = int(data["opening"])
+    save_settings(settings)
+    return await card_summary(request, entity=ent)

@@ -1864,18 +1864,25 @@
 #cash-list-panel .acct-header > span:nth-child(3),
 #cash-list-body .crm-row > *:nth-child(3):not(.crm-kebab-wrap) { flex: 0 0 104px; text-align: right; }  /* 收入 */
 #cash-list-panel .acct-header > span:nth-child(4),
-#cash-list-body .crm-row > *:nth-child(4):not(.crm-kebab-wrap) { flex: 0 0 104px; text-align: right; }  /* 支出 */
+#cash-list-body .crm-row > *:nth-child(4):not(.crm-kebab-wrap) { flex: 0 0 96px; text-align: right; }   /* 信用卡 */
 #cash-list-panel .acct-header > span:nth-child(5),
-#cash-list-body .crm-row > *:nth-child(5):not(.crm-kebab-wrap) { flex: 0 0 84px; }                      /* 類別 */
+#cash-list-body .crm-row > *:nth-child(5):not(.crm-kebab-wrap) { flex: 0 0 104px; text-align: right; }  /* 支出 */
+
+/* 信用卡欄只在「這本帳真的有刷卡列」時出現（母公司帳 0 筆，永遠空的欄＝雜訊）。
+   🔴 用 display:none 而不是不渲染 —— nth-child 數的是 DOM 位置，抽掉節點會讓
+   後面每一欄的欄寬規則整排錯位。 */
+#cash-list-panel:not(.has-card) .cash-col-card { display: none; }
 #cash-list-panel .acct-header > span:nth-child(6),
-#cash-list-body .crm-row > *:nth-child(6):not(.crm-kebab-wrap) { flex: 1.6 1 0; min-width: 0; text-align: left; color: #8a8a8a; }  /* 備註 */
+#cash-list-body .crm-row > *:nth-child(6):not(.crm-kebab-wrap) { flex: 0 0 84px; }                      /* 類別 */
 #cash-list-panel .acct-header > span:nth-child(7),
-#cash-list-body .crm-row > *:nth-child(7):not(.crm-kebab-wrap) { flex: 1 1 0; min-width: 0; text-align: left; }    /* 專案 */
+#cash-list-body .crm-row > *:nth-child(7):not(.crm-kebab-wrap) { flex: 1.6 1 0; min-width: 0; text-align: left; color: #8a8a8a; }  /* 備註 */
 #cash-list-panel .acct-header > span:nth-child(8),
-#cash-list-body .crm-row > *:nth-child(8):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 發票 */
+#cash-list-body .crm-row > *:nth-child(8):not(.crm-kebab-wrap) { flex: 1 1 0; min-width: 0; text-align: left; }    /* 專案 */
 #cash-list-panel .acct-header > span:nth-child(9),
-#cash-list-body .crm-row > *:nth-child(9):not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
+#cash-list-body .crm-row > *:nth-child(9):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 發票 */
 #cash-list-panel .acct-header > span:nth-child(10),
+#cash-list-body .crm-row > *:nth-child(10):not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
+#cash-list-panel .acct-header > span:nth-child(11),
 #cash-list-body .crm-row > .crm-kebab-wrap { flex: 0 0 36px; }
 
 /* ── 帳戶切換列（總表／各銀行，附餘額）────────────────────── */

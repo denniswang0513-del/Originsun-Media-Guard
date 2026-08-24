@@ -1358,6 +1358,13 @@ class CardAiSuggestPayload(BaseModel):
     rows: List[CardAiSuggestRow] = []
 
 
+class CardLedgerConfig(BaseModel):
+    """卡片餘額設定（api_finance_card）。opening 與 derive_opening_from 二選一。"""
+    opening: Optional[int] = None
+    derive_opening_from: Optional[int] = None   # 給「現在實際欠多少」，反推期初
+    repay_categories: Optional[list] = None
+
+
 class HoldingPayload(BaseModel):
     """資產儀表板 — 持股（api_finance_assets）。quote_symbol 空＝manual。"""
     broker: Optional[str] = None
