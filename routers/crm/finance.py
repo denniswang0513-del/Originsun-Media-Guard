@@ -1180,8 +1180,50 @@ async def payment_options(request: Request):
     docstring 說它把三份寫死的清單集中起來，但請款單這一份始終留在前端，改規則
     要發版，而零用金／請款／收支三者**刻意**的差異也從程式碼裡看不出來。
     """
-    require_entity(request, "", level="full")
-    return {"project_link_categories": list(_PAYMENT_LINK_CATEGORIES)}
+    ent = require_entity(request, "", level="full")
+    return {"project_link_categories": list(_PAYMENT_LINK_CATEGORIES),
+            "categories": await _payment_categories(ent)}
+
+
+async def _payment_categories(entity: str) -> list:
+    """請款單「項目」下拉的來源 ＝ **有會計對映的** ∪ **帳上已經在用的**。
+
+    🔴 為什麼不能寫死在前端：這份清單決定的不只是選單，還決定那筆錢怎麼入帳
+    （finance_category_map 把 category 翻成科目與 treatment）。兩邊各存一份就會漂，
+    而且是往兩個方向漂 —— 2026-08-24 實測生產：
+      · 有對映卻選不到 6 項（代收代付／代收薪資／代發薪資／勞報／後期雜支／現金代收）
+      · **帳上已經有請款單在用、編輯視窗卻選不到自己** 2 項（勞報、後期雜支）
+        —— 那些單一打開編輯就會被迫改成別的項目
+    同一個病在「專案外包」身上咬過一次（歷史匯入 371/806 筆、46% 的最大宗類別
+    當時不在清單裡），在收支明細身上也咬過一次（寫死 27 項少 5 項）。
+
+    排序照帳上使用次數（最常用的在最前面），沒用過的接在後面 —— 使用者天天選的
+    那幾個不該被字母序推到下面。
+    """
+    from sqlalchemy import func as sa_func
+
+    from db.models import FinanceCategoryMap
+    factory = await _get_factory()
+    async with factory() as session:
+        mapped = [r for (r,) in (await session.execute(
+            select(FinanceCategoryMap.category_text).where(
+                FinanceCategoryMap.source == "payment",
+                FinanceCategoryMap.active.is_(True)))).all()]
+        used = (await session.execute(
+            select(CrmPaymentRequest.category, sa_func.count())
+            .where(CrmPaymentRequest.entity == entity)
+            .group_by(CrmPaymentRequest.category)
+            .order_by(sa_func.count().desc()))).all()
+    seen, out = set(), []
+    for cat, _n in used:                    # 帳上在用的，照次數排
+        if cat and cat not in seen:
+            seen.add(cat)
+            out.append(cat)
+    for cat in sorted(mapped):              # 有對映但還沒用過的接在後面
+        if cat and cat not in seen:
+            seen.add(cat)
+            out.append(cat)
+    return out
 
 
 @router.get("/payments/advances", dependencies=[Depends(money_dep)])

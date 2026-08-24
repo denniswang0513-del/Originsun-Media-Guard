@@ -445,11 +445,15 @@ async function _loadPayOptions() {
     try {
         const o = await _fetch('/payments/options');
         if (o.project_link_categories?.length) _PROJECT_CATEGORIES = o.project_link_categories;
+        if (o.categories?.length) _CATEGORIES = o.categories;
     } catch (_) { /* 用 fallback，不擋畫面 */ }
 }
-// 🔴 清單缺「專案外包」曾讓最大宗的類別（歷史匯入 371/806 筆，46%）在編輯視窗
-// 選不到自己 —— 跟收支明細寫死 27 項少 5 項同一種病。快速列與編輯表單共用這一份。
-const _CATEGORIES = ['專案外包', '發票代開', '建構', '零用金', '專案雜支', '專案',
+// 項目清單**由後端供**（/payments/options 的 categories ＝ 有會計對映的 ∪ 帳上在用的）。
+// 🔴 寫死在前端會往兩個方向漂：選得到卻沒有會計對映（那筆錢會變成三表裡的「未歸類
+// 科目」），或帳上已經在用卻選不到自己（一打開編輯就被迫改成別的項目）。後者在
+// 「專案外包」身上咬過一次 —— 歷史匯入 371/806 筆、46% 的最大宗類別當時不在清單裡。
+// 下面這份只是**斷線時的 fallback**，不是正本；快速列與編輯表單共用同一份。
+let _CATEGORIES = ['專案外包', '發票代開', '建構', '零用金', '專案雜支', '專案',
     '薪資', '行政', '軟體網路服務', '業務推廣', '設備耗材', '設備維護',
     '獎金', '轉存', '其他'];
 
@@ -829,6 +833,11 @@ export async function initCrmPaymentsTab() {
     }
 
     setupResizeHandle('pay-resize-handle', 'pay-detail-panel');
+    // 🔴 選項要**先**拿到再渲染：renderList() 會畫快速新增列，那一列的項目下拉
+    //    直接讀 _CATEGORIES。跟 loadPayments() 平行跑的話，先到的通常是清單，
+    //    快速新增列就用 fallback 那份畫出來了（少 6 個有對映的項目），
+    //    而且不會再重畫 —— 使用者看到的是一份過期的選單。
+    await _loadPayOptions();
     await Promise.all([loadPayments(), loadProjects(), loadStaffList(),
-                       _loadInvoiceList(), _loadPayOptions()]);
+                       _loadInvoiceList()]);
 }
