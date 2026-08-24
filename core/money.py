@@ -244,20 +244,16 @@ async def money_dep(request: Request):
         # 這條檢查只是加牆，403 與否的其他判定（模組守衛）在端點層 ——
         # 守衛搶先 503 會把「沒模組該 403」的請求變 503（test_petty_cash
         # 2026-08-24 當場抓到）。沒 DB 時端點自己會 503，也沒有東西可洩。
+        # 判定走 core/ledger.is_mine_project（60s TTL 的 id 集合快取 ——
+        # 專案詳情一開 4-6 支並發 money 端點，逐請求查 DB 是純浪費）。
         import core.state as state
         factory = None
         if state.db_online:
             from db.session import get_session_factory
             factory = get_session_factory()
         if factory is not None:
-            from sqlalchemy import select
-
-            from db.models import CrmProject
-            async with factory() as session:
-                ent = (await session.execute(
-                    select(CrmProject.entity)
-                    .where(CrmProject.id == pid))).scalar_one_or_none()
-            if ent == "mine":
+            from core.ledger import is_mine_project
+            if await is_mine_project(factory, pid):
                 raise HTTPException(status_code=403,
                                     detail="這是私帳專案 —— 財務資料需要「我的帳」權限")
     return True

@@ -3,8 +3,7 @@
 
 v2.4.172 的教訓：原始碼掃描擋不住「查詢留著、結果丟掉」—— 這裡直接餵資料
 驗行為。"""
-from core.card_statement import parse_card_statement
-from routers.api_finance_card import suggest_rows
+from core.card_statement import parse_card_statement, suggest_rows
 
 
 def _rows(text):

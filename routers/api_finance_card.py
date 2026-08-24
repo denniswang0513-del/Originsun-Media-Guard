@@ -28,18 +28,17 @@ import uuid
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
-from core.card_statement import merchant_key, parse_card_statement
+from core.card_statement import (merchant_key, parse_card_statement,
+                                 suggest_rows)
 from core.db_guard import db_factory_or_503 as _factory_or_503
 from core.schemas import CardAiSuggestPayload, CardImportApply
 from routers.crm._shared import _assert_rows_open, _parse_shoot_date
 
 from .api_finance import _guard
-from .api_finance_stmt import _load_import_rules, _statement_text
+from .api_finance_stmt import (_STMT_MAX_BYTES, _load_import_rules,
+                               _statement_text)
 
 router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
-
-_CARD_MAX_BYTES = 8 * 1024 * 1024
-
 
 async def _history_map(session, ent: str) -> dict:
     """已入帳明細 → {merchant_key: category}，只收歷史完全一致的商家。"""
@@ -60,45 +59,6 @@ async def _history_map(session, ent: str) -> dict:
             by_key[k][category] += 1
     return {k: next(iter(c)) for k, c in by_key.items()
             if len(c) == 1 and sum(c.values()) >= 2}
-
-
-def _rule_suggest(rules, note: str) -> str:
-    for keyword, category, _dir, _only in rules:
-        if keyword and keyword in note:
-            return category
-    return ""
-
-
-def suggest_rows(rows, hist: dict, rules, seen: set) -> list:
-    """解析列 → 帶三層建議與重複旗標的預覽列（純函式，測試直接打這裡）。
-
-    優先序：手續費繼承前一筆消費 > 規則 > 歷史一致對映。
-    手續費繼承的「前一筆」只認 spend（fee 接 fee 不會鏈到更早的錯誤答案）；
-    🔴 且前一筆**沒有建議時手續費也留白** —— prev_cat 對每個 spend 都覆寫
-    （含空值），否則手續費會越過自己的母交易、抄到更早那筆的分類
-    （2026-08-24 dev 冒煙實測：MTMOGRAPH 無建議，其手續費卻抄了上上筆
-    八方雲集的 個人_生活）。
-    """
-    out, prev_cat = [], ""
-    for r in rows:
-        cat, source = "", ""
-        if r.kind == "fee" and prev_cat:
-            cat, source = prev_cat, "fee"          # 手續費跟前一筆
-        if not cat:
-            cat = _rule_suggest(rules, r.note)
-            source = "rule" if cat else source
-        if not cat:
-            cat = hist.get(merchant_key(r.note), "")
-            source = "history" if cat else source
-        if r.kind == "spend":
-            prev_cat = cat
-        out.append({
-            "line_no": r.line_no, "date": r.date, "amount": r.amount,
-            "note": r.note, "kind": r.kind,
-            "category": cat, "source": source,
-            "duplicate": (r.date, abs(r.amount)) in seen,
-        })
-    return out
 
 
 async def _existing_card_keys(session, ent: str, dates: list) -> set:
@@ -131,7 +91,7 @@ async def preview_card_statement(
     text = (text or "").strip()
     if file is not None:
         blob = await file.read()
-        if len(blob) > _CARD_MAX_BYTES:
+        if len(blob) > _STMT_MAX_BYTES:
             raise HTTPException(status_code=422, detail="檔案過大（上限 8MB）")
         import asyncio
         text = await asyncio.to_thread(_statement_text, file.filename or "", blob)

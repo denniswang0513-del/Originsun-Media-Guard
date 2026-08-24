@@ -35,6 +35,16 @@ from core.money import MODULE_KEY as MONEY_MODULE
 # 合法實體值。'parent'＝母公司（預設；既有資料全歸此）、'mine'＝我的帳。
 ENTITIES = ("parent", "mine")
 DEFAULT_ENTITY = "parent"
+MINE = "mine"
+
+
+def not_mine(entity_col):
+    """SQL 述詞：母公司的金額聚合**排除私帳**（§8）。
+
+    命名一份、兩處聚合（客戶績效、母公司專案毛利）共用 —— 散落的
+    `entity != "mine"` 字面沒有可 grep 的名字，第三個聚合點就會從零重新決定。
+    """
+    return entity_col != MINE
 
 # 帳本模組 key（core/auth.py ALL_MODULES 尾端）。
 # finance_partner＝母公司報表唯讀（合夥人；橫切帳本 key、不是 tab）。
@@ -97,3 +107,32 @@ def require_entity(request: Request, entity: str = "", level: str = "view") -> s
     if entity not in scope:
         raise HTTPException(status_code=403, detail="沒有該帳本的檢視權限")
     return entity
+
+
+# ── mine 專案 id 快取（core/money.money_dep 的熱路徑守衛用）──────────────
+#
+# money 端點（成本明細/財務摘要/雜支…）每個請求都要判「目標專案是不是私帳」。
+# 專案的 entity 實務上不可變（匯入時定，API 無改道），逐請求查 DB 是純浪費
+# （專案詳情一開就是 4-6 支並發 money 端點）。快取整個 mine id 集合（數百個、
+# 幾 KB），TTL 60 秒 —— 就算未來出現 entity 寫入路徑，一分鐘內收斂。
+_MINE_PROJECT_IDS: set | None = None
+_MINE_IDS_AT: float = 0.0
+_MINE_IDS_TTL = 60.0
+
+
+async def is_mine_project(session_factory, project_id: str) -> bool:
+    """project_id 是否屬於私帳（帶 60s TTL 快取）。查不到專案＝False。"""
+    import time
+    global _MINE_PROJECT_IDS, _MINE_IDS_AT
+    now = time.monotonic()
+    if _MINE_PROJECT_IDS is None or now - _MINE_IDS_AT > _MINE_IDS_TTL:
+        from sqlalchemy import select
+
+        from db.models import CrmProject
+        async with session_factory() as session:
+            ids = (await session.execute(
+                select(CrmProject.id)
+                .where(CrmProject.entity == MINE))).scalars().all()
+        _MINE_PROJECT_IDS = set(ids)
+        _MINE_IDS_AT = now
+    return project_id in _MINE_PROJECT_IDS

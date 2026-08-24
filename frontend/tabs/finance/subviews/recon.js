@@ -639,11 +639,12 @@ _fr.wbImportOpen = () => {
 // 細節只該存在一份。
 
 /** POST 預覽。失敗/未通過檢查 → 呼叫 show(原因) 並回 null。 */
-async function _stmtFetchPreview(fd, { btn, doneLabel, show, failMsg }) {
+async function _stmtFetchPreview(fd, { btn, doneLabel, show, failMsg,
+                                       url = '/api/v1/finance/bank-statement/preview' }) {
     btn.disabled = true;
     btn.textContent = '解析中…';
     try {
-        const res = await fetch(`/api/v1/finance/bank-statement/preview?entity=${finEntity()}`,
+        const res = await fetch(`${url}?entity=${finEntity()}`,
             { method: 'POST', body: fd, headers: bearerHeader() });
         const d = await res.json();
         if (!res.ok) throw new Error(d.detail || '解析失敗');
@@ -1900,18 +1901,15 @@ _fr.cardParse = async (btn) => {
     const fd = new FormData();
     if (file) fd.append('file', file);
     if (text) fd.append('text', text);
-    btn.disabled = true; btn.textContent = '解析中…';
-    try {
-        const res = await fetch(`/api/v1/finance/card-statement/preview?entity=${finEntity()}`,
-            { method: 'POST', body: fd, headers: bearerHeader() });
-        const d = await res.json();
-        if (!res.ok) throw new Error(d.detail || '解析失敗');
-        if (!d.ok) { show('這份卡單解析不出來：\n• ' + (d.errors || []).join('\n• ')); return; }
-        _cardPreview = d;
-        await _ensureCashCats();
-        _cardRenderPreview();
-    } catch (e) { show(e.message); }
-    finally { btn.disabled = false; btn.textContent = '解析看看'; }
+    const d = await _stmtFetchPreview(fd, {
+        btn, doneLabel: '解析看看', show,
+        failMsg: '這份卡單解析不出來：',
+        url: '/api/v1/finance/card-statement/preview',
+    });
+    if (!d) return;
+    _cardPreview = d;
+    await _ensureCashCats();
+    _cardRenderPreview();
 };
 
 function _cardRenderPreview() {
@@ -1964,7 +1962,7 @@ _fr.cardAiSuggest = async (btn) => {
     if (!blank.length) return finToast('沒有未分類的列');
     btn.disabled = true; btn.textContent = `AI 判讀中（${blank.length} 列）…`;
     try {
-        const r = await finFetch(`/card-statement/ai-suggest?entity=${finEntity()}`, {
+        const r = await finFetch('/card-statement/ai-suggest', {
             method: 'POST',
             body: JSON.stringify({ rows: blank.map(x => ({ note: d.rows[x.i].note, amount: d.rows[x.i].amount })) }),
         });
@@ -1997,7 +1995,7 @@ _fr.cardApply = async (btn) => {
     if (!picked.length) { err.textContent = '沒有勾選任何列'; err.style.display = 'block'; return; }
     btn.disabled = true; btn.textContent = '匯入中…';
     try {
-        const r = await finFetch(`/card-statement/apply?entity=${finEntity()}`, {
+        const r = await finFetch('/card-statement/apply', {
             method: 'POST', body: JSON.stringify({ rows: picked }),
         });
         _wbCloseModal();

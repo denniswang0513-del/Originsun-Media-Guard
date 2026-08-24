@@ -25,11 +25,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+# 金額 token 與數值化與 bank_statement 共用同一份（同族解析器 —— 那兩條
+# 規則各被修過兩次，留兩份等於下次只修得到一份）。
+from core.bank_statement import _AMOUNT, _to_int  # noqa: E402
+
 # 日期：2026/1/16、2026-01-16、115/01/16（民國；年 < 1000 視為民國 +1911）
 _DATE = re.compile(r"(?<!\d)(\d{2,4})[/\-.](\d{1,2})[/\-.](\d{1,2})(?!\d)")
-# 金額：千分位至少一組 ,ddd 或純數字；lookaround 擋掉長數字串（卡號）的中段。
-_AMOUNT = re.compile(
-    r"(?<![\d.,])(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?![\d,])")
 
 # 退款方向（金額記負）
 _REFUND_KW = ("退貨", "退款", "退刷", "溢繳", "退費", "回饋金")
@@ -50,7 +51,6 @@ class CardRow:
     amount: int
     note: str = ""                 # 商家/摘要（去掉日期與金額後的殘文）
     kind: str = "spend"            # spend / fee / payment
-    inferred: bool = False
 
 
 @dataclass
@@ -82,18 +82,9 @@ def _norm_date(y: int, m: int, d: int) -> str | None:
     return f"{y:04d}-{m:02d}-{d:02d}"
 
 
-def _to_int(tok: str) -> int | None:
-    t = tok.replace(",", "").strip()
-    try:
-        return int(round(float(t)))
-    except ValueError:
-        return None
-
-
 def parse_card_statement(text: str) -> CardParseResult:
     """卡單文字 → CardParseResult。一列一筆；無日期或無金額的列跳過。"""
     res = CardParseResult()
-    prev_spend: CardRow | None = None
     printed_totals: list[int] = []
 
     for i, raw in enumerate(text.splitlines(), start=1):
@@ -142,7 +133,6 @@ def parse_card_statement(text: str) -> CardParseResult:
             res.rows.append(row)
             continue
         res.rows.append(row)
-        prev_spend = row
 
     if not res.rows:
         res.errors.append("解析不出任何消費列 —— 請確認貼的是含「日期＋金額」的交易明細")
@@ -154,7 +144,6 @@ def parse_card_statement(text: str) -> CardParseResult:
             res.warnings.append(
                 f"帳單自印總計 {printed_totals} 與解析合計（消費 {res.total_spend:,}"
                 f"／淨額 {net:,}）對不上 —— 可能含循環息/年費列，請逐列確認")
-    _ = prev_spend
     return res
 
 
@@ -185,3 +174,39 @@ def merchant_key(summary: str) -> str:
     s = _TAIL_NUM.sub("", s)
     s = _PAREN.sub("", s)
     return re.sub(r"\s+", "", s)
+
+
+# ── 分類建議（preview 的三層合成；純函式 —— 測試直接打這裡）────────────
+
+def suggest_rows(rows, hist: dict, rules, seen: set) -> list:
+    """解析列 → 帶三層建議與重複旗標的預覽列。
+
+    優先序：手續費繼承前一筆消費 > 規則 > 歷史一致對映。
+    - 規則層走 bank_statement._classify —— 與銀行對帳單**同一張規則表、同一套
+      命中語意**（含 only_direction 方向條件；卡單 spend 為支出 → signed 取負）。
+      自己寫第二份比對迴圈會丟掉方向守衛（/simplify 2026-08-24 抓到）。
+    - 手續費只認「緊鄰的前一筆 spend」；🔴 前一筆**沒有建議時手續費也留白**——
+      prev_cat 對每個 spend 都覆寫（含空值），否則手續費會越級抄到更早那筆
+      的分類（dev 冒煙實抓）。
+    """
+    from core.bank_statement import _classify
+    out, prev_cat = [], ""
+    for r in rows:
+        cat, source = "", ""
+        if r.kind == "fee" and prev_cat:
+            cat, source = prev_cat, "fee"          # 手續費跟前一筆
+        if not cat:
+            cat = _classify(r.note, rules, signed=-r.amount)[0]
+            source = "rule" if cat else source
+        if not cat:
+            cat = hist.get(merchant_key(r.note), "")
+            source = "history" if cat else source
+        if r.kind == "spend":
+            prev_cat = cat
+        out.append({
+            "line_no": r.line_no, "date": r.date, "amount": r.amount,
+            "note": r.note, "kind": r.kind,
+            "category": cat, "source": source,
+            "duplicate": (r.date, abs(r.amount)) in seen,
+        })
+    return out

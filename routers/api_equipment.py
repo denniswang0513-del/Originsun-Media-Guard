@@ -91,9 +91,27 @@ def _usage_stats(checkouts, now):
     return round(days, 1), round(days / 365 * 100, 1)
 
 
+def _strip_mine_money(d: dict, request) -> dict:
+    """§8 錢牆（器材側）：mine 器材對「無我的帳 scope」者抹掉錢欄。
+
+    器材清單本身共用可見（owner 拍板「只有錢區隔」），但 purchase_cost／
+    monthly_depreciation 是 owner 私人器材的錢 —— 這個 router 沒掛
+    MoneyRedactRoute（core/money 記載的機制邊界），牆只能在這裡自己立。
+    刪鍵不歸零（三態慣例，同 core/money.redact）。"""
+    if d.get("entity") != "mine":
+        return d
+    from core.money import viewer_has_mine_scope
+    if viewer_has_mine_scope(request):
+        return d
+    for k in ("purchase_cost", "monthly_depreciation"):
+        d.pop(k, None)
+    return d
+
+
 def _equip_dict(e) -> dict:
     return {
         "id": e.id,
+        "entity": e.entity or "parent",
         "name": e.name,
         "category": e.category or "",
         "serial": e.serial or "",
@@ -194,7 +212,7 @@ async def list_equipment(request: Request, q: str = "", category: str = "", stat
     now = datetime.now(timezone.utc)
     items = []
     for r in rows:
-        d = _equip_dict(r)
+        d = _strip_mine_money(_equip_dict(r), request)
         c = open_by_eq.get(r.id)
         d["current_checkout"] = _checkout_dict(c, pnames.get(c.project_id) or "", now) if c else None
         d["overdue"] = bool(d["current_checkout"] and d["current_checkout"]["overdue"])
@@ -265,6 +283,9 @@ async def get_equipment(eid: str, request: Request):
         "monthly_depreciation": _monthly_depreciation(equip),
         "maintenance_total": sum(m.cost or 0 for m in maints),
     }
+    _strip_mine_money(d, request)
+    if "monthly_depreciation" not in d:      # mine 被抹 → stats 那份也要抹
+        d["stats"].pop("monthly_depreciation", None)
     return {"equipment": d}
 
 

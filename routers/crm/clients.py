@@ -42,7 +42,9 @@ async def list_clients(
     # 兩本帳 §8：成案「數」照算（客戶關係是真的），但金額合計**排除 mine**——
     # owner 私帳的營收不得混進母公司的客戶績效（合夥人看了會多出憑空的營收）。
     from sqlalchemy import and_ as _and
-    money_filter = _and(active_filter, CrmProject.entity != "mine")
+
+    from core.ledger import not_mine
+    money_filter = _and(active_filter, not_mine(CrmProject.entity))
     proj_sub = (
         select(
             CrmProject.client_id,

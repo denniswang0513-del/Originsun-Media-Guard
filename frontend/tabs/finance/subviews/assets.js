@@ -8,7 +8,7 @@
  * 母公司帳打開也能用（endpoint entity 通吃）；主要使用者是 /my-ledger.html
  * 的 mine 模式。合夥人（finance_partner）看不到本子視圖（fin-nav-mine-ok）。
  */
-import { finFetch, finEntity, esc, fmtNum, finToast } from '../fin-utils.js';
+import { finFetch, esc, fmtNum, finToast, todayStr } from '../fin-utils.js';
 
 let _c = null;
 let _isCurrent = () => true;
@@ -21,15 +21,25 @@ let _snaps = [];
 const SUPERSEDED = new Set(['生活帳戶', '公司資產(現金)', '公司資產(應收帳款)',
                             '財富自由(總額)', '備用金(Past)']);
 
+/** 上次快照的手填桶（排除被系統自動桶取代者）——「哪些桶帶入下一次」只有這一份規則 */
+function _manualBuckets(auto, last) {
+    const manual = {};
+    if (last) {
+        for (const [k, v] of Object.entries(last.buckets || {})) {
+            if (!SUPERSEDED.has(k) && !(k in auto)) manual[k] = v;
+        }
+    }
+    return manual;
+}
+
 export default async function render(container, ctx = {}) {
     _c = container;
     if (ctx.isCurrent) _isCurrent = ctx.isCurrent;
     _c.innerHTML = '<div style="color:#888;padding:40px;text-align:center;">載入資產資料…</div>';
     try {
-        const ent = finEntity();
         const [ov, sn] = await Promise.all([
-            finFetch(`/assets/overview?entity=${ent}`),
-            finFetch(`/assets/snapshots?entity=${ent}`),
+            finFetch('/assets/overview'),
+            finFetch('/assets/snapshots'),
         ]);
         if (!_isCurrent()) return;
         _data = ov;
@@ -50,12 +60,7 @@ function _render() {
     const auto = d.buckets || {};
     const last = d.last_snapshot;
     // 「現在估計」= 系統自動桶 + 上次快照的手填桶（未被取代者）
-    const manual = {};
-    if (last) {
-        for (const [k, v] of Object.entries(last.buckets || {})) {
-            if (!SUPERSEDED.has(k) && !(k in auto)) manual[k] = v;
-        }
-    }
+    const manual = _manualBuckets(auto, last);
     const estTotal = Object.values(auto).reduce((a, b) => a + b, 0)
         + Object.values(manual).reduce((a, b) => a + b, 0);
 
@@ -87,7 +92,10 @@ function _render() {
         <div id="fin-assets-modal"></div>`;
 }
 
-// ── 淨值成長線（純 SVG，比照 dashboard 子視圖的作法）────────────────
+// ── 淨值成長線（手刻 SVG）────────────────────────────────
+// 沒用共用 js/shared/svg-charts.lineChart：那支的 x 軸是等距索引，
+// 快照從 2021 週更漸疏到年 5 筆 —— 等距畫會把五年壓縮成假斜率。
+// 時間比例 x 軸若日後共用層支援了，再換過去。
 function _chartSvg() {
     if (_snaps.length < 2) return '<div style="color:#888;font-size:12px;">快照不足兩筆，還畫不出線。</div>';
     const W = 860, H = 220, PL = 66, PB = 22, PT = 8;
@@ -154,7 +162,7 @@ const _fa = (window._finAssets = window._finAssets || {});
 _fa.refreshQuotes = async (btn) => {
     btn.disabled = true; btn.textContent = '抓報價中…';
     try {
-        const r = await finFetch(`/assets/quotes/refresh?entity=${finEntity()}`, { method: 'POST' });
+        const r = await finFetch('/assets/quotes/refresh', { method: 'POST' });
         finToast(`已更新 ${r.updated.length} 檔`
             + (r.failed.length ? `；抓不到 ${r.failed.join('、')}（沿用舊價）` : '')
             + (r.usd_twd ? `；匯率 ${r.usd_twd}` : ''));
@@ -169,7 +177,7 @@ _fa.saveHolding = async (id, btn) => {
     const manual = tr.querySelector('.fa-manual').value.trim();
     const h = (_data.holdings || []).find((x) => x.id === id) || {};
     try {
-        await finFetch(`/assets/holdings/${id}?entity=${finEntity()}`, {
+        await finFetch(`/assets/holdings/${id}`, {
             method: 'PUT',
             body: JSON.stringify({
                 name: h.name,
@@ -185,7 +193,7 @@ _fa.saveHolding = async (id, btn) => {
 _fa.delHolding = async (id, name) => {
     if (!confirm(`刪除持股「${name}」？（不影響歷史快照）`)) return;
     try {
-        await finFetch(`/assets/holdings/${id}?entity=${finEntity()}`, { method: 'DELETE' });
+        await finFetch(`/assets/holdings/${id}`, { method: 'DELETE' });
         render(_c, { isCurrent: _isCurrent });
     } catch (e) { finToast('刪除失敗：' + e.message, 'error'); }
 };
@@ -195,7 +203,7 @@ _fa.addHolding = async (btn) => {
     if (!name) return finToast('名稱必填');
     btn.disabled = true;
     try {
-        await finFetch(`/assets/holdings?entity=${finEntity()}`, {
+        await finFetch('/assets/holdings', {
             method: 'POST',
             body: JSON.stringify({
                 name,
@@ -213,13 +221,7 @@ _fa.addHolding = async (btn) => {
 // ── 拍快照 ─────────────────────────────────────────────────
 _fa.snapOpen = () => {
     const auto = _data.buckets || {};
-    const last = _data.last_snapshot;
-    const manual = {};
-    if (last) {
-        for (const [k, v] of Object.entries(last.buckets || {})) {
-            if (!SUPERSEDED.has(k) && !(k in auto)) manual[k] = v;
-        }
-    }
+    const manual = _manualBuckets(auto, _data.last_snapshot);
     const autoRows = Object.entries(auto).map(([k, v]) => `
         <tr><td>${esc(k)}</td><td style="text-align:right;color:#86efac;">$${fmtNum(v)}</td>
             <td style="color:#666;font-size:11px;">自動</td></tr>`).join('');
@@ -233,7 +235,7 @@ _fa.snapOpen = () => {
             <div style="background:#202020;border:1px solid #333;border-radius:8px;padding:20px;width:560px;max-height:85vh;overflow:auto;">
                 <h3 style="color:#eee;margin:0 0 10px;font-size:15px;">📸 拍快照</h3>
                 <div class="crm-field"><label>快照日期</label>
-                    <input type="date" id="fa-snap-date" class="crm-input" value="${new Date().toISOString().slice(0, 10)}"></div>
+                    <input type="date" id="fa-snap-date" class="crm-input" value="${todayStr()}"></div>
                 <table class="crm-table" style="width:100%;font-size:12px;">
                     <thead><tr><th>資產桶</th><th style="text-align:right;">金額</th><th></th></tr></thead>
                     <tbody id="fa-snap-rows">${autoRows}${manualRows}</tbody></table>
@@ -268,7 +270,7 @@ _fa.snapSave = async (btn) => {
     });
     btn.disabled = true;
     try {
-        const r = await finFetch(`/assets/snapshots?entity=${finEntity()}`, {
+        const r = await finFetch('/assets/snapshots', {
             method: 'POST',
             body: JSON.stringify({
                 snap_date: document.getElementById('fa-snap-date').value,

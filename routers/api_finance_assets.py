@@ -137,39 +137,52 @@ async def refresh_quotes(request: Request, entity: str = ""):
     from db.models import FinanceHolding
     from services.quote_fetcher import fetch_quote, fetch_usd_twd
     factory = _factory_or_503()
+    # 先只撈「要抓價的 (id, 代號)」就放掉 session —— 網路抓價一檔最長 8 秒，
+    # 抓完才開第二個 session 寫回。原本整段包在一個 session 裡：pool 連線被
+    # 釘著陪網路 I/O 等好幾秒（/simplify 2026-08-24）。順帶 gather 平行抓：
+    # 總時長 ≈ 最慢的一檔，而不是逐檔相加。
     async with factory() as session:
-        holdings = (await session.execute(
-            select(FinanceHolding).where(FinanceHolding.entity == ent,
-                                         FinanceHolding.active.is_(True)))).scalars().all()
-        updated, failed = [], []
-        now = datetime.now(timezone.utc)
-        for h in holdings:
-            if not (h.quote_symbol or "").strip():
-                continue
-            px = await asyncio.to_thread(fetch_quote, h.quote_symbol)
+        targets = [(h.id, h.quote_symbol, h.symbol or h.name)
+                   for h in (await session.execute(
+                       select(FinanceHolding)
+                       .where(FinanceHolding.entity == ent,
+                              FinanceHolding.active.is_(True)))).scalars().all()
+                   if (h.quote_symbol or "").strip()]
+    results = await asyncio.gather(
+        *[asyncio.to_thread(fetch_quote, qs) for _hid, qs, _n in targets],
+        asyncio.to_thread(fetch_usd_twd))
+    fx = results[-1]
+    now = datetime.now(timezone.utc)
+    updated, failed = [], []
+    async with factory() as session:
+        for (hid, _qs, label), px in zip(targets, results[:-1]):
             if px:
-                h.last_price = px
-                h.price_at = now
-                updated.append(h.symbol or h.name)
+                h = await session.get(FinanceHolding, hid)
+                if h is not None:
+                    h.last_price = px
+                    h.price_at = now
+                updated.append(label)
             else:
-                failed.append(h.symbol or h.name)
-        fx = await asyncio.to_thread(fetch_usd_twd)
-        if fx:
-            ml = settings.setdefault("my_ledger", {})
-            ml["usd_twd"] = fx
-            ml["usd_twd_at"] = now.isoformat()
-            save_settings(settings)
+                failed.append(label)
         await session.commit()
+    if fx:
+        ml = settings.setdefault("my_ledger", {})
+        ml["usd_twd"] = fx
+        ml["usd_twd_at"] = now.isoformat()
+        save_settings(settings)
     return {"updated": updated, "failed": failed, "usd_twd": fx}
 
 
-@router.get("/assets/holdings")
-async def list_holdings(request: Request, entity: str = ""):
-    ent = _guard(request, entity, level="view")
-    factory = _factory_or_503()
-    async with factory() as session:
-        auto = await _auto_buckets(session, ent)
-    return {"holdings": auto["holdings"], "usd_twd": auto["usd_twd"]}
+async def _owned(session, model, oid: str, request: Request, label: str):
+    """載入單列 → 404 → 以**該列自己的 entity** 再驗一次 full scope。
+
+    update/delete 的 query entity 只驗了「你有權動哪本帳」，列真正屬於哪本
+    要看資料 —— 這一步三個端點都要，抽成一份免得第四個端點忘記。"""
+    row = await session.get(model, oid)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"{label}不存在")
+    _guard(request, row.entity or "parent", level="full")
+    return row
 
 
 @router.post("/assets/holdings")
@@ -195,10 +208,7 @@ async def update_holding(holding_id: str, payload: HoldingPayload,
     from db.models import FinanceHolding
     factory = _factory_or_503()
     async with factory() as session:
-        h = await session.get(FinanceHolding, holding_id)
-        if not h:
-            raise HTTPException(status_code=404, detail="持股不存在")
-        _guard(request, h.entity or "parent", level="full")  # 帳本層再驗一次
+        h = await _owned(session, FinanceHolding, holding_id, request, "持股")
         for k, v in payload.model_dump(exclude_unset=True, exclude={"entity"}).items():
             setattr(h, k, v)
         h.updated_at = datetime.now(timezone.utc)
@@ -212,10 +222,7 @@ async def delete_holding(holding_id: str, request: Request, entity: str = ""):
     from db.models import FinanceHolding
     factory = _factory_or_503()
     async with factory() as session:
-        h = await session.get(FinanceHolding, holding_id)
-        if not h:
-            raise HTTPException(status_code=404, detail="持股不存在")
-        _guard(request, h.entity or "parent", level="full")
+        h = await _owned(session, FinanceHolding, holding_id, request, "持股")
         await session.delete(h)
         await session.commit()
     return {"status": "ok"}
@@ -279,10 +286,7 @@ async def delete_snapshot(snapshot_id: str, request: Request, entity: str = ""):
     from db.models import FinanceNetSnapshot
     factory = _factory_or_503()
     async with factory() as session:
-        r = await session.get(FinanceNetSnapshot, snapshot_id)
-        if not r:
-            raise HTTPException(status_code=404, detail="快照不存在")
-        _guard(request, r.entity or "parent", level="full")
+        r = await _owned(session, FinanceNetSnapshot, snapshot_id, request, "快照")
         await session.delete(r)
         await session.commit()
     return {"status": "ok"}

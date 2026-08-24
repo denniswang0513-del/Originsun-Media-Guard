@@ -332,17 +332,14 @@ async def run(csv_path: str, apply: bool, prod: bool):
             """SELECT count(*) n, SUM(amount) s FROM crm_payment_requests
                WHERE entity='mine' AND payment_status='應付款'""")
         print(f"應付款請款單 {pr['n']} 張，合計 {pr['s']:,}")
-        ok = True
         if tot["n"] != len(projects):
-            ok = False
+            print("🔴 專案筆數不符")
+            sys.exit(1)
         # 錨點：進行中表（未收款子集）應收 2,079,209
         ar_all = await c.fetchval(
             """SELECT SUM(COALESCE(amount_receivable,0)) FROM crm_projects
                WHERE entity='mine' AND payment_status != '全額到帳'""")
         print(f"未全收專案應收合計 {ar_all:,}（＝結案作業 2,079,209 ＋ 執行中 1,791,543）")
-        if not ok:
-            print("🔴 驗證未全過")
-            sys.exit(1)
         print("驗證通過 ✓")
     finally:
         await c.close()

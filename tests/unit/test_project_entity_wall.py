@@ -82,8 +82,19 @@ def test_pin_money_dep_gates_mine_projects():
 
 
 def test_pin_stats_exclude_mine():
-    assert 'CrmProject.entity != "mine"' in _read("routers/crm/clients.py")
-    assert 'CrmProject.entity != "mine"' in _read("services/finance_statements.py")
+    # 述詞正本在 core/ledger.not_mine —— 兩個聚合點都必須用它（字面散落的
+    # entity != "mine" 沒有可 grep 的名字，第三個聚合點就會從零重新決定）
+    assert "not_mine(CrmProject.entity)" in _read("routers/crm/clients.py")
+    assert "not_mine(CrmProject.entity)" in _read("services/finance_statements.py")
+
+
+def test_not_mine_predicate_behaviour():
+    from core.ledger import MINE, not_mine
+
+    class Col:   # 最小 SQLAlchemy 欄位替身：!= 回一個可比對的標記
+        def __ne__(self, other):
+            return ("ne", other)
+    assert not_mine(Col()) == ("ne", MINE)
 
 
 def test_pin_redact_route_handles_mine_branch():
