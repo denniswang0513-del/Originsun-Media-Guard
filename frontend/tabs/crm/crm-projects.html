@@ -35,10 +35,11 @@
   <select id="proj-filter-am" class="crm-select">
     <option value="">全部 AM</option>
   </select>
-  <!-- 帳本（兩本帳 §8）：檢視篩選不是權限 —— 錢的牆在後端。預設母公司，
-       免得私帳案把公司列表淹掉。 -->
+  <!-- 帳本（兩本帳 §8）：檢視篩選不是權限 —— 錢的牆在後端。
+       預設值因人而異（crm-projects-state._defaultEntity，由 JS 設定）：
+       有我的帳權限者＝兩本都看，其他人＝母公司（免得私帳案淹掉公司列表）。 -->
   <select id="proj-filter-entity" class="crm-select" data-no-search>
-    <option value="parent" selected>母公司</option>
+    <option value="parent">母公司</option>
     <option value="mine">私帳</option>
     <option value="">兩本都看</option>
   </select>

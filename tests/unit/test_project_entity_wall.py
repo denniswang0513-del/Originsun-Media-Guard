@@ -113,6 +113,10 @@ def test_pin_project_list_supports_entity_filter():
     assert "entity: str = Query" in api
     assert "CrmProject.entity == entity" in api
     state = _read("frontend/tabs/crm/crm-projects-state.js")
-    assert "entity: 'parent'" in state, "前端預設要是母公司"
+    # 預設因人而異：有我的帳權限＝兩本都看（owner「跟我有關的專案我都要看到」），
+    # 其他人＝母公司（不淹沒同事的列表）
+    assert "_defaultEntity()" in state
+    fn = state.split("function _defaultEntity()")[1].split("}")[0]
+    assert "finance_mine" in fn and "'parent'" in fn
     html = _read("frontend/tabs/crm/crm-projects.html")
     assert 'id="proj-filter-entity"' in html

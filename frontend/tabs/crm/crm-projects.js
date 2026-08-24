@@ -283,7 +283,9 @@ export async function initCrmProjectsTab() {
         state.filters.am = e.target.value;
         loadProjects();
     });
-    document.getElementById('proj-filter-entity').addEventListener('change', e => {
+    const _entityEl = document.getElementById('proj-filter-entity');
+    _entityEl.value = state.filters.entity;   // 預設由 state 決定（見 _defaultEntity）
+    _entityEl.addEventListener('change', e => {
         state.filters.entity = e.target.value;
         loadProjects();
     });

@@ -19,6 +19,9 @@ CSV 來源：私帳 Sheet「結案總表」分頁（gid=2098748516）→ export?
   法人前綴 財團法人/社團法人 與 公司尾巴在 normalize 時拿掉）。其餘一律
   **新建**（寧可留重複讓人合併，不冒錯併危險）。決策全記
   scripts/data/my_ledger_client_map.json 供覆核。
+- 🔴 時間戳用**結案日**不是匯入當下：專案列表按 updated_at desc 排序，全帶
+  now() 會讓 402 案整片壓在最上面、把母公司的案子埋掉（2026-08-24 實際發生）。
+  執行中的案沒有結案日 → 落 now()，它們本來就該排在前面。
 - 專案 entity='mine'：status 一律 '結案'（表本身就是結案總表）、
   contract_amount=營收(含稅)、amount_receivable/received 照表、
   税別=發票→tax_rate 5 其餘 0。案碼/案源/税別/稅務欄/工種拆分/備註收進
@@ -291,7 +294,8 @@ async def run(csv_path: str, apply: bool, prod: bool):
                         public_credits_mode, public_old_slugs,
                         created_at, updated_at)
                    VALUES ($1,'mine',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-                           20,5,'text','[]'::jsonb,now(),now())""",
+                           20,5,'text','[]'::jsonb,
+                           COALESCE($6, now()), COALESCE($6, now()))""",
                 pid, p["name"], decisions[p["client"]]["client_id"], status,
                 p["type"], close_month_date(p["close_month"]),
                 p["contract"] or None, 5 if p["tax_kind"] == "發票" else 0,

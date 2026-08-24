@@ -13,6 +13,14 @@ export const STATUS_ORDER = ['投標', '開發', '洽詢', '提案', '製作', '
 export const PRESALE_STATUSES = ['投標', '開發', '洽詢', '提案'];
 export const CLOSED_STATUSES = ['結案', '歸檔'];
 
+/** 我的帳 scope？（鏡射後端 core/ledger：Lv3 或持有 finance_mine）
+ *  ⚠ 這只決定「預設看哪本」，不是授權 —— 錢的牆在後端。 */
+function _defaultEntity() {
+    const lv = window._accessLevel || 0;
+    const mods = window._modules || [];
+    return (lv >= 3 || mods.includes('finance_mine')) ? '' : 'parent';
+}
+
 // ── Shared State ────────────────────────────────────────────
 export const state = {
     projects: [],
@@ -26,8 +34,10 @@ export const state = {
     selectedId: null,
     editingId: null,
     staffList: [],
-    // entity 預設 'parent'：私帳專案共用可見但不該淹沒公司列表（§8「區隔清楚」）
-    filters: { q: '', status: '', client_id: '', am: '', entity: 'parent' },
+    // 帳本預設（兩本帳 §8）：**有我的帳權限的人預設兩本都看**（owner 2026-08-24
+    // 「跟我有關的專案我都要看到」），其他人預設只看母公司 —— 私帳 402 案共用
+    // 可見，但不該淹沒同事的公司列表。'' = 兩本都看。
+    filters: { q: '', status: '', client_id: '', am: '', entity: _defaultEntity() },
     // 多子表狀態
     costGroups: [],           // [{id, name, shoot_date, budget_amount, misc_budget_amount, summary, ...}]
     selectedGroupId: null,    // 當前選中的子表 id

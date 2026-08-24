@@ -4,6 +4,9 @@
 import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateClientSelect, searchableSelect, saveSettings, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
 import { state, callbacks, STATUS_ORDER } from './crm-projects-state.js';
 
+// 開場的帳本預設（因人而異）—— 快取守衛拿它判斷「有沒有套篩選」
+const _initialEntity = state.filters.entity;
+
 // 「還在談」的狀態子集 —— 從提案模組的常數正本拿，不要在這裡再列一份
 // （加第七個狀態時，列在這裡的那份會靜默漏掉）
 import { PRESALE_STATUSES as _PROP_SUB_STATUSES } from '../proposals/prop-const.js';
@@ -194,8 +197,10 @@ export function _hydrateProjectsFromCache() {
 function _writeProjectsCache() {
     // Only cache the unfiltered view — filtered results would mislead next
     // boot when filters are reset.
+    // 只快取「沒套任何篩選」的預設視圖。entity 的預設因人而異（見
+    // crm-projects-state._defaultEntity），所以跟 _initialEntity 比而不是寫死。
     if (state.filters.q || state.filters.status || state.filters.client_id
-        || state.filters.am || state.filters.entity !== 'parent') return;
+        || state.filters.am || state.filters.entity !== _initialEntity) return;
     try {
         localStorage.setItem(_SWR_KEY, JSON.stringify({
             projects: state.projects, ts: Date.now(),
