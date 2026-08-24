@@ -37,3 +37,19 @@ def test_assets_fx_rate_not_string_divided():
     fx_line = next(ln for ln in js.splitlines() if "美元匯率" in ln)
     assert "fmtNum" not in fx_line, fx_line
     assert "toFixed" in fx_line, fx_line
+
+
+def test_project_ledger_table_is_height_bounded():
+    """逐案損益的表格要框在可視高度內（清單自己內捲）。
+
+    2026-08-25 實測：不框高度時 #fpl-list-body 會長到 16,884px、內捲永不發生 ——
+    (1) 表頭跟著整頁捲走；(2) 更嚴重的是詳情面板是清單的 flex 兄弟，捲到第 300
+    列點開，詳情畫在整個表格頂端（往上一萬多 px）＝看不到。
+    """
+    js = _read("frontend/tabs/finance/subviews/projects.js")
+    assert "_fitBody" in js
+    fn = js.split("function _fitBody()")[1].split("\n}")[0]
+    # 量出來的、不是寫死 px：要拿捲動容器的可視底部減表格頂端
+    assert "getBoundingClientRect" in fn
+    assert "finance-content" in fn
+    assert "addEventListener('resize', _fitBody)" in js, "視窗縮放要重算"

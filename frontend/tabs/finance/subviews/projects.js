@@ -21,6 +21,7 @@ let _detail = null;     // 右側載入的單案資料
 let _q = '';
 let _unpaidOnly = false;
 let _dirty = false;
+let _resizeBound = false;
 
 export default async function render(container, ctx = {}) {
     _c = container;
@@ -64,7 +65,7 @@ function _renderShell() {
             <span>應收 <b style="color:#fbbf24;">$${fmtNum(t.receivable)}</b></span>
             <span>未付應付 <b style="color:#fca5a5;">$${fmtNum(t.ap_open)}</b></span>
         </div>
-        <div class="crm-body" style="min-height:420px;">
+        <div class="crm-body" id="fpl-body" style="min-height:320px;">
             <div class="crm-list-panel" id="fpl-list-panel">
                 <div class="crm-list-header" style="display:grid;grid-template-columns:92px 1.5fr 1fr 92px 92px 74px;align-items:center;gap:8px;">
                     <span>結案日</span><span>專案</span><span>客戶</span>
@@ -90,7 +91,34 @@ function _renderShell() {
         _load();
     });
     setupResizeHandle('fpl-resize', 'fpl-list-panel');
+    _fitBody();
+    if (!_resizeBound) {
+        window.addEventListener('resize', _fitBody);
+        _resizeBound = true;
+    }
     if (_sel) _fp.open(_sel);
+}
+
+/** 把表格框在可視高度內 —— 這一步同時修掉兩件事（2026-08-25 實測）：
+ *
+ *  1. 表頭捲走：`#fpl-list-body` 吃得到 crm.css 的 `[id$="-list-body"]`
+ *     （flex:1 + overflow-y:auto），但外層沒有高度限制時它會長到 16,884px、
+ *     內捲永遠不發生，於是整頁一起捲、表頭跟著不見。
+ *  2. 🔴 更嚴重的：詳情面板是清單的 flex 兄弟，容器 16,916px 高時，捲到第
+ *     300 列點開，詳情是畫在**整個表格的頂端**（往上一萬多 px）＝看不到。
+ *
+ *  用量的不用寫死 px：捲動容器（my-ledger 是 #finance-content、主系統是頁面）
+ *  的可視底部 − 表格頂端。視窗縮放時重算。
+ */
+function _fitBody() {
+    const body = document.getElementById('fpl-body');
+    if (!body) return;
+    const scroller = document.getElementById('finance-content');
+    const bottom = scroller && getComputedStyle(scroller).overflowY === 'auto'
+        ? scroller.getBoundingClientRect().bottom
+        : window.innerHeight;
+    const avail = bottom - body.getBoundingClientRect().top - 12;
+    body.style.height = Math.max(320, Math.round(avail)) + 'px';
 }
 
 function _renderList() {
