@@ -267,7 +267,7 @@ async def _kai_invoice_of(session, p, want_status):
     )).scalars().first()
 
 
-async def sync_remit_status(session, p) -> None:
+async def sync_remit_status(session, p, *, previous_invoice_id=None) -> None:
     """代開請款單付掉了沒 → 那張發票的撥款狀態（**單一正本**）。
 
     代開的生命週期是 未收款 → 待撥款 → 已撥款：客戶把錢匯進公司（發票→待撥款、
@@ -287,14 +287,22 @@ async def sync_remit_status(session, p) -> None:
     if (p.category or "") != "發票代開":
         return
     if (p.payment_status or "") == "已付款":
-        inv = await _kai_invoice_of(session, p, INVOICE_PASSTHROUGH_COLLECTED)
-        new = INVOICE_REMITTED
+        todo = [(await _kai_invoice_of(session, p, INVOICE_PASSTHROUGH_COLLECTED),
+                 INVOICE_REMITTED)]
     else:
-        inv = await _kai_invoice_of(session, p, INVOICE_REMITTED)
-        new = INVOICE_PENDING_REMIT
-    if inv:
-        inv.payment_status = new
-        inv.updated_at = _now()
+        todo = [(await _kai_invoice_of(session, p, INVOICE_REMITTED),
+                 INVOICE_PENDING_REMIT)]
+    # 🔴 改指到別張票時，原本那張要退回 —— 不退的話兩張票會同時說「錢已經匯出去
+    #    了」，而只有一筆錢，兩邊畫面各自都很正常。2026-08-24 owner 撞到的就是這個
+    #    形狀：已付款那張請款單標錯成台科大，真正匯出去的是古典魔力那筆。
+    if previous_invoice_id and previous_invoice_id != p.source_invoice_id:
+        prev = await session.get(CrmInvoice, previous_invoice_id)
+        todo.append((prev if prev and prev.payment_status == INVOICE_REMITTED else None,
+                     INVOICE_PENDING_REMIT))
+    for inv, state in todo:          # 指派只有這一處 —— 規則不要再長出第二份
+        if inv:
+            inv.payment_status = state
+            inv.updated_at = _now()
 
 
 async def resettle_invoices(session, invoice_ids, when=None,
@@ -1505,12 +1513,17 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
         # F1 月結守衛：舊/新 request_date 的月份都要開著
         await _assert_month_open(session, p.request_date, dates.get("request_date"),
                                  entity=ent)
+        prev_src = p.source_invoice_id
         for k, v in data.items():
             if k not in date_fields:
                 setattr(p, k, v)
         for k, v in dates.items():
             setattr(p, k, v)
         p.updated_at = _now()
+        # 代開：這支也會改付款狀態（payload 有 payment_status），而且會改「指向哪張
+        # 發票」—— 兩者都直接決定發票那側的撥款狀態，所以一樣走 sync_remit_status
+        # （改指時原本那張的退回也在它裡面，規則只有一份）。
+        await sync_remit_status(session, p, previous_invoice_id=prev_src)
         await session.commit()
     return {"status": "ok"}
 
