@@ -32,7 +32,7 @@ _ROUTER_MODULES = [
     'api_backup', 'api_verify', 'api_proxy', 'api_concat',
     'api_report', 'api_transcribe', 'api_system', 'api_ota', 'api_utils', 'api_tts',
     'api_job_history', 'api_queue', 'api_schedules', 'api_agents', 'api_bookmarks',
-    'api_api_keys', 'api_timesheets', 'api_cashflow', 'api_finance', 'api_finance_stmt', 'api_finance_card', 'api_finance_assets', 'api_locations', 'api_proposals',
+    'api_api_keys', 'api_timesheets', 'api_cashflow', 'api_finance', 'api_finance_stmt', 'api_finance_card', 'api_finance_assets', 'api_finance_projects', 'api_locations', 'api_proposals',
     'api_references',
     'api_intel',
     'api_portal',

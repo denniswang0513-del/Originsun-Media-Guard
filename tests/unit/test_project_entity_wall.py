@@ -120,3 +120,17 @@ def test_pin_project_list_supports_entity_filter():
     assert "finance_mine" in fn and "'parent'" in fn
     html = _read("frontend/tabs/crm/crm-projects.html")
     assert 'id="proj-filter-entity"' in html
+
+
+def test_pin_project_ledger_router_guarded():
+    """逐案損益（/my-ledger.html 的專案分頁）：兩支端點都要走帳本守衛。
+
+    它回的是逐案的錢（合約/已收/應收/掛帳支出/應付），沒有 _guard 就等於
+    繞過兩本帳的牆 —— 2026-08-24 實測合夥人打 ?entity=mine 應得 403。
+    """
+    src = _read("routers/api_finance_projects.py")
+    assert src.count("_guard(request, entity") >= 2
+    assert 'level="full"' in src
+    # 單案端點還要驗「這一列屬於哪本帳」（query 參數只驗得了人、驗不了資料）
+    assert "這個專案不屬於目前的帳本" in src
+    assert "api_finance_projects" in _read("main.py"), "router 沒註冊＝靜默 404"
