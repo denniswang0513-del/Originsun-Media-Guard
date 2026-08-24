@@ -68,7 +68,7 @@ async def _rollups(session, ent: str):
     的白工，而且清單端本來就整份拉）。
     """
     from sqlalchemy import func as fn
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
 
     from db.models import CrmCashEntry, CrmPaymentRequest
     cash_q = (select(CrmCashEntry.project_id,
@@ -80,7 +80,13 @@ async def _rollups(session, ent: str):
                    fn.coalesce(fn.sum(CrmPaymentRequest.amount), 0))
             .where(CrmPaymentRequest.entity == ent,
                    CrmPaymentRequest.project_id.isnot(None),
-                   CrmPaymentRequest.is_advance == 0,
+                   # 🔴 NULL 也是「不是預支」。生產的 is_advance 可為 NULL，
+                   # 而 SQL 的 `NULL = 0` 是 NULL → 那一列會整個消失在未付應付
+                   # 裡，卻還留在應付帳款上（core.finance_logic 走 Python
+                   # truthiness、crm/finance.py:1971 也是這樣防的）—— 正好是
+                   # 這支端點要消滅的「同一案兩個數字」。
+                   or_(CrmPaymentRequest.is_advance == 0,
+                       CrmPaymentRequest.is_advance.is_(None)),
                    CrmPaymentRequest.payment_status != "已付款")
             .group_by(CrmPaymentRequest.project_id))
     cash = {pid: int(e or 0) for pid, e in (await session.execute(cash_q)).all()}
@@ -125,6 +131,9 @@ async def project_ledger(request: Request, entity: str = ""):
             "id": p.id, "name": p.name, "client": cname or "",
             "status": p.status or "", "type": p.project_type or "",
             "close_date": _fmt_day(p.completion_date),
+            # 排序的次要鍵 —— 前端改完結案日要就地重排，少了它排不出與這裡
+            # ORDER BY 相同的順序（同一天結案的案子就會落在不同位置）
+            "updated_at": p.updated_at.isoformat() if p.updated_at else "",
             "contract": contract,
             "received": int(p.amount_received or 0),
             "receivable": int(p.amount_receivable or 0),
@@ -238,4 +247,5 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         net, check = compute(int(p.contract_amount or 0), d)
     return {"status": "ok", "detail": d, "net": net, "check": check,
             "contract": int(contract) if contract is not None else None,
-            "close_date": _fmt_day(p.completion_date)}
+            "close_date": _fmt_day(p.completion_date),
+            "updated_at": p.updated_at.isoformat() if p.updated_at else ""}

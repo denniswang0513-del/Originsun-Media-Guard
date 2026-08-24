@@ -178,6 +178,29 @@ def merchant_key(summary: str) -> str:
 
 # ── 分類建議（preview 的三層合成；純函式 —— 測試直接打這裡）────────────
 
+def mark_duplicates(keys: list, seen) -> list:
+    """逐列判「帳上是不是已經有這一筆了」。回傳與 keys 等長的 bool 清單。
+
+    🔴 消耗式：帳上有 N 筆就只標 N 列，不是把整組同鍵都標掉。同一天真的可能
+    刷兩筆一樣的錢（兩杯一樣的咖啡）—— 整組標成重複＝那第二筆永遠進不來。
+
+    🔴 preview 與 apply **共用這一份**。兩邊各寫一份的下場實際發生過：apply
+    那份邊跳邊回補 seen，數字會震盪（三筆同款只寫進兩筆），而且與 preview 對
+    同一份輸入給出不同答案（/simplify 第 4 輪抓到）。一條規則只能有一個實作。
+
+    seen 收 Counter（帶筆數）或 set（每鍵當一筆）皆可。
+    """
+    from collections import Counter
+    left = Counter(seen)
+    out = []
+    for k in keys:
+        hit = left[k] > 0
+        if hit:
+            left[k] -= 1
+        out.append(hit)
+    return out
+
+
 def suggest_rows(rows, hist: dict, rules, seen) -> list:
     """解析列 → 帶三層建議與重複旗標的預覽列。
 
@@ -189,14 +212,8 @@ def suggest_rows(rows, hist: dict, rules, seen) -> list:
       prev_cat 對每個 spend 都覆寫（含空值），否則手續費會越級抄到更早那筆
       的分類（dev 冒煙實抓）。
     """
-    from collections import Counter
-
     from core.bank_statement import _classify
-    # 🔴 消耗式比對：帳上已有一筆就只標一筆重複，不是把整組同鍵都標掉。
-    # 同一天真的可能刷兩筆一樣的錢（兩杯一樣的咖啡）—— 整組標成重複＝預覽
-    # 全不勾＝那第二筆永遠進不來。apply 端已經是這個語意，preview 這半原本
-    # 還在用 set（/simplify 第 4 輪抓到）。收 set 也照舊（每鍵當一筆）。
-    left = Counter(seen)
+    dups = mark_duplicates([(r.date, abs(r.amount)) for r in rows], seen)
     out, prev_cat = [], ""
     for r in rows:
         cat, source = "", ""
@@ -210,14 +227,11 @@ def suggest_rows(rows, hist: dict, rules, seen) -> list:
             source = "history" if cat else source
         if r.kind == "spend":
             prev_cat = cat
-        key = (r.date, abs(r.amount))
-        dup = left[key] > 0
-        if dup:
-            left[key] -= 1
         out.append({
             "line_no": r.line_no, "date": r.date, "amount": r.amount,
             "note": r.note, "kind": r.kind,
             "category": cat, "source": source,
-            "duplicate": dup,
         })
+    for row, dup in zip(out, dups):
+        row["duplicate"] = dup
     return out

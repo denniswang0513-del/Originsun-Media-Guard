@@ -1341,10 +1341,17 @@ class CardImportRow(BaseModel):
     amount: int
     note: str = ""
     category: Optional[str] = None
+    selected: bool = True
 
 
 class CardImportApply(BaseModel):
-    """卡單確認後寫入。不掛銀行帳戶（刷卡當下不動銀行 — status='card'）。"""
+    """卡單確認後寫入。不掛銀行帳戶（刷卡當下不動銀行 — status='card'）。
+
+    🔴 rows 是**整份卡單**（沒勾的列也要送，用 selected=false 標）。只送勾選
+    的列會讓 apply 對著被裁過的清單再扣一次「帳上已有」的筆數 —— 使用者刻意
+    勾的列就這樣無聲消失（/simplify 第 4 輪）。整份送進來，apply 才看得到
+    preview 看到的那份輸入，兩邊的重複判定才會是同一個答案。
+    """
     rows: List[CardImportRow] = []
 
 

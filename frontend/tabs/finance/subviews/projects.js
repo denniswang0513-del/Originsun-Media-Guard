@@ -50,7 +50,7 @@ async function _load() {
 function _visible() {
     const q = _q.toLowerCase();
     return (_data.projects || []).filter(p =>
-        (!q || (p.name + ' ' + p.client).toLowerCase().includes(q))
+        (!q || p.name.toLowerCase().includes(q) || (p.client || '').toLowerCase().includes(q))
         && (!_unpaidOnly || p.payment_status !== '全額到帳'));
 }
 
@@ -361,6 +361,20 @@ _fp.save = async (btn) => {
  *  原本是 `await _load()`：重跑 402 列查詢 + 兩個聚合、重建整個殼，然後
  *  `_renderShell` 尾端又把詳情重拉一次 —— 一次存檔三個往返。
  */
+// 結案日新→舊、未結案（空）排最前、同日再比 updated_at 新→舊。
+// 🔴 必須與後端 ORDER BY 逐字對應（completion_date DESC NULLS FIRST,
+// updated_at DESC）—— 少了次要鍵，同一天結案的案子就會排在跟重新載入不同的
+// 位置，使用者存個檔就看到清單「自己動了一下」（第 4 輪瀏覽器驗收實抓：
+// 還原日期後那列停在同日群組的尾端，重整才回到原位）。
+function _sortProjects() {
+    _data.projects.sort((a, b) => {
+        if (!a.close_date !== !b.close_date) return a.close_date ? 1 : -1;
+        return (b.close_date || '').localeCompare(a.close_date || '')
+            || (b.updated_at || '').localeCompare(a.updated_at || '');
+    });
+}
+
+
 function _applySaved(r) {
     const i = (_data.projects || []).findIndex(p => p.id === _sel);
     if (i < 0) { _load(); return; }
@@ -370,6 +384,7 @@ function _applySaved(r) {
         detail: r.detail, net: r.net, check: r.check,
         contract: r.contract != null ? r.contract : old.contract,
         close_date: r.close_date != null ? r.close_date : old.close_date,
+        updated_at: r.updated_at || old.updated_at,
     };
     const t = _data.totals;
     t.contract += next.contract - old.contract;
@@ -378,6 +393,9 @@ function _applySaved(r) {
     t.invoice_fee += next.detail.invoice_fee - old.detail.invoice_fee;
     t.unbalanced += (next.check ? 1 : 0) - (old.check ? 1 : 0);
     _data.projects[i] = next;
+    // 存檔會動到排序的兩個鍵（結案日、updated_at）—— 一律重排，讓畫面上的
+    // 順序與「現在重新載入會看到的順序」永遠一致。402 列排一次不值得省。
+    _sortProjects();
     if (_detail) _detail.project = { ..._detail.project, ...next };
     _renderTotals();
     _renderList();          // 樣板本身就會把 selected 標在對的那列

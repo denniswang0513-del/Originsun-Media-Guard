@@ -1985,14 +1985,16 @@ _fr.cardAiSuggest = async (btn) => {
 _fr.cardApply = async (btn) => {
     const d = _cardPreview; if (!d) return;
     const err = document.getElementById('fincard-apply-err');
-    const picked = [...document.querySelectorAll('.fincard-pick')].filter(c => c.checked)
-        .map(c => {
-            const i = Number(c.dataset.i);
-            const r = d.rows[i];
-            const cat = document.querySelector(`.fincard-cat[data-i="${i}"]`)?.value || null;
-            return { date: r.date, amount: r.amount, note: r.note, category: cat };
-        });
-    if (!picked.length) { err.textContent = '沒有勾選任何列'; err.style.display = 'block'; return; }
+    // 🔴 送**整份**卡單（沒勾的列帶 selected:false）。只送勾選的列，後端就會
+    // 對著被裁過的清單再扣一次「帳上已有」的筆數，把使用者刻意勾的列吃掉。
+    const picked = d.rows.map((r, i) => ({
+        date: r.date, amount: r.amount, note: r.note,
+        category: document.querySelector(`.fincard-cat[data-i="${i}"]`)?.value || null,
+        selected: !!document.querySelector(`.fincard-pick[data-i="${i}"]`)?.checked,
+    }));
+    if (!picked.some(x => x.selected)) {
+        err.textContent = '沒有勾選任何列'; err.style.display = 'block'; return;
+    }
     btn.disabled = true; btn.textContent = '匯入中…';
     try {
         const r = await finFetch('/card-statement/apply', {

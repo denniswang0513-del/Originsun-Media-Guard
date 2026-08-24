@@ -32,6 +32,7 @@ let _shellReady = null;       // 帳務殼的載入 Promise（只跑一次）
 function _ensureShell() {
     if (_shellReady) return _shellReady;
     const wrap = document.getElementById('finance-invoices-wrap');
+    wrap.innerHTML = _LOADING_HTML;   // 抓 HTML + 六支 API 這段期間不能是一片空白
     _shellReady = (async () => {
         const resp = await fetch('./tabs/crm/crm-invoices.html');
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -105,8 +106,12 @@ function _bindSideNav() {
                 _showSubview(_currentSubview);
                 return;
             }
-            const inner = document.getElementById('inv-global-refresh');
-            if (inner) inner.click();   // 殼還沒載＝沒東西要刷新
+            // 殼可能還在載 —— 等它好了再按，否則這顆鈕在那段期間按了沒反應
+            if (_shellAllowed) {
+                _ensureShell().then(() => {
+                    document.getElementById('inv-global-refresh')?.click();
+                }).catch(() => {});
+            }
         });
     }
 }

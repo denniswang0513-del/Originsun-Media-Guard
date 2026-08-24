@@ -29,8 +29,8 @@ import uuid
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from config import load_settings, save_settings
-from core.card_statement import (merchant_key, parse_card_statement,
-                                 suggest_rows)
+from core.card_statement import (mark_duplicates, merchant_key,
+                                 parse_card_statement, suggest_rows)
 from core.db_guard import db_factory_or_503 as _factory_or_503
 from core.schemas import (CardAiSuggestPayload, CardImportApply,
                           CardLedgerConfig)
@@ -148,6 +148,8 @@ async def apply_card_statement(payload: CardImportApply, request: Request,
     ent = _guard(request, entity, level="full")
     if not payload.rows:
         raise HTTPException(status_code=422, detail="沒有要匯入的列")
+    if not any(r.selected for r in payload.rows):
+        raise HTTPException(status_code=422, detail="沒有勾選任何列")
     from db.models import CrmCashEntry
     factory = _factory_or_503()
     async with factory() as session:
@@ -157,15 +159,21 @@ async def apply_card_statement(payload: CardImportApply, request: Request,
             if not d:
                 raise HTTPException(status_code=422, detail=f"日期無法解析：{r.date}")
             dated.append((f"{r.date} {(r.note or '')[:20]}", d))
-        await _assert_rows_open(session, dated, entity=ent)
         seen = await _existing_card_keys(session, ent, [r.date for r in payload.rows])
-        made, skipped = 0, 0
-        for r, (_lbl, d) in zip(payload.rows, dated):
-            key = (r.date, abs(int(r.amount)))
-            if seen[key] > 0:      # 帳上已有一筆就跳一筆，不是整組吃掉
-                seen[key] -= 1
-                skipped += 1
-                continue
+        # 重複判定與 preview 共用同一份實作 —— payload 帶的是整份卡單（含沒勾
+        # 的列），apply 看到的輸入才與 preview 相同，兩邊不會給出不同答案。
+        dups = mark_duplicates([(r.date, abs(int(r.amount))) for r in payload.rows], seen)
+        todo = [(r, d) for r, (_l, d), dup in zip(payload.rows, dated, dups)
+                if r.selected and not dup]
+        skipped = sum(1 for r, dup in zip(payload.rows, dups) if r.selected and dup)
+        if not todo:
+            return {"status": "ok", "made": 0, "skipped_duplicates": skipped}
+        # 月結鎖只驗**真的要寫**的那幾列 —— 沒勾的列不該讓整批 409
+        await _assert_rows_open(
+            session, [(f"{r.date} {(r.note or '')[:20]}", d) for r, d in todo],
+            entity=ent)
+        made = 0
+        for r, d in todo:
             item = (r.category or "").split("_", 1)
             session.add(CrmCashEntry(
                 id=uuid.uuid4().hex, entity=ent, entry_date=d,
@@ -176,7 +184,6 @@ async def apply_card_statement(payload: CardImportApply, request: Request,
                 item=item[1] if len(item) > 1 else None,
                 status="card", has_invoice=0,
             ))
-            seen[key] += 1        # 本批寫入的也算進去，同批重複才擋得住
             made += 1
         await session.commit()
     return {"status": "ok", "made": made, "skipped_duplicates": skipped}
@@ -265,7 +272,13 @@ _CARD_DEFAULT_REPAY_CATEGORIES = ["信用卡"]
 
 
 def _card_cfg(ent: str) -> dict:
-    cfg = ((load_settings().get("card_ledger") or {}).get(ent) or {})
+    return _card_cfg_from((load_settings().get("card_ledger") or {}).get(ent) or {})
+
+
+def _card_cfg_from(cfg: dict) -> dict:
+    """正規化一本帳的卡片設定。吃 dict 而不是自己讀檔 —— PUT 改完還款類別後
+    要用**改過的**那份重算，從磁碟讀回來的是舊的（/simplify 第 4 輪抓到：回傳
+    的 repay_categories 是新的、旁邊的 repayments 卻是舊類別算出來的）。"""
     return {
         "opening": int(cfg.get("opening") or 0),
         "repay_categories": [str(x) for x in (cfg.get("repay_categories")
@@ -273,11 +286,11 @@ def _card_cfg(ent: str) -> dict:
     }
 
 
-@router.get("/card-summary")
-async def card_summary(request: Request, entity: str = ""):
-    """卡片餘額：期初 + 刷卡 − 還款。回傳各分項供 UI 說明數字怎麼來的。"""
-    ent = _guard(request, entity, level="full")
-    cfg = _card_cfg(ent)
+async def _card_numbers(ent: str, cfg: dict) -> dict:
+    """{charges, charge_count, repayments} —— 依 cfg 給的還款類別算。
+
+    設定由呼叫端傳進來（不自己讀檔），PUT 才能用剛改好的類別重算。
+    """
     from sqlalchemy import func as fn
     from sqlalchemy import select
 
@@ -299,13 +312,22 @@ async def card_summary(request: Request, entity: str = ""):
             ).where(CrmCashEntry.entity == ent))).one()
         charges, n_charges = int(row[0] or 0), int(row[1] or 0)
         repay_out, repay_in = int(row[2] or 0), int(row[3] or 0)
-    repayments = repay_out - repay_in
-    return {
-        "opening": cfg["opening"], "charges": charges, "charge_count": n_charges,
-        "repayments": repayments,
-        "outstanding": cfg["opening"] + charges - repayments,
-        "repay_categories": cfg["repay_categories"],
-    }
+    return {"charges": charges, "charge_count": n_charges,
+            "repayments": repay_out - repay_in}
+
+
+def _card_view(cfg: dict, n: dict) -> dict:
+    return {"opening": cfg["opening"], **n,
+            "outstanding": cfg["opening"] + n["charges"] - n["repayments"],
+            "repay_categories": cfg["repay_categories"]}
+
+
+@router.get("/card-summary")
+async def card_summary(request: Request, entity: str = ""):
+    """卡片餘額：期初 + 刷卡 − 還款。回傳各分項供 UI 說明數字怎麼來的。"""
+    ent = _guard(request, entity, level="full")
+    cfg = _card_cfg(ent)
+    return _card_view(cfg, await _card_numbers(ent, cfg))
 
 
 @router.put("/card-summary")
@@ -323,14 +345,13 @@ async def update_card_summary(payload: CardLedgerConfig, request: Request,
     if "repay_categories" in data and data["repay_categories"] is not None:
         book["repay_categories"] = [str(x).strip() for x in data["repay_categories"]
                                     if str(x).strip()]
-    cur = await card_summary(request, entity=ent)
+    cfg = _card_cfg_from(book)          # 用剛改好的設定算，不從磁碟讀回舊的
+    n = await _card_numbers(ent, cfg)
     if data.get("derive_opening_from") is not None:
         # 目標未繳 = 期初 + 刷卡 − 還款 → 期初 = 目標 − (刷卡 − 還款)
-        book["opening"] = int(data["derive_opening_from"]) - (cur["charges"] - cur["repayments"])
+        book["opening"] = int(data["derive_opening_from"]) - (n["charges"] - n["repayments"])
     elif data.get("opening") is not None:
         book["opening"] = int(data["opening"])
     save_settings(settings)
-    # 刷卡與還款不會因為改期初而變 —— 就地重算未繳，不再跑一次整組聚合
-    return {**cur, "opening": book["opening"],
-            "repay_categories": book.get("repay_categories", cur["repay_categories"]),
-            "outstanding": book["opening"] + cur["charges"] - cur["repayments"]}
+    cfg["opening"] = int(book["opening"])
+    return _card_view(cfg, n)
