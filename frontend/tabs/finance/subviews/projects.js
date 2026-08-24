@@ -66,8 +66,8 @@ function _renderShell() {
         </div>
         <div class="crm-body" style="min-height:420px;">
             <div class="crm-list-panel" id="fpl-list-panel">
-                <div class="crm-list-header" style="display:grid;grid-template-columns:1fr 92px 92px 76px;align-items:center;gap:8px;">
-                    <span>客戶 / 專案</span>
+                <div class="crm-list-header" style="display:grid;grid-template-columns:92px 1.5fr 1fr 92px 92px 74px;align-items:center;gap:8px;">
+                    <span>結案日</span><span>專案</span><span>客戶</span>
                     <span style="text-align:right;">營收</span>
                     <span style="text-align:right;">實收</span>
                     <span style="text-align:right;">檢查</span>
@@ -75,7 +75,7 @@ function _renderShell() {
                 <div id="fpl-list-body"></div>
             </div>
             <div class="crm-resize-handle" id="fpl-resize"></div>
-            <div class="crm-detail-panel" id="fpl-detail" style="display:none;width:58%;"></div>
+            <div class="crm-detail-panel" id="fpl-detail" style="display:none;width:46%;"></div>
         </div>`;
     _renderList();
     const qEl = document.getElementById('fpl-q');
@@ -97,12 +97,13 @@ function _renderList() {
     document.getElementById('fpl-list-body').innerHTML =
         (_data.projects || []).map((p) => `
         <div class="crm-row${p.id === _sel ? ' selected' : ''}"
-             style="display:grid;grid-template-columns:1fr 92px 92px 76px;align-items:center;gap:8px;"
+             style="display:grid;grid-template-columns:92px 1.5fr 1fr 92px 92px 74px;align-items:center;gap:8px;"
              onclick="window._finProjLedger.open('${p.id}')">
-            <span style="overflow:hidden;min-width:0;" title="${esc(p.client)} / ${esc(p.name)}">
-                <span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e0e0e0;">${esc(p.name)}</span>
-                <span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6b7280;font-size:10px;">${esc(p.client)}${p.close_month ? '｜' + esc(p.close_month) : ''}</span>
-            </span>
+            <span style="color:${p.close_date ? '#9ca3af' : '#6b7280'};white-space:nowrap;">${esc(p.close_date || '未結案')}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e0e0e0;"
+                  title="${esc(p.name)}">${esc(p.name)}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9ca3af;"
+                  title="${esc(p.client)}">${esc(p.client)}</span>
             <span style="text-align:right;">${fmtNum(p.contract)}</span>
             <span style="text-align:right;color:#eee;">${fmtNum(p.net)}</span>
             <span style="text-align:right;color:${p.check ? '#fbbf24' : '#4b5563'};">${p.check ? fmtNum(p.check) : '0'}</span>
@@ -159,14 +160,17 @@ function _renderDetail() {
         </div>
         <div class="crm-detail-content" style="padding:14px 16px;">
             <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#888;margin-bottom:12px;">
-                <span>${esc(p.close_month || '未結案')}</span><span>${esc(p.status)}</span>
+                <span>${esc(p.close_date || '未結案')}</span><span>${esc(p.status)}</span>
                 <span>${esc(p.type)}</span><span>${esc(p.payment_status)}</span>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                 <div>
                     <div style="color:#ddd;font-size:12px;font-weight:600;margin-bottom:6px;">營收與費用</div>
                     <table class="crm-table" style="width:100%;font-size:12px;">
-                        <tr><td style="color:#bbb;">營收(含稅)</td><td style="width:130px;">${money('fpl-contract', p.contract)}</td></tr>
+                        <tr><td style="color:#bbb;">結案日</td>
+                            <td style="width:130px;"><input type="date" class="crm-input fpl-num" id="fpl-close"
+                                value="${esc(p.close_date || '')}" style="width:100%;"></td></tr>
+                        <tr><td style="color:#bbb;">營收(含稅)</td><td>${money('fpl-contract', p.contract)}</td></tr>
                         ${costRows}
                     </table>
                     <table class="crm-table" style="width:100%;font-size:12px;margin-top:8px;">
@@ -261,6 +265,8 @@ _fp.save = async (btn) => {
     });
     const cEl = document.getElementById('fpl-contract');
     if (cEl) body.contract_amount = Number(cEl.value) || 0;
+    const dEl = document.getElementById('fpl-close');
+    if (dEl) body.close_date = dEl.value || '';     // 空＝清成未結案
     btn.disabled = true;
     btn.textContent = '儲存中…';
     try {

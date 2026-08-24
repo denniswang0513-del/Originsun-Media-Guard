@@ -120,7 +120,10 @@ async def project_ledger(request: Request, entity: str = "", q: str = "",
         query = (select(CrmProject, Client.short_name)
                  .outerjoin(Client, Client.id == CrmProject.client_id)
                  .where(CrmProject.entity == ent)
-                 .order_by(CrmProject.updated_at.desc()))
+                 # 依結案日新→舊；未結案（無日期）排最前 —— 這張表是照結案日
+                 # 整理的（owner：先整理專案再記帳），不是照最後編輯時間。
+                 .order_by(CrmProject.completion_date.desc().nullsfirst(),
+                           CrmProject.updated_at.desc()))
         if q:
             ql = f"%{q}%"
             query = query.where(or_(CrmProject.name.ilike(ql),
@@ -142,6 +145,7 @@ async def project_ledger(request: Request, entity: str = "", q: str = "",
         items.append({
             "id": p.id, "name": p.name, "client": cname or "",
             "status": p.status or "", "type": p.project_type or "",
+            "close_date": _fmt_day(p.completion_date),
             "close_month": _fmt_day(p.completion_date)[:7] if p.completion_date else "",
             "contract": contract,
             "received": int(p.amount_received or 0),
@@ -195,6 +199,7 @@ async def project_ledger_detail(project_id: str, request: Request,
         "project": {
             "id": p.id, "name": p.name, "client": client.short_name if client else "",
             "status": p.status or "", "type": p.project_type or "",
+            "close_date": _fmt_day(p.completion_date),
             "close_month": _fmt_day(p.completion_date)[:7] if p.completion_date else "",
             "contract": int(p.contract_amount or 0),
             "received": int(p.amount_received or 0),
@@ -231,7 +236,7 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
     """
     ent = _guard(request, entity, level="full")
     from db.models import CrmProject
-    from routers.crm._shared import _now
+    from routers.crm._shared import _now, _parse_shoot_date
     factory = _factory_or_503()
     async with factory() as session:
         p = await session.get(CrmProject, project_id)
@@ -243,6 +248,19 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         contract = data.pop("contract_amount", None)
         if contract is not None:
             p.contract_amount = int(contract)
+        # 結案日：owner 的流程是「先整理專案再記帳」，日期在這張表就要能改。
+        # 空字串＝清空（未結案）。日期慣例走 _parse_shoot_date（UTC 午夜）。
+        if "close_date" in data:
+            raw = (data.pop("close_date") or "").strip()
+            if raw:
+                d = _parse_shoot_date(raw)
+                if not d:
+                    raise HTTPException(status_code=422, detail=f"結案日無法解析：{raw}")
+                p.completion_date = d
+            else:
+                p.completion_date = None
+        else:
+            data.pop("close_date", None)
         d = norm_detail(p.ledger_detail)
         for k, v in data.items():
             if v is None:
@@ -255,4 +273,5 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         await session.commit()
         net, check = compute(int(p.contract_amount or 0), d)
     return {"status": "ok", "detail": d, "net": net, "check": check,
-            "contract": int(contract) if contract is not None else None}
+            "contract": int(contract) if contract is not None else None,
+            "close_date": _fmt_day(p.completion_date)}

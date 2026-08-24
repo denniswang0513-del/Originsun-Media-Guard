@@ -1390,6 +1390,7 @@ class LedgerDetailPayload(BaseModel):
     shareholder: Optional[int] = None
     split: Optional[dict] = None
     contract_amount: Optional[int] = None    # 營收(含稅)，直接落 crm_projects
+    close_date: Optional[str] = None         # 結案日 'YYYY-MM-DD'；''＝清空
 
 
 class NetSnapshotPayload(BaseModel):
