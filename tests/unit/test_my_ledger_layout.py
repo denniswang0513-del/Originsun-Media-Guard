@@ -89,3 +89,23 @@ def test_card_summary_needs_opening_balance():
     src = _read("routers/api_finance_card.py")
     assert "derive_opening_from" in src, "要能從『現在實際欠多少』反推期初"
     assert 'status.is_distinct_from("card")' in src, "還款不能把刷卡列也算進去"
+
+
+def test_card_repay_account_dropdown_uses_bank_only():
+    """「哪些算真銀行帳戶」的正本在 fin-utils.bankOnly（含 active 判斷、排除
+    股東往來）—— 自己 filter 會漏掉 active，停用帳戶就出現在還款下拉裡，
+    還款會落到死帳戶上（/simplify 第 2 輪抓到）。"""
+    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    assert "bankOnly as _bankOnly" in js
+    panel = js.split("window._cashCardPanel = function ()")[1].split("\n};")[0]
+    assert "_bankOnly(_bankAccounts" in panel
+    assert ".filter(" not in panel, "帳戶清單只能問 bankOnly，不准就地再 filter 一次"
+
+
+def test_cashbook_card_summary_skipped_on_pure_filters():
+    """卡片餘額只跟 entity 有關 —— 換帳戶頁籤/搜尋/兩個篩選下拉都不該重算。
+    🔴 cards 預設 true：漏標異動點＝數字過期（看不出來），漏標篩選點只是多打
+    一次請求（看得出來、不傷帳）。"""
+    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    assert "async function loadEntries({ render = true, cards = true } = {})" in js
+    assert js.count("cards: false") >= 4

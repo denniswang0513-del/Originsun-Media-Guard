@@ -157,3 +157,69 @@ def test_norm_detail_drops_zero_items_and_junk():
     assert d["split"] == {"調光": 100}
     assert d["outsource"] == 5
     assert d["misc"] == 0        # 缺鍵補 0，形狀固定
+
+
+# ── 器材側的 §8 錢牆（遞迴，不是手列兩個鍵）────────────────────────────
+
+def _req(modules):
+    from starlette.requests import Request
+
+    from core.auth import create_token
+    t = create_token({"sub": "u", "username": "u", "access_level": 1,
+                      "modules": modules})
+    return Request({"type": "http", "method": "GET", "path": "/",
+                    "headers": [(b"authorization", ("Bearer " + t).encode())],
+                    "query_string": b""})
+
+
+_EQUIP = {"entity": "mine", "name": "A7S3", "purchase_cost": 180000,
+          "monthly_depreciation": 5000, "maintenance_total": 12000,
+          "depreciation_months": 36,
+          "maintenances": [{"id": "m1", "cost": 3000, "note": "清感光元件"}]}
+
+
+def test_mine_equipment_hides_every_money_key_not_just_two():
+    """🔴 手列鍵的那版只蓋了 purchase_cost 與 monthly_depreciation —— 詳情裡的
+    maintenance_total 與每筆保養的 cost 照樣外流。跟著 MONEY_FIELDS 遞迴走。"""
+    from routers.api_equipment import _strip_mine_money
+    out = _strip_mine_money(dict(_EQUIP), _req(["money_view", "crm_invoices"]))
+    assert "purchase_cost" not in out and "monthly_depreciation" not in out
+    assert "maintenance_total" not in out
+    assert "cost" not in out["maintenances"][0]
+    # 刪鍵不歸零；非錢的欄位一個都不能少
+    assert out["name"] == "A7S3" and out["depreciation_months"] == 36
+    assert out["maintenances"][0]["note"] == "清感光元件"
+
+
+def test_mine_scope_sees_its_own_equipment_money():
+    from routers.api_equipment import _strip_mine_money
+    out = _strip_mine_money(dict(_EQUIP),
+                            _req(["money_view", "crm_invoices", "finance_mine"]))
+    assert out["maintenance_total"] == 12000
+    assert out["maintenances"][0]["cost"] == 3000
+
+
+def test_parent_equipment_untouched():
+    from routers.api_equipment import _strip_mine_money
+    out = _strip_mine_money(dict(_EQUIP, entity="parent"),
+                            _req(["money_view", "crm_invoices"]))
+    assert out["purchase_cost"] == 180000
+
+
+def test_editable_cost_fields_match_the_payload_schema():
+    """🔴 兩份清單必須同步：schema 多一欄 → PUT 收下、norm_detail 丟掉（回 200
+    但數字不見）；COST_FIELDS 多一欄 → UI 畫得出來卻送不上去。"""
+    from core.ledger_project import COST_KEYS
+    from core.schemas import LedgerDetailPayload
+    non_cost = {"split", "contract_amount", "close_date"}
+    assert set(LedgerDetailPayload.model_fields) - non_cost == set(COST_KEYS)
+
+
+def test_pin_project_ledger_ap_matches_ap_open_payments():
+    """🔴 預支不是應付（那是先給出去的週轉金，核銷後才變成成本）。混進來會讓
+    同一個專案在逐案損益與應付帳款上出現兩個數字。"""
+    src = _read("routers/api_finance_projects.py")
+    fn = src.split("async def _rollups")[1].split("\n@router")[0]
+    assert "is_advance == 0" in fn
+    assert 'payment_status != "已付款"' in fn
+    assert "ap_open_payments" in src, "口徑正本要留名字，否則第三個聚合點又會從零決定一次"

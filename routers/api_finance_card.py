@@ -127,8 +127,7 @@ async def preview_card_statement(
         rules = await _load_import_rules(session)
         seen = await _existing_card_keys(session, ent, [r.date for r in res.rows])
 
-    # suggest_rows 只問「這一列帳上有沒有」→ 給它 Counter 的鍵集合
-    out = suggest_rows(res.rows, hist, rules, set(seen))
+    out = suggest_rows(res.rows, hist, rules, seen)   # Counter 直接進去（消耗式比對）
     n_sug = sum(1 for x in out if x["category"])
     return {
         "ok": True,

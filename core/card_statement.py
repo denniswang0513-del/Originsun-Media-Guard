@@ -178,7 +178,7 @@ def merchant_key(summary: str) -> str:
 
 # ── 分類建議（preview 的三層合成；純函式 —— 測試直接打這裡）────────────
 
-def suggest_rows(rows, hist: dict, rules, seen: set) -> list:
+def suggest_rows(rows, hist: dict, rules, seen) -> list:
     """解析列 → 帶三層建議與重複旗標的預覽列。
 
     優先序：手續費繼承前一筆消費 > 規則 > 歷史一致對映。
@@ -189,7 +189,14 @@ def suggest_rows(rows, hist: dict, rules, seen: set) -> list:
       prev_cat 對每個 spend 都覆寫（含空值），否則手續費會越級抄到更早那筆
       的分類（dev 冒煙實抓）。
     """
+    from collections import Counter
+
     from core.bank_statement import _classify
+    # 🔴 消耗式比對：帳上已有一筆就只標一筆重複，不是把整組同鍵都標掉。
+    # 同一天真的可能刷兩筆一樣的錢（兩杯一樣的咖啡）—— 整組標成重複＝預覽
+    # 全不勾＝那第二筆永遠進不來。apply 端已經是這個語意，preview 這半原本
+    # 還在用 set（/simplify 第 4 輪抓到）。收 set 也照舊（每鍵當一筆）。
+    left = Counter(seen)
     out, prev_cat = [], ""
     for r in rows:
         cat, source = "", ""
@@ -203,10 +210,14 @@ def suggest_rows(rows, hist: dict, rules, seen: set) -> list:
             source = "history" if cat else source
         if r.kind == "spend":
             prev_cat = cat
+        key = (r.date, abs(r.amount))
+        dup = left[key] > 0
+        if dup:
+            left[key] -= 1
         out.append({
             "line_no": r.line_no, "date": r.date, "amount": r.amount,
             "note": r.note, "kind": r.kind,
             "category": cat, "source": source,
-            "duplicate": (r.date, abs(r.amount)) in seen,
+            "duplicate": dup,
         })
     return out

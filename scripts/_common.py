@@ -169,6 +169,11 @@ def parse_date(v: str, *, minguo: bool = False):
     if not m:
         return None
     y = int(m[1])
+    if not (1900 <= y <= 2100) and not (minguo and y < 1000):
+        # 🔴 `0114/12/21` 這種格子在沒開 minguo 時是**打錯字**，要回 None 進
+        # 「跳過」清單讓人看見。原本 (\d{4}) 會收下它並造出西元 114 年 ——
+        # 一個沒有人會發現的日期（/simplify 第 4 輪抓到）。
+        return None
     if minguo and y < 1000:
         y += 1911
     from routers.crm._shared import _parse_shoot_date
