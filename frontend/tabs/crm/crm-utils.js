@@ -617,6 +617,16 @@ export function invoicePayBadge(status) {
     return `<span class="crm-badge crm-pay-badge-${cls}">${esc(s)}</span>`;
 }
 
+/** 開立狀態 badge（發票本與專案頁共用一份 —— 兩邊各畫一份就會配色/用詞分岔）。
+ *
+ * 詞彙正本在後端 core.finance_logic（未開立／已開立／作廢）。「開立中」是舊詞，
+ * 舊資料或舊客戶端還可能送，這裡照樣顯示，不要靜靜吞掉。 */
+export function invoiceIssueBadge(status) {
+    const s = (status || '').trim() || '未開立';
+    const cls = s === '作廢' ? 'void' : s === '已開立' ? 'collected' : 'unpaid';
+    return `<span class="crm-badge crm-pay-badge-${cls}">${esc(s)}</span>`;
+}
+
 const TAX_RATE = 1.05;
 
 /** 一個金額 + 它是未稅還是含稅 → 推出三個金額欄。

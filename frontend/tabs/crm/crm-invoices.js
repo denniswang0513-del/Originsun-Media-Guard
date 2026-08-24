@@ -1,7 +1,7 @@
 /**
  * crm-invoices.js — 帳務管理 Tab
  */
-import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, invoiceAmounts as _amountsFrom, invoicePayBadge as _payBadge,
+import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, invoiceAmounts as _amountsFrom, invoicePayBadge as _payBadge, invoiceIssueBadge,
          INV_PENDING_REMIT, INV_REMITTED, projectOptionsHtml } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
@@ -128,14 +128,10 @@ function _populateProjectFilter() {
 }
 
 
-function _statusBadge(status) {
-    const cls = status === '作廢' ? 'void'
-        : status === '已開立' ? 'collected' : 'unpaid';
-    return `<span class="crm-badge crm-pay-badge-${cls}">${_esc(status || '開立中')}</span>`;
-}
+const _statusBadge = invoiceIssueBadge;   // 與專案頁共用同一份（crm-utils）
 
-// 開立中 → 已開立 → 作廢:工作流順序,asc 把待處理(開立中)排前面
-const _INV_STATUS_ORDER = ['開立中', '已開立', '作廢'];
+// 未開立 → 已開立 → 作廢:工作流順序,asc 把待處理(未開立)排前面
+const _INV_STATUS_ORDER = ['未開立', '已開立', '作廢'];
 // 款項狀態排序：待處理(未收/未付)在前、空白墊底（空白＝來源沒填，不是一種進度）
 // 代開發票的三段（owner 2026-08-21 定名，後端 crm/finance.py 同一組字）：
 //   未收款 ──客戶匯錢進來──▶ 待撥款 ──應付帳款把請款單付掉──▶ 已撥款
@@ -162,7 +158,7 @@ const _sorter = createSortable({
         category: i => (i.category || '').toLowerCase(),
         kind:     i => (i.invoice_kind || '').toLowerCase(),
         pay:      i => enumIndex(_INV_PAY_ORDER, (i.payment_status || '').trim(), ''),
-        status:   i => enumIndex(_INV_STATUS_ORDER, i.issue_status, '開立中'),
+        status:   i => enumIndex(_INV_STATUS_ORDER, i.issue_status, '未開立'),
     },
 });
 
@@ -267,7 +263,7 @@ function _quickAddRow() {
             _INV_KINDS.map(v => `<option value="${_esc(v)}"${v === '電子發票' ? ' selected' : ''}>${_esc(v.replace('發票', ''))}</option>`).join('')
         }</select></div>
         <div><select id="inv-qa-pay">${opts(['未收款', '已收款', INV_PENDING_REMIT, INV_REMITTED, '作廢'], '未收款')}</select></div>
-        <div><select id="inv-qa-iss">${opts(['開立中', '已開立', '作廢'], '開立中')}</select></div>
+        <div><select id="inv-qa-iss">${opts(['未開立', '已開立', '作廢'], '未開立')}</select></div>
         <span class="crm-kebab-wrap">
           <button class="crm-btn crm-btn-primary crm-btn-sm inv-qa-btn"
                   title="新增這筆發票" onclick="window._invQuickAdd()">＋</button>
@@ -390,7 +386,7 @@ function _buildEditFields() {
         {name:'title', label:'名稱', type:'text'},
         // ── 開立資訊
         {name:'invoice_number', label:'發票編號', type:'text'},
-        {name:'issue_status', label:'開立狀態', type:'select', options:[{value:'開立中',label:'開立中'},{value:'已開立',label:'已開立'},{value:'作廢',label:'作廢'}]},
+        {name:'issue_status', label:'開立狀態', type:'select', options:[{value:'未開立',label:'未開立'},{value:'已開立',label:'已開立'},{value:'作廢',label:'作廢'}]},
         // 🔴 兩欄都可以填 —— 對方報價給的有時是未稅、有時是含稅，只開一邊就要
         // 有人自己按計算機再回填（owner 2026-08-20）。改哪一欄就以哪一欄為準，
         // 另一欄與稅額由 _deriveInvoice 推（同一支，不另寫一套換算）。
@@ -468,7 +464,7 @@ function _wireEditDynamics() {
     if (invNumEl && statusSel) {
         invNumEl.addEventListener('input', () => {
             if (statusSel.value === '作廢') return;
-            statusSel.value = invNumEl.value.trim() ? '已開立' : '開立中';
+            statusSel.value = invNumEl.value.trim() ? '已開立' : '未開立';
         });
     }
 
@@ -852,9 +848,11 @@ function renderDetail(inv) {
         };
         enableInlineEdit('inv-detail-content', 'inv-bar-actions', _buildEditFields(), editData,
             async (payload) => {
-                // auto: 有編號→已開立，無編號→開立中（除非作廢）
+                // auto: 有編號→已開立，無編號→未開立（除非作廢）。
+                // 這只是打字時的即時提示；真正定案的是後端入口
+                // （core.finance_logic.issue_status_for）。
                 if (payload.issue_status !== '作廢') {
-                    payload.issue_status = payload.invoice_number?.trim() ? '已開立' : '開立中';
+                    payload.issue_status = payload.invoice_number?.trim() ? '已開立' : '未開立';
                 }
                 // 🔴 這裡是「編別的欄位」的路徑，不是改收付狀態的路徑 —— 兩欄一律原值帶回。
                 // 舊寫法硬塞 payment_type='收款'（匯入的 183 張付款發票一被編輯就翻面）、
@@ -993,7 +991,7 @@ function _onInvoiceNumberInput() {
     const status = document.getElementById('inv-f-issue_status');
     if (status.value === '作廢') return;
     const num = document.getElementById('inv-f-invoice_number').value.trim();
-    status.value = num ? '已開立' : '開立中';
+    status.value = num ? '已開立' : '未開立';
 }
 
 function openModal(inv = null) {
@@ -1019,7 +1017,7 @@ function openModal(inv = null) {
         if (f === 'invoice_date') {
             el.value = inv?.invoice_date ? inv.invoice_date.substring(0, 10) : _todayStr();
         } else if (f === 'issue_status') {
-            el.value = inv?.issue_status || '開立中';
+            el.value = inv?.issue_status || '未開立';
         } else if (f === 'category') {
             el.value = inv?.category || '專案';
         } else {

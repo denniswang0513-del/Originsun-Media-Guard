@@ -19,6 +19,7 @@ from core.crm_logic import normalize_tax_id
 from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 INVOICE_PASSTHROUGH_COLLECTED,
                                 INVOICE_PENDING_REMIT, INVOICE_REMITTED,
+                                issue_status_for,
                                 INVOICE_RECEIVED, alloc_verdict,
                                 initial_invoice_status,
                                 amount_is_settled, invoice_direction,
@@ -692,6 +693,10 @@ async def create_invoice(req: InvoicePayload, request: Request):
     # 於是待撥款的代開發票會被當成收款、跑進應收帳款
     if not (data.get("payment_type") or "").strip():
         data["payment_type"] = invoice_direction(data["payment_status"])
+    # 開立狀態同理：有發票號碼才叫已開立。規則本來只在發票本的前端（而且抄三份），
+    # 專案頁那個入口沒有 → 從那裡開一張還沒拿到號碼的票會吃到預設值「已開立」。
+    data["issue_status"] = issue_status_for(data.get("invoice_number"),
+                                            data.get("issue_status"))
     inv = CrmInvoice(
         id=uuid.uuid4().hex, invoice_date=_parse_shoot_date(req.invoice_date),
         created_at=now, updated_at=now, entity=ent, **data,
@@ -813,6 +818,9 @@ async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request)
         upd["payment_status"] = (
             normalize_invoice_status(upd.get("payment_status") or "")
             or initial_invoice_status(upd.get("payment_type") or ""))
+        # 同 create：號碼被補上/清掉時，開立狀態要跟著走（作廢維持作廢）
+        upd["issue_status"] = issue_status_for(upd.get("invoice_number"),
+                                               upd.get("issue_status"))
         for k, v in upd.items():
             setattr(inv, k, v)
         inv.invoice_date = new_date

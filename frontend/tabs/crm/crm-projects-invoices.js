@@ -27,7 +27,7 @@
  */
 
 import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum, invoiceAmounts,
-         invoicePayBadge, crmToast, today } from './crm-utils.js';
+         invoicePayBadge, invoiceIssueBadge, crmToast, today } from './crm-utils.js';
 
 let _cur = null;          // 目前這個專案（渲染與預填都要）
 let _client = null;       // 這個案子的客戶 —— 抬頭與統編從這裡來
@@ -120,7 +120,7 @@ function _listHtml() {
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead style="background:#242424;"><tr>
           ${th('發票號')}${th('日期')}${th('品名')}${th('申請人')}${th('品項')}
-          ${th('金額', 1)}${th('已收', 1)}${th('狀態')}${th('')}
+          ${th('金額', 1)}${th('已收', 1)}${th('開立')}${th('收款')}${th('')}
         </tr></thead>
         <tbody>${rows.map(i => `
           <tr style="border-top:1px solid #2a2a2a;">
@@ -136,6 +136,7 @@ function _listHtml() {
             </td>
             <td style="padding:5px 8px;text-align:right;color:#eee;">$${fmtNum(i.amount_total || 0)}</td>
             <td style="padding:5px 8px;text-align:right;color:#9ca3af;">$${fmtNum(i.collected || 0)}</td>
+            <td style="padding:5px 8px;">${invoiceIssueBadge(i.issue_status)}</td>
             <td style="padding:5px 8px;">${invoicePayBadge(i.payment_status)}</td>
             <td style="padding:5px 8px;text-align:right;">
               <button class="crm-btn crm-btn-secondary crm-btn-sm" title="刪除這張發票"

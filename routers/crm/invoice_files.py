@@ -60,7 +60,7 @@ def _invoice_file_name(inv, ext: str) -> str:
     """{日期}_{發票號碼}_{抬頭前20字}_{含稅金額}[_作廢].{ext}
 
     - 日期開頭 → 資料夾內自然照時間排序，整包交給會計師順序就是對的
-    - 發票號碼 → 法定唯一識別，對帳/查調/作廢都用它；沒號碼（開立中）用 id 前 8 碼
+    - 發票號碼 → 法定唯一識別，對帳/查調/作廢都用它；沒號碼（未開立）用 id 前 8 碼
     - 抬頭截斷 20 字 → 台灣公司名很長，不截會撞 Windows 260 字元路徑上限
     - 含稅金額 → 交叉核對用，檔名數字跟系統對不上就知道有問題
     - 作廢放**尾端**不放前綴 —— 放前面會破壞日期排序
@@ -183,7 +183,7 @@ async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFil
                                 detail=f"檔案超過 {_MAX_INVOICE_BYTES // 1024 // 1024}MB")
         inv.file_url = filepath
         # 有了電子發票證明聯就代表這張已經開出去了（owner 2026-08-19）。
-        # 作廢的不動 —— 作廢也會留存證明聯，那不是「開立中」。
+        # 作廢的不動 —— 作廢也會留存證明聯，那不是「未開立」。
         if (inv.issue_status or "") != "作廢":
             inv.issue_status = "已開立"
         inv.updated_at = _now()

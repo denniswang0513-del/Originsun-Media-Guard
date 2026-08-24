@@ -884,6 +884,32 @@ def alloc_verdict(actual: int, allocated: int, side: str = "receipt") -> dict:
             "message": t[state].format(n=abs(gap))}
 
 
+#: 開立狀態 —— **由發票號碼決定**，不是呼叫端各自決定（owner 2026-08-24：
+#: 「這裡沒有發票號碼 要標註未開立，等到有發票號碼 才能標註已開立」）。
+INVOICE_NOT_ISSUED = "未開立"
+INVOICE_ISSUED = "已開立"
+INVOICE_VOID = "作廢"
+
+def issue_status_for(invoice_number, current: str = "") -> str:
+    """發票的開立狀態：**有號碼才叫已開立**。
+
+    這條規則本來只存在於發票本的前端，而且抄了三份（打字時即時改、存檔時再推
+    一次、開視窗時填預設）。專案頁那個入口沒有那三份，於是從專案頁開一張還沒
+    拿到號碼的票，會吃到 schema 預設值「已開立」—— 帳上出現一張沒有號碼卻宣稱
+    已開立的發票（2026-08-24 實測，全帳 400 張裡就那一張）。所以搬到入口定案，
+    跟 payment_status 同一條路（見 create_invoice 的說明）。
+
+    🔴 作廢是**人的決定**，不能用號碼推翻：作廢的發票通常是有號碼的，
+       拿號碼重推會把它變回已開立，等於把作廢這件事無聲取消。
+    """
+    # 只有作廢需要看呼叫端說什麼，其餘一律由號碼決定 —— 所以舊詞「開立中」
+    # （前端改名前的用字，生產 0 張）不需要別名表：它不是作廢，就會走號碼那條，
+    # 結果自然落在新詞上。
+    if (current or "").strip() == INVOICE_VOID:
+        return INVOICE_VOID
+    return INVOICE_ISSUED if (invoice_number or "").strip() else INVOICE_NOT_ISSUED
+
+
 def initial_invoice_status(payment_type: str, unpaid: bool = False) -> str:
     """開一張發票時的初始款項狀態。方向決定，不是呼叫端各自決定。
 
