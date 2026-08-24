@@ -1486,7 +1486,16 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
     _require_db()
     factory = await _get_factory()
     date_fields = {"request_date", "payment_date"}
-    dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
+    # 🔴 部分更新：**只寫前端真的送來的欄位**（exclude_unset）。
+    # 整包 model_dump 會把沒送的欄位洗成 pydantic 預設值，而編輯面板只送 13 個欄位
+    # —— needs_invoice→0、invoice_amount→None、is_advance→0、advance_by→""、
+    # advance_returned→0、project_label→"" 全部無聲歸零。2026-08-24 量過生產：
+    # 824 張請款單裡，需代開與代開金額各 186 張、專案標籤 141 張會被一次存檔清掉，
+    # 而畫面上只有使用者改的那一欄看起來變了。這是全 repo 的既定慣例
+    # （20+ 個更新端點都用 exclude_unset），這支跟 update_cash_entry 一樣是漏網的。
+    # 也因此 source_invoice_id 不再需要單獨挑出來保護 —— 沒送就不會被碰。
+    data = req.model_dump(exclude_unset=True, exclude={"entity"})
+    dates = {f: _parse_shoot_date(data[f]) for f in date_fields if f in data}
     async with factory() as session:
         p = await session.get(CrmPaymentRequest, payment_id)
         if not p:
@@ -1496,15 +1505,9 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
         # F1 月結守衛：舊/新 request_date 的月份都要開著
         await _assert_month_open(session, p.request_date, dates.get("request_date"),
                                  entity=ent)
-        data = req.model_dump(exclude=date_fields | {"entity"})
-        # 🔴 source_invoice_id 沒送就維持原值，不要被預設的 None 洗掉。
-        # 這是整包 model_dump 的老坑：欄位有預設值 + 前端不送 = 該欄被清空。
-        # 這個欄位被清空的後果特別安靜：請款單付掉時就找不到要收尾的那張發票，
-        # 代開發票會永遠停在待撥款。
-        if data.get("source_invoice_id") is None:
-            data.pop("source_invoice_id", None)
         for k, v in data.items():
-            setattr(p, k, v)
+            if k not in date_fields:
+                setattr(p, k, v)
         for k, v in dates.items():
             setattr(p, k, v)
         p.updated_at = _now()

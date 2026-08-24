@@ -675,7 +675,15 @@ class PaymentRequestPayload(BaseModel):
     project_label: str = ""
     payment_date: Optional[str] = None
     payment_status: str = "應付款"
+    # 🔴 空值一定要收得下 None。前端的共用收值（crm-utils.enableInlineEdit）對
+    # date/month 型別一律 `val = val || null` —— 那對 request_date/payment_date
+    # 是對的（Optional），但「預計付款月」留空時送來的也是 null，而這欄宣告 str
+    # → 整張單存不了，錯誤訊息只有一句 "Input should be a valid string"，
+    # 完全看不出是哪一欄（owner 2026-08-24 就這樣被擋住，改不了記帳錯誤）。
+    # 存的形狀維持空字串（全 repo 都用 `planned_month or ""` 比對），只在入口收斂。
     planned_month: str = ""
+    _norm_planned_month = field_validator("planned_month", mode="before")(
+        lambda v: "" if v is None else v)
     advance_by: str = ""
     is_advance: int = 0
     advance_returned: int = 0

@@ -160,9 +160,17 @@ def test_update_payment_does_not_wipe_the_invoice_key():
 
     這個欄位被清空特別安靜：請款單付掉時找不到要收尾的發票，代開發票會永遠
     停在待撥款。
+
+    2026-08-24：原本是替 source_invoice_id 單獨開一道 `data.pop(...)` 守衛。
+    但同一個坑不只咬這一欄 —— 編輯面板只送 13 個欄位，needs_invoice /
+    invoice_amount / project_label / advance_by / is_advance / advance_returned
+    全都會被洗掉（量過生產：824 張裡各有 186／186／141 張中槍）。改成整支端點
+    走 exclude_unset 部分更新（全 repo 20+ 個更新端點的既定慣例），這一欄就跟
+    其他欄位一樣「沒送就不會被碰」，不需要專屬守衛。
     """
     body = _body('async def update_payment(')
-    assert 'data.pop("source_invoice_id", None)' in body
+    assert 'exclude_unset=True' in body,         'update_payment 又變回整包寫回 —— source_invoice_id 會被清空'
+    assert 'req.model_dump(exclude=date_fields' not in body,         '還留著整包 model_dump 的舊路徑'
 
 
 def test_passthrough_category_has_one_definition():
