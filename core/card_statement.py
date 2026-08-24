@@ -29,8 +29,10 @@ from dataclasses import dataclass, field
 # 規則各被修過兩次，留兩份等於下次只修得到一份）。
 from core.bank_statement import _AMOUNT, _to_int  # noqa: E402
 
-# 日期：2026/1/16、2026-01-16、115/01/16（民國；年 < 1000 視為民國 +1911）
-_DATE = re.compile(r"(?<!\d)(\d{2,4})[/\-.](\d{1,2})[/\-.](\d{1,2})(?!\d)")
+# 日期規則與 bank_statement 共用（民國年、分隔符集合都只留一份）——
+# 卡單這邊原本自己寫了一份，分隔符還少了「年/月」，正是那條註解說的
+# 「留兩份等於下次只修得到一份」（/simplify 2026-08-25）。
+from core.bank_statement import _DATE  # noqa: E402
 
 # 退款方向（金額記負）
 _REFUND_KW = ("退貨", "退款", "退刷", "溢繳", "退費", "回饋金")
@@ -128,10 +130,8 @@ def parse_card_statement(text: str) -> CardParseResult:
             res.payments.append(row)
             continue
         if any(k in note for k in _FEE_KW):
-            row.kind = "fee"
             # 附掛前一筆：分類建議由消費端（preview）依此繼承
-            res.rows.append(row)
-            continue
+            row.kind = "fee"
         res.rows.append(row)
 
     if not res.rows:

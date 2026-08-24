@@ -22,50 +22,22 @@ CSV 來源：私帳 Sheet「固定資產」分頁（gid=1293578410）→ export?
   兩種口徑並列，差異屬口徑不同非資料錯誤。
 - 冪等：--apply 先清 entity='mine' 的 equipment 再重建。
 """
-import argparse
-import asyncio
 import csv
 import io
-import re
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts._common import find_header, resolve_db_url  # noqa: E402
-
-import asyncpg  # noqa: E402
-
-
-def money(s: str) -> int:
-    s = (s or "").replace("NT$", "").replace(",", "").strip()
-    try:
-        return round(float(s))
-    except ValueError:
-        return 0
-
-
-def pdate(s: str):
-    m = re.match(r"(\d{4})/(\d{1,2})/(\d{1,2})", (s or "").strip())
-    if not m:
-        return None
-    try:
-        return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
-                        tzinfo=timezone.utc)
-    except ValueError:
-        return None
+from scripts._common import (assert_safe_rebuild, cli, col_getter, connect, db_target,  # noqa: E402
+                             find_header, money, parse_date, print_dry_run_end,
+                             print_target)
 
 
 def load_rows(csv_path: str):
     rows = list(csv.reader(io.open(csv_path, encoding="utf-8")))
     h = find_header(rows, "建置日期")
-    hdr = [x.strip() for x in rows[h]]
-    ix = {name: i for i, name in enumerate(hdr)}
-
-    def col(r, name):
-        i = ix.get(name)
-        return (r[i] if i is not None and len(r) > i else "").strip()
+    col = col_getter(rows[h])
 
     out = []
     for r in rows[h + 1:]:
@@ -85,7 +57,7 @@ def load_rows(csv_path: str):
             note_bits.append(status_raw)          # 報廢_2024年轉售給邱家琳 之類
         out.append({
             "name": name[:128],
-            "date": pdate(col(r, "建置日期")),
+            "date": parse_date(col(r, "建置日期")),
             "cost": money(col(r, "建構金額")),
             "months": months,
             "status": "除役" if status_raw.startswith("報廢") else "在庫",
@@ -107,24 +79,28 @@ def system_net(rows, as_of=(2026, 8)) -> int:
     return total
 
 
-async def run(csv_path: str, apply: bool, prod: bool):
-    url = resolve_db_url(prod)
-    dbname = url.rsplit("/", 1)[-1]
-    dsn = url.replace("postgresql+asyncpg://", "postgresql://")
+async def run(csv_path: str, apply: bool, prod: bool, force: bool = False):
+    dbname, dsn = db_target(prod)
     rows = load_rows(csv_path)
     active = [r for r in rows if r["status"] == "在庫"]
-    print(f"目標資料庫: {dbname}   模式: {'寫入 (--apply)' if apply else 'DRY-RUN（不寫入）'}")
+    print_target(dbname, apply)
     print(f"解析：{len(rows)} 項（在庫 {len(active)}／除役 {len(rows) - len(active)}）")
     print(f"在庫建構金額合計: {sum(r['cost'] for r in active):,}（Sheet 錨點 1,434,948）")
     print(f"Sheet 淨值（5% 殘值口徑）: {sum(r['sheet_net'] for r in active):,}（錨點 449,903）")
     print(f"系統淨值（攤到 0 口徑）: {system_net(rows):,} —— 差額＝殘值底床，口徑不同非錯誤")
     if not apply:
-        print("\nDRY-RUN 結束 —— 沒有寫入任何東西。")
+        print_dry_run_end()
         return
 
-    c = await asyncio.wait_for(asyncpg.connect(dsn), 15)
+    c = await connect(dsn)
     try:
         n0 = await c.fetchval("SELECT count(*) FROM equipment WHERE entity='mine'")
+        await assert_safe_rebuild(c, [
+            ("非匯入建立的 mine 器材", "SELECT count(*) FROM equipment"
+             " WHERE entity='mine' AND (note IS NULL OR note NOT LIKE '[私帳匯入]%')"),
+            ("有領用紀錄的 mine 器材", "SELECT count(*) FROM equipment_checkouts c"
+             " JOIN equipment e ON e.id=c.equipment_id WHERE e.entity='mine'"),
+        ], force)
         print(f"\n清場：mine equipment={n0} → 重建")
         await c.execute("DELETE FROM equipment WHERE entity='mine'")
         await c.executemany(
@@ -147,10 +123,4 @@ async def run(csv_path: str, apply: bool, prod: bool):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", required=True, help="固定資產分頁的 CSV（gid=1293578410）")
-    ap.add_argument("--prod", action="store_true")
-    ap.add_argument("--apply", action="store_true")
-    a = ap.parse_args()
-    sys.stdout.reconfigure(encoding="utf-8")
-    asyncio.run(run(a.csv, a.apply, a.prod))
+    cli(run, "固定資產分頁的 CSV（gid=1293578410）")

@@ -16,8 +16,6 @@
 不吻合的那幾案是 Sheet 自己帳不平（台新展覽攝影／潮對流／畫我台灣／快樂學游泳／
 親子形象片），不是解析錯 —— 系統照實存，讓「檢查」欄把它們顯示出來。
 """
-import argparse
-import asyncio
 import csv
 import io
 import json
@@ -26,9 +24,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts._common import resolve_db_url  # noqa: E402
-
-import asyncpg  # noqa: E402
+from scripts._common import (cli, col_getter, connect, db_target,  # noqa: E402
+                             money, print_dry_run_end, print_target)
 
 # 🔴 欄位清單與算式一律從 core 取 —— 這支原本各複製了一份（工項十項、費用七欄、
 # computed_net），正是 core/ledger_project 檔頭記的那個「第一天就有兩份」。
@@ -39,28 +36,9 @@ from core.ledger_project import (COST_FIELDS,  # noqa: E402
 COST_COLS = {label: key for key, label in COST_FIELDS}
 
 
-def money(s: str) -> int:
-    s = (s or "").replace("NT$", "").replace(",", "").strip()
-    s = s.replace("（", "(").replace("）", ")")
-    neg = s.startswith("(") and s.endswith(")")
-    s = s.strip("()").strip()
-    if not s:
-        return 0
-    try:
-        v = float(s)
-    except ValueError:
-        return 0
-    return -round(v) if neg else round(v)
-
-
 def load_by_code(csv_path: str) -> dict:
     rows = list(csv.reader(io.open(csv_path, encoding="utf-8")))
-    hdr = [h.strip() for h in rows[0]]
-    ix = {h: i for i, h in enumerate(hdr)}
-
-    def col(r, name):
-        i = ix.get(name)
-        return (r[i] if i is not None and len(r) > i else "")
+    col = col_getter(rows[0])
 
     out = {}
     for r in rows[1:]:
@@ -76,15 +54,13 @@ def load_by_code(csv_path: str) -> dict:
     return out
 
 
-async def run(csv_path: str, apply: bool, prod: bool):
-    url = resolve_db_url(prod)
-    dbname = url.rsplit("/", 1)[-1]
-    dsn = url.replace("postgresql+asyncpg://", "postgresql://")
+async def run(csv_path: str, apply: bool, prod: bool, force: bool = False):
+    dbname, dsn = db_target(prod)
     by_code = load_by_code(csv_path)
-    print(f"目標資料庫: {dbname}   模式: {'寫入 (--apply)' if apply else 'DRY-RUN（不寫入）'}")
+    print_target(dbname, apply)
     print(f"Sheet 有案碼的列: {len(by_code)}")
 
-    c = await asyncio.wait_for(asyncpg.connect(dsn), 15)
+    c = await connect(dsn)
     try:
         rows = await c.fetch(
             "SELECT id, name, notes, contract_amount FROM crm_projects WHERE entity='mine'")
@@ -109,7 +85,7 @@ async def run(csv_path: str, apply: bool, prod: bool):
         n_split = sum(1 for _i, d in matched if d["split"])
         print(f"有工項拆分的案子: {n_split}")
         if not apply:
-            print("\nDRY-RUN 結束 —— 沒有寫入任何東西。")
+            print_dry_run_end()
             return
         await c.executemany(
             "UPDATE crm_projects SET ledger_detail = $2::jsonb WHERE id = $1",
@@ -126,10 +102,4 @@ async def run(csv_path: str, apply: bool, prod: bool):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", required=True, help="結案總表 CSV（gid=2098748516）")
-    ap.add_argument("--prod", action="store_true")
-    ap.add_argument("--apply", action="store_true")
-    a = ap.parse_args()
-    sys.stdout.reconfigure(encoding="utf-8")
-    asyncio.run(run(a.csv, a.apply, a.prod))
+    cli(run, "結案總表 CSV（gid=2098748516）")

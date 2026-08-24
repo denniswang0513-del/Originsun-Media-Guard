@@ -150,7 +150,7 @@ async def project_ledger_detail(project_id: str, request: Request,
     ent = _guard(request, entity, level="full")
     from sqlalchemy import select
 
-    from db.models import Client, CrmCashEntry, CrmPaymentRequest, CrmProject
+    from db.models import Client, CrmCashEntry, CrmPaymentRequest
     factory = _factory_or_503()
     async with factory() as session:
         p = await _owned_project(session, project_id, ent)

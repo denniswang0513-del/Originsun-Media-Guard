@@ -40,7 +40,7 @@ def _holding_value(h, usd_twd: float) -> int:
     return 0
 
 
-async def _auto_buckets(session, ent: str, ml: dict | None = None) -> dict:
+async def _auto_buckets(session, ent: str, usd_twd: float) -> dict:
     """系統算得出來的桶。回 {桶名: 金額}＋meta。"""
     from sqlalchemy import func as fn
     from sqlalchemy import select
@@ -83,7 +83,9 @@ async def _auto_buckets(session, ent: str, ml: dict | None = None) -> dict:
         select(FinanceHolding).where(FinanceHolding.entity == ent,
                                      FinanceHolding.active.is_(True))
         .order_by(FinanceHolding.sort_order, FinanceHolding.created_at))).scalars().all()
-    usd_twd = float((ml or {}).get("usd_twd") or 0)
+    # 🔴 匯率由呼叫端傳，**不給預設值**：R2 把它改成可選之後 save_snapshot
+    # 沒傳，於是每筆美元持股乘以 0 —— 存進 row.auto 的證券現值少掉整個外幣
+    # 部位，而且沒有任何跡象（/simplify 2026-08-25 第 3 輪抓到）。
     h_rows = [{
         "id": h.id, "broker": h.broker or "", "symbol": h.symbol or "",
         "name": h.name, "shares": h.shares, "currency": h.currency,
@@ -107,8 +109,9 @@ async def assets_overview(request: Request, entity: str = ""):
 
     from db.models import FinanceNetSnapshot
     ml = load_settings().get("my_ledger") or {}   # 一次讀完，別在同一支端點讀兩次
+    fx = float(ml.get("usd_twd") or 0)
     async with factory() as session:
-        auto = await _auto_buckets(session, ent, ml)
+        auto = await _auto_buckets(session, ent, fx)
         last = (await session.execute(
             select(FinanceNetSnapshot)
             .where(FinanceNetSnapshot.entity == ent)
@@ -150,18 +153,18 @@ async def refresh_quotes(request: Request, entity: str = ""):
         asyncio.to_thread(fetch_usd_twd))
     fx = results[-1]
     now = datetime.now(timezone.utc)
-    updated, failed = [], []
-    async with factory() as session:
-        for (hid, _qs, label), px in zip(targets, results[:-1]):
-            if px:
-                h = await session.get(FinanceHolding, hid)
-                if h is not None:
-                    h.last_price = px
-                    h.price_at = now
-                updated.append(label)
-            else:
-                failed.append(label)
-        await session.commit()
+    pairs = list(zip(targets, results[:-1]))
+    updated = [lbl for (_h, _q, lbl), px in pairs if px]
+    failed = [lbl for (_h, _q, lbl), px in pairs if not px]
+    # 批次 update by primary key：原本每檔一次 SELECT ＋一次 UPDATE（2N 個來回）。
+    # 順帶不用再處理「抓完價之後那筆被刪掉」—— 批次 update 對消失的 id 直接無事發生。
+    rows = [{"id": hid, "last_price": px, "price_at": now}
+            for (hid, _q, _l), px in pairs if px]
+    if rows:
+        from sqlalchemy import update
+        async with factory() as session:
+            await session.execute(update(FinanceHolding), rows)
+            await session.commit()
     if fx:
         ml = settings.setdefault("my_ledger", {})
         ml["usd_twd"] = fx
@@ -226,7 +229,7 @@ async def delete_holding(holding_id: str, request: Request, entity: str = ""):
 
 
 @router.get("/assets/snapshots")
-async def list_snapshots(request: Request, entity: str = "", limit: int = 500):
+async def list_snapshots(request: Request, entity: str = ""):
     ent = _guard(request, entity, level="view")
     from sqlalchemy import select
 
@@ -236,11 +239,12 @@ async def list_snapshots(request: Request, entity: str = "", limit: int = 500):
         rows = (await session.execute(
             select(FinanceNetSnapshot)
             .where(FinanceNetSnapshot.entity == ent)
-            .order_by(FinanceNetSnapshot.snap_date)
-            .limit(max(1, min(limit, 2000))))).scalars().all()
+            .order_by(FinanceNetSnapshot.snap_date))).scalars().all()
+    # 只回圖表讀得到的欄：buckets 在 116 列上是 27KB（整包的 66%），而唯一的
+    # 消費者只用 date/total —— 拍快照要用的上一份桶是從 /assets/overview 的
+    # last_snapshot 拿的，不是這裡（/simplify 2026-08-25）。
     return {"snapshots": [{
         "id": r.id, "date": _fmt_day(r.snap_date), "total": int(r.total or 0),
-        "buckets": r.buckets or {}, "note": r.note or "",
     } for r in rows]}
 
 
@@ -261,7 +265,9 @@ async def save_snapshot(payload: NetSnapshotPayload, request: Request,
     from db.models import FinanceNetSnapshot
     factory = _factory_or_503()
     async with factory() as session:
-        auto = await _auto_buckets(session, ent)
+        auto = await _auto_buckets(
+            session, ent,
+            float((load_settings().get("my_ledger") or {}).get("usd_twd") or 0))
         row = (await session.execute(
             select(FinanceNetSnapshot)
             .where(FinanceNetSnapshot.entity == ent,

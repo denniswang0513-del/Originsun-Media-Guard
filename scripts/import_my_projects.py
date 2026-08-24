@@ -37,21 +37,27 @@ CSV 來源：私帳 Sheet「結案總表」分頁（gid=2098748516）→ export?
 - 🔴 既有母公司客戶的 status **不動**（匯入大量歷史專案會讓分級整批跳動）；
   只有新建客戶按 0=潛在/1=新/2+=舊 設定。
 """
-import argparse
-import asyncio
 import csv
 import io
 import json
 import re
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts._common import resolve_db_url  # noqa: E402
+from scripts._common import (assert_safe_rebuild, cli, col_getter, connect, db_target,  # noqa: E402
+                             money, parse_date, print_dry_run_end, print_target)
 
-import asyncpg  # noqa: E402
+# 🔴 工項十項與費用欄的中文標籤一律從 core 取 —— 那份清單是 Sheet 欄名的正本，
+# UI（ledger_detail 編輯器）與 backfill_my_ledger_detail 都吃它。這支原本自己
+# 抄了一份 DEPT_COLS 與四個稅務欄名，Sheet 改欄名時只有它會靜默漏掉。
+from core.ledger_project import (COST_FIELDS,  # noqa: E402
+                                 DEFAULT_INCOME_ITEMS as DEPT_COLS)
+
+COST_LABEL = dict(COST_FIELDS)
+# 進 notes 稅務摘要那行的費用鍵（順序照 COST_FIELDS，＝ Sheet 的欄序）
+NOTE_COST_KEYS = ("tax_fee", "buy_invoice", "invoice_fee", "personal_tax")
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
@@ -70,39 +76,15 @@ def norm(s: str) -> str:
     return _STRIP.sub("", re.sub(r"\s+", "", s or "")).lower()
 
 
-def money(s: str) -> int:
-    s = (s or "").replace("NT$", "").replace(",", "").strip()
-    s = s.replace("（", "(").replace("）", ")")
-    neg = s.startswith("(") and s.endswith(")")
-    s = s.strip("()").strip()
-    if not s:
-        return 0
-    try:
-        v = float(s)
-    except ValueError:
-        return 0
-    return -round(v) if neg else round(v)
-
-
 def close_month_date(s: str):
+    """結案月（Sheet 只填到月）→ 該月 1 號的 UTC 午夜（日期慣例見 _common.parse_date）。"""
     m = re.match(r"(\d{4})/(\d{1,2})", (s or "").strip())
-    if not m:
-        return None
-    return datetime(int(m.group(1)), int(m.group(2)), 1, tzinfo=timezone.utc)
-
-
-DEPT_COLS = ["前期製作", "動態攝影", "剪輯", "調光", "動態效果",
-             "平面攝影", "諮詢", "教學", "錄混音", "其他"]
+    return parse_date(f"{m[1]}/{m[2]}/1") if m else None
 
 
 def load_projects(csv_path: str):
     rows = list(csv.reader(io.open(csv_path, encoding="utf-8")))
-    hdr = [h.strip() for h in rows[0]]
-    ix = {h: i for i, h in enumerate(hdr)}
-
-    def col(r, name, default=""):
-        i = ix.get(name)
-        return (r[i] if i is not None and len(r) > i else default).strip()
+    col = col_getter(rows[0])
 
     out = []
     for r in rows[1:]:
@@ -128,9 +110,7 @@ def load_projects(csv_path: str):
             "out_paid": money(col(r, "委外已付")),
             "tax_due": money(col(r, "應付稅款")),
             "tax_status": col(r, "稅款狀態"),
-            "tax": money(col(r, "稅金")), "buy_inv": money(col(r, "買發票")),
-            "inv_fee": money(col(r, "發票代辦費")),
-            "personal_tax": money(col(r, "個人稅款")),
+            "costs": {k: money(col(r, COST_LABEL[k])) for k in NOTE_COST_KEYS},
             "depts": {k: v for k, v in depts.items() if v},
         })
     return out
@@ -142,9 +122,7 @@ def build_notes(p: dict) -> str:
     if p["progress"]:
         meta.append(f"進度:{p['progress']}")
     lines.append("｜".join(meta))
-    tax_bits = [(n, v) for n, v in [("稅金", p["tax"]), ("買發票", p["buy_inv"]),
-                                    ("發票代辦費", p["inv_fee"]),
-                                    ("個人稅款", p["personal_tax"])] if v]
+    tax_bits = [(COST_LABEL[k], p["costs"][k]) for k in NOTE_COST_KEYS if p["costs"][k]]
     if tax_bits:
         lines.append("｜".join(f"{n}:{v:,}" for n, v in tax_bits))
     if p["depts"]:
@@ -180,12 +158,10 @@ def match_client(name: str, prod_index: dict, sheet_norms: set):
     return None, "new"
 
 
-async def run(csv_path: str, apply: bool, prod: bool):
-    url = resolve_db_url(prod)
-    dbname = url.rsplit("/", 1)[-1]
-    dsn = url.replace("postgresql+asyncpg://", "postgresql://")
+async def run(csv_path: str, apply: bool, prod: bool, force: bool = False):
+    dbname, dsn = db_target(prod)
     projects = load_projects(csv_path)
-    print(f"目標資料庫: {dbname}   模式: {'寫入 (--apply)' if apply else 'DRY-RUN（不寫入）'}")
+    print_target(dbname, apply)
     n_run = sum(1 for p in projects if p["progress"] == "執行中")
     print(f"解析：{len(projects)} 案（執行中 {n_run}、代碼缺漏 "
           f"{sum(1 for p in projects if not p['code'])}）")
@@ -198,7 +174,7 @@ async def run(csv_path: str, apply: bool, prod: bool):
         print("🔴 結案作業應收與進行中表錨點不符 — 檢查資料")
         sys.exit(1)
 
-    c = await asyncio.wait_for(asyncpg.connect(dsn), 15)
+    c = await connect(dsn)
     try:
         # 客戶索引
         rows = await c.fetch("SELECT id, short_name, full_name FROM clients")
@@ -244,12 +220,20 @@ async def run(csv_path: str, apply: bool, prod: bool):
               f"（錨點：委外 92,600＋稅款 145,896＋結案殘留）")
 
         if not apply:
-            print("\nDRY-RUN 結束 —— 沒有寫入任何東西。確認上面數字無誤後加 --apply。")
+            print_dry_run_end(hint=True)
             return
 
         # ── 冪等清場（只碰 mine）──
         n1 = await c.fetchval("SELECT count(*) FROM crm_projects WHERE entity='mine'")
         n2 = await c.fetchval("SELECT count(*) FROM crm_payment_requests WHERE entity='mine'")
+        await assert_safe_rebuild(c, [
+            ("逐案損益已編輯（ledger_detail）",
+             "SELECT count(*) FROM crm_projects WHERE entity='mine'"
+             " AND ledger_detail IS NOT NULL"),
+            ("非匯入建立的 mine 專案",
+             "SELECT count(*) FROM crm_projects WHERE entity='mine'"
+             " AND (notes IS NULL OR notes NOT LIKE '[私帳匯入]%')"),
+        ], force)
         print(f"\n清場：mine projects={n1} payment_requests={n2} → 重建")
         await c.execute("UPDATE crm_cash_entries SET project_id=NULL WHERE entity='mine'")
         await c.execute("DELETE FROM crm_payment_requests WHERE entity='mine'")
@@ -350,10 +334,4 @@ async def run(csv_path: str, apply: bool, prod: bool):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", required=True, help="結案總表的 CSV（gid=2098748516）")
-    ap.add_argument("--prod", action="store_true", help="對生產庫 mediaguard（預設 dev）")
-    ap.add_argument("--apply", action="store_true", help="真的寫入（預設 dry-run）")
-    a = ap.parse_args()
-    sys.stdout.reconfigure(encoding="utf-8")
-    asyncio.run(run(a.csv, a.apply, a.prod))
+    cli(run, "結案總表的 CSV（gid=2098748516）")

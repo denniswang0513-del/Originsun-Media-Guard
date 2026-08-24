@@ -19,20 +19,15 @@ total 由現存桶加總（Sheet 的總額欄若是 #REF! 就用加總）。
 0050/2330（TWSE 報價）、VTI/VEA/VWO（Yahoo）；盈透證券整戶與 Firstrade
 現金等不可逐檔核實的，以 manual_value 一列代表，owner 之後在 UI 細分。
 """
-import argparse
-import asyncio
 import csv
 import io
-import re
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts._common import resolve_db_url  # noqa: E402
-
-import asyncpg  # noqa: E402
+from scripts._common import (cli, connect, db_target, money,  # noqa: E402
+                             parse_date, print_dry_run_end, print_target)
 
 BUCKET_COLS = ["生活帳戶", "公司資產(現金)", "公司資產(應收帳款)", "源日資本額",
                "預付帳款", "備用金(Past)", "備用金", "財富自由(總額)",
@@ -50,29 +45,10 @@ HOLDINGS_SEED = [
 ]
 
 
-def money(s: str):
-    s = (s or "").replace("NT$", "").replace(",", "").strip()
-    s = s.replace("（", "(").replace("）", ")")
-    if not s or "#REF" in s:
-        return None
-    neg = s.startswith("(") and s.endswith(")")
-    s = s.strip("()").strip()
-    try:
-        v = float(s)
-    except ValueError:
-        return None
-    return -round(v) if neg else round(v)
-
-
-def pdate(s: str):
-    m = re.match(r"(\d{4})/(\d{1,2})/(\d{1,2})", (s or "").strip())
-    if not m:
-        return None
-    try:
-        return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
-                        tzinfo=timezone.utc)
-    except ValueError:
-        return None
+# 這張表的空格與 #REF!（早年公式斷鏈）要跟「真的是 0」分得開 —— 唯一開
+# none_on_bad 的呼叫端，旗標寫在這裡讓下一個人一眼看到差在哪（正本在 _common）。
+def _money(s: str):
+    return money(s, none_on_bad=True)
 
 
 def load_snapshots(csv_path: str):
@@ -89,12 +65,12 @@ def load_snapshots(csv_path: str):
         date_ix = next(i for i, c in enumerate(hdr) if c in ("統計日期", "日期"))
         bucket_ix = {b: i for i, c in enumerate(hdr) for b in BUCKET_COLS if c == b}
         for r in rows[hdr_i + 1:end]:
-            d = pdate(r[date_ix] if len(r) > date_ix else "")
+            d = parse_date(r[date_ix] if len(r) > date_ix else "")
             if not d:
                 continue
             buckets = {}
             for b, i in bucket_ix.items():
-                v = money(r[i] if len(r) > i else "")
+                v = _money(r[i] if len(r) > i else "")
                 if v is not None and v != 0:
                     buckets[b] = v
             if not buckets:
@@ -107,12 +83,10 @@ def load_snapshots(csv_path: str):
     return sorted(dedup.values(), key=lambda x: x["date"])
 
 
-async def run(csv_path: str, apply: bool, prod: bool):
-    url = resolve_db_url(prod)
-    dbname = url.rsplit("/", 1)[-1]
-    dsn = url.replace("postgresql+asyncpg://", "postgresql://")
+async def run(csv_path: str, apply: bool, prod: bool, force: bool = False):
+    dbname, dsn = db_target(prod)
     snaps = load_snapshots(csv_path)
-    print(f"目標資料庫: {dbname}   模式: {'寫入 (--apply)' if apply else 'DRY-RUN（不寫入）'}")
+    print_target(dbname, apply)
     print(f"快照：{len(snaps)} 列，{snaps[0]['date']:%Y-%m-%d} → {snaps[-1]['date']:%Y-%m-%d}")
     print(f"最新一列 total: {snaps[-1]['total']:,}（Sheet 2026/8/24 總額錨點 53,636,960 —— "
           "容許差=＃REF!略過桶）")
@@ -120,10 +94,10 @@ async def run(csv_path: str, apply: bool, prod: bool):
     if not apply:
         for s_ in snaps[-3:]:
             print(f"  {s_['date']:%Y-%m-%d} total={s_['total']:,} buckets={len(s_['buckets'])}")
-        print("\nDRY-RUN 結束 —— 沒有寫入任何東西。")
+        print_dry_run_end()
         return
 
-    c = await asyncio.wait_for(asyncpg.connect(dsn), 15)
+    c = await connect(dsn)
     try:
         n0 = await c.fetchval("SELECT count(*) FROM finance_net_snapshots WHERE entity='mine'")
         print(f"\n清場：mine snapshots={n0} → 重建")
@@ -166,10 +140,4 @@ async def run(csv_path: str, apply: bool, prod: bool):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", required=True, help="淨值快照分頁 CSV（gid=1020655022）")
-    ap.add_argument("--prod", action="store_true")
-    ap.add_argument("--apply", action="store_true")
-    a = ap.parse_args()
-    sys.stdout.reconfigure(encoding="utf-8")
-    asyncio.run(run(a.csv, a.apply, a.prod))
+    cli(run, "淨值快照分頁 CSV（gid=1020655022）")

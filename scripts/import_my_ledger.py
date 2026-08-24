@@ -36,20 +36,16 @@ CSV 來源：私帳 Sheet「總資產」分頁（gid=1067034519）→ export?for
 9. 類別與標籤欄皆空的列（2026-08 實測 244 筆：ATM/跨轉/利息/分期）category 留
    NULL → 進「未歸類」清單，是階段 2 AI 分類層的第一批工作，不硬猜。
 """
-import argparse
-import asyncio
 import csv
 import io
 import re
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts._common import find_header, resolve_db_url  # noqa: E402
-
-import asyncpg  # noqa: E402
+from scripts._common import (assert_safe_rebuild, cli, connect, db_target, find_header,  # noqa: E402
+                             money, parse_date, print_dry_run_end, print_target)
 
 # ── 帳戶（期末目標 = Sheet dashboard 各帳戶「期末現金」）─────────────────
 ACCOUNTS = [
@@ -92,31 +88,14 @@ def _map_for(tag: str):
     return ("transfer", "3200")   # 個人/家用/轉匯/雜項 → 業主往來（不進損益）
 
 
+# 這張表混了外幣欄（US$／裸 $）且有民國年格 —— 兩個旗標開在這裡，
+# 其他四支腳本不開，差異就寫在呼叫端看得見的地方（正本在 _common）。
 def _money(s: str) -> int:
-    s = (s or "").replace("NT$", "").replace(",", "").replace("US$", "").replace("$", "")
-    s = s.replace("（", "(").replace("）", ")").strip()
-    neg = s.startswith("(") and s.endswith(")")
-    s = s.strip("()").strip()
-    if not s:
-        return 0
-    try:
-        v = float(s)
-    except ValueError:
-        return 0
-    return -round(v) if neg else round(v)
+    return money(s, usd=True)
 
 
 def _date(s: str):
-    m = re.match(r"(\d{2,4})/(\d{1,2})/(\d{1,2})$", (s or "").strip())
-    if not m:
-        return None
-    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    if y < 1000:
-        y += 1911            # 民國（0114/12/21 → 2025/12/21）
-    try:
-        return datetime(y, mo, d, tzinfo=timezone.utc)   # UTC 午夜（repo 慣例）
-    except ValueError:
-        return None
+    return parse_date(s, minguo=True)
 
 
 def _cat_key(cat: str, item: str, is_out: bool) -> str:
@@ -175,14 +154,12 @@ def load_rows(csv_path: str):
     return out, skipped
 
 
-async def run(csv_path: str, apply: bool, prod: bool):
-    url = resolve_db_url(prod)
-    dbname = url.rsplit("/", 1)[-1]
-    dsn = url.replace("postgresql+asyncpg://", "postgresql://")
+async def run(csv_path: str, apply: bool, prod: bool, force: bool = False):
+    dbname, dsn = db_target(prod)
     entries, skipped = load_rows(csv_path)
     n_card = sum(1 for e in entries if e["status"] == "card")
     n_uncat = sum(1 for e in entries if not e["category"])
-    print(f"目標資料庫: {dbname}   模式: {'寫入 (--apply)' if apply else 'DRY-RUN（不寫入）'}")
+    print_target(dbname, apply)
     print(f"解析：{len(entries)} 筆（信用卡 {n_card}、未歸類 {n_uncat}），跳過 {len(skipped)}")
     for s in skipped[:10]:
         print("  skip:", s)
@@ -197,13 +174,19 @@ async def run(csv_path: str, apply: bool, prod: bool):
         print(f"\n{'category':24}{'存入':>14}{'支出':>14}{'筆數':>6}")
         for k, (d, x, n) in sorted(agg.items(), key=lambda kv: -(kv[1][0] + kv[1][1])):
             print(f"{k:24}{d:>14,}{x:>14,}{n:>6}")
-        print("\nDRY-RUN 結束 —— 沒有寫入任何東西。確認上面數字無誤後加 --apply。")
+        print_dry_run_end(hint=True)
         return
 
-    c = await asyncio.wait_for(asyncpg.connect(dsn), 15)
+    c = await connect(dsn)
     try:
         n1 = await c.fetchval("SELECT count(*) FROM crm_cash_entries WHERE entity='mine'")
         n2 = await c.fetchval("SELECT count(*) FROM bank_accounts WHERE entity='mine'")
+        await assert_safe_rebuild(c, [
+            ("卡單匯入的收支", "SELECT count(*) FROM crm_cash_entries"
+             " WHERE entity='mine' AND note LIKE '%[卡單匯入]%'"),
+            ("非 Sheet 匯入的 mine 收支", "SELECT count(*) FROM crm_cash_entries"
+             " WHERE entity='mine' AND (note IS NULL OR note NOT LIKE '%[sheet-import]%')"),
+        ], force)
         print(f"清場（冪等，只碰 mine）：entries={n1} accounts={n2} → 重建")
         await c.execute("DELETE FROM crm_cash_entries WHERE entity='mine'")
         await c.execute("DELETE FROM bank_accounts WHERE entity='mine'")
@@ -267,10 +250,4 @@ async def run(csv_path: str, apply: bool, prod: bool):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", required=True, help="總資產分頁的 CSV（gid=1067034519）")
-    ap.add_argument("--prod", action="store_true", help="對生產庫 mediaguard（預設 dev）")
-    ap.add_argument("--apply", action="store_true", help="真的寫入（預設 dry-run）")
-    a = ap.parse_args()
-    sys.stdout.reconfigure(encoding="utf-8")
-    asyncio.run(run(a.csv, a.apply, a.prod))
+    cli(run, "總資產分頁的 CSV（gid=1067034519）")

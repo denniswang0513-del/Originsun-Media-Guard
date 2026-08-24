@@ -197,16 +197,17 @@ async def ai_suggest_categories(payload: CardAiSuggestPayload, request: Request,
     if len(payload.rows) > 300:
         raise HTTPException(status_code=422, detail="一次最多 300 列")
 
-    # 白名單 = 對映表 ∪ 帳上在用（與 cash options 同精神：兩個來源缺一不可）
+    # 白名單 = 對映表 ∪ 帳上在用（與 cash options 同精神：兩個來源缺一不可）。
+    # 對映表那半走 crm._shared.cash_category_texts —— 那支自稱唯一正本，是因為
+    # 這份清單曾經散在四個地方、active 的寫法還不一致，結果自家匯入寫出來的列
+    # 使用者在編輯視窗裡選不到自己的類別。
     from sqlalchemy import distinct, select
 
-    from db.models import CrmCashEntry, FinanceCategoryMap
+    from db.models import CrmCashEntry
+    from routers.crm._shared import cash_category_texts
     factory = _factory_or_503()
     async with factory() as session:
-        mapped = (await session.execute(
-            select(FinanceCategoryMap.category_text)
-            .where(FinanceCategoryMap.source == "cash",
-                   FinanceCategoryMap.active.is_(True)))).scalars().all()
+        mapped = await cash_category_texts(session)
         in_use = (await session.execute(
             select(distinct(CrmCashEntry.category))
             .where(CrmCashEntry.entity == ent,
@@ -226,8 +227,11 @@ async def ai_suggest_categories(payload: CardAiSuggestPayload, request: Request,
     out, err = await _call_claude(prompt)
     if out is None:
         raise HTTPException(status_code=422, detail=f"AI 判讀失敗：{err}")
-    # 容錯抽 JSON（claude 偶帶 fence/前後語）
-    s = out.strip()
+    # 容錯抽 JSON。fence 交給 seo_runner.strip_fence —— 那是 claude 回應的
+    # 後處理正本（同一層、同一個 _call_claude 旁邊）；自己再寫一次的版本會漏掉
+    # ```json 圍欄，只靠大括號掃描碰運氣。
+    from services.website.seo_runner import strip_fence
+    s = strip_fence(out)
     a, b = s.find("{"), s.rfind("}")
     if a < 0 or b <= a:
         raise HTTPException(status_code=422, detail="AI 回覆不含 JSON 物件")

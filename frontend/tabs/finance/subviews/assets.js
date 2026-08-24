@@ -50,6 +50,23 @@ export default async function render(container, ctx = {}) {
     }
 }
 
+/** 精準重載：只有拍快照會動到快照序列，其餘四條路只需要 overview。
+ *
+ *  🔴 原本五條路都呼叫 render()，那會先把容器清成「載入資產資料…」——
+ *  除了白抓一份 41KB 的快照與重畫 116 點的圖，更實際的傷害是**別的持股列
+ *  裡還沒按存的輸入會被一起清掉**（/simplify 2026-08-25）。
+ */
+_fa.reload = async ({ snaps = false } = {}) => {
+    const [ov, sn] = await Promise.all([
+        finFetch('/assets/overview'),
+        snaps ? finFetch('/assets/snapshots') : Promise.resolve(null),
+    ]);
+    if (!_isCurrent()) return;
+    _data = ov;
+    if (sn) _snaps = sn.snapshots || [];
+    _render();
+};
+
 function _card(title, inner) {
     return `<div style="background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:16px;margin-bottom:16px;">
         <h3 style="color:#eee;margin:0 0 10px;font-size:14px;">${title}</h3>${inner}</div>`;
@@ -75,7 +92,8 @@ function _render() {
             <div style="color:#888;font-size:12px;">現在估計（系統即時＋上次快照手填欄）
                 ${last ? `｜上次快照 ${esc(last.date)}：$${fmtNum(last.total)}` : '｜尚無快照'}</div>
             <div style="flex:1;"></div>
-            <button class="crm-btn crm-btn-secondary" onclick="window._finAssets.refreshQuotes(this)">📈 更新報價</button>
+            <button class="crm-btn crm-btn-secondary" onclick="window._finAssets.refreshQuotes(this)"
+                    ${d.quotes_enabled === false ? 'disabled title="報價抓取已停用（settings my_ledger.quotes_enabled）"' : ''}>📈 更新報價</button>
             <button class="crm-btn crm-btn-primary" onclick="window._finAssets.snapOpen()">📸 拍快照</button>
         </div>
         ${_card('淨值成長（' + _snaps.length + ' 個快照）', _chartSvg())}
@@ -166,7 +184,7 @@ _fa.refreshQuotes = async (btn) => {
         finToast(`已更新 ${r.updated.length} 檔`
             + (r.failed.length ? `；抓不到 ${r.failed.join('、')}（沿用舊價）` : '')
             + (r.usd_twd ? `；匯率 ${r.usd_twd}` : ''));
-        render(_c, { isCurrent: _isCurrent });
+        _fa.reload();
     } catch (e) { finToast('報價更新失敗：' + e.message, 'error'); }
     finally { btn.disabled = false; btn.textContent = '📈 更新報價'; }
 };
@@ -186,7 +204,7 @@ _fa.saveHolding = async (id, btn) => {
             }),
         });
         finToast('已儲存');
-        render(_c, { isCurrent: _isCurrent });
+        _fa.reload();
     } catch (e) { finToast('儲存失敗：' + e.message, 'error'); }
 };
 
@@ -194,7 +212,7 @@ _fa.delHolding = async (id, name) => {
     if (!confirm(`刪除持股「${name}」？（不影響歷史快照）`)) return;
     try {
         await finFetch(`/assets/holdings/${id}`, { method: 'DELETE' });
-        render(_c, { isCurrent: _isCurrent });
+        _fa.reload();
     } catch (e) { finToast('刪除失敗：' + e.message, 'error'); }
 };
 
@@ -213,7 +231,7 @@ _fa.addHolding = async (btn) => {
                 quote_symbol: document.getElementById('fa-new-qs').value.trim(),
             }),
         });
-        render(_c, { isCurrent: _isCurrent });
+        _fa.reload();
     } catch (e) { finToast('新增失敗：' + e.message, 'error'); }
     finally { btn.disabled = false; }
 };
@@ -279,7 +297,7 @@ _fa.snapSave = async (btn) => {
         });
         finToast(`快照已存：$${fmtNum(r.total)}`);
         document.getElementById('fin-assets-modal').innerHTML = '';
-        render(_c, { isCurrent: _isCurrent });
+        _fa.reload({ snaps: true });
     } catch (e) { finToast('存快照失敗：' + e.message, 'error'); }
     finally { btn.disabled = false; }
 };

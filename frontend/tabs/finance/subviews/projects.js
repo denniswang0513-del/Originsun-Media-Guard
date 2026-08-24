@@ -70,10 +70,9 @@ function _renderTotals() {
         + cell('未付應付', 'ap_open', '#fca5a5');
 }
 
-function _renderCount() {
+function _renderCount(n) {
     const el = document.getElementById('fpl-count');
     if (!el) return;
-    const n = _visible().length;
     const t = _data.totals || {};
     el.innerHTML = `${fmtNum(n)}${n === _data.count ? '' : ' / ' + fmtNum(_data.count)} 案`
         + (t.unbalanced ? `｜<span style="color:#fbbf24;">${t.unbalanced} 案檢查≠0</span>` : '');
@@ -160,8 +159,9 @@ function _fitBody() {
 function _renderList() {
     const body = document.getElementById('fpl-list-body');
     const keepScroll = body.scrollTop;
+    const rows = _visible();          // 篩一次就好（_renderCount 原本又篩一次）
     body.innerHTML =
-        _visible().map((p) => `
+        rows.map((p) => `
         <div class="crm-row${p.id === _sel ? ' selected' : ''}" data-id="${p.id}"
              style="${_GRID}"
              onclick="window._finProjLedger.open('${p.id}')">
@@ -176,7 +176,7 @@ function _renderList() {
         </div>`).join('')
         || '<div class="crm-empty">沒有符合的專案</div>';
     body.scrollTop = keepScroll;   // 重畫不該把使用者彈回列表頂端
-    _renderCount();
+    _renderCount(rows.length);
 }
 
 // ── 右側詳情（可編輯）──────────────────────────────────────
@@ -380,7 +380,6 @@ function _applySaved(r) {
     _data.projects[i] = next;
     if (_detail) _detail.project = { ..._detail.project, ...next };
     _renderTotals();
-    _renderList();
-    _markSelected();
+    _renderList();          // 樣板本身就會把 selected 標在對的那列
     _renderDetail();
 }
