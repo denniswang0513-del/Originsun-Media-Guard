@@ -73,7 +73,11 @@ def suggest_rows(rows, hist: dict, rules, seen: set) -> list:
     """解析列 → 帶三層建議與重複旗標的預覽列（純函式，測試直接打這裡）。
 
     優先序：手續費繼承前一筆消費 > 規則 > 歷史一致對映。
-    手續費繼承的「前一筆」只認 spend（fee 接 fee 不會鏈到更早的錯誤答案）。
+    手續費繼承的「前一筆」只認 spend（fee 接 fee 不會鏈到更早的錯誤答案）；
+    🔴 且前一筆**沒有建議時手續費也留白** —— prev_cat 對每個 spend 都覆寫
+    （含空值），否則手續費會越過自己的母交易、抄到更早那筆的分類
+    （2026-08-24 dev 冒煙實測：MTMOGRAPH 無建議，其手續費卻抄了上上筆
+    八方雲集的 個人_生活）。
     """
     out, prev_cat = [], ""
     for r in rows:
@@ -86,7 +90,7 @@ def suggest_rows(rows, hist: dict, rules, seen: set) -> list:
         if not cat:
             cat = hist.get(merchant_key(r.note), "")
             source = "history" if cat else source
-        if r.kind == "spend" and cat:
+        if r.kind == "spend":
             prev_cat = cat
         out.append({
             "line_no": r.line_no, "date": r.date, "amount": r.amount,

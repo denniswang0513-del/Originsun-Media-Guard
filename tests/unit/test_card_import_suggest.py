@@ -42,6 +42,18 @@ def test_fee_without_previous_spend_falls_back():
     assert out[0]["category"] == ""
 
 
+def test_fee_after_unsuggested_spend_stays_blank():
+    # 🔴 母交易沒建議 → 手續費不准越級抄更早那筆的分類（dev 冒煙抓到的真 bug）
+    rows = _rows(
+        "2026/07/03 連加＊八方雲集雙城店 75\n"
+        "2026/07/05 沒看過的外幣店 76.83 USD 2,427\n"
+        "2026/07/05 國外交易服務費（簽帳 2,427 ) 36\n")
+    out = suggest_rows(rows, {"八方雲集雙城店": "個人_生活"}, [], set())
+    assert out[0]["category"] == "個人_生活"
+    assert out[1]["category"] == ""
+    assert out[2]["category"] == ""      # 不是 個人_生活
+
+
 def test_unknown_merchant_left_blank_not_guessed():
     rows = _rows("2026/02/22 從沒看過的店 999\n")
     out = suggest_rows(rows, {"別家店": "個人_生活"}, [], set())
