@@ -217,6 +217,14 @@ class CrmProject(Base):
     proposal_folder_name = Column(String(255), nullable=True)
     archive_checklist = Column(JSONB, nullable=True)             # 結案歸檔清單（範本正本在 core/project_archive.py）
     review_kpta = Column(JSONB, nullable=True)                   # 專案回顧 Keep/Problem/Try/Action
+    # 逐案損益的明細欄（兩本帳 §8 / owner 私帳的「結案總表」形式，2026-08-24）。
+    # {outsource, tax_fee, buy_invoice, invoice_fee, personal_tax, misc,
+    #  shareholder, split:{工項: 金額}}。實收與檢查是**算出來的**不落庫：
+    #   實收 = contract_amount − outsource − invoice_fee − personal_tax − misc − shareholder
+    #   檢查 = 實收 − Σsplit（應為 0；Sheet 有 5 案本來就不為 0）
+    # 🔴 invoice_fee 存原值不由 tax_fee+buy_invoice 推導 —— 402 案有 1 案兩者
+    # 不等（IGER DAY 講座側錄），推導會靜默改掉來源資料。
+    ledger_detail = Column(JSONB, nullable=True)
     flow_checks = Column(JSONB, nullable=True)                   # 工作流手動里程碑（範本正本在 core/project_flow.py）
     status = Column(String(32), nullable=False, default="洽詢")
     am_username = Column(String(64), nullable=True)

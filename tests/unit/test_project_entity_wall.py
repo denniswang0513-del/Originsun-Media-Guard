@@ -134,3 +134,26 @@ def test_pin_project_ledger_router_guarded():
     # 單案端點還要驗「這一列屬於哪本帳」（query 參數只驗得了人、驗不了資料）
     assert "這個專案不屬於目前的帳本" in src
     assert "api_finance_projects" in _read("main.py"), "router 沒註冊＝靜默 404"
+
+
+def test_ledger_compute_formula():
+    """實收/檢查算式（Sheet 反推、402 案驗證過）——正本只有後端這一份。"""
+    from routers.api_finance_projects import compute, norm_detail
+    d = norm_detail({"outsource": 12000, "tax_fee": 3905, "buy_invoice": 2655,
+                     "invoice_fee": 6560, "split": {"剪輯": 28000, "調光": 29440,
+                                                    "動態攝影": 6000}})
+    net, check = compute(82000, d)
+    assert net == 63440          # 82,000 − 12,000 − 6,560（文心藝所 Lucas Arruda 實例）
+    assert check == 0            # 工項 63,440 剛好等於實收
+    # 個人稅款那條路（報稅型：典藏藝術家庭 媒體顧問）
+    net2, _ = compute(42000, norm_detail({"personal_tax": 5086}))
+    assert net2 == 36914
+
+
+def test_norm_detail_drops_zero_items_and_junk():
+    """0 值工項＝使用者把格子清空＝刪掉；非數字不進庫。"""
+    from routers.api_finance_projects import norm_detail
+    d = norm_detail({"outsource": 5, "split": {"剪輯": 0, "調光": 100, "壞的": "x"}})
+    assert d["split"] == {"調光": 100}
+    assert d["outsource"] == 5
+    assert d["misc"] == 0        # 缺鍵補 0，形狀固定

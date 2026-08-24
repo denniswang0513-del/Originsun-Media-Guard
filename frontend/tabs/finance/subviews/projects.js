@@ -1,22 +1,26 @@
 /**
- * projects.js — 📁 逐案損益（帳本視角的專案清單，2026-08-24）。
+ * projects.js — 📁 逐案損益（帳本視角的專案表；2026-08-24）。
  *
- * owner「跟我有關的專案我都要看到」。/my-ledger.html 刻意沒有 CRM 專案管理
- * （那是主系統的事：階段/派工/看板），但它缺的正是最在意的維度 —— 逐案的錢。
- * 這個子視圖＝原 Sheet「結案總表」的系統版：一列一案，帶合約／已收／應收／
- * 掛帳支出／未付應付／淨額，點開看逐筆收支與應付。
+ * owner：「我希望是這種形式的，我可以自己設定每個工項的費用」「像 crm 的專案
+ * 管理表那種，打開右側有詳細的表」。所以版面＝CRM 的左列右詳情（沿用
+ * crm-body / crm-list-panel / crm-detail-panel，my-ledger.html 已載 crm.css），
+ * 右側詳情是**可編輯**的逐案損益表：營收、費用七欄、工項拆分十項。
  *
- * 資料全部來自後端 /finance/project-ledger（口徑與注意事項見該檔 docstring：
- * 淨額**不等於** Sheet 的「實收」—— 稅金/買發票/代辦費在匯入時只留純文字，
- * 算不出來就不假裝算得出，明細把原始備註原樣附上供對照）。
+ * 內容＝原 Sheet「結案總表」的系統版。實收與檢查**不在前端算** ——
+ * 算式正本在後端 api_finance_projects.compute()，兩份算式必然漂移。
+ * 存檔後端回算好的值回來，這裡只顯示。
  */
 import { finFetch, esc, fmtNum, finToast } from '../fin-utils.js';
+import { setupResizeHandle } from '../../crm/crm-utils.js';
 
 let _c = null;
 let _isCurrent = () => true;
 let _data = null;
+let _sel = null;        // 目前選取的專案 id
+let _detail = null;     // 右側載入的單案資料
 let _q = '';
 let _unpaidOnly = false;
+let _dirty = false;
 
 export default async function render(container, ctx = {}) {
     _c = container;
@@ -33,59 +37,47 @@ async function _load() {
         const d = await finFetch(`/project-ledger${p.toString() ? '?' + p : ''}`);
         if (!_isCurrent()) return;
         _data = d;
-        _render();
+        _renderShell();
     } catch (e) {
         _c.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">專案載入失敗：${esc(e.message)}</div>`;
     }
 }
 
-function _render() {
+function _renderShell() {
     const t = _data.totals || {};
-    const rows = (_data.projects || []).map((p) => `
-        <tr style="cursor:pointer;" onclick="window._finProjLedger.open('${p.id}')">
-            <td style="white-space:nowrap;color:#888;">${esc(p.close_month || '—')}</td>
-            <td>${esc(p.client)}</td>
-            <td>${esc(p.name)}<div style="color:#666;font-size:10px;">${esc(p.type)}${p.status ? '｜' + esc(p.status) : ''}</div></td>
-            <td style="text-align:right;">${fmtNum(p.contract)}</td>
-            <td style="text-align:right;color:#86efac;">${fmtNum(p.received)}</td>
-            <td style="text-align:right;color:${p.receivable ? '#fbbf24' : '#666'};">${p.receivable ? fmtNum(p.receivable) : '—'}</td>
-            <td style="text-align:right;color:#fca5a5;">${p.spent ? fmtNum(p.spent) : '—'}</td>
-            <td style="text-align:right;color:${p.ap_open ? '#fca5a5' : '#666'};">${p.ap_open ? fmtNum(p.ap_open) : '—'}</td>
-            <td style="text-align:right;color:#eee;">${fmtNum(p.net)}</td>
-        </tr>`).join('');
     _c.innerHTML = `
-        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
-            <input id="fpl-q" class="crm-input" placeholder="搜尋專案 / 客戶" style="width:220px;" value="${esc(_q)}">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+            <input id="fpl-q" class="crm-input" placeholder="搜尋專案 / 客戶" style="width:200px;" value="${esc(_q)}">
             <label style="font-size:12px;color:#ccc;display:flex;align-items:center;gap:5px;">
-                <input type="checkbox" id="fpl-unpaid" ${_unpaidOnly ? 'checked' : ''}> 只看未收清
-            </label>
+                <input type="checkbox" id="fpl-unpaid" ${_unpaidOnly ? 'checked' : ''}> 只看未收清</label>
             <div style="flex:1;"></div>
-            <span style="font-size:12px;color:#888;">${fmtNum(_data.count)} 案</span>
+            <span style="font-size:12px;color:#888;">${fmtNum(_data.count)} 案${
+                t.unbalanced ? `｜<span style="color:#fbbf24;">${t.unbalanced} 案檢查≠0</span>` : ''}</span>
         </div>
-        <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:#ccc;margin-bottom:10px;
-                    background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:12px 16px;">
-            <span>營收(含稅) <b style="color:#eee;">$${fmtNum(t.contract)}</b></span>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#ccc;margin-bottom:10px;
+                    background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:10px 14px;">
+            <span>營收 <b style="color:#eee;">$${fmtNum(t.contract)}</b></span>
+            <span>委外 <b style="color:#fca5a5;">$${fmtNum(t.outsource)}</b></span>
+            <span>代辦費 <b style="color:#fca5a5;">$${fmtNum(t.invoice_fee)}</b></span>
+            <span>實收 <b style="color:#eee;">$${fmtNum(t.net)}</b></span>
             <span>已收 <b style="color:#86efac;">$${fmtNum(t.received)}</b></span>
             <span>應收 <b style="color:#fbbf24;">$${fmtNum(t.receivable)}</b></span>
-            <span>掛帳支出 <b style="color:#fca5a5;">$${fmtNum(t.spent)}</b></span>
             <span>未付應付 <b style="color:#fca5a5;">$${fmtNum(t.ap_open)}</b></span>
-            <span>淨額 <b style="color:#eee;">$${fmtNum(t.net)}</b></span>
         </div>
-        <div style="overflow-x:auto;border:1px solid #2e2e2e;border-radius:8px;">
-        <table class="crm-table" style="width:100%;font-size:12px;">
-            <thead><tr>
-                <th>結案月</th><th>客戶</th><th>專案</th>
-                <th style="text-align:right;">營收</th><th style="text-align:right;">已收</th>
-                <th style="text-align:right;">應收</th><th style="text-align:right;">掛帳支出</th>
-                <th style="text-align:right;">未付應付</th><th style="text-align:right;">淨額</th>
-            </tr></thead>
-            <tbody>${rows || '<tr><td colspan="9" style="color:#888;padding:24px;text-align:center;">沒有符合的專案</td></tr>'}</tbody>
-        </table></div>
-        <div style="color:#666;font-size:11px;margin-top:8px;">
-            淨額 = 營收 − 掛帳支出 − 未付應付。<b>不等於</b>原表的「實收」——
-            稅金／買發票／發票代辦費匯入時只保留為文字，點開單案可看原始備註對照。
-        </div>
-        <div id="fpl-modal"></div>`;
+        <div class="crm-body" style="min-height:420px;">
+            <div class="crm-list-panel" id="fpl-list-panel">
+                <div class="crm-list-header" style="display:grid;grid-template-columns:1fr 92px 92px 76px;align-items:center;gap:8px;">
+                    <span>客戶 / 專案</span>
+                    <span style="text-align:right;">營收</span>
+                    <span style="text-align:right;">實收</span>
+                    <span style="text-align:right;">檢查</span>
+                </div>
+                <div id="fpl-list-body"></div>
+            </div>
+            <div class="crm-resize-handle" id="fpl-resize"></div>
+            <div class="crm-detail-panel" id="fpl-detail" style="display:none;width:58%;"></div>
+        </div>`;
+    _renderList();
     const qEl = document.getElementById('fpl-q');
     let timer;
     qEl.addEventListener('input', (e) => {
@@ -97,56 +89,191 @@ function _render() {
         _unpaidOnly = e.target.checked;
         _load();
     });
+    setupResizeHandle('fpl-resize', 'fpl-list-panel');
+    if (_sel) _fp.open(_sel);
 }
 
+function _renderList() {
+    document.getElementById('fpl-list-body').innerHTML =
+        (_data.projects || []).map((p) => `
+        <div class="crm-row${p.id === _sel ? ' selected' : ''}"
+             style="display:grid;grid-template-columns:1fr 92px 92px 76px;align-items:center;gap:8px;"
+             onclick="window._finProjLedger.open('${p.id}')">
+            <span style="overflow:hidden;min-width:0;" title="${esc(p.client)} / ${esc(p.name)}">
+                <span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e0e0e0;">${esc(p.name)}</span>
+                <span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6b7280;font-size:10px;">${esc(p.client)}${p.close_month ? '｜' + esc(p.close_month) : ''}</span>
+            </span>
+            <span style="text-align:right;">${fmtNum(p.contract)}</span>
+            <span style="text-align:right;color:#eee;">${fmtNum(p.net)}</span>
+            <span style="text-align:right;color:${p.check ? '#fbbf24' : '#4b5563'};">${p.check ? fmtNum(p.check) : '0'}</span>
+        </div>`).join('')
+        || '<div class="crm-empty">沒有符合的專案</div>';
+}
+
+// ── 右側詳情（可編輯）──────────────────────────────────────
 const _fp = (window._finProjLedger = window._finProjLedger || {});
 
 _fp.open = async (id) => {
-    const host = document.getElementById('fpl-modal');
-    host.innerHTML = `<div style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;
-        display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this)this.remove()">
-        <div style="background:#202020;border:1px solid #333;border-radius:8px;padding:20px;
-                    width:820px;max-height:86vh;overflow:auto;color:#888;">載入中…</div></div>`;
+    if (_dirty && id !== _sel
+        && !confirm('這一案有未儲存的修改，要放棄嗎？')) return;
+    _sel = id;
+    _dirty = false;
+    _renderList();
+    const panel = document.getElementById('fpl-detail');
+    panel.style.display = '';
+    panel.innerHTML = '<div style="color:#888;padding:30px;text-align:center;">載入中…</div>';
     try {
-        const d = await finFetch(`/project-ledger/${id}`);
-        const p = d.project;
-        const entries = (d.entries || []).map((e) => `
-            <tr><td style="white-space:nowrap;color:#888;">${esc(e.date)}</td>
-                <td>${esc(e.summary)}<div style="color:#666;font-size:10px;">${esc(e.category)}</div></td>
-                <td style="text-align:right;color:#86efac;">${e.deposit ? fmtNum(e.deposit) : ''}</td>
-                <td style="text-align:right;color:#fca5a5;">${e.expense ? fmtNum(e.expense) : ''}</td></tr>`).join('');
-        const pays = (d.payments || []).map((x) => `
-            <tr><td>${esc(x.summary)}<div style="color:#666;font-size:10px;">${esc(x.category)}${x.payee ? '｜' + esc(x.payee) : ''}</div></td>
-                <td style="text-align:right;">${fmtNum(x.amount)}</td>
-                <td style="white-space:nowrap;color:${x.payment_status === '已付款' ? '#86efac' : '#fbbf24'};">${esc(x.payment_status)}${x.payment_date ? ' ' + esc(x.payment_date) : ''}</td></tr>`).join('');
-        host.querySelector('div > div').outerHTML = `
-            <div style="background:#202020;border:1px solid #333;border-radius:8px;padding:20px;width:820px;max-height:86vh;overflow:auto;">
-                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;">
-                    <h3 style="color:#eee;margin:0;font-size:15px;">${esc(p.client)}／${esc(p.name)}</h3>
-                    <button class="crm-btn crm-btn-secondary crm-btn-sm"
-                            onclick="document.getElementById('fpl-modal').innerHTML=''">關閉</button>
-                </div>
-                <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#ccc;margin:10px 0 14px;">
-                    <span>${esc(p.close_month || '—')}</span><span>${esc(p.status)}</span>
-                    <span>營收 <b style="color:#eee;">$${fmtNum(p.contract)}</b></span>
-                    <span>已收 <b style="color:#86efac;">$${fmtNum(p.received)}</b></span>
-                    <span>應收 <b style="color:#fbbf24;">$${fmtNum(p.receivable)}</b></span>
-                    <span>${esc(p.payment_status)}</span>
-                </div>
-                <h4 style="color:#ddd;font-size:13px;margin:12px 0 6px;">掛在本案的收支（${(d.entries || []).length}）</h4>
-                <table class="crm-table" style="width:100%;font-size:12px;">
-                    <thead><tr><th>日期</th><th>摘要</th><th style="text-align:right;">存入</th><th style="text-align:right;">支出</th></tr></thead>
-                    <tbody>${entries || '<tr><td colspan="4" style="color:#666;padding:12px;">（無）</td></tr>'}</tbody></table>
-                <h4 style="color:#ddd;font-size:13px;margin:16px 0 6px;">應付／請款單（${(d.payments || []).length}）</h4>
-                <table class="crm-table" style="width:100%;font-size:12px;">
-                    <thead><tr><th>項目</th><th style="text-align:right;">金額</th><th>狀態</th></tr></thead>
-                    <tbody>${pays || '<tr><td colspan="3" style="color:#666;padding:12px;">（無）</td></tr>'}</tbody></table>
-                <h4 style="color:#ddd;font-size:13px;margin:16px 0 6px;">原始備註（匯入保留：案碼／案源／税別／稅務欄／工種拆分）</h4>
-                <pre style="white-space:pre-wrap;color:#aaa;font-size:11px;background:#1a1a1a;
-                            border:1px solid #2a2a2a;border-radius:6px;padding:10px;margin:0;">${esc(p.notes || '（無）')}</pre>
-            </div>`;
+        _detail = await finFetch(`/project-ledger/${id}`);
+        _renderDetail();
     } catch (e) {
-        host.innerHTML = '';
-        finToast('載入單案明細失敗：' + e.message, 'error');
+        panel.innerHTML = `<div style="color:#f87171;padding:30px;">載入失敗：${esc(e.message)}</div>`;
+    }
+};
+
+function _renderDetail() {
+    const d = _detail;
+    const p = d.project;
+    const det = p.detail || {};
+    const money = (id, val, extra = '') => `
+        <input type="number" class="crm-input fpl-num" id="${id}" value="${val || ''}"
+               placeholder="0" style="width:100%;text-align:right;${extra}">`;
+    const costRows = (d.cost_fields || []).map((f) => `
+        <tr><td style="color:#bbb;">${esc(f.label)}</td>
+            <td style="width:130px;">${money('fpl-c-' + f.key, det[f.key])}</td></tr>`).join('');
+    const splitRows = (d.income_items || []).map((it) => `
+        <tr><td style="color:#bbb;">${esc(it)}</td>
+            <td style="width:130px;">${money('fpl-s-' + encodeURIComponent(it), (det.split || {})[it])}</td></tr>`).join('');
+    // 使用者自己加過、但不在預設清單裡的工項也要出現（否則存檔會靜默丟掉）
+    const extra = Object.keys(det.split || {}).filter((k) => !(d.income_items || []).includes(k));
+    const extraRows = extra.map((it) => `
+        <tr><td style="color:#c4b5fd;">${esc(it)} <span style="font-size:10px;color:#666;">(自訂)</span></td>
+            <td>${money('fpl-s-' + encodeURIComponent(it), det.split[it])}</td></tr>`).join('');
+
+    document.getElementById('fpl-detail').innerHTML = `
+        <div class="crm-detail-bar">
+            <div class="crm-detail-bar-title">${esc(p.client)} / ${esc(p.name)}</div>
+            <div class="crm-detail-bar-actions">
+                <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finProjLedger.save(this)">儲存</button>
+                <button class="crm-detail-close" onclick="window._finProjLedger.close()" title="關閉">✕</button>
+            </div>
+        </div>
+        <div class="crm-detail-content" style="padding:14px 16px;">
+            <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#888;margin-bottom:12px;">
+                <span>${esc(p.close_month || '未結案')}</span><span>${esc(p.status)}</span>
+                <span>${esc(p.type)}</span><span>${esc(p.payment_status)}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div>
+                    <div style="color:#ddd;font-size:12px;font-weight:600;margin-bottom:6px;">營收與費用</div>
+                    <table class="crm-table" style="width:100%;font-size:12px;">
+                        <tr><td style="color:#bbb;">營收(含稅)</td><td style="width:130px;">${money('fpl-contract', p.contract)}</td></tr>
+                        ${costRows}
+                    </table>
+                    <table class="crm-table" style="width:100%;font-size:12px;margin-top:8px;">
+                        <tr><td style="color:#ddd;font-weight:600;">實收</td>
+                            <td style="text-align:right;font-weight:600;color:#eee;" id="fpl-net">$${fmtNum(p.net)}</td></tr>
+                        <tr><td style="color:#ddd;font-weight:600;">檢查（實收−Σ工項）</td>
+                            <td style="text-align:right;font-weight:600;color:${p.check ? '#fbbf24' : '#86efac'};" id="fpl-check">${fmtNum(p.check)}</td></tr>
+                        <tr><td style="color:#888;">已收 / 應收</td>
+                            <td style="text-align:right;color:#888;">${fmtNum(p.received)} / ${fmtNum(p.receivable)}</td></tr>
+                    </table>
+                    <div style="color:#666;font-size:11px;margin-top:6px;">
+                        實收 = 營收 − 委外 − 代辦費 − 個人稅款 − 雜支 − 股東往來（後端算）。
+                        檢查 0 表示工項拆分剛好等於實收。</div>
+                </div>
+                <div>
+                    <div style="color:#ddd;font-size:12px;font-weight:600;margin-bottom:6px;">工項拆分</div>
+                    <table class="crm-table" style="width:100%;font-size:12px;">
+                        ${splitRows}${extraRows}
+                        <tr><td style="color:#ddd;font-weight:600;">合計</td>
+                            <td style="text-align:right;font-weight:600;color:#eee;" id="fpl-splitsum">$${fmtNum(Object.values(det.split || {}).reduce((a, b) => a + b, 0))}</td></tr>
+                    </table>
+                    <div style="display:flex;gap:6px;margin-top:8px;">
+                        <input class="crm-input" id="fpl-newitem" placeholder="自訂工項名稱" style="flex:1;">
+                        <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finProjLedger.addItem()">＋</button>
+                    </div>
+                </div>
+            </div>
+            <div style="color:#ddd;font-size:12px;font-weight:600;margin:16px 0 6px;">掛在本案的收支（${(d.entries || []).length}）</div>
+            <table class="crm-table" style="width:100%;font-size:12px;">
+                <thead><tr><th>日期</th><th>摘要</th><th style="text-align:right;">存入</th><th style="text-align:right;">支出</th></tr></thead>
+                <tbody>${(d.entries || []).map((e) => `
+                    <tr><td style="white-space:nowrap;color:#888;">${esc(e.date)}</td>
+                        <td>${esc(e.summary)}</td>
+                        <td style="text-align:right;color:#86efac;">${e.deposit ? fmtNum(e.deposit) : ''}</td>
+                        <td style="text-align:right;color:#fca5a5;">${e.expense ? fmtNum(e.expense) : ''}</td></tr>`).join('')
+                    || '<tr><td colspan="4" style="color:#666;padding:10px;">（無）</td></tr>'}</tbody></table>
+            <div style="color:#ddd;font-size:12px;font-weight:600;margin:16px 0 6px;">應付／請款單（${(d.payments || []).length}）</div>
+            <table class="crm-table" style="width:100%;font-size:12px;">
+                <tbody>${(d.payments || []).map((x) => `
+                    <tr><td>${esc(x.summary)}<div style="color:#666;font-size:10px;">${esc(x.category)}${x.payee ? '｜' + esc(x.payee) : ''}</div></td>
+                        <td style="text-align:right;">${fmtNum(x.amount)}</td>
+                        <td style="white-space:nowrap;color:${x.payment_status === '已付款' ? '#86efac' : '#fbbf24'};">${esc(x.payment_status)}</td></tr>`).join('')
+                    || '<tr><td colspan="3" style="color:#666;padding:10px;">（無）</td></tr>'}</tbody></table>
+            <details style="margin-top:14px;">
+                <summary style="color:#888;font-size:12px;cursor:pointer;">匯入保留的原始備註（案碼／案源／税別／工項）</summary>
+                <pre style="white-space:pre-wrap;color:#aaa;font-size:11px;background:#1a1a1a;
+                            border:1px solid #2a2a2a;border-radius:6px;padding:10px;margin:6px 0 0;">${esc(p.notes || '（無）')}</pre>
+            </details>
+        </div>`;
+    document.querySelectorAll('#fpl-detail .fpl-num').forEach((el) => {
+        el.addEventListener('input', () => { _dirty = true; _liveSum(); });
+    });
+}
+
+/** 工項合計即時更新（實收/檢查等存檔後由後端回算 —— 前端不算第二份）。 */
+function _liveSum() {
+    let sum = 0;
+    document.querySelectorAll('#fpl-detail [id^="fpl-s-"]').forEach((el) => {
+        sum += Number(el.value) || 0;
+    });
+    const el = document.getElementById('fpl-splitsum');
+    if (el) el.textContent = '$' + fmtNum(sum);
+}
+
+_fp.addItem = () => {
+    const name = (document.getElementById('fpl-newitem').value || '').trim();
+    if (!name) return finToast('請輸入工項名稱');
+    if (!_detail.project.detail.split) _detail.project.detail.split = {};
+    if (_detail.project.detail.split[name] !== undefined) return finToast('這個工項已經有了');
+    _detail.project.detail.split[name] = 0;
+    _renderDetail();
+    _dirty = true;
+};
+
+_fp.close = () => {
+    if (_dirty && !confirm('有未儲存的修改，要放棄嗎？')) return;
+    _sel = null;
+    _dirty = false;
+    document.getElementById('fpl-detail').style.display = 'none';
+    _renderList();
+};
+
+_fp.save = async (btn) => {
+    const body = { split: {} };
+    (_detail.cost_fields || []).forEach((f) => {
+        const el = document.getElementById('fpl-c-' + f.key);
+        if (el) body[f.key] = Number(el.value) || 0;
+    });
+    document.querySelectorAll('#fpl-detail [id^="fpl-s-"]').forEach((el) => {
+        const name = decodeURIComponent(el.id.slice('fpl-s-'.length));
+        body.split[name] = Number(el.value) || 0;
+    });
+    const cEl = document.getElementById('fpl-contract');
+    if (cEl) body.contract_amount = Number(cEl.value) || 0;
+    btn.disabled = true;
+    btn.textContent = '儲存中…';
+    try {
+        const r = await finFetch(`/project-ledger/${_sel}`, {
+            method: 'PUT', body: JSON.stringify(body),
+        });
+        _dirty = false;
+        finToast(r.check ? `已儲存 —— 檢查 ${fmtNum(r.check)}（工項與實收對不上）` : '已儲存');
+        await _load();          // 清單的實收/檢查/合計跟著更新
+    } catch (e) {
+        finToast('儲存失敗：' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '儲存';
     }
 };

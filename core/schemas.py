@@ -1374,6 +1374,24 @@ class HoldingPayload(BaseModel):
     entity: Optional[str] = None      # 由 query/守衛決定，payload 值不採用
 
 
+class LedgerDetailPayload(BaseModel):
+    """逐案損益的可編輯欄（api_finance_projects）。
+
+    費用欄用 Optional：只送有改的欄，None＝維持原值（整包 model_dump 寫回
+    會把沒送的欄洗成 0 —— 這個 repo 咬過那個坑）。split 送就是整份取代
+    （工項是一組值，逐項 patch 沒有語意）。
+    """
+    outsource: Optional[int] = None
+    tax_fee: Optional[int] = None
+    buy_invoice: Optional[int] = None
+    invoice_fee: Optional[int] = None
+    personal_tax: Optional[int] = None
+    misc: Optional[int] = None
+    shareholder: Optional[int] = None
+    split: Optional[dict] = None
+    contract_amount: Optional[int] = None    # 營收(含稅)，直接落 crm_projects
+
+
 class NetSnapshotPayload(BaseModel):
     """淨值快照。total 由後端加總（前端算的不收）。"""
     snap_date: str = ""
