@@ -24,7 +24,8 @@
   core/finance_logic.py 純函式不知 entity 存在。
 - 錢流六源（invoices/payments/cash_entries/adjustments/bank_accounts/loans）
   以 entity WHERE 過濾；loan_payments 經 loans 推導；科目表/科目對映兩本共用
-  （plan §1.2）。CRM 營運域（equipment/專案毛利/預支核銷）屬母公司 →
+  （plan §1.2）。**equipment 2026-08-24 起帶 entity（§8 階段 4）—— 兩本帳各餵
+  各的折舊/淨值**；CRM 營運域（專案毛利/預支核銷）仍屬母公司 →
   entity!='parent'（我的帳）時不餵、對應回傳鍵給空值（形狀不變）。
 """
 from __future__ import annotations
@@ -123,11 +124,11 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
                          "claim", "category", "summary", "invoice_id",
                          "advance_payment_id", "payment_request_id",
                          "bank_account_id")
-    # 器材是母公司域（無 entity 欄）→ 我的帳不餵折舊（plan §1.2）
-    equipment = (_dump(await _all(Equipment),
-                       "id", "name", "purchase_cost", "purchase_date",
-                       "depreciation_months", "retired_date", "status")
-                 if entity == "parent" else [])
+    # 器材 2026-08-24 起帶 entity（§8 階段 4）：兩本帳各餵各的折舊/淨值。
+    # （plan §1.2 的「我的帳不餵器材」自此作廢 —— owner 私帳有 123 項器材。）
+    equipment = _dump(await _all(Equipment, where=Equipment.entity == entity),
+                      "id", "name", "purchase_cost", "purchase_date",
+                      "depreciation_months", "retired_date", "status")
     adjustments = _dump(await _all(FinanceAdjustment,
                                    where=FinanceAdjustment.entity == entity),
                         "id", "adj_date", "amount", "adj_type", "description",

@@ -1047,6 +1047,8 @@ async def _on_startup():
                         # （parent=母公司（預設）/mine=我的帳，docs/LEDGER_ENTITY_PLAN.md §1.1）
                         # 兩本帳 §8：專案的錢流歸屬（2026-08-24 解凍，專案/客戶共用、錢分帳）
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
+                        # 兩本帳 §8 延伸：器材折舊歸屬（owner 私帳 123 項器材，階段 4）
+                        "ALTER TABLE equipment ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
                         "ALTER TABLE crm_invoices ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
                         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",

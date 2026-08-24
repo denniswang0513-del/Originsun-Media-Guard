@@ -1354,6 +1354,9 @@ class Equipment(Base):
     __tablename__ = "equipment"
 
     id = Column(String(32), primary_key=True)                    # uuid4 hex
+    # 兩本帳 §8 延伸（2026-08-24）：器材的折舊/淨值歸哪本帳。器材清單本身共用
+    # 可見（owner 拍板「只有錢區隔」）；報表引擎按 entity 各餵各的折舊。
+    entity = Column(String(16), nullable=False, server_default="parent")
     name = Column(String(128), nullable=False)
     category = Column(String(32), nullable=True)                 # 機身/鏡頭/燈光/收音/週邊/其他
     serial = Column(String(64), nullable=True)                   # 序號
