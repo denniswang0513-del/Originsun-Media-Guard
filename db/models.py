@@ -201,6 +201,12 @@ class CrmProject(Base):
     __tablename__ = "crm_projects"
 
     id = Column(String(32), primary_key=True)
+    # 兩本帳 §8（2026-08-24 owner 拍板「專案與客戶全面共用、只有錢分帳」）：
+    # entity 決定這個專案的**錢流歸屬**（'parent'=母公司／'mine'=owner 私帳），
+    # 專案本身（名稱/階段/看板/官網上架）對所有 crm_projects 使用者可見。
+    # 錢的牆：金額欄位靠 core/money 的 mine-aware 抹除、money 端點靠
+    # money_dep 的 mine-scope 檢查、統計聚合排除 mine —— 見 core/ledger。
+    entity = Column(String(16), nullable=False, server_default="parent")
     name = Column(String(255), nullable=False)
     # soft FK → clients.id。提案=專案合體（2026-08-06）後可空 —— 前期草稿提案
     # 常常還沒定客戶，卻已經是管線「提案」階段的專案。手建專案仍要求選客戶

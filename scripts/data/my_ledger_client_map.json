@@ -1,0 +1,398 @@
+{
+ "文心藝術基金會": {
+  "client_id": "2495854c4afb486a92f2e246c42975b8",
+  "how": "exact"
+ },
+ "IGER": {
+  "client_id": "f9cb4d782c5e4134a4e17f5aa52b4177",
+  "how": "created"
+ },
+ "中強光電文化藝術基金會": {
+  "client_id": "493de957237043319520d149d83cd347",
+  "how": "norm"
+ },
+ "典藏藝術家庭": {
+  "client_id": "4c2375bd84714526835708f9cd42204d",
+  "how": "norm"
+ },
+ "工商時報": {
+  "client_id": "eaaaca1217c941e9a11f24ed5ce74e6b",
+  "how": "created"
+ },
+ "景川視覺創意": {
+  "client_id": "900c44cf2a3c425494eacaebd33153d7",
+  "how": "created"
+ },
+ "國稅局": {
+  "client_id": "161f75350ef14b32bfddbadd7fe9d4ea",
+  "how": "created"
+ },
+ "台灣永續價值顧問": {
+  "client_id": "a027d3833c414540bcb499dc3fba31d9",
+  "how": "prefix(台灣永續價值)"
+ },
+ "龍應台文化基金會": {
+  "client_id": "58df56d64ba04775ac7c8297e063b899",
+  "how": "norm"
+ },
+ "台新藝術基金會": {
+  "client_id": "238969408e6d4ec4819db193463f957a",
+  "how": "created"
+ },
+ "潤泰醫療集團": {
+  "client_id": "a483c8c9ab4f4754855cf97b966f1332",
+  "how": "created"
+ },
+ "雲清藝術": {
+  "client_id": "bfc628a33d3a49a5b966fff4c5231129",
+  "how": "created"
+ },
+ "太赫茲": {
+  "client_id": "cbc3c7bdc7ca471ab3dc7f1e59a01a46",
+  "how": "created"
+ },
+ "域創": {
+  "client_id": "2bee1c19dea84c9c8ffa879f04c6f036",
+  "how": "norm"
+ },
+ "台北國際藝術村": {
+  "client_id": "a5919dbbfa6b43f08e595dc57fdb4715",
+  "how": "created"
+ },
+ "三星營造": {
+  "client_id": "e0fd103b9bb74f82ba44d56a52666207",
+  "how": "created"
+ },
+ "俠醫會": {
+  "client_id": "aef9aeff86a142e78373a7bfdc1fac22",
+  "how": "norm"
+ },
+ "TVBS": {
+  "client_id": "05dc6748f6b04865842d84fb18476402",
+  "how": "created"
+ },
+ "桃園市工業會": {
+  "client_id": "649f28843b73431baa56de9c981fd0d1",
+  "how": "created"
+ },
+ "同心圓": {
+  "client_id": "c64e99f493e1433eac7af464f2172b8d",
+  "how": "norm"
+ },
+ "台北當代藝術館": {
+  "client_id": "f234bd11b9d74376b54b88536f51fba5",
+  "how": "created"
+ },
+ "寬微廣告": {
+  "client_id": "ee83cb3e7a274067b784b7990f2f084c",
+  "how": "norm"
+ },
+ "澄質行銷": {
+  "client_id": "8a0fcc25e8a145ec96418cb9719702b2",
+  "how": "created"
+ },
+ "絕對映像": {
+  "client_id": "e6a6b66291f64fc59e9efbbf1e9d37bc",
+  "how": "norm"
+ },
+ "睦晨數位創意": {
+  "client_id": "5e4d9f83b43040a7a3bfac7c65c07c6a",
+  "how": "norm"
+ },
+ "工研院": {
+  "client_id": "c279851004334c6fafd8dae213d85a5b",
+  "how": "created"
+ },
+ "天啓行銷": {
+  "client_id": "7919c540a871461583cdac563af35471",
+  "how": "norm"
+ },
+ "雙山": {
+  "client_id": "fb2ac79b277945beadab01a47d1acf99",
+  "how": "norm"
+ },
+ "林旻潔": {
+  "client_id": "67567ff7fb47493a9b586d37de67015e",
+  "how": "created"
+ },
+ "管科會": {
+  "client_id": "87bdafac77324b129a9187991b043866",
+  "how": "created"
+ },
+ "華南銀行": {
+  "client_id": "b172fddcf5d94aa3a0a94aa569df41c0",
+  "how": "created"
+ },
+ "格局數位": {
+  "client_id": "2cffa774c38249a3829cbfa1f3db52f7",
+  "how": "norm"
+ },
+ "簡訊設計": {
+  "client_id": "db106f99c54e40cc8058422ee89a0be0",
+  "how": "created"
+ },
+ "歌喉饗宴": {
+  "client_id": "a3ac43b007dc4c059dccc0bbad465600",
+  "how": "created"
+ },
+ "新北市立美術館": {
+  "client_id": "0aae38cf56b5478282d4aab644d61d41",
+  "how": "created"
+ },
+ "台南市政府": {
+  "client_id": "da7f8dfabd784e6b875f5b64095124c0",
+  "how": "created"
+ },
+ "趨勢基金會": {
+  "client_id": "36382340eec34a018c7e4f1a914514f5",
+  "how": "created"
+ },
+ "產科會": {
+  "client_id": "1823f36f24d84df79f040ec0a074eb61",
+  "how": "created"
+ },
+ "國家兩廳院": {
+  "client_id": "122ad89056294df686baec7dc9d81c29",
+  "how": "created"
+ },
+ "台南一中": {
+  "client_id": "d1f1572224154051a93e26d53174d78d",
+  "how": "exact"
+ },
+ "動工設計": {
+  "client_id": "0a59059fa7e4441ea47a4e164fe2c0db",
+  "how": "norm"
+ },
+ "台聚": {
+  "client_id": "4b97ba0d25894e3c951274f13f8a9294",
+  "how": "created"
+ },
+ "王道銀行教育基金會": {
+  "client_id": "701075fca76444a4b0c12b405429979b",
+  "how": "norm"
+ },
+ "金龍國小": {
+  "client_id": "566ac22970b545f18e70f621332e6af7",
+  "how": "created"
+ },
+ "永豐金證券": {
+  "client_id": "7ef26681758145a391ec5144f55f3eac",
+  "how": "created"
+ },
+ "耿畫廊": {
+  "client_id": "ad29c4e2d3fb4e85bad2d63a57206297",
+  "how": "created"
+ },
+ "政大AI學程": {
+  "client_id": "d4d8b7a8d3204ad7b99fa2f8e49d8367",
+  "how": "created"
+ },
+ "融意水電": {
+  "client_id": "3933698bfbcb42648804eff209a98e76",
+  "how": "created"
+ },
+ "書田診所": {
+  "client_id": "ce65d82d0c884fa596f9a7e12cf6ef3a",
+  "how": "created"
+ },
+ "花蓮觀光局": {
+  "client_id": "3c9da474d6cc43fbbdfd62f81736f215",
+  "how": "created"
+ },
+ "政大資訊系": {
+  "client_id": "d4c8e8536d6a41548445a7aeee71fb84",
+  "how": "created"
+ },
+ "動起來影像": {
+  "client_id": "028338978b9948699a314e77313109bc",
+  "how": "created"
+ },
+ "工安協會": {
+  "client_id": "a78effe0efd0404795c3d2138b2269e1",
+  "how": "created"
+ },
+ "政大AI中心": {
+  "client_id": "afa79b84d8b14538b17f4600b707a69d",
+  "how": "created"
+ },
+ "動因創意": {
+  "client_id": "5160e1c85f604b21b946204e8870fbde",
+  "how": "norm"
+ },
+ "麗寶文化藝術基金會": {
+  "client_id": "b7a0f9b6493b413390c3150c0ea115b3",
+  "how": "norm"
+ },
+ "台灣大哥大": {
+  "client_id": "ff8fda1fd793486eb6a288493f67ead6",
+  "how": "norm"
+ },
+ "双融域": {
+  "client_id": "6c75b1a9ce854c718271ab55b8ca8d06",
+  "how": "norm"
+ },
+ "三立電視台": {
+  "client_id": "2b49ccfe2ad34730adeb21b40f90eb11",
+  "how": "created"
+ },
+ "數位人道協會": {
+  "client_id": "d1ebc20f0c6242ae84a0dfb01af5d90c",
+  "how": "norm"
+ },
+ "國美館": {
+  "client_id": "7e56421e791d48e5b3b5699f69784a74",
+  "how": "created"
+ },
+ "urbenresearch": {
+  "client_id": "9ac243dc30334f53b139310cc8d298ec",
+  "how": "created"
+ },
+ "松山文創園區": {
+  "client_id": "6f31ac5f34c748209541cc89ef2e0a46",
+  "how": "created"
+ },
+ "煥民新村": {
+  "client_id": "f570bc1f3a104400818207dd1998fa17",
+  "how": "created"
+ },
+ "好合製藝": {
+  "client_id": "17b5955e32c242059e73c8a803befa8f",
+  "how": "norm"
+ },
+ "現代婦女基金會": {
+  "client_id": "4e64acb05f464313b55ccd45598bdb8a",
+  "how": "prefix(現代婦女教育)"
+ },
+ "豐譽聯合工程": {
+  "client_id": "cc42a7a5ac604da1a2acd52a678d9bb0",
+  "how": "norm"
+ },
+ "中研院": {
+  "client_id": "2fb30ea7b98d499f8bcd9d898e46650e",
+  "how": "created"
+ },
+ "天主教失智老人基金會": {
+  "client_id": "789277d7b1c14f9c91d18e572a17df2f",
+  "how": "prefix(天主教失智老人社會福利)"
+ },
+ "頑啤": {
+  "client_id": "7bd2d10e7c6e45d897e3af4e85ded0c3",
+  "how": "norm"
+ },
+ "藝朵文化": {
+  "client_id": "4ae4b91f8f584a919bbf4cab06bfbc2e",
+  "how": "created"
+ },
+ "防水小哥": {
+  "client_id": "fb58590f8807423ca8129812a1580efb",
+  "how": "exact"
+ },
+ "蝦皮": {
+  "client_id": "aba31ca40ad344f3b7a5d8a4bd0135ad",
+  "how": "created"
+ },
+ "鹿樂平臺": {
+  "client_id": "70e0cfbfe1d64e508a4bdb56a2fa5d1d",
+  "how": "created"
+ },
+ "新竹市立美術館": {
+  "client_id": "0801c0a659bc48498ccb050a9d79f44d",
+  "how": "created"
+ },
+ "Gut好德": {
+  "client_id": "02070340df4441c7ae4aa735e86df9cc",
+  "how": "created"
+ },
+ "女性生涯發展協會": {
+  "client_id": "b043b7355e8043e5908c4c4d7bd64ed3",
+  "how": "created"
+ },
+ "個人：史丹": {
+  "client_id": "03bd77435c1046e7950872b09e592c6b",
+  "how": "created"
+ },
+ "台籃補習班": {
+  "client_id": "6581ddf6548946958ec48fddaf5cd3f9",
+  "how": "created"
+ },
+ "煜程": {
+  "client_id": "56d57c5489944c7fa70a3ea5eb5b74c8",
+  "how": "norm"
+ },
+ "爍樂畫廊": {
+  "client_id": "70bdcaa8cd73427fb0b845eb445ed220",
+  "how": "created"
+ },
+ "幾莫創意": {
+  "client_id": "c428330216804d079d196cde7785be08",
+  "how": "norm"
+ },
+ "王金平辦公室": {
+  "client_id": "de428671c63f4aa0bae3bb2b3f78093c",
+  "how": "created"
+ },
+ "歐可酷": {
+  "client_id": "f72e6ab26b6d4f7daba3e6a6b81c7147",
+  "how": "norm"
+ },
+ "司法院": {
+  "client_id": "c64072bded1342f896557d09443904a3",
+  "how": "exact"
+ },
+ "TEDMA": {
+  "client_id": "88f2f623cd90490eabb2d13715424afd",
+  "how": "created"
+ },
+ "C-LAB": {
+  "client_id": "da23279203a84c4c94b883a22289389b",
+  "how": "created"
+ },
+ "延伸公關": {
+  "client_id": "089f485ee59f4f8cb6c051695598bfa9",
+  "how": "created"
+ },
+ "富邦文教基金會": {
+  "client_id": "7747db9d504047359b8545ee6153dc3a",
+  "how": "norm"
+ },
+ "個人：王怡婷": {
+  "client_id": "8744ee1f89d04ff49d544ba7ae9dacba",
+  "how": "created"
+ },
+ "文心藝所": {
+  "client_id": "526dcd39d54c44bd905d809562783d31",
+  "how": "created"
+ },
+ "豐譽營造": {
+  "client_id": "f31d9bf5d7a44046876a081b626415ae",
+  "how": "exact"
+ },
+ "歐姆龍": {
+  "client_id": "8c1c5fcf8cd44484a810cb668637d7f7",
+  "how": "created"
+ },
+ "優視傳播": {
+  "client_id": "5f541250c2294c39a9761baf6b96e141",
+  "how": "norm"
+ },
+ "大漁映畫": {
+  "client_id": "21cad3e3765843bfbe2548d346b5eef6",
+  "how": "created"
+ },
+ "Podcast錄音室": {
+  "client_id": "9022c0de065642fcb8778c908d276b6b",
+  "how": "created"
+ },
+ "先決影像": {
+  "client_id": "5c8eda169b914c92bb93f80f130fd18c",
+  "how": "created"
+ },
+ "泛亞工程": {
+  "client_id": "c1b26550548e4c4384b884cfb8e6bc15",
+  "how": "prefix(泛亞工程建設)"
+ },
+ "赤兔影像": {
+  "client_id": "f8b1b1cf6f024c0b8de69d586fe571c5",
+  "how": "created"
+ }
+}

@@ -278,7 +278,9 @@ export function renderList() {
 
     body.innerHTML = _sorter.sorted(state.projects).map(p => `
         <div class="crm-row${p.id === state.selectedId ? ' selected' : ''}" data-id="${p.id}" onclick="window._projSelect('${p.id}')">
-            <div class="crm-row-name">${_esc(p.name)}</div>
+            <div class="crm-row-name">${_esc(p.name)}${p.entity === 'mine'
+                ? ' <span style="font-size:10px;color:#c4b5fd;border:1px solid #4c3d78;border-radius:3px;padding:0 4px;vertical-align:1px;" title="錢流記在 owner 私帳（我的帳）；專案本身共用">私帳</span>'
+                : ''}</div>
             <div class="crm-row-client">${p.client_short_name
                 ? _esc(p.client_short_name)
                 : '<span class="crm-muted">待補客戶</span>'}</div>

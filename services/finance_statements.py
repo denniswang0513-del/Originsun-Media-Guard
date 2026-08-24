@@ -643,8 +643,11 @@ async def _project_margins(session, *, top=5) -> dict:
         projects = (await session.execute(
             select(CrmProject.id, CrmProject.name, CrmProject.contract_amount,
                    CrmProject.tax_rate)
+            # 兩本帳 §8：專案毛利是母公司報表的元件 —— mine 專案的合約額
+            # 混進來會讓母公司儀表板憑空多出 owner 私帳的營收
             .where(CrmProject.contract_amount.isnot(None),
-                   CrmProject.contract_amount > 0))).all()
+                   CrmProject.contract_amount > 0,
+                   CrmProject.entity != "mine"))).all()
         if not projects:
             return {"available": False, "top": [], "bottom": []}
         exp_by = {pid: int(t or 0) for pid, t in (await session.execute(

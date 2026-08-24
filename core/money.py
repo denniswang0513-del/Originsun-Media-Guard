@@ -228,8 +228,27 @@ async def money_dep(request: Request):
 
     兩種形式都住在這裡：政策正本在 `core`，用法正本卻擺進 CRM 套件的話，
     `api_finance` 想改用 dependency 形式就得反向 import CRM —— 層級倒置。
+
+    兩本帳 §8 追加：路徑帶 project_id 的 money 端點（成本明細/財務摘要/
+    雜支…），目標專案若是 mine（owner 私帳）→ 還要有我的帳 full scope。
+    money_view 是母公司的金額鑰匙，開不了 owner 的私帳（core/ledger §2.3）。
     """
-    return check_money(request)
+    check_money(request)
+    pid = request.path_params.get("project_id")
+    if pid and not viewer_has_mine_scope(request):
+        from sqlalchemy import select
+
+        from core.db_guard import db_factory_or_503  # 延遲 import（同檔其他慣例）
+        from db.models import CrmProject
+        factory = db_factory_or_503()   # DB 離線 → 503（這些端點沒 DB 本來也做不了事）
+        async with factory() as session:
+            ent = (await session.execute(
+                select(CrmProject.entity)
+                .where(CrmProject.id == pid))).scalar_one_or_none()
+        if ent == "mine":
+            raise HTTPException(status_code=403,
+                                detail="這是私帳專案 —— 財務資料需要「我的帳」權限")
+    return True
 
 
 # 便宜的預篩：`MONEY_FIELDS` 每一個鍵都含這幾個子字串之一（由
@@ -258,6 +277,33 @@ def redact(obj: Any) -> Any:
     return obj
 
 
+def viewer_has_mine_scope(request: Request) -> bool:
+    """這個請求有沒有「我的帳」full scope（兩本帳 §8 的錢牆判定）。
+
+    正本在 core/ledger.allowed_entities —— 這裡只是問一句。延遲 import：
+    ledger import money（MODULE_KEY），反向頂層 import 會成環。
+    """
+    from core.ledger import allowed_entities
+    return "mine" in allowed_entities(_extract_token(request), level="full")
+
+
+def redact_mine(obj: Any) -> Any:
+    """兩本帳 §8 的第二層：**有** money_view、但沒有我的帳 scope 的請求，
+    只抹 `entity=='mine'` 的物件子樹（母公司的錢照常看）。
+
+    專案與客戶全面共用（owner 2026-08-24 拍板），所以 mine 專案的存在、名稱、
+    階段大家都看得到 —— 要藏的只有那棵物件上的金額鍵。判定靠序列化層放進
+    payload 的 "entity" 鍵（routers/crm/projects.py `_to_dict`）。
+    """
+    if isinstance(obj, dict):
+        if obj.get("entity") == "mine":
+            return redact(obj)
+        return {k: redact_mine(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [redact_mine(v) for v in obj]
+    return obj
+
+
 class MoneyRedactRoute(APIRoute):
     """第二層：掛在 router 上，沒授權的請求出口統一抹掉金額欄位。
 
@@ -278,18 +324,24 @@ class MoneyRedactRoute(APIRoute):
 
         async def handler(request: Request) -> Response:
             response = await original(request)
-            if can_see_money(request):
-                return response
             body = getattr(response, "body", None)
             if not body or "application/json" not in response.headers.get("content-type", ""):
                 return response
-            if not any(t in body for t in _PREFILTER):
-                return response
+            if can_see_money(request):
+                # 兩本帳 §8：有 money_view 但沒有我的帳 scope → 只抹 mine 子樹。
+                # 預篩 b'"mine"'：JSONResponse 是緊湊分隔，沒出現就沒東西要抹。
+                if b'"mine"' not in body or viewer_has_mine_scope(request):
+                    return response
+                redactor = redact_mine
+            else:
+                if not any(t in body for t in _PREFILTER):
+                    return response
+                redactor = redact
             try:
                 data = json.loads(body)
             except ValueError:
                 return response
-            clean = redact(data)
+            clean = redactor(data)
             # 沒動到就別重建 —— 深度比較實測 0.00~0.04ms（redact 重用了葉節點，
             # `==` 在每個純量上以 identity 短路），換掉的是 0.88ms 的 json.dumps。
             if clean == data:

@@ -44,6 +44,9 @@ def _to_project_dict(p, client_short_name: str = "") -> dict:
         "project_type": p.project_type or "",
         "folder_path": p.folder_path or "",
         "description": p.description or "", "notes": p.notes or "",
+        # 兩本帳 §8：錢流歸屬。這個鍵同時是 core/money mine-aware 抹除的
+        # 判定依據（entity=='mine' 的物件，金額鍵對無 mine scope 者整棵抹掉）
+        "entity": p.entity or "parent",
         "contract_amount": p.contract_amount,
         "tax_rate": p.tax_rate, "profit_target_pct": p.profit_target_pct,
         "misc_budget_pct": p.misc_budget_pct,

@@ -39,11 +39,15 @@ async def list_clients(
     # Subquery: per-client project stats (exclude not-yet-won 階段；
     # 口徑集中在 _shared._CLIENT_TIER_EXCLUDE_STATUSES，與客戶分級同源)
     active_filter = CrmProject.status.notin_(_CLIENT_TIER_EXCLUDE_STATUSES)
+    # 兩本帳 §8：成案「數」照算（客戶關係是真的），但金額合計**排除 mine**——
+    # owner 私帳的營收不得混進母公司的客戶績效（合夥人看了會多出憑空的營收）。
+    from sqlalchemy import and_ as _and
+    money_filter = _and(active_filter, CrmProject.entity != "mine")
     proj_sub = (
         select(
             CrmProject.client_id,
             _fn.count(_case((active_filter, 1))).label("project_count"),
-            _fn.coalesce(_fn.sum(_case((active_filter, CrmProject.contract_amount), else_=0)), 0).label("total_contract"),
+            _fn.coalesce(_fn.sum(_case((money_filter, CrmProject.contract_amount), else_=0)), 0).label("total_contract"),
         )
         .group_by(CrmProject.client_id)
         .subquery()
