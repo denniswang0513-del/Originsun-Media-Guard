@@ -28,22 +28,17 @@ entity 的帳本頁（刻意沒有 CRM 專案管理），但它缺的正是 owne
 """
 from fastapi import APIRouter, HTTPException, Request
 
+from config import load_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
 from core.ledger_project import (COST_FIELDS, SUM_KEYS, compute,
-                                 income_items as _income_items, norm_detail)
+                                 income_items, norm_detail)
 from core.schemas import LedgerDetailPayload
 from routers.crm._shared import _fmt_day
 
 from .api_finance import _guard
 
 router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
-
-
-def income_items() -> list:
-    """工項清單（讀 settings 的薄殼；規則正本在 core.ledger_project）。"""
-    from config import load_settings
-    return _income_items(load_settings())
 
 
 async def _owned_project(session, project_id: str, ent: str):
@@ -61,7 +56,7 @@ async def _owned_project(session, project_id: str, ent: str):
     return p
 
 
-async def _rollups(session, ent: str, narrowed: bool, project_ids=None):
+async def _rollups(session, ent: str):
     """({project_id: 掛帳支出}, {project_id: 未付應付})。一次聚合，不逐案 N+1。
 
     🔴 未付應付**排除預支款**（is_advance）—— 對齊 core.finance_logic
@@ -69,8 +64,8 @@ async def _rollups(session, ent: str, narrowed: bool, project_ids=None):
     週轉金，核銷後才變成成本），混進來會讓同一個專案在逐案損益與應付帳款上
     出現兩個數字，那正是這套帳要消滅的東西（/simplify 2026-08-25）。
 
-    narrowed：清單有沒有被搜尋/篩選縮過。沒縮的話 entity 條件本身就等價，
-    再帶 402 個 id 進 IN 是零選擇性的白工。
+    entity 條件本身就把範圍圈定了 —— 不再另外帶 id 清單進 IN（那是零選擇性
+    的白工，而且清單端本來就整份拉）。
     """
     from sqlalchemy import func as fn
     from sqlalchemy import select
@@ -88,20 +83,21 @@ async def _rollups(session, ent: str, narrowed: bool, project_ids=None):
                    CrmPaymentRequest.is_advance == 0,
                    CrmPaymentRequest.payment_status != "已付款")
             .group_by(CrmPaymentRequest.project_id))
-    if narrowed and project_ids:
-        cash_q = cash_q.where(CrmCashEntry.project_id.in_(project_ids))
-        ap_q = ap_q.where(CrmPaymentRequest.project_id.in_(project_ids))
     cash = {pid: int(e or 0) for pid, e in (await session.execute(cash_q)).all()}
     ap = {pid: int(a or 0) for pid, a in (await session.execute(ap_q)).all()}
     return cash, ap
 
 
 @router.get("/project-ledger")
-async def project_ledger(request: Request, entity: str = "", q: str = "",
-                         unpaid_only: bool = False):
-    """本帳本的逐案損益清單（含合計）。q 搜專案名/客戶；unpaid_only 只看未收清。"""
+async def project_ledger(request: Request, entity: str = ""):
+    """本帳本的逐案損益清單（含合計）。
+
+    刻意不收 q／unpaid_only：前端一次拉完 402 列後在本地篩（每敲一個字重抓
+    整份是白工，見 subviews/projects.js）。留著沒人走的分支只會讓下一個要改
+    rollup 規則的人去推理一個從未執行過的模式（/simplify 2026-08-25）。
+    """
     ent = _guard(request, entity, level="full")
-    from sqlalchemy import or_, select
+    from sqlalchemy import select
 
     from db.models import Client, CrmProject
     factory = _factory_or_503()
@@ -113,15 +109,8 @@ async def project_ledger(request: Request, entity: str = "", q: str = "",
                  # 整理的（owner：先整理專案再記帳），不是照最後編輯時間。
                  .order_by(CrmProject.completion_date.desc().nullsfirst(),
                            CrmProject.updated_at.desc()))
-        if q:
-            ql = f"%{q}%"
-            query = query.where(or_(CrmProject.name.ilike(ql),
-                                    Client.short_name.ilike(ql)))
-        if unpaid_only:
-            query = query.where(CrmProject.payment_status != "全額到帳")
         rows = (await session.execute(query)).all()
-        cash, ap = await _rollups(session, ent, bool(q or unpaid_only),
-                                  [p.id for p, _ in rows])
+        cash, ap = await _rollups(session, ent)
 
     items, tot = [], {"contract": 0, "received": 0, "receivable": 0,
                       "spent": 0, "ap_open": 0, "net": 0,
@@ -191,7 +180,7 @@ async def project_ledger_detail(project_id: str, request: Request,
             # 匯入時把案碼/案源/税別等收在這裡（純文字）—— 逐案對照 Sheet 用
             "notes": p.notes or "",
         },
-        "income_items": income_items(),
+        "income_items": income_items(load_settings()),
         "cost_fields": [{"key": k, "label": lb} for k, lb in COST_FIELDS],
         "entries": [{
             "id": e.id, "date": _fmt_day(e.entry_date), "summary": e.summary,

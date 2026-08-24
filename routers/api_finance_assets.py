@@ -40,7 +40,7 @@ def _holding_value(h, usd_twd: float) -> int:
     return 0
 
 
-async def _auto_buckets(session, ent: str) -> dict:
+async def _auto_buckets(session, ent: str, ml: dict | None = None) -> dict:
     """系統算得出來的桶。回 {桶名: 金額}＋meta。"""
     from sqlalchemy import func as fn
     from sqlalchemy import select
@@ -83,7 +83,7 @@ async def _auto_buckets(session, ent: str) -> dict:
         select(FinanceHolding).where(FinanceHolding.entity == ent,
                                      FinanceHolding.active.is_(True))
         .order_by(FinanceHolding.sort_order, FinanceHolding.created_at))).scalars().all()
-    usd_twd = float((load_settings().get("my_ledger") or {}).get("usd_twd") or 0)
+    usd_twd = float((ml or {}).get("usd_twd") or 0)
     h_rows = [{
         "id": h.id, "broker": h.broker or "", "symbol": h.symbol or "",
         "name": h.name, "shares": h.shares, "currency": h.currency,
@@ -96,9 +96,6 @@ async def _auto_buckets(session, ent: str) -> dict:
                     "固定資產淨值": eq_net,
                     "證券現值": sum(r["value_twd"] for r in h_rows)},
         "holdings": h_rows, "usd_twd": usd_twd,
-        "bank_lines": [{"name": a.name,
-                        "balance": int(a.opening_balance or 0) + int(flows.get(a.id, 0) or 0)}
-                       for a in accts if (a.acct_kind or "bank") == "bank"],
     }
 
 
@@ -109,8 +106,9 @@ async def assets_overview(request: Request, entity: str = ""):
     from sqlalchemy import select
 
     from db.models import FinanceNetSnapshot
+    ml = load_settings().get("my_ledger") or {}   # 一次讀完，別在同一支端點讀兩次
     async with factory() as session:
-        auto = await _auto_buckets(session, ent)
+        auto = await _auto_buckets(session, ent, ml)
         last = (await session.execute(
             select(FinanceNetSnapshot)
             .where(FinanceNetSnapshot.entity == ent)
@@ -120,8 +118,7 @@ async def assets_overview(request: Request, entity: str = ""):
         "last_snapshot": ({"id": last.id, "date": _fmt_day(last.snap_date),
                            "buckets": last.buckets or {}, "total": int(last.total or 0),
                            "note": last.note or ""} if last else None),
-        "quotes_enabled": bool((load_settings().get("my_ledger") or {})
-                               .get("quotes_enabled", True)),
+        "quotes_enabled": bool(ml.get("quotes_enabled", True)),
     }
 
 
@@ -174,10 +171,12 @@ async def refresh_quotes(request: Request, entity: str = ""):
 
 
 async def _owned(session, model, oid: str, request: Request, label: str):
-    """載入單列 → 404 → 以**該列自己的 entity** 再驗一次 full scope。
+    """載入單列 → 404 → 以**該列自己的 entity** 驗 full scope。
 
-    update/delete 的 query entity 只驗了「你有權動哪本帳」，列真正屬於哪本
-    要看資料 —— 這一步三個端點都要，抽成一份免得第四個端點忘記。"""
+    這一步就是授權本身，不需要前面再來一次 `_guard(query 的 entity)`：
+    query 參數只說得出「使用者想動哪本帳」，說不出「這一列是誰的」，而多驗
+    那一次還會在「帶了自己沒權限的 entity、但列其實是自己的」時誤 403
+    （/simplify 2026-08-25）。三個端點都要，抽成一份免得第四個忘記。"""
     row = await session.get(model, oid)
     if not row:
         raise HTTPException(status_code=404, detail=f"{label}不存在")
@@ -204,7 +203,6 @@ async def create_holding(payload: HoldingPayload, request: Request,
 @router.put("/assets/holdings/{holding_id}")
 async def update_holding(holding_id: str, payload: HoldingPayload,
                          request: Request, entity: str = ""):
-    _guard(request, entity, level="full")
     from db.models import FinanceHolding
     factory = _factory_or_503()
     async with factory() as session:
@@ -218,7 +216,6 @@ async def update_holding(holding_id: str, payload: HoldingPayload,
 
 @router.delete("/assets/holdings/{holding_id}")
 async def delete_holding(holding_id: str, request: Request, entity: str = ""):
-    _guard(request, entity, level="full")
     from db.models import FinanceHolding
     factory = _factory_or_503()
     async with factory() as session:
@@ -282,7 +279,6 @@ async def save_snapshot(payload: NetSnapshotPayload, request: Request,
 
 @router.delete("/assets/snapshots/{snapshot_id}")
 async def delete_snapshot(snapshot_id: str, request: Request, entity: str = ""):
-    _guard(request, entity, level="full")
     from db.models import FinanceNetSnapshot
     factory = _factory_or_503()
     async with factory() as session:

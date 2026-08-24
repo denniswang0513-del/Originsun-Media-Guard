@@ -90,8 +90,12 @@ MONEY_FIELDS = frozenset({
     # `fee` ＝ crm_cash_invoice_links.fee（這張發票的匯款被匯出行扣掉多少）。
     # 跟 bank_fee 是同一筆錢的兩種視角：bank_fee 是那一列的加總，這個是逐張歸屬。
     "bank_fee", "fee", "annual_rate",
-    # 器材（api_equipment，同上理由）
-    "purchase_cost",
+    # 器材（api_equipment，同上理由）。monthly_depreciation 與 maintenance_total
+    # 是**推導出來的金額**（購入成本÷攤提月數、保養費合計）—— 判準是「它自己或
+    # 它與另一個可見欄位的乘積是不是金額」，月折舊×月數就把 purchase_cost 還原
+    # 回來了，抹了前者卻留後者等於沒抹（/simplify 2026-08-25 於兩本帳的器材
+    # 錢牆抓到：mine 器材的詳情照樣把這兩個數字送出去）。
+    "purchase_cost", "monthly_depreciation", "maintenance_total",
     # 福利池編列金額（hr_benefit_pools.budget）。整個 /benefits 端點群本來就有
     # money_dep（沒 money_view 直接 403），列在這裡是為了那句「錢的欄位名有一份
     # 完整清單」。⚠ 只加 budget（model 欄位、掃描器要求表態的那個）；池的
@@ -114,6 +118,9 @@ MONEY_FIELDS = frozenset({
 _NOT_MONEY = {
     "tax_rate": "法定 5%，沒有資訊量",
     "budget_hours": "時數池不是錢（N2 工時）",
+    # 攤提**月數**，是期間不是金額。它自己看不出成本；能還原成本的是
+    # monthly_depreciation（已收進 MONEY_FIELDS），不是這個。
+    "depreciation_months": "直線攤提的月數（期間），不是錢",
     "cost_group_id": "外鍵 ID",
     # 下面兩筆是被「中文尾註」那條軸掃到的假陽性 —— 註解裡提到成本/費用，
     # 欄位本身是名稱字串（會計科目掃描不可避免會碰到的兩個）。
@@ -273,7 +280,12 @@ async def money_dep(request: Request):
 # 錢字只要加在這裡，兩個用途一起長。（`salary` 目前沒有欄位命中，列著是為了
 # 下一個加薪資欄的人 —— 多一個 token 只會讓預篩多命中一點，不改變行為。）
 _PREFILTER = (b"amount", b"rate", b"cost", b"price", b"fee", b"salary",
-              b"profit", b"budget", b"ex_tax", b"contract", b"balance")
+              b"profit", b"budget", b"ex_tax", b"contract", b"balance",
+              # 器材的兩個推導金額：monthly_depreciation／maintenance_total 的
+              # 字面都不含上面任何一個詞，不加 token 的話 MoneyRedactRoute 會
+              # 在預篩就整份跳過 —— 鍵在名單裡卻永遠抹不到
+              # （test_prefilter_tokens_cover_every_money_field 當場擋下）。
+              b"depreciation", b"maintenance")
 
 
 def redact(obj: Any) -> Any:

@@ -100,12 +100,14 @@ def _strip_mine_money(d: dict, request) -> dict:
     刪鍵不歸零（三態慣例，同 core/money.redact）。"""
     if d.get("entity") != "mine":
         return d
-    from core.money import viewer_has_mine_scope
+    from core.money import redact, viewer_has_mine_scope
     if viewer_has_mine_scope(request):
         return d
-    for k in ("purchase_cost", "monthly_depreciation"):
-        d.pop(k, None)
-    return d
+    # 🔴 遞迴走 core.money.redact，不要自己列鍵：手列那版只蓋了 purchase_cost
+    # 與 monthly_depreciation，詳情裡的 maintenance_total 與每筆保養的 cost
+    # 照樣外流（/simplify 2026-08-25）。跟著 MONEY_FIELDS 走，以後加欄自動涵蓋，
+    # 也才受 test_money_visibility 的掃描守住。
+    return redact(d)
 
 
 def _equip_dict(e) -> dict:
@@ -283,10 +285,9 @@ async def get_equipment(eid: str, request: Request):
         "monthly_depreciation": _monthly_depreciation(equip),
         "maintenance_total": sum(m.cost or 0 for m in maints),
     }
-    _strip_mine_money(d, request)
-    if "monthly_depreciation" not in d:      # mine 被抹 → stats 那份也要抹
-        d["stats"].pop("monthly_depreciation", None)
-    return {"equipment": d}
+    # redact 是遞迴的 —— stats 裡的 monthly_depreciation／maintenance_total
+    # 與 maintenance[].cost 一起處理掉，不用再各補一刀
+    return {"equipment": _strip_mine_money(d, request)}
 
 
 @router.put("/{eid}")

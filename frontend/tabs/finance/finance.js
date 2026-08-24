@@ -18,6 +18,36 @@ import { createSubviewLoader } from '../../js/shared/subview-loader.js';
 
 let _inited = false;
 let _currentSubview = null;   // null = 帳務內嵌模式；否則為子視圖名稱
+let _shellAllowed = false;    // 這個身分能不能看帳務殼（合夥人不行）
+let _shellReady = null;       // 帳務殼的載入 Promise（只跑一次）
+
+/** 帳務殼（crm-invoices）**用到才載**。
+ *
+ *  🔴 原本在 initFinanceTab 就 await 載完再 display:none 掉：那一段會打
+ *  /invoices-root、/invoices、/projects、/clients、申請人、代辦費六支 API
+ *  （/projects 還沒帶篩選，私帳 402 案全撈），再做一次完整 renderList ——
+ *  全部落在首次繪製的阻塞路徑上，而預設落地是儀表板、mine 模式下六個帳務
+ *  視圖只有兩個看得到（/simplify 2026-08-25）。
+ */
+function _ensureShell() {
+    if (_shellReady) return _shellReady;
+    const wrap = document.getElementById('finance-invoices-wrap');
+    _shellReady = (async () => {
+        const resp = await fetch('./tabs/crm/crm-invoices.html');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        wrap.innerHTML = await resp.text();
+        const mod = await import('../crm/crm-invoices.js');
+        await mod.initCrmInvoicesTab();
+    })().catch((e) => {
+        wrap.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">
+            帳務載入失敗：${esc(e.message)}
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:8px;"
+                    onclick="location.reload()">重新整理頁面</button></div>`;
+        _shellReady = null;      // 讓下次點擊可以重試
+        throw e;
+    });
+    return _shellReady;
+}
 
 const _LOADING_HTML = '<div style="color:#888;padding:40px;text-align:center;">載入中…</div>';
 
@@ -39,27 +69,7 @@ export async function initFinanceTab() {
     if (mineMode || !fullParent) hideNav('.fin-nav-full');
     if (!mineMode && !fullParent) hideNav('.fin-nav-mine-ok');
 
-    const wrap = document.getElementById('finance-invoices-wrap');
-    if (loadShell) {
-        try {
-            // 1. 載入既有帳務殼（含發票視圖 + 其餘五視圖的內部 lazy-load 容器）
-            const resp = await fetch('./tabs/crm/crm-invoices.html');
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            wrap.innerHTML = await resp.text();
-
-            // 2. 啟動既有帳務邏輯（六視圖切換/CSV 匯入/月結卡全部沿用）
-            const mod = await import('../crm/crm-invoices.js');
-            await mod.initCrmInvoicesTab();
-        } catch (e) {
-            wrap.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">
-                帳務載入失敗：${esc(e.message)}
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:8px;"
-                        onclick="location.reload()">重新整理頁面</button></div>`;
-            _inited = false;
-            return;
-        }
-    }
-
+    _shellAllowed = loadShell;
     _bindSideNav();
 
     // 預設落地 = 📊 儀表板子視圖（帳務殼已初始化但隱藏，點帳務按鈕仍可切回）。
@@ -75,10 +85,12 @@ function _bindSideNav() {
         const btn = e.target.closest('.finance-nav-btn');
         if (!btn) return;
         if (btn.dataset.invView) {
-            const inner = document.getElementById(`inv-view-${btn.dataset.invView}`);
-            if (!inner) return;
+            if (!_shellAllowed) return;
             _showInvoicesMode();
-            inner.click();   // 走既有切換邏輯（crm-invoices.js 內含各視圖 lazy-load）
+            _ensureShell().then(() => {
+                const inner = document.getElementById(`inv-view-${btn.dataset.invView}`);
+                inner?.click();   // 走既有切換邏輯（crm-invoices.js 內含各視圖 lazy-load）
+            }).catch(() => {});
         } else if (btn.dataset.subview) {
             _showSubview(btn.dataset.subview);
         } else {
@@ -94,7 +106,7 @@ function _bindSideNav() {
                 return;
             }
             const inner = document.getElementById('inv-global-refresh');
-            if (inner) inner.click();
+            if (inner) inner.click();   // 殼還沒載＝沒東西要刷新
         });
     }
 }

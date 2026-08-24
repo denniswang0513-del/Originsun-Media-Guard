@@ -34,7 +34,8 @@ from core.card_statement import (merchant_key, parse_card_statement,
 from core.db_guard import db_factory_or_503 as _factory_or_503
 from core.schemas import (CardAiSuggestPayload, CardImportApply,
                           CardLedgerConfig)
-from routers.crm._shared import _assert_rows_open, _parse_shoot_date
+from routers.crm._shared import (_assert_rows_open, _fmt_day,
+                                 _parse_shoot_date)
 
 from .api_finance import _guard
 from .api_finance_stmt import (_STMT_MAX_BYTES, _load_import_rules,
@@ -63,22 +64,37 @@ async def _history_map(session, ent: str) -> dict:
             if len(c) == 1 and sum(c.values()) >= 2}
 
 
-async def _existing_card_keys(session, ent: str, dates: list) -> set:
-    """同帳本、落在卡單日期範圍內的既有 card 列 → {(date, |金額|)}。"""
+async def _existing_card_keys(session, ent: str, dates: list):
+    """帳上已有的卡費 (日期, |金額|) → **筆數**。preview 標記、apply 擋下。
+
+    兩條規則照銀行側的正本（api_finance_stmt._existing_entry_keys），都是實測換來的：
+    🔴 回 Counter 不是 set —— 同一天真的可能刷兩筆一樣的錢（兩杯一樣的咖啡）。
+       用 set 的話帳上有一筆就把第二筆也吃掉，而且完全沒有跡象。
+    🔴 前後各放寬一天 —— _parse_shoot_date 造的是 UTC 午夜，跟 timestamptz 比較
+       時邊界會偏，「卡單最後一天」的列永遠判不出重複，而那正是重複匯入時最常
+       撞到的一天。真正的比對交給 (日期, 金額) 鍵。
+    """
+    from collections import Counter
+    from datetime import timedelta
+
     from sqlalchemy import select
 
     from db.models import CrmCashEntry
+    out = Counter()
     if not dates:
-        return set()
-    lo = _parse_shoot_date(min(dates))
-    hi = _parse_shoot_date(max(dates))
+        return out
+    lo = _parse_shoot_date(min(dates)) - timedelta(days=1)
+    hi = _parse_shoot_date(max(dates)) + timedelta(days=1)
     rows = (await session.execute(
         select(CrmCashEntry.entry_date, CrmCashEntry.expense)
         .where(CrmCashEntry.entity == ent,
                CrmCashEntry.status == "card",
                CrmCashEntry.entry_date >= lo,
                CrmCashEntry.entry_date <= hi))).all()
-    return {(d.strftime("%Y-%m-%d"), abs(int(e or 0))) for d, e in rows if d}
+    for d, e in rows:
+        if d:
+            out[(_fmt_day(d), abs(int(e or 0)))] += 1
+    return out
 
 
 @router.post("/card-statement/preview")
@@ -111,7 +127,8 @@ async def preview_card_statement(
         rules = await _load_import_rules(session)
         seen = await _existing_card_keys(session, ent, [r.date for r in res.rows])
 
-    out = suggest_rows(res.rows, hist, rules, seen)
+    # suggest_rows 只問「這一列帳上有沒有」→ 給它 Counter 的鍵集合
+    out = suggest_rows(res.rows, hist, rules, set(seen))
     n_sug = sum(1 for x in out if x["category"])
     return {
         "ok": True,
@@ -145,7 +162,9 @@ async def apply_card_statement(payload: CardImportApply, request: Request,
         seen = await _existing_card_keys(session, ent, [r.date for r in payload.rows])
         made, skipped = 0, 0
         for r, (_lbl, d) in zip(payload.rows, dated):
-            if (r.date, abs(int(r.amount))) in seen:
+            key = (r.date, abs(int(r.amount)))
+            if seen[key] > 0:      # 帳上已有一筆就跳一筆，不是整組吃掉
+                seen[key] -= 1
                 skipped += 1
                 continue
             item = (r.category or "").split("_", 1)
@@ -158,7 +177,7 @@ async def apply_card_statement(payload: CardImportApply, request: Request,
                 item=item[1] if len(item) > 1 else None,
                 status="card", has_invoice=0,
             ))
-            seen.add((r.date, abs(int(r.amount))))
+            seen[key] += 1        # 本批寫入的也算進去，同批重複才擋得住
             made += 1
         await session.commit()
     return {"status": "ok", "made": made, "skipped_duplicates": skipped}
