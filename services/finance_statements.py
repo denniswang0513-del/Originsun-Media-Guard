@@ -44,8 +44,6 @@ from core.finance_logic import (
     build_balance_sheet,
     build_cashflow,
     build_pnl,
-    cash_account_ids,
-    cash_entry_flow,
     cashflow_lines,
     classify_cash_entry,
     client_concentration,
@@ -275,7 +273,8 @@ async def compute_live(session, months, inputs=None, adv=None,
     cum_months = month_range(min(baseline, as_of), as_of)
     cum_pnl = pnl if cum_months == months else build_pnl(cum_months, **kw)
     warn = statement_warnings(inputs["cash_entries"], inputs["payments"],
-                              inputs["cat_map"], months)
+                              inputs["cat_map"], months,
+                              inputs["loan_payments"])
     # 🔴 股東往來帳戶不是現金 —— 拆出來分別進負債（借款）與權益（投資款）。
     # 混在 bank_lines 裡的話，現金會憑空多出股東墊付的錢（那些錢從來沒進過
     # 公司的銀行帳戶），資產負債表與現金流量表全部失真。
@@ -364,7 +363,8 @@ async def statements_for_period(session, months, entity: str = "parent") -> dict
     # live 已對同一期間掃過 warnings → 直接複用；否則（有鎖定月）重掃全期間
     warn = (live["warnings"] if live and live_months == months
             else statement_warnings(inputs["cash_entries"], inputs["payments"],
-                                    inputs["cat_map"], months))
+                                    inputs["cat_map"], months,
+                                    inputs["loan_payments"]))
     interpretation = statement_interpretation(
         pnl, bs, cf, ar_over_60=ar_overdue_amount(inputs["invoices"], baseline))
     return {

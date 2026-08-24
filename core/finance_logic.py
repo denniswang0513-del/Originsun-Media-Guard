@@ -1921,11 +1921,25 @@ def merge_cf(parts, opening, closing) -> dict:
 
 # ── 檢核警示 + 白話解讀 ──────────────────────────────────────
 
-def statement_warnings(cash_entries, payments, cat_map, months=None) -> dict:
+def statement_warnings(cash_entries, payments, cat_map, months=None,
+                       loan_payments=()) -> dict:
     """報表品質警示：未歸類（cash+payment category 查無對映）、未掛帳戶、
-    未填日期（undated 不受期間過濾 — 沒日期本來就進不了任何期間）。"""
+    未填日期（undated 不受期間過濾 — 沒日期本來就進不了任何期間）、
+    貸款繳款落在攤還表涵蓋範圍外。
+
+    🔴 最後那條的來歷：利息費用是**按攤還表的 due_date 權責認列**
+    （iter_loan_interest），攤還表沒有那個月的期別就認列 0。而貸款建檔時很容易
+    只填「從下期起的剩餘期數」—— 2026-08-24 實測，五筆貸款的攤還表全都是從
+    2026-09 起算，帳上 2024-03 ~ 2026-08 共 30 個月、每月都真的在繳息，損益表的
+    利息費用卻整段是空的，而且沒有任何一張表出過聲（現金流照樣勾稽為 0，因為
+    繳款走 financing 那側跟攤還表無關）。錢真的出去了、帳上也記了，只有損益表
+    看不到 —— 這種缺口不會自己浮出來，只能明講。
+    """
     mset = set(months) if months is not None else None
+    covered = {m for m in (month_of(p.get("due_date")) for p in (loan_payments or ()))
+               if m}
     unmapped = unassigned = undated = 0
+    loan_gap_months = set()
     for e in cash_entries:
         m = month_of(e.get("entry_date"))
         if m is None:
@@ -1933,10 +1947,14 @@ def statement_warnings(cash_entries, payments, cat_map, months=None) -> dict:
             continue
         if mset is not None and m not in mset:
             continue
-        if classify_cash_entry(e, cat_map or {}) == "unmapped":
+        treatment = classify_cash_entry(e, cat_map or {})
+        if treatment == "unmapped":
             unmapped += 1
         if not e.get("bank_account_id"):
             unassigned += 1
+        # 只看流出：撥款（存入）落在攤還表首期之前是正常的，繳款不是
+        if treatment == "loan" and int(e.get("expense") or 0) > 0 and m not in covered:
+            loan_gap_months.add(m)
     for p in payments:
         if p.get("is_advance"):
             continue
@@ -1952,8 +1970,15 @@ def statement_warnings(cash_entries, payments, cat_map, months=None) -> dict:
         messages.append(f"{unassigned} 筆收支未掛銀行帳戶（不列入現金流量表）")
     if undated:
         messages.append(f"{undated} 筆收支未填日期（無法定位月份，不列入報表）")
+    if loan_gap_months:
+        span = (f"{min(loan_gap_months)}" if len(loan_gap_months) == 1
+                else f"{min(loan_gap_months)} ~ {max(loan_gap_months)}")
+        messages.append(
+            f"{len(loan_gap_months)} 個月的貸款繳款落在攤還表涵蓋範圍外（{span}）"
+            f"—— 這些月份的利息費用不會認列，請把貸款的期數/首期繳款日補成"
+            f"實際的生命週期")
     return {"unmapped": unmapped, "unassigned": unassigned, "undated": undated,
-            "messages": messages}
+            "loan_gap_months": sorted(loan_gap_months), "messages": messages}
 
 
 def statement_interpretation(pnl, bs, cf, *, ar_over_60=0) -> list:
