@@ -41,7 +41,12 @@
     </nav>
 
     <!-- 右側內容區：帳務內嵌殼（wrapper 便於 display 切換）+ 子視圖容器並存 -->
-    <main id="finance-content" style="flex:1;min-width:0;overflow:hidden;padding:0 12px;">
+    <!-- overflow 只擋**橫向**（防 flex 撐破）：縱向要留給頁面決定 —— 主系統整頁
+         跟著 body 捲、/my-ledger.html 是固定視窗高的殼所以自己捲（該頁樣式表
+         覆寫 overflow-y:auto）。寫成 inline 的 overflow:hidden 會連縱向一起關掉，
+         而 inline 樣式外部表覆寫不了 → 內容超過一屏就整段裁掉、哪一層都捲不動
+         （2026-08-24 資產儀表板實測）。 -->
+    <main id="finance-content" style="flex:1;min-width:0;overflow-x:hidden;padding:0 12px;">
         <div id="finance-invoices-wrap">
             <div id="finance-loading" style="color:#888;padding:40px;text-align:center;">載入中…</div>
         </div>

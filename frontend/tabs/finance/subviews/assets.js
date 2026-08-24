@@ -86,7 +86,7 @@ function _render() {
                     ${bucketRows(manual, '上次快照')}
                 </tbody></table>
             <div style="color:#666;font-size:11px;margin-top:6px;">
-                美元匯率 ${d.usd_twd ? fmtNum(d.usd_twd * 1000) / 1000 : '—'}（更新報價時一併抓）；
+                美元匯率 ${d.usd_twd ? Number(d.usd_twd).toFixed(3) : '—'}（更新報價時一併抓）；
                 「上次快照」欄拍快照時可改。</div>`)}
         ${_card('持股（' + (d.holdings || []).length + '）', _holdingsHtml())}
         <div id="fin-assets-modal"></div>`;

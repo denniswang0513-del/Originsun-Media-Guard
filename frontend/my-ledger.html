@@ -59,6 +59,11 @@
     text-align: center; padding: 0 20px; }
   #app-view { display: none; height: calc(100vh - 40px); overflow: hidden; }
   #app-view #finance-root { height: 100%; }
+  /* 🔴 本頁是**固定視窗高的殼**（不像主系統整頁跟著 body 捲），所以右側內容區
+     必須自己捲 —— finance.html 給 #finance-content 的 overflow:hidden 是防
+     flex 橫向撐破，在這裡會把超出一屏的內容整段裁掉而且沒有任何一層可捲
+     （2026-08-24 資產儀表板實測：圖表以下全看不到）。只覆寫縱向。 */
+  #app-view #finance-content { overflow-y: auto; overflow-x: hidden; min-height: 0; }
 </style>
 </head>
 <body>
