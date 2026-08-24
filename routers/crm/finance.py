@@ -267,6 +267,36 @@ async def _kai_invoice_of(session, p, want_status):
     )).scalars().first()
 
 
+async def sync_remit_status(session, p) -> None:
+    """代開請款單付掉了沒 → 那張發票的撥款狀態（**單一正本**）。
+
+    代開的生命週期是 未收款 → 待撥款 → 已撥款：客戶把錢匯進公司（發票→待撥款、
+    同時自動生一張應付的請款單），公司再把 92%／90% 匯給代開人（請款單→已付款、
+    發票→已撥款）。所以「請款單付掉沒」與「發票撥款沒」是同一件事的兩個面。
+
+    🔴 為什麼要收成一份：這條規則本來 inline 寫在 batch_pay 與 batch_unpay 裡，
+    而**改請款單付款狀態的路徑不只那兩條** —— resettle_payment_requests（依帳上
+    實付重算，收支明細把匯款配到請款單時走這條）也會標已付款／退回應付款，卻
+    沒有這一段。從那條路結清一張代開單，請款單會說錢匯出去了、發票卻停在待撥款，
+    而兩個畫面各自看起來都很正常。實測生產目前 0 張走過那條路（所以還沒咬到），
+    但那是「還沒有人這樣操作」，不是「不會發生」。
+
+    ⚠ 兩個方向都要走。只補正向的話，取消付款時發票會留在已撥款 ——
+    待請款區有一張沒付的單，發票卻說錢已經匯了。
+    """
+    if (p.category or "") != "發票代開":
+        return
+    if (p.payment_status or "") == "已付款":
+        inv = await _kai_invoice_of(session, p, INVOICE_PASSTHROUGH_COLLECTED)
+        new = INVOICE_REMITTED
+    else:
+        inv = await _kai_invoice_of(session, p, INVOICE_REMITTED)
+        new = INVOICE_PENDING_REMIT
+    if inv:
+        inv.payment_status = new
+        inv.updated_at = _now()
+
+
 async def resettle_invoices(session, invoice_ids, when=None,
                             unmark_if_empty: bool = False) -> None:
     """N 張發票一次重算收款狀態。
@@ -464,6 +494,9 @@ async def resettle_payment_requests(session, request_ids, when=None) -> None:
             ap.payment_status = "未付款"
             ap.payment_date = None
         ap.updated_at = _now()
+        # 🔴 代開單從這條路結清時，發票也要跟著收尾 —— 少了這一行，請款單會說
+        #    錢匯出去了、發票卻停在待撥款（batch_pay 有做、這裡本來沒有）。
+        await sync_remit_status(session, ap)
 
 
 async def replace_payment_allocs(session, entry, rows):
@@ -1375,14 +1408,9 @@ async def batch_pay(request: Request):
             p.payment_date = pay_date
             p.updated_at = _now()
             updated += 1
-            # 代開請款單付掉 = 錢匯給代開人了 → 對應發票走到「已轉撥」，
-            # 整條生命週期（未收款→已收款→已轉撥）收尾。號碼對得上才動。
-            if p.category == "發票代開":
-                inv = await _kai_invoice_of(session, p,
-                                            INVOICE_PASSTHROUGH_COLLECTED)
-                if inv:
-                    inv.payment_status = INVOICE_REMITTED
-                    inv.updated_at = _now()
+            # 代開請款單付掉 = 錢匯給代開人了 → 對應發票走到「已撥款」，
+            # 整條生命週期（未收款→待撥款→已撥款）收尾。規則見 sync_remit_status。
+            await sync_remit_status(session, p)
         await session.commit()
     return {"status": "ok", "updated": updated}
 
@@ -1427,14 +1455,8 @@ async def batch_unpay(request: Request):
             p.payment_date = None
             p.updated_at = _now()
             updated += 1
-            # batch_pay 的對稱反向：取消付掉的代開請款單 → 發票從「已轉撥」
-            # 退回「已收款」。不退的話會留下「請款單應付款、發票卻已轉撥」
-            # 的矛盾 —— 待請款區有一張，發票卻說錢已經匯了。
-            if p.category == "發票代開":
-                inv = await _kai_invoice_of(session, p, INVOICE_REMITTED)
-                if inv:
-                    inv.payment_status = INVOICE_PENDING_REMIT
-                    inv.updated_at = _now()
+            # batch_pay 的對稱反向 —— 同一份規則（sync_remit_status 兩個方向都走）
+            await sync_remit_status(session, p)
         await session.commit()
     return {"status": "ok", "updated": updated}
 

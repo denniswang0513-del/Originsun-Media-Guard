@@ -29,16 +29,21 @@ def test_every_status_change_path_triggers_the_sync():
 
 
 def test_pay_and_unpay_complete_the_invoice_lifecycle_symmetrically():
-    """付掉 → 發票進「已付款」；取消付款 → 退回「已收款」。
+    """付掉 → 發票進「已撥款」；取消付款 → 退回「待撥款」。
 
-    只做一半會留下「請款單應付款、發票卻已付款」的矛盾 —— 待請款區有一張，
+    只做一半會留下「請款單應付款、發票卻已撥款」的矛盾 —— 待請款區有一張，
     發票卻說錢已經匯了。
-    """
-    pay = _body('async def batch_pay(')
-    unpay = _body('async def batch_unpay(')
-    assert 'INVOICE_REMITTED' in pay and '_kai_invoice_of(' in pay,         'batch_pay 沒有收尾發票狀態'
-    assert 'INVOICE_PENDING_REMIT' in unpay and '_kai_invoice_of(' in unpay,         'batch_unpay 沒有對稱反向'
 
+    2026-08-24：這條規則本來 inline 寫在這兩支裡，而**改付款狀態的路徑不只
+    這兩條** —— resettle_payment_requests（依帳上實付重算）也會標已付款，卻沒有
+    收尾那一段。生產上因此留下一張「請款單已付款、發票卻停在待撥款」的票
+    （ZK19927752，owner 指出來的那張）。規則已收進
+    routers.crm.finance.sync_remit_status（兩個方向都在裡面），行為本身由
+    tests/unit/test_remit_status_sync.py 直接驗；這裡只確認這兩支仍然呼叫它 ——
+    漏掉任何一支，就是上面那種矛盾的來源。
+    """
+    for fn in ('async def batch_pay(', 'async def batch_unpay('):
+        assert 'sync_remit_status(session,' in _body(fn),             f'{fn} 沒有收尾發票的撥款狀態'
 
 def test_sync_guards_are_all_present():
     """核心函式的三道防線：

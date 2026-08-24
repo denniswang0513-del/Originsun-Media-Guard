@@ -5,11 +5,18 @@ owner：「在專案表填的發票，在發票裡自動綁定好。」
 
 ui_project_invoices.py 刻意沒有真的開票（只驗預填與摘要），所以「按下去之後
 到底存成什麼」從來沒被證明過。這支真的按下「開立」，然後：
-  ① 直接讀 DB —— project_id / category / 金額三欄 / 抬頭統編 存對了沒
+  ① 直接讀 DB —— project_id / category / 金額三欄 / 抬頭統編 / 申請人品項 存對了沒
   ② 回專案頁 —— 新的那張出現在清單、摘要跟著變
   ③ 切到帳務→發票 —— 那張票在發票本裡看得到，而且「關聯專案」是對的
+  ④ 就地改品項 —— **只有那一欄變**，其他欄位一個都不能被洗掉
+  ⑤ 在專案頁刪票 —— 發票本那邊也跟著不見
 
 🔴 ②③ 缺一不可：只驗 DB 的話，「存對了但兩邊畫面都看不到」照樣過。
+🔴 ④ 是這支最重要的一步（owner 2026-08-24 要求可以在專案頁補申請人/品項）。
+   PUT /invoices/{id} 是**整包寫回** —— model_dump 逐欄 setattr，沒送的欄位會被
+   schema 預設值蓋掉。只送要改的那一欄的話，品名/金額/抬頭/統編/專案連結會全部
+   歸零，而畫面上只有品項那一格看起來變了，其餘要等對帳才會發現。同一族陷阱在
+   這個 repo 咬過兩次，其中一次把 183 張、合計 10,656,093 的代開票方向翻成收款。
 """
 import asyncio
 import io
@@ -81,7 +88,10 @@ async def read_back():
                 "payment_type": inv.payment_type, "payment_status": inv.payment_status,
                 "amount_total": inv.amount_total, "amount_ex_tax": inv.amount_ex_tax,
                 "tax_amount": inv.tax_amount, "company_name": inv.company_name,
-                "tax_id": inv.tax_id, "number": inv.invoice_number}
+                "tax_id": inv.tax_id, "number": inv.invoice_number,
+                "applicant": inv.applicant, "item_type": inv.item_type,
+                "title": inv.title, "issue_status": inv.issue_status,
+                "invoice_kind": inv.invoice_kind, "notes": inv.notes}
 
 async def clean():
     from sqlalchemy import select
@@ -121,6 +131,14 @@ with sync_playwright() as p:
     pg.click("#proj-detail-invoices button:has-text('開發票')")
     pg.wait_for_timeout(1500)
     pg.fill("#proj-inv-title", TAG + " 第一期款")
+    # 申請人與品項（owner 2026-08-24：「這裡要可以填申請人跟品項」）——
+    # 申請人的選項只能來自伺服器那份清單，所以直接讀下拉裡的第二個選項來選
+    APPLICANT = pg.eval_on_selector(
+        "#proj-inv-applicant", "s => s.options.length > 1 ? s.options[1].value : ''")
+    check(bool(APPLICANT), "開票視窗的申請人下拉有讀到伺服器清單", APPLICANT)
+    if APPLICANT:
+        pg.select_option("#proj-inv-applicant", APPLICANT)
+    pg.fill("#proj-inv-item", "影片製作")
     pg.fill("#proj-inv-amount", "166950")
     pg.fill("#proj-inv-number", TAG[:2] + "88880001")
     pg.dispatch_event("#proj-inv-amount", "input")
@@ -146,6 +164,8 @@ with sync_playwright() as p:
         check(row["company_name"].endswith("股份有限公司"), "抬頭是客戶全名",
               str(row["company_name"]))
         check(row["tax_id"] == "12345675", "統編", str(row["tax_id"]))
+        check(row["applicant"] == APPLICANT, "申請人存進去了", str(row["applicant"]))
+        check(row["item_type"] == "影片製作", "品項存進去了", str(row["item_type"]))
 
     print("")
     print("[3] 專案頁的清單與摘要跟著更新")
@@ -187,6 +207,52 @@ with sync_playwright() as p:
         s.value = ''; s.dispatchEvent(new Event('change', { bubbles: true }));
     }""")
     pg.wait_for_timeout(2500)
+    print("")
+    print("[6] 🔴 回專案頁就地改品項 —— 只有那一欄變，其他欄位一個都不能被洗掉")
+    # PUT /invoices/{id} 是整包寫回（model_dump 逐欄 setattr）。只送要改的那一欄
+    # 的話，品名/金額/抬頭/統編/專案連結會全部變成 schema 預設值 —— 而畫面上
+    # 只有品項那一格看起來變了，其他要等對帳才會發現。這一步就是在證明沒有。
+    pg.evaluate("window.switchTab('tab_crm_projects')")
+    pg.wait_for_timeout(3000)
+    pg.evaluate("(id) => window._projSelect && window._projSelect(id)", PID)
+    pg.wait_for_timeout(2500)
+    pg.locator("#proj-detail-tabs .crm-tab[data-tab='invoices']").click()
+    pg.wait_for_timeout(3000)
+    cell = pg.locator("#proj-detail-invoices [data-inv-meta='item_type']").first
+    check(cell.input_value() == "影片製作", "品項那一格顯示的是存進去的值",
+          cell.input_value())
+    sel = pg.locator("#proj-detail-invoices [data-inv-meta='applicant']").first
+    check(sel.input_value() == APPLICANT, "申請人那一格選的是存進去的人",
+          sel.input_value())
+    cell.fill("展場攝影")
+    cell.dispatch_event("change")
+    pg.wait_for_timeout(3000)
+    after = arun(read_back())
+    check(after and after["item_type"] == "展場攝影", "品項改成功",
+          str(after and after["item_type"]))
+    if row and after:
+        washed = [k for k, v in row.items() if k != "item_type" and after[k] != v]
+        check(not washed, "🔴 其他欄位一個都沒被整包寫回洗掉",
+              "被洗掉的：" + str({k: (row[k], after[k]) for k in washed}) if washed else "")
+
+    print("")
+    print("[7] 🔴 在專案頁刪票 —— 發票本那邊也要不見（同一張票，同一支端點）")
+    pg.on("dialog", lambda d: d.accept())
+    pg.locator("#proj-detail-invoices button:has-text('刪除')").first.click()
+    pg.wait_for_timeout(3500)
+    gone = arun(read_back())
+    check(gone is None, "DB 裡真的沒了", str(gone))
+    txt3 = pg.locator("#proj-detail-invoices").inner_text()
+    check(TAG + " 第一期款" not in txt3, "專案頁清單上不見了")
+    pg.evaluate("window.switchTab('tab_crm_invoices')")
+    pg.wait_for_timeout(3000)
+    pg.locator("[data-inv-view='invoices']").click()
+    pg.wait_for_timeout(3000)
+    pg.fill("#inv-search", TAG)
+    pg.wait_for_timeout(3000)
+    book2 = pg.locator("#inv-list-body").inner_text()
+    check(TAG + " 第一期款" not in book2, "🔴 發票本那一頁也跟著不見了", book2[:150])
+
     check(not errs, "整輪都沒有 JS 例外", str(errs[:3]))
     b.close()
 

@@ -14,8 +14,14 @@
  *            —— 記帳與對帳的人用
  *   這一頁   只有這個案子、開票、看收款到哪 —— PM/AM 用
  *
- * 🔴 這裡**只做新增與檢視**。編輯、作廢、PDF、收款配對一律導去發票本 ——
+ * 🔴 這裡做**新增、刪除與檢視**。編輯、作廢、PDF、收款配對一律導去發票本 ——
  *    兩邊都能改同一張票 ＝ 兩套規則遲早分岔（收支明細、匯費、分類規則各踩過一次）。
+ * 🔴 刪除是那條規則的例外（owner 2026-08-24：「這裡刪除發票，發票開立那邊也要
+ *    可以刪除發票」），而它**刻意不自己實作**：直接打發票本同一支
+ *    DELETE /invoices/{id}。那支會一併清掉收款分配（crm_cash_invoice_links）、
+ *    改指或清空收支列的主要發票、並檢查鎖帳月 —— 在這裡另寫一套「簡單版刪除」
+ *    就會留下孤兒分配列，而後果是靜默的：那筆收款仍被判成「分配與實收相符」，
+ *    錢卻沒對到任何存在的發票。共用同一支端點，正是兩邊不會分岔的原因。
  * 🔴 稅額走 crm-utils.invoiceAmounts，跟發票本同一支。複製一份的話，兩個入口
  *    開出來的發票尾差會不一樣，而且是對帳時才會發現的那種差。
  */
@@ -26,6 +32,10 @@ import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum, invoiceAmounts,
 let _cur = null;          // 目前這個專案（渲染與預填都要）
 let _client = null;       // 這個案子的客戶 —— 抬頭與統編從這裡來
 let _invoices = [];
+// 申請人清單存在伺服器（settings.invoice_applicants），發票本的 ⚙️ 在管它。
+// 🔴 這裡只讀不寫，也不另存一份 —— 兩個入口各有一份清單的話，這頁開的票會
+//    掛到一個發票本下拉裡選不到的名字，篩選與排序就再也對不起來。
+let _applicants = [];
 
 const _P = (window._projInv = window._projInv || {});
 
@@ -81,6 +91,23 @@ function _summaryHtml() {
     </div>`;
 }
 
+/** 申請人下拉。
+ *
+ * 🔴 票上的名字不在目前清單裡時（有人把它從發票本的 ⚙️ 移掉、或歷史資料），
+ *    要把它補成一個選項並選起來。少了這一段，下拉會顯示「—」——畫面在說
+ *    「這張沒有申請人」，而它其實有；接著只要有人動同一列的品項，整包寫回就會
+ *    把那個名字真的清掉。畫面說謊在先，資料損毀在後。 */
+function _applicantCell(inv) {
+    const cur = inv.applicant || '';
+    const names = _applicants.includes(cur) || !cur ? _applicants : [cur, ..._applicants];
+    return `<select class="crm-input" data-inv-meta="applicant"
+                style="font-size:11px;padding:2px 5px;min-width:76px;"
+                onchange="window._projInv.setMeta('${_esc(inv.id)}','applicant',this)">
+        <option value=""${cur ? '' : ' selected'}>—</option>
+        ${names.map(n => `<option value="${_esc(n)}"${n === cur ? ' selected' : ''}>${_esc(n)}</option>`).join('')}
+      </select>`;
+}
+
 function _listHtml() {
     const rows = _receipts();
     if (!rows.length) {
@@ -92,22 +119,35 @@ function _listHtml() {
     return `<div style="border:1px solid #2e2e2e;border-radius:6px;overflow:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead style="background:#242424;"><tr>
-          ${th('發票號')}${th('日期')}${th('品名')}${th('金額', 1)}${th('已收', 1)}${th('狀態')}
+          ${th('發票號')}${th('日期')}${th('品名')}${th('申請人')}${th('品項')}
+          ${th('金額', 1)}${th('已收', 1)}${th('狀態')}${th('')}
         </tr></thead>
         <tbody>${rows.map(i => `
           <tr style="border-top:1px solid #2a2a2a;">
             <td style="padding:5px 8px;color:#ddd;">${_esc(i.invoice_number || '無號')}</td>
             <td style="padding:5px 8px;color:#9ca3af;">${_esc((i.invoice_date || '').substring(0, 10))}</td>
             <td style="padding:5px 8px;color:#eee;">${_esc(i.title || '')}</td>
+            <td style="padding:3px 6px;">${_applicantCell(i)}</td>
+            <td style="padding:3px 6px;">
+              <input class="crm-input" data-inv-meta="item_type"
+                     style="font-size:11px;padding:2px 5px;width:104px;"
+                     value="${_esc(i.item_type || '')}" placeholder="影片製作…"
+                     onchange="window._projInv.setMeta('${_esc(i.id)}','item_type',this)">
+            </td>
             <td style="padding:5px 8px;text-align:right;color:#eee;">$${fmtNum(i.amount_total || 0)}</td>
             <td style="padding:5px 8px;text-align:right;color:#9ca3af;">$${fmtNum(i.collected || 0)}</td>
             <td style="padding:5px 8px;">${invoicePayBadge(i.payment_status)}</td>
+            <td style="padding:5px 8px;text-align:right;">
+              <button class="crm-btn crm-btn-secondary crm-btn-sm" title="刪除這張發票"
+                      onclick="window._projInv.del('${_esc(i.id)}')">刪除</button>
+            </td>
           </tr>`).join('')}</tbody>
       </table>
     </div>
     <div style="color:#6b7280;font-size:11px;margin-top:8px;">
       要改內容、作廢、上傳電子發票或配收款 —— 到「帳務 → 發票」那一頁。
-      這裡只負責開票與看進度。
+      這裡負責開票、刪票與看進度。兩邊是同一張票：那邊改了這裡就是改後的，
+      哪一邊刪掉另一邊都會跟著不見。
     </div>`;
 }
 
@@ -133,6 +173,13 @@ _P.create = function _openCreate() {
           <label style="color:#9ca3af;font-size:12px;">品名</label>
           <input id="proj-inv-title" class="crm-input" placeholder="例：形象影片 第一期款"
                  value="${_esc(_cur.name || '')}">
+          <label style="color:#9ca3af;font-size:12px;">申請人</label>
+          <select id="proj-inv-applicant" class="crm-input">
+            <option value="">—</option>
+            ${_applicants.map(n => `<option value="${_esc(n)}">${_esc(n)}</option>`).join('')}
+          </select>
+          <label style="color:#9ca3af;font-size:12px;">品項</label>
+          <input id="proj-inv-item" class="crm-input" placeholder="影片製作/展場攝影...">
           <label style="color:#9ca3af;font-size:12px;">金額</label>
           <div style="display:flex;gap:8px;align-items:center;">
             <input id="proj-inv-amount" type="number" class="crm-input" style="flex:1;"
@@ -195,6 +242,8 @@ _P.save = async (btn) => {
             body: JSON.stringify({
                 invoice_date: document.getElementById('proj-inv-date').value || today(),
                 title,
+                applicant: document.getElementById('proj-inv-applicant').value,
+                item_type: document.getElementById('proj-inv-item').value.trim(),
                 invoice_number: document.getElementById('proj-inv-number').value.trim(),
                 company_name: document.getElementById('proj-inv-company').value.trim(),
                 tax_id: document.getElementById('proj-inv-taxid').value.trim(),
@@ -217,6 +266,69 @@ _P.save = async (btn) => {
     }
 };
 
+/** 就地補上申請人／品項 —— 這兩個是純標註欄位（沒有金額、方向、狀態），
+ *  所以是「編輯一律去發票本」那條規則裡唯一開的口（owner 2026-08-24：
+ *  「這裡要可以填申請人跟品項」。票通常就是在這一頁開的，開完卻要換一頁才能
+ *  補這兩格，那正是這個入口存在要消滅的來回）。
+ *
+ * 🔴 PUT /invoices/{id} 是**整包寫回** —— model_dump 逐欄 setattr，沒送的欄位
+ *    會被 schema 預設值覆蓋（端點自己的註解就寫著「空字串照樣會寫進去」）。
+ *    只送要改的那一欄，品名、金額、抬頭、統編、專案連結會全部被洗掉。所以這裡
+ *    先 GET 整張票、換掉一欄、再整包送回 —— 跟發票本同一條路（window._invEdit
+ *    也是先 GET 再開表單）。已驗：GET /invoices/{id} 涵蓋 InvoicePayload 全部
+ *    22 個欄位，所以這個來回是無損的，並由單元測試釘住。
+ * ⚠ 不可以改成拿清單那一列當底稿省一趟。現在剛好夠，但清單序列化與寫入
+ *    payload 是兩份定義 —— 哪天分岔，這裡就會靜默清掉欄位而沒有人會發現。
+ */
+_P.setMeta = async (id, field, el) => {
+    const inv = _invoices.find(x => x.id === id);
+    if (!inv) return;
+    const value = (el.value || '').trim();
+    if ((inv[field] || '') === value) return;      // 沒真的改就不要打後端
+    el.disabled = true;
+    try {
+        const full = await _fetch('/invoices/' + id);
+        await _fetch('/invoices/' + id,
+                     { method: 'PUT', body: JSON.stringify({ ...full, [field]: value }) });
+        inv[field] = value;
+        crmToast('已更新');
+    } catch (e) {
+        el.value = inv[field] || '';               // 失敗要退回原值，別讓畫面說謊
+        alert(e.message || '更新失敗');
+    } finally {
+        el.disabled = false;
+    }
+};
+
+/** 刪除這張發票 —— 打的是發票本同一支端點，所以兩邊看到的結果一定一樣。
+ *
+ * 🔴 確認框要把後果講出來。已經配到收款的發票被刪掉時，後端會連著把
+ *    crm_cash_invoice_links 的分配列一起清掉、並改指或清空那些收支列的主要發票
+ *    —— 錢還在帳上，但它對到的發票不見了。PM 在專案頁按這顆按鈕時，畫面上只有
+ *    「已收 $X」一個數字，不會自己想到那件事，所以由這裡明講。
+ */
+_P.del = async (id) => {
+    const inv = _invoices.find(x => x.id === id);
+    if (!inv) return;
+    const got = Number(inv.collected) || 0;
+    const warn = got
+        ? `\n\n⚠ 這張已收 $${fmtNum(got)} —— 刪掉會一併解除那些收款的配對，`
+          + `錢還在收支明細裡，但不再對到任何發票。`
+        : '';
+    if (!confirm(`確定刪除「${inv.title || ''}」$${fmtNum(inv.amount_total || 0)}？`
+                 + `${warn}\n\n發票本那一頁也會跟著消失。`)) return;
+    try {
+        await _fetch('/invoices/' + id, { method: 'DELETE' });
+        crmToast('發票已刪除');
+        const r = await _fetch('/invoices?project_id=' + encodeURIComponent(_cur.id));
+        _invoices = r.invoices || [];
+        _renderTab();
+    } catch (e) {
+        // 鎖帳月會回 409 —— 那是規則不是故障，原文照顯示比「刪除失敗」有用
+        alert(e.message || '刪除失敗');
+    }
+};
+
 /** 分頁入口。專案換了就整頁重畫（跟其他 lazy 分頁同一個約定）。 */
 export async function loadInvoicesTab(projectId) {
     const host = document.getElementById('proj-detail-invoices');
@@ -228,14 +340,18 @@ export async function loadInvoicesTab(projectId) {
         //    （代稱是「泛亞」，抬頭是「泛亞工程顧問股份有限公司」，開錯要作廢重開）。
         //    走 crmCacheFetch 的共用快取（列表本來就帶 full_name / tax_id），
         //    比逐次 GET /clients/{id} 少一趟序列往返，也不會跟別頁的客戶資料分岔。
-        const [proj, inv, cli] = await Promise.all([
+        const [proj, inv, cli, app] = await Promise.all([
             _fetch('/projects/' + projectId),
             _fetch('/invoices?project_id=' + encodeURIComponent(projectId)),
             crmCacheFetch('clients', '/clients').catch(() => ({ clients: [] })),
+            // 申請人清單撈不到不該讓整個分頁掛掉 —— 那只會讓下拉變空
+            crmCacheFetch('invoice_applicants', '/invoice-applicants')
+                .catch(() => ({ applicants: [] })),
         ]);
         _cur = proj.project || proj;
         _invoices = inv.invoices || [];
         _client = (cli.clients || []).find(c => c.id === _cur?.client_id) || null;
+        _applicants = app.applicants || [];
     } catch (e) {
         // 🔴 重試要帶**這次要載的 id**，不能靠 _cur —— 第一次就失敗時 _cur 還是
         //    null（或上一個專案），按下去不是沒反應就是載到別的案子。

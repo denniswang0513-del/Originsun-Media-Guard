@@ -54,12 +54,33 @@ def test_the_status_rule_is_left_to_the_backend():
 
 # ── 兩個入口的分工 ────────────────────────────────────────────
 
-def test_this_page_only_creates_and_reads():
-    """編輯／作廢／PDF／收款配對一律留在發票本 —— 兩邊都能改就會分岔。"""
+def test_this_page_stays_inside_its_boundary():
+    """這一頁能做什麼、不能做什麼（owner 2026-08-24 調整過界線）。
+
+    可以：開票（POST）、刪票（DELETE，打發票本同一支端點）、補申請人／品項
+          （PUT，純標註欄位，且必須是讀整張再整包送回）。
+    不可以：作廢、改金額／抬頭／統編／方向、上傳 PDF、配收款 —— 那些留在發票本。
+            兩邊都能改同一張票的那些面向 ＝ 兩套規則遲早分岔。
+
+    🔴 這條本來是「一律不准出現 PUT/DELETE」。owner 要求「這裡要可以填申請人跟
+       品項」「這裡刪除發票，發票開立那邊也要可以刪除」之後，界線變成**按面向**
+       而不是按動詞 —— 所以這裡改成逐項釘死，而不是放寬成什麼都不管。
+    """
     js = _js()
-    assert "method: 'POST'" in js
-    for verb in ("'PUT'", "'DELETE'", "'PATCH'"):
-        assert verb not in js, f"專案頁出現了 {verb} —— 修改應該留在發票本"
+    assert "method: 'POST'" in js, "開票沒了"
+    assert "'PATCH'" not in js, "專案頁出現了 PATCH —— 沒有任何面向需要它"
+    # 刪除只能是那一支共用端點
+    assert js.count("'DELETE'") == 1, "DELETE 不只一處"
+    assert "_fetch('/invoices/' + id, { method: 'DELETE' })" in js,         "刪除沒走發票本同一支端點（自己實作會留下孤兒的收款分配）"
+    # PUT 只能碰那兩個標註欄位，而且只能出現在 setMeta 裡
+    assert js.count("method: 'PUT'") == 1, "PUT 不只一處 —— 界線正在鬆掉"
+    meta = js[js.index("_P.setMeta"):js.index("_P.del")]
+    assert "method: 'PUT'" in meta, "PUT 跑到 setMeta 以外的地方了"
+    for forbidden in ("issue_status", "payment_status", "payment_type",
+                      "amount_total", "company_name", "tax_id", "file_url"):
+        # 裸鍵（issue_status: 'x'）與字串鍵都要擋 —— 只檢查加引號的形式的話，
+        # 物件字面量那種寫法會整個溜過去（實測）。
+        assert forbidden not in meta,             f"setMeta 碰了 {forbidden} —— 那個面向留在發票本"
 
 
 def test_it_tells_people_where_to_go_for_editing():
