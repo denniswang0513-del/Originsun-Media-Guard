@@ -283,6 +283,10 @@ export async function initCrmProjectsTab() {
         state.filters.am = e.target.value;
         loadProjects();
     });
+    document.getElementById('proj-filter-entity').addEventListener('change', e => {
+        state.filters.entity = e.target.value;
+        loadProjects();
+    });
 
     // ── Buttons ──
     document.getElementById('proj-btn-add').addEventListener('click', () => openModal());

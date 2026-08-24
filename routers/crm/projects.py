@@ -67,7 +67,17 @@ async def list_projects(
     status: str = Query(""),
     client_id: str = Query(""),
     am: str = Query(""),
+    entity: str = Query(""),
 ):
+    """entity 篩選（兩本帳 §8）：''＝兩本都看、'parent'＝母公司、'mine'＝私帳。
+
+    🔴 這是**檢視篩選不是權限**：專案本身共用可見（owner 拍板「只有錢分帳」），
+    錢的牆在 core/money（mine-aware 抹除 + money_dep）。前端預設帶 'parent' ——
+    私帳 402 案匯入後全帶新的 updated_at，不篩就整片壓在列表最上面、把公司的
+    案子埋掉（2026-08-24 owner 回報「沒有看到專案管理」的真正症狀）。
+    """
+    if entity and entity not in ("parent", "mine"):
+        raise HTTPException(status_code=422, detail=f"未知的帳本: {entity}")
     _require_db()
     factory = await _get_factory()
 
@@ -90,6 +100,8 @@ async def list_projects(
             .outerjoin(Client, Client.id == CrmProject.client_id)
             .order_by(CrmProject.updated_at.desc())
         )
+        if entity:
+            query = query.where(CrmProject.entity == entity)
         if status:
             query = query.where(CrmProject.status == status)
         if client_id:

@@ -26,7 +26,8 @@ export const state = {
     selectedId: null,
     editingId: null,
     staffList: [],
-    filters: { q: '', status: '', client_id: '', am: '' },
+    // entity 預設 'parent'：私帳專案共用可見但不該淹沒公司列表（§8「區隔清楚」）
+    filters: { q: '', status: '', client_id: '', am: '', entity: 'parent' },
     // 多子表狀態
     costGroups: [],           // [{id, name, shoot_date, budget_amount, misc_budget_amount, summary, ...}]
     selectedGroupId: null,    // 當前選中的子表 id

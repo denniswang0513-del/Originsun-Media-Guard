@@ -175,7 +175,9 @@ function _showModalError(msg) {
 // in the background and re-renders when it lands. Coworkers used to see an
 // empty "找不到專案" until the first fetch returned; now they see real data
 // immediately on cached visits.
-const _SWR_KEY = 'crm_projects_swr_v1';
+// v2（2026-08-24）：v1 的快取是私帳 402 案匯入後、加帳本篩選前存的混合清單 ——
+// 不換鍵的話下次開啟會先閃一次那份舊資料再被正確的取代。
+const _SWR_KEY = 'crm_projects_swr_v2';
 
 export function _hydrateProjectsFromCache() {
     try {
@@ -192,7 +194,8 @@ export function _hydrateProjectsFromCache() {
 function _writeProjectsCache() {
     // Only cache the unfiltered view — filtered results would mislead next
     // boot when filters are reset.
-    if (state.filters.q || state.filters.status || state.filters.client_id || state.filters.am) return;
+    if (state.filters.q || state.filters.status || state.filters.client_id
+        || state.filters.am || state.filters.entity !== 'parent') return;
     try {
         localStorage.setItem(_SWR_KEY, JSON.stringify({
             projects: state.projects, ts: Date.now(),
@@ -210,6 +213,7 @@ export async function loadProjects() {
     if (state.filters.status)    params.set('status', state.filters.status);
     if (state.filters.client_id) params.set('client_id', state.filters.client_id);
     if (state.filters.am)        params.set('am', state.filters.am);
+    if (state.filters.entity)    params.set('entity', state.filters.entity);
 
     try {
         const data = await _fetch(`/projects?${params}`);

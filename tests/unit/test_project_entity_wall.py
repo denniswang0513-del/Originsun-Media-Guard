@@ -101,3 +101,18 @@ def test_pin_redact_route_handles_mine_branch():
     src = _read("core/money.py")
     assert "redact_mine" in src
     assert 'b\'"mine"\'' in src
+
+
+def test_pin_project_list_supports_entity_filter():
+    """列表要能按帳本篩，且前端預設母公司。
+
+    私帳 402 案匯入時全帶新的 updated_at（列表按 updated_at desc）→ 不篩就整片
+    壓在最上面把公司的案子埋掉（2026-08-24 owner 回報）。共用≠混在一起。
+    """
+    api = _read("routers/crm/projects.py")
+    assert "entity: str = Query" in api
+    assert "CrmProject.entity == entity" in api
+    state = _read("frontend/tabs/crm/crm-projects-state.js")
+    assert "entity: 'parent'" in state, "前端預設要是母公司"
+    html = _read("frontend/tabs/crm/crm-projects.html")
+    assert 'id="proj-filter-entity"' in html

@@ -35,6 +35,13 @@
   <select id="proj-filter-am" class="crm-select">
     <option value="">全部 AM</option>
   </select>
+  <!-- 帳本（兩本帳 §8）：檢視篩選不是權限 —— 錢的牆在後端。預設母公司，
+       免得私帳案把公司列表淹掉。 -->
+  <select id="proj-filter-entity" class="crm-select" data-no-search>
+    <option value="parent" selected>母公司</option>
+    <option value="mine">私帳</option>
+    <option value="">兩本都看</option>
+  </select>
   <div class="crm-toolbar-right">
     <button id="proj-btn-expense" class="crm-btn crm-btn-secondary" onclick="window._projOpenExpensePage()">雜支登記</button>
     <button id="proj-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
