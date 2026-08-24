@@ -136,10 +136,42 @@ def test_a_wrong_opening_balance_must_not_block_the_import():
     from tests.unit._srcscan import code_only, func_body, repo_src
     body = code_only(func_body(repo_src("routers/api_finance_stmt.py"),
                                "async def _build_statement_preview("))
-    assert "if opening is not None and not res.ok:" in body, \
-        "對不上時沒有退回「不帶期初餘額」再解析一次"
+    # 釘的是**保證**不是某一行字：不帶期初先解一次，帶期初那次只有在成功時才採用。
+    assert "res = parse_statement(text, rules=rules)" in body, \
+        "沒有先解一次不帶期初的 —— 期初算錯就會整份匯不進來"
+    assert "if better.ok:" in body, \
+        "帶期初那次不管成不成功都採用了 —— 對不上就會擋掉一份有效的對帳單"
     assert body.count("parse_statement(") == 2, \
-        "少了退回那次解析 —— 期初餘額算錯就會整份匯不進來"
+        "解析次數不是兩次（一次拿第一筆交易日、一次帶期初）"
+
+
+def test_the_first_transaction_date_comes_from_the_parser_not_the_header():
+    """🔴 第一筆交易日要由**解析器**說，不是從整份文字撈第一個日期。
+
+    合庫的對帳單第二行就是「查詢期間：2025/01/01-2026/01/01」—— 撈第一個日期
+    會撈到 2025/01/01，而第一筆交易其實是 2025/01/08，差七天。那七天內只要有
+    任何一筆資料，算出來的期初就是錯的，這個優化就默默失效（錯的期初會讓解析
+    失敗、退回原行為，所以不危險，但也沒人會發現它根本沒作用）。
+    """
+    from core.bank_statement import _DATE, parse_statement
+    header = ("歷史交易查詢\n查詢期間：2025/01/01-2026/01/01\n"
+              "類別：TWD_CURRENT 帳號：0070717559515\n"
+              "1 2025/01/08 01:56:40 攤還本息 合庫松山 TWD 4470.00 170538.00 01-08 315614\n"
+              "2 2025/01/08 01:56:40 攤還本息 合庫松山 TWD 25290.00 145248.00 01-08 315611\n")
+    assert _DATE.search(header).group(0) == "2025/01/01", \
+        "這份樣本沒有重現那個陷阱（表頭的日期要早於第一筆交易）"
+    assert parse_statement(header).rows[0].date == "2025-01-08", \
+        "解析器認定的第一筆交易日"
+
+    from tests.unit._srcscan import code_only, func_body, repo_src
+    body = code_only(func_body(repo_src("routers/api_finance_stmt.py"),
+                               "async def _build_statement_preview("))
+    assert "_balance_before(session, acct, res.rows[0].date)" in body, \
+        "期初的基準日不是解析器認定的第一筆交易日"
+    guard = code_only(func_body(repo_src("routers/api_finance_stmt.py"),
+                                "async def _balance_before("))
+    assert "_DATE" not in guard, \
+        "_balance_before 又自己去文字裡撈日期了 —— 那會撈到表頭的查詢期間"
 
 
 def test_the_fallback_really_recovers():

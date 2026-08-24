@@ -447,8 +447,8 @@ async def _assert_statement_belongs_to(session, acct, ent, text) -> None:
                 "請改選對的帳戶再匯一次。"))
 
 
-async def _balance_before(session, acct, text):
-    """這個帳戶在對帳單**第一列的前一天**是多少錢。抓不到就回 None。
+async def _balance_before(session, acct, first_date: str):
+    """這個帳戶在 `first_date`（對帳單第一筆交易日）**之前**是多少錢。
 
     🔴 為什麼要算這個：第一列沒有前一列的餘額可減，銀行又不一定印總計，
        解析器只好用關鍵字猜方向並標 inferred（預覽預設不勾）。但這個數字系統
@@ -458,20 +458,20 @@ async def _balance_before(session, acct, text):
 
     ⚠ 只在**那天以前確實有資料**或帳戶有期初餘額時才給。全新帳戶（第一筆交易
       就在這份對帳單裡）餘額 0 也是正確答案 —— 那正是一銀 2025-05-12 的情況。
+
+    🔴 `first_date` 由**解析器**告訴我們（`res.rows[0].date`），不是從整份文字裡
+       撈第一個日期。合庫的對帳單第二行就是「查詢期間：2025/01/01-2026/01/01」，
+       撈第一個日期會撈到 2025/01/01，而第一筆交易其實是 2025/01/08 —— 差七天。
+       那七天內只要有任何一筆資料，算出來的期初就是錯的，這個優化就默默失效
+       （錯的期初會讓解析失敗、退回原行為，所以不危險，但也沒人會發現它沒作用）。
+       「哪一行算交易列」的定義只有解析器那一份，不要在這裡長出第二份。
     """
     from sqlalchemy import and_, func, select
 
-    from core.bank_statement import _DATE
     from core.finance_logic import bank_running_balance
     from db.models import CrmCashEntry
-    m = _DATE.search(text or "")
-    if not m:
-        return None
-    y = int(m.group(1))
-    if y < 1000:
-        y += 1911
     try:
-        first_day = _parse_day(f"{y:04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}")
+        first_day = _parse_day(first_date)
     except Exception:
         return None
     row = (await session.execute(
@@ -500,15 +500,20 @@ async def _build_statement_preview(session, acct, ent, text):
     acct_id = acct.id
     # 分類規則走 DB（使用者可編），不是寫死那 14 條
     rules = await _load_import_rules(session, acct_id)
-    # 🔴 期初餘額是**提示不是約束**：帶著跑一次，對不上就退回原本的行為。
+    # 先解一次（不帶期初）—— 這一趟的目的是拿到**第一筆交易日**。
+    # 從整份文字撈第一個日期會撈到表頭的「查詢期間」，見 _balance_before 的說明。
+    res = parse_statement(text, rules=rules)
+    # 🔴 期初餘額是**提示不是約束**：算得出來就再解一次，對不上就留用第一次的。
     #    parse_statement 拿 opening_balance 當硬條件 —— 第一列跟它對不上就整份
     #    解析失敗。而它對不上是很常見的（帳上那段期間有缺漏、重疊匯入、
     #    對帳單不是從帳上資料的斷點開始）。擋掉一份有效的對帳單，比讓第一列
     #    多打一個勾嚴重得多。
-    opening = await _balance_before(session, acct, text)
-    res = parse_statement(text, rules=rules, opening_balance=opening)
-    if opening is not None and not res.ok:
-        res = parse_statement(text, rules=rules)
+    if res.ok and res.rows:
+        opening = await _balance_before(session, acct, res.rows[0].date)
+        if opening is not None:
+            better = parse_statement(text, rules=rules, opening_balance=opening)
+            if better.ok:            # 對得上才用 —— 對不上就當沒這個提示
+                res = better
     if not res.ok:
         return {"ok": False, "errors": res.errors,
                 "warnings": res.warnings, "rows": []}
