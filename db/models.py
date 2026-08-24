@@ -1531,6 +1531,56 @@ class BankImportDraft(Base):
         Index("ix_bankdraft_acct", "entity", "bank_account_id"),
     )
 
+class FinanceNetSnapshot(Base):
+    """淨值快照（資產儀表板的時序，§8 階段 5，2026-08-24）。
+
+    一列＝某天的資產全貌：`buckets` 是 {桶名: 金額} 的自由字典（owner 私帳的
+    桶：生活帳戶/公司現金/公司應收/財富自由總額/…），`total`＝合計。
+    拍快照時系統欄自動算（銀行/應收/器材/持股）、手填欄帶上次值 —— auto 欄
+    存「當下系統算出的那部分」供事後稽核（快照是歷史，不隨帳目重算）。
+    歷史匯入（owner Sheet 2021/3 起 117 列）與新快照同表同構。"""
+    __tablename__ = "finance_net_snapshots"
+
+    id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="parent")
+    snap_date = Column(DateTime(timezone=True), nullable=False)
+    buckets = Column(JSONB, nullable=False, default=dict)   # {桶名: 金額}
+    total = Column(BigInteger, nullable=False, default=0)
+    auto = Column(JSONB, nullable=True)                     # 系統算的子集（稽核）
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("entity", "snap_date",
+                                       name="uq_networth_entity_date"),)
+
+
+class FinanceHolding(Base):
+    """證券持股（資產儀表板的自動報價層，§8 階段 5）。
+
+    持股手維護（買賣時改一列）、價格自動抓（services/quote_fetcher —— TWSE/
+    stooq 免 key 公開源；`quote_symbol` 空＝manual，現值取 `manual_value`）。
+    抓不到就沿用 last_price 並標舊價 —— 報價源斷線不能擋拍快照。"""
+    __tablename__ = "finance_holdings"
+
+    id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="parent")
+    broker = Column(String(64), nullable=True)              # 富邦證券/盈透/Firstrade…
+    symbol = Column(String(32), nullable=True)              # 2330/0050/VTI…（顯示用）
+    name = Column(String(128), nullable=False)
+    shares = Column(Float, nullable=True)                   # 股數（manual 列可空）
+    currency = Column(String(8), nullable=False, default="TWD")
+    # 報價源代號："tse:2330" / "stooq:vti.us" / ""=manual（現值用 manual_value）
+    quote_symbol = Column(String(64), nullable=True, default="")
+    last_price = Column(Float, nullable=True)               # 最近抓到的單價（原幣）
+    price_at = Column(DateTime(timezone=True), nullable=True)
+    manual_value = Column(BigInteger, nullable=True)        # 手動現值（TWD）
+    sort_order = Column(Integer, default=0)
+    active = Column(Boolean, default=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class FinanceCategoryMap(Base):
     """收支/請款/發票 category → 科目 對映（引擎的翻譯層）。
 

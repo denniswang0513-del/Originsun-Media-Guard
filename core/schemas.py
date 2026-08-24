@@ -1358,6 +1358,30 @@ class CardAiSuggestPayload(BaseModel):
     rows: List[CardAiSuggestRow] = []
 
 
+class HoldingPayload(BaseModel):
+    """資產儀表板 — 持股（api_finance_assets）。quote_symbol 空＝manual。"""
+    broker: Optional[str] = None
+    symbol: Optional[str] = None
+    name: str = ""
+    shares: Optional[float] = None
+    currency: str = "TWD"
+    quote_symbol: Optional[str] = ""
+    last_price: Optional[float] = None
+    manual_value: Optional[int] = None
+    sort_order: int = 0
+    active: bool = True
+    note: Optional[str] = None
+    entity: Optional[str] = None      # 由 query/守衛決定，payload 值不採用
+
+
+class NetSnapshotPayload(BaseModel):
+    """淨值快照。total 由後端加總（前端算的不收）。"""
+    snap_date: str = ""
+    buckets: dict = {}
+    note: Optional[str] = None
+    entity: Optional[str] = None
+
+
 class BankImportRulePayload(BaseModel):
     """對帳單摘要 → 收支類別 的分類規則（使用者可編）。
 
