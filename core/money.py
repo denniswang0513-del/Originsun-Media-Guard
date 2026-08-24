@@ -125,6 +125,10 @@ _NOT_MONEY = {
 # ⚠️ 這裡的理由是**斷言不是事實**：哪天有人在掛 MoneyRedactRoute 的 router 上
 # 加一支回這些鍵的端點、第一層又沒擋，兩層會一起放行。搬端點時要回頭看這張表。
 _ONLY_ON_BLOCKED_ROUTES = {
+    "buckets": "淨值快照的資產桶 —— finance/assets 整支 require_entity 檔"
+               "（另 buckets 是泛名：aging_buckets 等非錢結構也用，抹了會誤殺）",
+    "last_price": "持股最近報價 —— finance/assets 整支 require_entity 檔",
+    "price_at": "報價時間戳（不是金額）—— 同上",
     "subtotal": "報價小計 —— crm/quotes 整支 403",
     "commission": "發票佣金 —— crm/finance 整支 403",
     "claim": "收支明細的請款欄 —— crm/finance 整支 403",
