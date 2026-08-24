@@ -1577,7 +1577,10 @@ class FinanceHolding(Base):
     name = Column(String(128), nullable=False)
     shares = Column(Float, nullable=True)                   # 股數（manual 列可空）
     currency = Column(String(8), nullable=False, default="TWD")
-    # 報價源代號："tse:2330" / "stooq:vti.us" / ""=manual（現值用 manual_value）
+    # 報價源代號："tse:2330" / "yahoo:VTI"（LSE 如 "yahoo:VWRA.L"）/ ""=manual
+    # 🔴 只認 tse: 與 yahoo: 兩個前綴（services/quote_fetcher.py）。stooq 在
+    # 2026-08-24 實測已加反爬、**不要填** —— 未知前綴的失敗長得跟「網路抓不到」
+    # 一模一樣（都只是進 failed 清單），沒人查得出是格式寫錯。
     quote_symbol = Column(String(64), nullable=True, default="")
     last_price = Column(Float, nullable=True)               # 最近抓到的單價（原幣）
     price_at = Column(DateTime(timezone=True), nullable=True)

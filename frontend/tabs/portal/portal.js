@@ -97,7 +97,7 @@ async function _loadProjects() {
     const sel = document.getElementById('portal-new-project');
     if (!sel) return;
     try {
-        const d = await tfetch('/api/v1/crm/projects');
+        const d = await tfetch('/api/v1/crm/projects?entity=parent');
         _projects = d.projects || [];
         sel.innerHTML = '<option value="">— 選擇專案 —</option>' + _projects.map(p =>
             `<option value="${esc(p.id)}">${esc(p.name)}${p.client_short_name ? '（' + esc(p.client_short_name) + '）' : ''}</option>`

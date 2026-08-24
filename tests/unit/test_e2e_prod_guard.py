@@ -37,8 +37,14 @@ E2E = Path(__file__).resolve().parents[1] / "e2e"
 #:    2026-08-24 加了一支改 settings.json 的 e2e（記帳費設定），它不碰資料庫，
 #:    卻會改掉那台機器的設定；打到生產就是改生產設定，比種幾筆測試資料更難察覺。
 #:    當時這條測試把它判成「唯讀」並要求拿掉防護 —— 判準錯了，不是防護錯了。
+# 判準是「有沒有副作用」，不是「有沒有直接寫 DB」—— e2e 也可以透過瀏覽器
+# 打端點改資料（ui_ledger_r5 就是：PUT /project-ledger 改結案日）。那條路
+# 一樣會弄髒生產，所以這些痕跡也要算進來（/simplify 2026-08-25）。
 SEED_MARKS = ("from db.session import", "get_session_factory",
-              'settings.json"', "settings.json'")
+              'settings.json"', "settings.json'",
+              "method: 'PUT'", 'method: "PUT"',
+              "method: 'POST'", 'method: "POST"',
+              "_finProjLedger.save", "_finAssets.")
 
 DEV = "postgresql+asyncpg://u:p@192.168.1.132:5432/mediaguard_dev"
 PROD = "postgresql+asyncpg://u:p@192.168.1.132:5432/mediaguard"

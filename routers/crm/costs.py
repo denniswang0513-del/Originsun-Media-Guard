@@ -1628,14 +1628,25 @@ async def duplicate_cost_group(group_id: str, req: CostGroupDuplicate, request: 
 
 
 @router.get("/cost-groups/{group_id}/summary", dependencies=[Depends(money_dep)])
-async def get_cost_group_summary(group_id: str):
-    """單一子表的儀表板資料。"""
+async def get_cost_group_summary(group_id: str, request: Request):
+    """單一子表的儀表板資料。
+
+    🔴 要自己補列級的帳本守衛：`money_dep` 的私帳那道只認路徑參數
+    `project_id`，這支的路徑參數是 `group_id`，所以整道跳過 —— 有 money_view
+    但沒有 finance_mine 的人，拿到 group_id 就讀得到 mine 專案的成本合計。
+    發票／請款／收支那幾支都各自補了 require_entity，只有這支漏掉
+    （/simplify 2026-08-25；dev 上 mine 專案還沒有成本子表，所以尚未可利用）。
+    """
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         g = await session.get(CrmProjectCostGroup, group_id)
         if not g:
             raise HTTPException(status_code=404, detail="找不到此子表")
+        from core.ledger import require_entity
+        proj = await session.get(CrmProject, g.project_id) if g.project_id else None
+        if proj is not None:
+            require_entity(request, proj.entity or "parent", level="full")
         summary = await _compute_group_summary(session, group_id)
     return {"cost_group": _cost_group_to_dict(g, summary)}
 

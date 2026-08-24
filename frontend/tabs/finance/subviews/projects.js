@@ -369,8 +369,13 @@ _fp.save = async (btn) => {
 function _sortProjects() {
     _data.projects.sort((a, b) => {
         if (!a.close_date !== !b.close_date) return a.close_date ? 1 : -1;
-        return (b.close_date || '').localeCompare(a.close_date || '')
-            || (b.updated_at || '').localeCompare(a.updated_at || '');
+        // ISO 字串直接比大小就好 —— localeCompare 會照地區的排序規則走，
+        // 對 '2026-08-24T19:32:37+00:00' vs '...:37.134519+00:00'（isoformat
+        // 會省略 .000000）給出跟時間順序相反的答案。
+        const ca = a.close_date || '', cb = b.close_date || '';
+        if (ca !== cb) return ca < cb ? 1 : -1;
+        const ua = a.updated_at || '', ub = b.updated_at || '';
+        return ua === ub ? 0 : (ua < ub ? 1 : -1);
     });
 }
 

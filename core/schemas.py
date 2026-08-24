@@ -1011,6 +1011,9 @@ class EquipmentPayload(BaseModel):
     status: Optional[str] = None          # 在庫/出勤/維修/除役
     note: Optional[str] = None
     cover_url: Optional[str] = None
+    # 帳本（兩本帳 §8）：建立時可指定（需該帳本的 full 權限），**更新時不可換**
+    # —— 換帳本＝把一件器材的折舊整個搬到另一本損益表，那不是編輯是搬遷。
+    entity: Optional[str] = None
 
 
 class EquipmentCheckoutPayload(BaseModel):
@@ -1341,7 +1344,10 @@ class CardImportRow(BaseModel):
     amount: int
     note: str = ""
     category: Optional[str] = None
-    selected: bool = True
+    # 🔴 沒有預設值：舊版前端（只送勾選的列）如果因為快取活著，帶預設 True 會
+    # 讓後端對著被裁過的清單重跑重複判定 —— 也就是無聲退回修掉的那個 bug。
+    # 必填的話它會 422 大聲壞掉，那是對的失敗方式。
+    selected: bool
 
 
 class CardImportApply(BaseModel):
@@ -1385,7 +1391,6 @@ class HoldingPayload(BaseModel):
     sort_order: int = 0
     active: bool = True
     note: Optional[str] = None
-    entity: Optional[str] = None      # 由 query/守衛決定，payload 值不採用
 
 
 class LedgerDetailPayload(BaseModel):
@@ -1407,6 +1412,8 @@ class LedgerDetailPayload(BaseModel):
     close_date: Optional[str] = None         # 結案日 'YYYY-MM-DD'；''＝清空
 
 
+# 註：本組 payload 刻意**沒有** entity —— 帳本一律由 query 的 entity 經
+# `_guard` 決定，payload 說了不算（不然等於讓請求體自己挑要寫進哪本帳）。
 class NetSnapshotPayload(BaseModel):
     """淨值快照。total 由後端加總（前端算的不收）。"""
     snap_date: str = ""

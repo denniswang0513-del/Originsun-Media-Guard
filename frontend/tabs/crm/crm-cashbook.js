@@ -73,7 +73,12 @@ async function _loadLinkLists() {
 }
 
 async function _loadProjectList() {
-    try { _projectList = (await _fetch('/projects')).projects || []; } catch(_) { _projectList = []; }
+    // 🔴 要帶帳本：不帶＝兩本都回，私帳的 402 案會混進母公司的下拉、反之亦然。
+    // 選到另一本帳的專案，那筆錢在**兩本帳的掛帳支出裡都不會出現**（rollup 按
+    // entity 篩收支、再按 entity 迭代專案，跨帳本的組合兩邊都對不上）。
+    try {
+        _projectList = (await _fetch('/projects?entity=' + _pinEntity())).projects || [];
+    } catch (_) { _projectList = []; }
 }
 
 async function _loadClientList() {
@@ -252,13 +257,17 @@ function renderList() {
         body.innerHTML = `<div class="crm-empty">尚無收支紀錄${_filters.q ? '，請調整搜尋' : ''}</div>`;
         return;
     }
-    body.innerHTML = _sorter.sorted(_entries).map(e => `
+    // 每列各算一次就好 —— 三元判斷與輸出各呼叫一次的話，4,704 列會多跑
+    // 9,408 次同樣的計算
+    body.innerHTML = _sorter.sorted(_entries).map((e) => {
+        const card = _cardAmt(e), out = _bankOut(e);
+        return `
         <div class="crm-row${e.id === _selectedId ? ' selected' : ''}" onclick="window._cashSelect('${e.id}')">
             <div class="crm-row-date">${e.entry_date ? e.entry_date.substring(0, 10) : '—'}</div>
             <div class="crm-row-name">${_esc(e.summary)}</div>
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
-            <div class="cash-col-card" style="color:#c4b5fd;">${_cardAmt(e) ? '$' + _fmtNum(_cardAmt(e)) : ''}</div>
-            <div style="color:#fca5a5;">${_bankOut(e) ? '$' + _fmtNum(_bankOut(e)) : ''}</div>
+            <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
+            <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
             <div>${e.category ? _esc(e.category) : _NO_CAT_DOT}</div>
             <div title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}</div>
             <div>${_esc(e.project_name || '')}</div>
@@ -266,7 +275,8 @@ function renderList() {
             <div>${_esc(_acctName(e.bank_account_id))}</div>
             ${kebabMenuHtml(e.id, { onEdit: '_cashEdit', onDuplicate: '_cashDup', onDelete: '_cashDelete' })}
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 /** 刷卡金額：status='card' 的列（刷卡當下不動銀行，所以不算銀行支出）。 */

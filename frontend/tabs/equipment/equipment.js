@@ -258,7 +258,7 @@ function _mountOverlay(innerHTML) {
 async function _loadProjects() {
     if (_projectsCache) return _projectsCache;
     try {
-        const d = await tfetch('/api/v1/crm/projects');
+        const d = await tfetch('/api/v1/crm/projects?entity=parent');
         _projectsCache = (d.projects || []).map(p => ({ id: p.id, name: p.name }));
     } catch {
         _projectsCache = [];

@@ -19,9 +19,8 @@ entity 的帳本頁（刻意沒有 CRM 專案管理），但它缺的正是 owne
 - 檢查       = 實收 − Σ工項（應為 0）
   這兩條是 2026-08-24 對 402 案反推驗證出來的 Sheet 算式（實收 395/402、
   檢查 397/402 吻合；不吻合的是 Sheet 自己帳不平的那幾案，照實顯示不修）。
-  算式正本在本檔 `compute()` —— 前端只顯示，不自己算第二份。
-- 掛帳支出   = 掛在該案的收支明細 expense 合計（階段 3 按案碼回掛的 612 筆）
-- 未付應付   = 該案 crm_payment_requests 未付款者合計（委外／代開稅款）
+  算式正本在 `core/ledger_project.py` 的 `compute()`（本檔只是 import 它；
+  腳本與測試也 import 同一份）—— 前端只顯示，不自己算第二份。
 
 工項與費用欄存在 `crm_projects.ledger_detail`（JSONB），可由 UI 編輯；
 工項清單預設十項、settings `my_ledger.income_items` 可覆寫。

@@ -32,6 +32,13 @@ function _manualBuckets(auto, last) {
     return manual;
 }
 
+// 🔴 這行必須在**任何** `_fa.xxx = ...` 之前 —— ES module 的 const 有 TDZ，
+// 而那些賦值是模組求值時就跑的頂層敘述。2026-08-25 之前它待在檔案下半部，
+// 整個子視圖每次點開都拋 ReferenceError、畫「子視圖載入失敗」，而三輪審查
+// ＋一次瀏覽器驗收都沒抓到（驗收只開了當輪改過的子視圖）。
+const _fa = (window._finAssets = window._finAssets || {});
+
+
 export default async function render(container, ctx = {}) {
     _c = container;
     if (ctx.isCurrent) _isCurrent = ctx.isCurrent;
@@ -175,8 +182,6 @@ function _holdingsHtml() {
 }
 
 // ── 動作 ─────────────────────────────────────────────────
-const _fa = (window._finAssets = window._finAssets || {});
-
 _fa.refreshQuotes = async (btn) => {
     btn.disabled = true; btn.textContent = '抓報價中…';
     try {

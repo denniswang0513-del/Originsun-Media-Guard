@@ -103,7 +103,7 @@ let _projectsCache = null;
 /** CRM 專案清單（挑選器用）。proposal-folders 的資料夾連結也吃這一份。 */
 export function crmProjects() {
     if (!_projectsCache) {
-        _projectsCache = tfetch('/api/v1/crm/projects').then(d => d.projects || []);
+        _projectsCache = tfetch('/api/v1/crm/projects?entity=parent').then(d => d.projects || []);
     }
     return _projectsCache;
 }

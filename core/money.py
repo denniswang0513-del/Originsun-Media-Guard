@@ -142,6 +142,13 @@ _ONLY_ON_BLOCKED_ROUTES = {
     "deposit": "收支明細的存入欄 —— 同上",
     "expense": "收支明細的支出欄；另外它也是雜支端點 `{expense:{id}}` 物件的鍵，"
                "抹了會把建立回應打壞",
+    # 以下四個是兩本帳 §8 新增的錢，一律只出現在 require_entity 全擋的端點上。
+    # 掃描器原本**看不到它們**（既不在 _PREFILTER 詞彙、中文尾註也不含
+    # 「現值/淨值」），等於漏了也不會變紅 —— 明著登記進來讓網子接得住。
+    "total": "淨值快照的總額 —— finance/assets 整支 require_entity 檔",
+    "manual_value": "持股的手填現值 —— 同上",
+    "auto": "快照的系統欄快照（銀行/應收/器材/證券）—— 同上",
+    "ledger_detail": "逐案損益的工項與費用拆解 —— finance/project-ledger 整支檔",
 }
 
 # 是錢，但屬於「工作面的錢」——owner 待決的邊界

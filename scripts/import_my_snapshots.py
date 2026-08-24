@@ -26,7 +26,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts._common import (cli, connect, db_target, money,  # noqa: E402
+from scripts._common import (assert_safe_rebuild, cli, connect, db_target, money,  # noqa: E402
                              parse_date, print_dry_run_end, print_target)
 
 BUCKET_COLS = ["生活帳戶", "公司資產(現金)", "公司資產(應收帳款)", "源日資本額",
@@ -100,6 +100,13 @@ async def run(csv_path: str, apply: bool, prod: bool, force: bool = False):
     c = await connect(dsn)
     try:
         n0 = await c.fetchval("SELECT count(*) FROM finance_net_snapshots WHERE entity='mine'")
+        # 守衛的 docstring 點名「拍快照」是會被整批清掉的東西之一，這支卻是
+        # 五支裡唯一沒掛上的（force 參數收下了卻從沒用過＝加了旗標也沒差別）。
+        await assert_safe_rebuild(c, [
+            ("UI 拍的淨值快照（非本腳本匯入）",
+             "SELECT count(*) FROM finance_net_snapshots WHERE entity='mine'"
+             " AND (note IS NULL OR note NOT LIKE '[sheet-import]%')"),
+        ], force)
         print(f"\n清場：mine snapshots={n0} → 重建")
         await c.execute("DELETE FROM finance_net_snapshots WHERE entity='mine'")
         import json

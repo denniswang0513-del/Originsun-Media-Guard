@@ -110,6 +110,20 @@ def _strip_mine_money(d: dict, request) -> dict:
     return redact(d)
 
 
+def _assert_mine_writable(equip, request) -> None:
+    """🔴 mine 器材只有「有我的帳 scope」的人能改／刪。
+
+    讀的牆（_strip_mine_money）2026-08-25 之前只立在讀那一側，寫這側整個沒有：
+    只有 `equipment` 模組的 Lv1 帳號可以直接 `PUT {"purchase_cost": …}` 改寫
+    owner 私人器材的成本。牆要兩側都有才叫牆。
+    """
+    if (getattr(equip, "entity", None) or "parent") != "mine":
+        return
+    from core.money import viewer_has_mine_scope
+    if not viewer_has_mine_scope(request):
+        raise HTTPException(status_code=403, detail="這件器材不屬於你可存取的帳本")
+
+
 def _equip_dict(e) -> dict:
     return {
         "id": e.id,
@@ -176,9 +190,16 @@ async def _get_equipment_or_404(session, eid: str):
 
 
 @router.get("")
-async def list_equipment(request: Request, q: str = "", category: str = "", status: str = ""):
-    """器材列表 + 篩選（q=名稱/序號、分類、狀態），附 current_checkout + overdue 旗標。"""
+async def list_equipment(request: Request, q: str = "", category: str = "",
+                         status: str = "", entity: str = ""):
+    """器材列表 + 篩選（q=名稱/序號、分類、狀態、帳本），附 current_checkout + overdue。
+
+    entity：''＝兩本都看（維持既有行為，清單本身共用可見）、'parent'、'mine'。
+    """
     _check_auth(request)
+    from core.ledger import ENTITIES
+    if entity and entity not in ENTITIES:
+        raise HTTPException(status_code=422, detail=f"未知的帳本: {entity}")
     factory = _require_factory()
 
     from sqlalchemy import or_, select
@@ -186,6 +207,8 @@ async def list_equipment(request: Request, q: str = "", category: str = "", stat
 
     async with factory() as session:
         query = select(Equipment).order_by(Equipment.updated_at.desc())
+        if entity:
+            query = query.where(Equipment.entity == entity)
         if category:
             query = query.where(Equipment.category == category)
         if status:
@@ -236,9 +259,16 @@ async def create_equipment(req: EquipmentPayload, request: Request):
 
     data = req.model_dump(exclude_unset=True)
     data["name"] = name
+    # 🔴 帳本要收得進來。原本 entity 只有讀那側用得到（折舊按它進哪本損益表、
+    # 錢牆按它決定抹不抹），寫這側收不了 —— owner 從 UI 新增的私人器材一律
+    # 落 parent，折舊靜靜進了母公司損益表，而且 UI 沒有任何辦法搬回去。
+    from core.ledger import require_entity
+    ent = (data.get("entity") or "parent").strip() or "parent"
+    require_entity(request, ent, level="full")
     equip = Equipment(
         id=uuid.uuid4().hex,
         purchase_date=purchase_date,
+        entity=ent,
         **{k: v for k, v in data.items() if k in _EQUIP_FIELDS},
     )
     async with factory() as session:
@@ -299,9 +329,14 @@ async def update_equipment(eid: str, req: EquipmentPayload, request: Request):
     data = req.model_dump(exclude_unset=True)
     if "name" in data and not (data["name"] or "").strip():
         raise HTTPException(status_code=422, detail="name 不可為空")
+    # 換帳本＝把這件器材的折舊整個搬到另一本損益表，那不是編輯。比照兩本帳
+    # 其他寫入端點：更新一律不得換帳本。
+    if data.get("entity") is not None:
+        raise HTTPException(status_code=422, detail="不能用更新換帳本")
 
     async with factory() as session:
         equip = await _get_equipment_or_404(session, eid)
+        _assert_mine_writable(equip, request)
         for k, v in data.items():
             if k in _EQUIP_FIELDS:
                 setattr(equip, k, v)
@@ -310,7 +345,9 @@ async def update_equipment(eid: str, req: EquipmentPayload, request: Request):
         equip.updated_at = datetime.now(timezone.utc)
         await session.commit()
         await session.refresh(equip)
-    return {"status": "ok", "equipment": _equip_dict(equip)}
+    # 🔴 回應要過讀的牆 —— 兩支 GET 都包了，這支原本是裸的，於是送一個空
+    # body（exclude_unset 讓它什麼都不改）就讀得到 GET 藏起來的 purchase_cost。
+    return {"status": "ok", "equipment": _strip_mine_money(_equip_dict(equip), request)}
 
 
 @router.delete("/{eid}")
@@ -324,6 +361,7 @@ async def delete_equipment(eid: str, request: Request):
 
     async with factory() as session:
         equip = await _get_equipment_or_404(session, eid)
+        _assert_mine_writable(equip, request)
         await session.execute(sa_delete(EquipmentCheckout)
                               .where(EquipmentCheckout.equipment_id == eid))
         await session.execute(sa_delete(EquipmentMaintenance)

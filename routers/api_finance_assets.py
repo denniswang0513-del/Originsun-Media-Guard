@@ -179,7 +179,15 @@ async def _owned(session, model, oid: str, request: Request, label: str):
     這一步就是授權本身，不需要前面再來一次 `_guard(query 的 entity)`：
     query 參數只說得出「使用者想動哪本帳」，說不出「這一列是誰的」，而多驗
     那一次還會在「帶了自己沒權限的 entity、但列其實是自己的」時誤 403
-    （/simplify 2026-08-25）。三個端點都要，抽成一份免得第四個忘記。"""
+    （/simplify 2026-08-25）。三個端點都要，抽成一份免得第四個忘記。
+
+    🔴 但「不用 query 的 entity 驗」不等於「進 DB 前什麼都不驗」：原本連完全
+    沒帶 token 的請求都會先查一次 DB，401（id 存在）與 404（id 不存在）的差別
+    就是一台免費的 id 存在性預言機，順帶給未認證者一條 DB 往返。所以先擋沒有
+    任何帳本權限的人，列級的 `_guard(row.entity)` 維持在後面不動。
+    """
+    from core.auth import check_logged_in
+    check_logged_in(request)           # 沒登入 → 401，不進 DB
     row = await session.get(model, oid)
     if not row:
         raise HTTPException(status_code=404, detail=f"{label}不存在")
@@ -197,7 +205,7 @@ async def create_holding(payload: HoldingPayload, request: Request,
     factory = _factory_or_503()
     async with factory() as session:
         h = FinanceHolding(id=uuid.uuid4().hex, entity=ent,
-                           **payload.model_dump(exclude={"entity"}))
+                           **payload.model_dump())
         session.add(h)
         await session.commit()
     return {"status": "ok", "id": h.id}
@@ -210,7 +218,7 @@ async def update_holding(holding_id: str, payload: HoldingPayload,
     factory = _factory_or_503()
     async with factory() as session:
         h = await _owned(session, FinanceHolding, holding_id, request, "持股")
-        for k, v in payload.model_dump(exclude_unset=True, exclude={"entity"}).items():
+        for k, v in payload.model_dump(exclude_unset=True).items():
             setattr(h, k, v)
         h.updated_at = datetime.now(timezone.utc)
         await session.commit()

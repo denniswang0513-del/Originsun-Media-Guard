@@ -221,5 +221,51 @@ def test_pin_project_ledger_ap_matches_ap_open_payments():
     src = _read("routers/api_finance_projects.py")
     fn = src.split("async def _rollups")[1].split("\n@router")[0]
     assert "is_advance == 0" in fn
+    # 🔴 上面那行單獨用是**釘不住**的：改回裸的 `is_advance == 0` 之後它照樣
+    # 綠著（子字串在 or_(...) 裡面也命中）。NULL 那半要單獨釘。
+    assert "is_advance.is_(None)" in fn
     assert 'payment_status != "已付款"' in fn
     assert "ap_open_payments" in src, "口徑正本要留名字，否則第三個聚合點又會從零決定一次"
+
+
+# ── 跨帳本掛專案（/simplify 第 5 輪）──────────────────────────────
+def test_cash_entry_cannot_link_a_project_from_the_other_ledger():
+    """🔴 mine 收支掛到 parent 專案（或反過來）會讓那筆錢在**兩本帳的掛帳支出
+    裡都不出現** —— rollup 按 entity 篩收支、再按 entity 迭代專案，跨帳本的
+    組合兩邊都對不上，比多算一筆更難發現。實測已回 403。
+
+    下拉帶了 entity 之後這條路正常走不到，但守衛不能靠 UI。
+    """
+    src = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
+    fn = src.split("async def _assert_project_same_entity(")[1].split("\ndef ")[0]
+    assert 'status_code=403' in fn
+    # 建立與更新兩條路都要叫
+    for name in ("create_cash_entry", "update_cash_entry"):
+        seg = src.split(f"async def {name}(")
+        if len(seg) > 1:
+            assert "_assert_project_same_entity(session, e)" in seg[1].split("\n@router")[0], name
+
+
+def test_cashbook_project_dropdown_carries_the_ledger():
+    js = (ROOT / "frontend/tabs/crm/crm-cashbook.js").read_text(encoding="utf-8")
+    assert "'/projects?entity=' + _pinEntity()" in js, "收支的專案下拉沒帶帳本"
+
+
+def test_cost_group_summary_has_a_row_level_ledger_guard():
+    """🔴 money_dep 的私帳那道只認路徑參數 `project_id`；這支的路徑參數是
+    `group_id`，整道跳過 —— 有 money_view 但沒有 finance_mine 的人拿到
+    group_id 就讀得到 mine 專案的成本合計。"""
+    src = (ROOT / "routers/crm/costs.py").read_text(encoding="utf-8")
+    fn = src.split("async def get_cost_group_summary(")[1].split("\n@router")[0]
+    assert "request: Request" in src.split("async def get_cost_group_summary(")[1][:80]
+    assert 'require_entity(request, proj.entity or "parent", level="full")' in fn
+
+
+def test_holdings_owner_check_authenticates_before_touching_the_db():
+    """匿名請求不該先查一次 DB —— 401（id 存在）vs 404（不存在）就是一台
+    免費的 id 存在性預言機。實測修正後兩者都回 401。"""
+    src = (ROOT / "routers/api_finance_assets.py").read_text(encoding="utf-8")
+    fn = src.split("async def _owned(")[1].split("\n@router")[0]
+    i_auth = fn.index("check_logged_in(request)")
+    i_db = fn.index("await session.get(model, oid)")
+    assert i_auth < i_db, "身份檢查要在進 DB 之前"

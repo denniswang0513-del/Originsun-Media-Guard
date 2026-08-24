@@ -35,7 +35,7 @@ let _items = [];   // 上次搜尋結果快取（tag 編輯直接讀，免重抓
 export async function initFootageTab() {
     _content = document.getElementById('ft-content');
     if (!_content) return;
-    _projects = (await ffetch('/api/v1/crm/projects').catch(() => ({ projects: [] }))).projects || [];
+    _projects = (await ffetch('/api/v1/crm/projects?entity=parent').catch(() => ({ projects: [] }))).projects || [];
     await refresh();
 }
 

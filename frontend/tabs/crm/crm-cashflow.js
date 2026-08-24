@@ -74,7 +74,7 @@ async function refresh() {
             cfetch('/api/v1/cashflow/forecast?days=90'),
             cfetch('/api/v1/cashflow/milestones'),
             cfetch('/api/v1/cashflow/month-close'),
-            cfetch('/api/v1/crm/projects').catch(() => ({ projects: [] })),
+            cfetch('/api/v1/crm/projects?entity=parent').catch(() => ({ projects: [] })),
         ]);
         _projects = (projs.projects || []).map(p => ({ id: p.id, name: p.name }));
         // 固定月成本 forecast 已回（fc.fixed_monthly，同一 settings 鍵），不用另抓 settings

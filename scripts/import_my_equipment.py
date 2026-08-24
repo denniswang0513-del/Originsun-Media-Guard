@@ -67,16 +67,23 @@ def load_rows(csv_path: str):
     return out
 
 
-def system_net(rows, as_of=(2026, 8)) -> int:
-    """直線攤到 0 的系統口徑淨值（等價 core.finance_logic 的月粒度算法）。"""
-    total = 0
-    for e in rows:
-        if e["status"] == "除役" or not e["date"] or e["cost"] <= 0:
-            continue
-        used = (as_of[0] - e["date"].year) * 12 + (as_of[1] - e["date"].month)
-        used = max(0, min(e["months"], used))
-        total += round(e["cost"] * (1 - used / e["months"]))
-    return total
+def system_net(rows) -> int:
+    """系統口徑（直線攤到 0）的在庫淨值 —— 走報表引擎那一份，不自己算。
+
+    🔴 這行印出來的數字唯一的用途，是讓 owner 確認「Sheet 449,903（5% 殘值）
+    vs 系統 X（攤到 0）的差額＝殘值底床、口徑不同不是錯誤」。用**另一套**算法
+    算出來的 X 沒辦法證明那句話 —— 原本這裡自己寫的版本把購入當月不算折舊
+    （引擎是當月即折一整月），123 項整體差了大約一個月的總折舊。
+    而且原本 as_of 寫死 (2026, 8)，時間一過就靜默失真。
+    """
+    from datetime import datetime, timezone
+
+    from core.finance_logic import equipment_net_rows
+    return equipment_net_rows(
+        [{"name": e["name"], "purchase_cost": e["cost"], "purchase_date": e["date"],
+          "depreciation_months": e["months"], "retired_date": None,
+          "status": e["status"]} for e in rows],
+        datetime.now(timezone.utc).strftime("%Y-%m"))["net_total"]
 
 
 async def run(csv_path: str, apply: bool, prod: bool, force: bool = False):

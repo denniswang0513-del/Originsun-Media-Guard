@@ -161,7 +161,7 @@ def test_registry_covers_money_columns():
     # 剛好選中我列的字」上 —— `estimated`/`actual` 就是被人找到之後才手動補進
     # 詞彙表的，失效模式跟它要取代的「人抄名單」一模一樣。而作者用中文寫
     # 「# 預估金額」的機率，遠高於他選中某個英文 token。
-    zh = re.compile(r"金額|費用|單價|價格|款項|薪|成本|預算|營收|匯費|稅額")
+    zh = re.compile(r"金額|費用|單價|價格|款項|薪|成本|預算|營收|匯費|稅額|現值|淨值|餘額")
     noted = {m.group(1) for m in re.finditer(
         r"^\s{4}(\w+)\s*=\s*Column\([^\n]*#\s*(.*)$", src, re.M) if zh.search(m.group(2))}
 

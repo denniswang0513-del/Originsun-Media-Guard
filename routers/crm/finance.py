@@ -1698,6 +1698,24 @@ def _normalize_cash_fks(e):
             setattr(e, f, None)
 
 
+async def _assert_project_same_entity(session, e):
+    """🔴 不變式：收支只能掛**同一本帳**的專案。
+
+    下拉帶了 entity 之後這條路正常走不到，但守衛不能靠 UI —— 跨帳本的組合會讓
+    那筆錢在兩本帳的「掛帳支出」裡**都不出現**（api_finance_projects._rollups
+    按 entity 篩收支、再按 entity 迭代專案，兩者對不上就靜靜消失），比多算一筆
+    更難發現。比照 api_finance_projects._owned_project 回 403。
+    """
+    if not e.project_id:
+        return
+    from db.models import CrmProject
+    p = await session.get(CrmProject, e.project_id)
+    if p and (p.entity or "parent") != (e.entity or "parent"):
+        raise HTTPException(
+            status_code=403,
+            detail="不能把收支掛到另一本帳的專案上")
+
+
 def _enforce_cash_project_link(e):
     """🔴 不變式：只有專案類的收支可以掛專案（core/project_link.CASH_CATEGORIES）。
 
@@ -1791,6 +1809,7 @@ async def create_cash_entry(req: CashEntryPayload, request: Request):
     _enforce_cash_project_link(e)
     async with factory() as session:
         await _assert_month_open(session, dates.get("entry_date"), entity=ent)
+        await _assert_project_same_entity(session, e)
         session.add(e)
         await session.flush()      # 讓 _resettle_invoice 的查詢看得到這筆
         # 🔴 建立也要進分配表，不能只有更新路徑做（2026-08-20 實測：新開一筆掛了
@@ -1882,6 +1901,7 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
             await _sync_single_alloc(session, e)
         _normalize_cash_fks(e)
         _enforce_cash_project_link(e)
+        await _assert_project_same_entity(session, e)
         await session.commit()
     return {"status": "ok"}
 

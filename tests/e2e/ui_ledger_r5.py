@@ -17,7 +17,13 @@ sys.path.insert(0, r"E:\Dev\Originsun-Media-Guard")
 from core.auth import create_token  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
+from tests.e2e._guard import refuse_prod_seed  # noqa: E402
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001"
+# 🔴 這支會**改一筆真實的專案資料**（結案日，驗完還原）。改資料的 e2e 一律
+# 先過生產閘門 —— 2026-08-23 就是一支「會種資料又中途失敗」的 e2e 把假發票
+# 寫進生產帳（見 tests/e2e/_guard.py）。
+refuse_prod_seed(BASE)
 PID = "c5271c8acabf476c9846bcc63c18a4f5"      # 2026 思沙龍 EP02 / 龍應台文化基金會
 STRADDLE = "2 龍"                              # 兩個欄位各自都不含，併起來才含
 T = create_token({"sub": "admin", "username": "admin", "access_level": 3,
@@ -75,19 +81,30 @@ with sync_playwright() as p:
     pg.wait_for_selector("#fpl-close", timeout=15000)
     orig = pg.input_value("#fpl-close")
     check(bool(orig), "取得原值", orig)
-    before = names(pg).index("2026 思沙龍 EP02")
-    pg.fill("#fpl-close", "2020-01-01")
-    pg.evaluate("window._finProjLedger.save(document.createElement('button'))")
-    pg.wait_for_timeout(2500)
-    after = names(pg).index("2026 思沙龍 EP02")
-    check(after > before, "改成很舊的日期後往下移", f"{before} → {after}")
 
-    print("[2b] 還原，並驗「就地排序 == 重新載入的順序」")
-    pg.fill("#fpl-close", orig)
-    pg.evaluate("window._finProjLedger.save(document.createElement('button'))")
-    pg.wait_for_timeout(2500)
-    check(pg.input_value("#fpl-close") == orig, "結案日還原", orig)
-    inplace = names(pg)
+    def _save(value):
+        pg.fill("#fpl-close", value)
+        pg.evaluate("window._finProjLedger.save(document.createElement('button'))")
+        pg.wait_for_timeout(2500)
+
+    # 🔴 還原一定要在 finally —— 中間任何一步拋（`.index()` 找不到那列就會
+    # ValueError、fill/evaluate 也會逾時），owner 的結案日就會留在 2020-01-01，
+    # 而且在每一張逐案損益與報表上都跑到別的年份去，沒有任何跡象。
+    inplace = None
+    try:
+        before = names(pg).index("2026 思沙龍 EP02")
+        _save("2020-01-01")
+        after = names(pg).index("2026 思沙龍 EP02")
+        check(after > before, "改成很舊的日期後往下移", f"{before} → {after}")
+    finally:
+        print("[2b] 還原，並驗「就地排序 == 重新載入的順序」")
+        _save(orig)
+        ok = pg.input_value("#fpl-close") == orig
+        check(ok, "結案日還原", orig)
+        if ok:
+            inplace = names(pg)
+    if inplace is None:
+        raise SystemExit("還原失敗，中止")
     # 🔴 這才是真正的不變量：前端就地重排的結果，必須逐列等於現在重新載入
     # 會看到的順序。只驗「回到原本那個 index」是錯的 —— 存檔本來就會動到
     # updated_at（後端排序的次要鍵），原位不見得還是原位。
@@ -107,6 +124,22 @@ with sync_playwright() as p:
     pg.wait_for_timeout(120)
     html = pg.eval_on_selector("#finance-invoices-wrap", "e => e.innerHTML.trim()")
     check(len(html) > 0, "點下去馬上就有東西（loading 或內容）", f"{len(html)} 字元")
+
+    # 🔴 每一個子視圖都點開一次。資產儀表板的 TDZ 崩潰活了三輪審查沒被發現，
+    # 就是因為驗收只開「當輪改過的」那幾個 —— 一支模組載不起來的症狀（畫面
+    # 寫「子視圖載入失敗」）只有真的點下去才看得到。
+    print("[4] 每個子視圖都載得起來")
+    # 只點看得見的 —— mine 模式下 fin-nav-full 那幾顆是刻意隱藏的
+    subs = pg.eval_on_selector_all(
+        "#finance-nav [data-subview]",
+        "els => els.filter(e => e.offsetParent !== null).map(e => e.dataset.subview)")
+    check(len(subs) >= 4, "找得到看得見的子視圖清單", subs)
+    for name in subs:
+        pg.locator(f"#finance-nav [data-subview='{name}']").click()
+        pg.wait_for_timeout(3500)
+        txt = pg.eval_on_selector("#finance-subview", "e => e.innerText.trim()")
+        check("子視圖載入失敗" not in txt and len(txt) > 0,
+              f"子視圖 {name}", " ".join(txt[:70].split()))
 
     check(not errs, "沒有 JS 例外", errs[:2])
     b.close()
