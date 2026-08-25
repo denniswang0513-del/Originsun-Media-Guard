@@ -76,6 +76,7 @@ export async function initFinanceTab() {
     if (!((window._modules || []).includes('finance_mine'))) {
         hideNav('[data-subview="projects"]');
         hideNav('[data-subview="gear"]');   // 器材清冊＝owner 私人器材，同一道門
+        hideNav('[data-subview="receivable"]');   // 私帳應收（逐案投影），同一道門
     }
 
     _shellAllowed = loadShell;

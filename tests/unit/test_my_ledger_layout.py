@@ -137,3 +137,16 @@ def test_assets_overview_lists_per_account_cash():
     assert '"bank_lines"' in py
     js = _read("frontend/tabs/finance/subviews/assets.js")
     assert "d.bank_lines" in js
+
+
+def test_receivable_subview_is_project_based_and_gated():
+    """私帳應收（owner 2026-08-25「除了應付以外，也需要有應收」）＝執行專案
+    的投影 —— 🔴 不是 CRM 應收視圖（那支查 crm_invoices，owner 不開發票，
+    對私帳恆空）。同 projects/gear：釘 mine ＋ finance_mine 指名門。"""
+    js = _read("frontend/tabs/finance/subviews/receivable.js")
+    assert "finFetch('/project-ledger', { entity: 'mine' })" in js
+    assert "omgJumpLedgerProject" in js, "點列要能跳到執行專案（同一條交棒路）"
+    html = _read("frontend/tabs/finance/finance.html")
+    assert html.count('data-subview="receivable"') == 1, "側欄按鈕恰好一顆（插補丁曾重複）"
+    fin = _read("frontend/tabs/finance/finance.js")
+    assert fin.count('hideNav(\'[data-subview="receivable"]\')') == 1

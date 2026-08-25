@@ -19,6 +19,9 @@
         <button class="finance-nav-btn fin-nav-mine-ok" data-inv-view="payments">💳 請款</button>
         <button class="finance-nav-btn fin-nav-mine-ok" data-inv-view="cashbook">📒 收支明細</button>
         <button class="finance-nav-btn fin-nav-mine-ok" data-inv-view="payables">📤 應付帳款</button>
+        <!-- 私帳應收＝逐案投影（owner 不開發票，發票版應收對私帳恆空）；
+             入口由 finance.js 以 finance_mine 指名門把關 -->
+        <button class="finance-nav-btn fin-nav-mine-ok" data-subview="receivable">📥 應收帳款</button>
         <button class="finance-nav-btn fin-nav-full" data-inv-view="receivables">📥 應收帳款</button>
         <!-- 零用金：同事墊的錢。就地掛 tabs/petty 的元件（與獨立網址
              /petty-cash.html 同一套），不是連出去 —— 已經登入的人不該被踢去

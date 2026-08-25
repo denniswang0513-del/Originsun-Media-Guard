@@ -381,3 +381,13 @@ def test_ledger_create_endpoint_guards():
     assert "status_code=409" in fn and "案碼" in fn
     # 前綴不撞：比對必須錨定行尾/檔尾，2026010 不可誤中 20260100
     assert 'pat_mid' in fn and 'pat_end' in fn
+
+
+def test_mine_receivable_subview_is_a_projection_and_gated():
+    """私帳應收（owner 2026-08-25）＝執行專案的投影（owner 不開發票，發票版
+    應收對私帳恆空），固定打 mine、入口走 finance_mine 指名門。"""
+    js = (ROOT / "frontend/tabs/finance/subviews/receivable.js").read_text(encoding="utf-8")
+    assert "finFetch('/project-ledger', { entity: 'mine' })" in js
+    assert "omgJumpLedgerProject" in js         # 點列→執行專案，同一條交棒路
+    fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
+    assert 'hideNav(\'[data-subview="receivable"]\')' in fin

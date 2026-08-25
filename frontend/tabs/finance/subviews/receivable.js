@@ -1,0 +1,98 @@
+/**
+ * receivable.js — 📥 應收帳款（私帳；owner 2026-08-25「除了應付以外，也需要
+ * 有應收」）。
+ *
+ * 🔴 私帳的應收**不是**發票（owner 不開發票，CRM 應收視圖查 crm_invoices 對
+ * 私帳恆空）—— 正確資料源是執行專案的逐案應收（營收 − 已收）。所以這頁是
+ * /finance/project-ledger 的投影：應收 ≠ 0 的案子按客戶分組，收款動作本身在
+ * 收支明細（記收入勾專案，到齊自動變收款）。
+ *
+ * 同 projects/gear：固定打私帳（entity:'mine'），入口由 finance.js 以
+ * finance_mine 指名門把關。
+ */
+import { finFetch, esc, fmtNum } from '../fin-utils.js';
+
+let _c = null;
+let _isCurrent = () => true;
+
+export default async function render(container, ctx = {}) {
+    _c = container;
+    if (ctx.isCurrent) _isCurrent = ctx.isCurrent;
+    _c.innerHTML = '<div style="color:#888;padding:40px;text-align:center;">載入應收…</div>';
+    try {
+        const d = await finFetch('/project-ledger', { entity: 'mine' });
+        if (!_isCurrent()) return;
+        _render(d);
+    } catch (e) {
+        _c.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">應收載入失敗：${esc(e.message)}</div>`;
+    }
+}
+
+function _render(d) {
+    const rows = (d.projects || []).filter((p) => (p.receivable || 0) !== 0);
+    const total = rows.reduce((a, p) => a + p.receivable, 0);
+    const over = rows.filter((p) => p.receivable < 0);
+
+    // 按客戶分組、小計大者在前 —— 「誰欠我最多」一眼看到
+    const groups = new Map();
+    rows.forEach((p) => {
+        const k = p.client || '（未定客戶）';
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(p);
+    });
+    const ordered = [...groups.entries()]
+        .map(([client, list]) => ({
+            client, list: list.sort((a, b) => b.receivable - a.receivable),
+            sub: list.reduce((a, p) => a + p.receivable, 0),
+        }))
+        .sort((a, b) => b.sub - a.sub);
+
+    const badge = (st) => {
+        const c = st === '部分到帳' ? '#fbbf24' : st === '全額到帳' ? '#86efac' : '#9ca3af';
+        return `<span style="color:${c};">${esc(st || '未到帳')}</span>`;
+    };
+    const body = ordered.map((g) => `
+        <tr style="background:#242424;">
+            <td colspan="4" style="color:#ddd;font-weight:600;">${esc(g.client)}
+                <span style="color:#666;font-size:11px;">（${g.list.length} 案）</span></td>
+            <td style="text-align:right;color:#fbbf24;font-weight:600;">$${fmtNum(g.sub)}</td>
+            <td></td>
+        </tr>
+        ${g.list.map((p) => `
+        <tr style="cursor:pointer;" onclick="window._finRecv.open('${p.id}')"
+            title="到執行專案開啟這一案">
+            <td style="padding-left:18px;">${esc(p.name)}</td>
+            <td style="color:#888;white-space:nowrap;">${esc(p.close_date || '未結案')}</td>
+            <td style="text-align:right;">$${fmtNum(p.contract)}</td>
+            <td style="text-align:right;color:#86efac;">${p.received ? '$' + fmtNum(p.received) : ''}</td>
+            <td style="text-align:right;color:${p.receivable < 0 ? '#fca5a5' : '#eee'};font-weight:600;">$${fmtNum(p.receivable)}</td>
+            <td>${badge(p.payment_status)}</td>
+        </tr>`).join('')}`).join('');
+
+    _c.innerHTML = `
+        <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
+            <h2 style="color:#eee;margin:0;font-size:18px;">📥 應收帳款</h2>
+            <span style="color:#888;font-size:12px;">${rows.length} 案・應收合計
+                <b style="color:#fbbf24;">$${fmtNum(total)}</b>${over.length
+                    ? `・溢收 ${over.length} 案（紅字，通常是表上帳不平）` : ''}</span>
+        </div>
+        <div style="max-height:calc(100vh - 240px);overflow-y:auto;background:#202020;border:1px solid #2e2e2e;border-radius:8px;">
+        <table class="crm-table" style="width:100%;font-size:12px;">
+            <thead><tr style="position:sticky;top:0;background:#202020;z-index:1;">
+                <th>專案</th><th>結案日</th>
+                <th style="text-align:right;">營收</th>
+                <th style="text-align:right;">已收</th>
+                <th style="text-align:right;">應收</th><th>狀態</th></tr></thead>
+            <tbody>${body || '<tr><td colspan="6" style="color:#666;padding:16px;">（沒有未收的案子 🎉）</td></tr>'}</tbody>
+        </table></div>
+        <div style="color:#666;font-size:11px;margin-top:8px;">
+            點任一列到「執行專案」開啟該案。收款＝到收支明細記收入並勾選專案，金額到齊會自動變「全額到帳」並離開這張表。</div>`;
+}
+
+const _fr2 = (window._finRecv = window._finRecv || {});
+
+_fr2.open = (id) => {
+    // 交棒同專案管理→執行專案那條路：projects.js 的 render 收尾會接住並開啟
+    sessionStorage.setItem('omgJumpLedgerProject', id);
+    document.querySelector("#finance-nav [data-subview='projects']")?.click();
+};
