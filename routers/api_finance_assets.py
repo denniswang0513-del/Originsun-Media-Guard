@@ -125,6 +125,59 @@ async def assets_overview(request: Request, entity: str = ""):
     }
 
 
+@router.get("/assets/equipment")
+async def assets_equipment(request: Request, entity: str = ""):
+    """固定資產清單（owner 2026-08-25：「沒看到固定資產清單」）。
+
+    overview 只回「固定資產淨值」一顆合計，123 件的清冊在儀表板上看不到 ——
+    這支把逐件明細補出來，**口徑走引擎同一份**（core.finance_logic.
+    equipment_net_rows：除役出表、as_of 之後購入不列、當月即折一整月），
+    所以逐件 net 加總必然等於 overview 那顆桶。
+
+    🔴 逐件是「一件一件餵進引擎」而不是自己重抄除役/未購入的排除規則 ——
+    自己抄第二份就是第 5 輪才修掉的那個病（匯入腳本抄的那份還算錯一個月）。
+    123 件 × O(攤提月) 與 overview 本來就在跑的量同級。
+    """
+    ent = _guard(request, entity, level="view")
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from core.finance_logic import equipment_net_rows
+    from db.models import Equipment
+    factory = _factory_or_503()
+    async with factory() as session:
+        equip = (await session.execute(
+            select(Equipment).where(Equipment.entity == ent)
+            .order_by(Equipment.purchase_date.desc().nullslast()))).scalars().all()
+    as_of = datetime.now(timezone.utc).strftime("%Y-%m")
+    items, net_total, cost_active = [], 0, 0
+    for e in equip:
+        line = equipment_net_rows([{
+            "purchase_cost": e.purchase_cost, "purchase_date": e.purchase_date,
+            "depreciation_months": e.depreciation_months,
+            "retired_date": e.retired_date, "status": e.status, "name": e.name,
+        }], as_of)["lines"]
+        counted = bool(line)          # 引擎沒收＝除役/未購入/無金額，不進資產
+        net = line[0]["net"] if counted else 0
+        accum = line[0]["accum"] if counted else None
+        items.append({
+            "id": e.id, "name": e.name, "category": e.category or "",
+            "purchase_date": _fmt_day(e.purchase_date),
+            "cost": int(e.purchase_cost or 0),
+            "months": int(e.depreciation_months or 0),
+            "status": e.status or "", "note": e.note or "",
+            "accum": accum, "net": net, "counted": counted,
+        })
+        if counted:
+            net_total += net
+            cost_active += int(e.purchase_cost or 0)
+    return {"items": items, "as_of": as_of,
+            "totals": {"count": len(items),
+                       "counted": sum(1 for x in items if x["counted"]),
+                       "cost": cost_active, "net": net_total}}
+
+
 @router.post("/assets/quotes/refresh")
 async def refresh_quotes(request: Request, entity: str = ""):
     """逐檔抓報價寫回 holdings；順帶更新 USD/TWD。失敗檔沿用舊價並列名。"""

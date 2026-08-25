@@ -269,3 +269,16 @@ def test_holdings_owner_check_authenticates_before_touching_the_db():
     i_auth = fn.index("check_logged_in(request)")
     i_db = fn.index("await session.get(model, oid)")
     assert i_auth < i_db, "身份檢查要在進 DB 之前"
+
+
+def test_assets_equipment_list_uses_the_engine_per_item():
+    """🔴 固定資產清單的逐件淨值必須「一件一件餵進 equipment_net_rows」——
+    不准自己重抄除役/未購入的排除規則（匯入腳本抄的那份還算錯一個月，
+    第 5 輪才修掉）。同一份引擎＝逐件加總必然等於 overview 的那顆桶
+    （實測 379,941 == 379,941）。"""
+    src = (ROOT / "routers/api_finance_assets.py").read_text(encoding="utf-8")
+    fn = src.split("async def assets_equipment(")[1].split("\n@router")[0]
+    assert "equipment_net_rows([{" in fn, "逐件要走引擎，不是自己算"
+    # 排除規則的關鍵字不准出現 —— 出現就代表有人把政策抄了第二份
+    for banned in ("除役", "retired_date) or", "pm > as_of"):
+        assert f'"{banned}" ==' not in fn and "startswith" not in fn

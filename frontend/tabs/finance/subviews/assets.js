@@ -13,6 +13,7 @@ import { finFetch, esc, fmtNum, finToast, todayStr } from '../fin-utils.js';
 let _c = null;
 let _isCurrent = () => true;
 let _data = null;      // overview
+let _equip = null;     // 固定資產清單（變動少，載入抓一次即可）
 let _snaps = [];
 
 // 拍快照時，上次快照裡這些桶名**不帶入**手填欄 —— 它們已被系統自動欄取代
@@ -44,13 +45,15 @@ export default async function render(container, ctx = {}) {
     if (ctx.isCurrent) _isCurrent = ctx.isCurrent;
     _c.innerHTML = '<div style="color:#888;padding:40px;text-align:center;">載入資產資料…</div>';
     try {
-        const [ov, sn] = await Promise.all([
+        const [ov, sn, eq] = await Promise.all([
             finFetch('/assets/overview'),
             finFetch('/assets/snapshots'),
+            finFetch('/assets/equipment'),
         ]);
         if (!_isCurrent()) return;
         _data = ov;
         _snaps = sn.snapshots || [];
+        _equip = eq;
         _render();
     } catch (e) {
         _c.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">資產資料載入失敗：${esc(e.message)}</div>`;
@@ -78,6 +81,43 @@ function _card(title, inner) {
     return `<div style="background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:16px;margin-bottom:16px;">
         <h3 style="color:#eee;margin:0 0 10px;font-size:14px;">${title}</h3>${inner}</div>`;
 }
+
+// 固定資產清冊（owner：「沒看到固定資產清單」）。逐件的 net 由後端走報表
+// 引擎算（口徑與上面「固定資產淨值」那顆桶同一份），前端只顯示不自己算。
+function _equipCard() {
+    const eq = _equip;
+    if (!eq || !eq.items || !eq.items.length) return '';
+    const t = eq.totals;
+    const rows = eq.items.map((x) => `
+        <tr style="${x.counted ? '' : 'color:#555;'}">
+            <td title="${esc(x.note)}">${esc(x.name)}</td>
+            <td style="color:#888;">${esc(x.category)}</td>
+            <td style="color:#888;white-space:nowrap;">${esc(x.purchase_date || '—')}</td>
+            <td style="text-align:right;">$${fmtNum(x.cost)}</td>
+            <td style="text-align:right;color:#888;">${x.months || '—'}</td>
+            <td style="text-align:right;color:#888;">${x.accum != null ? '$' + fmtNum(x.accum) : '—'}</td>
+            <td style="text-align:right;${x.counted ? 'color:#eee;font-weight:600;' : ''}">${x.counted ? '$' + fmtNum(x.net) : '—'}</td>
+            <td>${x.counted ? esc(x.status || '在庫')
+                            : `<span style="color:#777;">${esc(x.status || '除役')}</span>`}</td>
+        </tr>`).join('');
+    return _card(`固定資產（${t.count} 件・計入 ${t.counted} 件）`, `
+        <div style="max-height:420px;overflow-y:auto;">
+        <table class="crm-table" style="width:100%;font-size:12px;">
+            <thead><tr style="position:sticky;top:0;background:#202020;">
+                <th>名稱</th><th>類別</th><th>建置日</th>
+                <th style="text-align:right;">建構金額</th>
+                <th style="text-align:right;">攤提(月)</th>
+                <th style="text-align:right;">已折</th>
+                <th style="text-align:right;">淨值</th><th>狀態</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table></div>
+        <div style="display:flex;gap:20px;margin-top:8px;color:#888;font-size:12px;">
+            <span>計入建構金額合計 <b style="color:#eee;">$${fmtNum(t.cost)}</b></span>
+            <span>淨值合計 <b style="color:#eee;">$${fmtNum(t.net)}</b>（＝上方「固定資產淨值」）</span>
+            <span style="color:#666;">截至 ${esc(eq.as_of)}；除役／未計入者灰字。編輯請至主系統「器材庫」</span>
+        </div>`);
+}
+
 
 function _render() {
     const d = _data;
@@ -114,6 +154,7 @@ function _render() {
                 美元匯率 ${d.usd_twd ? Number(d.usd_twd).toFixed(3) : '—'}（更新報價時一併抓）；
                 「上次快照」欄拍快照時可改。</div>`)}
         ${_card('持股（' + (d.holdings || []).length + '）', _holdingsHtml())}
+        ${_equipCard()}
         <div id="fin-assets-modal"></div>`;
 }
 
