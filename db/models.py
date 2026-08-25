@@ -225,6 +225,10 @@ class CrmProject(Base):
     # 🔴 invoice_fee 存原值不由 tax_fee+buy_invoice 推導 —— 402 案有 1 案兩者
     # 不等（IGER DAY 講座側錄），推導會靜默改掉來源資料。
     ledger_detail = Column(JSONB, nullable=True)
+    # 私帳案推送到專案管理（owner 2026-08-25）：1＝出現在母公司管線、列表標
+    # 「後期專案」。只對 entity='mine' 有意義；錢流歸屬不變（仍在私帳，金額
+    # 對無 mine scope 者照抹）。
+    crm_pushed = Column(Integer, nullable=False, server_default="0")
     flow_checks = Column(JSONB, nullable=True)                   # 工作流手動里程碑（範本正本在 core/project_flow.py）
     status = Column(String(32), nullable=False, default="洽詢")
     am_username = Column(String(64), nullable=True)

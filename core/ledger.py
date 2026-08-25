@@ -59,7 +59,11 @@ def allowed_entities(payload, level: str = "view") -> set[str]:
 
     payload 為 `core.auth._extract_token` 的結果（dict 或 None）：
     - None（未登入）→ 空 set
-    - Lv3（access_level >= 3）或 legacy role=='admin' → 兩本全開（view 與 full 皆是）
+    - Lv3（access_level >= 3）或 legacy role=='admin' → **母公司**全開（view/full）。
+      🔴 mine **不**隨 Lv3 —— owner 2026-08-25：私帳只有 denniswang0513 看得到，
+      而生產還有其他 Lv3 帳號。finance_mine 是「指名才有」的模組
+      （core.auth.EXPLICIT_ONLY_MODULES：_enrich 不會塞給管理員），這裡也直接看
+      modules 清單本身，不走 payload_grants（那條規則對 Lv3 永遠回 True）。
     - level="view"（看報表）：
         'parent' ⟺ (modules 含 'crm_invoices' AND 'money_view') OR 'finance_partner'
         'mine'   ⟺ modules 含 'finance_mine'
@@ -72,14 +76,16 @@ def allowed_entities(payload, level: str = "view") -> set[str]:
         return set()
     # 不帶 key 的 payload_grants ＝ 純 admin 判定（core/auth.py 那條規則的正本，
     # 不在這裡複寫 access_level>=3 or role=='admin'）。
-    if payload_grants(payload):
-        return {"parent", "mine"}
     scope: set[str] = set()
-    if payload_grants(payload, "crm_invoices") and payload_grants(payload, MONEY_MODULE):
+    if payload_grants(payload):
+        scope.add("parent")               # 管理員＝母公司全開；mine 見下（指名才有）
+    elif payload_grants(payload, "crm_invoices") and payload_grants(payload, MONEY_MODULE):
         scope.add("parent")
     elif level == "view" and payload_grants(payload, PARTNER_MODULE):
         scope.add("parent")
-    if payload_grants(payload, MINE_MODULE):
+    # 🔴 直接看 modules 本身 —— payload_grants 對 Lv3 永遠 True，會把「指名才有」
+    # 判成人人有；_enrich 那層已保證管理員的 modules 不含 finance_mine（除非明勾）。
+    if MINE_MODULE in (payload.get("modules") or []):
         scope.add("mine")
     return scope
 

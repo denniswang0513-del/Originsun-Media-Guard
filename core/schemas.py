@@ -1394,6 +1394,9 @@ class HoldingPayload(BaseModel):
 
 
 class LedgerDetailPayload(BaseModel):
+    # crm_pushed：推送/取消推送到專案管理（0/1）。不是損益欄位 —— PUT 端點會先
+    # pop 掉，**不能**落進 ledger_detail JSON（那個迴圈把剩餘鍵全當費用欄寫）。
+    crm_pushed: Optional[int] = None
     """逐案損益的可編輯欄（api_finance_projects）。
 
     費用欄用 Optional：只送有改的欄，None＝維持原值（整包 model_dump 寫回

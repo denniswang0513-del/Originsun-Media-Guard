@@ -6,6 +6,11 @@
  * crm-body / crm-list-panel / crm-detail-panel，my-ledger.html 已載 crm.css），
  * 右側詳情是**可編輯**的逐案損益表：營收、費用七欄、工項拆分十項。
  *
+ * 🔴 本子視圖**固定打私帳（entity='mine'）**，在主系統也是（owner 2026-08-25
+ * 「這裡的逐案損益也先都放在私帳」）——所以三個 finFetch 都帶 entity 覆寫，
+ * 不跟著頁面 pin 走。入口按鈕只給帳號上真的有 finance_mine 的人
+ * （finance.js），後端 require_entity 是真正的牆。
+ *
  * 內容＝原 Sheet「結案總表」的系統版。實收與檢查**不在前端算** ——
  * 算式正本在後端 api_finance_projects.compute()，兩份算式必然漂移。
  * 存檔後端回算好的值回來，這裡只顯示。
@@ -37,7 +42,7 @@ export default async function render(container, ctx = {}) {
  *  是純白工（後端還要再跑兩個 group-by 聚合）。篩選改在前端做。 */
 async function _load() {
     try {
-        const d = await finFetch('/project-ledger');
+        const d = await finFetch('/project-ledger', { entity: 'mine' });
         if (!_isCurrent()) return;
         _data = d;
         _renderShell();
@@ -189,12 +194,19 @@ _fp.open = async (id) => {
     _sel = id;
     _dirty = false;
     _markSelected();
-    if (same && _detail) { _renderDetail(); return; }   // 同一案不用再拉一次
+    if (same && _detail) {
+        // 同一案不用再拉一次 —— 但面板要重新打開：離開子視圖再回來時整個
+        // 容器是重畫的（panel 回到 display:none），模組態的 _sel/_detail 卻
+        // 還活著，走這條 early-return 就什麼都看不到（第 7 輪瀏覽器驗收實抓）。
+        document.getElementById('fpl-detail').style.display = '';
+        _renderDetail();
+        return;
+    }
     const panel = document.getElementById('fpl-detail');
     panel.style.display = '';
     panel.innerHTML = '<div style="color:#888;padding:30px;text-align:center;">載入中…</div>';
     try {
-        _detail = await finFetch(`/project-ledger/${id}`);
+        _detail = await finFetch(`/project-ledger/${id}`, { entity: 'mine' });
         _renderDetail();
     } catch (e) {
         panel.innerHTML = `<div style="color:#f87171;padding:30px;">載入失敗：${esc(e.message)}</div>`;
@@ -224,6 +236,11 @@ function _renderDetail() {
         <div class="crm-detail-bar">
             <div class="crm-detail-bar-title">${esc(p.client)} / ${esc(p.name)}</div>
             <div class="crm-detail-bar-actions">
+                <button class="crm-btn crm-btn-secondary crm-btn-sm"
+                        title="${p.crm_pushed
+                            ? '這一案已出現在專案管理的母公司管線（標「後期專案」）。再按一次取消。'
+                            : '讓這一案出現在專案管理的母公司管線，標「後期專案」。錢流不變（仍在私帳，金額只有你看得到）。'}"
+                        onclick="window._finProjLedger.push(this)">${p.crm_pushed ? '✓ 已在專案管理' : '⬆ 推專案管理'}</button>
                 <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finProjLedger.save(this)">儲存</button>
                 <button class="crm-detail-close" onclick="window._finProjLedger.close()" title="關閉">✕</button>
             </div>
@@ -323,6 +340,33 @@ _fp.close = () => {
     _markSelected();
 };
 
+_fp.push = async (btn) => {
+    // 推送/取消推送到專案管理（owner 2026-08-25：「有一個按鈕可以讓我的私帳
+    // 推送到 crm 的專案系統裡，標注後期專案」）。立即生效，不走「儲存」。
+    const p = _detail && _detail.project;
+    if (!p) return;
+    const v = p.crm_pushed ? 0 : 1;
+    btn.disabled = true;
+    try {
+        const r = await finFetch(`/project-ledger/${_sel}`, {
+            entity: 'mine', method: 'PUT', body: JSON.stringify({ crm_pushed: v }),
+        });
+        p.crm_pushed = r.crm_pushed;
+        const row = _data.projects.find((x) => x.id === _sel);
+        if (row) {
+            row.crm_pushed = r.crm_pushed;
+            row.updated_at = r.updated_at || row.updated_at;   // 排序鍵跟著動，見 _sortProjects
+        }
+        _sortProjects();
+        _renderList();
+        _renderDetail();
+        finToast(v ? '已推送到專案管理（標註「後期專案」）' : '已取消推送');
+    } catch (e) {
+        finToast('推送失敗：' + e.message, 'error');
+        btn.disabled = false;
+    }
+};
+
 _fp.save = async (btn) => {
     const body = { split: {} };
     (_detail.cost_fields || []).forEach((f) => {
@@ -341,6 +385,7 @@ _fp.save = async (btn) => {
     btn.textContent = '儲存中…';
     try {
         const r = await finFetch(`/project-ledger/${_sel}`, {
+            entity: 'mine',
             method: 'PUT', body: JSON.stringify(body),
         });
         _dirty = false;

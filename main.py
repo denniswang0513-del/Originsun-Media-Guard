@@ -1051,6 +1051,8 @@ async def _on_startup():
                         "ALTER TABLE equipment ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
                         # 逐案損益明細（工項拆分 + 委外/稅費），見 db/models.CrmProject.ledger_detail
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS ledger_detail JSONB",
+                        # 私帳案推送到專案管理（標「後期專案」），見 db/models.CrmProject.crm_pushed
+                        "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS crm_pushed INTEGER NOT NULL DEFAULT 0",
                         "ALTER TABLE crm_invoices ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
                         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",

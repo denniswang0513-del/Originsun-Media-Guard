@@ -211,7 +211,7 @@ def test_editable_cost_fields_match_the_payload_schema():
     但數字不見）；COST_FIELDS 多一欄 → UI 畫得出來卻送不上去。"""
     from core.ledger_project import COST_KEYS
     from core.schemas import LedgerDetailPayload
-    non_cost = {"split", "contract_amount", "close_date"}
+    non_cost = {"split", "contract_amount", "close_date", "crm_pushed"}
     assert set(LedgerDetailPayload.model_fields) - non_cost == set(COST_KEYS)
 
 
@@ -282,3 +282,47 @@ def test_assets_equipment_list_uses_the_engine_per_item():
     # 排除規則的關鍵字不准出現 —— 出現就代表有人把政策抄了第二份
     for banned in ("除役", "retired_date) or", "pm > as_of"):
         assert f'"{banned}" ==' not in fn and "startswith" not in fn
+
+
+# ── 私帳推送到專案管理（owner 2026-08-25）────────────────────────────
+def test_pushed_projects_need_the_explicit_param():
+    """🔴 推送案進母公司管線是**明確參數**（include_pushed=1），不是預設 ——
+    掛錢用的下拉（收支/器材/現金流…）打純 entity=parent，混進私帳案會讓人
+    選到之後被跨帳本守衛 403。"""
+    src = (ROOT / "routers/crm/projects.py").read_text(encoding="utf-8")
+    fn = src.split("async def list_projects(")[1].split("\n@router")[0]
+    assert 'include_pushed: int = Query(0)' in fn
+    assert 'entity == "parent" and include_pushed' in fn, "納入條件必須被參數守著"
+    js = (ROOT / "frontend/tabs/crm/crm-projects-core.js").read_text(encoding="utf-8")
+    assert "params.set('include_pushed', '1')" in js
+
+
+def test_crm_pushed_never_lands_in_ledger_detail():
+    """🔴 PUT 的迴圈把剩餘鍵全當費用欄寫進 ledger_detail JSON —— crm_pushed
+    必須在 contract_amount 之前 pop 掉，否則推送一次就在損益明細裡多出一個
+    看不懂的鍵。"""
+    src = (ROOT / "routers/api_finance_projects.py").read_text(encoding="utf-8")
+    fn = src.split("async def update_project_ledger(")[1]
+    i_pop = fn.index('data.pop("crm_pushed"')
+    i_loop = fn.index("for k, v in data.items()")
+    assert i_pop < i_loop
+
+
+def test_ledger_view_is_pinned_to_mine_and_gated_by_explicit_module():
+    """逐案損益＝私帳（在主系統也是），入口只給帳號上**真的有** finance_mine
+    的人 —— 不走 hasModule 的 Lv3 bypass（後端 Lv3 已不隱含）。"""
+    js = (ROOT / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
+    assert js.count("entity: 'mine'") >= 3, "list/detail/save 三個呼叫點都要釘 mine"
+    fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
+    assert "(window._modules || []).includes('finance_mine')" in fin
+    ml = (ROOT / "frontend/my-ledger.html").read_text(encoding="utf-8")
+    assert "access_level || 0) < 3" not in ml, "my-ledger 閘門不准留 Lv3 bypass"
+
+
+def test_reopening_the_same_case_unhides_the_panel():
+    """🔴 同一案的 early-return 也要把面板打開 —— 離開子視圖再回來時容器是
+    重畫的（panel 回到 display:none），模組態卻還活著，原本這條路什麼都不畫
+    （第 7 輪瀏覽器驗收實抓）。"""
+    js = (ROOT / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
+    seg = js.split("if (same && _detail) {")[1].split("return;")[0]
+    assert "style.display = ''" in seg

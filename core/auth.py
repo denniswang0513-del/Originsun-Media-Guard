@@ -181,15 +181,26 @@ ALL_MODULES = [
 ]
 
 
+# 🔴 「指名才有」的模組 —— Lv3 **不**隱含，必須在使用者管理明著勾在那個帳號上。
+# owner 2026-08-25 拍板：私帳（finance_mine）只有 denniswang0513 看得到。生產上
+# 還有其他 Lv3 帳號（Finance/Web/Assitance 待降權）——隱含制之下他們的 token
+# 一律帶著 finance_mine，改 ledger 那層的規則擋不住，唯一有效的層就是這裡。
+EXPLICIT_ONLY_MODULES = ('finance_mine',)
+
+
 def grant_admin_all_modules(access_level, modules):
     """RBAC v2 invariant (single source of truth): an admin (access_level>=3)
-    implicitly holds every module. The frontend shouldShowTab gates nav purely
+    implicitly holds every module **except EXPLICIT_ONLY_MODULES** — those must
+    be ticked on the account itself. The frontend shouldShowTab gates nav purely
     by `modules` (access_level doesn't auto-grant tabs), so an admin must carry
     the full set or they'd lose tabs when stored modules are incomplete. Both
     the JWT-payload builder and api_auth._enrich_user funnel through here so the
     rule can't drift between them.
     """
-    return list(ALL_MODULES) if (access_level or 0) >= 3 else modules
+    if (access_level or 0) < 3:
+        return modules
+    held = [m for m in (modules or []) if m in EXPLICIT_ONLY_MODULES]
+    return [m for m in ALL_MODULES if m not in EXPLICIT_ONLY_MODULES] + held
 
 
 # 進得去某個 tab 的模組（任一即可）。**只有需要額外放行的 tab 才列一行**，

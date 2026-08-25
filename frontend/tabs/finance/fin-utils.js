@@ -34,9 +34,11 @@ export async function finFetch(path, opts = {}) {
     const token = localStorage.getItem('auth_token');
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    // 一律帶 entity（既有呼叫端有的 path 已帶 '?'，判斷後拼接）
+    // 一律帶 entity（既有呼叫端有的 path 已帶 '?'，判斷後拼接）。
+    // opts.entity＝單次覆寫（逐案損益在主系統也固定打私帳，見 subviews/projects.js）
+    const { entity, ...rest } = opts;
     const sep = path.includes('?') ? '&' : '?';
-    const res = await fetch(API + path + sep + 'entity=' + finEntity(), { ...opts, headers });
+    const res = await fetch(API + path + sep + 'entity=' + (entity || finEntity()), { ...rest, headers });
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         const detail = Array.isArray(err.detail)

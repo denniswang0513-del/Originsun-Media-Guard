@@ -50,12 +50,17 @@ def _src(rel: str) -> str:
 # ── ① scope 矩陣（allowed_entities 純函式，view/full 兩層）─────────────
 
 SCOPE_MATRIX = [
-    # Lv3 → 兩本兩層全開
-    ({"access_level": 3, "modules": []}, "view", {"parent", "mine"}),
-    ({"access_level": 3, "modules": []}, "full", {"parent", "mine"}),
-    # legacy token（role 字串、無 access_level）→ 同 Lv3
-    ({"role": "admin"}, "view", {"parent", "mine"}),
-    ({"role": "admin"}, "full", {"parent", "mine"}),
+    # Lv3 → **母公司**兩層全開；mine 不隨 Lv3（owner 2026-08-25：私帳只有
+    # denniswang0513 看得到，而生產還有其他 Lv3 帳號。finance_mine 是「指名
+    # 才有」的模組 —— core.auth.EXPLICIT_ONLY_MODULES）
+    ({"access_level": 3, "modules": []}, "view", {"parent"}),
+    ({"access_level": 3, "modules": []}, "full", {"parent"}),
+    # Lv3 且帳號上明著有 finance_mine → 兩本全開（owner 本人就是這個形狀）
+    ({"access_level": 3, "modules": ["finance_mine"]}, "view", {"parent", "mine"}),
+    ({"access_level": 3, "modules": ["finance_mine"]}, "full", {"parent", "mine"}),
+    # legacy token（role 字串、無 access_level）→ 同 Lv3：只有母公司
+    ({"role": "admin"}, "view", {"parent"}),
+    ({"role": "admin"}, "full", {"parent"}),
     # 合夥人：唯一一把 finance_partner → 母公司**報表層**而已；full 空 set
     ({"access_level": 1, "modules": ["finance_partner"]}, "view", {"parent"}),
     ({"access_level": 1, "modules": ["finance_partner"]}, "full", set()),
@@ -175,9 +180,36 @@ def test_parent_bookkeeper_cannot_read_mine(level):
 
 @pytest.mark.parametrize("entity", ["parent", "mine"])
 @pytest.mark.parametrize("level", ["view", "full"])
-def test_admin_reads_both_at_both_levels(entity, level):
-    r = _req(_tok(access_level=3))
+def test_admin_with_mine_module_reads_both(entity, level):
+    """owner 的形狀：Lv3 ＋ 帳號上明著有 finance_mine → 兩本兩層全開。"""
+    r = _req(_tok(access_level=3, modules=["finance_mine"]))
     assert require_entity(r, entity, level=level) == entity
+
+
+@pytest.mark.parametrize("level", ["view", "full"])
+def test_admin_without_mine_module_cannot_read_mine(level):
+    """🔴 其他管理員（生產上還有幾個 Lv3）打私帳要 403 —— Lv3 不再隱含
+    finance_mine（owner 2026-08-25 拍板「私帳只有 denniswang0513 看得到」）。
+    這條規則有效的前提是 _enrich 不把 finance_mine 塞給管理員 ——
+    見 test_admin_enrichment_excludes_explicit_only。"""
+    r = _req(_tok(access_level=3))
+    assert require_entity(r, "parent", level=level) == "parent"   # 母公司照常
+    with pytest.raises(HTTPException) as ex:
+        require_entity(r, "mine", level=level)
+    assert ex.value.status_code == 403
+
+
+def test_admin_enrichment_excludes_explicit_only():
+    """🔴 規則的另一半：grant_admin_all_modules 不准把「指名才有」的模組塞給
+    管理員 —— 塞了的話 token 的 modules 天生就帶 finance_mine，上面那條 403
+    永遠測不到真實情境。明勾了的要保留。"""
+    from core.auth import ALL_MODULES, grant_admin_all_modules
+    enriched = grant_admin_all_modules(3, [])
+    assert "finance_mine" not in enriched
+    assert set(enriched) == set(ALL_MODULES) - {"finance_mine"}
+    assert "finance_mine" in grant_admin_all_modules(3, ["finance_mine"])
+    # 非管理員原樣通過
+    assert grant_admin_all_modules(1, ["backup"]) == ["backup"]
 
 
 # ── ③ 原始碼掃描釘（防回歸）───────────────────────────────────────────

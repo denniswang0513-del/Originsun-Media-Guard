@@ -47,6 +47,7 @@ def _to_project_dict(p, client_short_name: str = "") -> dict:
         # 兩本帳 §8：錢流歸屬。這個鍵同時是 core/money mine-aware 抹除的
         # 判定依據（entity=='mine' 的物件，金額鍵對無 mine scope 者整棵抹掉）
         "entity": p.entity or "parent",
+        "crm_pushed": int(p.crm_pushed or 0),
         "contract_amount": p.contract_amount,
         "tax_rate": p.tax_rate, "profit_target_pct": p.profit_target_pct,
         "misc_budget_pct": p.misc_budget_pct,
@@ -68,6 +69,7 @@ async def list_projects(
     client_id: str = Query(""),
     am: str = Query(""),
     entity: str = Query(""),
+    include_pushed: int = Query(0),
 ):
     """entity 篩選（兩本帳 §8）：''＝兩本都看、'parent'＝母公司、'mine'＝私帳。
 
@@ -101,7 +103,15 @@ async def list_projects(
             .outerjoin(Client, Client.id == CrmProject.client_id)
             .order_by(CrmProject.updated_at.desc())
         )
-        if entity:
+        if entity == "parent" and include_pushed:
+            # 專案管理的管線視圖：母公司案 ∪ 推送過來的私帳案（後期專案）。
+            # 🔴 是明確參數不是預設 —— 掛錢用的下拉（收支/器材/現金流…）打的
+            # 是純 entity=parent，混進私帳案會讓人選到之後被跨帳本守衛 403。
+            from sqlalchemy import and_
+            query = query.where(or_(CrmProject.entity == "parent",
+                                    and_(CrmProject.entity == "mine",
+                                         CrmProject.crm_pushed == 1)))
+        elif entity:
             query = query.where(CrmProject.entity == entity)
         if status:
             query = query.where(CrmProject.status == status)

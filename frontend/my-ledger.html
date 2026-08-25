@@ -158,7 +158,10 @@ $('login-form').addEventListener('submit', async (ev) => {
     // 閘門直接讀登入回應（username/access_level/modules 都在裡面 —— 本頁刻意
     // 只有「每次重新登入」這一條路，沒有 token 續用的開機路徑，所以不需要再打
     // /auth/me 換同一份資料。比照 website-admin.html 的新登入分支）。
-    if ((d.access_level || 0) < 3 && !(d.modules || []).includes('finance_mine')) {
+    // 🔴 只認帳號上真的有的 finance_mine —— Lv3 不 bypass（後端
+    // grant_admin_all_modules 已把它列為「指名才有」，管理員的 modules 不含它
+    // 除非明勾）。owner 2026-08-25：私帳只有 denniswang0513 看得到。
+    if (!(d.modules || []).includes('finance_mine')) {
         showNoperm('此帳號沒有『我的帳』權限。');
         return;
     }

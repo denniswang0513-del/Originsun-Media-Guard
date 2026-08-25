@@ -69,6 +69,13 @@ export async function initFinanceTab() {
         .forEach((el) => { el.style.display = 'none'; });
     if (mineMode || !fullParent) hideNav('.fin-nav-full');
     if (!mineMode && !fullParent) hideNav('.fin-nav-mine-ok');
+    // 逐案損益＝私帳（owner 2026-08-25），入口只給帳號上**真的有** finance_mine
+    // 的人。🔴 直接看 _modules、不走 hasModule 的 Lv3 bypass —— 後端
+    // grant_admin_all_modules 已把 finance_mine 列為「指名才有」（管理員不隱含），
+    // 這裡用同一個口徑，兩邊才不會一邊給看一邊 403。
+    if (!((window._modules || []).includes('finance_mine'))) {
+        hideNav('[data-subview="projects"]');
+    }
 
     _shellAllowed = loadShell;
     _bindSideNav();

@@ -184,6 +184,7 @@ async def project_ledger_detail(project_id: str, request: Request,
             "received": int(p.amount_received or 0),
             "receivable": int(p.amount_receivable or 0),
             "payment_status": p.payment_status or "",
+            "crm_pushed": int(p.crm_pushed or 0),
             "detail": _d, "net": _net, "check": _check,
             # 匯入時把案碼/案源/税別等收在這裡（純文字）—— 逐案對照 Sheet 用
             "notes": p.notes or "",
@@ -219,6 +220,10 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
     async with factory() as session:
         p = await _owned_project(session, project_id, ent)
         data = payload.model_dump(exclude_unset=True)
+        # 🔴 先 pop —— 下面的迴圈把剩餘鍵全當費用欄寫進 ledger_detail JSON
+        pushed = data.pop("crm_pushed", None)
+        if pushed is not None:
+            p.crm_pushed = 1 if pushed else 0
         contract = data.pop("contract_amount", None)
         if contract is not None:
             p.contract_amount = int(contract)
@@ -247,4 +252,5 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
     return {"status": "ok", "detail": d, "net": net, "check": check,
             "contract": int(contract) if contract is not None else None,
             "close_date": _fmt_day(p.completion_date),
+            "crm_pushed": int(p.crm_pushed or 0),
             "updated_at": p.updated_at.isoformat() if p.updated_at else ""}
