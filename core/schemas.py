@@ -1398,15 +1398,19 @@ class LedgerProjectCreate(BaseModel):
     所以入口在帳本頁；工項/費用建立後在詳情編。"""
     name: str
     client_id: Optional[str] = None
-    code: str = ""                  # 案碼（對 Sheet 的鍵；可空，之後補）
+    code: str = ""                  # 案碼（owner 自己的案件編號；可空）
     close_date: str = ""            # 'YYYY-MM-DD'；空＝未結案
     contract_amount: Optional[int] = None
+    source: str = ""                # 案源：自接/源日(現金收款)/代開發票(自動代辦費)
+    fee_pct: Optional[float] = None  # 服務費率 %（代開發票用；預設 8）
 
 
 class LedgerDetailPayload(BaseModel):
     # crm_pushed：推送/取消推送到專案管理（0/1）。不是損益欄位 —— PUT 端點會先
     # pop 掉，**不能**落進 ledger_detail JSON（那個迴圈把剩餘鍵全當費用欄寫）。
     crm_pushed: Optional[int] = None
+    source: Optional[str] = None     # 案源（meta，經 norm_detail 白名單）
+    fee_pct: Optional[float] = None  # 服務費率 %（代開發票；預設 8）
     """逐案損益的可編輯欄（api_finance_projects）。
 
     費用欄用 Optional：只送有改的欄，None＝維持原值（整包 model_dump 寫回

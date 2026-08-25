@@ -46,17 +46,42 @@ def income_items(settings: dict | None = None) -> list:
     return [str(x) for x in items if str(x).strip()] if items else list(DEFAULT_INCOME_ITEMS)
 
 
+# 案源（owner 2026-08-25）：源日＝現金收款；代開發票＝營收 × 服務費率的代辦費
+# （預設 8%，191 個歷史案實證全部 8.00%；逐案可調）。自接＝中性。
+SOURCES = ("自接", "源日", "代開發票")
+DEFAULT_FEE_PCT = 8.0
+
+
 def norm_detail(raw) -> dict:
     """ledger_detail → 固定形狀（缺鍵補 0、split 只留非零數字）。
 
     0 值工項會被清掉 —— 那正是「使用者把格子清空」的意思（＝刪掉這個工項）。
+    另保留兩個 meta 鍵：source（案源）與 fee_pct（服務費率；只在非預設時存）。
     """
     d = raw if isinstance(raw, dict) else {}
     out = {k: int(d.get(k) or 0) for k in COST_KEYS}
     split = d.get("split") if isinstance(d.get("split"), dict) else {}
     out["split"] = {str(k): int(v) for k, v in split.items()
                     if isinstance(v, (int, float)) and int(v)}
+    src = str(d.get("source") or "").strip()
+    if src in SOURCES:
+        out["source"] = src
+    try:
+        pct = float(d.get("fee_pct"))
+        if pct > 0 and pct != DEFAULT_FEE_PCT:
+            out["fee_pct"] = pct
+    except (TypeError, ValueError):
+        pass
     return out
+
+
+def apply_source_fee(contract: int, d: dict) -> dict:
+    """案源＝代開發票 → 發票代辦費 = round(營收 × 費率)。**唯一的自動費用規則**，
+    寫入端（create/update）呼叫；其他案源不動使用者填的數字。"""
+    if d.get("source") == "代開發票":
+        pct = float(d.get("fee_pct") or DEFAULT_FEE_PCT)
+        d["invoice_fee"] = round(int(contract or 0) * pct / 100)
+    return d
 
 
 def compute(contract: int, d: dict) -> tuple:

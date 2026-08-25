@@ -2,6 +2,9 @@
  * crm-payables.js — 應付帳款子視圖（按月份分組）
  */
 import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, createSortable, today } from './crm-utils.js';
+// 兩本帳：Sheet 退役（owner 2026-08-25「我不會用 sheet 工作了」）→ 匯款清單
+// 也要在私帳可用。pin 模式同 crm-cashbook。
+import { finEntity as _pinEntity } from '../finance/fin-utils.js';
 
 let _payees = [];       // raw API data (grouped by payee)
 let _monthGroups = [];  // restructured: grouped by month, then payee
@@ -64,6 +67,7 @@ async function loadPayables() {
         const params = new URLSearchParams();
         if (month) params.set('month', month);
         if (status) params.set('status', status);
+        params.set('entity', _pinEntity());
         const data = await _fetch('/payables/summary?' + params);
         _payees = data.payees || [];
         document.getElementById('payable-total').textContent = '$' + _fmtNum(data.grand_total);

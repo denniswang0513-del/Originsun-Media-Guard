@@ -30,7 +30,8 @@ from fastapi import APIRouter, HTTPException, Request
 from config import load_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
-from core.ledger_project import (COST_FIELDS, SUM_KEYS, compute,
+from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, SOURCES,
+                                 SUM_KEYS, apply_source_fee, compute,
                                  income_items, norm_detail)
 from core.schemas import LedgerDetailPayload, LedgerProjectCreate
 from routers.crm._shared import _fmt_day
@@ -197,11 +198,18 @@ async def create_ledger_project(payload: LedgerProjectCreate, request: Request,
                 raise HTTPException(status_code=409,
                                     detail=f"案碼 {code} 已存在 —— 收支按案碼回掛，重複會讓兩案分不清彼此的帳")
         pid = _uuid.uuid4().hex
+        # 案源規則（owner 2026-08-25）：源日＝現金收款；代開發票＝自動代辦費
+        # （contract × fee_pct，預設 8%）—— 規則正本在 core.ledger_project
+        contract = int(payload.contract_amount or 0)
+        d = norm_detail({"source": payload.source,
+                         "fee_pct": payload.fee_pct})
+        d = norm_detail(apply_source_fee(contract, d))
         session.add(CrmProject(
             id=pid, name=name, client_id=payload.client_id or None,
             entity=ent, status="結案" if close else "製作",
             completion_date=close,
-            contract_amount=int(payload.contract_amount or 0) or None,
+            contract_amount=contract or None,
+            ledger_detail=d,
             payment_status="未到帳",
             notes=f"[私帳新增] 案碼:{code}" if code else "[私帳新增]",
             created_at=_now(), updated_at=_now(),
@@ -249,6 +257,7 @@ async def project_ledger_detail(project_id: str, request: Request,
             "notes": p.notes or "",
         },
         "income_items": income_items(load_settings()),
+        "sources": list(SOURCES), "default_fee_pct": DEFAULT_FEE_PCT,
         "cost_fields": [{"key": k, "label": lb} for k, lb in COST_FIELDS],
         "entries": [{
             "id": e.id, "date": _fmt_day(e.entry_date), "summary": e.summary,
@@ -298,11 +307,19 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
             else:
                 p.completion_date = None
         d = norm_detail(p.ledger_detail)
+        # 案源與費率是 meta（字串/浮點），不能進下面那個 int() 迴圈
+        if "source" in data:
+            d["source"] = data.pop("source") or ""
+        if "fee_pct" in data:
+            d["fee_pct"] = data.pop("fee_pct")
         for k, v in data.items():
             if v is None:
                 continue
             d[k] = ({str(x): int(y) for x, y in v.items()
                      if isinstance(y, (int, float))} if k == "split" else int(v))
+        # 🔴 案源＝代開發票 → 代辦費由費率算（唯一的自動費用規則；其他案源
+        # 不碰使用者填的數字）。在 norm 前套，contract 用改完的值。
+        d = apply_source_fee(int(p.contract_amount or 0), d)
         d = norm_detail(d)          # 再正規化一次（清掉 0 值工項）
         p.ledger_detail = d
         p.updated_at = _now()

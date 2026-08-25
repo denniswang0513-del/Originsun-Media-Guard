@@ -2,6 +2,8 @@
  * crm-payments.js — 請款管理子視圖
  */
 import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, today, crmToast, projectOptionsHtml } from './crm-utils.js';
+// 兩本帳 pin（同 crm-cashbook）：清單/專案下拉/新增請款都跟著目前帳本走
+import { finEntity as _pinEntity } from '../finance/fin-utils.js';
 
 let _payments = [];
 let _projects = [];
@@ -24,13 +26,15 @@ async function loadPayments() {
     if (_filters.unassigned)     params.set('unassigned', '1');
     // 建議只在批次模式要 —— 那是唯一會看它的地方，平常列清單不必付這個計算成本
     if (_batch.on)               params.set('suggest', '1');
+    params.set('entity', _pinEntity());
     try { _payments = (await _fetch('/payments?' + params)).payments || []; }
     catch (_) { _payments = []; }
     renderList();
 }
 
 async function loadProjects() {
-    try { _projects = (await _fetch('/projects')).projects || []; } catch(_) { _projects = []; }
+    // 🔴 帶帳本：跨帳本掛專案會被守衛 403，下拉從源頭就別給選（同 cashbook）
+    try { _projects = (await _fetch('/projects?entity=' + _pinEntity())).projects || []; } catch(_) { _projects = []; }
     _populateProjectFilter();
 }
 
@@ -537,6 +541,7 @@ window._payQuickAdd = async function () {
     const btn = document.querySelector('.inv-qa-btn');
     if (btn) btn.disabled = true;
     try {
+        payload.entity = _pinEntity();   // 新增落在目前帳本（後端 _entity_for_write 驗 scope）
         await _fetch('/payments', { method: 'POST', body: JSON.stringify(payload) });
         await loadPayments();
         // 重載後焦點回摘要欄 —— 連續登記（打字、Enter、打字、Enter）不用重新點

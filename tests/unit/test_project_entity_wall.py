@@ -211,7 +211,7 @@ def test_editable_cost_fields_match_the_payload_schema():
     但數字不見）；COST_FIELDS 多一欄 → UI 畫得出來卻送不上去。"""
     from core.ledger_project import COST_KEYS
     from core.schemas import LedgerDetailPayload
-    non_cost = {"split", "contract_amount", "close_date", "crm_pushed"}
+    non_cost = {"split", "contract_amount", "close_date", "crm_pushed", "source", "fee_pct"}
     assert set(LedgerDetailPayload.model_fields) - non_cost == set(COST_KEYS)
 
 

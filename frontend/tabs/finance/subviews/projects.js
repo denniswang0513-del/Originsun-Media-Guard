@@ -110,11 +110,16 @@ function _renderShell() {
                 <label style="color:#888;font-size:11px;">案碼<input class="crm-input" id="fpc-code" placeholder="例 2026051"></label>
                 <label style="color:#888;font-size:11px;">結案日<input class="crm-input" type="date" id="fpc-close"></label>
                 <label style="color:#888;font-size:11px;">營收(含稅)<input class="crm-input" type="number" id="fpc-contract"></label>
+                <label style="color:#888;font-size:11px;">案源<select class="crm-input" id="fpc-source">
+                    <option value="">—</option><option>自接</option>
+                    <option value="源日">源日（現金收款）</option>
+                    <option value="代開發票">代開發票（扣服務費）</option></select></label>
+                <label style="color:#888;font-size:11px;" id="fpc-fee-wrap" hidden>服務費率 %<input class="crm-input" type="number" id="fpc-feepct" value="8" step="0.1"></label>
             </div>
             <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
                 <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finProjLedger.createSave(this)">建立</button>
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="document.getElementById('fpl-create').style.display='none'">取消</button>
-                <span style="color:#666;font-size:11px;">建立後直接打開詳情，工項與費用在那邊填。案碼＝對 Sheet 的鍵（可留空之後補；重複會擋）。</span>
+                <span style="color:#666;font-size:11px;">建立後直接打開詳情，工項與費用在那邊填。案碼＝你自己的案件編號（可留空；重複會擋）。</span>
             </div>
         </div>
         <div id="fpl-totals" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#ccc;
@@ -304,6 +309,14 @@ function _renderDetail() {
                             <td style="width:130px;"><input type="date" class="crm-input fpl-num" id="fpl-close"
                                 value="${esc(p.close_date || '')}" style="width:100%;"></td></tr>
                         <tr><td style="color:#bbb;">營收(含稅)</td><td>${money('fpl-contract', p.contract)}</td></tr>
+                        <tr><td style="color:#bbb;">案源</td>
+                            <td><select class="crm-input fpl-num" id="fpl-source" style="width:100%;">
+                                <option value="">—</option>
+                                ${(d.sources || []).map((s) => `<option value="${esc(s)}"${det.source === s ? ' selected' : ''}>${s === '源日' ? '源日（現金收款）' : s === '代開發票' ? '代開發票（自動代辦費）' : s}</option>`).join('')}
+                            </select></td></tr>
+                        <tr id="fpl-fee-row" style="${det.source === '代開發票' ? '' : 'display:none;'}">
+                            <td style="color:#bbb;">服務費率 %</td>
+                            <td>${money('fpl-feepct', det.fee_pct || d.default_fee_pct || 8)}</td></tr>
                         ${costRows}
                     </table>
                     <table class="crm-table" style="width:100%;font-size:12px;margin-top:8px;">
@@ -356,6 +369,32 @@ function _renderDetail() {
     document.querySelectorAll('#fpl-detail .fpl-num').forEach((el) => {
         el.addEventListener('input', () => { _dirty = true; _liveSum(); });
     });
+    // 案源規則（正本在後端 apply_source_fee，這裡只是即時預覽同一條式子）：
+    // 代開發票 → 代辦費 = round(營收 × 費率)，欄位鎖住；其他案源恢復手填。
+    const _syncFee = () => {
+        const src = document.getElementById('fpl-source')?.value;
+        const feeEl = document.getElementById('fpl-c-invoice_fee');
+        const row = document.getElementById('fpl-fee-row');
+        if (!feeEl || !row) return;
+        const isAgency = src === '代開發票';
+        row.style.display = isAgency ? '' : 'none';
+        feeEl.disabled = isAgency;
+        feeEl.title = isAgency ? '案源＝代開發票：代辦費＝營收×費率，自動計算' : '';
+        if (isAgency) {
+            const c = Number(document.getElementById('fpl-contract')?.value) || 0;
+            const pct = Number(document.getElementById('fpl-feepct')?.value) || 8;
+            feeEl.value = Math.round(c * pct / 100) || '';
+            _liveSum();
+        }
+    };
+    ['fpl-source', 'fpl-feepct', 'fpl-contract'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('input', _syncFee);
+            el.addEventListener('change', _syncFee);
+        }
+    });
+    _syncFee();
 }
 
 /** 工項合計即時更新（實收/檢查等存檔後由後端回算 —— 前端不算第二份）。 */
@@ -404,6 +443,14 @@ _fp.create = async () => {
             .map((c) => `<option value="${c.id}">${esc(c.short_name)}</option>`).join('');
     }
     document.getElementById('fpc-name').focus();
+    // 費率欄只在代開發票時出現（預設 8，可逐案調）
+    const srcSel = document.getElementById('fpc-source');
+    if (srcSel && !srcSel._feeBound) {
+        srcSel._feeBound = true;
+        srcSel.addEventListener('change', () => {
+            document.getElementById('fpc-fee-wrap').hidden = srcSel.value !== '代開發票';
+        });
+    }
 };
 
 _fp.createSave = async (btn) => {
@@ -417,6 +464,8 @@ _fp.createSave = async (btn) => {
                 name: g('fpc-name'), client_id: g('fpc-client') || null,
                 code: g('fpc-code'), close_date: g('fpc-close'),
                 contract_amount: parseInt(g('fpc-contract') || '0', 10) || null,
+                source: g('fpc-source'),
+                fee_pct: parseFloat(g('fpc-feepct') || '8') || 8,
             }),
         });
         document.getElementById('fpl-create').style.display = 'none';
@@ -477,6 +526,10 @@ _fp.save = async (btn) => {
     if (cEl) body.contract_amount = Number(cEl.value) || 0;
     const dEl = document.getElementById('fpl-close');
     if (dEl) body.close_date = dEl.value || '';     // 空＝清成未結案
+    const sEl = document.getElementById('fpl-source');
+    if (sEl) body.source = sEl.value;               // 空＝清掉案源
+    const fEl = document.getElementById('fpl-feepct');
+    if (fEl && sEl && sEl.value === '代開發票') body.fee_pct = Number(fEl.value) || 8;
     btn.disabled = true;
     btn.textContent = '儲存中…';
     try {
