@@ -1752,8 +1752,9 @@ def _enforce_cash_project_link(e):
     行政／薪資／房租那種公司層級支出掛到專案上，專案毛利就會多算一筆不屬於它的錢。
     """
     from core.project_link import cash_can_link
-    if e.project_id and not cash_can_link(e.entity, e.category):
-        if (e.entity or "parent") == "mine":
+    _ent = getattr(e, "entity", None)      # 測試替身可能沒有這個欄；預設＝母公司規則
+    if e.project_id and not cash_can_link(_ent, e.category):
+        if (_ent or "parent") == "mine":
             raise HTTPException(
                 status_code=409,
                 detail=f"「{e.category or '未分類'}」不能掛專案 —— 私帳只有"
