@@ -153,3 +153,15 @@ def test_receivable_subview_is_project_based_and_gated():
     assert "fin-nav-mine-only" in btn
     fin = _read("frontend/tabs/finance/finance.js")
     assert fin.count("hideNav('.fin-nav-mine-only')") == 1
+
+
+def test_household_subview_wiring():
+    """🏠 家用（owner 2026-08-26「開一個家用記帳頁面（都我在記）」）：
+    固定打 mine、指名門 class、記一筆＝寫一般收支列（資料仍在收支明細）。"""
+    js = _read("frontend/tabs/finance/subviews/household.js")
+    assert "finFetchMine('/household')" in js
+    assert "crmFetch('/cash-entries'" in js
+    assert "entity: 'mine'" in js
+    html = _read("frontend/tabs/finance/finance.html")
+    btn = [ln for ln in html.splitlines() if 'data-subview="household"' in ln]
+    assert len(btn) == 1 and "fin-nav-mine-only" in btn[0]

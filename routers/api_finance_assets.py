@@ -358,3 +358,74 @@ async def delete_snapshot(snapshot_id: str, request: Request, entity: str = ""):
         await session.delete(r)
         await session.commit()
     return {"status": "ok"}
+
+
+# ── 🏠 家用（owner 2026-08-26「開一個家用記帳頁面（都我在記）」）──────────
+
+@router.get("/household")
+async def household_overview(request: Request, entity: str = ""):
+    """家用記帳頁的資料源：代墊餘額＋月度＋最近列。
+
+    口徑＝報表引擎同一條（家用往來科目掛的 cash 類別，支出−存入 的存量），
+    所以這頁的餘額必然等於 BS 的「家用代墊」線。類別清單也從對映表來 ——
+    新增家用類別只要進 finance_category_map，這頁與 BS 同步認得。
+    level="full"：家用是 owner 的私事，指名門之內才看得到（mine 由
+    finance_mine 鎖；母公司帳本來就沒有家用類別，回空殼）。
+    """
+    ent = _guard(request, entity, level="full")
+    from sqlalchemy import select
+
+    from db.models import BankAccount, CrmCashEntry, FinanceAccount, FinanceCategoryMap
+    factory = _factory_or_503()
+    async with factory() as session:
+        acct_id = (await session.execute(
+            select(FinanceAccount.id).where(FinanceAccount.code == "1310")
+        )).scalar_one_or_none()
+        cats = list((await session.execute(
+            select(FinanceCategoryMap.category_text).where(
+                FinanceCategoryMap.source == "cash",
+                FinanceCategoryMap.account_id == (acct_id or ""))
+        )).scalars()) if acct_id else []
+        if not cats:
+            return {"balance": 0, "categories": [], "monthly": [],
+                    "recent": [], "sub_items": [], "accounts": []}
+        rows = (await session.execute(
+            select(CrmCashEntry)
+            .where(CrmCashEntry.entity == ent, CrmCashEntry.category.in_(cats))
+            .order_by(CrmCashEntry.entry_date.desc(), CrmCashEntry.created_at.desc())
+        )).scalars().all()
+        accts = [{"id": a.id, "name": a.name} for a in (await session.execute(
+            select(BankAccount).where(BankAccount.entity == ent,
+                                      BankAccount.active.isnot(False))
+            .order_by(BankAccount.sort_order, BankAccount.name))).scalars()]
+
+    balance = 0
+    monthly: dict = {}
+    sub_items = set()
+    recent = []
+    for e in rows:
+        exp, dep = int(e.expense or 0), int(e.deposit or 0)
+        balance += exp - dep
+        m = e.entry_date.strftime("%Y-%m") if e.entry_date else ""
+        if m:
+            b = monthly.setdefault(m, {"month": m, "advanced": 0, "repaid": 0})
+            b["advanced"] += exp
+            b["repaid"] += dep
+        if e.sub_item:
+            sub_items.add(e.sub_item)
+        if len(recent) < 60:
+            recent.append({
+                "id": e.id, "date": _fmt_day(e.entry_date),
+                "summary": e.summary, "category": e.category,
+                "sub_item": e.sub_item or "", "expense": exp, "deposit": dep,
+                "status": e.status or "",
+                "bank_account_id": e.bank_account_id or "",
+            })
+    return {
+        "balance": balance,                       # ＝BS「家用代墊」線（同一條算法）
+        "categories": sorted(cats),
+        "monthly": sorted(monthly.values(), key=lambda x: x["month"], reverse=True),
+        "recent": recent, "total_rows": len(rows),
+        "sub_items": sorted(sub_items),
+        "accounts": accts,
+    }

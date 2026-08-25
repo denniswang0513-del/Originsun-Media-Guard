@@ -15,6 +15,7 @@ from core.finance_logic import (build_balance_sheet, card_outstanding,
 ACCTS = {
     "eq": {"name": "業主往來", "acct_type": "equity"},
     "adv": {"name": "員工往來-預支", "acct_type": "asset"},
+    "hh": {"name": "家用往來", "acct_type": "asset"},
     "gear": {"name": "器材設備", "acct_type": "asset"},
     "bank": {"name": "銀行存款", "acct_type": "asset"},
 }
@@ -22,6 +23,8 @@ CMAP = {
     ("cash", "個人_生活"): {"treatment": "transfer", "account_id": "eq"},
     ("cash", "個人_主動收入"): {"treatment": "transfer", "account_id": "eq"},
     ("cash", "公司_代墊"): {"treatment": "transfer", "account_id": "adv"},
+    ("cash", "家用"): {"treatment": "transfer", "account_id": "hh"},
+    ("cash", "家用_變動支出"): {"treatment": "transfer", "account_id": "hh"},
     ("cash", "公司_器材"): {"treatment": "transfer", "account_id": "gear"},
     ("cash", "信用卡"): {"treatment": "transfer", "account_id": "bank"},
     ("cash", "公司_專案"): {"treatment": "direct_income", "account_id": "rev"},
@@ -54,13 +57,25 @@ def test_advance_position_is_out_minus_back():
     assert pos["owner_net"] == 0
 
 
+def test_household_position_is_out_minus_back():
+    """家用代墊（owner 2026-08-26）：支出＝墊出、還款＝沖銷 —— 是資產不是
+    業主提取（刷卡或銀行付都算，owner 拍板「代墊不分支付方式」）。"""
+    rows = [_e("2024-01", exp=3000, cat="家用_變動支出", status="card"),
+            _e("2024-02", exp=500, cat="家用_變動支出"),
+            _e("2024-03", dep=1200, cat="家用")]
+    pos = equity_transfer_position(rows, CMAP, ACCTS, "2026-01")
+    assert pos["household_net"] == 3000 + 500 - 1200
+    assert pos["owner_net"] == 0
+
+
 def test_gear_and_bank_transfers_create_no_position():
     """器材走清冊（再記流量＝重複）、銀行存款走卡債邏輯 —— 都不進位置。
     器材流出只以 cap_flow 順手量出（資本化差額警語用，不是 BS 位置）。"""
     rows = [_e("2024-01", exp=9000, cat="公司_器材"),
             _e("2024-02", exp=5000, cat="信用卡")]
     pos = equity_transfer_position(rows, CMAP, ACCTS, "2026-01")
-    assert pos == {"owner_net": 0, "advance_net": 0, "cap_flow": 9000}
+    assert pos == {"owner_net": 0, "advance_net": 0, "household_net": 0,
+                   "cap_flow": 9000}
     # cap_floor＝期初累計月（> floor 才算）：期初裡的購置不再重複計入
     assert equity_transfer_position(rows, CMAP, ACCTS, "2026-01",
                                     cap_floor="2024-01")["cap_flow"] == 0
@@ -100,10 +115,12 @@ def test_synthetic_book_balances_to_zero(monkeypatch):
     """🔴 皇冠不變量：一本乾淨的合成小帳本，BS 的 diff 必須是 0。
 
     劇本：期初現金 10,000（有期初調整列）→ 收入 5,000 入帳戶 → 提取 2,000
-    → 刷卡消費 800（生活）→ 還卡款 600 → 代墊出 1,000。
-    現金 = 10,000+5,000−2,000−600−1,000 = 11,400；卡債 = 800−600 = 200；
-    代墊資產 1,000；權益 = 期初 10,000 + 損益 5,000 − 提取(2,000+800) = 12,200。
-    資產 12,400 − 負債 200 − 權益 12,200 = 0。
+    → 刷卡消費 800（生活）＋ 刷卡家用 400 → 還卡款 600 → 代墊出 1,000
+    → 家人還款 300 入帳戶。
+    現金 = 10,000+5,000−2,000−600−1,000+300 = 11,700；卡債 = 1,200−600 = 600；
+    代墊資產 1,000；家用代墊 = 400−300 = 100；
+    權益 = 期初 10,000 + 損益 5,000 − 提取(2,000+800) = 12,200（家用不是提取）。
+    資產 12,800 − 負債 600 − 權益 12,200 = 0。
     """
     import config
 
@@ -115,8 +132,10 @@ def test_synthetic_book_balances_to_zero(monkeypatch):
         {**_e("2026-01", dep=5000, cat="公司_專案"), "bank_account_id": "b1"},
         {**_e("2026-02", exp=2000, cat="個人_生活"), "bank_account_id": "b1"},
         _e("2026-02", exp=800, cat="個人_生活", status="card"),
+        _e("2026-02", exp=400, cat="家用_變動支出", status="card"),
         {**_e("2026-03", exp=600, cat="信用卡"), "bank_account_id": "b1"},
         {**_e("2026-03", exp=1000, cat="公司_代墊"), "bank_account_id": "b1"},
+        {**_e("2026-03", dep=300, cat="家用"), "bank_account_id": "b1"},
     ]
     accounts = dict(ACCTS, rev={"name": "營業收入", "acct_type": "income",
                                 "pnl_group": "營業收入", "cf_activity": "operating"})
@@ -133,10 +152,12 @@ def test_synthetic_book_balances_to_zero(monkeypatch):
                                  inputs=inputs, adv={"balance_total": 0, "expenses": []},
                                  entity="mine"))
     bs = r["bs"]
-    assert bs["assets"]["total"] == 12400
-    assert bs["liabilities"]["total"] == 200
+    assert bs["assets"]["total"] == 12800
+    assert bs["liabilities"]["total"] == 600
     assert bs["equity"]["total"] == 12200
     assert bs["check"]["diff"] == 0
+    hh = next(x for x in bs["assets"]["current"] if x["key"] == "household")
+    assert hh["amount"] == 100
 
 
 def test_card_rows_never_batch_assigned_to_a_bank_account():

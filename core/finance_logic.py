@@ -1540,6 +1540,7 @@ def equity_transfer_position(cash_entries, cat_map, accounts, as_of_month,
                              cap_floor=None) -> dict:
     """{'owner_net': 業主往來淨額(注入−提取，直接可加進權益 owner 線),
         'advance_net': 員工往來-預支未收回餘額(資產),
+        'household_net': 家用往來未收回餘額(資產 —— 代墊家用，owner 2026-08-26),
         'cap_flow': 「器材設備」transfer 淨流出（資本化差額警語用）}。
 
     位置是**存量**：只設上限（月 ≤ as_of），不設 baseline 下限 —— 與調整列
@@ -1554,7 +1555,7 @@ def equity_transfer_position(cash_entries, cat_map, accounts, as_of_month,
     「收支上的器材流出」，供對照清冊在期購置量差額；它有自己的下限
     cap_floor（期初累計月，> floor 才算 —— 期初裡的購置已含在基準裡）。
     """
-    owner = advance = cap = 0
+    owner = advance = household = cap = 0
     for e in cash_entries:
         cm = cat_map.get(("cash", e.get("category") or ""))
         if not cm or cm.get("treatment") != "transfer":
@@ -1568,10 +1569,13 @@ def equity_transfer_position(cash_entries, cat_map, accounts, as_of_month,
             owner += dep - exp          # 注入為正、提取為負
         elif (acct.get("name") or "") == "員工往來-預支":
             advance += exp - dep        # 給出去未收回＝資產
+        elif (acct.get("name") or "") == "家用往來":
+            household += exp - dep      # 代墊家用未收回＝資產（還款沖銷）
         elif (acct.get("name") or "") == "器材設備":
             if cap_floor is None or m > cap_floor:
                 cap += exp - dep        # 資本化流出（退款為負）
-    return {"owner_net": owner, "advance_net": advance, "cap_flow": cap}
+    return {"owner_net": owner, "advance_net": advance,
+            "household_net": household, "cap_flow": cap}
 
 
 def card_outstanding(cash_entries, card_cfg: dict, as_of_month) -> int:
@@ -1606,7 +1610,8 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
                         cumulative_net=0, note_counts=None,
                         shareholder_loan_lines=(),
                         shareholder_capital_lines=(),
-                        owner_flow_net=0, card_outstanding=0) -> dict:
+                        owner_flow_net=0, card_outstanding=0,
+                        household_net=0) -> dict:
     """資產負債表（as_of = 期末月月底；推導式，非複式簿記）。
 
     - 資產：各銀行帳戶推導餘額分列 + 應收帳款 + 員工往來-預支（未結清預支
@@ -1640,6 +1645,11 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
                     "amount": int(receivable_total or 0), "drill": "receivable"})
     current.append({"key": "advance", "label": "員工往來-預支",
                     "amount": int(advance_balance or 0)})
+    if household_net:
+        # 家用代墊（私帳；owner 2026-08-26）：墊出去未收回＝別人欠你的錢。
+        # 母公司恆 0 → 不畫（零列＝雜訊）；有值才上，語意同員工往來。
+        current.append({"key": "household", "label": "家用代墊",
+                        "amount": int(household_net or 0)})
     eq_rows = equipment_net_rows(equipment, as_of_month)
     noncurrent = [{"key": "equipment", "label": "器材淨值",
                    "amount": eq_rows["net_total"]}]
