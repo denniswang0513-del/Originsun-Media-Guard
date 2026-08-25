@@ -11,8 +11,10 @@
         <div style="padding:0 16px 12px;font-size:11px;color:#666;letter-spacing:0.08em;">財務管理</div>
 
         <!-- nav 三模式（LEDGER_ENTITY_PLAN §5，顯隱由 finance.js 控制）：
-             .fin-nav-full    = 只在 full-parent scope（記帳者/owner）顯示 —— 母公司 CRM 域
-             .fin-nav-mine-ok = full-parent 與「我的帳」（/my-ledger.html，entity=mine）都顯示；合夥人隱藏
+             .fin-nav-full      = 只在 full-parent scope（記帳者/owner）顯示 —— 母公司 CRM 域
+             .fin-nav-mine-ok   = full-parent 與「我的帳」（/my-ledger.html，entity=mine）都顯示；合夥人隱藏
+             .fin-nav-mine-only = 私帳專屬（執行專案/器材清冊/私帳應收）：帳號要有 finance_mine
+                                  （指名制）才顯示 —— finance.js 一行 hideNav 收掉，新私帳子視圖掛這個 class 即可
              無 class          = 三種模式都顯示（儀表板／財務三表） -->
         <div class="fin-nav-mine-ok" style="padding:4px 16px;font-size:10px;color:#555;letter-spacing:0.1em;">🧾 帳務</div>
         <button class="finance-nav-btn fin-nav-full" data-inv-view="invoices">🧾 發票</button>
@@ -21,7 +23,7 @@
         <button class="finance-nav-btn fin-nav-mine-ok" data-inv-view="payables">📤 應付帳款</button>
         <!-- 私帳應收＝逐案投影（owner 不開發票，發票版應收對私帳恆空）；
              入口由 finance.js 以 finance_mine 指名門把關 -->
-        <button class="finance-nav-btn fin-nav-mine-ok" data-subview="receivable">📥 應收帳款</button>
+        <button class="finance-nav-btn fin-nav-mine-ok fin-nav-mine-only" data-subview="receivable">📥 應收帳款</button>
         <button class="finance-nav-btn fin-nav-full" data-inv-view="receivables">📥 應收帳款</button>
         <!-- 零用金：同事墊的錢。就地掛 tabs/petty 的元件（與獨立網址
              /petty-cash.html 同一套），不是連出去 —— 已經登入的人不該被踢去
@@ -30,9 +32,9 @@
 
         <div style="padding:14px 16px 4px;font-size:10px;color:#555;letter-spacing:0.1em;">📈 分析</div>
         <button class="finance-nav-btn active" data-subview="dashboard">📊 儀表板</button>
-        <button class="finance-nav-btn fin-nav-mine-ok" data-subview="projects">📁 執行專案</button>
+        <button class="finance-nav-btn fin-nav-mine-ok fin-nav-mine-only" data-subview="projects">📁 執行專案</button>
         <button class="finance-nav-btn fin-nav-mine-ok" data-subview="assets">💎 資產儀表板</button>
-        <button class="finance-nav-btn fin-nav-mine-ok" data-subview="gear">🎥 器材清冊</button>
+        <button class="finance-nav-btn fin-nav-mine-ok fin-nav-mine-only" data-subview="gear">🎥 器材清冊</button>
         <button class="finance-nav-btn" data-subview="statements">📑 財務三表</button>
         <button class="finance-nav-btn fin-nav-full" data-inv-view="cashflow">💧 現金流預測</button>
 

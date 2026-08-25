@@ -10,7 +10,7 @@
  * 同 projects/gear：固定打私帳（entity:'mine'），入口由 finance.js 以
  * finance_mine 指名門把關。
  */
-import { finFetch, esc, fmtNum } from '../fin-utils.js';
+import { finFetchMine, finSubviewBoot, esc, fmtNum } from '../fin-utils.js';
 
 let _c = null;
 let _isCurrent = () => true;
@@ -18,14 +18,12 @@ let _isCurrent = () => true;
 export default async function render(container, ctx = {}) {
     _c = container;
     if (ctx.isCurrent) _isCurrent = ctx.isCurrent;
-    _c.innerHTML = '<div style="color:#888;padding:40px;text-align:center;">載入應收…</div>';
-    try {
-        const d = await finFetch('/project-ledger', { entity: 'mine' });
-        if (!_isCurrent()) return;
-        _render(d);
-    } catch (e) {
-        _c.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">應收載入失敗：${esc(e.message)}</div>`;
-    }
+    const r = await finSubviewBoot(_c, {
+        title: '📥 應收帳款', isCurrent: _isCurrent,
+        fetchers: [() => finFetchMine('/project-ledger')],
+        retry: 'window._finRecv.reload()',
+    });
+    if (r) _render(r[0]);
 }
 
 function _render(d) {
@@ -47,9 +45,10 @@ function _render(d) {
         }))
         .sort((a, b) => b.sub - a.sub);
 
+    // 付款狀態 badge 用 crm.css 既有的三個 class（同一套詞彙不畫第三份色票）
     const badge = (st) => {
-        const c = st === '部分到帳' ? '#fbbf24' : st === '全額到帳' ? '#86efac' : '#9ca3af';
-        return `<span style="color:${c};">${esc(st || '未到帳')}</span>`;
+        const s = ['未到帳', '部分到帳', '全額到帳'].includes(st) ? st : '未到帳';
+        return `<span class="crm-badge crm-pay-${s}">${esc(st || '未到帳')}</span>`;
     };
     const body = ordered.map((g) => `
         <tr style="background:#242424;">
@@ -90,6 +89,11 @@ function _render(d) {
 }
 
 const _fr2 = (window._finRecv = window._finRecv || {});
+
+_fr2.reload = () => {
+    // 重試鈕：容器還在時整段重跑（render 本身冪等）
+    if (_c) render(_c, { isCurrent: _isCurrent });
+};
 
 _fr2.open = (id) => {
     // 交棒同專案管理→執行專案那條路：projects.js 的 render 收尾會接住並開啟

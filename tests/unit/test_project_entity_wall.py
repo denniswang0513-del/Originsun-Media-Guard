@@ -312,7 +312,10 @@ def test_ledger_view_is_pinned_to_mine_and_gated_by_explicit_module():
     """逐案損益＝私帳（在主系統也是），入口只給帳號上**真的有** finance_mine
     的人 —— 不走 hasModule 的 Lv3 bypass（後端 Lv3 已不隱含）。"""
     js = (ROOT / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
-    assert js.count("entity: 'mine'") >= 3, "list/detail/save 三個呼叫點都要釘 mine"
+    # 釘機制不釘呼叫點數量：全部走 finFetchMine（漏釘的裸 finFetch 不准存在 ——
+    # 忘了釘不會炸，只會靜靜打到母公司帳）
+    assert "finFetchMine(" in js
+    assert "finFetch(" not in js.replace("finFetchMine(", ""), "不准有沒釘 mine 的裸 finFetch"
     fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
     assert "(window._modules || []).includes('finance_mine')" in fin
     ml = (ROOT / "frontend/my-ledger.html").read_text(encoding="utf-8")
@@ -379,15 +382,19 @@ def test_ledger_create_endpoint_guards():
     fn = src.split("async def create_ledger_project(")[1].split("\n@router")[0]
     assert '_guard(request, entity, level="full")' in fn
     assert "status_code=409" in fn and "案碼" in fn
-    # 前綴不撞：比對必須錨定行尾/檔尾，2026010 不可誤中 20260100
-    assert 'pat_mid' in fn and 'pat_end' in fn
+    # 撞碼比對走 core.ledger_project.code_of 唯一解析器（曾有 SQL LIKE 第三份，
+    # 「案碼:XXX 補」尾註列與 regex 讀者給出不同答案）；2026010/20260100 前綴
+    # 不撞由 \S+ 整段比對保證
+    assert "code_of(" in fn
 
 
-def test_mine_receivable_subview_is_a_projection_and_gated():
-    """私帳應收（owner 2026-08-25）＝執行專案的投影（owner 不開發票，發票版
-    應收對私帳恆空），固定打 mine、入口走 finance_mine 指名門。"""
-    js = (ROOT / "frontend/tabs/finance/subviews/receivable.js").read_text(encoding="utf-8")
-    assert "finFetch('/project-ledger', { entity: 'mine' })" in js
-    assert "omgJumpLedgerProject" in js         # 點列→執行專案，同一條交棒路
-    fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
-    assert 'hideNav(\'[data-subview="receivable"]\')' in fin
+def test_code_note_has_exactly_one_parser():
+    """案碼協定（notes 的 `案碼:XXX` 行）的解析器只有 core 那一份 ——
+    行為驗證＋讀者都指向它。"""
+    from core.ledger_project import code_of
+    assert code_of("[私帳匯入] 案碼:2026010\n案源:自接") == "2026010"
+    assert code_of("[私帳新增] 案碼:2026010") == "2026010"
+    assert code_of("[私帳匯入] 案碼:無") == ""      # 「無」＝沒有案碼
+    assert code_of(None) == ""
+    bf = (ROOT / "scripts/backfill_my_ledger_detail.py").read_text(encoding="utf-8")
+    assert "code_of(" in bf and '案碼:(\\S+)' not in bf, "回填不准自己再 regex 一份"

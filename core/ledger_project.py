@@ -17,6 +17,8 @@ docstring 自稱正本的算式在第一天就有兩份（/simplify 2026-08-25 �
 """
 from __future__ import annotations
 
+import re
+
 # 工項（收入拆分）預設清單 —— 對齊 owner 原 Sheet 的欄序。
 # settings `my_ledger.income_items` 可覆寫（見 income_items()）。
 DEFAULT_INCOME_ITEMS = ["前期製作", "動態攝影", "剪輯", "調光", "動態效果",
@@ -50,6 +52,22 @@ def income_items(settings: dict | None = None) -> list:
 # （預設 8%，191 個歷史案實證全部 8.00%；逐案可調）。自接＝中性。
 SOURCES = ("自接", "源日", "代開發票")
 DEFAULT_FEE_PCT = 8.0
+
+# 案碼協定：匯入/新增都把 `案碼:XXX` 寫進 notes（前綴不同：[私帳匯入]/[私帳新增]），
+# 收支回掛與撞碼防線都靠它。
+_CODE_NOTE_RE = re.compile(r"案碼:(\S+)")
+
+
+def code_of(notes) -> str:
+    """notes 裡的案碼；無案碼（含匯入時寫的「無」）→ 空字串。
+
+    🔴 這個協定的**唯一解析器**。讀取端曾經各解各的（撞碼防線用 SQL LIKE
+    行尾錨點、回填腳本用 regex）——「案碼:2026010 補」這種尾註列 regex 認、
+    LIKE 不認，防線就漏了。解析只留這一份，讀案碼的一律呼叫這支。
+    """
+    m = _CODE_NOTE_RE.search(notes or "")
+    code = m.group(1) if m else ""
+    return "" if code == "無" else code
 
 
 def norm_detail(raw) -> dict:

@@ -7,7 +7,7 @@
  * 右側詳情是**可編輯**的逐案損益表：營收、費用七欄、工項拆分十項。
  *
  * 🔴 本子視圖**固定打私帳（entity='mine'）**，在主系統也是（owner 2026-08-25
- * 「這裡的逐案損益也先都放在私帳」）——所以三個 finFetch 都帶 entity 覆寫，
+ * 「這裡的逐案損益也先都放在私帳」）——所以一律走 finFetchMine，
  * 不跟著頁面 pin 走。入口按鈕只給帳號上真的有 finance_mine 的人
  * （finance.js），後端 require_entity 是真正的牆。
  *
@@ -15,8 +15,8 @@
  * 算式正本在後端 api_finance_projects.compute()，兩份算式必然漂移。
  * 存檔後端回算好的值回來，這裡只顯示。
  */
-import { finFetch, esc, fmtNum, finToast } from '../fin-utils.js';
-import { setupResizeHandle } from '../../crm/crm-utils.js';
+import { finFetchMine, esc, fmtNum, finToast } from '../fin-utils.js';
+import { crmFetch, setupResizeHandle } from '../../crm/crm-utils.js';
 
 let _c = null;
 let _isCurrent = () => true;
@@ -42,7 +42,7 @@ export default async function render(container, ctx = {}) {
  *  是純白工（後端還要再跑兩個 group-by 聚合）。篩選改在前端做。 */
 async function _load() {
     try {
-        const d = await finFetch('/project-ledger', { entity: 'mine' });
+        const d = await finFetchMine('/project-ledger');
         if (!_isCurrent()) return;
         _data = d;
         _renderShell();
@@ -212,13 +212,13 @@ const _fp = (window._finProjLedger = window._finProjLedger || {});
 // 有未存編修就整段跳過 —— 使用者手上的東西優先。
 _fp.refresh = async () => {
     if (_dirty || !document.getElementById('fpl-list-body')) return;
-    const d = await finFetch('/project-ledger', { entity: 'mine' });
+    const d = await finFetchMine('/project-ledger');
     if (!_isCurrent()) return;
     _data = d;
     _renderTotals();
     _renderList();
     if (_sel && _detail) {
-        _detail = await finFetch(`/project-ledger/${_sel}`, { entity: 'mine' });
+        _detail = await finFetchMine(`/project-ledger/${_sel}`);
         _renderDetail();
     }
 };
@@ -252,7 +252,7 @@ _fp.open = async (id) => {
     panel.style.display = '';
     panel.innerHTML = '<div style="color:#888;padding:30px;text-align:center;">載入中…</div>';
     try {
-        _detail = await finFetch(`/project-ledger/${id}`, { entity: 'mine' });
+        _detail = await finFetchMine(`/project-ledger/${id}`);
         _renderDetail();
     } catch (e) {
         panel.innerHTML = `<div style="color:#f87171;padding:30px;">載入失敗：${esc(e.message)}</div>`;
@@ -314,7 +314,7 @@ function _renderDetail() {
                                 <option value="">—</option>
                                 ${(d.sources || []).map((s) => `<option value="${esc(s)}"${det.source === s ? ' selected' : ''}>${s === '源日' ? '源日（現金收款）' : s === '代開發票' ? '代開發票（自動代辦費）' : s}</option>`).join('')}
                             </select></td></tr>
-                        <tr id="fpl-fee-row" style="${det.source === '代開發票' ? '' : 'display:none;'}">
+                        <tr id="fpl-fee-row">
                             <td style="color:#bbb;">服務費率 %</td>
                             <td>${money('fpl-feepct', det.fee_pct || d.default_fee_pct || 8)}</td></tr>
                         ${costRows}
@@ -455,11 +455,11 @@ _fp.create = async () => {
     if (box.style.display === 'none') return;
     if (!_clients) {
         try {
-            const token = localStorage.getItem('auth_token');
-            const r = await fetch('/api/v1/crm/clients', {
-                headers: token ? { Authorization: 'Bearer ' + token } : {} });
-            _clients = (await r.json()).clients || [];
-        } catch (_) { _clients = []; }
+            _clients = (await crmFetch('/clients')).clients || [];
+        } catch (e) {
+            _clients = [];   // 下拉是選配，載不到仍可建案 —— 但失敗要出聲
+            finToast('客戶名錄載入失敗：' + e.message, 'error');
+        }
         const sel = document.getElementById('fpc-client');
         sel.innerHTML = '<option value="">— 未定 —</option>' + _clients
             .map((c) => `<option value="${c.id}">${esc(c.short_name)}</option>`).join('');
@@ -480,8 +480,8 @@ _fp.createSave = async (btn) => {
     if (!g('fpc-name')) { finToast('專案名稱必填', 'error'); return; }
     btn.disabled = true;
     try {
-        const r = await finFetch('/project-ledger', {
-            entity: 'mine', method: 'POST',
+        const r = await finFetchMine('/project-ledger', {
+            method: 'POST',
             body: JSON.stringify({
                 name: g('fpc-name'), client_id: g('fpc-client') || null,
                 code: g('fpc-code'), close_date: g('fpc-close'),
@@ -517,11 +517,8 @@ _fp.outsourceAdd = async (btn) => {
     try {
         // 委外項目＝專案外包請款單：後端會把本案的委外費用 += 金額（增量制），
         // 同時進應付帳款的匯款清單 —— 一筆資料，三個地方同一個真相
-        const token = localStorage.getItem('auth_token');
-        const r = await fetch('/api/v1/crm/payments', {
+        await crmFetch('/payments', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json',
-                       ...(token ? { Authorization: 'Bearer ' + token } : {}) },
             body: JSON.stringify({
                 entity: 'mine', category: '專案外包', project_id: _sel,
                 payee_name: payee, amount: amt,
@@ -529,10 +526,8 @@ _fp.outsourceAdd = async (btn) => {
                 request_date: new Date().toISOString().slice(0, 10),
             }),
         });
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '建立失敗');
         finToast('已加入委外（應付款）');
         await _fp.refresh();            // 委外費用/未付應付都變了 → 清單＋詳情一起換新
-        _fp.open(_sel);
     } catch (e) {
         finToast('委外建立失敗：' + e.message, 'error');
     } finally { btn.disabled = false; }
@@ -552,8 +547,8 @@ _fp.push = async (btn) => {
     const v = p.crm_pushed ? 0 : 1;
     btn.disabled = true;
     try {
-        const r = await finFetch(`/project-ledger/${_sel}`, {
-            entity: 'mine', method: 'PUT', body: JSON.stringify({ crm_pushed: v }),
+        const r = await finFetchMine(`/project-ledger/${_sel}`, {
+            method: 'PUT', body: JSON.stringify({ crm_pushed: v }),
         });
         p.crm_pushed = r.crm_pushed;
         const row = _data.projects.find((x) => x.id === _sel);
@@ -592,8 +587,7 @@ _fp.save = async (btn) => {
     btn.disabled = true;
     btn.textContent = '儲存中…';
     try {
-        const r = await finFetch(`/project-ledger/${_sel}`, {
-            entity: 'mine',
+        const r = await finFetchMine(`/project-ledger/${_sel}`, {
             method: 'PUT', body: JSON.stringify(body),
         });
         _dirty = false;

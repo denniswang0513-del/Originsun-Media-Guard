@@ -321,7 +321,7 @@ async def compute_live(session, months, inputs=None, adv=None,
     # transfer 流量的位置（業主往來/代墊）＋卡債 —— BS 的另一半（詳見
     # core/finance_logic.equity_transfer_position 檔頭；對母公司是空操作）
     _pos = equity_transfer_position(inputs["cash_entries"], inputs["cat_map"],
-                                    inputs["accounts"], as_of)
+                                    inputs["accounts"], as_of, cap_floor=baseline)
     from core.card_statement import card_cfg as _card_cfg
     from config import load_settings as _ls
     _card = card_outstanding(inputs["cash_entries"],
@@ -330,17 +330,7 @@ async def compute_live(session, months, inputs=None, adv=None,
     # 窗口的購置成本（資本化＝現金變資產）。流出 > 清冊＝清冊外的小額配件其實
     # 是費用（該改類別或補清冊）；< 清冊＝有購置沒走收支。這個差就是 BS diff
     # 的具名成分之一 —— 指名數字，別讓人對著一個總差額猜。
-    _cap_flow = 0
-    for _e in inputs["cash_entries"]:
-        _cm = inputs["cat_map"].get(("cash", _e.get("category") or ""))
-        if not _cm or _cm.get("treatment") != "transfer":
-            continue
-        _acct = inputs["accounts"].get(_cm.get("account_id")) or {}
-        if (_acct.get("name") or "") != "器材設備":
-            continue
-        _m = month_of(_e.get("entry_date"))
-        if _m and baseline < _m <= as_of:
-            _cap_flow += int(_e.get("expense") or 0) - int(_e.get("deposit") or 0)
+    _cap_flow = _pos["cap_flow"]
     _cap_reg = sum(int(q.get("purchase_cost") or 0) for q in inputs["equipment"]
                    if baseline < (month_of(q.get("purchase_date")) or "") <= as_of)
     if _cap_flow != _cap_reg and (_cap_flow or _cap_reg):

@@ -49,6 +49,10 @@ export async function finFetch(path, opts = {}) {
     return res.json();
 }
 
+/** 私帳子視圖（執行專案/器材清冊/應收）固定打 'mine' —— 逐呼叫手釘的話，
+ *  忘了第 12 個呼叫點不會炸，只會靜靜打到母公司帳，所以收成一支。 */
+export const finFetchMine = (path, opts = {}) => finFetch(path, { ...opts, entity: 'mine' });
+
 export function esc(str) {
     return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }

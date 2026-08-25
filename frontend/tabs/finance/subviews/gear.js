@@ -11,7 +11,8 @@
  * 刻意**不是** CRM 器材庫的複本：領用/歸還/稼動率是公司工作流，私人器材
  * 只需要 名稱/類別/建置日/金額/攤提/狀態/備註 —— 對齊 owner 原 Sheet 的欄位。
  */
-import { finFetch, esc, fmtNum, finToast } from '../fin-utils.js';
+import { finFetchMine, finSubviewBoot, esc, fmtNum, finToast } from '../fin-utils.js';
+import { authFetch } from '../../../js/shared/utils.js';
 
 const API = '/api/v1/equipment';
 
@@ -21,11 +22,9 @@ let _data = null;      // /finance/assets/equipment 的回應
 let _editing = null;   // 編輯中的 item id；'new'＝新增
 
 async function _efetch(path, opts = {}) {
-    // 器材 CRUD 不在 /api/v1/finance 底下 —— finFetch 的 prefix 不適用
-    const token = localStorage.getItem('auth_token');
-    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(API + path, { ...opts, headers });
+    // 器材 CRUD 不在 /api/v1/finance 底下 —— token/JSON 殼走 shared authFetch
+    //（body 傳物件會自動 stringify），這裡只補 detail 抽取
+    const res = await authFetch(API + path, opts);
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error(err.detail || '請求失敗');
@@ -36,20 +35,19 @@ async function _efetch(path, opts = {}) {
 export default async function render(container, ctx = {}) {
     _c = container;
     if (ctx.isCurrent) _isCurrent = ctx.isCurrent;
-    _c.innerHTML = '<div style="color:#888;padding:40px;text-align:center;">載入器材清冊…</div>';
     await _load();
 }
 
 async function _load() {
-    try {
-        const d = await finFetch('/assets/equipment', { entity: 'mine' });
-        if (!_isCurrent()) return;
-        _data = d;
-        _editing = null;
-        _render();
-    } catch (e) {
-        _c.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">器材清冊載入失敗：${esc(e.message)}</div>`;
-    }
+    const r = await finSubviewBoot(_c, {
+        title: '🎥 器材清冊', isCurrent: _isCurrent,
+        fetchers: [() => finFetchMine('/assets/equipment')],
+        retry: 'window._finGear.reload()',
+    });
+    if (!r) return;
+    _data = r[0];
+    _editing = null;
+    _render();
 }
 
 function _cats() {
@@ -109,8 +107,7 @@ function _render() {
             <button class="crm-btn crm-btn-primary crm-btn-sm" style="margin-left:auto;"
                     onclick="window._finGear.add()">＋ 新增器材</button>
         </div>
-        ${_editing === 'new' ? _formHtml(null) : ''}
-        ${editingItem ? _formHtml(editingItem) : ''}
+        ${_editing ? _formHtml(editingItem) : ''}
         <div style="max-height:calc(100vh - 260px);overflow-y:auto;background:#202020;border:1px solid #2e2e2e;border-radius:8px;">
         <table class="crm-table" style="width:100%;font-size:12px;">
             <thead><tr style="position:sticky;top:0;background:#202020;z-index:1;">
@@ -128,6 +125,7 @@ function _render() {
 
 const _fg = (window._finGear = window._finGear || {});
 
+_fg.reload = _load;
 _fg.add = () => { _editing = 'new'; _render(); };
 _fg.edit = (id) => { _editing = _editing === id ? null : id; _render(); };
 _fg.cancel = () => { _editing = null; _render(); };
@@ -145,10 +143,10 @@ _fg.save = async (btn) => {
     btn.disabled = true;
     try {
         if (_editing === 'new') {
-            await _efetch('', { method: 'POST', body: JSON.stringify({ ...body, entity: 'mine' }) });
+            await _efetch('', { method: 'POST', body: { ...body, entity: 'mine' } });
             finToast('已新增到清冊');
         } else {
-            await _efetch(`/${_editing}`, { method: 'PUT', body: JSON.stringify(body) });
+            await _efetch(`/${_editing}`, { method: 'PUT', body });
             finToast('已儲存');
         }
         await _load();      // 淨值要引擎重算，別在前端自己湊

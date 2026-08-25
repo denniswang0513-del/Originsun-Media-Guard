@@ -119,8 +119,14 @@ with sync_playwright() as p:
     check(fresh.index("2026 思沙龍 EP02") < 60, "還原後回到 2026-07 那一段",
           fresh.index("2026 思沙龍 EP02"))
 
-    print("[3] 發票殼載入期間不是空白")
-    pg.locator("[data-inv-view='invoices']").first.click()
+    print("[3] 帳務殼載入期間不是空白")
+    # 🔴 別點死「發票」—— 它在 mine 模式是 fin-nav-full（發票下架後刻意藏），
+    # 這一步驗的是殼的 lazy-load 不空白，點第一顆看得見的帳務鈕即可
+    inv = pg.eval_on_selector_all(
+        "[data-inv-view]",
+        "els => els.filter(e => e.offsetParent !== null).map(e => e.dataset.invView)")
+    check(len(inv) > 0, "有看得見的帳務按鈕", inv)
+    pg.locator(f"[data-inv-view='{inv[0]}']").first.click()
     pg.wait_for_timeout(120)
     html = pg.eval_on_selector("#finance-invoices-wrap", "e => e.innerHTML.trim()")
     check(len(html) > 0, "點下去馬上就有東西（loading 或內容）", f"{len(html)} 字元")

@@ -85,7 +85,8 @@ def test_gear_subview_is_pinned_to_mine_and_gated():
     """私帳的器材清冊：清單走引擎端點（與 BS 同口徑）、建立帶 entity='mine'、
     入口只給帳號上真的有 finance_mine 的人。"""
     js = (ROOT / "frontend/tabs/finance/subviews/gear.js").read_text(encoding="utf-8")
-    assert "finFetch('/assets/equipment', { entity: 'mine' })" in js
+    assert "finFetchMine('/assets/equipment')" in js
     assert "entity: 'mine'" in js.split("method: 'POST'")[1][:120], "建立要落私帳"
-    fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
-    assert 'hideNav(\'[data-subview="gear"]\')' in fin
+    html = (ROOT / "frontend/tabs/finance/finance.html").read_text(encoding="utf-8")
+    btn = [ln for ln in html.splitlines() if 'data-subview="gear"' in ln][0]
+    assert "fin-nav-mine-only" in btn, "指名門是宣告式：按鈕掛 class、finance.js 一行收掉"

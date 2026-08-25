@@ -63,7 +63,10 @@ def test_received_sync_is_incremental_and_mine_only():
     from pathlib import Path
     src = (Path(__file__).resolve().parents[2] / "routers/crm/finance.py").read_text(encoding="utf-8")
     helper = src.split("async def _sync_mine_project_received(")[1].split("\ndef ")[0]
-    assert '!= "mine":\n        return' in helper.replace("'", '"')
+    # mine-only 那半（安全半邊）收在共用前導 _get_mine_project，兩支 sync 都走它
+    assert "_get_mine_project(session, project_id)" in helper
+    pre = src.split("async def _get_mine_project(")[1].split("\nasync def ")[0]
+    assert '!= "mine":' in pre.replace("'", '"') and "return None" in pre
     assert "amount_received or 0) + int(delta)" in helper
     for fn_name in ("create_cash_entry", "update_cash_entry", "delete_cash_entry"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
@@ -94,8 +97,15 @@ def test_owner_can_write_own_book_but_parent_stays_admin_only():
     helper = src.split("def _mine_or_admin_write(")[1].split("\ndef ")[0]
     assert 'require_entity(request, "mine", level="full")' in helper
     assert "_check_auth(request)" in helper          # 母公司路徑原樣
-    for fn_name in ("create_cash_entry", "update_cash_entry", "delete_cash_entry",
-                    "create_payment", "update_payment", "delete_payment"):
+    # 建立/更新走 _entity_for_write 咽喉（守衛收在裡面 —— 逐端點明呼會忘）
+    throat = src.split("def _entity_for_write(")[1].split("\ndef ")[0]
+    assert "_mine_or_admin_write(request, ent)" in throat
+    for fn_name in ("create_cash_entry", "update_cash_entry",
+                    "create_payment", "update_payment"):
+        fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
+        assert "_entity_for_write" in fn, fn_name
+    # 刪除沒有 payload、不走咽喉 —— 各自明呼
+    for fn_name in ("delete_cash_entry", "delete_payment"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
         assert "_mine_or_admin_write" in fn, fn_name
     for fn_name in ("batch_pay", "batch_unpay", "batch_update_month"):

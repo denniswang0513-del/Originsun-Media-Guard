@@ -55,11 +55,15 @@ def test_advance_position_is_out_minus_back():
 
 
 def test_gear_and_bank_transfers_create_no_position():
-    """器材走清冊（再記流量＝重複）、銀行存款走卡債邏輯 —— 都不進位置。"""
+    """器材走清冊（再記流量＝重複）、銀行存款走卡債邏輯 —— 都不進位置。
+    器材流出只以 cap_flow 順手量出（資本化差額警語用，不是 BS 位置）。"""
     rows = [_e("2024-01", exp=9000, cat="公司_器材"),
             _e("2024-02", exp=5000, cat="信用卡")]
     pos = equity_transfer_position(rows, CMAP, ACCTS, "2026-01")
-    assert pos == {"owner_net": 0, "advance_net": 0}
+    assert pos == {"owner_net": 0, "advance_net": 0, "cap_flow": 9000}
+    # cap_floor＝期初累計月（> floor 才算）：期初裡的購置不再重複計入
+    assert equity_transfer_position(rows, CMAP, ACCTS, "2026-01",
+                                    cap_floor="2024-01")["cap_flow"] == 0
 
 
 def test_card_outstanding_formula_and_guard():

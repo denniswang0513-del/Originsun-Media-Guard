@@ -1536,9 +1536,11 @@ def merge_pnl(parts, n_months: int) -> dict:
 # 列數 = 0；parent 的股東流動走 split_bank_lines 的帳戶機制，是另一條路）。
 
 
-def equity_transfer_position(cash_entries, cat_map, accounts, as_of_month) -> dict:
+def equity_transfer_position(cash_entries, cat_map, accounts, as_of_month,
+                             cap_floor=None) -> dict:
     """{'owner_net': 業主往來淨額(注入−提取，直接可加進權益 owner 線),
-        'advance_net': 員工往來-預支未收回餘額(資產)}。
+        'advance_net': 員工往來-預支未收回餘額(資產),
+        'cap_flow': 「器材設備」transfer 淨流出（資本化差額警語用）}。
 
     位置是**存量**：只設上限（月 ≤ as_of），不設 baseline 下限 —— 與調整列
     同一條規則（期初列本來就開在基準月）。卡片消費列（status='card'）也算：
@@ -1547,8 +1549,12 @@ def equity_transfer_position(cash_entries, cat_map, accounts, as_of_month) -> di
     分類依據＝科目的 acct_type（equity → 業主往來線）；員工往來-預支按科目名
     指認 —— 同為 asset 的器材設備走清冊（再記流量就重複）、銀行存款走卡債
     邏輯，asset 一律入位置反而是錯的，所以這裡刻意不用 acct_type 泛化。
+
+    cap_flow **不是** BS 位置（器材淨值走清冊），只是同一趟掃描順手量出的
+    「收支上的器材流出」，供對照清冊在期購置量差額；它有自己的下限
+    cap_floor（期初累計月，> floor 才算 —— 期初裡的購置已含在基準裡）。
     """
-    owner = advance = 0
+    owner = advance = cap = 0
     for e in cash_entries:
         cm = cat_map.get(("cash", e.get("category") or ""))
         if not cm or cm.get("treatment") != "transfer":
@@ -1562,7 +1568,10 @@ def equity_transfer_position(cash_entries, cat_map, accounts, as_of_month) -> di
             owner += dep - exp          # 注入為正、提取為負
         elif (acct.get("name") or "") == "員工往來-預支":
             advance += exp - dep        # 給出去未收回＝資產
-    return {"owner_net": owner, "advance_net": advance}
+        elif (acct.get("name") or "") == "器材設備":
+            if cap_floor is None or m > cap_floor:
+                cap += exp - dep        # 資本化流出（退款為負）
+    return {"owner_net": owner, "advance_net": advance, "cap_flow": cap}
 
 
 def card_outstanding(cash_entries, card_cfg: dict, as_of_month) -> int:

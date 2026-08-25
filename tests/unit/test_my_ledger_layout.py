@@ -144,9 +144,12 @@ def test_receivable_subview_is_project_based_and_gated():
     的投影 —— 🔴 不是 CRM 應收視圖（那支查 crm_invoices，owner 不開發票，
     對私帳恆空）。同 projects/gear：釘 mine ＋ finance_mine 指名門。"""
     js = _read("frontend/tabs/finance/subviews/receivable.js")
-    assert "finFetch('/project-ledger', { entity: 'mine' })" in js
+    assert "finFetchMine('/project-ledger')" in js
     assert "omgJumpLedgerProject" in js, "點列要能跳到執行專案（同一條交棒路）"
     html = _read("frontend/tabs/finance/finance.html")
     assert html.count('data-subview="receivable"') == 1, "側欄按鈕恰好一顆（插補丁曾重複）"
+    # 指名門是宣告式的：按鈕掛 .fin-nav-mine-only、finance.js 一行 hideNav 收掉
+    btn = [ln for ln in html.splitlines() if 'data-subview="receivable"' in ln][0]
+    assert "fin-nav-mine-only" in btn
     fin = _read("frontend/tabs/finance/finance.js")
-    assert fin.count('hideNav(\'[data-subview="receivable"]\')') == 1
+    assert fin.count("hideNav('.fin-nav-mine-only')") == 1

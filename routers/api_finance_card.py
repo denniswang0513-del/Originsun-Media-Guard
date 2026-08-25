@@ -276,9 +276,9 @@ def _card_cfg(ent: str) -> dict:
 def _card_cfg_from(cfg: dict) -> dict:
     """正規化一本帳的卡片設定。吃 dict 而不是自己讀檔 —— PUT 改完還款類別後
     要用**改過的**那份重算，從磁碟讀回來的是舊的（/simplify 第 4 輪抓到）。
-    正本在 core.card_statement.card_cfg（報表引擎的卡債負債列也走那份）。"""
-    from core.card_statement import card_cfg
-    return card_cfg({"card_ledger": {"_": cfg}}, "_")
+    正本在 core.card_statement.normalize_card_cfg（報表引擎的卡債列也走那份）。"""
+    from core.card_statement import normalize_card_cfg
+    return normalize_card_cfg(cfg)
 
 
 async def _card_numbers(ent: str, cfg: dict) -> dict:

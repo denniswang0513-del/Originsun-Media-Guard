@@ -31,7 +31,7 @@ from config import load_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
 from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, SOURCES,
-                                 SUM_KEYS, apply_source_fee, compute,
+                                 SUM_KEYS, apply_source_fee, code_of, compute,
                                  income_items, norm_detail)
 from core.schemas import LedgerDetailPayload, LedgerProjectCreate
 from routers.crm._shared import _fmt_day
@@ -184,17 +184,13 @@ async def create_ledger_project(payload: LedgerProjectCreate, request: Request,
             if not await session.get(Client, payload.client_id):
                 raise HTTPException(status_code=404, detail="找不到指定的客戶")
         if code:
-            # 案碼行是「案碼:XXX」＋行尾（或檔尾）—— 兩種樣式都比，避免
-            # 2026010 誤中 20260100 這種前綴撞名
-            pat_mid = "%案碼:" + code + "\n%"
-            pat_end = "%案碼:" + code
-            dup = (await session.execute(
-                select(CrmProject.id).where(
-                    CrmProject.entity == ent,
-                    CrmProject.notes.like(pat_mid) |
-                    CrmProject.notes.like(pat_end),
-                ).limit(1))).scalar_one_or_none()
-            if dup:
+            # 撞碼防線走 code_of 唯一解析器逐列比（本帳 ~400 列、一次查詢）
+            # —— 曾用 SQL LIKE 行尾錨點，與回填腳本的 regex 對「案碼:XXX 補」
+            # 這種尾註列給出不同答案；一個協定只能有一個解析器。
+            notes_rows = (await session.execute(
+                select(CrmProject.notes).where(CrmProject.entity == ent)
+            )).scalars().all()
+            if any(code_of(n) == code for n in notes_rows):
                 raise HTTPException(status_code=409,
                                     detail=f"案碼 {code} 已存在 —— 收支按案碼回掛，重複會讓兩案分不清彼此的帳")
         pid = _uuid.uuid4().hex

@@ -181,20 +181,26 @@ def merchant_key(summary: str) -> str:
 DEFAULT_REPAY_CATEGORIES = ["信用卡"]
 
 
-def card_cfg(settings: dict, entity: str) -> dict:
-    """一本帳的卡片設定（期初／還款類別）正規化 —— 正本。
+def normalize_card_cfg(cfg: dict) -> dict:
+    """卡片設定（期初／還款類別）正規化 —— 正本。
 
     router（api_finance_card）與報表引擎（finance_statements 的卡債負債列）
     都要用同一份：兩邊各讀各的 settings 預設值，漂了就是「卡片餘額對、
-    資產負債表上的卡債不對」這種最難查的錯。
+    資產負債表上的卡債不對」這種最難查的錯。已握有 cfg dict 的呼叫端
+    （如 PUT 後要用改過的那份重算）直接打這支，不必偽造 settings 形狀。
     """
-    cfg = ((settings.get("card_ledger") or {}).get(entity) or {})
+    cfg = cfg or {}
     return {
         "opening": int(cfg.get("opening") or 0),
         "repay_categories": [str(x) for x in (cfg.get("repay_categories")
                                               or DEFAULT_REPAY_CATEGORIES)
                              if str(x).strip()],
     }
+
+
+def card_cfg(settings: dict, entity: str) -> dict:
+    """一本帳的卡片設定：settings 導航＋normalize_card_cfg。"""
+    return normalize_card_cfg((settings.get("card_ledger") or {}).get(entity))
 
 
 def mark_duplicates(keys: list, seen) -> list:
