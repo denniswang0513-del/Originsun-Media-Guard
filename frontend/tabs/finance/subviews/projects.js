@@ -353,7 +353,21 @@ function _renderDetail() {
                         <td style="text-align:right;color:#86efac;">${e.deposit ? fmtNum(e.deposit) : ''}</td>
                         <td style="text-align:right;color:#fca5a5;">${e.expense ? fmtNum(e.expense) : ''}</td></tr>`).join('')
                     || '<tr><td colspan="4" style="color:#666;padding:10px;">（無）</td></tr>'}</tbody></table>
-            <div style="color:#ddd;font-size:12px;font-weight:600;margin:16px 0 6px;">應付／請款單（${(d.payments || []).length}）</div>
+            <div style="display:flex;align-items:center;gap:8px;margin:16px 0 6px;">
+                <span style="color:#ddd;font-size:12px;font-weight:600;">應付／請款單（${(d.payments || []).length}）</span>
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:auto;"
+                        onclick="window._finProjLedger.outsourceForm()">＋ 委外</button>
+            </div>
+            <div id="fpl-out-form" style="display:none;background:#202020;border:1px solid #3b82f6;border-radius:8px;padding:10px;margin-bottom:8px;">
+                <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+                    <label style="color:#888;font-size:11px;">收款人<input class="crm-input" id="fpl-out-payee" style="width:120px;"></label>
+                    <label style="color:#888;font-size:11px;">金額<input class="crm-input" type="number" id="fpl-out-amt" style="width:110px;"></label>
+                    <label style="color:#888;font-size:11px;">說明<input class="crm-input" id="fpl-out-note" placeholder="（選填）" style="width:150px;"></label>
+                    <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finProjLedger.outsourceAdd(this)">加入</button>
+                </div>
+                <div style="color:#666;font-size:10px;margin-top:6px;">
+                    加入＝建一張「專案外包」請款單（應付款）：本案的委外費用自動累加、應付帳款的匯款清單也會出現這一筆。</div>
+            </div>
             <table class="crm-table" style="width:100%;font-size:12px;">
                 <tbody>${(d.payments || []).map((x) => `
                     <tr><td>${esc(x.summary)}<div style="color:#666;font-size:10px;">${esc(x.category)}${x.payee ? '｜' + esc(x.payee) : ''}</div></td>
@@ -380,10 +394,18 @@ function _renderDetail() {
         row.style.display = isAgency ? '' : 'none';
         feeEl.disabled = isAgency;
         feeEl.title = isAgency ? '案源＝代開發票：代辦費＝營收×費率，自動計算' : '';
+        const taxEl = document.getElementById('fpl-c-tax_fee');
+        const buyEl = document.getElementById('fpl-c-buy_invoice');
+        [taxEl, buyEl].forEach((el) => { if (el) el.disabled = isAgency; });
         if (isAgency) {
+            // 同後端 apply_source_fee：代辦費=營收×費率；稅金=未稅×5%；買發票=差額
             const c = Number(document.getElementById('fpl-contract')?.value) || 0;
             const pct = Number(document.getElementById('fpl-feepct')?.value) || 8;
-            feeEl.value = Math.round(c * pct / 100) || '';
+            const fee = Math.round(c * pct / 100);
+            const tax = Math.round(c / 1.05 * 0.05);
+            feeEl.value = fee || '';
+            if (taxEl) taxEl.value = tax || '';
+            if (buyEl) buyEl.value = (fee - tax) || '';
             _liveSum();
         }
     };
@@ -476,6 +498,43 @@ _fp.createSave = async (btn) => {
         _fp.open(r.id);             // 直接打開詳情填工項
     } catch (e) {
         finToast('建立失敗：' + e.message, 'error');
+    } finally { btn.disabled = false; }
+};
+
+_fp.outsourceForm = () => {
+    const box = document.getElementById('fpl-out-form');
+    box.style.display = box.style.display === 'none' ? '' : 'none';
+    if (box.style.display === '') document.getElementById('fpl-out-payee').focus();
+};
+
+_fp.outsourceAdd = async (btn) => {
+    const payee = document.getElementById('fpl-out-payee').value.trim();
+    const amt = parseInt(document.getElementById('fpl-out-amt').value, 10) || 0;
+    const note = document.getElementById('fpl-out-note').value.trim();
+    if (!payee || amt <= 0) { finToast('收款人與金額必填', 'error'); return; }
+    const p = _detail.project;
+    btn.disabled = true;
+    try {
+        // 委外項目＝專案外包請款單：後端會把本案的委外費用 += 金額（增量制），
+        // 同時進應付帳款的匯款清單 —— 一筆資料，三個地方同一個真相
+        const token = localStorage.getItem('auth_token');
+        const r = await fetch('/api/v1/crm/payments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json',
+                       ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+            body: JSON.stringify({
+                entity: 'mine', category: '專案外包', project_id: _sel,
+                payee_name: payee, amount: amt,
+                summary: `委外：${payee}｜${p.name}${note ? '（' + note + '）' : ''}`,
+                request_date: new Date().toISOString().slice(0, 10),
+            }),
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '建立失敗');
+        finToast('已加入委外（應付款）');
+        await _fp.refresh();            // 委外費用/未付應付都變了 → 清單＋詳情一起換新
+        _fp.open(_sel);
+    } catch (e) {
+        finToast('委外建立失敗：' + e.message, 'error');
     } finally { btn.disabled = false; }
 };
 

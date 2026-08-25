@@ -71,3 +71,48 @@ def test_received_sync_is_incremental_and_mine_only():
     upd = src.split("async def update_cash_entry(")[1].split("\n@router")[0]
     assert upd.index("_old_dep, _old_pid") < upd.index("for k, v in data.items()"), \
         "舊值要在 setattr 之前抓"
+
+
+def test_agency_fee_composition():
+    """稅金5% + 買發票 = 代辦費（owner 口述＋Sheet 實證 82,000→3,905/2,655/6,560）。
+    三欄是**組成**不是加項 —— compute 只扣 invoice_fee，三個都扣＝同一筆錢
+    扣兩次。"""
+    from core.ledger_project import compute
+    d = apply_source_fee(82000, norm_detail({"source": "代開發票"}))
+    assert (d["invoice_fee"], d["tax_fee"], d["buy_invoice"]) == (6560, 3905, 2655)
+    assert d["tax_fee"] + d["buy_invoice"] == d["invoice_fee"]
+    net, _ = compute(82000, d)
+    assert net == 82000 - 6560               # 只扣代辦費一次
+
+
+def test_owner_can_write_own_book_but_parent_stays_admin_only():
+    """🔴 owner＝lv1＋finance_mine（指名制），原本 CRM 寫入全是 Lv3-only ——
+    帳本主人在生產連一筆帳都記不進去（真實帳號形狀實測 403 才發現；先前
+    測試全用 Lv3 token）。開 mine full 路徑；母公司維持 Lv3（不放寬同事）。"""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2] / "routers/crm/finance.py").read_text(encoding="utf-8")
+    helper = src.split("def _mine_or_admin_write(")[1].split("\ndef ")[0]
+    assert 'require_entity(request, "mine", level="full")' in helper
+    assert "_check_auth(request)" in helper          # 母公司路徑原樣
+    for fn_name in ("create_cash_entry", "update_cash_entry", "delete_cash_entry",
+                    "create_payment", "update_payment", "delete_payment"):
+        fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
+        assert "_mine_or_admin_write" in fn, fn_name
+    for fn_name in ("batch_pay", "batch_unpay", "batch_update_month"):
+        fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
+        assert "_mine_or_admin_write_rows(request, rows)" in fn, fn_name
+    # 沒動的端點維持 Lv3（發票/CSV 匯入/批次收款/分配）
+    for fn_name in ("create_invoice", "batch_receive"):
+        fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
+        assert "_check_auth(request)" in fn, fn_name
+
+
+def test_outsource_sync_is_incremental_and_scoped():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2] / "routers/crm/finance.py").read_text(encoding="utf-8")
+    helper = src.split("async def _sync_mine_project_outsource(")[1].split("\ndef ")[0]
+    assert '!= "專案外包":\n        return' in helper.replace("'", '"')
+    assert '+ int(delta)' in helper
+    for fn_name in ("create_payment", "update_payment", "delete_payment"):
+        fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
+        assert "_sync_mine_project_outsource" in fn, fn_name

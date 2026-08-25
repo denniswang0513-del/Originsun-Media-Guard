@@ -26,6 +26,7 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 apply_payment_fee, apply_receipt_fee,
                                 is_passthrough_category, month_of,
                                 normalize_invoice_status, passthrough_commission)
+from core.auth import check_logged_in
 from core.ledger import require_entity
 from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES
 from core.project_match import prepare as prepare_projects
@@ -1154,7 +1155,7 @@ async def list_payments(
 
 @router.post("/payments")
 async def create_payment(req: PaymentRequestPayload, request: Request):
-    _check_auth(request)
+    _mine_or_admin_write(request, req.entity)
     _require_db()
     ent = _entity_for_write(request, req.entity)
     factory = await _get_factory()
@@ -1167,6 +1168,9 @@ async def create_payment(req: PaymentRequestPayload, request: Request):
     async with factory() as session:
         # F1 月結守衛：請款單的權責費用認列月 = request_date
         await _assert_month_open(session, dates.get("request_date"), entity=ent)
+        if ent == "mine":
+            await _sync_mine_project_outsource(session, p.project_id,
+                                               p.category, int(p.amount or 0))
         session.add(p)
         await session.commit()
     return {"status": "ok", "payment": _to_payment_dict(p)}
@@ -1389,7 +1393,7 @@ async def batch_update_month(request: Request):
     F1 月結守衛判準：planned_month 是「預計付款月」排程欄，不是權責認列日
     （request_date）也不是現金發生日（payment_date）— 改排程不改帳，不掛守衛
     （所以也沒有 per-entity 鎖月檢查；各列的 entity 維持不變）。"""
-    _check_auth(request)
+    check_logged_in(request)
     _require_db()
     factory = await _get_factory()
     body = await request.json()
@@ -1399,13 +1403,13 @@ async def batch_update_month(request: Request):
         raise HTTPException(status_code=400, detail="請提供 payment_ids")
 
     async with factory() as session:
+        rows = [p for pid in ids if (p := await session.get(CrmPaymentRequest, pid))]
+        _mine_or_admin_write_rows(request, rows)
         updated = 0
-        for pid in ids:
-            p = await session.get(CrmPaymentRequest, pid)
-            if p:
-                p.planned_month = planned_month
-                p.updated_at = _now()
-                updated += 1
+        for p in rows:
+            p.planned_month = planned_month
+            p.updated_at = _now()
+            updated += 1
         await session.commit()
     return {"status": "ok", "updated": updated}
 
@@ -1417,7 +1421,7 @@ async def batch_pay(request: Request):
     F1 月結守衛判準：付款動作影響的是現金側（payment_date），不改權責費用
     認列月（request_date）— 所以這裡守 payment_date：新付款日或原付款日
     （搬出鎖定月也算改帳）落鎖定月 → 整批 409 並列出違規筆。"""
-    _check_auth(request)
+    check_logged_in(request)
     _require_db()
     factory = await _get_factory()
     body = await request.json()
@@ -1436,6 +1440,7 @@ async def batch_pay(request: Request):
             will_change = (p.payment_status != "已付款") or (p.payment_date != pay_date)
             if will_change:
                 rows.append(p)
+        _mine_or_admin_write_rows(request, rows)
         # 兩本帳各自鎖月（plan §3）：涉及的 entity 分組、各查一次鎖定月集合
         locked_by_entity = {
             ent: await _locked_month_set(session, entity=ent)
@@ -1479,7 +1484,7 @@ async def batch_unpay(request: Request):
 
     F1 月結守衛判準同 batch-pay：取消付款是把現金事件從原付款月抽走 —
     原 payment_date 落鎖定月 → 整批 409 並列出違規筆。"""
-    _check_auth(request)
+    check_logged_in(request)
     _require_db()
     factory = await _get_factory()
     body = await request.json()
@@ -1493,6 +1498,7 @@ async def batch_unpay(request: Request):
             p = await session.get(CrmPaymentRequest, pid)
             if p and p.payment_status == "已付款":
                 rows.append(p)
+        _mine_or_admin_write_rows(request, rows)
         # 兩本帳各自鎖月（plan §3）：涉及的 entity 分組、各查一次鎖定月集合
         locked_by_entity = {
             ent: await _locked_month_set(session, entity=ent)
@@ -1540,7 +1546,7 @@ async def get_payment(payment_id: str, request: Request):
 
 @router.put("/payments/{payment_id}")
 async def update_payment(payment_id: str, req: PaymentRequestPayload, request: Request):
-    _check_auth(request)
+    check_logged_in(request)
     _require_db()
     factory = await _get_factory()
     date_fields = {"request_date", "payment_date"}
@@ -1558,6 +1564,9 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
         p = await session.get(CrmPaymentRequest, payment_id)
         if not p:
             raise HTTPException(status_code=404, detail="找不到此請款單")
+        _mine_or_admin_write(request, p.entity)
+        # 委外費用同步要用「改之前」的 (金額, 專案, 類別) 當減項
+        _old_amt, _old_pid, _old_cat = int(p.amount or 0), p.project_id, p.category
         # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422
         ent = _entity_for_write(request, req.entity, p)
         # F1 月結守衛：舊/新 request_date 的月份都要開著
@@ -1574,21 +1583,30 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
         # 發票」—— 兩者都直接決定發票那側的撥款狀態，所以一樣走 sync_remit_status
         # （改指時原本那張的退回也在它裡面，規則只有一份）。
         await sync_remit_status(session, p, previous_invoice_id=prev_src)
+        if (p.entity or "parent") == "mine":
+            _new = (int(p.amount or 0), p.project_id, p.category)
+            if _new != (_old_amt, _old_pid, _old_cat):
+                await _sync_mine_project_outsource(session, _old_pid, _old_cat, -_old_amt)
+                await _sync_mine_project_outsource(session, _new[1], _new[2], _new[0])
         await session.commit()
     return {"status": "ok"}
 
 
 @router.delete("/payments/{payment_id}")
 async def delete_payment(payment_id: str, request: Request):
-    _check_auth(request)
+    check_logged_in(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         p = await session.get(CrmPaymentRequest, payment_id)
         if not p:
             raise HTTPException(status_code=404, detail="找不到此請款單")
-        require_entity(request, p.entity or "parent", level="full")  # 兩本帳 scope 驗證（full：原始帳列，money_dep 之上刻意雙保險）
+        require_entity(request, p.entity or "parent", level="full")
+        _mine_or_admin_write(request, p.entity)  # 兩本帳 scope 驗證（full：原始帳列，money_dep 之上刻意雙保險）
         await _assert_month_open(session, p.request_date, entity=p.entity or "parent")
+        if (p.entity or "parent") == "mine":
+            await _sync_mine_project_outsource(session, p.project_id, p.category,
+                                               -int(p.amount or 0))
         await session.delete(p)
         await session.commit()
     return {"status": "ok"}
@@ -1744,6 +1762,52 @@ async def _sync_mine_project_received(session, project_id, delta: int):
     p.updated_at = _now()
 
 
+async def _sync_mine_project_outsource(session, project_id, category, delta: int):
+    """私帳委外規則（owner 2026-08-25「要可以新增委外項目」）：掛在專案上、
+    類別＝專案外包 的請款單驅動該案 ledger_detail 的「委外費用」。
+
+    🔴 增量制（同 _sync_mine_project_received 的理由）：歷史委外費用是匯入
+    基準值（1,661,183，多數已付、沒有對應請款單列），重算會洗掉老案。
+    委外費用是**權責**（應付＋已付都算成本），所以只跟金額走、不看付款狀態。
+    """
+    if not project_id or not delta or (category or "") != "專案外包":
+        return
+    from core.ledger_project import norm_detail
+    from db.models import CrmProject
+    p = await session.get(CrmProject, project_id)
+    if not p or (p.entity or "parent") != "mine":
+        return
+    d = norm_detail(p.ledger_detail)
+    d["outsource"] = int(d.get("outsource") or 0) + int(delta)
+    p.ledger_detail = norm_detail(d)
+    p.updated_at = _now()
+
+
+def _mine_or_admin_write(request, target_entity):
+    """CRM 帳務的寫入守衛：Lv3 照舊全放行；**私帳的列**另開給 mine full scope。
+
+    🔴 為什麼要開：owner 的帳號是 lv1＋finance_mine（指名制，刻意不是管理員），
+    但這批端點原本 `_check_auth`＝只限 Lv3 —— 帳本主人在生產上**連一筆帳都記
+    不進去**（2026-08-25 用真實帳號形狀實測 403；先前測試全用 Lv3 token 所以
+    沒炸）。記自己的帳不需要是管理員。
+    🔴 母公司路徑維持 Lv3-only：parent full scope（crm_invoices+money_view）
+    是財務同事的「看」，寫仍是管理員 —— 這裡只開私帳，不動母公司的權限面。
+    """
+    if (target_entity or "parent") == "mine":
+        require_entity(request, "mine", level="full")
+    else:
+        _check_auth(request)
+
+
+def _mine_or_admin_write_rows(request, rows):
+    """批次版：全部是私帳列 → mine full；混到任何母公司列 → Lv3。"""
+    ents = {(getattr(r, "entity", None) or "parent") for r in rows}
+    if ents and ents == {"mine"}:
+        require_entity(request, "mine", level="full")
+    else:
+        _check_auth(request)
+
+
 def _enforce_cash_project_link(e):
     """🔴 不變式：只有專案類的收支可以掛專案（core/project_link.CASH_CATEGORIES）。
 
@@ -1834,7 +1898,7 @@ async def list_cash_entries(
 
 @router.post("/cash-entries")
 async def create_cash_entry(req: CashEntryPayload, request: Request):
-    _check_auth(request)
+    _mine_or_admin_write(request, req.entity)
     _require_db()
     # summary 在 schema 是選填（PUT 要能只送幾個欄位做部分更新），建立時必填由這裡驗
     if not (req.summary or "").strip():
@@ -1910,7 +1974,7 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
     也因為是部分更新，詳情面板的快速連結下拉直接打這支送 `{project_id}` 就好，
     不需要另開一支「只改關聯欄」的端點。
     """
-    _check_auth(request)
+    check_logged_in(request)           # 先擋匿名（不給 401/404 當存在性預言機）
     _require_db()
     factory = await _get_factory()
     date_fields = {"entry_date", "payment_date"}
@@ -1920,6 +1984,7 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
         e = await session.get(CrmCashEntry, entry_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此收支紀錄")
+        _mine_or_admin_write(request, e.entity)
         # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422
         ent = _entity_for_write(request, req.entity, e)
         await _assert_month_open(session, e.entry_date, dates.get("entry_date"),
@@ -1958,13 +2023,14 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
 
 @router.delete("/cash-entries/{entry_id}")
 async def delete_cash_entry(entry_id: str, request: Request):
-    _check_auth(request)
+    check_logged_in(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         e = await session.get(CrmCashEntry, entry_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此收支紀錄")
+        _mine_or_admin_write(request, e.entity)
         require_entity(request, e.entity or "parent", level="full")  # 兩本帳 scope 驗證（full：原始帳列，money_dep 之上刻意雙保險）
         await _assert_month_open(session, e.entry_date, entity=e.entity or "parent")
         # 對帳工作台反向清理：這筆若被對帳單明細認領，解除認領

@@ -76,11 +76,23 @@ def norm_detail(raw) -> dict:
 
 
 def apply_source_fee(contract: int, d: dict) -> dict:
-    """案源＝代開發票 → 發票代辦費 = round(營收 × 費率)。**唯一的自動費用規則**，
-    寫入端（create/update）呼叫；其他案源不動使用者填的數字。"""
+    """案源＝代開發票 → 三個欄位自動算（**唯一的自動費用規則**，寫入端呼叫；
+    其他案源不動使用者填的數字）。owner 2026-08-25：「稅金5%+買發票＝代辦
+    發票的%數，這邊可以直接自動計算」，Sheet 實證吻合（82,000 →
+    稅金 3,905 + 買發票 2,655 = 代辦費 6,560 = 8%）：
+
+        發票代辦費 = round(營收 × 費率)          —— 給代開業者的總服務費
+        稅金       = round(營收 / 1.05 × 5%)     —— 其中的營業稅（未稅 × 5%）
+        買發票     = 代辦費 − 稅金               —— 其中的開票佣金
+
+    稅金與買發票是代辦費的**組成**，不再另外進實收的減項（compute 只扣
+    invoice_fee —— 三個都扣就是同一筆錢扣兩次）。"""
     if d.get("source") == "代開發票":
+        c = int(contract or 0)
         pct = float(d.get("fee_pct") or DEFAULT_FEE_PCT)
-        d["invoice_fee"] = round(int(contract or 0) * pct / 100)
+        d["invoice_fee"] = round(c * pct / 100)
+        d["tax_fee"] = round(c / 1.05 * 0.05)
+        d["buy_invoice"] = d["invoice_fee"] - d["tax_fee"]
     return d
 
 
