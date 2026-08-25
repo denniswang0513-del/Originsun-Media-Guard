@@ -25,3 +25,15 @@ PAYMENT_CATEGORIES = ("專案外包", "專案雜支")
 
 # 收支明細（前端經 /crm/cash-entries/options 取用，後端寫入時強制）
 CASH_CATEGORIES = ("專案", "專案雜支", "專案外包")
+
+# 私帳（entity='mine'）的規則是**前綴**不是清單：公司線類別（公司_專案／
+# 公司_專案支出／公司_代墊…）可掛專案，個人/家用掛上去會污染毛利 —— 與母公司
+# 的白名單同一個道理，只是詞彙不同。實證：匯入回掛的 612 筆全部「公司」開頭。
+MINE_CASH_LINK_PREFIX = "公司"
+
+
+def cash_can_link(entity: str, category: str) -> bool:
+    """這一筆收支（依其帳本）能不能掛專案 —— 規則正本，寫入守衛與下拉都走這裡。"""
+    if (entity or "parent") == "mine":
+        return (category or "").startswith(MINE_CASH_LINK_PREFIX)
+    return (category or "") in CASH_CATEGORIES

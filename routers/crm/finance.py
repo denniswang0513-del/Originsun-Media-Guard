@@ -1716,6 +1716,34 @@ async def _assert_project_same_entity(session, e):
             detail="不能把收支掛到另一本帳的專案上")
 
 
+async def _sync_mine_project_received(session, project_id, delta: int):
+    """私帳收款規則（owner 2026-08-25「勾選專案，如果金額到齊，就是收款」）：
+    掛在專案上的**收入**驅動該案的 已收/應收/收款狀態。
+
+    🔴 增量制（±delta），不是「從掛帳收入整個重算」—— 歷史已收是匯入的基準值
+    （並非每一筆歷史收款都有對應的掛帳收支列），重算會把老案的已收洗掉。
+    新增 +deposit、刪除 −deposit、編輯＝先減舊再加新，帳永遠平。
+
+    🔴 只管 entity='mine'：母公司的已收走發票/收款那條既有流程（分配表），
+    再疊一條會雙重驅動。到齊（已收 ≥ 營收且營收 > 0）＝全額到帳；部分＝
+    部分到帳；歸零＝未到帳。應收 = 營收 − 已收（可為負：溢收要看得見，
+    Sheet 的泛亞 −3,000 就是這種）。
+    """
+    if not project_id or not delta:
+        return
+    from db.models import CrmProject
+    p = await session.get(CrmProject, project_id)
+    if not p or (p.entity or "parent") != "mine":
+        return
+    received = int(p.amount_received or 0) + int(delta)
+    contract = int(p.contract_amount or 0)
+    p.amount_received = received
+    p.amount_receivable = contract - received
+    p.payment_status = ("全額到帳" if contract > 0 and received >= contract
+                        else "部分到帳" if received > 0 else "未到帳")
+    p.updated_at = _now()
+
+
 def _enforce_cash_project_link(e):
     """🔴 不變式：只有專案類的收支可以掛專案（core/project_link.CASH_CATEGORIES）。
 
@@ -1723,7 +1751,14 @@ def _enforce_cash_project_link(e):
     那條路（零用金那邊踩過同樣的洞，見 petty._enforce_project_link 的說明）。
     行政／薪資／房租那種公司層級支出掛到專案上，專案毛利就會多算一筆不屬於它的錢。
     """
-    if e.project_id and (e.category or "") not in _PROJECT_LINK_CATEGORIES:
+    from core.project_link import cash_can_link
+    if e.project_id and not cash_can_link(e.entity, e.category):
+        if (e.entity or "parent") == "mine":
+            raise HTTPException(
+                status_code=409,
+                detail=f"「{e.category or '未分類'}」不能掛專案 —— 私帳只有"
+                       "「公司」開頭的類別（公司_專案／公司_專案支出…）能掛，"
+                       "個人與家用掛上去會污染專案毛利")
         raise HTTPException(
             status_code=409,
             detail=f"「{e.category or '未分類'}」的收支不能連結專案 —— "
@@ -1731,7 +1766,7 @@ def _enforce_cash_project_link(e):
 
 
 @router.get("/cash-entries/options", dependencies=[Depends(money_dep)])
-async def cash_entry_options(request: Request):
+async def cash_entry_options(request: Request, entity: str = Query("")):
     """收支明細的下拉選項來源（比照 /petty/options）。
 
     類別清單與「哪些類別可連結專案」都由後端說了算 —— 前端寫死的下拉會跟
@@ -1739,13 +1774,16 @@ async def cash_entry_options(request: Request):
     類別就沒同步進去，結果對帳單匯入自己寫出來的列，使用者在編輯視窗選不到
     它的類別（實測種子 32 個、前端只有 27 個）。
     """
-    require_entity(request, "", level="full")
+    ent = require_entity(request, entity, level="full")
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         cats = await cash_category_texts(session)
+    from core.project_link import MINE_CASH_LINK_PREFIX
+    linkable = ([c for c in cats if c.startswith(MINE_CASH_LINK_PREFIX)]
+                if ent == "mine" else list(_PROJECT_LINK_CATEGORIES))
     return {"categories": cats,
-            "project_link_categories": list(_PROJECT_LINK_CATEGORIES)}
+            "project_link_categories": linkable}
 
 
 @router.get("/cash-entries", dependencies=[Depends(money_dep)])
@@ -1811,6 +1849,9 @@ async def create_cash_entry(req: CashEntryPayload, request: Request):
     async with factory() as session:
         await _assert_month_open(session, dates.get("entry_date"), entity=ent)
         await _assert_project_same_entity(session, e)
+        if ent == "mine":
+            await _sync_mine_project_received(session, e.project_id,
+                                              int(e.deposit or 0))
         session.add(e)
         await session.flush()      # 讓 _resettle_invoice 的查詢看得到這筆
         # 🔴 建立也要進分配表，不能只有更新路徑做（2026-08-20 實測：新開一筆掛了
@@ -1882,6 +1923,8 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
         ent = _entity_for_write(request, req.entity, e)
         await _assert_month_open(session, e.entry_date, dates.get("entry_date"),
                                  entity=ent)
+        # 私帳收款同步要用「改之前」的 (收入, 專案) 當減項 —— setattr 之後就沒了
+        _old_dep, _old_pid = int(e.deposit or 0), e.project_id
         for k, v in data.items():
             if k not in date_fields:
                 setattr(e, k, v)
@@ -1903,6 +1946,11 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
         _normalize_cash_fks(e)
         _enforce_cash_project_link(e)
         await _assert_project_same_entity(session, e)
+        if ent == "mine" and ("deposit" in data or "project_id" in data):
+            new_dep, new_pid = int(e.deposit or 0), e.project_id
+            if (_old_dep, _old_pid) != (new_dep, new_pid):
+                await _sync_mine_project_received(session, _old_pid, -_old_dep)
+                await _sync_mine_project_received(session, new_pid, new_dep)
         await session.commit()
     return {"status": "ok"}
 
@@ -1932,6 +1980,9 @@ async def delete_cash_entry(entry_id: str, request: Request):
             .where(CrmCashInvoiceLink.cash_entry_id == entry_id))).scalars().all()
         await session.execute(_sadelete(CrmCashInvoiceLink).where(
             CrmCashInvoiceLink.cash_entry_id == entry_id))
+        if (e.entity or "parent") == "mine":
+            await _sync_mine_project_received(session, e.project_id,
+                                              -int(e.deposit or 0))
         await session.delete(e)
         await session.flush()
         # 被這筆收款影響到的發票要重算 —— 舊碼是「無條件打回未收款」，那會把

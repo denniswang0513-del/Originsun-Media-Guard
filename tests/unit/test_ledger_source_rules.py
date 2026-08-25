@@ -41,3 +41,33 @@ def test_endpoints_apply_the_rule_on_write():
     for fn_name in ("create_ledger_project", "update_project_ledger"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
         assert "apply_source_fee(" in fn, fn_name
+
+
+# ── 收款自動同步（owner 2026-08-25「勾選專案，如果金額到齊，就是收款」）──
+def test_mine_link_rule_is_prefix_and_parent_is_list():
+    from core.project_link import CASH_CATEGORIES, cash_can_link
+    assert cash_can_link("mine", "公司_專案")
+    assert cash_can_link("mine", "公司_專案支出")
+    assert not cash_can_link("mine", "個人_生活")      # 掛上去污染專案毛利
+    assert not cash_can_link("mine", "")
+    for c in CASH_CATEGORIES:
+        assert cash_can_link("parent", c)
+    assert not cash_can_link("parent", "公司_專案")     # 兩本詞彙不互通
+    assert not cash_can_link(None, "公司_專案")         # 預設＝母公司規則
+
+
+def test_received_sync_is_incremental_and_mine_only():
+    """🔴 增量制（±delta）不是重算 —— 歷史已收是匯入基準，重算會把老案洗掉。
+    三個寫入端點都要掛；update 必須在 setattr 前抓舊值。只管 mine（母公司的
+    已收走發票/分配那條既有流程，疊上去＝雙重驅動）。"""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2] / "routers/crm/finance.py").read_text(encoding="utf-8")
+    helper = src.split("async def _sync_mine_project_received(")[1].split("\ndef ")[0]
+    assert '!= "mine":\n        return' in helper.replace("'", '"')
+    assert "amount_received or 0) + int(delta)" in helper
+    for fn_name in ("create_cash_entry", "update_cash_entry", "delete_cash_entry"):
+        fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
+        assert "_sync_mine_project_received(" in fn, fn_name
+    upd = src.split("async def update_cash_entry(")[1].split("\n@router")[0]
+    assert upd.index("_old_dep, _old_pid") < upd.index("for k, v in data.items()"), \
+        "舊值要在 setattr 之前抓"
