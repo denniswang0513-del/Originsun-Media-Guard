@@ -268,22 +268,17 @@ async def ai_suggest_categories(payload: CardAiSuggestPayload, request: Request,
 #
 # 期初與還款類別存 settings['card_ledger'][entity]，每本帳各自一份。
 
-_CARD_DEFAULT_REPAY_CATEGORIES = ["信用卡"]
-
-
 def _card_cfg(ent: str) -> dict:
-    return _card_cfg_from((load_settings().get("card_ledger") or {}).get(ent) or {})
+    from core.card_statement import card_cfg
+    return card_cfg(load_settings(), ent)
 
 
 def _card_cfg_from(cfg: dict) -> dict:
     """正規化一本帳的卡片設定。吃 dict 而不是自己讀檔 —— PUT 改完還款類別後
-    要用**改過的**那份重算，從磁碟讀回來的是舊的（/simplify 第 4 輪抓到：回傳
-    的 repay_categories 是新的、旁邊的 repayments 卻是舊類別算出來的）。"""
-    return {
-        "opening": int(cfg.get("opening") or 0),
-        "repay_categories": [str(x) for x in (cfg.get("repay_categories")
-                                              or _CARD_DEFAULT_REPAY_CATEGORIES) if str(x).strip()],
-    }
+    要用**改過的**那份重算，從磁碟讀回來的是舊的（/simplify 第 4 輪抓到）。
+    正本在 core.card_statement.card_cfg（報表引擎的卡債負債列也走那份）。"""
+    from core.card_statement import card_cfg
+    return card_cfg({"card_ledger": {"_": cfg}}, "_")
 
 
 async def _card_numbers(ent: str, cfg: dict) -> dict:

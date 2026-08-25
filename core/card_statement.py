@@ -178,6 +178,25 @@ def merchant_key(summary: str) -> str:
 
 # ── 分類建議（preview 的三層合成；純函式 —— 測試直接打這裡）────────────
 
+DEFAULT_REPAY_CATEGORIES = ["信用卡"]
+
+
+def card_cfg(settings: dict, entity: str) -> dict:
+    """一本帳的卡片設定（期初／還款類別）正規化 —— 正本。
+
+    router（api_finance_card）與報表引擎（finance_statements 的卡債負債列）
+    都要用同一份：兩邊各讀各的 settings 預設值，漂了就是「卡片餘額對、
+    資產負債表上的卡債不對」這種最難查的錯。
+    """
+    cfg = ((settings.get("card_ledger") or {}).get(entity) or {})
+    return {
+        "opening": int(cfg.get("opening") or 0),
+        "repay_categories": [str(x) for x in (cfg.get("repay_categories")
+                                              or DEFAULT_REPAY_CATEGORIES)
+                             if str(x).strip()],
+    }
+
+
 def mark_duplicates(keys: list, seen) -> list:
     """逐列判「帳上是不是已經有這一筆了」。回傳與 keys 等長的 bool 清單。
 

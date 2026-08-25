@@ -73,7 +73,8 @@ from core.finance_logic import (
     statement_warnings,
     VALID_DRILL_KINDS,  # re-export：endpoint 與單元測試由本模組取用
     vat_position,
-)
+    equity_transfer_position,
+    card_outstanding,)
 from core.crm_logic import project_margin
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,9 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
     cash_entries = _dump(await _all(CrmCashEntry,
                                     where=CrmCashEntry.entity == entity),
                          "id", "entry_date", "deposit", "expense", "bank_fee",
+                         # status：卡債負債列靠它認刷卡列（status='card'）——
+                         # 引擎原本看不到這個欄，卡片帳對 BS 是隱形的
+                         "status",
                          "claim", "category", "summary", "invoice_id",
                          "advance_payment_id", "payment_request_id",
                          "bank_account_id")
@@ -314,10 +318,40 @@ async def compute_live(session, months, inputs=None, adv=None,
                                baseline, as_of)
     vat_cum = vat_position(inputs["invoices"], inputs["cash_entries"],
                            inputs["cat_map"], cum_months)
+    # transfer 流量的位置（業主往來/代墊）＋卡債 —— BS 的另一半（詳見
+    # core/finance_logic.equity_transfer_position 檔頭；對母公司是空操作）
+    _pos = equity_transfer_position(inputs["cash_entries"], inputs["cat_map"],
+                                    inputs["accounts"], as_of)
+    from core.card_statement import card_cfg as _card_cfg
+    from config import load_settings as _ls
+    _card = card_outstanding(inputs["cash_entries"],
+                             _card_cfg(_ls(), inputs.get("entity") or entity), as_of)
+    # 器材資本化差額外顯：對到「器材設備」的 transfer 流出理應等於清冊在同一
+    # 窗口的購置成本（資本化＝現金變資產）。流出 > 清冊＝清冊外的小額配件其實
+    # 是費用（該改類別或補清冊）；< 清冊＝有購置沒走收支。這個差就是 BS diff
+    # 的具名成分之一 —— 指名數字，別讓人對著一個總差額猜。
+    _cap_flow = 0
+    for _e in inputs["cash_entries"]:
+        _cm = inputs["cat_map"].get(("cash", _e.get("category") or ""))
+        if not _cm or _cm.get("treatment") != "transfer":
+            continue
+        _acct = inputs["accounts"].get(_cm.get("account_id")) or {}
+        if (_acct.get("name") or "") != "器材設備":
+            continue
+        _m = month_of(_e.get("entry_date"))
+        if _m and baseline < _m <= as_of:
+            _cap_flow += int(_e.get("expense") or 0) - int(_e.get("deposit") or 0)
+    _cap_reg = sum(int(q.get("purchase_cost") or 0) for q in inputs["equipment"]
+                   if baseline < (month_of(q.get("purchase_date")) or "") <= as_of)
+    if _cap_flow != _cap_reg and (_cap_flow or _cap_reg):
+        warn["messages"].append(
+            f"器材資本化差額 {_cap_flow - _cap_reg:+,}：收支的器材流出 {_cap_flow:,} vs "
+            f"清冊在期購置 {_cap_reg:,} —— 流出較多＝清冊外的小額配件其實是費用"
+            "（把那些列改類別，或補進器材清冊）")
     bs = build_balance_sheet(
         as_of, bank_lines=bank_lines,
         receivable_total=sum(int(i.get("amount_total") or 0) for i in ar_rows),
-        advance_balance=adv["balance_total"],
+        advance_balance=adv["balance_total"] + _pos["advance_net"],
         equipment=inputs["equipment"], adjustments=inputs["adjustments"],
         payable_total=sum(int(p.get("amount") or 0) for p in ap_rows),
         vat_payable=vat_cum["net"],
@@ -325,7 +359,8 @@ async def compute_live(session, months, inputs=None, adv=None,
                                         inputs["loan_payments"], as_of),
         cumulative_net=cum_pnl["net"]["amount"], note_counts=warn,
         shareholder_loan_lines=_split["shareholder_loan"],
-        shareholder_capital_lines=_split["shareholder_capital"])
+        shareholder_capital_lines=_split["shareholder_capital"],
+        owner_flow_net=_pos["owner_net"], card_outstanding=_card)
     opening_lines = split_bank_lines(inputs["bank_accounts"], bank_balances_asof(
         inputs["bank_accounts"], inputs["cash_entries"],
         shift_month(months[0], -1)))["cash"]

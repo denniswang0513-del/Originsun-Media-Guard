@@ -1524,6 +1524,71 @@ def merge_pnl(parts, n_months: int) -> dict:
     return _finalize_pnl(prim, max(n_months, 1))
 
 
+# ── transfer 流量的「位置」（兩本帳 §8，2026-08-25）──────────────
+#
+# treatment='transfer' 把一筆錢從損益排除 —— 但錢沒有消失，它去了某個**位置**：
+# 業主往來（權益）、員工往來-預支（資產）、器材（資產，走清冊另計）、
+# 銀行互轉（現金內移動，無位置）。修正前引擎只做了「排除」這一半，位置全部
+# 沒記 —— owner 私帳的 BS 因此差了 -7,188,302（生活/家用/股利等 transfer 流出
+# 幾百萬，權益的「業主往來」卻掛 0）。
+#
+# 🔴 對母公司是空操作（實測 parent 的 transfer 類別對到 equity/員工往來科目的
+# 列數 = 0；parent 的股東流動走 split_bank_lines 的帳戶機制，是另一條路）。
+
+
+def equity_transfer_position(cash_entries, cat_map, accounts, as_of_month) -> dict:
+    """{'owner_net': 業主往來淨額(注入−提取，直接可加進權益 owner 線),
+        'advance_net': 員工往來-預支未收回餘額(資產)}。
+
+    位置是**存量**：只設上限（月 ≤ as_of），不設 baseline 下限 —— 與調整列
+    同一條規則（期初列本來就開在基準月）。卡片消費列（status='card'）也算：
+    刷卡買生活＝當下就是業主提取，錢之後才由還款離開銀行。
+
+    分類依據＝科目的 acct_type（equity → 業主往來線）；員工往來-預支按科目名
+    指認 —— 同為 asset 的器材設備走清冊（再記流量就重複）、銀行存款走卡債
+    邏輯，asset 一律入位置反而是錯的，所以這裡刻意不用 acct_type 泛化。
+    """
+    owner = advance = 0
+    for e in cash_entries:
+        cm = cat_map.get(("cash", e.get("category") or ""))
+        if not cm or cm.get("treatment") != "transfer":
+            continue
+        m = month_of(e.get("entry_date"))
+        if not m or (as_of_month and m > as_of_month):
+            continue
+        acct = accounts.get(cm.get("account_id")) or {}
+        dep, exp = int(e.get("deposit") or 0), int(e.get("expense") or 0)
+        if acct.get("acct_type") == "equity":
+            owner += dep - exp          # 注入為正、提取為負
+        elif (acct.get("name") or "") == "員工往來-預支":
+            advance += exp - dep        # 給出去未收回＝資產
+    return {"owner_net": owner, "advance_net": advance}
+
+
+def card_outstanding(cash_entries, card_cfg: dict, as_of_month) -> int:
+    """信用卡未繳餘額（負債）＝期初 + 刷卡（status='card' 的支出）− 還款
+    （還款類別的 支−存）。口徑與 api_finance_card.card_summary 同一條式子 ——
+    那邊是即時值，這邊是 as_of 截止的存量。"""
+    charges = repay = 0
+    repay_cats = set(card_cfg.get("repay_categories") or [])
+    for e in cash_entries:
+        m = month_of(e.get("entry_date"))
+        if not m or (as_of_month and m > as_of_month):
+            continue
+        dep, exp = int(e.get("deposit") or 0), int(e.get("expense") or 0)
+        if (e.get("status") or "") == "card":
+            charges += exp - dep
+        elif (e.get("category") or "") in repay_cats:
+            repay += exp - dep
+    opening = int(card_cfg.get("opening") or 0)
+    # 🔴 沒有卡片帳的帳本（無期初、無刷卡列）一律 0 —— 否則一筆恰好叫
+    # 「信用卡」類別的雜列就會在母公司 BS 憑空長出一條**負數負債**
+    # （今天母公司 0 筆，這是結構防呆不是現況修補）。
+    if opening == 0 and charges == 0:
+        return 0
+    return opening + charges - repay
+
+
 # ── 資產負債表 ───────────────────────────────────────────────
 
 def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
@@ -1531,7 +1596,8 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
                         payable_total=0, vat_payable=0, loan_rows=(),
                         cumulative_net=0, note_counts=None,
                         shareholder_loan_lines=(),
-                        shareholder_capital_lines=()) -> dict:
+                        shareholder_capital_lines=(),
+                        owner_flow_net=0, card_outstanding=0) -> dict:
     """資產負債表（as_of = 期末月月底；推導式，非複式簿記）。
 
     - 資產：各銀行帳戶推導餘額分列 + 應收帳款 + 員工往來-預支（未結清預支
@@ -1598,6 +1664,10 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
         {"key": "vat_payable", "label": "應付營業稅",
          "amount": int(vat_payable or 0) + vat_adj},
     ]
+    # 信用卡未繳（私帳；母公司無卡片帳 → 0 → 不出列）
+    if int(card_outstanding or 0):
+        liab_current.append({"key": "card", "label": "信用卡未繳",
+                             "amount": int(card_outstanding)})
     # 股東借款逐筆分列（owner 2026-08-21）。餘額＝公司欠該股東多少 —— 是負債，
     # 🔴 不可以混進上面的 bank_lines（那會讓現金憑空多出股東墊付的錢）。
     liab_current += [{"key": f"sh_loan:{x.get('id')}",
@@ -1620,7 +1690,9 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
            "amount": int(x.get("amount") or 0)}
           for x in shareholder_capital_lines],
         {"key": "opening", "label": "期初調整", "amount": opening},
-        {"key": "owner", "label": "業主往來", "amount": owner},
+        # 調整列（手記）＋ transfer 流量自動推導（equity_transfer_position）——
+        # 私帳的日常提取每月都在流動，靜態調整列跟不上，必須由流量推
+        {"key": "owner", "label": "業主往來", "amount": owner + int(owner_flow_net or 0)},
         {"key": "retained", "label": "累積損益", "amount": int(cumulative_net or 0)},
         {"key": "adjustments", "label": "其他調整", "amount": other},
     ]
@@ -1976,7 +2048,10 @@ def statement_warnings(cash_entries, payments, cat_map, months=None,
         treatment = classify_cash_entry(e, cat_map or {})
         if treatment == "unmapped":
             unmapped += 1
-        if not e.get("bank_account_id"):
+        # 刷卡列（status='card'）**刻意**不掛帳戶 —— 刷卡當下不動銀行，
+        # 錢由月底還款離開、債掛在 BS 的「信用卡未繳」。把它們算進「未掛帳戶」
+        # 會讓私帳永遠掛著一條四位數的假警語，真的忘了掛的列反而被淹掉。
+        if not e.get("bank_account_id") and (e.get("status") or "") != "card":
             unassigned += 1
         # 只看流出：撥款（存入）落在攤還表首期之前是正常的，繳款不是
         if treatment == "loan" and int(e.get("expense") or 0) > 0 and m not in covered:
