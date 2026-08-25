@@ -75,7 +75,35 @@ callbacks.renderGroupSwitcher = renderGroupSwitcher;
 
 export { loadProjects };
 
+// ── 兩邊互通（owner 2026-08-25：「推至專案管理後兩邊互相連通、編修即時同步」）
+// 同一列資料（crm_projects），所以「同步」= 切回來時拿最新的。比照提案庫
+// _bindTabHook 的理由：清單在開頁那一刻定格，逐案損益那邊改的營收/結案日/
+// 推送狀態不會通知這裡。有未存編修就整段跳過 —— 不吃掉使用者手上的東西。
+let _tabHookBound = false;
+function _bindTabHook() {
+    if (_tabHookBound) return;
+    _tabHookBound = true;
+    document.addEventListener('tab-changed', async (e) => {
+        if (e.detail?.tab !== 'tab_crm_projects') return;
+        const jump = sessionStorage.getItem('omgJumpCrmProject');
+        if (!jump && (window._allDirtyCount?.() > 0)) return;
+        await loadProjects();                    // 自帶 renderList
+        if (jump) {
+            sessionStorage.removeItem('omgJumpCrmProject');
+            selectProject(jump);                 // 自帶未存編修 confirm
+            document.querySelector(`#proj-list-body .crm-row[data-id="${jump}"]`)
+                ?.scrollIntoView({ block: 'center' });
+        } else if (state.selectedId) {
+            // 詳情面板跟清單同一份 state —— 重抓後面板也換成新資料
+            const p = state.projects.find((x) => x.id === state.selectedId);
+            if (p) renderDetail(p);
+        }
+    });
+}
+
+
 export async function initCrmProjectsTab() {
+    _bindTabHook();
     // Move modals to body
     for (const id of ['proj-modal', 'proj-import-modal']) {
         const el = document.getElementById(id);

@@ -602,6 +602,18 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
 
+        # 🔴 私帳案的金額欄只有 mine scope 能寫。推送進管線（crm_pushed）後
+        # 同事看得到這一列 —— 讀那側金額有抹（redact_mine），寫這側原本是零
+        # 守衛：逐格 autosave 平常只送 dirty 欄沒事，但誰都能手動對私帳案送
+        # contract_amount，而且他看到的欄位是被抹成空白的。非金額欄（階段/
+        # 名稱/派工/描述）照「專案共用」的拍板不擋。
+        if (project.entity or "parent") == "mine":
+            from core.money import MONEY_FIELDS, viewer_has_mine_scope
+            touched = set(update_data) & MONEY_FIELDS
+            if touched and not viewer_has_mine_scope(request):
+                raise HTTPException(status_code=403,
+                                    detail="私帳案的金額欄只有帳本主人能修改")
+
         # If client_id is changing, validate the new client exists.
         # 空值 = 清空客戶（合體後合法：提案殼專案還沒定客戶）→ 正規化成 None。
         if "client_id" in update_data:

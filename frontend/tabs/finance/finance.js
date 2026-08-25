@@ -80,6 +80,19 @@ export async function initFinanceTab() {
     _shellAllowed = loadShell;
     _bindSideNav();
 
+    // 兩邊互通（owner 2026-08-25）：切回財務分頁時，逐案損益要拿到專案管理
+    // 那邊剛改的東西（同一列資料，「同步」=回來時重抓）；從專案管理的
+    // 「逐案損益 ↗」跳過來則接棒切子視圖（open 交給 projects.js 的 render 收尾）。
+    document.addEventListener('tab-changed', (e) => {
+        if (e.detail?.tab !== 'tab_crm_invoices') return;
+        const btn = document.querySelector("#finance-nav [data-subview='projects']");
+        if (sessionStorage.getItem('omgJumpLedgerProject')) {
+            if (btn && btn.offsetParent !== null) btn.click();
+            return;
+        }
+        if (_currentSubview === 'projects') window._finProjLedger?.refresh?.();
+    });
+
     // 預設落地 = 📊 儀表板子視圖（帳務殼已初始化但隱藏，點帳務按鈕仍可切回）。
     // finance.html 已把 nav active 標在儀表板按鈕上，故此處不需再改 active class。
     _showSubview('dashboard');

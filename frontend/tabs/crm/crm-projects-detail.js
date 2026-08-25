@@ -289,6 +289,22 @@ function renderDetail(project) {
     _go.href = '/project.html?id=' + encodeURIComponent(project.id);
     _go.textContent = '開啟專案頁 ↗';
     _title.appendChild(_go);
+    // 私帳案（owner 才看得到這顆）：跳到財務管理的逐案損益 —— 工項/費用/
+    // 實收檢查在那邊編。交棒走 sessionStorage，finance.js 的 tab-changed
+    // handler 接住後切子視圖並開同一案。
+    if (project.entity === 'mine' && (window._modules || []).includes('finance_mine')
+            && typeof window.switchTab === 'function') {
+        const _led = document.createElement('a');
+        _led.className = 'crm-btn crm-btn-secondary crm-btn-sm';
+        _led.style.cssText = 'margin-left:6px;font-size:10px;padding:2px 8px;cursor:pointer;';
+        _led.textContent = '逐案損益 ↗';
+        _led.title = '在財務管理的逐案損益開啟這一案（私帳的工項與費用在那邊編）';
+        _led.onclick = () => {
+            sessionStorage.setItem('omgJumpLedgerProject', project.id);
+            window.switchTab('tab_crm_invoices');
+        };
+        _title.appendChild(_led);
+    }
 
     const _pBadge = (status) => {
         const map = {'未到帳':'crm-badge crm-pay-未到帳','部分到帳':'crm-badge crm-pay-部分到帳','全額到帳':'crm-badge crm-pay-全額到帳'};

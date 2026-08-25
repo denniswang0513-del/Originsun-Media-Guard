@@ -326,3 +326,46 @@ def test_reopening_the_same_case_unhides_the_panel():
     js = (ROOT / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
     seg = js.split("if (same && _detail) {")[1].split("return;")[0]
     assert "style.display = ''" in seg
+
+
+# ── 兩邊互通（owner 2026-08-25「編修即時同步」）────────────────────────
+def test_mine_money_writes_require_mine_scope_on_crm_put():
+    """🔴 推送進管線後，能編專案的人（_check_auth=Lv3）不一定有 mine scope ——
+    他看到的金額欄是被抹成空白的，寫回去就是把 owner 的數字洗掉。金額欄要
+    另外驗 mine scope；非金額欄（階段/名稱/派工）照「專案共用」不擋。
+    實測：其他 Lv3 改金額 403、改階段 200、母公司案不受影響。"""
+    src = (ROOT / "routers/crm/projects.py").read_text(encoding="utf-8")
+    fn = src.split("async def update_project(")[1].split("\n@router")[0]
+    assert "set(update_data) & MONEY_FIELDS" in fn
+    assert "viewer_has_mine_scope(request)" in fn
+    # 守衛必須在任何 setattr 之前
+    assert fn.index("viewer_has_mine_scope") < fn.index("setattr(project")
+
+
+def test_jump_handoff_keys_match_between_writer_and_reader():
+    """🔴 交棒走 sessionStorage —— 寫的那邊與讀的那邊 key 字串漂了就是
+    「按了沒反應」的靜默斷線，而且兩個檔案各自看都是對的。"""
+    ledger = (ROOT / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
+    crm_js = (ROOT / "frontend/tabs/crm/crm-projects.js").read_text(encoding="utf-8")
+    crm_detail = (ROOT / "frontend/tabs/crm/crm-projects-detail.js").read_text(encoding="utf-8")
+    fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
+    # 逐案損益 → 專案管理
+    assert "sessionStorage.setItem('omgJumpCrmProject'" in ledger
+    assert "sessionStorage.getItem('omgJumpCrmProject')" in crm_js
+    # 專案管理 → 逐案損益（finance.js 只負責切子視圖、projects.js 收尾開案）
+    assert "sessionStorage.setItem('omgJumpLedgerProject'" in crm_detail
+    assert "sessionStorage.getItem('omgJumpLedgerProject')" in fin
+    assert "sessionStorage.getItem('omgJumpLedgerProject')" in ledger
+
+
+def test_tab_activation_refreshes_but_never_eats_unsaved_edits():
+    """「同步」＝切回來時重抓（同一列資料）。🔴 兩邊都必須先讓路給未存編修 ——
+    重抓會整片重畫，使用者手上改到一半的東西比新鮮度重要。"""
+    crm_js = (ROOT / "frontend/tabs/crm/crm-projects.js").read_text(encoding="utf-8")
+    hook = crm_js.split("document.addEventListener('tab-changed'")[1].split("});")[0]
+    assert "_allDirtyCount" in hook, "CRM 側的刷新沒讓路給未存編修"
+    ledger = (ROOT / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
+    refresh = ledger.split("_fp.refresh = async")[1].split("};")[0]
+    assert "_dirty" in refresh, "逐案損益的刷新沒讓路給未存編修"
+    fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
+    assert "tab-changed" in fin and "_finProjLedger?.refresh" in fin

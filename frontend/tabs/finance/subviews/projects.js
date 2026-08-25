@@ -46,6 +46,7 @@ async function _load() {
         if (!_isCurrent()) return;
         _data = d;
         _renderShell();
+        _consumeJump();      // 從專案管理跳過來的話，清單畫好後直接開那一案
     } catch (e) {
         _c.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">專案載入失敗：${esc(e.message)}</div>`;
     }
@@ -187,6 +188,31 @@ function _renderList() {
 // ── 右側詳情（可編輯）──────────────────────────────────────
 const _fp = (window._finProjLedger = window._finProjLedger || {});
 
+// 兩邊互通：切回財務分頁時 finance.js 呼叫（同一列資料，「同步」=重抓）。
+// 有未存編修就整段跳過 —— 使用者手上的東西優先。
+_fp.refresh = async () => {
+    if (_dirty || !document.getElementById('fpl-list-body')) return;
+    const d = await finFetch('/project-ledger', { entity: 'mine' });
+    if (!_isCurrent()) return;
+    _data = d;
+    _renderTotals();
+    _renderList();
+    if (_sel && _detail) {
+        _detail = await finFetch(`/project-ledger/${_sel}`, { entity: 'mine' });
+        _renderDetail();
+    }
+};
+
+// 從專案管理的「逐案損益 ↗」跳過來 —— render 收尾時呼叫（清單畫好才開得了案）
+function _consumeJump() {
+    const jump = sessionStorage.getItem('omgJumpLedgerProject');
+    if (!jump) return;
+    sessionStorage.removeItem('omgJumpLedgerProject');
+    _fp.open(jump);
+    document.querySelector(`#fpl-list-body .crm-row[data-id="${jump}"]`)
+        ?.scrollIntoView({ block: 'center' });
+}
+
 _fp.open = async (id) => {
     if (_dirty && id !== _sel
         && !confirm('這一案有未儲存的修改，要放棄嗎？')) return;
@@ -236,6 +262,11 @@ function _renderDetail() {
         <div class="crm-detail-bar">
             <div class="crm-detail-bar-title">${esc(p.client)} / ${esc(p.name)}</div>
             <div class="crm-detail-bar-actions">
+                ${p.crm_pushed && typeof window.switchTab === 'function'
+                    ? `<button class="crm-btn crm-btn-secondary crm-btn-sm"
+                               title="到專案管理開啟這一案（階段/派工/資料夾/會議記錄在那邊）"
+                               onclick="window._finProjLedger.gotoCrm()">專案管理 ↗</button>`
+                    : ''}
                 <button class="crm-btn crm-btn-secondary crm-btn-sm"
                         title="${p.crm_pushed
                             ? '這一案已出現在專案管理的母公司管線（標「後期專案」）。再按一次取消。'
@@ -338,6 +369,12 @@ _fp.close = () => {
     _dirty = false;
     document.getElementById('fpl-detail').style.display = 'none';
     _markSelected();
+};
+
+_fp.gotoCrm = () => {
+    if (!_sel) return;
+    sessionStorage.setItem('omgJumpCrmProject', _sel);
+    window.switchTab('tab_crm_projects');   // CRM 的 tab-changed handler 接棒
 };
 
 _fp.push = async (btn) => {
