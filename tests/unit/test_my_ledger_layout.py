@@ -109,3 +109,31 @@ def test_cashbook_card_summary_skipped_on_pure_filters():
     js = _read("frontend/tabs/crm/crm-cashbook.js")
     assert "async function loadEntries({ render = true, cards = true } = {})" in js
     assert js.count("cards: false") >= 4
+
+
+def test_chart_dots_have_instant_hover_labels():
+    """owner 2026-08-25「滑鼠移動到每個點點都可以看到當時的數字」——原本只有
+    原生 <title>（2.4px 的點壓不準＋一秒延遲＝看不到）。釘：大命中區＋
+    :hover 即亮的標籤。"""
+    js = _read("frontend/tabs/finance/subviews/assets.js")
+    assert 'r="9" fill="transparent"' in js, "沒有大命中區"
+    assert ".fa-dot:hover .fa-lbl{visibility:visible;}" in js
+
+
+def test_cashbook_surfaces_sub_item():
+    """子項目（外出用餐/交通/書籍…3,180 筆）有匯進 DB 但 UI 原本不顯示 ——
+    owner 以為漏匯了。釘：列上顯示＋可編輯＋搜尋涵蓋。"""
+    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    assert "e.sub_item" in js, "清單沒顯示子項目"
+    assert "{name:'sub_item', label:'子項目'" in js, "編輯欄位沒有子項目"
+    py = _read("routers/crm/finance.py")
+    assert "CrmCashEntry.sub_item.ilike(ql)" in py, "搜尋沒涵蓋子項目"
+
+
+def test_assets_overview_lists_per_account_cash():
+    """owner 2026-08-25「這些帳戶與資料要呈現」——銀行現金那顆桶要能攤開成
+    各帳戶分列，且口徑同一份（期初＋流水），不是第二份算法。"""
+    py = _read("routers/api_finance_assets.py")
+    assert '"bank_lines"' in py
+    js = _read("frontend/tabs/finance/subviews/assets.js")
+    assert "d.bank_lines" in js

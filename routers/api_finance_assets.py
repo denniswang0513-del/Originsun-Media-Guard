@@ -97,6 +97,11 @@ async def _auto_buckets(session, ent: str, usd_twd: float) -> dict:
         "buckets": {"銀行現金": bank_cash, "應收帳款": receivable,
                     "固定資產淨值": eq_net,
                     "證券現值": sum(r["value_twd"] for r in h_rows)},
+        # 各帳戶分列（owner 2026-08-25「這些帳戶與資料要呈現」）—— 銀行現金那
+        # 顆桶的逐帳戶明細，口徑同上（期初＋流水），不是第二份算法
+        "bank_lines": [{"name": a.name,
+                        "amount": int(a.opening_balance or 0) + int(flows.get(a.id, 0) or 0)}
+                       for a in accts if (a.acct_kind or "bank") == "bank"],
         "holdings": h_rows, "usd_twd": usd_twd,
     }
 

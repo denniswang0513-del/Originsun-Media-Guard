@@ -131,7 +131,11 @@ function _render() {
     const bucketRows = (obj, tag) => Object.entries(obj).map(([k, v]) => `
         <tr><td>${esc(k)}</td>
             <td style="text-align:right;color:${v < 0 ? '#fca5a5' : '#eee'};">$${fmtNum(v)}</td>
-            <td style="color:#666;font-size:11px;">${tag}</td></tr>`).join('');
+            <td style="color:#666;font-size:11px;">${tag}</td></tr>${k === '銀行現金'
+        ? (d.bank_lines || []).map((b) => `
+        <tr style="color:#9ca3af;font-size:11px;"><td style="padding-left:18px;">└ ${esc(b.name)}</td>
+            <td style="text-align:right;">$${fmtNum(b.amount)}</td><td></td></tr>`).join('')
+        : ''}`).join('');
 
     _c.innerHTML = `
         <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:14px;">
@@ -182,10 +186,29 @@ function _chartSvg() {
         const t = new Date(`${yr}-01-01`).getTime();
         years.push(`<text x="${x(t)}" y="${H - 6}" text-anchor="middle" fill="#666" font-size="10">${yr}</text>`);
     }
-    const dots = _snaps.map((s, i) =>
-        `<circle cx="${x(ts[i]).toFixed(1)}" cy="${y(vs[i]).toFixed(1)}" r="2.4" fill="#3b82f6">
-            <title>${esc(s.date)}　$${fmtNum(s.total)}</title></circle>`).join('');
-    return `<div style="overflow-x:auto;"><svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:600px;">
+    // 每個點：大命中區（r=9 透明）＋懸浮即亮的標籤（:hover 顯示，不吃原生
+    // title 的一秒延遲 —— owner 2026-08-25「滑鼠移動到每個點點都可以看到
+    // 當時的數字」，2.4px 的點根本壓不準）。標籤位置夾在圖框內。
+    const dots = _snaps.map((s, i) => {
+        const cx = +x(ts[i]).toFixed(1), cy = +y(vs[i]).toFixed(1);
+        const label = `${s.date}　$${fmtNum(s.total)}`;
+        const lw = label.length * 6.4 + 12;
+        const lx = Math.min(Math.max(cx - lw / 2, PL), W - 8 - lw);
+        const ly = cy < 44 ? cy + 12 : cy - 30;   // 靠頂的點標籤放下面
+        return `<g class="fa-dot">
+            <circle cx="${cx}" cy="${cy}" r="9" fill="transparent"/>
+            <circle cx="${cx}" cy="${cy}" r="2.6" fill="#3b82f6" class="fa-dot-c"/>
+            <g class="fa-lbl" visibility="hidden" pointer-events="none">
+                <rect x="${lx}" y="${ly}" width="${lw.toFixed(0)}" height="18" rx="4"
+                      fill="#111" stroke="#3b82f6" stroke-width="0.6"/>
+                <text x="${(lx + lw / 2).toFixed(0)}" y="${ly + 13}" text-anchor="middle"
+                      fill="#dbeafe" font-size="11">${esc(label)}</text>
+            </g></g>`;
+    }).join('');
+    return `<div style="overflow-x:auto;">
+        <style>.fa-dot:hover .fa-lbl{visibility:visible;}
+               .fa-dot:hover .fa-dot-c{r:4;fill:#93c5fd;}</style>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:600px;">
         ${yTicks}${years.join('')}
         <polyline points="${pts}" fill="none" stroke="#3b82f6" stroke-width="1.6"/>
         ${dots}</svg></div>`;

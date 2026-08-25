@@ -1785,6 +1785,7 @@ async def list_cash_entries(
             # 只搜摘要的話「找某張發票的那筆收款」永遠找不到。
             ql = f"%{q}%"
             query = query.where(or_(CrmCashEntry.summary.ilike(ql),
+                                    CrmCashEntry.sub_item.ilike(ql),
                                     CrmCashEntry.payee.ilike(ql),
                                     CrmCashEntry.note.ilike(ql),
                                     CrmCashEntry.invoice_number.ilike(ql)))

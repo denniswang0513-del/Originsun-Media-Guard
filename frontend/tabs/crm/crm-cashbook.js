@@ -268,7 +268,8 @@ function renderList() {
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
             <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
-            <div>${e.category ? _esc(e.category) : _NO_CAT_DOT}</div>
+            <div>${e.category ? _esc(e.category) : _NO_CAT_DOT}${e.sub_item
+                ? `<div style="color:#8b8b8b;font-size:10px;">${_esc(e.sub_item)}</div>` : ''}</div>
             <div title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}</div>
             <div>${_esc(e.project_name || '')}</div>
             <div>${_esc(e.invoice_title || '')}</div>
@@ -527,6 +528,7 @@ function _buildEditFields(currentBankAccountId, currentInvoiceId) {
         {name:'expense', label:'支出', type:'number'},
         {name:'summary', label:'內容', type:'text'},
         {name:'category', label:'類別', type:'select', options:catOpts},
+        {name:'sub_item', label:'子項目', type:'text'},
         {name:'note', label:'備註', type:'text'},
         {name:'project_id', label:'專案', type:'select', options:projectOpts},
         {name:'invoice_id', label:'發票', type:'select', options:invoiceOpts},
