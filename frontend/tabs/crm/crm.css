@@ -1846,10 +1846,10 @@
 
 
 
-/* ── 收支明細：9 欄的寬度分配 ────────────────────────────────
-   加了「帳戶」「備註」之後欄位變 9 個，全部 flex:1 均分會讓日期換行、
-   金額被截斷。這裡把固定寬度的欄（日期/金額/類別/帳戶）釘死，剩下的空間
-   給會長的文字欄按比例分。
+/* ── 收支明細：10 欄的寬度分配 ────────────────────────────────
+   加了「帳戶」「備註」「子項目」之後欄位變多，全部 flex:1 均分會讓日期換行、
+   金額被截斷。這裡把固定寬度的欄（日期/金額/類別/子項目/帳戶）釘死，剩下的
+   空間給會長的文字欄按比例分。
    ⚠️ 選擇器要壓過上面那條 `#cash-list-body .crm-row > div:not(.crm-kebab-wrap)`
    （特異度 (1,2,1)），所以資料列這邊也帶 :not() 保持同級並排在後面。 */
 /* 🔴 資料列的選擇器一定要帶 :not(.crm-kebab-wrap)。沒帶的話
@@ -1875,14 +1875,16 @@
 #cash-list-panel .acct-header > span:nth-child(6),
 #cash-list-body .crm-row > *:nth-child(6):not(.crm-kebab-wrap) { flex: 0 0 84px; }                      /* 類別 */
 #cash-list-panel .acct-header > span:nth-child(7),
-#cash-list-body .crm-row > *:nth-child(7):not(.crm-kebab-wrap) { flex: 1.6 1 0; min-width: 0; text-align: left; color: #8a8a8a; }  /* 備註 */
+#cash-list-body .crm-row > *:nth-child(7):not(.crm-kebab-wrap) { flex: 0 0 96px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* 子項目（owner 2026-08-26：獨立一欄） */
 #cash-list-panel .acct-header > span:nth-child(8),
-#cash-list-body .crm-row > *:nth-child(8):not(.crm-kebab-wrap) { flex: 1 1 0; min-width: 0; text-align: left; }    /* 專案 */
+#cash-list-body .crm-row > *:nth-child(8):not(.crm-kebab-wrap) { flex: 1.6 1 0; min-width: 0; text-align: left; color: #8a8a8a; }  /* 備註 */
 #cash-list-panel .acct-header > span:nth-child(9),
-#cash-list-body .crm-row > *:nth-child(9):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 發票 */
+#cash-list-body .crm-row > *:nth-child(9):not(.crm-kebab-wrap) { flex: 1 1 0; min-width: 0; text-align: left; }    /* 專案 */
 #cash-list-panel .acct-header > span:nth-child(10),
-#cash-list-body .crm-row > *:nth-child(10):not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
+#cash-list-body .crm-row > *:nth-child(10):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 發票 */
 #cash-list-panel .acct-header > span:nth-child(11),
+#cash-list-body .crm-row > *:nth-child(11):not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
+#cash-list-panel .acct-header > span:nth-child(12),
 #cash-list-body .crm-row > .crm-kebab-wrap { flex: 0 0 36px; }
 
 /* ── 帳戶切換列（總表／各銀行，附餘額）────────────────────── */

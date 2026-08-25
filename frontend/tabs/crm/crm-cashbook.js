@@ -108,6 +108,7 @@ const _sorter = createSortable({
         expense:  e => _bankOut(e),
         card:     e => _cardAmt(e),
         category: e => (e.category || '').toLowerCase(),
+        sub_item: e => (e.sub_item || '').toLowerCase(),
         project:  e => (e.project_name || '').toLowerCase(),
         invoice:  e => (e.invoice_title || '').toLowerCase(),
         account:  e => _acctName(e.bank_account_id).toLowerCase(),
@@ -138,7 +139,9 @@ function _syncFilterOptions() {
         // 之後只增不減。
         _entries.forEach(e => { if (e.category) _catVocab.add(e.category); });
         const used = [..._catVocab].sort();
+        // __none__＝後端的「未分類」快篩（category IS NULL/''）——卡單匯入的殘尾用
         cat.innerHTML = '<option value="">全部類別</option>'
+            + `<option value="__none__"${_filters.category === '__none__' ? ' selected' : ''}>（未分類）</option>`
             + used.map(v => `<option value="${_esc(v)}"${v === _filters.category ? ' selected' : ''}>${_esc(v)}</option>`).join('');
     }
     _renderAcctTabs();
@@ -268,8 +271,8 @@ function renderList() {
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
             <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
-            <div>${e.category ? _esc(e.category) : _NO_CAT_DOT}${e.sub_item
-                ? `<div style="color:#8b8b8b;font-size:10px;">${_esc(e.sub_item)}</div>` : ''}</div>
+            <div>${e.category ? _esc(e.category) : _NO_CAT_DOT}</div>
+            <div style="color:#9a9a9a;">${_esc(e.sub_item || '')}</div>
             <div title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}</div>
             <div>${_esc(e.project_name || '')}</div>
             <div>${_esc(e.invoice_title || '')}</div>
@@ -364,6 +367,7 @@ function renderDetail(e) {
     if (e.expense) html += prop('支出', '$' + _fmtNum(e.expense));
     html += prop('內容', e.summary);
     if (e.category) html += prop('類別', e.category);
+    if (e.sub_item) html += prop('子項目', e.sub_item);
     if (e.note) html += prop('備註', e.note);
 
     html += prop('帳戶', _acctName(e.bank_account_id));

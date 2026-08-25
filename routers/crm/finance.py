@@ -1341,7 +1341,10 @@ async def batch_assign_project(request: Request):
     幾十張，錯起來比逐張更難發現 —— 所以這裡是整批擋下、把違規的列出來，
     不是默默跳過（默默跳過＝使用者以為掛好了）。
     """
-    _check_auth(request)
+    # 寫入守衛＝列的帳本說了算（同 batch_pay 三兄弟）：check_logged_in 先擋匿名，
+    # 列載入後 _mine_or_admin_write_rows 定案 —— 原本 _check_auth 只認 Lv3，
+    # 帳本主人（lv1+finance_mine）批次掛自己的專案會 403（2026-08-26 同型清查）。
+    check_logged_in(request)
     _require_db()
     factory = await _get_factory()
     body = await request.json()
@@ -1371,6 +1374,7 @@ async def batch_assign_project(request: Request):
         if cross:
             raise HTTPException(status_code=409,
                                 detail=f"{len(cross)} 張請款單屬於另一本帳，不可跨帳本掛專案")
+        _mine_or_admin_write_rows(request, rows)
 
         # 掛上去才需要驗類別；解除連結（project_id=None）永遠合法
         if project_id:
@@ -1886,7 +1890,11 @@ async def list_cash_entries(
             .where(CrmCashEntry.entity == ent)
             .order_by(CrmCashEntry.entry_date.desc())
         )
-        if category:
+        if category == "__none__":
+            # 「未分類」快篩：卡單匯入後真的分不出的尾巴（owner 逐筆點完就歸零）
+            query = query.where(or_(CrmCashEntry.category.is_(None),
+                                    CrmCashEntry.category == ""))
+        elif category:
             query = query.where(CrmCashEntry.category == category)
         if project_id:
             query = query.where(CrmCashEntry.project_id == project_id)
@@ -2363,12 +2371,17 @@ async def _write_allocs(request, entry_id: str, kind: str, items, fee=None):
     付款側整筆一個（跨行手續費對一次匯出收一次）。
     """
     k = _ALLOC_KINDS[kind]
-    _check_auth(request)
+    # 🔴 寫入守衛＝列的帳本說了算（母公司=Lv3、私帳=mine full）——原本開頭
+    # _check_auth 只認 Lv3，帳本主人在生產存「請款單分配」直接 權限不足 ×3
+    # （2026-08-26 實測；上次開 mine 寫入權時漏了分配這條路，它不走
+    # _entity_for_write 咽喉）。先 check_logged_in 再載列，匿名不得拿 404 探 id。
+    check_logged_in(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         e, ent = await _entry_for_alloc(session, entry_id, request,
                                         month_guard=True)
+        _mine_or_admin_write(request, e.entity)
         rows = await resolve_allocs(
             session, [(getattr(it, k["id_field"]), it.amount) for it in (items or [])],
             ent, kind)

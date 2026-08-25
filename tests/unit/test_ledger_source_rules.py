@@ -108,6 +108,13 @@ def test_owner_can_write_own_book_but_parent_stays_admin_only():
     for fn_name in ("delete_cash_entry", "delete_payment"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
         assert "_mine_or_admin_write" in fn, fn_name
+    # 🔴 分配寫入（_write_allocs 兩側共用）與批次掛專案 —— 2026-08-26 生產實測
+    # 補上的兩條漏網（owner 存「請款單分配」權限不足 ×3）。不走咽喉的寫入端點
+    # 一律：check_logged_in → 載列 → 按列帳本驗 _mine_or_admin_write*
+    alloc = src.split("async def _write_allocs(")[1].split("\n@router")[0]
+    assert "_check_auth(" not in alloc and "_mine_or_admin_write(request, e.entity)" in alloc
+    batch = src.split("async def batch_assign_project(")[1].split("\n@router")[0]
+    assert "_check_auth(" not in batch and "_mine_or_admin_write_rows(request, rows)" in batch
     for fn_name in ("batch_pay", "batch_unpay", "batch_update_month"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
         assert "_mine_or_admin_write_rows(request, rows)" in fn, fn_name
