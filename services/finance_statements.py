@@ -166,7 +166,9 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
             "cash_entries": cash_entries, "equipment": equipment,
             "adjustments": adjustments, "bank_accounts": bank_accounts,
             "loans": loans, "loan_payments": loan_payments,
-            "accounts": accounts, "cat_map": cat_map}
+            "accounts": accounts, "cat_map": cat_map,
+            # _resolve_baseline 要分帳本（settings 的基準月只屬於母公司）
+            "entity": entity}
 
 
 async def _advance_state(session, entity: str = "parent") -> dict:
@@ -229,14 +231,22 @@ async def _advance_state(session, entity: str = "parent") -> dict:
 
 
 def _resolve_baseline(inputs: dict):
-    """基準月：settings finance.baseline_month → 資料最早月 → None。"""
-    try:
-        from config import load_settings
-        b = ((load_settings().get("finance") or {}).get("baseline_month") or "").strip()
-        if re.match(r"^\d{4}-\d{2}$", b):
-            return b
-    except Exception:
-        pass
+    """基準月：settings finance.baseline_month（🔴 只有母公司）→ 資料最早月 → None。
+
+    finance.baseline_month 是**母公司設定精靈**寫的全域單值（那支精靈只服務
+    母公司帳本）。2026-08-25 之前這裡不分帳本直接套 —— 私帳的三表被母公司的
+    2025-07 攔腰切掉（owner 的私帳資料從 2021/3 起，之前的應收應付全被基準月
+    排除）。owner：「我的私帳的對帳起始點先不用設」→ mine 一律走資料最早月；
+    哪天真要給私帳設起點，再開 per-entity 的鍵，別把這個全域值借去用。
+    """
+    if (inputs.get("entity") or "parent") == "parent":
+        try:
+            from config import load_settings
+            b = ((load_settings().get("finance") or {}).get("baseline_month") or "").strip()
+            if re.match(r"^\d{4}-\d{2}$", b):
+                return b
+        except Exception:
+            pass
     candidates = []
     for inv in inputs["invoices"]:
         candidates.append(month_of(inv.get("invoice_date")))
@@ -269,6 +279,17 @@ async def compute_live(session, months, inputs=None, adv=None,
         adv = await _advance_state(session, entity)
     as_of = months[-1]
     baseline = _resolve_baseline(inputs) or months[0]
+    # 🔴 基準月異常早（超出累計上限）→ clamp ＋ 警語，不准整張三表 500。
+    # 沒有 settings 基準月的帳本（私帳）baseline＝資料最早月 —— 一筆打錯年份
+    # 的日期（實例：Sheet 上兩筆 2024/3/14 打成 2014/3/14）就會把累計區間撐到
+    # 148 個月、month_range 直接 raise、整個財務三表打不開。打錯字要讓人看見，
+    # 但看見的方式是警語，不是白畫面。
+    from core.finance_logic import _MAX_PERIOD_MONTHS, shift_month
+    _floor = shift_month(as_of, -(_MAX_PERIOD_MONTHS - 1))
+    _baseline_clamped = None
+    if min(baseline, as_of) < _floor:
+        _baseline_clamped = baseline
+        baseline = _floor
     kw = _pnl_kw(inputs, adv)
     pnl = build_pnl(months, **kw)
     cum_months = month_range(min(baseline, as_of), as_of)
@@ -276,6 +297,11 @@ async def compute_live(session, months, inputs=None, adv=None,
     warn = statement_warnings(inputs["cash_entries"], inputs["payments"],
                               inputs["cat_map"], months,
                               inputs["loan_payments"])
+    if _baseline_clamped:
+        warn["messages"].insert(0,
+            f"資料最早月 {_baseline_clamped} 超出累計上限（{_MAX_PERIOD_MONTHS} 個月），"
+            f"期初累計自 {baseline} 起算 —— 更早的列不在期初裡。"
+            "通常是打錯年份的日期，請到收支明細搜出那幾筆修正。")
     # 🔴 股東往來帳戶不是現金 —— 拆出來分別進負債（借款）與權益（投資款）。
     # 混在 bank_lines 裡的話，現金會憑空多出股東墊付的錢（那些錢從來沒進過
     # 公司的銀行帳戶），資產負債表與現金流量表全部失真。
