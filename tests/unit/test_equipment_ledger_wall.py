@@ -70,3 +70,22 @@ def test_list_can_filter_by_ledger():
     body = _fn("list_equipment")
     assert "Equipment.entity == entity" in body
     assert "未知的帳本" in body, "未知 entity 要 422，不要靜靜當成沒篩"
+
+
+# ── 清冊分家（owner 2026-08-25「crm 如果是我的清冊就不要看到」）────────
+def test_crm_equipment_tab_is_pinned_to_parent():
+    """CRM 器材庫只看公司器材 —— 兩個取數點（列表＋chips 全量補抓）都要帶
+    entity=parent，漏一個就會把 123 件私人器材混回來。"""
+    js = (ROOT / "frontend/tabs/equipment/equipment.js").read_text(encoding="utf-8")
+    assert "params.set('entity', 'parent')" in js
+    assert "'?entity=parent'" in js, "chips 的全量補抓那條路也要釘"
+
+
+def test_gear_subview_is_pinned_to_mine_and_gated():
+    """私帳的器材清冊：清單走引擎端點（與 BS 同口徑）、建立帶 entity='mine'、
+    入口只給帳號上真的有 finance_mine 的人。"""
+    js = (ROOT / "frontend/tabs/finance/subviews/gear.js").read_text(encoding="utf-8")
+    assert "finFetch('/assets/equipment', { entity: 'mine' })" in js
+    assert "entity: 'mine'" in js.split("method: 'POST'")[1][:120], "建立要落私帳"
+    fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
+    assert 'hideNav(\'[data-subview="gear"]\')' in fin

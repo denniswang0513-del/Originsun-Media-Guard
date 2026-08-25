@@ -133,3 +133,14 @@ def test_synthetic_book_balances_to_zero(monkeypatch):
     assert bs["liabilities"]["total"] == 200
     assert bs["equity"]["total"] == 12200
     assert bs["check"]["diff"] == 0
+
+
+def test_card_rows_never_batch_assigned_to_a_bank_account():
+    """🔴 銀行頁的「整批掛到預設帳戶」不可撈到刷卡列 —— 掛了＝刷卡金額直接
+    打進銀行餘額、與月底還款重複計（私帳 2,793 筆，一按就中）。未掛計數同口徑。"""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2] / "routers/api_finance.py").read_text(encoding="utf-8")
+    cnt = src.split("async def _unassigned_count")[1].split("\nasync def ")[0]
+    assert 'status.is_distinct_from("card")' in cnt
+    prefix = src.split("cond = [CrmCashEntry.status.is_distinct_from(\"card\")]")
+    assert len(prefix) == 2, "整批掛帳的 cond 必須以排除刷卡列開頭（不分 only_unassigned）"

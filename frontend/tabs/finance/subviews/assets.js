@@ -114,7 +114,7 @@ function _equipCard() {
         <div style="display:flex;gap:20px;margin-top:8px;color:#888;font-size:12px;">
             <span>計入建構金額合計 <b style="color:#eee;">$${fmtNum(t.cost)}</b></span>
             <span>淨值合計 <b style="color:#eee;">$${fmtNum(t.net)}</b>（＝上方「固定資產淨值」）</span>
-            <span style="color:#666;">截至 ${esc(eq.as_of)}；除役／未計入者灰字。編輯請至主系統「器材庫」</span>
+            <span style="color:#666;">截至 ${esc(eq.as_of)}；除役／未計入者灰字。編輯到側欄「器材清冊」</span>
         </div>`);
 }
 

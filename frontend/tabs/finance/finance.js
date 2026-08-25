@@ -75,6 +75,7 @@ export async function initFinanceTab() {
     // 這裡用同一個口徑，兩邊才不會一邊給看一邊 403。
     if (!((window._modules || []).includes('finance_mine'))) {
         hideNav('[data-subview="projects"]');
+        hideNav('[data-subview="gear"]');   // 器材清冊＝owner 私人器材，同一道門
     }
 
     _shellAllowed = loadShell;

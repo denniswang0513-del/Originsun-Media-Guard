@@ -126,13 +126,19 @@ async def _flow_sums_by_account(session, until=None, account_id=None,
 
 
 async def _unassigned_count(session, entity: str = "parent") -> int:
-    """未掛帳戶的收支筆數 — 兩本帳分開數（兩本帳互不見彼此的未掛帳待辦）。"""
+    """未掛帳戶的收支筆數 — 兩本帳分開數（兩本帳互不見彼此的未掛帳待辦）。
+
+    🔴 刷卡列（status='card'）**刻意**不掛帳戶（刷卡當下不動銀行，錢由月底
+    還款離開、債在 BS 的「信用卡未繳」）—— 算進來會讓私帳的銀行頁永遠掛著
+    2,793 筆的假警語，真忘了掛的列反而被淹掉。與 statement_warnings 同口徑。
+    """
     from sqlalchemy import select, or_, func as safunc
     from db.models import CrmCashEntry
     return (await session.execute(
         select(safunc.count(CrmCashEntry.id)).where(
             or_(CrmCashEntry.bank_account_id.is_(None),
                 CrmCashEntry.bank_account_id == ""),
+            CrmCashEntry.status.is_distinct_from("card"),
             CrmCashEntry.entity == entity))).scalar() or 0
 
 
@@ -1097,7 +1103,10 @@ async def bulk_assign_account(payload: BulkAssignAccountPayload, request: Reques
             raise HTTPException(status_code=404, detail="帳戶不存在")
         acct_ent = acct.entity or "parent"
         _guard(request, acct_ent, level="full")  # 目標帳戶所屬帳本要在 scope 內
-        cond = []
+        # 🔴 刷卡列絕不可整批掛進銀行帳戶 —— 掛了＝刷卡金額直接打進銀行餘額、
+        # 與月底還款重複計，卡片帳與現金流整組毀掉（私帳有 2,793 筆刷卡列，
+        # 這顆「整批掛」按鈕一按就中）。不分 only_unassigned 一律排除。
+        cond = [CrmCashEntry.status.is_distinct_from("card")]
         if payload.only_unassigned:
             cond.append(or_(CrmCashEntry.bank_account_id.is_(None),
                             CrmCashEntry.bank_account_id == ""))

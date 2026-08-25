@@ -169,12 +169,15 @@ async function refreshGrid() {
     try {
         const params = new URLSearchParams();
         for (const [k, v] of Object.entries(_filters)) if (v) params.set(k, v);
+        // 🔴 只看母公司 —— owner 2026-08-25：「crm 如果是我的清冊就不要看到」。
+        // 私帳的 123 件在財務管理（私帳）的「器材清冊」子視圖管理。
+        params.set('entity', 'parent');
         const qs = params.toString();
         const d = await tfetch(API + (qs ? '?' + qs : ''));
         const items = d.equipment || [];
         if (!_hasFilters()) _all = items;
         else if (!_all.length) {  // 首次載入就帶篩選 → 補抓一次全量供 chips
-            try { _all = (await tfetch(API)).equipment || []; } catch { _all = items; }
+            try { _all = (await tfetch(API + '?entity=parent')).equipment || []; } catch { _all = items; }
         }
         _renderStats();
         grid.innerHTML = items.length ? items.map(_card).join('')
