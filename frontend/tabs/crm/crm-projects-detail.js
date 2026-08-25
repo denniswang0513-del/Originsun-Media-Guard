@@ -297,8 +297,8 @@ function renderDetail(project) {
         const _led = document.createElement('a');
         _led.className = 'crm-btn crm-btn-secondary crm-btn-sm';
         _led.style.cssText = 'margin-left:6px;font-size:10px;padding:2px 8px;cursor:pointer;';
-        _led.textContent = '逐案損益 ↗';
-        _led.title = '在財務管理的逐案損益開啟這一案（私帳的工項與費用在那邊編）';
+        _led.textContent = '執行專案 ↗';
+        _led.title = '在財務管理的「執行專案」開啟這一案（私帳的工項與費用在那邊編）';
         _led.onclick = () => {
             sessionStorage.setItem('omgJumpLedgerProject', project.id);
             window.switchTab('tab_crm_invoices');
