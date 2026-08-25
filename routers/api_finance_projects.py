@@ -32,7 +32,7 @@ from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
 from core.ledger_project import (COST_FIELDS, SUM_KEYS, compute,
                                  income_items, norm_detail)
-from core.schemas import LedgerDetailPayload
+from core.schemas import LedgerDetailPayload, LedgerProjectCreate
 from routers.crm._shared import _fmt_day
 
 from .api_finance import _guard
@@ -149,6 +149,65 @@ async def project_ledger(request: Request, entity: str = ""):
         if check:
             tot["unbalanced"] += 1
     return {"projects": items, "totals": tot, "count": len(items)}
+
+
+@router.post("/project-ledger")
+async def create_ledger_project(payload: LedgerProjectCreate, request: Request,
+                                entity: str = ""):
+    """在帳本視角新增專案（owner 2026-08-25「我這裡需要有地方新增專案」）。
+
+    落在目前帳本（同一道 require_entity full 門）。案碼寫進 notes 的
+    `案碼:XXX` 行 —— 與匯入同一個鍵，Sheet 對齊同步靠它。
+    🔴 案碼重複直接 409：2026010 撞碼曾讓回填把 EP5 的費用寫進攝影授課，
+    同一顆雷不裝第二次。
+    """
+    ent = _guard(request, entity, level="full")
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from db.models import Client, CrmProject
+    from routers.crm._shared import _now, _parse_shoot_date
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="專案名稱必填")
+    code = (payload.code or "").strip()
+    close = None
+    if (payload.close_date or "").strip():
+        close = _parse_shoot_date(payload.close_date.strip())
+        if not close:
+            raise HTTPException(status_code=422, detail=f"結案日無法解析：{payload.close_date}")
+    factory = _factory_or_503()
+    async with factory() as session:
+        if payload.client_id:
+            if not await session.get(Client, payload.client_id):
+                raise HTTPException(status_code=404, detail="找不到指定的客戶")
+        if code:
+            # 案碼行是「案碼:XXX」＋行尾（或檔尾）—— 兩種樣式都比，避免
+            # 2026010 誤中 20260100 這種前綴撞名
+            pat_mid = "%案碼:" + code + "\n%"
+            pat_end = "%案碼:" + code
+            dup = (await session.execute(
+                select(CrmProject.id).where(
+                    CrmProject.entity == ent,
+                    CrmProject.notes.like(pat_mid) |
+                    CrmProject.notes.like(pat_end),
+                ).limit(1))).scalar_one_or_none()
+            if dup:
+                raise HTTPException(status_code=409,
+                                    detail=f"案碼 {code} 已存在 —— 收支按案碼回掛，重複會讓兩案分不清彼此的帳")
+        pid = _uuid.uuid4().hex
+        session.add(CrmProject(
+            id=pid, name=name, client_id=payload.client_id or None,
+            entity=ent, status="結案" if close else "製作",
+            completion_date=close,
+            contract_amount=int(payload.contract_amount or 0) or None,
+            payment_status="未到帳",
+            notes=f"[私帳新增] 案碼:{code}" if code else "[私帳新增]",
+            created_at=_now(), updated_at=_now(),
+        ))
+        await session.commit()
+    return {"status": "ok", "id": pid}
 
 
 @router.get("/project-ledger/{project_id}")

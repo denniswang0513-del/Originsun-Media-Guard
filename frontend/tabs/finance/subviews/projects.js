@@ -99,8 +99,23 @@ function _renderShell() {
             <input id="fpl-q" class="crm-input" placeholder="搜尋專案 / 客戶" style="width:200px;" value="${esc(_q)}">
             <label style="font-size:12px;color:#ccc;display:flex;align-items:center;gap:5px;">
                 <input type="checkbox" id="fpl-unpaid" ${_unpaidOnly ? 'checked' : ''}> 只看未收清</label>
+            <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finProjLedger.create()">＋ 新增專案</button>
             <div style="flex:1;"></div>
             <span id="fpl-count" style="font-size:12px;color:#888;"></span>
+        </div>
+        <div id="fpl-create" style="display:none;background:#202020;border:1px solid #3b82f6;border-radius:8px;padding:14px;margin-bottom:10px;">
+            <div style="display:grid;grid-template-columns:2fr 1.4fr 1fr 1fr 1fr;gap:8px;">
+                <label style="color:#888;font-size:11px;">專案名稱*<input class="crm-input" id="fpc-name"></label>
+                <label style="color:#888;font-size:11px;">客戶<select class="crm-input" id="fpc-client"><option value="">— 未定 —</option></select></label>
+                <label style="color:#888;font-size:11px;">案碼<input class="crm-input" id="fpc-code" placeholder="例 2026051"></label>
+                <label style="color:#888;font-size:11px;">結案日<input class="crm-input" type="date" id="fpc-close"></label>
+                <label style="color:#888;font-size:11px;">營收(含稅)<input class="crm-input" type="number" id="fpc-contract"></label>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
+                <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finProjLedger.createSave(this)">建立</button>
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="document.getElementById('fpl-create').style.display='none'">取消</button>
+                <span style="color:#666;font-size:11px;">建立後直接打開詳情，工項與費用在那邊填。案碼＝對 Sheet 的鍵（可留空之後補；重複會擋）。</span>
+            </div>
         </div>
         <div id="fpl-totals" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#ccc;
                     margin-bottom:10px;background:#202020;border:1px solid #2e2e2e;
@@ -369,6 +384,50 @@ _fp.close = () => {
     _dirty = false;
     document.getElementById('fpl-detail').style.display = 'none';
     _markSelected();
+};
+
+let _clients = null;   // 客戶下拉（共用名錄，載一次）
+
+_fp.create = async () => {
+    const box = document.getElementById('fpl-create');
+    box.style.display = box.style.display === 'none' ? '' : 'none';
+    if (box.style.display === 'none') return;
+    if (!_clients) {
+        try {
+            const token = localStorage.getItem('auth_token');
+            const r = await fetch('/api/v1/crm/clients', {
+                headers: token ? { Authorization: 'Bearer ' + token } : {} });
+            _clients = (await r.json()).clients || [];
+        } catch (_) { _clients = []; }
+        const sel = document.getElementById('fpc-client');
+        sel.innerHTML = '<option value="">— 未定 —</option>' + _clients
+            .map((c) => `<option value="${c.id}">${esc(c.short_name)}</option>`).join('');
+    }
+    document.getElementById('fpc-name').focus();
+};
+
+_fp.createSave = async (btn) => {
+    const g = (id) => document.getElementById(id).value.trim();
+    if (!g('fpc-name')) { finToast('專案名稱必填', 'error'); return; }
+    btn.disabled = true;
+    try {
+        const r = await finFetch('/project-ledger', {
+            entity: 'mine', method: 'POST',
+            body: JSON.stringify({
+                name: g('fpc-name'), client_id: g('fpc-client') || null,
+                code: g('fpc-code'), close_date: g('fpc-close'),
+                contract_amount: parseInt(g('fpc-contract') || '0', 10) || null,
+            }),
+        });
+        document.getElementById('fpl-create').style.display = 'none';
+        ['fpc-name', 'fpc-code', 'fpc-close', 'fpc-contract'].forEach(
+            (id) => { document.getElementById(id).value = ''; });
+        finToast('已建立');
+        await _load();              // 重抓整份（排序/合計由後端口徑）
+        _fp.open(r.id);             // 直接打開詳情填工項
+    } catch (e) {
+        finToast('建立失敗：' + e.message, 'error');
+    } finally { btn.disabled = false; }
 };
 
 _fp.gotoCrm = () => {

@@ -1393,6 +1393,16 @@ class HoldingPayload(BaseModel):
     note: Optional[str] = None
 
 
+class LedgerProjectCreate(BaseModel):
+    """執行專案 — 新增（api_finance_projects）。owner 的流程是先整理專案再記帳，
+    所以入口在帳本頁；工項/費用建立後在詳情編。"""
+    name: str
+    client_id: Optional[str] = None
+    code: str = ""                  # 案碼（對 Sheet 的鍵；可空，之後補）
+    close_date: str = ""            # 'YYYY-MM-DD'；空＝未結案
+    contract_amount: Optional[int] = None
+
+
 class LedgerDetailPayload(BaseModel):
     # crm_pushed：推送/取消推送到專案管理（0/1）。不是損益欄位 —— PUT 端點會先
     # pop 掉，**不能**落進 ledger_detail JSON（那個迴圈把剩餘鍵全當費用欄寫）。

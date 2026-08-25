@@ -369,3 +369,15 @@ def test_tab_activation_refreshes_but_never_eats_unsaved_edits():
     assert "_dirty" in refresh, "逐案損益的刷新沒讓路給未存編修"
     fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
     assert "tab-changed" in fin and "_finProjLedger?.refresh" in fin
+
+
+def test_ledger_create_endpoint_guards():
+    """執行專案的新增：同一道 require_entity full 門＋🔴 案碼重複 409 ——
+    2026010 撞碼曾讓回填把 EP5 的費用寫進攝影授課（營收 2,000 的案子掛著
+    19,320 的別人工項），同一顆雷不裝第二次。"""
+    src = (ROOT / "routers/api_finance_projects.py").read_text(encoding="utf-8")
+    fn = src.split("async def create_ledger_project(")[1].split("\n@router")[0]
+    assert '_guard(request, entity, level="full")' in fn
+    assert "status_code=409" in fn and "案碼" in fn
+    # 前綴不撞：比對必須錨定行尾/檔尾，2026010 不可誤中 20260100
+    assert 'pat_mid' in fn and 'pat_end' in fn
