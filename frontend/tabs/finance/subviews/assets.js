@@ -132,14 +132,7 @@ function _render() {
     const estTotal = Object.values(auto).reduce((a, b) => a + b, 0)
         + Object.values(manual).reduce((a, b) => a + b, 0);
 
-    const bucketRows = (obj, tag) => Object.entries(obj).map(([k, v]) => `
-        <tr><td>${esc(k)}</td>
-            <td style="text-align:right;color:${v < 0 ? '#fca5a5' : '#eee'};">$${fmtNum(v)}</td>
-            <td style="color:#666;font-size:11px;">${tag}</td></tr>${k === '銀行現金'
-        ? (d.bank_lines || []).map((b) => `
-        <tr style="color:#9ca3af;font-size:11px;"><td style="padding-left:18px;">└ ${esc(b.name)}</td>
-            <td style="text-align:right;">$${fmtNum(b.amount)}</td><td></td></tr>`).join('')
-        : ''}`).join('');
+    const compositionHtml = _compositionHtml(auto, manual, estTotal, d.bank_lines || []);
 
     _c.innerHTML = `
         <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:14px;">
@@ -153,18 +146,83 @@ function _render() {
         </div>
         ${_card('淨值成長（' + _snaps.length + ' 個快照）', _chartSvg())}
         ${_card('資產組成（現在）', `
-            <table class="crm-table" style="width:100%;font-size:13px;">
-                <tbody>
-                    ${bucketRows(auto, '系統即時')}
-                    ${bucketRows(manual, '上次快照')}
-                </tbody></table>
-            <div style="color:#666;font-size:11px;margin-top:6px;">
+            ${compositionHtml}
+            <div style="color:#666;font-size:11px;margin-top:8px;">
                 美元匯率 ${d.usd_twd ? Number(d.usd_twd).toFixed(3) : '—'}（更新報價時一併抓）；
                 「上次快照」欄拍快照時可改。</div>`)}
         ${_card('持股（' + (d.holdings || []).length + '）', _holdingsHtml())}
         ${_equipCard()}
         <div id="fin-assets-modal"></div>`;
 }
+
+// ── 資產組成（owner 2026-08-26「增加一些比較好讀的視覺化設計」）────────
+// 形式＝組成條（一條 100% 疊條看「佔比」）＋逐桶列（色塊＋等比小條看「量」）。
+// 顏色跟著桶名走（固定槽位，不跟排名跑）—— 調色盤 8 槽已用 dataviz 驗證器
+// 對 #202020 卡面跑過（CVD 相鄰 ΔE 8.4、對比全 ≥3:1 全過）；不在表裡的
+// 未知桶一律中性灰（不偷用第 9 個色相，靠標籤識別）。
+const BUCKET_COLORS = {
+    '銀行現金': '#3987e5', '應收帳款': '#d95926', '固定資產淨值': '#199e70',
+    '證券現值': '#c98500', '信用卡': '#d55181', '預付帳款': '#008300',
+    '源日資本額': '#9085e9',
+};
+const _bucketColor = (name) => BUCKET_COLORS[name] || '#6b7280';
+
+function _compositionHtml(auto, manual, total, bankLines) {
+    const rows = [
+        ...Object.entries(auto).map(([k, v]) => ({ k, v, tag: '系統即時' })),
+        ...Object.entries(manual).map(([k, v]) => ({ k, v, tag: '上次快照' })),
+    ];
+    const pos = rows.filter((r) => r.v > 0);
+    const maxV = Math.max(...rows.map((r) => Math.abs(r.v)), 1);
+    // 100% 疊條：段寬=佔比、段色=桶色、2px 間隙；≥10% 的段直接標名（小段靠下方列表）
+    const stack = pos.map((r) => {
+        const pct = r.v / (total || 1) * 100;
+        return `<div title="${esc(r.k)} $${fmtNum(r.v)}（${pct.toFixed(1)}%）"
+                     style="flex:0 0 ${pct.toFixed(2)}%;background:${_bucketColor(r.k)};
+                            display:flex;align-items:center;justify-content:center;overflow:hidden;">
+            ${pct >= 10 ? `<span style="font-size:10px;color:#fff;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,.55);">${esc(r.k)} ${pct.toFixed(0)}%</span>` : ''}
+        </div>`;
+    }).join('');
+    const row = (r) => {
+        const pct = total ? (r.v / total * 100) : 0;
+        const barW = Math.abs(r.v) / maxV * 100;
+        return `
+        <div class="fa-comp-row" title="${esc(r.k)} $${fmtNum(r.v)}（${pct.toFixed(1)}%）">
+            <span style="width:10px;height:10px;border-radius:2px;background:${_bucketColor(r.k)};flex:none;"></span>
+            <span style="color:#ddd;flex:0 0 108px;">${esc(r.k)}</span>
+            <span style="flex:1;height:6px;background:#2a2a2a;border-radius:3px;overflow:hidden;">
+                <span style="display:block;height:100%;width:${barW.toFixed(1)}%;border-radius:3px;
+                             background:${r.v < 0 ? '#e66767' : _bucketColor(r.k)};"></span></span>
+            <span style="color:#888;flex:0 0 46px;text-align:right;font-variant-numeric:tabular-nums;">${pct.toFixed(1)}%</span>
+            <span style="color:${r.v < 0 ? '#fca5a5' : '#eee'};flex:0 0 110px;text-align:right;font-variant-numeric:tabular-nums;">$${fmtNum(r.v)}</span>
+            <span style="color:#666;font-size:10px;flex:0 0 56px;text-align:right;">${r.tag}</span>
+        </div>
+        ${r.k === '銀行現金' ? _bankSubRows(bankLines) : ''}`;
+    };
+    return `
+        <style>
+            .fa-comp-row{display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:12px;border-radius:4px;}
+            .fa-comp-row:hover{background:#262626;}
+            .fa-bank-row{display:flex;align-items:center;gap:8px;padding:2px 2px 2px 20px;font-size:11px;color:#9ca3af;}
+        </style>
+        <div style="display:flex;gap:2px;height:18px;border-radius:5px;overflow:hidden;margin:2px 0 12px;">${stack}</div>
+        ${rows.map(row).join('')}`;
+}
+
+function _bankSubRows(bankLines) {
+    const lines = bankLines || [];
+    const maxB = Math.max(...lines.map((b) => Math.abs(b.amount)), 1);
+    return lines.map((b) => `
+        <div class="fa-bank-row">
+            <span style="flex:0 0 118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">└ ${esc(b.name)}</span>
+            <span style="flex:1;height:4px;background:#242424;border-radius:2px;overflow:hidden;">
+                <span style="display:block;height:100%;width:${(Math.abs(b.amount) / maxB * 100).toFixed(1)}%;
+                             border-radius:2px;background:#3987e5;opacity:.45;"></span></span>
+            <span style="flex:0 0 110px;text-align:right;font-variant-numeric:tabular-nums;color:${b.amount < 0 ? '#fca5a5' : '#9ca3af'};">$${fmtNum(b.amount)}</span>
+            <span style="flex:0 0 56px;"></span>
+        </div>`).join('');
+}
+
 
 // ── 淨值成長線（手刻 SVG）────────────────────────────────
 // 沒用共用 js/shared/svg-charts.lineChart：那支的 x 軸是等距索引，

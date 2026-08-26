@@ -27,11 +27,23 @@ except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 tr
 
 @router.get("/clients")
 async def list_clients(
+    request: Request,
     q: str = Query(""),
     status: str = Query(""),
     am: str = Query(""),
+    entity: str = Query(""),
 ):
+    """兩本帳（owner 2026-08-26「我的客戶先不要混到 crm」）：
+    - 預設（CRM 各呼叫端不帶參數）＝只回 parent 客戶 —— 私帳客戶從客戶管理
+      與所有下拉消失。
+    - entity=mine（私帳執行專案的客戶下拉）＝owner 的名錄：私帳客戶＋
+      「已被私帳案引用的 parent 客戶」（典藏那 15 個兩邊都有案的 —— 不給看
+      會逼 owner 建重複客戶）。要 mine full scope。
+    """
     _require_db()
+    if entity == "mine":
+        from core.ledger import require_entity
+        require_entity(request, "mine", level="full")
     factory = await _get_factory()
 
     from sqlalchemy import func as _fn, case as _case
@@ -61,6 +73,14 @@ async def list_clients(
             .outerjoin(proj_sub, proj_sub.c.client_id == Client.id)
             .order_by(Client.updated_at.desc())
         )
+        if entity == "mine":
+            _mine_refs = (select(CrmProject.client_id)
+                          .where(CrmProject.entity == "mine",
+                                 CrmProject.client_id.isnot(None)))
+            query = query.where(or_(Client.entity == "mine",
+                                    Client.id.in_(_mine_refs)))
+        else:
+            query = query.where(not_mine(Client.entity))
         if status:
             query = query.where(Client.status == status)
         if am:
@@ -85,7 +105,14 @@ async def list_clients(
 
 @router.post("/clients")
 async def create_client(req: ClientPayload, request: Request):
-    _check_auth(request)
+    # 兩本帳寫入守衛：mine 客戶開給 mine full（owner=lv1+finance_mine，
+    # 私帳建案要能順手建自己的客戶）；parent 維持 Lv3
+    ent = req.entity or "parent"
+    if ent == "mine":
+        from core.ledger import require_entity
+        require_entity(request, "mine", level="full")
+    else:
+        _check_auth(request)
     _require_db()
     factory = await _get_factory()
 
@@ -102,7 +129,8 @@ async def create_client(req: ClientPayload, request: Request):
                 raise HTTPException(status_code=409,
                     detail=f"已存在相同抬頭＋統編的客戶「{dup.short_name}」")
 
-        client = Client(id=uuid.uuid4().hex, created_at=now, updated_at=now, **req.model_dump())
+        client = Client(id=uuid.uuid4().hex, entity=ent, created_at=now, updated_at=now,
+                        **req.model_dump(exclude={"entity"}))
         try:
             session.add(client)
             await session.commit()
@@ -126,7 +154,8 @@ async def get_client(client_id: str):
 
 @router.put("/clients/{client_id}")
 async def update_client(client_id: str, req: ClientPayload, request: Request):
-    _check_auth(request)
+    from core.auth import check_logged_in
+    check_logged_in(request)      # 先擋匿名，載列後按列帳本驗（同 CRM 帳務慣例）
     _require_db()
     factory = await _get_factory()
 
@@ -134,11 +163,13 @@ async def update_client(client_id: str, req: ClientPayload, request: Request):
         client = await session.get(Client, client_id)
         if not client:
             raise HTTPException(status_code=404, detail="找不到此客戶")
+        _client_write_guard(request, client)
         old_am = client.am_username
         # status 由「客戶分級」自動管理（_auto_update_client_status）。客戶編輯表單
         # 不送 status，若照 ClientPayload 預設值（'潛在客戶'）寫回會把分級洗掉 ——
         # 這正是「改業務後客戶屬性跳掉」的成因。排除它，再依專案數重算。
-        for k, v in req.model_dump(exclude={"status"}).items():
+        # entity 一律不換帳本（同收支/請款的規矩：換帳＝刪掉重建才留得下痕跡）
+        for k, v in req.model_dump(exclude={"status", "entity"}).items():
             setattr(client, k, v)
         client.updated_at = _now()
         await _auto_update_client_status(session, client_id)  # 重算分級（保留手動『暫停合作』）
@@ -158,9 +189,21 @@ async def update_client(client_id: str, req: ClientPayload, request: Request):
     return {"status": "ok", "client": _to_dict(client)}
 
 
+def _client_write_guard(request, client):
+    """客戶寫入守衛：mine 列開給 mine full scope、parent 列維持 Lv3 ——
+    與 routers/crm/finance._mine_or_admin_write 同一條政策（客戶表在另一個
+    領域檔，故就地一份小的；行為要一致）。"""
+    if (client.entity or "parent") == "mine":
+        from core.ledger import require_entity
+        require_entity(request, "mine", level="full")
+    else:
+        _check_auth(request)
+
+
 @router.delete("/clients/{client_id}")
 async def delete_client(client_id: str, request: Request):
-    _check_auth(request)
+    from core.auth import check_logged_in
+    check_logged_in(request)
     _require_db()
     factory = await _get_factory()
 
@@ -168,6 +211,7 @@ async def delete_client(client_id: str, request: Request):
         client = await session.get(Client, client_id)
         if not client:
             raise HTTPException(status_code=404, detail="找不到此客戶")
+        _client_write_guard(request, client)
         await session.delete(client)
         await session.commit()
     return {"status": "ok"}

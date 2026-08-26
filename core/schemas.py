@@ -461,6 +461,8 @@ class ClientPayload(BaseModel):
     payment_info: str = ""
     payment_note: str = ""
     notes: str = ""
+    # 兩本帳：None＝建立落 'parent'；更新一律不換帳本（endpoint exclude 掉）
+    entity: Optional[str] = None
 
 
 class CrmProjectPayload(BaseModel):

@@ -175,6 +175,9 @@ class Client(Base):
     __tablename__ = "clients"
 
     id = Column(String(32), primary_key=True)
+    # 兩本帳（owner 2026-08-26「我的客戶先不要混到 crm 系統」）：mine＝私帳
+    # 專用客戶，CRM 客戶管理與各下拉一律看不到；等 owner 確認對應後才併回 parent。
+    entity = Column(String(16), nullable=False, server_default="parent")
     short_name = Column(String(64), nullable=False, unique=True)  # 客戶代稱
     full_name = Column(String(255), nullable=True, default="")  # 全稱 / 抬頭
     tax_id = Column(String(16), nullable=True, default="")      # 統一編號

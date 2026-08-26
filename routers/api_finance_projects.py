@@ -113,8 +113,11 @@ async def project_ledger(request: Request, entity: str = ""):
                  .where(CrmProject.entity == ent)
                  # 依結案日新→舊；未結案（無日期）排最前 —— 這張表是照結案日
                  # 整理的（owner：先整理專案再記帳），不是照最後編輯時間。
+                 # 🔴 id 是必要的第三鍵：同批匯入的案 updated_at 到微秒都相同，
+                 # 沒有它 Postgres 平手順序不保證 —— 前端就地重排（穩定排序）
+                 # 與重新載入會給出兩種順序（e2e r5 實抓：媒體顧問 vs 鍾馗嫁妹）
                  .order_by(CrmProject.completion_date.desc().nullsfirst(),
-                           CrmProject.updated_at.desc()))
+                           CrmProject.updated_at.desc(), CrmProject.id))
         rows = (await session.execute(query)).all()
         cash, ap = await _rollups(session, ent)
 

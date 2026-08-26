@@ -687,6 +687,8 @@ async def _on_startup():
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS source_invoice_id VARCHAR(32)",
                         "CREATE INDEX IF NOT EXISTS idx_payreq_src_invoice ON crm_payment_requests(source_invoice_id)",
                         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS advance_payment_id VARCHAR(32)",
+                        # 兩本帳：私帳客戶分家（owner 2026-08-26「先不要混到 crm」）
+                        "ALTER TABLE clients ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
                         # ── 零用金請款（docs/PETTY_CASH_PLAN.md）──────────────
                         # 支出單據行擴充：一筆登記同時餵專案成本與個人請款。
                         # project_id 放寬成可空 —— 公司層級支出（行政/業務推廣）沒有
