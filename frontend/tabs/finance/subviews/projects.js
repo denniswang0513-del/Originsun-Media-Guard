@@ -25,6 +25,7 @@ let _sel = null;        // 目前選取的專案 id
 let _detail = null;     // 右側載入的單案資料
 let _q = '';
 let _unpaidOnly = false;
+let _fy = '';           // 會計年度篩選（''=全部、'open'=未結案、數字=FY 結束年）
 let _dirty = false;
 let _resizeBound = false;
 
@@ -52,19 +53,39 @@ async function _load() {
     }
 }
 
+/** 結案日 → 會計年度（7/1–6/30，以結束年命名；同 fin-utils 的 FY 口徑）。 */
+function _closeFY(p) {
+    if (!p.close_date) return null;
+    const y = +p.close_date.slice(0, 4), m = +p.close_date.slice(5, 7);
+    return m >= 7 ? y + 1 : y;
+}
+
 /** 目前畫面上的列（前端篩選：402 列已經在手上，不必回伺服器）。 */
 function _visible() {
     const q = _q.toLowerCase();
     return (_data.projects || []).filter(p =>
         (!q || p.name.toLowerCase().includes(q) || (p.client || '').toLowerCase().includes(q))
-        && (!_unpaidOnly || p.payment_status !== '全額到帳'));
+        && (!_unpaidOnly || p.payment_status !== '全額到帳')
+        && (!_fy || (_fy === 'open' ? !p.close_date : _closeFY(p) === +_fy)));
 }
 
-/** 合計列。存檔後就地更新走同一份，不重畫整個殼。 */
+/** 合計列 —— 由**畫面上的列**即時計算（年度/搜尋/未收清篩下去合計跟著變：
+ *  選 FY2026 這裡就是你年度表的「實際營收 8,103,670」那排數字）。 */
 function _renderTotals() {
     const el = document.getElementById('fpl-totals');
     if (!el) return;
-    const t = _data.totals || {};
+    const rows = _visible();
+    const t = { contract: 0, outsource: 0, invoice_fee: 0, net: 0,
+                received: 0, receivable: 0, ap_open: 0 };
+    rows.forEach((p) => {
+        t.contract += p.contract || 0;
+        t.net += p.net || 0;
+        t.received += p.received || 0;
+        t.receivable += p.receivable || 0;
+        t.ap_open += p.ap_open || 0;
+        t.outsource += (p.detail && p.detail.outsource) || 0;
+        t.invoice_fee += (p.detail && p.detail.invoice_fee) || 0;
+    });
     const cell = (label, key, color) =>
         `<span>${label} <b style="color:${color};">$${fmtNum(t[key])}</b></span>`;
     el.innerHTML = cell('營收', 'contract', '#eee')
@@ -76,12 +97,12 @@ function _renderTotals() {
         + cell('未付應付', 'ap_open', '#fca5a5');
 }
 
-function _renderCount(n) {
+function _renderCount(n, rows) {
     const el = document.getElementById('fpl-count');
     if (!el) return;
-    const t = _data.totals || {};
+    const unbalanced = (rows || []).reduce((a, p) => a + (p.check ? 1 : 0), 0);
     el.innerHTML = `${fmtNum(n)}${n === _data.count ? '' : ' / ' + fmtNum(_data.count)} 案`
-        + (t.unbalanced ? `｜<span style="color:#fbbf24;">${t.unbalanced} 案檢查≠0</span>` : '');
+        + (unbalanced ? `｜<span style="color:#fbbf24;">${unbalanced} 案檢查≠0</span>` : '');
 }
 
 /** 只切 selected class —— 重建整份 innerHTML 會重新解析約 2,800 個節點，
@@ -99,6 +120,13 @@ function _renderShell() {
             <input id="fpl-q" class="crm-input" placeholder="搜尋專案 / 客戶" style="width:200px;" value="${esc(_q)}">
             <label style="font-size:12px;color:#ccc;display:flex;align-items:center;gap:5px;">
                 <input type="checkbox" id="fpl-unpaid" ${_unpaidOnly ? 'checked' : ''}> 只看未收清</label>
+            <select class="crm-input" id="fpl-fy" title="會計年度（7/1–6/30）" style="width:170px;" data-no-search>
+                <option value="">全部年度</option>
+                <option value="open"${_fy === 'open' ? ' selected' : ''}>未結案</option>
+                ${[...new Set((_data.projects || []).map(_closeFY).filter(Boolean))]
+                    .sort((a, b) => b - a)
+                    .map((y) => `<option value="${y}"${String(_fy) === String(y) ? ' selected' : ''}>${y - 1}/07 – ${y}/06</option>`).join('')}
+            </select>
             <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finProjLedger.create()">＋ 新增專案</button>
             <div style="flex:1;"></div>
             <span id="fpl-count" style="font-size:12px;color:#888;"></span>
@@ -153,6 +181,10 @@ function _renderShell() {
         _unpaidOnly = e.target.checked;
         _renderList();
     });
+    document.getElementById('fpl-fy').addEventListener('change', (e) => {
+        _fy = e.target.value;
+        _renderList();
+    });
     setupResizeHandle('fpl-resize', 'fpl-list-panel');
     _fitBody();
     if (!_resizeBound) {
@@ -204,7 +236,8 @@ function _renderList() {
         </div>`).join('')
         || '<div class="crm-empty">沒有符合的專案</div>';
     body.scrollTop = keepScroll;   // 重畫不該把使用者彈回列表頂端
-    _renderCount(rows.length);
+    _renderCount(rows.length, rows);
+    _renderTotals();               // 合計＝畫面上的列（篩選後跟著變）
 }
 
 // ── 右側詳情（可編輯）──────────────────────────────────────
@@ -682,12 +715,7 @@ function _applySaved(r) {
         close_date: r.close_date != null ? r.close_date : old.close_date,
         updated_at: r.updated_at || old.updated_at,
     };
-    const t = _data.totals;
-    t.contract += next.contract - old.contract;
-    t.net += next.net - old.net;
-    t.outsource += next.detail.outsource - old.detail.outsource;
-    t.invoice_fee += next.detail.invoice_fee - old.detail.invoice_fee;
-    t.unbalanced += (next.check ? 1 : 0) - (old.check ? 1 : 0);
+    // 合計列由 _renderTotals 從畫面上的列即時算 —— 不再增量維護一份影子合計
     _data.projects[i] = next;
     // 存檔會動到排序的兩個鍵（結案日、updated_at）—— 一律重排，讓畫面上的
     // 順序與「現在重新載入會看到的順序」永遠一致。402 列排一次不值得省。

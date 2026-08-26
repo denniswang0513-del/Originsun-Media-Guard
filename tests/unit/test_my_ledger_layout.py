@@ -155,6 +155,16 @@ def test_receivable_subview_is_project_based_and_gated():
     assert fin.count("hideNav('.fin-nav-mine-only')") == 1
 
 
+def test_projects_fy_filter_and_live_totals():
+    """執行專案的年度篩選（7/1–6/30，同 fin-utils FY 口徑）＋合計列由畫面上
+    的列即時計算 —— 選 FY 之後合計＝owner 年度表「實際營收」那排數字。"""
+    js = _read("frontend/tabs/finance/subviews/projects.js")
+    assert "_closeFY" in js and "m >= 7 ? y + 1 : y" in js
+    assert 'id="fpl-fy"' in js
+    seg = js.split("function _renderTotals")[1][:300]
+    assert "_visible()" in seg, "合計要從畫面上的列算（不然篩選後合計不動）"
+
+
 def test_fiscal_year_period_for_mine():
     """私帳結帳年度 7/1–6/30（owner 2026-08-26「我的結帳月份是每年 6 月 30，
     這塊預設為年」）：mine 模式期間預設＝年、年＝會計年度（翻成後端本來就吃

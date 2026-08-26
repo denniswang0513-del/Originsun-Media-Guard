@@ -81,6 +81,38 @@ def test_gear_and_bank_transfers_create_no_position():
                                     cap_floor="2024-01")["cap_flow"] == 0
 
 
+def test_mine_receivable_and_accrual_from_projects():
+    """「兩張表對不起來」根因修正（owner 2026-08-26）：owner 年度表＝權責
+    （結案日認列，FY2026 分毫實證 8,103,670）、系統私帳損益＝現金。
+    BS 應收正本＝執行專案（發票 AR 對 mine 恆 0）：結案 ≤ as_of 且應收 > 0；
+    溢收不抵別案；未結案/期後結案不進本期。accrual_revenue＝橋接警語用。"""
+    from core.finance_logic import mine_project_positions
+    projs = [
+        {"id": "a", "name": "A", "completion_date": "2026-05-01",
+         "contract_amount": 1000, "amount_receivable": 400},
+        {"id": "b", "name": "B", "completion_date": "2026-08-01",     # as_of 之後結案
+         "contract_amount": 2000, "amount_receivable": 2000},
+        {"id": "c", "name": "C", "completion_date": "2026-04-01",     # 溢收
+         "contract_amount": 500, "amount_receivable": -50},
+        {"id": "d", "name": "D", "completion_date": None,             # 未結案
+         "contract_amount": 700, "amount_receivable": 700},
+    ]
+    mp = mine_project_positions(projs, ["2026-04", "2026-05", "2026-06"], "2026-06")
+    assert mp["accrual_revenue"] == 1500          # a + c（結案月在期間內）
+    assert mp["receivable"] == 400                # b 期後、c 溢收、d 未結案都不進
+    assert mp["receivable_rows"][0]["id"] == "a"
+
+
+def test_mine_bs_receivable_uses_project_ledger():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2] / "services/finance_statements.py"
+           ).read_text(encoding="utf-8")
+    assert '_mp["receivable"] if _mp is not None' in src, "BS 應收線要走專案口徑"
+    assert "權責" in src, "橋接警語（權責 vs 現金）要在頁面上講出來"
+    drill = src.split('elif kind == "receivable":')[1][:900]
+    assert "mine_project_positions" in drill, "下鑽也要換資料源（發票下鑽對 mine 恆空）"
+
+
 def test_card_outstanding_formula_and_guard():
     cfg = {"opening": 100, "repay_categories": ["信用卡"]}
     rows = [_e("2024-01", exp=800, status="card"),

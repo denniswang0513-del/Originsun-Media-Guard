@@ -156,6 +156,15 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
         "id", "loan_id", "period_no", "due_date",
         "principal_due", "interest_due", "status", "paid_at")
 
+    # 私帳的應收正本＝執行專案（owner 不開發票 → invoice AR 恆 0）；
+    # 權責/現金橋接警語也吃這份。母公司不載（照舊走發票）。
+    projects = []
+    if entity == "mine":
+        from db.models import CrmProject
+        projects = _dump(await _all(CrmProject, where=CrmProject.entity == "mine"),
+                         "id", "name", "completion_date", "contract_amount",
+                         "amount_received", "amount_receivable")
+
     accounts = {r.id: {"code": r.code, "name": r.name, "pnl_group": r.pnl_group,
                        "cf_activity": r.cf_activity, "acct_type": r.acct_type}
                 for r in (await session.execute(select(FinanceAccount))).scalars().all()}
@@ -170,6 +179,7 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
             "cash_entries": cash_entries, "equipment": equipment,
             "adjustments": adjustments, "bank_accounts": bank_accounts,
             "loans": loans, "loan_payments": loan_payments,
+            "projects": projects,
             "accounts": accounts, "cat_map": cat_map,
             # _resolve_baseline 要分帳本（settings 的基準月只屬於母公司）
             "entity": entity}
@@ -314,6 +324,13 @@ async def compute_live(session, months, inputs=None, adv=None,
         bank_balances_asof(inputs["bank_accounts"], inputs["cash_entries"], as_of))
     bank_lines = _split["cash"]
     ar_rows = ar_open_invoices(inputs["invoices"], baseline, as_of)
+    # 私帳：應收正本＝執行專案（發票 AR 恆 0）＋ 權責/現金橋接警語
+    #（owner 2026-08-26「兩張表對不起來」：他的年度表按結案日認列營收＝權責，
+    # 本表損益按入帳＝現金 —— 差額就是應收變動，指名講出來別讓人對著猜）
+    _mp = None
+    if (inputs.get("entity") or entity) == "mine":
+        from core.finance_logic import mine_project_positions
+        _mp = mine_project_positions(inputs.get("projects") or [], months, as_of)
     ap_rows = ap_open_payments(inputs["payments"], inputs["cat_map"],
                                baseline, as_of)
     vat_cum = vat_position(inputs["invoices"], inputs["cash_entries"],
@@ -338,9 +355,17 @@ async def compute_live(session, months, inputs=None, adv=None,
             f"器材資本化差額 {_cap_flow - _cap_reg:+,}：收支的器材流出 {_cap_flow:,} vs "
             f"清冊在期購置 {_cap_reg:,} —— 流出較多＝清冊外的小額配件其實是費用"
             "（把那些列改類別，或補進器材清冊）")
+    if _mp is not None:
+        _cash_rev = int(pnl["revenue"]["total"] or 0)
+        _acc = _mp["accrual_revenue"]
+        warn["messages"].append(
+            f"損益表為現金基礎（入帳認列 {_cash_rev:,}）；權責口徑（本期結案案"
+            f"合約合計）為 {_acc:,}，差 {_acc - _cash_rev:+,} ＝ 應收/跨期收款的"
+            "變動 —— 逐案權責看「執行專案」（你的年度表就是那個口徑）。")
     bs = build_balance_sheet(
         as_of, bank_lines=bank_lines,
-        receivable_total=sum(int(i.get("amount_total") or 0) for i in ar_rows),
+        receivable_total=(_mp["receivable"] if _mp is not None
+                          else sum(int(i.get("amount_total") or 0) for i in ar_rows)),
         advance_balance=adv["balance_total"] + _pos["advance_net"],
         equipment=inputs["equipment"], adjustments=inputs["adjustments"],
         payable_total=sum(int(p.get("amount") or 0) for p in ap_rows),
@@ -598,11 +623,20 @@ async def drilldown(session, kind: str, months, entity: str = "parent") -> dict:
                 "已繳" if (p.get("status") or "") == "paid" else "未繳"))
 
     elif kind == "receivable":
-        baseline = _resolve_baseline(inputs)
-        for inv in ar_open_invoices(inputs["invoices"], baseline, months[-1]):
-            items.append(_row("invoice", inv["id"], inv.get("invoice_date"),
-                              inv.get("title"), inv.get("amount_total"),
-                              inv.get("category"), "未收"))
+        if (inputs.get("entity") or "parent") == "mine":
+            # 私帳應收＝執行專案（與 BS 線同一份 mine_project_positions）
+            from core.finance_logic import mine_project_positions
+            _mp = mine_project_positions(inputs.get("projects") or [],
+                                         months, months[-1])
+            for r in _mp["receivable_rows"]:
+                items.append(_row("project", r["id"], r["close_month"],
+                                  r["name"], r["amount"], "執行專案", "未收"))
+        else:
+            baseline = _resolve_baseline(inputs)
+            for inv in ar_open_invoices(inputs["invoices"], baseline, months[-1]):
+                items.append(_row("invoice", inv["id"], inv.get("invoice_date"),
+                                  inv.get("title"), inv.get("amount_total"),
+                                  inv.get("category"), "未收"))
 
     elif kind == "payable":
         baseline = _resolve_baseline(inputs)

@@ -1578,6 +1578,37 @@ def equity_transfer_position(cash_entries, cat_map, accounts, as_of_month,
             "household_net": household, "cap_flow": cap}
 
 
+def mine_project_positions(projects, months, as_of_month) -> dict:
+    """私帳的專案側位置（2026-08-26：「兩張表對不起來」的根因修正）。
+
+    owner 的年度表是**權責**（結案日認列營收）、系統私帳損益是**現金**（入帳
+    認列）—— 已分毫實證：FY2026 結案 131 案合約合計 8,103,670 = 表上實際營收。
+    回傳：
+    - receivable：BS 應收線 ＝ Σ(結案月 ≤ as_of 且應收 > 0)。🔴 私帳沒有發票，
+      invoice AR 恆 0 —— 應收的正本是執行專案（amount_receivable，基準見
+      ledger_project.expected_cash_in）。溢收（負值）不拿來抵別案。
+      ⚠ as-of 近似：歷史「已收」是匯入基準值（無逐筆日期），無法回溯早於
+      匯入日的期末 —— 對現在與往後的期末是準的。
+    - accrual_revenue：Σ(結案月 ∈ 期間) 合約金額 —— 權責 vs 現金的橋接警語用。
+    - receivable_rows：BS 下鑽明細。
+    """
+    mset = set(months or [])
+    recv = accrual = 0
+    rows = []
+    for p in projects or ():
+        m = month_of(p.get("completion_date"))
+        if m and m in mset:
+            accrual += int(p.get("contract_amount") or 0)
+        ar = int(p.get("amount_receivable") or 0)
+        if ar > 0 and m and (not as_of_month or m <= as_of_month):
+            recv += ar
+            rows.append({"id": p.get("id"), "name": p.get("name"),
+                         "close_month": m, "amount": ar})
+    rows.sort(key=lambda x: -x["amount"])
+    return {"receivable": recv, "accrual_revenue": accrual,
+            "receivable_rows": rows}
+
+
 def card_outstanding(cash_entries, card_cfg: dict, as_of_month) -> int:
     """信用卡未繳餘額（負債）＝期初 + 刷卡（status='card' 的支出）− 還款
     （還款類別的 支−存）。口徑與 api_finance_card.card_summary 同一條式子 ——
