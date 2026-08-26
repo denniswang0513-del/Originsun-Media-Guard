@@ -299,3 +299,15 @@ def normalize_tax_id(raw) -> str:
     if not s or not s.isdigit() or len(s) >= TAX_ID_LEN:
         return s
     return s.zfill(TAX_ID_LEN)
+
+def client_tier(active_project_count: int) -> str:
+    """客戶分級（0=潛在客戶／1=新客戶／2+=舊客戶）。
+
+    規則正本：端點 `_auto_update_client_status` 與遷移腳本共用這一支 ——
+    門檻散成兩份，重算一次就會把畫面上的分級洗成另一套。
+    「有效案數」的口徑（排除投標/開發/洽詢/提案/未成案）在
+    `routers.crm._shared._CLIENT_TIER_EXCLUDE_STATUSES`；手動的「暫停合作」
+    不由本支決定（呼叫端先擋）。
+    """
+    n = int(active_project_count or 0)
+    return "潛在客戶" if n == 0 else ("新客戶" if n == 1 else "舊客戶")

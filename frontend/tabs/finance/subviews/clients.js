@@ -2,10 +2,12 @@
  * clients.js — 👥 客戶管理（私帳；owner 2026-08-26「新增一個客戶管理，讓我可以
  * 比對 crm 與我的客戶」「基本上我希望跟 crm 同步，但是用連結的方式」）。
  *
- * 語意：**只記對應、不搬資料**。私帳客戶連結到 CRM 客戶＝「這兩筆是同一個
- * 真實客戶」的確認 —— 之後要「併過去」時以此為依據。共用客戶（本來就是
- * parent、被私帳案引用的那 15 個）天生同步，列出來看就好不用連結。
- * 名稱吻合的自動給建議（唯一候選才建議，多個不猜）。
+ * 🔴 2026-08-26 owner 拍板「把私帳的客戶都整合到 crm 系統裡面」→ 84 家私帳
+ * 客戶已併入 CRM，**客戶主檔只有一份**。所以本頁的主表＝「我用到的客戶」
+ * （都是 CRM 客戶，帶私帳/公司各自的案數）；錢仍分帳本（金額的門綁在專案的
+ * entity，不在客戶）。
+ * 上半的「私帳專屬客戶＋連結對應」只在真的還有 entity='mine' 客戶時才出現
+ * （併完為空）—— 留著是防呆：又冒出私帳客戶時，這裡看得到也連得起來。
  * 同 projects/gear：入口由 .fin-nav-mine-only 指名門把關。
  */
 import { finSubviewBoot, esc, fmtNum, finToast } from '../fin-utils.js';
@@ -48,34 +50,48 @@ function _render() {
                        onclick="window._finCli.link('${m.id}','${m.suggest_id}')">採用</button> ${pick}`
             : pick;
     };
+    // 併完之後 mine 為空 —— 這一區整段不畫（留碼是防呆，見檔頭）
+    const mineBlock = d.mine.length ? `
+        <div style="background:#2a2320;border:1px solid #7c5b2e;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+            <div style="color:#fbbf24;font-size:12px;margin-bottom:8px;">
+                還有 ${d.mine.length} 家私帳專屬客戶沒進 CRM 主檔（已連結 ${linked.length}・有建議 ${sugg.length}）</div>
+            <table class="crm-table" style="width:100%;font-size:12px;">
+                <thead><tr><th>私帳客戶</th><th style="text-align:right;">案數</th>
+                    <th>對應 CRM 客戶</th></tr></thead>
+                <tbody>${d.mine.map((m) => `
+                    <tr><td style="color:#e0e0e0;">${esc(m.short_name)}</td>
+                        <td style="text-align:right;color:#888;">${fmtNum(m.n_projects)}</td>
+                        <td class="fcl-link" data-id="${m.id}" style="overflow:visible;">${linkCell(m)}</td></tr>`).join('')}</tbody>
+            </table>
+        </div>` : '';
+
+    const both = d.shared.filter((s) => s.n_parent > 0).length;
     _c.innerHTML = `
         <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
             <h2 style="color:#eee;margin:0;font-size:18px;">👥 客戶管理</h2>
-            <span style="color:#888;font-size:12px;">我的客戶 ${d.mine.length}・已連結
-                <b style="color:#86efac;">${linked.length}</b>・有建議 ${sugg.length}・
-                共用（本來就在 CRM）${d.shared.length}</span>
+            <span style="color:#888;font-size:12px;">我用到的客戶 ${d.shared.length} 家・
+                其中 ${both} 家也有公司案・CRM 主檔共 ${d.crm.length} 家</span>
         </div>
+        ${mineBlock}
         <div style="max-height:calc(100vh - 300px);overflow-y:auto;background:#202020;border:1px solid #2e2e2e;border-radius:8px;">
         <table class="crm-table" style="width:100%;font-size:12px;">
             <thead><tr style="position:sticky;top:0;background:#202020;z-index:1;">
-                <th>我的客戶</th><th style="text-align:right;">案數</th>
-                <th>對應 CRM 客戶（連結，不搬資料）</th></tr></thead>
-            <tbody>${d.mine.map((m) => `
-                <tr><td style="color:#e0e0e0;">${esc(m.short_name)}</td>
-                    <td style="text-align:right;color:#888;">${fmtNum(m.n_projects)}</td>
-                    <td class="fcl-link" data-id="${m.id}" style="overflow:visible;">${linkCell(m)}</td></tr>`).join('')
-                || '<tr><td colspan="3" style="color:#666;padding:14px;">（沒有私帳客戶）</td></tr>'}</tbody>
+                <th>客戶</th><th>抬頭</th><th>統編</th>
+                <th style="text-align:right;">私帳案</th>
+                <th style="text-align:right;">公司案</th></tr></thead>
+            <tbody>${d.shared.map((s) => `
+                <tr><td style="color:#e0e0e0;">${esc(s.short_name)}</td>
+                    <td style="color:#9a9a9a;overflow:hidden;text-overflow:ellipsis;max-width:280px;white-space:nowrap;"
+                        title="${esc(s.full_name)}">${esc(s.full_name)}</td>
+                    <td style="color:#888;font-variant-numeric:tabular-nums;">${esc(s.tax_id)}</td>
+                    <td style="text-align:right;color:#c4b5fd;">${fmtNum(s.n_projects)}</td>
+                    <td style="text-align:right;color:${s.n_parent ? '#86efac' : '#4b5563'};">${s.n_parent ? fmtNum(s.n_parent) : '—'}</td>
+                </tr>`).join('')
+                || '<tr><td colspan="5" style="color:#666;padding:14px;">（私帳還沒有掛客戶的案子）</td></tr>'}</tbody>
         </table></div>
-        <div style="color:#ddd;font-size:12px;font-weight:600;margin:14px 0 6px;">
-            共用客戶（兩邊都有案，本來就是 CRM 客戶 —— 天生同步）</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            ${d.shared.map((s) => `<span style="background:#242424;border:1px solid #333;border-radius:12px;
-                padding:3px 10px;font-size:11px;color:#bbb;">${esc(s.short_name)}
-                <span style="color:#666;">${fmtNum(s.n_projects)} 案</span></span>`).join('')
-                || '<span style="color:#666;font-size:12px;">（無）</span>'}
-        </div>
         <div style="color:#666;font-size:11px;margin-top:10px;">
-            連結＝確認「這兩筆是同一個客戶」的對應，資料兩邊都不動。全部對應完之後要併回 CRM 再說一聲。</div>`;
+            客戶主檔與 CRM 統一（2026-08-26）——同一家客戶只有一筆資料，兩邊共用；
+            金額仍分帳本（私帳案的錢只有你看得到）。要改客戶資料到 CRM 的客戶管理改。</div>`;
 }
 
 const _fc = (window._finCli = window._finCli || {});

@@ -33,12 +33,13 @@ async def list_clients(
     am: str = Query(""),
     entity: str = Query(""),
 ):
-    """兩本帳（owner 2026-08-26「我的客戶先不要混到 crm」）：
-    - 預設（CRM 各呼叫端不帶參數）＝只回 parent 客戶 —— 私帳客戶從客戶管理
-      與所有下拉消失。
-    - entity=mine（私帳執行專案的客戶下拉）＝owner 的名錄：私帳客戶＋
-      「已被私帳案引用的 parent 客戶」（典藏那 15 個兩邊都有案的 —— 不給看
-      會逼 owner 建重複客戶）。要 mine full scope。
+    """客戶主檔（owner 2026-08-26 拍板「把私帳的客戶都整合到 crm 系統裡面」
+    → 84 家私帳客戶已併入 CRM，**兩本帳共用同一份名錄**）：
+    - 預設＝排除 entity='mine'（併完後為空；留著是防呆，萬一又冒出私帳客戶
+      不會靜靜混進 CRM 名錄）。
+    - entity=mine（私帳執行專案的客戶下拉）＝**整份主檔**：統一之後私帳要能
+      挑到任何一家 CRM 客戶（只回「私帳用過的」會逼 owner 重建已存在的客戶）。
+      仍要 mine full scope。
     """
     _require_db()
     if entity == "mine":
@@ -73,13 +74,7 @@ async def list_clients(
             .outerjoin(proj_sub, proj_sub.c.client_id == Client.id)
             .order_by(Client.updated_at.desc())
         )
-        if entity == "mine":
-            _mine_refs = (select(CrmProject.client_id)
-                          .where(CrmProject.entity == "mine",
-                                 CrmProject.client_id.isnot(None)))
-            query = query.where(or_(Client.entity == "mine",
-                                    Client.id.in_(_mine_refs)))
-        else:
+        if entity != "mine":
             query = query.where(not_mine(Client.entity))
         if status:
             query = query.where(Client.status == status)
@@ -105,14 +100,17 @@ async def list_clients(
 
 @router.post("/clients")
 async def create_client(req: ClientPayload, request: Request):
-    # 兩本帳寫入守衛：mine 客戶開給 mine full（owner=lv1+finance_mine，
-    # 私帳建案要能順手建自己的客戶）；parent 維持 Lv3
-    ent = req.entity or "parent"
-    if ent == "mine":
+    # 客戶主檔統一後（owner 2026-08-26）：一律建 **CRM 客戶**，不再有私帳專屬
+    # 客戶 —— 私帳建案順手建的客戶也直接進主檔（否則又開始分裂）。
+    # 🔴 寫入守衛因此放寬一格：帳本主人（lv1＋finance_mine）可以**建**客戶，
+    # 改/刪既有客戶仍是 Lv3 —— 建客戶是低風險（名稱/統編），而 owner 不是 Lv3
+    # 是刻意的（指名制），不放寬他就建不了案。
+    ent = "parent"
+    try:
+        _check_auth(request)
+    except HTTPException:
         from core.ledger import require_entity
         require_entity(request, "mine", level="full")
-    else:
-        _check_auth(request)
     _require_db()
     factory = await _get_factory()
 
@@ -348,6 +346,10 @@ async def mine_client_links(request: Request):
             select(CrmProject.client_id, _fn.count())
             .where(CrmProject.entity == "mine", CrmProject.client_id.isnot(None))
             .group_by(CrmProject.client_id))).all())
+        par_cnt = dict((await session.execute(
+            select(CrmProject.client_id, _fn.count())
+            .where(not_mine(CrmProject.entity), CrmProject.client_id.isnot(None))
+            .group_by(CrmProject.client_id))).all())
         mine_rows = (await session.execute(
             select(Client).where(Client.entity == "mine")
             .order_by(Client.short_name))).scalars().all()
@@ -367,9 +369,13 @@ async def mine_client_links(request: Request):
             "suggest_id": sug["id"] if sug else "",
             "suggest_name": sug["short_name"] if sug else "",
         })
+    # 私帳用到的 CRM 客戶（統一主檔後這就是主表；mine 併完為空）
     shared = [{"id": c.id, "short_name": c.short_name,
-               "n_projects": int(mine_cnt.get(c.id, 0))}
+               "full_name": c.full_name or "", "tax_id": c.tax_id or "",
+               "n_projects": int(mine_cnt.get(c.id, 0)),
+               "n_parent": int(par_cnt.get(c.id, 0))}
               for c in parent_rows if c.id in mine_cnt]
+    shared.sort(key=lambda x: -x["n_projects"])
     return {"mine": mine, "crm": parents, "shared": shared}
 
 

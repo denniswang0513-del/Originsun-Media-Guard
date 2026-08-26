@@ -135,7 +135,7 @@ function _renderShell() {
             <div style="display:grid;grid-template-columns:2fr 1.4fr 1fr 1fr 1fr;gap:8px;">
                 <label style="color:#888;font-size:11px;">專案名稱*<input class="crm-input" id="fpc-name"></label>
                 <label style="color:#888;font-size:11px;">客戶<select class="crm-input" id="fpc-client"><option value="">— 未定 —</option></select></label>
-                <label style="color:#888;font-size:11px;">或新客戶<input class="crm-input" id="fpc-newclient" placeholder="（建私帳客戶）"></label>
+                <label style="color:#888;font-size:11px;">或新客戶<input class="crm-input" id="fpc-newclient" placeholder="（建 CRM 客戶）"></label>
                 <label style="color:#888;font-size:11px;">案碼<input class="crm-input" id="fpc-code" placeholder="例 2026051"></label>
                 <label style="color:#888;font-size:11px;">結案日<input class="crm-input" type="date" id="fpc-close"></label>
                 <label style="color:#888;font-size:11px;">營收(含稅)<input class="crm-input" type="number" id="fpc-contract"></label>
@@ -515,8 +515,7 @@ _fp.create = async () => {
     if (box.style.display === 'none') return;
     if (!_clients) {
         try {
-            // owner 的名錄（owner 2026-08-26「我的客戶先不要混到 crm」）：
-            // 私帳客戶＋已被私帳案引用的 CRM 客戶（後者標註，避免建重複）
+            // 客戶主檔（統一到 CRM 之後 entity=mine 回的就是整份主檔）
             _clients = (await crmFetch('/clients?entity=mine')).clients || [];
         } catch (e) {
             _clients = [];   // 下拉是選配，載不到仍可建案 —— 但失敗要出聲
@@ -524,7 +523,7 @@ _fp.create = async () => {
         }
         const sel = document.getElementById('fpc-client');
         sel.innerHTML = '<option value="">— 未定 —</option>' + _clients
-            .map((c) => `<option value="${c.id}">${esc(c.short_name)}${(c.entity || 'parent') === 'mine' ? '' : '（CRM）'}</option>`).join('');
+            .map((c) => `<option value="${c.id}">${esc(c.short_name)}</option>`).join('');
     }
     document.getElementById('fpc-name').focus();
     // 費率欄只在代開發票時出現（預設 8，可逐案調）
@@ -547,10 +546,11 @@ _fp.createSave = async (btn) => {
     try {
         let clientId = g('fpc-client') || null;
         if (g('fpc-newclient')) {
-            // 建私帳客戶（entity=mine：不進 CRM 客戶管理，之後確認對應再併）
+            // 建客戶＝直接進 CRM 主檔（owner 2026-08-26「把私帳的客戶都整合到
+            // crm 系統裡面」—— 再建私帳專屬客戶就又分裂了）
             const nc = await crmFetch('/clients', {
                 method: 'POST',
-                body: JSON.stringify({ short_name: g('fpc-newclient'), entity: 'mine' }),
+                body: JSON.stringify({ short_name: g('fpc-newclient') }),
             });
             clientId = nc.client.id;
             _clients = null;      // 名錄變了，下次打開重抓
