@@ -62,6 +62,7 @@ from core.finance_logic import (
     local_day,
     map_account,
     paired_expense_category,
+    restate_revenue_accrual,
     merge_cf,
     merge_pnl,
     month_of,
@@ -357,12 +358,16 @@ async def compute_live(session, months, inputs=None, adv=None,
             f"清冊在期購置 {_cap_reg:,} —— 流出較多＝清冊外的小額配件其實是費用"
             "（把那些列改類別，或補進器材清冊）")
     if _mp is not None:
+        # 私帳的損益表＝**權責**（owner 的年度表就是這個口徑：本期結案案的合約
+        # 合計，2026-08-27 三年逐一核對，5,928,950／6,955,899／8,103,670 全中）。
+        # 現金認列數留在 by_collection.cash 與警語裡，兩個口徑都看得到、可互推。
         _cash_rev = int(pnl["revenue"]["total"] or 0)
         _acc = _mp["accrual_revenue"]
+        pnl = restate_revenue_accrual(pnl, _acc, cash_revenue=_cash_rev,
+                                      n_months=len(months))
         warn["messages"].append(
-            f"損益表為現金基礎（入帳認列 {_cash_rev:,}）；權責口徑（本期結案案"
-            f"合約合計）為 {_acc:,}，差 {_acc - _cash_rev:+,} ＝ 應收/跨期收款的"
-            "變動 —— 逐案權責看「執行專案」（你的年度表就是那個口徑）。")
+            f"損益表為權責基礎（本期結案案合約合計 {_acc:,}）；同期現金入帳為 "
+            f"{_cash_rev:,}，差 {_acc - _cash_rev:+,} ＝ 應收/跨期收款的變動。")
     bs = build_balance_sheet(
         as_of, bank_lines=bank_lines,
         receivable_total=(_mp["receivable"] if _mp is not None

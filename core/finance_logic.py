@@ -1539,6 +1539,56 @@ def _finalize_pnl(prim: dict, n_months: int) -> dict:
     }
 
 
+def restate_revenue_accrual(pnl: dict, accrual_revenue: int, *,
+                            cash_revenue: int | None = None, n_months: int = 0) -> dict:
+    """把一份已 finalize 的損益表換成**權責**營收，並讓底下所有小計/比率跟著走。
+
+    為什麼要有這支：私帳的年度表是權責口徑（本期**結案**案的合約合計），
+    系統原本逐筆按入帳日認列＝現金口徑。同一本帳、同一段期間，兩個口徑差的是
+    應收與跨期收款 —— 不是誰算錯（2026-08-27 三年逐一核對，權責數字與 owner
+    的表分毫不差：5,928,950／6,955,899／8,103,670）。
+
+    只換營收那一列與其下游（毛利/營益/稅前/稅後/比率/月均）；成本、費用、
+    業外、稅一律不動。現金認列數保留在 by_collection.cash，兩個口徑都看得到。
+    """
+    out = dict(pnl)
+    rev = dict(pnl.get("revenue") or {})
+    cash = int(rev.get("total") or 0) if cash_revenue is None else int(cash_revenue)
+    total = int(accrual_revenue or 0)
+    by_col = dict(rev.get("by_collection") or {})
+    by_col["cash"] = cash
+    rev.update({"total": total, "basis": "accrual",
+                "lines": [{"key": "accrual", "label": "本期結案案（合約合計）",
+                           "amount": total}] if total else [],
+                "by_collection": by_col})
+    out["revenue"] = rev
+    cost_total = int((pnl.get("cost") or {}).get("total") or 0)
+    opex_total = int((pnl.get("opex") or {}).get("total") or 0)
+    gross = total - cost_total
+    operating = gross - opex_total
+    pretax = operating + int((pnl.get("non_operating") or {}).get("total") or 0)
+    net = pretax - int((pnl.get("tax") or {}).get("income_tax") or 0)
+    out["gross"] = {"amount": gross, "rate": _pct(gross, total)}
+    out["operating"] = {"amount": operating, "rate": _pct(operating, total),
+                        "expense_rate": _pct(opex_total, total)}
+    out["pretax"] = pretax
+    out["net"] = {"amount": net, "rate": _pct(net, total)}
+    n = n_months or _implied_months(pnl, cash)
+    if n:
+        avg = dict(pnl.get("monthly_avg") or {})
+        avg["revenue"] = round(total / n)
+        out["monthly_avg"] = avg
+    return out
+
+
+def _implied_months(pnl: dict, cash_revenue: int) -> int:
+    """從既有 monthly_avg 反推期間月數（caller 沒給 n_months 時的備援）。"""
+    avg = int((pnl.get("monthly_avg") or {}).get("revenue") or 0)
+    if not avg or not cash_revenue:
+        return 0
+    return max(1, round(cash_revenue / avg))
+
+
 def merge_pnl(parts, n_months: int) -> dict:
     """多份已 finalize 的損益表（鎖定月快照 + live 期間）合併為一份。
 

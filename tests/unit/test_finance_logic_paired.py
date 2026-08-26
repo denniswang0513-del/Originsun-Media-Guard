@@ -56,3 +56,19 @@ def test_expense_side_appears_once_in_the_single_iteration_source():
     assert len(rows) == 1
     _src, _row, group, label, amount = rows[0]
     assert (group, label, amount) == ("營業成本-費", "專案雜支", 300_000)
+
+
+def test_restate_revenue_accrual_moves_the_whole_chain():
+    """換成權責營收時，毛利/營益/稅前/稅後/比率/月均要一起走 —— 只換一列會前後矛盾。"""
+    from core.finance_logic import restate_revenue_accrual
+    entries = [_entry("公司_專案", deposit=1_000_000, eid="in"),
+               _entry("公司_專案", expense=300_000, eid="out")]
+    pnl = build_pnl(MONTHS, cash_entries=entries, cat_map=CAT_MAP, accounts=ACCOUNTS)
+    out = restate_revenue_accrual(pnl, 1_500_000, cash_revenue=1_000_000, n_months=12)
+    assert out["revenue"]["total"] == 1_500_000
+    assert out["revenue"]["by_collection"]["cash"] == 1_000_000, "現金口徑要留著可互推"
+    assert out["gross"]["amount"] == 1_200_000           # 1.5M − 300k 成本
+    assert out["net"]["amount"] == 1_200_000
+    assert out["monthly_avg"]["revenue"] == 125_000      # 1.5M / 12
+    assert out["cost"]["total"] == pnl["cost"]["total"], "成本不該被動到"
+    assert out["gross"]["rate"] == 80.0
