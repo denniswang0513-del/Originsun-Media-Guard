@@ -1876,9 +1876,15 @@ async def list_cash_entries(
     q: str = Query(""), category: str = Query(""),
     project_id: str = Query(""),
     bank_account_id: str = Query(""), direction: str = Query(""),
+    date_from: str = Query(""), date_to: str = Query(""),
+    sub_item: str = Query(""),
+    amount_min: str = Query(""), amount_max: str = Query(""),
     entity: str = Query(""),
 ):
-    """direction：'in'＝只看有收入的、'out'＝只看有支出的、空＝全部。"""
+    """direction：'in'＝只看有收入的、'out'＝只看有支出的、空＝全部。
+    date_from/date_to＝含當日；amount_min/max 比的是該列**金額量級**
+    （收入或 支出＋匯費，取大者）—— owner 2026-08-26「可以篩選日期區間、
+    分類、子項目、金額」。"""
     # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
     # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
     ent = require_entity(request, entity, level="full")
@@ -1898,6 +1904,26 @@ async def list_cash_entries(
                                     CrmCashEntry.category == ""))
         elif category:
             query = query.where(CrmCashEntry.category == category)
+        if sub_item:
+            query = query.where(CrmCashEntry.sub_item == sub_item)
+        if date_from:
+            d = _parse_shoot_date(date_from)
+            if d:
+                query = query.where(CrmCashEntry.entry_date >= d)
+        if date_to:
+            d = _parse_shoot_date(date_to)
+            if d:
+                from datetime import timedelta
+                query = query.where(CrmCashEntry.entry_date < d + timedelta(days=1))
+        if amount_min or amount_max:
+            from sqlalchemy import func as _fn
+            _amt = _fn.greatest(
+                _fn.coalesce(CrmCashEntry.deposit, 0),
+                _fn.coalesce(CrmCashEntry.expense, 0) + _fn.coalesce(CrmCashEntry.bank_fee, 0))
+            if (amount_min or "").strip().lstrip("-").isdigit():
+                query = query.where(_amt >= int(amount_min))
+            if (amount_max or "").strip().lstrip("-").isdigit():
+                query = query.where(_amt <= int(amount_max))
         if project_id:
             query = query.where(CrmCashEntry.project_id == project_id)
         if bank_account_id:

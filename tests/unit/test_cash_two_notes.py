@@ -59,6 +59,23 @@ def test_cashbook_has_two_note_columns_with_inline_edit():
         assert f"_cashInline(event,'${{e.id}}',{f})" in js, f
 
 
+def test_cashbook_filters_date_sub_amount():
+    """篩選列（owner 2026-08-26「可以篩選日期區間、分類、子項目、金額」）：
+    日期含當日（迄日 +1 天開區間）、子項目精確、金額比**量級**
+    （收入或 支出＋匯費 取大者 —— 比單邊會讓收款列全篩不到）。"""
+    src = _read("routers/crm/finance.py")
+    fn = src.split("async def list_cash_entries(")[1].split("\n@router")[0]
+    for frag in ("date_from", "timedelta(days=1)", "sub_item == sub_item", "_fn.greatest"):
+        assert frag in fn, frag
+    html = _read("frontend/tabs/crm/crm-cashbook.html")
+    for i in ("cash-filter-from", "cash-filter-to", "cash-filter-sub",
+              "cash-filter-amin", "cash-filter-amax"):
+        assert i in html, i
+    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    for k in ("date_from", "date_to", "sub_item", "amount_min", "amount_max"):
+        assert f"params.set('{k}'" in js, k
+
+
 def test_category_cell_edits_with_searchable_select():
     """類別欄點按填寫（owner 2026-08-26）＝格內可搜尋下拉 —— 自由文字會打錯字
     長出新類別，選單保證值域；選定即存單欄。"""

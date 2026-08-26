@@ -19,9 +19,11 @@ let _clientList = [];
 let _bankAccounts = null;   // 財務模組銀行帳戶；null = 載入失敗/未啟用（優雅降級：不顯示帳戶欄）
 let _selectedId = null;
 let _editingId = null;
-let _filters = { q: '', category: '', bank_account_id: '', direction: '' };
+let _filters = { q: '', category: '', bank_account_id: '', direction: '',
+                 date_from: '', date_to: '', sub_item: '', amount_min: '', amount_max: '' };
 let _csvFile = null;
 const _catVocab = new Set();   // 類別篩選器的詞彙（只增不減，見 _syncFilterOptions）
+const _subVocab = new Set();   // 子項目篩選器的詞彙（同上規則）
 
 function _toggleAdvanceFields(isAdv) {
     var ids = ['cash-advance-section', 'cash-field-project', 'cash-field-invoice', 'cash-field-bankfee'];
@@ -39,6 +41,11 @@ async function loadEntries({ render = true, cards = true } = {}) {
     if (_filters.category)        params.set('category', _filters.category);
     if (_filters.bank_account_id) params.set('bank_account_id', _filters.bank_account_id);
     if (_filters.direction)       params.set('direction', _filters.direction);
+    if (_filters.date_from)       params.set('date_from', _filters.date_from);
+    if (_filters.date_to)         params.set('date_to', _filters.date_to);
+    if (_filters.sub_item)        params.set('sub_item', _filters.sub_item);
+    if (_filters.amount_min)      params.set('amount_min', _filters.amount_min);
+    if (_filters.amount_max)      params.set('amount_max', _filters.amount_max);
     params.set('entity', _pinEntity());
     // 🔴 卡片摘要只跟 entity 有關，與 q/類別/帳戶/方向這些篩選無關 ——
     // loadEntries 綁在搜尋框、兩個下拉、每個帳戶頁籤與 8 條存檔後路徑上，
@@ -144,6 +151,13 @@ function _syncFilterOptions() {
         cat.innerHTML = '<option value="">全部類別</option>'
             + `<option value="__none__"${_filters.category === '__none__' ? ' selected' : ''}>（未分類）</option>`
             + used.map(v => `<option value="${_esc(v)}"${v === _filters.category ? ' selected' : ''}>${_esc(v)}</option>`).join('');
+    }
+    const sub = document.getElementById('cash-filter-sub');
+    if (sub) {
+        _entries.forEach(e => { if (e.sub_item) _subVocab.add(e.sub_item); });
+        sub.innerHTML = '<option value="">全部子項目</option>'
+            + [..._subVocab].sort().map(v => `<option value="${_esc(v)}"${v === _filters.sub_item ? ' selected' : ''}>${_esc(v)}</option>`).join('');
+        sub._syncSsValue?.();     // 已被升級成可搜尋時，重灌選項後同步顯示字
     }
     _renderAcctTabs();
 }
@@ -928,9 +942,20 @@ export async function initCrmCashbookTab() {
         _filters.q = e.target.value; clearTimeout(_t);
         _t = setTimeout(() => loadEntries({ cards: false }), 300);   // 搜尋不影響卡片餘額
     });
-    // 兩個篩選下拉同理 —— 卡片餘額只跟 entity 有關
+    // 篩選控件同理 —— 卡片餘額只跟 entity 有關
     document.getElementById('cash-filter-cat').addEventListener('change', e => { _filters.category = e.target.value; loadEntries({ cards: false }); });
     document.getElementById('cash-filter-dir').addEventListener('change', e => { _filters.direction = e.target.value; loadEntries({ cards: false }); });
+    document.getElementById('cash-filter-from')?.addEventListener('change', e => { _filters.date_from = e.target.value; loadEntries({ cards: false }); });
+    document.getElementById('cash-filter-to')?.addEventListener('change', e => { _filters.date_to = e.target.value; loadEntries({ cards: false }); });
+    document.getElementById('cash-filter-sub')?.addEventListener('change', e => { _filters.sub_item = e.target.value; loadEntries({ cards: false }); });
+    // 金額打字用同一個 debounce（連打數字別每鍵打一次 API）
+    for (const [id, key] of [['cash-filter-amin', 'amount_min'], ['cash-filter-amax', 'amount_max']]) {
+        document.getElementById(id)?.addEventListener('input', e => {
+            _filters[key] = e.target.value.trim();
+            clearTimeout(_t);
+            _t = setTimeout(() => loadEntries({ cards: false }), 350);
+        });
+    }
 
     document.getElementById('cash-btn-add').addEventListener('click', () => openModal());
     document.getElementById('cash-btn-import').addEventListener('click', openImportModal);

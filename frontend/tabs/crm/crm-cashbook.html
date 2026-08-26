@@ -11,6 +11,15 @@
     <option value="in">只看收入</option>
     <option value="out">只看支出</option>
   </select>
+  <!-- 日期區間／子項目／金額（owner 2026-08-26「可以篩選日期區間、分類、子項目、金額」）-->
+  <input id="cash-filter-from" type="date" class="crm-input" title="起日（含）" style="width:132px;">
+  <span style="color:#666;">–</span>
+  <input id="cash-filter-to" type="date" class="crm-input" title="迄日（含）" style="width:132px;">
+  <select id="cash-filter-sub" class="crm-select">
+    <option value="">全部子項目</option>
+  </select>
+  <input id="cash-filter-amin" type="number" class="crm-input" placeholder="金額 ≥" title="金額下限（收入或支出的量級）" style="width:88px;">
+  <input id="cash-filter-amax" type="number" class="crm-input" placeholder="金額 ≤" title="金額上限" style="width:88px;">
   <div class="crm-toolbar-right">
     <!-- 對帳與匯入 CSV 本來是兩顆 —— 對使用者是同一件事（把外面的帳弄進來），
          合成一個入口，兩者都在展開的面板裡。 -->
