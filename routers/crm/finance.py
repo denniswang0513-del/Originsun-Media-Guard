@@ -1775,12 +1775,12 @@ async def _sync_mine_project_received(session, project_id, delta: int):
     p = await _get_mine_project(session, project_id)
     if not p:
         return
+    from core.ledger_project import receivable_status
     received = int(p.amount_received or 0) + int(delta)
     contract = int(p.contract_amount or 0)
     p.amount_received = received
     p.amount_receivable = contract - received
-    p.payment_status = ("全額到帳" if contract > 0 and received >= contract
-                        else "部分到帳" if received > 0 else "未到帳")
+    p.payment_status = receivable_status(contract, received)
     p.updated_at = _now()
 
 

@@ -114,6 +114,17 @@ def apply_source_fee(contract: int, d: dict) -> dict:
     return d
 
 
+def receivable_status(contract: int, received: int) -> str:
+    """收款狀態判定 —— 收支同步（_sync_mine_project_received）與執行專案的
+    新增/更新端點共用同一條（owner 2026-08-26 實測：新增端點沒初始化
+    amount_receivable，新案永遠不進應收帳款）。"""
+    if contract > 0 and received >= contract:
+        return "全額到帳"
+    if received > 0:
+        return "部分到帳"
+    return "未到帳"
+
+
 def compute(contract: int, d: dict) -> tuple:
     """(實收, 檢查)。算式正本 —— 前端與匯入腳本都只呼叫這支，不各算一份。"""
     net = (contract - d["outsource"] - d["invoice_fee"]

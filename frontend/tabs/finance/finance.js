@@ -88,7 +88,12 @@ export async function initFinanceTab() {
             if (btn && btn.offsetParent !== null) btn.click();
             return;
         }
+        // 切回財務 tab 一律自動重新整理（owner 2026-08-26）：
+        // 執行專案走自己的 refresh（有未存編修讓路的 dirty guard）；其他子視圖
+        // 整個重 render（它們是查看型，重畫＝重抓）；帳務內嵌模式按全域重新整理。
         if (_currentSubview === 'projects') window._finProjLedger?.refresh?.();
+        else if (_currentSubview) _showSubview(_currentSubview);
+        else if (_shellAllowed) document.getElementById('inv-global-refresh')?.click();
     });
 
     // 預設落地 = 📊 儀表板子視圖（帳務殼已初始化但隱藏，點帳務按鈕仍可切回）。

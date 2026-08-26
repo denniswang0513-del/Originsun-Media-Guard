@@ -388,6 +388,38 @@ def test_ledger_create_endpoint_guards():
     assert "code_of(" in fn
 
 
+def test_new_and_edited_cases_land_in_receivable():
+    """🔴 應收視圖讀**存欄** amount_receivable（收支同步是增量制，不替 NULL 補課）
+    —— 建立要初始化、營收改了要重算。2026-08-26 owner 實測：新增台新案不進
+    應收；清查發現 349 案 NULL、37 案部分到帳被靜靜漏掉。"""
+    from core.ledger_project import receivable_status
+    assert receivable_status(0, 0) == "未到帳"
+    assert receivable_status(100, 0) == "未到帳"
+    assert receivable_status(100, 40) == "部分到帳"
+    assert receivable_status(100, 100) == "全額到帳"
+    assert receivable_status(0, 50) == "部分到帳"      # 溢收（無營收）也要看得到
+    src = (ROOT / "routers/api_finance_projects.py").read_text(encoding="utf-8")
+    create = src.split("async def create_ledger_project(")[1].split("\n@router")[0]
+    assert "amount_receivable=contract or 0" in create and "amount_received=0" in create
+    upd = src.split("async def update_project_ledger(")[1].split("\n@router")[0]
+    assert "receivable_status(" in upd and "amount_receivable" in upd
+    fin = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
+    assert "receivable_status(contract, received)" in fin, "sync 與端點要共用同一條規則"
+
+
+def test_tab_switches_auto_refresh():
+    """切 tab 自動重新整理（owner 2026-08-26）：帳務內嵌視圖回訪呼叫 refresh
+    鉤子；頂層切回財務時子視圖重載（執行專案走 dirty-guard 的 refresh）。"""
+    inv = (ROOT / "frontend/tabs/crm/crm-invoices.js").read_text(encoding="utf-8")
+    for hook in ("window._payRefresh?.()", "window._cashRefresh?.()",
+                 "window._payableRefresh?.()"):
+        assert hook in inv, hook
+    fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
+    seg = fin.split("tab-changed")[1]
+    assert "_showSubview(_currentSubview)" in seg
+    assert "_finProjLedger?.refresh" in seg          # projects 保 dirty guard
+
+
 def test_code_note_has_exactly_one_parser():
     """案碼協定（notes 的 `案碼:XXX` 行）的解析器只有 core 那一份 ——
     行為驗證＋讀者都指向它。"""

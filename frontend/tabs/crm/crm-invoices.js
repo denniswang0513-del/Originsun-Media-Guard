@@ -1353,11 +1353,18 @@ export async function initCrmInvoicesTab() {
         document.getElementById(activeBtn)?.classList.add('active');
     }
 
-    document.getElementById('inv-view-invoices').addEventListener('click', () => _switchView(invView, 'inv-view-invoices'));
+    // 切視圖自動重新整理（owner 2026-08-26「切 tab 的時候可以自動重新整理」）：
+    // 各視圖 lazy-load 一次後是快取的 —— 回來時資料停在上次離開的樣子，在別的
+    // 視圖記的帳看不到。已載過的再點＝呼叫該視圖的 refresh 鉤子重抓。
+    document.getElementById('inv-view-invoices').addEventListener('click', () => {
+        _switchView(invView, 'inv-view-invoices');
+        loadInvoices();
+    });
 
     document.getElementById('inv-view-payments').addEventListener('click', async () => {
         if (_paymentsLoading) return;
         _switchView(payView, 'inv-view-payments');
+        if (_paymentsLoaded) { window._payRefresh?.(); return; }
         if (!_paymentsLoaded) {
             _paymentsLoading = true;
             try {
@@ -1377,6 +1384,7 @@ export async function initCrmInvoicesTab() {
     document.getElementById('inv-view-cashbook').addEventListener('click', async () => {
         if (_cashbookLoading) return;
         _switchView(cashView, 'inv-view-cashbook');
+        if (_cashbookLoaded) { window._cashRefresh?.(); return; }
         if (!_cashbookLoaded) {
             _cashbookLoading = true;
             try {
@@ -1396,6 +1404,7 @@ export async function initCrmInvoicesTab() {
     document.getElementById('inv-view-payables').addEventListener('click', async () => {
         if (_payablesLoading) return;
         _switchView(payablesView, 'inv-view-payables');
+        if (_payablesLoaded) { window._payableRefresh?.(); return; }
         if (!_payablesLoaded) {
             _payablesLoading = true;
             try {
