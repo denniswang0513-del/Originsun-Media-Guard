@@ -16,7 +16,9 @@
  */
 import { searchableSelect } from '../../tabs/crm/crm-utils.js';
 
-const MIN_OPTIONS = 8;
+// owner 2026-08-26「所有下拉選單都要可以搜尋」：門檻 8 → 4（案源這種 4 選項的
+// 也要能打字選）。2-3 個選項的（方向/是否/解析度）維持原生 —— 搜尋框比點兩下慢。
+const MIN_OPTIONS = 4;
 const SEL = 'select:not([data-searchable]):not([multiple]):not([data-no-search])';
 
 function _sweep() {

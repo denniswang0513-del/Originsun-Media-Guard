@@ -1,7 +1,7 @@
 /**
  * crm-cashbook.js — 收支明細子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today, autoFee, crmToast } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today, autoFee, crmToast, searchableSelect } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
@@ -272,7 +272,7 @@ function renderList() {
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
             <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
-            <div>${e.category ? _esc(e.category) : _NO_CAT_DOT}</div>
+            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}')">${e.category ? _esc(e.category) : _NO_CAT_DOT}</div>
             <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','sub_item')"
                  style="color:#9a9a9a;">${_esc(e.sub_item || '')}</div>
             <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','bank_memo')"
@@ -327,6 +327,44 @@ window._cashInline = (ev, id, f) => {
         else if (k.key === 'Escape') finish(false);
     });
     inp.addEventListener('blur', () => finish(true));
+};
+
+/** 類別欄點按填寫（owner 2026-08-26）：格子裡直接彈**可搜尋下拉**（類別 28 個，
+ *  純文字輸入會打錯字造成新類別 —— 選單保證值域），選定即存。
+ *  選項正本＝_CATEGORIES（loadOptions 從後端 /cash-entries/options 灌）。 */
+window._cashCatEdit = (ev, id) => {
+    ev.stopPropagation();
+    const cell = ev.currentTarget;
+    if (cell.querySelector('select,input')) return;
+    const e = _entries.find((x) => x.id === id);
+    if (!e) return;
+    const sel = document.createElement('select');
+    sel.className = 'crm-input';
+    sel.innerHTML = '<option value="">—</option>' + _CATEGORIES
+        .map((c) => `<option${c === e.category ? ' selected' : ''}>${_esc(c)}</option>`).join('');
+    cell.innerHTML = '';
+    cell.appendChild(sel);
+    searchableSelect(sel, { placeholder: '搜尋類別…' });
+    const inp = cell.querySelector('.ss-input');
+    if (inp) { inp.focus(); inp.addEventListener('click', (k) => k.stopPropagation()); }
+    let saved = false;
+    sel.addEventListener('change', async () => {
+        if (saved) return;
+        saved = true;
+        const v = sel.value;
+        try {
+            await _fetch(`/cash-entries/${id}`, {
+                method: 'PUT', body: JSON.stringify({ category: v }),
+            });
+            e.category = v;
+            crmToast('已儲存');
+        } catch (err) {
+            crmToast('儲存失敗：' + err.message);
+        }
+        renderList();
+    });
+    // 點到別處沒選 → 放棄編輯還原格子（stopPropagation 已擋掉整列選取）
+    if (inp) inp.addEventListener('blur', () => setTimeout(() => { if (!saved) renderList(); }, 200));
 };
 
 /** 刷卡金額：status='card' 的列（刷卡當下不動銀行，所以不算銀行支出）。 */

@@ -57,3 +57,23 @@ def test_cashbook_has_two_note_columns_with_inline_edit():
     assert "JSON.stringify({ [f]: v })" in fn, "自動儲存只送那一欄（部分更新）"
     for f in ("'sub_item'", "'bank_memo'", "'note'"):
         assert f"_cashInline(event,'${{e.id}}',{f})" in js, f
+
+
+def test_category_cell_edits_with_searchable_select():
+    """類別欄點按填寫（owner 2026-08-26）＝格內可搜尋下拉 —— 自由文字會打錯字
+    長出新類別，選單保證值域；選定即存單欄。"""
+    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    fn = js.split("window._cashCatEdit = (ev")[1].split("window._cashInline = (ev")[0]
+    assert "searchableSelect(sel" in fn
+    assert "JSON.stringify({" in fn and "category: v" in fn
+    assert "_cashCatEdit(event,'${e.id}')" in js
+
+
+def test_all_dropdowns_searchable_everywhere():
+    """「所有下拉選單都要可以搜尋」：門檻 4（案源這種 4 選項的也要）；
+    /my-ledger.html 是獨立頁沒載 app.js —— 要自己開 initSelectAutoUpgrade
+    （owner 截圖裡客戶下拉還是原生的就是這個漏）。"""
+    up = _read("frontend/js/shared/select-upgrade.js")
+    assert "MIN_OPTIONS = 4" in up
+    ml = _read("frontend/my-ledger.html")
+    assert "select-upgrade.js" in ml and "initSelectAutoUpgrade" in ml

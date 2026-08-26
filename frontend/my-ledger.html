@@ -137,6 +137,11 @@ async function mountLedger(me) {
         ]);
         $('app-view').innerHTML = html;
         await mod.initFinanceTab();
+        // 下拉自動升級成可搜尋（owner 2026-08-26「所有下拉選單都要可以搜尋」）。
+        // 主 SPA 由 app.js 開；本頁是獨立 HTML 沒載 app.js —— 之前整頁下拉都是
+        // 原生的就是漏了這行。MutationObserver 會涵蓋之後動態渲染的表單。
+        import('/js/shared/select-upgrade.js')
+            .then((m) => m.initSelectAutoUpgrade()).catch(() => {});
     } catch (e) {
         showNoperm('我的帳載入失敗：' + ((e && e.message) || e));
     }
