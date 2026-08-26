@@ -70,6 +70,14 @@ def _iso(s):
         return None
 
 
+# Sheet 上打錯的日期（owner 2026-08-27「依你建議調整」）。我沒有那份 Google Sheet 的
+# 寫入權，所以更正記在這裡 —— 有據可查、重跑結果一致。owner 什麼時候把 Sheet 改好，
+# 這幾條就可以刪掉（刪掉後結果不變，因為那時 Sheet 自己就是對的）。
+#   672/673：年份打成 2014（帳上 2024-03-14，個人_生活／信用卡回饋）
+#   3902：民國西元混寫 0114/12/21（帳上 2025-12-21，公司_器材 13,954）
+SHEET_DATE_FIXES = {672: "2024-03-14", 673: "2024-03-14", 3902: "2025-12-21"}
+
+
 def load_sheet(csv_path, header_row=15):
     """回傳 (可用列, 日期壞掉的列)。header_row 是 1-based 的表頭列號。"""
     rows = list(csv.reader(io.open(csv_path, encoding="utf-8")))
@@ -79,20 +87,29 @@ def load_sheet(csv_path, header_row=15):
         raw = (r[0] or "").strip()
         if not raw:
             continue
-        d = _iso(raw)
+        d = SHEET_DATE_FIXES.get(n) or _iso(raw)
         if not d or not ("2000-01-01" <= d <= "2099-12-31"):
             if any(x.strip() for x in r[2:6]):
                 bad.append({"row": n, "raw": raw, "summary": r[5].strip()[:30]})
             continue
         card, out_, in_ = _money(r[3]), _money(r[2]), _money(r[4])
-        out.append({
+        base = {
             "row": n, "date": d, "acct": r[1].strip(),
             "card": card, "out": out_, "in": in_,
             "amt": card or out_ or in_,
             "summary": (r[5].strip() or "（無摘要）")[:250],
             "memo": r[6].strip(),
             "book": r[7].strip(), "item": r[8].strip(), "sub": r[9].strip(),
-        })
+        }
+        # 一列同時填了支出與存入 → **拆成兩腳**（owner 2026-08-27「拆成兩列」）。
+        # 一列裝兩筆錢流，配對只認得到一邊，另一邊會永遠掛在「帳上有 Sheet 沒有」。
+        if out_ and in_:
+            a, b = dict(base), dict(base)
+            a.update({"in": 0, "amt": out_, "leg": "out"})
+            b.update({"out": 0, "amt": in_, "leg": "in"})
+            out.extend([a, b])
+            continue
+        out.append(base)
     return out, bad
 
 
@@ -129,14 +146,14 @@ def _fmt(x):
 
 
 async def run(csv_path, apply, prod, limit, report_csv=None,
-              sheet_wins=False, insert_missing=False):
+              sheet_wins=False, insert_missing=False, unknown_card=None):
     dbname, dsn = db_target(prod)
     print_target(dbname, apply)
     sheet, bad_dates = load_sheet(csv_path)
     # 一列同時填了支出與存入 → 那是兩筆錢流擠在一列，系統只會認一邊。不猜，列出來。
-    two_sided = [s for s in sheet if sum(1 for k in ("card", "out", "in") if s[k]) > 1]
-    print(f"Sheet 可用列 {len(sheet)}；日期壞掉的 {len(bad_dates)}；"
-          f"一列填兩個金額欄的 {len(two_sided)}")
+    two_sided = [s for s in sheet if s.get("leg")]
+    print(f"Sheet 可用列 {len(sheet)}（含拆腳）；日期壞掉的 {len(bad_dates)}；"
+          f"一列填兩個金額欄而被拆成兩腳的 {len(two_sided) // 2}")
 
     c = await connect(dsn)
     try:
@@ -231,7 +248,11 @@ async def run(csv_path, apply, prod, limit, report_csv=None,
                 name = CARD_ACCOUNTS.get(s["acct"], "")
                 cur = by_id.get(e["bank_account_id"] or "", {}).get("name", "")
                 if not name:
-                    card_unknown.append((s, e))
+                    # owner 指定過就跟著掛（2026-08-27：125 筆全部 → 富邦信用卡）
+                    if unknown_card and cur != unknown_card:
+                        card_fix.append((s, e, unknown_card, cur))
+                    elif not unknown_card:
+                        card_unknown.append((s, e))
                 elif cur != name:
                     card_fix.append((s, e, name, cur))
 
@@ -272,7 +293,8 @@ async def run(csv_path, apply, prod, limit, report_csv=None,
         dump("🔴 帳上有、Sheet 找不到", no_sheet,
              lambda e: f"{e['d']} {(e['expense'] or e['deposit'] or 0):>9,} "
                        f"{(e['summary'] or '')[:30]}  [{e['category'] or '（空）'}]")
-        dump("🔴 一列填了兩個金額欄（系統只認一邊）", two_sided, _fmt)
+        dump("🟡 一列填兩個金額欄（已拆成兩腳處理）", two_sided,
+             lambda t: _fmt(t) + f"  [{t['leg']} 腳]")
         dump("🔴 日期壞掉（Sheet）", bad_dates,
              lambda b: f"第 {b['row']} 列 日期「{b['raw']}」 {b['summary']}")
 
@@ -352,9 +374,6 @@ async def run(csv_path, apply, prod, limit, report_csv=None,
         if insert_missing and no_db:
             now = datetime.now(timezone.utc)
             for s in no_db:
-                if s in two_sided:
-                    print(f"  ⚠️ 第 {s['row']} 列同時有支出與存入 —— 不補（要你先拆成兩列）")
-                    continue
                 if s["card"]:
                     acct_id = (accts.get(CARD_ACCOUNTS.get(s["acct"], "")) or {}).get("id")
                     status, expense, deposit = "card", s["card"], None
@@ -391,7 +410,9 @@ if __name__ == "__main__":
                     help="衝突也照 Sheet 覆蓋（owner 要「完全同步」時才開）")
     ap.add_argument("--insert-missing", action="store_true",
                     help="Sheet 有帳上沒有的列補進系統（日期打錯的雙胞胎不補）")
+    ap.add_argument("--unknown-card",
+                    help="卡別不明那批全掛到這張卡（owner 指定後才用，別自己猜）")
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     asyncio.run(run(a.csv, a.apply, a.prod, a.limit, a.report_csv,
-                    a.sheet_wins, a.insert_missing))
+                    a.sheet_wins, a.insert_missing, a.unknown_card))
