@@ -1855,7 +1855,7 @@
 
 
 
-/* ── 收支明細：11 欄的寬度分配 ────────────────────────────────
+/* ── 收支明細：12 欄的寬度分配 ────────────────────────────────
    帳戶/子項目/雙備註（銀行資訊＋附註）加齊後欄位變多，全部 flex:1 均分會讓
    日期換行、金額被截斷。這裡把固定寬度的欄（日期/金額/類別/子項目/帳戶）釘死，
    剩下的空間給會長的文字欄按比例分。
@@ -1882,20 +1882,22 @@
    後面每一欄的欄寬規則整排錯位。 */
 #cash-list-panel:not(.has-card) .cash-col-card { display: none; }
 #cash-list-panel .acct-header > span:nth-child(6),
-#cash-list-body .crm-row > *:nth-child(6):not(.crm-kebab-wrap) { flex: 0 0 84px; }                      /* 類別 */
+#cash-list-body .crm-row > *:nth-child(6):not(.crm-kebab-wrap) { flex: 0 0 78px; }                      /* 類別（公司/個人/家用…） */
 #cash-list-panel .acct-header > span:nth-child(7),
-#cash-list-body .crm-row > *:nth-child(7):not(.crm-kebab-wrap) { flex: 0 0 96px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* 子項目（owner 2026-08-26：獨立一欄） */
+#cash-list-body .crm-row > *:nth-child(7):not(.crm-kebab-wrap) { flex: 0 0 92px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* 項目 */
 #cash-list-panel .acct-header > span:nth-child(8),
-#cash-list-body .crm-row > *:nth-child(8):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; color: #7a7a7a; }  /* 銀行資訊（機器來源） */
+#cash-list-body .crm-row > *:nth-child(8):not(.crm-kebab-wrap) { flex: 0 0 92px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* 子項目 */
 #cash-list-panel .acct-header > span:nth-child(9),
-#cash-list-body .crm-row > *:nth-child(9):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; color: #b9b9b9; }  /* 附註（手寫） */
+#cash-list-body .crm-row > *:nth-child(9):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; color: #7a7a7a; }  /* 銀行資訊（機器來源） */
 #cash-list-panel .acct-header > span:nth-child(10),
-#cash-list-body .crm-row > *:nth-child(10):not(.crm-kebab-wrap) { flex: 1 1 0; min-width: 0; text-align: left; }    /* 專案 */
+#cash-list-body .crm-row > *:nth-child(10):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; color: #b9b9b9; }  /* 附註（手寫） */
 #cash-list-panel .acct-header > span:nth-child(11),
-#cash-list-body .crm-row > *:nth-child(11):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 發票 */
+#cash-list-body .crm-row > *:nth-child(11):not(.crm-kebab-wrap) { flex: 1 1 0; min-width: 0; text-align: left; }    /* 專案 */
 #cash-list-panel .acct-header > span:nth-child(12),
-#cash-list-body .crm-row > *:nth-child(12):not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
+#cash-list-body .crm-row > *:nth-child(12):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 發票 */
 #cash-list-panel .acct-header > span:nth-child(13),
+#cash-list-body .crm-row > *:nth-child(13):not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
+#cash-list-panel .acct-header > span:nth-child(14),
 #cash-list-body .crm-row > .crm-kebab-wrap { flex: 0 0 36px; }
 
 /* 行內可編輯格（子項目/銀行資訊/附註）：hover 給出「這裡可以點」的暗示 */

@@ -20,10 +20,11 @@ let _bankAccounts = null;   // 財務模組銀行帳戶；null = 載入失敗/�
 let _selectedId = null;
 let _editingId = null;
 let _filters = { q: '', category: '', bank_account_id: '', direction: '',
-                 date_from: '', date_to: '', sub_item: '', amount_min: '', amount_max: '' };
+                 date_from: '', date_to: '', sub_item: '', amount_min: '', amount_max: '',
+                 book: '', item: '' };   // 三層分類（owner 2026-08-27）
+let _taxonomy = { books: [], items_by_book: {}, sub_items: [] };
 let _csvFile = null;
-const _catVocab = new Set();   // 類別篩選器的詞彙（只增不減，見 _syncFilterOptions）
-const _subVocab = new Set();   // 子項目篩選器的詞彙（同上規則）
+const _subVocab = new Set();   // 子項目篩選器的詞彙（只增不減，見 _syncFilterOptions）
 
 function _toggleAdvanceFields(isAdv) {
     var ids = ['cash-advance-section', 'cash-field-project', 'cash-field-invoice', 'cash-field-bankfee'];
@@ -44,6 +45,8 @@ async function loadEntries({ render = true, cards = true } = {}) {
     if (_filters.date_from)       params.set('date_from', _filters.date_from);
     if (_filters.date_to)         params.set('date_to', _filters.date_to);
     if (_filters.sub_item)        params.set('sub_item', _filters.sub_item);
+    if (_filters.book)            params.set('book', _filters.book);
+    if (_filters.item)            params.set('item', _filters.item);
     if (_filters.amount_min)      params.set('amount_min', _filters.amount_min);
     if (_filters.amount_max)      params.set('amount_max', _filters.amount_max);
     params.set('entity', _pinEntity());
@@ -114,7 +117,8 @@ const _sorter = createSortable({
         deposit:  e => e.deposit || 0,
         expense:  e => _bankOut(e),
         card:     e => _cardAmt(e),
-        category: e => (e.category || '').toLowerCase(),
+        book:     e => (e.book || '').toLowerCase(),
+        item:     e => (e.item || '').toLowerCase(),
         sub_item: e => (e.sub_item || '').toLowerCase(),
         bank_memo: e => (e.bank_memo || '').toLowerCase(),
         project:  e => (e.project_name || '').toLowerCase(),
@@ -139,25 +143,34 @@ function _acctName(id) {
 /** 篩選器選項依**實際資料**生成 —— 寫死的清單會跟使用中的類別脫節，
  *  選了卻篩不到東西（原本的「請款/收支」兩個選項就是這樣，永遠 0 筆）。 */
 function _syncFilterOptions() {
-    const cat = document.getElementById('cash-filter-cat');
-    if (cat) {
-        // 🔴 詞彙要**累積**，不能每次拿當下篩出來的結果重建 —— 那樣選了「專案雜支」
-        // 之後選單裡就只剩「專案雜支」一個選項，再也切不到別的類別（2026-08-20 實測：
-        // 從專案雜支切轉存變成整個篩選被清空）。首次載入是未篩選的，詞彙那時就齊了；
-        // 之後只增不減。
-        _entries.forEach(e => { if (e.category) _catVocab.add(e.category); });
-        const used = [..._catVocab].sort();
-        // __none__＝後端的「未分類」快篩（category IS NULL/''）——卡單匯入的殘尾用
-        cat.innerHTML = '<option value="">全部類別</option>'
-            + `<option value="__none__"${_filters.category === '__none__' ? ' selected' : ''}>（未分類）</option>`
-            + used.map(v => `<option value="${_esc(v)}"${v === _filters.category ? ' selected' : ''}>${_esc(v)}</option>`).join('');
+    // 三層分類的值域由後端 options 的 taxonomy 給（正本 core.cash_taxonomy）；
+    // 子項目沿用「詞彙只增不減」那條（篩選之後選單不該跟著縮水）。
+    const bookSel = document.getElementById('cash-filter-book');
+    if (bookSel) {
+        const books = _taxonomy.books || [];
+        bookSel.innerHTML = '<option value="">全部類別</option>'
+            + `<option value="__none__"${_filters.book === '__none__' ? ' selected' : ''}>（未分類）</option>`
+            + books.map(b => `<option value="${_esc(b)}"${b === _filters.book ? ' selected' : ''}>${_esc(b)}</option>`).join('');
+        bookSel._syncSsValue?.();
+    }
+    const itemSel = document.getElementById('cash-filter-item');
+    if (itemSel) {
+        // 連動：選了類別就只列它底下的項目；沒選就列全部（去重）
+        const map = _taxonomy.items_by_book || {};
+        const items = _filters.book && map[_filters.book]
+            ? map[_filters.book]
+            : [...new Set(Object.values(map).flat())].sort();
+        itemSel.innerHTML = '<option value="">全部項目</option>'
+            + items.map(v => `<option value="${_esc(v)}"${v === _filters.item ? ' selected' : ''}>${_esc(v)}</option>`).join('');
+        itemSel._syncSsValue?.();
     }
     const sub = document.getElementById('cash-filter-sub');
     if (sub) {
+        (_taxonomy.sub_items || []).forEach(v => _subVocab.add(v));
         _entries.forEach(e => { if (e.sub_item) _subVocab.add(e.sub_item); });
         sub.innerHTML = '<option value="">全部子項目</option>'
             + [..._subVocab].sort().map(v => `<option value="${_esc(v)}"${v === _filters.sub_item ? ' selected' : ''}>${_esc(v)}</option>`).join('');
-        sub._syncSsValue?.();     // 已被升級成可搜尋時，重灌選項後同步顯示字
+        sub._syncSsValue?.();
     }
     _renderAcctTabs();
 }
@@ -286,7 +299,10 @@ function renderList() {
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
             <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
-            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}')">${e.category ? _esc(e.category) : _NO_CAT_DOT}</div>
+            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}')"
+                 title="${_esc(e.category || '')}">${e.category ? _esc(e.book) : _NO_CAT_DOT}</div>
+            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}')"
+                 style="color:#c9c9c9;" title="${_esc(e.category || '')}">${_esc(e.item || '')}</div>
             <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','sub_item')"
                  style="color:#9a9a9a;">${_esc(e.sub_item || '')}</div>
             <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','bank_memo')"
@@ -349,39 +365,63 @@ window._cashInline = (ev, id, f) => {
 window._cashCatEdit = (ev, id) => {
     ev.stopPropagation();
     const cell = ev.currentTarget;
-    if (cell.querySelector('select,input')) return;
+    if (cell.querySelector('select')) return;
     const e = _entries.find((x) => x.id === id);
     if (!e) return;
-    const sel = document.createElement('select');
-    sel.className = 'crm-input';
-    sel.innerHTML = '<option value="">—</option>' + _CATEGORIES
-        .map((c) => `<option${c === e.category ? ' selected' : ''}>${_esc(c)}</option>`).join('');
-    // 🔴 選單面板會被列的 overflow:hidden 裁掉（crm.css 那條 ellipsis 規則；
-    // DOM 上仍「可見」）—— 開編輯時解掉該列的裁切，重畫自然復原
+    const books = _taxonomy.books || [];
+    const map = _taxonomy.items_by_book || {};
+    // 🔴 選單面板會被列的 overflow:hidden 裁掉（crm.css 那條 ellipsis 規則）
     cell.closest('.crm-row')?.classList.add('cash-ed-open');
-    cell.innerHTML = '';
-    cell.appendChild(sel);
-    searchableSelect(sel, { placeholder: '搜尋類別…' });
-    const inp = cell.querySelector('.ss-input');
-    if (inp) { inp.focus(); inp.addEventListener('click', (k) => k.stopPropagation()); }
+    cell.innerHTML = '<span class="cash-cat-edit" style="display:flex;gap:4px;">'
+        + '<select class="crm-input cash-cat-book" style="min-width:78px;"></select>'
+        + '<select class="crm-input cash-cat-item" style="min-width:92px;"></select></span>';
+    const bSel = cell.querySelector('.cash-cat-book');
+    const iSel = cell.querySelector('.cash-cat-item');
+    bSel.innerHTML = '<option value="">類別…</option>'
+        + books.map((b) => `<option${b === e.book ? ' selected' : ''}>${_esc(b)}</option>`).join('');
+    const fillItems = () => {
+        const list = map[bSel.value] || [];
+        iSel.innerHTML = '<option value="">（無項目）</option>'
+            + list.map((i) => `<option${i === e.item ? ' selected' : ''}>${_esc(i)}</option>`).join('');
+        iSel.style.display = list.length ? '' : 'none';
+    };
+    fillItems();
     let saved = false;
-    sel.addEventListener('change', async () => {
+    const save = async () => {
         if (saved) return;
+        const book = bSel.value;
+        if (!book) return;
+        const list = map[book] || [];
+        if (list.length && !iSel.value) return;      // 有項目可選就等他選完
         saved = true;
-        const v = sel.value;
+        const category = iSel.value ? book + '_' + iSel.value : book;
         try {
             await _fetch(`/cash-entries/${id}`, {
-                method: 'PUT', body: JSON.stringify({ category: v }),
+                method: 'PUT',
+                body: JSON.stringify({ category, item: iSel.value || '' }),
             });
-            e.category = v;
+            e.category = category;
+            e.book = book;
+            e.item = iSel.value || '';
             crmToast('已儲存');
         } catch (err) {
             crmToast('儲存失敗：' + err.message);
         }
         renderList();
-    });
-    // 點到別處沒選 → 放棄編輯還原格子（stopPropagation 已擋掉整列選取）
-    if (inp) inp.addEventListener('blur', () => setTimeout(() => { if (!saved) renderList(); }, 200));
+    };
+    bSel.addEventListener('change', () => { fillItems(); save(); });
+    iSel.addEventListener('change', save);
+    [bSel, iSel].forEach((el) => el.addEventListener('click', (k) => k.stopPropagation()));
+    searchableSelect(bSel, { placeholder: '搜尋類別…' });
+    searchableSelect(iSel, { placeholder: '搜尋項目…' });
+    const first = cell.querySelector('.ss-input');
+    if (first) {
+        first.focus();
+        first.addEventListener('blur', () => setTimeout(() => {
+            // 點到別處又沒選完 → 放棄編輯還原格子
+            if (!saved && !cell.contains(document.activeElement)) renderList();
+        }, 250));
+    }
 };
 
 /** 刷卡金額：status='card' 的列（刷卡當下不動銀行，所以不算銀行支出）。 */
@@ -413,6 +453,7 @@ async function _loadCashOptions() {
         const o = await _fetch('/cash-entries/options?entity=' + _pinEntity());
         if (o.project_link_categories?.length) _LINKABLE = o.project_link_categories;
         if (o.categories?.length) _CATEGORIES = o.categories;
+        if (o.taxonomy) _taxonomy = o.taxonomy;     // 三層分類（正本 core.cash_taxonomy）
     } catch (_) { /* 用 fallback，不擋畫面 */ }
 }
 
@@ -467,7 +508,8 @@ function renderDetail(e) {
     if (e.deposit) html += prop('收入', '$' + _fmtNum(e.deposit));
     if (e.expense) html += prop('支出', '$' + _fmtNum(e.expense));
     html += prop('內容', e.summary);
-    if (e.category) html += prop('類別', e.category);
+    if (e.book) html += prop('類別', e.book);
+    if (e.item) html += prop('項目', e.item);
     if (e.sub_item) html += prop('子項目', e.sub_item);
     if (e.bank_memo) html += prop('銀行資訊', e.bank_memo);
     if (e.note) html += prop('附註', e.note);
@@ -943,7 +985,14 @@ export async function initCrmCashbookTab() {
         _t = setTimeout(() => loadEntries({ cards: false }), 300);   // 搜尋不影響卡片餘額
     });
     // 篩選控件同理 —— 卡片餘額只跟 entity 有關
-    document.getElementById('cash-filter-cat').addEventListener('change', e => { _filters.category = e.target.value; loadEntries({ cards: false }); });
+    document.getElementById('cash-filter-book').addEventListener('change', e => {
+        _filters.book = e.target.value;
+        // 換類別時清掉項目（原項目多半不屬於新類別，留著會篩出空白）
+        _filters.item = '';
+        _filters.category = e.target.value === '__none__' ? '__none__' : '';
+        loadEntries({ cards: false });
+    });
+    document.getElementById('cash-filter-item').addEventListener('change', e => { _filters.item = e.target.value; loadEntries({ cards: false }); });
     document.getElementById('cash-filter-dir').addEventListener('change', e => { _filters.direction = e.target.value; loadEntries({ cards: false }); });
     document.getElementById('cash-filter-from')?.addEventListener('change', e => { _filters.date_from = e.target.value; loadEntries({ cards: false }); });
     document.getElementById('cash-filter-to')?.addEventListener('change', e => { _filters.date_to = e.target.value; loadEntries({ cards: false }); });

@@ -28,6 +28,7 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 normalize_invoice_status, passthrough_commission)
 from core.auth import check_logged_in
 from sqlalchemy import and_ as _sa_and
+from core.cash_taxonomy import SEP as _TAX_SEP, split_category as _tax_split
 from core.ledger import not_mine as _cli_not_mine, require_entity
 from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES
 from core.project_match import prepare as prepare_projects
@@ -1692,7 +1693,11 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "") -> dict:
         "expense": e.expense, "claim": e.claim, "deposit": e.deposit,
         "summary": e.summary or "", "note": e.note or "",
         "bank_memo": getattr(e, "bank_memo", "") or "",
-        "category": e.category or "", "item": e.item or "",
+        "category": e.category or "",
+        # 三層（book/item 由複合鍵拆出；item 欄有值時以欄為準 —— 匯入時填的
+        # 比拆字串可靠）。sub_item 是第三層。
+        "book": _tax_split(e.category)[0],
+        "item": (e.item or "") or _tax_split(e.category)[1],
         "sub_item": e.sub_item or "", "payee": e.payee or "",
         "status": e.status or "",
         "has_invoice": e.has_invoice, "invoice_number": e.invoice_number or "",
@@ -1867,8 +1872,30 @@ async def cash_entry_options(request: Request, entity: str = Query("")):
     from core.project_link import MINE_CASH_LINK_PREFIX
     linkable = ([c for c in cats if c.startswith(MINE_CASH_LINK_PREFIX)]
                 if ent == "mine" else list(_PROJECT_LINK_CATEGORIES))
+    # 三層分類樹（owner 2026-08-27「類別、項目、子項目」）——
+    # 儲存仍是複合鍵 category，畫面拆三層，規則正本 core.cash_taxonomy。
+    #
+    # 🔴 值域＝**這本帳實際用到的類別** ∪ 對映表裡同一類別底下的（尚未用過的
+    # 新類別也要挑得到）。不能直接餵整份 finance_category_map：那是兩本帳共用的，
+    # 母公司的平面類別（行政/薪資/交際應酬…沒有底線）會各自變成一個「類別」，
+    # 私帳的類別下拉就從 5 個爆成 37 個（2026-08-27 實測）。
+    from core.cash_taxonomy import book_of, taxonomy
+    async with factory() as session:
+        used = list((await session.execute(
+            select(CrmCashEntry.category).where(
+                CrmCashEntry.entity == ent,
+                CrmCashEntry.category.isnot(None),
+                CrmCashEntry.category != "").distinct())).scalars())
+        subs = list((await session.execute(
+            select(CrmCashEntry.sub_item).where(
+                CrmCashEntry.entity == ent,
+                CrmCashEntry.sub_item.isnot(None),
+                CrmCashEntry.sub_item != "").distinct())).scalars())
+    books_used = {book_of(c) for c in used}
+    tax_cats = used + [c for c in cats if book_of(c) in books_used and c not in used]
     return {"categories": cats,
-            "project_link_categories": linkable}
+            "project_link_categories": linkable,
+            "taxonomy": taxonomy(tax_cats, subs)}
 
 
 @router.get("/cash-entries", dependencies=[Depends(money_dep)])
@@ -1878,7 +1905,7 @@ async def list_cash_entries(
     project_id: str = Query(""),
     bank_account_id: str = Query(""), direction: str = Query(""),
     date_from: str = Query(""), date_to: str = Query(""),
-    sub_item: str = Query(""),
+    sub_item: str = Query(""), book: str = Query(""), item: str = Query(""),
     amount_min: str = Query(""), amount_max: str = Query(""),
     entity: str = Query(""),
 ):
@@ -1907,6 +1934,14 @@ async def list_cash_entries(
             query = query.where(CrmCashEntry.category == category)
         if sub_item:
             query = query.where(CrmCashEntry.sub_item == sub_item)
+        # 三層分類的前兩層：儲存是複合鍵，篩選在鍵上做前綴/後綴比對
+        # （規則正本 core.cash_taxonomy —— 別在這裡自己拼字串）
+        if book:
+            query = query.where(or_(CrmCashEntry.category == book,
+                                    CrmCashEntry.category.like(book + _TAX_SEP + "%")))
+        if item:
+            query = query.where(or_(CrmCashEntry.item == item,
+                                    CrmCashEntry.category.like("%" + _TAX_SEP + item)))
         if date_from:
             d = _parse_shoot_date(date_from)
             if d:

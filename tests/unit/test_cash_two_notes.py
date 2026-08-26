@@ -76,13 +76,14 @@ def test_cashbook_filters_date_sub_amount():
         assert f"params.set('{k}'" in js, k
 
 
-def test_category_cell_edits_with_searchable_select():
-    """類別欄點按填寫（owner 2026-08-26）＝格內可搜尋下拉 —— 自由文字會打錯字
-    長出新類別，選單保證值域；選定即存單欄。"""
+def test_category_cell_edits_with_cascading_selects():
+    """類別欄點按填寫（owner 2026-08-26 起）＝格內下拉；2026-08-27 起改兩層
+    （類別→項目，組回複合鍵存）—— 自由文字會打錯字長出新類別，選單保證值域。
+    詳細行為釘在 test_cash_taxonomy.py。"""
     js = _read("frontend/tabs/crm/crm-cashbook.js")
-    fn = js.split("window._cashCatEdit = (ev")[1].split("window._cashInline = (ev")[0]
-    assert "searchableSelect(sel" in fn
-    assert "JSON.stringify({" in fn and "category: v" in fn
+    fn = js.split("window._cashCatEdit = (ev")[1].split("/** 刷卡金額")[0]
+    assert "searchableSelect(bSel" in fn and "searchableSelect(iSel" in fn
+    assert "JSON.stringify({ category, item: iSel.value" in fn
     assert "_cashCatEdit(event,'${e.id}')" in js
 
 
