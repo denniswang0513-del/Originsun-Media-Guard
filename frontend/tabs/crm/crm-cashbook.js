@@ -1,7 +1,7 @@
 /**
  * crm-cashbook.js — 收支明細子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today, autoFee } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today, autoFee, crmToast } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
@@ -109,6 +109,7 @@ const _sorter = createSortable({
         card:     e => _cardAmt(e),
         category: e => (e.category || '').toLowerCase(),
         sub_item: e => (e.sub_item || '').toLowerCase(),
+        bank_memo: e => (e.bank_memo || '').toLowerCase(),
         project:  e => (e.project_name || '').toLowerCase(),
         invoice:  e => (e.invoice_title || '').toLowerCase(),
         account:  e => _acctName(e.bank_account_id).toLowerCase(),
@@ -272,8 +273,12 @@ function renderList() {
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
             <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
             <div>${e.category ? _esc(e.category) : _NO_CAT_DOT}</div>
-            <div style="color:#9a9a9a;">${_esc(e.sub_item || '')}</div>
-            <div title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}</div>
+            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','sub_item')"
+                 style="color:#9a9a9a;">${_esc(e.sub_item || '')}</div>
+            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','bank_memo')"
+                 title="${_esc(_flat(e.bank_memo, ' '))}">${_esc(_flat(e.bank_memo, ' · '))}</div>
+            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','note')"
+                 title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}</div>
             <div>${_esc(e.project_name || '')}</div>
             <div>${_esc(e.invoice_title || '')}</div>
             <div>${_esc(_acctName(e.bank_account_id))}</div>
@@ -282,6 +287,47 @@ function renderList() {
     `;
     }).join('');
 }
+
+/** 列表格子行內編輯（owner 2026-08-26「直接點按就編輯、自動儲存」）：
+ *  子項目／銀行資訊／附註三欄。點格→input→Enter/失焦即存（Esc 取消），
+ *  PUT 部分更新只送那一欄（exclude_unset —— 不會洗掉其他欄）。
+ *  stopPropagation：格子的點擊不能觸發整列的選取/開詳情。 */
+window._cashInline = (ev, id, f) => {
+    ev.stopPropagation();
+    const cell = ev.currentTarget;
+    if (cell.querySelector('input')) return;       // 已在編輯中
+    const e = _entries.find((x) => x.id === id);
+    if (!e) return;
+    const old = e[f] || '';
+    cell.innerHTML = `<input class="crm-input" style="width:100%;font-size:12px;padding:2px 6px;">`;
+    const inp = cell.querySelector('input');
+    inp.value = old;                                // 不走 innerHTML 插值（引號/尖括號安全）
+    inp.focus();
+    inp.select();
+    inp.addEventListener('click', (k) => k.stopPropagation());
+    let done = false;
+    const finish = async (save) => {
+        if (done) return;
+        done = true;
+        const v = inp.value.trim();
+        if (!save || v === (old || '').trim()) { renderList(); return; }
+        try {
+            await _fetch(`/cash-entries/${id}`, {
+                method: 'PUT', body: JSON.stringify({ [f]: v }),
+            });
+            e[f] = v;
+            crmToast('已儲存');
+        } catch (err) {
+            crmToast('儲存失敗：' + err.message);
+        }
+        renderList();
+    };
+    inp.addEventListener('keydown', (k) => {
+        if (k.key === 'Enter') finish(true);
+        else if (k.key === 'Escape') finish(false);
+    });
+    inp.addEventListener('blur', () => finish(true));
+};
 
 /** 刷卡金額：status='card' 的列（刷卡當下不動銀行，所以不算銀行支出）。 */
 function _cardAmt(e) {
@@ -368,7 +414,8 @@ function renderDetail(e) {
     html += prop('內容', e.summary);
     if (e.category) html += prop('類別', e.category);
     if (e.sub_item) html += prop('子項目', e.sub_item);
-    if (e.note) html += prop('備註', e.note);
+    if (e.bank_memo) html += prop('銀行資訊', e.bank_memo);
+    if (e.note) html += prop('附註', e.note);
 
     html += prop('帳戶', _acctName(e.bank_account_id));
     if (e.bank_fee) html += prop('匯費', '$' + _fmtNum(e.bank_fee));
@@ -533,7 +580,8 @@ function _buildEditFields(currentBankAccountId, currentInvoiceId) {
         {name:'summary', label:'內容', type:'text'},
         {name:'category', label:'類別', type:'select', options:catOpts},
         {name:'sub_item', label:'子項目', type:'text'},
-        {name:'note', label:'備註', type:'text'},
+        {name:'bank_memo', label:'銀行資訊', type:'text'},
+        {name:'note', label:'附註', type:'text'},
         {name:'project_id', label:'專案', type:'select', options:projectOpts},
         {name:'invoice_id', label:'發票', type:'select', options:invoiceOpts},
         {name:'bank_fee', label:'匯費', type:'number'},

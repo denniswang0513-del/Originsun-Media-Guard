@@ -179,7 +179,8 @@ async def apply_card_statement(payload: CardImportApply, request: Request,
                 id=uuid.uuid4().hex, entity=ent, entry_date=d,
                 expense=int(r.amount),
                 summary=(r.note or "（卡單）")[:250],
-                note="[卡單匯入]",
+                # 雙備註（2026-08-26）：note 留給人手寫；卡單來源由 status='card'
+                # ＋created_at 說明，不再寫「[卡單匯入]」標記汙染附註欄
                 category=r.category or None,
                 item=item[1] if len(item) > 1 else None,
                 status="card", has_invoice=0,

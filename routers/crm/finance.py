@@ -1690,6 +1690,7 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "") -> dict:
         "entry_date": e.entry_date.isoformat() if e.entry_date else None,
         "expense": e.expense, "claim": e.claim, "deposit": e.deposit,
         "summary": e.summary or "", "note": e.note or "",
+        "bank_memo": getattr(e, "bank_memo", "") or "",
         "category": e.category or "", "item": e.item or "",
         "sub_item": e.sub_item or "", "payee": e.payee or "",
         "status": e.status or "",
@@ -1912,6 +1913,7 @@ async def list_cash_entries(
                                     CrmCashEntry.sub_item.ilike(ql),
                                     CrmCashEntry.payee.ilike(ql),
                                     CrmCashEntry.note.ilike(ql),
+                                    CrmCashEntry.bank_memo.ilike(ql),
                                     CrmCashEntry.invoice_number.ilike(ql)))
         rows = (await session.execute(query)).all()
     return {"entries": [_to_cash_dict(r[0], r[1] or "", r[2] or "") for r in rows], "total": len(rows)}

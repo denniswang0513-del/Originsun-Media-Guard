@@ -761,7 +761,11 @@ class CrmCashEntry(Base):
     claim = Column(Integer, nullable=True)                       # 請款
     deposit = Column(Integer, nullable=True)                     # 存入
     summary = Column(String(255), nullable=False)                # 摘要
-    note = Column(Text, nullable=True)                           # 附註
+    note = Column(Text, nullable=True)                           # 附註（使用者手寫）
+    # 銀行/卡單那側原始資訊（分期餘額、商家溢出行、跨轉摘要…）—— owner 2026-08-26
+    # 「像原本表那樣有兩個備註欄：一個銀行帳戶本來的資訊、一個我的附註」。
+    # 機器來源進這欄，note 留給人。
+    bank_memo = Column(Text, nullable=True)
     category = Column(String(32), nullable=True)                 # 類別：請款/收支/轉存
     item = Column(String(64), nullable=True)                     # 項目：專案/設備耗材/行政/轉存
     sub_item = Column(String(64), nullable=True)                 # 子項目

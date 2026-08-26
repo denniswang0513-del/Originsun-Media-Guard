@@ -704,6 +704,7 @@ class CashEntryPayload(BaseModel):
     deposit: Optional[int] = None
     summary: Optional[str] = None
     note: str = ""
+    bank_memo: str = ""       # 銀行/卡單原始資訊（note＝使用者手寫附註）
     category: str = ""
     item: str = ""
     sub_item: str = ""
