@@ -16,7 +16,7 @@ def test_norm_detail_drops_default_fee_and_unknown_source():
     案源走白名單（亂字串不進 meta）。"""
     d = norm_detail({"source": "路邊撿的", "fee_pct": DEFAULT_FEE_PCT})
     assert "source" not in d and "fee_pct" not in d
-    assert set(SOURCES) == {"自接", "源日", "代開發票"}
+    assert set(SOURCES) == {"自接", "源日", "代開發票", "執行業務所得"}
 
 
 def test_agency_fee_is_contract_times_pct():
@@ -86,6 +86,23 @@ def test_agency_fee_composition():
     assert d["tax_fee"] + d["buy_invoice"] == d["invoice_fee"]
     net, _ = compute(82000, d)
     assert net == 82000 - 6560               # 只扣代辦費一次
+
+
+def test_professional_income_withholding_auto():
+    """執行業務所得（owner 2026-08-26「新增一個執行業務所得的項目自動算」）：
+    源頭代扣＝所得扣繳 10%（單次稅額 ≤2,000 免扣）＋二代健保 2.11%
+    （單次 <20,000 免扣）。42,000 → 4,200＋886＝5,086（典藏媒體顧問實帳）。
+    「自接」自可選清單移除（歷史值仍有效，白名單保留）。"""
+    from core.ledger_project import (SELECTABLE_SOURCES, SOURCES,
+                                     apply_source_fee, withholding)
+    assert withholding(42000) == 5086
+    assert withholding(20000) == 422          # 稅 2,000 免扣；健保 422 照收
+    assert withholding(19999) == 0            # 兩門檻皆未達
+    assert withholding(100000) == 10000 + 2110
+    d = apply_source_fee(42000, norm_detail({"source": "執行業務所得"}))
+    assert d["personal_tax"] == 5086
+    assert "自接" not in SELECTABLE_SOURCES and "自接" in SOURCES
+    assert "執行業務所得" in SELECTABLE_SOURCES
 
 
 def test_owner_can_write_own_book_but_parent_stays_admin_only():

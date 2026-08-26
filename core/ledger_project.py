@@ -48,10 +48,31 @@ def income_items(settings: dict | None = None) -> list:
     return [str(x) for x in items if str(x).strip()] if items else list(DEFAULT_INCOME_ITEMS)
 
 
-# 案源（owner 2026-08-25）：源日＝現金收款；代開發票＝營收 × 服務費率的代辦費
-# （預設 8%，191 個歷史案實證全部 8.00%；逐案可調）。自接＝中性。
-SOURCES = ("自接", "源日", "代開發票")
+# 案源（owner 2026-08-25/26）：源日＝現金收款；代開發票＝營收 × 服務費率的
+# 代辦費（預設 8%，191 個歷史案實證全部 8.00%；逐案可調）；執行業務所得＝
+# 源頭代扣自動算（見 apply_source_fee）。
+# 🔴 自接＝歷史值（361 案），**不再可選**（owner 2026-08-26「下拉把自接移除」）
+# —— 留在 SOURCES 白名單讓舊案的 meta 不被 norm_detail 洗掉，UI 下拉用
+# SELECTABLE_SOURCES。
+SOURCES = ("自接", "源日", "代開發票", "執行業務所得")
+SELECTABLE_SOURCES = ("源日", "代開發票", "執行業務所得")
 DEFAULT_FEE_PCT = 8.0
+
+# 執行業務所得的源頭代扣（典藏媒體顧問實帳驗證：42,000 → 4,200＋886＝5,086）
+WITHHOLD_TAX_PCT = 10.0          # 所得扣繳；單次稅額 ≤ 2,000 免扣
+WITHHOLD_TAX_EXEMPT = 2000
+NHI_PCT = 2.11                   # 二代健保補充保費；單次 < 20,000 免扣
+NHI_MIN_PAYMENT = 20000
+
+
+def withholding(contract: int) -> int:
+    """執行業務所得單次給付的源頭代扣合計（所得扣繳＋二代健保）。"""
+    c = int(contract or 0)
+    tax = round(c * WITHHOLD_TAX_PCT / 100)
+    if tax <= WITHHOLD_TAX_EXEMPT:
+        tax = 0
+    nhi = round(c * NHI_PCT / 100) if c >= NHI_MIN_PAYMENT else 0
+    return tax + nhi
 
 # 案碼協定：匯入/新增都把 `案碼:XXX` 寫進 notes（前綴不同：[私帳匯入]/[私帳新增]），
 # 收支回掛與撞碼防線都靠它。
@@ -111,14 +132,36 @@ def apply_source_fee(contract: int, d: dict) -> dict:
         d["invoice_fee"] = round(c * pct / 100)
         d["tax_fee"] = round(c / 1.05 * 0.05)
         d["buy_invoice"] = d["invoice_fee"] - d["tax_fee"]
+    elif d.get("source") == "執行業務所得":
+        # 個人稅款＝源頭代扣自動算（owner 2026-08-26「新增一個執行業務所得的
+        # 項目自動算」）；應收基準同步吃到（expected_cash_in 減 personal_tax）
+        d["personal_tax"] = withholding(contract)
     return d
 
 
-def receivable_status(contract: int, received: int) -> str:
+def expected_cash_in(contract: int, d: dict) -> int:
+    """這一案**實際會匯進來**的錢 —— 應收與收款狀態都以此為基準，不是營收。
+
+    源頭代扣的錢永遠不會進帳，掛在應收上就是永遠清不掉的殘尾
+    （owner 2026-08-26：「那個是代扣勞保，本來就要扣掉的」）：
+    - 個人稅款（personal_tax）＝執行業務所得的源頭代扣。已對帳實證：
+      42,000 × 10%（所得扣繳）＋ 42,000 × 2.11%（二代健保補充保費）
+      ＝ 4,200 ＋ 886 ＝ 5,086，與典藏媒體顧問案的個人稅款分毫吻合；
+      全庫 0 筆「收滿又記稅」的自繳反例。五月報稅退回的所得稅走獨立的
+      「綜合所得稅退稅」案，不回沖到本案。
+    - 代開發票的代辦費（invoice_fee）＝代開業者匯款前先扣走。
+    """
+    base = int(contract or 0) - int(d.get("personal_tax") or 0)
+    if d.get("source") == "代開發票":
+        base -= int(d.get("invoice_fee") or 0)
+    return base
+
+
+def receivable_status(expected: int, received: int) -> str:
     """收款狀態判定 —— 收支同步（_sync_mine_project_received）與執行專案的
-    新增/更新端點共用同一條（owner 2026-08-26 實測：新增端點沒初始化
-    amount_receivable，新案永遠不進應收帳款）。"""
-    if contract > 0 and received >= contract:
+    新增/更新端點共用同一條。expected＝expected_cash_in（不是營收 ——
+    2026-08-26 之前用營收當基準，34 個源頭代扣案永遠「部分到帳」）。"""
+    if expected > 0 and received >= expected:
         return "全額到帳"
     if received > 0:
         return "部分到帳"

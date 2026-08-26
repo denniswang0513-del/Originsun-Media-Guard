@@ -112,9 +112,10 @@ function _renderShell() {
                 <label style="color:#888;font-size:11px;">結案日<input class="crm-input" type="date" id="fpc-close"></label>
                 <label style="color:#888;font-size:11px;">營收(含稅)<input class="crm-input" type="number" id="fpc-contract"></label>
                 <label style="color:#888;font-size:11px;">案源<select class="crm-input" id="fpc-source">
-                    <option value="">—</option><option>自接</option>
+                    <option value="">—</option>
                     <option value="源日">源日（現金收款）</option>
-                    <option value="代開發票">代開發票（扣服務費）</option></select></label>
+                    <option value="代開發票">代開發票（扣服務費）</option>
+                    <option value="執行業務所得">執行業務所得（自動代扣）</option></select></label>
                 <label style="color:#888;font-size:11px;" id="fpc-fee-wrap" hidden>服務費率 %<input class="crm-input" type="number" id="fpc-feepct" value="8" step="0.1"></label>
             </div>
             <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
@@ -313,7 +314,17 @@ function _renderDetail() {
                         <tr><td style="color:#bbb;">案源</td>
                             <td><select class="crm-input fpl-num" id="fpl-source" style="width:100%;">
                                 <option value="">—</option>
-                                ${(d.sources || []).map((s) => `<option value="${esc(s)}"${det.source === s ? ' selected' : ''}>${s === '源日' ? '源日（現金收款）' : s === '代開發票' ? '代開發票（自動代辦費）' : s}</option>`).join('')}
+                                ${(() => {
+                                    // 自接＝歷史值不再可選 —— 但舊案選著它時要就地補一個
+                                    // 選項，否則畫面顯示成空、存檔會把值洗掉
+                                    const label = (s) => s === '源日' ? '源日（現金收款）'
+                                        : s === '代開發票' ? '代開發票（自動代辦費）'
+                                        : s === '執行業務所得' ? '執行業務所得（自動代扣）'
+                                        : s === '自接' ? '自接（歷史）' : s;
+                                    const list = [...(d.sources || [])];
+                                    if (det.source && !list.includes(det.source)) list.unshift(det.source);
+                                    return list.map((s) => `<option value="${esc(s)}"${det.source === s ? ' selected' : ''}>${label(s)}</option>`).join('');
+                                })()}
                             </select></td></tr>
                         <tr id="fpl-fee-row">
                             <td style="color:#bbb;">服務費率 %</td>
@@ -385,22 +396,24 @@ function _renderDetail() {
         el.addEventListener('input', () => { _dirty = true; _liveSum(); });
     });
     // 案源規則（正本在後端 apply_source_fee，這裡只是即時預覽同一條式子）：
-    // 代開發票 → 代辦費 = round(營收 × 費率)，欄位鎖住；其他案源恢復手填。
+    // 代開發票 → 代辦費三欄自動、鎖住；執行業務所得 → 個人稅款自動（源頭代扣
+    // 10%＋二代健保 2.11%，含免扣門檻）、鎖住；其他案源恢復手填。
     const _syncFee = () => {
         const src = document.getElementById('fpl-source')?.value;
         const feeEl = document.getElementById('fpl-c-invoice_fee');
         const row = document.getElementById('fpl-fee-row');
         if (!feeEl || !row) return;
         const isAgency = src === '代開發票';
+        const isPro = src === '執行業務所得';
         row.style.display = isAgency ? '' : 'none';
         feeEl.disabled = isAgency;
         feeEl.title = isAgency ? '案源＝代開發票：代辦費＝營收×費率，自動計算' : '';
         const taxEl = document.getElementById('fpl-c-tax_fee');
         const buyEl = document.getElementById('fpl-c-buy_invoice');
         [taxEl, buyEl].forEach((el) => { if (el) el.disabled = isAgency; });
+        const c = Number(document.getElementById('fpl-contract')?.value) || 0;
         if (isAgency) {
             // 同後端 apply_source_fee：代辦費=營收×費率；稅金=未稅×5%；買發票=差額
-            const c = Number(document.getElementById('fpl-contract')?.value) || 0;
             const pct = Number(document.getElementById('fpl-feepct')?.value) || 8;
             const fee = Math.round(c * pct / 100);
             const tax = Math.round(c / 1.05 * 0.05);
@@ -408,6 +421,19 @@ function _renderDetail() {
             if (taxEl) taxEl.value = tax || '';
             if (buyEl) buyEl.value = (fee - tax) || '';
             _liveSum();
+        }
+        const ptEl = document.getElementById('fpl-c-personal_tax');
+        if (ptEl) {
+            ptEl.disabled = isPro;
+            ptEl.title = isPro ? '案源＝執行業務所得：源頭代扣 10%＋二代健保 2.11%，自動計算' : '';
+            if (isPro) {
+                // 同後端 withholding：稅額 ≤2,000 免扣；單次 <20,000 免二代健保
+                let tax = Math.round(c * 0.10);
+                if (tax <= 2000) tax = 0;
+                const nhi = c >= 20000 ? Math.round(c * 0.0211) : 0;
+                ptEl.value = (tax + nhi) || '';
+                _liveSum();
+            }
         }
     };
     ['fpl-source', 'fpl-feepct', 'fpl-contract'].forEach((id) => {

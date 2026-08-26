@@ -30,8 +30,9 @@ from fastapi import APIRouter, HTTPException, Request
 from config import load_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
-from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, SOURCES,
-                                 SUM_KEYS, apply_source_fee, code_of, compute,
+from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT,
+                                 SELECTABLE_SOURCES, SUM_KEYS, apply_source_fee,
+                                 code_of, compute, expected_cash_in,
                                  income_items, norm_detail, receivable_status)
 from core.schemas import LedgerDetailPayload, LedgerProjectCreate
 from routers.crm._shared import _fmt_day
@@ -212,8 +213,9 @@ async def create_ledger_project(payload: LedgerProjectCreate, request: Request,
             # 🔴 應收要在建立時就初始化 —— 應收視圖讀的是存起來的
             # amount_receivable（收支同步是增量制，不會替 NULL 補課）。
             # 漏掉的話新案永遠不進應收帳款（owner 2026-08-26 實測）。
+            # 基準＝實際會進帳的錢（營收−源頭代扣，見 expected_cash_in）。
             amount_received=0,
-            amount_receivable=contract or 0,
+            amount_receivable=expected_cash_in(contract, d),
             payment_status="未到帳",
             notes=f"[私帳新增] 案碼:{code}" if code else "[私帳新增]",
             created_at=_now(), updated_at=_now(),
@@ -261,7 +263,8 @@ async def project_ledger_detail(project_id: str, request: Request,
             "notes": p.notes or "",
         },
         "income_items": income_items(load_settings()),
-        "sources": list(SOURCES), "default_fee_pct": DEFAULT_FEE_PCT,
+        # 下拉只給可選的（自接＝歷史值不再可選；舊案的值由前端就地補一個選項）
+        "sources": list(SELECTABLE_SOURCES), "default_fee_pct": DEFAULT_FEE_PCT,
         "cost_fields": [{"key": k, "label": lb} for k, lb in COST_FIELDS],
         "entries": [{
             "id": e.id, "date": _fmt_day(e.entry_date), "summary": e.summary,
@@ -299,10 +302,6 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         contract = data.pop("contract_amount", None)
         if contract is not None:
             p.contract_amount = int(contract)
-            # 營收變了 → 應收與收款狀態跟著走（應收=營收−已收；同 sync 規則）
-            _recv = int(p.amount_received or 0)
-            p.amount_receivable = int(contract) - _recv
-            p.payment_status = receivable_status(int(contract), _recv)
         # 結案日：owner 的流程是「先整理專案再記帳」，日期在這張表就要能改。
         # 空字串＝清空（未結案）。日期慣例走 _parse_shoot_date（UTC 午夜）。
         if "close_date" in data:
@@ -330,6 +329,12 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         d = apply_source_fee(int(p.contract_amount or 0), d)
         d = norm_detail(d)          # 再正規化一次（清掉 0 值工項）
         p.ledger_detail = d
+        # 營收或代扣成本（個人稅款/代辦費）動了 → 應收與收款狀態一律重算
+        # （基準＝實際會進帳的錢；規則正本 expected_cash_in，與收支同步同一條）
+        _recv = int(p.amount_received or 0)
+        _exp = expected_cash_in(int(p.contract_amount or 0), d)
+        p.amount_receivable = _exp - _recv
+        p.payment_status = receivable_status(_exp, _recv)
         p.updated_at = _now()
         await session.commit()
         net, check = compute(int(p.contract_amount or 0), d)

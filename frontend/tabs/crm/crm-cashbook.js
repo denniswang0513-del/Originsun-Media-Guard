@@ -342,6 +342,9 @@ window._cashCatEdit = (ev, id) => {
     sel.className = 'crm-input';
     sel.innerHTML = '<option value="">—</option>' + _CATEGORIES
         .map((c) => `<option${c === e.category ? ' selected' : ''}>${_esc(c)}</option>`).join('');
+    // 🔴 選單面板會被列的 overflow:hidden 裁掉（crm.css 那條 ellipsis 規則；
+    // DOM 上仍「可見」）—— 開編輯時解掉該列的裁切，重畫自然復原
+    cell.closest('.crm-row')?.classList.add('cash-ed-open');
     cell.innerHTML = '';
     cell.appendChild(sel);
     searchableSelect(sel, { placeholder: '搜尋類別…' });

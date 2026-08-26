@@ -715,6 +715,15 @@
 .crm-row.inv-qa .ss-input { width: 100%; font-size: 11px; padding: 2px 4px; text-align: center; }
 .crm-row.inv-qa .ss-panel { z-index: 300; text-align: left; }
 
+/* 收支明細的類別格行內編輯（2026-08-26）：同一個 overflow:hidden 裁切陷阱 ——
+   面板在 DOM 上「可見」但被格子的 ellipsis 規則整個裁掉（owner 實測：點了只
+   看到搜尋框、沒有選單）。照上面的指示補這份 ID，不動 ellipsis 那條。 */
+#cash-list-body .crm-row.cash-ed-open,
+#cash-list-body .crm-row.cash-ed-open > div:not(.crm-kebab-wrap) { overflow: visible; }
+#cash-list-body .cash-ed .ss-wrap { width: 100%; }
+#cash-list-body .cash-ed .ss-input { width: 100%; font-size: 12px; padding: 2px 6px; }
+#cash-list-body .cash-ed .ss-panel { z-index: 300; text-align: left; min-width: 200px; }
+
 /* ── 詳情列的「複製」（低調：平常近乎隱形，滑到該列才浮出）── */
 .crm-detail-prop { position: relative; }
 .crm-prop-copy {

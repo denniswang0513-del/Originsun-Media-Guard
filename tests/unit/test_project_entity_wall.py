@@ -392,19 +392,29 @@ def test_new_and_edited_cases_land_in_receivable():
     """🔴 應收視圖讀**存欄** amount_receivable（收支同步是增量制，不替 NULL 補課）
     —— 建立要初始化、營收改了要重算。2026-08-26 owner 實測：新增台新案不進
     應收；清查發現 349 案 NULL、37 案部分到帳被靜靜漏掉。"""
-    from core.ledger_project import receivable_status
+    from core.ledger_project import expected_cash_in, receivable_status
     assert receivable_status(0, 0) == "未到帳"
     assert receivable_status(100, 0) == "未到帳"
     assert receivable_status(100, 40) == "部分到帳"
     assert receivable_status(100, 100) == "全額到帳"
     assert receivable_status(0, 50) == "部分到帳"      # 溢收（無營收）也要看得到
+    # 🔴 基準＝實際會進帳的錢（owner 2026-08-26「代扣勞保本來就要扣掉」）：
+    # 執行業務所得源頭代扣 10%＋二代健保 2.11% —— 42,000 → 代扣 5,086、
+    # 實進 36,914（典藏媒體顧問實帳驗證）。收滿 36,914 就是全額到帳。
+    assert expected_cash_in(42000, {"personal_tax": 5086}) == 36914
+    assert receivable_status(36914, 36914) == "全額到帳"
+    # 代開發票：代辦費由代開業者匯款前扣走
+    assert expected_cash_in(82000, {"source": "代開發票", "invoice_fee": 6560,
+                                    "personal_tax": 0}) == 75440
+    assert expected_cash_in(100, {}) == 100            # 無代扣＝營收
     src = (ROOT / "routers/api_finance_projects.py").read_text(encoding="utf-8")
     create = src.split("async def create_ledger_project(")[1].split("\n@router")[0]
-    assert "amount_receivable=contract or 0" in create and "amount_received=0" in create
+    assert "amount_receivable=expected_cash_in(contract, d)" in create \
+        and "amount_received=0" in create
     upd = src.split("async def update_project_ledger(")[1].split("\n@router")[0]
-    assert "receivable_status(" in upd and "amount_receivable" in upd
+    assert "expected_cash_in(" in upd and "receivable_status(" in upd
     fin = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
-    assert "receivable_status(contract, received)" in fin, "sync 與端點要共用同一條規則"
+    assert "receivable_status(expected, received)" in fin, "sync 與端點要共用同一條規則"
 
 
 def test_tab_switches_auto_refresh():
