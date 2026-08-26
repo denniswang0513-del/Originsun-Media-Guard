@@ -66,6 +66,8 @@ from routers.crm._shared import (_assert_month_open, _parse_day,
 
 router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
 
+from core.finance_logic import CARD_KIND
+
 MAP_SOURCES = {"cash", "payment", "invoice"}
 # ⚠ 改 TREATMENTS / ACCT_KINDS 值域要同步 frontend/tabs/finance/fin-utils.js 的 *_OPTIONS
 TREATMENTS = {"direct_expense", "direct_income", "ap_settlement", "ar_settlement",
@@ -75,10 +77,14 @@ TREATMENTS = {"direct_expense", "direct_income", "ap_settlement", "ar_settlement
 #    缺口不是政府欠你；補不回發票時用一筆具名調整沖平那個年代。
 ADJ_TYPES = {"opening", "correction", "owner_in", "owner_out",
              "accountant", "writeoff", "other", "vat"}
-# bank=銀行帳戶 / cash=零用金 / shareholder_*=股東往來（owner 2026-08-21）。
-# 股東往來的兩種在報表上落點不同：借款→負債、投資款→權益
-# （規則正本 core.finance_logic.SHAREHOLDER_KINDS + split_bank_lines）。
-ACCT_KINDS = {"bank", "cash", "shareholder_loan", "shareholder_capital"}
+# bank=銀行帳戶 / cash=零用金 / shareholder_*=股東往來（owner 2026-08-21）
+# / card=信用卡（owner 2026-08-27「區隔哪一個銀行的信用卡」：一張卡一個帳戶，
+# 刷卡列掛它當卡別身分）。
+# 這幾種在報表上落點不同：股東借款→負債、投資款→權益、信用卡→都不落
+# （卡債由 card_outstanding 算，卡片帳戶再落一次就是重複計）
+# —— 規則正本 core.finance_logic.SHAREHOLDER_KINDS / CARD_KIND + split_bank_lines。
+ACCT_KINDS = {"bank", "cash", "shareholder_loan", "shareholder_capital",
+              CARD_KIND}
 LOAN_PAY_CATEGORY = "貸款繳款"  # 對映 (cash, 貸款繳款) → 2400/loan（seed_finance）
 
 

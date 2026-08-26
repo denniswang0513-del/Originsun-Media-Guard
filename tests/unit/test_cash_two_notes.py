@@ -55,8 +55,29 @@ def test_cashbook_has_two_note_columns_with_inline_edit():
     fn = js.split("window._cashInline = (ev")[1]
     assert "stopPropagation()" in fn, "格子點擊不可觸發整列選取"
     assert "JSON.stringify({ [f]: v })" in fn, "自動儲存只送那一欄（部分更新）"
-    for f in ("'sub_item'", "'bank_memo'", "'note'"):
-        assert f"_cashInline(event,'${{e.id}}',{f})" in js, f
+
+
+def test_edit_needs_an_explicit_entry_point():
+    """🔴 單擊格子不編輯（owner 2026-08-27：「按這裡再跳出編輯就好了，現在
+    點到就跳出編輯視窗很惱人」）—— 入口是 ✎ 或雙擊；單擊回到「選這一列」。"""
+    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    row = js.split("body.innerHTML = _sorter.sorted(_entries)")[1][:2200]
+    assert 'onclick="window._cashInline' not in row, "格子不可單擊即編輯"
+    assert 'onclick="window._cashCatEdit' not in row
+    assert row.count("ondblclick=") >= 5, "五個可編輯格都要有雙擊入口"
+    assert "_PEN(" in row, "每格要有 ✎ 入口"
+    css = _read("frontend/tabs/crm/crm.css")
+    assert ".cash-ed-pen" in css and "opacity: 0" in css.split(".cash-ed-pen")[1][:200],         "✎ 平常隱形、滑到該列才浮出"
+
+
+def test_sub_item_cell_has_searchable_dropdown():
+    """子項目要有下拉（owner 2026-08-27「子項目跳不出下拉清單」），且留得下
+    新值 —— 純選單擋掉新詞、純文字打錯字長雙胞胎。"""
+    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    fn = js.split("window._cashSubEdit = (ev")[1].split("/** 刷卡金額")[0]
+    assert "searchableSelect(sel" in fn
+    assert "'＋ 自訂…'" in fn or "＋ 自訂" in fn, "要留自訂入口"
+    assert "JSON.stringify({ sub_item: v })" in fn
 
 
 def test_cashbook_filters_date_sub_amount():

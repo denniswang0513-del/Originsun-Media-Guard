@@ -1243,22 +1243,38 @@ def ap_open_payments(payments, cat_map=None, baseline_month=None, as_of_month=No
 # 分不清楚時用借款 —— 未經增資登記的錢本來就還是往來，不是股本。
 SHAREHOLDER_KINDS = ("shareholder_loan", "shareholder_capital")
 
+# 信用卡帳戶（owner 2026-08-27「信用卡匯入時也可以區隔哪一個銀行的信用卡」）：
+# 一張卡一個帳戶，刷卡列掛在它身上。🔴 **不是現金**：卡片餘額是負債，而負債那
+# 條由 card_outstanding 算（期初＋刷卡−還款）—— 卡片帳戶若落進 cash 就是同一
+# 筆錢一邊當資產一邊當負債。
+CARD_KIND = "card"
+
+
+def is_card_kind(kind) -> bool:
+    return (kind or "") == CARD_KIND
+
 
 def is_shareholder_kind(kind) -> bool:
     return (kind or "") in SHAREHOLDER_KINDS
 
 
 def split_bank_lines(bank_accounts, lines) -> dict:
-    """把 bank_balances_asof 的結果依帳戶性質拆三堆。
+    """把 bank_balances_asof 的結果依帳戶性質分堆。
 
     現金／股東借款／股東投資款 落在資產負債表的**三個不同區塊**，
-    一起丟進現金就是把負債與權益當成資產。
+    一起丟進現金就是把負債與權益當成資產。信用卡帳戶（CARD_KIND）也單獨
+    一堆並且**不進任何 BS 區塊** —— 它只是卡別身分，卡債由 card_outstanding
+    算（重複計會讓負債翻倍）。
     """
     kind_of = {b.get("id"): (b.get("acct_kind") or "bank") for b in bank_accounts}
-    out = {"cash": [], "shareholder_loan": [], "shareholder_capital": []}
+    out = {"cash": [], "shareholder_loan": [], "shareholder_capital": [],
+           CARD_KIND: []}
     for ln in lines:
         k = kind_of.get(ln.get("id"), "bank")
-        out[k if k in SHAREHOLDER_KINDS else "cash"].append(ln)
+        if k in SHAREHOLDER_KINDS or k == CARD_KIND:
+            out[k].append(ln)          # 卡片：不進現金（負債由 card_outstanding 出）
+        else:
+            out["cash"].append(ln)
     return out
 
 

@@ -1906,6 +1906,7 @@ async def list_cash_entries(
     bank_account_id: str = Query(""), direction: str = Query(""),
     date_from: str = Query(""), date_to: str = Query(""),
     sub_item: str = Query(""), book: str = Query(""), item: str = Query(""),
+    status: str = Query(""),
     amount_min: str = Query(""), amount_max: str = Query(""),
     entity: str = Query(""),
 ):
@@ -1934,6 +1935,10 @@ async def list_cash_entries(
             query = query.where(CrmCashEntry.category == category)
         if sub_item:
             query = query.where(CrmCashEntry.sub_item == sub_item)
+        if status:
+            # 卡片明細＝status='card'（owner 2026-08-27「切這個按鈕就切換成
+            # 信用卡的明細」）；其餘 status 值同義比對
+            query = query.where(CrmCashEntry.status == status)
         # 三層分類的前兩層：儲存是複合鍵，篩選在鍵上做前綴/後綴比對
         # （規則正本 core.cash_taxonomy —— 別在這裡自己拼字串）
         if book:

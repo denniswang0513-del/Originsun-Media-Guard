@@ -173,11 +173,22 @@ async def apply_card_statement(payload: CardImportApply, request: Request,
             session, [(f"{r.date} {(r.note or '')[:20]}", d) for r, d in todo],
             entity=ent)
         made = 0
+        card_id = (payload.card_account_id or "").strip() or None
+        if card_id:
+            # 卡別必須是這本帳的**卡片**帳戶 —— 掛到銀行帳戶上，刷卡金額會被
+            # 當成銀行流水，餘額與卡債一起錯
+            from core.finance_logic import CARD_KIND
+            from db.models import BankAccount
+            acct = await session.get(BankAccount, card_id)
+            if (not acct or (acct.entity or "parent") != ent
+                    or (acct.acct_kind or "") != CARD_KIND):
+                raise HTTPException(status_code=422, detail="卡別不存在或不是信用卡帳戶")
         for r, d in todo:
             item = (r.category or "").split("_", 1)
             session.add(CrmCashEntry(
                 id=uuid.uuid4().hex, entity=ent, entry_date=d,
                 expense=int(r.amount),
+                bank_account_id=card_id,      # 卡別身分（見 CardImportApply 說明）
                 summary=(r.note or "（卡單）")[:250],
                 # 雙備註（2026-08-26）：note 留給人手寫；卡單來源由 status='card'
                 # ＋created_at 說明，不再寫「[卡單匯入]」標記汙染附註欄
@@ -320,10 +331,38 @@ def _card_view(cfg: dict, n: dict) -> dict:
 
 @router.get("/card-summary")
 async def card_summary(request: Request, entity: str = ""):
-    """卡片餘額：期初 + 刷卡 − 還款。回傳各分項供 UI 說明數字怎麼來的。"""
+    """卡片餘額：期初 + 刷卡 − 還款。回傳各分項供 UI 說明數字怎麼來的。
+
+    另附 `by_card`：逐卡刷卡金額（owner 2026-08-27「區隔哪一個銀行的信用卡」）。
+    🔴 只拆刷卡那半 —— 還款是從銀行付的、帳上沒記還的是哪張卡，硬分是猜的，
+    所以「未繳」仍是全域一個數（見 core.card_statement.charges_by_card）。
+    """
     ent = _guard(request, entity, level="full")
     cfg = _card_cfg(ent)
-    return _card_view(cfg, await _card_numbers(ent, cfg))
+    view = _card_view(cfg, await _card_numbers(ent, cfg))
+    from sqlalchemy import select
+
+    from core.card_statement import charges_by_card
+    from core.finance_logic import CARD_KIND
+    from db.models import BankAccount, CrmCashEntry
+    factory = _factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmCashEntry.entry_date, CrmCashEntry.expense,
+                   CrmCashEntry.deposit, CrmCashEntry.status,
+                   CrmCashEntry.bank_account_id)
+            .where(CrmCashEntry.entity == ent, CrmCashEntry.status == "card"))).all()
+        cards = (await session.execute(
+            select(BankAccount).where(BankAccount.entity == ent,
+                                      BankAccount.acct_kind == CARD_KIND)
+            .order_by(BankAccount.sort_order, BankAccount.name))).scalars().all()
+    charges = charges_by_card([{"entry_date": d, "expense": e, "deposit": dp,
+                                "status": st, "bank_account_id": b}
+                               for d, e, dp, st, b in rows])
+    view["by_card"] = [{"id": a.id, "name": a.name, "charges": charges.get(a.id, 0),
+                        "opening": int(a.opening_balance or 0)} for a in cards]
+    view["unassigned_charges"] = charges.get("", 0)
+    return view
 
 
 @router.put("/card-summary")

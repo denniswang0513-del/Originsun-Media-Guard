@@ -36,25 +36,28 @@ function _render() {
     const sugg = unlinked.filter((m) => m.suggest_id);
     const linkCell = (m) => {
         if (m.crm_link_id) {
-            return `<span style="color:#86efac;">→ ${esc(m.crm_link_name)}</span>
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:6px;color:#f87171;"
+            return `<button class="crm-btn crm-btn-secondary crm-btn-sm" style="color:#f87171;"
                         title="解除對應（只解連結，兩邊資料都不動）"
-                        onclick="window._finCli.link('${m.id}','')">解除</button>`;
+                        onclick="window._finCli.link('${m.id}','')">解除連結</button>`;
         }
         const pick = `<button class="crm-btn crm-btn-secondary crm-btn-sm"
-                              onclick="window._finCli.pick(event,'${m.id}')">連結</button>`;
+                              onclick="window._finCli.pick(event,'${m.id}')">選 CRM 客戶</button>`;
         return m.suggest_id
-            ? `<span style="color:#888;">建議：${esc(m.suggest_name)}</span>
-               <button class="crm-btn crm-btn-primary crm-btn-sm" style="margin-left:6px;"
-                       title="採用建議的對應"
-                       onclick="window._finCli.link('${m.id}','${m.suggest_id}')">採用</button> ${pick}`
+            ? `<button class="crm-btn crm-btn-primary crm-btn-sm" style="margin-right:6px;"
+                       title="採用建議：連到「${esc(m.suggest_name)}」"
+                       onclick="window._finCli.link('${m.id}','${m.suggest_id}')">採用建議</button>${pick}`
             : pick;
     };
+
     const row = (m) => `
         <tr><td style="color:#e0e0e0;">${esc(m.short_name)}</td>
             <td style="color:#888;font-variant-numeric:tabular-nums;">${esc(m.tax_id || '')}</td>
             <td style="text-align:right;color:#c4b5fd;">${fmtNum(m.n_projects)}</td>
-            <td class="fcl-link" data-id="${m.id}" style="overflow:visible;">${linkCell(m)}</td></tr>`;
+            <td style="color:${m.crm_link_id ? '#86efac' : '#777'};">${
+                m.crm_link_id ? '→ ' + esc(m.crm_link_name)
+                : m.suggest_id ? '建議：' + esc(m.suggest_name) : '（未對應）'}</td>
+            <td class="fcl-link" data-id="${m.id}"
+                style="overflow:visible;text-align:right;white-space:nowrap;width:200px;">${linkCell(m)}</td></tr>`;
     _c.innerHTML = `
         <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
             <h2 style="color:#eee;margin:0;font-size:18px;">👥 客戶管理</h2>
@@ -72,9 +75,10 @@ function _render() {
             <thead><tr style="position:sticky;top:0;background:#202020;z-index:1;">
                 <th>私帳客戶</th><th>統編</th>
                 <th style="text-align:right;">私帳案</th>
-                <th>對應的 CRM 客戶（連結，不搬資料）</th></tr></thead>
+                <th>對應的 CRM 客戶</th>
+                <th style="text-align:right;">連結（不搬資料）</th></tr></thead>
             <tbody>${[...unlinked, ...linked].map(row).join('')
-                || '<tr><td colspan="4" style="color:#666;padding:14px;">（沒有私帳客戶）</td></tr>'}</tbody>
+                || '<tr><td colspan="5" style="color:#666;padding:14px;">（沒有私帳客戶）</td></tr>'}</tbody>
         </table></div>
         ${d.shared.length ? `
         <div style="color:#ddd;font-size:12px;font-weight:600;margin:14px 0 6px;">

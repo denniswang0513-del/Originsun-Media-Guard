@@ -88,18 +88,28 @@ export const ACCT_KIND_OPTIONS = [
     //    （規則正本 core.finance_logic.split_bank_lines）。
     { v: 'shareholder_loan', label: '股東往來－借款' },
     { v: 'shareholder_capital', label: '股東往來－投資款' },
+    // 信用卡（owner 2026-08-27「區隔哪一個銀行的信用卡」）：一張卡一個帳戶，
+    // 刷卡列掛它當**卡別身分**。🔴 不是現金也不是資產 —— 卡債由卡片帳的
+    // 期初＋刷卡−還款算（core.finance_logic.card_outstanding）。
+    { v: 'card', label: '信用卡' },
 ];
 // 哪些 acct_kind 是股東往來（鏡射 core.finance_logic.SHAREHOLDER_KINDS）
 export const SHAREHOLDER_KINDS = ['shareholder_loan', 'shareholder_capital'];
 export const isShareholderAcct = (k) => SHAREHOLDER_KINDS.includes(k || '');
+export const CARD_KIND = 'card';                    // 鏡射 core.finance_logic.CARD_KIND
+export const isCardAcct = (k) => (k || '') === CARD_KIND;
+/** 這本帳的信用卡帳戶（啟用中）—— 卡別下拉與卡片頁籤共用這一份判定 */
+export const cardOnly = (accounts) =>
+    (accounts || []).filter(a => a.active !== false && isCardAcct(a.acct_kind));
 
 /** 啟用中的**真銀行**帳戶（排除股東往來）。
  *  對帳單匯入、分類規則、貸款扣款、對帳工作台都只該看到這些 —— 股東往來沒有
- *  銀行對帳單、也不會拿來扣貸款。收支明細那邊的帳戶下拉不受此限（股東墊付的
- *  費用本來就要掛到股東帳戶上）。
+ *  銀行對帳單、也不會拿來扣貸款；信用卡帳戶是卡別身分不是錢包（2026-08-27）。
+ *  收支明細那邊的帳戶下拉不受此限（股東墊付的費用本來就要掛到股東帳戶上）。
  *  住在這裡而不是各自寫一份：banking.js 與 recon.js 拆開後兩邊都要問這句話。 */
 export const bankOnly = (accounts) =>
-    (accounts || []).filter(a => a.active !== false && !isShareholderAcct(a.acct_kind));
+    (accounts || []).filter(a => a.active !== false && !isShareholderAcct(a.acct_kind)
+                                 && !isCardAcct(a.acct_kind));
 
 /**
  * 子視圖開場殼：loading → Promise.all → isCurrent 防競態 → 失敗畫重試鈕。

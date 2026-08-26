@@ -21,7 +21,8 @@ let _selectedId = null;
 let _editingId = null;
 let _filters = { q: '', category: '', bank_account_id: '', direction: '',
                  date_from: '', date_to: '', sub_item: '', amount_min: '', amount_max: '',
-                 book: '', item: '' };   // 三層分類（owner 2026-08-27）
+                 book: '', item: '',     // 三層分類（owner 2026-08-27）
+                 status: '' };           // 'card'＝只看信用卡明細（卡片頁籤）
 let _taxonomy = { books: [], items_by_book: {}, sub_items: [] };
 let _csvFile = null;
 const _subVocab = new Set();   // 子項目篩選器的詞彙（只增不減，見 _syncFilterOptions）
@@ -47,6 +48,7 @@ async function loadEntries({ render = true, cards = true } = {}) {
     if (_filters.sub_item)        params.set('sub_item', _filters.sub_item);
     if (_filters.book)            params.set('book', _filters.book);
     if (_filters.item)            params.set('item', _filters.item);
+    if (_filters.status)          params.set('status', _filters.status);
     if (_filters.amount_min)      params.set('amount_min', _filters.amount_min);
     if (_filters.amount_max)      params.set('amount_max', _filters.amount_max);
     params.set('entity', _pinEntity());
@@ -184,37 +186,63 @@ function _renderAcctTabs() {
     if (!_bankAccounts || !_bankAccounts.length) { box.innerHTML = ''; return; }
     const money = (n) => (n == null ? '—'
         : `<span class="${n < 0 ? 'neg' : 'pos'}">$${_fmtNum(n)}</span>`);
-    const total = _bankAccounts.reduce((sum, a) => sum + (a.current_balance || 0), 0);
+    // 🔴 只列真銀行帳戶：信用卡帳戶是**卡別身分**不是錢包（2026-08-27），
+    // 混進來會多出幾顆餘額是負數的假錢包
+    const banks = _bankOnly(_bankAccounts);
+    const total = banks.reduce((sum, a) => sum + (a.current_balance || 0), 0);
+    const on = (id) => !_filters.status && String(id) === _filters.bank_account_id;
     const tab = (id, name, bal) => `
-        <button type="button" class="cash-acct-tab${String(id) === _filters.bank_account_id ? ' active' : ''}"
+        <button type="button" class="cash-acct-tab${on(id) ? ' active' : ''}"
                 data-acct="${_esc(id)}">${_esc(name)}<b>${money(bal)}</b></button>`;
     box.innerHTML = tab('', '總表', total)
-        + _bankAccounts.map(a => tab(a.id, a.name, a.current_balance)).join('')
+        + banks.map(a => tab(a.id, a.name, a.current_balance)).join('')
         + _cardChipHtml();
     box.querySelectorAll('[data-acct]').forEach(btn => {
         btn.addEventListener('click', () => {
             _filters.bank_account_id = btn.dataset.acct;
+            _filters.status = '';           // 回到銀行視角
             loadEntries({ cards: false });   // 換帳戶頁籤不影響卡片餘額
+        });
+    });
+    // 卡片頁籤：切換成信用卡明細（owner 2026-08-27）——
+    // data-card='' 是全部卡、有值就是那一張
+    box.querySelectorAll('[data-card]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            _filters.status = 'card';
+            _filters.bank_account_id = btn.dataset.card;
+            loadEntries({ cards: false });
         });
     });
 }
 
-/* ── 信用卡：未繳餘額 + 還款記帳 ─────────────────────────────
- *
- * 刷卡不動銀行（列在「信用卡」欄），月底繳款才是銀行支出 —— 所以「現在欠多少」
- * 不是任何一個帳戶餘額看得出來的，要另外算：期初 + 刷卡 − 還款。
- * 🔴 期初不可省：owner 的資料從 2023/10 起，卡片在那之前就有餘額（實測不給
- * 期初會算出 −36,988，而當時實際是 +2,428）。設定裡可以直接填「現在實際欠
- * 多少」讓後端反推期初 —— 對帳單上的未繳金額是手上唯一可信的數字。
- */
+// 卡片摘要（/card-summary：期初＋刷卡−還款＋逐卡）——「有沒有刷卡列」也靠它，
+// 沒有就不畫信用卡欄與卡片頁籤（母公司帳 0 筆，永遠空的欄是雜訊）
 let _cardSummary = null;
 
 function _cardChipHtml() {
-    if (!_cardSummary || !_cardSummary.charge_count) return '';
-    const n = _cardSummary.outstanding;
-    return `<button type="button" class="cash-acct-tab" title="期初 ${_fmtNum(_cardSummary.opening)}
- + 刷卡 ${_fmtNum(_cardSummary.charges)} − 還款 ${_fmtNum(_cardSummary.repayments)}"
-            onclick="window._cashCardPanel()">💳 信用卡未繳<b class="${n < 0 ? 'pos' : 'neg'}">$${_fmtNum(n)}</b></button>`;
+    const c = _cardSummary;
+    if (!c || !c.charge_count) return '';
+    const n = c.outstanding;
+    const act = (id) => (_filters.status === 'card'
+        && String(id) === _filters.bank_account_id) ? ' active' : '';
+    const money = (v) => `<b class="${v < 0 ? 'pos' : 'neg'}">$${_fmtNum(v)}</b>`;
+    // 主 chip：未繳總額（點了看全部卡的明細）
+    let html = `<button type="button" class="cash-acct-tab${act('')}" data-card=""
+            title="期初 ${_fmtNum(c.opening)} + 刷卡 ${_fmtNum(c.charges)} − 還款 ${_fmtNum(c.repayments)}
+點一下看信用卡明細">💳 信用卡未繳${money(n)}</button>`;
+    // 逐卡（>1 張才分，1 張時主 chip 就夠了）
+    const cards = c.by_card || [];
+    if (cards.length > 1) {
+        html += cards.map((k) => `<button type="button" class="cash-acct-tab${act(k.id)}"
+            data-card="${_esc(k.id)}" title="這張卡的刷卡合計（未繳是全部卡一起算 ——
+還款沒記還的是哪張卡）">${_esc(k.name)}${money(k.charges)}</button>`).join('');
+    }
+    if (c.unassigned_charges) {
+        html += `<button type="button" class="cash-acct-tab${act('__none__')}" data-card="__none__"
+            title="還沒指定是哪張卡的刷卡列">未指定卡別${money(c.unassigned_charges)}</button>`;
+    }
+    return html + `<button type="button" class="cash-acct-tab" title="卡片設定／還款"
+            onclick="window._cashCardPanel()" style="padding:6px 10px;">⚙</button>`;
 }
 
 export async function loadCardSummary() {
@@ -269,6 +297,18 @@ function _wireBankFeeSplit() {
     paint();
 }
 
+/** 可編輯格右上的小 ✎ —— 平常隱形、滑到該列才浮出（owner 2026-08-27：
+ *  「按這裡再跳出編輯就好了，現在點到就跳出編輯視窗很惱人」）。
+ *
+ *  🔴 單擊格子**不再**進入編輯：那條路讓「想選這一列」與「想改這一格」變成
+ *  同一個動作，於是每次點列都彈出輸入框。編輯要有明確的入口（✎ 或雙擊），
+ *  單擊回到它本來的意思＝選這一列。
+ */
+const _PEN = (id, field) => `<span class="cash-ed-pen" title="編輯"
+    onclick="${field === 'cat' ? `window._cashCatEdit(event,'${id}')`
+              : field === 'sub' ? `window._cashSubEdit(event,'${id}')`
+              : `window._cashInline(event,'${id}','${field}')`}">✎</span>`;
+
 /** 沒填分類的那一列給一個小紅點（owner 2026-08-24）。
  *
  *  🔴 為什麼要標：沒分類的列在三表裡會落到「未歸類」，而清單上那一格只是**空白**
@@ -299,16 +339,16 @@ function renderList() {
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
             <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
-            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}')"
-                 title="${_esc(e.category || '')}">${e.category ? _esc(e.book) : _NO_CAT_DOT}</div>
-            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}')"
-                 style="color:#c9c9c9;" title="${_esc(e.category || '')}">${_esc(e.item || '')}</div>
-            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','sub_item')"
-                 style="color:#9a9a9a;">${_esc(e.sub_item || '')}</div>
-            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','bank_memo')"
-                 title="${_esc(_flat(e.bank_memo, ' '))}">${_esc(_flat(e.bank_memo, ' · '))}</div>
-            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','note')"
-                 title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}</div>
+            <div class="cash-ed" ondblclick="window._cashCatEdit(event,'${e.id}')"
+                 title="${_esc(e.category || '')}">${e.category ? _esc(e.book) : _NO_CAT_DOT}${_PEN(e.id, 'cat')}</div>
+            <div class="cash-ed" ondblclick="window._cashCatEdit(event,'${e.id}')"
+                 style="color:#c9c9c9;" title="${_esc(e.category || '')}">${_esc(e.item || '')}${_PEN(e.id, 'cat')}</div>
+            <div class="cash-ed" ondblclick="window._cashSubEdit(event,'${e.id}')"
+                 style="color:#9a9a9a;">${_esc(e.sub_item || '')}${_PEN(e.id, 'sub')}</div>
+            <div class="cash-ed" ondblclick="window._cashInline(event,'${e.id}','bank_memo')"
+                 title="${_esc(_flat(e.bank_memo, ' '))}">${_esc(_flat(e.bank_memo, ' · '))}${_PEN(e.id, 'bank_memo')}</div>
+            <div class="cash-ed" ondblclick="window._cashInline(event,'${e.id}','note')"
+                 title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}${_PEN(e.id, 'note')}</div>
             <div>${_esc(e.project_name || '')}</div>
             <div>${_esc(e.invoice_title || '')}</div>
             <div>${_esc(_acctName(e.bank_account_id))}</div>
@@ -324,7 +364,9 @@ function renderList() {
  *  stopPropagation：格子的點擊不能觸發整列的選取/開詳情。 */
 window._cashInline = (ev, id, f) => {
     ev.stopPropagation();
-    const cell = ev.currentTarget;
+    // 入口有兩個（✎ 與雙擊格子）—— 一律取所在的格子
+    const cell = ev.currentTarget.closest('.cash-ed');
+    if (!cell) return;
     if (cell.querySelector('input')) return;       // 已在編輯中
     const e = _entries.find((x) => x.id === id);
     if (!e) return;
@@ -364,7 +406,8 @@ window._cashInline = (ev, id, f) => {
  *  選項正本＝_CATEGORIES（loadOptions 從後端 /cash-entries/options 灌）。 */
 window._cashCatEdit = (ev, id) => {
     ev.stopPropagation();
-    const cell = ev.currentTarget;
+    const cell = ev.currentTarget.closest('.cash-ed');
+    if (!cell) return;
     if (cell.querySelector('select')) return;
     const e = _entries.find((x) => x.id === id);
     if (!e) return;
@@ -419,6 +462,67 @@ window._cashCatEdit = (ev, id) => {
         first.focus();
         first.addEventListener('blur', () => setTimeout(() => {
             // 點到別處又沒選完 → 放棄編輯還原格子
+            if (!saved && !cell.contains(document.activeElement)) renderList();
+        }, 250));
+    }
+};
+
+/** 子項目格：**可搜尋下拉**（owner 2026-08-27「子項目跳不出下拉清單」）。
+ *
+ *  值域＝這本帳用過的子項目（options 的 taxonomy ∪ 目前畫面上的），另給
+ *  「＋ 自訂…」轉成文字輸入 —— 子項目是自由詞彙（新開銷類型隨時會冒出來），
+ *  純選單擋掉新值、純文字又打錯字長出雙胞胎，兩個入口都要留。
+ */
+window._cashSubEdit = (ev, id) => {
+    ev.stopPropagation();
+    const cell = ev.currentTarget.closest('.cash-ed');
+    if (!cell || cell.querySelector('select,input')) return;
+    const e = _entries.find((x) => x.id === id);
+    if (!e) return;
+    const vocab = [...new Set([...(_taxonomy.sub_items || []),
+                               ..._entries.map((x) => x.sub_item).filter(Boolean)])].sort();
+    cell.closest('.crm-row')?.classList.add('cash-ed-open');
+    const CUSTOM = '__custom__';
+    cell.innerHTML = '<select class="crm-input cash-sub-sel" style="min-width:110px;"></select>';
+    const sel = cell.querySelector('.cash-sub-sel');
+    sel.innerHTML = '<option value="">（清空）</option>'
+        + vocab.map((v) => `<option${v === e.sub_item ? ' selected' : ''}>${_esc(v)}</option>`).join('')
+        + `<option value="${CUSTOM}">＋ 自訂…</option>`;
+    let saved = false;
+    const save = async (v) => {
+        if (saved) return;
+        saved = true;
+        try {
+            await _fetch(`/cash-entries/${id}`, {
+                method: 'PUT', body: JSON.stringify({ sub_item: v }),
+            });
+            e.sub_item = v;
+            crmToast('已儲存');
+        } catch (err) {
+            crmToast('儲存失敗：' + err.message);
+        }
+        renderList();
+    };
+    sel.addEventListener('change', () => {
+        if (sel.value !== CUSTOM) { save(sel.value); return; }
+        // 自訂：換成文字輸入，Enter/失焦存
+        cell.innerHTML = '<input class="crm-input" style="width:100%;font-size:12px;padding:2px 6px;">';
+        const inp = cell.querySelector('input');
+        inp.value = e.sub_item || '';
+        inp.focus();
+        inp.addEventListener('click', (k) => k.stopPropagation());
+        inp.addEventListener('keydown', (k) => {
+            if (k.key === 'Enter') save(inp.value.trim());
+            else if (k.key === 'Escape') { saved = true; renderList(); }
+        });
+        inp.addEventListener('blur', () => save(inp.value.trim()));
+    });
+    sel.addEventListener('click', (k) => k.stopPropagation());
+    searchableSelect(sel, { placeholder: '搜尋子項目…' });
+    const inp = cell.querySelector('.ss-input');
+    if (inp) {
+        inp.focus();
+        inp.addEventListener('blur', () => setTimeout(() => {
             if (!saved && !cell.contains(document.activeElement)) renderList();
         }, 250));
     }

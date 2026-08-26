@@ -1362,6 +1362,11 @@ class CardImportApply(BaseModel):
     preview 看到的那份輸入，兩邊的重複判定才會是同一個答案。
     """
     rows: List[CardImportRow] = []
+    # 哪一張卡（owner 2026-08-27「信用卡匯入時也可以區隔哪一個銀行的信用卡」）：
+    # bank_accounts 裡 acct_kind='card' 的那筆 id；空＝未指定卡別（沿用舊行為）。
+    # 🔴 刷卡列仍**不掛銀行帳戶**（status='card'，刷卡當下不動銀行）——
+    # 這個欄位存在 bank_account_id 上是「卡別身分」，不是現金帳戶。
+    card_account_id: Optional[str] = None
 
 
 class CardAiSuggestRow(BaseModel):

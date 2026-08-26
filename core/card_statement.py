@@ -260,3 +260,23 @@ def suggest_rows(rows, hist: dict, rules, seen) -> list:
     for row, dup in zip(out, dups):
         row["duplicate"] = dup
     return out
+
+
+def charges_by_card(cash_entries, as_of_month=None) -> dict:
+    """逐卡刷卡金額 {card_account_id or '': 金額}（退刷為負）。
+
+    🔴 只拆**刷卡**那半：還款是從銀行帳戶付出去的，帳上沒有「這筆還的是哪張
+    卡」，硬分會是猜的。所以「未繳」仍是全域一個數（core.finance_logic.
+    card_outstanding），這裡回的是各卡刷了多少、以及還沒指定卡別的那堆（鍵 ''）。
+    """
+    from core.finance_logic import month_of
+    out: dict = {}
+    for e in cash_entries or ():
+        if (e.get("status") or "") != "card":
+            continue
+        m = month_of(e.get("entry_date"))
+        if as_of_month and m and m > as_of_month:
+            continue
+        key = e.get("bank_account_id") or ""
+        out[key] = out.get(key, 0) + int(e.get("expense") or 0) - int(e.get("deposit") or 0)
+    return out

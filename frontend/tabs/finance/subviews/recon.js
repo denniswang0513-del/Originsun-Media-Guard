@@ -16,7 +16,7 @@
  *
  * 命名空間 window._finRecon（banking.js 仍是 window._finBank，兩邊不重疊）。
  */
-import { finFetch, finEntity, esc, fmtNum, finToast, bankOnly } from '../fin-utils.js';
+import { finFetch, finEntity, esc, fmtNum, finToast, bankOnly, cardOnly } from '../fin-utils.js';
 import { createSortable, sortableTh, enumIndex, autoFee as _autoFee }
     from '../../crm/crm-utils.js';   // 匯費容差的正本在共用層（見 crm-utils）
 import { bearerHeader } from '../../../js/shared/utils.js';   // 送 FormData 時不能自帶 Content-Type
@@ -1871,6 +1871,26 @@ _fr.stmtApply = async (btn) => {
 
 let _cardPreview = null;
 
+/** 卡別選擇（owner 2026-08-27「信用卡匯入的時候也可以區隔哪一個銀行的信用卡」）。
+ *
+ *  卡片＝bank_accounts 裡 acct_kind='card' 的帳戶（一張卡一個帳戶，在「銀行帳戶」
+ *  那頁新增）。沒有任何卡片帳戶時不出這一格，只給一句提示 —— 逼人先去建帳戶
+ *  才能匯入卡單，等於把月結卡在這裡。
+ */
+function _cardPickerHtml() {
+    const cards = cardOnly(_accounts);
+    if (!cards.length) {
+        return `<div style="color:#6b7280;font-size:11px;margin:0 0 8px;">
+            （還沒有信用卡帳戶：到「銀行帳戶」新增一個種類為「信用卡」的帳戶，
+            之後匯入就能區分是哪一張卡。這次匯入會標成未指定卡別。）</div>`;
+    }
+    return `<div class="crm-field"><label>這份帳單是哪一張卡</label>
+        <select id="fincard-acct" class="crm-input">
+            <option value="">— 未指定卡別 —</option>
+            ${cards.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}
+        </select></div>`;
+}
+
 _fr.cardOpen = () => {
     _cardPreview = null;
     _wbModal('匯入信用卡帳單', `
@@ -1878,6 +1898,7 @@ _fr.cardOpen = () => {
             上傳卡單（PDF / CSV / TXT），或把網銀的消費明細整塊複製貼上。
             系統先用分類規則與消費歷史自動分類，剩下沒把握的可以一鍵丟 AI 判讀 ——
             最後由你逐列確認才寫進帳。繳款列會自動排除（那筆走銀行對帳單那側）。</p>
+        ${_cardPickerHtml()}
         <div class="crm-field"><label>上傳檔案</label>
             <input type="file" id="fincard-file" accept=".pdf,.csv,.txt" class="crm-file"></div>
         <div class="crm-field"><label>或：貼上消費明細</label>
@@ -1907,6 +1928,11 @@ _fr.cardParse = async (btn) => {
         url: '/api/v1/finance/card-statement/preview',
     });
     if (!d) return;
+    // 🔴 卡別要在**預覽把 modal 換掉之前**收起來 —— 那顆 select 在預覽畫面
+    // 已經不存在，apply 時才讀就永遠是 null（卡別靜靜掉了）
+    d.card_account_id = document.getElementById('fincard-acct')?.value || null;
+    d.card_name = document.getElementById('fincard-acct')
+        ?.selectedOptions?.[0]?.textContent || '';
     _cardPreview = d;
     await _ensureCashCats();
     _cardRenderPreview();
@@ -1933,6 +1959,9 @@ function _cardRenderPreview() {
     const warn = (d.warnings || []).length
         ? `<div style="color:#fbbf24;font-size:12px;margin:6px 0;white-space:pre-wrap;">⚠ ${d.warnings.map(esc).join('\n⚠ ')}</div>` : '';
     _wbModal('信用卡帳單 — 確認明細', `
+        ${d.card_account_id
+            ? `<div style="color:#93c5fd;font-size:12px;margin:0 0 6px;">💳 這批要記到：<b>${esc(d.card_name)}</b></div>`
+            : '<div style="color:#6b7280;font-size:12px;margin:0 0 6px;">💳 未指定卡別（之後可在收支明細改）</div>'}
         <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:#ccc;margin-bottom:6px;">
             <span>共 <b>${fmtNum(s.count)}</b> 筆</span>
             <span>消費 <b style="color:#fca5a5;">$${fmtNum(s.total_spend)}</b></span>
@@ -2008,7 +2037,13 @@ _fr.cardApply = async (btn) => {
     btn.disabled = true; btn.textContent = '匯入中…';
     try {
         const r = await finFetch('/card-statement/apply', {
-            method: 'POST', body: JSON.stringify({ rows: picked }),
+            method: 'POST',
+            body: JSON.stringify({
+                rows: picked,
+                // 卡別在解析前那一步選的；預覽是同一個 modal 換內容，所以這裡
+                // 讀不到那顆 select —— 解析時先記在 _cardPreview 上
+                card_account_id: (_cardPreview && _cardPreview.card_account_id) || null,
+            }),
         });
         _wbCloseModal();
         finToast(`已匯入 ${r.made} 筆卡單消費`

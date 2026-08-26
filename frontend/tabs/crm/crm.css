@@ -1900,9 +1900,19 @@
 #cash-list-panel .acct-header > span:nth-child(14),
 #cash-list-body .crm-row > .crm-kebab-wrap { flex: 0 0 36px; }
 
-/* 行內可編輯格（子項目/銀行資訊/附註）：hover 給出「這裡可以點」的暗示 */
-#cash-list-body .cash-ed { cursor: text; min-height: 16px; border-radius: 3px; }
-#cash-list-body .cash-ed:hover { outline: 1px dashed #4b5563; outline-offset: 1px; }
+/* 行內可編輯格（類別/項目/子項目/銀行資訊/附註）。
+   🔴 單擊**不編輯** —— 編輯入口是格子右緣那顆 ✎（或雙擊）。owner 2026-08-27：
+   「按這裡再跳出編輯就好了，現在點到就跳出編輯視窗很惱人」：單擊要回到它
+   本來的意思（選這一列），不然每次點列都彈出輸入框。 */
+#cash-list-body .cash-ed { position: relative; min-height: 16px; border-radius: 3px;
+  padding-right: 14px; }
+#cash-list-body .cash-ed-pen {
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  font-size: 11px; line-height: 1; color: #6b7280; cursor: pointer;
+  opacity: 0; transition: opacity .12s, color .12s;
+}
+#cash-list-body .crm-row:hover .cash-ed-pen { opacity: 1; }
+#cash-list-body .cash-ed-pen:hover { color: #93c5fd; }
 
 /* ── 帳戶切換列（總表／各銀行，附餘額）────────────────────── */
 .cash-acct-tabs { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 12px;
