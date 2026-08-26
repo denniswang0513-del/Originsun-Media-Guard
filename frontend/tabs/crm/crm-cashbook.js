@@ -329,9 +329,9 @@ function renderList() {
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
             <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
-            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}')"
+            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}','book')"
                  title="${_esc(e.category || '')}">${e.category ? _esc(e.book) : _NO_CAT_DOT}</div>
-            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}')"
+            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}','item')"
                  style="color:#c9c9c9;" title="${_esc(e.category || '')}">${e.item ? _esc(e.item) : _NO_VAL_DOT}</div>
             <div class="cash-ed" onclick="window._cashSubEdit(event,'${e.id}')"
                  style="color:#9a9a9a;">${e.sub_item ? _esc(e.sub_item) : _NO_VAL_DOT}</div>
@@ -391,29 +391,43 @@ window._cashInline = (ev, id, f) => {
     inp.addEventListener('blur', () => finish(true));
 };
 
-/** 類別欄點按填寫（owner 2026-08-26）：格子裡直接彈**可搜尋下拉**（類別 28 個，
- *  純文字輸入會打錯字造成新類別 —— 選單保證值域），選定即存。
- *  選項正本＝_CATEGORIES（loadOptions 從後端 /cash-entries/options 灌）。 */
-window._cashCatEdit = (ev, id) => {
+/** 類別／項目欄點按填寫（owner 2026-08-26；2026-08-27「項目就是項目的、類別就是類別的」）。
+ *
+ *  **點哪一欄就只編哪一欄** —— 兩欄共用一個「類別＋項目」串接選單的話，想改項目
+ *  卻先被要求重選一次類別，很惱人（owner 實際回報）。
+ *  唯一的例外是「項目欄但這列還沒有類別」：項目是掛在類別底下的（儲存仍是
+ *  `類別_項目` 複合鍵），沒有類別就形不成鍵，所以那種情況才補問類別。
+ *
+ *  值域走可搜尋下拉（純文字輸入會打錯字長出新類別）；正本＝_taxonomy（loadOptions
+ *  從後端 /cash-entries/options 灌）。
+ */
+window._cashCatEdit = (ev, id, level) => {
     ev.stopPropagation();
     const cell = ev.currentTarget.closest('.cash-ed');
-    if (!cell) return;
-    if (cell.querySelector('select')) return;
+    if (!cell || cell.querySelector('select,input')) return;
     const e = _entries.find((x) => x.id === id);
     if (!e) return;
     const books = _taxonomy.books || [];
     const map = _taxonomy.items_by_book || {};
+    // 沒類別就想改項目 → 這一次連類別一起問（不然存不出複合鍵）
+    const needBook = level === 'book' || !e.book;
+    const needItem = level === 'item' || !needBook;
     // 🔴 選單面板會被列的 overflow:hidden 裁掉（crm.css 那條 ellipsis 規則）
     cell.closest('.crm-row')?.classList.add('cash-ed-open');
     cell.innerHTML = '<span class="cash-cat-edit" style="display:flex;gap:4px;">'
-        + '<select class="crm-input cash-cat-book" style="min-width:78px;"></select>'
-        + '<select class="crm-input cash-cat-item" style="min-width:92px;"></select></span>';
+        + (needBook ? '<select class="crm-input cash-cat-book" style="min-width:78px;"></select>' : '')
+        + (needItem ? '<select class="crm-input cash-cat-item" style="min-width:92px;"></select>' : '')
+        + '</span>';
     const bSel = cell.querySelector('.cash-cat-book');
     const iSel = cell.querySelector('.cash-cat-item');
-    bSel.innerHTML = '<option value="">類別…</option>'
-        + books.map((b) => `<option${b === e.book ? ' selected' : ''}>${_esc(b)}</option>`).join('');
+    if (bSel) {
+        bSel.innerHTML = '<option value="">類別…</option>'
+            + books.map((b) => `<option${b === e.book ? ' selected' : ''}>${_esc(b)}</option>`).join('');
+    }
+    const bookVal = () => (bSel ? bSel.value : e.book);
     const fillItems = () => {
-        const list = map[bSel.value] || [];
+        if (!iSel) return;
+        const list = map[bookVal()] || [];
         iSel.innerHTML = '<option value="">（無項目）</option>'
             + list.map((i) => `<option${i === e.item ? ' selected' : ''}>${_esc(i)}</option>`).join('');
         iSel.style.display = list.length ? '' : 'none';
@@ -422,31 +436,32 @@ window._cashCatEdit = (ev, id) => {
     let saved = false;
     const save = async () => {
         if (saved) return;
-        const book = bSel.value;
+        const book = bookVal();
         if (!book) return;
         const list = map[book] || [];
-        if (list.length && !iSel.value) return;      // 有項目可選就等他選完
+        if (iSel && list.length && !iSel.value) return;      // 有項目可選就等他選完
+        // 只改類別時保留原項目 —— 但換了類別而原項目不屬於新類別，就得放掉
+        const item = iSel ? (iSel.value || '') : (list.includes(e.item) ? e.item : '');
         saved = true;
-        const category = iSel.value ? book + '_' + iSel.value : book;
+        const category = item ? book + '_' + item : book;
         try {
             await _fetch(`/cash-entries/${id}`, {
-                method: 'PUT',
-                body: JSON.stringify({ category, item: iSel.value || '' }),
+                method: 'PUT', body: JSON.stringify({ category, item }),
             });
             e.category = category;
             e.book = book;
-            e.item = iSel.value || '';
+            e.item = item;
             crmToast('已儲存');
         } catch (err) {
             crmToast('儲存失敗：' + err.message);
         }
         renderList();
     };
-    bSel.addEventListener('change', () => { fillItems(); save(); });
-    iSel.addEventListener('change', save);
-    [bSel, iSel].forEach((el) => el.addEventListener('click', (k) => k.stopPropagation()));
-    searchableSelect(bSel, { placeholder: '搜尋類別…' });
-    searchableSelect(iSel, { placeholder: '搜尋項目…' });
+    if (bSel) bSel.addEventListener('change', () => { fillItems(); save(); });
+    if (iSel) iSel.addEventListener('change', save);
+    [bSel, iSel].filter(Boolean).forEach((el) => el.addEventListener('click', (k) => k.stopPropagation()));
+    if (bSel) searchableSelect(bSel, { placeholder: '搜尋類別…' });
+    if (iSel) searchableSelect(iSel, { placeholder: '搜尋項目…' });
     const first = cell.querySelector('.ss-input');
     if (first) {
         first.focus();

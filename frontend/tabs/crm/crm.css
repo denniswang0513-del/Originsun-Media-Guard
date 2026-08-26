@@ -1870,6 +1870,14 @@
 #cash-list-body .crm-row > *:nth-child(1):not(.crm-kebab-wrap) { flex: 0 0 92px; }                      /* 日期 */
 #cash-list-panel .acct-header > span:nth-child(2),
 #cash-list-body .crm-row > *:nth-child(2):not(.crm-kebab-wrap) { flex: 1.6 1 0; min-width: 0; text-align: left; }  /* 內容 */
+/* 內容欄不截斷 —— 卡單摘要（「連加＊連加＊潮味決－台…」）截掉尾巴就分不出是哪一筆，
+   owner 2026-08-27 要求超過就折行。覆寫的是上面資料列那條共用 ellipsis 規則，
+   所以 white-space / overflow / text-overflow 三個都要寫回來（只改 white-space 的話，
+   overflow:hidden 仍會把第二行切掉）。break-word 讓沒有空白的長英數字串也能斷。 */
+#cash-list-body .crm-row > *:nth-child(2):not(.crm-kebab-wrap) {
+  white-space: normal; overflow: visible; text-overflow: clip;
+  overflow-wrap: break-word; line-height: 1.4;
+}
 #cash-list-panel .acct-header > span:nth-child(3),
 #cash-list-body .crm-row > *:nth-child(3):not(.crm-kebab-wrap) { flex: 0 0 104px; text-align: right; }  /* 收入 */
 #cash-list-panel .acct-header > span:nth-child(4),
