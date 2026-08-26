@@ -31,6 +31,7 @@ DB 撈出來的值餵進來。單元測試在 tests/unit/test_finance_logic.py
 from __future__ import annotations
 
 import calendar
+import json
 import re
 from datetime import date, datetime, timezone
 
@@ -1581,6 +1582,68 @@ def restate_revenue_accrual(pnl: dict, accrual_revenue: int, *,
     return out
 
 
+_PROJECT_CASH_MIRROR_LABEL = "專案雜支"
+_OUTSOURCE_LABEL = "委外費用"
+_PROJECT_MISC_LABEL = "專案雜支（逐案）"
+
+
+def apply_ledger_project_costs(pnl: dict, *, outsource: int = 0, tax: int = 0,
+                               misc: int = 0) -> dict:
+    """私帳：成本的委外/雜支與稅改用**逐案（權責）**的數，並拿掉現金那一面。
+
+    owner 的年度表這三項全是從專案管理表逐案加總的（2026-08-27 三年核對全中）。
+    🔴 收支明細裡「公司_專案」的支出列＝匯給外包與繳稅的**現金那一面**，
+    引擎會把它們認成「專案雜支」成本 —— 與這裡的權責數是同一批錢，
+    兩邊都留就是重複計（FY2025 會多算 1,118,775）。所以先把那條成本行拿掉。
+
+    稅：`income_tax` 直接換成逐案稅款（發票代辦費＋報稅案個人稅款）。系統原本
+    靠收支的 tax_income 對映認稅，私帳沒有那種列 → 一直是 0。
+    """
+    out = dict(pnl)
+    cost = dict(pnl.get("cost") or {})
+    groups = []
+    for g in cost.get("groups") or ():
+        g = dict(g)
+        g["lines"] = [ln for ln in (g.get("lines") or ())
+                      if ln.get("label") != _PROJECT_CASH_MIRROR_LABEL]
+        if g["label"] == "工":
+            if outsource:
+                g["lines"] = list(g["lines"]) + [{"label": _OUTSOURCE_LABEL,
+                                                  "amount": outsource}]
+        elif g["label"] == "費":
+            if misc:
+                g["lines"] = list(g["lines"]) + [{"label": _PROJECT_MISC_LABEL,
+                                                  "amount": misc}]
+        g["lines"].sort(key=lambda x: -x["amount"])
+        g["total"] = sum(int(x["amount"]) for x in g["lines"])
+        groups.append(g)
+    cost["groups"] = groups
+    cost["total"] = sum(g["total"] for g in groups)
+    out["cost"] = cost
+
+    revenue = int((pnl.get("revenue") or {}).get("total") or 0)
+    opex_total = int((pnl.get("opex") or {}).get("total") or 0)
+    gross = revenue - cost["total"]
+    operating = gross - opex_total
+    pretax = operating + int((pnl.get("non_operating") or {}).get("total") or 0)
+    tax_block = dict(pnl.get("tax") or {})
+    tax_block["income_tax"] = int(tax or 0)
+    out["tax"] = tax_block
+    out["gross"] = {"amount": gross, "rate": _pct(gross, revenue)}
+    out["operating"] = {"amount": operating, "rate": _pct(operating, revenue),
+                        "expense_rate": _pct(opex_total, revenue)}
+    out["pretax"] = pretax
+    out["net"] = {"amount": pretax - int(tax or 0),
+                  "rate": _pct(pretax - int(tax or 0), revenue)}
+    avg = dict(pnl.get("monthly_avg") or {})
+    n = _implied_months(pnl, int((pnl.get("revenue") or {}).get("by_collection", {})
+                                 .get("cash") or 0)) or 0
+    if avg.get("cost") and cost["total"] and n:
+        avg["cost"] = round(cost["total"] / n)
+        out["monthly_avg"] = avg
+    return out
+
+
 def _implied_months(pnl: dict, cash_revenue: int) -> int:
     """從既有 monthly_avg 反推期間月數（caller 沒給 n_months 時的備援）。"""
     avg = int((pnl.get("monthly_avg") or {}).get("revenue") or 0)
@@ -1687,14 +1750,30 @@ def mine_project_positions(projects, months, as_of_month) -> dict:
       匯入日的期末 —— 對現在與往後的期末是準的。
     - accrual_revenue：Σ(結案月 ∈ 期間) 合約金額 —— 權責 vs 現金的橋接警語用。
     - receivable_rows：BS 下鑽明細。
+    - outsource / tax / misc：Σ(結案月 ∈ 期間) 逐案的委外費用、稅款、雜支
+      （ledger_detail）。owner 的年度表這三項就是逐案加總出來的 —— 2026-08-27
+      三年逐一核對：委外 294,715／506,566／485,902、稅 —／292,271／443,302 全中
+      （稅 ＝ 發票代辦費〔營業稅＋買發票〕＋ 報稅案的個人稅款）。
+      🔴 這三項與收支明細裡「公司_專案」的**支出列是同一批錢的兩面**（那些列就是
+      匯給外包與繳稅的現金），兩邊都認會重複計 —— 用了這裡就要排除那些現金列。
     """
     mset = set(months or [])
     recv = accrual = 0
+    outsource = tax = misc = 0
     rows = []
     for p in projects or ():
         m = month_of(p.get("completion_date"))
         if m and m in mset:
             accrual += int(p.get("contract_amount") or 0)
+            d = p.get("ledger_detail") or {}
+            if isinstance(d, str):
+                try:
+                    d = json.loads(d)
+                except ValueError:
+                    d = {}
+            outsource += int(d.get("outsource") or 0)
+            tax += int(d.get("invoice_fee") or 0) + int(d.get("personal_tax") or 0)
+            misc += int(d.get("misc") or 0)
         ar = int(p.get("amount_receivable") or 0)
         if ar > 0 and m and (not as_of_month or m <= as_of_month):
             recv += ar
@@ -1702,7 +1781,7 @@ def mine_project_positions(projects, months, as_of_month) -> dict:
                          "close_month": m, "amount": ar})
     rows.sort(key=lambda x: -x["amount"])
     return {"receivable": recv, "accrual_revenue": accrual,
-            "receivable_rows": rows}
+            "receivable_rows": rows, "outsource": outsource, "tax": tax, "misc": misc}
 
 
 def card_outstanding(cash_entries, card_cfg: dict, as_of_month) -> int:

@@ -63,6 +63,7 @@ from core.finance_logic import (
     map_account,
     paired_expense_category,
     restate_revenue_accrual,
+    apply_ledger_project_costs,
     merge_cf,
     merge_pnl,
     month_of,
@@ -165,7 +166,9 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
         from db.models import CrmProject
         projects = _dump(await _all(CrmProject, where=CrmProject.entity == "mine"),
                          "id", "name", "completion_date", "contract_amount",
-                         "amount_received", "amount_receivable")
+                         "amount_received", "amount_receivable",
+                         # 逐案的委外/稅款/雜支（owner 年度表的成本與稅就是這三欄加總）
+                         "ledger_detail")
 
     accounts = {r.id: {"code": r.code, "name": r.name, "pnl_group": r.pnl_group,
                        "cf_activity": r.cf_activity, "acct_type": r.acct_type}
@@ -365,6 +368,9 @@ async def compute_live(session, months, inputs=None, adv=None,
         _acc = _mp["accrual_revenue"]
         pnl = restate_revenue_accrual(pnl, _acc, cash_revenue=_cash_rev,
                                       n_months=len(months))
+        # 委外/雜支/稅改用逐案（權責），並拿掉收支那一面避免重複計
+        pnl = apply_ledger_project_costs(
+            pnl, outsource=_mp["outsource"], tax=_mp["tax"], misc=_mp["misc"])
         warn["messages"].append(
             f"損益表為權責基礎（本期結案案合約合計 {_acc:,}）；同期現金入帳為 "
             f"{_cash_rev:,}，差 {_acc - _cash_rev:+,} ＝ 應收/跨期收款的變動。")
