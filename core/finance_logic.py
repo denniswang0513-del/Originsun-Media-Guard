@@ -1001,6 +1001,25 @@ _map_info = map_info  # 底線別名（相容既有引用）
 _map_account = map_account
 
 
+_PAIRED_EXPENSE_SUFFIX = "支出"
+
+
+def paired_expense_category(category, cat_map: dict) -> str:
+    """收入類別的「支出版」類別（同鍵兩用時，**方向**才是判準）。
+
+    🔴 owner 的私帳把專案的收款與專案的支出放在同一個類別鍵 `公司_專案` 底下 ——
+    金額落在「支出」欄就是支出、落在「存入」欄就是收入，他的 Sheet 是這樣讀的。
+    對映表只認類別文字，於是 direct_income 的支出列被當成「退款」去沖營收
+    （實測 FY2025 有 1,118,775 的專案支出被沖掉，營收因此少了同額，
+    成本那側也同額憑空消失 —— 兩張表當然對不起來）。
+
+    規則：`<類別>支出` 這條對映存在就用它（`公司_專案` → `公司_專案支出`），
+    沒有就維持原本的沖回行為（利息收入被退款之類，沖回同科目才是對的）。
+    """
+    cand = (category or "") + _PAIRED_EXPENSE_SUFFIX
+    return cand if ("cash", cand) in (cat_map or {}) else ""
+
+
 def expense_slot(acct: dict | None) -> tuple:
     """費用該落在哪個 (pnl_group, 行標籤)。
 
@@ -1079,6 +1098,14 @@ def iter_expense_items(payments, cash_entries, cat_map, accounts, mset):
             if amount:
                 group, label = expense_slot(
                     map_account(cat_map, accounts, "cash", e.get("category")))
+                yield "cash", e, group, label, amount
+        elif t == "direct_income":
+            # 收入類別的**支出**列 → 掛它的「支出版」科目（見 paired_expense_category）
+            pair = paired_expense_category(e.get("category"), cat_map)
+            amount = out_amount(e) if pair else 0
+            if amount:
+                group, label = expense_slot(
+                    map_account(cat_map, accounts, "cash", pair))
                 yield "cash", e, group, label, amount
         elif t == "unmapped":
             amount = out_amount(e)
@@ -1426,7 +1453,10 @@ def build_pnl(months, *, invoices=(), payments=(), cash_entries=(), equipment=()
         if t == "direct_income":
             acct = map_account(cat_map, accounts, "cash", e.get("category"))
             _dispatch_income(prim, acct, in_amount(e))
-            _dispatch_income(prim, acct, -out_amount(e))
+            # 有「支出版」對映時，支出側已由 iter_expense_items 認列成費用，
+            # 這裡再沖一次營收就會雙算（見 paired_expense_category）
+            if not paired_expense_category(e.get("category"), cat_map):
+                _dispatch_income(prim, acct, -out_amount(e))
         elif t == "unmapped":
             _dispatch_income(prim, None, in_amount(e))
 

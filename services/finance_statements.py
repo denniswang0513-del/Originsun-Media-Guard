@@ -61,6 +61,7 @@ from core.finance_logic import (
     loan_outstanding_rows,
     local_day,
     map_account,
+    paired_expense_category,
     merge_cf,
     merge_pnl,
     month_of,
@@ -533,10 +534,15 @@ async def drilldown(session, kind: str, months, entity: str = "parent") -> dict:
                 continue
             acct = map_account(cat_map, accounts, "cash", e.get("category"))
             if (acct or {}).get("pnl_group") == "營業收入":
-                items.append(_row("cash", e["id"], e.get("entry_date"),
-                                  e.get("summary"),
-                                  in_amount(e) - out_amount(e),
-                                  e.get("category"), "現金收入"))
+                # 有「支出版」對映的類別，支出側是成本不是退款（見
+                # core.finance_logic.paired_expense_category）—— 這裡只列收入側，
+                # 支出側會出現在 cost./opex. 的 drilldown
+                amount = (in_amount(e) if paired_expense_category(e.get("category"), cat_map)
+                          else in_amount(e) - out_amount(e))
+                if amount:
+                    items.append(_row("cash", e["id"], e.get("entry_date"),
+                                      e.get("summary"), amount,
+                                      e.get("category"), "現金收入"))
 
     elif kind.startswith("cost.") or kind.startswith("opex."):
         side, _, glabel = kind.partition(".")
@@ -596,7 +602,9 @@ async def drilldown(session, kind: str, months, entity: str = "parent") -> dict:
             acct = map_account(cat_map, accounts, "cash", e.get("category"))
             g = (acct or {}).get("pnl_group")
             flow = in_amount(e) - out_amount(e)
-            if t == "direct_income" and g != "營業收入":
+            if (t == "direct_income" and g != "營業收入"
+                    and not (out_amount(e) and paired_expense_category(
+                        e.get("category"), cat_map))):
                 # 業外收入科目照科目；誤映/無 pnl_group 者 build_pnl 落
                 # 「未歸類收入」— 同樣屬業外區，一併列出
                 items.append(_row("cash", e["id"], e.get("entry_date"),
