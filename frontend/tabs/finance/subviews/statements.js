@@ -18,6 +18,7 @@
 import {
     finFetch, esc, fmtNum, finToast,
     renderPeriodInputs, periodFromInputs, metricCard, fmtPct, downloadCsv,
+    defaultPeriodMode,
 } from '../fin-utils.js';
 import { createSortable, sortableTh } from '../../crm/crm-utils.js';   // 點欄頭排序（通用排序器）
 
@@ -80,9 +81,9 @@ function _renderShell() {
 
         <div class="crm-toolbar" style="margin-bottom:14px;">
             <select id="finstmt-mode" class="crm-select">
-                <option value="month" selected>月</option>
+                <option value="month"${defaultPeriodMode() === 'month' ? ' selected' : ''}>月</option>
                 <option value="quarter">季</option>
-                <option value="year">年</option>
+                <option value="year"${defaultPeriodMode() === 'year' ? ' selected' : ''}>年</option>
                 <option value="custom">自訂區間</option>
             </select>
             <span id="finstmt-inputs" style="display:inline-flex;gap:8px;align-items:center;"></span>

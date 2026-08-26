@@ -26,6 +26,7 @@
 import {
     finFetch, esc, fmtNum, finToast,
     renderPeriodInputs, periodFromInputs, metricCard, fmtPct, downloadManyCsv,
+    defaultPeriodMode,
 } from '../fin-utils.js';
 import { lineChart, hbars, CHART_COLORS } from '../../../js/shared/svg-charts.js';
 
@@ -50,7 +51,7 @@ export default async function render(container, ctx = {}) {
     _c = container;
     _isCurrent = ctx.isCurrent || (() => true);
     _renderShell();
-    await _fd.load();   // 預設本月自動載入
+    await _fd.load();   // 預設期間自動載入（私帳=本會計年度、母公司=本月）
 }
 
 // ── 殼：期間列 + 結果容器 + 稅務包區塊（只畫一次，載入只換 results） ──
@@ -61,9 +62,9 @@ function _renderShell() {
 
         <div class="crm-toolbar" style="margin-bottom:14px;">
             <select id="findash-mode" class="crm-select">
-                <option value="month" selected>月</option>
+                <option value="month"${defaultPeriodMode() === 'month' ? ' selected' : ''}>月</option>
                 <option value="quarter">季</option>
-                <option value="year">年</option>
+                <option value="year"${defaultPeriodMode() === 'year' ? ' selected' : ''}>年</option>
                 <option value="custom">自訂區間</option>
             </select>
             <span id="findash-inputs" style="display:inline-flex;gap:8px;align-items:center;"></span>

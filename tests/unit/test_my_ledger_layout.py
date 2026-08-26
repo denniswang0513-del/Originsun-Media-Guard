@@ -155,6 +155,20 @@ def test_receivable_subview_is_project_based_and_gated():
     assert fin.count("hideNav('.fin-nav-mine-only')") == 1
 
 
+def test_fiscal_year_period_for_mine():
+    """私帳結帳年度 7/1–6/30（owner 2026-08-26「我的結帳月份是每年 6 月 30，
+    這塊預設為年」）：mine 模式期間預設＝年、年＝會計年度（翻成後端本來就吃
+    的 from..to 區間 —— 後端零改動）；母公司照曆年、預設月不受影響。"""
+    fu = _read("frontend/tabs/finance/fin-utils.js")
+    assert "FISCAL_END_MONTH = 6" in fu
+    assert "fiscalYearMode() ? 'year' : 'month'" in fu
+    assert "fiscalRange(" in fu and "data-fiscal" in fu
+    for rel in ("frontend/tabs/finance/subviews/statements.js",
+                "frontend/tabs/finance/subviews/dashboard.js"):
+        js = _read(rel)
+        assert "defaultPeriodMode() === 'year'" in js, rel
+
+
 def test_household_subview_wiring():
     """🏠 家用（owner 2026-08-26「開一個家用記帳頁面（都我在記）」）：
     固定打 mine、指名門 class、記一筆＝寫一般收支列（資料仍在收支明細）。"""

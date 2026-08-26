@@ -144,6 +144,30 @@ export function finToast(msg, isErr = false) {
 // ── 期間選擇器（statements / dashboard 子視圖共用） ─────────────
 // 兩個子視圖的期間列 element-id 前綴不同（finstmt- / findash-），
 // 故 prefix 參數化；container 為子視圖根容器（各自的 _c）。
+
+// 私帳的會計年度（owner 2026-08-26「我的結帳月份是每年 6 月 30」）：
+// 年度＝前一年 7/1 〜 當年 6/30，以**結束年**命名（FY2026＝2025/07–2026/06）。
+// 母公司照曆年不受影響。之後若要可設定再搬 settings，先寫死一份正本在這。
+const FISCAL_END_MONTH = 6;
+
+/** 私帳的年度用會計年度（見上）；母公司照曆年 */
+export const fiscalYearMode = () => finEntity() === 'mine';
+
+/** 今天落在哪個會計年度（以結束年命名）：2026-08 → FY2027（2026/07–2027/06） */
+export function currentFiscalYear() {
+    const t = new Date();
+    return t.getFullYear() + (t.getMonth() + 1 > FISCAL_END_MONTH ? 1 : 0);
+}
+
+/** 期間 mode 預設：私帳＝年（owner 的節奏是年度結帳）、母公司＝月 */
+export const defaultPeriodMode = () => (fiscalYearMode() ? 'year' : 'month');
+
+/** FY 的起訖（period 字串用）：FY2026 → ['2025-07', '2026-06'] */
+export function fiscalRange(y) {
+    const mm = String(FISCAL_END_MONTH).padStart(2, '0');
+    const mm1 = String(FISCAL_END_MONTH + 1).padStart(2, '0');
+    return [`${y - 1}-${mm1}`, `${y}-${mm}`];
+}
 /**
  * 依 mode（月/季/年/自訂）畫期間輸入元件，塞進 container 內 #{prefix}-inputs。
  * mode 讀 container 內 #{prefix}-mode；所有動態 id 都帶 prefix。
@@ -166,7 +190,18 @@ export function renderPeriodInputs(container, prefix) {
             <select id="${prefix}-q-year" class="crm-select">${yearOpts(curYear)}</select>
             <select id="${prefix}-q" class="crm-select">${[1, 2, 3, 4].map(i => `<option value="${i}"${i === q ? ' selected' : ''}>Q${i}</option>`).join('')}</select>`;
     } else if (mode === 'year') {
-        span.innerHTML = `<select id="${prefix}-year" class="crm-select">${yearOpts(curYear)}</select>`;
+        if (fiscalYearMode()) {
+            // 私帳：年＝會計年度（7/1–6/30），選項直接把區間寫在臉上
+            const fy = currentFiscalYear();
+            const opts = [];
+            for (let y = fy; y >= fy - 7; y--) {
+                const [a, b] = fiscalRange(y);
+                opts.push(`<option value="${y}"${y === fy ? ' selected' : ''}>${a.replace('-', '/')} – ${b.replace('-', '/')}</option>`);
+            }
+            span.innerHTML = `<select id="${prefix}-year" class="crm-select" data-fiscal="1">${opts.join('')}</select>`;
+        } else {
+            span.innerHTML = `<select id="${prefix}-year" class="crm-select">${yearOpts(curYear)}</select>`;
+        }
     } else {
         span.innerHTML = `
             <input id="${prefix}-from" type="month" class="crm-input" value="${curYear}-01">
@@ -192,6 +227,11 @@ export function periodFromInputs(container, prefix) {
     if (mode === 'year') {
         const y = g('year')?.value;
         if (!y) { finToast('請選年份', true); return null; }
+        if (g('year')?.dataset.fiscal) {
+            // 私帳會計年度 → 後端本來就吃的自訂區間格式（不用動後端）
+            const [a, b] = fiscalRange(parseInt(y, 10));
+            return { period: `${a}..${b}`, end: b };
+        }
         return { period: y, end: `${y}-12` };
     }
     const from = g('from')?.value, to = g('to')?.value;
