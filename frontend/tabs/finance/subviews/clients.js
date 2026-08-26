@@ -119,8 +119,20 @@ _fc.pick = (ev, id) => {
     cell.innerHTML = '';
     cell.appendChild(sel);
     searchableSelect(sel, { placeholder: '搜尋 CRM 客戶…' });
+    // 🔴 這格只有 86px，搜尋框與選單跟著縮成 86px 就打不了字也看不到客戶全名
+    // （owner 2026-08-27「link 出來的搜尋框太小了 小到無法作業」）。
+    // 讓它**浮起來蓋在表格上**（cell 當定位原點）——比放大格子好，欄寬不會抖動。
+    cell.style.position = 'relative';
+    const wrap = cell.querySelector('.ss-wrap');
+    if (wrap) wrap.style.cssText += ';position:absolute;top:2px;left:2px;width:300px;z-index:320;';
+    const panel = cell.querySelector('.ss-panel');
+    if (panel) panel.style.maxHeight = '320px';
     const inp = cell.querySelector('.ss-input');
-    if (inp) { inp.focus(); inp.addEventListener('click', (k) => k.stopPropagation()); }
+    if (inp) {
+        inp.style.cssText += ';font-size:13px;padding:6px 10px;';
+        inp.focus();
+        inp.addEventListener('click', (k) => k.stopPropagation());
+    }
     let saved = false;
     sel.addEventListener('change', () => {
         if (saved || !sel.value) return;
