@@ -178,6 +178,10 @@ class Client(Base):
     # 兩本帳（owner 2026-08-26「我的客戶先不要混到 crm 系統」）：mine＝私帳
     # 專用客戶，CRM 客戶管理與各下拉一律看不到；等 owner 確認對應後才併回 parent。
     entity = Column(String(16), nullable=False, server_default="parent")
+    # 私帳客戶 → CRM 客戶的對應連結（soft FK → clients.id，entity='parent' 列）。
+    # owner 2026-08-26「跟 crm 同步，但是用連結的方式」—— 只記對應、不搬資料；
+    # 之後「併過去」以此為依據。只有 mine 列會有值。
+    crm_link_id = Column(String(32), nullable=True)
     short_name = Column(String(64), nullable=False, unique=True)  # 客戶代稱
     full_name = Column(String(255), nullable=True, default="")  # 全稱 / 抬頭
     tax_id = Column(String(16), nullable=True, default="")      # 統一編號

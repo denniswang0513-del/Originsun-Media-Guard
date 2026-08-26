@@ -309,6 +309,98 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
     return result
 
 
+# ── 私帳客戶對應（owner 2026-08-26「跟 crm 同步，但是用連結的方式」）──────
+# 只記「私帳客戶 ↔ CRM 客戶」的對應連結、不搬資料 —— 之後「併過去」以此為依據。
+
+def _norm_client_name(s: str) -> str:
+    """比對用正規化：去空白與常見公司尾綴（「寬微廣告有限公司」≈「寬微廣告」）。"""
+    import re as _re
+    s = _re.sub(r"\s+", "", s or "")
+    stripped = _re.sub(r"(股份有限公司|有限公司|股份公司|工作室)$", "", s)
+    return stripped or s
+
+
+def _suggest_crm_match(mine_name: str, parents: list):
+    """在 CRM 客戶裡找**唯一**的名稱吻合候選（正規化後相等或互為前綴，≥3 字）。
+    多個候選＝不猜（回 None，讓 owner 自己挑）。"""
+    n = _norm_client_name(mine_name)
+    if len(n) < 3:
+        return None
+    hits = [p for p in parents
+            if (lambda m: m == n or m.startswith(n) or n.startswith(m))
+               (_norm_client_name(p["short_name"]))]
+    return hits[0] if len(hits) == 1 else None
+
+
+# 🔴 路徑刻意不用 /clients/mine-links —— 會被更早註冊的 /clients/{client_id}
+# 吃掉（client_id="mine-links" → 404），而且誰重排函式順序誰踩雷
+@router.get("/clients-mine-links")
+async def mine_client_links(request: Request):
+    """私帳客戶管理的資料源：我的客戶（含對應狀態＋建議）＋CRM 客戶名錄（picker 用）
+    ＋已共用客戶（本來就是 parent、被私帳案引用的那批 —— 天生同步，不用連結）。"""
+    from core.ledger import not_mine, require_entity
+    require_entity(request, "mine", level="full")
+    _require_db()
+    factory = await _get_factory()
+    from sqlalchemy import func as _fn
+    async with factory() as session:
+        mine_cnt = dict((await session.execute(
+            select(CrmProject.client_id, _fn.count())
+            .where(CrmProject.entity == "mine", CrmProject.client_id.isnot(None))
+            .group_by(CrmProject.client_id))).all())
+        mine_rows = (await session.execute(
+            select(Client).where(Client.entity == "mine")
+            .order_by(Client.short_name))).scalars().all()
+        parent_rows = (await session.execute(
+            select(Client).where(not_mine(Client.entity))
+            .order_by(Client.short_name))).scalars().all()
+    parents = [{"id": c.id, "short_name": c.short_name} for c in parent_rows]
+    pmap = {p["id"]: p["short_name"] for p in parents}
+    mine = []
+    for c in mine_rows:
+        link = c.crm_link_id or ""
+        sug = None if link else _suggest_crm_match(c.short_name, parents)
+        mine.append({
+            "id": c.id, "short_name": c.short_name,
+            "n_projects": int(mine_cnt.get(c.id, 0)),
+            "crm_link_id": link, "crm_link_name": pmap.get(link, ""),
+            "suggest_id": sug["id"] if sug else "",
+            "suggest_name": sug["short_name"] if sug else "",
+        })
+    shared = [{"id": c.id, "short_name": c.short_name,
+               "n_projects": int(mine_cnt.get(c.id, 0))}
+              for c in parent_rows if c.id in mine_cnt]
+    return {"mine": mine, "crm": parents, "shared": shared}
+
+
+@router.put("/clients/{client_id}/crm-link")
+async def set_client_crm_link(client_id: str, request: Request):
+    """設定/清除私帳客戶的 CRM 對應（body: {crm_link_id: id|null}）。
+    只有 mine 列能設；目標必須是 parent 客戶 —— 連到另一個私帳客戶＝把對應
+    做成環，之後併過去會無所適從。"""
+    from core.auth import check_logged_in
+    check_logged_in(request)
+    _require_db()
+    body = await request.json()
+    target = (body.get("crm_link_id") or "").strip() or None
+    factory = await _get_factory()
+    async with factory() as session:
+        client = await session.get(Client, client_id)
+        if not client:
+            raise HTTPException(status_code=404, detail="找不到此客戶")
+        _client_write_guard(request, client)
+        if (client.entity or "parent") != "mine":
+            raise HTTPException(status_code=422, detail="只有私帳客戶能設定 CRM 對應")
+        if target:
+            t = await session.get(Client, target)
+            if not t or (t.entity or "parent") == "mine":
+                raise HTTPException(status_code=422, detail="對應目標必須是 CRM（母公司）客戶")
+        client.crm_link_id = target
+        client.updated_at = _now()
+        await session.commit()
+    return {"status": "ok", "crm_link_id": target or ""}
+
+
 # ── Users for AM/PM pickers ──────────────────────────────────
 
 @router.get("/users")
