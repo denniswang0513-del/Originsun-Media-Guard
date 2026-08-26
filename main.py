@@ -693,6 +693,11 @@ async def _on_startup():
                         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS bank_memo TEXT",
                         # 私帳客戶 → CRM 客戶對應連結（owner 2026-08-26「用連結的方式同步」）
                         "ALTER TABLE clients ADD COLUMN IF NOT EXISTS crm_link_id VARCHAR(32)",
+                        # 客戶代稱改「每本帳唯一」—— 同一家公司 CRM 一筆＋私帳一筆
+                        # （owner 2026-08-26「兩邊各一筆＋連結」），名字要能一樣
+                        "ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_short_name_key",
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_client_entity_short_name"
+                        " ON clients (entity, short_name)",
                         # ── 零用金請款（docs/PETTY_CASH_PLAN.md）──────────────
                         # 支出單據行擴充：一筆登記同時餵專案成本與個人請款。
                         # project_id 放寬成可空 —— 公司層級支出（行政/業務推廣）沒有

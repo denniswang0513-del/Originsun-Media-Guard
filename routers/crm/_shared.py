@@ -475,15 +475,17 @@ async def _auto_update_client_status(session, client_id: str):
     client = await session.get(Client, client_id)
     if not client or client.status == "暫停合作":
         return
-    # 客戶主檔統一後（owner 2026-08-26「把私帳的客戶都整合到 crm」）：分級＝
-    # **客戶關係**，兩本帳的案子都算（與客戶清單的「案數」欄同口徑；金額合計
-    # 才排除私帳）。私帳做過 32 個案的客戶當然是舊客戶，掛成潛在客戶是錯的。
+    # 兩本帳各一筆＋連結（owner 2026-08-26 定案）：CRM 客戶的分級＝**公司**的
+    # 客戶關係，只算母公司案 —— 私帳案掛在私帳那一筆上，混算會讓合夥人看到
+    # 一個「舊客戶」卻找不到任何公司案。私帳那筆不套 CRM 分級（語彙不同）。
+    from core.ledger import not_mine
     if (client.entity or "parent") == "mine":
-        return          # 防呆：真有私帳專屬客戶時不套 CRM 分級（併完後為空）
+        return
     count = (await session.execute(
         select(_fn.count()).where(
             CrmProject.client_id == client_id,
             CrmProject.status.notin_(_CLIENT_TIER_EXCLUDE_STATUSES),
+            not_mine(CrmProject.entity),
         )
     )).scalar() or 0
     from core.crm_logic import client_tier

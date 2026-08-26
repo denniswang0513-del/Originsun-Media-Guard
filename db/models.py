@@ -182,7 +182,13 @@ class Client(Base):
     # owner 2026-08-26「跟 crm 同步，但是用連結的方式」—— 只記對應、不搬資料；
     # 之後「併過去」以此為依據。只有 mine 列會有值。
     crm_link_id = Column(String(32), nullable=True)
-    short_name = Column(String(64), nullable=False, unique=True)  # 客戶代稱
+
+    __table_args__ = (UniqueConstraint("entity", "short_name",
+                                       name="uq_client_entity_short_name"),)
+    # 客戶代稱：**每本帳各自唯一**（owner 2026-08-26「兩邊各一筆＋連結」——
+    # 同一家公司 CRM 一筆、私帳一筆，名字本來就該一樣；全域唯一會讓第二筆
+    # 被迫改名，那是替約束服務而不是替帳服務）。
+    short_name = Column(String(64), nullable=False)  # 客戶代稱
     full_name = Column(String(255), nullable=True, default="")  # 全稱 / 抬頭
     tax_id = Column(String(16), nullable=True, default="")      # 統一編號
     am_username = Column(String(64), nullable=True)             # AM，FK → users

@@ -27,7 +27,8 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 is_passthrough_category, month_of,
                                 normalize_invoice_status, passthrough_commission)
 from core.auth import check_logged_in
-from core.ledger import require_entity
+from sqlalchemy import and_ as _sa_and
+from core.ledger import not_mine as _cli_not_mine, require_entity
 from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES
 from core.project_match import prepare as prepare_projects
 from core.project_match import suggest_project
@@ -2217,7 +2218,10 @@ async def receivables_summary(request: Request, status: str = Query(""),
             select(CrmInvoice, CrmProject.name.label("pn"),
                    Client.tax_id.label("c_tax_id"), Client.payment_info, Client.payment_note)
             .outerjoin(CrmProject, CrmProject.id == CrmInvoice.project_id)
-            .outerjoin(Client, Client.short_name == CrmInvoice.company_name)
+            # 🔴 代稱不再全域唯一（CRM/私帳各一筆同名）—— 不指名母公司那筆，
+            # 這個 join 會讓同一張發票回兩列
+            .outerjoin(Client, _sa_and(Client.short_name == CrmInvoice.company_name,
+                                       _cli_not_mine(Client.entity)))
             .where(CrmInvoice.issue_status == "已開立")
             .where(CrmInvoice.entity == ent)
             # 🔴 日期後面一定要有 tiebreaker：一天開 5-10 張發票很常見，只用

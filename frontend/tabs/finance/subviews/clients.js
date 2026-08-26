@@ -2,12 +2,11 @@
  * clients.js — 👥 客戶管理（私帳；owner 2026-08-26「新增一個客戶管理，讓我可以
  * 比對 crm 與我的客戶」「基本上我希望跟 crm 同步，但是用連結的方式」）。
  *
- * 🔴 2026-08-26 owner 拍板「把私帳的客戶都整合到 crm 系統裡面」→ 84 家私帳
- * 客戶已併入 CRM，**客戶主檔只有一份**。所以本頁的主表＝「我用到的客戶」
- * （都是 CRM 客戶，帶私帳/公司各自的案數）；錢仍分帳本（金額的門綁在專案的
- * entity，不在客戶）。
- * 上半的「私帳專屬客戶＋連結對應」只在真的還有 entity='mine' 客戶時才出現
- * （併完為空）—— 留著是防呆：又冒出私帳客戶時，這裡看得到也連得起來。
+ * 🔴 owner 2026-08-26 定案：**兩邊各一筆＋連結** —— 同一家公司 CRM 一筆、
+ * 私帳一筆，中間用 crm_link_id 對照；「連結後以 crm 的客戶清單為主要清單」。
+ * 所以本頁＝**那份連結清單**（要留著日後使用）：私帳每一家的對應狀態、
+ * 一鍵連結/解除、名稱吻合給建議（唯一候選才給，多個不猜）。
+ * 資料兩邊都不動 —— 連結只記「這兩筆是同一家」。
  * 同 projects/gear：入口由 .fin-nav-mine-only 指名門把關。
  */
 import { finSubviewBoot, esc, fmtNum, finToast } from '../fin-utils.js';
@@ -33,7 +32,8 @@ export default async function render(container, ctx = {}) {
 function _render() {
     const d = _d;
     const linked = d.mine.filter((m) => m.crm_link_id);
-    const sugg = d.mine.filter((m) => !m.crm_link_id && m.suggest_id);
+    const unlinked = d.mine.filter((m) => !m.crm_link_id);
+    const sugg = unlinked.filter((m) => m.suggest_id);
     const linkCell = (m) => {
         if (m.crm_link_id) {
             return `<span style="color:#86efac;">→ ${esc(m.crm_link_name)}</span>
@@ -50,48 +50,43 @@ function _render() {
                        onclick="window._finCli.link('${m.id}','${m.suggest_id}')">採用</button> ${pick}`
             : pick;
     };
-    // 併完之後 mine 為空 —— 這一區整段不畫（留碼是防呆，見檔頭）
-    const mineBlock = d.mine.length ? `
-        <div style="background:#2a2320;border:1px solid #7c5b2e;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
-            <div style="color:#fbbf24;font-size:12px;margin-bottom:8px;">
-                還有 ${d.mine.length} 家私帳專屬客戶沒進 CRM 主檔（已連結 ${linked.length}・有建議 ${sugg.length}）</div>
-            <table class="crm-table" style="width:100%;font-size:12px;">
-                <thead><tr><th>私帳客戶</th><th style="text-align:right;">案數</th>
-                    <th>對應 CRM 客戶</th></tr></thead>
-                <tbody>${d.mine.map((m) => `
-                    <tr><td style="color:#e0e0e0;">${esc(m.short_name)}</td>
-                        <td style="text-align:right;color:#888;">${fmtNum(m.n_projects)}</td>
-                        <td class="fcl-link" data-id="${m.id}" style="overflow:visible;">${linkCell(m)}</td></tr>`).join('')}</tbody>
-            </table>
-        </div>` : '';
-
-    const both = d.shared.filter((s) => s.n_parent > 0).length;
+    const row = (m) => `
+        <tr><td style="color:#e0e0e0;">${esc(m.short_name)}</td>
+            <td style="color:#888;font-variant-numeric:tabular-nums;">${esc(m.tax_id || '')}</td>
+            <td style="text-align:right;color:#c4b5fd;">${fmtNum(m.n_projects)}</td>
+            <td class="fcl-link" data-id="${m.id}" style="overflow:visible;">${linkCell(m)}</td></tr>`;
     _c.innerHTML = `
         <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
             <h2 style="color:#eee;margin:0;font-size:18px;">👥 客戶管理</h2>
-            <span style="color:#888;font-size:12px;">我用到的客戶 ${d.shared.length} 家・
-                其中 ${both} 家也有公司案・CRM 主檔共 ${d.crm.length} 家</span>
+            <span style="color:#888;font-size:12px;">私帳客戶 ${d.mine.length} 家・
+                <b style="color:#86efac;">已連結 ${linked.length}</b>・
+                未連結 ${unlinked.length}（其中 ${sugg.length} 家有建議）・
+                CRM 主檔 ${d.crm.length} 家</span>
+            <div style="flex:1;"></div>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm"
+                    title="把連結清單存成 CSV（日後對照用）"
+                    onclick="window._finCli.exportCsv()">⭳ 匯出連結清單</button>
         </div>
-        ${mineBlock}
         <div style="max-height:calc(100vh - 300px);overflow-y:auto;background:#202020;border:1px solid #2e2e2e;border-radius:8px;">
         <table class="crm-table" style="width:100%;font-size:12px;">
             <thead><tr style="position:sticky;top:0;background:#202020;z-index:1;">
-                <th>客戶</th><th>抬頭</th><th>統編</th>
+                <th>私帳客戶</th><th>統編</th>
                 <th style="text-align:right;">私帳案</th>
-                <th style="text-align:right;">公司案</th></tr></thead>
-            <tbody>${d.shared.map((s) => `
-                <tr><td style="color:#e0e0e0;">${esc(s.short_name)}</td>
-                    <td style="color:#9a9a9a;overflow:hidden;text-overflow:ellipsis;max-width:280px;white-space:nowrap;"
-                        title="${esc(s.full_name)}">${esc(s.full_name)}</td>
-                    <td style="color:#888;font-variant-numeric:tabular-nums;">${esc(s.tax_id)}</td>
-                    <td style="text-align:right;color:#c4b5fd;">${fmtNum(s.n_projects)}</td>
-                    <td style="text-align:right;color:${s.n_parent ? '#86efac' : '#4b5563'};">${s.n_parent ? fmtNum(s.n_parent) : '—'}</td>
-                </tr>`).join('')
-                || '<tr><td colspan="5" style="color:#666;padding:14px;">（私帳還沒有掛客戶的案子）</td></tr>'}</tbody>
+                <th>對應的 CRM 客戶（連結，不搬資料）</th></tr></thead>
+            <tbody>${[...unlinked, ...linked].map(row).join('')
+                || '<tr><td colspan="4" style="color:#666;padding:14px;">（沒有私帳客戶）</td></tr>'}</tbody>
         </table></div>
+        ${d.shared.length ? `
+        <div style="color:#ddd;font-size:12px;font-weight:600;margin:14px 0 6px;">
+            私帳直接用 CRM 客戶的案子（不需要連結 —— 本來就是同一筆）</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            ${d.shared.map((s) => `<span style="background:#242424;border:1px solid #333;border-radius:12px;
+                padding:3px 10px;font-size:11px;color:#bbb;">${esc(s.short_name)}
+                <span style="color:#666;">${fmtNum(s.n_projects)} 案</span></span>`).join('')}
+        </div>` : ''}
         <div style="color:#666;font-size:11px;margin-top:10px;">
-            客戶主檔與 CRM 統一（2026-08-26）——同一家客戶只有一筆資料，兩邊共用；
-            金額仍分帳本（私帳案的錢只有你看得到）。要改客戶資料到 CRM 的客戶管理改。</div>`;
+            連結＝確認「這兩筆是同一家客戶」，兩邊資料都不動；連結後以 CRM 那份為主清單。
+            日後私帳新增客戶直接建進 CRM（執行專案的「或新客戶」就是建 CRM 客戶）。</div>`;
 }
 
 const _fc = (window._finCli = window._finCli || {});
@@ -131,4 +126,29 @@ _fc.pick = (ev, id) => {
         _fc.link(id, sel.value);
     });
     if (inp) inp.addEventListener('blur', () => setTimeout(() => { if (!saved) _render(); }, 200));
+};
+
+_fc.exportCsv = () => {
+    // 連結清單存檔（BOM，Excel 開中文不亂碼；欄位對得上 CRM 匯入的詞彙）
+    const rows = [["私帳客戶", "統編", "私帳案數", "對應CRM客戶", "連結狀態"]];
+    _d.mine.forEach((m) => rows.push([
+        m.short_name, m.tax_id || "", m.n_projects,
+        m.crm_link_name || (m.suggest_name ? "（建議：" + m.suggest_name + "）" : ""),
+        m.crm_link_id ? "已連結" : "未連結",
+    ]));
+    const NL = String.fromCharCode(10);
+    const cell = (v) => {
+        const t = String(v ?? "");
+        // 含逗號/引號/換行才包引號（CSV 規則；不用正則以免跳脫字元被工具鏈吃掉）
+        return (t.includes(",") || t.includes(String.fromCharCode(34)) || t.includes(NL))
+            ? String.fromCharCode(34) + t.split(String.fromCharCode(34)).join(String.fromCharCode(34, 34)) + String.fromCharCode(34)
+            : t;
+    };
+    const csv = String.fromCharCode(0xFEFF)
+        + rows.map((r) => r.map(cell).join(",")).join(String.fromCharCode(13, 10));
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    a.download = "私帳客戶_CRM連結清單.csv";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 };

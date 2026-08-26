@@ -33,12 +33,12 @@ async def list_clients(
     am: str = Query(""),
     entity: str = Query(""),
 ):
-    """客戶主檔（owner 2026-08-26 拍板「把私帳的客戶都整合到 crm 系統裡面」
-    → 84 家私帳客戶已併入 CRM，**兩本帳共用同一份名錄**）：
-    - 預設＝排除 entity='mine'（併完後為空；留著是防呆，萬一又冒出私帳客戶
-      不會靜靜混進 CRM 名錄）。
-    - entity=mine（私帳執行專案的客戶下拉）＝**整份主檔**：統一之後私帳要能
-      挑到任何一家 CRM 客戶（只回「私帳用過的」會逼 owner 重建已存在的客戶）。
+    """客戶名錄（owner 2026-08-26 定案：**兩邊各一筆＋連結**，CRM 那份是主清單）：
+    - 預設（CRM 各呼叫端）＝只回 CRM 客戶（entity!='mine'）——私帳那一筆不混進來。
+    - entity=mine（私帳執行專案的客戶下拉）＝CRM 主檔 ＋ **還沒連結的**私帳客戶。
+      🔴 已連結的私帳客戶要濾掉：它與 CRM 那筆同名（代稱改成每本帳唯一之後
+      本來就會同名），兩筆並排出現在下拉裡沒有人分得出該選哪個 —— 有連結就
+      以 CRM 那筆為準（owner：「連結後以 crm 的客戶清單為主要清單」）。
       仍要 mine full scope。
     """
     _require_db()
@@ -74,7 +74,11 @@ async def list_clients(
             .outerjoin(proj_sub, proj_sub.c.client_id == Client.id)
             .order_by(Client.updated_at.desc())
         )
-        if entity != "mine":
+        if entity == "mine":
+            # 主檔 ＋ 未連結的私帳客戶（已連結的由 CRM 那筆代表）
+            query = query.where(or_(not_mine(Client.entity),
+                                    Client.crm_link_id.is_(None)))
+        else:
             query = query.where(not_mine(Client.entity))
         if status:
             query = query.where(Client.status == status)
@@ -334,8 +338,9 @@ def _suggest_crm_match(mine_name: str, parents: list):
 # 吃掉（client_id="mine-links" → 404），而且誰重排函式順序誰踩雷
 @router.get("/clients-mine-links")
 async def mine_client_links(request: Request):
-    """私帳客戶管理的資料源：我的客戶（含對應狀態＋建議）＋CRM 客戶名錄（picker 用）
-    ＋已共用客戶（本來就是 parent、被私帳案引用的那批 —— 天生同步，不用連結）。"""
+    """連結清單的資料源（owner 2026-08-26「留下這個連結的清單好做日後使用」）：
+    私帳客戶（含對應狀態＋名稱建議）＋CRM 客戶名錄（picker 用）＋私帳直接用
+    CRM 客戶的那些（本來就同一筆，不需要連結）。"""
     from core.ledger import not_mine, require_entity
     require_entity(request, "mine", level="full")
     _require_db()
@@ -364,6 +369,7 @@ async def mine_client_links(request: Request):
         sug = None if link else _suggest_crm_match(c.short_name, parents)
         mine.append({
             "id": c.id, "short_name": c.short_name,
+            "tax_id": c.tax_id or "", "full_name": c.full_name or "",
             "n_projects": int(mine_cnt.get(c.id, 0)),
             "crm_link_id": link, "crm_link_name": pmap.get(link, ""),
             "suggest_id": sug["id"] if sug else "",

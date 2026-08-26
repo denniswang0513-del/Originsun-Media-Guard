@@ -668,7 +668,9 @@ async def mirror_public_to_crm(session: AsyncSession, project: CrmProject, updat
     new_client_text = (updates.get("public_client") or "").strip()
     if new_client_text:
         c = (await session.execute(
-            select(Client).where(Client.short_name == new_client_text)
+            # 代稱每本帳唯一 —— 官網/專案這條是公司域，指名母公司那筆
+            select(Client).where(Client.short_name == new_client_text,
+                                 Client.entity != "mine")
         )).scalar_one_or_none()
         if c:
             project.client_id = c.id
