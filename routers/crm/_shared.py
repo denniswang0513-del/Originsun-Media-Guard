@@ -471,7 +471,6 @@ async def _auto_update_client_status(session, client_id: str):
     client_id 可為空（提案建殼專案還沒定客戶）→ 無客戶可算，直接返回。"""
     if not client_id:
         return
-    from sqlalchemy import func as _fn
     client = await session.get(Client, client_id)
     if not client or client.status == "暫停合作":
         return
@@ -482,7 +481,7 @@ async def _auto_update_client_status(session, client_id: str):
     if (client.entity or "parent") == "mine":
         return
     count = (await session.execute(
-        select(_fn.count()).where(
+        select(func.count()).where(
             CrmProject.client_id == client_id,
             CrmProject.status.notin_(_CLIENT_TIER_EXCLUDE_STATUSES),
             not_mine(CrmProject.entity),

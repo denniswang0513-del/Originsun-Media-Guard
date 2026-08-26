@@ -57,17 +57,17 @@ def test_cashbook_has_two_note_columns_with_inline_edit():
     assert "JSON.stringify({ [f]: v })" in fn, "自動儲存只送那一欄（部分更新）"
 
 
-def test_edit_needs_an_explicit_entry_point():
-    """🔴 單擊格子不編輯（owner 2026-08-27：「按這裡再跳出編輯就好了，現在
-    點到就跳出編輯視窗很惱人」）—— 入口是 ✎ 或雙擊；單擊回到「選這一列」。"""
+def test_cells_are_click_to_edit_and_detail_comes_from_kebab():
+    """owner 2026-08-27 更正：「這裡是要點擊就可以調整，但是跳出右側詳情頁，
+    要點最右邊的編輯」—— 格子單擊即編輯；整列**不再**開右側詳情，詳情走最右邊
+    ⋮ 的「編輯」。（先前把兩者理解反了，做成 ✎ 才能編輯 —— 已退回。）"""
     js = _read("frontend/tabs/crm/crm-cashbook.js")
-    row = js.split("body.innerHTML = _sorter.sorted(_entries)")[1][:2200]
-    assert 'onclick="window._cashInline' not in row, "格子不可單擊即編輯"
-    assert 'onclick="window._cashCatEdit' not in row
-    assert row.count("ondblclick=") >= 5, "五個可編輯格都要有雙擊入口"
-    assert "_PEN(" in row, "每格要有 ✎ 入口"
-    css = _read("frontend/tabs/crm/crm.css")
-    assert ".cash-ed-pen" in css and "opacity: 0" in css.split(".cash-ed-pen")[1][:200],         "✎ 平常隱形、滑到該列才浮出"
+    row = js.split("body.innerHTML = _sorter.sorted(_entries)")[1][:2400]
+    assert row.count('class="cash-ed" onclick="window._cash') >= 5, "五個格子都要單擊即編輯"
+    assert "_PEN(" not in row, "✎ 那一版已退回"
+    assert 'class="crm-row${e.id === _selectedId' in row
+    assert "onclick=\"window._cashSelect" not in row, "整列不可再開右側詳情"
+    assert "onEdit: '_cashSelect'" in js, "詳情改從最右邊 ⋮ 的『編輯』開"
 
 
 def test_sub_item_cell_has_searchable_dropdown():

@@ -151,7 +151,7 @@ function _syncFilterOptions() {
     if (bookSel) {
         const books = _taxonomy.books || [];
         bookSel.innerHTML = '<option value="">全部類別</option>'
-            + `<option value="__none__"${_filters.book === '__none__' ? ' selected' : ''}>（未分類）</option>`
+            + `<option value="__none__"${_filters.category === '__none__' ? ' selected' : ''}>（未分類）</option>`
             + books.map(b => `<option value="${_esc(b)}"${b === _filters.book ? ' selected' : ''}>${_esc(b)}</option>`).join('');
         bookSel._syncSsValue?.();
     }
@@ -297,28 +297,18 @@ function _wireBankFeeSplit() {
     paint();
 }
 
-/** 可編輯格右上的小 ✎ —— 平常隱形、滑到該列才浮出（owner 2026-08-27：
- *  「按這裡再跳出編輯就好了，現在點到就跳出編輯視窗很惱人」）。
- *
- *  🔴 單擊格子**不再**進入編輯：那條路讓「想選這一列」與「想改這一格」變成
- *  同一個動作，於是每次點列都彈出輸入框。編輯要有明確的入口（✎ 或雙擊），
- *  單擊回到它本來的意思＝選這一列。
- */
-const _PEN = (id, field) => `<span class="cash-ed-pen" title="編輯"
-    onclick="${field === 'cat' ? `window._cashCatEdit(event,'${id}')`
-              : field === 'sub' ? `window._cashSubEdit(event,'${id}')`
-              : `window._cashInline(event,'${id}','${field}')`}">✎</span>`;
-
 /** 沒填分類的那一列給一個小紅點（owner 2026-08-24）。
  *
  *  🔴 為什麼要標：沒分類的列在三表裡會落到「未歸類」，而清單上那一格只是**空白**
  *     —— 空白看起來像「這欄本來就沒東西」，不像「這裡要處理」。對帳單匯入一次
  *     進來幾十列，摘要沒中任何關鍵字的就是空的，很容易整批漏掉。
  *  用 title 講原因，不要只放一個沒人看得懂的點。 */
-const _NO_CAT_DOT =
-    '<span title="還沒填分類 —— 三表會把它歸到「未歸類」，點開這一列補上"'
+const _NO_VAL_DOT =
+    '<span title="還沒填 —— 點一下這一格補上"'
     + ' style="display:inline-block;width:7px;height:7px;border-radius:50%;'
     + 'background:#ef4444;vertical-align:middle;"></span>';
+// 舊名保留給類別那格的既有呼叫點（語意相同：沒填就是一顆紅點）
+const _NO_CAT_DOT = _NO_VAL_DOT;
 
 function renderList() {
     const body = document.getElementById('cash-list-body');
@@ -333,26 +323,26 @@ function renderList() {
     body.innerHTML = _sorter.sorted(_entries).map((e) => {
         const card = _cardAmt(e), out = _bankOut(e);
         return `
-        <div class="crm-row${e.id === _selectedId ? ' selected' : ''}" onclick="window._cashSelect('${e.id}')">
+        <div class="crm-row${e.id === _selectedId ? ' selected' : ''}">
             <div class="crm-row-date">${e.entry_date ? e.entry_date.substring(0, 10) : '—'}</div>
             <div class="crm-row-name">${_esc(e.summary)}</div>
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
             <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
-            <div class="cash-ed" ondblclick="window._cashCatEdit(event,'${e.id}')"
-                 title="${_esc(e.category || '')}">${e.category ? _esc(e.book) : _NO_CAT_DOT}${_PEN(e.id, 'cat')}</div>
-            <div class="cash-ed" ondblclick="window._cashCatEdit(event,'${e.id}')"
-                 style="color:#c9c9c9;" title="${_esc(e.category || '')}">${_esc(e.item || '')}${_PEN(e.id, 'cat')}</div>
-            <div class="cash-ed" ondblclick="window._cashSubEdit(event,'${e.id}')"
-                 style="color:#9a9a9a;">${_esc(e.sub_item || '')}${_PEN(e.id, 'sub')}</div>
-            <div class="cash-ed" ondblclick="window._cashInline(event,'${e.id}','bank_memo')"
-                 title="${_esc(_flat(e.bank_memo, ' '))}">${_esc(_flat(e.bank_memo, ' · '))}${_PEN(e.id, 'bank_memo')}</div>
-            <div class="cash-ed" ondblclick="window._cashInline(event,'${e.id}','note')"
-                 title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}${_PEN(e.id, 'note')}</div>
+            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}')"
+                 title="${_esc(e.category || '')}">${e.category ? _esc(e.book) : _NO_CAT_DOT}</div>
+            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}')"
+                 style="color:#c9c9c9;" title="${_esc(e.category || '')}">${e.item ? _esc(e.item) : _NO_VAL_DOT}</div>
+            <div class="cash-ed" onclick="window._cashSubEdit(event,'${e.id}')"
+                 style="color:#9a9a9a;">${e.sub_item ? _esc(e.sub_item) : _NO_VAL_DOT}</div>
+            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','bank_memo')"
+                 title="${_esc(_flat(e.bank_memo, ' '))}">${_esc(_flat(e.bank_memo, ' · '))}</div>
+            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','note')"
+                 title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}</div>
             <div>${_esc(e.project_name || '')}</div>
             <div>${_esc(e.invoice_title || '')}</div>
             <div>${_esc(_acctName(e.bank_account_id))}</div>
-            ${kebabMenuHtml(e.id, { onEdit: '_cashEdit', onDuplicate: '_cashDup', onDelete: '_cashDelete' })}
+            ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup', onDelete: '_cashDelete' })}
         </div>
     `;
     }).join('');
@@ -1090,10 +1080,13 @@ export async function initCrmCashbookTab() {
     });
     // 篩選控件同理 —— 卡片餘額只跟 entity 有關
     document.getElementById('cash-filter-book').addEventListener('change', e => {
-        _filters.book = e.target.value;
+        const v = e.target.value;
+        // 🔴 「（未分類）」是**類別欄為空**的快篩，不是一個叫 __none__ 的類別 ——
+        // 當成 book 送出去會變成 LIKE '__none__\_%'，一列都篩不到（實測 0 筆）
+        _filters.book = v === '__none__' ? '' : v;
+        _filters.category = v === '__none__' ? '__none__' : '';
         // 換類別時清掉項目（原項目多半不屬於新類別，留著會篩出空白）
         _filters.item = '';
-        _filters.category = e.target.value === '__none__' ? '__none__' : '';
         loadEntries({ cards: false });
     });
     document.getElementById('cash-filter-item').addEventListener('change', e => { _filters.item = e.target.value; loadEntries({ cards: false }); });

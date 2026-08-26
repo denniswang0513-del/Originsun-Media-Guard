@@ -34,30 +34,29 @@ function _render() {
     const linked = d.mine.filter((m) => m.crm_link_id);
     const unlinked = d.mine.filter((m) => !m.crm_link_id);
     const sugg = unlinked.filter((m) => m.suggest_id);
-    const linkCell = (m) => {
-        if (m.crm_link_id) {
-            return `<button class="crm-btn crm-btn-secondary crm-btn-sm" style="color:#f87171;"
-                        title="解除對應（只解連結，兩邊資料都不動）"
-                        onclick="window._finCli.link('${m.id}','')">解除連結</button>`;
-        }
-        const pick = `<button class="crm-btn crm-btn-secondary crm-btn-sm"
-                              onclick="window._finCli.pick(event,'${m.id}')">選 CRM 客戶</button>`;
-        return m.suggest_id
-            ? `<button class="crm-btn crm-btn-primary crm-btn-sm" style="margin-right:6px;"
-                       title="採用建議：連到「${esc(m.suggest_name)}」"
-                       onclick="window._finCli.link('${m.id}','${m.suggest_id}')">採用建議</button>${pick}`
-            : pick;
-    };
+    // 按鈕依實際狀況 Link / Unlink（owner 2026-08-27），放在**最左邊**一欄 ——
+    // 擠在名字右側時列距只有幾像素，很容易按到隔壁那家
+    const linkCell = (m) => m.crm_link_id
+        ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" style="color:#f87171;width:74px;"
+                   title="解除與「${esc(m.crm_link_name)}」的對應（只解連結，兩邊資料都不動）"
+                   onclick="window._finCli.link('${m.id}','')">Unlink</button>`
+        : `<button class="crm-btn crm-btn-secondary crm-btn-sm" style="width:74px;"
+                   title="連到 CRM 客戶（只記對應，不搬資料）"
+                   onclick="window._finCli.pick(event,'${m.id}')">Link</button>`;
 
     const row = (m) => `
-        <tr><td style="color:#e0e0e0;">${esc(m.short_name)}</td>
+        <tr><td class="fcl-link" data-id="${m.id}" style="overflow:visible;width:86px;">${linkCell(m)}</td>
+            <td style="color:#e0e0e0;">${esc(m.short_name)}</td>
             <td style="color:#888;font-variant-numeric:tabular-nums;">${esc(m.tax_id || '')}</td>
             <td style="text-align:right;color:#c4b5fd;">${fmtNum(m.n_projects)}</td>
             <td style="color:${m.crm_link_id ? '#86efac' : '#777'};">${
                 m.crm_link_id ? '→ ' + esc(m.crm_link_name)
-                : m.suggest_id ? '建議：' + esc(m.suggest_name) : '（未對應）'}</td>
-            <td class="fcl-link" data-id="${m.id}"
-                style="overflow:visible;text-align:right;white-space:nowrap;width:200px;">${linkCell(m)}</td></tr>`;
+                : m.suggest_id
+                    ? `建議：${esc(m.suggest_name)}
+                       <button class="crm-btn crm-btn-primary crm-btn-sm" style="margin-left:6px;"
+                               onclick="window._finCli.link('${m.id}','${m.suggest_id}')">採用</button>`
+                    : '（未對應）'}</td></tr>`;
+
     _c.innerHTML = `
         <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
             <h2 style="color:#eee;margin:0;font-size:18px;">👥 客戶管理</h2>
@@ -73,10 +72,9 @@ function _render() {
         <div style="max-height:calc(100vh - 300px);overflow-y:auto;background:#202020;border:1px solid #2e2e2e;border-radius:8px;">
         <table class="crm-table" style="width:100%;font-size:12px;">
             <thead><tr style="position:sticky;top:0;background:#202020;z-index:1;">
-                <th>私帳客戶</th><th>統編</th>
+                <th>連結</th><th>私帳客戶</th><th>統編</th>
                 <th style="text-align:right;">私帳案</th>
-                <th>對應的 CRM 客戶</th>
-                <th style="text-align:right;">連結（不搬資料）</th></tr></thead>
+                <th>對應的 CRM 客戶</th></tr></thead>
             <tbody>${[...unlinked, ...linked].map(row).join('')
                 || '<tr><td colspan="5" style="color:#666;padding:14px;">（沒有私帳客戶）</td></tr>'}</tbody>
         </table></div>
