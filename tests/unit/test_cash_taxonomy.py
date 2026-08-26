@@ -72,8 +72,11 @@ def test_cashbook_ui_three_columns_and_cascading_filters():
     # 換類別要清掉項目（否則篩出空白）
     seg = js.split("cash-filter-book').addEventListener")[1][:400]
     assert "_filters.item = ''" in seg
-    # 格內編輯＝類別→項目兩層，組回複合鍵存
+    # 格內編輯：**點哪欄編哪欄**（owner 2026-08-27「項目就是項目的、類別就是類別的」）
     ed = js.split("window._cashCatEdit = (ev")[1].split("/** 刷卡金額")[0]
     assert "cash-cat-book" in ed and "cash-cat-item" in ed
-    assert "book + '_' + iSel.value" in ed, "存回去要組成複合鍵"
+    assert "level === 'book'" in ed and "level === 'item'" in ed, "要看是哪一欄叫的"
+    assert "!e.book" in ed, "項目欄但沒類別時要補問類別（不然形不成複合鍵）"
+    assert "book + '_' + item" in ed, "存回去要組成複合鍵"
+    assert "list.includes(e.item)" in ed, "只改類別時：原項目不屬於新類別就放掉"
     assert "searchableSelect(bSel" in ed and "searchableSelect(iSel" in ed

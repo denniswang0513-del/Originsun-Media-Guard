@@ -98,14 +98,16 @@ def test_cashbook_filters_date_sub_amount():
 
 
 def test_category_cell_edits_with_cascading_selects():
-    """類別欄點按填寫（owner 2026-08-26 起）＝格內下拉；2026-08-27 起改兩層
-    （類別→項目，組回複合鍵存）—— 自由文字會打錯字長出新類別，選單保證值域。
-    詳細行為釘在 test_cash_taxonomy.py。"""
+    """類別欄點按填寫（owner 2026-08-26 起）＝格內下拉；2026-08-27 起**點哪欄編哪欄**
+    （類別欄只問類別、項目欄只問項目，仍組回複合鍵存）—— 自由文字會打錯字長出新
+    類別，選單保證值域。詳細行為釘在 test_cash_taxonomy.py。"""
     js = _read("frontend/tabs/crm/crm-cashbook.js")
     fn = js.split("window._cashCatEdit = (ev")[1].split("/** 刷卡金額")[0]
     assert "searchableSelect(bSel" in fn and "searchableSelect(iSel" in fn
-    assert "JSON.stringify({ category, item: iSel.value" in fn
-    assert "_cashCatEdit(event,'${e.id}')" in js
+    assert "JSON.stringify({ category, item })" in fn
+    # 兩欄各帶自己的 level（點項目不該先被要求重選類別）
+    assert "_cashCatEdit(event,'${e.id}','book')" in js
+    assert "_cashCatEdit(event,'${e.id}','item')" in js
 
 
 def test_all_dropdowns_searchable_everywhere():
