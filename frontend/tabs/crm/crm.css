@@ -1867,9 +1867,25 @@
    套到新寬度、資料列還是均分 flex:1，整排欄位對不到標題（2026-08-20 實測）。
    帶了 :not() 之後是 (1,3,0)，b 段 3>2 勝出。 */
 #cash-list-panel .acct-header > span:nth-child(1),
-#cash-list-body .crm-row > *:nth-child(1):not(.crm-kebab-wrap) { flex: 0 0 92px; }                      /* 日期 */
+#cash-list-body .crm-row > *:nth-child(1):not(.crm-kebab-wrap) { flex: 0 0 122px; }                     /* 日期＋星期小標 */
 #cash-list-panel .acct-header > span:nth-child(2),
 #cash-list-body .crm-row > *:nth-child(2):not(.crm-kebab-wrap) { flex: 3.4 1 0; min-width: 0; text-align: left; }  /* 內容（折行，給寬一點：卡單摘要長） */
+/* 六日／國定假日（owner 2026-08-27「假日的功能也做在收支」）：日期後面掛一個
+   星期小標，六日藍、假日紅褐 —— 判斷這筆屬公屬私時，那天是不是假日是關鍵線索。
+   ⚠️ 日期欄是 flex 0 0 92px 的固定寬，小標要能擠進去 → 字級壓到 10px、
+   左右各 3px，量過 92px 放得下「2026-04-05 清明節」以外的所有組合；
+   放不下的（節日名 3 字以上）交給 white-space:nowrap 讓它自然溢出到內容欄前緣。 */
+#cash-list-body .crm-row > .crm-row-date { display: flex; align-items: baseline; gap: 4px;
+  justify-content: flex-start; white-space: nowrap; }
+#cash-list-body .cash-wd {
+  font-size: 10px; padding: 0 3px; border-radius: 2px;
+  background: #2e2e2e; color: #8b8b8b; line-height: 1.5;
+}
+#cash-list-body .crm-row-date.is-weekend { color: #cfd8e6; }
+#cash-list-body .crm-row-date.is-weekend .cash-wd { background: #24344d; color: #93b4e6; font-weight: 600; }
+#cash-list-body .crm-row-date.is-holiday { color: #e8d5cd; }
+#cash-list-body .crm-row-date.is-holiday .cash-wd { background: #3b2620; color: #e0a48c; font-weight: 600; }
+
 /* 內容欄不截斷 —— 卡單摘要（「連加＊連加＊潮味決－台…」）截掉尾巴就分不出是哪一筆，
    owner 2026-08-27 要求超過就折行。覆寫的是上面資料列那條共用 ellipsis 規則，
    所以 white-space / overflow / text-overflow 三個都要寫回來（只改 white-space 的話，

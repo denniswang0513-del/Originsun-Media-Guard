@@ -62,7 +62,7 @@ def test_cells_are_click_to_edit_and_detail_comes_from_kebab():
     要點最右邊的編輯」—— 格子單擊即編輯；整列**不再**開右側詳情，詳情走最右邊
     ⋮ 的「編輯」。（先前把兩者理解反了，做成 ✎ 才能編輯 —— 已退回。）"""
     js = _read("frontend/tabs/crm/crm-cashbook.js")
-    row = js.split("body.innerHTML = _sorter.sorted(_entries)")[1][:2400]
+    row = js.split("body.innerHTML = _sorter.sorted(")[1][:2400]
     assert row.count('class="cash-ed" onclick="window._cash') >= 5, "五個格子都要單擊即編輯"
     assert "_PEN(" not in row, "✎ 那一版已退回"
     assert 'class="crm-row${e.id === _selectedId' in row
@@ -118,3 +118,27 @@ def test_all_dropdowns_searchable_everywhere():
     assert "MIN_OPTIONS = 4" in up
     ml = _read("frontend/my-ledger.html")
     assert "select-upgrade.js" in ml and "initSelectAutoUpgrade" in ml
+
+
+def test_cashbook_marks_weekends_and_holidays():
+    """六日／假日標記（owner 2026-08-27「假日的功能也做在收支」）。
+
+    判斷一筆屬公屬私時，那天是不是假日是關鍵線索 —— 日期字串本身看不出來。
+    星期用算的（一定準）、假日走 shared/tw-calendar.js 的清單。
+    """
+    cal = _read("frontend/js/shared/tw-calendar.js")
+    # 🔴 只給 'YYYY-MM-DD' 時 JS 當 UTC 午夜解析；用本地 getDay() 讀會差一天
+    assert "getUTCDay()" in cal, "星期要用 UTC 讀，否則時區會讓日期整個位移"
+    for day in ("2026-02-17", "2026-04-05", "2025-10-25", "2024-02-09"):
+        assert day in cal, f"假日清單少了 {day}"
+    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    assert "tw-calendar.js" in js and "_dayMark" in js
+    # helper 要在模組層 —— 曾經被塞進 renderList 內部，事件處理器就抓不到 _offOnly
+    assert "\nlet _offOnly" in js, "篩選狀態要在模組層"
+    assert "\nfunction _dayHtml" in js and "\nfunction _dayCls" in js
+    seg = js.split("function renderList")[1]
+    assert "_offOnly" in seg.split("_sorter.sorted(")[0], "renderList 要吃到六日/假日篩選"
+    html = _read("frontend/tabs/crm/crm-cashbook.html")
+    assert 'id="cash-filter-off"' in html
+    css = _read("frontend/tabs/crm/crm.css")
+    assert ".cash-wd" in css and "is-holiday" in css and "is-weekend" in css

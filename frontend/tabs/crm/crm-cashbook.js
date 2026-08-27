@@ -10,6 +10,9 @@ import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, 
 // 不在這裡複寫（finFetch 會自己附 entity）。
 import { finEntity as _pinEntity, finFetch as _finFetch,
          bankOnly as _bankOnly } from '../finance/fin-utils.js';
+// 六日／國定假日標記（owner 2026-08-27）：看帳時「那天是不是假日」是判斷公私的
+// 關鍵線索，日期字串本身看不出來。星期是算的、假日是清單 —— 見該模組檔頭。
+import { dayMark as _dayMark } from '../../js/shared/tw-calendar.js';
 
 let _entries = [];
 let _invoiceList = [];
@@ -310,6 +313,20 @@ const _NO_VAL_DOT =
 // 舊名保留給類別那格的既有呼叫點（語意相同：沒填就是一顆紅點）
 const _NO_CAT_DOT = _NO_VAL_DOT;
 
+let _offOnly = false;   // 只看六日／假日（純前端篩，日期已在手上）
+
+/** 日期格：日期＋星期（六日／假日再上色）。沒有日期就一個破折號。 */
+function _dayHtml(e) {
+    const m = _dayMark(e.entry_date);
+    if (!m.day) { return '—'; }
+    return `${m.day}<span class="cash-wd">${_esc(m.holiday || m.wd)}</span>`;
+}
+
+function _dayCls(e) {
+    const m = _dayMark(e.entry_date);
+    return m.holiday ? ' is-holiday' : (m.weekend ? ' is-weekend' : '');
+}
+
 function renderList() {
     const body = document.getElementById('cash-list-body');
     if (!body) return;
@@ -320,11 +337,16 @@ function renderList() {
     }
     // 每列各算一次就好 —— 三元判斷與輸出各呼叫一次的話，4,704 列會多跑
     // 9,408 次同樣的計算
-    body.innerHTML = _sorter.sorted(_entries).map((e) => {
+    // 六日／假日是純前端篩（日期已在手上，不必為了它多跑一趟後端）
+    const _rows = _offOnly
+        ? _entries.filter((e) => { const m = _dayMark(e.entry_date);
+                                   return m.holiday || m.weekend; })
+        : _entries;
+    body.innerHTML = _sorter.sorted(_rows).map((e) => {
         const card = _cardAmt(e), out = _bankOut(e);
         return `
         <div class="crm-row${e.id === _selectedId ? ' selected' : ''}">
-            <div class="crm-row-date">${e.entry_date ? e.entry_date.substring(0, 10) : '—'}</div>
+            <div class="crm-row-date${_dayCls(e)}">${_dayHtml(e)}</div>
             <div class="crm-row-name">${_esc(e.summary)}</div>
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
@@ -1094,6 +1116,16 @@ export async function initCrmCashbookTab() {
         _t = setTimeout(() => loadEntries({ cards: false }), 300);   // 搜尋不影響卡片餘額
     });
     // 篩選控件同理 —— 卡片餘額只跟 entity 有關
+    const _offBtn = document.getElementById('cash-filter-off');
+    if (_offBtn) {
+        _offBtn.addEventListener('click', () => {
+            _offOnly = !_offOnly;
+            _offBtn.setAttribute('aria-pressed', String(_offOnly));
+            _offBtn.classList.toggle('crm-btn-primary', _offOnly);
+            _offBtn.classList.toggle('crm-btn-secondary', !_offOnly);
+            renderList();
+        });
+    }
     document.getElementById('cash-filter-book').addEventListener('change', e => {
         const v = e.target.value;
         // 🔴 「（未分類）」是**類別欄為空**的快篩，不是一個叫 __none__ 的類別 ——

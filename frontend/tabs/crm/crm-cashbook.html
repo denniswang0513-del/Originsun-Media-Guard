@@ -26,6 +26,10 @@
   </select>
   <input id="cash-filter-amin" type="number" class="crm-input" placeholder="金額 ≥" title="金額下限（收入或支出的量級）" style="width:88px;">
   <input id="cash-filter-amax" type="number" class="crm-input" placeholder="金額 ≤" title="金額上限" style="width:88px;">
+  <!-- 六日／假日（owner 2026-08-27）：判斷屬公屬私時常要單獨看假日花的錢。
+       純前端篩（列都已在手上），不打後端。 -->
+  <button id="cash-filter-off" type="button" class="crm-btn crm-btn-secondary crm-btn-sm"
+          aria-pressed="false" title="只看落在六日或國定假日的收支">六日／假日</button>
   <div class="crm-toolbar-right">
     <!-- 對帳與匯入 CSV 本來是兩顆 —— 對使用者是同一件事（把外面的帳弄進來），
          合成一個入口，兩者都在展開的面板裡。 -->
