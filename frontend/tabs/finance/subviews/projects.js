@@ -30,9 +30,11 @@ let _dirty = false;
 let _resizeBound = false;
 
 // 表頭與資料列共用一份欄寬 —— 分開寫的話改一邊就整排對不齊
-// 九欄：結案日／專案／客戶／營收／應收／應付／實收／實付／檢查
+// 九欄：結案日／專案／客戶／營收／應收／未收／應付／未付／檢查
+// owner 2026-08-29 要一眼回答五件事：① 營收 ② 客戶會匯多少（扣掉代辦費）
+// ③ 我要匯出去多少 ④ 收齊了嗎還剩多少 ⑤ 付清了嗎還剩多少
 const _GRID = 'display:grid;grid-template-columns:'
-    + '88px 1.4fr 1fr 96px 92px 92px 96px 92px 64px;'
+    + '84px 1.4fr 0.9fr 96px 96px 92px 96px 92px 60px;'
     + 'align-items:center;gap:8px;';
 
 export default async function render(container, ctx = {}) {
@@ -79,7 +81,8 @@ function _renderTotals() {
     if (!el) return;
     const rows = _visible();
     const t = { contract: 0, outsource: 0, invoice_fee: 0, net: 0,
-                received: 0, receivable: 0, ap_open: 0, spent: 0 };
+                received: 0, receivable: 0, ap_open: 0, spent: 0,
+                client_wire: 0, payout: 0 };
     rows.forEach((p) => {
         t.contract += p.contract || 0;
         t.net += p.net || 0;
@@ -87,6 +90,8 @@ function _renderTotals() {
         t.receivable += p.receivable || 0;
         t.ap_open += p.ap_open || 0;
         t.spent += p.spent || 0;
+        t.client_wire += p.client_wire || 0;
+        t.payout += p.payout || 0;
         t.outsource += (p.detail && p.detail.outsource) || 0;
         t.invoice_fee += (p.detail && p.detail.invoice_fee) || 0;
     });
@@ -96,13 +101,13 @@ function _renderTotals() {
     // **真的收到的錢**，同一頁兩個「實收」指不同東西會看錯帳。這裡改名，
     // 詳情面板與 Sheet 維持原詞（那是結案總表的正本用語）。
     el.innerHTML = cell('營收', 'contract', '#eee')
-        + cell('委外', 'outsource', '#fca5a5')
-        + cell('代辦費', 'invoice_fee', '#fca5a5')
-        + cell('淨收', 'net', '#eee')
-        + cell('實收', 'received', '#86efac')
-        + cell('應收', 'receivable', '#fbbf24')
-        + cell('實付', 'spent', '#c4b5fd')
-        + cell('應付', 'ap_open', '#fca5a5');
+        + cell('應收', 'client_wire', '#86efac')
+        + cell('已收', 'received', '#86efac')
+        + cell('未收', 'receivable', '#fbbf24')
+        + cell('應付', 'payout', '#c4b5fd')
+        + cell('已付', 'spent', '#c4b5fd')
+        + cell('未付', 'ap_open', '#fca5a5')
+        + cell('淨收', 'net', '#eee');
 }
 
 function _renderCount(n, rows) {
@@ -168,10 +173,10 @@ function _renderShell() {
                 <div class="crm-list-header" style="${_GRID}">
                     <span>結案日</span><span>專案</span><span>客戶</span>
                     <span style="text-align:right;">營收</span>
-                    <span style="text-align:right;" title="還沒收到的錢">應收</span>
-                    <span style="text-align:right;" title="還沒付出去的（未付的請款單）">應付</span>
-                    <span style="text-align:right;" title="真的收到的錢">實收</span>
-                    <span style="text-align:right;" title="真的付出去的（掛在本案的現金支出）">實付</span>
+                    <span style="text-align:right;" title="客戶總共會匯給我多少＝營收 − 代辦費 − 個人稅款（源頭代扣的錢不會經過我的手）">應收</span>
+                    <span style="text-align:right;" title="還沒收到的＝營收 − 實收。0 表示收齊了（帳上收款記全額，所以這裡跟營收同基準）">未收</span>
+                    <span style="text-align:right;" title="我總共要匯出去多少＝委外 + 行政雜支 + 稅金 + 買發票">應付</span>
+                    <span style="text-align:right;" title="還沒付出去的（未付的請款單）。0 表示付清了">未付</span>
                     <span style="text-align:right;" title="淨收 − Σ工項；0 表示工項拆分剛好對上">檢查</span>
                 </div>
                 <div id="fpl-list-body"></div>
@@ -247,10 +252,10 @@ function _renderList() {
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9ca3af;"
                   title="${esc(p.client)}">${esc(p.client)}</span>
             <span style="text-align:right;">${fmtNum(p.contract)}</span>
+            ${_amt(p.client_wire, '#86efac')}
             ${_amt(p.receivable, '#fbbf24')}
+            ${_amt(p.payout, '#c4b5fd')}
             ${_amt(p.ap_open, '#fca5a5')}
-            ${_amt(p.received, '#86efac')}
-            ${_amt(p.spent, '#c4b5fd')}
             <span style="text-align:right;color:${p.check ? '#fbbf24' : '#4b5563'};">${p.check ? fmtNum(p.check) : '0'}</span>
         </div>`).join('')
         || '<div class="crm-empty">沒有符合的專案</div>';

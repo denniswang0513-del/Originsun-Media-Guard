@@ -31,6 +31,7 @@ from config import load_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
 from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, apply_crm_costs,
+                                 client_wire, payout_total,
                                  SELECTABLE_SOURCES, SUM_KEYS, apply_source_fee,
                                  code_of, compute, expected_cash_in,
                                  income_items, norm_detail, receivable_status)
@@ -236,6 +237,10 @@ async def project_ledger(request: Request, entity: str = ""):
             "receivable": int(p.amount_receivable or 0),
             "payment_status": p.payment_status or "",
             "spent": spent, "ap_open": ap_open,
+            # 五件事（owner 2026-08-29）：② 客戶會匯多少 ③ 我要匯出去多少
+            # ④⑤ 的「還剩多少」由前端用 營收−實收、應付−已付 算（同一份資料）
+            "client_wire": client_wire(int(p.contract_amount or 0), detail),
+            "payout": payout_total(detail),
             "detail": detail, "net": net, "check": check,
         }
         items.append(item)

@@ -192,6 +192,31 @@ def apply_source_fee(contract: int, d: dict) -> dict:
     return d
 
 
+#: **源頭代扣** —— 客戶匯款前就被扣走的錢，永遠不會經過我們的手。
+#: 代開業者的代辦費、執行業務所得的個人稅款。
+WITHHELD_FIELDS = ("invoice_fee", "personal_tax")
+
+#: **要自己匯出去的** —— 委外、行政雜支、稅金、買發票。
+#: 🔴 不含源頭代扣：那筆錢沒進來過，再算一次「要付出去」就是重複。
+PAYOUT_FIELDS = ("outsource", "misc", "tax_fee", "buy_invoice")
+
+
+def client_wire(contract: int, d: dict) -> int:
+    """② 客戶最終會匯進來多少 ＝ 營收 − 源頭代扣。
+
+    🔴 與 `expected_cash_in` 的差別：那支只在案源＝代開發票時才扣代辦費
+    （它服務的是收款狀態判定）；這支**一律扣**，因為 owner 2026-08-29 說明
+    「我收到的就已經是扣除後的了」—— 帳上記全額收入＋代辦費支出兩列，是為了
+    讓帳面看得見全額，實際匯進來的一直是淨額。
+    """
+    return int(contract or 0) - sum(int((d or {}).get(k) or 0) for k in WITHHELD_FIELDS)
+
+
+def payout_total(d: dict) -> int:
+    """③ 這一案總共要自己匯出去多少（委外＋雜支＋稅金＋買發票）。"""
+    return sum(int((d or {}).get(k) or 0) for k in PAYOUT_FIELDS)
+
+
 def expected_cash_in(contract: int, d: dict) -> int:
     """這一案**實際會匯進來**的錢 —— 應收與收款狀態都以此為基準，不是營收。
 
