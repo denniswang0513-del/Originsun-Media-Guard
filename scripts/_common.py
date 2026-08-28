@@ -205,3 +205,28 @@ async def assert_safe_rebuild(conn, checks, force: bool) -> None:
         print("   ·", h)
     print("   確定要放棄這些資料的話，加 --force-rebuild 再跑一次。")
     sys.exit(1)
+
+
+async def load_taxonomy_tree(conn, entity="mine"):
+    """收支分類樹 → `({(parent_id, name): id}, {id: [路徑…]})`。
+
+    給改分類的腳本用：寫 category/sub_item 的同時一定要把 `taxonomy_node_id`
+    一起寫對，否則會留下「有類別、但不在樹上」的孤兒 —— 樹狀篩選看不到它，
+    後台的影響筆數也算不到它。規則正本見 `core.cash_taxonomy.mirror_from_path`。
+    """
+    from core.cash_tree import index_paths   # walk 只有一份（含環保險）
+
+    rows = await conn.fetch("SELECT id, parent_id, name FROM cash_taxonomy_nodes"
+                            " WHERE entity=$1", entity)
+    child = {(r["parent_id"] or "", r["name"]): r["id"] for r in rows}
+    return child, index_paths((r["id"], r["parent_id"], r["name"]) for r in rows)
+
+
+def node_for_path(child, names):
+    """路徑（名稱陣列）→ 節點 id；對不到回空字串。"""
+    nid = ""
+    for nm in names:
+        nid = child.get((nid, nm), "")
+        if not nid:
+            return ""
+    return nid

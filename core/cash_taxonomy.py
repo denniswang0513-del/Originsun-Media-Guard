@@ -14,7 +14,13 @@
 
   類別（book）  公司 / 個人 / 家用 / 轉匯與定存 / 信用卡
   項目（item）  專案 / 生活 / 變動支出 / 薪水 / 代墊 …（category 的後半段）
-  子項目        外出用餐 / 出國度假 / 交通 …（sub_item 欄，自由詞）
+  子項目        外出用餐 / 出國度假 / 交通 …（sub_item 欄）
+
+🔴 2026-08-27 補：**深度不只三層**。owner 的 Sheet 只有三個固定分類欄，某支要
+長第四、五層時他就溢出到旁邊的欄（「款別」「專案標籤」）——
+`家用▸變動支出▸醫療保健▸乳癌治療▸台北馬偕` 是五層。正本因此改成一張樹表
+（`db.models.CashTaxonomyNode`），而上面那三欄降級為**路徑前三層的鏡射**
+（`mirror_from_path`）。三欄的介面不變，所以既有消費端一行都不用改。
 """
 from __future__ import annotations
 
@@ -56,6 +62,41 @@ def item_of(category) -> str:
     return split_category(category)[1]
 
 
+def mirror_from_path(path) -> tuple:
+    """節點路徑 → `(category, item, sub_item)` 三欄鏡射。**規則只有這一份。**
+
+        ['家用','變動支出','醫療保健','乳癌治療','台北馬偕']
+            → ('家用_變動支出', '變動支出', '醫療保健')
+
+    🔴 第四層以後**刻意不進這三欄**：那三欄是既有消費端的介面
+    （finance_category_map 對映、三表、卡債、core.project_link、銀行匯入規則、
+    petty_item_for），塞進去等於讓它們看到不認識的詞。深度活在
+    `crm_cash_entries.taxonomy_node_id` 的路徑裡，加層數不必碰任何一個消費端。
+    """
+    p = [str(x).strip() for x in (path or []) if str(x).strip()]
+    book = p[0] if len(p) > 0 else ""
+    item = p[1] if len(p) > 1 else ""
+    sub = p[2] if len(p) > 2 else ""
+    return join_category(book, item), item, sub
+
+
+def path_from_columns(category, sub_item) -> list:
+    """三欄 → 路徑（`mirror_from_path` 的反向）。**規則同一份** —— 寫入端反查
+    節點（routers/crm/finance._sync_taxonomy）與種子掃歷史組合
+    （db/seed_cash_taxonomy）都吃它；各拼各的，種下的節點跟反查的路徑就會歧義。
+    """
+    book, item = split_category(category)
+    if not book:
+        return []
+    p = [book]
+    if item:
+        p.append(item)
+    s = (sub_item or "").strip()
+    if s:
+        p.append(s)
+    return p
+
+
 def taxonomy(categories, sub_items=()) -> dict:
     """把現有的 category 清單整理成三層樹（給前端的下拉／篩選用）。
 
@@ -77,3 +118,44 @@ def taxonomy(categories, sub_items=()) -> dict:
                                                  if b in KNOWN_BOOKS else 99, b))
     return {"books": books, "items_by_book": items_by_book,
             "sub_items": sorted({s for s in (sub_items or ()) if s})}
+
+
+# ── 私帳類別 → 母公司零用金的會計項目 ────────────────────────────────
+# 兩本帳的詞彙不同：私帳寫 `公司_器材`（他自己怎麼分帳），母公司的會計項目是
+# `設備耗材`（finance_category_map 的鍵，AP 的科目從它來）。把私帳的一列推去
+# 零用金請款時要換詞 —— 直接把複合鍵塞進單據的 item，科目就落到另一條分支，
+# 應付款的科目跟著錯。
+#
+# 只列「去掉 `公司_` 前綴後對不上母公司詞彙」的那幾個；其餘（教育訓練／
+# 業績獎金／其他…）去前綴後本來就一樣，交給下面的通則。
+PETTY_ITEM_OVERRIDES = {
+    "公司_專案": "專案雜支",       # 私帳的支出列掛在收入類別下＝該案的成本
+    "公司_專案支出": "專案雜支",
+    "公司_代墊": "專案雜支",
+    "公司_器材": "設備耗材",
+    "公司_軟體與耗材": "軟體網路服務",
+    "公司_餐敘": "交際應酬",
+    "公司_加班": "薪資",
+    "公司_薪水": "薪資",
+    "公司_年終獎金": "獎金",
+    "公司_業績獎金": "獎金",
+}
+
+
+def petty_item_for(category, valid_items=()) -> str:
+    """`公司_器材` → `設備耗材`。對不出來就回**空字串**。
+
+    🔴 對不出來時不要硬猜一個項目 —— 猜錯會讓那筆錢默默記到別的科目，
+    比留白更難發現。空字串的意思是「請人挑」，呼叫端據此把欄位留給使用者。
+    `valid_items` 給了就當白名單（正本＝finance_category_map source='cash'）。
+    """
+    c = (category or "").strip()
+    if not c:
+        return ""
+    valid = set(valid_items or ())
+    hit = PETTY_ITEM_OVERRIDES.get(c)
+    if not hit:
+        hit = item_of(c) or c        # 去前綴；沒有前綴就是它自己
+    if valid and hit not in valid:
+        return ""
+    return hit

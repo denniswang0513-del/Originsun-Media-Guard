@@ -241,6 +241,8 @@ class CrmProject(Base):
     # 私帳案推送到專案管理（owner 2026-08-25）：1＝出現在母公司管線、列表標
     # 「後期專案」。只對 entity='mine' 有意義；錢流歸屬不變（仍在私帳，金額
     # 對無 mine scope 者照抹）。
+    # 🔴 這個旗標**不影響金額可見性** —— 2026-08-28 一度讓它放寬，當天被 owner
+    # 收回：「推到私帳沒有私帳的權限就要看不到了」。抹除只看 entity。
     crm_pushed = Column(Integer, nullable=False, server_default="0")
     flow_checks = Column(JSONB, nullable=True)                   # 工作流手動里程碑（範本正本在 core/project_flow.py）
     status = Column(String(32), nullable=False, default="洽詢")
@@ -717,6 +719,10 @@ class CrmPaymentRequest(Base):
     # 零用金批次產生的應付款（一張批次 → 多張 AP：會計項目 × 認列月份）。
     # 🔴 方向是 AP→批次 而不是批次→AP：一對多的那一邊才存得下。
     reimbursement_id = Column(String(32), nullable=True, index=True)
+    # 從私帳逐案損益的「委外人員名單」一鍵請款時，記住是哪一行成本行
+    # （crm_project_cost_lines.id）—— 沒有它就只能靠人名＋金額目測，同一個人
+    # 同一筆金額在同一案出現兩次時分不出誰請過了。
+    cost_line_id = Column(String(32), nullable=True, index=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -794,6 +800,9 @@ class CrmCashEntry(Base):
     payment_request_id = Column(String(32), nullable=True)       # AP 硬連結 → crm_payment_requests
     loan_payment_id = Column(String(32), nullable=True)          # 貸款繳款硬連結 → finance_loan_payments（treatment=loan，不進損益）
     expense_id = Column(String(32), nullable=True, index=True)   # 零用金逐行落帳硬連結 → crm_project_expenses（重跑不重複記帳）
+    # 分類樹的**葉節點**（→ cash_taxonomy_nodes.id）。上面的 category/item/sub_item
+    # 是這條路徑前三層的鏡射，第四層以後只有這裡看得到（見 CashTaxonomyNode）。
+    taxonomy_node_id = Column(String(32), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -2016,4 +2025,48 @@ class HrBenefitEntry(Base):
     __table_args__ = (
         Index("idx_benefit_entry_pool_status", "pool_id", "status"),
         Index("idx_benefit_entry_staff", "staff_id", "status"),
+    )
+
+
+class CashTaxonomyNode(Base):
+    """收支分類樹 —— 私帳的類別／項目／子項目…（**深度不限**）。
+
+    🔴 為什麼是樹不是三個欄位：owner 的 Google Sheet 只有三個固定分類欄
+    （類別／項目／子項目），某一支要長第四、五層時他就把值溢出到旁邊的欄
+    （「款別」「專案標籤」）—— owner 原話「那時候表沒地方擴充 只好先暫時放在
+    專案的位置」。實測 2026-08-27：
+
+        家用 ▸ 變動支出 ▸ 醫療保健 ▸ 乳癌治療 ▸ 台北馬偕      （五層）
+        公司 ▸ 專案     ▸ 已收帳款/已付稅款/委外已付           （三層）
+
+    深度因分支而異，所以欄位數固定的模型一定會再溢出一次。
+
+    🔴 與 `crm_cash_entries` 的關係：那邊的 `category`/`item`/`sub_item`
+    **不動、繼續寫**，改成本樹路徑**前三層的鏡射**（規則正本
+    `core.cash_taxonomy.mirror_from_path`）。第四層以後只活在 `taxonomy_node_id`
+    的路徑裡。這樣「加深度」不必碰 finance_category_map 對映、三表、卡債、
+    core.project_link、銀行匯入規則、petty_item_for 任何一個消費端。
+
+    🔴 `entity` 只放 'mine'。母公司那本用的是 finance_category_map 的**平面**
+    科目（行政／薪資／交際應酬…），混進來私帳的類別下拉會從 5 個爆成 37 個
+    （2026-08-27 實測，註解在 routers/crm/finance.py 的 cash options）。
+    """
+    __tablename__ = "cash_taxonomy_nodes"
+
+    id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="mine")
+    # 🔴 根節點用**空字串**不是 NULL —— Postgres 的 UNIQUE 視 NULL 互不相等，
+    # 用 NULL 當根，第一層就擋不掉重複。
+    parent_id = Column(String(32), nullable=False, server_default="", index=True)
+    name = Column(String(64), nullable=False)
+    depth = Column(Integer, nullable=False, default=1)      # 1=類別 2=項目 3=子項目 …
+    sort = Column(Integer, nullable=False, default=0)
+    # 停用＝新列挑不到，**舊列照樣顯示**（分類會退流行，但歷史不該消失）
+    active = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("entity", "parent_id", "name", name="uq_cash_tax_node"),
+        Index("idx_cash_tax_entity_parent", "entity", "parent_id", "sort"),
     )

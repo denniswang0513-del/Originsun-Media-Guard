@@ -6,8 +6,8 @@
  * 科目代碼不出現在主 UI：下拉顯示 name（name_plain 進 option title tooltip），
  * treatment 全用白話標籤。後端 API prefix /api/v1/finance（fin-utils.finFetch）。
  */
-import { finFetch, esc, fmtNum, finToast, finSubviewBoot, TREATMENT_OPTIONS, ACCT_KIND_OPTIONS } from '../fin-utils.js';
-import { createSortable, sortableTh } from '../../crm/crm-utils.js';   // 點欄頭排序（通用排序器）
+import { finFetch, finEntity, esc, fmtNum, finToast, finSubviewBoot, TREATMENT_OPTIONS, ACCT_KIND_OPTIONS } from '../fin-utils.js';
+import { createSortable, sortableTh, crmFetch } from '../../crm/crm-utils.js';   // 點欄頭排序（通用排序器）+ 分類樹 API（在 /crm 底下不是 /finance）
 
 let _c = null;
 let _isCurrent = () => true;
@@ -16,6 +16,7 @@ let _coa = [];        // 會計科目
 let _map = [];        // 類別對映列
 let _unmapped = [];   // 待歸類
 let _fee = null;      // 記帳費費率（含歷史 + 未來幾期預覽）
+let _tax = [];        // 收支分類樹（**只有私帳有**，母公司走上面那張平面對映表）
 
 // 精靈帳戶列狀態（re-render 前先 _syncWizRows 保住已輸入值）
 let _wizRows = [];
@@ -79,10 +80,16 @@ export default async function render(container, ctx = {}) {
             () => finFetch('/category-map'),
             () => finFetch('/category-map/unmapped').catch(() => ({ items: [] })),
             () => finFetch('/bookkeeping-fee').catch(() => null),
+            // 🔴 分類樹只有私帳有；母公司那本用的是平面的類別對映表（詞彙不同，
+            // 混在一起私帳的類別下拉會從 5 個爆成 37 個 —— 見 core/cash_taxonomy.py）
+            () => (finEntity() === 'mine'
+                ? crmFetch('/cash-taxonomy/nodes?entity=mine').catch(() => ({ tree: [] }))
+                : Promise.resolve({ tree: [] })),
         ],
     });
     if (!results) return;
-    const [bank, coa, map, unmapped, fee] = results;
+    const [bank, coa, map, unmapped, fee, tax] = results;
+    _tax = (tax && tax.tree) || [];
     _fee = fee;
     _bankAccounts = bank.items || [];
     _coa = coa.items || [];
@@ -132,10 +139,12 @@ function _renderShell() {
         <p style="color:#888;font-size:12px;margin:0 0 14px;">期初設定 + 收支類別 → 財務科目的對映，是三表與儀表板的地基。</p>
         ${_bankAccounts.length === 0 ? _wizardHtml() : ''}
         ${_unmappedHtml()}
+        ${_taxHtml()}
         ${_feeHtml()}
         ${_mapHtml()}
     `;
     if (_bankAccounts.length === 0) _renderWizRows();
+    _wireTaxNewRow();
     _mapSorter.attach();
 }
 
@@ -465,3 +474,209 @@ _fs.saveMap = async (btn) => {
         btn.disabled = false; btn.textContent = '💾 儲存變更';
     }
 };
+
+// ── 收支分類樹（私帳專屬）─────────────────────────────────────────
+// 正本＝後端 cash_taxonomy_nodes，深度不限。這張卡只在**我的帳**出現：母公司那
+// 本用的是上面那張平面的類別對映表，兩套詞彙不同（見 core/cash_taxonomy.py）。
+//
+// 🔴 改名／搬家在後端是**資料遷移**（收支的三欄鏡射 ＋ finance_category_map 的
+// 鍵一起改）。所以動到有資料的節點一律先講清楚影響筆數，做完也把後端實際改了
+// 什麼回報出來 —— 靜靜改掉 N 筆帳是最難查的那種變更。
+
+const _taxOpen = new Set();      // 展開的節點（預設只展開第一層）
+let _taxAdding = null;           // 正在新增子分類的父節點 id（'' = 第一層），null = 沒有
+let _taxFlatAll = [];            // 整棵攤平（每次 _taxHtml 算一次；每列各攤一次是 O(n²)）
+
+function _taxFlat(nodes, out = []) {
+    for (const n of nodes) { out.push(n); _taxFlat(n.children, out); }
+    return out;
+}
+
+function _taxFind(id) { return _taxFlatAll.find(n => n.id === id); }
+
+/** 可以搬去的上層：**同深度**的其他節點（後端也擋，這裡是不給他選錯的）。 */
+function _taxMoveOptions(node, parentId) {
+    if (node.depth < 2) return '';        // 第一層上面沒東西了，不能搬
+    const banned = new Set(_taxFlat([node]).map(n => n.id));
+    const opts = _taxFlatAll
+        .filter(n => n.depth === node.depth - 1 && !banned.has(n.id))
+        .map(n => `<option value="${esc(n.id)}"${n.id === parentId ? ' selected' : ''}>${esc(n.path.join(' ▸ '))}</option>`);
+    return opts.length > 1 ? opts.join('') : '';
+}
+
+function _taxNewRow(parentId, depth) {
+    return `<div style="padding:3px 0 3px ${depth * 20 + 20}px;">
+        <input class="crm-input fin-tax-new" data-parent="${esc(parentId)}"
+               placeholder="新分類名稱，Enter 建立（Esc 取消）"
+               style="font-size:12px;padding:2px 6px;width:230px;"></div>`;
+}
+
+/** 筆數：直接掛在它上面的 vs 整支。0/0 就什麼都不印（大部分節點是這樣）。 */
+function _taxCountText(n) {
+    if (n.count && n.subtree_count > n.count) {
+        return `${fmtNum(n.count)} 筆（整支 ${fmtNum(n.subtree_count)}）`;
+    }
+    if (n.count) return `${fmtNum(n.count)} 筆`;
+    return n.subtree_count ? `整支 ${fmtNum(n.subtree_count)} 筆` : '';
+}
+
+function _taxRowHtml(n, parentId) {
+    const kids = n.children.length;
+    const open = _taxOpen.has(n.id);
+    const move = _taxMoveOptions(n, parentId);
+    const btn = (label, call) =>
+        `<button class="crm-btn crm-btn-sm crm-btn-secondary" onclick="window._finSet.${call}">${label}</button>`;
+    return `
+    <div class="fin-tax-row" data-tax="${esc(n.id)}"
+         style="display:flex;align-items:center;gap:6px;padding:2px 0;border-top:1px solid #262626;
+                padding-left:${(n.depth - 1) * 20}px;${n.active ? '' : 'opacity:.45;'}">
+        <span style="width:14px;color:#666;${kids ? 'cursor:pointer;' : ''}"
+              ${kids ? `onclick="window._finSet.taxToggleOpen('${esc(n.id)}')"` : ''}>${kids ? (open ? '▾' : '▸') : ''}</span>
+        <span class="tax-name" style="color:#eee;min-width:130px;">${esc(n.name)}</span>
+        <span style="color:#666;font-size:11px;min-width:110px;">${_taxCountText(n)}</span>
+        ${btn('改名', `taxRename('${esc(n.id)}')`)}
+        ${btn('＋子分類', `taxAdd('${esc(n.id)}')`)}
+        ${btn(n.active ? '停用' : '啟用', `taxToggle('${esc(n.id)}',${n.active ? 0 : 1})`)}
+        ${!kids && !n.subtree_count ? btn('刪除', `taxDelete('${esc(n.id)}')`) : ''}
+        ${move ? `<select class="crm-select" style="font-size:11px;padding:1px 4px;max-width:200px;"
+                    title="搬到別的上層分類底下"
+                    onchange="window._finSet.taxMove('${esc(n.id)}', this.value)">${move}</select>` : ''}
+    </div>
+    ${_taxAdding === n.id ? _taxNewRow(n.id, n.depth) : ''}
+    ${open ? n.children.map(c => _taxRowHtml(c, n.id)).join('') : ''}`;
+}
+
+function _taxHtml() {
+    if (!_tax.length) return '';
+    _taxFlatAll = _taxFlat(_tax);
+    return `
+    <div id="finset-tax-card" style="background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:16px;margin-bottom:16px;">
+        <h3 style="color:#eee;margin:0 0 4px;font-size:14px;">🌳 收支分類樹</h3>
+        <p style="color:#888;font-size:12px;margin:0 0 4px;">
+            收支明細那三個分類欄的值域。<b>深度不限</b> —— 需要再細分就往下長一層
+            （家用 ▸ 變動支出 ▸ 醫療保健 ▸ 乳癌治療 ▸ 就醫地點）。第四層以後不進
+            收支的欄位，只活在路徑裡，所以加層數不會動到科目對映。</p>
+        <p style="color:#c9a08a;font-size:12px;margin:0 0 12px;">
+            改第一、二層的名字＝改到 <b>category</b> 複合鍵，收支的欄位與科目對映會一起更新。
+            有資料的節點請優先用「停用」（歷史照樣看得到，只是新的挑不到）。</p>
+        <div>${_tax.map(n => _taxRowHtml(n, '')).join('')}</div>
+        ${_taxAdding === '' ? _taxNewRow('', 0) : ''}
+        <div style="margin-top:10px;">
+            <button class="crm-btn crm-btn-secondary crm-btn-sm"
+                    onclick="window._finSet.taxAdd('')">＋ 新增第一層分類</button>
+        </div>
+    </div>`;
+}
+
+/** 新增列的鍵盤處理 + 自動 focus。_renderShell 每次重畫都要重掛。 */
+function _wireTaxNewRow() {
+    const inp = _c && _c.querySelector('.fin-tax-new');
+    if (!inp) return;
+    inp.focus();
+    inp.addEventListener('keydown', (k) => {
+        if (k.key === 'Escape') { _taxAdding = null; _renderShell(); return; }
+        if (k.key !== 'Enter') return;
+        const name = inp.value.trim();
+        const parent = inp.dataset.parent;
+        _taxAdding = null;
+        if (!name) { _renderShell(); return; }
+        _taxCreate(parent, name);
+    });
+    inp.addEventListener('blur', () => setTimeout(() => {
+        if (_taxAdding !== null && !inp.value.trim()) { _taxAdding = null; _renderShell(); }
+    }, 200));
+}
+
+_fs.taxToggleOpen = (id) => {
+    if (_taxOpen.has(id)) _taxOpen.delete(id); else _taxOpen.add(id);
+    _renderShell();
+};
+
+_fs.taxAdd = (parentId) => {
+    _taxAdding = parentId;
+    if (parentId) _taxOpen.add(parentId);
+    _renderShell();
+};
+
+/** 改名：格內換成 input（Enter 存、Esc 取消）。有資料就先講清楚會動到什麼。 */
+_fs.taxRename = (id) => {
+    const n = _taxFind(id);
+    const cell = _c.querySelector(`.fin-tax-row[data-tax="${id}"] .tax-name`);
+    if (!n || !cell || cell.querySelector('input')) return;
+    cell.innerHTML = '<input class="crm-input" style="font-size:12px;padding:1px 6px;width:150px;">';
+    const inp = cell.querySelector('input');
+    inp.value = n.name;
+    inp.focus();
+    inp.select();
+    inp.addEventListener('keydown', (k) => {
+        if (k.key === 'Escape') { _renderShell(); return; }
+        if (k.key !== 'Enter') return;
+        const name = inp.value.trim();
+        if (!name || name === n.name) { _renderShell(); return; }
+        if (n.subtree_count && n.depth <= 2
+            && !confirm(`「${n.name}」改成「${name}」會一併更新 ${fmtNum(n.subtree_count)} 筆收支的`
+                        + `類別欄，以及它在科目對映表裡的那一筆。確定？`)) {
+            _renderShell(); return;
+        }
+        _taxSave(id, { name });
+    });
+};
+
+_fs.taxToggle = (id, active) => {
+    const n = _taxFind(id);
+    if (!active && n && n.subtree_count
+        && !confirm(`停用「${n.name}」？已經記在上面的 ${fmtNum(n.subtree_count)} 筆照樣看得到，`
+                    + '只是新的收支挑不到它。')) return;
+    _taxSave(id, { active });
+};
+
+_fs.taxMove = (id, parentId) => {
+    const n = _taxFind(id);
+    const tgt = _taxFind(parentId);
+    if (!n || !tgt) { _renderShell(); return; }
+    if (!confirm(`把「${n.name}」搬到「${tgt.path.join(' ▸ ')}」底下？`
+                 + (n.subtree_count ? `會一併更新 ${fmtNum(n.subtree_count)} 筆收支的類別欄。` : ''))) {
+        _renderShell(); return;
+    }
+    _taxSave(id, { parent_id: parentId });
+};
+
+_fs.taxDelete = async (id) => {
+    const n = _taxFind(id);
+    if (!n || !confirm(`刪除分類「${n.name}」？（它底下沒有子分類，也沒有任何收支）`)) return;
+    try {
+        await crmFetch(`/cash-taxonomy/nodes/${encodeURIComponent(id)}?entity=${finEntity()}`,
+                       { method: 'DELETE' });
+        finToast('已刪除');
+        _fs.reload();
+    } catch (e) { finToast(e.message, true); }
+};
+
+async function _taxSave(id, body) {
+    try {
+        const r = await crmFetch(`/cash-taxonomy/nodes/${encodeURIComponent(id)}`, {
+            method: 'PUT', body: JSON.stringify({ ...body, entity: finEntity() }),
+        });
+        const bits = [];
+        if (r.rows_remirrored) bits.push(`更新 ${fmtNum(r.rows_remirrored)} 筆收支的分類欄`);
+        if (r.category_map_renamed && r.category_map_renamed.length) {
+            bits.push('科目對映 ' + r.category_map_renamed.map(x => x[0] + '→' + x[1]).join('、'));
+        }
+        finToast(bits.length ? '已儲存：' + bits.join('；') : '已儲存');
+        _fs.reload();
+    } catch (e) {
+        finToast(e.message, true);
+        _renderShell();
+    }
+}
+
+async function _taxCreate(parentId, name) {
+    try {
+        const r = await crmFetch('/cash-taxonomy/nodes', {
+            method: 'POST',
+            body: JSON.stringify({ parent_id: parentId, name, entity: finEntity() }),
+        });
+        finToast(r.existed ? `「${name}」本來就有了` : '已新增');
+        _fs.reload();
+    } catch (e) { finToast(e.message, true); }
+}

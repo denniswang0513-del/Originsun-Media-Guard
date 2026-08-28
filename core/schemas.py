@@ -537,6 +537,22 @@ class PettySubmitPayload(BaseModel):
     notes: str = ""
 
 
+class PettyFromCashPayload(BaseModel):
+    """收支明細 → 零用金單據（收支表上的「推送零用金請款」）。
+
+    `preview=True` 只試算不寫 —— 前端先把「會建成什麼樣」給人看過再送出，
+    因為推完之後那筆錢就進了公司的請款流程，退回要動到三張表。
+
+    ⚠️ 沒有 `staff_id` —— 請款人是身分不是欄位（同 PettyExpensePayload）。
+    代為推送走路徑參數 `/petty/staff/{staff_id}/from-cash`。
+    """
+    entry_id: str = ""              # 一次一列（owner 拍板「不是一次一批」）
+    item: str = ""                  # 空 → 由類別對映推（對不出來後端會擋）
+    project_id: Optional[str] = None
+    notes: str = ""
+    preview: bool = False
+
+
 class ExpenseLinkPayload(BaseModel):
     """發一條雜支登記的分享連結（token）。
 
@@ -673,6 +689,8 @@ class PaymentRequestPayload(BaseModel):
     # 代開請款單指向的那張發票。號碼可能是空的（代開還沒拿到號），id 才是可靠的鍵
     # —— 付款時要靠它把發票收尾到「已撥款」。
     source_invoice_id: Optional[str] = None
+    # 從「委外人員名單」一鍵請款時帶的成本行 id（防重複請款）
+    cost_line_id: Optional[str] = None
     project_id: Optional[str] = None
     project_label: str = ""
     payment_date: Optional[str] = None
@@ -691,6 +709,40 @@ class PaymentRequestPayload(BaseModel):
     advance_returned: int = 0
     notes: str = ""
     # 兩本帳：None＝建立時落 'parent'、更新時維持既有值；🔴 不可給 "parent" 當預設——整包 model_dump 寫回會把我的帳列洗回母公司
+    entity: Optional[str] = None
+
+
+class ProjectLedgerMovePayload(BaseModel):
+    """把專案搬到另一本帳（`entity`：'mine' 或 'parent'）。
+
+    🔴 這是全 repo「更新一律不得換帳本」的**唯一例外**，所以走專屬端點而不是
+    塞進 PUT /projects/{id} —— 換帳本要有自己的守衛（只有私帳 full scope 能按、
+    身上掛了錢就擋）與自己的痕跡，混進一般更新裡遲早被當成普通欄位寫過去。
+    """
+    entity: str = ""
+
+
+class CashTaxonomyNodePayload(BaseModel):
+    """在收支分類樹上長一個節點（收支明細的「＋自訂…」）。
+
+    `parent_id` 空＝第一層。**不收 depth**：深度是位置的性質不是欄位，由後端從
+    父節點推 —— 讓前端送，遲早會送出一個 depth 跟 parent 對不上的節點。
+    """
+    parent_id: str = ""
+    name: str = ""
+    entity: Optional[str] = None
+
+
+class CashTaxonomyNodeUpdate(BaseModel):
+    """改分類樹的節點（後台編輯器）。**部分更新**：只送要改的欄。
+
+    name / parent_id 是**資料遷移**不是改標籤 —— 第一、二層的名字就是 category
+    複合鍵，改了要連 finance_category_map 的對映一起改，否則那批帳從三表消失。
+    後端 update_cash_taxonomy_node 一手包辦，呼叫端不要自己補。
+    """
+    name: Optional[str] = None
+    parent_id: Optional[str] = None
+    active: Optional[int] = None
     entity: Optional[str] = None
 
 
@@ -721,6 +773,10 @@ class CashEntryPayload(BaseModel):
     advance_payment_id: Optional[str] = None
     bank_account_id: Optional[str] = None       # 掛哪個銀行帳戶（財務階段二）
     payment_request_id: Optional[str] = None    # AP 硬連結 → crm_payment_requests
+    # 分類樹的葉節點（cash_taxonomy_nodes.id）。送了就是**它說了算** ——
+    # category/item/sub_item 由後端 _sync_taxonomy 從路徑推導，前端送的不算數。
+    # 送空字串＝清掉分類（連三欄一起清）。沒送＝這次沒動分類。
+    taxonomy_node_id: Optional[str] = None
     # 兩本帳：None＝建立時落 'parent'、更新時維持既有值；🔴 不可給 "parent" 當預設——整包 model_dump 寫回會把我的帳列洗回母公司
     entity: Optional[str] = None
 

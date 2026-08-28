@@ -1,3 +1,4 @@
+import gzip
 import os
 # 確保 VBS/BAT 啟動時 CUDA 環境正確（TEMP relaunch 可能丟失 GPU 存取）
 os.environ.setdefault('CUDA_DEVICE_ORDER', 'PCI_BUS_ID')
@@ -105,6 +106,97 @@ class NoCacheMiddleware:
 
         await self.app(scope, receive, send_wrapper)
 
+
+class GzipJsonMiddleware:
+    """只壓 `application/json` 的純 ASGI 壓縮層。
+
+    owner 平常從外面（cloudflared）開帳：收支明細一次回 4,733 列＝3.5 MB，
+    在隧道上就是主要成本；JSON 每列重複同一批欄位名，壓縮率極高。
+
+    🔴 **不用 starlette 的 GZipMiddleware**：它不分內容型別，會連
+    OTA 的 ~1GB ZIP（純燒 CPU）、看片門戶帶 Range 的影片（壓了 Range 就壞）、
+    SSE `text/event-stream`（會被緩衝，即時進度就不即時了）一起處理。
+    這裡只認 JSON，其餘原封不動穿過去。
+
+    🔴 只有 JSON 會被扣住等壓縮，所以不影響串流；真有超大 JSON 串流時
+    （_CAP）會放棄壓縮、把已收的原樣送出，不會把記憶體吃爆。
+    """
+
+    _MIN = 1024                  # 太小的不值得壓（標頭就佔掉了）
+    _THREAD_AT = 512 * 1024      # 超過這個就別在事件迴圈上壓
+    _CAP = 32 * 1024 * 1024      # 保險：超過就放棄壓縮，原樣送
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        accept = next((v for k, v in scope.get("headers", [])
+                       if k == b"accept-encoding"), b"")
+        if b"gzip" not in accept.lower():
+            await self.app(scope, receive, send)
+            return
+
+        held = {"start": None, "chunks": [], "size": 0}
+
+        async def flush_plain():
+            """放棄壓縮：把扣住的 start 與已收的 body 原樣送出。"""
+            await send(held["start"])
+            held["start"] = None
+            for c in held["chunks"]:
+                await send({"type": "http.response.body", "body": c, "more_body": True})
+            held["chunks"] = []
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                hs = {k.lower(): v for k, v in message.get("headers", [])}
+                if (hs.get(b"content-type", b"").startswith(b"application/json")
+                        and b"content-encoding" not in hs):
+                    held["start"] = message      # 先扣著，壓完才連標頭一起送
+                    return
+                await send(message)
+                return
+            if message["type"] == "http.response.body" and held["start"] is not None:
+                held["chunks"].append(message.get("body", b""))
+                held["size"] += len(message.get("body", b""))
+                if held["size"] > self._CAP:     # 大到不像話 → 放棄壓縮
+                    await flush_plain()
+                    await send({"type": "http.response.body", "body": b"",
+                                "more_body": bool(message.get("more_body"))})
+                    return
+                if message.get("more_body"):
+                    return
+                raw = b"".join(held["chunks"])
+                held["chunks"] = []
+                if len(raw) < self._MIN:
+                    await send(held["start"])
+                    await send({"type": "http.response.body", "body": raw})
+                    return
+                # 🔴 大的丟去執行緒：3.5MB 在 level 6 要幾十毫秒，那段時間整個
+                # 事件迴圈停住（這台同時在推 Socket.IO 進度、又有健康輪詢餓死
+                # 的前科）。zlib 對大 buffer 會放掉 GIL，所以真的平行得起來；
+                # 小的留在原地（to_thread 本身的開銷比壓縮還貴）。
+                packed = (gzip.compress(raw, 6) if len(raw) < self._THREAD_AT
+                          else await asyncio.to_thread(gzip.compress, raw, 6))
+                keep, vary = [], b""
+                for k, v in held["start"]["headers"]:
+                    lk = k.lower()
+                    if lk == b"vary":
+                        vary = v
+                    elif lk not in (b"content-length", b"content-encoding"):
+                        keep.append((k, v))
+                keep += [(b"content-encoding", b"gzip"),
+                         (b"content-length", str(len(packed)).encode()),
+                         (b"vary", (vary + b", " if vary else b"") + b"Accept-Encoding")]
+                await send({**held["start"], "headers": keep})
+                await send({"type": "http.response.body", "body": packed})
+                return
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -116,6 +208,8 @@ app.add_middleware(
 # outside — this lets it inject Access-Control-Allow-Private-Network on
 # CORS preflight responses that CORSMiddleware already handled.
 app.add_middleware(NoCacheMiddleware)
+# 最外層：壓縮要看得到最終標頭。只壓 JSON —— 下載／影片／SSE 原樣穿過。
+app.add_middleware(GzipJsonMiddleware)
 
 io_app = socketio.ASGIApp(sio, app)
 
@@ -759,6 +853,18 @@ async def _on_startup():
                         "CREATE EXTENSION IF NOT EXISTS pg_trgm",
                         "CREATE INDEX IF NOT EXISTS idx_footage_transcript_trgm "
                         "ON footage_index USING gin (transcript gin_trgm_ops)",
+                        # ── 收支分類樹 ─────────────────────────────────────
+                        # cash_taxonomy_nodes **新表由 startup 的 create_all 建**
+                        # （schema 正本＝db.models.CashTaxonomyNode，跟 hr_leave_requests
+                        # 同慣例 —— 這裡再抄一份 DDL 就是第二份會漂的 schema）。
+                        # 既有表的加欄與其索引才走這裡：
+                        "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS taxonomy_node_id VARCHAR(32)",
+                        # 委外請款單 ↔ 專案成本行（私帳「委外人員名單」一鍵請款）
+                        "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS cost_line_id VARCHAR(32)",
+                        "CREATE INDEX IF NOT EXISTS idx_payreq_cost_line "
+                        "ON crm_payment_requests (cost_line_id)",
+                        "CREATE INDEX IF NOT EXISTS idx_cash_taxonomy_node "
+                        "ON crm_cash_entries (taxonomy_node_id)",
                     ]:
                         try:
                             await _sex.execute(_tex(col_sql))
@@ -1108,6 +1214,18 @@ async def _on_startup():
                 await seed_finance_stage2(_ffin)
         except Exception as _e_fin:
             print(f"[startup] finance stage2 migration/seed failed: {_e_fin}")
+
+    # ── 種子：私帳收支分類樹（冪等；含把 entry 回填到葉節點）──────────
+    # 🔴 獨立 try —— 這是私帳那本的分類值域，掛了不該連累 startup 或財務種子。
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _ftax = get_session_factory()
+            if _ftax:
+                from db.seed_cash_taxonomy import seed_cash_taxonomy
+                await seed_cash_taxonomy(_ftax)
+        except Exception as _e_tax:
+            print(f"[startup] cash taxonomy seed failed: {_e_tax}")
 
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())

@@ -29,13 +29,15 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
 from core.auth import check_logged_in
 from sqlalchemy import and_ as _sa_and
 from core.cash_taxonomy import SEP as _TAX_SEP, split_category as _tax_split
-from core.ledger import not_mine as _cli_not_mine, require_entity
+from core.ledger import (not_mine as _cli_not_mine, require_entity,
+                         not_mine_project as _not_mine_project)
 from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES
 from core.project_match import prepare as prepare_projects
 from core.project_match import suggest_project
 from core.project_link import PAYMENT_CATEGORIES as _PAYMENT_LINK_CATEGORIES
 from core.schemas import (InvoicePayload, PaymentRequestPayload, CashEntryPayload,
-                          CashInvoiceLinksPayload, CashPaymentLinksPayload)
+                          CashInvoiceLinksPayload, CashPaymentLinksPayload,
+                          CashTaxonomyNodePayload, CashTaxonomyNodeUpdate)
 
 from ._shared import (router, _check_auth, money_dep, _require_db,
                       cash_category_texts,
@@ -1175,9 +1177,16 @@ async def create_payment(req: PaymentRequestPayload, request: Request):
     async with factory() as session:
         # F1 月結守衛：請款單的權責費用認列月 = request_date
         await _assert_month_open(session, dates.get("request_date"), entity=ent)
+        # 一行成本只能請一次款。前端請完就把按鈕換成「已請款」，但那擋不住
+        # 雙擊、兩個分頁、或重送 —— 硬連結存在的意義就是在這裡認得出重複。
+        if req.cost_line_id and (await session.execute(
+                select(CrmPaymentRequest.id).where(
+                    CrmPaymentRequest.cost_line_id == req.cost_line_id))).first():
+            raise HTTPException(409, "這一行成本已經請過款了")
         if ent == "mine":
             await _sync_mine_project_outsource(session, p.project_id,
-                                               p.category, int(p.amount or 0))
+                                               p.category, int(p.amount or 0),
+                                               p.cost_line_id)
         session.add(p)
         await session.commit()
     return {"status": "ok", "payment": _to_payment_dict(p)}
@@ -1259,9 +1268,12 @@ async def list_advance_payments(request: Request, returned: int = -1,
         for p in rows:
             # Calculate expenses by this payee in this project
             expense_total = 0
+            # 私帳專案的花費不能拿來核銷母公司的預支款（owner 2026-08-28）——
+            # 核銷等於「這筆預支變成公司的成本」，述詞正本 core.ledger
             exp_sum = (await session.execute(
                 select(sa_func.coalesce(sa_func.sum(CrmProjectExpense.actual), 0))
-                .where(CrmProjectExpense.advance_id == p.id)
+                .where(CrmProjectExpense.advance_id == p.id,
+                       _not_mine_project(CrmProjectExpense))
             )).scalar() or 0
             expense_total = exp_sum
 
@@ -1577,6 +1589,7 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
             raise HTTPException(status_code=404, detail="找不到此請款單")
         # 委外費用同步要用「改之前」的 (金額, 專案, 類別) 當減項
         _old_amt, _old_pid, _old_cat = int(p.amount or 0), p.project_id, p.category
+        _old_line = p.cost_line_id      # setattr 之後就沒了（同上三個舊值）
         # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422
         # （寫入守衛也在 _entity_for_write 裡定案）
         ent = _entity_for_write(request, req.entity, p)
@@ -1597,8 +1610,10 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
         if (p.entity or "parent") == "mine":
             _new = (int(p.amount or 0), p.project_id, p.category)
             if _new != (_old_amt, _old_pid, _old_cat):
-                await _sync_mine_project_outsource(session, _old_pid, _old_cat, -_old_amt)
-                await _sync_mine_project_outsource(session, _new[1], _new[2], _new[0])
+                await _sync_mine_project_outsource(session, _old_pid, _old_cat,
+                                                   -_old_amt, _old_line)
+                await _sync_mine_project_outsource(session, _new[1], _new[2],
+                                                   _new[0], p.cost_line_id)
         await session.commit()
     return {"status": "ok"}
 
@@ -1685,7 +1700,8 @@ def _set_primary_invoice(e, inv):
     e.has_invoice = 1 if inv else 0
 
 
-def _to_cash_dict(e, project_name: str = "", invoice_title: str = "") -> dict:
+def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
+                  petty_status: str = "", tax_path=None) -> dict:
     return {
         "id": e.id,
         "entity": e.entity or "parent",
@@ -1710,6 +1726,14 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "") -> dict:
         "advance_payment_id": e.advance_payment_id or "",
         "bank_account_id": getattr(e, 'bank_account_id', '') or "",
         "payment_request_id": getattr(e, 'payment_request_id', '') or "",
+        # 零用金推送狀態（routers/crm/petty.petty_from_cash）。expense_id 指向
+        # 已刪的單據時 petty_status 會是空的 —— 那就是「沒推過」，跟撤銷後一樣。
+        "expense_id": getattr(e, 'expense_id', '') or "",
+        "petty_status": petty_status or "",
+        # 分類樹：節點 id ＋ **完整**路徑。上面的 book/item/sub_item 只是前三層的
+        # 鏡射，第四層以後（家用▸變動支出▸醫療保健▸乳癌治療▸台北馬偕）只有這裡看得到。
+        "taxonomy_node_id": getattr(e, 'taxonomy_node_id', '') or "",
+        "taxonomy_path": list(tax_path or []),
         "invoice_title": invoice_title,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
@@ -1729,6 +1753,43 @@ def _normalize_cash_fks(e):
     for f in _CASH_FK_FIELDS:
         if getattr(e, f, None) == "":
             setattr(e, f, None)
+
+
+async def _sync_taxonomy(session, e, data: dict, paths: dict | None = None):
+    """`taxonomy_node_id` ↔ `category`/`item`/`sub_item` 保持一致 —— **規則只有這一份**。
+
+    兩個方向都要走，因為寫入端不只一個：
+    - 前端挑了分類樹的節點 → 送 `taxonomy_node_id`，**節點是正本**，三欄由
+      `mirror_from_path` 推導（前端送什麼 category 都不算數 —— 兩邊各算一次
+      必漂，而且漂的是會計對映的鍵）。
+    - CSV／銀行對帳單匯入、對帳腳本走舊路，只有 category/sub_item →
+      反查掛上節點。不掛的話那些列要等下次 boot 的回填才進得了樹狀篩選。
+
+    🔴 `taxonomy_node_id` 明確送空 → 連三欄一起清掉。只清節點會留下一列
+    「有類別、但不在樹上」的孤兒，樹狀篩選看不到它。
+    """
+    from core.cash_taxonomy import mirror_from_path, path_from_columns
+    from core.cash_tree import find_node_id, path_map
+
+    ent = e.entity or "parent"
+    if "taxonomy_node_id" in data:
+        nid = (data.get("taxonomy_node_id") or "").strip()
+        if not nid:
+            e.taxonomy_node_id = None
+            e.category = e.item = e.sub_item = ""
+            return
+        # `paths` ＝呼叫端已經算好的 id→路徑表（批次分類一次 200 列，各撈一次
+        # 樹就是 200 趟）。沒帶就自己撈 —— 單筆更新那條路不必為此改。
+        path = (paths if paths is not None else await path_map(session, ent)).get(nid)
+        if not path:
+            raise HTTPException(status_code=400, detail="找不到這個分類節點")
+        e.taxonomy_node_id = nid
+        e.category, e.item, e.sub_item = mirror_from_path(path)
+        return
+    if not ({"category", "item", "sub_item"} & set(data)):
+        return                                  # 這次沒動分類，不必重算
+    path = path_from_columns(e.category, e.sub_item)
+    e.taxonomy_node_id = (await find_node_id(session, ent, path)) or None
 
 
 async def _assert_project_same_entity(session, e):
@@ -1791,15 +1852,22 @@ async def _sync_mine_project_received(session, project_id, delta: int):
     p.updated_at = _now()
 
 
-async def _sync_mine_project_outsource(session, project_id, category, delta: int):
+async def _sync_mine_project_outsource(session, project_id, category, delta: int,
+                                       cost_line_id=None):
     """私帳委外規則（owner 2026-08-25「要可以新增委外項目」）：掛在專案上、
     類別＝專案外包 的請款單驅動該案 ledger_detail 的「委外費用」。
 
     🔴 增量制（同 _sync_mine_project_received 的理由）：歷史委外費用是匯入
     基準值（1,661,183，多數已付、沒有對應請款單列），重算會洗掉老案。
+
+    ⚠️ **這一欄不只有你在寫**：`core.ledger_project.apply_crm_costs` 讀取時會把
+    CRM 專案帳目的人員費用**加上**你累加的值（owner 2026-08-28 拍板的甲案）。
+    所以這裡累加的必須只有「CRM 上沒有的那幾筆」——
+    🔴 帶 `cost_line_id` 的請款單是 CRM 成本行的鏡射（逐案損益的一鍵請款建的），
+    它的錢已經由 apply_crm_costs 算過一次，再累加就是同一筆算兩次。
     委外費用是**權責**（應付＋已付都算成本），所以只跟金額走、不看付款狀態。
     """
-    if not delta or (category or "") != "專案外包":
+    if not delta or (category or "") != "專案外包" or cost_line_id:
         return
     from core.ledger_project import norm_detail
     p = await _get_mine_project(session, project_id)
@@ -1891,11 +1959,17 @@ async def cash_entry_options(request: Request, entity: str = Query("")):
                 CrmCashEntry.entity == ent,
                 CrmCashEntry.sub_item.isnot(None),
                 CrmCashEntry.sub_item != "").distinct())).scalars())
+        # 分類樹（深度不限，正本＝cash_taxonomy_nodes）。舊的 taxonomy 扁平欄位
+        # 先留一版 —— 前端已全面改吃 tree，但發版當下還開著的舊分頁仍讀它；
+        # 下一版可以連同 core.cash_taxonomy.taxonomy() 一起收掉。
+        from core.cash_tree import load_tree
+        tree = await load_tree(session, ent)
     books_used = {book_of(c) for c in used}
     tax_cats = used + [c for c in cats if book_of(c) in books_used and c not in used]
     return {"categories": cats,
             "project_link_categories": linkable,
-            "taxonomy": taxonomy(tax_cats, subs)}
+            "taxonomy": taxonomy(tax_cats, subs),
+            "tree": tree}
 
 
 @router.get("/cash-entries", dependencies=[Depends(money_dep)])
@@ -1906,6 +1980,7 @@ async def list_cash_entries(
     bank_account_id: str = Query(""), direction: str = Query(""),
     date_from: str = Query(""), date_to: str = Query(""),
     sub_item: str = Query(""), book: str = Query(""), item: str = Query(""),
+    node_id: str = Query(""),
     status: str = Query(""),
     amount_min: str = Query(""), amount_max: str = Query(""),
     entity: str = Query(""),
@@ -1919,11 +1994,20 @@ async def list_cash_entries(
     ent = require_entity(request, entity, level="full")
     _require_db()
     factory = await _get_factory()
+    from core.cash_tree import load_nodes, path_map, subtree_ids
     async with factory() as session:
+        # 分類樹一請求只撈一次（篩選的子樹與每列的路徑共用同一份；含停用 ——
+        # 歷史列掛在停用節點上路徑照樣要印得出來）
+        tax_nodes = await load_nodes(session, ent, include_inactive=True)
         query = (
-            select(CrmCashEntry, CrmProject.name.label("pn"), CrmInvoice.title.label("inv_title"))
+            select(CrmCashEntry, CrmProject.name.label("pn"),
+                   CrmInvoice.title.label("inv_title"),
+                   CrmProjectExpense.status.label("petty_status"))
             .outerjoin(CrmProject, CrmProject.id == CrmCashEntry.project_id)
             .outerjoin(CrmInvoice, CrmInvoice.id == CrmCashEntry.invoice_id)
+            # 推去零用金的那幾列要在清單上看得出狀態（PK join，成本可忽略）
+            .outerjoin(CrmProjectExpense,
+                       CrmProjectExpense.id == CrmCashEntry.expense_id)
             .where(CrmCashEntry.entity == ent)
             .order_by(CrmCashEntry.entry_date.desc())
         )
@@ -1941,6 +2025,11 @@ async def list_cash_entries(
             query = query.where(CrmCashEntry.status == status)
         # 三層分類的前兩層：儲存是複合鍵，篩選在鍵上做前綴/後綴比對
         # （規則正本 core.cash_taxonomy —— 別在這裡自己拼字串）
+        # 分類樹：選到哪一層就看**那一支整支**（選「家用」＝家用底下全部）。
+        # 這條蓋過上面 book/item/sub_item 三個舊參數 —— 前端切過去之後只送這個。
+        if node_id:
+            query = query.where(CrmCashEntry.taxonomy_node_id.in_(
+                await subtree_ids(session, ent, node_id, nodes=tax_nodes)))
         if book:
             query = query.where(or_(CrmCashEntry.category == book,
                                     CrmCashEntry.category.like(book + _TAX_SEP + "%")))
@@ -1984,7 +2073,11 @@ async def list_cash_entries(
                                     CrmCashEntry.bank_memo.ilike(ql),
                                     CrmCashEntry.invoice_number.ilike(ql)))
         rows = (await session.execute(query)).all()
-    return {"entries": [_to_cash_dict(r[0], r[1] or "", r[2] or "") for r in rows], "total": len(rows)}
+        # 路徑一次撈完（幾百個節點一張 dict），不逐列往上爬
+        paths = await path_map(session, ent, nodes=tax_nodes)
+    return {"entries": [_to_cash_dict(r[0], r[1] or "", r[2] or "", r[3] or "",
+                                      paths.get(r[0].taxonomy_node_id))
+                        for r in rows], "total": len(rows)}
 
 
 @router.post("/cash-entries")
@@ -1998,11 +2091,17 @@ async def create_cash_entry(req: CashEntryPayload, request: Request):
     date_fields = {"entry_date", "payment_date"}
     dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
     data = req.model_dump(exclude=date_fields | {"entity"})
+    # 🔴 分類同步要看「前端**真的送了**哪些欄」，不能看 data —— 建立時 data 是
+    # 整包（每個欄位都在），照它判會把「只送了 category」的建立當成「明確送了
+    # 空的 taxonomy_node_id」，分類當場被清掉。
+    sent = req.model_dump(exclude_unset=True)
     e = CrmCashEntry(id=uuid.uuid4().hex, **dates, entity=ent, created_at=_now(), **data)
     _normalize_cash_fks(e)
-    _enforce_cash_project_link(e)
     async with factory() as session:
         await _assert_month_open(session, dates.get("entry_date"), entity=ent)
+        # 分類樹 → 三欄鏡射要跑在可掛專案判定**之前**（判定吃的是 category）
+        await _sync_taxonomy(session, e, sent)
+        _enforce_cash_project_link(e)
         await _assert_project_same_entity(session, e)
         if ent == "mine":
             await _sync_mine_project_received(session, e.project_id,
@@ -2099,6 +2198,7 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
             # 分配表、主要發票欄、相關發票的收款狀態一次到位；換掉的舊發票也會
             # 被重算（共用寫入者比對分配表的前後差異），不用在這裡再比一次
             await _sync_single_alloc(session, e)
+        await _sync_taxonomy(session, e, data)      # 同上：要在可掛專案判定之前
         _normalize_cash_fks(e)
         _enforce_cash_project_link(e)
         await _assert_project_same_entity(session, e)
@@ -2108,7 +2208,99 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
                 await _sync_mine_project_received(session, _old_pid, -_old_dep)
                 await _sync_mine_project_received(session, new_pid, new_dep)
         await session.commit()
-    return {"status": "ok"}
+        # 分類是後端從節點路徑推導的（_sync_taxonomy）—— 把推導結果回給前端，
+        # 它就地 patch 那一列就好，不必為了拿三欄鏡射把 4,700 列整表重載。
+        # 只在這次真的動到分類時才多算（path_map 是一次 237 列的撈取）。
+        entry_patch = {}
+        if {"taxonomy_node_id", "category", "item", "sub_item"} & set(data):
+            from core.cash_tree import path_map
+            paths = await path_map(session, e.entity or "parent")
+            entry_patch = {
+                "category": e.category or "",
+                "book": _tax_split(e.category)[0],
+                "item": (e.item or "") or _tax_split(e.category)[1],
+                "sub_item": e.sub_item or "",
+                "taxonomy_node_id": e.taxonomy_node_id or "",
+                "taxonomy_path": list(paths.get(e.taxonomy_node_id) or []),
+            }
+    return {"status": "ok", "entry": entry_patch}
+
+
+@router.patch("/cash-entries/batch-taxonomy")
+async def batch_set_taxonomy(request: Request):
+    """批次分類（owner 2026-08-28「我想要有一個可以批次處理分類的按鈕功能」）。
+
+    信用卡明細一天好幾筆「街口電支－統一超商」，一筆一筆點三格分類要按上千次。
+    這支把選起來的列一次掛到同一個節點（`taxonomy_node_id=''` ＝一次清掉分類）。
+
+    規則一條都不另寫：三欄鏡射走 `_sync_taxonomy`（**唯一**那份），可掛專案的
+    不變式走 `_enforce_cash_project_link`，鎖月走 `_locked_month_set` ——
+    單筆更新有的守衛，批次一個都不能少（批次才是會一次弄壞幾百列的那條路）。
+
+    🔴 有問題就**整批不動**（比照 batch-project）：跳過壞列會讓人以為全部都成功了，
+    而畫面上看不出哪幾列沒改到 —— 補歷史時這種靜默漏網最難查。
+    """
+    check_logged_in(request)           # 先擋匿名（不給 401/404 當存在性預言機）
+    _require_db()
+    factory = await _get_factory()
+    body = await request.json()
+    ids = body.get("entry_ids") or []
+    # 兩種挑法，因為兩本帳的分類長得不一樣：私帳有分類樹（送節點 id），
+    # 母公司是平的一層（送 category 字串 —— 那本沒有樹，種子只種 mine）。
+    # 兩邊都只是同一份 `_sync_taxonomy` 的兩個入口，不是兩套規則。
+    nid = body.get("taxonomy_node_id")
+    cat = body.get("category")
+    if not ids:
+        raise HTTPException(status_code=400, detail="請提供 entry_ids")
+    if nid is None and cat is None:
+        raise HTTPException(status_code=400,
+                            detail="請提供 taxonomy_node_id 或 category")
+    nid = (nid or "").strip() if nid is not None else None
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmCashEntry).where(CrmCashEntry.id.in_(ids)))).scalars().all()
+        if not rows:
+            raise HTTPException(status_code=404, detail="找不到這些收支紀錄")
+        _mine_or_admin_write_rows(request, rows)
+        ents = {(e.entity or "parent") for e in rows}
+        # 節點只屬於一本帳的樹 —— 混選必然有一半找不到節點。與其讓它報
+        # 「找不到這個分類節點」（看起來像樹壞了），不如說清楚是選錯了。
+        if len(ents) > 1:
+            raise HTTPException(status_code=400,
+                                detail="選取的列橫跨兩本帳，請分開處理")
+        ent = ents.pop()
+        locked = await _locked_month_set(session, entity=ent)
+        violations = [f"{e.summary or e.id}（{month_of(e.entry_date)}）"
+                      for e in rows if month_of(e.entry_date) in locked]
+        if violations:
+            _raise_locked_batch(violations)
+        # id→路徑表算一次給整批用（_sync_taxonomy 的 paths 參數就為了這個）
+        from core.cash_tree import path_map
+        paths = await path_map(session, ent)
+        now = _now()
+        for e in rows:
+            if nid is not None:
+                await _sync_taxonomy(session, e, {"taxonomy_node_id": nid}, paths)
+            else:
+                # 平的那本：三欄先賦值，再讓同一份規則去反查掛不掛得上節點
+                # （母公司沒有樹 → 查不到就是 None，正常）。每列各查一次是刻意的 ——
+                # 為了少幾次查詢把「路徑→節點」再寫一份在這裡，那份就會跟樹漂。
+                e.category, e.item, e.sub_item = (cat or ""), "", ""
+                await _sync_taxonomy(session, e, {"category": e.category})
+            _enforce_cash_project_link(e)
+            e.updated_at = now
+        await session.commit()
+        # 整批同一個節點 → 鏡射結果也只有一份，回一份給前端就地 patch 那幾列
+        e0 = rows[0]
+        entry_patch = {
+            "category": e0.category or "",
+            "book": _tax_split(e0.category)[0],
+            "item": (e0.item or "") or _tax_split(e0.category)[1],
+            "sub_item": e0.sub_item or "",
+            "taxonomy_node_id": e0.taxonomy_node_id or "",
+            "taxonomy_path": list(paths.get(e0.taxonomy_node_id) or []),
+        }
+    return {"status": "ok", "updated": len(rows), "entry": entry_patch}
 
 
 @router.delete("/cash-entries/{entry_id}")
@@ -2523,3 +2715,233 @@ async def set_cash_entry_invoices(entry_id: str, req: CashInvoiceLinksPayload,
 
 
 _bind_alloc_ops()
+
+
+# ── 收支分類樹 ────────────────────────────────────────────────────
+# 樹的正本是 `cash_taxonomy_nodes`（種子見 db/seed_cash_taxonomy.py）。日常讀取
+# 走 `/cash-entries/options` 的 `tree`；這裡是它的 CRUD —— POST 收「＋自訂…」
+# 長出來的新節點，GET/PUT/DELETE 服務後台編輯器（finance 設定頁的分類樹卡）。
+# 🔴 PUT 的改名／搬家是**資料遷移**：收支三欄鏡射與 finance_category_map 的鍵
+# 會一起改（見 update_cash_taxonomy_node），不是改個標籤而已。
+
+@router.post("/cash-taxonomy/nodes", dependencies=[Depends(money_dep)])
+async def create_cash_taxonomy_node(req: CashTaxonomyNodePayload, request: Request):
+    from db.models import CashTaxonomyNode
+
+    ent = _entity_for_write(request, req.entity)
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="分類名稱必填")
+    if _TAX_SEP in name:
+        # 名稱含底線會把複合鍵切爛（`轉匯與定存_公司信用卡` 的教訓：只切第一個
+        # 底線，所以第二層叫「公司_信用卡」時 split 出來就不是原來那個名字了）
+        raise HTTPException(status_code=422, detail=f"分類名稱不能包含「{_TAX_SEP}」")
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        parent_id = (req.parent_id or "").strip()
+        depth = 1
+        if parent_id:
+            parent = await session.get(CashTaxonomyNode, parent_id)
+            if parent is None or parent.entity != ent:
+                raise HTTPException(status_code=404, detail="找不到上層分類")
+            depth = (parent.depth or 1) + 1
+        exist = (await session.execute(
+            select(CashTaxonomyNode).where(
+                CashTaxonomyNode.entity == ent,
+                CashTaxonomyNode.parent_id == parent_id,
+                CashTaxonomyNode.name == name))).scalar_one_or_none()
+        if exist is not None:
+            # 已經有了就回它 —— 兩個人同時打同一個名字不該噴錯，結果一樣就好。
+            # 停用過的順手復活（他正想用它）。
+            if not exist.active:
+                exist.active = 1
+                await session.commit()
+            return {"status": "ok", "node": {"id": exist.id, "name": exist.name,
+                                             "depth": exist.depth}, "existed": True}
+        # sort 排在同層最後（種子給的順序是 owner 的 Sheet 順序，新的接在後面）
+        last = (await session.execute(
+            select(func.max(CashTaxonomyNode.sort)).where(
+                CashTaxonomyNode.entity == ent,
+                CashTaxonomyNode.parent_id == parent_id))).scalar()
+        node = CashTaxonomyNode(id=uuid.uuid4().hex, entity=ent, parent_id=parent_id,
+                                name=name, depth=depth, sort=int(last or 0) + 1, active=1)
+        session.add(node)
+        await session.commit()
+        return {"status": "ok", "node": {"id": node.id, "name": node.name,
+                                         "depth": node.depth}, "existed": False}
+
+
+@router.get("/cash-taxonomy/nodes", dependencies=[Depends(money_dep)])
+async def list_cash_taxonomy_nodes(request: Request, entity: str = Query("")):
+    """整棵樹（**含停用**）＋每個節點的使用筆數 —— 後台編輯器用。
+
+    `count` 是直接掛在它上面的、`subtree_count` 是整支的。改名／停用／刪除前
+    要看得到「會動到幾筆」，這是危險操作唯一的剎車。
+    """
+    from core.cash_tree import load_tree
+
+    ent = require_entity(request, entity, level="full")
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        # active 隨 build_tree 的節點 dict 出來，不必再查一張表
+        tree = await load_tree(session, ent, include_inactive=True)
+        used = dict((await session.execute(
+            select(CrmCashEntry.taxonomy_node_id, func.count())
+            .where(CrmCashEntry.entity == ent,
+                   CrmCashEntry.taxonomy_node_id.isnot(None))
+            .group_by(CrmCashEntry.taxonomy_node_id))).all())
+
+    def walk(nodes):
+        total = 0
+        for n in nodes:
+            n["count"] = used.get(n["id"], 0)
+            n["subtree_count"] = n["count"] + walk(n["children"])
+            total += n["subtree_count"]
+        return total
+
+    walk(tree)
+    return {"tree": tree}
+
+
+async def _rename_category_map(session, renames) -> list:
+    """複合鍵改名 → `finance_category_map` 的鍵跟著改。
+
+    🔴 不改的話那批帳**從三表消失**：那張表帶著每個鍵的科目與 treatment
+    （實測 38 個私帳複合鍵都在，各自帶 transfer／direct_expense／direct_income）。
+    新鍵已經存在就擋下來 —— 把兩個科目對映併成一個不是「改名」該做的事。
+    """
+    from db.models import FinanceCategoryMap
+
+    done = []
+    for old, new in renames:
+        clash = (await session.execute(
+            select(FinanceCategoryMap).where(
+                FinanceCategoryMap.source == "cash",
+                FinanceCategoryMap.category_text == new))).scalar_one_or_none()
+        if clash is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"「{new}」已經有科目對映了 —— 改成這個名字會把兩個對映併在一起。"
+                       f"請先到「科目與設定」處理那一筆，或換個名字")
+        row = (await session.execute(
+            select(FinanceCategoryMap).where(
+                FinanceCategoryMap.source == "cash",
+                FinanceCategoryMap.category_text == old))).scalar_one_or_none()
+        if row is not None:
+            row.category_text = new
+            done.append([old, new])
+    return done
+
+
+@router.put("/cash-taxonomy/nodes/{node_id}", dependencies=[Depends(money_dep)])
+async def update_cash_taxonomy_node(node_id: str, req: CashTaxonomyNodeUpdate,
+                                    request: Request):
+    """改名／搬家／停用。
+
+    改名與搬家是**資料遷移**，一次做完三件事：節點本身 → 掛在這一支底下的收支
+    三欄鏡射 → finance_category_map 的鍵。少做任何一件，帳與分類就對不起來。
+    """
+    from core.cash_tree import (category_keys, load_nodes, remirror_subtree,
+                                subtree_ids)
+    from db.models import CashTaxonomyNode
+
+    ent = _entity_for_write(request, req.entity)
+    data = req.model_dump(exclude_unset=True, exclude={"entity"})
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        node = await session.get(CashTaxonomyNode, node_id)
+        if node is None or node.entity != ent:
+            raise HTTPException(status_code=404, detail="找不到這個分類節點")
+        # 改前撈一次、flush 後撈一次 —— 各 helper 都吃 nodes=，別讓一個 PUT
+        # 把節點表整張撈六遍
+        nodes_before = await load_nodes(session, ent, include_inactive=True)
+        new_name = (data.get("name") or node.name).strip()
+        new_parent = data.get("parent_id", node.parent_id) or ""
+        if "name" in data:
+            if not new_name:
+                raise HTTPException(status_code=422, detail="分類名稱必填")
+            if _TAX_SEP in new_name:
+                raise HTTPException(status_code=422,
+                                    detail=f"分類名稱不能包含「{_TAX_SEP}」")
+        if new_parent != node.parent_id:
+            # 🔴 只准同層搬家。跨層搬會讓深度變，複合鍵跟著憑空出現或消失
+            # （第三層搬到第二層＝多一個沒人對映的科目鍵，那批帳當場掉出三表）。
+            old_parent = (await session.get(CashTaxonomyNode, node.parent_id)
+                          if node.parent_id else None)
+            tgt = await session.get(CashTaxonomyNode, new_parent) if new_parent else None
+            if new_parent and (tgt is None or tgt.entity != ent):
+                raise HTTPException(status_code=404, detail="找不到要搬去的上層分類")
+            if (tgt.depth if tgt else 0) != (old_parent.depth if old_parent else 0):
+                raise HTTPException(
+                    status_code=422,
+                    detail="只能搬到同一層的其他分類底下（跨層搬會讓科目對映對不上）")
+            if new_parent in await subtree_ids(session, ent, node_id,
+                                               nodes=nodes_before):
+                raise HTTPException(status_code=422, detail="不能搬到自己底下")
+        if new_name != node.name or new_parent != node.parent_id:
+            dup = (await session.execute(
+                select(CashTaxonomyNode.id).where(
+                    CashTaxonomyNode.entity == ent,
+                    CashTaxonomyNode.parent_id == new_parent,
+                    CashTaxonomyNode.name == new_name,
+                    CashTaxonomyNode.id != node_id))).scalar()
+            if dup:
+                raise HTTPException(status_code=409,
+                                    detail=f"同一層底下已經有「{new_name}」了")
+
+        ids = await subtree_ids(session, ent, node_id, nodes=nodes_before)
+        before = await category_keys(session, ent, ids, nodes=nodes_before)
+        node.name = new_name
+        node.parent_id = new_parent
+        if "active" in data:
+            node.active = 1 if data["active"] else 0
+        node.updated_at = _now()
+        await session.flush()      # 🔴 先落地，下面重讀才看得到新名字
+        nodes_after = await load_nodes(session, ent, include_inactive=True)
+        after = await category_keys(session, ent, ids, nodes=nodes_after)
+        renames = [(before[k], after[k]) for k in before
+                   if k in after and before[k] != after[k]]
+        mapped = await _rename_category_map(session, renames)
+        rows = await remirror_subtree(session, ent, node_id, nodes=nodes_after)
+        await session.commit()
+    return {"status": "ok", "rows_remirrored": rows, "category_map_renamed": mapped}
+
+
+@router.delete("/cash-taxonomy/nodes/{node_id}", dependencies=[Depends(money_dep)])
+async def delete_cash_taxonomy_node(node_id: str, request: Request,
+                                    entity: str = Query("")):
+    """只刪得掉**空的**節點（沒有子分類、整支沒有任何收支列）。
+
+    有資料的請用「停用」—— 刪掉會讓那些列指向一個爬不回根的孤兒 id，而 category
+    欄還留著舊值，兩邊從此對不起來。
+
+    🔴 `finance_category_map` 那一筆**刻意不刪**：它是會計對映（科目＋treatment），
+    歸「科目與設定」管；分類樹刪一個沒人用的節點不該連帶動到會計設定。
+    """
+    from core.cash_tree import subtree_ids
+    from db.models import CashTaxonomyNode
+
+    ent = _entity_for_write(request, entity or None)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        node = await session.get(CashTaxonomyNode, node_id)
+        if node is None or node.entity != ent:
+            raise HTTPException(status_code=404, detail="找不到這個分類節點")
+        ids = await subtree_ids(session, ent, node_id)
+        if len(ids) > 1:
+            raise HTTPException(status_code=409,
+                                detail=f"底下還有 {len(ids) - 1} 個分類，請先處理它們")
+        used = (await session.execute(
+            select(func.count()).select_from(CrmCashEntry)
+            .where(CrmCashEntry.entity == ent,
+                   CrmCashEntry.taxonomy_node_id == node_id))).scalar()
+        if used:
+            raise HTTPException(status_code=409,
+                                detail=f"還有 {used} 筆收支掛在這個分類上 —— 請改用「停用」")
+        await session.delete(node)
+        await session.commit()
+    return {"status": "ok"}

@@ -61,22 +61,23 @@ def test_backend_serves_three_levels():
 
 
 def test_cashbook_ui_three_columns_and_cascading_filters():
+    """三個分類欄可排序、篩選會連動、格內編輯**點哪欄編哪欄**。
+
+    2026-08-27 起機制換成分類樹（深度不限）：篩選是一排會長的下拉、編輯選到
+    還有下層就再長一格。三欄仍在（它們是路徑前三層的鏡射），但值域與寫入都走
+    節點 —— 前端不再自己組複合鍵。樹本身的行為釘在 test_cash_tree.py。
+    """
     html = _read("frontend/tabs/crm/crm-cashbook.html")
     for k in ('data-sort-key="book"', 'data-sort-key="item"', 'data-sort-key="sub_item"'):
         assert k in html, k
-    assert 'id="cash-filter-book"' in html and 'id="cash-filter-item"' in html
+    assert 'id="cash-filter-tax"' in html, "分類篩選是一個會長的容器，不是寫死幾顆"
     js = _read("frontend/tabs/crm/crm-cashbook.js")
-    assert "_taxonomy" in js and "o.taxonomy" in js
-    # 連動：選了類別，項目只列該類別底下的
-    assert "map[_filters.book]" in js
-    # 換類別要清掉項目（否則篩出空白）
-    seg = js.split("cash-filter-book').addEventListener")[1][:400]
-    assert "_filters.item = ''" in seg
-    # 格內編輯：**點哪欄編哪欄**（owner 2026-08-27「項目就是項目的、類別就是類別的」）
-    ed = js.split("window._cashCatEdit = (ev")[1].split("/** 刷卡金額")[0]
-    assert "cash-cat-book" in ed and "cash-cat-item" in ed
-    assert "level === 'book'" in ed and "level === 'item'" in ed, "要看是哪一欄叫的"
-    assert "!e.book" in ed, "項目欄但沒類別時要補問類別（不然形不成複合鍵）"
-    assert "book + '_' + item" in ed, "存回去要組成複合鍵"
-    assert "list.includes(e.item)" in ed, "只改類別時：原項目不屬於新類別就放掉"
-    assert "searchableSelect(bSel" in ed and "searchableSelect(iSel" in ed
+    assert "o.tree" in js and "_indexTax" in js, "樹要從後端來並建索引"
+    # 連動：每一層只列上一層底下的（規則只有 _taxKidsAt 一份，篩選與編輯共用）
+    assert "_taxKidsAt = (chain, i)" in js
+    # 選「全部」＝退回上一層，不是整個清空（不然一路點下去就回不去了）
+    seg = js.split("function _syncTaxFilter()")[1].split("function ")[0]
+    assert "chain[i - 1].id" in seg
+    ed = js.split("window._cashTaxEdit = (ev")[1].split("/** 刷卡金額")[0]
+    assert "Math.min(level, chain.length)" in ed, "上層沒值時要從頭問（形不成路徑）"
+    assert "_taxKidsAt(sel, i)" in ed, "每層的值域＝上一層的子節點（共用那份規則）"

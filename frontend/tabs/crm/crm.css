@@ -1886,6 +1886,13 @@
 #cash-list-body .crm-row-date.is-holiday { color: #e8d5cd; }
 #cash-list-body .crm-row-date.is-holiday .cash-wd { background: #3b2620; color: #e0a48c; font-weight: 600; }
 
+/* 已推去零用金的列 —— 摘要後面掛一個狀態標。不標的話這一列跟沒推過長得一樣，
+   而「推過沒有」正是重推與漏推的唯一防線。 */
+#cash-list-body .cash-petty {
+  margin-left: 6px; font-size: 10px; padding: 1px 5px; border-radius: 3px;
+  background: #2a3a2c; color: #9ccfa4; white-space: nowrap;
+}
+
 /* 內容欄不截斷 —— 卡單摘要（「連加＊連加＊潮味決－台…」）截掉尾巴就分不出是哪一筆，
    owner 2026-08-27 要求超過就折行。覆寫的是上面資料列那條共用 ellipsis 規則，
    所以 white-space / overflow / text-overflow 三個都要寫回來（只改 white-space 的話，
@@ -1942,3 +1949,12 @@
   font-variant-numeric: tabular-nums; }
 .cash-acct-tab .neg { color: #fca5a5; }
 .cash-acct-tab .pos { color: #fbbf24; }
+
+/* 逐案損益：由 CRM 專案帳目撐著的費用欄（行政雜支／人員費用）。
+   值是即時算的，那一格鎖住 —— 這個標記是在說「要改去 CRM 改」。 */
+.fpl-src {
+    margin-left: 6px; padding: 0 5px; border-radius: 2px;
+    font-size: 10px; letter-spacing: .04em;
+    color: #7fb0dd; border: 1px solid #2f4d68; background: #1b2a38;
+    vertical-align: 1px;
+}

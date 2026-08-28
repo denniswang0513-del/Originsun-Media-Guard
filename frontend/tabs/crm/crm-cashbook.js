@@ -23,12 +23,22 @@ let _bankAccounts = null;   // 財務模組銀行帳戶；null = 載入失敗/�
 let _selectedId = null;
 let _editingId = null;
 let _filters = { q: '', category: '', bank_account_id: '', direction: '',
-                 date_from: '', date_to: '', sub_item: '', amount_min: '', amount_max: '',
-                 book: '', item: '',     // 三層分類（owner 2026-08-27）
+                 date_from: '', date_to: '', amount_min: '', amount_max: '',
+                 node_id: '',            // 分類樹：選到哪一層就看那一支整支
                  status: '' };           // 'card'＝只看信用卡明細（卡片頁籤）
-let _taxonomy = { books: [], items_by_book: {}, sub_items: [] };
+// 分類樹（正本＝後端 cash_taxonomy_nodes；深度不限）。_taxById 是 id → **從根到
+// 它的節點物件鏈** —— 編輯與篩選都要「這一層的上層是誰」，每次現爬會爬很多次。
+let _taxTree = [];
+let _taxById = {};
+// 第 i 層的值域＝上一層節點的子節點（第 0 層＝整棵樹的根）。
+// 篩選器與格內編輯器共用 —— 這是「每一格能選什麼」的唯一規則。
+const _taxKidsAt = (chain, i) => (i === 0 ? _taxTree
+    : (chain[i - 1] ? chain[i - 1].children : []));
+// 批次分類（owner 2026-08-28）：信用卡明細一天好幾筆「街口電支－統一超商」，
+// 一筆一筆點三格要按上千次。on＝批次模式（點列＝選取，不開編輯）、
+// sel＝選到的 id、last＝上一次點的（Shift 連選的錨點）、chain＝要套的分類路徑。
+let _batch = { on: false, sel: new Set(), last: null, chain: [] };
 let _csvFile = null;
-const _subVocab = new Set();   // 子項目篩選器的詞彙（只增不減，見 _syncFilterOptions）
 
 function _toggleAdvanceFields(isAdv) {
     var ids = ['cash-advance-section', 'cash-field-project', 'cash-field-invoice', 'cash-field-bankfee'];
@@ -48,9 +58,7 @@ async function loadEntries({ render = true, cards = true } = {}) {
     if (_filters.direction)       params.set('direction', _filters.direction);
     if (_filters.date_from)       params.set('date_from', _filters.date_from);
     if (_filters.date_to)         params.set('date_to', _filters.date_to);
-    if (_filters.sub_item)        params.set('sub_item', _filters.sub_item);
-    if (_filters.book)            params.set('book', _filters.book);
-    if (_filters.item)            params.set('item', _filters.item);
+    if (_filters.node_id)         params.set('node_id', _filters.node_id);
     if (_filters.status)          params.set('status', _filters.status);
     if (_filters.amount_min)      params.set('amount_min', _filters.amount_min);
     if (_filters.amount_max)      params.set('amount_max', _filters.amount_max);
@@ -145,38 +153,70 @@ function _acctName(id) {
     return a ? (a.name || '') : '';
 }
 
+/** 分類篩選：**一排會長的下拉** —— 選到哪一層就再長一格，跟列的編輯器同一套走法。
+ *  選了就篩「那一支整支」（選「家用」＝家用底下全部，不是只有沒細分的那些）。
+ *
+ *  🔴 值域來自後端的樹（cash_taxonomy_nodes），不是「畫面上這批列用過的」——
+ *  篩完之後選單會跟著縮水，就再也切不回去了。
+ */
+/** 一排會長的分類下拉 —— 篩選器／格內編輯／批次分類**三處共用**。
+ *  第 i 格的值域＝上一層的子節點（_taxKidsAt），選到葉就不再長一格。
+ *  三處的差別只有標籤與要不要「＋自訂」，用參數表達；各寫一份的話樹一長深
+ *  只有其中一份會跟上（篩選器與格內編輯本來就已經是兩份幾乎一樣的迴圈）。
+ *
+ *  `keepOne`：鏈已經到葉了也**至少留一格**（格內編輯就是點了那格要編它）。 */
+function _taxSelects(box, o) {
+    const chain = o.chain || [];
+    const start = o.start || 0;
+    const parts = [];
+    for (let i = start; i <= chain.length; i++) {
+        if (i === chain.length && !_taxKidsAt(chain, i).length
+            && !(o.keepOne && i === start)) { break; }
+        parts.push(`<select class="${o.cls}" data-i="${i}"${
+            o.style ? ` style="${o.style}"` : ''}></select>`);
+    }
+    box.innerHTML = o.wrap
+        ? `<span class="cash-cat-edit" style="display:flex;gap:4px;">${parts.join('')}</span>`
+        : parts.join('');
+    box.querySelectorAll('select[data-i]').forEach((sel) => {
+        const i = Number(sel.dataset.i);
+        const cur = chain[i];
+        sel.innerHTML = `<option value="">${o.blank(i)}</option>`
+            + (i === start ? (o.extraFirst || '') : '')
+            + _taxKidsAt(chain, i).map((n) =>
+                `<option value="${_esc(n.id)}"${cur && cur.id === n.id ? ' selected' : ''}>${_esc(n.name)}</option>`).join('')
+            + (o.custom ? '<option value="__custom__">＋ 自訂…</option>' : '');
+        sel.addEventListener('click', (k) => k.stopPropagation());
+        sel.addEventListener('change', () => o.onPick(i, sel.value));
+        searchableSelect(sel, { placeholder: i === 0 ? '搜尋類別…' : '搜尋…' });
+    });
+}
+
+function _syncTaxFilter() {
+    const box = document.getElementById('cash-filter-tax');
+    if (!box) return;
+    const chain = _filters.node_id ? (_taxById[_filters.node_id] || []) : [];
+    _taxSelects(box, {
+        chain,
+        cls: 'crm-select cash-taxf',
+        blank: (i) => (i === 0 ? '全部類別' : '全部'),
+        extraFirst: `<option value="__none__"${
+            _filters.category === '__none__' ? ' selected' : ''}>（未分類）</option>`,
+        onPick: (i, v) => {
+            // 🔴 「（未分類）」是**類別欄為空**的快篩，不是一個叫 __none__ 的節點 ——
+            // 當成 node_id 送出去一列都篩不到（舊版當成 book 送，實測 0 筆）
+            _filters.category = v === '__none__' ? '__none__' : '';
+            _filters.node_id = v === '__none__' ? '' : v
+                || (i > 0 && chain[i - 1] ? chain[i - 1].id : '');   // 選「全部」＝退回上一層
+            loadEntries({ cards: false });
+        },
+    });
+}
+
 /** 篩選器選項依**實際資料**生成 —— 寫死的清單會跟使用中的類別脫節，
  *  選了卻篩不到東西（原本的「請款/收支」兩個選項就是這樣，永遠 0 筆）。 */
 function _syncFilterOptions() {
-    // 三層分類的值域由後端 options 的 taxonomy 給（正本 core.cash_taxonomy）；
-    // 子項目沿用「詞彙只增不減」那條（篩選之後選單不該跟著縮水）。
-    const bookSel = document.getElementById('cash-filter-book');
-    if (bookSel) {
-        const books = _taxonomy.books || [];
-        bookSel.innerHTML = '<option value="">全部類別</option>'
-            + `<option value="__none__"${_filters.category === '__none__' ? ' selected' : ''}>（未分類）</option>`
-            + books.map(b => `<option value="${_esc(b)}"${b === _filters.book ? ' selected' : ''}>${_esc(b)}</option>`).join('');
-        bookSel._syncSsValue?.();
-    }
-    const itemSel = document.getElementById('cash-filter-item');
-    if (itemSel) {
-        // 連動：選了類別就只列它底下的項目；沒選就列全部（去重）
-        const map = _taxonomy.items_by_book || {};
-        const items = _filters.book && map[_filters.book]
-            ? map[_filters.book]
-            : [...new Set(Object.values(map).flat())].sort();
-        itemSel.innerHTML = '<option value="">全部項目</option>'
-            + items.map(v => `<option value="${_esc(v)}"${v === _filters.item ? ' selected' : ''}>${_esc(v)}</option>`).join('');
-        itemSel._syncSsValue?.();
-    }
-    const sub = document.getElementById('cash-filter-sub');
-    if (sub) {
-        (_taxonomy.sub_items || []).forEach(v => _subVocab.add(v));
-        _entries.forEach(e => { if (e.sub_item) _subVocab.add(e.sub_item); });
-        sub.innerHTML = '<option value="">全部子項目</option>'
-            + [..._subVocab].sort().map(v => `<option value="${_esc(v)}"${v === _filters.sub_item ? ' selected' : ''}>${_esc(v)}</option>`).join('');
-        sub._syncSsValue?.();
-    }
+    _syncTaxFilter();
     _renderAcctTabs();
 }
 
@@ -311,9 +351,19 @@ const _NO_VAL_DOT =
     + ' style="display:inline-block;width:7px;height:7px;border-radius:50%;'
     + 'background:#ef4444;vertical-align:middle;"></span>';
 // 舊名保留給類別那格的既有呼叫點（語意相同：沒填就是一顆紅點）
-const _NO_CAT_DOT = _NO_VAL_DOT;
 
 let _offOnly = false;   // 只看六日／假日（純前端篩，日期已在手上）
+
+/** 子項目格顯示**第三層以後的全部**（`醫療保健 ▸ 乳癌治療 ▸ 台北馬偕`）。
+ *  🔴 只印第三層的話，第四、五層在畫面上會整個消失 —— 資料在那裡卻看不到，
+ *  比沒有還糟。格子本來就有 ellipsis，完整路徑放在 title。
+ *  沒有節點的舊列（分類是匯入寫的、還沒回填）退回 sub_item 欄。 */
+const _taxDeep = (e) => ((e.taxonomy_path || []).length > 2
+    ? e.taxonomy_path.slice(2).join(' ▸ ') : (e.sub_item || ''));
+
+/** 整條路徑（給 title）。沒有節點就退回複合鍵。 */
+const _taxFull = (e) => ((e.taxonomy_path || []).length
+    ? e.taxonomy_path.join(' ▸ ') : (e.category || ''));
 
 /** 日期格：日期＋星期（六日／假日再上色）。沒有日期就一個破折號。 */
 function _dayHtml(e) {
@@ -327,47 +377,109 @@ function _dayCls(e) {
     return m.holiday ? ' is-holiday' : (m.weekend ? ' is-weekend' : '');
 }
 
+// 一次只畫這麼多列，捲到底再續 —— 4,733 列全畫是 105,912 個 DOM 元素、
+// 每次重畫 ~680ms（2026-08-28 實測 0.14ms/列）。篩選、排序、改一格分類都會
+// 重畫，於是每個動作都要等一秒以上。
+const _PAGE = 200;
+let _shown = [];      // 目前這批排序/篩選後的完整列表（畫多少由 _drawn 決定）
+let _drawn = 0;
+
+/** 單列 HTML。renderList 與 _patchRow 共用 —— 兩份會漂。 */
+function _rowHtml(e) {
+    const card = _cardAmt(e), out = _bankOut(e), deep = _taxDeep(e);
+    // 一列算一次就好 —— 每個都被原本的樣板呼叫 2~3 次（4,733 列時很有感）
+    const tf = _esc(_taxFull(e)), bm = _flat(e.bank_memo, ' '), nt = _flat(e.note, ' ');
+    return `
+        <div class="crm-row${e.id === _selectedId && !_batch.on ? ' selected' : ''}${
+            _batch.on && _batch.sel.has(e.id) ? ' batch-picked' : ''}" data-id="${e.id}"
+             onclick="window._cashRowClick(event,'${e.id}')">
+            <div class="crm-row-date${_dayCls(e)}">${_dayHtml(e)}</div>
+            <div class="crm-row-name">${_esc(e.summary)}${_pettyTag(e)}</div>
+            <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
+            <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
+            <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
+            <div class="cash-ed" onclick="window._cashTaxEdit(event,'${e.id}',0)"
+                 title="${tf}">${e.category ? _esc(e.book) : _NO_VAL_DOT}</div>
+            <div class="cash-ed" onclick="window._cashTaxEdit(event,'${e.id}',1)"
+                 style="color:#c9c9c9;" title="${tf}">${e.item ? _esc(e.item) : _NO_VAL_DOT}</div>
+            <div class="cash-ed" onclick="window._cashTaxEdit(event,'${e.id}',2)"
+                 style="color:#9a9a9a;" title="${tf}">${deep ? _esc(deep) : _NO_VAL_DOT}</div>
+            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','bank_memo')"
+                 title="${_esc(bm)}">${_esc(_flat(e.bank_memo, ' · '))}</div>
+            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','note')"
+                 title="${_esc(nt)}">${_esc(_flat(e.note, ' · '))}</div>
+            <div>${_esc(e.project_name || '')}</div>
+            <div>${_esc(e.invoice_title || '')}</div>
+            <div>${_esc(_acctName(e.bank_account_id))}</div>
+            ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup',
+                                   onDelete: '_cashDelete', extra: _pettyMenu(e) })}
+        </div>
+    `;
+}
+
+/** 只換一列（行內編輯用）。整表重畫要 ~680ms，換一列是 0。 */
+function _patchRow(id) {
+    const e = _entries.find((x) => x.id === id);
+    const el = document.querySelector(`.crm-row[data-id="${CSS.escape(id)}"]`);
+    if (!el) { return; }          // 不在目前畫出來的那批裡 —— 捲到它時自然是新的
+    if (!e) { el.remove(); return; }
+    el.outerHTML = _rowHtml(e);
+}
+
+/** 捲到接近底部就補下一批（哨兵 + IntersectionObserver）。 */
+let _moreObserver = null;
+
+/** IntersectionObserver 的 root。列表容器**通常**就是捲動的那個
+ *  （`crm.css` 給 `[id$="-list-body"]` 的是 `flex:1; overflow-y:auto`），
+ *  但那要它真的被限高才成立 —— 獨立掛載或版面改動時就不是了。
+ *  🔴 所以用量的，不是寫死：量不出捲動就退回 viewport（null）。寫死成 body
+ *  的話，容器沒被限高時哨兵一出現就立刻相交，首屏會一路多畫好幾批。 */
+function _scrollRoot(body) {
+    const ov = getComputedStyle(body).overflowY;
+    return ((ov === 'auto' || ov === 'scroll') && body.scrollHeight > body.clientHeight)
+        ? body : null;
+}
+
+function _drawMore(body) {
+    const slice = _shown.slice(_drawn, _drawn + _PAGE);
+    if (!slice.length) { return; }
+    const html = slice.map(_rowHtml).join('');
+    let s = document.getElementById('cash-more');
+    // 插在哨兵**前面** —— 這樣不用把它搬回最後，observe 也只做一次
+    if (s) { s.insertAdjacentHTML('beforebegin', html); }
+    else { body.insertAdjacentHTML('beforeend', html); }
+    _drawn += slice.length;
+    if (_drawn >= _shown.length) { if (s) { s.remove(); } return; }
+    if (!s) {
+        body.insertAdjacentHTML('beforeend',
+            '<div id="cash-more" class="crm-empty" style="padding:10px;">載入更多…</div>');
+        _moreObserver = new IntersectionObserver((ents) => {
+            if (ents.some((x) => x.isIntersecting)) { _drawMore(body); }
+        }, { root: _scrollRoot(body), rootMargin: '600px' });
+        _moreObserver.observe(document.getElementById('cash-more'));
+    }
+}
+
 function renderList() {
     const body = document.getElementById('cash-list-body');
     if (!body) return;
     _sorter.attach();
+    if (_moreObserver) { _moreObserver.disconnect(); _moreObserver = null; }
     if (_entries.length === 0) {
         body.innerHTML = `<div class="crm-empty">尚無收支紀錄${_filters.q ? '，請調整搜尋' : ''}</div>`;
+        _shown = []; _drawn = 0;
         return;
     }
-    // 每列各算一次就好 —— 三元判斷與輸出各呼叫一次的話，4,704 列會多跑
-    // 9,408 次同樣的計算
     // 六日／假日是純前端篩（日期已在手上，不必為了它多跑一趟後端）
     const _rows = _offOnly
         ? _entries.filter((e) => { const m = _dayMark(e.entry_date);
                                    return m.holiday || m.weekend; })
         : _entries;
-    body.innerHTML = _sorter.sorted(_rows).map((e) => {
-        const card = _cardAmt(e), out = _bankOut(e);
-        return `
-        <div class="crm-row${e.id === _selectedId ? ' selected' : ''}">
-            <div class="crm-row-date${_dayCls(e)}">${_dayHtml(e)}</div>
-            <div class="crm-row-name">${_esc(e.summary)}</div>
-            <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
-            <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
-            <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
-            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}','book')"
-                 title="${_esc(e.category || '')}">${e.category ? _esc(e.book) : _NO_CAT_DOT}</div>
-            <div class="cash-ed" onclick="window._cashCatEdit(event,'${e.id}','item')"
-                 style="color:#c9c9c9;" title="${_esc(e.category || '')}">${e.item ? _esc(e.item) : _NO_VAL_DOT}</div>
-            <div class="cash-ed" onclick="window._cashSubEdit(event,'${e.id}')"
-                 style="color:#9a9a9a;">${e.sub_item ? _esc(e.sub_item) : _NO_VAL_DOT}</div>
-            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','bank_memo')"
-                 title="${_esc(_flat(e.bank_memo, ' '))}">${_esc(_flat(e.bank_memo, ' · '))}</div>
-            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','note')"
-                 title="${_esc(_flat(e.note, ' '))}">${_esc(_flat(e.note, ' · '))}</div>
-            <div>${_esc(e.project_name || '')}</div>
-            <div>${_esc(e.invoice_title || '')}</div>
-            <div>${_esc(_acctName(e.bank_account_id))}</div>
-            ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup', onDelete: '_cashDelete' })}
-        </div>
-    `;
-    }).join('');
+    _shown = _sorter.sorted(_rows);
+    _drawn = 0;
+    body.innerHTML = '';
+    _drawMore(body);
+    _batchRefreshBar();        // 篩選變了，「目前篩出 N 筆」要跟著變
 }
 
 /** 列表格子行內編輯（owner 2026-08-26「直接點按就編輯、自動儲存」）：
@@ -375,6 +487,10 @@ function renderList() {
  *  PUT 部分更新只送那一欄（exclude_unset —— 不會洗掉其他欄）。
  *  stopPropagation：格子的點擊不能觸發整列的選取/開詳情。 */
 window._cashInline = (ev, id, f) => {
+    // 批次模式：點格子＝選這一列（不進行內編輯）—— 兩種點擊語意疊在同一個
+    // 格子上，會變成「想選取卻開了編輯器」。stopPropagation 是必要的：不然
+    // 這一下還會冒泡到列的 onclick，選了又取消＝按不動。
+    if (_batch.on) { ev.stopPropagation(); window._cashRowClick(ev, id); return; }
     ev.stopPropagation();
     // 入口有兩個（✎ 與雙擊格子）—— 一律取所在的格子
     const cell = ev.currentTarget.closest('.cash-ed');
@@ -394,7 +510,7 @@ window._cashInline = (ev, id, f) => {
         if (done) return;
         done = true;
         const v = inp.value.trim();
-        if (!save || v === (old || '').trim()) { renderList(); return; }
+        if (!save || v === (old || '').trim()) { _patchRow(id); return; }
         try {
             await _fetch(`/cash-entries/${id}`, {
                 method: 'PUT', body: JSON.stringify({ [f]: v }),
@@ -404,7 +520,7 @@ window._cashInline = (ev, id, f) => {
         } catch (err) {
             crmToast('儲存失敗：' + err.message);
         }
-        renderList();
+        _patchRow(id);
     };
     inp.addEventListener('keydown', (k) => {
         if (k.key === 'Enter') finish(true);
@@ -413,147 +529,251 @@ window._cashInline = (ev, id, f) => {
     inp.addEventListener('blur', () => finish(true));
 };
 
-/** 類別／項目欄點按填寫（owner 2026-08-26；2026-08-27「項目就是項目的、類別就是類別的」）。
+/** 分類欄點按填寫 —— **順著樹走**（owner 2026-08-27）。
  *
- *  **點哪一欄就只編哪一欄** —— 兩欄共用一個「類別＋項目」串接選單的話，想改項目
- *  卻先被要求重選一次類別，很惱人（owner 實際回報）。
- *  唯一的例外是「項目欄但這列還沒有類別」：項目是掛在類別底下的（儲存仍是
- *  `類別_項目` 複合鍵），沒有類別就形不成鍵，所以那種情況才補問類別。
+ *  類別／項目／子項目三個格子是同一棵樹的前三層；點哪一格就從那一層開始問，
+ *  選到「還有下層」的節點就再長一格出來 —— 所以第四、五層
+ *  （家用▸變動支出▸醫療保健▸乳癌治療▸台北馬偕）不必改程式就問得出來。
  *
- *  值域走可搜尋下拉（純文字輸入會打錯字長出新類別）；正本＝_taxonomy（loadOptions
- *  從後端 /cash-entries/options 灌）。
+ *  🔴 上層還沒選就從頭問：項目掛在類別底下，沒有類別形不成路徑。反過來，上層
+ *  已經有值時點哪格就從哪格開始 —— 只想換子項目卻被要求重選類別很惱人。
+ *
+ *  🔴 存檔時機＝選到**沒有下層**的節點（或點到別處）。一選就存的話，「改類別」
+ *  在還沒選到項目前就會先把下層清掉，畫面跳一次而且中途狀態會落地。
+ *
+ *  🔴 存完一律重載列表，不在前端自己算 category／item／sub_item —— 那三欄是
+ *  後端從路徑推導的鏡射（core.cash_taxonomy.mirror_from_path），前端再算一份
+ *  就是第二份規則，而且漂的是會計對映的鍵。
  */
-window._cashCatEdit = (ev, id, level) => {
+window._cashTaxEdit = (ev, id, level) => {
+    // 批次模式：點格子＝選這一列（不進行內編輯）—— 兩種點擊語意疊在同一個
+    // 格子上，會變成「想選取卻開了編輯器」。stopPropagation 是必要的：不然
+    // 這一下還會冒泡到列的 onclick，選了又取消＝按不動。
+    if (_batch.on) { ev.stopPropagation(); window._cashRowClick(ev, id); return; }
     ev.stopPropagation();
     const cell = ev.currentTarget.closest('.cash-ed');
     if (!cell || cell.querySelector('select,input')) return;
     const e = _entries.find((x) => x.id === id);
     if (!e) return;
-    const books = _taxonomy.books || [];
-    const map = _taxonomy.items_by_book || {};
-    // 沒類別就想改項目 → 這一次連類別一起問（不然存不出複合鍵）
-    const needBook = level === 'book' || !e.book;
-    const needItem = level === 'item' || !needBook;
-    // 🔴 選單面板會被列的 overflow:hidden 裁掉（crm.css 那條 ellipsis 規則）
-    cell.closest('.crm-row')?.classList.add('cash-ed-open');
-    cell.innerHTML = '<span class="cash-cat-edit" style="display:flex;gap:4px;">'
-        + (needBook ? '<select class="crm-input cash-cat-book" style="min-width:78px;"></select>' : '')
-        + (needItem ? '<select class="crm-input cash-cat-item" style="min-width:92px;"></select>' : '')
-        + '</span>';
-    const bSel = cell.querySelector('.cash-cat-book');
-    const iSel = cell.querySelector('.cash-cat-item');
-    if (bSel) {
-        bSel.innerHTML = '<option value="">類別…</option>'
-            + books.map((b) => `<option${b === e.book ? ' selected' : ''}>${_esc(b)}</option>`).join('');
-    }
-    const bookVal = () => (bSel ? bSel.value : e.book);
-    const fillItems = () => {
-        if (!iSel) return;
-        const list = map[bookVal()] || [];
-        iSel.innerHTML = '<option value="">（無項目）</option>'
-            + list.map((i) => `<option${i === e.item ? ' selected' : ''}>${_esc(i)}</option>`).join('');
-        iSel.style.display = list.length ? '' : 'none';
-    };
-    fillItems();
-    let saved = false;
-    const save = async () => {
-        if (saved) return;
-        const book = bookVal();
-        if (!book) return;
-        const list = map[book] || [];
-        if (iSel && list.length && !iSel.value) return;      // 有項目可選就等他選完
-        // 只改類別時保留原項目 —— 但換了類別而原項目不屬於新類別，就得放掉
-        const item = iSel ? (iSel.value || '') : (list.includes(e.item) ? e.item : '');
-        saved = true;
-        const category = item ? book + '_' + item : book;
-        try {
-            await _fetch(`/cash-entries/${id}`, {
-                method: 'PUT', body: JSON.stringify({ category, item }),
-            });
-            e.category = category;
-            e.book = book;
-            e.item = item;
-            crmToast('已儲存');
-        } catch (err) {
-            crmToast('儲存失敗：' + err.message);
-        }
-        renderList();
-    };
-    if (bSel) bSel.addEventListener('change', () => { fillItems(); save(); });
-    if (iSel) iSel.addEventListener('change', save);
-    [bSel, iSel].filter(Boolean).forEach((el) => el.addEventListener('click', (k) => k.stopPropagation()));
-    if (bSel) searchableSelect(bSel, { placeholder: '搜尋類別…' });
-    if (iSel) searchableSelect(iSel, { placeholder: '搜尋項目…' });
-    const first = cell.querySelector('.ss-input');
-    if (first) {
-        first.focus();
-        first.addEventListener('blur', () => setTimeout(() => {
-            // 點到別處又沒選完 → 放棄編輯還原格子
-            if (!saved && !cell.contains(document.activeElement)) renderList();
-        }, 250));
-    }
-};
-
-/** 子項目格：**可搜尋下拉**（owner 2026-08-27「子項目跳不出下拉清單」）。
- *
- *  值域＝這本帳用過的子項目（options 的 taxonomy ∪ 目前畫面上的），另給
- *  「＋ 自訂…」轉成文字輸入 —— 子項目是自由詞彙（新開銷類型隨時會冒出來），
- *  純選單擋掉新值、純文字又打錯字長出雙胞胎，兩個入口都要留。
- */
-window._cashSubEdit = (ev, id) => {
-    ev.stopPropagation();
-    const cell = ev.currentTarget.closest('.cash-ed');
-    if (!cell || cell.querySelector('select,input')) return;
-    const e = _entries.find((x) => x.id === id);
-    if (!e) return;
-    const vocab = [...new Set([...(_taxonomy.sub_items || []),
-                               ..._entries.map((x) => x.sub_item).filter(Boolean)])].sort();
-    cell.closest('.crm-row')?.classList.add('cash-ed-open');
+    const chain = (_taxById[e.taxonomy_node_id] || []).slice();
+    const start = Math.min(level, chain.length);   // 上層沒值就從頭問
+    // 🔴 `sel` 是**完整**的現況路徑，`start` 只決定從第幾格開始畫。截掉下層的話，
+    // 點「類別」格會看到一個空白下拉（現在選的是哪一個看不出來），而且一改類別
+    // 就把下層默默清掉。
+    let sel = chain.slice();
+    let saved = false, dirty = false;
     const CUSTOM = '__custom__';
-    cell.innerHTML = '<select class="crm-input cash-sub-sel" style="min-width:110px;"></select>';
-    const sel = cell.querySelector('.cash-sub-sel');
-    sel.innerHTML = '<option value="">（清空）</option>'
-        + vocab.map((v) => `<option${v === e.sub_item ? ' selected' : ''}>${_esc(v)}</option>`).join('')
-        + `<option value="${CUSTOM}">＋ 自訂…</option>`;
-    let saved = false;
-    const save = async (v) => {
+    cell.closest('.crm-row')?.classList.add('cash-ed-open');
+
+    const childrenAt = (i) => _taxKidsAt(sel, i);
+
+    const save = async (close) => {
         if (saved) return;
         saved = true;
+        if (!dirty) { if (close) _patchRow(id); return; }
+        const node = sel[sel.length - 1];
         try {
-            await _fetch(`/cash-entries/${id}`, {
-                method: 'PUT', body: JSON.stringify({ sub_item: v }),
+            const r = await _fetch(`/cash-entries/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ taxonomy_node_id: node ? node.id : '' }),
             });
-            e.sub_item = v;
+            // 三欄鏡射是後端從路徑推導的 —— 就地 patch 它回傳的結果，
+            // 不為了拿三個欄位把 4,700 列整表重載
+            if (r.entry) { Object.assign(e, r.entry); }
             crmToast('已儲存');
         } catch (err) {
             crmToast('儲存失敗：' + err.message);
         }
-        renderList();
+        _patchRow(id);
     };
-    sel.addEventListener('change', () => {
-        if (sel.value !== CUSTOM) { save(sel.value); return; }
-        // 自訂：換成文字輸入，Enter/失焦存
-        cell.innerHTML = '<input class="crm-input" style="width:100%;font-size:12px;padding:2px 6px;">';
+
+    const focusLast = () => {
+        const inputs = cell.querySelectorAll('.ss-input');
+        const last = inputs[inputs.length - 1];
+        if (!last) return;
+        last.focus();
+        last.addEventListener('blur', () => setTimeout(() => {
+            if (!saved && !cell.contains(document.activeElement)) save(true);
+        }, 250));
+    };
+
+    const addCustom = (i) => {
+        cell.innerHTML = '<input class="crm-input" placeholder="新分類名稱，Enter 建立"'
+            + ' style="width:100%;font-size:12px;padding:2px 6px;">';
         const inp = cell.querySelector('input');
-        inp.value = e.sub_item || '';
         inp.focus();
         inp.addEventListener('click', (k) => k.stopPropagation());
-        inp.addEventListener('keydown', (k) => {
-            if (k.key === 'Enter') save(inp.value.trim());
-            else if (k.key === 'Escape') { saved = true; renderList(); }
+        inp.addEventListener('keydown', async (k) => {
+            if (k.key === 'Escape') { saved = true; _patchRow(id); return; }
+            if (k.key !== 'Enter') return;
+            const name = inp.value.trim();
+            if (!name) { saved = true; _patchRow(id); return; }
+            try {
+                const r = await _fetch('/cash-taxonomy/nodes', {
+                    method: 'POST',
+                    body: JSON.stringify({ parent_id: sel[i - 1] ? sel[i - 1].id : '', name }),
+                });
+                await _loadCashOptions();          // 新節點要進樹才選得到
+                // 重新解析整條鏈：重載之後舊的節點物件已經是別份了
+                sel = (_taxById[r.node && r.node.id] || []).slice();
+                dirty = true;
+                saved = false;
+                await save(true);
+            } catch (err) {
+                crmToast('建立失敗：' + err.message);
+                _patchRow(id);
+            }
         });
-        inp.addEventListener('blur', () => save(inp.value.trim()));
-    });
-    sel.addEventListener('click', (k) => k.stopPropagation());
-    searchableSelect(sel, { placeholder: '搜尋子項目…' });
-    const inp = cell.querySelector('.ss-input');
-    if (inp) {
-        inp.focus();
         inp.addEventListener('blur', () => setTimeout(() => {
-            if (!saved && !cell.contains(document.activeElement)) renderList();
+            if (!saved && !cell.contains(document.activeElement)) { saved = true; _patchRow(id); }
         }, 250));
-    }
+    };
+
+    const onPick = (i, v) => {
+        if (v === CUSTOM) { addCustom(i); return; }
+        sel = sel.slice(0, i);
+        dirty = true;
+        const node = childrenAt(i).find((n) => n.id === v);
+        if (node) sel.push(node);
+        const last = sel[sel.length - 1];
+        if (last && last.children.length) { draw(); focusLast(); }
+        else save(true);
+    };
+
+    // 「至少留一格」＝ keepOne：`公司▸器材` 這種還沒有子項目的，那一格就是
+    // 拿來按「＋ 自訂…」的
+    const draw = () => _taxSelects(cell, {
+        chain: sel, start, keepOne: true, wrap: true,
+        cls: 'crm-input cash-tax-sel', style: 'min-width:92px;',
+        blank: (i) => (i === 0 ? '類別…' : '（不再細分）'),
+        custom: true,
+        onPick,
+    });
+
+    draw();
+    focusLast();
 };
+
+// ── 批次分類 ──────────────────────────────────────────────────
+
+/** 批次模式時點列＝選取；平常點列不做事（詳情走最右邊的編輯鈕）。
+ *  Shift＋點＝從上一次點的那列選到這列（照畫面順序）。 */
+window._cashRowClick = (ev, id) => {
+    if (!_batch.on) { return; }
+    const order = _shown.map((e) => e.id);
+    if (ev && ev.shiftKey && _batch.last && order.includes(_batch.last)) {
+        const a = order.indexOf(_batch.last), b = order.indexOf(id);
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        // 範圍一律**加選**（不是 toggle）—— toggle 會把中間已選的取消掉，
+        // 那是使用者最不想要的結果
+        for (let i = lo; i <= hi; i++) { _batch.sel.add(order[i]); }
+    } else if (_batch.sel.has(id)) {
+        _batch.sel.delete(id);
+    } else {
+        _batch.sel.add(id);
+    }
+    _batch.last = id;
+    _batchPaint();
+};
+
+/** 只把選取狀態刷到**已經畫出來**的列上 —— 不重建 DOM。
+ *  （整表重畫要 ~680ms，而且分批繪製時重畫會把捲軸拉回頂端。） */
+function _batchPaint() {
+    document.querySelectorAll('#cash-list-body .crm-row[data-id]').forEach((el) => {
+        el.classList.toggle('batch-picked', _batch.sel.has(el.dataset.id));
+    });
+    _batchRefreshBar();
+}
+
+function _batchRefreshBar() {
+    const bar = document.getElementById('cash-batch-bar');
+    if (!bar) { return; }
+    bar.style.display = _batch.on ? 'flex' : 'none';
+    const el = document.getElementById('cash-batch-count');
+    if (!el) { return; }
+    el.innerHTML = _batch.sel.size
+        ? `已選 <b style="color:#eee;">${_batch.sel.size}</b> 筆`
+        : `<span style="color:#6b7280;">點列選取，按住 Shift 選一整段（目前篩出 ${_shown.length} 筆）</span>`;
+}
+
+/** 批次列的分類下拉 —— 與篩選器、格內編輯同一個生成器。
+ *  🔴 母公司那本**沒有分類樹**（種子只種私帳），類別是平的一層 ——
+ *  那邊退回一顆 `_CATEGORIES` 的下拉。不退的話那本按下批次分類會看到一個
+ *  空下拉，等於這顆按鈕在公司帳上是壞的。 */
+function _batchTaxDraw() {
+    const box = document.getElementById('cash-batch-tax');
+    if (!box) { return; }
+    if (!_taxTree.length) {
+        box.innerHTML = '<select id="cash-batch-cat" class="crm-select" style="min-width:160px;">'
+            + '<option value="">要套哪個類別…</option>'
+            + _CATEGORIES.map((c) => `<option value="${_esc(c)}">${_esc(c)}</option>`).join('')
+            + '</select>';
+        searchableSelect(box.querySelector('select'), { placeholder: '搜尋類別…' });
+        return;
+    }
+    _taxSelects(box, {
+        chain: _batch.chain, keepOne: true,
+        cls: 'crm-select cash-batch-sel', style: 'min-width:120px;',
+        blank: (i) => (i === 0 ? '要套哪個分類…' : '（不再細分）'),
+        onPick: (i, v) => {
+            _batch.chain = _batch.chain.slice(0, i);
+            const n = _taxKidsAt(_batch.chain, i).find((x) => x.id === v);
+            if (n) { _batch.chain.push(n); }
+            _batchTaxDraw();
+        },
+    });
+}
+
+function _batchSetMode(on) {
+    _batch.on = on;
+    _batch.sel.clear();
+    _batch.last = null;
+    const btn = document.getElementById('cash-btn-batch');
+    if (btn) {
+        btn.textContent = on ? '離開批次' : '批次分類';
+        btn.classList.toggle('crm-btn-primary', on);
+        btn.classList.toggle('crm-btn-secondary', !on);
+    }
+    if (on) { closeDetail(); _batchTaxDraw(); }
+    renderList();                     // 底色與 selected 狀態都要跟著換
+    _batchRefreshBar();
+}
+
+/** 目前挑到的分類：`{label, body}` —— body 直接就是要送的欄位
+ *  （有樹送 taxonomy_node_id、平的那本送 category）。 */
+function _batchPick() {
+    if (!_taxTree.length) {
+        const v = document.getElementById('cash-batch-cat')?.value || '';
+        return { label: v, body: { category: v } };
+    }
+    const node = _batch.chain[_batch.chain.length - 1];
+    return { label: node ? node.name : '', body: { taxonomy_node_id: node ? node.id : '' } };
+}
+
+/** 套用（label 為空＝把選取的這幾筆的分類清掉）。 */
+async function _batchApply(pick) {
+    const ids = [..._batch.sel];
+    if (!ids.length) { crmToast('還沒選任何一筆'); return; }
+    try {
+        const r = await _fetch('/cash-entries/batch-taxonomy', {
+            method: 'PATCH',
+            body: JSON.stringify({ entry_ids: ids, ...pick.body }),
+        });
+        // 整批同一個分類 → 鏡射也只有一份，就地套到那幾列（不重載 4,700 列）
+        _entries.forEach((e) => { if (_batch.sel.has(e.id)) { Object.assign(e, r.entry); } });
+        crmToast(pick.label
+            ? `${r.updated} 筆已分類到「${pick.label}」`
+            : `${r.updated} 筆的分類已清掉`);
+        _batch.sel.clear();
+        _batch.last = null;
+        renderList();
+        _batchRefreshBar();
+    } catch (e) {
+        // 後端是**整批擋下**並說明原因（鎖月、掛了專案的類別不合）—— 原話顯示，
+        // 吞成「操作失敗」的話使用者不知道要取消勾選哪幾筆
+        crmToast(e.message || '批次分類失敗', 8000);
+    }
+}
 
 /** 刷卡金額：status='card' 的列（刷卡當下不動銀行，所以不算銀行支出）。 */
 function _cardAmt(e) {
@@ -584,8 +804,17 @@ async function _loadCashOptions() {
         const o = await _fetch('/cash-entries/options?entity=' + _pinEntity());
         if (o.project_link_categories?.length) _LINKABLE = o.project_link_categories;
         if (o.categories?.length) _CATEGORIES = o.categories;
-        if (o.taxonomy) _taxonomy = o.taxonomy;     // 三層分類（正本 core.cash_taxonomy）
+        if (o.tree) { _taxTree = o.tree; _taxById = {}; _indexTax(_taxTree, []); }
     } catch (_) { /* 用 fallback，不擋畫面 */ }
+}
+
+/** 攤平分類樹成 `id → [根, …, 它]` 的節點物件鏈。 */
+function _indexTax(nodes, chain) {
+    (nodes || []).forEach((n) => {
+        const c = chain.concat([n]);
+        _taxById[n.id] = c;
+        _indexTax(n.children, c);
+    });
 }
 
 /** 專案／發票的即時連結下拉。直接打 PUT /cash-entries/{id} 只送要改的那一欄 ——
@@ -723,7 +952,10 @@ function renderDetail(e) {
 }
 
 async function selectEntry(id) {
-    _selectedId = id; renderList();
+    const prev = _selectedId;
+    _selectedId = id;
+    if (prev) { _patchRow(prev); }
+    _patchRow(id);
     document.getElementById('cash-detail-panel').style.display = 'flex';
     document.getElementById('cash-resize-handle').style.display = '';
     const e = _entries.find(x => x.id === id);
@@ -731,10 +963,11 @@ async function selectEntry(id) {
 }
 
 function closeDetail() {
+    const prev = _selectedId;
     _selectedId = null;
     document.getElementById('cash-detail-panel').style.display = 'none';
     document.getElementById('cash-resize-handle').style.display = 'none';
-    renderList();
+    if (prev) { _patchRow(prev); }
 }
 
 // ── Edit Fields (for inline edit) ───────────────────────────
@@ -1126,21 +1359,39 @@ export async function initCrmCashbookTab() {
             renderList();
         });
     }
-    document.getElementById('cash-filter-book').addEventListener('change', e => {
-        const v = e.target.value;
-        // 🔴 「（未分類）」是**類別欄為空**的快篩，不是一個叫 __none__ 的類別 ——
-        // 當成 book 送出去會變成 LIKE '__none__\_%'，一列都篩不到（實測 0 筆）
-        _filters.book = v === '__none__' ? '' : v;
-        _filters.category = v === '__none__' ? '__none__' : '';
-        // 換類別時清掉項目（原項目多半不屬於新類別，留著會篩出空白）
-        _filters.item = '';
-        loadEntries({ cards: false });
+    // 批次分類（分類下拉的監聽在 _batchTaxDraw 裡 —— 動態長出來的，這裡綁不到）
+    document.getElementById('cash-btn-batch')?.addEventListener('click',
+        () => _batchSetMode(!_batch.on));
+    document.getElementById('cash-batch-exit')?.addEventListener('click',
+        () => _batchSetMode(false));
+    document.getElementById('cash-batch-all')?.addEventListener('click', () => {
+        // 全選＝目前**篩選出來的全部**，不是畫面上那批（分批繪製一次只畫 200 列，
+        // 只選看得到的會讓「全選」在 800 筆的清單上默默漏掉 600 筆）
+        _shown.forEach((e) => _batch.sel.add(e.id));
+        _batchPaint();
     });
-    document.getElementById('cash-filter-item').addEventListener('change', e => { _filters.item = e.target.value; loadEntries({ cards: false }); });
+    document.getElementById('cash-batch-same')?.addEventListener('click', () => {
+        const last = _entries.find((e) => e.id === _batch.last);
+        if (!last) { crmToast('先點一列，再按「選相同內容」'); return; }
+        const key = (last.summary || '').trim();
+        _shown.forEach((e) => { if ((e.summary || '').trim() === key) { _batch.sel.add(e.id); } });
+        _batchPaint();
+    });
+    document.getElementById('cash-batch-none')?.addEventListener('click', () => {
+        _batch.sel.clear(); _batch.last = null; _batchPaint();
+    });
+    document.getElementById('cash-batch-apply')?.addEventListener('click', () => {
+        const pick = _batchPick();
+        if (!pick.label) { crmToast('先選要套的分類'); return; }
+        _batchApply(pick);
+    });
+    document.getElementById('cash-batch-clear')?.addEventListener('click',
+        () => _batchApply({ label: '', body: _taxTree.length
+            ? { taxonomy_node_id: '' } : { category: '' } }));
+    // 分類篩選的監聽在 _syncTaxFilter 裡（下拉是動態長出來的，這裡綁不到）
     document.getElementById('cash-filter-dir').addEventListener('change', e => { _filters.direction = e.target.value; loadEntries({ cards: false }); });
     document.getElementById('cash-filter-from')?.addEventListener('change', e => { _filters.date_from = e.target.value; loadEntries({ cards: false }); });
     document.getElementById('cash-filter-to')?.addEventListener('change', e => { _filters.date_to = e.target.value; loadEntries({ cards: false }); });
-    document.getElementById('cash-filter-sub')?.addEventListener('change', e => { _filters.sub_item = e.target.value; loadEntries({ cards: false }); });
     // 金額打字用同一個 debounce（連打數字別每鍵打一次 API）
     for (const [id, key] of [['cash-filter-amin', 'amount_min'], ['cash-filter-amax', 'amount_max']]) {
         document.getElementById(id)?.addEventListener('input', e => {
@@ -1624,4 +1875,159 @@ window._cashCardCalib = async function (btn) {
         await loadEntries();
     } catch (e) { err.textContent = e.message; err.style.display = 'block'; }
     finally { btn.disabled = false; }
+};
+
+
+// ── 源日請款（＝推送到母公司零用金；owner 2026-08-27 命名）──────────
+//
+// 「我收支表想要有個按鈕，可以推送到應收款，然後進到 crm 請款」＋「我希望接進去
+// 的是零用金系統」。這裡不另造流程：把收支的那一列變成一張**零用金草稿單據**
+// （crm_project_expenses），之後走既有的送出→核准→應付款→匯款。
+//
+// 🔴 付款方式不影響（owner：「不管是匯款或信用卡都可以直接接到 crm 的零用金
+// 請款」）—— 卡片列與銀行列一視同仁，判準只有「這一列有沒有流出金額」。
+// 🔴 只建草稿。送出＝即核准即產應付款，那一步要人在零用金那邊按。
+// 🔴 命名：使用者看到的是**「源日請款」**（他站在私帳這一側，這動作就是「跟源日
+// 請這筆錢」）；程式/資料/另一個 Tab 仍叫零用金（petty）—— 那是母公司那側的
+// 系統名，別為了對齊而去改 petty_status／端點／Tab 名。
+
+/** 這一列流出多少（卡片列與銀行列同一個式子；後端 `_cash_claim_amount` 的鏡像）。 */
+const _pettyAmt = (e) => (e.expense || 0) + (e.claim || 0) + (e.bank_fee || 0);
+
+/** 已推送的列在摘要後面帶一個狀態標 —— 不標的話這一列跟沒推過長得一樣。 */
+function _pettyTag(e) {
+    if (!e.petty_status) { return ''; }
+    return `<span class="cash-petty" title="已送出源日請款">源日·${_esc(e.petty_status)}</span>`;
+}
+
+function _pettyMenu(e) {
+    if (e.petty_status || e.expense_id) {   // expense_id 而無狀態＝單據被刪的空殼連結
+        return [{ label: e.petty_status ? '撤銷源日請款' : '清除源日請款連結',
+                  fn: '_cashPettyUndo' }];
+    }
+    return _pettyAmt(e) > 0 ? [{ label: '源日請款', fn: '_cashPettyPush' }] : [];
+}
+
+// 請款人：正本是「呼叫者綁定的人員檔案」（後端從 token 解，前端不傳）。
+// 帳號還沒綁的時候才落到代管路徑 —— 那時挑一次人，之後這個 session 沿用。
+// owner 2026-08-27：「登記人都是王士源」，所以代管的預設就挑他，但選單留著。
+const _PETTY_DEFAULT_NAME = '王士源';
+let _pettyStaffId = '';
+let _pettyStaffOpts = [];
+
+const _pettyPath = (suffix = '') => (_pettyStaffId
+    ? `/petty/staff/${encodeURIComponent(_pettyStaffId)}/from-cash${suffix}`
+    : `/petty/from-cash${suffix}`);
+
+/** 先走本人路徑；帳號沒綁人員檔案（409）才挑一個人走代管。 */
+async function _pettyPost(body) {
+    try {
+        return await _fetch(_pettyPath(), {
+            method: 'POST', body: JSON.stringify(body) });
+    } catch (e) {
+        if (_pettyStaffId || !/綁定/.test(e.message || '')) { throw e; }
+        const o = await _fetch('/petty/staff-options');
+        _pettyStaffOpts = o.staff || [];
+        const pick = _pettyStaffOpts.find(x => x.name === _PETTY_DEFAULT_NAME)
+                     || _pettyStaffOpts[0];
+        if (!pick) { throw e; }
+        _pettyStaffId = pick.id;
+        return await _fetch(_pettyPath(), {
+            method: 'POST', body: JSON.stringify(body) });
+    }
+}
+
+const _pettyClose = () => {
+    const ov = document.getElementById('cash-petty-overlay');
+    if (ov) { ov.remove(); }
+};
+
+/** 推送前先試算給人看 —— 推完那筆錢就進了公司的請款流程，不該是一鍵無聲的。 */
+window._cashPettyPush = async function (id) {
+    let pv;
+    try {
+        pv = await _pettyPost({ entry_id: id, preview: true });
+    } catch (err) { crmToast('推送失敗：' + err.message); return; }
+    const row = pv.row || {};
+    _pettyClose();
+    const ov = document.createElement('div');
+    ov.id = 'cash-petty-overlay';
+    ov.className = 'crm-modal-overlay';
+    ov.style.display = 'flex';
+    ov.addEventListener('click', ev => { if (ev.target === ov) { _pettyClose(); } });
+    // 值域由後端供（_petty_item_domain）：下拉選的跟寫入時驗的是同一份清單，
+    // 前端不自己濾 —— 濾法一漂，選得到的跟存得進的就不是同一批。
+    const items = (pv.items || []).map(c =>
+        `<option value="${_esc(c)}"${c === row.item ? ' selected' : ''}>${_esc(c)}</option>`).join('');
+    ov.innerHTML = `
+      <div class="crm-modal" style="max-width:460px;">
+        <div class="crm-modal-header"><h3>源日請款</h3>
+          <button onclick="window._cashPettyClose()" class="crm-detail-close">✕</button></div>
+        <div class="crm-modal-body">
+          <table class="crm-table" style="width:100%;font-size:12px;">
+            <tr><td style="color:#bbb;width:80px;">日期</td><td>${_esc(row.date || '')}</td></tr>
+            <tr><td style="color:#bbb;">摘要</td><td>${_esc(row.summary || '')}</td></tr>
+            <tr><td style="color:#bbb;">收支類別</td><td>${_esc(row.category || '（未分類）')}</td></tr>
+            <tr><td style="color:#bbb;">請款人</td><td>${_pettyStaffOpts.length
+                ? `<select id="cash-petty-staff" class="crm-input" style="width:100%;">`
+                  + _pettyStaffOpts.map(x => `<option value="${_esc(x.id)}"${
+                        x.id === _pettyStaffId ? ' selected' : ''}>${_esc(x.name)}</option>`).join('')
+                  + `</select>`
+                : _esc((pv.staff || {}).name || '')}</td></tr>
+            <tr><td style="color:#ddd;font-weight:600;">請款金額</td>
+                <td style="font-weight:600;color:#eee;">$${_fmtNum(row.amount || 0)}</td></tr>
+          </table>
+          <div class="crm-form-section" style="margin-top:14px;">會計項目</div>
+          <select id="cash-petty-item" class="crm-input" style="width:100%;">
+            <option value="">— 請選擇 —</option>${items}</select>
+          <div style="color:#666;font-size:11px;margin-top:4px;">
+            ${row.item ? '由收支類別對映帶出，可以改。' :
+                '這個收支類別沒有對應的會計項目，請自己挑一個。'}</div>
+          <div id="cash-petty-err" style="display:none;color:#fca5a5;font-size:12px;margin-top:8px;"></div>
+          <div style="color:#666;font-size:11px;margin-top:12px;">
+            會建一張<b>草稿</b>單據掛在請款人名下。要真的請款，到
+            「財務管理 → 零用金 → 我的請款」按送出（送出即核准並產生應付款）。</div>
+        </div>
+        <div class="crm-modal-footer">
+          <button class="crm-btn crm-btn-secondary" onclick="window._cashPettyClose()">取消</button>
+          <button class="crm-btn crm-btn-primary" onclick="window._cashPettyConfirm(this,'${_esc(id)}')"
+                  ${row.blocked ? 'disabled title="' + _esc(row.blocked) + '"' : ''}>
+            ${row.blocked ? _esc(row.blocked) : '建立草稿單據'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+};
+
+window._cashPettyClose = _pettyClose;
+
+window._cashPettyConfirm = async function (btn, id) {
+    const err = document.getElementById('cash-petty-err');
+    const item = document.getElementById('cash-petty-item').value;
+    if (!item) {
+        err.textContent = '請先選會計項目 —— 空著會落到「其他」，之後很難翻出來。';
+        err.style.display = 'block';
+        return;
+    }
+    const sel = document.getElementById('cash-petty-staff');
+    if (sel) { _pettyStaffId = sel.value; }
+    btn.disabled = true;
+    try {
+        const r = await _pettyPost({ entry_id: id, item });
+        _pettyClose();
+        crmToast(`已建立草稿單據 $${_fmtNum(r.amount || 0)}`);
+        // 卡片摘要不會被推送改到（只動 expense_id/petty_status，不動金額）
+        await loadEntries({ cards: false });
+    } catch (e) {
+        err.textContent = e.message; err.style.display = 'block';
+        btn.disabled = false;
+    }
+};
+
+window._cashPettyUndo = async function (id) {
+    if (!confirm('撤銷推送？會刪掉那張草稿單據並解開連結。')) { return; }
+    try {
+        await _fetch('/petty/from-cash/' + encodeURIComponent(id), { method: 'DELETE' });
+        crmToast('已撤銷');
+        await loadEntries({ cards: false });
+    } catch (e) { crmToast('撤銷失敗：' + e.message); }
 };

@@ -3,27 +3,20 @@
   <input id="cash-search" type="search" placeholder="搜尋內容、備註、發票號碼..." class="crm-search-input">
   <!-- 類別選項由 JS 依實際資料生成（寫死的清單跟不上使用中的類別，選了篩不到東西）。
        原本還有一個「全部項目」篩 item 欄 —— 那欄從來沒有資料，永遠篩出空白，已移除。 -->
-  <!-- 三層分類篩選（owner 2026-08-27「類別、項目、子項目」）：類別＝公司/個人/
-       家用…、項目＝專案/生活/變動支出…、子項目＝外出用餐…。連動：選了類別，
-       項目只列該類別底下的。 -->
-  <select id="cash-filter-book" class="crm-select">
-    <option value="">全部類別</option>
-  </select>
-  <select id="cash-filter-item" class="crm-select">
-    <option value="">全部項目</option>
-  </select>
+  <!-- 分類篩選（owner 2026-08-27）：**一排會長的下拉** —— 選了類別就長出項目、
+       選了項目就長出子項目，一路到底（家用▸變動支出▸醫療保健▸乳癌治療▸台北馬偕）。
+       選項與監聽都由 _syncTaxFilter 生成（深度不定，寫死幾顆就會不夠用）。 -->
+  <span id="cash-filter-tax" style="display:flex;gap:6px;"></span>
   <select id="cash-filter-dir" class="crm-select">
     <option value="">收入＋支出</option>
     <option value="in">只看收入</option>
     <option value="out">只看支出</option>
   </select>
-  <!-- 日期區間／子項目／金額（owner 2026-08-26「可以篩選日期區間、分類、子項目、金額」）-->
+  <!-- 日期區間／金額（owner 2026-08-26「可以篩選日期區間、分類、子項目、金額」；
+       分類與子項目已收斂到上面那排會長的下拉）-->
   <input id="cash-filter-from" type="date" class="crm-input" title="起日（含）" style="width:132px;">
   <span style="color:#666;">–</span>
   <input id="cash-filter-to" type="date" class="crm-input" title="迄日（含）" style="width:132px;">
-  <select id="cash-filter-sub" class="crm-select">
-    <option value="">全部子項目</option>
-  </select>
   <input id="cash-filter-amin" type="number" class="crm-input" placeholder="金額 ≥" title="金額下限（收入或支出的量級）" style="width:88px;">
   <input id="cash-filter-amax" type="number" class="crm-input" placeholder="金額 ≤" title="金額上限" style="width:88px;">
   <!-- 六日／假日（owner 2026-08-27）：判斷屬公屬私時常要單獨看假日花的錢。
@@ -33,6 +26,10 @@
   <div class="crm-toolbar-right">
     <!-- 對帳與匯入 CSV 本來是兩顆 —— 對使用者是同一件事（把外面的帳弄進來），
          合成一個入口，兩者都在展開的面板裡。 -->
+    <!-- 批次分類（owner 2026-08-28）：信用卡明細同一家店一個月十幾筆，
+         一筆一筆點三格分類要按上千次。 -->
+    <button id="cash-btn-batch" class="crm-btn crm-btn-secondary"
+            title="點列選取（Shift 選一整段），一次把它們分到同一個分類">批次分類</button>
     <button id="cash-btn-recon" class="crm-btn crm-btn-secondary"
             title="上傳對帳單、分類規則、對帳工作台、核對餘額、匯入 CSV">🔍 對帳／匯入</button>
     <button id="cash-btn-add" class="crm-btn crm-btn-primary">+ 新增</button>
@@ -59,6 +56,23 @@
     <!-- 帳戶切換列：總表／各銀行，每個都標當下餘額。放這裡而不是塞進工具列的
          下拉 —— 餘額是每天要看的數字，藏在下拉裡等於沒有。 -->
     <div class="cash-acct-tabs" id="cash-acct-tabs"></div>
+    <!-- 批次分類列：只在批次模式顯示。分類下拉由 _batchTaxDraw 生成
+         （深度不定，寫死幾顆就會不夠用 —— 同篩選器那排）。 -->
+    <div id="cash-batch-bar" style="display:none;align-items:center;gap:8px;padding:8px 12px;
+         border-bottom:1px solid #2e2e2e;background:#1b1b1b;flex-wrap:wrap;">
+      <span id="cash-batch-count" style="color:#9ca3af;font-size:12px;"></span>
+      <button id="cash-batch-all" class="crm-btn crm-btn-secondary crm-btn-sm"
+              title="選取目前篩選出來的全部（不只畫面上這幾列）">全選目前清單</button>
+      <button id="cash-batch-same" class="crm-btn crm-btn-secondary crm-btn-sm"
+              title="點一列之後按這個，會把「內容」一模一樣的都選起來">選相同內容</button>
+      <button id="cash-batch-none" class="crm-btn crm-btn-secondary crm-btn-sm">清除選取</button>
+      <span id="cash-batch-tax" style="display:flex;gap:6px;"></span>
+      <button id="cash-batch-apply" class="crm-btn crm-btn-primary crm-btn-sm">套用分類</button>
+      <button id="cash-batch-clear" class="crm-btn crm-btn-secondary crm-btn-sm"
+              title="把選取的這幾筆的分類清掉">清掉分類</button>
+      <span style="flex:1;"></span>
+      <button id="cash-batch-exit" class="crm-btn crm-btn-secondary crm-btn-sm">結束批次</button>
+    </div>
     <div class="crm-list-header acct-header">
       <span data-sort-key="date">日期 <span class="crm-sort-ind">↕</span></span>
       <span data-sort-key="summary">內容 <span class="crm-sort-ind">↕</span></span>
