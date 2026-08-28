@@ -39,6 +39,8 @@ const _drillSorter = createSortable({
     getters: {
         date: it => it.date ? String(it.date).substring(0, 10) : '',
         label: it => it.label || '',
+        account: it => it.account || '',
+        category: it => it.category || '',
         amount: it => it.amount ?? '',
     },
 });
@@ -570,25 +572,38 @@ async function _openDrill(kind, label) {
 function _renderDrillTable() {
     const body = _c && _c.querySelector('#finstmt-drill-body');
     if (!body || !_drill) return;
+    // 有值才畫那一欄 —— 發票/請款的明細沒有帳戶，空欄只是佔位子
+    const has = (k) => _drill.items.some((it) => (it[k] || '') !== '');
+    const cols = { account: has('account'), category: has('category'),
+                   note: has('note') || has('status') };
+    const td = 'padding:5px 10px;';
     body.innerHTML = `
     <table style="border-collapse:collapse;font-size:12px;color:#ccc;width:100%;">
         <thead>
             <tr style="color:#888;text-align:left;">
-                ${sortableTh('date', '日期', 'style="padding:5px 10px;"')}
-                ${sortableTh('label', '摘要', 'style="padding:5px 10px;"')}
-                ${sortableTh('amount', '金額', 'style="padding:5px 10px;text-align:right;"')}
+                ${sortableTh('date', '日期', `style="${td}"`)}
+                ${sortableTh('label', '摘要', `style="${td}"`)}
+                ${cols.account ? sortableTh('account', '帳戶', `style="${td}"`) : ''}
+                ${cols.category ? sortableTh('category', '分類', `style="${td}"`) : ''}
+                ${cols.note ? `<th style="${td}">說明</th>` : ''}
+                ${sortableTh('amount', '金額', `style="${td}text-align:right;"`)}
             </tr>
         </thead>
         <tbody>${_drillSorter.sorted(_drill.items).map(it => `
             <tr style="border-top:1px solid #2a2a2a;">
-                <td style="padding:5px 10px;white-space:nowrap;">${esc(it.date ? String(it.date).substring(0, 10) : '')}</td>
-                <td style="padding:5px 10px;">${esc(it.label || '')}</td>
-                <td style="padding:5px 10px;text-align:right;white-space:nowrap;color:${(it.amount || 0) < 0 ? '#fca5a5' : '#ddd'};">$${fmtNum(it.amount)}</td>
+                <td style="${td}white-space:nowrap;">${esc(it.date ? String(it.date).substring(0, 10) : '')}</td>
+                <td style="${td}">${esc(it.label || '')}</td>
+                ${cols.account ? `<td style="${td}color:#9ca3af;white-space:nowrap;">${esc(it.account || '')}</td>` : ''}
+                ${cols.category ? `<td style="${td}color:#9ca3af;white-space:nowrap;">${esc(it.category || '')}</td>` : ''}
+                ${cols.note ? `<td style="${td}color:#777;">${esc(it.note || '')}${
+                    it.status ? `<span style="color:#555;">${it.note ? '｜' : ''}${esc(it.status)}</span>` : ''}</td>` : ''}
+                <td style="${td}text-align:right;white-space:nowrap;color:${(it.amount || 0) < 0 ? '#fca5a5' : '#ddd'};">$${fmtNum(it.amount)}</td>
             </tr>`).join('')}
         </tbody>
         <tfoot>
             <tr style="border-top:2px solid #444;font-weight:700;color:#eee;">
-                <td colspan="2" style="padding:6px 10px;">合計（${fmtNum(_drill.items.length)} 筆）</td>
+                <td colspan="${1 + 1 + (cols.account ? 1 : 0) + (cols.category ? 1 : 0) + (cols.note ? 1 : 0)}"
+                    style="padding:6px 10px;">合計（${fmtNum(_drill.items.length)} 筆）</td>
                 <td style="padding:6px 10px;text-align:right;">$${fmtNum(_drill.total)}</td>
             </tr>
         </tfoot>

@@ -129,6 +129,10 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
                          # 引擎原本看不到這個欄，卡片帳對 BS 是隱形的
                          "status",
                          "claim", "category", "summary", "invoice_id",
+                         # 三表鑽取的明細要看得懂：摘要常常只有交易類型
+                         # （「網路自轉」），用途寫在銀行資訊／附註
+                         # （owner 2026-08-29「明細多一點內容」）
+                         "bank_memo", "note",
                          "advance_payment_id", "payment_request_id",
                          "bank_account_id")
     # 器材 2026-08-24 起帶 entity（§8 階段 4）：兩本帳各餵各的折舊/淨值。
@@ -380,6 +384,17 @@ async def compute_live(session, months, inputs=None, adv=None,
         warn["messages"].append(
             f"損益表為權責基礎（本期結案案合約合計 {_acc:,}）；同期現金入帳為 "
             f"{_cash_rev:,}，差 {_acc - _cash_rev:+,} ＝ 應收/跨期收款的變動。")
+        # ⏳ 未解：**BS 的應收是累計權責、累積損益是現金**，兩邊口徑不同 ——
+        # 應收長出來的錢在權益那側沒有對應，資產負債表就差那麼多
+        # （2026-08-29 實測 dev：2026-06 差 1,428,185、2026-08 差 1,836,281，
+        # 而 2023~2025 只有 2~9 萬）。
+        # 🔴 試過把 cum_pnl 也 restate 成權責，同一份資料前後對照是**好壞參半**：
+        # 2026 兩期各降到 723,003／747,079，但 2025-12 從 90,265 惡化到
+        # −1,224,185、2024-06 從 22,590 到 −201,841。根因是兩者的窗口不同 ——
+        # accrual 只認「結案月 ∈ cum_months」的合約，而應收認「結案 ≤ as_of 且
+        # 未收 > 0」，基準月之前結案、之後才收的案子兩邊各記各的。
+        # 要修得對，得先決定「基準月之前的未收」怎麼進期初 —— 那是 owner 的
+        # 會計決定，不是實作細節。**別在沒想清楚前把權益改掉**。
     bs = build_balance_sheet(
         as_of, bank_lines=bank_lines,
         receivable_total=(_mp["receivable"] if _mp is not None
@@ -508,7 +523,14 @@ async def _recon_warnings(session, month: str, bank_accounts) -> list:
 
 # ── Drilldown ────────────────────────────────────────────────
 
-def _row(source, rid, date, label, amount, category="", status="") -> dict:
+def _row(source, rid, date, label, amount, category="", status="",
+         account="", note="") -> dict:
+    """鑽取明細的一列。
+
+    `account`／`note` 是給收支列的（帳戶名、銀行資訊）—— owner 2026-08-29
+    「明細多一點內容 現在內容太少看不懂」：摘要欄常常只有「網路自轉」，
+    真正說明用途的是銀行資訊那欄（「生活開支南京東路分行」「定期定額買台股」）。
+    """
     # timestamptz 回讀是 UTC 表示 → 轉回本地時區再取日（與 month_of 同理，
     # 否則月初列的顯示日期會少一天）
     if isinstance(date, datetime) and date.tzinfo is not None:
@@ -517,7 +539,8 @@ def _row(source, rid, date, label, amount, category="", status="") -> dict:
             "date": (date.strftime("%Y-%m-%d") if hasattr(date, "strftime")
                      else (date or None)),
             "label": label or "", "amount": int(amount or 0),
-            "category": category or "", "status": status or ""}
+            "category": category or "", "status": status or "",
+            "account": account or "", "note": note or ""}
 
 
 async def drilldown(session, kind: str, months, entity: str = "parent") -> dict:
@@ -681,6 +704,8 @@ async def drilldown(session, kind: str, months, entity: str = "parent") -> dict:
         rows, _stats = cashflow_lines(inputs["cash_entries"], months,
                                       cat_map=cat_map, accounts=accounts,
                                       bank_accounts=inputs["bank_accounts"])
+        acct_names = {b.get("id"): b.get("name") or ""
+                      for b in (inputs["bank_accounts"] or [])}
         for r in rows:
             if r["activity"] != act:
                 continue
@@ -690,7 +715,11 @@ async def drilldown(session, kind: str, months, entity: str = "parent") -> dict:
                 label += "（跨行手續費）"   # 本金是內部移動，這一列只有手續費
             items.append(_row("cash", e["id"], e.get("entry_date"),
                               label, r["amount"], e.get("category"),
-                              r["treatment"]))
+                              r["treatment"],
+                              account=acct_names.get(e.get("bank_account_id"), ""),
+                              # 銀行資訊優先、沒有才退回附註 —— 摘要是交易類型
+                              # （「網路自轉」），用途寫在這兩欄
+                              note=(e.get("bank_memo") or e.get("note") or "")))
 
     items.sort(key=lambda x: (x["date"] or "", x["id"] or ""))
     total = sum(x["amount"] for x in items)
