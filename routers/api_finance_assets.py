@@ -28,6 +28,24 @@ from .api_finance import _guard
 router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
 
 
+def _to_twd(amount, currency: str, usd_twd: float) -> int:
+    """原幣金額 → 台幣。TWD 直接回；其餘乘匯率（拿不到匯率就是 0，同現值那側）。
+
+    🔴 現值與成本**共用這一支**：兩邊各自換算的話，損益會是兩個不同匯率的差，
+    在沒有任何交易的日子也會浮動。
+    """
+    if amount is None:
+        return 0
+    if (currency or "TWD").upper() == "TWD":
+        return round(float(amount))
+    return round(float(amount) * (usd_twd or 0))
+
+
+def _holding_cost(h, usd_twd: float) -> int:
+    """一列持股的台幣投資成本。沒填成本就是 0（＝不知道，不是零成本）。"""
+    return _to_twd(h.cost_total, h.currency, usd_twd) if h.cost_total else 0
+
+
 def _holding_value(h, usd_twd: float) -> int:
     """一列持股的台幣現值。manual_value 優先；有價有股數就算；其餘 0。"""
     if h.manual_value is not None:
@@ -92,6 +110,11 @@ async def _auto_buckets(session, ent: str, usd_twd: float) -> dict:
         "quote_symbol": h.quote_symbol or "", "last_price": h.last_price,
         "price_at": _fmt_day(h.price_at), "manual_value": h.manual_value,
         "value_twd": _holding_value(h, usd_twd), "note": h.note or "",
+        # 成本與損益：沒填成本的列 cost_twd=0、pnl=None（**不是 0**）——
+        # 「還沒填成本」與「成本剛好等於市值」在畫面上必須看得出差別
+        "cost_total": h.cost_total, "cost_twd": _holding_cost(h, usd_twd),
+        "pnl": (_holding_value(h, usd_twd) - _holding_cost(h, usd_twd)
+                if h.cost_total else None),
     } for h in holdings]
     return {
         "buckets": {"銀行現金": bank_cash, "應收帳款": receivable,

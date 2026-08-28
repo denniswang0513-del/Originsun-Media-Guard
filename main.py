@@ -863,6 +863,9 @@ async def _on_startup():
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS cost_line_id VARCHAR(32)",
                         "CREATE INDEX IF NOT EXISTS idx_payreq_cost_line "
                         "ON crm_payment_requests (cost_line_id)",
+                        # 證券持股的投資成本（owner 2026-08-29）—— 有它才算得出損益
+                        "ALTER TABLE finance_holdings ADD COLUMN IF NOT EXISTS "
+                        "cost_total BIGINT",
                         "CREATE INDEX IF NOT EXISTS idx_cash_taxonomy_node "
                         "ON crm_cash_entries (taxonomy_node_id)",
                     ]:

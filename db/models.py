@@ -1615,6 +1615,12 @@ class FinanceHolding(Base):
     last_price = Column(Float, nullable=True)               # 最近抓到的單價（原幣）
     price_at = Column(DateTime(timezone=True), nullable=True)
     manual_value = Column(BigInteger, nullable=True)        # 手動現值（TWD）
+    # 投資成本（**這一列自己的幣別**，同 last_price 的慣例）—— 有它才算得出
+    # 損益與報酬率。owner 2026-08-29：券商 App 上看到的是「+17,885,232」，
+    # 系統只記得市值，那個數字生不出來。
+    # 🔴 TWD 換算在讀取端（_holding_cost）做，不落庫 —— 匯率天天變，存成台幣
+    # 就會凍住某一天的匯率，而市值那側是即時換算的，兩邊用不同匯率算損益。
+    cost_total = Column(BigInteger, nullable=True)
     sort_order = Column(Integer, default=0)
     active = Column(Boolean, default=True)
     note = Column(Text, nullable=True)

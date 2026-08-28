@@ -148,6 +148,7 @@ _ONLY_ON_BLOCKED_ROUTES = {
     # 「現值/淨值」），等於漏了也不會變紅 —— 明著登記進來讓網子接得住。
     "total": "淨值快照的總額 —— finance/assets 整支 require_entity 檔",
     "manual_value": "持股的手填現值 —— 同上",
+    "cost_total": "持股的投資成本 —— 同上（2026-08-29 證券投資頁）",
     "auto": "快照的系統欄快照（銀行/應收/器材/證券）—— 同上",
     "ledger_detail": "逐案損益的工項與費用拆解 —— finance/project-ledger 整支檔",
 }
