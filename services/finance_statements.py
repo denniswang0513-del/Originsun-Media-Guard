@@ -384,17 +384,21 @@ async def compute_live(session, months, inputs=None, adv=None,
         warn["messages"].append(
             f"損益表為權責基礎（本期結案案合約合計 {_acc:,}）；同期現金入帳為 "
             f"{_cash_rev:,}，差 {_acc - _cash_rev:+,} ＝ 應收/跨期收款的變動。")
-        # ⏳ 未解：**BS 的應收是累計權責、累積損益是現金**，兩邊口徑不同 ——
-        # 應收長出來的錢在權益那側沒有對應，資產負債表就差那麼多
-        # （2026-08-29 實測 dev：2026-06 差 1,428,185、2026-08 差 1,836,281，
-        # 而 2023~2025 只有 2~9 萬）。
-        # 🔴 試過把 cum_pnl 也 restate 成權責，同一份資料前後對照是**好壞參半**：
-        # 2026 兩期各降到 723,003／747,079，但 2025-12 從 90,265 惡化到
-        # −1,224,185、2024-06 從 22,590 到 −201,841。根因是兩者的窗口不同 ——
-        # accrual 只認「結案月 ∈ cum_months」的合約，而應收認「結案 ≤ as_of 且
-        # 未收 > 0」，基準月之前結案、之後才收的案子兩邊各記各的。
-        # 要修得對，得先決定「基準月之前的未收」怎麼進期初 —— 那是 owner 的
-        # 會計決定，不是實作細節。**別在沒想清楚前把權益改掉**。
+        # 🔴 累積損益要跟 BS 的應收**同一個口徑**：那條應收線是累計權責
+        # （結案 ≤ as_of 的未收），cum_pnl 卻是現金 —— 應收長出來的錢在權益那側
+        # 沒有對應，資產負債表就差那麼多。
+        #
+        # 加的是**應收本身**，不是把 cum_pnl 整份 restate 成權責：
+        # 2026-08-29 試過整份 restate（連 apply_ledger_project_costs 一起），
+        # 同一份資料前後對照好壞參半 —— 2026 兩期各降到 723,003／747,079，
+        # 但 2025-12 從 90,265 惡化到 −1,224,185。那支 restate 是為**期間**設計的
+        # （對齊 owner 年度表），套在「基準月以來的累計」窗口上會連成本也一起
+        # 換掉，多移了一百多萬。
+        #
+        # 這條式子成立的前提，2026-08-29 實測生產成立：**基準月(2023-06)之前
+        # 結案而仍未收的案＝0 筆**（43 筆未收全部在 2025 之後結案）。哪天有了
+        # 那種案，它的營收落在基準之前、應收卻掛在表上，就要另外進期初調整。
+        _cum_recv = _mp["receivable"]
     bs = build_balance_sheet(
         as_of, bank_lines=bank_lines,
         receivable_total=(_mp["receivable"] if _mp is not None
@@ -405,7 +409,8 @@ async def compute_live(session, months, inputs=None, adv=None,
         vat_payable=vat_cum["net"],
         loan_rows=loan_outstanding_rows(inputs["loans"],
                                         inputs["loan_payments"], as_of),
-        cumulative_net=cum_pnl["net"]["amount"], note_counts=warn,
+        cumulative_net=cum_pnl["net"]["amount"] + (_cum_recv if _mp is not None else 0),
+        note_counts=warn,
         shareholder_loan_lines=_split["shareholder_loan"],
         shareholder_capital_lines=_split["shareholder_capital"],
         owner_flow_net=_pos["owner_net"], card_outstanding=_card,
