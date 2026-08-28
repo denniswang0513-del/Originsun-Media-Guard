@@ -1620,7 +1620,10 @@ class FinanceHolding(Base):
     # 系統只記得市值，那個數字生不出來。
     # 🔴 TWD 換算在讀取端（_holding_cost）做，不落庫 —— 匯率天天變，存成台幣
     # 就會凍住某一天的匯率，而市值那側是即時換算的，兩邊用不同匯率算損益。
-    cost_total = Column(BigInteger, nullable=True)
+    # 🔴 Float 不是整數（同 shares／last_price）：碎股的成本是有小數的美金，
+    # 取整會把報酬率算歪 —— Firstrade 的 VEA 成本 48.42 美元存成 48，
+    # 報酬率就從 16.7% 變 17.8%（2026-08-29 實例）。
+    cost_total = Column(Float, nullable=True)
     sort_order = Column(Integer, default=0)
     active = Column(Boolean, default=True)
     note = Column(Text, nullable=True)

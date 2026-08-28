@@ -233,8 +233,7 @@ _fs.save = async (id, btn) => {
             body: JSON.stringify({
                 name: h.name,               // PUT 是 exclude_unset，name 是必填欄
                 shares: _num(tr.querySelector('.fs-shares')),
-                cost_total: _num(tr.querySelector('.fs-cost')) === null
-                    ? null : Math.round(_num(tr.querySelector('.fs-cost'))),
+                cost_total: _num(tr.querySelector('.fs-cost')),   // 碎股成本有小數，不取整
                 manual_value: _num(tr.querySelector('.fs-manual')) === null
                     ? null : Math.round(_num(tr.querySelector('.fs-manual'))),
             }),
@@ -258,7 +257,7 @@ _fs.add = async (btn) => {
                 name: v('fs-new-name'), symbol: v('fs-new-symbol'),
                 broker: v('fs-new-broker'),
                 shares: v('fs-new-shares') === '' ? null : Number(v('fs-new-shares')),
-                cost_total: v('fs-new-cost') === '' ? null : Math.round(Number(v('fs-new-cost'))),
+                cost_total: v('fs-new-cost') === '' ? null : Number(v('fs-new-cost')),
                 currency: v('fs-new-cur'), quote_symbol: v('fs-new-qs'),
             }),
         });

@@ -1452,7 +1452,7 @@ class HoldingPayload(BaseModel):
     quote_symbol: Optional[str] = ""
     last_price: Optional[float] = None
     manual_value: Optional[int] = None
-    cost_total: Optional[int] = None      # 投資成本（該列的幣別）
+    cost_total: Optional[float] = None    # 投資成本（該列的幣別；碎股有小數）
     sort_order: int = 0
     active: bool = True
     note: Optional[str] = None

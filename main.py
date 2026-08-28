@@ -865,7 +865,11 @@ async def _on_startup():
                         "ON crm_payment_requests (cost_line_id)",
                         # 證券持股的投資成本（owner 2026-08-29）—— 有它才算得出損益
                         "ALTER TABLE finance_holdings ADD COLUMN IF NOT EXISTS "
-                        "cost_total BIGINT",
+                        "cost_total DOUBLE PRECISION",
+                        # 2026-08-29 當天從 BIGINT 改浮點（碎股成本有小數）——
+                        # 欄位當天才建、生產零筆資料，改型別無損
+                        "ALTER TABLE finance_holdings ALTER COLUMN cost_total "
+                        "TYPE DOUBLE PRECISION",
                         "CREATE INDEX IF NOT EXISTS idx_cash_taxonomy_node "
                         "ON crm_cash_entries (taxonomy_node_id)",
                     ]:
