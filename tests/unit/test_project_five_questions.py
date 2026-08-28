@@ -85,7 +85,7 @@ def test_list_uses_to_collect_not_the_stored_receivable():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     api = (root / "routers/api_finance_projects.py").read_text(encoding="utf-8")
-    assert '"to_collect": to_collect(' in api
+    assert "_tc = to_collect(" in api and '"to_collect": _tc' in api
     js = (root / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
     row = js.split("function _renderList()")[1].split("_renderCount(")[0]
     assert "p.to_collect" in row and "p.receivable" not in row

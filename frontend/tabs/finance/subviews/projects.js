@@ -24,18 +24,48 @@ let _data = null;
 let _sel = null;        // 目前選取的專案 id
 let _detail = null;     // 右側載入的單案資料
 let _q = '';
-let _unpaidOnly = false;
+// 收付狀態篩選（''＝全部）。取代舊的「只看未收清」checkbox —— 那個用的是
+// `payment_status` 欄，跟畫面上的未收不是同一個口徑（收齊的代開案在舊欄位裡
+// 還是「部分到帳」），兩種判準並存只會讓人不知道該信哪一個。
+let _settle = '';
 let _fy = '';           // 會計年度篩選（''=全部、'open'=未結案、數字=FY 結束年）
 let _dirty = false;
 let _resizeBound = false;
 
 // 表頭與資料列共用一份欄寬 —— 分開寫的話改一邊就整排對不齊
-// 九欄：結案日／專案／客戶／營收／應收／未收／應付／未付／檢查
+// 十欄：狀態／結案日／專案／客戶／營收／應收／未收／應付／未付／檢查
 // owner 2026-08-29 要一眼回答五件事：① 營收 ② 客戶會匯多少（扣掉代辦費）
 // ③ 我要匯出去多少 ④ 收齊了嗎還剩多少 ⑤ 付清了嗎還剩多少
 const _GRID = 'display:grid;grid-template-columns:'
-    + '84px 1.4fr 0.9fr 96px 96px 92px 96px 92px 60px;'
+    + '46px 82px 1.3fr 0.85fr 94px 94px 90px 94px 90px 56px;'
     + 'align-items:center;gap:8px;';
+
+// 收付狀態（C 案，owner 2026-08-29 選）：結案＝一個綠色「結」，
+// 未結才長出「收」「付」兩字各自上色。判定在後端（settle_state），這裡只畫。
+// 🔴 `out === 'none'`（這案沒有要付的）**不畫那個字** —— 畫一個灰「付」會讓人
+// 以為是「還沒付」；少一個字反而說得清楚。
+const _ST_IN = { ok: ['收', '#86efac'], wait: ['收', '#fbbf24'], over: ['溢', '#c4b5fd'] };
+const _ST_OUT = { ok: ['付', '#86efac'], wait: ['付', '#fca5a5'] };
+
+function _stTip(p) {
+    const st = p.settle || {};
+    if (st.done) { return '結案 —— 該收該付都完成'; }
+    const a = st.in === 'over' ? `溢收 ${fmtNum(-p.to_collect)}`
+        : st.in === 'wait' ? `還有 ${fmtNum(p.to_collect)} 沒收到` : '收齊了';
+    const b = st.out === 'wait' ? `還有 ${fmtNum(p.ap_open)} 沒付`
+        : st.out === 'ok' ? '付清了' : '這案沒有要付的';
+    return `${a}；${b}`;
+}
+
+function _stHtml(p) {
+    const st = p.settle || {};
+    const ch = (t, c) => `<b style="color:${c};font-weight:600;">${t}</b>`;
+    const body = st.done ? ch('結', '#86efac')
+        : [_ST_IN[st.in] && ch(..._ST_IN[st.in]),
+           _ST_OUT[st.out] && ch(..._ST_OUT[st.out])].filter(Boolean).join('');
+    return `<span style="display:inline-flex;gap:5px;font-size:12px;letter-spacing:.02em;"
+                  title="${esc(_stTip(p))}">${body}</span>`;
+}
 
 export default async function render(container, ctx = {}) {
     _c = container;
@@ -66,11 +96,24 @@ function _closeFY(p) {
 }
 
 /** 目前畫面上的列（前端篩選：402 列已經在手上，不必回伺服器）。 */
+/** 狀態篩選 —— 判準與最左欄同一份（後端 settle_state 算好帶下來），
+ *  這裡只是照 `settle` 挑。前端自己再判一次的話，篩出來的和看到的會不一樣。 */
+function _settleMatch(p) {
+    const st = p.settle || {};
+    if (!_settle) { return true; }
+    if (_settle === 'done') { return !!st.done; }
+    if (_settle === 'in') { return st.in === 'wait'; }
+    if (_settle === 'out') { return st.out === 'wait'; }
+    if (_settle === 'either') { return st.in === 'wait' || st.out === 'wait'; }
+    if (_settle === 'over') { return st.in === 'over'; }
+    return true;
+}
+
 function _visible() {
     const q = _q.toLowerCase();
     return (_data.projects || []).filter(p =>
         (!q || p.name.toLowerCase().includes(q) || (p.client || '').toLowerCase().includes(q))
-        && (!_unpaidOnly || p.payment_status !== '全額到帳')
+        && _settleMatch(p)
         && (!_fy || (_fy === 'open' ? !p.close_date : _closeFY(p) === +_fy)));
 }
 
@@ -131,8 +174,12 @@ function _renderShell() {
     _c.innerHTML = `
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
             <input id="fpl-q" class="crm-input" placeholder="搜尋專案 / 客戶" style="width:200px;" value="${esc(_q)}">
-            <label style="font-size:12px;color:#ccc;display:flex;align-items:center;gap:5px;">
-                <input type="checkbox" id="fpl-unpaid" ${_unpaidOnly ? 'checked' : ''}> 只看未收清</label>
+            <select class="crm-input" id="fpl-settle" title="收付狀態（與最左欄同一份判定）"
+                    style="width:150px;" data-no-search>
+                ${[['', '全部狀態'], ['either', '待收或待付'], ['in', '待收'],
+                   ['out', '待付'], ['done', '已結案'], ['over', '溢收']]
+                    .map(([v, t]) => `<option value="${v}"${_settle === v ? ' selected' : ''}>${t}</option>`).join('')}
+            </select>
             <select class="crm-input" id="fpl-fy" title="會計年度（7/1–6/30）" style="width:170px;" data-no-search>
                 <option value="">全部年度</option>
                 <option value="open"${_fy === 'open' ? ' selected' : ''}>未結案</option>
@@ -171,6 +218,7 @@ function _renderShell() {
         <div class="crm-body" id="fpl-body" style="min-height:320px;">
             <div class="crm-list-panel" id="fpl-list-panel">
                 <div class="crm-list-header" style="${_GRID}">
+                    <span style="text-align:center;" title="收付狀態。結＝該收該付都完成；未完成才分開標「收」「付」。這裡只看錢清了沒，跟結案日無關">狀態</span>
                     <span>結案日</span><span>專案</span><span>客戶</span>
                     <span style="text-align:right;">營收</span>
                     <span style="text-align:right;" title="客戶總共會匯給我多少＝營收 − 代辦費 − 個人稅款（源頭代扣的錢不會經過我的手）">應收</span>
@@ -193,8 +241,8 @@ function _renderShell() {
         clearTimeout(timer);
         timer = setTimeout(_renderList, 150);   // 前端篩選，不用回伺服器
     });
-    document.getElementById('fpl-unpaid').addEventListener('change', (e) => {
-        _unpaidOnly = e.target.checked;
+    document.getElementById('fpl-settle').addEventListener('change', (e) => {
+        _settle = e.target.value;
         _renderList();
     });
     document.getElementById('fpl-fy').addEventListener('change', (e) => {
@@ -246,6 +294,7 @@ function _renderList() {
         <div class="crm-row${p.id === _sel ? ' selected' : ''}" data-id="${p.id}"
              style="${_GRID}"
              onclick="window._finProjLedger.open('${p.id}')">
+            <span style="text-align:center;">${_stHtml(p)}</span>
             <span style="color:${p.close_date ? '#9ca3af' : '#6b7280'};white-space:nowrap;">${esc(p.close_date || '未結案')}</span>
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e0e0e0;"
                   title="${esc(p.name)}">${esc(p.name)}</span>

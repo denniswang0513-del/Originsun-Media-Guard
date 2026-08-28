@@ -217,6 +217,46 @@ def payout_total(d: dict) -> int:
     return sum(int((d or {}).get(k) or 0) for k in PAYOUT_FIELDS)
 
 
+def settle_state(to_collect_amt: int, ap_open: int, payout: int) -> dict:
+    """收付狀態 —— 列表最左欄與狀態篩選**共用這一份**。
+
+    回 `{"in": ..., "out": ..., "done": bool}`：
+      in  'ok' 收齊／'wait' 還沒收完／'over' 溢收（客戶多付）
+      out 'ok' 付清／'wait' 還沒付完／'none' 這案本來就沒有要付的
+      done 兩邊都完成 → 畫面收成一個記號（owner 2026-08-29
+           「如果該收該付都完成，我希望變成一個色塊是結案」）
+
+    🔴 這裡的「結案」只看錢清了沒，跟專案的**結案日**無關：沒填結案日但錢都
+    清了一樣算結案；有結案日但還欠錢，照樣亮兩個記號。名字一樣、判準不同，
+    所以寫在這裡而不是塞進 close_date 的邏輯裡。
+    """
+    tin = "over" if to_collect_amt < 0 else ("wait" if to_collect_amt > 0 else "ok")
+    tout = "none" if not payout else ("wait" if ap_open > 0 else "ok")
+    return {"in": tin, "out": tout,
+            "done": tin == "ok" and tout in ("ok", "none")}
+
+
+#: 狀態篩選的值域（前端下拉與 `settle_match` 共用；空字串＝全部）
+SETTLE_FILTERS = ("done", "in", "out", "either", "over")
+
+
+def settle_match(state: dict, want: str) -> bool:
+    """這一案符不符合狀態篩選。`want` 空＝全部。"""
+    if not want:
+        return True
+    if want == "done":
+        return bool(state.get("done"))
+    if want == "in":
+        return state.get("in") == "wait"
+    if want == "out":
+        return state.get("out") == "wait"
+    if want == "either":
+        return state.get("in") == "wait" or state.get("out") == "wait"
+    if want == "over":
+        return state.get("in") == "over"
+    return True
+
+
 def to_collect(contract: int, received: int, d: dict) -> int:
     """④ 這一案**還沒收到**多少 ＝ 應收（客戶會匯的總數）− 已收。
 
