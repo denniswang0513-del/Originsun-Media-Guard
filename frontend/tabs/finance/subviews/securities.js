@@ -62,26 +62,34 @@ function _pnlCell(v, pct) {
              pct === null ? '—' : sign + pct.toFixed(1) + '%'}</td>`;
 }
 
+const _IN = 'width:100%;text-align:right;padding:2px 6px;';
+
 function _rowHtml(h) {
     const cur = (h.currency || 'TWD').toUpperCase();
+    // 手動現值只畫在**手動列**上：有報價源的列填了也不會被採用
+    // （_holding_value 以 manual_value 優先，等於把報價蓋掉），
+    // 每列都放一個空框只是邀請人填錯。
+    const manual = h.quote_symbol
+        ? '<span style="color:#444;">—</span>'
+        : `<input class="crm-input fs-manual" style="${_IN}"
+                  value="${h.manual_value ?? ''}" placeholder="現值">`;
     return `
         <tr data-id="${h.id}">
             <td>${esc(h.name)}${h.symbol ? ` <span style="color:#93c5fd;">${esc(h.symbol)}</span>` : ''}
                 <div style="color:#666;font-size:10px;">${esc(h.broker || '—')}｜${esc(cur)}${
                     h.quote_symbol ? '' : '｜手動'}</div></td>
-            <td><input class="crm-input fs-shares" style="width:96px;text-align:right;"
+            <td><input class="crm-input fs-shares" style="${_IN}"
                        value="${h.shares ?? ''}" placeholder="股數"></td>
             <td style="text-align:right;">${h.last_price
                 ? fmtNum(h.last_price) + `<div style="color:#666;font-size:10px;">${esc(h.price_at || '')}</div>`
-                : '<span style="color:#666;">—</span>'}</td>
-            <td><input class="crm-input fs-cost" style="width:110px;text-align:right;"
-                       value="${h.cost_total ?? ''}" placeholder="成本(${esc(cur)})"></td>
-            <td><input class="crm-input fs-manual" style="width:110px;text-align:right;"
-                       value="${h.manual_value ?? ''}" placeholder="手動現值"></td>
+                : '<span style="color:#444;">—</span>'}</td>
+            <td><input class="crm-input fs-cost" style="${_IN}"
+                       value="${h.cost_total ?? ''}" placeholder="成本"></td>
+            <td style="text-align:right;">${manual}</td>
             <td style="text-align:right;color:#eee;">${fmtNum(h.value_twd)}</td>
             <td style="text-align:right;color:#bbb;">${h.cost_twd ? fmtNum(h.cost_twd) : '—'}</td>
             ${_pnlCell(h.pnl, _roi(h))}
-            <td style="white-space:nowrap;">
+            <td style="text-align:center;">
                 <button class="crm-btn crm-btn-secondary crm-btn-sm"
                         onclick="window._finSecurities.save('${h.id}', this)">存</button>
             </td>
@@ -129,7 +137,7 @@ function _draw() {
     const missing = rows.filter((h) => h.pnl === null || h.pnl === undefined);
 
     _c.innerHTML = `
-    <div style="padding:16px;max-width:1280px;">
+    <div style="padding:16px;max-width:1400px;">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
         <h2 style="margin:0;font-size:16px;color:#eee;">📈 證券投資</h2>
         <span style="color:#666;font-size:12px;">匯率 USD/TWD ${
@@ -158,12 +166,19 @@ function _draw() {
           ⚠ ${missing.length} 檔還沒填投資成本，損益與報酬率算的只有填了的那
           ${known.length} 檔：${missing.map((h) => esc(h.name)).join('、')}</div>` : ''}
 
-      <table class="crm-table" style="width:100%;font-size:12px;">
+      <div style="overflow-x:auto;">
+      <table class="crm-table" style="width:100%;min-width:1020px;font-size:12px;
+             table-layout:fixed;font-variant-numeric:tabular-nums;">
+        <colgroup>
+          <col><col style="width:96px;"><col style="width:96px;"><col style="width:112px;">
+          <col style="width:104px;"><col style="width:124px;"><col style="width:120px;">
+          <col style="width:120px;"><col style="width:80px;"><col style="width:52px;">
+        </colgroup>
         <thead><tr>
           <th>標的</th><th style="text-align:right;">股數</th>
-          <th style="text-align:right;">現價（原幣）</th>
-          <th style="text-align:right;">投資成本（原幣）</th>
-          <th style="text-align:right;">手動現值(TWD)</th>
+          <th style="text-align:right;">現價<span style="color:#666;">(原幣)</span></th>
+          <th style="text-align:right;">投資成本<span style="color:#666;">(原幣)</span></th>
+          <th style="text-align:right;">手動現值</th>
           <th style="text-align:right;">市值(TWD)</th>
           <th style="text-align:right;">成本(TWD)</th>
           <th style="text-align:right;">損益</th><th style="text-align:right;">報酬率</th>
@@ -171,15 +186,18 @@ function _draw() {
         </tr></thead>
         <tbody>${body || '<tr><td colspan="10" class="crm-empty">尚無持股</td></tr>'}</tbody>
       </table>
+      </div>
 
-      <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;align-items:center;">
-        <input class="crm-input" id="fs-new-name" placeholder="名稱" style="width:150px;">
-        <input class="crm-input" id="fs-new-symbol" placeholder="代號" style="width:80px;">
-        <input class="crm-input" id="fs-new-broker" placeholder="券商" style="width:110px;">
-        <input class="crm-input" id="fs-new-shares" placeholder="股數" style="width:90px;">
-        <input class="crm-input" id="fs-new-cost" placeholder="投資成本" style="width:100px;">
-        <select class="crm-select" id="fs-new-cur"><option>TWD</option><option>USD</option></select>
-        <input class="crm-input" id="fs-new-qs" placeholder="報價源 tse:0050／yahoo:VTI（空=手動）" style="width:250px;">
+      <div style="display:flex;gap:6px;margin-top:14px;flex-wrap:wrap;align-items:center;
+                  background:#1b1b1b;border:1px solid #2e2e2e;border-radius:6px;padding:10px;">
+        <span style="color:#9ca3af;font-size:12px;">新增持股</span>
+        <input class="crm-input" id="fs-new-name" placeholder="名稱" style="width:160px;">
+        <input class="crm-input" id="fs-new-symbol" placeholder="代號" style="width:76px;">
+        <input class="crm-input" id="fs-new-broker" placeholder="券商" style="width:104px;">
+        <input class="crm-input" id="fs-new-shares" placeholder="股數" style="width:88px;text-align:right;">
+        <input class="crm-input" id="fs-new-cost" placeholder="投資成本" style="width:96px;text-align:right;">
+        <select class="crm-select" id="fs-new-cur" style="width:78px;"><option>TWD</option><option>USD</option></select>
+        <input class="crm-input" id="fs-new-qs" placeholder="報價源（空=手動）" style="width:170px;">
         <button class="crm-btn crm-btn-secondary" onclick="window._finSecurities.add(this)">＋ 新增</button>
       </div>
       <div style="color:#666;font-size:11px;margin-top:6px;line-height:1.6;">
@@ -221,7 +239,9 @@ _fs.refresh = async (btn) => {
     }
 };
 
-const _num = (el) => (el.value.trim() === '' ? null : Number(el.value.trim()));
+// 🔴 收 null：手動現值那格只畫在手動列上（有報價的列沒有這個 input），
+// 直接 el.value 會 TypeError —— 整個「存」就啞掉。
+const _num = (el) => (!el || el.value.trim() === '' ? null : Number(el.value.trim()));
 
 _fs.save = async (id, btn) => {
     const tr = btn.closest('tr');
@@ -234,8 +254,13 @@ _fs.save = async (id, btn) => {
                 name: h.name,               // PUT 是 exclude_unset，name 是必填欄
                 shares: _num(tr.querySelector('.fs-shares')),
                 cost_total: _num(tr.querySelector('.fs-cost')),   // 碎股成本有小數，不取整
-                manual_value: _num(tr.querySelector('.fs-manual')) === null
-                    ? null : Math.round(_num(tr.querySelector('.fs-manual'))),
+                // 有報價的列沒有這一格 → 不送這個欄位（PUT 是 exclude_unset，
+                // 送 null 會把它清成 null；那對手動列是「清掉」的語意，
+                // 對有報價的列則是白寫一次）
+                ...(tr.querySelector('.fs-manual')
+                    ? { manual_value: _num(tr.querySelector('.fs-manual')) === null
+                        ? null : Math.round(_num(tr.querySelector('.fs-manual'))) }
+                    : {}),
             }),
         });
         finToast('已儲存');
