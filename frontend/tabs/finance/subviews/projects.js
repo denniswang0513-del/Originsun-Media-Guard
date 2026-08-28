@@ -30,7 +30,10 @@ let _dirty = false;
 let _resizeBound = false;
 
 // 表頭與資料列共用一份欄寬 —— 分開寫的話改一邊就整排對不齊
-const _GRID = 'display:grid;grid-template-columns:92px 1.5fr 1fr 92px 92px 74px;align-items:center;gap:8px;';
+// 九欄：結案日／專案／客戶／營收／應收／應付／實收／實付／檢查
+const _GRID = 'display:grid;grid-template-columns:'
+    + '88px 1.4fr 1fr 96px 92px 92px 96px 92px 64px;'
+    + 'align-items:center;gap:8px;';
 
 export default async function render(container, ctx = {}) {
     _c = container;
@@ -76,25 +79,30 @@ function _renderTotals() {
     if (!el) return;
     const rows = _visible();
     const t = { contract: 0, outsource: 0, invoice_fee: 0, net: 0,
-                received: 0, receivable: 0, ap_open: 0 };
+                received: 0, receivable: 0, ap_open: 0, spent: 0 };
     rows.forEach((p) => {
         t.contract += p.contract || 0;
         t.net += p.net || 0;
         t.received += p.received || 0;
         t.receivable += p.receivable || 0;
         t.ap_open += p.ap_open || 0;
+        t.spent += p.spent || 0;
         t.outsource += (p.detail && p.detail.outsource) || 0;
         t.invoice_fee += (p.detail && p.detail.invoice_fee) || 0;
     });
     const cell = (label, key, color) =>
         `<span>${label} <b style="color:${color};">$${fmtNum(t[key])}</b></span>`;
+    // 🔴 「淨收」以前叫「實收」—— 但 owner 2026-08-29 把列表的「實收」定義成
+    // **真的收到的錢**，同一頁兩個「實收」指不同東西會看錯帳。這裡改名，
+    // 詳情面板與 Sheet 維持原詞（那是結案總表的正本用語）。
     el.innerHTML = cell('營收', 'contract', '#eee')
         + cell('委外', 'outsource', '#fca5a5')
         + cell('代辦費', 'invoice_fee', '#fca5a5')
-        + cell('實收', 'net', '#eee')
-        + cell('已收', 'received', '#86efac')
+        + cell('淨收', 'net', '#eee')
+        + cell('實收', 'received', '#86efac')
         + cell('應收', 'receivable', '#fbbf24')
-        + cell('未付應付', 'ap_open', '#fca5a5');
+        + cell('實付', 'spent', '#c4b5fd')
+        + cell('應付', 'ap_open', '#fca5a5');
 }
 
 function _renderCount(n, rows) {
@@ -160,8 +168,11 @@ function _renderShell() {
                 <div class="crm-list-header" style="${_GRID}">
                     <span>結案日</span><span>專案</span><span>客戶</span>
                     <span style="text-align:right;">營收</span>
-                    <span style="text-align:right;">實收</span>
-                    <span style="text-align:right;">檢查</span>
+                    <span style="text-align:right;" title="還沒收到的錢">應收</span>
+                    <span style="text-align:right;" title="還沒付出去的（未付的請款單）">應付</span>
+                    <span style="text-align:right;" title="真的收到的錢">實收</span>
+                    <span style="text-align:right;" title="真的付出去的（掛在本案的現金支出）">實付</span>
+                    <span style="text-align:right;" title="淨收 − Σ工項；0 表示工項拆分剛好對上">檢查</span>
                 </div>
                 <div id="fpl-list-body"></div>
             </div>
@@ -216,6 +227,11 @@ function _fitBody() {
     body.style.height = Math.max(320, Math.round(avail)) + 'px';
 }
 
+/** 金額格：0 畫成灰破折號 —— 406 列裡多數是 0，一整片「0」會把真正有數字的
+ *  那幾列淹掉（看不出哪案還欠錢，正是這幾欄要回答的問題）。 */
+const _amt = (v, color) => `<span style="text-align:right;color:${
+    v ? color : '#3f3f46'};">${v ? fmtNum(v) : '—'}</span>`;
+
 function _renderList() {
     const body = document.getElementById('fpl-list-body');
     const keepScroll = body.scrollTop;
@@ -231,7 +247,10 @@ function _renderList() {
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9ca3af;"
                   title="${esc(p.client)}">${esc(p.client)}</span>
             <span style="text-align:right;">${fmtNum(p.contract)}</span>
-            <span style="text-align:right;color:#eee;">${fmtNum(p.net)}</span>
+            ${_amt(p.receivable, '#fbbf24')}
+            ${_amt(p.ap_open, '#fca5a5')}
+            ${_amt(p.received, '#86efac')}
+            ${_amt(p.spent, '#c4b5fd')}
             <span style="text-align:right;color:${p.check ? '#fbbf24' : '#4b5563'};">${p.check ? fmtNum(p.check) : '0'}</span>
         </div>`).join('')
         || '<div class="crm-empty">沒有符合的專案</div>';
