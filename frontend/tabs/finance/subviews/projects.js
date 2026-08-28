@@ -87,7 +87,7 @@ function _renderTotals() {
         t.contract += p.contract || 0;
         t.net += p.net || 0;
         t.received += p.received || 0;
-        t.receivable += p.receivable || 0;
+        t.receivable += p.to_collect || 0;   // 未收走 to_collect（同列表那欄）
         t.ap_open += p.ap_open || 0;
         t.spent += p.spent || 0;
         t.client_wire += p.client_wire || 0;
@@ -174,7 +174,7 @@ function _renderShell() {
                     <span>結案日</span><span>專案</span><span>客戶</span>
                     <span style="text-align:right;">營收</span>
                     <span style="text-align:right;" title="客戶總共會匯給我多少＝營收 − 代辦費 − 個人稅款（源頭代扣的錢不會經過我的手）">應收</span>
-                    <span style="text-align:right;" title="還沒收到的＝營收 − 實收。0 表示收齊了（帳上收款記全額，所以這裡跟營收同基準）">未收</span>
+                    <span style="text-align:right;" title="還沒收到的＝應收 − 已收。0 表示收齊了。舊帳的代開案收款記全額，收齊時差額會是負的代辦費 —— 那不是溢收，在源頭代扣的範圍內一律當 0；超出範圍的負數是真的溢收，照實顯示">未收</span>
                     <span style="text-align:right;" title="我總共要匯出去多少＝委外 + 行政雜支 + 稅金 + 買發票">應付</span>
                     <span style="text-align:right;" title="還沒付出去的（未付的請款單）。0 表示付清了">未付</span>
                     <span style="text-align:right;" title="淨收 − Σ工項；0 表示工項拆分剛好對上">檢查</span>
@@ -253,7 +253,7 @@ function _renderList() {
                   title="${esc(p.client)}">${esc(p.client)}</span>
             <span style="text-align:right;">${fmtNum(p.contract)}</span>
             ${_amt(p.client_wire, '#86efac')}
-            ${_amt(p.receivable, '#fbbf24')}
+            ${_amt(p.to_collect, '#fbbf24')}
             ${_amt(p.payout, '#c4b5fd')}
             ${_amt(p.ap_open, '#fca5a5')}
             <span style="text-align:right;color:${p.check ? '#fbbf24' : '#4b5563'};">${p.check ? fmtNum(p.check) : '0'}</span>

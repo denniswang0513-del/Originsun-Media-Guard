@@ -47,5 +47,45 @@ def test_endpoint_and_list_expose_all_five():
     for w in ("營收", "應收", "未收", "應付", "未付"):
         assert f">{w}</span>" in head, w
     row = js.split("function _renderList()")[1].split("_renderCount(")[0]
-    for k in ("p.client_wire", "p.receivable", "p.payout", "p.ap_open"):
+    for k in ("p.client_wire", "p.to_collect", "p.payout", "p.ap_open"):
         assert k in row, k
+
+
+def test_to_collect_takes_both_bookkeeping_bases():
+    """④ 一條規則要同時吃兩種記法（owner 2026-08-29「從新的帳開始，未收就會是
+    應收為基準」）：
+
+    · 舊帳：代開收款記**全額**、代辦費另記一筆支出 → 收齊時 已收＝營收，
+      應收−已收 ＝ −代辦費
+    · 新帳：收款直接記**淨額** → 收齊時 已收＝應收，差額 0
+    兩種都該顯示「收齊了」。
+    """
+    from core.ledger_project import to_collect, to_collect_gross
+    d = {"invoice_fee": 44000}          # 營收 550,000、客戶會匯 506,000
+    assert to_collect(550000, 550000, d) == 0, "舊帳收齊（已收記全額）"
+    assert to_collect(550000, 506000, d) == 0, "新帳收齊（已收記淨額）"
+    assert to_collect(550000, 400000, d) == 106000, "還沒收完＝應收−已收"
+    assert to_collect(550000, 0, d) == 506000
+
+
+def test_real_overcollection_is_not_clamped_away():
+    """🔴 只有「落在源頭代扣範圍內」的負差額才當 0（那是記法落差）。
+    超出範圍的是真的溢收 —— 夾成 0 會讓它永遠沒人發現。
+    2026-08-29 生產實測：164 案是記法落差、**1 案是真的溢收**
+    （工程空拍：營收 0、已收 3,000）。"""
+    from core.ledger_project import to_collect
+    d = {"invoice_fee": 44000}
+    assert to_collect(550000, 594000, d) == -88000, "多收了，照實顯示"
+    assert to_collect(0, 3000, {}) == -3000, "沒有代扣可解釋 → 一毛都不夾"
+
+
+def test_list_uses_to_collect_not_the_stored_receivable():
+    """列表的未收走 to_collect —— `amount_receivable` 是營收−已收，
+    收齊的代開案會差一個代辦費。"""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    api = (root / "routers/api_finance_projects.py").read_text(encoding="utf-8")
+    assert '"to_collect": to_collect(' in api
+    js = (root / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
+    row = js.split("function _renderList()")[1].split("_renderCount(")[0]
+    assert "p.to_collect" in row and "p.receivable" not in row

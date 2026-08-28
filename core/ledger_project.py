@@ -217,6 +217,30 @@ def payout_total(d: dict) -> int:
     return sum(int((d or {}).get(k) or 0) for k in PAYOUT_FIELDS)
 
 
+def to_collect(contract: int, received: int, d: dict) -> int:
+    """④ 這一案**還沒收到**多少 ＝ 應收（客戶會匯的總數）− 已收。
+
+    🔴 一條規則要同時吃兩種記法（owner 2026-08-29「從新的帳開始，未收就會是
+    應收為基準」）：
+    - **舊帳**：代開的收款記**全額**，代辦費另記一筆支出。收齊時 已收＝營收，
+      應收−已收 ＝ −代辦費（負的）。
+    - **新帳**：收款直接記**淨額**。收齊時 已收＝應收，差額 0。
+    兩種都該顯示「收齊了」。所以**負差額在源頭代扣的範圍內就當 0** ——
+    那不是溢收，是兩種記法的落差。
+
+    超出那個範圍的負數**照實顯示**：那是真的溢收（客戶多付了），
+    夾成 0 會讓它永遠沒人發現。
+    """
+    short = to_collect_gross(contract, received, d)
+    withheld = int(contract or 0) - client_wire(contract, d)
+    return 0 if -withheld <= short < 0 else short
+
+
+def to_collect_gross(contract: int, received: int, d: dict) -> int:
+    """未收的原始差額（應收 − 已收），沒有夾。給要看溢收的地方用。"""
+    return client_wire(contract, d) - int(received or 0)
+
+
 def expected_cash_in(contract: int, d: dict) -> int:
     """這一案**實際會匯進來**的錢 —— 應收與收款狀態都以此為基準，不是營收。
 
