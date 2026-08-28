@@ -2029,22 +2029,30 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
 
 # ── 現金流量表（直接法）──────────────────────────────────────
 
-def cash_entry_activity(entry: dict, cat_map: dict, accounts: dict):
-    """單筆收支 → 現金流量活動。None = 本金不列入（transfer/advance 內部移動）。
+def cash_entry_activity(entry: dict, cat_map: dict, accounts: dict, *,
+                        internal: bool = True):
+    """單筆收支 → 現金流量活動。None = 本金不列入（內部移動）。
 
-    direct_* / loan 走對映科目的 cf_activity（'none'/查無 → operating）—
-    貸款撥款/繳款（treatment='loan'）對映科目 2400 cf_activity=financing，
-    自然落籌資活動且不進損益；硬連結結清（ar/ap）、稅、passthrough、
-    unmapped → operating（最不錯的預設，unmapped 另由 statement_warnings 計數）。
+    走對映科目的 cf_activity（'none'/查無 → operating）—— 貸款撥款/繳款
+    （treatment='loan'）對映科目 2400 cf_activity=financing，自然落籌資活動且
+    不進損益；硬連結結清（ar/ap）、稅、passthrough、unmapped → operating
+    （最不錯的預設，unmapped 另由 statement_warnings 計數）。
+
+    🔴 `internal`：這一列**是不是真的只是內部移動**（錢搬到另一個追蹤中的帳戶）。
+    只有那種才不列入活動 —— 兩腳互相抵銷，記不記都不影響總額。
+    transfer/advance 的另一半是「錢真的離開了現金池」（買股票、繳卡費、
+    代墊給家人）：銀行餘額掉了卻不記淨流，「期初＋淨流 ≠ 期末」的差額就是
+    它們（owner 2026-08-29 實測私帳本期 −4,365,820）。
+    呼叫端（cashflow_lines）用 transfer_pairs 配對的結果決定這個旗標；
+    預設 True＝維持舊行為，給還沒帶旗標的呼叫端。
     """
     t = classify_cash_entry(entry, cat_map or {})
-    if t in INTERNAL_MOVEMENT_TREATMENTS:
+    if t in INTERNAL_MOVEMENT_TREATMENTS and internal:
         return None
-    if t in ("direct_expense", "direct_income", "loan"):
-        acct = map_account(cat_map or {}, accounts or {}, "cash", entry.get("category"))
-        act = (acct or {}).get("cf_activity")
-        if act in ("investing", "financing"):
-            return act
+    acct = map_account(cat_map or {}, accounts or {}, "cash", entry.get("category"))
+    act = (acct or {}).get("cf_activity")
+    if act in ("investing", "financing"):
+        return act
     return "operating"
 
 
@@ -2062,8 +2070,17 @@ def cash_account_ids(bank_accounts):
     """
     if bank_accounts is None:
         return None
+    # 🔴 **卡片也不是現金**：split_bank_lines 把 CARD_KIND 另分一桶（負債由
+    # card_outstanding 出），所以期初/期末的現金總額裡沒有它 —— 這裡漏排除的話
+    # 迭代那側就會把刷卡列當成現金流動。
+    # 2026-08-29 實測私帳：勾稽差額 1,508,164 剛好等於兩張卡的刷卡流量
+    # （台新 −644,215 ＋ 富邦 −863,949）。以前沒炸是因為刷卡列多半是
+    # treatment='transfer'、被「內部移動」那條擋掉了；改成「配得成對才算內部
+    # 移動」之後它們就漏進來了 —— 這條規則本來就該與 split_bank_lines 一致，
+    # 那支的 docstring 也是這樣寫的。
     return {b.get("id") for b in bank_accounts
-            if not is_shareholder_kind(b.get("acct_kind"))}
+            if not is_shareholder_kind(b.get("acct_kind"))
+            and not is_card_kind(b.get("acct_kind"))}
 
 
 #: 轉存配對允許的日期差。跨行當天到，但兩邊的對帳單常各記各的日期
@@ -2112,7 +2129,21 @@ def transfer_pairs(entries, *, window_days=TRANSFER_PAIR_WINDOW_DAYS,
     bank_account_id / id / summary。呼叫端負責只傳 treatment=='transfer' 的列。
     """
     def _d(e):
-        return local_day(e.get("entry_date")) if e.get("entry_date") else None
+        """日期 → 可相減的 datetime/date。
+
+        🔴 字串也要吃：`local_day` 對非 datetime 是原樣回，而這裡會做
+        `(a - b).days` —— 餵字串就 TypeError。生產路徑一律是 DB 撈出來的
+        datetime，所以這條路兩個月沒被踩到；2026-08-29 現金流量表改成
+        「配得成對才算內部移動」之後，本函式被引擎每次都呼叫，
+        任何一筆字串日期就會讓整張三表炸掉。
+        """
+        v = local_day(e.get("entry_date"))
+        if isinstance(v, str):
+            try:
+                return datetime.fromisoformat(v[:19].replace("Z", ""))
+            except ValueError:
+                return None
+        return v or None
 
     outs = [e for e in entries if int(e.get("expense") or 0) > 0]
     ins = [e for e in entries if int(e.get("deposit") or 0) > 0]
@@ -2177,6 +2208,25 @@ def transfer_pairs(entries, *, window_days=TRANSFER_PAIR_WINDOW_DAYS,
     return pairs, unpaired_out, unpaired_in, reversals
 
 
+def paired_transfer_ids(cash_entries, cat_map, accounts) -> set:
+    """配得成對的帳戶間轉存（含銀行退匯的沖正對）的 id 集合。
+
+    「成對」＝錢搬到另一個**追蹤中的**帳戶，兩腳在現金總額裡互相抵銷，
+    所以不列入活動分類；配不到對手的那些，錢是真的離開了現金池。
+    配對規則走 `transfer_pairs`，與對帳系統的「帳戶間轉存」面板同一支 ——
+    畫面說「這組成對了」而現金流量表卻當它沒成對，就是兩份規則各判各的。
+    """
+    moves = [e for e in cash_entries if is_account_move(e, cat_map, accounts)]
+    pairs, _uo, _ui, revs = transfer_pairs(moves)
+    ids = set()
+    for grp in (pairs, revs):
+        for p in grp:
+            ids.add((p["out"] or {}).get("id"))
+            ids.add((p["in"] or {}).get("id"))
+    ids.discard(None)
+    return ids
+
+
 def cashflow_lines(cash_entries, months, *, cat_map=None, accounts=None,
                    bank_accounts=None):
     """現金流量表「哪幾列算數、各算多少」的**唯一正本** → (rows, stats)。
@@ -2196,6 +2246,10 @@ def cashflow_lines(cash_entries, months, *, cat_map=None, accounts=None,
     accounts = accounts or {}
     mset = set(months)
     cash_ids = cash_account_ids(bank_accounts)
+    # 🔴 哪幾列是**真的內部移動**：配得成對的轉存（兩腳都在追蹤中的帳戶）。
+    # 配對在整份收支上做、不限本期 —— 一筆轉存的兩腳可能跨月，只看本期會把
+    # 期界上的那幾組判成「配不到」。
+    paired = paired_transfer_ids(cash_entries, cat_map, accounts)
     rows = []
     stats = {"advance_net": 0, "transfer_net": 0, "unassigned": 0, "noncash": 0}
     for e in cash_entries:
@@ -2208,7 +2262,8 @@ def cashflow_lines(cash_entries, months, *, cat_map=None, accounts=None,
             stats["noncash"] += 1           # 股東往來等：不在現金總額裡
             continue
         t = classify_cash_entry(e, cat_map)
-        if t in INTERNAL_MOVEMENT_TREATMENTS:
+        internal = t == "advance" or e.get("id") in paired
+        if t in INTERNAL_MOVEMENT_TREATMENTS and internal:
             principal = in_amount(e) - out_amount(e)
             stats["advance_net" if t == "advance" else "transfer_net"] += principal
             fee = int(e.get("bank_fee") or 0)
@@ -2217,7 +2272,9 @@ def cashflow_lines(cash_entries, months, *, cat_map=None, accounts=None,
                 rows.append({"entry": e, "activity": "operating", "amount": -fee,
                              "treatment": t, "is_fee": True})
             continue
-        rows.append({"entry": e, "activity": cash_entry_activity(e, cat_map, accounts),
+        rows.append({"entry": e,
+                     "activity": cash_entry_activity(e, cat_map, accounts,
+                                                     internal=internal),
                      "amount": cash_entry_flow(e), "treatment": t, "is_fee": False})
     return rows, stats
 
@@ -2269,7 +2326,10 @@ def build_cashflow(months, *, opening, closing, cash_entries=(),
     if unassigned:
         notes.append(f"{unassigned} 筆未掛帳戶收支未列入")
     if noncash:
-        notes.append(f"{noncash} 筆掛在非現金帳戶（股東往來）的收支未列入現金流")
+        # 卡片列佔大宗（刷卡當下不動銀行，錢是繳卡費那天才出去）—— 只寫
+        # 「股東往來」會讓人以為帳有問題，實際上那是對的
+        notes.append(f"{noncash} 筆掛在非現金帳戶（信用卡／股東往來）的收支未列入現金流"
+                     "——刷卡當下沒有動到銀行，錢在繳卡費那天才出去")
     return {"opening": opening, "closing": closing,
             "operating": acts["operating"], "investing": acts["investing"],
             "financing": acts["financing"], "net": net,

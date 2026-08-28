@@ -51,7 +51,8 @@ def test_noncash_accounts_are_excluded_from_flow():
     這是 owner 2026-08-22 正要開始用股東往來記帳前抓到的（還沒爆）。"""
     assert 'cash_ids is not None and e["bank_account_id"] not in cash_ids' in _cfl()
     assert 'stats["noncash"] += 1' in _cfl()
-    assert "非現金帳戶（股東往來）" in _cf(), "排除了但沒告訴人"
+    # 2026-08-29 起措辭含信用卡（那才是大宗；只寫股東往來會讓人以為帳壞了）
+    assert "非現金帳戶（信用卡／股東往來）" in _cf(), "排除了但沒告訴人"
 
 
 def test_official_path_passes_the_accounts():
@@ -99,10 +100,14 @@ def test_transfer_fee_is_real_money_leaving():
     鑽取整筆跳過（錯）→ 兩邊差 150。差得少所以更難發現。
     """
     from core.finance_logic import build_cashflow, cashflow_lines
+    # 🔴 兩腳都要在：2026-08-29 起「內部移動」＝**配得成對**的轉存
+    # （配不到對手的，錢是真的離開現金池了，本金要列入活動）。
     ents = [{"id": "t1", "entry_date": "2026-01-10", "bank_account_id": "A",
-             "expense": 5000, "bank_fee": 15, "category": "轉存"}]
+             "expense": 5000, "bank_fee": 15, "category": "轉存"},
+            {"id": "t2", "entry_date": "2026-01-10", "bank_account_id": "B",
+             "deposit": 5000, "category": "轉存"}]
     cm = {("cash", "轉存"): {"treatment": "transfer"}}
-    accts = [{"id": "A", "acct_kind": "bank"}]
+    accts = [{"id": "A", "acct_kind": "bank"}, {"id": "B", "acct_kind": "bank"}]
     r = build_cashflow(["2026-01"], opening={"total": 0}, closing={"total": 0},
                        cash_entries=ents, cat_map=cm, bank_accounts=accts)
     assert r["operating"] == -15, "手續費沒算進營運"
@@ -120,6 +125,8 @@ def test_the_table_and_the_drilldown_cannot_disagree():
          "deposit": 100000, "category": "設計服務收入"},
         {"id": "b", "entry_date": "2026-01-03", "bank_account_id": "A",
          "expense": 5000, "bank_fee": 15, "category": "轉存"},      # 內部移動＋手續費
+        {"id": "b2", "entry_date": "2026-01-03", "bank_account_id": "B",
+         "deposit": 5000, "category": "轉存"},                       # ↑ 的另一腳
         {"id": "c", "entry_date": "2026-01-04", "bank_account_id": "A",
          "expense": 8000, "category": "行政費用"},
         {"id": "d", "entry_date": "2026-01-05", "bank_account_id": "S",
@@ -130,7 +137,7 @@ def test_the_table_and_the_drilldown_cannot_disagree():
     cm = {("cash", "設計服務收入"): {"treatment": "direct_income"},
           ("cash", "行政費用"): {"treatment": "direct_expense"},
           ("cash", "轉存"): {"treatment": "transfer"}}
-    accts = [{"id": "A", "acct_kind": "bank"},
+    accts = [{"id": "A", "acct_kind": "bank"}, {"id": "B", "acct_kind": "bank"},
              {"id": "S", "acct_kind": "shareholder_loan"}]
     table = build_cashflow(months, opening={"total": 0}, closing={"total": 0},
                            cash_entries=ents, cat_map=cm, bank_accounts=accts)
