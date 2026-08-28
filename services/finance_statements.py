@@ -204,16 +204,21 @@ async def _advance_state(session, entity: str = "parent") -> dict:
         return {"balance_total": 0, "expenses": []}
     from sqlalchemy import select, func as safunc
     from core.crm_logic import compute_advance_status
+    from core.ledger import not_mine_project
     from db.models import CrmCashEntry, CrmPaymentRequest, CrmProjectExpense
 
     advances = (await session.execute(
         select(CrmPaymentRequest.id, CrmPaymentRequest.amount)
         .where(CrmPaymentRequest.is_advance == 1,
                CrmPaymentRequest.entity == entity))).all()
+    # 🔴 私帳專案的雜支不算母公司成本（owner 2026-08-28）—— 這幾列會經由
+    # build_pnl 的 advance_expenses 進母公司損益表的「營業成本-費」。專案搬帳本
+    # 時這張表沒跟著搬（它沒有 entity 欄），所以要在取數層擋掉。
     exp_by_adv = {row[0]: int(row[1] or 0) for row in (await session.execute(
         select(CrmProjectExpense.advance_id, safunc.sum(CrmProjectExpense.actual))
         .where(CrmProjectExpense.advance_id.isnot(None),
-               CrmProjectExpense.advance_id != "")
+               CrmProjectExpense.advance_id != "",
+               not_mine_project(CrmProjectExpense))
         .group_by(CrmProjectExpense.advance_id))).all()}
     pay_by_adv = {row[0]: int(row[1] or 0) for row in (await session.execute(
         select(CrmCashEntry.advance_payment_id, safunc.sum(CrmCashEntry.expense))
@@ -241,7 +246,8 @@ async def _advance_state(session, entity: str = "parent") -> dict:
     exp_rows = (await session.execute(
         select(CrmProjectExpense).where(
             CrmProjectExpense.advance_id.isnot(None),
-            CrmProjectExpense.advance_id != ""))).scalars().all()
+            CrmProjectExpense.advance_id != "",
+            not_mine_project(CrmProjectExpense)))).scalars().all()
     expenses = [{"id": x.id, "date": x.created_at, "amount": int(x.actual or 0),
                  "label": (x.sub_item or x.category or "預支核銷"),
                  "category": x.category or ""}
