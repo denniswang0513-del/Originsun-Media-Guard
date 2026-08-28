@@ -122,6 +122,7 @@ _NOT_MONEY = {
     # monthly_depreciation（已收進 MONEY_FIELDS），不是這個。
     "depreciation_months": "直線攤提的月數（期間），不是錢",
     "cost_group_id": "外鍵 ID",
+    "cost_line_id": "外鍵 ID（委外請款單 → 專案成本行；防重複請款用）",
     # 下面兩筆是被「中文尾註」那條軸掃到的假陽性 —— 註解裡提到成本/費用，
     # 欄位本身是名稱字串（會計科目掃描不可避免會碰到的兩個）。
     "name": "名稱字串（科目名「外包成本」、貸款名…），不是金額",
@@ -321,6 +322,11 @@ def redact_mine(obj: Any) -> Any:
     專案與客戶全面共用（owner 2026-08-24 拍板），所以 mine 專案的存在、名稱、
     階段大家都看得到 —— 要藏的只有那棵物件上的金額鍵。判定靠序列化層放進
     payload 的 "entity" 鍵（routers/crm/projects.py `_to_dict`）。
+
+    🔴 **`crm_pushed` 不是例外**：推進公司管線只決定「案子出不出現在管線」，
+    不放寬金額。2026-08-28 一度為它開過例外（「crm 有權限的人要看得到」），
+    當天就被 owner 收回 ——「推到私帳沒有私帳的權限就要看不到了」。
+    判定就只看 `entity`，別再加第二個條件。
     """
     if isinstance(obj, dict):
         if obj.get("entity") == "mine":

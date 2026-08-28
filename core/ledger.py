@@ -38,6 +38,23 @@ DEFAULT_ENTITY = "parent"
 MINE = "mine"
 
 
+def hide_mine_projects(request) -> bool:
+    """這個請求該不該**看見私帳專案**（owner 2026-08-28「連專案都看不到」）。
+
+    🔴 這是**列的可見性**，不是金額抹除 —— 兩件事：
+      · `core.money.redact_mine`：共用的列（客戶、器材…）只藏金額鍵
+      · 這一支：私帳**專案**對沒有 mine scope 的人整列不存在
+    2026-08-24「專案與客戶全面共用、只有錢分帳」對**專案那一半**因此被推翻
+    （客戶那側不變）。
+
+    🔴 每個**列舉專案**的查詢都要問它一次（選單、清單、挑選視窗）。用 id 反查
+    名字的地方不必 —— 那是使用者已經在看的那一列，藏掉名字只會讓畫面難懂。
+    掃描測試在 tests/unit/test_money_visibility.py 釘住這條分界。
+    """
+    from core.money import viewer_has_mine_scope
+    return not viewer_has_mine_scope(request)
+
+
 def not_mine(entity_col):
     """SQL 述詞：母公司的金額聚合**排除私帳**（§8）。
 
@@ -45,6 +62,27 @@ def not_mine(entity_col):
     `entity != "mine"` 字面沒有可 grep 的名字，第三個聚合點就會從零重新決定。
     """
     return entity_col != MINE
+
+def not_mine_project(model):
+    """SQL 述詞：這一列**不屬於私帳專案**（owner 2026-08-28「已經轉到私帳的
+    專案不能列入母公司的成本」）。
+
+    給**沒有 entity 欄、只有 project_id** 的成本表用（crm_project_expenses /
+    crm_project_cost_lines / crm_project_staff）—— 那些列跟著專案走，專案搬進
+    私帳它們就不再是母公司的成本，但表上看不出來。
+
+    🔴 `project_id IS NULL` 要放行：NOT IN 遇到 NULL 整條述詞是 NULL（不是 TRUE），
+    沒特別處理的話「沒掛專案的雜支」會被整批篩掉 —— 零用金的一般花費全在那一類。
+
+    🔴 為什麼不是 `not_mine(...)` 就好：那支比的是列自己的 entity 欄，這幾張表
+    沒有那一欄。兩個名字分開，才看得出「這一列的帳本是誰說了算」。
+    """
+    from sqlalchemy import or_, select
+
+    from db.models import CrmProject
+    mine = select(CrmProject.id).where(CrmProject.entity == MINE)
+    return or_(model.project_id.is_(None), model.project_id.notin_(mine))
+
 
 # 帳本模組 key（core/auth.py ALL_MODULES 尾端）。
 # finance_partner＝母公司報表唯讀（合夥人；橫切帳本 key、不是 tab）。
@@ -118,7 +156,8 @@ def require_entity(request: Request, entity: str = "", level: str = "view") -> s
 # ── mine 專案 id 快取（core/money.money_dep 的熱路徑守衛用）──────────────
 #
 # money 端點（成本明細/財務摘要/雜支…）每個請求都要判「目標專案是不是私帳」。
-# 專案的 entity 實務上不可變（匯入時定，API 無改道），逐請求查 DB 是純浪費
+# 專案的 entity 幾乎不動（匯入時定；唯一的寫入路徑是「推送至私帳」按鈕，
+# 它會呼叫 invalidate_mine_projects()），逐請求查 DB 是純浪費
 # （專案詳情一開就是 4-6 支並發 money 端點）。快取整個 mine id 集合（數百個、
 # 幾 KB），TTL 60 秒 —— 就算未來出現 entity 寫入路徑，一分鐘內收斂。
 _MINE_PROJECT_IDS: set | None = None
@@ -142,3 +181,11 @@ async def is_mine_project(session_factory, project_id: str) -> bool:
         _MINE_PROJECT_IDS = set(ids)
         _MINE_IDS_AT = now
     return project_id in _MINE_PROJECT_IDS
+
+
+def invalidate_mine_projects() -> None:
+    """搬帳本之後把快取丟掉 —— 呼叫端＝`routers/crm/projects.move_project_ledger`
+    （全 repo 唯一的 entity 寫入路徑）。不清的話最多一分鐘內，剛搬過去的案子
+    還會被 money_dep 當成母公司的。"""
+    global _MINE_PROJECT_IDS, _MINE_IDS_AT
+    _MINE_PROJECT_IDS, _MINE_IDS_AT = None, 0.0

@@ -15,7 +15,9 @@ from fastapi import HTTPException, Request, UploadFile, File, Query
 
 from config import load_settings as _load_settings
 
-from core.schemas import CrmProjectPayload, CrmProjectPatchPayload
+from core.ledger import hide_mine_projects, not_mine
+from core.schemas import (CrmProjectPayload, CrmProjectPatchPayload,
+                          ProjectLedgerMovePayload)
 
 from ._shared import (router, _check_auth, _check_status_auth, _check_project_write_auth,
                       _check_website_auth, _require_db,
@@ -24,7 +26,8 @@ from ._shared import (router, _check_auth, _check_status_auth, _check_project_wr
 
 try:
     from ._shared import (select, or_,
-                          Client, CrmProject, CrmProjectCostGroup,
+                          Client, CrmCashEntry, CrmInvoice, CrmPaymentRequest,
+                          CrmProject, CrmProjectCostGroup,
                           CrmProjectCostLine, CrmProjectExpense,
                           CrmProjectStaff, CrmProjectShowcase)
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
@@ -60,10 +63,15 @@ def _to_project_dict(p, client_short_name: str = "") -> dict:
     }
 
 
+# 私帳案的可見性規則在 core.ledger.hide_mine_projects（取名字才 grep 得到）。
+_hide_mine = hide_mine_projects
+
+
 # ── Project Endpoints ───────────────────────────────────────
 
 @router.get("/projects")
 async def list_projects(
+    request: Request,
     q: str = Query(""),
     status: str = Query(""),
     client_id: str = Query(""),
@@ -103,6 +111,11 @@ async def list_projects(
             .outerjoin(Client, Client.id == CrmProject.client_id)
             .order_by(CrmProject.updated_at.desc())
         )
+        # 🔴 先擋可見性再談篩選：沒有私帳權限的人，私帳案整列不出現
+        # （包含 include_pushed 推進管線的那些 —— 推送只影響「他自己」在
+        # 專案管理看不看得到，不是對外開放）。
+        if _hide_mine(request):
+            query = query.where(not_mine(CrmProject.entity))
         if entity == "parent" and include_pushed:
             # 專案管理的管線視圖：母公司案 ∪ 推送過來的私帳案（後期專案）。
             # 🔴 是明確參數不是預設 —— 掛錢用的下拉（收支/器材/現金流…）打的
@@ -381,13 +394,17 @@ async def list_closing_projects(request: Request):
     factory = await _get_factory()
 
     async with factory() as session:
-        rows = (await session.execute(
+        _q = (
             select(CrmProject, Client.short_name.label("client_short_name"),
                    Client.full_name.label("client_full_name"))
             .outerjoin(Client, Client.id == CrmProject.client_id)
             .where(CrmProject.status == _CLOSING_STATUS)
             .order_by(CrmProject.completion_date.desc().nullslast())
-        )).all()
+        )
+        # 沒有私帳權限就看不到私帳案（同清單那條）
+        if _hide_mine(request):
+            _q = _q.where(not_mine(CrmProject.entity))
+        rows = (await session.execute(_q)).all()
 
         # 批次撈全部作品（1 查詢取代逐專案 2 次 — 看板每次操作後全量重打，N+1 很有感）
         works_map: dict[str, list] = {}
@@ -496,13 +513,17 @@ async def _latest_proposal_status(session, project_id: str) -> str:
 
 
 @router.get("/projects/{project_id}")
-async def get_project(project_id: str):
+async def get_project(project_id: str, request: Request):
     _require_db()
     factory = await _get_factory()
 
     async with factory() as session:
         project = await session.get(CrmProject, project_id)
         if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        # 私帳案對沒有 mine scope 的人不存在 —— 回 404 不是 403，
+        # 403 等於承認「有這個案子只是你不能看」，那本身就是洩漏。
+        if (project.entity or "parent") == "mine" and _hide_mine(request):
             raise HTTPException(status_code=404, detail="找不到此專案")
         client = await session.get(Client, project.client_id)
         client_name = client.short_name if client else ""
@@ -809,3 +830,109 @@ async def import_projects_csv(request: Request, file: UploadFile = File(...)):
 
     return {"status": "ok", "imported": imported, "updated": updated, "skipped": skipped}
 
+
+# ── 搬帳本（專案管理 ↔ 私帳）─────────────────────────────────────
+# owner 2026-08-28：「可以有一個按鈕把專案推送至私帳（只有擁有私帳權限的人能用）」。
+#
+# 🔴 這是全 repo「更新一律不得換帳本」（器材／福委會／客戶／收支／請款都擋）的
+# **唯一例外**，所以給它專屬端點與專屬守衛，而不是放行 PUT /projects/{id} 的
+# entity 欄 —— 那條路一開，任何一次普通更新都可能把案子的錢流歸屬帶走。
+#
+# 擋的只有**自己帶 entity 的那三張**：搬過去它們會留在原本那本帳，
+# `_assert_project_same_entity`（收支只能掛同一本帳的專案）當場破功，
+# 母公司三表也會少掉那幾筆。
+#
+# 🔴 **專案帳目（雜支／成本行）刻意不擋**（owner 2026-08-28「這個還是要可以推啊，
+# 我已經做相對應的空間了」）：那兩張沒有 entity 欄，本來就跟著專案走，而私帳的
+# 逐案損益已經有「行政雜支／人員費用」兩欄收納它們（core.ledger_project.CRM_BACKED）。
+# 已經跟公司請過款的那些不會重複計算 —— `_crm_costs` 只算 claim_id 為空的。
+# 早一版把雜支也列進來，結果是「有帳目的案子永遠推不動」，正好擋掉他要推的那些。
+_LEDGER_BLOCKERS = (
+    (CrmCashEntry, "收支明細"),
+    (CrmInvoice, "發票"),
+    (CrmPaymentRequest, "請款"),
+)
+
+
+async def _ledger_blockers(session, project_id: str) -> list:
+    """這個專案身上掛了哪些錢。回 [(中文名, 筆數), …]，空＝可以搬。"""
+    from .flow import _count_sq
+
+    row = (await session.execute(select(*[
+        _count_sq(M, M.project_id == project_id).label(f"c{i}")
+        for i, (M, _label) in enumerate(_LEDGER_BLOCKERS)]))).one()
+    return [(label, int(n)) for n, (_M, label) in zip(row, _LEDGER_BLOCKERS) if n]
+
+
+@router.get("/projects/{project_id}/ledger-move-check")
+async def check_project_ledger_move(project_id: str, request: Request):
+    """能不能搬、搬過去會變怎樣 —— 按鈕按下去之前先問這支。
+
+    把「會擋住的東西」講出來，而不是讓使用者按了才吃一個 409。
+    """
+    from core.ledger import require_entity
+
+    require_entity(request, "mine", level="full")
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        p = await session.get(CrmProject, project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        blockers = await _ledger_blockers(session, project_id)
+        cur, name = p.entity or "parent", p.name
+    return {"entity": cur, "target": "parent" if cur == "mine" else "mine",
+            "can_move": not blockers,
+            "blockers": [{"what": w, "count": n} for w, n in blockers],
+            # 擋人的那句話只寫一次 —— 前端直接顯示它，不再自己拼一份
+            "reason": _blocked_reason(name, blockers),
+            "name": name}
+
+
+def _blocked_reason(name: str, blockers) -> str:
+    """為什麼不能搬。check 端點與 POST 的 409 共用同一句。"""
+    if not blockers:
+        return ""
+    what = "、".join(f"{w} {n} 筆" for w, n in blockers)
+    return (f"「{name}」身上已經記了錢（{what}），不能換帳本 —— "
+            f"錢會留在原本那本，帳目就對不起來了。請先處理那些單據")
+
+
+@router.post("/projects/{project_id}/move-ledger")
+async def move_project_ledger(project_id: str, req: ProjectLedgerMovePayload,
+                              request: Request):
+    """把專案搬到另一本帳。**只有私帳 full scope 的帳號能按**（兩個方向都是）。
+
+    搬到私帳時順手把 `crm_pushed` 設成 1 —— 否則專案管理的預設檢視
+    （entity=parent）當場看不到它，使用者會以為案子不見了。搬回母公司時清掉。
+    """
+    from core.ledger import ENTITIES, require_entity
+
+    require_entity(request, "mine", level="full")
+    target = (req.entity or "").strip()
+    if target not in ENTITIES:
+        raise HTTPException(status_code=422, detail=f"未知的帳本: {target or '(空)'}")
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        p = await session.get(CrmProject, project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        cur = p.entity or "parent"
+        if cur == target:
+            raise HTTPException(status_code=409, detail=f"這個專案本來就在「{target}」")
+        blockers = await _ledger_blockers(session, project_id)
+        if blockers:
+            raise HTTPException(status_code=409,
+                                detail=_blocked_reason(p.name, blockers))
+        p.entity = target
+        # 搬到私帳的案子預設仍要在專案管理看得到（標「後期專案」）
+        pushed = 1 if target == "mine" else 0
+        p.crm_pushed = pushed
+        p.updated_at = _now()
+        await session.commit()
+        # 🔴 is_mine_project 有 60 秒 id-set 快取，而這裡是全 repo 唯一的 entity
+        # 寫入路徑 —— 不清掉的話，剛搬過去的案子最多一分鐘內還被當成母公司的。
+        from core.ledger import invalidate_mine_projects
+        invalidate_mine_projects()
+    return {"status": "ok", "entity": target, "crm_pushed": pushed}

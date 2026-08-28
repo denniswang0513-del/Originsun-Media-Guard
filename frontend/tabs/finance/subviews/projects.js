@@ -298,12 +298,28 @@ function _renderDetail() {
     const d = _detail;
     const p = d.project;
     const det = p.detail || {};
-    const money = (id, val, extra = '') => `
+    // ro＝這一格由 CRM 專案帳目撐著（值是算出來的）。樣式跟著 ro 走，
+    // 不另開一個 extra 參數 —— 那樣「看起來鎖住」和「真的鎖住」會各自漂。
+    const money = (id, val, ro = false) => `
         <input type="number" class="crm-input fpl-num" id="${id}" value="${val || ''}"
-               placeholder="0" style="width:100%;text-align:right;${extra}">`;
-    const costRows = (d.cost_fields || []).map((f) => `
-        <tr><td style="color:#bbb;">${esc(f.label)}</td>
-            <td style="width:130px;">${money('fpl-c-' + f.key, det[f.key])}</td></tr>`).join('');
+               placeholder="0"${ro ? ' readonly' : ''}
+               style="width:100%;text-align:right;${ro ? 'opacity:.75;cursor:not-allowed;' : ''}">`;
+    // 由 CRM 專案帳目撐著的費用欄（行政雜支／人員費用）：顯示值＝手填＋CRM
+    // （甲案，owner 2026-08-28）。輸入框裡放的是**手填那部分**，改得動 ——
+    // 放合計的話一存檔就把 CRM 算出來的數字存成副本，CRM 改了這裡就走味。
+    const src = p.cost_sources || {};
+    const costRows = (d.cost_fields || []).map((f) => {
+        const from = src[f.key];              // {crm, manual}；沒有＝純手填欄
+        const label = from
+            ? `${esc(f.label)}<span class="fpl-src" title="CRM 專案帳目算出 ${
+                fmtNum(from.crm)}，這一格是額外手動加的，兩者相加">＋CRM ${fmtNum(from.crm)}</span>`
+            : esc(f.label);
+        const cell = money('fpl-c-' + f.key, from ? from.manual : det[f.key])
+            + (from ? `<div style="font-size:10px;color:#666;text-align:right;margin-top:2px;">
+                   合計 ${fmtNum((from.manual || 0) + from.crm)}</div>` : '');
+        return `<tr><td style="color:#bbb;">${label}</td>
+            <td style="width:130px;">${cell}</td></tr>`;
+    }).join('');
     const splitRows = (d.income_items || []).map((it) => `
         <tr><td style="color:#bbb;">${esc(it)}</td>
             <td style="width:130px;">${money('fpl-s-' + encodeURIComponent(it), (det.split || {})[it])}</td></tr>`).join('');
@@ -389,6 +405,7 @@ function _renderDetail() {
                     </div>
                 </div>
             </div>
+            ${_crmLinesHtml(d.crm_lines)}
             <div style="color:#ddd;font-size:12px;font-weight:600;margin:16px 0 6px;">掛在本案的收支（${(d.entries || []).length}）</div>
             <table class="crm-table" style="width:100%;font-size:12px;">
                 <thead><tr><th>日期</th><th>摘要</th><th style="text-align:right;">存入</th><th style="text-align:right;">支出</th></tr></thead>
@@ -576,10 +593,80 @@ _fp.createSave = async (btn) => {
     } finally { btn.disabled = false; }
 };
 
+/** CRM 專案帳目的明細（上面費用欄那兩個 CRM 合計的組成）。
+ *  🔴 人員那張帶「請款」按鈕：一鍵建一張私帳的委外請款單，並用 cost_line_id
+ *  釘住是哪一行 —— 請過的就標起來，不會重複付同一個人。 */
+function _crmLinesHtml(cl) {
+    if (!cl) { return ''; }
+    const people = cl.people || [], misc = cl.misc || [];
+    if (!people.length && !misc.length) { return ''; }
+    const box = (title, sum, rows) => `
+        <div style="margin-top:14px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                <span style="color:#ddd;font-size:12px;font-weight:600;">${title}</span>
+                <span class="fpl-src">CRM 專案帳目</span>
+                <span style="margin-left:auto;color:#888;font-size:12px;">$${fmtNum(sum)}</span>
+            </div>
+            <table class="crm-table" style="width:100%;font-size:12px;"><tbody>${rows}</tbody></table>
+        </div>`;
+    const peopleRows = people.map((x) => `
+        <tr><td>${esc(x.who || '（未指定人員）')}
+                <div style="color:#666;font-size:10px;">${esc(x.phase)}｜${esc(x.item)}</div></td>
+            <td style="text-align:right;">${fmtNum(x.amount)}</td>
+            <td style="width:82px;text-align:right;">${x.claimed
+                ? '<span style="color:#86efac;font-size:11px;">已請款</span>'
+                : `<button class="crm-btn crm-btn-secondary crm-btn-sm"
+                     onclick="window._finProjLedger.claimLine('${esc(x.id)}', this)">請款</button>`}</td></tr>`).join('');
+    const miscRows = misc.map((x) => `
+        <tr><td>${esc(x.item || x.category)}
+                <div style="color:#666;font-size:10px;">${esc(x.date)}｜${esc(x.category)}${
+                    x.payee ? '｜' + esc(x.payee) : ''}${
+                    x.billed_to_company ? '｜<span style="color:#fbbf24;">已跟公司請款（不計私帳成本）</span>' : ''}</div></td>
+            <td style="text-align:right;color:${x.billed_to_company ? '#666' : '#ddd'};">${fmtNum(x.amount)}</td></tr>`).join('');
+    return (people.length ? box('委外人員', people.reduce((a, b) => a + b.amount, 0), peopleRows) : '')
+         + (misc.length ? box('行政雜支明細',
+                misc.filter((x) => !x.billed_to_company).reduce((a, b) => a + b.amount, 0), miscRows) : '');
+}
+
 _fp.outsourceForm = () => {
     const box = document.getElementById('fpl-out-form');
     box.style.display = box.style.display === 'none' ? '' : 'none';
     if (box.style.display === '') document.getElementById('fpl-out-payee').focus();
+};
+
+/** 委外人員名單的「請款」：一鍵建一張私帳的委外請款單。
+ *  帶 cost_line_id 釘住是哪一行 —— 請過的下次就顯示「已請款」，不會重複付。 */
+_fp.claimLine = async (lineId, btn) => {
+    const row = ((_detail.crm_lines || {}).people || []).find((x) => x.id === lineId);
+    if (!row) { return; }
+    const who = row.who || '';
+    if (!who) {
+        finToast('這一行沒有指定人員 —— 請先到 CRM 專案帳目補上收款人', 'error');
+        return;
+    }
+    if (!window.confirm(`跟私帳請款：${who} $${fmtNum(row.amount)}
+`
+                        + `（${row.phase}｜${row.item}）
+
+`
+                        + '會建一張私帳的「專案外包」應付款，之後在應付帳款付掉。')) { return; }
+    if (btn) { btn.disabled = true; }        // 連點兩下＝兩張單，後端 409 擋得住但別讓人看到錯誤
+    try {
+        await crmFetch('/payments', {
+            method: 'POST',
+            body: JSON.stringify({
+                entity: 'mine', category: '專案外包', project_id: _sel,
+                payee_name: who, amount: row.amount, cost_line_id: row.id,
+                summary: `委外：${who}｜${_detail.project.name}（${row.phase}｜${row.item}）`,
+                request_date: new Date().toISOString().slice(0, 10),
+            }),
+        });
+        finToast(`已建立委外請款：${who}`);
+        await _fp.refresh();
+    } catch (e) {
+        if (btn) { btn.disabled = false; }
+        finToast('請款失敗：' + e.message, 'error');
+    }
 };
 
 _fp.outsourceAdd = async (btn) => {
@@ -645,7 +732,9 @@ _fp.save = async (btn) => {
     const body = { split: {} };
     (_detail.cost_fields || []).forEach((f) => {
         const el = document.getElementById('fpl-c-' + f.key);
-        if (el) body[f.key] = Number(el.value) || 0;
+        // 每一格送的都是**這一格裡的數字**：純手填欄就是它的值，CRM 撐著的欄
+        // 那格放的是手填那部分（合計是畫在下面的小字，不是輸入值）
+        if (el) { body[f.key] = Number(el.value) || 0; }
     });
     document.querySelectorAll('#fpl-detail [id^="fpl-s-"]').forEach((el) => {
         const name = decodeURIComponent(el.id.slice('fpl-s-'.length));

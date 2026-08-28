@@ -32,11 +32,64 @@ COST_FIELDS = [
     ("buy_invoice", "買發票"),
     ("invoice_fee", "發票代辦費"),
     ("personal_tax", "個人稅款"),
-    ("misc", "雜支"),
+    # owner 2026-08-28「私帳的專案裡增加一個項目行政雜支」—— 這一欄本來就在，
+    # 只是 390 個私帳案一個都沒填過（Sheet 時代雜支沒進來）。改成他要的名字，
+    # 值改由 CRM 專案帳目撐（見 CRM_BACKED）。
+    # 🔴 舊標籤「雜支」是匯入腳本的 Sheet 欄名反查鍵 —— 別名補在
+    # scripts/backfill_my_ledger_detail.py 的 COST_COLS。
+    ("misc", "行政雜支"),
     ("shareholder", "股東往來"),
 ]
 
 COST_KEYS = [k for k, _label in COST_FIELDS]
+
+# ── CRM 專案帳目 → 逐案損益的兩個費用欄（owner 2026-08-28）─────────────
+# 專案推送到私帳之後，它在 CRM 那邊的「專案帳目」還在記：
+#   行政雜支（crm_project_expenses）      → `misc`
+#   人員費用（crm_project_cost_lines 實際）→ `outsource`
+#
+# 🔴 **不複製、即時算**。owner 上一輪要的「兩本帳的編修甚至可以同步」用這個方式
+# 達成 —— 資料只有一份（CRM 那張表），私帳這邊是它的視圖，所以永遠不會漂。
+#
+# 規則（owner 2026-08-28 拍板「甲」）：**CRM 合計 ＋ 手填那幾筆**，兩邊都算進去。
+# 一開始是 B2「有 CRM 就用它、沒有才用手填」（＝覆蓋），但那讓「CRM 上沒有、
+# 在私帳這邊手動加的委外」在有成本行的案子上憑空消失。改成相加之後：
+#   · 落庫的 `ledger_detail[key]` 永遠只有**手填**那部分
+#   · 讀取時才把 CRM 合計加上去（顯示值＝手填＋CRM）
+# 歷史 390 個私帳案一個都沒有 CRM 成本行（2026-08-28 實測 mine=0 / parent=21），
+# 相加之後它們的顯示值仍是原本的手填值，沒有任何一案被動到。
+#
+# 🔴 相加制的代價是**同一筆錢不能被算兩次**：私帳逐案損益的「委外人員一鍵請款」
+# 建的請款單帶 `cost_line_id`（指向它是哪一行 CRM 成本行）—— 那張單**不可以**
+# 再累加進 outsource，否則 CRM 成本行算一次、累加器再算一次。守衛在
+# routers/crm/finance._sync_mine_project_outsource（單一出口）。
+# 🔴 只放鍵，不放標籤 —— 標籤的正本是上面的 COST_FIELDS。這裡曾經帶過一份
+# {"outsource": "人員費用"}，跟 COST_FIELDS 的「委外費用」當場打架而且沒人讀。
+CRM_BACKED = ("misc", "outsource")
+
+
+def apply_crm_costs(detail: dict, crm: dict | None) -> tuple:
+    """把 CRM 算出來的合計併進 detail。回 `(detail, sources)`。
+
+    `crm`：`{"misc": 合計, "outsource": 合計}`；0 或缺席＝CRM 那邊沒資料。
+    `outsource` 有第二個寫入者：`routers/crm/finance._sync_mine_project_outsource`
+    把掛在私帳專案上、類別＝專案外包的請款單累加進 detail —— 那正是「手填那幾筆」
+    的來源，相加制之下兩者相安。唯一要擋的是帶 `cost_line_id` 的那種（一鍵請款
+    ＝CRM 成本行的鏡射），守衛在那支函式裡。
+
+    `sources`：`{欄位鍵: {"crm": 合計, "manual": 落庫的手填值}}` —— 前端據此
+    拆開顯示（輸入框只放手填那部分，改它才不會把 CRM 的數字存成副本）。
+    """
+    out = dict(detail or {})
+    sources = {}
+    for key in CRM_BACKED:
+        v = int((crm or {}).get(key) or 0)
+        if v:
+            manual = int(out.get(key) or 0)
+            out[key] = manual + v
+            sources[key] = {"crm": v, "manual": manual}
+    return out, sources
+
 
 # 逐案清單裡要加總成合計列的鍵（一份清單，別在端點裡再列一次）
 SUM_KEYS = ("contract", "received", "receivable", "spent", "ap_open", "net")

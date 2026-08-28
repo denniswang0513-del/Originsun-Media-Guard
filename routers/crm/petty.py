@@ -31,7 +31,11 @@ from ._shared import cash_category_texts
 from core.auth import check_admin_or_module
 from core.money import can_see_money
 from core.identity import resolve_current_staff
-from core.schemas import PettyExpensePayload, PettySubmitPayload
+from core.cash_taxonomy import SEP as _TAX_SEP
+from core.cash_taxonomy import petty_item_for
+from core.schemas import (PettyExpensePayload, PettyFromCashPayload,
+                          PettySubmitPayload)
+from core.ledger import not_mine, not_mine_project as _not_mine_project
 from db.models import (Client, CrmCashEntry, CrmPaymentRequest, CrmProject,
                        CrmProjectCostGroup, CrmProjectExpense, CrmReimbursement,
                        CrmStaff, User)
@@ -186,12 +190,19 @@ async def petty_options():
     （owner 2026-08-18）。年份的取法見 `_project_year`（沒填日期的專案不硬猜）。
     """
     async with _crm_session() as session:
-        projects = (await session.execute(
+        # 🔴 選單不提供私帳案（core.ledger.hide_mine_projects）——
+        # 私帳的案子不能跟公司請款（見 _assert_not_mine_project），提供出來
+        # 只會讓人挑了才在送出時吃 409。
+        _q = (
             select(CrmProject.id, CrmProject.name, CrmProject.status,
                    CrmProject.start_date, CrmProject.shoot_date,
                    CrmProject.completion_date, Client.short_name)
             .outerjoin(Client, Client.id == CrmProject.client_id)
-            .order_by(CrmProject.created_at.desc()).limit(400))).all()
+            .order_by(CrmProject.created_at.desc()).limit(400))
+        # 私帳的案子不能跟公司請款 —— 這個選單一律不提供（不看 request：
+        # 就算是帳本主人自己，也不該從這裡把私帳案掛到零用金單據上）
+        _q = _q.where(not_mine(CrmProject.entity))
+        projects = (await session.execute(_q)).all()
         items = await cash_category_texts(session)
     return {
         "projects": [{"id": p.id, "name": p.name, "status": p.status or "",
@@ -208,10 +219,16 @@ async def _petty_payload(session, staff) -> dict:
     """某個人的零用金現況。own-scope 與代管視圖共用 —— 兩份會漂。"""
     names = dict((await session.execute(
         select(CrmProject.id, CrmProject.name))).all())
+    # 🔴 私帳專案的雜支不出現在零用金（owner 2026-08-28「已經轉到私帳的專案
+    # 不能列入母公司的成本」）。登記時就擋掉了（_assert_not_mine_project），但
+    # **專案是後來才搬過去的**那條路擋不到 —— 那張單會一直躺在他的可請款清單裡，
+    # 而且整批送出時被 409 卡住、其他幾張跟著送不出去。它沒有不見：私帳逐案
+    # 損益的「行政雜支明細」會列出來，由私帳自己付。
     rows = (await session.execute(
         select(CrmProjectExpense)
         .where(CrmProjectExpense.staff_id == staff.id,
-               CrmProjectExpense.claim_id.is_(None))
+               CrmProjectExpense.claim_id.is_(None),
+               _not_mine_project(CrmProjectExpense))
         .order_by(CrmProjectExpense.expense_date.desc().nullslast())
     )).scalars().all()
     claims = (await session.execute(
@@ -399,16 +416,59 @@ async def upload_my_petty_receipt(expense_id: str, request: Request,
     return await _save_receipt(project_id, expense_id, file)
 
 
+async def _assert_not_mine_project(session, rows) -> None:
+    """🔴 **私帳的專案不可能跟公司請款**（owner 2026-08-28 原話）。
+
+    那些案子的錢流歸屬在私帳 —— 自己的案子自己出錢。而且逐案損益的「行政雜支」
+    只算沒請過款的，真送出去那筆錢會從私帳成本裡消失、變成公司費用，兩邊都不對。
+
+    源頭也堵了：收支明細推去零用金時**不帶私帳專案**（見 `_petty_project_id`）
+    —— 那張單據是要跟公司請款的，公司要的是它自己那個案子。這裡是第二道，
+    擋任何其他路徑塞進來的。
+    """
+    pids = {r.project_id for r in rows if r.project_id}
+    if not pids:
+        return
+    mine = dict((await session.execute(
+        select(CrmProject.id, CrmProject.name)
+        .where(CrmProject.id.in_(pids), CrmProject.entity == "mine"))).all())
+    if not mine:
+        return
+    blocked = sum(1 for r in rows if r.project_id in mine)
+    which = "、".join(sorted(mine.values()))
+    raise HTTPException(
+        status_code=409,
+        detail=f"「{which}」是私帳的案子，不能跟公司請款（{blocked} 筆）——"
+               f"自己的案子自己出錢，那些花費已經算在私帳的逐案損益裡了。"
+               f"要送的話請先把那幾筆的專案清掉，或把案子搬回公司帳")
+
+
+async def _petty_project_id(session, project_id: str):
+    """零用金單據能不能掛這個專案。私帳的案子 → 回 None（不掛）。
+
+    🔴 收支明細推去零用金那條路（源日請款）預設會把收支列的專案帶過去，而私帳
+    收支只能掛私帳專案 —— 帶過去就成了「私帳的案子在跟公司請款」，正是
+    `_assert_not_mine_project` 要擋的事。在**源頭**清掉，使用者不會先建好一張
+    註定送不出去的單據。資訊沒有掉：收支列那邊的專案連結還在。
+    """
+    if not project_id:
+        return None
+    p = await session.get(CrmProject, project_id)
+    return None if p is not None and p.entity == "mine" else project_id
+
+
 async def _submit_for(session, staff, notes: str = "") -> dict:
     """把某人手上的草稿打包成批次並直接成立。本人送出／代為送出共用。"""
     rows = (await session.execute(
         select(CrmProjectExpense)
         .where(CrmProjectExpense.staff_id == staff.id,
-               CrmProjectExpense.claim_id.is_(None))
+               CrmProjectExpense.claim_id.is_(None),
+               _not_mine_project(CrmProjectExpense))       # 同 _petty_payload
     )).scalars().all()
     rows = [r for r in rows if (r.status or "草稿") in EDITABLE]
     if not rows:
         raise HTTPException(status_code=400, detail="沒有可送出的單據")
+    await _assert_not_mine_project(session, rows)
     dates = [r.expense_date for r in rows if r.expense_date]
     total = sum(r.actual or 0 for r in rows)
     opening = staff.petty_float or 0
@@ -453,6 +513,156 @@ async def submit_my_petty(body: PettySubmitPayload, request: Request):
         return await _submit_for(session, staff, body.notes)
 
 
+# ── 收支明細 → 零用金單據（owner 2026-08-27）────────────────────────
+#
+# 為什麼要這條路：他自己墊出去的錢原本只記在私帳（entity='mine'）裡，公司這邊
+# 完全看不到 —— 零用金系統裡他的單據數是 **0**，但私帳中用個人帳戶/信用卡付掉
+# 的公司支出有一百多萬。手抄一遍到零用金工作台不只是慢，兩本帳還會各自漂。
+# 這條路把收支的那一列直接變成一張草稿單據，並用 `cash_entries.expense_id`
+# 把兩邊釘死（那個欄位本來就在 model 裡，之前 0 筆使用）。
+#
+# 🔴 付款方式不影響能不能推（owner：「不管是匯款或信用卡都可以直接接到 crm 的
+# 零用金請款」）。卡費最後從哪個帳戶扣是另一件事，不在這裡判。
+# 🔴 一次一列（owner：「每一列都可以推送，不是一次一批」）—— 不留批次入口：
+# 批次語意（一個 item 蓋整批異質類別）從來沒被設計過，留著就是陷阱。
+# 🔴 只建**草稿**，不自動送出 —— 送出＝即核准即產應付款（見 `/petty/submit`
+# 的說明），那一步要人看過項目與專案才按。
+
+def _cash_claim_amount(e) -> int:
+    """這一列要跟公司請多少 —— 流出側（expense + claim）再加匯費。
+
+    匯費在損益上另列管理費（`core.finance_logic.out_amount` 刻意不含它），
+    但錢確實是從他的帳戶走的，請款要還他。
+    """
+    return int(e.expense or 0) + int(e.claim or 0) + int(e.bank_fee or 0)
+
+
+def _cash_push_block(entry, pushed) -> str:
+    """不能推的理由；空字串＝可以推。expense_id 指向已被刪掉的單據 → 視同沒推過。"""
+    if pushed is not None:
+        return f"已經推送過（{pushed.status or '草稿'}）"
+    if _cash_claim_amount(entry) <= 0:
+        return "這一列沒有支出金額"
+    return ""
+
+
+async def _petty_item_domain(session) -> list:
+    """會計項目的值域 —— **下拉選項＝寫入白名單，同一份**。
+
+    source='cash' 裡平鋪的費用類別。兩類要排除：複合鍵（`公司_器材`…）是私帳
+    自己的分類詞彙，不是會計項目；`轉存`／`請款單`／`營業稅` 那些 treatment 非
+    費用的類別掛到單據上，AP 認列會落到轉帳/稅務分支 —— 所以按
+    treatment='direct_expense' 篩，不是只濾底線。
+    """
+    from db.models import FinanceCategoryMap
+    rows = (await session.execute(
+        select(FinanceCategoryMap.category_text)
+        .where(FinanceCategoryMap.source == "cash",
+               FinanceCategoryMap.active.is_(True),
+               FinanceCategoryMap.treatment == "direct_expense")
+        .order_by(FinanceCategoryMap.category_text))).all()
+    items = [r[0] for r in rows if _TAX_SEP not in r[0]]
+    return items or list(FALLBACK_ITEMS)
+
+
+async def _push_from_cash(session, staff, body: PettyFromCashPayload) -> dict:
+    """本人推送／代為推送共用的正本（可先 `preview=True` 試算）。"""
+    if not body.entry_id:
+        raise HTTPException(status_code=400, detail="沒有選到收支列")
+    entry = await session.get(CrmCashEntry, body.entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="找不到這一列收支")
+    pushed = (await session.get(CrmProjectExpense, entry.expense_id)
+              if entry.expense_id else None)
+    blocked = _cash_push_block(entry, pushed)
+    items = await _petty_item_domain(session)
+    item = body.item or petty_item_for(entry.category, items)
+
+    if body.preview:
+        return {"status": "ok", "preview": True,
+                "staff": {"id": staff.id, "name": staff.name},
+                "items": items,
+                "row": {"entry_id": entry.id,
+                        "date": _fmt_day(entry.entry_date),
+                        "summary": entry.summary or "",
+                        "category": entry.category or "",
+                        "amount": _cash_claim_amount(entry),
+                        "item": item,     # 空＝對不出會計項目，畫面要人挑
+                        "blocked": blocked}}
+
+    if blocked:
+        raise HTTPException(status_code=409, detail=blocked)
+    # 🔴 空項目就擋下，不落「其他」—— 「對不出來留白讓人挑」是 petty_item_for
+    # 的契約，守在這裡（後端）才對所有呼叫端都成立，不能只靠一個對話框的 JS。
+    if not item:
+        raise HTTPException(status_code=400, detail="請先選會計項目")
+    if item not in items:
+        raise HTTPException(status_code=400, detail=f"「{item}」不是可用的會計項目")
+    exp = _new_expense(PettyExpensePayload(
+        actual=_cash_claim_amount(entry),
+        summary=entry.summary or "",
+        item=item,
+        category=entry.sub_item or "其他",
+        project_id=await _petty_project_id(
+            session, body.project_id or entry.project_id or ""),
+        invoice_no=entry.invoice_number or "",
+        notes=body.notes or f"由收支明細推送（{_fmt_day(entry.entry_date)}）",
+    ), staff.id)
+    # 🔴 認列在**消費日**（收支列的日期），不是今天 —— 專案成本的時點規則見
+    # CrmProjectExpense 的欄位註解。直接用原 datetime，不走字串來回。
+    exp.expense_date = entry.entry_date
+    _enforce_project_link(exp)           # 非專案雜支不得掛專案
+    await _attach_cost_group(session, exp)
+    session.add(exp)
+    entry.expense_id = exp.id            # 兩邊釘死 —— 重推會被 blocked 擋
+    await session.commit()
+    return {"status": "ok", "staff": {"id": staff.id, "name": staff.name},
+            "expense_id": exp.id, "amount": exp.actual, "item": exp.item}
+
+
+@router.post("/petty/from-cash", dependencies=[Depends(money_dep)])
+async def petty_from_cash(body: PettyFromCashPayload, request: Request):
+    """自己的收支列 → 自己的零用金草稿。"""
+    async with _crm_session() as session:
+        return await _push_from_cash(session, await _my_staff(request), body)
+
+
+@router.post("/petty/staff/{staff_id}/from-cash", dependencies=[Depends(money_dep)])
+async def petty_from_cash_for(staff_id: str, body: PettyFromCashPayload,
+                              request: Request):
+    """代為推送 —— 比照代為登記走**路徑參數**，own-scope 的 schema 不長 staff_id。"""
+    _check_approver(request)     # 先擋權限再碰 DB
+    async with _crm_session() as session:
+        staff = await _approver_staff(request, session, staff_id)
+        return await _push_from_cash(session, staff, body)
+
+
+@router.delete("/petty/from-cash/{entry_id}", dependencies=[Depends(money_dep)])
+async def undo_petty_from_cash(entry_id: str, request: Request):
+    """撤銷推送：刪掉草稿單據並解開連結。送出之後就撤不了（要走退回）。"""
+    async with _crm_session() as session:
+        entry = await session.get(CrmCashEntry, entry_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="找不到這一列收支")
+        exp = (await session.get(CrmProjectExpense, entry.expense_id)
+               if entry.expense_id else None)
+        if exp is not None:
+            if (exp.status or "草稿") not in EDITABLE or exp.claim_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"單據已經送出（{exp.status}），請到零用金那邊退回")
+            # 🔴 身分守衛與建立側對稱：自己的草稿自己撤；撤**別人的**＝代管動作，
+            # 走審核權（不然任何有 money_view 的人都能把同事的推送靜靜還原）。
+            ident = await resolve_current_staff(request)
+            me = ident["staff"]
+            if me is None or exp.staff_id != me.id:
+                _check_approver(request)
+            await session.delete(exp)
+        entry.expense_id = None      # 空殼連結（單據已刪）＝自我修復，不需身分
+        await session.commit()
+    return {"status": "ok", "entry_id": entry_id}
+
+
 # ── 財務視角（money_view + finance_approve）：匯款清冊 / 審核 / 帳冊 ────
 @router.get("/petty/accounts", dependencies=[Depends(money_dep)])
 async def petty_accounts(request: Request):
@@ -474,7 +684,8 @@ async def petty_accounts(request: Request):
             select(CrmProjectExpense.staff_id, CrmProjectExpense.status,
                    safunc.coalesce(safunc.sum(CrmProjectExpense.actual), 0),
                    safunc.count(CrmProjectExpense.id))
-            .where(CrmProjectExpense.staff_id.isnot(None))
+            .where(CrmProjectExpense.staff_id.isnot(None),
+                   _not_mine_project(CrmProjectExpense))   # 同上：不是公司的錢
             .group_by(CrmProjectExpense.staff_id, CrmProjectExpense.status))).all()
         staff_rows = (await session.execute(
             select(CrmStaff.id, CrmStaff.name, CrmStaff.petty_float,

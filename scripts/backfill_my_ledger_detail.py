@@ -34,6 +34,10 @@ from core.ledger_project import (COST_FIELDS,  # noqa: E402
 
 # Sheet 欄名 → ledger_detail 鍵（COST_FIELDS 的反向）
 COST_COLS = {label: key for key, label in COST_FIELDS}
+# 舊 Sheet 欄名：UI 標籤 2026-08-28 從「雜支」改成「行政雜支」，Sheet 那邊
+# 還是舊名 —— 反查表兩個都認，不然那一欄會靜默對不到（它本來就全空，
+# 對不到不會噴錯，只會什麼都沒發生）。
+COST_COLS.setdefault("雜支", "misc")
 
 
 def load_by_code(csv_path: str) -> dict:

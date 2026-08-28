@@ -470,7 +470,18 @@ function renderDetail(project) {
 
     const actions = document.getElementById('proj-bar-actions');
     if (actions) {
-        actions.innerHTML = `<button class="crm-detail-close" title="關閉">✕</button>`;
+        // 搬帳本（owner 2026-08-28）。🔴 只給帳號上**真的有** finance_mine 的人 ——
+        // 直接看 _modules、不走 Lv3 bypass，跟 finance.js 的私帳子視圖同一個口徑
+        // （後端 require_entity 才是真正的牆，這裡只是不給看到按不到的東西）。
+        const _mine = (window._modules || []).includes('finance_mine');
+        const _toMine = (project.entity || 'parent') !== 'mine';
+        actions.innerHTML = (_mine
+            ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="proj-move-ledger"
+                       title="${_toMine ? '把這個專案的錢流歸屬改成私帳' : '把這個專案搬回母公司帳'}"
+                       >${_toMine ? '推送至私帳' : '搬回公司帳'}</button>` : '')
+            + `<button class="crm-detail-close" title="關閉">✕</button>`;
+        actions.querySelector('#proj-move-ledger')?.addEventListener('click',
+            () => window._projMoveLedger(project.id));
         actions.querySelector('.crm-detail-close').addEventListener('click', () => callbacks.closeDetail?.());
     }
     // Re-attach the [🟢 已自動儲存] indicator that _loadFinancialSummary injects —

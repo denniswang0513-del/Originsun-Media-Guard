@@ -543,13 +543,18 @@ async def _build_statement_preview(session, acct, ent, text):
     # 挑選視窗要看得出「是哪個案子」—— 只有名稱不夠（同名/近名的案子很多）
     cmap = {c.id: c.short_name for c in
             (await session.execute(select(Client))).scalars().all()}
+    # 挑選視窗只列**這本帳**的專案：母公司的對帳單挑到私帳案的話，掛上去會被
+    # `_assert_project_same_entity` 打回來；私帳的對帳單同理。順帶也就不會把
+    # 私帳案列給沒有 mine scope 的人看（那條規則的正本是
+    # core.ledger.hide_mine_projects，這裡用更貼近的帳本條件達成）。
+    _proj_q = (select(CrmProject).where(CrmProject.entity == ent)
+               .order_by(CrmProject.created_at.desc()))
     projects = [{
         "id": p.id, "name": p.name,
         "client": cmap.get(p.client_id, ""),
         "status": p.status or "",
         "start": str(p.start_date)[:10] if p.start_date else "",
-    } for p in (await session.execute(
-        select(CrmProject).order_by(CrmProject.created_at.desc()))).scalars().all()]
+    } for p in (await session.execute(_proj_q)).scalars().all()]
     # 發票只列**還沒收齊**的收款發票 —— 已經收完的列出來只會讓人選錯
     # 方向與作廢在 SQL 就篩掉：撈回來再用 Python 篩的話，下一步的
     # _invoice_collections 會拿到全部 400 個 id，而不是真正需要的那 150 個。

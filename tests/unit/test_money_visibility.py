@@ -18,6 +18,15 @@ from fastapi import FastAPI
 from fastapi.routing import APIRouter
 from fastapi.testclient import TestClient
 
+_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _read(rel: str) -> str:
+    """讀 repo 內的原始碼（跟 cwd 無關）。"""
+    return (_ROOT / rel).read_text(encoding="utf-8")
+
+
+
 from core.money import (_PENDING_OWNER, _PREFILTER, MONEY_FIELDS,
                         REGISTRY_EXEMPT, SCANNER_EXACT, MoneyRedactRoute, redact)
 
@@ -304,3 +313,93 @@ def test_route_class_leaves_anonymous_responses_without_money_untouched():
     """沒有金額的回應原樣返回 —— 不該因為經過這層就被重新序列化。"""
     c = _stub_app(lambda: {"ok": True, "total": 7})
     assert c.get("/x/probe").json() == {"ok": True, "total": 7}
+
+
+# ── 私帳案對沒有私帳權限的人：整個看不到（owner 2026-08-28 最終拍板）────
+# 同一天走過三版：①只抹金額、案子照看 ②推進管線就放寬金額 ③連案子都看不到。
+# 前兩版都被 owner 收回，最終是③。這幾個測試就是不讓它再被改回去。
+def test_mine_project_amounts_are_always_redacted():
+    """`crm_pushed` **不放寬金額** —— 推進管線只決定案子出不出現在管線。"""
+    from core.money import redact_mine
+
+    for pushed in (0, 1):
+        out = redact_mine({"id": "p", "entity": "mine", "crm_pushed": pushed,
+                           "name": "案子", "contract_amount": 500000})
+        assert "contract_amount" not in out, f"crm_pushed={pushed} 也要抹"
+        assert out["name"] == "案子", "刪的是金額鍵，不是整個物件"
+
+
+def test_mine_projects_are_hidden_from_viewers_without_scope():
+    """沒有私帳權限 → 私帳案**整列不出現**（不是只抹金額）。
+
+    🔴 單筆回 **404 不是 403** —— 403 等於承認「有這個案子只是你不能看」，
+    那本身就是洩漏。
+    """
+    # 規則有名字、住在 core（散落的字面沒有可 grep 的名字）
+    led = _read("core/ledger.py")
+    assert "def hide_mine_projects(request)" in led
+    src = _read("routers/crm/projects.py")
+    assert "hide_mine_projects" in src
+    lst = src[src.index("async def list_projects("):src.index("async def create_project")]
+    # 述詞走 core.ledger.not_mine（那個 helper 的存在理由就是不要有第三份字面）
+    assert "not_mine(CrmProject.entity)" in lst
+    assert 'CrmProject.entity != "mine"' not in src, "不可再寫字面"
+    one = src[src.index("async def get_project(project_id"):][:900]
+    assert "_hide_mine(request)" in one and "status_code=404" in one
+    assert "status_code=403" not in one
+
+
+def test_visible_does_not_mean_writable():
+    """看得到不等於改得動 —— 那筆錢的歸屬還是私帳的。"""
+    src = _read("routers/crm/projects.py")
+    assert "私帳案的金額欄只有帳本主人能修改" in src
+    seg = src[src.index('if (project.entity or "parent") == "mine":'):][:600]
+    assert "crm_pushed" not in seg, "寫入守衛只看 entity，不看 crm_pushed"
+
+
+def test_every_project_enumeration_decides_about_mine():
+    """🔴 掃描：**列舉**專案的查詢都要對「私帳案給不給看」表態。
+
+    owner 2026-08-28「連專案都看不到」。三支專案端點擋了，但這條規則會被下一個
+    新端點靜默繞過 —— 所以用掃描釘住，新增的列舉點要嘛套規則、要嘛進豁免名單
+    並寫理由。
+
+    分界：**列舉**（選單／清單／挑選視窗）要表態；**用 id 反查名字**不必 ——
+    那是使用者已經在看的那一列，藏掉名字只會讓畫面難懂而擋不住任何東西。
+    """
+    import re
+
+    # 豁免：用 id 反查、或本來就不是給人看的（伺服器端比對）。
+    EXEMPT = {
+        # id 反查名字（viewer 已經有那一列）
+        "routers/api_cashflow.py", "routers/api_equipment.py",
+        "routers/api_locations.py", "routers/api_portal.py",
+        "routers/api_proposals.py", "routers/api_references.py",
+        "routers/crm/staff.py", "routers/crm/clients.py",
+        # 伺服器端名稱比對／匯入去重，不回給前端當清單
+        "routers/api_timesheets.py", "routers/crm/finance.py",
+        "routers/crm/proposal_assets.py", "routers/crm/flow.py",
+        # 帳本自己的視角（entity 已經圈定範圍）
+        "routers/api_finance_projects.py", "routers/api_finance_stmt.py",
+        "services/finance_statements.py",
+        # 官網／公開頁（另一套可見性：作品要上架才出得去）
+        "services/website/project_service.py",
+        "services/website/initiative_service.py",
+        "services/media_log_catchup.py", "routers/crm/media_log.py",
+    }
+    hits = []
+    for rel in ("routers", "services"):
+        for f in sorted((_ROOT / rel).rglob("*.py")):
+            key = f.relative_to(_ROOT).as_posix()
+            if key in EXEMPT:
+                continue
+            src = f.read_text(encoding="utf-8")
+            if not re.search(r"select\(\s*CrmProject[.,)]", src):
+                continue
+            if "hide_mine_projects" in src or "not_mine(CrmProject.entity)" in src:
+                continue
+            hits.append(key)
+    assert not hits, (
+        "這些檔案列舉了專案卻沒對私帳可見性表態 —— 套 "
+        "core.ledger.hide_mine_projects / not_mine，或加進 EXEMPT 並寫理由：\n  "
+        + "\n  ".join(hits))

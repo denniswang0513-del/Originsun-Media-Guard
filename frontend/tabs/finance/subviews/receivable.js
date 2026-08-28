@@ -11,6 +11,7 @@
  * finance_mine 指名門把關。
  */
 import { finFetchMine, finSubviewBoot, esc, fmtNum } from '../fin-utils.js';
+import { crmFetch } from '../../crm/crm-utils.js';
 
 let _c = null;
 let _isCurrent = () => true;
@@ -20,13 +21,47 @@ export default async function render(container, ctx = {}) {
     if (ctx.isCurrent) _isCurrent = ctx.isCurrent;
     const r = await finSubviewBoot(_c, {
         title: '📥 應收帳款', isCurrent: _isCurrent,
-        fetchers: [() => finFetchMine('/project-ledger')],
+        fetchers: [
+            () => finFetchMine('/project-ledger'),
+            // 零用金那側是**源日欠我**（收支明細推過去的那些單據）。取不到就
+            // 當沒有 —— 帳號沒綁人員檔案會 409，不該整頁掛掉。
+            () => crmFetch('/petty/me').catch(() => null),
+        ],
         retry: 'window._finRecv.reload()',
     });
-    if (r) _render(r[0]);
+    if (r) _render(r[0], r[1]);
 }
 
-function _render(d) {
+/** 源日請款待收 —— 收支明細推過去、源日還沒把錢匯回來的部分。
+ *  （UI 叫「源日請款」，資料/端點仍是零用金 petty —— 見 crm-cashbook.js 的命名註解）
+ *
+ *  🔴 兩段要分開講：草稿還沒送出（公司那邊還不知道有這筆），已核准才是真的
+ *  應收。混成一個數字的話，看到「應收 4 萬」卻在公司的應付款裡找不到。 */
+function _pettyBlock(petty) {
+    if (!petty) { return ''; }
+    const draft = petty.pending_total || 0;
+    const claims = (petty.claims || []).filter((c) => c.status !== '已付款');
+    const approved = claims.reduce((a, c) => a + (c.total_claim || 0), 0);
+    if (!draft && !approved) { return ''; }
+    return `
+        <div style="background:#202020;border:1px solid #2e2e2e;border-radius:8px;
+                    padding:12px 14px;margin-bottom:14px;">
+            <div style="color:#ddd;font-weight:600;font-size:13px;margin-bottom:6px;">源日請款待收</div>
+            <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:12px;">
+                <span style="color:#888;">已核准待匯款
+                    <b style="color:#fbbf24;">$${fmtNum(approved)}</b>
+                    <span style="color:#666;">（${claims.length} 批）</span></span>
+                <span style="color:#888;">草稿未送出
+                    <b style="color:#9ccfa4;">$${fmtNum(draft)}</b>
+                    <span style="color:#666;">（${(petty.pending || []).length} 筆）</span></span>
+            </div>
+            <div style="color:#666;font-size:11px;margin-top:6px;">
+                從收支明細的 ⋮「源日請款」進來。草稿要到「財務管理 → 零用金 →
+                我的請款」按送出，源日那邊才會產生應付款。</div>
+        </div>`;
+}
+
+function _render(d, petty) {
     const rows = (d.projects || []).filter((p) => (p.receivable || 0) !== 0);
     const total = rows.reduce((a, p) => a + p.receivable, 0);
     const over = rows.filter((p) => p.receivable < 0);
@@ -69,6 +104,7 @@ function _render(d) {
         </tr>`).join('')}`).join('');
 
     _c.innerHTML = `
+        ${_pettyBlock(petty)}
         <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
             <h2 style="color:#eee;margin:0;font-size:18px;">📥 應收帳款</h2>
             <span style="color:#888;font-size:12px;">${rows.length} 案・應收合計

@@ -30,7 +30,7 @@ from fastapi import APIRouter, HTTPException, Request
 from config import load_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
-from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT,
+from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, apply_crm_costs,
                                  SELECTABLE_SOURCES, SUM_KEYS, apply_source_fee,
                                  code_of, compute, expected_cash_in,
                                  income_items, norm_detail, receivable_status)
@@ -55,6 +55,96 @@ async def _owned_project(session, project_id: str, ent: str):
     if (p.entity or "parent") != ent:
         raise HTTPException(status_code=403, detail="這個專案不屬於目前的帳本")
     return p
+
+
+def _pid_where(model, project_id: str) -> tuple:
+    """單案模式的額外述詞（空＝整本帳）。"""
+    return (model.project_id == project_id,) if project_id else ()
+
+
+async def _crm_costs(session, ent: str, project_id: str = "") -> dict:
+    """`{project_id: {"misc": 行政雜支合計, "outsource": 人員費用合計}}`。
+
+    來源是 CRM 專案帳目那兩張表（它們沒有 entity 欄 —— 掛在專案上，跟著專案走）。
+    清單那支一次聚合、不逐案 N+1；單案讀取傳 `project_id` 收斂成兩個索引查詢
+    —— 不傳的話等於為了兩個數字掃全帳本，而詳情每開一次、每存一次都付一遍。
+    entity 從專案那側圈定。
+
+    🔴 人員費用排除 `phase='行政雜支'` 的成本行 —— 那個階段值跟
+    crm_project_expenses 講的是同一件事，兩邊都算就是重複計算
+    （2026-08-28 實測目前該階段的實際金額為 0，但那是現況不是保證）。
+    """
+    from sqlalchemy import func as fn
+    from sqlalchemy import select
+
+    from db.models import CrmProject, CrmProjectCostLine, CrmProjectExpense
+    # 🔴 只算**沒跟公司請過款**的（`claim_id` 為空）。跟公司請款拿回來的那些，
+    # 錢最後是公司出的 —— 私帳沒有承擔，算進來就是憑空多一筆成本，
+    # 逐案損益的實收會被壓低（owner 2026-08-28 拍板）。
+    #     自己吸收 500 → 私帳成本 500
+    #     跟公司請款拿回 500 → 私帳成本 0
+    exp_q = (select(CrmProjectExpense.project_id,
+                    fn.coalesce(fn.sum(CrmProjectExpense.actual), 0))
+             .join(CrmProject, CrmProject.id == CrmProjectExpense.project_id)
+             .where(CrmProject.entity == ent,
+                    CrmProjectExpense.claim_id.is_(None),
+                    *_pid_where(CrmProjectExpense, project_id))
+             .group_by(CrmProjectExpense.project_id))
+    line_q = (select(CrmProjectCostLine.project_id,
+                     fn.coalesce(fn.sum(CrmProjectCostLine.actual_amount), 0))
+              .join(CrmProject, CrmProject.id == CrmProjectCostLine.project_id)
+              .where(CrmProject.entity == ent,
+                     CrmProjectCostLine.phase != "行政雜支",
+                     *_pid_where(CrmProjectCostLine, project_id))
+              .group_by(CrmProjectCostLine.project_id))
+    out: dict = {}
+    for pid, v in (await session.execute(exp_q)).all():
+        out.setdefault(pid, {})["misc"] = int(v or 0)
+    for pid, v in (await session.execute(line_q)).all():
+        out.setdefault(pid, {})["outsource"] = int(v or 0)
+    return out
+
+
+async def _crm_lines(session, project_id: str) -> dict:
+    """這個案子在 CRM 專案帳目裡的**明細**（owner 2026-08-28「轉過來的 crm 明細
+    要列出」）。上面 `_crm_costs` 給的是合計，這裡是它加總的那幾列。
+
+    `people` 帶 `claimed`：是否已經有委外請款單指向這一行（`cost_line_id`）——
+    沒有硬連結的話只能靠人名＋金額目測，同一個人同金額出現兩次就分不出來。
+    """
+    from sqlalchemy import select
+
+    from db.models import (CrmPaymentRequest, CrmProjectCostLine,
+                           CrmProjectExpense, CrmStaff)
+    exp = (await session.execute(
+        select(CrmProjectExpense)
+        .where(CrmProjectExpense.project_id == project_id)
+        .order_by(CrmProjectExpense.expense_date))).scalars().all()
+    lines = (await session.execute(
+        select(CrmProjectCostLine)
+        .where(CrmProjectCostLine.project_id == project_id,
+               CrmProjectCostLine.phase != "行政雜支",
+               CrmProjectCostLine.actual_amount.isnot(None),
+               CrmProjectCostLine.actual_amount != 0)
+        .order_by(CrmProjectCostLine.sort_order))).scalars().all()
+    sids = {x for l in lines for x in (l.actual_staff_id, l.estimated_staff_id) if x}
+    names = dict((await session.execute(
+        select(CrmStaff.id, CrmStaff.name).where(CrmStaff.id.in_(sids)))).all()) if sids else {}
+    claimed = set((await session.execute(
+        select(CrmPaymentRequest.cost_line_id)
+        .where(CrmPaymentRequest.project_id == project_id,
+               CrmPaymentRequest.cost_line_id.isnot(None)))).scalars())
+    return {
+        "misc": [{"date": _fmt_day(e.expense_date), "category": e.category or "",
+                  "item": e.sub_item or e.item or "", "amount": int(e.actual or 0),
+                  "payee": e.payee or names.get(e.staff_id, ""),
+                  # 跟公司請過款的不算私帳成本（見 _crm_costs），列出來但標示
+                  "billed_to_company": bool(e.claim_id)} for e in exp],
+        "people": [{"id": l.id, "phase": l.phase or "", "item": l.item_name or "",
+                    "who": names.get(l.actual_staff_id or l.estimated_staff_id, ""),
+                    "amount": int(l.actual_amount or 0),
+                    "claimed": l.id in claimed} for l in lines],
+    }
 
 
 async def _rollups(session, ent: str):
@@ -121,6 +211,7 @@ async def project_ledger(request: Request, entity: str = ""):
                            CrmProject.updated_at.desc(), CrmProject.id))
         rows = (await session.execute(query)).all()
         cash, ap = await _rollups(session, ent)
+        crm_costs = await _crm_costs(session, ent)
 
     items, tot = [], {"contract": 0, "received": 0, "receivable": 0,
                       "spent": 0, "ap_open": 0, "net": 0,
@@ -129,7 +220,9 @@ async def project_ledger(request: Request, entity: str = ""):
         spent = cash.get(p.id, 0)
         ap_open = ap.get(p.id, 0)
         contract = int(p.contract_amount or 0)
-        detail = norm_detail(p.ledger_detail)
+        # CRM 專案帳目蓋過手填（B2，owner 2026-08-28）—— 規則在 core，不在這裡
+        detail, _src = apply_crm_costs(norm_detail(p.ledger_detail),
+                                       crm_costs.get(p.id))
         net, check = compute(contract, detail)
         item = {
             "id": p.id, "name": p.name, "client": cname or "",
@@ -246,7 +339,9 @@ async def project_ledger_detail(project_id: str, request: Request,
             .where(CrmPaymentRequest.project_id == project_id,
                    CrmPaymentRequest.entity == ent)
             .order_by(CrmPaymentRequest.created_at))).scalars().all()
-    _d = norm_detail(p.ledger_detail)
+        _crm = (await _crm_costs(session, ent, project_id)).get(project_id)
+        _lines = await _crm_lines(session, project_id)
+    _d, _cost_src = apply_crm_costs(norm_detail(p.ledger_detail), _crm)
     _net, _check = compute(int(p.contract_amount or 0), _d)
     return {
         "project": {
@@ -259,9 +354,13 @@ async def project_ledger_detail(project_id: str, request: Request,
             "payment_status": p.payment_status or "",
             "crm_pushed": int(p.crm_pushed or 0),
             "detail": _d, "net": _net, "check": _check,
+            # 哪幾個費用欄的值是從 CRM 專案帳目算來的（前端據此標來源並鎖住）
+            "cost_sources": _cost_src,
             # 匯入時把案碼/案源/税別等收在這裡（純文字）—— 逐案對照 Sheet 用
             "notes": p.notes or "",
         },
+        # CRM 專案帳目的明細（合計在 detail 的 misc/outsource，這是它的組成）
+        "crm_lines": _lines,
         "income_items": income_items(load_settings()),
         # 下拉只給可選的（自接＝歷史值不再可選；舊案的值由前端就地補一個選項）
         "sources": list(SELECTABLE_SOURCES), "default_fee_pct": DEFAULT_FEE_PCT,
@@ -314,6 +413,11 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
             else:
                 p.completion_date = None
         d = norm_detail(p.ledger_detail)
+        # 🔴 CRM 撐著的費用欄（行政雜支／人員費用）：落庫的永遠只有**手填**那部分，
+        # CRM 合計是讀取時即時加上去的（甲案，見 core.ledger_project.apply_crm_costs）。
+        # 前端那格送回來的也是手填值 —— 送合計就會把 CRM 的數字存成一份會走味的
+        # 副本（CRM 那邊改了、這裡卻停在舊數字），所以前端與這裡都只認手填。
+        crm_now = (await _crm_costs(session, ent, project_id)).get(project_id) or {}
         # 案源與費率是 meta（字串/浮點），不能進下面那個 int() 迴圈
         if "source" in data:
             d["source"] = data.pop("source") or ""
@@ -337,8 +441,10 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         p.payment_status = receivable_status(_exp, _recv)
         p.updated_at = _now()
         await session.commit()
+        d, cost_src = apply_crm_costs(d, crm_now)
         net, check = compute(int(p.contract_amount or 0), d)
     return {"status": "ok", "detail": d, "net": net, "check": check,
+            "cost_sources": cost_src,
             "contract": int(contract) if contract is not None else None,
             "close_date": _fmt_day(p.completion_date),
             "crm_pushed": int(p.crm_pushed or 0),

@@ -1,7 +1,7 @@
 /**
  * crm-projects-core.js — 列表 + CRUD Modal + CSV 匯入
  */
-import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateClientSelect, searchableSelect, saveSettings, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateClientSelect, searchableSelect, saveSettings, kebabMenuHtml, createSortable, enumIndex, crmToast } from './crm-utils.js';
 import { state, callbacks, STATUS_ORDER } from './crm-projects-state.js';
 
 // 開場的帳本預設（因人而異）—— 快取守衛拿它判斷「有沒有套篩選」
@@ -500,3 +500,49 @@ export async function doImport() {
         btn.textContent = '開始匯入';
     }
 }
+
+
+// ── 搬帳本（專案管理 ↔ 私帳）─────────────────────────────────────
+// owner 2026-08-28：「可以有一個按鈕把專案推送至私帳（只有擁有私帳權限的人能用）」。
+// 按鈕在詳情面板的動作列（crm-projects-detail.js），只對有 finance_mine 的帳號畫出來。
+//
+// 🔴 換帳本是全 repo「更新一律不得換帳本」的唯一例外，所以：
+//   1) 先問後端「能不能搬」，把會擋住的東西講出來 —— 不要讓人按了才吃 409；
+//   2) 動手前一定 confirm，並把「錢會跟著算到哪本帳」寫清楚。
+window._projMoveLedger = async function (id) {
+    let chk;
+    try {
+        chk = await _fetch(`/projects/${encodeURIComponent(id)}/ledger-move-check`);
+    } catch (e) {
+        crmToast('查不到搬帳本的狀態：' + e.message);
+        return;
+    }
+    const toMine = chk.target === 'mine';
+    if (!chk.can_move) {
+        // 這句話的正本在後端（_blocked_reason）—— 前端再拼一份就會跟 409 的
+        // 訊息漂成兩種說法
+        crmToast(chk.reason || '這個專案不能換帳本', 6000);
+        return;
+    }
+    const msg = toMine
+        ? `把「${chk.name}」推送至私帳？\n\n`
+          + '這個專案的錢流歸屬會改成私帳：之後掛在它身上的發票／收支／請款都算私帳的，\n'
+          + '母公司的三表不再計入它。專案管理仍看得到（標「後期專案」）。\n\n'
+          + '目前它身上沒有任何單據，所以搬過去不會動到任何一筆已記的帳。'
+        : `把「${chk.name}」搬回母公司帳？\n\n`
+          + '錢流歸屬改回母公司，之後掛在它身上的錢都算公司的。';
+    if (!window.confirm(msg)) { return; }
+    try {
+        await _fetch(`/projects/${encodeURIComponent(id)}/move-ledger`, {
+            method: 'POST', body: JSON.stringify({ entity: chk.target }),
+        });
+        crmToast(toMine ? '已推送至私帳' : '已搬回公司帳');
+        crmCacheInvalidate('/projects');
+        await loadProjects();
+        // 詳情面板要重畫（按鈕文字與帳本標記都變了）
+        const p = state.projects.find(x => x.id === id);
+        if (p) { callbacks.renderDetail?.(p); }
+    } catch (e) {
+        crmToast('搬帳本失敗：' + e.message);
+    }
+};
