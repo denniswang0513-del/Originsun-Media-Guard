@@ -33,6 +33,8 @@ SEED_ACCOUNTS: list[tuple] = [
     ("1110", "零用金", None, "asset", "operating", None),
     ("1200", "應收帳款", "客戶還沒付的錢", "asset", "operating", None),
     ("1300", "員工往來-預支", "預支給同事還沒核銷的錢", "asset", "operating", None),
+    ("1400", "其他金融資產", "換匯／定存／證券／沒被系統追蹤的銀行帳戶 —— "
+     "錢沒被花掉，只是換了個地方放", "asset", "operating", None),
     ("1500", "器材設備", "攝影器材等資產原價", "asset", "investing", None),
     ("1509", "累計折舊", "器材已折舊掉的部分，負值概念", "asset", "investing", None),
     # ── 負債 ──

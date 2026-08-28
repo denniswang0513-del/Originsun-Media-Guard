@@ -394,7 +394,8 @@ async def compute_live(session, months, inputs=None, adv=None,
         shareholder_loan_lines=_split["shareholder_loan"],
         shareholder_capital_lines=_split["shareholder_capital"],
         owner_flow_net=_pos["owner_net"], card_outstanding=_card,
-        household_net=_pos["household_net"])
+        household_net=_pos["household_net"],
+        financial_net=_pos["financial_net"])
     opening_lines = split_bank_lines(inputs["bank_accounts"], bank_balances_asof(
         inputs["bank_accounts"], inputs["cash_entries"],
         shift_month(months[0], -1)))["cash"]

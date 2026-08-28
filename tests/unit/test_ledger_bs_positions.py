@@ -75,7 +75,7 @@ def test_gear_and_bank_transfers_create_no_position():
             _e("2024-02", exp=5000, cat="信用卡")]
     pos = equity_transfer_position(rows, CMAP, ACCTS, "2026-01")
     assert pos == {"owner_net": 0, "advance_net": 0, "household_net": 0,
-                   "cap_flow": 9000}
+                   "financial_net": 0, "cap_flow": 9000}
     # cap_floor＝期初累計月（> floor 才算）：期初裡的購置不再重複計入
     assert equity_transfer_position(rows, CMAP, ACCTS, "2026-01",
                                     cap_floor="2024-01")["cap_flow"] == 0
