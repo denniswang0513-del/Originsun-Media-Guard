@@ -290,7 +290,9 @@ export function renderList() {
 
     body.innerHTML = _sorter.sorted(state.projects).map(p => `
         <div class="crm-row${p.id === state.selectedId ? ' selected' : ''}" data-id="${p.id}" onclick="window._projSelect('${p.id}')">
-            <div class="crm-row-name">${_esc(p.name)}${p.entity !== 'mine' ? ''
+            <div class="crm-row-name">${_esc(p.name)}${p.mirrored
+                ? ' <span style="font-size:10px;color:#86efac;border:1px solid #2f5d43;border-radius:3px;padding:0 4px;vertical-align:1px;" title="這一案的後期費用已經在私帳開了收入分身（「連結私帳」）">已連結私帳</span>'
+                : ''}${p.entity !== 'mine' ? ''
                 : p.crm_pushed
                     ? ' <span style="font-size:10px;color:#7dd3fc;border:1px solid #2d5a78;border-radius:3px;padding:0 4px;vertical-align:1px;" title="從 owner 私帳推送進管線的後期案；錢流仍在私帳">後期專案</span>'
                     : ' <span style="font-size:10px;color:#c4b5fd;border:1px solid #4c3d78;border-radius:3px;padding:0 4px;vertical-align:1px;" title="錢流記在 owner 私帳（我的帳）；專案本身共用">私帳</span>'}</div>

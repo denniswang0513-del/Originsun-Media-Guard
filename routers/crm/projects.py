@@ -35,7 +35,7 @@ except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 tr
 
 # ── Project Helpers ─────────────────────────────────────────
 
-def _to_project_dict(p, client_short_name: str = "") -> dict:
+def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False) -> dict:
     return {
         "id": p.id, "name": p.name,
         "client_id": p.client_id, "client_short_name": client_short_name,
@@ -51,6 +51,10 @@ def _to_project_dict(p, client_short_name: str = "") -> dict:
         # 判定依據（entity=='mine' 的物件，金額鍵對無 mine scope 者整棵抹掉）
         "entity": p.entity or "parent",
         "crm_pushed": int(p.crm_pushed or 0),
+        # 這一案有沒有私帳分身（「連結私帳」建出來的那一列指回它）。
+        # 🔴 只在請求者看得到私帳時才會是 True —— 分身是私帳的列，對沒有
+        # mine scope 的人連存在都不該露（hide_mine_projects 那條線）。
+        "mirrored": bool(mirrored),
         "contract_amount": p.contract_amount,
         "tax_rate": p.tax_rate, "profit_target_pct": p.profit_target_pct,
         "misc_budget_pct": p.misc_budget_pct,
@@ -139,10 +143,18 @@ async def list_projects(
                 CrmProject.description.ilike(ql),
             ))
         rows = (await session.execute(query)).all()
+        # 有分身的母公司案（「連結私帳」）—— 一次撈成集合，不逐列查。
+        # 看不到私帳的人拿到空集合：那個標籤等於在說「owner 私帳有這一案」。
+        mirrored_ids = set()
+        if not _hide_mine(request):
+            mirrored_ids = set((await session.execute(
+                select(CrmProject.source_project_id)
+                .where(CrmProject.source_project_id.isnot(None)))).scalars())
 
     return {
         "projects": [
-            {**_to_project_dict(p, cname or ""), "proposal_status": ps or ""}
+            {**_to_project_dict(p, cname or "", p.id in mirrored_ids),
+             "proposal_status": ps or ""}
             for p, cname, ps in rows
         ],
         "total": len(rows),

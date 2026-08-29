@@ -153,3 +153,18 @@ def test_button_only_shows_for_parent_projects():
     js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-detail.js"))
     seg = js.split("actions.innerHTML")[1].split("crm-detail-close")[0]
     assert "_mine && _toMine" in seg and "proj-mirror-mine" in seg
+
+
+def test_the_mirrored_badge_is_hidden_from_people_without_the_private_ledger():
+    """🔴 「已連結私帳」標籤等於在說「owner 的私帳有這一案」—— 對沒有
+    finance_mine 的人不能出現（owner 2026-08-30：「沒有權限看到私帳的帳號
+    不能看到私帳才有的內容」）。分身本身是私帳的列，hide_mine_projects
+    那條線也該罩到它。"""
+    fn = _fn(_src(), "list_projects")
+    assert "mirrored_ids = set()" in fn
+    assert "if not _hide_mine(request):" in fn
+    # 一次撈成集合，不逐列查（409 案的清單）
+    assert "CrmProject.source_project_id.isnot(None)" in fn
+    row = code_only(repo_src("routers/crm/projects.py")).split(
+        "def _to_project_dict(")[1].split("\ndef ")[0]
+    assert '"mirrored": bool(mirrored),' in row
