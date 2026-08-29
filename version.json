@@ -1,5 +1,5 @@
 {
-  "version": "2.4.244",
+  "version": "2.4.245",
   "build_date": "2026-08-29",
-  "notes": "修：刪除一鍵請款的委外單會扣掉當初沒加進去的錢（ledger_detail.outsource 被吃掉）"
+  "notes": "/simplify：委外同步改吃請款單快照、應收算式收斂進 core、mirror 端點與前端瘦身"
 }

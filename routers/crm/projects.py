@@ -948,8 +948,9 @@ async def move_project_ledger(project_id: str, req: ProjectLedgerMovePayload,
 #
 # 金額來源＝人員配置的成本行裡掛給**我**的那些（規則正本 core.ledger_project
 # .mirror_lines）。「我」＝登入帳號綁的 crm_staff（User.staff_id），不寫死人名。
-async def _mirror_preview(session, project_id: str, staff_id: str) -> dict:
-    """這一案能鏡射出什麼 —— 預覽與寫入共用，兩邊各算一次就會漂。"""
+async def _mirror_preview(session, project_id: str, staff_id: str) -> tuple:
+    """這一案能鏡射出什麼 → `(母公司專案, mirror_lines 結果, 已連結的私帳案|None)`。
+    預覽與寫入共用，兩邊各算一次就會漂。"""
     from core.ledger_project import mirror_lines
 
     p = await session.get(CrmProject, project_id)
@@ -965,8 +966,8 @@ async def _mirror_preview(session, project_id: str, staff_id: str) -> dict:
     mir = mirror_lines(lines, staff_id)
     linked = (await session.execute(
         select(CrmProject)
-        .where(CrmProject.source_project_id == project_id))).scalars().first()
-    return {"project": p, "mirror": mir, "linked": linked}
+        .where(CrmProject.source_project_id == project_id).limit(1))).scalars().first()
+    return p, mir, linked
 
 
 async def _me_staff_id(request) -> str:
@@ -996,11 +997,13 @@ async def check_project_mirror(project_id: str, request: Request):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        pre = await _mirror_preview(session, project_id, sid)
-        p, mir, linked = pre["project"], pre["mirror"], pre["linked"]
+        p, mir, linked = await _mirror_preview(session, project_id, sid)
+        reason = _mirror_blocked_reason(mir["total"], linked)
         client = await session.get(Client, p.client_id) if p.client_id else None
-        # 可連結的既有私帳案（他手動建過 109 案）—— 已經是別案分身的不列
-        options = (await session.execute(
+        # 可連結的既有私帳案（他手動建過 109 案）—— 已經是別案分身的不列。
+        # 擋下來的時候不撈：前端一看到 reason 就 toast 完 return，那份清單
+        # （~109 列、約 8KB）純粹是白跑一趟查詢＋白傳一次。
+        options = [] if reason else (await session.execute(
             select(CrmProject.id, CrmProject.name, CrmProject.contract_amount)
             .where(CrmProject.entity == "mine",
                    CrmProject.source_project_id.is_(None))
@@ -1009,10 +1012,9 @@ async def check_project_mirror(project_id: str, request: Request):
         "name": p.name,
         "client": client.short_name if client else "",
         "lines": mir["lines"], "total": mir["total"],
-        "can_mirror": bool(mir["total"]) and linked is None,
-        "reason": _mirror_blocked_reason(mir["total"], linked),
-        "linked": ({"id": linked.id, "name": linked.name,
-                    "amount": int(linked.contract_amount or 0)} if linked else None),
+        # can 與 reason 是同一件事的兩面 —— 由 reason 推導，不各寫一份判斷式
+        # （多一個擋人的條件時只改得到一邊＝「擋住了但沒說為什麼」）
+        "can_mirror": not reason, "reason": reason,
         "options": [{"id": i, "name": n, "amount": int(a or 0)} for i, n, a in options],
     }
 
@@ -1039,7 +1041,7 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
     import uuid as _uuid
 
     from core.ledger import require_entity
-    from core.ledger_project import mirror_detail
+    from core.ledger_project import MIRROR_SOURCE, mirror_detail, norm_detail
     from routers.api_finance_projects import (new_ledger_project,
                                               resync_receivable)
 
@@ -1048,13 +1050,11 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        pre = await _mirror_preview(session, project_id, sid)
-        p, mir, linked = pre["project"], pre["mirror"], pre["linked"]
+        p, mir, linked = await _mirror_preview(session, project_id, sid)
         reason = _mirror_blocked_reason(mir["total"], linked)
         if reason:
             raise HTTPException(status_code=409, detail=reason)
         target_id = (req.target_id or "").strip()
-        d = mirror_detail(mir["split"])
         if target_id:
             # 連結既有：只覆蓋收入那半邊。他在私帳填的委外／代開費用是**他自己
             # 的成本**，公司管不著 —— 整包寫回去會把那些洗成 0。
@@ -1066,10 +1066,8 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
             if t.source_project_id:
                 raise HTTPException(status_code=409,
                                     detail=f"「{t.name}」已經是別案的分身了")
-            from core.ledger_project import norm_detail
             keep = norm_detail(t.ledger_detail)
-            keep["split"] = d["split"]
-            keep["source"] = d["source"]
+            keep["split"], keep["source"] = mir["split"], MIRROR_SOURCE
             t.ledger_detail = keep
             t.contract_amount = mir["total"]
             t.source_project_id = project_id
@@ -1081,7 +1079,8 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
             new_id = _uuid.uuid4().hex
             session.add(new_ledger_project(
                 project_id=new_id, name=p.name, client_id=p.client_id,
-                entity="mine", contract=mir["total"], detail=d,
+                entity="mine", contract=mir["total"],
+                detail=mirror_detail(mir["split"]),
                 close=p.completion_date,
                 notes=f"[私帳連結] 來自母公司專案：{p.name}",
                 source_project_id=project_id))

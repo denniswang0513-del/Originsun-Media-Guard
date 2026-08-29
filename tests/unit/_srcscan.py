@@ -38,6 +38,33 @@ def code_only(body: str) -> str:
     return "\n".join(ln.split("#")[0] for ln in body.splitlines())
 
 
+def call_args(src: str, callee: str) -> list:
+    """`callee(...)` 每一次呼叫的引數清單（配對括號，只在頂層逗號切）。
+
+    🔴 第三個坑（2026-08-29 加）：`.split(")")` 會被引數裡的
+    `int(p.amount or 0)` 提前切斷 —— 而被切掉的正好是最後一個參數，
+    「有沒有把它傳進去」這種斷言於是永遠看不到答案。
+    """
+    out = []
+    for chunk in src.split(f"{callee}(")[1:]:
+        depth, buf, args = 1, [], []
+        for ch in chunk:
+            if ch in "([":
+                depth += 1
+            elif ch in ")]":
+                depth -= 1
+                if depth == 0:
+                    break
+            if ch == "," and depth == 1:
+                args.append("".join(buf).strip())
+                buf = []
+                continue
+            buf.append(ch)
+        args.append("".join(buf).strip())
+        out.append(args)
+    return out
+
+
 def js_code_only(src: str) -> str:
     """JS 版的 code_only —— 剝掉 /* */ 與 // 註解。
 

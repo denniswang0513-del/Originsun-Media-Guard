@@ -107,7 +107,7 @@ def test_petty_push_does_not_carry_a_mine_project():
 
 def test_outsource_has_two_writers_and_both_say_so():
     """🔴 `outsource` 同時被兩個地方寫：CRM 成本行（apply_crm_costs，覆蓋顯示值）
-    與專案外包請款單（_sync_mine_project_outsource，增量累加）。
+    與專案外包請款單（_apply_outsource，增量累加）。
 
     目前無實例（私帳專案有成本行的＝0），但這是 owner 要拍板的語意問題。
     這個測試只確保**兩邊的註解都指向對方** —— 下一個讀到其中一邊的人不會以為
@@ -115,6 +115,6 @@ def test_outsource_has_two_writers_and_both_say_so():
     """
     lp = _read("core/ledger_project.py")
     fin = _read("routers/crm/finance.py")
-    assert "_sync_mine_project_outsource" in lp, "apply_crm_costs 要指向另一個寫入者"
-    assert "apply_crm_costs" in fin[fin.index("async def _sync_mine_project_outsource"):
+    assert "_apply_outsource" in lp, "apply_crm_costs 要指向另一個寫入者"
+    assert "apply_crm_costs" in fin[fin.index("async def _apply_outsource"):
                                    fin.index("def _mine_or_admin_write")]

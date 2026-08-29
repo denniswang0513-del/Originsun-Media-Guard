@@ -250,7 +250,11 @@ class CrmProject(Base):
     # 🔴 跟 entity 是兩回事，別混：`entity` 說「這案的錢算哪本帳」（搬家，一案只在
     # 一本）；`source_project_id` 說「我這案的收入來自公司那案」（分身，兩案並存）。
     # 只寫在 entity='mine' 的那一列上，母公司那列不動任何欄位。
-    source_project_id = Column(String(32), nullable=True, index=True)
+    # soft FK → crm_projects.id（全庫慣例，無 ForeignKey；刪母公司案會留下懸空
+    # 指標，那一列從此不出現在可連結清單裡 —— 目前只能用 SQL 解開）
+    # 索引由 main.py 的 startup migration 建（idx_projects_source_project）——
+    # 這裡再加 index=True 會多一條同欄位的 btree，寫入時白付兩次維護成本。
+    source_project_id = Column(String(32), nullable=True)
     flow_checks = Column(JSONB, nullable=True)                 # 工作流手動里程碑（範本正本在 core/project_flow.py）
     status = Column(String(32), nullable=False, default="洽詢")
     am_username = Column(String(64), nullable=True)

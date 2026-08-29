@@ -144,11 +144,11 @@ def test_owner_can_write_own_book_but_parent_stays_admin_only():
 def test_outsource_sync_is_incremental_and_scoped():
     from pathlib import Path
     src = (Path(__file__).resolve().parents[2] / "routers/crm/finance.py").read_text(encoding="utf-8")
-    helper = src.split("async def _sync_mine_project_outsource(")[1].split("\ndef ")[0]
-    # 🔴 帶 cost_line_id 的請款單（逐案損益「委外人員一鍵請款」建的）不累加 ——
-    # 那筆錢已經由 apply_crm_costs 從 CRM 成本行算過一次（甲案是相加制）
-    assert '!= "專案外包" or cost_line_id:\n        return' in helper.replace("'", '"')
-    assert '+ int(delta)' in helper
+    helper = src.split("async def _apply_outsource(")[1].split("\ndef ")[0]
+    # 🔴 帶硬連結的請款單（逐案損益的一鍵請款建的）不累加 —— 那筆錢已經由
+    # apply_crm_costs 從 CRM 成本行算過一次（甲案是相加制）
+    assert '!= "專案外包" or linked:\n        return' in helper.replace("'", '"')
+    assert "sign * amount" in helper, "增量制：加與減走同一條，不是重算"
     for fn_name in ("create_payment", "update_payment", "delete_payment"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
-        assert "_sync_mine_project_outsource" in fn, fn_name
+        assert "_apply_outsource" in fn, fn_name

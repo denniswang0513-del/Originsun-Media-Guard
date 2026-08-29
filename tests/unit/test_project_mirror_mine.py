@@ -7,13 +7,12 @@
 生產庫實查（2026-08-29）：16 案 / 68 行 / 1,149,286 的成本行掛給我，
 其中在私帳有分身的＝0。這顆按鈕要補的就是這 115 萬。
 """
-from pathlib import Path
 from types import SimpleNamespace as NS
 
 from core.ledger_project import (MIRROR_SOURCE, mirror_amount, mirror_detail,
                                  mirror_lines)
+from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
 
-ROOT = Path(__file__).resolve().parents[2]
 ME = "me-staff-id"
 OTHER = "someone-else"
 
@@ -74,13 +73,15 @@ def test_source_is_cash_receipt():
     assert client_wire(46000, d) == 46000           # 公司匯給我的＝全額
 
 
-# ── 端點守衛（讀原始碼斷言，跟 test_crm_lines_claim 同套路）──
+# ── 端點守衛（讀原始碼斷言）──
+# 🔴 一律經過 `code_only`：不剝註解的話，「這個函式**不可以**碰 p.contract_amount」
+# 這種說明文字自己就會讓 not-in 斷言變綠（_srcscan 檔頭記的那個坑）。
 def _src():
-    return (ROOT / "routers/crm/projects.py").read_text(encoding="utf-8")
+    return repo_src("routers/crm/projects.py")
 
 
 def _fn(src: str, name: str) -> str:
-    return src.split(f"async def {name}(")[1].split("\n@router")[0]
+    return code_only(func_body(src, f"async def {name}("))
 
 
 def test_both_endpoints_are_gated_on_the_private_ledger():
@@ -94,7 +95,7 @@ def test_both_endpoints_are_gated_on_the_private_ledger():
 def test_who_am_i_comes_from_the_single_resolver():
     """🔴 「我」＝帳號綁的 crm_staff，從 `core.identity` 現查（不寫死人名、
     也不信 JWT 裡的舊值 —— admin 重綁後要立刻生效）。"""
-    src = _src()
+    src = code_only(_src())
     assert "resolve_current_staff" in src
     assert "999be75c" not in src, "不可以把人的 staff id 寫死在程式裡"
 
@@ -114,7 +115,7 @@ def test_linking_existing_keeps_my_own_costs():
     fn = _fn(_src(), "mirror_project_to_mine")
     seg = fn.split("if target_id:")[1]
     assert "keep = norm_detail(t.ledger_detail)" in seg
-    assert 'keep["split"] = d["split"]' in seg
+    assert 'keep["split"], keep["source"] = mir["split"], MIRROR_SOURCE' in seg
     assert "t.ledger_detail = keep" in seg
 
 
@@ -142,13 +143,13 @@ def test_new_mirror_row_goes_through_the_single_create_path():
     assert "new_ledger_project(" in fn
     # 連結既有那條路換掉了營收 → 應收要一起重算（同一支 resync_receivable）
     assert "resync_receivable(t, keep)" in fn
-    api = (ROOT / "routers/api_finance_projects.py").read_text(encoding="utf-8")
-    helper = api.split("def new_ledger_project(")[1].split("\n@router")[0]
-    assert "resync_receivable(row, detail)" in helper
+    # `new_ledger_project` 自己有沒有初始化應收，由 test_project_entity_wall
+    # 的 test_new_and_edited_cases_land_in_receivable 擁有 —— 這裡再抄一份，
+    # 就是兩個檔案要一起改
 
 
 def test_button_only_shows_for_parent_projects():
     """已經搬到私帳的案子沒有「公司付給我」這回事 —— 按鈕不畫。"""
-    js = (ROOT / "frontend/tabs/crm/crm-projects-detail.js").read_text(encoding="utf-8")
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-detail.js"))
     seg = js.split("actions.innerHTML")[1].split("crm-detail-close")[0]
     assert "_mine && _toMine" in seg and "proj-mirror-mine" in seg

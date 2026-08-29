@@ -34,8 +34,8 @@ from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, apply_crm_costs,
                                  client_wire, payout_total, settle_state,
                                  to_collect,
                                  SELECTABLE_SOURCES, SUM_KEYS, apply_source_fee,
-                                 code_of, compute, expected_cash_in,
-                                 income_items, norm_detail, receivable_status)
+                                 code_of, compute,
+                                 income_items, norm_detail, receivable_fields)
 from core.schemas import LedgerDetailPayload, LedgerProjectCreate
 from routers.crm._shared import _fmt_day
 
@@ -277,10 +277,9 @@ def resync_receivable(project, detail: dict) -> None:
     🔴 抽成一支是因為它有三個呼叫點（新增／編輯／連結私帳）而漏掉不會噴錯，
     只會讓那一案安靜地不進應收帳款（owner 2026-08-26 清查：349 案 NULL）。
     """
-    recv = int(getattr(project, "amount_received", 0) or 0)
-    exp = expected_cash_in(int(project.contract_amount or 0), detail)
-    project.amount_receivable = exp - recv
-    project.payment_status = receivable_status(exp, recv)
+    project.amount_receivable, project.payment_status = receivable_fields(
+        int(project.contract_amount or 0),
+        int(getattr(project, "amount_received", 0) or 0), detail)
 
 
 def new_ledger_project(*, project_id: str, name: str, client_id, entity: str,

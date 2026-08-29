@@ -62,7 +62,7 @@ COST_KEYS = [k for k, _label in COST_FIELDS]
 # 🔴 相加制的代價是**同一筆錢不能被算兩次**：私帳逐案損益的「委外人員一鍵請款」
 # 建的請款單帶 `cost_line_id`（指向它是哪一行 CRM 成本行）—— 那張單**不可以**
 # 再累加進 outsource，否則 CRM 成本行算一次、累加器再算一次。守衛在
-# routers/crm/finance._sync_mine_project_outsource（單一出口）。
+# routers/crm/finance._apply_outsource（單一出口）。
 # 🔴 只放鍵，不放標籤 —— 標籤的正本是上面的 COST_FIELDS。這裡曾經帶過一份
 # {"outsource": "人員費用"}，跟 COST_FIELDS 的「委外費用」當場打架而且沒人讀。
 CRM_BACKED = ("misc", "outsource")
@@ -72,7 +72,7 @@ def apply_crm_costs(detail: dict, crm: dict | None) -> tuple:
     """把 CRM 算出來的合計併進 detail。回 `(detail, sources)`。
 
     `crm`：`{"misc": 合計, "outsource": 合計}`；0 或缺席＝CRM 那邊沒資料。
-    `outsource` 有第二個寫入者：`routers/crm/finance._sync_mine_project_outsource`
+    `outsource` 有第二個寫入者：`routers/crm/finance._apply_outsource`
     把掛在私帳專案上、類別＝專案外包的請款單累加進 detail —— 那正是「手填那幾筆」
     的來源，相加制之下兩者相安。唯一要擋的是帶 `cost_line_id` 的那種（一鍵請款
     ＝CRM 成本行的鏡射），守衛在那支函式裡。
@@ -157,11 +157,8 @@ def mirror_amount(line) -> int:
     兩個都空＝這工項還沒發生，回 0 讓上層濾掉 —— 把估算當成收入記進去，
     私帳的營收就會領先現實。
     """
-    for attr in ("actual_amount", "estimated_amount"):
-        v = getattr(line, attr, None)
-        if v:
-            return int(v)
-    return 0
+    return int(getattr(line, "actual_amount", None)
+               or getattr(line, "estimated_amount", None) or 0)
 
 
 def mirror_lines(cost_lines, staff_id: str) -> dict:
@@ -364,6 +361,20 @@ def receivable_status(expected: int, received: int) -> str:
     if received > 0:
         return "部分到帳"
     return "未到帳"
+
+
+def receivable_fields(contract: int, received: int, d: dict) -> tuple:
+    """(應收, 收款狀態) —— 「營收或代扣成本動了就重算這兩欄」的算式正本。
+
+    基準是**實際會進帳的錢**（營收 − 源頭代扣），不是營收。四個寫入端共用：
+    帳本新增／編輯（routers/api_finance_projects）、收支同步與請款同步
+    （routers/crm/finance）。各自抄一份的下場是同一案在應收帳款與逐案損益
+    給出兩個數字 —— 2026-08-26 清查到 349 案 amount_receivable 是 NULL，
+    正是「有人忘了補這兩行」的痕跡。
+    """
+    exp = expected_cash_in(int(contract or 0), d)
+    recv = int(received or 0)
+    return exp - recv, receivable_status(exp, recv)
 
 
 def compute(contract: int, d: dict) -> tuple:

@@ -1186,9 +1186,7 @@ async def create_payment(req: PaymentRequestPayload, request: Request):
                     select(CrmPaymentRequest.id).where(_col == _val))).first():
                 raise HTTPException(409, "這一行已經請過款了")
         if ent == "mine":
-            await _sync_mine_project_outsource(session, p.project_id,
-                                               p.category, int(p.amount or 0),
-                                               p.cost_line_id or p.expense_id)
+            await _apply_outsource(session, _outsource_key(p), +1)
         session.add(p)
         await session.commit()
     return {"status": "ok", "payment": _to_payment_dict(p)}
@@ -1589,9 +1587,8 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
         p = await session.get(CrmPaymentRequest, payment_id)
         if not p:
             raise HTTPException(status_code=404, detail="找不到此請款單")
-        # 委外費用同步要用「改之前」的 (金額, 專案, 類別) 當減項
-        _old_amt, _old_pid, _old_cat = int(p.amount or 0), p.project_id, p.category
-        _old_line = p.cost_line_id or p.expense_id   # setattr 之後就沒了（同上）
+        # 委外費用同步要用「改之前」的快照當減項（setattr 之後就沒了）
+        _old_key = _outsource_key(p)
         # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422
         # （寫入守衛也在 _entity_for_write 裡定案）
         ent = _entity_for_write(request, req.entity, p)
@@ -1610,13 +1607,10 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
         # （改指時原本那張的退回也在它裡面，規則只有一份）。
         await sync_remit_status(session, p, previous_invoice_id=prev_src)
         if (p.entity or "parent") == "mine":
-            _new = (int(p.amount or 0), p.project_id, p.category)
-            if _new != (_old_amt, _old_pid, _old_cat):
-                await _sync_mine_project_outsource(session, _old_pid, _old_cat,
-                                                   -_old_amt, _old_line)
-                await _sync_mine_project_outsource(session, _new[1], _new[2],
-                                                   _new[0],
-                                                   p.cost_line_id or p.expense_id)
+            _new_key = _outsource_key(p)
+            if _new_key != _old_key:
+                await _apply_outsource(session, _old_key, -1)
+                await _apply_outsource(session, _new_key, +1)
         await session.commit()
     return {"status": "ok"}
 
@@ -1633,12 +1627,7 @@ async def delete_payment(payment_id: str, request: Request):
         _mine_or_admin_write(request, p.entity)  # 兩本帳寫入守衛：母公司=Lv3、私帳=mine full
         await _assert_month_open(session, p.request_date, entity=p.entity or "parent")
         if (p.entity or "parent") == "mine":
-            # 🔴 硬連結要帶進去（跟新增／編輯同一組參數）—— 少了它，刪掉一張
-            # 一鍵請款建的委外單會從 ledger_detail 扣掉一筆**當初根本沒加進去**
-            # 的錢（新增時被守衛擋下），委外費用就會被吃掉甚至變負數。
-            await _sync_mine_project_outsource(session, p.project_id, p.category,
-                                               -int(p.amount or 0),
-                                               p.cost_line_id or p.expense_id)
+            await _apply_outsource(session, _outsource_key(p), -1)
         await session.delete(p)
         await session.commit()
     return {"status": "ok"}
@@ -1849,20 +1838,33 @@ async def _sync_mine_project_received(session, project_id, delta: int):
     p = await _get_mine_project(session, project_id)
     if not p:
         return
-    from core.ledger_project import expected_cash_in, norm_detail, receivable_status
-    received = int(p.amount_received or 0) + int(delta)
-    # 基準＝實際會進帳的錢（營收 − 源頭代扣）—— 見 expected_cash_in 檔頭
-    expected = expected_cash_in(int(p.contract_amount or 0), norm_detail(p.ledger_detail))
-    p.amount_received = received
-    p.amount_receivable = expected - received
-    p.payment_status = receivable_status(expected, received)
+    from core.ledger_project import norm_detail, receivable_fields
+    p.amount_received = int(p.amount_received or 0) + int(delta)
+    # 應收與收款狀態的算式正本在 core（四個寫入端共用；基準＝實際會進帳的錢，
+    # 不是營收 —— 見 receivable_fields）
+    p.amount_receivable, p.payment_status = receivable_fields(
+        int(p.contract_amount or 0), p.amount_received, norm_detail(p.ledger_detail))
     p.updated_at = _now()
 
 
-async def _sync_mine_project_outsource(session, project_id, category, delta: int,
-                                       cost_line_id=None):
+def _outsource_key(p) -> tuple:
+    """一張請款單身上「會影響私帳委外費用」的那幾個欄位：
+    `(專案, 類別, 金額, 硬連結)`。
+
+    🔴 抽這一支的理由是實帳事故：這幾個欄位原本由**三個呼叫端各自拼**，
+    helper 後來多收一個 `cost_line_id`，只有兩個呼叫端跟著改 —— 漏掉的
+    `delete_payment` 於是會扣掉一筆當初根本沒加進去的錢，而且不會噴錯
+    （helper 靜靜 return）。要記得帶第 N 個參數的介面遲早會漏，
+    所以改成「哪些欄位算數」只在這裡定義一次。
+    """
+    return (p.project_id, p.category, int(p.amount or 0),
+            p.cost_line_id or p.expense_id)
+
+
+async def _apply_outsource(session, key: tuple, sign: int):
     """私帳委外規則（owner 2026-08-25「要可以新增委外項目」）：掛在專案上、
     類別＝專案外包 的請款單驅動該案 ledger_detail 的「委外費用」。
+    `key` 來自 `_outsource_key`；`sign` +1 記上、−1 抵銷。
 
     🔴 增量制（同 _sync_mine_project_received 的理由）：歷史委外費用是匯入
     基準值（1,661,183，多數已付、沒有對應請款單列），重算會洗掉老案。
@@ -1870,18 +1872,19 @@ async def _sync_mine_project_outsource(session, project_id, category, delta: int
     ⚠️ **這一欄不只有你在寫**：`core.ledger_project.apply_crm_costs` 讀取時會把
     CRM 專案帳目的人員費用**加上**你累加的值（owner 2026-08-28 拍板的甲案）。
     所以這裡累加的必須只有「CRM 上沒有的那幾筆」——
-    🔴 帶 `cost_line_id` 的請款單是 CRM 成本行的鏡射（逐案損益的一鍵請款建的），
+    🔴 帶硬連結的請款單是 CRM 成本行／雜支行的鏡射（逐案損益的一鍵請款建的），
     它的錢已經由 apply_crm_costs 算過一次，再累加就是同一筆算兩次。
     委外費用是**權責**（應付＋已付都算成本），所以只跟金額走、不看付款狀態。
     """
-    if not delta or (category or "") != "專案外包" or cost_line_id:
+    project_id, category, amount, linked = key
+    if not amount or (category or "") != "專案外包" or linked:
         return
     from core.ledger_project import norm_detail
     p = await _get_mine_project(session, project_id)
     if not p:
         return
     d = norm_detail(p.ledger_detail)
-    d["outsource"] = int(d.get("outsource") or 0) + int(delta)
+    d["outsource"] = int(d.get("outsource") or 0) + sign * amount
     p.ledger_detail = norm_detail(d)
     p.updated_at = _now()
 

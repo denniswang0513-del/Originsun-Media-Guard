@@ -414,14 +414,20 @@ def test_new_and_edited_cases_land_in_receivable():
     assert "new_ledger_project(" in create
     row = src.split("def new_ledger_project(")[1].split("\n@router")[0]
     assert "resync_receivable(row, detail)" in row and "amount_received=0" in row
-    # 重算規則本身也只有一份（新增／編輯／連結私帳三個呼叫點）
+    # 🔴 算式正本在 core（`receivable_fields`），**四個**寫入端都呼叫它：
+    # 帳本新增／編輯、收支同步、請款同步。這條原本只斷言「finance.py 裡有
+    # receivable_status」—— 那反而是在把「兩邊各算一份」釘成規格（兩份算式
+    # 逐字相同，改一邊就漂）。
+    from core.ledger_project import receivable_fields
+    assert receivable_fields(42000, 0, {"personal_tax": 5086}) == (36914, "未到帳")
+    assert receivable_fields(42000, 36914, {"personal_tax": 5086}) == (0, "全額到帳")
     resync = src.split("def resync_receivable(")[1].split("\ndef ")[0]
-    assert "expected_cash_in(int(project.contract_amount or 0), detail)" in resync
-    assert "receivable_status(exp, recv)" in resync
+    assert "receivable_fields(" in resync
     upd = src.split("async def update_project_ledger(")[1].split("\n@router")[0]
     assert "resync_receivable(p, d)" in upd
     fin = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
-    assert "receivable_status(expected, received)" in fin, "sync 與端點要共用同一條規則"
+    assert "receivable_fields(" in fin, "收支同步要走同一支，不是自己再算一份"
+    assert "p.amount_receivable = expected - received" not in fin, "舊的第二份算式"
 
 
 def test_tab_switches_auto_refresh():

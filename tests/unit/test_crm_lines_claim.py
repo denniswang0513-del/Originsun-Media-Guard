@@ -7,6 +7,8 @@
 """
 from pathlib import Path
 
+from tests.unit._srcscan import call_args
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -14,39 +16,13 @@ def _fn(src: str, name: str) -> str:
     return src.split(f"async def {name}(")[1].split("\n@router")[0]
 
 
-def _calls(src: str, callee: str) -> list:
-    """`callee(...)` 每一次呼叫的引數清單（配對括號、頂層逗號才切）。
-
-    單純 `.split(")")` 會被引數裡的 `int(p.amount or 0)` 提前切斷 ——
-    那正好會把「有沒有帶最後一個參數」這件事切掉，斷言就永遠看不到它。
-    """
-    out = []
-    for chunk in src.split(f"{callee}(")[1:]:
-        depth, buf, args = 1, [], []
-        for ch in chunk:
-            if ch in "([":
-                depth += 1
-            elif ch in ")]":
-                depth -= 1
-                if depth == 0:
-                    break
-            if ch == "," and depth == 1:
-                args.append("".join(buf).strip())
-                buf = []
-                continue
-            buf.append(ch)
-        args.append("".join(buf).strip())
-        out.append(args)
-    return out
-
-
 def test_claim_is_blocked_when_the_cost_line_was_already_claimed():
-    """而且要擋在 `_sync_mine_project_outsource` 之前 —— 那支是**增量制**
+    """而且要擋在 `_apply_outsource` 之前 —— 那支是**增量制**
     （委外費用 += 金額），先累加再拒絕的話，被擋下的那次也會留下痕跡。"""
     src = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
     fn = _fn(src, "create_payment")
     assert "cost_line_id" in fn and "409" in fn
-    assert fn.index("cost_line_id") < fn.index("_sync_mine_project_outsource")
+    assert fn.index("cost_line_id") < fn.index("_apply_outsource")
 
 
 def test_people_list_excludes_admin_phase_and_zero_rows():
@@ -76,21 +52,26 @@ def test_one_click_claim_is_not_counted_twice():
     2026-08-28 實測：CRM 成本行 12,000 ＋ 手動 5,000 ＝ 17,000，
     對那一行按下一鍵請款之後**仍是** 17,000（不是 29,000）。"""
     src = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
-    helper = src.split("async def _sync_mine_project_outsource(")[1]
-    sig, body = helper.split('"""')[0], helper.split('"""')[2]
-    assert "cost_line_id" in sig, "簽章要收得到它"
-    assert 'or cost_line_id:' in body.replace("'", '"'), "早退那一行要認它"
-    # 🔴 **三個**寫入端都要把它帶進去，刪除也算一個：新增被守衛擋下（沒加），
+    # 「哪些欄位算數」只定義在 `_outsource_key` 一處 —— 原本由三個呼叫端
+    # 各自拼參數，helper 多收一個 cost_line_id 時漏掉了 delete_payment，
+    # 而且不會噴錯（helper 靜靜 return）。
+    key = src.split("def _outsource_key(")[1].split("\n\n\n")[0]
+    assert "p.cost_line_id or p.expense_id" in key, "硬連結要在快照裡"
+    body = src.split("async def _apply_outsource(")[1].split('"""')[2]
+    assert "or linked:" in body, "早退那一行要認硬連結"
+
+    # 🔴 **三個**寫入端都走快照，刪除也算一個：新增被守衛擋下（沒加），
     # 刪除卻照扣的話，會扣掉一筆當初根本沒加進去的錢（2026-08-29 實查到的
     # 漏網之魚 —— 只有 delete_payment 沒帶，委外費用會被吃掉甚至變負數）。
-    # 斷言在「有沒有第 5 個引數」而不是名字 —— 編輯那支傳的是 `_old_line`
-    # （setattr 前先存下來的舊值），一樣是硬連結。
+    # 斷言在「第二個引數是不是 _outsource_key 產的快照」，不是參數個數 ——
+    # 數個數會被任何一次合法的簽章調整弄紅，卻擋不住傳錯值。
     for fn_name in ("create_payment", "update_payment", "delete_payment"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
-        calls = _calls(fn, "_sync_mine_project_outsource")
+        calls = call_args(fn, "_apply_outsource")
         assert calls, f"{fn_name} 沒有呼叫到"
         for args in calls:
-            assert len(args) == 5, f"{fn_name} 有一次呼叫沒帶硬連結：{args}"
+            assert len(args) == 3 and ("key" in args[1] or "_outsource_key(" in args[1]), \
+                f"{fn_name} 有一次呼叫沒走快照：{args}"
 
 
 def test_misc_rows_are_claimable_one_by_one():

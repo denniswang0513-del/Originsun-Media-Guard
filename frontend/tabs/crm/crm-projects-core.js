@@ -1,7 +1,7 @@
 /**
  * crm-projects-core.js — 列表 + CRUD Modal + CSV 匯入
  */
-import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateClientSelect, searchableSelect, saveSettings, kebabMenuHtml, createSortable, enumIndex, crmToast } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, fmtNum, renderAvatar, populateClientSelect, searchableSelect, saveSettings, kebabMenuHtml, createSortable, enumIndex, crmToast } from './crm-utils.js';
 import { state, callbacks, STATUS_ORDER } from './crm-projects-state.js';
 
 // 開場的帳本預設（因人而異）—— 快取守衛拿它判斷「有沒有套篩選」
@@ -572,16 +572,16 @@ window._projMirrorMine = async function (id) {
     const rows = (chk.lines || []).map(l => `<tr>
         <td style="color:#888;">${_esc(l.phase)}</td>
         <td>${_esc(l.item)}</td>
-        <td style="text-align:right;">${l.amount.toLocaleString()}</td></tr>`).join('');
+        <td style="text-align:right;">${fmtNum(l.amount)}</td></tr>`).join('');
     const opts = (chk.options || []).map(o =>
-        `<option value="${o.id}">${_esc(o.name)}${o.amount ? ` — ${o.amount.toLocaleString()}` : ''}</option>`).join('');
+        `<option value="${o.id}">${_esc(o.name)}${o.amount ? ` — ${fmtNum(o.amount)}` : ''}</option>`).join('');
     _mirrorModal(`連結私帳 — ${chk.name}`, `
         <div style="color:#bbb;font-size:12px;margin-bottom:8px;">
             公司要付給你的（來自人員配置的成本行）</div>
         <table class="crm-table" style="width:100%;font-size:12px;">${rows}
             <tr><td colspan="2" style="font-weight:600;">私帳收入合計</td>
                 <td style="text-align:right;font-weight:600;color:#86efac;">
-                    ${chk.total.toLocaleString()}</td></tr></table>
+                    ${fmtNum(chk.total)}</td></tr></table>
         <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px;font-size:13px;">
             <label style="display:flex;align-items:center;gap:6px;">
                 <input type="radio" name="pmm-mode" value="new" checked>
@@ -595,31 +595,30 @@ window._projMirrorMine = async function (id) {
             <button class="crm-btn crm-btn-secondary crm-btn-sm"
                     onclick="window._projMirrorClose()">取消</button>
             <button class="crm-btn crm-btn-primary crm-btn-sm" id="pmm-go"
-                    data-id="${id}">建立並連結</button>
+                    >建立並連結</button>
         </div>`);
+    // 模式只有一個真相：目前勾中的那顆 radio。`sel.disabled` 由它推導，
+    // 不另外記一份（按鈕文字曾是第三份，改一處漏一處就會自相矛盾）。
     const sel = document.getElementById('pmm-target');
-    document.querySelectorAll('input[name="pmm-mode"]').forEach(r =>
-        r.addEventListener('change', () => {
-            const link = r.value === 'link' && r.checked;
-            sel.disabled = !link;
-            document.getElementById('pmm-go').textContent = link ? '連結' : '建立並連結';
-        }));
-    document.getElementById('pmm-go').addEventListener('click', _projMirrorSubmit);
+    const box = document.getElementById('proj-mirror-body');
+    box.addEventListener('change', () => { sel.disabled = !_pmmLink(); });
+    document.getElementById('pmm-go').addEventListener('click',
+        (ev) => _projMirrorSubmit(ev.currentTarget, id));
 };
 
-async function _projMirrorSubmit(ev) {
-    const btn = ev.currentTarget;
-    const id = btn.dataset.id;
-    const link = document.querySelector('input[name="pmm-mode"]:checked')?.value === 'link';
-    const target = link ? (document.getElementById('pmm-target').value || '') : '';
-    if (link && !target) { crmToast('請先選一個要連結的私帳專案'); return; }
+const _pmmLink = () =>
+    document.querySelector('input[name="pmm-mode"]:checked')?.value === 'link';
+
+async function _projMirrorSubmit(btn, id) {
+    const target = _pmmLink() ? (document.getElementById('pmm-target').value || '') : '';
+    if (_pmmLink() && !target) { crmToast('請先選一個要連結的私帳專案'); return; }
     btn.disabled = true;
     try {
         const r = await _fetch(`/projects/${encodeURIComponent(id)}/mirror-to-mine`, {
             method: 'POST', body: JSON.stringify({ target_id: target }),
         });
         window._projMirrorClose();
-        crmToast(`已在私帳同步收入 ${(r.amount || 0).toLocaleString()}`);
+        crmToast(`已在私帳同步收入 ${fmtNum(r.amount)}`);
         crmCacheInvalidate('/projects');
     } catch (e) {
         btn.disabled = false;
