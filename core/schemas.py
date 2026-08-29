@@ -691,6 +691,7 @@ class PaymentRequestPayload(BaseModel):
     source_invoice_id: Optional[str] = None
     # 從「委外人員名單」一鍵請款時帶的成本行 id（防重複請款）
     cost_line_id: Optional[str] = None
+    expense_id: Optional[str] = None      # 行政雜支那一行（crm_project_expenses.id）
     project_id: Optional[str] = None
     project_label: str = ""
     payment_date: Optional[str] = None

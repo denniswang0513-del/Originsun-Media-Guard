@@ -690,16 +690,57 @@ function _crmLinesHtml(cl) {
                 ? '<span style="color:#86efac;font-size:11px;">已請款</span>'
                 : `<button class="crm-btn crm-btn-secondary crm-btn-sm"
                      onclick="window._finProjLedger.claimLine('${esc(x.id)}', this)">請款</button>`}</td></tr>`).join('');
+    // 雜支也能逐項請款（owner 2026-08-29）。已經跟公司請過款的**不給按** ——
+    // 那筆錢公司出了，私帳再請一次就是同一筆錢請兩次。
     const miscRows = misc.map((x) => `
         <tr><td>${esc(x.item || x.category)}
                 <div style="color:#666;font-size:10px;">${esc(x.date)}｜${esc(x.category)}${
                     x.payee ? '｜' + esc(x.payee) : ''}${
                     x.billed_to_company ? '｜<span style="color:#fbbf24;">已跟公司請款（不計私帳成本）</span>' : ''}</div></td>
-            <td style="text-align:right;color:${x.billed_to_company ? '#666' : '#ddd'};">${fmtNum(x.amount)}</td></tr>`).join('');
+            <td style="text-align:right;color:${x.billed_to_company ? '#666' : '#ddd'};">${fmtNum(x.amount)}</td>
+            <td style="width:82px;text-align:right;">${x.billed_to_company
+                ? '<span style="color:#4b5563;font-size:11px;">公司出</span>'
+                : x.claimed
+                    ? '<span style="color:#86efac;font-size:11px;">已請款</span>'
+                    : `<button class="crm-btn crm-btn-secondary crm-btn-sm"
+                         onclick="window._finProjLedger.claimMisc('${esc(x.id)}', this)">請款</button>`}</td></tr>`).join('');
     return (people.length ? box('委外人員', people.reduce((a, b) => a + b.amount, 0), peopleRows) : '')
          + (misc.length ? box('行政雜支明細',
                 misc.filter((x) => !x.billed_to_company).reduce((a, b) => a + b.amount, 0), miscRows) : '');
 }
+
+/** 行政雜支明細的「請款」：一鍵建一張私帳的專案雜支應付款。
+ *  帶 expense_id 釘住是哪一行 —— 同 claimLine 的理由（同金額同項目分不出誰請過）。
+ *  🔴 類別用「專案雜支」：它對映到的科目正好是 apply_ledger_project_costs
+ *  會拿掉的那條現金鏡射，所以不會跟逐案的雜支重複計。 */
+_fp.claimMisc = async (expenseId, btn) => {
+    const row = ((_detail.crm_lines || {}).misc || []).find((x) => x.id === expenseId);
+    if (!row) { return; }
+    const label = row.item || row.category || '雜支';
+    if (!window.confirm(`跟私帳請款：${label} $${fmtNum(row.amount)}
+`
+                        + `（${row.date}｜${row.category}${row.payee ? '｜' + row.payee : ''}）
+
+`
+                        + '會建一張私帳的「專案雜支」應付款，之後在應付帳款付掉。')) { return; }
+    if (btn) { btn.disabled = true; }
+    try {
+        await crmFetch('/payments', {
+            method: 'POST',
+            body: JSON.stringify({
+                entity: 'mine', category: '專案雜支', project_id: _sel,
+                payee_name: row.payee || label, amount: row.amount, expense_id: row.id,
+                summary: `雜支：${label}｜${_detail.project.name}`,
+                request_date: new Date().toISOString().slice(0, 10),
+            }),
+        });
+        finToast(`已建立雜支請款：${label}`);
+        await _fp.refresh();
+    } catch (e) {
+        if (btn) { btn.disabled = false; }
+        finToast('請款失敗：' + e.message, 'error');
+    }
+};
 
 _fp.outsourceForm = () => {
     const box = document.getElementById('fpl-out-form');

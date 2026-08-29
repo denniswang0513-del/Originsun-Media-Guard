@@ -1177,16 +1177,18 @@ async def create_payment(req: PaymentRequestPayload, request: Request):
     async with factory() as session:
         # F1 月結守衛：請款單的權責費用認列月 = request_date
         await _assert_month_open(session, dates.get("request_date"), entity=ent)
-        # 一行成本只能請一次款。前端請完就把按鈕換成「已請款」，但那擋不住
-        # 雙擊、兩個分頁、或重送 —— 硬連結存在的意義就是在這裡認得出重複。
-        if req.cost_line_id and (await session.execute(
-                select(CrmPaymentRequest.id).where(
-                    CrmPaymentRequest.cost_line_id == req.cost_line_id))).first():
-            raise HTTPException(409, "這一行成本已經請過款了")
+        # CRM 的一行（人員費用或行政雜支）只能請一次款。前端請完就把按鈕換成
+        # 「已請款」，但那擋不住雙擊、兩個分頁、或重送 —— 硬連結存在的意義
+        # 就是在這裡認得出重複。兩條連結**同一條規則**，各寫一次必漏一個。
+        for _col, _val in ((CrmPaymentRequest.cost_line_id, req.cost_line_id),
+                           (CrmPaymentRequest.expense_id, req.expense_id)):
+            if _val and (await session.execute(
+                    select(CrmPaymentRequest.id).where(_col == _val))).first():
+                raise HTTPException(409, "這一行已經請過款了")
         if ent == "mine":
             await _sync_mine_project_outsource(session, p.project_id,
                                                p.category, int(p.amount or 0),
-                                               p.cost_line_id)
+                                               p.cost_line_id or p.expense_id)
         session.add(p)
         await session.commit()
     return {"status": "ok", "payment": _to_payment_dict(p)}
@@ -1589,7 +1591,7 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
             raise HTTPException(status_code=404, detail="找不到此請款單")
         # 委外費用同步要用「改之前」的 (金額, 專案, 類別) 當減項
         _old_amt, _old_pid, _old_cat = int(p.amount or 0), p.project_id, p.category
-        _old_line = p.cost_line_id      # setattr 之後就沒了（同上三個舊值）
+        _old_line = p.cost_line_id or p.expense_id   # setattr 之後就沒了（同上）
         # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422
         # （寫入守衛也在 _entity_for_write 裡定案）
         ent = _entity_for_write(request, req.entity, p)
@@ -1613,7 +1615,8 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
                 await _sync_mine_project_outsource(session, _old_pid, _old_cat,
                                                    -_old_amt, _old_line)
                 await _sync_mine_project_outsource(session, _new[1], _new[2],
-                                                   _new[0], p.cost_line_id)
+                                                   _new[0],
+                                                   p.cost_line_id or p.expense_id)
         await session.commit()
     return {"status": "ok"}
 

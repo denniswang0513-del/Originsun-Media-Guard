@@ -723,6 +723,10 @@ class CrmPaymentRequest(Base):
     # （crm_project_cost_lines.id）—— 沒有它就只能靠人名＋金額目測，同一個人
     # 同一筆金額在同一案出現兩次時分不出誰請過了。
     cost_line_id = Column(String(32), nullable=True, index=True)
+    # 同上，但指向「行政雜支」那一行（crm_project_expenses.id）——
+    # 雜支與人員費用來自兩張不同的表，所以兩條硬連結各自一欄。
+    # 兩者的語意一樣：**這張請款單是 CRM 某一行的鏡射**，不是新的一筆錢。
+    expense_id = Column(String(32), nullable=True, index=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

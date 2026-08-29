@@ -132,16 +132,24 @@ async def _crm_lines(session, project_id: str) -> dict:
     sids = {x for l in lines for x in (l.actual_staff_id, l.estimated_staff_id) if x}
     names = dict((await session.execute(
         select(CrmStaff.id, CrmStaff.name).where(CrmStaff.id.in_(sids)))).all()) if sids else {}
+    # 已請款的 CRM 行 —— 兩條硬連結一起撈（人員費用走 cost_line_id、
+    # 行政雜支走 expense_id），id 不會撞所以同一個集合就夠
     claimed = set((await session.execute(
         select(CrmPaymentRequest.cost_line_id)
         .where(CrmPaymentRequest.project_id == project_id,
                CrmPaymentRequest.cost_line_id.isnot(None)))).scalars())
+    claimed |= set((await session.execute(
+        select(CrmPaymentRequest.expense_id)
+        .where(CrmPaymentRequest.project_id == project_id,
+               CrmPaymentRequest.expense_id.isnot(None)))).scalars())
     return {
-        "misc": [{"date": _fmt_day(e.expense_date), "category": e.category or "",
+        "misc": [{"id": e.id,
+                  "date": _fmt_day(e.expense_date), "category": e.category or "",
                   "item": e.sub_item or e.item or "", "amount": int(e.actual or 0),
                   "payee": e.payee or names.get(e.staff_id, ""),
                   # 跟公司請過款的不算私帳成本（見 _crm_costs），列出來但標示
-                  "billed_to_company": bool(e.claim_id)} for e in exp],
+                  "billed_to_company": bool(e.claim_id),
+                  "claimed": e.id in claimed} for e in exp],
         "people": [{"id": l.id, "phase": l.phase or "", "item": l.item_name or "",
                     "who": names.get(l.actual_staff_id or l.estimated_staff_id, ""),
                     "amount": int(l.actual_amount or 0),

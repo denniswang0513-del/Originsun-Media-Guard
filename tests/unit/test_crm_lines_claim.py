@@ -58,3 +58,37 @@ def test_one_click_claim_is_not_counted_twice():
     for fn_name in ("create_payment", "update_payment"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
         assert "cost_line_id" in fn, fn_name
+
+
+def test_misc_rows_are_claimable_one_by_one():
+    """行政雜支也能逐項請款（owner 2026-08-29）。來源是另一張表
+    （crm_project_expenses），所以硬連結另開一欄 `expense_id` ——
+    兩條連結**同一條重複守衛**，各寫一次必漏一個。"""
+    src = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
+    fn = _fn(src, "create_payment")
+    assert "CrmPaymentRequest.expense_id, req.expense_id" in fn
+    assert "for _col, _val in (" in fn, "兩條連結走同一個迴圈，不是各寫一份"
+    api = (ROOT / "routers/api_finance_projects.py").read_text(encoding="utf-8")
+    lines = api.split("async def _crm_lines(")[1].split("async def _rollups")[0]
+    assert '"claimed": e.id in claimed' in lines
+    assert "CrmPaymentRequest.expense_id" in lines, "已請款要一起撈 expense_id"
+
+
+def test_company_billed_rows_cannot_be_claimed_again():
+    """🔴 已經跟公司請過款的雜支**不給按** —— 那筆錢公司出了，
+    私帳再請一次就是同一筆錢請兩次（畫面顯示「公司出」）。"""
+    js = (ROOT / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
+    seg = js.split("const miscRows =")[1].split("').join('')")[0]
+    assert "x.billed_to_company" in seg and "公司出" in seg
+    assert seg.index("x.billed_to_company") < seg.index("claimMisc"),         "公司出的判斷要在按鈕之前 —— 否則會先畫出按鈕"
+
+
+def test_misc_claim_uses_a_category_that_does_not_double_count():
+    """🔴 類別用「專案雜支」：它對映的科目正好是 `apply_ledger_project_costs`
+    會拿掉的那條現金鏡射（_PROJECT_CASH_MIRROR_LABEL），所以不會跟逐案的
+    雜支重複計。換成別的類別（例如「行政」）就會兩邊都算。"""
+    js = (ROOT / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
+    fn = js.split("_fp.claimMisc = async (")[1].split("_fp.outsourceForm")[0]
+    assert "category: '專案雜支'" in fn and "expense_id: row.id" in fn
+    from core.finance_logic import _PROJECT_CASH_MIRROR_LABEL
+    assert _PROJECT_CASH_MIRROR_LABEL == "專案雜支"
