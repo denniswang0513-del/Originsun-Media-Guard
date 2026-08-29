@@ -120,6 +120,12 @@ async def list_projects(
         # 專案管理看不看得到，不是對外開放）。
         if _hide_mine(request):
             query = query.where(not_mine(CrmProject.entity))
+        # 🔴 分身不進這份清單（owner 2026-08-30「已經連結的就不用重複出現了，
+        # 只出現 crm 的就好」）：連結私帳之後同一個案名會出現兩列 —— 母公司那列
+        # 標「已連結私帳」、私帳分身那列標「私帳」，看起來像重複建案。
+        # 母公司那一列才是專案管理要管的主體（案子、客戶、派工都在它身上）；
+        # 分身只是收入的鏡射，它該出現的地方是財務管理 › 執行專案。
+        query = query.where(CrmProject.source_project_id.is_(None))
         if entity == "parent" and include_pushed:
             # 專案管理的管線視圖：母公司案 ∪ 推送過來的私帳案（後期專案）。
             # 🔴 是明確參數不是預設 —— 掛錢用的下拉（收支/器材/現金流…）打的

@@ -168,3 +168,14 @@ def test_the_mirrored_badge_is_hidden_from_people_without_the_private_ledger():
     row = code_only(repo_src("routers/crm/projects.py")).split(
         "def _to_project_dict(")[1].split("\ndef ")[0]
     assert '"mirrored": bool(mirrored),' in row
+
+
+def test_the_mirror_does_not_show_up_next_to_its_parent():
+    """🔴 連結之後同一個案名會在專案管理出現兩列（母公司那列標「已連結私帳」、
+    分身那列標「私帳」）—— 看起來像重複建案。owner 2026-08-30：「已經連結的
+    就不用重複出現了，只出現 crm 的就好」。
+
+    主體是母公司那一列（案子、客戶、派工都在它身上）；分身只是收入的鏡射，
+    它該出現的地方是財務管理 › 執行專案（那支是另一個端點）。"""
+    fn = _fn(_src(), "list_projects")
+    assert "CrmProject.source_project_id.is_(None)" in fn

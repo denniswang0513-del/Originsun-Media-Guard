@@ -364,6 +364,7 @@ function renderDetail(project) {
           <span class="pi-edit-cell" data-field="am_username" onclick="window._projEdit(this)" style="cursor:pointer;">${_amHtml}</span>
           <span class="pi-edit-cell" data-field="pm_usernames" onclick="window._projEdit(this)" style="cursor:pointer;">${_pmHtml}</span>
           <span class="pi-dot"></span>
+          ${_isMineProject(project) ? _mineMoneyNotice(project) : `
           <span>合約 <b style="color:#60a5fa;">${_editCell('contract_amount', _$(project.contract_amount))}</b></span>
           <span class="pi-dot"></span>
           <span>稅率 ${_editCell('tax_rate', (project.tax_rate != null ? project.tax_rate : 5) + '%')}</span>
@@ -374,7 +375,7 @@ function renderDetail(project) {
           <span class="pi-dot"></span>
           <span>匯費 ${_editCell('transfer_fee', project.transfer_fee ? '$' + fmtNum(project.transfer_fee) : _placeholder('—'))}</span>
           <span class="pi-dot"></span>
-          ${_editCell('payment_status', _pBadge(project.payment_status))}
+          ${_editCell('payment_status', _pBadge(project.payment_status))}`}
           <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:auto;padding:2px 10px;font-size:11px;"
                   onclick="window._projOpenForm('${project.id}')" title="編輯所有專案資訊">✎ 編輯</button>
         </div>
@@ -496,6 +497,27 @@ function renderDetail(project) {
     // renderDetail just wiped the actions area.
     window._costShowSaveBtn?.();
 }
+
+/** 這一案的錢記在私帳嗎（owner 2026-08-30「crm 專案的檢視要以母公司的帳為主體」）。
+ *
+ *  🔴 CRM ＝**公司的**帳本視角。私帳案的合約／應收／已收是他跟自己客戶的錢，
+ *  公司帳上沒有這些數字 —— 照原樣畫在專案總覽，就等於把私帳的營收混進公司的
+ *  管線裡（實測生產有 2 案這樣：86,500 與 60,000 都是他自己接的）。
+ *
+ *  只擋**收入那半邊**：專案帳目（成本行／雜支）照舊可編 —— 那些是這一案真的
+ *  發生的成本，而且私帳的逐案損益正是從它們算過來的（CRM_BACKED）。
+ */
+const _isMineProject = (p) => (p && (p.entity || 'parent') === 'mine');
+
+/** 私帳案在 CRM 的金額列：不畫數字、指路到它真正該看的地方。 */
+function _mineMoneyNotice(project) {
+    return `<span style="color:#c4b5fd;font-size:12px;"
+        title="CRM 是公司的帳本視角。這一案的合約與收款屬於私帳（我的帳），公司帳上沒有它的錢 —— 金額請到財務管理 › 執行專案看。專案帳目（成本、雜支）在這裡照常可以編。">
+        合約與收款在私帳</span>
+        <span class="pi-dot"></span>
+        <span style="color:#6b7280;font-size:12px;">公司帳上沒有這一案的錢</span>`;
+}
+
 
 // ── Budget Overview (stage-aware) ─────────────────────────
 
