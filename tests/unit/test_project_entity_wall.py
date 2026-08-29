@@ -308,18 +308,42 @@ def test_crm_pushed_never_lands_in_ledger_detail():
     assert i_pop < i_loop
 
 
-def test_ledger_view_is_pinned_to_mine_and_gated_by_explicit_module():
-    """逐案損益＝私帳（在主系統也是），入口只給帳號上**真的有** finance_mine
-    的人 —— 不走 hasModule 的 Lv3 bypass（後端 Lv3 已不隱含）。"""
-    js = (ROOT / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
-    # 釘機制不釘呼叫點數量：全部走 finFetchMine（漏釘的裸 finFetch 不准存在 ——
-    # 忘了釘不會炸，只會靜靜打到母公司帳）
-    assert "finFetchMine(" in js
-    assert "finFetch(" not in js.replace("finFetchMine(", ""), "不准有沒釘 mine 的裸 finFetch"
-    fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
-    assert "(window._modules || []).includes('finance_mine')" in fin
+def test_ledger_view_follows_the_current_book_and_hides_private_only_fields():
+    """🔴 2026-08-30 反轉：逐案損益**不再釘死私帳**。owner「crm 的執行專案，
+    是 for 母公司的，你現在呈現的數字與項目都是私帳的」—— 改成跟著當前帳本
+    （主系統財務管理＝母公司、/my-ledger.html＝私帳，那頁把 _finEntity 釘 mine）。
+
+    代價是母公司模式必須收起**私帳專屬的模型**：案源／服務費率／費用七欄／
+    工項拆分／實收／檢查／一鍵請款。那些欄位母公司的專案沒有（ledger_detail
+    是空的），畫出來不只沒意義 —— 存下去就是把私帳形狀寫進母公司的列。
+    """
+    from tests.unit._srcscan import js_code_only, repo_src
+    # 🔴 一定要剝註解：檔頭那段說明自己就寫著「案源／工項拆分…要收起來」，
+    # 不剝的話下面的 marker 全部命中註解（_srcscan 檔頭記的那個坑）。
+    js = js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))
+    assert "finFetchMine(" not in js, "不再釘死私帳"
+    assert "const _isMine = () => finEntity() === 'mine';" in js
+    # 私帳專屬的那幾塊都要掛在 _isMine() 後面（漏一塊就是母公司模式畫出
+    # 一個永遠 0 又存得下去的欄位）
+    for marker in ("案源", "服務費率 %", "工項拆分", "檢查（實收−Σ工項）"):
+        i = js.index(marker)
+        assert "_isMine()" in js[max(0, i - 1500):i], marker
+    # 一鍵請款寫死開 entity='mine' 的請款單 —— 母公司模式不給按
+    assert js.count("!_isMine() ? ''") >= 6
     ml = (ROOT / "frontend/my-ledger.html").read_text(encoding="utf-8")
     assert "access_level || 0) < 3" not in ml, "my-ledger 閘門不准留 Lv3 bypass"
+
+
+def test_mine_only_nav_still_gates_on_the_explicit_module():
+    """器材清冊／私帳應收仍是私帳專屬，入口只給帳號上**真的有** finance_mine
+    的人 —— 不走 hasModule 的 Lv3 bypass（後端 Lv3 已不隱含）。"""
+    fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
+    assert "(window._modules || []).includes('finance_mine')" in fin
+    html = (ROOT / "frontend/tabs/finance/finance.html").read_text(encoding="utf-8")
+    assert 'fin-nav-mine-only" data-subview="gear"' in html
+    assert 'data-subview="projects">📁 執行專案' in html
+    seg = html.split('data-subview="projects"')[0].rsplit("<button", 1)[1]
+    assert "fin-nav-mine-only" not in seg, "執行專案不再是私帳專屬入口"
 
 
 def test_reopening_the_same_case_unhides_the_panel():

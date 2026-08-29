@@ -7,7 +7,17 @@
  * 右側詳情是**可編輯**的逐案損益表：營收、費用七欄、工項拆分十項。
  *
  * 🔴 本子視圖**固定打私帳（entity='mine'）**，在主系統也是（owner 2026-08-25
- * 「這裡的逐案損益也先都放在私帳」）——所以一律走 finFetchMine，
+ * 「這裡的逐案損益也先都放在私帳」）——那個「先」到 2026-08-30 結束：owner
+ * 「crm 的執行專案，是 for 母公司的，你現在呈現的數字與項目都是私帳的」。
+ * 現在**跟著當前帳本**（finFetch 會帶 window._finEntity）：主系統的財務管理＝
+ * 母公司、/my-ledger.html＝私帳（那頁把 _finEntity 釘成 mine）。
+ *
+ * 🔴 母公司模式要收起來的是**私帳專屬的模型**：案源／服務費率／代開發票費／
+ * 個人稅款／股東往來／工項拆分／實收／檢查，還有一鍵請款（它寫死開私帳的
+ * 請款單）。那些欄位母公司的專案根本沒有（ledger_detail 是空的），畫出來
+ * 不只沒意義 —— 存下去就是把私帳形狀的資料寫進母公司的列。
+ * 兩本帳都成立的只有：營收／應收／已收／未收／應付／未付。
+ *
  * 不跟著頁面 pin 走。入口按鈕只給帳號上真的有 finance_mine 的人
  * （finance.js），後端 require_entity 是真正的牆。
  *
@@ -15,8 +25,11 @@
  * 算式正本在後端 api_finance_projects.compute()，兩份算式必然漂移。
  * 存檔後端回算好的值回來，這裡只顯示。
  */
-import { finFetchMine, esc, fmtNum, finToast } from '../fin-utils.js';
+import { finFetch, finEntity, esc, fmtNum, finToast } from '../fin-utils.js';
 import { crmFetch, setupResizeHandle } from '../../crm/crm-utils.js';
+
+/** 現在這一頁在哪一本帳。母公司模式收起私帳專屬的欄位與動作（見檔頭）。 */
+const _isMine = () => finEntity() === 'mine';
 
 let _c = null;
 let _isCurrent = () => true;
@@ -36,9 +49,11 @@ let _resizeBound = false;
 // 十欄：狀態／結案日／專案／客戶／營收／應收／未收／應付／未付／檢查
 // owner 2026-08-29 要一眼回答五件事：① 營收 ② 客戶會匯多少（扣掉代辦費）
 // ③ 我要匯出去多少 ④ 收齊了嗎還剩多少 ⑤ 付清了嗎還剩多少
-const _GRID = 'display:grid;grid-template-columns:'
-    + '46px 82px 1.3fr 0.85fr 94px 94px 90px 94px 90px 56px;'
-    + 'align-items:center;gap:8px;';
+// 🔴 「檢查」（實收−Σ工項）是**私帳的算式** —— 母公司的專案沒有工項拆分，
+// 那一欄永遠 0，佔著一欄還讓人以為公司帳有什麼對不上。母公司模式少一欄。
+const _grid = () => 'display:grid;grid-template-columns:'
+    + '46px 82px 1.3fr 0.85fr 94px 94px 90px 94px 90px'
+    + (_isMine() ? ' 56px' : '') + ';align-items:center;gap:8px;';
 
 // 收付狀態（C 案，owner 2026-08-29 選）：結案＝一個綠色「結」，
 // 未結才長出「收」「付」兩字各自上色。判定在後端（settle_state），這裡只畫。
@@ -78,7 +93,7 @@ export default async function render(container, ctx = {}) {
  *  是純白工（後端還要再跑兩個 group-by 聚合）。篩選改在前端做。 */
 async function _load() {
     try {
-        const d = await finFetchMine('/project-ledger');
+        const d = await finFetch('/project-ledger');
         if (!_isCurrent()) return;
         _data = d;
         _renderShell();
@@ -158,7 +173,8 @@ function _renderCount(n, rows) {
     if (!el) return;
     const unbalanced = (rows || []).reduce((a, p) => a + (p.check ? 1 : 0), 0);
     el.innerHTML = `${fmtNum(n)}${n === _data.count ? '' : ' / ' + fmtNum(_data.count)} 案`
-        + (unbalanced ? `｜<span style="color:#fbbf24;">${unbalanced} 案檢查≠0</span>` : '');
+        + (unbalanced && _isMine()
+            ? `｜<span style="color:#fbbf24;">${unbalanced} 案檢查≠0</span>` : '');
 }
 
 /** 只切 selected class —— 重建整份 innerHTML 會重新解析約 2,800 個節點，
@@ -192,19 +208,21 @@ function _renderShell() {
             <span id="fpl-count" style="font-size:12px;color:#888;"></span>
         </div>
         <div id="fpl-create" style="display:none;background:#202020;border:1px solid #3b82f6;border-radius:8px;padding:14px;margin-bottom:10px;">
-            <div style="display:grid;grid-template-columns:2fr 1.4fr 1fr 1fr 1fr;gap:8px;">
+            <div style="display:grid;grid-template-columns:${
+                _isMine() ? '2fr 1.4fr 1fr 1fr 1fr' : '2fr 1.4fr 1fr 1fr'};gap:8px;">
                 <label style="color:#888;font-size:11px;">專案名稱*<input class="crm-input" id="fpc-name"></label>
                 <label style="color:#888;font-size:11px;">客戶<select class="crm-input" id="fpc-client"><option value="">— 未定 —</option></select></label>
                 <label style="color:#888;font-size:11px;">或新客戶<input class="crm-input" id="fpc-newclient" placeholder="（建 CRM 客戶）"></label>
                 <label style="color:#888;font-size:11px;">案碼<input class="crm-input" id="fpc-code" placeholder="例 2026051"></label>
                 <label style="color:#888;font-size:11px;">結案日<input class="crm-input" type="date" id="fpc-close"></label>
                 <label style="color:#888;font-size:11px;">營收(含稅)<input class="crm-input" type="number" id="fpc-contract"></label>
+                ${!_isMine() ? '' : `
                 <label style="color:#888;font-size:11px;">案源<select class="crm-input" id="fpc-source">
                     <option value="">—</option>
                     <option value="源日">源日（現金收款）</option>
                     <option value="代開發票">代開發票（扣服務費）</option>
                     <option value="執行業務所得">執行業務所得（自動代扣）</option></select></label>
-                <label style="color:#888;font-size:11px;" id="fpc-fee-wrap" hidden>服務費率 %<input class="crm-input" type="number" id="fpc-feepct" value="8" step="0.1"></label>
+                <label style="color:#888;font-size:11px;" id="fpc-fee-wrap" hidden>服務費率 %<input class="crm-input" type="number" id="fpc-feepct" value="8" step="0.1"></label>`}
             </div>
             <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
                 <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finProjLedger.createSave(this)">建立</button>
@@ -217,7 +235,7 @@ function _renderShell() {
                     border-radius:8px;padding:10px 14px;"></div>
         <div class="crm-body" id="fpl-body" style="min-height:320px;">
             <div class="crm-list-panel" id="fpl-list-panel">
-                <div class="crm-list-header" style="${_GRID}">
+                <div class="crm-list-header" style="${_grid()}">
                     <span style="text-align:center;" title="收付狀態。結＝該收該付都完成；未完成才分開標「收」「付」。這裡只看錢清了沒，跟結案日無關">狀態</span>
                     <span>結案日</span><span>專案</span><span>客戶</span>
                     <span style="text-align:right;">營收</span>
@@ -225,7 +243,7 @@ function _renderShell() {
                     <span style="text-align:right;" title="還沒收到的＝應收 − 已收。0 表示收齊了。舊帳的代開案收款記全額，收齊時差額會是負的代辦費 —— 那不是溢收，在源頭代扣的範圍內一律當 0；超出範圍的負數是真的溢收，照實顯示">未收</span>
                     <span style="text-align:right;" title="我總共要匯出去多少＝委外 + 行政雜支 + 稅金 + 買發票">應付</span>
                     <span style="text-align:right;" title="還沒付出去的（未付的請款單）。0 表示付清了">未付</span>
-                    <span style="text-align:right;" title="淨收 − Σ工項；0 表示工項拆分剛好對上">檢查</span>
+                    ${!_isMine() ? '' : '<span style="text-align:right;" title="淨收 − Σ工項；0 表示工項拆分剛好對上">檢查</span>'}
                 </div>
                 <div id="fpl-list-body"></div>
             </div>
@@ -292,7 +310,7 @@ function _renderList() {
     body.innerHTML =
         rows.map((p) => `
         <div class="crm-row${p.id === _sel ? ' selected' : ''}" data-id="${p.id}"
-             style="${_GRID}"
+             style="${_grid()}"
              onclick="window._finProjLedger.open('${p.id}')">
             <span style="text-align:center;">${_stHtml(p)}</span>
             <span style="color:${p.close_date ? '#9ca3af' : '#6b7280'};white-space:nowrap;">${esc(p.close_date || '未結案')}</span>
@@ -305,7 +323,8 @@ function _renderList() {
             ${_amt(p.to_collect, '#fbbf24')}
             ${_amt(p.payout, '#c4b5fd')}
             ${_amt(p.ap_open, '#fca5a5')}
-            <span style="text-align:right;color:${p.check ? '#fbbf24' : '#4b5563'};">${p.check ? fmtNum(p.check) : '0'}</span>
+            ${!_isMine() ? '' : `<span style="text-align:right;color:${
+                p.check ? '#fbbf24' : '#4b5563'};">${p.check ? fmtNum(p.check) : '0'}</span>`}
         </div>`).join('')
         || '<div class="crm-empty">沒有符合的專案</div>';
     body.scrollTop = keepScroll;   // 重畫不該把使用者彈回列表頂端
@@ -320,13 +339,13 @@ const _fp = (window._finProjLedger = window._finProjLedger || {});
 // 有未存編修就整段跳過 —— 使用者手上的東西優先。
 _fp.refresh = async () => {
     if (_dirty || !document.getElementById('fpl-list-body')) return;
-    const d = await finFetchMine('/project-ledger');
+    const d = await finFetch('/project-ledger');
     if (!_isCurrent()) return;
     _data = d;
     _renderTotals();
     _renderList();
     if (_sel && _detail) {
-        _detail = await finFetchMine(`/project-ledger/${_sel}`);
+        _detail = await finFetch(`/project-ledger/${_sel}`);
         _renderDetail();
     }
 };
@@ -360,7 +379,7 @@ _fp.open = async (id) => {
     panel.style.display = '';
     panel.innerHTML = '<div style="color:#888;padding:30px;text-align:center;">載入中…</div>';
     try {
-        _detail = await finFetchMine(`/project-ledger/${id}`);
+        _detail = await finFetch(`/project-ledger/${id}`);
         _renderDetail();
     } catch (e) {
         panel.innerHTML = `<div style="color:#f87171;padding:30px;">載入失敗：${esc(e.message)}</div>`;
@@ -434,11 +453,12 @@ function _renderDetail() {
                                title="到專案管理開啟這一案（階段/派工/資料夾/會議記錄在那邊）"
                                onclick="window._finProjLedger.gotoCrm()">專案管理 ↗</button>`
                     : ''}
+                ${!_isMine() ? '' : `
                 <button class="crm-btn crm-btn-secondary crm-btn-sm"
                         title="${p.crm_pushed
                             ? '這一案已出現在專案管理的母公司管線（標「後期專案」）。再按一次取消。'
                             : '讓這一案出現在專案管理的母公司管線，標「後期專案」。錢流不變（仍在私帳，金額只有你看得到）。'}"
-                        onclick="window._finProjLedger.push(this)">${p.crm_pushed ? '✓ 已在專案管理' : '⬆ 推專案管理'}</button>
+                        onclick="window._finProjLedger.push(this)">${p.crm_pushed ? '✓ 已在專案管理' : '⬆ 推專案管理'}</button>`}
                 <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finProjLedger.save(this)">儲存</button>
                 <button class="crm-detail-close" onclick="window._finProjLedger.close()" title="關閉">✕</button>
             </div>
@@ -448,7 +468,8 @@ function _renderDetail() {
                 <span>${esc(p.close_date || '未結案')}</span><span>${esc(p.status)}</span>
                 <span>${esc(p.type)}</span><span>${esc(p.payment_status)}</span>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div style="display:grid;grid-template-columns:${
+                _isMine() ? '1fr 1fr' : '1fr'};gap:16px;">
                 <div>
                     <div style="color:#ddd;font-size:12px;font-weight:600;margin-bottom:6px;">營收與費用</div>
                     <table class="crm-table" style="width:100%;font-size:12px;">
@@ -456,6 +477,7 @@ function _renderDetail() {
                             <td style="width:130px;"><input type="date" class="crm-input fpl-num" id="fpl-close"
                                 value="${esc(p.close_date || '')}" style="width:100%;"></td></tr>
                         <tr><td style="color:#bbb;">營收(含稅)</td><td>${money('fpl-contract', p.contract)}</td></tr>
+                        ${!_isMine() ? '' : `
                         <tr><td style="color:#bbb;">案源</td>
                             <td><select class="crm-input fpl-num" id="fpl-source" style="width:100%;">
                                 <option value="">—</option>
@@ -474,20 +496,23 @@ function _renderDetail() {
                         <tr id="fpl-fee-row">
                             <td style="color:#bbb;">服務費率 %</td>
                             <td>${money('fpl-feepct', det.fee_pct || d.default_fee_pct || 8)}</td></tr>
-                        ${costRows}
+                        ${costRows}`}
                     </table>
                     <table class="crm-table" style="width:100%;font-size:12px;margin-top:8px;">
+                        ${!_isMine() ? '' : `
                         <tr><td style="color:#ddd;font-weight:600;">實收</td>
                             <td style="text-align:right;font-weight:600;color:#eee;" id="fpl-net">$${fmtNum(p.net)}</td></tr>
                         <tr><td style="color:#ddd;font-weight:600;">檢查（實收−Σ工項）</td>
-                            <td style="text-align:right;font-weight:600;color:${p.check ? '#fbbf24' : '#86efac'};" id="fpl-check">${fmtNum(p.check)}</td></tr>
+                            <td style="text-align:right;font-weight:600;color:${p.check ? '#fbbf24' : '#86efac'};" id="fpl-check">${fmtNum(p.check)}</td></tr>`}
                         <tr><td style="color:#888;">已收 / 應收</td>
                             <td style="text-align:right;color:#888;">${fmtNum(p.received)} / ${fmtNum(p.receivable)}</td></tr>
                     </table>
+                    ${!_isMine() ? '' : `
                     <div style="color:#666;font-size:11px;margin-top:6px;">
                         實收 = 營收 − 委外 − 代辦費 − 個人稅款 − 雜支 − 股東往來（後端算）。
-                        檢查 0 表示工項拆分剛好等於實收。</div>
+                        檢查 0 表示工項拆分剛好等於實收。</div>`}
                 </div>
+                ${!_isMine() ? '' : `
                 <div>
                     <div style="color:#ddd;font-size:12px;font-weight:600;margin-bottom:6px;">工項拆分</div>
                     <table class="crm-table" style="width:100%;font-size:12px;">
@@ -499,7 +524,7 @@ function _renderDetail() {
                         <input class="crm-input" id="fpl-newitem" placeholder="自訂工項名稱" style="flex:1;">
                         <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finProjLedger.addItem()">＋</button>
                     </div>
-                </div>
+                </div>`}
             </div>
             ${_crmLinesHtml(d.crm_lines)}
             <div style="color:#ddd;font-size:12px;font-weight:600;margin:16px 0 6px;">掛在本案的收支（${(d.entries || []).length}）</div>
@@ -532,11 +557,12 @@ function _renderDetail() {
                         <td style="text-align:right;">${fmtNum(x.amount)}</td>
                         <td style="white-space:nowrap;color:${x.payment_status === '已付款' ? '#86efac' : '#fbbf24'};">${esc(x.payment_status)}</td></tr>`).join('')
                     || '<tr><td colspan="3" style="color:#666;padding:10px;">（無）</td></tr>'}</tbody></table>
+            ${!_isMine() ? '' : `
             <details style="margin-top:14px;">
                 <summary style="color:#888;font-size:12px;cursor:pointer;">匯入保留的原始備註（案碼／案源／税別／工項）</summary>
                 <pre style="white-space:pre-wrap;color:#aaa;font-size:11px;background:#1a1a1a;
                             border:1px solid #2a2a2a;border-radius:6px;padding:10px;margin:6px 0 0;">${esc(p.notes || '（無）')}</pre>
-            </details>
+            </details>`}
         </div>`;
     _detailShown = p.id;
     if (_prev) {
@@ -655,7 +681,9 @@ _fp.create = async () => {
 };
 
 _fp.createSave = async (btn) => {
-    const g = (id) => document.getElementById(id).value.trim();
+    // 🔴 收 null：母公司模式不畫案源／費率那兩格（見檔頭）—— 裸的
+    // `getElementById(id).value` 會 TypeError，整顆「建立」就啞掉
+    const g = (id) => (document.getElementById(id)?.value || '').trim();
     if (!g('fpc-name')) { finToast('專案名稱必填', 'error'); return; }
     if (g('fpc-client') && g('fpc-newclient')) {
         finToast('「客戶」與「或新客戶」擇一填', 'error'); return;
@@ -673,7 +701,7 @@ _fp.createSave = async (btn) => {
             clientId = nc.client.id;
             _clients = null;      // 名錄變了，下次打開重抓
         }
-        const r = await finFetchMine('/project-ledger', {
+        const r = await finFetch('/project-ledger', {
             method: 'POST',
             body: JSON.stringify({
                 name: g('fpc-name'), client_id: clientId,
@@ -716,7 +744,8 @@ function _crmLinesHtml(cl) {
             <td style="text-align:right;">${fmtNum(x.amount)}</td>
             <td style="width:82px;text-align:right;">${x.claimed
                 ? '<span style="color:#86efac;font-size:11px;">已請款</span>'
-                : `<button class="crm-btn crm-btn-secondary crm-btn-sm"
+                : !_isMine() ? ''
+                    : `<button class="crm-btn crm-btn-secondary crm-btn-sm"
                      onclick="window._finProjLedger.claimLine('${esc(x.id)}', this)">請款</button>`}</td></tr>`).join('');
     // 雜支也能逐項請款（owner 2026-08-29）。已經跟公司請過款的**不給按** ——
     // 那筆錢公司出了，私帳再請一次就是同一筆錢請兩次。
@@ -730,6 +759,7 @@ function _crmLinesHtml(cl) {
                 ? '<span style="color:#4b5563;font-size:11px;">公司出</span>'
                 : x.claimed
                     ? '<span style="color:#86efac;font-size:11px;">已請款</span>'
+                    : !_isMine() ? ''
                     : `<button class="crm-btn crm-btn-secondary crm-btn-sm"
                          onclick="window._finProjLedger.claimMisc('${esc(x.id)}', this)">請款</button>`}</td></tr>`).join('');
     return (people.length ? box('委外人員', people.reduce((a, b) => a + b.amount, 0), peopleRows) : '')
@@ -851,7 +881,7 @@ _fp.push = async (btn) => {
     const v = p.crm_pushed ? 0 : 1;
     btn.disabled = true;
     try {
-        const r = await finFetchMine(`/project-ledger/${_sel}`, {
+        const r = await finFetch(`/project-ledger/${_sel}`, {
             method: 'PUT', body: JSON.stringify({ crm_pushed: v }),
         });
         p.crm_pushed = r.crm_pushed;
@@ -893,7 +923,7 @@ _fp.save = async (btn) => {
     btn.disabled = true;
     btn.textContent = '儲存中…';
     try {
-        const r = await finFetchMine(`/project-ledger/${_sel}`, {
+        const r = await finFetch(`/project-ledger/${_sel}`, {
             method: 'PUT', body: JSON.stringify(body),
         });
         _dirty = false;

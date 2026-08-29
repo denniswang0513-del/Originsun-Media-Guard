@@ -69,7 +69,10 @@ export async function initFinanceTab() {
         .forEach((el) => { el.style.display = 'none'; });
     if (mineMode || !fullParent) hideNav('.fin-nav-full');
     if (!mineMode && !fullParent) hideNav('.fin-nav-mine-ok');
-    // 私帳專屬子視圖（.fin-nav-mine-only：執行專案/器材清冊/私帳應收），入口
+    // 私帳專屬子視圖（.fin-nav-mine-only：器材清冊/私帳應收），入口
+    // 🔴 執行專案 2026-08-30 起**不在這一組**：它改成跟著帳本切（母公司模式
+    // 顯示公司的逐案收付、收起私帳專屬的工項與案源）—— owner「crm 的執行專案，
+    // 是 for 母公司的」。所以它掛 .fin-nav-mine-ok（有任一本帳就看得到）。
     // 只給帳號上**真的有** finance_mine 的人。🔴 直接看 _modules、不走 hasModule
     // 的 Lv3 bypass —— 後端 grant_admin_all_modules 已把 finance_mine 列為
     // 「指名才有」（管理員不隱含），這裡用同一個口徑，兩邊才不會一邊給看一邊 403。
