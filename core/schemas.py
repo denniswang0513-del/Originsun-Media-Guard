@@ -728,8 +728,16 @@ class ProjectMirrorPayload(BaseModel):
 
     `target_id` 空＝建新的私帳案；有值＝連結到既有那一案（他手動建過 109 案，
     名字跟母公司的不一定一樣，所以要留這條路）。
+
+    `mode`＝要連結的那一案**已經填過工項**時怎麼辦（owner 2026-08-30
+    「跳出幾個選擇讓我決定要怎麼做」）：
+      overwrite  私帳的工項換成母公司成本行算出來的（建新案一律走這條）
+      keep       只建立連結，私帳的金額一毛不動
+      import     反過來：把私帳的工項寫成母公司的 CRM 成本行（掛給我），
+                 私帳不動。匯入後那些成本行在 CRM 照常可編。
     """
     target_id: str = ""
+    mode: str = "overwrite"
 
 
 class CashTaxonomyNodePayload(BaseModel):

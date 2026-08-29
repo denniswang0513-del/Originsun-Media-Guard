@@ -557,7 +557,10 @@ window._projMoveLedger = async function (id) {
 // 一案，收入＝人員配置裡掛給我的那幾行成本。金額判定全在後端
 // （core.ledger_project.mirror_lines），前端只顯示它算出來的明細 —— 前端自己
 // 再加一次總和，兩個數字遲早會不一樣。
+let _pmmProjectId = '';
+
 window._projMirrorMine = async function (id) {
+    _pmmProjectId = id;
     let chk;
     try {
         chk = await _fetch(`/projects/${encodeURIComponent(id)}/mirror-check`);
@@ -575,7 +578,12 @@ window._projMirrorMine = async function (id) {
         <td style="color:#888;">${_esc(l.phase)}</td>
         <td>${_esc(l.item)}</td>
         <td style="text-align:right;">${fmtNum(l.amount)}</td></tr>`).join('');
-    const opts = (chk.options || []).map(o =>
+    _pmmOptions = chk.options || [];
+    _pmmCrmSplit = {};
+    (chk.lines || []).forEach((l) => {
+        _pmmCrmSplit[l.item] = (_pmmCrmSplit[l.item] || 0) + l.amount;
+    });
+    const opts = _pmmOptions.map(o =>
         `<option value="${o.id}">${_esc(o.name)}${o.amount ? ` — ${fmtNum(o.amount)}` : ''}</option>`).join('');
     _mirrorModal(`連結私帳 — ${chk.name}`, `
         <div style="color:#bbb;font-size:12px;margin-bottom:8px;">
@@ -592,6 +600,7 @@ window._projMirrorMine = async function (id) {
                 <input type="radio" name="pmm-mode" value="link"> 連結到既有私帳專案</label>
             <select class="crm-input" id="pmm-target" disabled style="margin-left:22px;">
                 <option value="">— 選一個 —</option>${opts}</select>
+            <div id="pmm-conflict" style="margin-left:22px;"></div>
         </div>
         <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px;">
             <button class="crm-btn crm-btn-secondary crm-btn-sm"
@@ -603,7 +612,13 @@ window._projMirrorMine = async function (id) {
     // 不另外記一份（按鈕文字曾是第三份，改一處漏一處就會自相矛盾）。
     const sel = document.getElementById('pmm-target');
     const box = document.getElementById('proj-mirror-body');
-    box.addEventListener('change', () => { sel.disabled = !_pmmLink(); });
+    box.addEventListener('change', () => {
+        sel.disabled = !_pmmLink();
+        _pmmDrawConflict();
+        const go = document.getElementById('pmm-go');
+        const conflict = document.getElementById('pmm-conflict');
+        if (go) { go.style.display = conflict && conflict.innerHTML ? 'none' : ''; }
+    });
     document.getElementById('pmm-go').addEventListener('click',
         (ev) => _projMirrorSubmit(ev.currentTarget, id));
 };
@@ -611,21 +626,84 @@ window._projMirrorMine = async function (id) {
 const _pmmLink = () =>
     document.querySelector('input[name="pmm-mode"]:checked')?.value === 'link';
 
-async function _projMirrorSubmit(btn, id) {
+async function _projMirrorSubmit(btn, id, mode) {
     const target = _pmmLink() ? (document.getElementById('pmm-target').value || '') : '';
     if (_pmmLink() && !target) { crmToast('請先選一個要連結的私帳專案'); return; }
     btn.disabled = true;
     try {
         const r = await _fetch(`/projects/${encodeURIComponent(id)}/mirror-to-mine`, {
-            method: 'POST', body: JSON.stringify({ target_id: target }),
+            method: 'POST',
+            body: JSON.stringify({ target_id: target, mode: mode || 'overwrite' }),
         });
         window._projMirrorClose();
-        crmToast(`已在私帳同步收入 ${fmtNum(r.amount)}`);
+        crmToast(r.mode === 'keep' ? '已連結（私帳金額未變動）'
+            : r.mode === 'import' ? `已從私帳匯入 ${r.imported} 個工項到 CRM 成本行`
+                : `已在私帳同步收入 ${fmtNum(r.amount)}`);
         crmCacheInvalidate('/projects');
+        await loadProjects();
     } catch (e) {
         btn.disabled = false;
         crmToast('連結私帳失敗：' + e.message, 6000);
     }
+}
+
+// 這一輪視窗用得到的兩份資料：可連結的私帳案（含它們現有的工項）、
+// 以及母公司這邊算出來的工項。畫對照表時兩邊都要。
+let _pmmOptions = [];
+let _pmmCrmSplit = {};
+
+/** 選到的那個私帳案已經填過工項 → 把兩邊並排列出來，讓人有依據可判斷，
+ *  再給三個處理方式（owner 2026-08-30「跳出幾個選擇讓我決定要怎麼做」）。
+ *
+ *  🔴 沒有預設哪一個是對的：私帳那份可能是他照實際請款填的（比 CRM 準），
+ *  也可能是舊的估算。只給三顆按鈕不給數字，等於要他憑印象賭一把。 */
+function _pmmDrawConflict() {
+    const box = document.getElementById('pmm-conflict');
+    if (!box) { return; }
+    const id = document.getElementById('pmm-target').value || '';
+    const opt = _pmmLink() ? _pmmOptions.find(o => o.id === id) : null;
+    const mineSplit = (opt && opt.split) || {};
+    if (!Object.keys(mineSplit).length) { box.innerHTML = ''; return; }
+
+    const keys = [...new Set([...Object.keys(mineSplit),
+                              ...Object.keys(_pmmCrmSplit)])];
+    const sum = (o) => Object.values(o).reduce((n, v) => n + (v || 0), 0);
+    const cell = (v) => (v ? fmtNum(v) : '<span style="color:#3f3f46;">—</span>');
+    const rows = keys.map(k => `<tr>
+        <td style="color:#ddd;">${_esc(k)}</td>
+        <td style="text-align:right;">${cell(mineSplit[k])}</td>
+        <td style="text-align:right;">${cell(_pmmCrmSplit[k])}</td></tr>`).join('');
+    const btn = (mode, label, title) =>
+        `<button class="crm-btn crm-btn-secondary crm-btn-sm" data-mode="${mode}"
+                 title="${_esc(title)}">${label}</button>`;
+    box.innerHTML = `
+        <div style="margin-top:10px;border:1px solid #4c3d78;border-radius:6px;padding:10px;">
+          <div style="color:#c4b5fd;font-size:12px;margin-bottom:6px;">
+            「${_esc(opt.name)}」已經填過工項 —— 要怎麼處理？</div>
+          <table class="crm-table" style="width:100%;font-size:12px;">
+            <tr><th style="text-align:left;">工項</th>
+                <th style="text-align:right;">私帳現有</th>
+                <th style="text-align:right;">CRM 成本行</th></tr>
+            ${rows}
+            <tr style="font-weight:600;"><td>合計</td>
+                <td style="text-align:right;">${fmtNum(sum(mineSplit))}</td>
+                <td style="text-align:right;">${fmtNum(sum(_pmmCrmSplit))}</td></tr>
+          </table>
+          <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
+            ${btn('overwrite', '用 CRM 覆蓋', '私帳的工項換成 CRM 成本行算出來的')}
+            ${btn('keep', '保留私帳', '只建立連結，私帳的金額一毛不動')}
+            ${btn('import', '從私帳匯入 CRM',
+                  '反過來：把私帳的工項寫成 CRM 的成本行（掛給你、階段後期製作），'
+                  + '私帳不動。匯入後那些成本行在 CRM 照常可以編。')}
+          </div>
+        </div>`;
+    box.querySelectorAll('button[data-mode]').forEach((b) => {
+        b.addEventListener('click', () =>
+            _projMirrorSubmit(b, _pmmProjectId, b.dataset.mode));
+    });
+    // 有工項時，下面那顆「建立並連結」不該再是入口（它不帶 mode，等於偷偷覆蓋）
+    const go = document.getElementById('pmm-go');
+    if (go) { go.style.display = 'none'; }
 }
 
 /** 疊在詳情面板之上的預覽視窗。重複使用同一個 overlay（每次重建會在 body

@@ -179,3 +179,56 @@ def test_the_mirror_does_not_show_up_next_to_its_parent():
     它該出現的地方是財務管理 › 執行專案（那支是另一個端點）。"""
     fn = _fn(_src(), "list_projects")
     assert "CrmProject.source_project_id.is_(None)" in fn
+
+
+# ── 連結到「已經填過工項」的私帳案：三個處理方式（owner 2026-08-30）──
+
+def test_three_modes_are_offered_and_validated():
+    """「跳出幾個選擇讓我決定要怎麼做」—— 三種，而且後端要驗值域
+    （前端傳錯字不能靜靜當成 overwrite 把人家的工項洗掉）。"""
+    from routers.crm.projects import MIRROR_MODES
+    assert MIRROR_MODES == ("overwrite", "keep", "import")
+    fn = _fn(_src(), "mirror_project_to_mine")
+    assert "mode not in MIRROR_MODES" in fn and "422" in fn
+
+
+def test_keep_mode_touches_no_money():
+    """「保留私帳」＝只建立連結。金額一毛不動 —— 那份數字可能是他照實際
+    請款填的，比 CRM 的成本行準。"""
+    fn = _fn(_src(), "mirror_project_to_mine")
+    seg = fn.split('elif mode == "overwrite":')[1].split("t.source_project_id")[0]
+    # 覆蓋那條才動錢；keep 落在兩者之外，只走到 source_project_id
+    assert "t.contract_amount = mir" in seg and "resync_receivable" in seg
+    assert "t.source_project_id = project_id" in fn
+
+
+def test_import_mode_writes_into_crm_and_leaves_the_private_ledger_alone():
+    """「從私帳匯入」＝反過來，私帳是正本。寫的是母公司的成本行，
+    私帳那一列除了連結之外一個數字都不碰。"""
+    fn = _fn(_src(), "mirror_project_to_mine")
+    seg = fn.split('if mode == "import":')[1].split("elif")[0]
+    assert "_import_split_to_cost_lines(" in seg
+    for bad in ("t.contract_amount", "t.ledger_detail", "resync_receivable"):
+        assert bad not in seg, bad
+
+
+def test_import_only_touches_lines_assigned_to_me():
+    """🔴 只碰 `actual_staff_id` 是我的那幾行。掛給別人的同名行一律不動 ——
+    「導演」那種工項本來就可能同時有兩個人，覆蓋掉就是改到別人的錢。"""
+    body = code_only(func_body(repo_src("routers/crm/projects.py"),
+                               "async def _import_split_to_cost_lines("))
+    assert '(r.actual_staff_id or "") == staff_id' in body
+    assert "actual_staff_id=staff_id" in body, "新增的行也要掛給我"
+    assert 'phase="後期製作"' in body
+
+
+def test_the_conflict_dialog_shows_both_sides_before_asking():
+    """🔴 只給三顆按鈕不給數字，等於要他憑印象賭一把 —— 視窗要把兩邊的工項
+    並排列出來。私帳那份可能是照實際請款填的，也可能是舊估算，沒有哪一邊
+    先天是對的。"""
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-core.js"))
+    fn = js.split("function _pmmDrawConflict(")[1].split("\nlet _pmm")[0]
+    assert "私帳現有" in fn and "CRM 成本行" in fn
+    for mode in ("overwrite", "keep", "import"):
+        assert f"btn('{mode}'" in fn, mode
+    assert "opt.split" in fn, "對照要用那一案自己的工項"

@@ -966,6 +966,62 @@ async def move_project_ledger(project_id: str, req: ProjectLedgerMovePayload,
 #
 # 金額來源＝人員配置的成本行裡掛給**我**的那些（規則正本 core.ledger_project
 # .mirror_lines）。「我」＝登入帳號綁的 crm_staff（User.staff_id），不寫死人名。
+#: 連結時，要連結的私帳案**已經填過工項**的三種處理方式（owner 2026-08-30
+#: 「跳出幾個選擇讓我決定要怎麼做」）。前端的三顆按鈕與這裡是同一組值。
+MIRROR_MODES = ("overwrite", "keep", "import")
+
+
+async def _import_split_to_cost_lines(session, parent, split: dict,
+                                      staff_id: str) -> int:
+    """私帳的工項 → 母公司的 CRM 成本行（掛給我）。回寫了幾行。
+
+    「從私帳匯入」那條路：私帳是正本（那些數字是他照實際請款填的），公司這邊
+    反而還沒把成本行建起來。匯入之後那些成本行在 CRM 照常可以編
+    （owner：「但是其他工項 crm 也可以編輯」）—— 它們就是一般的成本行，
+    沒有任何鎖。
+
+    🔴 **只碰掛給我自己的那幾行**：同工項名且 `actual_staff_id` 是我 → 更新
+    金額；沒有 → 新增一行。掛給別人的同名行一律不動 —— 那是他們的錢，
+    「導演」那種工項本來就可能同時有兩個人。
+    """
+    from db.models import CrmProjectCostGroup, CrmProjectCostLine
+
+    if not split:
+        return 0
+    rows = (await session.execute(
+        select(CrmProjectCostLine)
+        .where(CrmProjectCostLine.project_id == parent.id))).scalars().all()
+    mine = {(r.item_name or ""): r for r in rows
+            if (r.actual_staff_id or "") == staff_id}
+    # 子表：沿用第一張（建案時一定會有「主表」），不另外開一張
+    gid = (await session.execute(
+        select(CrmProjectCostGroup.id)
+        .where(CrmProjectCostGroup.project_id == parent.id)
+        .order_by(CrmProjectCostGroup.sort_order).limit(1))).scalar()
+    nxt = max([int(r.sort_order or 0) for r in rows], default=0)
+    now = _now()
+    n = 0
+    for item, amount in split.items():
+        amt = int(amount or 0)
+        if not amt:
+            continue
+        row = mine.get(item)
+        if row is not None:
+            if int(row.actual_amount or 0) == amt:
+                continue                       # 已經一樣了，不動（也不算一行）
+            row.actual_amount = amt
+            row.updated_at = now
+        else:
+            nxt += 1
+            session.add(CrmProjectCostLine(
+                id=uuid.uuid4().hex, project_id=parent.id, cost_group_id=gid,
+                phase="後期製作", item_name=item, sort_order=nxt,
+                actual_amount=amt, actual_staff_id=staff_id,
+                created_at=now, updated_at=now))
+        n += 1
+    return n
+
+
 async def _mirror_preview(session, project_id: str, staff_id: str) -> tuple:
     """這一案能鏡射出什麼 → `(母公司專案, mirror_lines 結果, 已連結的私帳案|None)`。
     預覽與寫入共用，兩邊各算一次就會漂。"""
@@ -1010,6 +1066,8 @@ async def check_project_mirror(project_id: str, request: Request):
     """按鈕按下去之前的預覽：哪幾行、多少錢、連結了沒、可選的既有私帳案。"""
     from core.ledger import require_entity
 
+    from core.ledger_project import norm_detail
+
     require_entity(request, "mine", level="full")
     sid = await _me_staff_id(request)
     _require_db()
@@ -1022,7 +1080,8 @@ async def check_project_mirror(project_id: str, request: Request):
         # 擋下來的時候不撈：前端一看到 reason 就 toast 完 return，那份清單
         # （~109 列、約 8KB）純粹是白跑一趟查詢＋白傳一次。
         options = [] if reason else (await session.execute(
-            select(CrmProject.id, CrmProject.name, CrmProject.contract_amount)
+            select(CrmProject.id, CrmProject.name, CrmProject.contract_amount,
+                   CrmProject.ledger_detail)
             .where(CrmProject.entity == "mine",
                    CrmProject.source_project_id.is_(None))
             .order_by(CrmProject.created_at.desc()).limit(400))).all()
@@ -1033,7 +1092,12 @@ async def check_project_mirror(project_id: str, request: Request):
         # can 與 reason 是同一件事的兩面 —— 由 reason 推導，不各寫一份判斷式
         # （多一個擋人的條件時只改得到一邊＝「擋住了但沒說為什麼」）
         "can_mirror": not reason, "reason": reason,
-        "options": [{"id": i, "name": n, "amount": int(a or 0)} for i, n, a in options],
+        # 每個候選帶著它**現有的工項** —— 選到有工項的那一案時，要在當下就畫出
+        # 「私帳現有 vs CRM 成本行」的對照讓人決定怎麼做（owner 2026-08-30）。
+        # 為此再打一趟 API 的話，下拉每換一次就閃一下。
+        "options": [{"id": i, "name": n, "amount": int(a or 0),
+                     "split": (norm_detail(d).get("split") or {})}
+                    for i, n, a, d in options],
     }
 
 
@@ -1064,6 +1128,10 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                                               resync_receivable)
 
     require_entity(request, "mine", level="full")
+    mode = (req.mode or "overwrite").strip()
+    if mode not in MIRROR_MODES:
+        raise HTTPException(status_code=422,
+                            detail=f"未知的處理方式：{mode or '(空)'}")
     sid = await _me_staff_id(request)
     _require_db()
     factory = await _get_factory()
@@ -1073,6 +1141,7 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
         if reason:
             raise HTTPException(status_code=409, detail=reason)
         target_id = (req.target_id or "").strip()
+        imported = 0
         if target_id:
             # 連結既有：只覆蓋收入那半邊。他在私帳填的委外／代開費用是**他自己
             # 的成本**，公司管不著 —— 整包寫回去會把那些洗成 0。
@@ -1085,12 +1154,19 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 raise HTTPException(status_code=409,
                                     detail=f"「{t.name}」已經是別案的分身了")
             keep = norm_detail(t.ledger_detail)
-            keep["split"], keep["source"] = mir["split"], MIRROR_SOURCE
-            t.ledger_detail = keep
-            t.contract_amount = mir["total"]
+            if mode == "import":
+                # 反過來：私帳是正本，把它的工項寫成母公司的成本行。
+                # 私帳那一列除了連結之外一個數字都不動。
+                imported = await _import_split_to_cost_lines(
+                    session, p, keep.get("split") or {}, sid)
+            elif mode == "overwrite":
+                keep["split"], keep["source"] = mir["split"], MIRROR_SOURCE
+                t.ledger_detail = keep
+                t.contract_amount = mir["total"]
+                # 營收換了 → 應收跟著重算，否則這一案的應收停在舊數字
+                resync_receivable(t, keep)
+            # mode == "keep"：只建立連結，金額一毛不動
             t.source_project_id = project_id
-            # 營收換了 → 應收跟著重算，否則這一案的應收停在舊數字
-            resync_receivable(t, keep)
             t.updated_at = _now()
             new_id = t.id
         else:
@@ -1107,4 +1183,5 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
         # 否則這一分鐘內它會被當成母公司的（同 move-ledger 的理由）
         from core.ledger import invalidate_mine_projects
         invalidate_mine_projects()
-    return {"status": "ok", "id": new_id, "amount": mir["total"]}
+    return {"status": "ok", "id": new_id, "amount": mir["total"],
+            "mode": mode, "imported": imported}
