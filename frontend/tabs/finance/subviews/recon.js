@@ -885,8 +885,9 @@ _fr.stmtParse = async (btn) => {
     if (!d) return;
     // 帳戶跟著預覽回來（bank_account_id）—— 不用再自己記一份
     _stmtPreview = d;
-    // 類別清單也一起回來了（mapped_categories）—— 這條路不用再跨 prefix 抓
-    if (d.mapped_categories && d.mapped_categories.length) _cashCats = d.mapped_categories;
+    // 類別清單也一起回來了（mapped_categories，後端已按帳本篩過）——
+    // 這條路不用再跨 prefix 抓
+    _stmtCacheCats(d);
     _stmtRenderPreview();
 };
 
@@ -927,7 +928,7 @@ _fr.draftOpen = async (id, btn) => {
             return;
         }
         _stmtPreview = d;
-        if (d.mapped_categories && d.mapped_categories.length) _cashCats = d.mapped_categories;
+        _stmtCacheCats(d);
         _stmtRenderPreview();
         // 存草稿之後才被匯進去的列會變成「已匯過」並自動取消勾選 —— 要講出來，
         // 不然使用者以為自己上次沒勾到。
@@ -1043,7 +1044,7 @@ function _stmtRow(r, i) {
         <td style="padding:4px 6px;white-space:nowrap;">
             <select class="crm-select crm-select-sm"
                     onchange="window._finRecon.stmtCatChanged(${i}, this.value)">
-                ${_stmtCatOptions(r.category)}
+                ${_stmtCatOptions(r)}
             </select>
             <button type="button" title="把「${esc((r.description || '').slice(0, 12))} → 這個類別」存成規則，以後自動套用"
                     onclick="window._finRecon.stmtSaveRule(${i})"
@@ -1057,23 +1058,78 @@ function _stmtRow(r, i) {
 }
 
 /** 類別下拉的選項。來源是後端的收支科目對映（規則只能填報表認得的類別）。 */
-let _cashCats = null;
+// 🔴 **按帳本各快取一份**。原本是單一 `_cashCats` 且呼叫時沒帶 entity ——
+// 後端那支預設 parent，於是私帳的匯入視窗永遠拿到母公司的類別清單
+// （owner 2026-08-29：「分類的填寫方式也需要和私帳同步，不是用 crm 的」）。
+// 存成一個變數還會讓先開母公司、再切私帳的人繼續看到上一本的清單。
+const _cashOpts = {};
 
-/** 類別清單由後端供（唯一正本）—— 前端寫死的清單會跟科目對映脫節。
- *  那支端點在 crm prefix 下，這裡直接打完整路徑（不為了一次呼叫把 crmFetch
- *  拉進財務模組，那條線的 base 與錯誤處理都不一樣）。抓一次就夠，兩個入口共用。 */
-async function _ensureCashCats() {
-    if (_cashCats) return _cashCats;
+/** 這本帳的類別清單與分類樹，由後端供（唯一正本）—— 前端寫死的清單會跟科目
+ *  對映脫節。那支端點在 crm prefix 下，這裡直接打完整路徑（不為了一次呼叫把
+ *  crmFetch 拉進財務模組，那條線的 base 與錯誤處理都不一樣）。
+ *  回 `{categories, tree}`：母公司用平面 categories、私帳用 tree。 */
+async function _ensureCashOpts() {
+    const ent = finEntity();
+    if (_cashOpts[ent]) return _cashOpts[ent];
     try {
-        const res = await fetch('/api/v1/crm/cash-entries/options',
-                                { headers: bearerHeader() });
-        _cashCats = res.ok ? ((await res.json()).categories || []) : [];
-    } catch (_) { _cashCats = []; }
-    return _cashCats;
+        const res = await fetch(
+            '/api/v1/crm/cash-entries/options?entity=' + encodeURIComponent(ent),
+            { headers: bearerHeader() });
+        const d = res.ok ? await res.json() : {};
+        _cashOpts[ent] = { categories: d.categories || [], tree: d.tree || [],
+                           taxonomy_paths: _flatTaxPaths(d.tree || []) };
+    } catch (_) { _cashOpts[ent] = { categories: [], tree: [], taxonomy_paths: [] }; }
+    return _cashOpts[ent];
 }
 
-function _stmtCatOptions(cur) {
-    const list = _cashCats || (cur ? [cur] : []);
+async function _ensureCashCats() {
+    return (await _ensureCashOpts()).categories;
+}
+
+/** 樹 → `[{id, path}]`（每個節點一列，不只葉節點 —— 有些列就是歸在中間層）。
+ *  後端的 core.cash_tree.flatten 做同一件事，這裡是給 options 端點那條路用的
+ *  （它回的是巢狀 tree；預覽那條路後端已經攤平好帶下來了）。 */
+function _flatTaxPaths(tree, out = []) {
+    (tree || []).forEach((n) => {
+        out.push({ id: n.id, path: n.path || [] });
+        _flatTaxPaths(n.children || [], out);
+    });
+    return out;
+}
+
+/** 預覽回應自帶這本帳的類別清單 —— 寫進**當前帳本**那一格快取。
+ *  （寫進共用變數的話，切帳本之後上一本的清單還留著。） */
+function _stmtCacheCats(d) {
+    if (!d || !(d.mapped_categories || []).length) { return; }
+    const ent = finEntity();
+    _cashOpts[ent] = { ...(_cashOpts[ent] || {}),
+                       categories: d.mapped_categories,
+                       taxonomy_paths: d.taxonomy_paths || [] };
+}
+
+/** 分類下拉的選項。
+ *
+ *  🔴 兩本帳的**填寫方式不一樣**，因為值域不一樣（owner 2026-08-29
+ *  「分類的填寫方式也需要和私帳同步，不是用 crm 的」）：
+ *    母公司 → finance_category_map 的平面科目，一個字串一個選項。
+ *    私帳   → cash_taxonomy_nodes 那棵樹，選的是**節點**，畫完整路徑
+ *             （家用 ▸ 變動支出 ▸ 醫療保健 ▸ 乳癌治療），值＝節點 id。
+ *
+ *  私帳為什麼不做成收支明細那種逐層下拉：那邊一次編一列（詳情面板），這裡
+ *  是一份對帳單五十幾列的表格 —— 每列三四個下拉會把表撐爆。單一下拉列完整
+ *  路徑，深度一樣看得到，寬度只佔一格。
+ */
+function _stmtCatOptions(row) {
+    const opts = _cashOpts[finEntity()] || {};
+    const paths = opts.taxonomy_paths || [];
+    if (paths.length) {
+        const cur = row.taxonomy_node_id || '';
+        return `<option value="">（未分類）</option>`
+            + paths.map(n => `<option value="${esc(n.id)}"${n.id === cur ? ' selected' : ''}>${
+                esc((n.path || []).join(' ▸ '))}</option>`).join('');
+    }
+    const cur = row.category || '';
+    const list = opts.categories || (cur ? [cur] : []);
     return `<option value="">（未分類）</option>`
         + list.map(v => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(v)}</option>`).join('');
 }
@@ -1084,6 +1140,15 @@ _fr.stmtCatChanged = (i, v) => {
     if (!_stmtPreview || !_stmtPreview.rows[i]) return;
     const r = _stmtPreview.rows[i];
     const cats = _stmtPreview.project_categories || [];
+    const paths = (_cashOpts[finEntity()] || {}).taxonomy_paths || [];
+    if (paths.length) {
+        // 私帳：下拉的值是**節點 id**。category 這裡先照鏡射規則的前兩層填上
+        // （畫面上的「專案類」判斷、未對映提醒都讀它），寫入時後端會用
+        // `_sync_taxonomy` 從節點重推一次 —— 那份才是正本。
+        const node = paths.find(n => n.id === v);
+        r.taxonomy_node_id = node ? node.id : '';
+        v = node ? (node.path || []).slice(0, 2).join('_') : '';
+    }
     r.category = v;
     // 「會落到未歸類嗎」的規則跟後端同一條：沒類別**或**類別沒有科目對映。
     // 只判 !v 的話，改成一個沒對映的類別之後那個提醒就消失了。
@@ -1162,7 +1227,8 @@ function _rulesRender() {
     const acctOpts = '<option value="">所有帳戶</option>' + _bankOnly()
         .map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
     const catOpts = '<option value="">— 選類別 —</option>'
-        + (_cashCats || []).map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+        + (((_cashOpts[finEntity()] || {}).categories) || [])
+            .map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
     const rows = _rules.map(r => `
         <tr style="border-bottom:1px solid #2a2a2a;${r.active ? '' : 'opacity:.45;'}">
             <td style="padding:4px 6px;color:#ddd;">${esc(r.keyword)}</td>
@@ -1509,6 +1575,9 @@ function _stmtIndex() {
 const _stmtRowPayload = (x) => ({
     date: x.date, amount: x.amount, description: x.description,
     category: x.category, loan_id: x.loan_id, period_no: x.period_no,
+    // 私帳挑的是分類樹的節點 —— 不帶它的話寫進去的列只有 category 字串、
+    // 沒有節點，收支明細的分類篩選與路徑顯示就看不到它（樹才是正本）
+    taxonomy_node_id: x.taxonomy_node_id || null,
     project_id: x.project_id || null,
     invoices: x.invoices || [],
     // 支出列的鏡像。同樣用 `|| []` —— 後端那兩欄是 List 不收 null（見上面那段

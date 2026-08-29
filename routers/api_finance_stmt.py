@@ -163,13 +163,19 @@ def _rule_priority_key(bank_account_id: str = ""):
     return key
 
 
-async def _load_import_rules(session, bank_account_id: str = ""):
-    """回 [(關鍵字, category, 方向, 只在哪個方向)]，已照優先序排好給 _classify 用。"""
+async def _load_import_rules(session, bank_account_id: str = "", ent: str = "parent"):
+    """回 [(關鍵字, category, 方向, 只在哪個方向)]，已照優先序排好給 _classify 用。
+
+    🔴 `ent` 必帶：規則按帳本分家（見 db.models.BankImportRule.entity）。
+    漏傳等於把母公司的類別套到私帳的列上 —— 那些值私帳的報表不認得，會靜靜
+    落到「未歸類」，而且看起來像已經分好類了。
+    """
     from sqlalchemy import select
 
     from db.models import BankImportRule
     rows = (await session.execute(
-        select(BankImportRule).where(BankImportRule.active.is_(True)))).scalars().all()
+        select(BankImportRule).where(BankImportRule.active.is_(True),
+                                     BankImportRule.entity == ent))).scalars().all()
     # 別家帳戶專屬的規則不參與這次比對（tier 2）
     rows = [r for r in rows
             if not r.bank_account_id or r.bank_account_id == bank_account_id]
@@ -187,24 +193,42 @@ def _rule_dict(r) -> dict:
 
 
 @router.get("/import-rules")
-async def list_import_rules(request: Request, bank_account_id: str = ""):
+async def list_import_rules(request: Request, bank_account_id: str = "",
+                            entity: str = ""):
     """規則清單。顯示順序＝命中優先序（共用 _rule_priority_key）。
 
     帶 bank_account_id 就是「這個帳戶實際會怎麼比」；不帶則是綁帳戶的一律在前
     （多帳戶時那不等於任何一個帳戶的真實順序，所以畫面要嘛選帳戶、要嘛別宣稱）。
     """
-    _guard(request, level="full")
+    ent = _guard(request, entity, level="full")
     from sqlalchemy import select
 
     from db.models import BankImportRule
     factory = _factory_or_503()
     async with factory() as session:
-        rows = (await session.execute(select(BankImportRule))).scalars().all()
+        rows = (await session.execute(
+            select(BankImportRule).where(BankImportRule.entity == ent))).scalars().all()
     rows.sort(key=_rule_priority_key(bank_account_id))
     return {"items": [_rule_dict(r) for r in rows]}
 
 
-async def _apply_rule_payload(r, payload, *, require_all: bool, session):
+async def _owned_rule(session, rule_id: str, ent: str):
+    """載入規則 → 404 → 驗它真的屬於這本帳。
+
+    query 的 entity 只驗得了「人有沒有這本帳的權限」，驗不了「這一條是誰的」——
+    不驗的話，私帳的帳號可以改到母公司的規則（規則會改變已匯入資料的分類）。
+    """
+    from db.models import BankImportRule
+    r = await session.get(BankImportRule, rule_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="規則不存在")
+    if (r.entity or "parent") != ent:
+        raise HTTPException(status_code=403, detail="這條規則不屬於目前的帳本")
+    return r
+
+
+async def _apply_rule_payload(r, payload, *, require_all: bool, session,
+                              ent: str = "parent"):
     """驗規則欄位並寫進 r。新增與修改共用 —— 各寫一份的話，防呆會只加在一邊。
 
     require_all：新增時關鍵字與類別都必填；修改時允許只送要改的那個。
@@ -215,7 +239,7 @@ async def _apply_rule_payload(r, payload, *, require_all: bool, session):
         raise HTTPException(status_code=422, detail="關鍵字與類別都要填")
     if kw:
         _assert_usable_keyword(kw)
-    await _assert_known_category(cat, session)
+    await _assert_known_category(cat, session, ent)
     r.keyword = kw or r.keyword
     r.category = cat or r.category
     r.bank_account_id = payload.bank_account_id or None
@@ -230,14 +254,15 @@ async def _apply_rule_payload(r, payload, *, require_all: bool, session):
 
 
 @router.post("/import-rules")
-async def create_import_rule(payload: BankImportRulePayload, request: Request):
-    _guard(request, level="full")
+async def create_import_rule(payload: BankImportRulePayload, request: Request,
+                             entity: str = ""):
+    ent = _guard(request, entity, level="full")
     from db.models import BankImportRule
     factory = _factory_or_503()
     async with factory() as session:
         r = await _apply_rule_payload(
-            BankImportRule(id=uuid.uuid4().hex, direction=0), payload,
-            require_all=True, session=session)
+            BankImportRule(id=uuid.uuid4().hex, direction=0, entity=ent), payload,
+            require_all=True, session=session, ent=ent)
         session.add(r)
         await session.commit()
         return _rule_dict(r)
@@ -245,29 +270,24 @@ async def create_import_rule(payload: BankImportRulePayload, request: Request):
 
 @router.put("/import-rules/{rule_id}")
 async def update_import_rule(rule_id: str, payload: BankImportRulePayload,
-                             request: Request):
-    _guard(request, level="full")
-    from db.models import BankImportRule
+                             request: Request, entity: str = ""):
+    ent = _guard(request, entity, level="full")
     factory = _factory_or_503()
     async with factory() as session:
-        r = await session.get(BankImportRule, rule_id)
-        if not r:
-            raise HTTPException(status_code=404, detail="規則不存在")
-        await _apply_rule_payload(r, payload, require_all=False, session=session)
+        r = await _owned_rule(session, rule_id, ent)
+        await _apply_rule_payload(r, payload, require_all=False, session=session,
+                                  ent=ent)
         r.updated_at = datetime.now()
         await session.commit()
         return _rule_dict(r)
 
 
 @router.delete("/import-rules/{rule_id}")
-async def delete_import_rule(rule_id: str, request: Request):
-    _guard(request, level="full")
-    from db.models import BankImportRule
+async def delete_import_rule(rule_id: str, request: Request, entity: str = ""):
+    ent = _guard(request, entity, level="full")
     factory = _factory_or_503()
     async with factory() as session:
-        r = await session.get(BankImportRule, rule_id)
-        if not r:
-            raise HTTPException(status_code=404, detail="規則不存在")
+        r = await _owned_rule(session, rule_id, ent)
         await session.delete(r)
         await session.commit()
     return {"ok": True}
@@ -307,8 +327,8 @@ def _assert_usable_keyword(kw: str):
                    f"卻看起來像設好了規則。請改用描述性質的字。")
 
 
-async def _assert_known_category(cat: str, session):
-    """規則只能填 finance_category_map 認得的類別。
+async def _assert_known_category(cat: str, session, ent: str = "parent"):
+    """規則只能填**這本帳**認得的類別。
 
     🔴 不然規則會產出一個報表看不懂的值，那些列全部靜靜落到「未歸類」——
     而且是**匯入當下就分好類**的假象，比沒分類更難發現。
@@ -318,13 +338,37 @@ async def _assert_known_category(cat: str, session):
     """
     if not cat:
         return
-    from routers.crm._shared import cash_category_texts
-    known = set(await cash_category_texts(session))
+    known = await _known_categories(session, ent)
     if cat not in known:
         raise HTTPException(
             status_code=422,
             detail=f"「{cat}」不在收支科目對映裡 —— 規則只能填報表認得的類別。"
                    f"要新增科目請到帳務設定。")
+
+
+async def _known_categories(session, ent: str) -> set:
+    """這本帳認得的類別。
+
+    🔴 兩本帳的值域**不重疊**：母公司是 finance_category_map 的平面科目
+    （行政／薪資／交際應酬…），私帳是 cash_taxonomy_nodes 那棵樹，存進
+    `category` 欄的是路徑前兩層的複合鍵（`公司_專案`、`家用_變動支出`；
+    鏡射規則的正本在 core.cash_taxonomy.mirror_from_path）。
+
+    共用同一份白名單的話，私帳可以設出一條「→ 交際應酬」的規則 —— 而私帳的
+    報表根本沒有那個類別，那些列會靜靜落到「未歸類」，看起來卻像已經分好了。
+    """
+    from routers.crm._shared import cash_category_texts
+    flat = set(await cash_category_texts(session))
+    if ent != "mine":
+        return flat
+    from core.cash_taxonomy import mirror_from_path
+    from core.cash_tree import flatten, load_tree
+    tree = await load_tree(session, ent, include_inactive=True)
+    from_tree = {mirror_from_path(n["path"])[0] for n in flatten(tree)}
+    from_tree.discard("")
+    # 樹上還沒被建成科目的分支照樣可以設規則（科目對映是另一條線的事，
+    # 缺對映本來就有「科目未對映」的標記在提醒）—— 所以是聯集不是交集。
+    return from_tree | {c for c in flat if c in from_tree}
 
 
 @router.post("/import-rules/apply-unclassified")
@@ -354,7 +398,7 @@ async def apply_rules_to_unclassified(request: Request, entity: str = ""):
         for e in rows:
             acct = e.bank_account_id or ""
             if acct not in cache:
-                cache[acct] = await _load_import_rules(session, acct)
+                cache[acct] = await _load_import_rules(session, acct, ent)
             # 🔴 一定要傳 signed，否則帶方向條件的規則會被整批跳過
             #    （_classify：不知道方向就不假裝知道）。「薪資」兩側都有、
             #    靠方向分成代收／代發 —— 那正是這條路要分的東西。
@@ -511,8 +555,10 @@ async def _build_statement_preview(session, acct, ent, text):
     from core.bank_statement import (LOAN_CATEGORY, match_loan_payments,
                                      parse_statement)
     acct_id = acct.id
-    # 分類規則走 DB（使用者可編），不是寫死那 14 條
-    rules = await _load_import_rules(session, acct_id)
+    # 分類規則走 DB（使用者可編），不是寫死那 14 條。
+    # 🔴 帶帳本：規則按帳本分家，母公司的類別套到私帳的列上等於分了個
+    # 私帳報表不認得的類（見 db.models.BankImportRule.entity）。
+    rules = await _load_import_rules(session, acct_id, ent)
     # 先解一次（不帶期初）—— 這一趟的目的是拿到**第一筆交易日**。
     # 從整份文字撈第一個日期會撈到表頭的「查詢期間」，見 _balance_before 的說明。
     res = parse_statement(text, rules=rules)
@@ -543,9 +589,18 @@ async def _build_statement_preview(session, acct, ent, text):
     existing = await _existing_entry_keys(
         session, acct_id, sorted({r.date for r in res.rows}))
 
-    # 科目對映：category 沒對映的要標出來（不然匯進去報表變未歸類）
-    from routers.crm._shared import cash_category_texts
-    mapped = set(await cash_category_texts(session))
+    # 科目對映：category 沒對映的要標出來（不然匯進去報表變未歸類）。
+    # 🔴 走 `_known_categories` 而不是整份 cash_category_texts —— 那份是兩本帳
+    # 共用的，私帳的匯入視窗會拿到母公司的平面科目（行政／薪資／交際應酬…），
+    # 而它們在私帳的分類樹上根本不存在（owner 2026-08-29）。
+    mapped = await _known_categories(session, ent)
+    # 私帳的分類樹一起回（母公司沒有樹，回空陣列）—— 前端逐列的分類下拉
+    # 要用它，多打一支 API 只是為了同一份資料
+    from core.cash_tree import flatten as _tax_flatten
+    from core.cash_tree import load_tree as _load_tax_tree
+    tax_paths = ([{"id": n["id"], "path": n["path"]}
+                  for n in _tax_flatten(await _load_tax_tree(session, ent))]
+                 if ent == "mine" else [])
 
     # 預覽要能當場掛專案／發票（owner 2026-08-20）→ 選項一起回，
     # 前端不用再多打兩支 API（那兩支還在不同的 prefix 下）。
@@ -672,6 +727,7 @@ async def _build_statement_preview(session, acct, ent, text):
         # 不然改成一個沒對映的類別之後那個提醒就消失了。
         # （也省掉前端跨 prefix 去打 /crm/cash-entries/options 那一支）
         "mapped_categories": sorted(mapped),
+        "taxonomy_paths": tax_paths,
         "summary": {"count": len(out_rows), "total_in": res.total_in,
                     "total_out": res.total_out,
                     "duplicates": sum(1 for r in out_rows if r["duplicate"]),
@@ -955,6 +1011,13 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                     note="銀行對帳單匯入",
                     category=(r.category or "").strip() or None,
                     bank_account_id=payload.bank_account_id, entity=ent)
+                # 私帳挑的是分類樹的節點 —— category/item/sub_item 由
+                # `_sync_taxonomy` 從路徑推（規則正本在 routers/crm/finance），
+                # 這裡不自己拼第二份鏡射
+                if (r.taxonomy_node_id or "").strip():
+                    from routers.crm.finance import _sync_taxonomy
+                    await _sync_taxonomy(
+                        session, ce, {"taxonomy_node_id": r.taxonomy_node_id.strip()})
                 # 預覽時當場掛的專案／發票（owner 2026-08-20）。
                 # 🔴 走 crm/finance 的既有 helper，不在這裡自己寫一套：
                 #  - 專案要過 _enforce_cash_project_link（行政/薪資掛專案會讓

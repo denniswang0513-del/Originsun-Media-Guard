@@ -1356,6 +1356,10 @@ class StatementImportRow(BaseModel):
     amount: int
     description: Optional[str] = ""
     category: Optional[str] = ""
+    # 私帳的分類是一棵樹（cash_taxonomy_nodes），`category` 只是路徑前兩層的
+    # 鏡射。挑了節點就送它，寫入端用 `_sync_taxonomy` 推三欄 —— 只送 category
+    # 的話那一列沒有節點，收支明細的分類篩選與路徑顯示就看不到它。
+    taxonomy_node_id: Optional[str] = None
     # 指定成貸款繳款時要帶：配到哪筆貸款的哪一期（preview 已配好或使用者手選）
     loan_id: Optional[str] = None
     period_no: Optional[int] = None

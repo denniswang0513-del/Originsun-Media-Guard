@@ -1184,6 +1184,11 @@ async def _on_startup():
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS crm_pushed INTEGER NOT NULL DEFAULT 0",
                         # 連結私帳：私帳案 → 它是哪個母公司專案的收入分身
                         # （見 db/models.CrmProject.source_project_id）
+                        # 分類規則按帳本分家（既有列 DEFAULT 'parent' ＝回填）
+                        "ALTER TABLE bank_import_rules ADD COLUMN IF NOT EXISTS "
+                        "entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
+                        "CREATE INDEX IF NOT EXISTS ix_bankrule_entity "
+                        "ON bank_import_rules (entity, bank_account_id, active)",
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS source_project_id VARCHAR(32)",
                         "CREATE INDEX IF NOT EXISTS idx_projects_source_project "
                         "ON crm_projects (source_project_id)",

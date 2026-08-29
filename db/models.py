@@ -1530,6 +1530,12 @@ class BankImportRule(Base):
     __tablename__ = "bank_import_rules"
 
     id = Column(String(32), primary_key=True)
+    # 🔴 規則**按帳本分家**（owner 2026-08-29「這裡的分類規則不需要和 crm 共用」）：
+    # 母公司的類別是 finance_category_map 的平面科目（行政／薪資／交際應酬…），
+    # 私帳走的是 cash_taxonomy_nodes 的樹（公司_專案／家用_變動支出…）——
+    # 兩套值域根本不重疊，共用一份規則只會讓兩邊都選到對方看不懂的類別。
+    # 既有 36 條全歸 parent（ALTER 的 DEFAULT 就是回填），私帳從 0 開始。
+    entity = Column(String(16), nullable=False, server_default="parent")
     keyword = Column(String(64), nullable=False)                 # 摘要包含這串就命中
     bank_account_id = Column(String(32), nullable=True)          # soft FK；空=所有帳戶
     category = Column(String(32), nullable=False)                # 命中後填的收支類別
@@ -1549,7 +1555,7 @@ class BankImportRule(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        Index("ix_bankrule_acct", "bank_account_id", "active"),
+        Index("ix_bankrule_acct", "entity", "bank_account_id", "active"),
     )
 
 
