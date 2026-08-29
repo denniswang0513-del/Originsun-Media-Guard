@@ -270,6 +270,53 @@ async def project_ledger(request: Request, entity: str = ""):
     return {"projects": items, "totals": tot, "count": len(items)}
 
 
+def resync_receivable(project, detail: dict) -> None:
+    """營收或代扣成本動了 → 應收與收款狀態重算（就地改 project）。
+
+    基準＝**實際會進帳的錢**（營收 − 源頭代扣，見 expected_cash_in），不是營收。
+    🔴 抽成一支是因為它有三個呼叫點（新增／編輯／連結私帳）而漏掉不會噴錯，
+    只會讓那一案安靜地不進應收帳款（owner 2026-08-26 清查：349 案 NULL）。
+    """
+    recv = int(getattr(project, "amount_received", 0) or 0)
+    exp = expected_cash_in(int(project.contract_amount or 0), detail)
+    project.amount_receivable = exp - recv
+    project.payment_status = receivable_status(exp, recv)
+
+
+def new_ledger_project(*, project_id: str, name: str, client_id, entity: str,
+                       contract: int, detail: dict, close=None, notes: str,
+                       source_project_id: str = ""):
+    """帳本裡新增一列專案的**單一正本**（回未加入 session 的 CrmProject）。
+
+    這裡集中的是幾條不放在同一處就會走鐘的初始化：
+
+    🔴 `amount_receivable` 要在建立時就算好 —— 應收視圖讀的是存起來的值
+    （收支同步是增量制，不會替 NULL 補課）。漏掉的話新案永遠不進應收帳款
+    （owner 2026-08-26 實測）。基準＝實際會進帳的錢（營收−源頭代扣）。
+
+    手動新增（POST /project-ledger）與連結私帳的鏡射案（crm/projects.py 的
+    mirror-to-mine）共用這支 —— 兩條路各建一份 CrmProject，遲早只有一邊
+    記得補新的必填欄。
+    """
+    from db.models import CrmProject
+    from routers.crm._shared import _now
+
+    now = _now()
+    row = CrmProject(
+        id=project_id, name=name, client_id=client_id or None,
+        entity=entity, status="結案" if close else "製作",
+        completion_date=close,
+        contract_amount=contract or None,
+        ledger_detail=detail,
+        amount_received=0,
+        notes=notes,
+        source_project_id=source_project_id or None,
+        created_at=now, updated_at=now,
+    )
+    resync_receivable(row, detail)
+    return row
+
+
 @router.post("/project-ledger")
 async def create_ledger_project(payload: LedgerProjectCreate, request: Request,
                                 entity: str = ""):
@@ -286,7 +333,7 @@ async def create_ledger_project(payload: LedgerProjectCreate, request: Request,
     from sqlalchemy import select
 
     from db.models import Client, CrmProject
-    from routers.crm._shared import _now, _parse_shoot_date
+    from routers.crm._shared import _parse_shoot_date
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail="專案名稱必填")
@@ -318,21 +365,10 @@ async def create_ledger_project(payload: LedgerProjectCreate, request: Request,
         d = norm_detail({"source": payload.source,
                          "fee_pct": payload.fee_pct})
         d = norm_detail(apply_source_fee(contract, d))
-        session.add(CrmProject(
-            id=pid, name=name, client_id=payload.client_id or None,
-            entity=ent, status="結案" if close else "製作",
-            completion_date=close,
-            contract_amount=contract or None,
-            ledger_detail=d,
-            # 🔴 應收要在建立時就初始化 —— 應收視圖讀的是存起來的
-            # amount_receivable（收支同步是增量制，不會替 NULL 補課）。
-            # 漏掉的話新案永遠不進應收帳款（owner 2026-08-26 實測）。
-            # 基準＝實際會進帳的錢（營收−源頭代扣，見 expected_cash_in）。
-            amount_received=0,
-            amount_receivable=expected_cash_in(contract, d),
-            payment_status="未到帳",
+        session.add(new_ledger_project(
+            project_id=pid, name=name, client_id=payload.client_id,
+            entity=ent, contract=contract, detail=d, close=close,
             notes=f"[私帳新增] 案碼:{code}" if code else "[私帳新增]",
-            created_at=_now(), updated_at=_now(),
         ))
         await session.commit()
     return {"status": "ok", "id": pid}
@@ -456,10 +492,7 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         p.ledger_detail = d
         # 營收或代扣成本（個人稅款/代辦費）動了 → 應收與收款狀態一律重算
         # （基準＝實際會進帳的錢；規則正本 expected_cash_in，與收支同步同一條）
-        _recv = int(p.amount_received or 0)
-        _exp = expected_cash_in(int(p.contract_amount or 0), d)
-        p.amount_receivable = _exp - _recv
-        p.payment_status = receivable_status(_exp, _recv)
+        resync_receivable(p, d)
         p.updated_at = _now()
         await session.commit()
         d, cost_src = apply_crm_costs(d, crm_now)

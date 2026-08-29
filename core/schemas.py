@@ -723,6 +723,15 @@ class ProjectLedgerMovePayload(BaseModel):
     entity: str = ""
 
 
+class ProjectMirrorPayload(BaseModel):
+    """連結私帳：母公司專案 → 私帳的收入分身。
+
+    `target_id` 空＝建新的私帳案；有值＝連結到既有那一案（他手動建過 109 案，
+    名字跟母公司的不一定一樣，所以要留這條路）。
+    """
+    target_id: str = ""
+
+
 class CashTaxonomyNodePayload(BaseModel):
     """在收支分類樹上長一個節點（收支明細的「＋自訂…」）。
 

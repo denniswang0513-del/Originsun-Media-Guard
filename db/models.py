@@ -244,7 +244,14 @@ class CrmProject(Base):
     # 🔴 這個旗標**不影響金額可見性** —— 2026-08-28 一度讓它放寬，當天被 owner
     # 收回：「推到私帳沒有私帳的權限就要看不到了」。抹除只看 entity。
     crm_pushed = Column(Integer, nullable=False, server_default="0")
-    flow_checks = Column(JSONB, nullable=True)                   # 工作流手動里程碑（範本正本在 core/project_flow.py）
+    # 連結私帳（owner 2026-08-29）：這一列（私帳案）是**哪個母公司專案**的收入分身。
+    # 公司把後期發給我做 → 公司那邊是成本行、我這邊是收入，兩本帳各記各的。
+    #
+    # 🔴 跟 entity 是兩回事，別混：`entity` 說「這案的錢算哪本帳」（搬家，一案只在
+    # 一本）；`source_project_id` 說「我這案的收入來自公司那案」（分身，兩案並存）。
+    # 只寫在 entity='mine' 的那一列上，母公司那列不動任何欄位。
+    source_project_id = Column(String(32), nullable=True, index=True)
+    flow_checks = Column(JSONB, nullable=True)                 # 工作流手動里程碑（範本正本在 core/project_flow.py）
     status = Column(String(32), nullable=False, default="洽詢")
     am_username = Column(String(64), nullable=True)
     pm_usernames = Column(JSONB, nullable=True)

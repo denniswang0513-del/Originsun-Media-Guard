@@ -408,11 +408,18 @@ def test_new_and_edited_cases_land_in_receivable():
                                     "personal_tax": 0}) == 75440
     assert expected_cash_in(100, {}) == 100            # 無代扣＝營收
     src = (ROOT / "routers/api_finance_projects.py").read_text(encoding="utf-8")
+    # 初始化在 `new_ledger_project`（建列的單一正本；手動新增與「連結私帳」的
+    # 鏡射案都走它）—— 各自 insert 一份 CrmProject 就只有一邊記得補新欄位
     create = src.split("async def create_ledger_project(")[1].split("\n@router")[0]
-    assert "amount_receivable=expected_cash_in(contract, d)" in create \
-        and "amount_received=0" in create
+    assert "new_ledger_project(" in create
+    row = src.split("def new_ledger_project(")[1].split("\n@router")[0]
+    assert "resync_receivable(row, detail)" in row and "amount_received=0" in row
+    # 重算規則本身也只有一份（新增／編輯／連結私帳三個呼叫點）
+    resync = src.split("def resync_receivable(")[1].split("\ndef ")[0]
+    assert "expected_cash_in(int(project.contract_amount or 0), detail)" in resync
+    assert "receivable_status(exp, recv)" in resync
     upd = src.split("async def update_project_ledger(")[1].split("\n@router")[0]
-    assert "expected_cash_in(" in upd and "receivable_status(" in upd
+    assert "resync_receivable(p, d)" in upd
     fin = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
     assert "receivable_status(expected, received)" in fin, "sync 與端點要共用同一條規則"
 

@@ -17,7 +17,7 @@ from config import load_settings as _load_settings
 
 from core.ledger import hide_mine_projects, not_mine
 from core.schemas import (CrmProjectPayload, CrmProjectPatchPayload,
-                          ProjectLedgerMovePayload)
+                          ProjectLedgerMovePayload, ProjectMirrorPayload)
 
 from ._shared import (router, _check_auth, _check_status_auth, _check_project_write_auth,
                       _check_website_auth, _require_db,
@@ -936,3 +936,158 @@ async def move_project_ledger(project_id: str, req: ProjectLedgerMovePayload,
         from core.ledger import invalidate_mine_projects
         invalidate_mine_projects()
     return {"status": "ok", "entity": target, "crm_pushed": pushed}
+
+
+# ── 連結私帳（母公司專案 → 私帳的收入分身）──────────────────────
+# owner 2026-08-29：「費用要給王士源的，直接在私帳建立專案、同步收入」。
+#
+# 🔴 跟上面的「搬帳本」是**兩件事**，別把它們併成一顆按鈕：
+#   搬帳本 = 整案換本（一案只在一本，母公司不再認它）
+#   連結   = 分身（母公司留著跟客戶的合約；私帳多一案，收入＝公司要付我的錢）
+# 兩本帳各記各的，不是重複計帳：公司那邊是成本、我這邊是收入。
+#
+# 金額來源＝人員配置的成本行裡掛給**我**的那些（規則正本 core.ledger_project
+# .mirror_lines）。「我」＝登入帳號綁的 crm_staff（User.staff_id），不寫死人名。
+async def _mirror_preview(session, project_id: str, staff_id: str) -> dict:
+    """這一案能鏡射出什麼 —— 預覽與寫入共用，兩邊各算一次就會漂。"""
+    from core.ledger_project import mirror_lines
+
+    p = await session.get(CrmProject, project_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="找不到此專案")
+    if (p.entity or "parent") == "mine":
+        raise HTTPException(status_code=409,
+                            detail="這一案本來就在私帳 —— 連結是給母公司專案用的")
+    lines = (await session.execute(
+        select(CrmProjectCostLine)
+        .where(CrmProjectCostLine.project_id == project_id)
+        .order_by(CrmProjectCostLine.sort_order))).scalars().all()
+    mir = mirror_lines(lines, staff_id)
+    linked = (await session.execute(
+        select(CrmProject)
+        .where(CrmProject.source_project_id == project_id))).scalars().first()
+    return {"project": p, "mirror": mir, "linked": linked}
+
+
+async def _me_staff_id(request) -> str:
+    """登入帳號綁的 crm_staff。沒綁就不知道「給我的」是哪幾行。
+
+    走 `core.identity.resolve_current_staff`（全 repo 唯一的「我是誰」解析器，
+    staff_id 從 DB 現查不是從 JWT —— admin 重綁後免重新登入）。
+    """
+    from core.identity import resolve_current_staff
+
+    sid = ((await resolve_current_staff(request)).get("staff_id") or "").strip()
+    if not sid:
+        raise HTTPException(
+            status_code=422,
+            detail="這個帳號還沒綁人員檔案 —— 沒有它就認不出成本行哪幾筆是給你的。"
+                   "請先到使用者管理把帳號綁到自己的人員資料")
+    return sid
+
+
+@router.get("/projects/{project_id}/mirror-check")
+async def check_project_mirror(project_id: str, request: Request):
+    """按鈕按下去之前的預覽：哪幾行、多少錢、連結了沒、可選的既有私帳案。"""
+    from core.ledger import require_entity
+
+    require_entity(request, "mine", level="full")
+    sid = await _me_staff_id(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        pre = await _mirror_preview(session, project_id, sid)
+        p, mir, linked = pre["project"], pre["mirror"], pre["linked"]
+        client = await session.get(Client, p.client_id) if p.client_id else None
+        # 可連結的既有私帳案（他手動建過 109 案）—— 已經是別案分身的不列
+        options = (await session.execute(
+            select(CrmProject.id, CrmProject.name, CrmProject.contract_amount)
+            .where(CrmProject.entity == "mine",
+                   CrmProject.source_project_id.is_(None))
+            .order_by(CrmProject.created_at.desc()).limit(400))).all()
+    return {
+        "name": p.name,
+        "client": client.short_name if client else "",
+        "lines": mir["lines"], "total": mir["total"],
+        "can_mirror": bool(mir["total"]) and linked is None,
+        "reason": _mirror_blocked_reason(mir["total"], linked),
+        "linked": ({"id": linked.id, "name": linked.name,
+                    "amount": int(linked.contract_amount or 0)} if linked else None),
+        "options": [{"id": i, "name": n, "amount": int(a or 0)} for i, n, a in options],
+    }
+
+
+def _mirror_blocked_reason(total: int, linked) -> str:
+    """為什麼不能連結。預覽與 POST 的 409 共用同一句。"""
+    if linked is not None:
+        return f"這一案已經連結到私帳的「{linked.name}」了"
+    if not total:
+        return ("這一案的成本行沒有一筆掛給你（或金額還沒填）—— "
+                "先去人員配置把該給你的工項填上實際金額")
+    return ""
+
+
+@router.post("/projects/{project_id}/mirror-to-mine")
+async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
+                                 request: Request):
+    """建立（或連結既有的）私帳收入分身。**只有私帳 full scope 的帳號能按**。
+
+    寫入只碰私帳那一列：`contract_amount`／`ledger_detail.split`／
+    `source_project_id`。母公司那一列一個欄位都不動 —— 它跟客戶的合約與成本
+    都還在原地。
+    """
+    import uuid as _uuid
+
+    from core.ledger import require_entity
+    from core.ledger_project import mirror_detail
+    from routers.api_finance_projects import (new_ledger_project,
+                                              resync_receivable)
+
+    require_entity(request, "mine", level="full")
+    sid = await _me_staff_id(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        pre = await _mirror_preview(session, project_id, sid)
+        p, mir, linked = pre["project"], pre["mirror"], pre["linked"]
+        reason = _mirror_blocked_reason(mir["total"], linked)
+        if reason:
+            raise HTTPException(status_code=409, detail=reason)
+        target_id = (req.target_id or "").strip()
+        d = mirror_detail(mir["split"])
+        if target_id:
+            # 連結既有：只覆蓋收入那半邊。他在私帳填的委外／代開費用是**他自己
+            # 的成本**，公司管不著 —— 整包寫回去會把那些洗成 0。
+            t = await session.get(CrmProject, target_id)
+            if t is None:
+                raise HTTPException(status_code=404, detail="找不到要連結的私帳專案")
+            if (t.entity or "parent") != "mine":
+                raise HTTPException(status_code=409, detail="要連結的專案不在私帳")
+            if t.source_project_id:
+                raise HTTPException(status_code=409,
+                                    detail=f"「{t.name}」已經是別案的分身了")
+            from core.ledger_project import norm_detail
+            keep = norm_detail(t.ledger_detail)
+            keep["split"] = d["split"]
+            keep["source"] = d["source"]
+            t.ledger_detail = keep
+            t.contract_amount = mir["total"]
+            t.source_project_id = project_id
+            # 營收換了 → 應收跟著重算，否則這一案的應收停在舊數字
+            resync_receivable(t, keep)
+            t.updated_at = _now()
+            new_id = t.id
+        else:
+            new_id = _uuid.uuid4().hex
+            session.add(new_ledger_project(
+                project_id=new_id, name=p.name, client_id=p.client_id,
+                entity="mine", contract=mir["total"], detail=d,
+                close=p.completion_date,
+                notes=f"[私帳連結] 來自母公司專案：{p.name}",
+                source_project_id=project_id))
+        await session.commit()
+        # 新建的是私帳案 —— is_mine_project 的 60 秒 id-set 快取要清，
+        # 否則這一分鐘內它會被當成母公司的（同 move-ledger 的理由）
+        from core.ledger import invalidate_mine_projects
+        invalidate_mine_projects()
+    return {"status": "ok", "id": new_id, "amount": mir["total"]}

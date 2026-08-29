@@ -479,9 +479,17 @@ function renderDetail(project) {
             ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="proj-move-ledger"
                        title="${_toMine ? '把這個專案的錢流歸屬改成私帳' : '把這個專案搬回母公司帳'}"
                        >${_toMine ? '推送至私帳' : '搬回公司帳'}</button>` : '')
+            // 連結私帳＝在私帳開一案，收入＝公司要付給我的成本行（母公司這案不動）。
+            // 只對還在母公司的案子顯示 —— 已經搬過去的案子沒有「公司付給我」這回事。
+            + (_mine && _toMine
+                ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="proj-mirror-mine"
+                           title="公司發給你做的部分，在私帳開一案、收入同步過去（這案留在母公司）"
+                           >連結私帳</button>` : '')
             + `<button class="crm-detail-close" title="關閉">✕</button>`;
         actions.querySelector('#proj-move-ledger')?.addEventListener('click',
             () => window._projMoveLedger(project.id));
+        actions.querySelector('#proj-mirror-mine')?.addEventListener('click',
+            () => window._projMirrorMine(project.id));
         actions.querySelector('.crm-detail-close').addEventListener('click', () => callbacks.closeDetail?.());
     }
     // Re-attach the [🟢 已自動儲存] indicator that _loadFinancialSummary injects —

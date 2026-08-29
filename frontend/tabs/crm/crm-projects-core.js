@@ -546,3 +546,112 @@ window._projMoveLedger = async function (id) {
         crmToast('搬帳本失敗：' + e.message);
     }
 };
+
+
+// ── 連結私帳（母公司專案 → 私帳的收入分身）──────────────────────
+// owner 2026-08-29：「費用要給王士源的，直接在私帳建立專案、同步收入」。
+//
+// 跟「推送至私帳」（搬家）是兩件事：這裡母公司那案原封不動，只是在私帳多開
+// 一案，收入＝人員配置裡掛給我的那幾行成本。金額判定全在後端
+// （core.ledger_project.mirror_lines），前端只顯示它算出來的明細 —— 前端自己
+// 再加一次總和，兩個數字遲早會不一樣。
+window._projMirrorMine = async function (id) {
+    let chk;
+    try {
+        chk = await _fetch(`/projects/${encodeURIComponent(id)}/mirror-check`);
+    } catch (e) {
+        crmToast('查不到連結私帳的狀態：' + e.message, 6000);
+        return;
+    }
+    if (!chk.can_mirror) {
+        // 這句話的正本在後端（_mirror_blocked_reason）——前端再拼一份就會跟
+        // 409 的訊息漂成兩種說法
+        crmToast(chk.reason || '這一案不能連結私帳', 6000);
+        return;
+    }
+    const rows = (chk.lines || []).map(l => `<tr>
+        <td style="color:#888;">${_esc(l.phase)}</td>
+        <td>${_esc(l.item)}</td>
+        <td style="text-align:right;">${l.amount.toLocaleString()}</td></tr>`).join('');
+    const opts = (chk.options || []).map(o =>
+        `<option value="${o.id}">${_esc(o.name)}${o.amount ? ` — ${o.amount.toLocaleString()}` : ''}</option>`).join('');
+    _mirrorModal(`連結私帳 — ${chk.name}`, `
+        <div style="color:#bbb;font-size:12px;margin-bottom:8px;">
+            公司要付給你的（來自人員配置的成本行）</div>
+        <table class="crm-table" style="width:100%;font-size:12px;">${rows}
+            <tr><td colspan="2" style="font-weight:600;">私帳收入合計</td>
+                <td style="text-align:right;font-weight:600;color:#86efac;">
+                    ${chk.total.toLocaleString()}</td></tr></table>
+        <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px;font-size:13px;">
+            <label style="display:flex;align-items:center;gap:6px;">
+                <input type="radio" name="pmm-mode" value="new" checked>
+                在私帳建立新專案（客戶：${_esc(chk.client || '未指定')}／案源：源日）</label>
+            <label style="display:flex;align-items:center;gap:6px;">
+                <input type="radio" name="pmm-mode" value="link"> 連結到既有私帳專案</label>
+            <select class="crm-input" id="pmm-target" disabled style="margin-left:22px;">
+                <option value="">— 選一個 —</option>${opts}</select>
+        </div>
+        <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px;">
+            <button class="crm-btn crm-btn-secondary crm-btn-sm"
+                    onclick="window._projMirrorClose()">取消</button>
+            <button class="crm-btn crm-btn-primary crm-btn-sm" id="pmm-go"
+                    data-id="${id}">建立並連結</button>
+        </div>`);
+    const sel = document.getElementById('pmm-target');
+    document.querySelectorAll('input[name="pmm-mode"]').forEach(r =>
+        r.addEventListener('change', () => {
+            const link = r.value === 'link' && r.checked;
+            sel.disabled = !link;
+            document.getElementById('pmm-go').textContent = link ? '連結' : '建立並連結';
+        }));
+    document.getElementById('pmm-go').addEventListener('click', _projMirrorSubmit);
+};
+
+async function _projMirrorSubmit(ev) {
+    const btn = ev.currentTarget;
+    const id = btn.dataset.id;
+    const link = document.querySelector('input[name="pmm-mode"]:checked')?.value === 'link';
+    const target = link ? (document.getElementById('pmm-target').value || '') : '';
+    if (link && !target) { crmToast('請先選一個要連結的私帳專案'); return; }
+    btn.disabled = true;
+    try {
+        const r = await _fetch(`/projects/${encodeURIComponent(id)}/mirror-to-mine`, {
+            method: 'POST', body: JSON.stringify({ target_id: target }),
+        });
+        window._projMirrorClose();
+        crmToast(`已在私帳同步收入 ${(r.amount || 0).toLocaleString()}`);
+        crmCacheInvalidate('/projects');
+    } catch (e) {
+        btn.disabled = false;
+        crmToast('連結私帳失敗：' + e.message, 6000);
+    }
+}
+
+/** 疊在詳情面板之上的預覽視窗。重複使用同一個 overlay（每次重建會在 body
+ *  裡疊出一堆孤兒節點，radio 的 name 也會互相搶）。 */
+function _mirrorModal(title, bodyHtml) {
+    let o = document.getElementById('proj-mirror-modal');
+    if (!o) {
+        o = document.createElement('div');
+        o.id = 'proj-mirror-modal';
+        o.className = 'crm-modal-overlay';
+        o.style.zIndex = '1100';
+        o.innerHTML = `<div class="crm-modal" style="max-width:min(560px,94vw);">
+            <div class="crm-modal-header">
+                <h3 id="proj-mirror-title"></h3>
+                <button class="crm-detail-close"
+                        onclick="window._projMirrorClose()">&#x2715;</button>
+            </div>
+            <div class="crm-modal-body" id="proj-mirror-body"></div>
+        </div>`;
+        document.body.appendChild(o);
+    }
+    o.querySelector('#proj-mirror-title').textContent = title;
+    o.querySelector('#proj-mirror-body').innerHTML = bodyHtml;
+    o.style.display = 'flex';
+}
+
+window._projMirrorClose = function () {
+    const o = document.getElementById('proj-mirror-modal');
+    if (o) { o.style.display = 'none'; o.querySelector('#proj-mirror-body').innerHTML = ''; }
+};

@@ -367,9 +367,27 @@ _fp.open = async (id) => {
     }
 };
 
+// 上一次畫的是哪一案 —— **同一案**重畫才保留捲動位置（換案子當然要回頂端）。
+let _detailShown = null;
+
+/** 詳情面板真正在捲的那一層。`.crm-detail-panel` 是 overflow:hidden 的 flex
+ *  容器，捲的是裡面的 `.crm-detail-content` —— 量出來的，不寫死：版面改了
+ *  這支就退回 null，最多是不保留，不會抓錯元素亂設 scrollTop。 */
+function _detailScroller() {
+    const el = document.querySelector('#fpl-detail .crm-detail-content');
+    if (!el) { return null; }
+    const ov = getComputedStyle(el).overflowY;
+    return (ov === 'auto' || ov === 'scroll') && el.scrollHeight > el.clientHeight
+        ? el : null;
+}
+
 function _renderDetail() {
     const d = _detail;
     const p = d.project;
+    // 🔴 請款／存檔之後會重畫整個面板 —— 不記住捲動位置的話，畫面會跳回最上面，
+    //    而那幾顆按鈕（委外人員、行政雜支的逐項請款）在面板最下面：
+    //    按一次就得重新捲下去一次（owner 2026-08-29「請款完留在原本頁面」）。
+    const _prev = _detailShown === p.id ? (_detailScroller()?.scrollTop || 0) : 0;
     const det = p.detail || {};
     // ro＝這一格由 CRM 專案帳目撐著（值是算出來的）。樣式跟著 ro 走，
     // 不另開一個 extra 參數 —— 那樣「看起來鎖住」和「真的鎖住」會各自漂。
@@ -515,6 +533,11 @@ function _renderDetail() {
                             border:1px solid #2a2a2a;border-radius:6px;padding:10px;margin:6px 0 0;">${esc(p.notes || '（無）')}</pre>
             </details>
         </div>`;
+    _detailShown = p.id;
+    if (_prev) {
+        const sc = _detailScroller();
+        if (sc) { sc.scrollTop = _prev; }
+    }
     document.querySelectorAll('#fpl-detail .fpl-num').forEach((el) => {
         el.addEventListener('input', () => { _dirty = true; _liveSum(); });
     });

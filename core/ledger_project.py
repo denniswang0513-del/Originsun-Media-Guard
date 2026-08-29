@@ -144,6 +144,62 @@ def code_of(notes) -> str:
     return "" if code == "無" else code
 
 
+# ── 連結私帳（owner 2026-08-29）────────────────────────────────────
+#: 鏡射案的案源。源日＝現金收款（不抽代辦費、不算源頭代扣），正是公司內部
+#: 轉單該有的形狀 —— 手動建的 109 個歷史案也都是這個值。
+MIRROR_SOURCE = "源日"
+
+
+def mirror_amount(line) -> int:
+    """一行成本要記多少進私帳收入：實際優先、沒填才用預估。
+
+    跟 CRM 其他地方同口徑（專案結算看 actual、執行預算看 estimated）。
+    兩個都空＝這工項還沒發生，回 0 讓上層濾掉 —— 把估算當成收入記進去，
+    私帳的營收就會領先現實。
+    """
+    for attr in ("actual_amount", "estimated_amount"):
+        v = getattr(line, attr, None)
+        if v:
+            return int(v)
+    return 0
+
+
+def mirror_lines(cost_lines, staff_id: str) -> dict:
+    """母公司專案的成本行 → 私帳的收入分身。
+
+    回 `{"lines": [{phase,item,amount}], "split": {工項: 金額}, "total": int}`。
+
+    🔴 認人只認 `actual_staff_id`（實際派給誰），沒填才退回 `estimated_staff_id`
+    —— 預估掛我、實際換人做的那些不是我的收入。
+
+    🔴 同名工項要**相加**進 split（一案可能有兩行「導演」，實測 OMRON 那案就
+    有兩行腳本、兩行導演）。dict 直接指派會讓後面那行吃掉前面那行。
+    """
+    out, split, total = [], {}, 0
+    for ln in cost_lines or []:
+        who = getattr(ln, "actual_staff_id", None) or getattr(ln, "estimated_staff_id", None)
+        if who != staff_id:
+            continue
+        amt = mirror_amount(ln)
+        if not amt:
+            continue
+        item = (getattr(ln, "item_name", "") or "").strip() or "其他"
+        out.append({"phase": getattr(ln, "phase", "") or "",
+                    "item": item, "amount": amt})
+        split[item] = split.get(item, 0) + amt
+        total += amt
+    return {"lines": out, "split": split, "total": total}
+
+
+def mirror_detail(split: dict) -> dict:
+    """鏡射案的 ledger_detail：只有收入分項與案源，成本欄全 0。
+
+    委外／代開發票／稅金那些是**我自己的**成本，公司管不著 —— 建立時留空，
+    之後他在私帳自己填。再同步時也只覆蓋 split（見 routers/crm/projects.py）。
+    """
+    return norm_detail({"split": split, "source": MIRROR_SOURCE})
+
+
 def norm_detail(raw) -> dict:
     """ledger_detail → 固定形狀（缺鍵補 0、split 只留非零數字）。
 
