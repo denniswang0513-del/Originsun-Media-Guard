@@ -17,6 +17,7 @@
  * 命名空間 window._finRecon（banking.js 仍是 window._finBank，兩邊不重疊）。
  */
 import { finFetch, finEntity, esc, fmtNum, finToast, bankOnly, cardOnly } from '../fin-utils.js';
+import { indexTax, taxSelects } from '../../../js/shared/cash-tax-picker.js';
 import { createSortable, sortableTh, enumIndex, autoFee as _autoFee }
     from '../../crm/crm-utils.js';   // 匯費容差的正本在共用層（見 crm-utils）
 import { bearerHeader } from '../../../js/shared/utils.js';   // 送 FormData 時不能自帶 Content-Type
@@ -1017,6 +1018,7 @@ function _stmtRefreshRow(i) {
     const tr = tb && tb.querySelectorAll('tr')[i];
     if (!tr || !_stmtPreview || !_stmtPreview.rows[i]) return;
     tr.outerHTML = _stmtRow(_stmtPreview.rows[i], i);
+    _stmtTaxDraw(i);          // outerHTML 換掉了那一格的 DOM
 }
 
 function _stmtRow(r, i) {
@@ -1041,11 +1043,13 @@ function _stmtRow(r, i) {
         <td style="padding:4px 6px;color:#ddd;" title="${esc(r.description || '')}">${esc(r.description || '')}</td>
         <td style="padding:4px 6px;text-align:right;white-space:nowrap;color:${isOut ? '#fca5a5' : '#86efac'};">
             ${isOut ? '-' : '+'}$${fmtNum(Math.abs(r.amount))}</td>
-        <td style="padding:4px 6px;white-space:nowrap;">
-            <select class="crm-select crm-select-sm"
-                    onchange="window._finRecon.stmtCatChanged(${i}, this.value)">
-                ${_stmtCatOptions(r)}
-            </select>
+        <td style="padding:4px 6px;min-width:150px;">
+            ${(_cashOpts[finEntity()] || {}).tree?.length
+                ? _stmtTaxCell(r, i)
+                : `<select class="crm-select crm-select-sm"
+                        onchange="window._finRecon.stmtCatChanged(${i}, this.value)">
+                    ${_stmtCatOptions(r)}
+                   </select>`}
             <button type="button" title="把「${esc((r.description || '').slice(0, 12))} → 這個類別」存成規則，以後自動套用"
                     onclick="window._finRecon.stmtSaveRule(${i})"
                     style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:12px;padding:0 2px;">＋規則</button>
@@ -1076,9 +1080,10 @@ async function _ensureCashOpts() {
             '/api/v1/crm/cash-entries/options?entity=' + encodeURIComponent(ent),
             { headers: bearerHeader() });
         const d = res.ok ? await res.json() : {};
-        _cashOpts[ent] = { categories: d.categories || [], tree: d.tree || [],
-                           taxonomy_paths: _flatTaxPaths(d.tree || []) };
-    } catch (_) { _cashOpts[ent] = { categories: [], tree: [], taxonomy_paths: [] }; }
+        const tree = d.tree || [];
+        _cashOpts[ent] = { categories: d.categories || [], tree,
+                           byId: indexTax(tree) };
+    } catch (_) { _cashOpts[ent] = { categories: [], tree: [], byId: {} }; }
     return _cashOpts[ent];
 }
 
@@ -1086,25 +1091,15 @@ async function _ensureCashCats() {
     return (await _ensureCashOpts()).categories;
 }
 
-/** 樹 → `[{id, path}]`（每個節點一列，不只葉節點 —— 有些列就是歸在中間層）。
- *  後端的 core.cash_tree.flatten 做同一件事，這裡是給 options 端點那條路用的
- *  （它回的是巢狀 tree；預覽那條路後端已經攤平好帶下來了）。 */
-function _flatTaxPaths(tree, out = []) {
-    (tree || []).forEach((n) => {
-        out.push({ id: n.id, path: n.path || [] });
-        _flatTaxPaths(n.children || [], out);
-    });
-    return out;
-}
-
 /** 預覽回應自帶這本帳的類別清單 —— 寫進**當前帳本**那一格快取。
  *  （寫進共用變數的話，切帳本之後上一本的清單還留著。） */
 function _stmtCacheCats(d) {
     if (!d || !(d.mapped_categories || []).length) { return; }
     const ent = finEntity();
+    const tree = d.taxonomy_tree || (_cashOpts[ent] || {}).tree || [];
     _cashOpts[ent] = { ...(_cashOpts[ent] || {}),
                        categories: d.mapped_categories,
-                       taxonomy_paths: d.taxonomy_paths || [] };
+                       tree, byId: indexTax(tree) };
 }
 
 /** 分類下拉的選項。
@@ -1121,33 +1116,62 @@ function _stmtCacheCats(d) {
  */
 function _stmtCatOptions(row) {
     const opts = _cashOpts[finEntity()] || {};
-    const paths = opts.taxonomy_paths || [];
-    if (paths.length) {
-        const cur = row.taxonomy_node_id || '';
-        return `<option value="">（未分類）</option>`
-            + paths.map(n => `<option value="${esc(n.id)}"${n.id === cur ? ' selected' : ''}>${
-                esc((n.path || []).join(' ▸ '))}</option>`).join('');
-    }
     const cur = row.category || '';
     const list = opts.categories || (cur ? [cur] : []);
     return `<option value="">（未分類）</option>`
         + list.map(v => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(v)}</option>`).join('');
 }
 
+/** 私帳那一格：**一排會長的下拉**（類別 → 項目 → 子項目 …），跟收支明細同一套
+ *  （owner 2026-08-30「這個部分就比照私帳收支表的模式處理」）。
+ *
+ *  🔴 上一版是單一下拉列完整路徑 —— 這一欄很窄，每一項都被截成「公司 ▸ 薪水…」，
+ *  七個選項長得一模一樣，等於沒得選。逐層選就沒有這個問題：每一格只放一層的
+ *  名字。垂直排（width:100%）而不是並排 —— 表格的欄寬容不下三格並排。 */
+function _stmtTaxCell(row, i) {
+    return `<div class="fbk-tax" data-row="${i}"></div>`;
+}
+
+function _stmtTaxDrawAll() {
+    ((_stmtPreview && _stmtPreview.rows) || []).forEach((_r, i) => _stmtTaxDraw(i));
+}
+
+/** 把某一列的分類下拉畫出來（innerHTML 之後才有 DOM，所以分兩步）。 */
+function _stmtTaxDraw(i) {
+    const box = document.querySelector(`.fbk-tax[data-row="${i}"]`);
+    const r = _stmtPreview && _stmtPreview.rows[i];
+    if (!box || !r) { return; }
+    const opts = _cashOpts[finEntity()] || {};
+    taxSelects(box, {
+        tree: opts.tree || [],
+        chain: (opts.byId || {})[r.taxonomy_node_id] || [],
+        cls: 'crm-select crm-select-sm',
+        style: 'width:100%;margin-bottom:2px;',
+        keepOne: true,
+        blank: (n) => (n === 0 ? '（未分類）' : '（不細分）'),
+        onPick: (n, v) => _fr.stmtCatChanged(i, v, n),
+    });
+}
+
 /** 逐列改分類 —— 規則沒中的列本來只能整批落到「未歸類」，那比沒分類更難發現
  *  （畫面上看起來「已經分好了」）。改在這裡當場修掉，最省事。 */
-_fr.stmtCatChanged = (i, v) => {
+_fr.stmtCatChanged = (i, v, level) => {
     if (!_stmtPreview || !_stmtPreview.rows[i]) return;
     const r = _stmtPreview.rows[i];
     const cats = _stmtPreview.project_categories || [];
-    const paths = (_cashOpts[finEntity()] || {}).taxonomy_paths || [];
-    if (paths.length) {
-        // 私帳：下拉的值是**節點 id**。category 這裡先照鏡射規則的前兩層填上
-        // （畫面上的「專案類」判斷、未對映提醒都讀它），寫入時後端會用
-        // `_sync_taxonomy` 從節點重推一次 —— 那份才是正本。
-        const node = paths.find(n => n.id === v);
-        r.taxonomy_node_id = node ? node.id : '';
-        v = node ? (node.path || []).slice(0, 2).join('_') : '';
+    const opts = _cashOpts[finEntity()] || {};
+    if ((opts.tree || []).length) {
+        // 私帳：下拉的值是**節點 id**。選「（不細分）」＝退回上一層（那一層
+        // 本身就是有效的分類，家用底下很多列就停在第二層）。
+        const chain = (opts.byId || {})[r.taxonomy_node_id] || [];
+        const node = v ? (opts.byId || {})[v] : null;
+        const picked = node ? node[node.length - 1]
+            : (level > 0 && chain[level - 1] ? chain[level - 1] : null);
+        r.taxonomy_node_id = picked ? picked.id : '';
+        // category 照鏡射規則填前兩層（畫面上的「專案類」判斷、未對映提醒都
+        // 讀它）；寫入時後端會用 `_sync_taxonomy` 從節點重推 —— 那份才是正本。
+        v = picked ? ((opts.byId || {})[picked.id] || [])
+            .slice(0, 2).map(n => n.name).join('_') : '';
     }
     r.category = v;
     // 「會落到未歸類嗎」的規則跟後端同一條：沒類別**或**類別沒有科目對映。
@@ -1866,6 +1890,7 @@ function _stmtRenderPreview() {
                     title="掛到一半先收起來，之後在對帳系統接著做">存成草稿</button>
             <button class="crm-btn crm-btn-primary" onclick="window._finRecon.stmtApply(this)">匯入勾選的列</button>
         </div>`, { width: 1240 });
+    _stmtTaxDrawAll();
     const all = document.getElementById('finbank-stmt-all');
     if (all) {
         all.onchange = () => {

@@ -596,11 +596,8 @@ async def _build_statement_preview(session, acct, ent, text):
     mapped = await _known_categories(session, ent)
     # 私帳的分類樹一起回（母公司沒有樹，回空陣列）—— 前端逐列的分類下拉
     # 要用它，多打一支 API 只是為了同一份資料
-    from core.cash_tree import flatten as _tax_flatten
     from core.cash_tree import load_tree as _load_tax_tree
-    tax_paths = ([{"id": n["id"], "path": n["path"]}
-                  for n in _tax_flatten(await _load_tax_tree(session, ent))]
-                 if ent == "mine" else [])
+    tax_tree = await _load_tax_tree(session, ent) if ent == "mine" else []
 
     # 預覽要能當場掛專案／發票（owner 2026-08-20）→ 選項一起回，
     # 前端不用再多打兩支 API（那兩支還在不同的 prefix 下）。
@@ -727,7 +724,7 @@ async def _build_statement_preview(session, acct, ent, text):
         # 不然改成一個沒對映的類別之後那個提醒就消失了。
         # （也省掉前端跨 prefix 去打 /crm/cash-entries/options 那一支）
         "mapped_categories": sorted(mapped),
-        "taxonomy_paths": tax_paths,
+        "taxonomy_tree": tax_tree,
         "summary": {"count": len(out_rows), "total_in": res.total_in,
                     "total_out": res.total_out,
                     "duplicates": sum(1 for r in out_rows if r["duplicate"]),

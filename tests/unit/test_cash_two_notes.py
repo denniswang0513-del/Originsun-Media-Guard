@@ -83,9 +83,14 @@ def test_taxonomy_cell_has_searchable_dropdown_and_custom_entry():
     # 2026-08-28 起三處（篩選／格內編輯／批次分類）的下拉都由 `_taxSelects` 生成 ——
     # 可搜尋與「＋ 自訂…」那兩件事跟著搬進去了，斷言跟著走
     assert "_taxSelects(" in fn and "custom: true" in fn, "要留自訂入口"
-    builder = js.split("function _taxSelects(")[1].split("function _syncTaxFilter")[0]
-    assert "searchableSelect(sel," in builder
-    assert "＋ 自訂" in builder
+    # 2026-08-30 起下拉的產生器抽到 js/shared/cash-tax-picker（對帳單匯入預覽
+    # 也用同一套 —— owner「比照私帳收支表的模式」）：可搜尋的升級留在這個 tab
+    # （各 tab 的實作不同），「＋ 自訂…」在共用版裡。
+    wrap = js.split("function _taxSelects(")[1].split("function _syncTaxFilter")[0]
+    assert "searchableSelect(" in wrap and "tree: _taxTree" in wrap
+    shared = _read("frontend/js/shared/cash-tax-picker.js")
+    assert "＋ 自訂" in shared
+    assert "o.searchable(sel, i)" in shared, "可搜尋的鉤子要留給呼叫端"
     assert "'/cash-taxonomy/nodes'" in fn, "自訂＝在樹上長節點，不是寫字串"
 
 

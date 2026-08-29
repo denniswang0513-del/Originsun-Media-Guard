@@ -75,8 +75,12 @@ def test_the_private_ledger_picks_a_tree_node_not_a_flat_string():
     """🔴 私帳的分類是一棵樹，選的是**節點**。只寫 category 字串的話，那一列
     沒有 taxonomy_node_id —— 收支明細的分類篩選與路徑顯示都看不到它。"""
     js = js_code_only(repo_src(JS))
-    fn = js.split("function _stmtCatOptions(")[1].split("\n/**")[0]
-    assert "taxonomy_paths" in fn and "n.id" in fn
+    # 私帳那一格用的是**一排會長的下拉**（類別→項目→子項目…），跟收支明細
+    # 同一支共用元件 —— owner 2026-08-30：單一下拉列完整路徑在這個窄欄裡
+    # 每一項都被截成「公司 ▸ 薪水…」，七個選項長得一模一樣。
+    assert "taxSelects(box, {" in js and "cash-tax-picker.js" in js
+    fn = js.split("function _stmtTaxDraw(")[1].split("\nfunction ")[0]
+    assert "opts.tree" in fn and "byId" in fn and "keepOne: true" in fn
     assert "taxonomy_node_id: x.taxonomy_node_id || null" in js, "apply 沒把節點送出去"
 
 

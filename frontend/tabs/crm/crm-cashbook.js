@@ -13,6 +13,8 @@ import { finEntity as _pinEntity, finFetch as _finFetch,
 // 六日／國定假日標記（owner 2026-08-27）：看帳時「那天是不是假日」是判斷公私的
 // 關鍵線索，日期字串本身看不出來。星期是算的、假日是清單 —— 見該模組檔頭。
 import { dayMark as _dayMark } from '../../js/shared/tw-calendar.js';
+import { indexTax as _indexTaxShared, taxKidsAt as _kidsAt, taxSelects }
+    from '../../js/shared/cash-tax-picker.js';
 
 let _entries = [];
 let _invoiceList = [];
@@ -32,8 +34,7 @@ let _taxTree = [];
 let _taxById = {};
 // 第 i 層的值域＝上一層節點的子節點（第 0 層＝整棵樹的根）。
 // 篩選器與格內編輯器共用 —— 這是「每一格能選什麼」的唯一規則。
-const _taxKidsAt = (chain, i) => (i === 0 ? _taxTree
-    : (chain[i - 1] ? chain[i - 1].children : []));
+const _taxKidsAt = (chain, i) => _kidsAt(_taxTree, chain, i);
 // 批次分類（owner 2026-08-28）：信用卡明細一天好幾筆「街口電支－統一超商」，
 // 一筆一筆點三格要按上千次。on＝批次模式（點列＝選取，不開編輯）、
 // sel＝選到的 id、last＝上一次點的（Shift 連選的錨點）、chain＝要套的分類路徑。
@@ -159,38 +160,19 @@ function _acctName(id) {
  *  🔴 值域來自後端的樹（cash_taxonomy_nodes），不是「畫面上這批列用過的」——
  *  篩完之後選單會跟著縮水，就再也切不回去了。
  */
-/** 一排會長的分類下拉 —— 篩選器／格內編輯／批次分類**三處共用**。
- *  第 i 格的值域＝上一層的子節點（_taxKidsAt），選到葉就不再長一格。
- *  三處的差別只有標籤與要不要「＋自訂」，用參數表達；各寫一份的話樹一長深
- *  只有其中一份會跟上（篩選器與格內編輯本來就已經是兩份幾乎一樣的迴圈）。
- *
- *  `keepOne`：鏈已經到葉了也**至少留一格**（格內編輯就是點了那格要編它）。 */
+/** 一排會長的分類下拉 —— 篩選器／格內編輯／批次分類三處共用。
+ *  正本已抽到 js/shared/cash-tax-picker（對帳單匯入預覽也要用同一套，
+ *  owner 2026-08-30「比照私帳收支表的模式」）—— 這裡只補上這個 tab 的樹與
+ *  可搜尋升級，其餘參數原樣往下傳。 */
 function _taxSelects(box, o) {
-    const chain = o.chain || [];
-    const start = o.start || 0;
-    const parts = [];
-    for (let i = start; i <= chain.length; i++) {
-        if (i === chain.length && !_taxKidsAt(chain, i).length
-            && !(o.keepOne && i === start)) { break; }
-        parts.push(`<select class="${o.cls}" data-i="${i}"${
-            o.style ? ` style="${o.style}"` : ''}></select>`);
-    }
-    box.innerHTML = o.wrap
-        ? `<span class="cash-cat-edit" style="display:flex;gap:4px;">${parts.join('')}</span>`
-        : parts.join('');
-    box.querySelectorAll('select[data-i]').forEach((sel) => {
-        const i = Number(sel.dataset.i);
-        const cur = chain[i];
-        sel.innerHTML = `<option value="">${o.blank(i)}</option>`
-            + (i === start ? (o.extraFirst || '') : '')
-            + _taxKidsAt(chain, i).map((n) =>
-                `<option value="${_esc(n.id)}"${cur && cur.id === n.id ? ' selected' : ''}>${_esc(n.name)}</option>`).join('')
-            + (o.custom ? '<option value="__custom__">＋ 自訂…</option>' : '');
-        sel.addEventListener('click', (k) => k.stopPropagation());
-        sel.addEventListener('change', () => o.onPick(i, sel.value));
-        searchableSelect(sel, { placeholder: i === 0 ? '搜尋類別…' : '搜尋…' });
+    taxSelects(box, {
+        ...o,
+        tree: _taxTree,
+        searchable: (sel, i) => searchableSelect(
+            sel, { placeholder: i === 0 ? '搜尋類別…' : '搜尋…' }),
     });
 }
+
 
 function _syncTaxFilter() {
     const box = document.getElementById('cash-filter-tax');
@@ -804,17 +786,8 @@ async function _loadCashOptions() {
         const o = await _fetch('/cash-entries/options?entity=' + _pinEntity());
         if (o.project_link_categories?.length) _LINKABLE = o.project_link_categories;
         if (o.categories?.length) _CATEGORIES = o.categories;
-        if (o.tree) { _taxTree = o.tree; _taxById = {}; _indexTax(_taxTree, []); }
+        if (o.tree) { _taxTree = o.tree; _taxById = _indexTaxShared(_taxTree); }
     } catch (_) { /* 用 fallback，不擋畫面 */ }
-}
-
-/** 攤平分類樹成 `id → [根, …, 它]` 的節點物件鏈。 */
-function _indexTax(nodes, chain) {
-    (nodes || []).forEach((n) => {
-        const c = chain.concat([n]);
-        _taxById[n.id] = c;
-        _indexTax(n.children, c);
-    });
 }
 
 /** 專案／發票的即時連結下拉。直接打 PUT /cash-entries/{id} 只送要改的那一欄 ——
