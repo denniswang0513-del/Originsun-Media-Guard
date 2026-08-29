@@ -217,7 +217,12 @@ export function hbars(items, opts = {}) {
         const w = Math.max(2, Math.abs(v) / maxV * barMaxW);
         const color = r.color || (v < 0 ? CHART_COLORS.red : (opts.barColor || CHART_COLORS.blue));
         const pct = r.pct != null ? Number(r.pct) : (total ? (v / total * 100) : 0);
-        const pctTxt = showPct ? `${(Math.round(pct * 10) / 10).toLocaleString('en-US')}%` : '';
+        // 非 0 卻四捨五入成 0% 的要標成 <0.1% —— 直接印「0%」會讓一筆真的有錢的
+        // 部位看起來是空的（實帳：美國匯豐 24,996 / 9,369 萬 ＝ 0.027%）
+        const pctR = Math.round(pct * 10) / 10;
+        const pctTxt = !showPct ? ''
+            : (pctR === 0 && pct !== 0 ? (pct > 0 ? '<0.1%' : '>-0.1%')
+                : `${pctR.toLocaleString('en-US')}%`);
         const lbl = _esc(r.label ?? '');
         body += `
         <text x="${labelW}" y="${(cy + rowH / 2 + 4).toFixed(1)}" fill="${_TXT2}" font-size="12" text-anchor="end">${lbl}</text>
@@ -229,6 +234,124 @@ export function hbars(items, opts = {}) {
 
     return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet"
         style="max-width:100%;display:block;${_FONT}" role="img">
+        ${body}
+    </svg>`;
+}
+
+
+/**
+ * groupedBars(items, opts) — 每個類別兩根橫條的對照圖（成本 vs 市值、預算 vs 實際）。
+ *
+ * 形式選擇：兩個**同單位**的量放同一個 x 軸比長度（絕不畫雙軸）。配色是
+ * 「一個色相 + 灰」的強調式，不是分類色 —— 讀者要比的是同一列的兩根誰長，
+ * 不是分辨兩個族群，用兩個彩色反而讓每一列都在跟旁邊那列搶注意力。
+ *
+ * items: [{ label, a, b }]；opts.aName/bName 圖例名稱、opts.aColor/bColor 覆寫。
+ */
+export function groupedBars(items, opts = {}) {
+    const rows = (items || []).filter(Boolean);
+    const W = opts.width || 560;
+    const fmt = opts.formatValue || _fmt;
+    const labelW = opts.labelWidth || 88;
+    const valueW = opts.valueWidth || 96;
+    const aColor = opts.aColor || '#4a4a4a';               // 對照組：退到灰
+    const bColor = opts.bColor || CHART_COLORS.blue;       // 主角
+    const barH = 11, gap = 2, rowGap = 16;                 // gap=2：兩根之間留底色縫
+    const rowH = barH * 2 + gap + rowGap;
+    const padT = 26, padB = 6;                             // padT 讓出圖例
+
+    if (!rows.length || !rows.some(r => (Number(r.a) || 0) || (Number(r.b) || 0))) {
+        return _empty(W, 120, opts.emptyText);
+    }
+    const maxV = Math.max(...rows.map(r => Math.max(Math.abs(r.a || 0), Math.abs(r.b || 0))), 1);
+    const barLeft = labelW + 8;
+    // 條的最大長度要**扣掉數值欄**：不扣的話最長那列的條會一路頂到右邊，
+    // 跟靠右的數字疊在一起（2026-08-29 截圖上富邦／盈透兩列就是這樣）。
+    const barMaxW = W - barLeft - valueW - 12;
+    const H = rows.length * rowH + padT + padB;
+
+    let body = '';
+    rows.forEach((r, i) => {
+        const top = padT + i * rowH;
+        [['a', aColor, opts.aName || 'A'], ['b', bColor, opts.bName || 'B']]
+            .forEach(([k, color, name], j) => {
+                const v = Number(r[k]) || 0;
+                const y = top + j * (barH + gap);
+                const w = Math.max(2, Math.abs(v) / maxV * barMaxW);
+                body += `
+        <rect x="${barLeft}" y="${y}" width="${w.toFixed(1)}" height="${barH}" rx="4" fill="${color}">
+            <title>${_esc(r.label)}｜${_esc(name)} ${_esc(fmt(v))}</title></rect>
+        <text x="${W - 4}" y="${y + barH - 1}" fill="${j ? _TXT2 : _TXT}" font-size="10.5"
+              text-anchor="end">${_esc(fmt(v))}</text>`;
+            });
+        body += `
+        <text x="${labelW}" y="${top + barH + 4}" fill="${_TXT2}" font-size="11.5"
+              text-anchor="end">${_esc(r.label)}</text>`;
+    });
+
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet"
+        style="max-width:100%;display:block;${_FONT}" role="img">
+        ${_legend([{ name: opts.aName || 'A', color: aColor },
+                   { name: opts.bName || 'B', color: bColor }], barLeft, 12)}
+        ${body}
+    </svg>`;
+}
+
+
+/**
+ * divergingBars(items, opts) — 有正負的橫條（報酬率、損益貢獻）。
+ *
+ * 零線在中間、正負各往一邊長 —— 「賺還是賠」用**方向**回答，不必先讀數字。
+ * 顏色是狀態色不是分類色（預設台股慣例：紅漲綠跌），所以不進分類色的檢核。
+ *
+ * items: [{ label, value, note? }]；opts.posColor/negColor 覆寫。
+ */
+export function divergingBars(items, opts = {}) {
+    const rows = (items || []).filter(Boolean);
+    const W = opts.width || 560;
+    const fmt = opts.formatValue || _fmt;
+    const labelW = opts.labelWidth || 132;
+    const valueW = opts.valueWidth || 74;
+    const pos = opts.posColor || '#f87171';
+    const neg = opts.negColor || '#4ade80';
+    const rowH = opts.rowHeight || 26;
+    const padT = 6, padB = 6;
+
+    if (!rows.length) { return _empty(W, 100, opts.emptyText); }
+
+    const maxV = Math.max(...rows.map(r => Math.abs(Number(r.value) || 0)), 1);
+    const left = labelW + 8;
+    const span = W - left - valueW - 8;
+    // 🔴 零線只在**真的有正也有負**的時候才置中。全是正的還把零線放中間，等於
+    // 把一半的寬度讓給永遠不會有東西的那側 —— 條就只剩一半長，小額那幾筆
+    // 直接細到看不見。實帳的報酬率就是全正（2026-08-29 截圖上一眼可見）。
+    const hasPos = rows.some(r => (Number(r.value) || 0) > 0);
+    const hasNeg = rows.some(r => (Number(r.value) || 0) < 0);
+    const both = hasPos && hasNeg;
+    const half = both ? span / 2 : span;
+    const zero = both ? left + span / 2 : (hasNeg ? left + span : left);
+    const H = rows.length * rowH + padT + padB;
+
+    let body = '';
+    rows.forEach((r, i) => {
+        const v = Number(r.value) || 0;
+        const cy = padT + i * rowH;
+        const y = cy + rowH / 2 - 6;
+        const w = Math.max(2, Math.abs(v) / maxV * half);
+        const x = v >= 0 ? zero : zero - w;
+        body += `
+        <text x="${labelW}" y="${(cy + rowH / 2 + 4).toFixed(1)}" fill="${_TXT2}" font-size="11.5"
+              text-anchor="end">${_esc(r.label)}</text>
+        <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="12" rx="4"
+              fill="${v >= 0 ? pos : neg}"><title>${_esc(r.label)}｜${_esc(fmt(v))}${
+            r.note ? '｜' + _esc(r.note) : ''}</title></rect>
+        <text x="${W - 4}" y="${(cy + rowH / 2 + 4).toFixed(1)}" fill="${v >= 0 ? pos : neg}"
+              font-size="11.5" text-anchor="end">${_esc(fmt(v))}</text>`;
+    });
+
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet"
+        style="max-width:100%;display:block;${_FONT}" role="img">
+        <line x1="${zero}" y1="${padT}" x2="${zero}" y2="${H - padB}" stroke="${_AXIS_STRONG}" stroke-width="1"/>
         ${body}
     </svg>`;
 }

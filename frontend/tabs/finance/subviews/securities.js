@@ -9,8 +9,20 @@
  * 🔴 成本填的是**該列自己的幣別**（跟單價同慣例）：Firstrade 的 VTI 填美金、
  *    富邦的 0050 填台幣。台幣換算在後端用同一支 _to_twd 做，市值與成本共用
  *    同一個匯率 —— 兩邊各換各的，沒交易的日子損益也會浮動。
+ *
+ * 圖表（owner 2026-08-29「優化視覺呈現，配色不調整，圖表形式如參考圖」）：
+ *   配置    → 單色橫條（不是甜甜圈）。實帳是 47.7% / 43.1% / 7.6% / 1.6% /
+ *             0.006%：前兩塊幾乎一樣大、後兩塊在圓餅上根本看不到，正是
+ *             「圓餅不適合比接近的值」那一條。橫條同時給長度與數字。
+ *   成本vs市值 → 一個色相＋灰的對照條（不是兩個彩色）：要比的是同一列兩根
+ *             誰長，不是分辨兩個族群。
+ *   報酬率  → 零線居中的正負條，紅漲綠跌（狀態色，跟全站損益同一組）。
+ *   **沒有折線圖**：finance_net_snapshots 是整份淨值（含現金/不動產/器材）的
+ *   快照，不是證券部位的歷史 —— 畫在這頁會是張標錯的圖。要證券的時間軸得先
+ *   有證券自己的快照。
  */
-import { finFetch, esc, fmtNum, finToast } from '../fin-utils.js';
+import { finFetch, esc, fmtNum, finToast, metricCard } from '../fin-utils.js';
+import { hbars, groupedBars, divergingBars } from '../../../js/shared/svg-charts.js';
 
 let _c = null;
 let _isCurrent = () => true;
@@ -136,10 +148,30 @@ function _draw() {
     const pnl = known.length ? known.reduce((n, h) => n + h.pnl, 0) : null;
     const missing = rows.filter((h) => h.pnl === null || h.pnl === undefined);
 
+    // ── 圖表資料（都從同一份 rows 推導，沒有第二個取數來源）──
+    const alloc = groups.map(([k, list]) => ({
+        label: k, value: list.reduce((n, h) => n + (h.value_twd || 0), 0),
+    })).filter((r) => r.value > 0);
+    const costVsValue = groups.map(([k, list]) => ({
+        label: k,
+        a: list.reduce((n, h) => n + (h.cost_twd || 0), 0),
+        b: list.reduce((n, h) => n + (h.value_twd || 0), 0),
+    })).filter((r) => r.a > 0);
+    // 報酬率與損益各排各的：報酬率高的常常是小部位（0050 +266% 只有 76 萬），
+    // 兩張圖回答的是不同問題（哪一檔賺得兇 vs 哪一檔真的把錢賺回來）
+    // 兩張圖都濾掉 0：活存那幾列的報酬率恆為 0%，畫成一根長度 0 的條只是佔位，
+    // 把真正有動的那幾檔擠窄。它們在下面的表格裡照樣列得到。
+    const roiRows = known.map((h) => ({
+        label: h.name, value: _roi(h), note: h.broker || '',
+    })).filter((r) => r.value).sort((a, b) => b.value - a.value);
+    const pnlRows = known.map((h) => ({
+        label: h.name, value: h.pnl, note: h.broker || '',
+    })).filter((r) => r.value).sort((a, b) => b.value - a.value);
+
     _c.innerHTML = `
     <div style="padding:16px;max-width:1400px;">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
-        <h2 style="margin:0;font-size:16px;color:#eee;">📈 證券投資</h2>
+        <h2 style="margin:0;font-size:16px;color:#eee;">證券投資</h2>
         <span style="color:#666;font-size:12px;">匯率 USD/TWD ${
             _data.usd_twd ? fmtNum(_data.usd_twd) : '未設定'}</span>
         <span style="flex:1;"></span>
@@ -147,18 +179,42 @@ function _draw() {
           <input type="checkbox" id="fs-all" ${_showAll ? 'checked' : ''}>
           連現金／保險一起看</label>
         <button class="crm-btn crm-btn-secondary crm-btn-sm"
-                onclick="window._finSecurities.refresh(this)">📈 更新報價</button>
+                onclick="window._finSecurities.refresh(this)">更新報價</button>
       </div>
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
-        ${_stat('市值合計', fmtNum(val), '#eee')}
-        ${_stat('投入成本', cost ? fmtNum(cost) : '—', '#bbb')}
-        ${_stat('未實現損益', pnl === null ? '—'
-            : (pnl >= 0 ? '+' : '') + fmtNum(pnl), pnl === null ? '#666'
-            : (pnl >= 0 ? '#f87171' : '#4ade80'))}
-        ${_stat('報酬率', pnl === null || !cost ? '—'
-            : (pnl >= 0 ? '+' : '') + ((pnl / cost) * 100).toFixed(1) + '%',
-            pnl === null || !cost ? '#666' : (pnl >= 0 ? '#f87171' : '#4ade80'))}
+        ${metricCard('市值合計', `<span style="color:#eee;">${fmtNum(val)}</span>`,
+            `<span style="color:#666;">${rows.length} 檔</span>`)}
+        ${metricCard('投入成本', `<span style="color:#bbb;">${cost ? fmtNum(cost) : '—'}</span>`,
+            known.length ? `<span style="color:#666;">${known.length} 檔有填成本</span>` : '')}
+        ${metricCard('未實現損益', `<span style="color:${_pnlColor(pnl)};">${
+            pnl === null ? '—' : (pnl >= 0 ? '+' : '') + fmtNum(pnl)}</span>`,
+            pnl === null ? '' : `<span style="color:#666;">市值 − 成本</span>`)}
+        ${metricCard('報酬率', `<span style="color:${_pnlColor(pnl)};">${
+            pnl === null || !cost ? '—'
+                : (pnl >= 0 ? '+' : '') + ((pnl / cost) * 100).toFixed(1) + '%'}</span>`,
+            cost ? `<span style="color:#666;">對投入成本</span>` : '')}
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));
+                  gap:10px;margin-bottom:14px;">
+        ${_panel('配置（按券商）', hbars(alloc, {
+            width: 520, labelWidth: 96, valueWidth: 132,
+            emptyText: '尚無持股',
+        }), `合計 ${fmtNum(val)}`)}
+        ${_panel('成本 vs 市值', groupedBars(costVsValue, {
+            width: 520, labelWidth: 96, valueWidth: 104,
+            aName: '成本', bName: '市值', emptyText: '還沒有填成本的券商',
+        }), '只列有填成本的券商')}
+        ${_panel('個股報酬率', divergingBars(roiRows, {
+            width: 520, labelWidth: 150, valueWidth: 68,
+            formatValue: (v) => (v >= 0 ? '+' : '') + v.toFixed(1) + '%',
+            emptyText: '還沒有填成本的持股',
+        }), '紅漲綠跌；0% 的不列')}
+        ${_panel('未實現損益貢獻', divergingBars(pnlRows, {
+            width: 520, labelWidth: 150, valueWidth: 92,
+            emptyText: '還沒有填成本的持股',
+        }), '誰把整體報酬撐起來')}
       </div>
 
       ${missing.length ? `<div style="background:#2a2416;border:1px solid #6b5a1e;border-radius:6px;
@@ -213,11 +269,20 @@ function _draw() {
     });
 }
 
-function _stat(label, value, color) {
-    return `<div style="background:#1b1b1b;border:1px solid #2e2e2e;border-radius:6px;
-        padding:10px 16px;min-width:150px;">
-        <div style="color:#9ca3af;font-size:11px;">${esc(label)}</div>
-        <div style="color:${color};font-size:18px;font-weight:600;margin-top:2px;">${value}</div>
+/** 損益色：紅漲綠跌（台股慣例，全站同一組狀態色）；算不出來是灰的不是 0。 */
+function _pnlColor(v) {
+    return v === null || v === undefined ? '#666' : (v >= 0 ? '#f87171' : '#4ade80');
+}
+
+/** 圖表卡：標題 + 右上角一句註解 + 圖。四張共用一個殼，版面才會齊。 */
+function _panel(title, svg, note) {
+    return `<div style="background:#222;border:1px solid #333;border-radius:8px;padding:12px 14px;">
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
+            <span style="color:#ddd;font-size:13px;font-weight:600;">${esc(title)}</span>
+            <span style="flex:1;"></span>
+            <span style="color:#666;font-size:11px;">${esc(note || '')}</span>
+        </div>
+        ${svg}
     </div>`;
 }
 
@@ -235,7 +300,7 @@ _fs.refresh = async (btn) => {
         finToast('報價更新失敗：' + e.message, 'error');
     } finally {
         btn.disabled = false;
-        btn.textContent = '📈 更新報價';
+        btn.textContent = '更新報價';
     }
 };
 
