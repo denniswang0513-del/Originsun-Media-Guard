@@ -14,6 +14,32 @@ def _fn(src: str, name: str) -> str:
     return src.split(f"async def {name}(")[1].split("\n@router")[0]
 
 
+def _calls(src: str, callee: str) -> list:
+    """`callee(...)` 每一次呼叫的引數清單（配對括號、頂層逗號才切）。
+
+    單純 `.split(")")` 會被引數裡的 `int(p.amount or 0)` 提前切斷 ——
+    那正好會把「有沒有帶最後一個參數」這件事切掉，斷言就永遠看不到它。
+    """
+    out = []
+    for chunk in src.split(f"{callee}(")[1:]:
+        depth, buf, args = 1, [], []
+        for ch in chunk:
+            if ch in "([":
+                depth += 1
+            elif ch in ")]":
+                depth -= 1
+                if depth == 0:
+                    break
+            if ch == "," and depth == 1:
+                args.append("".join(buf).strip())
+                buf = []
+                continue
+            buf.append(ch)
+        args.append("".join(buf).strip())
+        out.append(args)
+    return out
+
+
 def test_claim_is_blocked_when_the_cost_line_was_already_claimed():
     """而且要擋在 `_sync_mine_project_outsource` 之前 —— 那支是**增量制**
     （委外費用 += 金額），先累加再拒絕的話，被擋下的那次也會留下痕跡。"""
@@ -54,10 +80,17 @@ def test_one_click_claim_is_not_counted_twice():
     sig, body = helper.split('"""')[0], helper.split('"""')[2]
     assert "cost_line_id" in sig, "簽章要收得到它"
     assert 'or cost_line_id:' in body.replace("'", '"'), "早退那一行要認它"
-    # 兩個寫入端都要把它帶進去（漏一個，那條路就會補累加）
-    for fn_name in ("create_payment", "update_payment"):
+    # 🔴 **三個**寫入端都要把它帶進去，刪除也算一個：新增被守衛擋下（沒加），
+    # 刪除卻照扣的話，會扣掉一筆當初根本沒加進去的錢（2026-08-29 實查到的
+    # 漏網之魚 —— 只有 delete_payment 沒帶，委外費用會被吃掉甚至變負數）。
+    # 斷言在「有沒有第 5 個引數」而不是名字 —— 編輯那支傳的是 `_old_line`
+    # （setattr 前先存下來的舊值），一樣是硬連結。
+    for fn_name in ("create_payment", "update_payment", "delete_payment"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
-        assert "cost_line_id" in fn, fn_name
+        calls = _calls(fn, "_sync_mine_project_outsource")
+        assert calls, f"{fn_name} 沒有呼叫到"
+        for args in calls:
+            assert len(args) == 5, f"{fn_name} 有一次呼叫沒帶硬連結：{args}"
 
 
 def test_misc_rows_are_claimable_one_by_one():

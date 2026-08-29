@@ -1633,8 +1633,12 @@ async def delete_payment(payment_id: str, request: Request):
         _mine_or_admin_write(request, p.entity)  # 兩本帳寫入守衛：母公司=Lv3、私帳=mine full
         await _assert_month_open(session, p.request_date, entity=p.entity or "parent")
         if (p.entity or "parent") == "mine":
+            # 🔴 硬連結要帶進去（跟新增／編輯同一組參數）—— 少了它，刪掉一張
+            # 一鍵請款建的委外單會從 ledger_detail 扣掉一筆**當初根本沒加進去**
+            # 的錢（新增時被守衛擋下），委外費用就會被吃掉甚至變負數。
             await _sync_mine_project_outsource(session, p.project_id, p.category,
-                                               -int(p.amount or 0))
+                                               -int(p.amount or 0),
+                                               p.cost_line_id or p.expense_id)
         await session.delete(p)
         await session.commit()
     return {"status": "ok"}
