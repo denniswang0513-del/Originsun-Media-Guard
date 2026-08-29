@@ -428,15 +428,26 @@ async def _assert_statement_belongs_to(session, acct, ent, text) -> None:
     found = extract_account_no(text)
     if not found:
         return                                  # 這份沒印帳號，驗不了
-    if same_account_no(found, acct.account_no):
-        return
     if not (acct.account_no or "").strip():
         return                                  # 這個帳戶沒登記帳號，驗不了
-    # 對不上 —— 看看它其實是哪個帳戶的，講出來比只說「不對」有用得多
+
+    # 這本帳裡有哪些帳戶能對上這個號碼。`same_account_no` 認尾碼（對帳單印
+    # 完整 14 碼、存摺上是後 6 碼），所以理論上可能同時對上兩個 —— 那種情況
+    # 不能猜，照樣擋下來並把候選講出來。
     others = (await session.execute(
         select(BankAccount).where(BankAccount.entity == ent))).scalars().all()
-    owner_acct = next((a for a in others
-                       if same_account_no(found, a.account_no)), None)
+    matches = [a for a in others if same_account_no(found, a.account_no)]
+    if len(matches) == 1 and matches[0].id == acct.id:
+        return
+    if len(matches) > 1 and any(a.id == acct.id for a in matches):
+        raise HTTPException(
+            status_code=422,
+            detail=(f"這份對帳單的帳號 {found} 同時對得上 "
+                    + "、".join(f"「{a.name}」" for a in matches)
+                    + "（登記的是尾碼，彼此互為尾碼所以分不出來）。"
+                      "請把這幾個帳戶的帳號補成完整號碼再匯一次。"))
+    # 對不上 —— 看看它其實是哪個帳戶的，講出來比只說「不對」有用得多
+    owner_acct = matches[0] if matches else None
     whose = (f"是「{owner_acct.name}」的" if owner_acct
              else "不屬於系統裡任何一個帳戶")
     raise HTTPException(
@@ -444,7 +455,9 @@ async def _assert_statement_belongs_to(session, acct, ent, text) -> None:
         detail=(f"這份對帳單的帳號是 {found}，{whose}；"
                 f"但你選的是「{acct.name}」（登記帳號 {acct.account_no}）。"
                 "選錯帳戶會讓兩邊的餘額同時錯掉，所以先擋下來 —— "
-                "請改選對的帳戶再匯一次。"))
+                "請改選對的帳戶再匯一次。"
+                "（登記的是後幾碼也沒關係，系統會比對尾碼；"
+                "但要是連尾碼都不一樣，那就真的是不同帳戶。）"))
 
 
 async def _balance_before(session, acct, first_date: str):

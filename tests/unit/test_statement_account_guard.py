@@ -108,10 +108,12 @@ def test_the_guard_only_blocks_when_it_can_actually_verify():
     body = code_only(func_body(repo_src("routers/api_finance_stmt.py"),
                                "async def _assert_statement_belongs_to("))
     assert "if not found:" in body, "抓不到帳號時沒放行"
-    assert "same_account_no(found, acct.account_no)" in body, "沒有比對"
+    assert "same_account_no(found, a.account_no)" in body, "沒有比對"
     assert "if not (acct.account_no or \"\").strip():" in body, \
         "帳戶沒登記帳號時沒放行"
     assert "raise HTTPException" in body, "對不上卻沒擋"
+    # 對得上就放行，而且要「只對得上這一個」才算數（尾碼比對的代價）
+    assert "len(matches) == 1 and matches[0].id == acct.id" in body
 
 
 def test_the_block_says_whose_statement_it_actually_is():
@@ -122,3 +124,38 @@ def test_the_block_says_whose_statement_it_actually_is():
     seg = src[i:i + 2600]
     assert "owner_acct" in seg, "沒有去找它其實屬於哪個帳戶"
     assert "這份對帳單的帳號是" in seg and "但你選的是" in seg, "訊息沒講清楚兩邊"
+
+
+# ── ③ 短碼 = 尾碼（owner 2026-08-29 實帳）──────────────────────
+
+def test_the_registered_short_code_is_the_tail_of_the_printed_number():
+    """🔴 富邦對帳單印完整 14 碼 `00200168218604`，存摺上（＝系統裡登記的）
+    是後 6 碼 `218604`。只比完全相等的話，這道防呆會把**正確**的那份擋下來，
+    而且使用者手上根本沒有長號碼可以填 —— 2026-08-29 owner 實際撞到。"""
+    assert same_account_no("00200168218604", "218604")
+    assert same_account_no("218604", "00200168218604")
+
+
+def test_the_other_fubon_accounts_still_do_not_match():
+    """放寬不能放寬到「同一家銀行都算同一個」—— owner 的三個富邦戶
+    651214／213467／218604 彼此都要對不上。"""
+    for other in ("651214", "213467"):
+        assert not same_account_no("00200168218604", other), other
+
+
+def test_a_tail_too_short_to_be_trusted_does_not_match():
+    """4 碼尾碼撞在一起的機會太高，不放行（ACCOUNT_TAIL_MIN=6）。"""
+    from core.bank_statement import ACCOUNT_TAIL_MIN
+    assert ACCOUNT_TAIL_MIN == 6
+    assert not same_account_no("00200168218604", "8604")
+
+
+def test_ambiguous_tails_are_blocked_not_guessed():
+    """🔴 尾碼比對的代價：同一本帳裡若有兩個帳號互為尾碼，一份對帳單會同時
+    對上兩個。那種情況**不能猜**，要擋下來並叫人補完整號碼。
+    （2026-08-29 生產庫實查：目前沒有這種互撞，但那是現況不是保證。）"""
+    from tests.unit._srcscan import code_only, func_body, repo_src
+    body = code_only(func_body(repo_src("routers/api_finance_stmt.py"),
+                               "async def _assert_statement_belongs_to("))
+    assert "len(matches) > 1" in body
+    assert "補成完整號碼" in body

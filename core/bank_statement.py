@@ -213,10 +213,33 @@ def extract_account_no(text: str) -> str | None:
     return digits if len(digits) >= 8 else None
 
 
+#: 尾碼比對的最短長度。6 碼是 owner 三個富邦帳戶登記的長度（651214／213467／
+#: 218604）；再短（4 碼以下）不同帳戶撞在一起的機會就高到不值得放行了。
+ACCOUNT_TAIL_MIN = 6
+
+
 def same_account_no(a, b) -> bool:
-    """兩個帳號是不是同一個。只比數字，兩邊都有值才比得了。"""
+    """兩個帳號是不是同一個。只比數字，兩邊都有值才比得了。
+
+    🔴 **短碼是尾碼，不是另一個號碼**（owner 2026-08-29 實帳）：富邦的對帳單
+    印完整 14 碼 `00200168218604`，但存摺上（和系統裡登記的）是後 6 碼
+    `218604`。只比完全相等的話，這道防呆會把**正確**的那份對帳單擋下來 ——
+    而且沒有任何辦法可以匯入，因為使用者手上的號碼就是短的那個。
+
+    所以：完全相等，或**其中一個是另一個的尾碼**（短的那邊至少
+    `ACCOUNT_TAIL_MIN` 碼）就算同一個。前綴是分行／科目代號，本來就會被印上去。
+
+    ⚠ 尾碼比對會讓「同一本帳裡有兩個帳號互為尾碼」的情況變成模稜兩可 ——
+    那要由呼叫端處理（見 routers/api_finance_stmt._assert_statement_belongs_to），
+    這支只回答「這兩個能不能是同一個」。
+    """
     da, db = re.sub(r"\D", "", a or ""), re.sub(r"\D", "", b or "")
-    return bool(da) and bool(db) and da == db
+    if not da or not db:
+        return False
+    if da == db:
+        return True
+    short, long_ = (da, db) if len(da) <= len(db) else (db, da)
+    return len(short) >= ACCOUNT_TAIL_MIN and long_.endswith(short)
 
 
 def _find_totals(text: str):
