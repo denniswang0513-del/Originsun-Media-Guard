@@ -81,12 +81,18 @@ def test_crm_equipment_tab_is_pinned_to_parent():
     assert "'?entity=parent'" in js, "chips 的全量補抓那條路也要釘"
 
 
-def test_gear_subview_is_pinned_to_mine_and_gated():
-    """私帳的器材清冊：清單走引擎端點（與 BS 同口徑）、建立帶 entity='mine'、
-    入口只給帳號上真的有 finance_mine 的人。"""
+def test_gear_subview_follows_the_current_book():
+    """🔴 2026-08-30 反轉：器材清冊不再釘死私帳。owner「器材清單這些清單是
+    私帳的，跟母公司沒關係，母公司的器材清單要另外建」—— 改成跟著當前帳本，
+    母公司那本從零開始建（生產實查：123 件全在私帳、母公司 0 件）。
+
+    清單走引擎端點（與 BS 的「器材淨值」同口徑）、建立落在**當前帳本**。
+    """
     js = (ROOT / "frontend/tabs/finance/subviews/gear.js").read_text(encoding="utf-8")
-    assert "finFetchMine('/assets/equipment')" in js
-    assert "entity: 'mine'" in js.split("method: 'POST'")[1][:120], "建立要落私帳"
+    assert "finFetchMine" not in js.split("*/", 1)[1], "不再釘死私帳（檔頭註解不算）"
+    assert "finFetch('/assets/equipment')" in js
+    assert "entity: finEntity()" in js.split("method: 'POST'")[1][:160],         "建立要落在當前帳本"
     html = (ROOT / "frontend/tabs/finance/finance.html").read_text(encoding="utf-8")
     btn = [ln for ln in html.splitlines() if 'data-subview="gear"' in ln][0]
-    assert "fin-nav-mine-only" in btn, "指名門是宣告式：按鈕掛 class、finance.js 一行收掉"
+    assert "fin-nav-mine-only" not in btn, "兩本帳都看得到，不再是私帳專屬入口"
+    assert "fin-nav-mine-ok" in btn, "但仍要有任一本帳的權"

@@ -1,17 +1,23 @@
 /**
- * gear.js — 🎥 器材清冊（owner 私人器材；2026-08-25）。
+ * gear.js — 🎥 器材清冊（財務視角的器材清單；2026-08-25）。
  *
  * owner：「我的器材清冊拉到我的私帳頁面可以看到，crm 如果是我的清冊就不要
- * 看到」。CRM 器材庫已釘 entity=parent，私帳的 123 件在這裡看與管 ——
- * 沒有這頁的話，藏掉 CRM 之後 owner 的器材就沒有任何地方能編了。
+ * 看到」。私帳的 123 件在這裡看與管 —— 沒有這頁的話 owner 的器材沒地方編。
+ *
+ * 🔴 2026-08-30 起**跟著當前帳本**（原本寫死 finFetchMine）：owner「器材清單
+ * 這些清單是私帳的，跟母公司沒關係，母公司的器材清單要另外建」。母公司那本
+ * 是空的（生產實查：123 件全在私帳、母公司 0 件），從這裡開始建。
+ * 兩本帳的欄位一樣（名稱/類別/建置日/金額/攤提/狀態/備註），差別只在資料屬於
+ * 哪一本 —— 所以是同一個畫面換帳本，不是兩支子視圖。
  *
  * 口徑：清單與淨值走 /finance/assets/equipment（逐件過報表引擎，與 BS 的
  * 「器材淨值」同一份算法 —— 見該端點的說明）；新增/編修走 /api/v1/equipment
- * CRUD（entity='mine'，寫入側有 _assert_mine_writable 的牆）。
- * 刻意**不是** CRM 器材庫的複本：領用/歸還/稼動率是公司工作流，私人器材
- * 只需要 名稱/類別/建置日/金額/攤提/狀態/備註 —— 對齊 owner 原 Sheet 的欄位。
+ * CRUD（寫入側 mine 那半有 _assert_mine_writable 的牆）。
+ * 刻意**不是** CRM 器材庫的複本：領用/歸還/稼動率是公司的工作流，這頁是
+ * 財務視角（金額/攤提/淨值）—— 對齊 owner 原 Sheet 的欄位。
  */
-import { finFetchMine, finSubviewBoot, esc, fmtNum, finToast } from '../fin-utils.js';
+import { finFetch, finEntity, finSubviewBoot, esc, fmtNum, finToast }
+    from '../fin-utils.js';
 import { authFetch } from '../../../js/shared/utils.js';
 
 const API = '/api/v1/equipment';
@@ -41,7 +47,7 @@ export default async function render(container, ctx = {}) {
 async function _load() {
     const r = await finSubviewBoot(_c, {
         title: '🎥 器材清冊', isCurrent: _isCurrent,
-        fetchers: [() => finFetchMine('/assets/equipment')],
+        fetchers: [() => finFetch('/assets/equipment')],
         retry: 'window._finGear.reload()',
     });
     if (!r) return;
@@ -143,7 +149,8 @@ _fg.save = async (btn) => {
     btn.disabled = true;
     try {
         if (_editing === 'new') {
-            await _efetch('', { method: 'POST', body: { ...body, entity: 'mine' } });
+            // 建在**當前帳本**（母公司模式建的就是公司的器材）
+            await _efetch('', { method: 'POST', body: { ...body, entity: finEntity() } });
             finToast('已新增到清冊');
         } else {
             await _efetch(`/${_editing}`, { method: 'PUT', body });

@@ -340,10 +340,11 @@ def test_mine_only_nav_still_gates_on_the_explicit_module():
     fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
     assert "(window._modules || []).includes('finance_mine')" in fin
     html = (ROOT / "frontend/tabs/finance/finance.html").read_text(encoding="utf-8")
-    assert 'fin-nav-mine-only" data-subview="gear"' in html
-    assert 'data-subview="projects">📁 執行專案' in html
-    seg = html.split('data-subview="projects"')[0].rsplit("<button", 1)[1]
-    assert "fin-nav-mine-only" not in seg, "執行專案不再是私帳專屬入口"
+    assert 'fin-nav-mine-only" data-subview="household"' in html
+    # 執行專案與器材清冊都改成跟著帳本切，不再是私帳專屬入口
+    for sub in ("projects", "gear"):
+        seg = html.split(f'data-subview="{sub}"')[0].rsplit("<button", 1)[1]
+        assert "fin-nav-mine-only" not in seg, sub
 
 
 def test_reopening_the_same_case_unhides_the_panel():

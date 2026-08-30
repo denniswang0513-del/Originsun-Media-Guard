@@ -143,7 +143,9 @@ def test_private_only_subviews_are_hidden_in_the_parent_book():
     fin = js_code_only(repo_src("frontend/tabs/finance/finance.js"))
     assert "if (!mineMode || !((window._modules || []).includes('finance_mine')))" in fin
     html = repo_src("frontend/tabs/finance/finance.html")
-    for sub in ("household", "securities", "gear", "receivable"):
+    # 🔴 gear 不在這一組：2026-08-30 起它跟著帳本切（母公司那本從零建），
+    # 跟執行專案同一種處理。留在這裡的是「整個就是私帳的東西」那幾個。
+    for sub in ("household", "securities", "receivable"):
         seg = html.split(f'data-subview="{sub}"')[0].rsplit("<button", 1)[1]
         assert "fin-nav-mine-only" in seg, sub
 
