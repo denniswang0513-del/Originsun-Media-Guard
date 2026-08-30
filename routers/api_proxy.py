@@ -107,7 +107,7 @@ async def verify_standalone_proxies(req: VerifyStandaloneProxiesRequest):
     req.sources = [tr(s) for s in req.sources]
     req.dest_dir = tr(req.dest_dir)
     missing_sources = []
-    video_exts = {".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts", ".r3d", ".braw"}
+    from core.media_exts import VIDEO_EXTS as video_exts
     proxy_exts = {".mov", ".mp4"}
 
     source_stems = {}

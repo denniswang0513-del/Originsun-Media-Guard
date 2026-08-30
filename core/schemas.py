@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, field_validator  # type: ignore
 from typing import List, Optional, Tuple
 
 from core.crm_logic import normalize_tax_id
+from core.media_exts import sorted_video_exts
 
 
 class BackupRequest(BaseModel):
@@ -388,7 +389,8 @@ class DownloadModelRequest(BaseModel):
 
 class ListDirRequest(BaseModel):
     path: str
-    exts: List[str] = [".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts", ".r3d", ".braw"]
+    # 預設值 = core.media_exts 那份正本（前端不送 exts 就吃這個）
+    exts: List[str] = Field(default_factory=sorted_video_exts)
 
 class MergeOutputRequest(BaseModel):
     proxy_root: str
@@ -410,7 +412,7 @@ class VerifyStandaloneProxiesRequest(BaseModel):
 class CompareSourceRequest(BaseModel):
     source_dir: str
     output_dir: str
-    video_exts: List[str] = [".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts", ".r3d", ".braw"]
+    video_exts: List[str] = Field(default_factory=sorted_video_exts)
     proxy_exts: List[str] = [".mov", ".mp4"]
     flat_proxy: bool = False
 

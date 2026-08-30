@@ -140,7 +140,7 @@ def _dispatch_tts(task_type: str, req_data: dict) -> bool:
 # ── 分散式轉檔派發 ────────────────────────────────────────────
 
 # 影片副檔名（與 ListDirRequest 預設值對齊）
-_VIDEO_EXTS = {".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts", ".r3d", ".braw"}
+from core.media_exts import VIDEO_EXTS as _VIDEO_EXTS
 
 
 def _scan_video_files(source_dirs: list) -> list:

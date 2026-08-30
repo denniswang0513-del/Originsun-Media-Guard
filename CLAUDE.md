@@ -1048,18 +1048,39 @@ e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe -m py_compile <modified_fi
 編輯任何檔案前先量它：
 
 ```powershell
-(Get-Content <path> | Measure-Object -Line).Lines
+(Get-Content <path> -Encoding UTF8).Count
 ```
 
-需要全貌時產生即時清單（破千行檔案，2026-07 約 13 個，app.js / core_engine.py /
-routers/crm/costs.py / blog/editor.js 等都在列）：
+🔴 **這兩個參數都不能省**（2026-08-30 體檢實測，這裡原本寫的
+`(Get-Content <path> | Measure-Object -Line).Lines` 系統性低估 18–35%）：
+
+| 檔案 | 舊寫法說 | 實際 | 誤差 |
+|------|---------|------|------|
+| `db/models.py` | 1,389 | **2,121** | −35% |
+| `routers/api_finance.py` | 1,503 | 1,843 | −18% |
+| `core/finance_logic/_core.py` | 1,067 | 1,307 | −18% |
+
+兩個獨立的錯誤疊在一起：`Measure-Object -Line` **會把空行丟掉**（占 15–20%）；
+`Get-Content` **不指定編碼時在含中文的檔上會少切行**（`db/models.py` 少 443 行、
+`api_finance.py` 少 169 行）。用位元組 `\n` 數交叉驗證過，`-Encoding UTF8` 那個是對的。
+
+低估的方向正好是危險的那一邊：`db/models.py` 回報 1,389 看起來安全，於是整檔讀
+下去 —— 而它 2,121 行，會被靜默截掉四分之一，而且它是全 repo 第二常改的檔。
+**Bash 那側用 `wc -l` 即可**（它數 `\n`，沒有這兩個問題）。
+
+需要全貌時產生即時清單（破千行檔案，2026-08-30 用對的量法重數是 30 個；
+超過 2,000 硬上限的 5 個：app.js 2,659 / core_engine.py 2,309 /
+finance/subviews/recon.js 2,253 / db/models.py 2,121 / crm-cashbook.js 2,012）：
 
 ```powershell
 Get-ChildItem -Recurse -Include *.py,*.js -Exclude node_modules |
   Where-Object { $_.FullName -notmatch '\\(\.venv|node_modules|python_embed|__pycache__|dist)\\' } |
-  ForEach-Object { [PSCustomObject]@{ Lines=(Get-Content $_.FullName | Measure-Object -Line).Lines; File=$_.FullName } } |
+  ForEach-Object { [PSCustomObject]@{ Lines=(Get-Content $_.FullName -Encoding UTF8).Count; File=$_.FullName } } |
   Where-Object Lines -gt 1000 | Sort-Object Lines -Descending
 ```
+
+財務目錄與那 5 個超標檔由 `tests/unit/test_finance_files_stay_readable.py` 守著
+（它用 Python 的 `splitlines()`，量得是對的），超過上限會直接紅。
 
 **超過 500 行的檔案，強制使用 `offset` + `limit` 分段讀取。禁止一次讀完後假裝看到了全部內容。**
 

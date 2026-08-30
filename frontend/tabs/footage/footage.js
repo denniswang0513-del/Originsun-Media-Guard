@@ -6,6 +6,12 @@
  * 「掃描資料夾」把既有影片 + 同名 .txt/.srt 逐字稿建索引。
  */
 
+// 🔴 core/media_exts.VIDEO_EXTS 的鏡射（前端沒有 build step，抄不到後端常數）。
+// tests/unit/test_media_exts_sync.py 逐值比對，漂開就紅。
+// 原本這裡只列 5 種，而索引端當時只收 7 種 —— 兩份都少，於是 RED / BRAW 的素材
+// 既進不了索引、也篩不出來。收進正本之後這裡要跟著全開，不然索引得到卻篩不到。
+const FOOTAGE_EXTS = ['.avi', '.braw', '.m2ts', '.mkv', '.mov', '.mp4', '.mts', '.mxf', '.r3d'];
+
 import { esc } from '../website/website-utils.js';
 
 async function ffetch(path, opts = {}) {
@@ -87,7 +93,7 @@ function _render(res, st) {
             <input id="ft-q" type="search" placeholder="搜逐字稿內容、檔名、專案…" value="${esc(_q)}">
             <select id="ft-proj"><option value="">全部專案</option>${projOpts}</select>
             <select id="ft-ext"><option value="">全部格式</option>
-                ${['.mp4', '.mov', '.mxf', '.mkv', '.avi'].map(e => `<option value="${e}"${e === _extFilter ? ' selected' : ''}>${e}</option>`).join('')}</select>
+                ${FOOTAGE_EXTS.map(e => `<option value="${e}"${e === _extFilter ? ' selected' : ''}>${e}</option>`).join('')}</select>
             <button class="ft-btn" data-ft="search">搜尋</button>
             <button class="ft-btn ghost" data-ft="scan">📂 掃描資料夾</button>
         </div>

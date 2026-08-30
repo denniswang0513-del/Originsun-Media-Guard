@@ -1922,7 +1922,7 @@ if (typeof appendLog === 'undefined') {
                         try {
                             const r = await fetch(getComputeBaseUrl() + '/api/v1/list_dir', {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ path: absoluteSrcPath, exts: ['.mov', '.mp4', '.mkv', '.mxf', '.avi', '.mts', '.m2ts', '.r3d', '.braw'] })
+                                body: JSON.stringify({ path: absoluteSrcPath })
                             });
                             if (r.ok) {
                                 const d = await r.json();
@@ -1948,7 +1948,7 @@ if (typeof appendLog === 'undefined') {
                         try {
                             const r = await fetch(getComputeBaseUrl() + '/api/v1/list_dir', {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ path: cardDir, exts: ['.mov', '.mp4', '.mkv', '.mxf', '.avi', '.mts', '.m2ts', '.r3d', '.braw'] })
+                                body: JSON.stringify({ path: cardDir })
                             });
                             if (r.ok) {
                                 const d = await r.json();
@@ -1972,7 +1972,7 @@ if (typeof appendLog === 'undefined') {
                     try {
                         const r = await fetch(getComputeBaseUrl() + '/api/v1/list_dir', {
                             method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ path: projDir, exts: ['.mov', '.mp4', '.mkv', '.mxf', '.avi', '.mts', '.m2ts', '.r3d', '.braw'] })
+                            body: JSON.stringify({ path: projDir })
                         });
                         if (r.ok) { const d = await r.json(); if (d.files && d.files.length) cardEntries.push({ cardName: '', files: d.files }); }
                     } catch (e) { if (typeof appendLog === 'function') appendLog('⚠️ 無法掃描來源: ' + e.message, 'error'); }

@@ -450,7 +450,11 @@ function updateAlignSubmitBtn() {
 
 // ─── Batch import ───────────────────────────────────────────────────────
 
-const _VIDEO_EXTS_FOR_LIST = [".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts", ".webm", ".ts"];
+// 🔴 core/media_exts.TRANSCRIBE_EXTS 的鏡射（前端沒有 build step）。
+// tests/unit/test_media_exts_sync.py 逐值比對，漂開就紅。
+// 這一份**刻意**與 VIDEO_EXTS 不同：.r3d / .braw 是原廠 raw，ffmpeg 沒有解碼器
+// 抽不出音軌；.webm / .ts 不是拍攝素材但 ffmpeg 讀得動。理由寫在正本的檔頭。
+const _VIDEO_EXTS_FOR_LIST = [".avi", ".m2ts", ".mkv", ".mov", ".mp4", ".mts", ".mxf", ".ts", ".webm"];
 const _TRANSCRIPT_EXTS = [".txt", ".srt"];
 
 // Native tkinter pickers open on the agent's machine. When the user is

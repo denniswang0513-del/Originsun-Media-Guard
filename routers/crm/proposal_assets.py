@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -309,11 +310,20 @@ async def ensure_subdir(folder_abs: str, rel: str) -> str:
     自己產或使用者認領過的，磁碟上被搬走/還沒建都不該讓上傳失敗 —— 逃逸或
     建不出來就退回資產夾根（有落點總比 500 好，呼叫端不必再寫一套退路）。
     """
-    sub = str(rel or "").replace("\\", "/").strip("/")
+    raw = str(rel or "")
+    sub = raw.replace("\\", "/").strip("/")
     if not folder_abs or not sub:
         return folder_abs
+    # 🔴 碟符 / UNC 開頭的要在這裡就擋掉，`within_dir` 接不住它們：
+    # `os.path.join(root, "C:", "Users", …)` 在 Windows 上會把 `C:` 吃掉，
+    # 於是 `C:\Users\我\x` 變成 root 底下一整串 `Users\我\x` 的深層目錄 ——
+    # 沒有逃出資產夾（安全那一面是好的），但會在客戶的共用夾裡憑空長出一棵
+    # 照著某人硬碟路徑長的目錄樹，而且回應是 200。docstring 本來就寫著
+    # 「絕對路徑注入 → 當沒設」，這裡把它補成真的。（2026-08-30 測出來的）
+    if re.match(r"^[A-Za-z]:", sub) or raw.startswith(("\\\\", "//")):
+        return folder_abs
     target = os.path.join(folder_abs, *sub.split("/"))
-    if not within_dir(folder_abs, target):     # `..` / 絕對路徑注入 → 當沒設
+    if not within_dir(folder_abs, target):     # `..` 逃逸 → 當沒設
         return folder_abs
     try:
         await asyncio.to_thread(os.makedirs, target, exist_ok=True)

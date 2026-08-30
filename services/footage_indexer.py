@@ -13,7 +13,9 @@ import os
 import re
 import subprocess
 
-VIDEO_EXTS = {".mp4", ".mov", ".mxf", ".mkv", ".avi", ".mts", ".m2ts"}
+# 🔴 原本自己一份 7 種（缺 .r3d .braw）—— 素材庫索引掃到那兩種就 continue，
+# 於是 RED 與 BRAW 的素材在檢索裡不存在。正本在 core/media_exts。
+from core.media_exts import VIDEO_EXTS
 _MAX_FILES = 2000
 _TRANSCRIPT_MAX = 200_000   # 單檔逐字稿存 200KB 上限，防超長 SRT 撐爆列
 

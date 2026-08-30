@@ -21,14 +21,12 @@ _CONFIG_PATH = os.path.join(_BASE_DIR, "watcher_config.json")
 _HISTORY_PATH = os.path.join(_BASE_DIR, "watcher_history.json")
 _HISTORY_MAX = 50
 
-_VIDEO_EXTS = {".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts"}
-# Photos go through exiftool-only path in worker._drone_meta_sync. Kept in
-# sync with DRONE_META_IMAGE_EXTS in core/worker.py.
-_IMAGE_EXTS = {
-    ".dng", ".jpg", ".jpeg", ".arw", ".cr2", ".cr3",
-    ".nef", ".raf", ".orf", ".rw2", ".tif", ".tiff",
-}
-_MEDIA_EXTS = _VIDEO_EXTS | _IMAGE_EXTS
+# 🔴 這裡原本自己寫了一份 7 種的清單（缺 .r3d .braw）—— 空拍監控看不到 RED 與
+# BRAW 的素材，而且是靜默的。正本在 core/media_exts。
+# 影片那半由 _MEDIA_EXTS 帶進來（本檔的掃描只問「是不是媒體檔」，
+# 照片與影片走的是同一個 os.scandir 迴圈）
+from core.media_exts import IMAGE_EXTS as _IMAGE_EXTS
+from core.media_exts import MEDIA_EXTS as _MEDIA_EXTS
 
 _file_lock = threading.Lock()
 

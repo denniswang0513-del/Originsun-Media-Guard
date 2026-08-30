@@ -91,10 +91,9 @@ async def open_local_folder(req: OpenFileRequest, _auth=_LOGIN):
         return {"status": "error", "message": f"資料夾不存在: {folder_path}"}
     except Exception as e: return {"status": "error", "message": str(e)}
 
-_VIDEO_FILETYPES = (
-    "(('Video', '*.mov *.mp4 *.mkv *.mxf *.avi *.mts *.m2ts *.MOV *.MP4'),"
-    " ('All files', '*.*'))"
-)
+from core.media_exts import video_filetypes_spec as _video_filetypes_spec
+
+_VIDEO_FILETYPES = _video_filetypes_spec()
 
 
 def _run_picker_subprocess(mode: str, title: str):
@@ -433,7 +432,9 @@ async def api_resolve_drop(name: str, _auth=_LOGIN):
 
 
 # ── NAS Browser (for external access) ──────────────────────────────────
-VIDEO_EXTS = {".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts", ".r3d", ".braw"}
+# 🔴 這裡原本有一份 VIDEO_EXTS —— 是那 13 份影片副檔名清單裡**沒有任何人用**
+# 的一份（browse_directory 的 show_files 列出所有檔案，不過濾副檔名）。
+# 2026-08-30 收斂時 ruff 抓出來，直接刪掉。要用就 from core.media_exts import。
 
 @router.get("/api/v1/browse")
 async def browse_directory(path: str = "", show_files: bool = False, _auth=_LOGIN):
