@@ -8,7 +8,7 @@ import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setu
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
 // pin 值；payload 只在 'mine' 才帶 entity:'mine'（後端 None 語意：建立落 parent、
 // 更新維持既有值 —— 不洗欄位）。pin 用財務模組那份，不在這裡複寫。
-import { finEntity as _pinEntity } from '../finance/fin-utils.js';
+import { finEntity as _pinEntity, finIsMine } from '../finance/fin-utils.js';
 // 🔴 複製一律走 shared 那份：同事多半從 http://192.168.1.x 連進來（非安全內容），
 // navigator.clipboard 根本不存在 —— 那支有 textarea+execCommand 的 fallback。
 import { copyText } from '../../js/shared/utils.js';
@@ -331,7 +331,7 @@ window._invQuickAdd = async function () {
         // 前端本來自己判 `=== 已撥款 ? 付款 : 收款`，漏掉「待撥款」那個也是付款
         // 方向的狀態，於是那張代開發票會被當成收款、跑進應收帳款
     }, { amount: val('inv-qa-amt'), mode: _qaMode() });
-    if (_pinEntity() === 'mine') payload.entity = 'mine';   // 帳本 pin，parent 不送
+    if (finIsMine()) payload.entity = 'mine';   // 帳本 pin，parent 不送
 
     const btn = document.querySelector('.inv-qa-btn');
     if (btn) btn.disabled = true;
@@ -1082,7 +1082,7 @@ async function saveInvoice() {
     else if (_editingId && _editingPaymentStatus) payload.payment_status = _editingPaymentStatus;
     else payload.payment_status = '未收款';
     // 帳本（兩本帳）— pin 是 'mine' 才帶；parent 不送（後端 None→parent，PUT 不洗欄位）
-    if (_pinEntity() === 'mine') payload.entity = 'mine';
+    if (finIsMine()) payload.entity = 'mine';
 
     const btn = document.getElementById('inv-btn-save');
     btn.disabled = true; btn.textContent = '儲存中...';

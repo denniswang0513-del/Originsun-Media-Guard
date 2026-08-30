@@ -124,7 +124,9 @@ async def preview_card_statement(
     factory = _factory_or_503()
     async with factory() as session:
         hist = await _history_map(session, ent)
-        rules = await _load_import_rules(session)
+        # 🔴 帶 ent：規則按帳本分家。漏傳＝拿母公司的規則去分私帳的卡費
+        # （那支 helper 的 docstring 就在講這件事）。
+        rules = await _load_import_rules(session, "", ent)
         seen = await _existing_card_keys(session, ent, [r.date for r in res.rows])
 
     out = suggest_rows(res.rows, hist, rules, seen)   # Counter 直接進去（消耗式比對）
@@ -183,9 +185,19 @@ async def apply_card_statement(payload: CardImportApply, request: Request,
             if (not acct or (acct.entity or "parent") != ent
                     or (acct.acct_kind or "") != CARD_KIND):
                 raise HTTPException(status_code=422, detail="卡別不存在或不是信用卡帳戶")
+        # 分類的三欄與節點交給**同一份規則**（`_sync_taxonomy`）：
+        #  - `item` 自己 `split("_", 1)` 是 `core.cash_taxonomy.split_category`
+        #    的第三份 —— 那條「只切第一個底線」的規則有它自己的理由
+        #    （`轉匯與定存_公司信用卡` 的項目是「公司信用卡」）。
+        #  - 不掛 `taxonomy_node_id` 的話，卡單寫出來的列是「有類別、不在樹上」
+        #    的孤兒：收支明細的樹狀篩選看不到它們。銀行對帳單那兩條路
+        #    （apply_bank_statement / apply_rules_to_unclassified）已經都走它了，
+        #    卡單是最後一個自己來的寫入端。
+        from core.cash_tree import path_map
+        from routers.crm.finance import _sync_taxonomy
+        paths = await path_map(session, ent) if todo else {}
         for r, d in todo:
-            item = (r.category or "").split("_", 1)
-            session.add(CrmCashEntry(
+            ce = CrmCashEntry(
                 id=uuid.uuid4().hex, entity=ent, entry_date=d,
                 expense=int(r.amount),
                 bank_account_id=card_id,      # 卡別身分（見 CardImportApply 說明）
@@ -193,9 +205,11 @@ async def apply_card_statement(payload: CardImportApply, request: Request,
                 # 雙備註（2026-08-26）：note 留給人手寫；卡單來源由 status='card'
                 # ＋created_at 說明，不再寫「[卡單匯入]」標記汙染附註欄
                 category=r.category or None,
-                item=item[1] if len(item) > 1 else None,
                 status="card", has_invoice=0,
-            ))
+            )
+            session.add(ce)
+            if r.category:
+                await _sync_taxonomy(session, ce, {"category": r.category}, paths)
             made += 1
         await session.commit()
     return {"status": "ok", "made": made, "skipped_duplicates": skipped}
@@ -222,10 +236,14 @@ async def ai_suggest_categories(payload: CardAiSuggestPayload, request: Request,
     from sqlalchemy import distinct, select
 
     from db.models import CrmCashEntry
-    from routers.crm._shared import cash_category_texts
+    from routers.crm._shared import ledger_category_domain
     factory = _factory_or_503()
     async with factory() as session:
-        mapped = await cash_category_texts(session)
+        # 🔴 **這本帳**的值域。整份 finance_category_map 是兩本共用的 —— 拿它
+        # 當白名單餵給 AI，私帳的卡費就會被分到「交際應酬」那種私帳沒有的類別，
+        # 寫進去之後靜靜躺在「未歸類」（同一支檔案上面的 _load_import_rules 修的
+        # 是同一件事）。
+        mapped = await ledger_category_domain(session, ent)
         in_use = (await session.execute(
             select(distinct(CrmCashEntry.category))
             .where(CrmCashEntry.entity == ent,

@@ -6,7 +6,7 @@
  * 科目代碼不出現在主 UI：下拉顯示 name（name_plain 進 option title tooltip），
  * treatment 全用白話標籤。後端 API prefix /api/v1/finance（fin-utils.finFetch）。
  */
-import { finFetch, finEntity, esc, fmtNum, finToast, finSubviewBoot, TREATMENT_OPTIONS, ACCT_KIND_OPTIONS } from '../fin-utils.js';
+import { finFetch, finEntity, esc, fmtNum, finToast, finSubviewBoot, TREATMENT_OPTIONS, ACCT_KIND_OPTIONS, finIsMine } from '../fin-utils.js';
 import { createSortable, sortableTh, crmFetch } from '../../crm/crm-utils.js';   // 點欄頭排序（通用排序器）+ 分類樹 API（在 /crm 底下不是 /finance）
 
 let _c = null;
@@ -82,7 +82,7 @@ export default async function render(container, ctx = {}) {
             () => finFetch('/bookkeeping-fee').catch(() => null),
             // 🔴 分類樹只有私帳有；母公司那本用的是平面的類別對映表（詞彙不同，
             // 混在一起私帳的類別下拉會從 5 個爆成 37 個 —— 見 core/cash_taxonomy.py）
-            () => (finEntity() === 'mine'
+            () => (finIsMine()
                 ? crmFetch('/cash-taxonomy/nodes?entity=mine').catch(() => ({ tree: [] }))
                 : Promise.resolve({ tree: [] })),
         ],

@@ -33,12 +33,13 @@ from core.db_guard import db_factory_or_503 as _factory_or_503
 from core.finance_logic import local_day
 from core.schemas import (BankImportRulePayload, StatementDraftPayload,
                           StatementImportApply)
-from routers.crm._shared import (_assert_rows_open, _fmt_minute, _parse_day,
-                                 _username)
+from routers.crm._shared import (_assert_rows_open, _fmt_minute,
+                                 ledger_categories_and_tree,
+                                 ledger_category_domain, _parse_day, _username)
 
 # 前半的東西：守門一支、貸款三支（對帳單裡認出來的繳款要寫進既有的攤還表）
-from .api_finance import (_acct_and_entity, _get_loan_and_period, _guard,
-                          _load_loans_with_payments, _record_loan_payment,
+from .api_finance import (_acct_and_entity, _entry_flow, _get_loan_and_period,
+                          _guard, _load_loans_with_payments, _record_loan_payment,
                           recognize_transfer_fees_in)
 
 router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
@@ -209,8 +210,11 @@ async def list_import_rules(request: Request, bank_account_id: str = "",
     async with factory() as session:
         rows = (await session.execute(
             select(BankImportRule).where(BankImportRule.entity == ent))).scalars().all()
+        # 規則面板的「歸到類別」下拉吃這一份 —— 跟寫入時擋人的
+        # （`_assert_known_category`）必須是同一個值域。
+        cats = sorted(await ledger_category_domain(session, ent))
     rows.sort(key=_rule_priority_key(bank_account_id))
-    return {"items": [_rule_dict(r) for r in rows]}
+    return {"items": [_rule_dict(r) for r in rows], "categories": cats}
 
 
 async def _owned_rule(session, rule_id: str, ent: str):
@@ -232,27 +236,47 @@ async def _apply_rule_payload(r, payload, *, require_all: bool, session,
                               ent: str = "parent"):
     """驗規則欄位並寫進 r。新增與修改共用 —— 各寫一份的話，防呆會只加在一邊。
 
-    require_all：新增時關鍵字與類別都必填；修改時允許只送要改的那個。
+    require_all：新增＝關鍵字與類別必填、每一欄都寫；修改＝**部分更新**，
+    只碰前端真的送了的欄位。
+
+    🔴 修改為什麼一定要部分更新：payload 的每一欄都有預設值，整包寫回的話，
+    前端「沒送」和「送了預設值」在後端長得一模一樣。停用鈕只送 `active`，
+    於是 `only_direction` 被 0（不限）洗掉 —— 一條「薪資 只支出」的規則按一次
+    停用再啟用，就變成收付兩邊都中，而畫面上不會有任何提示。
+    （`taxonomy_node_id` 之前被單獨加了 `is not None` 哨兵擋著，那是同一個病的
+    OK 繃；改成部分更新之後，往後再加欄位也不會重演。）
     """
+    sent = set(payload.model_dump(exclude_unset=True)) if not require_all else None
+
+    def touched(field: str) -> bool:
+        return sent is None or field in sent
+
     kw = (payload.keyword or "").strip()
     cat = (payload.category or "").strip()
     if require_all and (not kw or not cat):
         raise HTTPException(status_code=422, detail="關鍵字與類別都要填")
     if kw:
         _assert_usable_keyword(kw)
-    await _assert_known_category(cat, session, ent)
-    r.keyword = kw or r.keyword
-    r.category = cat or r.category
-    if payload.taxonomy_node_id is not None:
+    if touched("category"):
+        await _assert_known_category(cat, session, ent)
+        r.category = cat or r.category
+    if touched("keyword"):
+        r.keyword = kw or r.keyword
+    if touched("taxonomy_node_id"):
         r.taxonomy_node_id = (payload.taxonomy_node_id or "").strip() or None
-    r.bank_account_id = payload.bank_account_id or None
-    od = int(payload.only_direction or 0)
-    if od not in (-1, 0, 1):
-        raise HTTPException(status_code=422, detail="方向條件只能是 -1／0／+1")
-    r.only_direction = od
-    r.sort_order = payload.sort_order
-    r.active = payload.active
-    r.note = (payload.note or "")[:255]
+    if touched("bank_account_id"):
+        r.bank_account_id = payload.bank_account_id or None
+    if touched("only_direction"):
+        od = int(payload.only_direction or 0)
+        if od not in (-1, 0, 1):
+            raise HTTPException(status_code=422, detail="方向條件只能是 -1／0／+1")
+        r.only_direction = od
+    if touched("sort_order"):
+        r.sort_order = payload.sort_order
+    if touched("active"):
+        r.active = payload.active
+    if touched("note"):
+        r.note = (payload.note or "")[:255]
     return r
 
 
@@ -341,37 +365,12 @@ async def _assert_known_category(cat: str, session, ent: str = "parent"):
     """
     if not cat:
         return
-    known = await _known_categories(session, ent)
+    known = await ledger_category_domain(session, ent)
     if cat not in known:
         raise HTTPException(
             status_code=422,
             detail=f"「{cat}」不在收支科目對映裡 —— 規則只能填報表認得的類別。"
                    f"要新增科目請到帳務設定。")
-
-
-async def _known_categories(session, ent: str) -> set:
-    """這本帳認得的類別。
-
-    🔴 兩本帳的值域**不重疊**：母公司是 finance_category_map 的平面科目
-    （行政／薪資／交際應酬…），私帳是 cash_taxonomy_nodes 那棵樹，存進
-    `category` 欄的是路徑前兩層的複合鍵（`公司_專案`、`家用_變動支出`；
-    鏡射規則的正本在 core.cash_taxonomy.mirror_from_path）。
-
-    共用同一份白名單的話，私帳可以設出一條「→ 交際應酬」的規則 —— 而私帳的
-    報表根本沒有那個類別，那些列會靜靜落到「未歸類」，看起來卻像已經分好了。
-    """
-    from routers.crm._shared import cash_category_texts
-    flat = set(await cash_category_texts(session))
-    if ent != "mine":
-        return flat
-    from core.cash_taxonomy import mirror_from_path
-    from core.cash_tree import flatten, load_tree
-    tree = await load_tree(session, ent, include_inactive=True)
-    from_tree = {mirror_from_path(n["path"])[0] for n in flatten(tree)}
-    from_tree.discard("")
-    # 樹上還沒被建成科目的分支照樣可以設規則（科目對映是另一條線的事，
-    # 缺對映本來就有「科目未對映」的標記在提醒）—— 所以是聯集不是交集。
-    return from_tree | {c for c in flat if c in from_tree}
 
 
 @router.post("/import-rules/apply-unclassified")
@@ -386,8 +385,9 @@ async def apply_rules_to_unclassified(request: Request, entity: str = ""):
     from sqlalchemy import or_, select
 
     from core.bank_statement import _classify
-    from core.finance_logic import cash_entry_flow
     from db.models import CrmCashEntry
+    from core.cash_tree import path_map
+    from routers.crm.finance import _sync_taxonomy
     factory = _factory_or_503()
     changed, by_cat = 0, {}
     async with factory() as session:
@@ -396,6 +396,10 @@ async def apply_rules_to_unclassified(request: Request, entity: str = ""):
                 CrmCashEntry.entity == ent,
                 or_(CrmCashEntry.category.is_(None), CrmCashEntry.category == "")))
         ).scalars().all()
+        # 🔴 id→路徑表**整批撈一次**。不傳給 `_sync_taxonomy` 的話它每一列自己
+        # 撈一次整棵樹（它的 docstring 就在講這件事）—— 這條路一次掃的是整本帳
+        # 所有沒分類的列，私帳有幾百列符合。
+        paths = await path_map(session, ent) if rows else {}
         # 規則依帳戶不同 → 逐帳戶載一次（同帳戶的列共用）
         cache = {}
         for e in rows:
@@ -406,17 +410,33 @@ async def apply_rules_to_unclassified(request: Request, entity: str = ""):
             #    （_classify：不知道方向就不假裝知道）。「薪資」兩側都有、
             #    靠方向分成代收／代發 —— 那正是這條路要分的東西。
             #    正負號用 cash_entry_flow 的定義（正=流入、負=流出）。
+            # 🔴 `_entry_flow` 而不是 `cash_entry_flow` —— 後者吃的是收支明細的
+            # dict payload，這裡手上是 ORM 列，直接餵會 AttributeError（母公司
+            # 沒有未歸類的列，迴圈進不去，所以一直沒炸出來）。
             cat, _d, node = _classify(f"{e.summary or ''} {e.note or ''}", cache[acct],
-                                      signed=cash_entry_flow(e))
+                                      signed=_entry_flow(e))
             if cat:
-                e.category = cat
-                # 規則指定到第三層以後時，節點才是正本（category 只到第二層）——
-                # 只寫 category 的話，這批補分類的列在收支明細的樹狀篩選裡看不到
-                if node:
-                    e.taxonomy_node_id = node
+                # 🔴 節點與三欄的一致性只有一份規則：`_sync_taxonomy`
+                # （routers/crm/finance，docstring 寫著「規則只有這一份」）。
+                # 在這裡自己寫 category＋taxonomy_node_id 就是第二份 ——
+                # 兩者不一致時，哪一邊算數要看讀的人是誰。
+                # 🔴 節點可能已經被刪掉（刪分類節點不會回頭清規則裡的參照）。
+                # 那時 `_sync_taxonomy` 的節點分支會丟 400，把**整批**打掉 ——
+                # 一條爛規則不該讓其他幾百列都白跑。掛不上就退回只寫類別。
+                if node and node in paths:
+                    await _sync_taxonomy(session, e, {"taxonomy_node_id": node},
+                                         paths)
+                else:
+                    # 只帶 category 的規則（節點欄還沒填的那些）：三欄先賦值，
+                    # 再讓同一份規則去反查掛不掛得上節點。自己寫
+                    # `e.taxonomy_node_id` 就是第二份規則。
+                    e.category, e.item, e.sub_item = cat, "", ""
+                    await _sync_taxonomy(session, e, {"category": cat}, paths)
                 e.updated_at = datetime.now()
                 changed += 1
-                by_cat[cat] = by_cat.get(cat, 0) + 1
+                # 🔴 計數用**實際寫進去的**類別：節點那條路的 category 由節點的
+                # 路徑推導，跟規則上寫的可能不一樣，報表照規則算就會對不上。
+                by_cat[e.category] = by_cat.get(e.category, 0) + 1
         if changed:
             await session.commit()
     return {"ok": True, "scanned": len(rows), "changed": changed, "by_category": by_cat}
@@ -597,10 +617,12 @@ async def _build_statement_preview(session, acct, ent, text):
         session, acct_id, sorted({r.date for r in res.rows}))
 
     # 科目對映：category 沒對映的要標出來（不然匯進去報表變未歸類）。
-    # 🔴 走 `_known_categories` 而不是整份 cash_category_texts —— 那份是兩本帳
-    # 共用的，私帳的匯入視窗會拿到母公司的平面科目（行政／薪資／交際應酬…），
-    # 而它們在私帳的分類樹上根本不存在（owner 2026-08-29）。
-    mapped = await _known_categories(session, ent)
+    # 🔴 走**這本帳**的值域而不是整份 cash_category_texts —— 那份是兩本共用的，
+    # 私帳的匯入視窗會拿到母公司的平面科目（行政／薪資／交際應酬…），而它們在
+    # 私帳的分類樹上根本不存在（owner 2026-08-29）。畫面用的樹跟它是一組，
+    # 撈一次分兩邊過濾 —— 規則與理由都收在 `ledger_categories_and_tree` 裡。
+    cat_list, tax_tree = await ledger_categories_and_tree(session, ent)
+    mapped = set(cat_list)          # 逐列比對用集合，回應給前端的是排好的那份
     # 源日請款要填「會計項目」—— 對映規則的正本是 core.cash_taxonomy.petty_item_for
     # （`公司_器材` → `設備耗材`），值域是 _petty_item_domain。前端**不重寫一份**：
     # 這裡逐列算好建議值帶下去，對不出來就回空字串（那是「請人挑」的意思，
@@ -608,10 +630,8 @@ async def _build_statement_preview(session, acct, ent, text):
     from core.cash_taxonomy import petty_item_for as _petty_item_for
     from routers.crm.petty import _petty_item_domain
     petty_items = await _petty_item_domain(session) if ent == "mine" else []
-    # 私帳的分類樹一起回（母公司沒有樹，回空陣列）—— 前端逐列的分類下拉
-    # 要用它，多打一支 API 只是為了同一份資料
-    from core.cash_tree import load_tree as _load_tax_tree
-    tax_tree = await _load_tax_tree(session, ent) if ent == "mine" else []
+    # 私帳的分類樹跟著回（母公司沒有樹，回空陣列）—— 前端逐列的分類下拉要用
+    # 它，多打一支 API 只是為了同一份資料。
 
     # 預覽要能當場掛專案／發票（owner 2026-08-20）→ 選項一起回，
     # 前端不用再多打兩支 API（那兩支還在不同的 prefix 下）。
@@ -742,7 +762,12 @@ async def _build_statement_preview(session, acct, ent, text):
         # 有科目對映的類別。前端改分類時要用同一條規則判「會不會落到未歸類」，
         # 不然改成一個沒對映的類別之後那個提醒就消失了。
         # （也省掉前端跨 prefix 去打 /crm/cash-entries/options 那一支）
-        "mapped_categories": sorted(mapped),
+        "mapped_categories": cat_list,
+        # 🔴 每個節點附上它鏡射出來的 `category`（路徑前兩層以 `_` 相接）——
+        # 前端要用它判「這一列會不會落到未歸類」「這類別收不收得下專案」。
+        # 不附的話前端就得自己 `path.slice(0,2).join('_')`，那是把
+        # core.cash_taxonomy.mirror_from_path 這條規則抄第二份到瀏覽器裡
+        # （它的 docstring 寫著「規則只有這一份」）。
         "taxonomy_tree": tax_tree,
         # 源日請款的會計項目值域（＝寫入白名單，同一份）
         "petty_items": petty_items,
@@ -910,7 +935,7 @@ async def delete_statement_draft(draft_id: str, request: Request):
         return {"ok": True}
 
 
-async def _push_one_petty(session, request, entry, item: str = "") -> None:
+async def _push_one_petty(session, staff, entry, item: str = "") -> None:
     """一列收支 → 母公司零用金的草稿單據（＝畫面上的「源日請款」）。
 
     🔴 **不另造流程**：呼叫零用金那支既有的 `_push_from_cash`（owner 2026-08-27
@@ -918,20 +943,14 @@ async def _push_one_petty(session, request, entry, item: str = "") -> None:
     項目就擋下、不落其他」、重推防線都在那支裡面 —— 在這裡重寫一份，遲早
     只有其中一份跟上規則的改動。
 
-    請款人＝呼叫者綁定的人員檔案（`resolve_current_staff`，永不接受前端傳值）。
-    沒綁的話這裡就推不動，理由會回到匯入結果裡讓人看到。
+    🔴 `staff` 由呼叫端**解一次**傳進來，不是每列自己解：`resolve_current_staff`
+    會另開一個 session 跑兩個查詢，放在迴圈裡就是 2N 次查詢＋N 次連線借出
+    （db/session.py 記著一次因連線壓力而起的生產 503）。同一個 request 的答案
+    每次都一樣。
     """
-    from core.identity import resolve_current_staff
     from core.schemas import PettyFromCashPayload
     from routers.crm.petty import _push_from_cash
 
-    ident = await resolve_current_staff(request)
-    staff = ident.get("staff")
-    if staff is None:
-        raise HTTPException(
-            status_code=422,
-            detail="這個帳號還沒綁人員檔案，源日請款要有請款人 —— "
-                   "請先到使用者管理綁定，或匯入後到收支明細逐列推送")
     await session.flush()          # 需要 entry.id
     await _push_from_cash(session, staff,
                           PettyFromCashPayload(entry_id=entry.id, item=item))
@@ -1012,6 +1031,13 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
             if r.loan_id and r.period_no:
                 split_totals[(r.loan_id, r.period_no)] += abs(int(r.amount or 0))
 
+        # 🔴 id→路徑表撈一次就好。`_sync_taxonomy` 沒拿到就每一列自己撈一次
+        # 整棵樹（它的 docstring 就在講這件事）—— 一張對帳單 52 列就是 52 趟。
+        # 延後到真的有列挑了節點才撈：母公司那本沒有樹，撈了是白撈。
+        from core.cash_tree import path_map
+        from routers.crm.finance import _sync_taxonomy
+        tax_paths = None
+
         stmt_lines = []
         for r, (_label, d) in zip(payload.rows, dated):
             if r.loan_id and r.period_no:
@@ -1067,9 +1093,11 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                 # `_sync_taxonomy` 從路徑推（規則正本在 routers/crm/finance），
                 # 這裡不自己拼第二份鏡射
                 if (r.taxonomy_node_id or "").strip():
-                    from routers.crm.finance import _sync_taxonomy
+                    if tax_paths is None:
+                        tax_paths = await path_map(session, ent)
                     await _sync_taxonomy(
-                        session, ce, {"taxonomy_node_id": r.taxonomy_node_id.strip()})
+                        session, ce, {"taxonomy_node_id": r.taxonomy_node_id.strip()},
+                        tax_paths)
                 # 預覽時當場掛的專案／發票（owner 2026-08-20）。
                 # 🔴 走 crm/finance 的既有 helper，不在這裡自己寫一套：
                 #  - 專案要過 _enforce_cash_project_link（行政/薪資掛專案會讓
@@ -1181,9 +1209,20 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
         # 🔴 推不動的**不讓整批匯入失敗**（那批帳已經是對的）—— 收集理由回報，
         # 使用者到收支明細補推即可。
         petty_done, petty_failed = 0, []
+        # 身分解一次就好（見 _push_one_petty 的說明）。沒綁人員檔案的話，
+        # 每一列的失敗理由都是同一句 —— 在這裡就講清楚。
+        petty_staff = None
+        if petty_rows:
+            from core.identity import resolve_current_staff
+            petty_staff = (await resolve_current_staff(request)).get("staff")
         for r, ce in petty_rows:
             try:
-                await _push_one_petty(session, request, ce,
+                if petty_staff is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="這個帳號還沒綁人員檔案，源日請款要有請款人 —— "
+                               "請先到使用者管理綁定，或匯入後到收支明細逐列推送")
+                await _push_one_petty(session, petty_staff, ce,
                                       (r.petty_item or "").strip())
                 petty_done += 1
             except HTTPException as e:

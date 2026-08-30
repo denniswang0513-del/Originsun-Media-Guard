@@ -25,11 +25,9 @@
  * 算式正本在後端 api_finance_projects.compute()，兩份算式必然漂移。
  * 存檔後端回算好的值回來，這裡只顯示。
  */
-import { finFetch, finEntity, esc, fmtNum, finToast } from '../fin-utils.js';
+import { finFetch, finIsMine as _isMine, esc, fmtNum, finToast }
+    from '../fin-utils.js';
 import { crmFetch, setupResizeHandle } from '../../crm/crm-utils.js';
-
-/** 現在這一頁在哪一本帳。母公司模式收起私帳專屬的欄位與動作（見檔頭）。 */
-const _isMine = () => finEntity() === 'mine';
 
 let _c = null;
 let _isCurrent = () => true;

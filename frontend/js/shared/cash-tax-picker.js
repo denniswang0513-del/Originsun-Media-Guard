@@ -14,23 +14,26 @@
  *   [{ id, name, depth, path:[名稱…], children:[…] }, …]
  */
 
+// 逃脫走 js/shared/dom.js 那支（同一個資料夾，它的存在理由就是「輕量
+// render 模組不必為了逃脫拖進整個 utils.js」）—— 這裡再寫一份就是樹裡第四份。
+import { esc as _esc } from './dom.js';
+
 /** `{id: [根, …, 自己]}` —— 每個節點從根到它的**節點物件鏈**。
  *  編輯與篩選都要問「這一層的上層是誰」，每次現爬會爬很多次。 */
-export function indexTax(tree, byId = {}, chain = []) {
-    (tree || []).forEach((n) => {
+export function indexTax(tree) {
+    const byId = {};
+    const walk = (nodes, chain) => (nodes || []).forEach((n) => {
         const c = chain.concat([n]);
         byId[n.id] = c;
-        indexTax(n.children || [], byId, c);
+        walk(n.children, c);
     });
+    walk(tree, []);
     return byId;
 }
 
 /** 第 i 層的值域＝上一層節點的子節點（第 0 層＝整棵樹的根）。 */
 export const taxKidsAt = (tree, chain, i) =>
     (i === 0 ? (tree || []) : ((chain[i - 1] && chain[i - 1].children) || []));
-
-const _esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 /**
  * 把一排下拉畫進 `box`。

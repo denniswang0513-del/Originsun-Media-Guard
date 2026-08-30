@@ -56,10 +56,17 @@ def index_paths(rows) -> dict:
 def build_tree(nodes) -> list:
     """扁平節點 → 巢狀 dict 清單（給前端逐層下拉用）。
 
-    每個節點：`{id, name, depth, active, path, children: [...]}`。`path` 是從根到
-    自己的名稱陣列 —— 前端要顯示「家用 ▸ 變動支出 ▸ 醫療保健 ▸ 乳癌治療 ▸ 台北馬偕」
-    或算三欄鏡射時都直接用它，不必自己往上爬。
+    每個節點：`{id, name, depth, active, path, cat, children: [...]}`。`path` 是從
+    根到自己的名稱陣列 —— 前端要顯示「家用 ▸ 變動支出 ▸ 醫療保健 ▸ 乳癌治療 ▸
+    台北馬偕」時直接用它，不必自己往上爬。
+
+    🔴 `cat` ＝這個節點鏡射出來的 category（`mirror_from_path`，規則正本在
+    core.cash_taxonomy）。附在**建樹的這一支**而不是某個 router，是因為三個端點
+    出的是同一個節點形狀（/cash-entries/options、/cash-taxonomy/nodes、對帳單
+    匯入預覽），而前端只有一份快取在收它們 —— 只有其中一支帶 cat 的話，快取
+    是哪一支最後寫的就決定欄位在不在，不在的那次會靜靜地把 category 存成空的。
     """
+    from core.cash_taxonomy import mirror_from_path
     by_id, kids = {}, {}
     for n in nodes:
         by_id[n.id] = {"id": n.id, "name": n.name, "depth": n.depth,
@@ -72,6 +79,7 @@ def build_tree(nodes) -> list:
         for nid in kids.get(parent_id, []):
             node = by_id[nid]
             node["path"] = prefix + [node["name"]]
+            node["cat"] = mirror_from_path(node["path"])[0]
             node["children"] = attach(nid, node["path"])
             out.append(node)
         return out
@@ -104,6 +112,18 @@ async def path_map(session, entity: str, nodes=None) -> dict:
     if nodes is None:
         nodes = await load_nodes(session, entity, include_inactive=True)
     return index_paths((n.id, n.parent_id, n.name) for n in nodes)
+
+
+def node_id_in(paths: dict, path) -> str:
+    """`find_node_id` 的記憶體版：在已經撈好的 `path_map` 裡反查。對不到回空字串。
+
+    批次寫入（套用規則、批次分類、卡單匯入）一次跑幾百列，逐列打
+    `find_node_id` 是逐層各一次 SELECT —— 撈一次表在記憶體裡對就好。
+    """
+    want = [str(x).strip() for x in (path or []) if str(x).strip()]
+    if not want:
+        return ""
+    return next((nid for nid, p in (paths or {}).items() if p == want), "")
 
 
 async def find_node_id(session, entity: str, path) -> str:

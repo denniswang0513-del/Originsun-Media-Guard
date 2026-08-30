@@ -13,7 +13,7 @@
  *   行為等價優先）；除非帳務視圖天然重寫，不做真子視圖化拆殼。
  */
 
-import { esc, finEntity, finHasFullParentScope } from './fin-utils.js';
+import { esc, finEntity, finHasFullParentScope, finIsMine } from './fin-utils.js';
 import { createSubviewLoader } from '../../js/shared/subview-loader.js';
 
 let _inited = false;
@@ -62,14 +62,15 @@ export async function initFinanceTab() {
     // （.fin-nav-full：請款/應付/應收/零用金/現金流預測）；合夥人（finance_partner
     // 唯讀）＝只留 儀表板 + 財務三表，不載帳務殼（其 CRM 讀取端點對合夥人本來
     // 就 403，載了只會畫一排空殼）。
-    const mineMode = finEntity() === 'mine';
+    const mineMode = finIsMine();
     const fullParent = finHasFullParentScope();
     const loadShell = mineMode || fullParent;
     const hideNav = (sel) => document.querySelectorAll('#finance-nav ' + sel)
         .forEach((el) => { el.style.display = 'none'; });
     if (mineMode || !fullParent) hideNav('.fin-nav-full');
     if (!mineMode && !fullParent) hideNav('.fin-nav-mine-ok');
-    // 私帳專屬子視圖（.fin-nav-mine-only：家用／證券投資／器材清冊／私帳應收）。
+    // 私帳專屬子視圖（是哪幾個看 finance.html 上的 .fin-nav-mine-only class ——
+    // 名冊只留那一份，在這裡再抄一遍就是下一次過期的地方）。
     // 兩道門，兩件不同的事：
     //   ① 沒有 finance_mine 的帳號 → 永遠看不到。🔴 直接看 _modules、不走
     //      hasModule 的 Lv3 bypass —— 後端 grant_admin_all_modules 已把

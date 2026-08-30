@@ -30,6 +30,15 @@ export function finHasFullParentScope() {
 /** 目前帳本 — 頁面 pin（/my-ledger.html 設 window._finEntity='mine'），預設母公司 */
 export function finEntity() { return window._finEntity || 'parent'; }
 
+/** 現在這一本是不是私帳 —— **全樹唯一一支**（tests/unit/
+ *  test_project_entity_wall.py 有一條掃全 frontend/ 的斷言在守）。
+ *
+ *  🔴 `'mine'` 哪天不再是單一字面常數（第二本私帳、逐人帳本 id），要改的就只有
+ *  這一行；散在各處的 `xxxEntity() === 'mine'` 連 grep 都沒有名字可以找。
+ *  `finFetchMine` 的說明講的是同一件事，只是它管的是寫那一半。
+ */
+export const finIsMine = () => finEntity() === 'mine';
+
 export async function finFetch(path, opts = {}) {
     const token = localStorage.getItem('auth_token');
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
@@ -160,9 +169,6 @@ export function finToast(msg, isErr = false) {
 // 母公司照曆年不受影響。之後若要可設定再搬 settings，先寫死一份正本在這。
 const FISCAL_END_MONTH = 6;
 
-/** 私帳的年度用會計年度（見上）；母公司照曆年 */
-export const fiscalYearMode = () => finEntity() === 'mine';
-
 /** 今天落在哪個會計年度（以結束年命名）：2026-08 → FY2027（2026/07–2027/06） */
 export function currentFiscalYear() {
     const t = new Date();
@@ -170,7 +176,7 @@ export function currentFiscalYear() {
 }
 
 /** 期間 mode 預設：私帳＝年（owner 的節奏是年度結帳）、母公司＝月 */
-export const defaultPeriodMode = () => (fiscalYearMode() ? 'year' : 'month');
+export const defaultPeriodMode = () => (finIsMine() ? 'year' : 'month');
 
 /** FY 的起訖（period 字串用）：FY2026 → ['2025-07', '2026-06'] */
 export function fiscalRange(y) {
@@ -200,7 +206,7 @@ export function renderPeriodInputs(container, prefix) {
             <select id="${prefix}-q-year" class="crm-select">${yearOpts(curYear)}</select>
             <select id="${prefix}-q" class="crm-select">${[1, 2, 3, 4].map(i => `<option value="${i}"${i === q ? ' selected' : ''}>Q${i}</option>`).join('')}</select>`;
     } else if (mode === 'year') {
-        if (fiscalYearMode()) {
+        if (finIsMine()) {
             // 私帳：年＝會計年度（7/1–6/30），選項直接把區間寫在臉上
             const fy = currentFiscalYear();
             const opts = [];

@@ -8,7 +8,7 @@ import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, 
 // pin 值；payload 只在 'mine' 才帶 entity:'mine'（後端 None 語意：建立落 parent、
 // 更新維持既有值 —— 不洗欄位）。pin 與 /api/v1/finance 的 fetch 都用財務模組那份，
 // 不在這裡複寫（finFetch 會自己附 entity）。
-import { finEntity as _pinEntity, finFetch as _finFetch,
+import { finEntity as _pinEntity, finFetch as _finFetch, finIsMine,
          bankOnly as _bankOnly } from '../finance/fin-utils.js';
 // 六日／國定假日標記（owner 2026-08-27）：看帳時「那天是不是假日」是判斷公私的
 // 關鍵線索，日期字串本身看不出來。星期是算的、假日是清單 —— 見該模組檔頭。
@@ -1047,11 +1047,17 @@ function _populateInvoiceSelect(selectedId) {
     sel.innerHTML = _invOptsHtml(selectedId);
 }
 
-/** 新增/編輯 modal 的類別下拉（HTML 不再寫死選項）。 */
+/** 新增/編輯 modal 的類別下拉（HTML 不再寫死選項）。
+ *
+ *  🔴 這一列現在的值一定要在選項裡。不在的話下拉會掉到「—」，看起來像沒分類過
+ *  —— 而使用者只是來改別的欄位，一存就真的把分類清掉了。值域是會變的（2026-08-30
+ *  起私帳吃的是分類樹鏡射出來的鍵，不是母公司那份平面科目）。 */
 function _populateCategorySelect(selected) {
     const sel = document.getElementById('cash-f-category');
     if (!sel) return;
-    sel.innerHTML = '<option value="">—</option>' + _CATEGORIES.map(v =>
+    const list = _CATEGORIES.slice();
+    if (selected && !list.includes(selected)) { list.unshift(selected); }
+    sel.innerHTML = '<option value="">—</option>' + list.map(v =>
         `<option value="${_esc(v)}"${v === selected ? ' selected' : ''}>${_esc(v)}</option>`).join('');
 }
 
@@ -1162,7 +1168,7 @@ async function saveEntry() {
         if (bel) payload.bank_account_id = bel.value;
     }
     // 帳本（兩本帳）— pin 是 'mine' 才帶；parent 不送（後端 None→parent，PUT 不洗欄位）
-    if (_pinEntity() === 'mine') payload.entity = 'mine';
+    if (finIsMine()) payload.entity = 'mine';
     _cleanPayload(payload);
     // 專案雜支 + 預支關聯 → 自動帶入預支款的專案
     if (payload.advance_payment_id && !payload.project_id) {

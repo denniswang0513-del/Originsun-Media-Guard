@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import os
+import pathlib
 import re
 
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -65,6 +66,28 @@ def call_args(src: str, callee: str) -> list:
     return out
 
 
+def js_func_body(src: str, header: str) -> str:
+    """JS 版 `func_body` —— 從 `header` 切到**下一個頂層宣告**之前。
+
+    🔴 檔頭那個坑的 JS 變體：這裡本來各測試自己 `split("\nfunction ")[0]`，
+    而那只擋得住下一個東西剛好是 `function` 的情形。下一個是 `const`、
+    `window.`、`export`、或一段 `/** */` 的時候，切出來的「函式本體」會一路
+    吃到檔尾 —— 於是 `assert X in fn` 幾乎必定成立，斷言看起來很嚴格，其實
+    整個檔案都算數。
+
+    判準：函式內的每一行都有縮排（或是收尾的 `}` / `});`），所以第一個
+    「頂在第 0 欄、又不是收尾符號」的行就是下一個宣告。
+    """
+    i = src.index(header)
+    lines = src[i + len(header):].splitlines(True)
+    out = lines[:1]                      # header 之後的殘句一定屬於本體
+    for ln in lines[1:]:
+        if ln[:1].strip() and not ln.startswith(("}", ")", "]")):
+            break
+        out.append(ln)
+    return header + "".join(out)
+
+
 def js_code_only(src: str) -> str:
     """JS 版的 code_only —— 剝掉 /* */ 與 // 註解。
 
@@ -74,3 +97,31 @@ def js_code_only(src: str) -> str:
     """
     src = re.sub(r"/\*[\s\S]*?\*/", "", src)
     return "\n".join(re.sub(r"(?<!:)//.*$", "", ln) for ln in src.splitlines())
+
+
+def py_callers(*roots) -> dict:
+    """`{"路徑:函式名": 它內部呼叫過的名字集合}`，掃 `roots` 底下所有 .py。
+
+    「每個做 X 的地方都要呼叫 Y」這種不變式用它寫 —— 點名幾支函式的斷言只擋得住
+    **已經想到**的那幾個（2026-08-30 實例：三條寫入路都接上了 `_sync_taxonomy`、
+    測試也照著點名那三支，第四個寫入端沒人想到，它照樣只寫一半）。
+
+    🔴 `obj.method(...)` 也算：只看 `ast.Name` 的話 `models.CrmCashEntry(...)`
+    這種寫法會整個看不見 —— 而看不見是**靜默通過**，錯的那一邊。
+    🔴 鍵帶著檔案路徑：同名函式散在兩個檔時，用純函式名當鍵會後蓋前，其中一個
+    沒做也看不出來；順便讓失敗訊息直接指到檔案。
+    """
+    import ast
+
+    out: dict = {}
+    for root in roots:
+        base = pathlib.Path(_REPO) / root
+        for path in sorted(base.rglob("*.py")):
+            rel = path.relative_to(_REPO).as_posix()
+            for fn in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                out[f"{rel}:{fn.name}"] = {
+                    getattr(n.func, "id", None) or getattr(n.func, "attr", None)
+                    for n in ast.walk(fn) if isinstance(n, ast.Call)}
+    return out

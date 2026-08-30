@@ -7,11 +7,18 @@ owner 2026-08-24 拍板：mine 專案（owner 私帳）與客戶全面共用 —
 2. money_dep 的 project_id 檢查（mine 專案 money 端點 403）— 掃描釘。
 3. 統計聚合排除 mine（客戶績效金額合計、母公司專案毛利）— 掃描釘。
 """
+import re
 from pathlib import Path
+
+from tests.unit._srcscan import js_code_only, repo_src
 
 from core.money import MONEY_FIELDS, redact_mine
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+
+CANON = "frontend/tabs/finance/fin-utils.js"
+# 「拿目前這本帳去跟字面值比」的寫法（`==`／`!==`／多餘空白都算）
+_PIN = re.compile(r"""Entity\(\)\s*[!=]==?\s*['"]mine['"]""")
 
 
 def test_redact_mine_strips_money_on_mine_objects_only():
@@ -317,26 +324,52 @@ def test_ledger_view_follows_the_current_book_and_hides_private_only_fields():
     工項拆分／實收／檢查／一鍵請款。那些欄位母公司的專案沒有（ledger_detail
     是空的），畫出來不只沒意義 —— 存下去就是把私帳形狀寫進母公司的列。
     """
-    from tests.unit._srcscan import js_code_only, repo_src
     # 🔴 一定要剝註解：檔頭那段說明自己就寫著「案源／工項拆分…要收起來」，
     # 不剝的話下面的 marker 全部命中註解（_srcscan 檔頭記的那個坑）。
     js = js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))
     assert "finFetchMine(" not in js, "不再釘死私帳"
-    assert "const _isMine = () => finEntity() === 'mine';" in js
-    # 私帳專屬的那幾塊都要掛在 _isMine() 後面（漏一塊就是母公司模式畫出
-    # 一個永遠 0 又存得下去的欄位）
-    for marker in ("案源", "服務費率 %", "工項拆分", "檢查（實收−Σ工項）"):
+    assert "finIsMine" in js, "帳本判斷走 fin-utils 那一支"
+    # 🔴 私帳專屬的每一塊都要掛在 _isMine() 後面 —— 漏一塊就是母公司模式畫出
+    # 一個永遠 0 又存得下去的欄位。**點名功能**、不去數 `!_isMine() ? ''`
+    # 出現幾次：那個數字擋不住「多寫了一個守衛、卻漏掉某一塊」，而且把
+    # 三元運算子的寫法釘成了規格（換成 && 就紅，可是行為一樣）。
+    for marker in ("案源", "服務費率 %", "工項拆分", "檢查（實收−Σ工項）",
+                   "匯入保留的原始備註", "這一案已出現在專案管理的母公司管線"):
         i = js.index(marker)
         assert "_isMine()" in js[max(0, i - 1500):i], marker
-    # 一鍵請款寫死開 entity='mine' 的請款單 —— 母公司模式不給按
-    assert js.count("!_isMine() ? ''") >= 6
     ml = (ROOT / "frontend/my-ledger.html").read_text(encoding="utf-8")
     assert "access_level || 0) < 3" not in ml, "my-ledger 閘門不准留 Lv3 bypass"
 
 
+def test_the_ledger_check_has_exactly_one_implementation():
+    """🔴「現在是不是私帳」全樹只有 `fin-utils.finIsMine` 一支。
+
+    這個斷言要掃**整棵樹**才有意義：只掃一個檔案的話，下一個抄裸比較的子視圖
+    照樣綠燈 —— 而它正是這條規則要擋的東西。`'mine'` 哪天不再是單一字面常數
+    （第二本私帳、逐人帳本 id），要改的就會是散在各處、又沒有名字可以 grep 的
+    那幾個比較式。
+    """
+    # 🔴 正向對照：先確定偵測式在**正本自己**身上抓得到。少了這一步，
+    # `finEntity` 一改名（或寫法一變）這個掃描就永遠零命中＝永遠綠燈，
+    # 而它要守的東西早就不見了。
+    assert _PIN.search(js_code_only(repo_src(CANON))),         "偵測式在 fin-utils 自己身上都抓不到 —— 掃描已失效"
+    offenders = []
+    for path in sorted((ROOT / "frontend").rglob("*.js")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel == CANON:
+            continue          # 正本本人
+        # 只找「**目前這本帳**是不是私帳」：finEntity()（含 _pinEntity 之類的
+        # 別名）拿去跟字面值比。`project.entity === 'mine'`（那一列屬於哪本）
+        # 與 `chk.target === 'mine'`（要搬去哪本）問的是別的事，不在此列。
+        if _PIN.search(js_code_only(repo_src(rel))):
+            offenders.append(rel)
+    assert not offenders, f"這些檔案自己比對帳本，改用 finIsMine()：{offenders}"
+
+
 def test_mine_only_nav_still_gates_on_the_explicit_module():
-    """器材清冊／私帳應收仍是私帳專屬，入口只給帳號上**真的有** finance_mine
-    的人 —— 不走 hasModule 的 Lv3 bypass（後端 Lv3 已不隱含）。"""
+    """家用／證券投資那幾個仍是私帳專屬（整個就是私帳的東西，不是同一份資料
+    換個帳本看），入口只給帳號上**真的有** finance_mine 的人 —— 不走 hasModule
+    的 Lv3 bypass（後端 Lv3 已不隱含）。"""
     fin = (ROOT / "frontend/tabs/finance/finance.js").read_text(encoding="utf-8")
     assert "(window._modules || []).includes('finance_mine')" in fin
     html = (ROOT / "frontend/tabs/finance/finance.html").read_text(encoding="utf-8")

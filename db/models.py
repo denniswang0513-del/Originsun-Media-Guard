@@ -1661,10 +1661,22 @@ class FinanceCategoryMap(Base):
     """收支/請款/發票 category → 科目 對映（引擎的翻譯層）。
 
     使用者照舊填中文 category，報表引擎查這張表決定科目與會計處理方式
-    （treatment）。種子提供預設值，後台可改。"""
+    （treatment）。種子提供預設值，後台可改。
+
+    🔴 `entity`：**`source='cash'` 的對映按帳本分家**（owner 2026-08-30
+    「母公司的就是母公司，私帳就是私帳，要完全分開」）。兩本帳的收支類別值域
+    根本不重疊 —— 母公司是平的科目（行政／薪資／交際應酬…），私帳是
+    `cash_taxonomy_nodes` 那棵樹鏡射出來的複合鍵（家用_變動支出…）。不分家的話
+    母公司的規則下拉會列出 38 個屬於私帳的類別，設下去照樣生效，那筆錢就分到一個
+    公司報表沒有的類別去，然後在三表裡變成「未歸類」——而且不會噴錯。
+
+    `payment`／`invoice` 那兩種**兩本帳共用**（私帳的 34 張請款用的就是母公司
+    那批類別：其他、專案外包）。它們一律留在 'parent'，讀取端也不過濾。
+    """
     __tablename__ = "finance_category_map"
 
     id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="parent")
     source = Column(String(16), nullable=False)                  # cash/payment/invoice
     category_text = Column(String(64), nullable=False)           # 原始 category 中文值
     account_id = Column(String(32), nullable=False)              # soft FK → finance_accounts.id
@@ -1673,8 +1685,10 @@ class FinanceCategoryMap(Base):
     treatment = Column(String(24), nullable=False)
     active = Column(Boolean, default=True)
 
-    __table_args__ = (UniqueConstraint("source", "category_text",
-                                       name="uq_fincatmap_source_text"),)
+    # 唯一鍵帶 entity：分家之後兩本帳可以各有一個同名類別（母公司的「其他」
+    # 與私帳的「其他」是不同的東西，各自對到不同科目）。
+    __table_args__ = (Index("uq_fincatmap_entity_source_text",
+                            "entity", "source", "category_text", unique=True),)
 
 
 class BankAccount(Base):

@@ -557,10 +557,7 @@ window._projMoveLedger = async function (id) {
 // 一案，收入＝人員配置裡掛給我的那幾行成本。金額判定全在後端
 // （core.ledger_project.mirror_lines），前端只顯示它算出來的明細 —— 前端自己
 // 再加一次總和，兩個數字遲早會不一樣。
-let _pmmProjectId = '';
-
 window._projMirrorMine = async function (id) {
-    _pmmProjectId = id;
     let chk;
     try {
         chk = await _fetch(`/projects/${encodeURIComponent(id)}/mirror-check`);
@@ -578,12 +575,7 @@ window._projMirrorMine = async function (id) {
         <td style="color:#888;">${_esc(l.phase)}</td>
         <td>${_esc(l.item)}</td>
         <td style="text-align:right;">${fmtNum(l.amount)}</td></tr>`).join('');
-    _pmmOptions = chk.options || [];
-    _pmmCrmSplit = {};
-    (chk.lines || []).forEach((l) => {
-        _pmmCrmSplit[l.item] = (_pmmCrmSplit[l.item] || 0) + l.amount;
-    });
-    const opts = _pmmOptions.map(o =>
+    const opts = (chk.options || []).map(o =>
         `<option value="${o.id}">${_esc(o.name)}${o.amount ? ` — ${fmtNum(o.amount)}` : ''}</option>`).join('');
     _mirrorModal(`連結私帳 — ${chk.name}`, `
         <div style="color:#bbb;font-size:12px;margin-bottom:8px;">
@@ -614,7 +606,7 @@ window._projMirrorMine = async function (id) {
     const box = document.getElementById('proj-mirror-body');
     box.addEventListener('change', () => {
         sel.disabled = !_pmmLink();
-        _pmmDrawConflict();
+        _pmmDrawConflict(chk, id);
         const go = document.getElementById('pmm-go');
         const conflict = document.getElementById('pmm-conflict');
         if (go) { go.style.display = conflict && conflict.innerHTML ? 'none' : ''; }
@@ -647,32 +639,30 @@ async function _projMirrorSubmit(btn, id, mode) {
     }
 }
 
-// 這一輪視窗用得到的兩份資料：可連結的私帳案（含它們現有的工項）、
-// 以及母公司這邊算出來的工項。畫對照表時兩邊都要。
-let _pmmOptions = [];
-let _pmmCrmSplit = {};
-
 /** 選到的那個私帳案已經填過工項 → 把兩邊並排列出來，讓人有依據可判斷，
  *  再給三個處理方式（owner 2026-08-30「跳出幾個選擇讓我決定要怎麼做」）。
  *
  *  🔴 沒有預設哪一個是對的：私帳那份可能是他照實際請款填的（比 CRM 準），
  *  也可能是舊的估算。只給三顆按鈕不給數字，等於要他憑印象賭一把。 */
-function _pmmDrawConflict() {
+function _pmmDrawConflict(chk, projectId) {
     const box = document.getElementById('pmm-conflict');
     if (!box) { return; }
     const id = document.getElementById('pmm-target').value || '';
-    const opt = _pmmLink() ? _pmmOptions.find(o => o.id === id) : null;
+    const opt = _pmmLink() ? (chk.options || []).find(o => o.id === id) : null;
     const mineSplit = (opt && opt.split) || {};
     if (!Object.keys(mineSplit).length) { box.innerHTML = ''; return; }
 
+    // CRM 這側的工項合計用後端算好的 `crm_split`（mirror_lines 一次算出 lines
+    // 與 split 兩份）—— 使用者就是拿這個數字跟私帳現有的並排做決定。
+    const crmSplit = chk.crm_split || {};
     const keys = [...new Set([...Object.keys(mineSplit),
-                              ...Object.keys(_pmmCrmSplit)])];
+                              ...Object.keys(crmSplit)])];
     const sum = (o) => Object.values(o).reduce((n, v) => n + (v || 0), 0);
     const cell = (v) => (v ? fmtNum(v) : '<span style="color:#3f3f46;">—</span>');
     const rows = keys.map(k => `<tr>
         <td style="color:#ddd;">${_esc(k)}</td>
         <td style="text-align:right;">${cell(mineSplit[k])}</td>
-        <td style="text-align:right;">${cell(_pmmCrmSplit[k])}</td></tr>`).join('');
+        <td style="text-align:right;">${cell(crmSplit[k])}</td></tr>`).join('');
     const btn = (mode, label, title) =>
         `<button class="crm-btn crm-btn-secondary crm-btn-sm" data-mode="${mode}"
                  title="${_esc(title)}">${label}</button>`;
@@ -687,7 +677,7 @@ function _pmmDrawConflict() {
             ${rows}
             <tr style="font-weight:600;"><td>合計</td>
                 <td style="text-align:right;">${fmtNum(sum(mineSplit))}</td>
-                <td style="text-align:right;">${fmtNum(sum(_pmmCrmSplit))}</td></tr>
+                <td style="text-align:right;">${fmtNum(sum(crmSplit))}</td></tr>
           </table>
           <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
             ${btn('overwrite', '用 CRM 覆蓋', '私帳的工項換成 CRM 成本行算出來的')}
@@ -699,11 +689,8 @@ function _pmmDrawConflict() {
         </div>`;
     box.querySelectorAll('button[data-mode]').forEach((b) => {
         b.addEventListener('click', () =>
-            _projMirrorSubmit(b, _pmmProjectId, b.dataset.mode));
+            _projMirrorSubmit(b, projectId, b.dataset.mode));
     });
-    // 有工項時，下面那顆「建立並連結」不該再是入口（它不帶 mode，等於偷偷覆蓋）
-    const go = document.getElementById('pmm-go');
-    if (go) { go.style.display = 'none'; }
 }
 
 /** 疊在詳情面板之上的預覽視窗。重複使用同一個 overlay（每次重建會在 body

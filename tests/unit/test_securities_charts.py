@@ -4,7 +4,8 @@
 圖是 SVG 字串（js/shared/svg-charts.js 純函式），這裡用掃描式斷言釘住幾條
 **用眼睛才看得出來、但看過一次就不想再看第二次**的規則。
 """
-from tests.unit._srcscan import func_body, js_code_only, repo_src
+from tests.unit._srcscan import (func_body, js_code_only, js_func_body,
+                                 repo_src)
 
 CHARTS = "frontend/js/shared/svg-charts.js"
 PAGE = "frontend/tabs/finance/subviews/securities.js"
@@ -50,9 +51,7 @@ def test_allocation_is_bars_not_a_pie():
 def test_charts_read_from_the_same_rows_as_the_table():
     """四張圖與下面的表格是同一份 `rows` 推導出來的 —— 另外取一次數，
     篩選（連現金／保險一起看）一切換，圖和表就會各說各話。"""
-    # `func_body` 的結尾標記是 Python 的 def —— JS 這邊自己切到下一個 function
-    fn = js_code_only(repo_src(PAGE)).split("function _draw(")[1] \
-        .split("\nfunction _pnlColor(")[0]
+    fn = js_func_body(js_code_only(repo_src(PAGE)), "function _draw(")
     for name in ("const alloc =", "const costVsValue =", "const roiRows =",
                  "const pnlRows ="):
         assert name in fn, name

@@ -407,6 +407,9 @@ async def household_overview(request: Request, entity: str = ""):
         cats = list((await session.execute(
             select(FinanceCategoryMap.category_text).where(
                 FinanceCategoryMap.source == "cash",
+                # 對映的收支那半按帳本分家（2026-08-30）—— 帶上 ent，母公司
+                # 回空殼就變成明講的行為，不是「剛好沒有家用類別」的巧合
+                FinanceCategoryMap.entity == ent,
                 FinanceCategoryMap.account_id == (acct_id or ""))
         )).scalars()) if acct_id else []
         if not cats:

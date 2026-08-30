@@ -1542,8 +1542,11 @@ class BankImportRulePayload(BaseModel):
     讓人去理解 +1/-1/0 不划算。使用者新增的規則一律 0（＝看不出方向，
     解析器會標記該列要人確認）。種子那 14 條的方向值保留在 DB 裡。
     """
-    keyword: str
-    category: str
+    # 🔴 新增時兩個都必填，但**必填是端點在驗的**（`_apply_rule_payload` 的
+    # require_all）不是 schema —— PUT 是部分更新，只送 {"active": false} 這種
+    # 請求不可以被 schema 擋在門外。schema 這裡設成選填，新增那條路照樣 422。
+    keyword: str = ""
+    category: str = ""
     bank_account_id: Optional[str] = None    # 空 = 套用到所有帳戶
     sort_order: int = 100
     # 只在這個方向的列上套用：-1 只支出 / +1 只存入 / 0 不限。

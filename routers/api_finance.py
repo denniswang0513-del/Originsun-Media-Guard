@@ -62,6 +62,7 @@ from core.schemas import (BankAccountPayload,
                           StatementLinesBulkPayload,
                           StatementLineUpdatePayload)
 from routers.crm._shared import (_assert_month_open, _parse_day,
+                                 assert_ledger_category,
                                  _username, _validate_month)
 
 router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
@@ -176,9 +177,26 @@ async def list_accounts(request: Request, entity: str = ""):
 # ── category → 科目 對映 ────────────────────────────────────
 
 def _map_dict(m) -> dict:
-    return {"id": m.id, "source": m.source, "category_text": m.category_text,
+    return {"id": m.id, "entity": m.entity or "parent",
+            "source": m.source, "category_text": m.category_text,
             "account_id": m.account_id, "treatment": m.treatment,
             "active": bool(m.active)}
+
+
+def _map_scope(ent: str):
+    """對映表的帳本過濾條件（`source='cash'` 分家、payment／invoice 共用）。
+
+    🔴 只有 cash 分家：兩本帳的收支類別值域根本不重疊（母公司是平的科目、
+    私帳是分類樹鏡射出來的複合鍵），共用一份的下場是母公司的下拉列出 38 個
+    私帳的類別，選了照樣存得進去、然後在三表裡變成「未歸類」。
+    請款／發票那兩種是公司流程的詞彙，兩本帳講的是同一件事（私帳的 34 張請款
+    用的就是母公司那批類別），所以不分。
+    """
+    from sqlalchemy import or_
+
+    from db.models import FinanceCategoryMap
+    return or_(FinanceCategoryMap.source != "cash",
+               FinanceCategoryMap.entity == ent)
 
 
 @router.get("/transfer-pairs")
@@ -341,22 +359,26 @@ async def set_bookkeeping_fee(payload: BookkeepingFeePut, request: Request):
 
 @router.get("/category-map")
 async def list_category_map(request: Request, entity: str = ""):
-    _guard(request, entity)  # 對映兩本帳共用：任一 scope 可讀、不過濾
+    ent = _guard(request, entity)   # 收支那半按帳本（見 _map_scope）
     from sqlalchemy import select
     from db.models import FinanceCategoryMap
     factory = _factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
-            select(FinanceCategoryMap).order_by(
+            select(FinanceCategoryMap).where(_map_scope(ent)).order_by(
                 FinanceCategoryMap.source, FinanceCategoryMap.category_text))).scalars().all()
     return {"items": [_map_dict(m) for m in rows]}
 
 
 @router.put("/category-map")
-async def upsert_category_map(payload: FinanceCategoryMapPut, request: Request):
-    """批次 upsert：以 (source, category_text) 為 key，有則改 account/treatment、無則建。"""
-    # 共用科目表，寫入限母公司 full scope（合夥人不可改兩本帳共用的對映）
-    _guard(request, "parent", level="full")
+async def upsert_category_map(payload: FinanceCategoryMapPut, request: Request,
+                              entity: str = ""):
+    """批次 upsert：以 (帳本, source, category_text) 為 key，有則改、無則建。
+
+    🔴 key 帶帳本：收支那半分家之後，母公司的「其他」與私帳的「其他」是兩筆
+    不同的對映（各自對到不同科目）。不帶的話在私帳存一次就把母公司那筆改掉了。
+    """
+    ent = _guard(request, entity, level="full")
     if not payload.items:
         raise HTTPException(status_code=422, detail="items 不可為空")
     for it in payload.items:
@@ -380,11 +402,14 @@ async def upsert_category_map(payload: FinanceCategoryMapPut, request: Request):
         bad = [it.account_id for it in payload.items if it.account_id not in valid_ids]
         if bad:
             raise HTTPException(status_code=422, detail=f"科目不存在: {', '.join(sorted(set(bad)))}")
-        existing = {(m.source, m.category_text): m for m in (await session.execute(
-            select(FinanceCategoryMap))).scalars().all()}
+        existing = {(m.entity or "parent", m.source, m.category_text): m
+                    for m in (await session.execute(
+                        select(FinanceCategoryMap))).scalars().all()}
         count = 0
         for it in payload.items:
-            key = (it.source, it.category_text.strip())
+            # payment／invoice 兩本共用 → 一律記在 parent 名下
+            row_ent = ent if it.source == "cash" else "parent"
+            key = (row_ent, it.source, it.category_text.strip())
             row = existing.get(key)
             if row:
                 row.account_id = it.account_id
@@ -392,7 +417,7 @@ async def upsert_category_map(payload: FinanceCategoryMapPut, request: Request):
                 row.active = True
             else:
                 row = FinanceCategoryMap(
-                    id=uuid.uuid4().hex, source=it.source,
+                    id=uuid.uuid4().hex, entity=row_ent, source=it.source,
                     category_text=it.category_text.strip(),
                     account_id=it.account_id, treatment=it.treatment, active=True)
                 session.add(row)
@@ -406,20 +431,25 @@ async def upsert_category_map(payload: FinanceCategoryMapPut, request: Request):
 async def list_unmapped_categories(request: Request, entity: str = ""):
     """掃收支明細 + 請款單的 distinct category 中沒有對映的值（含使用筆數），
     給後台「有幾個類別還沒歸科目」的待辦清單。"""
-    _guard(request, entity)  # 對映兩本帳共用：任一 scope 可讀、不過濾
+    ent = _guard(request, entity)
     from sqlalchemy import select, func as safunc
     from db.models import CrmCashEntry, CrmPaymentRequest, FinanceCategoryMap
     factory = _factory_or_503()
     async with factory() as session:
+        # 🔴 兩邊都要按帳本：不然母公司會看到一整排「私帳有在用、母公司沒對映」
+        # 的類別排在待歸類佇列裡，而那些根本不是它該處理的。
         mapped = {(s, t) for s, t in (await session.execute(
-            select(FinanceCategoryMap.source, FinanceCategoryMap.category_text))).all()}
+            select(FinanceCategoryMap.source, FinanceCategoryMap.category_text)
+            .where(_map_scope(ent)))).all()}
         items = []
-        for source, col, id_col in (
-                ("cash", CrmCashEntry.category, CrmCashEntry.id),
-                ("payment", CrmPaymentRequest.category, CrmPaymentRequest.id)):
+        for source, col, id_col, ent_col in (
+                ("cash", CrmCashEntry.category, CrmCashEntry.id, CrmCashEntry.entity),
+                ("payment", CrmPaymentRequest.category, CrmPaymentRequest.id,
+                 CrmPaymentRequest.entity)):
             rows = (await session.execute(
                 select(col, safunc.count(id_col))
-                .where(col.isnot(None), col != "").group_by(col))).all()
+                .where(col.isnot(None), col != "", ent_col == ent)
+                .group_by(col))).all()
             items.extend({"source": source, "category_text": c, "usage_count": int(n)}
                          for c, n in rows if (source, c) not in mapped)
     items.sort(key=lambda x: -x["usage_count"])
@@ -953,6 +983,10 @@ async def create_entry_from_statement_line(
             raise HTTPException(status_code=422, detail="請先填這列的交易日再補記")
         if not (payload.category or "").strip():
             raise HTTPException(status_code=422, detail="請選擇類別（報表要靠它歸科目）")
+        # 🔴 而且要是**這本帳**認得的類別。這一格是 `<input list=…>`（datalist 只是
+        # 建議、擋不住手打或貼上），私帳打一個樹上沒有的字進來，就是一列
+        # 「有類別、不在樹上」的孤兒：樹狀篩選看不到，畫面上卻像分好了。
+        await assert_ledger_category(session, payload.category.strip(), row_ent)
         await _assert_month_open(session, row.line_date, entity=row_ent)
         amt = row.amount
         entry = CrmCashEntry(
@@ -964,6 +998,12 @@ async def create_entry_from_statement_line(
             note="銀行對帳補記", bank_account_id=row.bank_account_id,
             entity=row_ent)  # 補記入帳繼承帳戶的帳本
         session.add(entry)
+        # 🔴 三欄與節點交給同一份規則（`_sync_taxonomy`）—— 這裡的類別下拉在私帳
+        # 吃的是**分類樹鏡射出來的複合鍵**（公司_專案／家用_變動支出），只寫
+        # category 的話這一列就是「有類別、不在樹上」的孤兒：收支明細的樹狀篩選
+        # 看不到它。銀行對帳單、套用規則、卡單三條寫入路都已經走它了。
+        from routers.crm.finance import _sync_taxonomy
+        await _sync_taxonomy(session, entry, {"category": entry.category})
         row.matched_entry_id = entry.id
         await session.commit()
         return {"ok": True, "cash_entry_id": entry.id, "line": _stmt_dict(row)}

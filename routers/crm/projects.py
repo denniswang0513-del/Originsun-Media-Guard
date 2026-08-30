@@ -984,7 +984,7 @@ async def _import_split_to_cost_lines(session, parent, split: dict,
     金額；沒有 → 新增一行。掛給別人的同名行一律不動 —— 那是他們的錢，
     「導演」那種工項本來就可能同時有兩個人。
     """
-    from db.models import CrmProjectCostGroup, CrmProjectCostLine
+    from db.models import CrmProjectCostLine
 
     if not split:
         return 0
@@ -993,11 +993,11 @@ async def _import_split_to_cost_lines(session, parent, split: dict,
         .where(CrmProjectCostLine.project_id == parent.id))).scalars().all()
     mine = {(r.item_name or ""): r for r in rows
             if (r.actual_staff_id or "") == staff_id}
-    # 子表：沿用第一張（建案時一定會有「主表」），不另外開一張
-    gid = (await session.execute(
-        select(CrmProjectCostGroup.id)
-        .where(CrmProjectCostGroup.project_id == parent.id)
-        .order_by(CrmProjectCostGroup.sort_order).limit(1))).scalar()
+    # 子表：走 costs.py 既有的挑選規則（首張＝主表，完全沒有子表時自我修復
+    # 建一張）—— 在這裡自己寫 `order_by(sort_order).limit(1)` 就是第三份，
+    # 而且少了那個自我修復（「建案時一定會有主表」是假設不是保證）。
+    from .costs import _resolve_target_group
+    gid = await _resolve_target_group(session, parent.id, None)
     nxt = max([int(r.sort_order or 0) for r in rows], default=0)
     now = _now()
     n = 0
@@ -1089,6 +1089,10 @@ async def check_project_mirror(project_id: str, request: Request):
         "name": p.name,
         "client": client.short_name if client else "",
         "lines": mir["lines"], "total": mir["total"],
+        # 工項合計＝`lines` 依工項名彙總（同名相加、空名落其他都在 mirror_lines
+        # 裡）。它一次就把兩份都算好了，前端直接用 —— 使用者要拿這個數字跟私帳
+        # 現有的並排，決定覆蓋／保留／匯入。
+        "crm_split": mir["split"],
         # can 與 reason 是同一件事的兩面 —— 由 reason 推導，不各寫一份判斷式
         # （多一個擋人的條件時只改得到一邊＝「擋住了但沒說為什麼」）
         "can_mirror": not reason, "reason": reason,

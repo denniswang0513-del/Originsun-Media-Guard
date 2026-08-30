@@ -96,9 +96,10 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
     """全表載入 → 純函式吃的 dict/list（欄位子集，含 drilldown 需要的識別欄）。
 
     entity：錢流六源以 entity WHERE 過濾；loan_payments 經該 entity 的 loans；
-    equipment 是母公司域（plan §1.2）→ entity!='parent' 回空；科目/對映兩本共用不過濾。
+    equipment 是母公司域（plan §1.2）→ entity!='parent' 回空；科目表兩本共用。
+    對映表只有 `source='cash'` 那批按帳本分家（2026-08-30），payment／invoice 共用。
     """
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
     from db.models import (BankAccount, CrmCashEntry, CrmInvoice,
                            CrmPaymentRequest, Equipment, FinanceAccount,
                            FinanceAdjustment, FinanceCategoryMap, FinanceLoan,
@@ -178,11 +179,18 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
                        "cf_activity": r.cf_activity, "acct_type": r.acct_type}
                 for r in (await session.execute(select(FinanceAccount))).scalars().all()}
 
+    # 🔴 `cash` 的對映按帳本分家（母公司的平面科目 vs 私帳分類樹的複合鍵，
+    # 見 db.models.FinanceCategoryMap）—— 不過濾的話，兩本帳哪天有同名類別，
+    # 這個 (source, category_text) 的字典就會有一邊蓋掉另一邊，而它決定的是
+    # 科目與 treatment：那批帳會被算進錯的科目裡。
+    # `payment`／`invoice` 兩本帳共用，照舊全收。
     cat_map = {(r.source, r.category_text): {"treatment": r.treatment,
                                              "account_id": r.account_id}
                for r in (await session.execute(
                    select(FinanceCategoryMap).where(
-                       FinanceCategoryMap.active.is_(True)))).scalars().all()}
+                       FinanceCategoryMap.active.is_(True),
+                       or_(FinanceCategoryMap.source != "cash",
+                           FinanceCategoryMap.entity == entity)))).scalars().all()}
 
     return {"invoices": invoices, "payments": payments,
             "cash_entries": cash_entries, "equipment": equipment,

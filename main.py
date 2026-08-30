@@ -1205,6 +1205,18 @@ async def _on_startup():
                         # 「薪資」兩側都有（收＝代收薪資、支＝代發薪資），
                         # 光靠關鍵字分不出來，要能限定方向。
                         "ALTER TABLE bank_import_rules ADD COLUMN IF NOT EXISTS only_direction INTEGER NOT NULL DEFAULT 0",
+                        # 科目對映按帳本分家（2026-08-30，見 db.models.FinanceCategoryMap）。
+                        # 既有列走 DEFAULT 'parent'，私帳那批由下面的一次性回填改判
+                        # （回填要用到分類樹，所以放在 seed_cash_taxonomy 之後跑）。
+                        "ALTER TABLE finance_category_map ADD COLUMN IF NOT EXISTS "
+                        "entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
+                        # 舊唯一鍵沒有 entity，分家之後兩本帳不能各有一個同名類別 ——
+                        # 換成帶 entity 的那把。用 INDEX 不用 CONSTRAINT 是為了
+                        # IF NOT EXISTS（Postgres 的 ADD CONSTRAINT 沒有這個語法）。
+                        "ALTER TABLE finance_category_map "
+                        "DROP CONSTRAINT IF EXISTS uq_fincatmap_source_text",
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_fincatmap_entity_source_text "
+                        "ON finance_category_map (entity, source, category_text)",
                         # 福委會登記的心得筆記（2026-08-21，非必填）
                         "ALTER TABLE hr_benefit_entries ADD COLUMN IF NOT EXISTS reflection TEXT",
                         # 福委會：年度活動（每人額度＋期間）與說明／附件
@@ -1249,6 +1261,10 @@ async def _on_startup():
             if _ftax:
                 from db.seed_cash_taxonomy import seed_cash_taxonomy
                 await seed_cash_taxonomy(_ftax)
+                # 🔴 科目對映的帳本回填要**排在分類樹種好之後** —— 判定規則就是
+                # 「這個類別在不在私帳的分類樹裡」。
+                from db.seed_finance import backfill_category_map_entity
+                await backfill_category_map_entity(_ftax)
         except Exception as _e_tax:
             print(f"[startup] cash taxonomy seed failed: {_e_tax}")
 

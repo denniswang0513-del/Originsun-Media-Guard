@@ -67,7 +67,7 @@ function _pnlCell(v, pct) {
         return '<td style="text-align:right;color:#666;">—</td>'
              + '<td style="text-align:right;color:#666;">—</td>';
     }
-    const col = v >= 0 ? '#f87171' : '#4ade80';   // 台股慣例：紅漲綠跌
+    const col = _pnlColor(v);          // 紅漲綠跌的判斷只有 _pnlColor 一份
     const sign = v >= 0 ? '+' : '';
     return `<td style="text-align:right;color:${col};">${sign}${fmtNum(v)}</td>`
          + `<td style="text-align:right;color:${col};">${
@@ -108,17 +108,26 @@ function _rowHtml(h) {
         </tr>`;
 }
 
-/** 一個券商的小計列。沒有任何一列填了成本 → 損益欄留白，不要顯示 0。 */
-function _subtotal(label, rows) {
+/** 一批持股的合計（檔數／市值／成本／有填成本的那些／損益）。
+ *  小計列、群組排序、兩張圖、總計列都問這一支。 */
+function _sums(rows) {
     const val = rows.reduce((n, h) => n + (h.value_twd || 0), 0);
     const cost = rows.reduce((n, h) => n + (h.cost_twd || 0), 0);
     const known = rows.filter((h) => h.pnl !== null && h.pnl !== undefined);
-    const pnl = known.length ? known.reduce((n, h) => n + h.pnl, 0) : null;
+    return { n: rows.length, val, cost, known,
+             pnl: known.length ? known.reduce((n, h) => n + h.pnl, 0) : null };
+}
+
+/** 一個券商的小計列。沒有任何一列填了成本 → 損益欄留白，不要顯示 0。
+ *  只收算好的合計（_draw 排序時本來就要算一次）—— 再收一份 rows 的話，
+ *  呼叫端有辦法把兩者送成不一致的。 */
+function _subtotal(label, s) {
+    const { n, val, cost, known, pnl } = s;
     const pct = pnl !== null && cost ? (pnl / cost) * 100 : null;
-    const partial = known.length && known.length < rows.length;
+    const partial = known.length && known.length < n;
     return `<tr style="background:#1b1b1b;font-weight:600;">
         <td colspan="5" style="color:#ddd;">${esc(label)}<span style="color:#666;font-weight:400;">
-            ｜${rows.length} 檔${partial ? `（其中 ${known.length} 檔有填成本）` : ''}</span></td>
+            ｜${n} 檔${partial ? `（其中 ${known.length} 檔有填成本）` : ''}</span></td>
         <td style="text-align:right;color:#eee;">${fmtNum(val)}</td>
         <td style="text-align:right;color:#bbb;">${cost ? fmtNum(cost) : '—'}</td>
         ${_pnlCell(pnl, pct)}
@@ -134,29 +143,23 @@ function _draw() {
         if (!byBroker.has(k)) { byBroker.set(k, []); }
         byBroker.get(k).push(h);
     });
-    // 市值大的券商排前面 —— 一打開就看到主要部位
-    const groups = [...byBroker.entries()].sort(
-        (a, b) => b[1].reduce((n, h) => n + h.value_twd, 0)
-                - a[1].reduce((n, h) => n + h.value_twd, 0));
+    // 每個券商的合計算一次，排序／小計列／下面兩張圖共用。
+    // 市值大的券商排前面 —— 一打開就看到主要部位。
+    const groups = [...byBroker.entries()]
+        .map(([k, list]) => [k, list, _sums(list)])
+        .sort((a, b) => b[2].val - a[2].val);
 
-    const body = groups.map(([k, list]) =>
-        _subtotal(k, list) + list.map(_rowHtml).join('')).join('');
+    const body = groups.map(([k, list, s]) =>
+        _subtotal(k, s) + list.map(_rowHtml).join('')).join('');
 
-    const val = rows.reduce((n, h) => n + (h.value_twd || 0), 0);
-    const cost = rows.reduce((n, h) => n + (h.cost_twd || 0), 0);
-    const known = rows.filter((h) => h.pnl !== null && h.pnl !== undefined);
-    const pnl = known.length ? known.reduce((n, h) => n + h.pnl, 0) : null;
+    const { val, cost, known, pnl } = _sums(rows);
     const missing = rows.filter((h) => h.pnl === null || h.pnl === undefined);
 
     // ── 圖表資料（都從同一份 rows 推導，沒有第二個取數來源）──
-    const alloc = groups.map(([k, list]) => ({
-        label: k, value: list.reduce((n, h) => n + (h.value_twd || 0), 0),
-    })).filter((r) => r.value > 0);
-    const costVsValue = groups.map(([k, list]) => ({
-        label: k,
-        a: list.reduce((n, h) => n + (h.cost_twd || 0), 0),
-        b: list.reduce((n, h) => n + (h.value_twd || 0), 0),
-    })).filter((r) => r.a > 0);
+    const alloc = groups.map(([k, , s]) => ({ label: k, value: s.val }))
+        .filter((r) => r.value > 0);
+    const costVsValue = groups.map(([k, , s]) => ({ label: k, a: s.cost, b: s.val }))
+        .filter((r) => r.a > 0);
     // 報酬率與損益各排各的：報酬率高的常常是小部位（0050 +266% 只有 76 萬），
     // 兩張圖回答的是不同問題（哪一檔賺得兇 vs 哪一檔真的把錢賺回來）
     // 兩張圖都濾掉 0：活存那幾列的報酬率恆為 0%，畫成一根長度 0 的條只是佔位，

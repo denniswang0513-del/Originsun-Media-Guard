@@ -164,9 +164,12 @@ SEED_CATEGORY_MAP: list[dict] = [
 
 
 async def seed_finance_stage2(session_factory) -> None:
-    """冪等種子：科目（以 code 查）+ 對映（以 (source, category_text) 查）。
+    """冪等種子：科目（以 code 查）+ 對映（以 (entity, source, category_text) 查）。
 
     只補缺的列，不覆蓋既有列 — 使用者後台改過的科目/對映不會被還原。
+
+    種子那批全是**母公司**的（平的科目）；私帳的收支類別來自分類樹，由
+    `backfill_category_map_entity` 判定歸屬，種子不碰。
     """
     from sqlalchemy import select
     from db.models import BankImportRule, FinanceAccount, FinanceCategoryMap
@@ -193,20 +196,21 @@ async def seed_finance_stage2(session_factory) -> None:
 
         # 2) 對映：查無 (source, category_text) 才 insert
         existing_pairs = {
-            (src, txt) for src, txt in
+            (ent, src, txt) for ent, src, txt in
             (await session.execute(
-                select(FinanceCategoryMap.source, FinanceCategoryMap.category_text))).all()
+                select(FinanceCategoryMap.entity, FinanceCategoryMap.source,
+                       FinanceCategoryMap.category_text))).all()
         }
         added_maps = 0
         for row in SEED_CATEGORY_MAP:
-            key = (row["source"], row["category_text"])
+            key = ("parent", row["source"], row["category_text"])
             if key in existing_pairs:
                 continue
             account_id = code_to_id.get(row["account_code"])
             if not account_id:  # 理論上不會發生（科目種子在前）
                 continue
             session.add(FinanceCategoryMap(
-                id=uuid.uuid4().hex,
+                id=uuid.uuid4().hex, entity="parent",
                 source=row["source"], category_text=row["category_text"],
                 account_id=account_id, treatment=row["treatment"], active=True,
             ))
@@ -233,3 +237,45 @@ async def seed_finance_stage2(session_factory) -> None:
             await session.commit()
             logger.info("[seed_finance] 科目 +%d、對映 +%d、對帳單規則 +%d",
                         added_accounts, added_maps, added_rules)
+
+
+async def backfill_category_map_entity(session_factory) -> int:
+    """一次性：把 `source='cash'` 的對映判給它真正屬於的那本帳。
+
+    判定＝**這個 category 在不在私帳的分類樹裡**（`ledger_category_domain`）。
+    2026-08-30 在生產庫上核對過：這條規則跟「哪本帳實際在用這個類別」零矛盾
+    （27 筆只有母公司用、41 筆只有私帳用、0 筆兩本都用），比看有沒有底線可靠
+    —— `公司_專案支出` 有底線但不在樹上，是母公司的。
+
+    🔴 只跑一次：任何一列已經是 'mine' 就當作跑過了，直接返回。不這樣的話，
+    使用者哪天把某個對映手動改判給另一本帳，下次開機就被改回去。
+
+    `payment`／`invoice` 不碰：那兩種兩本帳共用（私帳的請款用的就是母公司那批
+    類別），全部留在 'parent'，讀取端也不按帳本過濾。
+    """
+    from sqlalchemy import select, update
+
+    from db.models import FinanceCategoryMap
+
+    async with session_factory() as session:
+        done = (await session.execute(
+            select(FinanceCategoryMap.id)
+            .where(FinanceCategoryMap.entity == "mine").limit(1))).scalar()
+        if done:
+            return 0
+        from routers.crm._shared import ledger_category_domain
+        mine = await ledger_category_domain(session, "mine")
+        if not mine:
+            return 0                      # 分類樹還沒種好 —— 下次開機再說
+        rows = (await session.execute(
+            select(FinanceCategoryMap)
+            .where(FinanceCategoryMap.source == "cash"))).scalars().all()
+        ids = [r.id for r in rows if r.category_text in mine]
+        if not ids:
+            return 0
+        await session.execute(
+            update(FinanceCategoryMap)
+            .where(FinanceCategoryMap.id.in_(ids)).values(entity="mine"))
+        await session.commit()
+        logger.info("[seed_finance] 科目對映帳本回填：%d 筆判給私帳", len(ids))
+        return len(ids)

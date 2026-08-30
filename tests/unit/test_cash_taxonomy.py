@@ -81,3 +81,80 @@ def test_cashbook_ui_three_columns_and_cascading_filters():
     ed = js.split("window._cashTaxEdit = (ev")[1].split("/** 刷卡金額")[0]
     assert "Math.min(level, chain.length)" in ed, "上層沒值時要從頭問（形不成路徑）"
     assert "_taxKidsAt(sel, i)" in ed, "每層的值域＝上一層的子節點（共用那份規則）"
+
+
+# ── 分類同步不可以碰它管不到的欄（2026-08-30 回歸）────────────
+
+def test_path_and_mirror_are_not_inverses_for_a_flat_category_with_a_sub_item():
+    """🔴 `path_from_columns` 與 `mirror_from_path` **不是**互為反向。
+
+    平的類別（母公司那本全是平的）配上子項目時，路徑的位置 1 放的是子項目，
+    而 mirror 讀位置 1 當**項目** —— 反推回來類別就被改寫了：
+
+        ('其他', '保險費') → ['其他','保險費'] → ('其他_保險費', '保險費', '')
+
+    這一條釘的是「不要拿 mirror 去覆蓋三欄」。真的覆蓋下去的後果：類別變成
+    finance_category_map 裡沒有的複合鍵（那一列掉進三表的未歸類），子項目不見。
+    """
+    from core.cash_taxonomy import mirror_from_path, path_from_columns
+    assert mirror_from_path(path_from_columns("其他", "保險費")) != ("其他", "", "保險費")
+    # 複合類別才成立（私帳那本）
+    for cat, sub in (("公司_薪水", ""), ("家用_變動支出", "醫療保健")):
+        m = mirror_from_path(path_from_columns(cat, sub))
+        assert (m[0], m[2]) == (cat, sub), (cat, sub, m)
+
+
+def test_sync_taxonomy_never_derives_item_from_category():
+    """🔴 `item` 不是 category 的衍生欄 —— 母公司那本它是**獨立資料**。
+
+    零用金放那張 AP 的類別、福委會放 AP_CATEGORY、CSV 匯入吃「項目」欄。
+    `_sync_taxonomy` 一旦推導它（`item_of(category)`，平類別＝空字串），
+    使用者從編輯視窗按一次存檔就把那一欄清掉了，而畫面上沒有任何提示。
+    """
+    from tests.unit._srcscan import code_only, func_body, repo_src
+    body = code_only(func_body(repo_src("routers/crm/finance.py"),
+                               "async def _sync_taxonomy("))
+    tail = body.split("if not (")[1]      # 節點分支之後那一段（category 那條路）
+    assert "item_of(" not in tail, "category 那條路不可以推導 item"
+    assert "mirror_from_path(want)" not in tail, "更不可以拿 mirror 覆蓋三欄"
+
+
+def test_editing_a_row_does_not_demote_a_node_deeper_than_three_levels():
+    """🔴 三欄只裝得下 3 層，深度活在 `taxonomy_node_id` 裡。
+
+    收支明細的編輯視窗每次存檔都會送 category＋sub_item，如果拿那三欄回頭反查
+    節點，一定只找得到第 3 層那個 —— 使用者只是來改金額，分類就被降級了，
+    而且每存一次降一次。私帳有 60 筆掛在第 4 層以後（2026-08-30 實查）。
+
+    前三層真的被改掉時仍然要重新反查 —— 那是使用者確實換了分類。
+    """
+    import asyncio
+
+    from routers.crm.finance import _sync_taxonomy
+
+    class Row:
+        entity = "mine"
+
+        def __init__(self, cat, item, sub, nid):
+            self.category, self.item, self.sub_item = cat, item, sub
+            self.taxonomy_node_id = nid
+
+    # 家用 ▸ 變動支出 ▸ 醫療保健 ▸ 乳癌治療 ▸ 台北馬偕（第 5 層）
+    paths = {"n3": ["家用", "變動支出", "醫療保健"],
+             "n5": ["家用", "變動支出", "醫療保健", "乳癌治療", "台北馬偕"],
+             "other": ["家用", "固定支出"]}
+    three = ("家用_變動支出", "變動支出", "醫療保健")
+
+    def run(data, start="n5"):
+        e = Row(*three, start)
+        asyncio.run(_sync_taxonomy(None, e, data, paths))
+        return e.taxonomy_node_id
+
+    # 只是存檔、分類沒動 → 第 5 層要留著
+    assert run({"category": three[0], "sub_item": three[2]}) == "n5"
+    assert run({"category": three[0]}) == "n5"
+    # 真的換了分類 → 照常重新反查（換到樹上沒有的組合就是沒有節點）
+    assert run({"category": three[0], "sub_item": "牙科"}) is None
+    assert run({"category": "家用_固定支出", "sub_item": ""}) == "other"
+    # 本來就只掛在第 3 層的，行為不變
+    assert run({"category": three[0], "sub_item": three[2]}, start="n3") == "n3"

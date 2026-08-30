@@ -16,7 +16,8 @@
  *
  * 命名空間 window._finRecon（banking.js 仍是 window._finBank，兩邊不重疊）。
  */
-import { finFetch, finEntity, esc, fmtNum, finToast, bankOnly, cardOnly } from '../fin-utils.js';
+import { finFetch, finEntity, finIsMine, esc, fmtNum, finToast, bankOnly, cardOnly }
+    from '../fin-utils.js';
 import { indexTax, taxSelects } from '../../../js/shared/cash-tax-picker.js';
 import { createSortable, sortableTh, enumIndex, autoFee as _autoFee }
     from '../../crm/crm-utils.js';   // 匯費容差的正本在共用層（見 crm-utils）
@@ -848,8 +849,7 @@ _fr.stmtOpen = async () => {
         <p style="color:#888;font-size:12px;margin:0 0 10px;">
             上傳網銀下載的交易明細（PDF / CSV / TXT），或把網銀畫面的交易表格複製貼上。
             系統用<b>餘額欄</b>推每筆是支出還是存入，再跟對帳單自己印的總計核對 ——
-            對不上會直接擋下來，不會猜。${_stmtHasLoans()
-                ? '貸款扣款會自動配到對應的貸款期別。' : ''}</p>
+            對不上會直接擋下來，不會猜。</p>
         <div class="crm-field"><label>這份對帳單是哪個帳戶</label>
             <select id="finbank-stmt-acct" class="crm-select">${opts}</select></div>
         <div class="crm-field"><label>上傳檔案</label>
@@ -1019,7 +1019,8 @@ function _stmtRefreshRow(i) {
     const tr = tb && tb.querySelectorAll('tr')[i];
     if (!tr || !_stmtPreview || !_stmtPreview.rows[i]) return;
     tr.outerHTML = _stmtRow(_stmtPreview.rows[i], i);
-    _stmtTaxDraw(i);          // outerHTML 換掉了那一格的 DOM
+    // outerHTML 換掉了那一格的 DOM，分類下拉要重畫
+    _stmtTaxInto(document.querySelector(`.fbk-tax[data-row="${i}"]`), i);
 }
 
 function _stmtRow(r, i) {
@@ -1045,11 +1046,11 @@ function _stmtRow(r, i) {
         <td style="padding:4px 6px;text-align:right;white-space:nowrap;color:${isOut ? '#fca5a5' : '#86efac'};">
             ${isOut ? '-' : '+'}$${fmtNum(Math.abs(r.amount))}</td>
         <td style="padding:4px 6px;min-width:150px;">
-            ${(_cashOpts[finEntity()] || {}).tree?.length
-                ? _stmtTaxCell(r, i)
+            ${_opts().tree?.length
+                ? _stmtTaxCell(i)
                 : `<select class="crm-select crm-select-sm"
                         onchange="window._finRecon.stmtCatChanged(${i}, this.value)">
-                    ${_stmtCatOptions(r)}
+                    ${_stmtCatOptions(r.category)}
                    </select>`}
             <button type="button" title="把「${esc((r.description || '').slice(0, 12))} → 這個類別」存成規則，以後自動套用"
                     onclick="window._finRecon.stmtSaveRule(${i})"
@@ -1075,6 +1076,20 @@ function _stmtRow(r, i) {
 // 存成一個變數還會讓先開母公司、再切私帳的人繼續看到上一本的清單。
 const _cashOpts = {};
 
+/** 目前這本帳的那一格（還沒載到就是空的）—— 六個讀取點共用。 */
+const _opts = () => _cashOpts[finEntity()] || {};
+
+/** 寫回目前這本帳的那一格，順便重建 id→節點鏈索引（樹一換就得重建，
+ *  分成兩處寫的時候漏過一次：類別換了、byId 還是上一棵樹的）。 */
+function _setCashOpts(patch) {
+    const ent = finEntity();
+    const cur = _cashOpts[ent] || {};
+    const next = { ...cur, ...patch };
+    next.byId = indexTax(next.tree || []);
+    _cashOpts[ent] = next;
+    return next;
+}
+
 /** 這本帳的類別清單與分類樹，由後端供（唯一正本）—— 前端寫死的清單會跟科目
  *  對映脫節。那支端點在 crm prefix 下，這裡直接打完整路徑（不為了一次呼叫把
  *  crmFetch 拉進財務模組，那條線的 base 與錯誤處理都不一樣）。
@@ -1087,11 +1102,8 @@ async function _ensureCashOpts() {
             '/api/v1/crm/cash-entries/options?entity=' + encodeURIComponent(ent),
             { headers: bearerHeader() });
         const d = res.ok ? await res.json() : {};
-        const tree = d.tree || [];
-        _cashOpts[ent] = { categories: d.categories || [], tree,
-                           byId: indexTax(tree) };
-    } catch (_) { _cashOpts[ent] = { categories: [], tree: [], byId: {} }; }
-    return _cashOpts[ent];
+        return _setCashOpts({ categories: d.categories || [], tree: d.tree || [] });
+    } catch (_) { return _setCashOpts({ categories: [], tree: [] }); }
 }
 
 async function _ensureCashCats() {
@@ -1102,11 +1114,8 @@ async function _ensureCashCats() {
  *  （寫進共用變數的話，切帳本之後上一本的清單還留著。） */
 function _stmtCacheCats(d) {
     if (!d || !(d.mapped_categories || []).length) { return; }
-    const ent = finEntity();
-    const tree = d.taxonomy_tree || (_cashOpts[ent] || {}).tree || [];
-    _cashOpts[ent] = { ...(_cashOpts[ent] || {}),
-                       categories: d.mapped_categories,
-                       tree, byId: indexTax(tree) };
+    _setCashOpts({ categories: d.mapped_categories,
+                   tree: d.taxonomy_tree || _opts().tree || [] });
 }
 
 /** 分類下拉的選項。
@@ -1123,7 +1132,7 @@ function _stmtCacheCats(d) {
  */
 /** 這一列能不能送源日請款：私帳的**流出**列才有意義（那是我先墊、要跟公司
  *  收回來的錢）。收入列、母公司的列都沒有這回事。 */
-const _stmtCanPetty = (r) => finEntity() === 'mine' && (r.amount || 0) < 0;
+const _stmtCanPetty = (r) => finIsMine() && (r.amount || 0) < 0;
 
 _fr.stmtPettyToggle = (i, btn) => {
     const r = _stmtPreview && _stmtPreview.rows[i];
@@ -1169,16 +1178,20 @@ function _stmtAllocLabel() {
     const d = _stmtPreview || {};
     const inv = (d.invoices || []).length;
     const pay = (d.payment_requests || []).length;
-    if (inv && pay) { return '發票／請款單'; }
-    if (inv) { return '發票'; }
-    if (pay) { return '請款單'; }
+    if (inv && !pay) { return '發票'; }
+    if (pay && !inv) { return '請款單'; }
     return '發票／請款單';
 }
 
-function _stmtCatOptions(row) {
-    const opts = _cashOpts[finEntity()] || {};
-    const cur = row.category || '';
-    const list = opts.categories || (cur ? [cur] : []);
+/** 分類下拉的選項（`cur` ＝這一列現在的值）。收**字串**不是整列 ——
+ *  它只讀 category，而卡單那個呼叫點曾經傳了 `r.category` 進來當 row，
+ *  於是每一列的 selected 都不見了（看起來像沒分類過）。 */
+function _stmtCatOptions(cur) {
+    cur = cur || '';
+    // 這一列現在的值一定要在選項裡 —— 否則下拉會顯示成「（未分類）」，
+    // 看起來像沒分類過，一存就真的把它清掉了（值域縮過、或這列是舊制留下的）。
+    const list = (_opts().categories || []).slice();
+    if (cur && !list.includes(cur)) { list.unshift(cur); }
     return `<option value="">（未分類）</option>`
         + list.map(v => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(v)}</option>`).join('');
 }
@@ -1189,20 +1202,21 @@ function _stmtCatOptions(row) {
  *  🔴 上一版是單一下拉列完整路徑 —— 這一欄很窄，每一項都被截成「公司 ▸ 薪水…」，
  *  七個選項長得一模一樣，等於沒得選。逐層選就沒有這個問題：每一格只放一層的
  *  名字。垂直排（width:100%）而不是並排 —— 表格的欄寬容不下三格並排。 */
-function _stmtTaxCell(row, i) {
+function _stmtTaxCell(i) {
     return `<div class="fbk-tax" data-row="${i}"></div>`;
 }
 
+/** 整張表的分類下拉一次畫完（一次 querySelectorAll，不逐列掃全文件）。 */
 function _stmtTaxDrawAll() {
-    ((_stmtPreview && _stmtPreview.rows) || []).forEach((_r, i) => _stmtTaxDraw(i));
+    document.querySelectorAll('#finbank-stmt-tbody .fbk-tax')
+        .forEach((box) => _stmtTaxInto(box, Number(box.dataset.row)));
 }
 
-/** 把某一列的分類下拉畫出來（innerHTML 之後才有 DOM，所以分兩步）。 */
-function _stmtTaxDraw(i) {
-    const box = document.querySelector(`.fbk-tax[data-row="${i}"]`);
+/** 把某一列的分類下拉畫進它的格子（innerHTML 之後才有 DOM，所以分兩步）。 */
+function _stmtTaxInto(box, i) {
     const r = _stmtPreview && _stmtPreview.rows[i];
     if (!box || !r) { return; }
-    const opts = _cashOpts[finEntity()] || {};
+    const opts = _opts();
     taxSelects(box, {
         tree: opts.tree || [],
         chain: (opts.byId || {})[r.taxonomy_node_id] || [],
@@ -1220,7 +1234,7 @@ _fr.stmtCatChanged = (i, v, level) => {
     if (!_stmtPreview || !_stmtPreview.rows[i]) return;
     const r = _stmtPreview.rows[i];
     const cats = _stmtPreview.project_categories || [];
-    const opts = _cashOpts[finEntity()] || {};
+    const opts = _opts();
     if ((opts.tree || []).length) {
         // 私帳：下拉的值是**節點 id**。選「（不細分）」＝退回上一層（那一層
         // 本身就是有效的分類，家用底下很多列就停在第二層）。
@@ -1229,10 +1243,11 @@ _fr.stmtCatChanged = (i, v, level) => {
         const picked = node ? node[node.length - 1]
             : (level > 0 && chain[level - 1] ? chain[level - 1] : null);
         r.taxonomy_node_id = picked ? picked.id : '';
-        // category 照鏡射規則填前兩層（畫面上的「專案類」判斷、未對映提醒都
-        // 讀它）；寫入時後端會用 `_sync_taxonomy` 從節點重推 —— 那份才是正本。
-        v = picked ? ((opts.byId || {})[picked.id] || [])
-            .slice(0, 2).map(n => n.name).join('_') : '';
+        // 🔴 category 用**後端附在節點上的 `cat`**（core.cash_taxonomy
+        // .mirror_from_path 算的）。這裡自己 `path.slice(0,2).join('_')` 的話，
+        // 那條規則就有第二份在瀏覽器裡 —— 而它的 docstring 寫著「規則只有這一份」，
+        // 分隔符或層數一改，畫面上的「科目未對映」提醒就會跟實際存進去的不一致。
+        v = picked ? (picked.cat || '') : '';
     }
     r.category = v;
     // 「會落到未歸類嗎」的規則跟後端同一條：沒類別**或**類別沒有科目對映。
@@ -1259,7 +1274,7 @@ _fr.stmtSaveRule = async (i) => {
     // 🔴 規則存的是**你在這一列選到的那一層**，不是只到第二層（owner 2026-08-30
     // 「規則的套用可以設定到所有的分類」）。私帳有 3,346 筆收支掛在第三層，
     // 只存 category 的話那些分類永遠自動不了。
-    const chain = ((_cashOpts[finEntity()] || {}).byId || {})[r.taxonomy_node_id] || [];
+    const chain = (_opts().byId || {})[r.taxonomy_node_id] || [];
     const shown = chain.length ? chain.map((n) => n.name).join(' ▸ ') : r.category;
     const kw = prompt(
         '摘要：' + (r.description || '')
@@ -1307,10 +1322,17 @@ function _acctName(id) {
     return a ? (a.name || '') : String(id).slice(0, 8);
 }
 
+let _ruleCats = [];   // 規則面板的類別下拉值域（由 /import-rules 供）
+
 _fr.rulesOpen = async () => {
-    await _ensureCashCats();
-    try { _rules = (await finFetch('/import-rules')).items || []; }
-    catch (_) { _rules = []; }
+    // 🔴 類別下拉吃 /import-rules 自己回的 categories —— 那是**這本帳**的值域，
+    // 跟後端寫入時擋人的是同一份。用 /cash-entries/options 的 categories 畫的
+    // 話，私帳會看到一整排母公司的平面科目，選了才 422。
+    try {
+        const d = await finFetch('/import-rules');
+        _rules = d.items || [];
+        _ruleCats = d.categories || [];
+    } catch (_) { _rules = []; _ruleCats = []; }
     _rulesRender();
 };
 
@@ -1318,7 +1340,7 @@ function _rulesRender() {
     const acctOpts = '<option value="">所有帳戶</option>' + _bankOnly()
         .map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
     const catOpts = '<option value="">— 選類別 —</option>'
-        + (((_cashOpts[finEntity()] || {}).categories) || [])
+        + _ruleCats
             .map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
     const rows = _rules.map(r => `
         <tr style="border-bottom:1px solid #2a2a2a;${r.active ? '' : 'opacity:.45;'}">
@@ -1394,13 +1416,14 @@ _fr.ruleAdd = async (btn) => {
     }
 };
 
+/** 停用／啟用：**只送 active**。
+ *
+ *  🔴 以前是把整條規則重送一次，而它漏了 `only_direction` —— 後端整包寫回，
+ *  那一欄就被預設值 0（不限）洗掉：一條「薪資 只支出」的規則停用再啟用，
+ *  之後收付兩邊都會中。PUT 現在是部分更新，沒送的欄位不會被動到。 */
 _fr.ruleToggle = async (id, active) => {
-    const r = _rules.find(x => x.id === id);
-    if (!r) return;
-    await finFetch('/import-rules/' + id, { method: 'PUT', body: JSON.stringify({
-        keyword: r.keyword, category: r.category,
-        bank_account_id: r.bank_account_id || null,
-        sort_order: r.sort_order, active, note: r.note }) });
+    await finFetch('/import-rules/' + id, {
+        method: 'PUT', body: JSON.stringify({ active }) });
     await _fr.rulesOpen();
 };
 

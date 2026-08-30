@@ -11,7 +11,8 @@ from types import SimpleNamespace as NS
 
 from core.ledger_project import (MIRROR_SOURCE, mirror_amount, mirror_detail,
                                  mirror_lines)
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import (code_only, func_body, js_code_only,
+                                 js_func_body, repo_src)
 
 ME = "me-staff-id"
 OTHER = "someone-else"
@@ -227,7 +228,7 @@ def test_the_conflict_dialog_shows_both_sides_before_asking():
     並排列出來。私帳那份可能是照實際請款填的，也可能是舊估算，沒有哪一邊
     先天是對的。"""
     js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-core.js"))
-    fn = js.split("function _pmmDrawConflict(")[1].split("\nlet _pmm")[0]
+    fn = js_func_body(js, "function _pmmDrawConflict(")
     assert "私帳現有" in fn and "CRM 成本行" in fn
     for mode in ("overwrite", "keep", "import"):
         assert f"btn('{mode}'" in fn, mode

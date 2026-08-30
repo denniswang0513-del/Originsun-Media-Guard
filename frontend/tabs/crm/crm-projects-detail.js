@@ -292,7 +292,7 @@ function renderDetail(project) {
     // 私帳案（owner 才看得到這顆）：跳到財務管理的逐案損益 —— 工項/費用/
     // 實收檢查在那邊編。交棒走 sessionStorage，finance.js 的 tab-changed
     // handler 接住後切子視圖並開同一案。
-    if (project.entity === 'mine' && (window._modules || []).includes('finance_mine')
+    if (_isMineProject(project) && (window._modules || []).includes('finance_mine')
             && typeof window.switchTab === 'function') {
         const _led = document.createElement('a');
         _led.className = 'crm-btn crm-btn-secondary crm-btn-sm';
@@ -364,7 +364,7 @@ function renderDetail(project) {
           <span class="pi-edit-cell" data-field="am_username" onclick="window._projEdit(this)" style="cursor:pointer;">${_amHtml}</span>
           <span class="pi-edit-cell" data-field="pm_usernames" onclick="window._projEdit(this)" style="cursor:pointer;">${_pmHtml}</span>
           <span class="pi-dot"></span>
-          ${_isMineProject(project) ? _mineMoneyNotice(project) : `
+          ${_isMineProject(project) ? _MINE_MONEY_NOTICE : `
           <span>合約 <b style="color:#60a5fa;">${_editCell('contract_amount', _$(project.contract_amount))}</b></span>
           <span class="pi-dot"></span>
           <span>稅率 ${_editCell('tax_rate', (project.tax_rate != null ? project.tax_rate : 5) + '%')}</span>
@@ -510,13 +510,11 @@ function renderDetail(project) {
 const _isMineProject = (p) => (p && (p.entity || 'parent') === 'mine');
 
 /** 私帳案在 CRM 的金額列：不畫數字、指路到它真正該看的地方。 */
-function _mineMoneyNotice(project) {
-    return `<span style="color:#c4b5fd;font-size:12px;"
+const _MINE_MONEY_NOTICE = `<span style="color:#c4b5fd;font-size:12px;"
         title="CRM 是公司的帳本視角。這一案的合約與收款屬於私帳（我的帳），公司帳上沒有它的錢 —— 金額請到財務管理 › 執行專案看。專案帳目（成本、雜支）在這裡照常可以編。">
         合約與收款在私帳</span>
         <span class="pi-dot"></span>
         <span style="color:#6b7280;font-size:12px;">公司帳上沒有這一案的錢</span>`;
-}
 
 
 // ── Budget Overview (stage-aware) ─────────────────────────

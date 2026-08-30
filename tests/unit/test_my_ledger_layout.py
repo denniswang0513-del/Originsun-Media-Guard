@@ -7,7 +7,10 @@
 縱向也被關掉且**外部樣式表覆寫不了 inline** → 資產儀表板圖表以下整段
 看不到、哪一層都捲不動。修法是兩半，缺一不可，所以兩半都釘。
 """
+import re
 from pathlib import Path
+
+from tests.unit._srcscan import js_func_body
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -171,7 +174,10 @@ def test_fiscal_year_period_for_mine():
     的 from..to 區間 —— 後端零改動）；母公司照曆年、預設月不受影響。"""
     fu = _read("frontend/tabs/finance/fin-utils.js")
     assert "FISCAL_END_MONTH = 6" in fu
-    assert "fiscalYearMode() ? 'year' : 'month'" in fu
+    period = js_func_body(fu, "export const defaultPeriodMode")
+    # 釘**方向**：三個 token 都在的斷言，對 `finIsMine() ? 'month' : 'year'`
+    # 一樣會過 —— 而那個顛倒正是這條規則唯一擋得住的 bug。
+    assert re.search(r"finIsMine\(\)\s*\?\s*'year'", period), "私帳＝會計年度"
     assert "fiscalRange(" in fu and "data-fiscal" in fu
     for rel in ("frontend/tabs/finance/subviews/statements.js",
                 "frontend/tabs/finance/subviews/dashboard.js"):

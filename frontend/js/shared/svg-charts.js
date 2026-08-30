@@ -256,6 +256,8 @@ export function groupedBars(items, opts = {}) {
     const valueW = opts.valueWidth || 96;
     const aColor = opts.aColor || '#4a4a4a';               // 對照組：退到灰
     const bColor = opts.bColor || CHART_COLORS.blue;       // 主角
+    const aName = opts.aName || 'A';                       // 預設只寫一次
+    const bName = opts.bName || 'B';
     const barH = 11, gap = 2, rowGap = 16;                 // gap=2：兩根之間留底色縫
     const rowH = barH * 2 + gap + rowGap;
     const padT = 26, padB = 6;                             // padT 讓出圖例
@@ -273,7 +275,7 @@ export function groupedBars(items, opts = {}) {
     let body = '';
     rows.forEach((r, i) => {
         const top = padT + i * rowH;
-        [['a', aColor, opts.aName || 'A'], ['b', bColor, opts.bName || 'B']]
+        [['a', aColor, aName], ['b', bColor, bName]]
             .forEach(([k, color, name], j) => {
                 const v = Number(r[k]) || 0;
                 const y = top + j * (barH + gap);
@@ -291,8 +293,8 @@ export function groupedBars(items, opts = {}) {
 
     return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet"
         style="max-width:100%;display:block;${_FONT}" role="img">
-        ${_legend([{ name: opts.aName || 'A', color: aColor },
-                   { name: opts.bName || 'B', color: bColor }], barLeft, 12)}
+        ${_legend([{ name: aName, color: aColor },
+                   { name: bName, color: bColor }], barLeft, 12)}
         ${body}
     </svg>`;
 }

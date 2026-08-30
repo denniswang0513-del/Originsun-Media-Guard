@@ -558,6 +558,8 @@ async def _petty_item_domain(session) -> list:
     rows = (await session.execute(
         select(FinanceCategoryMap.category_text)
         .where(FinanceCategoryMap.source == "cash",
+               # 零用金是母公司的東西（本檔的專案查詢都帶 not_mine）
+               FinanceCategoryMap.entity == "parent",
                FinanceCategoryMap.active.is_(True),
                FinanceCategoryMap.treatment == "direct_expense")
         .order_by(FinanceCategoryMap.category_text))).all()

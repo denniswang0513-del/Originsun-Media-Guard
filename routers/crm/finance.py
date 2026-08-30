@@ -40,7 +40,7 @@ from core.schemas import (InvoicePayload, PaymentRequestPayload, CashEntryPayloa
                           CashTaxonomyNodePayload, CashTaxonomyNodeUpdate)
 
 from ._shared import (router, _check_auth, money_dep, _require_db,
-                      cash_category_texts,
+                      ledger_categories_and_tree,
                       _get_factory, _fmt_day, _now,
                       _parse_shoot_date, _assert_month_open, _assert_rows_open,
                       _locked_month_set, _raise_locked_batch, map_csv_row)
@@ -1765,7 +1765,7 @@ async def _sync_taxonomy(session, e, data: dict, paths: dict | None = None):
     「有類別、但不在樹上」的孤兒，樹狀篩選看不到它。
     """
     from core.cash_taxonomy import mirror_from_path, path_from_columns
-    from core.cash_tree import find_node_id, path_map
+    from core.cash_tree import find_node_id, node_id_in, path_map
 
     ent = e.entity or "parent"
     if "taxonomy_node_id" in data:
@@ -1784,8 +1784,46 @@ async def _sync_taxonomy(session, e, data: dict, paths: dict | None = None):
         return
     if not ({"category", "item", "sub_item"} & set(data)):
         return                                  # 這次沒動分類，不必重算
-    path = path_from_columns(e.category, e.sub_item)
-    e.taxonomy_node_id = (await find_node_id(session, ent, path)) or None
+    # 送什麼就先落到列上，**沒送的欄一律不動**。
+    #
+    # 🔴 這裡不推導 `item`。它看起來像 category 第二層的鏡射，但那只在私帳成立
+    # （私帳的 category 是 `書_項目` 複合鍵）。母公司那本的 category 全是平的，
+    # `item` 放的是**獨立資料**：零用金放那張 AP 的類別、福委會放 AP_CATEGORY、
+    # CSV 匯入吃「項目」欄。拿 `item_of(category)`（平類別＝空字串）去覆蓋，等於
+    # 每次從編輯視窗按存檔就把那一欄清空 —— 而畫面上不會有任何提示。
+    for k in ("category", "item", "sub_item"):
+        if k in data:
+            setattr(e, k, data.get(k) or "")
+    # `paths` 給了就在記憶體裡反查（`find_node_id` 是逐層各一次 SELECT，批次那
+    # 條路一次跑幾百列就是上千趟）。兩種查法都住在 core/cash_tree，路徑怎麼算
+    # 也只有 `path_from_columns` 一份 —— 這裡沒有第二份規則。
+    want = [x for x in path_from_columns(e.category, e.sub_item) if x]
+    # 🔴 本來就掛在**第 4 層以後**、而三欄描述的前三層沒變 → 保留原本的節點。
+    #
+    # 三欄只裝得下 3 層（`mirror_from_path` 的規則：第 4 層以後刻意不進那三欄，
+    # 深度活在 `taxonomy_node_id` 裡）。拿三欄回頭反查一定只找得到第 3 層那個，
+    # 所以不擋的話，使用者只是來改別的欄位按一次存檔，分類就被降級了 ——
+    # 收支明細的編輯視窗每次都會送 category＋sub_item，等於每存一次降一次。
+    # 實測：`家用▸變動支出▸醫療保健▸乳癌治療▸台北馬偕` 會掉成
+    # `家用▸變動支出▸醫療保健`，而私帳有 60 筆掛在那麼深。
+    #
+    # 前三層真的被改掉時（`cur[:3] != want`）就不保留 —— 那是使用者確實換了分類。
+    if e.taxonomy_node_id and len(want) == 3:
+        tbl = paths if paths is not None else await path_map(session, ent)
+        cur = tbl.get(e.taxonomy_node_id)
+        if cur and len(cur) > 3 and cur[:3] == want:
+            return
+    nid = ""
+    if want:
+        nid = (node_id_in(paths, want) if paths is not None
+               else await find_node_id(session, ent, want))
+    e.taxonomy_node_id = nid or None
+    # 🔴 這條路**只寫節點**，三欄維持呼叫端送進來的。想從路徑反推三欄的話要用
+    # `mirror_from_path`，但它跟 `path_from_columns` 不是互為反向：平的類別配上
+    # 子項目時（母公司的類別全是平的），`path_from_columns('其他','保險費')` 出
+    # `['其他','保險費']`，mirror 讀位置 1 當項目 → `('其他_保險費','保險費','')`
+    # —— 類別被改寫成一個 finance_category_map 裡沒有的複合鍵（那一列於是掉進
+    # 三表的「未歸類」），子項目還不見了。生產有這種列。
 
 
 async def _assert_project_same_entity(session, e):
@@ -1945,20 +1983,14 @@ async def cash_entry_options(request: Request, entity: str = Query("")):
     ent = require_entity(request, entity, level="full")
     _require_db()
     factory = await _get_factory()
-    async with factory() as session:
-        cats = await cash_category_texts(session)
-    from core.project_link import MINE_CASH_LINK_PREFIX
-    linkable = ([c for c in cats if c.startswith(MINE_CASH_LINK_PREFIX)]
-                if ent == "mine" else list(_PROJECT_LINK_CATEGORIES))
-    # 三層分類樹（owner 2026-08-27「類別、項目、子項目」）——
-    # 儲存仍是複合鍵 category，畫面拆三層，規則正本 core.cash_taxonomy。
-    #
-    # 🔴 值域＝**這本帳實際用到的類別** ∪ 對映表裡同一類別底下的（尚未用過的
-    # 新類別也要挑得到）。不能直接餵整份 finance_category_map：那是兩本帳共用的，
-    # 母公司的平面類別（行政/薪資/交際應酬…沒有底線）會各自變成一個「類別」，
-    # 私帳的類別下拉就從 5 個爆成 37 個（2026-08-27 實測）。
     from core.cash_taxonomy import book_of, taxonomy
     async with factory() as session:
+        # 🔴 **這本帳**的值域 —— 不是整份 finance_category_map。那份是兩本共用的，
+        # 私帳拿到的會是母公司的平面科目（行政／薪資／交際應酬…），而私帳的報表
+        # 根本沒有那些類別：選了存進去就靜靜落到「未歸類」，看起來卻像分好了
+        # （owner 2026-08-29「這裡的分類規則不需要和 crm 共用」）。母公司那半仍是
+        # 同一份平面科目，所以母公司這條路一個字都沒變。
+        cats, tree = await ledger_categories_and_tree(session, ent)
         used = list((await session.execute(
             select(CrmCashEntry.category).where(
                 CrmCashEntry.entity == ent,
@@ -1969,11 +2001,13 @@ async def cash_entry_options(request: Request, entity: str = Query("")):
                 CrmCashEntry.entity == ent,
                 CrmCashEntry.sub_item.isnot(None),
                 CrmCashEntry.sub_item != "").distinct())).scalars())
-        # 分類樹（深度不限，正本＝cash_taxonomy_nodes）。舊的 taxonomy 扁平欄位
-        # 先留一版 —— 前端已全面改吃 tree，但發版當下還開著的舊分頁仍讀它；
-        # 下一版可以連同 core.cash_taxonomy.taxonomy() 一起收掉。
-        from core.cash_tree import load_tree
-        tree = await load_tree(session, ent)
+    from core.project_link import MINE_CASH_LINK_PREFIX
+    linkable = ([c for c in cats if c.startswith(MINE_CASH_LINK_PREFIX)]
+                if ent == "mine" else list(_PROJECT_LINK_CATEGORIES))
+    # 舊的 taxonomy 扁平欄位先留一版：前端已全面改吃 tree，但發版當下還開著的
+    # 舊分頁仍讀它；下一版可以連同 core.cash_taxonomy.taxonomy() 一起收掉。
+    # 它的值域＝**這本帳實際用到的類別** ∪ 值域裡同一本底下的（還沒用過的新
+    # 類別也要挑得到）。
     books_used = {book_of(c) for c in used}
     tax_cats = used + [c for c in cats if book_of(c) in books_used and c not in used]
     return {"categories": cats,
@@ -2292,11 +2326,14 @@ async def batch_set_taxonomy(request: Request):
             if nid is not None:
                 await _sync_taxonomy(session, e, {"taxonomy_node_id": nid}, paths)
             else:
-                # 平的那本：三欄先賦值，再讓同一份規則去反查掛不掛得上節點
-                # （母公司沒有樹 → 查不到就是 None，正常）。每列各查一次是刻意的 ——
-                # 為了少幾次查詢把「路徑→節點」再寫一份在這裡，那份就會跟樹漂。
+                # 平的那本：這條路的語意是「這幾列現在就是這個類別」，所以更深的
+                # 兩欄要一起清掉 —— 不清的話「清空分類」會留下一列沒有類別、卻
+                # 還顯示著項目與子項目的列（正是這一輪在消滅的孤兒形狀）。
+                # 三欄自己賦值、節點交給同一份規則反查（母公司沒有樹 → 查不到
+                # 就是 None，正常）。`paths` 一樣要帶：不帶的話 `_sync_taxonomy`
+                # 逐列打 `find_node_id`，一批 200 列就是 200 趟必定落空的查詢。
                 e.category, e.item, e.sub_item = (cat or ""), "", ""
-                await _sync_taxonomy(session, e, {"category": e.category})
+                await _sync_taxonomy(session, e, {"category": e.category}, paths)
             _enforce_cash_project_link(e)
             e.updated_at = now
         await session.commit()
@@ -2815,7 +2852,7 @@ async def list_cash_taxonomy_nodes(request: Request, entity: str = Query("")):
     return {"tree": tree}
 
 
-async def _rename_category_map(session, renames) -> list:
+async def _rename_category_map(session, renames, ent: str = "mine") -> list:
     """複合鍵改名 → `finance_category_map` 的鍵跟著改。
 
     🔴 不改的話那批帳**從三表消失**：那張表帶著每個鍵的科目與 treatment
@@ -2829,6 +2866,7 @@ async def _rename_category_map(session, renames) -> list:
         clash = (await session.execute(
             select(FinanceCategoryMap).where(
                 FinanceCategoryMap.source == "cash",
+                FinanceCategoryMap.entity == ent,
                 FinanceCategoryMap.category_text == new))).scalar_one_or_none()
         if clash is not None:
             raise HTTPException(
@@ -2838,6 +2876,7 @@ async def _rename_category_map(session, renames) -> list:
         row = (await session.execute(
             select(FinanceCategoryMap).where(
                 FinanceCategoryMap.source == "cash",
+                FinanceCategoryMap.entity == ent,
                 FinanceCategoryMap.category_text == old))).scalar_one_or_none()
         if row is not None:
             row.category_text = new
@@ -2914,7 +2953,7 @@ async def update_cash_taxonomy_node(node_id: str, req: CashTaxonomyNodeUpdate,
         after = await category_keys(session, ent, ids, nodes=nodes_after)
         renames = [(before[k], after[k]) for k in before
                    if k in after and before[k] != after[k]]
-        mapped = await _rename_category_map(session, renames)
+        mapped = await _rename_category_map(session, renames, ent)
         rows = await remirror_subtree(session, ent, node_id, nodes=nodes_after)
         await session.commit()
     return {"status": "ok", "rows_remirrored": rows, "category_map_renamed": mapped}

@@ -590,17 +590,91 @@ async def _mint_token_generic(session, model_cls, obj_id: str, scope: str, *,
         row.updated_at = _now()
     return token, row
 
-async def cash_category_texts(session) -> list:
+async def cash_category_texts(session, ent: str = "parent") -> list:
     """目前有效的收支明細 category 清單（finance_category_map, source='cash'）。
 
-    唯一正本 —— 這份清單本來散在四個地方（零用金 options 端點、零用金另一支查詢、
-    對帳單預覽的未對映檢查、匯入腳本），其中兩份是 ORM、兩份是手寫 SQL，`active`
-    的寫法還不一致。前端下拉也不該再寫死：`貸款繳款`／`貸款補貼` 這些後來加的
+    **母公司**那一半的唯一正本 —— 兩本帳都要問的是下面的
+    `ledger_category_domain`。這份清單本來散在四個地方（零用金 options 端點、
+    零用金另一支查詢、對帳單預覽的未對映檢查、匯入腳本），其中兩份是 ORM、
+    兩份是手寫 SQL，`active` 的寫法還不一致。前端下拉也不該再寫死：`貸款繳款`／`貸款補貼` 這些後來加的
     類別沒同步進去，結果自家匯入寫出來的列，使用者在編輯視窗裡選不到它的類別。
     """
     from db.models import FinanceCategoryMap
     return [r[0] for r in (await session.execute(
         select(FinanceCategoryMap.category_text)
         .where(FinanceCategoryMap.source == "cash",
+               FinanceCategoryMap.entity == ent,
                FinanceCategoryMap.active.is_(True))
         .order_by(FinanceCategoryMap.category_text))).all()]
+
+
+async def ledger_category_domain(session, ent: str, nodes=None) -> set:
+    """**這本帳**認得的 category 值域。上面那支是它母公司的那一半。
+
+    🔴 兩本帳的值域**不重疊**：母公司是 finance_category_map 的平面科目
+    （行政／薪資／交際應酬…），私帳是 cash_taxonomy_nodes 那棵樹，存進
+    `category` 欄的是路徑前兩層的複合鍵（`公司_專案`、`家用_變動支出`；
+    鏡射規則的正本在 core.cash_taxonomy.mirror_from_path）。
+
+    共用同一份白名單的話，私帳可以設出一條「→ 交際應酬」的規則 —— 而私帳的
+    報表根本沒有那個類別，那些列會靜靜落到「未歸類」，看起來卻像已經分好了
+    （owner 2026-08-29「這裡的分類規則不需要和 crm 共用」）。
+
+    住在 `_shared` 而不是某個 router：問這個問題的地方不只一處（匯入規則的
+    驗證、規則面板的下拉、預覽的「科目未對映」提醒），而**規則只有這一份**。
+
+    `nodes` 給了就用（呼叫端已經撈過整棵樹時傳進來 —— core/cash_tree 的檔頭
+    就在講這件事：同一個請求別讓樹撈六遍）。
+    """
+    if ent != "mine":
+        # 母公司走平面科目（樹是私帳才有的東西，這條路連查都不用查）
+        return set(await cash_category_texts(session, ent))
+    from core.cash_taxonomy import mirror_from_path
+    from core.cash_tree import path_map
+    # 🔴 值域＝樹上每個節點鏡射出來的 category。**不跟科目對映取交集**：樹上還
+    # 沒建成科目的分支照樣可以設規則（缺對映另有「科目未對映」的標記在提醒）。
+    out = {mirror_from_path(p)[0]
+           for p in (await path_map(session, ent, nodes=nodes)).values()}
+    out.discard("")
+    return out
+
+
+async def assert_ledger_category(session, cat: str, ent: str) -> None:
+    """自由輸入的類別：**私帳**不在值域內就 422。
+
+    值域的判斷只有 `ledger_category_domain` 一份，擋人的訊息也只有這一份 ——
+    每個寫入端各寫一句，措辭會漂，而使用者看到的就是那句話。
+
+    🔴 只擋私帳，因為兩本帳的「不在值域內」意思不一樣：
+    - 私帳的值域是**分類樹**（封閉的）。樹外的類別＝一列看不見的孤兒：
+      樹狀篩選找不到它，畫面上卻像分好了。
+    - 母公司的值域是**會計科目對映表**，那份刻意允許沒對映的類別 —— 它們會
+      出現在「未歸類佇列」等人去補對映，那是既有設計（見補記入帳的說明），
+      不是錯誤。在這裡擋下來等於把那條路堵死。
+    """
+    from fastapi import HTTPException
+    if ent != "mine":
+        return
+    if cat and cat not in await ledger_category_domain(session, ent):
+        raise HTTPException(
+            status_code=422,
+            detail=f"「{cat}」不是這本帳的類別 —— 請先在分類設定裡建立它")
+
+
+async def ledger_categories_and_tree(session, ent: str) -> tuple:
+    """`(這本帳的類別值域, 畫面用的分類樹)` —— 兩個一起要的地方都問這一支。
+
+    🔴 節點表**整份撈一次**（core/cash_tree 檔頭：「別讓一個請求把節點表撈六遍」）
+    再兩邊各自過濾，因為兩者要的深淺不同：
+
+    - 值域收**全份**（含停用節點）—— 歷史列掛在被停用的節點上，它的 category
+      照樣是有效值，不然那些列一驗就變成「不認得的類別」。
+    - 畫面上的樹只放**啟用中**的 —— 停用＝新列挑不到。
+
+    母公司沒有樹（值域是平面科目），那條路連查都不用查。
+    """
+    from core.cash_tree import build_tree, load_nodes
+    nodes = await load_nodes(session, ent, include_inactive=True) \
+        if ent == "mine" else []
+    return (sorted(await ledger_category_domain(session, ent, nodes=nodes)),
+            build_tree([n for n in nodes if n.active]))

@@ -13,8 +13,9 @@
         <!-- nav 三模式（LEDGER_ENTITY_PLAN §5，顯隱由 finance.js 控制）：
              .fin-nav-full      = 只在 full-parent scope（記帳者/owner）顯示 —— 母公司 CRM 域
              .fin-nav-mine-ok   = full-parent 與「我的帳」（/my-ledger.html，entity=mine）都顯示；合夥人隱藏
-             .fin-nav-mine-only = 私帳專屬（執行專案/器材清冊/私帳應收）：帳號要有 finance_mine
-                                  （指名制）才顯示 —— finance.js 一行 hideNav 收掉，新私帳子視圖掛這個 class 即可
+             .fin-nav-mine-only = 私帳專屬（私帳應收／家用／客戶管理／證券投資）：兩道門都要過 ——
+                                  帳號要有 finance_mine（指名制），**而且**現在是私帳模式；判定在 finance.js。
+                                  🔴 執行專案與器材清冊 2026-08-30 起改成跟著帳本切，已不在這一組
              無 class          = 三種模式都顯示（儀表板／財務三表） -->
         <div class="fin-nav-mine-ok" style="padding:4px 16px;font-size:10px;color:#555;letter-spacing:0.1em;">🧾 帳務</div>
         <button class="finance-nav-btn fin-nav-full" data-inv-view="invoices">🧾 發票</button>
