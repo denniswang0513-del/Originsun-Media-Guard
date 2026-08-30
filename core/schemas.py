@@ -1368,6 +1368,13 @@ class StatementImportRow(BaseModel):
     # 鏡射。挑了節點就送它，寫入端用 `_sync_taxonomy` 推三欄 —— 只送 category
     # 的話那一列沒有節點，收支明細的分類篩選與路徑顯示就看不到它。
     taxonomy_node_id: Optional[str] = None
+    # 匯進去之後直接送「源日請款」（＝推成母公司零用金的草稿單據）。
+    # owner 2026-08-30：功能本來就有（收支明細每列的選單），他要的是匯入當下
+    # 就能勾，不必匯完再回收支表走一遍。只對**私帳的流出列**有意義。
+    petty_claim: bool = False
+    # 源日請款的會計項目。空＝由 `petty_item_for` 從類別推（推不出來後端會擋，
+    # 理由回到匯入結果裡）—— 前端在勾選當下就會請人挑，所以正常會帶值。
+    petty_item: str = ""
     # 指定成貸款繳款時要帶：配到哪筆貸款的哪一期（preview 已配好或使用者手選）
     loan_id: Optional[str] = None
     period_no: Optional[int] = None

@@ -1054,6 +1054,12 @@ function _stmtRow(r, i) {
             <button type="button" title="把「${esc((r.description || '').slice(0, 12))} → 這個類別」存成規則，以後自動套用"
                     onclick="window._finRecon.stmtSaveRule(${i})"
                     style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:12px;padding:0 2px;">＋規則</button>
+            ${!_stmtCanPetty(r) ? '' : `<button type="button"
+                    title="匯入之後直接送「源日請款」—— 推成母公司零用金的草稿單據，之後在零用金那邊送出。功能跟收支明細每列選單裡的那顆是同一個。"
+                    onclick="window._finRecon.stmtPettyToggle(${i}, this)"
+                    style="background:none;border:none;cursor:pointer;font-size:12px;padding:0 2px;color:${
+                        r.petty_claim ? '#86efac' : '#6b7280'};">${
+                        r.petty_claim ? '✓源日請款' : '源日請款'}</button>`}
         </td>
         <td style="padding:4px 6px;">${_stmtProjCell(r, i)}</td>
         <td style="padding:4px 6px;">${_stmtAllocCell(r, i)}</td>
@@ -1115,6 +1121,43 @@ function _stmtCacheCats(d) {
  *  是一份對帳單五十幾列的表格 —— 每列三四個下拉會把表撐爆。單一下拉列完整
  *  路徑，深度一樣看得到，寬度只佔一格。
  */
+/** 這一列能不能送源日請款：私帳的**流出**列才有意義（那是我先墊、要跟公司
+ *  收回來的錢）。收入列、母公司的列都沒有這回事。 */
+const _stmtCanPetty = (r) => finEntity() === 'mine' && (r.amount || 0) < 0;
+
+_fr.stmtPettyToggle = (i, btn) => {
+    const r = _stmtPreview && _stmtPreview.rows[i];
+    if (!r) { return; }
+    if (!r.petty_claim) {
+        // 🔴 會計項目在**勾的當下**就要確定 —— 等匯入完才發現對不出來，帳已經
+        // 進去了、請款卻沒送出，那筆錢就靜靜地跟公司要不回來。
+        // 建議值是後端用 petty_item_for 算的（`公司_器材` → `設備耗材`），
+        // 前端不重寫那條規則，只在它算不出來時請人挑。
+        let item = r.petty_item || '';
+        const domain = _stmtPreview.petty_items || [];
+        if (!item) {
+            if (!domain.length) {
+                return finToast('這本帳沒有可用的會計項目 —— 請先到科目與設定建立', true);
+            }
+            const nl = String.fromCharCode(10);
+            const pick = prompt(
+                (r.category ? `「${r.category}」對不出會計項目。`
+                    : '這一列還沒選分類。')
+                + nl + '源日請款要填一個會計項目，從下面挑一個填進來：'
+                + nl + nl + domain.join('、'), '');
+            item = (pick || '').trim();
+            if (!item) { return; }
+            if (!domain.includes(item)) {
+                return finToast(`「${item}」不在可用的會計項目裡`, true);
+            }
+        }
+        r.petty_item = item;
+    }
+    r.petty_claim = !r.petty_claim;
+    btn.textContent = r.petty_claim ? `✓源日請款（${r.petty_item}）` : '源日請款';
+    btn.style.color = r.petty_claim ? '#86efac' : '#6b7280';
+};
+
 /** 這本帳有沒有貸款 —— 沒有就不畫「貸款期別」欄（owner 2026-08-30「因為我
  *  沒有貸款所以不用貸款期別」）。看的是**這次預覽回來的貸款清單**，不是寫死
  *  哪一本帳：他哪天真的去借了款，欄位自己就回來了。 */
@@ -1626,6 +1669,8 @@ const _stmtRowPayload = (x) => ({
     // 私帳挑的是分類樹的節點 —— 不帶它的話寫進去的列只有 category 字串、
     // 沒有節點，收支明細的分類篩選與路徑顯示就看不到它（樹才是正本）
     taxonomy_node_id: x.taxonomy_node_id || null,
+    petty_claim: !!x.petty_claim,
+    petty_item: x.petty_item || '',
     project_id: x.project_id || null,
     invoices: x.invoices || [],
     // 支出列的鏡像。同樣用 `|| []` —— 後端那兩欄是 List 不收 null（見上面那段
@@ -1964,12 +2009,21 @@ _fr.stmtApply = async (btn) => {
         // 逾時重按也是）—— 跳過幾筆一定要講，否則使用者以為全部匯進去了。
         const dup = (r.skipped_duplicates || []).length;
         finToast(`已匯入 ${r.entries} 筆收支、${r.loan_payments} 期貸款繳款`
+            + (r.petty_claims ? `；${r.petty_claims} 筆已送源日請款（草稿）` : '')
             + (r.linked_invoices ? `；掛上 ${r.linked_invoices} 張發票` : '')
             + (r.statement_lines ? `；對帳工作台同步 ${r.statement_lines} 列（已自動配對）` : '')
             + (dup ? `；跳過 ${dup} 筆重複（帳上已有）` : '')
             // 從草稿匯入時草稿**留著** —— 常常是分幾次匯（先匯確定的、剩下的再查）。
             // 匯過的列下次開啟會自動標「已匯過」且不勾，所以留著不會重複匯。
             + (d.draft_id ? '；草稿仍保留（剩下的列可以之後再匯，做完記得刪掉）' : ''));
+        // 🔴 源日請款推不動的**要講出來**：帳已經匯進去了，但那幾筆沒進請款
+        // 流程。不講的話使用者以為都送出去了，那筆錢就跟公司要不回來。
+        if ((r.petty_failed || []).length) {
+            const nl = String.fromCharCode(10);
+            alert('這幾筆匯進去了，但源日請款沒推成功'
+                + '（到收支明細逐列補推即可）：' + nl + nl
+                + r.petty_failed.join(nl));
+        }
         _fr.reload();
     } catch (e) {
         err.textContent = e.message;

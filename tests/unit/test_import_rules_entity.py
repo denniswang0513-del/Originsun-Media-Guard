@@ -146,3 +146,35 @@ def test_private_only_subviews_are_hidden_in_the_parent_book():
     for sub in ("household", "securities", "gear", "receivable"):
         seg = html.split(f'data-subview="{sub}"')[0].rsplit("<button", 1)[1]
         assert "fin-nav-mine-only" in seg, sub
+
+
+def test_petty_claim_from_the_import_reuses_the_existing_flow():
+    """🔴 「源日請款」2026-08-27 就做過（收支明細每列的選單）—— owner 2026-08-30
+    要的是**匯入當下**就能勾。所以是同一條路的第二個入口，不是第二套流程：
+    走零用金既有的 `_push_from_cash`（會計項目白名單、「對不出項目就擋下、
+    不落其他」、重推防線都在那支裡面）。"""
+    body = code_only(func_body(repo_src(STMT), "async def _push_one_petty("))
+    assert "_push_from_cash(session, staff" in body
+    assert "resolve_current_staff" in body, "請款人要從 token 解，不收前端傳值"
+    apply_fn = code_only(func_body(repo_src(STMT), "async def apply_bank_statement("))
+    assert "petty_rows.append((r, ce))" in apply_fn
+
+
+def test_a_failed_petty_push_does_not_fail_the_whole_import():
+    """🔴 推不動的不能讓整批匯入白做（那批帳已經是對的）—— 收集理由回報，
+    而且前端**一定要講出來**：不講的話使用者以為都送出去了，那筆錢就跟公司
+    要不回來。"""
+    apply_fn = code_only(func_body(repo_src(STMT), "async def apply_bank_statement("))
+    assert "petty_failed.append(" in apply_fn
+    assert '"petty_failed": petty_failed' in apply_fn
+    js = js_code_only(repo_src(JS))
+    assert "r.petty_failed || []" in js and "alert(" in js
+
+
+def test_the_petty_toggle_only_shows_on_private_outflow_rows():
+    """私帳的**流出**列才有這回事（那是我先墊、要跟公司收回來的錢）。
+    收入列、母公司的列都沒有。"""
+    js = js_code_only(repo_src(JS))
+    fn = js.split("const _stmtCanPetty =")[1].split(";")[0]
+    assert "finEntity() === 'mine'" in fn and "(r.amount || 0) < 0" in fn
+    assert "petty_claim: !!x.petty_claim" in js, "apply 沒把旗標送出去"

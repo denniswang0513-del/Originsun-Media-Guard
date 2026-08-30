@@ -601,6 +601,13 @@ async def _build_statement_preview(session, acct, ent, text):
     # 共用的，私帳的匯入視窗會拿到母公司的平面科目（行政／薪資／交際應酬…），
     # 而它們在私帳的分類樹上根本不存在（owner 2026-08-29）。
     mapped = await _known_categories(session, ent)
+    # 源日請款要填「會計項目」—— 對映規則的正本是 core.cash_taxonomy.petty_item_for
+    # （`公司_器材` → `設備耗材`），值域是 _petty_item_domain。前端**不重寫一份**：
+    # 這裡逐列算好建議值帶下去，對不出來就回空字串（那是「請人挑」的意思，
+    # 不是「沒有」）。
+    from core.cash_taxonomy import petty_item_for as _petty_item_for
+    from routers.crm.petty import _petty_item_domain
+    petty_items = await _petty_item_domain(session) if ent == "mine" else []
     # 私帳的分類樹一起回（母公司沒有樹，回空陣列）—— 前端逐列的分類下拉
     # 要用它，多打一支 API 只是為了同一份資料
     from core.cash_tree import load_tree as _load_tax_tree
@@ -701,6 +708,9 @@ async def _build_statement_preview(session, acct, ent, text):
             "category": r.category, "inferred": r.inferred,
             # 規則指定到第三層以後時，節點才是正本（category 只到第二層）
             "taxonomy_node_id": r.taxonomy_node_id,
+            # 源日請款用的會計項目建議（空＝對不出來，畫面要人挑）
+            "petty_item": (_petty_item_for(r.category, petty_items)
+                           if petty_items else ""),
             # 🔴 方向是推出來的列**不預設勾選**：我們才剛跟使用者說「這列的方向
             # 是猜的」，不能又讓表頭那顆全選一按就把猜測寫進帳。要它就自己勾。
             "duplicate": dup, "selected": not dup and not r.inferred,
@@ -734,6 +744,8 @@ async def _build_statement_preview(session, acct, ent, text):
         # （也省掉前端跨 prefix 去打 /crm/cash-entries/options 那一支）
         "mapped_categories": sorted(mapped),
         "taxonomy_tree": tax_tree,
+        # 源日請款的會計項目值域（＝寫入白名單，同一份）
+        "petty_items": petty_items,
         # 這本帳有幾筆貸款 —— 前端據此決定畫不畫「貸款期別」欄（owner 2026-08-30
         # 「因為我沒有貸款所以不用貸款期別」）。回**數量**不回整份清單：那份
         # 已經在配對器裡用掉了，前端只需要「有沒有」。
@@ -898,6 +910,33 @@ async def delete_statement_draft(draft_id: str, request: Request):
         return {"ok": True}
 
 
+async def _push_one_petty(session, request, entry, item: str = "") -> None:
+    """一列收支 → 母公司零用金的草稿單據（＝畫面上的「源日請款」）。
+
+    🔴 **不另造流程**：呼叫零用金那支既有的 `_push_from_cash`（owner 2026-08-27
+    做的那條路，收支明細每列的選單走的也是它）。會計項目的白名單、「對不出
+    項目就擋下、不落其他」、重推防線都在那支裡面 —— 在這裡重寫一份，遲早
+    只有其中一份跟上規則的改動。
+
+    請款人＝呼叫者綁定的人員檔案（`resolve_current_staff`，永不接受前端傳值）。
+    沒綁的話這裡就推不動，理由會回到匯入結果裡讓人看到。
+    """
+    from core.identity import resolve_current_staff
+    from core.schemas import PettyFromCashPayload
+    from routers.crm.petty import _push_from_cash
+
+    ident = await resolve_current_staff(request)
+    staff = ident.get("staff")
+    if staff is None:
+        raise HTTPException(
+            status_code=422,
+            detail="這個帳號還沒綁人員檔案，源日請款要有請款人 —— "
+                   "請先到使用者管理綁定，或匯入後到收支明細逐列推送")
+    await session.flush()          # 需要 entry.id
+    await _push_from_cash(session, staff,
+                          PettyFromCashPayload(entry_id=entry.id, item=item))
+
+
 @router.post("/bank-statement/apply")
 async def apply_bank_statement(payload: StatementImportApply, request: Request):
     """把確認過的列寫進帳：一般列 → 收支明細；貸款繳款列 → 走繳款流程
@@ -954,6 +993,7 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
             session, payload.bank_account_id, sorted(r.date for r in payload.rows))
         made_entries = made_payments = 0
         skipped_dup = []
+        petty_rows = []
         linked = []          # 有掛發票的收款列 → commit 前要進分配表並重算發票狀態
         pay_linked = []      # 有掛請款單的支出列 → 同上（付款狀態走同一條容差規則）
         alloc_fees: dict = {}   # (收支 id, 發票 id) → 逐張匯費（收款側才有）
@@ -1069,6 +1109,8 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                 session.add(ce)
                 made_entries += 1
                 stmt_lines.append((r, ce))
+                if r.petty_claim:
+                    petty_rows.append((r, ce))
                 if allocs and amt > 0:
                     linked.append((ce, await resolve_invoice_allocs(
                         session, allocs, ent, by_id=inv_by_id)))
@@ -1133,6 +1175,21 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
             #    先不為了對稱而多一支平行實作。
             await replace_payment_allocs(session, ce, rows_)
         await session.flush()
+        # 勾了「源日請款」的列 → 推成母公司零用金草稿。
+        # 🔴 走零用金那支既有的 `_push_from_cash`，不在這裡另造一份：會計項目的
+        # 白名單、「對不出項目就擋下不落其他」、重推防線都在那支裡面。
+        # 🔴 推不動的**不讓整批匯入失敗**（那批帳已經是對的）—— 收集理由回報，
+        # 使用者到收支明細補推即可。
+        petty_done, petty_failed = 0, []
+        for r, ce in petty_rows:
+            try:
+                await _push_one_petty(session, request, ce,
+                                      (r.petty_item or "").strip())
+                petty_done += 1
+            except HTTPException as e:
+                petty_failed.append(f"{r.date} {int(r.amount or 0):+,}：{e.detail}")
+            except Exception as e:      # noqa: BLE001
+                petty_failed.append(f"{r.date} {int(r.amount or 0):+,}：{type(e).__name__}")
         try:
             fees_done = await recognize_transfer_fees_in(session, ent,
                                                          month_guard=False)
@@ -1145,4 +1202,5 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
             "linked_invoices": sum(len(v) for _ce, v in linked),
             "linked_payments": sum(len(v) for _ce, v in pay_linked),
             "transfer_fees": len(fees_done),
+            "petty_claims": petty_done, "petty_failed": petty_failed,
             "skipped_duplicates": skipped_dup}
