@@ -1,4 +1,4 @@
-"""Repository for reports table."""
+"""reports 表的薄 CRUD（契約同 agents_repo 檔頭：回 dict、不 commit）。"""
 
 from typing import List
 
@@ -17,6 +17,7 @@ async def list_all(session: AsyncSession) -> List[dict]:
 
 
 async def add(session: AsyncSession, entry: dict) -> None:
+    """冪等：同 id 再加一次是 no-op —— 報表索引雙寫（本機+NAS）時重放不重複。"""
     stmt = pg_insert(Report).values(
         id=entry.get("id", ""),
         name=entry.get("name", ""),

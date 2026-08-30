@@ -40,7 +40,8 @@ def test_backend_carries_bank_memo():
     src = finance_src()
     assert '"bank_memo"' in src.split("def _to_cash_dict")[1][:1600]
     assert "CrmCashEntry.bank_memo.ilike(ql)" in src, "搜尋要涵蓋銀行資訊欄"
-    models = _read("db/models.py")
+    from tests.unit._srcscan import models_src
+    models = models_src()
     assert "bank_memo = Column(Text" in models
 
 

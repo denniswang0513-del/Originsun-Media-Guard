@@ -41,8 +41,8 @@ EXEMPT = {
         "備份/轉檔/串接/驗證四個引擎共用暫停停止狀態，切點不明顯",
     "frontend/tabs/finance/subviews/recon.js":
         "對帳工作台（三週改 17 次、每次都連著測試改，是活躍但受控的）",
-    "db/models.py":
-        "所有 ORM 表的單一宣告處，本來就會隨表數線性長；分檔要先決定分組軸",
+    # db/models.py 2026-08-31 已拆成套件（db/models/，最大段 701 行）——
+    # 它曾同時是 fan-in 85／2,121 行／三週改 47 次的最大爆炸半徑
     "frontend/tabs/crm/crm-cashbook.js":
         "收支明細主畫面（清單＋編輯＋匯入三合一）",
 }
@@ -79,7 +79,7 @@ def test_the_scan_actually_covers_the_repo():
     安安靜靜地永遠綠燈，而它們要守的東西早就沒人看著了。"""
     files = _files()
     assert len(files) >= 400, f"只掃到 {len(files)} 個檔，掃描本身可能壞了"
-    for must in ("main.py", "db/models.py", "frontend/app.js",
+    for must in ("main.py", "db/models/_crm.py", "frontend/app.js",
                  "core/finance_logic/_core.py", "routers/crm/finance.py"):
         assert must in files, f"掃描漏了 {must}"
 

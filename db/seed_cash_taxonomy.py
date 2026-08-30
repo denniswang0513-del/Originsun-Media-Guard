@@ -217,6 +217,11 @@ _BACKFILL_SQL = [
 
 
 async def backfill_taxonomy_nodes(session_factory) -> int:
+    """把「有 category 但沒掛節點」的既有私帳收支補上 taxonomy_node_id，回補到幾筆。
+
+    SQL 冪等（都帶 taxonomy_node_id IS NULL 條件），開機每次跑、補完自然歸零。
+    沒掛節點的列在收支明細的樹狀篩選裡看不到 —— 這支就是在清那種孤兒。
+    """
     from sqlalchemy import text
 
     n = 0

@@ -245,6 +245,14 @@ async def generate_for_post(session: AsyncSession, post_id: int) -> dict:
 
 async def run_pipeline(session: AsyncSession, *, target_post_id: Optional[int] = None,
                        batch_size: int = 10, dry_run: bool = False) -> dict:
+    """文章 AI SEO 一輪：選件 → claude 生成 → 寫回，回 {processed, errors, works}。
+
+    🔴 有 `MASTER_RELAY_URL` 就整包轉給 master 跑（NAS 容器沒有 claude 執行檔）
+    —— dry_run 例外，它不碰 claude，本地算完就回。
+    選件＝audit 裡 needs_ai 的，completeness 低的先做（缺最多的最值得跑）。
+    `_run_lock` 不等待、拿不到直接回 busy：這是「一次一輪」的閘，不是佇列 ——
+    排隊會讓兩次手動觸發默默變成跑兩輪。
+    """
     relay = os.environ.get("MASTER_RELAY_URL", "").strip()
     if relay and not dry_run:
         if target_post_id is not None:

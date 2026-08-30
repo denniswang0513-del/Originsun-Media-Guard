@@ -87,8 +87,8 @@ def test_model_and_payload_expose_it():
 def test_it_is_not_confused_with_direction():
     """🔴 direction（推方向的提示）與 only_direction（篩選條件）是兩件事。
     借用同一欄會把原本「第一列推不出方向」那條路弄壞。"""
-    from tests.unit._srcscan import repo_src
-    src = repo_src("db/models.py")
+    from tests.unit._srcscan import models_src
+    src = models_src()
     i = src.index("class BankImportRule")
     seg = src[i:src.index("\nclass ", i + 10)]
     assert "only_direction" in seg and "direction = Column" in seg

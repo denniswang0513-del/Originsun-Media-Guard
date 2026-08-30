@@ -509,7 +509,9 @@ def test_payload_entity_default_is_none(schema):
 # （由 test_main_migration_covers_seven_tables_and_composite_index 正面釘）。
 OWN_BAN_FILES = [
     "core/ledger.py",
-    "db/models.py",
+    "db/models/_crm.py",
+    "db/models/_finance.py",
+    "db/models/_workspace.py",
     "services/finance_statements.py",
     "routers/api_finance.py",
     "routers/api_finance_stmt.py",

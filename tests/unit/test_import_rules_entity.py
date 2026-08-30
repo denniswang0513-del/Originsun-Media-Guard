@@ -28,7 +28,8 @@ def _fn(name):
 
 def test_the_rules_table_is_scoped_by_ledger():
     """欄位在、預設是 parent（既有 36 條的歸屬），索引也帶上它。"""
-    m = repo_src("db/models.py")
+    from tests.unit._srcscan import models_src
+    m = models_src()
     seg = m.split("class BankImportRule(")[1].split("\nclass ")[0]
     assert 'entity = Column(String(16), nullable=False, server_default="parent")' in seg
     assert '"ix_bankrule_acct", "entity"' in seg
@@ -164,7 +165,8 @@ def test_a_rule_can_target_any_depth_of_the_tree():
     """🔴 規則原本只存 category（路徑前兩層的鏡射），第三層以後表達不出來 ——
     而私帳有 3,346 筆收支就掛在第三層（2026-08-30 實查），正是最需要自動分類的
     那一批。所以規則多帶 `taxonomy_node_id`。"""
-    m = repo_src("db/models.py")
+    from tests.unit._srcscan import models_src
+    m = models_src()
     seg = m.split("class BankImportRule(")[1].split("\nclass ")[0]
     assert "taxonomy_node_id = Column(String(32), nullable=True)" in seg
     assert "taxonomy_node_id VARCHAR(32)" in migration_sql()

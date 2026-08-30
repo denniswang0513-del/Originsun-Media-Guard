@@ -195,6 +195,18 @@ def finance_logic_src(header: str = "") -> str:
                            ("_core.py", "_statements.py", "_flows.py"), header)
 
 
+def models_src(header: str = "") -> str:
+    """原本 `db/models.py` 那一整個檔的內容。
+
+    🔴 2026-08-31 拆成套件 `db/models/`（同一個理由第三次：2,121 行超過單次
+    讀取上限、fan-in 85、三週改 47 次）。純行段切割、零類別搬家，六段照原檔
+    的領域分節。斷言釘的是「這張表長什麼樣」，不是「它住哪個檔」。
+    """
+    return _split_file_src("db/models",
+                           ("_base.py", "_system.py", "_crm.py", "_workos.py",
+                            "_finance.py", "_workspace.py"), header)
+
+
 def _split_file_src(rel_dir: str, files: tuple, header: str = "") -> str:
     """一個被拆開的檔：把幾塊串回去，或在其中一塊裡找出某支函式的本體。
 

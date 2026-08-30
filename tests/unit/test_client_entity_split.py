@@ -32,7 +32,8 @@ def _read(rel):
 def test_short_name_unique_per_entity():
     """全域唯一會讓「私帳一筆＋CRM 一筆」的第二筆被迫改名 —— 那是替約束
     服務不是替帳服務。改成每本帳各自唯一。"""
-    m = _read("db/models.py")
+    from tests.unit._srcscan import models_src
+    m = models_src()
     assert "short_name = Column(String(64), nullable=False)" in m, "不可再是 unique=True"
     assert 'UniqueConstraint("entity", "short_name"' in m
     from tests.unit._srcscan import migration_sql

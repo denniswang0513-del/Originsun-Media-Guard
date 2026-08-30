@@ -407,6 +407,12 @@ async def apply_entity(session: AsyncSession, etype: str, eid: str, fields: dict
 # ══════════════════════════════════════════════════════════
 
 async def run_pipeline(session: AsyncSession, *, batch_size: int = 10, dry_run: bool = False) -> dict:
+    """英文翻譯一輪（works/posts/services 的 _en 欄）：選件 → claude transcreation → 寫回。
+
+    形狀同 post_seo_runner.run_pipeline：relay 轉 master／dry_run 本地／
+    `_run_lock` 拿不到直接回 busy。差別在寫回：`translation.auto_approve`
+    開著就直接核准上站，關著進待審（後台翻譯卡片人工過）。
+    """
     relay = os.environ.get("MASTER_RELAY_URL", "").strip()
     if relay and not dry_run:
         url = f"{relay.rstrip('/')}/api/website/admin/internal/translation/run?batch_size={batch_size}"

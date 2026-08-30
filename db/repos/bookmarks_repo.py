@@ -1,4 +1,4 @@
-"""Repository for bookmarks table."""
+"""bookmarks 表的薄 CRUD（契約同 agents_repo 檔頭：回 dict、不 commit）。"""
 
 from typing import List, Optional
 from datetime import datetime

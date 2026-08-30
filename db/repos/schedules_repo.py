@@ -1,4 +1,4 @@
-"""Repository for scheduled_jobs table."""
+"""scheduled_jobs 表的薄 CRUD（契約同 agents_repo 檔頭：回 dict、不 commit）。"""
 
 from datetime import datetime
 from typing import List, Optional

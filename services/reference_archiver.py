@@ -103,6 +103,12 @@ def status() -> dict:
 
 
 def tick() -> None:
+    """排程每分鐘敲一次的入口：該跑就丟一支背景下載，不該跑就便宜地返回。
+
+    四道早退（順序有意義，愈便宜愈前面）：上一支還在跑 → 不是 master
+    （機隊 8 台每分鐘白讀 settings 檔）→ 功能沒開 → 還沒到節流時間
+    （per_hour 換算的間隔）。實際工作在 _run_one_guarded，這裡永遠不阻塞。
+    """
     global _busy, _task
     if _busy:
         return

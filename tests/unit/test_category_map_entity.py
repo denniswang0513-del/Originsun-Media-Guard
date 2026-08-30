@@ -19,7 +19,8 @@ from tests.unit._srcscan import finance_src
 
 def test_the_mapping_table_is_scoped_by_ledger():
     """欄位在、預設 parent（既有列的歸屬），唯一鍵也帶上它。"""
-    seg = repo_src("db/models.py").split(
+    from tests.unit._srcscan import models_src
+    seg = models_src().split(
         "class FinanceCategoryMap(")[1].split("\nclass ")[0]
     assert 'entity = Column(String(16), nullable=False, server_default="parent")' in seg
     # 🔴 唯一鍵要帶 entity：分家之後兩本帳可以各有一個同名類別（母公司的「其他」

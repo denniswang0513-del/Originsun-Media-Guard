@@ -322,7 +322,14 @@ Originsun-Media-Guard/
 │   │                        #   - resetProgress()：重置所有進度條與狀態
 │   │                        #   - 所有函式也掛到 window.* 供非 module 程式碼呼叫
 │   │
-│   └── tabs/                # 各功能頁籤目錄（每個頁籤嚴格隔離，各含 .html + .js）
+│   └── tabs/                # 各功能頁籤目錄（各含 .html + .js）
+│                            #   隔離規則（2026-08-31 校正——原本寫「嚴格隔離」與事實不符）：
+│                            #   **頁面邏輯**零跨頁籤依賴；但有 16 個「住在頁籤資料夾裡的
+│                            #   共用庫」被跨頁籤 import（crm-utils×7 頁籤、website-utils×7、
+│                            #   proposals 的 prop-* 家族、concat↔drone_meta 互嵌編輯器）。
+│                            #   白名單與「為什麼不搬進 js/shared/」記在
+│                            #   tests/unit/test_tab_import_boundary.py——要加跨頁籤 import
+│                            #   先讀它檔頭的三個選項，白名單外的會直接紅。
 │       ├── backup/          # 備份頁籤
 │       ├── verify/          # 檔案比對驗證頁籤
 │       ├── transcode/       # 轉 Proxy 頁籤（高級整理模式，含分散式派發）

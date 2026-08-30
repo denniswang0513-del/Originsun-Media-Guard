@@ -158,8 +158,12 @@ def test_registry_covers_money_columns():
     """
     db = Path(__file__).resolve().parents[2] / "db"
     # models_website/ 也要掃 —— `budget_range` 就住在那裡（inquiry.py）。
+    # models.py 2026-08-31 拆成套件：掃 db/models/ 底下的段檔（glob 抓 _*.py，
+    # __init__ 只有再匯出沒有 Column）。下面那條 >300 的地板就是**這一刻**
+    # 接住拆檔的：它在拆完的第一次跑就紅了，而不是靜默變成空集合。
     src = "\n".join(p.read_text(encoding="utf-8")
-                    for p in [db / "models.py", *sorted((db / "models_website").glob("*.py"))])
+                    for p in [*sorted((db / "models").glob("_*.py")),
+                              *sorted((db / "models_website").glob("*.py"))])
     cols = set(re.findall(r"^\s{4}(\w+)\s*=\s*Column\(", src, re.M))
     # 🔴 地板：這條掃描靠正則認 `Column(`，換成 `mapped_column`、改縮排、或把
     # model 拆檔都會讓它靜默變成空集合 —— 空集合的 `missing` 也是空的，測試照樣
