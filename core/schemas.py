@@ -1527,6 +1527,8 @@ class NetSnapshotPayload(BaseModel):
 
 
 class BankImportRulePayload(BaseModel):
+    # 命中後要掛的分類樹節點（私帳可指定到任何一層；空＝只用 category）
+    taxonomy_node_id: Optional[str] = None
     """對帳單摘要 → 收支類別 的分類規則（使用者可編）。
 
     🔴 direction 不在這裡 —— 它只在「第一列推不出方向」的邊緣情況用得到，

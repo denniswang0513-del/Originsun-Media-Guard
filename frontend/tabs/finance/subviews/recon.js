@@ -848,7 +848,8 @@ _fr.stmtOpen = async () => {
         <p style="color:#888;font-size:12px;margin:0 0 10px;">
             上傳網銀下載的交易明細（PDF / CSV / TXT），或把網銀畫面的交易表格複製貼上。
             系統用<b>餘額欄</b>推每筆是支出還是存入，再跟對帳單自己印的總計核對 ——
-            對不上會直接擋下來，不會猜。貸款扣款會自動配到對應的貸款期別。</p>
+            對不上會直接擋下來，不會猜。${_stmtHasLoans()
+                ? '貸款扣款會自動配到對應的貸款期別。' : ''}</p>
         <div class="crm-field"><label>這份對帳單是哪個帳戶</label>
             <select id="finbank-stmt-acct" class="crm-select">${opts}</select></div>
         <div class="crm-field"><label>上傳檔案</label>
@@ -1056,7 +1057,7 @@ function _stmtRow(r, i) {
         </td>
         <td style="padding:4px 6px;">${_stmtProjCell(r, i)}</td>
         <td style="padding:4px 6px;">${_stmtAllocCell(r, i)}</td>
-        <td style="padding:4px 6px;">${loanCell}</td>
+        ${!_stmtHasLoans() ? '' : `<td style="padding:4px 6px;">${loanCell}</td>`}
         <td style="padding:4px 6px;">${status}</td>
     </tr>`;
 }
@@ -1114,6 +1115,23 @@ function _stmtCacheCats(d) {
  *  是一份對帳單五十幾列的表格 —— 每列三四個下拉會把表撐爆。單一下拉列完整
  *  路徑，深度一樣看得到，寬度只佔一格。
  */
+/** 這本帳有沒有貸款 —— 沒有就不畫「貸款期別」欄（owner 2026-08-30「因為我
+ *  沒有貸款所以不用貸款期別」）。看的是**這次預覽回來的貸款清單**，不是寫死
+ *  哪一本帳：他哪天真的去借了款，欄位自己就回來了。 */
+const _stmtHasLoans = () => !!((_stmtPreview || {}).loan_count || 0);
+
+/** 那一欄的抬頭。私帳沒有發票（生產實查 401 張全在母公司），寫「發票／請款單」
+ *  等於一半是空話 —— 有哪一側就說哪一側。 */
+function _stmtAllocLabel() {
+    const d = _stmtPreview || {};
+    const inv = (d.invoices || []).length;
+    const pay = (d.payment_requests || []).length;
+    if (inv && pay) { return '發票／請款單'; }
+    if (inv) { return '發票'; }
+    if (pay) { return '請款單'; }
+    return '發票／請款單';
+}
+
 function _stmtCatOptions(row) {
     const opts = _cashOpts[finEntity()] || {};
     const cur = row.category || '';
@@ -1195,10 +1213,15 @@ _fr.stmtSaveRule = async (i) => {
     const r = _stmtPreview && _stmtPreview.rows[i];
     if (!r) return;
     if (!r.category) return finToast('先選一個類別再存規則');
+    // 🔴 規則存的是**你在這一列選到的那一層**，不是只到第二層（owner 2026-08-30
+    // 「規則的套用可以設定到所有的分類」）。私帳有 3,346 筆收支掛在第三層，
+    // 只存 category 的話那些分類永遠自動不了。
+    const chain = ((_cashOpts[finEntity()] || {}).byId || {})[r.taxonomy_node_id] || [];
+    const shown = chain.length ? chain.map((n) => n.name).join(' ▸ ') : r.category;
     const kw = prompt(
         '摘要：' + (r.description || '')
         + '\n\n從上面挑一段當關鍵字（摘要包含它就自動歸到「'
-        + r.category + '」）：', '');
+        + shown + '」）：', '');
     if (!kw || !kw.trim()) return;
     if (!(r.description || '').includes(kw.trim())) {
         // 打錯字的話這條規則永遠不會中，而且沒有任何跡象 —— 當場擋下來
@@ -1208,10 +1231,11 @@ _fr.stmtSaveRule = async (i) => {
     try {
         await finFetch('/import-rules', { method: 'POST', body: JSON.stringify({
             keyword: kw.trim(), category: r.category,
+            taxonomy_node_id: r.taxonomy_node_id || '',
             bank_account_id: _stmtPreview.bank_account_id,   // 綁這個帳戶：各行摘要用語不同
             sort_order: 50, active: true,
             note: '從對帳單預覽建立' }) });
-        finToast('已存成規則：' + kw.trim() + ' → ' + r.category);
+        finToast('已存成規則：' + kw.trim() + ' → ' + shown);
     } catch (e) {
         alert('存不起來：' + e.message);
     }
@@ -1874,11 +1898,13 @@ function _stmtRenderPreview() {
                     <col><!-- 摘要：吃剩下的 -->
                     <col style="width:96px;"><col style="width:118px;">
                     <col style="width:150px;"><col style="width:230px;">
-                    <col style="width:150px;"><col style="width:62px;">
+                    ${_stmtHasLoans() ? '<col style="width:150px;">' : ''}
+                    <col style="width:62px;">
                 </colgroup>
                 <thead style="position:sticky;top:0;background:#1b1b1b;"><tr>
                     ${th('<input type="checkbox" id="finbank-stmt-all">')}${th('日期')}${th('摘要')}
-                    ${th('金額', 'right')}${th('分類')}${th('專案')}${th('發票／請款單')}${th('貸款期別')}${th('')}
+                    ${th('金額', 'right')}${th('分類')}${th('專案')}${th(_stmtAllocLabel())}
+                    ${_stmtHasLoans() ? th('貸款期別') : ''}${th('')}
                 </tr></thead>
                 <tbody id="finbank-stmt-tbody">${(d.rows || []).map(_stmtRow).join('')}</tbody>
             </table>

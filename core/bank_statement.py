@@ -93,6 +93,9 @@ class StmtRow:
     # 🔴 matcher 靠 note 找放款帳號 —— 只留這一個名字，不再有 description/raw 分身。
     note: str = ""
     category: str = ""
+    # 規則指定的分類樹節點（私帳；規則可以指定到任何一層，見 _classify）。
+    # category 只鏡射到路徑前兩層，第三層以後要靠它。
+    taxonomy_node_id: str = ""
     inferred: bool = False         # 方向靠關鍵字猜的（第一列且無總計）
 
 
@@ -131,7 +134,14 @@ def _to_int(tok: str):
 
 
 def _classify(text: str, rules=None, signed=None):
-    """摘要文字 → (category, 方向提示)。沒中回 ('', 0)。
+    """摘要文字 → (category, 方向提示, 分類樹節點)。沒中回 ('', 0, '')。
+
+    規則的元組可以多帶第 5 個元素 `taxonomy_node_id`（owner 2026-08-30
+    「規則的套用可以設定到所有的分類」—— `category` 只鏡射到路徑前兩層，
+    第三層以後要靠節點）。沒帶的規則回空字串。
+
+    🔴 **一律三元組**，不看規則有沒有帶節點才決定回幾個 —— 那種條件式回傳
+    會讓呼叫端得猜這次拿到幾個值，而猜錯只在特定資料下才炸。
 
     rules = [(關鍵字, category, 方向)] 或 [(關鍵字, category, 方向, 只在哪個方向)]，
     由呼叫端給（正式路徑是 DB 的 bank_import_rules，使用者可編）。不給就用模組
@@ -157,8 +167,8 @@ def _classify(text: str, rules=None, signed=None):
         if only:
             if signed is None or (signed > 0) != (only > 0):
                 continue
-        return cat, direction
-    return "", 0
+        return cat, direction, (r[4] if len(r) > 4 else "")
+    return "", 0, ""
 
 
 _TOTAL_LABEL = re.compile(r"[^\s]*?(?:總筆數|總金額|金額總計)")
@@ -371,7 +381,7 @@ def parse_statement(text: str, opening_balance: int = None,
             # signed=None 是**刻意**的：這裡正在推導方向，還沒有方向可傳。
             # 明寫出來而不是省略 —— 省略的話跟「忘了傳」長得一模一樣
             #（api_finance_stmt 就忘過，方向規則在那條路上整批失效）。
-            cat, direction = _classify(first["words"], rules, signed=None)
+            cat, direction, _n = _classify(first["words"], rules, signed=None)
             amt = first["amounts"][0] if first["amounts"] else 0
             first["signed"] = amt * (direction if direction else -1)
             inferred_first = True
@@ -400,10 +410,11 @@ def parse_statement(text: str, opening_balance: int = None,
                 f"{r['amounts']} 對不上：{r['raw'][:70]}")
 
     for r in rows:
-        cat, _ = _classify(r["words"], rules, signed=r["signed"])
+        cat, _d, node = _classify(r["words"], rules, signed=r["signed"])
         res.rows.append(StmtRow(
             line_no=r["line_no"], date=r["date"], amount=r["signed"] or 0,
             balance=r["balance"], note=r["words"], category=cat,
+            taxonomy_node_id=node,
             inferred=(inferred_first and r is first)))
 
     # ── 交叉驗證：與銀行印的總計比對 ──

@@ -1187,6 +1187,9 @@ async def _on_startup():
                         # 分類規則按帳本分家（既有列 DEFAULT 'parent' ＝回填）
                         "ALTER TABLE bank_import_rules ADD COLUMN IF NOT EXISTS "
                         "entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
+                        # 規則可以指定到分類樹的任何一層（見 BankImportRule）
+                        "ALTER TABLE bank_import_rules ADD COLUMN IF NOT EXISTS "
+                        "taxonomy_node_id VARCHAR(32)",
                         "CREATE INDEX IF NOT EXISTS ix_bankrule_entity "
                         "ON bank_import_rules (entity, bank_account_id, active)",
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS source_project_id VARCHAR(32)",

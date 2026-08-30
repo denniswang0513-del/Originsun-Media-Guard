@@ -15,11 +15,11 @@ STMT = ("2026/09/01 神秘扣款 5,000.00 995,000.00\n"
 
 def test_no_rules_means_no_category():
     """規則是外部給的 —— 給空清單就什麼都不該中（證明它真的不吃寫死那份）。"""
-    assert _classify("攤還本息 315614", []) == ("", 0)
+    assert _classify("攤還本息 315614", []) == ("", 0, "")
 
 
 def test_injected_rules_win_over_builtin():
-    cat, _d = _classify("神秘扣款", [("神秘扣款", "設備耗材", 0)])
+    cat, _d, _n = _classify("神秘扣款", [("神秘扣款", "設備耗材", 0)])
     assert cat == "設備耗材"
 
 

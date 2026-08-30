@@ -181,11 +181,12 @@ async def _load_import_rules(session, bank_account_id: str = "", ent: str = "par
             if not r.bank_account_id or r.bank_account_id == bank_account_id]
     rows.sort(key=_rule_priority_key(bank_account_id))
     return [(r.keyword, r.category, int(r.direction or 0),
-             int(r.only_direction or 0)) for r in rows]
+             int(r.only_direction or 0), r.taxonomy_node_id or "") for r in rows]
 
 
 def _rule_dict(r) -> dict:
     return {"id": r.id, "keyword": r.keyword, "category": r.category,
+            "taxonomy_node_id": r.taxonomy_node_id or "",
             "bank_account_id": r.bank_account_id or "",
             "sort_order": r.sort_order, "active": bool(r.active),
             "only_direction": int(r.only_direction or 0),
@@ -242,6 +243,8 @@ async def _apply_rule_payload(r, payload, *, require_all: bool, session,
     await _assert_known_category(cat, session, ent)
     r.keyword = kw or r.keyword
     r.category = cat or r.category
+    if payload.taxonomy_node_id is not None:
+        r.taxonomy_node_id = (payload.taxonomy_node_id or "").strip() or None
     r.bank_account_id = payload.bank_account_id or None
     od = int(payload.only_direction or 0)
     if od not in (-1, 0, 1):
@@ -403,10 +406,14 @@ async def apply_rules_to_unclassified(request: Request, entity: str = ""):
             #    （_classify：不知道方向就不假裝知道）。「薪資」兩側都有、
             #    靠方向分成代收／代發 —— 那正是這條路要分的東西。
             #    正負號用 cash_entry_flow 的定義（正=流入、負=流出）。
-            cat, _d = _classify(f"{e.summary or ''} {e.note or ''}", cache[acct],
-                                signed=cash_entry_flow(e))
+            cat, _d, node = _classify(f"{e.summary or ''} {e.note or ''}", cache[acct],
+                                      signed=cash_entry_flow(e))
             if cat:
                 e.category = cat
+                # 規則指定到第三層以後時，節點才是正本（category 只到第二層）——
+                # 只寫 category 的話，這批補分類的列在收支明細的樹狀篩選裡看不到
+                if node:
+                    e.taxonomy_node_id = node
                 e.updated_at = datetime.now()
                 changed += 1
                 by_cat[cat] = by_cat.get(cat, 0) + 1
@@ -692,6 +699,8 @@ async def _build_statement_preview(session, acct, ent, text):
         out_rows.append({
             "date": r.date, "amount": r.amount, "description": r.note[:120],
             "category": r.category, "inferred": r.inferred,
+            # 規則指定到第三層以後時，節點才是正本（category 只到第二層）
+            "taxonomy_node_id": r.taxonomy_node_id,
             # 🔴 方向是推出來的列**不預設勾選**：我們才剛跟使用者說「這列的方向
             # 是猜的」，不能又讓表頭那顆全選一按就把猜測寫進帳。要它就自己勾。
             "duplicate": dup, "selected": not dup and not r.inferred,
@@ -725,6 +734,12 @@ async def _build_statement_preview(session, acct, ent, text):
         # （也省掉前端跨 prefix 去打 /crm/cash-entries/options 那一支）
         "mapped_categories": sorted(mapped),
         "taxonomy_tree": tax_tree,
+        # 這本帳有幾筆貸款 —— 前端據此決定畫不畫「貸款期別」欄（owner 2026-08-30
+        # 「因為我沒有貸款所以不用貸款期別」）。回**數量**不回整份清單：那份
+        # 已經在配對器裡用掉了，前端只需要「有沒有」。
+        # 🔴 是資料驅動不是寫死「私帳沒有」—— 生產實查 5 筆全在母公司、私帳 0，
+        # 但他哪天真的去借了款，欄位要自己回來。
+        "loan_count": len(loans),
         "summary": {"count": len(out_rows), "total_in": res.total_in,
                     "total_out": res.total_out,
                     "duplicates": sum(1 for r in out_rows if r["duplicate"]),

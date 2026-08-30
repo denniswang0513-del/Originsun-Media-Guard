@@ -69,14 +69,22 @@ export async function initFinanceTab() {
         .forEach((el) => { el.style.display = 'none'; });
     if (mineMode || !fullParent) hideNav('.fin-nav-full');
     if (!mineMode && !fullParent) hideNav('.fin-nav-mine-ok');
-    // 私帳專屬子視圖（.fin-nav-mine-only：器材清冊/私帳應收），入口
-    // 🔴 執行專案 2026-08-30 起**不在這一組**：它改成跟著帳本切（母公司模式
-    // 顯示公司的逐案收付、收起私帳專屬的工項與案源）—— owner「crm 的執行專案，
+    // 私帳專屬子視圖（.fin-nav-mine-only：家用／證券投資／器材清冊／私帳應收）。
+    // 兩道門，兩件不同的事：
+    //   ① 沒有 finance_mine 的帳號 → 永遠看不到。🔴 直接看 _modules、不走
+    //      hasModule 的 Lv3 bypass —— 後端 grant_admin_all_modules 已把
+    //      finance_mine 列為「指名才有」（管理員不隱含），兩邊要同一個口徑，
+    //      才不會一邊給看一邊 403。
+    //   ② **母公司模式也看不到**（owner 2026-08-30「crm 系統裡頭不用出現
+    //      家用、證券投資」「器材清單這些清單是私帳的，跟母公司沒關係，
+    //      母公司的器材清單要另外建」）。這幾個子視圖整個是私帳的東西，
+    //      不是「同一份資料換個帳本看」。
+    // 🔴 執行專案**不在這一組**：它 2026-08-30 起跟著帳本切（母公司模式顯示
+    // 公司的逐案收付、收起私帳專屬的工項與案源）—— owner「crm 的執行專案，
     // 是 for 母公司的」。所以它掛 .fin-nav-mine-ok（有任一本帳就看得到）。
-    // 只給帳號上**真的有** finance_mine 的人。🔴 直接看 _modules、不走 hasModule
-    // 的 Lv3 bypass —— 後端 grant_admin_all_modules 已把 finance_mine 列為
-    // 「指名才有」（管理員不隱含），這裡用同一個口徑，兩邊才不會一邊給看一邊 403。
-    if (!((window._modules || []).includes('finance_mine'))) hideNav('.fin-nav-mine-only');
+    if (!mineMode || !((window._modules || []).includes('finance_mine'))) {
+        hideNav('.fin-nav-mine-only');
+    }
 
     _shellAllowed = loadShell;
     _bindSideNav();

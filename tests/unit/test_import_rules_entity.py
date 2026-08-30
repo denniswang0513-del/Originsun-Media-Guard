@@ -101,3 +101,48 @@ def test_the_category_list_is_cached_per_ledger():
     fn = js.split("async function _ensureCashOpts(")[1].split("\nasync function")[0]
     assert "const ent = finEntity();" in fn
     assert "entity=' + encodeURIComponent(ent)" in fn
+
+
+# ── 匯入預覽的欄位與側欄（owner 2026-08-30）──────────────────
+
+def test_columns_appear_only_when_this_book_has_that_thing():
+    """🔴 「沒有貸款就不要貸款期別」「發票文字可以拿掉」—— 判斷用**這本帳
+    有沒有那種東西**，不是寫死「私帳沒有」。生產實查：貸款 5 筆全在母公司、
+    發票 401 張全在母公司，私帳各 0；他哪天真的去借款或開發票，欄位要自己回來。
+    """
+    js = js_code_only(repo_src(JS))
+    assert "_stmtHasLoans = () => !!((_stmtPreview || {}).loan_count || 0)" in js
+    fn = js.split("function _stmtAllocLabel(")[1].split("\nfunction ")[0]
+    assert "d.invoices" in fn and "d.payment_requests" in fn
+    assert "'請款單'" in fn and "'發票'" in fn
+    py = code_only(func_body(repo_src(STMT), "async def _build_statement_preview("))
+    assert '"loan_count": len(loans)' in py
+
+
+def test_a_rule_can_target_any_depth_of_the_tree():
+    """🔴 規則原本只存 category（路徑前兩層的鏡射），第三層以後表達不出來 ——
+    而私帳有 3,346 筆收支就掛在第三層（2026-08-30 實查），正是最需要自動分類的
+    那一批。所以規則多帶 `taxonomy_node_id`。"""
+    m = repo_src("db/models.py")
+    seg = m.split("class BankImportRule(")[1].split("\nclass ")[0]
+    assert "taxonomy_node_id = Column(String(32), nullable=True)" in seg
+    assert "taxonomy_node_id VARCHAR(32)" in repo_src("main.py")
+    # 分類器把節點一起回；一律三元組（條件式回傳會讓呼叫端得猜拿到幾個值）
+    cls = code_only(func_body(repo_src("core/bank_statement.py"), "def _classify("))
+    assert 'return cat, direction, (r[4] if len(r) > 4 else "")' in cls
+    assert 'return "", 0, ""' in cls
+    # 套用到未歸類的歷史列時也要寫節點（只寫 category 的話，樹狀篩選看不到）
+    fn = code_only(func_body(repo_src(STMT), "async def apply_rules_to_unclassified("))
+    assert "e.taxonomy_node_id = node" in fn
+
+
+def test_private_only_subviews_are_hidden_in_the_parent_book():
+    """owner 2026-08-30：「crm 系統裡頭不用出現 家用、證券投資」「器材清單這些
+    清單是私帳的，跟母公司沒關係」。這些整個是私帳的東西，不是換個帳本看同一份
+    資料 —— 母公司模式整項不出現（有 finance_mine 也一樣）。"""
+    fin = js_code_only(repo_src("frontend/tabs/finance/finance.js"))
+    assert "if (!mineMode || !((window._modules || []).includes('finance_mine')))" in fin
+    html = repo_src("frontend/tabs/finance/finance.html")
+    for sub in ("household", "securities", "gear", "receivable"):
+        seg = html.split(f'data-subview="{sub}"')[0].rsplit("<button", 1)[1]
+        assert "fin-nav-mine-only" in seg, sub

@@ -25,8 +25,8 @@ from core.bank_statement import _classify
 def test_plain_rule_still_works():
     """沒有方向條件的規則（既有 17 條全是這種）行為完全不變。"""
     rules = [("跨行轉入", "轉存", 0)]
-    assert _classify("跨行轉入 合庫", rules) == ("轉存", 0)
-    assert _classify("跨行轉入 合庫", rules, signed=-100) == ("轉存", 0)
+    assert _classify("跨行轉入 合庫", rules) == ("轉存", 0, "")
+    assert _classify("跨行轉入 合庫", rules, signed=-100) == ("轉存", 0, "")
 
 
 def test_direction_filter_selects_the_right_category():
@@ -39,7 +39,7 @@ def test_direction_filter_selects_the_right_category():
 
 def test_wrong_direction_does_not_match():
     rules = [("薪資", "代發薪資", 0, -1)]
-    assert _classify("念栩薪資營業部", rules, signed=+100) == ("", 0)
+    assert _classify("念栩薪資營業部", rules, signed=+100) == ("", 0, "")
 
 
 def test_unknown_direction_skips_directional_rules():
@@ -48,7 +48,7 @@ def test_unknown_direction_skips_directional_rules():
     rules = [("薪資", "代發薪資", 0, -1), ("薪資", "轉存", 0)]
     assert _classify("蔡念栩薪資中山分行", rules, signed=None)[0] == "轉存"
     rules_only = [("薪資", "代發薪資", 0, -1)]
-    assert _classify("蔡念栩薪資中山分行", rules_only, signed=None) == ("", 0)
+    assert _classify("蔡念栩薪資中山分行", rules_only, signed=None) == ("", 0, "")
 
 
 def test_first_match_wins_within_the_same_direction():

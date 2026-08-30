@@ -1537,6 +1537,11 @@ class BankImportRule(Base):
     # 既有 36 條全歸 parent（ALTER 的 DEFAULT 就是回填），私帳從 0 開始。
     entity = Column(String(16), nullable=False, server_default="parent")
     keyword = Column(String(64), nullable=False)                 # 摘要包含這串就命中
+    # 命中後要掛的**分類樹節點**（私帳；owner 2026-08-30「規則的套用可以設定到
+    # 所有的分類」）。`category` 只是路徑前兩層的鏡射，表達不了第三層以後 ——
+    # 而私帳有 3,346 筆收支就掛在第三層（2026-08-30 實查），那是最需要自動
+    # 分類的一批。母公司沒有樹，這一欄留空、照舊只用 category。
+    taxonomy_node_id = Column(String(32), nullable=True)
     bank_account_id = Column(String(32), nullable=True)          # soft FK；空=所有帳戶
     category = Column(String(32), nullable=False)                # 命中後填的收支類別
     direction = Column(Integer, nullable=False, default=0)       # -1 支出 / +1 存入 / 0 不確定
