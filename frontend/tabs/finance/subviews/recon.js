@@ -22,6 +22,7 @@ import { indexTax, taxSelects } from '../../../js/shared/cash-tax-picker.js';
 import { createSortable, sortableTh, enumIndex, autoFee as _autoFee }
     from '../../crm/crm-utils.js';   // 匯費容差的正本在共用層（見 crm-utils）
 import { bearerHeader } from '../../../js/shared/utils.js';   // 送 FormData 時不能自帶 Content-Type
+import { splitBadgeHtml } from '../../../js/shared/cash-split-editor.js';   // 「已拆 N 項」badge 的唯一那顆
 
 let _c = null;
 let _isCurrent = () => true;
@@ -1025,6 +1026,7 @@ function _stmtRefreshRow(i) {
 
 function _stmtRow(r, i) {
     const isOut = r.amount < 0;
+    const nSplits = (r.splits || []).length;    // 一列算一次就好（同 cashbook _rowHtml 的慣例）
     const tag = (txt, bg, fg) =>
         `<span style="font-size:10px;padding:1px 5px;border-radius:7px;background:${bg};color:${fg};">${esc(txt)}</span>`;
     let status = '';
@@ -1046,12 +1048,20 @@ function _stmtRow(r, i) {
         <td style="padding:4px 6px;text-align:right;white-space:nowrap;color:${isOut ? '#fca5a5' : '#86efac'};">
             ${isOut ? '-' : '+'}$${fmtNum(Math.abs(r.amount))}</td>
         <td style="padding:4px 6px;min-width:150px;">
-            ${_opts().tree?.length
+            ${nSplits
+                ? splitBadgeHtml(nSplits)
+                : _opts().tree?.length
                 ? _stmtTaxCell(i)
                 : `<select class="crm-select crm-select-sm"
                         onchange="window._finRecon.stmtCatChanged(${i}, this.value)">
                     ${_stmtCatOptions(r.category)}
                    </select>`}
+            ${Math.abs(r.amount) > 0 && !r.is_loan ? `<button type="button"
+                    title="帳目一筆、內容拆裂：這一筆同時裝著專案款／代墊回款／薪資時，拆給各個項目（可連結未收案與未回款代墊）"
+                    onclick="window._finRecon.stmtSplitOpen(${i})"
+                    style="background:none;border:none;cursor:pointer;font-size:12px;padding:0 2px;color:${
+                        nSplits ? '#86efac' : '#6b7280'};">${
+                        nSplits ? '改拆項' : '拆內容'}</button>` : ''}
             <button type="button" title="把「${esc((r.description || '').slice(0, 12))} → 這個類別」存成規則，以後自動套用"
                     onclick="window._finRecon.stmtSaveRule(${i})"
                     style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:12px;padding:0 2px;">＋規則</button>
@@ -1165,6 +1175,39 @@ _fr.stmtPettyToggle = (i, btn) => {
     r.petty_claim = !r.petty_claim;
     btn.textContent = r.petty_claim ? `✓源日請款（${r.petty_item}）` : '源日請款';
     btn.style.color = r.petty_claim ? '#86efac' : '#6b7280';
+};
+
+/** 拆內容（帳目一筆、內容拆裂）：編輯器是 js/shared 的共用件，收支明細那邊
+ *  用同一個 —— 拆項存在**列資料**上（r.splits），apply 時整組送後端。
+ *  有拆項的列，本列的分類/專案/發票整組讓位（後端也這樣認）。 */
+_fr.stmtSplitOpen = async (i) => {
+    const r = _stmtPreview && _stmtPreview.rows[i];
+    if (!r) { return; }
+    const { openCashSplitEditor } = await import('../../../js/shared/cash-split-editor.js');
+    openCashSplitEditor({
+        entity: finEntity(),
+        amount: Math.abs(r.amount),
+        side: r.amount > 0 ? 'deposit' : 'expense',
+        taxOpts: _opts(),
+        initial: r.splits || [],
+        title: `${r.date} ${r.description || ''}  ${r.amount > 0 ? '+' : '-'}$${fmtNum(Math.abs(r.amount))}`,
+        onSave: (items) => {
+            r.splits = items || [];
+            if (r.splits.length) {
+                // 讓位集合＝schema 驗證器的互斥集（StatementImportRow._splits_are_exclusive）
+                // —— 少清一個，匯入直接 422 整批擋下
+                r.taxonomy_node_id = null;
+                r.category = '';
+                r.project_id = null;
+                r.invoices = [];
+                r.payments = [];
+                r.payment_fee = null;
+                r.petty_claim = false;
+                r.petty_item = '';
+            }
+            _stmtRefreshRow(i);
+        },
+    });
 };
 
 /** 這本帳有沒有貸款 —— 沒有就不畫「貸款期別」欄（owner 2026-08-30「因為我
@@ -1701,6 +1744,8 @@ const _stmtRowPayload = (x) => ({
     // （0 在關聯面板那條路是「把匯費清掉」的意思）。
     payments: x.payments || [],
     payment_fee: (x.payment_fee === 0 || x.payment_fee) ? x.payment_fee : null,
+    // 拆項（帳目一筆、內容拆裂）。同 invoices 的教訓：List 欄不收 null。
+    splits: x.splits || [],
 });
 
 /** 分配格：收入列掛發票、支出列掛請款單、零元列兩者皆非。

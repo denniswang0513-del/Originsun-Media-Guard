@@ -681,6 +681,58 @@ class CrmCashPaymentLink(Base):
     )
 
 
+class CrmCashSplit(Base):
+    """收支列的內部拆項 —— 「帳目一筆、內容拆裂」（owner 2026-08-31 定案）。
+
+    母公司匯給 owner 的一筆錢（+350,436）同時裝著專案款、代墊回款、薪資 ——
+    三種會計性質不同的錢。帳目上維持**一筆**（收支明細與對帳工作台 1↔1 都
+    不動），拆裂放在這張表：每個拆項各自帶分類樹節點與專案連結。
+
+    🔴 不變式：Σ(splits.amount) ＝ 父列的 deposit 或 expense（哪側非零跟哪側）
+      —— 寫入端（routers/crm/cash_splits._apply_splits）強制；三表引擎在載入層
+      展開時，差額會變成「未歸類」殘項誠實外顯，不會靜默吞掉。
+    🔴 父列有拆項後**不再自帶分類與專案**（分類的正本在拆項）—— 清單顯示
+      「已拆 N 項」；批次改分類／改金額要先解除拆項。
+    🔴 category/item/sub_item 是 taxonomy_node_id 的鏡射，寫入走 cash.py 的
+      `_sync_taxonomy` 同一份規則 —— 不另拼第二份。
+    """
+    __tablename__ = "crm_cash_splits"
+    id = Column(String(32), primary_key=True)
+    entry_id = Column(String(32), nullable=False, index=True)   # soft FK → crm_cash_entries.id
+    amount = Column(Integer, nullable=False)                     # 恆正；方向跟父列
+    category = Column(String(128), nullable=True)
+    item = Column(String(64), nullable=True)
+    sub_item = Column(String(64), nullable=True)
+    taxonomy_node_id = Column(String(32), nullable=True)
+    project_id = Column(String(32), nullable=True, index=True)   # soft FK → crm_projects.id
+    note = Column(String(255), nullable=True)
+    sort = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CrmCashSplitAdvanceLink(Base):
+    """拆項 ↔ 代墊支出列的逐筆結清連結（「對起來」的另一半）。
+
+    公司_代墊的流出（owner 先墊的錢）等回款；回款拆項勾了哪幾列、各沖多少，
+    記在這裡 —— 逐列可推「已回款/未回款」。1300 科目餘額本來就靠兩側同分類
+    自動軋平，這張表只負責**逐筆**歸屬。
+
+    🔴 歷史回款（2026-08 以前的 144 列流入）沒有逐筆連結 —— 帳齡從啟用日起算，
+    總額仍以 1300 科目餘額為準。
+    """
+    __tablename__ = "crm_cash_split_advance_links"
+    id = Column(String(32), primary_key=True)
+    split_id = Column(String(32), nullable=False, index=True)         # soft FK → crm_cash_splits.id
+    advance_entry_id = Column(String(32), nullable=False, index=True)  # soft FK → crm_cash_entries.id（代墊流出列）
+    amount = Column(Integer, nullable=False)                           # 沖到那一列多少
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("split_id", "advance_entry_id",
+                         name="uq_cashsplit_advance"),
+    )
+
+
 class ApiKey(Base):
     """API Key for programmatic access (OpenClaw, scripts, CI/CD)."""
     __tablename__ = "api_keys"

@@ -23,7 +23,8 @@ from ._system import (  # noqa: F401
 
 # CRM：專案/報價/人力/作品 ＋ 帳務三表（發票/請款/收支）＋ ApiKey
 from ._crm import (  # noqa: F401
-    ApiKey, CrmCashEntry, CrmCashInvoiceLink, CrmCashPaymentLink,
+    ApiKey, CrmCashEntry, CrmCashInvoiceLink, CrmCashPaymentLink, CrmCashSplit,
+    CrmCashSplitAdvanceLink,
     CrmCostLineTemplate, CrmInvoice, CrmPaymentRequest, CrmProject,
     CrmProjectCostGroup, CrmProjectCostLine, CrmProjectExpense, CrmProjectShowcase,
     CrmProjectStaff, CrmQuotation, CrmQuotationItem, CrmQuotationTemplate,

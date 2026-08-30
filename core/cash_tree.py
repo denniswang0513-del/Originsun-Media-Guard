@@ -173,9 +173,18 @@ async def remirror_subtree(session, entity: str, node_id: str, nodes=None) -> in
     if not ids:
         return 0
     paths = await path_map(session, entity, nodes=nodes)
-    rows = (await session.execute(
+    rows = list((await session.execute(
         select(CrmCashEntry).where(CrmCashEntry.entity == entity,
-                                   CrmCashEntry.taxonomy_node_id.in_(ids)))).scalars().all()
+                                   CrmCashEntry.taxonomy_node_id.in_(ids)))).scalars())
+    # 🔴 拆項的三欄是**同一種鏡射**（cash_splits 寫入走同一份 _sync_taxonomy）——
+    # 只重算 entries 的話，改名之後拆項的 category 對映到一個已不存在的類別，
+    # 三表把那筆錢靜靜落進「未歸類」（2026-08-31 /simplify 層次審查抓到的）。
+    from db.models import CrmCashSplit
+    rows += list((await session.execute(
+        select(CrmCashSplit)
+        .join(CrmCashEntry, CrmCashEntry.id == CrmCashSplit.entry_id)
+        .where(CrmCashEntry.entity == entity,
+               CrmCashSplit.taxonomy_node_id.in_(ids)))).scalars())
     n = 0
     for e in rows:
         cat, item, sub = mirror_from_path(paths.get(e.taxonomy_node_id) or [])

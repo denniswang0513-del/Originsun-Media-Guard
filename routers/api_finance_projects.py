@@ -191,6 +191,19 @@ async def _rollups(session, ent: str):
                    CrmPaymentRequest.payment_status != "已付款")
             .group_by(CrmPaymentRequest.project_id))
     cash = {pid: int(e or 0) for pid, e in (await session.execute(cash_q)).all()}
+    # 拆項掛的專案也是掛帳支出（父列的 project_id 已讓位給拆項 —— 帳目一筆、
+    # 內容拆裂）。只算支出側：收入側走 amount_received（_sync_mine_project_received
+    # 增量制），跟父列掛專案的規則同一套。
+    from db.models import CrmCashSplit
+    split_q = (select(CrmCashSplit.project_id,
+                      fn.coalesce(fn.sum(CrmCashSplit.amount), 0))
+               .join(CrmCashEntry, CrmCashEntry.id == CrmCashSplit.entry_id)
+               .where(CrmCashEntry.entity == ent,
+                      CrmCashEntry.expense > 0,
+                      CrmCashSplit.project_id.isnot(None))
+               .group_by(CrmCashSplit.project_id))
+    for pid, amt in (await session.execute(split_q)).all():
+        cash[pid] = cash.get(pid, 0) + int(amt or 0)
     ap = {pid: int(a or 0) for pid, a in (await session.execute(ap_q)).all()}
     return cash, ap
 

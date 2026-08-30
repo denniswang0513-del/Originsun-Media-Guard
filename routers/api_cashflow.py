@@ -300,10 +300,28 @@ async def _month_snapshot(session, month: str, entity: str = "parent") -> dict:
         select(CrmCashEntry.category,
                safunc.coalesce(safunc.sum(CrmCashEntry.expense), 0))
         .where(cond).group_by(CrmCashEntry.category))).all()
+    cats = {(c or "未分類"): int(v or 0) for c, v in by_cat}
+    # 拆項父列的 category 是空的（正本在拆項）—— 不展開的話，拆過的支出整筆
+    # 落進快照的「未分類」，而快照是鎖月後**永久**的紀錄。把拆項的分類補回來、
+    # 同額從未分類移出（Σ 不變，只是歸對格子）。收入側快照本來就不分類。
+    from db.models import CrmCashSplit
+    split_cats = (await session.execute(
+        select(CrmCashSplit.category,
+               safunc.coalesce(safunc.sum(CrmCashSplit.amount), 0))
+        .join(CrmCashEntry, CrmCashEntry.id == CrmCashSplit.entry_id)
+        .where(cond, CrmCashEntry.expense > 0)
+        .group_by(CrmCashSplit.category))).all()
+    for c, v in split_cats:
+        amt = int(v or 0)
+        cats[c or "未分類"] = cats.get(c or "未分類", 0) + amt
+        if c:                                     # 從「未分類」把父列那份移出
+            cats["未分類"] = cats.get("未分類", 0) - amt
+    if not cats.get("未分類"):
+        cats.pop("未分類", None)
     return {
         "income": int(total[0] or 0), "expense": int(total[1] or 0),
         "entry_count": int(total[2] or 0),
-        "expense_by_category": {(c or "未分類"): int(v or 0) for c, v in by_cat},
+        "expense_by_category": cats,
     }
 
 

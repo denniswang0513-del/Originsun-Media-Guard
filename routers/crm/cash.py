@@ -295,6 +295,13 @@ async def cash_entry_options(request: Request, entity: str = Query("")):
                 CrmCashEntry.entity == ent,
                 CrmCashEntry.category.isnot(None),
                 CrmCashEntry.category != "").distinct())).scalars())
+        # 只活在拆項裡的類別也算「用過」（父列的 category 已讓位）
+        from db.models import CrmCashSplit as _CS
+        used += [c for c in (await session.execute(
+            select(_CS.category).join(CrmCashEntry,
+                                      CrmCashEntry.id == _CS.entry_id)
+            .where(CrmCashEntry.entity == ent, _CS.category.isnot(None),
+                   _CS.category != "").distinct())).scalars() if c not in used]
         subs = list((await session.execute(
             select(CrmCashEntry.sub_item).where(
                 CrmCashEntry.entity == ent,
@@ -354,14 +361,31 @@ async def list_cash_entries(
             .where(CrmCashEntry.entity == ent)
             .order_by(CrmCashEntry.entry_date.desc())
         )
+        # 拆項（帳目一筆、內容拆裂）：分類與專案的正本可能在拆項裡 ——
+        # **每一個**分類形狀的篩選都要問拆項（split_category_pred），漏一個
+        # 就是拆過的錢在那個篩選裡人間蒸發。lazy import 是循環（cash_splits
+        # import 本檔的 _sync_taxonomy），一函式一次。
+        from routers.crm.cash_splits import (_split_to_dict, entry_has_splits_subq,
+                                             load_advance_links_map, load_splits_map,
+                                             split_category_pred)
+        from db.models import CrmCashSplit
         if category == "__none__":
             # 「未分類」快篩：卡單匯入後真的分不出的尾巴（owner 逐筆點完就歸零）
+            # 🔴 拆項父列的 category 也是空 —— 但它**已經分好了**（正本在拆項），
+            # 混進未分類會讓人再分一次、還會被 apply-unclassified 的規則掃到
             query = query.where(or_(CrmCashEntry.category.is_(None),
-                                    CrmCashEntry.category == ""))
+                                    CrmCashEntry.category == ""),
+                                CrmCashEntry.id.notin_(entry_has_splits_subq()))
         elif category:
-            query = query.where(CrmCashEntry.category == category)
+            query = query.where(or_(
+                CrmCashEntry.category == category,
+                CrmCashEntry.id.in_(split_category_pred(
+                    CrmCashSplit.category == category))))
         if sub_item:
-            query = query.where(CrmCashEntry.sub_item == sub_item)
+            query = query.where(or_(
+                CrmCashEntry.sub_item == sub_item,
+                CrmCashEntry.id.in_(split_category_pred(
+                    CrmCashSplit.sub_item == sub_item))))
         if status:
             # 卡片明細＝status='card'（owner 2026-08-27「切這個按鈕就切換成
             # 信用卡的明細」）；其餘 status 值同義比對
@@ -371,14 +395,25 @@ async def list_cash_entries(
         # 分類樹：選到哪一層就看**那一支整支**（選「家用」＝家用底下全部）。
         # 這條蓋過上面 book/item/sub_item 三個舊參數 —— 前端切過去之後只送這個。
         if node_id:
-            query = query.where(CrmCashEntry.taxonomy_node_id.in_(
-                await subtree_ids(session, ent, node_id, nodes=tax_nodes)))
+            _ids = await subtree_ids(session, ent, node_id, nodes=tax_nodes)
+            query = query.where(or_(
+                CrmCashEntry.taxonomy_node_id.in_(_ids),
+                CrmCashEntry.id.in_(split_category_pred(
+                    CrmCashSplit.taxonomy_node_id.in_(_ids)))))
         if book:
-            query = query.where(or_(CrmCashEntry.category == book,
-                                    CrmCashEntry.category.like(book + _TAX_SEP + "%")))
+            query = query.where(or_(
+                CrmCashEntry.category == book,
+                CrmCashEntry.category.like(book + _TAX_SEP + "%"),
+                CrmCashEntry.id.in_(split_category_pred(or_(
+                    CrmCashSplit.category == book,
+                    CrmCashSplit.category.like(book + _TAX_SEP + "%"))))))
         if item:
-            query = query.where(or_(CrmCashEntry.item == item,
-                                    CrmCashEntry.category.like("%" + _TAX_SEP + item)))
+            query = query.where(or_(
+                CrmCashEntry.item == item,
+                CrmCashEntry.category.like("%" + _TAX_SEP + item),
+                CrmCashEntry.id.in_(split_category_pred(or_(
+                    CrmCashSplit.item == item,
+                    CrmCashSplit.category.like("%" + _TAX_SEP + item))))))
         if date_from:
             d = _parse_shoot_date(date_from)
             if d:
@@ -398,7 +433,11 @@ async def list_cash_entries(
             if (amount_max or "").strip().lstrip("-").isdigit():
                 query = query.where(_amt <= int(amount_max))
         if project_id:
-            query = query.where(CrmCashEntry.project_id == project_id)
+            # 拆項掛的專案也要找得到（父列的 project_id 已讓位給拆項）
+            query = query.where(or_(
+                CrmCashEntry.project_id == project_id,
+                CrmCashEntry.id.in_(split_category_pred(
+                    CrmCashSplit.project_id == project_id))))
         if bank_account_id:
             query = query.where(CrmCashEntry.bank_account_id == bank_account_id)
         if direction == "in":
@@ -418,9 +457,21 @@ async def list_cash_entries(
         rows = (await session.execute(query)).all()
         # 路徑一次撈完（幾百個節點一張 dict），不逐列往上爬
         paths = await path_map(session, ent, nodes=tax_nodes)
-    return {"entries": [_to_cash_dict(r[0], r[1] or "", r[2] or "", r[3] or "",
-                                      paths.get(r[0].taxonomy_node_id))
-                        for r in rows], "total": len(rows)}
+        # 拆項整本帳一次撈（表很小；用列 id 進 IN 的話，未篩選清單就是
+        # 4,733 個 bind param 的 SQL —— /simplify 效率審查）
+        smap = await load_splits_map(session, entity=ent)
+        amap = await load_advance_links_map(
+            session, [s.id for subs in smap.values() for s in subs])
+    out = []
+    for r in rows:
+        d = _to_cash_dict(r[0], r[1] or "", r[2] or "", r[3] or "",
+                          paths.get(r[0].taxonomy_node_id))
+        subs = smap.get(r[0].id, [])
+        d["splits"] = [_split_to_dict(s, paths.get(s.taxonomy_node_id),
+                                      amap.get(s.id)) for s in subs]
+        d["split_count"] = len(subs)
+        out.append(d)
+    return {"entries": out, "total": len(out)}
 
 
 @router.post("/cash-entries")
@@ -519,6 +570,27 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
         # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422
         # （寫入守衛也在 _entity_for_write 裡定案）
         ent = _entity_for_write(request, req.entity, e)
+        # 🔴 拆項父列：金額、分類、專案的正本在拆項（Σ 不變式＋分類讓位）——
+        # 改這些欄會讓 Σ 悄悄失衡或長出第二份分類；要動請走「拆內容」。
+        # 🔴 比「值有沒有變」而不是「鍵有沒有送」：編輯視窗每次都整包送
+        # _FIELDS（含 deposit/category），按鍵判的話拆項父列連改個摘要都 409
+        # —— 使用者被迫「先解除拆項再改」，代墊結清連結跟著陪葬。
+        def _norm(field, v):
+            if field in ("deposit", "expense"):
+                return int(v or 0)
+            return (v or "") if not isinstance(v, str) else (v.strip() or "")
+        _guarded = {"deposit", "expense", "category", "item", "sub_item",
+                    "taxonomy_node_id", "project_id"}
+        _changed = {k for k in _guarded & set(data)
+                    if _norm(k, data.get(k)) != _norm(k, getattr(e, k, None))}
+        if _changed:
+            from routers.crm.cash_splits import entry_has_splits
+            if await entry_has_splits(session, entry_id):
+                raise HTTPException(
+                    status_code=409,
+                    detail="這一列已經拆項（帳目一筆、內容拆裂）—— 金額、分類與"
+                           "專案要在「拆內容」裡改，或先解除拆項"
+                           f"（這次想改：{'、'.join(sorted(_changed))}）")
         await _assert_month_open(session, e.entry_date, dates.get("entry_date"),
                                  entity=ent)
         # 私帳收款同步要用「改之前」的 (收入, 專案) 當減項 —— setattr 之後就沒了
@@ -602,6 +674,20 @@ async def batch_set_taxonomy(request: Request):
     async with factory() as session:
         rows = (await session.execute(
             select(CrmCashEntry).where(CrmCashEntry.id.in_(ids)))).scalars().all()
+        # 拆項父列不收批次分類（分類的正本在拆項）—— 比照本端點「有問題就整批
+        # 不動」的鐵則，混進一列就整批擋下並點名，不靜默跳過
+        from routers.crm.cash_splits import entry_has_splits_subq as _ehs
+        _split_parents = set((await session.execute(
+            select(CrmCashEntry.id).where(
+                CrmCashEntry.id.in_([r.id for r in rows]),
+                CrmCashEntry.id.in_(_ehs())))).scalars())
+        if _split_parents:
+            _names = [f"{(r.summary or r.id)[:20]}" for r in rows
+                      if r.id in _split_parents][:5]
+            raise HTTPException(
+                status_code=409,
+                detail=f"{len(_split_parents)} 列已拆項，分類要在「拆內容」裡改："
+                       f"{'、'.join(_names)}")
         if not rows:
             raise HTTPException(status_code=404, detail="找不到這些收支紀錄")
         _mine_or_admin_write_rows(request, rows)
@@ -677,6 +763,15 @@ async def delete_cash_entry(entry_id: str, request: Request):
         if (e.entity or "parent") == "mine":
             await _sync_mine_project_received(session, e.project_id,
                                               -int(e.deposit or 0))
+        # 拆項連刪＋專案已收沖回：teardown 只有 cash_splits 那一份
+        # （remove_entry_splits —— 解除拆項與刪列走同一條，不各抄一遍）
+        from routers.crm.cash_splits import remove_entry_splits
+        from db.models import CrmCashSplitAdvanceLink
+        await remove_entry_splits(session, e)
+        # 反向：這一列若是**被沖銷的代墊流出**，指向它的結清連結也要清 ——
+        # 留著的話那些回款拆項顯示沖到一列不存在的代墊
+        await session.execute(_sadelete(CrmCashSplitAdvanceLink).where(
+            CrmCashSplitAdvanceLink.advance_entry_id == entry_id))
         await session.delete(e)
         await session.flush()
         # 被這筆收款影響到的發票要重算 —— 舊碼是「無條件打回未收款」，那會把

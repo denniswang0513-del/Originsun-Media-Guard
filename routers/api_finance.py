@@ -220,8 +220,11 @@ async def list_transfer_pairs(request: Request, entity: str = ""):
     # 🔴 判準是 is_account_move（真的搬到另一個帳戶），不是 treatment=='transfer'
     # —— 後者還包含「不進損益」的私人開銷，那些不是互轉。owner 2026-08-29：
     # 「我只有富邦的幾個帳戶互轉有記帳，你表列的這些都不是互轉」。
+    # 🔴 排除拆項展開的虛擬列（帶 parent_id）：id 是拆項 id，寫回 session.get
+    # 拿不到會靜默 continue；而拆過的列金額正本在拆項，自動搬匯費會搬壞 Σ。
     rows = [e for e in inputs["cash_entries"]
-            if is_account_move(e, inputs["cat_map"], inputs["accounts"])]
+            if not e.get("parent_id")
+            and is_account_move(e, inputs["cat_map"], inputs["accounts"])]
     pairs, un_o, un_i, revs = transfer_pairs(rows)
 
     def _brief(e):
@@ -263,8 +266,11 @@ async def recognize_transfer_fees_in(session, ent: str, only_ids=None,
     inputs = await _load_inputs(session, entity=ent)
     # 取數判準與 /transfer-pairs 同一支（畫面說「要拆」按鈕卻拆別的，就是這裡
     # 兩份判準漂掉造成的）
+    # 🔴 排除拆項展開的虛擬列（帶 parent_id）：id 是拆項 id，寫回 session.get
+    # 拿不到會靜默 continue；而拆過的列金額正本在拆項，自動搬匯費會搬壞 Σ。
     rows = [e for e in inputs["cash_entries"]
-            if is_account_move(e, inputs["cat_map"], inputs["accounts"])]
+            if not e.get("parent_id")
+            and is_account_move(e, inputs["cat_map"], inputs["accounts"])]
     pairs, _o, _i, _rev = transfer_pairs(rows)
     todo = {p["out"]["id"]: p["gap"] for p in pairs if p["fee_inside"]}
     want = set(only_ids or ()) or set(todo)
@@ -452,6 +458,20 @@ async def list_unmapped_categories(request: Request, entity: str = ""):
                 .group_by(col))).all()
             items.extend({"source": source, "category_text": c, "usage_count": int(n)}
                          for c, n in rows if (source, c) not in mapped)
+        # 拆項的分類也餵三表（載入層展開走 (cash, category) 同一份對映）——
+        # 不掃的話，沒對映的拆項錢在報表落「未歸類」，而這張待辦清單看不到病因
+        from db.models import CrmCashSplit
+        rows = (await session.execute(
+            select(CrmCashSplit.category, safunc.count(CrmCashSplit.id))
+            .join(CrmCashEntry, CrmCashEntry.id == CrmCashSplit.entry_id)
+            .where(CrmCashSplit.category.isnot(None), CrmCashSplit.category != "",
+                   CrmCashEntry.entity == ent)
+            .group_by(CrmCashSplit.category))).all()
+        seen = {(it["source"], it["category_text"]) for it in items}
+        for c, n in rows:
+            if ("cash", c) not in mapped and ("cash", c) not in seen:
+                items.append({"source": "cash", "category_text": c,
+                              "usage_count": int(n)})
     items.sort(key=lambda x: -x["usage_count"])
     return {"items": items}
 

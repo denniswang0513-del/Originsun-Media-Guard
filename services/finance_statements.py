@@ -92,6 +92,65 @@ def _dump(rows, *cols) -> list:
     return [{c: getattr(r, c) for c in cols} for r in rows]
 
 
+def explode_cash_splits(cash_entries: list, splits_by_entry: dict) -> list:
+    """拆項展開的算式正本（純函式，直接可測）。
+
+    有拆項的父列 → N 個虛擬列（id=拆項 id、金額=拆項額、分類/專案=拆項的），
+    其餘欄位（日期/帳戶/摘要/status）繼承父列。規則細節：
+
+    🔴 金額差額不吞：Σ(拆項) ≠ 父列金額時（寫入端理應擋掉，但資料可能繞路進來
+      —— 直接改 DB、舊版匯入），差額補一個 category=None 的殘項 → 落進三表的
+      「未歸類」桶誠實外顯，statement_warnings 會數到它。靜默吞掉的話報表
+      憑空少一塊錢，而且不會有人知道。
+    🔴 bank_fee／claim 留在誰身上：掛在**第一個**虛擬列。匯費是整筆匯款收一次
+      的真實費用（bank_fee_total 逐列加總，放兩列就重複計）。
+    🔴 invoice_id／advance_payment_id／payment_request_id 不繼承：那些連結
+      屬於父列整筆（分配表另有正本），複製 N 份會讓對應的沖銷邏輯算 N 次。
+    🔴 虛擬列帶 `parent_id`＝真正的收支列 PK —— 展開後 `id` 是拆項 id，
+      **不是**資料庫裡查得到的列。任何拿 inputs 的 id 回頭寫 DB 的消費端
+      （如 recognize_transfer_fees_in）要用 parent_id 判斷／跳過。
+    🔴 方向判定走 `core.crm_logic.split_side`（唯一那份）：兩側都有值的列
+      判不出分母 → **整列原樣通過、不展開**（寫入端本來就擋，這裡防的是
+      繞路進來的資料）—— 自己 if/else 判的話那種列的另一側會被 None 掉，
+      錢從報表上直接消失。
+    """
+    from core.crm_logic import split_side
+    if not splits_by_entry:
+        return cash_entries
+    out = []
+    for e in cash_entries:
+        subs = splits_by_entry.get(e.get("id"))
+        if not subs:
+            out.append(e)
+            continue
+        side = split_side(e.get("deposit"), e.get("expense"))
+        if not side:
+            out.append(e)
+            continue
+        parent_amount = int(e.get(side) or 0)
+        remain = parent_amount - sum(s["amount"] for s in subs)
+        pieces = list(subs)
+        if remain:
+            pieces = pieces + [{"id": f"{e.get('id')}#rest", "amount": remain,
+                                "category": None, "note": "拆項差額", "project_id": None}]
+        for i, s in enumerate(pieces):
+            v = dict(e)
+            v["id"] = s["id"]
+            v["parent_id"] = e.get("id")
+            v[side] = s["amount"]
+            v["deposit" if side == "expense" else "expense"] = None
+            v["category"] = s["category"]
+            v["note"] = s.get("note") or e.get("note")
+            v["project_id"] = s.get("project_id")
+            if i > 0:                       # 費用類欄位只留第一列（見 docstring）
+                v["bank_fee"] = None
+                v["claim"] = None
+            for k in ("invoice_id", "advance_payment_id", "payment_request_id"):
+                v[k] = None
+            out.append(v)
+    return out
+
+
 async def _load_inputs(session, entity: str = "parent") -> dict:
     """全表載入 → 純函式吃的 dict/list（欄位子集，含 drilldown 需要的識別欄）。
 
@@ -112,6 +171,23 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
         if order_by is not None:
             q = q.order_by(*order_by)
         return (await session.execute(q)).scalars().all()
+
+    # ── 拆項展開（帳目一筆、內容拆裂；owner 2026-08-31 規劃 v3）──
+    # 🔴 鐵則：展開只發生在這個載入層，引擎純函式不知道拆項存在。
+    # 有拆項的父列被替換成 N 個虛擬列（各帶自己的分類/專案/金額，繼承父列的
+    # 日期/帳戶/摘要）—— build_pnl/bs/cf/drilldown 一行不用改。
+    from db.models import CrmCashSplit
+    _split_rows = (await session.execute(
+        select(CrmCashSplit)
+        .join(CrmCashEntry, CrmCashEntry.id == CrmCashSplit.entry_id)
+        .where(CrmCashEntry.entity == entity)
+        .order_by(CrmCashSplit.sort))).scalars().all()
+    splits_by_entry: dict = {}
+    for _s in _split_rows:
+        splits_by_entry.setdefault(_s.entry_id, []).append(
+            {"id": _s.id, "amount": int(_s.amount or 0),
+             "category": _s.category or None, "note": _s.note or "",
+             "project_id": _s.project_id or None})
 
     invoices = _dump(await _all(CrmInvoice, where=CrmInvoice.entity == entity),
                      "id", "payment_type", "issue_status", "payment_status",
@@ -136,6 +212,7 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
                          "bank_memo", "note",
                          "advance_payment_id", "payment_request_id",
                          "bank_account_id")
+    cash_entries = explode_cash_splits(cash_entries, splits_by_entry)
     # 器材 2026-08-24 起帶 entity（§8 階段 4）：兩本帳各餵各的折舊/淨值。
     # （plan §1.2 的「我的帳不餵器材」自此作廢 —— owner 私帳有 123 項器材。）
     equipment = _dump(await _all(Equipment, where=Equipment.entity == entity),

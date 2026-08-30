@@ -388,6 +388,9 @@ def test_every_project_enumeration_decides_about_mine():
         # 帳本自己的視角（entity 已經圈定範圍）
         "routers/api_finance_projects.py", "routers/api_finance_stmt.py",
         "services/finance_statements.py",
+        # 拆項的未收案選單：require_entity(mine, level="full") 守在端點上 ——
+        # 進得來的人本來就有私帳 full scope，比 hide_mine_projects 更嚴
+        "routers/crm/cash_splits.py",
         # 官網／公開頁（另一套可見性：作品要上架才出得去）
         "services/website/project_service.py",
         "services/website/initiative_service.py",

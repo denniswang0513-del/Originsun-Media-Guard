@@ -118,6 +118,16 @@ async def list_cash_taxonomy_nodes(request: Request, entity: str = Query("")):
             .where(CrmCashEntry.entity == ent,
                    CrmCashEntry.taxonomy_node_id.isnot(None))
             .group_by(CrmCashEntry.taxonomy_node_id))).all())
+        # 拆項也掛節點（帳目一筆、內容拆裂）—— 用量不算它們的話，樹上顯示 0 筆
+        # 的節點可能有一堆錢掛在拆項裡
+        from db.models import CrmCashSplit
+        for nid, n in (await session.execute(
+                select(CrmCashSplit.taxonomy_node_id, func.count())
+                .join(CrmCashEntry, CrmCashEntry.id == CrmCashSplit.entry_id)
+                .where(CrmCashEntry.entity == ent,
+                       CrmCashSplit.taxonomy_node_id.isnot(None))
+                .group_by(CrmCashSplit.taxonomy_node_id))).all():
+            used[nid] = used.get(nid, 0) + n
 
     def walk(nodes):
         total = 0
@@ -267,6 +277,14 @@ async def delete_cash_taxonomy_node(node_id: str, request: Request,
             select(func.count()).select_from(CrmCashEntry)
             .where(CrmCashEntry.entity == ent,
                    CrmCashEntry.taxonomy_node_id == node_id))).scalar()
+        # 🔴 拆項的引用也算 —— 只數 entries 的話，掛在拆項上的節點可以被硬刪，
+        # 那些拆項從此指向一個不存在的節點（路徑查不到、鏡射凍結）
+        from db.models import CrmCashSplit
+        used = int(used or 0) + int((await session.execute(
+            select(func.count()).select_from(CrmCashSplit)
+            .join(CrmCashEntry, CrmCashEntry.id == CrmCashSplit.entry_id)
+            .where(CrmCashEntry.entity == ent,
+                   CrmCashSplit.taxonomy_node_id == node_id))).scalar() or 0)
         if used:
             raise HTTPException(status_code=409,
                                 detail=f"還有 {used} 筆收支掛在這個分類上 —— 請改用「停用」")

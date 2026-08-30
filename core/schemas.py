@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator  # type: ignore
+from pydantic import BaseModel, Field, field_validator, model_validator  # type: ignore
 from typing import List, Optional, Tuple
 
 from core.crm_logic import normalize_tax_id
@@ -1397,6 +1397,52 @@ class StatementImportRow(BaseModel):
     #     都一樣。所以它跟 CashPaymentLinksPayload.fee 同形狀，不另立第二種表示法。
     # None ＝ 不認列（不動 bank_fee）。
     payment_fee: Optional[int] = None
+    # 拆項（帳目一筆、內容拆裂 —— owner 2026-08-31）：一筆母公司匯款裝著
+    # 專案款＋代墊回款＋薪資，匯入當下就拆。Σ 必須等於 |amount|，寫入端
+    # （routers/crm/cash_splits._apply_splits）強制；有拆項時本列的
+    # category/taxonomy/project_id 一律忽略（分類的正本在拆項）。
+    splits: List["CashSplitItem"] = []
+
+    @model_validator(mode="after")
+    def _splits_are_exclusive(self):
+        """🔴 拆項與本列的其他記帳意圖互斥 —— 規則放 schema 這一層，兩條路
+        （匯入／存草稿）與前端的「讓位清單」才不會各自漂。
+
+        寫入端對拆項列會跳過發票/請款/匯費/源日請款的處理；不擋的話，使用者
+        在預覽勾好的東西會**靜默消失**（正好是會特地去拆的那種複雜列）。"""
+        if self.splits:
+            kept = [n for n, v in (("invoices", self.invoices),
+                                   ("payments", self.payments),
+                                   ("payment_fee", self.payment_fee),
+                                   ("petty_claim", self.petty_claim)) if v]
+            if kept:
+                raise ValueError(
+                    f"這一列已拆項，不能同時帶 {'、'.join(kept)} —— "
+                    "拆項列的發票/請款/匯費/源日請款要先取消（拆項才是內容的正本）")
+        return self
+
+
+class CashSplitAdvanceLinkItem(BaseModel):
+    """拆項對一列代墊流出的沖銷（逐筆結清）。"""
+    entry_id: str
+    amount: int
+
+
+class CashSplitItem(BaseModel):
+    """一個拆項。分類：私帳送 taxonomy_node_id（樹節點是正本）；
+    母公司可只送 category/sub_item（平面科目）。"""
+    amount: int
+    taxonomy_node_id: str = ""
+    category: str = ""
+    sub_item: str = ""
+    project_id: str = ""
+    note: str = ""
+    advances: List[CashSplitAdvanceLinkItem] = []
+
+
+class CashSplitsPayload(BaseModel):
+    """整組取代一列的拆項；空 list ＝ 解除拆項。"""
+    splits: List[CashSplitItem] = []
 
 
 class StatementDraftRow(StatementImportRow):

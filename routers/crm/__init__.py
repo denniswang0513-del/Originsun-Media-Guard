@@ -11,6 +11,7 @@ from . import staff      # noqa: F401  人力 + 履歷 + 派工
 from . import costs      # noqa: F401  雜支 + 收據 + 成本估算 + 子表
 from . import finance    # noqa: F401  共用 helper + 發票（cash/payments/taxonomy 都 import 它）
 from . import cash       # noqa: F401  收支明細 + 應付/應收 + 收款↔發票分配
+from . import cash_splits  # noqa: F401  收支拆項（帳目一筆、內容拆裂；依賴 cash/finance）
 from . import payments   # noqa: F401  請款單 + 預支款 + 批次付款
 from . import taxonomy   # noqa: F401  私帳收支分類樹（/cash-taxonomy）
 from . import invoice_files  # noqa: F401  電子發票檔（上傳/下載/分享連結）＋發票根目錄設定

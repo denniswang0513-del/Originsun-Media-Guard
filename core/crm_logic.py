@@ -311,3 +311,43 @@ def client_tier(active_project_count: int) -> str:
     """
     n = int(active_project_count or 0)
     return "潛在客戶" if n == 0 else ("新客戶" if n == 1 else "舊客戶")
+
+
+# ── 收支拆項（帳目一筆、內容拆裂；owner 2026-08-31）────────────────
+
+def split_side(deposit, expense) -> str:
+    """這一列的拆項跟哪一側：'deposit'／'expense'；兩側都有值或都沒值 → ""。
+
+    兩側都有的列（極少數：同列又收又付）不開放拆項 —— Σ 不變式沒有明確的
+    分母，硬拆會讓兩側各自漂。
+    """
+    d, x = int(deposit or 0), int(expense or 0)
+    if d > 0 and x <= 0:
+        return "deposit"
+    if x > 0 and d <= 0:
+        return "expense"
+    return ""
+
+
+def split_amount_error(parent_amount: int, amounts: list) -> str:
+    """拆項金額的不變式：每項 > 0、Σ ＝ 父列金額。合法 → ""，否則中文理由。
+
+    🔴 差額不做「自動補一項」—— 補出來的那項沒有人決定它的分類，會變成一列
+    永遠掛著的未歸類。要嘛拆到剛好，要嘛回去改金額。
+    """
+    if not amounts:
+        return "至少要有一個拆項"
+    for a in amounts:
+        if int(a or 0) <= 0:
+            return "每個拆項金額都要大於 0"
+    total = sum(int(a) for a in amounts)
+    if total != int(parent_amount or 0):
+        diff = int(parent_amount or 0) - total
+        return (f"拆項合計 {total:,} 與帳目金額 {int(parent_amount or 0):,} 不符"
+                f"（差 {diff:+,}）—— 差一塊都不能存，帳才對得回銀行")
+    return ""
+
+
+def advance_open_amount(expense: int, linked_sum: int) -> int:
+    """一列代墊流出還剩多少沒被回款沖到（逐筆結清的餘額；不會小於 0）。"""
+    return max(0, int(expense or 0) - int(linked_sum or 0))

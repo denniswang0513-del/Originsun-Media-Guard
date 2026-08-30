@@ -391,10 +391,14 @@ async def apply_rules_to_unclassified(request: Request, entity: str = ""):
     factory = _factory_or_503()
     changed, by_cat = 0, {}
     async with factory() as session:
+        from routers.crm.cash_splits import entry_has_splits_subq
         rows = (await session.execute(
             select(CrmCashEntry).where(
                 CrmCashEntry.entity == ent,
-                or_(CrmCashEntry.category.is_(None), CrmCashEntry.category == "")))
+                or_(CrmCashEntry.category.is_(None), CrmCashEntry.category == ""),
+                # 拆項父列的 category 是空的，但它**已經分好了**（正本在拆項）
+                # —— 規則掃到它會把整筆重新分類、Σ 不變式旁邊長出第二份答案
+                CrmCashEntry.id.notin_(entry_has_splits_subq())))
         ).scalars().all()
         # 🔴 id→路徑表**整批撈一次**。不傳給 `_sync_taxonomy` 的話它每一列自己
         # 撈一次整棵樹（它的 docstring 就在講這件事）—— 這條路一次掃的是整本帳
@@ -1180,6 +1184,22 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                     note="銀行對帳單匯入",
                     category=(r.category or "").strip() or None,
                     bank_account_id=payload.bank_account_id, entity=ent)
+                # 拆項（帳目一筆、內容拆裂）：這列的分類/專案/發票整組讓位給
+                # 拆項 —— 寫入走 cash_splits._apply_splits **唯一**那份
+                # （Σ 不變式、鏡射、專案已收增量都在裡面），這裡不重覆。
+                if r.splits:
+                    from routers.crm.cash_splits import _apply_splits
+                    if tax_paths is None:
+                        tax_paths = await path_map(session, ent)
+                    session.add(ce)
+                    # fresh=True：ce 是剛建的，舊拆項必為空 —— 52 列的對帳單
+                    # 不用跑 52 趟保證空手的 SELECT。父列讓位由 _apply_splits
+                    # 唯一那份做，這裡不先清（清了也會被它覆寫）。
+                    await _apply_splits(session, ce, r.splits, paths=tax_paths,
+                                        fresh=True)
+                    made_entries += 1
+                    stmt_lines.append((r, ce))
+                    continue
                 # 私帳挑的是分類樹的節點 —— category/item/sub_item 由
                 # `_sync_taxonomy` 從路徑推（規則正本在 routers/crm/finance），
                 # 這裡不自己拼第二份鏡射

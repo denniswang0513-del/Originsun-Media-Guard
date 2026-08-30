@@ -13,6 +13,7 @@ import { finEntity as _pinEntity, finFetch as _finFetch, finIsMine,
 // 六日／國定假日標記（owner 2026-08-27）：看帳時「那天是不是假日」是判斷公私的
 // 關鍵線索，日期字串本身看不出來。星期是算的、假日是清單 —— 見該模組檔頭。
 import { dayMark as _dayMark } from '../../js/shared/tw-calendar.js';
+import { splitBadgeHtml } from '../../js/shared/cash-split-editor.js';
 import { indexTax as _indexTaxShared, taxKidsAt as _kidsAt, taxSelects }
     from '../../js/shared/cash-tax-picker.js';
 
@@ -367,6 +368,50 @@ let _shown = [];      // 目前這批排序/篩選後的完整列表（畫多少
 let _drawn = 0;
 
 /** 單列 HTML。renderList 與 _patchRow 共用 —— 兩份會漂。 */
+// ── 拆項（帳目一筆、內容拆裂；owner 2026-08-31）──────────────────
+// 編輯器是 js/shared/cash-split-editor（對帳單匯入預覽共用同一份）。
+// 有拆項的列：分類三格換成「已拆 N 項」badge（分類的正本在拆項），
+// 金額/分類/專案改由「拆內容」進 —— 後端對這幾欄也是 409。
+
+function _splitMenu(e) {
+    const amt = (e.deposit || 0) || (e.expense || 0);
+    if (!amt) { return []; }
+    return [{ label: e.split_count ? '改拆項' : '拆內容', fn: '_cashSplitOpen' }];
+}
+
+window._cashSplitOpen = async (id) => {
+    const e = _entries.find((x) => x.id === id);
+    if (!e) { return; }
+    const { openCashSplitEditor } = await import('../../js/shared/cash-split-editor.js');
+    openCashSplitEditor({
+        entity: _pinEntity(),
+        amount: (e.deposit || 0) || (e.expense || 0),
+        side: e.deposit ? 'deposit' : 'expense',
+        taxOpts: { tree: _taxTree, byId: _taxById },
+        initial: e.splits || [],
+        title: `${e.entry_date || ''} ${e.summary || ''}`,
+        onSave: async (items) => {
+            try {
+                const r = await _fetch(`/cash-entries/${id}/splits`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ splits: items || [] }),
+                });
+                crmToast(items && items.length ? `已拆 ${items.length} 項` : '已解除拆項');
+                // 只補這一列（整表重抓＋重畫是 4,733 列與 ~680ms，見 _patchRow 註解）。
+                // 後端的讓位規則在這裡鏡射：分類與專案清空、拆項換新。
+                e.splits = (r && r.splits) || [];
+                e.split_count = e.splits.length;
+                e.category = ''; e.item = ''; e.sub_item = ''; e.book = '';
+                e.taxonomy_node_id = ''; e.taxonomy_path = [];
+                e.project_id = ''; e.project_name = '';
+                _patchRow(id);
+            } catch (err) {
+                crmToast(err.message || '拆項儲存失敗', true);
+            }
+        },
+    });
+};
+
 function _rowHtml(e) {
     const card = _cardAmt(e), out = _bankOut(e), deep = _taxDeep(e);
     // 一列算一次就好 —— 每個都被原本的樣板呼叫 2~3 次（4,733 列時很有感）
@@ -380,12 +425,17 @@ function _rowHtml(e) {
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
             <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
+            ${e.split_count ? `
+            <div style="grid-column:span 3;cursor:pointer;" onclick="event.stopPropagation();window._cashSplitOpen('${e.id}')"
+                 title="${_esc((e.splits || []).map((s) => `$${_fmtNum(s.amount)} ${(s.taxonomy_path || []).join(' ▸ ') || s.category || '未分類'}`).join('\n'))}">
+                ${splitBadgeHtml(e.split_count)}
+            </div>` : `
             <div class="cash-ed" onclick="window._cashTaxEdit(event,'${e.id}',0)"
                  title="${tf}">${e.category ? _esc(e.book) : _NO_VAL_DOT}</div>
             <div class="cash-ed" onclick="window._cashTaxEdit(event,'${e.id}',1)"
                  style="color:#c9c9c9;" title="${tf}">${e.item ? _esc(e.item) : _NO_VAL_DOT}</div>
             <div class="cash-ed" onclick="window._cashTaxEdit(event,'${e.id}',2)"
-                 style="color:#9a9a9a;" title="${tf}">${deep ? _esc(deep) : _NO_VAL_DOT}</div>
+                 style="color:#9a9a9a;" title="${tf}">${deep ? _esc(deep) : _NO_VAL_DOT}</div>`}
             <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','bank_memo')"
                  title="${_esc(bm)}">${_esc(_flat(e.bank_memo, ' · '))}</div>
             <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','note')"
@@ -394,7 +444,8 @@ function _rowHtml(e) {
             <div>${_esc(e.invoice_title || '')}</div>
             <div>${_esc(_acctName(e.bank_account_id))}</div>
             ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup',
-                                   onDelete: '_cashDelete', extra: _pettyMenu(e) })}
+                                   onDelete: '_cashDelete',
+                                   extra: [..._splitMenu(e), ..._pettyMenu(e)] })}
         </div>
     `;
 }
