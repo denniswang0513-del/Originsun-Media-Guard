@@ -1,5 +1,5 @@
 {
-  "version": "2.4.259",
-  "build_date": "2026-08-30",
-  "notes": "影片格式清單 13 份收成 1 份 —— RED(.r3d)/BRAW 的素材原本在素材庫索引與空拍監控裡收不到（靜默）；檔案挑選視窗補齊大寫變體；修 ensure_subdir 碟符路徑會在資產夾裡長出深層目錄；補跨語言同步守衛與提案子系統測試"
+  "version": "2.4.261",
+  "build_date": "2026-08-31",
+  "notes": "db/models 拆成六段套件（零類別搬家）＋修 deploy 遞迴剪枝按裸名字剪掉 db/models/ 的洞（smoke 全綠但生產跑舊 models）＋頁籤跨界 import 白名單＋runner/repos docstring"
 }
