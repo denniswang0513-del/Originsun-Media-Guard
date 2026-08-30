@@ -15,6 +15,7 @@
 import pytest
 
 from core.finance_logic import FEE_TOLERANCE, alloc_verdict
+from tests.unit._srcscan import finance_src
 
 
 def _pay(paid, allocated):
@@ -86,8 +87,8 @@ def test_one_ladder_not_two():
 
 def test_tolerance_comes_from_the_shared_constant():
     """容差只有一個正本 —— 兩側各寫死一個數字，調的時候一定漏一邊。"""
-    from tests.unit._srcscan import code_only, func_body, repo_src
-    src = repo_src("core/finance_logic.py")
+    from tests.unit._srcscan import code_only, finance_logic_src, func_body
+    src = finance_logic_src()
     body = code_only(func_body(src, "def alloc_verdict("))
     assert "FEE_TOLERANCE" in body
     assert "50" not in body, "又寫死了一個容差數字"
@@ -128,17 +129,19 @@ def test_one_allocation_per_pair():
 
 from tests.unit._srcscan import code_only, func_body, repo_src   # noqa: E402
 
-SRC = "routers/crm/finance.py"
+# 內容本身（不是路徑）—— finance.py 2026-08-30 拆成四個檔，
+# finance_src() 把它們串起來，斷言釘的是「這支函式做了什麼」不是它在哪。
+SRC = finance_src()
 JS = "frontend/tabs/crm/crm-cashbook.js"
 
 
 def _body(fn):
-    return code_only(func_body(repo_src(SRC), fn))
+    return code_only(func_body(SRC, fn))
 
 
 def test_write_path_is_single():
     """只有一個地方寫連結表 —— 兩個寫入點就會有兩套規則。"""
-    src = repo_src(SRC)
+    src = SRC
     assert src.count("session.add(CrmCashPaymentLink(") == 1
 
 
@@ -182,7 +185,7 @@ def test_amount_mismatch_is_not_a_gate():
 def test_both_sides_answer_the_same_error_the_same_way():
     """🔴 本來兩支各寫一份，於是同一個錯誤在兩邊回不同的 HTTP 碼
     （跨帳本 409 vs 422），空 id 一邊擋一邊靜靜丟掉。"""
-    src = repo_src("routers/crm/finance.py")
+    src = finance_src()
     for wrapper in ("async def resolve_invoice_allocs(",
                     "async def resolve_payment_allocs("):
         body = code_only(func_body(src, wrapper))
@@ -202,7 +205,7 @@ def test_fee_is_written_to_bank_fee():
     變回含匯費的數字，那一列從此在對帳工作台配不上而且畫面上看不出來。
     """
     assert "fee=req.fee" in _body("async def set_cash_entry_payments(")
-    src = repo_src(SRC)
+    src = SRC
     # 兩側的規則收在 _ALLOC_KINDS 的 fee 欄。值是**一支吃 entry 的函式**，不是
     # (欄名, 純函式) —— 寫回的動作留在呼叫端的話，兩個呼叫端就寫成了兩種樣子
     # （實測過：一處用回傳的 bank_fee、一處丟掉回傳值自己再推一次）。
@@ -236,7 +239,7 @@ def test_the_four_alloc_endpoints_share_one_prologue():
     抄四遍的代價：同一個 404 在別處寫成「找不到此收支紀錄」、在這裡寫成
     「收支明細不存在」，而 level="full" 那個雙保險漏掉一處就是權限缺口。
     """
-    src = code_only(repo_src("routers/crm/finance.py"))
+    src = code_only(finance_src())
     seg = src[src.index("async def _entry_for_alloc("):]
     assert seg.count("session.get(CrmCashEntry, entry_id)") == 1,         "分配端點又自己去撈收支列了"
 

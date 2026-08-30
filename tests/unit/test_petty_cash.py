@@ -14,6 +14,8 @@
 """
 import re
 from pathlib import Path
+from tests.unit._srcscan import js_func_body
+
 
 import pytest
 
@@ -690,7 +692,7 @@ def test_dashboard_misc_estimate_source():
     # 不准自己算（2026-08-18 /simplify：兩份公式已經在 usagePct 改口徑時
     # 差點各改各的）
     assert "export function calcDashboardParts" in calc
-    fill = COST_VIEW.split("function _fillDashGrid")[1].split("\nfunction ")[0]
+    fill = js_func_body(COST_VIEW, "function _fillDashGrid")
     assert "calcDashboardParts(" in fill
     assert "Math.round" not in fill, "_fillDashGrid 又自己長出公式了"
     assert "_miscBudgetEdit" in COST_VIEW and "_miscPctModal" in COST_VIEW

@@ -20,6 +20,7 @@ import pytest
 from core.crm_logic import normalize_tax_id
 from core.schemas import ClientPayload, InvoicePayload
 from tests.unit._srcscan import repo_src
+from tests.unit._srcscan import finance_src
 
 
 # ── 規則本身 ──────────────────────────────────────────────────────
@@ -89,13 +90,12 @@ def test_client_csv_import_normalizes():
     """🔴 CSV 那條是 `Client(**data)` 直接建、繞過 payload 的驗證器 ——
     漏了它，最容易吃掉 0 的那條路（試算表匯出）反而沒有保護。"""
     src = repo_src("routers/crm/clients.py")
-    i = src.index("def import_clients_csv") if "def import_clients_csv" in src else 0
     assert "normalize_tax_id(data.get(\"tax_id\"))" in src, "客戶 CSV 沒過正規化"
     assert 'data["tax_id"] = tax_id' in src, "算了卻沒寫回 data"
 
 
 def test_invoice_csv_import_normalizes():
-    src = repo_src("routers/crm/finance.py")
+    src = finance_src()
     body = src[src.index("def _map_invoice_row"):]
     assert 'data["tax_id"] = normalize_tax_id(data["tax_id"])' in body[:1200], \
         "發票 CSV 沒過正規化"

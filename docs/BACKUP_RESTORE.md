@@ -1,5 +1,8 @@
 # 資料備份與還原 Runbook（Backup & Restore）
 
+> 📅 最後更新：2026-07-04　—　🔴 規格與程式碼分歧時**以程式碼為準**。
+> 這份文件不會自動跟著改，日期越舊越要當心（用 `git log -1 -- docs/BACKUP_RESTORE.md` 確認）。
+
 > 對象：值班/維運人員。目標：出事時照抄指令就能還原。
 > 系統：Originsun Media Guard —— `mediaguard` Postgres DB + 官網上傳媒體。
 > 相關程式：`services/website/backup_service.py`（Layer 2）、`drive_sync.py`（Drive 上傳）、

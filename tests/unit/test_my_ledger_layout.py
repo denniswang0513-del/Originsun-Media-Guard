@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 from tests.unit._srcscan import js_func_body
+from tests.unit._srcscan import finance_src
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -51,7 +52,7 @@ def test_project_ledger_table_is_height_bounded():
     """
     js = _read("frontend/tabs/finance/subviews/projects.js")
     assert "_fitBody" in js
-    fn = js.split("function _fitBody()")[1].split("\n}")[0]
+    fn = js_func_body(js, "function _fitBody()")
     # 量出來的、不是寫死 px：要拿捲動容器的可視底部減表格頂端
     assert "getBoundingClientRect" in fn
     assert "finance-content" in fn
@@ -67,8 +68,8 @@ def test_cashbook_card_column_separates_card_from_bank_expense():
     js = _read("frontend/tabs/crm/crm-cashbook.js")
     for fn_name in ("_cardAmt", "_bankOut"):
         assert f"function {fn_name}(e)" in js
-    card = js.split("function _cardAmt(e)")[1].split("\n}")[0]
-    bank = js.split("function _bankOut(e)")[1].split("\n}")[0]
+    card = js_func_body(js, "function _cardAmt(e)")
+    bank = js_func_body(js, "function _bankOut(e)")
     assert "'card'" in card and "'card'" in bank
     # 互斥：卡費列的銀行支出必須是 0
     assert "? 0 :" in bank
@@ -129,7 +130,7 @@ def test_cashbook_surfaces_sub_item():
     js = _read("frontend/tabs/crm/crm-cashbook.js")
     assert "e.sub_item" in js, "清單沒顯示子項目"
     assert "{name:'sub_item', label:'子項目'" in js, "編輯欄位沒有子項目"
-    py = _read("routers/crm/finance.py")
+    py = finance_src()
     assert "CrmCashEntry.sub_item.ilike(ql)" in py, "搜尋沒涵蓋子項目"
 
 

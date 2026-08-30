@@ -61,7 +61,7 @@ class TestManualDupKey:
     def test_aware_utc_vs_naive_local(self):
         # timestamptz 讀回 aware UTC vs 寫入時 naive 本地 — 必須落同一本地日
         # （e2e 實抓的 bug：naive 17 日寫入 → 讀回 16 日 16:00Z）
-        from datetime import timedelta, timezone as tz
+        from datetime import timezone as tz
         naive_local = D(2026, 7, 17, 0, 0)
         aware_utc = naive_local.astimezone(tz.utc)   # 依本機時區換算成 UTC
         assert manual_dup_key("x", naive_local, "p") == manual_dup_key("x", aware_utc, "p")

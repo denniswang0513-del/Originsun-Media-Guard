@@ -14,6 +14,7 @@ from db.models import CrmInvoice
 from routers.crm.finance import _to_invoice_dict
 from core.schemas import InvoicePayload
 from tests.unit._srcscan import func_body, js_code_only, repo_src
+from tests.unit._srcscan import finance_src
 
 PANEL = "frontend/tabs/crm/crm-projects-invoices.js"
 
@@ -91,7 +92,7 @@ def test_deleting_an_invoice_with_money_on_it_says_so():
 def test_the_delete_endpoint_still_cleans_the_allocations():
     """後端那半：上面那條「共用端點就安全」的前提是端點真的有清乾淨。"""
     import re
-    body = func_body(repo_src("routers/crm/finance.py"),
+    body = func_body(finance_src(),
                      "async def delete_invoice(")
     # 釘的是「真的刪掉那些連結列」，不是「這個字有出現」—— 端點本來就會先
     # select 一次拿受影響的收支，光看字串的話刪除那行被拿掉也照樣綠。

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """收付狀態（owner 2026-08-29 選 C 案）：結案＝一個記號，未結才分開標收／付。"""
 from core.ledger_project import SETTLE_FILTERS, settle_match, settle_state
+from tests.unit._srcscan import js_func_body
+
 
 
 def test_done_collapses_when_both_sides_are_finished():
@@ -52,7 +54,7 @@ def test_frontend_renders_one_char_when_done():
     from pathlib import Path
     js = (Path(__file__).resolve().parents[2]
           / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
-    fn = js.split("function _stHtml(")[1].split("\n}")[0]
+    fn = js_func_body(js, "function _stHtml(")
     assert "st.done ? ch('結'" in fn, "結案要收成一個字"
     assert "_ST_OUT[st.out] && ch" in fn, "沒有要付的那格不畫"
     assert "_unpaidOnly" not in js, "舊的「只看未收清」要被狀態下拉取代，不並存"

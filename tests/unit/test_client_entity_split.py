@@ -19,6 +19,7 @@ owner 的話：「crm 有一筆，私帳有一筆，中間做連結」「留下�
   6. 連結清單是交付物：端點 + 子視圖 + 匯出 CSV。
 """
 from pathlib import Path
+from tests.unit._srcscan import finance_src
 
 ROOT = Path(__file__).resolve().parents[2]
 NL = chr(10)
@@ -34,7 +35,8 @@ def test_short_name_unique_per_entity():
     m = _read("db/models.py")
     assert "short_name = Column(String(64), nullable=False)" in m, "不可再是 unique=True"
     assert 'UniqueConstraint("entity", "short_name"' in m
-    mig = _read("main.py")
+    from tests.unit._srcscan import migration_sql
+    mig = migration_sql()
     assert "DROP CONSTRAINT IF EXISTS clients_short_name_key" in mig
     assert "uq_client_entity_short_name" in mig
 
@@ -85,7 +87,7 @@ def test_crm_tier_counts_company_projects_only():
 def test_short_name_lookups_pin_the_company_row():
     """代稱不再全域唯一 —— 靠代稱查客戶的地方不指名母公司那筆就會撈到兩列
     （發票 join 會讓同一張發票回兩次）。"""
-    inv = _read("routers/crm/finance.py")
+    inv = finance_src()
     seg = inv.split("Client.short_name == CrmInvoice.company_name")[1][:140]
     assert "_cli_not_mine(Client.entity)" in seg
     ws = _read("services/website/project_service.py")

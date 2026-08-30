@@ -8,13 +8,14 @@
 """
 from types import SimpleNamespace
 
-from tests.unit._srcscan import code_only, func_body, repo_src  # noqa: E402
+from tests.unit._srcscan import code_only, flow_body, repo_src  # noqa: E402
 
 
 def _body(fn, rel='routers/api_finance.py'):
     # 🔴 跨兩個檔案：_record_loan_payment 在 api_finance，對帳單匯入 2026-08-21
     # 搬去 api_finance_stmt（純搬家）。兩邊都要掃得到，別只留一個檔名。
-    return code_only(func_body(repo_src(rel), fn))
+    # flow_body：端點把階段抽成 helper 之後，這裡要跟著看進去（見該函式說明）
+    return code_only(flow_body(repo_src(rel), fn))
 
 
 class FakeSession:

@@ -67,7 +67,6 @@ def test_financial_position_is_an_asset_not_a_draw():
 
 def test_balance_sheet_shows_the_financial_asset_line():
     """有值才畫（零列＝雜訊，同家用代墊那條的慣例）。"""
-    from pathlib import Path
-    src = (Path(__file__).resolve().parents[2] / "core/finance_logic.py").read_text(encoding="utf-8")
-    fn = src.split("def build_balance_sheet(")[1].split("\ndef ")[0]
+    from tests.unit._srcscan import finance_logic_src
+    fn = finance_logic_src("def build_balance_sheet(")
     assert "if financial_net:" in fn and '"label": "其他金融資產"' in fn

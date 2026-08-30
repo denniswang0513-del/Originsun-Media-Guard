@@ -1,5 +1,8 @@
 # 提案企劃工具 — 方法論整理（工作稿）
 
+> 📅 最後更新：2026-08-16　—　🔴 規格與程式碼分歧時**以程式碼為準**。
+> 這份文件不會自動跟著改，日期越舊越要當心（用 `git log -1 -- docs/PROPOSAL_PLANNER.md` 確認）。
+
 > **狀態**：✅ **階段一～三全部實作於 dev**（2026-07-28，已跑 /simplify 修 18 項）：
 > 資料層（`preprod_proposals.plan` JSONB + migration）、三端點（PUT /plan、
 > PATCH /plan/cell 樂觀鎖+FOR UPDATE、GET /plan/meta?since= 短路）、

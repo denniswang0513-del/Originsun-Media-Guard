@@ -5,10 +5,12 @@
 但「已收金額」與關聯面板讀 crm_cash_invoice_links —— 只寫一邊就會兩處各講各的
 （這一輪已經在收支明細那邊修過同一個洞，不可以在匯入這條路上重犯）。
 """
-from tests.unit._srcscan import code_only, func_body, repo_src  # noqa: E402
+from tests.unit._srcscan import finance_src, code_only, func_body, repo_src  # noqa: E402
 
 
-SRC = 'routers/crm/finance.py'
+# 內容本身（不是路徑）：finance.py 2026-08-30 拆成四個檔，
+# finance_src() 把它們串起來 —— 斷言釘的是規則，不是函式在哪個檔案。
+SRC = finance_src()
 
 
 def _body(fn):
@@ -58,15 +60,15 @@ def test_invoice_goes_through_the_allocation_table():
         body = code_only(repo_src(path))
         hits += [(path, m.start()) for m in re.finditer(r'CrmCashInvoiceLink\(', body)]
     assert len(hits) == 1, f'分配表有 {len(hits)} 個寫入點（應該只有 1 個）：{hits}'
-    writer = code_only(func_body(repo_src(SRC),
+    writer = code_only(func_body(SRC,
                                  'async def replace_invoice_allocs_bulk('))
     assert 'CrmCashInvoiceLink(' in writer, '唯一的寫入點不是共用的那支'
     # 單筆版只是薄殼 —— 規則不能有第二份
-    one = code_only(func_body(repo_src(SRC),
+    one = code_only(func_body(SRC,
                               'async def replace_invoice_allocs(session, entry'))
     assert 'replace_invoice_allocs_bulk(' in one and 'CrmCashInvoiceLink(' not in one
     # 編輯視窗那條路也委派給它（差別只在「不要動主要發票」這個旋鈕）
-    single = code_only(func_body(repo_src(SRC), 'async def _sync_single_alloc('))
+    single = code_only(func_body(SRC, 'async def _sync_single_alloc('))
     assert 'replace_invoice_allocs(' in single and 'set_primary=False' in single
 
     body = _body('async def apply_bank_statement(')
@@ -87,7 +89,7 @@ def test_one_row_can_carry_many_invoices():
     body = _body('async def apply_bank_statement(')
     assert 'r.invoices' in body, 'apply 沒有讀多張分配'
     # 主要發票 = 金額最大那張。規則只有一份，在 replace_invoice_allocs 裡。
-    writer = code_only(func_body(repo_src(SRC),
+    writer = code_only(func_body(SRC,
                                  'async def replace_invoice_allocs_bulk('))
     assert 'max(rows, key=lambda x: x[1])' in writer
 

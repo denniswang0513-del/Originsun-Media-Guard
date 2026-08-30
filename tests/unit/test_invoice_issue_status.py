@@ -12,9 +12,11 @@ owner 2026-08-24：「這裡沒有發票號碼 要標註未開立，等到有發
 from core.finance_logic import (INVOICE_ISSUED, INVOICE_NOT_ISSUED, INVOICE_VOID,
                                 issue_status_for)
 from core.schemas import InvoicePayload
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import finance_src, code_only, func_body, js_code_only, repo_src
 
-SRC = "routers/crm/finance.py"
+# 內容本身（不是路徑）—— finance.py 2026-08-30 拆成四個檔，
+# finance_src() 把它們串起來，斷言釘的是「這支函式做了什麼」不是它在哪。
+SRC = finance_src()
 
 
 # ── 規則本身 ──────────────────────────────────────────────────
@@ -58,7 +60,7 @@ def test_the_old_wording_never_survives():
 def test_both_invoice_entry_points_derive_it():
     """規則只有一份沒有用 —— 建立與更新兩個入口都要走它。
     少了 create 那半，就是 owner 這次撞到的形狀。"""
-    src = repo_src(SRC)
+    src = SRC
     for fn in ("async def create_invoice(", "async def update_invoice("):
         body = code_only(func_body(src, fn))
         assert "issue_status_for(" in body, f"{fn} 沒有在入口定案開立狀態"

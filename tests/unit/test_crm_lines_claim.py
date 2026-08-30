@@ -8,6 +8,7 @@
 from pathlib import Path
 
 from tests.unit._srcscan import call_args
+from tests.unit._srcscan import finance_src
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -19,7 +20,7 @@ def _fn(src: str, name: str) -> str:
 def test_claim_is_blocked_when_the_cost_line_was_already_claimed():
     """而且要擋在 `_apply_outsource` 之前 —— 那支是**增量制**
     （委外費用 += 金額），先累加再拒絕的話，被擋下的那次也會留下痕跡。"""
-    src = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
+    src = finance_src()
     fn = _fn(src, "create_payment")
     assert "cost_line_id" in fn and "409" in fn
     assert fn.index("cost_line_id") < fn.index("_apply_outsource")
@@ -51,7 +52,7 @@ def test_one_click_claim_is_not_counted_twice():
     分辨方式就是 `cost_line_id`（手動加的委外沒有它，所以照舊累加）。
     2026-08-28 實測：CRM 成本行 12,000 ＋ 手動 5,000 ＝ 17,000，
     對那一行按下一鍵請款之後**仍是** 17,000（不是 29,000）。"""
-    src = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
+    src = finance_src()
     # 「哪些欄位算數」只定義在 `_outsource_key` 一處 —— 原本由三個呼叫端
     # 各自拼參數，helper 多收一個 cost_line_id 時漏掉了 delete_payment，
     # 而且不會噴錯（helper 靜靜 return）。
@@ -78,7 +79,7 @@ def test_misc_rows_are_claimable_one_by_one():
     """行政雜支也能逐項請款（owner 2026-08-29）。來源是另一張表
     （crm_project_expenses），所以硬連結另開一欄 `expense_id` ——
     兩條連結**同一條重複守衛**，各寫一次必漏一個。"""
-    src = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
+    src = finance_src()
     fn = _fn(src, "create_payment")
     assert "CrmPaymentRequest.expense_id, req.expense_id" in fn
     assert "for _col, _val in (" in fn, "兩條連結走同一個迴圈，不是各寫一份"

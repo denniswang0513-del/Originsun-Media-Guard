@@ -12,14 +12,16 @@ owner 選擇人工掛，工具只負責「一次寫很多筆」。
    所以類別守衛不能省，而且違規要**整批擋下並說明**，不能默默跳過 —— 默默跳過
    ＝使用者以為掛好了，而專案成本永遠少那幾張。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import finance_src, code_only, func_body, js_code_only, repo_src
 
-SRC = "routers/crm/finance.py"
+# 內容本身（不是路徑）—— finance.py 2026-08-30 拆成四個檔，
+# finance_src() 把它們串起來，斷言釘的是「這支函式做了什麼」不是它在哪。
+SRC = finance_src()
 JS = "frontend/tabs/crm/crm-payments.js"
 
 
 def _body():
-    return code_only(func_body(repo_src(SRC), "async def batch_assign_project("))
+    return code_only(func_body(SRC, "async def batch_assign_project("))
 
 
 def test_it_reuses_the_one_rule_about_which_categories_may_link_a_project():
@@ -75,7 +77,7 @@ def test_it_does_not_bolt_on_a_month_lock_guard():
 def test_the_unassigned_filter_only_lists_rows_that_should_have_a_project():
     """「只看未掛專案」不能把行政／薪資也列進來 —— 那些本來就不該掛，
     混進來只會讓待辦清單看起來永遠做不完。"""
-    src = code_only(repo_src(SRC))
+    src = code_only(SRC)
     i = src.index("if unassigned:")
     seg = src[i:i + 400]
     assert "CrmPaymentRequest.project_id.is_(None)" in seg

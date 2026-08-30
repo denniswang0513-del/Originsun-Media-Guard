@@ -14,6 +14,7 @@ import re
 from core.project_match import (MIN_SCORE, STRONG_SCORE, normalize, similarity,
                                 suggest_project)
 from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import finance_src
 
 JS = "frontend/tabs/crm/crm-payments.js"
 
@@ -118,7 +119,7 @@ def test_the_suggestion_memo_does_not_outlive_the_request():
     🔴 但快取**不能**升級成模組級：專案清單會變，新增一個專案之後建議就永遠
     停在舊答案，而且是那種「看起來只是沒配到」的靜默錯。
     """
-    src = repo_src("routers/crm/finance.py")
+    src = finance_src()
     body = code_only(func_body(src, "async def list_payments("))
     # 釘機制不是變數名 —— 只找 "memo" 的話，宣告留著、實際又每列各算一次
     # 也會過（實測：破壞驗證時就是這樣逃掉的）。

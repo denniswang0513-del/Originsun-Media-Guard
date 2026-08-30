@@ -10,6 +10,8 @@
  * 所以也要設一份 —— 用 SPA 的 authFetch，不自己造 token 讀取邏輯。
  */
 import { authFetch, bearerHeader } from '../../../js/shared/utils.js';
+// 逃脫走 dom.js（本檔原本那份連 > 都不逃脫）
+import { esc } from '../../../js/shared/dom.js';
 import { hasModule, canSeeMoney } from '../../crm/crm-utils.js';
 
 const TABS = [
@@ -95,7 +97,6 @@ async function _mountReceiptsRoot(container, host) {
     const cfg = await r.json();
     const bar = container.querySelector('a[href="/petty-cash.html"]')?.parentElement;
     if (!bar) return;
-    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
     const a = document.createElement('a');
     a.href = 'javascript:void(0)';

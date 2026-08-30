@@ -10,9 +10,11 @@ owner 2026-08-24 拍板：mine 專案（owner 私帳）與客戶全面共用 —
 import re
 from pathlib import Path
 
-from tests.unit._srcscan import js_code_only, repo_src
+from tests.unit._srcscan import (js_code_only, repo_src,
+                                 js_func_body)
 
 from core.money import MONEY_FIELDS, redact_mine
+from tests.unit._srcscan import finance_src
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -78,8 +80,11 @@ def test_pin_project_serializer_carries_entity():
 
 
 def test_pin_migration_adds_project_entity():
+    # migration SQL 住 db/migrations.py（main.py 只剩執行迴圈）—— 釘「這句 SQL
+    # 存在」而不是「它在哪個檔案裡」。
+    from tests.unit._srcscan import migration_sql
     assert ("ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS entity"
-            in _read("main.py"))
+            in migration_sql())
 
 
 def test_pin_money_dep_gates_mine_projects():
@@ -123,7 +128,7 @@ def test_pin_project_list_supports_entity_filter():
     # 預設因人而異：有我的帳權限＝兩本都看（owner「跟我有關的專案我都要看到」），
     # 其他人＝母公司（不淹沒同事的列表）
     assert "_defaultEntity()" in state
-    fn = state.split("function _defaultEntity()")[1].split("}")[0]
+    fn = js_func_body(state, "function _defaultEntity()")
     assert "finance_mine" in fn and "'parent'" in fn
     html = _read("frontend/tabs/crm/crm-projects.html")
     assert 'id="proj-filter-entity"' in html
@@ -243,7 +248,7 @@ def test_cash_entry_cannot_link_a_project_from_the_other_ledger():
 
     下拉帶了 entity 之後這條路正常走不到，但守衛不能靠 UI。
     """
-    src = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
+    src = finance_src()
     fn = src.split("async def _assert_project_same_entity(")[1].split("\ndef ")[0]
     assert 'status_code=403' in fn
     # 建立與更新兩條路都要叫
@@ -483,7 +488,7 @@ def test_new_and_edited_cases_land_in_receivable():
     assert "receivable_fields(" in resync
     upd = src.split("async def update_project_ledger(")[1].split("\n@router")[0]
     assert "resync_receivable(p, d)" in upd
-    fin = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
+    fin = finance_src()
     assert "receivable_fields(" in fin, "收支同步要走同一支，不是自己再算一份"
     assert "p.amount_receivable = expected - received" not in fin, "舊的第二份算式"
 

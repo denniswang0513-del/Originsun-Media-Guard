@@ -7,7 +7,10 @@
 """
 from pathlib import Path
 
+from tests.unit._srcscan import js_func_body
+
 from core.cash_taxonomy import book_of, item_of, join_category, split_category, taxonomy
+from tests.unit._srcscan import finance_src
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,14 +45,14 @@ def test_taxonomy_scoped_to_this_ledger():
     """🔴 值域＝這本帳實際用到的類別 ∪ 同類別底下未用過的 —— 直接餵整份
     finance_category_map（兩本帳共用）會讓母公司的平面類別（行政/薪資…）
     各自變成一個「類別」，私帳的類別下拉從 5 個爆成 37 個（實測）。"""
-    src = _read("routers/crm/finance.py")
+    src = finance_src()
     opt = src.split("async def cash_entry_options(")[1].split(chr(10) + "@router")[0]
     assert "CrmCashEntry.category" in opt and "distinct()" in opt, "值域要從實際資料來"
     assert "books_used" in opt and "book_of(c) in books_used" in opt
 
 
 def test_backend_serves_three_levels():
-    src = _read("routers/crm/finance.py")
+    src = finance_src()
     opt = src.split("async def cash_entry_options(")[1].split(chr(10) + "@router")[0]
     assert '"taxonomy": taxonomy(' in opt
     lst = src.split("async def list_cash_entries(")[1].split(chr(10) + "@router")[0]
@@ -76,7 +79,7 @@ def test_cashbook_ui_three_columns_and_cascading_filters():
     # 連動：每一層只列上一層底下的（規則只有 _taxKidsAt 一份，篩選與編輯共用）
     assert "_taxKidsAt = (chain, i)" in js
     # 選「全部」＝退回上一層，不是整個清空（不然一路點下去就回不去了）
-    seg = js.split("function _syncTaxFilter()")[1].split("function ")[0]
+    seg = js_func_body(js, "function _syncTaxFilter()")
     assert "chain[i - 1].id" in seg
     ed = js.split("window._cashTaxEdit = (ev")[1].split("/** 刷卡金額")[0]
     assert "Math.min(level, chain.length)" in ed, "上層沒值時要從頭問（形不成路徑）"
@@ -111,8 +114,8 @@ def test_sync_taxonomy_never_derives_item_from_category():
     `_sync_taxonomy` 一旦推導它（`item_of(category)`，平類別＝空字串），
     使用者從編輯視窗按一次存檔就把那一欄清掉了，而畫面上沒有任何提示。
     """
-    from tests.unit._srcscan import code_only, func_body, repo_src
-    body = code_only(func_body(repo_src("routers/crm/finance.py"),
+    from tests.unit._srcscan import (code_only, func_body)
+    body = code_only(func_body(finance_src(),
                                "async def _sync_taxonomy("))
     tail = body.split("if not (")[1]      # 節點分支之後那一段（category 那條路）
     assert "item_of(" not in tail, "category 那條路不可以推導 item"
@@ -130,7 +133,7 @@ def test_editing_a_row_does_not_demote_a_node_deeper_than_three_levels():
     """
     import asyncio
 
-    from routers.crm.finance import _sync_taxonomy
+    from routers.crm.cash import _sync_taxonomy
 
     class Row:
         entity = "mine"

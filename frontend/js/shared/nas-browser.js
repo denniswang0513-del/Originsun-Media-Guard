@@ -11,9 +11,8 @@ function _fmt(bytes) {
     return (bytes / 1e3).toFixed(0) + ' KB';
 }
 
-function _esc(s) {
-    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+// 逃脫走 dom.js（本檔原本這份漏了單引號，而檔名/路徑是可能帶單引號的）
+import { esc as _esc } from './dom.js';
 
 /**
  * Open NAS browser modal and return selected path.

@@ -13,7 +13,7 @@
 既有 36 條全歸母公司（ALTER 的 DEFAULT 'parent' 就是回填），私帳從 0 開始
 自己設 —— owner 拍板。
 """
-from tests.unit._srcscan import (call_args, code_only, func_body, js_code_only,
+from tests.unit._srcscan import (migration_sql, call_args, code_only, flow_body, func_body, js_code_only,
                                  js_func_body, repo_src)
 
 STMT = "routers/api_finance_stmt.py"
@@ -21,7 +21,9 @@ JS = "frontend/tabs/finance/subviews/recon.js"
 
 
 def _fn(name):
-    return code_only(func_body(repo_src(STMT), name))
+    # flow_body 而不是 func_body：這些斷言問的是「這條流程有沒有做這件事」，
+    # 不是「這段程式住在哪一支函式」——端點抽出階段 helper 時不該變紅。
+    return code_only(flow_body(repo_src(STMT), name))
 
 
 def test_the_rules_table_is_scoped_by_ledger():
@@ -30,7 +32,7 @@ def test_the_rules_table_is_scoped_by_ledger():
     seg = m.split("class BankImportRule(")[1].split("\nclass ")[0]
     assert 'entity = Column(String(16), nullable=False, server_default="parent")' in seg
     assert '"ix_bankrule_acct", "entity"' in seg
-    mig = repo_src("main.py")
+    mig = migration_sql()
     assert "ALTER TABLE bank_import_rules ADD COLUMN IF NOT EXISTS " in mig
     assert "entity VARCHAR(16) NOT NULL DEFAULT 'parent'" in mig
 
@@ -78,7 +80,7 @@ def test_the_category_whitelist_is_per_ledger():
             (STMT, "async def _assert_known_category("),
             (STMT, "async def list_import_rules("),
             (STMT, "async def _build_statement_preview("),
-            ("routers/crm/finance.py", "async def cash_entry_options("),
+            ("routers/crm/cash.py", "async def cash_entry_options("),
             ("routers/api_finance_card.py", "async def ai_suggest_categories(")):
         fn = code_only(func_body(repo_src(src), name))
         assert "ledger_categor" in fn, (src, name)
@@ -86,7 +88,7 @@ def test_the_category_whitelist_is_per_ledger():
     # 🔴 值域與畫面用的樹是一組（深淺不同：值域含停用節點、樹只放啟用的），
     # 兩個都要的地方走同一支 —— 各自寫一遍就是同一份契約散成兩份
     for src, name in ((STMT, "async def _build_statement_preview("),
-                      ("routers/crm/finance.py", "async def cash_entry_options(")):
+                      ("routers/crm/cash.py", "async def cash_entry_options(")):
         fn = code_only(func_body(repo_src(src), name))
         assert "ledger_categories_and_tree(" in fn, (src, name)
         assert "load_nodes(" not in fn, (src, name)
@@ -165,7 +167,7 @@ def test_a_rule_can_target_any_depth_of_the_tree():
     m = repo_src("db/models.py")
     seg = m.split("class BankImportRule(")[1].split("\nclass ")[0]
     assert "taxonomy_node_id = Column(String(32), nullable=True)" in seg
-    assert "taxonomy_node_id VARCHAR(32)" in repo_src("main.py")
+    assert "taxonomy_node_id VARCHAR(32)" in migration_sql()
     # 分類器把節點一起回；一律三元組（條件式回傳會讓呼叫端得猜拿到幾個值）
     cls = code_only(func_body(repo_src("core/bank_statement.py"), "def _classify("))
     assert 'return cat, direction, (r[4] if len(r) > 4 else "")' in cls
@@ -206,7 +208,7 @@ def test_petty_claim_from_the_import_reuses_the_existing_flow():
     不落其他」、重推防線都在那支裡面）。"""
     body = code_only(func_body(repo_src(STMT), "async def _push_one_petty("))
     assert "_push_from_cash(session, staff" in body
-    apply_fn = code_only(func_body(repo_src(STMT), "async def apply_bank_statement("))
+    apply_fn = _fn("async def apply_bank_statement(")
     assert "petty_rows.append((r, ce))" in apply_fn
     # 🔴 請款人從 token 解（不收前端傳值），而且**解一次**不是每列解 ——
     # resolve_current_staff 會另開 session 跑兩個查詢，放迴圈裡就是 2N 次
@@ -218,9 +220,13 @@ def test_a_failed_petty_push_does_not_fail_the_whole_import():
     """🔴 推不動的不能讓整批匯入白做（那批帳已經是對的）—— 收集理由回報，
     而且前端**一定要講出來**：不講的話使用者以為都送出去了，那筆錢就跟公司
     要不回來。"""
-    apply_fn = code_only(func_body(repo_src(STMT), "async def apply_bank_statement("))
-    assert "petty_failed.append(" in apply_fn
-    assert '"petty_failed": petty_failed' in apply_fn
+    apply_fn = _fn("async def apply_bank_statement(")
+    # 🔴 斷言寫「例外被收成清單、清單有回出去」，不寫變數叫什麼名字 ——
+    # 原本釘的是 `petty_failed.append(`，把階段抽成 helper（區域變數改叫 failed）
+    # 就紅了一次，而行為一個字都沒變。
+    assert "except HTTPException" in apply_fn and "failed.append(" in apply_fn, \
+        "推不動的沒有被接住 → 一列失敗就整批回滾"
+    assert '"petty_failed":' in apply_fn, "失敗理由沒有回給前端"
     js = js_code_only(repo_src(JS))
     assert "r.petty_failed || []" in js and "alert(" in js
 

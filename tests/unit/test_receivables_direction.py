@@ -14,6 +14,7 @@
 import re
 
 from core.finance_logic import ar_open_invoices, iter_revenue_invoices
+from tests.unit._srcscan import finance_src
 
 
 def _inv(**kw):
@@ -33,7 +34,7 @@ def _src(rel):
 
 def test_receivables_query_filters_payment_direction():
     """CRM 應收帳款子視圖的查詢要把 payment_type 釘成收款（NULL 視為收款）。"""
-    src = _src("routers/crm/finance.py")
+    src = finance_src()
     i = src.index("async def receivables_summary(")
     body = src[i:i + 3000]
     assert 'CrmInvoice.payment_type == "收款"' in body, \
@@ -73,6 +74,6 @@ def test_no_other_receivables_query_forgot_the_filter():
     有三種說法（已收款／待撥款／已撥款），各處自己寫字串遲早漏掉一個，漏掉的
     那個就會被算回應收（「已轉撥」漏掉那次把應收虛增成 4.7 倍）。
     """
-    src = _src("routers/crm/finance.py")
+    src = finance_src()
     hits = re.findall(r'payment_status\.notin_\(\[\*INVOICE_COLLECTED, "作廢"\]\)', src)
     assert len(hits) == 1, f"應收條件出現 {len(hits)} 處，新增的那處也要過濾 payment_type"

@@ -3,7 +3,7 @@
 
 owner 2026-08-20：一份跨月的對帳單不該逼人切成三次傳。
 """
-from tests.unit._srcscan import code_only, func_body, repo_src  # noqa: E402
+from tests.unit._srcscan import code_only, flow_body, repo_src  # noqa: E402
 
 # 🔴 跨兩個檔案：對帳工作台（add_statement_lines）留在 api_finance，
 # 對帳單匯入（apply_bank_statement）2026-08-21 搬去 api_finance_stmt。
@@ -12,7 +12,7 @@ STMT = 'routers/api_finance_stmt.py'
 
 
 def _body(fn, rel=SRC):
-    return code_only(func_body(repo_src(rel), fn))
+    return code_only(flow_body(repo_src(rel), fn))
 
 
 def test_month_is_derived_per_row_not_taken_from_payload():

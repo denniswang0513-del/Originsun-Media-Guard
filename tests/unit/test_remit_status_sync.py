@@ -22,9 +22,11 @@ import pytest
 from core.finance_logic import (INVOICE_PENDING_REMIT, INVOICE_RECEIVED,
                                 INVOICE_REMITTED)
 from routers.crm.finance import sync_remit_status
-from tests.unit._srcscan import func_body, repo_src
+from tests.unit._srcscan import finance_src, func_body
 
-SRC = "routers/crm/finance.py"
+# 內容本身（不是路徑）—— finance.py 2026-08-30 拆成四個檔，
+# finance_src() 把它們串起來，斷言釘的是「這支函式做了什麼」不是它在哪。
+SRC = finance_src()
 
 
 class _Inv:
@@ -106,7 +108,7 @@ def test_an_already_remitted_invoice_is_not_rewritten():
 def test_every_path_that_changes_paidness_goes_through_the_rule():
     """🔴 這條是這支測試真正的重點。規則只有一份沒有用，要**每一條改付款狀態
     的路徑都呼叫它** —— 漏掉的那條就是 owner 這次撞到的那種矛盾的來源。"""
-    src = repo_src(SRC)
+    src = SRC
     for fn in ("async def batch_pay(",
                "async def batch_unpay(",
                "async def resettle_payment_requests(",
@@ -119,7 +121,7 @@ def test_every_path_that_changes_paidness_goes_through_the_rule():
 
 def test_the_rule_is_not_duplicated_inline_anywhere():
     """收成一份之後，就不該再有人在別處手寫 `inv.payment_status = 已撥款`。"""
-    src = repo_src(SRC)
+    src = SRC
     body = func_body(src, "async def sync_remit_status(")
     # 指派給發票撥款狀態的地方，全檔只有正本裡那一個迴圈
     assert "inv.payment_status = state" in body
@@ -153,7 +155,7 @@ def test_repointing_a_request_takes_the_old_invoice_back():
 
     # 規則寫對了還要真的接上去 —— update_payment 少傳一個參數，改指就不會退回，
     # 而上面那段直接測 sync_remit_status 是看不出來的。
-    body = func_body(repo_src(SRC), "async def update_payment(")
+    body = func_body(SRC, "async def update_payment(")
     assert "prev_src = p.source_invoice_id" in body, "沒記下原本指向哪張票"
     assert "previous_invoice_id=prev_src" in body,         "記了卻沒傳給規則 —— 改指時原本那張不會退回"
 

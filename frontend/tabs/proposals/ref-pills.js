@@ -8,7 +8,8 @@
  * 兩個頁面的 .pill / .pill.ok / .pill.used 樣式類名相同，這裡只產 HTML。
  */
 
-const esc = (s) => { const d = document.createElement('div'); d.textContent = String(s ?? ''); return d.innerHTML; };
+// 逃脫走 dom.js（理由同上：textContent 不逃脫引號）
+import { esc } from '../../js/shared/dom.js';
 
 // archive_status → 顯示（空字串 = 還沒排到，不顯示 pill 以免整庫都掛「待建檔」噪音）
 export const ARCHIVE_LABEL = {

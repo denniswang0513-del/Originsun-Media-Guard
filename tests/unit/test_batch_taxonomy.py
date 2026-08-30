@@ -6,8 +6,10 @@
 """
 from pathlib import Path
 
+from tests.unit._srcscan import finance_src
+
 ROOT = Path(__file__).resolve().parents[2]
-SRC = (ROOT / "routers/crm/finance.py").read_text(encoding="utf-8")
+SRC = finance_src()
 JS = (ROOT / "frontend/tabs/crm/crm-cashbook.js").read_text(encoding="utf-8")
 FN = SRC.split("async def batch_set_taxonomy(")[1].split("\n@router")[0]
 

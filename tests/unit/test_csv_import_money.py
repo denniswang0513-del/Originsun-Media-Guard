@@ -9,9 +9,13 @@
    應收帳款憑空消失、收入被提前認列。
 """
 import pytest
+from tests.unit._srcscan import finance_src
 
-from routers.crm.finance import (_map_cash_row, _map_invoice_row,
-                                 _map_payment_row, _parse_money)
+# 🔴 三支 mapper 2026-08-30 隨著 finance.py 拆檔各自搬家（收支→cash、
+# 請款→payments、發票與共用的 _parse_money 留在 finance）。行為沒變。
+from routers.crm.cash import _map_cash_row
+from routers.crm.payments import _map_payment_row
+from routers.crm.finance import _map_invoice_row, _parse_money
 
 
 # ── _parse_money：三支 import_csv 的單一正本 ──────────────────
@@ -139,8 +143,8 @@ def test_the_three_money_importers_share_one_skeleton():
     起算、entity='parent'、以及**先 parse 全部再一次判月、任一列落鎖定月整批 409**。
     第四支帳務 CSV 一定會漏抄其中一半，而漏掉守衛＝把一個已經結完帳的月份重新打開。
     """
-    from tests.unit._srcscan import code_only, func_body, repo_src
-    src = repo_src('routers/crm/finance.py')
+    from tests.unit._srcscan import code_only, func_body
+    src = finance_src()
     skel = code_only(func_body(src, 'async def _import_money_csv('))
     for must in ('_assert_rows_open(', 'entity="parent"', 'big5', 'start=2'):
         assert must in skel, f'共用骨架少了 {must}'

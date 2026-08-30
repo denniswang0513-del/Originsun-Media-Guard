@@ -6,6 +6,7 @@
 from core.cash_taxonomy import mirror_from_path, split_category
 from core.cash_tree import build_tree, flatten
 from db.seed_cash_taxonomy import CANONICAL, HOUSE_GROUPS, canonical_paths
+from tests.unit._srcscan import finance_src
 
 
 class _N:
@@ -94,7 +95,7 @@ def test_build_tree_drops_orphans():
 
 
 # ── 階段 2：寫入端的兩個容易靜默出錯的地方（讀原始碼釘住）─────────────
-_FIN = open("routers/crm/finance.py", encoding="utf-8").read()
+_FIN = finance_src()
 
 
 def test_create_decides_taxonomy_by_what_was_actually_sent():

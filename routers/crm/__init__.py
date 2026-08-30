@@ -9,7 +9,10 @@ from . import projects   # noqa: F401  專案管理 + 結案看板 + CSV
 from . import quotes     # noqa: F401  報價 + 報價範本
 from . import staff      # noqa: F401  人力 + 履歷 + 派工
 from . import costs      # noqa: F401  雜支 + 收據 + 成本估算 + 子表
-from . import finance    # noqa: F401  發票 + 請款 + 收支 + 應付/應收
+from . import finance    # noqa: F401  共用 helper + 發票（cash/payments/taxonomy 都 import 它）
+from . import cash       # noqa: F401  收支明細 + 應付/應收 + 收款↔發票分配
+from . import payments   # noqa: F401  請款單 + 預支款 + 批次付款
+from . import taxonomy   # noqa: F401  私帳收支分類樹（/cash-taxonomy）
 from . import invoice_files  # noqa: F401  電子發票檔（上傳/下載/分享連結）＋發票根目錄設定
 from . import showcase   # noqa: F401  Showcase + token 編輯 + Site API
 from . import works      # noqa: F401  1:N 作品子端點（依賴 projects/showcase，須在其後）

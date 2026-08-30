@@ -9,7 +9,7 @@
 守衛有沒有真的裝在每一條進得了門的路上、附件會不會被整包寫回洗掉、
 既有的兩個共用池會不會被這次改動波及。
 """
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import migration_sql, code_only, func_body, repo_src
 
 SRC = "routers/crm/benefits.py"
 JS = "frontend/tabs/hr_benefits/hr_benefits.js"
@@ -28,7 +28,7 @@ def test_shared_is_the_default_everywhere():
     from db.models import HrBenefitPool
     col = HrBenefitPool.__table__.c["quota"]
     assert col.server_default.arg == "shared"
-    assert "'shared'" in repo_src("main.py"), "migration 沒有給 DEFAULT"
+    assert "'shared'" in migration_sql(), "migration 沒有給 DEFAULT"
     # 讀的那一側也要有 fallback（舊列可能是 NULL）
     assert '(p.quota or "shared")' in repo_src(SRC)
 

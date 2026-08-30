@@ -1,5 +1,8 @@
 # 新增對外網站頁面 SEO Checklist
 
+> 📅 最後更新：2026-04-30　—　🔴 規格與程式碼分歧時**以程式碼為準**。
+> 這份文件不會自動跟著改，日期越舊越要當心（用 `git log -1 -- docs/NEW_PAGE_CHECKLIST.md` 確認）。
+
 每加一個 `.astro` 頁面到 [`website/src/pages/`](../website/src/pages/)，依序過 10 關。
 SEO 鐵閘會擋掉常見漏項，但有些細節仍要人工確認。
 

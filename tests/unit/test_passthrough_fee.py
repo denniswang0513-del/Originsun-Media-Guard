@@ -98,14 +98,14 @@ def test_uses_the_shared_tax_helper():
 
 def test_pnl_and_drilldown_use_the_same_function():
     """🔴 表頭用淨額、明細用 commission 的話，明細加起來永遠對不上表頭。"""
-    from tests.unit._srcscan import repo_src
-    for path in ("core/finance_logic.py", "services/finance_statements.py"):
-        assert "passthrough_fee_income(inv)" in repo_src(path), path
+    from tests.unit._srcscan import finance_logic_src, repo_src
+    assert "passthrough_fee_income(inv)" in finance_logic_src()
+    assert "passthrough_fee_income(inv)" in repo_src("services/finance_statements.py")
 
 
 def test_label_says_tax_was_deducted():
     """標籤要講出「已扣銷項稅」—— 不然看的人會以為那是 8% 的全額。"""
-    from tests.unit._srcscan import repo_src
-    src = repo_src("core/finance_logic.py")
+    from tests.unit._srcscan import finance_logic_src
+    src = finance_logic_src()
     assert "代開手續費（已扣銷項稅）" in src
     assert '"代開手續費收入", c)' not in src, "舊的整筆記法還在"

@@ -9,6 +9,7 @@
 推得動 → 推之前母公司 2026-08 損益表有那筆 9,000（預支核銷）、推之後歸零。
 """
 from pathlib import Path
+from tests.unit._srcscan import finance_src
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -37,7 +38,7 @@ def test_parent_pnl_excludes_mine_project_expenses():
 
 def test_advance_settlement_excludes_mine_project_expenses():
     """核銷＝「這筆預支變成公司的成本」，私帳專案的花費不能拿來核銷。"""
-    src = _read("routers/crm/finance.py")
+    src = finance_src()
     fn = src.split("async def list_advances(")[1].split("\n@router")[0] \
         if "async def list_advances(" in src else src
     assert "_not_mine_project(CrmProjectExpense)" in fn

@@ -4,6 +4,7 @@
 算式本身（實收／檢查／案源費率）釘在 test_ledger_source_rules.py。
 """
 from pathlib import Path
+from tests.unit._srcscan import finance_src
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -114,7 +115,7 @@ def test_outsource_has_two_writers_and_both_say_so():
     自己是唯一的寫入者，然後「順手統一」掉另一邊。
     """
     lp = _read("core/ledger_project.py")
-    fin = _read("routers/crm/finance.py")
     assert "_apply_outsource" in lp, "apply_crm_costs 要指向另一個寫入者"
-    assert "apply_crm_costs" in fin[fin.index("async def _apply_outsource"):
-                                   fin.index("def _mine_or_admin_write")]
+    # 🔴 用函式邊界切，不要用「兩個函式之間」的位置切 —— 那兩支 2026-08-30
+    # 拆檔後落在不同檔案，位置切法會切出空字串（斷言就變成假通過）。
+    assert "apply_crm_costs" in finance_src("async def _apply_outsource(")

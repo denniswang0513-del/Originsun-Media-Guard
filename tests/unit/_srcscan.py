@@ -33,6 +33,30 @@ def func_body(src: str, header: str) -> str:
     return src[i:i + len(header) + (min(ends) if ends else len(rest))]
 
 
+def flow_body(src: str, header: str) -> str:
+    """一條**流程**的程式碼：那支函式，加上它在同一個檔裡呼叫的自家 helper。
+
+    🔴 2026-08-30 加。掃描斷言老是寫成 `func_body(src, "async def 某端點(")`，
+    釘的其實是「這段程式住在哪一支函式裡」—— 而規則是「這條流程有沒有做這件事」。
+    於是把 285 行的端點抽出兩個階段函式（純搬運、行為零改變），四支測試立刻紅了，
+    紅的理由是「找不到 BankStatementLine(」，看起來像功能不見了。
+
+    這種假紅有實質代價：它讓「把長函式切開」變成一件會弄壞測試的事，於是沒有人
+    切，於是那個檔繼續長。要守的東西應該是行為，不是行號。
+
+    只跟一層（`_` 開頭的同檔 helper）—— 夠用，而且不會把半個模組拖進來。
+    """
+    body = func_body(src, header)
+    seen = {header}
+    for name in sorted(set(re.findall(r"\b(_[A-Za-z0-9_]+)\s*\(", body))):
+        for h in (f"async def {name}(", f"def {name}("):
+            if h in src and h not in seen:
+                seen.add(h)
+                body += "\n" + func_body(src, h)
+                break
+    return body
+
+
 def code_only(body: str) -> str:
     """剝掉 docstring 與 # 註解，只留程式碼。"""
     body = re.sub(r'"""[\s\S]*?"""', "", body)
@@ -125,3 +149,66 @@ def py_callers(*roots) -> dict:
                     getattr(n.func, "id", None) or getattr(n.func, "attr", None)
                     for n in ast.walk(fn) if isinstance(n, ast.Call)}
     return out
+
+
+def migration_sql() -> str:
+    """開機時會跑的**所有** migration SQL，串成一大段文字。
+
+    🔴 用它，不要直接讀 `main.py`：那些 SQL 2026-08-30 從 `_on_startup`（895 行、
+    占 main.py 58%）搬進了 `db/migrations.py`，七支斷言「這句 SQL 在 main.py 裡」
+    的測試當場全紅 —— 它們釘的是**位置**不是規則。這一支兩個檔案都收，所以
+    下次再搬也不會紅。
+    """
+    return repo_src("db/migrations.py") + "\n" + repo_src("main.py")
+
+
+def finance_src(header: str = "") -> str:
+    """原本 `routers/crm/finance.py` 那一整個檔的內容。
+
+    🔴 2026-08-30 那個檔 2,996 行（超過 AI 單次讀取上限、又是三週改動第一名），
+    依真實相依方向拆成四個：`finance.py`（共用 helper ＋ 發票）、`cash.py`
+    （收支明細／應付／應收／收款分配）、`payments.py`（請款單）、`taxonomy.py`
+    （分類樹）。三個新模組只 import finance，沒有反向依賴。
+
+    當時有三十幾支斷言寫著 `repo_src("routers/crm/finance.py")` —— 它們釘的是
+    **函式在哪個檔案**，而規則其實是「這支函式做了什麼」。用這一支就不會被拆檔
+    弄紅：它把四個檔串起來（同源，沒有同名函式），下次再拆只要改這裡一行。
+
+    給 `header` 就回那支函式的本體（在四個檔裡找）。
+    """
+    return _split_file_src("routers/crm", ("finance.py", "cash.py",
+                                           "payments.py", "taxonomy.py"), header)
+
+
+def finance_logic_src(header: str = "") -> str:
+    """原本 `core/finance_logic.py` 那一整個檔的內容。
+
+    🔴 2026-08-30 同樣的理由拆成套件 `core/finance_logic/`（原本 2,548 行、
+    改動第二頻繁的財務檔）：`_core`（月份/折舊/貸款/發票狀態/期末部位）
+    ← `_statements`（損益表 + 資產負債表）← `_flows`（現金流量表 + 檢核）。
+    純行段切割、零函式搬家，跨檔的邊全部同向。
+
+    用這一支而不是 `repo_src("core/finance_logic.py")` —— 理由同 `finance_src`：
+    那些斷言釘的是「這支函式做了什麼」，不是「它住在哪個檔」。
+    """
+    return _split_file_src("core/finance_logic",
+                           ("_core.py", "_statements.py", "_flows.py"), header)
+
+
+def _split_file_src(rel_dir: str, files: tuple, header: str = "") -> str:
+    """一個被拆開的檔：把幾塊串回去，或在其中一塊裡找出某支函式的本體。
+
+    拆檔要對掃描測試無感，靠的就是這一支 —— 下次再拆只要改呼叫端那一行的清單。
+    """
+    import pathlib
+
+    base = pathlib.Path(_REPO).joinpath(*rel_dir.split("/"))
+    parts = [(base / n).read_text(encoding="utf-8")
+             for n in files if (base / n).exists()]
+    assert parts, f"{rel_dir} 底下一個檔都讀不到（拆檔後改名了？）"
+    if not header:
+        return "\n".join(parts)
+    for src in parts:
+        if header in src:
+            return func_body(src, header)
+    raise AssertionError(f"{rel_dir} 的 {files} 裡找不到 {header!r}")

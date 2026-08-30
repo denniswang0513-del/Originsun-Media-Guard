@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 
 from routers.crm.finance import _alloc_verdict  # noqa: E402
-from tests.unit._srcscan import code_only, func_body, repo_src  # noqa: E402
+from tests.unit._srcscan import code_only, func_body  # noqa: E402
+from tests.unit._srcscan import finance_src
 
 
 def _entry(deposit):
@@ -71,7 +72,7 @@ def test_delete_cash_entry_also_deletes_its_invoice_links():
     刪掉三筆分期收款後，發票仍顯示已收滿額、尚欠 0）。這測掃原始碼確認刪除
     端點真的有那道 delete，比起完整跑一次 DB 便宜得多。
     """
-    body = code_only(func_body(repo_src('routers/crm/finance.py'),
+    body = code_only(func_body(finance_src(),
                                'async def delete_cash_entry('))
     # 收緊：只斷言出現 `CrmCashInvoiceLink` 的話，把 delete 換成 select（正是這條
     # 要防的退化）照樣通過。要求刪除語句本身與那個條件都在。
@@ -87,7 +88,7 @@ def test_both_write_paths_sync_the_allocation_table():
     空的、那張發票的已收金額停在 0（兩者讀 crm_cash_invoice_links）。要有人多按
     一次編輯再存檔才會補上 —— 帳對不對取決於有沒有人多按那一下。
     """
-    src = repo_src('routers/crm/finance.py')
+    src = finance_src()
     for fn in ('async def create_cash_entry(', 'async def update_cash_entry('):
         body = code_only(func_body(src, fn))
         assert '_sync_single_alloc' in body, f'{fn} 沒有同步發票分配表'
@@ -132,7 +133,7 @@ def test_settlement_rule_has_exactly_one_definition():
     2026-08-20 之前有三種寫法各自為政：編輯路徑「碰到就標已收款」、分配面板
     「完全不動」、刪除路徑「無條件打回未收款」。
     """
-    src = repo_src('routers/crm/finance.py')
+    src = finance_src()
     # 收款狀態一律由分配表那條路收尾：三個寫入端點走 _sync_single_alloc /
     # replace_invoice_allocs（兩者最終都是 replace_invoice_allocs），刪除那條
     # 沒有分配可寫，直接呼叫 _resettle_invoice。
@@ -158,7 +159,7 @@ def test_settlement_rule_has_exactly_one_definition():
 
 def test_edit_form_cannot_flatten_a_multi_invoice_allocation():
     """多張分配時，編輯視窗換發票要被擋 —— 不能靜默把其他幾張的已收清掉。"""
-    body = code_only(func_body(repo_src('routers/crm/finance.py'),
+    body = code_only(func_body(finance_src(),
                                'async def _sync_single_alloc('))
     assert 'len(existing) > 1' in body and '409' in body, \
         '_sync_single_alloc 又會把多張分配壓成一張了'
@@ -186,8 +187,8 @@ def test_nothing_collected_is_never_settled():
 
 def test_the_settled_rule_has_exactly_one_definition():
     """呼叫端不准再自己補一次 `got > 0`。"""
-    from tests.unit._srcscan import code_only, repo_src
-    src = code_only(repo_src("routers/crm/finance.py"))
+    from tests.unit._srcscan import code_only
+    src = code_only(finance_src())
     assert "got > 0 and amount_is_settled" not in src
     assert "got and amount_is_settled" not in src
 

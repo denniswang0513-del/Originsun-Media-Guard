@@ -13,7 +13,8 @@
 🔴 只有 `source='cash'` 分家。`payment`／`invoice` 是公司流程的詞彙，兩本帳講的
 是同一件事（私帳的 34 張請款用的就是母公司那批類別），分了會把私帳的請款打斷。
 """
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import migration_sql, code_only, func_body, repo_src
+from tests.unit._srcscan import finance_src
 
 
 def test_the_mapping_table_is_scoped_by_ledger():
@@ -25,7 +26,7 @@ def test_the_mapping_table_is_scoped_by_ledger():
     # 與私帳的「其他」對到不同科目）。舊的 (source, category_text) 會擋住其中一個。
     assert '"uq_fincatmap_entity_source_text"' in seg
     assert '"entity", "source", "category_text", unique=True' in seg
-    mig = repo_src("main.py")
+    mig = migration_sql()
     assert ("ALTER TABLE finance_category_map ADD COLUMN IF NOT EXISTS "
             in mig and "entity VARCHAR(16) NOT NULL DEFAULT 'parent'" in mig)
     assert "DROP CONSTRAINT IF EXISTS uq_fincatmap_source_text" in mig
@@ -64,7 +65,7 @@ def test_every_read_of_the_cash_half_is_scoped():
                                 "async def _petty_item_domain("))
     assert 'FinanceCategoryMap.entity == "parent"' in petty
     # 分類樹改名 → 對映的鍵跟著改，只能改這本帳那一筆
-    ren = code_only(func_body(repo_src("routers/crm/finance.py"),
+    ren = code_only(func_body(finance_src(),
                               "async def _rename_category_map("))
     assert ren.count("FinanceCategoryMap.entity == ent") == 2
 

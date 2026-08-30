@@ -1,6 +1,7 @@
 import { appendLog, resetProgress, pickPath, getComputeBaseUrl, validateRemotePaths, toUncPath, ensureDriveMap, bearerHeader } from '../../js/shared/utils.js';
 import { fmtDuration as _fmtDuration, fmtSize as _fmtSize, parseCreationTimeLocal } from '../../js/shared/clip_utils.js';
 import { createClipCard } from '../../js/shared/clip_card.js';
+import { esc } from '../../js/shared/dom.js';
 // Ensure openConcatEditor is available on window from drone_meta tab too
 import '../concat/concat_editor_modal.js';
 
@@ -903,8 +904,8 @@ function _dmwBuildSnapshotHtml(cfg, saved, current) {
         ['concat_xfade_duration','轉場秒數', v => `${v ?? 1}s`],
     ];
 
-    const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
+    // 逃脫走檔頭 import 的 dom.js esc（本檔原本那份不逃引號，而且 String(s)
+    // 對 null 會印出 "null"）
     const topHtml = topRows.map(([label, val]) =>
         `<div class="flex justify-between gap-3 py-0.5"><span class="text-gray-500">${label}</span><span class="text-gray-200 text-right truncate">${esc(val)}</span></div>`
     ).join('');

@@ -10,9 +10,12 @@ card_outstanding（期初＋刷卡−還款）出，卡片帳戶若落進 cash �
 一邊當資產一邊當負債。
 """
 from pathlib import Path
+from tests.unit._srcscan import js_func_body
+
 
 from core.card_statement import charges_by_card
 from core.finance_logic import CARD_KIND, is_card_kind, split_bank_lines
+from tests.unit._srcscan import finance_src
 
 ROOT = Path(__file__).resolve().parents[2]
 NL = chr(10)
@@ -68,12 +71,12 @@ def test_import_carries_the_card():
 def test_card_tab_switches_to_card_detail():
     js = _read("frontend/tabs/crm/crm-cashbook.js")
     assert "data-card=" in js, "卡片頁籤"
-    tabs = js.split("function _renderAcctTabs()")[1].split("function _cardChipHtml")[0]
+    tabs = js_func_body(js, "function _renderAcctTabs()")
     assert "_bankOnly(_bankAccounts)" in tabs, "銀行頁籤只列真銀行帳戶"
     assert "_filters.status = 'card'" in tabs, "點卡片頁籤＝切換成信用卡明細"
     assert "_filters.status = ''" in tabs, "點回銀行頁籤要清掉卡片視角"
     assert "params.set('status'" in js
-    api = _read("routers/crm/finance.py")
+    api = finance_src()
     lst = api.split("async def list_cash_entries(")[1].split(NL + "@router")[0]
     assert "status: str = Query" in lst and "CrmCashEntry.status == status" in lst
     fu = _read("frontend/tabs/finance/fin-utils.js")

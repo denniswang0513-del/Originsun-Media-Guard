@@ -2,6 +2,7 @@
 """案源規則（owner 2026-08-25）：源日＝現金收款；代開發票＝營收×服務費率的
 代辦費（預設 8%，191 個歷史案實證全部 8.00%；逐案可調）。正本在
 core.ledger_project.apply_source_fee —— 前端只是同一條式子的即時預覽。"""
+from tests.unit._srcscan import finance_src
 from core.ledger_project import (DEFAULT_FEE_PCT, SOURCES, apply_source_fee,
                                  norm_detail)
 
@@ -60,8 +61,7 @@ def test_received_sync_is_incremental_and_mine_only():
     """🔴 增量制（±delta）不是重算 —— 歷史已收是匯入基準，重算會把老案洗掉。
     三個寫入端點都要掛；update 必須在 setattr 前抓舊值。只管 mine（母公司的
     已收走發票/分配那條既有流程，疊上去＝雙重驅動）。"""
-    from pathlib import Path
-    src = (Path(__file__).resolve().parents[2] / "routers/crm/finance.py").read_text(encoding="utf-8")
+    src = finance_src()   # 四個帳務檔串起來（2026-08-30 拆檔）
     helper = src.split("async def _sync_mine_project_received(")[1].split("\ndef ")[0]
     # mine-only 那半（安全半邊）收在共用前導 _get_mine_project，兩支 sync 都走它
     assert "_get_mine_project(session, project_id)" in helper
@@ -109,8 +109,7 @@ def test_owner_can_write_own_book_but_parent_stays_admin_only():
     """🔴 owner＝lv1＋finance_mine（指名制），原本 CRM 寫入全是 Lv3-only ——
     帳本主人在生產連一筆帳都記不進去（真實帳號形狀實測 403 才發現；先前
     測試全用 Lv3 token）。開 mine full 路徑；母公司維持 Lv3（不放寬同事）。"""
-    from pathlib import Path
-    src = (Path(__file__).resolve().parents[2] / "routers/crm/finance.py").read_text(encoding="utf-8")
+    src = finance_src()   # 四個帳務檔串起來（2026-08-30 拆檔）
     helper = src.split("def _mine_or_admin_write(")[1].split("\ndef ")[0]
     assert 'require_entity(request, "mine", level="full")' in helper
     assert "_check_auth(request)" in helper          # 母公司路徑原樣
@@ -132,18 +131,48 @@ def test_owner_can_write_own_book_but_parent_stays_admin_only():
     assert "_check_auth(" not in alloc and "_mine_or_admin_write(request, e.entity)" in alloc
     batch = src.split("async def batch_assign_project(")[1].split("\n@router")[0]
     assert "_check_auth(" not in batch and "_mine_or_admin_write_rows(request, rows)" in batch
-    for fn_name in ("batch_pay", "batch_unpay", "batch_update_month"):
+    # batch_receive 2026-08-30 併入同一條規則：它原本 `_check_auth` ＋逐張
+    # `session.get(CrmInvoice, iid)` 不看 entity＝可跨帳本改發票（見下面那支測試）
+    for fn_name in ("batch_pay", "batch_unpay", "batch_update_month", "batch_receive"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
         assert "_mine_or_admin_write_rows(request, rows)" in fn, fn_name
-    # 沒動的端點維持 Lv3（發票/CSV 匯入/批次收款/分配）
-    for fn_name in ("create_invoice", "batch_receive"):
+        assert "_check_auth(" not in fn, f"{fn_name}：Lv3-only 會把帳本主人擋在門外"
+    # 沒動的端點維持 Lv3（發票單筆建立／CSV 匯入／分配）
+    for fn_name in ("create_invoice",):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
         assert "_check_auth(request)" in fn, fn_name
 
 
+def test_batch_receive_cannot_touch_the_other_ledger():
+    """🔴 批次標記已收款要按列的帳本驗，不能只認 Lv3。
+
+    原本的形狀：`_check_auth` 過了就逐張 `session.get(CrmInvoice, iid)` 直接改。
+    id 是前端從**已按帳本過濾**的清單帶回來的，所以畫面上摸不到別本帳的發票 ——
+    但端點本身沒有任何一道防線，手打一組 id 就改得到，回應只有一個 updated 數字，
+    不噴錯、不留痕。私帳現在 0 張發票所以還沒出事，這是還沒到期的帳。
+    """
+    fn = finance_src().split("async def batch_receive(")[1].split("\n@router")[0]
+    # 先把會變動的列載齊 → 驗 → 才寫（權限不足時一筆都不動）
+    assert fn.index("_mine_or_admin_write_rows(request, rows)") < fn.index(
+        "_mark_invoice_received("), "守衛要在寫入之前，不能邊改邊驗"
+
+
+def test_a_mixed_batch_needs_write_rights_on_every_ledger_it_touches():
+    """批次守衛取**聯集**：涉及哪幾本帳就要有哪幾本的權限。
+
+    舊版是「全私帳 → mine full；混到母公司 → Lv3」。Lv3 不隱含 finance_mine
+    （生產上除 owner 外每個管理員都是這種），所以往 ids 裡混一張母公司發票，
+    整批就從 Lv3 那道門進來、把私帳那幾列一起改掉。
+    """
+    fn = finance_src().split("def _mine_or_admin_write_rows(")[1].split("\n\n\n")[0]
+    assert "for ent in {" in fn and "_mine_or_admin_write(request, ent)" in fn, \
+        "要逐本驗，不是把整批壓成單一 target_entity"
+    assert 'else "parent"' not in fn.split('or "parent") for r in rows}')[-1], \
+        "混帳本不可以再降級成只驗母公司"
+
+
 def test_outsource_sync_is_incremental_and_scoped():
-    from pathlib import Path
-    src = (Path(__file__).resolve().parents[2] / "routers/crm/finance.py").read_text(encoding="utf-8")
+    src = finance_src()   # 四個帳務檔串起來（2026-08-30 拆檔）
     helper = src.split("async def _apply_outsource(")[1].split("\ndef ")[0]
     # 🔴 帶硬連結的請款單（逐案損益的一鍵請款建的）不累加 —— 那筆錢已經由
     # apply_crm_costs 從 CRM 成本行算過一次（甲案是相加制）

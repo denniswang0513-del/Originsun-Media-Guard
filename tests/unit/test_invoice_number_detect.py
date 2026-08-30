@@ -19,6 +19,7 @@ BS = chr(92)
 # router 只留讀檔那半。
 from core.invoice_pdf import INVOICE_NO_LABELLED as _INVOICE_NO_LABELLED
 from routers.crm.invoice_files import _detect_invoice_number
+from tests.unit._srcscan import finance_src
 
 
 # ── 標籤正則（真 PDF 的抽取結果會長成什麼樣）──────────────
@@ -172,8 +173,9 @@ def test_file_name_resyncs_on_update():
     檔名還停在 `20260806_42ec03d2_…`。"""
     src = _finance_src()
     assert "def _resync_invoice_file(" in src
-    # 🔴 這條跨兩個檔案：helper 在 invoice_files、update_invoice 還在 finance
-    fin = _repo_src("routers/crm/finance.py")
+    # 🔴 這條跨兩個檔案：helper 在 invoice_files、update_invoice 在發票那一側
+    # （本檔的 _finance_src 讀的是 invoice_files，不要跟 _srcscan 的 finance_src 搞混）
+    fin = finance_src()
     i = fin.index("async def update_invoice(")
     assert "_resync_invoice_file" in fin[i:i + 2500], "update_invoice 沒有重新對齊檔名"
     helper = _func_body(src, "def _resync_invoice_file(")

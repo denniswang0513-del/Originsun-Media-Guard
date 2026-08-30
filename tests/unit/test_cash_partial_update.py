@@ -10,7 +10,8 @@ test_project_link_rule_has_one_source 裡那段說明）。
 from types import SimpleNamespace
 
 from core.project_link import CASH_CATEGORIES, PAYMENT_CATEGORIES, PETTY_ITEMS  # noqa: E402
-from tests.unit._srcscan import code_only, func_body, repo_src  # noqa: E402
+from tests.unit._srcscan import code_only, func_body  # noqa: E402
+from tests.unit._srcscan import finance_src
 
 
 def test_update_cash_entry_is_a_partial_update():
@@ -20,7 +21,7 @@ def test_update_cash_entry_is_a_partial_update():
     寫回會把沒送的 status／project_label／invoice_number／payee 洗成預設值 ——
     匯進來的「待確認」標記、專案標籤、發票號碼會在有人按一下編輯之後消失。
     """
-    body = code_only(func_body(repo_src('routers/crm/finance.py'),
+    body = code_only(func_body(finance_src(),
                                'async def update_cash_entry('))
     assert 'exclude_unset=True' in body, 'PUT 又變回整包寫回了 —— 會洗掉沒送的欄位'
 
@@ -45,7 +46,7 @@ def test_project_link_rule_has_one_source():
 
 def test_cash_project_link_is_enforced_on_both_write_paths():
     """建立與更新都要過守衛 —— 只擋前端的話，API 直接打就繞過去了。"""
-    src = repo_src('routers/crm/finance.py')
+    src = finance_src()
     for fn in ('async def create_cash_entry(', 'async def update_cash_entry('):
         body = code_only(func_body(src, fn))
         assert '_enforce_cash_project_link' in body, f'{fn} 沒有強制專案連結規則'
@@ -69,7 +70,7 @@ def test_enforce_cash_project_link_actually_raises():
     """行為版：行政支出掛專案要擋下來（409），專案類的放行。"""
     import pytest
     from fastapi import HTTPException
-    from routers.crm.finance import _enforce_cash_project_link
+    from routers.crm.cash import _enforce_cash_project_link
 
     with pytest.raises(HTTPException) as ei:
         _enforce_cash_project_link(SimpleNamespace(project_id="p1", category="行政"))
@@ -89,7 +90,7 @@ def test_normalize_cash_fks_turns_empty_strings_into_null():
     HTML select 的空選項送出來就是 ''，不是 None，所以每一筆從表單建立的收支
     都會踩到。
     """
-    from routers.crm.finance import _CASH_FK_FIELDS, _normalize_cash_fks
+    from routers.crm.cash import _CASH_FK_FIELDS, _normalize_cash_fks
     e = SimpleNamespace(**{f: "" for f in _CASH_FK_FIELDS})
     _normalize_cash_fks(e)
     for f in _CASH_FK_FIELDS:

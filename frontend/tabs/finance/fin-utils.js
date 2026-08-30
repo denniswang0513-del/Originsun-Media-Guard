@@ -62,9 +62,14 @@ export async function finFetch(path, opts = {}) {
  *  忘了第 12 個呼叫點不會炸，只會靜靜打到母公司帳，所以收成一支。 */
 export const finFetchMine = (path, opts = {}) => finFetch(path, { ...opts, entity: 'mine' });
 
-export function esc(str) {
-    return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+// HTML 逃脫只有 js/shared/dom.js 一份（2026-08-30 收斂：全前端曾有八份，
+// 而且逃脫的字元各不相同）。這裡 re-export，呼叫端一個字都不用改。
+// 🔴 `import` 再 `export`，不能只寫 `export { esc } from …` ——
+// 那是純轉出，**不會在本模組建立區域繫結**，本檔自己用到 esc 的地方會
+// ReferenceError（2026-08-30 收斂時就這樣炸過一次）。
+import { esc } from '../../js/shared/dom.js';
+
+export { esc };
 
 export function fmtNum(n) {
     return (n || 0).toLocaleString('zh-TW');

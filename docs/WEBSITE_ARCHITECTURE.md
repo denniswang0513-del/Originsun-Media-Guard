@@ -1,5 +1,8 @@
 # Originsun 官方網站 — 架構設計書
 
+> 📅 最後更新：2026-06-14　—　🔴 規格與程式碼分歧時**以程式碼為準**。
+> 這份文件不會自動跟著改，日期越舊越要當心（用 `git log -1 -- docs/WEBSITE_ARCHITECTURE.md` 確認）。
+
 > **專案代號**：Phase M
 > **網域**：`originsun-studio.com`（沿用舊站、DNS 轉 Cloudflare）
 > **時程**：2026-04-20 ~ 2026-07-01（10 週）

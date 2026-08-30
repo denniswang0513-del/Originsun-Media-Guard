@@ -21,9 +21,12 @@ let _facetOptions = {};
 let _inited = false;
 
 const $ = (id) => document.getElementById(id);
-const esc = (s) => { const d = document.createElement('div'); d.textContent = String(s ?? ''); return d.innerHTML; };
-const attr = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// 🔴 逃脫走 dom.js。本檔原本用 `textContent → innerHTML`，那條路**不逃脫引號**
+// ——所以旁邊還得另外寫一支 `attr()` 給屬性用。dom.js 那份連引號一起逃，
+// 兩個用途一支就夠（`attr` 保留為別名，呼叫端不用改）。
+import { esc } from '../../js/shared/dom.js';
+
+const attr = esc;
 
 const STYLE_ID = 'reft-style';
 const CSS = `

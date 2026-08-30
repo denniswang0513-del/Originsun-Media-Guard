@@ -7,20 +7,18 @@ owner 把所有收支都掛上帳戶之後，差額還在 $65,880 —— 因為�
 
 猜的原因比沒有原因更糟：它讓人往錯的方向修一整輪。
 """
-from tests.unit._srcscan import code_only, func_body, repo_src
-
-SRC = "core/finance_logic.py"
+from tests.unit._srcscan import code_only, finance_logic_src, repo_src
 JS = "frontend/tabs/finance/subviews/statements.js"
 
 
 def _cf():
-    return code_only(func_body(repo_src(SRC), "def build_cashflow("))
+    return code_only(finance_logic_src("def build_cashflow("))
 
 
 def _cfl():
     """「哪幾列算數、各算多少」自 2026-08-22 起住在 cashflow_lines
     —— build_cashflow 與鑽取共用同一支（見該函式 docstring）。"""
-    return code_only(func_body(repo_src(SRC), "def cashflow_lines("))
+    return code_only(finance_logic_src("def cashflow_lines("))
 
 
 # ── 後端本來就算得出原因 ──────────────────────────────────────────
@@ -192,7 +190,7 @@ def test_drilldown_uses_the_same_eligibility_as_the_number_it_drills_into():
     for own in ("cash_account_ids(", "classify_cash_entry(", "cash_entry_activity("):
         assert own not in seg, f"鑽取又自己判了一次（{own}）"
     # 兩邊都用具名的那一份，不准再出現字面
-    cf = code_only(repo_src("core/finance_logic.py"))
+    cf = code_only(finance_logic_src())
     assert '("advance", "transfer")' not in cf, "core 裡還有字面的內部移動清單"
 
 

@@ -33,6 +33,7 @@ from starlette.requests import Request
 
 from core.auth import ALL_MODULES, TAB_ACCESS, create_token
 from core.ledger import allowed_entities, require_entity
+from tests.unit._srcscan import finance_src
 from core.schemas import (BankAccountPayload, CashEntryPayload,
                           FinanceAdjustmentPayload, InvoicePayload,
                           LoanPayload, PaymentRequestPayload)
@@ -319,13 +320,18 @@ def test_statement_import_full_level_floor():
     assert n >= 9, f'api_finance_stmt 的 level="full" 只出現 {n} 次（< 9）'
 
 
-CF_SRC = _src("routers/crm/finance.py")
+CF_SRC = finance_src()
 
 
-# 🔴 帳務域的守衛掃描要蓋**兩個**檔案：2026-08-21 把發票檔那 500 行搬到
-# invoice_files.py 時，有 4 處 require_entity 跟著搬過去 —— 只掃 finance.py 的話
-# 那 4 處從此沒人看著，而且下限 >= 12 還是會過，看不出少了東西。
-@pytest.mark.parametrize("rel,floor", [("routers/crm/finance.py", 12),
+# 🔴 帳務域的守衛掃描要蓋**每一個**帳務檔，而且這件事發生過兩次：
+#   2026-08-21 發票檔那 500 行搬到 invoice_files.py，4 處 require_entity 跟著走；
+#   2026-08-30 finance.py（2,996 行）拆成 finance/cash/payments/taxonomy 四個。
+# 只掃其中一個的話，搬走的那些從此沒人看著，而下限還是會過 —— 看不出少了東西。
+# 所以這裡逐檔列，每個檔都要有自己的下限。
+@pytest.mark.parametrize("rel,floor", [("routers/crm/finance.py", 4),
+                                       ("routers/crm/cash.py", 4),
+                                       ("routers/crm/payments.py", 4),
+                                       ("routers/crm/taxonomy.py", 1),
                                        ("routers/crm/invoice_files.py", 3)])
 def test_crm_finance_require_entity_all_full_level(rel, floor):
     """CRM 帳務逐筆端點（invoices/payments/cash-entries）的 require_entity
@@ -415,7 +421,8 @@ def test_main_migration_covers_seven_tables_and_composite_index():
     v1 的 own→parent fixup 已移除：那批 SET DEFAULT / UPDATE 只對 dev DB 有意義，
     2026-08-19 確認七表 own=0、default 全 'parent' 後即無事可做 —— 留著等於每次
     開機對七張錢流表各做一次全表掃描＋一次 ACCESS EXCLUSIVE DDL。"""
-    src = _src("main.py")
+    from tests.unit._srcscan import migration_sql
+    src = migration_sql()
     for table in ("crm_invoices", "crm_payment_requests", "crm_cash_entries",
                   "bank_accounts", "finance_adjustments", "finance_loans",
                   "finance_month_close"):
@@ -528,8 +535,8 @@ def test_batch_pay_locks_are_per_ledger():
     —— 我的帳鎖了某個月，母公司的批次付款就整批 409；而同一支函式裡「舊付款日」
     那條是對的。同一個判斷兩套規則。
     """
-    from tests.unit._srcscan import code_only, func_body, repo_src
-    body = code_only(func_body(repo_src('routers/crm/finance.py'),
+    from tests.unit._srcscan import code_only, func_body
+    body = code_only(func_body(finance_src(),
                                'async def batch_pay('))
     assert 'for locked in locked_by_entity.values()' not in body, \
         '又用跨帳本的鎖月判斷了'

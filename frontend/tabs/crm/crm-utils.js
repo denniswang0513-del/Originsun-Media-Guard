@@ -88,9 +88,16 @@ export async function saveSettings(payload) {
     });
 }
 
-export function esc(str) {
-    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+// HTML 逃脫只有 js/shared/dom.js 一份（2026-08-30 收斂）。
+// 🔴 順帶修好一個語意差異：本檔原本是 `String(str || '')`，於是 `esc(0)` 回空
+// 字串。dom.js 那份是 `?? ''`（只有 null/undefined 才變空白）—— 對記帳系統來說
+// 「0 被渲染成空白」是危險的預設。實查 CRM 呼叫點傳的都是名字/id，畫面不變。
+// 🔴 `import` 再 `export`，不能只寫 `export { esc } from …` ——
+// 那是純轉出，**不會在本模組建立區域繫結**，本檔自己用到 esc 的地方會
+// ReferenceError（2026-08-30 收斂時就這樣炸過一次）。
+import { esc } from '../../js/shared/dom.js';
+
+export { esc };
 
 export function renderAvatar(username, users, size = 22) {
     const user = users.find(u => u.username === username);

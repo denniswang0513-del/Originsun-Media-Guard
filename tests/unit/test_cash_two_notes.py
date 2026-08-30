@@ -6,8 +6,11 @@
 行內編輯走 PUT 部分更新（只送那一欄）且不觸發整列點擊。
 """
 from pathlib import Path
+from tests.unit._srcscan import js_func_body
+
 
 from scripts.split_cash_notes import split_note
+from tests.unit._srcscan import finance_src
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,7 +37,7 @@ def test_split_note_classifies_by_origin():
 
 
 def test_backend_carries_bank_memo():
-    src = _read("routers/crm/finance.py")
+    src = finance_src()
     assert '"bank_memo"' in src.split("def _to_cash_dict")[1][:1600]
     assert "CrmCashEntry.bank_memo.ilike(ql)" in src, "搜尋要涵蓋銀行資訊欄"
     models = _read("db/models.py")
@@ -86,7 +89,7 @@ def test_taxonomy_cell_has_searchable_dropdown_and_custom_entry():
     # 2026-08-30 起下拉的產生器抽到 js/shared/cash-tax-picker（對帳單匯入預覽
     # 也用同一套 —— owner「比照私帳收支表的模式」）：可搜尋的升級留在這個 tab
     # （各 tab 的實作不同），「＋ 自訂…」在共用版裡。
-    wrap = js.split("function _taxSelects(")[1].split("function _syncTaxFilter")[0]
+    wrap = js_func_body(js, "function _taxSelects(")
     assert "searchableSelect(" in wrap and "tree: _taxTree" in wrap
     shared = _read("frontend/js/shared/cash-tax-picker.js")
     assert "＋ 自訂" in shared
@@ -98,7 +101,7 @@ def test_cashbook_filters_date_sub_amount():
     """篩選列（owner 2026-08-26「可以篩選日期區間、分類、子項目、金額」）：
     日期含當日（迄日 +1 天開區間）、子項目精確、金額比**量級**
     （收入或 支出＋匯費 取大者 —— 比單邊會讓收款列全篩不到）。"""
-    src = _read("routers/crm/finance.py")
+    src = finance_src()
     fn = src.split("async def list_cash_entries(")[1].split("\n@router")[0]
     for frag in ("date_from", "timedelta(days=1)", "sub_item == sub_item", "_fn.greatest"):
         assert frag in fn, frag
@@ -180,7 +183,7 @@ def test_cashbook_renders_in_chunks_not_all_rows():
     # 的話列表在面板裡捲時永遠不觸發；寫死成容器的話沒限高時會一次畫太多批。
     assert "_scrollRoot(body)" in js and "scrollHeight > body.clientHeight" in js
     # renderList 只畫第一批，不再一次 map 整個陣列
-    fn = js.split("function renderList()")[1].split("\n}")[0]
+    fn = js_func_body(js, "function renderList()")
     assert "_drawMore(body)" in fn
     assert ".map(" not in fn, "整表 map 就是那 680ms"
 

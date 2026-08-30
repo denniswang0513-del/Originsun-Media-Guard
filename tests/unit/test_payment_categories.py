@@ -16,23 +16,25 @@ owner 2026-08-24：「請款單項目希望有代收代付」。
 清單裡）、收支明細（寫死 27 項少 5 項）。所以這次不是加一個字串，是把清單搬到
 後端 —— 前端那份降級成斷線時的 fallback。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import finance_src, code_only, func_body, js_code_only, repo_src
 
-SRC = "routers/crm/finance.py"
+# 內容本身（不是路徑）—— finance.py 2026-08-30 拆成四個檔，
+# finance_src() 把它們串起來，斷言釘的是「這支函式做了什麼」不是它在哪。
+SRC = finance_src()
 JS = "frontend/tabs/crm/crm-payments.js"
 
 
 # ── 後端才是正本 ──────────────────────────────────────────────
 
 def test_the_options_endpoint_serves_the_category_list():
-    body = code_only(func_body(repo_src(SRC), "async def payment_options("))
+    body = code_only(func_body(SRC, "async def payment_options("))
     assert '"categories"' in body, "/payments/options 沒有供項目清單"
 
 
 def test_it_reads_both_sources():
     """讀對映、也讀帳上在用的。行為由下面那組假 session 的測試驗 ——
     這條只釘「讀的是 payment 那一側的對映」（讀成 cash 的話會多出營業稅之類的）。"""
-    body = code_only(func_body(repo_src(SRC), "async def _payment_categories("))
+    body = code_only(func_body(SRC, "async def _payment_categories("))
     assert 'FinanceCategoryMap.source == "payment"' in body, "讀錯來源"
 
 
@@ -68,7 +70,8 @@ class _FakeSession:
 def _categories(mapped, used):
     import asyncio
 
-    from routers.crm import finance as F
+    # 請款相關的都在 payments.py（2026-08-30 從 finance.py 拆出來）
+    from routers.crm import payments as F
     orig = F._get_factory
 
     async def _fake_factory():
@@ -111,21 +114,21 @@ def test_blank_categories_are_dropped():
 
 def test_inactive_mappings_do_not_show_up():
     """對映可以在後台停用 —— 停用的不該還出現在下拉裡。"""
-    body = code_only(func_body(repo_src(SRC), "async def _payment_categories("))
+    body = code_only(func_body(SRC, "async def _payment_categories("))
     assert "FinanceCategoryMap.active.is_(True)" in body, "沒過濾停用的對映"
 
 
 def test_the_order_follows_actual_usage():
     """使用者天天選的那幾個不該被字母序推到下面（專案外包佔 371/806）。"""
-    body = code_only(func_body(repo_src(SRC), "async def _payment_categories("))
+    body = code_only(func_body(SRC, "async def _payment_categories("))
     assert "order_by(sa_func.count().desc())" in body, "沒有照使用次數排"
 
 
 def test_it_is_scoped_to_the_ledger():
     """兩本帳：我的帳用過的項目不該外洩到母公司的下拉，反之亦然。"""
-    body = code_only(func_body(repo_src(SRC), "async def _payment_categories("))
+    body = code_only(func_body(SRC, "async def _payment_categories("))
     assert "CrmPaymentRequest.entity == entity" in body, "沒有依帳本過濾"
-    caller = code_only(func_body(repo_src(SRC), "async def payment_options("))
+    caller = code_only(func_body(SRC, "async def payment_options("))
     assert "_payment_categories(ent)" in caller, "算了帳本卻沒傳進去"
 
 

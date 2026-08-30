@@ -1,4 +1,6 @@
 import { appendLog, pickPath, setupInputDrop, getAgentBaseUrl, resolveDropPath } from '../../js/shared/utils.js';
+// 逃脫走 dom.js（本檔原本那份沒逃單引號，而且 s 不是字串就會炸）
+import { esc as _escHtml } from '../../js/shared/dom.js';
 
 let _allEdgeVoices = [];
 let _ttsRefAudioPath = '';
@@ -767,7 +769,7 @@ function _collectDictRows(type) {
     return result;
 }
 
-function _escHtml(s) { return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
 
 function _showDictStatus(msg, cls) {
     const el = document.getElementById('dict_save_status');

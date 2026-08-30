@@ -1,5 +1,8 @@
 # Originsun Work OS — 短中長程戰略計畫（2026-07-08）
 
+> 📅 最後更新：2026-07-10　—　🔴 規格與程式碼分歧時**以程式碼為準**。
+> 這份文件不會自動跟著改，日期越舊越要當心（用 `git log -1 -- docs/STRATEGY_2026H2.md` 確認）。
+
 > 撰寫背景：Claude Fable 5 交接前的整體戰略盤點（接手模型請先跑 `/briefing`，
 > 再讀 [`WORK_OS_BLUEPRINT.md`](WORK_OS_BLUEPRINT.md) 與本文件）。
 > 系統現況基準：v1.10.217。公司定位：影像製作公司，本系統 = 內部 Work OS

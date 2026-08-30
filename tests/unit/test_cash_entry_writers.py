@@ -27,7 +27,7 @@ EXEMPT = {
     # category 的第二層鏡射 —— 走 _sync_taxonomy 會把那個值洗掉
     "routers/crm/petty.py:pay_claim",
     # CSV 匯入：建構時就寫死 entity="parent"
-    "routers/crm/finance.py:import_cash_csv",
+    "routers/crm/cash.py:import_cash_csv",
 }
 
 

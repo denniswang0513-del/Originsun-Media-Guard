@@ -280,6 +280,18 @@ async def delete_pool(pool_id: str, request: Request):
 
 @router.get("/benefits/pools/{pool_id}", dependencies=[Depends(money_dep)])
 async def pool_detail(pool_id: str, request: Request):
+    """單一池的全貌：撥款、每人額度、逐筆支出。
+
+    🔴 這裡有**兩份看起來很像的加總，兩份都要在**（別把其中一份當重複刪掉）：
+      · `_pool_dict(...)` 裡的 `benefit_pool_balance` ＝ **池的錢**
+        （撥了多少 − 花了多少）。共用池與每人額度池都算得出來。
+      · `allowance_rollup` ＝ **額度的錢**（發出去的額度總和 vs 已用）。
+        只有每人額度池有意義，而它跟池餘額常常對不上 —— 額度可以發得比池裡的
+        錢多（明年還會再撥），也可以發得比較少（留一部分機動）。
+
+    兩個數字不一致不是 bug，是這個制度本來的樣子。合成一個就再也答不出
+    「池裡還有錢，但我的額度用完了」這種問題。
+    """
     async with _crm_session() as session:
         p = await _pool_or_404(session, pool_id)
         require_entity(request, p.entity or "parent", level="full")
@@ -947,6 +959,20 @@ async def pay_entry(entry_id: str, request: Request,
 # ── 送會計 ────────────────────────────────────────────────────────
 
 async def _package(session, ent: str, year: int) -> dict:
+    """會計交件包：這一年撥了多少進池、花掉多少、逐筆是誰花的。
+
+    🔴 「這一年」在兩張表是**兩件不同的事**，不要把它們統一：
+      · 撥款看 `HrBenefitFunding.year` —— 那是「哪一年度的預算」，是人填的欄位。
+        年底撥下一年度的款很常見，用撥款日期判會把它算到今年。
+      · 支出看 `spend_date` 的年份 —— 那是錢實際花掉的日子。核准日不算數
+        （12 月花的、1 月才核准，那筆是去年的福利）。
+
+    🔴 只收 `BENEFIT_COMMITTED`（已核准＋已付款）。待審與退回**不是帳** ——
+    送進交件包的話，會計會拿到一份含「可能不會發生」的支出的報表。
+
+    沒有任何活動的池也要出現在 summary 裡（`by_pool` 先用所有池鋪底）：
+    「這個池今年沒人用」跟「這個池不存在」對看報表的人是兩回事。
+    """
     pools = (await session.execute(
         select(HrBenefitPool).where(HrBenefitPool.entity == ent)
         .order_by(HrBenefitPool.sort_order, HrBenefitPool.name))).scalars().all()

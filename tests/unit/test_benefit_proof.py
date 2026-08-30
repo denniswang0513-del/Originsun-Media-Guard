@@ -13,7 +13,8 @@
 以及一個資料面的：心得**不共用 notes** —— notes 裝退回原因（append `[退回] xxx`），
 員工寫的心得跟 owner 寫的退回理由混在一欄，兩邊都讀不乾淨。
 """
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import (code_only, func_body, repo_src,
+                                 js_func_body)
 
 SRC = "routers/crm/benefits.py"
 
@@ -101,7 +102,7 @@ def test_missing_proof_is_a_quiet_affordance_not_an_error():
     """沒有不是錯誤 —— 是一顆淡的「補上去」，不是紅字警告。"""
     js = repo_src("frontend/tabs/hr_benefits/hr_benefits.js")
     assert "＋單據" in js and "＋心得" in js
-    assert "danger" not in js.split("function _proof(")[1].split("}")[0], \
+    assert "danger" not in js_func_body(js, "function _proof("), \
         "缺單據/心得被畫成了警告"
     css = repo_src("frontend/tabs/hr_benefits/hr_benefits.html")
     assert "button.hb-proof" in css and "dashed" in css, \

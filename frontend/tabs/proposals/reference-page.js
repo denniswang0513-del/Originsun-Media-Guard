@@ -168,11 +168,11 @@ html.ref-theme-light .rfc { --rfc-ink: #262626; --rfc-sub: #737373; --rfc-line: 
 @media (max-width: 860px) { .rfc .rfc-grid { grid-template-columns: 1fr; } }
 `;
 
-function esc(s) { const d = document.createElement('div'); d.textContent = String(s ?? ''); return d.innerHTML; }
-function attr(s) {
-    return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-        .replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+// 🔴 逃脫走 dom.js（理由同 references.js：textContent 那條路不逃脫引號，
+// 所以旁邊還得另外寫一支 attr()。dom.js 那份連引號一起逃，一支就夠）
+import { esc } from '../../js/shared/dom.js';
+
+const attr = esc;
 function safeUrl(u) { return /^https?:\/\//i.test(String(u ?? '')) ? String(u) : ''; }
 
 // ── 影片嵌入（provider 由後端 parse_video_url 快取；link 無 embed → 外連）──

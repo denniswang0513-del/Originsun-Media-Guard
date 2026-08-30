@@ -21,6 +21,7 @@ owner 2026-08-24：「我之前記帳錯誤我要調整 但是不給我調整了
 """
 from core.schemas import PaymentRequestPayload
 from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import finance_src
 
 BASE = dict(summary="台科大10周年 後期製作", amount=14490, category="發票代開")
 
@@ -71,7 +72,7 @@ def test_a_partial_payload_only_carries_what_was_sent():
 
 
 def test_the_endpoint_writes_only_what_was_sent():
-    body = code_only(func_body(repo_src("routers/crm/finance.py"),
+    body = code_only(func_body(finance_src(),
                                "async def update_payment("))
     assert "exclude_unset=True" in body, \
         "整包寫回 —— 編輯面板沒送的六個欄位會被洗成預設值"

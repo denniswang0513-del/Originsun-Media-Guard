@@ -1,7 +1,8 @@
 // ─── Version Publisher Modal (admin only) ─── //
 import { _ensureModalStyles } from '../shared/modal-styles.js';
 
-function _esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+// 逃脫走 dom.js（textContent 那條路不逃脫引號，塞進 attr="…" 會逃逸）
+import { esc as _esc } from '../shared/dom.js';
 
 function _authHeaders() {
     const h = { 'Content-Type': 'application/json' };

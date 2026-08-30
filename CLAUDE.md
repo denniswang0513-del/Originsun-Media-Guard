@@ -133,7 +133,7 @@ Originsun-Media-Guard/
 │                            #   - _read_local_version()：讀取本機 version.json 版號
 │                            #   - _is_newer(remote, local)：語意版本比較（支援 v 前綴）
 │
-├── core_engine.py           # 核心引擎類別 MediaGuardEngine（約 1550 行）
+├── core_engine.py           # 核心引擎類別 MediaGuardEngine（🔴 破千行，編輯前先量）
 │                            #   - run_backup_job()：備份邏輯（本機 + NAS 雙寫、衝突處理）
 │                            #   - run_transcode_job()：呼叫 ffmpeg.exe 進行 Proxy 轉檔
 │                            #   - run_concat_job()：合併多個影片成一個 Reel
@@ -144,7 +144,7 @@ Originsun-Media-Guard/
 │                            #   - 包含 ReportManifest、FileRecord dataclass
 │                            #   - _pause_event / _stop_event：threading.Event，用於暫停/停止任務
 │
-├── transcriber.py           # Whisper 語音辨識（約 500 行）
+├── transcriber.py           # Whisper 語音辨識
 │                            #   - 使用 faster-whisper（比原版快 4~8 倍）
 │                            #   - run_transcribe_job()：掃描影片 → ffmpeg 抽音頻 → Whisper → 輸出 SRT/TXT
 │                            #   - 支援 individual_mode（每個影片單獨一個檔）或合併模式
@@ -243,7 +243,7 @@ Originsun-Media-Guard/
 │   │                        #   - 任務完成後 emit 'task_status' {'status': 'done'/'error'}
 │   │                        #   - BackupRequest 完成後若 do_report=True，啟動 _run_report_job()
 │   │
-│   ├── report_job.py        # 視覺報表非同步任務（約 240 行）
+│   ├── report_job.py        # 視覺報表非同步任務
 │   │                        #   - _run_report_job(req: ReportJobRequest)：完整報表流程
 │   │                        #   - Phase 1 Scan → Phase 2 Meta/Hash → Phase 3 Film Strip
 │   │                        #   - → Phase 4 Render HTML + PDF → Phase 5 Publish to NAS Web Server
@@ -296,12 +296,12 @@ Originsun-Media-Guard/
 │
 │  ── 【frontend/ — 靜態前端（SPA）】
 ├── frontend/
-│   ├── index.html           # 主殼層（約 450 行）
+│   ├── index.html           # 主殼層
 │   │                        #   - 頁籤切換邏輯（點擊 tab 按鈕 → 顯示對應 section）
 │   │                        #   - 各頁籤的 HTML 結構都在這個檔案內
 │   │                        #   - 底部載入 app.js 作為 type="module"
 │   │
-│   ├── app.js               # 主要應用邏輯（約 2200 行）
+│   ├── app.js               # 主要應用邏輯（🔴 破兩千行，讀不完，見規則 B）
 │   │                        #   - Socket.IO 連線管理（io()、'connect'、'disconnect'）
 │   │                        #   - 所有 Socket 事件的監聽（見第 4.1 節完整事件清單）
 │   │                        #   - 分散式轉檔派發（dispatchRemoteTranscode）
@@ -312,7 +312,7 @@ Originsun-Media-Guard/
 │   │                        #   主色 #1a1a1a，強調色 #3b82f6（藍）/ #d48a04（橘）/ #228b22（綠）
 │   │
 │   ├── js/shared/
-│   │   └── utils.js         # 前端共用工具（ES Module，約 220 行）
+│   │   └── utils.js         # 前端共用工具（ES Module）
 │   │                        #   - resolveDropPath(e, file, index)：4 種策略解析拖放路徑
 │   │                        #   - appendLog(msg, type)：寫入 terminal
 │   │                        #   - pickPath(inputId, type)：呼叫後端 pick_folder/pick_file
@@ -364,25 +364,19 @@ Originsun-Media-Guard/
 │
 │  ── 【測試套件】
 ├── pytest.ini               # pytest 設定（asyncio_mode=auto, testpaths=tests）
-├── tests/
+├── tests/                   # 🔴 檔數與測試數長得很快，**不要相信任何寫死的數字**
 │   ├── conftest.py          # 共用 fixtures（tmp_settings, mock_engine, async_client, real_server）
-│   ├── test_smoke.py        # Smoke tests（5 個：health, version, settings, frontend, socketio）
-│   ├── unit/                # 單元測試（20 個）
-│   │   ├── test_taiwan_normalizer.py  # 台灣正音引擎（8 個測試）
-│   │   ├── test_config.py             # 設定讀寫（6 個測試）
-│   │   └── test_core_engine.py        # 核心引擎（6 個測試）
-│   ├── integration/         # 整合測試（30 個）
-│   │   ├── test_api_system.py         # 系統 API（7 個測試）
-│   │   ├── test_api_queue.py          # 佇列管理 API（8 個測試）
-│   │   ├── test_api_validate_paths.py # 遠端路徑驗證 API（8 個測試）
-│   │   ├── test_task_queue.py         # 任務佇列（3 個測試）
-│   │   └── test_conflict_resolution.py # 衝突解決（4 個測試）
-│   └── e2e/                 # 端對端測試（20 個）
-│       ├── conftest.py      # Playwright fixtures
-│       ├── test_ui_basic.py           # 基本 UI（5 個測試）
-│       ├── test_task_flow.py          # 任務流程（3 個測試）
-│       ├── test_projects_tab.py       # 專案總覽 UI（8 個測試）
-│       └── test_validate_remote_paths.py  # 遠端路徑驗證前端（4 個測試）
+│   ├── test_smoke.py        # Smoke tests（health / version / settings / frontend / socketio）
+│   ├── unit/                # 單元測試 —— 主力，跑得快、不需要 DB
+│   │   └── _srcscan.py      # 🔴 掃原始碼型測試的共用工具（repo_src / func_body /
+│   │                        #    js_func_body / code_only / js_code_only / call_args /
+│   │                        #    py_callers）。要寫「每個做 X 的地方都要呼叫 Y」這種
+│   │                        #    不變式，用它，不要自己 read_text + split 手切字串。
+│   ├── integration/         # 整合測試（需要跑起來的 app）
+│   └── e2e/                 # Playwright 端對端
+
+    要知道現在有幾支測試就跑（別問文件）：
+        .venv/Scripts/python.exe -m pytest tests/unit -q --collect-only | tail -1
 │
 │  ── 【測試與開發文件】
 ├── TEST_INSTRUCTIONS.md     # 測試套件建置指令（17 個指令）
@@ -724,7 +718,7 @@ def _emit_sync(event: str, data: dict) -> None:
 | POST | `/api/v1/voice_profiles/{id}/cache` | 將 NAS 角色快取到本機 |
 
 
-### 7.15 CRM 模組（`routers/crm/` 套件 — 140+ 端點）
+### 7.15 CRM 模組（`routers/crm/` 套件）
 
 > 2026-07-06 起由單檔 api_crm.py（~5,100 行）拆分為領域套件：`_shared.py`（router 單例 +
 > 跨領域 helpers）+ `clients` / `projects` / `quotes` / `staff` / `costs` / `finance` / `showcase`。
@@ -1048,6 +1042,9 @@ e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe -m py_compile <modified_fi
 每次讀檔有 2,000 行的硬上限，超過的部分會被截斷——AI 不會告訴你它沒看完。
 
 **不要相信任何文件裡寫死的行數**（2026-07-07 盤點：前一天更新的清單隔天就漂了）。
+🔴 **這包含本文件**：CLAUDE.md 裡的目錄樹只描述「這個檔案是幹嘛的」，
+不描述它多大。2026-08-30 體檢時，這裡曾經寫死的五個數字全部過期
+（端點 140+ 實際 297、測試 75 實際 1,820、`api_crm.py` 2900+ 行實際 20）。
 編輯任何檔案前先量它：
 
 ```powershell
@@ -1073,8 +1070,9 @@ Get-ChildItem -Recurse -Include *.py,*.js -Exclude node_modules |
 **編輯任何檔案前，一律重新讀取目標區段。不准信任記憶中的程式碼。**
 
 特別注意：
-- `crm-projects.js` 的 `window.*` 函式定義散布在 1700 行中，不讀完不要猜行號
-- `api_crm.py` 的端點順序經常變動，不要假設某個函式在「大約第 X 行」
+- `crm-projects.js` 的 `window.*` 函式定義散布在整個檔案，不讀完不要猜行號
+- `routers/crm/*.py` 的端點順序經常變動，不要假設某個函式在「大約第 X 行」
+  （`routers/api_crm.py` 本身只剩 20 行的薄殼，早就拆到 `routers/crm/` 了）
 
 ### 規則 D：搜尋結果永遠要懷疑
 

@@ -956,12 +956,103 @@ async def _push_one_petty(session, staff, entry, item: str = "") -> None:
                           PettyFromCashPayload(entry_id=entry.id, item=item))
 
 
+async def _fill_workbench_column(session, bank_account_id: str, stmt_lines: list) -> None:
+    """對帳工作台的「銀行說發生了什麼」那一欄，並直接跟剛記的帳配起來。
+
+    🔴 這支端點原本只寫帳（右欄），左欄留白 —— 用它匯完一整年，打開工作台會看到
+    「帳上 30 筆、銀行 0 筆」，看起來像銀行整年沒有任何交易。工作台自己那條匯入
+    路徑則只填左欄不寫帳，兩邊各做一半，誰都沒說完整的話。這裡兩欄一起填，並且
+    直接寫上 matched_entry_id：帳本來就是從這份對帳單記的，不需要人再去勾一次。
+
+    工作台可能已經自己匯過同一個月。那些列就是這幾筆交易，不該再建一份 ——
+    同日同額且還沒配對的直接拿來配（multiset：帳上有幾筆就配幾筆）。
+    """
+    from collections import defaultdict
+
+    from sqlalchemy import and_, select
+
+    from db.models import BankStatementLine
+    if not stmt_lines:
+        return
+    spare = defaultdict(list)
+    months = {r.date[:7] for r, _ce in stmt_lines}
+    for ln in (await session.execute(
+            select(BankStatementLine).where(and_(
+                BankStatementLine.bank_account_id == bank_account_id,
+                BankStatementLine.month.in_(months),
+                BankStatementLine.matched_entry_id.is_(None))))).scalars():
+        key = (local_day(ln.line_date).strftime("%Y-%m-%d")
+               if ln.line_date else "", int(ln.amount or 0))
+        spare[key].append(ln)
+    for r, ce in stmt_lines:
+        key = (r.date, int(r.amount or 0))
+        if spare[key]:
+            spare[key].pop().matched_entry_id = ce.id       # 沿用工作台已有的那列
+            continue
+        session.add(BankStatementLine(
+            id=uuid.uuid4().hex,
+            bank_account_id=bank_account_id,
+            month=r.date[:7],
+            line_date=_parse_day(r.date),
+            description=(r.description or "")[:255],
+            # 左欄記**銀行說的**金額。貸款列的收支金額也已經改記實扣，
+            # 兩邊會一致 —— 工作台要求金額相等才算配對得上。
+            amount=int(r.amount or 0),
+            matched_entry_id=ce.id,
+            created_by="銀行對帳單匯入"))
+
+
+async def _push_petty_drafts(session, request, petty_rows: list) -> tuple:
+    """勾了「源日請款」的列 → 推成母公司零用金草稿。回 `(成功數, 失敗理由清單)`。
+
+    🔴 走零用金那支既有的 `_push_from_cash`，不在這裡另造一份：會計項目的白名單、
+    「對不出項目就擋下不落其他」、重推防線都在那支裡面。
+    🔴 推不動的**不讓整批匯入失敗**（那批帳已經是對的）—— 收集理由回報，
+    使用者到收支明細補推即可。
+    """
+    done, failed = 0, []
+    if not petty_rows:
+        return done, failed
+    # 身分解一次就好（見 _push_one_petty 的說明）。沒綁人員檔案的話，
+    # 每一列的失敗理由都是同一句 —— 在這裡就講清楚。
+    from core.identity import resolve_current_staff
+    staff = (await resolve_current_staff(request)).get("staff")
+    for r, ce in petty_rows:
+        try:
+            if staff is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="這個帳號還沒綁人員檔案，源日請款要有請款人 —— "
+                           "請先到使用者管理綁定，或匯入後到收支明細逐列推送")
+            await _push_one_petty(session, staff, ce, (r.petty_item or "").strip())
+            done += 1
+        except HTTPException as e:
+            failed.append(f"{r.date} {int(r.amount or 0):+,}：{e.detail}")
+        except Exception as e:      # noqa: BLE001
+            failed.append(f"{r.date} {int(r.amount or 0):+,}：{type(e).__name__}")
+    return done, failed
+
+
 @router.post("/bank-statement/apply")
 async def apply_bank_statement(payload: StatementImportApply, request: Request):
     """把確認過的列寫進帳：一般列 → 收支明細；貸款繳款列 → 走繳款流程
     （標期別已繳＋自動建帶 loan_payment_id 硬連結的收支，與手動按繳款同一條路）。
 
     月結守衛：任一列落鎖定月 → 整批 409，不做半套。
+
+    ── 六個階段（全部在**同一個交易**裡；中途 raise ＝ 整批回滾）──
+      1. 守衛與預撈：權限、帳戶↔帳本、發票一次撈完、鎖定月一次驗完
+      2. 重複偵測：帳上同日同額的既有列做成 multiset（`seen`）
+      3. 逐列寫帳：貸款期別 / 一般收支兩條分支 —— **本函式主體**
+      4. 工作台左欄     → `_fill_workbench_column`
+      5. 分配表與匯費   → `replace_invoice_allocs_bulk` / `replace_payment_allocs`
+      6. 零用金草稿     → `_push_petty_drafts`（失敗只回報，不回滾）
+
+    🔴 階段 3 那一圈（~110 行）刻意沒有抽成獨立函式：它跨了十二個累積變數
+    （`seen`／`skipped_dup`／`stmt_lines`／`linked`／`pay_linked`／`alloc_fees`／
+    `petty_rows`／`tax_paths`／兩個計數…），抽出去就得多帶一個狀態物件，讀的人
+    要在兩個地方之間跳 —— 比現在難懂。階段 4 與 6 抽得出來是因為它們各只吃三個
+    輸入。**要動它以前先看清楚：那一圈裡每一條 🔴 註解都是一次真實的生產事故。**
     """
     _guard(request, level="full")
     if not payload.rows:
@@ -1151,40 +1242,8 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                     pay_linked.append((ce, await resolve_payment_allocs(
                         session, pay_allocs, ent)))
 
-        # 工作台可能已經自己匯過同一個月（它那條路只填左欄不寫帳）。那些列就是
-        # 這幾筆交易，不該再建一份 —— 找同日同額且還沒配對的，直接拿來配。
-        from collections import defaultdict
-
-        from sqlalchemy import and_, select
-
-        from db.models import BankStatementLine
-        spare = defaultdict(list)
-        if stmt_lines:
-            months = {r.date[:7] for r, _ce in stmt_lines}
-            for ln in (await session.execute(
-                    select(BankStatementLine).where(and_(
-                        BankStatementLine.bank_account_id == payload.bank_account_id,
-                        BankStatementLine.month.in_(months),
-                        BankStatementLine.matched_entry_id.is_(None))))).scalars():
-                key = (local_day(ln.line_date).strftime("%Y-%m-%d")
-                       if ln.line_date else "", int(ln.amount or 0))
-                spare[key].append(ln)
-        for r, ce in stmt_lines:
-            key = (r.date, int(r.amount or 0))
-            if spare[key]:
-                spare[key].pop().matched_entry_id = ce.id       # 沿用工作台已有的那列
-                continue
-            session.add(BankStatementLine(
-                id=uuid.uuid4().hex,
-                bank_account_id=payload.bank_account_id,
-                month=r.date[:7],
-                line_date=_parse_day(r.date),
-                description=(r.description or "")[:255],
-                # 左欄記**銀行說的**金額。貸款列的收支金額也已經改記實扣，
-                # 兩邊會一致 —— 工作台要求金額相等才算配對得上。
-                amount=int(r.amount or 0),
-                matched_entry_id=ce.id,
-                created_by="銀行對帳單匯入"))
+        # ── 階段 4：工作台左欄 ──
+        await _fill_workbench_column(session, payload.bank_account_id, stmt_lines)
         # 分配表與發票收款狀態 —— 要等收支列有 id（flush）之後才做得了
         if linked or pay_linked:
             await session.flush()
@@ -1203,32 +1262,8 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
             #    先不為了對稱而多一支平行實作。
             await replace_payment_allocs(session, ce, rows_)
         await session.flush()
-        # 勾了「源日請款」的列 → 推成母公司零用金草稿。
-        # 🔴 走零用金那支既有的 `_push_from_cash`，不在這裡另造一份：會計項目的
-        # 白名單、「對不出項目就擋下不落其他」、重推防線都在那支裡面。
-        # 🔴 推不動的**不讓整批匯入失敗**（那批帳已經是對的）—— 收集理由回報，
-        # 使用者到收支明細補推即可。
-        petty_done, petty_failed = 0, []
-        # 身分解一次就好（見 _push_one_petty 的說明）。沒綁人員檔案的話，
-        # 每一列的失敗理由都是同一句 —— 在這裡就講清楚。
-        petty_staff = None
-        if petty_rows:
-            from core.identity import resolve_current_staff
-            petty_staff = (await resolve_current_staff(request)).get("staff")
-        for r, ce in petty_rows:
-            try:
-                if petty_staff is None:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="這個帳號還沒綁人員檔案，源日請款要有請款人 —— "
-                               "請先到使用者管理綁定，或匯入後到收支明細逐列推送")
-                await _push_one_petty(session, petty_staff, ce,
-                                      (r.petty_item or "").strip())
-                petty_done += 1
-            except HTTPException as e:
-                petty_failed.append(f"{r.date} {int(r.amount or 0):+,}：{e.detail}")
-            except Exception as e:      # noqa: BLE001
-                petty_failed.append(f"{r.date} {int(r.amount or 0):+,}：{type(e).__name__}")
+        # ── 階段 6：零用金草稿（推不動不讓整批匯入失敗）──
+        petty_done, petty_failed = await _push_petty_drafts(session, request, petty_rows)
         try:
             fees_done = await recognize_transfer_fees_in(session, ent,
                                                          month_guard=False)

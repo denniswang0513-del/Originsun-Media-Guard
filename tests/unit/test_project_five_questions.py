@@ -60,7 +60,7 @@ def test_to_collect_takes_both_bookkeeping_bases():
     · 新帳：收款直接記**淨額** → 收齊時 已收＝應收，差額 0
     兩種都該顯示「收齊了」。
     """
-    from core.ledger_project import to_collect, to_collect_gross
+    from core.ledger_project import to_collect
     d = {"invoice_fee": 44000}          # 營收 550,000、客戶會匯 506,000
     assert to_collect(550000, 550000, d) == 0, "舊帳收齊（已收記全額）"
     assert to_collect(550000, 506000, d) == 0, "新帳收齊（已收記淨額）"

@@ -30,11 +30,8 @@ const _TXT2 = '#ccc';      // 數值標籤
 const _FONT = 'font-family:system-ui,-apple-system,\'Segoe UI\',sans-serif;';
 
 // ── 內部工具 ────────────────────────────────────────────────
-function _esc(s) {
-    return String(s ?? '')
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+// 逃脫走 dom.js（同資料夾、行為相同 —— 這裡再寫一份只是多一個要一起改的地方）
+import { esc as _esc } from './dom.js';
 
 /** 千分位（四捨五入為整數）*/
 function _fmt(n) {

@@ -6,13 +6,15 @@
 手續費）→ 在應付帳款付掉 → 發票走到「已付款」，整條收尾。
 歷史資料實測：92% 是主流（105 筆），發票庫 209 張有 commission。
 """
-from tests.unit._srcscan import code_only, func_body, repo_src  # noqa: E402
+from tests.unit._srcscan import finance_src, code_only, func_body, repo_src  # noqa: E402
 
-SRC = 'routers/crm/finance.py'
+# 內容本身（不是路徑）：finance.py 2026-08-30 拆成四個檔，
+# finance_src() 把它們串起來 —— 斷言釘的是規則，不是函式在哪個檔案。
+SRC = finance_src()
 
 
 def _body(fn):
-    return code_only(func_body(repo_src(SRC), fn))
+    return code_only(func_body(SRC, fn))
 
 
 def test_every_status_change_path_triggers_the_sync():
@@ -183,7 +185,7 @@ def test_passthrough_category_has_one_definition():
     assert INVOICE_PASSTHROUGH_CATEGORIES == ("內部代開", "外部代開")
     assert is_passthrough_category("內部代開") and not is_passthrough_category("代開")
 
-    src = repo_src(SRC)
+    src = SRC
     assert '"代開" in inv.category' not in src, '又出現子字串比對'
     # 科目對映的種子從同一組推，不另列一份
     seed = repo_src('db/seed_finance.py')
