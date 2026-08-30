@@ -1,5 +1,5 @@
 {
-  "version": "2.4.261",
+  "version": "2.4.262",
   "build_date": "2026-08-31",
-  "notes": "db/models 拆成六段套件（零類別搬家）＋修 deploy 遞迴剪枝按裸名字剪掉 db/models/ 的洞（smoke 全綠但生產跑舊 models）＋頁籤跨界 import 白名單＋runner/repos docstring"
+  "notes": "收支拆項：帳目一筆、內容拆裂 —— 母公司匯總入帳在對帳時拆給私帳的未收案與未回款代墊（逐筆結清），Σ 不變式、三表載入層展開、拆項父列讓位守衛；含 /simplify 四軸審查 30 條處置（改名重鏡射/月結快照/平面篩選等讀取端補齊）"
 }
