@@ -685,7 +685,7 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
 
     Returns {"ok": bool, "log": str}. Does NOT restart 8000 (caller does).
     """
-    from ota_manifest import AGENT_FILES, AGENT_DIRS, EXCLUDE_DIRS
+    from ota_manifest import AGENT_FILES, AGENT_DIRS, NESTED_EXCLUDE_DIRS
     src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     dst = _PROD_DIR
     log: list = []
@@ -776,7 +776,8 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
         if not os.path.isdir(sdir):
             continue
         for root, dirs, files in os.walk(sdir):
-            dirs[:] = [x for x in dirs if x not in EXCLUDE_DIRS and x != "__pycache__"]
+            # NESTED_ 版：按裸名字剪每一層會把 db/models/ 一起剪掉（見 ota_manifest 註解）
+            dirs[:] = [x for x in dirs if x not in NESTED_EXCLUDE_DIRS and x != "__pycache__"]
             rel = os.path.relpath(root, src)
             tgt = os.path.join(dst, rel)
             os.makedirs(tgt, exist_ok=True)

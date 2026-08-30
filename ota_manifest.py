@@ -78,6 +78,15 @@ EXCLUDE_DIRS = {
     '_rollback', 'python_embed', 'exiftool_files',
 }
 
+# 🔴 遞迴 walk（deploy 複製、依賴掃描）用這份，不要用上面那份。
+# 上面的 'models' 指的是**根目錄**的 F5-TTS 模型快取（models/f5_tts/，GB 級
+# 權重檔）；但按裸名字在每一層剪，會把 db/models/（2026-08-31 拆檔後的 ORM
+# 套件）一起剪掉 —— 實際咬過：deploy_to_prod 整包複製完，生產的 db/ 底下
+# 就是沒有 models/，而 smoke check 因為舊 models.py 還在所以照樣全綠。
+# 根層的 listdir 檢查（OTA zip 探索、publish、build_agent_zip）繼續用
+# EXCLUDE_DIRS —— 那裡「models」真的就是根目錄那顆快取。
+NESTED_EXCLUDE_DIRS = EXCLUDE_DIRS - {'models'}
+
 # ── Python stdlib modules (excluded from dependency checks) ──
 # 3.10+ 直接問直譯器，不再手維護清單 —— tarfile / unicodedata / zoneinfo
 # 各漏過一次，每次都是 preflight/發版現場才發現。master 與機隊都跑 3.11。
@@ -183,7 +192,8 @@ def scan_imports(base_dir: str) -> set:
     """
     imported = set()
     for root, dirs, files in os.walk(base_dir):
-        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+        # NESTED_ 版（見上面定義處的理由）；根層那顆 models/ 快取沒有 .py，掃到也無害
+        dirs[:] = [d for d in dirs if d not in NESTED_EXCLUDE_DIRS]
         for f in files:
             if not f.endswith(".py"):
                 continue
