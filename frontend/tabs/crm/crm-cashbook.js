@@ -419,6 +419,33 @@ window._cashSplitOpen = async (id) => {
     });
 };
 
+// 列表的「專案」格就地連結（owner 2026-09-01「在紅框處就可以連結」——
+// 不用開詳情面板）。同一顆可搜尋挑選視窗；改完只補這一列。
+window._cashProjPick = (ev, id) => {
+    ev.stopPropagation();
+    const e = _entries.find((x) => x.id === id);
+    if (!e) { return; }
+    openProjectPicker({
+        projects: _projectList,
+        currentId: e.project_id || '',
+        title: '連結專案 — ' + (e.summary || ''),
+        onPick: async (pid) => {
+            try {
+                await _fetch('/cash-entries/' + id, {
+                    method: 'PUT', body: JSON.stringify({ project_id: pid }) });
+                e.project_id = pid;
+                e.project_name = pid
+                    ? ((_projectList.find((p) => p.id === pid) || {}).name || '') : '';
+                _patchRow(id);
+                if (id === _selectedId) renderDetail(e);   // 詳情開著就同步
+                crmToast(pid ? '已連結專案' : '已取消連結');
+            } catch (err) {
+                crmToast('連結失敗：' + err.message, true);
+            }
+        },
+    });
+};
+
 function _rowHtml(e) {
     const card = _cardAmt(e), out = _bankOut(e), deep = _taxDeep(e);
     // 一列算一次就好 —— 每個都被原本的樣板呼叫 2~3 次（4,733 列時很有感）
@@ -447,7 +474,11 @@ function _rowHtml(e) {
                  title="${_esc(bm)}">${_esc(_flat(e.bank_memo, ' · '))}</div>
             <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','note')"
                  title="${_esc(nt)}">${_esc(_flat(e.note, ' · '))}</div>
-            <div>${_esc(e.project_name || '')}</div>
+            ${_LINKABLE.includes(e.category || '') && !e.split_count ? `
+            <div class="cash-ed" onclick="window._cashProjPick(event,'${e.id}')"
+                 title="${e.project_name ? _esc(e.project_name) : '連結專案（可搜尋）'}">${
+                 e.project_name ? _esc(e.project_name) : _NO_VAL_DOT}</div>` : `
+            <div>${_esc(e.project_name || '')}</div>`}
             <div class="cash-col-inv">${_esc(e.invoice_title || '')}</div>
             <div>${_esc(_acctName(e.bank_account_id))}</div>
             ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup',

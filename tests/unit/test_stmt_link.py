@@ -166,6 +166,10 @@ def test_project_lists_are_searchable_and_checkable():
     cb = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
     assert 'openProjectPicker({' in cb, '快速連結沒接上共用挑選視窗'
     assert '_projOptsHtml(e.project_id' not in cb, '快速連結還留著整包 405 項的原生下拉'
+    # 列表的「專案」格就地連結（owner「在紅框處就可以連結」）——
+    # 只有可掛專案的分類、且不是拆項父列（那幾欄後端本來就 409）
+    assert '_cashProjPick' in cb
+    assert "_LINKABLE.includes(e.category || '') && !e.split_count" in cb
     ed = js_code_only(repo_src('frontend/js/shared/cash-split-editor.js'))
     assert 'data-projq' in ed and 'bindProj()' in ed, '拆項編輯器的未收案清單沒有搜尋'
 
