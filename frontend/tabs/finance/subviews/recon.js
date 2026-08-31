@@ -1059,8 +1059,9 @@ function _stmtRow(r, i) {
             ${Math.abs(r.amount) > 0 && !r.is_loan ? `<button type="button"
                     title="帳目一筆、內容拆裂：這一筆同時裝著專案款／代墊回款／薪資時，拆給各個項目（可連結未收案與未回款代墊）"
                     onclick="window._finRecon.stmtSplitOpen(${i})"
-                    style="background:none;border:none;cursor:pointer;font-size:12px;padding:0 2px;color:${
-                        nSplits ? '#86efac' : '#6b7280'};">${
+                    style="cursor:pointer;font-size:12px;padding:1px 8px;border-radius:4px;${
+                        nSplits ? 'background:#0f2a18;border:1px solid #22c55e;color:#86efac;'
+                                : 'background:#1e2a3f;border:1px solid #3b82f6;color:#93c5fd;'}">${
                         nSplits ? '改拆項' : '拆內容'}</button>` : ''}
             <button type="button" title="把「${esc((r.description || '').slice(0, 12))} → 這個類別」存成規則，以後自動套用"
                     onclick="window._finRecon.stmtSaveRule(${i})"
