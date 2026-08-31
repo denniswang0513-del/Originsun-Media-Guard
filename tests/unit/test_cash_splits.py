@@ -152,6 +152,80 @@ def test_expense_side_splits_explode_on_the_expense_column():
     assert all(e["deposit"] is None for e in out)
 
 
+# ── 2.5 發票代開費（owner 2026-08-31：源日代開發票、扣完費用才匯）────
+#
+# 數學同收款匯費（recognize_receipt_fee）：拆項 amount 記**實匯淨額**、fee
+# 外加。三個不變量：營收進毛額、費用記一次、淨流一塊不動。
+
+def test_the_invoice_fee_grosses_revenue_and_keeps_net_flow():
+    from core.finance_logic import cash_entry_flow
+    lump = [_entry(deposit=350436)]
+    splits = {"E1": [
+        {"id": "S1", "amount": 57000, "fee": 3000, "category": "公司_專案",
+         "note": "", "project_id": "P1"},
+        {"id": "S2", "amount": 293436, "category": "公司_代墊", "note": "",
+         "project_id": None},
+    ]}
+    out = explode_cash_splits(lump, splits)
+    s1 = next(e for e in out if e["id"] == "S1")
+    assert s1["deposit"] == 60000, "營收要進毛額（amount+fee）"
+    assert int(s1["bank_fee"] or 0) == 3000, "代開費走 bank_fee 費用鏈"
+    assert sum(cash_entry_flow(e) for e in out) == 350436, \
+        "淨流不變 —— 銀行餘額鏈與對帳工作台都靠這條"
+    assert not any(str(e["id"]).endswith("#rest") for e in out), \
+        "Σ 殘項判定用淨額 —— fee 不能生出假殘項"
+
+
+def test_the_parent_bank_fee_and_the_split_fee_stack_without_loss():
+    """父列自己的匯費（掛第一列）＋拆項的代開費要疊加，不能互相蓋掉。"""
+    from core.finance_logic import cash_entry_flow
+    lump = [_entry(deposit=1000, bank_fee=30)]
+    splits = {"E1": [{"id": "S1", "amount": 600, "fee": 50, "category": "公司_專案",
+                      "note": "", "project_id": "P1"},
+                     {"id": "S2", "amount": 400, "category": "b", "note": "",
+                      "project_id": None}]}
+    out = explode_cash_splits(lump, splits)
+    assert [int(e.get("bank_fee") or 0) for e in out] == [80, 0]
+    assert sum(cash_entry_flow(e) for e in out) == cash_entry_flow(lump[0])
+
+
+def test_project_settlement_uses_the_gross_amount():
+    """🔴 已收按毛額（amount+fee）記 —— 只記淨額的話，未收額永遠留一個
+    費用大小的尾巴清不掉（這正是 fee 欄存在的理由）。"""
+    from routers.crm.cash_splits import _project_deltas
+
+    class S:                      # 替身：_project_deltas 只讀這三個欄
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    d = _project_deltas("deposit", 0, None,
+                        [S(project_id="P1", amount=57000, fee=3000),
+                         S(project_id=None, amount=1000, fee=0)])
+    assert d == {"P1": 60000}
+
+
+def test_the_fee_survives_the_full_round_trip():
+    """🔴 重編輯的 initial 就是 _split_to_dict 的輸出 —— fee 沒跟著出去的話，
+    使用者按一次「儲存拆項」代開費就靜默歸零（advances 同一款教訓）。
+    載入層與 migration 也各要有它，少一處就是三表少算或開機缺欄。"""
+    from tests.unit._srcscan import migration_sql
+    assert '"fee"' in code_only(func_body(repo_src(SPLITS), "def _split_to_dict("))
+    assert '"fee": int(_s.fee or 0)' in repo_src("services/finance_statements.py")
+    assert "crm_cash_splits ADD COLUMN IF NOT EXISTS fee" in migration_sql()
+    js = js_code_only(repo_src("frontend/js/shared/cash-split-editor.js"))
+    assert "Number(s.fee)" in js, "編輯器 initial 要把 fee 讀回列狀態"
+    assert "fee: r.kind === 'project'" in js, "存檔 payload 要送 fee（僅專案拆項）"
+
+
+def test_the_fee_is_rejected_outside_deposit_side_project_splits():
+    """代開費＝源日先扣走的**專案款** —— 支出側或沒掛專案的拆項寫 fee
+    是分類錯誤，寫入端要 422 而不是默默存起來變成幽靈費用。"""
+    body = code_only(func_body(repo_src(SPLITS), "async def _apply_splits("))
+    assert "it.fee" in body and "代開費" in func_body(repo_src(SPLITS),
+                                                  "async def _apply_splits(")
+    assert 'side != "deposit"' in body
+
+
 # ── 3. 守衛與讓位（掃原始碼）────────────────────────────────────
 
 def test_the_writer_is_single_and_enforces_the_trinity():

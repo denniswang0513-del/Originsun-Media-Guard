@@ -54,6 +54,8 @@ export async function openCashSplitEditor(o) {
     const rows = (o.initial || []).map((s) => ({
         kind: s.project_id ? 'project' : ((s.advances || []).length ? 'advance' : 'manual'),
         amount: Number(s.amount) || 0,
+        fee: Number(s.fee) || 0,
+        feeOn: (Number(s.fee) || 0) > 0,
         taxonomy_node_id: s.taxonomy_node_id || '',
         category: s.category || '',
         sub_item: s.sub_item || '',
@@ -116,7 +118,13 @@ export async function openCashSplitEditor(o) {
                 <div>
                     ${r.kind === 'project'
                         ? `<span style="color:#93c5fd;font-size:12px;">${esc((out.projects.find((p) => p.id === r.project_id) || {}).name || r.project_id)}</span>
-                           <span style="color:#6b7280;font-size:11px;">（${esc(pathOf(r.taxonomy_node_id))}）</span>`
+                           <span style="color:#6b7280;font-size:11px;">（${esc(pathOf(r.taxonomy_node_id))}）</span>
+                           <label title="源日代開發票、扣完費用才匯：金額填實匯淨額、這裡填被扣的代開費 —— 專案按毛額（金額＋代開費）結清，未收才會歸零"
+                               style="display:inline-flex;gap:4px;align-items:center;color:#9ca3af;font-size:11px;cursor:pointer;white-space:nowrap;">
+                               <input type="checkbox" data-feechk="${i}" ${r.feeOn ? 'checked' : ''}>扣代開費</label>
+                           ${r.feeOn ? `<input type="number" data-fee="${i}" value="${r.fee || ''}" min="0" placeholder="代開費"
+                                   style="background:#141414;border:1px solid #333;color:#eee;border-radius:6px;padding:2px 6px;width:80px;text-align:right;font-size:12px;">
+                               <span style="color:#6b7280;font-size:11px;">專案結清毛額 $${fmtNum((Number(r.amount) || 0) + r.fee)}</span>` : ''}`
                         : r.kind === 'advance'
                         ? `<span style="color:#fbbf24;font-size:12px;">沖 ${(r.advances || []).length} 筆代墊</span>
                            <span style="color:#6b7280;font-size:11px;">（${esc(pathOf(r.taxonomy_node_id))}）</span>`
@@ -178,6 +186,7 @@ export async function openCashSplitEditor(o) {
             if (!isOk()) return;
             o.onSave(rows.map((r) => ({
                 amount: Number(r.amount) || 0,
+                fee: r.kind === 'project' ? (Number(r.fee) || 0) : 0,
                 taxonomy_node_id: r.taxonomy_node_id || '',
                 category: r.taxonomy_node_id ? '' : (r.category || ''),
                 sub_item: r.taxonomy_node_id ? '' : (r.sub_item || ''),
@@ -198,7 +207,9 @@ export async function openCashSplitEditor(o) {
         });
         wrap.querySelectorAll('[data-amt]').forEach((inp) => {
             inp.onchange = () => {           // 只補合計與儲存鈕，不整窗重畫（保焦點）
-                rows[Number(inp.dataset.amt)].amount = Number(inp.value) || 0;
+                const r = rows[Number(inp.dataset.amt)];
+                r.amount = Number(inp.value) || 0;
+                if (r.feeOn) { render(); return; }  // 毛額提示要跟著金額走
                 patchSum();
             };
         });
@@ -208,11 +219,38 @@ export async function openCashSplitEditor(o) {
         wrap.querySelectorAll('[data-cat]').forEach((inp) => {
             inp.onchange = () => { rows[Number(inp.dataset.cat)].category = inp.value.trim(); };
         });
+        // 扣代開費（源日代開發票、扣完費用才匯）：金額欄恆為實匯淨額，
+        // 代開費外加 —— 勾了先猜「未收 − 目前金額」（實匯已填好的常見流程），
+        // 改代開費則反推金額 = 未收 − 費（兩個方向都不用使用者自己算）。
+        wrap.querySelectorAll('[data-feechk]').forEach((cb) => {
+            cb.onchange = () => {
+                const r = rows[Number(cb.dataset.feechk)];
+                const p = out.projects.find((x) => x.id === r.project_id);
+                r.feeOn = cb.checked;
+                if (cb.checked) {
+                    r.fee = p ? Math.max(0, p.receivable - (Number(r.amount) || 0)) : 0;
+                } else {
+                    r.fee = 0;
+                    if (p) r.amount = p.receivable;
+                }
+                render();
+            };
+        });
+        wrap.querySelectorAll('[data-fee]').forEach((inp) => {
+            inp.onchange = () => {
+                const r = rows[Number(inp.dataset.fee)];
+                const p = out.projects.find((x) => x.id === r.project_id);
+                r.fee = Math.max(0, Number(inp.value) || 0);
+                if (p) r.amount = Math.max(0, p.receivable - r.fee);
+                render();
+            };
+        });
         wrap.querySelectorAll('[data-proj]').forEach((cb) => {
             cb.onchange = () => {
                 const p = out.projects.find((x) => x.id === cb.dataset.proj);
                 if (cb.checked && p && projIdx(p.id) < 0) {
                     rows.push({ kind: 'project', amount: p.receivable,
+                                fee: 0, feeOn: false,
                                 taxonomy_node_id: out.project_node_id || '',
                                 category: '', sub_item: '',
                                 project_id: p.id, note: '', advances: [] });

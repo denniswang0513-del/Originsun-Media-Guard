@@ -104,6 +104,10 @@ def explode_cash_splits(cash_entries: list, splits_by_entry: dict) -> list:
       憑空少一塊錢，而且不會有人知道。
     🔴 bank_fee／claim 留在誰身上：掛在**第一個**虛擬列。匯費是整筆匯款收一次
       的真實費用（bank_fee_total 逐列加總，放兩列就重複計）。
+    🔴 拆項自帶 fee（發票代開費）＝收款側匯費的數學（recognize_receipt_fee）：
+      該虛擬列 deposit 補成毛額（amount+fee）、fee 掛上自己的 bank_fee ——
+      營收進毛額、代開費落手續費費用桶、淨流（deposit − bank_fee）不變，
+      對帳與銀行餘額鏈都不動。第一列的 bank_fee ＝ 父列的＋自己的。
     🔴 invoice_id／advance_payment_id／payment_request_id 不繼承：那些連結
       屬於父列整筆（分配表另有正本），複製 N 份會讓對應的沖銷邏輯算 N 次。
     🔴 虛擬列帶 `parent_id`＝真正的收支列 PK —— 展開後 `id` 是拆項 id，
@@ -145,6 +149,11 @@ def explode_cash_splits(cash_entries: list, splits_by_entry: dict) -> list:
             if i > 0:                       # 費用類欄位只留第一列（見 docstring）
                 v["bank_fee"] = None
                 v["claim"] = None
+            # 代開費：毛額進營收、fee 疊上本列 bank_fee（淨流不變，見 docstring）
+            fee = int(s.get("fee") or 0) if side == "deposit" else 0
+            if fee:
+                v["deposit"] = s["amount"] + fee
+                v["bank_fee"] = int(v.get("bank_fee") or 0) + fee
             for k in ("invoice_id", "advance_payment_id", "payment_request_id"):
                 v[k] = None
             out.append(v)
@@ -186,6 +195,7 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
     for _s in _split_rows:
         splits_by_entry.setdefault(_s.entry_id, []).append(
             {"id": _s.id, "amount": int(_s.amount or 0),
+             "fee": int(_s.fee or 0),
              "category": _s.category or None, "note": _s.note or "",
              "project_id": _s.project_id or None})
 

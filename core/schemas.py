@@ -1430,8 +1430,12 @@ class CashSplitAdvanceLinkItem(BaseModel):
 
 class CashSplitItem(BaseModel):
     """一個拆項。分類：私帳送 taxonomy_node_id（樹節點是正本）；
-    母公司可只送 category/sub_item（平面科目）。"""
+    母公司可只送 category/sub_item（平面科目）。
+    fee＝發票代開費（源日代開發票、扣完費用才匯）：amount 是實匯淨額、
+    fee 外加，專案已收按毛額（amount+fee）結清 —— 只在收入側掛專案的
+    拆項有效（寫入端擋其他組合）。"""
     amount: int
+    fee: int = 0
     taxonomy_node_id: str = ""
     category: str = ""
     sub_item: str = ""

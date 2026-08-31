@@ -48,6 +48,7 @@ def _split_to_dict(s, tax_path=None, advances=None) -> dict:
     # 使用者按一次「儲存拆項」代墊結清連結就整組被 replace 掉（靜默）。
     return {
         "id": s.id, "amount": int(s.amount or 0),
+        "fee": int(s.fee or 0),
         "category": s.category or "", "item": s.item or "",
         "sub_item": s.sub_item or "",
         "taxonomy_node_id": s.taxonomy_node_id or "",
@@ -128,10 +129,12 @@ async def _advance_linked_sums(session, advance_ids, *, exclude_split_ids=()) ->
 
 
 def _project_deltas(side: str, parent_deposit, parent_project_id, splits) -> dict:
-    """這組狀態對各專案「已收」的貢獻 {project_id: Σamount}（只算收入側）。
+    """這組狀態對各專案「已收」的貢獻 {project_id: Σ毛額}（只算收入側）。
 
     父列自己掛的專案也算一份 —— 第一次拆項時父列的連結被拆項取代，
     差額制（新 − 舊）自然會把父列那份沖掉、拆項那份補上，帳永遠平。
+    🔴 毛額＝amount＋fee：代開費是源日先扣走的專案款 —— 只記淨額的話
+    未收額會永遠留一個費用大小的尾巴清不掉（這正是 fee 欄存在的理由）。
     """
     out: dict = {}
     if side != "deposit":
@@ -140,7 +143,8 @@ def _project_deltas(side: str, parent_deposit, parent_project_id, splits) -> dic
         out[parent_project_id] = out.get(parent_project_id, 0) + int(parent_deposit or 0)
     for s in splits:
         if s.project_id:
-            out[s.project_id] = out.get(s.project_id, 0) + int(s.amount or 0)
+            out[s.project_id] = (out.get(s.project_id, 0)
+                                 + int(s.amount or 0) + int(s.fee or 0))
     return out
 
 
@@ -208,6 +212,14 @@ async def _apply_splits(session, e, items: list, *, paths: dict,
                 status_code=422,
                 detail="每個拆項都要有分類 —— 沒分類的拆項會從"
                        "「未分類」快篩與自動分類規則眼前消失（父列被視為已分好）")
+        if int(it.fee or 0) < 0:
+            raise HTTPException(status_code=422, detail="代開費不能是負數")
+        if int(it.fee or 0) > 0 and (side != "deposit"
+                                     or not (it.project_id or "").strip()):
+            raise HTTPException(
+                status_code=422,
+                detail="代開費只對「收入側、掛了專案」的拆項有意義 —— "
+                       "它是源日代開發票先扣走的專案款（專案按毛額結清）")
 
     # ── 代墊連結驗證（一趟迭代收齊；先驗完才動資料，任何一條不合法整批不寫）──
     want: dict = {}
@@ -252,8 +264,8 @@ async def _apply_splits(session, e, items: list, *, paths: dict,
     created = []
     for i, it in enumerate(items):
         s = CrmCashSplit(id=uuid.uuid4().hex[:32], entry_id=e.id,
-                         amount=int(it.amount), note=(it.note or "")[:255] or None,
-                         sort=i)
+                         amount=int(it.amount), fee=int(it.fee or 0) or None,
+                         note=(it.note or "")[:255] or None, sort=i)
         s.entity = ent          # transient — _sync_taxonomy 的 fallback 會讀
         data = ({"taxonomy_node_id": it.taxonomy_node_id}
                 if (it.taxonomy_node_id or "").strip()

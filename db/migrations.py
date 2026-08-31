@@ -99,6 +99,9 @@ FINANCE_AND_CRM_COLUMNS = [
         "ALTER TABLE clients ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
         # 收支雙備註（owner 2026-08-26）：銀行原始資訊與手寫附註分欄
         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS bank_memo TEXT",
+        # 拆項的發票代開費（owner 2026-08-31：源日代開發票、扣完費用才匯）
+        # —— amount 記實匯淨額、fee 外加，專案已收按毛額結清
+        "ALTER TABLE crm_cash_splits ADD COLUMN IF NOT EXISTS fee INTEGER",
         # 私帳客戶 → CRM 客戶對應連結（owner 2026-08-26「用連結的方式同步」）
         "ALTER TABLE clients ADD COLUMN IF NOT EXISTS crm_link_id VARCHAR(32)",
         # 客戶代稱改「每本帳唯一」—— 同一家公司 CRM 一筆＋私帳一筆

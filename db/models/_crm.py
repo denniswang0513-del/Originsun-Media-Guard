@@ -700,6 +700,11 @@ class CrmCashSplit(Base):
     id = Column(String(32), primary_key=True)
     entry_id = Column(String(32), nullable=False, index=True)   # soft FK → crm_cash_entries.id
     amount = Column(Integer, nullable=False)                     # 恆正；方向跟父列
+    # 發票代開費（源日代開發票、扣完費用才匯）：amount 是實匯淨額，fee 外加。
+    # 專案已收按毛額（amount+fee）結清；三表展開時毛額進營收、fee 走 bank_fee
+    # 同一條費用鏈 —— 數學同 recognize_receipt_fee（淨流不變）。只在收入側
+    # 且掛專案的拆項有意義（寫入端擋其他組合）。
+    fee = Column(Integer, nullable=True)
     category = Column(String(128), nullable=True)
     item = Column(String(64), nullable=True)
     sub_item = Column(String(64), nullable=True)
