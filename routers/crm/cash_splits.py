@@ -43,9 +43,12 @@ from .finance import _mine_or_admin_write
 ADVANCE_CATEGORY = "公司_代墊"
 
 
-def _split_to_dict(s, tax_path=None, advances=None) -> dict:
+def _split_to_dict(s, tax_path=None, advances=None, project_name="") -> dict:
     # 🔴 `advances` 一定要出去：重編輯的 initial 就是這份 dict —— 少了它，
     # 使用者按一次「儲存拆項」代墊結清連結就整組被 replace 掉（靜默）。
+    # 🔴 `project_name` 也是：編輯器的名稱查表只有**未收案**清單 —— 案子一
+    # 結清就不在裡面，重開編輯器那列會顯示成一串 raw id，owner 看起來像
+    # 「連結不完整」（和平行動者案，2026-09-01 實際發生）。
     return {
         "id": s.id, "amount": int(s.amount or 0),
         "fee": int(s.fee or 0),
@@ -53,9 +56,22 @@ def _split_to_dict(s, tax_path=None, advances=None) -> dict:
         "sub_item": s.sub_item or "",
         "taxonomy_node_id": s.taxonomy_node_id or "",
         "taxonomy_path": list(tax_path or []),
-        "project_id": s.project_id or "", "note": s.note or "",
+        "project_id": s.project_id or "",
+        "project_name": project_name or "",
+        "note": s.note or "",
         "advances": list(advances or []),
     }
+
+
+async def project_names_map(session, splits) -> dict:
+    """{project_id: name} —— 給 _split_to_dict 的 project_name（一次撈齊）。"""
+    ids = {s.project_id for s in splits if s.project_id}
+    if not ids:
+        return {}
+    rows = (await session.execute(
+        select(CrmProject.id, CrmProject.name)
+        .where(CrmProject.id.in_(list(ids))))).all()
+    return {pid: (name or "") for pid, name in rows}
 
 
 async def load_splits_map(session, entry_ids=None, *, entity=None) -> dict:
@@ -318,10 +334,12 @@ async def replace_cash_entry_splits(entry_id: str, request: Request):
         paths = await path_map(session, e.entity or "parent")
         created = await _apply_splits(session, e, payload.splits, paths=paths)
         adv = await load_advance_links_map(session, [s.id for s in created])
+        pnames = await project_names_map(session, created)
         await session.commit()
         return {"status": "ok",
                 "splits": [_split_to_dict(s, paths.get(s.taxonomy_node_id),
-                                          adv.get(s.id))
+                                          adv.get(s.id),
+                                          pnames.get(s.project_id, ""))
                            for s in created]}
 
 

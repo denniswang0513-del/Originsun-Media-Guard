@@ -380,6 +380,11 @@ let _drawn = 0;
 // 有拆項的列：分類三格換成「已拆 N 項」badge（分類的正本在拆項），
 // 金額/分類/專案改由「拆內容」進 —— 後端對這幾欄也是 409。
 
+/** 拆項父列的「專案」格：本列的 project_id 已讓位給拆項，把拆項連的案名
+ *  秀回來 —— 不然整列看起來像沒連結（owner 就是這樣以為帳沒連完）。 */
+const _splitProjNames = (e) => [...new Set(
+    (e.splits || []).map((s) => s.project_name).filter(Boolean))].join('、');
+
 function _splitMenu(e) {
     const amt = (e.deposit || 0) || (e.expense || 0);
     if (!amt) { return []; }
@@ -478,7 +483,8 @@ function _rowHtml(e) {
             <div class="cash-ed" onclick="window._cashProjPick(event,'${e.id}')"
                  title="${e.project_name ? _esc(e.project_name) : '連結專案（可搜尋）'}">${
                  e.project_name ? _esc(e.project_name) : _NO_VAL_DOT}</div>` : `
-            <div>${_esc(e.project_name || '')}</div>`}
+            <div title="${_esc(e.split_count ? _splitProjNames(e) : '')}">${
+                _esc(e.split_count ? _splitProjNames(e) : (e.project_name || ''))}</div>`}
             <div class="cash-col-inv">${_esc(e.invoice_title || '')}</div>
             <div>${_esc(_acctName(e.bank_account_id))}</div>
             ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup',

@@ -215,6 +215,13 @@ def test_the_fee_survives_the_full_round_trip():
     js = js_code_only(repo_src("frontend/js/shared/cash-split-editor.js"))
     assert "Number(s.fee)" in js, "編輯器 initial 要把 fee 讀回列狀態"
     assert "fee: r.kind === 'project'" in js, "存檔 payload 要送 fee（僅專案拆項）"
+    # 🔴 project_name 同款：未收案清單只有還在等錢的案 —— 結清的案查不到名字，
+    # 那列會顯示成一串 raw id（和平行動者案，owner 以為連結壞掉）。
+    assert '"project_name"' in code_only(func_body(repo_src(SPLITS),
+                                                   "def _split_to_dict("))
+    assert "|| r.project_name || r.project_id" in js, "編輯器要用 project_name 當名稱後援"
+    cbjs = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
+    assert "_splitProjNames" in cbjs, "拆項父列的專案格要把拆項連的案名秀回來"
 
 
 def test_the_fee_is_rejected_outside_deposit_side_project_splits():

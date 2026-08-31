@@ -60,6 +60,9 @@ export async function openCashSplitEditor(o) {
         category: s.category || '',
         sub_item: s.sub_item || '',
         project_id: s.project_id || '',
+        // 🔴 名稱要跟著帶：未收案清單只有**還在等錢的**案 —— 結清的案查不到
+        // 名字，那列會顯示成一串 raw id，看起來像連結壞掉（和平行動者案）
+        project_name: s.project_name || '',
         note: s.note || '',
         advances: (s.advances || []).map((a) => ({ ...a })),
     }));
@@ -119,7 +122,8 @@ export async function openCashSplitEditor(o) {
                                 fee: 0, feeOn: false,
                                 taxonomy_node_id: out.project_node_id || '',
                                 category: '', sub_item: '',
-                                project_id: p.id, note: '', advances: [] });
+                                project_id: p.id, project_name: p.name || '',
+                                note: '', advances: [] });
                 } else if (!cb.checked) {
                     const i = projIdx(cb.dataset.proj);
                     if (i >= 0) rows.splice(i, 1);
@@ -145,7 +149,7 @@ export async function openCashSplitEditor(o) {
                     style="background:#141414;border:1px solid #333;color:#eee;border-radius:6px;padding:4px 8px;text-align:right;${r.kind === 'advance' ? 'opacity:.7;' : ''}">
                 <div>
                     ${r.kind === 'project'
-                        ? `<span style="color:#93c5fd;font-size:12px;">${esc((out.projects.find((p) => p.id === r.project_id) || {}).name || r.project_id)}</span>
+                        ? `<span style="color:#93c5fd;font-size:12px;">${esc((out.projects.find((p) => p.id === r.project_id) || {}).name || r.project_name || r.project_id)}</span>
                            <span style="color:#6b7280;font-size:11px;">（${esc(pathOf(r.taxonomy_node_id))}）</span>
                            <label title="源日代開發票、扣完費用才匯：金額填實匯淨額、這裡填被扣的代開費 —— 專案按毛額（金額＋代開費）結清，未收才會歸零"
                                style="display:inline-flex;gap:4px;align-items:center;color:#9ca3af;font-size:11px;cursor:pointer;white-space:nowrap;">

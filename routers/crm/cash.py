@@ -367,7 +367,7 @@ async def list_cash_entries(
         # import 本檔的 _sync_taxonomy），一函式一次。
         from routers.crm.cash_splits import (_split_to_dict, entry_has_splits_subq,
                                              load_advance_links_map, load_splits_map,
-                                             split_category_pred)
+                                             project_names_map, split_category_pred)
         from db.models import CrmCashSplit
         if category == "__none__":
             # 「未分類」快篩：卡單匯入後真的分不出的尾巴（owner 逐筆點完就歸零）
@@ -462,13 +462,17 @@ async def list_cash_entries(
         smap = await load_splits_map(session, entity=ent)
         amap = await load_advance_links_map(
             session, [s.id for subs in smap.values() for s in subs])
+        pnames = await project_names_map(
+            session, [s for subs in smap.values() for s in subs])
     out = []
     for r in rows:
         d = _to_cash_dict(r[0], r[1] or "", r[2] or "", r[3] or "",
                           paths.get(r[0].taxonomy_node_id))
         subs = smap.get(r[0].id, [])
         d["splits"] = [_split_to_dict(s, paths.get(s.taxonomy_node_id),
-                                      amap.get(s.id)) for s in subs]
+                                      amap.get(s.id),
+                                      pnames.get(s.project_id, ""))
+                       for s in subs]
         d["split_count"] = len(subs)
         out.append(d)
     return {"entries": out, "total": len(out)}
