@@ -1066,11 +1066,9 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
     from core.finance_logic import apply_payment_fee, apply_receipt_fee
     from db.models import CrmCashEntry
     # 專案／發票／請款單的寫入規則只有一套正本 —— 這裡借用，不另寫。
-    # 🔴 2026-08-30 finance.py 拆檔後這批名字分家兩處（cash / finance）。
-    # 這種**函式內** lazy import 斷了不會有任何靜態工具叫：py_compile 過、
-    # ruff 過、掃字串的測試過 —— 第一個知道的是按下「匯入」的人（整條
-    # apply 500 了一天半才被匯入路徑的 e2e 撞出來）。現在有
-    # tests/unit/test_lazy_imports_resolve.py 整批守著。
+    # 拆檔後這批名字分家兩處（cash / finance）；函式內 lazy import 靜態工具
+    # 不守，整批由 tests/unit/test_lazy_imports_resolve.py 把關（事故經過在
+    # 它的檔頭）。
     from routers.crm.cash import (_enforce_cash_project_link,
                                   resolve_invoice_allocs)
     from routers.crm.finance import (replace_invoice_allocs_bulk,

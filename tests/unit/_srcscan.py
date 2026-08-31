@@ -123,6 +123,24 @@ def js_code_only(src: str) -> str:
     return "\n".join(re.sub(r"(?<!:)//.*$", "", ln) for ln in src.splitlines())
 
 
+def py_trees(*roots):
+    """yield `(repo 相對路徑, ast.Module)` —— 掃描型測試的共用 walker。
+
+    roots 裡的目錄遞迴掃、單一 .py 檔名直接收。走這一支而不是各測試檔自己
+    rglob＋parse（2026-08-31 已經長出第二份，跳過 SyntaxError 的行為還跟這裡
+    不一致 —— 掃描工具的老規矩：正本只有一份）。
+    """
+    import ast
+
+    for root in roots:
+        base = pathlib.Path(_REPO) / root
+        paths = sorted(base.rglob("*.py")) if base.is_dir() else \
+            ([base] if base.exists() else [])
+        for path in paths:
+            yield (path.relative_to(_REPO).as_posix(),
+                   ast.parse(path.read_text(encoding="utf-8")))
+
+
 def py_callers(*roots) -> dict:
     """`{"路徑:函式名": 它內部呼叫過的名字集合}`，掃 `roots` 底下所有 .py。
 
@@ -138,16 +156,13 @@ def py_callers(*roots) -> dict:
     import ast
 
     out: dict = {}
-    for root in roots:
-        base = pathlib.Path(_REPO) / root
-        for path in sorted(base.rglob("*.py")):
-            rel = path.relative_to(_REPO).as_posix()
-            for fn in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                out[f"{rel}:{fn.name}"] = {
-                    getattr(n.func, "id", None) or getattr(n.func, "attr", None)
-                    for n in ast.walk(fn) if isinstance(n, ast.Call)}
+    for rel, tree in py_trees(*roots):
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            out[f"{rel}:{fn.name}"] = {
+                getattr(n.func, "id", None) or getattr(n.func, "attr", None)
+                for n in ast.walk(fn) if isinstance(n, ast.Call)}
     return out
 
 
