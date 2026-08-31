@@ -143,6 +143,31 @@ def test_mine_replaces_invoice_links_with_project_links():
     assert '(e.deposit || finIsMine())' in cb, '快速連結的發票下拉沒擋私帳'
     assert '...(finIsMine() ? []' in cb, '編輯欄位清單沒把發票欄抽掉'
     assert 'inv && finIsMine()' in cb, '新增/編輯視窗的發票欄沒對私帳恆隱藏'
+    # 列表的「發票」**整欄**也要藏（owner 2026-09-01 第二輪）—— 同 has-card 的
+    # 做法：cell 照渲染、CSS display:none（nth-child 欄寬數 DOM 位置，抽節點會
+    # 讓後面每一欄整排錯位）
+    assert "classList.toggle('mine-book', finIsMine())" in cb
+    assert 'cash-col-inv' in cb, '列的發票 cell 沒掛 class'
+    assert 'cash-col-inv' in repo_src('frontend/tabs/crm/crm-cashbook.html'), \
+        '表頭的發票欄沒掛 class'
+    css = repo_src('frontend/tabs/crm/crm.css')
+    assert '#cash-list-panel.mine-book .cash-col-inv { display: none; }' in css
+
+
+def test_project_lists_are_searchable_and_checkable():
+    """owner 2026-09-01「分類是專案時，專案列表要可以勾選、搜尋」——
+    405 個專案塞原生 <select> 等於沒得選。兩個入口：
+      · 收支明細快速連結 → js/shared/project-picker（搜尋＋勾選樣式，單選）
+      · 拆項編輯器的未收案清單 → 原有勾選＋新增搜尋框（只換清單不整窗重畫）"""
+    from tests.unit._srcscan import js_code_only
+    pk = js_code_only(repo_src('frontend/js/shared/project-picker.js'))
+    assert 'export function openProjectPicker' in pk
+    assert 'type="search"' in pk and 'type="checkbox"' in pk
+    cb = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
+    assert 'openProjectPicker({' in cb, '快速連結沒接上共用挑選視窗'
+    assert '_projOptsHtml(e.project_id' not in cb, '快速連結還留著整包 405 項的原生下拉'
+    ed = js_code_only(repo_src('frontend/js/shared/cash-split-editor.js'))
+    assert 'data-projq' in ed and 'bindProj()' in ed, '拆項編輯器的未收案清單沒有搜尋'
 
 
 def test_preview_returns_the_option_lists():

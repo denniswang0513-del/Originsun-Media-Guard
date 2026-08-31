@@ -13,6 +13,9 @@ import { finEntity as _pinEntity, finFetch as _finFetch, finIsMine,
 // 六日／國定假日標記（owner 2026-08-27）：看帳時「那天是不是假日」是判斷公私的
 // 關鍵線索，日期字串本身看不出來。星期是算的、假日是清單 —— 見該模組檔頭。
 import { dayMark as _dayMark } from '../../js/shared/tw-calendar.js';
+// 專案連結改用可搜尋的挑選視窗（owner 2026-09-01「專案列表要可以勾選、搜尋」——
+// 私帳 405 個專案塞原生下拉等於沒得選）。共用件，別在這裡再刻一份。
+import { openProjectPicker } from '../../js/shared/project-picker.js';
 import { splitBadgeHtml } from '../../js/shared/cash-split-editor.js';
 import { indexTax as _indexTaxShared, taxKidsAt as _kidsAt, taxSelects }
     from '../../js/shared/cash-tax-picker.js';
@@ -445,7 +448,7 @@ function _rowHtml(e) {
             <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','note')"
                  title="${_esc(nt)}">${_esc(_flat(e.note, ' · '))}</div>
             <div>${_esc(e.project_name || '')}</div>
-            <div>${_esc(e.invoice_title || '')}</div>
+            <div class="cash-col-inv">${_esc(e.invoice_title || '')}</div>
             <div>${_esc(_acctName(e.bank_account_id))}</div>
             ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup',
                                    onDelete: '_cashDelete',
@@ -855,8 +858,15 @@ function _renderQuickLink(e) {
             <span style="color:#9ca3af;font-size:12px;flex:0 0 48px;">${label}</span>
             <select id="${id}" style="flex:1;min-width:0;">${optsHtml}</select>
         </div>`;
+    const curProj = _projectList.find(p => p.id === e.project_id);
     box.innerHTML = `
-        ${row('專案', 'cash-ql-proj', _projOptsHtml(e.project_id, '— 未連結 —'))}
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+            <span style="color:#9ca3af;font-size:12px;flex:0 0 48px;">專案</span>
+            <button id="cash-ql-proj" class="crm-btn crm-btn-secondary" title="挑一個專案（可搜尋）"
+                style="flex:1;min-width:0;text-align:left;font-size:12px;padding:4px 8px;
+                       overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${curProj ? '' : 'color:#6b7280;'}">
+                ${curProj ? _esc(curProj.name) : '＋ 選專案'}</button>
+        </div>
         ${/* 發票下拉只在支出列出現：收入列的發票走上面可掛多張的「關聯發票」區。
              私帳整個不出現 —— 私帳不開發票，連結一律走專案（owner 2026-09-01） */ ''}
         ${(e.deposit || finIsMine()) ? '' : row('發票', 'cash-ql-inv', _invOptsHtml(e.invoice_id, '— 未連結 —'))}
@@ -878,7 +888,12 @@ function _renderQuickLink(e) {
         }
     };
     const pj = document.getElementById('cash-ql-proj');
-    if (pj) pj.addEventListener('change', () => save({ project_id: pj.value }));
+    if (pj) pj.addEventListener('click', () => openProjectPicker({
+        projects: _projectList,
+        currentId: e.project_id || '',
+        title: '連結專案 — ' + (e.summary || ''),
+        onPick: (id) => save({ project_id: id }),
+    }));
     const iv = document.getElementById('cash-ql-inv');
     if (iv) iv.addEventListener('change', () => save({ invoice_id: iv.value }));
 }
@@ -1375,6 +1390,11 @@ export async function initCrmCashbookTab() {
         const el = document.getElementById(id);
         if (el) document.body.appendChild(el);
     }
+    // 私帳不開發票（owner 2026-09-01）：列表的「發票」欄整欄藏掉。
+    // 同 has-card 的做法：cell 照渲染、CSS display:none —— nth-child 的欄寬
+    // 規則數的是 DOM 位置，抽掉節點會讓後面每一欄整排錯位。
+    const _panel = document.getElementById('cash-list-panel');
+    if (_panel) _panel.classList.toggle('mine-book', finIsMine());
     window._cashSelect = selectEntry;
     window._cashRefresh = loadEntries;
     window._cashEdit = (id) => { const e = _entries.find(x => x.id === id); if (e) openModal(e); };

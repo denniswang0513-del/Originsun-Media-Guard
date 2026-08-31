@@ -1912,6 +1912,9 @@
    🔴 用 display:none 而不是不渲染 —— nth-child 數的是 DOM 位置，抽掉節點會讓
    後面每一欄的欄寬規則整排錯位。 */
 #cash-list-panel:not(.has-card) .cash-col-card { display: none; }
+/* 私帳不開發票（owner 2026-09-01）：發票欄整欄藏掉。同上 —— display:none 不抽節點，
+   nth-child 的欄寬規則才不會整排錯位。 */
+#cash-list-panel.mine-book .cash-col-inv { display: none; }
 #cash-list-panel .acct-header > span:nth-child(6),
 #cash-list-body .crm-row > *:nth-child(6):not(.crm-kebab-wrap) { flex: 0 0 78px; }                      /* 類別（公司/個人/家用…） */
 #cash-list-panel .acct-header > span:nth-child(7),

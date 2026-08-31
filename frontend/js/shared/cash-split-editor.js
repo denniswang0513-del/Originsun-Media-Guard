@@ -64,6 +64,10 @@ export async function openCashSplitEditor(o) {
         advances: (s.advances || []).map((a) => ({ ...a })),
     }));
 
+    // 未收案清單的搜尋詞（owner 2026-09-01「專案列表要可以勾選、搜尋」——
+    // 案子多起來之後用捲的找不如打字）。已勾的列不受過濾影響，永遠看得到。
+    let projQ = '';
+
     const wrap = document.createElement('div');
     wrap.id = 'cash-split-overlay';
     wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9800;'
@@ -94,14 +98,38 @@ export async function openCashSplitEditor(o) {
         if (save) save.disabled = !isOk();
     }
 
-    function render() {
-        const projList = (out.projects || []).map((p) => `
+    const projListHtml = () => ((out.projects || [])
+        .filter((p) => projIdx(p.id) >= 0 || !projQ
+            || (p.name || '').toLowerCase().includes(projQ))
+        .map((p) => `
             <label style="display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer;">
                 <input type="checkbox" data-proj="${esc(p.id)}" ${projIdx(p.id) >= 0 ? 'checked' : ''}>
                 <span style="flex:1;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name)}</span>
                 <span style="color:#9ca3af;font-size:11px;">未收 $${fmtNum(p.receivable)}</span>
             </label>`).join('')
-            || '<div style="color:#6b7280;font-size:12px;">沒有還在等錢的案子</div>';
+        || `<div style="color:#6b7280;font-size:12px;">${projQ ? '找不到符合的未收案' : '沒有還在等錢的案子'}</div>`);
+
+    /** 勾選事件（清單重畫後要重掛 —— 搜尋只換清單那塊、不整窗重畫）。 */
+    function bindProj() {
+        wrap.querySelectorAll('[data-proj]').forEach((cb) => {
+            cb.onchange = () => {
+                const p = out.projects.find((x) => x.id === cb.dataset.proj);
+                if (cb.checked && p && projIdx(p.id) < 0) {
+                    rows.push({ kind: 'project', amount: p.receivable,
+                                fee: 0, feeOn: false,
+                                taxonomy_node_id: out.project_node_id || '',
+                                category: '', sub_item: '',
+                                project_id: p.id, note: '', advances: [] });
+                } else if (!cb.checked) {
+                    const i = projIdx(cb.dataset.proj);
+                    if (i >= 0) rows.splice(i, 1);
+                }
+                render();
+            };
+        });
+    }
+
+    function render() {
         const advList = (out.advances || []).map((a) => `
             <label style="display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer;">
                 <input type="checkbox" data-adv="${esc(a.entry_id)}" ${advChecked(a.entry_id) ? 'checked' : ''}>
@@ -152,7 +180,9 @@ export async function openCashSplitEditor(o) {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
                 <div style="background:#151515;border:1px solid #2a2a2a;border-radius:8px;padding:10px 12px;max-height:180px;overflow:auto;">
                     <div style="color:#93c5fd;font-size:12px;margin-bottom:4px;">連結未收案（勾了自動帶未收額，金額可改）</div>
-                    ${projList}
+                    <input data-projq type="search" value="${esc(projQ)}" placeholder="搜尋未收案…" autocomplete="off"
+                        style="background:#141414;border:1px solid #333;color:#eee;border-radius:6px;padding:3px 8px;font-size:12px;width:100%;margin-bottom:4px;">
+                    <div id="csp-projlist">${projListHtml()}</div>
                 </div>
                 <div style="background:#151515;border:1px solid #2a2a2a;border-radius:8px;padding:10px 12px;max-height:180px;overflow:auto;">
                     <div style="color:#fbbf24;font-size:12px;margin-bottom:4px;">沖未回款代墊（逐筆結清；金額＝勾選合計）</div>
@@ -245,22 +275,15 @@ export async function openCashSplitEditor(o) {
                 render();
             };
         });
-        wrap.querySelectorAll('[data-proj]').forEach((cb) => {
-            cb.onchange = () => {
-                const p = out.projects.find((x) => x.id === cb.dataset.proj);
-                if (cb.checked && p && projIdx(p.id) < 0) {
-                    rows.push({ kind: 'project', amount: p.receivable,
-                                fee: 0, feeOn: false,
-                                taxonomy_node_id: out.project_node_id || '',
-                                category: '', sub_item: '',
-                                project_id: p.id, note: '', advances: [] });
-                } else if (!cb.checked) {
-                    const i = projIdx(cb.dataset.proj);
-                    if (i >= 0) rows.splice(i, 1);
-                }
-                render();
+        bindProj();
+        const pq = wrap.querySelector('[data-projq]');
+        if (pq) {
+            pq.oninput = () => {   // 只換清單那塊 —— 整窗重畫會把打字焦點打掉
+                projQ = pq.value.trim().toLowerCase();
+                const box = wrap.querySelector('#csp-projlist');
+                if (box) { box.innerHTML = projListHtml(); bindProj(); }
             };
-        });
+        }
         wrap.querySelectorAll('[data-adv]').forEach((cb) => {
             cb.onchange = () => {
                 const a = out.advances.find((x) => x.entry_id === cb.dataset.adv);
