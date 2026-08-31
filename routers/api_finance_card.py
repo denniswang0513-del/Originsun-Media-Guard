@@ -194,7 +194,7 @@ async def apply_card_statement(payload: CardImportApply, request: Request,
         #    （apply_bank_statement / apply_rules_to_unclassified）已經都走它了，
         #    卡單是最後一個自己來的寫入端。
         from core.cash_tree import path_map
-        from routers.crm.finance import _sync_taxonomy
+        from routers.crm.cash import _sync_taxonomy
         paths = await path_map(session, ent) if todo else {}
         for r, d in todo:
             ce = CrmCashEntry(

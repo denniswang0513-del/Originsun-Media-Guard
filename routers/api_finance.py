@@ -1022,7 +1022,7 @@ async def create_entry_from_statement_line(
         # 吃的是**分類樹鏡射出來的複合鍵**（公司_專案／家用_變動支出），只寫
         # category 的話這一列就是「有類別、不在樹上」的孤兒：收支明細的樹狀篩選
         # 看不到它。銀行對帳單、套用規則、卡單三條寫入路都已經走它了。
-        from routers.crm.finance import _sync_taxonomy
+        from routers.crm.cash import _sync_taxonomy
         await _sync_taxonomy(session, entry, {"category": entry.category})
         row.matched_entry_id = entry.id
         await session.commit()
