@@ -641,7 +641,7 @@ async def _build_statement_preview(session, acct, ent, text):
     # 前端不用再多打兩支 API（那兩支還在不同的 prefix 下）。
     from sqlalchemy import or_, select
 
-    from core.project_link import CASH_CATEGORIES
+    from core.project_link import CASH_CATEGORIES, cash_can_link
     from db.models import Client, CrmInvoice, CrmProject
     # 挑選視窗要看得出「是哪個案子」—— 只有名稱不夠（同名/近名的案子很多）
     cmap = {c.id: c.short_name for c in
@@ -761,8 +761,14 @@ async def _build_statement_preview(session, acct, ent, text):
         # 支出列用的候選（還沒付滿的請款單）。跟 invoices 是同一個位置的兩側 ——
         # 一列不可能同時掛發票與請款單（方向互斥），前端也就共用同一格。
         "payment_requests": open_pays,
-        # 哪些類別收得下專案 —— 前端拿它決定專案下拉何時可用（規則同收支明細）
-        "project_categories": list(CASH_CATEGORIES),
+        # 哪些類別收得下專案 —— 前端拿它決定專案下拉何時可用。
+        # 🔴 規則正本是 core.project_link.cash_can_link：原本兩本帳都寫死母公司
+        # 白名單（專案/專案雜支/專案外包），私帳的「公司_專案」永遠比不中 →
+        # 專案格恆為「—」，對帳單匯入的收款完全沒有掛專案的入口（owner
+        # 2026-09-01「這裡無法收專案」—— 私帳不開發票，收款只能靠連結專案）。
+        # 私帳的 cat_list 已是全值域（樹節點鏡射，_shared.ledger_categories_and_tree）。
+        "project_categories": ([c for c in cat_list if cash_can_link(ent, c)]
+                               if ent == "mine" else list(CASH_CATEGORIES)),
         # 有科目對映的類別。前端改分類時要用同一條規則判「會不會落到未歸類」，
         # 不然改成一個沒對映的類別之後那個提醒就消失了。
         # （也省掉前端跨 prefix 去打 /crm/cash-entries/options 那一支）
@@ -1070,6 +1076,7 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
     # 不守，整批由 tests/unit/test_lazy_imports_resolve.py 把關（事故經過在
     # 它的檔頭）。
     from routers.crm.cash import (_enforce_cash_project_link,
+                                  _sync_mine_project_received,
                                   resolve_invoice_allocs)
     from routers.crm.finance import (replace_invoice_allocs_bulk,
                                      replace_payment_allocs,
@@ -1248,6 +1255,14 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                               for x in (r.payments or [])]
                 if r.payment_fee and amt < 0:
                     apply_payment_fee(ce, int(r.payment_fee))
+                # 私帳收款規則同 create_cash_entry：掛在專案上的**收入**驅動該案
+                # 已收/應收/收款狀態（增量制正本 cash._sync_mine_project_received）。
+                # 🔴 少這一步＝匯入時掛了專案、未收額卻一毛不動 —— 私帳不開發票，
+                # 收款靠的就是這條（owner 2026-09-01）。放在匯費認列之後：deposit
+                # 要是補完毛額的終值（同 create 端點看到的樣子）。
+                if ce.project_id and ent == "mine":
+                    await _sync_mine_project_received(session, ce.project_id,
+                                                     int(ce.deposit or 0))
                 session.add(ce)
                 made_entries += 1
                 stmt_lines.append((r, ce))

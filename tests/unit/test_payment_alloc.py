@@ -249,7 +249,10 @@ def test_ui_has_the_payment_box_on_expense_rows_only():
     assert "loadCashPaymentAllocs" in js and "cash-pay-box" in js
     seg = func_body(js, "function renderDetail(")
     assert "e.expense" in seg, "收入列也載入了付款分配（那是發票那區的事）"
-    assert "if (e.deposit) loadCashInvoiceAllocs(e.id);" in seg, "動到了發票那側"
+    # 發票那側只在收入列載入；私帳整個不載（不開發票，連結一律走專案 ——
+    # owner 2026-09-01，詳見 test_stmt_link 的 mine_replaces_invoice_links）
+    assert "if (e.deposit && !mineNoInvoice) loadCashInvoiceAllocs(e.id);" in seg, \
+        "動到了發票那側"
 
 
 def test_ui_does_not_fetch_allocs_for_rows_that_have_none():

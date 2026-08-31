@@ -104,6 +104,47 @@ def test_invoice_only_for_income_rows():
     assert 'invoice_id' not in StatementImportRow.model_fields
 
 
+def test_mine_project_categories_use_the_one_link_rule():
+    """🔴 「哪些類別收得下專案」的正本是 core.project_link.cash_can_link。
+    preview 原本寫死母公司白名單（專案/專案雜支/專案外包）—— 私帳的
+    「公司_專案」永遠比不中，專案格恆為「—」：私帳不開發票，對帳單匯入的
+    收款就此完全沒有掛專案的入口（owner 2026-09-01「這裡無法收專案」）。"""
+    body = _body('async def _build_statement_preview(')
+    assert 'cash_can_link(ent, c)' in body, 'project_categories 沒走 cash_can_link 正本'
+    from core.project_link import cash_can_link
+    assert cash_can_link('mine', '公司_專案')
+    assert not cash_can_link('mine', '家用_餐飲'), '個人/家用掛專案會污染毛利'
+    assert not cash_can_link('parent', '公司_專案'), '兩本帳詞彙不同是刻意的'
+
+
+def test_apply_credits_the_mine_project_on_import():
+    """🔴 掛了專案的私帳收入列，匯入時要走 _sync_mine_project_received 增量
+    （規則同 create_cash_entry）。少這一步＝專案掛上了、未收額一毛不動 ——
+    掛專案看起來成功，帳齡卻永遠掛著。"""
+    body = _body('async def apply_bank_statement(')
+    assert '_sync_mine_project_received(session, ce.project_id' in body
+    # 要在匯費認列之後：deposit 得是補完毛額的終值（同 create 端點看到的樣子）
+    assert (body.index('apply_receipt_fee(ce')
+            < body.index('_sync_mine_project_received(session, ce.project_id'))
+
+
+def test_mine_replaces_invoice_links_with_project_links():
+    """owner 2026-09-01「私帳不會開發票，連結發票都用連結專案替代」——
+    私帳的發票介面要整組消失（不是留一個開了也是空清單的死按鈕）：
+      · 匯入預覽：收入側 _sideOf 恆 null（發票格與挑選視窗一起不出現）
+      · 收支明細：關聯發票區／快速連結發票下拉／編輯視窗發票欄都收掉"""
+    from tests.unit._srcscan import js_code_only
+    recon = js_code_only(repo_src('frontend/tabs/finance/subviews/recon.js'))
+    side = recon.split('const _sideOf =')[1].split(';')[0]
+    assert 'finIsMine()' in side and 'null' in side, '收入側的發票格對私帳沒有關掉'
+    cb = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
+    assert 'mineNoInvoice' in cb, '收支明細詳情的發票區沒有私帳閘門'
+    # 三個不共用 render 的入口各自要擋（帳本判定一律 finIsMine 唯一正本）
+    assert '(e.deposit || finIsMine())' in cb, '快速連結的發票下拉沒擋私帳'
+    assert '...(finIsMine() ? []' in cb, '編輯欄位清單沒把發票欄抽掉'
+    assert 'inv && finIsMine()' in cb, '新增/編輯視窗的發票欄沒對私帳恆隱藏'
+
+
 def test_preview_returns_the_option_lists():
     """選項跟預覽一起回 —— 那兩支在不同的 prefix 下，前端不該再多打兩次。"""
     # 預覽的內容由 _build_statement_preview 產（上傳與開啟草稿共用同一支）

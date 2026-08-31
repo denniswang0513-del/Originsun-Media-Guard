@@ -1219,6 +1219,7 @@ const _stmtHasLoans = () => !!((_stmtPreview || {}).loan_count || 0);
 /** 那一欄的抬頭。私帳沒有發票（生產實查 401 張全在母公司），寫「發票／請款單」
  *  等於一半是空話 —— 有哪一側就說哪一側。 */
 function _stmtAllocLabel() {
+    if (finIsMine()) { return '請款單'; }   // 私帳不開發票（收款走專案欄）
     const d = _stmtPreview || {};
     const inv = (d.invoices || []).length;
     const pay = (d.payment_requests || []).length;
@@ -1625,8 +1626,12 @@ const _SIDES = {
     },
 };
 
-/** 這一列該用哪一側？金額的方向決定，沒有第二個判準。 */
-const _sideOf = (r) => (r.amount > 0 ? _SIDES.inv : r.amount < 0 ? _SIDES.pay : null);
+/** 這一列該用哪一側？金額的方向決定，沒有第二個判準。
+ *  🔴 私帳收入側恆為 null（owner 2026-09-01「私帳不會開發票，連結發票都用
+ *  連結專案替代」）—— 收款掛的是專案欄那格，發票格與挑選視窗整個不出現。 */
+const _sideOf = (r) => (r.amount > 0
+    ? (finIsMine() ? null : _SIDES.inv)
+    : r.amount < 0 ? _SIDES.pay : null);
 
 /** 搜尋框輸入 → 只重畫清單（不重畫整個視窗，不然游標會跳掉）。 */
 _fr.pickSearch = (q) => {

@@ -48,6 +48,10 @@ function _toggleAdvanceFields(isAdv) {
         var el = document.getElementById(ids[i]);
         if (el) el.style.display = (i === 0 ? isAdv : !isAdv) ? '' : 'none';
     }
+    // 私帳不開發票（owner 2026-09-01）：發票欄恆隱藏，連結一律走專案。
+    // 這支是唯一會把該欄「顯示回來」的地方，所以蓋在最後。
+    var inv = document.getElementById('cash-field-invoice');
+    if (inv && finIsMine()) inv.style.display = 'none';
 }
 
 // ── Data Loading ────────────────────────────────────────────
@@ -853,8 +857,9 @@ function _renderQuickLink(e) {
         </div>`;
     box.innerHTML = `
         ${row('專案', 'cash-ql-proj', _projOptsHtml(e.project_id, '— 未連結 —'))}
-        ${/* 發票下拉只在支出列出現：收入列的發票走上面可掛多張的「關聯發票」區 */ ''}
-        ${e.deposit ? '' : row('發票', 'cash-ql-inv', _invOptsHtml(e.invoice_id, '— 未連結 —'))}
+        ${/* 發票下拉只在支出列出現：收入列的發票走上面可掛多張的「關聯發票」區。
+             私帳整個不出現 —— 私帳不開發票，連結一律走專案（owner 2026-09-01） */ ''}
+        ${(e.deposit || finIsMine()) ? '' : row('發票', 'cash-ql-inv', _invOptsHtml(e.invoice_id, '— 未連結 —'))}
         <div id="cash-ql-msg" style="font-size:11px;color:#666;margin-top:5px;">選了就直接存</div>`;
 
     const save = async (patch) => {
@@ -911,7 +916,10 @@ function renderDetail(e) {
         ? matchedClient.short_name + (matchedClient.payment_info ? ' (' + matchedClient.payment_info + ')' : '')
         : '';
     const isProjectish = _LINKABLE.includes(e.category || '');
-    const showInvoiceProp = !e.deposit;   // 收入列的發票由下面「關聯發票」區負責，不重複列
+    // 收入列的發票由下面「關聯發票」區負責，不重複列。
+    // 私帳沒有發票這回事（不開發票，收款＝連結專案），相關欄目整組不出現。
+    const mineNoInvoice = finIsMine();
+    const showInvoiceProp = !e.deposit && !mineNoInvoice;
     const rel = [
         // 有快速連結下拉時就不印唯讀版 —— 下拉本身已經顯示目前選的是什麼，
         // 印兩份會變成「專案 X」下面又一個「專案」標籤
@@ -930,7 +938,7 @@ function renderDetail(e) {
     // 關聯發票（合併匯款 / 分期收款）—— 只有收入列有，內容由 loadCashInvoiceAllocs
     // 非同步填。舊的「單張發票驗算」被這區塊取代：它只看得到一張發票，客戶合併
     // 匯款時必然報「不平衡」，等於在對的資料上顯示假警告。
-    if (e.deposit) {
+    if (e.deposit && !mineNoInvoice) {
         html += section('關聯發票');
         html += '<div id="cash-alloc-box" style="font-size:12px;color:#888;">載入中…</div>';
     }
@@ -944,7 +952,7 @@ function renderDetail(e) {
 
     document.getElementById('cash-detail-content').innerHTML = html;
     if (_LINKABLE.includes(e.category || '')) _renderQuickLink(e);
-    if (e.deposit) loadCashInvoiceAllocs(e.id);
+    if (e.deposit && !mineNoInvoice) loadCashInvoiceAllocs(e.id);
     // 🔴 沒掛過任何請款單就不用打那一趟：payment_request_id 的不變量由
     //    replace_payment_allocs 維持（有連結才非空、清空就設回 null），所以它
     //    等於「這列有沒有分配」。實測生產 907 筆支出列，有硬連結的是 0 筆 ——
@@ -1068,7 +1076,10 @@ function _buildEditFields(currentBankAccountId, currentInvoiceId) {
         {name:'bank_memo', label:'銀行資訊', type:'text'},
         {name:'note', label:'附註', type:'text'},
         {name:'project_id', label:'專案', type:'select', options:projectOpts},
-        {name:'invoice_id', label:'發票', type:'select', options:invoiceOpts},
+        // 私帳不開發票（owner 2026-09-01）：發票欄整個不出現，連結一律走專案。
+        // 不出現＝payload 不含此鍵（exclude_unset 部分更新），不會洗掉既有值。
+        ...(finIsMine() ? []
+            : [{name:'invoice_id', label:'發票', type:'select', options:invoiceOpts}]),
         {name:'bank_fee', label:'匯費', type:'number'},
     ];
     // 帳戶（財務模組）— 清單載入成功才提供（降級時不出現，PUT payload 不含此鍵、不洗掉既有值）
