@@ -107,6 +107,10 @@ FINANCE_AND_CRM_COLUMNS = [
         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS mine_link_id VARCHAR(32)",
         "CREATE INDEX IF NOT EXISTS idx_project_mine_link"
         " ON crm_projects (mine_link_id)",
+        # 規則命中後要寫進那一列的備註（owner 2026-09-01「也可以記憶備註」）。
+        # 跟既有的 `note`（規則自己的備忘）是兩件事，見 BankImportRule 的註解。
+        "ALTER TABLE bank_import_rules ADD COLUMN IF NOT EXISTS"
+        " apply_note VARCHAR(255)",
         # 私帳客戶 → CRM 客戶對應連結（owner 2026-08-26「用連結的方式同步」）
         "ALTER TABLE clients ADD COLUMN IF NOT EXISTS crm_link_id VARCHAR(32)",
         # 客戶代稱改「每本帳唯一」—— 同一家公司 CRM 一筆＋私帳一筆

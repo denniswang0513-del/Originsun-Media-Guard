@@ -146,6 +146,11 @@ async def _existing_entry_keys(session, acct_id, dates):
 # 右半邊本來就是資料驅動的，左半邊原本寫死在 core/bank_statement.KEYWORD_RULES。
 
 
+# 匯入時給沒有備註的列填的制式字樣。**只有這一份** —— 重分類那條路要靠它
+# 判斷「這句不是人寫的、可以被規則的備註取代」，字串各寫一份就會判錯。
+STMT_IMPORT_NOTE = "銀行對帳單匯入"
+
+
 def _rule_priority_key(bank_account_id: str = ""):
     """規則的命中優先序。**清單顯示與實際比對共用這一支** —— 各寫一份的話，
     畫面上說「由上而下比對，先命中的先贏」就會是假的。
@@ -182,7 +187,8 @@ async def _load_import_rules(session, bank_account_id: str = "", ent: str = "par
             if not r.bank_account_id or r.bank_account_id == bank_account_id]
     rows.sort(key=_rule_priority_key(bank_account_id))
     return [(r.keyword, r.category, int(r.direction or 0),
-             int(r.only_direction or 0), r.taxonomy_node_id or "") for r in rows]
+             int(r.only_direction or 0), r.taxonomy_node_id or "",
+             r.apply_note or "") for r in rows]
 
 
 def _rule_dict(r) -> dict:
@@ -191,7 +197,7 @@ def _rule_dict(r) -> dict:
             "bank_account_id": r.bank_account_id or "",
             "sort_order": r.sort_order, "active": bool(r.active),
             "only_direction": int(r.only_direction or 0),
-            "note": r.note or ""}
+            "note": r.note or "", "apply_note": r.apply_note or ""}
 
 
 @router.get("/import-rules")
@@ -210,11 +216,17 @@ async def list_import_rules(request: Request, bank_account_id: str = "",
     async with factory() as session:
         rows = (await session.execute(
             select(BankImportRule).where(BankImportRule.entity == ent))).scalars().all()
-        # 規則面板的「歸到類別」下拉吃這一份 —— 跟寫入時擋人的
+        # 規則面板的「歸到類別」吃這一份 —— 跟寫入時擋人的
         # （`_assert_known_category`）必須是同一個值域。
-        cats = sorted(await ledger_category_domain(session, ent))
+        # 🔴 樹也由**這個端點**一起回，面板不去借收支明細那份快取：規則可以指定
+        # 到任何一層（owner 2026-09-01「記到第四層」），選節點就得有樹；而借快取
+        # 的話，切帳本時面板會拿到上一本的樹 —— 選了才 422。兩個一起要就走
+        # `ledger_categories_and_tree` 那一支（節點表整份撈一次，深淺各自過濾）。
+        cats, tree = await ledger_categories_and_tree(session, ent)
+        cats = sorted(cats)
     rows.sort(key=_rule_priority_key(bank_account_id))
-    return {"items": [_rule_dict(r) for r in rows], "categories": cats}
+    return {"items": [_rule_dict(r) for r in rows], "categories": cats,
+            "taxonomy_tree": tree}
 
 
 async def _owned_rule(session, rule_id: str, ent: str):
@@ -277,6 +289,8 @@ async def _apply_rule_payload(r, payload, *, require_all: bool, session,
         r.active = payload.active
     if touched("note"):
         r.note = (payload.note or "")[:255]
+    if touched("apply_note"):
+        r.apply_note = (payload.apply_note or "").strip()[:255] or None
     return r
 
 
@@ -417,9 +431,15 @@ async def apply_rules_to_unclassified(request: Request, entity: str = ""):
             # 🔴 `_entry_flow` 而不是 `cash_entry_flow` —— 後者吃的是收支明細的
             # dict payload，這裡手上是 ORM 列，直接餵會 AttributeError（母公司
             # 沒有未歸類的列，迴圈進不去，所以一直沒炸出來）。
-            cat, _d, node = _classify(f"{e.summary or ''} {e.note or ''}", cache[acct],
-                                      signed=_entry_flow(e))
+            hit = _classify(f"{e.summary or ''} {e.note or ''}", cache[acct],
+                            signed=_entry_flow(e))
+            cat, node = hit.category, hit.node
             if cat:
+                # 規則記住的備註：**只補空的**。這條路是回頭重分類既有的列，
+                # 覆蓋掉人手寫的備註就是靜靜毀資料 —— 匯入時寫的那句制式
+                # 「銀行對帳單匯入」算空（它不是人寫的）。
+                if hit.note and (e.note or "").strip() in ("", STMT_IMPORT_NOTE):
+                    e.note = hit.note
                 # 🔴 節點與三欄的一致性只有一份規則：`_sync_taxonomy`
                 # （routers/crm/finance，docstring 寫著「規則只有這一份」）。
                 # 在這裡自己寫 category＋taxonomy_node_id 就是第二份 ——
@@ -732,6 +752,8 @@ async def _build_statement_preview(session, acct, ent, text):
             "category": r.category, "inferred": r.inferred,
             # 規則指定到第三層以後時，節點才是正本（category 只到第二層）
             "taxonomy_node_id": r.taxonomy_node_id,
+            # 規則記住的備註（空＝這列沒中帶備註的規則，寫入時填制式字樣）
+            "note": r.entry_note,
             # 源日請款用的會計項目建議（空＝對不出來，畫面要人挑）
             "petty_item": (_petty_item_for(r.category, petty_items)
                            if petty_items else ""),
@@ -1171,7 +1193,8 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                     continue
                 ent_line = _record_loan_payment(
                     session, loan, row, d, payload.bank_account_id,
-                    note="銀行對帳單匯入", actual_amount=amt,
+                    note=(r.note or "").strip()[:255] or STMT_IMPORT_NOTE,
+                    actual_amount=amt,
                     split_total=split_totals[(r.loan_id, r.period_no)])
                 made_payments += 1
                 stmt_lines.append((r, ent_line))
@@ -1189,7 +1212,7 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                     expense=(-amt if amt < 0 else None),
                     deposit=(amt if amt > 0 else None),
                     summary=(r.description or "銀行對帳單")[:255],
-                    note="銀行對帳單匯入",
+                    note=(r.note or "").strip()[:255] or STMT_IMPORT_NOTE,
                     category=(r.category or "").strip() or None,
                     bank_account_id=payload.bank_account_id, entity=ent)
                 # 拆項（帳目一筆、內容拆裂）：這列的分類/專案/發票整組讓位給

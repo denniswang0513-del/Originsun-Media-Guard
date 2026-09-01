@@ -78,7 +78,14 @@ class BankImportRule(Base):
     only_direction = Column(Integer, nullable=False, server_default="0")  # -1 只支出 / +1 只存入 / 0 不限
     sort_order = Column(Integer, nullable=False, default=100)    # 小的先比（多條命中時誰贏）
     active = Column(Boolean, default=True)
-    note = Column(String(255), nullable=True)
+    note = Column(String(255), nullable=True)                    # 規則自己的備忘（給人看的，不會寫進帳）
+    # 🔴 跟 `note` 是兩件事，別混（命名照做的事，不是照欄位長相）：
+    #   note       = 這條規則本身的備忘（「從對帳單預覽建立」）
+    #   apply_note = **命中後要寫進那一列收支的備註**
+    # owner 2026-09-01「規則可以記憶備註」：每月同一筆房租、同一筆貸款轉帳，
+    # 分類自動了、備註還是每次手打。備註跟分類一樣是「這串摘要代表什麼」的
+    # 一部分，該一起記在規則裡。空＝沿用原本的「銀行對帳單匯入」。
+    apply_note = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 

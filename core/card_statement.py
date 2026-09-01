@@ -245,7 +245,7 @@ def suggest_rows(rows, hist: dict, rules, seen) -> list:
         if r.kind == "fee" and prev_cat:
             cat, source = prev_cat, "fee"          # 手續費跟前一筆
         if not cat:
-            cat = _classify(r.note, rules, signed=-r.amount)[0]
+            cat = _classify(r.note, rules, signed=-r.amount).category
             source = "rule" if cat else source
         if not cat:
             cat = hist.get(merchant_key(r.note), "")

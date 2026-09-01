@@ -1370,6 +1370,9 @@ class StatementImportRow(BaseModel):
     # 鏡射。挑了節點就送它，寫入端用 `_sync_taxonomy` 推三欄 —— 只送 category
     # 的話那一列沒有節點，收支明細的分類篩選與路徑顯示就看不到它。
     taxonomy_node_id: Optional[str] = None
+    # 這一列的備註。預覽時由命中的規則帶出來（BankImportRule.apply_note），
+    # 使用者可以改。空＝寫入時填制式的「銀行對帳單匯入」。
+    note: Optional[str] = ""
     # 匯進去之後直接送「源日請款」（＝推成母公司零用金的草稿單據）。
     # owner 2026-08-30：功能本來就有（收支明細每列的選單），他要的是匯入當下
     # 就能勾，不必匯完再回收支表走一遍。只對**私帳的流出列**有意義。
@@ -1605,7 +1608,10 @@ class BankImportRulePayload(BaseModel):
     # 跟 direction（推方向的提示）是兩件事 —— 見 BankImportRule 的註解。
     only_direction: int = 0
     active: bool = True
-    note: str = ""
+    note: str = ""              # 規則自己的備忘（給人看的）
+    # 命中後要寫進那一列收支的備註（owner 2026-09-01「也可以記憶備註」）。
+    # 跟上面的 `note` 是兩件事 —— 見 BankImportRule 的註解。
+    apply_note: str = ""
 
 
 class CashInvoiceLinksPayload(BaseModel):

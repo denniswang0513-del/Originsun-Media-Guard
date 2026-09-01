@@ -1044,7 +1044,11 @@ function _stmtRow(r, i) {
         <td style="padding:4px 6px;"><input type="checkbox" data-stmt-i="${i}"
             onchange="window._finRecon.stmtPick(${i}, this.checked)" ${r.selected ? 'checked' : ''}></td>
         <td style="padding:4px 6px;color:#ccc;white-space:nowrap;">${esc(r.date)}</td>
-        <td style="padding:4px 6px;color:#ddd;" title="${esc(r.description || '')}">${esc(r.description || '')}</td>
+        <td style="padding:4px 6px;color:#ddd;" title="${esc(r.description || '')}">${esc(r.description || '')}
+            <input class="crm-input" value="${esc(r.note || '')}" placeholder="備註"
+                   title="會寫進這筆收支的備註。命中帶備註的規則時自動帶出來（見「＋規則」）。"
+                   oninput="window._finRecon.stmtNoteChanged(${i}, this.value)"
+                   style="width:100%;margin-top:3px;font-size:11px;padding:1px 4px;"></td>
         <td style="padding:4px 6px;text-align:right;white-space:nowrap;color:${isOut ? '#fca5a5' : '#86efac'};">
             ${isOut ? '-' : '+'}$${fmtNum(Math.abs(r.amount))}</td>
         <td style="padding:4px 6px;min-width:150px;">
@@ -1304,6 +1308,14 @@ _fr.stmtCatChanged = (i, v, level) => {
     _stmtRefreshRow(i);        // 專案格的可用與否跟著分類走（只有這一列會變）
 };
 
+/** 備註改動。**不重畫這一列** —— `_stmtRefreshRow` 會換掉整個 <tr>，
+ *  正在打字的輸入框連同游標一起消失（每打一個字跳走一次）。備註不影響
+ *  其他任何格子，所以只更新資料就好。 */
+_fr.stmtNoteChanged = (i, v) => {
+    const r = _stmtPreview && _stmtPreview.rows[i];
+    if (r) { r.note = v; }
+};
+
 /** 把「這列的摘要 → 這個類別」存成規則。關鍵字由使用者自己打。
  *
  * 🔴 刻意**不**預填猜測值（owner 2026-08-20）。原本是 `description.slice(0, 8)`，
@@ -1335,6 +1347,9 @@ _fr.stmtSaveRule = async (i) => {
         await finFetch('/import-rules', { method: 'POST', body: JSON.stringify({
             keyword: kw.trim(), category: r.category,
             taxonomy_node_id: r.taxonomy_node_id || '',
+            // 連備註一起記（owner 2026-09-01「也可以記憶備註」）—— 每月同一筆
+            // 房租、同一筆貸款轉帳，分類自動了備註還要手打就等於沒自動。
+            apply_note: (r.note || '').trim(),
             bank_account_id: _stmtPreview.bank_account_id,   // 綁這個帳戶：各行摘要用語不同
             sort_order: 50, active: true,
             note: '從對帳單預覽建立' }) });
@@ -1368,6 +1383,8 @@ function _acctName(id) {
 }
 
 let _ruleCats = [];   // 規則面板的類別下拉值域（由 /import-rules 供）
+let _ruleTree = [];   // 私帳的分類樹（同一個端點回的；母公司是空的）
+let _ruleById = {};   // 節點 id → 路徑（indexTax 建的）
 
 _fr.rulesOpen = async () => {
     // 🔴 類別下拉吃 /import-rules 自己回的 categories —— 那是**這本帳**的值域，
@@ -1377,8 +1394,63 @@ _fr.rulesOpen = async () => {
         const d = await finFetch('/import-rules');
         _rules = d.items || [];
         _ruleCats = d.categories || [];
-    } catch (_) { _rules = []; _ruleCats = []; }
+        // 分類樹也吃**這個端點回的那份**，不去借收支明細的快取 —— 面板的規矩
+        // 是「值域一律由規則端點自己回」（借快取時切帳本會拿到上一本的樹）。
+        // 規則可以指定到任何一層（owner 2026-09-01「記到第四層」），選節點就
+        // 得有樹；`indexTax` 建 id → 路徑的索引，畫完整路徑跟逐層下拉都靠它。
+        _ruleTree = d.taxonomy_tree || [];
+        _ruleById = indexTax(_ruleTree);
+    } catch (_) { _rules = []; _ruleCats = []; _ruleTree = []; _ruleById = {}; }
     _rulesRender();
+};
+
+/** 規則的分類顯示：有節點就畫**完整路徑**，沒有才退回 category。
+ *
+ *  🔴 只顯示 `r.category` 的話，一條指到第四層的規則在清單上長得跟只到第二層
+ *  的一模一樣（category 是路徑前兩層的鏡射）—— 使用者看到的就是「規則記不住
+ *  第三層以後」，而其實存進去了。 */
+function _rulePathText(r) {
+    const chain = _ruleById[r.taxonomy_node_id] || [];
+    return chain.length ? chain.map((n) => n.name).join(' ▸ ') : (r.category || '');
+}
+
+/** 新增表單那一格的暫存值（樹是逐層選的，選到一半也要記得住）。 */
+let _ruleDraft = { taxonomy_node_id: '', category: '' };
+
+/** 把新增表單的分類樹畫進它的格子（innerHTML 之後才有 DOM，同 _stmtTaxInto）。 */
+function _ruleTaxInto() {
+    const box = document.getElementById('rule-cat-box');
+    if (!box) { return; }
+    taxSelects(box, {
+        tree: _ruleTree,
+        chain: _ruleById[_ruleDraft.taxonomy_node_id] || [],
+        cls: 'crm-select crm-select-sm',
+        style: 'margin-right:3px;',
+        keepOne: true,
+        blank: (n) => (n === 0 ? '— 選類別 —' : '（不細分）'),
+        onPick: (n, v) => {
+            const chain = _ruleById[_ruleDraft.taxonomy_node_id] || [];
+            const node = v ? _ruleById[v] : null;
+            // 選「（不細分）」＝停在上一層（那一層本身就是有效的分類）
+            const picked = node ? node[node.length - 1]
+                : (n > 0 && chain[n - 1] ? chain[n - 1] : null);
+            _ruleDraft = { taxonomy_node_id: picked ? picked.id : '',
+                           // 🔴 category 用節點自帶的 `cat`（後端 mirror_from_path
+                           // 算的），不在這裡自己拼第二份鏡射 —— 同 stmtCatChanged。
+                           category: picked ? (picked.cat || '') : '' };
+            _ruleTaxInto();      // 往下長一層／收回一層
+        },
+    });
+}
+
+/** 改一條既有規則的備註（會寫進帳的那個）。部分更新，只送這一欄。 */
+_fr.ruleNoteSave = async (id, v) => {
+    const r = _rules.find((x) => x.id === id);
+    if (!r || (r.apply_note || '') === v.trim()) { return; }   // 沒改就別打 API
+    await finFetch('/import-rules/' + id, {
+        method: 'PUT', body: JSON.stringify({ apply_note: v.trim() }) });
+    r.apply_note = v.trim();
+    finToast('備註已存');
 };
 
 function _rulesRender() {
@@ -1390,7 +1462,11 @@ function _rulesRender() {
     const rows = _rules.map(r => `
         <tr style="border-bottom:1px solid #2a2a2a;${r.active ? '' : 'opacity:.45;'}">
             <td style="padding:4px 6px;color:#ddd;">${esc(r.keyword)}</td>
-            <td style="padding:4px 6px;color:#bbb;">${esc(r.category)}</td>
+            <td style="padding:4px 6px;color:#bbb;">${esc(_rulePathText(r))}</td>
+            <td style="padding:4px 6px;">
+                <input class="crm-input" value="${esc(r.apply_note || '')}" placeholder="（不填）"
+                       onchange="window._finRecon.ruleNoteSave('${r.id}', this.value)"
+                       style="width:120px;font-size:11px;padding:1px 4px;"></td>
             <td style="padding:4px 6px;color:#9ca3af;font-size:11px;">${
                 r.bank_account_id ? esc(_acctName(r.bank_account_id)) : '所有帳戶'}</td>
             <td style="padding:4px 6px;color:#9ca3af;font-size:11px;">${
@@ -1408,15 +1484,23 @@ function _rulesRender() {
             對帳單的摘要包含「關鍵字」就自動歸到那個類別。
             <b>綁定帳戶的規則優先於「所有帳戶」</b> —— 合庫寫「攤還本息」、一銀寫
             「中小７月」，同一件事兩種寫法，綁帳戶才不會互相誤觸。
-            由上而下比對，先命中的先贏。<br>
+            由上而下比對，先命中的先贏。<b>類別可以指定到任何一層</b> ——
+            選到第四層就記第四層，清單上顯示完整路徑。<br>
+            <b>備註</b>：填了的話，命中這條規則的列匯進去就帶著這句備註
+            （每月同一筆房租、同一筆轉帳不必再手打）。<br>
             <b>方向</b>：同一個關鍵字兩個方向是不同類別時用它 —— 例如「薪資」，
             股東匯進來是<b>代收薪資</b>、公司發給員工是<b>代發薪資</b>。
             不限的規則排在前面會蓋掉方向規則，所以方向規則的順序要排前面。</p>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;">
             <div><div style="color:#9ca3af;font-size:11px;">關鍵字</div>
                 <input id="rule-kw" class="crm-input" style="width:130px;" placeholder="摘要含這串"></div>
-            <div><div style="color:#9ca3af;font-size:11px;">歸到類別</div>
-                <select id="rule-cat" class="crm-select">${catOpts}</select></div>
+            <div><div style="color:#9ca3af;font-size:11px;">歸到類別</div>${
+                _ruleTree.length
+                    ? '<div id="rule-cat-box" style="display:flex;gap:3px;"></div>'
+                    : `<select id="rule-cat" class="crm-select">${catOpts}</select>`}</div>
+            <div><div style="color:#9ca3af;font-size:11px;">備註（會寫進帳）</div>
+                <input id="rule-note" class="crm-input" style="width:150px;"
+                       placeholder="不填＝銀行對帳單匯入"></div>
             <div><div style="color:#9ca3af;font-size:11px;">適用帳戶</div>
                 <select id="rule-acct" class="crm-select">${acctOpts}</select></div>
             <div><div style="color:#9ca3af;font-size:11px;">方向</div>
@@ -1428,6 +1512,7 @@ function _rulesRender() {
         ${_wbTable(`<thead><tr>
             <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">關鍵字</th>
             <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">類別</th>
+            <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">備註（寫進帳）</th>
             <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">適用帳戶</th>
             <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">方向</th>
             <th></th></tr></thead><tbody>${rows}</tbody>`, 300)}
@@ -1437,6 +1522,7 @@ function _rulesRender() {
                 套用到未歸類的歷史列</button>
             <button class="crm-btn crm-btn-secondary" onclick="window._finRecon.wbCloseModal()">關閉</button>
         </div>`);
+    _ruleTaxInto();      // 分類樹的下拉要等 modal 的 DOM 進去之後才畫得了
 }
 
 _fr.ruleAdd = async (btn) => {
@@ -1444,16 +1530,21 @@ _fr.ruleAdd = async (btn) => {
     const show = (m) => { err.textContent = m; err.style.display = 'block'; };
     err.style.display = 'none';
     const kw = document.getElementById('rule-kw').value.trim();
-    const cat = document.getElementById('rule-cat').value;
+    // 私帳選的是樹的節點（可以是任何一層），母公司是平面科目下拉。
+    const catEl = document.getElementById('rule-cat');
+    const cat = catEl ? catEl.value : _ruleDraft.category;
+    const node = catEl ? '' : _ruleDraft.taxonomy_node_id;
     if (!kw) return show('請填關鍵字');
     if (!cat) return show('請選類別');
     btn.disabled = true;
     try {
         await finFetch('/import-rules', { method: 'POST', body: JSON.stringify({
-            keyword: kw, category: cat,
+            keyword: kw, category: cat, taxonomy_node_id: node,
+            apply_note: document.getElementById('rule-note').value.trim(),
             bank_account_id: document.getElementById('rule-acct').value || null,
             only_direction: parseInt(document.getElementById('rule-dir').value, 10),
             sort_order: 50, active: true, note: '手動新增' }) });
+        _ruleDraft = { taxonomy_node_id: '', category: '' };   // 存好了就清空，別黏著下一條
         await _fr.rulesOpen();
     } catch (e) {
         show(e.message);
@@ -1741,6 +1832,9 @@ const _stmtRowPayload = (x) => ({
     // 私帳挑的是分類樹的節點 —— 不帶它的話寫進去的列只有 category 字串、
     // 沒有節點，收支明細的分類篩選與路徑顯示就看不到它（樹才是正本）
     taxonomy_node_id: x.taxonomy_node_id || null,
+    // 這一列的備註：預覽時由命中的規則帶出來（規則的 apply_note），可現場改。
+    // 空＝後端填制式的「銀行對帳單匯入」。
+    note: x.note || '',
     petty_claim: !!x.petty_claim,
     petty_item: x.petty_item || '',
     project_id: x.project_id || null,

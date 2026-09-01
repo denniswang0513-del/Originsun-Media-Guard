@@ -6,7 +6,7 @@
 右半邊本來就是資料驅動的，左半邊原本寫死 14 條在 core/bank_statement.py
 （owner 2026-08-20：希望自己能設規則）。
 """
-from core.bank_statement import KEYWORD_RULES, _classify, parse_statement  # noqa: E402
+from core.bank_statement import KEYWORD_RULES, RuleHit, _classify, parse_statement  # noqa: E402
 
 # 餘額鏈自洽的兩列（第二列才是要測分類的那筆）
 STMT = ("2026/09/01 神秘扣款 5,000.00 995,000.00\n"
@@ -15,12 +15,12 @@ STMT = ("2026/09/01 神秘扣款 5,000.00 995,000.00\n"
 
 def test_no_rules_means_no_category():
     """規則是外部給的 —— 給空清單就什麼都不該中（證明它真的不吃寫死那份）。"""
-    assert _classify("攤還本息 315614", []) == ("", 0, "")
+    assert _classify("攤還本息 315614", []) == RuleHit()
 
 
 def test_injected_rules_win_over_builtin():
-    cat, _d, _n = _classify("神秘扣款", [("神秘扣款", "設備耗材", 0)])
-    assert cat == "設備耗材"
+    hit = _classify("神秘扣款", [("神秘扣款", "設備耗材", 0)])
+    assert hit.category == "設備耗材"
 
 
 def test_first_match_wins_so_caller_must_sort():

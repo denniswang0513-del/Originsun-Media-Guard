@@ -183,7 +183,9 @@ def test_save_and_apply_send_the_same_row_shape():
         assert 'invoices: null' not in body
     # 兩欄都要是空陣列不是 null —— 後端那兩欄都是 List
     i = SRC.index('const _stmtRowPayload')
-    seg = SRC[i:i + 700]
+    # 切到它自己的結尾，不要數字元數 —— 固定寬度的視窗會被上面新加的一行註解
+    # 推出範圍，於是測試在「投影少了一欄」和「投影多了一句註解」上長得一樣紅。
+    seg = SRC[i:SRC.index(chr(10) + "});", i)]
     assert 'invoices: x.invoices || []' in seg
     assert 'payments: x.payments || []' in seg, '請款單沒有進共用投影 —— 掛了會存不進去'
 

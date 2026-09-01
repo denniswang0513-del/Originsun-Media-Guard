@@ -172,8 +172,8 @@ def test_a_rule_can_target_any_depth_of_the_tree():
     assert "taxonomy_node_id VARCHAR(32)" in migration_sql()
     # 分類器把節點一起回；一律三元組（條件式回傳會讓呼叫端得猜拿到幾個值）
     cls = code_only(func_body(repo_src("core/bank_statement.py"), "def _classify("))
-    assert 'return cat, direction, (r[4] if len(r) > 4 else "")' in cls
-    assert 'return "", 0, ""' in cls
+    assert "return RuleHit(cat, direction, _at(r, 4), _at(r, 5))" in cls
+    assert "return RuleHit()" in cls
     # 套用到未歸類的歷史列時，**兩個分支**都走 `_sync_taxonomy` —— 節點與三欄的
     # 一致性只有那一份規則。只帶 category 的規則自己寫 `e.category = cat` 的話，
     # 那一列變成「有類別、不在樹上」的孤兒：樹狀篩選看不到，畫面上卻像分好了。

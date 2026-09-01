@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from itertools import combinations
+from typing import NamedTuple
 
 # 日期：2025/09/10、2025-09-10、114/07/01（民國）、2025年9月10日。
 # 🔴 民國年一定要收：台灣網銀匯出常見 3 碼年（114/07/01 = 2025-07-01），
@@ -96,6 +97,10 @@ class StmtRow:
     # 規則指定的分類樹節點（私帳；規則可以指定到任何一層，見 _classify）。
     # category 只鏡射到路徑前兩層，第三層以後要靠它。
     taxonomy_node_id: str = ""
+    # 規則記住的備註，命中時帶出來填進這一列（BankImportRule.apply_note）。
+    # 🔴 名字是 `entry_note` 不是 `note` —— 這個 dataclass 的 `note` 已經是
+    # **銀行摘要原文**了，同名會靜靜互相蓋掉。
+    entry_note: str = ""
     inferred: bool = False         # 方向靠關鍵字猜的（第一列且無總計）
 
 
@@ -133,14 +138,34 @@ def _to_int(tok: str):
     return int(round(v))
 
 
-def _classify(text: str, rules=None, signed=None):
-    """摘要文字 → (category, 方向提示, 分類樹節點)。沒中回 ('', 0, '')。
+class RuleHit(NamedTuple):
+    """規則命中的結果。**具名**，不是隨手加長的元組。
+
+    本來是三元組，加了分類樹節點變四個、加了備註變五個 —— 每加一次，所有
+    `cat, _d, node = _classify(...)` 的呼叫端就得跟著改位置，而漏改的那個
+    只在跑到那條路的資料上才炸。具名之後，呼叫端只取自己要的欄位，往後再
+    加欄位不會動到任何人。
+    """
+    category: str = ""
+    direction: int = 0          # 方向提示（只在餘額鏈推不出方向時用得到）
+    node: str = ""              # 分類樹節點 id（私帳；category 只鏡射前兩層）
+    note: str = ""              # 命中後要寫進那一列的備註（規則的 apply_note）
+
+
+def _at(row, i: int) -> str:
+    """規則元組的第 i 個欄位，短的規則（測試與 KEYWORD_RULES 的三元組）回空字串。"""
+    return row[i] if len(row) > i else ""
+
+
+def _classify(text: str, rules=None, signed=None) -> RuleHit:
+    """摘要文字 → `RuleHit`。沒中回全空的 `RuleHit()`。
 
     規則的元組可以多帶第 5 個元素 `taxonomy_node_id`（owner 2026-08-30
     「規則的套用可以設定到所有的分類」—— `category` 只鏡射到路徑前兩層，
-    第三層以後要靠節點）。沒帶的規則回空字串。
+    第三層以後要靠節點）、第 6 個 `apply_note`（owner 2026-09-01「也可以
+    記憶備註」）。沒帶的規則回空字串。
 
-    🔴 **一律三元組**，不看規則有沒有帶節點才決定回幾個 —— 那種條件式回傳
+    🔴 **回傳長度固定**，不看規則帶了幾個欄位才決定回幾個 —— 那種條件式回傳
     會讓呼叫端得猜這次拿到幾個值，而猜錯只在特定資料下才炸。
 
     rules = [(關鍵字, category, 方向)] 或 [(關鍵字, category, 方向, 只在哪個方向)]，
@@ -167,8 +192,8 @@ def _classify(text: str, rules=None, signed=None):
         if only:
             if signed is None or (signed > 0) != (only > 0):
                 continue
-        return cat, direction, (r[4] if len(r) > 4 else "")
-    return "", 0, ""
+        return RuleHit(cat, direction, _at(r, 4), _at(r, 5))
+    return RuleHit()
 
 
 _TOTAL_LABEL = re.compile(r"[^\s]*?(?:總筆數|總金額|金額總計)")
@@ -381,7 +406,8 @@ def parse_statement(text: str, opening_balance: int = None,
             # signed=None 是**刻意**的：這裡正在推導方向，還沒有方向可傳。
             # 明寫出來而不是省略 —— 省略的話跟「忘了傳」長得一模一樣
             #（api_finance_stmt 就忘過，方向規則在那條路上整批失效）。
-            cat, direction, _n = _classify(first["words"], rules, signed=None)
+            hit = _classify(first["words"], rules, signed=None)
+            cat, direction = hit.category, hit.direction
             amt = first["amounts"][0] if first["amounts"] else 0
             first["signed"] = amt * (direction if direction else -1)
             inferred_first = True
@@ -410,11 +436,11 @@ def parse_statement(text: str, opening_balance: int = None,
                 f"{r['amounts']} 對不上：{r['raw'][:70]}")
 
     for r in rows:
-        cat, _d, node = _classify(r["words"], rules, signed=r["signed"])
+        hit = _classify(r["words"], rules, signed=r["signed"])
         res.rows.append(StmtRow(
             line_no=r["line_no"], date=r["date"], amount=r["signed"] or 0,
-            balance=r["balance"], note=r["words"], category=cat,
-            taxonomy_node_id=node,
+            balance=r["balance"], note=r["words"], category=hit.category,
+            taxonomy_node_id=hit.node, entry_note=hit.note,
             inferred=(inferred_first and r is first)))
 
     # ── 交叉驗證：與銀行印的總計比對 ──
