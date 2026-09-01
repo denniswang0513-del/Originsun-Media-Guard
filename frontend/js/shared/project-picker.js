@@ -63,16 +63,22 @@ export function openProjectPicker(o) {
                  還有 ${hit.length - rows.length} 個沒顯示 —— 繼續輸入縮小範圍</div>` : '';
         return rows.map((p) => {
             const on = p.id === o.currentId;
-            return `<label data-pick="${esc(p.id)}" style="display:flex;gap:10px;align-items:center;
+            // 🔴 這一列是 <div> 不是 <label>：label 會把 click **轉發**給裡面的
+            // checkbox，input 的 click 再冒泡回 label —— 同一次點擊跑兩次 onclick，
+            // 於是送出兩個併發的 PUT，兩邊都讀到「原本沒掛專案」，專案已收就
+            // 被加了兩次（2026-09-01 生產實帳：4 個顧問月費案各溢收 22,000）。
+            // pointer-events:none 擋不住這個 —— 它擋的是指標事件，不是 label 的轉發。
+            return `<div data-pick="${esc(p.id)}" style="display:flex;gap:10px;align-items:center;
                     padding:7px 10px;border-bottom:1px solid #262626;cursor:pointer;${on ? 'background:#1e3a2a;' : ''}">
-                <input type="checkbox" ${on ? 'checked' : ''} style="pointer-events:none;">
+                <input type="checkbox" ${on ? 'checked' : ''} tabindex="-1" style="pointer-events:none;">
                 <span style="flex:1;min-width:0;">
                     <span style="color:#eee;font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name || p.id)}</span>
                     ${clientOf(p) || p.status ? `<span style="color:#9ca3af;font-size:11px;">${esc(clientOf(p))}${p.status ? '　·　' + esc(p.status) : ''}</span>` : ''}
                 </span>
                 ${dueAmt[p.id] ? `<span style="color:#fbbf24;font-size:11px;white-space:nowrap;">未收 $${
-                    dueAmt[p.id].toLocaleString('zh-TW')}</span>` : ''}
-            </label>`;
+                    dueAmt[p.id].toLocaleString('zh-TW')}</span>`
+                    : '<span style="color:#4b5563;font-size:11px;white-space:nowrap;">已收齊</span>'}
+            </div>`;
         }).join('') + tail;
     };
 

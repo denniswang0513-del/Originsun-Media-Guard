@@ -568,7 +568,12 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
     data = req.model_dump(exclude_unset=True, exclude={"entity"})
     dates = {f: _parse_shoot_date(data[f]) for f in date_fields if f in data}
     async with factory() as session:
-        e = await session.get(CrmCashEntry, entry_id)
+        # 🔴 鎖住這一列再讀：私帳的專案「已收」是增量制（±delta），兩個併發的
+        # PUT 會**都**讀到「原本沒掛專案」，然後各加一次 —— 同一筆錢進帳兩次。
+        # 2026-09-01 生產實帳：挑選視窗一次點擊送出兩個請求（label 轉發 click），
+        # 4 個顧問月費案各溢收 22,000。前端那個 bug 已修，但這裡是最後一道
+        # 防線：任何重送／雙擊／兩個分頁同時操作都走這條路。
+        e = await session.get(CrmCashEntry, entry_id, with_for_update=True)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此收支紀錄")
         # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422

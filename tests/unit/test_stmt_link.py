@@ -166,6 +166,15 @@ def test_project_lists_are_searchable_and_checkable():
     # 🔴 預設只列還沒收齊的案（owner「這個清單要是款項沒收齊的清單」）——
     # 411 案裡 217 案早就結清。但「顯示全部」要留（補記舊帳選得到），而且
     # 目前連著的那一案不管收齊沒都必須在清單裡，否則看起來像連結不見了。
+    # 🔴 列是 <div> 不是 <label>：label 會把 click 轉發給裡面的 checkbox，
+    # input 的 click 再冒泡回 label —— 一次點擊跑兩次 onclick，送出兩個併發的
+    # PUT，專案已收被加兩次（2026-09-01 生產：4 個顧問月費案各溢收 22,000）。
+    assert 'data-pick' in pk and '<label data-pick' not in pk, \
+        '可點列用了 <label> —— 點一下會觸發兩次'
+    from tests.unit._srcscan import repo_src as _rs
+    cash_src = code_only(_rs('routers/crm/cash.py'))
+    assert 'with_for_update=True' in cash_src, \
+        '收支更新沒鎖列 —— 併發的兩個 PUT 會各自把專案已收加一次'
     assert 'showAll ? all : due' in pk, '沒有分成「未收齊／全部」兩份清單'
     assert 'due.unshift(byId[o.currentId])' in pk, '目前連著的案沒有強制留在清單裡'
     assert '#pp-toggle' in pk, '沒有「顯示全部」切換'
