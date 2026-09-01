@@ -42,6 +42,18 @@ let _settle = '';
 let _fy = '';           // 會計年度篩選（''=全部、'open'=未結案、數字=FY 結束年）
 let _dirty = false;
 let _resizeBound = false;
+// 個人稅款上一次的試算值 —— 用來分辨「這格還是試算值」與「人調過了」。
+// 面板每次存檔都整包重畫，所以判準只能是值本身，不能是旗標（旗標活不過重畫）。
+let _lastProTax = 0;
+
+/** 執行業務所得的源頭代扣試算 —— 同後端 core.ledger_project.withholding：
+ *  所得扣繳 10%（單次稅額 ≤2,000 免扣）＋二代健保 2.11%（單次 <20,000 免扣）。*/
+function _proTax(contract) {
+    const c = Number(contract) || 0;
+    let tax = Math.round(c * 0.10);
+    if (tax <= 2000) { tax = 0; }
+    return tax + (c >= 20000 ? Math.round(c * 0.0211) : 0);
+}
 
 // 表頭與資料列共用一份欄寬 —— 分開寫的話改一邊就整排對不齊
 // 十欄：狀態／結案日／專案／客戶／營收／應收／未收／應付／未付／檢查
@@ -571,9 +583,9 @@ function _renderDetail() {
         el.addEventListener('input', () => { _dirty = true; _liveSum(); });
     });
     // 案源規則（正本在後端 apply_source_fee，這裡只是即時預覽同一條式子）：
-    // 代開發票 → 代辦費三欄自動、鎖住；執行業務所得 → 個人稅款自動（源頭代扣
-    // 10%＋二代健保 2.11%，含免扣門檻）、鎖住；其他案源恢復手填。
-    const _syncFee = () => {
+    // 代開發票 → 代辦費三欄自動、鎖住；執行業務所得 → 個人稅款**試算**（可改，
+    // 見下方）；其他案源恢復手填。
+    const _syncFee = (sourceChanged = false) => {
         const src = document.getElementById('fpl-source')?.value;
         const feeEl = document.getElementById('fpl-c-invoice_fee');
         const row = document.getElementById('fpl-fee-row');
@@ -597,27 +609,43 @@ function _renderDetail() {
             if (buyEl) buyEl.value = (fee - tax) || '';
             _liveSum();
         }
+        // 個人稅款：自動值是**試算不是規定**（owner 2026-09-01「一開始先試算，
+        // 但有些狀況讓我可以調整 —— 有些客戶會拆單，所以我不用先繳」）。
+        // 🔴 所以這一格不鎖，而且只在兩種時候才動它：剛把案源切成執行業務所得、
+        // 或它還等於上一次的試算值（＝人沒調過）。判準用「值等於試算」而不是
+        // 一個 touched 旗標 —— 面板每次存檔都整個重畫，旗標活不過重畫，
+        // 而使用者刻意設的 0（拆單不用先繳）會被當成「空的」再填回去。
         const ptEl = document.getElementById('fpl-c-personal_tax');
         if (ptEl) {
-            ptEl.disabled = isPro;
-            ptEl.title = isPro ? '案源＝執行業務所得：源頭代扣 10%＋二代健保 2.11%，自動計算' : '';
+            ptEl.disabled = false;
+            ptEl.title = isPro
+                ? '試算：源頭代扣 10%＋二代健保 2.11%（含免扣門檻）—— 可自行調整，'
+                  + '例如客戶拆單就不用先繳'
+                : '';
+            const auto = isPro ? _proTax(c) : 0;
             if (isPro) {
-                // 同後端 withholding：稅額 ≤2,000 免扣；單次 <20,000 免二代健保
-                let tax = Math.round(c * 0.10);
-                if (tax <= 2000) tax = 0;
-                const nhi = c >= 20000 ? Math.round(c * 0.0211) : 0;
-                ptEl.value = (tax + nhi) || '';
-                _liveSum();
+                const cur = Number(ptEl.value) || 0;
+                if (sourceChanged || cur === _lastProTax) {
+                    ptEl.value = auto || '';
+                    _liveSum();
+                }
             }
+            _lastProTax = auto;
         }
     };
+    document.getElementById('fpl-source')?.addEventListener('change',
+        () => _syncFee(true));      // 換案源＝重新試算
     ['fpl-source', 'fpl-feepct', 'fpl-contract'].forEach((id) => {
         const el = document.getElementById(id);
         if (el) {
-            el.addEventListener('input', _syncFee);
-            el.addEventListener('change', _syncFee);
+            el.addEventListener('input', () => _syncFee());
+            el.addEventListener('change', () => _syncFee());
         }
     });
+    // 首次同步不算「換案源」—— 載入既有案時不可以覆寫人調過的稅款。
+    // 🔴 先把基準設成**本案**的試算值：不設的話 _lastProTax 還留著上一個案的
+    // 數字，切到另一案時萬一碰巧相等，人家調過的值就被覆寫掉。
+    _lastProTax = _proTax(Number(document.getElementById('fpl-contract')?.value) || 0);
     _syncFee();
 }
 

@@ -499,7 +499,9 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
                      if isinstance(y, (int, float))} if k == "split" else int(v))
         # 🔴 案源＝代開發票 → 代辦費由費率算（唯一的自動費用規則；其他案源
         # 不碰使用者填的數字）。在 norm 前套，contract 用改完的值。
-        d = apply_source_fee(int(p.contract_amount or 0), d)
+        # keep＝這次真的送上來的費用欄：個人稅款的自動值是**試算**，使用者
+        # 調過就要留住（owner 2026-09-01「有些客戶會拆單，所以我不用先繳」）。
+        d = apply_source_fee(int(p.contract_amount or 0), d, keep=set(data))
         d = norm_detail(d)          # 再正規化一次（清掉 0 值工項）
         p.ledger_detail = d
         # 營收或代扣成本（個人稅款/代辦費）動了 → 應收與收款狀態一律重算

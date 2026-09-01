@@ -211,6 +211,10 @@ def norm_detail(raw) -> dict:
     src = str(d.get("source") or "").strip()
     if src in SOURCES:
         out["source"] = src
+    # 個人稅款「由人決定」的旗標（見 apply_source_fee）—— 不保留的話每次
+    # 正規化都把它洗掉，等於旗標從來沒存在過
+    if d.get("tax_manual"):
+        out["tax_manual"] = 1
     try:
         pct = float(d.get("fee_pct"))
         if pct > 0 and pct != DEFAULT_FEE_PCT:
@@ -220,7 +224,7 @@ def norm_detail(raw) -> dict:
     return out
 
 
-def apply_source_fee(contract: int, d: dict) -> dict:
+def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
     """案源＝代開發票 → 三個欄位自動算（**唯一的自動費用規則**，寫入端呼叫；
     其他案源不動使用者填的數字）。owner 2026-08-25：「稅金5%+買發票＝代辦
     發票的%數，這邊可以直接自動計算」，Sheet 實證吻合（82,000 →
@@ -231,7 +235,14 @@ def apply_source_fee(contract: int, d: dict) -> dict:
         買發票     = 代辦費 − 稅金               —— 其中的開票佣金
 
     稅金與買發票是代辦費的**組成**，不再另外進實收的減項（compute 只扣
-    invoice_fee —— 三個都扣就是同一筆錢扣兩次）。"""
+    invoice_fee —— 三個都扣就是同一筆錢扣兩次）。
+
+    `keep`：這次呼叫端**明確送來**的欄位，不覆寫。
+    🔴 個人稅款的自動值是**試算不是規定**（owner 2026-09-01「一開始先試算，
+    但有些狀況讓我可以調整 —— 有些客戶會拆單，所以我不用先繳」）。原本每次
+    存檔都無條件覆寫，使用者改了也存不進去（改完按儲存，數字自己跳回來）。
+    建立新案時沒有這一欄可送 → keep 是空的 → 照樣自動試算。
+    """
     if d.get("source") == "代開發票":
         c = int(contract or 0)
         pct = float(d.get("fee_pct") or DEFAULT_FEE_PCT)
@@ -239,9 +250,19 @@ def apply_source_fee(contract: int, d: dict) -> dict:
         d["tax_fee"] = round(c / 1.05 * 0.05)
         d["buy_invoice"] = d["invoice_fee"] - d["tax_fee"]
     elif d.get("source") == "執行業務所得":
-        # 個人稅款＝源頭代扣自動算（owner 2026-08-26「新增一個執行業務所得的
+        # 個人稅款＝源頭代扣試算（owner 2026-08-26「新增一個執行業務所得的
         # 項目自動算」）；應收基準同步吃到（expected_cash_in 減 personal_tax）
-        d["personal_tax"] = withholding(contract)
+        auto = withholding(contract)
+        if "personal_tax" in keep:
+            # 送來的值 ≠ 試算 → 這格從此由人決定；改回試算值 → 交還自動。
+            # 🔴 旗標要**落庫**，不能只看「這次有沒有送」：只改別欄的那種存檔
+            # （例如單改行政雜支）不會送稅款，下一秒就把人調好的數字洗回試算值。
+            if int(d.get("personal_tax") or 0) != auto:
+                d["tax_manual"] = 1
+            else:
+                d.pop("tax_manual", None)
+        if not d.get("tax_manual"):
+            d["personal_tax"] = auto
     return d
 
 

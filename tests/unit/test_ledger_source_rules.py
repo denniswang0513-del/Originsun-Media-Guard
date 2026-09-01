@@ -105,6 +105,52 @@ def test_professional_income_withholding_auto():
     assert "執行業務所得" in SELECTABLE_SOURCES
 
 
+def test_the_withholding_is_an_estimate_the_owner_can_override():
+    """🔴 個人稅款的自動值是**試算不是規定**（owner 2026-09-01「一開始先試算，
+    但有些狀況讓我可以調整 —— 有些客戶會拆單，所以我不用先繳」）。
+
+    原本每次存檔都無條件覆寫：使用者改成 0 按儲存，數字自己跳回 5,086。
+    `keep`＝這次真的送上來的欄位 —— 有送就尊重，沒送（例如新建案還沒有這一欄）
+    照樣試算。
+    """
+    from core.ledger_project import apply_source_fee, withholding
+    base = norm_detail({"source": "執行業務所得", "personal_tax": 0})
+    kept = apply_source_fee(42000, dict(base), keep={"personal_tax"})
+    assert kept["personal_tax"] == 0, "使用者刻意設的 0（拆單不用先繳）被覆寫了"
+    assert apply_source_fee(42000, dict(base))["personal_tax"] == withholding(42000)
+
+    # 🔴 旗標要落庫：只改別欄的那種存檔（不送稅款）不可以把人調好的值洗回去。
+    # 這一條是 dev 端到端抓到的 —— 只看「這次有沒有送」的版本在這裡就破功。
+    saved = norm_detail(kept)
+    assert saved.get("tax_manual") == 1, "norm_detail 把旗標洗掉了"
+    later = apply_source_fee(42000, dict(saved), keep={"misc"})
+    assert later["personal_tax"] == 0, "只改別欄時，人調好的稅款被重算了"
+    # 改回試算值＝交還自動：之後營收變動會跟著重算
+    back = apply_source_fee(42000, dict(saved) | {"personal_tax": withholding(42000)},
+                            keep={"personal_tax"})
+    assert "tax_manual" not in back
+    assert apply_source_fee(50000, norm_detail(back))["personal_tax"] == withholding(50000)
+    # 代開發票那三欄不在這次放寬的範圍（owner 只講了個人稅款）
+    agency = apply_source_fee(82000, norm_detail({"source": "代開發票",
+                                                  "invoice_fee": 1}),
+                              keep={"invoice_fee"})
+    assert agency["invoice_fee"] == 6560
+
+
+def test_the_update_endpoint_passes_what_the_user_sent():
+    """端點要把「使用者送了哪些欄」傳給規則 —— 少了它，前端怎麼改都存不進去。"""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2]
+           / "routers/api_finance_projects.py").read_text(encoding="utf-8")
+    fn = src.split("async def update_project_ledger(")[1].split("\n@router")[0]
+    assert "keep=set(data)" in fn
+    js = (Path(__file__).resolve().parents[2]
+          / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
+    assert "ptEl.disabled = false" in js, "個人稅款那格還鎖著就改不了"
+    assert "sourceChanged || cur === _lastProTax" in js, \
+        "預填判準要是「剛換案源／值仍等於試算」—— 旗標活不過面板重畫"
+
+
 def test_owner_can_write_own_book_but_parent_stays_admin_only():
     """🔴 owner＝lv1＋finance_mine（指名制），原本 CRM 寫入全是 Lv3-only ——
     帳本主人在生產連一筆帳都記不進去（真實帳號形狀實測 403 才發現；先前
