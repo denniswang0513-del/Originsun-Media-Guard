@@ -24,6 +24,7 @@ let _entries = [];
 let _invoiceList = [];
 let _paymentList = [];   // 請款單（付款側的分配用）
 let _projectList = [];
+let _outstandingProjects = [];   // 還沒收齊的案（專案挑選視窗的預設清單）
 let _clientList = [];
 let _bankAccounts = null;   // 財務模組銀行帳戶；null = 載入失敗/未啟用（優雅降級：不顯示帳戶欄）
 let _selectedId = null;
@@ -111,6 +112,12 @@ async function _loadProjectList() {
     try {
         _projectList = (await _fetch('/projects?entity=' + _pinEntity())).projects || [];
     } catch (_) { _projectList = []; }
+    // 未收案（挑選視窗的預設清單 —— owner 2026-09-01「這個清單要是款項沒收齊
+    // 的清單」）。走拆項編輯器同一支端點，未收額的規則只有那一份。
+    try {
+        const r = await _fetch('/cash-splits/outstanding?entity=' + _pinEntity());
+        _outstandingProjects = r.projects || [];
+    } catch (_) { _outstandingProjects = []; }
 }
 
 async function _loadClientList() {
@@ -432,6 +439,7 @@ window._cashProjPick = (ev, id) => {
     if (!e) { return; }
     openProjectPicker({
         projects: _projectList,
+        outstanding: _outstandingProjects,
         currentId: e.project_id || '',
         title: '連結專案 — ' + (e.summary || ''),
         onPick: async (pid) => {
@@ -927,6 +935,7 @@ function _renderQuickLink(e) {
     const pj = document.getElementById('cash-ql-proj');
     if (pj) pj.addEventListener('click', () => openProjectPicker({
         projects: _projectList,
+        outstanding: _outstandingProjects,
         currentId: e.project_id || '',
         title: '連結專案 — ' + (e.summary || ''),
         onPick: (id) => save({ project_id: id }),

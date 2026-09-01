@@ -5,8 +5,15 @@
  * 專案塞在原生 <select> 裡等於沒得選。這裡是單選（一列收支只掛一個專案），
  * 勾選框只是視覺：點列＝選定並關窗，再點目前那列＝取消連結。
  *
+ * 🔴 預設只列**還沒收齊**的案（owner 同日補充：「這個清單要是款項沒收齊的
+ * 清單」）—— 記一筆進帳要連的一定是還在等錢的案；411 案裡 217 案早就結清，
+ * 全列出來等於把答案埋在雜訊裡。已結清的案要用「顯示全部」切換（補記舊帳
+ * 還是得選得到，而且目前連著的那一案不管收齊沒都一定要在清單裡，否則畫面
+ * 會看起來像連結不見了）。
+ *
  * openProjectPicker({
- *   projects,     // [{id, name, client?/client_short_name?, status?}, …]
+ *   projects,     // 全部：[{id, name, client?/client_short_name?, status?}, …]
+ *   outstanding,  // 未收齊：[{id, name, receivable}]（可省略＝不分兩份）
  *   currentId,    // 目前連結的專案 id（'' ＝未連結）
  *   title,        // 視窗標題（預設「選專案」）
  *   onPick(id),   // 使用者選定（id）或取消連結（''）時呼叫；關窗不呼叫
@@ -17,7 +24,21 @@ import { esc } from './dom.js';
 const MAX_ROWS = 120;   // 同 recon 挑選視窗的道理：超過就請人打字縮小範圍
 
 export function openProjectPicker(o) {
-    const list = o.projects || [];
+    const all = o.projects || [];
+    const dueRaw = o.outstanding || [];
+    // 未收額查表（畫面上要標出來，跟拆項編輯器同一個樣子）
+    const dueAmt = {};
+    dueRaw.forEach((p) => { dueAmt[p.id] = Number(p.receivable) || 0; });
+    // 未收清單缺的欄位（客戶/狀態）從全清單補；目前連著的那案一定放進來
+    const byId = {};
+    all.forEach((p) => { byId[p.id] = p; });
+    const due = dueRaw.map((p) => ({ ...(byId[p.id] || {}), ...p }));
+    if (o.currentId && !due.some((p) => p.id === o.currentId) && byId[o.currentId]) {
+        due.unshift(byId[o.currentId]);
+    }
+    // 沒給 outstanding 就沒有兩份清單可切
+    let showAll = !dueRaw.length;
+    const list = () => (showAll ? all : due);
     const wrap = document.createElement('div');
     // z-index 9820：要壓過拆項編輯器（9800）以外的一切；跟它互不嵌套
     wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9820;'
@@ -29,10 +50,12 @@ export function openProjectPicker(o) {
     let q = '';
 
     const rowsHtml = () => {
-        const hit = list.filter((p) => !q
+        const hit = list().filter((p) => !q
             || `${p.name || ''} ${clientOf(p)} ${p.status || ''}`.toLowerCase().includes(q));
         if (!hit.length) {
-            return '<div style="color:#6b7280;font-size:12px;padding:14px;">找不到符合的專案</div>';
+            return `<div style="color:#6b7280;font-size:12px;padding:14px;">${
+                showAll ? '找不到符合的專案'
+                    : '沒有還在等錢的案 —— 要連結已收齊的案請按「顯示全部」'}</div>`;
         }
         const rows = hit.slice(0, MAX_ROWS);
         const tail = hit.length > rows.length
@@ -47,6 +70,8 @@ export function openProjectPicker(o) {
                     <span style="color:#eee;font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name || p.id)}</span>
                     ${clientOf(p) || p.status ? `<span style="color:#9ca3af;font-size:11px;">${esc(clientOf(p))}${p.status ? '　·　' + esc(p.status) : ''}</span>` : ''}
                 </span>
+                ${dueAmt[p.id] ? `<span style="color:#fbbf24;font-size:11px;white-space:nowrap;">未收 $${
+                    dueAmt[p.id].toLocaleString('zh-TW')}</span>` : ''}
             </label>`;
         }).join('') + tail;
     };
@@ -59,7 +84,11 @@ export function openProjectPicker(o) {
             <button id="pp-close" class="crm-btn crm-btn-secondary" style="font-size:12px;">關閉</button>
         </div>
         <input id="pp-q" type="search" placeholder="搜尋專案名稱／客戶…" autocomplete="off"
-            style="background:#141414;border:1px solid #333;color:#eee;border-radius:6px;padding:6px 10px;font-size:13px;margin-bottom:8px;">
+            style="background:#141414;border:1px solid #333;color:#eee;border-radius:6px;padding:6px 10px;font-size:13px;margin-bottom:6px;">
+        ${dueRaw.length ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span id="pp-scope" style="color:#9ca3af;font-size:11px;flex:1;"></span>
+            <button id="pp-toggle" class="crm-btn crm-btn-secondary" style="font-size:11px;padding:2px 8px;"></button>
+        </div>` : ''}
         <div id="pp-list" style="overflow:auto;border:1px solid #262626;border-radius:8px;flex:1;min-height:120px;">${rowsHtml()}</div>
     </div>`;
 
@@ -72,7 +101,21 @@ export function openProjectPicker(o) {
             };
         });
     };
-    bind();
+    /** 清單重畫（切換範圍／搜尋共用）—— 只換清單那塊，輸入框與焦點不動。 */
+    const redraw = () => {
+        wrap.querySelector('#pp-list').innerHTML = rowsHtml();
+        const scope = wrap.querySelector('#pp-scope');
+        const btn = wrap.querySelector('#pp-toggle');
+        if (scope) {
+            scope.textContent = showAll
+                ? `全部 ${all.length} 案` : `還沒收齊的 ${due.length} 案`;
+        }
+        if (btn) btn.textContent = showAll ? '只看未收齊' : '顯示全部';
+        bind();
+    };
+    redraw();
+    const tgl = wrap.querySelector('#pp-toggle');
+    if (tgl) tgl.onclick = () => { showAll = !showAll; redraw(); };
     wrap.onclick = (ev) => { if (ev.target === wrap) close(); };
     wrap.querySelector('#pp-close').onclick = close;
     const clr = wrap.querySelector('#pp-clear');
@@ -80,8 +123,7 @@ export function openProjectPicker(o) {
     const qbox = wrap.querySelector('#pp-q');
     qbox.oninput = () => {          // 只重畫清單，不動輸入框（打一個字跳一次焦點會沒法用）
         q = qbox.value.trim().toLowerCase();
-        wrap.querySelector('#pp-list').innerHTML = rowsHtml();
-        bind();
+        redraw();
     };
     qbox.focus();
 }

@@ -163,6 +163,17 @@ def test_project_lists_are_searchable_and_checkable():
     pk = js_code_only(repo_src('frontend/js/shared/project-picker.js'))
     assert 'export function openProjectPicker' in pk
     assert 'type="search"' in pk and 'type="checkbox"' in pk
+    # 🔴 預設只列還沒收齊的案（owner「這個清單要是款項沒收齊的清單」）——
+    # 411 案裡 217 案早就結清。但「顯示全部」要留（補記舊帳選得到），而且
+    # 目前連著的那一案不管收齊沒都必須在清單裡，否則看起來像連結不見了。
+    assert 'showAll ? all : due' in pk, '沒有分成「未收齊／全部」兩份清單'
+    assert 'due.unshift(byId[o.currentId])' in pk, '目前連著的案沒有強制留在清單裡'
+    assert '#pp-toggle' in pk, '沒有「顯示全部」切換'
+    cb2 = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
+    assert cb2.count('outstanding: _outstandingProjects') == 2, \
+        '兩個入口（列格就地連結／詳情快速連結）都要給未收案清單'
+    assert "'/cash-splits/outstanding?entity='" in cb2, \
+        '未收額要走拆項編輯器同一支端點（規則只有一份）'
     cb = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
     assert 'openProjectPicker({' in cb, '快速連結沒接上共用挑選視窗'
     assert '_projOptsHtml(e.project_id' not in cb, '快速連結還留著整包 405 項的原生下拉'
