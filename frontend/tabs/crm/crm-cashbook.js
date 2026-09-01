@@ -472,11 +472,16 @@ function _rowHtml(e) {
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
             <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
+            ${/* 🔴 拆項列一樣要吐**三個**格子（分類/項目/子項目各一）：這個列表是
+                 flex，欄寬是 `nth-child(N)` 給的 —— `grid-column:span 3` 在 flex
+                 底下完全無效，少吐兩個節點就讓後面每一欄整排前移（銀行資訊跑到
+                 附註欄、專案名跑到銀行資訊欄，owner 2026-09-01 截圖）。
+                 badge 放第一格、後兩格留白（badge 比 78px 寬一點，溢到空格上剛好）。*/ ''}
             ${e.split_count ? `
-            <div style="grid-column:span 3;cursor:pointer;" onclick="event.stopPropagation();window._cashSplitOpen('${e.id}')"
+            <div style="cursor:pointer;white-space:nowrap;" onclick="event.stopPropagation();window._cashSplitOpen('${e.id}')"
                  title="${_esc((e.splits || []).map((s) => `$${_fmtNum(s.amount)} ${(s.taxonomy_path || []).join(' ▸ ') || s.category || '未分類'}`).join('\n'))}">
                 ${splitBadgeHtml(e.split_count)}
-            </div>` : `
+            </div><div></div><div></div>` : `
             <div class="cash-ed" onclick="window._cashTaxEdit(event,'${e.id}',0)"
                  title="${tf}">${e.category ? _esc(e.book) : _NO_VAL_DOT}</div>
             <div class="cash-ed" onclick="window._cashTaxEdit(event,'${e.id}',1)"

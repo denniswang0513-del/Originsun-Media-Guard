@@ -224,6 +224,25 @@ def test_the_fee_survives_the_full_round_trip():
     assert "_splitProjNames" in cbjs, "拆項父列的專案格要把拆項連的案名秀回來"
 
 
+def test_the_split_row_still_fills_all_three_taxonomy_cells():
+    """🔴 收支列表是 **flex**，欄寬由 `nth-child(N)` 給 —— 拆項列若只吐一個
+    格子（原本想用 `grid-column:span 3` 併成一格，那在 flex 底下無效），
+    後面每一欄的 nth-child 全部前移兩格：銀行資訊跑到附註欄、專案名跑到
+    銀行資訊欄（owner 2026-09-01 截圖）。所以拆項分支也要吐滿三個 div。
+    """
+    src = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
+    assert "grid-column" not in src, \
+        "這個列表是 flex，grid-column 不會生效 —— 要吐滿格子數"
+    row = src.split("function _rowHtml(")[1].split("\nfunction ")[0]
+    assert "</div><div></div><div></div>" in row, \
+        "拆項列沒有補滿三格（分類/項目/子項目）"
+    # 兩個分支的格子數要一樣多，否則整排錯位（數 <div 的開頭）
+    branch = row.split("${e.split_count ?")[1].split("`}")[0]
+    yes, no = branch.split('` : `')
+    assert yes.count("<div") == no.count("<div") == 3, \
+        f"拆項/未拆兩個分支的格子數不同：{yes.count('<div')} vs {no.count('<div')}"
+
+
 def test_the_fee_is_rejected_outside_deposit_side_project_splits():
     """代開費＝源日先扣走的**專案款** —— 支出側或沒掛專案的拆項寫 fee
     是分類錯誤，寫入端要 422 而不是默默存起來變成幽靈費用。"""
