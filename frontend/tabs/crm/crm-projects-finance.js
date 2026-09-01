@@ -90,7 +90,11 @@ async function _loadCostStaff(projectId) {
                 var _eName = _esc(s.name).replace(/'/g, "\\'");
                 var _eItems = _esc(itemNames.join('、')).replace(/'/g, "\\'");
                 statusHtml = '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="font-size:10px;padding:1px 6px;" onclick="window._costCreatePayment(\'' + _eName + '\',' + subtotal + ',\'' + _eItems + '\',\'應付款\')">請款</button>' +
-                    '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px;" onclick="window._costCreatePayment(\'' + _eName + '\',' + subtotal + ',\'' + _eItems + '\',\'已付款\')">現金已付款</button>';
+                    '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px;" onclick="window._costCreatePayment(\'' + _eName + '\',' + subtotal + ',\'' + _eItems + '\',\'已付款\')">現金已付款</button>' +
+                    // 費用已代墊（owner 2026-09-02）：這筆錢別人先掏了，公司要還的
+                    // 是**代墊人**。開的是同一個請款視窗、預先勾好代墊 —— 那個機制
+                    // 本來就在（modal 裡的勾選框），只是藏著沒人找得到（生產 0 筆）。
+                    '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px;" title="這筆費用由別人先代墊 —— 收款人改成代墊人，費用歸屬仍記在 ' + _eName + ' 身上" onclick="window._costCreatePayment(\'' + _eName + '\',' + subtotal + ',\'' + _eItems + '\',\'應付款\',true)">費用已代墊</button>';
             }
 
             html += '<div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #2e2e2e;gap:8px;">';
@@ -469,7 +473,13 @@ window._advAddExpense = function(payeeName, advanceId) {
     });
 };
 
-window._costCreatePayment = function(payeeName, amount, summary, status) {
+/** 請款／現金已付款／費用已代墊 —— 同一個視窗。
+ *
+ *  `advanced`＝從「費用已代墊」那顆進來：代墊區預先展開、代墊人下拉先聚焦。
+ *  🔴 不另建一套代墊流程 —— 這個機制本來就在（視窗裡的勾選框），只是藏著，
+ *  生產庫 0 筆用過。再刻一份的話，「誰去領這筆錢」就會有兩條規則。
+ */
+window._costCreatePayment = function(payeeName, amount, summary, status, advanced) {
     if (!state.selectedId) return;
     var proj = state.projects.find(function(p) { return p.id === state.selectedId; });
     var projName = proj ? proj.name : '';
@@ -478,16 +488,18 @@ window._costCreatePayment = function(payeeName, amount, summary, status) {
     overlay.style.display = 'flex';
     overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
     overlay.innerHTML = '<div class="crm-modal" style="max-width:420px;">' +
-        '<div class="crm-modal-header"><h3>' + (status === '已付款' ? '現金已付款' : '請款') + '</h3>' +
+        '<div class="crm-modal-header"><h3>' + (advanced ? '費用已代墊' : status === '已付款' ? '現金已付款' : '請款') + '</h3>' +
         '<button onclick="this.closest(\'.crm-modal-overlay\').remove()" class="crm-detail-close">✕</button></div>' +
         '<div class="crm-modal-body">' +
         '<div class="crm-field" style="margin-bottom:8px;"><label>專案</label><input class="crm-input" value="' + _esc(projName) + '" disabled style="opacity:0.6;"></div>' +
         '<div class="crm-form-grid">' +
         '<div class="crm-field crm-field-full"><label>人員 <span class="crm-required">*</span></label><input id="pay-modal-payee" class="crm-input" value="' + _esc(payeeName) + '" required></div>' +
         '<div class="crm-field crm-field-full"><label>金額 <span class="crm-required">*</span></label><input id="pay-modal-amount" type="number" class="crm-input" value="' + amount + '" required></div>' +
-        '<div class="crm-field crm-field-full" style="display:flex;align-items:center;gap:8px;"><label style="display:flex;align-items:center;gap:4px;cursor:pointer;margin:0;flex-shrink:0;"><input type="checkbox" id="pay-modal-advance" onchange="document.getElementById(\'pay-modal-advance-by\').style.display=this.checked?\'\':\' none\'"> 代墊</label><select id="pay-modal-advance-by" class="crm-input" style="display:none;flex:1;"><option value="">— 代墊人 —</option>' +
+        // 代墊：收款人換成代墊人，費用歸屬仍是原本那個人（送出時才對調 —— 見下方）
+        '<div class="crm-field crm-field-full" style="display:flex;align-items:center;gap:8px;"><label style="display:flex;align-items:center;gap:4px;cursor:pointer;margin:0;flex-shrink:0;"><input type="checkbox" id="pay-modal-advance"' + (advanced ? ' checked' : '') + ' onchange="document.getElementById(\'pay-modal-advance-by\').style.display=this.checked?\'\':\'none\'"> 代墊</label><select id="pay-modal-advance-by" class="crm-input" style="' + (advanced ? '' : 'display:none;') + 'flex:1;"><option value="">— 代墊人（實際收款人）—</option>' +
         state.staffList.map(function(s) { return '<option value="' + _esc(s.name) + '">' + _esc(s.name) + '</option>'; }).join('') +
         '</select></div>' +
+        (advanced ? '<div class="crm-field crm-field-full" style="color:#fb923c;font-size:11px;margin-top:-4px;">這筆錢由代墊人先掏 —— 公司要還的是<b>代墊人</b>，費用歸屬仍記在 ' + _esc(payeeName) + ' 身上（不影響連結私帳的收入鏡射）。</div>' : '') +
         '<div class="crm-field crm-field-full"><label>摘要 <span class="crm-required">*</span></label><input id="pay-modal-summary" class="crm-input" value="' + _esc(summary) + '" required></div>' +
         '<div class="crm-field crm-field-full"><label>報支項目 <span class="crm-required">*</span></label><select id="pay-modal-payee-type" class="crm-input" required><option value="">—</option><option value="內部人員">內部人員</option><option value="現金">現金</option><option value="勞報">勞報</option><option value="核銷">核銷</option></select></div>' +
         '<div class="crm-field crm-field-full"><label>預計付款月 <span class="crm-required">*</span></label><input id="pay-modal-month" type="month" class="crm-input" required></div>' +
@@ -507,10 +519,20 @@ window._costCreatePayment = function(payeeName, amount, summary, status) {
             var el = document.getElementById(fields[fi]);
             if (!el || !el.value.trim()) { alert(labels[fi] + ' 為必填'); btn.disabled = false; btn.textContent = '確定'; return; }
         }
+        var isAdvance = document.getElementById('pay-modal-advance').checked;
+        var advanceBy = isAdvance ? document.getElementById('pay-modal-advance-by').value : '';
+        var originalPayee = document.getElementById('pay-modal-payee').value;
+        // 🔴 勾了代墊卻沒選人＝靜靜變成一張付給原本那個人的單（代墊人根本拿不到
+        // 錢，而畫面上看起來一切正常）。當場擋下來。
+        if (isAdvance && !advanceBy) {
+            alert('請選代墊人 —— 公司要還的是先掏錢的那個人');
+            btn.disabled = false; btn.textContent = '確定'; return;
+        }
+        if (isAdvance && advanceBy === originalPayee) {
+            alert('代墊人跟費用歸屬是同一個人 —— 那就是一般請款，不必勾代墊');
+            btn.disabled = false; btn.textContent = '確定'; return;
+        }
         try {
-            var isAdvance = document.getElementById('pay-modal-advance').checked;
-            var advanceBy = isAdvance ? document.getElementById('pay-modal-advance-by').value : '';
-            var originalPayee = document.getElementById('pay-modal-payee').value;
             await _fetch('/payments', {
                 method: 'POST', body: JSON.stringify({
                     payee_name: isAdvance && advanceBy ? advanceBy : originalPayee,
@@ -553,7 +575,10 @@ window._costViewPayment = async function(paymentId) {
             '<div class="crm-detail-prop"><div class="crm-prop-label">金額</div><div class="crm-prop-value" style="font-weight:700;">$' + fmtNum(p.amount) + '</div></div>' +
             '<div class="crm-detail-prop"><div class="crm-prop-label">摘要</div><div class="crm-prop-value">' + _esc(p.summary) + '</div></div>' +
             (p.payee_type ? '<div class="crm-detail-prop"><div class="crm-prop-label">報支項目</div><div class="crm-prop-value">' + _esc(p.payee_type) + '</div></div>' : '') +
-            (p.advance_by ? '<div class="crm-detail-prop"><div class="crm-prop-label">代墊人</div><div class="crm-prop-value" style="color:#fb923c;">' + _esc(p.advance_by) + '（實際收款人）</div></div>' : '') +
+            // 🔴 這一欄裝的是**費用歸屬人**（原本該收這筆的人），不是代墊人 ——
+            // 代墊人是 payee_name（他才是實際去領錢的）。標籤原本寫反了：把
+            // 費用歸屬人標成「代墊人（實際收款人）」，看的人會以為錢匯給他。
+            (p.advance_by ? '<div class="crm-detail-prop"><div class="crm-prop-label">代墊</div><div class="crm-prop-value" style="color:#fb923c;">' + _esc(p.payee_name || '') + ' 代墊　·　費用歸屬 ' + _esc(p.advance_by) + '</div></div>' : '') +
             (p.request_date ? '<div class="crm-detail-prop"><div class="crm-prop-label">請款日期</div><div class="crm-prop-value">' + p.request_date.substring(0, 10) + '</div></div>' : '') +
             '<div class="crm-detail-prop"><div class="crm-prop-label">預計付款月</div><div class="crm-prop-value">' + (p.planned_month || '未設定') + '</div></div>' +
             '<div class="crm-detail-prop"><div class="crm-prop-label">狀態</div><div class="crm-prop-value" style="color:' + statusColor + ';">' + _esc(p.payment_status) + '</div></div>' +

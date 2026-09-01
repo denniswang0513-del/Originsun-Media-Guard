@@ -526,7 +526,12 @@ class CrmPaymentRequest(Base):
     payment_date = Column(DateTime(timezone=True), nullable=True)       # 付款日
     payment_status = Column(String(16), nullable=False, default="未付款") # 未付款/應付款/已付款
     planned_month = Column(String(7), nullable=True)                    # 預計付款月 "2026-04"
-    advance_by = Column(String(64), nullable=True)                     # 代墊人（實際收款人）
+    # 🔴 名字容易讀反：這一欄裝的是**費用歸屬人**（原本該收這筆錢的那個人），
+    # 不是代墊人 —— 代墊人是 `payee_name`（他才是實際去領錢的）。
+    # 例：王士源先掏錢付蘇家弘的製片費 → payee_name=王士源、advance_by=蘇家弘。
+    # 有值＝這張單是代墊。（2026-09-02 對齊：詳情面板原本把它標成「代墊人
+    # （實際收款人）」，跟實際存的相反。）
+    advance_by = Column(String(64), nullable=True)                     # 代墊時的費用歸屬人（原收款人）
     is_advance = Column(Integer, nullable=False, default=0)            # 0=一般, 1=預支款
     advance_returned = Column(Integer, nullable=False, default=0)      # 0=未歸還, 1=已歸還
     # 零用金批次產生的應付款（一張批次 → 多張 AP：會計項目 × 認列月份）。
