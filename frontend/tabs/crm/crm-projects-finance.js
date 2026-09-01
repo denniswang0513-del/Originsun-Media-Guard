@@ -70,10 +70,14 @@ async function _loadCostStaff(projectId) {
             }
             grandTotal += subtotal;
 
-            // Check payment status for this person
+            // 這張單是**誰的費用** —— 一般單就是收款人；代墊單的收款人是代墊人，
+            // 費用歸屬在 advance_by。
+            // 🔴 只比 payee_name 的話，代墊單永遠配不到費用歸屬人那一列：那一列
+            // 會一直顯示三顆按鈕，同一筆費用可以再請一次款（而畫面上看不出來）。
+            var _costOwner = function(p) { return p.advance_by || p.payee_name; };
             var matchedPayment = null;
             for (var pi = 0; pi < payments.length; pi++) {
-                if (payments[pi].payee_name === s.name && payments[pi].amount === subtotal) {
+                if (_costOwner(payments[pi]) === s.name && payments[pi].amount === subtotal) {
                     matchedPayment = payments[pi];
                     break;
                 }
@@ -81,10 +85,17 @@ async function _loadCostStaff(projectId) {
 
             var statusHtml = '';
             if (matchedPayment) {
+                // 代墊：錢是別人先掏的，這一列要標出來 —— 不標的話「已付款」
+                // 看起來像公司付給這個人，而實際上公司欠的是代墊人。
+                var advTag = matchedPayment.advance_by
+                    ? '<span style="color:#fb923c;font-size:10px;margin-right:6px;" title="這筆費用由 '
+                        + _esc(matchedPayment.payee_name || '') + ' 先代墊，公司要還的是他">'
+                        + _esc(matchedPayment.payee_name || '') + ' 代墊</span>'
+                    : '';
                 if (matchedPayment.payment_status === '已付款') {
-                    statusHtml = '<span style="color:#86efac;cursor:pointer;font-size:11px;" onclick="window._costViewPayment(\'' + matchedPayment.id + '\')">已付款 ✓</span>';
+                    statusHtml = advTag + '<span style="color:#86efac;cursor:pointer;font-size:11px;" onclick="window._costViewPayment(\'' + matchedPayment.id + '\')">已付款 ✓</span>';
                 } else {
-                    statusHtml = '<span style="color:#fb923c;cursor:pointer;font-size:11px;" onclick="window._costViewPayment(\'' + matchedPayment.id + '\')">已請款</span>';
+                    statusHtml = advTag + '<span style="color:#fb923c;cursor:pointer;font-size:11px;" onclick="window._costViewPayment(\'' + matchedPayment.id + '\')">已請款</span>';
                 }
             } else {
                 var _eName = _esc(s.name).replace(/'/g, "\\'");

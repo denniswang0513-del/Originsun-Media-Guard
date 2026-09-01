@@ -73,3 +73,26 @@ def test_the_detail_panel_no_longer_labels_the_owner_as_the_payee():
     m = repo_src("db/models/_crm.py")
     seg = m.split("advance_by = Column")[0].rsplit("planned_month", 1)[-1]
     assert "費用歸屬人" in seg and "不是代墊人" in seg
+
+
+def test_an_advanced_payment_matches_the_row_of_whose_cost_it_is():
+    """🔴 那一列的配對本來只比 `payee_name` —— 而代墊單的收款人是**代墊人**，
+    所以代墊單永遠配不到費用歸屬人那一列：那一列會一直顯示三顆按鈕，同一筆
+    費用可以再請一次款，而畫面上看不出來。
+
+    判準只有一條：這張單是誰的費用＝`advance_by || payee_name`。
+    """
+    js = js_code_only(repo_src(JS))
+    assert "var _costOwner = function(p) { return p.advance_by || p.payee_name; };" in js
+    assert "_costOwner(payments[pi]) === s.name" in js
+    assert "payments[pi].payee_name === s.name" not in js, "舊的單一判準還在"
+
+
+def test_the_row_says_who_fronted_the_money():
+    """owner 2026-09-02「要在那一列標出『○○○ 代墊』」—— 不標的話「已付款」
+    看起來像公司付給這個人，而實際上公司欠的是代墊人。"""
+    js = js_code_only(repo_src(JS))
+    assert "' 代墊</span>'" in js
+    assert "matchedPayment.advance_by" in js
+    # 兩種狀態（已付款／已請款）都要帶標籤 —— 只加一邊是最容易漏的
+    assert js.count("advTag + '<span") == 2
