@@ -36,15 +36,18 @@ def test_other_sources_never_touch_the_fee():
 
 
 def test_endpoints_apply_the_rule_on_write():
-    """create 與 update 都要在寫入時套（前端的 disabled 欄位擋不住 API 呼叫）。"""
-    from pathlib import Path
-    src = (Path(__file__).resolve().parents[2] / "routers/api_finance_projects.py").read_text(encoding="utf-8")
+    """create 與 update 都要在寫入時套（前端的 disabled 欄位擋不住 API 呼叫）。
+
+    掃描走 `_srcscan`（同檔其他測試也是）—— 手刻 read_text＋split 少了剝註解
+    那一步，斷言會被「正好在說明這件事」的註解餵飽。
+    """
+    from tests.unit._srcscan import code_only, func_body, repo_src
+    src = repo_src("routers/api_finance_projects.py")
     for fn_name in ("create_ledger_project", "update_project_ledger"):
-        fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
+        fn = code_only(func_body(src, f"async def {fn_name}("))
         assert "apply_source_fee(" in fn, fn_name
 
 
-# ── 收款自動同步（owner 2026-08-25「勾選專案，如果金額到齊，就是收款」）──
 def test_mine_link_rule_is_prefix_and_parent_is_list():
     from core.project_link import CASH_CATEGORIES, cash_can_link
     assert cash_can_link("mine", "公司_專案")
@@ -147,7 +150,9 @@ def test_the_update_endpoint_passes_what_the_user_sent():
     from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
     fn = code_only(func_body(repo_src("routers/api_finance_projects.py"),
                              "async def update_project_ledger("))
-    assert "keep=set(data)" in fn
+    # keep＝這次**真的送了值**的欄位；`None` 是「沒送」不是值（寫入迴圈也跳過
+    # 它）—— 一起算進去的話，送 `{"personal_tax": null}` 會把舊值凍住。
+    assert "keep={k for k, v in data.items() if v is not None}" in fn
     # 前端：「人調過了沒」的答案只有一個來源 —— 後端落庫的 tax_manual。自己
     # 維護「上次試算值」那種模組狀態活不過面板重畫，還得每次 render 手動校準。
     js = js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))

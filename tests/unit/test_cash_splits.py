@@ -251,8 +251,9 @@ def test_the_fee_is_rejected_outside_deposit_side_project_splits():
     """代開費＝源日先扣走的**專案款** —— 支出側或沒掛專案的拆項寫 fee
     是分類錯誤，寫入端要 422 而不是默默存起來變成幽靈費用。"""
     body = code_only(func_body(repo_src(SPLITS), "async def _apply_splits("))
-    assert "it.fee" in body and "代開費" in func_body(repo_src(SPLITS),
-                                                  "async def _apply_splits(")
+    # code_only 只剝註解與 docstring、不動字串字面 —— 「代開費」在
+    # HTTPException(detail=…) 裡，同一份 body 就查得到，不必再切一次
+    assert "it.fee" in body and "代開費" in body
     assert 'side != "deposit"' in body
 
 

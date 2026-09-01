@@ -67,6 +67,14 @@ export async function openCashSplitEditor(o) {
         advances: (s.advances || []).map((a) => ({ ...a })),
     }));
 
+    /** 一個拆項列的形狀只有這裡定義 —— 三處 rows.push 各寫一份的時候，
+     *  manual 與 advance 那兩份已經漏了 fee/feeOn/project_name。 */
+    const newRow = (kind, over = {}) => ({
+        kind, amount: 0, fee: 0, feeOn: false, taxonomy_node_id: '',
+        category: '', sub_item: '', project_id: '', project_name: '',
+        note: '', advances: [], ...over,
+    });
+
     // 未收案清單的搜尋詞（owner 2026-09-01「專案列表要可以勾選、搜尋」——
     // 案子多起來之後用捲的找不如打字）。已勾的列不受過濾影響，永遠看得到。
     let projQ = '';
@@ -135,12 +143,10 @@ export async function openCashSplitEditor(o) {
             cb.onchange = () => {
                 const p = out.projects.find((x) => x.id === cb.dataset.proj);
                 if (cb.checked && p && projIdx(p.id) < 0) {
-                    rows.push({ kind: 'project', amount: p.receivable,
-                                fee: 0, feeOn: false,
-                                taxonomy_node_id: out.project_node_id || '',
-                                category: '', sub_item: '',
-                                project_id: p.id, project_name: p.name || '',
-                                note: '', advances: [] });
+                    rows.push(newRow('project', {
+                        amount: p.receivable,
+                        taxonomy_node_id: out.project_node_id || '',
+                        project_id: p.id, project_name: p.name || '' }));
                 } else if (!cb.checked) {
                     const i = projIdx(cb.dataset.proj);
                     if (i >= 0) rows.splice(i, 1);
@@ -248,9 +254,7 @@ export async function openCashSplitEditor(o) {
             close();
         };
         wrap.querySelector('#csp-add').onclick = () => {
-            rows.push({ kind: 'manual', amount: Math.max(0, target - sum()) || 0,
-                        taxonomy_node_id: '', category: '', sub_item: '',
-                        project_id: '', note: '', advances: [] });
+            rows.push(newRow('manual', { amount: Math.max(0, target - sum()) || 0 }));
             render();
         };
         wrap.querySelectorAll('[data-del]').forEach((b) => {
@@ -275,7 +279,9 @@ export async function openCashSplitEditor(o) {
         // 改代開費則反推金額 = 未收 − 費（兩個方向都不用使用者自己算）。
         // 勾「扣代開費」與改代開費金額是同一件事的兩個入口 —— 一支處理：
         // 勾了先猜「未收 − 目前金額」，改費用則反推金額 = 未收 − 費。
-        const setFee = (i, fee, on) => {
+        //  `redraw`：勾選會長出／收掉輸入框，非重畫不可；改**金額**只動三個值
+        //  —— 那條走 patch（重畫會打掉打字焦點，見 patchGross 檔頭那條規則）
+        const setFee = (i, fee, on, redraw = true) => {
             const r = rows[i];
             const p = out.projects.find((x) => x.id === r.project_id);
             r.feeOn = on;
@@ -283,7 +289,11 @@ export async function openCashSplitEditor(o) {
             if (p) {
                 r.amount = on ? Math.max(0, p.receivable - r.fee) : p.receivable;
             }
-            render();
+            if (redraw) { render(); return; }
+            const amtEl = wrap.querySelector(`[data-amt="${i}"]`);
+            if (amtEl) { amtEl.value = r.amount || ''; }
+            patchGross(i);
+            patchSum();
         };
         wrap.querySelectorAll('[data-feechk]').forEach((cb) => {
             cb.onchange = () => {
@@ -295,7 +305,7 @@ export async function openCashSplitEditor(o) {
         });
         wrap.querySelectorAll('[data-fee]').forEach((inp) => {
             inp.onchange = () => setFee(Number(inp.dataset.fee),
-                                        Number(inp.value) || 0, true);
+                                        Number(inp.value) || 0, true, false);
         });
         bindProj();
         const pq = wrap.querySelector('[data-projq]');
@@ -312,10 +322,8 @@ export async function openCashSplitEditor(o) {
                 let r = rows.find((x) => x.kind === 'advance');
                 if (cb.checked && a) {
                     if (!r) {
-                        r = { kind: 'advance', amount: 0,
-                              taxonomy_node_id: out.advance_node_id || '',
-                              category: '', sub_item: '',
-                              project_id: '', note: '', advances: [] };
+                        r = newRow('advance',
+                                   { taxonomy_node_id: out.advance_node_id || '' });
                         rows.push(r);
                     }
                     if (!r.advances.some((l) => l.entry_id === a.entry_id)) {

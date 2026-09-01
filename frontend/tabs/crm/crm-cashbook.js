@@ -15,7 +15,8 @@ import { finEntity as _pinEntity, finFetch as _finFetch, finIsMine,
 import { dayMark as _dayMark } from '../../js/shared/tw-calendar.js';
 // 專案連結改用可搜尋的挑選視窗（owner 2026-09-01「專案列表要可以勾選、搜尋」——
 // 私帳 405 個專案塞原生下拉等於沒得選）。共用件，別在這裡再刻一份。
-import { openPaymentPicker, openProjectPicker } from '../../js/shared/project-picker.js';
+import { openPaymentPicker, openProjectPicker, paymentLabel }
+    from '../../js/shared/project-picker.js';
 import { splitBadgeHtml } from '../../js/shared/cash-split-editor.js';
 import { indexTax as _indexTaxShared, taxKidsAt as _kidsAt, taxSelects }
     from '../../js/shared/cash-tax-picker.js';
@@ -127,8 +128,7 @@ async function _loadProjectList() {
  *  一趟的代價不只是往返 —— 那支**有 `.limit(80)`**（清單會靜默截斷）、而且
  *  只在私帳才填 projects（母公司整趟全廢）。 */
 const _outstandingProjects = () => _projectList
-    .filter((p) => (p.amount_receivable || 0) > 0)
-    .map((p) => ({ ...p, receivable: p.amount_receivable }));
+    .filter((p) => (p.amount_receivable || 0) > 0);
 
 async function _loadClientList() {
     try { _clientList = (await _fetch('/clients')).clients || []; } catch(_) { _clientList = []; }
@@ -141,6 +141,8 @@ async function _loadBankAccounts() {
     try {
         _bankAccounts = (await _finFetch('/bank-accounts')).items || [];
     } catch (_) { _bankAccounts = null; }
+    _acctNameMap = new Map((_bankAccounts || [])
+        .map((a) => [String(a.id), a.name || '']));
 }
 
 // ── List ────────────────────────────────────────────────────
@@ -150,21 +152,23 @@ const _sorter = createSortable({
     defaultSort: { key: 'date', dir: 'desc' },
     panelId: 'cash-list-panel',
     onChange: () => renderList(),
+    // 🔴 getter 不用各自 .toLowerCase()：共用排序器已經統一正規化
+    //（sortable.js 檔頭明寫「同一份規則」），各背一次只是每次比較白做兩趟
     getters: {
         date:     e => e.entry_date || '',
-        summary:  e => (e.summary || '').toLowerCase(),
+        summary:  e => e.summary || '',
         deposit:  e => e.deposit || 0,
         expense:  e => _bankOut(e),
         card:     e => _cardAmt(e),
-        book:     e => (e.book || '').toLowerCase(),
-        item:     e => (e.item || '').toLowerCase(),
-        sub_item: e => (e.sub_item || '').toLowerCase(),
-        bank_memo: e => (e.bank_memo || '').toLowerCase(),
-        project:  e => (e.project_name || '').toLowerCase(),
+        book:     e => e.book || '',
+        item:     e => e.item || '',
+        sub_item: e => e.sub_item || '',
+        bank_memo: e => e.bank_memo || '',
+        project:  e => e.project_name || '',
         // 那一欄兩本帳裝的東西不同（母公司＝發票、私帳＝請款單）——排序鍵跟著走
-        invoice:  e => (e.invoice_title || e.payment_label || '').toLowerCase(),
-        account:  e => _acctName(e.bank_account_id).toLowerCase(),
-        note:     e => (e.note || '').toLowerCase(),
+        invoice:  e => e.invoice_title || e.payment_label || '',
+        account:  e => _acctName(e.bank_account_id),
+        note:     e => e.note || '',
     },
 });
 
@@ -173,11 +177,15 @@ function _flat(text, sep) {
     return String(text || '').split('\n').filter(Boolean).join(sep);
 }
 
-/** 帳戶 id → 顯示名。帳戶清單載入失敗（_bankAccounts=null）時回空字串，不炸。 */
+/** 帳戶 id → 顯示名。帳戶清單載入失敗（_bankAccounts=null）時回空字串，不炸。
+ *  🔴 走查表不走 find：排序時每次比較都會問一次，4,733 列就是上萬次線性搜尋。*/
+/** 這一列的分類收不收得下專案（＝前端側的 cash_can_link；值域由後端
+ *  /cash-entries/options 供）。三個呼叫點共用，不各寫一次 includes。 */
+const _canLinkProj = (e) => _LINKABLE.includes(e.category || '');
+
+let _acctNameMap = new Map();
 function _acctName(id) {
-    if (!id || !_bankAccounts) return '';
-    const a = _bankAccounts.find(x => String(x.id) === String(id));
-    return a ? (a.name || '') : '';
+    return id ? (_acctNameMap.get(String(id)) || '') : '';
 }
 
 /** 分類篩選：**一排會長的下拉** —— 選到哪一層就再長一格，跟列的編輯器同一套走法。
@@ -374,14 +382,12 @@ const _taxFull = (e) => ((e.taxonomy_path || []).length
     ? e.taxonomy_path.join(' ▸ ') : (e.category || ''));
 
 /** 日期格：日期＋星期（六日／假日再上色）。沒有日期就一個破折號。 */
-function _dayHtml(e) {
-    const m = _dayMark(e.entry_date);
+function _dayHtml(e, m = _dayMark(e.entry_date)) {
     if (!m.day) { return '—'; }
     return `${m.day}<span class="cash-wd">${_esc(m.holiday || m.wd)}</span>`;
 }
 
-function _dayCls(e) {
-    const m = _dayMark(e.entry_date);
+function _dayCls(e, m = _dayMark(e.entry_date)) {
     return m.holiday ? ' is-holiday' : (m.weekend ? ' is-weekend' : '');
 }
 
@@ -513,10 +519,9 @@ window._cashPayPick = (ev, id) => _inlineLink({
         });
     },
     patch: (e, pid) => {
-        // 顯示名的規則與後端 payment_label() 同一條：收款人優先、退回摘要
-        const p = _paymentList.find((x) => x.id === pid);
         e.payment_request_id = pid;
-        e.payment_label = p ? (p.payee_name || p.summary || '') : '';
+        // 顯示名走共用那份（＝後端 payment_label 的鏡射）
+        e.payment_label = paymentLabel(_paymentList.find((x) => x.id === pid));
     },
 });
 
@@ -532,15 +537,16 @@ function _rowHtml(e) {
     const card = _cardAmt(e), out = _bankOut(e), deep = _taxDeep(e);
     // 一列算一次就好 —— 每個都被原本的樣板呼叫 2~3 次（4,733 列時很有感）
     const tf = _esc(_taxFull(e)), bm = _flat(e.bank_memo, ' '), nt = _flat(e.note, ' ');
+    const dm = _dayMark(e.entry_date);   // 日期格與假日底色共用一次判定
     // 同上：這三個以前在樣板裡各算兩次（`_splitProjNames` 還是 map+Set+join）
     const projName = e.split_count ? _splitProjNames(e) : (e.project_name || '');
-    const canPickProj = !e.split_count && _LINKABLE.includes(e.category || '');
+    const canPickProj = !e.split_count && _canLinkProj(e);
     const mine = finIsMine();
     return `
         <div class="crm-row${e.id === _selectedId && !_batch.on ? ' selected' : ''}${
             _batch.on && _batch.sel.has(e.id) ? ' batch-picked' : ''}" data-id="${e.id}"
              onclick="window._cashRowClick(event,'${e.id}')">
-            <div class="crm-row-date${_dayCls(e)}">${_dayHtml(e)}</div>
+            <div class="crm-row-date${_dayCls(e, dm)}">${_dayHtml(e, dm)}</div>
             <div class="crm-row-name">${_esc(e.summary)}${_pettyTag(e)}</div>
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
@@ -565,17 +571,16 @@ function _rowHtml(e) {
                  title="${_esc(bm)}">${_esc(_flat(e.bank_memo, ' · '))}</div>
             <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','note')"
                  title="${_esc(nt)}">${_esc(_flat(e.note, ' · '))}</div>
-            ${_linkCell(projName, canPickProj
-                ? { pick: `window._cashProjPick(event,'${e.id}')`, hint: '連結專案（可搜尋）' }
-                : {})}
+            ${_linkCell(projName, {
+                pick: canPickProj ? `window._cashProjPick(event,'${e.id}')` : '',
+                hint: '連結專案（可搜尋）' })}
             ${/* 那一欄裝什麼由帳本決定：母公司＝發票（唯讀），私帳沒有發票，
                  讓給請款單 —— 支出列可點、收入列留白。 */ ''}
             ${mine
-                ? _linkCell(e.expense ? (e.payment_label || '') : '',
-                            e.expense ? { cls: 'cash-col-inv',
-                                          pick: `window._cashPayPick(event,'${e.id}')`,
-                                          hint: '連結請款單（可搜尋）' }
-                                      : { cls: 'cash-col-inv' })
+                ? _linkCell(e.expense ? (e.payment_label || '') : '', {
+                    cls: 'cash-col-inv',
+                    pick: e.expense ? `window._cashPayPick(event,'${e.id}')` : '',
+                    hint: '連結請款單（可搜尋）' })
                 : _linkCell(e.invoice_title || '', { cls: 'cash-col-inv' })}
             <div>${_esc(_acctName(e.bank_account_id))}</div>
             ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup',
@@ -981,23 +986,18 @@ async function _loadCashOptions() {
 function _renderQuickLink(e) {
     const box = document.getElementById('cash-quicklink');
     if (!box) return;
-    const row = (label, id, optsHtml) => `
+    const row = (label, inner) => `
         <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
-            <span style="color:#9ca3af;font-size:12px;flex:0 0 48px;">${label}</span>
-            <select id="${id}" style="flex:1;min-width:0;">${optsHtml}</select>
-        </div>`;
-    const curProj = _projectList.find(p => p.id === e.project_id);
+            <span style="color:#9ca3af;font-size:12px;flex:0 0 48px;">${label}</span>${inner}</div>`;
+    const sel = (id, optsHtml) => `<select id="${id}" style="flex:1;min-width:0;">${optsHtml}</select>`;
     box.innerHTML = `
-        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
-            <span style="color:#9ca3af;font-size:12px;flex:0 0 48px;">專案</span>
-            <button id="cash-ql-proj" class="crm-btn crm-btn-secondary" title="挑一個專案（可搜尋）"
+        ${row('專案', `<button id="cash-ql-proj" class="crm-btn crm-btn-secondary" title="挑一個專案（可搜尋）"
                 style="flex:1;min-width:0;text-align:left;font-size:12px;padding:4px 8px;
-                       overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${curProj ? '' : 'color:#6b7280;'}">
-                ${curProj ? _esc(curProj.name) : '＋ 選專案'}</button>
-        </div>
+                       overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${e.project_name ? '' : 'color:#6b7280;'}">
+                ${e.project_name ? _esc(e.project_name) : '＋ 選專案'}</button>`)}
         ${/* 發票下拉只在支出列出現：收入列的發票走上面可掛多張的「關聯發票」區。
              私帳整個不出現 —— 私帳不開發票，連結一律走專案（owner 2026-09-01） */ ''}
-        ${(e.deposit || _noInvoice()) ? '' : row('發票', 'cash-ql-inv', _invOptsHtml(e.invoice_id, '— 未連結 —'))}
+        ${(e.deposit || _noInvoice()) ? '' : row('發票', sel('cash-ql-inv', _invOptsHtml(e.invoice_id, '— 未連結 —')))}
         <div id="cash-ql-msg" style="font-size:11px;color:#666;margin-top:5px;">選了就直接存</div>`;
 
     const save = async (patch) => {
@@ -1054,7 +1054,7 @@ function renderDetail(e) {
     const clientLabel = matchedClient
         ? matchedClient.short_name + (matchedClient.payment_info ? ' (' + matchedClient.payment_info + ')' : '')
         : '';
-    const isProjectish = _LINKABLE.includes(e.category || '');
+    const isProjectish = _canLinkProj(e);
     // 收入列的發票由下面「關聯發票」區負責，不重複列。
     // 私帳沒有發票這回事（不開發票，收款＝連結專案），相關欄目整組不出現。
     const mineNoInvoice = _noInvoice();
@@ -1090,7 +1090,7 @@ function renderDetail(e) {
     }
 
     document.getElementById('cash-detail-content').innerHTML = html;
-    if (_LINKABLE.includes(e.category || '')) _renderQuickLink(e);
+    if (isProjectish) _renderQuickLink(e);
     if (e.deposit && !mineNoInvoice) loadCashInvoiceAllocs(e.id);
     // 🔴 沒掛過任何請款單就不用打那一趟：payment_request_id 的不變量由
     //    replace_payment_allocs 維持（有連結才非空、清空就設回 null），所以它
@@ -1199,9 +1199,6 @@ function _invoiceLabel(inv) {
 }
 
 function _buildEditFields(currentBankAccountId, currentInvoiceId) {
-    const invoiceOpts = [{value:'',label:'— 不關聯 —'}].concat(
-        _invoiceCandidates(currentInvoiceId).map(inv =>
-            ({value:inv.id, label:_invoiceLabel(inv)})));
     const projectOpts = [{value:'',label:'— 不關聯 —'}].concat(
         _projectList.map(p => ({value:p.id, label:p.name + (p.client_short_name ? ' (' + p.client_short_name + ')' : '')})));
     const catOpts = [''].concat(_CATEGORIES).map(v => ({ value: v, label: v || '—' }));
@@ -1217,8 +1214,11 @@ function _buildEditFields(currentBankAccountId, currentInvoiceId) {
         {name:'project_id', label:'專案', type:'select', options:projectOpts},
         // 私帳不開發票（owner 2026-09-01）：發票欄整個不出現，連結一律走專案。
         // 不出現＝payload 不含此鍵（exclude_unset 部分更新），不會洗掉既有值。
-        ...(_noInvoice() ? []
-            : [{name:'invoice_id', label:'發票', type:'select', options:invoiceOpts}]),
+        // 私帳不開發票：連候選清單都不用建（走一遍全部發票只為了丟掉）
+        ...(_noInvoice() ? [] : [{name: 'invoice_id', label: '發票', type: 'select',
+            options: [{ value: '', label: '— 不關聯 —' }].concat(
+                _invoiceCandidates(currentInvoiceId).map(
+                    (inv) => ({ value: inv.id, label: _invoiceLabel(inv) })))}]),
         {name:'bank_fee', label:'匯費', type:'number'},
     ];
     // 帳戶（財務模組）— 清單載入成功才提供（降級時不出現，PUT payload 不含此鍵、不洗掉既有值）

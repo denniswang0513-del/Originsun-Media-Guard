@@ -39,5 +39,11 @@ function compareValues(va, vb, sign) {
 export function sortRows(items, getValue, { key, dir } = {}) {
     if (!key) return [...items];
     const sign = dir === 'desc' ? -1 : 1;
-    return [...items].sort((a, b) => compareValues(getValue(a, key), getValue(b, key), sign));
+    // 🔴 先取值再排（decorate-sort-undecorate）：把 getter 放進比較器裡的話，
+    // n 列要呼叫它約 2·n·log n 次 —— 收支明細 4,733 列就是 11 萬次，而其中
+    // 有些 getter 是線性搜尋（帳戶名）或字串拼接。取值 n 次就夠了。
+    return items
+        .map((x) => [getValue(x, key), x])
+        .sort((a, b) => compareValues(a[0], b[0], sign))
+        .map((pair) => pair[1]);
 }

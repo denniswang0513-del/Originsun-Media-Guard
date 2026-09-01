@@ -26,7 +26,7 @@ export function openProjectPicker(o) {
     // 兩份索引再 spread 合併的舞步是上一版的殘留，那時它來自另一支端點。
     const due = o.outstanding || [];
     const clientOf = (p) => p.client_short_name || p.client || '';
-    const dueOf = (p) => Number(p.receivable ?? p.amount_receivable) || 0;
+    const dueOf = (p) => Number(p.amount_receivable) || 0;
 
     openRowPicker({
         rows: due,
@@ -54,6 +54,12 @@ export function openProjectPicker(o) {
  * `payments`＝還沒付完的請款單（清單端點已經用 payment_status 篩過）。
  * 已付掉的那張若正掛在這一列上，殼會自己把它留在清單裡。
  */
+/** 一張請款單顯示成什麼 —— 後端 `routers/crm/cash.payment_label()` 的鏡射：
+ *  收款人優先、沒有才退回摘要。🔴 兩個 JS 呼叫點（列表 patch、這個視窗）
+ *  各寫一份的話會像 2026-09-01 那樣漂：視窗寫「（無收款人）」、選完格子裡
+ *  卻顯示摘要，同一張單兩個名字。 */
+export const paymentLabel = (p) => (p ? (p.payee_name || p.summary || '') : '');
+
 export function openPaymentPicker(o) {
     const list = o.payments || [];
     openRowPicker({
@@ -65,8 +71,8 @@ export function openPaymentPicker(o) {
         emptyMain: '沒有還沒付完的請款單',
         hay: (p) => `${p.payee_name || ''} ${p.summary || ''} ${p.category || ''} ${p.project_label || ''}`,
         line: (p) => `<span style="flex:1;min-width:0;">
-                <span style="color:#eee;font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.payee_name || '（無收款人）')}</span>
-                <span style="color:#9ca3af;font-size:11px;">${esc((p.summary || '').slice(0, 30))}${p.category ? '　·　' + esc(p.category) : ''}</span>
+                <span style="color:#eee;font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(paymentLabel(p) || '（無收款人）')}</span>
+                <span style="color:#9ca3af;font-size:11px;">${esc(p.payee_name ? (p.summary || '').slice(0, 30) : '')}${p.category ? '　·　' + esc(p.category) : ''}</span>
             </span>
             <span style="color:#fbbf24;font-size:11px;white-space:nowrap;">$${money(p.amount)}</span>`,
         onPick: o.onPick,

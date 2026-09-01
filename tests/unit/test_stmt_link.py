@@ -113,10 +113,9 @@ def test_mine_project_categories_use_the_one_link_rule():
     # 規則本身（正本 core.project_link）——**連「怎麼分支」都在正本裡**：
     # 兩個產生點（這支 preview、收支明細的 /cash-entries/options）都只呼叫
     # linkable_categories，誰都不准自己 `if ent == "mine"`。
-    from core.project_link import cash_can_link, linkable_categories
-    assert cash_can_link('mine', '公司_專案')
-    assert not cash_can_link('mine', '家用_餐飲'), '個人/家用掛專案會污染毛利'
-    assert not cash_can_link('parent', '公司_專案'), '兩本帳詞彙不同是刻意的'
+    # `cash_can_link` 本身的三條在 test_ledger_source_rules 有專責測試（超集），
+    # 這裡只釘 linkable_categories 與「兩個產生點都不自己分支」。
+    from core.project_link import linkable_categories
     mine_domain = ['公司_專案', '公司_代墊', '家用_餐飲', '個人_保險']
     assert linkable_categories('mine', mine_domain) == ['公司_專案', '公司_代墊']
     # 母公司沒有樹：值域就是白名單本身，餵什麼進來都一樣

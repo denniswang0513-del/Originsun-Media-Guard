@@ -501,7 +501,11 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         # 不碰使用者填的數字）。在 norm 前套，contract 用改完的值。
         # keep＝這次真的送上來的費用欄：個人稅款的自動值是**試算**，使用者
         # 調過就要留住（owner 2026-09-01「有些客戶會拆單，所以我不用先繳」）。
-        d = apply_source_fee(int(p.contract_amount or 0), d, keep=set(data))
+        # keep＝這次**真的送了值**的欄位。`None` 是「沒送」不是值（上面的寫入
+        # 迴圈也 `if v is None: continue` 跳過它）—— 一起算進去的話，
+        # `{"personal_tax": null}` 會把舊值當成「人決定的」凍住。
+        d = apply_source_fee(int(p.contract_amount or 0), d,
+                             keep={k for k, v in data.items() if v is not None})
         d = norm_detail(d)          # 再正規化一次（清掉 0 值工項）
         p.ledger_detail = d
         # 營收或代扣成本（個人稅款/代辦費）動了 → 應收與收款狀態一律重算
