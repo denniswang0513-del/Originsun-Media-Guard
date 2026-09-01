@@ -97,12 +97,15 @@ function _stHtml(p) {
  *  狀態機只有一份：那支會連帶處理代開發票的撥款狀態（sync_remit_status）。
  */
 const _payBtn = (x) => (x.payment_status === '已付款'
-    ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" title="改回應付款"
+    ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" title="改回應付款（單子留著）"
               style="font-size:10px;padding:1px 6px;"
-              onclick="window._finProjLedger.unpay('${esc(x.id)}')">收回請款</button>`
+              onclick="window._finProjLedger.unpay('${esc(x.id)}')">改回應付</button>`
     : `<button class="crm-btn crm-btn-secondary crm-btn-sm" title="標記為已付款"
               style="font-size:10px;padding:1px 6px;color:#86efac;"
-              onclick="window._finProjLedger.pay('${esc(x.id)}')">標記付款</button>`);
+              onclick="window._finProjLedger.pay('${esc(x.id)}')">標記付款</button>
+       <button class="crm-btn crm-btn-secondary crm-btn-sm" title="撤掉這張請款單（這筆不用請了）"
+              style="font-size:10px;padding:1px 6px;color:#fca5a5;margin-left:4px;"
+              onclick="window._finProjLedger.withdraw('${esc(x.id)}','${esc(x.summary || '')}')">收回請款</button>`);
 
 export default async function render(container, ctx = {}) {
     _c = container;
@@ -862,6 +865,26 @@ async function _payAction(id, paid) {
 }
 
 _fp.pay = (id) => _payAction(id, true);
+
+/** 收回請款＝**撤掉這張單**（owner 2026-09-01「要可以收回請款」，指的是還沒付
+ *  的那張：這筆不用請了）。刪除端點會把私帳的委外費用一起沖回
+ *  （_apply_outsource −1），所以逐案損益的「委外」不會留下幽靈數字。
+ *  🔴 已付款的單不給這顆 —— 錢都出去了還撤單，帳上就會少一筆付款；
+ *  那條路是「改回應付」再處理。 */
+_fp.withdraw = async (id, summary) => {
+    if (!confirm(`收回這張請款單？
+
+${summary}
+
+（單子會被刪掉；已付的錢請改用「改回應付」）`)) { return; }
+    try {
+        await crmFetch(`/payments/${id}`, { method: 'DELETE' });
+        finToast('已收回請款');
+        await _fp.open(_sel);
+    } catch (e) {
+        finToast('收回失敗：' + e.message, 'error');
+    }
+};
 _fp.unpay = (id) => {
     if (!confirm('確定把這張請款單改回應付款？')) { return; }
     _payAction(id, false);
