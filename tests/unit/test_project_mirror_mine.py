@@ -170,12 +170,38 @@ def test_the_mirrored_badge_is_hidden_from_people_without_the_private_ledger():
     那條線也該罩到它。"""
     fn = _fn(_src(), "list_projects")
     assert "mirrored_ids = set()" in fn
-    assert "if not _hide_mine(request):" in fn
+    assert "show_mine = not _hide_mine(request)" in fn
     # 一次撈成集合，不逐列查（409 案的清單）
     assert "CrmProject.source_project_id.isnot(None)" in fn
+    # 🔴 新的連結記在來源側（mine_link_id），那半邊**也要**被同一條線罩住 ——
+    # 只把 mirrored_ids 清空是不夠的，`is_mirrored` 光看 mine_link_id 就會回 True。
+    assert "show_mine and is_mirrored(p, mirrored_ids)" in fn
     row = code_only(repo_src("routers/crm/projects.py")).split(
         "def _to_project_dict(")[1].split("\ndef ")[0]
     assert '"mirrored": bool(mirrored),' in row
+
+
+def test_the_badge_also_shows_for_the_second_project_sharing_one_mine_case():
+    """🔴 owner 2026-09-01 回報：「南山人壽謝經理」用「加進去」連上去之後
+    沒有「已連結私帳」標籤，同一個私帳案的「王經理」卻有。
+
+    原因是判定只查了**私帳案回指的** `source_project_id` —— 那一欄只裝得下
+    第一個來源，第二個之後連上去的案只有自己身上的 `mine_link_id`。判定要
+    兩種形狀都認，而且**只有一份**（`is_mirrored`），不要在清單與詳情各寫一遍。
+    """
+    from routers.crm.projects import is_mirrored
+    first = NS(id="p1", mine_link_id=None)      # 舊資料：只有私帳那側指回來
+    second = NS(id="p2", mine_link_id="mine1")  # 新連結：記在來源這一側
+    plain = NS(id="p3", mine_link_id=None)
+    assert is_mirrored(first, {"p1"})
+    assert is_mirrored(second)                  # 不必靠 legacy 集合
+    assert is_mirrored(second, {"p1"})
+    assert not is_mirrored(plain, {"p1"})
+    # 詳情那條路要的是**連到哪一案**（id），不是「有沒有連」——
+    # 兩種形狀都認得的規則在那裡是「先看來源側，查不到才退回舊查法」。
+    body = code_only(func_body(_src(), "async def _mirror_preview("))
+    assert "if p.mine_link_id:" in body
+    assert "CrmProject.source_project_id == project_id" in body
 
 
 def test_the_mirror_does_not_show_up_next_to_its_parent():

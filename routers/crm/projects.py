@@ -35,6 +35,20 @@ except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 tr
 
 # ── Project Helpers ─────────────────────────────────────────
 
+def is_mirrored(p, legacy_ids=()) -> bool:
+    """這一案有沒有在私帳開分身（＝要不要標「已連結私帳」）。**只有這一份判定。**
+
+    🔴 兩種形狀都算數，因為連結換過邊：
+      · 新的記在**來源這一側**（`mine_link_id`）—— 一個私帳案要能承接多個
+        CRM 案（owner 2026-09-01「可以多筆專案連結到一筆私帳」）。
+      · 舊的記在私帳案上（`source_project_id` 指回來源），那一欄只裝得下第一個。
+
+    只查舊的那種，第二個之後連上去的案就沒有標籤 —— owner 2026-09-01 回報的
+    正是這個（「南山人壽謝經理」連了卻沒標）。
+    """
+    return bool(getattr(p, "mine_link_id", None)) or p.id in legacy_ids
+
+
 def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False) -> dict:
     return {
         "id": p.id, "name": p.name,
@@ -152,14 +166,19 @@ async def list_projects(
         # 有分身的母公司案（「連結私帳」）—— 一次撈成集合，不逐列查。
         # 看不到私帳的人拿到空集合：那個標籤等於在說「owner 私帳有這一案」。
         mirrored_ids = set()
-        if not _hide_mine(request):
+        show_mine = not _hide_mine(request)      # 一次就好（每列問一次是白費）
+        if show_mine:
             mirrored_ids = set((await session.execute(
                 select(CrmProject.source_project_id)
                 .where(CrmProject.source_project_id.isnot(None)))).scalars())
 
     return {
         "projects": [
-            {**_to_project_dict(p, cname or "", p.id in mirrored_ids),
+            {**_to_project_dict(
+                p, cname or "",
+                # 看不到私帳的人：mirrored_ids 是空的，`mine_link_id` 這半邊也
+                # 要一起關掉，否則標籤照樣洩漏「owner 私帳有這一案」。
+                show_mine and is_mirrored(p, mirrored_ids)),
              "proposal_status": ps or ""}
             for p, cname, ps in rows
         ],
@@ -1042,7 +1061,7 @@ async def _mirror_preview(session, project_id: str, staff_id: str) -> tuple:
     # （owner 2026-09-01）。舊資料的連結記在私帳案上（source_project_id 指回來），
     # 所以查不到時退回舊查法，兩種形狀都認得。
     linked = None
-    if getattr(p, "mine_link_id", None):
+    if p.mine_link_id:
         linked = await session.get(CrmProject, p.mine_link_id)
     if linked is None:
         linked = (await session.execute(
