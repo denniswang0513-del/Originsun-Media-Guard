@@ -89,6 +89,21 @@ function _stHtml(p) {
                   title="${esc(_stTip(p))}">${body}</span>`;
 }
 
+/** 請款單那一列的動作鈕：已付款 → 收回請款；未付 → 標記付款。
+ *
+ *  owner 2026-09-01「我需要有按鈕可以收回請款」—— 應付帳款視圖早就有這顆
+ *  （crm-payables 的 ↩），但專案詳情這一區沒有，於是標錯付款狀態只能跑去
+ *  另一個 tab 找那張單。兩邊走**同一組端點**（batch-pay / batch-unpay），
+ *  狀態機只有一份：那支會連帶處理代開發票的撥款狀態（sync_remit_status）。
+ */
+const _payBtn = (x) => (x.payment_status === '已付款'
+    ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" title="改回應付款"
+              style="font-size:10px;padding:1px 6px;"
+              onclick="window._finProjLedger.unpay('${esc(x.id)}')">收回請款</button>`
+    : `<button class="crm-btn crm-btn-secondary crm-btn-sm" title="標記為已付款"
+              style="font-size:10px;padding:1px 6px;color:#86efac;"
+              onclick="window._finProjLedger.pay('${esc(x.id)}')">標記付款</button>`);
+
 export default async function render(container, ctx = {}) {
     _c = container;
     if (ctx.isCurrent) _isCurrent = ctx.isCurrent;
@@ -562,8 +577,9 @@ function _renderDetail() {
                 <tbody>${(d.payments || []).map((x) => `
                     <tr><td>${esc(x.summary)}<div style="color:#666;font-size:10px;">${esc(x.category)}${x.payee ? '｜' + esc(x.payee) : ''}</div></td>
                         <td style="text-align:right;">${fmtNum(x.amount)}</td>
-                        <td style="white-space:nowrap;color:${x.payment_status === '已付款' ? '#86efac' : '#fbbf24'};">${esc(x.payment_status)}</td></tr>`).join('')
-                    || '<tr><td colspan="3" style="color:#666;padding:10px;">（無）</td></tr>'}</tbody></table>
+                        <td style="white-space:nowrap;color:${x.payment_status === '已付款' ? '#86efac' : '#fbbf24'};">${esc(x.payment_status)}</td>
+                        <td style="text-align:right;white-space:nowrap;">${_payBtn(x)}</td></tr>`).join('')
+                    || '<tr><td colspan="4" style="color:#666;padding:10px;">（無）</td></tr>'}</tbody></table>
             ${!_isMine() ? '' : `
             <details style="margin-top:14px;">
                 <summary style="color:#888;font-size:12px;cursor:pointer;">匯入保留的原始備註（案碼／案源／税別／工項）</summary>
@@ -826,6 +842,29 @@ _fp.claimMisc = async (expenseId, btn) => {
         if (btn) { btn.disabled = false; }
         finToast('請款失敗：' + e.message, 'error');
     }
+};
+
+/** 收回請款／標記付款 —— 與應付帳款視圖共用 crm 的批次端點。
+ *  🔴 不自己 PUT payment_status：那支端點一次處理付款日與代開發票的撥款
+ *  狀態，繞過去就會出現「請款單說沒付、發票說已撥款」的兩份答案。 */
+async function _payAction(id, paid) {
+    const path = paid ? '/payments/batch-pay' : '/payments/batch-unpay';
+    const body = paid
+        ? { payment_ids: [id], payment_date: new Date().toISOString().slice(0, 10) }
+        : { payment_ids: [id] };
+    try {
+        await crmFetch(path, { method: 'PATCH', body: JSON.stringify(body) });
+        finToast(paid ? '已標記付款' : '已收回請款');
+        await _fp.open(_sel);         // 只重載這一案的詳情
+    } catch (e) {
+        finToast((paid ? '標記付款失敗：' : '收回失敗：') + e.message, 'error');
+    }
+}
+
+_fp.pay = (id) => _payAction(id, true);
+_fp.unpay = (id) => {
+    if (!confirm('確定把這張請款單改回應付款？')) { return; }
+    _payAction(id, false);
 };
 
 _fp.outsourceForm = () => {
