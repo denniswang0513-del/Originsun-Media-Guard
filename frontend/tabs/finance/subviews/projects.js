@@ -557,10 +557,20 @@ function _renderDetail() {
                 <thead><tr><th>日期</th><th>摘要</th><th style="text-align:right;">存入</th><th style="text-align:right;">支出</th></tr></thead>
                 <tbody>${(d.entries || []).map((e) => `
                     <tr><td style="white-space:nowrap;color:#888;">${esc(e.date)}</td>
-                        <td>${esc(e.summary)}</td>
+                        <td>${esc(e.summary)}${e.split ? `<span title="這筆收支被拆成幾個項目，其中一項掛在本案${
+                            e.fee ? `；金額是毛額（實匯 ${fmtNum(e.deposit - e.fee)} ＋ 代開費 ${fmtNum(e.fee)}）` : ''}"
+                            style="margin-left:6px;font-size:10px;padding:1px 5px;border-radius:7px;background:#14351f;color:#86efac;">拆項${
+                            e.fee ? '·含代開費' : ''}</span>` : ''}</td>
                         <td style="text-align:right;color:#86efac;">${e.deposit ? fmtNum(e.deposit) : ''}</td>
                         <td style="text-align:right;color:#fca5a5;">${e.expense ? fmtNum(e.expense) : ''}</td></tr>`).join('')
-                    || '<tr><td colspan="4" style="color:#666;padding:10px;">（無）</td></tr>'}</tbody></table>
+                    || '<tr><td colspan="4" style="color:#666;padding:10px;">（無）</td></tr>'}
+                    ${(d.entries || []).length ? `<tr style="border-top:1px solid #3a3a3a;">
+                        <td colspan="2" style="color:#888;">合計</td>
+                        <td style="text-align:right;color:#86efac;font-weight:600;">${
+                            fmtNum((d.entries || []).reduce((n, e) => n + (e.deposit || 0), 0))}</td>
+                        <td style="text-align:right;color:#fca5a5;font-weight:600;">${
+                            fmtNum((d.entries || []).reduce((n, e) => n + (e.expense || 0), 0))}</td></tr>` : ''}
+                </tbody></table>
             <div style="display:flex;align-items:center;gap:8px;margin:16px 0 6px;">
                 <span style="color:#ddd;font-size:12px;font-weight:600;">應付／請款單（${(d.payments || []).length}）</span>
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:auto;"

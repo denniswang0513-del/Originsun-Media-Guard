@@ -386,6 +386,45 @@ async def create_ledger_project(payload: LedgerProjectCreate, request: Request,
     return {"status": "ok", "id": pid}
 
 
+async def _project_split_entries(session, project_id: str, ent: str) -> list:
+    """掛在這一案的**拆項**（owner 2026-09-02「單筆拆分帳的部分，無法連結到
+    專案表單／要連結後 專案要可以看到明細」）。
+
+    🔴 一筆收支被拆之後，父列的 `project_id` 就**讓位給拆項**了（拆項是那筆錢
+    的內容正本）。所以只查 `CrmCashEntry.project_id` 的話，凡是走拆項進來的錢
+    在專案頁一筆都看不到 —— 而「已收」是算得進去的（`_project_deltas`），於是
+    畫面上「已收 80,000」卻只列得出一筆 30,000，看起來像帳掉了。
+
+    🔴 金額用**毛額**（amount＋fee），跟 `_project_deltas` 同一條規則：代開費是
+    源日先扣走的專案款，只列淨額的話明細加起來會比已收少一個費用。
+    """
+    from sqlalchemy import select
+
+    from db.models import CrmCashEntry, CrmCashSplit
+    rows = (await session.execute(
+        select(CrmCashSplit, CrmCashEntry)
+        .join(CrmCashEntry, CrmCashEntry.id == CrmCashSplit.entry_id)
+        .where(CrmCashSplit.project_id == project_id,
+               CrmCashEntry.entity == ent)
+        .order_by(CrmCashEntry.entry_date))).all()
+    out = []
+    for s, e in rows:
+        amt, fee = int(s.amount or 0), int(s.fee or 0)
+        deposit = bool(e.deposit)
+        out.append({
+            "id": e.id, "date": _fmt_day(e.entry_date),
+            # 拆項自己的備註優先 —— 一筆匯款拆成三案時，父列的摘要三列都一樣
+            "summary": (s.note or "").strip() or (e.summary or ""),
+            "category": s.category or e.category or "",
+            "deposit": (amt + fee) if deposit else 0,
+            "expense": 0 if deposit else amt,
+            "status": e.status or "",
+            # 前端據此標「拆項」，並在有代開費時說明毛額是怎麼來的
+            "split": True, "fee": fee if deposit else 0,
+        })
+    return out
+
+
 @router.get("/project-ledger/{project_id}")
 async def project_ledger_detail(project_id: str, request: Request,
                                 entity: str = ""):
@@ -403,6 +442,7 @@ async def project_ledger_detail(project_id: str, request: Request,
             .where(CrmCashEntry.project_id == project_id,
                    CrmCashEntry.entity == ent)
             .order_by(CrmCashEntry.entry_date))).scalars().all()
+        split_rows = await _project_split_entries(session, project_id, ent)
         pays = (await session.execute(
             select(CrmPaymentRequest)
             .where(CrmPaymentRequest.project_id == project_id,
@@ -434,11 +474,16 @@ async def project_ledger_detail(project_id: str, request: Request,
         # 下拉只給可選的（自接＝歷史值不再可選；舊案的值由前端就地補一個選項）
         "sources": list(SELECTABLE_SOURCES), "default_fee_pct": DEFAULT_FEE_PCT,
         "cost_fields": [{"key": k, "label": lb} for k, lb in COST_FIELDS],
-        "entries": [{
-            "id": e.id, "date": _fmt_day(e.entry_date), "summary": e.summary,
-            "category": e.category or "", "deposit": int(e.deposit or 0),
-            "expense": int(e.expense or 0), "status": e.status or "",
-        } for e in entries],
+        # 整列掛在本案的 ＋ 拆項掛在本案的，日期排序後合成一份 —— 兩者對這一案
+        # 都是真金白銀進來，畫面上分兩塊會讓人以為要自己相加。
+        "entries": sorted(
+            [{
+                "id": e.id, "date": _fmt_day(e.entry_date), "summary": e.summary,
+                "category": e.category or "", "deposit": int(e.deposit or 0),
+                "expense": int(e.expense or 0), "status": e.status or "",
+                "split": False, "fee": 0,
+            } for e in entries] + split_rows,
+            key=lambda x: (x["date"] or "", x["summary"] or "")),
         "payments": [{
             "id": x.id, "summary": x.summary, "amount": int(x.amount or 0),
             "category": x.category or "", "payee": x.payee_name or "",

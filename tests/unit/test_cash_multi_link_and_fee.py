@@ -117,3 +117,37 @@ def test_the_outstanding_list_shows_and_searches_the_client():
     assert '"client": cname or "",' in fn
     assert "outerjoin(Client, Client.id == CrmProject.client_id)" in fn, \
         "逐案回頭問客戶名＝80 趟查詢"
+
+
+# ── 5. 專案頁要看得到拆項那份錢 ────────────────────────────
+
+def test_the_project_page_lists_money_that_arrived_as_a_split():
+    """🔴 owner 2026-09-02「單筆拆分帳的部分，無法連結到專案表單／要連結後
+    專案要可以看到明細」。
+
+    一筆收支被拆之後，父列的 `project_id` **讓位給拆項**（拆項才是那筆錢的
+    內容正本）。所以只查 `CrmCashEntry.project_id` 的話，走拆項進來的錢在專案
+    頁一筆都看不到 —— 而「已收」是算得進去的（`_project_deltas`）。生產實查
+    「TEDMA / 12支直式廣告」：已收 80,000 ＝ 整列 30,000 ＋ 拆項 50,000，
+    畫面卻只列得出 30,000，看起來像帳掉了一半。
+    """
+    src = repo_src("routers/api_finance_projects.py")
+    assert "async def _project_split_entries(" in src
+    helper = code_only(func_body(src, "async def _project_split_entries("))
+    assert "CrmCashSplit.project_id == project_id" in helper
+    assert "join(CrmCashEntry, CrmCashEntry.id == CrmCashSplit.entry_id)" in helper
+    # 🔴 毛額＝amount＋fee，跟 _project_deltas 同一條規則 —— 只列淨額的話
+    # 明細加起來會比「已收」少一個代開費
+    assert "(amt + fee) if deposit else 0" in helper
+    fn = code_only(func_body(src, "async def project_ledger_detail("))
+    assert "_project_split_entries(session, project_id, ent)" in fn
+    assert "+ split_rows," in fn, "拆項那份沒有併進 entries"
+
+
+def test_the_project_entry_table_marks_splits_and_totals():
+    """列出來還要看得出「這筆是拆項的一部分」，並且有合計 ——
+    使用者要拿它跟「已收」對，逐列心算不是驗證。"""
+    js = js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))
+    seg = js.split("掛在本案的收支")[1].split("應付／請款單")[0]
+    assert "e.split ?" in seg, "沒有標出拆項"
+    assert "reduce((n, e) => n + (e.deposit || 0), 0)" in seg, "沒有合計"
