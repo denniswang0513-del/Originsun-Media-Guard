@@ -42,9 +42,6 @@ let _settle = '';
 let _fy = '';           // 會計年度篩選（''=全部、'open'=未結案、數字=FY 結束年）
 let _dirty = false;
 let _resizeBound = false;
-// 個人稅款上一次的試算值 —— 用來分辨「這格還是試算值」與「人調過了」。
-// 面板每次存檔都整包重畫，所以判準只能是值本身，不能是旗標（旗標活不過重畫）。
-let _lastProTax = 0;
 
 /** 執行業務所得的源頭代扣試算 —— 同後端 core.ledger_project.withholding：
  *  所得扣繳 10%（單次稅額 ≤2,000 免扣）＋二代健保 2.11%（單次 <20,000 免扣）。*/
@@ -585,6 +582,9 @@ function _renderDetail() {
     // 案源規則（正本在後端 apply_source_fee，這裡只是即時預覽同一條式子）：
     // 代開發票 → 代辦費三欄自動、鎖住；執行業務所得 → 個人稅款**試算**（可改，
     // 見下方）；其他案源恢復手填。
+    // 「個人稅款由人決定過」的答案在後端（落庫的 tax_manual）；這是它在本次
+    // 編輯期間的鏡射，存檔後由後端回的值重新接手。
+    let taxManual = !!det.tax_manual;
     const _syncFee = (sourceChanged = false) => {
         const src = document.getElementById('fpl-source')?.value;
         const feeEl = document.getElementById('fpl-c-invoice_fee');
@@ -622,31 +622,33 @@ function _renderDetail() {
                 ? '試算：源頭代扣 10%＋二代健保 2.11%（含免扣門檻）—— 可自行調整，'
                   + '例如客戶拆單就不用先繳'
                 : '';
-            const auto = isPro ? _proTax(c) : 0;
-            if (isPro) {
-                const cur = Number(ptEl.value) || 0;
-                if (sourceChanged || cur === _lastProTax) {
-                    ptEl.value = auto || '';
-                    _liveSum();
-                }
+            // 🔴「人調過了沒」不用猜：後端把它落庫成 `tax_manual`（見
+            // core.ledger_project.apply_source_fee）並隨 detail 回來。這裡只
+            // 在「剛換案源」或「這格還沒被人決定過」時填試算值 —— 上一版用
+            // 模組級「上次試算值」做值比對，那個基準活不過面板重畫，還得在
+            // 每次 render 手動重新校準。
+            if (isPro && (sourceChanged || !taxManual)) {
+                ptEl.value = _proTax(c) || '';
+                _liveSum();
             }
-            _lastProTax = auto;
         }
     };
+    // 使用者一動這格就是「由人決定」（存檔後由後端回的 tax_manual 接手）
+    document.getElementById('fpl-c-personal_tax')
+        ?.addEventListener('input', () => { taxManual = true; });
+    // 🔴 fpl-source 只掛**一個** listener：它同時在那個 forEach 裡的話，換一次
+    // 案源會跑兩三次 _syncFee，而 input 先於 change 觸發（sourceChanged=false）
+    // —— 旗標的意義就變成看 listener 的註冊順序。
     document.getElementById('fpl-source')?.addEventListener('change',
         () => _syncFee(true));      // 換案源＝重新試算
-    ['fpl-source', 'fpl-feepct', 'fpl-contract'].forEach((id) => {
+    ['fpl-feepct', 'fpl-contract'].forEach((id) => {
         const el = document.getElementById(id);
         if (el) {
             el.addEventListener('input', () => _syncFee());
             el.addEventListener('change', () => _syncFee());
         }
     });
-    // 首次同步不算「換案源」—— 載入既有案時不可以覆寫人調過的稅款。
-    // 🔴 先把基準設成**本案**的試算值：不設的話 _lastProTax 還留著上一個案的
-    // 數字，切到另一案時萬一碰巧相等，人家調過的值就被覆寫掉。
-    _lastProTax = _proTax(Number(document.getElementById('fpl-contract')?.value) || 0);
-    _syncFee();
+    _syncFee();     // 首次同步不算「換案源」—— 載入既有案時不覆寫人調過的稅款
 }
 
 /** 工項合計即時更新（實收/檢查等存檔後由後端回算 —— 前端不算第二份）。 */

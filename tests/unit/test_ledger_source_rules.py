@@ -138,17 +138,21 @@ def test_the_withholding_is_an_estimate_the_owner_can_override():
 
 
 def test_the_update_endpoint_passes_what_the_user_sent():
-    """端點要把「使用者送了哪些欄」傳給規則 —— 少了它，前端怎麼改都存不進去。"""
-    from pathlib import Path
-    src = (Path(__file__).resolve().parents[2]
-           / "routers/api_finance_projects.py").read_text(encoding="utf-8")
-    fn = src.split("async def update_project_ledger(")[1].split("\n@router")[0]
+    """端點要把「使用者送了哪些欄」傳給規則 —— 少了它，前端怎麼改都存不進去。
+
+    🔴 掃描一律走 `_srcscan`：手刻 `Path(...).read_text()` ＋ `split("async def")`
+    會漏掉剝註解那一步，斷言就會被「正好在說明這件事」的註解餵飽
+    （_srcscan 檔頭記的第一個坑）。
+    """
+    from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+    fn = code_only(func_body(repo_src("routers/api_finance_projects.py"),
+                             "async def update_project_ledger("))
     assert "keep=set(data)" in fn
-    js = (Path(__file__).resolve().parents[2]
-          / "frontend/tabs/finance/subviews/projects.js").read_text(encoding="utf-8")
-    assert "ptEl.disabled = false" in js, "個人稅款那格還鎖著就改不了"
-    assert "sourceChanged || cur === _lastProTax" in js, \
-        "預填判準要是「剛換案源／值仍等於試算」—— 旗標活不過面板重畫"
+    # 前端：「人調過了沒」的答案只有一個來源 —— 後端落庫的 tax_manual。自己
+    # 維護「上次試算值」那種模組狀態活不過面板重畫，還得每次 render 手動校準。
+    js = js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))
+    assert "tax_manual" in js, "前端沒吃後端落庫的旗標，又在自己猜"
+    assert "_lastProTax" not in js, "又長出第二個「人調過了沒」的答案"
 
 
 def test_owner_can_write_own_book_but_parent_stays_admin_only():

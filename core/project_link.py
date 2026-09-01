@@ -37,3 +37,16 @@ def cash_can_link(entity: str, category: str) -> bool:
     if (entity or "parent") == "mine":
         return (category or "").startswith(MINE_CASH_LINK_PREFIX)
     return (category or "") in CASH_CATEGORIES
+
+
+def linkable_categories(entity: str, categories=()) -> list:
+    """這本帳裡「收得下專案」的類別清單 —— 給下拉／預覽用。
+
+    🔴 兩個產生點（收支明細的 /cash-entries/options、對帳單匯入的預覽）本來
+    各自 `if ent == "mine"` 分支：一個手刻 `c.startswith(MINE_CASH_LINK_PREFIX)`
+    （等於把規則抄到 router 裡）、一個直接回白名單常數繞過 `cash_can_link`。
+    正本函式存在、每個新使用者卻還要自己決定何時繞過它，那就不是正本。
+    這一支把「怎麼分支」也收進來：母公司沒有樹、值域就是白名單本身。
+    """
+    src = categories if (entity or "parent") == "mine" else CASH_CATEGORIES
+    return [c for c in src if cash_can_link(entity, c)]

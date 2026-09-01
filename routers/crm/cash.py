@@ -33,7 +33,7 @@ from core.schemas import (CashEntryPayload,
                           CashInvoiceLinksPayload, CashPaymentLinksPayload)
 
 from ._shared import (router, money_dep, _require_db,
-                      ledger_categories_and_tree,
+                      ledger_categories_and_tree, project_names_map,
                       _get_factory, _now,
                       _parse_shoot_date, _assert_month_open, _locked_month_set, _raise_locked_batch, map_csv_row)
 
@@ -74,8 +74,16 @@ async def resolve_invoice_allocs(session, items, ent, by_id=None):
     return await resolve_allocs(session, items, ent, "invoice", by_id)
 
 
+def payment_label(payee_name: str = "", summary: str = "") -> str:
+    """一張請款單在清單上顯示成什麼 —— 收款人優先（一筆匯出通常就認人），
+    沒有才退回摘要。**規則只有這一份**：判定式留在呼叫點的話，第二個顯示端
+    （挑選視窗、關聯面板）就會長出第二種 precedence。"""
+    return payee_name or summary or ""
+
+
 def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
-                  petty_status: str = "", tax_path=None) -> dict:
+                  petty_status: str = "", tax_path=None,
+                  pay_label: str = "") -> dict:
     return {
         "id": e.id,
         "entity": e.entity or "parent",
@@ -109,6 +117,9 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
         "taxonomy_node_id": getattr(e, 'taxonomy_node_id', '') or "",
         "taxonomy_path": list(tax_path or []),
         "invoice_title": invoice_title,
+        # 主要請款單的顯示名（支出列的「請款單」欄）—— 同 project_name／
+        # invoice_title，由 JOIN 帶進來、規則走 payment_label()
+        "payment_label": pay_label,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 
@@ -307,9 +318,8 @@ async def cash_entry_options(request: Request, entity: str = Query("")):
                 CrmCashEntry.entity == ent,
                 CrmCashEntry.sub_item.isnot(None),
                 CrmCashEntry.sub_item != "").distinct())).scalars())
-    from core.project_link import MINE_CASH_LINK_PREFIX
-    linkable = ([c for c in cats if c.startswith(MINE_CASH_LINK_PREFIX)]
-                if ent == "mine" else list(_PROJECT_LINK_CATEGORIES))
+    from core.project_link import linkable_categories
+    linkable = linkable_categories(ent, cats)
     # 舊的 taxonomy 扁平欄位先留一版：前端已全面改吃 tree，但發版當下還開著的
     # 舊分頁仍讀它；下一版可以連同 core.cash_taxonomy.taxonomy() 一起收掉。
     # 它的值域＝**這本帳實際用到的類別** ∪ 值域裡同一本底下的（還沒用過的新
@@ -375,7 +385,7 @@ async def list_cash_entries(
         # import 本檔的 _sync_taxonomy），一函式一次。
         from routers.crm.cash_splits import (_split_to_dict, entry_has_splits_subq,
                                              load_advance_links_map, load_splits_map,
-                                             project_names_map, split_category_pred)
+                                             split_category_pred)
         from db.models import CrmCashSplit
         if category == "__none__":
             # 「未分類」快篩：卡單匯入後真的分不出的尾巴（owner 逐筆點完就歸零）
@@ -468,16 +478,14 @@ async def list_cash_entries(
         # 拆項整本帳一次撈（表很小；用列 id 進 IN 的話，未篩選清單就是
         # 4,733 個 bind param 的 SQL —— /simplify 效率審查）
         smap = await load_splits_map(session, entity=ent)
-        amap = await load_advance_links_map(
-            session, [s.id for subs in smap.values() for s in subs])
-        pnames = await project_names_map(
-            session, [s for subs in smap.values() for s in subs])
+        all_splits = [s for subs in smap.values() for s in subs]
+        amap = await load_advance_links_map(session, [s.id for s in all_splits])
+        pnames = await project_names_map(session, all_splits)
     out = []
     for r in rows:
         d = _to_cash_dict(r[0], r[1] or "", r[2] or "", r[3] or "",
-                          paths.get(r[0].taxonomy_node_id))
-        # 清單顯示用：收款人優先（一筆匯出通常就認人），沒有才退回摘要
-        d["payment_label"] = (r[4] or "") if not (r[5] or "") else (r[5] or "")
+                          paths.get(r[0].taxonomy_node_id),
+                          payment_label(r[5] or "", r[4] or ""))
         subs = smap.get(r[0].id, [])
         d["splits"] = [_split_to_dict(s, paths.get(s.taxonomy_node_id),
                                       amap.get(s.id),

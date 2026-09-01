@@ -641,7 +641,7 @@ async def _build_statement_preview(session, acct, ent, text):
     # 前端不用再多打兩支 API（那兩支還在不同的 prefix 下）。
     from sqlalchemy import or_, select
 
-    from core.project_link import CASH_CATEGORIES, cash_can_link
+    from core.project_link import linkable_categories
     from db.models import Client, CrmInvoice, CrmProject
     # 挑選視窗要看得出「是哪個案子」—— 只有名稱不夠（同名/近名的案子很多）
     cmap = {c.id: c.short_name for c in
@@ -762,13 +762,11 @@ async def _build_statement_preview(session, acct, ent, text):
         # 一列不可能同時掛發票與請款單（方向互斥），前端也就共用同一格。
         "payment_requests": open_pays,
         # 哪些類別收得下專案 —— 前端拿它決定專案下拉何時可用。
-        # 🔴 規則正本是 core.project_link.cash_can_link：原本兩本帳都寫死母公司
-        # 白名單（專案/專案雜支/專案外包），私帳的「公司_專案」永遠比不中 →
-        # 專案格恆為「—」，對帳單匯入的收款完全沒有掛專案的入口（owner
-        # 2026-09-01「這裡無法收專案」—— 私帳不開發票，收款只能靠連結專案）。
-        # 私帳的 cat_list 已是全值域（樹節點鏡射，_shared.ledger_categories_and_tree）。
-        "project_categories": ([c for c in cat_list if cash_can_link(ent, c)]
-                               if ent == "mine" else list(CASH_CATEGORIES)),
+        # 🔴 規則正本是 core.project_link（原本這裡寫死母公司白名單，私帳的
+        # 「公司_專案」永遠比不中 → 專案格恆為「—」，對帳單匯入的收款完全沒有
+        # 掛專案的入口，owner 2026-09-01「這裡無法收專案」）。連「怎麼分支」
+        # 都在正本裡 —— 收支明細的 /cash-entries/options 走的是同一支。
+        "project_categories": linkable_categories(ent, cat_list),
         # 有科目對映的類別。前端改分類時要用同一條規則判「會不會落到未歸類」，
         # 不然改成一個沒對映的類別之後那個提醒就消失了。
         # （也省掉前端跨 prefix 去打 /crm/cash-entries/options 那一支）

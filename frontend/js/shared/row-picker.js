@@ -27,13 +27,18 @@ export function openRowPicker(o) {
     const main = o.rows || [];
     const all = o.allRows || [];
     // 目前連著的那一筆一定要在清單裡，否則畫面看起來像連結不見了
-    const byId = {};
-    all.concat(main).forEach((r) => { byId[r.id] = r; });
     const list0 = main.slice();
-    if (o.currentId && !list0.some((r) => r.id === o.currentId) && byId[o.currentId]) {
-        list0.unshift(byId[o.currentId]);
+    if (o.currentId && !list0.some((r) => r.id === o.currentId)) {
+        const cur = all.find((r) => r.id === o.currentId);
+        if (cur) { list0.unshift(cur); }
     }
-    let showAll = !all.length || !main.length;
+    // 搜尋字串每列算一次就好（405 個專案 × 每按一次鍵重拼一次字串）
+    const hay = new Map();
+    all.concat(list0).forEach((r) => {
+        if (!hay.has(r.id)) { hay.set(r.id, (o.hay(r) || '').toLowerCase()); }
+    });
+    const canToggle = !!(all.length && main.length);
+    let showAll = !canToggle;
     const list = () => (showAll && all.length ? all : list0);
 
     const wrap = document.createElement('div');
@@ -45,10 +50,11 @@ export function openRowPicker(o) {
     let q = '';
 
     const rowsHtml = () => {
-        const hit = list().filter((r) => !q || (o.hay(r) || '').toLowerCase().includes(q));
+        const hit = list().filter((r) => !q || (hay.get(r.id) || '').includes(q));
         if (!hit.length) {
             return `<div style="color:#6b7280;font-size:12px;padding:14px;">${
-                esc((showAll ? o.emptyAll : o.emptyMain) || '找不到符合的項目')}</div>`;
+                esc((showAll ? (o.emptyAll || o.emptyMain)
+                    : (o.emptyMain || o.emptyAll)) || '找不到符合的項目')}</div>`;
         }
         const rows = hit.slice(0, MAX_ROWS);
         const tail = hit.length > rows.length
@@ -69,7 +75,6 @@ export function openRowPicker(o) {
         }).join('') + tail;
     };
 
-    const canToggle = all.length && main.length;
     wrap.innerHTML = `<div style="background:#1b1b1b;border:1px solid #333;border-radius:12px;
             width:min(560px,94vw);max-height:80vh;display:flex;flex-direction:column;padding:14px 16px;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
@@ -86,18 +91,11 @@ export function openRowPicker(o) {
         <div id="pp-list" style="overflow:auto;border:1px solid #262626;border-radius:8px;flex:1;min-height:120px;"></div>
     </div>`;
 
-    const bind = () => {
-        wrap.querySelectorAll('[data-pick]').forEach((el) => {
-            el.onclick = () => {
-                const id = el.dataset.pick;
-                o.onPick(id === o.currentId ? '' : id);   // 再點目前那列＝取消連結
-                close();
-            };
-        });
-    };
-    /** 清單重畫（切換範圍／搜尋共用）—— 只換清單那塊，輸入框與焦點不動。 */
+    /** 清單重畫（切換範圍／搜尋共用）—— 只換清單那塊，輸入框與焦點不動。
+     *  點擊走**事件委派**（掛在清單容器上）：重畫不必重掛 120 個 onclick。 */
+    const listBox = wrap.querySelector('#pp-list');
     const redraw = () => {
-        wrap.querySelector('#pp-list').innerHTML = rowsHtml();
+        listBox.innerHTML = rowsHtml();
         const scope = wrap.querySelector('#pp-scope');
         const btn = wrap.querySelector('#pp-toggle');
         if (scope) {
@@ -105,8 +103,14 @@ export function openRowPicker(o) {
                 ? `${o.scopeAll || '全部'} ${all.length}`
                 : `${o.scopeMain || '主清單'} ${list0.length}`;
         }
-        if (btn) btn.textContent = showAll ? (o.scopeMain || '只看主清單') : (o.scopeAll || '顯示全部');
-        bind();
+        if (btn) { btn.textContent = showAll ? `只看${o.scopeMain || '主清單'}` : (o.scopeAll || '顯示全部'); }
+    };
+    listBox.onclick = (ev) => {
+        const el = ev.target.closest('[data-pick]');
+        if (!el) { return; }
+        const id = el.dataset.pick;
+        o.onPick(id === o.currentId ? '' : id);   // 再點目前那列＝取消連結
+        close();
     };
     redraw();
     const tgl = wrap.querySelector('#pp-toggle');

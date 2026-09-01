@@ -11,8 +11,8 @@
  */
 import { esc } from './dom.js';
 import { openRowPicker } from './row-picker.js';
-
-const money = (n) => (Number(n) || 0).toLocaleString('zh-TW');
+// 千分位走既有那份（modal-styles 同款先例：shared → crm-utils）
+import { fmtNum as money } from '../../tabs/crm/crm-utils.js';
 
 /**
  * openProjectPicker({projects, outstanding, currentId, title, onPick})
@@ -22,14 +22,11 @@ const money = (n) => (Number(n) || 0).toLocaleString('zh-TW');
  */
 export function openProjectPicker(o) {
     const all = o.projects || [];
-    const dueRaw = o.outstanding || [];
-    const dueAmt = {};
-    dueRaw.forEach((p) => { dueAmt[p.id] = Number(p.receivable) || 0; });
-    // 未收清單缺的欄位（客戶／狀態）從全清單補
-    const byId = {};
-    all.forEach((p) => { byId[p.id] = p; });
-    const due = dueRaw.map((p) => ({ ...(byId[p.id] || {}), ...p }));
+    // `outstanding` 是 `projects` 的子集（同一種物件、多一個 receivable）——
+    // 兩份索引再 spread 合併的舞步是上一版的殘留，那時它來自另一支端點。
+    const due = o.outstanding || [];
     const clientOf = (p) => p.client_short_name || p.client || '';
+    const dueOf = (p) => Number(p.receivable ?? p.amount_receivable) || 0;
 
     openRowPicker({
         rows: due,
@@ -45,8 +42,8 @@ export function openProjectPicker(o) {
                 <span style="color:#eee;font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name || p.id)}</span>
                 ${clientOf(p) || p.status ? `<span style="color:#9ca3af;font-size:11px;">${esc(clientOf(p))}${p.status ? '　·　' + esc(p.status) : ''}</span>` : ''}
             </span>
-            ${dueAmt[p.id]
-                ? `<span style="color:#fbbf24;font-size:11px;white-space:nowrap;">未收 $${money(dueAmt[p.id])}</span>`
+            ${dueOf(p)
+                ? `<span style="color:#fbbf24;font-size:11px;white-space:nowrap;">未收 $${money(dueOf(p))}</span>`
                 : '<span style="color:#4b5563;font-size:11px;white-space:nowrap;">已收齊</span>'}`,
         onPick: o.onPick,
     });
@@ -66,7 +63,6 @@ export function openPaymentPicker(o) {
         title: o.title || '連結請款單',
         placeholder: '搜尋收款人／摘要／類別…',
         emptyMain: '沒有還沒付完的請款單',
-        emptyAll: '沒有還沒付完的請款單',
         hay: (p) => `${p.payee_name || ''} ${p.summary || ''} ${p.category || ''} ${p.project_label || ''}`,
         line: (p) => `<span style="flex:1;min-width:0;">
                 <span style="color:#eee;font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.payee_name || '（無收款人）')}</span>

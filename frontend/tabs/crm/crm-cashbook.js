@@ -24,7 +24,6 @@ let _entries = [];
 let _invoiceList = [];
 let _paymentList = [];   // 請款單（付款側的分配用）
 let _projectList = [];
-let _outstandingProjects = [];   // 還沒收齊的案（專案挑選視窗的預設清單）
 let _clientList = [];
 let _bankAccounts = null;   // 財務模組銀行帳戶；null = 載入失敗/未啟用（優雅降級：不顯示帳戶欄）
 let _selectedId = null;
@@ -46,16 +45,22 @@ const _taxKidsAt = (chain, i) => _kidsAt(_taxTree, chain, i);
 let _batch = { on: false, sel: new Set(), last: null, chain: [] };
 let _csvFile = null;
 
+/** 這本帳有沒有「發票」這回事 —— owner 2026-09-01「私帳不會開發票，連結發票
+ *  都用連結專案替代」。**一條產品規則一個名字**：本檔原本用五種寫法表達它
+ *  （`inv && finIsMine()`、`e.deposit || finIsMine()`、`finIsMine() ? [] : […]`、
+ *  `mineNoInvoice`、`_sideOf` 裡的 `finIsMine()`），改規則要找五個地方。 */
+const _noInvoice = () => finIsMine();
+
 function _toggleAdvanceFields(isAdv) {
-    var ids = ['cash-advance-section', 'cash-field-project', 'cash-field-invoice', 'cash-field-bankfee'];
-    for (var i = 0; i < ids.length; i++) {
-        var el = document.getElementById(ids[i]);
-        if (el) el.style.display = (i === 0 ? isAdv : !isAdv) ? '' : 'none';
-    }
-    // 私帳不開發票（owner 2026-09-01）：發票欄恆隱藏，連結一律走專案。
-    // 這支是唯一會把該欄「顯示回來」的地方，所以蓋在最後。
-    var inv = document.getElementById('cash-field-invoice');
-    if (inv && finIsMine()) inv.style.display = 'none';
+    // 每一格的可見性一次算完 —— 原本是「先照 !isAdv 全部顯示、再把發票欄蓋掉」，
+    // 補丁蓋補丁：下一個看的人會以為發票欄真的跟著 isAdv 走。
+    [['cash-advance-section', isAdv],
+     ['cash-field-project', !isAdv],
+     ['cash-field-invoice', !isAdv && !_noInvoice()],
+     ['cash-field-bankfee', !isAdv]].forEach(([id, on]) => {
+        const el = document.getElementById(id);
+        if (el) { el.style.display = on ? '' : 'none'; }
+    });
 }
 
 // ── Data Loading ────────────────────────────────────────────
@@ -112,13 +117,18 @@ async function _loadProjectList() {
     try {
         _projectList = (await _fetch('/projects?entity=' + _pinEntity())).projects || [];
     } catch (_) { _projectList = []; }
-    // 未收案（挑選視窗的預設清單 —— owner 2026-09-01「這個清單要是款項沒收齊
-    // 的清單」）。走拆項編輯器同一支端點，未收額的規則只有那一份。
-    try {
-        const r = await _fetch('/cash-splits/outstanding?entity=' + _pinEntity());
-        _outstandingProjects = r.projects || [];
-    } catch (_) { _outstandingProjects = []; }
 }
+
+/** 還沒收齊的案（挑選視窗的預設清單 —— owner 2026-09-01「這個清單要是款項
+ *  沒收齊的清單」）。
+ *
+ *  🔴 從 `_projectList` 導出，不另外打 `/cash-splits/outstanding`：那支回的
+ *  就是 `amount_receivable > 0`，而這一欄 `/projects` 本來就每列都給。多打
+ *  一趟的代價不只是往返 —— 那支**有 `.limit(80)`**（清單會靜默截斷）、而且
+ *  只在私帳才填 projects（母公司整趟全廢）。 */
+const _outstandingProjects = () => _projectList
+    .filter((p) => (p.amount_receivable || 0) > 0)
+    .map((p) => ({ ...p, receivable: p.amount_receivable }));
 
 async function _loadClientList() {
     try { _clientList = (await _fetch('/clients')).clients || []; } catch(_) { _clientList = []; }
@@ -432,73 +442,100 @@ window._cashSplitOpen = async (id) => {
     });
 };
 
-// 列表的「專案」格就地連結（owner 2026-09-01「在紅框處就可以連結」——
-// 不用開詳情面板）。同一顆可搜尋挑選視窗；改完只補這一列。
-window._cashProjPick = (ev, id) => {
+/** 就地連結（列表格子點一下）的共用殼：挑 → 寫 → 只補那一列 → toast。
+ *
+ *  專案與請款單只差三件事：開哪個挑選視窗、寫哪支端點、選完那一列長什麼樣。
+ *  三個 try/catch/toast 各寫一份的話，「連結失敗」的行為就會各自漂。
+ *  `apply(pid)` 要回一個 promise；`patch(e, pid)` 就地把那一列改成新樣子
+ *  （不重抓整表 —— 4,733 列與 ~680ms，見 _patchRow 的註解）。 */
+function _inlineLink({ ev, id, noun, open, apply, patch }) {
     ev.stopPropagation();
     const e = _entries.find((x) => x.id === id);
     if (!e) { return; }
-    openProjectPicker({
-        projects: _projectList,
-        outstanding: _outstandingProjects,
-        currentId: e.project_id || '',
-        title: '連結專案 — ' + (e.summary || ''),
-        onPick: async (pid) => {
-            try {
-                await _fetch('/cash-entries/' + id, {
-                    method: 'PUT', body: JSON.stringify({ project_id: pid }) });
-                e.project_id = pid;
-                e.project_name = pid
-                    ? ((_projectList.find((p) => p.id === pid) || {}).name || '') : '';
-                _patchRow(id);
-                if (id === _selectedId) renderDetail(e);   // 詳情開著就同步
-                crmToast(pid ? '已連結專案' : '已取消連結');
-            } catch (err) {
-                crmToast('連結失敗：' + err.message, true);
-            }
-        },
+    open(e, async (pid) => {
+        try {
+            await apply(pid, e);
+            patch(e, pid);
+            _patchRow(id);
+            if (id === _selectedId) { renderDetail(e); }   // 詳情開著就同步
+            crmToast(pid ? `已連結${noun}` : '已取消連結');
+        } catch (err) {
+            crmToast('連結失敗：' + err.message, true);
+        }
     });
-};
+}
+
+/** 專案挑選視窗的參數 —— 列表格子與詳情面板的快速連結共用（各寫一份的話，
+ *  「預設只列未收齊」這種規則改一邊就漂）。 */
+const _projPickerOpts = (e, onPick) => ({
+    projects: _projectList,
+    outstanding: _outstandingProjects(),
+    currentId: e.project_id || '',
+    title: '連結專案 — ' + (e.summary || ''),
+    onPick,
+});
+
+// 列表的「專案」格就地連結（owner 2026-09-01「在紅框處就可以連結」——
+// 不用開詳情面板）。
+window._cashProjPick = (ev, id) => _inlineLink({
+    ev, id, noun: '專案',
+    open: (e, onPick) => openProjectPicker(_projPickerOpts(e, onPick)),
+    apply: (pid) => _fetch('/cash-entries/' + id, {
+        method: 'PUT', body: JSON.stringify({ project_id: pid }) }),
+    patch: (e, pid) => {
+        e.project_id = pid;
+        e.project_name = pid
+            ? ((_projectList.find((p) => p.id === pid) || {}).name || '') : '';
+    },
+});
 
 // 支出列的「請款單」格就地連結（owner 2026-09-01「支出的請款單勾記我希望
 // 也可以在這裡直接勾，比照專案」）。私帳沒有發票，那一欄讓給請款單。
 // 🔴 寫入走分配表的正本路徑（PUT /cash-entries/{id}/payments）不是直接寫
 // payment_request_id —— 只寫一邊會讓列表與關聯面板各講各的（既有的坑）。
-window._cashPayPick = (ev, id) => {
-    ev.stopPropagation();
-    const e = _entries.find((x) => x.id === id);
-    if (!e) { return; }
-    openPaymentPicker({
+window._cashPayPick = (ev, id) => _inlineLink({
+    ev, id, noun: '請款單',
+    open: (e, onPick) => openPaymentPicker({
         payments: _paymentList,
         currentId: e.payment_request_id || '',
         title: '連結請款單 — ' + (e.summary || ''),
-        onPick: async (pid) => {
-            const p = _paymentList.find((x) => x.id === pid);
-            // 一筆匯出對一張單最常見；金額取兩者較小的（分次付／一筆付多張都
-            // 是合理的形狀，差額留給詳情面板的分配面板補）
-            const amt = Math.min(int_(e.expense) + int_(e.bank_fee), int_(p && p.amount))
-                || int_(p && p.amount);
-            try {
-                await _fetch(`/cash-entries/${id}/payments`, {
-                    method: 'PUT',
-                    body: JSON.stringify({ items: pid
-                        ? [{ payment_request_id: pid, amount: amt }] : [] }),
-                });
-                await loadEntries({ cards: false });
-                crmToast(pid ? '已連結請款單' : '已取消連結');
-            } catch (err) {
-                crmToast('連結失敗：' + err.message, true);
-            }
-        },
-    });
-};
+        onPick,
+    }),
+    apply: (pid, e) => {
+        const p = _paymentList.find((x) => x.id === pid);
+        // 一筆匯出對一張單最常見；金額取兩者較小的（分次付／一筆付多張都是
+        // 合理的形狀，差額留給詳情面板的分配面板補）
+        const amt = p ? Math.min((e.expense || 0) + (e.bank_fee || 0), p.amount || 0) : 0;
+        return _fetch(`/cash-entries/${id}/payments`, {
+            method: 'PUT',
+            body: JSON.stringify({ items: pid
+                ? [{ payment_request_id: pid, amount: amt }] : [] }),
+        });
+    },
+    patch: (e, pid) => {
+        // 顯示名的規則與後端 payment_label() 同一條：收款人優先、退回摘要
+        const p = _paymentList.find((x) => x.id === pid);
+        e.payment_request_id = pid;
+        e.payment_label = p ? (p.payee_name || p.summary || '') : '';
+    },
+});
 
-const int_ = (v) => Number(v) || 0;
+/** 「專案」與「請款單／發票」兩格：可點時是一格 cash-ed（沒值就一顆紅點），
+ *  不可點時是唯讀格。兩格的形狀一樣，差別只有 class／內容／要不要掛 onclick
+ *  —— 各寫一份三元式的下場是同一段樣板在檔案裡有四份（都要記得帶 class）。*/
+const _linkCell = (val, { cls = '', pick = '', hint = '' } = {}) =>
+    `<div class="${cls}${pick ? ' cash-ed' : ''}"${
+        pick ? ` onclick="${pick}"` : ''} title="${_esc(val || (pick ? hint : ''))}">${
+        val ? _esc(val) : (pick ? _NO_VAL_DOT : '')}</div>`;
 
 function _rowHtml(e) {
     const card = _cardAmt(e), out = _bankOut(e), deep = _taxDeep(e);
     // 一列算一次就好 —— 每個都被原本的樣板呼叫 2~3 次（4,733 列時很有感）
     const tf = _esc(_taxFull(e)), bm = _flat(e.bank_memo, ' '), nt = _flat(e.note, ' ');
+    // 同上：這三個以前在樣板裡各算兩次（`_splitProjNames` 還是 map+Set+join）
+    const projName = e.split_count ? _splitProjNames(e) : (e.project_name || '');
+    const canPickProj = !e.split_count && _LINKABLE.includes(e.category || '');
+    const mine = finIsMine();
     return `
         <div class="crm-row${e.id === _selectedId && !_batch.on ? ' selected' : ''}${
             _batch.on && _batch.sel.has(e.id) ? ' batch-picked' : ''}" data-id="${e.id}"
@@ -528,21 +565,18 @@ function _rowHtml(e) {
                  title="${_esc(bm)}">${_esc(_flat(e.bank_memo, ' · '))}</div>
             <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','note')"
                  title="${_esc(nt)}">${_esc(_flat(e.note, ' · '))}</div>
-            ${_LINKABLE.includes(e.category || '') && !e.split_count ? `
-            <div class="cash-ed" onclick="window._cashProjPick(event,'${e.id}')"
-                 title="${e.project_name ? _esc(e.project_name) : '連結專案（可搜尋）'}">${
-                 e.project_name ? _esc(e.project_name) : _NO_VAL_DOT}</div>` : `
-            <div title="${_esc(e.split_count ? _splitProjNames(e) : '')}">${
-                _esc(e.split_count ? _splitProjNames(e) : (e.project_name || ''))}</div>`}
-            ${/* 母公司：發票欄照舊（display:none 只在私帳）。
-                 私帳：那一欄讓給請款單 —— 支出列可點、收入列留白。 */ ''}
-            ${!finIsMine()
-                ? `<div class="cash-col-inv">${_esc(e.invoice_title || '')}</div>`
-                : (e.expense
-                    ? `<div class="cash-col-inv cash-ed" onclick="window._cashPayPick(event,'${e.id}')"
-                           title="${e.payment_label ? _esc(e.payment_label) : '連結請款單（可搜尋）'}">${
-                           e.payment_label ? _esc(e.payment_label) : _NO_VAL_DOT}</div>`
-                    : '<div class="cash-col-inv"></div>')}
+            ${_linkCell(projName, canPickProj
+                ? { pick: `window._cashProjPick(event,'${e.id}')`, hint: '連結專案（可搜尋）' }
+                : {})}
+            ${/* 那一欄裝什麼由帳本決定：母公司＝發票（唯讀），私帳沒有發票，
+                 讓給請款單 —— 支出列可點、收入列留白。 */ ''}
+            ${mine
+                ? _linkCell(e.expense ? (e.payment_label || '') : '',
+                            e.expense ? { cls: 'cash-col-inv',
+                                          pick: `window._cashPayPick(event,'${e.id}')`,
+                                          hint: '連結請款單（可搜尋）' }
+                                      : { cls: 'cash-col-inv' })
+                : _linkCell(e.invoice_title || '', { cls: 'cash-col-inv' })}
             <div>${_esc(_acctName(e.bank_account_id))}</div>
             ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup',
                                    onDelete: '_cashDelete',
@@ -963,7 +997,7 @@ function _renderQuickLink(e) {
         </div>
         ${/* 發票下拉只在支出列出現：收入列的發票走上面可掛多張的「關聯發票」區。
              私帳整個不出現 —— 私帳不開發票，連結一律走專案（owner 2026-09-01） */ ''}
-        ${(e.deposit || finIsMine()) ? '' : row('發票', 'cash-ql-inv', _invOptsHtml(e.invoice_id, '— 未連結 —'))}
+        ${(e.deposit || _noInvoice()) ? '' : row('發票', 'cash-ql-inv', _invOptsHtml(e.invoice_id, '— 未連結 —'))}
         <div id="cash-ql-msg" style="font-size:11px;color:#666;margin-top:5px;">選了就直接存</div>`;
 
     const save = async (patch) => {
@@ -982,13 +1016,8 @@ function _renderQuickLink(e) {
         }
     };
     const pj = document.getElementById('cash-ql-proj');
-    if (pj) pj.addEventListener('click', () => openProjectPicker({
-        projects: _projectList,
-        outstanding: _outstandingProjects,
-        currentId: e.project_id || '',
-        title: '連結專案 — ' + (e.summary || ''),
-        onPick: (id) => save({ project_id: id }),
-    }));
+    if (pj) pj.addEventListener('click', () => openProjectPicker(
+        _projPickerOpts(e, (id) => save({ project_id: id }))));
     const iv = document.getElementById('cash-ql-inv');
     if (iv) iv.addEventListener('change', () => save({ invoice_id: iv.value }));
 }
@@ -1028,7 +1057,7 @@ function renderDetail(e) {
     const isProjectish = _LINKABLE.includes(e.category || '');
     // 收入列的發票由下面「關聯發票」區負責，不重複列。
     // 私帳沒有發票這回事（不開發票，收款＝連結專案），相關欄目整組不出現。
-    const mineNoInvoice = finIsMine();
+    const mineNoInvoice = _noInvoice();
     const showInvoiceProp = !e.deposit && !mineNoInvoice;
     const rel = [
         // 有快速連結下拉時就不印唯讀版 —— 下拉本身已經顯示目前選的是什麼，
@@ -1188,7 +1217,7 @@ function _buildEditFields(currentBankAccountId, currentInvoiceId) {
         {name:'project_id', label:'專案', type:'select', options:projectOpts},
         // 私帳不開發票（owner 2026-09-01）：發票欄整個不出現，連結一律走專案。
         // 不出現＝payload 不含此鍵（exclude_unset 部分更新），不會洗掉既有值。
-        ...(finIsMine() ? []
+        ...(_noInvoice() ? []
             : [{name:'invoice_id', label:'發票', type:'select', options:invoiceOpts}]),
         {name:'bank_fee', label:'匯費', type:'number'},
     ];
@@ -1488,8 +1517,6 @@ export async function initCrmCashbookTab() {
     // 私帳不開發票（owner 2026-09-01）：那一欄讓給「請款單」（支出列可直接勾）。
     // 🔴 改標題而不是隱藏整欄：欄寬規則是 nth-child，表頭與列的格子數必須一直
     // 相等 —— 只藏表頭或只藏列都會讓後面每一欄錯位。
-    const _panel = document.getElementById('cash-list-panel');
-    if (_panel) _panel.classList.toggle('mine-book', finIsMine());
     if (finIsMine()) {
         const _h = document.querySelector('#cash-list-panel .acct-header .cash-col-inv');
         if (_h) { _h.childNodes[0].nodeValue = '請款單 '; }

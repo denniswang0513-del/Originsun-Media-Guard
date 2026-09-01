@@ -26,8 +26,9 @@ CSV 來源：私帳 Sheet「結案總表」分頁（gid=2098748516）→ export?
   contract_amount=營收(含稅)、amount_receivable/received 照表、
   税別=發票→tax_rate 5 其餘 0。案碼/案源/税別/稅務欄/工種拆分/備註收進
   notes（結構化文字；案碼行 `[私帳匯入] 案碼:XXXX` 是收支回掛的鍵）。
-- 委外應付>0 或 應付稅款未付 → crm_payment_requests（entity='mine'，
-  payment_status='應付款'）＝「我現在要匯多少給人家」的資料源。
+- 委外應付>0 → crm_payment_requests（entity='mine'，payment_status='應付款'）
+  ＝「我現在要匯多少給人家」的資料源。🔴 應付稅款（發票代辦）**不建單**：
+  那筆是源頭代扣（匯款當下就扣走），不是要匯出去的錢。
   收款人埋在 Sheet 備註自由文字 → 進 summary，payee_name 留白由 owner 補。
 - 收支回掛：階段 1 匯入的明細 project_label='{案碼}｜{標籤}' → 依案碼
   UPDATE project_id。
@@ -214,10 +215,14 @@ async def run(csv_path: str, apply: bool, prod: bool, force: bool = False):
             if p["out_due"] > 0:
                 prs.append((p, "專案外包", p["out_due"],
                             f"委外應付：{p['name']}" + (f"（{p['note']}）" if p["note"] else "")))
-            if p["tax_due"] > 0 and p["tax_status"] != "已付款":
-                prs.append((p, "其他", p["tax_due"], f"應付稅款（發票代辦）：{p['name']}"))
+            # 🔴 **不建「應付稅款（發票代辦）」的請款單**（owner 2026-09-01：
+            # 「這個其實在匯款的時候就會自動扣掉了，不用特地拉一張單子請款」）。
+            # 那筆錢是源頭代扣 —— 永遠不會從他的帳戶匯出去，所以不是應付。
+            # 首次匯入建了 28 張，其中一張還與 `client_wire`（應收預先扣掉
+            # 代辦費）形成「同一筆錢兩邊都算」：收齊的案未收 0、未付卻掛著
+            # 66,960，逐案損益永遠不會結案。2026-09-01 已全數清掉。
         print(f"應付請款單：{len(prs)} 張，合計 {sum(x[2] for x in prs):,}"
-              f"（錨點：委外 92,600＋稅款 145,896＋結案殘留）")
+              f"（只有委外；稅款是源頭代扣，不建單）")
 
         if not apply:
             print_dry_run_end(hint=True)

@@ -5,6 +5,7 @@
 但「已收金額」與關聯面板讀 crm_cash_invoice_links —— 只寫一邊就會兩處各講各的
 （這一輪已經在收支明細那邊修過同一個洞，不可以在匯入這條路上重犯）。
 """
+from core.project_link import CASH_CATEGORIES  # noqa: E402
 from tests.unit._srcscan import finance_src, code_only, func_body, repo_src  # noqa: E402
 
 
@@ -109,12 +110,24 @@ def test_mine_project_categories_use_the_one_link_rule():
     preview 原本寫死母公司白名單（專案/專案雜支/專案外包）—— 私帳的
     「公司_專案」永遠比不中，專案格恆為「—」：私帳不開發票，對帳單匯入的
     收款就此完全沒有掛專案的入口（owner 2026-09-01「這裡無法收專案」）。"""
-    body = _body('async def _build_statement_preview(')
-    assert 'cash_can_link(ent, c)' in body, 'project_categories 沒走 cash_can_link 正本'
-    from core.project_link import cash_can_link
+    # 規則本身（正本 core.project_link）——**連「怎麼分支」都在正本裡**：
+    # 兩個產生點（這支 preview、收支明細的 /cash-entries/options）都只呼叫
+    # linkable_categories，誰都不准自己 `if ent == "mine"`。
+    from core.project_link import cash_can_link, linkable_categories
     assert cash_can_link('mine', '公司_專案')
     assert not cash_can_link('mine', '家用_餐飲'), '個人/家用掛專案會污染毛利'
     assert not cash_can_link('parent', '公司_專案'), '兩本帳詞彙不同是刻意的'
+    mine_domain = ['公司_專案', '公司_代墊', '家用_餐飲', '個人_保險']
+    assert linkable_categories('mine', mine_domain) == ['公司_專案', '公司_代墊']
+    # 母公司沒有樹：值域就是白名單本身，餵什麼進來都一樣
+    assert linkable_categories('parent', mine_domain) == list(CASH_CATEGORIES)
+    assert linkable_categories('parent', []) == list(CASH_CATEGORIES)
+    # 兩個產生點都不再自己分支
+    for src, fn in ((_body('async def _build_statement_preview('), 'preview'),
+                    (code_only(finance_src('async def cash_entry_options(')),
+                     'cash-entries/options')):
+        assert 'linkable_categories(' in src, f'{fn} 沒走正本'
+        assert 'MINE_CASH_LINK_PREFIX' not in src, f'{fn} 又把前綴規則抄進 router'
 
 
 def test_apply_credits_the_mine_project_on_import():
@@ -129,79 +142,52 @@ def test_apply_credits_the_mine_project_on_import():
 
 
 def test_mine_replaces_invoice_links_with_project_links():
-    """owner 2026-09-01「私帳不會開發票，連結發票都用連結專案替代」——
-    私帳的發票介面要整組消失（不是留一個開了也是空清單的死按鈕）：
-      · 匯入預覽：收入側 _sideOf 恆 null（發票格與挑選視窗一起不出現）
-      · 收支明細：關聯發票區／快速連結發票下拉／編輯視窗發票欄都收掉"""
+    """owner 2026-09-01「私帳不會開發票，連結發票都用連結專案替代」＋
+    「支出的請款單勾記我希望也可以在這裡直接勾，比照專案」。
+
+    釘規則不是字串：
+      · 這條產品規則只有**一個名字**（_noInvoice）—— 原本同一件事在本檔用了
+        五種寫法，改規則要找五個地方
+      · 那一欄兩本帳都在（母公司＝發票、私帳＝請款單）：只藏一邊就整排錯位
+      · 請款單的寫入走分配表的正本路徑，不是直接寫 payment_request_id
+    """
     from tests.unit._srcscan import js_code_only
     recon = js_code_only(repo_src('frontend/tabs/finance/subviews/recon.js'))
     side = recon.split('const _sideOf =')[1].split(';')[0]
-    assert 'finIsMine()' in side and 'null' in side, '收入側的發票格對私帳沒有關掉'
+    assert 'finIsMine()' in side and 'null' in side, '收入側的發票格對私帳沒關掉'
     cb = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
-    assert 'mineNoInvoice' in cb, '收支明細詳情的發票區沒有私帳閘門'
-    # 三個不共用 render 的入口各自要擋（帳本判定一律 finIsMine 唯一正本）
-    assert '(e.deposit || finIsMine())' in cb, '快速連結的發票下拉沒擋私帳'
-    assert '...(finIsMine() ? []' in cb, '編輯欄位清單沒把發票欄抽掉'
-    assert 'inv && finIsMine()' in cb, '新增/編輯視窗的發票欄沒對私帳恆隱藏'
-    # 列表那一欄：母公司＝發票，私帳＝請款單（owner 2026-09-01 第三輪
-    # 「支出的請款單勾記我希望也可以在這裡直接勾，比照專案」）。
-    # 🔴 改標題而不是隱藏整欄 —— 欄寬規則是 nth-child，表頭與列的格子數必須
-    # 一直相等；只藏一邊就整排錯位（拆項列那次的同款教訓）。
-    assert "classList.toggle('mine-book', finIsMine())" in cb
-    assert "'請款單 '" in cb, '私帳沒有把那一欄的標題換成請款單'
-    assert 'cash-col-inv' in repo_src('frontend/tabs/crm/crm-cashbook.html'), \
-        '表頭那一欄沒掛 class'
-    assert cb.count('cash-col-inv') >= 3, '兩本帳的三種列都要掛同一個欄位 class'
+    assert 'const _noInvoice = ()' in cb, '「私帳沒有發票」沒有收成一個名字'
+    assert cb.count('_noInvoice()') >= 3, '還有消費點沒走那個述詞'
     css = repo_src('frontend/tabs/crm/crm.css')
-    assert '.mine-book .cash-col-inv { display: none' not in css, \
-        '那一欄不能整欄藏 —— 私帳要用它放請款單'
-    assert '_cashPayPick' in cb and "/payments`" in cb, \
-        '請款單就地連結要走分配表的正本路徑（PUT /cash-entries/{id}/payments）'
+    assert '.mine-book .cash-col-inv { display: none' not in css,         '那一欄不能整欄藏 —— 私帳要用它放請款單'
+    assert 'cash-col-inv' in repo_src('frontend/tabs/crm/crm-cashbook.html')
+    assert '_cashPayPick' in cb and '/payments`' in cb,         '請款單就地連結要走分配表的正本路徑'
 
 
 def test_project_lists_are_searchable_and_checkable():
-    """owner 2026-09-01「分類是專案時，專案列表要可以勾選、搜尋」——
-    405 個專案塞原生 <select> 等於沒得選。兩個入口：
-      · 收支明細快速連結 → js/shared/project-picker（搜尋＋勾選樣式，單選）
-      · 拆項編輯器的未收案清單 → 原有勾選＋新增搜尋框（只換清單不整窗重畫）"""
+    """owner 2026-09-01「專案列表要可以勾選、搜尋」「這個清單要是款項沒收齊
+    的清單」。殼在 js/shared/row-picker（專案與請款單共用一顆）。"""
     from tests.unit._srcscan import js_code_only
-    # 殼在 row-picker（專案與請款單共用同一顆），project-picker 只提供「一列長
-    # 什麼樣」與文案 —— 斷言跟著規則走，不是跟著檔名走
     pk = js_code_only(repo_src('frontend/js/shared/project-picker.js'))
     shell = js_code_only(repo_src('frontend/js/shared/row-picker.js'))
     assert 'export function openProjectPicker' in pk
-    assert 'export function openPaymentPicker' in pk, '請款單沒有共用同一顆挑選視窗'
+    assert 'export function openPaymentPicker' in pk, '請款單沒共用同一顆挑選視窗'
     assert 'openRowPicker(' in pk, 'project-picker 應該只是薄殼'
     assert 'type="search"' in shell and 'type="checkbox"' in shell
-    # 🔴 預設只列還沒收齊的案（owner「這個清單要是款項沒收齊的清單」）——
-    # 411 案裡 217 案早就結清。但「顯示全部」要留（補記舊帳選得到），而且
-    # 目前連著的那一案不管收齊沒都必須在清單裡，否則看起來像連結不見了。
-    # 🔴 列是 <div> 不是 <label>：label 會把 click 轉發給裡面的 checkbox，
-    # input 的 click 再冒泡回 label —— 一次點擊跑兩次 onclick，送出兩個併發的
-    # PUT，專案已收被加兩次（2026-09-01 生產：4 個顧問月費案各溢收 22,000）。
-    assert 'data-pick' in shell and '<label' not in shell, \
-        '可點列用了 <label> —— 點一下會觸發兩次'
-    from tests.unit._srcscan import repo_src as _rs
-    cash_src = code_only(_rs('routers/crm/cash.py'))
-    assert 'with_for_update=True' in cash_src, \
-        '收支更新沒鎖列 —— 併發的兩個 PUT 會各自把專案已收加一次'
-    assert 'showAll && all.length ? all : list0' in shell, '沒有分成兩份清單可切'
-    assert 'list0.unshift(byId[o.currentId])' in shell, '目前連著的那筆沒有強制留在清單裡'
-    assert '#pp-toggle' in shell, '沒有範圍切換'
-    cb2 = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
-    assert cb2.count('outstanding: _outstandingProjects') == 2, \
-        '兩個入口（列格就地連結／詳情快速連結）都要給未收案清單'
-    assert "'/cash-splits/outstanding?entity='" in cb2, \
-        '未收額要走拆項編輯器同一支端點（規則只有一份）'
+    # 🔴 可點列不准是 <label>：label 會把 click 轉發給裡面的 checkbox，input 的
+    # click 再冒泡回 label —— 一次點擊送出兩個併發寫入（2026-09-01 生產實帳：
+    # 專案已收被加兩次，4 個顧問月費案各溢收 22,000）。
+    assert 'data-pick' in shell and '<label' not in shell
+    assert 'list0.unshift(' in shell, '目前連著的那筆沒有強制留在清單裡'
+    cash_src = code_only(repo_src('routers/crm/cash.py'))
+    assert 'with_for_update=True' in cash_src,         '收支更新沒鎖列 —— 併發的兩個 PUT 會各自把專案已收加一次'
     cb = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
-    assert 'openProjectPicker({' in cb, '快速連結沒接上共用挑選視窗'
-    assert '_projOptsHtml(e.project_id' not in cb, '快速連結還留著整包 405 項的原生下拉'
-    # 列表的「專案」格就地連結（owner「在紅框處就可以連結」）——
-    # 只有可掛專案的分類、且不是拆項父列（那幾欄後端本來就 409）
+    # 未收案清單從**已經在手上的**專案導出（amount_receivable），不另打端點：
+    # 那支有 limit 80（會靜默截斷）、而且母公司帳本整趟全廢。
+    assert '/cash-splits/outstanding' not in cb, '又多打一支拿得到的資料'
+    assert 'amount_receivable' in cb
+    assert cb.count('_projPickerOpts(') >= 2,         '列表格子與詳情快速連結沒共用同一份 picker 參數'
     assert '_cashProjPick' in cb
-    assert "_LINKABLE.includes(e.category || '') && !e.split_count" in cb
-    ed = js_code_only(repo_src('frontend/js/shared/cash-split-editor.js'))
-    assert 'data-projq' in ed and 'bindProj()' in ed, '拆項編輯器的未收案清單沒有搜尋'
 
 
 def test_preview_returns_the_option_lists():

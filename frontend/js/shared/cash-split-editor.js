@@ -86,8 +86,19 @@ export async function openCashSplitEditor(o) {
     const advChecked = (aid) => rows.some((r) => r.kind === 'advance'
         && (r.advances || []).some((l) => l.entry_id === aid));
 
-    /** 金額改了只補三個節點（合計、儲存鈕、輸入框自己的值）——整窗重畫會把
-     *  剛 Tab 過去的焦點打掉，逐格輸入變成每格都要重新用滑鼠點（效率審查）。 */
+    /** 🔴 金額類的輸入一律**只補會變的那幾個節點**，不整窗 render()：重畫會把
+     *  194 個未收案的節點與所有 handler 重建一次，順便打掉剛 Tab 過去的焦點，
+     *  逐格輸入變成每格都要重新用滑鼠點（效率審查）。
+     *  patchGross：那一列的「專案結清毛額」提示。 */
+    function patchGross(i) {
+        const el = wrap.querySelector(`[data-gross="${i}"]`);
+        if (el) {
+            el.textContent = '專案結清毛額 $'
+                + fmtNum((Number(rows[i].amount) || 0) + (Number(rows[i].fee) || 0));
+        }
+    }
+
+    /** patchSum：合計與儲存鈕。 */
     function patchSum() {
         const total = sum();
         const diff = target - total;
@@ -101,16 +112,22 @@ export async function openCashSplitEditor(o) {
         if (save) save.disabled = !isOk();
     }
 
-    const projListHtml = () => ((out.projects || [])
-        .filter((p) => projIdx(p.id) >= 0 || !projQ
+    const projListHtml = () => {
+        // 已勾的一次算完：原本每案 filter 一次、checked 再一次，兩次都是
+        // rows.findIndex 線性搜尋，而搜尋框每按一鍵就重跑整份清單
+        const picked = new Set(rows.filter((r) => r.kind === 'project')
+            .map((r) => r.project_id));
+        return ((out.projects || [])
+        .filter((p) => picked.has(p.id) || !projQ
             || (p.name || '').toLowerCase().includes(projQ))
         .map((p) => `
             <label style="display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer;">
-                <input type="checkbox" data-proj="${esc(p.id)}" ${projIdx(p.id) >= 0 ? 'checked' : ''}>
+                <input type="checkbox" data-proj="${esc(p.id)}" ${picked.has(p.id) ? 'checked' : ''}>
                 <span style="flex:1;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name)}</span>
                 <span style="color:#9ca3af;font-size:11px;">未收 $${fmtNum(p.receivable)}</span>
             </label>`).join('')
         || `<div style="color:#6b7280;font-size:12px;">${projQ ? '找不到符合的未收案' : '沒有還在等錢的案子'}</div>`);
+    };
 
     /** 勾選事件（清單重畫後要重掛 —— 搜尋只換清單那塊、不整窗重畫）。 */
     function bindProj() {
@@ -149,14 +166,14 @@ export async function openCashSplitEditor(o) {
                     style="background:#141414;border:1px solid #333;color:#eee;border-radius:6px;padding:4px 8px;text-align:right;${r.kind === 'advance' ? 'opacity:.7;' : ''}">
                 <div>
                     ${r.kind === 'project'
-                        ? `<span style="color:#93c5fd;font-size:12px;">${esc((out.projects.find((p) => p.id === r.project_id) || {}).name || r.project_name || r.project_id)}</span>
+                        ? `<span style="color:#93c5fd;font-size:12px;">${esc(r.project_name || r.project_id)}</span>
                            <span style="color:#6b7280;font-size:11px;">（${esc(pathOf(r.taxonomy_node_id))}）</span>
                            <label title="源日代開發票、扣完費用才匯：金額填實匯淨額、這裡填被扣的代開費 —— 專案按毛額（金額＋代開費）結清，未收才會歸零"
                                style="display:inline-flex;gap:4px;align-items:center;color:#9ca3af;font-size:11px;cursor:pointer;white-space:nowrap;">
                                <input type="checkbox" data-feechk="${i}" ${r.feeOn ? 'checked' : ''}>扣代開費</label>
                            ${r.feeOn ? `<input type="number" data-fee="${i}" value="${r.fee || ''}" min="0" placeholder="代開費"
                                    style="background:#141414;border:1px solid #333;color:#eee;border-radius:6px;padding:2px 6px;width:80px;text-align:right;font-size:12px;">
-                               <span style="color:#6b7280;font-size:11px;">專案結清毛額 $${fmtNum((Number(r.amount) || 0) + r.fee)}</span>` : ''}`
+                               <span data-gross="${i}" style="color:#6b7280;font-size:11px;">專案結清毛額 $${fmtNum((Number(r.amount) || 0) + r.fee)}</span>` : ''}`
                         : r.kind === 'advance'
                         ? `<span style="color:#fbbf24;font-size:12px;">沖 ${(r.advances || []).length} 筆代墊</span>
                            <span style="color:#6b7280;font-size:11px;">（${esc(pathOf(r.taxonomy_node_id))}）</span>`
@@ -241,9 +258,9 @@ export async function openCashSplitEditor(o) {
         });
         wrap.querySelectorAll('[data-amt]').forEach((inp) => {
             inp.onchange = () => {           // 只補合計與儲存鈕，不整窗重畫（保焦點）
-                const r = rows[Number(inp.dataset.amt)];
-                r.amount = Number(inp.value) || 0;
-                if (r.feeOn) { render(); return; }  // 毛額提示要跟著金額走
+                const i = Number(inp.dataset.amt);
+                rows[i].amount = Number(inp.value) || 0;
+                patchGross(i);
                 patchSum();
             };
         });
@@ -256,28 +273,29 @@ export async function openCashSplitEditor(o) {
         // 扣代開費（源日代開發票、扣完費用才匯）：金額欄恆為實匯淨額，
         // 代開費外加 —— 勾了先猜「未收 − 目前金額」（實匯已填好的常見流程），
         // 改代開費則反推金額 = 未收 − 費（兩個方向都不用使用者自己算）。
+        // 勾「扣代開費」與改代開費金額是同一件事的兩個入口 —— 一支處理：
+        // 勾了先猜「未收 − 目前金額」，改費用則反推金額 = 未收 − 費。
+        const setFee = (i, fee, on) => {
+            const r = rows[i];
+            const p = out.projects.find((x) => x.id === r.project_id);
+            r.feeOn = on;
+            r.fee = on ? Math.max(0, fee) : 0;
+            if (p) {
+                r.amount = on ? Math.max(0, p.receivable - r.fee) : p.receivable;
+            }
+            render();
+        };
         wrap.querySelectorAll('[data-feechk]').forEach((cb) => {
             cb.onchange = () => {
-                const r = rows[Number(cb.dataset.feechk)];
-                const p = out.projects.find((x) => x.id === r.project_id);
-                r.feeOn = cb.checked;
-                if (cb.checked) {
-                    r.fee = p ? Math.max(0, p.receivable - (Number(r.amount) || 0)) : 0;
-                } else {
-                    r.fee = 0;
-                    if (p) r.amount = p.receivable;
-                }
-                render();
+                const i = Number(cb.dataset.feechk);
+                const p = out.projects.find((x) => x.id === rows[i].project_id);
+                setFee(i, p ? p.receivable - (Number(rows[i].amount) || 0) : 0,
+                       cb.checked);
             };
         });
         wrap.querySelectorAll('[data-fee]').forEach((inp) => {
-            inp.onchange = () => {
-                const r = rows[Number(inp.dataset.fee)];
-                const p = out.projects.find((x) => x.id === r.project_id);
-                r.fee = Math.max(0, Number(inp.value) || 0);
-                if (p) r.amount = Math.max(0, p.receivable - r.fee);
-                render();
-            };
+            inp.onchange = () => setFee(Number(inp.dataset.fee),
+                                        Number(inp.value) || 0, true);
         });
         bindProj();
         const pq = wrap.querySelector('[data-projq]');

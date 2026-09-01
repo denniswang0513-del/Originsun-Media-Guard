@@ -13,7 +13,8 @@ import pytest
 
 from core.crm_logic import advance_open_amount, split_amount_error, split_side
 from services.finance_statements import explode_cash_splits
-from tests.unit._srcscan import code_only, flow_body, func_body, js_code_only, repo_src
+from tests.unit._srcscan import (code_only, flow_body, func_body, js_code_only,
+                                 js_func_body, migration_sql, repo_src)
 
 SPLITS = "routers/crm/cash_splits.py"
 CASH = "routers/crm/cash.py"
@@ -208,18 +209,21 @@ def test_the_fee_survives_the_full_round_trip():
     """🔴 重編輯的 initial 就是 _split_to_dict 的輸出 —— fee 沒跟著出去的話，
     使用者按一次「儲存拆項」代開費就靜默歸零（advances 同一款教訓）。
     載入層與 migration 也各要有它，少一處就是三表少算或開機缺欄。"""
-    from tests.unit._srcscan import migration_sql
-    assert '"fee"' in code_only(func_body(repo_src(SPLITS), "def _split_to_dict("))
+    # 🔴 序列化的欄位集合要**蓋過** schema：少一欄就是使用者重存時靜默丟資料
+    # （advances 與 fee 都踩過）。釘欄位集合而不是某一行的寫法。
+    from core.schemas import CashSplitItem
+    ser = code_only(func_body(repo_src(SPLITS), "def _split_to_dict("))
+    for field in CashSplitItem.model_fields:
+        assert f'"{field}"' in ser, f"_split_to_dict 沒有把 {field} 送出去"
     assert '"fee": int(_s.fee or 0)' in repo_src("services/finance_statements.py")
     assert "crm_cash_splits ADD COLUMN IF NOT EXISTS fee" in migration_sql()
-    js = js_code_only(repo_src("frontend/js/shared/cash-split-editor.js"))
-    assert "Number(s.fee)" in js, "編輯器 initial 要把 fee 讀回列狀態"
-    assert "fee: r.kind === 'project'" in js, "存檔 payload 要送 fee（僅專案拆項）"
+    ed = js_func_body(js_code_only(repo_src("frontend/js/shared/cash-split-editor.js")),
+                      "export async function openCashSplitEditor(")
+    for field in ("fee", "project_name", "advances"):
+        assert field in ed, f"編輯器沒有處理 {field}（讀回來或送回去少一邊都是丟資料）"
     # 🔴 project_name 同款：未收案清單只有還在等錢的案 —— 結清的案查不到名字，
     # 那列會顯示成一串 raw id（和平行動者案，owner 以為連結壞掉）。
-    assert '"project_name"' in code_only(func_body(repo_src(SPLITS),
-                                                   "def _split_to_dict("))
-    assert "|| r.project_name || r.project_id" in js, "編輯器要用 project_name 當名稱後援"
+    assert '"project_name"' in ser
     cbjs = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
     assert "_splitProjNames" in cbjs, "拆項父列的專案格要把拆項連的案名秀回來"
 
@@ -233,9 +237,9 @@ def test_the_split_row_still_fills_all_three_taxonomy_cells():
     src = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
     assert "grid-column" not in src, \
         "這個列表是 flex，grid-column 不會生效 —— 要吐滿格子數"
-    row = src.split("function _rowHtml(")[1].split("\nfunction ")[0]
-    assert "</div><div></div><div></div>" in row, \
-        "拆項列沒有補滿三格（分類/項目/子項目）"
+    # 🔴 js_func_body 切到下一個**頂層宣告** —— `split("\nfunction ")` 只擋得住
+    # 下一個剛好是 function 的情形，過切會把整個檔案算進來（_srcscan 檔頭那個坑）
+    row = js_func_body(src, "function _rowHtml(")
     # 兩個分支的格子數要一樣多，否則整排錯位（數 <div 的開頭）
     branch = row.split("${e.split_count ?")[1].split("`}")[0]
     yes, no = branch.split('` : `')

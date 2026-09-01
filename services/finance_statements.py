@@ -69,6 +69,7 @@ from core.finance_logic import (
     month_of,
     month_range,
     out_amount,
+    recognize_receipt_fee,
     resolve_client_name,
     runway_months,
     shift_month,
@@ -149,11 +150,14 @@ def explode_cash_splits(cash_entries: list, splits_by_entry: dict) -> list:
             if i > 0:                       # 費用類欄位只留第一列（見 docstring）
                 v["bank_fee"] = None
                 v["claim"] = None
-            # 代開費：毛額進營收、fee 疊上本列 bank_fee（淨流不變，見 docstring）
+            # 代開費：毛額進營收、fee 疊上本列 bank_fee（淨流不變，見 docstring）。
+            # 🔴 補毛額的算式走 core 的正本（它擁有「淨流入不變」這條不變量與
+            # fee<0 的守衛）—— 這裡只負責把 fee 疊到父列既有的匯費上（父列那筆
+            # 掛在第 0 列，取代會把它吃掉）。
             fee = int(s.get("fee") or 0) if side == "deposit" else 0
             if fee:
-                v["deposit"] = s["amount"] + fee
-                v["bank_fee"] = int(v.get("bank_fee") or 0) + fee
+                v["deposit"], _f = recognize_receipt_fee(s["amount"], 0, fee)
+                v["bank_fee"] = int(v.get("bank_fee") or 0) + _f
             for k in ("invoice_id", "advance_payment_id", "payment_request_id"):
                 v[k] = None
             out.append(v)

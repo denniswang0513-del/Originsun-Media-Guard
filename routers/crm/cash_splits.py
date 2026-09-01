@@ -35,7 +35,7 @@ from db.models import (CrmCashEntry, CrmCashSplit, CrmCashSplitAdvanceLink,
                        CrmProject)
 
 from ._shared import (_assert_month_open, _get_factory, _now, _require_db,
-                      money_dep, router)
+                      money_dep, project_names_map, router)
 from .cash import _sync_mine_project_received, _sync_taxonomy
 from .finance import _mine_or_admin_write
 
@@ -61,17 +61,6 @@ def _split_to_dict(s, tax_path=None, advances=None, project_name="") -> dict:
         "note": s.note or "",
         "advances": list(advances or []),
     }
-
-
-async def project_names_map(session, splits) -> dict:
-    """{project_id: name} —— 給 _split_to_dict 的 project_name（一次撈齊）。"""
-    ids = {s.project_id for s in splits if s.project_id}
-    if not ids:
-        return {}
-    rows = (await session.execute(
-        select(CrmProject.id, CrmProject.name)
-        .where(CrmProject.id.in_(list(ids))))).all()
-    return {pid: (name or "") for pid, name in rows}
 
 
 async def load_splits_map(session, entry_ids=None, *, entity=None) -> dict:
@@ -228,10 +217,10 @@ async def _apply_splits(session, e, items: list, *, paths: dict,
                 status_code=422,
                 detail="每個拆項都要有分類 —— 沒分類的拆項會從"
                        "「未分類」快篩與自動分類規則眼前消失（父列被視為已分好）")
-        if int(it.fee or 0) < 0:
+        fee = int(it.fee or 0)
+        if fee < 0:
             raise HTTPException(status_code=422, detail="代開費不能是負數")
-        if int(it.fee or 0) > 0 and (side != "deposit"
-                                     or not (it.project_id or "").strip()):
+        if fee and (side != "deposit" or not (it.project_id or "").strip()):
             raise HTTPException(
                 status_code=422,
                 detail="代開費只對「收入側、掛了專案」的拆項有意義 —— "

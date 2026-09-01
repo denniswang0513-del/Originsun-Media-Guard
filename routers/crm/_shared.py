@@ -678,3 +678,21 @@ async def ledger_categories_and_tree(session, ent: str) -> tuple:
         if ent == "mine" else []
     return (sorted(await ledger_category_domain(session, ent, nodes=nodes)),
             build_tree([n for n in nodes if n.active]))
+
+async def project_names_map(session, rows) -> dict:
+    """{project_id: name} —— `rows` 是任何帶 `project_id` 的物件（一次撈齊）。
+
+    🔴 這個 `select(id, name).where(id.in_(...))` → dict 的慣用法在 repo 裡
+    手刻了六份（api_cashflow ×2、api_equipment、api_timesheets ×2、拆項清單）。
+    放這裡是因為它是**通用的 CRM helper**，不屬於任何一個領域模組 ——
+    留在 cash_splits 裡的話，下一個要用的人只會再刻第七份。
+    """
+    ids = {getattr(r, "project_id", None) for r in rows}
+    ids.discard(None)
+    ids.discard("")
+    if not ids:
+        return {}
+    rows2 = (await session.execute(
+        select(CrmProject.id, CrmProject.name)
+        .where(CrmProject.id.in_(list(ids))))).all()
+    return {pid: (name or "") for pid, name in rows2}
