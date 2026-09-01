@@ -81,9 +81,35 @@ def payment_label(payee_name: str = "", summary: str = "") -> str:
     return payee_name or summary or ""
 
 
+async def load_payment_links_map(session, *, entity=None) -> dict:
+    """收支 id → 它掛到的請款單 id 清單（金額大的在前）。
+
+    一筆匯出常常是**一個人的好幾張單併著發**（實例：2026/08/31 匯給張皓雲的
+    20,200 ＝ 思沙龍 EP02 翻譯 17,200 ＋ 開村影片翻譯 3,000）。清單只帶
+    `payment_request_id`（金額最大的那張）的話，畫面上看起來只掛了一張，
+    而挑選視窗也只勾得回一張 —— 存檔就把另一張的連結洗掉。
+
+    整本帳一次撈（表很小），同 load_splits_map 的理由：用列 id 進 IN 的話，
+    未篩選清單就是幾千個 bind param 的 SQL。
+    """
+    from sqlalchemy import select
+
+    from db.models import CrmCashEntry, CrmCashPaymentLink
+    q = select(CrmCashPaymentLink.cash_entry_id,
+               CrmCashPaymentLink.payment_request_id,
+               CrmCashPaymentLink.amount).order_by(CrmCashPaymentLink.amount.desc())
+    if entity:
+        q = q.where(CrmCashPaymentLink.cash_entry_id.in_(
+            select(CrmCashEntry.id).where(CrmCashEntry.entity == entity)))
+    out = {}
+    for eid, pid, _amt in (await session.execute(q)).all():
+        out.setdefault(eid, []).append(pid)
+    return out
+
+
 def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
                   petty_status: str = "", tax_path=None,
-                  pay_label: str = "") -> dict:
+                  pay_label: str = "", payment_ids=()) -> dict:
     return {
         "id": e.id,
         "entity": e.entity or "parent",
@@ -120,6 +146,9 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
         # 主要請款單的顯示名（支出列的「請款單」欄）—— 同 project_name／
         # invoice_title，由 JOIN 帶進來、規則走 payment_label()
         "payment_label": pay_label,
+        # 這筆匯款掛到的**所有**請款單（金額大的在前）。一筆匯出付多張是常態，
+        # 只給 payment_request_id 的話挑選視窗勾不回其餘幾張，存檔就洗掉它們。
+        "payment_ids": list(payment_ids or []),
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 
@@ -481,11 +510,13 @@ async def list_cash_entries(
         all_splits = [s for subs in smap.values() for s in subs]
         amap = await load_advance_links_map(session, [s.id for s in all_splits])
         pnames = await project_names_map(session, all_splits)
+        paylinks = await load_payment_links_map(session, entity=ent)
     out = []
     for r in rows:
         d = _to_cash_dict(r[0], r[1] or "", r[2] or "", r[3] or "",
                           paths.get(r[0].taxonomy_node_id),
-                          payment_label(r[5] or "", r[4] or ""))
+                          payment_label(r[5] or "", r[4] or ""),
+                          paylinks.get(r[0].id, ()))
         subs = smap.get(r[0].id, [])
         d["splits"] = [_split_to_dict(s, paths.get(s.taxonomy_node_id),
                                       amap.get(s.id),

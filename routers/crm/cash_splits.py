@@ -31,8 +31,8 @@ from core.auth import check_logged_in
 from core.crm_logic import advance_open_amount, split_amount_error, split_side
 from core.ledger import require_entity
 from core.project_link import cash_can_link
-from db.models import (CrmCashEntry, CrmCashSplit, CrmCashSplitAdvanceLink,
-                       CrmProject)
+from db.models import (Client, CrmCashEntry, CrmCashSplit,
+                       CrmCashSplitAdvanceLink, CrmProject)
 
 from ._shared import (_assert_month_open, _get_factory, _now, _require_db,
                       money_dep, project_names_map, router)
@@ -350,14 +350,20 @@ async def cash_splits_outstanding(request: Request, entity: str = Query("")):
     async with factory() as session:
         projects = []
         if ent == "mine":
+            # 客戶跟著帶（owner 2026-09-01「專案 要看得到客戶」）—— 同名的案
+            # 每年一個（「節目置入影帶剪輯2025年」「…2026年」），光看案名選不出
+            # 是哪一家的。JOIN 一次，不逐案回頭問。
             rows = (await session.execute(
-                select(CrmProject)
+                select(CrmProject, Client.short_name)
+                .outerjoin(Client, Client.id == CrmProject.client_id)
                 .where(CrmProject.entity == "mine",
                        CrmProject.amount_receivable > 0)
                 .order_by(CrmProject.updated_at.desc().nullslast())
-                .limit(80))).scalars().all()
+                .limit(80))).all()
             projects = [{"id": p.id, "name": p.name,
-                         "receivable": int(p.amount_receivable or 0)} for p in rows]
+                         "client": cname or "",
+                         "receivable": int(p.amount_receivable or 0)}
+                        for p, cname in rows]
 
         # 未回款過濾放 SQL（HAVING）：已結清的列不佔 limit 窗 —— 在 Python 裡
         # 篩的話，結清越多、越舊的未回款越容易被擠出選單（/simplify 效率審查）
@@ -385,6 +391,12 @@ async def cash_splits_outstanding(request: Request, entity: str = Query("")):
         paths = await path_map(session, ent)
         def canon(cat):
             return node_id_in(paths, [x for x in path_from_columns(cat, "") if x]) or ""
+    from core.ledger_project import DEFAULT_FEE_PCT
     return {"projects": projects, "advances": advances,
+            # 代開費的標準費率（%）。勾「扣代開費」時，如果那一案的未收額推不出
+            # 費用（案子已結清、或這一列是手動加的），就用它把實匯淨額還原成毛額
+            # ——「預設帶出內容，但可以細調」（owner 2026-09-01）。費率正本在
+            # core.ledger_project，前端不另外寫一個 8。
+            "fee_pct": DEFAULT_FEE_PCT,
             "project_node_id": canon("公司_專案"),
             "advance_node_id": canon(ADVANCE_CATEGORY)}

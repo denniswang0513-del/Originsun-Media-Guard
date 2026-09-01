@@ -50,9 +50,13 @@ export function openProjectPicker(o) {
 }
 
 /**
- * openPaymentPicker({payments, currentId, title, onPick})
+ * openPaymentPicker({payments, currentIds, linkedRows, rowAmount, title, onPick})
  * `payments`＝還沒付完的請款單（清單端點已經用 payment_status 篩過）。
- * 已付掉的那張若正掛在這一列上，殼會自己把它留在清單裡。
+ * 已付掉的那幾張若正掛在這一列上，殼會自己把它們留在清單裡。
+ *
+ * **多選**（owner 2026-09-01「這個要可以多選」）：一筆匯出常常是一個人的好幾張
+ * 單併著發 —— 2026/08/31 匯給張皓雲的 20,200 ＝ 17,200 ＋ 3,000。`onPick` 收到
+ * 的是 id 陣列（空陣列＝取消全部連結）。
  */
 /** 一張請款單顯示成什麼 —— 後端 `routers/crm/cash.payment_label()` 的鏡射：
  *  收款人優先、沒有才退回摘要。🔴 兩個 JS 呼叫點（列表 patch、這個視窗）
@@ -62,10 +66,27 @@ export const paymentLabel = (p) => (p ? (p.payee_name || p.summary || '') : '');
 
 export function openPaymentPicker(o) {
     const list = o.payments || [];
+    const amtOf = (id) => (list.find((p) => p.id === id) || {}).amount || 0;
     openRowPicker({
         rows: list,
         allRows: [],
-        currentId: o.currentId || '',
+        // 已付掉的單不在「還沒付完」的清單裡，但它可能正掛在這一列上 ——
+        // 撈不回來的話，重開視窗就少一張、按儲存就把它洗掉
+        extraRows: o.linkedRows || [],
+        multi: true,
+        currentIds: o.currentIds || [],
+        // 一筆匯出付多張時，「湊不湊得起來」是當下唯一要看的事 ——
+        // 張皓雲那筆 17,200 + 3,000 剛好等於匯出的 20,200。
+        footer: (ids) => {
+            if (!ids.length) { return '未選任何請款單（儲存＝取消連結）'; }
+            const sum = ids.reduce((n, id) => n + amtOf(id), 0);
+            const row = Number(o.rowAmount) || 0;
+            const diff = sum - row;
+            return `已選 ${ids.length} 張　合計 <b style="color:#eee;">$${money(sum)}</b>`
+                + (row ? `　／　本列 $${money(row)}`
+                    + (diff ? `<span style="color:#fbbf24;">　差 ${diff > 0 ? '+' : ''}${money(diff)}</span>`
+                        : '<span style="color:#86efac;">　剛好</span>') : '');
+        },
         title: o.title || '連結請款單',
         placeholder: '搜尋收款人／摘要／類別…',
         emptyMain: '沒有還沒付完的請款單',

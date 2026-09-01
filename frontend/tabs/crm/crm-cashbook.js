@@ -464,7 +464,10 @@ function _inlineLink({ ev, id, noun, open, apply, patch }) {
             patch(e, pid);
             _patchRow(id);
             if (id === _selectedId) { renderDetail(e); }   // 詳情開著就同步
-            crmToast(pid ? `已連結${noun}` : '已取消連結');
+            // 🔴 多選回的是陣列，而 `[]` 在 JS 是 truthy —— 用 `pid ?` 判斷的話
+            // 「取消全部連結」會報成「已連結」。
+            const has = Array.isArray(pid) ? pid.length > 0 : !!pid;
+            crmToast(has ? `已連結${noun}` : '已取消連結');
         } catch (err) {
             crmToast('連結失敗：' + err.message, true);
         }
@@ -503,27 +506,60 @@ window._cashPayPick = (ev, id) => _inlineLink({
     ev, id, noun: '請款單',
     open: (e, onPick) => openPaymentPicker({
         payments: _paymentList,
-        currentId: e.payment_request_id || '',
+        currentIds: _payIds(e),
+        // 已付掉、不在「還沒付完」清單裡、但正掛在這一列上的那幾張
+        linkedRows: e.payment_request_id && !_paymentList.some(
+            (p) => p.id === e.payment_request_id)
+            ? [{ id: e.payment_request_id, payee_name: e.payment_label || '',
+                 summary: '', amount: _payOut(e) }] : [],
+        rowAmount: _payOut(e),
         title: '連結請款單 — ' + (e.summary || ''),
         onPick,
     }),
-    apply: (pid, e) => {
-        const p = _paymentList.find((x) => x.id === pid);
-        // 一筆匯出對一張單最常見；金額取兩者較小的（分次付／一筆付多張都是
-        // 合理的形狀，差額留給詳情面板的分配面板補）
-        const amt = p ? Math.min((e.expense || 0) + (e.bank_fee || 0), p.amount || 0) : 0;
-        return _fetch(`/cash-entries/${id}/payments`, {
-            method: 'PUT',
-            body: JSON.stringify({ items: pid
-                ? [{ payment_request_id: pid, amount: amt }] : [] }),
+    apply: (ids, e) => {
+        // 逐張給它自己的金額，累計不超過本列實際流出 —— 一筆匯出付多張
+        // （張皓雲 17,200 + 3,000 = 20,200）剛好填滿；分次付（匯出比單小）
+        // 則只分配得出去的那部分，差額留給詳情面板的分配面板。
+        let left = _payOut(e);
+        const items = [];
+        const over = [];
+        (ids || []).forEach((pid) => {
+            const p = _paymentList.find((x) => x.id === pid);
+            const amt = Math.max(0, Math.min(p ? (p.amount || 0) : 0, left));
+            left -= amt;
+            // 🔴 金額 0 後端會擋（分配 ≤ 0 是一定錯）—— 濾掉，但要講出來，
+            // 不然使用者勾了三張、存完只剩兩張，畫面上沒有任何跡象。
+            if (amt > 0) { items.push({ payment_request_id: pid, amount: amt }); }
+            else { over.push(paymentLabel(p) || pid); }
         });
+        if (over.length) {
+            crmToast(`本列金額只夠分配 ${items.length} 張；`
+                + `${over.join('、')} 超出、沒有掛上去`, true);
+        }
+        return _fetch(`/cash-entries/${id}/payments`,
+                      { method: 'PUT', body: JSON.stringify({ items }) });
     },
-    patch: (e, pid) => {
-        e.payment_request_id = pid;
+    patch: (e, ids) => {
+        // 後端把 payment_request_id 同步成**金額最大**的那張 —— 這裡照做，
+        // 不然重整前後主要單據會不一樣（列表那一欄讀的就是它）。
+        const list = (ids || []).map((pid) => _paymentList.find((x) => x.id === pid))
+            .filter(Boolean).sort((a, b) => (b.amount || 0) - (a.amount || 0));
+        e.payment_ids = list.map((p) => p.id);
+        e.payment_request_id = list.length ? list[0].id : '';
         // 顯示名走共用那份（＝後端 payment_label 的鏡射）
-        e.payment_label = paymentLabel(_paymentList.find((x) => x.id === pid));
+        e.payment_label = list.length ? paymentLabel(list[0]) : '';
     },
 });
+
+/** 這一列實際流出多少（匯費算進去 —— 分配比的是這個數）。 */
+const _payOut = (e) => (e.expense || 0) + (e.bank_fee || 0);
+
+/** 這一列掛著哪幾張請款單。後端給 `payment_ids`（全部）；舊回應只有
+ *  `payment_request_id`（主要那張）—— 兩種形狀都認，不然一次部署落差就把
+ *  其餘幾張的連結洗掉。 */
+const _payIds = (e) => (e.payment_ids && e.payment_ids.length
+    ? e.payment_ids.slice()
+    : (e.payment_request_id ? [e.payment_request_id] : []));
 
 /** 「專案」與「請款單／發票」兩格：可點時是一格 cash-ed（沒值就一顆紅點），
  *  不可點時是唯讀格。兩格的形狀一樣，差別只有 class／內容／要不要掛 onclick

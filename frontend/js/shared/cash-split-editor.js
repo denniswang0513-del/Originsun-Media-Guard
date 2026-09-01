@@ -75,9 +75,11 @@ export async function openCashSplitEditor(o) {
         note: '', advances: [], ...over,
     });
 
-    // 未收案清單的搜尋詞（owner 2026-09-01「專案列表要可以勾選、搜尋」——
-    // 案子多起來之後用捲的找不如打字）。已勾的列不受過濾影響，永遠看得到。
+    // 兩個清單的搜尋詞（owner 2026-09-01「專案列表要可以勾選、搜尋」、
+    // 「代墊的部分希望有搜尋框可以搜尋」—— 項目多起來之後用捲的找不如打字）。
+    // 已勾的列不受過濾影響，永遠看得到。
     let projQ = '';
+    let advQ = '';
 
     const wrap = document.createElement('div');
     wrap.id = 'cash-split-overlay';
@@ -91,6 +93,28 @@ export async function openCashSplitEditor(o) {
         && rows.every((r) => (Number(r.amount) || 0) > 0);
     const pathOf = (nid) => ((byId[nid] || []).map((n) => n.name).join(' ▸ ')) || '（未分類）';
     const projIdx = (id) => rows.findIndex((r) => r.kind === 'project' && r.project_id === id);
+
+    /** 勾「扣代開費」時要帶出多少（owner 2026-09-01「勾代開費的時候預設可以
+     *  帶出內容，但我可以細調」）。兩條路，都是**建議值**，帶出來就能改：
+     *
+     *  1. 那一案還在等錢 → 未收 − 已填的實匯淨額＝被扣掉的那一段（精確）。
+     *  2. 推不出來（案子已結清、或這是手動加的列）→ 用標準費率把淨額還原成
+     *     毛額：費 = 淨額 × pct / (100 − pct)。原本這條直接給 0，於是勾了
+     *     之後欄位空著、毛額提示等於淨額，看起來像沒生效（owner 截圖那列
+     *     「節目置入影帶剪輯2025年」5,775 就是這種）。
+     *
+     *  🔴 費率吃後端回的 `fee_pct`（正本在 core.ledger_project.DEFAULT_FEE_PCT）
+     *  —— 這裡寫死一個 8 就是第二份，改費率時改不到。 */
+    const feeGuess = (r) => {
+        const p = (out.projects || []).find((x) => x.id === r.project_id);
+        const net = Number(r.amount) || 0;
+        if (p) {
+            const byDue = (p.receivable || 0) - net;
+            if (byDue > 0) { return byDue; }
+        }
+        const pct = Number(out.fee_pct) || 0;
+        return pct > 0 && pct < 100 ? Math.round(net * pct / (100 - pct)) : 0;
+    };
     const advChecked = (aid) => rows.some((r) => r.kind === 'advance'
         && (r.advances || []).some((l) => l.entry_id === aid));
 
@@ -126,16 +150,63 @@ export async function openCashSplitEditor(o) {
         const picked = new Set(rows.filter((r) => r.kind === 'project')
             .map((r) => r.project_id));
         return ((out.projects || [])
+        // 客戶也要搜得到（owner 2026-09-01「專案 要看得到客戶」）—— 看得到
+        // 卻搜不到的話，打客戶名反而變成「找不到符合的未收案」
         .filter((p) => picked.has(p.id) || !projQ
-            || (p.name || '').toLowerCase().includes(projQ))
+            || `${p.name || ''} ${p.client || ''}`.toLowerCase().includes(projQ))
         .map((p) => `
             <label style="display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer;">
                 <input type="checkbox" data-proj="${esc(p.id)}" ${picked.has(p.id) ? 'checked' : ''}>
-                <span style="flex:1;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name)}</span>
-                <span style="color:#9ca3af;font-size:11px;">未收 $${fmtNum(p.receivable)}</span>
+                <span style="flex:1;min-width:0;">
+                    <span style="display:block;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name)}</span>
+                    ${p.client ? `<span style="color:#6b7280;font-size:11px;">${esc(p.client)}</span>` : ''}
+                </span>
+                <span style="color:#9ca3af;font-size:11px;white-space:nowrap;">未收 $${fmtNum(p.receivable)}</span>
             </label>`).join('')
         || `<div style="color:#6b7280;font-size:12px;">${projQ ? '找不到符合的未收案' : '沒有還在等錢的案子'}</div>`);
     };
+
+    /** 代墊清單 —— 跟未收案同一個形狀（搜尋只換清單那塊、勾過的永遠看得到）。
+     *  owner 2026-09-01「代墊的部分希望有搜尋框可以搜尋」：那份清單一次撈 200
+     *  筆，Google Workspace 每月一筆、國外交易服務費每筆各一 —— 用捲的找不到。 */
+    const advListHtml = () => ((out.advances || [])
+        .filter((a) => advChecked(a.entry_id) || !advQ
+            || `${a.summary || ''} ${a.date || ''}`.toLowerCase().includes(advQ))
+        .map((a) => `
+            <label style="display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer;">
+                <input type="checkbox" data-adv="${esc(a.entry_id)}" ${advChecked(a.entry_id) ? 'checked' : ''}>
+                <span style="color:#9ca3af;font-size:11px;white-space:nowrap;">${esc(a.date)}</span>
+                <span style="flex:1;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(a.summary)}</span>
+                <span style="color:#fbbf24;font-size:11px;">$${fmtNum(a.open)}</span>
+            </label>`).join('')
+        || `<div style="color:#6b7280;font-size:12px;">${advQ ? '找不到符合的代墊' : '沒有未回款的代墊'}</div>`);
+
+    /** 代墊的勾選事件（同 bindProj：搜尋只換清單那塊，重畫後要重掛）。 */
+    function bindAdv() {
+        wrap.querySelectorAll('[data-adv]').forEach((cb) => {
+            cb.onchange = () => {
+                const a = (out.advances || []).find((x) => x.entry_id === cb.dataset.adv);
+                let r = rows.find((x) => x.kind === 'advance');
+                if (cb.checked && a) {
+                    if (!r) {
+                        r = newRow('advance',
+                                   { taxonomy_node_id: out.advance_node_id || '' });
+                        rows.push(r);
+                    }
+                    if (!r.advances.some((l) => l.entry_id === a.entry_id)) {
+                        r.advances.push({ entry_id: a.entry_id, amount: a.open });
+                    }
+                } else if (!cb.checked && r) {
+                    r.advances = r.advances.filter((l) => l.entry_id !== cb.dataset.adv);
+                    if (!r.advances.length) rows.splice(rows.indexOf(r), 1);
+                }
+                if (r && r.advances && r.advances.length) {
+                    r.amount = r.advances.reduce((s2, l) => s2 + l.amount, 0);
+                }
+                render();
+            };
+        });
+    }
 
     /** 勾選事件（清單重畫後要重掛 —— 搜尋只換清單那塊、不整窗重畫）。 */
     function bindProj() {
@@ -157,15 +228,6 @@ export async function openCashSplitEditor(o) {
     }
 
     function render() {
-        const advList = (out.advances || []).map((a) => `
-            <label style="display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer;">
-                <input type="checkbox" data-adv="${esc(a.entry_id)}" ${advChecked(a.entry_id) ? 'checked' : ''}>
-                <span style="color:#9ca3af;font-size:11px;white-space:nowrap;">${esc(a.date)}</span>
-                <span style="flex:1;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(a.summary)}</span>
-                <span style="color:#fbbf24;font-size:11px;">$${fmtNum(a.open)}</span>
-            </label>`).join('')
-            || '<div style="color:#6b7280;font-size:12px;">沒有未回款的代墊</div>';
-
         const rowHtml = rows.map((r, i) => `
             <div style="display:grid;grid-template-columns:110px minmax(0,1fr) 150px 28px;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid #262626;">
                 <input type="number" value="${r.amount || ''}" data-amt="${i}" ${r.kind === 'advance' ? 'readonly title="代墊拆項的金額＝勾選列的合計"' : ''}
@@ -213,7 +275,9 @@ export async function openCashSplitEditor(o) {
                 </div>
                 <div style="background:#151515;border:1px solid #2a2a2a;border-radius:8px;padding:10px 12px;max-height:180px;overflow:auto;">
                     <div style="color:#fbbf24;font-size:12px;margin-bottom:4px;">沖未回款代墊（逐筆結清；金額＝勾選合計）</div>
-                    ${advList}
+                    <input data-advq type="search" value="${esc(advQ)}" placeholder="搜尋代墊…" autocomplete="off"
+                        style="background:#141414;border:1px solid #333;color:#eee;border-radius:6px;padding:3px 8px;font-size:12px;width:100%;margin-bottom:4px;">
+                    <div id="csp-advlist">${advListHtml()}</div>
                     <div style="color:#4b5563;font-size:11px;margin-top:4px;">歷史回款未逐筆連結 —— 總額以 1300 科目餘額為準</div>
                 </div>
             </div>` : ''}
@@ -298,9 +362,7 @@ export async function openCashSplitEditor(o) {
         wrap.querySelectorAll('[data-feechk]').forEach((cb) => {
             cb.onchange = () => {
                 const i = Number(cb.dataset.feechk);
-                const p = out.projects.find((x) => x.id === rows[i].project_id);
-                setFee(i, p ? p.receivable - (Number(rows[i].amount) || 0) : 0,
-                       cb.checked);
+                setFee(i, feeGuess(rows[i]), cb.checked);
             };
         });
         wrap.querySelectorAll('[data-fee]').forEach((inp) => {
@@ -316,29 +378,15 @@ export async function openCashSplitEditor(o) {
                 if (box) { box.innerHTML = projListHtml(); bindProj(); }
             };
         }
-        wrap.querySelectorAll('[data-adv]').forEach((cb) => {
-            cb.onchange = () => {
-                const a = out.advances.find((x) => x.entry_id === cb.dataset.adv);
-                let r = rows.find((x) => x.kind === 'advance');
-                if (cb.checked && a) {
-                    if (!r) {
-                        r = newRow('advance',
-                                   { taxonomy_node_id: out.advance_node_id || '' });
-                        rows.push(r);
-                    }
-                    if (!r.advances.some((l) => l.entry_id === a.entry_id)) {
-                        r.advances.push({ entry_id: a.entry_id, amount: a.open });
-                    }
-                } else if (!cb.checked && r) {
-                    r.advances = r.advances.filter((l) => l.entry_id !== cb.dataset.adv);
-                    if (!r.advances.length) rows.splice(rows.indexOf(r), 1);
-                }
-                if (r && r.advances && r.advances.length) {
-                    r.amount = r.advances.reduce((s2, l) => s2 + l.amount, 0);
-                }
-                render();
+        bindAdv();
+        const aq = wrap.querySelector('[data-advq]');
+        if (aq) {
+            aq.oninput = () => {   // 同 projq：只換清單那塊，不動打字焦點
+                advQ = aq.value.trim().toLowerCase();
+                const box = wrap.querySelector('#csp-advlist');
+                if (box) { box.innerHTML = advListHtml(); bindAdv(); }
             };
-        });
+        }
         // 手動列的分類樹（同 cash-tax-picker 的一排會長的下拉）
         wrap.querySelectorAll('.csp-tax').forEach((box) => {
             const i = Number(box.dataset.row);
