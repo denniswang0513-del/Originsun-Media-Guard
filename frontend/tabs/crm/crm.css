@@ -1912,9 +1912,9 @@
    🔴 用 display:none 而不是不渲染 —— nth-child 數的是 DOM 位置，抽掉節點會讓
    後面每一欄的欄寬規則整排錯位。 */
 #cash-list-panel:not(.has-card) .cash-col-card { display: none; }
-/* 私帳不開發票（owner 2026-09-01）：發票欄整欄藏掉。同上 —— display:none 不抽節點，
-   nth-child 的欄寬規則才不會整排錯位。 */
-#cash-list-panel.mine-book .cash-col-inv { display: none; }
+/* 私帳不開發票（owner 2026-09-01）：那一欄讓給「請款單」——支出列可直接勾記
+   （同日「支出的請款單勾記我希望也可以在這裡直接勾，比照專案」）。所以這一欄
+   在兩本帳都留著、只有標題與內容不同，不需要 display:none。 */
 #cash-list-panel .acct-header > span:nth-child(6),
 #cash-list-body .crm-row > *:nth-child(6):not(.crm-kebab-wrap) { flex: 0 0 78px; }                      /* 類別（公司/個人/家用…） */
 #cash-list-panel .acct-header > span:nth-child(7),

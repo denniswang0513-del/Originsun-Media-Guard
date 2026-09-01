@@ -15,7 +15,7 @@ import { finEntity as _pinEntity, finFetch as _finFetch, finIsMine,
 import { dayMark as _dayMark } from '../../js/shared/tw-calendar.js';
 // 專案連結改用可搜尋的挑選視窗（owner 2026-09-01「專案列表要可以勾選、搜尋」——
 // 私帳 405 個專案塞原生下拉等於沒得選）。共用件，別在這裡再刻一份。
-import { openProjectPicker } from '../../js/shared/project-picker.js';
+import { openPaymentPicker, openProjectPicker } from '../../js/shared/project-picker.js';
 import { splitBadgeHtml } from '../../js/shared/cash-split-editor.js';
 import { indexTax as _indexTaxShared, taxKidsAt as _kidsAt, taxSelects }
     from '../../js/shared/cash-tax-picker.js';
@@ -151,7 +151,8 @@ const _sorter = createSortable({
         sub_item: e => (e.sub_item || '').toLowerCase(),
         bank_memo: e => (e.bank_memo || '').toLowerCase(),
         project:  e => (e.project_name || '').toLowerCase(),
-        invoice:  e => (e.invoice_title || '').toLowerCase(),
+        // 那一欄兩本帳裝的東西不同（母公司＝發票、私帳＝請款單）——排序鍵跟著走
+        invoice:  e => (e.invoice_title || e.payment_label || '').toLowerCase(),
         account:  e => _acctName(e.bank_account_id).toLowerCase(),
         note:     e => (e.note || '').toLowerCase(),
     },
@@ -459,6 +460,41 @@ window._cashProjPick = (ev, id) => {
     });
 };
 
+// 支出列的「請款單」格就地連結（owner 2026-09-01「支出的請款單勾記我希望
+// 也可以在這裡直接勾，比照專案」）。私帳沒有發票，那一欄讓給請款單。
+// 🔴 寫入走分配表的正本路徑（PUT /cash-entries/{id}/payments）不是直接寫
+// payment_request_id —— 只寫一邊會讓列表與關聯面板各講各的（既有的坑）。
+window._cashPayPick = (ev, id) => {
+    ev.stopPropagation();
+    const e = _entries.find((x) => x.id === id);
+    if (!e) { return; }
+    openPaymentPicker({
+        payments: _paymentList,
+        currentId: e.payment_request_id || '',
+        title: '連結請款單 — ' + (e.summary || ''),
+        onPick: async (pid) => {
+            const p = _paymentList.find((x) => x.id === pid);
+            // 一筆匯出對一張單最常見；金額取兩者較小的（分次付／一筆付多張都
+            // 是合理的形狀，差額留給詳情面板的分配面板補）
+            const amt = Math.min(int_(e.expense) + int_(e.bank_fee), int_(p && p.amount))
+                || int_(p && p.amount);
+            try {
+                await _fetch(`/cash-entries/${id}/payments`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ items: pid
+                        ? [{ payment_request_id: pid, amount: amt }] : [] }),
+                });
+                await loadEntries({ cards: false });
+                crmToast(pid ? '已連結請款單' : '已取消連結');
+            } catch (err) {
+                crmToast('連結失敗：' + err.message, true);
+            }
+        },
+    });
+};
+
+const int_ = (v) => Number(v) || 0;
+
 function _rowHtml(e) {
     const card = _cardAmt(e), out = _bankOut(e), deep = _taxDeep(e);
     // 一列算一次就好 —— 每個都被原本的樣板呼叫 2~3 次（4,733 列時很有感）
@@ -498,7 +534,15 @@ function _rowHtml(e) {
                  e.project_name ? _esc(e.project_name) : _NO_VAL_DOT}</div>` : `
             <div title="${_esc(e.split_count ? _splitProjNames(e) : '')}">${
                 _esc(e.split_count ? _splitProjNames(e) : (e.project_name || ''))}</div>`}
-            <div class="cash-col-inv">${_esc(e.invoice_title || '')}</div>
+            ${/* 母公司：發票欄照舊（display:none 只在私帳）。
+                 私帳：那一欄讓給請款單 —— 支出列可點、收入列留白。 */ ''}
+            ${!finIsMine()
+                ? `<div class="cash-col-inv">${_esc(e.invoice_title || '')}</div>`
+                : (e.expense
+                    ? `<div class="cash-col-inv cash-ed" onclick="window._cashPayPick(event,'${e.id}')"
+                           title="${e.payment_label ? _esc(e.payment_label) : '連結請款單（可搜尋）'}">${
+                           e.payment_label ? _esc(e.payment_label) : _NO_VAL_DOT}</div>`
+                    : '<div class="cash-col-inv"></div>')}
             <div>${_esc(_acctName(e.bank_account_id))}</div>
             ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup',
                                    onDelete: '_cashDelete',
@@ -1441,11 +1485,15 @@ export async function initCrmCashbookTab() {
         const el = document.getElementById(id);
         if (el) document.body.appendChild(el);
     }
-    // 私帳不開發票（owner 2026-09-01）：列表的「發票」欄整欄藏掉。
-    // 同 has-card 的做法：cell 照渲染、CSS display:none —— nth-child 的欄寬
-    // 規則數的是 DOM 位置，抽掉節點會讓後面每一欄整排錯位。
+    // 私帳不開發票（owner 2026-09-01）：那一欄讓給「請款單」（支出列可直接勾）。
+    // 🔴 改標題而不是隱藏整欄：欄寬規則是 nth-child，表頭與列的格子數必須一直
+    // 相等 —— 只藏表頭或只藏列都會讓後面每一欄錯位。
     const _panel = document.getElementById('cash-list-panel');
     if (_panel) _panel.classList.toggle('mine-book', finIsMine());
+    if (finIsMine()) {
+        const _h = document.querySelector('#cash-list-panel .acct-header .cash-col-inv');
+        if (_h) { _h.childNodes[0].nodeValue = '請款單 '; }
+    }
     window._cashSelect = selectEntry;
     window._cashRefresh = loadEntries;
     window._cashEdit = (id) => { const e = _entries.find(x => x.id === id); if (e) openModal(e); };

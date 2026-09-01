@@ -143,15 +143,20 @@ def test_mine_replaces_invoice_links_with_project_links():
     assert '(e.deposit || finIsMine())' in cb, '快速連結的發票下拉沒擋私帳'
     assert '...(finIsMine() ? []' in cb, '編輯欄位清單沒把發票欄抽掉'
     assert 'inv && finIsMine()' in cb, '新增/編輯視窗的發票欄沒對私帳恆隱藏'
-    # 列表的「發票」**整欄**也要藏（owner 2026-09-01 第二輪）—— 同 has-card 的
-    # 做法：cell 照渲染、CSS display:none（nth-child 欄寬數 DOM 位置，抽節點會
-    # 讓後面每一欄整排錯位）
+    # 列表那一欄：母公司＝發票，私帳＝請款單（owner 2026-09-01 第三輪
+    # 「支出的請款單勾記我希望也可以在這裡直接勾，比照專案」）。
+    # 🔴 改標題而不是隱藏整欄 —— 欄寬規則是 nth-child，表頭與列的格子數必須
+    # 一直相等；只藏一邊就整排錯位（拆項列那次的同款教訓）。
     assert "classList.toggle('mine-book', finIsMine())" in cb
-    assert 'cash-col-inv' in cb, '列的發票 cell 沒掛 class'
+    assert "'請款單 '" in cb, '私帳沒有把那一欄的標題換成請款單'
     assert 'cash-col-inv' in repo_src('frontend/tabs/crm/crm-cashbook.html'), \
-        '表頭的發票欄沒掛 class'
+        '表頭那一欄沒掛 class'
+    assert cb.count('cash-col-inv') >= 3, '兩本帳的三種列都要掛同一個欄位 class'
     css = repo_src('frontend/tabs/crm/crm.css')
-    assert '#cash-list-panel.mine-book .cash-col-inv { display: none; }' in css
+    assert '.mine-book .cash-col-inv { display: none' not in css, \
+        '那一欄不能整欄藏 —— 私帳要用它放請款單'
+    assert '_cashPayPick' in cb and "/payments`" in cb, \
+        '請款單就地連結要走分配表的正本路徑（PUT /cash-entries/{id}/payments）'
 
 
 def test_project_lists_are_searchable_and_checkable():
@@ -160,24 +165,29 @@ def test_project_lists_are_searchable_and_checkable():
       · 收支明細快速連結 → js/shared/project-picker（搜尋＋勾選樣式，單選）
       · 拆項編輯器的未收案清單 → 原有勾選＋新增搜尋框（只換清單不整窗重畫）"""
     from tests.unit._srcscan import js_code_only
+    # 殼在 row-picker（專案與請款單共用同一顆），project-picker 只提供「一列長
+    # 什麼樣」與文案 —— 斷言跟著規則走，不是跟著檔名走
     pk = js_code_only(repo_src('frontend/js/shared/project-picker.js'))
+    shell = js_code_only(repo_src('frontend/js/shared/row-picker.js'))
     assert 'export function openProjectPicker' in pk
-    assert 'type="search"' in pk and 'type="checkbox"' in pk
+    assert 'export function openPaymentPicker' in pk, '請款單沒有共用同一顆挑選視窗'
+    assert 'openRowPicker(' in pk, 'project-picker 應該只是薄殼'
+    assert 'type="search"' in shell and 'type="checkbox"' in shell
     # 🔴 預設只列還沒收齊的案（owner「這個清單要是款項沒收齊的清單」）——
     # 411 案裡 217 案早就結清。但「顯示全部」要留（補記舊帳選得到），而且
     # 目前連著的那一案不管收齊沒都必須在清單裡，否則看起來像連結不見了。
     # 🔴 列是 <div> 不是 <label>：label 會把 click 轉發給裡面的 checkbox，
     # input 的 click 再冒泡回 label —— 一次點擊跑兩次 onclick，送出兩個併發的
     # PUT，專案已收被加兩次（2026-09-01 生產：4 個顧問月費案各溢收 22,000）。
-    assert 'data-pick' in pk and '<label data-pick' not in pk, \
+    assert 'data-pick' in shell and '<label' not in shell, \
         '可點列用了 <label> —— 點一下會觸發兩次'
     from tests.unit._srcscan import repo_src as _rs
     cash_src = code_only(_rs('routers/crm/cash.py'))
     assert 'with_for_update=True' in cash_src, \
         '收支更新沒鎖列 —— 併發的兩個 PUT 會各自把專案已收加一次'
-    assert 'showAll ? all : due' in pk, '沒有分成「未收齊／全部」兩份清單'
-    assert 'due.unshift(byId[o.currentId])' in pk, '目前連著的案沒有強制留在清單裡'
-    assert '#pp-toggle' in pk, '沒有「顯示全部」切換'
+    assert 'showAll && all.length ? all : list0' in shell, '沒有分成兩份清單可切'
+    assert 'list0.unshift(byId[o.currentId])' in shell, '目前連著的那筆沒有強制留在清單裡'
+    assert '#pp-toggle' in shell, '沒有範圍切換'
     cb2 = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
     assert cb2.count('outstanding: _outstandingProjects') == 2, \
         '兩個入口（列格就地連結／詳情快速連結）都要給未收案清單'

@@ -349,12 +349,20 @@ async def list_cash_entries(
         # 分類樹一請求只撈一次（篩選的子樹與每列的路徑共用同一份；含停用 ——
         # 歷史列掛在停用節點上路徑照樣要印得出來）
         tax_nodes = await load_nodes(session, ent, include_inactive=True)
+        # 主要請款單的摘要 —— 支出列在清單上就要看得到掛了誰（owner 2026-09-01
+        # 「支出的請款單勾記我希望也可以在這裡直接勾，比照專案」）。同發票那個
+        # 做法：PK outerjoin，成本可忽略。
+        from db.models import CrmPaymentRequest
         query = (
             select(CrmCashEntry, CrmProject.name.label("pn"),
                    CrmInvoice.title.label("inv_title"),
-                   CrmProjectExpense.status.label("petty_status"))
+                   CrmProjectExpense.status.label("petty_status"),
+                   CrmPaymentRequest.summary.label("pay_summary"),
+                   CrmPaymentRequest.payee_name.label("pay_payee"))
             .outerjoin(CrmProject, CrmProject.id == CrmCashEntry.project_id)
             .outerjoin(CrmInvoice, CrmInvoice.id == CrmCashEntry.invoice_id)
+            .outerjoin(CrmPaymentRequest,
+                       CrmPaymentRequest.id == CrmCashEntry.payment_request_id)
             # 推去零用金的那幾列要在清單上看得出狀態（PK join，成本可忽略）
             .outerjoin(CrmProjectExpense,
                        CrmProjectExpense.id == CrmCashEntry.expense_id)
@@ -468,6 +476,8 @@ async def list_cash_entries(
     for r in rows:
         d = _to_cash_dict(r[0], r[1] or "", r[2] or "", r[3] or "",
                           paths.get(r[0].taxonomy_node_id))
+        # 清單顯示用：收款人優先（一筆匯出通常就認人），沒有才退回摘要
+        d["payment_label"] = (r[4] or "") if not (r[5] or "") else (r[5] or "")
         subs = smap.get(r[0].id, [])
         d["splits"] = [_split_to_dict(s, paths.get(s.taxonomy_node_id),
                                       amap.get(s.id),
