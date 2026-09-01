@@ -103,7 +103,13 @@ def test_who_am_i_comes_from_the_single_resolver():
 
 
 def test_linking_twice_is_blocked():
-    """雙擊／兩個分頁／重送 —— 一案只能有一個分身，否則收入記兩次。"""
+    """雙擊／兩個分頁／重送 —— 一案只能有一個分身，否則收入記兩次。
+
+    ⚠ 擋法在 2026-09-01 換了：從前是「已連結就整個擋掉」，那讓 CRM 後來改的
+    費用再也同步不過去。現在改由 `target_id` 解成已連結那一案來守（見
+    `test_resyncing_a_linked_case_never_creates_a_second_mirror`），這裡守的是
+    「查得到既有分身」與「該擋的時候真的回 409」。
+    """
     src = _src()
     assert "source_project_id == project_id" in src
     fn = _fn(src, "mirror_project_to_mine")
@@ -300,3 +306,43 @@ def test_sharing_one_mine_project_adds_instead_of_overwriting():
     assert "merged[k] = int(merged.get(k, 0)) + int(v or 0)" in body, "同名工項沒有相加"
     js = repo_src("frontend/tabs/crm/crm-projects-core.js")
     assert "'add', '加進去'" in js, "UI 沒有給「加進去」這個選項"
+
+
+def test_already_linked_is_not_a_reason_to_block():
+    """🔴 owner 2026-09-01「我 crm 有更新費用，但是私帳沒有連結過去」。
+
+    連結是**連結當下的一次性複製** —— CRM 後來新增的成本行（實例：蟾蜍山｜
+    煥民新村後補的「翻譯(士源代)」3,000）不會自己流過去。而「已經連結過」
+    原本是擋人的第一條理由，於是連**手動**再同步一次的路都沒有：按鈕只會
+    toast 一句「已經連結到 X 了」，私帳永遠停在舊數字。
+    """
+    from routers.crm.projects import _mirror_blocked_reason
+    assert _mirror_blocked_reason(60000) == ""       # 已連結不再是理由
+    assert "成本行沒有一筆掛給你" in _mirror_blocked_reason(0)
+    # 呼叫端也不再餵 linked 進去（餵了會 TypeError，等於漏改一處就紅）
+    src = repo_src("routers/crm/projects.py")
+    assert "_mirror_blocked_reason(mir[\"total\"], linked)" not in src
+
+
+def test_resyncing_a_linked_case_never_creates_a_second_mirror():
+    """🔴 已連結的案子重新同步時，空的 target 必須解成**原本那一案**。
+
+    落到建立分支就是在私帳多開第二個分身：同一筆錢算兩次，而且兩案同名同
+    客戶，畫面上分不出來。前端預設不送 target（它只在「連結既有」時才送）。
+    """
+    body = code_only(func_body(repo_src("routers/crm/projects.py"),
+                               "async def mirror_project_to_mine("))
+    assert "target_id = target_id or linked.id" in body
+    assert "if target_id != linked.id:" in body, "改連別案要擋下來，不能靜靜改指"
+
+
+def test_the_relink_dialog_hides_the_create_option_and_defaults_to_overwrite():
+    """重新同步的視窗不給「建立新專案」（那會多一個分身），而且「加進去」
+    要退到後面 —— 同一案重新同步時加會讓同一筆錢算兩次。"""
+    js = repo_src("frontend/tabs/crm/crm-projects-core.js")
+    fn = js_code_only(js_func_body(js, "window._projMirrorMine = async function (id) {"))
+    assert "const relink = !!chk.linked;" in fn
+    assert "relink ?" in fn and 'id="pmm-target"' in fn
+    draw = js_code_only(js_func_body(js, "function _pmmDrawConflict("))
+    assert "chk.linked ? '' : btn('add'" in draw, "重新同步還把「加進去」排在最前面"
+    assert "'再加一次'" in draw

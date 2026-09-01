@@ -1101,7 +1101,7 @@ async def check_project_mirror(project_id: str, request: Request):
     factory = await _get_factory()
     async with factory() as session:
         p, mir, linked = await _mirror_preview(session, project_id, sid)
-        reason = _mirror_blocked_reason(mir["total"], linked)
+        reason = _mirror_blocked_reason(mir["total"])
         client = await session.get(Client, p.client_id) if p.client_id else None
         # 可連結的既有私帳案。🔴 **已經被連結過的照樣列出來**（owner 2026-09-01
         # 「可以多筆專案連結到一筆私帳」）—— 原本排除它們，於是第二個 CRM 案
@@ -1123,6 +1123,13 @@ async def check_project_mirror(project_id: str, request: Request):
         "name": p.name,
         "client": client.short_name if client else "",
         "lines": mir["lines"], "total": mir["total"],
+        # 已經連結到哪一案（None＝還沒連）。有值時前端走「重新同步」：鎖定這一案、
+        # 不給「建立新專案」—— 那會多出第二個分身，同一筆錢在私帳算兩次。
+        # 帶著它現有的工項，才畫得出「私帳現有 vs CRM 現在算出來的」對照。
+        "linked": None if linked is None else {
+            "id": linked.id, "name": linked.name,
+            "amount": int(linked.contract_amount or 0),
+            "split": (norm_detail(linked.ledger_detail).get("split") or {})},
         # 工項合計＝`lines` 依工項名彙總（同名相加、空名落其他都在 mirror_lines
         # 裡）。它一次就把兩份都算好了，前端直接用 —— 使用者要拿這個數字跟私帳
         # 現有的並排，決定覆蓋／保留／匯入。
@@ -1142,10 +1149,16 @@ async def check_project_mirror(project_id: str, request: Request):
     }
 
 
-def _mirror_blocked_reason(total: int, linked) -> str:
-    """為什麼不能連結。預覽與 POST 的 409 共用同一句。"""
-    if linked is not None:
-        return f"這一案已經連結到私帳的「{linked.name}」了"
+def _mirror_blocked_reason(total: int) -> str:
+    """為什麼不能連結。預覽與 POST 的 409 共用同一句。
+
+    🔴 「已經連結過」**不是**擋人的理由（owner 2026-09-01「我 crm 有更新費用，
+    但是私帳沒有連結過去」）。連結是連結當下的一次性複製 —— CRM 後來新增的
+    成本行（那一案是後補的「翻譯(士源代)」3,000）不會自己流過去，而原本這裡
+    一擋，就連**手動**再同步一次的路都沒有了：按鈕只會 toast 一句「已經連結
+    到 X 了」，私帳永遠停在舊數字。已連結改走「重新同步」（鎖定原本那一案，
+    覆蓋／加進去／保留三選一）。
+    """
     if not total:
         return ("這一案的成本行沒有一筆掛給你（或金額還沒填）—— "
                 "先去人員配置把該給你的工項填上實際金額")
@@ -1178,10 +1191,20 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
     factory = await _get_factory()
     async with factory() as session:
         p, mir, linked = await _mirror_preview(session, project_id, sid)
-        reason = _mirror_blocked_reason(mir["total"], linked)
+        reason = _mirror_blocked_reason(mir["total"])
         if reason:
             raise HTTPException(status_code=409, detail=reason)
         target_id = (req.target_id or "").strip()
+        if linked is not None:
+            # 🔴 已經連結過的案子，空的 target 要解成**原本那一案**，不是落到
+            # 下面的 else 去 `new_ledger_project` —— 那會在私帳多開第二個分身，
+            # 同一筆錢算兩次，而畫面上兩案長得一模一樣（同名同客戶）。
+            target_id = target_id or linked.id
+            if target_id != linked.id:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"這一案已經連結到私帳的「{linked.name}」了 ——"
+                           " 要改連到別案，請先解除原本的連結")
         imported = 0
         if target_id:
             # 連結既有：只覆蓋收入那半邊。他在私帳填的委外／代開費用是**他自己

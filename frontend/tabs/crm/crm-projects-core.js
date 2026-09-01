@@ -580,7 +580,12 @@ window._projMirrorMine = async function (id) {
     const opts = (chk.options || []).map(o =>
         `<option value="${o.id}">${_esc(o.name)}${o.amount ? ` — ${fmtNum(o.amount)}` : ''}${
             o.linked_count ? `（已連 ${o.linked_count} 案）` : ''}</option>`).join('');
-    _mirrorModal(`連結私帳 — ${chk.name}`, `
+    // 已經連結過 → 這次是**重新同步**（owner 2026-09-01「我 crm 有更新費用，
+    // 但是私帳沒有連結過去」）。連結是連結當下的一次性複製，CRM 後來新增的
+    // 成本行不會自己流過去。這時不給「建立新專案」—— 那會多一個分身，同一筆
+    // 錢在私帳算兩次；目標鎖定原本那一案，怎麼合併由下面的模式鈕決定。
+    const relink = !!chk.linked;
+    _mirrorModal(`${relink ? '重新同步私帳' : '連結私帳'} — ${chk.name}`, `
         <div style="color:#bbb;font-size:12px;margin-bottom:8px;">
             公司要付給你的（來自人員配置的成本行）</div>
         <table class="crm-table" style="width:100%;font-size:12px;">${rows}
@@ -588,14 +593,17 @@ window._projMirrorMine = async function (id) {
                 <td style="text-align:right;font-weight:600;color:#86efac;">
                     ${fmtNum(chk.total)}</td></tr></table>
         <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px;font-size:13px;">
+            ${relink ? `
+            <div style="color:#c4b5fd;">已連結到私帳的「${_esc(chk.linked.name)}」</div>
+            <input type="hidden" id="pmm-target" value="${_esc(chk.linked.id)}">` : `
             <label style="display:flex;align-items:center;gap:6px;">
                 <input type="radio" name="pmm-mode" value="new" checked>
                 在私帳建立新專案（客戶：${_esc(chk.client || '未指定')}／案源：源日）</label>
             <label style="display:flex;align-items:center;gap:6px;">
                 <input type="radio" name="pmm-mode" value="link"> 連結到既有私帳專案</label>
             <select class="crm-input" id="pmm-target" disabled style="margin-left:22px;">
-                <option value="">— 選一個 —</option>${opts}</select>
-            <div id="pmm-conflict" style="margin-left:22px;"></div>
+                <option value="">— 選一個 —</option>${opts}</select>`}
+            <div id="pmm-conflict" style="${relink ? '' : 'margin-left:22px;'}"></div>
         </div>
         <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px;">
             <button class="crm-btn crm-btn-secondary crm-btn-sm"
@@ -607,19 +615,26 @@ window._projMirrorMine = async function (id) {
     // 不另外記一份（按鈕文字曾是第三份，改一處漏一處就會自相矛盾）。
     const sel = document.getElementById('pmm-target');
     const box = document.getElementById('proj-mirror-body');
-    box.addEventListener('change', () => {
-        sel.disabled = !_pmmLink();
+    const sync = () => {
+        if (sel.tagName === 'SELECT') { sel.disabled = !_pmmLink(); }
         _pmmDrawConflict(chk, id);
         const go = document.getElementById('pmm-go');
         const conflict = document.getElementById('pmm-conflict');
         if (go) { go.style.display = conflict && conflict.innerHTML ? 'none' : ''; }
-    });
+    };
+    box.addEventListener('change', sync);
+    // 重新同步沒有 radio，不會有 change 事件 —— 開啟當下就要把對照與模式鈕畫出來
+    if (relink) { sync(); }
     document.getElementById('pmm-go').addEventListener('click',
         (ev) => _projMirrorSubmit(ev.currentTarget, id));
 };
 
-const _pmmLink = () =>
-    document.querySelector('input[name="pmm-mode"]:checked')?.value === 'link';
+/** 這次要連到**既有**私帳案嗎。重新同步沒有 radio（目標鎖定原本那一案），
+ *  所以沒有 radio 時看有沒有目標 —— 有就是連既有，不是「建立新專案」。 */
+const _pmmLink = () => {
+    const r = document.querySelector('input[name="pmm-mode"]:checked');
+    return r ? r.value === 'link' : !!document.getElementById('pmm-target')?.value;
+};
 
 async function _projMirrorSubmit(btn, id, mode) {
     const target = _pmmLink() ? (document.getElementById('pmm-target').value || '') : '';
@@ -652,12 +667,18 @@ function _pmmDrawConflict(chk, projectId) {
     const box = document.getElementById('pmm-conflict');
     if (!box) { return; }
     const id = document.getElementById('pmm-target').value || '';
-    const opt = _pmmLink() ? (chk.options || []).find(o => o.id === id) : null;
+    // 重新同步時目標就是已連結那一案（它自己帶著現有工項回來，不必去 options 找）
+    const opt = chk.linked || (_pmmLink()
+        ? (chk.options || []).find(o => o.id === id) : null);
     const mineSplit = (opt && opt.split) || {};
     // 🔴 「已經承接過別的 CRM 案」也要跳選擇 —— 它可能沒有工項明細，但它的
     // 合約金額裡已經有別案鏡射進來的錢，直接覆蓋就是把那筆洗掉。
     const shared = !!(opt && opt.linked_count);
-    if (!Object.keys(mineSplit).length && !shared) { box.innerHTML = ''; return; }
+    // 🔴 重新同步一定要畫：那正是「要怎麼合併」的決定點。私帳那案剛好沒工項
+    // 時直接收掉選擇，就只剩一顆預設覆蓋的按鈕，等於幫他決定了。
+    if (!chk.linked && !Object.keys(mineSplit).length && !shared) {
+        box.innerHTML = ''; return;
+    }
 
     // CRM 這側的工項合計用後端算好的 `crm_split`（mirror_lines 一次算出 lines
     // 與 split 兩份）—— 使用者就是拿這個數字跟私帳現有的並排做決定。
@@ -676,9 +697,11 @@ function _pmmDrawConflict(chk, projectId) {
     box.innerHTML = `
         <div style="margin-top:10px;border:1px solid #4c3d78;border-radius:6px;padding:10px;">
           <div style="color:#c4b5fd;font-size:12px;margin-bottom:6px;">
-            「${_esc(opt.name)}」${shared
-                ? `已經承接 ${opt.linked_count} 個 CRM 案的收入`
-                : '已經填過工項'} —— 要怎麼處理？</div>
+            「${_esc(opt.name)}」${chk.linked
+                ? '是這一案的私帳分身 —— CRM 這邊改過之後要怎麼同步'
+                : shared
+                    ? `已經承接 ${opt.linked_count} 個 CRM 案的收入 —— 要怎麼處理`
+                    : '已經填過工項 —— 要怎麼處理'}？</div>
           <table class="crm-table" style="width:100%;font-size:12px;">
             <tr><th style="text-align:left;">工項</th>
                 <th style="text-align:right;">私帳現有</th>
@@ -689,11 +712,17 @@ function _pmmDrawConflict(chk, projectId) {
                 <td style="text-align:right;">${fmtNum(sum(crmSplit))}</td></tr>
           </table>
           <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
-            ${btn('add', '加進去', '這個 CRM 案的錢**加**到私帳案上（同名工項相加、'
+            ${chk.linked ? '' : btn('add', '加進去',
+                  '這個 CRM 案的錢**加**到私帳案上（同名工項相加、'
                   + '合約金額累加）—— 一個私帳案承接多筆時用這個')}
-            ${btn('overwrite', '用 CRM 覆蓋', shared
+            ${btn('overwrite', chk.linked ? '用 CRM 更新' : '用 CRM 覆蓋', shared
                   ? '⚠ 私帳的金額換成這個 CRM 案算出來的 —— 已經承接的別案收入會被洗掉'
-                  : '私帳的工項換成 CRM 成本行算出來的')}
+                  : chk.linked
+                      ? '私帳的工項換成 CRM 現在算出來的（這就是「同步過去」）'
+                      : '私帳的工項換成 CRM 成本行算出來的')}
+            ${!chk.linked ? '' : btn('add', '再加一次',
+                  '⚠ 很少用：把 CRM 這邊的金額**再加**到私帳現有的上面。'
+                  + '同一案重新同步時通常是要「用 CRM 更新」—— 加會讓同一筆錢算兩次')}
             ${btn('keep', '保留私帳', '只建立連結，私帳的金額一毛不動')}
             ${btn('import', '從私帳匯入 CRM',
                   '反過來：把私帳的工項寫成 CRM 的成本行（掛給你、階段後期製作），'
