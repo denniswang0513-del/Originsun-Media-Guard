@@ -102,6 +102,11 @@ FINANCE_AND_CRM_COLUMNS = [
         # 拆項的發票代開費（owner 2026-08-31：源日代開發票、扣完費用才匯）
         # —— amount 記實匯淨額、fee 外加，專案已收按毛額結清
         "ALTER TABLE crm_cash_splits ADD COLUMN IF NOT EXISTS fee INTEGER",
+        # 專案「連結私帳」改成多對一（owner 2026-09-01「可以多筆專案連結到
+        # 一筆私帳」）：連結記在**來源**那一側，一個私帳案可以承接多個 CRM 案
+        "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS mine_link_id VARCHAR(32)",
+        "CREATE INDEX IF NOT EXISTS idx_project_mine_link"
+        " ON crm_projects (mine_link_id)",
         # 私帳客戶 → CRM 客戶對應連結（owner 2026-08-26「用連結的方式同步」）
         "ALTER TABLE clients ADD COLUMN IF NOT EXISTS crm_link_id VARCHAR(32)",
         # 客戶代稱改「每本帳唯一」—— 同一家公司 CRM 一筆＋私帳一筆

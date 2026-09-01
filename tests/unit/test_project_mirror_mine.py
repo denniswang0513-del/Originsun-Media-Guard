@@ -7,6 +7,7 @@
 生產庫實查（2026-08-29）：16 案 / 68 行 / 1,149,286 的成本行掛給我，
 其中在私帳有分身的＝0。這顆按鈕要補的就是這 115 萬。
 """
+import re
 from types import SimpleNamespace as NS
 
 from core.ledger_project import (MIRROR_SOURCE, mirror_amount, mirror_detail,
@@ -116,7 +117,8 @@ def test_linking_existing_keeps_my_own_costs():
     fn = _fn(_src(), "mirror_project_to_mine")
     seg = fn.split("if target_id:")[1]
     assert "keep = norm_detail(t.ledger_detail)" in seg
-    assert 'keep["split"], keep["source"] = mir["split"], MIRROR_SOURCE' in seg
+    # 只換掉收入那半邊（split/source）；keep 這個 dict 的其他鍵原封帶著走
+    assert 'keep["split"], keep["source"] = merged, MIRROR_SOURCE' in seg
     assert "t.ledger_detail = keep" in seg
 
 
@@ -127,13 +129,18 @@ def test_mine_cache_is_invalidated():
 
 
 def test_the_parent_project_is_not_touched():
-    """母公司那一列一個欄位都不動 —— 它跟客戶的合約與成本都還在原地。
-    只要有人往 `p.` 寫東西，這條就會亮。"""
+    """母公司那一列的**錢與歸屬**一個欄位都不動 —— 它跟客戶的合約與成本
+    都還在原地。唯一准寫的是連結欄 `mine_link_id`（2026-09-01 owner
+    「可以多筆專案連結到一筆私帳」後移到來源側的，見下方多對一那兩條）。
+    只要有人往 `p.` 寫別的東西，這條就會亮。"""
     fn = _fn(_src(), "mirror_project_to_mine")
     body = fn.split("async with factory() as session:")[1]
     for bad in ("p.entity =", "p.contract_amount =", "p.crm_pushed =",
-                "p.ledger_detail =", "p.updated_at ="):
+                "p.ledger_detail =", "p.amount_received =", "p.client_id ="):
         assert bad not in body, bad
+    # 寫進來源列的就只有連結欄（+ 它自己的時間戳）
+    written = {m for m in re.findall(r"p\.(\w+) =", body)}
+    assert written <= {"mine_link_id", "updated_at"}, written
 
 
 def test_new_mirror_row_goes_through_the_single_create_path():
@@ -185,10 +192,11 @@ def test_the_mirror_does_not_show_up_next_to_its_parent():
 # ── 連結到「已經填過工項」的私帳案：三個處理方式（owner 2026-08-30）──
 
 def test_three_modes_are_offered_and_validated():
-    """「跳出幾個選擇讓我決定要怎麼做」—— 三種，而且後端要驗值域
+    """「跳出幾個選擇讓我決定要怎麼做」—— 四種（add 是多對一那次加的），
+    而且後端要驗值域
     （前端傳錯字不能靜靜當成 overwrite 把人家的工項洗掉）。"""
     from routers.crm.projects import MIRROR_MODES
-    assert MIRROR_MODES == ("overwrite", "keep", "import")
+    assert MIRROR_MODES == ("overwrite", "add", "keep", "import")
     fn = _fn(_src(), "mirror_project_to_mine")
     assert "mode not in MIRROR_MODES" in fn and "422" in fn
 
@@ -197,9 +205,9 @@ def test_keep_mode_touches_no_money():
     """「保留私帳」＝只建立連結。金額一毛不動 —— 那份數字可能是他照實際
     請款填的，比 CRM 的成本行準。"""
     fn = _fn(_src(), "mirror_project_to_mine")
-    seg = fn.split('elif mode == "overwrite":')[1].split("t.source_project_id")[0]
-    # 覆蓋那條才動錢；keep 落在兩者之外，只走到 source_project_id
-    assert "t.contract_amount = mir" in seg and "resync_receivable" in seg
+    seg = fn.split('elif mode in ("overwrite", "add"):')[1].split("p.mine_link_id")[0]
+    # 只有 overwrite/add 那條動錢；keep 落在所有分支之外，只走到連結那兩行
+    assert "t.contract_amount = " in seg and "resync_receivable" in seg
     assert "t.source_project_id = project_id" in fn
 
 
@@ -233,3 +241,36 @@ def test_the_conflict_dialog_shows_both_sides_before_asking():
     for mode in ("overwrite", "keep", "import"):
         assert f"btn('{mode}'" in fn, mode
     assert "opt.split" in fn, "對照要用那一案自己的工項"
+
+
+def test_many_crm_projects_can_share_one_mine_project():
+    """owner 2026-09-01「可以多筆專案連結到一筆私帳」。
+
+    🔴 連結必須記在**來源那一側**（crm_projects.mine_link_id）。原本記在私帳案
+    上（source_project_id 指回來源），一個欄位只裝得下一個來源 —— 第二個 CRM 案
+    連上去就被 409「已經是別案的分身了」擋掉，而候選清單也把它濾掉了。
+    """
+    src = repo_src("routers/crm/projects.py")
+    body = code_only(func_body(src, "async def mirror_project_to_mine("))
+    assert "p.mine_link_id = t.id" in body, "連結沒記在來源側 —— 多對一表達不出來"
+    assert "已經是別案的分身了" not in body, "還擋著第二個來源"
+    # 私帳案那側只記第一個來源（清單的「這是分身」判定沿用它）
+    assert "if not t.source_project_id:" in body
+    # 候選清單不再排除已被連結的
+    opts = code_only(func_body(src, "async def check_project_mirror("))
+    assert "source_project_id.is_(None)" not in opts, "候選還在排除已連結的私帳案"
+    assert "linked_count" in opts, "沒告訴前端這案已經承接幾筆"
+
+
+def test_sharing_one_mine_project_adds_instead_of_overwriting():
+    """多筆共用一個私帳案時，錢要**相加**不是覆蓋 —— 覆蓋會把前一個 CRM 案
+    鏡射進來的收入洗掉，而那筆也是他該拿的。"""
+    from routers.crm.projects import MIRROR_MODES
+    assert "add" in MIRROR_MODES
+    body = code_only(func_body(repo_src("routers/crm/projects.py"),
+                               "async def mirror_project_to_mine("))
+    assert 'mode in ("overwrite", "add")' in body
+    assert "int(t.contract_amount or 0) + mir[\"total\"]" in body, "add 沒有累加合約金額"
+    assert "merged[k] = int(merged.get(k, 0)) + int(v or 0)" in body, "同名工項沒有相加"
+    js = repo_src("frontend/tabs/crm/crm-projects-core.js")
+    assert "'add', '加進去'" in js, "UI 沒有給「加進去」這個選項"

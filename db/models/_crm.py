@@ -50,6 +50,13 @@ class CrmProject(Base):
     # 索引由 main.py 的 startup migration 建（idx_projects_source_project）——
     # 這裡再加 index=True 會多一條同欄位的 btree，寫入時白付兩次維護成本。
     source_project_id = Column(String(32), nullable=True)
+    # 🔴 這個 CRM 案的私帳收入歸到哪一案（**多對一**：owner 2026-09-01
+    # 「可以多筆專案連結到一筆私帳」）。與 `source_project_id` 的差別是方向：
+    # 那一欄記在**私帳案**上（「我是誰的分身」），一個欄位只裝得下一個來源，
+    # 所以第二個 CRM 案就連不上去了。連結記在來源這一側才表達得了多對一；
+    # 私帳案那側仍保留 source_project_id＝**第一個**來源（清單顯示、
+    # 「這是分身」的判定沿用它，不必全樹改讀）。
+    mine_link_id = Column(String(32), nullable=True)
     flow_checks = Column(JSONB, nullable=True)                 # 工作流手動里程碑（範本正本在 core/project_flow.py）
     status = Column(String(32), nullable=False, default="洽詢")
     am_username = Column(String(64), nullable=True)

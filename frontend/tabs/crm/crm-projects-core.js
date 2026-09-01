@@ -575,8 +575,11 @@ window._projMirrorMine = async function (id) {
         <td style="color:#888;">${_esc(l.phase)}</td>
         <td>${_esc(l.item)}</td>
         <td style="text-align:right;">${fmtNum(l.amount)}</td></tr>`).join('');
+    // 已經承接過別的 CRM 案的，在名稱後標出來 —— 一個私帳案可以承接多筆
+    // （owner 2026-09-01），但覆蓋會洗掉別案的錢，要先看得見
     const opts = (chk.options || []).map(o =>
-        `<option value="${o.id}">${_esc(o.name)}${o.amount ? ` — ${fmtNum(o.amount)}` : ''}</option>`).join('');
+        `<option value="${o.id}">${_esc(o.name)}${o.amount ? ` — ${fmtNum(o.amount)}` : ''}${
+            o.linked_count ? `（已連 ${o.linked_count} 案）` : ''}</option>`).join('');
     _mirrorModal(`連結私帳 — ${chk.name}`, `
         <div style="color:#bbb;font-size:12px;margin-bottom:8px;">
             公司要付給你的（來自人員配置的成本行）</div>
@@ -630,7 +633,8 @@ async function _projMirrorSubmit(btn, id, mode) {
         window._projMirrorClose();
         crmToast(r.mode === 'keep' ? '已連結（私帳金額未變動）'
             : r.mode === 'import' ? `已從私帳匯入 ${r.imported} 個工項到 CRM 成本行`
-                : `已在私帳同步收入 ${fmtNum(r.amount)}`);
+                : r.mode === 'add' ? `已加進私帳：+${fmtNum(r.amount)}`
+                    : `已在私帳同步收入 ${fmtNum(r.amount)}`);
         crmCacheInvalidate('/projects');
         await loadProjects();
     } catch (e) {
@@ -650,7 +654,10 @@ function _pmmDrawConflict(chk, projectId) {
     const id = document.getElementById('pmm-target').value || '';
     const opt = _pmmLink() ? (chk.options || []).find(o => o.id === id) : null;
     const mineSplit = (opt && opt.split) || {};
-    if (!Object.keys(mineSplit).length) { box.innerHTML = ''; return; }
+    // 🔴 「已經承接過別的 CRM 案」也要跳選擇 —— 它可能沒有工項明細，但它的
+    // 合約金額裡已經有別案鏡射進來的錢，直接覆蓋就是把那筆洗掉。
+    const shared = !!(opt && opt.linked_count);
+    if (!Object.keys(mineSplit).length && !shared) { box.innerHTML = ''; return; }
 
     // CRM 這側的工項合計用後端算好的 `crm_split`（mirror_lines 一次算出 lines
     // 與 split 兩份）—— 使用者就是拿這個數字跟私帳現有的並排做決定。
@@ -669,7 +676,9 @@ function _pmmDrawConflict(chk, projectId) {
     box.innerHTML = `
         <div style="margin-top:10px;border:1px solid #4c3d78;border-radius:6px;padding:10px;">
           <div style="color:#c4b5fd;font-size:12px;margin-bottom:6px;">
-            「${_esc(opt.name)}」已經填過工項 —— 要怎麼處理？</div>
+            「${_esc(opt.name)}」${shared
+                ? `已經承接 ${opt.linked_count} 個 CRM 案的收入`
+                : '已經填過工項'} —— 要怎麼處理？</div>
           <table class="crm-table" style="width:100%;font-size:12px;">
             <tr><th style="text-align:left;">工項</th>
                 <th style="text-align:right;">私帳現有</th>
@@ -680,7 +689,11 @@ function _pmmDrawConflict(chk, projectId) {
                 <td style="text-align:right;">${fmtNum(sum(crmSplit))}</td></tr>
           </table>
           <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
-            ${btn('overwrite', '用 CRM 覆蓋', '私帳的工項換成 CRM 成本行算出來的')}
+            ${btn('add', '加進去', '這個 CRM 案的錢**加**到私帳案上（同名工項相加、'
+                  + '合約金額累加）—— 一個私帳案承接多筆時用這個')}
+            ${btn('overwrite', '用 CRM 覆蓋', shared
+                  ? '⚠ 私帳的金額換成這個 CRM 案算出來的 —— 已經承接的別案收入會被洗掉'
+                  : '私帳的工項換成 CRM 成本行算出來的')}
             ${btn('keep', '保留私帳', '只建立連結，私帳的金額一毛不動')}
             ${btn('import', '從私帳匯入 CRM',
                   '反過來：把私帳的工項寫成 CRM 的成本行（掛給你、階段後期製作），'
