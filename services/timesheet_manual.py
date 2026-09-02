@@ -1,9 +1,10 @@
 """services/timesheet_manual.py — 手填列（管理端代填／員工自填／總表改列）的落庫規則與專案下拉。
 
-一列輸入 → 欄位只有 normalize_row 一支：實際或計畫至少一個 > 0（row_state）、分類在清單內
-（norm_work_type）、給了 project_id 就用它（下拉明確選的）否則名稱走 resolve_project（跟 Sheet
-同一支，手填與 Sheet 才不會落到不同 project_id 讓 burn 表分兩列）—— 插入（insert_manual_rows）
-與更新（timesheet_self.apply_update）同吃，422 帶規則原句。
+一列輸入 → 欄位只有 normalize_row 一支：分類在清單內（norm_work_type）、給了 project_id 就用它
+（下拉明確選的）否則名稱走 resolve_project（跟 Sheet 同一支，手填與 Sheet 才不會落到不同
+project_id 讓 burn 表分兩列）—— 插入（insert_manual_rows）與更新（timesheet_self.apply_update）
+同吃，422 帶規則原句。手填列（manual=True）另套「實際或計畫至少一個 > 0」並算 status；
+Sheet 列不套。更新時案名沒動可給 keep=(案名, project_id) 沿用原對映（caller 判，這裡不重判）。
 """
 from __future__ import annotations
 
@@ -22,10 +23,10 @@ async def names_for(session, rows) -> dict:
     return await project_names(session, [r.project_id for r in rows if r.project_id and not (r.project_name or "").strip()])
 
 
-def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, current: tuple | None = None) -> tuple:
+def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, keep: tuple | None = None) -> tuple:
     """一列輸入（TimesheetManualRow 形狀）→ (要落庫的欄位, 對映原因 why)；規則錯 → 422。
     manual=False（改 Sheet 列）不套 row_state：status 保留、0 小時也放行（Sheet 本來就收 0）。
-    current=(案名, project_id)：名字沒動就沿用原 id、不重新對映（呼叫端可不載查表）。"""
+    keep=(案名, project_id)：沿用這個對映、不查表（caller 已判定案名沒動，lk 可為 None）。"""
     try:
         status = row_state(r.hours, r.planned_hours) if manual else None
         wt = norm_work_type(r.work_type)
@@ -38,8 +39,8 @@ def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, current: tupl
     if r.project_id:
         pid, why = r.project_id, "map"
         pname = pname or (id_to_name.get(pid) or "").strip()
-    elif current is not None and pname == current[0]:
-        pid, why = current[1], "map"
+    elif keep is not None:
+        pid, why = keep[1], "map"
     else:
         pid, why = resolve_project(pname, lk)
     return {

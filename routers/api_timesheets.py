@@ -427,10 +427,11 @@ async def dashboard(request: Request):
     }
     if is_admin:
         yday = prev_workday(today)
-        filled = fillers_on(((n, d, h) for n, d, _p, _wt, h, _st in data), yday)
+        ndh = [(n, d, h) for n, d, _p, _wt, h, _st in data]      # active_fillers／fillers_on 的共同輸入
         out["manager"] = {
             "load": [{"name": p["name"], "hours": p["total"]} for p in week["people"]],
-            "missing_yesterday": {"date": yday.isoformat(), "names": missing_fillers(active_fillers(((n, d, h) for n, d, _p, _wt, h, _st in data), today), filled)},
+            "missing_yesterday": {"date": yday.isoformat(),
+                                  "names": missing_fillers(active_fillers(ndh, today), fillers_on(ndh, yday))},
             "plans_open": sorted({n for n, d, _p, _wt, _h, st in data if st == "plan" and d and d < today}),
         }
     return out
@@ -667,4 +668,4 @@ async def recent_rows(request: Request, limit: int = 50):
         rows = (await session.execute(
             select(Timesheet).order_by(Timesheet.created_at.desc()).limit(limit)
         )).scalars().all()
-    return {"rows": [ts_dict(r, with_note=True) for r in rows]}
+    return {"rows": [ts_dict(r) for r in rows]}

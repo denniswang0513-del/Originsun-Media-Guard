@@ -39,14 +39,15 @@ async def build_digest(session, today: date | None = None) -> dict:
         .where(Timesheet.work_date < d0 + timedelta(days=7)))).all()
     data = [(n, tw_day(d), p, h) for n, d, p, h in rows]
     week = [x for x in data if x[1] and x[1] >= mon]
-    active = active_fillers(((n, d, h) for n, d, _p, h in data), sun)
+    ndh = [(n, d, h) for n, d, _p, h in data]                 # active_fillers／fillers_on 的共同輸入
+    active = active_fillers(ndh, sun)
     rollup = hours_rollup(week, mon.year, mon.month)   # 年月只餵 reference_hours，digest_text 不看它
     missing: dict = {}
     for i in range(7):
         day = mon + timedelta(days=i)
         if not is_workday(day):
             continue
-        filled = fillers_on(((n, d, h) for n, d, _p, h in week), day)
+        filled = fillers_on(ndh, day)
         for n in missing_fillers(active, filled):
             missing[n] = missing.get(n, 0) + 1
     label = f"{mon.isoformat()} ～ {sun.isoformat()}"

@@ -111,15 +111,15 @@ async def add_rows(session, ident: dict, rows) -> dict:
 
 
 async def apply_update(session, r, body) -> None:
-    """把 body（TimesheetManualRow 形狀）套到一列：日期／專案（重新對映）／分類／內容／實際／計畫。
-    員工改自己的（update_row）與管理員總表（admin_update_row）同一份；hours 與 planned_hours
-    至少一個 > 0。Sheet 列保留 status=import（計畫／實際的判定只對手填列有意義）。不 commit。"""
-    current = (r.project_name or "", r.project_id)
-    unchanged = not body.project_id and (body.project_name or "").strip() == current[0]
-    lk = None if unchanged else await load_project_lookup(session)      # 名字沒動就不載查表
-    fields, _why = normalize_row(body, lk, await names_for(session, [body]), manual=r.source == "manual", current=current)
+    """把 body（TimesheetManualRow 形狀）套到一列，員工改自己的（update_row）與管理員總表
+    （admin_update_row）同一份。手填列：實際或計畫至少一個 > 0、status 重算；Sheet 列：不套那條、
+    status 保留 import。案名沒動就沿用原對映（不載查表）；動了才重新對映。不 commit。"""
+    unchanged = not body.project_id and (body.project_name or "").strip() == (r.project_name or "")
+    lk = None if unchanged else await load_project_lookup(session)
+    fields, _why = normalize_row(body, lk, await names_for(session, [body]), manual=r.source == "manual",
+                                 keep=(r.project_name or "", r.project_id) if unchanged else None)
     if fields["status"] is None:
-        fields.pop("status")          # Sheet 列保留 import：計畫／實際只對手填列有意義
+        fields.pop("status")
     for k, v in fields.items():
         setattr(r, k, v)
     # 對不到案的名字不擋（project_id 空 → 前端標「未對映」，管理員再指定），跟插入同一規則
