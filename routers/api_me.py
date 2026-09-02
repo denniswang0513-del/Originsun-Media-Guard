@@ -23,13 +23,15 @@ from sqlalchemy import func, select  # type: ignore
 
 from core.auth import check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
-from core.hr_logic import hours_rollup, leave_balance, leave_to_dict
+from core.hr_logic import (budget_burn, hours_rollup, leave_balance, leave_to_dict, local_day,
+                           month_span, months_back, project_metrics)
 from core.identity import resolve_current_staff
-from services.timesheet_self import apply_update, bound_ident, own_row, ts_dict
 from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
-                          MeTimesheetCreate, MeTimesheetUpdate, MeTodoUpdate)
+                          MeTimesheetUpdate, MeTodoUpdate)
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
                        CrmProjectStaff, HrLeaveRequest, Timesheet)
+from services.timesheet_lookup import budgets_for
+from services.timesheet_self import add_rows, bound_ident, delete_row, list_rows, update_row
 from routers.api_hr import approved_annual_used, new_leave_request
 
 router = APIRouter(prefix="/api/v1/me", tags=["me"])
@@ -313,170 +315,104 @@ async def my_timesheet_options(request: Request):
         return {"projects": await project_options(session, staff_name)}
 
 
-@router.post("/timesheets")
-async def add_my_timesheet(body: MeTimesheetCreate, request: Request):
-    """本人補登一筆工時（source=manual；staff_name 用綁定姓名 → 與 Sheet 同名即整合）。"""
-    check_admin_or_module(request, "me_finance")
-    ident = await resolve_current_staff(request)
-    if ident["staff"] is None:
-        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案，請聯絡管理員")
-    from routers.api_timesheets import insert_manual_rows
-    factory = db_factory_or_503()
-    async with factory() as session:
-        result = await insert_manual_rows(
-            session, staff_id=ident["staff_id"], staff_name=ident["staff"].name,
-            rows=[body])
-        await session.commit()
-    return result
-
-
 # ── 我的工時：自己填、看自己的、改／刪自己填的（docs/TIMESHEET_SELF_ENTRY_PLAN.md 階段 1）──
 #
-# own-scope：列的歸屬只認 staff_id（手填列必帶；Sheet 列由 ingest 的 resolve_staff 填），
-# 舊的 Sheet 列若 staff_id 空則退回姓名比對（同 /me 摘要卡的 name-match 妥協）。
+# 守衛／序列化／讀改刪只有 services.timesheet_self 一份（CRM tab 的「我的一天」同吃，
+# 只差模組鑰匙）；own-scope 只認 token 解析出的 staff_id，舊 Sheet 列退回姓名比對。
 
-# 序列化／守衛／改列規則只有 services.timesheet_self 一份（CRM tab 的「我的一天」同吃）
-_ts_dict = ts_dict
-
-
-async def _bound_ident(request: Request) -> dict:
-    return await bound_ident(request, "me_finance")
+def _me_ident(request: Request):
+    return bound_ident(request, "me_finance")
 
 
-_own_row = own_row
+def _month_or_422(month: str):
+    try:
+        return month_span(month)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.get("/timesheets")
 async def my_timesheets(request: Request, month: str = ""):
-    """本人該月所有列（Sheet＋手填），含 editable、合計、各案小計。month=YYYY-MM，預設本月。"""
-    ident = await _bound_ident(request)
-    try:
-        base = datetime.strptime(month, "%Y-%m") if month else datetime.now().replace(day=1)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="month 格式需 YYYY-MM")
-    m0 = base.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    m1 = m0.replace(year=m0.year + 1, month=1) if m0.month == 12 else m0.replace(month=m0.month + 1)
-    from sqlalchemy import or_
-    sid, name = ident["staff_id"], ident["staff"].name
+    """本人該月所有列（Sheet＋手填），含 editable 與合計。month=YYYY-MM，預設本月。"""
+    ident = await _me_ident(request)
+    m0, m1 = _month_or_422(month)
     factory = db_factory_or_503()
     async with factory() as session:
-        rows = (await session.execute(
-            select(Timesheet)
-            .where(or_(Timesheet.staff_id == sid, Timesheet.staff_name == name))
-            .where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
-            .order_by(Timesheet.work_date.desc(), Timesheet.created_at.desc())
-        )).scalars().all()
-    items = [_ts_dict(r, sid) for r in rows]
-    by_project: dict = {}
-    for it in items:
-        by_project[it["project_name"] or "(空白)"] = round(
-            by_project.get(it["project_name"] or "(空白)", 0) + it["hours"], 2)
+        items = await list_rows(session, ident, m0, m1)
     return {"month": m0.strftime("%Y-%m"), "items": items,
-            "total_hours": round(sum(i["hours"] for i in items), 1),
-            "by_project": sorted(by_project.items(), key=lambda x: -x[1])}
+            "total_hours": round(sum(i["hours"] for i in items), 1)}
 
 
 @router.post("/timesheets/batch")
 async def add_my_timesheets(body: MeTimesheetBatch, request: Request):
-    """本人一次填多列（同 insert_manual_rows 規則：source=manual、status=draft）。"""
-    ident = await _bound_ident(request)
-    if not body.rows:
-        raise HTTPException(status_code=422, detail="至少一列")
-    from routers.api_timesheets import insert_manual_rows
+    ident = await _me_ident(request)
     factory = db_factory_or_503()
     async with factory() as session:
-        result = await insert_manual_rows(
-            session, staff_id=ident["staff_id"], staff_name=ident["staff"].name, rows=body.rows)
-        await session.commit()
-    return result
+        return await add_rows(session, ident, body.rows)
 
 
 @router.put("/timesheets/{row_id}")
 async def update_my_timesheet(row_id: str, body: MeTimesheetUpdate, request: Request):
-    """改自己的手填列：日期／專案／內容／時數；專案名重新走同一支對映。"""
-    ident = await _bound_ident(request)
+    ident = await _me_ident(request)
     factory = db_factory_or_503()
     async with factory() as session:
-        r = await _own_row(session, row_id, ident)
-        await apply_update(session, r, body)
-        await session.commit()
-        return _ts_dict(r, ident["staff_id"])
+        return await update_row(session, ident, row_id, body)
 
 
 @router.delete("/timesheets/{row_id}")
 async def delete_my_timesheet(row_id: str, request: Request):
-    """刪自己的手填列（Sheet 列不行：改試算表再拉）。"""
-    ident = await _bound_ident(request)
+    ident = await _me_ident(request)
     factory = db_factory_or_503()
     async with factory() as session:
-        r = await _own_row(session, row_id, ident)
-        await session.delete(r)
-        await session.commit()
-    return {"deleted": row_id}
+        return await delete_row(session, ident, row_id)
 
 
 # ── 團隊工時（大家看得到彼此；docs/TIMESHEET_SELF_ENTRY_PLAN.md §5）──
 #
 # 閘門＝「看得到自己就看得到大家」（owner 2026-09-03「我希望大家可以看到彼此的工時」）：
-# 同 _bound_ident（me_finance ＋ 綁定）。回的是 Sheet 原字案名與時數，沒有金額、沒有
+# 同 _me_ident（me_finance ＋ 綁定）。回的是 Sheet 原字案名與時數，沒有金額、沒有
 # CRM 專案 id 的連結 —— 私帳「專案列」可見性那條線守的是錢，這裡是團隊自己的工時表。
-
-def _month_span(month: str):
-    try:
-        base = datetime.strptime(month, "%Y-%m") if month else datetime.now().replace(day=1)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="month 格式需 YYYY-MM")
-    m0 = base.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    m1 = m0.replace(year=m0.year + 1, month=1) if m0.month == 12 else m0.replace(month=m0.month + 1)
-    return m0, m1
-
 
 @router.get("/team/hours")
 async def team_hours(request: Request, month: str = ""):
     """團隊月表：每人合計／填了幾天／每週小計／各案小計，全體各案合計；參考工時＝工作日×8。"""
-    await _bound_ident(request)
-    m0, m1 = _month_span(month)
+    await _me_ident(request)
+    m0, m1 = _month_or_422(month)
     factory = db_factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
             select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name, Timesheet.hours)
             .where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
         )).all()
-    data = [(n, d.astimezone().date() if d else None, p, h) for n, d, p, h in rows]
+    data = [(n, local_day(d), p, h) for n, d, p, h in rows]     # rollup 只算實際（計畫列不算）
     return {"month": m0.strftime("%Y-%m"), **hours_rollup(data, m0.year, m0.month)}
 
 
 @router.get("/team/projects")
 async def team_projects(request: Request, months: int = 12):
     """專案工時匯總：近 N 個月每個 Sheet 案名的總時數、人數、預算（對到案才有）、最後填報。"""
-    await _bound_ident(request)
+    await _me_ident(request)
     months = max(1, min(int(months or 12), 36))
-    now = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    y, m = now.year, now.month - (months - 1)
-    while m <= 0:
-        y, m = y - 1, m + 12
-    since = now.replace(year=y, month=m)
+    m0, _ = month_span("")
+    since = months_back(m0, months - 1)
     factory = db_factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
             select(Timesheet.project_name, Timesheet.project_id,
                    func.sum(Timesheet.hours), func.count(func.distinct(Timesheet.staff_name)),
                    func.max(Timesheet.work_date))
-            .where(Timesheet.work_date >= since)
+            .where(Timesheet.work_date >= since).where(Timesheet.hours > 0)
             .group_by(Timesheet.project_name, Timesheet.project_id)
         )).all()
-        pids = [pid for _, pid, *_ in rows if pid]
-        budgets = dict((await session.execute(
-            select(CrmProject.id, CrmProject.budget_hours).where(CrmProject.id.in_(pids))
-        )).all()) if pids else {}
+        budgets = await budgets_for(session, [pid for _, pid, *_ in rows])
     items = []
     for pname, pid, total, people, last in rows:
-        b = budgets.get(pid) if pid else None
+        b = budgets.get(pid)
         total = round(float(total or 0), 1)
+        last_day = local_day(last)
         items.append({"project_name": pname or "(空白)", "hours": total, "people": people,
-                      "budget_hours": b, "remaining": round(b - total, 1) if b else None,
-                      "pct": round(total / b * 100, 1) if b else None,
-                      "last_entry": last.astimezone().date().isoformat() if last else None})
+                      "budget_hours": b, **budget_burn(total, b),
+                      "last_entry": last_day.isoformat() if last_day else None})
     items.sort(key=lambda x: -x["hours"])
     return {"since": since.strftime("%Y-%m"), "months": months, "items": items,
             "total": round(sum(i["hours"] for i in items), 1)}
@@ -485,30 +421,26 @@ async def team_projects(request: Request, months: int = 12):
 @router.get("/team/project")
 async def team_project_detail(request: Request, name: str = ""):
     """單一案（Sheet 原字）的工時明細：各人合計、各月走勢、最近 60 列。"""
-    await _bound_ident(request)
+    await _me_ident(request)
     name = (name or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail="name 必填")
     factory = db_factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
-            select(Timesheet.staff_name, Timesheet.work_date, Timesheet.task_note, Timesheet.hours)
-            .where(Timesheet.project_name == name)
+            select(Timesheet.staff_name, Timesheet.work_date, Timesheet.task_note, Timesheet.work_type, Timesheet.hours)
+            .where(Timesheet.project_name == name).where(Timesheet.hours > 0)
             .order_by(Timesheet.work_date.desc())
         )).all()
-    by_person: dict = {}
+    m = project_metrics((local_day(d), n, wt, h) for n, d, _t, wt, h in rows)
     by_month: dict = {}
-    for n, d, _t, h in rows:
-        h = float(h or 0)
-        by_person[n or "(空白)"] = by_person.get(n or "(空白)", 0.0) + h
-        if d:
-            mk = d.astimezone().strftime("%Y-%m")
-            by_month[mk] = by_month.get(mk, 0.0) + h
+    for _n, d, _t, _wt, h in rows:
+        ld = local_day(d)
+        if ld:
+            by_month[ld.strftime("%Y-%m")] = round(by_month.get(ld.strftime("%Y-%m"), 0.0) + float(h or 0), 1)
     return {
-        "project_name": name,
-        "total": round(sum(by_person.values()), 1),
-        "by_person": sorted(((k, round(v, 1)) for k, v in by_person.items()), key=lambda x: -x[1]),
-        "by_month": [(k, round(v, 1)) for k, v in sorted(by_month.items())],
-        "recent": [{"date": d.astimezone().date().isoformat() if d else "", "name": n or "",
-                    "task": t or "", "hours": round(float(h or 0), 2)} for n, d, t, h in rows[:60]],
+        "project_name": name, "total": m["total"], "by_person": m["by_person"],
+        "by_month": sorted(by_month.items()),
+        "recent": [{"date": (local_day(d).isoformat() if d else ""), "name": n or "",
+                    "task": t or "", "hours": round(float(h or 0), 2)} for n, d, t, _wt, h in rows[:60]],
     }

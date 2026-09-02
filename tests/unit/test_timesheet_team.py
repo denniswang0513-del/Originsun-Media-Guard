@@ -40,7 +40,7 @@ def test_team_endpoints_are_gated_like_my_own_rows_and_carry_no_money():
     src = code_only(repo_src("routers/api_me.py"))
     for fn in ("async def team_hours(", "async def team_projects(", "async def team_project_detail("):
         body = func_body(src, fn)
-        assert "await _bound_ident(request)" in body, fn
+        assert "await _me_ident(request)" in body, fn
         for bad in ("amount", "contract", "cost", "daily_rate", "hourly_rate"):
             assert bad not in body, (fn, bad)
     assert "hours_rollup(data, m0.year, m0.month)" in func_body(src, "async def team_hours("), "端點自己算了"

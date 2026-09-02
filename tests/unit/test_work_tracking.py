@@ -55,7 +55,12 @@ def test_board_and_my_day_are_gated_by_the_timesheets_module():
     board = func_body(src, "async def day_board(")
     assert "missing" not in board and "rank" not in board
     # 改列走服務那一份（同員工頁）
-    assert "apply_update(session, r, body)" in func_body(src, "async def my_update_row(")
+    assert "update_row(session, ident, row_id, body)" in func_body(src, "async def my_update_row(")
+    # 總表：看＝模組、改刪＝管理員；套欄位走服務那一份
+    assert 'check_admin_or_module(request, "timesheets")' in func_body(src, "async def ledger_rows(")
+    for fn in ("async def ledger_update_row(", "async def ledger_delete_row("):
+        assert "check_admin(request)" in func_body(src, fn), fn
+    assert "admin_update_row(session, row_id, body)" in func_body(src, "async def ledger_update_row(")
 
 
 def test_tab_has_the_six_views_and_the_daily_board_shows_what_not_how_much():

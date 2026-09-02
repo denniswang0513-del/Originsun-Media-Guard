@@ -558,6 +558,7 @@ async def _on_startup():
                         # 工作追蹤 P1（docs/WORK_TRACKING_UI_PLAN.md §2）：計畫小時＋工作分類
                         ("timesheets", "planned_hours", "DOUBLE PRECISION"),
                         ("timesheets", "work_type", "VARCHAR(32)"),
+                        ("timesheets", "note", "TEXT"),
                         # 影像紀錄：子資料夾名（首次生成後固定，見 media_log._ensure_folder_name）
                         ("project_media_log", "folder_name", "VARCHAR(255)"),
                         # 提案庫資產夾名（core.project_folders，2026-08-06）
@@ -1010,8 +1011,9 @@ async def _on_startup():
     _wd_threading.Thread(target=_wedge_watchdog, daemon=True, name="wedge-watchdog").start()
     from core.scheduler import run_scheduler  # type: ignore
     asyncio.create_task(run_scheduler())
-    from services import timesheet_puller
+    from services import timesheet_digest, timesheet_puller
     timesheet_puller.start_scheduler_task()   # 工時 Google Sheet 定時拉（內建 master gate）
+    timesheet_digest.start_scheduler_task()   # 週一工時 digest → Google Chat（內建 master gate，預設關）
 
 
 # ── Wedge watchdog: guaranteed recovery ──────────────────────────────────

@@ -24,6 +24,18 @@ async def load_project_lookup(session) -> ProjectLookup:
     return ProjectLookup.build(pmap, rows)
 
 
+async def budgets_for(session, project_ids) -> dict:
+    """`{project_id: budget_hours}`（只回有值的）—— burn 表／專案檔案／團隊匯總同一支反查，
+    這裡是 is_mine 表態過的查表模組，可見性掃描不必再豁免 router。"""
+    from db.models import CrmProject
+    ids = [p for p in set(project_ids or []) if p]
+    if not ids:
+        return {}
+    rows = (await session.execute(
+        select(CrmProject.id, CrmProject.budget_hours).where(CrmProject.id.in_(ids)))).all()
+    return {pid: b for pid, b in rows if b}
+
+
 async def load_staff_index(session) -> dict:
     """`{姓名: [lookup_row, …]}` —— 同名不合併，「不猜」由 `core.hr_logic.resolve_staff` 判。
     列的形狀跟專案那份一樣（id／name），resolve_* 兩支才能同一個契約。"""

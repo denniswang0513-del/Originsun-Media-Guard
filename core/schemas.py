@@ -393,6 +393,11 @@ class MeTimesheetUpdate(TimesheetManualRow):
     """員工改自己的一列（只有 source=manual 且未核可的可改）。"""
 
 
+class TimesheetRowAdminUpdate(TimesheetManualRow):
+    """管理員在總表改任一列（含 Sheet 列）；多一個管理員備註。"""
+    note: Optional[str] = None
+
+
 class BulletinAsk(BaseModel):
     message: str
 

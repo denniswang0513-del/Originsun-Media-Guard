@@ -377,9 +377,6 @@ def test_every_project_enumeration_decides_about_mine():
     EXEMPT = {
         # id 反查名字（viewer 已經有那一列）
         "routers/api_cashflow.py", "routers/api_equipment.py",
-        # 團隊工時匯總：用已對映的 project_id 反查 budget_hours（小時，不是錢；不回 id
-        # 給前端當連結）—— 列舉的是 timesheets 的 Sheet 案名，不是 crm_projects
-        "routers/api_me.py",
         "routers/api_locations.py", "routers/api_portal.py",
         "routers/api_proposals.py", "routers/api_references.py",
         "routers/crm/staff.py", "routers/crm/clients.py",

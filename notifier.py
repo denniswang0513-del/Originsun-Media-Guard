@@ -128,21 +128,40 @@ def notify_tab(template_key: str, **variables) -> None:
     import re
     msg = re.sub(r"\{[a-z_][a-z0-9_]*\}", "-", msg)
 
-    gchat_url = os.environ.get("GOOGLE_CHAT_WEBHOOK") or notif.get("google_chat_webhook", "")
+    gchat_url = gchat_webhook_url()
     # 🔴 級告警優先送「系統告警」聊天室；沒設就回頭用一般聊天室（不能因為沒設而靜音）。
     if is_critical:
         gchat_url = (os.environ.get("ALERT_WEBHOOK") or notif.get("alert_webhook", "") or gchat_url)
 
     # 重大告警不受各 tab 的 gchat 開關管轄 —— 那個開關是給「任務完成通知」用的
     if (send_gchat or is_critical) and gchat_url:
-        try:
-            import requests  # type: ignore — 精簡 agent 可能沒裝；缺它不該滅掉 email 那條
-            requests.post(gchat_url, json={"text": msg}, timeout=10)
-        except Exception as e:
-            print(f"notifier: Google Chat [{template_key}] failed: {e}")
+        _post_gchat(gchat_url, msg, template_key)
 
     if is_critical:
         _relay_alert_email(template_key, msg, settings)
+
+
+def gchat_webhook_url(settings: dict | None = None) -> str:
+    """一般聊天室的 webhook：環境變數優先，其次 settings.json notification.google_chat_webhook。"""
+    notif = (settings or _load_settings()).get("notification") or {}
+    return os.environ.get("GOOGLE_CHAT_WEBHOOK") or notif.get("google_chat_webhook", "")
+
+
+def _post_gchat(url: str, text: str, label: str = "") -> bool:
+    try:
+        import requests  # type: ignore — 精簡 agent 可能沒裝；缺它不該滅掉 email 那條
+        requests.post(url, json={"text": text}, timeout=10).raise_for_status()
+        return True
+    except Exception as e:
+        print(f"notifier: Google Chat [{label}] failed: {e}")
+        return False
+
+
+def send_google_chat(text: str) -> bool:
+    """不走範本、直接推一段文字到一般聊天室（週一工時 digest 等自己組文字的用途）。
+    沒設 webhook 回 False，不炸。"""
+    url = gchat_webhook_url()
+    return bool(url) and _post_gchat(url, text, "direct")
 
 
 def _relay_alert_email(template_key: str, msg: str, settings: dict) -> None:

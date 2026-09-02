@@ -5,11 +5,68 @@
 services/timesheet_lookup、scripts/import_timesheets（tests/unit/test_timesheet_import.py）。
 router 端只留 I/O。
 """
+import calendar
+import difflib
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import NamedTuple, Optional
+from zoneinfo import ZoneInfo
 
 LEAVE_TYPES = ("特休", "病假", "事假", "公假", "婚假", "喪假", "其他")
+
+# ── 日期歸一（工時整組共用；routers/crm/_shared._fmt_day 同一條規則）────────────
+#
+# 🔴 timestamptz 寫入端是 naive（PG 依 session 時區解讀）、asyncpg 讀回是 aware UTC ——
+# 面值取 .date() 在 +08 會差一天。這裡是唯一一份：aware 轉台北，naive 視為本地 wallclock。
+_TW = ZoneInfo("Asia/Taipei")
+
+
+def local_day(dt) -> Optional[date]:
+    """timestamptz／datetime → 台北的日期；None → None。"""
+    if not dt:
+        return None
+    if isinstance(dt, date) and not isinstance(dt, datetime):
+        return dt
+    return (dt.astimezone(_TW) if dt.tzinfo else dt).date()
+
+
+def month_span(month: str) -> tuple:
+    """'YYYY-MM'（空＝本月）→ (月初 00:00, 下月初 00:00) naive datetime；格式錯 → ValueError。"""
+    try:
+        base = datetime.strptime(month, "%Y-%m") if month else datetime.now()
+    except ValueError:
+        raise ValueError("month 格式需 YYYY-MM")
+    m0 = base.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    m1 = m0.replace(year=m0.year + 1, month=1) if m0.month == 12 else m0.replace(month=m0.month + 1)
+    return m0, m1
+
+
+def months_back(m0: datetime, n: int) -> datetime:
+    """月初往前 n 個月的月初（n=11 → 含本月共 12 個月）。"""
+    y, m = m0.year, m0.month - n
+    while m <= 0:
+        y, m = y - 1, m + 12
+    return m0.replace(year=y, month=m)
+
+
+def is_workday(day: date) -> bool:
+    return day.weekday() < 5
+
+
+def prev_workday(day: date) -> date:
+    """前一個工作日（週一 → 上週五）。國定假日不扣 —— 這是參考，不是打卡。"""
+    d = day - timedelta(days=1)
+    while not is_workday(d):
+        d -= timedelta(days=1)
+    return d
+
+
+def budget_burn(total, budget) -> dict:
+    """預算消耗：{remaining, pct}；沒預算兩個都 None。burn 表／專案檔案／團隊匯總同一份算法。"""
+    if not budget:
+        return {"remaining": None, "pct": None}
+    total = float(total or 0)
+    return {"remaining": round(budget - total, 1), "pct": round(total / budget * 100, 1)}
 LEAVE_STATUSES = ("待審", "已核准", "已退回")
 ANNUAL_TYPE = "特休"
 
@@ -72,9 +129,8 @@ def leave_balance(annual_days: Optional[int], approved_annual_sum: float) -> dic
 
 def month_workdays(year: int, month: int) -> int:
     """該月週一到週五的天數（不扣國定假日 —— 那是參考值，不是打卡標準）。"""
-    import calendar
     return sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
-               if calendar.weekday(year, month, d) < 5)
+               if is_workday(date(year, month, d)))
 
 
 def week_key(day) -> str:
@@ -87,11 +143,14 @@ def hours_rollup(rows, year: int, month: int) -> dict:
     """團隊月表的「幫大家算好」：`rows` = [(staff_name, day(date), project_name, hours), …]。
 
     每人：合計、填了幾天、平均每天、每週小計、各案小計；全體：各案合計、總時數；
-    參考工時＝工作日×8（只是對照，不是標準工時）。純函式，端點只做 I/O。"""
+    參考工時＝工作日×8（只是對照，不是標準工時）。純函式，端點只做 I/O。
+    🔴 只算實際（hours > 0）：只有計畫的列不是工時、也不算「填了一天」—— 呼叫端不必先濾。"""
     people: dict = {}
     projects: dict = {}
     for name, day, pname, h in rows:
         h = float(h or 0)
+        if h <= 0:
+            continue
         p = people.setdefault(name or "(空白)", {"name": name or "(空白)", "total": 0.0, "days": set(),
                                                   "weeks": {}, "projects": {}})
         p["total"] += h
@@ -133,10 +192,23 @@ def is_stale(status, last_entry, today, days: int = STALE_DAYS) -> bool:
     return (today - last_entry).days > days
 
 
+#: 「最近有在填的人」的視窗（漏填名單用；儀表板與週一 digest 同一個數字）
+ACTIVE_WINDOW_DAYS = 30
+
+
+def active_fillers(rows, today: date) -> set:
+    """`rows` = [(staff_name, day, …), …] → 最近 ACTIVE_WINDOW_DAYS 天有列的人名。"""
+    since = today - timedelta(days=ACTIVE_WINDOW_DAYS)
+    return {r[0] for r in rows if r[0] and r[1] and r[1] >= since}
+
+
 def type_composition(pairs) -> list:
-    """`[(work_type, hours), …]` → `[(type, hours, pct), …]` 大到小；沒分類的歸「未分類」。"""
+    """`[(work_type, hours), …]` → `[(type, hours, pct), …]` 大到小；沒分類的歸「未分類」；
+    只算實際（hours > 0）。"""
     acc: dict = {}
     for t, h in pairs:
+        if (h or 0) <= 0:
+            continue
         acc[t or "未分類"] = acc.get(t or "未分類", 0.0) + float(h or 0)
     total = sum(acc.values())
     return sorted(((k, round(v, 1), round(v / total * 100) if total else 0) for k, v in acc.items()),
@@ -145,12 +217,15 @@ def type_composition(pairs) -> list:
 
 def project_metrics(items) -> dict:
     """一案的形狀：`items` = [(day(date|None), staff_name, work_type, hours), …]。
-    總時數、人數、起訖、跨了幾天、分類組成、各人 —— 專案檔案頁與「類似專案並排」共用。"""
+    總時數、人數、起訖、跨了幾天、分類組成、各人 —— 專案檔案頁與「類似專案並排」共用。
+    只算實際（hours > 0），計畫列不進來。"""
     total = 0.0
     people: dict = {}
     days = []
     for day, name, wt, h in items:
         h = float(h or 0)
+        if h <= 0:
+            continue
         total += h
         people[name or "(空白)"] = people.get(name or "(空白)", 0.0) + h
         if day:
@@ -170,7 +245,6 @@ def project_metrics(items) -> dict:
 def similar_projects(name: str, client: str, total: float, candidates, limit: int = 5, floor: float = 0.35) -> list:
     """類似專案（自動推薦，人再挑）：案名相似（去前綴）0.5 ＋ 同客戶 0.3 ＋ 時數量級接近 0.2。
     `candidates` = [{"name", "client", "total"}, …]；排掉自己與零時數。回 [(name, score), …]。"""
-    import difflib
     key = sheet_project_key(name)
     if not key:
         return []
@@ -240,18 +314,26 @@ def row_state(hours, planned_hours) -> str:
 EDITABLE_STATUSES = frozenset({"plan", "draft", "confirmed"})
 
 
+#: can_edit_timesheet 的代碼 → 給人看的原因；HTTP 狀態由代碼決定，不靠中文比對
+EDIT_BLOCK_TEXT = {
+    "not_owner": "不是你的工時列",
+    "not_manual": "Sheet 同步進來的列不能在這裡改，請改試算表",
+    "locked": "這一列已鎖，不能再改",
+}
+
+
 def can_edit_timesheet(row, staff_id: str) -> str:
-    """本人能不能改這一列：回空字串＝可以，否則回原因（給 403/409 的 detail）。
+    """本人能不能改這一列：回空字串＝可以，否則回代碼（EDIT_BLOCK_TEXT 的鍵）。
 
     三個條件缺一不可：是本人的（staff_id）、是手填的（Sheet 同步進來的改 Sheet 那邊再拉）、
-    還沒核可／鎖帳。`row` 只要有 .staff_id／.source／.status。
+    還沒鎖。`row` 只要有 .staff_id／.source／.status。
     """
     if not staff_id or getattr(row, "staff_id", None) != staff_id:
-        return "不是你的工時列"
+        return "not_owner"
     if getattr(row, "source", "") != "manual":
-        return "Sheet 同步進來的列不能在這裡改，請改試算表"
+        return "not_manual"
     if getattr(row, "status", "") not in EDITABLE_STATUSES:
-        return f"已{getattr(row, 'status', '')}的列不能再改"
+        return "locked"
     return ""
 
 
@@ -265,9 +347,7 @@ def manual_dup_key(staff_name: str, work_date: Optional[datetime],
     16 日 16:00Z）。astimezone() 對 naive 視為本地時間、對 aware 轉回本地，
     兩種型態都落在同一個本地日。
     """
-    return ((staff_name or "").strip(),
-            work_date.astimezone().date() if work_date else None,
-            (project_name or "").strip())
+    return ((staff_name or "").strip(), local_day(work_date), (project_name or "").strip())
 
 
 # ── 福委會（docs/BENEFIT_POOL_PLAN.md）純規則 ────────────────────────
@@ -605,7 +685,6 @@ def suggest_projects(name: str, lk: ProjectLookup, limit: int = 2, floor: float 
     🔴 只在報告／讀路徑出現，任何寫入路徑都不准用它 —— 「華南永昌E指通」對「E指沖」
     是打錯字，該由人看一眼決定，不是程式猜。
     """
-    import difflib
     a = sheet_project_key(name)
     if not a:
         return []

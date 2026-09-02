@@ -23,6 +23,7 @@ class Timesheet(Base):
     hours = Column(Float, nullable=False, default=0.0)           # 實際小時；計畫列＝0 直到「完成」
     planned_hours = Column(Float, nullable=True)                 # 計畫小時（docs/WORK_TRACKING_UI_PLAN.md §2；Sheet 列 NULL）
     work_type = Column(String(32), nullable=True)                # 工作分類（core.hr_logic.WORK_TYPES；可空）
+    note = Column(Text, nullable=True)                           # 管理員備註（總表手動調整時寫；員工端不顯示）
     status = Column(String(16), nullable=False, default="import")  # import／draft（實際）／plan（只有計畫）
     source = Column(String(16), nullable=False, default="sheet")  # sheet/manual/schedule
     row_hash = Column(String(40), nullable=False, unique=True)   # 去重：date|staff|project|task|hours

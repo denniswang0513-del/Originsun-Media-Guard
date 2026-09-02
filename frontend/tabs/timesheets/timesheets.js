@@ -3,8 +3,11 @@
  *
  * MASTER 同源功能：打 /api/v1/timesheets/*（帶 auth token）。
  * 六個分頁：今日（每日看板：每個人每天做了什麼，實際為主、計畫加分）／我的一天（登入者
- * 自己記：實際或計畫、時數快捷鈕、複製昨天）／專案（burn 表）／人員（月視圖）／儀表板（P3）／
- * 設定（Sheet 拉取、未對映指定、代填、token；管理員）。
+ * 自己記：實際或計畫、時數快捷鈕、複製昨天）／專案（burn 表 → 專案檔案頁、類似專案並排）／
+ * 人員（月視圖 → 人員檔案頁）／儀表板（大家四格＋主管兩格）／設定（Sheet 拉取、digest、未對映
+ * 指定、代填、token；管理員）。
+ * 一列的「計畫／實際」由後端的 status 決定（plan／draft），這裡只顯示、不再自己判。
+ * 事件：整個 tab 一個委派的 click 監聽（initTimesheetsTab 註冊一次），局部重繪不再重綁。
  * 資料 = Google Sheet 每小時拉 + 系統內填（同人同日同案手填優先）。不審核。
  * 新增 UI 依 owner 鐵則無 emoji（既有元素不回溯）。
  */
@@ -12,6 +15,8 @@
 import { esc } from '../website/website-utils.js';
 import { createSortable, sortableTh, today as _today } from '../crm/crm-utils.js';
 import { openProjectPicker } from '../../js/shared/project-picker.js';   // 指定專案：共用挑選視窗
+import { authDownload } from '../../js/shared/utils.js';
+import { hbars } from '../../js/shared/svg-charts.js';
 
 async function tfetch(path, opts = {}) {
     const token = localStorage.getItem('auth_token');
@@ -41,6 +46,8 @@ let _projOpts = null;       // project_options（我的一天的專案 datalist�
 let _projectCache = null;   // 最近一次 /project（專案檔案頁）
 let _compareNames = [];     // 類似專案並排：目前選的案名
 let _digestCache = null;    // GET /timesheets/digest
+let _ledgerCache = null;    // GET /timesheets/rows（總表：一個月所有列）
+const _ledgerFilter = { staff: '', project: '', source: '', q: '' };   // 總表篩選（前端做）
 
 function _shiftDay(ymd, delta) {
     const [y, m, d] = ymd.split('-').map(Number);
@@ -108,6 +115,17 @@ function _redrawTbody(tableId, tbodyHtmlFn, sorter) {
     sorter.attach();
 }
 
+const _ledgerSorter = createSortable({
+    storageKey: 'timesheets_ledger_sort',
+    defaultSort: { key: 'date', dir: 'desc' },
+    panelId: 'ts-ledger-table',
+    onChange: () => _ledgerRedraw(),
+    getters: {
+        date: i => i.date, staff: i => i.staff_name, project: i => i.project_name || '',
+        type: i => i.work_type || '', task: i => i.task_note || '', planned: i => i.planned_hours ?? '',
+        hours: i => i.hours, source: i => i.source, note: i => i.note || '',
+    },
+});
 const _burnSorter = createSortable({
     storageKey: 'timesheets_burn_sort',
     defaultSort: { key: '', dir: 'asc' },
@@ -166,6 +184,17 @@ const _recentSorter = createSortable({
 export async function initTimesheetsTab() {
     _content = document.getElementById('ts-content');
     if (!_content) return;
+    // 委派：只註冊一次，之後任何局部重繪（加列、複製昨天、改列）都不用再綁
+    _content.addEventListener('click', (ev) => {
+        const hq = ev.target.closest('[data-hq]');
+        if (hq) {
+            const inp = hq.closest('td').querySelector('[data-f="hours"]');
+            if (inp) inp.value = hq.dataset.hq;
+            return;
+        }
+        const btn = ev.target.closest('[data-ts-action]');
+        if (btn && _content.contains(btn)) _onAction(btn);
+    });
     await refresh();
 }
 
@@ -184,13 +213,18 @@ async function refresh() {
             const d = await tfetch('/api/v1/timesheets/by_staff?month=' + _month);
             _staffCache = d;
             _content.innerHTML = _renderStaffView(d);
+        } else if (_view === 'ledger') {
+            _ledgerCache = await tfetch('/api/v1/timesheets/rows?month=' + _month);
+            _content.innerHTML = _renderLedger(_ledgerCache);
         } else if (_view === 'dash') {
             _content.innerHTML = _renderDash(await tfetch('/api/v1/timesheets/dashboard'));
         } else if (_view === 'settings') {
-            const s = await tfetch('/api/v1/timesheets/summary');
-            _summaryCache = s;
-            _pullCache = await tfetch('/api/v1/timesheets/pull').catch(() => null);
-            _digestCache = await tfetch('/api/v1/timesheets/digest').catch(() => null);
+            const [s, pull, digest] = await Promise.all([
+                tfetch('/api/v1/timesheets/summary'),
+                tfetch('/api/v1/timesheets/pull').catch(() => null),
+                tfetch('/api/v1/timesheets/digest').catch(() => null),
+            ]);
+            _summaryCache = s; _pullCache = pull; _digestCache = digest;
             _content.innerHTML = _renderSettings(s);
         } else if (_view.startsWith('project:')) {
             const d = await tfetch('/api/v1/timesheets/project?name=' + encodeURIComponent(_view.slice(8)));
@@ -223,7 +257,7 @@ function _viewBtns() {
     const b = (key, label) => `<button class="ts-btn ${_view === key ? '' : 'ghost'}"
         data-ts-action="view" data-view="${key}">${label}</button>`;
     return `<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        ${b('today', '今日')}${b('mine', '我的一天')}${b('projects', '專案')}${b('staff', '人員')}${b('dash', '儀表板')}${b('settings', '設定')}
+        ${b('today', '今日')}${b('mine', '我的一天')}${b('projects', '專案')}${b('staff', '人員')}${b('ledger', '總表')}${b('dash', '儀表板')}${b('settings', '設定')}
     </div>`;
 }
 
@@ -242,15 +276,31 @@ function _dayNav(extra = '') {
     </div>`;
 }
 
+// ── 一列的共用片段（看板卡片／週表格／我的一天／時間軸／逐日都吃這幾支）──
+const _isPlan = i => i.status === 'plan';                       // 後端 row_state 決定，這裡不重判
+function _hoursLabel(i) {
+    return _isPlan(i)
+        ? `<span style="color:#93c5fd;">計畫 ${i.planned_hours} h</span>`
+        : `<b style="color:#eee;">${i.hours} h</b>${i.planned_hours ? `<span style="color:#666;"> ／計畫 ${i.planned_hours}</span>` : ''}`;
+}
+const _typeTag = i => (i.work_type ? `<span style="color:#9ca3af;">[${esc(i.work_type)}]</span> ` : '');
+const _srcTag = i => (i.source === 'manual' ? '' : '<span style="color:#666;"> · Sheet</span>');
+/** 逐日流水：[{date, items}] → 每天一段；primary＝每項第一個字（時間軸放人名、人員頁放案名）。 */
+function _dayLog(days, primary) {
+    return days.map(day => `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid #2c2c2c;font-size:12.5px;">
+        <span style="width:100px;color:#888;white-space:nowrap;">${esc(_dayLabel(day.date))}</span>
+        <div style="flex:1;">${day.items.map(i => `<div>${_typeTag(i)}<span style="color:#eee;">${esc(i[primary] || '(空白)')}</span>
+            <span style="color:#bbb;"> ${esc(i.task_note || '')}</span>
+            <span style="float:right;">${_hoursLabel(i)}</span></div>`).join('')}</div>
+    </div>`).join('') || '<div style="color:#666;">還沒有紀錄</div>';
+}
+
 // ── 今日：每日看板（每個人每天做了什麼；實際為主，計畫加分；不排名、不標紅）──
 function _itemCard(i) {
-    const hrs = i.hours > 0
-        ? `<b style="color:#eee;">${i.hours} h</b>${i.planned_hours ? `<span style="color:#666;"> ／計畫 ${i.planned_hours}</span>` : ''}`
-        : `<span style="color:#93c5fd;">計畫 ${i.planned_hours} h</span>`;
-    return `<div style="padding:6px 8px;border:1px solid #333;border-radius:6px;margin:4px 0;background:${i.hours > 0 ? '#1f1f1f' : '#1a2233'};">
-        <div style="color:#ddd;font-size:12.5px;">${i.work_type ? `<span style="color:#9ca3af;">[${esc(i.work_type)}]</span> ` : ''}${esc(i.project_name || '(空白)')}</div>
+    return `<div style="padding:6px 8px;border:1px solid #333;border-radius:6px;margin:4px 0;background:${_isPlan(i) ? '#1a2233' : '#1f1f1f'};">
+        <div style="color:#ddd;font-size:12.5px;">${_typeTag(i)}${esc(i.project_name || '(空白)')}</div>
         ${i.task_note ? `<div style="color:#999;font-size:11.5px;">${esc(i.task_note)}</div>` : ''}
-        <div style="font-size:11.5px;margin-top:2px;">${hrs}${i.source === 'sheet' || i.source === 'import' ? '<span style="color:#666;"> · Sheet</span>' : ''}</div>
+        <div style="font-size:11.5px;margin-top:2px;">${_hoursLabel(i)}${_srcTag(i)}</div>
     </div>`;
 }
 
@@ -275,7 +325,7 @@ function _renderToday(d) {
                 ${d.items.map(x => {
                     const p = x.people.find(q => q.name === n);
                     return `<td style="vertical-align:top;min-width:150px;">${p ? p.items.map(i =>
-                        `<div style="font-size:11.5px;color:${i.hours > 0 ? '#ccc' : '#93c5fd'};">${esc(i.project_name || '(空白)')} ${i.hours > 0 ? i.hours : '計畫 ' + i.planned_hours}h</div>`).join('') : '<span style="color:#444;">—</span>'}</td>`;
+                        `<div style="font-size:11.5px;color:#ccc;">${esc(i.project_name || '(空白)')} ${_hoursLabel(i)}</div>`).join('') : '<span style="color:#444;">—</span>'}</td>`;
                 }).join('')}</tr>`).join('')}</tbody>
         </table></div>` : `<div class="ts-card" style="color:#777;">這一週還沒有人填。</div>`;
     }
@@ -291,7 +341,7 @@ async function _projectOptions() {
     return _projOpts;
 }
 function _typeSelect(cur, attr) {
-    const wts = (_mineCache && _mineCache.work_types) || [];
+    const wts = ((_view === 'ledger' ? _ledgerCache : _mineCache) || {}).work_types || [];
     return `<select ${attr}><option value="">分類</option>${wts.map(t =>
         `<option value="${esc(t)}"${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
 }
@@ -307,17 +357,14 @@ function _newRowHtml(v = {}) {
     </tr>`;
 }
 function _mineItemRow(i) {
-    const hrs = i.hours > 0 ? `<b>${i.hours} h</b>${i.planned_hours ? `<span style="color:#666;">（計畫 ${i.planned_hours}）</span>` : ''}`
-        : `<span style="color:#93c5fd;">計畫 ${i.planned_hours} h</span>`;
-    const src = i.source === 'manual' ? '' : '<span style="color:#666;"> · Sheet</span>';
     const acts = i.editable ? `
-        ${i.hours > 0 ? '' : `<button class="ts-btn ghost" data-ts-action="mine-done" data-id="${esc(i.id)}" style="padding:2px 8px;">完成（照計畫）</button>`}
+        ${_isPlan(i) ? `<button class="ts-btn ghost" data-ts-action="mine-done" data-id="${esc(i.id)}" style="padding:2px 8px;">完成（照計畫）</button>` : ''}
         <button class="ts-btn ghost" data-ts-action="mine-edit" data-id="${esc(i.id)}" style="padding:2px 8px;">改</button>
         <button class="ts-btn ghost" data-ts-action="mine-del" data-id="${esc(i.id)}" style="padding:2px 8px;">刪</button>` : '';
     return `<tr data-mine-id="${esc(i.id)}">
-        <td>${i.work_type ? `<span style="color:#9ca3af;">[${esc(i.work_type)}]</span> ` : ''}${esc(i.project_name || '(空白)')}</td>
+        <td>${_typeTag(i)}${esc(i.project_name || '(空白)')}</td>
         <td style="color:#999;">${esc(i.task_note || '')}</td>
-        <td class="num">${hrs}${src}</td>
+        <td class="num">${_hoursLabel(i)}${_srcTag(i)}</td>
         <td style="white-space:nowrap;">${acts}</td>
     </tr>`;
 }
@@ -355,15 +402,18 @@ function _renderMine(d, err) {
                 同一天同一案 Sheet 已有的列會標「Sheet」，不用再填一次。</div>
         </div>`;
 }
+/** 一列輸入 → 送給後端的 body（我的一天新增／改列、總表改列同一形狀；沒日期欄就用當天）。 */
+function _rowBody(tr) {
+    const v = f => tr.querySelector(`[data-f="${f}"]`)?.value ?? '';
+    return {
+        work_date: v('date') || _day, project_name: v('project').trim(), work_type: v('type') || null,
+        task_note: v('note'), planned_hours: v('planned') ? parseFloat(v('planned')) : null,
+        hours: v('hours') ? parseFloat(v('hours')) : null,
+    };
+}
 function _readNewRows() {
-    return [...document.querySelectorAll('#ts-mine-add .ts-mine-row')].map(tr => {
-        const v = f => tr.querySelector(`[data-f="${f}"]`).value;
-        return {
-            work_date: _day, project_name: v('project').trim(), work_type: v('type') || null,
-            task_note: v('note'), planned_hours: v('planned') ? parseFloat(v('planned')) : null,
-            hours: v('hours') ? parseFloat(v('hours')) : null,
-        };
-    }).filter(r => (r.hours || 0) > 0 || (r.planned_hours || 0) > 0);
+    return [...document.querySelectorAll('#ts-mine-add .ts-mine-row')].map(_rowBody)
+        .filter(r => (r.hours || 0) > 0 || (r.planned_hours || 0) > 0);
 }
 async function _mineSubmit() {
     const resEl = document.getElementById('ts-mine-result');
@@ -397,19 +447,12 @@ async function _mineEdit(id) {
             <button class="ts-btn ghost" data-ts-action="mine-cancel">取消</button>
             <span data-err style="color:#fca5a5;font-size:12px;margin-left:8px;"></span></td></tr>
     </tbody></table></td></tr>`;
-    _bind();
 }
 async function _mineSave(id) {
     const box = document.querySelector(`[data-mine-edit="${id}"]`);
     if (!box) return;
-    const tr = box.querySelector('.ts-mine-row');
-    const v = f => tr.querySelector(`[data-f="${f}"]`).value;
     try {
-        await tfetch('/api/v1/timesheets/mine/' + id, { method: 'PUT', body: {
-            work_date: _day, project_name: v('project').trim(), work_type: v('type') || null,
-            task_note: v('note'), planned_hours: v('planned') ? parseFloat(v('planned')) : null,
-            hours: v('hours') ? parseFloat(v('hours')) : null,
-        } });
+        await tfetch('/api/v1/timesheets/mine/' + id, { method: 'PUT', body: _rowBody(box.querySelector('.ts-mine-row')) });
         refresh();
     } catch (e) { box.querySelector('[data-err]').textContent = e.message || e; }
 }
@@ -417,6 +460,82 @@ async function _mineDelete(id) {
     if (!confirm('刪掉這一列？')) return;
     try { await tfetch('/api/v1/timesheets/mine/' + id, { method: 'DELETE' }); refresh(); }
     catch (e) { alert('刪除失敗：' + (e.message || e)); }
+}
+
+// ── 總表：這個月每一列；管理員逐列改細節與備註（像發票總表）──
+function _ledgerRows() {
+    const f = _ledgerFilter, q = f.q.trim().toLowerCase();
+    return ((_ledgerCache && _ledgerCache.items) || []).filter(i =>
+        (!f.staff || i.staff_name === f.staff) && (!f.project || i.project_name === f.project)
+        && (!f.source || (f.source === 'manual') === (i.source === 'manual'))
+        && (!q || [i.project_name, i.task_note, i.note, i.staff_name].some(s => (s || '').toLowerCase().includes(q))));
+}
+const _srcLabel = i => (i.source === 'manual' ? '手填' : 'Sheet');
+function _ledgerTbodyHtml() {
+    const can = _ledgerCache && _ledgerCache.editable;
+    return _ledgerSorter.sorted(_ledgerRows()).map(i => `<tr data-ledger-id="${esc(i.id)}">
+        <td style="white-space:nowrap;">${esc(i.date)}</td>
+        <td>${esc(i.staff_name)}</td>
+        <td>${esc(i.project_name || '(空白)')}${i.project_id ? '' : ' <span class="ts-badge">未對映</span>'}</td>
+        <td style="color:#9ca3af;">${esc(i.work_type || '')}</td>
+        <td style="color:#bbb;">${esc(i.task_note || '')}</td>
+        <td class="num" style="color:#93c5fd;">${i.planned_hours ?? ''}</td>
+        <td class="num">${_isPlan(i) ? '<span style="color:#666;">計畫</span>' : `<b>${i.hours}</b>`}</td>
+        <td style="color:#777;">${_srcLabel(i)}</td>
+        <td style="color:#fbbf24;">${esc(i.note || '')}</td>
+        <td style="white-space:nowrap;">${can ? `<button class="ts-btn ghost" data-ts-action="ledger-edit" data-id="${esc(i.id)}" style="padding:2px 8px;">改</button>
+            <button class="ts-btn ghost" data-ts-action="ledger-del" data-id="${esc(i.id)}" style="padding:2px 8px;">刪</button>` : ''}</td>
+    </tr>`).join('') || '<tr><td colspan="10" style="color:#666;text-align:center;">沒有符合的列</td></tr>';
+}
+/** 篩選／排序／改列後只重繪表身與計數（不重繪整頁 → 搜尋框不失焦）。 */
+function _ledgerRedraw() {
+    _redrawTbody('ts-ledger-table', _ledgerTbodyHtml, _ledgerSorter);
+    const rows = _ledgerRows();
+    const c = document.getElementById('ts-ledger-count');
+    if (c) c.innerHTML = `<span class="ts-chip"><b>${rows.length}</b>列</span><span class="ts-chip"><b>${Math.round(rows.reduce((a, i) => a + (i.hours || 0), 0) * 10) / 10}</b>實際 h</span>`;
+}
+function _ledgerEditHtml(i) {
+    const inp = 'style="background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;padding:3px 6px;"';
+    return `<tr data-ledger-edit="${esc(i.id)}">
+        <td><input type="date" data-f="date" value="${esc(i.date)}" ${inp}></td>
+        <td>${esc(i.staff_name)}</td>
+        <td><input list="ts-proj-list" data-f="project" value="${esc(i.project_name)}" style="width:100%;"></td>
+        <td>${_typeSelect(i.work_type, 'data-f="type"')}</td>
+        <td><input type="text" data-f="note" value="${esc(i.task_note)}" placeholder="做了什麼" style="width:100%;"></td>
+        <td><input type="number" data-f="planned" min="0" step="0.25" value="${i.planned_hours ?? ''}" style="width:64px;"></td>
+        <td><input type="number" data-f="hours" min="0" step="0.25" value="${i.hours || ''}" style="width:64px;"></td>
+        <td style="color:#777;">${_srcLabel(i)}</td>
+        <td><input type="text" data-f="remark" value="${esc(i.note)}" placeholder="管理員備註" style="width:100%;"></td>
+        <td style="white-space:nowrap;"><button class="ts-btn" data-ts-action="ledger-save" data-id="${esc(i.id)}" style="padding:2px 8px;">存</button>
+            <button class="ts-btn ghost" data-ts-action="ledger-cancel" style="padding:2px 8px;">取消</button>
+            <div data-err style="color:#fca5a5;font-size:11px;"></div></td>
+    </tr>`;
+}
+function _renderLedger(d) {
+    const items = d.items || [];
+    const sel = 'style="background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;padding:5px 8px;"';
+    const opts = (key, list, label) => `<select id="ts-lf-${key}" ${sel}><option value="">${label}</option>${list.map(v =>
+        `<option value="${esc(v)}"${_ledgerFilter[key] === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>`;
+    const uniq = k => [...new Set(items.map(i => i[k]).filter(Boolean))].sort();
+    return `${_head(d.editable ? '總表：這個月每一列（每人每案每項）。可以逐列改日期／專案／分類／內容／時數，加管理員備註（員工端看不到）。'
+                                : '總表：這個月每一列（每人每案每項）。')}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+            <input type="month" id="ts-month" value="${esc(_month)}" ${sel}>
+            ${opts('staff', uniq('staff_name'), '全部人員')}${opts('project', uniq('project_name'), '全部專案')}
+            <select id="ts-lf-source" ${sel}><option value="">全部來源</option>
+                <option value="sheet"${_ledgerFilter.source === 'sheet' ? ' selected' : ''}>Sheet</option>
+                <option value="manual"${_ledgerFilter.source === 'manual' ? ' selected' : ''}>手填</option></select>
+            <input type="search" id="ts-lf-q" value="${esc(_ledgerFilter.q)}" placeholder="搜專案／內容／備註" ${sel}>
+            <span id="ts-ledger-count"></span>
+            <button class="ts-btn ghost" data-ts-action="export-month">匯出 CSV</button>
+        </div>
+        <div class="ts-card" style="overflow-x:auto;">
+            <table id="ts-ledger-table">
+                <thead><tr>${sortableTh('date', '日期')}${sortableTh('staff', '人員')}${sortableTh('project', '專案')}${sortableTh('type', '分類')}${sortableTh('task', '內容')}${sortableTh('planned', '計畫', 'class="num"')}${sortableTh('hours', '實際', 'class="num"')}${sortableTh('source', '來源')}${sortableTh('note', '備註')}<th></th></tr></thead>
+                <tbody>${_ledgerTbodyHtml()}</tbody>
+            </table>
+            <datalist id="ts-proj-list"></datalist>
+        </div>`;
 }
 
 // ── 專案：burn 表（消耗率高在前）＋ 最近同步列 ──
@@ -448,7 +567,8 @@ function _renderProjects(s) {
     const totalHours = s.projects.reduce((a, p) => a + (p.hours_used || 0), 0)
         + s.unmatched.reduce((a, u) => a + (u.hours_used || 0), 0);
     const stale = s.projects.filter(p => p.stale).length;
-    const unmatchedRows = s.unmatched.filter(u => u.reason !== 'bucket').map(u => `
+    const unmatched = s.unmatched.filter(u => u.reason !== 'bucket');
+    const unmatchedRows = unmatched.map(u => `
         <tr><td><span class="ts-link" data-ts-action="open-project" data-name="${esc(u.project_name)}">${esc(u.project_name)}</span>
                 <span class="ts-badge">未對映</span></td>
             <td class="num">${u.hours_used}</td>
@@ -464,7 +584,7 @@ function _renderProjects(s) {
             <button class="ts-btn ghost" data-ts-action="recent" style="vertical-align:top;">最近同步列</button>
             <button class="ts-btn ghost" data-ts-action="export-month" style="vertical-align:top;">匯出本月 CSV</button>
         </div>
-        ${unmatchedRows ? `<div class="ts-card"><h3>未對映（${s.unmatched.filter(u => u.reason !== 'bucket').length}）—— 對到案之後才有預算與 burn</h3>
+        ${unmatchedRows ? `<div class="ts-card"><h3>未對映（${unmatched.length}）—— 對到案之後才有預算與 burn</h3>
             <table><thead><tr><th>Sheet 案名</th><th class="num">時數</th><th></th></tr></thead><tbody>${unmatchedRows}</tbody></table></div>` : ''}
         <div class="ts-card">
             <h3>📊 專案 Burn（消耗率高在前）</h3>
@@ -480,12 +600,10 @@ function _renderProjects(s) {
 }
 
 // ── 專案檔案頁：摘要／分類組成／時間軸／各人各月／預算／報價人日／類似專案 ──
-function _bars(pairs, colorFn) {
-    const max = Math.max(1, ...pairs.map(p => p[1]));
-    return pairs.map(([k, v, pct]) => `<div style="display:flex;gap:8px;align-items:center;font-size:12px;margin:3px 0;">
-        <span style="width:110px;color:#bbb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(k)}</span>
-        <div style="flex:1;height:8px;background:#2c2c2c;border-radius:4px;overflow:hidden;"><i style="display:block;height:100%;width:${Math.round(v / max * 100)}%;background:${colorFn ? colorFn(k) : '#3b82f6'};"></i></div>
-        <span style="width:90px;text-align:right;color:#ddd;">${v} h${pct != null ? `<span style="color:#666;"> ${pct}%</span>` : ''}</span></div>`).join('') || '<div style="color:#666;">—</div>';
+/** [(label, hours, pct?)…] → 共用的水平佔比條（js/shared/svg-charts.hbars）。 */
+function _bars(pairs) {
+    return hbars(pairs.map(([label, value, pct]) => ({ label, value, pct })),
+                 { formatValue: v => `${v} h`, showPct: pairs.some(p => p[2] != null), emptyText: '—' });
 }
 function _renderProject(d) {
     const pct = d.pct == null ? '—' : d.pct + '%';
@@ -521,13 +639,7 @@ function _renderProject(d) {
             </div>
         </div>
         <div class="ts-card" style="margin-top:14px;"><h3>時間軸（最近 90 個有紀錄的日子）</h3>
-            ${d.timeline.map(day => `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid #2c2c2c;font-size:12.5px;">
-                <span style="width:100px;color:#888;white-space:nowrap;">${esc(_dayLabel(day.date))}</span>
-                <div style="flex:1;">${day.items.map(i => `<div><span style="color:#eee;">${esc(i.name)}</span>
-                    ${i.work_type ? `<span style="color:#9ca3af;">[${esc(i.work_type)}]</span>` : ''}
-                    <span style="color:#bbb;">${esc(i.task || '')}</span>
-                    <span style="color:${i.hours > 0 ? '#ddd' : '#93c5fd'};float:right;">${i.hours > 0 ? i.hours + ' h' : '計畫 ' + (i.planned_hours || 0) + ' h'}</span></div>`).join('')}</div>
-            </div>`).join('') || '<div style="color:#666;">還沒有紀錄</div>'}
+            ${_dayLog(d.timeline, 'staff_name')}
         </div>`;
 }
 function _renderCompare(d) {
@@ -588,12 +700,7 @@ function _renderPerson(d) {
             <div class="ts-card" style="margin:0;"><h3>近 12 個月</h3>${_bars(d.trend)}</div>
         </div>
         <div class="ts-card" style="margin-top:14px;"><h3>逐日</h3>
-            ${d.days.map(day => `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid #2c2c2c;font-size:12.5px;">
-                <span style="width:100px;color:#888;white-space:nowrap;">${esc(_dayLabel(day.date))}</span>
-                <div style="flex:1;">${day.items.map(i => `<div>${i.work_type ? `<span style="color:#9ca3af;">[${esc(i.work_type)}]</span> ` : ''}<span style="color:#eee;">${esc(i.project_name || '(空白)')}</span>
-                    <span style="color:#bbb;"> ${esc(i.task || '')}</span>
-                    <span style="color:${i.hours > 0 ? '#ddd' : '#93c5fd'};float:right;">${i.hours > 0 ? i.hours + ' h' : '計畫 ' + (i.planned_hours || 0) + ' h'}</span></div>`).join('')}</div>
-            </div>`).join('') || '<div style="color:#666;">這個月沒有紀錄</div>'}
+            ${_dayLog(d.days, 'project_name')}
         </div>`;
 }
 
@@ -634,7 +741,6 @@ function _renderStaffView(d) {
 function _renderDash(d) {
     const card = (title, body) => `<div class="ts-card" style="margin:0;"><h3>${title}</h3>${body}</div>`;
     const m = d.manager;
-    const loadMax = m ? Math.max(1, ...m.load.map(x => x.hours)) : 1;
     return `${_head('儀表板：一眼看今天、本週、專案 burn、分類組成' + (m ? '；主管層：負載、漏填、有計畫沒結果' : '') + '。')}
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;">
             ${card('今天在做什麼', `<div style="margin-bottom:8px;"><span class="ts-chip"><b>${d.today.people}</b>人</span><span class="ts-chip"><b>${d.today.items}</b>工作項</span><span class="ts-chip"><b>${d.today.hours}</b>h</span></div>
@@ -647,10 +753,8 @@ function _renderDash(d) {
                 <span class="ts-pct" style="${_pctStyle(p.pct)}">${p.pct != null ? p.pct + '%' : '—'}</span>
                 <span style="color:#888;width:110px;text-align:right;">${p.hours_used} / ${p.budget_hours ?? '—'}</span></div>`).join('') || '<div style="color:#666;">—</div>')}
             ${card('本月分類組成', _bars(d.month_composition))}
-            ${m ? card('負載（本週每人）', m.load.map(x => `<div style="display:flex;gap:8px;align-items:center;font-size:12px;margin:3px 0;">
-                <span class="ts-link" data-ts-action="open-person" data-name="${esc(x.name)}" style="width:90px;">${esc(x.name)}</span>
-                <div style="flex:1;height:8px;background:#2c2c2c;border-radius:4px;overflow:hidden;"><i style="display:block;height:100%;width:${Math.round(x.hours / loadMax * 100)}%;background:${x.hours > 40 ? '#f87171' : '#3b82f6'};"></i></div>
-                <span style="width:50px;text-align:right;color:#ddd;">${x.hours} h</span></div>`).join('') || '<div style="color:#666;">本週還沒有人填</div>') : ''}
+            ${m ? card('負載（本週每人；超過 40 h 標紅）', hbars(m.load.map(x => ({ label: x.name, value: x.hours, color: x.hours > 40 ? '#f87171' : '#3b82f6' })),
+                { formatValue: v => `${v} h`, showPct: false, emptyText: '本週還沒有人填' })) : ''}
             ${m ? card(`漏填與未完成的計畫（只有管理員看得到）`, `<div style="font-size:12.5px;color:#bbb;">${esc(m.missing_yesterday.date)} 沒填：${m.missing_yesterday.names.length ? m.missing_yesterday.names.map(esc).join('、') : '<span style="color:#6ee7b7;">大家都填了</span>'}</div>
                 <div style="font-size:12.5px;color:#bbb;margin-top:6px;">有計畫還沒填實際：${m.plans_open.length ? m.plans_open.map(esc).join('、') : '沒有'}</div>`) : ''}
         </div>`;
@@ -813,23 +917,6 @@ async function _mapProject(sheetName) {
     });
 }
 
-/** 帶 token 抓 CSV 再觸發下載（<a href> 帶不了 Authorization）。 */
-async function _download(path) {
-    try {
-        const token = localStorage.getItem('auth_token');
-        const r = await fetch(path, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ('HTTP ' + r.status));
-        const blob = await r.blob();
-        const cd = r.headers.get('Content-Disposition') || '';
-        const m = /filename\*=UTF-8''([^;]+)/.exec(cd);
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = m ? decodeURIComponent(m[1]) : 'timesheets.csv';
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-    } catch (e) { alert('匯出失敗：' + (e.message || e)); }
-}
-
 async function _fillProjectDatalist() {
     const dl = document.getElementById('ts-proj-list');
     if (!dl || dl.children.length) return;
@@ -837,23 +924,21 @@ async function _fillProjectDatalist() {
     dl.innerHTML = opts.map(p => `<option value="${esc(p.name)}"></option>`).join('');
 }
 
+/** 每次整頁重繪後：輸入框的 change（按鈕的 click 走 initTimesheetsTab 的委派，不在這裡綁）。 */
 function _bind() {
     const monthInp = document.getElementById('ts-month');
     if (monthInp) monthInp.addEventListener('change', () => { _month = monthInp.value; refresh(); });
     const dayInp = document.getElementById('ts-day');
     if (dayInp) dayInp.addEventListener('change', () => { if (dayInp.value) { _day = dayInp.value; refresh(); } });
-    if (_view === 'mine') _fillProjectDatalist();
-
-    // 時數快捷鈕：填進同一列的「實際」欄（事件委派，新增列也吃得到）
-    _content.querySelectorAll('[data-hq]').forEach(btn => {
-        btn.onclick = () => {
-            const inp = btn.closest('td').querySelector('[data-f="hours"]');
-            if (inp) inp.value = btn.dataset.hq;
-        };
+    if (_view === 'mine' || _view === 'ledger') _fillProjectDatalist();
+    ['staff', 'project', 'source', 'q'].forEach(k => {
+        const el = document.getElementById('ts-lf-' + k);
+        if (el) el.addEventListener(k === 'q' ? 'input' : 'change', () => { _ledgerFilter[k] = el.value; _ledgerRedraw(); });
     });
+    if (_view === 'ledger') _ledgerRedraw();   // 計數 chip
+}
 
-    _content.querySelectorAll('[data-ts-action]').forEach(btn => {
-        btn.addEventListener('click', async () => {
+async function _onAction(btn) {
             const act = btn.dataset.tsAction;
             if (act === 'refresh') return refresh();
             if (act === 'pull') return _pullNow();
@@ -868,13 +953,14 @@ function _bind() {
             if (act === 'board-days') { _boardDays = Number(btn.dataset.days); return refresh(); }
             if (act === 'open-project') { _view = 'project:' + btn.dataset.name; return refresh(); }
             if (act === 'open-person') { _view = 'person:' + btn.dataset.name; return refresh(); }
-            if (act === 'compare-add') {
-                if (!_compareNames.includes(btn.dataset.name)) _compareNames.push(btn.dataset.name);
-                return refresh();
-            }
-            if (act === 'compare-remove') {
-                _compareNames = _compareNames.filter(n => n !== btn.dataset.name);
-                if (!_compareNames.length) _view = 'projects';
+            if (act === 'compare-add' || act === 'compare-remove') {
+                const n = btn.dataset.name;
+                _compareNames = act === 'compare-add'
+                    ? (_compareNames.includes(n) ? _compareNames : [..._compareNames, n])
+                    : _compareNames.filter(x => x !== n);
+                if (!_compareNames.length && _view === 'compare') _view = 'projects';
+                // 只是切前端的比較清單：專案檔案頁用快取重繪，不再打一次最重的 /project
+                if (_view.startsWith('project:') && _projectCache) { _content.innerHTML = _renderProject(_projectCache); _bind(); return; }
                 return refresh();
             }
             if (act === 'budget') {
@@ -888,8 +974,9 @@ function _bind() {
                 } catch (e) { return alert('改預算失敗：' + (e.message || e)); }
             }
             if (act === 'export-month' || act === 'export-project') {
-                const q = act === 'export-month' ? 'month=' + _month : 'project=' + encodeURIComponent(btn.dataset.name);
-                return _download('/api/v1/timesheets/export.csv?' + q);
+                const key = act === 'export-month' ? _month : btn.dataset.name;
+                const q = act === 'export-month' ? 'month=' + _month : 'project=' + encodeURIComponent(key);
+                return authDownload('/api/v1/timesheets/export.csv?' + q, `timesheets_${key}.csv`, '匯出');
             }
             if (act === 'digest-toggle') {
                 try { _digestCache = await tfetch('/api/v1/timesheets/digest', { method: 'PUT', body: { enabled: btn.dataset.on === '1' } }); return refresh(); }
@@ -905,20 +992,47 @@ function _bind() {
                 } catch (e) { pre.style.display = ''; pre.textContent = '失敗：' + (e.message || e); }
                 return;
             }
+            if (act === 'ledger-edit') {
+                const i = (_ledgerCache.items || []).find(x => x.id === btn.dataset.id);
+                const tr = document.querySelector(`[data-ledger-id="${btn.dataset.id}"]`);
+                if (!i || !tr) return;
+                await _projectOptions();
+                tr.outerHTML = _ledgerEditHtml(i);
+                return;
+            }
+            if (act === 'ledger-cancel') return _ledgerRedraw();
+            if (act === 'ledger-save') {
+                const tr = btn.closest('tr');
+                try {
+                    const it = await tfetch('/api/v1/timesheets/rows/' + btn.dataset.id, { method: 'PUT',
+                        body: { ..._rowBody(tr), note: tr.querySelector('[data-f="remark"]').value } });
+                    const k = _ledgerCache.items.findIndex(x => x.id === it.id);
+                    if (k >= 0) _ledgerCache.items[k] = it;
+                    _ledgerRedraw();
+                } catch (e) { tr.querySelector('[data-err]').textContent = e.message || e; }
+                return;
+            }
+            if (act === 'ledger-del') {
+                if (!confirm('刪掉這一列？')) return;
+                try {
+                    await tfetch('/api/v1/timesheets/rows/' + btn.dataset.id, { method: 'DELETE' });
+                    _ledgerCache.items = _ledgerCache.items.filter(x => x.id !== btn.dataset.id);
+                    _ledgerRedraw();
+                } catch (e) { alert('刪除失敗：' + (e.message || e)); }
+                return;
+            }
             if (act === 'row-add') {
                 const tb = document.querySelector('#ts-mine-add tbody');
-                if (tb) { tb.insertAdjacentHTML('beforeend', _newRowHtml()); _bind(); }
+                if (tb) tb.insertAdjacentHTML('beforeend', _newRowHtml());
                 return;
             }
             if (act === 'row-remove') { btn.closest('tr').remove(); return; }
             if (act === 'copy-yesterday') {
                 const tb = document.querySelector('#ts-mine-add tbody');
                 if (!tb || !_mineCache) return;
-                const empty = [...tb.querySelectorAll('.ts-mine-row')].filter(tr => !tr.querySelector('[data-f="project"]').value);
-                empty.forEach(tr => tr.remove());
+                [...tb.querySelectorAll('.ts-mine-row')].filter(tr => !tr.querySelector('[data-f="project"]').value).forEach(tr => tr.remove());
                 (_mineCache.yesterday || []).forEach(i => tb.insertAdjacentHTML('beforeend',
                     _newRowHtml({ project: i.project_name, work_type: i.work_type, note: i.task_note, planned: i.planned_hours, hours: '' })));
-                _bind();
                 return;
             }
             if (act === 'mine-submit') return _mineSubmit();
@@ -995,6 +1109,4 @@ function _bind() {
                     slot.innerHTML = `<div style="color:#f87171;padding:8px;">載入失敗：${esc(e.message || e)}</div>`;
                 }
             }
-        });
-    });
 }
