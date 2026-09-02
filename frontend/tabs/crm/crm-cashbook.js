@@ -560,14 +560,17 @@ window._cashInvPick = (ev, id) => {
             // 已收齊、不在候選清單裡、但正掛在這一列上的那幾張：不補進視窗就會被存檔
             // 洗掉。列上只有「金額最大那張」的抬頭，第二、三張要撈現有分配才有真的
             // 號碼與金額（捏造成主發票的抬頭＋$0 會讓人以為掛錯張）。
-            let linked = [];
             try {
                 existing = (await _fetch(`/cash-entries/${e.id}/invoices`)).items || [];
-                linked = existing.filter((it) => !it.missing
-                        && !_invoiceList.some((x) => x.id === it.invoice_id))
-                    .map((it) => ({ id: it.invoice_id, invoice_number: it.invoice_number || '',
-                                    title: it.title || '', amount_total: it.amount_total || 0 }));
-            } catch (_) { /* 撈不到就只列候選 */ }
+            } catch (err) {
+                // 看不到現有分配就不開視窗 —— 開了再存檔，等於把看不到的金額／匯費洗掉
+                crmToast('撈不到現有分配：' + err.message, true);
+                return;
+            }
+            const linked = existing.filter((it) => !it.missing
+                    && !_invoiceList.some((x) => x.id === it.invoice_id))
+                .map((it) => ({ id: it.invoice_id, invoice_number: it.invoice_number || '',
+                                title: it.title || '', amount_total: it.amount_total || 0 }));
             openInvoicePicker({
                 invoices: _invoiceList,
                 currentIds: _invIds(e),
@@ -579,38 +582,32 @@ window._cashInvPick = (ev, id) => {
         },
         apply: async (ids, e) => {
             // 現有分配先撈回來 —— 留著的那幾張要原封帶走（金額＋匯費）
-            const keep = {};
-            (existing || (await _fetch(`/cash-entries/${e.id}/invoices`)).items || [])
-                .forEach((it) => { keep[it.invoice_id] = it; });
+            const keep = Object.fromEntries((existing || []).map((it) => [it.invoice_id, it]));
             // 🔴 預帶走分配面板同一支 `toItem`，但殘額要餵**這一列自己的** ——
             // 它的預設值 `_allocRemainCash()` 讀的是面板上一次開的那一列，從列表叫
             // 會拿到別列的數字、靜靜寫一個錯的匯費進 DB。
             const picked = ids || [];
-            let left = Number(e.deposit) || 0;
-            picked.forEach((iid) => {
-                if (keep[iid]) { left -= Number(keep[iid].amount) || 0; }
-            });
+            let left = _allocRemain(e.deposit, picked.filter((iid) => keep[iid]).map((iid) => keep[iid]));
             const items = [];
             const over = [];
             picked.forEach((iid) => {
-                if (keep[iid]) {
-                    items.push({ invoice_id: iid, amount: keep[iid].amount, fee: keep[iid].fee || 0 });
-                    return;
-                }
+                if (keep[iid]) { items.push(keep[iid]); return; }   // 原封帶走（金額＋匯費）
                 // 沒在 keep 裡的一定在候選清單（視窗只列這兩種）
                 const inv = _invoiceList.find((x) => x.id === iid);
                 const it = _ALLOC_SIDES.invoice.toItem(inv, Math.max(0, left));
                 left -= it.amount;
                 // 🔴 金額 0 後端會擋（分配 ≤ 0 是一定錯）—— 濾掉，但要講出來（同請款單
                 // 那側），不然使用者勾了三張、存完只剩兩張，畫面上沒有任何跡象。
-                if (it.amount > 0) { items.push({ invoice_id: iid, amount: it.amount, fee: it.fee }); }
+                if (it.amount > 0) { items.push(it); }
                 else { over.push(inv.invoice_number || inv.title || iid); }
             });
             if (over.length) {
                 crmToast(`${over.join('、')} 沒有尚欠金額，沒有掛上去`, true);
             }
-            return _fetch(`/cash-entries/${id}/invoices`,
-                          { method: 'PUT', body: JSON.stringify({ items }) });
+            return _fetch(`/cash-entries/${id}/invoices`, {
+                method: 'PUT',
+                body: JSON.stringify({ items: _allocBody(_ALLOC_SIDES.invoice, items) }),
+            });
         },
         patch: (e, ids) => {
             e.invoice_ids = (ids || []).slice();
@@ -1833,11 +1830,23 @@ function _allocColor(state) {
 /** 這筆收款還沒被分配掉的入帳金額。掛上一張發票時拿它預帶匯費：
  *  「還沒收的部分」比「還剩多少錢可分」多幾十塊 → 那幾十塊就是被匯出行扣走的。
  *  check.actual 是後端送來的實收（收付兩側同一個欄位，見 _allocStatusLine）。 */
+/** 這筆收款還沒分配掉的入帳金額 —— 純函式：面板餵自己的 (actual, items)，列表的
+ *  就地連結餵那一列的（面板那份讀全域 _CASH_ALLOC，從列表叫會拿到別列的數字）。 */
+function _allocRemain(actual, items) {
+    const used = (items || []).reduce((n, x) => n + (Number(x.amount) || 0), 0);
+    return Math.max(0, (Number(actual) || 0) - used);
+}
 function _allocRemainCash() {
     const st = _CASH_ALLOC;
-    const actual = (st && st.check && st.check.actual) || 0;
-    const used = ((st && st.items) || []).reduce((n, x) => n + (Number(x.amount) || 0), 0);
-    return Math.max(0, actual - used);
+    return _allocRemain(st && st.check && st.check.actual, st && st.items);
+}
+
+/** PUT 的 items 形狀：{idKey, amount[, fee]} —— 面板存檔與就地連結同一份投影。 */
+function _allocBody(c, items) {
+    return items.map(x => ({
+        [c.idKey]: x[c.idKey], amount: Number(x.amount) || 0,
+        ...(c.perItemFee ? { fee: Math.max(0, Math.round(Number(x.fee) || 0)) } : {}),
+    }));
 }
 
 // 兩側（收款掛發票／匯款掛請款單）是**同一個面板**，只是換掉九樣東西。
@@ -2096,10 +2105,7 @@ async function _allocSave(side, btn, fee) {
             //    2026-08-24 owner 踩到的就是這裡：只把 30 填進匯費、amount 還停在
             //    149,870 → deposit 被補成 149,900、分配卻沒跟上，那 30 元繞一圈
             //    變成「還有沒掛上的發票」，發票也還是尚欠 30。
-            items: st.items.map(x => ({
-                [c.idKey]: x[c.idKey], amount: Number(x.amount) || 0,
-                ...(c.perItemFee ? { fee: Math.max(0, Math.round(Number(x.fee) || 0)) } : {}),
-            })),
+            items: _allocBody(c, st.items),
         };
         if (fee != null) body.fee = fee;
         const r = await _fetch(`/cash-entries/${st.entryId}/${c.path}`, {

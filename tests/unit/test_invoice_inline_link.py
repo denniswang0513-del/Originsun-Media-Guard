@@ -51,7 +51,9 @@ def test_already_linked_invoices_keep_their_amount_and_fee():
     js = js_code_only(repo_src(CB))
     fn = js_func_body(js, "window._cashInvPick = (ev, id) => {")
     assert "await _fetch(`/cash-entries/${e.id}/invoices`)" in fn, "沒撈現有分配"
-    assert "keep[iid].amount" in fn and "keep[iid].fee" in fn
+    assert "items.push(keep[iid])" in fn, "本來掛著的那幾張沒原封帶走"
+    # 殘額與 PUT 投影都走面板同一份純函式（不再各算一次）
+    assert "_allocRemain(e.deposit" in fn and "_allocBody(_ALLOC_SIDES.invoice, items)" in fn
 
 
 def test_only_income_rows_get_the_invoice_picker():

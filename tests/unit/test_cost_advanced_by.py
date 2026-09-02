@@ -26,7 +26,9 @@ def test_the_button_reuses_the_existing_payment_flow():
     # 🔴 釘的是「只有一個地方在組那顆按鈕」，不是它的參數排版 ——
     # 釘字面的話，有人把參數換行或改成物件展開就紅，而行為一點都沒變。
     body = js_func_body(js, "async function _loadCostStaff(")
-    assert body.count("<button class=\"crm-btn crm-btn-secondary crm-btn-sm\"") == 1,         "按鈕又被抄成多份了"
+    assert body.count("var payBtn = function(") == 1, "按鈕又被抄成多份了"
+    # 小按鈕的 HTML 模板整檔只有 _smallBtn 那一份（請款三顆／付款動作／預支三顆都吃它）
+    assert js.count('<button class="crm-btn crm-btn-secondary crm-btn-sm"') == 1, "小按鈕模板又被抄了"
     assert "advanced" in body and "費用已代墊" in body
     # 代墊沒有自己的建立端點 —— `_costCreatePayment` 裡只有一次 POST
     # （檔案裡另一次是「新增預支」，那是 is_advance=1 的另一個功能）

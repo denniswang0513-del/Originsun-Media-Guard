@@ -111,12 +111,9 @@ async function _loadCostStaff(projectId) {
                 // _costCreatePayment 的簽章要改三處（加第五個參數時已經證明過）
                 var payBtn = function(status, label, opt) {
                     opt = opt || {};
-                    return '<button class="crm-btn crm-btn-secondary crm-btn-sm"'
-                        + ' style="font-size:10px;padding:1px 6px;' + (opt.gap ? 'margin-left:4px;' : '') + '"'
-                        + (opt.title ? ' title="' + opt.title + '"' : '')
-                        + ' onclick="window._costCreatePayment(\'' + _eName + '\',' + subtotal
+                    return _smallBtn('window._costCreatePayment(\'' + _eName + '\',' + subtotal
                         + ',\'' + _eItems + '\',' + '\'' + status + '\''
-                        + (opt.advanced ? ',true' : '') + ')">' + label + '</button>';
+                        + (opt.advanced ? ',true' : '') + ')', label, opt);
                 };
                 // 費用已代墊（owner 2026-09-02）：這筆錢別人先掏了，公司要還的
                 // 是**代墊人**。開的是同一個請款視窗、預先勾好代墊 —— 那個機制
@@ -233,9 +230,9 @@ async function _loadAdvances(projectId) {
             html += '<span style="color:' + balanceColor + ';font-weight:600;">' + balanceLabel + '</span>';
             html += '<span style="flex:1;"></span>';
             if (!a.is_settled) {
-                html += '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="font-size:10px;padding:1px 6px;" onclick="window._advAddExpense(\'' + _esc(a.payee_name).replace(/'/g, "\\'") + '\',\'' + a.id + '\')">+ 登記支出</button>';
-                html += '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px;" onclick="window._advLinkExpenses(\'' + a.id + '\')">關聯既有</button>';
-                html += '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px;" onclick="window._advShareLink(\'' + a.id + '\')">分享連結</button>';
+                html += _smallBtn('window._advAddExpense(\'' + _esc(a.payee_name).replace(/'/g, "\\'") + '\',\'' + a.id + '\')', '+ 登記支出', {});
+                html += _smallBtn('window._advLinkExpenses(\'' + a.id + '\')', '關聯既有', { gap: true });
+                html += _smallBtn('window._advShareLink(\'' + a.id + '\')', '分享連結', { gap: true });
             }
             html += '</div>';
             html += '</div>';
@@ -650,26 +647,27 @@ window._costPayWithdraw = async function(id, summary, onDone) {
 };
 
 /** 這張單在畫面上該給哪幾顆動作鈕。列上與詳情視窗共用同一份。 */
+/** 財務區的小按鈕（請款三顆／付款動作／預支三顆）只有這一份模板 ——
+ *  onclick 字串由呼叫端組，這裡只管樣式：gap＝左邊留 4px、css 追加、title 提示。 */
+function _smallBtn(call, label, opt) {
+    opt = opt || {};
+    return '<button class="crm-btn crm-btn-secondary crm-btn-sm"'
+        + ' style="font-size:10px;padding:1px 6px;' + (opt.gap ? 'margin-left:4px;' : '') + (opt.css || '') + '"'
+        + (opt.title ? ' title="' + opt.title + '"' : '')
+        + ' onclick="' + call + '">' + label + '</button>';
+}
+
 window._costPayBtns = function(p, onDoneName) {
     var d = onDoneName ? (',' + onDoneName) : '';
-    var sty = 'font-size:10px;padding:1px 6px;margin-left:4px;';
     var sm = _esc(p.summary || '').replace(/'/g, "\\'");
-    var btn = function(css, title, call, label) {
-        return '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="' + sty + css + '"'
-            + ' title="' + title + '"'
-            + ' onclick="' + call + '">' + label + '</button>';
-    };
     if (p.payment_status === '已付款') {
-        return btn('', '改回應付款（單子留著）',
-                   'window._costPayMark(\'' + p.id + '\',false' + d + ')',
-                   '改回應付');
+        return _smallBtn('window._costPayMark(\'' + p.id + '\',false' + d + ')', '改回應付',
+                         { gap: true, title: '改回應付款（單子留著）' });
     }
-    return btn('color:#86efac;', '標記為已付款',
-               'window._costPayMark(\'' + p.id + '\',true' + d + ')',
-               '標記付款')
-        + btn('color:#fca5a5;', '撤掉這張請款單（改好再請一次）',
-              'window._costPayWithdraw(\'' + p.id + '\',\'' + sm + '\'' + d + ')',
-              '收回請款');
+    return _smallBtn('window._costPayMark(\'' + p.id + '\',true' + d + ')', '標記付款',
+                     { gap: true, css: 'color:#86efac;', title: '標記為已付款' })
+        + _smallBtn('window._costPayWithdraw(\'' + p.id + '\',\'' + sm + '\'' + d + ')', '收回請款',
+                    { gap: true, css: 'color:#fca5a5;', title: '撤掉這張請款單（改好再請一次）' });
 };
 
 window._costViewPayment = async function(paymentId, onDoneName) {

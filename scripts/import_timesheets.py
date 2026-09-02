@@ -113,7 +113,7 @@ def _dry_run(hours, P, prod: bool) -> None:
     P("")
     P("## 撞案（owner 在 tab 上「指定專案」）")
     for p, h, info in tiers.get("ambiguous", []):
-        P(f"- {p}（{h}h）→ 候選 {[(pid[:8], cli) for pid, _nm, cli in info['candidates']]}")
+        P(f"- {p}（{h}h）→ 候選 {[(c['id'][:8], c['client']) for c in info['candidates']]}")
     P("")
     P("## 找不到（owner 決定：對既有案／建新案／當桶）—— 括號內是相似案名建議，不是對映")
     for p, h, info in tiers.get("none", []):

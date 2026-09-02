@@ -94,7 +94,7 @@ def test_the_claimed_row_can_be_taken_back():
     assert "已付款" in fn and "改回應付" in fn
     assert "標記付款" in fn and "收回請款" in fn
     # 已付款的單不給收回 —— 錢都出去了還撤單，帳上會少一筆付款
-    head = fn.split("return btn('color:#86efac;'")[0]
+    head = fn.split("'標記付款'")[0]          # 「標記付款」之前＝已付款那條分支
     assert "_costPayWithdraw" not in head, "已付款那條路也給了收回鈕"
 
 

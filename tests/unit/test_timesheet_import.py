@@ -82,7 +82,7 @@ def test_lookup_keeps_collisions_visible_and_exposes_candidates():
     候選由 lookup 自帶案名與客戶，讀路徑不必再多打一次 DB。"""
     lk = _lk()
     assert len(lk.by_name["媒體顧問 202608"]) == 2
-    assert {c[0] for c in lk.candidates("典藏藝術家庭_媒體顧問 202608")} == {"b", "c"}
+    assert {c["id"] for c in lk.candidates("典藏藝術家庭_媒體顧問 202608")} == {"b", "c"}
     assert unique_hit([]) == (None, "none")
     assert unique_hit([("x",)]) == (("x",), "exact")
     assert unique_hit([("x",), ("y",)]) == (None, "ambiguous")
@@ -102,7 +102,8 @@ def test_staff_resolution_and_miss_buckets_share_the_project_contract():
         assert miss_bucket(why) is None, why
     src = code_only(repo_src("routers/api_timesheets.py"))
     for fn in ("async def ingest_rows(", "async def set_budgets(", "async def insert_manual_rows("):
-        assert "miss_bucket(" in func_body(src, fn), f"自己分桶：{fn}"
+        assert ".note(" in func_body(src, fn) and ".report(" in func_body(src, fn), f"自己收桶：{fn}"
+    assert "miss_bucket(" not in src, "router 又自己分桶了（走 Misses）"
     assert "unique_hit(" not in src, "router 自己判人員同名，沒走 resolve_staff"
 
 
@@ -144,11 +145,7 @@ def test_every_entry_point_shares_one_lookup_and_one_resolver():
         assert "load_project_lookup(session)" in func_body(src, fn), fn
     assert "/project_map" in src and "async def list_project_map" not in src, "沒人讀的清單端點又長回來了"
     assert "name_to_id" not in src, "第二份名稱對映還在"
-    # 列私帳案、寫對映／回填／預算：同一條 mine 守衛（行為見 test_the_mine_guard_refuses_by_status）
-    for fn in ("async def timesheet_projects(", "async def burn_summary("):
-        assert "_require_mine_admin(request)" in func_body(src, fn), f"沒套 mine 守衛：{fn}"
-    for fn in ("async def upsert_project_map(", "async def remap_timesheets(", "async def set_budgets("):
-        assert "_require_mine_admin(request" in func_body(src, fn), f"寫私帳沒套 mine 守衛：{fn}"
+    # mine 守衛：行為測試在 test_mapping_endpoints_refuse_before_touching_the_db，不釘拼字
     svc = code_only(repo_src("services/timesheet_lookup.py"))
     assert "is_mine(CrmProject.entity)" in svc, "自動對映只認私帳（owner 2026-09-02）"
     # remap 的判定走純函式，並且依名字聚合（不是 9,800 列逐列）
@@ -201,7 +198,7 @@ def test_ingest_only_accepts_the_two_sources_and_fills_staff_id():
     assert "source=req.source" in fn
     assert "staff_id=sid" in fn
     # 人員同名兩人不猜，而且分開回報（不是壓成「找不到」）
-    assert "resolve_staff(" in fn and "staff_ambiguous" in fn
+    assert "resolve_staff(" in fn and 'report("staff")' in fn
     # 逐列 budget 鏡射那條死路已經拿掉：預算只從 PUT /budgets 進
     assert "budget" not in fn
     assert "budget:" not in code_only(func_body(repo_src("core/schemas.py"), "class TimesheetRow("))
@@ -227,7 +224,7 @@ def test_the_burn_board_tells_the_owner_why_a_name_is_unmatched():
     # 「沒對到要附什麼」是純函式：撞案附候選、找不到附建議、其他什麼都不附
     lk = _lk()
     assert explain_miss("典藏_年度影片", lk)["reason"] == "ambiguous"
-    assert {c[0] for c in explain_miss("典藏_年度影片", lk)["candidates"]} == {"g", "h"}
+    assert {c["id"] for c in explain_miss("典藏_年度影片", lk)["candidates"]} == {"g", "h"}
     assert explain_miss("源日後期_作品集更新", lk) == {"reason": "none", "suggestions": []}
     assert explain_miss("行政庶務", lk) == {"reason": "bucket"}
     src = repo_src("routers/api_timesheets.py")

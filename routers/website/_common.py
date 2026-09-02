@@ -105,14 +105,8 @@ def current_username(request: Request) -> str:
     login flow），`username` 是 fallback。之前寫錯讓所有 inquiry.handled_by
     都被記成 "admin"。
     """
-    try:
-        from core.auth import _extract_token
-        payload = _extract_token(request)
-        if payload:
-            return payload.get("sub") or payload.get("username") or "admin"
-    except Exception:
-        pass
-    return "admin"
+    from core.auth import current_username as _cu   # 正本；官網七個呼叫端沿用的同名轉呼叫
+    return _cu(request)
 
 
 def admin_guard(request: Request) -> None:

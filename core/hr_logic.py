@@ -254,15 +254,46 @@ def sheet_project_key(name: str) -> str:
     return split_sheet_name(name)[1]
 
 
+def project_row(pid, name, client) -> dict:
+    """查表裡一案的形狀 `{"id","name","client"}` —— 直接就是回給前端的 JSON，
+    router／腳本不必各自從 tuple 重拼一次欄位順序。"""
+    return {"id": pid, "name": (name or "").strip(), "client": client or ""}
+
+
+def _row_name(row) -> str:
+    return row["name"] if isinstance(row, dict) else (row[1] or "").strip()
+
+
 def group_by_name(rows) -> dict:
-    """`[(id, name, …), …]` → `{name: [row, …]}`；同名**不合併** —— 撞名要在判定時被看見，
-    不是在建表時被最後一筆蓋掉。空名跳過。"""
+    """`[(id, name, …), …]` 或 `[project_row, …]` → `{name: [row, …]}`；同名**不合併** ——
+    撞名要在判定時被看見，不是在建表時被最後一筆蓋掉。空名跳過。"""
     out: dict = {}
     for row in rows:
-        nm = (row[1] or "").strip()
+        nm = _row_name(row)
         if nm:
             out.setdefault(nm, []).append(row)
     return out
+
+
+class Misses:
+    """「沒對到」的收集器：撞案／找不到兩桶，四個寫入點（ingest 專案、ingest 人員、
+    budgets、手填）共用 —— 容器與回應鍵名各寫一次就會漂（budgets 曾用 list，
+    同名重複會回兩次）。"""
+
+    def __init__(self):
+        self.ambiguous: set = set()
+        self.unmatched: set = set()
+
+    def note(self, why: str, name: str):
+        b = miss_bucket(why)
+        if b:
+            getattr(self, b).add(name)
+        return b
+
+    def report(self, kind: str = "projects") -> dict:
+        if kind == "staff":
+            return {"staff_ambiguous": sorted(self.ambiguous), "staff_unmatched": sorted(self.unmatched)}
+        return {"ambiguous_projects": sorted(self.ambiguous), "unmatched_projects": sorted(self.unmatched)}
 
 
 def unique_hit(hits) -> tuple:
@@ -305,15 +336,12 @@ class ProjectLookup(NamedTuple):
     def build(cls, project_map: dict, rows) -> "ProjectLookup":
         """`rows` = `[(id, name, client_short_name), …]`（呼叫端只放**私帳**：owner
         2026-09-02「這張表對應的是私帳的專案」）。"""
-        by_name: dict = {}
+        norm = [project_row(pid, nm, cli) for pid, nm, cli in rows]
+        by_name = group_by_name(norm)                 # 同名不合併、空名跳過，同人員那份
         by_key: dict = {}
-        for pid, nm, cli in rows:
-            nm = (nm or "").strip()
-            if not nm:
-                continue
-            row = (pid, nm, cli or "")
-            by_name.setdefault(nm, []).append(row)
-            by_key.setdefault(sheet_project_key(nm), []).append(row)
+        for row in norm:
+            if row["name"]:
+                by_key.setdefault(sheet_project_key(row["name"]), []).append(row)
         return cls(dict(project_map or {}), by_name, by_key)
 
     def candidates(self, name: str) -> list:
@@ -344,19 +372,19 @@ def resolve_project(name: str, lk: ProjectLookup) -> tuple:
         return None, "bucket"
     hit, _ = unique_hit(lk.by_name.get(n))
     if hit:
-        return hit[0], "exact"
+        return hit["id"], "exact"
     cli, key = split_sheet_name(n)
     hits = lk.by_key.get(key) or []
     hit, why = unique_hit(hits)
     if hit:
-        return hit[0], "key"
+        return hit["id"], "key"
     if why == "ambiguous":
         # Sheet 前綴是客戶的**簡稱**（「典藏藝術家庭」），clients.short_name 常是全名
         # （「典藏藝術家庭股份有限公司」）—— 認「以前綴開頭」，仍是精確比對不是模糊：
         # 唯一一案的客戶名以這個前綴開頭才算，兩案都符合照樣回 ambiguous。
-        hit, _ = unique_hit([h for h in hits if cli and (h[2] or "").startswith(cli)])
+        hit, _ = unique_hit([h for h in hits if cli and (h["client"] or "").startswith(cli)])
         if hit:
-            return hit[0], "key+client"
+            return hit["id"], "key+client"
         return None, "ambiguous"
     return None, "none"
 
