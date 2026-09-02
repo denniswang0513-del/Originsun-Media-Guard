@@ -275,18 +275,11 @@ _TW_TZ = ZoneInfo("Asia/Taipei")
 
 
 def _fmt_day(dt) -> str:
-    """timestamptz → 'YYYY-MM-DD'（台北），None → ''。
-
-    🔴 aware datetime 不准直接 strftime/取 date：寫入端是 naive（PG 依 session
-    時區 Asia/Taipei 解讀 → 存成前一天 16:00Z），asyncpg 讀回是 aware UTC ——
-    面值取日期就差一天（2026-08-18 在雜支消費日踩到，hr_logic/api_proposals
-    早各修過一次）。naive 視為本地 wallclock 直接取。
-    """
-    if not dt:
-        return ""
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(_TW_TZ)
-    return dt.strftime("%Y-%m-%d")
+    """timestamptz → 'YYYY-MM-DD'（台北），None → ''。規則只有 core.hr_logic.tw_day 一份
+    （aware 轉台北、naive 視為本地 wallclock；面值 strftime 在 +08 會差一天）。"""
+    from core.hr_logic import tw_day
+    d = tw_day(dt)
+    return d.isoformat() if d else ""
 
 
 def map_csv_row(col_map: dict, header_map: dict, row: dict, coerce=None) -> dict:

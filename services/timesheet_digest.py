@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from core.hr_logic import (ACTIVE_WINDOW_DAYS, active_fillers, digest_text, hours_rollup,
-                           is_workday, local_day, missing_fillers)
+                           is_workday, tw_day, missing_fillers)
 from services.timesheet_settings import SettingsBlock
 
 logger = logging.getLogger(__name__)
@@ -37,10 +37,10 @@ async def build_digest(session, today: date | None = None) -> dict:
         select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name, Timesheet.hours)
         .where(Timesheet.work_date >= d0 - timedelta(days=ACTIVE_WINDOW_DAYS))
         .where(Timesheet.work_date < d0 + timedelta(days=7)))).all()
-    data = [(n, local_day(d), p, h) for n, d, p, h in rows]
+    data = [(n, tw_day(d), p, h) for n, d, p, h in rows]
     week = [x for x in data if x[1] and x[1] >= mon]
     active = active_fillers(data, sun)
-    rollup = hours_rollup(week, mon.year, mon.month)
+    rollup = hours_rollup(week, mon.year, mon.month)   # 年月只餵 reference_hours，digest_text 不看它
     missing: dict = {}
     for i in range(7):
         day = mon + timedelta(days=i)
@@ -66,7 +66,7 @@ async def send_digest(force: bool = False) -> dict:
     try:
         async with factory() as session:
             d = await build_digest(session)
-        sent = send_google_chat(d["text"])
+        sent = await asyncio.to_thread(send_google_chat, d["text"])   # requests 是同步的
         summary = f"{datetime.now():%m/%d %H:%M} {d['week']}：{len(d['rollup']['people'])} 人" + ("" if sent else "（沒設 webhook，沒送）")
         settings.mark(last_run_at=time.time(), last_summary=summary)
         return {"status": "ok" if sent else "skipped", "text": d["text"], "sent": sent}

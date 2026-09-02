@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Optional
 
 from core.schemas import TimesheetRow
-from services.timesheet_ingest import ingest
+from services.timesheet_ingest import ingest, ingest_context
 from services.timesheet_settings import SettingsBlock
 from services.timesheet_sheet import fetch_xlsx, load_workbook, read_rows
 
@@ -67,10 +67,12 @@ async def run_pull(force: bool = False) -> dict:
             tot = {"inserted": 0, "skipped": 0, "skipped_manual_priority": 0}
             sets = {k: set() for k in ("ambiguous_projects", "unmatched_projects",
                                        "staff_ambiguous", "staff_unmatched")}
+            async with factory() as session:      # 查表建一次，20 批共用
+                ctx = await ingest_context(session, (x["staff"] for x in good))
             for i in range(0, len(good), _BATCH):
                 chunk = [TimesheetRow(**x) for x in good[i:i + _BATCH]]
                 async with factory() as session:
-                    r = await ingest(session, chunk, "sheet")
+                    r = await ingest(session, chunk, "sheet", ctx)
                 for k in tot:
                     tot[k] += r.get(k, 0)
                 for k in sets:

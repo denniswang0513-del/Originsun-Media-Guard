@@ -158,7 +158,7 @@ function projectHtml(d) {
                 <span style="width:64px;color:var(--sub);">${esc(m)}</span><div class="meter" style="flex:1;"><i style="width:${Math.round(h / maxM * 100)}%"></i></div><span style="width:56px;text-align:right;">${h} h</span></div>`).join("") || `<div class="empty">—</div>`}</div>
         <div class="card wrap"><div class="eyebrow" style="margin-bottom:10px;">Recent <span class="accent">最近 ${d.recent.length} 列</span></div>
             <table><tr><th>日期</th><th>人員</th><th>內容</th><th class="num">時數</th></tr>
-            ${d.recent.map(r => `<tr><td class="sub">${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.task)}</td><td class="num">${r.hours}</td></tr>`).join("")}</table></div>`;
+            ${d.recent.map(r => `<tr><td class="sub">${esc(r.date)}</td><td>${esc(r.staff_name)}</td><td>${esc(r.task_note)}</td><td class="num">${r.hours}</td></tr>`).join("")}</table></div>`;
 }
 
 document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => { _view = t.dataset.view; render(); }));

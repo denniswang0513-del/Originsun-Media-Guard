@@ -128,7 +128,7 @@ def notify_tab(template_key: str, **variables) -> None:
     import re
     msg = re.sub(r"\{[a-z_][a-z0-9_]*\}", "-", msg)
 
-    gchat_url = gchat_webhook_url()
+    gchat_url = gchat_webhook_url(settings)
     # 🔴 級告警優先送「系統告警」聊天室；沒設就回頭用一般聊天室（不能因為沒設而靜音）。
     if is_critical:
         gchat_url = (os.environ.get("ALERT_WEBHOOK") or notif.get("alert_webhook", "") or gchat_url)
@@ -142,12 +142,12 @@ def notify_tab(template_key: str, **variables) -> None:
 
 
 def gchat_webhook_url(settings: dict | None = None) -> str:
-    """一般聊天室的 webhook：環境變數優先，其次 settings.json notification.google_chat_webhook。"""
-    notif = (settings or _load_settings()).get("notification") or {}
+    """一般聊天室的 webhook：環境變數優先，其次 settings.json notifications.google_chat_webhook。"""
+    notif = (settings or _load_settings()).get("notifications") or {}
     return os.environ.get("GOOGLE_CHAT_WEBHOOK") or notif.get("google_chat_webhook", "")
 
 
-def _post_gchat(url: str, text: str, label: str = "") -> bool:
+def _post_gchat(url: str, text: str, label: str) -> bool:
     try:
         import requests  # type: ignore — 精簡 agent 可能沒裝；缺它不該滅掉 email 那條
         requests.post(url, json={"text": text}, timeout=10).raise_for_status()

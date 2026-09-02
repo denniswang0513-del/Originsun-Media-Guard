@@ -103,9 +103,10 @@ def test_staff_resolution_and_miss_buckets_share_the_project_contract():
         assert miss_bucket(why) is None, why
     src = code_only(repo_src("routers/api_timesheets.py"))
     svc = code_only(repo_src("services/timesheet_ingest.py"))
-    for s, fn in ((svc, "async def ingest("), (src, "async def set_budgets("), (src, "async def insert_manual_rows(")):
+    man = code_only(repo_src("services/timesheet_manual.py"))
+    for s, fn in ((svc, "async def ingest("), (src, "async def set_budgets("), (man, "async def insert_manual_rows(")):
         assert ".note(" in func_body(s, fn) and ".report(" in func_body(s, fn), f"自己收桶：{fn}"
-    for s in (src, svc):
+    for s in (src, svc, man):
         assert "miss_bucket(" not in s, "又自己分桶了（走 Misses）"
         assert "unique_hit(" not in s, "自己判人員同名，沒走 resolve_staff"
 
@@ -132,9 +133,9 @@ def test_suggestions_are_report_only_never_a_write_path():
     assert suggest_projects("完全無關", lk) == []
     src = repo_src("routers/api_timesheets.py")
     for fn in ("async def ingest_rows(", "async def remap_timesheets(",
-               "async def set_budgets(", "async def upsert_project_map(",
-               "async def insert_manual_rows("):
+               "async def set_budgets(", "async def upsert_project_map("):
         assert "suggest_projects" not in code_only(func_body(src, fn)), f"建議函式跑進寫入路徑了：{fn}"
+    assert "suggest_projects" not in code_only(repo_src("services/timesheet_manual.py")), "手填也是寫入路徑"
 
 
 # ── 端點與腳本守的規則（掃原始碼，釘規則不釘排版）──
@@ -144,10 +145,12 @@ def test_every_entry_point_shares_one_lookup_and_one_resolver():
     名稱→專案的判定只有 resolve_project 一支（手填原本自己維護第二份全名精確對映）。"""
     src = code_only(repo_src("routers/api_timesheets.py"))
     for fn in ("async def remap_timesheets(", "async def set_budgets(",
-               "async def burn_summary(", "async def insert_manual_rows(", "async def timesheet_projects("):
+               "async def burn_summary(", "async def timesheet_projects("):
         assert "load_project_lookup(session)" in func_body(src, fn), fn
     assert "load_project_lookup(session)" in func_body(
-        code_only(repo_src("services/timesheet_ingest.py")), "async def ingest(")
+        code_only(repo_src("services/timesheet_manual.py")), "async def insert_manual_rows(")
+    assert "load_project_lookup(session)" in func_body(
+        code_only(repo_src("services/timesheet_ingest.py")), "async def ingest_context(")
     assert "/project_map" in src and "async def list_project_map" not in src, "沒人讀的清單端點又長回來了"
     assert "name_to_id" not in src, "第二份名稱對映還在"
     # mine 守衛：行為測試在 test_mapping_endpoints_refuse_before_touching_the_db，不釘拼字

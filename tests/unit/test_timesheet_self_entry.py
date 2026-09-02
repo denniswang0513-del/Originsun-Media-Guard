@@ -13,18 +13,17 @@ from tests.unit._srcscan import code_only, func_body, repo_src
 def test_can_edit_truth_table():
     mine = dict(staff_id="s1", source="manual", status="draft")
     assert can_edit_timesheet(NS(**mine), "s1") == ""
-    assert can_edit_timesheet(NS(**{**mine, "status": "confirmed"}), "s1") == ""
     assert can_edit_timesheet(NS(**mine), "s2") == "not_owner"
     assert can_edit_timesheet(NS(**mine), "") == "not_owner"            # 沒綁定＝誰的都不是
     assert can_edit_timesheet(NS(**{**mine, "source": "sheet"}), "s1") == "not_manual"
     assert can_edit_timesheet(NS(**{**mine, "source": "import"}), "s1") == "not_manual"
-    for st in ("approved", "locked", "import"):
+    for st in ("approved", "locked", "import", "confirmed"):   # 不審核：這些狀態沒人寫得出來
         assert can_edit_timesheet(NS(**{**mine, "status": st}), "s1") == "locked", st
     # 代碼→給人看的原句只有一份（端點的 detail 從這裡拿）
     from core.hr_logic import EDIT_BLOCK_TEXT
     assert "不是你的" in EDIT_BLOCK_TEXT["not_owner"] and "Sheet" in EDIT_BLOCK_TEXT["not_manual"]
     assert "不能再改" in EDIT_BLOCK_TEXT["locked"]
-    assert EDITABLE_STATUSES == {"plan", "draft", "confirmed"}   # 不審核：計畫與實際都隨時可改
+    assert EDITABLE_STATUSES == {"plan", "draft"}   # 不審核：計畫與實際都隨時可改
 
 
 def test_own_scope_comes_from_the_token_never_the_body():
@@ -52,10 +51,14 @@ def test_own_scope_comes_from_the_token_never_the_body():
 
 
 def test_update_reuses_the_sheet_project_mapping():
-    body = code_only(func_body(repo_src("services/timesheet_self.py"), "async def apply_update("))
-    assert "resolve_project(pname, await load_project_lookup(session))" in body
-    assert "parse_date(body.work_date)" in body
-    assert "row_state(body.hours, body.planned_hours)" in body and "norm_work_type(body.work_type)" in body
+    man = code_only(repo_src("services/timesheet_manual.py"))
+    rule = func_body(man, "def normalize_row(")
+    assert "resolve_project(pname, lk)" in rule and "parse_date(r.work_date)" in rule
+    assert "row_state(r.hours, r.planned_hours)" in rule and "norm_work_type(r.work_type)" in rule
+    # 插入與更新都吃這一支，不各寫一份
+    upd = code_only(func_body(repo_src("services/timesheet_self.py"), "async def apply_update("))
+    assert "normalize_row(" in upd and "load_project_lookup(session)" in upd
+    assert "normalize_row(" in func_body(man, "async def insert_manual_rows(")
 
 
 def test_my_page_talks_to_the_me_endpoints_only():

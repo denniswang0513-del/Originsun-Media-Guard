@@ -23,15 +23,16 @@ from sqlalchemy import func, select  # type: ignore
 
 from core.auth import check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
-from core.hr_logic import (budget_burn, hours_rollup, leave_balance, leave_to_dict, local_day,
-                           month_span, months_back, project_metrics)
+from core.hr_logic import (budget_burn, by_month, day_iso, hours_rollup, leave_balance, leave_to_dict,
+                           month_span, months_back, project_metrics, tw_day)
 from core.identity import resolve_current_staff
 from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetUpdate, MeTodoUpdate)
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
                        CrmProjectStaff, HrLeaveRequest, Timesheet)
 from services.timesheet_lookup import budgets_for
-from services.timesheet_self import add_rows, bound_ident, delete_row, list_rows, update_row
+from services.timesheet_manual import project_options
+from services.timesheet_self import add_rows, bound_ident, delete_row, list_rows, month_or_422, ts_dict, update_row
 from routers.api_hr import approved_annual_used, new_leave_request
 
 router = APIRouter(prefix="/api/v1/me", tags=["me"])
@@ -145,8 +146,7 @@ async def my_workspace(request: Request):
                 .group_by(Timesheet.project_name)
                 .order_by(func.max(Timesheet.work_date).desc())
             )).all()
-            month_start = datetime.now().astimezone().replace(
-                day=1, hour=0, minute=0, second=0, microsecond=0)
+            month_start = month_span("")[0]
             month_hours = (await session.execute(
                 select(func.coalesce(func.sum(Timesheet.hours), 0.0))
                 .where(Timesheet.staff_name == name)
@@ -158,7 +158,7 @@ async def my_workspace(request: Request):
                 "by_project": [{
                     "project_name": r[0] or "(空白)",
                     "hours": round(r[1] or 0, 1), "rows": r[2],
-                    "last_entry": r[3].strftime("%Y-%m-%d") if r[3] else None,
+                    "last_entry": day_iso(r[3]),
                 } for r in ts_rows[:10]],
             }
 
@@ -309,7 +309,6 @@ async def my_timesheet_options(request: Request):
     check_admin_or_module(request, "me_finance")
     ident = await resolve_current_staff(request)
     factory = db_factory_or_503()
-    from routers.api_timesheets import project_options
     async with factory() as session:
         staff_name = ident["staff"].name if ident["staff"] else None
         return {"projects": await project_options(session, staff_name)}
@@ -324,18 +323,11 @@ def _me_ident(request: Request):
     return bound_ident(request, "me_finance")
 
 
-def _month_or_422(month: str):
-    try:
-        return month_span(month)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-
 @router.get("/timesheets")
 async def my_timesheets(request: Request, month: str = ""):
     """本人該月所有列（Sheet＋手填），含 editable 與合計。month=YYYY-MM，預設本月。"""
     ident = await _me_ident(request)
-    m0, m1 = _month_or_422(month)
+    m0, m1 = month_or_422(month)
     factory = db_factory_or_503()
     async with factory() as session:
         items = await list_rows(session, ident, m0, m1)
@@ -377,14 +369,14 @@ async def delete_my_timesheet(row_id: str, request: Request):
 async def team_hours(request: Request, month: str = ""):
     """團隊月表：每人合計／填了幾天／每週小計／各案小計，全體各案合計；參考工時＝工作日×8。"""
     await _me_ident(request)
-    m0, m1 = _month_or_422(month)
+    m0, m1 = month_or_422(month)
     factory = db_factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
             select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name, Timesheet.hours)
             .where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
         )).all()
-    data = [(n, local_day(d), p, h) for n, d, p, h in rows]     # rollup 只算實際（計畫列不算）
+    data = [(n, tw_day(d), p, h) for n, d, p, h in rows]     # rollup 只算實際（計畫列不算）
     return {"month": m0.strftime("%Y-%m"), **hours_rollup(data, m0.year, m0.month)}
 
 
@@ -409,10 +401,9 @@ async def team_projects(request: Request, months: int = 12):
     for pname, pid, total, people, last in rows:
         b = budgets.get(pid)
         total = round(float(total or 0), 1)
-        last_day = local_day(last)
         items.append({"project_name": pname or "(空白)", "hours": total, "people": people,
                       "budget_hours": b, **budget_burn(total, b),
-                      "last_entry": last_day.isoformat() if last_day else None})
+                      "last_entry": day_iso(last)})
     items.sort(key=lambda x: -x["hours"])
     return {"since": since.strftime("%Y-%m"), "months": months, "items": items,
             "total": round(sum(i["hours"] for i in items), 1)}
@@ -428,19 +419,12 @@ async def team_project_detail(request: Request, name: str = ""):
     factory = db_factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
-            select(Timesheet.staff_name, Timesheet.work_date, Timesheet.task_note, Timesheet.work_type, Timesheet.hours)
-            .where(Timesheet.project_name == name).where(Timesheet.hours > 0)
-            .order_by(Timesheet.work_date.desc())
-        )).all()
-    m = project_metrics((local_day(d), n, wt, h) for n, d, _t, wt, h in rows)
-    by_month: dict = {}
-    for _n, d, _t, _wt, h in rows:
-        ld = local_day(d)
-        if ld:
-            by_month[ld.strftime("%Y-%m")] = round(by_month.get(ld.strftime("%Y-%m"), 0.0) + float(h or 0), 1)
+            select(Timesheet).where(Timesheet.project_name == name).where(Timesheet.hours > 0)
+            .order_by(Timesheet.work_date.desc()))).scalars().all()
+    m = project_metrics((tw_day(r.work_date), r.staff_name, r.work_type, r.hours) for r in rows)
     return {
         "project_name": name, "total": m["total"], "by_person": m["by_person"],
+        "by_month": by_month((tw_day(r.work_date), r.hours) for r in rows),
         "by_month": sorted(by_month.items()),
-        "recent": [{"date": (local_day(d).isoformat() if d else ""), "name": n or "",
-                    "task": t or "", "hours": round(float(h or 0), 2)} for n, d, t, _wt, h in rows[:60]],
+        "recent": [ts_dict(r) for r in rows[:60]],
     }

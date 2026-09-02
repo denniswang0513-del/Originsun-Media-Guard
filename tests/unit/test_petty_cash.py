@@ -706,7 +706,8 @@ def test_expense_dates_are_formatted_in_taipei():
     aware UTC —— 面值 strftime/isoformat 取日期就差一天。2026-08-18 在消費日
     實測踩到（送 08-01 回讀 07-31）。
     """
-    assert "def _fmt_day" in SHARED_SRC and "astimezone(_TW_TZ)" in SHARED_SRC
+    assert "def _fmt_day" in SHARED_SRC and "tw_day(" in SHARED_SRC       # 委派 hr_logic 那一份
+    assert "astimezone(_TW)" in (REPO / "core" / "hr_logic.py").read_text(encoding="utf-8")
     # costs 的 _fmt_date 委派給 _fmt_day
     fmt = COSTS_SRC.split("def _fmt_date")[1].split("\ndef ")[0]
     assert "_fmt_day" in fmt and "isoformat" not in fmt

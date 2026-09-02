@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from core.hr_logic import ProjectLookup, group_by_name, lookup_row
+from core.hr_logic import ProjectLookup, budget_burn, group_by_name, is_stale, lookup_row, tw_day
 from core.ledger import is_mine
 
 
@@ -42,3 +42,32 @@ async def load_staff_index(session) -> dict:
     from db.models import CrmStaff
     rows = (await session.execute(select(CrmStaff.id, CrmStaff.name))).all()
     return group_by_name([lookup_row(sid, nm) for sid, nm in rows])
+
+
+async def burn_rows(session) -> list:
+    """burn 表的專案那一半（/summary 與 /dashboard 共用）：每個已對映案的已投入／預算／消耗率／停滯。
+    只選要用的四欄 —— CrmProject 六十多欄含幾個 JSONB／Text，三百案整列撈是白費。"""
+    from datetime import date
+    from sqlalchemy import func as safunc
+    from db.models import CrmProject, Timesheet
+    matched = (await session.execute(
+        select(Timesheet.project_id, safunc.sum(Timesheet.hours), safunc.count(Timesheet.id),
+               safunc.max(Timesheet.work_date))
+        .where(Timesheet.project_id.isnot(None)).group_by(Timesheet.project_id))).all()
+    pids = [m[0] for m in matched]
+    projs = {pid: (name, status, budget) for pid, name, status, budget in (await session.execute(
+        select(CrmProject.id, CrmProject.name, CrmProject.status, CrmProject.budget_hours)
+        .where(CrmProject.id.in_(pids)))).all()} if pids else {}
+    today = date.today()
+    items = []
+    for pid, total, cnt, last_date in matched:
+        name, status, budget = projs.get(pid, ("", "", None))
+        last_day = tw_day(last_date)
+        items.append({
+            "project_id": pid, "project_name": name or "", "status": status or "",
+            "hours_used": round(total or 0, 1), "budget_hours": budget, **budget_burn(total, budget),
+            "rows": cnt, "last_entry": last_day.isoformat() if last_day else None,
+            "stale": is_stale(status or "", last_day, today),
+        })
+    items.sort(key=lambda x: (x["pct"] is None, -(x["pct"] or 0)))
+    return items

@@ -2,10 +2,10 @@
  * timesheets.js — 工作追蹤 Tab（人事管理；docs/WORK_TRACKING_UI_PLAN.md P1）
  *
  * MASTER 同源功能：打 /api/v1/timesheets/*（帶 auth token）。
- * 六個分頁：今日（每日看板：每個人每天做了什麼，實際為主、計畫加分）／我的一天（登入者
+ * 七個分頁：今日（每日看板：每個人每天做了什麼，實際為主、計畫加分）／我的一天（登入者
  * 自己記：實際或計畫、時數快捷鈕、複製昨天）／專案（burn 表 → 專案檔案頁、類似專案並排）／
- * 人員（月視圖 → 人員檔案頁）／儀表板（大家四格＋主管兩格）／設定（Sheet 拉取、digest、未對映
- * 指定、代填、token；管理員）。
+ * 人員（月視圖 → 人員檔案頁）／總表（一個月每一列，管理員逐列改細節與備註）／儀表板（大家
+ * 四格＋主管兩格）／設定（Sheet 拉取、digest、未對映指定、代填、token；管理員）。
  * 一列的「計畫／實際」由後端的 status 決定（plan／draft），這裡只顯示、不再自己判。
  * 事件：整個 tab 一個委派的 click 監聽（initTimesheetsTab 註冊一次），局部重繪不再重綁。
  * 資料 = Google Sheet 每小時拉 + 系統內填（同人同日同案手填優先）。不審核。
@@ -33,7 +33,8 @@ async function tfetch(path, opts = {}) {
 }
 
 let _content = null;
-let _view = 'today';                                   // today | mine | projects | staff | dash | settings
+let _view = 'today';   // today | mine | projects | staff | ledger | dash | settings | compare | project:<案名> | person:<人名>
+let _workTypes = [];   // 後端的 WORK_TYPES（/mine 與 /rows 都帶）
 let _month = _today().slice(0, 7);   // YYYY-MM（本地時區；toISOString 是 UTC，1 號早上會停在上個月）
 let _day = _today();                 // 今日看板／我的一天的日期
 let _boardDays = 1;                  // 1＝日、7＝週
@@ -173,10 +174,10 @@ const _recentSorter = createSortable({
     onChange: () => _redrawTbody('ts-recent-table', _recentTbodyHtml, _recentSorter),
     getters: {
         date: r => r.date || '',
-        staff: r => r.staff || '',
-        project: r => r.project || '',
-        matched: r => r.matched ? 1 : 0,
-        task: r => r.task || '',
+        staff: r => r.staff_name || '',
+        project: r => r.project_name || '',
+        matched: r => r.project_id ? 1 : 0,
+        task: r => r.task_note || '',
         hours: r => r.hours ?? '',
     },
 });
@@ -208,6 +209,7 @@ async function refresh() {
             try { d = await tfetch('/api/v1/timesheets/mine?date=' + _day); }
             catch (e) { err = e.message || String(e); }
             _mineCache = d;
+            if (d) _workTypes = d.work_types || [];
             _content.innerHTML = _renderMine(d, err);
         } else if (_view === 'staff') {
             const d = await tfetch('/api/v1/timesheets/by_staff?month=' + _month);
@@ -215,12 +217,15 @@ async function refresh() {
             _content.innerHTML = _renderStaffView(d);
         } else if (_view === 'ledger') {
             _ledgerCache = await tfetch('/api/v1/timesheets/rows?month=' + _month);
+            _workTypes = _ledgerCache.work_types || [];
             _content.innerHTML = _renderLedger(_ledgerCache);
         } else if (_view === 'dash') {
             _content.innerHTML = _renderDash(await tfetch('/api/v1/timesheets/dashboard'));
         } else if (_view === 'settings') {
+            // /summary 是這個 tab 最重的讀（兩個全表 group by＋查表＋相似度）：有快取就用，
+            // 拉取／指定／改預算會把 _summaryCache 清掉，「重新整理」也會
             const [s, pull, digest] = await Promise.all([
-                tfetch('/api/v1/timesheets/summary'),
+                _summaryCache || tfetch('/api/v1/timesheets/summary'),
                 tfetch('/api/v1/timesheets/pull').catch(() => null),
                 tfetch('/api/v1/timesheets/digest').catch(() => null),
             ]);
@@ -237,7 +242,7 @@ async function refresh() {
             const d = await tfetch(`/api/v1/timesheets/person?name=${encodeURIComponent(_view.slice(7))}&month=${_month}`);
             _content.innerHTML = _renderPerson(d);
         } else {
-            const s = await tfetch('/api/v1/timesheets/summary');
+            const s = _summaryCache || await tfetch('/api/v1/timesheets/summary');
             _summaryCache = s;
             _content.innerHTML = _renderProjects(s);
         }
@@ -252,7 +257,7 @@ async function refresh() {
     }
 }
 
-// 六個分頁（純文字，無 emoji）
+// 七個分頁（新元素純文字，無 emoji）
 function _viewBtns() {
     const b = (key, label) => `<button class="ts-btn ${_view === key ? '' : 'ghost'}"
         data-ts-action="view" data-view="${key}">${label}</button>`;
@@ -341,8 +346,7 @@ async function _projectOptions() {
     return _projOpts;
 }
 function _typeSelect(cur, attr) {
-    const wts = ((_view === 'ledger' ? _ledgerCache : _mineCache) || {}).work_types || [];
-    return `<select ${attr}><option value="">分類</option>${wts.map(t =>
+    return `<select ${attr}><option value="">分類</option>${_workTypes.map(t =>
         `<option value="${esc(t)}"${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
 }
 function _newRowHtml(v = {}) {
@@ -412,8 +416,9 @@ function _rowBody(tr) {
     };
 }
 function _readNewRows() {
+    // 只丟掉整列空白的（「＋ 一列」的空模板）；填了東西但沒時數的交給後端 422 說原句
     return [...document.querySelectorAll('#ts-mine-add .ts-mine-row')].map(_rowBody)
-        .filter(r => (r.hours || 0) > 0 || (r.planned_hours || 0) > 0);
+        .filter(r => r.project_name || r.task_note || r.hours || r.planned_hours);
 }
 async function _mineSubmit() {
     const resEl = document.getElementById('ts-mine-result');
@@ -577,7 +582,7 @@ function _renderProjects(s) {
         <div style="margin-bottom:12px;">
             <span class="ts-chip"><b>${s.total_rows}</b>總列數</span>
             <span class="ts-chip"><b>${s.projects.length}</b>已對映專案</span>
-            <span class="ts-chip"><b>${s.unmatched.length}</b>未對映</span>
+            <span class="ts-chip"><b>${unmatched.length}</b>未對映</span>
             <span class="ts-chip"><b>${stale}</b>停滯</span>
             <span class="ts-chip"><b>${Math.round(totalHours)}</b>總時數</span>
             <button class="ts-btn ghost" data-ts-action="refresh" style="vertical-align:top;">↻ 重新整理</button>
@@ -830,10 +835,10 @@ function _renderSettings(s) {
 
 function _recentTbodyHtml() {
     return _recentSorter.sorted(_recentCache || []).map(r => `
-                                    <tr><td>${esc(r.date || '')}</td><td>${esc(r.staff)}</td>
-                                        <td>${esc(r.project)}</td>
-                                        <td>${r.matched ? '✅' : '<span style="color:#f59e0b;">—</span>'}</td>
-                                        <td style="color:#999;">${esc(r.task || '')}</td>
+                                    <tr><td>${esc(r.date || '')}</td><td>${esc(r.staff_name)}</td>
+                                        <td>${esc(r.project_name)}</td>
+                                        <td>${r.project_id ? '✅' : '<span style="color:#f59e0b;">—</span>'}</td>
+                                        <td style="color:#999;">${esc(r.task_note || '')}</td>
                                         <td class="num">${r.hours}</td></tr>`).join('');
 }
 
@@ -841,14 +846,14 @@ function _recentTbodyHtml() {
 async function _renderManual(slot) {
     slot.innerHTML = '<div style="color:#777;padding:8px;">載入選項…</div>';
     try {
-        const [staffD, projD] = await Promise.all([
+        const [staffD, projList] = await Promise.all([
             tfetch('/api/v1/crm/staff?status=在職'),
-            tfetch('/api/v1/timesheets/project_options'),
+            _projectOptions(),                       // 同一份 memo（我的一天／總表也用）
         ]);
         const staffOpts = (staffD.staff || []).map(s =>
             `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
         const projOpts = ['<option value="">— 選專案 —</option>']
-            .concat((projD.projects || []).map(p =>
+            .concat(projList.map(p =>
                 `<option value="${esc(p.name)}">${esc(p.name)}</option>`)).join('');
         const today = _today();   // 本地時區；toISOString 是 UTC 面值，會差一天
         const rowHtml = `
@@ -940,7 +945,7 @@ function _bind() {
 
 async function _onAction(btn) {
             const act = btn.dataset.tsAction;
-            if (act === 'refresh') return refresh();
+            if (act === 'refresh') { _summaryCache = null; return refresh(); }
             if (act === 'pull') return _pullNow();
             if (act === 'pull-settings') return _pullSettings();
             if (act === 'map') return _mapProject(btn.dataset.name);

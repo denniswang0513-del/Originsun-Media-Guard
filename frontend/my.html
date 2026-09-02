@@ -1073,6 +1073,7 @@ function cardFinance(ts, pay) {
 // ── 我的工時 ──
 let _tsMonth = _localToday().slice(0, 7);
 let _tsProjects = null;     // timesheet_options（進行中案＋本人最近填過的）
+let _tsItems = [];          // 最近一次 /me/timesheets 的列（改列時從這裡拿，不刮 DOM）
 function _localToday() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -1101,7 +1102,8 @@ async function loadMyTs() {
 }
 function renderMyTs(d) {
     const host = $("my-ts");
-    const rows = d.items.map(it => `
+    _tsItems = d.items || [];
+    const rows = _tsItems.map(it => `
         <div class="row" data-ts-id="${esc(it.id)}">
             <div class="grow">
                 <div class="title">${esc(it.project_name || "(空白)")}${it.task_note ? `<span style="color:var(--sub);"> · ${esc(it.task_note)}</span>` : ""}</div>
@@ -1124,7 +1126,7 @@ function renderMyTs(d) {
             <button class="mini-btn" onclick="toggleTsAdd()">新增工時</button>
         </div>
         <div class="pf-edit" id="ts-add" style="display:none;margin:8px 0 12px;">
-            <div id="ts-add-rows"></div>
+            <div id="ts-add-rows"></div><datalist id="ts-proj-list"></datalist>
             <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
                 <button class="mini-btn" onclick="addTsRow()">＋ 再一列</button>
                 <button class="mini-btn" onclick="submitTsRows()">送出</button>
@@ -1140,17 +1142,16 @@ function _shiftMonth(ym, delta) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 function setTsMonth(ym) { _tsMonth = ym; loadMyTs(); }
-function _tsProjectSelect(id, current) {
-    const opts = (_tsProjects || []).map(p =>
-        `<option value="${esc(p.name)}"${p.name === current ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+async function _tsFillList() {
     // 找不到就照打：用 datalist 而不是鎖死的 select（案名照 Sheet 規則對映，撞案留給管理員指定）
-    return `<input list="ts-proj-list" id="${id}" value="${esc(current || "")}" placeholder="專案（可打字）">
-            <datalist id="ts-proj-list">${opts}</datalist>`;
+    const opts = await _tsOptions();
+    const dl = $("ts-proj-list");
+    if (dl) dl.innerHTML = opts.map(p => `<option value="${esc(p.name)}"></option>`).join("");
 }
 function _tsRowHtml(v = {}) {
     return `<div class="inline-row ts-new-row" style="margin-bottom:6px;">
         <input type="date" data-f="date" value="${esc(v.date || _localToday())}">
-        ${_tsProjectSelect("", v.project).replace('id=""', 'data-f="project"')}
+        <input list="ts-proj-list" data-f="project" value="${esc(v.project || "")}" placeholder="專案（可打字）">
         <input data-f="note" placeholder="內容（選填）" value="${esc(v.note || "")}">
         <input type="number" data-f="hours" min="0.25" step="0.25" placeholder="時數" value="${v.hours || ""}" style="max-width:90px;">
     </div>`;
@@ -1160,7 +1161,7 @@ async function toggleTsAdd() {
     if (!box) return;
     const show = box.style.display === "none";
     box.style.display = show ? "" : "none";
-    if (show) { await _tsOptions(); if (!$("ts-add-rows").children.length) addTsRow(); }
+    if (show) { await _tsFillList(); if (!$("ts-add-rows").children.length) addTsRow(); }
 }
 function addTsRow() { $("ts-add-rows").insertAdjacentHTML("beforeend", _tsRowHtml()); }
 async function submitTsRows() {
@@ -1185,14 +1186,10 @@ async function submitTsRows() {
 }
 async function editMyTs(id) {
     const rowEl = document.querySelector(`[data-ts-id="${id}"]`);
-    if (!rowEl) return;
-    await _tsOptions();
-    const meta = rowEl.querySelector(".meta").textContent;
-    const date = meta.slice(0, 10);
-    const title = rowEl.querySelector(".title");
-    const project = title.childNodes[0].textContent.trim();
-    const note = title.querySelector("span") ? title.querySelector("span").textContent.replace(/^ · /, "") : "";
-    const hours = parseFloat(rowEl.querySelector(".pill").textContent);
+    const it = _tsItems.find(x => x.id === id);
+    if (!rowEl || !it) return;
+    await _tsFillList();
+    const date = it.date, project = it.project_name, note = it.task_note, hours = it.hours;
     rowEl.outerHTML = `<div class="pf-edit" data-ts-edit="${esc(id)}" style="margin:6px 0;">
         ${_tsRowHtml({ date, project, note, hours }).replace("ts-new-row", "ts-edit-row")}
         <button class="mini-btn" onclick="saveMyTs('${esc(id)}')">儲存</button>
@@ -1203,7 +1200,9 @@ async function saveMyTs(id) {
     const box = document.querySelector(`[data-ts-edit="${id}"]`);
     if (!box) return;
     const el = box.querySelector(".ts-edit-row");
+    const it = _tsItems.find(x => x.id === id) || {};
     const body = {
+        work_type: it.work_type || null, planned_hours: it.planned_hours,   // 這頁不編這兩欄，原值帶回去（PUT 是整列覆蓋）
         work_date: el.querySelector('[data-f="date"]').value,
         project_name: el.querySelector('[data-f="project"]').value.trim(),
         task_note: el.querySelector('[data-f="note"]').value,

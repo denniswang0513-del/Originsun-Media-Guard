@@ -10,9 +10,10 @@ from fastapi import HTTPException, Request
 from sqlalchemy import or_, select
 
 from core.auth import check_admin_or_module
-from core.hr_logic import (EDIT_BLOCK_TEXT, can_edit_timesheet, local_day, norm_work_type,
-                           resolve_project, row_state)
+from core.hr_logic import EDIT_BLOCK_TEXT, can_edit_timesheet, month_span, tw_day
 from core.identity import resolve_current_staff
+from services.timesheet_lookup import load_project_lookup
+from services.timesheet_manual import insert_manual_rows, names_for, normalize_row
 
 # can_edit_timesheet 的代碼 → HTTP 狀態：不是你的＝403，其餘（Sheet 列／已鎖）＝409
 _BLOCK_STATUS = {"not_owner": 403, "not_manual": 409, "locked": 409}
@@ -21,7 +22,7 @@ _BLOCK_STATUS = {"not_owner": 403, "not_manual": 409, "locked": 409}
 def ts_dict(r, staff_id: str | None = None) -> dict:
     """一列 Timesheet 的唯一序列化（看板／時間軸／人員逐日／我的一天都吃這個）。
     給 `staff_id` 才算 `editable`（own-scope 視角）。"""
-    d = local_day(r.work_date)
+    d = tw_day(r.work_date)
     out = {
         "id": r.id,
         "date": d.isoformat() if d else "",
@@ -39,6 +40,14 @@ def ts_dict(r, staff_id: str | None = None) -> dict:
     if staff_id is not None:
         out["editable"] = can_edit_timesheet(r, staff_id) == ""
     return out
+
+
+def month_or_422(request_month: str):
+    """'YYYY-MM'（空＝本月）→ (月初, 下月初)；格式錯 → 422。兩個 router 共用。"""
+    try:
+        return month_span(request_month)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 async def bound_ident(request: Request, module: str) -> dict:
@@ -87,7 +96,6 @@ async def add_rows(session, ident: dict, rows) -> dict:
     """本人一次填多列（實際或計畫；規則在 insert_manual_rows）。caller 不必 commit。"""
     if not rows:
         raise HTTPException(status_code=422, detail="至少一列")
-    from routers.api_timesheets import insert_manual_rows
     result = await insert_manual_rows(session, staff_id=ident["staff_id"], staff_name=ident["staff"].name, rows=rows)
     await session.commit()
     return result
@@ -97,30 +105,12 @@ async def apply_update(session, r, body) -> None:
     """把 body（TimesheetManualRow 形狀）套到一列：日期／專案（重新對映）／分類／內容／實際／計畫。
     員工改自己的（update_row）與管理員總表（admin_update_row）同一份；hours 與 planned_hours
     至少一個 > 0。Sheet 列保留 status=import（計畫／實際的判定只對手填列有意義）。不 commit。"""
-    from routers.crm._shared import project_names_map
-    from services.timesheet_ingest import parse_date
-    from services.timesheet_lookup import load_project_lookup
-    wd = parse_date(body.work_date)
-    if wd is None:
-        raise HTTPException(status_code=422, detail=f"日期格式錯誤：{body.work_date}")
-    try:
-        status = row_state(body.hours, body.planned_hours)
-        wt = norm_work_type(body.work_type)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    pname = (body.project_name or "").strip()
-    if body.project_id:
-        pid = body.project_id
-        pname = pname or (await project_names_map(session, [pid])).get(pid, "")
-    else:
-        pid, _why = resolve_project(pname, await load_project_lookup(session))
-    r.work_date, r.project_id, r.project_name = wd, pid, pname
-    r.task_note = (body.task_note or "").strip() or None
-    r.hours = float(body.hours or 0)
-    r.planned_hours = float(body.planned_hours) if body.planned_hours is not None else None
-    r.work_type = wt
-    if r.source == "manual":
-        r.status = status
+    fields, _why = normalize_row(body, await load_project_lookup(session), await names_for(session, [body]))
+    if r.source != "manual":
+        fields.pop("status")          # Sheet 列保留 import：計畫／實際只對手填列有意義
+    for k, v in fields.items():
+        setattr(r, k, v)
+    # 對不到案的名字不擋（project_id 空 → 前端標「未對映」，管理員再指定），跟插入同一規則
 
 
 async def update_row(session, ident: dict, row_id: str, body) -> dict:

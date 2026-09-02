@@ -55,7 +55,9 @@ def test_one_read_one_write_path():
     puller = code_only(repo_src("services/timesheet_puller.py"))
     assert "from services.timesheet_ingest import ingest" in puller
     assert "from services.timesheet_sheet import" in puller
-    assert 'ingest(session, chunk, "sheet")' in puller, "runner 落庫的 source 要是 sheet"
+    assert 'ingest(session, chunk, "sheet", ctx)' in puller, "runner 落庫的 source 要是 sheet"
+    # 查表建一次給 20 批共用，不每批重建
+    assert "ingest_context(session" in puller and puller.index("ingest_context(session") < puller.index("for i in range(0, len(good)")
     assert "def read_rows" not in code_only(repo_src("scripts/import_timesheets.py"))
 
 

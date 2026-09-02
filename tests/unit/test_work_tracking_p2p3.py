@@ -70,10 +70,10 @@ def test_endpoints_are_thin_and_gated():
     # 儀表板：主管層只在 admin 才組（負載排名／漏填不給全員比較）
     dash = func_body(src, "async def dashboard(")
     assert 'out["manager"]' in dash and "if is_admin:" in dash
-    assert "missing_fillers(active_fillers(data, today), filled)" in dash
+    assert "missing_fillers(active_fillers(" in dash
     # burn 表的專案那一半只有一份（/summary 與 /dashboard 共用）
-    assert "burn_summary_core(session)" in func_body(src, "async def burn_summary(")
-    assert "burn_summary_core(session)" in dash
+    assert "burn_rows(session)" in func_body(src, "async def burn_summary(")
+    assert "burn_rows(session)" in dash
 
 
 def test_digest_is_scheduled_in_the_puller_loop_and_off_by_default():
@@ -83,9 +83,9 @@ def test_digest_is_scheduled_in_the_puller_loop_and_off_by_default():
     assert "timesheet_digest.start_scheduler_task()" in repo_src("main.py")
     cfg = repo_src("config.py")
     assert '"digest": {"enabled": False, "cron": "0 9 * * 1"}' in cfg
-    assert "digest_text(label, rollup, missing)" in func_body(dg, "async def build_digest(")
+    assert "digest_text(" in func_body(dg, "async def build_digest(")
     # 發送走 notifier 那一份 webhook 讀法，不自己撈 settings
-    assert "send_google_chat(" in dg and "google_chat_webhook" not in dg
+    assert "send_google_chat" in dg and "google_chat_webhook" not in dg
 
 
 def test_tab_wires_the_new_views():

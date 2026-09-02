@@ -387,6 +387,8 @@ def test_every_project_enumeration_decides_about_mine():
         # 工時：查表在 services/timesheet_lookup（is_mine 表態）；router 裡剩的
         # select(CrmProject) 是 burn 摘要與預算回寫，端點整支守 _require_mine_admin
         "routers/api_timesheets.py",
+        # 手填的專案下拉（進行中案的 id／名）從 router 搬到 services；守衛仍在端點（timesheets 模組）
+        "services/timesheet_manual.py",
         "routers/crm/proposal_assets.py", "routers/crm/flow.py",
         # 帳本自己的視角（entity 已經圈定範圍）
         "routers/api_finance_projects.py", "routers/api_finance_stmt.py",

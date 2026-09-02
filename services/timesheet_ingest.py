@@ -31,7 +31,23 @@ def row_hash(date_s: str, staff: str, project: str, task: str, hours) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 
-async def ingest(session, rows, source: str) -> dict:
+async def ingest_context(session, staff_names) -> dict:
+    """ingest 每批都要的三份查表（專案對映／人員索引／手填優先鍵）。拉整本 Sheet 分 20 批時
+    建一次給每批用 —— 原本每批各建一次＝80 個查詢做 23 個的事。"""
+    from sqlalchemy import select
+    from db.models import Timesheet
+    names = {n for n in ((s or "").strip() for s in staff_names) if n}
+    manual_keys: set = set()
+    if names:
+        m_rows = (await session.execute(
+            select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name)
+            .where(Timesheet.source == "manual").where(Timesheet.staff_name.in_(names)))).all()
+        manual_keys = {manual_dup_key(n, d, p) for n, d, p in m_rows}
+    return {"lk": await load_project_lookup(session), "staff_index": await load_staff_index(session),
+            "manual_keys": manual_keys}
+
+
+async def ingest(session, rows, source: str, ctx: dict | None = None) -> dict:
     """`rows`：有 .date/.staff/.project/.task/.hours 的物件（core.schemas.TimesheetRow）。
     回 {inserted, skipped, skipped_manual_priority, ambiguous_projects, unmatched_projects,
     staff_ambiguous, staff_unmatched}。一個 session 一個交易。"""
@@ -43,8 +59,8 @@ async def ingest(session, rows, source: str) -> dict:
     misses, staff_misses = Misses(), Misses()      # 專案：撞案／找不到；人員：同名兩人／沒這人
 
     # 專案對映：對映表 → 精確 → 去客戶前綴（唯一才算）→ 撞案不猜（core.hr_logic）
-    lk = await load_project_lookup(session)
-    staff_index = await load_staff_index(session)
+    ctx = ctx or await ingest_context(session, (r.staff for r in rows))
+    lk, staff_index, manual_keys = ctx["lk"], ctx["staff_index"], ctx["manual_keys"]
 
     # 既有 hash 一次撈（避免逐列查詢；量大時仍遠小於全表掃描成本）
     hashes = [row_hash(r.date, r.staff, r.project, r.task, r.hours) for r in rows]
@@ -52,18 +68,7 @@ async def ingest(session, rows, source: str) -> dict:
         (await session.execute(select(Timesheet.row_hash).where(Timesheet.row_hash.in_(hashes)))).scalars()
     ) if hashes else set()
 
-    # 雙來源去重（藍圖 §3.6 階段3）：同 (人, 日, 專案) 已有手填列 → Sheet 列跳過
-    # （手填優先於 Sheet）。手填量小，逐人載鍵集比對。
-    batch_names = {(r.staff or "").strip() for r in rows if (r.staff or "").strip()}
-    manual_keys: set = set()
-    if batch_names:
-        m_rows = (await session.execute(
-            select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name)
-            .where(Timesheet.source == "manual")
-            .where(Timesheet.staff_name.in_(batch_names))
-        )).all()
-        manual_keys = {manual_dup_key(n, d, p) for n, d, p in m_rows}
-
+    # 雙來源去重（藍圖 §3.6 階段3）：同 (人, 日, 專案) 已有手填列 → Sheet 列跳過（手填優先；鍵集在 ctx）
     skipped_manual = 0
     seen_in_batch: set[str] = set()
     for r, h in zip(rows, hashes):

@@ -14,20 +14,44 @@ from zoneinfo import ZoneInfo
 
 LEAVE_TYPES = ("特休", "病假", "事假", "公假", "婚假", "喪假", "其他")
 
-# ── 日期歸一（工時整組共用；routers/crm/_shared._fmt_day 同一條規則）────────────
+# ── 日期歸一（工時整組共用；routers/crm/_shared._fmt_day 委派到這裡）────────────
+#
+# ⚠ 叫 tw_day 不叫 tw_day：core.finance_logic 已有一支 tw_day（系統時區、回 naive datetime），
+# 兩支同名擺在 core/ 相鄰 router 各 import 一支，回傳型別不同會踩。
 #
 # 🔴 timestamptz 寫入端是 naive（PG 依 session 時區解讀）、asyncpg 讀回是 aware UTC ——
 # 面值取 .date() 在 +08 會差一天。這裡是唯一一份：aware 轉台北，naive 視為本地 wallclock。
 _TW = ZoneInfo("Asia/Taipei")
 
 
-def local_day(dt) -> Optional[date]:
+def tw_day(dt) -> Optional[date]:
     """timestamptz／datetime → 台北的日期；None → None。"""
     if not dt:
         return None
     if isinstance(dt, date) and not isinstance(dt, datetime):
         return dt
     return (dt.astimezone(_TW) if dt.tzinfo else dt).date()
+
+
+def day_iso(dt) -> Optional[str]:
+    """tw_day 的字串版 'YYYY-MM-DD'；None → None（API 回日期一律走這裡，不 strftime 面值）。"""
+    d = tw_day(dt)
+    return d.isoformat() if d else None
+
+
+def bucket_hours(pairs) -> dict:
+    """(key, hours) → {key: 小時和（一位小數）}；只算 hours>0（計畫列不進）、key None 跳過。
+    專案各月／人員熱圖與案別／團隊各月都是這一支。"""
+    acc: dict = {}
+    for k, h in pairs:
+        if k is not None and (h or 0) > 0:
+            acc[k] = round(acc.get(k, 0.0) + float(h), 1)
+    return acc
+
+
+def by_month(day_hours) -> list:
+    """(day, hours) → [('YYYY-MM', 小時), …] 依月排序（day None 跳過）。"""
+    return sorted(bucket_hours((d.strftime("%Y-%m"), h) for d, h in day_hours if d).items())
 
 
 def month_span(month: str) -> tuple:
@@ -127,6 +151,9 @@ def leave_balance(annual_days: Optional[int], approved_annual_sum: float) -> dic
             "remaining": round(annual_days - used, 1)}
 
 
+HOURS_PER_WORKDAY = 8          # 參考工時（工作日 × 8），只對照不是打卡標準；儀表板同一個數
+
+
 def month_workdays(year: int, month: int) -> int:
     """該月週一到週五的天數（不扣國定假日 —— 那是參考值，不是打卡標準）。"""
     return sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
@@ -172,7 +199,7 @@ def hours_rollup(rows, year: int, month: int) -> dict:
     out_people.sort(key=lambda x: -x["total"])
     wd = month_workdays(year, month)
     return {
-        "workdays": wd, "reference_hours": wd * 8,
+        "workdays": wd, "reference_hours": wd * HOURS_PER_WORKDAY,
         "people": out_people,
         "projects": sorted(((k, round(v, 1)) for k, v in projects.items()), key=lambda x: -x[1]),
         "total": round(sum(projects.values()), 1),
@@ -311,7 +338,7 @@ def row_state(hours, planned_hours) -> str:
 
 #: 本人可改／可刪的手填列狀態（docs/TIMESHEET_SELF_ENTRY_PLAN.md D3／D5）：
 #: 不審核，所以 plan／draft 都能改；locked 留給日後月結。
-EDITABLE_STATUSES = frozenset({"plan", "draft", "confirmed"})
+EDITABLE_STATUSES = frozenset({"plan", "draft"})   # 不審核：沒有 confirmed／approved
 
 
 #: can_edit_timesheet 的代碼 → 給人看的原因；HTTP 狀態由代碼決定，不靠中文比對
@@ -347,7 +374,7 @@ def manual_dup_key(staff_name: str, work_date: Optional[datetime],
     16 日 16:00Z）。astimezone() 對 naive 視為本地時間、對 aware 轉回本地，
     兩種型態都落在同一個本地日。
     """
-    return ((staff_name or "").strip(), local_day(work_date), (project_name or "").strip())
+    return ((staff_name or "").strip(), tw_day(work_date), (project_name or "").strip())
 
 
 # ── 福委會（docs/BENEFIT_POOL_PLAN.md）純規則 ────────────────────────
@@ -415,7 +442,7 @@ QUOTA_MODES = ("shared", "per_person")
 def in_window(day, start, end) -> bool:
     """day 落在 [start, end] 之內嗎。三個都是 date（不是 datetime）。
 
-    🔴 呼叫端一律先用 local_day() 把 timestamptz 轉成本地日期再進來。
+    🔴 呼叫端一律先用 tw_day() 把 timestamptz 轉成本地日期再進來。
     直接拿 datetime 比會差一天 —— 讀回來是 UTC，這個 repo 已經被咬過三次。
     邊界含在內：券寫 2026/01/01–12/31，那兩天當然算數。
     """
