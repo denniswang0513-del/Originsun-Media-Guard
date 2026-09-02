@@ -165,7 +165,8 @@ def _run(name, wf, token):
         if node['class_type'] in ('EmptyLTXVLatentVideo', 'Wan22ImageToVideoLatent',
                                   'EmptyLatentVideo', 'CreateVideo',
                                   'SeedVR2TemporalChunk', 'ResizeImageMaskNode',
-                                  'Video Slice', 'VAEEncodeTiled', 'VAEDecodeTiled'):
+                                  'Video Slice', 'VAEEncodeTiled', 'VAEDecodeTiled',
+                                  'PrimitiveBoolean', 'ComfySwitchNode'):
             print('  %-26s %s' % (node['class_type'],
                                   json.dumps({k: v for k, v in node['inputs'].items()
                                    if not (isinstance(v, list) and len(v) == 2

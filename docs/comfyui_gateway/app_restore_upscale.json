@@ -1335,8 +1335,9 @@
        "ver": "0.28.0"
       },
       "widgets_values": [
-       0,
-       "auto"
+       4,
+       "manual",
+       21
       ]
      },
      {
@@ -1534,7 +1535,7 @@
        "Node name for S&R": "PrimitiveBoolean"
       },
       "widgets_values": [
-       false
+       true
       ]
      }
     ],
