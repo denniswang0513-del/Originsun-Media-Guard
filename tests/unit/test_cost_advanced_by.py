@@ -8,13 +8,8 @@
 歸屬，那筆錢就會被鏡射成代墊人的私帳**收入** —— 而它是要還他的錢，不是他賺的，
 私帳營收會憑空多一個代墊金額。所以代墊只動請款單，成本行一個欄位都不碰。
 """
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
-
-from tests.unit._srcscan import js_code_only, js_func_body, repo_src  # noqa: E402
+from tests.unit._srcscan import (js_code_only, js_func_body, models_src,
+                                 repo_src)
 
 JS = "frontend/tabs/crm/crm-projects-finance.js"
 
@@ -70,8 +65,9 @@ def test_the_detail_panel_no_longer_labels_the_owner_as_the_payee():
     assert "'（實際收款人）'" not in js
     assert "' 代墊　·　費用歸屬 '" in js
     # model 的註解也要說清楚（下一個讀的人只會看那裡）
-    m = repo_src("db/models/_crm.py")
-    seg = m.split("advance_by = Column")[0].rsplit("planned_month", 1)[-1]
+    # models_src 而不是釘 _crm.py —— 斷言釘的是「這張表長什麼樣」，
+    # 不是「它住哪個檔」（db/models 已經拆過一次套件）。
+    seg = models_src("class CrmPaymentRequest(Base):")
     assert "費用歸屬人" in seg and "不是代墊人" in seg
 
 

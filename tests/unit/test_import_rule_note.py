@@ -4,14 +4,8 @@
 分類已經自動了，備註還是每個月手打同一句 —— 每月房租、每月那筆貸款轉帳，
 摘要一模一樣。備註跟分類一樣是「這串摘要代表什麼」的一部分，該一起記在規則裡。
 """
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
-
-from core.bank_statement import RuleHit, _classify, parse_statement  # noqa: E402
-from tests.unit._srcscan import (code_only, func_body, js_code_only,  # noqa: E402
+from core.bank_statement import RuleHit, _classify, parse_statement
+from tests.unit._srcscan import (code_only, func_body, js_code_only,
                                  js_func_body, repo_src)
 
 

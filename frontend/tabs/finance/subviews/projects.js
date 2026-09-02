@@ -43,13 +43,26 @@ let _fy = '';           // 會計年度篩選（''=全部、'open'=未結案、�
 let _dirty = false;
 let _resizeBound = false;
 
-/** 執行業務所得的源頭代扣試算 —— 同後端 core.ledger_project.withholding：
- *  所得扣繳 10%（單次稅額 ≤2,000 免扣）＋二代健保 2.11%（單次 <20,000 免扣）。*/
-function _proTax(contract) {
+/** 執行業務所得的源頭代扣試算 —— 演算法同後端 `core.ledger_project.withholding`。
+ *  🔴 **費率吃後端回的 `withhold`**（`/project-ledger/{id}` 帶回來），這裡不寫死
+ *  10／2,000／2.11％／20,000：二代健保費率是法定的、動過不只一次，寫死的那份
+ *  改法後會讓畫面上的預覽跟存進去的值不一致，而預覽值一旦被使用者「確認」
+ *  就會被 `tax_manual` 凍住。同 `fee_pct` 的處理（cash-split-editor 那條）。 */
+function _proTax(contract, w) {
     const c = Number(contract) || 0;
-    let tax = Math.round(c * 0.10);
-    if (tax <= 2000) { tax = 0; }
-    return tax + (c >= 20000 ? Math.round(c * 0.0211) : 0);
+    const r = w || {};
+    let tax = Math.round(c * (Number(r.tax_pct) || 0) / 100);
+    if (tax <= (Number(r.tax_exempt) || 0)) { tax = 0; }
+    const nhi = c >= (Number(r.nhi_min) || 0)
+        ? Math.round(c * (Number(r.nhi_pct) || 0) / 100) : 0;
+    return tax + nhi;
+}
+
+/** 那段試算的說明文字 —— 費率同樣從後端來，不在文案裡再抄一份數字。 */
+function _proTaxTitle(w) {
+    const r = w || {};
+    return `試算：源頭代扣 ${r.tax_pct}%＋二代健保 ${r.nhi_pct}%（含免扣門檻）`
+        + ' —— 可自行調整，例如客戶拆單就不用先繳';
 }
 
 // 表頭與資料列共用一份欄寬 —— 分開寫的話改一邊就整排對不齊
@@ -647,17 +660,14 @@ function _renderDetail() {
         const ptEl = document.getElementById('fpl-c-personal_tax');
         if (ptEl) {
             ptEl.disabled = false;
-            ptEl.title = isPro
-                ? '試算：源頭代扣 10%＋二代健保 2.11%（含免扣門檻）—— 可自行調整，'
-                  + '例如客戶拆單就不用先繳'
-                : '';
+            ptEl.title = isPro ? _proTaxTitle(_detail && _detail.withhold) : '';
             // 🔴「人調過了沒」不用猜：後端把它落庫成 `tax_manual`（見
             // core.ledger_project.apply_source_fee）並隨 detail 回來。這裡只
             // 在「剛換案源」或「這格還沒被人決定過」時填試算值 —— 上一版用
             // 模組級「上次試算值」做值比對，那個基準活不過面板重畫，還得在
             // 每次 render 手動重新校準。
             if (isPro && (sourceChanged || !taxManual)) {
-                ptEl.value = _proTax(c) || '';
+                ptEl.value = _proTax(c, _detail && _detail.withhold) || '';
                 _liveSum();
             }
         }

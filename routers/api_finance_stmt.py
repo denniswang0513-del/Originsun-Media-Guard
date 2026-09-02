@@ -1115,6 +1115,17 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
             _select(CrmInvoice).where(CrmInvoice.id.in_(inv_ids))
         )).scalars().all()} if inv_ids else {}
 
+        # 同一個理由，換成專案：私帳收款要同步該案的已收（_sync_mine_project_received）
+        # 而拆項要驗專案存在，兩者都在迴圈裡逐案 session.get —— 先把整份對帳單會
+        # 碰到的案子一次撈進 identity map，迴圈裡那些 get 就變成零往返。
+        from db.models import CrmProject
+        proj_ids = ({r.project_id for r in payload.rows if r.project_id}
+                    | {sp.project_id for r in payload.rows
+                       for sp in (r.splits or []) if sp.project_id})
+        if proj_ids:
+            (await session.execute(
+                _select(CrmProject).where(CrmProject.id.in_(proj_ids)))).scalars().all()
+
         acct, ent = await _acct_and_entity(session, request, payload.bank_account_id)
 
         # 先驗全部月份（整批原子性：有一列落鎖定月就全部不做）。

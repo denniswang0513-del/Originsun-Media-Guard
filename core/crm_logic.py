@@ -351,3 +351,26 @@ def split_amount_error(parent_amount: int, amounts: list) -> str:
 def advance_open_amount(expense: int, linked_sum: int) -> int:
     """一列代墊流出還剩多少沒被回款沖到（逐筆結清的餘額；不會小於 0）。"""
     return max(0, int(expense or 0) - int(linked_sum or 0))
+
+
+def payment_label(payee_name: str = "", summary: str = "") -> str:
+    """一張請款單在清單上顯示成什麼 —— 收款人優先（一筆匯出通常就認人），
+    沒有才退回摘要。
+
+    🔴 **規則只有這一份**，而且要住在 core：判定式留在呼叫點的話，第二個顯示端
+    就會長出第二種 precedence —— 2026-09-02 的清理審查抓到的正是這個，
+    挑選視窗用「收款人」顯示、`resolve_allocs` 退回的 422 卻用「摘要」稱呼
+    同一列，同一張單在同一次操作裡有兩個名字。
+    """
+    return payee_name or summary or ""
+
+
+def split_gross(amount, fee=0) -> int:
+    """一個收入拆項對**專案**的貢獻＝實匯淨額 ＋ 被扣走的代開費。
+
+    🔴 專案按毛額結清（源日代開發票、扣完費用才匯）：只認 `amount` 的話，
+    那一案會永遠差一截代開費（owner 2026-09-02「和平行動者我應該是要都到帳
+    了才對」的成因）。這個加法本來散在拆項回寫、專案明細、報表展開三處，
+    規則放這裡，動的時候只有一個地方要改。
+    """
+    return int(amount or 0) + int(fee or 0)

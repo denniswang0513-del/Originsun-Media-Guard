@@ -115,8 +115,6 @@ export async function openCashSplitEditor(o) {
         const pct = Number(out.fee_pct) || 0;
         return pct > 0 && pct < 100 ? Math.round(net * pct / (100 - pct)) : 0;
     };
-    const advChecked = (aid) => rows.some((r) => r.kind === 'advance'
-        && (r.advances || []).some((l) => l.entry_id === aid));
 
     /** 🔴 金額類的輸入一律**只補會變的那幾個節點**，不整窗 render()：重畫會把
      *  194 個未收案的節點與所有 handler 重建一次，順便打掉剛 Tab 過去的焦點，
@@ -124,10 +122,7 @@ export async function openCashSplitEditor(o) {
      *  patchGross：那一列的「專案結清毛額」提示。 */
     function patchGross(i) {
         const el = wrap.querySelector(`[data-gross="${i}"]`);
-        if (el) {
-            el.textContent = '專案結清毛額 $'
-                + fmtNum((Number(rows[i].amount) || 0) + (Number(rows[i].fee) || 0));
-        }
+        if (el) { el.textContent = grossText(rows[i]); }
     }
 
     /** patchSum：合計與儲存鈕。 */
@@ -169,17 +164,28 @@ export async function openCashSplitEditor(o) {
     /** 代墊清單 —— 跟未收案同一個形狀（搜尋只換清單那塊、勾過的永遠看得到）。
      *  owner 2026-09-01「代墊的部分希望有搜尋框可以搜尋」：那份清單一次撈 200
      *  筆，Google Workspace 每月一筆、國外交易服務費每筆各一 —— 用捲的找不到。 */
-    const advListHtml = () => ((out.advances || [])
-        .filter((a) => advChecked(a.entry_id) || !advQ
+    /** 「專案結清毛額 $N」—— 樣板與 patchGross 共用一份，
+     *  不然改了文案或毛額公式，補上去的那格會跟重畫出來的不一樣。 */
+    const grossText = (r) => '專案結清毛額 $'
+        + fmtNum((Number(r.amount) || 0) + (Number(r.fee) || 0));
+
+    const advListHtml = () => {
+        // 已勾的一次算完（同 projListHtml）：原本每筆代墊 filter 一次、
+        // checked 再一次，兩次都是巢狀 some，而搜尋框每按一鍵重跑整份清單
+        const on = new Set(rows.filter((r) => r.kind === 'advance')
+            .flatMap((r) => (r.advances || []).map((l) => l.entry_id)));
+        return ((out.advances || [])
+        .filter((a) => on.has(a.entry_id) || !advQ
             || `${a.summary || ''} ${a.date || ''}`.toLowerCase().includes(advQ))
         .map((a) => `
             <label style="display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer;">
-                <input type="checkbox" data-adv="${esc(a.entry_id)}" ${advChecked(a.entry_id) ? 'checked' : ''}>
+                <input type="checkbox" data-adv="${esc(a.entry_id)}" ${on.has(a.entry_id) ? 'checked' : ''}>
                 <span style="color:#9ca3af;font-size:11px;white-space:nowrap;">${esc(a.date)}</span>
                 <span style="flex:1;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(a.summary)}</span>
                 <span style="color:#fbbf24;font-size:11px;">$${fmtNum(a.open)}</span>
             </label>`).join('')
         || `<div style="color:#6b7280;font-size:12px;">${advQ ? '找不到符合的代墊' : '沒有未回款的代墊'}</div>`);
+    };
 
     /** 代墊的勾選事件（同 bindProj：搜尋只換清單那塊，重畫後要重掛）。 */
     function bindAdv() {
@@ -241,7 +247,7 @@ export async function openCashSplitEditor(o) {
                                <input type="checkbox" data-feechk="${i}" ${r.feeOn ? 'checked' : ''}>扣代開費</label>
                            ${r.feeOn ? `<input type="number" data-fee="${i}" value="${r.fee || ''}" min="0" placeholder="代開費"
                                    style="background:#141414;border:1px solid #333;color:#eee;border-radius:6px;padding:2px 6px;width:80px;text-align:right;font-size:12px;">
-                               <span data-gross="${i}" style="color:#6b7280;font-size:11px;">專案結清毛額 $${fmtNum((Number(r.amount) || 0) + r.fee)}</span>` : ''}`
+                               <span data-gross="${i}" style="color:#6b7280;font-size:11px;">${grossText(r)}</span>` : ''}`
                         : r.kind === 'advance'
                         ? `<span style="color:#fbbf24;font-size:12px;">沖 ${(r.advances || []).length} 筆代墊</span>
                            <span style="color:#6b7280;font-size:11px;">（${esc(pathOf(r.taxonomy_node_id))}）</span>`
@@ -338,11 +344,8 @@ export async function openCashSplitEditor(o) {
         wrap.querySelectorAll('[data-cat]').forEach((inp) => {
             inp.onchange = () => { rows[Number(inp.dataset.cat)].category = inp.value.trim(); };
         });
-        // 扣代開費（源日代開發票、扣完費用才匯）：金額欄恆為實匯淨額，
-        // 代開費外加 —— 勾了先猜「未收 − 目前金額」（實匯已填好的常見流程），
-        // 改代開費則反推金額 = 未收 − 費（兩個方向都不用使用者自己算）。
-        // 勾「扣代開費」與改代開費金額是同一件事的兩個入口 —— 一支處理：
-        // 勾了先猜「未收 − 目前金額」，改費用則反推金額 = 未收 − 費。
+        // 勾「扣代開費」與改代開費金額是同一件事的兩個入口 —— 一支處理。
+        // 猜法本身寫在 feeGuess 的檔頭，這裡不再抄一遍。
         //  `redraw`：勾選會長出／收掉輸入框，非重畫不可；改**金額**只動三個值
         //  —— 那條走 patch（重畫會打掉打字焦點，見 patchGross 檔頭那條規則）
         const setFee = (i, fee, on, redraw = true) => {
@@ -369,24 +372,22 @@ export async function openCashSplitEditor(o) {
             inp.onchange = () => setFee(Number(inp.dataset.fee),
                                         Number(inp.value) || 0, true, false);
         });
-        bindProj();
-        const pq = wrap.querySelector('[data-projq]');
-        if (pq) {
-            pq.oninput = () => {   // 只換清單那塊 —— 整窗重畫會把打字焦點打掉
-                projQ = pq.value.trim().toLowerCase();
-                const box = wrap.querySelector('#csp-projlist');
-                if (box) { box.innerHTML = projListHtml(); bindProj(); }
+        // 搜尋框：**只換清單那塊**，整窗重畫會把打字焦點打掉。
+        // 兩份清單同一種接法 —— 寫兩次的話，修焦點的人只會修到其中一份。
+        const wireSearch = (attr, boxSel, html, bind, setQ) => {
+            const el = wrap.querySelector(`[${attr}]`);
+            bind();
+            if (!el) return;
+            el.oninput = () => {
+                setQ(el.value.trim().toLowerCase());
+                const box = wrap.querySelector(boxSel);
+                if (box) { box.innerHTML = html(); bind(); }
             };
-        }
-        bindAdv();
-        const aq = wrap.querySelector('[data-advq]');
-        if (aq) {
-            aq.oninput = () => {   // 同 projq：只換清單那塊，不動打字焦點
-                advQ = aq.value.trim().toLowerCase();
-                const box = wrap.querySelector('#csp-advlist');
-                if (box) { box.innerHTML = advListHtml(); bindAdv(); }
-            };
-        }
+        };
+        wireSearch('data-projq', '#csp-projlist', projListHtml, bindProj,
+                   (v) => { projQ = v; });
+        wireSearch('data-advq', '#csp-advlist', advListHtml, bindAdv,
+                   (v) => { advQ = v; });
         // 手動列的分類樹（同 cash-tax-picker 的一排會長的下拉）
         wrap.querySelectorAll('.csp-tax').forEach((box) => {
             const i = Number(box.dataset.row);

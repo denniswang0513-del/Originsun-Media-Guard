@@ -46,7 +46,7 @@ def is_mirrored(p, legacy_ids=()) -> bool:
     只查舊的那種，第二個之後連上去的案就沒有標籤 —— owner 2026-09-01 回報的
     正是這個（「南山人壽謝經理」連了卻沒標）。
     """
-    return bool(getattr(p, "mine_link_id", None)) or p.id in legacy_ids
+    return bool(p.mine_link_id) or p.id in legacy_ids
 
 
 def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False) -> dict:

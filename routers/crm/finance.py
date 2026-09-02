@@ -14,7 +14,7 @@ import uuid
 
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
-from core.crm_logic import normalize_tax_id
+from core.crm_logic import normalize_tax_id, payment_label
 from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 INVOICE_PASSTHROUGH_COLLECTED,
                                 INVOICE_PENDING_REMIT, INVOICE_REMITTED,
@@ -396,7 +396,10 @@ _ALLOC_KINDS = {
     "payment": {"model": CrmPaymentRequest, "noun": "請款單",
                 "id_field": "payment_request_id",
                 "dup": "同一張請款單重複出現",
-                "label": lambda o: o.summary or o.payee_name,
+                # 顯示名走 core.crm_logic 那份正本 —— 這裡本來是
+                # `summary or payee_name`（相反的順序），害挑選視窗
+                # 顯示收款人、退回的 422 卻用摘要稱呼同一張單。
+                "label": lambda o: payment_label(o.payee_name, o.summary),
                 "fee": apply_payment_fee},
 }
 # replace / load / verdict 定義在檔案後段 —— 這裡延後綁定（模組載入完才填），

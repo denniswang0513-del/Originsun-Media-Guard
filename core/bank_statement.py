@@ -152,11 +152,6 @@ class RuleHit(NamedTuple):
     note: str = ""              # 命中後要寫進那一列的備註（規則的 apply_note）
 
 
-def _at(row, i: int) -> str:
-    """規則元組的第 i 個欄位，短的規則（測試與 KEYWORD_RULES 的三元組）回空字串。"""
-    return row[i] if len(row) > i else ""
-
-
 def _classify(text: str, rules=None, signed=None) -> RuleHit:
     """摘要文字 → `RuleHit`。沒中回全空的 `RuleHit()`。
 
@@ -192,7 +187,9 @@ def _classify(text: str, rules=None, signed=None) -> RuleHit:
         if only:
             if signed is None or (signed > 0) != (only > 0):
                 continue
-        return RuleHit(cat, direction, _at(r, 4), _at(r, 5))
+        # 切片而不是逐格取：短規則（KEYWORD_RULES 與測試的三元組）
+        # 少掉的欄位由 RuleHit 自己的預設值補空字串。
+        return RuleHit(cat, direction, *r[4:6])
     return RuleHit()
 
 

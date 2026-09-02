@@ -27,6 +27,8 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
 from core.auth import check_logged_in
 from sqlalchemy import and_ as _sa_and
 from core.cash_taxonomy import SEP as _TAX_SEP, split_category as _tax_split
+# 請款單顯示名的正本在 core（關聯面板的 _ALLOC_KINDS 也吃同一支）
+from core.crm_logic import payment_label
 from core.ledger import (not_mine as _cli_not_mine, require_entity)
 from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES
 from core.schemas import (CashEntryPayload,
@@ -72,13 +74,6 @@ from .finance import (  # noqa: F401
 
 async def resolve_invoice_allocs(session, items, ent, by_id=None):
     return await resolve_allocs(session, items, ent, "invoice", by_id)
-
-
-def payment_label(payee_name: str = "", summary: str = "") -> str:
-    """一張請款單在清單上顯示成什麼 —— 收款人優先（一筆匯出通常就認人），
-    沒有才退回摘要。**規則只有這一份**：判定式留在呼叫點的話，第二個顯示端
-    （挑選視窗、關聯面板）就會長出第二種 precedence。"""
-    return payee_name or summary or ""
 
 
 async def load_payment_links_map(session, *, entity=None) -> dict:

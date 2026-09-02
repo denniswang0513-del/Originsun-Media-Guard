@@ -6,13 +6,7 @@
 3. 代墊清單要有搜尋框。
 4. 未收案清單要看得到客戶。
 """
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
-
-from tests.unit._srcscan import (code_only, func_body, js_code_only,  # noqa: E402
+from tests.unit._srcscan import (code_only, func_body, js_code_only,
                                  js_func_body, repo_src)
 
 EDITOR = "frontend/js/shared/cash-split-editor.js"
@@ -96,12 +90,15 @@ def test_both_pick_lists_are_searchable_and_rebind_after_redraw():
     """兩個清單同一個形狀：搜尋只換清單那塊（整窗重畫會打掉打字焦點），
     所以重畫後要重掛勾選事件。已勾的列不受過濾影響。"""
     body = js_code_only(repo_src(EDITOR))
-    for q, listId, bind in (("projQ", "csp-projlist", "bindProj"),
-                            ("advQ", "csp-advlist", "bindAdv")):
-        assert f"let {q} = ''" in body or f"{q} = " in body, q
-        assert listId in body, listId
-        assert f"{bind}();" in body, bind
-    assert "advChecked(a.entry_id) || !advQ" in body, "代墊搜尋會把已勾的濾掉"
+    # 兩個清單走同一支接線（wireSearch），不是各接一份 —— 各寫一次的話，
+    # 修焦點或重掛的人只會修到其中一份
+    for listId, html, bind in (("csp-projlist", "projListHtml", "bindProj"),
+                               ("csp-advlist", "advListHtml", "bindAdv")):
+        assert f"'#{listId}', {html}, {bind}," in body, listId
+    wire = js_func_body(body, "const wireSearch = (")
+    assert "box.innerHTML = html(); bind();" in wire, "重畫後沒有重掛勾選事件"
+    # 已勾的列不受過濾影響（兩邊都用一次算完的 Set，不是逐筆線性搜尋）
+    assert "on.has(a.entry_id) || !advQ" in body, "代墊搜尋會把已勾的濾掉"
     assert "picked.has(p.id) || !projQ" in body
 
 
@@ -138,7 +135,8 @@ def test_the_project_page_lists_money_that_arrived_as_a_split():
     assert "join(CrmCashEntry, CrmCashEntry.id == CrmCashSplit.entry_id)" in helper
     # 🔴 毛額＝amount＋fee，跟 _project_deltas 同一條規則 —— 只列淨額的話
     # 明細加起來會比「已收」少一個代開費
-    assert "(amt + fee) if deposit else 0" in helper
+    # 毛額走 core.crm_logic.split_gross（規則的正本），不在這裡自己加
+    assert "split_gross(amt, fee) if deposit else 0" in helper
     fn = code_only(func_body(src, "async def project_ledger_detail("))
     assert "_project_split_entries(session, project_id, ent)" in fn
     assert "+ split_rows," in fn, "拆項那份沒有併進 entries"
@@ -147,8 +145,10 @@ def test_the_project_page_lists_money_that_arrived_as_a_split():
 def test_the_project_entry_table_marks_splits_and_totals():
     """列出來還要看得出「這筆是拆項的一部分」，並且有合計 ——
     使用者要拿它跟「已收」對，逐列心算不是驗證。"""
-    js = js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))
-    seg = js.split("掛在本案的收支")[1].split("應付／請款單")[0]
+    # 切函式本體，不是切畫面上的中文標題 —— 改個標題就 IndexError
+    seg = js_code_only(js_func_body(
+        repo_src("frontend/tabs/finance/subviews/projects.js"),
+        "function _renderDetail("))
     assert "e.split ?" in seg, "沒有標出拆項"
     assert "reduce((n, e) => n + (e.deposit || 0), 0)" in seg, "沒有合計"
 

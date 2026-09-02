@@ -30,7 +30,10 @@ from fastapi import APIRouter, HTTPException, Request
 from config import load_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
-from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, apply_crm_costs,
+from core.crm_logic import split_gross
+from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, NHI_MIN_PAYMENT,
+                                 NHI_PCT, WITHHOLD_TAX_EXEMPT,
+                                 WITHHOLD_TAX_PCT, apply_crm_costs,
                                  client_wire, payout_total, settle_state,
                                  to_collect,
                                  SELECTABLE_SOURCES, SUM_KEYS, apply_source_fee,
@@ -416,7 +419,8 @@ async def _project_split_entries(session, project_id: str, ent: str) -> list:
             # 拆項自己的備註優先 —— 一筆匯款拆成三案時，父列的摘要三列都一樣
             "summary": (s.note or "").strip() or (e.summary or ""),
             "category": s.category or e.category or "",
-            "deposit": (amt + fee) if deposit else 0,
+            # 毛額規則在 core.crm_logic.split_gross
+            "deposit": split_gross(amt, fee) if deposit else 0,
             "expense": 0 if deposit else amt,
             "status": e.status or "",
             # 前端據此標「拆項」，並在有代開費時說明毛額是怎麼來的
@@ -473,6 +477,11 @@ async def project_ledger_detail(project_id: str, request: Request,
         "income_items": income_items(load_settings()),
         # 下拉只給可選的（自接＝歷史值不再可選；舊案的值由前端就地補一個選項）
         "sources": list(SELECTABLE_SOURCES), "default_fee_pct": DEFAULT_FEE_PCT,
+        # 源頭代扣的費率與門檻 —— 前端的試算吃這裡，不自己寫一份 10/2000/2.11/20000。
+        # 二代健保費率是法定的、動過不只一次；寫死在 JS 的話，改法的那天畫面上的
+        # 預覽會跟存進去的值不一致，而那個值一旦被使用者「確認」就被 tax_manual 凍住。
+        "withhold": {"tax_pct": WITHHOLD_TAX_PCT, "tax_exempt": WITHHOLD_TAX_EXEMPT,
+                     "nhi_pct": NHI_PCT, "nhi_min": NHI_MIN_PAYMENT},
         "cost_fields": [{"key": k, "label": lb} for k, lb in COST_FIELDS],
         # 整列掛在本案的 ＋ 拆項掛在本案的，日期排序後合成一份 —— 兩者對這一案
         # 都是真金白銀進來，畫面上分兩塊會讓人以為要自己相加。

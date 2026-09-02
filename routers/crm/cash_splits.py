@@ -28,7 +28,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import exists, func as sa_func, select
 
 from core.auth import check_logged_in
-from core.crm_logic import advance_open_amount, split_amount_error, split_side
+from core.crm_logic import split_gross, advance_open_amount, split_amount_error, split_side
 from core.ledger import require_entity
 from core.project_link import cash_can_link
 from db.models import (Client, CrmCashEntry, CrmCashSplit,
@@ -148,8 +148,8 @@ def _project_deltas(side: str, parent_deposit, parent_project_id, splits) -> dic
         out[parent_project_id] = out.get(parent_project_id, 0) + int(parent_deposit or 0)
     for s in splits:
         if s.project_id:
-            out[s.project_id] = (out.get(s.project_id, 0)
-                                 + int(s.amount or 0) + int(s.fee or 0))
+            # 毛額規則在 core.crm_logic.split_gross（專案按毛額結清）
+            out[s.project_id] = out.get(s.project_id, 0) + split_gross(s.amount, s.fee)
     return out
 
 

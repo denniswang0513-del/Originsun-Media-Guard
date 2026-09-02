@@ -26,7 +26,10 @@ export function openProjectPicker(o) {
     // 兩份索引再 spread 合併的舞步是上一版的殘留，那時它來自另一支端點。
     const due = o.outstanding || [];
     const clientOf = (p) => p.client_short_name || p.client || '';
-    const dueOf = (p) => Number(p.amount_receivable) || 0;
+    // 🔴 看不到金額的人：`amount_receivable` 整個鍵被 MoneyRedactRoute 抹掉，
+    // 回 null 讓下面畫「—」而不是「未收 $0」（把沒授權說成已收齊）。
+    const dueOf = (p) => ('amount_receivable' in p
+        ? (Number(p.amount_receivable) || 0) : null);
 
     openRowPicker({
         rows: due,
@@ -42,7 +45,9 @@ export function openProjectPicker(o) {
                 <span style="color:#eee;font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name || p.id)}</span>
                 ${clientOf(p) || p.status ? `<span style="color:#9ca3af;font-size:11px;">${esc(clientOf(p))}${p.status ? '　·　' + esc(p.status) : ''}</span>` : ''}
             </span>
-            ${dueOf(p)
+            ${dueOf(p) === null
+                ? '<span style="color:#4b5563;font-size:11px;white-space:nowrap;">—</span>'
+                : dueOf(p)
                 ? `<span style="color:#fbbf24;font-size:11px;white-space:nowrap;">未收 $${money(dueOf(p))}</span>`
                 : '<span style="color:#4b5563;font-size:11px;white-space:nowrap;">已收齊</span>'}`,
         onPick: o.onPick,

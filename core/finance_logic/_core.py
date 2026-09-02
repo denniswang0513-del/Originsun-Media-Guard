@@ -1106,6 +1106,25 @@ def bank_fee_total(cash_entries, mset) -> int:
                if month_of(e.get("entry_date")) in mset)
 
 
+def bank_fee_breakdown(cash_entries, mset):
+    """期間匯費桶拆成 `(真匯費, 發票代開費)` —— 兩者相加＝ `bank_fee_total`。
+
+    🔴 **減法只有這一份**。代開費為了守住淨流不變而疊在 `bank_fee` 上
+    （`recognize_receipt_fee`），所以「真匯費」是減出來的；那個減法本來散在
+    損益表頭與 drilldown 兩個顯示端各寫一次，第三個顯示端只要忘記減，
+    代開費就又會被叫成銀行手續費（owner 2026-09-02 看到的那顆 66,960）。
+
+    順帶只掃一次 `cash_entries`（原本兩支各掃一遍，`month_of` 每列算兩次）。
+    """
+    bank = agency = 0
+    for e in cash_entries:
+        if month_of(e.get("entry_date")) not in mset:
+            continue
+        bank += int(e.get("bank_fee") or 0)
+        agency += int(e.get("agency_fee") or 0)
+    return bank - agency, agency
+
+
 def agency_fee_total(cash_entries, mset) -> int:
     """期間**發票代開費**合計（bank_fee 桶裡屬於代開費的那一段）。
 

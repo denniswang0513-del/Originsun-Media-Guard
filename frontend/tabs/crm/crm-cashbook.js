@@ -128,7 +128,11 @@ async function _loadProjectList() {
  *  一趟的代價不只是往返 —— 那支**有 `.limit(80)`**（清單會靜默截斷）、而且
  *  只在私帳才填 projects（母公司整趟全廢）。 */
 const _outstandingProjects = () => _projectList
-    .filter((p) => (p.amount_receivable || 0) > 0);
+    // 🔴 三態：`amount_receivable` 是 MONEY_FIELDS，沒有 money_view 的人拿到的
+    // 是**鍵不存在**（不是 0）。`|| 0` 會把「你看不到」壓成「已收齊」——
+    // 清單整個空掉，而且「顯示全部」那邊每一列都被標成收齊了（core/money 檔頭
+    // 那條：判準一律用 `'key' in obj`）。看不到金額的人不做未收篩選。
+    .filter((p) => !('amount_receivable' in p) || (p.amount_receivable || 0) > 0);
 
 async function _loadClientList() {
     try { _clientList = (await _fetch('/clients')).clients || []; } catch(_) { _clientList = []; }
@@ -382,12 +386,12 @@ const _taxFull = (e) => ((e.taxonomy_path || []).length
     ? e.taxonomy_path.join(' ▸ ') : (e.category || ''));
 
 /** 日期格：日期＋星期（六日／假日再上色）。沒有日期就一個破折號。 */
-function _dayHtml(e, m = _dayMark(e.entry_date)) {
+function _dayHtml(m) {
     if (!m.day) { return '—'; }
     return `${m.day}<span class="cash-wd">${_esc(m.holiday || m.wd)}</span>`;
 }
 
-function _dayCls(e, m = _dayMark(e.entry_date)) {
+function _dayCls(m) {
     return m.holiday ? ' is-holiday' : (m.weekend ? ' is-weekend' : '');
 }
 
@@ -551,8 +555,14 @@ window._cashPayPick = (ev, id) => _inlineLink({
     },
 });
 
-/** 這一列實際流出多少（匯費算進去 —— 分配比的是這個數）。 */
-const _payOut = (e) => (e.expense || 0) + (e.bank_fee || 0);
+/** 這一列的毛支出：匯費算進去（銀行實際扣掉的就是這個數）。
+ *  🔴 下面三個「流出多少」全部長在它上面 —— 原本各寫一次 `expense + bank_fee`，
+ *  三處相隔 430 行，改刷卡規則的人只會看到其中兩個。 */
+const _grossOut = (e) => (e.expense || 0) + (e.bank_fee || 0);
+
+/** 這一列實際流出多少（分配比的是這個數）。
+ *  🔴 刻意不看 `status === 'card'`：刷卡列照樣可以掛請款單。 */
+const _payOut = (e) => _grossOut(e);
 
 /** 這一列掛著哪幾張請款單。後端給 `payment_ids`（全部）；舊回應只有
  *  `payment_request_id`（主要那張）—— 兩種形狀都認，不然一次部署落差就把
@@ -577,12 +587,12 @@ function _rowHtml(e) {
     // 同上：這三個以前在樣板裡各算兩次（`_splitProjNames` 還是 map+Set+join）
     const projName = e.split_count ? _splitProjNames(e) : (e.project_name || '');
     const canPickProj = !e.split_count && _canLinkProj(e);
-    const mine = finIsMine();
+    const mine = _noInvoice();
     return `
         <div class="crm-row${e.id === _selectedId && !_batch.on ? ' selected' : ''}${
             _batch.on && _batch.sel.has(e.id) ? ' batch-picked' : ''}" data-id="${e.id}"
              onclick="window._cashRowClick(event,'${e.id}')">
-            <div class="crm-row-date${_dayCls(e, dm)}">${_dayHtml(e, dm)}</div>
+            <div class="crm-row-date${_dayCls(dm)}">${_dayHtml(dm)}</div>
             <div class="crm-row-name">${_esc(e.summary)}${_pettyTag(e)}</div>
             <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
@@ -986,12 +996,12 @@ async function _batchApply(pick) {
 
 /** 刷卡金額：status='card' 的列（刷卡當下不動銀行，所以不算銀行支出）。 */
 function _cardAmt(e) {
-    return e.status === 'card' ? ((e.expense || 0) + (e.bank_fee || 0)) : 0;
+    return e.status === 'card' ? _grossOut(e) : 0;
 }
 
 /** 銀行支出：卡費列不算（那筆錢還在卡上，月底繳款才真的離開帳戶）。 */
 function _bankOut(e) {
-    return e.status === 'card' ? 0 : ((e.expense || 0) + (e.bank_fee || 0));
+    return e.status === 'card' ? 0 : _grossOut(e);
 }
 
 // ── Detail Panel ────────────────────────────────────────────
@@ -1093,8 +1103,7 @@ function renderDetail(e) {
     const isProjectish = _canLinkProj(e);
     // 收入列的發票由下面「關聯發票」區負責，不重複列。
     // 私帳沒有發票這回事（不開發票，收款＝連結專案），相關欄目整組不出現。
-    const mineNoInvoice = _noInvoice();
-    const showInvoiceProp = !e.deposit && !mineNoInvoice;
+    const showInvoiceProp = !e.deposit && !_noInvoice();
     const rel = [
         // 有快速連結下拉時就不印唯讀版 —— 下拉本身已經顯示目前選的是什麼，
         // 印兩份會變成「專案 X」下面又一個「專案」標籤
@@ -1146,7 +1155,7 @@ function renderDetail(e) {
     // 關聯發票（合併匯款 / 分期收款）—— 只有收入列有，內容由 loadCashInvoiceAllocs
     // 非同步填。舊的「單張發票驗算」被這區塊取代：它只看得到一張發票，客戶合併
     // 匯款時必然報「不平衡」，等於在對的資料上顯示假警告。
-    if (e.deposit && !mineNoInvoice) {
+    if (e.deposit && !_noInvoice()) {
         html += section('關聯發票');
         html += '<div id="cash-alloc-box" style="font-size:12px;color:#888;">載入中…</div>';
     }
@@ -1160,7 +1169,7 @@ function renderDetail(e) {
 
     document.getElementById('cash-detail-content').innerHTML = html;
     if (isProjectish) _renderQuickLink(e);
-    if (e.deposit && !mineNoInvoice) loadCashInvoiceAllocs(e.id);
+    if (e.deposit && !_noInvoice()) loadCashInvoiceAllocs(e.id);
     // 🔴 沒掛過任何請款單就不用打那一趟：payment_request_id 的不變量由
     //    replace_payment_allocs 維持（有連結才非空、清空就設回 null），所以它
     //    等於「這列有沒有分配」。實測生產 907 筆支出列，有硬連結的是 0 筆 ——
@@ -1586,7 +1595,7 @@ export async function initCrmCashbookTab() {
     // 私帳不開發票（owner 2026-09-01）：那一欄讓給「請款單」（支出列可直接勾）。
     // 🔴 改標題而不是隱藏整欄：欄寬規則是 nth-child，表頭與列的格子數必須一直
     // 相等 —— 只藏表頭或只藏列都會讓後面每一欄錯位。
-    if (finIsMine()) {
+    if (_noInvoice()) {
         const _h = document.querySelector('#cash-list-panel .acct-header .cash-col-inv');
         if (_h) { _h.childNodes[0].nodeValue = '請款單 '; }
     }

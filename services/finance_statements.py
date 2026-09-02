@@ -35,14 +35,14 @@ import re
 from datetime import datetime
 
 from core.finance_logic import (
+    _AGENCY_FEE_LABEL,
     aging_buckets,
     ap_open_payments,
     ar_open_invoices,
     ar_overdue_amount,
     bank_balances_asof,
     split_bank_lines,
-    agency_fee_total,
-    bank_fee_total,
+    bank_fee_breakdown,
     build_balance_sheet,
     build_cashflow,
     build_pnl,
@@ -726,16 +726,15 @@ async def drilldown(session, kind: str, months, entity: str = "parent") -> dict:
                 items.append(_row("derived", f"dep:{m}", f"{m}-01",
                                   f"器材折舊（{m}）", r["amount"], "折舊", ""))
         if group == "營業費用-管理":
-            # 代開費從匯費桶裡拆出來 —— 兩行相加＝原本那一行（見 build_pnl 那段）
-            agency = agency_fee_total(inputs["cash_entries"], mset)
-            fees = bank_fee_total(inputs["cash_entries"], mset) - agency
+            # 代開費從匯費桶裡拆出來（減法的正本在 bank_fee_breakdown）
+            fees, agency = bank_fee_breakdown(inputs["cash_entries"], mset)
             if fees:
                 items.append(_row("derived", "bank_fee", None,
                                   "銀行手續費（各筆匯費合計）", fees, "匯費", ""))
             if agency:
                 items.append(_row("derived", "agency_fee", None,
                                   "發票代開費（收款時被扣，各筆合計）", agency,
-                                  "發票代開費", ""))
+                                  _AGENCY_FEE_LABEL, ""))
 
     elif kind == "non_operating":
         for inv in inputs["invoices"]:

@@ -172,7 +172,8 @@ def test_a_rule_can_target_any_depth_of_the_tree():
     assert "taxonomy_node_id VARCHAR(32)" in migration_sql()
     # 分類器把節點一起回；一律三元組（條件式回傳會讓呼叫端得猜拿到幾個值）
     cls = code_only(func_body(repo_src("core/bank_statement.py"), "def _classify("))
-    assert "return RuleHit(cat, direction, _at(r, 4), _at(r, 5))" in cls
+    # 切片而不是逐格取：短規則少掉的欄位由 RuleHit 自己的預設值補
+    assert "return RuleHit(cat, direction, *r[4:6])" in cls
     assert "return RuleHit()" in cls
     # 套用到未歸類的歷史列時，**兩個分支**都走 `_sync_taxonomy` —— 節點與三欄的
     # 一致性只有那一份規則。只帶 category 的規則自己寫 `e.category = cat` 的話，

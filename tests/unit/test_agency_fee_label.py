@@ -7,15 +7,10 @@
 沒有**（同期間帳上 bank_fee 是 0 筆）。金額沒錯，名字錯了 —— 而錯的名字會讓
 人以為銀行收了六萬七的手續費。
 """
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
-
-from core.finance_logic import agency_fee_total, bank_fee_total  # noqa: E402
-from services.finance_statements import explode_cash_splits  # noqa: E402
-from tests.unit._srcscan import code_only, func_body, repo_src  # noqa: E402
+from core.finance_logic import (agency_fee_total, bank_fee_breakdown,
+                                bank_fee_total)
+from services.finance_statements import explode_cash_splits
+from tests.unit._srcscan import code_only, func_body, repo_src
 
 MSET = {"2026-08"}
 
@@ -66,15 +61,27 @@ def test_old_rows_without_the_tag_report_zero():
     assert bank_fee_total([_entry(bank_fee=30)], MSET) == 30
 
 
-def test_both_display_ends_split_the_bucket():
+def test_the_breakdown_owns_the_subtraction():
+    """🔴 減法只有一份：`bank_fee_breakdown` 回 (真匯費, 代開費)，
+    兩者相加必須等於 `bank_fee_total` —— 這是「管理費用小計不變」那條的機器版。"""
+    rows = explode_cash_splits([_entry(bank_fee=30)], {"e1": [
+        {"id": "s1", "amount": 291640, "fee": 66960, "category": "公司_專案"},
+        {"id": "s2", "amount": 58796, "category": "公司_專案"},
+    ]})
+    fee, agency = bank_fee_breakdown(rows, MSET)
+    assert (fee, agency) == (30, 66960)
+    assert fee + agency == bank_fee_total(rows, MSET), "兩行相加不等於原本那一行"
+
+
+def test_both_display_ends_go_through_the_breakdown():
     """損益摘要與 drilldown 明細**兩邊都要分**：只改一邊的話，點進去的合計
-    跟表頭那一行對不上。"""
+    跟表頭那一行對不上。兩邊都得走同一支 —— 自己再減一次就是第二份規則。"""
     summ = code_only(func_body(repo_src("core/finance_logic/_statements.py"),
                                "def build_pnl("))
-    assert "agency = agency_fee_total(cash_entries, mset)" in summ
-    assert "fee = bank_fee_total(cash_entries, mset) - agency" in summ
+    assert "fee, agency = bank_fee_breakdown(cash_entries, mset)" in summ
     assert "_AGENCY_FEE_LABEL, agency" in summ
-    drill = repo_src("services/finance_statements.py")
-    assert "agency = agency_fee_total(inputs[\"cash_entries\"], mset)" in drill
-    assert 'bank_fee_total(inputs["cash_entries"], mset) - agency' in drill
+    assert "bank_fee_total(" not in summ, "又在顯示端自己減了一次"
+    drill = code_only(repo_src("services/finance_statements.py"))
+    assert 'fees, agency = bank_fee_breakdown(inputs["cash_entries"], mset)' in drill
     assert "發票代開費（收款時被扣，各筆合計）" in drill
+    assert "bank_fee_total(" not in drill, "又在顯示端自己減了一次"
