@@ -70,6 +70,56 @@ def leave_balance(annual_days: Optional[int], approved_annual_sum: float) -> dic
             "remaining": round(annual_days - used, 1)}
 
 
+def month_workdays(year: int, month: int) -> int:
+    """該月週一到週五的天數（不扣國定假日 —— 那是參考值，不是打卡標準）。"""
+    import calendar
+    return sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
+               if calendar.weekday(year, month, d) < 5)
+
+
+def week_key(day) -> str:
+    """ISO 週鍵 'YYYY-Www'（跨年那幾天歸 ISO 年，週一起算）。"""
+    y, w, _ = day.isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def hours_rollup(rows, year: int, month: int) -> dict:
+    """團隊月表的「幫大家算好」：`rows` = [(staff_name, day(date), project_name, hours), …]。
+
+    每人：合計、填了幾天、平均每天、每週小計、各案小計；全體：各案合計、總時數；
+    參考工時＝工作日×8（只是對照，不是標準工時）。純函式，端點只做 I/O。"""
+    people: dict = {}
+    projects: dict = {}
+    for name, day, pname, h in rows:
+        h = float(h or 0)
+        p = people.setdefault(name or "(空白)", {"name": name or "(空白)", "total": 0.0, "days": set(),
+                                                  "weeks": {}, "projects": {}})
+        p["total"] += h
+        if day:
+            p["days"].add(day)
+            wk = week_key(day)
+            p["weeks"][wk] = p["weeks"].get(wk, 0.0) + h
+        p["projects"][pname or "(空白)"] = p["projects"].get(pname or "(空白)", 0.0) + h
+        projects[pname or "(空白)"] = projects.get(pname or "(空白)", 0.0) + h
+    out_people = []
+    for p in people.values():
+        days = len(p["days"])
+        out_people.append({
+            "name": p["name"], "total": round(p["total"], 1), "days_filled": days,
+            "avg_per_day": round(p["total"] / days, 1) if days else 0.0,
+            "weeks": {k: round(v, 1) for k, v in sorted(p["weeks"].items())},
+            "projects": sorted(((k, round(v, 1)) for k, v in p["projects"].items()), key=lambda x: -x[1]),
+        })
+    out_people.sort(key=lambda x: -x["total"])
+    wd = month_workdays(year, month)
+    return {
+        "workdays": wd, "reference_hours": wd * 8,
+        "people": out_people,
+        "projects": sorted(((k, round(v, 1)) for k, v in projects.items()), key=lambda x: -x[1]),
+        "total": round(sum(projects.values()), 1),
+    }
+
+
 #: 本人可改／可刪的手填列狀態（docs/TIMESHEET_SELF_ENTRY_PLAN.md D3／D5）：
 #: approved／locked 之後就不是自己的事了。
 EDITABLE_STATUSES = frozenset({"draft", "confirmed"})

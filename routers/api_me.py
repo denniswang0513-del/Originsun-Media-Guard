@@ -23,7 +23,7 @@ from sqlalchemy import func, select  # type: ignore
 
 from core.auth import check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
-from core.hr_logic import can_edit_timesheet, leave_balance, leave_to_dict
+from core.hr_logic import can_edit_timesheet, hours_rollup, leave_balance, leave_to_dict
 from core.identity import resolve_current_staff
 from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetCreate, MeTimesheetUpdate, MeTodoUpdate)
@@ -452,3 +452,102 @@ async def delete_my_timesheet(row_id: str, request: Request):
         await session.delete(r)
         await session.commit()
     return {"deleted": row_id}
+
+
+# ── 團隊工時（大家看得到彼此；docs/TIMESHEET_SELF_ENTRY_PLAN.md §5）──
+#
+# 閘門＝「看得到自己就看得到大家」（owner 2026-09-03「我希望大家可以看到彼此的工時」）：
+# 同 _bound_ident（me_finance ＋ 綁定）。回的是 Sheet 原字案名與時數，沒有金額、沒有
+# CRM 專案 id 的連結 —— 私帳「專案列」可見性那條線守的是錢，這裡是團隊自己的工時表。
+
+def _month_span(month: str):
+    try:
+        base = datetime.strptime(month, "%Y-%m") if month else datetime.now().replace(day=1)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="month 格式需 YYYY-MM")
+    m0 = base.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    m1 = m0.replace(year=m0.year + 1, month=1) if m0.month == 12 else m0.replace(month=m0.month + 1)
+    return m0, m1
+
+
+@router.get("/team/hours")
+async def team_hours(request: Request, month: str = ""):
+    """團隊月表：每人合計／填了幾天／每週小計／各案小計，全體各案合計；參考工時＝工作日×8。"""
+    await _bound_ident(request)
+    m0, m1 = _month_span(month)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name, Timesheet.hours)
+            .where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
+        )).all()
+    data = [(n, d.astimezone().date() if d else None, p, h) for n, d, p, h in rows]
+    return {"month": m0.strftime("%Y-%m"), **hours_rollup(data, m0.year, m0.month)}
+
+
+@router.get("/team/projects")
+async def team_projects(request: Request, months: int = 12):
+    """專案工時匯總：近 N 個月每個 Sheet 案名的總時數、人數、預算（對到案才有）、最後填報。"""
+    await _bound_ident(request)
+    months = max(1, min(int(months or 12), 36))
+    now = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    y, m = now.year, now.month - (months - 1)
+    while m <= 0:
+        y, m = y - 1, m + 12
+    since = now.replace(year=y, month=m)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet.project_name, Timesheet.project_id,
+                   func.sum(Timesheet.hours), func.count(func.distinct(Timesheet.staff_name)),
+                   func.max(Timesheet.work_date))
+            .where(Timesheet.work_date >= since)
+            .group_by(Timesheet.project_name, Timesheet.project_id)
+        )).all()
+        pids = [pid for _, pid, *_ in rows if pid]
+        budgets = dict((await session.execute(
+            select(CrmProject.id, CrmProject.budget_hours).where(CrmProject.id.in_(pids))
+        )).all()) if pids else {}
+    items = []
+    for pname, pid, total, people, last in rows:
+        b = budgets.get(pid) if pid else None
+        total = round(float(total or 0), 1)
+        items.append({"project_name": pname or "(空白)", "hours": total, "people": people,
+                      "budget_hours": b, "remaining": round(b - total, 1) if b else None,
+                      "pct": round(total / b * 100, 1) if b else None,
+                      "last_entry": last.astimezone().date().isoformat() if last else None})
+    items.sort(key=lambda x: -x["hours"])
+    return {"since": since.strftime("%Y-%m"), "months": months, "items": items,
+            "total": round(sum(i["hours"] for i in items), 1)}
+
+
+@router.get("/team/project")
+async def team_project_detail(request: Request, name: str = ""):
+    """單一案（Sheet 原字）的工時明細：各人合計、各月走勢、最近 60 列。"""
+    await _bound_ident(request)
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name 必填")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet.staff_name, Timesheet.work_date, Timesheet.task_note, Timesheet.hours)
+            .where(Timesheet.project_name == name)
+            .order_by(Timesheet.work_date.desc())
+        )).all()
+    by_person: dict = {}
+    by_month: dict = {}
+    for n, d, _t, h in rows:
+        h = float(h or 0)
+        by_person[n or "(空白)"] = by_person.get(n or "(空白)", 0.0) + h
+        if d:
+            mk = d.astimezone().strftime("%Y-%m")
+            by_month[mk] = by_month.get(mk, 0.0) + h
+    return {
+        "project_name": name,
+        "total": round(sum(by_person.values()), 1),
+        "by_person": sorted(((k, round(v, 1)) for k, v in by_person.items()), key=lambda x: -x[1]),
+        "by_month": [(k, round(v, 1)) for k, v in sorted(by_month.items())],
+        "recent": [{"date": d.astimezone().date().isoformat() if d else "", "name": n or "",
+                    "task": t or "", "hours": round(float(h or 0), 2)} for n, d, t, h in rows[:60]],
+    }

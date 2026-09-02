@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>團隊工時｜ORIGINSUN</title>
+<!-- 團隊工時（docs/TIMESHEET_SELF_ENTRY_PLAN.md §5）：大家看得到彼此的工時。
+     三個視圖：團隊月表（每人合計／每週／各案，系統算好）、專案匯總（總時數／預算／剩餘）、
+     專案明細（各人／各月／最近列）。資料 /api/v1/me/team/*（閘門＝看得到自己就看得到大家）。
+     同源共用 localStorage auth_token；沒登入導回 /my.html。設計語彙同 my.html（白底／旭日紅）。 -->
+<style>
+:root { --red: #c9372c; --ink: #262626; --sub: #737373; --line: #e5e5e5; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #fff; color: var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif; -webkit-font-smoothing: antialiased; }
+a { color: inherit; text-decoration: none; }
+header { position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: rgba(255,255,255,.95); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(229,229,229,.6); }
+.header-inner { max-width: 1100px; margin: 0 auto; padding: 0 20px; height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.brand-name { font-size: 13px; letter-spacing: .25em; font-weight: 300; }
+.eyebrow { font-size: 11px; letter-spacing: .35em; text-transform: uppercase; color: var(--sub); }
+.accent { color: var(--red); }
+main { max-width: 1100px; margin: 0 auto; padding: 96px 20px 80px; }
+h1 { font-size: 22px; font-weight: 300; letter-spacing: .1em; margin: 6px 0 18px; }
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+.tab { border: 1px solid var(--line); border-radius: 2px; padding: 7px 14px; font-size: 12px; letter-spacing: .15em; color: var(--sub); cursor: pointer; background: none; font-family: inherit; }
+.tab.on, .tab:hover { color: var(--red); border-color: var(--red); }
+.bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; font-size: 13px; }
+.mini-btn { border: 1px solid var(--line); border-radius: 2px; background: none; padding: 5px 12px; font-size: 12px; color: var(--sub); cursor: pointer; font-family: inherit; }
+.mini-btn:hover { color: var(--red); border-color: var(--red); }
+.pill { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--sub); white-space: nowrap; }
+.pill.hot { border-color: var(--red); color: var(--red); }
+.card { border: 1px solid var(--line); padding: 16px 18px; margin-bottom: 16px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 9px 8px; border-bottom: 1px solid #f0f0f0; text-align: left; vertical-align: top; }
+th { font-size: 11px; letter-spacing: .15em; text-transform: uppercase; color: var(--sub); font-weight: 400; }
+td.num, th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+tr.person { cursor: pointer; }
+tr.person:hover td { background: #fafafa; }
+.sub { font-size: 12px; color: var(--sub); }
+.meter { height: 6px; background: #f0f0f0; border-radius: 3px; overflow: hidden; min-width: 90px; }
+.meter > i { display: block; height: 100%; background: var(--ink); }
+.meter.over > i { background: var(--red); }
+.empty { padding: 22px 0; font-size: 13px; color: #a3a3a3; text-align: center; }
+.link { color: var(--red); cursor: pointer; }
+.wrap { overflow-x: auto; }
+@media (max-width: 640px) { th, td { padding: 8px 5px; } main { padding-top: 84px; } }
+</style>
+</head>
+<body>
+<header><div class="header-inner">
+    <a class="brand-name" href="/my.html">ORIGINSUN</a>
+    <div style="display:flex;gap:14px;align-items:center;font-size:12px;color:var(--sub);">
+        <a href="/my.html">← 我的工作台</a>
+    </div>
+</div></header>
+<main>
+    <div class="eyebrow">Team Hours <span class="accent">團隊工時</span></div>
+    <h1>大家的工時，系統算好的</h1>
+    <div class="tabs">
+        <button class="tab on" data-view="team">團隊月表</button>
+        <button class="tab" data-view="projects">專案匯總</button>
+    </div>
+    <div id="content"><div class="empty">載入中…</div></div>
+</main>
+<script>
+const TOKEN_KEY = "auth_token";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+async function mfetch(path) {
+    const tok = localStorage.getItem(TOKEN_KEY);
+    if (!tok) { location.href = "/my.html"; throw new Error("no token"); }
+    const r = await fetch(path, { headers: { "Authorization": "Bearer " + tok } });
+    if (r.status === 401) { location.href = "/my.html"; throw new Error("401"); }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || ("HTTP " + r.status));
+    return d;
+}
+let _view = "team";
+let _month = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })();
+function shiftMonth(ym, delta) { const [y, m] = ym.split("-").map(Number); const d = new Date(y, m - 1 + delta, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
+
+async function render() {
+    const host = $("content");
+    document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.view === _view));
+    host.innerHTML = `<div class="empty">載入中…</div>`;
+    try {
+        if (_view === "team") host.innerHTML = teamHtml(await mfetch("/api/v1/me/team/hours?month=" + _month));
+        else if (_view === "projects") host.innerHTML = projectsHtml(await mfetch("/api/v1/me/team/projects?months=12"));
+        else host.innerHTML = projectHtml(await mfetch("/api/v1/me/team/project?name=" + encodeURIComponent(_view.slice(8))));
+    } catch (e) { host.innerHTML = `<div class="empty">${esc(e.message || e)}</div>`; }
+}
+
+// ── 團隊月表：每人一列（合計／天數／平均／每週），點開看各案 ──
+function teamHtml(d) {
+    const weeks = [...new Set(d.people.flatMap(p => Object.keys(p.weeks)))].sort();
+    const head = `<tr><th>人員</th><th class="num">本月合計</th><th class="num">填了幾天</th><th class="num">平均/天</th>
+        ${weeks.map(w => `<th class="num">${esc(w.slice(5))}</th>`).join("")}</tr>`;
+    const rows = d.people.map((p, i) => `
+        <tr class="person" onclick="togglePerson(${i})">
+            <td>${esc(p.name)} <span class="sub">▾</span></td>
+            <td class="num"><b>${p.total}</b> h${p.total > d.reference_hours ? ' <span class="pill hot">超過參考</span>' : ""}</td>
+            <td class="num">${p.days_filled}</td>
+            <td class="num">${p.avg_per_day}</td>
+            ${weeks.map(w => `<td class="num">${p.weeks[w] ?? "—"}</td>`).join("")}
+        </tr>
+        <tr id="person-${i}" style="display:none;"><td colspan="${4 + weeks.length}" style="background:#fafafa;">
+            ${p.projects.map(([n, h]) => `<span class="pill" style="margin:2px 4px 2px 0;"><span class="link" onclick="event.stopPropagation();openProject('${esc(n)}')">${esc(n)}</span> ${h} h</span>`).join("")}
+        </td></tr>`).join("");
+    return `
+        <div class="bar">
+            <button class="mini-btn" onclick="_month=shiftMonth(_month,-1);render()">‹</button><b>${esc(d.month)}</b>
+            <button class="mini-btn" onclick="_month=shiftMonth(_month,1);render()">›</button>
+            <span class="pill">全體 ${d.total} h</span>
+            <span class="pill">${d.people.length} 人</span>
+            <span class="pill" title="週一到週五天數 × 8，只是對照用">參考 ${d.workdays} 個工作日 · ${d.reference_hours} h</span>
+        </div>
+        <div class="card wrap">${d.people.length ? `<table>${head}${rows}</table>` : `<div class="empty">這個月還沒有人填</div>`}</div>
+        <div class="card">
+            <div class="eyebrow" style="margin-bottom:10px;">By Project <span class="accent">本月各案</span></div>
+            ${d.projects.map(([n, h]) => `<span class="pill" style="margin:2px 4px 2px 0;"><span class="link" onclick="openProject('${esc(n)}')">${esc(n)}</span> ${h} h</span>`).join("") || `<div class="empty">—</div>`}
+        </div>`;
+}
+function togglePerson(i) { const tr = $("person-" + i); if (tr) tr.style.display = tr.style.display === "none" ? "" : "none"; }
+
+// ── 專案匯總：近 12 個月每案總時數／人數／預算／剩餘 ──
+function projectsHtml(d) {
+    const rows = d.items.map(p => {
+        const pct = p.pct == null ? null : Math.min(100, p.pct);
+        return `<tr>
+            <td><span class="link" onclick="openProject('${esc(p.project_name)}')">${esc(p.project_name)}</span></td>
+            <td class="num"><b>${p.hours}</b> h</td>
+            <td class="num">${p.people}</td>
+            <td class="num">${p.budget_hours ?? "—"}</td>
+            <td class="num">${p.remaining == null ? "—" : p.remaining}</td>
+            <td>${pct == null ? '<span class="sub">沒設預算</span>' : `<div class="meter${p.pct > 100 ? " over" : ""}"><i style="width:${pct}%"></i></div><span class="sub">${p.pct}%</span>`}</td>
+            <td class="sub">${esc(p.last_entry || "")}</td>
+        </tr>`;
+    }).join("");
+    return `
+        <div class="bar"><span class="pill">近 ${d.months} 個月（${esc(d.since)} 起）</span><span class="pill">${d.items.length} 案 · ${d.total} h</span></div>
+        <div class="card wrap"><table>
+            <tr><th>專案（Sheet 案名）</th><th class="num">總時數</th><th class="num">人數</th><th class="num">預算(h)</th><th class="num">剩餘</th><th>消耗</th><th>最後填報</th></tr>
+            ${rows || `<tr><td colspan="7" class="empty">—</td></tr>`}
+        </table></div>`;
+}
+
+// ── 專案明細 ──
+function openProject(name) { _view = "project:" + name; render(); }
+function projectHtml(d) {
+    const maxM = Math.max(1, ...d.by_month.map(([, h]) => h));
+    return `
+        <div class="bar"><button class="mini-btn" onclick="_view='projects';render()">‹ 專案匯總</button>
+            <b>${esc(d.project_name)}</b><span class="pill">共 ${d.total} h</span></div>
+        <div class="card"><div class="eyebrow" style="margin-bottom:10px;">By Person <span class="accent">各人</span></div>
+            ${d.by_person.map(([n, h]) => `<span class="pill" style="margin:2px 4px 2px 0;">${esc(n)} ${h} h</span>`).join("")}</div>
+        <div class="card"><div class="eyebrow" style="margin-bottom:10px;">By Month <span class="accent">各月</span></div>
+            ${d.by_month.map(([m, h]) => `<div style="display:flex;gap:10px;align-items:center;font-size:12px;margin:4px 0;">
+                <span style="width:64px;color:var(--sub);">${esc(m)}</span><div class="meter" style="flex:1;"><i style="width:${Math.round(h / maxM * 100)}%"></i></div><span style="width:56px;text-align:right;">${h} h</span></div>`).join("") || `<div class="empty">—</div>`}</div>
+        <div class="card wrap"><div class="eyebrow" style="margin-bottom:10px;">Recent <span class="accent">最近 ${d.recent.length} 列</span></div>
+            <table><tr><th>日期</th><th>人員</th><th>內容</th><th class="num">時數</th></tr>
+            ${d.recent.map(r => `<tr><td class="sub">${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.task)}</td><td class="num">${r.hours}</td></tr>`).join("")}</table></div>`;
+}
+
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => { _view = t.dataset.view; render(); }));
+render();
+</script>
+</body>
+</html>
