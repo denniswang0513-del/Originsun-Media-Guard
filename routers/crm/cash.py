@@ -94,10 +94,9 @@ async def load_alloc_links_map(session, kind: str, *, entity=None) -> dict:
     """
     from sqlalchemy import select
 
-    from db.models import CrmCashEntry, CrmCashInvoiceLink, CrmCashPaymentLink
-    link, col = ((CrmCashInvoiceLink, CrmCashInvoiceLink.invoice_id)
-                 if kind == "invoice"
-                 else (CrmCashPaymentLink, CrmCashPaymentLink.payment_request_id))
+    from db.models import CrmCashEntry
+    k = _ALLOC_KINDS[kind]          # 表與欄名跟其他每一項一樣，只在這一張登記表
+    link, col = k["link"], getattr(k["link"], k["id_field"])
     q = (select(link.cash_entry_id, col, link.amount)
          .order_by(link.amount.desc()))
     if entity:

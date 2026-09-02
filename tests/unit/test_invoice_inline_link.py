@@ -36,7 +36,7 @@ def test_the_fee_prefill_uses_this_row_not_the_panels_last_one():
     看不出來。就地連結要餵**這一列自己的**殘額。
     """
     js = js_code_only(repo_src(CB))
-    fn = js_func_body(js, "window._cashInvPick = (ev, id) => _inlineLink({")
+    fn = js_func_body(js, "window._cashInvPick = (ev, id) => {")
     # 同一支 toItem，殘額由呼叫端餵：面板餵自己的（預設參數），就地連結餵這一列的
     assert "_ALLOC_SIDES.invoice.toItem(inv, Math.max(0, left))" in fn
     assert "_allocRemainCash" not in fn, "就地連結又去讀面板的殘額了"
@@ -49,7 +49,7 @@ def test_already_linked_invoices_keep_their_amount_and_fee():
     """🔴 本來就掛著的那幾張，金額與匯費要原封保留 —— 就地勾一下就把人在分配
     面板調好的匯費洗掉，是這個功能最貴的失敗方式（發票側是 per-item fee）。"""
     js = js_code_only(repo_src(CB))
-    fn = js_func_body(js, "window._cashInvPick = (ev, id) => _inlineLink({")
+    fn = js_func_body(js, "window._cashInvPick = (ev, id) => {")
     assert "await _fetch(`/cash-entries/${e.id}/invoices`)" in fn, "沒撈現有分配"
     assert "keep[iid].amount" in fn and "keep[iid].fee" in fn
 

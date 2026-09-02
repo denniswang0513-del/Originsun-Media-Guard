@@ -18,10 +18,9 @@ import argparse
 import sys
 from pathlib import Path
 
-import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from core.auth import create_token  # noqa: E402
+from scripts._common import admin_session  # noqa: E402
 
 
 def main() -> None:
@@ -30,10 +29,8 @@ def main() -> None:
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
 
-    tok = create_token({"sub": "admin", "username": "admin",
-                        "access_level": 3, "modules": []})
-    h = {"Authorization": f"Bearer {tok}"}
-    users = requests.get(f"{args.base}/api/v1/auth/users", headers=h, timeout=15).json()
+    s = admin_session("backfill_me_petty")
+    users = s.get(f"{args.base}/api/v1/auth/users", timeout=15).json()
     if isinstance(users, dict):
         users = users.get("users", [])
 
@@ -47,8 +44,8 @@ def main() -> None:
         hits += 1
         print(f"{'APPLY' if args.apply else 'DRY  '} {u['username']}: +me_petty")
         if args.apply:
-            r = requests.put(f"{args.base}/api/v1/auth/users/{u['username']}",
-                             headers=h, json={"modules": mods + ["me_petty"]},
+            r = s.put(f"{args.base}/api/v1/auth/users/{u['username']}",
+                             json={"modules": mods + ["me_petty"]},
                              timeout=15)
             r.raise_for_status()
     print(f"{'寫入' if args.apply else '待補'} {hits} 個帳號")

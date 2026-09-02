@@ -20,6 +20,24 @@ import re
 import sys
 
 
+def api_base(prod: bool) -> str:
+    """走 HTTP 的腳本打哪個 agent：生產主控 8000／dev 8001（同 resolve_db_url 的二選一）。"""
+    return "http://127.0.0.1:8000" if prod else "http://127.0.0.1:8001"
+
+
+def admin_session(username: str, modules=()):
+    """帶管理員 token 的 requests.Session —— 走 HTTP 打端點的腳本共用。
+
+    `modules`：指名才有的模組（例如寫私帳案要 finance_mine；Lv3 不隱含）。
+    """
+    import requests
+    from core.auth import create_token
+    s = requests.Session()
+    s.headers["Authorization"] = "Bearer " + create_token(
+        {"sub": "admin", "username": username, "access_level": 3, "modules": list(modules)})
+    return s
+
+
 def resolve_db_url(prod: bool) -> str:
     """dev/prod 庫切換的單一正本。
 

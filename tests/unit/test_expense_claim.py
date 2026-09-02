@@ -76,7 +76,9 @@ def test_claiming_an_expense_redraws_the_expense_section():
     人員費用那三顆重畫的是自己那區，兩者不能共用一個寫死的重畫目標。"""
     js = js_code_only(repo_src(COST_JS))
     fn = js_func_body(js, "window._expCreatePayment = function(expenseId) {")
-    assert "onDone" in fn and "_loadFinancialSummary(state.selectedId)" in fn
+    assert "onDone: window._expClaimDone" in fn
+    js = js_code_only(repo_src(COST_JS))
+    assert "_loadFinancialSummary(state.selectedId)" in js_func_body(js, "window._expClaimDone = function() {")
     body = js_func_body(js_code_only(repo_src(FIN_JS)),
                         "window._costCreatePayment = function(payeeName, amount, "
                         "summary, status, advanced, opts) {")

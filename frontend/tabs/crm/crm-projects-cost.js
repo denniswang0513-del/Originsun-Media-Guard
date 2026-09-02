@@ -1033,7 +1033,7 @@ window._expCreatePayment = function(expenseId) {
     window._costCreatePayment(e.payee || '', e.actual || 0,
                               '雜支：' + label, '應付款', false,
                               { expenseId: e.id, plannedMonth: month,
-                                onDone: () => _loadFinancialSummary(state.selectedId) });
+                                onDone: window._expClaimDone });
 };
 
 // ── 就地新增一筆雜支（行政雜支區底部固定的輸入列）─────────────

@@ -552,68 +552,69 @@ window._cashPayPick = (ev, id) => _inlineLink({
 //   · 本來就掛著的 → 金額與匯費**原封保留**（不然就地勾一下就把人調好的匯費洗掉）
 //   · 這次新掛上的 → 走既有的預帶規則（尚欠金額 ＋ autoFee），跟分配面板同一份
 // 要細調就開詳情面板那個分配面板 —— 那才是它的家。
-window._cashInvPick = (ev, id) => _inlineLink({
-    ev, id, noun: '發票',
-    open: async (e, onPick) => {
-        // 已收齊、不在候選清單裡、但正掛在這一列上的那幾張：不補進視窗就會被存檔
-        // 洗掉。列上只有「金額最大那張」的抬頭，第二、三張要撈現有分配才有真的
-        // 號碼與金額（捏造成主發票的抬頭＋$0 會讓人以為掛錯張）。
-        let linked = [];
-        try {
-            const cur = await _fetch(`/cash-entries/${e.id}/invoices`);
-            linked = (cur.items || []).filter((it) => !it.missing
-                    && !_invoiceList.some((x) => x.id === it.invoice_id))
-                .map((it) => ({ id: it.invoice_id, invoice_number: it.invoice_number || '',
-                                title: it.title || '', amount_total: it.amount_total || 0 }));
-        } catch (_) { /* 撈不到就只列候選 */ }
-        openInvoicePicker({
-            invoices: _invoiceList,
-            currentIds: _invIds(e),
-            linkedRows: linked,
-            rowAmount: Number(e.deposit) || 0,
-            title: '連結發票 — ' + (e.summary || ''),
-            onPick,
-        });
-    },
-    apply: async (ids, e) => {
-        // 現有分配先撈回來 —— 留著的那幾張要原封帶走（金額＋匯費）
-        const keep = {};
-        try {
-            const cur = await _fetch(`/cash-entries/${e.id}/invoices`);
-            (cur.items || []).forEach((it) => { keep[it.invoice_id] = it; });
-        } catch (_) { /* 撈不到就當全部是新掛的 */ }
-        // 🔴 預帶走分配面板同一支 `toItem`，但殘額要餵**這一列自己的** ——
-        // 它的預設值 `_allocRemainCash()` 讀的是面板上一次開的那一列，從列表叫
-        // 會拿到別列的數字、靜靜寫一個錯的匯費進 DB。
-        const picked = ids || [];
-        let left = Number(e.deposit) || 0;
-        picked.forEach((iid) => {
-            if (keep[iid]) { left -= Number(keep[iid].amount) || 0; }
-        });
-        const items = picked.map((iid) => {
-            if (keep[iid]) {
-                return { invoice_id: iid, amount: keep[iid].amount,
-                         fee: keep[iid].fee || 0 };
-            }
-            const inv = _invoiceList.find((x) => x.id === iid);
-            if (!inv) { return { invoice_id: iid, amount: Number(e.deposit) || 0, fee: 0 }; }
-            const it = _ALLOC_SIDES.invoice.toItem(inv, Math.max(0, left));
-            left -= it.amount;
-            return { invoice_id: iid, amount: it.amount, fee: it.fee };
-        }).filter((it) => (it.amount || 0) > 0);
-        return _fetch(`/cash-entries/${id}/invoices`,
-                      { method: 'PUT', body: JSON.stringify({ items }) });
-    },
-    patch: (e, ids) => {
-        e.invoice_ids = (ids || []).slice();
-        // 後端把 invoice_id 同步成**金額最大**的那張；這裡樂觀更新只認「有沒有」，
-        // 顯示名等下次重載校正（分配金額在前端算不準 —— 那是後端寫入後才知道的）
-        const first = (ids || [])[0];
-        const inv = first ? _invoiceList.find((x) => x.id === first) : null;
-        e.invoice_id = first || '';
-        e.invoice_title = inv ? (inv.title || inv.invoice_number || '') : (first ? e.invoice_title : '');
-    },
-});
+window._cashInvPick = (ev, id) => {
+    let existing = null;   // 現有分配（金額＋匯費）：open 撈一次、apply 沿用
+    return _inlineLink({
+        ev, id, noun: '發票',
+        open: async (e, onPick) => {
+            // 已收齊、不在候選清單裡、但正掛在這一列上的那幾張：不補進視窗就會被存檔
+            // 洗掉。列上只有「金額最大那張」的抬頭，第二、三張要撈現有分配才有真的
+            // 號碼與金額（捏造成主發票的抬頭＋$0 會讓人以為掛錯張）。
+            let linked = [];
+            try {
+                existing = (await _fetch(`/cash-entries/${e.id}/invoices`)).items || [];
+                linked = existing.filter((it) => !it.missing
+                        && !_invoiceList.some((x) => x.id === it.invoice_id))
+                    .map((it) => ({ id: it.invoice_id, invoice_number: it.invoice_number || '',
+                                    title: it.title || '', amount_total: it.amount_total || 0 }));
+            } catch (_) { /* 撈不到就只列候選 */ }
+            openInvoicePicker({
+                invoices: _invoiceList,
+                currentIds: _invIds(e),
+                linkedRows: linked,
+                rowAmount: Number(e.deposit) || 0,
+                title: '連結發票 — ' + (e.summary || ''),
+                onPick,
+            });
+        },
+        apply: async (ids, e) => {
+            // 現有分配先撈回來 —— 留著的那幾張要原封帶走（金額＋匯費）
+            const keep = {};
+            (existing || (await _fetch(`/cash-entries/${e.id}/invoices`)).items || [])
+                .forEach((it) => { keep[it.invoice_id] = it; });
+            // 🔴 預帶走分配面板同一支 `toItem`，但殘額要餵**這一列自己的** ——
+            // 它的預設值 `_allocRemainCash()` 讀的是面板上一次開的那一列，從列表叫
+            // 會拿到別列的數字、靜靜寫一個錯的匯費進 DB。
+            const picked = ids || [];
+            let left = Number(e.deposit) || 0;
+            picked.forEach((iid) => {
+                if (keep[iid]) { left -= Number(keep[iid].amount) || 0; }
+            });
+            const items = picked.map((iid) => {
+                if (keep[iid]) {
+                    return { invoice_id: iid, amount: keep[iid].amount,
+                             fee: keep[iid].fee || 0 };
+                }
+                const inv = _invoiceList.find((x) => x.id === iid);
+                if (!inv) { return { invoice_id: iid, amount: Number(e.deposit) || 0, fee: 0 }; }
+                const it = _ALLOC_SIDES.invoice.toItem(inv, Math.max(0, left));
+                left -= it.amount;
+                return { invoice_id: iid, amount: it.amount, fee: it.fee };
+            }).filter((it) => (it.amount || 0) > 0);
+            return _fetch(`/cash-entries/${id}/invoices`,
+                          { method: 'PUT', body: JSON.stringify({ items }) });
+        },
+        patch: (e, ids) => {
+            e.invoice_ids = (ids || []).slice();
+            // 後端把 invoice_id 同步成**金額最大**的那張；這裡樂觀更新只認「有沒有」，
+            // 顯示名等下次重載校正（分配金額在前端算不準 —— 那是後端寫入後才知道的）
+            const first = (ids || [])[0];
+            const inv = first ? _invoiceList.find((x) => x.id === first) : null;
+            e.invoice_id = first || '';
+            e.invoice_title = inv ? (inv.title || inv.invoice_number || '') : (first ? e.invoice_title : '');
+        },
+    });
+};
 
 
 /** 這一列的毛支出：匯費算進去（銀行實際扣掉的就是這個數）。

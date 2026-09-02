@@ -383,7 +383,10 @@ def test_every_project_enumeration_decides_about_mine():
         # 伺服器端名稱比對／匯入去重，不回給前端當清單
         # 🔴 2026-08-30 finance.py 拆成四個檔，做「CSV 匯入時用專案名比對」的那段
         # 落到 payments.py —— 豁免的理由沒變（不回給前端當清單），只是換了檔案。
-        "routers/api_timesheets.py", "routers/crm/payments.py",
+        "routers/crm/payments.py",
+        # 工時：查表在 services/timesheet_lookup（is_mine 表態）；router 裡剩的
+        # select(CrmProject) 是 burn 摘要與預算回寫，端點整支守 _require_mine_admin
+        "routers/api_timesheets.py",
         "routers/crm/proposal_assets.py", "routers/crm/flow.py",
         # 帳本自己的視角（entity 已經圈定範圍）
         "routers/api_finance_projects.py", "routers/api_finance_stmt.py",

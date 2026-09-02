@@ -230,7 +230,7 @@ def _imports_in(content: str) -> set:
     try:
         tree = ast.parse(content)
     except SyntaxError:
-        for m in re.findall(r"^[ 	]*(?:from|import)\s+([A-Za-z_][A-Za-z0-9_.]*)",
+        for m in re.findall(r"^[ \t]*(?:from|import)\s+([A-Za-z_][A-Za-z0-9_.]*)",
                             content, re.MULTILINE):
             names.add(m.split(".")[0].lower())
         return names

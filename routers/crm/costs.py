@@ -212,7 +212,7 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
         # （8/10 那趟的住宿／飲食／交通），目測分不出誰請過。
         # 一次撈這批列的，不是整個專案的（同 project_names_map 的理由）。
         eids = [e.id for e in rows]
-        claims = {pid: (pstatus or "", ppay) for pid, pstatus, ppay in (
+        claims = {eid: (pstatus or "", ppay) for eid, pstatus, ppay in (
             await session.execute(
                 select(CrmPaymentRequest.expense_id, CrmPaymentRequest.payment_status,
                        CrmPaymentRequest.id)
@@ -243,8 +243,8 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
             # 送請款（owner 2026-09-02「雜支可以送請款進請款單」）：
             # 一列一張，硬連結記在請款單的 `expense_id` 上。重複請款由
             # `POST /payments` 的 409 守著（前端換按鈕擋不住雙擊／兩個分頁）。
-            "payment_id": claim_pid or "",
-            "payment_status": claim_status or "",
+            "payment_id": claim_pid,
+            "payment_status": claim_status,
         }
 
     expenses = [_e_to_dict(e) for e in rows]

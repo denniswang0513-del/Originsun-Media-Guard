@@ -386,15 +386,16 @@ async def _resettle_invoice(session, invoice_id, when=None,
 # docstring）：付款守「總流出不變」從 expense 搬出來、收款守「淨流入不變」往
 # deposit 補回去。放在這張表裡，_write_allocs 就只有一條路。
 _ALLOC_KINDS = {
-    "invoice": {"model": CrmInvoice, "noun": "發票", "id_field": "invoice_id",
+    "invoice": {"model": CrmInvoice, "link": CrmCashInvoiceLink,
+                "noun": "發票", "id_field": "invoice_id",
                 "dup": "同一張發票不可重複掛在同一筆收款",
                 "label": lambda o: o.invoice_number or o.title,
                 "fee": apply_receipt_fee,
                 # 逐張匯費：匯出行對每一張發票的匯款各扣一次。付款側沒有這個
                 # （跨行手續費是對「那一筆匯出」收一次，涵蓋幾張請款單都一樣）。
                 "per_item_fee": True},
-    "payment": {"model": CrmPaymentRequest, "noun": "請款單",
-                "id_field": "payment_request_id",
+    "payment": {"model": CrmPaymentRequest, "link": CrmCashPaymentLink,
+                "noun": "請款單", "id_field": "payment_request_id",
                 "dup": "同一張請款單重複出現",
                 # 顯示名走 core.crm_logic 那份正本 —— 這裡本來是
                 # `summary or payee_name`（相反的順序），害挑選視窗

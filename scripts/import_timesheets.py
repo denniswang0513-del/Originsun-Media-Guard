@@ -33,7 +33,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 from core.hr_logic import INTERNAL_BUCKETS, resolve_project, suggest_projects  # noqa: E402
-from scripts._common import resolve_db_url  # noqa: E402
+from scripts._common import admin_session, api_base, resolve_db_url  # noqa: E402
 
 DATA_SHEET = "總表（勿動）"
 STATUS_SHEET = "專案狀態(勿動)"
@@ -100,7 +100,7 @@ async def _lookup(prod: bool):
         await engine.dispose()
 
 
-def _dry_run(hours, staff, P, prod: bool) -> None:
+def _dry_run(hours, P, prod: bool) -> None:
     lk = asyncio.run(_lookup(prod))
     tiers = collections.defaultdict(list)
     for p in sorted(hours, key=lambda x: -hours[x]):
@@ -119,17 +119,11 @@ def _dry_run(hours, staff, P, prod: bool) -> None:
     for p, h in tiers.get("none", []):
         sug = suggest_projects(p, lk)
         P(f"- {p}（{h}h）" + (f" → 像：{sug}" if sug else ""))
-    P("")
-    P(f"## 人員：{dict(staff)}（對不到 crm_staff 的在 ingest 回應 staff_unmatched）")
 
 
 def _apply(base: str, good: list, budgets: list, P) -> None:
-    """走 HTTP（同 scripts/backfill_me_petty.py 的 requests ＋ create_token 寫法）。"""
-    import requests
-    from core.auth import create_token
-    s = requests.Session()
-    s.headers.update({"Authorization": "Bearer " + create_token(
-        {"sub": "admin", "username": "import_timesheets", "access_level": 3})})
+    """走 HTTP。灌預算＝寫私帳案，守 full scope → token 要帶 finance_mine。"""
+    s = admin_session("import_timesheets", modules=["finance_mine"])
     r = s.get(base + "/api/v1/timesheets/ingest_token", timeout=30)
     r.raise_for_status()
     ingest_headers = {"X-Timesheet-Token": r.json()["token"]}
@@ -190,7 +184,7 @@ def main():
     P(f"# 工時匯入報告 {dt.datetime.now():%Y-%m-%d %H:%M}（{mode}）")
     P("")
     P(f"- 可送 {len(good)} 列 / {sum(hours.values()):.1f} 小時；壞列 {len(bad)}（不送）")
-    P(f"- 人員：{dict(staff.most_common())}")
+    P(f"- 人員：{dict(staff.most_common())}（對不到 crm_staff 的在 ingest 回應 staff_unmatched）")
     P(f"- 專案名 {len(hours)} 個；內部桶 {sorted(p for p in hours if p in INTERNAL_BUCKETS)}")
     if a.budget:
         P(f"- 預算：{len(budgets)} 案有值")
@@ -202,9 +196,9 @@ def main():
         P("")
 
     if a.apply:
-        _apply("http://127.0.0.1:8000" if a.prod else "http://127.0.0.1:8001", good, budgets, P)
+        _apply(api_base(a.prod), good, budgets, P)
     else:
-        _dry_run(hours, staff, P, prod=a.prod)
+        _dry_run(hours, P, prod=a.prod)
 
     Path(a.report).write_text(out.getvalue(), encoding="utf-8")
     print(out.getvalue())

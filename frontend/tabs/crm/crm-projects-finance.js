@@ -699,7 +699,7 @@ window._costViewPayment = async function(paymentId, onDoneName) {
             (p.notes ? '<div class="crm-detail-prop"><div class="crm-prop-label">備註</div><div class="crm-prop-value">' + _esc(p.notes) + '</div></div>' : '') +
             '</div>' +
             '<div class="crm-modal-footer">' +
-            '<button onclick=\"this.closest(\'.crm-modal-overlay\').remove()\" class=\"crm-btn crm-btn-secondary\">關閉</button>' +
+            '<button onclick="this.closest(\'.crm-modal-overlay\').remove()" class="crm-btn crm-btn-secondary">關閉</button>' +
             // 收回／改狀態就在這裡 —— 行政雜支那一欄只有 88px 塞不下鈕，
             // 兩個入口共用同一份動作（window._costPayBtns）
             window._costPayBtns(p, onDoneName) +

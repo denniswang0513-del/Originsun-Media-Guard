@@ -1,7 +1,9 @@
 """core/hr_logic.py — 人事（請假/工時）純函式：判定邏輯 + 解析/序列化。
 
-照 CLAUDE.md 慣例：純函式、無 I/O、單元測試在 tests/unit/test_hr_logic.py。
-api_hr 與 api_me 共用（router 端只留 I/O）。
+照 CLAUDE.md 慣例：純函式、無 I/O。請假／額度那半給 api_hr 與 api_me
+（tests/unit/test_hr_logic.py）；工時 Sheet 對映那半給 api_timesheets、
+services/timesheet_lookup、scripts/import_timesheets（tests/unit/test_timesheet_import.py）。
+router 端只留 I/O。
 """
 import re
 from datetime import datetime
@@ -272,8 +274,25 @@ def unique_hit(hits) -> tuple:
     return None, ("ambiguous" if hits else "none")
 
 
+def resolve_staff(name: str, index: dict) -> tuple:
+    """人員名 → `(staff_id, why)`，同 `resolve_project` 的契約：空名 empty、同名兩人
+    ambiguous（不猜）、沒這人 none。`index` 是 `group_by_name` 的結果。"""
+    n = (name or "").strip()
+    if not n:
+        return None, "empty"
+    hit, why = unique_hit(index.get(n))
+    return (hit[0], "exact") if hit else (None, why)
+
+
+def miss_bucket(why: str):
+    """判定結果要不要回報、回報到哪一桶：ambiguous → "ambiguous"、none → "unmatched"，
+    其他（對到了／內部桶／空名）→ None。ingest／budgets／summary 三處共用，
+    各寫一次就會漂（曾經有一處把內部桶也算成「找不到」）。"""
+    return {"ambiguous": "ambiguous", "none": "unmatched"}.get(why)
+
+
 class ProjectLookup(NamedTuple):
-    """對映所需的三張表，一個物件帶著走（六個呼叫端不必各拆成三個位置參數）。
+    """對映所需的三張表，一個物件帶著走（呼叫端不必各拆成三個位置參數）。
 
     `project_map`：owner 決定過的 `{Sheet 原字: project_id}`
     `by_name`／`by_key`：`{全名 / 去前綴案名: [(id, name, client_short_name), …]}`

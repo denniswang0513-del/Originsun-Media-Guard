@@ -77,6 +77,18 @@ export const paymentLabel = (p) => (p ? (p.payee_name || p.summary || '') : '');
 export const paymentHay = (p) => (`${p.payee_name || ''} ${p.summary || ''} `
     + `${p.category || ''} ${p.project_label || ''}`).toLowerCase();
 
+/** 多選視窗底部：已選幾張、合計對本列金額差多少 —— 收付兩側同一句話。 */
+const sumFooter = (noun, sumLabel, amtOf, rowAmount) => (ids) => {
+    if (!ids.length) { return `未選任何${noun}（儲存＝取消連結）`; }
+    const sum = ids.reduce((n, id) => n + amtOf(id), 0);
+    const row = Number(rowAmount) || 0;
+    const diff = sum - row;
+    return `已選 ${ids.length} 張　${sumLabel} <b style="color:#eee;">$${money(sum)}</b>`
+        + (row ? `　／　本列 $${money(row)}`
+            + (diff ? `<span style="color:#fbbf24;">　差 ${diff > 0 ? '+' : ''}${money(diff)}</span>`
+                : '<span style="color:#86efac;">　剛好</span>') : '');
+};
+
 export function openPaymentPicker(o) {
     const list = o.payments || [];
     // 建表不用 find：合計每次重畫都跑一遍，清單有 800+ 張未付單，
@@ -94,16 +106,7 @@ export function openPaymentPicker(o) {
         currentIds: o.currentIds || [],
         // 一筆匯出付多張時，「湊不湊得起來」是當下唯一要看的事 ——
         // 張皓雲那筆 17,200 + 3,000 剛好等於匯出的 20,200。
-        footer: (ids) => {
-            if (!ids.length) { return '未選任何請款單（儲存＝取消連結）'; }
-            const sum = ids.reduce((n, id) => n + amtOf(id), 0);
-            const row = Number(o.rowAmount) || 0;
-            const diff = sum - row;
-            return `已選 ${ids.length} 張　合計 <b style="color:#eee;">$${money(sum)}</b>`
-                + (row ? `　／　本列 $${money(row)}`
-                    + (diff ? `<span style="color:#fbbf24;">　差 ${diff > 0 ? '+' : ''}${money(diff)}</span>`
-                        : '<span style="color:#86efac;">　剛好</span>') : '');
-        },
+        footer: sumFooter('請款單', '合計', amtOf, o.rowAmount),
         title: o.title || '連結請款單',
         placeholder: '搜尋收款人／摘要／類別…',
         emptyMain: '沒有還沒付完的請款單',
@@ -144,16 +147,7 @@ export function openInvoicePicker(o) {
         extraRows: o.linkedRows || [],
         multi: true,
         currentIds: o.currentIds || [],
-        footer: (ids) => {
-            if (!ids.length) { return '未選任何發票（儲存＝取消連結）'; }
-            const sum = ids.reduce((n, id) => n + (amtBy.get(id) || 0), 0);
-            const row = Number(o.rowAmount) || 0;
-            const diff = sum - row;
-            return `已選 ${ids.length} 張　尚欠合計 <b style="color:#eee;">$${money(sum)}</b>`
-                + (row ? `　／　本列 $${money(row)}`
-                    + (diff ? `<span style="color:#fbbf24;">　差 ${diff > 0 ? '+' : ''}${money(diff)}</span>`
-                        : '<span style="color:#86efac;">　剛好</span>') : '');
-        },
+        footer: sumFooter('發票', '尚欠合計', (id) => amtBy.get(id) || 0, o.rowAmount),
         title: o.title || '連結發票',
         placeholder: '搜尋發票號碼／抬頭／公司…',
         emptyMain: '沒有還沒收齊的發票',
