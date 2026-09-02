@@ -15,8 +15,8 @@ import { finEntity as _pinEntity, finFetch as _finFetch, finIsMine,
 import { dayMark as _dayMark } from '../../js/shared/tw-calendar.js';
 // 專案連結改用可搜尋的挑選視窗（owner 2026-09-01「專案列表要可以勾選、搜尋」——
 // 私帳 405 個專案塞原生下拉等於沒得選）。共用件，別在這裡再刻一份。
-import { openPaymentPicker, openProjectPicker, paymentHay, paymentLabel }
-    from '../../js/shared/project-picker.js';
+import { openInvoicePicker, openPaymentPicker, openProjectPicker,
+         paymentHay, paymentLabel } from '../../js/shared/project-picker.js';
 import { splitBadgeHtml, splitGross } from '../../js/shared/cash-split-editor.js';
 import { indexTax as _indexTaxShared, taxKidsAt as _kidsAt, taxSelects }
     from '../../js/shared/cash-tax-picker.js';
@@ -543,6 +543,71 @@ window._cashPayPick = (ev, id) => _inlineLink({
     },
 });
 
+// 列表的「發票」格就地連結（owner 2026-09-02「這裡的發票要可以連結（多筆），
+// 像是連結專案那樣」）。收款可以一次對到好幾張發票 —— 合併匯款是常態。
+//
+// 🔴 **這個視窗只決定「掛哪幾張」，不動逐張的分配金額與匯費。**
+// 發票側跟請款單側形狀不同：這一側是 per-item fee（客戶匯三張的錢，可能只有
+// 其中一張被扣了 30），而分期收款時分配金額也不等於面額。所以：
+//   · 本來就掛著的 → 金額與匯費**原封保留**（不然就地勾一下就把人調好的匯費洗掉）
+//   · 這次新掛上的 → 走既有的預帶規則（尚欠金額 ＋ autoFee），跟分配面板同一份
+// 要細調就開詳情面板那個分配面板 —— 那才是它的家。
+window._cashInvPick = (ev, id) => _inlineLink({
+    ev, id, noun: '發票',
+    open: (e, onPick) => openInvoicePicker({
+        invoices: _invoiceList,
+        currentIds: _invIds(e),
+        // 已收齊、不在候選清單裡、但正掛在這一列上的那幾張（不撈回來就會被存檔洗掉）
+        linkedRows: _invIds(e)
+            .filter((iid) => !_invoiceList.some((x) => x.id === iid))
+            .map((iid) => ({ id: iid, invoice_number: e.invoice_number || '',
+                             title: e.invoice_title || '', amount_total: 0 })),
+        rowAmount: Number(e.deposit) || 0,
+        title: '連結發票 — ' + (e.summary || ''),
+        onPick,
+    }),
+    apply: async (ids, e) => {
+        // 現有分配先撈回來 —— 留著的那幾張要原封帶走（金額＋匯費）
+        let keep = {};
+        try {
+            const cur = await _fetch(`/cash-entries/${e.id}/invoices`);
+            (cur.items || []).forEach((it) => { keep[it.invoice_id] = it; });
+        } catch (_) { keep = {}; }
+        // 🔴 預帶規則借 `_outstanding` / `autoFee` 這兩支（跟分配面板同一份），
+        // **但不能借 `_ALLOC_SIDES.invoice.toItem`** —— 它的 fee 是
+        // `autoFee(尚欠, _allocRemainCash())`，而 `_allocRemainCash()` 讀的是
+        // **分配面板上一次開的那一列**的殘額。從列表叫會拿到別列的數字，
+        // 靜靜寫一個錯的匯費進 DB。這裡餵的是這一列自己的殘額。
+        let left = Number(e.deposit) || 0;
+        (ids || []).forEach((iid) => {
+            if (keep[iid]) { left -= Number(keep[iid].amount) || 0; }
+        });
+        const items = (ids || []).map((iid) => {
+            if (keep[iid]) {
+                return { invoice_id: iid, amount: keep[iid].amount,
+                         fee: keep[iid].fee || 0 };
+            }
+            const inv = _invoiceList.find((x) => x.id === iid);
+            const amt = inv ? _outstanding(inv) : (Number(e.deposit) || 0);
+            const fee = inv ? autoFee(amt, Math.max(0, left)) : 0;
+            left -= amt;
+            return { invoice_id: iid, amount: amt, fee };
+        }).filter((it) => (it.amount || 0) > 0);
+        return _fetch(`/cash-entries/${id}/invoices`,
+                      { method: 'PUT', body: JSON.stringify({ items }) });
+    },
+    patch: (e, ids) => {
+        e.invoice_ids = (ids || []).slice();
+        // 後端把 invoice_id 同步成**金額最大**的那張；這裡樂觀更新只認「有沒有」，
+        // 顯示名等下次重載校正（分配金額在前端算不準 —— 那是後端寫入後才知道的）
+        const first = (ids || [])[0];
+        const inv = first ? _invoiceList.find((x) => x.id === first) : null;
+        e.invoice_id = first || '';
+        e.invoice_title = inv ? (inv.title || inv.invoice_number || '') : (first ? e.invoice_title : '');
+    },
+});
+
+
 /** 這一列的毛支出：匯費算進去（銀行實際扣掉的就是這個數）。
  *  🔴 下面三個「流出多少」全部長在它上面 —— 原本各寫一次 `expense + bank_fee`，
  *  三處相隔 430 行，改刷卡規則的人只會看到其中兩個。 */
@@ -552,6 +617,10 @@ const _grossOut = (e) => (e.expense || 0) + (e.bank_fee || 0);
  *  （一個人的好幾張單常併成一筆匯出），這裡不再留舊形狀的退路 —— 前端與 API
  *  由同一個行程吐出，「新 JS 遇到舊回應」這個組合出不來。 */
 const _payIds = (e) => (e.payment_ids || []).slice();
+
+/** 這一列掛著哪幾張發票（同 _payIds 的理由：只帶主要那張的話，挑選視窗
+ *  只勾得回一張，存檔就把其餘的洗掉）。 */
+const _invIds = (e) => (e.invoice_ids || []).slice();
 
 /** 「專案」與「請款單／發票」兩格：可點時是一格 cash-ed（沒值就一顆紅點），
  *  不可點時是唯讀格。兩格的形狀一樣，差別只有 class／內容／要不要掛 onclick
@@ -610,7 +679,11 @@ function _rowHtml(e) {
                     cls: 'cash-col-inv',
                     pick: e.expense ? `window._cashPayPick(event,'${e.id}')` : '',
                     hint: '連結請款單（可搜尋）' })
-                : _linkCell(e.invoice_title || '', { cls: 'cash-col-inv' })}
+                : _linkCell(e.invoice_title || '', {
+                    cls: 'cash-col-inv',
+                    // 收入列才掛發票（支出沒有「收款對到哪張發票」這回事）
+                    pick: e.deposit ? `window._cashInvPick(event,'${e.id}')` : '',
+                    hint: '連結發票（可搜尋、可多張）' })}
             <div>${_esc(_acctName(e.bank_account_id))}</div>
             ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup',
                                    onDelete: '_cashDelete',

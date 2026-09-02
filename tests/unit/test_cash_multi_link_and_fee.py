@@ -33,11 +33,16 @@ def test_the_list_returns_every_linked_payment_not_just_the_main_one():
     """🔴 清單只帶 `payment_request_id`（金額最大那張）的話，挑選視窗只勾得回
     一張 —— 存檔就把同一筆匯款上的其餘幾張連結洗掉。"""
     src = repo_src("routers/crm/cash.py")
-    assert "async def load_payment_links_map(" in src
+    # 撈法兩側共用一支（發票也一樣會多張）—— 各寫一份的話「主要那張怎麼挑」
+    # 這條規則就會有兩個答案
+    assert "async def load_alloc_links_map(session, kind: str, *, entity=None)" in src
     assert '"payment_ids": list(payment_ids or []),' in src
+    assert '"invoice_ids": list(invoice_ids or []),' in src
     fn = code_only(func_body(src, "async def list_cash_entries("))
-    assert "load_payment_links_map(session, entity=ent)" in fn
+    assert "load_alloc_links_map(session, 'payment', entity=ent)" in fn
+    assert "load_alloc_links_map(session, 'invoice', entity=ent)" in fn
     assert "paylinks.get(r[0].id, ())" in fn
+    assert "invlinks.get(r[0].id, ())" in fn
 
 
 def test_allocation_fills_up_to_what_the_row_actually_paid():

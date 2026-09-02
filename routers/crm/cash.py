@@ -76,35 +76,47 @@ async def resolve_invoice_allocs(session, items, ent, by_id=None):
     return await resolve_allocs(session, items, ent, "invoice", by_id)
 
 
-async def load_payment_links_map(session, *, entity=None) -> dict:
-    """收支 id → 它掛到的請款單 id 清單（金額大的在前）。
+async def load_alloc_links_map(session, kind: str, *, entity=None) -> dict:
+    """收支 id → 它掛到的**單據 id 清單**（金額大的在前）。`kind`＝invoice／payment。
 
-    一筆匯出常常是**一個人的好幾張單併著發**（實例：2026/08/31 匯給張皓雲的
-    20,200 ＝ 思沙龍 EP02 翻譯 17,200 ＋ 開村影片翻譯 3,000）。清單只帶
-    `payment_request_id`（金額最大的那張）的話，畫面上看起來只掛了一張，
-    而挑選視窗也只勾得回一張 —— 存檔就把另一張的連結洗掉。
+    一筆錢常常對到好幾張單，兩側都是：
+      收款：客戶一次匯 3 張發票的錢（合併匯款）
+      付款：一個人的好幾張請款單併著發（實例：2026/08/31 匯給張皓雲的
+            20,200 ＝ 思沙龍 EP02 翻譯 17,200 ＋ 開村影片翻譯 3,000）
+    清單只帶主要那張（`invoice_id` / `payment_request_id`）的話，畫面上看起來
+    只掛了一張，而挑選視窗也只勾得回一張 —— 存檔就把其餘的連結洗掉。
+
+    🔴 兩側**同一支**：形狀只差在表與欄名，各寫一份的話「主要那張怎麼挑」
+    這條規則就會有兩個答案。
 
     整本帳一次撈（表很小），同 load_splits_map 的理由：用列 id 進 IN 的話，
     未篩選清單就是幾千個 bind param 的 SQL。
     """
     from sqlalchemy import select
 
-    from db.models import CrmCashEntry, CrmCashPaymentLink
-    q = select(CrmCashPaymentLink.cash_entry_id,
-               CrmCashPaymentLink.payment_request_id,
-               CrmCashPaymentLink.amount).order_by(CrmCashPaymentLink.amount.desc())
+    from db.models import CrmCashEntry, CrmCashInvoiceLink, CrmCashPaymentLink
+    link, col = ((CrmCashInvoiceLink, CrmCashInvoiceLink.invoice_id)
+                 if kind == "invoice"
+                 else (CrmCashPaymentLink, CrmCashPaymentLink.payment_request_id))
+    q = (select(link.cash_entry_id, col, link.amount)
+         .order_by(link.amount.desc()))
     if entity:
-        q = q.where(CrmCashPaymentLink.cash_entry_id.in_(
+        q = q.where(link.cash_entry_id.in_(
             select(CrmCashEntry.id).where(CrmCashEntry.entity == entity)))
     out = {}
-    for eid, pid, _amt in (await session.execute(q)).all():
-        out.setdefault(eid, []).append(pid)
+    for eid, did, _amt in (await session.execute(q)).all():
+        out.setdefault(eid, []).append(did)
     return out
+
+
+async def load_payment_links_map(session, *, entity=None) -> dict:
+    """`load_alloc_links_map` 的請款單那一半（既有呼叫端沿用這個名字）。"""
+    return await load_alloc_links_map(session, "payment", entity=entity)
 
 
 def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
                   petty_status: str = "", tax_path=None,
-                  pay_label: str = "", payment_ids=()) -> dict:
+                  pay_label: str = "", payment_ids=(), invoice_ids=()) -> dict:
     return {
         "id": e.id,
         "entity": e.entity or "parent",
@@ -144,6 +156,9 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
         # 這筆匯款掛到的**所有**請款單（金額大的在前）。一筆匯出付多張是常態，
         # 只給 payment_request_id 的話挑選視窗勾不回其餘幾張，存檔就洗掉它們。
         "payment_ids": list(payment_ids or []),
+        # 掛到的發票（全部）。只帶 `invoice_id`（金額最大的那張）的話，就地連結
+        # 的挑選視窗只勾得回一張 —— 存檔就把其餘的洗掉（同 payment_ids）。
+        "invoice_ids": list(invoice_ids or []),
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 
@@ -523,13 +538,14 @@ async def list_cash_entries(
         page_splits = [s for r in rows for s in smap.get(r[0].id, [])]
         amap = await load_advance_links_map(session, [s.id for s in page_splits])
         pnames = await project_names_map(session, page_splits)
-        paylinks = await load_payment_links_map(session, entity=ent)
+        paylinks = await load_alloc_links_map(session, 'payment', entity=ent)
+        invlinks = await load_alloc_links_map(session, 'invoice', entity=ent)
     out = []
     for r in rows:
         d = _to_cash_dict(r[0], r[1] or "", r[2] or "", r[3] or "",
                           paths.get(r[0].taxonomy_node_id),
                           payment_label(r[5] or "", r[4] or ""),
-                          paylinks.get(r[0].id, ()))
+                          paylinks.get(r[0].id, ()), invlinks.get(r[0].id, ()))
         subs = smap.get(r[0].id, [])
         d["splits"] = [_split_to_dict(s, paths.get(s.taxonomy_node_id),
                                       amap.get(s.id),

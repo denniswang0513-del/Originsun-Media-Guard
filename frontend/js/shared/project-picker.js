@@ -116,3 +116,56 @@ export function openPaymentPicker(o) {
         onPick: o.onPick,
     });
 }
+
+
+/** 一張發票「搜得到什麼」—— 號碼／抬頭／公司／專案。
+ *  同 `paymentHay` 的理由：挑選視窗與分配面板打同一批 `_invoiceList`，
+ *  欄位集合各寫一份就會出現「A 找得到 B 找不到」。 */
+export const invoiceHay = (i) => (`${i.invoice_number || ''} ${i.title || ''} `
+    + `${i.company_name || ''} ${i.project_name || ''}`).toLowerCase();
+
+/** 一張發票顯示成什麼 —— 號碼優先（對帳時認的是號碼），沒有才退回抬頭。 */
+export const invoiceLabel = (i) => (i ? (i.invoice_number || i.title || '') : '');
+
+/**
+ * openInvoicePicker({invoices, currentIds, linkedRows, rowAmount, title, onPick})
+ *
+ * 收款可以一次對到好幾張發票（合併匯款：客戶一次匯 3 張的錢）——
+ * `onPick` 收到的是 id 陣列（空陣列＝取消全部連結）。
+ *
+ * 🔴 這個視窗只決定「掛哪幾張」。**逐張的分配金額與匯費不在這裡調** ——
+ * 那是詳情面板那個分配面板的事（發票側是 per-item fee，收款分期時金額也不等於
+ * 面額）。呼叫端負責：已經掛著的那幾張，金額與匯費原封保留。
+ */
+export function openInvoicePicker(o) {
+    const list = o.invoices || [];
+    const amtBy = new Map([...list, ...(o.linkedRows || [])]
+        .map((i) => [i.id, Number(i.outstanding != null ? i.outstanding : i.amount_total) || 0]));
+    openRowPicker({
+        rows: list,
+        allRows: [],
+        extraRows: o.linkedRows || [],
+        multi: true,
+        currentIds: o.currentIds || [],
+        footer: (ids) => {
+            if (!ids.length) { return '未選任何發票（儲存＝取消連結）'; }
+            const sum = ids.reduce((n, id) => n + (amtBy.get(id) || 0), 0);
+            const row = Number(o.rowAmount) || 0;
+            const diff = sum - row;
+            return `已選 ${ids.length} 張　尚欠合計 <b style="color:#eee;">$${money(sum)}</b>`
+                + (row ? `　／　本列 $${money(row)}`
+                    + (diff ? `<span style="color:#fbbf24;">　差 ${diff > 0 ? '+' : ''}${money(diff)}</span>`
+                        : '<span style="color:#86efac;">　剛好</span>') : '');
+        },
+        title: o.title || '連結發票',
+        placeholder: '搜尋發票號碼／抬頭／公司…',
+        emptyMain: '沒有還沒收齊的發票',
+        hay: invoiceHay,
+        line: (i) => `<span style="flex:1;min-width:0;">
+                <span style="color:#eee;font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(i.invoice_number || '無號碼')}　${esc((i.title || '').slice(0, 28))}</span>
+                ${i.company_name ? `<span style="color:#9ca3af;font-size:11px;">${esc(i.company_name)}</span>` : ''}
+            </span>
+            <span style="color:#fbbf24;font-size:11px;white-space:nowrap;">$${money(amtBy.get(i.id) || 0)}</span>`,
+        onPick: o.onPick,
+    });
+}
