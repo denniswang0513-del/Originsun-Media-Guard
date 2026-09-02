@@ -271,9 +271,8 @@ async def _patch_project_json(project_id: str, attr: str, call, payload):
 
 
 def _username(request: Request) -> str:
-    from core.auth import _extract_token
-    payload = _extract_token(request) or {}
-    return payload.get("username") or payload.get("sub") or "?"
+    from core.auth import current_username
+    return current_username(request)
 
 
 _TW_TZ = ZoneInfo("Asia/Taipei")

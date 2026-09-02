@@ -220,6 +220,7 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
         ).all()} if eids else {}
 
     def _e_to_dict(e):
+        claim_status, claim_pid = claims.get(e.id, ("", ""))
         return {
             "id": e.id, "category": e.category,
             "cost_group_id": e.cost_group_id or "",
@@ -242,8 +243,8 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
             # 送請款（owner 2026-09-02「雜支可以送請款進請款單」）：
             # 一列一張，硬連結記在請款單的 `expense_id` 上。重複請款由
             # `POST /payments` 的 409 守著（前端換按鈕擋不住雙擊／兩個分頁）。
-            "payment_id": claims.get(e.id, ("", ""))[1] or "",
-            "payment_status": claims.get(e.id, ("", ""))[0] or "",
+            "payment_id": claim_pid or "",
+            "payment_status": claim_status or "",
         }
 
     expenses = [_e_to_dict(e) for e in rows]

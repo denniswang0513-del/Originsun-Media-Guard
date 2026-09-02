@@ -55,6 +55,15 @@ def hide_mine_projects(request) -> bool:
     return not viewer_has_mine_scope(request)
 
 
+def is_mine(entity_col):
+    """SQL 述詞：這一列**屬於私帳**（`not_mine` 的正面雙生）。
+
+    列舉專案的查詢用它就等於對「私帳案給不給看」表了態 —— 只列私帳，呼叫端
+    自己要守 mine scope（tests/unit/test_money_visibility 的掃描認這個名字）。
+    """
+    return entity_col == MINE
+
+
 def not_mine(entity_col):
     """SQL 述詞：母公司的金額聚合**排除私帳**（§8）。
 
@@ -80,7 +89,7 @@ def not_mine_project(model):
     from sqlalchemy import or_, select
 
     from db.models import CrmProject
-    mine = select(CrmProject.id).where(CrmProject.entity == MINE)
+    mine = select(CrmProject.id).where(is_mine(CrmProject.entity))
     return or_(model.project_id.is_(None), model.project_id.notin_(mine))
 
 
@@ -177,7 +186,7 @@ async def is_mine_project(session_factory, project_id: str) -> bool:
         async with session_factory() as session:
             ids = (await session.execute(
                 select(CrmProject.id)
-                .where(CrmProject.entity == MINE))).scalars().all()
+                .where(is_mine(CrmProject.entity)))).scalars().all()
         _MINE_PROJECT_IDS = set(ids)
         _MINE_IDS_AT = now
     return project_id in _MINE_PROJECT_IDS

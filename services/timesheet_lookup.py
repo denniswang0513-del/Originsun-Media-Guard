@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from core.hr_logic import ProjectLookup, group_by_name
+from core.ledger import is_mine
 
 
 async def load_project_lookup(session) -> ProjectLookup:
@@ -19,7 +20,7 @@ async def load_project_lookup(session) -> ProjectLookup:
     rows = (await session.execute(
         select(CrmProject.id, CrmProject.name, Client.short_name)
         .outerjoin(Client, Client.id == CrmProject.client_id)
-        .where(CrmProject.entity == "mine"))).all()
+        .where(is_mine(CrmProject.entity)))).all()
     return ProjectLookup.build(pmap, rows)
 
 

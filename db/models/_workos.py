@@ -68,9 +68,9 @@ class TimesheetProjectMap(Base):
     """工時 Sheet 的專案原字 → `crm_projects.id`（docs/TIMESHEET_IMPORT_PLAN.md D1）。
 
     Sheet 寫「三立電視台_國民法官劇情短片」，私帳案叫「國民法官劇情短片」；
-    去掉客戶前綴後 324/346 自動對得到，剩下的是同名撞案（私帳 28 個名字各兩案）
-    與內部作業 —— 那些**由 owner 決定一次**，記在這張表，之後 Apps Script 每小時
-    同步進來的列自動吃到，不做一次性回填（先例：finance_category_map）。
+    去掉客戶前綴後大多自動對得到，剩下的是同名撞案與內部作業（數字在規劃文件
+    的 dry-run 報告，會隨 owner 指定而變）—— 那些**由 owner 決定一次**，記在這張表，
+    之後 Apps Script 每小時同步進來的列自動吃到，不做一次性回填（先例：finance_category_map）。
 
     🔴 對映表永遠優先於任何自動規則（core.hr_logic.resolve_project 第一段）。
     """

@@ -31,8 +31,8 @@ def test_the_list_endpoint_reports_the_hard_link_not_a_guess():
     fn = code_only(func_body(repo_src("routers/crm/costs.py"),
                              "async def list_project_expenses("))
     assert "CrmPaymentRequest.expense_id.in_(eids)" in fn
-    assert '"payment_id": claims.get(e.id' in fn
-    assert '"payment_status": claims.get(e.id' in fn
+    assert "claims.get(e.id" in fn
+    assert '"payment_id":' in fn and '"payment_status":' in fn
 
 
 def test_petty_rows_do_not_get_a_second_claim_path():
@@ -42,6 +42,10 @@ def test_petty_rows_do_not_get_a_second_claim_path():
     見 routers/crm/petty._build_aps）。兩條路都走＝同一筆錢請兩次，而後端的
     409 守的是 `expense_id` 重複，擋不到「零用金那側另外開了一張」。
     """
+    # 規則在後端：帶 expense_id 建單時，那一列若是零用金（staff_id）就 409
+    py = code_only(func_body(repo_src("routers/crm/payments.py"), "async def create_payment("))
+    assert "exp.staff_id" in py and "409" in py, "零用金列的第二條請款路沒在後端擋"
+    # 前端不長按鈕只是禮貌
     js = js_code_only(repo_src(COST_JS))
     seg = js_func_body(js, "const claimCell = (e) => {")
     assert "if (e.staff_id) return '';" in seg, "零用金列也長出請款鈕了"

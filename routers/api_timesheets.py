@@ -18,14 +18,13 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
 import core.state as state
 from config import load_settings, save_settings
-from core.auth import check_admin, check_admin_or_module
+from core.auth import _extract_token, check_admin, check_admin_or_module, current_username
 from core.db_guard import db_factory_or_503
-from core.ledger import require_entity
+from core.ledger import MINE, allowed_entities, require_entity
 from core.hr_logic import (manual_dup_key, remap_target, resolve_project,
                            suggest_projects, unique_hit)
 from core.schemas import (TimesheetBudgetRequest, TimesheetIngestRequest,
                           TimesheetManualRequest, TimesheetProjectMapRequest)
-from routers.crm._shared import _username
 from services.timesheet_lookup import load_project_lookup, load_staff_index
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
@@ -59,7 +58,15 @@ def _row_hash(date_s: str, staff: str, project: str, task: str, hours) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 
-_SOURCES = ("sheet", "import")
+def _require_mine_admin(request: Request, level: str = "view") -> None:
+    """對映相關端點（列私帳案／指定對映／回填／灌預算）的守衛。
+
+    🔴 私帳**專案**對沒有 mine scope 的人整列不存在（core.ledger.hide_mine_projects；
+    Lv3 不隱含 finance_mine）。讀清單守 view；把時數改掛到私帳案、往私帳案寫預算
+    是寫私帳，守 full（同 routers/crm 其他寫私帳的端點）—— 一支守衛，規則只有這一份。
+    """
+    check_admin(request)
+    require_entity(request, MINE, level=level)
 
 
 @router.get("/ingest_token")
@@ -78,8 +85,6 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
         raise HTTPException(status_code=401, detail="X-Timesheet-Token 無效")
     if len(req.rows) > _MAX_ROWS_PER_CALL:
         raise HTTPException(status_code=422, detail=f"單次上限 {_MAX_ROWS_PER_CALL} 列，分批送")
-    if req.source not in _SOURCES:
-        raise HTTPException(status_code=422, detail="source 只能是 sheet 或 import")
     if not state.db_online:
         # Apps Script 端會重試，給明確訊息（刻意不同於通用 503）
         raise HTTPException(status_code=503, detail="資料庫離線，稍後重送（Apps Script 會重試）")
@@ -136,7 +141,7 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
             elif why == "none":
                 unmatched.add(pname)
             sname = (r.staff or "").strip()
-            shit, swhy = unique_hit(staff_index.get(sname)) if sname else (None, "none")
+            shit, swhy = unique_hit(staff_index.get(sname))
             sid = shit[0] if shit else None
             if sname and not sid:
                 (staff_ambiguous if swhy == "ambiguous" else staff_unmatched).add(sname)
@@ -177,13 +182,10 @@ async def timesheet_projects(request: Request):
     不用 `/crm/projects?entity=mine`：那支回整包金額欄位給一個只要名字的用途、
     走 MoneyRedactRoute 白繞一圈。這裡同一份 load_project_lookup。
 
-    🔴 可見性照私帳的規矩：私帳**專案**對沒有 mine scope 的人整列不存在
-    （core.ledger.hide_mine_projects；Lv3 不隱含 finance_mine）。所以除了 tab 的
-    check_admin，再要 require_entity(mine)——沒指名的管理員按「指定專案」會拿到
-    403「沒有該帳本的檢視權限」，而不是打開一個空視窗。
+    守衛見 `_require_mine_admin` —— 沒指名的管理員按「指定專案」會拿到 403
+    「沒有該帳本的檢視權限」，而不是打開一個空視窗。
     """
-    check_admin(request)
-    require_entity(request, "mine")
+    _require_mine_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
         lk = await load_project_lookup(session)
@@ -194,7 +196,7 @@ async def timesheet_projects(request: Request):
 @router.get("/project_map")
 async def list_project_map(request: Request):
     """owner 決定過的 Sheet 專案名 → 案（含案名，前端清單用）。"""
-    check_admin(request)
+    _require_mine_admin(request)
     factory = db_factory_or_503()
     from sqlalchemy import select
     from db.models import CrmProject, TimesheetProjectMap
@@ -213,11 +215,11 @@ async def list_project_map(request: Request):
 @router.put("/project_map")
 async def upsert_project_map(req: TimesheetProjectMapRequest, request: Request):
     """整批 upsert。專案必須存在（任一帳本 —— owner 決定的可以指到母公司案）。"""
-    check_admin(request)
+    _require_mine_admin(request, level="full")
     factory = db_factory_or_503()
     from sqlalchemy import select
     from db.models import CrmProject, TimesheetProjectMap
-    who = _username(request)
+    who = current_username(request)
     async with factory() as session:
         pids = {it.project_id for it in req.items}
         ok = set((await session.execute(
@@ -251,7 +253,7 @@ async def remap_timesheets(request: Request):
     逐列 resolve ＋ 9,800 個 ORM 物件 ＋ 9,800 句 UPDATE 是白費 —— 每按一次「指定專案」
     都會跑這支。
     """
-    check_admin(request)
+    _require_mine_admin(request, level="full")
     factory = db_factory_or_503()
     from sqlalchemy import func as safunc, select, update
     from db.models import Timesheet
@@ -282,7 +284,7 @@ async def remap_timesheets(request: Request):
 async def set_budgets(req: TimesheetBudgetRequest, request: Request):
     """Sheet「專案狀態」的預算（剩餘＋實際）→ 對到的案的 `budget_hours`。
     走同一支 resolver；撞案與找不到的原樣回報、不寫。≤0 視為沒設、跳過。"""
-    check_admin(request)
+    _require_mine_admin(request, level="full")
     factory = db_factory_or_503()
     from db.models import CrmProject
     applied = 0
@@ -293,7 +295,7 @@ async def set_budgets(req: TimesheetBudgetRequest, request: Request):
         lk = await load_project_lookup(session)
         wanted: dict = {}
         for it in req.items:
-            if not it.budget_hours or it.budget_hours <= 0:
+            if it.budget_hours <= 0:
                 continue
             pid, why = resolve_project(it.sheet_name, lk)
             if why == "ambiguous":
@@ -448,6 +450,7 @@ async def hours_by_staff(request: Request, month: str = ""):
 async def burn_summary(request: Request):
     """每專案 burn 摘要：已投入時數 / 預算 / 消耗率。未對映專案以名稱聚合列出。"""
     check_admin(request)
+    can_mine = MINE in allowed_entities(_extract_token(request))
     factory = db_factory_or_503()
 
     from sqlalchemy import select, func as safunc
@@ -502,14 +505,19 @@ async def burn_summary(request: Request):
         lk = await load_project_lookup(session)
     out_unmatched = []
     for n, h, c in unmatched:
-        _pid, why = resolve_project(n or "", lk)
-        item = {"project_name": n or "(空白)", "hours_used": round(h or 0, 1), "rows": c,
+        name = n or ""
+        _pid, why = resolve_project(name, lk)
+        item = {"project_name": name or "(空白)", "hours_used": round(h or 0, 1), "rows": c,
                 "reason": why}
-        if why == "ambiguous":
+        # 候選／建議帶的是**私帳案名** —— 跟 /projects 同一條可見性線：沒 mine scope
+        # 的管理員看得到「這個名字沒對到」，但看不到私帳裡有哪些案
+        if not can_mine:
+            pass
+        elif why == "ambiguous":
             item["candidates"] = [{"id": pid, "name": nm, "client": cli}
-                                  for pid, nm, cli in lk.candidates(n or "")]
+                                  for pid, nm, cli in lk.candidates(name)]
         elif why == "none":
-            item["suggestions"] = [k for k, _sc in suggest_projects(n or "", lk)]
+            item["suggestions"] = [k for k, _sc in suggest_projects(name, lk)]
         out_unmatched.append(item)
     return {
         "projects": items,

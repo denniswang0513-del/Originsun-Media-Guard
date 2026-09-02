@@ -235,6 +235,12 @@ def tab_modules(key: str) -> tuple:
 
 # ── Role Decorator ──
 
+def current_username(request: Request) -> str:
+    """請求者的帳號名（沒登入回 "?"）—— 寫 decided_by／created_by 這類欄位用。"""
+    payload = _extract_token(request) or {}
+    return payload.get("username") or payload.get("sub") or "?"
+
+
 def _extract_token(request: Request) -> Optional[dict]:
     """Extract and verify auth from Authorization header OR X-API-Key header.
 

@@ -3,6 +3,7 @@
 Used by: publish_update.py, build_agent_zip.py, update_agent.py, preflight.py
 """
 
+import ast
 import os
 import re
 import sys
@@ -225,8 +226,6 @@ def _imports_in(content: str) -> set:
     parse 不過（半寫完的檔）才退回舊的 regex，但要求 ASCII 開頭的識別字 ——
     模組名不會是中文。
     """
-    import ast
-
     names = set()
     try:
         tree = ast.parse(content)
@@ -234,7 +233,7 @@ def _imports_in(content: str) -> set:
         for m in re.findall(r"^[ 	]*(?:from|import)\s+([A-Za-z_][A-Za-z0-9_.]*)",
                             content, re.MULTILINE):
             names.add(m.split(".")[0].lower())
-        return {n for n in names if n}
+        return names
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(a.name.split(".")[0].lower() for a in node.names)
@@ -242,4 +241,4 @@ def _imports_in(content: str) -> set:
             # level>0 ＝相對 import（from . import x）—— 那不是外部套件
             if not node.level and node.module:
                 names.add(node.module.split(".")[0].lower())
-    return {n for n in names if n}
+    return names

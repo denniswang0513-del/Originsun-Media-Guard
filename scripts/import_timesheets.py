@@ -92,10 +92,7 @@ async def _lookup(prod: bool):
     """只 SELECT 的查表（不 init_db、不 create_all）—— 跟 router 吃同一支 services 函式。"""
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from services.timesheet_lookup import load_project_lookup
-    url = resolve_db_url(prod)
-    if "+asyncpg" not in url:
-        url = url.replace("postgresql://", "postgresql+asyncpg://")
-    engine = create_async_engine(url)
+    engine = create_async_engine(resolve_db_url(prod))   # settings 的 DSN 已是 +asyncpg
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as s:
             return await load_project_lookup(s)
@@ -103,7 +100,7 @@ async def _lookup(prod: bool):
         await engine.dispose()
 
 
-def _dry_run(good: list, hours, staff, P, prod: bool) -> None:
+def _dry_run(hours, staff, P, prod: bool) -> None:
     lk = asyncio.run(_lookup(prod))
     tiers = collections.defaultdict(list)
     for p in sorted(hours, key=lambda x: -hours[x]):
@@ -207,7 +204,7 @@ def main():
     if a.apply:
         _apply("http://127.0.0.1:8000" if a.prod else "http://127.0.0.1:8001", good, budgets, P)
     else:
-        _dry_run(good, hours, staff, P, prod=a.prod)
+        _dry_run(hours, staff, P, prod=a.prod)
 
     Path(a.report).write_text(out.getvalue(), encoding="utf-8")
     print(out.getvalue())

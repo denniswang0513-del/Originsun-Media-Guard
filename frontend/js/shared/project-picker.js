@@ -124,9 +124,6 @@ export function openPaymentPicker(o) {
 export const invoiceHay = (i) => (`${i.invoice_number || ''} ${i.title || ''} `
     + `${i.company_name || ''} ${i.project_name || ''}`).toLowerCase();
 
-/** 一張發票顯示成什麼 —— 號碼優先（對帳時認的是號碼），沒有才退回抬頭。 */
-export const invoiceLabel = (i) => (i ? (i.invoice_number || i.title || '') : '');
-
 /**
  * openInvoicePicker({invoices, currentIds, linkedRows, rowAmount, title, onPick})
  *

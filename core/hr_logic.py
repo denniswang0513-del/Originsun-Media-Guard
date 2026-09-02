@@ -248,10 +248,6 @@ def split_sheet_name(name: str) -> tuple:
     return cli.strip(), re.sub(r"\s+", " ", key).strip()
 
 
-def sheet_project_client(name: str) -> str:
-    return split_sheet_name(name)[0]
-
-
 def sheet_project_key(name: str) -> str:
     return split_sheet_name(name)[1]
 
@@ -327,7 +323,7 @@ def resolve_project(name: str, lk: ProjectLookup) -> tuple:
         return lk.project_map[n], "map"
     if n in INTERNAL_BUCKETS:
         return None, "bucket"
-    hit, why = unique_hit(lk.by_name.get(n))
+    hit, _ = unique_hit(lk.by_name.get(n))
     if hit:
         return hit[0], "exact"
     cli, key = split_sheet_name(n)
@@ -377,11 +373,14 @@ def suggest_projects(name: str, lk: ProjectLookup, limit: int = 2, floor: float 
     scored = []
     for k in lk.by_key:
         sm.set_seq1(k)
-        sc = sm.ratio()
         # 短名字被 ratio 罰得太重（「沆涸」對「沆涸 剪輯」只有 0.57）：
         # 一邊整個包含另一邊（≥2 字）就至少當 0.75 —— 仍只是建議
-        if len(a) >= 2 and len(k) >= 2 and (a in k or k in a):
-            sc = max(sc, 0.75)
+        contains = len(a) >= 2 and len(k) >= 2 and (a in k or k in a)
+        # ratio 是 O(n²)；先用 difflib 自己的兩個上界擋掉明顯不像的
+        #（get_close_matches 同一招），結果一模一樣
+        if not contains and (sm.real_quick_ratio() < floor or sm.quick_ratio() < floor):
+            continue
+        sc = max(sm.ratio(), 0.75) if contains else sm.ratio()
         if sc >= floor:
             scored.append((k, round(sc, 2)))
     scored.sort(key=lambda x: -x[1])

@@ -554,44 +554,52 @@ window._cashPayPick = (ev, id) => _inlineLink({
 // 要細調就開詳情面板那個分配面板 —— 那才是它的家。
 window._cashInvPick = (ev, id) => _inlineLink({
     ev, id, noun: '發票',
-    open: (e, onPick) => openInvoicePicker({
-        invoices: _invoiceList,
-        currentIds: _invIds(e),
-        // 已收齊、不在候選清單裡、但正掛在這一列上的那幾張（不撈回來就會被存檔洗掉）
-        linkedRows: _invIds(e)
-            .filter((iid) => !_invoiceList.some((x) => x.id === iid))
-            .map((iid) => ({ id: iid, invoice_number: e.invoice_number || '',
-                             title: e.invoice_title || '', amount_total: 0 })),
-        rowAmount: Number(e.deposit) || 0,
-        title: '連結發票 — ' + (e.summary || ''),
-        onPick,
-    }),
+    open: async (e, onPick) => {
+        // 已收齊、不在候選清單裡、但正掛在這一列上的那幾張：不補進視窗就會被存檔
+        // 洗掉。列上只有「金額最大那張」的抬頭，第二、三張要撈現有分配才有真的
+        // 號碼與金額（捏造成主發票的抬頭＋$0 會讓人以為掛錯張）。
+        let linked = [];
+        try {
+            const cur = await _fetch(`/cash-entries/${e.id}/invoices`);
+            linked = (cur.items || []).filter((it) => !it.missing
+                    && !_invoiceList.some((x) => x.id === it.invoice_id))
+                .map((it) => ({ id: it.invoice_id, invoice_number: it.invoice_number || '',
+                                title: it.title || '', amount_total: it.amount_total || 0 }));
+        } catch (_) { /* 撈不到就只列候選 */ }
+        openInvoicePicker({
+            invoices: _invoiceList,
+            currentIds: _invIds(e),
+            linkedRows: linked,
+            rowAmount: Number(e.deposit) || 0,
+            title: '連結發票 — ' + (e.summary || ''),
+            onPick,
+        });
+    },
     apply: async (ids, e) => {
         // 現有分配先撈回來 —— 留著的那幾張要原封帶走（金額＋匯費）
-        let keep = {};
+        const keep = {};
         try {
             const cur = await _fetch(`/cash-entries/${e.id}/invoices`);
             (cur.items || []).forEach((it) => { keep[it.invoice_id] = it; });
-        } catch (_) { keep = {}; }
-        // 🔴 預帶規則借 `_outstanding` / `autoFee` 這兩支（跟分配面板同一份），
-        // **但不能借 `_ALLOC_SIDES.invoice.toItem`** —— 它的 fee 是
-        // `autoFee(尚欠, _allocRemainCash())`，而 `_allocRemainCash()` 讀的是
-        // **分配面板上一次開的那一列**的殘額。從列表叫會拿到別列的數字，
-        // 靜靜寫一個錯的匯費進 DB。這裡餵的是這一列自己的殘額。
+        } catch (_) { /* 撈不到就當全部是新掛的 */ }
+        // 🔴 預帶走分配面板同一支 `toItem`，但殘額要餵**這一列自己的** ——
+        // 它的預設值 `_allocRemainCash()` 讀的是面板上一次開的那一列，從列表叫
+        // 會拿到別列的數字、靜靜寫一個錯的匯費進 DB。
+        const picked = ids || [];
         let left = Number(e.deposit) || 0;
-        (ids || []).forEach((iid) => {
+        picked.forEach((iid) => {
             if (keep[iid]) { left -= Number(keep[iid].amount) || 0; }
         });
-        const items = (ids || []).map((iid) => {
+        const items = picked.map((iid) => {
             if (keep[iid]) {
                 return { invoice_id: iid, amount: keep[iid].amount,
                          fee: keep[iid].fee || 0 };
             }
             const inv = _invoiceList.find((x) => x.id === iid);
-            const amt = inv ? _outstanding(inv) : (Number(e.deposit) || 0);
-            const fee = inv ? autoFee(amt, Math.max(0, left)) : 0;
-            left -= amt;
-            return { invoice_id: iid, amount: amt, fee };
+            if (!inv) { return { invoice_id: iid, amount: Number(e.deposit) || 0, fee: 0 }; }
+            const it = _ALLOC_SIDES.invoice.toItem(inv, Math.max(0, left));
+            left -= it.amount;
+            return { invoice_id: iid, amount: it.amount, fee: it.fee };
         }).filter((it) => (it.amount || 0) > 0);
         return _fetch(`/cash-entries/${id}/invoices`,
                       { method: 'PUT', body: JSON.stringify({ items }) });
@@ -1865,9 +1873,11 @@ const _ALLOC_SIDES = {
         // 匯費也預帶一次（只在掛上的當下算，之後不再自己動）：這筆收款還沒分配掉
         // 的入帳金額比「還沒收的部分」少幾十塊時，那就是被匯出行扣走的
         // （owner 2026-08-23：「自動幫我填寫匯費，格子我可以修改調整」）。
-        toItem: i => ({
+        // `remainCash`＝這筆收款還沒分配掉的入帳金額：面板用自己的殘額，列表的
+        // 就地連結餵那一列自己的 —— 兩邊同一支，匯費規則只有這一份
+        toItem: (i, remainCash = _allocRemainCash()) => ({
             invoice_id: i.id, amount: _outstanding(i),
-            fee: autoFee(_outstanding(i), _allocRemainCash()),
+            fee: autoFee(_outstanding(i), remainCash),
             invoice_number: i.invoice_number || '', title: i.title || '',
             amount_total: i.amount_total || 0,
             payment_status: i.payment_status || '', missing: false,

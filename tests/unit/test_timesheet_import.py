@@ -8,9 +8,8 @@
 import re
 
 from core.hr_logic import (INTERNAL_BUCKETS, ProjectLookup, group_by_name,
-                           remap_target, resolve_project, sheet_project_client,
-                           sheet_project_key, split_sheet_name, suggest_projects,
-                           unique_hit)
+                           remap_target, resolve_project, sheet_project_key,
+                           split_sheet_name, suggest_projects, unique_hit)
 from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
 
 PROJECTS = [
@@ -38,7 +37,6 @@ def test_the_split_is_one_rule_used_by_both_halves():
     assert split_sheet_name("政大AI中心_課程影片製作_陳昭伶") == ("政大AI中心", "課程影片製作_陳昭伶")
     assert sheet_project_key("  典藏藝術家庭_媒體顧問   202608 ") == "媒體顧問 202608"
     assert split_sheet_name("行政庶務") == ("", "行政庶務")
-    assert sheet_project_client("行政庶務") == ""
 
 
 # ── 判定順序 ──
@@ -127,20 +125,27 @@ def test_every_entry_point_shares_one_lookup_and_one_resolver():
                "async def burn_summary(", "async def insert_manual_rows(", "async def timesheet_projects("):
         assert "load_project_lookup(session)" in func_body(src, fn), fn
     assert "name_to_id" not in src, "第二份名稱對映還在"
-    # 唯一回給前端當清單的端點，可見性照私帳規矩（Lv3 不隱含 finance_mine）
-    assert 'require_entity(request, "mine")' in func_body(src, "async def timesheet_projects("), \
-        "私帳案清單沒套 mine scope"
+    # 列私帳案、寫對映／回填／預算：同一條 mine 守衛（Lv3 不隱含 finance_mine）
+    guard = code_only(func_body(src, "def _require_mine_admin("))
+    assert "check_admin(request)" in guard and "require_entity(request, MINE" in guard
+    for fn in ("async def timesheet_projects(", "async def list_project_map("):
+        assert "_require_mine_admin(request)" in func_body(src, fn), f"沒套 mine 守衛：{fn}"
+    # 寫私帳（改掛時數、寫預算）守 full，同 routers/crm 其他寫私帳的端點
+    for fn in ("async def upsert_project_map(", "async def remap_timesheets(", "async def set_budgets("):
+        assert '_require_mine_admin(request, level="full")' in func_body(src, fn), f"寫私帳沒守 full：{fn}"
+    # burn 摘要本身給所有管理員看，但候選／建議帶的是私帳案名 —— 沒 mine scope 不給
+    assert "can_mine" in code_only(func_body(src, "async def burn_summary("))
     svc = code_only(repo_src("services/timesheet_lookup.py"))
-    assert 'CrmProject.entity == "mine"' in svc, "自動對映只認私帳（owner 2026-09-02）"
+    assert "is_mine(CrmProject.entity)" in svc, "自動對映只認私帳（owner 2026-09-02）"
     # remap 的判定走純函式，並且依名字聚合（不是 9,800 列逐列）
     rm = func_body(src, "async def remap_timesheets(")
-    assert "remap_target(why, cur_pid, pid)" in rm
-    assert ".group_by(Timesheet.project_name, Timesheet.project_id)" in rm
+    assert "remap_target(" in rm and ".group_by(" in rm
 
 
 def test_ingest_only_accepts_the_two_sources_and_fills_staff_id():
-    import routers.api_timesheets as m
-    assert set(m._SOURCES) == {"sheet", "import"}
+    from typing import get_args
+    from core.schemas import TimesheetIngestRequest
+    assert set(get_args(TimesheetIngestRequest.model_fields["source"].annotation)) == {"sheet", "import"}
     fn = code_only(func_body(repo_src("routers/api_timesheets.py"), "async def ingest_rows("))
     assert "source=req.source" in fn
     assert "staff_id=sid" in fn
@@ -170,7 +175,7 @@ def test_the_import_script_formats_dates_like_apps_script_and_never_inits_db():
 def test_the_burn_board_tells_the_owner_why_a_name_is_unmatched():
     src = repo_src("routers/api_timesheets.py")
     fn = code_only(func_body(src, "async def burn_summary("))
-    assert '"reason": why' in fn
+    assert '"reason":' in fn
     assert 'item["candidates"]' in fn and 'item["suggestions"]' in fn
     assert fn.count("resolve_project(") == 1, "同一個名字 resolve 了兩次"
     js = js_code_only(repo_src("frontend/tabs/timesheets/timesheets.js"))

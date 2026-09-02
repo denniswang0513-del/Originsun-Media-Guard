@@ -24,11 +24,7 @@ def test_one_loader_serves_both_sides():
     """兩側（發票／請款單）撈連結走**同一支** —— 形狀只差表與欄名。"""
     src = code_only(repo_src("routers/crm/cash.py"))
     assert "async def load_alloc_links_map(session, kind: str, *, entity=None)" in src
-    # 舊名字留成薄殼給既有呼叫端，不是第二份實作
-    body = code_only(func_body(repo_src("routers/crm/cash.py"),
-                               "async def load_payment_links_map("))
-    assert 'return await load_alloc_links_map(session, "payment", entity=entity)' in body
-    assert "select(" not in body, "薄殼又長出自己的查詢了"
+    assert "load_payment_links_map" not in src, "舊名字的薄殼又回來了（零呼叫端）"
 
 
 def test_the_fee_prefill_uses_this_row_not_the_panels_last_one():
@@ -41,11 +37,12 @@ def test_the_fee_prefill_uses_this_row_not_the_panels_last_one():
     """
     js = js_code_only(repo_src(CB))
     fn = js_func_body(js, "window._cashInvPick = (ev, id) => _inlineLink({")
-    assert "_ALLOC_SIDES.invoice.toItem" not in fn, "又借了綁在面板狀態上的那支"
-    assert "_allocRemainCash" not in fn
-    # 規則本身仍然共用（_outstanding / autoFee），只是換掉輸入
-    assert "autoFee(amt, Math.max(0, left))" in fn
-    assert "_outstanding(inv)" in fn
+    # 同一支 toItem，殘額由呼叫端餵：面板餵自己的（預設參數），就地連結餵這一列的
+    assert "_ALLOC_SIDES.invoice.toItem(inv, Math.max(0, left))" in fn
+    assert "_allocRemainCash" not in fn, "就地連結又去讀面板的殘額了"
+    assert "toItem: (i, remainCash = _allocRemainCash()) =>" in js
+    assert "autoFee(_outstanding(i), remainCash)" in js
+    assert "autoFee(" not in fn, "匯費規則長出第二份了"
 
 
 def test_already_linked_invoices_keep_their_amount_and_fee():

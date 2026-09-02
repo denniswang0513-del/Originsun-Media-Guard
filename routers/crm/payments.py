@@ -239,6 +239,15 @@ async def create_payment(req: PaymentRequestPayload, request: Request):
             if _val and (await session.execute(
                     select(CrmPaymentRequest.id).where(_col == _val))).first():
                 raise HTTPException(409, "這一行已經請過款了")
+        if req.expense_id:
+            # 零用金流進來的列（staff_id）已經有自己的一條請款路（零用金批次 →
+            # 依「會計項目×月份」開應付款，routers/crm/petty._build_aps）。上面的
+            # 409 只認 expense_id 重複，擋不到「零用金那側另外開了一張」——
+            # 這條規則要在這裡，前端不長按鈕只是禮貌。
+            from db.models import CrmProjectExpense
+            exp = await session.get(CrmProjectExpense, req.expense_id)
+            if exp is not None and exp.staff_id:
+                raise HTTPException(409, "零用金的支出走零用金批次請款，不能再從這裡請一次")
         if ent == "mine":
             await _apply_outsource(session, _outsource_key(p), +1)
         session.add(p)

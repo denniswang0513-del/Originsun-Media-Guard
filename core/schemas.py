@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator, model_validator  # type: ignore
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
 from core.crm_logic import normalize_tax_id
 from core.media_exts import sorted_video_exts
@@ -916,7 +916,7 @@ class TimesheetIngestRequest(BaseModel):
     rows: List[TimesheetRow]
     # sheet＝Apps Script 每小時同步；import＝歷史一次性匯入（docs/TIMESHEET_IMPORT_PLAN.md D3）。
     # 兩者走**同一條**寫入（同 row_hash、同手填優先去重），只差落庫的標記。
-    source: str = "sheet"
+    source: Literal["sheet", "import"] = "sheet"
 
 
 class TimesheetProjectMapItem(BaseModel):

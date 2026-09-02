@@ -109,11 +109,6 @@ async def load_alloc_links_map(session, kind: str, *, entity=None) -> dict:
     return out
 
 
-async def load_payment_links_map(session, *, entity=None) -> dict:
-    """`load_alloc_links_map` 的請款單那一半（既有呼叫端沿用這個名字）。"""
-    return await load_alloc_links_map(session, "payment", entity=entity)
-
-
 def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
                   petty_status: str = "", tax_path=None,
                   pay_label: str = "", payment_ids=(), invoice_ids=()) -> dict:

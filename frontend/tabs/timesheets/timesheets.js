@@ -371,10 +371,9 @@ async function _mapProject(sheetName) {
                 await tfetch('/api/v1/timesheets/project_map', {
                     method: 'PUT', body: { items: [{ sheet_name: sheetName, project_id: pid }] },
                 });
-                const r = await tfetch('/api/v1/timesheets/remap', { method: 'POST' });
+                await tfetch('/api/v1/timesheets/remap', { method: 'POST' });
                 _summaryCache = null;
                 await refresh();
-                console.info('[timesheets] remap changed', r.changed);
             } catch (e) {
                 alert('指定失敗：' + (e.message || e));
             }

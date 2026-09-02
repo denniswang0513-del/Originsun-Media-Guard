@@ -384,9 +384,6 @@ def test_every_project_enumeration_decides_about_mine():
         # 🔴 2026-08-30 finance.py 拆成四個檔，做「CSV 匯入時用專案名比對」的那段
         # 落到 payments.py —— 豁免的理由沒變（不回給前端當清單），只是換了檔案。
         "routers/api_timesheets.py", "routers/crm/payments.py",
-        # 工時查表（services）：只做 Sheet 案名→私帳案的伺服器端比對；唯一把它
-        # 回給前端當清單的 /timesheets/projects 套 require_entity(mine)
-        "services/timesheet_lookup.py",
         "routers/crm/proposal_assets.py", "routers/crm/flow.py",
         # 帳本自己的視角（entity 已經圈定範圍）
         "routers/api_finance_projects.py", "routers/api_finance_stmt.py",
@@ -408,10 +405,11 @@ def test_every_project_enumeration_decides_about_mine():
             src = f.read_text(encoding="utf-8")
             if not re.search(r"select\(\s*CrmProject[.,)]", src):
                 continue
-            if "hide_mine_projects" in src or "not_mine(CrmProject.entity)" in src:
+            if ("hide_mine_projects" in src or "not_mine(CrmProject.entity)" in src
+                    or "is_mine(CrmProject.entity)" in src):
                 continue
             hits.append(key)
     assert not hits, (
         "這些檔案列舉了專案卻沒對私帳可見性表態 —— 套 "
-        "core.ledger.hide_mine_projects / not_mine，或加進 EXEMPT 並寫理由：\n  "
+        "core.ledger.hide_mine_projects / not_mine / is_mine，或加進 EXEMPT 並寫理由：\n  "
         + "\n  ".join(hits))
