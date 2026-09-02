@@ -274,8 +274,6 @@ def norm_detail(raw) -> dict:
     return out
 
 
-
-
 def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
     """案源＝代開發票 → 三個欄位自動算（**唯一的自動費用規則**，寫入端呼叫；
     其他案源不動使用者填的數字）。owner 2026-08-25：「稅金5%+買發票＝代辦

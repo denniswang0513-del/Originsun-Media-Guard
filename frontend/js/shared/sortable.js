@@ -55,4 +55,3 @@ export function sortRows(items, getValue, { key, dir } = {}) {
         .sort((a, b) => compareValues(a[0], b[0], sign))
         .map((pair) => pair[1]);
 }
-

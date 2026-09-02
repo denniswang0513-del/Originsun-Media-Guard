@@ -43,11 +43,6 @@ let _fy = '';           // 會計年度篩選（''=全部、'open'=未結案、�
 let _dirty = false;
 let _resizeBound = false;
 
-/** 執行業務所得的源頭代扣試算 —— 演算法同後端 `core.ledger_project.withholding`。
- *  🔴 **費率吃後端回的 `withhold`**（`/project-ledger/{id}` 帶回來），這裡不寫死
- *  10／2,000／2.11％／20,000：二代健保費率是法定的、動過不只一次，寫死的那份
- *  改法後會讓畫面上的預覽跟存進去的值不一致，而預覽值一旦被使用者「確認」
- *  就會被 `tax_manual` 凍住。同 `fee_pct` 的處理（cash-split-editor 那條）。 */
 /** 後端隨 /project-ledger 送來的代扣費率（同檔其他 helper 一樣直接讀 _detail，
  *  不把模組級的值繞一圈當參數傳進來再防禦一次）。 */
 const _wh = () => (_detail && _detail.withhold) || {};
@@ -55,6 +50,11 @@ const _wh = () => (_detail && _detail.withhold) || {};
 /** 代開發票的服務費率預設 —— 正本是後端的 `DEFAULT_FEE_PCT`。 */
 const _defaultFeePct = () => (_detail && _detail.default_fee_pct) || 0;
 
+/** 執行業務所得的源頭代扣試算 —— 演算法同後端 `core.ledger_project.withholding`。
+ *  🔴 **費率吃後端回的 `withhold`**（`/project-ledger/{id}` 帶回來），這裡不寫死
+ *  10／2,000／2.11％／20,000：二代健保費率是法定的、動過不只一次，寫死的那份
+ *  改法後會讓畫面上的預覽跟存進去的值不一致，而預覽值一旦被使用者「確認」
+ *  就會被 `manual` 清單凍住。同 `fee_pct` 的處理（cash-split-editor 那條）。 */
 function _proTax(contract) {
     const c = Number(contract) || 0;
     const r = _wh();
@@ -675,7 +675,7 @@ function _renderDetail() {
         if (ptEl) {
             ptEl.disabled = false;
             ptEl.title = isPro ? _proTaxTitle() : '';
-            // 🔴「人調過了沒」不用猜：後端把它落庫成 `tax_manual`（見
+            // 🔴「人調過了沒」不用猜：後端把它落庫成 `manual` 清單（見
             // core.ledger_project.apply_source_fee）並隨 detail 回來。這裡只
             // 在「剛換案源」或「這格還沒被人決定過」時填試算值 —— 上一版用
             // 模組級「上次試算值」做值比對，那個基準活不過面板重畫，還得在
@@ -686,7 +686,7 @@ function _renderDetail() {
             }
         }
     };
-    // 使用者一動這格就是「由人決定」（存檔後由後端回的 tax_manual 接手）
+    // 使用者一動這格就是「由人決定」（存檔後由後端回的 `manual` 清單接手）
     document.getElementById('fpl-c-personal_tax')
         ?.addEventListener('input', () => { taxManual = true; });
     // 🔴 fpl-source 只掛**一個** listener：它同時在那個 forEach 裡的話，換一次

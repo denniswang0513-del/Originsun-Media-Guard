@@ -679,6 +679,7 @@ async def ledger_categories_and_tree(session, ent: str) -> tuple:
     return (sorted(await ledger_category_domain(session, ent, nodes=nodes)),
             build_tree([n for n in nodes if n.active]))
 
+
 async def project_names_map(session, rows) -> dict:
     """{project_id: name} —— 一次撈齊。
 
@@ -688,8 +689,10 @@ async def project_names_map(session, rows) -> dict:
     而這支存在的理由正是不要有下一份。
 
     這個 `select(id, name).where(id.in_(...))` → dict 的慣用法本來散在
-    api_cashflow ×2、api_equipment、拆項清單。
-    （api_timesheets 那兩處方向相反：name → id，結構上用不到這支。）
+    api_cashflow ×2、api_equipment、petty ×2、拆項清單 —— 全部遷過來了。
+    petty 那兩處原本還是**無條件撈全部專案**，換過來順帶收成有界的 IN。
+    （api_timesheets 那兩處方向相反：name → id，結構上用不到這支；
+      payments.py:197 要全表做模糊比對，也不是這支的形狀。）
     """
     ids = {r if isinstance(r, str) else getattr(r, "project_id", None)
            for r in rows}

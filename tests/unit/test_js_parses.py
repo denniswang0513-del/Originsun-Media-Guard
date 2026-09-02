@@ -20,13 +20,19 @@ import pytest
 
 from tests.unit._srcscan import _REPO
 
+# 第三方、產出物、上傳內容 —— 不是我們寫的，壞了也不是這支要管的
 _SKIP_DIRS = {".venv", "node_modules", "python_embed", "__pycache__", "dist",
-              ".git", "uploads", "website"}
+              ".git", "uploads", "windows_helper", "backups"}
 
 
 def _js_files():
+    """repo 裡我們自己寫的 .js（第三方與產出物不掃）。
+
+    root 取整個 repo 而不是只有 `frontend/` —— `_SKIP_DIRS` 才真的派得上用場，
+    而且 `website/` 那邊哪天長出自己的 .js 也會被守到。
+    """
     import pathlib
-    root = pathlib.Path(_REPO) / "frontend"
+    root = pathlib.Path(_REPO)
     return sorted(p for p in root.rglob("*.js")
                   if not _SKIP_DIRS & set(p.parts))
 

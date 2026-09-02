@@ -78,15 +78,12 @@ import { esc } from '../../js/shared/dom.js';
 
 export { esc };
 
-export function fmtNum(n) {
-    return (n || 0).toLocaleString('zh-TW');
-}
-
-/** 今天（本地時區）'YYYY-MM-DD' — 不用 toISOString（UTC 會差一天） */
-export function todayStr() {
-    const t = new Date();
-    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
-}
+// 千分位與「今天」在 crm-utils 已經有一份逐字相同的實作（連「別用
+// toISOString().slice(0,10)：那是 UTC 面值，台北早上八點前會差一天」這句警語
+// 都各寫一次）。這裡**只轉出不重寫** —— 消費端 21:6，兩邊都在用，
+// 而財務與 CRM 兩支 tab 早就互相 import（test_tab_import_boundary 的白名單）。
+export { fmtNum } from '../crm/crm-utils.js';
+export { today as todayStr } from '../crm/crm-utils.js';
 
 // ⚠ 值域對齊 routers/api_finance.py 的 TREATMENTS/ACCT_KINDS — 改任一邊要同步
 export const TREATMENT_OPTIONS = [

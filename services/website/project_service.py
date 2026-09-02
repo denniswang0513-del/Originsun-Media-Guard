@@ -17,7 +17,7 @@ from collections import defaultdict
 from types import SimpleNamespace
 from typing import Optional
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # is_main_work / work_url_slug / WORK_WIRE_FIELD_MAP 正本在 core.crm_logic（純函式、

@@ -9,7 +9,7 @@
  */
 
 import { esc } from '../website/website-utils.js';
-import { createSortable, sortableTh } from '../crm/crm-utils.js';
+import { createSortable, sortableTh, today as _today } from '../crm/crm-utils.js';
 
 async function tfetch(path, opts = {}) {
     const token = localStorage.getItem('auth_token');
@@ -265,7 +265,7 @@ async function _renderManual(slot) {
         const projOpts = ['<option value="">— 選專案 —</option>']
             .concat((projD.projects || []).map(p =>
                 `<option value="${esc(p.name)}">${esc(p.name)}</option>`)).join('');
-        const today = new Date().toISOString().slice(0, 10);
+        const today = _today();   // 本地時區；toISOString 是 UTC 面值，會差一天
         const rowHtml = `
             <tr class="ts-mrow">
                 <td><input type="date" value="${today}" data-m="date"></td>

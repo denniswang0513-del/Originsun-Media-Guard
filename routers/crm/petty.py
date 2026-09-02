@@ -41,7 +41,8 @@ from db.models import (Client, CrmCashEntry, CrmPaymentRequest, CrmProject,
                        CrmStaff, User)
 
 from ._shared import (_assert_month_open, _crm_session, _fmt_day, _now,
-                      _parse_day, _username, money_dep, router)
+                      _parse_day, _username, money_dep,
+                      project_names_map, router)
 
 # 送出後就不再是本人能改的東西；只有這兩個狀態算「還在我手上」
 EDITABLE = ("草稿", "退回")
@@ -861,8 +862,8 @@ async def petty_entries(request: Request, q: str = Query(""),
             base.order_by(CrmProjectExpense.expense_date.desc().nullsfirst(),
                           CrmProjectExpense.created_at.desc())
             .limit(min(limit, 2000)).offset(offset))).scalars().all()
-        names = dict((await session.execute(
-            select(CrmProject.id, CrmProject.name))).all())
+        # 有界的 IN（只問這批列用到的案）—— 原本是無條件撈全部專案
+        names = await project_names_map(session, rows)
         staff = dict((await session.execute(
             select(CrmStaff.id, CrmStaff.name))).all())
         # 哪些批次已經產過應付款 → 那些列的分類不能再改（見 PATCH）
@@ -997,8 +998,8 @@ async def petty_claims(request: Request, status: str = Query("待審")):
         rows = (await session.execute(
             select(CrmProjectExpense)
             .where(CrmProjectExpense.claim_id.in_(ids))) ).scalars().all() if ids else []
-        names = dict((await session.execute(
-            select(CrmProject.id, CrmProject.name))).all())
+        # 有界的 IN（只問這批列用到的案）—— 原本是無條件撈全部專案
+        names = await project_names_map(session, rows)
     grouped: dict[str, list] = {}
     for r in rows:
         grouped.setdefault(r.claim_id, []).append(

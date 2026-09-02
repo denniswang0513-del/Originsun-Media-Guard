@@ -204,7 +204,7 @@ async def list_equipment(request: Request, q: str = "", category: str = "",
     factory = _require_factory()
 
     from sqlalchemy import or_, select
-    from db.models import CrmProject, Equipment, EquipmentCheckout
+    from db.models import Equipment, EquipmentCheckout
 
     async with factory() as session:
         query = select(Equipment).order_by(Equipment.updated_at.desc())

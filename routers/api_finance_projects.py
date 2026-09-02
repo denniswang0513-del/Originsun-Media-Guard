@@ -32,8 +32,7 @@ from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
 from core.crm_logic import split_gross
 from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, NHI_MIN_PAYMENT,
-                                 VAT_PCT,
-                                 NHI_PCT, WITHHOLD_TAX_EXEMPT,
+                                 NHI_PCT, VAT_PCT, WITHHOLD_TAX_EXEMPT,
                                  WITHHOLD_TAX_PCT, apply_crm_costs,
                                  client_wire, payout_total, settle_state,
                                  to_collect,
@@ -480,7 +479,7 @@ async def project_ledger_detail(project_id: str, request: Request,
         "sources": list(SELECTABLE_SOURCES), "default_fee_pct": DEFAULT_FEE_PCT,
         # 源頭代扣的費率與門檻 —— 前端的試算吃這裡，不自己寫一份 10/2000/2.11/20000。
         # 二代健保費率是法定的、動過不只一次；寫死在 JS 的話，改法的那天畫面上的
-        # 預覽會跟存進去的值不一致，而那個值一旦被使用者「確認」就被 tax_manual 凍住。
+        # 預覽會跟存進去的值不一致，而那個值一旦被使用者「確認」就被 `manual` 清單凍住。
         "withhold": {"tax_pct": WITHHOLD_TAX_PCT, "tax_exempt": WITHHOLD_TAX_EXEMPT,
                      "nhi_pct": NHI_PCT, "nhi_min": NHI_MIN_PAYMENT},
         # 代開發票那一組的費率（前端的即時試算吃這裡，同 withhold 的理由）

@@ -1148,6 +1148,7 @@ def resolve_client_name(inv, project_client_map) -> str:
     return (inv.get("company_name") or "").strip() or "未指定"
 
 
+# ── 營業稅位置 ───────────────────────────────────────────────
 def vat_position(invoices, cash_entries, cat_map=None, months=None) -> dict:
     """營業稅位置：銷項（收款發票稅額）− 進項（付款發票稅額）− 已繳（tax_vat 收支）。
 

@@ -24,13 +24,13 @@ import { authFetch } from './utils.js';
 import { indexTax, taxSelects } from './cash-tax-picker.js';
 import { fmtNum } from '../../tabs/crm/crm-utils.js';   // modal-styles 同款先例：shared → crm-utils
 
-/** 「已拆 N 項」pill —— 收支明細與匯入預覽共用同一顆。 */
 /** 一個收入拆項對**專案**的貢獻＝實匯淨額 ＋ 被扣走的代開費。
  *  🔴 對應後端 `core.crm_logic.split_gross`（規則正本）。前端這一份是給
  *  「還沒送出去、算給人看」的那些格子用的 —— 編輯器的結清毛額、收支詳情的
  *  拆項列。三個顯示端各寫一次加法的話，畫的是同一筆錢卻會互相矛盾。 */
 export const splitGross = (s) => (Number(s.amount) || 0) + (Number(s.fee) || 0);
 
+/** 「已拆 N 項」pill —— 收支明細與匯入預覽共用同一顆。 */
 export function splitBadgeHtml(count) {
     return `<span style="font-size:11px;padding:2px 8px;border-radius:8px;background:#14351f;color:#86efac;">已拆 ${Number(count) || 0} 項</span>`;
 }
@@ -239,11 +239,6 @@ export async function openCashSplitEditor(o) {
         });
     }
 
-    /** 只重畫**拆項列**那一塊。
-     *  🔴 勾一個 checkbox 本來走整窗 render()，而 render() 是 `wrap.innerHTML=`
-     *  —— 那會把兩個面板（未收案 ≤80 列＋代墊 ≤200 列、約 1,400 個節點）整個
-     *  重建，順便把捲軸彈回頂端：勾到第 40 個案子時，勾完就找不到自己在哪。
-     *  這條規則本來只套在金額輸入上（見 patchGross 檔頭），勾選漏掉了。 */
     /** 拆項列上的 handler（刪、金額、代開費、備註、分類樹）——
      *  renderRows 換完列要重掛，外殼那次也走同一支。 */
     function bindRows() {
@@ -324,6 +319,11 @@ export async function openCashSplitEditor(o) {
         });
     }
 
+    /** 只重畫**拆項列**那一塊。
+     *  🔴 勾一個 checkbox 本來走整窗 render()，而 render() 是 `wrap.innerHTML=`
+     *  —— 那會把兩個面板（未收案 ≤80 列＋代墊 ≤200 列、約 1,400 個節點）整個
+     *  重建，順便把捲軸彈回頂端：勾到第 40 個案子時，勾完就找不到自己在哪。
+     *  這條規則本來只套在金額輸入上（見 patchGross 檔頭），勾選漏掉了。 */
     function renderRows() {
         const box = wrap.querySelector('#csp-rows');
         if (!box) { render(); return; }

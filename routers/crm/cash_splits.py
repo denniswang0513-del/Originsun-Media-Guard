@@ -28,7 +28,8 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import exists, func as sa_func, select
 
 from core.auth import check_logged_in
-from core.crm_logic import split_gross, advance_open_amount, split_amount_error, split_side
+from core.crm_logic import (advance_open_amount, split_amount_error,
+                            split_gross, split_side)
 from core.ledger import require_entity
 from core.project_link import cash_can_link
 from db.models import (Client, CrmCashEntry, CrmCashSplit,

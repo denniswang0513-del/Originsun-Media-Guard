@@ -56,7 +56,7 @@ def _ms_dict(m, pname: str = ""):
 async def list_milestones(request: Request, project_id: str = ""):
     _guard(request, "parent", level="full")  # 付款節點綁專案＝母公司 CRM 域（我的帳無專案；合夥人不可及，§2.4）
     from sqlalchemy import select
-    from db.models import PaymentMilestone, CrmProject
+    from db.models import PaymentMilestone
     factory = _factory_or_503()
     async with factory() as session:
         q = select(PaymentMilestone).order_by(
@@ -176,8 +176,7 @@ async def forecast(request: Request, days: int = 90):
     _guard(request, "parent", level="full")
     days = max(14, min(days, 365))
     from sqlalchemy import select
-    from db.models import (PaymentMilestone, CrmPaymentRequest, CrmProject,
-                           FinanceLoanPayment)
+    from db.models import (PaymentMilestone, CrmPaymentRequest, FinanceLoanPayment)
     factory = _factory_or_503()
 
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
