@@ -566,12 +566,20 @@ def loan_outstanding_rows(loans, loan_payments, as_of_month: str) -> list:
 
 # ── 發票/收支小工具 ──────────────────────────────────────────
 
+#: 營業稅率（%）。發票未稅／稅額、代開發票的稅金那一段都吃這一個。
+#: 🔴 法定費率不准寫兩份 —— 這裡是唯一的家，`core.ledger_project` 借用它。
+VAT_PCT = 5.0
+
+#: 含稅 → 未稅的除數（1.05）。
+VAT_DIVISOR = 1 + VAT_PCT / 100
+
+
 def invoice_ex_tax(inv: dict) -> int:
-    """發票未稅額：amount_ex_tax 缺值（None/0）→ round(amount_total / 1.05)。"""
+    """發票未稅額：amount_ex_tax 缺值（None/0）→ round(amount_total / (1+營業稅率))。"""
     ex = inv.get("amount_ex_tax")
     if ex:
         return int(ex)
-    return round(int(inv.get("amount_total") or 0) / 1.05)
+    return round(int(inv.get("amount_total") or 0) / VAT_DIVISOR)
 
 
 def invoice_tax(inv: dict) -> int:
@@ -583,7 +591,7 @@ def invoice_tax(inv: dict) -> int:
     ex = inv.get("amount_ex_tax")
     if ex:
         return total - int(ex)
-    return total - round(total / 1.05)
+    return total - round(total / VAT_DIVISOR)
 
 
 def passthrough_fee_income(inv: dict) -> int:

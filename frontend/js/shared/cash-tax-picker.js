@@ -51,6 +51,29 @@ export const taxKidsAt = (tree, chain, i) =>
  * o.onPick(i, value)  選了之後由呼叫端決定怎麼記
  * o.searchable(sel, i) 選填：把 select 升級成可搜尋（各 tab 的實作不同）
  */
+/**
+ * 「這一排下拉選出來的是哪個節點」—— 回 `{ id, cat }`。
+ *
+ * 兩件事收在這裡：
+ *  ① 選「（不細分）」＝**停在上一層**（那一層本身就是有效的分類，家用底下
+ *    很多列就停在第二層）。
+ *  ② `category` 用**節點自帶的 `cat`**（後端 `core.cash_taxonomy.mirror_from_path`
+ *    算的），不在瀏覽器裡自己 `path.slice(0,2).join('_')` 拼第二份鏡射 ——
+ *    那條規則的 docstring 寫著「規則只有這一份」，分隔符或層數一改，畫面上的
+ *    「科目未對映」提醒就會跟實際存進去的不一致。
+ *
+ * `byId`＝`indexTax(tree).byId`；`curId`＝目前選中的節點；`level`/`value` 是
+ * `taxSelects` 的 `onPick` 給的那兩個。
+ */
+export function taxPick(byId, curId, level, value) {
+    const chain = (byId || {})[curId] || [];
+    const node = value ? (byId || {})[value] : null;
+    const picked = node ? node[node.length - 1]
+        : (level > 0 && chain[level - 1] ? chain[level - 1] : null);
+    return { id: picked ? picked.id : '', cat: picked ? (picked.cat || '') : '' };
+}
+
+
 export function taxSelects(box, o) {
     const tree = o.tree || [];
     const chain = o.chain || [];

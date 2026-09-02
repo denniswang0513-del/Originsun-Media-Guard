@@ -55,7 +55,7 @@ def test_the_withholding_rates_come_from_the_backend():
     """源頭代扣的費率是法定的（二代健保動過不只一次）—— 前端不寫死一份。
 
     寫死的那份改法後會讓預覽跟存進去的值不一致，而預覽值一旦被使用者確認
-    就被 `tax_manual` 凍住。同 `fee_pct` 的處理。
+    就被 `manual` 清單凍住。同 `fee_pct` 的處理。
     """
     js = js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))
     body = js_func_body(js, "function _proTax(")

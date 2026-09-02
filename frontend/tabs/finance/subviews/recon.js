@@ -18,7 +18,7 @@
  */
 import { finFetch, finEntity, finIsMine, ledgerHasInvoices, esc, fmtNum,
          finToast, bankOnly, cardOnly } from '../fin-utils.js';
-import { indexTax, taxSelects } from '../../../js/shared/cash-tax-picker.js';
+import { indexTax, taxPick, taxSelects } from '../../../js/shared/cash-tax-picker.js';
 import { createSortable, sortableTh, enumIndex, autoFee as _autoFee }
     from '../../crm/crm-utils.js';   // 匯費容差的正本在共用層（見 crm-utils）
 import { bearerHeader } from '../../../js/shared/utils.js';   // 送 FormData 時不能自帶 Content-Type
@@ -1285,18 +1285,11 @@ _fr.stmtCatChanged = (i, v, level) => {
     const cats = _stmtPreview.project_categories || [];
     const opts = _opts();
     if ((opts.tree || []).length) {
-        // 私帳：下拉的值是**節點 id**。選「（不細分）」＝退回上一層（那一層
-        // 本身就是有效的分類，家用底下很多列就停在第二層）。
-        const chain = (opts.byId || {})[r.taxonomy_node_id] || [];
-        const node = v ? (opts.byId || {})[v] : null;
-        const picked = node ? node[node.length - 1]
-            : (level > 0 && chain[level - 1] ? chain[level - 1] : null);
-        r.taxonomy_node_id = picked ? picked.id : '';
-        // 🔴 category 用**後端附在節點上的 `cat`**（core.cash_taxonomy
-        // .mirror_from_path 算的）。這裡自己 `path.slice(0,2).join('_')` 的話，
-        // 那條規則就有第二份在瀏覽器裡 —— 而它的 docstring 寫著「規則只有這一份」，
-        // 分隔符或層數一改，畫面上的「科目未對映」提醒就會跟實際存進去的不一致。
-        v = picked ? (picked.cat || '') : '';
+        // 私帳：下拉的值是**節點 id**。「選到哪個節點 ＋ category 從哪來」
+        // 的規則在 cash-tax-picker.taxPick（規則有兩個使用點：這裡與規則面板）。
+        const hit = taxPick(opts.byId, r.taxonomy_node_id, level, v);
+        r.taxonomy_node_id = hit.id;
+        v = hit.cat;
     }
     r.category = v;
     // 「會落到未歸類嗎」的規則跟後端同一條：沒類別**或**類別沒有科目對映。
@@ -1429,15 +1422,8 @@ function _ruleTaxInto() {
         keepOne: true,
         blank: (n) => (n === 0 ? '— 選類別 —' : '（不細分）'),
         onPick: (n, v) => {
-            const chain = _ruleById[_ruleDraft.taxonomy_node_id] || [];
-            const node = v ? _ruleById[v] : null;
-            // 選「（不細分）」＝停在上一層（那一層本身就是有效的分類）
-            const picked = node ? node[node.length - 1]
-                : (n > 0 && chain[n - 1] ? chain[n - 1] : null);
-            _ruleDraft = { taxonomy_node_id: picked ? picked.id : '',
-                           // 🔴 category 用節點自帶的 `cat`（後端 mirror_from_path
-                           // 算的），不在這裡自己拼第二份鏡射 —— 同 stmtCatChanged。
-                           category: picked ? (picked.cat || '') : '' };
+            const hit = taxPick(_ruleById, _ruleDraft.taxonomy_node_id, n, v);
+            _ruleDraft = { taxonomy_node_id: hit.id, category: hit.cat };
             _ruleTaxInto();      // 往下長一層／收回一層
         },
     });

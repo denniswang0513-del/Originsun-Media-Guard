@@ -27,7 +27,7 @@ async function tfetch(path, opts = {}) {
 
 let _content = null;
 let _view = 'board';                                   // board（專案分析）| staff（人員月視圖）
-let _month = new Date().toISOString().slice(0, 7);     // YYYY-MM
+let _month = _today().slice(0, 7);   // YYYY-MM（本地時區；toISOString 是 UTC，1 號早上會停在上個月）
 let _summaryCache = null;   // 最近一次 summary（供點欄頭排序重繪）
 let _staffCache = null;     // 最近一次 by_staff
 let _recentCache = null;    // 最近一次 recent rows

@@ -218,8 +218,6 @@ async def petty_options():
 # ── 我的請款（own-scope，不受 money_view 管）──────────────────────────
 async def _petty_payload(session, staff) -> dict:
     """某個人的零用金現況。own-scope 與代管視圖共用 —— 兩份會漂。"""
-    names = dict((await session.execute(
-        select(CrmProject.id, CrmProject.name))).all())
     # 🔴 私帳專案的雜支不出現在零用金（owner 2026-08-28「已經轉到私帳的專案
     # 不能列入母公司的成本」）。登記時就擋掉了（_assert_not_mine_project），但
     # **專案是後來才搬過去的**那條路擋不到 —— 那張單會一直躺在他的可請款清單裡，
@@ -232,6 +230,9 @@ async def _petty_payload(session, staff) -> dict:
                _not_mine_project(CrmProjectExpense))
         .order_by(CrmProjectExpense.expense_date.desc().nullslast())
     )).scalars().all()
+    # 有界的 IN（只問這批列用到的案）—— 原本是無條件撈全部 400+ 案，
+    # 而這支是 GET /petty/me 的主體，每個人每次開零用金頁都打一次
+    names = await project_names_map(session, rows)
     claims = (await session.execute(
         select(CrmReimbursement)
         .where(CrmReimbursement.staff_id == staff.id)

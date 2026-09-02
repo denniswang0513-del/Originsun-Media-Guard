@@ -3,7 +3,10 @@
  *
  * finFetch：打 /api/v1/finance prefix 的小 helper（token / 錯誤處理比照
  * crm-utils.js 的 crmFetch + _doFetch — 4xx/5xx 時抽出 detail 丟 Error）。
- * esc / fmtNum：與 crm-utils 同名同義的小工具（避免跨 tab import 依賴）。
+ * esc / fmtNum / todayStr：**轉出，不重寫** —— esc 走 js/shared/dom.js，
+ * 另外兩個走 crm-utils（實作逐字相同過，連警語都各寫一次）。財務與 CRM
+ * 兩支 tab 早就互相 import（test_tab_import_boundary 的白名單收了 crm-utils），
+ * 為了避開那條依賴而各留一份，換來的是兩份會漂的實作。
  */
 
 const API = '/api/v1/finance';
@@ -14,7 +17,8 @@ const API = '/api/v1/finance';
 // 釘成 'mine'）。無使用者可見的帳本切換器（v2 已移除 v1 的切換 pill），所以
 // 前端不需要 entity → 顯示名稱的對照表（要顯示的那一處直接寫死）。
 
-// scope 判定（crm-utils.js hasModule 的同義複寫 —— 本檔刻意零 import，見檔頭）：
+// scope 判定（crm-utils.js hasModule 的同義複寫；那一支綁在 crm 的載入時序上，
+// 這裡只讀 window.* 全域，所以是刻意各留一份而不是漏收）：
 // Lv3 admin 的 modules 經 _enrich_user 已含全 key，Lv3 那半是安全冗餘。
 function _hasMod(key) {
     return (window._accessLevel || 0) >= 3 || (window._modules || []).includes(key);

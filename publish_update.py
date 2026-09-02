@@ -618,6 +618,43 @@ def main():
     else:
         print("[WARN] pytest 未安裝，跳過單元測試 gate（建議在發版機補裝）")
 
+    # ── Lint gate：ruff（同 .github/workflows/lint.yml 的 select）──
+    # 🔴 2026-09-02：清理審查刪掉幾個 import 之後留了三個 F401，而 ruff 只活在
+    # GitHub workflow —— 推上去才會紅，是靠人眼在審查裡發現的。CI 擋得住的東西
+    # 沒理由等到 CI。同 pytest gate 的模式：有就跑、沒有就明講跳過。
+    print("\n[*] 執行 lint gate (ruff check .)...")
+    _repo = os.path.dirname(os.path.abspath(__file__))
+    try:
+        import ruff as _ruff  # noqa: F401
+        _has_ruff = True
+    except ImportError:
+        _has_ruff = False
+    if _has_ruff:
+        l_result = subprocess.run(
+            [sys.executable, "-m", "ruff", "check", "."],
+            capture_output=True, text=True, timeout=120, cwd=_repo,
+        )
+        if l_result.returncode != 0:
+            print("\n[ERROR] lint 未過！不允許發布（CI 也會擋）：")
+            print((l_result.stdout or l_result.stderr or "")[-2000:])
+            v_data["version"] = current_version
+            atomic_json_write(VERSION_FILE, v_data)
+            sync_docs_version(current_version)
+            print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+            return 1
+        print("[OK] lint 通過")
+    else:
+        print("[WARN] ruff 未安裝，跳過 lint gate（建議在發版機補裝）")
+
+    # ── 前端 parse gate：node --input-type=module --check ──
+    # 🔴 2026-09-02：一次重構把 cash-split-editor.js 的括號放錯位置，整支 module
+    # 載入失敗（兩個靜態 importer 跟著打不開），而 `node --check <file>` 對它
+    # **回 exit 0**（那條路把 .js 當 CommonJS script 檢查），55 支掃原始碼的測試
+    # 也全綠 —— 兩層驗證都說沒事。這個 gate 的正本是 tests/unit/test_js_parses.py，
+    # 上面那段 pytest gate 已經涵蓋；這裡在沒有 node 的機器上明講跳過。
+    if not shutil.which("node"):
+        print("[WARN] 沒有 node，前端 parse gate 由 pytest 那支自動跳過")
+
     # Build ZIP
     print("\n[*] 開始編譯並打包 ZIP...")
     if not os.path.exists(BUILD_SCRIPT):

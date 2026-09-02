@@ -109,8 +109,6 @@ def load_projects(csv_path: str):
             "recv_status": recv_status,
             "out_due": money(col(r, "委外應付")),
             "out_paid": money(col(r, "委外已付")),
-            "tax_due": money(col(r, "應付稅款")),
-            "tax_status": col(r, "稅款狀態"),
             "costs": {k: money(col(r, COST_LABEL[k])) for k in NOTE_COST_KEYS},
             "depts": {k: v for k, v in depts.items() if v},
         })

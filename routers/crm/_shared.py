@@ -683,16 +683,15 @@ async def ledger_categories_and_tree(session, ent: str) -> tuple:
 async def project_names_map(session, rows) -> dict:
     """{project_id: name} —— 一次撈齊。
 
-    `rows` 收兩種形狀：帶 `project_id` 屬性的物件，或直接是 id 字串。
-    🔴 收字串是必要的，不是方便 —— 呼叫端手上一半是 ORM 列、一半是已經算好的
-    id 集合（api_equipment 就是後者）。只收前者的話，後者只能再手刻一份，
-    而這支存在的理由正是不要有下一份。
+    `rows` 收兩種形狀：帶 `project_id` 屬性的物件，或直接是 id 字串
+    （目前七個呼叫端都是前者；後者留著是因為「手上只有 id 集合」是這個慣用法
+      的另一半，收不下的話那一半只能再手刻一份）。
 
     這個 `select(id, name).where(id.in_(...))` → dict 的慣用法本來散在
-    api_cashflow ×2、api_equipment、petty ×2、拆項清單 —— 全部遷過來了。
-    petty 那兩處原本還是**無條件撈全部專案**，換過來順帶收成有界的 IN。
-    （api_timesheets 那兩處方向相反：name → id，結構上用不到這支；
-      payments.py:197 要全表做模糊比對，也不是這支的形狀。）
+    api_cashflow ×2、api_equipment、petty ×3、拆項清單 —— 全部遷過來了。
+    petty 那三處原本是**無條件撈全部專案**，換過來順帶收成有界的 IN。
+    （api_timesheets 那三處方向相反：name → id，結構上用不到這支；
+      payments.py 那處要全表做模糊比對，也不是這支的形狀。）
     """
     ids = {r if isinstance(r, str) else getattr(r, "project_id", None)
            for r in rows}

@@ -19,6 +19,10 @@ from __future__ import annotations
 
 import re
 
+# 營業稅率 —— 正本在 core.finance_logic（發票未稅／稅額吃的是同一個）。
+# 這裡轉出，讓呼叫端不必為了一個常數多 import 一個模組。
+from core.finance_logic import VAT_DIVISOR, VAT_PCT  # noqa: F401
+
 # 工項（收入拆分）預設清單 —— 對齊 owner 原 Sheet 的欄序。
 # settings `my_ledger.income_items` 可覆寫（見 income_items()）。
 DEFAULT_INCOME_ITEMS = ["前期製作", "動態攝影", "剪輯", "調光", "動態效果",
@@ -110,9 +114,6 @@ def income_items(settings: dict | None = None) -> list:
 SOURCES = ("自接", "源日", "代開發票", "執行業務所得")
 SELECTABLE_SOURCES = ("源日", "代開發票", "執行業務所得")
 DEFAULT_FEE_PCT = 8.0
-
-#: 營業稅率（代開發票的稅金那一段：未稅 × 5%）。
-VAT_PCT = 5.0
 
 # 執行業務所得的源頭代扣（典藏媒體顧問實帳驗證：42,000 → 4,200＋886＝5,086）
 WITHHOLD_TAX_PCT = 10.0          # 所得扣繳；單次稅額 ≤ 2,000 免扣
@@ -297,7 +298,7 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
         c = int(contract or 0)
         pct = float(d.get("fee_pct") or DEFAULT_FEE_PCT)
         d["invoice_fee"] = round(c * pct / 100)
-        d["tax_fee"] = round(c / (1 + VAT_PCT / 100) * (VAT_PCT / 100))
+        d["tax_fee"] = round(c / VAT_DIVISOR * (VAT_PCT / 100))
         d["buy_invoice"] = d["invoice_fee"] - d["tax_fee"]
     elif d.get("source") == "執行業務所得":
         # 個人稅款＝源頭代扣試算（owner 2026-08-26「新增一個執行業務所得的
