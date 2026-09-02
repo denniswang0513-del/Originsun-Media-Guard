@@ -52,6 +52,9 @@ let _resizeBound = false;
  *  不把模組級的值繞一圈當參數傳進來再防禦一次）。 */
 const _wh = () => (_detail && _detail.withhold) || {};
 
+/** 代開發票的服務費率預設 —— 正本是後端的 `DEFAULT_FEE_PCT`。 */
+const _defaultFeePct = () => (_detail && _detail.default_fee_pct) || 0;
+
 function _proTax(contract) {
     const c = Number(contract) || 0;
     const r = _wh();
@@ -537,7 +540,7 @@ function _renderDetail() {
                             </select></td></tr>
                         <tr id="fpl-fee-row">
                             <td style="color:#bbb;">服務費率 %</td>
-                            <td>${money('fpl-feepct', det.fee_pct || d.default_fee_pct || 8)}</td></tr>
+                            <td>${money('fpl-feepct', det.fee_pct || d.default_fee_pct || 0)}</td></tr>
                         ${costRows}`}
                     </table>
                     <table class="crm-table" style="width:100%;font-size:12px;margin-top:8px;">
@@ -630,8 +633,10 @@ function _renderDetail() {
     // 見下方）；其他案源恢復手填。
     // 「這一欄由人決定過」的答案在後端（落庫的 `manual` 清單）；這是它在本次
     // 編輯期間的鏡射，存檔後由後端回的值重新接手。
-    // `tax_manual` 是舊資料的單一布林鍵（core.ledger_project 那邊會轉成清單）。
-    let taxManual = (det.manual || []).includes('personal_tax') || !!det.tax_manual;
+    // 🔴 舊資料的 `tax_manual` 布林鍵不在這裡認：API 回的一律是 norm_detail 的
+    // 輸出，那一層已經把舊形狀轉成清單了。在這裡再認一次＝把過期的 schema 知識
+    // 帶過語言邊界，而且永遠測不到（走不到那條路）。
+    let taxManual = (det.manual || []).includes('personal_tax');
     const _syncFee = (sourceChanged = false) => {
         const src = document.getElementById('fpl-source')?.value;
         const feeEl = document.getElementById('fpl-c-invoice_fee');
@@ -647,10 +652,14 @@ function _renderDetail() {
         [taxEl, buyEl].forEach((el) => { if (el) el.disabled = isAgency; });
         const c = Number(document.getElementById('fpl-contract')?.value) || 0;
         if (isAgency) {
-            // 同後端 apply_source_fee：代辦費=營收×費率；稅金=未稅×5%；買發票=差額
-            const pct = Number(document.getElementById('fpl-feepct')?.value) || 8;
+            // 同後端 apply_source_fee：代辦費=營收×費率；稅金=未稅×營業稅率；
+            // 買發票=差額。🔴 兩個費率都吃後端回的（同 _wh() 那條）——
+            // 寫死 8 與 5 的話，費率一改預覽就跟存進去的值不一致。
+            const vat = Number((_detail && _detail.agency || {}).vat_pct) || 0;
+            const pct = Number(document.getElementById('fpl-feepct')?.value)
+                || Number(_defaultFeePct()) || 0;
             const fee = Math.round(c * pct / 100);
-            const tax = Math.round(c / 1.05 * 0.05);
+            const tax = vat ? Math.round(c / (1 + vat / 100) * (vat / 100)) : 0;
             feeEl.value = fee || '';
             if (taxEl) taxEl.value = tax || '';
             if (buyEl) buyEl.value = (fee - tax) || '';
@@ -780,7 +789,9 @@ _fp.createSave = async (btn) => {
                 code: g('fpc-code'), close_date: g('fpc-close'),
                 contract_amount: parseInt(g('fpc-contract') || '0', 10) || null,
                 source: g('fpc-source'),
-                fee_pct: parseFloat(g('fpc-feepct') || '8') || 8,
+                // 建立表單沒有 _detail 可讀 —— 留空讓後端套自己的預設，
+                // 不在前端猜一個數字（後端 norm_detail 只在非預設時才存）
+                fee_pct: parseFloat(g('fpc-feepct') || '') || undefined,
             }),
         });
         document.getElementById('fpl-create').style.display = 'none';
@@ -1034,7 +1045,10 @@ _fp.save = async (btn) => {
     const sEl = document.getElementById('fpl-source');
     if (sEl) body.source = sEl.value;               // 空＝清掉案源
     const fEl = document.getElementById('fpl-feepct');
-    if (fEl && sEl && sEl.value === '代開發票') body.fee_pct = Number(fEl.value) || 8;
+    // 空白＝用後端的預設費率（正本 DEFAULT_FEE_PCT），不在這裡寫死一個 8
+    if (fEl && sEl && sEl.value === '代開發票') {
+        body.fee_pct = Number(fEl.value) || _defaultFeePct() || undefined;
+    }
     btn.disabled = true;
     btn.textContent = '儲存中…';
     try {

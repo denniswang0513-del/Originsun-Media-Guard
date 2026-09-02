@@ -46,7 +46,9 @@ def test_import_writes_the_rule_note_and_falls_back_to_the_stock_line():
     src = repo_src("routers/api_finance_stmt.py")
     assert 'STMT_IMPORT_NOTE = "銀行對帳單匯入"' in src
     body = code_only(src)
-    assert 'note=(r.note or "").strip()[:255] or STMT_IMPORT_NOTE' in body
+    # 三步驟（strip → 截欄長 → fallback）收在 _entry_note，兩條建列路徑共用
+    assert 'return (getattr(row, "note", "") or "").strip()[:255] or STMT_IMPORT_NOTE' in body
+    assert body.count("note=_entry_note(r)") == 2, "兩條建列路徑沒有都走同一支"
     # 制式字樣不可以再有第二份字面值 —— 常數的定義那一行是唯一的一份，
     # 連 `created_by`（這列是誰建的）也吃同一個常數
     assert body.count('"銀行對帳單匯入"') == 1, \

@@ -74,8 +74,8 @@ export const paymentLabel = (p) => (p ? (p.payee_name || p.summary || '') : '');
  *  🔴 兩個入口（列表格子的挑選視窗、詳情面板的分配面板）打同一批
  *  `_paymentList`，欄位集合各寫一份的話，同一串字在 A 找得到、B 找不到，
  *  而畫面上沒有任何跡象說明為什麼。 */
-export const paymentHay = (p) => `${p.payee_name || ''} ${p.summary || ''} `
-    + `${p.category || ''} ${p.project_label || ''}`.toLowerCase();
+export const paymentHay = (p) => (`${p.payee_name || ''} ${p.summary || ''} `
+    + `${p.category || ''} ${p.project_label || ''}`).toLowerCase();
 
 export function openPaymentPicker(o) {
     const list = o.payments || [];

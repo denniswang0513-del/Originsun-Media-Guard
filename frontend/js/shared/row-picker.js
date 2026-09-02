@@ -118,6 +118,10 @@ export function openRowPicker(o) {
                 : `${o.scopeMain || '主清單'} ${list0.length}`;
         }
         if (btn) { btn.textContent = showAll ? `只看${o.scopeMain || '主清單'}` : (o.scopeAll || '顯示全部'); }
+        patchFooter();
+    };
+    /** 合計那一行（多選才有）。redraw 與「只補一列」兩條路都要更新它。 */
+    const patchFooter = () => {
         const sum = wrap.querySelector('#pp-sum');
         if (sum && o.footer) { sum.innerHTML = o.footer([...picked]); }
     };
@@ -134,8 +138,7 @@ export function openRowPicker(o) {
             el.style.background = on ? '#1e3a2a' : '';
             const box = el.querySelector('input[type=checkbox]');
             if (box) { box.checked = on; }
-            const sum = wrap.querySelector('#pp-sum');
-            if (sum && o.footer) { sum.innerHTML = o.footer([...picked]); }
+            patchFooter();
             return;
         }
         o.onPick(picked.has(id) ? '' : id);   // 再點目前那列＝取消連結

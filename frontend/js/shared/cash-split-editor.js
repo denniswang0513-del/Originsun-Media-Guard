@@ -304,20 +304,6 @@ export async function openCashSplitEditor(o) {
             inp.onchange = () => setFee(Number(inp.dataset.fee),
                                         Number(inp.value) || 0, true, false);
         });
-        // 搜尋框：**只換清單那塊**，整窗重畫會把打字焦點打掉。
-        // 兩份清單同一種接法 —— 寫兩次的話，修焦點的人只會修到其中一份。
-        const wireSearch = (attr, boxSel, html, bind, setQ) => {
-            const el = wrap.querySelector(`[${attr}]`);
-            bind();
-            if (!el) return;
-            el.oninput = () => {
-                setQ(el.value.trim().toLowerCase());
-                const box = wrap.querySelector(boxSel);
-                if (box) { box.innerHTML = html(); bind(); }
-            };
-        };
-    }
-
         // 手動列的分類樹（同 cash-tax-picker 的一排會長的下拉）
         wrap.querySelectorAll('.csp-tax').forEach((box) => {
             const i = Number(box.dataset.row);
@@ -446,6 +432,18 @@ export async function openCashSplitEditor(o) {
             renderRows();
         };
         bindRows();
+        // 搜尋框：**只換清單那塊**，整窗重畫會把打字焦點打掉。
+        // 兩份清單同一種接法 —— 寫兩次的話，修焦點的人只會修到其中一份。
+        const wireSearch = (attr, boxSel, html, bind, setQ) => {
+            const el = wrap.querySelector(`[${attr}]`);
+            bind();
+            if (!el) return;
+            el.oninput = () => {
+                setQ(el.value.trim().toLowerCase());
+                const box = wrap.querySelector(boxSel);
+                if (box) { box.innerHTML = html(); bind(); }
+            };
+        };
         wireSearch('data-projq', '#csp-projlist', projListHtml, bindProj,
                    (v) => { projQ = v; });
         wireSearch('data-advq', '#csp-advlist', advListHtml, bindAdv,

@@ -82,8 +82,9 @@ def test_an_advanced_payment_matches_the_row_of_whose_cost_it_is():
     判準只有一條：這張單是誰的費用＝`advance_by || payee_name`。
     """
     js = js_code_only(repo_src(JS))
-    assert "var _costOwner = function(p) { return p.advance_by || p.payee_name; };" in js
-    assert "_costOwner(payments[pi]) === s.name" in js
+    # 配對建成一張表（|人員| × |請款單| 的逐列掃描是白費），key 就是判準本身
+    assert "(_p.advance_by || _p.payee_name) + '|' + _p.amount" in js
+    assert "_payByOwnerAmount.get(s.name + '|' + subtotal)" in js
     assert "payments[pi].payee_name === s.name" not in js, "舊的單一判準還在"
 
 

@@ -14,8 +14,6 @@ import uuid
 from fastapi import HTTPException, Request, UploadFile, File, Query
 from sqlalchemy import func as _sa_func
 
-_sa_count = _sa_func.count
-
 from config import load_settings as _load_settings
 
 from core.ledger import hide_mine_projects, not_mine
@@ -1129,7 +1127,11 @@ async def check_project_mirror(project_id: str, request: Request):
         # 擋下來的時候不撈：前端一看到 reason 就 toast 完 return，那份清單
         # 純粹是白跑一趟查詢＋白傳一次。
         options, linked_counts = [], {}
-        if not reason:
+        # 擋下來、或**已經連結**的時候都不撈：前端一看到 reason 就 toast 完
+        # return；已連結那條路走的是「重新同步」，候選清單一個都不會用到
+        #（crm-projects-core.js 的 relink 分支不插 opts、也不畫衝突表）。
+        # 那是這一輪新增的**主要**路徑，每按一次白撈 400 案帶 JSONB。
+        if not reason and linked is None:
             options = (await session.execute(
                 select(CrmProject.id, CrmProject.name, CrmProject.contract_amount,
                        CrmProject.ledger_detail)
@@ -1137,7 +1139,7 @@ async def check_project_mirror(project_id: str, request: Request):
                 .order_by(CrmProject.created_at.desc()).limit(400))).all()
             # 每個候選已經承接了幾個 CRM 案（一次 group by，不逐案問）
             linked_counts = dict((await session.execute(
-                select(CrmProject.mine_link_id, _sa_count())
+                select(CrmProject.mine_link_id, _sa_func.count())
                 .where(CrmProject.mine_link_id.isnot(None))
                 .group_by(CrmProject.mine_link_id))).all())
     return {

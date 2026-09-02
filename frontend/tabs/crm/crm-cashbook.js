@@ -46,16 +46,12 @@ const _taxKidsAt = (chain, i) => _kidsAt(_taxTree, chain, i);
 let _batch = { on: false, sel: new Set(), last: null, chain: [] };
 let _csvFile = null;
 
-/** 這本帳沒有「發票」這回事 —— 規則正本在 fin-utils.ledgerHasInvoices
- *  （對帳單匯入那邊也吃同一支）。本檔原本用五種寫法表達它，改規則要找五個地方。 */
-const _noInvoice = () => !ledgerHasInvoices();
-
 function _toggleAdvanceFields(isAdv) {
     // 每一格的可見性一次算完 —— 原本是「先照 !isAdv 全部顯示、再把發票欄蓋掉」，
     // 補丁蓋補丁：下一個看的人會以為發票欄真的跟著 isAdv 走。
     [['cash-advance-section', isAdv],
      ['cash-field-project', !isAdv],
-     ['cash-field-invoice', !isAdv && !_noInvoice()],
+     ['cash-field-invoice', !isAdv && ledgerHasInvoices()],
      ['cash-field-bankfee', !isAdv]].forEach(([id, on]) => {
         const el = document.getElementById(id);
         if (el) { el.style.display = on ? '' : 'none'; }
@@ -165,12 +161,15 @@ function _flat(text, sep) {
     return String(text || '').split('\n').filter(Boolean).join(sep);
 }
 
-/** 帳戶 id → 顯示名。帳戶清單載入失敗（_bankAccounts=null）時回空字串，不炸。
- *  🔴 走查表不走 find：排序時每次比較都會問一次，4,733 列就是上萬次線性搜尋。*/
 /** 這一列的分類收不收得下專案（＝前端側的 cash_can_link；值域由後端
  *  /cash-entries/options 供）。三個呼叫點共用，不各寫一次 includes。 */
 const _canLinkProj = (e) => _LINKABLE.includes(e.category || '');
 
+/** 這次渲染用的帳本判定（`_rowHtml` 每列都問一次是白費）。 */
+let _MINE_LEDGER = false;
+
+/** 帳戶 id → 顯示名。帳戶清單載入失敗（_bankAccounts=null）時回空字串，不炸。
+ *  🔴 走查表不走 find：排序時每次比較都會問一次，4,733 列就是上萬次線性搜尋。*/
 let _acctNameMap = new Map();
 function _acctName(id) {
     return id ? (_acctNameMap.get(String(id)) || '') : '';
@@ -566,7 +565,8 @@ function _rowHtml(e) {
     // 同上：這三個以前在樣板裡各算兩次（`_splitProjNames` 還是 map+Set+join）
     const projName = e.split_count ? _splitProjNames(e) : (e.project_name || '');
     const canPickProj = !e.split_count && _canLinkProj(e);
-    const mine = _noInvoice();
+    // 帳本 pin 在一次渲染裡不會變 —— 200 列問 200 次沒有意義（同上）
+    const mine = _MINE_LEDGER;
     return `
         <div class="crm-row${e.id === _selectedId && !_batch.on ? ' selected' : ''}${
             _batch.on && _batch.sel.has(e.id) ? ' batch-picked' : ''}" data-id="${e.id}"
@@ -661,6 +661,7 @@ function _drawMore(body) {
 function renderList() {
     const body = document.getElementById('cash-list-body');
     if (!body) return;
+    _MINE_LEDGER = !ledgerHasInvoices();   // 這次渲染問一次就好
     _sorter.attach();
     if (_moreObserver) { _moreObserver.disconnect(); _moreObserver = null; }
     if (_entries.length === 0) {
@@ -1022,7 +1023,7 @@ function _renderQuickLink(e) {
                 ${e.project_name ? _esc(e.project_name) : '＋ 選專案'}</button>`)}
         ${/* 發票下拉只在支出列出現：收入列的發票走上面可掛多張的「關聯發票」區。
              私帳整個不出現 —— 私帳不開發票，連結一律走專案（owner 2026-09-01） */ ''}
-        ${(e.deposit || _noInvoice()) ? '' : row('發票', sel('cash-ql-inv', _invOptsHtml(e.invoice_id, '— 未連結 —')))}
+        ${(e.deposit || !ledgerHasInvoices()) ? '' : row('發票', sel('cash-ql-inv', _invOptsHtml(e.invoice_id, '— 未連結 —')))}
         <div id="cash-ql-msg" style="font-size:11px;color:#666;margin-top:5px;">選了就直接存</div>`;
 
     const save = async (patch) => {
@@ -1082,7 +1083,7 @@ function renderDetail(e) {
     const isProjectish = _canLinkProj(e);
     // 收入列的發票由下面「關聯發票」區負責，不重複列。
     // 私帳沒有發票這回事（不開發票，收款＝連結專案），相關欄目整組不出現。
-    const showInvoiceProp = !e.deposit && !_noInvoice();
+    const showInvoiceProp = !e.deposit && ledgerHasInvoices();
     const rel = [
         // 有快速連結下拉時就不印唯讀版 —— 下拉本身已經顯示目前選的是什麼，
         // 印兩份會變成「專案 X」下面又一個「專案」標籤
@@ -1133,7 +1134,7 @@ function renderDetail(e) {
     // 關聯發票（合併匯款 / 分期收款）—— 只有收入列有，內容由 loadCashInvoiceAllocs
     // 非同步填。舊的「單張發票驗算」被這區塊取代：它只看得到一張發票，客戶合併
     // 匯款時必然報「不平衡」，等於在對的資料上顯示假警告。
-    if (e.deposit && !_noInvoice()) {
+    if (e.deposit && ledgerHasInvoices()) {
         html += section('關聯發票');
         html += '<div id="cash-alloc-box" style="font-size:12px;color:#888;">載入中…</div>';
     }
@@ -1147,7 +1148,7 @@ function renderDetail(e) {
 
     document.getElementById('cash-detail-content').innerHTML = html;
     if (isProjectish) _renderQuickLink(e);
-    if (e.deposit && !_noInvoice()) loadCashInvoiceAllocs(e.id);
+    if (e.deposit && ledgerHasInvoices()) loadCashInvoiceAllocs(e.id);
     // 🔴 沒掛過任何請款單就不用打那一趟：payment_request_id 的不變量由
     //    replace_payment_allocs 維持（有連結才非空、清空就設回 null），所以它
     //    等於「這列有沒有分配」。實測生產 907 筆支出列，有硬連結的是 0 筆 ——
@@ -1271,7 +1272,7 @@ function _buildEditFields(currentBankAccountId, currentInvoiceId) {
         // 私帳不開發票（owner 2026-09-01）：發票欄整個不出現，連結一律走專案。
         // 不出現＝payload 不含此鍵（exclude_unset 部分更新），不會洗掉既有值。
         // 私帳不開發票：連候選清單都不用建（走一遍全部發票只為了丟掉）
-        ...(_noInvoice() ? [] : [{name: 'invoice_id', label: '發票', type: 'select',
+        ...(!ledgerHasInvoices() ? [] : [{name: 'invoice_id', label: '發票', type: 'select',
             options: [{ value: '', label: '— 不關聯 —' }].concat(
                 _invoiceCandidates(currentInvoiceId).map(
                     (inv) => ({ value: inv.id, label: _invoiceLabel(inv) })))}]),
@@ -1573,7 +1574,7 @@ export async function initCrmCashbookTab() {
     // 私帳不開發票（owner 2026-09-01）：那一欄讓給「請款單」（支出列可直接勾）。
     // 🔴 改標題而不是隱藏整欄：欄寬規則是 nth-child，表頭與列的格子數必須一直
     // 相等 —— 只藏表頭或只藏列都會讓後面每一欄錯位。
-    if (_noInvoice()) {
+    if (!ledgerHasInvoices()) {
         const _h = document.querySelector('#cash-list-panel .acct-header .cash-col-inv');
         if (_h) { _h.childNodes[0].nodeValue = '請款單 '; }
     }

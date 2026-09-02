@@ -145,7 +145,7 @@ def test_mine_replaces_invoice_links_with_project_links():
     「支出的請款單勾記我希望也可以在這裡直接勾，比照專案」。
 
     釘規則不是字串：
-      · 這條產品規則只有**一個名字**（_noInvoice）—— 原本同一件事在本檔用了
+      · 這條產品規則只有**一個名字**（fin-utils.ledgerHasInvoices）—— 原本同一件事在本檔用了
         五種寫法，改規則要找五個地方
       · 那一欄兩本帳都在（母公司＝發票、私帳＝請款單）：只藏一邊就整排錯位
       · 請款單的寫入走分配表的正本路徑，不是直接寫 payment_request_id
@@ -155,8 +155,10 @@ def test_mine_replaces_invoice_links_with_project_links():
     side = recon.split('const _sideOf =')[1].split(';')[0]
     assert 'ledgerHasInvoices()' in side and 'null' in side, '收入側的發票格對私帳沒關掉'
     cb = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
-    assert 'const _noInvoice = ()' in cb, '「私帳沒有發票」沒有收成一個名字'
-    assert cb.count('_noInvoice()') >= 3, '還有消費點沒走那個述詞'
+    # 🔴 述詞住在 fin-utils（跨檔共用），本檔不再包一層自己的名字 ——
+    # 包一層的話 recon.js 用正向、這裡用反向，兩支檔案搜不到彼此
+    assert 'const _noInvoice' not in cb, '又包了一個只有本檔看得到的名字'
+    assert cb.count('ledgerHasInvoices()') >= 3, '還有消費點沒走那個述詞'
     css = repo_src('frontend/tabs/crm/crm.css')
     assert '.mine-book .cash-col-inv { display: none' not in css,         '那一欄不能整欄藏 —— 私帳要用它放請款單'
     assert 'cash-col-inv' in repo_src('frontend/tabs/crm/crm-cashbook.html')

@@ -32,6 +32,7 @@ from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
 from core.crm_logic import split_gross
 from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, NHI_MIN_PAYMENT,
+                                 VAT_PCT,
                                  NHI_PCT, WITHHOLD_TAX_EXEMPT,
                                  WITHHOLD_TAX_PCT, apply_crm_costs,
                                  client_wire, payout_total, settle_state,
@@ -482,6 +483,8 @@ async def project_ledger_detail(project_id: str, request: Request,
         # 預覽會跟存進去的值不一致，而那個值一旦被使用者「確認」就被 tax_manual 凍住。
         "withhold": {"tax_pct": WITHHOLD_TAX_PCT, "tax_exempt": WITHHOLD_TAX_EXEMPT,
                      "nhi_pct": NHI_PCT, "nhi_min": NHI_MIN_PAYMENT},
+        # 代開發票那一組的費率（前端的即時試算吃這裡，同 withhold 的理由）
+        "agency": {"vat_pct": VAT_PCT},
         "cost_fields": [{"key": k, "label": lb} for k, lb in COST_FIELDS],
         # 整列掛在本案的 ＋ 拆項掛在本案的，日期排序後合成一份 —— 兩者對這一案
         # 都是真金白銀進來，畫面上分兩塊會讓人以為要自己相加。

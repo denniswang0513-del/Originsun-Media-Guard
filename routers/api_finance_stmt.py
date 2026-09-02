@@ -151,6 +151,15 @@ async def _existing_entry_keys(session, acct_id, dates):
 STMT_IMPORT_NOTE = "銀行對帳單匯入"
 
 
+def _entry_note(row) -> str:
+    """匯入建列時那一欄備註：使用者填的優先，沒填才落制式字樣。
+
+    三個步驟（strip → 截欄長 → fallback）兩條建列路徑都要走 —— 各寫一份的話，
+    `[:255]` 這種欄長知識就散兩處，欄位加長或改成順便清全形空白只會改到一個。
+    """
+    return (getattr(row, "note", "") or "").strip()[:255] or STMT_IMPORT_NOTE
+
+
 def _rule_priority_key(bank_account_id: str = ""):
     """規則的命中優先序。**清單顯示與實際比對共用這一支** —— 各寫一份的話，
     畫面上說「由上而下比對，先命中的先贏」就會是假的。
@@ -1115,17 +1124,24 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
             _select(CrmInvoice).where(CrmInvoice.id.in_(inv_ids))
         )).scalars().all()} if inv_ids else {}
 
-        # 同一個理由，換成專案：私帳收款要同步該案的已收（_sync_mine_project_received）
-        # 而拆項要驗專案存在，兩者都在迴圈裡逐案 session.get —— 先把整份對帳單會
-        # 碰到的案子一次撈進 identity map，迴圈裡那些 get 就變成零往返。
-        from db.models import CrmProject
-        proj_ids = ({r.project_id for r in payload.rows if r.project_id}
-                    | {sp.project_id for r in payload.rows
-                       for sp in (r.splits or []) if sp.project_id})
-        proj_by_id = {p.id: p for p in (await session.execute(
-            _select(CrmProject).where(CrmProject.id.in_(proj_ids)))).scalars()}             if proj_ids else {}
-
         acct, ent = await _acct_and_entity(session, request, payload.bank_account_id)
+
+        # 同一個理由，換成專案。這份預撈有**兩個**消費者，範圍不同：
+        #  ① 拆項要驗專案存在（`_apply_splits`）—— 兩本帳都要，而它是
+        #     **顯式 select**，不走 identity map，所以非傳進去不可：
+        #     每個有拆項的列固定多 1 趟，52 列全拆就是 52 趟同交易內往返。
+        #  ② 私帳收款同步該案已收（`_sync_mine_project_received` → session.get）
+        #     —— 只有 mine 走得到，母公司撈了沒人讀。
+        # 所以拆項那半一律撈、整列那半只在私帳撈；也因此要排在
+        # `_acct_and_entity` 之後（ent 還沒算出來就做不了這個區分）。
+        from db.models import CrmProject
+        proj_ids = {sp.project_id for r in payload.rows
+                    for sp in (r.splits or []) if sp.project_id}
+        if ent == "mine":
+            proj_ids |= {r.project_id for r in payload.rows if r.project_id}
+        proj_by_id = {p.id: p for p in (await session.execute(
+            _select(CrmProject).where(CrmProject.id.in_(proj_ids)))).scalars()} \
+            if proj_ids else {}
 
         # 先驗全部月份（整批原子性：有一列落鎖定月就全部不做）。
         # 🔴 用 _assert_rows_open 而不是逐列 _assert_month_open —— 後者每呼叫一次就
@@ -1203,7 +1219,7 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                     continue
                 ent_line = _record_loan_payment(
                     session, loan, row, d, payload.bank_account_id,
-                    note=(r.note or "").strip()[:255] or STMT_IMPORT_NOTE,
+                    note=_entry_note(r),
                     actual_amount=amt,
                     split_total=split_totals[(r.loan_id, r.period_no)])
                 made_payments += 1
@@ -1222,7 +1238,7 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                     expense=(-amt if amt < 0 else None),
                     deposit=(amt if amt > 0 else None),
                     summary=(r.description or "銀行對帳單")[:255],
-                    note=(r.note or "").strip()[:255] or STMT_IMPORT_NOTE,
+                    note=_entry_note(r),
                     category=(r.category or "").strip() or None,
                     bank_account_id=payload.bank_account_id, entity=ent)
                 # 拆項（帳目一筆、內容拆裂）：這列的分類/專案/發票整組讓位給

@@ -251,7 +251,7 @@ def test_ui_has_the_payment_box_on_expense_rows_only():
     assert "e.expense" in seg, "收入列也載入了付款分配（那是發票那區的事）"
     # 發票那側只在收入列載入；私帳整個不載（不開發票，連結一律走專案 ——
     # owner 2026-09-01，詳見 test_stmt_link 的 mine_replaces_invoice_links）
-    assert "if (e.deposit && !_noInvoice()) loadCashInvoiceAllocs(e.id);" in seg, \
+    assert "if (e.deposit && ledgerHasInvoices()) loadCashInvoiceAllocs(e.id);" in seg, \
         "動到了發票那側"
 
 

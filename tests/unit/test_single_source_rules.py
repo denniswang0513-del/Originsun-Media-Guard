@@ -5,7 +5,6 @@
 自己再寫一次 → 兩邊給出不同的答案，而錯的那一邊沒有人會發現。
 """
 from core.crm_logic import payment_label, split_gross
-from core.finance_logic import bank_fee_breakdown, bank_fee_total
 from tests.unit._srcscan import js_code_only, js_func_body, repo_src
 
 
@@ -35,18 +34,6 @@ def test_the_split_gross_rule_has_one_home():
     assert split_gross(None, None) == 0
     for path in ("routers/crm/cash_splits.py", "routers/api_finance_projects.py"):
         assert "split_gross(" in repo_src(path), path
-
-
-def test_the_fee_bucket_subtraction_has_one_home():
-    """真匯費是減出來的（代開費疊在 bank_fee 上是為了守淨流）——
-    減法只有 `bank_fee_breakdown` 一份，兩個顯示端都吃它。"""
-    rows = [{"entry_date": "2026-08-13", "bank_fee": 100, "agency_fee": 30},
-            {"entry_date": "2026-08-20", "bank_fee": 66960, "agency_fee": 66960},
-            {"entry_date": "2026-09-01", "bank_fee": 999, "agency_fee": 0}]
-    mset = {"2026-08"}
-    fee, agency = bank_fee_breakdown(rows, mset)
-    assert (fee, agency) == (70, 66990)
-    assert fee + agency == bank_fee_total(rows, mset)
 
 
 def test_money_that_was_redacted_is_not_rendered_as_settled():

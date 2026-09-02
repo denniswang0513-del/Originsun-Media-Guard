@@ -37,7 +37,7 @@ function compareValues(va, vb, sign) {
     if (ae !== be) return ae ? 1 : -1;
     if (ae) return 0;
     if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * sign;
-    return _coll.compare(String(va), String(vb)) * sign;
+    return _coll.compare(va, vb) * sign;   // _sortKey 已經字串化過
 }
 
 /**
@@ -55,3 +55,4 @@ export function sortRows(items, getValue, { key, dir } = {}) {
         .sort((a, b) => compareValues(a[0], b[0], sign))
         .map((pair) => pair[1]);
 }
+

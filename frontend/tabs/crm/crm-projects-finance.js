@@ -56,6 +56,18 @@ async function _loadCostStaff(projectId) {
             payments = payData.payments || [];
         } catch(_) {}
 
+        // 這張單是**誰的費用** —— 一般單就是收款人；代墊單的收款人是代墊人，
+        // 費用歸屬在 advance_by。
+        // 🔴 只比 payee_name 的話，代墊單永遠配不到費用歸屬人那一列：那一列會
+        // 一直顯示三顆按鈕，同一筆費用可以再請一次款（而畫面上看不出來）。
+        // 建表不逐列掃：原本是 |人員| × |請款單| 次比較，而且比較函式每列重配一次。
+        var _payByOwnerAmount = new Map();
+        for (var pi = 0; pi < payments.length; pi++) {
+            var _p = payments[pi];
+            var _k = (_p.advance_by || _p.payee_name) + '|' + _p.amount;
+            if (!_payByOwnerAmount.has(_k)) { _payByOwnerAmount.set(_k, _p); }
+        }
+
         var proj = state.projects.find(function(p) { return p.id === projectId; });
         var projName = proj ? proj.name : '';
         var grandTotal = 0;
@@ -70,18 +82,7 @@ async function _loadCostStaff(projectId) {
             }
             grandTotal += subtotal;
 
-            // 這張單是**誰的費用** —— 一般單就是收款人；代墊單的收款人是代墊人，
-            // 費用歸屬在 advance_by。
-            // 🔴 只比 payee_name 的話，代墊單永遠配不到費用歸屬人那一列：那一列
-            // 會一直顯示三顆按鈕，同一筆費用可以再請一次款（而畫面上看不出來）。
-            var _costOwner = function(p) { return p.advance_by || p.payee_name; };
-            var matchedPayment = null;
-            for (var pi = 0; pi < payments.length; pi++) {
-                if (_costOwner(payments[pi]) === s.name && payments[pi].amount === subtotal) {
-                    matchedPayment = payments[pi];
-                    break;
-                }
-            }
+            var matchedPayment = _payByOwnerAmount.get(s.name + '|' + subtotal) || null;
 
             var statusHtml = '';
             if (matchedPayment) {

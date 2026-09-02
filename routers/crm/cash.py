@@ -517,9 +517,12 @@ async def list_cash_entries(
         # 拆項整本帳一次撈（表很小；用列 id 進 IN 的話，未篩選清單就是
         # 4,733 個 bind param 的 SQL —— /simplify 效率審查）
         smap = await load_splits_map(session, entity=ent)
-        all_splits = [s for subs in smap.values() for s in subs]
-        amap = await load_advance_links_map(session, [s.id for s in all_splits])
-        pnames = await project_names_map(session, all_splits)
+        # 🔴 下面兩支要的是「**這次回傳的列**上的拆項」，不是整本帳的：
+        # 它們的 IN 進的是拆項 id 與專案 id，跟著整本帳長就是幾千個 bind param
+        # —— 那正是上面那段註解在避開的東西，只是換了一個 key。
+        page_splits = [s for r in rows for s in smap.get(r[0].id, [])]
+        amap = await load_advance_links_map(session, [s.id for s in page_splits])
+        pnames = await project_names_map(session, page_splits)
         paylinks = await load_payment_links_map(session, entity=ent)
     out = []
     for r in rows:

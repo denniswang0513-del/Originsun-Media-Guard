@@ -111,6 +111,9 @@ SOURCES = ("自接", "源日", "代開發票", "執行業務所得")
 SELECTABLE_SOURCES = ("源日", "代開發票", "執行業務所得")
 DEFAULT_FEE_PCT = 8.0
 
+#: 營業稅率（代開發票的稅金那一段：未稅 × 5%）。
+VAT_PCT = 5.0
+
 # 執行業務所得的源頭代扣（典藏媒體顧問實帳驗證：42,000 → 4,200＋886＝5,086）
 WITHHOLD_TAX_PCT = 10.0          # 所得扣繳；單次稅額 ≤ 2,000 免扣
 WITHHOLD_TAX_EXEMPT = 2000
@@ -221,6 +224,25 @@ def mirror_detail(split: dict) -> dict:
     return norm_detail({"split": split, "source": MIRROR_SOURCE})
 
 
+#: 可以被人「接手」、不再自動覆寫的欄位。加第二欄只要往這裡加一個字串。
+MANUAL_FIELDS = frozenset({"personal_tax"})
+
+
+def manual_fields(d) -> set:
+    """一份 ledger_detail 裡「哪幾欄由人決定」。**讀法只有這一份。**
+
+    收三件事：讀 `manual` 清單、吸收舊資料的 `tax_manual` 布林鍵、用
+    `MANUAL_FIELDS` 白名單夾（前端亂送的鍵不能凍住任意欄位）。
+    🔴 兩個呼叫端各寫一遍的話會漂 —— 而且曾經真的漂過：`apply_source_fee`
+    那份少了白名單，只是靠「隨後會被 norm_detail 濾掉」的呼叫順序在兜。
+    """
+    d = d if isinstance(d, dict) else {}
+    out = set(d.get("manual") or ())
+    if d.get("tax_manual"):        # 舊資料：單一布林鍵的年代
+        out.add("personal_tax")
+    return out & MANUAL_FIELDS
+
+
 def norm_detail(raw) -> dict:
     """ledger_detail → 固定形狀（缺鍵補 0、split 只留非零數字）。
 
@@ -240,10 +262,7 @@ def norm_detail(raw) -> dict:
     # 🔴 存成**清單**不是每欄一個布林鍵：`invoice_fee` 的手動覆寫遲早會來
     # （owner 對代開費說過「預設帶出內容，但我可以細調」），到時只是清單多一
     # 個字串，不用再長一個 `fee_manual` 鍵 ＋ 一段保留邏輯 ＋ 一份前端鏡射。
-    manual = set(d.get("manual") or ())
-    if d.get("tax_manual"):        # 舊資料：單一布林鍵的年代
-        manual.add("personal_tax")
-    manual &= set(MANUAL_FIELDS)
+    manual = manual_fields(d)
     if manual:
         out["manual"] = sorted(manual)
     try:
@@ -255,8 +274,6 @@ def norm_detail(raw) -> dict:
     return out
 
 
-#: 可以被人「接手」、不再自動覆寫的欄位。加第二欄只要往這裡加一個字串。
-MANUAL_FIELDS = ("personal_tax",)
 
 
 def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
@@ -282,15 +299,13 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
         c = int(contract or 0)
         pct = float(d.get("fee_pct") or DEFAULT_FEE_PCT)
         d["invoice_fee"] = round(c * pct / 100)
-        d["tax_fee"] = round(c / 1.05 * 0.05)
+        d["tax_fee"] = round(c / (1 + VAT_PCT / 100) * (VAT_PCT / 100))
         d["buy_invoice"] = d["invoice_fee"] - d["tax_fee"]
     elif d.get("source") == "執行業務所得":
         # 個人稅款＝源頭代扣試算（owner 2026-08-26「新增一個執行業務所得的
         # 項目自動算」）；應收基準同步吃到（expected_cash_in 減 personal_tax）
         auto = withholding(contract)
-        manual = set(d.get("manual") or ())
-        if d.get("tax_manual"):        # 舊資料
-            manual.add("personal_tax")
+        manual = manual_fields(d)
         if "personal_tax" in keep:
             # 送來的值 ≠ 試算 → 這格從此由人決定；改回試算值 → 交還自動。
             # 🔴 旗標要**落庫**，不能只看「這次有沒有送」：只改別欄的那種存檔
