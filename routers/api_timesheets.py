@@ -21,13 +21,16 @@ from config import load_settings, save_settings
 from core.auth import check_admin, check_admin_or_module, current_username
 from core.db_guard import db_factory_or_503
 from core.ledger import MINE, require_entity
-from core.hr_logic import Misses, explain_miss, remap_target, resolve_project
-from core.schemas import (TimesheetBudgetRequest, TimesheetIngestRequest, TimesheetManualRequest,
-                          TimesheetProjectMapRequest, TimesheetPullSettings)
+from core.hr_logic import (WORK_TYPES, Misses, explain_miss, norm_work_type, remap_target,
+                           resolve_project, row_state)
+from core.schemas import (MeTimesheetBatch, MeTimesheetUpdate, TimesheetBudgetRequest,
+                          TimesheetIngestRequest, TimesheetManualRequest, TimesheetProjectMapRequest,
+                          TimesheetPullSettings)
 from routers.crm._shared import project_names_map
 from services import timesheet_puller
 from services.timesheet_ingest import ingest, parse_date as _parse_date
 from services.timesheet_lookup import load_project_lookup
+from services.timesheet_self import apply_update, bound_ident, own_row, ts_dict
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
 
@@ -104,6 +107,131 @@ async def run_pull_now(request: Request):
     """立刻拉一次（admin；不看 enabled，dev 也能手動測）。"""
     check_admin(request)
     return await timesheet_puller.run_pull(force=True)
+
+
+# ── 工作追蹤 P1（docs/WORK_TRACKING_UI_PLAN.md）：每日看板 ＋ 我的一天 ─────────────
+#
+# 閘門＝timesheets 模組（進得了 tab 就看得到大家每天做了什麼，owner 拍板）；
+# 「我的一天」的讀改刪再加「綁定人員檔案」（services.timesheet_self.bound_ident）。
+
+def _day_span(day: str):
+    d = _parse_date(day) if day else datetime.now()
+    if d is None:
+        raise HTTPException(status_code=422, detail=f"日期格式錯誤：{day}")
+    d0 = d.replace(hour=0, minute=0, second=0, microsecond=0)
+    return d0, d0 + __import__("datetime").timedelta(days=1)
+
+
+@router.get("/work_types")
+async def work_types(request: Request):
+    check_admin_or_module(request, "timesheets")
+    return {"work_types": list(WORK_TYPES)}
+
+
+@router.get("/board")
+async def day_board(request: Request, date: str = "", days: int = 1):
+    """每日看板：從 date 起 days 天（1＝當天、7＝週模式），每天每個人做了什麼（實際＋計畫）。
+    只顯示有列的人；不排名、不標紅（主管層另做）。"""
+    check_admin_or_module(request, "timesheets")
+    days = max(1, min(int(days or 1), 14))
+    d0, _ = _day_span(date)
+    d1 = d0 + __import__("datetime").timedelta(days=days)
+    factory = db_factory_or_503()
+    from sqlalchemy import select
+    from db.models import Timesheet
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet).where(Timesheet.work_date >= d0).where(Timesheet.work_date < d1)
+            .order_by(Timesheet.work_date, Timesheet.staff_name, Timesheet.created_at)
+        )).scalars().all()
+    by_day: dict = {}
+    for r in rows:
+        day = r.work_date.astimezone().date().isoformat() if r.work_date else ""
+        person = by_day.setdefault(day, {}).setdefault(r.staff_name or "(空白)", [])
+        person.append({
+            "id": r.id, "project_name": r.project_name or "", "task_note": r.task_note or "",
+            "hours": round(float(r.hours or 0), 2),
+            "planned_hours": round(float(r.planned_hours), 2) if r.planned_hours is not None else None,
+            "work_type": r.work_type or "", "status": r.status or "", "source": r.source or "",
+        })
+    out_days = []
+    cur = d0
+    while cur < d1:
+        k = cur.date().isoformat()
+        people = [{"name": n, "items": its, "hours": round(sum(i["hours"] for i in its), 1),
+                   "planned": round(sum(i["planned_hours"] or 0 for i in its), 1)}
+                  for n, its in sorted(by_day.get(k, {}).items())]
+        out_days.append({"date": k, "people": people})
+        cur += __import__("datetime").timedelta(days=1)
+    return {"from": d0.date().isoformat(), "days": days, "items": out_days}
+
+
+@router.get("/mine")
+async def my_day(request: Request, date: str = ""):
+    """我的一天：本人該日的工作項（實際＋計畫）＋ 計畫／實際合計 ＋ 昨天的列（供「複製昨天」）。"""
+    ident = await bound_ident(request, "timesheets")
+    d0, d1 = _day_span(date)
+    y0 = d0 - __import__("datetime").timedelta(days=1)
+    factory = db_factory_or_503()
+    from sqlalchemy import or_, select
+    from db.models import Timesheet
+    sid, name = ident["staff_id"], ident["staff"].name
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet)
+            .where(or_(Timesheet.staff_id == sid, Timesheet.staff_name == name))
+            .where(Timesheet.work_date >= y0).where(Timesheet.work_date < d1)
+            .order_by(Timesheet.work_date, Timesheet.created_at)
+        )).scalars().all()
+    # 🔴 asyncpg 讀回的是 aware UTC、d0 是 naive 本地 —— 直接比會 TypeError；一律歸一到本地日再比
+    day0 = d0.date()
+    today_items = [ts_dict(r, sid) for r in rows if r.work_date and r.work_date.astimezone().date() >= day0]
+    yday_items = [ts_dict(r, sid) for r in rows if r.work_date and r.work_date.astimezone().date() < day0]
+    return {
+        "date": d0.date().isoformat(), "staff_name": name,
+        "items": today_items,
+        "planned_total": round(sum(i["planned_hours"] or 0 for i in today_items), 1),
+        "actual_total": round(sum(i["hours"] for i in today_items), 1),
+        "yesterday": yday_items,
+        "work_types": list(WORK_TYPES),
+    }
+
+
+@router.post("/mine/rows")
+async def my_add_rows(body: MeTimesheetBatch, request: Request):
+    """本人一次填多列（實際或計畫；同 insert_manual_rows 規則）。"""
+    ident = await bound_ident(request, "timesheets")
+    if not body.rows:
+        raise HTTPException(status_code=422, detail="至少一列")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        result = await insert_manual_rows(
+            session, staff_id=ident["staff_id"], staff_name=ident["staff"].name, rows=body.rows)
+        await session.commit()
+    return result
+
+
+@router.put("/mine/{row_id}")
+async def my_update_row(row_id: str, body: MeTimesheetUpdate, request: Request):
+    """改自己的一列（含「完成」：把 hours 填上，計畫列就變實際）。"""
+    ident = await bound_ident(request, "timesheets")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        r = await own_row(session, row_id, ident)
+        await apply_update(session, r, body)
+        await session.commit()
+        return ts_dict(r, ident["staff_id"])
+
+
+@router.delete("/mine/{row_id}")
+async def my_delete_row(row_id: str, request: Request):
+    ident = await bound_ident(request, "timesheets")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        r = await own_row(session, row_id, ident)
+        await session.delete(r)
+        await session.commit()
+    return {"deleted": row_id}
 
 
 # ── 對映表／回填／預算（docs/TIMESHEET_IMPORT_PLAN.md Phase A-3）────────────────
@@ -264,8 +392,12 @@ async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> d
     inserted = 0
     misses = Misses()
     for r in rows:
-        if (r.hours or 0) <= 0:
-            raise HTTPException(status_code=422, detail="時數需大於 0")
+        # 實際或計畫至少一個 > 0；分類在清單內（規則在 core.hr_logic，422 帶原句）
+        try:
+            status = row_state(r.hours, r.planned_hours)
+            wt = norm_work_type(r.work_type)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
         wd = _parse_date(r.work_date)
         if wd is None:
             raise HTTPException(status_code=422, detail=f"日期格式錯誤：{r.work_date}")
@@ -281,8 +413,10 @@ async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> d
             project_id=pid,
             project_name=pname,
             task_note=(r.task_note or "").strip() or None,
-            hours=float(r.hours),
-            status="draft",
+            hours=float(r.hours or 0),
+            planned_hours=float(r.planned_hours) if r.planned_hours is not None else None,
+            work_type=wt,
+            status=status,
             source="manual",
             row_hash="manual_" + uuid.uuid4().hex,
         ))

@@ -121,7 +121,7 @@ owner 2026-09-03 兩次釐清：「大家看到大家」是要知道**彼此每�
 
 | 階段 | 內容 | 量 |
 |------|------|----|
-| P1 | 兩欄 migration；我的一天（計畫→完成→結果）；今日看板；/work.html 殼＋六分頁骨架；tab 嵌入 | 1 session |
+| P1 ✅ 2026-09-03 | 兩欄 migration；我的一天（實際或計畫、時數快捷鈕、複製昨天、完成／改／刪）；每日看板（日／週）；tab 六分頁殼（專案／人員沿用既有表、儀表板 P3、設定收既有管理功能）；端點 /timesheets/board、/mine、/mine/rows、/mine/{id}、/work_types；own-scope 共用件 services/timesheet_self | 1 session |
 | P2 | 專案檔案頁（時間軸／分類組成／類似專案並排）；人員檔案頁（逐日／熱圖） | 1 session |
 | P3 | 儀表板六格；漏填 digest（週一 Google Chat）；舊「專案工時」視圖退場 | 1 session |
 

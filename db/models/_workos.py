@@ -20,8 +20,10 @@ class Timesheet(Base):
     project_id = Column(String(32), nullable=True)               # soft FK → crm_projects.id（名稱對映成功時）
     project_name = Column(String(255), nullable=False, default="")  # Sheet 原始專案名（含「行政庶務」內部桶）
     task_note = Column(Text, nullable=True)                      # 工作內容
-    hours = Column(Float, nullable=False, default=0.0)
-    status = Column(String(16), nullable=False, default="import")
+    hours = Column(Float, nullable=False, default=0.0)           # 實際小時；計畫列＝0 直到「完成」
+    planned_hours = Column(Float, nullable=True)                 # 計畫小時（docs/WORK_TRACKING_UI_PLAN.md §2；Sheet 列 NULL）
+    work_type = Column(String(32), nullable=True)                # 工作分類（core.hr_logic.WORK_TYPES；可空）
+    status = Column(String(16), nullable=False, default="import")  # import／draft（實際）／plan（只有計畫）
     source = Column(String(16), nullable=False, default="sheet")  # sheet/manual/schedule
     row_hash = Column(String(40), nullable=False, unique=True)   # 去重：date|staff|project|task|hours
     created_at = Column(DateTime(timezone=True), server_default=func.now())

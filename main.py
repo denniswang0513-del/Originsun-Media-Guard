@@ -555,6 +555,9 @@ async def _on_startup():
                         # N-hr H2 出缺勤 + 工時 staff_id 對映（hr_leave_requests 新表由 create_all 建）
                         ("crm_staff", "annual_leave_days", "INTEGER"),
                         ("timesheets", "staff_id", "VARCHAR(32)"),
+                        # 工作追蹤 P1（docs/WORK_TRACKING_UI_PLAN.md §2）：計畫小時＋工作分類
+                        ("timesheets", "planned_hours", "DOUBLE PRECISION"),
+                        ("timesheets", "work_type", "VARCHAR(32)"),
                         # 影像紀錄：子資料夾名（首次生成後固定，見 media_log._ensure_folder_name）
                         ("project_media_log", "folder_name", "VARCHAR(255)"),
                         # 提案庫資產夾名（core.project_folders，2026-08-06）

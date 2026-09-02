@@ -57,7 +57,8 @@ def test_hours_page_only_talks_to_team_endpoints():
     assert "/api/v1/me/team/project?name=" in html
     assert "/api/v1/timesheets/" not in html, "員工頁不該打管理端 timesheets 端點"
     assert 'href="/hours.html"' in repo_src("frontend/my.html"), "我的工時沒有入口到團隊工時"
-    # 內部 App 的專案工時 tab 也嵌同一頁（owner 2026-09-03「直接嵌進 tab」），不另刻一份
+    # 內部 App 的工作追蹤 tab：每日看板取代了嵌入的團隊頁，人員分頁留連結到 /hours.html；
+    # tab 不自己再畫一份 /me/team 的表
     tab_src = repo_src("frontend/tabs/timesheets/timesheets.js")
-    assert "b('team', '團隊工時')" in tab_src and 'src="/hours.html"' in tab_src
+    assert 'href="/hours.html"' in tab_src
     assert "/api/v1/me/team/" not in js_code_only(tab_src), "tab 自己又畫了一份團隊表"

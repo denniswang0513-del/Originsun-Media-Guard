@@ -120,9 +120,34 @@ def hours_rollup(rows, year: int, month: int) -> dict:
     }
 
 
+#: 工作分類（docs/WORK_TRACKING_UI_PLAN.md §3-A，owner 2026-09-03「照建議」）：固定選項，
+#: 跨案可比的形狀（拍攝 40h／剪接 120h）靠它；可不填。
+WORK_TYPES = ("前期企劃", "拍攝", "剪接", "動態／特效", "調光", "聲音", "會議溝通", "行政", "其他")
+
+
+def norm_work_type(v) -> Optional[str]:
+    """空＝None；不在清單裡就丟 ValueError（端點回 422）。"""
+    s = (v or "").strip()
+    if not s:
+        return None
+    if s not in WORK_TYPES:
+        raise ValueError(f"工作分類只能是：{'／'.join(WORK_TYPES)}")
+    return s
+
+
+def row_state(hours, planned_hours) -> str:
+    """一列是「只有計畫」還是「有實際」：hours>0 → draft（實際）；否則有 planned → plan；
+    兩個都沒有＝不合法（呼叫端先擋）。計畫列的 hours 存 0，燒錄／匯總只算 hours。"""
+    if (hours or 0) > 0:
+        return "draft"
+    if (planned_hours or 0) > 0:
+        return "plan"
+    raise ValueError("時數或計畫小時至少一個要大於 0")
+
+
 #: 本人可改／可刪的手填列狀態（docs/TIMESHEET_SELF_ENTRY_PLAN.md D3／D5）：
-#: approved／locked 之後就不是自己的事了。
-EDITABLE_STATUSES = frozenset({"draft", "confirmed"})
+#: 不審核，所以 plan／draft 都能改；locked 留給日後月結。
+EDITABLE_STATUSES = frozenset({"plan", "draft", "confirmed"})
 
 
 def can_edit_timesheet(row, staff_id: str) -> str:

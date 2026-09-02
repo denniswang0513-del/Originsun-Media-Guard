@@ -23,8 +23,9 @@ from sqlalchemy import func, select  # type: ignore
 
 from core.auth import check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
-from core.hr_logic import can_edit_timesheet, hours_rollup, leave_balance, leave_to_dict
+from core.hr_logic import hours_rollup, leave_balance, leave_to_dict
 from core.identity import resolve_current_staff
+from services.timesheet_self import apply_update, bound_ident, own_row, ts_dict
 from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetCreate, MeTimesheetUpdate, MeTodoUpdate)
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
@@ -334,38 +335,15 @@ async def add_my_timesheet(body: MeTimesheetCreate, request: Request):
 # own-scope：列的歸屬只認 staff_id（手填列必帶；Sheet 列由 ingest 的 resolve_staff 填），
 # 舊的 Sheet 列若 staff_id 空則退回姓名比對（同 /me 摘要卡的 name-match 妥協）。
 
-def _ts_dict(r, staff_id: str) -> dict:
-    d = r.work_date.astimezone().date() if r.work_date else None   # 寫 naive／讀 aware 差一天：歸一到本地日
-    return {
-        "id": r.id,
-        "date": d.isoformat() if d else "",
-        "project_name": r.project_name or "",
-        "project_id": r.project_id or "",
-        "task_note": r.task_note or "",
-        "hours": round(float(r.hours or 0), 2),
-        "source": r.source or "",
-        "status": r.status or "",
-        "editable": can_edit_timesheet(r, staff_id) == "",
-    }
+# 序列化／守衛／改列規則只有 services.timesheet_self 一份（CRM tab 的「我的一天」同吃）
+_ts_dict = ts_dict
 
 
 async def _bound_ident(request: Request) -> dict:
-    check_admin_or_module(request, "me_finance")
-    ident = await resolve_current_staff(request)
-    if ident["staff"] is None:
-        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案，請聯絡管理員")
-    return ident
+    return await bound_ident(request, "me_finance")
 
 
-async def _own_row(session, row_id: str, ident: dict):
-    """撈一列並驗「本人＋手填＋未核可」；不是就 403/409（原因來自 can_edit_timesheet）。"""
-    r = await session.get(Timesheet, row_id)
-    if r is None:
-        raise HTTPException(status_code=404, detail="找不到這一列")
-    why = can_edit_timesheet(r, ident["staff_id"])
-    if why:
-        raise HTTPException(status_code=403 if "不是你的" in why else 409, detail=why)
-    return r
+_own_row = own_row
 
 
 @router.get("/timesheets")
@@ -417,27 +395,10 @@ async def add_my_timesheets(body: MeTimesheetBatch, request: Request):
 async def update_my_timesheet(row_id: str, body: MeTimesheetUpdate, request: Request):
     """改自己的手填列：日期／專案／內容／時數；專案名重新走同一支對映。"""
     ident = await _bound_ident(request)
-    if (body.hours or 0) <= 0:
-        raise HTTPException(status_code=422, detail="時數需大於 0")
-    from core.hr_logic import resolve_project
-    from routers.api_timesheets import _parse_date
-    from routers.crm._shared import project_names_map
-    from services.timesheet_lookup import load_project_lookup
-    wd = _parse_date(body.work_date)
-    if wd is None:
-        raise HTTPException(status_code=422, detail=f"日期格式錯誤：{body.work_date}")
     factory = db_factory_or_503()
     async with factory() as session:
         r = await _own_row(session, row_id, ident)
-        pname = (body.project_name or "").strip()
-        if body.project_id:
-            pid = body.project_id
-            pname = pname or (await project_names_map(session, [pid])).get(pid, "")
-        else:
-            pid, _why = resolve_project(pname, await load_project_lookup(session))
-        r.work_date, r.project_id, r.project_name = wd, pid, pname
-        r.task_note = (body.task_note or "").strip() or None
-        r.hours = float(body.hours)
+        await apply_update(session, r, body)
         await session.commit()
         return _ts_dict(r, ident["staff_id"])
 

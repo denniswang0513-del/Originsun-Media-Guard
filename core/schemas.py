@@ -364,11 +364,15 @@ class AnnualLeaveSet(BaseModel):
 # ── 工時手填（與 Sheet 同步共存；同人+日+專案 手填優先）──
 
 class TimesheetManualRow(BaseModel):
+    """一個工作項：實際小時（hours）或計畫小時（planned_hours）至少一個 > 0
+    （docs/WORK_TRACKING_UI_PLAN.md §2：只有計畫的列 status=plan、hours 存 0）。"""
     work_date: str             # YYYY-MM-DD
     project_id: Optional[str] = None
     project_name: str = ""     # 無 id 時以名稱對映（同 ingest 邏輯）
     task_note: Optional[str] = None
-    hours: float
+    hours: Optional[float] = None
+    planned_hours: Optional[float] = None
+    work_type: Optional[str] = None   # core.hr_logic.WORK_TYPES 之一，可空
 
 
 class TimesheetManualRequest(BaseModel):
