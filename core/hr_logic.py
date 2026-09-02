@@ -3,6 +3,7 @@
 照 CLAUDE.md 慣例：純函式、無 I/O、單元測試在 tests/unit/test_hr_logic.py。
 api_hr 與 api_me 共用（router 端只留 I/O）。
 """
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -224,3 +225,110 @@ def validate_against_allowance(amount, spend_day, allowance) -> str:
     if a > left:
         return f"超過你的額度（還可以用 ${left:,}）"
     return ""
+
+
+# ── 工時 Sheet 專案名 → 專案（docs/TIMESHEET_IMPORT_PLAN.md §2 D1／§4）─────────
+
+#: Sheet 上不是專案的桶（行政、結案、提案…）—— 不對映、`project_name` 留桶名。
+INTERNAL_BUCKETS = frozenset({
+    "行政庶務", "結案作業", "提案企劃", "業務開發", "資訊工程", "客戶服務", "動畫小劇場",
+})
+
+
+def sheet_project_client(name: str) -> str:
+    """「客戶_案名」的客戶那一半；沒有底線＝沒有前綴。"""
+    s = (name or "").strip()
+    return s.split("_", 1)[0].strip() if "_" in s else ""
+
+
+def sheet_project_key(name: str) -> str:
+    """Sheet 專案原字 → 比對用的案名：去掉「客戶_」前綴、空白收成一格。
+
+    🔴 **只有這一份**（匯入、同步、預算灌入、remap 都走它）。Sheet 記的是
+    「三立電視台_國民法官劇情短片」，私帳案叫「國民法官劇情短片」—— 前綴是
+    Sheet 為了下拉分組加的，不是案名的一部分。
+    """
+    s = (name or "").strip()
+    if "_" in s:
+        s = s.split("_", 1)[1]
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def resolve_project(name: str, project_map: dict, by_name: dict, by_key: dict) -> tuple:
+    """一個 Sheet 專案原字 → `(project_id | None, reason)`。順序即優先序，第一個
+    **唯一**命中就停：
+
+        map        owner 在對映表決定過的（永遠優先）
+        bucket     內部桶 → 不對映
+        exact      全名精確同名（唯一）
+        key        去客戶前綴後同名（唯一）
+        key+client 去前綴後撞多案，但 Sheet 前綴＝其中一案的客戶代稱（唯一）
+        ambiguous  仍 >1 → **不猜**，留給 owner 指定
+        none       找不到
+
+    `by_name` / `by_key`：`{名字: [(project_id, client_short_name), …]}`，
+    呼叫端只放**私帳**（owner 2026-09-02：這張表對應的是私帳的專案）。
+    🔴 絕不 fuzzy 自動合併（同 scripts/import_my_projects.py 的鐵則）。
+    """
+    n = (name or "").strip()
+    if not n:
+        return None, "empty"
+    if n in project_map:
+        return project_map[n], "map"
+    if n in INTERNAL_BUCKETS:
+        return None, "bucket"
+    hits = by_name.get(n) or []
+    if len(hits) == 1:
+        return hits[0][0], "exact"
+    hits = by_key.get(sheet_project_key(n)) or []
+    if len(hits) == 1:
+        return hits[0][0], "key"
+    if len(hits) > 1:
+        cli = sheet_project_client(n)
+        # Sheet 前綴是客戶的**簡稱**（「典藏藝術家庭」），clients.short_name 常是全名
+        # （「典藏藝術家庭股份有限公司」）—— 認「以前綴開頭」，仍是精確比對不是模糊：
+        # 唯一一案的客戶名以這個前綴開頭才算，兩案都符合照樣回 ambiguous。
+        narrowed = [h for h in hits if cli and (h[1] or "").startswith(cli)]
+        if len(narrowed) == 1:
+            return narrowed[0][0], "key+client"
+        return None, "ambiguous"
+    return None, "none"
+
+
+def project_lookup_tables(projects) -> tuple:
+    """`[(id, name, client_short_name), …]` → `(by_name, by_key)` 給 resolve_project。
+    同名不合併 —— 撞案要在 resolve 那裡被看見，不是在這裡被吃掉。"""
+    by_name: dict = {}
+    by_key: dict = {}
+    for pid, nm, cli in projects:
+        nm = (nm or "").strip()
+        if not nm:
+            continue
+        by_name.setdefault(nm, []).append((pid, cli or ""))
+        by_key.setdefault(sheet_project_key(nm), []).append((pid, cli or ""))
+    return by_name, by_key
+
+
+def suggest_projects(name: str, by_key: dict, limit: int = 2, floor: float = 0.6) -> list:
+    """找不到時給 owner 看的**建議**（不是自動對映）：去前綴後跟所有私帳案名比相似度，
+    回 `[(key, score), …]`，最像的在前、低於 floor 不列。
+
+    🔴 只在報告裡出現，任何寫入路徑都不准用它 —— 「華南永昌E指通」對「E指沖」
+    是打錯字，該由人看一眼決定，不是程式猜。
+    """
+    import difflib
+    a = sheet_project_key(name)
+    if not a:
+        return []
+    scored = []
+    for k in by_key:
+        sc = difflib.SequenceMatcher(None, a, k).ratio()
+        # 短名字被 ratio 罰得太重（「沆涸」對「沆涸 剪輯」只有 0.57）：
+        # 一邊整個包含另一邊（≥2 字）就至少當 0.75 —— 仍只是建議
+        if len(a) >= 2 and len(k) >= 2 and (a in k or k in a):
+            sc = max(sc, 0.75)
+        if sc >= floor:
+            scored.append((k, round(sc, 2)))
+    scored.sort(key=lambda x: -x[1])
+    return scored[:limit]
+

@@ -915,6 +915,30 @@ class TimesheetRow(BaseModel):
 
 class TimesheetIngestRequest(BaseModel):
     rows: List[TimesheetRow]
+    # sheet＝Apps Script 每小時同步；import＝歷史一次性匯入（docs/TIMESHEET_IMPORT_PLAN.md D3）。
+    # 兩者走**同一條**寫入（同 row_hash、同手填優先去重），只差落庫的標記。
+    source: str = "sheet"
+
+
+class TimesheetProjectMapItem(BaseModel):
+    """owner 對一個 Sheet 專案原字的決定：對到哪一案。"""
+    sheet_name: str
+    project_id: str
+    note: str = ""
+
+
+class TimesheetProjectMapRequest(BaseModel):
+    items: List[TimesheetProjectMapItem]
+
+
+class TimesheetBudgetItem(BaseModel):
+    """Sheet「專案狀態」一列的預算（剩餘＋實際）→ 對到的案的 budget_hours。"""
+    sheet_name: str
+    budget_hours: float
+
+
+class TimesheetBudgetRequest(BaseModel):
+    items: List[TimesheetBudgetItem]
 
 
 class MilestonePayload(BaseModel):

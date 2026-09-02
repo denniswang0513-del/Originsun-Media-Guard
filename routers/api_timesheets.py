@@ -20,8 +20,11 @@ import core.state as state
 from config import load_settings, save_settings
 from core.auth import check_admin, check_admin_or_module
 from core.db_guard import db_factory_or_503
-from core.hr_logic import manual_dup_key
-from core.schemas import TimesheetIngestRequest, TimesheetManualRequest
+from core.hr_logic import (manual_dup_key, project_lookup_tables,
+                           resolve_project)
+from core.schemas import (TimesheetBudgetRequest, TimesheetIngestRequest,
+                          TimesheetManualRequest, TimesheetProjectMapRequest)
+from routers.crm._shared import _username
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
 
@@ -54,6 +57,37 @@ def _row_hash(date_s: str, staff: str, project: str, task: str, hours) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 
+_SOURCES = ("sheet", "import")
+
+
+async def _project_lookup(session) -> tuple:
+    """`(project_map, by_name, by_key)` —— 對映表 ＋ **私帳**專案（owner 2026-09-02：
+    這張 Sheet 對應的是私帳的專案）。四個入口（ingest／remap／budgets／dry-run）
+    都吃這一份，不各自組表。"""
+    from sqlalchemy import select
+    from db.models import Client, CrmProject, TimesheetProjectMap
+    pmap = dict((await session.execute(
+        select(TimesheetProjectMap.sheet_name, TimesheetProjectMap.project_id))).all())
+    rows = (await session.execute(
+        select(CrmProject.id, CrmProject.name, Client.short_name)
+        .outerjoin(Client, Client.id == CrmProject.client_id)
+        .where(CrmProject.entity == "mine"))).all()
+    by_name, by_key = project_lookup_tables(rows)
+    return pmap, by_name, by_key
+
+
+async def _staff_ids(session) -> dict:
+    """姓名 → crm_staff.id；同名兩人以上不猜（回 None）。"""
+    from sqlalchemy import select
+    from db.models import CrmStaff
+    out: dict = {}
+    for sid, nm in (await session.execute(select(CrmStaff.id, CrmStaff.name))).all():
+        nm = (nm or "").strip()
+        if nm:
+            out[nm] = None if nm in out else sid
+    return out
+
+
 @router.get("/ingest_token")
 async def get_ingest_token(request: Request):
     """取同步 token（admin）— 貼進 Apps Script 的 TOKEN 常數。"""
@@ -70,6 +104,8 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
         raise HTTPException(status_code=401, detail="X-Timesheet-Token 無效")
     if len(req.rows) > _MAX_ROWS_PER_CALL:
         raise HTTPException(status_code=422, detail=f"單次上限 {_MAX_ROWS_PER_CALL} 列，分批送")
+    if req.source not in _SOURCES:
+        raise HTTPException(status_code=422, detail="source 只能是 sheet 或 import")
     if not state.db_online:
         # Apps Script 端會重試，給明確訊息（刻意不同於通用 503）
         raise HTTPException(status_code=503, detail="資料庫離線，稍後重送（Apps Script 會重試）")
@@ -81,11 +117,13 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
     inserted = 0
     skipped = 0
     unmatched: set[str] = set()
+    ambiguous: set[str] = set()
+    staff_unmatched: set[str] = set()
 
     async with factory() as session:
-        # 專案名 → id 對映表（一次載入；精確比對，模糊留人工）
-        proj_rows = (await session.execute(select(CrmProject.id, CrmProject.name))).all()
-        name_to_id = {(n or "").strip(): pid for pid, n in proj_rows}
+        # 專案對映：對映表 → 精確 → 去客戶前綴（唯一才算）→ 撞案不猜（core.hr_logic）
+        pmap, by_name, by_key = await _project_lookup(session)
+        staff_ids = await _staff_ids(session)
 
         # 既有 hash 一次撈（避免逐列查詢；量大時仍遠小於全表掃描成本）
         hashes = [_row_hash(r.date, r.staff, r.project, r.task, r.hours) for r in req.rows]
@@ -118,19 +156,26 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
                 skipped_manual += 1
                 continue
             pname = (r.project or "").strip()
-            pid = name_to_id.get(pname)
-            if pid is None and pname:
+            pid, why = resolve_project(pname, pmap, by_name, by_key)
+            if why == "ambiguous":
+                ambiguous.add(pname)
+            elif why == "none":
                 unmatched.add(pname)
+            sname = (r.staff or "").strip()
+            sid = staff_ids.get(sname)
+            if sname and not sid:
+                staff_unmatched.add(sname)
             session.add(Timesheet(
                 id=uuid.uuid4().hex,
                 work_date=wd,
-                staff_name=(r.staff or "").strip(),
+                staff_name=sname,
+                staff_id=sid,
                 project_id=pid,
                 project_name=pname,
                 task_note=(r.task or "").strip() or None,
                 hours=float(r.hours or 0),
                 status="import",
-                source="sheet",
+                source=req.source,
                 row_hash=h,
             ))
             inserted += 1
@@ -150,8 +195,121 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
         "skipped": skipped,
         "skipped_manual_priority": skipped_manual,   # 手填優先擋下的 Sheet 列
         "unmatched_projects": sorted(unmatched),
+        "ambiguous_projects": sorted(ambiguous),     # 撞案：owner 用 project_map 指定
+        "staff_unmatched": sorted(staff_unmatched),
         "budget_mirrored": len(budget_updates),
     }
+
+
+# ── 對映表／回填／預算（docs/TIMESHEET_IMPORT_PLAN.md Phase A-3）────────────────
+
+@router.get("/project_map")
+async def list_project_map(request: Request):
+    """owner 決定過的 Sheet 專案名 → 案（含案名，前端清單用）。"""
+    check_admin(request)
+    factory = db_factory_or_503()
+    from sqlalchemy import select
+    from db.models import CrmProject, TimesheetProjectMap
+    async with factory() as session:
+        rows = (await session.execute(
+            select(TimesheetProjectMap, CrmProject.name)
+            .outerjoin(CrmProject, CrmProject.id == TimesheetProjectMap.project_id)
+            .order_by(TimesheetProjectMap.sheet_name))).all()
+    return {"items": [{
+        "sheet_name": m.sheet_name, "project_id": m.project_id, "project_name": pn or "",
+        "decided_by": m.decided_by or "", "note": m.note or "",
+        "decided_at": m.decided_at.isoformat() if m.decided_at else None,
+    } for m, pn in rows]}
+
+
+@router.put("/project_map")
+async def upsert_project_map(req: TimesheetProjectMapRequest, request: Request):
+    """整批 upsert。專案必須存在（任一帳本 —— owner 決定的可以指到母公司案）。"""
+    check_admin(request)
+    factory = db_factory_or_503()
+    from sqlalchemy import select
+    from db.models import CrmProject, TimesheetProjectMap
+    who = _username(request)
+    async with factory() as session:
+        pids = {it.project_id for it in req.items}
+        ok = set((await session.execute(
+            select(CrmProject.id).where(CrmProject.id.in_(pids)))).scalars()) if pids else set()
+        bad = sorted(pids - ok)
+        if bad:
+            raise HTTPException(status_code=422, detail=f"找不到專案：{bad[:5]}")
+        n = 0
+        for it in req.items:
+            key = (it.sheet_name or "").strip()
+            if not key:
+                continue
+            m = await session.get(TimesheetProjectMap, key)
+            if m is None:
+                m = TimesheetProjectMap(sheet_name=key)
+                session.add(m)
+            m.project_id = it.project_id
+            m.decided_by = who
+            m.note = (it.note or "")[:255] or None
+            n += 1
+        await session.commit()
+    return {"status": "ok", "upserted": n}
+
+
+@router.post("/remap")
+async def remap_timesheets(request: Request):
+    """依對映表＋規則回填既有列的 `project_id`。
+
+    對映表是 owner 的決定，**永遠覆蓋**：一列本來自動對到 A、owner 後來指定 B，
+    remap 就改成 B。自動規則只補**空的**（不動已經對好的列）；沒對到的維持 NULL
+    （名稱留著，Burn 表照樣以名稱列出）。
+    """
+    check_admin(request)
+    factory = db_factory_or_503()
+    from sqlalchemy import select
+    from db.models import Timesheet
+    changed = 0
+    out: dict = {}
+    async with factory() as session:
+        pmap, by_name, by_key = await _project_lookup(session)
+        rows = (await session.execute(
+            select(Timesheet).where(Timesheet.project_name != ""))).scalars().all()
+        for t in rows:
+            pid, why = resolve_project(t.project_name, pmap, by_name, by_key)
+            out[why] = out.get(why, 0) + 1
+            if (why == "map" and t.project_id != pid) or (pid and not t.project_id):
+                t.project_id = pid
+                changed += 1
+        await session.commit()
+    return {"status": "ok", "changed": changed, "by_reason": out}
+
+
+@router.put("/budgets")
+async def set_budgets(req: TimesheetBudgetRequest, request: Request):
+    """Sheet「專案狀態」的預算（剩餘＋實際）→ 對到的案的 `budget_hours`。
+    走同一支 resolver；撞案與找不到的原樣回報、不寫。≤0 視為沒設、跳過。"""
+    check_admin(request)
+    factory = db_factory_or_503()
+    from db.models import CrmProject
+    applied = 0
+    amb: list = []
+    none: list = []
+    async with factory() as session:
+        pmap, by_name, by_key = await _project_lookup(session)
+        for it in req.items:
+            if not it.budget_hours or it.budget_hours <= 0:
+                continue
+            pid, why = resolve_project(it.sheet_name, pmap, by_name, by_key)
+            if why == "ambiguous":
+                amb.append(it.sheet_name)
+                continue
+            if not pid:
+                none.append(it.sheet_name)
+                continue
+            proj = await session.get(CrmProject, pid)
+            if proj is not None and getattr(proj, "budget_hours", None) != float(it.budget_hours):
+                proj.budget_hours = float(it.budget_hours)
+                applied += 1
+        await session.commit()
+    return {"status": "ok", "applied": applied, "ambiguous": sorted(amb), "unmatched": sorted(none)}
 
 
 # ── 手填工時（與 Sheet 同步共存；N-hr 人事管理 v1）─────────────────────

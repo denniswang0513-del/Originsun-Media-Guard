@@ -64,6 +64,25 @@ class HrLeaveRequest(Base):
     )
 
 
+class TimesheetProjectMap(Base):
+    """工時 Sheet 的專案原字 → `crm_projects.id`（docs/TIMESHEET_IMPORT_PLAN.md D1）。
+
+    Sheet 寫「三立電視台_國民法官劇情短片」，私帳案叫「國民法官劇情短片」；
+    去掉客戶前綴後 324/346 自動對得到，剩下的是同名撞案（私帳 28 個名字各兩案）
+    與內部作業 —— 那些**由 owner 決定一次**，記在這張表，之後 Apps Script 每小時
+    同步進來的列自動吃到，不做一次性回填（先例：finance_category_map）。
+
+    🔴 對映表永遠優先於任何自動規則（core.hr_logic.resolve_project 第一段）。
+    """
+    __tablename__ = "timesheet_project_map"
+
+    sheet_name = Column(String(255), primary_key=True)          # Sheet 原字（含客戶前綴）
+    project_id = Column(String(32), nullable=False, index=True) # soft FK → crm_projects.id
+    decided_by = Column(String(64), nullable=True)              # username
+    decided_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    note = Column(String(255), nullable=True)
+
+
 class PaymentMilestone(Base):
     """付款節點（B3 現金流：訂金/期中/尾款；N1 上線後可綁 trigger_phase 自動提醒）。"""
     __tablename__ = "payment_milestones"
