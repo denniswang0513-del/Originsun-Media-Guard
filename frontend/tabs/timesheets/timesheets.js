@@ -152,6 +152,18 @@ export async function initTimesheetsTab() {
 
 async function refresh() {
     try {
+        if (_view === 'team') {
+            // 員工端的團隊工時頁（/hours.html）直接嵌進來（owner 2026-09-03「直接嵌進 tab」）：
+            // 同源、同一個 auth_token，頁面自己打 /api/v1/me/team/*，這裡不重做一份。
+            _content.innerHTML = `
+                <h2>專案工時</h2>
+                <div class="ts-sub">團隊工時 —— 大家互看的那一頁（與 /hours.html 相同；員工從「我的工作台」進）</div>
+                ${_viewBtns()}
+                <iframe src="/hours.html" title="團隊工時"
+                        style="width:100%;height:calc(100vh - 220px);min-height:520px;border:1px solid #333;border-radius:6px;background:#fff;"></iframe>`;
+            _bind();
+            return;
+        }
         if (_view === 'staff') {
             const d = await tfetch('/api/v1/timesheets/by_staff?month=' + _month);
             _staffCache = d;
@@ -179,7 +191,7 @@ function _viewBtns() {
     const b = (key, label) => `<button class="ts-btn ${_view === key ? '' : 'ghost'}"
         data-ts-action="view" data-view="${key}">${label}</button>`;
     return `<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;">
-        ${b('board', '專案分析')}${b('staff', '人員月視圖')}
+        ${b('board', '專案分析')}${b('staff', '人員月視圖')}${b('team', '團隊工時')}
         <button class="ts-btn ghost" data-ts-action="toggle-manual">快速補登</button>
     </div>
     <div id="ts-manual-slot" style="display:none;"></div>`;

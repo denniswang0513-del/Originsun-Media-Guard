@@ -8,7 +8,7 @@
 import datetime as dt
 
 from core.hr_logic import hours_rollup, month_workdays, week_key
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
 
 
 def test_workdays_and_week_key():
@@ -57,3 +57,7 @@ def test_hours_page_only_talks_to_team_endpoints():
     assert "/api/v1/me/team/project?name=" in html
     assert "/api/v1/timesheets/" not in html, "員工頁不該打管理端 timesheets 端點"
     assert 'href="/hours.html"' in repo_src("frontend/my.html"), "我的工時沒有入口到團隊工時"
+    # 內部 App 的專案工時 tab 也嵌同一頁（owner 2026-09-03「直接嵌進 tab」），不另刻一份
+    tab_src = repo_src("frontend/tabs/timesheets/timesheets.js")
+    assert "b('team', '團隊工時')" in tab_src and 'src="/hours.html"' in tab_src
+    assert "/api/v1/me/team/" not in js_code_only(tab_src), "tab 自己又畫了一份團隊表"
