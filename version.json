@@ -1,5 +1,5 @@
 {
-  "version": "2.4.296",
+  "version": "2.4.297",
   "build_date": "2026-09-03",
-  "notes": "修 2.4.295 的通知回歸（settings 鍵 notifications，一般聊天室任務通知恢復）；/my.html 改工時不再洗掉分類／計畫；/simplify 第二輪：手填規則一份、日期字串走 hr_logic、Sheet 拉取查表建一次、burn 表窄選"
+  "notes": "修 2.4.296 的 /me/team/project 500（/hours.html 專案明細）；/simplify 第三輪：漏填判定一份、報價人日換算後端算、三張工作項表單共用、services 不碰 router"
 }
