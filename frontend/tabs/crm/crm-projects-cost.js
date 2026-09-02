@@ -472,8 +472,12 @@ function _renderCostLines(grouped, expenses, financialSummary) {
     const claimCell = (e) => {
         if (e.payment_id) {
             const paid = e.payment_status === '已付款';
+            // 點開＝那張單的詳情，收回／改狀態的鈕在視窗頁尾（這一欄只有 88px，
+            // 塞不下三顆；人員費用那側欄寬夠，鈕直接畫在列上）。
+            // `_expClaimDone` 讓那些動作重畫**雜支這一區**，不是人員費用那區。
             return `<span class="exp-claimed" style="color:${paid ? '#86efac' : '#fb923c'};"
-                       title="點開請款單" onclick="window._costViewPayment('${e.payment_id}')"
+                       title="點開請款單（可收回、可改狀態）"
+                       onclick="window._costViewPayment('${e.payment_id}','window._expClaimDone')"
                        >${paid ? '已付款' : '已請款'}</span>`;
         }
         if (e.staff_id) return '';
@@ -1015,6 +1019,10 @@ window._projDeleteCostLine = async function(lineId) {
 // 那支已經處理了代墊（收款人換成代墊人、費用歸屬留原人）、報支項目、預計付款月
 // 與必填檢查。再刻一份的話，「代墊怎麼記」就會有兩條規則。
 // 硬連結 `expense_id` 由 modal 帶進 POST /payments；重複請款由後端 409 擋。
+// 請款單的動作（收回／改狀態）做完要重畫**雜支這一區** —— 人員費用那側重畫的
+// 是自己那區，兩者不能共用一個寫死的重畫目標。
+window._expClaimDone = function() { _loadFinancialSummary(state.selectedId); };
+
 window._expCreatePayment = function(expenseId) {
     const e = _expRowById[expenseId];
     if (!e) return;

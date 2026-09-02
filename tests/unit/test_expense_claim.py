@@ -77,3 +77,41 @@ def test_claiming_an_expense_redraws_the_expense_section():
                         "window._costCreatePayment = function(payeeName, amount, "
                         "summary, status, advanced, opts) {")
     assert "opts.onDone ? " in body or "if (opts.onDone)" in body
+
+
+# ── 請款之後：可收回、可改狀態（owner 2026-09-02「像私帳那樣」）──
+
+def test_the_claimed_row_can_be_taken_back():
+    """🔴 請款之後那一列不能只剩「已請款」三個字 —— 按錯了要能當場收回，
+    不用跑去別的 tab 找那張單。"""
+    js = js_code_only(repo_src(FIN_JS))
+    fn = js_func_body(js, "window._costPayBtns = function(p, onDoneName) {")
+    assert "已付款" in fn and "改回應付" in fn
+    assert "標記付款" in fn and "收回請款" in fn
+    # 已付款的單不給收回 —— 錢都出去了還撤單，帳上會少一筆付款
+    head = fn.split("return btn('color:#86efac;'")[0]
+    assert "_costPayWithdraw" not in head, "已付款那條路也給了收回鈕"
+
+
+def test_status_changes_go_through_the_shared_endpoints():
+    """🔴 走跟私帳同一組端點（batch-pay / batch-unpay），不自己 PUT
+    `payment_status` —— 那支端點一次處理付款日與代開發票的撥款狀態，繞過去
+    就會出現「請款單說沒付、發票說已撥款」的兩份答案。"""
+    js = js_code_only(repo_src(FIN_JS))
+    fn = js_func_body(js, "async function _costPayAction(id, paid) {")
+    assert "'/payments/batch-pay'" in fn and "'/payments/batch-unpay'" in fn
+    assert "payment_status" not in fn, "又自己寫狀態了"
+    # 整包 GET→PUT 寫回的舊寫法要真的退場（schema 預設值會洗掉沒送的欄位）
+    assert "window._costUpdatePaymentStatus = " not in js
+
+
+def test_both_entry_points_share_one_set_of_actions():
+    """人員費用（列上）與行政雜支（詳情視窗）共用同一份動作 —— 各寫一次的話，
+    「已付款能不能收回」這條規則就會有兩個答案。"""
+    fin = js_code_only(repo_src(FIN_JS))
+    assert "window._costPayBtns(matchedPayment)" in fin, "人員費用列沒接上"
+    assert "window._costPayBtns(p, onDoneName) +" in fin, "詳情視窗頁尾沒接上"
+    # 雜支那側重畫的是雜支區，不是人員費用區
+    cost = js_code_only(repo_src(COST_JS))
+    assert "window._expClaimDone" in cost
+    assert "_costViewPayment('${e.payment_id}','window._expClaimDone')" in cost

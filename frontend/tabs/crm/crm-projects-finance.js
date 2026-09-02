@@ -98,9 +98,12 @@ async function _loadCostStaff(projectId) {
                     return advTag + '<span style="color:' + color + ';cursor:pointer;font-size:11px;"'
                         + ' onclick="window._costViewPayment(\'' + _pid + '\')">' + text + '</span>';
                 };
-                statusHtml = matchedPayment.payment_status === '已付款'
+                // 🔴 請款之後那一列不能只剩三個字 —— 按錯了要能當場收回或改
+                // 狀態，不用跑去別的 tab 找那張單（owner 2026-09-02，同私帳）。
+                statusHtml = (matchedPayment.payment_status === '已付款'
                     ? statusSpan('#86efac', '已付款 ✓')
-                    : statusSpan('#fb923c', '已請款');
+                    : statusSpan('#fb923c', '已請款'))
+                    + window._costPayBtns(matchedPayment);
             } else {
                 var _eName = _esc(s.name).replace(/'/g, "\\'");
                 var _eItems = _esc(itemNames.join('、')).replace(/'/g, "\\'");
@@ -595,7 +598,81 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
     });
 };
 
-window._costViewPayment = async function(paymentId) {
+// ── 請款單的狀態動作（收回／標記付款／改回應付）────────────────────
+// owner 2026-09-02「這裡的請款要可收回可編輯（像私帳那樣）」：請款之後那一列
+// 只剩「已請款」三個字，按錯了只能跑去別的 tab 找那張單。
+//
+// 🔴 **走跟私帳同一組端點**（batch-pay / batch-unpay / DELETE）——
+// 不自己 PUT `payment_status`：那支端點一次處理付款日與代開發票的撥款狀態
+// （sync_remit_status），繞過去就會出現「請款單說沒付、發票說已撥款」的兩份答案。
+// 這也是本檔原本那支 `_costUpdatePaymentStatus`（整包 GET→PUT 寫回）被拿掉的
+// 理由：那種寫法還會被 schema 的預設值洗掉前端沒送的欄位。
+//
+// 🔴 **「編輯」＝收回後重新請款**（同私帳）。收回會把單子刪掉，那一列就變回
+// 三顆建立鈕，改好金額／收款人再按一次即可。已付款的單不給收回 —— 錢都出去了
+// 還撤單，帳上會少一筆付款；那條路是先「改回應付」。
+async function _costPayAction(id, paid) {
+    try {
+        await _fetch(paid ? '/payments/batch-pay' : '/payments/batch-unpay', {
+            method: 'PATCH',
+            body: JSON.stringify(paid ? { payment_ids: [id], payment_date: today() }
+                                      : { payment_ids: [id] }),
+        });
+        return true;
+    } catch (e) {
+        alert((paid ? '標記付款失敗：' : '改回應付失敗：') + e.message);
+        return false;
+    }
+}
+
+/** 動作做完要重畫哪一區 —— 人員費用與雜支各自不同，所以由呼叫端帶。 */
+function _costAfterPay(onDone) {
+    var ov = document.querySelector('.crm-modal-overlay');
+    if (ov) ov.remove();
+    if (onDone) { onDone(); }
+    else if (state.selectedId) { _loadCostStaff(state.selectedId); }
+}
+
+window._costPayMark = async function(id, paid, onDone) {
+    if (!paid && !confirm('把這張請款單改回應付款？（單子留著，只是取消付款）')) return;
+    if (await _costPayAction(id, paid)) { _costAfterPay(onDone); }
+};
+
+window._costPayWithdraw = async function(id, summary, onDone) {
+    var msg = '收回這張請款單？' + '\n\n' + (summary || '')
+        + '\n\n單子會被刪掉，那一列變回可以重新請款。\n'
+        + '（已付的錢請改用「改回應付」）';
+    if (!confirm(msg)) { return; }
+    try {
+        await _fetch('/payments/' + id, { method: 'DELETE' });
+        _costAfterPay(onDone);
+    } catch (e) { alert('收回失敗：' + e.message); }
+};
+
+/** 這張單在畫面上該給哪幾顆動作鈕。列上與詳情視窗共用同一份。 */
+window._costPayBtns = function(p, onDoneName) {
+    var d = onDoneName ? (',' + onDoneName) : '';
+    var sty = 'font-size:10px;padding:1px 6px;margin-left:4px;';
+    var sm = _esc(p.summary || '').replace(/'/g, "\\'");
+    var btn = function(css, title, call, label) {
+        return '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="' + sty + css + '"'
+            + ' title="' + title + '"'
+            + ' onclick="' + call + '">' + label + '</button>';
+    };
+    if (p.payment_status === '已付款') {
+        return btn('', '改回應付款（單子留著）',
+                   'window._costPayMark(\'' + p.id + '\',false' + d + ')',
+                   '改回應付');
+    }
+    return btn('color:#86efac;', '標記為已付款',
+               'window._costPayMark(\'' + p.id + '\',true' + d + ')',
+               '標記付款')
+        + btn('color:#fca5a5;', '撤掉這張請款單（改好再請一次）',
+              'window._costPayWithdraw(\'' + p.id + '\',\'' + sm + '\'' + d + ')',
+              '收回請款');
+};
+
+window._costViewPayment = async function(paymentId, onDoneName) {
     try {
         var p = await _fetch('/payments/' + paymentId);
         var statusColor = p.payment_status === '已付款' ? '#86efac' : '#fb923c';
@@ -622,27 +699,16 @@ window._costViewPayment = async function(paymentId) {
             (p.notes ? '<div class="crm-detail-prop"><div class="crm-prop-label">備註</div><div class="crm-prop-value">' + _esc(p.notes) + '</div></div>' : '') +
             '</div>' +
             '<div class="crm-modal-footer">' +
-            '<button onclick="this.closest(\'.crm-modal-overlay\').remove()" class="crm-btn crm-btn-secondary">關閉</button></div>' +
+            '<button onclick=\"this.closest(\'.crm-modal-overlay\').remove()\" class=\"crm-btn crm-btn-secondary\">關閉</button>' +
+            // 收回／改狀態就在這裡 —— 行政雜支那一欄只有 88px 塞不下鈕，
+            // 兩個入口共用同一份動作（window._costPayBtns）
+            window._costPayBtns(p, onDoneName) +
+            '</div>' +
             '</div>';
         document.body.appendChild(overlay);
     } catch (e) { alert('載入失敗：' + e.message); }
 };
 
-window._costUpdatePaymentStatus = async function(paymentId, newStatus) {
-    try {
-        // GET existing data first, then PUT with updated status
-        var existing = await _fetch('/payments/' + paymentId);
-        existing.payment_status = newStatus;
-        if (newStatus === '已付款') existing.payment_date = today();
-        delete existing.id;
-        delete existing.created_at;
-        delete existing.updated_at;
-        await _fetch('/payments/' + paymentId, { method: 'PUT', body: JSON.stringify(existing) });
-        var overlay = document.querySelector('.crm-modal-overlay');
-        if (overlay) overlay.remove();
-        if (state.selectedId) _loadCostStaff(state.selectedId);
-    } catch (e) { alert('更新失敗：' + e.message); }
-};
 
 // ── Init ────────────────────────────────────────────────────────
 
