@@ -276,6 +276,7 @@ VALID_DRILL_KINDS = frozenset(
 _UNMAPPED_EXPENSE_LABEL = "未歸類支出"
 _UNMAPPED_INCOME_LABEL = "未歸類收入"
 _BANK_FEE_LABEL = "銀行手續費"
+_AGENCY_FEE_LABEL = "發票代開費"
 _DEPRECIATION_LABEL = "折舊費用"
 _ADVANCE_EXPENSE_LABEL = "預支核銷支出"
 
@@ -1095,8 +1096,28 @@ def iter_expense_items(payments, cash_entries, cat_map, accounts, mset):
 
 def bank_fee_total(cash_entries, mset) -> int:
     """期間匯費合計 — 任何收支（含 transfer/advance）的 bank_fee 都是真實費用，
-    損益彙總成「營業費用-管理／銀行手續費」單列；drilldown 出同額 derived 列。"""
+    損益彙總成「營業費用-管理／銀行手續費」單列；drilldown 出同額 derived 列。
+
+    🔴 這個桶**含發票代開費**（拆項的 fee 疊在 bank_fee 上，為的是守住淨流不變
+    ——`recognize_receipt_fee`）。要拆名字用 `agency_fee_total`：
+    真匯費 ＝ bank_fee_total − agency_fee_total。
+    """
     return sum(int(e.get("bank_fee") or 0) for e in cash_entries
+               if month_of(e.get("entry_date")) in mset)
+
+
+def agency_fee_total(cash_entries, mset) -> int:
+    """期間**發票代開費**合計（bank_fee 桶裡屬於代開費的那一段）。
+
+    為什麼要分：代開費走 bank_fee 鏈是為了淨流不變，但它不是銀行手續費 ——
+    owner 2026-09-02 看到損益的「銀行手續費（各筆匯費合計）」是 66,960，
+    而同期間真正的匯費是 **0 筆**，整條全是幫他代開發票被扣的錢。金額沒錯、
+    名字錯了，而錯的名字會讓人以為銀行收了六萬七的手續費。
+
+    只有 `explode_cash_splits` 展開出來的虛擬列會帶 `agency_fee`；沒有拆項的
+    收支一律 0，所以這支對舊資料回 0，總額不受影響。
+    """
+    return sum(int(e.get("agency_fee") or 0) for e in cash_entries
                if month_of(e.get("entry_date")) in mset)
 
 

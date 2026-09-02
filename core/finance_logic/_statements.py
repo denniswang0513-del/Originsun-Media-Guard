@@ -9,7 +9,7 @@ check.diff 誠實外顯）、apply_ledger_project_costs（私帳逐案改寫）�
 from __future__ import annotations
 
 import json
-from ._core import (COST_GROUPS, OPEX_GROUPS, _ADVANCE_EXPENSE_LABEL, _BANK_FEE_LABEL, _DEPRECIATION_LABEL, _LOAN_INTEREST_LABEL, _UNMAPPED_INCOME_LABEL, _pct, bank_fee_total, classify_cash_entry, depreciation_rows, equipment_net_rows, in_amount, invoice_collected, invoice_ex_tax, is_passthrough_category, iter_expense_items, iter_revenue_invoices, loan_interest_total, map_account, month_of, out_amount, paired_expense_category, passthrough_fee_income, vat_position)
+from ._core import (COST_GROUPS, OPEX_GROUPS, _ADVANCE_EXPENSE_LABEL, _AGENCY_FEE_LABEL, _BANK_FEE_LABEL, _DEPRECIATION_LABEL, _LOAN_INTEREST_LABEL, _UNMAPPED_INCOME_LABEL, _pct, agency_fee_total, bank_fee_total, classify_cash_entry, depreciation_rows, equipment_net_rows, in_amount, invoice_collected, invoice_ex_tax, is_passthrough_category, iter_expense_items, iter_revenue_invoices, loan_interest_total, map_account, month_of, out_amount, paired_expense_category, passthrough_fee_income, vat_position)
 
 # ── 損益表 ───────────────────────────────────────────────────
 
@@ -145,9 +145,15 @@ def build_pnl(months, *, invoices=(), payments=(), cash_entries=(), equipment=()
         elif t == "unmapped":
             _dispatch_income(prim, None, in_amount(e))
 
-    fee = bank_fee_total(cash_entries, mset)
+    # 匯費桶含代開費（拆項的 fee 疊在 bank_fee 上，為的是淨流不變）——
+    # 名字要分開，不然「銀行手續費 66,960」會是一句假話（同期真匯費 0 筆）。
+    # 兩行相加＝原本那一行，管理費用小計不變。
+    agency = agency_fee_total(cash_entries, mset)
+    fee = bank_fee_total(cash_entries, mset) - agency
     if fee:
         _bump(prim["opex"].setdefault("營業費用-管理", {}), _BANK_FEE_LABEL, fee)
+    if agency:
+        _bump(prim["opex"].setdefault("營業費用-管理", {}), _AGENCY_FEE_LABEL, agency)
 
     dep = sum(r["amount"] for r in depreciation_rows(equipment, months))
     if dep:

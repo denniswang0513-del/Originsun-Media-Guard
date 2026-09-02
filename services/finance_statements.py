@@ -41,6 +41,7 @@ from core.finance_logic import (
     ar_overdue_amount,
     bank_balances_asof,
     split_bank_lines,
+    agency_fee_total,
     bank_fee_total,
     build_balance_sheet,
     build_cashflow,
@@ -158,6 +159,11 @@ def explode_cash_splits(cash_entries: list, splits_by_entry: dict) -> list:
             if fee:
                 v["deposit"], _f = recognize_receipt_fee(s["amount"], 0, fee)
                 v["bank_fee"] = int(v.get("bank_fee") or 0) + _f
+                # 🔴 同時記在 `agency_fee`：金額與淨流完全不變（那條靠 bank_fee），
+                # 這一欄只給**損益的名字**用 —— 代開費疊進匯費桶之後，那一行就叫
+                # 「銀行手續費」，而它可能一毛真的匯費都沒有（owner 2026-09-02
+                # 實際看到的：整整 66,960 全是代開費，同期真匯費 0 筆）。
+                v["agency_fee"] = int(v.get("agency_fee") or 0) + _f
             for k in ("invoice_id", "advance_payment_id", "payment_request_id"):
                 v[k] = None
             out.append(v)
@@ -720,10 +726,16 @@ async def drilldown(session, kind: str, months, entity: str = "parent") -> dict:
                 items.append(_row("derived", f"dep:{m}", f"{m}-01",
                                   f"器材折舊（{m}）", r["amount"], "折舊", ""))
         if group == "營業費用-管理":
-            fees = bank_fee_total(inputs["cash_entries"], mset)
+            # 代開費從匯費桶裡拆出來 —— 兩行相加＝原本那一行（見 build_pnl 那段）
+            agency = agency_fee_total(inputs["cash_entries"], mset)
+            fees = bank_fee_total(inputs["cash_entries"], mset) - agency
             if fees:
                 items.append(_row("derived", "bank_fee", None,
                                   "銀行手續費（各筆匯費合計）", fees, "匯費", ""))
+            if agency:
+                items.append(_row("derived", "agency_fee", None,
+                                  "發票代開費（收款時被扣，各筆合計）", agency,
+                                  "發票代開費", ""))
 
     elif kind == "non_operating":
         for inv in inputs["invoices"]:
