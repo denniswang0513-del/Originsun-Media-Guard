@@ -142,6 +142,45 @@ def test_suggestions_are_report_only_never_a_write_path():
     assert suggest_projects("華南銀行_華南永昌E指通", by_key)[0][0] == "華南永昌E指沖"
     assert suggest_projects("大漁映畫_沆涸", by_key)[0][0] == "沆涸 剪輯"
     assert suggest_projects("完全無關", by_key) == []
-    src = code_only(repo_src("routers/api_timesheets.py"))
-    assert "suggest_projects" not in src, "建議函式跑進寫入路徑了"
+    # 讀路徑（burn 表要給 owner 看建議）可以用；三條**寫入**路徑不准碰
+    src = repo_src("routers/api_timesheets.py")
+    for fn in ("async def ingest_rows(", "async def remap_timesheets(",
+               "async def set_budgets(", "async def upsert_project_map("):
+        assert "suggest_projects" not in code_only(func_body(src, fn)), f"建議函式跑進寫入路徑了：{fn}"
+
+
+def test_the_burn_board_tells_the_owner_why_a_name_is_unmatched():
+    """未對映的每個名字都帶 reason；撞案附候選、找不到附相似建議 —— owner 在 tab
+    上按「指定專案」就能決定，不用回頭翻報告。判定走同一支 resolver。"""
+    src = repo_src("routers/api_timesheets.py")
+    fn = code_only(func_body(src, "async def burn_summary("))
+    assert "await _project_lookup(session)" in fn
+    assert '"reason": why' in fn
+    assert 'item["candidates"]' in fn and 'item["suggestions"]' in fn
+    from tests.unit._srcscan import js_code_only
+    js = js_code_only(repo_src("frontend/tabs/timesheets/timesheets.js"))
+    # UI：寫對映表再 remap，不自己改列（對映表是每小時同步也要吃的正本）
+    assert "'/api/v1/timesheets/project_map'" in js and "'/api/v1/timesheets/remap'" in js
+    assert "project_id" not in js.split("async function _mapProject(")[1].split("
+}
+")[0].replace("project_id: pid", "")
+    assert 'data-ts-action="map"' in js
+
+
+def test_the_sync_script_reads_the_two_input_tabs_not_the_desc_master():
+    """🔴 總表是 ORDER BY 日期 DESC 的 QUERY，新列在最上面 ——「記到第幾列」的 marker
+    在它上面不成立。腳本要讀兩個底部追加的輸入分頁、各自記 marker、列 7 起、A–E。"""
+    gs = repo_src("docs/appsscript/timesheet_sync.gs")
+    assert "name: '工作紀錄表',     startRow: 7" in gs
+    assert "name: '助理工作紀錄表', startRow: 7" in gs
+    assert "總表（勿動）" not in gs.split("var CONFIG")[1].split("};")[0], "CONFIG 又去讀總表了"
+    assert "COL: { DATE: 1, STAFF: 2, PROJECT: 3, TASK: 4, HOURS: 5 }" in gs
+    assert "BUDGET" not in gs.split("var CONFIG")[1].split("};")[0], "預算欄在總表根本不存在"
+    # 每個分頁各自的 marker；IMPORTRANGE 失連要 throw 不是靜靜略過
+    assert "markerKey_(cfg.name)" in gs
+    assert "lastRow < lastSynced" in gs and "throw new Error" in gs
+    # 歷史列匯過 → 安裝時把 marker 設到表尾
+    assert "function executeSetMarkerToEnd()" in gs
+    # 日期格式與匯入腳本一致（hash 交接）
+    assert "'yyyy/MM/dd'" in gs
 

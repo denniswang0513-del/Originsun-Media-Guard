@@ -10,6 +10,7 @@
 
 import { esc } from '../website/website-utils.js';
 import { createSortable, sortableTh, today as _today } from '../crm/crm-utils.js';
+import { openProjectPicker } from '../../js/shared/project-picker.js';   // 指定專案：共用挑選視窗
 
 async function tfetch(path, opts = {}) {
     const token = localStorage.getItem('auth_token');
@@ -158,11 +159,33 @@ function _burnTbodyHtml() {
     return rows || '<tr><td colspan="8" style="color:#666;text-align:center;">尚無已對映專案</td></tr>';
 }
 
+// 未對映的原因（後端 resolver 回的；規則正本 core.hr_logic.resolve_project）
+const _REASON = {
+    ambiguous: ['撞案', '#fbbf24'], none: ['找不到', '#fca5a5'], bucket: ['內部桶', '#6b7280'],
+};
+
+/** 「為什麼沒對到」那一格：撞案列候選、找不到列相似建議（建議不是對映，只是給人看）。 */
+function _unmatchedWhyHtml(u) {
+    const [label, color] = _REASON[u.reason] || ['', '#888'];
+    let extra = '';
+    if (u.reason === 'ambiguous' && (u.candidates || []).length) {
+        extra = u.candidates.map(c => `${esc(c.name)}<span style="color:#666;">（${esc(c.client || '無客戶')}）</span>`).join('　/　');
+    } else if (u.reason === 'none' && (u.suggestions || []).length) {
+        extra = '像：' + u.suggestions.map(esc).join('、');
+    }
+    return `<span style="color:${color};font-size:11px;">${label}</span>`
+        + (extra ? `<div style="color:#9ca3af;font-size:11px;">${extra}</div>` : '');
+}
+
 function _unmatchedTbodyHtml() {
     return _unmatchedSorter.sorted((_summaryCache && _summaryCache.unmatched) || []).map(u => `
                     <tr><td>${esc(u.project_name)}</td>
                         <td class="num">${u.hours_used}</td>
-                        <td class="num">${u.rows}</td></tr>`).join('');
+                        <td class="num">${u.rows}</td>
+                        <td>${_unmatchedWhyHtml(u)}</td>
+                        <td>${u.reason === 'bucket' ? '' : `
+                            <button class="ts-btn ghost" data-ts-action="map"
+                                    data-name="${esc(u.project_name)}">指定專案</button>`}</td></tr>`).join('');
 }
 
 function _renderBoard(s) {
@@ -170,11 +193,11 @@ function _renderBoard(s) {
         <div class="ts-card">
             <h3>🔗 未對映專案（${s.unmatched.length}）</h3>
             <table id="ts-unmatched-table">
-                <thead><tr>${sortableTh('name', 'Sheet 專案名')}${sortableTh('hours', '時數', 'class="num"')}${sortableTh('rows', '列數', 'class="num"')}</tr></thead>
+                <thead><tr>${sortableTh('name', 'Sheet 專案名')}${sortableTh('hours', '時數', 'class="num"')}${sortableTh('rows', '列數', 'class="num"')}<th>原因</th><th></th></tr></thead>
                 <tbody>${_unmatchedTbodyHtml()}</tbody>
             </table>
-            <div class="ts-note">名稱與 CRM 專案完全一致即自動對映（下次同步生效）。
-                「行政庶務」等內部桶留在這裡是正常的。</div>
+            <div class="ts-note">去掉「客戶_」前綴後與私帳案名相同即自動對映；撞案（同名兩案）與找不到的按「指定專案」
+                決定一次，之後每小時同步自動吃到。「行政庶務」等內部桶留在這裡是正常的。</div>
         </div>` : '';
 
     const totalHours = s.projects.reduce((a, p) => a + (p.hours_used || 0), 0)
@@ -307,8 +330,9 @@ function _renderEmpty() {
             <ol>
                 <li>打開工時試算表 → <b>擴充功能 → Apps Script</b></li>
                 <li>貼上 repo 裡 <code>docs/appsscript/timesheet_sync.gs</code> 的全部內容</li>
-                <li>改頂部 CONFIG：分頁名稱、欄位位置（日期/員工/專案/內容/時數/預算是第幾欄）、
-                    TOKEN 按下面按鈕取得</li>
+                <li>改頂部 CONFIG.TOKEN（按下面按鈕取得）—— 分頁名與欄位已照工時表設好</li>
+                <li>歷史列由 <code>scripts/import_timesheets.py</code> 一次匯入；裝腳本前先執行一次
+                    <code>executeSetMarkerToEnd</code>，之後只送新列</li>
                 <li>執行一次 <code>syncNewRows</code>（首次會要求授權）→ 紀錄顯示 inserted 即成功</li>
                 <li>觸發條件 → 新增 → <code>syncNewRows</code> → 時間驅動 → 每小時</li>
             </ol>
@@ -319,6 +343,38 @@ function _renderEmpty() {
         </div>`;
 }
 
+// 私帳專案清單（挑選視窗用）—— 一次載入，這頁開著期間不會變
+let _mineProjects = null;
+
+/** 指定一個 Sheet 專案名對到哪一案：寫對映表 → 回填既有列 → 重整。
+ *  🔴 走 PUT /project_map ＋ POST /remap，不自己改 timesheets.project_id ——
+ *  對映表是之後每小時同步也要吃的正本，只改列就會下一小時又冒出來。 */
+async function _mapProject(sheetName) {
+    if (!sheetName) return;
+    if (!_mineProjects) {
+        _mineProjects = (await tfetch('/api/v1/crm/projects?entity=mine')).projects || [];
+    }
+    openProjectPicker({
+        projects: _mineProjects,
+        currentId: '',
+        title: '指定專案 — ' + sheetName,
+        onPick: async (pid) => {
+            if (!pid) return;
+            try {
+                await tfetch('/api/v1/timesheets/project_map', {
+                    method: 'PUT', body: { items: [{ sheet_name: sheetName, project_id: pid }] },
+                });
+                const r = await tfetch('/api/v1/timesheets/remap', { method: 'POST' });
+                _summaryCache = null;
+                await refresh();
+                console.info('[timesheets] remap changed', r.changed);
+            } catch (e) {
+                alert('指定失敗：' + (e.message || e));
+            }
+        },
+    });
+}
+
 function _bind() {
     const monthInp = document.getElementById('ts-month');
     if (monthInp) monthInp.addEventListener('change', () => { _month = monthInp.value; refresh(); });
@@ -327,6 +383,7 @@ function _bind() {
         btn.addEventListener('click', async () => {
             const act = btn.dataset.tsAction;
             if (act === 'refresh') return refresh();
+            if (act === 'map') return _mapProject(btn.dataset.name);
             if (act === 'view') { _view = btn.dataset.view; return refresh(); }
             if (act === 'toggle-manual') {
                 const slot = document.getElementById('ts-manual-slot');

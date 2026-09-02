@@ -21,7 +21,7 @@ from config import load_settings, save_settings
 from core.auth import check_admin, check_admin_or_module
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (manual_dup_key, project_lookup_tables,
-                           resolve_project)
+                           resolve_project, sheet_project_key, suggest_projects)
 from core.schemas import (TimesheetBudgetRequest, TimesheetIngestRequest,
                           TimesheetManualRequest, TimesheetProjectMapRequest)
 from routers.crm._shared import _username
@@ -494,11 +494,30 @@ async def burn_summary(request: Request):
         )).all()
 
         total_rows = (await session.execute(select(safunc.count(Timesheet.id)))).scalar() or 0
+        # 未對映的每一個名字：為什麼沒對到（撞案／找不到／內部桶）。撞案附候選、
+        # 找不到附相似建議 —— owner 在 tab 上直接指定，不用回頭翻報告。
+        pmap, by_name, by_key = await _project_lookup(session)
+        cand_ids = set()
+        for n, _h, _c in unmatched:
+            if resolve_project(n or "", pmap, by_name, by_key)[1] == "ambiguous":
+                cand_ids |= {pid for pid, _cli in by_key.get(sheet_project_key(n or ""), [])}
+        cand_names = dict((await session.execute(
+            select(CrmProject.id, CrmProject.name).where(CrmProject.id.in_(cand_ids)))).all())             if cand_ids else {}
 
+    out_unmatched = []
+    for n, h, c in unmatched:
+        _pid, why = resolve_project(n or "", pmap, by_name, by_key)
+        item = {"project_name": n or "(空白)", "hours_used": round(h or 0, 1), "rows": c,
+                "reason": why}
+        if why == "ambiguous":
+            item["candidates"] = [{"id": pid, "name": cand_names.get(pid, ""), "client": cli}
+                                  for pid, cli in by_key.get(sheet_project_key(n or ""), [])]
+        elif why == "none":
+            item["suggestions"] = [k for k, _sc in suggest_projects(n or "", by_key)]
+        out_unmatched.append(item)
     return {
         "projects": items,
-        "unmatched": [{"project_name": n or "(空白)", "hours_used": round(h or 0, 1), "rows": c}
-                      for n, h, c in unmatched],
+        "unmatched": out_unmatched,
         "total_rows": total_rows,
     }
 

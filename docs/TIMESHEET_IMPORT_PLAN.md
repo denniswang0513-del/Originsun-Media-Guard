@@ -103,15 +103,15 @@ Phase A 實測（2026-09-02，讀生產私帳 413 案）：key 266 案 18,791h �
 2. prod：`--apply --prod` → 同樣四處驗；**再跑一次 `--apply --prod` 確認 0 新增**（冪等證明）
 3. 對映表：owner 決定的 52＋5 筆 `PUT project_map` → `POST remap` → 驗撞案的 `project_id` 落定
 
-### Phase D —— 同步腳本修正並安裝（owner 15 分鐘）
+### Phase D —— 同步腳本修正並安裝（owner 15 分鐘）—— **腳本已改好（2026-09-02），剩 owner 安裝**
 
 1. `timesheet_sync.gs` 改：`SHEETS: [{name:'工作紀錄表', startRow:7}, {name:'助理工作紀錄表', startRow:7}]`、`COL: {DATE:1, STAFF:2, PROJECT:3, TASK:4, HOURS:5}`、拿掉 `BUDGET`、marker 改 per-sheet key
 2. **安裝前把兩個 marker 設成匯入當下的最後一列**（`executeSetMarker`）—— 之後只送新列；就算重疊，D9 保證 hash 相同、後端去重
 3. owner 照檔頭 5 步裝；第一次手動跑 `syncNewRows` 看 `inserted: 0`（因為都匯過了）
 
-### Phase E —— 收尾（1 小時）
+### Phase E —— 收尾（1 小時）—— **「指定專案」UI 已做（2026-09-02）**
 
-- `remap` 端點接進人事管理 › 專案工時 tab：未對映清單旁一顆「指定專案」（用既有 `openProjectPicker`，`entity=mine`）
+- ✅ 人事管理 › 專案工時 tab 的「未對映專案」表：每列多了「原因」（撞案附候選、找不到附相似建議）與「指定專案」鈕 → 寫 `project_map` → `remap` → 重整。owner 的 17 個決定在這裡做，不用碰 API。
 - 更新 ROADMAP N2 階段 0/1 的勾勾與藍圖 §3.6 的「現況」段
 
 ## 4. 消歧規則（撞案 52 個、1,268h）
