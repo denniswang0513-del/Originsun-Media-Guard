@@ -115,3 +115,6 @@ tools/
 # settings.json 的輪替備份（含舊 jwt_secret，絕不進 git）
 settings.json.bak_*
 scripts/_placeholder_backup_*.json
+
+# 工時匯入 dry-run 產出物（腳本每跑一次整檔覆寫；結論記在 docs/TIMESHEET_IMPORT_PLAN.md）
+docs/timesheet_import_report.md

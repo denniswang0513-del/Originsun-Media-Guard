@@ -910,7 +910,6 @@ class TimesheetRow(BaseModel):
     project: str = ""
     task: str = ""
     hours: float = 0.0
-    budget: Optional[float] = None   # Sheet 的專案預算時數欄（有帶就鏡射 crm_projects.budget_hours）
 
 
 class TimesheetIngestRequest(BaseModel):

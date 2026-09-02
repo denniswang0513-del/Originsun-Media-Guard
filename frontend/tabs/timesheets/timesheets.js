@@ -352,7 +352,14 @@ let _mineProjects = null;
 async function _mapProject(sheetName) {
     if (!sheetName) return;
     if (!_mineProjects) {
-        _mineProjects = (await tfetch('/api/v1/crm/projects?entity=mine')).projects || [];
+        // 工時自己的薄端點：同一份查表、只有 id/名稱/客戶；可見性照私帳規矩 ——
+        // 沒 finance_mine 的管理員拿 403，把後端那句理由直接給他看，不要開空視窗
+        try {
+            _mineProjects = (await tfetch('/api/v1/timesheets/projects')).projects || [];
+        } catch (e) {
+            alert('無法列出私帳案：' + (e.message || e));
+            return;
+        }
     }
     openProjectPicker({
         projects: _mineProjects,

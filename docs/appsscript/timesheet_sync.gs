@@ -40,10 +40,15 @@ var CONFIG = {
 
 function markerKey_(sheetName) { return 'omg_ts_marker_' + sheetName; }
 
-/** 一個分頁：讀 marker 之後的新列 → 分批 POST → 成功才推進 marker。 */
-function syncSheet_(cfg) {
+function sheetOf_(cfg) {
   var sheet = SpreadsheetApp.getActive().getSheetByName(cfg.name);
   if (!sheet) throw new Error('找不到分頁: ' + cfg.name);
+  return sheet;
+}
+
+/** 一個分頁：讀 marker 之後的新列 → 分批 POST → 成功才推進 marker。 */
+function syncSheet_(cfg) {
+  var sheet = sheetOf_(cfg);
   var props = PropertiesService.getScriptProperties();
   var key = markerKey_(cfg.name);
   var lastSynced = parseInt(props.getProperty(key) || '0', 10);
@@ -116,8 +121,7 @@ function executeSetMarkerToEnd() {
   var props = PropertiesService.getScriptProperties();
   for (var i = 0; i < CONFIG.SHEETS.length; i++) {
     var cfg = CONFIG.SHEETS[i];
-    var sheet = SpreadsheetApp.getActive().getSheetByName(cfg.name);
-    if (!sheet) throw new Error('找不到分頁: ' + cfg.name);
+    var sheet = sheetOf_(cfg);
     props.setProperty(markerKey_(cfg.name), String(sheet.getLastRow()));
     Logger.log('%s marker → %s', cfg.name, sheet.getLastRow());
   }

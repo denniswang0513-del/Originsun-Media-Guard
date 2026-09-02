@@ -5,7 +5,7 @@ api_hr 與 api_me 共用（router 端只留 I/O）。
 """
 import re
 from datetime import datetime
-from typing import Optional
+from typing import NamedTuple, Optional
 
 LEAVE_TYPES = ("特休", "病假", "事假", "公假", "婚假", "喪假", "其他")
 LEAVE_STATUSES = ("待審", "已核准", "已退回")
@@ -235,26 +235,78 @@ INTERNAL_BUCKETS = frozenset({
 })
 
 
-def sheet_project_client(name: str) -> str:
-    """「客戶_案名」的客戶那一半；沒有底線＝沒有前綴。"""
+def split_sheet_name(name: str) -> tuple:
+    """「客戶_案名」→ `(客戶, 案名)`；沒有底線＝沒有前綴。**只切第一個底線**（案名自己
+    可能含底線），案名的空白收成一格。前綴是 Sheet 為了下拉分組加的，不是案名的一部分
+    —— Sheet 記「三立電視台_國民法官劇情短片」，私帳案叫「國民法官劇情短片」。
+    這條切法**只有這一份**（匯入、同步、預算灌入、remap、報告都走它）。"""
     s = (name or "").strip()
-    return s.split("_", 1)[0].strip() if "_" in s else ""
+    if "_" in s:
+        cli, key = s.split("_", 1)
+    else:
+        cli, key = "", s
+    return cli.strip(), re.sub(r"\s+", " ", key).strip()
+
+
+def sheet_project_client(name: str) -> str:
+    return split_sheet_name(name)[0]
 
 
 def sheet_project_key(name: str) -> str:
-    """Sheet 專案原字 → 比對用的案名：去掉「客戶_」前綴、空白收成一格。
+    return split_sheet_name(name)[1]
 
-    🔴 **只有這一份**（匯入、同步、預算灌入、remap 都走它）。Sheet 記的是
-    「三立電視台_國民法官劇情短片」，私帳案叫「國民法官劇情短片」—— 前綴是
-    Sheet 為了下拉分組加的，不是案名的一部分。
+
+def group_by_name(rows) -> dict:
+    """`[(id, name, …), …]` → `{name: [row, …]}`；同名**不合併** —— 撞名要在判定時被看見，
+    不是在建表時被最後一筆蓋掉。空名跳過。"""
+    out: dict = {}
+    for row in rows:
+        nm = (row[1] or "").strip()
+        if nm:
+            out.setdefault(nm, []).append(row)
+    return out
+
+
+def unique_hit(hits) -> tuple:
+    """「同名不猜」的唯一判定：剛好一個 → `(row, "exact")`；沒有 → `(None, "none")`；
+    兩個以上 → `(None, "ambiguous")`。專案與人員都吃這一支。"""
+    hits = list(hits or ())
+    if len(hits) == 1:
+        return hits[0], "exact"
+    return None, ("ambiguous" if hits else "none")
+
+
+class ProjectLookup(NamedTuple):
+    """對映所需的三張表，一個物件帶著走（六個呼叫端不必各拆成三個位置參數）。
+
+    `project_map`：owner 決定過的 `{Sheet 原字: project_id}`
+    `by_name`／`by_key`：`{全名 / 去前綴案名: [(id, name, client_short_name), …]}`
     """
-    s = (name or "").strip()
-    if "_" in s:
-        s = s.split("_", 1)[1]
-    return re.sub(r"\s+", " ", s).strip()
+    project_map: dict
+    by_name: dict
+    by_key: dict
+
+    @classmethod
+    def build(cls, project_map: dict, rows) -> "ProjectLookup":
+        """`rows` = `[(id, name, client_short_name), …]`（呼叫端只放**私帳**：owner
+        2026-09-02「這張表對應的是私帳的專案」）。"""
+        by_name: dict = {}
+        by_key: dict = {}
+        for pid, nm, cli in rows:
+            nm = (nm or "").strip()
+            if not nm:
+                continue
+            row = (pid, nm, cli or "")
+            by_name.setdefault(nm, []).append(row)
+            by_key.setdefault(sheet_project_key(nm), []).append(row)
+        return cls(dict(project_map or {}), by_name, by_key)
+
+    def candidates(self, name: str) -> list:
+        """撞案時給人看的候選：去前綴後同名的那幾案 `[(id, name, client), …]`。"""
+        return list(self.by_key.get(sheet_project_key(name), ()))
 
 
-def resolve_project(name: str, project_map: dict, by_name: dict, by_key: dict) -> tuple:
+def resolve_project(name: str, lk: ProjectLookup) -> tuple:
     """一個 Sheet 專案原字 → `(project_id | None, reason)`。順序即優先序，第一個
     **唯一**命中就停：
 
@@ -262,67 +314,70 @@ def resolve_project(name: str, project_map: dict, by_name: dict, by_key: dict) -
         bucket     內部桶 → 不對映
         exact      全名精確同名（唯一）
         key        去客戶前綴後同名（唯一）
-        key+client 去前綴後撞多案，但 Sheet 前綴＝其中一案的客戶代稱（唯一）
+        key+client 去前綴後撞多案，但 Sheet 前綴＝其中唯一一案的客戶簡稱（以前綴開頭）
         ambiguous  仍 >1 → **不猜**，留給 owner 指定
         none       找不到
 
-    `by_name` / `by_key`：`{名字: [(project_id, client_short_name), …]}`，
-    呼叫端只放**私帳**（owner 2026-09-02：這張表對應的是私帳的專案）。
     🔴 絕不 fuzzy 自動合併（同 scripts/import_my_projects.py 的鐵則）。
     """
     n = (name or "").strip()
     if not n:
         return None, "empty"
-    if n in project_map:
-        return project_map[n], "map"
+    if n in lk.project_map:
+        return lk.project_map[n], "map"
     if n in INTERNAL_BUCKETS:
         return None, "bucket"
-    hits = by_name.get(n) or []
-    if len(hits) == 1:
-        return hits[0][0], "exact"
-    hits = by_key.get(sheet_project_key(n)) or []
-    if len(hits) == 1:
-        return hits[0][0], "key"
-    if len(hits) > 1:
-        cli = sheet_project_client(n)
+    hit, why = unique_hit(lk.by_name.get(n))
+    if hit:
+        return hit[0], "exact"
+    cli, key = split_sheet_name(n)
+    hits = lk.by_key.get(key) or []
+    hit, why = unique_hit(hits)
+    if hit:
+        return hit[0], "key"
+    if why == "ambiguous":
         # Sheet 前綴是客戶的**簡稱**（「典藏藝術家庭」），clients.short_name 常是全名
         # （「典藏藝術家庭股份有限公司」）—— 認「以前綴開頭」，仍是精確比對不是模糊：
         # 唯一一案的客戶名以這個前綴開頭才算，兩案都符合照樣回 ambiguous。
-        narrowed = [h for h in hits if cli and (h[1] or "").startswith(cli)]
-        if len(narrowed) == 1:
-            return narrowed[0][0], "key+client"
+        hit, _ = unique_hit([h for h in hits if cli and (h[2] or "").startswith(cli)])
+        if hit:
+            return hit[0], "key+client"
         return None, "ambiguous"
     return None, "none"
 
 
-def project_lookup_tables(projects) -> tuple:
-    """`[(id, name, client_short_name), …]` → `(by_name, by_key)` 給 resolve_project。
-    同名不合併 —— 撞案要在 resolve 那裡被看見，不是在這裡被吃掉。"""
-    by_name: dict = {}
-    by_key: dict = {}
-    for pid, nm, cli in projects:
-        nm = (nm or "").strip()
-        if not nm:
-            continue
-        by_name.setdefault(nm, []).append((pid, cli or ""))
-        by_key.setdefault(sheet_project_key(nm), []).append((pid, cli or ""))
-    return by_name, by_key
+def remap_target(why: str, current_pid, resolved_pid):
+    """remap 對既有一列該不該改、改成什麼 —— 回新 project_id，或 None＝不動。
+
+    三條規則（真值表在 tests/unit/test_timesheet_import.py）：
+      · 對映表是 owner 的決定，**永遠覆蓋**（本來自動對到 A、owner 指定 B → 改成 B）
+      · 自動規則只補**空的**（不動已經對好的列）
+      · **絕不清空**（找不到／撞案不會把既有的 project_id 拿掉）
+    """
+    if why == "map":
+        return resolved_pid if resolved_pid and resolved_pid != current_pid else None
+    if resolved_pid and not current_pid:
+        return resolved_pid
+    return None
 
 
-def suggest_projects(name: str, by_key: dict, limit: int = 2, floor: float = 0.6) -> list:
+def suggest_projects(name: str, lk: ProjectLookup, limit: int = 2, floor: float = 0.6) -> list:
     """找不到時給 owner 看的**建議**（不是自動對映）：去前綴後跟所有私帳案名比相似度，
     回 `[(key, score), …]`，最像的在前、低於 floor 不列。
 
-    🔴 只在報告裡出現，任何寫入路徑都不准用它 —— 「華南永昌E指通」對「E指沖」
+    🔴 只在報告／讀路徑出現，任何寫入路徑都不准用它 —— 「華南永昌E指通」對「E指沖」
     是打錯字，該由人看一眼決定，不是程式猜。
     """
     import difflib
     a = sheet_project_key(name)
     if not a:
         return []
+    # seq2 固定是要找的名字：difflib 對 seq2 做的索引快取整個迴圈都能重用
+    sm = difflib.SequenceMatcher(None, "", a)
     scored = []
-    for k in by_key:
-        sc = difflib.SequenceMatcher(None, a, k).ratio()
+    for k in lk.by_key:
+        sm.set_seq1(k)
+        sc = sm.ratio()
         # 短名字被 ratio 罰得太重（「沆涸」對「沆涸 剪輯」只有 0.57）：
         # 一邊整個包含另一邊（≥2 字）就至少當 0.75 —— 仍只是建議
         if len(a) >= 2 and len(k) >= 2 and (a in k or k in a):
@@ -331,4 +386,3 @@ def suggest_projects(name: str, by_key: dict, limit: int = 2, floor: float = 0.6
             scored.append((k, round(sc, 2)))
     scored.sort(key=lambda x: -x[1])
     return scored[:limit]
-

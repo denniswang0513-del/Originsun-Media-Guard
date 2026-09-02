@@ -2,8 +2,8 @@
 api_timesheets.py — 工時 API（N2 階段 0：Google Sheet 自動同步，藍圖 §3.6）
 
 流程：Google Apps Script 定時把 Sheet 新列 POST 到 /ingest（帶 X-Timesheet-Token）
-→ 去重寫入 timesheets → 專案名精確對映 crm_projects.name → 帶 budget 欄時
-鏡射 crm_projects.budget_hours。/summary 給 burn 檢核（已投入/預算/消耗率）。
+→ 去重寫入 timesheets → 專案對映走 core.hr_logic.resolve_project（對映表／去客戶前綴，
+撞案不猜）。預算只從 PUT /budgets 進（Sheet「專案狀態」頁）。/summary 給 burn 檢核。
 
 token：settings.json `timesheet.ingest_token`（首次取用自動生成）。
 Apps Script 端腳本見 docs/appsscript/timesheet_sync.gs。
@@ -20,11 +20,13 @@ import core.state as state
 from config import load_settings, save_settings
 from core.auth import check_admin, check_admin_or_module
 from core.db_guard import db_factory_or_503
-from core.hr_logic import (manual_dup_key, project_lookup_tables,
-                           resolve_project, sheet_project_key, suggest_projects)
+from core.ledger import require_entity
+from core.hr_logic import (manual_dup_key, remap_target, resolve_project,
+                           suggest_projects, unique_hit)
 from core.schemas import (TimesheetBudgetRequest, TimesheetIngestRequest,
                           TimesheetManualRequest, TimesheetProjectMapRequest)
 from routers.crm._shared import _username
+from services.timesheet_lookup import load_project_lookup, load_staff_index
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
 
@@ -60,34 +62,6 @@ def _row_hash(date_s: str, staff: str, project: str, task: str, hours) -> str:
 _SOURCES = ("sheet", "import")
 
 
-async def _project_lookup(session) -> tuple:
-    """`(project_map, by_name, by_key)` —— 對映表 ＋ **私帳**專案（owner 2026-09-02：
-    這張 Sheet 對應的是私帳的專案）。四個入口（ingest／remap／budgets／dry-run）
-    都吃這一份，不各自組表。"""
-    from sqlalchemy import select
-    from db.models import Client, CrmProject, TimesheetProjectMap
-    pmap = dict((await session.execute(
-        select(TimesheetProjectMap.sheet_name, TimesheetProjectMap.project_id))).all())
-    rows = (await session.execute(
-        select(CrmProject.id, CrmProject.name, Client.short_name)
-        .outerjoin(Client, Client.id == CrmProject.client_id)
-        .where(CrmProject.entity == "mine"))).all()
-    by_name, by_key = project_lookup_tables(rows)
-    return pmap, by_name, by_key
-
-
-async def _staff_ids(session) -> dict:
-    """姓名 → crm_staff.id；同名兩人以上不猜（回 None）。"""
-    from sqlalchemy import select
-    from db.models import CrmStaff
-    out: dict = {}
-    for sid, nm in (await session.execute(select(CrmStaff.id, CrmStaff.name))).all():
-        nm = (nm or "").strip()
-        if nm:
-            out[nm] = None if nm in out else sid
-    return out
-
-
 @router.get("/ingest_token")
 async def get_ingest_token(request: Request):
     """取同步 token（admin）— 貼進 Apps Script 的 TOKEN 常數。"""
@@ -112,18 +86,19 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
     factory = db_factory_or_503()
 
     from sqlalchemy import select
-    from db.models import Timesheet, CrmProject
+    from db.models import Timesheet
 
     inserted = 0
     skipped = 0
     unmatched: set[str] = set()
     ambiguous: set[str] = set()
     staff_unmatched: set[str] = set()
+    staff_ambiguous: set[str] = set()
 
     async with factory() as session:
         # 專案對映：對映表 → 精確 → 去客戶前綴（唯一才算）→ 撞案不猜（core.hr_logic）
-        pmap, by_name, by_key = await _project_lookup(session)
-        staff_ids = await _staff_ids(session)
+        lk = await load_project_lookup(session)
+        staff_index = await load_staff_index(session)
 
         # 既有 hash 一次撈（避免逐列查詢；量大時仍遠小於全表掃描成本）
         hashes = [_row_hash(r.date, r.staff, r.project, r.task, r.hours) for r in req.rows]
@@ -144,7 +119,6 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
             manual_keys = {manual_dup_key(n, d, p) for n, d, p in m_rows}
 
         skipped_manual = 0
-        budget_updates: dict[str, float] = {}
         seen_in_batch: set[str] = set()
         for r, h in zip(req.rows, hashes):
             if h in existing or h in seen_in_batch:
@@ -156,15 +130,16 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
                 skipped_manual += 1
                 continue
             pname = (r.project or "").strip()
-            pid, why = resolve_project(pname, pmap, by_name, by_key)
+            pid, why = resolve_project(pname, lk)
             if why == "ambiguous":
                 ambiguous.add(pname)
             elif why == "none":
                 unmatched.add(pname)
             sname = (r.staff or "").strip()
-            sid = staff_ids.get(sname)
+            shit, swhy = unique_hit(staff_index.get(sname)) if sname else (None, "none")
+            sid = shit[0] if shit else None
             if sname and not sid:
-                staff_unmatched.add(sname)
+                (staff_ambiguous if swhy == "ambiguous" else staff_unmatched).add(sname)
             session.add(Timesheet(
                 id=uuid.uuid4().hex,
                 work_date=wd,
@@ -179,14 +154,6 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
                 row_hash=h,
             ))
             inserted += 1
-            # Sheet 帶預算欄時鏡射到專案（階段0 預算 source of truth 還在 Sheet）
-            if pid and r.budget is not None and r.budget > 0:
-                budget_updates[pid] = float(r.budget)
-
-        for pid, bh in budget_updates.items():
-            proj = await session.get(CrmProject, pid)
-            if proj is not None and getattr(proj, "budget_hours", None) != bh:
-                proj.budget_hours = bh
 
         await session.commit()
 
@@ -197,11 +164,32 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
         "unmatched_projects": sorted(unmatched),
         "ambiguous_projects": sorted(ambiguous),     # 撞案：owner 用 project_map 指定
         "staff_unmatched": sorted(staff_unmatched),
-        "budget_mirrored": len(budget_updates),
+        "staff_ambiguous": sorted(staff_ambiguous),  # 同名兩人：不猜，留 NULL
     }
 
 
 # ── 對映表／回填／預算（docs/TIMESHEET_IMPORT_PLAN.md Phase A-3）────────────────
+
+@router.get("/projects")
+async def timesheet_projects(request: Request):
+    """挑選視窗用的私帳案清單：只有 id／名稱／客戶。
+
+    不用 `/crm/projects?entity=mine`：那支回整包金額欄位給一個只要名字的用途、
+    走 MoneyRedactRoute 白繞一圈。這裡同一份 load_project_lookup。
+
+    🔴 可見性照私帳的規矩：私帳**專案**對沒有 mine scope 的人整列不存在
+    （core.ledger.hide_mine_projects；Lv3 不隱含 finance_mine）。所以除了 tab 的
+    check_admin，再要 require_entity(mine)——沒指名的管理員按「指定專案」會拿到
+    403「沒有該帳本的檢視權限」，而不是打開一個空視窗。
+    """
+    check_admin(request)
+    require_entity(request, "mine")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        lk = await load_project_lookup(session)
+    rows = sorted({row for hits in lk.by_name.values() for row in hits}, key=lambda r: r[1])
+    return {"projects": [{"id": pid, "name": nm, "client": cli} for pid, nm, cli in rows]}
+
 
 @router.get("/project_map")
 async def list_project_map(request: Request):
@@ -256,30 +244,38 @@ async def upsert_project_map(req: TimesheetProjectMapRequest, request: Request):
 
 @router.post("/remap")
 async def remap_timesheets(request: Request):
-    """依對映表＋規則回填既有列的 `project_id`。
+    """依對映表＋規則回填既有列的 `project_id`。規則在 core.hr_logic.remap_target
+    （對映表覆蓋／自動只補空的／絕不清空）。
 
-    對映表是 owner 的決定，**永遠覆蓋**：一列本來自動對到 A、owner 後來指定 B，
-    remap 就改成 B。自動規則只補**空的**（不動已經對好的列）；沒對到的維持 NULL
-    （名稱留著，Burn 表照樣以名稱列出）。
+    🔴 依 (project_name, project_id) **聚合**再判定：全表 9,800 列只有 ~350 個不同名字，
+    逐列 resolve ＋ 9,800 個 ORM 物件 ＋ 9,800 句 UPDATE 是白費 —— 每按一次「指定專案」
+    都會跑這支。
     """
     check_admin(request)
     factory = db_factory_or_503()
-    from sqlalchemy import select
+    from sqlalchemy import func as safunc, select, update
     from db.models import Timesheet
     changed = 0
-    out: dict = {}
+    by_reason: dict = {}
     async with factory() as session:
-        pmap, by_name, by_key = await _project_lookup(session)
-        rows = (await session.execute(
-            select(Timesheet).where(Timesheet.project_name != ""))).scalars().all()
-        for t in rows:
-            pid, why = resolve_project(t.project_name, pmap, by_name, by_key)
-            out[why] = out.get(why, 0) + 1
-            if (why == "map" and t.project_id != pid) or (pid and not t.project_id):
-                t.project_id = pid
-                changed += 1
+        lk = await load_project_lookup(session)
+        groups = (await session.execute(
+            select(Timesheet.project_name, Timesheet.project_id, safunc.count(Timesheet.id))
+            .where(Timesheet.project_name != "")
+            .group_by(Timesheet.project_name, Timesheet.project_id))).all()
+        for pname, cur_pid, n in groups:
+            pid, why = resolve_project(pname, lk)
+            by_reason[why] = by_reason.get(why, 0) + n
+            target = remap_target(why, cur_pid, pid)
+            if target is None:
+                continue
+            cond = [Timesheet.project_name == pname]
+            cond.append(Timesheet.project_id.is_(None) if cur_pid is None
+                        else Timesheet.project_id == cur_pid)
+            res = await session.execute(update(Timesheet).where(*cond).values(project_id=target))
+            changed += res.rowcount or 0
         await session.commit()
-    return {"status": "ok", "changed": changed, "by_reason": out}
+    return {"status": "ok", "changed": changed, "by_reason": by_reason}
 
 
 @router.put("/budgets")
@@ -292,21 +288,26 @@ async def set_budgets(req: TimesheetBudgetRequest, request: Request):
     applied = 0
     amb: list = []
     none: list = []
+    from sqlalchemy import select
     async with factory() as session:
-        pmap, by_name, by_key = await _project_lookup(session)
+        lk = await load_project_lookup(session)
+        wanted: dict = {}
         for it in req.items:
             if not it.budget_hours or it.budget_hours <= 0:
                 continue
-            pid, why = resolve_project(it.sheet_name, pmap, by_name, by_key)
+            pid, why = resolve_project(it.sheet_name, lk)
             if why == "ambiguous":
                 amb.append(it.sheet_name)
-                continue
-            if not pid:
+            elif not pid:
                 none.append(it.sheet_name)
-                continue
-            proj = await session.get(CrmProject, pid)
-            if proj is not None and getattr(proj, "budget_hours", None) != float(it.budget_hours):
-                proj.budget_hours = float(it.budget_hours)
+            else:
+                wanted[pid] = float(it.budget_hours)
+        # 一次載入要改的案（367 案逐案 session.get 是 367 趟）
+        projs = (await session.execute(
+            select(CrmProject).where(CrmProject.id.in_(wanted)))).scalars().all() if wanted else []
+        for proj in projs:
+            if getattr(proj, "budget_hours", None) != wanted[proj.id]:
+                proj.budget_hours = wanted[proj.id]
                 applied += 1
         await session.commit()
     return {"status": "ok", "applied": applied, "ambiguous": sorted(amb), "unmatched": sorted(none)}
@@ -345,9 +346,10 @@ async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> d
     """
     from sqlalchemy import select
     from db.models import CrmProject, Timesheet
-    proj_rows = (await session.execute(select(CrmProject.id, CrmProject.name))).all()
-    name_to_id = {(n or "").strip(): pid for pid, n in proj_rows}
-    id_to_name = {pid: (n or "").strip() for pid, n in proj_rows}
+    # 名稱對映走跟 Sheet 同一支 resolver —— 手填一次、Sheet 一次落到不同 project_id，
+    # Burn 表就分兩列。下拉給了 id 就用 id（那是使用者明確選的）。
+    lk = await load_project_lookup(session)
+    id_to_name = dict((await session.execute(select(CrmProject.id, CrmProject.name))).all())
 
     inserted = 0
     unmatched: set[str] = set()
@@ -357,8 +359,9 @@ async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> d
         wd = _parse_date(r.work_date)
         if wd is None:
             raise HTTPException(status_code=422, detail=f"日期格式錯誤：{r.work_date}")
-        pid = r.project_id or name_to_id.get((r.project_name or "").strip())
-        pname = (r.project_name or "").strip() or id_to_name.get(pid or "", "")
+        pname = (r.project_name or "").strip()
+        pid = r.project_id or resolve_project(pname, lk)[0]
+        pname = pname or (id_to_name.get(pid or "") or "").strip()
         if pid is None and pname:
             unmatched.add(pname)
         session.add(Timesheet(
@@ -496,24 +499,17 @@ async def burn_summary(request: Request):
         total_rows = (await session.execute(select(safunc.count(Timesheet.id)))).scalar() or 0
         # 未對映的每一個名字：為什麼沒對到（撞案／找不到／內部桶）。撞案附候選、
         # 找不到附相似建議 —— owner 在 tab 上直接指定，不用回頭翻報告。
-        pmap, by_name, by_key = await _project_lookup(session)
-        cand_ids = set()
-        for n, _h, _c in unmatched:
-            if resolve_project(n or "", pmap, by_name, by_key)[1] == "ambiguous":
-                cand_ids |= {pid for pid, _cli in by_key.get(sheet_project_key(n or ""), [])}
-        cand_names = dict((await session.execute(
-            select(CrmProject.id, CrmProject.name).where(CrmProject.id.in_(cand_ids)))).all())             if cand_ids else {}
-
+        lk = await load_project_lookup(session)
     out_unmatched = []
     for n, h, c in unmatched:
-        _pid, why = resolve_project(n or "", pmap, by_name, by_key)
+        _pid, why = resolve_project(n or "", lk)
         item = {"project_name": n or "(空白)", "hours_used": round(h or 0, 1), "rows": c,
                 "reason": why}
         if why == "ambiguous":
-            item["candidates"] = [{"id": pid, "name": cand_names.get(pid, ""), "client": cli}
-                                  for pid, cli in by_key.get(sheet_project_key(n or ""), [])]
+            item["candidates"] = [{"id": pid, "name": nm, "client": cli}
+                                  for pid, nm, cli in lk.candidates(n or "")]
         elif why == "none":
-            item["suggestions"] = [k for k, _sc in suggest_projects(n or "", by_key)]
+            item["suggestions"] = [k for k, _sc in suggest_projects(n or "", lk)]
         out_unmatched.append(item)
     return {
         "projects": items,

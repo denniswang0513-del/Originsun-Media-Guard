@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
 """工時 Google Sheet 歷史匯入（docs/TIMESHEET_IMPORT_PLAN.md Phase B／C）。
 
-    # dry-run：只出報告，不寫任何東西
-    .venv/Scripts/python.exe scripts/import_timesheets.py --xlsx timesheet.xlsx --budget
+    # dry-run：只出報告，不寫任何東西（--prod 讀生產庫的私帳案來預估對映）
+    .venv/Scripts/python.exe scripts/import_timesheets.py --xlsx timesheet.xlsx --budget [--prod]
     # 真的匯（dev 8001）；--prod 改打生產 8000
     .venv/Scripts/python.exe scripts/import_timesheets.py --xlsx timesheet.xlsx --budget --apply [--prod]
 
 xlsx 來源：整本試算表 `export?format=xlsx`（「總表（勿動）」已是兩個輸入分頁的
-聯集、值已算好）。**走 HTTP 打 /timesheets/ingest**，不直接碰 DB —— 同 row_hash、
+聯集、值已算好）。**--apply 走 HTTP 打 /timesheets/ingest**，不直接碰 DB —— 同 row_hash、
 同手填優先去重，重跑第二次 0 新增（冪等）。
+
+🔴 dry-run 讀庫**不經 `db.session.init_db()`** —— 那支會 `create_all` 到目標庫，帶 --prod
+的「只讀預估」就會在生產建表（2026-09-02 實際發生過一次，建了空的 timesheet_project_map）。
+這裡用 scripts/_common.resolve_db_url 拿 DSN、自己開 engine，只 SELECT。
 
 🔴 日期一律轉成 `yyyy/MM/dd` 字串再送：Apps Script 是 `Utilities.formatDate(d,
 'Asia/Taipei','yyyy/MM/dd')`，hash 用的是日期**字串**，兩條路格式不同就會在交接處
@@ -17,19 +21,19 @@ xlsx 來源：整本試算表 `export?format=xlsx`（「總表（勿動）」已
 from __future__ import annotations
 
 import argparse
+import asyncio
 import collections
 import datetime as dt
 import io
-import json
 import os
 import sys
-import urllib.error
-import urllib.request
+from pathlib import Path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
-from core.hr_logic import INTERNAL_BUCKETS, sheet_project_key  # noqa: E402
+from core.hr_logic import INTERNAL_BUCKETS, resolve_project, suggest_projects  # noqa: E402
+from scripts._common import resolve_db_url  # noqa: E402
 
 DATA_SHEET = "總表（勿動）"
 STATUS_SHEET = "專案狀態(勿動)"
@@ -50,10 +54,8 @@ def _date_str(v) -> str:
     return str(v or "").strip()
 
 
-def read_rows(xlsx: str) -> tuple:
+def read_rows(wb) -> tuple:
     """回 (可送的列, 壞列)。壞列＝日期解析不了或時數不是數字 —— 收進報告，不送。"""
-    import openpyxl
-    wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
     ws = wb[DATA_SHEET]
     good, bad = [], []
     for i, r in enumerate(ws.iter_rows(min_row=4, values_only=True), start=4):
@@ -72,10 +74,8 @@ def read_rows(xlsx: str) -> tuple:
     return good, bad
 
 
-def read_budgets(xlsx: str) -> list:
+def read_budgets(wb) -> list:
     """「專案狀態」：預算＝剩餘＋實際（規劃 §1.1 驗過）；≤0＝沒設，不送。"""
-    import openpyxl
-    wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
     out = []
     for r in wb[STATUS_SHEET].iter_rows(min_row=2, values_only=True):
         r = list(r) + [None] * 12
@@ -88,118 +88,112 @@ def read_budgets(xlsx: str) -> list:
     return out
 
 
-class Api:
-    def __init__(self, base: str):
-        self.base = base
-        from core.auth import create_token
-        self.jwt = create_token({"sub": "admin", "username": "import_timesheets",
-                                 "access_level": 3})
-        self.token = self.call("GET", "/api/v1/timesheets/ingest_token")["token"]
-
-    def call(self, method: str, path: str, body=None, headers=None):
-        data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(self.base + path, data=data, method=method)
-        req.add_header("Authorization", "Bearer " + self.jwt)
-        req.add_header("Content-Type", "application/json")
-        for k, v in (headers or {}).items():
-            req.add_header(k, v)
-        try:
-            with urllib.request.urlopen(req, timeout=120) as x:
-                return json.loads(x.read().decode() or "{}")
-        except urllib.error.HTTPError as e:
-            raise SystemExit(f"{method} {path} → HTTP {e.code}: {e.read().decode()[:300]}")
+async def _lookup(prod: bool):
+    """只 SELECT 的查表（不 init_db、不 create_all）—— 跟 router 吃同一支 services 函式。"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from services.timesheet_lookup import load_project_lookup
+    url = resolve_db_url(prod)
+    if "+asyncpg" not in url:
+        url = url.replace("postgresql://", "postgresql+asyncpg://")
+    engine = create_async_engine(url)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+            return await load_project_lookup(s)
+    finally:
+        await engine.dispose()
 
 
-def _dry_run(good: list, hours, P, prod: bool = False) -> None:
-    """不寫：在本機用同一支 resolver 預估對映分層（讀 DB，不動 DB）。
-    `prod=True` 讀生產庫（只讀 —— 對映預估要看的是生產的私帳 413 案，dev 只有幾案）。"""
-    import asyncio
-
-    import db.session as _ds
-    if prod:
-        _orig = _ds.get_database_url
-        _ds.get_database_url = lambda: _orig().replace("mediaguard_dev", "mediaguard")
-    from core.hr_logic import resolve_project, suggest_projects
-    from routers.api_timesheets import _project_lookup
-
-    async def _pre():
-        await _ds.init_db()
-        async with _ds.get_session_factory()() as s:
-            return await _project_lookup(s)
-    pmap, by_name, by_key = asyncio.run(_pre())
+def _dry_run(good: list, hours, staff, P, prod: bool) -> None:
+    lk = asyncio.run(_lookup(prod))
     tiers = collections.defaultdict(list)
     for p in sorted(hours, key=lambda x: -hours[x]):
-        pid, why = resolve_project(p, pmap, by_name, by_key)
+        _pid, why = resolve_project(p, lk)
         tiers[why].append((p, round(hours[p], 1)))
     P("## 對映預估（不寫）")
     for why in ("map", "exact", "key", "key+client", "ambiguous", "none", "bucket"):
         rows = tiers.get(why, [])
         P(f"- **{why}**：{len(rows)} 個，{round(sum(h for _, h in rows))} 小時")
     P("")
-    P("## 撞案（owner 逐一指定 → PUT /timesheets/project_map）")
+    P("## 撞案（owner 在 tab 上「指定專案」）")
     for p, h in tiers.get("ambiguous", []):
-        cands = by_key.get(sheet_project_key(p), [])
-        P(f"- {p}（{h}h）→ 候選 {[(pid[:8], cli) for pid, cli in cands]}")
+        P(f"- {p}（{h}h）→ 候選 {[(pid[:8], cli) for pid, _nm, cli in lk.candidates(p)]}")
     P("")
     P("## 找不到（owner 決定：對既有案／建新案／當桶）—— 括號內是相似案名建議，不是對映")
     for p, h in tiers.get("none", []):
-        sug = suggest_projects(p, by_key)
+        sug = suggest_projects(p, lk)
         P(f"- {p}（{h}h）" + (f" → 像：{sug}" if sug else ""))
     P("")
-    staff = collections.Counter(r["staff"] for r in good)
     P(f"## 人員：{dict(staff)}（對不到 crm_staff 的在 ingest 回應 staff_unmatched）")
 
 
-def _apply(api: Api, good: list, budgets: list, P) -> None:
+def _apply(base: str, good: list, budgets: list, P) -> None:
+    """走 HTTP（同 scripts/backfill_me_petty.py 的 requests ＋ create_token 寫法）。"""
+    import requests
+    from core.auth import create_token
+    s = requests.Session()
+    s.headers.update({"Authorization": "Bearer " + create_token(
+        {"sub": "admin", "username": "import_timesheets", "access_level": 3})})
+    r = s.get(base + "/api/v1/timesheets/ingest_token", timeout=30)
+    r.raise_for_status()
+    ingest_headers = {"X-Timesheet-Token": r.json()["token"]}
+
     tot = collections.Counter()
     amb: set = set()
     unm: set = set()
     sun: set = set()
     for i in range(0, len(good), BATCH):
-        resp = api.call("POST", "/api/v1/timesheets/ingest",
-                        {"rows": good[i:i + BATCH], "source": "import"},
-                        headers={"X-Timesheet-Token": api.token})
+        r = s.post(base + "/api/v1/timesheets/ingest",
+                   json={"rows": good[i:i + BATCH], "source": "import"},
+                   headers=ingest_headers, timeout=120)
+        r.raise_for_status()
+        resp = r.json()
         for k in ("inserted", "skipped", "skipped_manual_priority"):
             tot[k] += resp.get(k, 0)
         amb |= set(resp.get("ambiguous_projects", []))
         unm |= set(resp.get("unmatched_projects", []))
-        sun |= set(resp.get("staff_unmatched", []))
+        sun |= set(resp.get("staff_unmatched", [])) | set(resp.get("staff_ambiguous", []))
         print(f"  batch {i // BATCH + 1}: {resp.get('inserted')} 新增 / {resp.get('skipped')} 重複")
     P("## 匯入結果")
     P(f"- 新增 {tot['inserted']}、重複跳過 {tot['skipped']}、手填優先擋下 {tot['skipped_manual_priority']}")
     P(f"- 撞案 {len(amb)}：{sorted(amb)}")
     P(f"- 找不到 {len(unm)}：{sorted(unm)}")
-    P(f"- 人員對不到 {len(sun)}：{sorted(sun)}")
+    P(f"- 人員對不到／同名 {len(sun)}：{sorted(sun)}")
     if budgets:
-        r = api.call("PUT", "/api/v1/timesheets/budgets", {"items": budgets})
-        P(f"- 預算：寫入 {r['applied']} 案；撞案 {len(r['ambiguous'])}；找不到 {len(r['unmatched'])}")
+        r = s.put(base + "/api/v1/timesheets/budgets", json={"items": budgets}, timeout=120)
+        r.raise_for_status()
+        b = r.json()
+        P(f"- 預算：寫入 {b['applied']} 案；撞案 {len(b['ambiguous'])}；找不到 {len(b['unmatched'])}")
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8")   # Windows 主控台 cp950 會讓中文報告整支炸掉
     ap = argparse.ArgumentParser()
     ap.add_argument("--xlsx", required=True)
     ap.add_argument("--budget", action="store_true", help="一併從「專案狀態」灌 budget_hours")
     ap.add_argument("--apply", action="store_true", help="真的送；不帶＝只出報告（dry-run）")
-    ap.add_argument("--prod", action="store_true", help="打生產 8000（預設 dev 8001）")
+    ap.add_argument("--prod", action="store_true", help="生產（8000／mediaguard）；預設 dev（8001／mediaguard_dev）")
     ap.add_argument("--report", default=os.path.join(REPO, "docs", "timesheet_import_report.md"))
     a = ap.parse_args()
 
-    good, bad = read_rows(a.xlsx)
-    budgets = read_budgets(a.xlsx) if a.budget else []
+    import openpyxl
+    wb = openpyxl.load_workbook(a.xlsx, read_only=True, data_only=True)   # 開一次，兩個分頁共用
+    good, bad = read_rows(wb)
+    budgets = read_budgets(wb) if a.budget else []
     hours = collections.Counter()
     for r in good:
         hours[r["project"]] += r["hours"]
+    staff = collections.Counter(r["staff"] for r in good)
 
     out = io.StringIO()
 
     def P(*x):
         out.write(" ".join(str(y) for y in x) + "\n")
 
-    mode = ("生產 8000" if a.prod else "dev 8001") + ("，APPLY" if a.apply else "，dry-run")
+    mode = ("生產" if a.prod else "dev") + ("，APPLY" if a.apply else "，dry-run")
     P(f"# 工時匯入報告 {dt.datetime.now():%Y-%m-%d %H:%M}（{mode}）")
     P("")
     P(f"- 可送 {len(good)} 列 / {sum(hours.values()):.1f} 小時；壞列 {len(bad)}（不送）")
-    P(f"- 人員：{dict(collections.Counter(r['staff'] for r in good).most_common())}")
+    P(f"- 人員：{dict(staff.most_common())}")
     P(f"- 專案名 {len(hours)} 個；內部桶 {sorted(p for p in hours if p in INTERNAL_BUCKETS)}")
     if a.budget:
         P(f"- 預算：{len(budgets)} 案有值")
@@ -211,12 +205,11 @@ def main():
         P("")
 
     if a.apply:
-        _apply(Api("http://127.0.0.1:8000" if a.prod else "http://127.0.0.1:8001"),
-               good, budgets, P)
+        _apply("http://127.0.0.1:8000" if a.prod else "http://127.0.0.1:8001", good, budgets, P)
     else:
-        _dry_run(good, hours, P, prod=a.prod)
+        _dry_run(good, hours, staff, P, prod=a.prod)
 
-    io.open(a.report, "w", encoding="utf-8").write(out.getvalue())
+    Path(a.report).write_text(out.getvalue(), encoding="utf-8")
     print(out.getvalue())
     print(f"報告：{a.report}")
 
