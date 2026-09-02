@@ -77,3 +77,28 @@ def test_the_withholding_rates_come_from_the_backend():
     assert "r.tax_pct" in body and "r.nhi_pct" in body
     assert '"withhold": {"tax_pct": WITHHOLD_TAX_PCT' in repo_src(
         "routers/api_finance_projects.py"), "後端沒把費率送出來"
+
+
+def test_picking_never_rebuilds_the_list_the_user_is_scrolling():
+    """🔴 勾一列不可以重建整份清單 —— 那會把捲軸彈回頂端。
+
+    兩個地方都踩過同一顆：拆項編輯器勾未收案時走整窗 `render()`（重建兩個面板
+    約 1,400 個節點），多選挑選視窗勾請款單時走 `redraw()`（重建最多 120 列）。
+    使用者連勾三筆就被彈三次，勾到第 40 個案子時勾完找不到自己在哪。
+    這條規則本來只寫在「金額輸入」上（patchGross 檔頭），勾選漏掉了。
+    """
+    ed = js_code_only(repo_src("frontend/js/shared/cash-split-editor.js"))
+    # 勾選／新增／刪列都只換 #csp-rows 那一塊
+    assert "function renderRows()" in ed
+    assert "box.innerHTML = rowsHtml() || EMPTY_ROWS" in ed
+    for fn in ("function bindProj(", "function bindAdv("):
+        body = js_func_body(ed, fn)
+        assert "renderRows();" in body, fn
+        assert "\n                render();" not in body, f"{fn} 又整窗重畫了"
+    # 🔴 面板不再跟著重畫 → 列上的 ✕ 要自己把對應的 checkbox 取消勾選
+    assert "cb.checked = false;" in ed, "刪列之後面板還勾著，清單裡卻沒有它"
+
+    pick = js_code_only(repo_src("frontend/js/shared/row-picker.js"))
+    multi = pick.split("if (o.multi) {")[1].split("return;")[0]
+    assert "redraw()" not in multi, "多選切換又重建了整份清單"
+    assert "box.checked = on;" in multi

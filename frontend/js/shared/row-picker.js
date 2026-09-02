@@ -126,9 +126,16 @@ export function openRowPicker(o) {
         if (!el) { return; }
         const id = el.dataset.pick;
         if (o.multi) {
-            // 切換勾選、**不關窗** —— 多選就是要連點好幾列
-            if (picked.has(id)) { picked.delete(id); } else { picked.add(id); }
-            redraw();
+            // 切換勾選、**不關窗** —— 多選就是要連點好幾列。
+            // 🔴 只補那一列的兩個屬性，不 redraw()：整份清單重建（最多 120 列）
+            // 會把捲軸彈回頂端，連勾三張單就被彈三次。redraw 留給搜尋與範圍切換。
+            const on = !picked.has(id);
+            if (on) { picked.add(id); } else { picked.delete(id); }
+            el.style.background = on ? '#1e3a2a' : '';
+            const box = el.querySelector('input[type=checkbox]');
+            if (box) { box.checked = on; }
+            const sum = wrap.querySelector('#pp-sum');
+            if (sum && o.footer) { sum.innerHTML = o.footer([...picked]); }
             return;
         }
         o.onPick(picked.has(id) ? '' : id);   // 再點目前那列＝取消連結

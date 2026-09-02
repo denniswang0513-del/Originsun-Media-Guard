@@ -215,7 +215,7 @@ export async function openCashSplitEditor(o) {
                 if (r && r.advances && r.advances.length) {
                     r.amount = r.advances.reduce((s2, l) => s2 + l.amount, 0);
                 }
-                render();
+                renderRows();      // 面板一個節點都不動 —— 捲軸留在原地
             };
         });
     }
@@ -234,13 +234,123 @@ export async function openCashSplitEditor(o) {
                     const i = projIdx(cb.dataset.proj);
                     if (i >= 0) rows.splice(i, 1);
                 }
-                render();
+                renderRows();
             };
         });
     }
 
-    function render() {
-        const rowHtml = rows.map((r, i) => `
+    /** 只重畫**拆項列**那一塊。
+     *  🔴 勾一個 checkbox 本來走整窗 render()，而 render() 是 `wrap.innerHTML=`
+     *  —— 那會把兩個面板（未收案 ≤80 列＋代墊 ≤200 列、約 1,400 個節點）整個
+     *  重建，順便把捲軸彈回頂端：勾到第 40 個案子時，勾完就找不到自己在哪。
+     *  這條規則本來只套在金額輸入上（見 patchGross 檔頭），勾選漏掉了。 */
+    /** 拆項列上的 handler（刪、金額、代開費、備註、分類樹）——
+     *  renderRows 換完列要重掛，外殼那次也走同一支。 */
+    function bindRows() {
+        wrap.querySelectorAll('[data-del]').forEach((b) => {
+            b.onclick = () => {
+                // 🔴 面板不再跟著重畫了 —— 刪掉的那一列若來自勾選，要自己把
+                // 對應的 checkbox 取消，否則面板顯示勾著、清單裡卻沒有它
+                const gone = rows.splice(Number(b.dataset.del), 1)[0] || {};
+                const sels = gone.kind === 'project'
+                    ? (gone.project_id ? [`[data-proj="${gone.project_id}"]`] : [])
+                    : (gone.advances || []).map((l) => `[data-adv="${l.entry_id}"]`);
+                sels.forEach((sel) => {
+                    const cb = wrap.querySelector(sel);
+                    if (cb) cb.checked = false;
+                });
+                renderRows();
+            };
+        });
+        wrap.querySelectorAll('[data-amt]').forEach((inp) => {
+            inp.onchange = () => {           // 只補合計與儲存鈕，不整窗重畫（保焦點）
+                const i = Number(inp.dataset.amt);
+                rows[i].amount = Number(inp.value) || 0;
+                patchGross(i);
+                patchSum();
+            };
+        });
+        wrap.querySelectorAll('[data-note]').forEach((inp) => {
+            inp.onchange = () => { rows[Number(inp.dataset.note)].note = inp.value; };
+        });
+        wrap.querySelectorAll('[data-cat]').forEach((inp) => {
+            inp.onchange = () => { rows[Number(inp.dataset.cat)].category = inp.value.trim(); };
+        });
+        // 勾「扣代開費」與改代開費金額是同一件事的兩個入口 —— 一支處理。
+        // 猜法本身寫在 feeGuess 的檔頭，這裡不再抄一遍。
+        //  `redraw`：勾選會長出／收掉輸入框，非重畫不可；改**金額**只動三個值
+        //  —— 那條走 patch（重畫會打掉打字焦點，見 patchGross 檔頭那條規則）
+        const setFee = (i, fee, on, redraw = true) => {
+            const r = rows[i];
+            const p = out.projects.find((x) => x.id === r.project_id);
+            r.feeOn = on;
+            r.fee = on ? Math.max(0, fee) : 0;
+            if (p) {
+                r.amount = on ? Math.max(0, p.receivable - r.fee) : p.receivable;
+            }
+            if (redraw) { renderRows(); return; }
+            const amtEl = wrap.querySelector(`[data-amt="${i}"]`);
+            if (amtEl) { amtEl.value = r.amount || ''; }
+            patchGross(i);
+            patchSum();
+        };
+        wrap.querySelectorAll('[data-feechk]').forEach((cb) => {
+            cb.onchange = () => {
+                const i = Number(cb.dataset.feechk);
+                setFee(i, feeGuess(rows[i]), cb.checked);
+            };
+        });
+        wrap.querySelectorAll('[data-fee]').forEach((inp) => {
+            inp.onchange = () => setFee(Number(inp.dataset.fee),
+                                        Number(inp.value) || 0, true, false);
+        });
+        // 搜尋框：**只換清單那塊**，整窗重畫會把打字焦點打掉。
+        // 兩份清單同一種接法 —— 寫兩次的話，修焦點的人只會修到其中一份。
+        const wireSearch = (attr, boxSel, html, bind, setQ) => {
+            const el = wrap.querySelector(`[${attr}]`);
+            bind();
+            if (!el) return;
+            el.oninput = () => {
+                setQ(el.value.trim().toLowerCase());
+                const box = wrap.querySelector(boxSel);
+                if (box) { box.innerHTML = html(); bind(); }
+            };
+        };
+    }
+
+        // 手動列的分類樹（同 cash-tax-picker 的一排會長的下拉）
+        wrap.querySelectorAll('.csp-tax').forEach((box) => {
+            const i = Number(box.dataset.row);
+            const draw = () => taxSelects(box, {
+                tree,
+                chain: byId[rows[i].taxonomy_node_id] || [],
+                cls: 'crm-select crm-select-sm',
+                style: 'max-width:130px;',
+                blank: (lv) => (lv === 0 ? '（選分類）' : '（不細分）'),
+                keepOne: true,
+                onPick: (lv, v) => {
+                    const chain = byId[rows[i].taxonomy_node_id] || [];
+                    rows[i].taxonomy_node_id = v || (lv > 0 ? (chain[lv - 1] || {}).id || '' : '');
+                    draw();
+                },
+            });
+            draw();
+        });
+    }
+
+    function renderRows() {
+        const box = wrap.querySelector('#csp-rows');
+        if (!box) { render(); return; }
+        box.innerHTML = rowsHtml() || EMPTY_ROWS;
+        bindRows();
+        patchSum();
+    }
+
+    const EMPTY_ROWS = '<div style="color:#4b5563;font-size:12px;padding:8px 0;">'
+        + '還沒有拆項 —— 勾上面的未收項目，或按「＋ 手動一項」</div>';
+
+    function rowsHtml() {
+        return rows.map((r, i) => `
             <div style="display:grid;grid-template-columns:110px minmax(0,1fr) 150px 28px;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid #262626;">
                 <input type="number" value="${r.amount || ''}" data-amt="${i}" ${r.kind === 'advance' ? 'readonly title="代墊拆項的金額＝勾選列的合計"' : ''}
                     style="background:#141414;border:1px solid #333;color:#eee;border-radius:6px;padding:4px 8px;text-align:right;${r.kind === 'advance' ? 'opacity:.7;' : ''}">
@@ -266,7 +376,9 @@ export async function openCashSplitEditor(o) {
                     style="background:#141414;border:1px solid #333;color:#ccc;border-radius:6px;padding:4px 8px;font-size:12px;">
                 <button data-del="${i}" title="移除" style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:14px;">✕</button>
             </div>`).join('');
+    }
 
+    function render() {
         wrap.innerHTML = `<div style="background:#1b1b1b;border:1px solid #333;border-radius:12px;
                 width:min(880px,94vw);max-height:92vh;overflow:auto;padding:18px 20px;">
             <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;">
@@ -296,7 +408,7 @@ export async function openCashSplitEditor(o) {
             <div style="display:grid;grid-template-columns:110px minmax(0,1fr) 150px 28px;gap:6px;color:#6b7280;font-size:11px;">
                 <div style="text-align:right;">金額</div><div>分類／連結</div><div>備註</div><div></div>
             </div>
-            ${rowHtml || '<div style="color:#4b5563;font-size:12px;padding:8px 0;">還沒有拆項 —— 勾上面的未收項目，或按「＋ 手動一項」</div>'}
+            <div id="csp-rows">${rowsHtml() || EMPTY_ROWS}</div>
             <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
                 <button id="csp-add" class="crm-btn crm-btn-secondary" style="font-size:12px;">＋ 手動一項</button>
                 <div style="flex:1;"></div>
@@ -331,87 +443,13 @@ export async function openCashSplitEditor(o) {
         };
         wrap.querySelector('#csp-add').onclick = () => {
             rows.push(newRow('manual', { amount: Math.max(0, target - sum()) || 0 }));
-            render();
+            renderRows();
         };
-        wrap.querySelectorAll('[data-del]').forEach((b) => {
-            b.onclick = () => { rows.splice(Number(b.dataset.del), 1); render(); };
-        });
-        wrap.querySelectorAll('[data-amt]').forEach((inp) => {
-            inp.onchange = () => {           // 只補合計與儲存鈕，不整窗重畫（保焦點）
-                const i = Number(inp.dataset.amt);
-                rows[i].amount = Number(inp.value) || 0;
-                patchGross(i);
-                patchSum();
-            };
-        });
-        wrap.querySelectorAll('[data-note]').forEach((inp) => {
-            inp.onchange = () => { rows[Number(inp.dataset.note)].note = inp.value; };
-        });
-        wrap.querySelectorAll('[data-cat]').forEach((inp) => {
-            inp.onchange = () => { rows[Number(inp.dataset.cat)].category = inp.value.trim(); };
-        });
-        // 勾「扣代開費」與改代開費金額是同一件事的兩個入口 —— 一支處理。
-        // 猜法本身寫在 feeGuess 的檔頭，這裡不再抄一遍。
-        //  `redraw`：勾選會長出／收掉輸入框，非重畫不可；改**金額**只動三個值
-        //  —— 那條走 patch（重畫會打掉打字焦點，見 patchGross 檔頭那條規則）
-        const setFee = (i, fee, on, redraw = true) => {
-            const r = rows[i];
-            const p = out.projects.find((x) => x.id === r.project_id);
-            r.feeOn = on;
-            r.fee = on ? Math.max(0, fee) : 0;
-            if (p) {
-                r.amount = on ? Math.max(0, p.receivable - r.fee) : p.receivable;
-            }
-            if (redraw) { render(); return; }
-            const amtEl = wrap.querySelector(`[data-amt="${i}"]`);
-            if (amtEl) { amtEl.value = r.amount || ''; }
-            patchGross(i);
-            patchSum();
-        };
-        wrap.querySelectorAll('[data-feechk]').forEach((cb) => {
-            cb.onchange = () => {
-                const i = Number(cb.dataset.feechk);
-                setFee(i, feeGuess(rows[i]), cb.checked);
-            };
-        });
-        wrap.querySelectorAll('[data-fee]').forEach((inp) => {
-            inp.onchange = () => setFee(Number(inp.dataset.fee),
-                                        Number(inp.value) || 0, true, false);
-        });
-        // 搜尋框：**只換清單那塊**，整窗重畫會把打字焦點打掉。
-        // 兩份清單同一種接法 —— 寫兩次的話，修焦點的人只會修到其中一份。
-        const wireSearch = (attr, boxSel, html, bind, setQ) => {
-            const el = wrap.querySelector(`[${attr}]`);
-            bind();
-            if (!el) return;
-            el.oninput = () => {
-                setQ(el.value.trim().toLowerCase());
-                const box = wrap.querySelector(boxSel);
-                if (box) { box.innerHTML = html(); bind(); }
-            };
-        };
+        bindRows();
         wireSearch('data-projq', '#csp-projlist', projListHtml, bindProj,
                    (v) => { projQ = v; });
         wireSearch('data-advq', '#csp-advlist', advListHtml, bindAdv,
                    (v) => { advQ = v; });
-        // 手動列的分類樹（同 cash-tax-picker 的一排會長的下拉）
-        wrap.querySelectorAll('.csp-tax').forEach((box) => {
-            const i = Number(box.dataset.row);
-            const draw = () => taxSelects(box, {
-                tree,
-                chain: byId[rows[i].taxonomy_node_id] || [],
-                cls: 'crm-select crm-select-sm',
-                style: 'max-width:130px;',
-                blank: (lv) => (lv === 0 ? '（選分類）' : '（不細分）'),
-                keepOne: true,
-                onPick: (lv, v) => {
-                    const chain = byId[rows[i].taxonomy_node_id] || [];
-                    rows[i].taxonomy_node_id = v || (lv > 0 ? (chain[lv - 1] || {}).id || '' : '');
-                    draw();
-                },
-            });
-            draw();
-        });
     }
     render();
 }
