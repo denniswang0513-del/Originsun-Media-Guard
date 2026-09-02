@@ -1,15 +1,15 @@
 """
 api_timesheets.py — 工時 API（N2 階段 0：Google Sheet 自動同步，藍圖 §3.6）
 
-流程：Google Apps Script 定時把 Sheet 新列 POST 到 /ingest（帶 X-Timesheet-Token）
-→ 去重寫入 timesheets → 專案對映走 core.hr_logic.resolve_project（對映表／去客戶前綴，
-撞案不猜）。預算只從 PUT /budgets 進（Sheet「專案狀態」頁）。/summary 給 burn 檢核。
+流程：主控端定時拉整本 Sheet（services/timesheet_puller，公開連結 xlsx export；設定在
+/pull）→ services.timesheet_ingest 去重寫入 timesheets → 專案對映走
+core.hr_logic.resolve_project（對映表／去客戶前綴，撞案不猜）。Apps Script 推 /ingest
+（帶 X-Timesheet-Token）仍可用，走同一條寫入。預算只從 PUT /budgets 進（Sheet「專案狀態」頁）。
+/summary 給 burn 檢核。
 
 token：settings.json `timesheet.ingest_token`（首次取用自動生成）。
-Apps Script 端腳本見 docs/appsscript/timesheet_sync.gs。
 """
 
-import hashlib
 import secrets
 import uuid
 from datetime import datetime
@@ -21,11 +21,13 @@ from config import load_settings, save_settings
 from core.auth import check_admin, check_admin_or_module, current_username
 from core.db_guard import db_factory_or_503
 from core.ledger import MINE, require_entity
-from core.hr_logic import (Misses, explain_miss, manual_dup_key, remap_target, resolve_project, resolve_staff)
-from core.schemas import (TimesheetBudgetRequest, TimesheetIngestRequest,
-                          TimesheetManualRequest, TimesheetProjectMapRequest)
+from core.hr_logic import Misses, explain_miss, remap_target, resolve_project
+from core.schemas import (TimesheetBudgetRequest, TimesheetIngestRequest, TimesheetManualRequest,
+                          TimesheetProjectMapRequest, TimesheetPullSettings)
 from routers.crm._shared import project_names_map
-from services.timesheet_lookup import load_project_lookup, load_staff_index
+from services import timesheet_puller
+from services.timesheet_ingest import ingest, parse_date as _parse_date
+from services.timesheet_lookup import load_project_lookup
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
 
@@ -40,22 +42,6 @@ def _get_or_create_ingest_token() -> str:
         s.setdefault("timesheet", {})["ingest_token"] = tok
         save_settings(s)
     return tok
-
-
-def _parse_date(raw: str):
-    """Sheet 日期容錯：2026/6/30、2026-06-30、2026/06/30。解析失敗回 None（列仍收）。"""
-    raw = (raw or "").strip()
-    for fmt in ("%Y/%m/%d", "%Y-%m-%d", "%Y.%m.%d"):
-        try:
-            return datetime.strptime(raw, fmt)
-        except ValueError:
-            continue
-    return None
-
-
-def _row_hash(date_s: str, staff: str, project: str, task: str, hours) -> str:
-    key = f"{(date_s or '').strip()}|{(staff or '').strip()}|{(project or '').strip()}|{(task or '').strip()}|{hours}"
-    return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 
 def _require_mine_admin(request: Request, level: str = "view") -> None:
@@ -89,78 +75,35 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
         # Apps Script 端會重試，給明確訊息（刻意不同於通用 503）
         raise HTTPException(status_code=503, detail="資料庫離線，稍後重送（Apps Script 會重試）")
     factory = db_factory_or_503()
-
-    from sqlalchemy import select
-    from db.models import Timesheet
-
-    inserted = 0
-    skipped = 0
-    misses, staff_misses = Misses(), Misses()      # 專案：撞案／找不到；人員：同名兩人／沒這人
-
+    # 寫入規則（去重／手填優先／對映）只有 services.timesheet_ingest 那一份 —— 拉取 runner 也走它
     async with factory() as session:
-        # 專案對映：對映表 → 精確 → 去客戶前綴（唯一才算）→ 撞案不猜（core.hr_logic）
-        lk = await load_project_lookup(session)
-        staff_index = await load_staff_index(session)
+        return await ingest(session, req.rows, req.source)
 
-        # 既有 hash 一次撈（避免逐列查詢；量大時仍遠小於全表掃描成本）
-        hashes = [_row_hash(r.date, r.staff, r.project, r.task, r.hours) for r in req.rows]
-        existing = set(
-            (await session.execute(select(Timesheet.row_hash).where(Timesheet.row_hash.in_(hashes)))).scalars()
-        )
 
-        # 雙來源去重（藍圖 §3.6 階段3）：同 (人, 日, 專案) 已有手填列 → Sheet 列跳過
-        # （手填優先於 Sheet）。手填量小，逐人載鍵集比對。
-        batch_names = {(r.staff or "").strip() for r in req.rows if (r.staff or "").strip()}
-        manual_keys: set = set()
-        if batch_names:
-            m_rows = (await session.execute(
-                select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name)
-                .where(Timesheet.source == "manual")
-                .where(Timesheet.staff_name.in_(batch_names))
-            )).all()
-            manual_keys = {manual_dup_key(n, d, p) for n, d, p in m_rows}
+# ── 主控端定時拉 Sheet（services/timesheet_puller；取代 Apps Script 推）──────────
 
-        skipped_manual = 0
-        seen_in_batch: set[str] = set()
-        for r, h in zip(req.rows, hashes):
-            if h in existing or h in seen_in_batch:
-                skipped += 1
-                continue
-            seen_in_batch.add(h)
-            wd = _parse_date(r.date)
-            if manual_keys and manual_dup_key(r.staff, wd, r.project) in manual_keys:
-                skipped_manual += 1
-                continue
-            pname = (r.project or "").strip()
-            pid, why = resolve_project(pname, lk)
-            misses.note(why, pname)
-            sname = (r.staff or "").strip()
-            sid, swhy = resolve_staff(sname, staff_index)
-            staff_misses.note(swhy, sname)
-            session.add(Timesheet(
-                id=uuid.uuid4().hex,
-                work_date=wd,
-                staff_name=sname,
-                staff_id=sid,
-                project_id=pid,
-                project_name=pname,
-                task_note=(r.task or "").strip() or None,
-                hours=float(r.hours or 0),
-                status="import",
-                source=req.source,
-                row_hash=h,
-            ))
-            inserted += 1
+@router.get("/pull")
+async def get_pull(request: Request):
+    """拉取設定與上次結果（admin）。"""
+    check_admin(request)
+    return timesheet_puller.get_pull_settings()
 
-        await session.commit()
 
-    return {
-        "inserted": inserted,
-        "skipped": skipped,
-        "skipped_manual_priority": skipped_manual,   # 手填優先擋下的 Sheet 列
-        **misses.report("projects"),      # 撞案：owner 用 project_map 指定
-        **staff_misses.report("staff"),   # 同名兩人：不猜，留 NULL
-    }
+@router.put("/pull")
+async def put_pull(req: TimesheetPullSettings, request: Request):
+    """改 enabled／sheet_id／cron（admin）；cron 錯 → 422。"""
+    check_admin(request)
+    try:
+        return timesheet_puller.update_pull_settings(req.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"cron 格式錯誤：{e}")
+
+
+@router.post("/pull")
+async def run_pull_now(request: Request):
+    """立刻拉一次（admin；不看 enabled，dev 也能手動測）。"""
+    check_admin(request)
+    return await timesheet_puller.run_pull(force=True)
 
 
 # ── 對映表／回填／預算（docs/TIMESHEET_IMPORT_PLAN.md Phase A-3）────────────────

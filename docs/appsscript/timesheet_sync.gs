@@ -2,6 +2,10 @@
  * timesheet_sync.gs — 工時 Google Sheet → Originsun Media Guard 自動同步
  * （N2 階段 0；docs/TIMESHEET_IMPORT_PLAN.md Phase D）
  *
+ * ⚠ 2026-09-03 起這支是**可選**的：主控端已改成定時拉整本 Sheet（公開連結 xlsx export，
+ *   services/timesheet_puller，專案工時 tab 的「設定」開），不裝也會同步。兩條路走同一條
+ *   寫入（row_hash 去重），同時開也不會重複。只有在「不想讓主控端拉」時才需要裝這支。
+ *
  * ── 安裝步驟（一次性，約 5 分鐘）──────────────────────────────
  * 1. 打開工時試算表 → 擴充功能 → Apps Script → 貼上本檔全部內容
  * 2. 改下方 CONFIG.TOKEN（管理員登入 → GET /api/v1/timesheets/ingest_token，或請 Claude 撈）

@@ -1007,6 +1007,8 @@ async def _on_startup():
     _wd_threading.Thread(target=_wedge_watchdog, daemon=True, name="wedge-watchdog").start()
     from core.scheduler import run_scheduler  # type: ignore
     asyncio.create_task(run_scheduler())
+    from services import timesheet_puller
+    timesheet_puller.start_scheduler_task()   # 工時 Google Sheet 定時拉（內建 master gate）
 
 
 # ── Wedge watchdog: guaranteed recovery ──────────────────────────────────

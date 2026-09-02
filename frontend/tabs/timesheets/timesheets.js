@@ -32,6 +32,54 @@ let _month = _today().slice(0, 7);   // YYYY-MM（本地時區；toISOString 是
 let _summaryCache = null;   // 最近一次 summary（供點欄頭排序重繪）
 let _staffCache = null;     // 最近一次 by_staff
 let _recentCache = null;    // 最近一次 recent rows
+let _pullCache = null;      // GET /timesheets/pull（主控端定時拉 Sheet 的設定與上次結果）
+
+/** Sheet 拉取狀態列：開／關、上次結果、立即拉取、設定 —— 空狀態與看板共用。 */
+function _pullBar() {
+    const p = _pullCache;
+    if (!p) return '';
+    const state = p.enabled ? `每小時自動拉（cron ${esc(p.cron)}）` : '自動拉取：關';
+    const last = p.last_summary ? esc(p.last_summary) : '還沒拉過';
+    return `
+        <div class="ts-note" style="margin:6px 0 12px;">
+            Google Sheet 拉取 — ${state}｜${last}
+            ${p.sheet_id ? '' : '｜<b>還沒設試算表 id</b>'}
+            <button class="ts-btn ghost" data-ts-action="pull" ${p.running ? 'disabled' : ''}
+                    style="margin-left:8px;">${p.running ? '拉取中…' : '立即拉取'}</button>
+            <button class="ts-btn ghost" data-ts-action="pull-settings">設定</button>
+        </div>`;
+}
+
+/** 設定視窗最小化：prompt 試算表 id → 是否啟用；cron 用預設每小時。 */
+async function _pullSettings() {
+    const cur = _pullCache || {};
+    const sid = prompt('工時試算表 id（網址 /d/<id>/ 那段；公開連結即可）', cur.sheet_id || '');
+    if (sid === null) return;
+    const enable = confirm('要開啟每小時自動拉取嗎？\n（取消＝關閉自動拉取，仍可手動「立即拉取」）');
+    try {
+        _pullCache = await tfetch('/api/v1/timesheets/pull', {
+            method: 'PUT', body: { sheet_id: sid.trim(), enabled: enable },
+        });
+        await refresh();
+    } catch (e) {
+        alert('儲存失敗：' + (e.message || e));
+    }
+}
+
+async function _pullNow() {
+    try {
+        const r = await tfetch('/api/v1/timesheets/pull', { method: 'POST' });
+        if (r.status !== 'ok') { alert('拉取沒成功：' + (r.message || r.status)); }
+        else {
+            alert(`拉了 ${r.rows} 列：新增 ${r.inserted}、重複 ${r.skipped}、壞列 ${r.bad_rows}`
+                + (r.unmatched_projects.length ? `\n找不到 ${r.unmatched_projects.length} 個專案名（看下方未對映表）` : ''));
+        }
+        _summaryCache = null;
+        await refresh();
+    } catch (e) {
+        alert('拉取失敗：' + (e.message || e));
+    }
+}
 
 // ── 點欄頭排序：預設 key '' = 不排序、維持後端順序（burn 表本身已按消耗率排好），點了才生效 ──
 function _redrawTbody(tableId, tbodyHtmlFn, sorter) {
@@ -111,6 +159,8 @@ async function refresh() {
         } else {
             const s = await tfetch('/api/v1/timesheets/summary');
             _summaryCache = s;
+            // 拉取狀態列（admin 端點；拿不到就不顯示那一列，不擋看板）
+            _pullCache = await tfetch('/api/v1/timesheets/pull').catch(() => null);
             _content.innerHTML = (s.total_rows === 0) ? _renderEmpty() : _renderBoard(s);
         }
         _bind();
@@ -215,6 +265,7 @@ function _renderBoard(s) {
             <button class="ts-btn ghost" data-ts-action="refresh" style="vertical-align:top;">↻ 重新整理</button>
             <button class="ts-btn ghost" data-ts-action="recent" style="vertical-align:top;">🔍 最近同步列</button>
         </div>
+        ${_pullBar()}
         <div class="ts-card">
             <h3>📊 專案 Burn（消耗率高在前）</h3>
             <table id="ts-burn-table">
@@ -325,21 +376,18 @@ function _renderEmpty() {
         <h2>專案工時</h2>
         <div class="ts-sub">資料來源：工時 Google Sheet 自動同步 + 系統內快速補登</div>
         ${_viewBtns()}
+        ${_pullBar()}
         <div class="ts-card" style="max-width:720px;">
-            <h3>🚀 尚無資料 — 把同步腳本裝進 Google Sheet（約 5 分鐘，一次性）</h3>
+            <h3>尚無資料 — 讓主控端定時拉工時 Google Sheet（一次設定）</h3>
             <ol>
-                <li>打開工時試算表 → <b>擴充功能 → Apps Script</b></li>
-                <li>貼上 repo 裡 <code>docs/appsscript/timesheet_sync.gs</code> 的全部內容</li>
-                <li>改頂部 CONFIG.TOKEN（按下面按鈕取得）—— 分頁名與欄位已照工時表設好</li>
-                <li>歷史列由 <code>scripts/import_timesheets.py</code> 一次匯入；裝腳本前先執行一次
-                    <code>executeSetMarkerToEnd</code>，之後只送新列</li>
-                <li>執行一次 <code>syncNewRows</code>（首次會要求授權）→ 紀錄顯示 inserted 即成功</li>
-                <li>觸發條件 → 新增 → <code>syncNewRows</code> → 時間驅動 → 每小時</li>
+                <li>按上面「設定」，貼工時試算表的 id（網址 /d/&lt;id&gt;/ 那段；公開連結即可）並開啟自動拉取</li>
+                <li>按「立即拉取」—— 整本表會匯進來（後端以列內容去重，重跑安全）</li>
+                <li>之後每小時自動拉一次；團隊照常填 Sheet，這頁的數字跟著更新</li>
             </ol>
-            <button class="ts-btn" data-ts-action="token">🔑 顯示同步 Token</button>
-            <span id="ts-token-slot" style="margin-left:10px;"></span>
-            <div class="ts-note">裝好後第一次執行會把歷史列全部匯入（後端自動去重，重跑安全）。
-                團隊照常填 Sheet，這頁的數字每小時自動更新。</div>
+            <div class="ts-note">不想讓主控端拉、要從 Sheet 那邊推的話，仍可裝 <code>docs/appsscript/timesheet_sync.gs</code>
+                （token 按下面取得）；兩條路走同一條寫入，重疊也不會重複。
+                <button class="ts-btn ghost" data-ts-action="token" style="margin-left:6px;">顯示同步 Token</button>
+                <span id="ts-token-slot" style="margin-left:10px;"></span></div>
         </div>`;
 }
 
@@ -389,6 +437,8 @@ function _bind() {
         btn.addEventListener('click', async () => {
             const act = btn.dataset.tsAction;
             if (act === 'refresh') return refresh();
+            if (act === 'pull') return _pullNow();
+            if (act === 'pull-settings') return _pullSettings();
             if (act === 'map') return _mapProject(btn.dataset.name);
             if (act === 'view') { _view = btn.dataset.view; return refresh(); }
             if (act === 'toggle-manual') {

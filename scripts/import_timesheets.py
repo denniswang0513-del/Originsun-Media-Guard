@@ -34,58 +34,9 @@ sys.path.insert(0, REPO)
 
 from core.hr_logic import INTERNAL_BUCKETS, explain_miss  # noqa: E402
 from scripts._common import admin_session, api_base, resolve_db_url  # noqa: E402
+from services.timesheet_sheet import load_workbook, read_budgets, read_rows  # noqa: E402  讀表只有那一份
 
-DATA_SHEET = "總表（勿動）"
-STATUS_SHEET = "專案狀態(勿動)"
 BATCH = 200
-
-
-def _num(v):
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def _date_str(v) -> str:
-    """xlsx 的 datetime → 'yyyy/MM/dd'（同 Apps Script）；已是字串就原樣 strip。"""
-    if isinstance(v, (dt.datetime, dt.date)):
-        return f"{v.year:04d}/{v.month:02d}/{v.day:02d}"
-    return str(v or "").strip()
-
-
-def read_rows(wb) -> tuple:
-    """回 (可送的列, 壞列)。壞列＝日期解析不了或時數不是數字 —— 收進報告，不送。"""
-    ws = wb[DATA_SHEET]
-    good, bad = [], []
-    for i, r in enumerate(ws.iter_rows(min_row=4, values_only=True), start=4):
-        r = list(r) + [None] * 8
-        d, who, proj, task, hrs = r[:5]
-        if d is None and not who and not proj and not task:
-            continue
-        h = _num(hrs)
-        ds = _date_str(d)
-        if h is None or not ds or len(ds) < 8:
-            bad.append({"row": i, "date": ds, "staff": who, "project": proj, "hours": hrs})
-            continue
-        good.append({"date": ds, "staff": str(who or "").strip(),
-                     "project": str(proj or "").strip(),
-                     "task": str(task or "").strip(), "hours": h})
-    return good, bad
-
-
-def read_budgets(wb) -> list:
-    """「專案狀態」：預算＝剩餘＋實際（規劃 §1.1 驗過）；≤0＝沒設，不送。"""
-    out = []
-    for r in wb[STATUS_SHEET].iter_rows(min_row=2, values_only=True):
-        r = list(r) + [None] * 12
-        menu = (r[1] or "")
-        if not menu:
-            continue
-        b = (_num(r[9]) or 0) + (_num(r[10]) or 0)
-        if b > 0:
-            out.append({"sheet_name": str(menu).strip(), "budget_hours": round(b, 1)})
-    return out
 
 
 async def _lookup(prod: bool):
@@ -167,8 +118,7 @@ def main():
     ap.add_argument("--report", default=os.path.join(REPO, "docs", "timesheet_import_report.md"))
     a = ap.parse_args()
 
-    import openpyxl
-    wb = openpyxl.load_workbook(a.xlsx, read_only=True, data_only=True)   # 開一次，兩個分頁共用
+    wb = load_workbook(Path(a.xlsx).read_bytes())   # 開一次，兩個分頁共用
     good, bad = read_rows(wb)
     budgets = read_budgets(wb) if a.budget else []
     hours = collections.Counter()

@@ -102,10 +102,12 @@ def test_staff_resolution_and_miss_buckets_share_the_project_contract():
     for why in ("map", "exact", "key", "key+client", "bucket", "empty"):
         assert miss_bucket(why) is None, why
     src = code_only(repo_src("routers/api_timesheets.py"))
-    for fn in ("async def ingest_rows(", "async def set_budgets(", "async def insert_manual_rows("):
-        assert ".note(" in func_body(src, fn) and ".report(" in func_body(src, fn), f"自己收桶：{fn}"
-    assert "miss_bucket(" not in src, "router 又自己分桶了（走 Misses）"
-    assert "unique_hit(" not in src, "router 自己判人員同名，沒走 resolve_staff"
+    svc = code_only(repo_src("services/timesheet_ingest.py"))
+    for s, fn in ((svc, "async def ingest("), (src, "async def set_budgets("), (src, "async def insert_manual_rows(")):
+        assert ".note(" in func_body(s, fn) and ".report(" in func_body(s, fn), f"自己收桶：{fn}"
+    for s in (src, svc):
+        assert "miss_bucket(" not in s, "又自己分桶了（走 Misses）"
+        assert "unique_hit(" not in s, "自己判人員同名，沒走 resolve_staff"
 
 
 # ── remap 的三條規則（真值表）──
@@ -141,9 +143,11 @@ def test_every_entry_point_shares_one_lookup_and_one_resolver():
     """ingest／remap／budgets／手填／summary／projects 都吃 services 那一份查表；
     名稱→專案的判定只有 resolve_project 一支（手填原本自己維護第二份全名精確對映）。"""
     src = code_only(repo_src("routers/api_timesheets.py"))
-    for fn in ("async def ingest_rows(", "async def remap_timesheets(", "async def set_budgets(",
+    for fn in ("async def remap_timesheets(", "async def set_budgets(",
                "async def burn_summary(", "async def insert_manual_rows(", "async def timesheet_projects("):
         assert "load_project_lookup(session)" in func_body(src, fn), fn
+    assert "load_project_lookup(session)" in func_body(
+        code_only(repo_src("services/timesheet_ingest.py")), "async def ingest(")
     assert "/project_map" in src and "async def list_project_map" not in src, "沒人讀的清單端點又長回來了"
     assert "name_to_id" not in src, "第二份名稱對映還在"
     # mine 守衛：行為測試在 test_mapping_endpoints_refuse_before_touching_the_db，不釘拼字
@@ -195,8 +199,9 @@ def test_ingest_only_accepts_the_two_sources_and_fills_staff_id():
     from typing import get_args
     from core.schemas import TimesheetIngestRequest
     assert set(get_args(TimesheetIngestRequest.model_fields["source"].annotation)) == {"sheet", "import"}
-    fn = code_only(func_body(repo_src("routers/api_timesheets.py"), "async def ingest_rows("))
-    assert "source=req.source" in fn
+    # 寫入本體在 services.timesheet_ingest（HTTP 端點與拉取 runner 共用）
+    fn = code_only(func_body(repo_src("services/timesheet_ingest.py"), "async def ingest("))
+    assert "source=source" in fn
     assert "staff_id=sid" in fn
     # 人員同名兩人不猜，而且分開回報（不是壓成「找不到」）
     assert "resolve_staff(" in fn and 'report("staff")' in fn
@@ -210,11 +215,13 @@ def test_the_import_script_formats_dates_like_apps_script_and_never_inits_db():
     兩條路格式不同，交接那幾天的列就會重複入庫（規劃 D9）。
     🔴 dry-run 不經 init_db：那支會 create_all 到目標庫，--prod 的「只讀」就不只讀了。"""
     import datetime as dt
-    from scripts.import_timesheets import _date_str
-    assert _date_str(dt.datetime(2026, 9, 1)) == "2026/09/01"
-    assert _date_str(dt.date(2026, 1, 5)) == "2026/01/05"
-    assert _date_str(" 2026/6/30 ") == "2026/6/30"
+    from services.timesheet_sheet import date_str
+    assert date_str(dt.datetime(2026, 9, 1)) == "2026/09/01"
+    assert date_str(dt.date(2026, 1, 5)) == "2026/01/05"
+    assert date_str(" 2026/6/30 ") == "2026/6/30"
     src = code_only(repo_src("scripts/import_timesheets.py"))
+    # 讀表（分頁名／欄位／壞列／日期字串）只有 services.timesheet_sheet 那一份，拉取 runner 同吃
+    assert "def read_rows" not in src and "from services.timesheet_sheet import" in src
     assert '"source": "import"' in src
     assert "init_db" not in src
     assert "routers.api_timesheets" not in src, "腳本為了查表拉進整個 router"

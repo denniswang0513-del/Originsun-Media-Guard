@@ -111,11 +111,32 @@ Phase A 實測（2026-09-02，讀生產私帳 413 案）：key 266 案 18,791h �
 Phase A 端點在 dev 端到端實跑過（2026-09-02）：ingest(import) 3 列 → 重送 0 新增 → source=csv 422
 → summary 的 reason/candidates → project_map → remap changed=1 → budgets applied=2、找不到的回報不寫。
 
-### Phase D —— 同步腳本修正並安裝（owner 15 分鐘）—— **腳本已改好（2026-09-02），剩 owner 安裝**
+**✅ 執行紀錄（2026-09-02 23:50，生產 8000，owner 下令）**
 
-1. `timesheet_sync.gs` 改：`SHEETS: [{name:'工作紀錄表', startRow:7}, {name:'助理工作紀錄表', startRow:7}]`、`COL: {DATE:1, STAFF:2, PROJECT:3, TASK:4, HOURS:5}`、拿掉 `BUDGET`、marker 改 per-sheet key
-2. **安裝前把兩個 marker 設成匯入當下的最後一列**（`executeSetMarker`）—— 之後只送新列；就算重疊，D9 保證 hash 相同、後端去重
-3. owner 照檔頭 5 步裝；第一次手動跑 `syncNewRows` 看 `inserted: 0`（因為都匯過了）
+- deploy_to_prod → 8000 = v2.4.288（機隊不動；`_deploy_backup` 留 2.4.287）
+- 前置：建 crm_staff 4 人（郭昭君／陳妍蓁／林依靜／黃柔云）；私帳案「源日後期」
+  （客戶＝源日有限公司）；`源日後期_*` 4 個 Sheet 名對映過去
+- 匯入：9,822 可送列 → **新增 9,813、去重 9**（Sheet 內容完全相同的列）；壞列 23 沒送（報告列在上面）
+- 冪等：立刻再跑一次 → 新增 0、重複 9,822
+- 預算：寫入 373 案；撞案 3、找不到 11（留 owner 在 tab 指定）
+- remap：changed 124（源日後期那四個）；by_reason key 6,742／key+client 355／map 124／bucket 2,220／none 184／ambiguous 1
+- 結果：burn 表 318 案有時數；未對映剩 1 撞案 ＋ 15 找不到（畫面有候選／建議）＋ 7 內部桶
+  ＋ **603.7h 專案名空白**（Sheet 本來就沒填，owner 決定要不要回頭補）
+- 剩下：owner 在 tab 逐一指定；Phase D 裝 Apps Script
+
+### Phase D —— 持續同步：**改成主控端定時拉（2026-09-03）**，Apps Script 變成可選
+
+owner 2026-09-03「可以寫一個東西定期向 Google Sheet 拉資料就好了嗎？那個連結是公開連結」。
+可以：整本 xlsx 用公開連結 `export?format=xlsx` 拿得到（助理分頁的 IMPORTRANGE 值也在），
+每次拉全表、走同一條 `services.timesheet_ingest.ingest`（row_hash 去重）—— 不用 marker、
+不用碰試算表那邊。
+
+- `services/timesheet_puller.py`：settings.json `timesheet.pull {enabled, sheet_id, cron}`，
+  每 60s 看 cron 到期就拉；**只在 master 跑**（`core.topology.is_master_machine`，dev 不跑）
+- 端點：`GET/PUT/POST /api/v1/timesheets/pull`（admin；POST＝立即拉一次，不看 enabled）
+- 專案工時 tab 有狀態列：開／關、上次結果、「立即拉取」「設定」（填 sheet id、開關）
+- 讀表只有 `services/timesheet_sheet.py` 一份，歷史匯入腳本同吃
+- 舊路 `timesheet_sync.gs` 仍可用（推 /ingest，同一條寫入，重疊不重複），沒必要不用裝
 
 ### Phase E —— 收尾（1 小時）—— **「指定專案」UI 已做（2026-09-02）**
 

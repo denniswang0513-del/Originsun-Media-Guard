@@ -37,6 +37,12 @@ _DEFAULT_SETTINGS: dict = {
     "finance": {
         "report_remind_hour": 9,
     },
+    # 工時 Google Sheet（services/timesheet_puller，只在 master 跑）：ingest_token 給
+    # Apps Script／腳本推；pull 是主控端定時拉整本 xlsx（公開連結），enabled 由 owner 開。
+    "timesheet": {
+        "ingest_token": "",
+        "pull": {"enabled": False, "sheet_id": "", "cron": "0 * * * *"},
+    },
     "nas_paths": {
         "ota_dir": "",
         "web_report_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\FileReport",

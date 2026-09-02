@@ -912,6 +912,13 @@ class TimesheetRow(BaseModel):
     hours: float = 0.0
 
 
+class TimesheetPullSettings(BaseModel):
+    """PUT /timesheets/pull —— 只送要改的欄；None＝不動。"""
+    enabled: Optional[bool] = None
+    sheet_id: Optional[str] = None
+    cron: Optional[str] = None
+
+
 class TimesheetIngestRequest(BaseModel):
     rows: List[TimesheetRow]
     # sheet＝Apps Script 每小時同步；import＝歷史一次性匯入（docs/TIMESHEET_IMPORT_PLAN.md D3）。
