@@ -101,7 +101,15 @@ Phase A 實測（2026-09-02，讀生產私帳 413 案）：key 266 案 18,791h �
 
 1. dev（`mediaguard_dev`）：`--apply` → 驗 `timesheets` 9,8xx 筆、Burn 表、人員月視圖、專案頁工時燈、`/my.html` 卡
 2. prod：`--apply --prod` → 同樣四處驗；**再跑一次 `--apply --prod` 確認 0 新增**（冪等證明）
-3. 對映表：owner 決定的 52＋5 筆 `PUT project_map` → `POST remap` → 驗撞案的 `project_id` 落定
+3. 前置資料（owner 已拍板）：4 個人 → `POST /api/v1/crm/staff`；「源日後期」→
+   **`POST /api/v1/finance/project-ledger?entity=mine`**（🔴 不是 CRM 的 `POST /projects` ——
+   那條會落母公司，dev e2e 實際踩到；entity 用 query pin）
+4. 對映：owner 在人事管理 › 專案工時 tab 的「未對映」表逐一按「指定專案」（1 撞案＋16 找不到＋
+   源日後期_* 4 個 → 新案）；每按一次自動 `PUT project_map` → `POST remap`
+5. 驗：Burn 表撞案落定、`SELECT count(*) FROM timesheets WHERE project_id IS NULL AND project_name NOT IN (內部桶)` 趨近 0
+
+Phase A 端點在 dev 端到端實跑過（2026-09-02）：ingest(import) 3 列 → 重送 0 新增 → source=csv 422
+→ summary 的 reason/candidates → project_map → remap changed=1 → budgets applied=2、找不到的回報不寫。
 
 ### Phase D —— 同步腳本修正並安裝（owner 15 分鐘）—— **腳本已改好（2026-09-02），剩 owner 安裝**
 
