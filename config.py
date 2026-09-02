@@ -42,6 +42,8 @@ _DEFAULT_SETTINGS: dict = {
     "timesheet": {
         "ingest_token": "",
         "pull": {"enabled": False, "sheet_id": "", "cron": "0 * * * *"},
+        # 週一 09:00 上週工時 digest → Google Chat（services/timesheet_digest）
+        "digest": {"enabled": False, "cron": "0 9 * * 1"},
     },
     "nas_paths": {
         "ota_dir": "",

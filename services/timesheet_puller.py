@@ -129,23 +129,29 @@ async def _scheduler_loop() -> None:
         logger.info("[timesheet_puller] 非 master（或 dev）— 工時拉取排程不啟動；手動 POST /pull 仍可用")
         return
     await asyncio.sleep(62)       # 錯開其他 runner 的啟動檢查
+    from services import timesheet_digest
+
+    def _due(cron: str, last_at: float) -> bool:
+        try:
+            return datetime.now() >= croniter(cron, datetime.fromtimestamp(last_at)).get_next(datetime)
+        except (ValueError, KeyError, TypeError) as e:
+            logger.warning("[timesheet_puller] cron 格式錯誤 %r: %s", cron, e)
+            return False
+
     while True:
         try:
             cfg = get_pull_settings()
             if cfg["enabled"] and cfg["cron"] and cfg["sheet_id"]:
-                last_at = cfg["last_run_at"]
-                if last_at <= 0:
-                    # 首次啟用：立刻拉一次（沒有額度顧慮；資料本來就該在）
+                # 首次啟用：立刻拉一次（沒有額度顧慮；資料本來就該在）
+                if cfg["last_run_at"] <= 0 or _due(cfg["cron"], cfg["last_run_at"]):
                     await run_pull()
-                else:
-                    try:
-                        next_due = croniter(cfg["cron"], datetime.fromtimestamp(last_at)).get_next(datetime)
-                    except (ValueError, KeyError, TypeError) as e:
-                        logger.warning("[timesheet_puller] cron 格式錯誤 %r: %s", cfg["cron"], e)
-                        await asyncio.sleep(60)
-                        continue
-                    if datetime.now() >= next_due:
-                        await run_pull()
+            # 週一 digest（同一個 loop、同一個 master gate；首次啟用等下一個 cron 時點，不立刻轟一封）
+            dg = timesheet_digest.get_digest_settings()
+            if dg["enabled"] and dg["cron"]:
+                if dg["last_run_at"] <= 0:
+                    timesheet_digest._mark(last_run_at=time.time())
+                elif _due(dg["cron"], dg["last_run_at"]):
+                    await timesheet_digest.send_digest()
         except Exception:
             logger.exception("[timesheet_puller] scheduler loop 異常")
         await asyncio.sleep(60)

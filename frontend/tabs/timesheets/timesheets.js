@@ -38,6 +38,9 @@ let _recentCache = null;    // 最近一次 recent rows
 let _pullCache = null;      // GET /timesheets/pull（主控端定時拉 Sheet 的設定與上次結果）
 let _mineCache = null;      // 最近一次 /mine（我的一天）
 let _projOpts = null;       // project_options（我的一天的專案 datalist）
+let _projectCache = null;   // 最近一次 /project（專案檔案頁）
+let _compareNames = [];     // 類似專案並排：目前選的案名
+let _digestCache = null;    // GET /timesheets/digest
 
 function _shiftDay(ymd, delta) {
     const [y, m, d] = ymd.split('-').map(Number);
@@ -182,14 +185,23 @@ async function refresh() {
             _staffCache = d;
             _content.innerHTML = _renderStaffView(d);
         } else if (_view === 'dash') {
-            const s = await tfetch('/api/v1/timesheets/summary');
-            _summaryCache = s;
-            _content.innerHTML = _renderDash(s);
+            _content.innerHTML = _renderDash(await tfetch('/api/v1/timesheets/dashboard'));
         } else if (_view === 'settings') {
             const s = await tfetch('/api/v1/timesheets/summary');
             _summaryCache = s;
             _pullCache = await tfetch('/api/v1/timesheets/pull').catch(() => null);
+            _digestCache = await tfetch('/api/v1/timesheets/digest').catch(() => null);
             _content.innerHTML = _renderSettings(s);
+        } else if (_view.startsWith('project:')) {
+            const d = await tfetch('/api/v1/timesheets/project?name=' + encodeURIComponent(_view.slice(8)));
+            _projectCache = d;
+            _content.innerHTML = _renderProject(d);
+        } else if (_view === 'compare') {
+            const d = await tfetch('/api/v1/timesheets/compare?names=' + encodeURIComponent(_compareNames.join('|')));
+            _content.innerHTML = _renderCompare(d);
+        } else if (_view.startsWith('person:')) {
+            const d = await tfetch(`/api/v1/timesheets/person?name=${encodeURIComponent(_view.slice(7))}&month=${_month}`);
+            _content.innerHTML = _renderPerson(d);
         } else {
             const s = await tfetch('/api/v1/timesheets/summary');
             _summaryCache = s;
@@ -419,7 +431,8 @@ function _pctStyle(pct) {
 function _burnTbodyHtml() {
     const rows = _burnSorter.sorted((_summaryCache && _summaryCache.projects) || []).map(p => `
         <tr>
-            <td>${esc(p.project_name || p.project_id)}</td>
+            <td><span class="ts-link" data-ts-action="open-project" data-name="${esc(p.project_name || '')}">${esc(p.project_name || p.project_id)}</span>
+                ${p.stale ? '<span class="ts-badge warn" title="進行中但 7 天沒工時">停滯</span>' : ''}</td>
             <td style="color:#888;">${esc(p.status || '')}</td>
             <td class="num">${p.hours_used}</td>
             <td class="num">${p.budget_hours ?? '<span style="color:#666;">未設</span>'}</td>
@@ -434,15 +447,25 @@ function _burnTbodyHtml() {
 function _renderProjects(s) {
     const totalHours = s.projects.reduce((a, p) => a + (p.hours_used || 0), 0)
         + s.unmatched.reduce((a, u) => a + (u.hours_used || 0), 0);
-    return `${_head('專案：每案投入時數對預算（P2 會加時間軸、分類組成、類似專案比較）')}
+    const stale = s.projects.filter(p => p.stale).length;
+    const unmatchedRows = s.unmatched.filter(u => u.reason !== 'bucket').map(u => `
+        <tr><td><span class="ts-link" data-ts-action="open-project" data-name="${esc(u.project_name)}">${esc(u.project_name)}</span>
+                <span class="ts-badge">未對映</span></td>
+            <td class="num">${u.hours_used}</td>
+            <td><button class="ts-btn ghost" data-ts-action="map" data-name="${esc(u.project_name)}" style="padding:2px 8px;">指定專案</button></td></tr>`).join('');
+    return `${_head('專案：每案投入時數對預算。點案名進檔案頁（時間軸、分類組成、類似專案並排）。')}
         <div style="margin-bottom:12px;">
             <span class="ts-chip"><b>${s.total_rows}</b>總列數</span>
             <span class="ts-chip"><b>${s.projects.length}</b>已對映專案</span>
             <span class="ts-chip"><b>${s.unmatched.length}</b>未對映</span>
+            <span class="ts-chip"><b>${stale}</b>停滯</span>
             <span class="ts-chip"><b>${Math.round(totalHours)}</b>總時數</span>
             <button class="ts-btn ghost" data-ts-action="refresh" style="vertical-align:top;">↻ 重新整理</button>
             <button class="ts-btn ghost" data-ts-action="recent" style="vertical-align:top;">最近同步列</button>
+            <button class="ts-btn ghost" data-ts-action="export-month" style="vertical-align:top;">匯出本月 CSV</button>
         </div>
+        ${unmatchedRows ? `<div class="ts-card"><h3>未對映（${s.unmatched.filter(u => u.reason !== 'bucket').length}）—— 對到案之後才有預算與 burn</h3>
+            <table><thead><tr><th>Sheet 案名</th><th class="num">時數</th><th></th></tr></thead><tbody>${unmatchedRows}</tbody></table></div>` : ''}
         <div class="ts-card">
             <h3>📊 專案 Burn（消耗率高在前）</h3>
             <table id="ts-burn-table">
@@ -456,11 +479,129 @@ function _renderProjects(s) {
         <div id="ts-recent-slot"></div>`;
 }
 
-// ── 人員月視圖：每人 × 每專案 時數（P2 會加逐日流水與熱圖）──
+// ── 專案檔案頁：摘要／分類組成／時間軸／各人各月／預算／報價人日／類似專案 ──
+function _bars(pairs, colorFn) {
+    const max = Math.max(1, ...pairs.map(p => p[1]));
+    return pairs.map(([k, v, pct]) => `<div style="display:flex;gap:8px;align-items:center;font-size:12px;margin:3px 0;">
+        <span style="width:110px;color:#bbb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(k)}</span>
+        <div style="flex:1;height:8px;background:#2c2c2c;border-radius:4px;overflow:hidden;"><i style="display:block;height:100%;width:${Math.round(v / max * 100)}%;background:${colorFn ? colorFn(k) : '#3b82f6'};"></i></div>
+        <span style="width:90px;text-align:right;color:#ddd;">${v} h${pct != null ? `<span style="color:#666;"> ${pct}%</span>` : ''}</span></div>`).join('') || '<div style="color:#666;">—</div>';
+}
+function _renderProject(d) {
+    const pct = d.pct == null ? '—' : d.pct + '%';
+    const inCompare = _compareNames.includes(d.project_name);
+    return `${_head('專案檔案：這個案誰在哪天做了什麼、花了多少、跟類似的案比起來如何。')}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+            <button class="ts-btn ghost" data-ts-action="view" data-view="projects">‹ 專案清單</button>
+            <b style="color:#eee;font-size:15px;">${esc(d.project_name)}</b>
+            <span style="color:#888;">${esc(d.status || (d.mapped ? '' : '未對映'))}</span>
+            <span style="flex:1;"></span>
+            <button class="ts-btn ghost" data-ts-action="compare-add" data-name="${esc(d.project_name)}">${inCompare ? '已在比較清單' : '加入比較'}</button>
+            ${_compareNames.length ? `<button class="ts-btn" data-ts-action="view" data-view="compare">並排比較（${_compareNames.length}）</button>` : ''}
+            ${d.mapped ? `<button class="ts-btn ghost" data-ts-action="budget" data-pid="${esc(d.project_id)}" data-cur="${d.budget_hours ?? ''}">改預算</button>` : ''}
+            <button class="ts-btn ghost" data-ts-action="export-project" data-name="${esc(d.project_name)}">匯出 CSV</button>
+        </div>
+        <div style="margin-bottom:12px;">
+            <span class="ts-chip"><b>${d.total}</b>總時數</span>
+            <span class="ts-chip"><b>${d.people}</b>人</span>
+            <span class="ts-chip"><b>${d.span_days}</b>天（${esc(d.first || '—')} → ${esc(d.last || '—')}）</span>
+            <span class="ts-chip"><b>${d.budget_hours ?? '—'}</b>預算 h　<span class="ts-pct" style="${_pctStyle(d.pct)}">${pct}</span></span>
+            ${d.quote_days != null ? `<span class="ts-chip"><b>${d.quote_days}</b>報價人日（≈ ${d.quote_days * 8} h）</span>` : ''}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;">
+            <div class="ts-card" style="margin:0;"><h3>分類組成</h3>${_bars(d.composition)}</div>
+            <div class="ts-card" style="margin:0;"><h3>各人</h3>${_bars(d.by_person)}</div>
+            <div class="ts-card" style="margin:0;"><h3>各月</h3>${_bars(d.by_month)}</div>
+            <div class="ts-card" style="margin:0;"><h3>類似專案（自動推薦，人再挑）</h3>
+                ${d.similar.length ? d.similar.map(([n, sc]) => `<div style="display:flex;gap:8px;align-items:center;font-size:12px;margin:4px 0;">
+                    <span class="ts-link" data-ts-action="open-project" data-name="${esc(n)}" style="flex:1;">${esc(n)}</span>
+                    <span style="color:#666;">${Math.round(sc * 100)}%</span>
+                    <button class="ts-btn ghost" data-ts-action="compare-add" data-name="${esc(n)}" style="padding:2px 8px;">${_compareNames.includes(n) ? '已加' : '加入比較'}</button></div>`).join('')
+                : '<div style="color:#666;">沒有像的案（同客戶／案名相似／時數量級接近）</div>'}
+            </div>
+        </div>
+        <div class="ts-card" style="margin-top:14px;"><h3>時間軸（最近 90 個有紀錄的日子）</h3>
+            ${d.timeline.map(day => `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid #2c2c2c;font-size:12.5px;">
+                <span style="width:100px;color:#888;white-space:nowrap;">${esc(_dayLabel(day.date))}</span>
+                <div style="flex:1;">${day.items.map(i => `<div><span style="color:#eee;">${esc(i.name)}</span>
+                    ${i.work_type ? `<span style="color:#9ca3af;">[${esc(i.work_type)}]</span>` : ''}
+                    <span style="color:#bbb;">${esc(i.task || '')}</span>
+                    <span style="color:${i.hours > 0 ? '#ddd' : '#93c5fd'};float:right;">${i.hours > 0 ? i.hours + ' h' : '計畫 ' + (i.planned_hours || 0) + ' h'}</span></div>`).join('')}</div>
+            </div>`).join('') || '<div style="color:#666;">還沒有紀錄</div>'}
+        </div>`;
+}
+function _renderCompare(d) {
+    const cols = d.items;
+    const row = (label, fn) => `<tr><th style="white-space:nowrap;">${label}</th>${cols.map(c => `<td>${fn(c)}</td>`).join('')}</tr>`;
+    const types = [...new Set(cols.flatMap(c => c.composition.map(x => x[0])))];
+    return `${_head('類似專案並排：總時數、跨了幾天、幾個人、分類組成、各人 —— 接類似案時的參考。')}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+            <button class="ts-btn ghost" data-ts-action="view" data-view="projects">‹ 專案清單</button>
+            ${_compareNames.map(n => `<span class="ts-chip" style="padding:4px 10px;">${esc(n)} <span class="ts-link" data-ts-action="compare-remove" data-name="${esc(n)}" style="margin-left:6px;">×</span></span>`).join('')}
+        </div>
+        <div class="ts-card" style="overflow-x:auto;"><table>
+            <thead><tr><th></th>${cols.map(c => `<th><span class="ts-link" data-ts-action="open-project" data-name="${esc(c.project_name)}">${esc(c.project_name)}</span></th>`).join('')}</tr></thead>
+            <tbody>
+                ${row('總時數', c => `<b>${c.total}</b> h`)}
+                ${row('人數', c => c.people)}
+                ${row('起訖', c => `${esc(c.first || '—')} → ${esc(c.last || '—')}`)}
+                ${row('跨天數', c => c.span_days)}
+                ${types.map(t => row(t, c => { const x = c.composition.find(y => y[0] === t); return x ? `${x[1]} h <span style="color:#666;">${x[2]}%</span>` : '<span style="color:#444;">—</span>'; })).join('')}
+                ${row('各人', c => c.by_person.slice(0, 5).map(([n, h]) => `${esc(n)} ${h}`).join('<br>'))}
+            </tbody>
+        </table></div>`;
+}
+
+// ── 人員檔案頁：逐日流水／熱圖／案別／分類／12 個月走勢 ──
+function _heatCell(h) {
+    if (!h) return '#2a2a2a';
+    if (h >= 8) return '#1d4ed8';
+    if (h >= 4) return '#2563eb';
+    if (h >= 2) return '#3b82f6';
+    return '#60a5fa';
+}
+function _renderPerson(d) {
+    const [y, m] = d.month.split('-').map(Number);
+    const first = new Date(y, m - 1, 1);
+    const daysIn = new Date(y, m, 0).getDate();
+    let cells = '';
+    for (let i = 0; i < first.getDay(); i++) cells += '<div></div>';
+    for (let dd = 1; dd <= daysIn; dd++) {
+        const k = `${d.month}-${String(dd).padStart(2, '0')}`;
+        const h = d.heat[k] || 0;
+        cells += `<div title="${k}：${h} h" style="height:26px;border-radius:4px;background:${_heatCell(h)};display:flex;align-items:center;justify-content:center;font-size:10px;color:${h ? '#fff' : '#555'};">${dd}</div>`;
+    }
+    return `${_head('人員檔案：這個人每天做了什麼、投入哪些案、近一年的走勢。')}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+            <button class="ts-btn ghost" data-ts-action="view" data-view="staff">‹ 人員清單</button>
+            <b style="color:#eee;font-size:15px;">${esc(d.name)}</b>
+            <input type="month" id="ts-month" value="${esc(d.month)}" style="background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;padding:5px 8px;">
+            <span class="ts-chip"><b>${d.total}</b>本月 h</span>
+            <span class="ts-chip"><b>${d.days_filled}</b>填了幾天</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;">
+            <div class="ts-card" style="margin:0;"><h3>每天幾小時</h3>
+                <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:10px;color:#666;text-align:center;">${_WD.map(w => `<div>${w}</div>`).join('')}</div>
+                <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:4px;">${cells}</div></div>
+            <div class="ts-card" style="margin:0;"><h3>案別</h3>${_bars(d.projects)}</div>
+            <div class="ts-card" style="margin:0;"><h3>分類組成</h3>${_bars(d.composition)}</div>
+            <div class="ts-card" style="margin:0;"><h3>近 12 個月</h3>${_bars(d.trend)}</div>
+        </div>
+        <div class="ts-card" style="margin-top:14px;"><h3>逐日</h3>
+            ${d.days.map(day => `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid #2c2c2c;font-size:12.5px;">
+                <span style="width:100px;color:#888;white-space:nowrap;">${esc(_dayLabel(day.date))}</span>
+                <div style="flex:1;">${day.items.map(i => `<div>${i.work_type ? `<span style="color:#9ca3af;">[${esc(i.work_type)}]</span> ` : ''}<span style="color:#eee;">${esc(i.project_name || '(空白)')}</span>
+                    <span style="color:#bbb;"> ${esc(i.task || '')}</span>
+                    <span style="color:${i.hours > 0 ? '#ddd' : '#93c5fd'};float:right;">${i.hours > 0 ? i.hours + ' h' : '計畫 ' + (i.planned_hours || 0) + ' h'}</span></div>`).join('')}</div>
+            </div>`).join('') || '<div style="color:#666;">這個月沒有紀錄</div>'}
+        </div>`;
+}
+
+// ── 人員月視圖：每人 × 每專案 時數；點人名進檔案頁 ──
 function _staffTbodyHtml() {
     const staffBlocks = _staffSorter.sorted((_staffCache && _staffCache.staff) || []).map(s => `
         <tr style="background:#262626;">
-            <td style="color:#eee;font-weight:600;">${esc(s.name)}</td>
+            <td style="color:#eee;font-weight:600;"><span class="ts-link" data-ts-action="open-person" data-name="${esc(s.name)}">${esc(s.name)}</span></td>
             <td class="num" style="color:#eee;font-weight:600;">${s.total_hours}</td>
             <td class="num" style="color:#777;">${s.projects.length} 案</td>
         </tr>
@@ -489,22 +630,29 @@ function _renderStaffView(d) {
         </div>`;
 }
 
-// ── 儀表板（P1 只放三個數字；P3 做六格）──
-function _renderDash(s) {
-    const over = s.projects.filter(p => p.pct != null && p.pct >= 100).length;
-    return `${_head('儀表板：P3 會做六格（今日、本週 vs 參考、burn 前五、漏填、負載、分類組成）。')}
-        <div style="margin-bottom:12px;">
-            <span class="ts-chip"><b>${s.total_rows}</b>總列數</span>
-            <span class="ts-chip"><b>${s.projects.length}</b>已對映專案</span>
-            <span class="ts-chip"><b>${over}</b>超過預算的案</span>
-        </div>
-        <div class="ts-card">
-            <h3>Burn 前五（超預算標紅）</h3>
-            ${s.projects.slice(0, 5).map(p => `<div style="display:flex;gap:10px;align-items:center;font-size:12.5px;padding:4px 0;">
-                <span style="flex:1;color:#ddd;">${esc(p.project_name)}</span>
+// ── 儀表板：大家的四格 ＋ 主管層兩格（後端只給管理員 manager）──
+function _renderDash(d) {
+    const card = (title, body) => `<div class="ts-card" style="margin:0;"><h3>${title}</h3>${body}</div>`;
+    const m = d.manager;
+    const loadMax = m ? Math.max(1, ...m.load.map(x => x.hours)) : 1;
+    return `${_head('儀表板：一眼看今天、本週、專案 burn、分類組成' + (m ? '；主管層：負載、漏填、有計畫沒結果' : '') + '。')}
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;">
+            ${card('今天在做什麼', `<div style="margin-bottom:8px;"><span class="ts-chip"><b>${d.today.people}</b>人</span><span class="ts-chip"><b>${d.today.items}</b>工作項</span><span class="ts-chip"><b>${d.today.hours}</b>h</span></div>
+                <button class="ts-btn ghost" data-ts-action="view" data-view="today">看每日看板 →</button>`)}
+            ${card(`本週（${esc(d.week.from)} 起）`, `<div><span class="ts-chip"><b>${d.week.total}</b>全體 h</span><span class="ts-chip"><b>${d.week.people}</b>人有填</span></div>
+                <div class="ts-note">參考：每人每週 ${d.week.reference_per_person} h（週一到週五 × 8，只是對照）</div>`)}
+            ${card('專案 Burn 前五（超預算標紅、停滯標黃）', d.burn_top.map(p => `<div style="display:flex;gap:10px;align-items:center;font-size:12.5px;padding:4px 0;">
+                <span class="ts-link" data-ts-action="open-project" data-name="${esc(p.project_name)}" style="flex:1;">${esc(p.project_name)}</span>
+                ${p.stale ? '<span class="ts-badge warn">停滯</span>' : ''}
                 <span class="ts-pct" style="${_pctStyle(p.pct)}">${p.pct != null ? p.pct + '%' : '—'}</span>
-                <span style="color:#888;width:120px;text-align:right;">${p.hours_used} / ${p.budget_hours ?? '—'} h</span>
-            </div>`).join('') || '<div style="color:#666;">—</div>'}
+                <span style="color:#888;width:110px;text-align:right;">${p.hours_used} / ${p.budget_hours ?? '—'}</span></div>`).join('') || '<div style="color:#666;">—</div>')}
+            ${card('本月分類組成', _bars(d.month_composition))}
+            ${m ? card('負載（本週每人）', m.load.map(x => `<div style="display:flex;gap:8px;align-items:center;font-size:12px;margin:3px 0;">
+                <span class="ts-link" data-ts-action="open-person" data-name="${esc(x.name)}" style="width:90px;">${esc(x.name)}</span>
+                <div style="flex:1;height:8px;background:#2c2c2c;border-radius:4px;overflow:hidden;"><i style="display:block;height:100%;width:${Math.round(x.hours / loadMax * 100)}%;background:${x.hours > 40 ? '#f87171' : '#3b82f6'};"></i></div>
+                <span style="width:50px;text-align:right;color:#ddd;">${x.hours} h</span></div>`).join('') || '<div style="color:#666;">本週還沒有人填</div>') : ''}
+            ${m ? card(`漏填與未完成的計畫（只有管理員看得到）`, `<div style="font-size:12.5px;color:#bbb;">${esc(m.missing_yesterday.date)} 沒填：${m.missing_yesterday.names.length ? m.missing_yesterday.names.map(esc).join('、') : '<span style="color:#6ee7b7;">大家都填了</span>'}</div>
+                <div style="font-size:12.5px;color:#bbb;margin-top:6px;">有計畫還沒填實際：${m.plans_open.length ? m.plans_open.map(esc).join('、') : '沒有'}</div>`) : ''}
         </div>`;
 }
 
@@ -548,8 +696,20 @@ function _renderSettings(s) {
             <div class="ts-note">去掉「客戶_」前綴後與私帳案名相同即自動對映；撞案（同名兩案）與找不到的按「指定專案」
                 決定一次，之後每小時同步自動吃到。「行政庶務」等內部桶留在這裡是正常的。</div>
         </div>`;
-    return `${_head('設定：Sheet 拉取、未對映指定、代填、同步 token（管理員）')}
+    const dg = _digestCache;
+    const digestCard = dg ? `
+        <div class="ts-card">
+            <h3>週一工時 digest（Google Chat）</h3>
+            <div class="ts-note" style="margin:0 0 8px;">${dg.enabled ? `開：cron ${esc(dg.cron)}` : '關'}｜${dg.last_summary ? esc(dg.last_summary) : '還沒發過'}
+                　每人上週合計／填了幾天／漏填幾天；發到 notification.google_chat_webhook。</div>
+            <button class="ts-btn ghost" data-ts-action="digest-toggle" data-on="${dg.enabled ? '0' : '1'}">${dg.enabled ? '關閉' : '開啟每週一 09:00'}</button>
+            <button class="ts-btn ghost" data-ts-action="digest-preview">預覽上週</button>
+            <button class="ts-btn ghost" data-ts-action="digest-send">立即發送</button>
+            <pre id="ts-digest-preview" style="display:none;white-space:pre-wrap;color:#bbb;font-size:12px;background:#1a1a1a;padding:8px;border-radius:4px;margin-top:8px;"></pre>
+        </div>` : '';
+    return `${_head('設定：Sheet 拉取、未對映指定、代填、週一 digest、同步 token（管理員）')}
         ${_pullBar()}
+        ${digestCard}
         ${unmatchedCard}
         <div class="ts-card">
             <h3>代填（管理員幫人補登）</h3>
@@ -653,6 +813,23 @@ async function _mapProject(sheetName) {
     });
 }
 
+/** 帶 token 抓 CSV 再觸發下載（<a href> 帶不了 Authorization）。 */
+async function _download(path) {
+    try {
+        const token = localStorage.getItem('auth_token');
+        const r = await fetch(path, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ('HTTP ' + r.status));
+        const blob = await r.blob();
+        const cd = r.headers.get('Content-Disposition') || '';
+        const m = /filename\*=UTF-8''([^;]+)/.exec(cd);
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = m ? decodeURIComponent(m[1]) : 'timesheets.csv';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    } catch (e) { alert('匯出失敗：' + (e.message || e)); }
+}
+
 async function _fillProjectDatalist() {
     const dl = document.getElementById('ts-proj-list');
     if (!dl || dl.children.length) return;
@@ -689,6 +866,45 @@ function _bind() {
                 return refresh();
             }
             if (act === 'board-days') { _boardDays = Number(btn.dataset.days); return refresh(); }
+            if (act === 'open-project') { _view = 'project:' + btn.dataset.name; return refresh(); }
+            if (act === 'open-person') { _view = 'person:' + btn.dataset.name; return refresh(); }
+            if (act === 'compare-add') {
+                if (!_compareNames.includes(btn.dataset.name)) _compareNames.push(btn.dataset.name);
+                return refresh();
+            }
+            if (act === 'compare-remove') {
+                _compareNames = _compareNames.filter(n => n !== btn.dataset.name);
+                if (!_compareNames.length) _view = 'projects';
+                return refresh();
+            }
+            if (act === 'budget') {
+                const v = prompt('這個案的預算小時（清空＝拿掉預算）', btn.dataset.cur || '');
+                if (v === null) return;
+                try {
+                    await tfetch('/api/v1/timesheets/project_budget', { method: 'PUT',
+                        body: { project_id: btn.dataset.pid, budget_hours: v.trim() ? parseFloat(v) : null } });
+                    _summaryCache = null;
+                    return refresh();
+                } catch (e) { return alert('改預算失敗：' + (e.message || e)); }
+            }
+            if (act === 'export-month' || act === 'export-project') {
+                const q = act === 'export-month' ? 'month=' + _month : 'project=' + encodeURIComponent(btn.dataset.name);
+                return _download('/api/v1/timesheets/export.csv?' + q);
+            }
+            if (act === 'digest-toggle') {
+                try { _digestCache = await tfetch('/api/v1/timesheets/digest', { method: 'PUT', body: { enabled: btn.dataset.on === '1' } }); return refresh(); }
+                catch (e) { return alert('儲存失敗：' + (e.message || e)); }
+            }
+            if (act === 'digest-preview' || act === 'digest-send') {
+                const pre = document.getElementById('ts-digest-preview');
+                try {
+                    const r = await tfetch('/api/v1/timesheets/digest' + (act === 'digest-preview' ? '?preview=1' : ''), { method: 'POST' });
+                    pre.style.display = '';
+                    pre.textContent = (r.status === 'ok' ? '已發送：\n' : r.status === 'skipped' ? '沒設 webhook，沒送：\n' : r.status === 'preview' ? '' : (r.message || r.status) + '\n') + (r.text || '');
+                    if (act === 'digest-send') _digestCache = await tfetch('/api/v1/timesheets/digest').catch(() => _digestCache);
+                } catch (e) { pre.style.display = ''; pre.textContent = '失敗：' + (e.message || e); }
+                return;
+            }
             if (act === 'row-add') {
                 const tb = document.querySelector('#ts-mine-add tbody');
                 if (tb) { tb.insertAdjacentHTML('beforeend', _newRowHtml()); _bind(); }

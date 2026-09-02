@@ -932,6 +932,18 @@ class TimesheetPullSettings(BaseModel):
     cron: Optional[str] = None
 
 
+class TimesheetDigestSettings(BaseModel):
+    """PUT /timesheets/digest —— 週一 digest 開關與 cron。"""
+    enabled: Optional[bool] = None
+    cron: Optional[str] = None
+
+
+class TimesheetBudgetSet(BaseModel):
+    """PUT /timesheets/project_budget —— 專案檔案頁直接改預算小時（管理員）。"""
+    project_id: str
+    budget_hours: Optional[float] = None   # None／0＝清掉
+
+
 class TimesheetIngestRequest(BaseModel):
     rows: List[TimesheetRow]
     # sheet＝Apps Script 每小時同步；import＝歷史一次性匯入（docs/TIMESHEET_IMPORT_PLAN.md D3）。

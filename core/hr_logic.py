@@ -120,6 +120,96 @@ def hours_rollup(rows, year: int, month: int) -> dict:
     }
 
 
+#: 專案「停滯」門檻：進行中（製作）但這麼多天沒工時（docs/WORK_TRACKING_UI_PLAN.md §7 主管角度）
+STALE_DAYS = 7
+
+
+def is_stale(status, last_entry, today, days: int = STALE_DAYS) -> bool:
+    """進行中的案、最後一筆工時在 `days` 天以前（或根本沒有）→ 停滯。結案／未開工的不算。"""
+    if (status or "") != "製作":
+        return False
+    if last_entry is None:
+        return True
+    return (today - last_entry).days > days
+
+
+def type_composition(pairs) -> list:
+    """`[(work_type, hours), …]` → `[(type, hours, pct), …]` 大到小；沒分類的歸「未分類」。"""
+    acc: dict = {}
+    for t, h in pairs:
+        acc[t or "未分類"] = acc.get(t or "未分類", 0.0) + float(h or 0)
+    total = sum(acc.values())
+    return sorted(((k, round(v, 1), round(v / total * 100) if total else 0) for k, v in acc.items()),
+                  key=lambda x: -x[1])
+
+
+def project_metrics(items) -> dict:
+    """一案的形狀：`items` = [(day(date|None), staff_name, work_type, hours), …]。
+    總時數、人數、起訖、跨了幾天、分類組成、各人 —— 專案檔案頁與「類似專案並排」共用。"""
+    total = 0.0
+    people: dict = {}
+    days = []
+    for day, name, wt, h in items:
+        h = float(h or 0)
+        total += h
+        people[name or "(空白)"] = people.get(name or "(空白)", 0.0) + h
+        if day:
+            days.append(day)
+    first, last = (min(days), max(days)) if days else (None, None)
+    return {
+        "total": round(total, 1),
+        "people": len(people),
+        "by_person": sorted(((k, round(v, 1)) for k, v in people.items()), key=lambda x: -x[1]),
+        "first": first.isoformat() if first else None,
+        "last": last.isoformat() if last else None,
+        "span_days": (last - first).days + 1 if days else 0,
+        "composition": type_composition((wt, h) for _d, _n, wt, h in items),
+    }
+
+
+def similar_projects(name: str, client: str, total: float, candidates, limit: int = 5, floor: float = 0.35) -> list:
+    """類似專案（自動推薦，人再挑）：案名相似（去前綴）0.5 ＋ 同客戶 0.3 ＋ 時數量級接近 0.2。
+    `candidates` = [{"name", "client", "total"}, …]；排掉自己與零時數。回 [(name, score), …]。"""
+    import difflib
+    key = sheet_project_key(name)
+    if not key:
+        return []
+    sm = difflib.SequenceMatcher(None, "", key)
+    out = []
+    for c in candidates:
+        if c["name"] == name or (c.get("total") or 0) <= 0:
+            continue
+        sm.set_seq1(sheet_project_key(c["name"]))
+        score = 0.5 * sm.ratio()
+        if client and c.get("client") and c["client"] == client:
+            score += 0.3
+        if total > 0:
+            ratio = (c["total"] or 0) / total
+            if 0.5 <= ratio <= 2.0:
+                score += 0.2
+        if score >= floor:
+            out.append((c["name"], round(score, 2)))
+    out.sort(key=lambda x: -x[1])
+    return out[:limit]
+
+
+def missing_fillers(active_names, filled_names) -> list:
+    """漏填：最近有在填的人裡，那一天沒有任何列的（主管層用，不給全員看）。"""
+    return sorted(set(active_names) - set(filled_names))
+
+
+def digest_text(week_label: str, rollup: dict, missing_days: dict) -> str:
+    """週一 digest（Google Chat 純文字，無 emoji）：每人上週合計／填了幾天，漏填天數另列。"""
+    lines = [f"【上週工時】{week_label}　全體 {rollup['total']} h"]
+    for p in rollup["people"]:
+        miss = missing_days.get(p["name"], 0)
+        lines.append(f"{p['name']}：{p['total']} h（{p['days_filled']} 天）" + (f"　漏填 {miss} 天" if miss else ""))
+    if not rollup["people"]:
+        lines.append("上週沒有任何工時紀錄")
+    lines.append("→ 後台 人事管理 › 工作追蹤")
+    return "\n".join(lines)
+
+
 #: 工作分類（docs/WORK_TRACKING_UI_PLAN.md §3-A，owner 2026-09-03「照建議」）：固定選項，
 #: 跨案可比的形狀（拍攝 40h／剪接 120h）靠它；可不填。
 WORK_TYPES = ("前期企劃", "拍攝", "剪接", "動態／特效", "調光", "聲音", "會議溝通", "行政", "其他")

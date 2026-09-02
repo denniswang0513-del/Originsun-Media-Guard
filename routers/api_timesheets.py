@@ -13,6 +13,7 @@ token：settings.json `timesheet.ingest_token`（首次取用自動生成）。
 import secrets
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
@@ -21,13 +22,15 @@ from config import load_settings, save_settings
 from core.auth import check_admin, check_admin_or_module, current_username
 from core.db_guard import db_factory_or_503
 from core.ledger import MINE, require_entity
-from core.hr_logic import (WORK_TYPES, Misses, explain_miss, norm_work_type, remap_target,
-                           resolve_project, row_state)
-from core.schemas import (MeTimesheetBatch, MeTimesheetUpdate, TimesheetBudgetRequest,
-                          TimesheetIngestRequest, TimesheetManualRequest, TimesheetProjectMapRequest,
-                          TimesheetPullSettings)
+from core.hr_logic import (WORK_TYPES, Misses, explain_miss, hours_rollup, is_stale,
+                           missing_fillers, norm_work_type, project_metrics, remap_target,
+                           resolve_project, row_state, similar_projects, split_sheet_name,
+                           type_composition)
+from core.schemas import (MeTimesheetBatch, MeTimesheetUpdate, TimesheetBudgetRequest, TimesheetBudgetSet,
+                          TimesheetDigestSettings, TimesheetIngestRequest, TimesheetManualRequest,
+                          TimesheetProjectMapRequest, TimesheetPullSettings)
 from routers.crm._shared import project_names_map
-from services import timesheet_puller
+from services import timesheet_digest, timesheet_puller
 from services.timesheet_ingest import ingest, parse_date as _parse_date
 from services.timesheet_lookup import load_project_lookup
 from services.timesheet_self import apply_update, bound_ident, own_row, ts_dict
@@ -232,6 +235,327 @@ async def my_delete_row(row_id: str, request: Request):
         await session.delete(r)
         await session.commit()
     return {"deleted": row_id}
+
+
+# ── 工作追蹤 P2：專案檔案頁／類似專案並排／人員檔案頁／改預算 ────────────────────
+
+def _lday(d):
+    return d.astimezone().date() if d else None
+
+
+async def _project_candidates(session) -> list:
+    """類似專案的候選池：每個 Sheet 案名的總時數與客戶前綴（一次 group by）。"""
+    from sqlalchemy import func as safunc, select
+    from db.models import Timesheet
+    rows = (await session.execute(
+        select(Timesheet.project_name, safunc.sum(Timesheet.hours))
+        .where(Timesheet.project_name != "").group_by(Timesheet.project_name))).all()
+    return [{"name": n, "client": split_sheet_name(n)[0], "total": float(h or 0)} for n, h in rows]
+
+
+async def _quote_days(session, project_id: str) -> Optional[float]:
+    """報價人日：該案最新版報價單裡單位是「天／人日」的數量合計（只帶人日，不帶錢）。"""
+    if not project_id:
+        return None
+    from sqlalchemy import func as safunc, select
+    from db.models import CrmQuotation, CrmQuotationItem
+    q = (await session.execute(
+        select(CrmQuotation.id).where(CrmQuotation.project_id == project_id)
+        .order_by(CrmQuotation.version.desc()).limit(1))).scalar()
+    if not q:
+        return None
+    days = (await session.execute(
+        select(safunc.sum(CrmQuotationItem.quantity))
+        .where(CrmQuotationItem.quotation_id == q)
+        .where(CrmQuotationItem.unit.in_(("天", "人日", "日"))))).scalar()
+    return float(days) if days else None
+
+
+@router.get("/project")
+async def project_file(request: Request, name: str = ""):
+    """專案檔案頁（Sheet 案名）：摘要、分類組成、時間軸（逐日工作項）、各人、各月、預算、
+    報價人日、類似專案（自動推薦，人再挑）。"""
+    check_admin_or_module(request, "timesheets")
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name 必填")
+    factory = db_factory_or_503()
+    from sqlalchemy import select
+    from db.models import CrmProject, Timesheet
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet).where(Timesheet.project_name == name)
+            .order_by(Timesheet.work_date.desc(), Timesheet.staff_name))).scalars().all()
+        pid = next((r.project_id for r in rows if r.project_id), None)
+        proj = await session.get(CrmProject, pid) if pid else None
+        quote_days = await _quote_days(session, pid)
+        cands = await _project_candidates(session)
+    items = [(_lday(r.work_date), r.staff_name, r.work_type, r.hours) for r in rows if r.hours]
+    m = project_metrics(items)
+    by_month: dict = {}
+    timeline: dict = {}
+    for r in rows:
+        d = _lday(r.work_date)
+        if not d:
+            continue
+        if r.hours:
+            by_month[d.strftime("%Y-%m")] = round(by_month.get(d.strftime("%Y-%m"), 0.0) + float(r.hours), 1)
+        timeline.setdefault(d.isoformat(), []).append({
+            "name": r.staff_name or "", "work_type": r.work_type or "", "task": r.task_note or "",
+            "hours": round(float(r.hours or 0), 2), "planned_hours": r.planned_hours, "status": r.status or ""})
+    budget = getattr(proj, "budget_hours", None) if proj else None
+    return {
+        "project_name": name, "project_id": pid or "", "status": getattr(proj, "status", "") if proj else "",
+        "mapped": bool(pid), **m,
+        "budget_hours": budget, "pct": round(m["total"] / budget * 100, 1) if budget else None,
+        "quote_days": quote_days,
+        "by_month": sorted(by_month.items()),
+        "timeline": [{"date": k, "items": v} for k, v in sorted(timeline.items(), reverse=True)][:90],
+        "similar": similar_projects(name, split_sheet_name(name)[0], m["total"], cands),
+    }
+
+
+@router.get("/compare")
+async def compare_projects(request: Request, names: str = ""):
+    """類似專案並排：names 用 | 分隔，每案回 project_metrics（總時數／人數／起訖／分類組成／各人）。"""
+    check_admin_or_module(request, "timesheets")
+    wanted = [n.strip() for n in (names or "").split("|") if n.strip()][:6]
+    if not wanted:
+        raise HTTPException(status_code=422, detail="names 必填（| 分隔）")
+    factory = db_factory_or_503()
+    from sqlalchemy import select
+    from db.models import Timesheet
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet.project_name, Timesheet.work_date, Timesheet.staff_name, Timesheet.work_type, Timesheet.hours)
+            .where(Timesheet.project_name.in_(wanted)).where(Timesheet.hours > 0))).all()
+    out = []
+    for n in wanted:
+        items = [(_lday(d), s, wt, h) for pn, d, s, wt, h in rows if pn == n]
+        out.append({"project_name": n, **project_metrics(items)})
+    return {"items": out}
+
+
+@router.get("/person")
+async def person_file(request: Request, name: str = "", month: str = ""):
+    """人員檔案頁：該月逐日流水、每日時數（熱圖）、案別組成、分類組成、近 12 個月走勢。"""
+    check_admin_or_module(request, "timesheets")
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name 必填")
+    try:
+        base = datetime.strptime(month, "%Y-%m") if month else datetime.now().replace(day=1)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="month 格式需 YYYY-MM")
+    m0 = base.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    m1 = m0.replace(year=m0.year + 1, month=1) if m0.month == 12 else m0.replace(month=m0.month + 1)
+    y, mo = m0.year, m0.month - 11
+    while mo <= 0:
+        y, mo = y - 1, mo + 12
+    since = m0.replace(year=y, month=mo)
+    factory = db_factory_or_503()
+    from sqlalchemy import select
+    from db.models import Timesheet
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet).where(Timesheet.staff_name == name)
+            .where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
+            .order_by(Timesheet.work_date.desc(), Timesheet.created_at))).scalars().all()
+        # 近 12 個月走勢：一個人一年幾百列，Python 端按本地月加總（DB 端 to_char 會吃伺服器時區）
+        year_rows = (await session.execute(
+            select(Timesheet.work_date, Timesheet.hours)
+            .where(Timesheet.staff_name == name).where(Timesheet.work_date >= since))).all()
+    trend: dict = {}
+    for d, h in year_rows:
+        ld = _lday(d)
+        if ld and h:
+            trend[ld.strftime("%Y-%m")] = trend.get(ld.strftime("%Y-%m"), 0.0) + float(h)
+    days: dict = {}
+    heat: dict = {}
+    projects: dict = {}
+    for r in rows:
+        d = _lday(r.work_date)
+        if not d:
+            continue
+        k = d.isoformat()
+        days.setdefault(k, []).append({
+            "project_name": r.project_name or "", "work_type": r.work_type or "", "task": r.task_note or "",
+            "hours": round(float(r.hours or 0), 2), "planned_hours": r.planned_hours, "status": r.status or ""})
+        if r.hours:
+            heat[k] = round(heat.get(k, 0.0) + float(r.hours), 1)
+            projects[r.project_name or "(空白)"] = round(projects.get(r.project_name or "(空白)", 0.0) + float(r.hours), 1)
+    return {
+        "name": name, "month": m0.strftime("%Y-%m"),
+        "total": round(sum(heat.values()), 1), "days_filled": len(heat),
+        "heat": heat,
+        "days": [{"date": k, "items": v} for k, v in sorted(days.items(), reverse=True)],
+        "projects": sorted(projects.items(), key=lambda x: -x[1]),
+        "composition": type_composition((r.work_type, r.hours) for r in rows if r.hours),
+        "trend": sorted((k, round(v, 1)) for k, v in trend.items()),
+    }
+
+
+@router.put("/project_budget")
+async def set_project_budget(req: TimesheetBudgetSet, request: Request):
+    """專案檔案頁直接改預算小時（不用回 Sheet 改）。Sheet 拉取不會覆蓋（預算只從 PUT /budgets 進，那是一次性）。"""
+    _require_mine_admin(request, level="full")
+    factory = db_factory_or_503()
+    from db.models import CrmProject
+    async with factory() as session:
+        p = await session.get(CrmProject, req.project_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="找不到專案")
+        p.budget_hours = float(req.budget_hours) if req.budget_hours else None
+        await session.commit()
+        return {"status": "ok", "project_id": p.id, "budget_hours": p.budget_hours}
+
+
+# ── 工作追蹤 P3：儀表板／匯出／週一 digest ────────────────────────────────────
+
+@router.get("/dashboard")
+async def dashboard(request: Request):
+    """六格：大家的（今日在做什麼、本週全體、本月分類組成、burn 前五）＋
+    主管層（負載排名、昨天漏填、有計畫沒結果）—— 主管層只給管理員（不給全員比較）。"""
+    check_admin_or_module(request, "timesheets")
+    is_admin = True
+    try:
+        check_admin(request)
+    except HTTPException:
+        is_admin = False
+    now = datetime.now()
+    today = now.date()
+    td = __import__("datetime").timedelta
+    week_mon = now.replace(hour=0, minute=0, second=0, microsecond=0) - td(days=now.weekday())
+    m0 = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    since = min(week_mon, m0) - td(days=30)
+    factory = db_factory_or_503()
+    from sqlalchemy import select
+    from db.models import Timesheet
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name,
+                   Timesheet.work_type, Timesheet.hours, Timesheet.status)
+            .where(Timesheet.work_date >= since))).all()
+        burn = (await burn_summary_core(session))[:5]
+    data = [(n, _lday(d), p, wt, float(h or 0), st) for n, d, p, wt, h, st in rows]
+    today_rows = [x for x in data if x[1] == today]
+    week_rows = [(n, d, p, h) for n, d, p, wt, h, st in data if d and d >= week_mon.date() and h > 0]
+    week = hours_rollup(week_rows, now.year, now.month)
+    out = {
+        "today": {"people": len({n for n, *_ in today_rows}), "items": len(today_rows),
+                  "hours": round(sum(x[4] for x in today_rows), 1)},
+        "week": {"total": week["total"], "people": len(week["people"]),
+                 "reference_per_person": 5 * 8, "from": week_mon.date().isoformat()},
+        "month_composition": type_composition((wt, h) for n, d, p, wt, h, st in data if d and d >= m0.date() and h > 0),
+        "burn_top": burn,
+    }
+    if is_admin:
+        active = {n for n, d, *_ in data if n and d and d >= today - td(days=30)}
+        yday = today - td(days=1)
+        while yday.weekday() >= 5:
+            yday -= td(days=1)
+        filled = {n for n, d, *_ in data if d == yday}
+        out["manager"] = {
+            "load": [{"name": p["name"], "hours": p["total"]} for p in week["people"]],
+            "missing_yesterday": {"date": yday.isoformat(), "names": missing_fillers(active, filled)},
+            "plans_open": sorted({n for n, d, p, wt, h, st in data if st == "plan" and d and d < today}),
+        }
+    return out
+
+
+async def burn_summary_core(session) -> list:
+    """burn 表的專案那一半（/summary 與 /dashboard 共用）。"""
+    from sqlalchemy import func as safunc, select
+    from db.models import CrmProject, Timesheet
+    matched = (await session.execute(
+        select(Timesheet.project_id, safunc.sum(Timesheet.hours), safunc.count(Timesheet.id),
+               safunc.max(Timesheet.work_date))
+        .where(Timesheet.project_id.isnot(None)).group_by(Timesheet.project_id))).all()
+    pids = [m[0] for m in matched]
+    projs = {p.id: p for p in (await session.execute(
+        select(CrmProject).where(CrmProject.id.in_(pids)))).scalars()} if pids else {}
+    items = []
+    today = datetime.now().date()
+    for pid, total, cnt, last_date in matched:
+        p = projs.get(pid)
+        budget = getattr(p, "budget_hours", None) if p else None
+        items.append({
+            "project_id": pid,
+            "project_name": getattr(p, "name", "") if p else "",
+            "status": getattr(p, "status", "") if p else "",
+            "hours_used": round(total or 0, 1), "budget_hours": budget,
+            "remaining": round(budget - total, 1) if budget else None,
+            "pct": round(total / budget * 100, 1) if budget else None,
+            "rows": cnt,
+            "last_entry": last_date.strftime("%Y-%m-%d") if last_date else None,
+            "stale": is_stale(getattr(p, "status", "") if p else "", _lday(last_date), today),
+        })
+    items.sort(key=lambda x: (x["pct"] is None, -(x["pct"] or 0)))
+    return items
+
+
+@router.get("/export.csv")
+async def export_csv(request: Request, month: str = "", project: str = ""):
+    """匯出 CSV（給會計／結算）：month=YYYY-MM 或 project=Sheet 案名，至少一個。"""
+    check_admin_or_module(request, "timesheets")
+    import csv
+    import io
+    from fastapi.responses import Response
+    from sqlalchemy import select
+    from db.models import Timesheet
+    q = select(Timesheet).order_by(Timesheet.work_date, Timesheet.staff_name)
+    if month:
+        try:
+            m0 = datetime.strptime(month, "%Y-%m")
+        except ValueError:
+            raise HTTPException(status_code=422, detail="month 格式需 YYYY-MM")
+        m1 = m0.replace(year=m0.year + 1, month=1) if m0.month == 12 else m0.replace(month=m0.month + 1)
+        q = q.where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
+    if project:
+        q = q.where(Timesheet.project_name == project.strip())
+    if not month and not project:
+        raise HTTPException(status_code=422, detail="month 或 project 至少一個")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(q)).scalars().all()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["日期", "人員", "專案", "分類", "內容", "計畫小時", "實際小時", "來源", "狀態"])
+    for r in rows:
+        d = _lday(r.work_date)
+        w.writerow([d.isoformat() if d else "", r.staff_name or "", r.project_name or "", r.work_type or "",
+                    r.task_note or "", r.planned_hours if r.planned_hours is not None else "",
+                    r.hours or 0, r.source or "", r.status or ""])
+    fname = f"timesheets_{month or project}.csv"
+    return Response(content="﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{__import__('urllib.parse').parse.quote(fname)}"})
+
+
+@router.get("/digest")
+async def get_digest(request: Request):
+    check_admin(request)
+    return timesheet_digest.get_digest_settings()
+
+
+@router.put("/digest")
+async def put_digest(req: TimesheetDigestSettings, request: Request):
+    check_admin(request)
+    try:
+        return timesheet_digest.update_digest_settings(req.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"cron 格式錯誤：{e}")
+
+
+@router.post("/digest")
+async def send_digest_now(request: Request, preview: bool = False):
+    """立刻算上週 digest；preview=1 只回文字不發送。"""
+    check_admin(request)
+    if preview:
+        factory = db_factory_or_503()
+        async with factory() as session:
+            d = await timesheet_digest.build_digest(session)
+        return {"status": "preview", "text": d["text"]}
+    return await timesheet_digest.send_digest(force=True)
 
 
 # ── 對映表／回填／預算（docs/TIMESHEET_IMPORT_PLAN.md Phase A-3）────────────────
@@ -498,41 +822,10 @@ async def burn_summary(request: Request):
     factory = db_factory_or_503()
 
     from sqlalchemy import select, func as safunc
-    from db.models import Timesheet, CrmProject
+    from db.models import Timesheet
 
     async with factory() as session:
-        matched = (await session.execute(
-            select(Timesheet.project_id,
-                   safunc.sum(Timesheet.hours),
-                   safunc.count(Timesheet.id),
-                   safunc.max(Timesheet.work_date))
-            .where(Timesheet.project_id.isnot(None))
-            .group_by(Timesheet.project_id)
-        )).all()
-        pids = [m[0] for m in matched]
-        projs = {}
-        if pids:
-            for p in (await session.execute(
-                    select(CrmProject).where(CrmProject.id.in_(pids)))).scalars():
-                projs[p.id] = p
-
-        items = []
-        for pid, total, cnt, last_date in matched:
-            p = projs.get(pid)
-            budget = getattr(p, "budget_hours", None) if p else None
-            pct = round(total / budget * 100, 1) if budget else None
-            items.append({
-                "project_id": pid,
-                "project_name": getattr(p, "name", "") if p else "",
-                "status": getattr(p, "status", "") if p else "",
-                "hours_used": round(total or 0, 1),
-                "budget_hours": budget,
-                "remaining": round(budget - total, 1) if budget else None,
-                "pct": pct,
-                "rows": cnt,
-                "last_entry": last_date.strftime("%Y-%m-%d") if last_date else None,
-            })
-        items.sort(key=lambda x: (x["pct"] is None, -(x["pct"] or 0)))
+        items = await burn_summary_core(session)     # 專案那一半與 /dashboard 共用
 
         unmatched = (await session.execute(
             select(Timesheet.project_name,
