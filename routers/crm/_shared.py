@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 # （proposal_assets 模組層就 import 了），函式內 import 的 ImportError 退路是
 # 死碼，而守衛掛在 router 層＝每個請求都走一次。
 from core.auth import check_admin_or_module, check_logged_in
+from core.auth import current_username as _username  # noqa: F401  十個呼叫端沿用這個名字
 from core.money import MoneyRedactRoute, money_dep  # money_dep 給領域模組 re-export
 from core.project_flow import ADVANCE_MODULES, CHECK_MODULES
 
@@ -268,11 +269,6 @@ async def _patch_project_json(project_id: str, attr: str, call, payload):
         await session.commit()
         return await payload(session, project)
     return await _with_project(project_id, _run)
-
-
-def _username(request: Request) -> str:
-    from core.auth import current_username
-    return current_username(request)
 
 
 _TW_TZ = ZoneInfo("Asia/Taipei")

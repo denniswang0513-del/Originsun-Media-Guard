@@ -174,14 +174,8 @@ def test_norm_detail_drops_zero_items_and_junk():
 # ── 器材側的 §8 錢牆（遞迴，不是手列兩個鍵）────────────────────────────
 
 def _req(modules):
-    from starlette.requests import Request
-
-    from core.auth import create_token
-    t = create_token({"sub": "u", "username": "u", "access_level": 1,
-                      "modules": modules})
-    return Request({"type": "http", "method": "GET", "path": "/",
-                    "headers": [(b"authorization", ("Bearer " + t).encode())],
-                    "query_string": b""})
+    from tests.unit._req import token_request
+    return token_request(modules=modules)
 
 
 _EQUIP = {"entity": "mine", "name": "A7S3", "purchase_cost": 180000,

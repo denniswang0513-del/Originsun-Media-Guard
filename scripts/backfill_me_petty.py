@@ -20,17 +20,18 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts._common import admin_session  # noqa: E402
+from scripts._common import admin_session, api_base  # noqa: E402
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="http://127.0.0.1:8001")
+    ap.add_argument("--prod", action="store_true", help="生產 8000；預設 dev 8001")
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
+    base = api_base(args.prod)
 
     s = admin_session("backfill_me_petty")
-    users = s.get(f"{args.base}/api/v1/auth/users", timeout=15).json()
+    users = s.get(f"{base}/api/v1/auth/users", timeout=15).json()
     if isinstance(users, dict):
         users = users.get("users", [])
 
@@ -44,7 +45,7 @@ def main() -> None:
         hits += 1
         print(f"{'APPLY' if args.apply else 'DRY  '} {u['username']}: +me_petty")
         if args.apply:
-            r = s.put(f"{args.base}/api/v1/auth/users/{u['username']}",
+            r = s.put(f"{base}/api/v1/auth/users/{u['username']}",
                              json={"modules": mods + ["me_petty"]},
                              timeout=15)
             r.raise_for_status()

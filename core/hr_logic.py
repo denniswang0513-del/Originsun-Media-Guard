@@ -376,6 +376,20 @@ def remap_target(why: str, current_pid, resolved_pid):
     return None
 
 
+def explain_miss(name: str, lk: ProjectLookup) -> dict:
+    """一個沒對到的 Sheet 名字要給 owner 看什麼：`{"reason": why}`，撞案附
+    `candidates`（`[(id, name, client), …]`），找不到附 `suggestions`（案名清單，只是
+    建議）。burn 摘要與匯入腳本的 dry-run 同一份 —— 各寫一次就會出現「報告有建議、
+    畫面沒有」。"""
+    _pid, why = resolve_project(name, lk)
+    out = {"reason": why}
+    if why == "ambiguous":
+        out["candidates"] = lk.candidates(name)
+    elif why == "none":
+        out["suggestions"] = [k for k, _sc in suggest_projects(name, lk)]
+    return out
+
+
 def suggest_projects(name: str, lk: ProjectLookup, limit: int = 2, floor: float = 0.6) -> list:
     """找不到時給 owner 看的**建議**（不是自動對映）：去前綴後跟所有私帳案名比相似度，
     回 `[(key, score), …]`，最像的在前、低於 floor 不列。

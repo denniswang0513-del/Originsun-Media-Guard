@@ -21,8 +21,7 @@ from config import load_settings, save_settings
 from core.auth import check_admin, check_admin_or_module, current_username
 from core.db_guard import db_factory_or_503
 from core.ledger import MINE, require_entity
-from core.hr_logic import (manual_dup_key, miss_bucket, remap_target, resolve_project, resolve_staff,
-                           suggest_projects)
+from core.hr_logic import (explain_miss, manual_dup_key, miss_bucket, remap_target, resolve_project, resolve_staff)
 from core.schemas import (TimesheetBudgetRequest, TimesheetIngestRequest,
                           TimesheetManualRequest, TimesheetProjectMapRequest)
 from routers.crm._shared import project_names_map
@@ -96,10 +95,8 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
 
     inserted = 0
     skipped = 0
-    unmatched: set[str] = set()
-    ambiguous: set[str] = set()
-    staff_unmatched: set[str] = set()
-    staff_ambiguous: set[str] = set()
+    misses = {"ambiguous": set(), "unmatched": set()}          # 專案：撞案／找不到
+    staff_misses = {"ambiguous": set(), "unmatched": set()}    # 人員：同名兩人／沒這人
 
     async with factory() as session:
         # 專案對映：對映表 → 精確 → 去客戶前綴（唯一才算）→ 撞案不猜（core.hr_logic）
@@ -138,11 +135,11 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
             pname = (r.project or "").strip()
             pid, why = resolve_project(pname, lk)
             if (b := miss_bucket(why)):
-                (ambiguous if b == "ambiguous" else unmatched).add(pname)
+                misses[b].add(pname)
             sname = (r.staff or "").strip()
             sid, swhy = resolve_staff(sname, staff_index)
             if (b := miss_bucket(swhy)):
-                (staff_ambiguous if b == "ambiguous" else staff_unmatched).add(sname)
+                staff_misses[b].add(sname)
             session.add(Timesheet(
                 id=uuid.uuid4().hex,
                 work_date=wd,
@@ -164,10 +161,10 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
         "inserted": inserted,
         "skipped": skipped,
         "skipped_manual_priority": skipped_manual,   # 手填優先擋下的 Sheet 列
-        "unmatched_projects": sorted(unmatched),
-        "ambiguous_projects": sorted(ambiguous),     # 撞案：owner 用 project_map 指定
-        "staff_unmatched": sorted(staff_unmatched),
-        "staff_ambiguous": sorted(staff_ambiguous),  # 同名兩人：不猜，留 NULL
+        "unmatched_projects": sorted(misses["unmatched"]),
+        "ambiguous_projects": sorted(misses["ambiguous"]),     # 撞案：owner 用 project_map 指定
+        "staff_unmatched": sorted(staff_misses["unmatched"]),
+        "staff_ambiguous": sorted(staff_misses["ambiguous"]),  # 同名兩人：不猜，留 NULL
     }
 
 
@@ -189,25 +186,6 @@ async def timesheet_projects(request: Request):
         lk = await load_project_lookup(session)
     rows = sorted((r for hits in lk.by_name.values() for r in hits), key=lambda r: r[1])
     return {"projects": [{"id": pid, "name": nm, "client": cli} for pid, nm, cli in rows]}
-
-
-@router.get("/project_map")
-async def list_project_map(request: Request):
-    """owner 決定過的 Sheet 專案名 → 案（含案名，前端清單用）。"""
-    _require_mine_admin(request)
-    factory = db_factory_or_503()
-    from sqlalchemy import select
-    from db.models import CrmProject, TimesheetProjectMap
-    async with factory() as session:
-        rows = (await session.execute(
-            select(TimesheetProjectMap, CrmProject.name)
-            .outerjoin(CrmProject, CrmProject.id == TimesheetProjectMap.project_id)
-            .order_by(TimesheetProjectMap.sheet_name))).all()
-    return {"items": [{
-        "sheet_name": m.sheet_name, "project_id": m.project_id, "project_name": pn or "",
-        "decided_by": m.decided_by or "", "note": m.note or "",
-        "decided_at": m.decided_at.isoformat() if m.decided_at else None,
-    } for m, pn in rows]}
 
 
 @router.put("/project_map")
@@ -269,10 +247,12 @@ async def remap_timesheets(request: Request):
             target = remap_target(why, cur_pid, pid)
             if target is None:
                 continue
-            cond = [Timesheet.project_name == pname]
-            cond.append(Timesheet.project_id.is_(None) if cur_pid is None
-                        else Timesheet.project_id == cur_pid)
-            res = await session.execute(update(Timesheet).where(*cond).values(project_id=target))
+            res = await session.execute(
+                update(Timesheet)
+                .where(Timesheet.project_name == pname,
+                       Timesheet.project_id.is_(None) if cur_pid is None
+                       else Timesheet.project_id == cur_pid)
+                .values(project_id=target))
             changed += res.rowcount or 0
         await session.commit()
     return {"status": "ok", "changed": changed, "by_reason": by_reason}
@@ -287,8 +267,7 @@ async def set_budgets(req: TimesheetBudgetRequest, request: Request):
     from sqlalchemy import select
     from db.models import CrmProject
     applied = 0
-    amb: list = []
-    none: list = []
+    misses = {"ambiguous": [], "unmatched": []}
     async with factory() as session:
         lk = await load_project_lookup(session)
         wanted: dict = {}
@@ -296,11 +275,8 @@ async def set_budgets(req: TimesheetBudgetRequest, request: Request):
             if it.budget_hours <= 0:
                 continue
             pid, why = resolve_project(it.sheet_name, lk)
-            b = miss_bucket(why)
-            if b == "ambiguous":
-                amb.append(it.sheet_name)
-            elif b == "unmatched":
-                none.append(it.sheet_name)
+            if (b := miss_bucket(why)):
+                misses[b].append(it.sheet_name)
             elif pid:
                 wanted[pid] = float(it.budget_hours)
         # 一次載入要改的案（367 案逐案 session.get 是 367 趟）
@@ -311,7 +287,9 @@ async def set_budgets(req: TimesheetBudgetRequest, request: Request):
                 proj.budget_hours = wanted[proj.id]
                 applied += 1
         await session.commit()
-    return {"status": "ok", "applied": applied, "ambiguous": sorted(amb), "unmatched": sorted(none)}
+    return {"status": "ok", "applied": applied,                   # 鍵名同 /ingest
+            "ambiguous_projects": sorted(misses["ambiguous"]),
+            "unmatched_projects": sorted(misses["unmatched"])}
 
 
 # ── 手填工時（與 Sheet 同步共存；N-hr 人事管理 v1）─────────────────────
@@ -509,14 +487,11 @@ async def burn_summary(request: Request):
     out_unmatched = []
     for n, h, c in unmatched:
         name = n or ""
-        _pid, why = resolve_project(name, lk)
         item = {"project_name": name or "(空白)", "hours_used": round(h or 0, 1), "rows": c,
-                "reason": why}
-        if why == "ambiguous":
+                **explain_miss(name, lk)}
+        if "candidates" in item:
             item["candidates"] = [{"id": pid, "name": nm, "client": cli}
-                                  for pid, nm, cli in lk.candidates(name)]
-        elif why == "none":
-            item["suggestions"] = [k for k, _sc in suggest_projects(name, lk)]
+                                  for pid, nm, cli in item["candidates"]]
         out_unmatched.append(item)
     return {
         "projects": items,

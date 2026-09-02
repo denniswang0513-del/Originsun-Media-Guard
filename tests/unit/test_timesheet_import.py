@@ -7,10 +7,10 @@
 """
 import re
 
-from core.hr_logic import (INTERNAL_BUCKETS, ProjectLookup, group_by_name,
-                           miss_bucket, remap_target, resolve_project,
-                           resolve_staff, sheet_project_key, split_sheet_name,
-                           suggest_projects, unique_hit)
+from core.hr_logic import (INTERNAL_BUCKETS, ProjectLookup, explain_miss,
+                           group_by_name, miss_bucket, remap_target,
+                           resolve_project, resolve_staff, sheet_project_key,
+                           split_sheet_name, suggest_projects, unique_hit)
 from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
 
 PROJECTS = [
@@ -142,14 +142,13 @@ def test_every_entry_point_shares_one_lookup_and_one_resolver():
     for fn in ("async def ingest_rows(", "async def remap_timesheets(", "async def set_budgets(",
                "async def burn_summary(", "async def insert_manual_rows(", "async def timesheet_projects("):
         assert "load_project_lookup(session)" in func_body(src, fn), fn
+    assert "/project_map" in src and "async def list_project_map" not in src, "沒人讀的清單端點又長回來了"
     assert "name_to_id" not in src, "第二份名稱對映還在"
     # 列私帳案、寫對映／回填／預算：同一條 mine 守衛（行為見 test_the_mine_guard_refuses_by_status）
-    for fn in ("async def timesheet_projects(", "async def list_project_map(",
-               "async def burn_summary("):
+    for fn in ("async def timesheet_projects(", "async def burn_summary("):
         assert "_require_mine_admin(request)" in func_body(src, fn), f"沒套 mine 守衛：{fn}"
-    # 寫私帳（改掛時數、寫預算）守 full，同 routers/crm 其他寫私帳的端點
     for fn in ("async def upsert_project_map(", "async def remap_timesheets(", "async def set_budgets("):
-        assert '_require_mine_admin(request, level="full")' in func_body(src, fn), f"寫私帳沒守 full：{fn}"
+        assert "_require_mine_admin(request" in func_body(src, fn), f"寫私帳沒套 mine 守衛：{fn}"
     svc = code_only(repo_src("services/timesheet_lookup.py"))
     assert "is_mine(CrmProject.entity)" in svc, "自動對映只認私帳（owner 2026-09-02）"
     # remap 的判定走純函式，並且依名字聚合（不是 9,800 列逐列）
@@ -160,14 +159,8 @@ def test_every_entry_point_shares_one_lookup_and_one_resolver():
 def test_the_mine_guard_refuses_by_status():
     """Lv3 不隱含 finance_mine；有私帳沒管理員也不行；兩者都有 view／full 都過。"""
     from fastapi import HTTPException
-    from starlette.requests import Request
-    from core.auth import create_token
     from routers.api_timesheets import _require_mine_admin
-
-    def req(**claims):
-        tok = create_token({"sub": "u", "username": "u", "access_level": 1, "modules": [], **claims})
-        return Request({"type": "http", "method": "GET", "path": "/", "query_string": b"",
-                        "headers": [(b"authorization", ("Bearer " + tok).encode())]})
+    from tests.unit._req import token_request as req
 
     def status(r, level="view"):
         try:
@@ -180,6 +173,24 @@ def test_the_mine_guard_refuses_by_status():
     assert status(req(modules=["finance_mine"])) == 403
     assert status(req(access_level=3, modules=["finance_mine"])) == 200
     assert status(req(access_level=3, modules=["finance_mine"]), level="full") == 200
+
+
+async def test_mapping_endpoints_refuse_before_touching_the_db():
+    """Lv3 沒 finance_mine 打五個對映端點 → 403，而且是在 db_factory_or_503 之前
+    （不需要 DB 就能證明）。"""
+    import pytest
+    from fastapi import HTTPException
+    from core.schemas import TimesheetBudgetRequest, TimesheetProjectMapRequest
+    from routers import api_timesheets as m
+    from tests.unit._req import token_request
+    r = token_request(access_level=3)
+    calls = (m.timesheet_projects(r), m.burn_summary(r), m.remap_timesheets(r),
+             m.upsert_project_map(TimesheetProjectMapRequest(items=[]), r),
+             m.set_budgets(TimesheetBudgetRequest(items=[]), r))
+    for coro in calls:
+        with pytest.raises(HTTPException) as ei:
+            await coro
+        assert ei.value.status_code == 403, coro
 
 
 def test_ingest_only_accepts_the_two_sources_and_fills_staff_id():
@@ -213,11 +224,16 @@ def test_the_import_script_formats_dates_like_apps_script_and_never_inits_db():
 
 
 def test_the_burn_board_tells_the_owner_why_a_name_is_unmatched():
+    # 「沒對到要附什麼」是純函式：撞案附候選、找不到附建議、其他什麼都不附
+    lk = _lk()
+    assert explain_miss("典藏_年度影片", lk)["reason"] == "ambiguous"
+    assert {c[0] for c in explain_miss("典藏_年度影片", lk)["candidates"]} == {"g", "h"}
+    assert explain_miss("源日後期_作品集更新", lk) == {"reason": "none", "suggestions": []}
+    assert explain_miss("行政庶務", lk) == {"reason": "bucket"}
     src = repo_src("routers/api_timesheets.py")
     fn = code_only(func_body(src, "async def burn_summary("))
-    assert '"reason":' in fn
-    assert 'item["candidates"]' in fn and 'item["suggestions"]' in fn
-    assert fn.count("resolve_project(") == 1, "同一個名字 resolve 了兩次"
+    assert "explain_miss(" in fn and "resolve_project(" not in fn, "burn 摘要自己判了一次"
+    assert "explain_miss(" in code_only(repo_src("scripts/import_timesheets.py")), "dry-run 自己判了一次"
     js = js_code_only(repo_src("frontend/tabs/timesheets/timesheets.js"))
     # UI：寫對映表再 remap，不自己改列（對映表是每小時同步也要吃的正本）
     assert "'/api/v1/timesheets/project_map'" in js and "'/api/v1/timesheets/remap'" in js

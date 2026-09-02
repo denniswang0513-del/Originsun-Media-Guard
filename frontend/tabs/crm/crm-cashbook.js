@@ -595,8 +595,8 @@ window._cashInvPick = (ev, id) => {
                     return { invoice_id: iid, amount: keep[iid].amount,
                              fee: keep[iid].fee || 0 };
                 }
+                // 沒在 keep 裡的一定在候選清單（視窗只列這兩種）
                 const inv = _invoiceList.find((x) => x.id === iid);
-                if (!inv) { return { invoice_id: iid, amount: Number(e.deposit) || 0, fee: 0 }; }
                 const it = _ALLOC_SIDES.invoice.toItem(inv, Math.max(0, left));
                 left -= it.amount;
                 return { invoice_id: iid, amount: it.amount, fee: it.fee };

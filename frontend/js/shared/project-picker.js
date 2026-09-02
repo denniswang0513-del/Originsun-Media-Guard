@@ -89,16 +89,18 @@ const sumFooter = (noun, sumLabel, amtOf, rowAmount) => (ids) => {
                 : '<span style="color:#86efac;">　剛好</span>') : '');
 };
 
+/** id → 金額。建表不用 find：合計每次重畫都跑一遍，清單有 800+ 張未付單，
+ *  勾 5 張就是每次重畫 4,000 次比較。掛在這一列上的那幾張也一起收進來。 */
+const amtIndex = (rows, linked, amtOf) => {
+    const m = new Map([...rows, ...(linked || [])].map((r) => [r.id, Number(amtOf(r)) || 0]));
+    return (id) => m.get(id) || 0;
+};
+
 export function openPaymentPicker(o) {
     const list = o.payments || [];
-    // 建表不用 find：合計每次重畫都跑一遍，清單有 800+ 張未付單，
-    // 勾 5 張就是每次重畫 4,000 次比較。掛在這一列上的那幾張也一起收進來。
-    const amtBy = new Map([...list, ...(o.linkedRows || [])]
-        .map((p) => [p.id, Number(p.amount) || 0]));
-    const amtOf = (id) => amtBy.get(id) || 0;
+    const amtOf = amtIndex(list, o.linkedRows, (p) => p.amount);
     openRowPicker({
         rows: list,
-        allRows: [],
         // 已付掉的單不在「還沒付完」的清單裡，但它可能正掛在這一列上 ——
         // 撈不回來的話，重開視窗就少一張、按儲存就把它洗掉
         extraRows: o.linkedRows || [],
@@ -139,15 +141,14 @@ export const invoiceHay = (i) => (`${i.invoice_number || ''} ${i.title || ''} `
  */
 export function openInvoicePicker(o) {
     const list = o.invoices || [];
-    const amtBy = new Map([...list, ...(o.linkedRows || [])]
-        .map((i) => [i.id, Number(i.outstanding != null ? i.outstanding : i.amount_total) || 0]));
+    const amtOf = amtIndex(list, o.linkedRows,
+                           (i) => (i.outstanding != null ? i.outstanding : i.amount_total));
     openRowPicker({
         rows: list,
-        allRows: [],
         extraRows: o.linkedRows || [],
         multi: true,
         currentIds: o.currentIds || [],
-        footer: sumFooter('發票', '尚欠合計', (id) => amtBy.get(id) || 0, o.rowAmount),
+        footer: sumFooter('發票', '尚欠合計', amtOf, o.rowAmount),
         title: o.title || '連結發票',
         placeholder: '搜尋發票號碼／抬頭／公司…',
         emptyMain: '沒有還沒收齊的發票',

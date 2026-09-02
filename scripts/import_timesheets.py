@@ -32,7 +32,7 @@ from pathlib import Path
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
-from core.hr_logic import INTERNAL_BUCKETS, resolve_project, suggest_projects  # noqa: E402
+from core.hr_logic import INTERNAL_BUCKETS, explain_miss, resolve_project  # noqa: E402
 from scripts._common import admin_session, api_base, resolve_db_url  # noqa: E402
 
 DATA_SHEET = "總表（勿動）"
@@ -113,11 +113,12 @@ def _dry_run(hours, P, prod: bool) -> None:
     P("")
     P("## 撞案（owner 在 tab 上「指定專案」）")
     for p, h in tiers.get("ambiguous", []):
-        P(f"- {p}（{h}h）→ 候選 {[(pid[:8], cli) for pid, _nm, cli in lk.candidates(p)]}")
+        cands = explain_miss(p, lk)["candidates"]
+        P(f"- {p}（{h}h）→ 候選 {[(pid[:8], cli) for pid, _nm, cli in cands]}")
     P("")
     P("## 找不到（owner 決定：對既有案／建新案／當桶）—— 括號內是相似案名建議，不是對映")
     for p, h in tiers.get("none", []):
-        sug = suggest_projects(p, lk)
+        sug = explain_miss(p, lk)["suggestions"]
         P(f"- {p}（{h}h）" + (f" → 像：{sug}" if sug else ""))
 
 
@@ -153,7 +154,8 @@ def _apply(base: str, good: list, budgets: list, P) -> None:
         r = s.put(base + "/api/v1/timesheets/budgets", json={"items": budgets}, timeout=120)
         r.raise_for_status()
         b = r.json()
-        P(f"- 預算：寫入 {b['applied']} 案；撞案 {len(b['ambiguous'])}；找不到 {len(b['unmatched'])}")
+        P(f"- 預算：寫入 {b['applied']} 案；撞案 {len(b['ambiguous_projects'])}；"
+          f"找不到 {len(b['unmatched_projects'])}")
 
 
 def main():

@@ -77,7 +77,6 @@ def test_claiming_an_expense_redraws_the_expense_section():
     js = js_code_only(repo_src(COST_JS))
     fn = js_func_body(js, "window._expCreatePayment = function(expenseId) {")
     assert "onDone: window._expClaimDone" in fn
-    js = js_code_only(repo_src(COST_JS))
     assert "_loadFinancialSummary(state.selectedId)" in js_func_body(js, "window._expClaimDone = function() {")
     body = js_func_body(js_code_only(repo_src(FIN_JS)),
                         "window._costCreatePayment = function(payeeName, amount, "
