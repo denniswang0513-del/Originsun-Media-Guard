@@ -14,8 +14,8 @@
 **以 CRM（內部 App）為主開發**（owner 2026-09-03）：新 UI 直接做在人事管理 › 「專案工時」
 tab（改名「工作追蹤」），用 tab 的原生寫法（深色主題、`frontend/tabs/timesheets/`），員工也用
 內部 App 登入來填（帳號＋`timesheets` 模組＋綁定人員檔案）。「我的一天」在 tab 裡以登入者
-own-scope 呈現。員工端獨立頁 `/my.html`「我的工時」與 `/hours.html` 先留著不動，等 tab 定型
-後再決定要不要收成同一份。
+own-scope 呈現。**員工端網頁介面到時候再規劃**（owner 2026-09-03）：`/my.html`「我的工時」
+與 `/hours.html` 維持現狀、不再投入；本規劃只做 tab。
 
 ## 1. 現在有什麼（不重做）
 
