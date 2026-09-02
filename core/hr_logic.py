@@ -254,24 +254,19 @@ def sheet_project_key(name: str) -> str:
     return split_sheet_name(name)[1]
 
 
-def project_row(pid, name, client) -> dict:
-    """查表裡一案的形狀 `{"id","name","client"}` —— 直接就是回給前端的 JSON，
-    router／腳本不必各自從 tuple 重拼一次欄位順序。"""
+def lookup_row(pid, name, client="") -> dict:
+    """查表裡一列（專案或人員）的形狀 `{"id","name","client"}` —— 直接就是回給前端
+    的 JSON，router／腳本不必各自從 tuple 重拼一次欄位順序；人員沒有 client，留空字串。"""
     return {"id": pid, "name": (name or "").strip(), "client": client or ""}
 
 
-def _row_name(row) -> str:
-    return row["name"] if isinstance(row, dict) else (row[1] or "").strip()
-
-
 def group_by_name(rows) -> dict:
-    """`[(id, name, …), …]` 或 `[project_row, …]` → `{name: [row, …]}`；同名**不合併** ——
-    撞名要在判定時被看見，不是在建表時被最後一筆蓋掉。空名跳過。"""
+    """`[lookup_row, …]` → `{name: [row, …]}`；同名**不合併** —— 撞名要在判定時被看見，
+    不是在建表時被最後一筆蓋掉。空名跳過。專案與人員都吃這一支。"""
     out: dict = {}
     for row in rows:
-        nm = _row_name(row)
-        if nm:
-            out.setdefault(nm, []).append(row)
+        if row["name"]:
+            out.setdefault(row["name"], []).append(row)
     return out
 
 
@@ -312,7 +307,7 @@ def resolve_staff(name: str, index: dict) -> tuple:
     if not n:
         return None, "empty"
     hit, why = unique_hit(index.get(n))
-    return (hit[0], "exact") if hit else (None, why)
+    return (hit["id"], "exact") if hit else (None, why)
 
 
 def miss_bucket(why: str):
@@ -336,7 +331,7 @@ class ProjectLookup(NamedTuple):
     def build(cls, project_map: dict, rows) -> "ProjectLookup":
         """`rows` = `[(id, name, client_short_name), …]`（呼叫端只放**私帳**：owner
         2026-09-02「這張表對應的是私帳的專案」）。"""
-        norm = [project_row(pid, nm, cli) for pid, nm, cli in rows]
+        norm = [lookup_row(pid, nm, cli) for pid, nm, cli in rows]
         by_name = group_by_name(norm)                 # 同名不合併、空名跳過，同人員那份
         by_key: dict = {}
         for row in norm:

@@ -583,9 +583,8 @@ window._cashInvPick = (ev, id) => {
         apply: async (ids, e) => {
             // 現有分配先撈回來 —— 留著的那幾張要原封帶走（金額＋匯費）
             const keep = Object.fromEntries((existing || []).map((it) => [it.invoice_id, it]));
-            // 🔴 預帶走分配面板同一支 `toItem`，但殘額要餵**這一列自己的** ——
-            // 它的預設值 `_allocRemainCash()` 讀的是面板上一次開的那一列，從列表叫
-            // 會拿到別列的數字、靜靜寫一個錯的匯費進 DB。
+            // 🔴 預帶走分配面板同一支 `toItem`，殘額餵**這一列自己的**（面板餵它自己的）——
+            // 曾經是讀全域面板狀態的預設值，從列表叫會拿到別列的數字、靜靜寫一個錯的匯費進 DB。
             const picked = ids || [];
             let left = _allocRemain(e.deposit, picked.filter((iid) => keep[iid]).map((iid) => keep[iid]));
             const items = [];
@@ -1827,18 +1826,13 @@ function _allocColor(state) {
              under: '#fca5a5', empty: '#888' }[state] || '#888';
 }
 
-/** 這筆收款還沒被分配掉的入帳金額。掛上一張發票時拿它預帶匯費：
- *  「還沒收的部分」比「還剩多少錢可分」多幾十塊 → 那幾十塊就是被匯出行扣走的。
- *  check.actual 是後端送來的實收（收付兩側同一個欄位，見 _allocStatusLine）。 */
-/** 這筆收款還沒分配掉的入帳金額 —— 純函式：面板餵自己的 (actual, items)，列表的
- *  就地連結餵那一列的（面板那份讀全域 _CASH_ALLOC，從列表叫會拿到別列的數字）。 */
+/** 這筆收款還沒分配掉的入帳金額 —— 純函式，殘額由呼叫端餵：面板餵自己的
+ *  (check.actual, items)，列表的就地連結餵那一列的。掛上一張發票時拿它預帶匯費：
+ *  「還沒收的部分」比「還剩多少錢可分」多幾十塊 → 那幾十塊就是被匯出行扣走的
+ *  （check.actual 是後端送來的實收，收付兩側同一個欄位，見 _allocStatusLine）。 */
 function _allocRemain(actual, items) {
     const used = (items || []).reduce((n, x) => n + (Number(x.amount) || 0), 0);
     return Math.max(0, (Number(actual) || 0) - used);
-}
-function _allocRemainCash() {
-    const st = _CASH_ALLOC;
-    return _allocRemain(st && st.check && st.check.actual, st && st.items);
 }
 
 /** PUT 的 items 形狀：{idKey, amount[, fee]} —— 面板存檔與就地連結同一份投影。 */
@@ -1893,7 +1887,7 @@ const _ALLOC_SIDES = {
         // （owner 2026-08-23：「自動幫我填寫匯費，格子我可以修改調整」）。
         // `remainCash`＝這筆收款還沒分配掉的入帳金額：面板用自己的殘額，列表的
         // 就地連結餵那一列自己的 —— 兩邊同一支，匯費規則只有這一份
-        toItem: (i, remainCash = _allocRemainCash()) => ({
+        toItem: (i, remainCash) => ({
             invoice_id: i.id, amount: _outstanding(i),
             fee: autoFee(_outstanding(i), remainCash),
             invoice_number: i.invoice_number || '', title: i.title || '',
@@ -2085,7 +2079,8 @@ function _allocSearch(side, q) {
         el.addEventListener('click', () => {
             const hit = hits.find(x => x.id === el.dataset.allocAdd);
             if (!hit) return;
-            st.items.push(c.toItem(hit));
+            // 殘額餵面板自己的（付款側的 toItem 不吃第二個參數，多給無妨）
+            st.items.push(c.toItem(hit, _allocRemain(st.check && st.check.actual, st.items)));
             _renderAllocs(side);
         });
     });

@@ -242,8 +242,7 @@ async def remap_timesheets(request: Request):
             res = await session.execute(
                 update(Timesheet)
                 .where(Timesheet.project_name == pname,
-                       Timesheet.project_id.is_(None) if cur_pid is None
-                       else Timesheet.project_id == cur_pid)
+                       Timesheet.project_id == cur_pid)   # None → SQLAlchemy 自己出 IS NULL
                 .values(project_id=target))
             changed += res.rowcount or 0
         await session.commit()
@@ -315,7 +314,7 @@ async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> d
     # 名稱對映走跟 Sheet 同一支 resolver —— 手填一次、Sheet 一次落到不同 project_id，
     # Burn 表就分兩列。下拉給了 id 就用 id（那是使用者明確選的）。
     lk = await load_project_lookup(session)
-    # 下拉只給 id 沒給名的那幾列才回查案名（有界 IN，同其他八個呼叫端）
+    # 下拉只給 id 沒給名的那幾列才回查案名（有界 IN，同其他呼叫端）
     id_to_name = await project_names_map(
         session, [r.project_id for r in rows if not (r.project_name or "").strip()])
 

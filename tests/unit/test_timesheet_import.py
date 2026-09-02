@@ -8,7 +8,7 @@
 import re
 
 from core.hr_logic import (INTERNAL_BUCKETS, ProjectLookup, explain_miss,
-                           group_by_name, miss_bucket, remap_target,
+                           group_by_name, lookup_row, miss_bucket, remap_target,
                            resolve_project, resolve_staff, sheet_project_key,
                            split_sheet_name, suggest_projects, unique_hit)
 from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
@@ -86,12 +86,13 @@ def test_lookup_keeps_collisions_visible_and_exposes_candidates():
     assert unique_hit([]) == (None, "none")
     assert unique_hit([("x",)]) == (("x",), "exact")
     assert unique_hit([("x",), ("y",)]) == (None, "ambiguous")
-    assert group_by_name([("1", "王"), ("2", "王"), ("3", "")]) == {"王": [("1", "王"), ("2", "王")]}
+    rows = [lookup_row("1", "王"), lookup_row("2", "王"), lookup_row("3", "")]
+    assert group_by_name(rows) == {"王": rows[:2]}
 
 
 def test_staff_resolution_and_miss_buckets_share_the_project_contract():
     """人員同名不猜；「沒對到要回報到哪一桶」只有一份（內部桶與空名不是找不到）。"""
-    idx = group_by_name([("1", "王"), ("2", "王"), ("3", "李")])
+    idx = group_by_name([lookup_row("1", "王"), lookup_row("2", "王"), lookup_row("3", "李")])
     assert resolve_staff("李", idx) == ("3", "exact")
     assert resolve_staff("王", idx) == (None, "ambiguous")
     assert resolve_staff("陳", idx) == (None, "none")

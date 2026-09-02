@@ -40,7 +40,8 @@ def test_the_fee_prefill_uses_this_row_not_the_panels_last_one():
     # 同一支 toItem，殘額由呼叫端餵：面板餵自己的（預設參數），就地連結餵這一列的
     assert "_ALLOC_SIDES.invoice.toItem(inv, Math.max(0, left))" in fn
     assert "_allocRemainCash" not in fn, "就地連結又去讀面板的殘額了"
-    assert "toItem: (i, remainCash = _allocRemainCash()) =>" in js
+    assert "toItem: (i, remainCash) =>" in js          # 殘額是必填參數，沒有讀全域的預設值
+    assert "_allocRemainCash" not in js, "讀全域面板狀態的殘額又回來了"
     assert "autoFee(_outstanding(i), remainCash)" in js
     assert "autoFee(" not in fn, "匯費規則長出第二份了"
 

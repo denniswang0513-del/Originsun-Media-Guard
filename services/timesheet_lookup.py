@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from core.hr_logic import ProjectLookup, group_by_name
+from core.hr_logic import ProjectLookup, group_by_name, lookup_row
 from core.ledger import is_mine
 
 
@@ -25,7 +25,8 @@ async def load_project_lookup(session) -> ProjectLookup:
 
 
 async def load_staff_index(session) -> dict:
-    """`{姓名: [(id, name), …]}` —— 同名不合併，「不猜」由 `core.hr_logic.unique_hit` 判。"""
+    """`{姓名: [lookup_row, …]}` —— 同名不合併，「不猜」由 `core.hr_logic.resolve_staff` 判。
+    列的形狀跟專案那份一樣（id／name），resolve_* 兩支才能同一個契約。"""
     from db.models import CrmStaff
     rows = (await session.execute(select(CrmStaff.id, CrmStaff.name))).all()
-    return group_by_name(rows)
+    return group_by_name([lookup_row(sid, nm) for sid, nm in rows])

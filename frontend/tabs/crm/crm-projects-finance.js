@@ -646,7 +646,6 @@ window._costPayWithdraw = async function(id, summary, onDone) {
     } catch (e) { alert('收回失敗：' + e.message); }
 };
 
-/** 這張單在畫面上該給哪幾顆動作鈕。列上與詳情視窗共用同一份。 */
 /** 財務區的小按鈕（請款三顆／付款動作／預支三顆）只有這一份模板 ——
  *  onclick 字串由呼叫端組，這裡只管樣式：gap＝左邊留 4px、css 追加、title 提示。 */
 function _smallBtn(call, label, opt) {
@@ -657,6 +656,7 @@ function _smallBtn(call, label, opt) {
         + ' onclick="' + call + '">' + label + '</button>';
 }
 
+/** 這張單在畫面上該給哪幾顆動作鈕。列上與詳情視窗共用同一份。 */
 window._costPayBtns = function(p, onDoneName) {
     var d = onDoneName ? (',' + onDoneName) : '';
     var sm = _esc(p.summary || '').replace(/'/g, "\\'");

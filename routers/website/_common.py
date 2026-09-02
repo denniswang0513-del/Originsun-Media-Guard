@@ -99,12 +99,7 @@ def check_admin(request: Request) -> None:
 
 
 def current_username(request: Request) -> str:
-    """從 JWT 取使用者名稱（for audit fields like handled_by）。
-
-    既有 JWT payload 用 `sub` key（見 core/auth.py create_token 及 api_auth 的
-    login flow），`username` 是 fallback。之前寫錯讓所有 inquiry.handled_by
-    都被記成 "admin"。
-    """
+    """轉呼叫 core.auth.current_username（正本）；官網呼叫端沿用這個名字（audit 欄位用）。"""
     from core.auth import current_username as _cu   # 正本；官網七個呼叫端沿用的同名轉呼叫
     return _cu(request)
 
