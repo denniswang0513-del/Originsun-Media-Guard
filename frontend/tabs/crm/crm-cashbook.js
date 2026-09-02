@@ -1110,6 +1110,39 @@ function renderDetail(e) {
         if (isProjectish) html += '<div id="cash-quicklink"></div>';
     }
 
+    // 拆項明細（owner 2026-09-02「已拆的明細要在這裡可以看到」）。
+    // 🔴 一列被拆之後，它的分類／專案／發票**整組讓位給拆項** —— 上面那些欄位
+    // 因此是空的，詳情面板等於只剩「350,436 從源日進來」，看不出這筆錢是誰的。
+    // 資料早就跟著清單回來了（`splits`），只是沒畫。
+    const _sp = e.splits || [];
+    if (_sp.length) {
+        const gross = (s) => (s.amount || 0) + (s.fee || 0);
+        html += section(`拆項明細（${_sp.length}）`);
+        html += '<div style="font-size:12px;">' + _sp.map((s) => {
+            const path = (s.taxonomy_path || []).join(' ▸ ')
+                || [s.category, s.sub_item].filter(Boolean).join(' ▸ ');
+            const tags = [];
+            if (s.project_name) { tags.push(_esc(s.project_name)); }
+            if ((s.advances || []).length) { tags.push(`沖 ${s.advances.length} 筆代墊`); }
+            if (s.note) { tags.push(_esc(s.note)); }
+            return `<div style="display:flex;gap:8px;align-items:baseline;padding:4px 0;border-bottom:1px solid #262626;">
+                <span style="width:92px;text-align:right;flex-shrink:0;color:#e0e0e0;">$${_fmtNum(gross(s))}</span>
+                <span style="flex:1;min-width:0;">
+                    <span style="color:#ddd;">${_esc(path) || '（未分類）'}</span>
+                    ${tags.length ? `<span style="display:block;color:#9ca3af;font-size:11px;">${tags.join('　·　')}</span>` : ''}
+                    ${s.fee ? `<span style="display:block;color:#fb923c;font-size:11px;">實匯 $${_fmtNum(s.amount)} ＋ 代開費 $${_fmtNum(s.fee)}（專案按毛額結清）</span>` : ''}
+                </span></div>`;
+        }).join('')
+        // 合計比的是 amount（＝帳目金額），代開費是外加的，不進這個 Σ
+        + `<div style="display:flex;gap:8px;padding:5px 0;color:#9ca3af;">
+             <span style="width:92px;text-align:right;flex-shrink:0;">$${
+                 _fmtNum(_sp.reduce((n, s) => n + (s.amount || 0), 0))}</span>
+             <span style="flex:1;">合計（＝本列金額）</span></div>`
+        + `<button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-top:6px;"
+                  onclick="window._cashSplitOpen('${e.id}')">改拆項</button>`
+        + '</div>';
+    }
+
     // 關聯發票（合併匯款 / 分期收款）—— 只有收入列有，內容由 loadCashInvoiceAllocs
     // 非同步填。舊的「單張發票驗算」被這區塊取代：它只看得到一張發票，客戶合併
     // 匯款時必然報「不平衡」，等於在對的資料上顯示假警告。

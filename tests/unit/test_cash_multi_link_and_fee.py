@@ -151,3 +151,24 @@ def test_the_project_entry_table_marks_splits_and_totals():
     seg = js.split("掛在本案的收支")[1].split("應付／請款單")[0]
     assert "e.split ?" in seg, "沒有標出拆項"
     assert "reduce((n, e) => n + (e.deposit || 0), 0)" in seg, "沒有合計"
+
+
+def test_the_cash_detail_panel_shows_the_split_breakdown():
+    """🔴 owner 2026-09-02「已拆的明細要在這裡可以看到」。
+
+    一列被拆之後，它的分類／專案／發票**整組讓位給拆項** —— 詳情面板上那幾欄
+    因此全是空的，等於只剩「350,436 從源日進來」，看不出這筆錢是誰的。資料
+    早就跟著清單回來了（`splits`），只是沒畫。
+    """
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
+    fn = js_func_body(js, "function renderDetail(e) {")
+    assert "const _sp = e.splits || [];" in fn
+    assert "拆項明細" in fn
+    # 代開費要看得出「實匯 vs 專案結清毛額」—— 只印一個數字的話，
+    # 對不上專案已收時沒有任何線索
+    assert "(s.amount || 0) + (s.fee || 0)" in fn
+    assert "代開費" in fn
+    # 合計比的是 amount（＝帳目金額），代開費外加不進 Σ
+    assert "n + (s.amount || 0)" in fn
+    # 從這裡就能改，不必回列表找那顆按鈕
+    assert "window._cashSplitOpen('${e.id}')" in fn
