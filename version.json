@@ -1,5 +1,5 @@
 {
-  "version": "2.4.288",
-  "build_date": "2026-09-02",
-  "notes": "工時 Sheet 匯入（對映表／resolver／remap／預算）＋ /simplify 七輪；發票就地連結與請款鈕整理"
+  "version": "2.4.289",
+  "build_date": "2026-09-03",
+  "notes": "工時 Sheet 改由主控端定時拉（公開連結 xlsx），專案工時頁可設定／立即拉取；Apps Script 變可選"
 }
