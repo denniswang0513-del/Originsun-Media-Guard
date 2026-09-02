@@ -200,10 +200,46 @@ def scan_imports(base_dir: str) -> set:
             try:
                 with open(os.path.join(root, f), encoding="utf-8", errors="ignore") as fh:
                     content = fh.read()
-                for m in re.findall(r"^\s*(?:from|import)\s+([\w.]+)", content, re.MULTILINE):
-                    name = m.split(".")[0].lower()
-                    if name:
-                        imported.add(name)
             except Exception:
-                pass
+                continue
+            imported |= _imports_in(content)
     return imported
+
+
+def _imports_in(content: str) -> set:
+    r"""一份 .py 原始碼裡的頂層 import 名字。
+
+    🔴 **走 AST 不走 regex**（2026-09-02 發版實際被擋下來才發現）：舊版是
+    `re.findall(r"^\s*(?:from|import)\s+([\w.]+)")` 掃**原始文字**，於是
+    `core/schemas.py` 描述 `mode` 那四個值的 docstring ——
+
+          import     反過來：把私帳的工項寫成母公司的 CRM 成本行
+
+    被當成 `import 反過來`（Python 的 `\w` 是 Unicode-aware，中文照樣命中），
+    自動寫進 `requirements_agent.txt`，preflight 再 `import 反過來` 炸掉。
+
+    真正危險的不是這次這種明顯的假名字，而是**剛好撞到 PyPI 上真有的套件名** ——
+    那就會被裝進 9 台 agent 而沒有人發現。AST 只看真的 import 節點，註解與
+    docstring 一律不算。
+
+    parse 不過（半寫完的檔）才退回舊的 regex，但要求 ASCII 開頭的識別字 ——
+    模組名不會是中文。
+    """
+    import ast
+
+    names = set()
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        for m in re.findall(r"^[ 	]*(?:from|import)\s+([A-Za-z_][A-Za-z0-9_.]*)",
+                            content, re.MULTILINE):
+            names.add(m.split(".")[0].lower())
+        return {n for n in names if n}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name.split(".")[0].lower() for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            # level>0 ＝相對 import（from . import x）—— 那不是外部套件
+            if not node.level and node.module:
+                names.add(node.module.split(".")[0].lower())
+    return {n for n in names if n}

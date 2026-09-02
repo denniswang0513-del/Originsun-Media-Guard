@@ -624,11 +624,12 @@ def main():
     # 沒理由等到 CI。同 pytest gate 的模式：有就跑、沒有就明講跳過。
     print("\n[*] 執行 lint gate (ruff check .)...")
     _repo = os.path.dirname(os.path.abspath(__file__))
-    try:
-        import ruff as _ruff  # noqa: F401
-        _has_ruff = True
-    except ImportError:
-        _has_ruff = False
+    # 🔴 用 find_spec 偵測，不寫 `import ruff` —— 那一行會被 OTA 的依賴掃描
+    # 當成**執行期依賴**，把 ruff 寫進 requirements_agent.txt 裝到 9 台 agent
+    # 身上（它是發版機的工具，agent 一輩子用不到）。而且我們本來就沒有要
+    # import 它，是用 `-m ruff` 跑。
+    import importlib.util
+    _has_ruff = importlib.util.find_spec("ruff") is not None
     if _has_ruff:
         l_result = subprocess.run(
             [sys.executable, "-m", "ruff", "check", "."],
