@@ -157,7 +157,7 @@ export function openInvoicePicker(o) {
                 <span style="color:#eee;font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(i.invoice_number || '無號碼')}　${esc((i.title || '').slice(0, 28))}</span>
                 ${i.company_name ? `<span style="color:#9ca3af;font-size:11px;">${esc(i.company_name)}</span>` : ''}
             </span>
-            <span style="color:#fbbf24;font-size:11px;white-space:nowrap;">$${money(amtBy.get(i.id) || 0)}</span>`,
+            <span style="color:#fbbf24;font-size:11px;white-space:nowrap;">$${money(amtOf(i.id) || 0)}</span>`,
         onPick: o.onPick,
     });
 }

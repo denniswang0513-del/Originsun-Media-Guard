@@ -101,7 +101,7 @@ def test_staff_resolution_and_miss_buckets_share_the_project_contract():
     for why in ("map", "exact", "key", "key+client", "bucket", "empty"):
         assert miss_bucket(why) is None, why
     src = code_only(repo_src("routers/api_timesheets.py"))
-    for fn in ("async def ingest_rows(", "async def set_budgets("):
+    for fn in ("async def ingest_rows(", "async def set_budgets(", "async def insert_manual_rows("):
         assert "miss_bucket(" in func_body(src, fn), f"自己分桶：{fn}"
     assert "unique_hit(" not in src, "router 自己判人員同名，沒走 resolve_staff"
 

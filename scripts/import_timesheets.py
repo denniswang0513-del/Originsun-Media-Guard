@@ -32,7 +32,7 @@ from pathlib import Path
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
-from core.hr_logic import INTERNAL_BUCKETS, explain_miss, resolve_project  # noqa: E402
+from core.hr_logic import INTERNAL_BUCKETS, explain_miss  # noqa: E402
 from scripts._common import admin_session, api_base, resolve_db_url  # noqa: E402
 
 DATA_SHEET = "總表（勿動）"
@@ -104,21 +104,20 @@ def _dry_run(hours, P, prod: bool) -> None:
     lk = asyncio.run(_lookup(prod))
     tiers = collections.defaultdict(list)
     for p in sorted(hours, key=lambda x: -hours[x]):
-        _pid, why = resolve_project(p, lk)
-        tiers[why].append((p, round(hours[p], 1)))
+        info = explain_miss(p, lk)            # 判一次：reason ＋ 撞案候選／找不到建議
+        tiers[info["reason"]].append((p, round(hours[p], 1), info))
     P("## 對映預估（不寫）")
     for why in ("map", "exact", "key", "key+client", "ambiguous", "none", "bucket"):
         rows = tiers.get(why, [])
-        P(f"- **{why}**：{len(rows)} 個，{round(sum(h for _, h in rows))} 小時")
+        P(f"- **{why}**：{len(rows)} 個，{round(sum(r[1] for r in rows))} 小時")
     P("")
     P("## 撞案（owner 在 tab 上「指定專案」）")
-    for p, h in tiers.get("ambiguous", []):
-        cands = explain_miss(p, lk)["candidates"]
-        P(f"- {p}（{h}h）→ 候選 {[(pid[:8], cli) for pid, _nm, cli in cands]}")
+    for p, h, info in tiers.get("ambiguous", []):
+        P(f"- {p}（{h}h）→ 候選 {[(pid[:8], cli) for pid, _nm, cli in info['candidates']]}")
     P("")
     P("## 找不到（owner 決定：對既有案／建新案／當桶）—— 括號內是相似案名建議，不是對映")
-    for p, h in tiers.get("none", []):
-        sug = explain_miss(p, lk)["suggestions"]
+    for p, h, info in tiers.get("none", []):
+        sug = info["suggestions"]
         P(f"- {p}（{h}h）" + (f" → 像：{sug}" if sug else ""))
 
 

@@ -286,7 +286,7 @@ def resolve_staff(name: str, index: dict) -> tuple:
 
 def miss_bucket(why: str):
     """判定結果要不要回報、回報到哪一桶：ambiguous → "ambiguous"、none → "unmatched"，
-    其他（對到了／內部桶／空名）→ None。ingest／budgets／summary 三處共用，
+    其他（對到了／內部桶／空名）→ None。ingest（專案、人員）與 budgets 共用，
     各寫一次就會漂（曾經有一處把內部桶也算成「找不到」）。"""
     return {"ambiguous": "ambiguous", "none": "unmatched"}.get(why)
 

@@ -590,17 +590,25 @@ window._cashInvPick = (ev, id) => {
             picked.forEach((iid) => {
                 if (keep[iid]) { left -= Number(keep[iid].amount) || 0; }
             });
-            const items = picked.map((iid) => {
+            const items = [];
+            const over = [];
+            picked.forEach((iid) => {
                 if (keep[iid]) {
-                    return { invoice_id: iid, amount: keep[iid].amount,
-                             fee: keep[iid].fee || 0 };
+                    items.push({ invoice_id: iid, amount: keep[iid].amount, fee: keep[iid].fee || 0 });
+                    return;
                 }
                 // 沒在 keep 裡的一定在候選清單（視窗只列這兩種）
                 const inv = _invoiceList.find((x) => x.id === iid);
                 const it = _ALLOC_SIDES.invoice.toItem(inv, Math.max(0, left));
                 left -= it.amount;
-                return { invoice_id: iid, amount: it.amount, fee: it.fee };
-            }).filter((it) => (it.amount || 0) > 0);
+                // 🔴 金額 0 後端會擋（分配 ≤ 0 是一定錯）—— 濾掉，但要講出來（同請款單
+                // 那側），不然使用者勾了三張、存完只剩兩張，畫面上沒有任何跡象。
+                if (it.amount > 0) { items.push({ invoice_id: iid, amount: it.amount, fee: it.fee }); }
+                else { over.push(inv.invoice_number || inv.title || iid); }
+            });
+            if (over.length) {
+                crmToast(`${over.join('、')} 沒有尚欠金額，沒有掛上去`, true);
+            }
             return _fetch(`/cash-entries/${id}/invoices`,
                           { method: 'PUT', body: JSON.stringify({ items }) });
         },

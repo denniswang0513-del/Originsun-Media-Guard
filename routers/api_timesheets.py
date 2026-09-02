@@ -193,14 +193,11 @@ async def upsert_project_map(req: TimesheetProjectMapRequest, request: Request):
     """整批 upsert。專案必須存在（任一帳本 —— owner 決定的可以指到母公司案）。"""
     _require_mine_admin(request, level="full")
     factory = db_factory_or_503()
-    from sqlalchemy import select
-    from db.models import CrmProject, TimesheetProjectMap
+    from db.models import TimesheetProjectMap
     who = current_username(request)
     async with factory() as session:
         pids = {it.project_id for it in req.items}
-        ok = set((await session.execute(
-            select(CrmProject.id).where(CrmProject.id.in_(pids)))).scalars()) if pids else set()
-        bad = sorted(pids - ok)
+        bad = sorted(pids - set(await project_names_map(session, pids)))   # 存在的才回得來
         if bad:
             raise HTTPException(status_code=422, detail=f"找不到專案：{bad[:5]}")
         n = 0
@@ -332,7 +329,7 @@ async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> d
         session, [r.project_id for r in rows if not (r.project_name or "").strip()])
 
     inserted = 0
-    unmatched: set[str] = set()
+    misses = {"ambiguous": set(), "unmatched": set()}
     for r in rows:
         if (r.hours or 0) <= 0:
             raise HTTPException(status_code=422, detail="時數需大於 0")
@@ -340,10 +337,10 @@ async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> d
         if wd is None:
             raise HTTPException(status_code=422, detail=f"日期格式錯誤：{r.work_date}")
         pname = (r.project_name or "").strip()
-        pid = r.project_id or resolve_project(pname, lk)[0]
+        pid, why = (r.project_id, "map") if r.project_id else resolve_project(pname, lk)
         pname = pname or (id_to_name.get(pid or "") or "").strip()
-        if pid is None and pname:
-            unmatched.add(pname)
+        if (b := miss_bucket(why)):
+            misses[b].add(pname)
         session.add(Timesheet(
             id=uuid.uuid4().hex,
             work_date=wd,
@@ -358,7 +355,8 @@ async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> d
             row_hash="manual_" + uuid.uuid4().hex,
         ))
         inserted += 1
-    return {"inserted": inserted, "unmatched_projects": sorted(unmatched)}
+    return {"inserted": inserted, "unmatched_projects": sorted(misses["unmatched"]),
+            "ambiguous_projects": sorted(misses["ambiguous"])}
 
 
 @router.get("/project_options")

@@ -69,3 +69,6 @@ def test_the_picker_says_it_does_not_touch_amounts():
     fn = js_func_body(js_code_only(src), "export function openInvoicePicker(o) {")
     assert "multi: true" in fn
     assert "extraRows: o.linkedRows || []," in fn, "已收齊的那幾張會被存檔洗掉"
+    # 金額索引兩側同一支（amtIndex）；eslint 刻意不開 no-undef，重構留下的舊名字
+    # （amtBy）只有這裡抓得到 —— 2026-09-02 曾經漏過一次，每一列都會 throw
+    assert "amtIndex(" in fn and "amtBy" not in src
