@@ -641,6 +641,12 @@ export function invoiceIssueBadge(status) {
     return `<span class="crm-badge crm-pay-badge-${cls}">${esc(s)}</span>`;
 }
 
+// 🔴 這是**瀏覽器裡的第二個營業稅率**。正本在後端 `core.finance_logic.VAT_PCT`
+// （`VAT_DIVISOR` 就是這個 1.05，發票未稅/稅額與代開發票的稅金那段都吃它）。
+// 這裡沒有把它換成 API 值，是因為發票計算機在使用者打字的當下就要算，而
+// crm-utils 是純函式層、拿不到 request context。
+// **費率一改，這一行與後端那兩支要一起改** —— 財務那邊已經改成吃後端回的
+// `agency.vat_pct`（見 finance/subviews/projects.js），只剩這一處還是寫死的。
 const TAX_RATE = 1.05;
 
 /** 一個金額 + 它是未稅還是含稅 → 推出三個金額欄。

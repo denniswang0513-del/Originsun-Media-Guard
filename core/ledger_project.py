@@ -21,7 +21,7 @@ import re
 
 # 營業稅率 —— 正本在 core.finance_logic（發票未稅／稅額吃的是同一個）。
 # 這裡轉出，讓呼叫端不必為了一個常數多 import 一個模組。
-from core.finance_logic import VAT_DIVISOR, VAT_PCT  # noqa: F401
+from core.finance_logic import VAT_DIVISOR, VAT_PCT
 
 # 工項（收入拆分）預設清單 —— 對齊 owner 原 Sheet 的欄序。
 # settings `my_ledger.income_items` 可覆寫（見 income_items()）。

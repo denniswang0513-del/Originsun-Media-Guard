@@ -684,7 +684,7 @@ async def project_names_map(session, rows) -> dict:
     """{project_id: name} —— 一次撈齊。
 
     `rows` 收兩種形狀：帶 `project_id` 屬性的物件，或直接是 id 字串
-    （目前七個呼叫端都是前者；後者留著是因為「手上只有 id 集合」是這個慣用法
+    （目前八個呼叫端都是前者；後者留著是因為「手上只有 id 集合」是這個慣用法
       的另一半，收不下的話那一半只能再手刻一份）。
 
     這個 `select(id, name).where(id.in_(...))` → dict 的慣用法本來散在

@@ -21,10 +21,13 @@ def test_the_button_reuses_the_existing_payment_flow():
     assert "'費用已代墊'" in js or "費用已代墊" in js
     # 第三顆按鈕走同一支，只多帶 advanced 旗標
     assert "window._costCreatePayment = function(payeeName, amount, summary, status, advanced)" in js
-    # 三顆按鈕由同一支 payBtn 產出（逐字抄三份的話，改簽章要改三處）——
-    # 代墊那顆只多帶 advanced 旗標
-    assert "opt.advanced ? ',true' : ''" in js
-    assert "payBtn('應付款', '費用已代墊', { gap: true, advanced: true," in js
+    # 三顆按鈕由**同一支產生器**產出（逐字抄三份的話，改簽章要改三處）——
+    # 代墊那顆只多帶 advanced 旗標。
+    # 🔴 釘的是「只有一個地方在組那顆按鈕」，不是它的參數排版 ——
+    # 釘字面的話，有人把參數換行或改成物件展開就紅，而行為一點都沒變。
+    body = js_func_body(js, "async function _loadCostStaff(")
+    assert body.count("<button class=\"crm-btn crm-btn-secondary crm-btn-sm\"") == 1,         "按鈕又被抄成多份了"
+    assert "advanced" in body and "費用已代墊" in body
     # 代墊沒有自己的建立端點 —— `_costCreatePayment` 裡只有一次 POST
     # （檔案裡另一次是「新增預支」，那是 is_advance=1 的另一個功能）
     fn = js_func_body(js, "window._costCreatePayment = function(payeeName, amount, summary, status, advanced) {")

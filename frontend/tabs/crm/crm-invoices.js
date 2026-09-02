@@ -2,7 +2,8 @@
  * crm-invoices.js — 帳務管理 Tab
  */
 import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, invoiceAmounts as _amountsFrom, invoicePayBadge as _payBadge, invoiceIssueBadge,
-         INV_PENDING_REMIT, INV_REMITTED, projectOptionsHtml } from './crm-utils.js';
+         INV_PENDING_REMIT, INV_REMITTED, projectOptionsHtml,
+         today as _today } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
@@ -236,7 +237,7 @@ function _quickAddRow() {
     return `
       <div class="inv-qa-wrap">
       <div class="crm-row inv-qa">
-        <div class="crm-row-date"><input id="inv-qa-date" type="date" value="${_todayStr()}"></div>
+        <div class="crm-row-date"><input id="inv-qa-date" type="date" value="${_today()}"></div>
         <div><select id="inv-qa-applicant">${
             ['<option value="">—</option>'].concat(_applicants.map(n =>
                 `<option value="${_esc(n)}">${_esc(n)}</option>`)).join('')
@@ -943,10 +944,6 @@ function _deriveInvoice(payload, { amount, mode = 'ex', fallbackTaxId = '' } = {
     return payload;
 }
 
-function _todayStr() {
-    const d = new Date();
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-}
 
 function _updateTaxCalc() {
     // 稅率只有 _amountsFrom 一個出口 —— 本來這裡與計算機各自寫死 1.05，
@@ -1015,7 +1012,7 @@ function openModal(inv = null) {
         const el = document.getElementById('inv-f-' + f);
         if (!el) continue;
         if (f === 'invoice_date') {
-            el.value = inv?.invoice_date ? inv.invoice_date.substring(0, 10) : _todayStr();
+            el.value = inv?.invoice_date ? inv.invoice_date.substring(0, 10) : _today();
         } else if (f === 'issue_status') {
             el.value = inv?.issue_status || '未開立';
         } else if (f === 'category') {

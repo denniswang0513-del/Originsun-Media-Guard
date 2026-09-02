@@ -136,8 +136,12 @@ const _sorter = createSortable({
     defaultSort: { key: 'date', dir: 'desc' },
     panelId: 'cash-list-panel',
     onChange: () => renderList(),
-    // 🔴 getter 不用各自 .toLowerCase()：共用排序器已經統一正規化
-    //（sortable.js 檔頭明寫「同一份規則」），各背一次只是每次比較白做兩趟
+    // 🔴 getter 不用各自 .toLowerCase()：共用排序器的 `_sortKey` 已經在
+    // decorate 那一步統一正規化（每列一次），getter 再做一次是純冗餘。
+    // ⚠ 這條目前只有本檔遵守 —— crm-invoices / crm-payments / crm-projects-core
+    // / crm-quotes / crm-staff / crm / crm-payables / crm-receivables 還有 23 個
+    // getter 各背一次（不影響結果，只是白做）。它們在這次清理的範圍外，
+    // 動到的話是八個檔的機械性修改；要收的話一次收乾淨，別留一半。
     getters: {
         date:     e => e.entry_date || '',
         summary:  e => e.summary || '',

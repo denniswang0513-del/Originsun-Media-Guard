@@ -260,8 +260,9 @@ async def _apply_splits(session, e, items: list, *, paths: dict,
                            f"沖 {amt:,} 會超沖")
 
     # ── 專案一次撈齊（逐項 session.get 是 N 趟循序往返）──
-    proj_ids = {it.project_id.strip() for it in items if (it.project_id or "").strip()}
     if projects is None:
+        proj_ids = {it.project_id.strip() for it in items
+                    if (it.project_id or "").strip()}
         projects = {p.id: p for p in (await session.execute(
             select(CrmProject).where(CrmProject.id.in_(list(proj_ids))))).scalars()} \
             if proj_ids else {}
