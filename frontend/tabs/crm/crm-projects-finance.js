@@ -506,7 +506,14 @@ window._advAddExpense = function(payeeName, advanceId) {
  *  🔴 不另建一套代墊流程 —— 這個機制本來就在（視窗裡的勾選框），只是藏著，
  *  生產庫 0 筆用過。再刻一份的話，「誰去領這筆錢」就會有兩條規則。
  */
-window._costCreatePayment = function(payeeName, amount, summary, status, advanced) {
+// `opts`（選填，行政雜支那顆才會帶）：
+//   expenseId    → 寫進請款單的 `expense_id` 硬連結（「這張單是 CRM 某一行的
+//                  鏡射」）。重複請款由後端 409 擋 —— 前端把按鈕換掉擋不住
+//                  雙擊／兩個分頁／重送。
+//   plannedMonth → 預帶預計付款月（雜支先花了才請，通常就是消費月）
+//   onDone       → 建立成功後要重畫哪一區（人員費用那三顆不帶＝重畫自己那區）
+window._costCreatePayment = function(payeeName, amount, summary, status, advanced, opts) {
+    opts = opts || {};
     if (!state.selectedId) return;
     var proj = state.projects.find(function(p) { return p.id === state.selectedId; });
     var projName = proj ? proj.name : '';
@@ -529,7 +536,7 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
         (advanced ? '<div class="crm-field crm-field-full" style="color:#fb923c;font-size:11px;margin-top:-4px;">這筆錢由代墊人先掏 —— 公司要還的是<b>代墊人</b>，費用歸屬仍記在 ' + _esc(payeeName) + ' 身上（不影響連結私帳的收入鏡射）。</div>' : '') +
         '<div class="crm-field crm-field-full"><label>摘要 <span class="crm-required">*</span></label><input id="pay-modal-summary" class="crm-input" value="' + _esc(summary) + '" required></div>' +
         '<div class="crm-field crm-field-full"><label>報支項目 <span class="crm-required">*</span></label><select id="pay-modal-payee-type" class="crm-input" required><option value="">—</option><option value="內部人員">內部人員</option><option value="現金">現金</option><option value="勞報">勞報</option><option value="核銷">核銷</option></select></div>' +
-        '<div class="crm-field crm-field-full"><label>預計付款月 <span class="crm-required">*</span></label><input id="pay-modal-month" type="month" class="crm-input" required></div>' +
+        '<div class="crm-field crm-field-full"><label>預計付款月 <span class="crm-required">*</span></label><input id="pay-modal-month" type="month" class="crm-input" value="' + _esc(opts.plannedMonth || '') + '" required></div>' +
         '<div class="crm-field crm-field-full"><label>備註</label><input id="pay-modal-notes" class="crm-input" placeholder="選填"></div>' +
         '</div></div>' +
         '<div class="crm-modal-footer">' +
@@ -575,10 +582,12 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
                     request_date: today(),
                     payment_status: status,
                     payment_date: status === '已付款' ? today() : '',
+                    // 行政雜支那顆才有 —— 釘住這張單是哪一行的鏡射
+                    expense_id: opts.expenseId || '',
                 })
             });
             overlay.remove();
-            _loadCostStaff(state.selectedId);
+            if (opts.onDone) { opts.onDone(); } else { _loadCostStaff(state.selectedId); }
         } catch (e) {
             alert('建立失敗：' + e.message);
             btn.disabled = false; btn.textContent = '確定';

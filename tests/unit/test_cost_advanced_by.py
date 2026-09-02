@@ -20,7 +20,7 @@ def test_the_button_reuses_the_existing_payment_flow():
     js = js_code_only(repo_src(JS))
     assert "'費用已代墊'" in js or "費用已代墊" in js
     # 第三顆按鈕走同一支，只多帶 advanced 旗標
-    assert "window._costCreatePayment = function(payeeName, amount, summary, status, advanced)" in js
+    assert "window._costCreatePayment = function(payeeName, amount, summary, status, advanced, opts)" in js
     # 三顆按鈕由**同一支產生器**產出（逐字抄三份的話，改簽章要改三處）——
     # 代墊那顆只多帶 advanced 旗標。
     # 🔴 釘的是「只有一個地方在組那顆按鈕」，不是它的參數排版 ——
@@ -30,7 +30,7 @@ def test_the_button_reuses_the_existing_payment_flow():
     assert "advanced" in body and "費用已代墊" in body
     # 代墊沒有自己的建立端點 —— `_costCreatePayment` 裡只有一次 POST
     # （檔案裡另一次是「新增預支」，那是 is_advance=1 的另一個功能）
-    fn = js_func_body(js, "window._costCreatePayment = function(payeeName, amount, summary, status, advanced) {")
+    fn = js_func_body(js, "window._costCreatePayment = function(payeeName, amount, summary, status, advanced, opts) {")
     assert fn.count("await _fetch('/payments', {") == 1
 
 
@@ -38,7 +38,7 @@ def test_the_cost_line_is_never_reassigned():
     """🔴 代墊只動請款單。成本行的歸屬（actual_staff_id）一個字都不能改 ——
     改了，連結私帳就會把代墊的錢鏡射成代墊人的收入。"""
     js = js_code_only(repo_src(JS))
-    fn = js_func_body(js, "window._costCreatePayment = function(payeeName, amount, summary, status, advanced) {")
+    fn = js_func_body(js, "window._costCreatePayment = function(payeeName, amount, summary, status, advanced, opts) {")
     for bad in ("actual_staff_id", "estimated_staff_id", "cost-lines", "cost_lines"):
         assert bad not in fn, bad
 
@@ -58,7 +58,7 @@ def test_a_ticked_advance_without_a_person_is_blocked():
     assert "if (isAdvance && !advanceBy) {" in js
     assert "if (isAdvance && advanceBy === originalPayee) {" in js
     # 擋下來要**在送出之前**（try 之外），不然按鈕已經 disabled 又沒還原
-    fn = js_func_body(js, "window._costCreatePayment = function(payeeName, amount, summary, status, advanced) {")
+    fn = js_func_body(js, "window._costCreatePayment = function(payeeName, amount, summary, status, advanced, opts) {")
     head = fn.split("await _fetch('/payments', {")[0]
     assert "if (isAdvance && !advanceBy) {" in head
     assert head.index("if (isAdvance && !advanceBy) {") < head.index("try {")

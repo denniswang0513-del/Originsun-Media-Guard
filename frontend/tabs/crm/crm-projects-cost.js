@@ -13,6 +13,9 @@ import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect, moneyGate, t
 let _dashBase = null;
 window._costDirtyMap = {};
 window._expDirtyMap = {};  // {expId: {field: value}} 行政雜支 inline edit
+// 這次 render 畫出來的雜支列（id → 列）。送請款要帶金額／類別／消費日，
+// 從這裡查比塞進 onclick 字串安全（細項含單引號就會把 handler 打斷）。
+let _expRowById = {};
 window._projDirtyMap = {}; // {field: value} 專案資訊 cell-by-cell inline edit
 
 window._allDirtyCount = function() {
@@ -459,6 +462,25 @@ function _renderCostLines(grouped, expenses, financialSummary) {
         <span class="exp-col-action"></span>
       </div>`;
 
+    // 送請款（owner 2026-09-02「雜支可以送請款進請款單」）：一列一張，
+    // 硬連結記在請款單的 `expense_id` 上（後端 `POST /payments` 有 409 守衛，
+    // 前端換按鈕擋不住雙擊／兩個分頁）。
+    // 🔴 零用金流進來的列（staff_id）**不給這顆鈕** —— 那些錢已經有自己的一條
+    // 請款路（零用金批次 → 依「會計項目×月份」開應付款），兩條路都走就是同一筆
+    // 錢請兩次。它們的 pill 已經標著「零用金」。
+    _expRowById = Object.fromEntries((expenses || []).map((x) => [x.id, x]));
+    const claimCell = (e) => {
+        if (e.payment_id) {
+            const paid = e.payment_status === '已付款';
+            return `<span class="exp-claimed" style="color:${paid ? '#86efac' : '#fb923c'};"
+                       title="點開請款單" onclick="window._costViewPayment('${e.payment_id}')"
+                       >${paid ? '已付款' : '已請款'}</span>`;
+        }
+        if (e.staff_id) return '';
+        return `<button class="exp-claim" title="開一張請款單（這一列一張）"
+                        onclick="window._expCreatePayment('${e.id}')">請款</button>`;
+    };
+
     if (expenses && expenses.length > 0) {
         // 照消費日排（舊→新，最新的落在底部緊鄰新增列）；同日第二筆起日期淡化
         const sorted = [...expenses].sort((a, b) =>
@@ -495,7 +517,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
                 ${edCell('exp-col-amt', 'actual', e.actual || 0, '$' + fmtNum(e.actual))}
                 ${edCell('exp-col-payee', 'payee', e.payee, (payeeName ? _esc(payeeName) : '') + pill)}
                 <span class="exp-col-receipt">${e.receipt_url ? '<a href="' + e.receipt_url + '" target="_blank" style="color:#3b82f6;">📎</a>' : ''}</span>
-                <span class="exp-col-action">${locked ? '' : `
+                <span class="exp-col-action">${locked ? '' : `${claimCell(e)}
                   <button class="exp-del" title="刪除這筆"
                           onclick="window._projDeleteExpense('${e.id}')">✕</button>`}
                 </span>
@@ -985,6 +1007,25 @@ window._projDeleteCostLine = async function(lineId) {
         await _fetch('/project-cost-lines/' + lineId, { method: 'DELETE' });
         _loadFinancialSummary(state.selectedId);
     } catch (e) { alert(e.message); }
+};
+
+// ── 送請款：一列雜支 → 一張請款單 ───────────────────────────────
+// owner 2026-09-02「crm 系統裡面的雜支，可以送請款進請款單」。
+// 🔴 **複用人員費用那顆的 modal**（`_costCreatePayment`），不另刻一份表單 ——
+// 那支已經處理了代墊（收款人換成代墊人、費用歸屬留原人）、報支項目、預計付款月
+// 與必填檢查。再刻一份的話，「代墊怎麼記」就會有兩條規則。
+// 硬連結 `expense_id` 由 modal 帶進 POST /payments；重複請款由後端 409 擋。
+window._expCreatePayment = function(expenseId) {
+    const e = _expRowById[expenseId];
+    if (!e) return;
+    // 摘要：類別＋細項（細項常是空的，只有類別也讀得懂）
+    const label = [e.category, e.sub_item].filter(Boolean).join(' ');
+    // 預計付款月預帶消費日那個月 —— 雜支是先花了才請，付款月通常就是當月
+    const month = (e.expense_date || '').slice(0, 7);
+    window._costCreatePayment(e.payee || '', e.actual || 0,
+                              '雜支：' + label, '應付款', false,
+                              { expenseId: e.id, plannedMonth: month,
+                                onDone: () => _loadFinancialSummary(state.selectedId) });
 };
 
 // ── 就地新增一筆雜支（行政雜支區底部固定的輸入列）─────────────

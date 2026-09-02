@@ -1227,9 +1227,21 @@
     text-align: left; color: #9ca3af;
 }
 .cost-row-expense .exp-col-action {
-    flex: 0 0 46px;   /* 「新增」兩字不折行；✕ 置中不受影響 */
+    /* 「請款」＋✕ 併排不折行（「新增」那列只有一顆鈕，照樣塞得下） */
+    flex: 0 0 88px;
     text-align: center;
+    white-space: nowrap;
 }
+/* 送請款：同 .exp-del 的安靜版 —— 平常不搶戲，滑到列上才現身。
+   已請款／已付款是狀態不是動作，所以一直看得到（顏色同人員費用那兩顆）。 */
+.exp-claim {
+    background: none; border: 1px solid transparent; cursor: pointer;
+    color: #3a3a3a; font-size: 10px; padding: 1px 5px; border-radius: 4px;
+}
+.cost-row-expense:hover .exp-claim { color: #9ca3af; border-color: #374151; }
+.exp-claim:hover { color: #93c5fd; border-color: #3b82f6; }
+.exp-claimed { font-size: 10px; cursor: pointer; padding: 1px 3px; }
+.exp-claimed:hover { text-decoration: underline; }
 /* 雜支迷你追蹤條：預算（可點編）｜已用｜剩餘 */
 .exp-mini { font-weight: 400; font-size: 11px; color: #6b7280; }
 .exp-mini .cost-editable { color: #d1d5db; }

@@ -207,6 +207,18 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
             select(CrmStaff.id, CrmStaff.name).where(CrmStaff.id.in_(sids))
         )).all()) if sids else {}
 
+        # 這一列請過款沒 —— 走**硬連結** `expense_id`（同 api_finance_projects
+        # 的 `claimed`），不是人名＋金額目測：同一案同金額的雜支很常見
+        # （8/10 那趟的住宿／飲食／交通），目測分不出誰請過。
+        # 一次撈這批列的，不是整個專案的（同 project_names_map 的理由）。
+        eids = [e.id for e in rows]
+        claims = {pid: (pstatus or "", ppay) for pid, pstatus, ppay in (
+            await session.execute(
+                select(CrmPaymentRequest.expense_id, CrmPaymentRequest.payment_status,
+                       CrmPaymentRequest.id)
+                .where(CrmPaymentRequest.expense_id.in_(eids)))
+        ).all()} if eids else {}
+
     def _e_to_dict(e):
         return {
             "id": e.id, "category": e.category,
@@ -227,6 +239,11 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
             "has_invoice": bool(e.has_invoice),
             "status": e.status or "",
             "claim_id": e.claim_id or "",
+            # 送請款（owner 2026-09-02「雜支可以送請款進請款單」）：
+            # 一列一張，硬連結記在請款單的 `expense_id` 上。重複請款由
+            # `POST /payments` 的 409 守著（前端換按鈕擋不住雙擊／兩個分頁）。
+            "payment_id": claims.get(e.id, ("", ""))[1] or "",
+            "payment_status": claims.get(e.id, ("", ""))[0] or "",
         }
 
     expenses = [_e_to_dict(e) for e in rows]
