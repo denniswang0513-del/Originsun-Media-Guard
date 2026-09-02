@@ -65,7 +65,7 @@ from ._core import (  # noqa: F401
     accumulated_depreciation, alloc_verdict, amortization_schedule,
     amount_is_settled, ap_open_payments, apply_payment_fee, apply_receipt_fee,
     ar_open_invoices, ar_overdue_amount, auto_match_statement_lines,
-    agency_fee_total, bank_balances_asof, bank_fee_breakdown,
+    bank_balances_asof, bank_fee_breakdown,
     bank_fee_total, bank_running_balance,
     bookkeeping_fee,
     cash_entry_flow, classify_cash_entry, depreciation_for_month, depreciation_rows,

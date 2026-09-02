@@ -3,7 +3,8 @@
 錢流判定規則是公司帳務的 source of truth，抽成純函式讓「規則」與
 「SQL 聚合」分離：endpoint 只負責把 DB 加總餵進來。
 """
-from core.finance_logic import INVOICE_COLLECTED_STATUSES
+from core.finance_logic import (INVOICE_COLLECTED_STATUSES,
+                                recognize_receipt_fee)
 
 
 def compute_advance_status(amount: float, expense_total: float,
@@ -370,7 +371,11 @@ def split_gross(amount, fee=0) -> int:
 
     🔴 專案按毛額結清（源日代開發票、扣完費用才匯）：只認 `amount` 的話，
     那一案會永遠差一截代開費（owner 2026-09-02「和平行動者我應該是要都到帳
-    了才對」的成因）。這個加法本來散在拆項回寫、專案明細、報表展開三處，
-    規則放這裡，動的時候只有一個地方要改。
+    了才對」的成因）。這個加法本來散在拆項回寫、專案明細、報表展開三處。
+
+    🔴 **算式借 `recognize_receipt_fee`**，不自己寫一次加法：三表展開
+    （`explode_cash_splits`）把同一筆錢加成毛額時走的就是它，兩邊各寫一次的話，
+    哪天代開費改成「按比例攤在多列」或「不入營收」，專案帳與損益表會各自演化
+    —— 而那正是這一輪在追的那種差額。順帶白拿它的 `fee < 0` 守衛。
     """
-    return int(amount or 0) + int(fee or 0)
+    return recognize_receipt_fee(amount, 0, fee)[0]

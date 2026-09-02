@@ -19,17 +19,25 @@ export const enumIndex = (arr, val, fallback) => {
 
 const _isEmpty = (v) => v === '' || v == null;
 
+// 排序用的 collator 建一次就好 —— `localeCompare(…, 'zh-Hant')` 每次呼叫多數
+// 引擎會現建一個 collator，而 4,733 列排一次要比較約 11 萬次。
+const _coll = new Intl.Collator('zh-Hant');
+
+/** 排序鍵的正規化：大小寫收在這裡（中文是 no-op，英文混排的欄位才一致），
+ *  所以 getter 不用各自背 `.toLowerCase()`。**在 decorate 那一步做**，
+ *  每列一次；放進比較器就會變成每次比較一次（n → 2·n·log n）。 */
+const _sortKey = (v) => (typeof v === 'number' || _isEmpty(v) ? v : String(v).toLowerCase());
+
 /**
  * 兩個值怎麼比。**空值永遠排尾**（跟方向無關 —— 避免 desc 時一整排空值跑到
- * 頂端把有資料的壓下去），大小寫正規化收在這裡（中文是 no-op，英文混排的
- * 欄位才一致），所以 getter 不用各自背 `.toLowerCase()`。
+ * 頂端把有資料的壓下去）。收到的值已經過 `_sortKey` 正規化。
  */
 function compareValues(va, vb, sign) {
     const ae = _isEmpty(va), be = _isEmpty(vb);
     if (ae !== be) return ae ? 1 : -1;
     if (ae) return 0;
     if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * sign;
-    return String(va).toLowerCase().localeCompare(String(vb).toLowerCase(), 'zh-Hant') * sign;
+    return _coll.compare(String(va), String(vb)) * sign;
 }
 
 /**
@@ -43,7 +51,7 @@ export function sortRows(items, getValue, { key, dir } = {}) {
     // n 列要呼叫它約 2·n·log n 次 —— 收支明細 4,733 列就是 11 萬次，而其中
     // 有些 getter 是線性搜尋（帳戶名）或字串拼接。取值 n 次就夠了。
     return items
-        .map((x) => [getValue(x, key), x])
+        .map((x) => [_sortKey(getValue(x, key)), x])
         .sort((a, b) => compareValues(a[0], b[0], sign))
         .map((pair) => pair[1]);
 }

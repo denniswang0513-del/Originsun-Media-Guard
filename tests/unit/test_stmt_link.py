@@ -153,7 +153,7 @@ def test_mine_replaces_invoice_links_with_project_links():
     from tests.unit._srcscan import js_code_only
     recon = js_code_only(repo_src('frontend/tabs/finance/subviews/recon.js'))
     side = recon.split('const _sideOf =')[1].split(';')[0]
-    assert 'finIsMine()' in side and 'null' in side, '收入側的發票格對私帳沒關掉'
+    assert 'ledgerHasInvoices()' in side and 'null' in side, '收入側的發票格對私帳沒關掉'
     cb = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
     assert 'const _noInvoice = ()' in cb, '「私帳沒有發票」沒有收成一個名字'
     assert cb.count('_noInvoice()') >= 3, '還有消費點沒走那個述詞'
@@ -183,8 +183,12 @@ def test_project_lists_are_searchable_and_checkable():
     cb = js_code_only(repo_src('frontend/tabs/crm/crm-cashbook.js'))
     # 未收案清單從**已經在手上的**專案導出（amount_receivable），不另打端點：
     # 那支有 limit 80（會靜默截斷）、而且母公司帳本整趟全廢。
+    # 導出動作住在挑選器裡（`due` ＝ 由 `dueOf` 篩 `projects`）—— 呼叫端各自
+    # 先 filter 一次的話，「未收怎麼算」就有兩份。
     assert '/cash-splits/outstanding' not in cb, '又多打一支拿得到的資料'
-    assert 'amount_receivable' in cb
+    pick = js_code_only(repo_src('frontend/js/shared/project-picker.js'))
+    assert 'amount_receivable' in pick
+    assert 'all.filter((p) => dueOf(p) === null || dueOf(p) > 0)' in pick
     assert cb.count('_projPickerOpts(') >= 2,         '列表格子與詳情快速連結沒共用同一份 picker 參數'
     assert '_cashProjPick' in cb
 

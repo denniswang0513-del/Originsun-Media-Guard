@@ -22,14 +22,15 @@ import { fmtNum as money } from '../../tabs/crm/crm-utils.js';
  */
 export function openProjectPicker(o) {
     const all = o.projects || [];
-    // `outstanding` 是 `projects` 的子集（同一種物件、多一個 receivable）——
-    // 兩份索引再 spread 合併的舞步是上一版的殘留，那時它來自另一支端點。
-    const due = o.outstanding || [];
     const clientOf = (p) => p.client_short_name || p.client || '';
-    // 🔴 看不到金額的人：`amount_receivable` 整個鍵被 MoneyRedactRoute 抹掉，
-    // 回 null 讓下面畫「—」而不是「未收 $0」（把沒授權說成已收齊）。
+    // 🔴 看不到金額的人：`amount_receivable` 整個鍵被 MoneyRedactRoute 抹掉
+    //（不是 0），回 null 讓下面畫「—」而不是「未收 $0」——「你沒授權」被畫成
+    // 「已收齊」是謊報。判準用 `'key' in obj`（core/money 檔頭那條）。
     const dueOf = (p) => ('amount_receivable' in p
         ? (Number(p.amount_receivable) || 0) : null);
+    // 主清單＝還在等錢的，從 `projects` 推導。**「未收怎麼算」只有 dueOf 一份**：
+    // 呼叫端各自先 filter 一次的話，那條判準（含上面的三態）就有兩份。
+    const due = all.filter((p) => dueOf(p) === null || dueOf(p) > 0);
 
     openRowPicker({
         rows: due,
@@ -69,9 +70,20 @@ export function openProjectPicker(o) {
  *  卻顯示摘要，同一張單兩個名字。 */
 export const paymentLabel = (p) => (p ? (p.payee_name || p.summary || '') : '');
 
+/** 一張請款單「搜得到什麼」—— 收款人／摘要／類別／專案標籤四欄。
+ *  🔴 兩個入口（列表格子的挑選視窗、詳情面板的分配面板）打同一批
+ *  `_paymentList`，欄位集合各寫一份的話，同一串字在 A 找得到、B 找不到，
+ *  而畫面上沒有任何跡象說明為什麼。 */
+export const paymentHay = (p) => `${p.payee_name || ''} ${p.summary || ''} `
+    + `${p.category || ''} ${p.project_label || ''}`.toLowerCase();
+
 export function openPaymentPicker(o) {
     const list = o.payments || [];
-    const amtOf = (id) => (list.find((p) => p.id === id) || {}).amount || 0;
+    // 建表不用 find：合計每次重畫都跑一遍，清單有 800+ 張未付單，
+    // 勾 5 張就是每次重畫 4,000 次比較。掛在這一列上的那幾張也一起收進來。
+    const amtBy = new Map([...list, ...(o.linkedRows || [])]
+        .map((p) => [p.id, Number(p.amount) || 0]));
+    const amtOf = (id) => amtBy.get(id) || 0;
     openRowPicker({
         rows: list,
         allRows: [],
@@ -95,7 +107,7 @@ export function openPaymentPicker(o) {
         title: o.title || '連結請款單',
         placeholder: '搜尋收款人／摘要／類別…',
         emptyMain: '沒有還沒付完的請款單',
-        hay: (p) => `${p.payee_name || ''} ${p.summary || ''} ${p.category || ''} ${p.project_label || ''}`,
+        hay: paymentHay,
         line: (p) => `<span style="flex:1;min-width:0;">
                 <span style="color:#eee;font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(paymentLabel(p) || '（無收款人）')}</span>
                 <span style="color:#9ca3af;font-size:11px;">${esc(p.payee_name ? (p.summary || '').slice(0, 30) : '')}${p.category ? '　·　' + esc(p.category) : ''}</span>

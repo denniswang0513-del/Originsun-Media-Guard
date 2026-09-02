@@ -39,6 +39,13 @@ export function finEntity() { return window._finEntity || 'parent'; }
  */
 export const finIsMine = () => finEntity() === 'mine';
 
+/** 這本帳有沒有「發票」這回事 —— owner 2026-09-01「私帳不會開發票，連結發票
+ *  都用連結專案替代」。
+ *  🔴 **一條產品規則一個名字**，而且要跨檔：`finIsMine()` 在這個 repo 至少
+ *  承載四種語意（帳本 pin、期間預設、發票有無、代收薪資）。哪天私帳也要開
+ *  發票，改的是這一支；裸寫 `finIsMine()` 的地方改不到。 */
+export const ledgerHasInvoices = () => !finIsMine();
+
 export async function finFetch(path, opts = {}) {
     const token = localStorage.getItem('auth_token');
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };

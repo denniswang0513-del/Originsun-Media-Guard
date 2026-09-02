@@ -25,7 +25,7 @@
  * 算式正本在後端 api_finance_projects.compute()，兩份算式必然漂移。
  * 存檔後端回算好的值回來，這裡只顯示。
  */
-import { finFetch, finIsMine as _isMine, esc, fmtNum, finToast }
+import { finFetch, finIsMine as _isMine, esc, fmtNum, finToast, todayStr }
     from '../fin-utils.js';
 import { crmFetch, setupResizeHandle } from '../../crm/crm-utils.js';
 
@@ -48,9 +48,13 @@ let _resizeBound = false;
  *  10／2,000／2.11％／20,000：二代健保費率是法定的、動過不只一次，寫死的那份
  *  改法後會讓畫面上的預覽跟存進去的值不一致，而預覽值一旦被使用者「確認」
  *  就會被 `tax_manual` 凍住。同 `fee_pct` 的處理（cash-split-editor 那條）。 */
-function _proTax(contract, w) {
+/** 後端隨 /project-ledger 送來的代扣費率（同檔其他 helper 一樣直接讀 _detail，
+ *  不把模組級的值繞一圈當參數傳進來再防禦一次）。 */
+const _wh = () => (_detail && _detail.withhold) || {};
+
+function _proTax(contract) {
     const c = Number(contract) || 0;
-    const r = w || {};
+    const r = _wh();
     let tax = Math.round(c * (Number(r.tax_pct) || 0) / 100);
     if (tax <= (Number(r.tax_exempt) || 0)) { tax = 0; }
     const nhi = c >= (Number(r.nhi_min) || 0)
@@ -59,8 +63,8 @@ function _proTax(contract, w) {
 }
 
 /** 那段試算的說明文字 —— 費率同樣從後端來，不在文案裡再抄一份數字。 */
-function _proTaxTitle(w) {
-    const r = w || {};
+function _proTaxTitle() {
+    const r = _wh();
     return `試算：源頭代扣 ${r.tax_pct}%＋二代健保 ${r.nhi_pct}%（含免扣門檻）`
         + ' —— 可自行調整，例如客戶拆單就不用先繳';
 }
@@ -624,9 +628,10 @@ function _renderDetail() {
     // 案源規則（正本在後端 apply_source_fee，這裡只是即時預覽同一條式子）：
     // 代開發票 → 代辦費三欄自動、鎖住；執行業務所得 → 個人稅款**試算**（可改，
     // 見下方）；其他案源恢復手填。
-    // 「個人稅款由人決定過」的答案在後端（落庫的 tax_manual）；這是它在本次
+    // 「這一欄由人決定過」的答案在後端（落庫的 `manual` 清單）；這是它在本次
     // 編輯期間的鏡射，存檔後由後端回的值重新接手。
-    let taxManual = !!det.tax_manual;
+    // `tax_manual` 是舊資料的單一布林鍵（core.ledger_project 那邊會轉成清單）。
+    let taxManual = (det.manual || []).includes('personal_tax') || !!det.tax_manual;
     const _syncFee = (sourceChanged = false) => {
         const src = document.getElementById('fpl-source')?.value;
         const feeEl = document.getElementById('fpl-c-invoice_fee');
@@ -660,14 +665,14 @@ function _renderDetail() {
         const ptEl = document.getElementById('fpl-c-personal_tax');
         if (ptEl) {
             ptEl.disabled = false;
-            ptEl.title = isPro ? _proTaxTitle(_detail && _detail.withhold) : '';
+            ptEl.title = isPro ? _proTaxTitle() : '';
             // 🔴「人調過了沒」不用猜：後端把它落庫成 `tax_manual`（見
             // core.ledger_project.apply_source_fee）並隨 detail 回來。這裡只
             // 在「剛換案源」或「這格還沒被人決定過」時填試算值 —— 上一版用
             // 模組級「上次試算值」做值比對，那個基準活不過面板重畫，還得在
             // 每次 render 手動重新校準。
             if (isPro && (sourceChanged || !taxManual)) {
-                ptEl.value = _proTax(c, _detail && _detail.withhold) || '';
+                ptEl.value = _proTax(c) || '';
                 _liveSum();
             }
         }
@@ -856,7 +861,7 @@ _fp.claimMisc = async (expenseId, btn) => {
                 entity: 'mine', category: '專案雜支', project_id: _sel,
                 payee_name: row.payee || label, amount: row.amount, expense_id: row.id,
                 summary: `雜支：${label}｜${_detail.project.name}`,
-                request_date: new Date().toISOString().slice(0, 10),
+                request_date: todayStr(),
             }),
         });
         finToast(`已建立雜支請款：${label}`);
@@ -873,7 +878,7 @@ _fp.claimMisc = async (expenseId, btn) => {
 async function _payAction(id, paid) {
     const path = paid ? '/payments/batch-pay' : '/payments/batch-unpay';
     const body = paid
-        ? { payment_ids: [id], payment_date: new Date().toISOString().slice(0, 10) }
+        ? { payment_ids: [id], payment_date: todayStr() }
         : { payment_ids: [id] };
     try {
         await crmFetch(path, { method: 'PATCH', body: JSON.stringify(body) });
@@ -940,7 +945,7 @@ _fp.claimLine = async (lineId, btn) => {
                 entity: 'mine', category: '專案外包', project_id: _sel,
                 payee_name: who, amount: row.amount, cost_line_id: row.id,
                 summary: `委外：${who}｜${_detail.project.name}（${row.phase}｜${row.item}）`,
-                request_date: new Date().toISOString().slice(0, 10),
+                request_date: todayStr(),
             }),
         });
         finToast(`已建立委外請款：${who}`);
@@ -967,7 +972,7 @@ _fp.outsourceAdd = async (btn) => {
                 entity: 'mine', category: '專案外包', project_id: _sel,
                 payee_name: payee, amount: amt,
                 summary: `委外：${payee}｜${p.name}${note ? '（' + note + '）' : ''}`,
-                request_date: new Date().toISOString().slice(0, 10),
+                request_date: todayStr(),
             }),
         });
         finToast('已加入委外（應付款）');

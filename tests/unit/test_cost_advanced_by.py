@@ -21,7 +21,10 @@ def test_the_button_reuses_the_existing_payment_flow():
     assert "'費用已代墊'" in js or "費用已代墊" in js
     # 第三顆按鈕走同一支，只多帶 advanced 旗標
     assert "window._costCreatePayment = function(payeeName, amount, summary, status, advanced)" in js
-    assert "',true)" in js and "費用已代墊</button>" in js
+    # 三顆按鈕由同一支 payBtn 產出（逐字抄三份的話，改簽章要改三處）——
+    # 代墊那顆只多帶 advanced 旗標
+    assert "opt.advanced ? ',true' : ''" in js
+    assert "payBtn('應付款', '費用已代墊', { gap: true, advanced: true," in js
     # 代墊沒有自己的建立端點 —— `_costCreatePayment` 裡只有一次 POST
     # （檔案裡另一次是「新增預支」，那是 is_advance=1 的另一個功能）
     fn = js_func_body(js, "window._costCreatePayment = function(payeeName, amount, summary, status, advanced) {")
@@ -90,5 +93,7 @@ def test_the_row_says_who_fronted_the_money():
     js = js_code_only(repo_src(JS))
     assert "' 代墊</span>'" in js
     assert "matchedPayment.advance_by" in js
-    # 兩種狀態（已付款／已請款）都要帶標籤 —— 只加一邊是最容易漏的
-    assert js.count("advTag + '<span") == 2
+    # 兩種狀態（已付款／已請款）都要帶標籤 —— 只加一邊是最容易漏的。
+    # 兩者由同一支 statusSpan 產出，所以標籤在定義處掛一次就兩邊都有。
+    assert "return advTag + '<span" in js
+    assert "statusSpan('#86efac'" in js and "statusSpan('#fb923c'" in js

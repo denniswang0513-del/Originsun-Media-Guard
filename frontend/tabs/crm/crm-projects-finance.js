@@ -92,20 +92,35 @@ async function _loadCostStaff(projectId) {
                         + _esc(matchedPayment.payee_name || '') + ' 先代墊，公司要還的是他">'
                         + _esc(matchedPayment.payee_name || '') + ' 代墊</span>'
                     : '';
-                if (matchedPayment.payment_status === '已付款') {
-                    statusHtml = advTag + '<span style="color:#86efac;cursor:pointer;font-size:11px;" onclick="window._costViewPayment(\'' + matchedPayment.id + '\')">已付款 ✓</span>';
-                } else {
-                    statusHtml = advTag + '<span style="color:#fb923c;cursor:pointer;font-size:11px;" onclick="window._costViewPayment(\'' + matchedPayment.id + '\')">已請款</span>';
-                }
+                var _pid = matchedPayment.id;
+                var statusSpan = function(color, text) {
+                    return advTag + '<span style="color:' + color + ';cursor:pointer;font-size:11px;"'
+                        + ' onclick="window._costViewPayment(\'' + _pid + '\')">' + text + '</span>';
+                };
+                statusHtml = matchedPayment.payment_status === '已付款'
+                    ? statusSpan('#86efac', '已付款 ✓')
+                    : statusSpan('#fb923c', '已請款');
             } else {
                 var _eName = _esc(s.name).replace(/'/g, "\\'");
                 var _eItems = _esc(itemNames.join('、')).replace(/'/g, "\\'");
-                statusHtml = '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="font-size:10px;padding:1px 6px;" onclick="window._costCreatePayment(\'' + _eName + '\',' + subtotal + ',\'' + _eItems + '\',\'應付款\')">請款</button>' +
-                    '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px;" onclick="window._costCreatePayment(\'' + _eName + '\',' + subtotal + ',\'' + _eItems + '\',\'已付款\')">現金已付款</button>' +
-                    // 費用已代墊（owner 2026-09-02）：這筆錢別人先掏了，公司要還的
-                    // 是**代墊人**。開的是同一個請款視窗、預先勾好代墊 —— 那個機制
-                    // 本來就在（modal 裡的勾選框），只是藏著沒人找得到（生產 0 筆）。
-                    '<button class="crm-btn crm-btn-secondary crm-btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px;" title="這筆費用由別人先代墊 —— 收款人改成代墊人，費用歸屬仍記在 ' + _eName + ' 身上" onclick="window._costCreatePayment(\'' + _eName + '\',' + subtotal + ',\'' + _eItems + '\',\'應付款\',true)">費用已代墊</button>';
+                // 三顆按鈕只差 status／字／代墊旗標 —— 逐字抄三份的話，改樣式或改
+                // _costCreatePayment 的簽章要改三處（加第五個參數時已經證明過）
+                var payBtn = function(status, label, opt) {
+                    opt = opt || {};
+                    return '<button class="crm-btn crm-btn-secondary crm-btn-sm"'
+                        + ' style="font-size:10px;padding:1px 6px;' + (opt.gap ? 'margin-left:4px;' : '') + '"'
+                        + (opt.title ? ' title="' + opt.title + '"' : '')
+                        + ' onclick="window._costCreatePayment(\'' + _eName + '\',' + subtotal
+                        + ',\'' + _eItems + '\',' + '\'' + status + '\''
+                        + (opt.advanced ? ',true' : '') + ')">' + label + '</button>';
+                };
+                // 費用已代墊（owner 2026-09-02）：這筆錢別人先掏了，公司要還的
+                // 是**代墊人**。開的是同一個請款視窗、預先勾好代墊 —— 那個機制
+                // 本來就在（modal 裡的勾選框），只是藏著沒人找得到（生產 0 筆）。
+                statusHtml = payBtn('應付款', '請款')
+                    + payBtn('已付款', '現金已付款', { gap: true })
+                    + payBtn('應付款', '費用已代墊', { gap: true, advanced: true,
+                        title: '這筆費用由別人先代墊 —— 收款人改成代墊人，費用歸屬仍記在 ' + _eName + ' 身上' });
             }
 
             html += '<div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #2e2e2e;gap:8px;">';

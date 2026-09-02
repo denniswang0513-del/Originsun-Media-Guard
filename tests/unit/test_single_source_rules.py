@@ -55,11 +55,13 @@ def test_money_that_was_redacted_is_not_rendered_as_settled():
     `|| 0` 會把「你看不到」壓成「已收齊」：未收清單整個空掉，而「顯示全部」
     每一列都被標成收齊了。判準用 `'key' in obj`（core/money 檔頭那條）。
     """
-    cash = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
-    assert "!('amount_receivable' in p) || (p.amount_receivable || 0) > 0" in cash
     picker = js_code_only(repo_src("frontend/js/shared/project-picker.js"))
     assert "'amount_receivable' in p" in picker
     assert "dueOf(p) === null" in picker, "看不到金額時沒有畫成第三態"
+    # 🔴 判準只有 `dueOf` 一份：呼叫端自己先 filter 一次未收，就是第二份
+    # （而那一份漏掉三態的話，症狀是清單靜默少幾案）
+    cash = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
+    assert "amount_receivable" not in cash, "收支帳本又自己判了一次未收"
 
 
 def test_the_withholding_rates_come_from_the_backend():

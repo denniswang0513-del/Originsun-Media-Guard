@@ -680,14 +680,19 @@ async def ledger_categories_and_tree(session, ent: str) -> tuple:
             build_tree([n for n in nodes if n.active]))
 
 async def project_names_map(session, rows) -> dict:
-    """{project_id: name} —— `rows` 是任何帶 `project_id` 的物件（一次撈齊）。
+    """{project_id: name} —— 一次撈齊。
 
-    🔴 這個 `select(id, name).where(id.in_(...))` → dict 的慣用法在 repo 裡
-    手刻了六份（api_cashflow ×2、api_equipment、api_timesheets ×2、拆項清單）。
-    放這裡是因為它是**通用的 CRM helper**，不屬於任何一個領域模組 ——
-    留在 cash_splits 裡的話，下一個要用的人只會再刻第七份。
+    `rows` 收兩種形狀：帶 `project_id` 屬性的物件，或直接是 id 字串。
+    🔴 收字串是必要的，不是方便 —— 呼叫端手上一半是 ORM 列、一半是已經算好的
+    id 集合（api_equipment 就是後者）。只收前者的話，後者只能再手刻一份，
+    而這支存在的理由正是不要有下一份。
+
+    這個 `select(id, name).where(id.in_(...))` → dict 的慣用法本來散在
+    api_cashflow ×2、api_equipment、拆項清單。
+    （api_timesheets 那兩處方向相反：name → id，結構上用不到這支。）
     """
-    ids = {getattr(r, "project_id", None) for r in rows}
+    ids = {r if isinstance(r, str) else getattr(r, "project_id", None)
+           for r in rows}
     ids.discard(None)
     ids.discard("")
     if not ids:

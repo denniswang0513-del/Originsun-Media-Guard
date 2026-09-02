@@ -16,7 +16,8 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from config import load_settings
 from core.finance_logic import local_day
 from core.schemas import MilestonePayload, MonthClosePayload
-from routers.crm._shared import _parse_day, _username, _validate_month
+from routers.crm._shared import (_parse_day, _username, _validate_month,
+                                 project_names_map)
 
 router = APIRouter(prefix="/api/v1/cashflow", tags=["cashflow"])
 
@@ -63,12 +64,7 @@ async def list_milestones(request: Request, project_id: str = ""):
         if project_id:
             q = q.where(PaymentMilestone.project_id == project_id)
         rows = (await session.execute(q)).scalars().all()
-        pids = {r.project_id for r in rows}
-        names = {}
-        if pids:
-            for pid, name in (await session.execute(
-                    select(CrmProject.id, CrmProject.name).where(CrmProject.id.in_(pids)))).all():
-                names[pid] = name
+        names = await project_names_map(session, rows)
     return {"milestones": [_ms_dict(m, names.get(m.project_id, "")) for m in rows]}
 
 
@@ -202,12 +198,7 @@ async def forecast(request: Request, days: int = 90):
             .where(FinanceLoanPayment.status != "paid",
                    FinanceLoanPayment.due_date < horizon,
                    FinanceLoan.entity == "parent"))).scalars().all()  # 母公司帳本
-        pids = {m.project_id for m in ms}
-        names = {}
-        if pids:
-            for pid, name in (await session.execute(
-                    select(CrmProject.id, CrmProject.name).where(CrmProject.id.in_(pids)))).all():
-                names[pid] = name
+        names = await project_names_map(session, ms)
 
     # 週分桶
     n_weeks = (days + 6) // 7

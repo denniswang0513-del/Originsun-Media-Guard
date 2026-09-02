@@ -63,7 +63,7 @@ def test_金額式子兩邊一致():
     be = _read("routers/crm/petty.py")
     assert "int(e.expense or 0) + int(e.claim or 0) + int(e.bank_fee or 0)" in be
     fe = _read("frontend/tabs/crm/crm-cashbook.js")
-    assert "(e.expense || 0) + (e.claim || 0) + (e.bank_fee || 0)" in fe
+    assert "_grossOut(e) + (e.claim || 0)" in fe
 
 
 def test_只建草稿且走單據正本():

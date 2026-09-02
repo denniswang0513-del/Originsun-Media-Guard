@@ -125,19 +125,41 @@ def test_the_withholding_is_an_estimate_the_owner_can_override():
     # 🔴 旗標要落庫：只改別欄的那種存檔（不送稅款）不可以把人調好的值洗回去。
     # 這一條是 dev 端到端抓到的 —— 只看「這次有沒有送」的版本在這裡就破功。
     saved = norm_detail(kept)
-    assert saved.get("tax_manual") == 1, "norm_detail 把旗標洗掉了"
+    assert saved.get("manual") == ["personal_tax"], "norm_detail 把旗標洗掉了"
     later = apply_source_fee(42000, dict(saved), keep={"misc"})
     assert later["personal_tax"] == 0, "只改別欄時，人調好的稅款被重算了"
     # 改回試算值＝交還自動：之後營收變動會跟著重算
     back = apply_source_fee(42000, dict(saved) | {"personal_tax": withholding(42000)},
                             keep={"personal_tax"})
-    assert "tax_manual" not in back
+    assert "personal_tax" not in (back.get("manual") or [])
     assert apply_source_fee(50000, norm_detail(back))["personal_tax"] == withholding(50000)
     # 代開發票那三欄不在這次放寬的範圍（owner 只講了個人稅款）
     agency = apply_source_fee(82000, norm_detail({"source": "代開發票",
                                                   "invoice_fee": 1}),
                               keep={"invoice_fee"})
     assert agency["invoice_fee"] == 6560
+
+
+def test_the_manual_flag_is_a_list_so_a_second_field_costs_one_string():
+    """🔴 「這幾欄由人決定」存成**清單**不是每欄一個布林鍵。
+
+    只有一個欄位在用的時候兩種寫法一樣長，但第二欄（`invoice_fee` 的手動覆寫
+    遲早會來 —— owner 對代開費說過「預設帶出內容，但我可以細調」）在布林鍵那
+    條路上要付：新鍵 ＋ `norm_detail` 一段保留邏輯 ＋ `apply_source_fee` 一個
+    分支 ＋ 一份前端鏡射。清單只多一個字串。
+
+    舊資料（`tax_manual: 1`）要能無痛讀進來 —— 生產庫裡有。
+    """
+    from core.ledger_project import MANUAL_FIELDS, apply_source_fee
+
+    assert "personal_tax" in MANUAL_FIELDS
+    old = norm_detail({"source": "執行業務所得", "personal_tax": 3000, "tax_manual": 1})
+    assert old.get("manual") == ["personal_tax"], "舊的布林鍵沒有轉成清單"
+    assert "tax_manual" not in old, "兩種形狀同時存在＝兩個真相"
+    # 轉過來之後照樣不被自動值覆寫
+    assert apply_source_fee(42000, dict(old))["personal_tax"] == 3000
+    # 名單外的鍵不留（避免前端亂送把任意欄位凍住）
+    assert "manual" not in norm_detail({"source": "執行業務所得", "manual": ["outsource"]})
 
 
 def test_the_update_endpoint_passes_what_the_user_sent():
@@ -153,10 +175,10 @@ def test_the_update_endpoint_passes_what_the_user_sent():
     # keep＝這次**真的送了值**的欄位；`None` 是「沒送」不是值（寫入迴圈也跳過
     # 它）—— 一起算進去的話，送 `{"personal_tax": null}` 會把舊值凍住。
     assert "keep={k for k, v in data.items() if v is not None}" in fn
-    # 前端：「人調過了沒」的答案只有一個來源 —— 後端落庫的 tax_manual。自己
+    # 前端：「人調過了沒」的答案只有一個來源 —— 後端落庫的 `manual` 清單。自己
     # 維護「上次試算值」那種模組狀態活不過面板重畫，還得每次 render 手動校準。
     js = js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))
-    assert "tax_manual" in js, "前端沒吃後端落庫的旗標，又在自己猜"
+    assert "det.manual" in js, "前端沒吃後端落庫的旗標，又在自己猜"
     assert "_lastProTax" not in js, "又長出第二個「人調過了沒」的答案"
 
 

@@ -25,6 +25,12 @@ import { indexTax, taxSelects } from './cash-tax-picker.js';
 import { fmtNum } from '../../tabs/crm/crm-utils.js';   // modal-styles 同款先例：shared → crm-utils
 
 /** 「已拆 N 項」pill —— 收支明細與匯入預覽共用同一顆。 */
+/** 一個收入拆項對**專案**的貢獻＝實匯淨額 ＋ 被扣走的代開費。
+ *  🔴 對應後端 `core.crm_logic.split_gross`（規則正本）。前端這一份是給
+ *  「還沒送出去、算給人看」的那些格子用的 —— 編輯器的結清毛額、收支詳情的
+ *  拆項列。三個顯示端各寫一次加法的話，畫的是同一筆錢卻會互相矛盾。 */
+export const splitGross = (s) => (Number(s.amount) || 0) + (Number(s.fee) || 0);
+
 export function splitBadgeHtml(count) {
     return `<span style="font-size:11px;padding:2px 8px;border-radius:8px;background:#14351f;color:#86efac;">已拆 ${Number(count) || 0} 項</span>`;
 }
@@ -161,14 +167,14 @@ export async function openCashSplitEditor(o) {
         || `<div style="color:#6b7280;font-size:12px;">${projQ ? '找不到符合的未收案' : '沒有還在等錢的案子'}</div>`);
     };
 
+    /** 「專案結清毛額 $N」—— 樣板與 patchGross 共用一份，
+     *  不然改了文案或毛額公式，補上去的那格會跟重畫出來的不一樣。
+     *  加法本身走 `splitGross`（規則正本在後端 core.crm_logic.split_gross）。 */
+    const grossText = (r) => '專案結清毛額 $' + fmtNum(splitGross(r));
+
     /** 代墊清單 —— 跟未收案同一個形狀（搜尋只換清單那塊、勾過的永遠看得到）。
      *  owner 2026-09-01「代墊的部分希望有搜尋框可以搜尋」：那份清單一次撈 200
      *  筆，Google Workspace 每月一筆、國外交易服務費每筆各一 —— 用捲的找不到。 */
-    /** 「專案結清毛額 $N」—— 樣板與 patchGross 共用一份，
-     *  不然改了文案或毛額公式，補上去的那格會跟重畫出來的不一樣。 */
-    const grossText = (r) => '專案結清毛額 $'
-        + fmtNum((Number(r.amount) || 0) + (Number(r.fee) || 0));
-
     const advListHtml = () => {
         // 已勾的一次算完（同 projListHtml）：原本每筆代墊 filter 一次、
         // checked 再一次，兩次都是巢狀 some，而搜尋框每按一鍵重跑整份清單

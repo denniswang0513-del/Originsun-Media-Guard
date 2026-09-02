@@ -186,7 +186,7 @@ async def remove_entry_splits(session, e):
 
 
 async def _apply_splits(session, e, items: list, *, paths: dict,
-                        fresh: bool = False) -> list:
+                        fresh: bool = False, projects: dict = None) -> list:
     """拆項的唯一寫入端（單筆端點與對帳單匯入共用）。回寫入後的拆項列。
 
     `items`：core.schemas.CashSplitItem 的 list；空 list ＝ 解除拆項。

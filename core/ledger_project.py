@@ -188,6 +188,30 @@ def mirror_lines(cost_lines, staff_id: str) -> dict:
     return {"lines": out, "split": split, "total": total}
 
 
+def merge_split(current: dict, incoming: dict, *, add: bool) -> tuple:
+    """把一個 CRM 案鏡射過來的收入分項併進私帳案的 split，回 `(merged, delta)`。
+
+    `add=True`＝一個私帳案承接多個 CRM 案（owner 2026-09-01「可以多筆專案連結
+    到一筆私帳」）：同名工項相加。`add=False`＝overwrite，用這一個 CRM 案的錢
+    取代（第二個來源進來時 overwrite 會把前一個的錢洗掉，所以多對一只有 add
+    說得通）。
+
+    🔴 回的是 **delta 不是 total**：私帳案的 `contract_amount` 未必等於
+    Σ(split)——他可能自己填過非工項的合約金額。呼叫端拿 delta 去加，
+    才不會在「順手改成 sum(merged.values())」的時候靜默改掉已連結案的金額。
+
+    同名工項要相加這條規則跟 `mirror_lines` 是同一條（生產庫的 OMRON 那案有
+    兩行導演、兩行腳本），那邊做的是單一案內、這邊是跨案。
+    """
+    merged = dict(current or {}) if add else {}
+    delta = 0
+    for k, v in (incoming or {}).items():
+        amt = int(v or 0)
+        merged[k] = int(merged.get(k, 0)) + amt
+        delta += amt
+    return merged, delta
+
+
 def mirror_detail(split: dict) -> dict:
     """鏡射案的 ledger_detail：只有收入分項與案源，成本欄全 0。
 
@@ -211,10 +235,17 @@ def norm_detail(raw) -> dict:
     src = str(d.get("source") or "").strip()
     if src in SOURCES:
         out["source"] = src
-    # 個人稅款「由人決定」的旗標（見 apply_source_fee）—— 不保留的話每次
-    # 正規化都把它洗掉，等於旗標從來沒存在過
-    if d.get("tax_manual"):
-        out["tax_manual"] = 1
+    # 「這幾欄由人決定，不要自動覆寫」（見 apply_source_fee）—— 不保留的話
+    # 每次正規化都把它洗掉，等於旗標從來沒存在過。
+    # 🔴 存成**清單**不是每欄一個布林鍵：`invoice_fee` 的手動覆寫遲早會來
+    # （owner 對代開費說過「預設帶出內容，但我可以細調」），到時只是清單多一
+    # 個字串，不用再長一個 `fee_manual` 鍵 ＋ 一段保留邏輯 ＋ 一份前端鏡射。
+    manual = set(d.get("manual") or ())
+    if d.get("tax_manual"):        # 舊資料：單一布林鍵的年代
+        manual.add("personal_tax")
+    manual &= set(MANUAL_FIELDS)
+    if manual:
+        out["manual"] = sorted(manual)
     try:
         pct = float(d.get("fee_pct"))
         if pct > 0 and pct != DEFAULT_FEE_PCT:
@@ -222,6 +253,10 @@ def norm_detail(raw) -> dict:
     except (TypeError, ValueError):
         pass
     return out
+
+
+#: 可以被人「接手」、不再自動覆寫的欄位。加第二欄只要往這裡加一個字串。
+MANUAL_FIELDS = ("personal_tax",)
 
 
 def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
@@ -253,16 +288,23 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
         # 個人稅款＝源頭代扣試算（owner 2026-08-26「新增一個執行業務所得的
         # 項目自動算」）；應收基準同步吃到（expected_cash_in 減 personal_tax）
         auto = withholding(contract)
+        manual = set(d.get("manual") or ())
+        if d.get("tax_manual"):        # 舊資料
+            manual.add("personal_tax")
         if "personal_tax" in keep:
             # 送來的值 ≠ 試算 → 這格從此由人決定；改回試算值 → 交還自動。
             # 🔴 旗標要**落庫**，不能只看「這次有沒有送」：只改別欄的那種存檔
             # （例如單改行政雜支）不會送稅款，下一秒就把人調好的數字洗回試算值。
+            manual.discard("personal_tax")
             if int(d.get("personal_tax") or 0) != auto:
-                d["tax_manual"] = 1
-            else:
-                d.pop("tax_manual", None)
-        if not d.get("tax_manual"):
+                manual.add("personal_tax")
+        if "personal_tax" not in manual:
             d["personal_tax"] = auto
+        d.pop("tax_manual", None)      # 一律換成清單形狀，別留兩種真相
+        if manual:
+            d["manual"] = sorted(manual)
+        else:
+            d.pop("manual", None)
     return d
 
 

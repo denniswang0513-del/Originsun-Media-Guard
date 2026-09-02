@@ -46,7 +46,7 @@ def test_allocation_fills_up_to_what_the_row_actually_paid():
     沒有任何跡象，是最難發現的一種。"""
     fn = js_code_only(js_func_body(repo_src(CASHBOOK),
                                    "window._cashPayPick = (ev, id) => _inlineLink({"))
-    assert "let left = _payOut(e);" in fn
+    assert "let left = _grossOut(e);" in fn
     assert "Math.min(p ? (p.amount || 0) : 0, left)" in fn
     assert "if (amt > 0) {" in fn and "over.push(" in fn
     assert "crmToast(" in fn, "被濾掉的那幾張沒有告訴使用者"
@@ -166,7 +166,7 @@ def test_the_cash_detail_panel_shows_the_split_breakdown():
     assert "拆項明細" in fn
     # 代開費要看得出「實匯 vs 專案結清毛額」—— 只印一個數字的話，
     # 對不上專案已收時沒有任何線索
-    assert "(s.amount || 0) + (s.fee || 0)" in fn
+    assert "splitGross(s)" in fn
     assert "代開費" in fn
     # 合計比的是 amount（＝帳目金額），代開費外加不進 Σ
     assert "n + (s.amount || 0)" in fn

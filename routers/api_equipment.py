@@ -22,6 +22,7 @@ from core.schemas import (
     EquipmentPayload,
     EquipmentReturnPayload,
 )
+from routers.crm._shared import project_names_map
 
 router = APIRouter(prefix="/api/v1/equipment", tags=["equipment"])
 
@@ -223,12 +224,7 @@ async def list_equipment(request: Request, q: str = "", category: str = "",
             .where(EquipmentCheckout.returned_at.is_(None))
             .order_by(EquipmentCheckout.out_at.desc())
         )).scalars().all()
-        pids = {c.project_id for c in open_rows if c.project_id}
-        pnames = {}
-        if pids:
-            pnames = dict((await session.execute(
-                select(CrmProject.id, CrmProject.name).where(CrmProject.id.in_(pids))
-            )).all())
+        pnames = await project_names_map(session, open_rows)
 
     open_by_eq = {}
     for c in open_rows:  # 已按 out_at desc — 每件器材取最新未歸還那筆

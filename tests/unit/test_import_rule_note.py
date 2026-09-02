@@ -47,8 +47,9 @@ def test_import_writes_the_rule_note_and_falls_back_to_the_stock_line():
     assert 'STMT_IMPORT_NOTE = "銀行對帳單匯入"' in src
     body = code_only(src)
     assert 'note=(r.note or "").strip()[:255] or STMT_IMPORT_NOTE' in body
-    # 制式字樣不可以再有第二份字面值（`created_by` 那個是草稿的建立者，不是備註）
-    assert body.count('"銀行對帳單匯入"') == 2, \
+    # 制式字樣不可以再有第二份字面值 —— 常數的定義那一行是唯一的一份，
+    # 連 `created_by`（這列是誰建的）也吃同一個常數
+    assert body.count('"銀行對帳單匯入"') == 1, \
         "制式備註字樣散成多份了 —— 重分類那條路會判不出「這句不是人寫的」"
 
 

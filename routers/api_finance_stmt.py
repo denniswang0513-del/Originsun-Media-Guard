@@ -1029,7 +1029,7 @@ async def _fill_workbench_column(session, bank_account_id: str, stmt_lines: list
             # 兩邊會一致 —— 工作台要求金額相等才算配對得上。
             amount=int(r.amount or 0),
             matched_entry_id=ce.id,
-            created_by="銀行對帳單匯入"))
+            created_by=STMT_IMPORT_NOTE))
 
 
 async def _push_petty_drafts(session, request, petty_rows: list) -> tuple:
@@ -1122,9 +1122,8 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
         proj_ids = ({r.project_id for r in payload.rows if r.project_id}
                     | {sp.project_id for r in payload.rows
                        for sp in (r.splits or []) if sp.project_id})
-        if proj_ids:
-            (await session.execute(
-                _select(CrmProject).where(CrmProject.id.in_(proj_ids)))).scalars().all()
+        proj_by_id = {p.id: p for p in (await session.execute(
+            _select(CrmProject).where(CrmProject.id.in_(proj_ids)))).scalars()}             if proj_ids else {}
 
         acct, ent = await _acct_and_entity(session, request, payload.bank_account_id)
 
@@ -1238,7 +1237,7 @@ async def apply_bank_statement(payload: StatementImportApply, request: Request):
                     # 不用跑 52 趟保證空手的 SELECT。父列讓位由 _apply_splits
                     # 唯一那份做，這裡不先清（清了也會被它覆寫）。
                     await _apply_splits(session, ce, r.splits, paths=tax_paths,
-                                        fresh=True)
+                                        fresh=True, projects=proj_by_id)
                     made_entries += 1
                     stmt_lines.append((r, ce))
                     continue

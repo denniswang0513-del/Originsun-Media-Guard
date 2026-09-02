@@ -12,6 +12,9 @@ import shutil
 import uuid
 
 from fastapi import HTTPException, Request, UploadFile, File, Query
+from sqlalchemy import func as _sa_func
+
+_sa_count = _sa_func.count
 
 from config import load_settings as _load_settings
 
@@ -45,8 +48,33 @@ def is_mirrored(p, legacy_ids=()) -> bool:
 
     只查舊的那種，第二個之後連上去的案就沒有標籤 —— owner 2026-09-01 回報的
     正是這個（「南山人壽謝經理」連了卻沒標）。
+
+    這是 `resolve_mine_link()` 的布林版：那支現查目標案（詳情那條路），這支
+    吃一份先撈好的 `legacy_ids`（清單那條路 —— 409 案不能逐列查 DB）。
+    **兩種形狀的知識就這兩支**，舊形狀要退場時一起改。
     """
     return bool(p.mine_link_id) or p.id in legacy_ids
+
+
+async def resolve_mine_link(session, p):
+    """這一案連到私帳的哪一案（沒有就 None）。**「兩種形狀」的知識只有這一份。**
+
+    🔴 連結記在**來源這一側**（`mine_link_id`）—— 一個私帳案要能承接多個 CRM 案
+    （owner 2026-09-01「可以多筆專案連結到一筆私帳」）。舊資料的連結記在私帳案上
+    （`source_project_id` 指回來），那一欄只裝得下第一個來源，所以查不到時退回
+    舊查法，兩種形狀都認得。
+
+    `is_mirrored()` 是它的布林版（清單那條路不能逐列查 DB，改用一次撈成集合的
+    `legacy_ids`）—— 兩支要一起改，舊形狀退場時才不會漏。
+    """
+    if p.mine_link_id:
+        t = await session.get(CrmProject, p.mine_link_id)
+        if t is not None:
+            return t
+    return (await session.execute(
+        select(CrmProject)
+        .where(CrmProject.source_project_id == p.id)
+        .limit(1))).scalars().first()
 
 
 def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False) -> dict:
@@ -69,6 +97,9 @@ def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False) -> 
         # 🔴 只在請求者看得到私帳時才會是 True —— 分身是私帳的列，對沒有
         # mine scope 的人連存在都不該露（hide_mine_projects 那條線）。
         "mirrored": bool(mirrored),
+        # 連到私帳的哪一案。跟 `mirrored` 同一條可見性線（看不到私帳的人拿到
+        # 空字串）—— 露出來前端才畫得出「連到哪」，而不是只有開視窗才知道。
+        "mine_link_id": (p.mine_link_id or "") if mirrored else "",
         "contract_amount": p.contract_amount,
         "tax_rate": p.tax_rate, "profit_target_pct": p.profit_target_pct,
         "misc_budget_pct": p.misc_budget_pct,
@@ -1057,18 +1088,7 @@ async def _mirror_preview(session, project_id: str, staff_id: str) -> tuple:
         .where(CrmProjectCostLine.project_id == project_id)
         .order_by(CrmProjectCostLine.sort_order))).scalars().all()
     mir = mirror_lines(lines, staff_id)
-    # 🔴 連結記在**來源這一側**（mine_link_id）—— 一個私帳案要能承接多個 CRM 案
-    # （owner 2026-09-01）。舊資料的連結記在私帳案上（source_project_id 指回來），
-    # 所以查不到時退回舊查法，兩種形狀都認得。
-    linked = None
-    if p.mine_link_id:
-        linked = await session.get(CrmProject, p.mine_link_id)
-    if linked is None:
-        linked = (await session.execute(
-            select(CrmProject)
-            .where(CrmProject.source_project_id == project_id)
-            .limit(1))).scalars().first()
-    return p, mir, linked
+    return p, mir, await resolve_mine_link(session, p)
 
 
 async def _me_staff_id(request) -> str:
@@ -1108,17 +1128,18 @@ async def check_project_mirror(project_id: str, request: Request):
         # 永遠選不到同一個私帳案。改成把「已承接幾案」帶給前端去標示。
         # 擋下來的時候不撈：前端一看到 reason 就 toast 完 return，那份清單
         # 純粹是白跑一趟查詢＋白傳一次。
-        options = [] if reason else (await session.execute(
-            select(CrmProject.id, CrmProject.name, CrmProject.contract_amount,
-                   CrmProject.ledger_detail)
-            .where(CrmProject.entity == "mine")
-            .order_by(CrmProject.created_at.desc()).limit(400))).all()
-        # 每個候選已經承接了幾個 CRM 案（一次 group by，不逐案問）
-        from sqlalchemy import func as _fn
-        linked_counts = dict((await session.execute(
-            select(CrmProject.mine_link_id, _fn.count())
-            .where(CrmProject.mine_link_id.isnot(None))
-            .group_by(CrmProject.mine_link_id))).all()) if not reason else {}
+        options, linked_counts = [], {}
+        if not reason:
+            options = (await session.execute(
+                select(CrmProject.id, CrmProject.name, CrmProject.contract_amount,
+                       CrmProject.ledger_detail)
+                .where(CrmProject.entity == "mine")
+                .order_by(CrmProject.created_at.desc()).limit(400))).all()
+            # 每個候選已經承接了幾個 CRM 案（一次 group by，不逐案問）
+            linked_counts = dict((await session.execute(
+                select(CrmProject.mine_link_id, _sa_count())
+                .where(CrmProject.mine_link_id.isnot(None))
+                .group_by(CrmProject.mine_link_id))).all())
     return {
         "name": p.name,
         "client": client.short_name if client else "",
@@ -1177,7 +1198,8 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
     import uuid as _uuid
 
     from core.ledger import require_entity
-    from core.ledger_project import MIRROR_SOURCE, mirror_detail, norm_detail
+    from core.ledger_project import (MIRROR_SOURCE, merge_split,
+                                     mirror_detail, norm_detail)
     from routers.api_finance_projects import (new_ledger_project,
                                               resync_receivable)
 
@@ -1203,8 +1225,8 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
             if target_id != linked.id:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"這一案已經連結到私帳的「{linked.name}」了 ——"
-                           " 要改連到別案，請先解除原本的連結")
+                    detail=f"這一案已經連結到私帳的「{linked.name}」了，"
+                           "目前不支援改連到別案")
         imported = 0
         if target_id:
             # 連結既有：只覆蓋收入那半邊。他在私帳填的委外／代開費用是**他自己
@@ -1224,13 +1246,14 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 # overwrite＝用這個 CRM 案的錢取代；add＝加上去（同名工項相加）。
                 # 🔴 一個私帳案承接多個 CRM 案時只有 add 說得通 —— overwrite
                 # 會把前一個 CRM 案鏡射進來的錢洗掉，而那筆錢也是他該拿的。
-                cur = (keep.get("split") or {}) if mode == "add" else {}
-                merged = dict(cur)
-                for k, v in (mir["split"] or {}).items():
-                    merged[k] = int(merged.get(k, 0)) + int(v or 0)
+                # 併法（同名工項相加／取代）的正本在 core.ledger_project，
+                # 它回 delta 而不是 total —— 私帳案的合約金額未必等於 Σ(split)
+                merged, delta = merge_split(keep.get("split") or {},
+                                            mir["split"] or {},
+                                            add=(mode == "add"))
                 keep["split"], keep["source"] = merged, MIRROR_SOURCE
                 t.ledger_detail = keep
-                t.contract_amount = (int(t.contract_amount or 0) + mir["total"]
+                t.contract_amount = (int(t.contract_amount or 0) + delta
                                      if mode == "add" else mir["total"])
                 # 營收換了 → 應收跟著重算，否則這一案的應收停在舊數字
                 resync_receivable(t, keep)

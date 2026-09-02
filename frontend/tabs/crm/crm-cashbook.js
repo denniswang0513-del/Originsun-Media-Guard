@@ -9,15 +9,15 @@ import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, 
 // 更新維持既有值 —— 不洗欄位）。pin 與 /api/v1/finance 的 fetch 都用財務模組那份，
 // 不在這裡複寫（finFetch 會自己附 entity）。
 import { finEntity as _pinEntity, finFetch as _finFetch, finIsMine,
-         bankOnly as _bankOnly } from '../finance/fin-utils.js';
+         ledgerHasInvoices, bankOnly as _bankOnly } from '../finance/fin-utils.js';
 // 六日／國定假日標記（owner 2026-08-27）：看帳時「那天是不是假日」是判斷公私的
 // 關鍵線索，日期字串本身看不出來。星期是算的、假日是清單 —— 見該模組檔頭。
 import { dayMark as _dayMark } from '../../js/shared/tw-calendar.js';
 // 專案連結改用可搜尋的挑選視窗（owner 2026-09-01「專案列表要可以勾選、搜尋」——
 // 私帳 405 個專案塞原生下拉等於沒得選）。共用件，別在這裡再刻一份。
-import { openPaymentPicker, openProjectPicker, paymentLabel }
+import { openPaymentPicker, openProjectPicker, paymentHay, paymentLabel }
     from '../../js/shared/project-picker.js';
-import { splitBadgeHtml } from '../../js/shared/cash-split-editor.js';
+import { splitBadgeHtml, splitGross } from '../../js/shared/cash-split-editor.js';
 import { indexTax as _indexTaxShared, taxKidsAt as _kidsAt, taxSelects }
     from '../../js/shared/cash-tax-picker.js';
 
@@ -46,11 +46,9 @@ const _taxKidsAt = (chain, i) => _kidsAt(_taxTree, chain, i);
 let _batch = { on: false, sel: new Set(), last: null, chain: [] };
 let _csvFile = null;
 
-/** 這本帳有沒有「發票」這回事 —— owner 2026-09-01「私帳不會開發票，連結發票
- *  都用連結專案替代」。**一條產品規則一個名字**：本檔原本用五種寫法表達它
- *  （`inv && finIsMine()`、`e.deposit || finIsMine()`、`finIsMine() ? [] : […]`、
- *  `mineNoInvoice`、`_sideOf` 裡的 `finIsMine()`），改規則要找五個地方。 */
-const _noInvoice = () => finIsMine();
+/** 這本帳沒有「發票」這回事 —— 規則正本在 fin-utils.ledgerHasInvoices
+ *  （對帳單匯入那邊也吃同一支）。本檔原本用五種寫法表達它，改規則要找五個地方。 */
+const _noInvoice = () => !ledgerHasInvoices();
 
 function _toggleAdvanceFields(isAdv) {
     // 每一格的可見性一次算完 —— 原本是「先照 !isAdv 全部顯示、再把發票欄蓋掉」，
@@ -119,20 +117,6 @@ async function _loadProjectList() {
         _projectList = (await _fetch('/projects?entity=' + _pinEntity())).projects || [];
     } catch (_) { _projectList = []; }
 }
-
-/** 還沒收齊的案（挑選視窗的預設清單 —— owner 2026-09-01「這個清單要是款項
- *  沒收齊的清單」）。
- *
- *  🔴 從 `_projectList` 導出，不另外打 `/cash-splits/outstanding`：那支回的
- *  就是 `amount_receivable > 0`，而這一欄 `/projects` 本來就每列都給。多打
- *  一趟的代價不只是往返 —— 那支**有 `.limit(80)`**（清單會靜默截斷）、而且
- *  只在私帳才填 projects（母公司整趟全廢）。 */
-const _outstandingProjects = () => _projectList
-    // 🔴 三態：`amount_receivable` 是 MONEY_FIELDS，沒有 money_view 的人拿到的
-    // 是**鍵不存在**（不是 0）。`|| 0` 會把「你看不到」壓成「已收齊」——
-    // 清單整個空掉，而且「顯示全部」那邊每一列都被標成收齊了（core/money 檔頭
-    // 那條：判準一律用 `'key' in obj`）。看不到金額的人不做未收篩選。
-    .filter((p) => !('amount_receivable' in p) || (p.amount_receivable || 0) > 0);
 
 async function _loadClientList() {
     try { _clientList = (await _fetch('/clients')).clients || []; } catch(_) { _clientList = []; }
@@ -482,7 +466,6 @@ function _inlineLink({ ev, id, noun, open, apply, patch }) {
  *  「預設只列未收齊」這種規則改一邊就漂）。 */
 const _projPickerOpts = (e, onPick) => ({
     projects: _projectList,
-    outstanding: _outstandingProjects(),
     currentId: e.project_id || '',
     title: '連結專案 — ' + (e.summary || ''),
     onPick,
@@ -506,6 +489,8 @@ window._cashProjPick = (ev, id) => _inlineLink({
 // 也可以在這裡直接勾，比照專案」）。私帳沒有發票，那一欄讓給請款單。
 // 🔴 寫入走分配表的正本路徑（PUT /cash-entries/{id}/payments）不是直接寫
 // payment_request_id —— 只寫一邊會讓列表與關聯面板各講各的（既有的坑）。
+// 🔴 分配比的是 `_grossOut`（含匯費）而且**刻意不看 `status === 'card'`**：
+// 刷卡列照樣可以掛請款單，那筆錢只是還沒離開帳戶。
 window._cashPayPick = (ev, id) => _inlineLink({
     ev, id, noun: '請款單',
     open: (e, onPick) => openPaymentPicker({
@@ -515,8 +500,8 @@ window._cashPayPick = (ev, id) => _inlineLink({
         linkedRows: e.payment_request_id && !_paymentList.some(
             (p) => p.id === e.payment_request_id)
             ? [{ id: e.payment_request_id, payee_name: e.payment_label || '',
-                 summary: '', amount: _payOut(e) }] : [],
-        rowAmount: _payOut(e),
+                 summary: '', amount: _grossOut(e) }] : [],
+        rowAmount: _grossOut(e),
         title: '連結請款單 — ' + (e.summary || ''),
         onPick,
     }),
@@ -524,7 +509,7 @@ window._cashPayPick = (ev, id) => _inlineLink({
         // 逐張給它自己的金額，累計不超過本列實際流出 —— 一筆匯出付多張
         // （張皓雲 17,200 + 3,000 = 20,200）剛好填滿；分次付（匯出比單小）
         // 則只分配得出去的那部分，差額留給詳情面板的分配面板。
-        let left = _payOut(e);
+        let left = _grossOut(e);
         const items = [];
         const over = [];
         (ids || []).forEach((pid) => {
@@ -560,16 +545,10 @@ window._cashPayPick = (ev, id) => _inlineLink({
  *  三處相隔 430 行，改刷卡規則的人只會看到其中兩個。 */
 const _grossOut = (e) => (e.expense || 0) + (e.bank_fee || 0);
 
-/** 這一列實際流出多少（分配比的是這個數）。
- *  🔴 刻意不看 `status === 'card'`：刷卡列照樣可以掛請款單。 */
-const _payOut = (e) => _grossOut(e);
-
-/** 這一列掛著哪幾張請款單。後端給 `payment_ids`（全部）；舊回應只有
- *  `payment_request_id`（主要那張）—— 兩種形狀都認，不然一次部署落差就把
- *  其餘幾張的連結洗掉。 */
-const _payIds = (e) => (e.payment_ids && e.payment_ids.length
-    ? e.payment_ids.slice()
-    : (e.payment_request_id ? [e.payment_request_id] : []));
+/** 這一列掛著哪幾張請款單。後端 `_to_cash_dict` **無條件**輸出 `payment_ids`
+ *  （一個人的好幾張單常併成一筆匯出），這裡不再留舊形狀的退路 —— 前端與 API
+ *  由同一個行程吐出，「新 JS 遇到舊回應」這個組合出不來。 */
+const _payIds = (e) => (e.payment_ids || []).slice();
 
 /** 「專案」與「請款單／發票」兩格：可點時是一格 cash-ed（沒值就一顆紅點），
  *  不可點時是唯讀格。兩格的形狀一樣，差別只有 class／內容／要不要掛 onclick
@@ -1125,7 +1104,6 @@ function renderDetail(e) {
     // 資料早就跟著清單回來了（`splits`），只是沒畫。
     const _sp = e.splits || [];
     if (_sp.length) {
-        const gross = (s) => (s.amount || 0) + (s.fee || 0);
         html += section(`拆項明細（${_sp.length}）`);
         html += '<div style="font-size:12px;">' + _sp.map((s) => {
             const path = (s.taxonomy_path || []).join(' ▸ ')
@@ -1135,7 +1113,7 @@ function renderDetail(e) {
             if ((s.advances || []).length) { tags.push(`沖 ${s.advances.length} 筆代墊`); }
             if (s.note) { tags.push(_esc(s.note)); }
             return `<div style="display:flex;gap:8px;align-items:baseline;padding:4px 0;border-bottom:1px solid #262626;">
-                <span style="width:92px;text-align:right;flex-shrink:0;color:#e0e0e0;">$${_fmtNum(gross(s))}</span>
+                <span style="width:92px;text-align:right;flex-shrink:0;color:#e0e0e0;">$${_fmtNum(splitGross(s))}</span>
                 <span style="flex:1;min-width:0;">
                     <span style="color:#ddd;">${_esc(path) || '（未分類）'}</span>
                     ${tags.length ? `<span style="display:block;color:#9ca3af;font-size:11px;">${tags.join('　·　')}</span>` : ''}
@@ -1830,9 +1808,10 @@ const _ALLOC_SIDES = {
             + (!it.request_settled && (it.request_open || 0) > 0
                 ? `<span style="color:#fbbf24;">，尚欠 $${_fmtNum(it.request_open)}</span>` : ''),
         // 已付款的在 _loadLinkLists 就被後端篩掉了（不是在這裡濾 800 筆）。
+        // 搜尋欄位走共用那份（paymentHay）—— 挑選視窗與這裡打同一批
+        // _paymentList，欄位集合各寫一份就會出現「A 找得到 B 找不到」
         candidates: (q, picked) => _paymentList.filter(
-            p => !picked.has(p.id) && [p.payee_name, p.summary, p.project_label, p.category]
-                .some(v => (v || '').toLowerCase().includes(q))),
+            p => !picked.has(p.id) && paymentHay(p).includes(q)),
         hitLine: p => `${_esc(p.payee_name || '無收款人')} · ${_esc((p.summary || '').substring(0, 26))}`
             + `<span style="color:#fbbf24;"> $${_fmtNum(p.amount || 0)}</span>`
             + `<span style="color:#666;"> · ${_esc(p.payment_status || '')}</span>`,
@@ -2157,7 +2136,7 @@ window._cashCardCalib = async function (btn) {
 // 系統名，別為了對齊而去改 petty_status／端點／Tab 名。
 
 /** 這一列流出多少（卡片列與銀行列同一個式子；後端 `_cash_claim_amount` 的鏡像）。 */
-const _pettyAmt = (e) => (e.expense || 0) + (e.claim || 0) + (e.bank_fee || 0);
+const _pettyAmt = (e) => _grossOut(e) + (e.claim || 0);
 
 /** 已推送的列在摘要後面帶一個狀態標 —— 不標的話這一列跟沒推過長得一樣。 */
 function _pettyTag(e) {

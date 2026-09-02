@@ -111,7 +111,8 @@ def test_linking_twice_is_blocked():
     「查得到既有分身」與「該擋的時候真的回 409」。
     """
     src = _src()
-    assert "source_project_id == project_id" in src
+    # 「查得到既有分身」的規則在 resolve_mine_link（兩種形狀都認）
+    assert "CrmProject.source_project_id == p.id" in src
     fn = _fn(src, "mirror_project_to_mine")
     assert "_mirror_blocked_reason" in fn and "409" in fn
 
@@ -203,11 +204,16 @@ def test_the_badge_also_shows_for_the_second_project_sharing_one_mine_case():
     assert is_mirrored(second)                  # 不必靠 legacy 集合
     assert is_mirrored(second, {"p1"})
     assert not is_mirrored(plain, {"p1"})
-    # 詳情那條路要的是**連到哪一案**（id），不是「有沒有連」——
-    # 兩種形狀都認得的規則在那裡是「先看來源側，查不到才退回舊查法」。
-    body = code_only(func_body(_src(), "async def _mirror_preview("))
+    # 詳情那條路要的是**連到哪一案**（id），不是「有沒有連」—— 那條走
+    # `resolve_mine_link`（「先看來源側，查不到才退回舊查法」的唯一那份）。
+    # 🔴 兩種形狀的知識就 is_mirrored ＋ resolve_mine_link 這兩支，不要
+    # 在 _mirror_preview 或清單那條路再各寫一遍。
+    prev = code_only(func_body(_src(), "async def _mirror_preview("))
+    assert "resolve_mine_link(session, p)" in prev
+    assert "mine_link_id" not in prev, "_mirror_preview 又自己判了一次"
+    body = code_only(func_body(_src(), "async def resolve_mine_link("))
     assert "if p.mine_link_id:" in body
-    assert "CrmProject.source_project_id == project_id" in body
+    assert "CrmProject.source_project_id == p.id" in body
 
 
 def test_the_mirror_does_not_show_up_next_to_its_parent():
@@ -299,11 +305,23 @@ def test_sharing_one_mine_project_adds_instead_of_overwriting():
     鏡射進來的收入洗掉，而那筆也是他該拿的。"""
     from routers.crm.projects import MIRROR_MODES
     assert "add" in MIRROR_MODES
+    # 併法本身是**錢的推導**，正本在 core（router 只做模式分派）
+    from core.ledger_project import merge_split
+    merged, delta = merge_split({"導演": 10000}, {"導演": 20000, "剪輯": 5000},
+                                add=True)
+    assert merged == {"導演": 30000, "剪輯": 5000}, "同名工項沒有相加"
+    assert delta == 25000, "加進去的金額算錯"
+    # overwrite 不看舊值
+    assert merge_split({"導演": 10000}, {"剪輯": 5000}, add=False) == ({"剪輯": 5000}, 5000)
+    # 🔴 回 delta 不是 total：私帳案的合約金額未必等於 Σ(split)，
+    # 順手改成 sum(merged.values()) 會靜默改掉已連結案的金額
+    assert merge_split({"導演": 10000}, {"剪輯": 5000}, add=True)[1] == 5000
+
     body = code_only(func_body(repo_src("routers/crm/projects.py"),
                                "async def mirror_project_to_mine("))
     assert 'mode in ("overwrite", "add")' in body
-    assert "int(t.contract_amount or 0) + mir[\"total\"]" in body, "add 沒有累加合約金額"
-    assert "merged[k] = int(merged.get(k, 0)) + int(v or 0)" in body, "同名工項沒有相加"
+    assert "merge_split(" in body, "併法又在 router 裡自己寫了一次"
+    assert "int(t.contract_amount or 0) + delta" in body, "add 沒有累加合約金額"
     js = repo_src("frontend/tabs/crm/crm-projects-core.js")
     assert "'add', '加進去'" in js, "UI 沒有給「加進去」這個選項"
 

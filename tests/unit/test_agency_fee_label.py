@@ -7,8 +7,7 @@
 沒有**（同期間帳上 bank_fee 是 0 筆）。金額沒錯，名字錯了 —— 而錯的名字會讓
 人以為銀行收了六萬七的手續費。
 """
-from core.finance_logic import (agency_fee_total, bank_fee_breakdown,
-                                bank_fee_total)
+from core.finance_logic import bank_fee_breakdown, bank_fee_total
 from services.finance_statements import explode_cash_splits
 from tests.unit._srcscan import code_only, func_body, repo_src
 
@@ -42,14 +41,14 @@ def test_the_fee_is_tagged_so_the_two_buckets_can_be_named_apart():
 
 
 def test_the_two_lines_add_up_to_the_old_single_line():
-    """🔴 拆名字**不可以動到金額**：真匯費 ＝ bank_fee_total − agency_fee_total，
+    """🔴 拆名字**不可以動到金額**：真匯費 ＝ bank_fee_total − 代開費，
     兩行相加＝原本那一行，管理費用小計不變。"""
     rows = explode_cash_splits([_entry(bank_fee=30)], {"e1": [
         {"id": "s1", "amount": 291640, "fee": 66960, "category": "公司_專案"},
         {"id": "s2", "amount": 58796, "category": "公司_專案"},
     ]})
     total = bank_fee_total(rows, MSET)
-    agency = agency_fee_total(rows, MSET)
+    agency = bank_fee_breakdown(rows, MSET)[1]
     assert agency == 66960
     assert total == 66960 + 30          # 父列那 30 元真匯費還在
     assert total - agency == 30, "真匯費被代開費吃掉了"
@@ -57,7 +56,7 @@ def test_the_two_lines_add_up_to_the_old_single_line():
 
 def test_old_rows_without_the_tag_report_zero():
     """沒有拆項的收支一律 0 —— 這支對舊資料回 0，總額不受影響。"""
-    assert agency_fee_total([_entry(bank_fee=30)], MSET) == 0
+    assert bank_fee_breakdown([_entry(bank_fee=30)], MSET)[1] == 0
     assert bank_fee_total([_entry(bank_fee=30)], MSET) == 30
 
 
