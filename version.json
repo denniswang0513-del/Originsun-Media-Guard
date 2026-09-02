@@ -1,5 +1,5 @@
 {
-  "version": "2.4.295",
+  "version": "2.4.296",
   "build_date": "2026-09-03",
-  "notes": "工作追蹤：總表（管理員逐列改日期／專案／分類／內容／時數＋管理員備註、刪列）；/simplify 第一輪收斂（規則上提 hr_logic、設定塊共用、own-scope 一份、前端單一委派 click 修重複送單）"
+  "notes": "修 2.4.295 的通知回歸（settings 鍵 notifications，一般聊天室任務通知恢復）；/my.html 改工時不再洗掉分類／計畫；/simplify 第二輪：手填規則一份、日期字串走 hr_logic、Sheet 拉取查表建一次、burn 表窄選"
 }
