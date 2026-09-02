@@ -124,6 +124,8 @@ owner 2026-09-03 兩次釐清：「大家看到大家」是要知道**彼此每�
 - Sheet 列也能改：改過的列 `row_hash` 不變，下次拉取仍認得、不會再插一次；但 Sheet 那一格之後
   若也改了，會以新 hash 另插一列（兩邊都改＝兩列，總表上看得到、刪一列即可）。
 - 套欄位與員工改自己的列是同一支 `services.timesheet_self.apply_update`，只差守衛（check_admin）與 404。
+- 管理員備註只進管理員端點的 JSON（總表依 is_admin、抽查列）；看板／時間軸／員工頁／團隊頁一律不帶。
+- Sheet 列不套「實際或計畫至少一個 > 0」（0 小時的 Sheet 列也能改、status 保留 import）。
 - 端點：`GET /timesheets/rows?month=`、`PUT /timesheets/rows/{id}`、`DELETE /timesheets/rows/{id}`。
 
 ## 5. 階段與工作量
@@ -133,7 +135,7 @@ owner 2026-09-03 兩次釐清：「大家看到大家」是要知道**彼此每�
 | P1 ✅ 2026-09-03 | 兩欄 migration；我的一天（實際或計畫、時數快捷鈕、複製昨天、完成／改／刪）；每日看板（日／週）；tab 六分頁殼（專案／人員沿用既有表、儀表板 P3、設定收既有管理功能）；端點 /timesheets/board、/mine、/mine/rows、/mine/{id}、/work_types；own-scope 共用件 services/timesheet_self | 1 session |
 | P2 ✅ 2026-09-03 | 專案檔案頁（摘要／分類組成／各人各月／時間軸／報價人日／類似專案自動推薦＋加入比較→並排表／改預算／匯出）；人員檔案頁（月曆熱圖／逐日／案別／分類／12 個月）；專案清單停滯與未對映徽章、可直接指定 | 同一 session |
 | P3 ✅ 2026-09-03 | 儀表板：大家的四格（今日、本週、burn 前五、本月分類）＋主管兩格（負載、昨天漏填／有計畫沒結果，只給管理員）；匯出 CSV（月或案）；週一 09:00 digest（Google Chat，設定分頁開關／預覽／立即發送，預設關） | 同一 session |
-| P4 ✅ 2026-09-03 | 總表（§4.7）：月表＋前端篩選／排序、管理員逐列改細節與備註（`note` 欄 migration）、刪列；`/timesheets/rows*` 三端點；跟 /simplify 收斂一起發 | 同一 session |
+| P4 ✅ 2026-09-03 | 總表（§4.7）：月表＋前端篩選／排序、管理員逐列改細節與備註（`note` 欄 migration）、刪列；`/timesheets/rows*` 三端點；/simplify 四輪收斂（v2.4.295→.298）：修了兩個回歸（notifier 鍵名、/me/team/project 500）與一個洩漏（管理員備註曾進員工端 JSON → `ts_dict(with_note)` 只給管理員） | 同一 session |
 
 P1 做完就能開始用（⑦③⑥）；P2 是回溯（①②④）；P3 是一眼看（⑤）。
 
