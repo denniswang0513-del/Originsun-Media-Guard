@@ -70,6 +70,26 @@ def leave_balance(annual_days: Optional[int], approved_annual_sum: float) -> dic
             "remaining": round(annual_days - used, 1)}
 
 
+#: 本人可改／可刪的手填列狀態（docs/TIMESHEET_SELF_ENTRY_PLAN.md D3／D5）：
+#: approved／locked 之後就不是自己的事了。
+EDITABLE_STATUSES = frozenset({"draft", "confirmed"})
+
+
+def can_edit_timesheet(row, staff_id: str) -> str:
+    """本人能不能改這一列：回空字串＝可以，否則回原因（給 403/409 的 detail）。
+
+    三個條件缺一不可：是本人的（staff_id）、是手填的（Sheet 同步進來的改 Sheet 那邊再拉）、
+    還沒核可／鎖帳。`row` 只要有 .staff_id／.source／.status。
+    """
+    if not staff_id or getattr(row, "staff_id", None) != staff_id:
+        return "不是你的工時列"
+    if getattr(row, "source", "") != "manual":
+        return "Sheet 同步進來的列不能在這裡改，請改試算表"
+    if getattr(row, "status", "") not in EDITABLE_STATUSES:
+        return f"已{getattr(row, 'status', '')}的列不能再改"
+    return ""
+
+
 def manual_dup_key(staff_name: str, work_date: Optional[datetime],
                    project_name: str) -> tuple:
     """工時雙來源去重鍵（藍圖 §3.6 階段3：同人+日+專案，手填優先於 Sheet）。

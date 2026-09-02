@@ -23,10 +23,10 @@ from sqlalchemy import func, select  # type: ignore
 
 from core.auth import check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
-from core.hr_logic import leave_balance, leave_to_dict
+from core.hr_logic import can_edit_timesheet, leave_balance, leave_to_dict
 from core.identity import resolve_current_staff
-from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetCreate,
-                          MeTodoUpdate)
+from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
+                          MeTimesheetCreate, MeTimesheetUpdate, MeTodoUpdate)
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
                        CrmProjectStaff, HrLeaveRequest, Timesheet)
 from routers.api_hr import approved_annual_used, new_leave_request
@@ -327,3 +327,128 @@ async def add_my_timesheet(body: MeTimesheetCreate, request: Request):
             rows=[body])
         await session.commit()
     return result
+
+
+# ── 我的工時：自己填、看自己的、改／刪自己填的（docs/TIMESHEET_SELF_ENTRY_PLAN.md 階段 1）──
+#
+# own-scope：列的歸屬只認 staff_id（手填列必帶；Sheet 列由 ingest 的 resolve_staff 填），
+# 舊的 Sheet 列若 staff_id 空則退回姓名比對（同 /me 摘要卡的 name-match 妥協）。
+
+def _ts_dict(r, staff_id: str) -> dict:
+    d = r.work_date.astimezone().date() if r.work_date else None   # 寫 naive／讀 aware 差一天：歸一到本地日
+    return {
+        "id": r.id,
+        "date": d.isoformat() if d else "",
+        "project_name": r.project_name or "",
+        "project_id": r.project_id or "",
+        "task_note": r.task_note or "",
+        "hours": round(float(r.hours or 0), 2),
+        "source": r.source or "",
+        "status": r.status or "",
+        "editable": can_edit_timesheet(r, staff_id) == "",
+    }
+
+
+async def _bound_ident(request: Request) -> dict:
+    check_admin_or_module(request, "me_finance")
+    ident = await resolve_current_staff(request)
+    if ident["staff"] is None:
+        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案，請聯絡管理員")
+    return ident
+
+
+async def _own_row(session, row_id: str, ident: dict):
+    """撈一列並驗「本人＋手填＋未核可」；不是就 403/409（原因來自 can_edit_timesheet）。"""
+    r = await session.get(Timesheet, row_id)
+    if r is None:
+        raise HTTPException(status_code=404, detail="找不到這一列")
+    why = can_edit_timesheet(r, ident["staff_id"])
+    if why:
+        raise HTTPException(status_code=403 if "不是你的" in why else 409, detail=why)
+    return r
+
+
+@router.get("/timesheets")
+async def my_timesheets(request: Request, month: str = ""):
+    """本人該月所有列（Sheet＋手填），含 editable、合計、各案小計。month=YYYY-MM，預設本月。"""
+    ident = await _bound_ident(request)
+    try:
+        base = datetime.strptime(month, "%Y-%m") if month else datetime.now().replace(day=1)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="month 格式需 YYYY-MM")
+    m0 = base.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    m1 = m0.replace(year=m0.year + 1, month=1) if m0.month == 12 else m0.replace(month=m0.month + 1)
+    from sqlalchemy import or_
+    sid, name = ident["staff_id"], ident["staff"].name
+    factory = db_factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet)
+            .where(or_(Timesheet.staff_id == sid, Timesheet.staff_name == name))
+            .where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
+            .order_by(Timesheet.work_date.desc(), Timesheet.created_at.desc())
+        )).scalars().all()
+    items = [_ts_dict(r, sid) for r in rows]
+    by_project: dict = {}
+    for it in items:
+        by_project[it["project_name"] or "(空白)"] = round(
+            by_project.get(it["project_name"] or "(空白)", 0) + it["hours"], 2)
+    return {"month": m0.strftime("%Y-%m"), "items": items,
+            "total_hours": round(sum(i["hours"] for i in items), 1),
+            "by_project": sorted(by_project.items(), key=lambda x: -x[1])}
+
+
+@router.post("/timesheets/batch")
+async def add_my_timesheets(body: MeTimesheetBatch, request: Request):
+    """本人一次填多列（同 insert_manual_rows 規則：source=manual、status=draft）。"""
+    ident = await _bound_ident(request)
+    if not body.rows:
+        raise HTTPException(status_code=422, detail="至少一列")
+    from routers.api_timesheets import insert_manual_rows
+    factory = db_factory_or_503()
+    async with factory() as session:
+        result = await insert_manual_rows(
+            session, staff_id=ident["staff_id"], staff_name=ident["staff"].name, rows=body.rows)
+        await session.commit()
+    return result
+
+
+@router.put("/timesheets/{row_id}")
+async def update_my_timesheet(row_id: str, body: MeTimesheetUpdate, request: Request):
+    """改自己的手填列：日期／專案／內容／時數；專案名重新走同一支對映。"""
+    ident = await _bound_ident(request)
+    if (body.hours or 0) <= 0:
+        raise HTTPException(status_code=422, detail="時數需大於 0")
+    from core.hr_logic import resolve_project
+    from routers.api_timesheets import _parse_date
+    from routers.crm._shared import project_names_map
+    from services.timesheet_lookup import load_project_lookup
+    wd = _parse_date(body.work_date)
+    if wd is None:
+        raise HTTPException(status_code=422, detail=f"日期格式錯誤：{body.work_date}")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        r = await _own_row(session, row_id, ident)
+        pname = (body.project_name or "").strip()
+        if body.project_id:
+            pid = body.project_id
+            pname = pname or (await project_names_map(session, [pid])).get(pid, "")
+        else:
+            pid, _why = resolve_project(pname, await load_project_lookup(session))
+        r.work_date, r.project_id, r.project_name = wd, pid, pname
+        r.task_note = (body.task_note or "").strip() or None
+        r.hours = float(body.hours)
+        await session.commit()
+        return _ts_dict(r, ident["staff_id"])
+
+
+@router.delete("/timesheets/{row_id}")
+async def delete_my_timesheet(row_id: str, request: Request):
+    """刪自己的手填列（Sheet 列不行：改試算表再拉）。"""
+    ident = await _bound_ident(request)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        r = await _own_row(session, row_id, ident)
+        await session.delete(r)
+        await session.commit()
+    return {"deleted": row_id}

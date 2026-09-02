@@ -1061,58 +1061,166 @@ function cardFinance(ts, pay) {
             <span class="pill${p.status !== "已付款" ? " hot" : ""}">${esc(p.status || "—")}</span></div></div>`).join("");
     }
     if (ts) {
-        // 補登一筆工時（source=manual；與 Sheet 同步共存，同人同日同案手填優先）
-        html += `<div style="padding-top:14px;">
-            <button class="mini-btn" onclick="toggleTsForm()">補一筆工時</button>
-            <div class="pf-edit" id="ts-form" style="display:none;margin-top:10px;">
-                <div class="inline-row" style="margin-bottom:8px;">
-                    <input type="date" id="tsf-date" value="${new Date().toISOString().slice(0, 10)}">
-                    <input type="number" id="tsf-hours" min="0.1" step="0.1" placeholder="時數">
-                </div>
-                <div class="field"><select id="tsf-project"><option value="">— 選專案 —</option></select></div>
-                <div class="field"><input id="tsf-note" placeholder="工作內容（選填）"></div>
-                <button class="mini-btn" onclick="submitTs()">送出</button>
-                <span class="err" id="tsf-err" style="margin-left:8px;"></span>
-            </div>
-        </div>`;
+        // 我的工時：看自己該月的每一列（Sheet＋手填）、改／刪自己填的、一次新增多列
+        // （docs/TIMESHEET_SELF_ENTRY_PLAN.md 階段 1；同人同日同案手填優先於 Sheet）
+        html += `<div style="padding-top:14px;" id="my-ts"></div>`;
     }
     body.innerHTML = html || `<div class="empty">尚無工時／請款紀錄</div>`;
+    if (ts) setTimeout(loadMyTs, 0);
     return card;
 }
-async function toggleTsForm() {
-    const f = $("ts-form");
-    if (!f) return;
-    const show = f.style.display === "none";
-    f.style.display = show ? "" : "none";
-    const sel = $("tsf-project");
-    if (show && sel && sel.options.length <= 1) {
-        try {
-            const r = await mfetch("/api/v1/me/timesheet_options");
-            if (r.ok) {
-                const d = await r.json();
-                (d.projects || []).forEach(p => {
-                    const o = document.createElement("option");
-                    o.value = p.name; o.textContent = p.name;
-                    sel.appendChild(o);
-                });
-            }
-        } catch (_) {}
-    }
+
+// ── 我的工時 ──
+let _tsMonth = _localToday().slice(0, 7);
+let _tsProjects = null;     // timesheet_options（進行中案＋本人最近填過的）
+function _localToday() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-async function submitTs() {
-    const errEl = $("tsf-err");
+async function _tsOptions() {
+    if (_tsProjects) return _tsProjects;
     try {
-        const r = await mfetch("/api/v1/me/timesheets", { method: "POST", body: JSON.stringify({
-            work_date: $("tsf-date").value, project_name: $("tsf-project").value,
-            task_note: $("tsf-note").value, hours: parseFloat($("tsf-hours").value || "0"),
-        }) });
+        const r = await mfetch("/api/v1/me/timesheet_options");
+        _tsProjects = r.ok ? ((await r.json()).projects || []) : [];
+    } catch (_) { _tsProjects = []; }
+    return _tsProjects;
+}
+async function loadMyTs() {
+    const host = $("my-ts");
+    if (!host) return;
+    host.innerHTML = `<div class="empty">載入中…</div>`;
+    try {
+        const r = await mfetch("/api/v1/me/timesheets?month=" + _tsMonth);
         if (!r.ok) {
             const d = await r.json().catch(() => ({}));
-            errEl.textContent = d.detail || "送出失敗"; errEl.style.display = "inline";
+            host.innerHTML = `<div class="notice">${esc(d.detail || ("HTTP " + r.status))}</div>`;
             return;
         }
-        loadWorkspace();   // 時數統計要重算，整包重抓
-    } catch (_) { errEl.textContent = "連線失敗"; errEl.style.display = "inline"; }
+        renderMyTs(await r.json());
+    } catch (_) { host.innerHTML = `<div class="notice">連線失敗</div>`; }
+}
+function renderMyTs(d) {
+    const host = $("my-ts");
+    const rows = d.items.map(it => `
+        <div class="row" data-ts-id="${esc(it.id)}">
+            <div class="grow">
+                <div class="title">${esc(it.project_name || "(空白)")}${it.task_note ? `<span style="color:var(--sub);"> · ${esc(it.task_note)}</span>` : ""}</div>
+                <div class="meta">${esc(it.date)} · ${it.source === "manual" ? "系統填" : "Sheet"}${it.status && it.status !== "draft" && it.status !== "import" ? " · " + esc(it.status) : ""}</div>
+            </div>
+            <span class="pill">${it.hours} h</span>
+            ${it.editable ? `<button class="mini-btn" onclick="editMyTs('${esc(it.id)}')">改</button>
+                             <button class="mini-btn" onclick="deleteMyTs('${esc(it.id)}')">刪</button>` : ""}
+        </div>`).join("");
+    const mon = d.month;
+    const prev = _shiftMonth(mon, -1), next = _shiftMonth(mon, 1);
+    host.innerHTML = `
+        <div class="inline-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
+            <button class="mini-btn" onclick="setTsMonth('${prev}')">‹</button>
+            <b>${esc(mon)}</b>
+            <button class="mini-btn" onclick="setTsMonth('${next}')">›</button>
+            <span class="pill">本月 ${d.total_hours} h</span>
+            <span style="flex:1;"></span>
+            <button class="mini-btn" onclick="toggleTsAdd()">新增工時</button>
+        </div>
+        <div class="pf-edit" id="ts-add" style="display:none;margin:8px 0 12px;">
+            <div id="ts-add-rows"></div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+                <button class="mini-btn" onclick="addTsRow()">＋ 再一列</button>
+                <button class="mini-btn" onclick="submitTsRows()">送出</button>
+                <span class="err" id="ts-add-err"></span>
+            </div>
+            <div class="meta" style="margin-top:6px;color:var(--sub);">同一天同一案只填一邊：在這裡填了，Sheet 那列會被擋（手填優先）。Sheet 已拉進來的列在下面看得到，別重複填。</div>
+        </div>
+        ${rows || `<div class="empty">這個月還沒有工時</div>`}`;
+}
+function _shiftMonth(ym, delta) {
+    const [y, m] = ym.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function setTsMonth(ym) { _tsMonth = ym; loadMyTs(); }
+function _tsProjectSelect(id, current) {
+    const opts = (_tsProjects || []).map(p =>
+        `<option value="${esc(p.name)}"${p.name === current ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+    // 找不到就照打：用 datalist 而不是鎖死的 select（案名照 Sheet 規則對映，撞案留給管理員指定）
+    return `<input list="ts-proj-list" id="${id}" value="${esc(current || "")}" placeholder="專案（可打字）">
+            <datalist id="ts-proj-list">${opts}</datalist>`;
+}
+function _tsRowHtml(v = {}) {
+    return `<div class="inline-row ts-new-row" style="margin-bottom:6px;">
+        <input type="date" data-f="date" value="${esc(v.date || _localToday())}">
+        ${_tsProjectSelect("", v.project).replace('id=""', 'data-f="project"')}
+        <input data-f="note" placeholder="內容（選填）" value="${esc(v.note || "")}">
+        <input type="number" data-f="hours" min="0.25" step="0.25" placeholder="時數" value="${v.hours || ""}" style="max-width:90px;">
+    </div>`;
+}
+async function toggleTsAdd() {
+    const box = $("ts-add");
+    if (!box) return;
+    const show = box.style.display === "none";
+    box.style.display = show ? "" : "none";
+    if (show) { await _tsOptions(); if (!$("ts-add-rows").children.length) addTsRow(); }
+}
+function addTsRow() { $("ts-add-rows").insertAdjacentHTML("beforeend", _tsRowHtml()); }
+async function submitTsRows() {
+    const errEl = $("ts-add-err");
+    errEl.textContent = "";
+    const rows = [...document.querySelectorAll("#ts-add-rows .ts-new-row")].map(el => ({
+        work_date: el.querySelector('[data-f="date"]').value,
+        project_name: el.querySelector('[data-f="project"]').value.trim(),
+        task_note: el.querySelector('[data-f="note"]').value,
+        hours: parseFloat(el.querySelector('[data-f="hours"]').value || "0"),
+    })).filter(r => r.work_date && r.hours > 0);
+    if (!rows.length) { errEl.textContent = "至少填一列（日期＋時數）"; return; }
+    try {
+        const r = await mfetch("/api/v1/me/timesheets/batch", { method: "POST", body: JSON.stringify({ rows }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { errEl.textContent = d.detail || "送出失敗"; return; }
+        $("ts-add-rows").innerHTML = "";
+        $("ts-add").style.display = "none";
+        await loadMyTs();
+        if ((d.unmatched_projects || []).length) alert("這幾個專案名系統對不到案（已存下來，管理員會指定）：" + d.unmatched_projects.join("、"));
+    } catch (_) { errEl.textContent = "連線失敗"; }
+}
+async function editMyTs(id) {
+    const rowEl = document.querySelector(`[data-ts-id="${id}"]`);
+    if (!rowEl) return;
+    await _tsOptions();
+    const meta = rowEl.querySelector(".meta").textContent;
+    const date = meta.slice(0, 10);
+    const title = rowEl.querySelector(".title");
+    const project = title.childNodes[0].textContent.trim();
+    const note = title.querySelector("span") ? title.querySelector("span").textContent.replace(/^ · /, "") : "";
+    const hours = parseFloat(rowEl.querySelector(".pill").textContent);
+    rowEl.outerHTML = `<div class="pf-edit" data-ts-edit="${esc(id)}" style="margin:6px 0;">
+        ${_tsRowHtml({ date, project, note, hours }).replace("ts-new-row", "ts-edit-row")}
+        <button class="mini-btn" onclick="saveMyTs('${esc(id)}')">儲存</button>
+        <button class="mini-btn" onclick="loadMyTs()">取消</button>
+        <span class="err" data-err></span></div>`;
+}
+async function saveMyTs(id) {
+    const box = document.querySelector(`[data-ts-edit="${id}"]`);
+    if (!box) return;
+    const el = box.querySelector(".ts-edit-row");
+    const body = {
+        work_date: el.querySelector('[data-f="date"]').value,
+        project_name: el.querySelector('[data-f="project"]').value.trim(),
+        task_note: el.querySelector('[data-f="note"]').value,
+        hours: parseFloat(el.querySelector('[data-f="hours"]').value || "0"),
+    };
+    try {
+        const r = await mfetch("/api/v1/me/timesheets/" + encodeURIComponent(id), { method: "PUT", body: JSON.stringify(body) });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); box.querySelector("[data-err]").textContent = d.detail || "儲存失敗"; return; }
+        loadMyTs();
+    } catch (_) { box.querySelector("[data-err]").textContent = "連線失敗"; }
+}
+async function deleteMyTs(id) {
+    if (!confirm("刪掉這一列工時？")) return;
+    try {
+        const r = await mfetch("/api/v1/me/timesheets/" + encodeURIComponent(id), { method: "DELETE" });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.detail || "刪除失敗"); return; }
+        loadMyTs();
+    } catch (_) { alert("連線失敗"); }
 }
 
 // ── boot ──
