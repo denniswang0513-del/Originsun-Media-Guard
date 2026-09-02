@@ -28,6 +28,7 @@ def test_manual_rows_accept_plan_only_and_store_the_two_columns():
     man = code_only(repo_src("services/timesheet_manual.py"))
     rule = func_body(man, "def normalize_row(")
     assert "row_state(r.hours, r.planned_hours)" in rule and "norm_work_type(r.work_type)" in rule
+    assert "resolve_project(pname, lk)" in rule and "parse_date(r.work_date)" in rule
     body = func_body(man, "async def insert_manual_rows(")
     assert "normalize_row(" in body and 'source="manual"' in body
     model = repo_src("db/models/_workos.py")
@@ -55,9 +56,9 @@ def test_board_and_my_day_are_gated_by_the_timesheets_module():
     assert "admin_update_row(session, row_id, body)" in func_body(src, "async def ledger_update_row(")
 
 
-def test_tab_has_the_six_views_and_the_daily_board_shows_what_not_how_much():
+def test_tab_has_the_seven_views_and_the_daily_board_shows_what_not_how_much():
     js = repo_src("frontend/tabs/timesheets/timesheets.js")
-    for key in ("today", "mine", "projects", "staff", "dash", "settings"):
+    for key in ("today", "mine", "projects", "staff", "ledger", "dash", "settings"):
         assert f"b('{key}'," in js, key
     code = js_code_only(js)
     assert "/api/v1/timesheets/board?date=" in code

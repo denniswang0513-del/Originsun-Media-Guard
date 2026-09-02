@@ -277,9 +277,8 @@ _TW_TZ = ZoneInfo("Asia/Taipei")
 def _fmt_day(dt) -> str:
     """timestamptz → 'YYYY-MM-DD'（台北），None → ''。規則只有 core.hr_logic.tw_day 一份
     （aware 轉台北、naive 視為本地 wallclock；面值 strftime 在 +08 會差一天）。"""
-    from core.hr_logic import tw_day
-    d = tw_day(dt)
-    return d.isoformat() if d else ""
+    from core.hr_logic import day_iso
+    return day_iso(dt) or ""
 
 
 def map_csv_row(col_map: dict, header_map: dict, row: dict, coerce=None) -> dict:

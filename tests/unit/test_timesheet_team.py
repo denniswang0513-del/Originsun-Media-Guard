@@ -2,7 +2,7 @@
 """團隊工時互看＋匯總（docs/TIMESHEET_SELF_ENTRY_PLAN.md §5）。
 
 釘的規則：「幫大家算好」是純函式（每人合計／天數／每週／各案、參考工時＝工作日×8）；
-團隊端點的閘門＝看得到自己就看得到大家（_bound_ident），回的是 Sheet 案名與時數、
+團隊端點的閘門＝看得到自己就看得到大家（_me_ident＝services.timesheet_self.bound_ident），回的是 Sheet 案名與時數、
 沒有金額也沒有 CRM 專案 id；/hours.html 只打 /me/team/*。
 """
 import datetime as dt
@@ -62,3 +62,16 @@ def test_hours_page_only_talks_to_team_endpoints():
     tab_src = repo_src("frontend/tabs/timesheets/timesheets.js")
     assert 'href="/hours.html"' in tab_src
     assert "/api/v1/me/team/" not in js_code_only(tab_src), "tab 自己又畫了一份團隊表"
+
+
+def test_returned_dicts_never_repeat_a_key():
+    """dict 字面值同鍵寫兩次＝後者蓋前者（第二輪把 by_month 換成 hr_logic 函式後舊行沒刪 →
+    .items() 炸 500，掃原始碼的測試全綠）。AST 掃工時整組的檔，任何常數鍵重複就紅。"""
+    import ast
+    for path in ("routers/api_me.py", "routers/api_timesheets.py", "services/timesheet_self.py",
+                 "services/timesheet_manual.py", "services/timesheet_lookup.py", "services/timesheet_digest.py",
+                 "services/timesheet_puller.py", "services/timesheet_ingest.py", "core/hr_logic.py"):
+        for node in ast.walk(ast.parse(repo_src(path))):
+            if isinstance(node, ast.Dict):
+                keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
+                assert len(keys) == len(set(keys)), (path, keys)

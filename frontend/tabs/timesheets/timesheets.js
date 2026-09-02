@@ -349,14 +349,17 @@ function _typeSelect(cur, attr) {
     return `<select ${attr}><option value="">分類</option>${_workTypes.map(t =>
         `<option value="${esc(t)}"${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
 }
-function _newRowHtml(v = {}) {
-    return `<tr class="ts-mine-row">
-        <td><input list="ts-proj-list" data-f="project" value="${esc(v.project || '')}" placeholder="專案（可打字）" style="width:100%;"></td>
+/** 一個工作項的五格輸入（專案／分類／內容／計畫／實際）；我的一天新增、改列與總表改列同一份。 */
+function _rowCells(v = {}, quick = false) {
+    return `<td><input list="ts-proj-list" data-f="project" value="${esc(v.project || '')}" placeholder="專案（可打字）" style="width:100%;"></td>
         <td>${_typeSelect(v.work_type || '', 'data-f="type"')}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}" placeholder="做了什麼" style="width:100%;"></td>
         <td><input type="number" data-f="planned" min="0" step="0.25" value="${v.planned ?? ''}" placeholder="計畫" style="width:64px;"></td>
         <td><input type="number" data-f="hours" min="0" step="0.25" value="${v.hours ?? ''}" placeholder="實際" style="width:64px;">
-            ${[0.5, 1, 2, 4, 8].map(h => `<button class="ts-btn ghost" data-hq="${h}" style="padding:2px 6px;font-size:11px;margin-left:2px;">${h}</button>`).join('')}</td>
+            ${quick ? [0.5, 1, 2, 4, 8].map(h => `<button class="ts-btn ghost" data-hq="${h}" style="padding:2px 6px;font-size:11px;margin-left:2px;">${h}</button>`).join('') : ''}</td>`;
+}
+function _newRowHtml(v = {}) {
+    return `<tr class="ts-mine-row">${_rowCells(v, true)}
         <td><button class="ts-btn ghost" data-ts-action="row-remove" style="padding:2px 8px;">×</button></td>
     </tr>`;
 }
@@ -445,7 +448,6 @@ async function _mineEdit(id) {
     const i = (_mineCache.items || []).find(x => x.id === id);
     const tr = document.querySelector(`[data-mine-id="${id}"]`);
     if (!i || !tr) return;
-    await _projectOptions();
     tr.outerHTML = `<tr data-mine-edit="${esc(id)}"><td colspan="4"><table><tbody>
         ${_newRowHtml({ project: i.project_name, work_type: i.work_type, note: i.task_note, planned: i.planned_hours, hours: i.hours || '' }).replace('data-ts-action="row-remove"', 'data-ts-action="mine-cancel"')}
         <tr><td colspan="6"><button class="ts-btn" data-ts-action="mine-save" data-id="${esc(id)}">儲存</button>
@@ -504,11 +506,7 @@ function _ledgerEditHtml(i) {
     return `<tr data-ledger-edit="${esc(i.id)}">
         <td><input type="date" data-f="date" value="${esc(i.date)}" ${inp}></td>
         <td>${esc(i.staff_name)}</td>
-        <td><input list="ts-proj-list" data-f="project" value="${esc(i.project_name)}" style="width:100%;"></td>
-        <td>${_typeSelect(i.work_type, 'data-f="type"')}</td>
-        <td><input type="text" data-f="note" value="${esc(i.task_note)}" placeholder="做了什麼" style="width:100%;"></td>
-        <td><input type="number" data-f="planned" min="0" step="0.25" value="${i.planned_hours ?? ''}" style="width:64px;"></td>
-        <td><input type="number" data-f="hours" min="0" step="0.25" value="${i.hours || ''}" style="width:64px;"></td>
+        ${_rowCells({ project: i.project_name, work_type: i.work_type, note: i.task_note, planned: i.planned_hours, hours: i.hours || '' })}
         <td style="color:#777;">${_srcLabel(i)}</td>
         <td><input type="text" data-f="remark" value="${esc(i.note)}" placeholder="管理員備註" style="width:100%;"></td>
         <td style="white-space:nowrap;"><button class="ts-btn" data-ts-action="ledger-save" data-id="${esc(i.id)}" style="padding:2px 8px;">存</button>
@@ -629,7 +627,7 @@ function _renderProject(d) {
             <span class="ts-chip"><b>${d.people}</b>人</span>
             <span class="ts-chip"><b>${d.span_days}</b>天（${esc(d.first || '—')} → ${esc(d.last || '—')}）</span>
             <span class="ts-chip"><b>${d.budget_hours ?? '—'}</b>預算 h　<span class="ts-pct" style="${_pctStyle(d.pct)}">${pct}</span></span>
-            ${d.quote_days != null ? `<span class="ts-chip"><b>${d.quote_days}</b>報價人日（≈ ${d.quote_days * 8} h）</span>` : ''}
+            ${d.quote_days != null ? `<span class="ts-chip"><b>${d.quote_days}</b>報價人日（≈ ${d.quote_hours} h）</span>` : ''}
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;">
             <div class="ts-card" style="margin:0;"><h3>分類組成</h3>${_bars(d.composition)}</div>
@@ -758,7 +756,7 @@ function _renderDash(d) {
                 <span class="ts-pct" style="${_pctStyle(p.pct)}">${p.pct != null ? p.pct + '%' : '—'}</span>
                 <span style="color:#888;width:110px;text-align:right;">${p.hours_used} / ${p.budget_hours ?? '—'}</span></div>`).join('') || '<div style="color:#666;">—</div>')}
             ${card('本月分類組成', _bars(d.month_composition))}
-            ${m ? card('負載（本週每人；超過 40 h 標紅）', hbars(m.load.map(x => ({ label: x.name, value: x.hours, color: x.hours > 40 ? '#f87171' : '#3b82f6' })),
+            ${m ? card(`負載（本週每人；超過 ${d.week.reference_per_person} h 標紅）`, hbars(m.load.map(x => ({ label: x.name, value: x.hours, color: x.hours > d.week.reference_per_person ? '#f87171' : '#3b82f6' })),
                 { formatValue: v => `${v} h`, showPct: false, emptyText: '本週還沒有人填' })) : ''}
             ${m ? card(`漏填與未完成的計畫（只有管理員看得到）`, `<div style="font-size:12.5px;color:#bbb;">${esc(m.missing_yesterday.date)} 沒填：${m.missing_yesterday.names.length ? m.missing_yesterday.names.map(esc).join('、') : '<span style="color:#6ee7b7;">大家都填了</span>'}</div>
                 <div style="font-size:12.5px;color:#bbb;margin-top:6px;">有計畫還沒填實際：${m.plans_open.length ? m.plans_open.map(esc).join('、') : '沒有'}</div>`) : ''}
@@ -858,10 +856,10 @@ async function _renderManual(slot) {
         const today = _today();   // 本地時區；toISOString 是 UTC 面值，會差一天
         const rowHtml = `
             <tr class="ts-mrow">
-                <td><input type="date" value="${today}" data-m="date"></td>
-                <td><select data-m="project">${projOpts}</select></td>
-                <td><input type="text" data-m="note" placeholder="工作內容" style="width:100%;"></td>
-                <td><input type="number" data-m="hours" min="0.1" step="0.1" style="width:70px;" placeholder="時數"></td>
+                <td><input type="date" value="${today}" data-f="date"></td>
+                <td><select data-f="project">${projOpts}</select></td>
+                <td><input type="text" data-f="note" placeholder="工作內容" style="width:100%;"></td>
+                <td><input type="number" data-f="hours" min="0.1" step="0.1" style="width:70px;" placeholder="時數"></td>
             </tr>`;
         slot.innerHTML = `
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;">
@@ -1001,8 +999,7 @@ async function _onAction(btn) {
                 const i = (_ledgerCache.items || []).find(x => x.id === btn.dataset.id);
                 const tr = document.querySelector(`[data-ledger-id="${btn.dataset.id}"]`);
                 if (!i || !tr) return;
-                await _projectOptions();
-                tr.outerHTML = _ledgerEditHtml(i);
+                tr.outerHTML = _ledgerEditHtml(i);      // datalist 在表外，_bind 已填好
                 return;
             }
             if (act === 'ledger-cancel') return _ledgerRedraw();
@@ -1063,12 +1060,8 @@ async function _onAction(btn) {
             if (act === 'manual-submit') {
                 const resEl = document.getElementById('ts-m-result');
                 const staffSel = document.getElementById('ts-m-staff');
-                const rows = [...document.querySelectorAll('#ts-m-table .ts-mrow')].map(tr => ({
-                    work_date: tr.querySelector('[data-m="date"]').value,
-                    project_name: tr.querySelector('[data-m="project"]').value,
-                    task_note: tr.querySelector('[data-m="note"]').value,
-                    hours: parseFloat(tr.querySelector('[data-m="hours"]').value || '0'),
-                })).filter(r => r.work_date && r.hours > 0);
+                const rows = [...document.querySelectorAll('#ts-m-table .ts-mrow')].map(_rowBody)
+                    .filter(r => r.work_date && r.hours > 0);
                 if (!staffSel?.value || !rows.length) {
                     if (resEl) resEl.textContent = '請選人員並至少填一列（日期 + 時數）';
                     return;

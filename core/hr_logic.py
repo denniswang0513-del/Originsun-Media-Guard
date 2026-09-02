@@ -13,10 +13,12 @@ from typing import NamedTuple, Optional
 from zoneinfo import ZoneInfo
 
 LEAVE_TYPES = ("特休", "病假", "事假", "公假", "婚假", "喪假", "其他")
+LEAVE_STATUSES = ("待審", "已核准", "已退回")
+ANNUAL_TYPE = "特休"
 
 # ── 日期歸一（工時整組共用；routers/crm/_shared._fmt_day 委派到這裡）────────────
 #
-# ⚠ 叫 tw_day 不叫 tw_day：core.finance_logic 已有一支 tw_day（系統時區、回 naive datetime），
+# ⚠ 叫 tw_day 不叫 local_day：core.finance_logic 已有一支 local_day（系統時區、回 naive datetime），
 # 兩支同名擺在 core/ 相鄰 router 各 import 一支，回傳型別不同會踩。
 #
 # 🔴 timestamptz 寫入端是 naive（PG 依 session 時區解讀）、asyncpg 讀回是 aware UTC ——
@@ -91,8 +93,6 @@ def budget_burn(total, budget) -> dict:
         return {"remaining": None, "pct": None}
     total = float(total or 0)
     return {"remaining": round(budget - total, 1), "pct": round(total / budget * 100, 1)}
-LEAVE_STATUSES = ("待審", "已核准", "已退回")
-ANNUAL_TYPE = "特休"
 
 
 def parse_ymd(raw: Optional[str]) -> Optional[datetime]:
@@ -292,6 +292,12 @@ def similar_projects(name: str, client: str, total: float, candidates, limit: in
             out.append((c["name"], round(score, 2)))
     out.sort(key=lambda x: -x[1])
     return out[:limit]
+
+
+def fillers_on(rows, day) -> set:
+    """`rows` = [(staff_name, day, hours), …] → 那一天有實際時數（>0）的人名；只有計畫不算填了。
+    儀表板「昨天漏填」與週一 digest 都吃這一支。"""
+    return {n for n, d, h in rows if n and d == day and (h or 0) > 0}
 
 
 def missing_fillers(active_names, filled_names) -> list:

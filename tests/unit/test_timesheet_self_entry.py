@@ -52,10 +52,7 @@ def test_own_scope_comes_from_the_token_never_the_body():
 
 def test_update_reuses_the_sheet_project_mapping():
     man = code_only(repo_src("services/timesheet_manual.py"))
-    rule = func_body(man, "def normalize_row(")
-    assert "resolve_project(pname, lk)" in rule and "parse_date(r.work_date)" in rule
-    assert "row_state(r.hours, r.planned_hours)" in rule and "norm_work_type(r.work_type)" in rule
-    # 插入與更新都吃這一支，不各寫一份
+    # 規則本體釘在 test_work_tracking；這裡只釘「插入與更新都吃 normalize_row 這一支」
     upd = code_only(func_body(repo_src("services/timesheet_self.py"), "async def apply_update("))
     assert "normalize_row(" in upd and "load_project_lookup(session)" in upd
     assert "normalize_row(" in func_body(man, "async def insert_manual_rows(")

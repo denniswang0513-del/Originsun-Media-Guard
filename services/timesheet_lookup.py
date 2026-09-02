@@ -24,6 +24,16 @@ async def load_project_lookup(session) -> ProjectLookup:
     return ProjectLookup.build(pmap, rows)
 
 
+async def project_names(session, project_ids) -> dict:
+    """`{project_id: name}`（手填只給 id 沒給名的那幾列回查案名；services 自己查，不 import router）。"""
+    from db.models import CrmProject
+    ids = [p for p in set(project_ids or []) if p]
+    if not ids:
+        return {}
+    rows = (await session.execute(select(CrmProject.id, CrmProject.name).where(CrmProject.id.in_(ids)))).all()
+    return {pid: n or "" for pid, n in rows}
+
+
 async def budgets_for(session, project_ids) -> dict:
     """`{project_id: budget_hours}`（只回有值的）—— burn 表／專案檔案／團隊匯總同一支反查，
     這裡是 is_mine 表態過的查表模組，可見性掃描不必再豁免 router。"""

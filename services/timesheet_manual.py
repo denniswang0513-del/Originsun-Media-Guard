@@ -14,14 +14,12 @@ from sqlalchemy import func as safunc, select
 
 from core.hr_logic import Misses, norm_work_type, resolve_project, row_state
 from services.timesheet_ingest import parse_date
-from services.timesheet_lookup import load_project_lookup
+from services.timesheet_lookup import load_project_lookup, project_names
 
 
 async def names_for(session, rows) -> dict:
-    """下拉只給 id 沒給名的那幾列才回查案名（有界 IN）。"""
-    from routers.crm._shared import project_names_map
-    ids = [r.project_id for r in rows if r.project_id and not (r.project_name or "").strip()]
-    return await project_names_map(session, ids) if ids else {}
+    """下拉只給 id 沒給名的那幾列才回查案名（有界 IN；目前兩個前端都只送名字，這是 API 路）。"""
+    return await project_names(session, [r.project_id for r in rows if r.project_id and not (r.project_name or "").strip()])
 
 
 def normalize_row(r, lk, id_to_name: dict) -> tuple:

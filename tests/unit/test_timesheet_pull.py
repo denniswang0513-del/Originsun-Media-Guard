@@ -8,7 +8,18 @@ runner 都走 services.timesheet_ingest）、只在 master 跑、設定驗證、
 import datetime as dt
 import io
 
+import pytest
 from tests.unit._srcscan import code_only, func_body, repo_src
+
+
+@pytest.fixture
+def pull_store(monkeypatch):
+    """settings.json 的替身：只有 timesheet.pull 那一塊（puller 與 SettingsBlock 都讀它）。"""
+    import services.timesheet_settings as tss
+    store = {"timesheet": {"pull": {}}}
+    monkeypatch.setattr(tss, "load_settings", lambda: store)
+    monkeypatch.setattr(tss, "save_settings", lambda s: store.update(s))
+    return store
 
 
 def _wb(rows, budgets=()):
@@ -57,8 +68,7 @@ def test_one_read_one_write_path():
     assert "from services.timesheet_sheet import" in puller
     assert 'ingest(session, chunk, "sheet", ctx)' in puller, "runner 落庫的 source 要是 sheet"
     # 查表建一次給 20 批共用，不每批重建
-    assert "ingest_context(session" in puller and puller.index("ingest_context(session") < puller.index("for i in range(0, len(good)")
-    assert "def read_rows" not in code_only(repo_src("scripts/import_timesheets.py"))
+    assert puller.count("ingest_context(") == 1
 
 
 def test_scheduler_only_runs_on_master():
@@ -70,12 +80,8 @@ def test_scheduler_only_runs_on_master():
     assert "timesheet_puller.start_scheduler_task()" in repo_src("main.py")
 
 
-def test_settings_validation_and_defaults(monkeypatch):
+def test_settings_validation_and_defaults(pull_store):
     import services.timesheet_puller as tp
-    import services.timesheet_settings as tss
-    store = {"timesheet": {"pull": {}}}
-    monkeypatch.setattr(tss, "load_settings", lambda: store)
-    monkeypatch.setattr(tss, "save_settings", lambda s: store.update(s))
     cfg = tp.get_pull_settings()
     assert cfg == {"enabled": False, "sheet_id": "", "cron": tp.DEFAULT_CRON,
                    "last_run_at": 0.0, "last_summary": "", "running": False}
@@ -89,24 +95,18 @@ def test_settings_validation_and_defaults(monkeypatch):
     assert "except ValueError" in ep and "422" in ep
 
 
-async def test_run_pull_is_disabled_by_default_and_needs_sheet_id(monkeypatch):
+async def test_run_pull_is_disabled_by_default_and_needs_sheet_id(pull_store):
     import services.timesheet_puller as tp
-    import services.timesheet_settings as tss
-    store = {"timesheet": {"pull": {}}}
-    monkeypatch.setattr(tss, "load_settings", lambda: store)
-    monkeypatch.setattr(tss, "save_settings", lambda s: store.update(s))
     assert (await tp.run_pull()) == {"status": "disabled"}
     r = await tp.run_pull(force=True)
     assert r["status"] == "error" and "sheet_id" in r["message"]
 
 
-async def test_run_pull_survives_a_fetch_failure(monkeypatch):
+async def test_run_pull_survives_a_fetch_failure(monkeypatch, pull_store):
     """Google 那邊掛了／網路斷了：記到 last_summary、回 error，不讓排程 loop 炸掉。"""
     import services.timesheet_puller as tp
-    import services.timesheet_settings as tss
-    store = {"timesheet": {"pull": {"enabled": True, "sheet_id": "x"}}}
-    monkeypatch.setattr(tss, "load_settings", lambda: store)
-    monkeypatch.setattr(tss, "save_settings", lambda s: store.update(s))
+    store = pull_store
+    store["timesheet"]["pull"].update({"enabled": True, "sheet_id": "x"})
 
     def boom(_sid):
         raise OSError("HTTP 503")

@@ -14,7 +14,7 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from core.hr_logic import (ACTIVE_WINDOW_DAYS, active_fillers, digest_text, hours_rollup,
+from core.hr_logic import (fillers_on, ACTIVE_WINDOW_DAYS, active_fillers, digest_text, hours_rollup,
                            is_workday, tw_day, missing_fillers)
 from services.timesheet_settings import SettingsBlock
 
@@ -46,7 +46,7 @@ async def build_digest(session, today: date | None = None) -> dict:
         day = mon + timedelta(days=i)
         if not is_workday(day):
             continue
-        filled = {n for n, d, _p, h in week if d == day and (h or 0) > 0}
+        filled = fillers_on(((n, d, h) for n, d, _p, h in week), day)
         for n in missing_fillers(active, filled):
             missing[n] = missing.get(n, 0) + 1
     label = f"{mon.isoformat()} ～ {sun.isoformat()}"

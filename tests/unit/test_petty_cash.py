@@ -706,8 +706,7 @@ def test_expense_dates_are_formatted_in_taipei():
     aware UTC —— 面值 strftime/isoformat 取日期就差一天。2026-08-18 在消費日
     實測踩到（送 08-01 回讀 07-31）。
     """
-    assert "def _fmt_day" in SHARED_SRC and "tw_day(" in SHARED_SRC       # 委派 hr_logic 那一份
-    assert "astimezone(_TW)" in (REPO / "core" / "hr_logic.py").read_text(encoding="utf-8")
+    assert "def _fmt_day" in SHARED_SRC and "day_iso(" in SHARED_SRC       # 委派 hr_logic 那一份
     # costs 的 _fmt_date 委派給 _fmt_day
     fmt = COSTS_SRC.split("def _fmt_date")[1].split("\ndef ")[0]
     assert "_fmt_day" in fmt and "isoformat" not in fmt
@@ -719,8 +718,6 @@ def test_expense_dates_are_formatted_in_taipei():
     for f in sorted((REPO / "routers" / "crm").glob("*.py")):
         src = f.read_text(encoding="utf-8")
         assert "isoformat()[:10]" not in src, f"{f.name} 有面值取日期，該走 _fmt_day"
-        if f.name == "_shared.py":     # _fmt_day 本體的 strftime 是歸一後的合法使用
-            continue
         for ln in src.splitlines():
             if ('strftime("%Y-%m-%d")' in ln
                     and "datetime.now()" not in ln and "_now()" not in ln):

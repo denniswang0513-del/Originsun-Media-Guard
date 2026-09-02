@@ -10,7 +10,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import or_, select
 
 from core.auth import check_admin_or_module
-from core.hr_logic import EDIT_BLOCK_TEXT, can_edit_timesheet, month_span, tw_day
+from core.hr_logic import EDIT_BLOCK_TEXT, by_month, can_edit_timesheet, day_iso, month_span, tw_day
 from core.identity import resolve_current_staff
 from services.timesheet_lookup import load_project_lookup
 from services.timesheet_manual import insert_manual_rows, names_for, normalize_row
@@ -22,10 +22,9 @@ _BLOCK_STATUS = {"not_owner": 403, "not_manual": 409, "locked": 409}
 def ts_dict(r, staff_id: str | None = None) -> dict:
     """一列 Timesheet 的唯一序列化（看板／時間軸／人員逐日／我的一天都吃這個）。
     給 `staff_id` 才算 `editable`（own-scope 視角）。"""
-    d = tw_day(r.work_date)
     out = {
         "id": r.id,
-        "date": d.isoformat() if d else "",
+        "date": day_iso(r.work_date) or "",
         "staff_name": r.staff_name or "",
         "project_name": r.project_name or "",
         "project_id": r.project_id or "",
@@ -50,6 +49,16 @@ def month_or_422(request_month: str):
         raise HTTPException(status_code=422, detail=str(e))
 
 
+def metrics_input(rows) -> list:
+    """Timesheet 列 → project_metrics 的輸入（日、人、分類、小時）；計畫列由 project_metrics 自己略過。"""
+    return [(tw_day(r.work_date), r.staff_name, r.work_type, r.hours) for r in rows]
+
+
+def rows_by_month(rows) -> list:
+    """Timesheet 列 → [('YYYY-MM', 小時), …]（專案各月／團隊各月同一支）。"""
+    return by_month((tw_day(r.work_date), r.hours) for r in rows)
+
+
 async def bound_ident(request: Request, module: str) -> dict:
     """守衛（模組鑰匙由呼叫端給：員工頁 me_finance、CRM tab timesheets）＋ 必須綁定人員檔案。"""
     check_admin_or_module(request, module)
@@ -59,11 +68,16 @@ async def bound_ident(request: Request, module: str) -> dict:
     return ident
 
 
-def own_rows(ident: dict):
-    """本人的列：認 staff_id；舊 Sheet 列若 staff_id 空則退回姓名比對。"""
+def own_filter(ident: dict):
+    """「本人的列」的 WHERE：認 staff_id；舊 Sheet 列若 staff_id 空則退回姓名比對。
+    列表（own_rows）與 /my.html 工作台的合計都用這一條，不各自寫一種 own-scope。"""
     from db.models import Timesheet
-    return select(Timesheet).where(or_(Timesheet.staff_id == ident["staff_id"],
-                                       Timesheet.staff_name == ident["staff"].name))
+    return or_(Timesheet.staff_id == ident["staff_id"], Timesheet.staff_name == ident["staff"].name)
+
+
+def own_rows(ident: dict):
+    from db.models import Timesheet
+    return select(Timesheet).where(own_filter(ident))
 
 
 async def get_row(session, row_id: str):

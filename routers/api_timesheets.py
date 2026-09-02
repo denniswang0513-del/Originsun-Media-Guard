@@ -28,8 +28,8 @@ import core.state as state
 from config import load_settings, save_settings
 from core.auth import check_admin, check_admin_or_module, current_username, payload_grants
 from core.db_guard import db_factory_or_503
-from core.hr_logic import (HOURS_PER_WORKDAY, WORK_TYPES, Misses, active_fillers, bucket_hours, budget_burn,
-                           by_month, day_iso, explain_miss, hours_rollup, missing_fillers, month_span, months_back,
+from core.hr_logic import (fillers_on, HOURS_PER_WORKDAY, WORK_TYPES, Misses, active_fillers, bucket_hours, budget_burn,
+                           day_iso, explain_miss, hours_rollup, missing_fillers, month_span, months_back,
                            prev_workday, project_metrics, remap_target, resolve_project, similar_projects,
                            split_sheet_name, tw_day, type_composition)
 from core.schemas import (MeTimesheetBatch, MeTimesheetUpdate, TimesheetBudgetRequest, TimesheetBudgetSet,
@@ -42,7 +42,7 @@ from services.timesheet_ingest import ingest, parse_date as _parse_date
 from services.timesheet_lookup import burn_rows, load_project_lookup
 from services.timesheet_manual import insert_manual_rows, project_options
 from services.timesheet_self import (add_rows, admin_delete_row, admin_update_row, bound_ident, delete_row,
-                                     list_rows, month_or_422, ts_dict, update_row)
+                                     list_rows, metrics_input, month_or_422, rows_by_month, ts_dict, update_row)
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
 
@@ -292,15 +292,6 @@ async def _quote_days(session, project_id: str) -> Optional[float]:
     return float(days) if days else None
 
 
-def _metrics_input(rows):
-    """Timesheet 列 → project_metrics 的輸入（日、人、分類、小時）；計畫列由 project_metrics 自己略過。"""
-    return [(tw_day(r.work_date), r.staff_name, r.work_type, r.hours) for r in rows]
-
-
-def _by_month(rows) -> list:
-    return by_month((tw_day(r.work_date), r.hours) for r in rows)
-
-
 def _day_log(rows, limit: Optional[int] = None) -> list:
     """逐日流水：[{date, items:[ts_dict…]}, …] 新的在前（專案時間軸與人員逐日同一形狀）。"""
     days: dict = {}
@@ -329,14 +320,15 @@ async def project_file(request: Request, name: str = ""):
         proj = await session.get(CrmProject, pid) if pid else None
         quote_days = await _quote_days(session, pid)
         cands = await _project_candidates(session)
-    m = project_metrics(_metrics_input(rows))
+    m = project_metrics(metrics_input(rows))
     budget = getattr(proj, "budget_hours", None)
     return {
         "project_name": name, "project_id": pid or "", "status": getattr(proj, "status", ""),
         "mapped": bool(pid), **m,
         "budget_hours": budget, **budget_burn(m["total"], budget),
         "quote_days": quote_days,
-        "by_month": _by_month(rows),
+        "quote_hours": quote_days * HOURS_PER_WORKDAY if quote_days else None,
+        "by_month": rows_by_month(rows),
         "timeline": _day_log(rows, limit=90),
         "similar": similar_projects(name, split_sheet_name(name)[0], m["total"], cands),
     }
@@ -353,7 +345,7 @@ async def compare_projects(request: Request, names: str = ""):
     async with factory() as session:
         rows = (await session.execute(
             select(Timesheet).where(Timesheet.project_name.in_(wanted)))).scalars().all()
-    return {"items": [{"project_name": n, **project_metrics(_metrics_input(r for r in rows if r.project_name == n))}
+    return {"items": [{"project_name": n, **project_metrics(metrics_input(r for r in rows if r.project_name == n))}
                       for n in wanted]}
 
 
@@ -383,7 +375,7 @@ async def person_file(request: Request, name: str = "", month: str = ""):
         "days": _day_log(rows),
         "projects": sorted(projects.items(), key=lambda x: -x[1]),
         "composition": type_composition((r.work_type, r.hours) for r in rows),
-        "trend": _by_month(year_rows),
+        "trend": rows_by_month(year_rows),
     }
 
 
@@ -405,7 +397,7 @@ async def set_project_budget(req: TimesheetBudgetSet, request: Request):
 
 @router.get("/dashboard")
 async def dashboard(request: Request):
-    """六格：大家的（今日在做什麼、本週全體、本月分類組成、burn 前五）＋
+    """大家的四格（今日在做什麼、本週全體、本月分類組成、burn 前五）＋
     主管層（負載排名、昨天漏填、有計畫沒結果）—— 主管層只給管理員（不給全員比較）。"""
     payload = check_admin_or_module(request, "timesheets")
     is_admin = payload_grants(payload)          # 不帶模組鑰匙＝純管理員判定
@@ -435,7 +427,7 @@ async def dashboard(request: Request):
     }
     if is_admin:
         yday = prev_workday(today)
-        filled = {n for n, d, _p, _wt, h, _st in data if d == yday and h > 0}
+        filled = fillers_on(((n, d, h) for n, d, _p, _wt, h, _st in data), yday)
         out["manager"] = {
             "load": [{"name": p["name"], "hours": p["total"]} for p in week["people"]],
             "missing_yesterday": {"date": yday.isoformat(), "names": missing_fillers(active_fillers(data, today), filled)},

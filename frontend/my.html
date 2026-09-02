@@ -980,7 +980,7 @@ function cardLeave(lv) {
     const body = card.querySelector(".card-body");
     if (!lv) { body.innerHTML = `<div class="empty">尚未綁定人員檔案</div>`; return card; }
     const q = lv.quota || {};
-    const today = new Date().toISOString().slice(0, 10);
+    const today = _localToday();
     let html = `<div class="stat-row">
         <div class="stat"><div class="num ${q.remaining < 0 ? "accent" : ""}">${q.remaining ?? "—"}</div><div class="lbl">特休剩餘(天)</div></div>
         <div class="stat"><div class="num">${q.used ?? 0}</div><div class="lbl">已休</div></div>
@@ -1164,15 +1164,15 @@ async function toggleTsAdd() {
     if (show) { await _tsFillList(); if (!$("ts-add-rows").children.length) addTsRow(); }
 }
 function addTsRow() { $("ts-add-rows").insertAdjacentHTML("beforeend", _tsRowHtml()); }
+/** 一列輸入 → 送給後端的 body（新增與改列同一形狀）。 */
+function _tsRowBody(el) {
+    const v = f => el.querySelector(`[data-f="${f}"]`).value;
+    return { work_date: v("date"), project_name: v("project").trim(), task_note: v("note"), hours: parseFloat(v("hours") || "0") };
+}
 async function submitTsRows() {
     const errEl = $("ts-add-err");
     errEl.textContent = "";
-    const rows = [...document.querySelectorAll("#ts-add-rows .ts-new-row")].map(el => ({
-        work_date: el.querySelector('[data-f="date"]').value,
-        project_name: el.querySelector('[data-f="project"]').value.trim(),
-        task_note: el.querySelector('[data-f="note"]').value,
-        hours: parseFloat(el.querySelector('[data-f="hours"]').value || "0"),
-    })).filter(r => r.work_date && r.hours > 0);
+    const rows = [...document.querySelectorAll("#ts-add-rows .ts-new-row")].map(_tsRowBody).filter(r => r.work_date && r.hours > 0);
     if (!rows.length) { errEl.textContent = "至少填一列（日期＋時數）"; return; }
     try {
         const r = await mfetch("/api/v1/me/timesheets/batch", { method: "POST", body: JSON.stringify({ rows }) });
@@ -1201,13 +1201,8 @@ async function saveMyTs(id) {
     if (!box) return;
     const el = box.querySelector(".ts-edit-row");
     const it = _tsItems.find(x => x.id === id) || {};
-    const body = {
-        work_type: it.work_type || null, planned_hours: it.planned_hours,   // 這頁不編這兩欄，原值帶回去（PUT 是整列覆蓋）
-        work_date: el.querySelector('[data-f="date"]').value,
-        project_name: el.querySelector('[data-f="project"]').value.trim(),
-        task_note: el.querySelector('[data-f="note"]').value,
-        hours: parseFloat(el.querySelector('[data-f="hours"]').value || "0"),
-    };
+    // 這頁不編分類／計畫小時，原值帶回去（PUT 是整列覆蓋）
+    const body = { ..._tsRowBody(el), work_type: it.work_type || null, planned_hours: it.planned_hours };
     try {
         const r = await mfetch("/api/v1/me/timesheets/" + encodeURIComponent(id), { method: "PUT", body: JSON.stringify(body) });
         if (!r.ok) { const d = await r.json().catch(() => ({})); box.querySelector("[data-err]").textContent = d.detail || "儲存失敗"; return; }

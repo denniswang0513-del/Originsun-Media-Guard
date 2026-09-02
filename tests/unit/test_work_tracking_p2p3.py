@@ -60,9 +60,9 @@ def test_endpoints_are_thin_and_gated():
     for fn in ("async def project_file(", "async def compare_projects(", "async def person_file(",
                "async def dashboard(", "async def export_csv("):
         assert 'check_admin_or_module(request, "timesheets")' in func_body(src, fn), fn
-    assert "project_metrics(_metrics_input(rows))" in func_body(src, "async def project_file(")
+    assert "project_metrics(metrics_input(rows))" in func_body(src, "async def project_file(")
     assert "similar_projects(name" in func_body(src, "async def project_file(")
-    assert "project_metrics(_metrics_input(" in func_body(src, "async def compare_projects(")
+    assert "project_metrics(metrics_input(" in func_body(src, "async def compare_projects(")
     # 改預算＝寫私帳案 → full；digest 設定＝管理員
     assert '_require_mine_admin(request, level="full")' in func_body(src, "async def set_project_budget(")
     for fn in ("async def get_digest(", "async def put_digest(", "async def send_digest_now("):

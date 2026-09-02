@@ -380,10 +380,6 @@ class TimesheetManualRequest(BaseModel):
     rows: List[TimesheetManualRow]
 
 
-class MeTimesheetCreate(TimesheetManualRow):
-    """員工自助補登一筆工時（staff 由 token 解析）— 欄位同 TimesheetManualRow。"""
-
-
 class MeTimesheetBatch(BaseModel):
     """員工一次填多列（/my.html「我的工時」新增 grid）。"""
     rows: List[TimesheetManualRow]

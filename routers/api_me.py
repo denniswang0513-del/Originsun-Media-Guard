@@ -23,7 +23,7 @@ from sqlalchemy import func, select  # type: ignore
 
 from core.auth import check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
-from core.hr_logic import (budget_burn, by_month, day_iso, hours_rollup, leave_balance, leave_to_dict,
+from core.hr_logic import (budget_burn, day_iso, hours_rollup, leave_balance, leave_to_dict,
                            month_span, months_back, project_metrics, tw_day)
 from core.identity import resolve_current_staff
 from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
@@ -32,7 +32,8 @@ from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
                        CrmProjectStaff, HrLeaveRequest, Timesheet)
 from services.timesheet_lookup import budgets_for
 from services.timesheet_manual import project_options
-from services.timesheet_self import add_rows, bound_ident, delete_row, list_rows, month_or_422, ts_dict, update_row
+from services.timesheet_self import (add_rows, bound_ident, delete_row, list_rows, metrics_input, month_or_422,
+                                     own_filter, rows_by_month, ts_dict, update_row)
 from routers.api_hr import approved_annual_used, new_leave_request
 
 router = APIRouter(prefix="/api/v1/me", tags=["me"])
@@ -136,20 +137,19 @@ async def my_workspace(request: Request):
             } for o in rows]
 
         if "me_finance" in allowed and staff is not None:
-            # ⚠ name-match（脆弱）：見模組 docstring。
-            name = staff.name
+            name = staff.name                       # 應付款那段還是認收款人姓名
             ts_rows = (await session.execute(
                 select(Timesheet.project_name,
                        func.sum(Timesheet.hours), func.count(Timesheet.id),
                        func.max(Timesheet.work_date))
-                .where(Timesheet.staff_name == name)
+                .where(own_filter(ident))           # own-scope 同「我的工時」那一條
                 .group_by(Timesheet.project_name)
                 .order_by(func.max(Timesheet.work_date).desc())
             )).all()
             month_start = month_span("")[0]
             month_hours = (await session.execute(
                 select(func.coalesce(func.sum(Timesheet.hours), 0.0))
-                .where(Timesheet.staff_name == name)
+                .where(own_filter(ident))
                 .where(Timesheet.work_date >= month_start)
             )).scalar() or 0.0
             out["timesheet"] = {
@@ -421,10 +421,9 @@ async def team_project_detail(request: Request, name: str = ""):
         rows = (await session.execute(
             select(Timesheet).where(Timesheet.project_name == name).where(Timesheet.hours > 0)
             .order_by(Timesheet.work_date.desc()))).scalars().all()
-    m = project_metrics((tw_day(r.work_date), r.staff_name, r.work_type, r.hours) for r in rows)
+    m = project_metrics(metrics_input(rows))
     return {
         "project_name": name, "total": m["total"], "by_person": m["by_person"],
-        "by_month": by_month((tw_day(r.work_date), r.hours) for r in rows),
-        "by_month": sorted(by_month.items()),
+        "by_month": rows_by_month(rows),
         "recent": [ts_dict(r) for r in rows[:60]],
     }
