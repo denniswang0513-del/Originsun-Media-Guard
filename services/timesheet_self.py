@@ -18,9 +18,10 @@ from services.timesheet_manual import insert_manual_rows, names_for, normalize_r
 _BLOCK_STATUS = {"not_owner": 403, "not_manual": 409, "locked": 409}
 
 
-def ts_dict(r, staff_id: str | None = None) -> dict:
+def ts_dict(r, staff_id: str | None = None, *, with_note: bool = False) -> dict:
     """一列 Timesheet 的唯一序列化（看板／時間軸／人員逐日／我的一天都吃這個）。
-    給 `staff_id` 才算 `editable`（own-scope 視角）。"""
+    給 `staff_id` 才算 `editable`（own-scope 視角）；管理員備註 `note` 只在 with_note（管理員端點）
+    才進 JSON —— 員工頁與團隊頁不該讀得到主管寫的話。"""
     out = {
         "id": r.id,
         "date": day_iso(r.work_date) or "",
@@ -33,8 +34,9 @@ def ts_dict(r, staff_id: str | None = None) -> dict:
         "work_type": r.work_type or "",
         "source": r.source or "",
         "status": r.status or "",
-        "note": r.note or "",
     }
+    if with_note:
+        out["note"] = r.note or ""
     if staff_id is not None:
         out["editable"] = can_edit_timesheet(r, staff_id) == ""
     return out
@@ -112,8 +114,11 @@ async def apply_update(session, r, body) -> None:
     """把 body（TimesheetManualRow 形狀）套到一列：日期／專案（重新對映）／分類／內容／實際／計畫。
     員工改自己的（update_row）與管理員總表（admin_update_row）同一份；hours 與 planned_hours
     至少一個 > 0。Sheet 列保留 status=import（計畫／實際的判定只對手填列有意義）。不 commit。"""
-    fields, _why = normalize_row(body, await load_project_lookup(session), await names_for(session, [body]))
-    if r.source != "manual":
+    current = (r.project_name or "", r.project_id)
+    unchanged = not body.project_id and (body.project_name or "").strip() == current[0]
+    lk = None if unchanged else await load_project_lookup(session)      # 名字沒動就不載查表
+    fields, _why = normalize_row(body, lk, await names_for(session, [body]), manual=r.source == "manual", current=current)
+    if fields["status"] is None:
         fields.pop("status")          # Sheet 列保留 import：計畫／實際只對手填列有意義
     for k, v in fields.items():
         setattr(r, k, v)
@@ -144,7 +149,7 @@ async def admin_update_row(session, row_id: str, body) -> dict:
     if body.note is not None:
         r.note = body.note.strip() or None
     await session.commit()
-    return {**ts_dict(r), "editable": True}
+    return {**ts_dict(r, with_note=True), "editable": True}
 
 
 async def admin_delete_row(session, row_id: str) -> dict:

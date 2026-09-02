@@ -29,7 +29,7 @@ from config import load_settings, save_settings
 from core.auth import check_admin, check_admin_or_module, current_username, payload_grants
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (fillers_on, HOURS_PER_WORKDAY, WORK_TYPES, Misses, active_fillers, bucket_hours, budget_burn,
-                           day_iso, explain_miss, hours_rollup, missing_fillers, month_span, months_back,
+                           day_iso, explain_miss, hours_rollup, missing_fillers, month_key, month_span, months_back,
                            prev_workday, project_metrics, remap_target, resolve_project, similar_projects,
                            split_sheet_name, tw_day, type_composition)
 from core.schemas import (MeTimesheetBatch, MeTimesheetUpdate, TimesheetBudgetRequest, TimesheetBudgetSet,
@@ -246,8 +246,8 @@ async def ledger_rows(request: Request, month: str = ""):
         rows = (await session.execute(
             select(Timesheet).where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
             .order_by(Timesheet.work_date.desc(), Timesheet.staff_name, Timesheet.created_at))).scalars().all()
-    return {"month": m0.strftime("%Y-%m"), "editable": is_admin,
-            "items": [ts_dict(r) for r in rows], "work_types": list(WORK_TYPES)}
+    return {"month": month_key(m0), "editable": is_admin,
+            "items": [ts_dict(r, with_note=is_admin) for r in rows], "work_types": list(WORK_TYPES)}
 
 
 @router.put("/rows/{row_id}")
@@ -364,12 +364,12 @@ async def person_file(request: Request, name: str = "", month: str = ""):
             select(Timesheet).where(Timesheet.staff_name == name)
             .where(Timesheet.work_date >= months_back(m0, 11)).where(Timesheet.work_date < m1)
             .order_by(Timesheet.work_date.desc(), Timesheet.created_at))).scalars().all()
-    month_key = m0.strftime("%Y-%m")
-    rows = [r for r in year_rows if tw_day(r.work_date).strftime("%Y-%m") == month_key]   # 查詢已排除 NULL 日期
+    mk = month_key(m0)
+    rows = [r for r in year_rows if month_key(tw_day(r.work_date)) == mk]   # 查詢已排除 NULL 日期
     heat = bucket_hours((day_iso(r.work_date), r.hours) for r in rows)
     projects = bucket_hours((r.project_name or "(空白)", r.hours) for r in rows)
     return {
-        "name": name, "month": month_key,
+        "name": name, "month": mk,
         "total": round(sum(heat.values()), 1), "days_filled": len(heat),
         "heat": heat,
         "days": _day_log(rows),
@@ -430,7 +430,7 @@ async def dashboard(request: Request):
         filled = fillers_on(((n, d, h) for n, d, _p, _wt, h, _st in data), yday)
         out["manager"] = {
             "load": [{"name": p["name"], "hours": p["total"]} for p in week["people"]],
-            "missing_yesterday": {"date": yday.isoformat(), "names": missing_fillers(active_fillers(data, today), filled)},
+            "missing_yesterday": {"date": yday.isoformat(), "names": missing_fillers(active_fillers(((n, d, h) for n, d, _p, _wt, h, _st in data), today), filled)},
             "plans_open": sorted({n for n, d, _p, _wt, _h, st in data if st == "plan" and d and d < today}),
         }
     return out
@@ -625,7 +625,7 @@ async def hours_by_staff(request: Request, month: str = ""):
     staff_list = sorted(by_staff.values(), key=lambda x: -x["total_hours"])
     for e in staff_list:
         e["projects"].sort(key=lambda p: -p["hours"])
-    return {"month": m0.strftime("%Y-%m"), "staff": staff_list,
+    return {"month": month_key(m0), "staff": staff_list,
             "total_hours": round(sum(e["total_hours"] for e in staff_list), 1)}
 
 
@@ -667,4 +667,4 @@ async def recent_rows(request: Request, limit: int = 50):
         rows = (await session.execute(
             select(Timesheet).order_by(Timesheet.created_at.desc()).limit(limit)
         )).scalars().all()
-    return {"rows": [ts_dict(r) for r in rows]}
+    return {"rows": [ts_dict(r, with_note=True) for r in rows]}

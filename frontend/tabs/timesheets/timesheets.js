@@ -535,7 +535,7 @@ function _renderLedger(d) {
         <div class="ts-card" style="overflow-x:auto;">
             <table id="ts-ledger-table">
                 <thead><tr>${sortableTh('date', '日期')}${sortableTh('staff', '人員')}${sortableTh('project', '專案')}${sortableTh('type', '分類')}${sortableTh('task', '內容')}${sortableTh('planned', '計畫', 'class="num"')}${sortableTh('hours', '實際', 'class="num"')}${sortableTh('source', '來源')}${sortableTh('note', '備註')}<th></th></tr></thead>
-                <tbody>${_ledgerTbodyHtml()}</tbody>
+                <tbody></tbody>   <!-- _bind → _ledgerRedraw 填（不在這裡建一次又重建一次） -->
             </table>
             <datalist id="ts-proj-list"></datalist>
         </div>`;

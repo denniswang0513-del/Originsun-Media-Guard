@@ -22,10 +22,12 @@ async def names_for(session, rows) -> dict:
     return await project_names(session, [r.project_id for r in rows if r.project_id and not (r.project_name or "").strip()])
 
 
-def normalize_row(r, lk, id_to_name: dict) -> tuple:
-    """一列輸入（TimesheetManualRow 形狀）→ (要落庫的欄位, 對映原因 why)；規則錯 → 422。"""
+def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, current: tuple | None = None) -> tuple:
+    """一列輸入（TimesheetManualRow 形狀）→ (要落庫的欄位, 對映原因 why)；規則錯 → 422。
+    manual=False（改 Sheet 列）不套 row_state：status 保留、0 小時也放行（Sheet 本來就收 0）。
+    current=(案名, project_id)：名字沒動就沿用原 id、不重新對映（呼叫端可不載查表）。"""
     try:
-        status = row_state(r.hours, r.planned_hours)
+        status = row_state(r.hours, r.planned_hours) if manual else None
         wt = norm_work_type(r.work_type)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -36,6 +38,8 @@ def normalize_row(r, lk, id_to_name: dict) -> tuple:
     if r.project_id:
         pid, why = r.project_id, "map"
         pname = pname or (id_to_name.get(pid) or "").strip()
+    elif current is not None and pname == current[0]:
+        pid, why = current[1], "map"
     else:
         pid, why = resolve_project(pname, lk)
     return {

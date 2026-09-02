@@ -715,7 +715,7 @@ def test_expense_dates_are_formatted_in_taipei():
     assert "_fmt_day" in year_fn and ".year" not in year_fn
     # 整個 routers/crm 套件掃一輪：日期欄位不准再面值取日
     # （hr_logic → api_proposals → 消費日，同一個坑已經修三次了）
-    for f in sorted((REPO / "routers" / "crm").glob("*.py")):
+    for f in sorted((REPO / "routers" / "crm").glob("*.py")) + [REPO / "routers" / "api_me.py", REPO / "core" / "hr_logic.py"]:
         src = f.read_text(encoding="utf-8")
         assert "isoformat()[:10]" not in src, f"{f.name} 有面值取日期，該走 _fmt_day"
         for ln in src.splitlines():

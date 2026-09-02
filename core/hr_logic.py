@@ -51,9 +51,14 @@ def bucket_hours(pairs) -> dict:
     return acc
 
 
+def month_key(d) -> str:
+    """date／datetime → 'YYYY-MM'（API 的 month 欄與各月加總同一個寫法）。"""
+    return d.strftime("%Y-%m")
+
+
 def by_month(day_hours) -> list:
     """(day, hours) → [('YYYY-MM', 小時), …] 依月排序（day None 跳過）。"""
-    return sorted(bucket_hours((d.strftime("%Y-%m"), h) for d, h in day_hours if d).items())
+    return sorted(bucket_hours((month_key(d), h) for d, h in day_hours if d).items())
 
 
 def month_span(month: str) -> tuple:
@@ -111,8 +116,8 @@ def leave_to_dict(o) -> dict:
     return {
         "id": o.id, "staff_id": o.staff_id, "staff_name": o.staff_name or "",
         "leave_type": o.leave_type,
-        "start_date": o.start_date.strftime("%Y-%m-%d") if o.start_date else "",
-        "end_date": o.end_date.strftime("%Y-%m-%d") if o.end_date else "",
+        "start_date": day_iso(o.start_date) or "",
+        "end_date": day_iso(o.end_date) or "",
         "days": o.days, "reason": o.reason or "",
         "status": o.status,
         "approved_by": o.approved_by or "",
@@ -224,9 +229,10 @@ ACTIVE_WINDOW_DAYS = 30
 
 
 def active_fillers(rows, today: date) -> set:
-    """`rows` = [(staff_name, day, …), …] → 最近 ACTIVE_WINDOW_DAYS 天有列的人名。"""
+    """`rows` = [(staff_name, day, hours), …] → 最近 ACTIVE_WINDOW_DAYS 天有實際時數的人名
+    （只排計畫沒記實際的不算「有在填」，跟 fillers_on 同一條，漏填名單才不會永遠有他）。"""
     since = today - timedelta(days=ACTIVE_WINDOW_DAYS)
-    return {r[0] for r in rows if r[0] and r[1] and r[1] >= since}
+    return {n for n, d, h in rows if n and d and d >= since and (h or 0) > 0}
 
 
 def type_composition(pairs) -> list:

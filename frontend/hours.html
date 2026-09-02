@@ -104,7 +104,7 @@ function teamHtml(d) {
             ${weeks.map(w => `<td class="num">${p.weeks[w] ?? "—"}</td>`).join("")}
         </tr>
         <tr id="person-${i}" style="display:none;"><td colspan="${4 + weeks.length}" style="background:#fafafa;">
-            ${p.projects.map(([n, h]) => `<span class="pill" style="margin:2px 4px 2px 0;"><span class="link" onclick="event.stopPropagation();openProject('${esc(n)}')">${esc(n)}</span> ${h} h</span>`).join("")}
+            ${p.projects.map(([n, h]) => `<span class="pill" style="margin:2px 4px 2px 0;"><span class="link" data-open="${esc(n)}">${esc(n)}</span> ${h} h</span>`).join("")}
         </td></tr>`).join("");
     return `
         <div class="bar">
@@ -117,7 +117,7 @@ function teamHtml(d) {
         <div class="card wrap">${d.people.length ? `<table>${head}${rows}</table>` : `<div class="empty">這個月還沒有人填</div>`}</div>
         <div class="card">
             <div class="eyebrow" style="margin-bottom:10px;">By Project <span class="accent">本月各案</span></div>
-            ${d.projects.map(([n, h]) => `<span class="pill" style="margin:2px 4px 2px 0;"><span class="link" onclick="openProject('${esc(n)}')">${esc(n)}</span> ${h} h</span>`).join("") || `<div class="empty">—</div>`}
+            ${d.projects.map(([n, h]) => `<span class="pill" style="margin:2px 4px 2px 0;"><span class="link" data-open="${esc(n)}">${esc(n)}</span> ${h} h</span>`).join("") || `<div class="empty">—</div>`}
         </div>`;
 }
 function togglePerson(i) { const tr = $("person-" + i); if (tr) tr.style.display = tr.style.display === "none" ? "" : "none"; }
@@ -127,7 +127,7 @@ function projectsHtml(d) {
     const rows = d.items.map(p => {
         const pct = p.pct == null ? null : Math.min(100, p.pct);
         return `<tr>
-            <td><span class="link" onclick="openProject('${esc(p.project_name)}')">${esc(p.project_name)}</span></td>
+            <td><span class="link" data-open="${esc(p.project_name)}">${esc(p.project_name)}</span></td>
             <td class="num"><b>${p.hours}</b> h</td>
             <td class="num">${p.people}</td>
             <td class="num">${p.budget_hours ?? "—"}</td>
@@ -146,6 +146,8 @@ function projectsHtml(d) {
 
 // ── 專案明細 ──
 function openProject(name) { _view = "project:" + name; render(); }
+// 案名放 data-*（不放進 onclick 字串：含引號的名字會把 JS 字面值截斷）
+document.addEventListener("click", e => { const t = e.target.closest("[data-open]"); if (t) { e.stopPropagation(); openProject(t.dataset.open); } });
 function projectHtml(d) {
     const maxM = Math.max(1, ...d.by_month.map(([, h]) => h));
     return `

@@ -48,6 +48,9 @@ def test_team_endpoints_are_gated_like_my_own_rows_and_carry_no_money():
     body = func_body(src, "async def team_projects(")
     assert '"project_name": pname' in body and '"budget_hours": b' in body
     assert '"project_id"' not in body
+    # 明細的列走 _team_row＝ts_dict 去掉 project_id（不然 ts_dict 會把私帳案 id 帶出去）
+    assert "_team_row(r)" in func_body(src, "async def team_project_detail(")
+    assert '.pop("project_id")' in func_body(src, "def _team_row(")
 
 
 def test_hours_page_only_talks_to_team_endpoints():

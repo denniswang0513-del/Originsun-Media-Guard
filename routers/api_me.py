@@ -24,7 +24,7 @@ from sqlalchemy import func, select  # type: ignore
 from core.auth import check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (budget_burn, day_iso, hours_rollup, leave_balance, leave_to_dict,
-                           month_span, months_back, project_metrics, tw_day)
+                           month_key, month_span, months_back, project_metrics, tw_day)
 from core.identity import require_bound_staff, resolve_current_staff
 from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetUpdate, MeTodoUpdate)
@@ -60,7 +60,7 @@ def _profile_dict(s) -> dict:
         "skills": s.skills or [], "education": s.education or [],
         "experience": s.experience or [], "awards": s.awards or [],
         "employment_type": s.employment_type or "",
-        "hire_date": s.hire_date.strftime("%Y-%m-%d") if s.hire_date else "",
+        "hire_date": day_iso(s.hire_date) or "",
         "status": s.status or "在職",
     }
 
@@ -181,7 +181,7 @@ async def my_workspace(request: Request):
                 "unpaid_amount": int(totals[2] or 0),
                 # 摘要即可 — 不回 payee_id / 銀行資訊
                 "recent": [{
-                    "date": p.request_date.strftime("%Y-%m-%d") if p.request_date else "",
+                    "date": day_iso(p.request_date) or "",
                     "amount": p.amount or 0, "summary": p.summary or "",
                     "status": p.payment_status or "",
                     "project": p.project_label or "",
@@ -313,6 +313,13 @@ def _me_ident(request: Request):
     return bound_ident(request, "me_finance")
 
 
+def _team_row(r) -> dict:
+    """團隊頁的一列：ts_dict 去掉 project_id（回 Sheet 案名與時數，不給 CRM 私帳案 id 當連結）。"""
+    d = ts_dict(r)
+    d.pop("project_id")
+    return d
+
+
 @router.get("/timesheets")
 async def my_timesheets(request: Request, month: str = ""):
     """本人該月所有列（Sheet＋手填），含 editable 與合計。month=YYYY-MM，預設本月。"""
@@ -321,7 +328,7 @@ async def my_timesheets(request: Request, month: str = ""):
     factory = db_factory_or_503()
     async with factory() as session:
         items = await list_rows(session, ident, m0, m1)
-    return {"month": m0.strftime("%Y-%m"), "items": items,
+    return {"month": month_key(m0), "items": items,
             "total_hours": round(sum(i["hours"] for i in items), 1)}
 
 
@@ -367,7 +374,7 @@ async def team_hours(request: Request, month: str = ""):
             .where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
         )).all()
     data = [(n, tw_day(d), p, h) for n, d, p, h in rows]     # rollup 只算實際（計畫列不算）
-    return {"month": m0.strftime("%Y-%m"), **hours_rollup(data, m0.year, m0.month)}
+    return {"month": month_key(m0), **hours_rollup(data, m0.year, m0.month)}
 
 
 @router.get("/team/projects")
@@ -395,7 +402,7 @@ async def team_projects(request: Request, months: int = 12):
                       "budget_hours": b, **budget_burn(total, b),
                       "last_entry": day_iso(last)})
     items.sort(key=lambda x: -x["hours"])
-    return {"since": since.strftime("%Y-%m"), "months": months, "items": items,
+    return {"since": month_key(since), "months": months, "items": items,
             "total": round(sum(i["hours"] for i in items), 1)}
 
 
@@ -415,5 +422,5 @@ async def team_project_detail(request: Request, name: str = ""):
     return {
         "project_name": name, "total": m["total"], "by_person": m["by_person"],
         "by_month": rows_by_month(rows),
-        "recent": [ts_dict(r) for r in rows[:60]],
+        "recent": [_team_row(r) for r in rows[:60]],
     }

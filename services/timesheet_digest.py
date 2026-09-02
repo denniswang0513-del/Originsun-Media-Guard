@@ -39,7 +39,7 @@ async def build_digest(session, today: date | None = None) -> dict:
         .where(Timesheet.work_date < d0 + timedelta(days=7)))).all()
     data = [(n, tw_day(d), p, h) for n, d, p, h in rows]
     week = [x for x in data if x[1] and x[1] >= mon]
-    active = active_fillers(data, sun)
+    active = active_fillers(((n, d, h) for n, d, _p, h in data), sun)
     rollup = hours_rollup(week, mon.year, mon.month)   # 年月只餵 reference_hours，digest_text 不看它
     missing: dict = {}
     for i in range(7):

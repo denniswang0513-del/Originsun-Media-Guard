@@ -63,7 +63,8 @@ async def burn_rows(session) -> list:
     matched = (await session.execute(
         select(Timesheet.project_id, safunc.sum(Timesheet.hours), safunc.count(Timesheet.id),
                safunc.max(Timesheet.work_date))
-        .where(Timesheet.project_id.isnot(None)).group_by(Timesheet.project_id))).all()
+        .where(Timesheet.project_id.isnot(None)).where(Timesheet.hours > 0)   # 只算實際，同 /me/team/projects
+        .group_by(Timesheet.project_id))).all()
     pids = [m[0] for m in matched]
     projs = {pid: (name, status, budget) for pid, name, status, budget in (await session.execute(
         select(CrmProject.id, CrmProject.name, CrmProject.status, CrmProject.budget_hours)

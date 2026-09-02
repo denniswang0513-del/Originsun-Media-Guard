@@ -54,6 +54,10 @@ def test_board_and_my_day_are_gated_by_the_timesheets_module():
     for fn in ("async def ledger_update_row(", "async def ledger_delete_row("):
         assert "check_admin(request)" in func_body(src, fn), fn
     assert "admin_update_row(session, row_id, body)" in func_body(src, "async def ledger_update_row(")
+    # 管理員備註只進管理員的 JSON（總表依 is_admin、抽查列 admin-only）；ts_dict 預設不帶
+    assert "ts_dict(r, with_note=is_admin)" in func_body(src, "async def ledger_rows(")
+    svc = code_only(repo_src("services/timesheet_self.py"))
+    assert "if with_note:" in func_body(svc, "def ts_dict(")
 
 
 def test_tab_has_the_seven_views_and_the_daily_board_shows_what_not_how_much():
