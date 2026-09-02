@@ -161,9 +161,9 @@ def test_the_burn_board_tells_the_owner_why_a_name_is_unmatched():
     js = js_code_only(repo_src("frontend/tabs/timesheets/timesheets.js"))
     # UI：寫對映表再 remap，不自己改列（對映表是每小時同步也要吃的正本）
     assert "'/api/v1/timesheets/project_map'" in js and "'/api/v1/timesheets/remap'" in js
-    assert "project_id" not in js.split("async function _mapProject(")[1].split("
-}
-")[0].replace("project_id: pid", "")
+    from tests.unit._srcscan import js_func_body
+    body = js_func_body(js, "async function _mapProject(sheetName) {")
+    assert "project_id =" not in body and ".project_id" not in body, "UI 自己改了列的 project_id"
     assert 'data-ts-action="map"' in js
 
 
