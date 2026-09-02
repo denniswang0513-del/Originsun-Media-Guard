@@ -577,20 +577,18 @@ async def set_budgets(req: TimesheetBudgetRequest, request: Request):
 # ── 手填工時（與 Sheet 同步共存；N-hr 人事管理 v1）─────────────────────
 
 @router.get("/project_options")
-async def get_project_options(request: Request, staff_name: str = ""):
-    """內部補登 grid 的專案下拉（timesheets 模組可用）。"""
+async def get_project_options(request: Request):
+    """內部補登 grid／我的一天／總表的專案下拉（timesheets 模組可用；「本人最近填過的」只有員工頁那支帶名字）。"""
     check_admin_or_module(request, "timesheets")
     factory = db_factory_or_503()
     async with factory() as session:
-        return {"projects": await project_options(session, staff_name or None)}
+        return {"projects": await project_options(session)}
 
 
 @router.post("/manual")
 async def add_manual_rows(body: TimesheetManualRequest, request: Request):
     """管理端批次手填（指定人員；員工自助走 /mine/rows 或 /api/v1/me/timesheets/batch）。"""
     check_admin_or_module(request, "timesheets")
-    if not body.rows:
-        raise HTTPException(status_code=422, detail="至少一列")
     factory = db_factory_or_503()
     async with factory() as session:
         staff = await session.get(CrmStaff, body.staff_id)

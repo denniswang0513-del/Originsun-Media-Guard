@@ -132,10 +132,10 @@ def test_suggestions_are_report_only_never_a_write_path():
     assert suggest_projects("大漁映畫_沆涸", lk)[0][0] == "沆涸 剪輯"
     assert suggest_projects("完全無關", lk) == []
     src = repo_src("routers/api_timesheets.py")
-    for fn in ("async def ingest_rows(", "async def remap_timesheets(",
-               "async def set_budgets(", "async def upsert_project_map("):
+    for fn in ("async def remap_timesheets(", "async def set_budgets(", "async def upsert_project_map("):
         assert "suggest_projects" not in code_only(func_body(src, fn)), f"建議函式跑進寫入路徑了：{fn}"
-    assert "suggest_projects" not in code_only(repo_src("services/timesheet_manual.py")), "手填也是寫入路徑"
+    for svc in ("services/timesheet_ingest.py", "services/timesheet_manual.py"):     # 真正落庫的兩支
+        assert "suggest_projects" not in code_only(repo_src(svc)), f"建議函式跑進寫入路徑了：{svc}"
 
 
 # ── 端點與腳本守的規則（掃原始碼，釘規則不釘排版）──

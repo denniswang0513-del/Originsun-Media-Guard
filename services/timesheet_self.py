@@ -9,9 +9,8 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 from sqlalchemy import or_, select
 
-from core.auth import check_admin_or_module
 from core.hr_logic import EDIT_BLOCK_TEXT, by_month, can_edit_timesheet, day_iso, month_span, tw_day
-from core.identity import resolve_current_staff
+from core.identity import require_bound_staff
 from services.timesheet_lookup import load_project_lookup
 from services.timesheet_manual import insert_manual_rows, names_for, normalize_row
 
@@ -61,11 +60,7 @@ def rows_by_month(rows) -> list:
 
 async def bound_ident(request: Request, module: str) -> dict:
     """守衛（模組鑰匙由呼叫端給：員工頁 me_finance、CRM tab timesheets）＋ 必須綁定人員檔案。"""
-    check_admin_or_module(request, module)
-    ident = await resolve_current_staff(request)
-    if ident["staff"] is None:
-        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案，請聯絡管理員")
-    return ident
+    return await require_bound_staff(request, module)
 
 
 def own_filter(ident: dict):
@@ -108,8 +103,6 @@ async def list_rows(session, ident: dict, d0, d1) -> list:
 
 async def add_rows(session, ident: dict, rows) -> dict:
     """本人一次填多列（實際或計畫；規則在 insert_manual_rows）。caller 不必 commit。"""
-    if not rows:
-        raise HTTPException(status_code=422, detail="至少一列")
     result = await insert_manual_rows(session, staff_id=ident["staff_id"], staff_name=ident["staff"].name, rows=rows)
     await session.commit()
     return result

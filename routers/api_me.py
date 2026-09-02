@@ -25,7 +25,7 @@ from core.auth import check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (budget_burn, day_iso, hours_rollup, leave_balance, leave_to_dict,
                            month_span, months_back, project_metrics, tw_day)
-from core.identity import resolve_current_staff
+from core.identity import require_bound_staff, resolve_current_staff
 from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetUpdate, MeTodoUpdate)
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
@@ -208,10 +208,7 @@ async def my_workspace(request: Request):
 @router.put("/profile")
 async def update_my_profile(body: MeProfileUpdate, request: Request):
     """本人編輯自己的人員檔案 — 僅白名單欄位；target 一律由 token 解析。"""
-    check_admin_or_module(request, "me_profile")
-    ident = await resolve_current_staff(request)
-    if ident["staff"] is None:
-        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案，請聯絡管理員")
+    ident = await require_bound_staff(request, "me_profile")
     factory = db_factory_or_503()
     # 白名單 = MeProfileUpdate schema 本身（pydantic 已擋掉其他欄位），不另列清單
     data = body.model_dump(exclude_unset=True)
@@ -254,14 +251,10 @@ async def update_my_todo(item_id: str, body: MeTodoUpdate, request: Request):
 @router.post("/leave")
 async def apply_my_leave(body: MeLeaveCreate, request: Request):
     """本人送請假單（staff_id 由 token 解析；固定進待審，管理端在人事 tab 簽核）。"""
-    payload = check_admin_or_module(request, "me_leave")
-    ident = await resolve_current_staff(request)
-    if ident["staff"] is None:
-        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案，請聯絡管理員")
+    ident = await require_bound_staff(request, "me_leave")
     factory = db_factory_or_503()
     async with factory() as session:
-        obj = new_leave_request(ident["staff_id"], ident["staff"].name, body,
-                                (payload or {}).get("sub"))
+        obj = new_leave_request(ident["staff_id"], ident["staff"].name, body, ident["username"])
         session.add(obj)
         await session.commit()
         await session.refresh(obj)
@@ -283,10 +276,7 @@ async def apply_my_leave(body: MeLeaveCreate, request: Request):
 @router.delete("/leave/{leave_id}")
 async def cancel_my_leave(leave_id: str, request: Request):
     """撤回自己的待審請假單（已核准/已退回不可自行刪除，找管理者）。"""
-    check_admin_or_module(request, "me_leave")
-    ident = await resolve_current_staff(request)
-    if ident["staff_id"] is None:
-        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案")
+    ident = await require_bound_staff(request, "me_leave")
     factory = db_factory_or_503()
     async with factory() as session:
         obj = (await session.execute(

@@ -386,7 +386,7 @@ class MeTimesheetBatch(BaseModel):
 
 
 class MeTimesheetUpdate(TimesheetManualRow):
-    """員工改自己的一列（只有 source=manual 且未核可的可改）。"""
+    """員工改自己的一列（本人＋手填＋未鎖，規則在 core.hr_logic.can_edit_timesheet；不審核）。"""
 
 
 class TimesheetRowAdminUpdate(TimesheetManualRow):

@@ -76,7 +76,7 @@ def test_endpoints_are_thin_and_gated():
     assert "burn_rows(session)" in dash
 
 
-def test_digest_is_scheduled_in_the_puller_loop_and_off_by_default():
+def test_digest_has_its_own_master_gated_loop_and_is_off_by_default():
     dg = code_only(repo_src("services/timesheet_digest.py"))
     loop = func_body(dg, "async def _scheduler_loop(")
     assert "send_digest()" in loop and "is_master_machine()" in loop

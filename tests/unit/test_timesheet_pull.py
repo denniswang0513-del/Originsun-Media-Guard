@@ -87,7 +87,6 @@ def test_settings_validation_and_defaults(pull_store):
                    "last_run_at": 0.0, "last_summary": "", "running": False}
     cfg = tp.update_pull_settings({"enabled": True, "sheet_id": " abc ", "cron": "*/30 * * * *"})
     assert cfg["enabled"] is True and cfg["sheet_id"] == "abc" and cfg["cron"] == "*/30 * * * *"
-    import pytest
     with pytest.raises(ValueError):
         tp.update_pull_settings({"cron": "not a cron"})
     # 端點把 ValueError 變 422，不是 500

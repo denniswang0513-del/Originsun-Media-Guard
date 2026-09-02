@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """員工在系統裡自己填工時（docs/TIMESHEET_SELF_ENTRY_PLAN.md 階段 1）。
 
-釘的規則：可改／可刪只認「本人＋手填＋未核可」（純函式真值表）；own-scope 只從 token
+釘的規則：可改／可刪只認「本人＋手填＋未鎖」（純函式真值表）；own-scope 只從 token
 解析、絕不吃 client 的 staff_id；改列走同一支專案對映；前端打的是 /me 的端點。
 """
 from types import SimpleNamespace as NS
 
-from core.hr_logic import EDITABLE_STATUSES, can_edit_timesheet
+from core.hr_logic import EDIT_BLOCK_TEXT, EDITABLE_STATUSES, can_edit_timesheet
 from tests.unit._srcscan import code_only, func_body, repo_src
 
 
@@ -20,7 +20,6 @@ def test_can_edit_truth_table():
     for st in ("approved", "locked", "import", "confirmed"):   # 不審核：這些狀態沒人寫得出來
         assert can_edit_timesheet(NS(**{**mine, "status": st}), "s1") == "locked", st
     # 代碼→給人看的原句只有一份（端點的 detail 從這裡拿）
-    from core.hr_logic import EDIT_BLOCK_TEXT
     assert "不是你的" in EDIT_BLOCK_TEXT["not_owner"] and "Sheet" in EDIT_BLOCK_TEXT["not_manual"]
     assert "不能再改" in EDIT_BLOCK_TEXT["locked"]
     assert EDITABLE_STATUSES == {"plan", "draft"}   # 不審核：計畫與實際都隨時可改
@@ -51,11 +50,9 @@ def test_own_scope_comes_from_the_token_never_the_body():
 
 
 def test_update_reuses_the_sheet_project_mapping():
-    man = code_only(repo_src("services/timesheet_manual.py"))
-    # 規則本體釘在 test_work_tracking；這裡只釘「插入與更新都吃 normalize_row 這一支」
+    # 規則本體與插入側釘在 test_work_tracking；這裡只釘更新側也吃同一支 normalize_row
     upd = code_only(func_body(repo_src("services/timesheet_self.py"), "async def apply_update("))
     assert "normalize_row(" in upd and "load_project_lookup(session)" in upd
-    assert "normalize_row(" in func_body(man, "async def insert_manual_rows(")
 
 
 def test_my_page_talks_to_the_me_endpoints_only():

@@ -54,6 +54,8 @@ async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> d
     Sheet 端撞手填由 ingest 的 manual_dup_key 檢查擋）。
     """
     from db.models import Timesheet
+    if not rows:
+        raise HTTPException(status_code=422, detail="至少一列")
     lk = await load_project_lookup(session)
     id_to_name = await names_for(session, rows)
     misses = Misses()

@@ -11,9 +11,9 @@ own-scope，不建 own/team/all 通用框架。
 """
 from typing import Optional
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
-from core.auth import _extract_token
+from core.auth import _extract_token, check_admin_or_module
 
 
 async def resolve_current_staff(request: Request) -> dict:
@@ -52,3 +52,13 @@ async def resolve_current_staff(request: Request) -> dict:
         # 與 _save_user_to_db 同哲學：DB 故障不擋認證路徑，降級為未綁定
         pass
     return result
+
+
+async def require_bound_staff(request: Request, module: str) -> dict:
+    """守衛（模組鑰匙由呼叫端給）＋ 必須綁定人員檔案：回 resolve_current_staff 的 dict，沒綁 → 409。
+    個人頁（profile／leave／timesheets）與 CRM tab 的「我的一天」都走這一支，409 原句只有這裡。"""
+    check_admin_or_module(request, module)
+    ident = await resolve_current_staff(request)
+    if ident["staff"] is None:
+        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案，請聯絡管理員")
+    return ident
