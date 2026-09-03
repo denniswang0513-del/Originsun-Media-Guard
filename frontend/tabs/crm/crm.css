@@ -194,7 +194,10 @@
 /* 收支明細工具列塞了快篩之後會擠：讓它換行，按鈕不折字（原本擠到每顆都變直排） */
 #cash-toolbar { flex-wrap: wrap; row-gap: 6px; }
 #cash-toolbar .crm-btn, #cash-toolbar select { white-space: nowrap; }
-.crm-row.cash-kind-project:hover, .crm-row.cash-kind-passthrough:hover, .crm-row.cash-kind-none:hover { filter: brightness(1.15); }
+/* 🔴 滑過去不用 filter：filter 會讓列變成 position:fixed 子孫（三點選單）的定位基準，選單就跑到別的地方（owner 2026-09-04 截圖） */
+.crm-row.cash-kind-project:hover { background: rgba(59,130,246,.24); }
+.crm-row.cash-kind-passthrough:hover { background: rgba(59,130,246,.14); }
+.crm-row.cash-kind-none:hover { background: rgba(239,68,68,.28); }
 .crm-row.cash-kind-project.selected, .crm-row.cash-kind-passthrough.selected, .crm-row.cash-kind-none.selected { background: #1e3a5f; }
 
 .crm-row-name { flex: 1.5; min-width: 60px; font-weight: 600; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
