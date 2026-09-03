@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from core.auth import check_admin, check_admin_or_module, check_logged_in, payload_grants
+from core.ledger import not_mine   # 手機版只看母公司案（同 api_crm_mobile._company_projects）：私帳案的場次不列、也不准建
 from routers.crm._shared import _parse_shoot_date
 from core.schemas import (CalendarConfigPayload, ShootCreate, ShootEquipmentPayload,
                           ShootStatusPayload, ShootUpdate)
@@ -373,7 +374,8 @@ async def list_shoots(request: Request, from_: str = Query("", alias="from"), to
     offset = max(0, int(offset))
     factory = _require_factory()
     async with factory() as session:
-        q = select(CrmShoot).where(CrmShoot.date >= d_from)
+        q = (select(CrmShoot).join(CrmProject, CrmProject.id == CrmShoot.project_id)
+             .where(not_mine(CrmProject.entity)).where(CrmShoot.date >= d_from))
         if d_to:
             q = q.where(CrmShoot.date <= d_to)
         if project_id:
@@ -453,7 +455,7 @@ async def create_shoot(req: ShootCreate, request: Request):
     factory = _require_factory()
     now = datetime.now(timezone.utc)
     async with factory() as session:
-        if (await session.execute(select(CrmProject.id).where(CrmProject.id == pid))).scalar() is None:
+        if (await session.execute(select(CrmProject.id).where(CrmProject.id == pid, not_mine(CrmProject.entity)))).scalar() is None:
             raise HTTPException(status_code=404, detail="找不到專案")
         s = CrmShoot(id=uuid.uuid4().hex, project_id=pid, status=SCHEDULED,
                      created_by=(user or {}).get("username") or "", created_at=now, updated_at=now)
@@ -478,7 +480,7 @@ async def update_shoot(sid: str, req: ShootUpdate, request: Request):
         old_pid = s.project_id
         if "project_id" in req.model_fields_set and (req.project_id or "").strip():
             npid = req.project_id.strip()
-            if (await session.execute(select(CrmProject.id).where(CrmProject.id == npid))).scalar() is None:
+            if (await session.execute(select(CrmProject.id).where(CrmProject.id == npid, not_mine(CrmProject.entity)))).scalar() is None:
                 raise HTTPException(status_code=404, detail="找不到專案")
             s.project_id = npid
         _apply_fields(s, req, partial=True)
