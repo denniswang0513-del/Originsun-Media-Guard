@@ -124,7 +124,7 @@ function _showLogin(msg = '') {
     root.hidden = false;
     root.innerHTML = `
       <div class="m-login">
-        <div class="m-login-brand"><span>Originsun</span> CRM</div>
+        <div class="m-login-brand"><img src="/img/originsun-logo.webp" alt="源日"><span>源日</span> CRM</div>
         <div id="m-gsi" style="display:none"></div>
         <div id="m-gsi-div" class="m-login-div" style="display:none">或</div>
         <form id="m-login-form" autocomplete="on">
@@ -144,7 +144,7 @@ function _showNoPerm(me) {
     root.hidden = false;
     root.innerHTML = `
       <div class="m-login">
-        <div class="m-login-brand"><span>Originsun</span> CRM</div>
+        <div class="m-login-brand"><img src="/img/originsun-logo.webp" alt="源日"><span>源日</span> CRM</div>
         <div class="m-login-err">「${esc(me.username || '')}」沒有 CRM 手機版的權限
           （需要管理員或「專案管理」模組），請找管理員開通。</div>
         <button type="button" class="m-btn-primary" id="m-logout">改用其他帳號登入</button>

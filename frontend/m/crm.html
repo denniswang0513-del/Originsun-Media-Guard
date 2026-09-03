@@ -8,11 +8,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="CRM">
+<meta name="apple-mobile-web-app-title" content="源日 CRM">
 <link rel="manifest" href="/m/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/m/icon-180.png">
 <link rel="icon" href="/m/icon-192.png">
-<title>Originsun CRM</title>
+<title>源日 CRM</title>
 <!-- CRM 手機版（docs/CRM_MOBILE_PLAN.md）：現場輸入＋快看，跟桌機版分開。
      五個分頁（發票／零用金／專案／報價／付款），hash 路由；殼只有 ./shell.js 一份。
      閘門：管理員（Lv3）或擁有「crm_projects」模組；寫入鈕再看 /options 的 me.can_write。
@@ -37,6 +37,7 @@
   .m-login { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px 18px; }
   .m-login-brand { text-align:center; font-size:20px; font-weight:700; color:#fff; margin-bottom:18px; }
   .m-login-brand span { color:var(--pri); }
+  .m-login-brand img { height:64px; width:auto; display:block; margin:0 auto 10px; }
   #m-gsi { display:flex; justify-content:center; }
   .m-login-div { display:flex; align-items:center; gap:10px; color:var(--sub); font-size:12px; margin:14px 0; }
   .m-login-div::before, .m-login-div::after { content:""; flex:1; height:1px; background:var(--line); }
@@ -71,7 +72,8 @@
   .m-hdr { position:fixed; top:0; left:0; right:0; height:60px; box-sizing:border-box; z-index:50; display:flex; align-items:center; justify-content:space-between;
     padding:calc(10px + var(--sat)) 16px 10px; background:rgba(26,26,26,.94); backdrop-filter:blur(10px);
     border-bottom:1px solid var(--line); }
-  .m-hdr .brand { font-weight:700; color:#fff; }
+  .m-hdr .brand { font-weight:700; color:#fff; display:flex; align-items:center; justify-content:center; gap:6px; }
+  .m-hdr .logo { height:26px; width:auto; }
   .m-hdr .brand span { color:var(--pri); }
   .m-hdr .who { font-size:12px; color:var(--sub); }
   .m-hdr .ttl { flex:1; text-align:center; min-width:0; line-height:1.2; }
@@ -186,7 +188,7 @@
 <div id="m-app" hidden>
   <header class="m-hdr">
     <button type="button" class="nav" id="m-back" aria-label="上一頁">‹ 上一頁</button>
-    <div class="ttl"><div class="brand"><span>Originsun</span> CRM</div><div class="page" id="m-page"></div></div>
+    <div class="ttl"><div class="brand"><img class="logo" src="/img/originsun-logo.webp" alt="源日"><span>源日</span> CRM</div><div class="page" id="m-page"></div></div>
     <button type="button" class="nav" id="m-home" aria-label="首頁">首頁</button>
     <!-- 舊版 crm.js 開頭會找這個元素填帳號；Cloudflare 對 .js 給瀏覽器 4 小時快取而 html 是即時的，
          發版後有一段時間會是「新 html＋舊 js」——元素留著（藏起來）舊 js 才不會在這裡中斷（2026-09-03 實際踩到） -->
