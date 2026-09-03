@@ -212,9 +212,8 @@ export async function _onLoginSuccess(d) {
     // boot-time loadTabs() filter (no token → CRM/admin skipped) still
     // have empty innerHTML. Inject them now or first-login users hit a
     // blank 專案管理 forever.
-    if (typeof window._ensureTabsLoaded === 'function') {
-        await window._ensureTabsLoaded();
-    }
+    const cur = document.querySelector('.tab-content:not(.hidden)')?.id;
+    if (cur) await window._ensureTabLoaded?.(cur);
     // （移除「首次登入改密碼」的 blocking alert：UI 建立的帳號 first_login=False、
     //   Google 帳號根本沒密碼可改，這提示實際只會擋到 admin/自己 → 直接登入）
 }

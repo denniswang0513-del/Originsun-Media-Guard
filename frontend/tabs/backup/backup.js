@@ -408,6 +408,19 @@ export function initBackupTab() {
         if (e.target.value) bkApplyBookmark(e.target.value);
     });
 
+    // 專案名稱預設今天（原本在 app.js 開機段——分頁點到才載後，這頁的 DOM 開機時不存在）
+    const today = new Date();
+    const projNameEl = document.getElementById('proj_name');
+    if (projNameEl && !projNameEl.value) {
+        projNameEl.value = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+    }
+    // 勾了轉檔才露出多機勾選面板
+    document.getElementById('chk_transcode')?.addEventListener('change', (e) => {
+        const hp = document.getElementById('host_selector_panel');
+        if (hp && (window._computeHosts || []).length > 0) hp.classList.toggle('hidden', !e.target.checked);
+    });
+    // 「最新備份報表」清單由 report.js 填（也給它的重新載入鈕用）——把報表分頁一起載進來
+    window._ensureTabLoaded?.('tab_report').then(() => window.loadReportHistory?.());
 }
 
 

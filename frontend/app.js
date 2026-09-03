@@ -10,32 +10,19 @@ import './js/auth/google-oauth.js';
 import './js/admin/user-mgmt.js';
 import './js/admin/publish-mgmt.js';
 import './js/admin/api-keys.js';
-import './js/update/version-check.js';
+import { pollLocalAgent } from './js/update/version-check.js';
 import './js/update/update-modal.js';
 import './js/settings/settings-modal.js';
 import './js/shared/nas-browser.js';
 import './js/shared/drive-map-modal.js';
 import { initSelectAutoUpgrade } from './js/shared/select-upgrade.js';
 import { initPasteImage } from './js/shared/paste-image.js';
+// utils.js 以前靠各分頁模組在開機時順便載進來；分頁改成點到才載後，要靠這一行保住
+// window.appendLog / resetProgress / bearerHeader … 在開機就存在（socket handler 會用）
+import { tabLoadError, startVisiblePolling } from './js/shared/utils.js';
+import { _LOADING_HTML } from './js/shared/subview-loader.js';
 import { updateProgress, showCompletionSummary, _showErrorPanelIfNeeded, _hideErrorPanel } from './js/app/progress.js';
 import './js/app/remote-dispatch.js';
-
-// ─── Fallback for appendLog function ─── //
-// If utils.js hasn't loaded yet or appendLog is not available globally, define a fallback
-if (typeof appendLog === 'undefined') {
-    window.appendLog = function(msg, type = 'info') {
-        const terminal = document.getElementById('terminal_verbose');
-        if (terminal) {
-            const line = document.createElement('div');
-            line.className = type === 'system' ? 'text-yellow-300 font-bold' :
-                            type === 'error' ? 'text-red-400' :
-                            type === 'verbose' ? 'text-gray-500 text-xs' : 'text-gray-400';
-            line.textContent = '[' + new Date().toLocaleTimeString('en-US', { hour12: false }) + '] ' + msg;
-            terminal.appendChild(line);
-            terminal.scrollTop = terminal.scrollHeight;
-        }
-    };
-}
 
 // ─── Main Application ─── //
         let socket = null;
@@ -50,73 +37,69 @@ if (typeof appendLog === 'undefined') {
         // 🔴 不帶 ?t= 時間戳：主機對靜態檔回 no-cache + ETag，瀏覽器每次只問一句 304，
         // 檔案本體不重傳；發版換了檔 ETag 就變，不會拿到舊的。
         const _loaderBySection = new Map(TAB_LOADERS.map(([key, html, js, init]) => [TAB_MAP[key], { key, html, js, init }]));
+        const _loading = new Map();   // sectionId → 進行中的載入（同時兩處要同一頁只載一次、init 一次）
 
-        // Helper: load a single tab by section id. fetch(html) and import(js) run in
-        // parallel — the module doesn't depend on the DOM until initFn runs.
-        const _loadTab = async (sectionId) => {
-            if (_loadedTabs.has(sectionId)) return;
+        // 載一個分頁：html 與 js 並行抓、填進 section、init。回傳「這次真的載進來了嗎」。
+        // embed：沒有這頁權限、但要用它模組的人（專案頁嵌報價子頁——報價 API 守的是 money_view，
+        // 不是分頁權限）跳過權限閘門；section 本來就 hidden，不會多露出什麼。
+        const _loadTab = (sectionId, { embed = false } = {}) => {
+            if (_loadedTabs.has(sectionId)) return Promise.resolve(false);
+            if (!_loading.has(sectionId)) {
+                _loading.set(sectionId, _doLoadTab(sectionId, embed).finally(() => _loading.delete(sectionId)));
+            }
+            return _loading.get(sectionId);
+        };
+        async function _doLoadTab(sectionId, embed) {
             const ld = _loaderBySection.get(sectionId);
-            if (!ld || !_authed(ld.key)) return;
+            const el = document.getElementById(sectionId);
+            if (!ld || !el || (!embed && !_authed(ld.key))) return false;
+            const fail = (status) => { el.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">${tabLoadError(status)}</div>`; return false; };
             try {
-                const el = document.getElementById(sectionId);
-                if (!el) return;
                 const [res, mod] = await Promise.all([fetch(ld.html), import(ld.js)]);
-                if (res.ok) {
-                    el.innerHTML = await res.text();
-                    if (typeof mod[ld.init] === 'function') await mod[ld.init]();
-                    _loadedTabs.add(sectionId);
-                    // 初始權限套用（管理員限定元素等）發生在載入之前 → 對剛長出來的 DOM 再套一次
-                    if (typeof window._applyAuthState === 'function') window._applyAuthState(window._accessLevel >= 3);
-                    if (typeof window._applyVisibleTabs === 'function') window._applyVisibleTabs();
-                }
+                if (!res.ok) return fail(res.status);
+                el.innerHTML = await res.text();
+                if (typeof mod[ld.init] === 'function') await mod[ld.init]();
             } catch (e) {
                 console.warn(`[${sectionId}] 載入失敗:`, e);
+                return fail(0);
             }
-        };
+            _loadedTabs.add(sectionId);
+            // 開機時套的權限（管理員限定元素）與機隊勾選面板都發生在這頁長出來之前 → 對新 DOM 補一次
+            window._applyAuthState(window._accessLevel >= 3);
+            renderHostSelector();
+            renderStandaloneHostPanels();
+            return true;
+        }
         window._ensureTabLoaded = _loadTab;
 
-        async function loadTabs({ autoSwitch = true } = {}) {
+        async function loadTabs() {
             try {
                 // Wait for auth so we know which modules to load
                 await window._authReady;
                 const modules = window._modules;
                 const hasModules = !!window._authUser && modules && modules.length > 0;
 
-                // Hide nav buttons & sections for unauthorized tabs immediately
+                // Hide sections for unauthorized tabs immediately
                 Object.entries(TAB_MAP).forEach(([key, tabId]) => {
-                    if (!_authed(key)) {
-                        const btn = document.getElementById('btn_' + tabId);
-                        if (btn) btn.style.display = 'none';
-                        const sec = document.getElementById(tabId);
-                        if (sec) sec.style.display = 'none';
-                    }
+                    const sec = document.getElementById(tabId);
+                    if (sec && !_authed(key)) sec.style.display = 'none';
                 });
 
                 // 只載入要落地的那一頁；其餘分頁 switchTab 時才載
-                if (autoSwitch) {
-                    renderGroupNav(); // build top bar with resolved auth before first switch
-                    // Deep-link: honor a #section in the URL if it exists and is allowed.
-                    const hashTab = location.hash.slice(1);
-                    const fromHash = _isNavigable(hashTab) ? hashTab : null;
-                    // Else logged-out users get media tools only → land on 備份並轉檔
-                    // (the historical default tab), derived from TAB_MAP not a literal.
-                    // modules[0] 可能是非 tab 的橫切 key（如 finance_partner —— 合夥人
-                    // 帳號只有這一把）→ TAB_MAP 查無 → 退到第一個看得到的 tab。
-                    const firstTab = fromHash || (hasModules ? (TAB_MAP[modules[0]] || _firstAuthorizedSection()) : TAB_MAP.backup);
-                    if (firstTab) await switchTab(firstTab);
-                } else {
-                    // 登入後補：目前看著的那一頁若剛取得權限而還沒載，補載它
-                    const cur = document.querySelector('.tab-content:not(.hidden)')?.id;
-                    if (cur) await _loadTab(cur);
-                }
+                renderGroupNav(); // build top bar with resolved auth before first switch
+                // Deep-link: honor a #section in the URL if it exists and is allowed.
+                const hashTab = location.hash.slice(1);
+                const fromHash = _isNavigable(hashTab) ? hashTab : null;
+                // Else logged-out users get media tools only → land on 備份並轉檔
+                // (the historical default tab), derived from TAB_MAP not a literal.
+                // modules[0] 可能是非 tab 的橫切 key（如 finance_partner —— 合夥人
+                // 帳號只有這一把）→ TAB_MAP 查無 → 退到第一個看得到的 tab。
+                const firstTab = fromHash || (hasModules ? (TAB_MAP[modules[0]] || _firstAuthorizedSection()) : TAB_MAP.backup);
+                if (firstTab) await switchTab(firstTab);
             } catch (err) {
                 console.error("Error loading tabs:", err);
             }
         }
-
-        // Post-login hook: inject tabs that became authorized but weren't
-        // loaded at boot (no token at boot → filter excluded CRM/admin tabs).
-        window._ensureTabsLoaded = () => loadTabs({ autoSwitch: false });
 
         // 全域下拉統一：即刻啟動（初掃現有 DOM + MutationObserver 監看之後動態
         // 渲染的下拉）。不綁 loadTabs/登入，確保任何時序都會補升級長清單 select。
@@ -128,64 +111,21 @@ if (typeof appendLog === 'undefined') {
 
         // Initialize tabs immediately (grouped nav is rendered inside loadTabs
         // once auth resolves, so it reflects the user's authorized tabs)
-        loadTabs().then(async () => {
-            // Auth already resolved inside loadTabs(); apply tab visibility as safety fallback
-            if (typeof window._applyVisibleTabs === 'function') window._applyVisibleTabs();
-            // Re-apply admin-only / manager-only visibility to newly injected tab DOM
-            // (initial _applyAuthState runs before loadTabs completes, so querySelectorAll
-            // misses elements inside dynamically loaded .html files like projects.html)
-            if (typeof window._applyAuthState === 'function') {
-                window._applyAuthState(window._accessLevel >= 3);
-            }
-
-            // Initialization after dynamic tabs load
-            const today = new Date();
-            const yyyy = today.getFullYear();
-            const mm = String(today.getMonth() + 1).padStart(2, '0');
-            const dd = String(today.getDate()).padStart(2, '0');
-
-            // Backup Tab project name
-            const projNameEl = document.getElementById('proj_name');
-            if (projNameEl) projNameEl.value = `${yyyy}${mm}${dd}`;
-
-            // Report Tab report name
-            const rptNameEl = document.getElementById('rpt_report_name');
-            if (rptNameEl && !rptNameEl.value) {
-                rptNameEl.value = `${yyyy}${mm}${dd}_Report`;
-            }
-
-            // 備份頁的「最新備份報表」：report.js 是動態 import 的，
-            // DOMContentLoaded 當下還沒掛上 window.loadReportHistory —— 這裡才是
-            // 「tab 都載完了」的確定時機（2026-08-12）
-            if (typeof window.loadReportHistory === 'function') window.loadReportHistory();
-
-            // Transcode checkbox listener
-            const _chkTc = document.getElementById('chk_transcode');
-            if (_chkTc) {
-                _chkTc.addEventListener('change', () => {
-                    const hp = document.getElementById('host_selector_panel');
-                    if (hp && (window._computeHosts || []).length > 0)
-                        hp.classList.toggle('hidden', !_chkTc.checked);
-                });
-            }
-
-            if (typeof updateComputeModeStyle === 'function') {
-                updateComputeModeStyle();
-            }
-
-            // Pre-load agents from NAS so host selector shows immediately
+        loadTabs().then(() => {
+            updateComputeModeStyle();
+            // 機隊清單只填 window._computeHosts；各分頁的勾選面板在它載入時（_doLoadTab）長出來，
+            // 已載入的分頁靠這裡回頭補一次
             fetch('/api/v1/agents')
                 .then(res => res.ok ? res.json() : null)
                 .then(data => {
-                    if (data) {
-                        window._computeHosts = (data.agents || []).map(a => ({
-                            id: a.id,
-                            name: a.name,
-                            ip: (a.url || '').replace(/^https?:\/\//, '')
-                        }));
-                        if (typeof renderHostSelector === 'function') renderHostSelector();
-                        if (typeof renderStandaloneHostPanels === 'function') renderStandaloneHostPanels();
-                    }
+                    if (!data) return;
+                    window._computeHosts = (data.agents || []).map(a => ({
+                        id: a.id,
+                        name: a.name,
+                        ip: (a.url || '').replace(/^https?:\/\//, '')
+                    }));
+                    renderHostSelector();
+                    renderStandaloneHostPanels();
                 }).catch(() => {});
         });
 
@@ -236,11 +176,7 @@ if (typeof appendLog === 'undefined') {
                 }
             });
 
-            socket.on('progress', (data) => {
-                if (typeof updateProgress === 'function') {
-                    updateProgress(data);
-                }
-            });
+            socket.on('progress', (data) => updateProgress(data));
 
             socket.on('transcribe_error', (data) => {
                 const retryBtn = document.getElementById('btn_retry');
@@ -541,8 +477,8 @@ if (typeof appendLog === 'undefined') {
                 const retryBtn = document.getElementById('btn_retry');
                 if (retryBtn) retryBtn.style.display = 'none';
 
-                // Refresh the history dashboard on both tabs
-                loadReportHistory();
+                // Refresh the history dashboard on both tabs（report.js 點到報表／備份分頁才載）
+                window.loadReportHistory?.();
 
                 playDing();
 
@@ -622,9 +558,9 @@ if (typeof appendLog === 'undefined') {
             // Disabled — task completion sound removed per user request
         }
 
-        // Start polling immediately and then every 3 seconds
-        if (typeof window.pollLocalAgent === 'function') window.pollLocalAgent();
-        setInterval(() => { if (typeof window.pollLocalAgent === 'function') window.pollLocalAgent(); }, 3000);
+        // 本機代理燈：立刻問一次，之後每 3 秒（分頁在背景不打）
+        pollLocalAgent();
+        startVisiblePolling(pollLocalAgent, 3000);
         // ---------------------------
 
         // Variables related to sources and setup were moved to backup.js
@@ -883,11 +819,9 @@ if (typeof appendLog === 'undefined') {
             if (!_section) return; // unknown/orphan tabId (e.g. a granted-but-pageless module) — no-op
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
             _section.classList.remove('hidden');
-            const fresh = !_loadedTabs.has(tabId);   // 第一次切到這頁：現在才載（html + js + init）
-            if (fresh) {
-                if (!_section.children.length) _section.innerHTML = '<div style="color:#888;padding:40px;text-align:center;">載入中…</div>';
-                await _loadTab(tabId);
-            }
+            // 第一次切到這頁：現在才載（html + js + init）。fresh＝這次真的載進來了
+            if (!_loadedTabs.has(tabId) && !_section.children.length) _section.innerHTML = _LOADING_HTML;
+            const fresh = _loadedTabs.has(tabId) ? false : await _loadTab(tabId);
 
             // Sync grouped-nav chrome (top-bar highlight + left sidebar)
             _syncGroupChrome(tabId);
@@ -897,7 +831,7 @@ if (typeof appendLog === 'undefined') {
             document.querySelectorAll('.media-task-section').forEach(el => el.style.display = hideTaskLog ? 'none' : '');
 
             // 通知各分頁「你被切到了」。fresh＝這次切換才把它載進來，init 剛抓過資料，
-            // 「切回來要重抓」的鉤子看到 fresh 就別再抓一次（提案庫、CRM 專案）
+            // 「切回來要重抓」的鉤子看到 fresh 就別再抓一次（提案庫、CRM 專案、財務）
             document.dispatchEvent(new CustomEvent('tab-changed', { detail: { tab: tabId, fresh } }));
 
             // Auto-fill output directory when entering report tab

@@ -960,14 +960,21 @@ _detectLocalIp();
 //   1. mixed content — https 頁面不准 fetch http 資源，瀏覽器直接擋
 //   2. 網段不通 — 遠端瀏覽器不在 192.168.1.x 內網，連不到 LAN IP
 // 這也讓本面板的燈號與「專案總覽」的機器卡片（agent-cards.js 早就用 proxy）一致。
+// 「看得見才打」的輪詢：瀏覽器分頁在背景就跳過；給了 sectionId 時該 SPA 分頁被 switchTab 藏起來也跳過。
+// 只給無限期的狀態輪詢用（本機代理燈、機隊燈、官網健康／收件匣徽章）；有終點的工作輪詢不該停。
+export function startVisiblePolling(fn, ms, { sectionId } = {}) {
+    const visible = () => !document.hidden
+        && (!sectionId || !document.getElementById(sectionId)?.classList.contains('hidden'));
+    return setInterval(() => { if (visible()) fn(); }, ms);
+}
+
 let _hostHealthTimer = null;
 async function _checkHostHealth() {
-    if (document.hidden) return;   // 背景分頁不逐台 ping
     const hosts = window._computeHosts || [];
-    for (const h of hosts) {
+    await Promise.all(hosts.map(async (h) => {
         const dotId = 'host-dot-' + (h.ip || '').replace(/[.:]/g, '_');
         const dots = document.querySelectorAll(`[id="${dotId}"]`);
-        if (!h.id) continue;  // 沒 agent id 無法走 proxy — 留灰，不誤判紅
+        if (!h.id || !dots.length) return;  // 沒 agent id 無法走 proxy — 留灰；畫面上沒這顆燈就不打
         const setRed = () => dots.forEach(el => { el.style.background = '#ef4444'; el.style.boxShadow = 'none'; });
         try {
             const r = await fetch('/api/v1/agents/' + encodeURIComponent(h.id) + '/health',
@@ -985,13 +992,13 @@ async function _checkHostHealth() {
         } catch {
             setRed();
         }
-    }
+    }));
 }
 
 function _startHostHealthPolling() {
     if (_hostHealthTimer) return;
     _detectLocalIp().then(() => _checkHostHealth()); // 先偵測本機 IP 再檢查健康
-    _hostHealthTimer = setInterval(_checkHostHealth, 30000); // 每 30 秒
+    _hostHealthTimer = startVisiblePolling(_checkHostHealth, 30000); // 每 30 秒
 }
 
 export function renderHostCheckboxes(containerId, opts = {}) {

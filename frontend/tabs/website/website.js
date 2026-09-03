@@ -12,6 +12,7 @@
 import { getApiBase, websiteFetch, esc } from './website-utils.js';
 import { initRebuildBar, destroyRebuildBar } from './rebuild-bar.js';
 import { createSubviewLoader } from '../../js/shared/subview-loader.js';
+import { startVisiblePolling } from '../../js/shared/utils.js';
 
 const SUBVIEWS = [
     'dashboard', 'home', 'works', 'categories',
@@ -114,19 +115,10 @@ const _loadSubviewInto = createSubviewLoader({
     retryBtnClass: 'btn btn-sm',
 });
 
-function _tabIsVisible() {
-    // 瀏覽器分頁不在前景 → 停
-    if (document.visibilityState === 'hidden') return false;
-    // Tab section 被 switchTab 設 hidden（使用者切到 CRM 等別的 tab）→ 停
-    const section = document.getElementById('tab_website');
-    return !!section && !section.classList.contains('hidden');
-}
-
 function _startHealthCheck() {
     const el = document.getElementById('website-api-health');
     if (!el) return;
     const ping = async () => {
-        if (!_tabIsVisible()) return;
         try {
             await websiteFetch('/healthz');
             el.textContent = '✓ 連線正常';
@@ -139,11 +131,10 @@ function _startHealthCheck() {
     };
     ping();
     if (_healthTimer) clearInterval(_healthTimer);
-    _healthTimer = setInterval(ping, 30000);
+    _healthTimer = startVisiblePolling(ping, 30000, { sectionId: 'tab_website' });
 }
 
 async function _refreshInquiryBadge() {
-    if (!_tabIsVisible()) return;
     const badge = document.getElementById('website-inq-badge');
     if (!badge) return;
     try {
@@ -163,7 +154,7 @@ async function _refreshInquiryBadge() {
 function _startBadgeRefresh() {
     _refreshInquiryBadge();
     if (_badgeTimer) clearInterval(_badgeTimer);
-    _badgeTimer = setInterval(_refreshInquiryBadge, 60000);
+    _badgeTimer = startVisiblePolling(_refreshInquiryBadge, 60000, { sectionId: 'tab_website' });
 }
 
 export { switchSubview };

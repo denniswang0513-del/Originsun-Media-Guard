@@ -100,6 +100,7 @@ export async function initFinanceTab() {
             if (btn && btn.offsetParent !== null) btn.click();
             return;
         }
+        if (e.detail.fresh) return;   // 剛載入：init 才落地儀表板，別再重畫一次
         // 切回財務 tab 一律自動重新整理（owner 2026-08-26）：
         // 執行專案走自己的 refresh（有未存編修讓路的 dirty guard）；其他子視圖
         // 整個重 render（它們是查看型，重畫＝重抓）；帳務內嵌模式按全域重新整理。

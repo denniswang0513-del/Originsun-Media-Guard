@@ -92,7 +92,6 @@ async function pickLiveDispatchHosts(opts) {
     }));
     return live;
 }
-window.pickLiveDispatchHosts = pickLiveDispatchHosts;
 
 // 來源檔名 → 比對用 stem（proxy 產出是 <stem>_proxy.mov）
 function _proxyStem(pathOrName) {
@@ -742,8 +741,11 @@ async function dispatchRemoteTranscode(ctx) {
         hostCardMaps[hostIdx][cardName].push(file);
     });
 
-    // 派工的目的地根 —— 失聯重派要用它組接手主機的 HostDispatch 夾
+    // 派工的目的地根 —— 失聯重派要用它組接手主機的 HostDispatch 夾；
+    // Proxy Root／案名也在這裡定住：合併發生在幾分鐘後，那時發起派工的分頁不一定還在
     window._dispatchDestRoot = ctx.proxy_root ? ctx.proxy_root + '/' + ctx.project_name : '';
+    window._dispatchProxyRoot = ctx.proxy_root || '';
+    window._dispatchProjectName = ctx.project_name || '';
 
     window._activeRemoteHosts = {};
     for (let i = 0; i < reachable.length; i++) {
@@ -804,12 +806,13 @@ async function dispatchRemoteTranscode(ctx) {
 
 // Step 6: Merge
 async function mergeHostOutputs() {
-    const proxyRoot = window._isStandaloneTranscode
+    // 派工時定住的值優先（dispatchRemoteTranscode）；沒有才回頭讀分頁欄位
+    const proxyRoot = window._dispatchProxyRoot || (window._isStandaloneTranscode
         ? (document.getElementById('tc_dest') || {}).value || ''
-        : (document.getElementById('proxy_root') || {}).value || '';
-    const projName = window._isStandaloneTranscode
+        : (document.getElementById('proxy_root') || {}).value || '');
+    const projName = window._dispatchProjectName || (window._isStandaloneTranscode
         ? (document.getElementById('tc_proj_name') || {}).value || ''
-        : (document.getElementById('proj_name') || {}).value || '';
+        : (document.getElementById('proj_name') || {}).value || '');
     if (!proxyRoot || !projName) {
         if (typeof appendLog === 'function') appendLog('請先填寫 Proxy Root 與專案名稱。', 'error'); return;
     }
@@ -1152,5 +1155,3 @@ async function mergeHostOutputs() {
         } else { if (typeof appendLog === 'function') appendLog('❌ 合併失敗: ' + (d.message || d.detail || ('HTTP ' + r.status)), 'error'); }
     } catch (e) { if (typeof appendLog === 'function') appendLog('❌ 合併錯誤: ' + e.message, 'error'); }
 }
-
-window.mergeHostOutputs = mergeHostOutputs;

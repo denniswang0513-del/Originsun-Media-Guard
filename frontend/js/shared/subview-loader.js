@@ -12,7 +12,7 @@
  * （?t=<timestamp>）等於換一個 module map key，強制重新 fetch。
  */
 
-const _LOADING_HTML = '<div style="color:#888;padding:40px;text-align:center;">載入中…</div>';
+export const _LOADING_HTML = '<div style="color:#888;padding:40px;text-align:center;">載入中…</div>';
 
 /**
  * @param {object} opts

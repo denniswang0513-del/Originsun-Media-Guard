@@ -53,6 +53,7 @@ FAKE_JS = """
         window._retryFailedHosts = [];
         window._remoteJobType = null;
         window._dispatchDestRoot = '';
+        window._dispatchProxyRoot = ''; window._dispatchProjectName = '';
         if (window._heartbeatTimer) { clearInterval(window._heartbeatTimer); window._heartbeatTimer = null; }
     })(window.fetch.bind(window));
 
@@ -150,11 +151,9 @@ NO_TAKEOVER_JS = """
     window._originalDispatchHosts = [{ name: 'HostA', ip: HOST_A }];   // 沒有別台可接手
     window._originalSourceDirs = [];
     window._dispatchDestRoot = '//nas/proxy/PROJ';
+    window._dispatchProxyRoot = '//nas/proxy';      // 派工時定住的值（合併不再讀分頁欄位）
+    window._dispatchProjectName = 'PROJ';
     window._isStandaloneTranscode = true;
-    const dest = document.getElementById('tc_dest');
-    const proj = document.getElementById('tc_proj_name');
-    if (dest) dest.value = '//nas/proxy';
-    if (proj) proj.value = 'PROJ';
 
     window._activeRemoteHosts = {};
     window._activeRemoteHosts[HOST_A] = {
@@ -193,9 +192,6 @@ def test_no_takeover_available_still_reaches_merge(page):
     卻在區塊外被讀取 —— ReferenceError 直接把 heartbeat 的這一輪炸掉，
     停在 stopHeartbeatMonitor() 之後、觸發合併之前，畫面就這樣不動了。
     """
-    # 2026-09-03 分頁改成點到才載：合併函式從轉檔分頁的 tc_dest / tc_proj_name 讀值，
-    # 先把那個分頁載進來（真人派發一定是從轉檔分頁按的，載過的分頁不會卸掉）
-    page.evaluate("() => window._ensureTabLoaded('tab_transcode')")
     page.evaluate(NO_TAKEOVER_JS)
     try:
         page.wait_for_timeout(11000)   # 一輪偵測 + 2 秒緩衝後才觸發合併

@@ -101,7 +101,7 @@ class NoCacheMiddleware:
                     # 帶 ETag 問一句、主機回 304 不重傳本體 —— 遠端（Cloudflare）開頁少下載 ~1.5 MB
                     # 而發版換檔 ETag 就變，不會吃到舊的（owner 2026-09-03「存取都有點慢」）。
                     path = scope.get("path", "")
-                    if path.startswith("/api/") or path.startswith("/socket.io") or path.startswith("/download"):
+                    if path.startswith(("/api/", "/socket.io", "/download", "/healthz", "/e/")):
                         headers.append((b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"))
                         headers.append((b"pragma", b"no-cache"))
                         headers.append((b"expires", b"0"))

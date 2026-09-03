@@ -157,42 +157,13 @@ async function _renderQuoteDetail(quoteId) {
 
 // crm-quotes.js (the one that registers _openQuoteModalForProject /
 // _openQuoteModalForEdit / _openQuoteModalForDuplicate) is normally loaded by
-// the top-level 報價管理 tab (crm_quotes). But a user with crm_projects yet
-// WITHOUT the crm_quotes module never loads that tab — so if they open a
-// project's "報價管理" sub-tab, those window functions would be undefined and
-// the buttons silently no-op. Mirror the load steps here, injecting the HTML
-// into the (hidden, unauthorized) tab_crm_quotes section as a fallback host.
-let _ensurePromise = null;
+// the top-level 報價管理 tab (crm_quotes). A user with crm_projects but WITHOUT the
+// crm_quotes module never gets that tab — so load it through app.js's loader with
+// embed（跳過分頁權限閘門；報價 API 守的是 money_view）. 同一支載入器會記在 _loadedTabs，
+// 之後真的切到報價分頁不會再 init 一次；並行呼叫也只載一次。
 async function _ensureQuotesModule() {
     if (window._openQuoteModalForProject) return;
-    if (!_ensurePromise) {
-        _ensurePromise = (async () => {
-            // 分頁 2026-09-03 起「點到才載」：有權限的人走 app.js 同一支載入器（會記在 _loadedTabs，
-            // 之後切到報價分頁不會再載一次、init 兩次）；沒權限的才走下面的 fallback 灌 html
-            if (typeof window._ensureTabLoaded === 'function') {
-                await window._ensureTabLoaded('tab_crm_quotes');
-                if (window._openQuoteModalForProject) return;
-            }
-            const container = document.getElementById('tab_crm_quotes');
-            if (container && !container.innerHTML.trim()) {
-                try {
-                    const res = await fetch('./tabs/crm/crm-quotes.html');
-                    if (res.ok) {
-                        container.innerHTML = await res.text();
-                        const inner = container.querySelector('.crm-root');
-                        if (inner) {
-                            inner.style.height = '100%';
-                            inner.style.minHeight = '0';
-                            inner.style.maxHeight = 'none';
-                        }
-                    }
-                } catch (_) { /* HTML load best-effort */ }
-            }
-            const mod = await import('./crm-quotes.js');
-            await mod.initCrmQuotesTab();
-        })();
-    }
-    return _ensurePromise;
+    await window._ensureTabLoaded('tab_crm_quotes', { embed: true });
 }
 
 function initQuoteHandlers() {

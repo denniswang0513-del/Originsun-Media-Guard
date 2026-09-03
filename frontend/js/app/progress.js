@@ -375,5 +375,3 @@ function updateProgress(data) {
 }
 
 export { updateProgress, showCompletionSummary, _showErrorPanelIfNeeded, _hideErrorPanel };
-window.updateProgress = updateProgress;
-window.showCompletionSummary = showCompletionSummary;

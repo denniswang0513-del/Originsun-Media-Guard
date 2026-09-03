@@ -19,7 +19,6 @@ window._updateStartTime = 0;
 window._localAgentVersion = null;
 
 export async function pollLocalAgent() {
-    if (document.hidden) return;   // 背景分頁不打（切回來下一輪就補）
     // 外網存取時不需要偵測本機代理 — 直接連伺服器
     if (window._isExternalAccess) {
         window._localAgentActive = true;
