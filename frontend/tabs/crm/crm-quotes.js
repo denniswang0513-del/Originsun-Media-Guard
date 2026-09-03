@@ -530,6 +530,24 @@ async function _deleteTemplate(id) {
 
 // ── Init ─────────────────────────────────────────────────────
 
+// 三個彈窗入口也給專案頁的報價子頁 import（crm-projects-quotes.js）——它們在這裡是 window.* 給
+// inline onclick 用，在那邊是模組匯出，名字錯了會在載入時就炸，不會變成按了沒反應的死按鈕
+export async function quoteEdit(id) {
+    try {
+        const q = await _fetch(`/quotations/${id}`);
+        openModal(q);
+    } catch (_) {}
+}
+export async function quoteDup(id) {
+    try {
+        const q = await _fetch('/quotations/' + id);
+        openModal(q, q.project_id);
+        _editingId = null;
+        document.getElementById('quote-modal-title').textContent = '複製報價';
+    } catch (_) {}
+}
+export const openQuoteForProject = (projectId) => openModal(null, projectId);
+
 export async function initCrmQuotesTab() {
     // Guard against double-init: this Tab has two lazy-loaders (the outer
     // "報價總覽" sub-tab in crm-projects.js and the project-detail "報價管理"
@@ -545,26 +563,14 @@ export async function initCrmQuotesTab() {
     }
 
     window._quoteSelect = selectQuotation;
-    window._quoteEdit = async (id) => {
-        try {
-            const q = await _fetch(`/quotations/${id}`);
-            openModal(q);
-        } catch (_) {}
-    };
+    window._quoteEdit = quoteEdit;
     window._quoteDelete = (id) => {
         const q = _quotations.find(x => x.id === id);
         if (q) deleteQuotation(q);
     };
-    window._quoteDup = async (id) => {
-        try {
-            const q = await _fetch('/quotations/' + id);
-            openModal(q, q.project_id);
-            _editingId = null;
-            document.getElementById('quote-modal-title').textContent = '複製報價';
-        } catch (_) {}
-    };
+    window._quoteDup = quoteDup;
     window._quoteRemoveItem = removeItemRow;
-    window._openQuoteModalForProject = (projectId) => openModal(null, projectId);
+    window._openQuoteModalForProject = openQuoteForProject;
     window._quoteActivateProject = async (projectId) => {
         if (!confirm('確定將此專案狀態切為「製作」？')) return;
         try {

@@ -19,7 +19,7 @@ import { initSelectAutoUpgrade } from './js/shared/select-upgrade.js';
 import { initPasteImage } from './js/shared/paste-image.js';
 // utils.js 以前靠各分頁模組在開機時順便載進來；分頁改成點到才載後，要靠這一行保住
 // window.appendLog / resetProgress / bearerHeader … 在開機就存在（socket handler 會用）
-import { tabLoadError, startVisiblePolling } from './js/shared/utils.js';
+import { tabLoadError, startVisiblePolling, resetProgress } from './js/shared/utils.js';
 import { _LOADING_HTML } from './js/shared/subview-loader.js';
 import { loadReportHistory } from './js/shared/report-history.js';
 import { updateProgress, showCompletionSummary, _showErrorPanelIfNeeded, _hideErrorPanel } from './js/app/progress.js';
@@ -214,7 +214,7 @@ import './js/app/remote-dispatch.js';
                     // 新任務開始時清除上一次的錯誤 + 完成狀態
                     window._taskErrors = [];
                     _hideErrorPanel();
-                    if (typeof resetProgress === 'function') resetProgress();
+                    resetProgress();
                 }
 
                 if (data.status === 'done') {
@@ -303,7 +303,7 @@ import './js/app/remote-dispatch.js';
 
                 } else if (data.status === 'cancelled') {
                     updateActionBarState('idle');
-                    if (typeof resetProgress === 'function') resetProgress();
+                    resetProgress();
                     appendLog('❌ 任務已被中止', 'error');
                 }
             });
@@ -886,7 +886,7 @@ import './js/app/remote-dispatch.js';
                 if (window._heartbeatTimer) { clearInterval(window._heartbeatTimer); window._heartbeatTimer = null; }
                 window._remoteDispatching = false;
                 updateActionBarState('idle');
-                if (typeof resetProgress === 'function') resetProgress();
+                resetProgress();
                 appendLog('❌ 已全部強制中止（本機 + 所有遠端主機）', 'error');
             }
         }

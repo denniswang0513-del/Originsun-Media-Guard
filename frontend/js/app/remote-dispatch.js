@@ -3,6 +3,8 @@
 // 派發（dispatchRemoteTranscode）、合併輸出＋合併後任務＋補跑缺檔。八個頁籤都只透過 window.* 呼叫，
 // 名字全部維持不變（tests/e2e/test_host_failover.py 釘著 startHeartbeatMonitor / _activeRemoteHosts）。
 // 回頭用到 app.js 的 updateActionBarState / playDing 一律走 window.（模組作用域看不到彼此）。
+import { resetProgress } from '../shared/utils.js';
+import { loadReportHistory } from '../shared/report-history.js';
 
 // 派工時定住的 Proxy Root／案名：合併發生在幾分鐘後，發起派工的分頁不一定還在（分頁點到才載）。
 // 目的地根由這兩個推導、不另存；window._dispatchCtx 只給 e2e 灌假狀態用。
@@ -431,7 +433,7 @@ function startHeartbeatMonitor() {
                     }
                     stopHeartbeatMonitor();
                     // 報表完成時刷新歷史列表
-                    if (_rjt === 'report' && typeof loadReportHistory === 'function') {
+                    if (_rjt === 'report') {
                         loadReportHistory();
                     }
                     window.updateActionBarState('idle');
@@ -465,7 +467,7 @@ function resetRemoteJobUi() {
     if (area) area.classList.add('hidden');
     window._activeRemoteHosts = {};
     window._remoteJobType = null;
-    if (typeof resetProgress === 'function') resetProgress();
+    resetProgress();
     window.updateActionBarState('idle');
 }
 window.resetRemoteJobUi = resetRemoteJobUi;

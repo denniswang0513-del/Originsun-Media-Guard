@@ -17,11 +17,8 @@ export async function loadReportHistory() {
         el.innerHTML = '<div class="px-4 py-6 text-center text-xs text-gray-500">載入中...</div>';
     });
 
-    // outDir is ignored by server in 1.0.143+, but keep it for API compatibility
-    const outDir = document.getElementById('rpt_output')?.value.trim() || '';
     try {
-        const url = getComputeBaseUrl() + '/api/v1/reports/history?output_dir=' + encodeURIComponent(outDir);
-        const res = await fetch(url);
+        const res = await fetch(getComputeBaseUrl() + '/api/v1/reports/history');
         const data = await res.json();
         const reports = data.reports || [];
 

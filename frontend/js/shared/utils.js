@@ -911,46 +911,22 @@ function _dotHtml(ip) {
     return `<span id="${dotId}" class="host-status-dot" style="width:8px;height:8px;border-radius:50%;display:inline-block;background:#555;flex-shrink:0;"></span>`;
 }
 
-// 偵測本機 IP（從 window.location 或 /api/v1/health）
-let _localIp = null;
-async function _detectLocalIp() {
-    if (_localIp) return _localIp;
-    const hostname = window.location.hostname;
-    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
-        _localIp = hostname;
-        return _localIp;
-    }
-    try {
-        const r = await fetch('/api/v1/health', { signal: AbortSignal.timeout(3000) });
-        const d = await r.json();
-        // 從 agents 中找匹配 hostname 的
-        const hosts = window._computeHosts || [];
-        for (const h of hosts) {
-            try {
-                const hr = await fetch('http://' + h.ip + '/api/v1/health', { signal: AbortSignal.timeout(2000) });
-                const hd = await hr.json();
-                if (hd.hostname === d.hostname) { _localIp = h.ip; return _localIp; }
-            } catch {}
-        }
-    } catch {}
-    _localIp = 'localhost';
-    return _localIp;
+// 今天的 YYYYMMDD（備份專案名／報表名／獨立轉檔名的預設都用它，別再各寫一份）
+export function todayStamp(suffix = '') {
+    const t = new Date();
+    return `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, '0')}${String(t.getDate()).padStart(2, '0')}${suffix}`;
 }
 
-// 判斷 agent IP 是否為本機
+// 判斷 agent IP 是否為本機：看網址的 hostname 就夠了（以前另有一支偵測函式想靠直連機隊比對
+// hostname 找本機 IP——機隊清單到手前它的迴圈永遠空跑，結果只會是 hostname 或 'localhost'，2026-09-03 刪）
 function _isLocalHost(agentIp) {
     if (!agentIp || agentIp === 'local') return true;
     const ip = agentIp.replace(/:\d+$/, '');
-    const local = (_localIp || '').replace(/:\d+$/, '');
     const hostname = window.location.hostname;
-    return ip === local
-        || ip === hostname
+    return ip === hostname
         || (hostname === 'localhost' && ip === '127.0.0.1')
         || (hostname === '127.0.0.1' && ip === 'localhost');
 }
-
-// 頁面載入時立即偵測本機 IP
-_detectLocalIp();
 
 // 偵測所有主機連線狀態，更新狀態燈。
 //
@@ -960,20 +936,16 @@ _detectLocalIp();
 //   1. mixed content — https 頁面不准 fetch http 資源，瀏覽器直接擋
 //   2. 網段不通 — 遠端瀏覽器不在 192.168.1.x 內網，連不到 LAN IP
 // 這也讓本面板的燈號與「專案總覽」的機器卡片（agent-cards.js 早就用 proxy）一致。
-// 今天的 YYYYMMDD（備份專案名／報表名／獨立轉檔名的預設都用它，別再各寫一份）
-export function todayStamp(suffix = '') {
-    const t = new Date();
-    return `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, '0')}${String(t.getDate()).padStart(2, '0')}${suffix}`;
-}
 
-// 「看得見才打」的輪詢：立刻打一發，之後每 ms 一次；瀏覽器分頁在背景就跳過，給了 sectionId 時
-// 該 SPA 分頁被 switchTab 藏起來也跳過。只給無限期的狀態輪詢用（本機代理燈、機隊燈、官網健康／
-// 收件匣徽章）；有終點的工作輪詢不該停。
+// 「看得見才打」的輪詢：立刻打一發（同樣過閘門——背景分頁開頁不白打），之後每 ms 一次；
+// 瀏覽器分頁在背景就跳過，給了 sectionId 時該 SPA 分頁被 switchTab 藏起來也跳過。
+// 只給無限期的狀態輪詢用（本機代理燈、機隊燈、官網健康／收件匣徽章）；有終點的工作輪詢不該停。
 export function startVisiblePolling(fn, ms, { sectionId } = {}) {
     const visible = () => !document.hidden
         && (!sectionId || !document.getElementById(sectionId)?.classList.contains('hidden'));
-    fn();
-    return setInterval(() => { if (visible()) fn(); }, ms);
+    const tick = () => { if (visible()) fn(); };
+    tick();
+    return setInterval(tick, ms);
 }
 
 let _hostHealthTimer = null;

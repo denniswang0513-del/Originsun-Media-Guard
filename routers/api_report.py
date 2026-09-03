@@ -63,7 +63,7 @@ async def start_report_job(req: ReportJobRequest):
 
 
 @router.get("/api/v1/reports/history")
-async def get_reports_history(output_dir: str = ""):
+async def get_reports_history():
     # DB first
     if state.db_online:
         try:
@@ -85,7 +85,7 @@ async def get_reports_history(output_dir: str = ""):
 
 
 @router.delete("/api/v1/reports/{report_id}")
-async def delete_report_entry(request: Request, report_id: str, output_dir: str = ""):
+async def delete_report_entry(request: Request, report_id: str):
     try:
         from core.auth import check_admin
         check_admin(request)

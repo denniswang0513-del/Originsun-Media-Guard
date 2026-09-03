@@ -268,9 +268,6 @@ export function initTranscribeTab() {
     setupInputDrop('transcribe_dest');
     // Wire align mode UI (lives in the same tab)
     if (typeof _wireAlignTab === 'function') _wireAlignTab();
-    // Render host panels now that this tab's DOM exists (covers the case
-    // where the agents list resolved before the tab HTML was injected).
-    if (window.renderStandaloneHostPanels) window.renderStandaloneHostPanels();
 }
 
 export async function pickTranscribeFolder() {

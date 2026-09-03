@@ -102,7 +102,10 @@ class NoCacheMiddleware:
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
-                if method == "GET":
+                # handler 自己宣告了 Cache-Control（index.html 的 no-store、影像紀錄縮圖的 private max-age）
+                # 就以它為準，不再疊一層；其餘 GET 才套下面的通則
+                declared = any(k.lower() == b"cache-control" for k, _ in headers)
+                if method == "GET" and not declared:
                     # 靜態檔（分頁 html／js／css／圖）no-cache：瀏覽器每次帶 ETag 問一句、主機回 304
                     # 不重傳本體 —— 遠端（Cloudflare）開頁少下載 ~1.5 MB，發版換檔 ETag 就變
                     # （owner 2026-09-03「存取都有點慢」）。判準見 _NO_STORE_FILES 上方。

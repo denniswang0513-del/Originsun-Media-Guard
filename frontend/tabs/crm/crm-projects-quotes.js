@@ -155,21 +155,18 @@ async function _renderQuoteDetail(quoteId) {
 
 // ── Window handlers ──────────────────────────────────────────
 
-// crm-quotes.js (the one that registers _openQuoteModalForProject /
-// _openQuoteModalForEdit / _openQuoteModalForDuplicate) is normally loaded by
-// 報價彈窗住在 crm-quotes.js；每個入口先把那頁載進來（embed：沒有 crm_quotes 分頁權限的人也載——
-// 報價 API 守的是 money_view）。同一支載入器記在 _loadedTabs，之後切到報價分頁不會再 init 一次。
-const _quoteModal = (fn) => async (id) => {
+// 報價彈窗住在 crm-quotes.js：先把那頁載進來（embed：沒有 crm_quotes 分頁權限的人也載——報價 API 守的是
+// money_view；同一支載入器記在 _loadedTabs，之後切到報價分頁不會再 init 一次），再 import 同一個模組實例
+// 直接呼叫。以前經由 window 字串找函式，編輯／複製兩顆按鈕接錯名字就靜靜死了一年（2026-09-03 抓到）。
+async function _withQuotes(use) {
     await window._ensureTabLoaded('tab_crm_quotes', { embed: true });
-    window[fn]?.(id);
-};
+    return use(await import('./crm-quotes.js'));
+}
 
 function initQuoteHandlers() {
     window._pqSelect = (quoteId) => _renderQuoteDetail(quoteId);
-    // 編輯／複製走 crm-quotes.js 掛在 window 的 _quoteEdit / _quoteDup（原本接的 _openQuoteModalForEdit /
-    // _openQuoteModalForDuplicate 從來沒有人定義，這兩顆按鈕點了一直沒反應——2026-09-03 /simplify 抓到）
-    window._pqEdit = _quoteModal('_quoteEdit');
-    window._pqDuplicate = _quoteModal('_quoteDup');
+    window._pqEdit = (id) => _withQuotes(m => m.quoteEdit(id));
+    window._pqDuplicate = (id) => _withQuotes(m => m.quoteDup(id));
 
     window._pqDelete = async (quoteId) => {
         if (!confirm('確定刪除此報價？')) return;
@@ -179,8 +176,8 @@ function initQuoteHandlers() {
         } catch (e) { alert('刪除失敗：' + e.message); }
     };
 
-    window._projAddQuote = async () => {
-        if (state.selectedId) await _quoteModal('_openQuoteModalForProject')(state.selectedId);
+    window._projAddQuote = () => {
+        if (state.selectedId) _withQuotes(m => m.openQuoteForProject(state.selectedId));
     };
 
     window._projRefreshQuotes = (projectId) => {

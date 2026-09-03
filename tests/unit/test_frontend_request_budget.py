@@ -50,6 +50,7 @@ def test_tab_defaults_live_in_their_own_init():
 
 
 async def test_static_files_revalidate_with_etag_api_stays_no_store(async_client):
+    from main import _NO_STORE_FILES
     r = await async_client.get("/app.js")
     assert r.status_code == 200 and r.headers["cache-control"] == "no-cache" and r.headers.get("etag")
     r304 = await async_client.get("/app.js", headers={"If-None-Match": r.headers["etag"]})
@@ -57,7 +58,10 @@ async def test_static_files_revalidate_with_etag_api_stays_no_store(async_client
     for path in ("/api/v1/version", "/healthz"):
         rr = await async_client.get(path)
         assert rr.headers["cache-control"].startswith("no-store"), path
-    assert '_NO_STORE_FILES = ("/download", "/e/")' in repo_src("main.py")   # 例外要留著理由
+    # handler 自己宣告的以它為準（index.html 要 no-store，而且只有一個 Cache-Control，不是疊兩層）
+    idx = await async_client.get("/")
+    assert idx.headers["cache-control"] == "no-store, no-cache, must-revalidate, max-age=0"
+    assert _NO_STORE_FILES == ("/download", "/e/")   # 例外要留著理由（OTA 安裝包、分享連結的財務文件）
 
 
 def test_background_polling_is_light():
@@ -67,7 +71,9 @@ def test_background_polling_is_light():
     assert "_versionCheckedAt < 60000) return" in js_func_body(vc, "export async function checkAgentVersion(")
     # 四個無限期的狀態輪詢都走同一支「看得見才打」（它自己打第一發，呼叫端不必再手動打）
     utils = js_code_only(repo_src("frontend/js/shared/utils.js"))
-    assert "fn();" in js_func_body(utils, "export function startVisiblePolling(")
+    poller = js_func_body(utils, "export function startVisiblePolling(")
+    assert poller.index("tick();") < poller.index("setInterval(tick")   # 第一發自己打、而且一樣過閘門
+    assert "_detectLocalIp" not in utils                                # 機隊燈走 proxy，不再直連機隊猜本機 IP
     assert "startVisiblePolling(pollLocalAgent, 3000)" in js_code_only(repo_src("frontend/app.js"))
     assert "startVisiblePolling(_checkHostHealth, 30000)" in utils
     web = js_code_only(repo_src("frontend/tabs/website/website.js"))
@@ -76,9 +82,11 @@ def test_background_polling_is_light():
 
 
 @pytest.mark.parametrize("rel", ["frontend/app.js", "frontend/js/app/remote-dispatch.js"])
-def test_no_dead_appendlog_guards(rel):
-    """utils.js 開機就 import，window.appendLog 一定在——`typeof appendLog === 'function'` 守衛只會把訊息吞掉。"""
-    assert "typeof appendLog" not in js_code_only(repo_src(rel))
+def test_no_dead_utils_guards(rel):
+    """utils.js／report-history.js 開機就 import——`typeof appendLog === 'function'` 這類守衛只會把訊息吞掉。"""
+    src = js_code_only(repo_src(rel))
+    for name in ("appendLog", "resetProgress", "loadReportHistory"):
+        assert f"typeof {name}" not in src, name
 
 
 def test_dispatch_state_is_one_ctx():
