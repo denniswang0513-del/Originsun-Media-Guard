@@ -394,3 +394,14 @@ def prepend_note(notes, line) -> str:
     if not line:
         return old
     return f"{line}\n\n{old}" if old else line
+
+
+def rank_items(items, counts: dict, top: int = 10, min_count: int = 3) -> list:
+    """零用金的會計項目分「常用／其他」（owner 2026-09-04：整理過去資料中最常用的項目，其他收攏）。
+    常用＝用過 ≥ min_count 次、依次數排、最多 top 個；其他照原本順序。回 [{name, count, common}]。"""
+    counts = {(k or "").strip(): int(v or 0) for k, v in (counts or {}).items()}
+    names = [(i or "").strip() for i in items if (i or "").strip()]
+    ranked = sorted((n for n in names if counts.get(n, 0) >= min_count), key=lambda n: (-counts.get(n, 0), names.index(n)))
+    common = ranked[:top]
+    return ([{"name": n, "count": counts.get(n, 0), "common": True} for n in common]
+            + [{"name": n, "count": counts.get(n, 0), "common": False} for n in names if n not in common])

@@ -8,6 +8,8 @@ Sheet 列不套。更新時案名沒動可給 keep=(案名, project_id) 沿用�
 """
 from __future__ import annotations
 
+from core.project_flow import is_closed
+
 import uuid
 
 from fastapi import HTTPException
@@ -93,7 +95,7 @@ async def project_options(session, staff_name: str | None = None) -> list:
         year = str(d.year) if d else ""
         # label＝「年份 客戶 案名」（owner 2026-09-03：跟零用金一樣的呈現）；前端用它當下拉的字，存的時候對回 id
         # closed：前端把下拉分「進行中（預設）／已結案（收著）」（owner 2026-09-03）——分組規則住這裡，前端只看旗標
-        opts.append({"id": pid, "name": n or "", "client": client or "", "year": year, "closed": st == "結案",
+        opts.append({"id": pid, "name": n or "", "client": client or "", "year": year, "closed": is_closed(st),
                      "label": " ".join(x for x in (year, client or "", n or "") if x)})
     if staff_name:
         have = {o["name"] for o in opts}

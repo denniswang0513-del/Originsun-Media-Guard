@@ -164,6 +164,13 @@ def wins_proposal(new_status: str, proposal_count: int, already_won: bool) -> bo
 # 由 NEXT_STATUS 直接跳到「提案」。
 PIPELINE = ("投標", "開發", "洽詢", "提案", "製作", "結案", "歸檔")
 LOST = "未成案"
+# 專案選單的「已結案」那一組（工作日誌、零用金的浮層都吃這個旗標）：結案之後的階段＋未成案
+CLOSED_STATUSES = ("結案", "歸檔", LOST)
+
+
+def is_closed(status) -> bool:
+    """專案選單分組：True＝收進「已結案」那段（預設不展開）。"""
+    return (status or "").strip() in CLOSED_STATUSES
 TERMINAL = (LOST, "歸檔")
 
 NEXT_STATUS = {

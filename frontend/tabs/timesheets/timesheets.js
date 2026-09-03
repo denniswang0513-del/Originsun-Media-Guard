@@ -16,6 +16,7 @@ import { esc } from '../website/website-utils.js';
 import { createSortable, sortableTh, today as _today } from '../crm/crm-utils.js';
 import { openProjectPicker } from '../../js/shared/project-picker.js';   // 指定專案：共用挑選視窗
 import { authDownload } from '../../js/shared/utils.js';
+import { attachProjectPop } from '../../js/shared/project-pop.js';   // 專案格的浮層（進行中／已結案），零用金也用同一個
 import { hbars } from '../../js/shared/svg-charts.js';
 
 async function tfetch(path, opts = {}) {
@@ -210,7 +211,8 @@ export async function initTimesheetsTab() {
         const pa = ev.target.closest('input[data-pick-all]');
         if (pa) { _ledgerSel = pa.checked ? new Set(_ledgerRows().map(i => i.id)) : new Set(); _ledgerRedraw(); }
     });
-    _bindProjectPop(_content);                       // 要在 _sheetKeydown 前綁（capture），浮層開著時 ↓↑ 歸浮層
+    // 專案格浮層要先掛（capture）：開著時 ↓↑ 歸浮層，關著時才輪到 _sheetKeydown 的換列。格子只放案名（整串太長），id 記在 data-pid
+    attachProjectPop(_content, { options: _projectOptions, value: (p) => (p.id ? (p.name || p.label) : (p.label || p.name)) });
     _content.addEventListener('keydown', _sheetKeydown);
     _content.addEventListener('input', (ev) => {
         _sheetGrow(ev);
@@ -382,95 +384,6 @@ async function _projectOptions() {
     try { _projOpts = (await tfetch('/api/v1/timesheets/project_options')).projects || []; }
     catch (_) { _projOpts = []; }
     return _projOpts;
-}
-// ── 專案格的下拉：分「進行中（預設展開）／已結案（收著，打字會搜到、也可點開）」（owner 2026-09-03）──
-// 原生 datalist 分不了組，改成自己的浮層。顯示「年份 客戶 案名」（同零用金）；選了把字填回格子並觸發 input／change，
-// 存檔還是 _projectFromInput 對回 id。鍵盤：浮層開著時 ↓↑ 在浮層裡走、Enter 選、Esc／Tab 關；關著時 ↓↑ 才是列的上下移動。
-let _pop = null;   // {el, input, idx, showClosed, flat}
-function _projPopClose() { if (_pop) { _pop.el.remove(); _pop = null; } }
-function _projPopSplit(q, showClosed) {
-    const needle = (q || '').trim().toLowerCase();
-    const hit = p => !needle || (p.label || p.name || '').toLowerCase().includes(needle);
-    const opts = _projOpts || [];
-    return { active: opts.filter(p => !p.closed && hit(p)), closed: opts.filter(p => p.closed && hit(p)), show: showClosed || !!needle };
-}
-function _projPopRender() {
-    const { el, input } = _pop;
-    const { active, closed, show } = _projPopSplit(input.value, _pop.showClosed);
-    const flat = [];
-    const item = (p) => {
-        flat.push(p); const i = flat.length - 1;
-        const sub = [p.year, p.client].filter(Boolean).join(' · ');
-        return `<div class="ts-pp-item${i === _pop.idx ? ' on' : ''}" data-i="${i}"><div class="ts-pp-name">${esc(p.name || p.label)}</div>${sub ? `<div class="ts-pp-sub">${esc(sub)}</div>` : ''}</div>`;
-    };
-    let html = `<div class="ts-pp-h">進行中（${active.length}）</div>` + (active.length ? active.map(item).join('') : '<div class="ts-pp-empty">沒有符合的</div>');
-    html += `<div class="ts-pp-h ts-pp-toggle" data-toggle="1">已結案（${closed.length}）${show ? '' : '　點一下展開'}</div>`;
-    if (show) html += closed.length ? closed.map(item).join('') : '<div class="ts-pp-empty">沒有符合的</div>';
-    _pop.flat = flat;
-    el.innerHTML = html;
-    const r = input.getBoundingClientRect();
-    el.style.left = `${r.left + window.scrollX}px`; el.style.top = `${r.bottom + window.scrollY}px`;
-    el.style.minWidth = `${Math.max(r.width, 320)}px`;
-    el.querySelector('.ts-pp-item.on')?.scrollIntoView({ block: 'nearest' });
-}
-async function _projPopOpen(input) {
-    await _projectOptions();
-    if (document.activeElement !== input) return;      // 抓完選項時人已經離開那一格
-    if (!_pop || _pop.input !== input) {
-        _projPopClose();
-        const el = document.createElement('div');
-        el.className = 'ts-proj-pop';
-        el.addEventListener('pointerdown', (ev) => {        // pointerdown：blur 會先於 click 把浮層收掉
-            ev.preventDefault();
-            const it = ev.target.closest('.ts-pp-item');
-            if (it) { _projPopPick(_pop.flat[Number(it.dataset.i)]); return; }
-            if (ev.target.closest('[data-toggle]')) { _pop.showClosed = !_pop.showClosed; _pop.idx = -1; _projPopRender(); }
-        });
-        document.body.appendChild(el);
-        _pop = { el, input, idx: -1, showClosed: false, flat: [] };
-    }
-    _projPopRender();
-}
-function _projPopPick(p) {
-    if (!p || !_pop) return;
-    const input = _pop.input;
-    // 格子只放案名（「年份 客戶全名 案名」太長）；id 記在 data-pid、完整名稱放 title（owner 2026-09-04）
-    input.value = p.id ? (p.name || p.label) : (p.label || p.name);
-    input.dataset.pid = p.id || '';
-    input.dataset.pname = input.value;
-    input.title = p.label || p.name || '';
-    _projPopClose();
-    const ev = new Event('input', { bubbles: true });
-    ev._fromPick = true;                                  // 讓下面的 input 監聽別把浮層又打開
-    input.dispatchEvent(ev);
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-}
-function _projPopKeydown(ev) {   // capture 階段：浮層開著時先於 _sheetKeydown 吃掉 ↓↑ Enter Esc
-    if (!_pop || ev.target !== _pop.input) return;
-    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
-        ev.preventDefault(); ev.stopPropagation();
-        const n = _pop.flat.length; if (!n) return;
-        _pop.idx = (_pop.idx + (ev.key === 'ArrowDown' ? 1 : -1) + n) % n;
-        _projPopRender();
-    } else if (ev.key === 'Enter') {
-        if (_pop.idx >= 0) { ev.preventDefault(); ev.stopPropagation(); _projPopPick(_pop.flat[_pop.idx]); }
-        else _projPopClose();
-    } else if (ev.key === 'Escape' || ev.key === 'Tab') {
-        _projPopClose();
-    }
-}
-function _bindProjectPop(root) {
-    root.addEventListener('keydown', _projPopKeydown, true);
-    root.addEventListener('focusin', (ev) => { const inp = ev.target.closest?.('input[data-proj-pick]'); if (inp && !inp.readOnly) _projPopOpen(inp); });
-    root.addEventListener('input', (ev) => {
-        const inp = ev.target.closest?.('input[data-proj-pick]'); if (!inp || ev._fromPick) return;
-        if (inp.dataset.pid && inp.value.trim() !== inp.dataset.pname) { delete inp.dataset.pid; delete inp.dataset.pname; inp.title = ''; }
-        if (_pop && _pop.input === inp) { _pop.idx = -1; _projPopRender(); } else _projPopOpen(inp);
-    });
-    root.addEventListener('focusout', (ev) => {
-        if (!ev.target.closest?.('input[data-proj-pick]')) return;
-        setTimeout(() => { if (_pop && document.activeElement !== _pop.input) _projPopClose(); }, 120);
-    });
 }
 function _typeSelect(cur, attr) {
     return `<select ${attr} data-no-search><option value="">分類</option>${_workTypes.map(t =>

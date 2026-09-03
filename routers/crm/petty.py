@@ -17,6 +17,9 @@
 """
 from __future__ import annotations
 
+from core.project_flow import is_closed
+from core.crm_logic import rank_items
+
 import csv
 import io
 import uuid
@@ -205,11 +208,17 @@ async def petty_options():
         _q = _q.where(not_mine(CrmProject.entity))
         projects = (await session.execute(_q)).all()
         items = await cash_category_texts(session)
+        # 項目用量（整個公司過去的雜支列）→ 前端浮層分「常用／其他」（core.crm_logic.rank_items）
+        item_counts = dict((await session.execute(
+            select(CrmProjectExpense.item, safunc.count()).where(CrmProjectExpense.item.isnot(None))
+            .group_by(CrmProjectExpense.item))).all())
     return {
-        "projects": [{"id": p.id, "name": p.name, "status": p.status or "",
+        # closed：前端浮層分「進行中／已結案」（core.project_flow.is_closed，同工作日誌）
+        "projects": [{"id": p.id, "name": p.name, "status": p.status or "", "closed": is_closed(p.status),
                       "year": _project_year(p), "client": p.short_name or ""}
                      for p in projects],
         "items": items or list(FALLBACK_ITEMS),
+        "items_ranked": rank_items(items or list(FALLBACK_ITEMS), item_counts),
         # 前端據此決定專案欄可不可以編（規則的單一真相在後端）
         "project_link_items": list(PROJECT_LINK_ITEMS),
     }

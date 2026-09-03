@@ -18,6 +18,7 @@ const F = () => window.__petty || DEFAULT_HOST;
 // dom.js 的 esc 是純字串替換（零依賴、公開頁也 import 得起）——
 // 帳冊一次渲染叫上萬次也扛得住；別換回 createElement 版（實測慢兩秒多）。
 import { esc } from "../../js/shared/dom.js";
+import { attachProjectPop } from "../../js/shared/project-pop.js";   // 專案欄的浮層（進行中／已結案），同工作日誌
 const money = (n) => (n === null || n === undefined) ? "—"
     : (n < 0 ? "-NT$ " : "NT$ ") + Math.abs(n).toLocaleString();
 // 🔴 本地今天，不是 toISOString()（UTC 面值，台北早上八點前差一天）——
@@ -33,10 +34,10 @@ const flashOk = (el) => {
 };
 
 // 專案顯示字串的**單一正本**：「2025｜台北市政府｜城市形象片」。
-// 年份與客戶不只是給人看的 —— <datalist> 與升級後的搜尋下拉都是對整串做子字串
+// 年份與客戶不只是給人看的 —— 專案浮層（js/shared/project-pop）是對整串做子字串
 // 比對，所以打「2025」或客戶名一樣濾得到（owner 2026-08-18：「也可以用這些資訊
 // 搜索」）。年份/客戶缺就自動不出現，不會留下空的分隔線。
-// 顯示字串必須唯一才能從 <datalist> 的值反查回 id —— 撞名的補一個短碼。
+// 顯示字串必須唯一才能從格子的值反查回 id —— 撞名的補一個短碼。
 function projectLabels(projects) {
     const seen = new Map(), labelOf = {}, idOfLabel = {};
     for (const p of projects) {
@@ -48,6 +49,16 @@ function projectLabels(projects) {
         idOfLabel[label] = p.id;
     }
     return { labelOf, idOfLabel };
+}
+// 項目浮層的列：常用（後端 items_ranked 的 common）展開、其他收著；值就是項目名
+function itemRows(opts) {
+    const ranked = opts.items_ranked || opts.items.map(i => ({ name: i, common: true }));
+    return ranked.map(r => ({ id: r.name, name: r.name, label: r.name, closed: !r.common }));
+}
+const ITEM_GROUPS = ['常用', '其他'];
+// 浮層要的列：唯一標籤（年份｜客戶｜案名）當值（各處都用它反查 id）、closed 由後端給
+function projectRows(projects, labelOf) {
+    return projects.map(p => ({ id: p.id, name: p.name, label: labelOf[p.id], client: p.client, year: p.year, closed: !!p.closed }));
 }
 // <select> 用的整串 options（第一個是「不選」那格，各處文案不同）。
 // 呼叫端手上已有 labelOf 就傳進來，別讓同一張表在一個 render 裡算兩次。
@@ -184,13 +195,13 @@ export async function renderMine(host) {
         throw e;
     }
 
-    // 專案 238 筆 → input+datalist（原生可搜尋，跟帳冊同一招）：顯示字串用
+    // 專案 238 筆 → input＋浮層（進行中／已結案，跟帳冊同一個 js/shared/project-pop）：顯示字串用
     // projectLabels 的唯一標籤（年份｜客戶｜專案名），送出時反查回 id
-    const { idOfLabel: formIdOfLabel } = projectLabels(opts.projects);
-    const FORM_PROJ_DL = '<datalist id="f-proj-dl">'
-        + Object.keys(formIdOfLabel).map(l => `<option value="${esc(l)}"></option>`).join("")
-        + "</datalist>";
-    const itemOpts = opts.items.map(i => `<option value="${esc(i)}">${esc(i)}</option>`).join("");
+    const { labelOf: formLabelOf, idOfLabel: formIdOfLabel } = projectLabels(opts.projects);
+    host._projRows = projectRows(opts.projects, formLabelOf);
+    attachProjectPop(host, { options: () => host._projRows });     // 同一個 host 只掛一次；重畫後靠 host._projRows 拿最新
+    host._itemRows = itemRows(opts);
+    attachProjectPop(host, { match: "input[data-item-pick]", options: () => host._itemRows, groups: ITEM_GROUPS });
 
     const asSel = staffList && staffList.length ? `
       <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;">
@@ -222,9 +233,9 @@ export async function renderMine(host) {
         <div><label>金額</label><input type="number" id="f-amt" inputmode="numeric" placeholder="0"></div>
         <div style="grid-column:span 2;"><label>摘要</label>
           <input id="f-sum" placeholder="例：兩廳院拍攝午餐"></div>
-        <div><label>項目（會計）</label><select id="f-item">${itemOpts}</select></div>
-        <div><label>專案</label><input id="f-proj" list="f-proj-dl"
-             placeholder="不填＝公司支出；輸入年份/客戶/專案名搜尋">${FORM_PROJ_DL}</div>
+        <div><label>項目（會計）</label><input id="f-item" data-item-pick autocomplete="off" value="${esc((host._itemRows[0] || {}).name || "")}" placeholder="打字搜尋項目（常用的在上面）"></div>
+        <div><label>專案</label><input id="f-proj" data-proj-pick autocomplete="off"
+             placeholder="不填＝公司支出；打年份/客戶/專案名搜尋（進行中／已結案分開列）"></div>
         <div><label>發票號碼（沒有可留白）</label><input id="f-inv" placeholder="AB12345678"></div>
         <div><label>收據照片</label><input type="file" id="f-file" accept="image/*" capture="environment"></div>
       </div>
@@ -286,7 +297,7 @@ export async function renderMine(host) {
         const btn = ev.currentTarget;
         const amt = parseInt(host.querySelector("#f-amt").value, 10);
         if (!amt) { msg.textContent = "金額不可為 0"; return; }
-        // datalist 是自由文字：非空就必須反查得到 id，打錯字不能靜默變公司支出
+        // 專案欄是自由文字：非空就必須反查得到 id，打錯字不能靜默變公司支出
         const projLabel = host.querySelector("#f-proj").value.trim();
         const projId = projLabel ? (formIdOfLabel[projLabel] || null) : null;
         if (projLabel && !projId) { msg.textContent = "專案對不上，請從清單挑選"; return; }
@@ -544,22 +555,22 @@ export async function renderOverview(host) {
 
     // 選項字串**只組一次**（300 列各組一次＝300 倍的無謂工作）；
     // 選中哪一個等 innerHTML 掛好之後用 `.value =` 設，一列一次賦值。
-    const ITEM_OPTS = '<option value=""></option>'
-        + opts.items.map(i => `<option>${esc(i)}</option>`).join("");
+    host._itemRows = itemRows(opts);
+    const ITEM_SET = new Set(opts.items);
+    attachProjectPop(host, { match: "input[data-item-pick]", options: () => host._itemRows, groups: ITEM_GROUPS });
     const STAFF_OPTS = '<option value=""></option>'
         + people.staff.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
     // 🔴 專案下拉**不預先展開**：238 個專案 × 300 列 ＝ 七萬個 <option>，
     // 那就是「載入有點慢」的來源（實測 DOM 節點數差一個數量級）。這裡只放
     // 目前值那一個，其餘等使用者真的點下去（focus）才補 —— 一次只長一個下拉。
     // 🔴 專案有 238 個 —— 純 <select> 沒辦法用（owner 2026-08-17：「這個清單太多
-    // 要可以搜尋」）。用**共用一份 <datalist> + 可打字的 input**：
+    // 要可以搜尋」）。用**共用一個浮層 + 可打字的 input**（js/shared/project-pop，跟工作日誌同一個）：
     //   - 238 個 option 全表只長一次，不是每列一份（那是先前載入慢的原因）
     //   - 型別提示與過濾是瀏覽器原生的，不必引 searchableSelect
     //     （那支住在 tabs/crm/，而這個元件要同時跑在獨立頁與 SPA 子視圖）
     const { labelOf, idOfLabel } = projectLabels(opts.projects);
-    const PROJ_DATALIST = '<datalist id="pc-proj-dl">'
-        + Object.keys(idOfLabel).map(l => `<option value="${esc(l)}"></option>`).join("")
-        + "</datalist>";
+    host._projRows = projectRows(opts.projects, labelOf);
+    attachProjectPop(host, { options: () => host._projRows });     // 每列與新增列的專案欄共用一個浮層
     // 新增列仍用 select（只有一個，238 個選項無所謂，而且可直接挑）
     // 只有「專案雜支」開放連結專案（owner 2026-08-17）。規則來自後端的
     // `project_link_items`，不在前端寫死 —— 兩邊各寫一份就會漂。
@@ -591,13 +602,13 @@ export async function renderOverview(host) {
             ? val + (e.project_label ? `（原始標籤：${e.project_label}）` : "")
             : (e.project_label ? "原始標籤：" + e.project_label
                                : "打字搜尋專案（年份／客戶／專案名都能打）；清空＝不歸專案");
-        return `<span class="lg-proj"><input data-f="project_id" list="pc-proj-dl"
+        return `<span class="lg-proj"><input data-f="project_id" data-proj-pick autocomplete="off"
                        value="${esc(val)}" data-was="${esc(val)}"
                        placeholder="${e.project_label ? esc(e.project_label) + "（未歸戶）" : "（無專案）"}"
                        title="${esc(tip)}">${groupHint(e)}</span>`;
     };
 
-    host.innerHTML = CSS + LEDGER_CSS + PROJ_DATALIST + `
+    host.innerHTML = CSS + LEDGER_CSS + `
       <div class="lg-bar">
         <input id="lg-q" placeholder="搜尋摘要／附註／發票號／標籤（Enter）"
                value="${esc(_LG.q)}" style="min-width:240px;">
@@ -629,9 +640,9 @@ export async function renderOverview(host) {
             <td class="amt"><input type="number" id="n-amt" placeholder="金額" style="text-align:right;"></td>
             <td><input id="n-sum" placeholder="＋ 新增一筆：摘要"></td>
             <td><input id="n-note" placeholder="發票號／附註"></td>
-            <td><select data-no-search id="n-item">${ITEM_OPTS}</select></td>
+            <td><input id="n-item" data-item-pick autocomplete="off" placeholder="項目"></td>
             <td><select data-no-search id="n-staff">${STAFF_OPTS}</select></td>
-            <td><input id="n-proj" list="pc-proj-dl" disabled placeholder="打字搜尋專案（年份／客戶／案名）"
+            <td><input id="n-proj" data-proj-pick autocomplete="off" disabled placeholder="打字搜尋專案（年份／客戶／案名）"
                        title="打字搜尋專案；留空＝不歸專案"></td>
             <td><button class="pc-btn" id="n-add"
                         style="padding:5px 10px;font-size:12px;">新增</button></td>
@@ -644,7 +655,7 @@ export async function renderOverview(host) {
             <td><input data-f="summary" value="${esc(e.summary)}"></td>
             <td><input data-f="${e.invoice_no ? "invoice_no" : "note"}"
                        value="${esc(e.invoice_no || e.note)}"></td>
-            <td><select data-no-search data-f="item" data-v="${esc(e.item)}">${ITEM_OPTS}</select></td>
+            <td><input data-f="item" data-item-pick autocomplete="off" value="${esc(e.item || "")}" data-was="${esc(e.item || "")}"></td>
             <td>${e.staff_id || !e.staff_name
               // 非員工的代墊（生產有 14 列「外部製片_現金提款」）沒有 staff_id ——
               // 不補這一個選項的話，下拉空白、名字也不見了，看起來像資料掉了
@@ -743,7 +754,7 @@ export async function renderOverview(host) {
         const amt = parseInt(host.querySelector("#n-amt").value, 10);
         if (!staffId) { alert("請先選收款人（這筆錢是誰墊的）"); return; }
         if (!amt) { alert("金額不可為 0"); return; }
-        // 專案欄是 datalist 自由文字（owner 2026-09-04：要能打字搜）：非空就必須反查得到 id，打錯字不能靜默變無專案
+        // 專案欄是自由文字（owner 2026-09-04：要能打字搜）：非空就必須反查得到 id，打錯字不能靜默變無專案
         const nProjText = host.querySelector("#n-proj").value.trim();
         const nProjId = nProjText ? (idOfLabel[nProjText] || null) : null;
         if (nProjText && !nProjId) { alert("找不到專案「" + nProjText + "」，請從清單挑一個，或清空表示不歸專案。"); return; }
@@ -812,6 +823,16 @@ export async function renderOverview(host) {
             const tr = el.closest("tr");
             const f = el.dataset.f;
             let val = el.type === "number" ? Number(el.value) : el.value;
+            if (f === "item" && el.tagName === "INPUT") {
+                const typed = el.value.trim();
+                if (typed && !ITEM_SET.has(typed)) {      // 打錯字不能靜默變成新項目
+                    alert("找不到項目「" + typed + "」，請從清單挑一個。");
+                    el.value = el.dataset.was || "";
+                    return;
+                }
+                el.dataset.was = typed;
+                val = typed;
+            }
             if (f === "project_id" && el.tagName === "INPUT") {
                 const typed = el.value.trim();
                 if (typed && !(typed in idOfLabel)) {

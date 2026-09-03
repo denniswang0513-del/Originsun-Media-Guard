@@ -1,39 +1,67 @@
 # -*- coding: utf-8 -*-
-"""工作日誌的專案下拉分「進行中（預設）／已結案」（owner 2026-09-03）。
+"""打字浮層分兩段（owner 2026-09-03 工作日誌專案「進行中／已結案」、2026-09-04 零用金專案同規則＋項目「常用／其他」）。
 
-分組規則住後端（project_options 每筆帶 closed），前端只看旗標；原生 datalist 分不了組，
-timesheets.js 用自己的浮層（.ts-proj-pop）；浮層開著時 ↓↑ 歸浮層（capture），關著時才是列的上下移動。
+一份元件：frontend/js/shared/project-pop.js（原生 datalist／select 分不了組）。分組旗標由後端給：
+專案 closed＝core.project_flow.is_closed（結案／歸檔／未成案；工作日誌 project_options 與零用金 /petty/options 同一條），
+項目 common＝core.crm_logic.rank_items（過去用量 ≥3 次、最多 10 個）。
+浮層開著時 ↓↑ 歸浮層（capture），關著時才輪到宿主（工作日誌的換列）；選了記 data-pid，存檔先認 id。
 """
 from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
 
-
-def test_backend_options_carry_closed_flag():
-    body = code_only(func_body(repo_src("services/timesheet_manual.py"), "async def project_options("))
-    assert '"closed": st == "結案"' in body
-    assert '"closed": False' in body, "最近填過（沒 id）的也要帶旗標，前端不用猜"
+POP = "frontend/js/shared/project-pop.js"
 
 
-def test_frontend_uses_grouped_popover_not_datalist():
-    js = js_code_only(repo_src("frontend/tabs/timesheets/timesheets.js"))
-    assert 'list="ts-proj-list"' not in js and "<datalist" not in js, "專案格不再用 datalist（分不了組）"
-    assert js.count("data-proj-pick") >= 3, "我的一天、總表改列、批次調整三處都要掛浮層"
-    assert "進行中（${active.length}）" in js and "已結案（${closed.length}）" in js
-    assert "p.closed" in js, "分組只看後端旗標"
-    assert "_bindProjectPop(_content);" in js and "_content.addEventListener('keydown', _sheetKeydown);" in js
-    assert js.index("_bindProjectPop(_content);") < js.index("_content.addEventListener('keydown', _sheetKeydown);"), "浮層要先綁（capture）"
-    assert "root.addEventListener('keydown', _projPopKeydown, true);" in js
-    assert "ev.stopPropagation();" in code_only(func_body(js, "function _projPopKeydown(ev)"))
-    html = repo_src("frontend/tabs/timesheets/timesheets.html")
-    assert ".ts-proj-pop" in html and ".ts-pp-toggle" in html
+def test_closed_flag_comes_from_one_backend_rule():
+    from core.project_flow import CLOSED_STATUSES, LOST, is_closed
+    assert is_closed("結案") and is_closed("歸檔") and is_closed(LOST) and not is_closed("製作") and not is_closed("")
+    assert set(CLOSED_STATUSES) == {"結案", "歸檔", LOST}
+    ts = code_only(func_body(repo_src("services/timesheet_manual.py"), "async def project_options("))
+    assert '"closed": is_closed(st)' in ts and '"closed": False' in ts
+    petty = code_only(func_body(repo_src("routers/crm/petty.py"), "async def petty_options("))
+    assert '"closed": is_closed(p.status)' in petty
+    assert "rank_items(" in petty and "CrmProjectExpense.item" in petty, "項目用量從過去雜支列算"
 
 
-def test_pick_keeps_id_on_the_cell_and_shows_short_name():
-    """名稱太長（年份＋客戶全名＋案名）：浮層兩行、格子只放案名、id 記在 data-pid，存檔先認 id 再退回字串比對。"""
-    js = js_code_only(repo_src("frontend/tabs/timesheets/timesheets.js"))
-    pick = code_only(func_body(js, "function _projPopPick(p)"))
-    assert "input.dataset.pid = p.id || ''" in pick and "input.title = p.label" in pick
-    assert 'class="ts-pp-sub"' in js and 'class="ts-pp-name"' in js
-    body = code_only(func_body(js, "function _projectFromInput(text, el = null)"))
-    assert "el.dataset.pid" in body
-    assert "_projectFromInput(v('project'), tr.querySelector" in js and "_projectFromInput(proj, document.getElementById('ts-batch-project'))" in js
+def test_rank_items_rule():
+    from core.crm_logic import rank_items
+    items = ["交通", "餐費", "器材", "郵資", "其他"]
+    out = rank_items(items, {"餐費": 40, "交通": 12, "郵資": 3, "器材": 2})
+    assert [r["name"] for r in out if r["common"]] == ["餐費", "交通", "郵資"]       # ≥3 次、依次數
+    assert [r["name"] for r in out if not r["common"]] == ["器材", "其他"]         # 其他照原順序
+    assert [r["name"] for r in rank_items(items, {}, top=10)] == items and not any(r["common"] for r in rank_items(items, {}))
+    assert len([r for r in rank_items([f"i{n}" for n in range(20)], {f"i{n}": 5 for n in range(20)}) if r["common"]]) == 10
+
+
+def test_shared_popover_contract():
+    js = js_code_only(repo_src(POP))
+    assert "export function attachProjectPop(root, cfg = {})" in js and "export function closeProjectPop()" in js
+    assert "groups: cfg.groups || ['進行中', '已結案']" in js
+    assert "p.closed" in js, "分組只看後端旗標，不認狀態字"
+    assert "root.addEventListener('keydown', _keydown, true);" in js, "capture：先於宿主的 keydown"
+    assert "ev.stopPropagation();" in code_only(func_body(js, "function _keydown(ev)"))
+    pick = code_only(func_body(js, "function _pick(p)"))
+    assert "input.dataset.pid = p.id || ''" in pick and "ev._fromPick = true" in pick
     assert "delete inp.dataset.pid" in js, "手打改了字要清掉 id"
+    assert "root.dataset[flag]" in js, "同一個 root 依欄位各掛一次（重畫靠委派）"
+
+
+def test_timesheets_and_petty_use_the_shared_popover_not_datalist():
+    ts = js_code_only(repo_src("frontend/tabs/timesheets/timesheets.js"))
+    assert "from '../../js/shared/project-pop.js'" in ts and "attachProjectPop(_content," in ts
+    assert ts.index("attachProjectPop(_content,") < ts.index("_content.addEventListener('keydown', _sheetKeydown);"), "浮層要先掛"
+    assert "<datalist" not in ts and 'list="ts-proj-list"' not in ts and "ts-proj-pop" not in ts
+    assert ts.count("data-proj-pick") >= 3
+    assert "el.dataset.pid" in code_only(func_body(ts, "function _projectFromInput(text, el = null)"))
+    assert "_projectFromInput(v('project'), tr.querySelector" in ts
+
+    pt = js_code_only(repo_src("frontend/tabs/petty/petty-view.js"))
+    assert 'from "../../js/shared/project-pop.js"' in pt
+    assert "<datalist" not in pt and "pc-proj-dl" not in pt and "f-proj-dl" not in pt and "ITEM_OPTS" not in pt
+    assert pt.count("data-proj-pick autocomplete") == 3, "專案：我的請款表單、總表每列、新增列"
+    assert pt.count("data-item-pick autocomplete") == 3, "項目：我的請款表單、總表每列、新增列"
+    assert pt.count("attachProjectPop(host,") == 4 and pt.count("groups: ITEM_GROUPS") == 2 and "closed: !r.common" in pt
+    assert "ITEM_SET.has(typed)" in pt, "項目打錯字要擋"
+
+
+def test_no_leftover_popover_css_in_timesheets_html():
+    assert ".ts-proj-pop" not in repo_src("frontend/tabs/timesheets/timesheets.html")

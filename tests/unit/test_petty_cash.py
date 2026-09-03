@@ -497,18 +497,16 @@ def test_new_expense_applies_the_item_owner_rule():
     assert 'id="lg-owners"' in PETTY_VIEW
 
 
-def test_project_picker_is_one_shared_datalist_not_300_selects():
+def test_project_picker_is_one_shared_popover_not_300_selects():
     """🔴 專案有 238 個 —— 每列各長一份下拉＝七萬個 option（載入卡住的原因）。
 
-    改成**共用一份 datalist**：選項全表只長一次，型別提示由瀏覽器做。
-    這條釘住兩件事：datalist 只組一次、而且列裡是 input 不是 select
-    （回頭改成 select 就會把 238 個選項再乘上 300）。
+    2026-09-04 起改成**共用一個浮層**（js/shared/project-pop，跟工作日誌同一個；分「進行中／已結案」）：
+    選項只在記憶體一份，列裡是 input 不是 select（回頭改成 select 就會把 238 個選項再乘上 300）。
     """
-    assert PETTY_VIEW.count("<datalist id=\"pc-proj-dl\">") == 1
-    assert 'list="pc-proj-dl"' in PETTY_VIEW
-    # 逐列的專案欄是 input；select 版本（含 data-lazy 那套）不該再存在
+    assert "<datalist" not in js_code_only(PETTY_VIEW)
+    assert 'import { attachProjectPop } from "../../js/shared/project-pop.js"' in PETTY_VIEW
     assert "data-lazy" not in PETTY_VIEW
-    assert '<input data-f="project_id"' in PETTY_VIEW
+    assert '<input data-f="project_id" data-proj-pick' in PETTY_VIEW
     assert '<select data-no-search data-f="project_id"' not in PETTY_VIEW
 
 
@@ -578,12 +576,11 @@ def test_every_project_picker_shares_one_label_builder():
     assert PETTY_VIEW.count("function projectLabels") == 1
     # 沒有人再自己把 opts.projects 攤成 <option>（那就是繞過標籤建構）
     assert "opts.projects.map(" not in PETTY_VIEW, "有下拉自己組專案選項，沒走共用建構"
-    # <select> 挑選處（帳冊新增列／未歸戶綁定）走共用 options 建構
-    for blank in ("（無專案）", "選擇專案…"):
-        assert f"projectOptions(opts.projects, '<option value=\"\">{blank}" in PETTY_VIEW, \
-            f"「{blank}」那個下拉沒走共用的標籤建構"
-    # datalist 挑選處（帳冊過濾／登記表單，2026-08-19 表單改可搜尋）：
+    # <select> 挑選處（未歸戶綁定）走共用 options 建構；帳冊新增列 2026-09-04 起也是浮層
+    assert "projectOptions(opts.projects, '<option value=\"\">選擇專案…" in PETTY_VIEW, "「選擇專案…」那個下拉沒走共用的標籤建構"
+    # 浮層挑選處（登記表單／帳冊每列與新增列）：列由 projectRows 用同一份 labelOf 組——
     # 值與反查表同源 —— 自由文字必須反查得到 id，打錯不准靜默變公司支出
+    assert PETTY_VIEW.count("projectRows(opts.projects,") == 2
     assert "const { labelOf, idOfLabel } = projectLabels(opts.projects);" in PETTY_VIEW
     assert "idOfLabel: formIdOfLabel } = projectLabels(opts.projects)" in PETTY_VIEW
     assert "formIdOfLabel[projLabel]" in PETTY_VIEW, "表單送出沒反查 id"
