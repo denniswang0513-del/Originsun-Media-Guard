@@ -28,6 +28,10 @@
   html, body { background:var(--bg); color:var(--ink); min-height:100vh;
     font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif; font-size:15px; }
   input[type=date], input[type=month] { color-scheme:dark; }
+  /* iOS Safari 的日期／月份欄位有自己的內建高度與外觀，跟旁邊欄位不齊（零用金日期框蓋到摘要）：拿掉原生外觀、鎖同高 */
+  input[type=date], input[type=month] { -webkit-appearance:none; appearance:none; display:block; width:100%; box-sizing:border-box;
+    min-height:44px; height:44px; line-height:normal; text-align:left; }
+  input[type=date]::-webkit-date-and-time-value, input[type=month]::-webkit-date-and-time-value { text-align:left; height:auto; margin:0; }
   button { font-family:inherit; }
   a { color:var(--pri); text-decoration:none; }
   [hidden] { display:none !important; }
@@ -174,6 +178,7 @@
   #petty .pc-form input, #petty .pc-form select, #petty .pc-form textarea,
   #petty input, #petty select, #petty textarea { background:var(--field); color:var(--ink);
     border:1px solid var(--line); border-radius:8px; min-height:44px; font-size:16px; }
+  #petty input:not([type=checkbox]), #petty select { box-sizing:border-box; height:44px; }   /* 日期／金額／下拉同高 */
   #petty .pc-sum, #petty .pc-form { border-radius:12px; background:var(--card); }
 
   /* ── toast ── */
