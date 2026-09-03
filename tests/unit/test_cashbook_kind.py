@@ -19,7 +19,7 @@ def test_backend_options_expose_passthrough_categories_from_category_map():
 def test_frontend_kind_is_one_rule_for_color_and_filter():
     js = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
     assert "const _kindOf = (e) =>" in js and js.count("_kindOf(") >= 2     # 底色（快篩鈕已改成打字框）
-    kind = js[js.index("const _kindOf = (e) =>"):js.index("let _kindOnly")]
+    kind = js[js.index("const _kindOf = (e) =>"):js.index("let _catQ")]
     assert "代開" not in kind, "種類判定不寫死類別名：代開那組從後端 passthrough_categories 拿"
     assert "_PASSTHROUGH = o.passthrough_categories" in js
     assert "' cash-kind-' + _kindOf(e)" in js
