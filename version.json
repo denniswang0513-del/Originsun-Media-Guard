@@ -1,5 +1,5 @@
 {
-  "version": "2.4.310",
+  "version": "2.4.311",
   "build_date": "2026-09-03",
-  "notes": "CRM 手機版：頂欄上一頁／首頁＋固定頂列（含主畫面 safe-area）、源日標誌與 iPhone 主畫面圖示、每個清單「載入更多」（發票後端 offset）、記雜支改頁內畫面、專案抽屜的開發票／記雜支原地展開且動作按鈕會換色、抽屜不蓋分頁列、/options 多 expense.categories"
+  "notes": "行事曆：拍攝場次＋器材登記（手機版第五分頁取代付款，付款成隱藏頁）；場次連專案（拍攝日自動算）與 Google 日曆（服務帳號寫入）；器材預約沿用器材庫領用紀錄（已領／已還共用規則）；新表 crm_shoots、equipment_checkouts.shoot_id"
 }
