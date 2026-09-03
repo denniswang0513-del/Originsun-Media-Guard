@@ -3,6 +3,7 @@
 對外一律從 `db.models` 匯入，別直接指名這個檔。
 """
 from ._base import (Base, BigInteger, Boolean, Column, DateTime, Float, Index, Integer, JSONB, String, Text, UniqueConstraint, func)
+from sqlalchemy import Date   # 拍攝日只有日期沒有時間（crm_shoots）
 
 class Timesheet(Base):
     """工時紀錄（N2 工時鏈；階段 0 先收 Google Sheet 同步，藍圖 §3.6）。
@@ -595,6 +596,9 @@ class EquipmentCheckout(Base):
     due_at = Column(DateTime(timezone=True), nullable=True)      # 應還日
     returned_at = Column(DateTime(timezone=True), nullable=True)  # 歸還時間（空＝未歸還）
     condition_note = Column(String(255), nullable=True)          # 歸還時狀況備註
+    # 行事曆（docs/SHOOT_CALENDAR_PLAN.md）：掛在哪一場拍攝。預約列＝out_at 空、returned_at 空；
+    # 「已領」填 out_at、「已還」填 returned_at —— 跟器材庫直接領用是同一張表、同一套規則。
+    shoot_id = Column(String(32), nullable=True, index=True)     # soft FK → crm_shoots.id
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("idx_eqco_equipment_returned", "equipment_id", "returned_at"),)
@@ -610,6 +614,32 @@ class EquipmentMaintenance(Base):
     cost = Column(Integer, nullable=True)                        # 保養費用
     note = Column(String(255), nullable=True)                    # 保養內容
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CrmShoot(Base):
+    """拍攝場次（行事曆，docs/SHOOT_CALENDAR_PLAN.md §1）— 哪一天、哪個案子、去哪裡、誰去、帶什麼器材。
+    器材走 equipment_checkouts.shoot_id；專案的 shoot_date 從這裡的場次算（core.shoot_logic）。"""
+    __tablename__ = "crm_shoots"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    project_id = Column(String(32), nullable=False, index=True)  # soft FK → crm_projects.id
+    title = Column(String(128), nullable=True)                   # 空＝用案名
+    date = Column(Date, nullable=False, index=True)              # 拍攝日
+    end_date = Column(Date, nullable=True)                       # 多日拍攝的結束日（空＝當天）
+    start_time = Column(String(5), nullable=True)                # 'HH:MM'，空＝全天
+    end_time = Column(String(5), nullable=True)
+    location_id = Column(String(32), nullable=True)              # soft FK → preprod_locations.id
+    location_text = Column(String(255), nullable=True)           # 自由文字地點
+    crew = Column(Text, nullable=True)                           # JSON [{staff_id, name}]
+    notes = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="排定")   # core.shoot_logic.SHOOT_STATUSES
+    cost_group_id = Column(String(32), nullable=True)            # soft FK → crm_project_cost_groups.id
+    google_event_id = Column(String(255), nullable=True)         # Google 日曆事件 id
+    synced_at = Column(DateTime(timezone=True), nullable=True)
+    sync_error = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class FootageIndex(Base):

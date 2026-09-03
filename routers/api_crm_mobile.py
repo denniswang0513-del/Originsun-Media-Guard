@@ -223,6 +223,8 @@ async def mobile_project_detail(project_id: str, request: Request):
         show_money = _money_visible(request, project)
         out = {"project": await project_wire(session, project),
                "notes": project.notes or ""}
+        from routers.api_shoots import shoots_for_project   # 延遲 import：api_shoots 的 options 反過來借這裡的 _slim_project
+        out["shoots"] = await shoots_for_project(session, project_id)
         if show_money:
             out["quotes"] = [_to_quotation_dict(q, project_name=project.name or "")
                              for q in await project_quotation_rows(session, project_id)]

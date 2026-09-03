@@ -10,12 +10,14 @@ export const state = {
     canWrite: false,
     invoicePreset: null,  // 從專案抽屜「開發票」帶過來的 project_id
     expensePreset: null,  // 從專案抽屜「記雜支」帶過來的 project_id
+    shootPreset: null,    // 從專案抽屜「登記拍攝」帶過來的 project_id
 };
 
-export const TABS = ['invoice', 'petty', 'projects', 'quotes', 'payments'];
+// owner 2026-09-03：第五顆改「行事曆」（拍攝排程＋器材登記，docs/SHOOT_CALENDAR_PLAN.md）；付款退成隱藏路由
+export const TABS = ['invoice', 'petty', 'projects', 'quotes', 'calendar'];
 export const DEFAULT_TAB = 'invoice';
-/** 有畫面但不在分頁列的路由（從別的畫面進、上一頁回去）：記雜支。 */
-export const ROUTES = [...TABS, 'expense'];
+/** 有畫面但不在分頁列的路由（從別的畫面進、上一頁回去）：記雜支、付款（專案抽屜「請款」段的「付款清單」進）。 */
+export const ROUTES = [...TABS, 'expense', 'payments'];
 
 export function currentTab() {
     const h = (location.hash || '').replace(/^#/, '').split('?')[0];

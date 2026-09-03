@@ -14,7 +14,8 @@
 <link rel="icon" href="/m/icon-192.png">
 <title>源日 CRM</title>
 <!-- CRM 手機版（docs/CRM_MOBILE_PLAN.md）：現場輸入＋快看，跟桌機版分開。
-     五個分頁（發票／零用金／專案／報價／付款），hash 路由；殼只有 ./shell.js 一份。
+     五個分頁（發票／零用金／專案／報價／行事曆），hash 路由；殼只有 ./shell.js 一份。
+     付款（owner 2026-09-03 被行事曆取代）與記雜支是隱藏路由，從專案抽屜進。
      閘門：管理員（Lv3）或擁有「crm_projects」模組；寫入鈕再看 /options 的 me.can_write。
      字彙（階段／案型／狀態／款項／發票種類）全部來自 GET /api/v1/crm/m/options，
      這裡一個都不寫死 —— /invoice.html 寫死 payment_status 的下場見計畫 §7。
@@ -27,11 +28,12 @@
   * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
   html, body { background:var(--bg); color:var(--ink); min-height:100vh;
     font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif; font-size:15px; }
-  input[type=date], input[type=month] { color-scheme:dark; }
-  /* iOS Safari 的日期／月份欄位有自己的內建高度與外觀，跟旁邊欄位不齊（零用金日期框蓋到摘要）：拿掉原生外觀、鎖同高 */
-  input[type=date], input[type=month] { -webkit-appearance:none; appearance:none; display:block; width:100%; box-sizing:border-box;
+  input[type=date], input[type=month], input[type=time] { color-scheme:dark; }
+  /* iOS Safari 的日期／月份／時間欄位有自己的內建高度與外觀，跟旁邊欄位不齊（零用金日期框蓋到摘要）：拿掉原生外觀、鎖同高 */
+  input[type=date], input[type=month], input[type=time] { -webkit-appearance:none; appearance:none; display:block; width:100%; box-sizing:border-box;
     min-height:44px; height:44px; line-height:normal; text-align:left; }
-  input[type=date]::-webkit-date-and-time-value, input[type=month]::-webkit-date-and-time-value { text-align:left; height:auto; margin:0; }
+  input[type=date]::-webkit-date-and-time-value, input[type=month]::-webkit-date-and-time-value,
+  input[type=time]::-webkit-date-and-time-value { text-align:left; height:auto; margin:0; }
   button { font-family:inherit; }
   a { color:var(--pri); text-decoration:none; }
   [hidden] { display:none !important; }
@@ -107,6 +109,7 @@
   .pill.pri { color:var(--pri); border-color:var(--pri); }
   .pill.ok { color:var(--ok); border-color:#166534; }
   .pill.warn { color:var(--warn); border-color:#92400e; }
+  .pill.bad { color:var(--bad); border-color:#7f1d1d; }
   .m-strip { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
   .m-strip .k { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
   .m-strip .k .n { font-size:24px; font-weight:700; color:#fff; font-variant-numeric:tabular-nums; }
@@ -116,6 +119,10 @@
   .m-chips button { flex:none; min-height:36px; padding:0 14px; border-radius:999px; border:1px solid var(--line);
     background:var(--card); color:var(--sub); font-size:13px; cursor:pointer; }
   .m-chips button.on { background:rgba(59,130,246,.18); border-color:var(--pri); color:var(--pri); }
+  /* 行事曆表單的已選人員／器材：可換行、按一下移除；撞到別場的器材紅框 */
+  .m-chips.wrap { flex-wrap:wrap; overflow:visible; margin-bottom:12px; }
+  .m-chips .chip { background:rgba(59,130,246,.18); border-color:var(--pri); color:var(--ink); }
+  .m-chips .chip.bad { background:rgba(185,28,28,.18); border-color:#b91c1c; color:var(--bad); }
   .m-h { font-size:12px; letter-spacing:.12em; color:var(--sub); font-weight:600; margin:16px 0 8px; text-transform:uppercase; }
   .m-h:first-child { margin-top:2px; }
   .m-empty { color:var(--sub); font-size:13px; text-align:center; padding:28px 0; }
@@ -208,7 +215,7 @@
     <button type="button" data-tab="petty"><i class="ico"></i>零用金</button>
     <button type="button" data-tab="projects"><i class="ico"></i>專案</button>
     <button type="button" data-tab="quotes"><i class="ico"></i>報價</button>
-    <button type="button" data-tab="payments"><i class="ico"></i>付款</button>
+    <button type="button" data-tab="calendar"><i class="ico"></i>行事曆</button>
   </nav>
 </div>
 

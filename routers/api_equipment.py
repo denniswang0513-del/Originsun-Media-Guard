@@ -373,6 +373,25 @@ async def delete_equipment(eid: str, request: Request):
 # ── 領用 / 歸還 ───────────────────────────────────────────
 
 
+def mark_checked_out(equip, checkout, now, person: str = "") -> None:
+    """領用：領用列填 out_at、器材轉出勤。器材庫直接領用與行事曆場次「已領」共用這一份規則。"""
+    checkout.out_at = now
+    if person and not checkout.person:
+        checkout.person = person[:64]
+    equip.status = "出勤"
+    equip.updated_at = now
+
+
+def mark_returned(equip, checkout, now, note: str = "") -> None:
+    """歸還：領用列填 returned_at（＋狀況備註）、器材轉在庫。"""
+    checkout.returned_at = now
+    note = (note or "").strip()
+    if note:
+        checkout.condition_note = note[:255]
+    equip.status = "在庫"
+    equip.updated_at = now
+
+
 @router.post("/{eid}/checkout")
 async def checkout_equipment(eid: str, req: EquipmentCheckoutPayload, request: Request):
     """領用（person 必填；已有未歸還紀錄回 409）。成功後 status=出勤。"""
@@ -402,12 +421,10 @@ async def checkout_equipment(eid: str, req: EquipmentCheckoutPayload, request: R
             equipment_id=eid,
             project_id=(req.project_id or "").strip() or None,
             person=person[:64],
-            out_at=now,
             due_at=due_at,
         )
         session.add(checkout)
-        equip.status = "出勤"
-        equip.updated_at = now
+        mark_checked_out(equip, checkout, now)
         await session.commit()
         await session.refresh(checkout)
         project_name = ""
@@ -440,12 +457,7 @@ async def return_equipment(eid: str, req: EquipmentReturnPayload, request: Reque
         if not open_row:
             raise HTTPException(status_code=404, detail="此器材沒有未歸還的領用紀錄")
 
-        open_row.returned_at = now
-        note = (req.condition_note or "").strip()
-        if note:
-            open_row.condition_note = note[:255]
-        equip.status = "在庫"
-        equip.updated_at = now
+        mark_returned(equip, open_row, now, req.condition_note or "")
         await session.commit()
         await session.refresh(open_row)
 

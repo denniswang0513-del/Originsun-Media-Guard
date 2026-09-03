@@ -5,7 +5,7 @@
  */
 import { mfetch, toast, esc, money, fmtDate } from '../shell.js';
 import { state, list, lostPhase, opt, selectOpts, pickerHtml, mountPicker, skeleton, emptyBox, errBox, pill, statusPill,
-         moneyCell, withBusy, openSheet, closeSheet, embedHost, unembedHost, markStale, shouldLoad } from '../ui.js';
+         moneyCell, withBusy, openSheet, closeSheet, embedHost, unembedHost, switchTab, markStale, shouldLoad } from '../ui.js';
 
 const PAGE = 30;
 const st = { phase: '', q: '', items: [], offset: 0, total: 0, loading: false };
@@ -100,13 +100,17 @@ function detailHtml(d) {
         <button type="button" class="m-btn" data-act="phase">推階段</button>
         <button type="button" class="m-btn" data-act="note">加備註</button>
         <button type="button" class="m-btn" data-act="expense">記雜支</button>
+        <button type="button" class="m-btn" data-act="shoot">登記拍攝</button>
         <button type="button" class="m-btn" data-act="invoice">開發票</button>
       </div>
       <div id="pj-act-box"></div>
+      ${section('拍攝', (d.shoots || []).map(s => li(`${esc(fmtDate(s.date))}${s.start_time ? ' ' + esc(s.start_time) : ''} ${pill(s.status)}`,
+          esc(s.location_name || s.location_text || (s.equipment_count ? '器材 ' + s.equipment_count : '')))), '沒有排拍攝')}
       ${section('報價', (d.quotes || []).map(q => li(`${esc(q.version || '')} ${pill(q.status)}`,
           `<span class="amt">${amt(q, 'total') ?? ''}</span> ${esc(fmtDate(q.quote_date))}`)), '沒有報價')}
       ${section('請款', (d.payments || []).map(x => li(`${esc(x.summary || x.payee_name || '')} ${pill(x.payment_status)}`,
           `<span class="amt">${amt(x, 'amount') ?? ''}</span> ${esc(x.planned_month || '')}`)), '沒有請款')}
+      <div class="row" style="margin:-4px 0 6px"><span></span><button type="button" class="m-btn sm" data-act="payments">付款清單</button></div>
       ${section('發票', (d.invoices || []).map(x => li(`${esc(x.title || x.invoice_number || '')} ${pill(x.payment_status)}`,
           `<span class="amt">${amt(x, 'amount_total') ?? ''}</span> ${esc(fmtDate(x.invoice_date))}`)), '沒有發票')}
       ${section('最近雜支', (d.expenses_recent || []).map(x => li(`${esc(x.sub_item || x.category || '')} ${esc(x.payee || '')}`,
@@ -179,10 +183,13 @@ export async function openProject(id) {
         box.innerHTML = '';
         if (again) return;
         const kind = b.dataset.act;
-        if (kind === 'invoice' || kind === 'expense') {
-            if (kind === 'invoice') state.invoicePreset = p.id; else state.expensePreset = p.id;
+        if (kind === 'payments') { closeSheet(); switchTab('payments'); return; }   // 付款是隱藏路由（owner 2026-09-03 行事曆取代付款分頁）
+        const PRESET = { invoice: 'invoicePreset', expense: 'expensePreset', shoot: 'shootPreset' };
+        if (PRESET[kind]) {
+            state[PRESET[kind]] = p.id;
+            const view = kind === 'shoot' ? 'calendar' : kind;
             box.innerHTML = skeleton(2);
-            try { const host = await state.ensureView(kind); box.innerHTML = ''; embedHost(box, host); }
+            try { const host = await state.ensureView(view); box.innerHTML = ''; embedHost(box, host); }
             catch (e) { box.innerHTML = errBox(e); }
             return;
         }

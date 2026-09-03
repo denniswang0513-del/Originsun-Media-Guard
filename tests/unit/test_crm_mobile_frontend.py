@@ -162,11 +162,13 @@ def test_html_meta_for_phone():
 
 
 def test_five_tabs_and_invoice_is_the_landing_tab():
-    """owner 2026-09-03：發票與零用金最常用，排最前面；發票是預設落地分頁。"""
+    """owner 2026-09-03：發票與零用金最常用，排最前面；發票是預設落地分頁。
+    同日再拍板：第五顆「付款」改「行事曆」（拍攝排程＋器材登記），付款退成隱藏路由（專案抽屜「付款清單」進）。"""
     ui = repo_src("frontend/m/ui.js")
     tabs = re.search(r"export const TABS = \[(.*?)\]", ui).group(1)
     ids = re.findall(r"'(\w+)'", tabs)
-    assert ids == ["invoice", "petty", "projects", "quotes", "payments"], ids
+    assert ids == ["invoice", "petty", "projects", "quotes", "calendar"], ids
+    assert "export const ROUTES = [...TABS, 'expense', 'payments']" in ui
     assert "export const DEFAULT_TAB = 'invoice'" in ui
     html_tabs = re.findall(r'data-tab="(\w+)"', CRM_HTML)
     assert html_tabs == ids, "tab bar 的順序要跟 TABS 一致"
@@ -241,10 +243,29 @@ def test_expense_is_an_in_app_route_not_a_popup():
     assert "ensureView(" in pj and "embedHost(" in pj, "開發票／記雜支在抽屜裡原地展開（owner：不要跳到另一個畫面）"
     assert "switchTab('expense')" not in pj and "switchTab('invoice')" not in pj
     ui = repo_src("frontend/m/ui.js")
-    assert "export const ROUTES = [...TABS, 'expense']" in ui, "expense 是路由不是分頁（分頁列維持五個）"
+    assert "'expense'" in re.search(r"export const ROUTES = \[(.*?)\]", ui).group(1), "expense 是路由不是分頁（分頁列維持五個）"
     exp = js_code_only(repo_src("frontend/m/views/expense.js"))
     assert "pickerHtml('exp-project_id')" in exp and "renderPaged(" in exp
     assert "opt().expense" in exp and "'交通'" not in exp, "類別從 options.expense.categories 拿，不寫死"
     assert "/receipts/" in exp and "FormData" in exp
     sh = repo_src("frontend/m/shell.js")
     assert "instanceof FormData" in sh, "multipart 也走 mfetch（殼只有一份）"
+
+
+def test_calendar_tab_contract():
+    """行事曆分頁（docs/SHOOT_CALENDAR_PLAN.md §3）：專案／地點／人員／器材都是打字找的選擇器、字彙從 /shoots/options 拿、
+    清單有載入更多；專案抽屜有「登記拍攝」（原地展開）與「付款清單」（隱藏路由）。"""
+    cal = js_code_only(repo_src("frontend/m/views/calendar.js"))
+    for pid in ("cal-project_id", "cal-location", "cal-crew", "cal-equip"):
+        assert f"pickerHtml('{pid}')" in cal and f"mountPicker('{pid}'" in cal, pid
+    assert "/api/v1/shoots" in cal and "renderPaged(" in cal
+    assert "calendar/status" in cal and "calendar/config" in cal and "calendar/test" in cal
+    assert "_o.statuses" in cal and "equipment_states" in cal
+    for word in ("'排定'", "'預約'", "'已領'", "'已還'"):     # 「完成」「取消」是按鈕動作字，狀態比對一律走 options
+        assert word not in cal, f"calendar.js 寫死了字彙 {word}"
+    assert "=== doneStatus()" in cal and "=== cancelled()" in cal
+    pj = js_code_only(repo_src("frontend/m/views/projects.js"))
+    assert 'data-act="shoot"' in pj and "shootPreset" in pj and "ensureView(view)" in pj
+    assert 'data-act="payments"' in pj and "switchTab('payments')" in pj
+    html_tabs = re.findall(r'data-tab="(\w+)"', CRM_HTML)
+    assert html_tabs[-1] == "calendar" and "payments" not in html_tabs

@@ -1186,6 +1186,38 @@ class EquipmentMaintenancePayload(BaseModel):
     note: Optional[str] = None
 
 
+class ShootCreate(BaseModel):
+    """拍攝場次（行事曆）新增；日期 'YYYY-MM-DD'、時間 'HH:MM'。"""
+    project_id: Optional[str] = None
+    title: Optional[str] = None
+    date: Optional[str] = None
+    end_date: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    location_id: Optional[str] = None
+    location_text: Optional[str] = None
+    crew: Optional[list] = None            # [{staff_id, name}]
+    equipment_ids: Optional[List[str]] = None
+    notes: Optional[str] = None
+    cost_group_id: Optional[str] = None
+
+
+class ShootUpdate(ShootCreate):
+    """部分更新：只動有送的欄位（看 model_fields_set）；equipment_ids 有送才做器材差異。"""
+
+
+class ShootStatusPayload(BaseModel):
+    status: Optional[str] = None           # core.shoot_logic.SHOOT_STATUSES
+
+
+class ShootEquipmentPayload(BaseModel):
+    equipment_ids: Optional[List[str]] = None   # 空＝整場
+
+
+class CalendarConfigPayload(BaseModel):
+    calendar_id: Optional[str] = None
+
+
 class FootageScanRequest(BaseModel):
     """B5 素材庫：掃描資料夾建索引。"""
     root_path: str

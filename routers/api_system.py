@@ -74,7 +74,7 @@ async def health_check():
 # `https://foundry.originsun-studio.com/api/settings/load` 從公網可讀到這兩個值。
 # 因此輸出前一律抹除。新增機密欄位時務必同步加進這裡。
 _SECRET_KEYS = ("jwt_secret", "database_url")
-_SECRET_SUBKEYS = {"google_oauth": ("client_secret",)}
+_SECRET_SUBKEYS = {"google_oauth": ("client_secret",), "google_calendar": ("service_account_json",)}
 
 
 def _redact_settings(s: dict) -> dict:

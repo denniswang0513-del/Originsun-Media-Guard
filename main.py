@@ -38,7 +38,7 @@ _ROUTER_MODULES = [
     'api_references',
     'api_intel',
     'api_portal',
-    'api_equipment',
+    'api_equipment', 'api_shoots',
     'api_footage',
     'api_analytics',
     'api_crm',
@@ -617,6 +617,8 @@ async def _on_startup():
                         # 關聯面板每次載入那格都是空的 → 按一下儲存就送 fee=0，
                         # deposit 退回去、bank_fee 被清掉（靜默回退，畫面看不出來）。
                         ("crm_cash_invoice_links", "fee", "INTEGER NOT NULL DEFAULT 0"),
+                        # 行事曆：器材預約列掛在哪一場拍攝（docs/SHOOT_CALENDAR_PLAN.md）
+                        ("equipment_checkouts", "shoot_id", "VARCHAR(32)"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

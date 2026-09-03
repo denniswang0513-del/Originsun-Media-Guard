@@ -91,6 +91,10 @@ _DEFAULT_SETTINGS: dict = {
     "browse_roots": [],  # NAS 瀏覽器允許的根目錄，例 ["S:/", "R:/", "T:/"]
     "staff_roles": ["攝影師", "剪輯師", "導演", "製片", "燈光", "收音", "空拍", "動畫"],
     "project_types": ["紀實影片", "活動紀實", "形象影片", "廣告", "MV"],
+    "google_calendar": {          # 行事曆（docs/SHOOT_CALENDAR_PLAN.md）：日曆 ID＋服務帳號（空＝借官網設定的 GA 服務帳號）
+        "calendar_id": "",
+        "service_account_json": "",
+    },
     "google_oauth": {
         "enabled": False,
         "client_id": "",
