@@ -68,12 +68,16 @@
 
   /* ── App 殼 ── */
   #m-app { display:flex; flex-direction:column; min-height:100vh; }
-  .m-hdr { position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between;
+  .m-hdr { position:sticky; top:0; z-index:50; display:flex; align-items:center; justify-content:space-between;
     padding:calc(10px + var(--sat)) 16px 10px; background:rgba(26,26,26,.94); backdrop-filter:blur(10px);
     border-bottom:1px solid var(--line); }
   .m-hdr .brand { font-weight:700; color:#fff; }
   .m-hdr .brand span { color:var(--pri); }
   .m-hdr .who { font-size:12px; color:var(--sub); }
+  .m-hdr .ttl { flex:1; text-align:center; min-width:0; line-height:1.2; }
+  .m-hdr .page { font-size:12px; color:var(--sub); margin-top:2px; }
+  .m-hdr .nav { min-width:64px; min-height:40px; padding:0 10px; background:transparent; border:1px solid var(--line); border-radius:8px; color:var(--ink); font-size:14px; }
+  .m-hdr .nav:active { border-color:var(--pri); color:var(--pri); }
   #m-view { flex:1; padding:12px 12px calc(76px + var(--sab)); max-width:560px; width:100%; margin:0 auto; }
   .m-tabbar { position:fixed; left:0; right:0; bottom:0; z-index:30; display:flex; background:#202020;
     border-top:1px solid var(--line); padding-bottom:var(--sab); }
@@ -181,8 +185,9 @@
 
 <div id="m-app" hidden>
   <header class="m-hdr">
-    <div class="brand"><span>Originsun</span> CRM</div>
-    <div class="who" id="m-who"></div>
+    <button type="button" class="nav" id="m-back" aria-label="上一頁">‹ 上一頁</button>
+    <div class="ttl"><div class="brand"><span>Originsun</span> CRM</div><div class="page" id="m-page"></div></div>
+    <button type="button" class="nav" id="m-home" aria-label="首頁">首頁</button>
   </header>
   <main id="m-view"></main>
   <nav class="m-tabbar" id="m-tabbar">

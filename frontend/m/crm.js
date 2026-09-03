@@ -6,7 +6,7 @@
  * 分頁：#invoice（預設）／#petty／#projects／#quotes／#payments，畫面在 views/。
  */
 import { boot, mfetch, toast, esc } from './shell.js';
-import { state, TABS, currentTab, initSheet, closeSheet, errBox } from './ui.js';
+import { state, TABS, DEFAULT_TAB, currentTab, initSheet, closeSheet, errBox } from './ui.js';
 import * as invoiceView from './views/invoice.js';
 import * as pettyView from './views/petty.js';
 import * as projectsView from './views/projects.js';
@@ -19,6 +19,10 @@ const VIEWS = { invoice: invoiceView, petty: pettyView, projects: projectsView,
 const gate = (me) => (me.access_level || 0) >= 3 || (me.modules || []).includes('crm_projects');
 
 const hosts = {};
+let _depth = 0;      // 這次開頁後往前走了幾步（上一頁按到底就回首頁，不會退出這個 app）
+
+// 分頁名從底部 tabbar 的按鈕文字拿，不另外抄一份
+const tabLabel = (tab) => (document.querySelector(`#m-tabbar button[data-tab="${tab}"]`) || {}).textContent || '';
 
 function _host(tab) {
     if (!hosts[tab]) {
@@ -34,6 +38,7 @@ function _host(tab) {
 async function render() {
     const tab = currentTab();
     if (location.hash.replace(/^#/, '').split('?')[0] !== tab) location.hash = tab;
+    document.getElementById('m-page').textContent = tabLabel(tab) + (state.me && state.me.username ? '｜' + state.me.username : '');
     for (const b of document.querySelectorAll('#m-tabbar button'))
         b.classList.toggle('on', b.dataset.tab === tab);
     for (const t of TABS) if (hosts[t]) hosts[t].hidden = t !== tab;
@@ -53,13 +58,20 @@ async function render() {
 async function main() {
     const me = await boot({ gate });
     state.me = me;
-    document.getElementById('m-who').textContent = me.username || '';
     initSheet();
+    // 頂欄：上一頁＝先關抽屜、再退一個分頁、退到底回首頁；首頁＝發票分頁（落地分頁）
+    document.getElementById('m-back').addEventListener('click', () => {
+        const s = document.getElementById('m-sheet');
+        if (!s.hidden) { closeSheet(); return; }
+        if (_depth > 0) { _depth -= 2; history.back(); return; }   // hashchange 會再 +1，所以先扣 2
+        location.hash = DEFAULT_TAB;
+    });
+    document.getElementById('m-home').addEventListener('click', () => { closeSheet(); location.hash = DEFAULT_TAB; window.scrollTo(0, 0); });
     document.getElementById('m-tabbar').addEventListener('click', (ev) => {
         const b = ev.target.closest('button[data-tab]');
         if (b) location.hash = b.dataset.tab;
     });
-    window.addEventListener('hashchange', render);
+    window.addEventListener('hashchange', () => { _depth += 1; render(); });
     try {
         state.options = await mfetch('/api/v1/crm/m/options');
     } catch (e) {

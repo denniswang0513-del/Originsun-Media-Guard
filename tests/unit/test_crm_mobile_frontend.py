@@ -130,6 +130,15 @@ def test_long_lists_are_typeable_pickers():
     assert '<select id="np-client"' not in pj
 
 
+def test_top_bar_has_back_and_home():
+    """owner 2026-09-03：手機版最上面要有回上一頁與首頁——上一頁先關抽屜、再退分頁、退到底回首頁，不退出 app。"""
+    html = repo_src("frontend/m/crm.html")
+    assert 'id="m-back"' in html and 'id="m-home"' in html and 'id="m-page"' in html
+    js = js_code_only(CRM_JS)
+    assert "getElementById('m-back')" in js and "getElementById('m-home')" in js
+    assert "closeSheet(); return;" in js and "history.back()" in js and "location.hash = DEFAULT_TAB" in js
+
+
 def test_options_is_fetched_once_at_boot():
     assert "/api/v1/crm/m/options" in CRM_JS
     for p in _page_modules():
