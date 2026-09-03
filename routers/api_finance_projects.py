@@ -499,6 +499,7 @@ async def project_ledger_detail(project_id: str, request: Request,
             "id": x.id, "summary": x.summary, "amount": int(x.amount or 0),
             "category": x.category or "", "payee": x.payee_name or "",
             "payment_status": x.payment_status or "",
+            "request_date": _fmt_day(x.request_date),      # owner 2026-09-04「新增付款與請款日期」
             "payment_date": _fmt_day(x.payment_date),
         } for x in pays],
     }

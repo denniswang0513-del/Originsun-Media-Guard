@@ -611,8 +611,9 @@ function _renderDetail() {
                     <tr><td>${esc(x.summary)}<div style="color:#666;font-size:10px;">${esc(x.category)}${x.payee ? '｜' + esc(x.payee) : ''}</div></td>
                         <td style="text-align:right;">${fmtNum(x.amount)}</td>
                         <td style="white-space:nowrap;color:${x.payment_status === '已付款' ? '#86efac' : '#fbbf24'};">${esc(x.payment_status)}</td>
+                        <td style="white-space:nowrap;color:#888;font-size:11px;line-height:1.5;" title="請款日／付款日">請款 ${esc(x.request_date || '—')}<br>付款 ${esc(x.payment_date || '—')}</td>
                         <td style="text-align:right;white-space:nowrap;">${_payBtn(x)}</td></tr>`).join('')
-                    || '<tr><td colspan="4" style="color:#666;padding:10px;">（無）</td></tr>'}</tbody></table>
+                    || '<tr><td colspan="5" style="color:#666;padding:10px;">（無）</td></tr>'}</tbody></table>
             ${!_isMine() ? '' : `
             <details style="margin-top:14px;">
                 <summary style="color:#888;font-size:12px;cursor:pointer;">匯入保留的原始備註（案碼／案源／税別／工項）</summary>
