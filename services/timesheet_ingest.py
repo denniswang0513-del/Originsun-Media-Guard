@@ -35,8 +35,9 @@ async def ingest_context(session, staff_names) -> dict:
     """ingest 每批都要的三份查表（專案對映／人員索引／手填優先鍵）。拉整本 Sheet 分 20 批時
     建一次給每批用 —— 原本每批各建一次＝80 個查詢做 23 個的事。"""
     from sqlalchemy import select
-    from db.models import Timesheet
+    from db.models import Timesheet, TimesheetTombstone
     names = {n for n in ((s or "").strip() for s in staff_names) if n}
+    tombstones = set((await session.execute(select(TimesheetTombstone.row_hash))).scalars())   # 總表刪過的 Sheet 列
     manual_keys: set = set()
     if names:
         m_rows = (await session.execute(
@@ -44,7 +45,7 @@ async def ingest_context(session, staff_names) -> dict:
             .where(Timesheet.source == "manual").where(Timesheet.staff_name.in_(names)))).all()
         manual_keys = {manual_dup_key(n, d, p) for n, d, p in m_rows}
     return {"lk": await load_project_lookup(session), "staff_index": await load_staff_index(session),
-            "manual_keys": manual_keys}
+            "manual_keys": manual_keys, "tombstones": tombstones}
 
 
 async def ingest(session, rows, source: str, ctx: dict | None = None) -> dict:
@@ -60,7 +61,7 @@ async def ingest(session, rows, source: str, ctx: dict | None = None) -> dict:
 
     # 專案對映：對映表 → 精確 → 去客戶前綴（唯一才算）→ 撞案不猜（core.hr_logic）
     ctx = ctx or await ingest_context(session, (r.staff for r in rows))
-    lk, staff_index, manual_keys = ctx["lk"], ctx["staff_index"], ctx["manual_keys"]
+    lk, staff_index, manual_keys, tombstones = ctx["lk"], ctx["staff_index"], ctx["manual_keys"], ctx["tombstones"]
 
     # 既有 hash 一次撈（避免逐列查詢；量大時仍遠小於全表掃描成本）
     hashes = [row_hash(r.date, r.staff, r.project, r.task, r.hours) for r in rows]
@@ -70,10 +71,14 @@ async def ingest(session, rows, source: str, ctx: dict | None = None) -> dict:
 
     # 雙來源去重（藍圖 §3.6 階段3）：同 (人, 日, 專案) 已有手填列 → Sheet 列跳過（手填優先；鍵集在 ctx）
     skipped_manual = 0
+    skipped_deleted = 0
     seen_in_batch: set[str] = set()
     for r, h in zip(rows, hashes):
         if h in existing or h in seen_in_batch:
             skipped += 1
+            continue
+        if h in tombstones:                      # 總表刪過：以總表為準，不插回來
+            skipped_deleted += 1
             continue
         seen_in_batch.add(h)
         wd = parse_date(r.date)
@@ -106,6 +111,7 @@ async def ingest(session, rows, source: str, ctx: dict | None = None) -> dict:
         "inserted": inserted,
         "skipped": skipped,
         "skipped_manual_priority": skipped_manual,   # 手填優先擋下的 Sheet 列
+        "skipped_deleted": skipped_deleted,          # 總表刪過、留了指紋的 Sheet 列
         **misses.report("projects"),      # 撞案：owner 用 project_map 指定
         **staff_misses.report("staff"),   # 同名兩人：不猜，留 NULL
     }

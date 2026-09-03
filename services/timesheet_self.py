@@ -152,7 +152,14 @@ async def admin_update_row(session, row_id: str, body) -> dict:
     return {**ts_dict(r, with_note=True), "editable": True}
 
 
-async def admin_delete_row(session, row_id: str) -> dict:
-    await session.delete(await get_row(session, row_id))
+async def admin_delete_row(session, row_id: str, who: str = "") -> dict:
+    """管理員刪任一列。Sheet 拉進來的列另留指紋（TimesheetTombstone），下次拉取不再插回來 ——
+    總表為準（owner 2026-09-03）。手填列沒有 Sheet 對應，不用留。"""
+    from db.models import TimesheetTombstone
+    r = await get_row(session, row_id)
+    if r.source != "manual" and not await session.get(TimesheetTombstone, r.row_hash):
+        session.add(TimesheetTombstone(row_hash=r.row_hash, staff_name=r.staff_name or "", project_name=r.project_name or "",
+                                       work_date=r.work_date, hours=float(r.hours or 0), deleted_by=who or ""))
+    await session.delete(r)
     await session.commit()
-    return {"deleted": row_id}
+    return {"deleted": row_id, "tombstoned": r.source != "manual"}

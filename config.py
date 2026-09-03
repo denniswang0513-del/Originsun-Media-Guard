@@ -41,7 +41,7 @@ _DEFAULT_SETTINGS: dict = {
     # Apps Script／腳本推；pull 是主控端定時拉整本 xlsx（公開連結），enabled 由 owner 開。
     "timesheet": {
         "ingest_token": "",
-        "pull": {"enabled": False, "sheet_id": "", "cron": "0 * * * *"},
+        "pull": {"enabled": False, "sheet_id": "", "cron": "0 9 * * 6"},
         # 週一 09:00 上週工時 digest → Google Chat（services/timesheet_digest）
         "digest": {"enabled": False, "cron": "0 9 * * 1"},
     },

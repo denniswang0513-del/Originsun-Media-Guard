@@ -7,7 +7,7 @@ owner 2026-09-03：「可以寫一個東西定期向 Google Sheet 拉資料就�
 設定在 settings.json `timesheet.pull`（services.timesheet_settings；dev／生產各自一份檔案）：
     enabled   bool   預設 false —— 生產由 owner 打開（PUT /api/v1/timesheets/pull）
     sheet_id  str    試算表 id（網址 /d/<id>/ 那段）
-    cron      str    預設每小時整點
+    cron      str    預設每週六 09:00
     last_run_at / last_summary   runner 狀態
 
 只在 master 跑（core.topology.is_master_machine）：全機隊共用同一顆 mediaguard DB，
@@ -29,7 +29,7 @@ from services.timesheet_sheet import fetch_xlsx, load_workbook, read_rows
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CRON = "0 * * * *"
+DEFAULT_CRON = "0 9 * * 6"     # 每週六 09:00（owner 2026-09-03：總表為準，一週拉一次就好）
 _BATCH = 500                     # 一個交易幾列（9,800 列全表 ≈ 20 個交易）
 _run_lock = asyncio.Lock()
 _scheduler_task: Optional[asyncio.Task] = None
@@ -64,7 +64,7 @@ async def run_pull(force: bool = False) -> dict:
             factory = get_session_factory()
             if factory is None:
                 return {"status": "error", "message": "資料庫離線"}
-            tot = {"inserted": 0, "skipped": 0, "skipped_manual_priority": 0}
+            tot = {"inserted": 0, "skipped": 0, "skipped_manual_priority": 0, "skipped_deleted": 0}
             sets = {k: set() for k in ("ambiguous_projects", "unmatched_projects",
                                        "staff_ambiguous", "staff_unmatched")}
             async with factory() as session:      # 查表建一次，20 批共用
@@ -81,7 +81,7 @@ async def run_pull(force: bool = False) -> dict:
                    **{k: sorted(v) for k, v in sets.items()},
                    "seconds": round(time.time() - t0, 1)}
             summary = (f"{datetime.now():%m/%d %H:%M} 拉 {len(good)} 列：新增 {tot['inserted']}、"
-                       f"重複 {tot['skipped']}、壞列 {len(bad)}；撞案 {len(sets['ambiguous_projects'])}、"
+                       f"重複 {tot['skipped']}、總表已刪 {tot['skipped_deleted']}、壞列 {len(bad)}；撞案 {len(sets['ambiguous_projects'])}、"
                        f"找不到 {len(sets['unmatched_projects'])}")
             settings.mark(last_run_at=time.time(), last_summary=summary)
             logger.info("[timesheet_puller] %s", summary)

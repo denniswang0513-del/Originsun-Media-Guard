@@ -8,7 +8,7 @@
  * 四格＋主管兩格）／設定（Sheet 拉取、digest、未對映指定、代填、token；管理員）。
  * 一列的「計畫／實際」由後端的 status 決定（plan／draft），這裡只顯示、不再自己判。
  * 事件：整個 tab 一個委派的 click 監聽（initTimesheetsTab 註冊一次），局部重繪不再重綁。
- * 資料 = Google Sheet 每小時拉 + 系統內填（同人同日同案手填優先）。不審核。
+ * 資料 = Google Sheet 每週六拉 + 系統內填（同人同日同案手填優先）；總表為準（刪過的 Sheet 列不再插回）。不審核。
  * 新增 UI 依 owner 鐵則無 emoji（既有元素不回溯）。
  */
 
@@ -65,7 +65,7 @@ function _dayLabel(ymd) {
 function _pullBar() {
     const p = _pullCache;
     if (!p) return '';
-    const state = p.enabled ? `每小時自動拉（cron ${esc(p.cron)}）` : '自動拉取：關';
+    const state = p.enabled ? `自動拉（cron ${esc(p.cron)}）` : '自動拉取：關';
     const last = p.last_summary ? esc(p.last_summary) : '還沒拉過';
     return `
         <div class="ts-note" style="margin:6px 0 12px;">
@@ -77,12 +77,12 @@ function _pullBar() {
         </div>`;
 }
 
-/** 設定視窗最小化：prompt 試算表 id → 是否啟用；cron 用預設每小時。 */
+/** 設定視窗最小化：prompt 試算表 id → 是否啟用；cron 用預設（每週六 09:00）。 */
 async function _pullSettings() {
     const cur = _pullCache || {};
     const sid = prompt('工時試算表 id（網址 /d/<id>/ 那段；公開連結即可）', cur.sheet_id || '');
     if (sid === null) return;
-    const enable = confirm('要開啟每小時自動拉取嗎？\n（取消＝關閉自動拉取，仍可手動「立即拉取」）');
+    const enable = confirm('要開啟自動拉取嗎？（預設每週六 09:00）\n（取消＝關閉自動拉取，仍可手動「立即拉取」）');
     try {
         _pullCache = await tfetch('/api/v1/timesheets/pull', {
             method: 'PUT', body: { sheet_id: sid.trim(), enabled: enable },
@@ -801,7 +801,7 @@ function _renderSettings(s) {
                 <tbody>${_unmatchedTbodyHtml() || '<tr><td colspan="5" style="color:#666;text-align:center;">全部對到了</td></tr>'}</tbody>
             </table>
             <div class="ts-note">去掉「客戶_」前綴後與私帳案名相同即自動對映；撞案（同名兩案）與找不到的按「指定專案」
-                決定一次，之後每小時同步自動吃到。「行政庶務」等內部桶留在這裡是正常的。</div>
+                決定一次，之後每次同步自動吃到。「行政庶務」等內部桶留在這裡是正常的。</div>
         </div>`;
     const dg = _digestCache;
     const digestCard = dg ? `
@@ -825,7 +825,7 @@ function _renderSettings(s) {
         </div>
         <div class="ts-card">
             <h3>從 Sheet 那邊推（可選）</h3>
-            <div class="ts-note">主控端已經每小時拉，不必裝。若要改成 Sheet 端推，裝 <code>docs/appsscript/timesheet_sync.gs</code>，token 按這裡取：
+            <div class="ts-note">主控端已經每週六自動拉，不必裝。若要改成 Sheet 端推，裝 <code>docs/appsscript/timesheet_sync.gs</code>，token 按這裡取：
                 <button class="ts-btn ghost" data-ts-action="token" style="margin-left:6px;">顯示同步 Token</button>
                 <span id="ts-token-slot" style="margin-left:10px;"></span></div>
         </div>`;
@@ -887,7 +887,7 @@ let _mineProjects = null;
 
 /** 指定一個 Sheet 專案名對到哪一案：寫對映表 → 回填既有列 → 重整。
  *  🔴 走 PUT /project_map ＋ POST /remap，不自己改 timesheets.project_id ——
- *  對映表是之後每小時同步也要吃的正本，只改列就會下一小時又冒出來。 */
+ *  對映表是之後每次同步也要吃的正本，只改列就會下次拉取又冒出來。 */
 async function _mapProject(sheetName) {
     if (!sheetName) return;
     if (!_mineProjects) {
@@ -1015,7 +1015,9 @@ async function _onAction(btn) {
                 return;
             }
             if (act === 'ledger-del') {
-                if (!confirm('刪掉這一列？')) return;
+                const row = (_ledgerCache.items || []).find(x => x.id === btn.dataset.id);
+                const fromSheet = row && row.source !== 'manual';
+                if (!confirm(fromSheet ? '刪掉這一列？\n這是 Sheet 拉進來的：刪了之後下次拉取不會再插回來（總表為準）。' : '刪掉這一列？')) return;
                 try {
                     await tfetch('/api/v1/timesheets/rows/' + btn.dataset.id, { method: 'DELETE' });
                     _ledgerCache.items = _ledgerCache.items.filter(x => x.id !== btn.dataset.id);

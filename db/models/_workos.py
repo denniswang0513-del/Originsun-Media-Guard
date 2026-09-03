@@ -35,6 +35,23 @@ class Timesheet(Base):
     )
 
 
+class TimesheetTombstone(Base):
+    """總表刪掉的 Sheet 列（owner 2026-09-03：拉進來的資料以總表為準）。
+
+    Sheet 沒有列 id，冪等靠內容指紋 row_hash；刪掉列只刪 timesheets 的話，下次拉取指紋不在庫裡
+    就會再插回來。這裡留指紋，ingest 看到就跳過。Sheet 那格之後若改了（指紋變）會當新列進來 ——
+    那是新內容，不是這裡擋的範圍。快照欄只給人看「當時刪的是哪列」。"""
+    __tablename__ = "timesheet_tombstones"
+
+    row_hash = Column(String(40), primary_key=True)
+    staff_name = Column(String(64), nullable=False, default="")
+    project_name = Column(String(255), nullable=False, default="")
+    work_date = Column(DateTime(timezone=True), nullable=True)
+    hours = Column(Float, nullable=False, default=0.0)
+    deleted_by = Column(String(64), nullable=False, default="")
+    deleted_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class HrLeaveRequest(Base):
     """請假單（N-hr H2 極簡版：申請 + 核可 + 額度；不做打卡鐘）。
 

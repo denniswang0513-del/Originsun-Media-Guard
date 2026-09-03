@@ -263,7 +263,7 @@ async def ledger_delete_row(row_id: str, request: Request):
     check_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
-        return await admin_delete_row(session, row_id)
+        return await admin_delete_row(session, row_id, current_username(request))
 
 
 # ── 專案檔案頁／類似專案並排／人員檔案頁／改預算（P2）──────────────────────────

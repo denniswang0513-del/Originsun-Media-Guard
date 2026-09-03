@@ -58,6 +58,12 @@ def test_board_and_my_day_are_gated_by_the_timesheets_module():
     assert "ts_dict(r, with_note=is_admin)" in func_body(src, "async def ledger_rows(")
     svc = code_only(repo_src("services/timesheet_self.py"))
     assert "if with_note:" in func_body(svc, "def ts_dict(")
+    # 總表刪掉的 Sheet 列留指紋、ingest 看到就跳過（總表為準；手填列不留）
+    dele = func_body(svc, "async def admin_delete_row(")
+    assert "TimesheetTombstone(row_hash=r.row_hash" in dele and 'r.source != "manual"' in dele
+    ing = code_only(repo_src("services/timesheet_ingest.py"))
+    assert "select(TimesheetTombstone.row_hash)" in func_body(ing, "async def ingest_context(")
+    assert "if h in tombstones:" in func_body(ing, "async def ingest(")
 
 
 def test_tab_has_the_seven_views_and_the_daily_board_shows_what_not_how_much():

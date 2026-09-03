@@ -82,6 +82,7 @@ def test_scheduler_only_runs_on_master():
 
 def test_settings_validation_and_defaults(pull_store):
     import services.timesheet_puller as tp
+    assert tp.DEFAULT_CRON == "0 9 * * 6"        # owner 2026-09-03：每週六一次
     cfg = tp.get_pull_settings()
     assert cfg == {"enabled": False, "sheet_id": "", "cron": tp.DEFAULT_CRON,
                    "last_run_at": 0.0, "last_summary": "", "running": False}
