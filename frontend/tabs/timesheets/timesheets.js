@@ -45,6 +45,7 @@ let _pullCache = null;      // GET /timesheets/pull（主控端定時拉 Sheet �
 let _mineCache = null;      // 最近一次 /mine（我的一天）
 let _projOpts = null;       // project_options（我的一天的專案 datalist）
 let _projectCache = null;   // 最近一次 /project（專案檔案頁）
+let _projectPid = '';       // 專案檔案頁：從 burn 表點進來帶的 project_id（撈整個案）；Sheet 案名進來就空
 let _compareNames = [];     // 類似專案並排：目前選的案名
 let _digestCache = null;    // GET /timesheets/digest
 let _ledgerCache = null;    // GET /timesheets/rows（總表：一個月所有列）
@@ -235,7 +236,8 @@ async function refresh() {
             _summaryCache = s; _pullCache = pull; _digestCache = digest;
             _content.innerHTML = _renderSettings(s);
         } else if (_view.startsWith('project:')) {
-            const d = await tfetch('/api/v1/timesheets/project?name=' + encodeURIComponent(_view.slice(8)));
+            const d = await tfetch('/api/v1/timesheets/project?name=' + encodeURIComponent(_view.slice(8))
+                + (_projectPid ? '&project_id=' + encodeURIComponent(_projectPid) : ''));
             _projectCache = d;
             _content.innerHTML = _renderProject(d);
         } else if (_view === 'compare') {
@@ -624,7 +626,7 @@ function _pctStyle(pct) {
 function _burnTbodyHtml() {
     const rows = _burnSorter.sorted((_summaryCache && _summaryCache.projects) || []).map(p => `
         <tr>
-            <td><span class="ts-link" data-ts-action="open-project" data-name="${esc(p.project_name || '')}">${esc(p.project_name || p.project_id)}</span>
+            <td><span class="ts-link" data-ts-action="open-project" data-name="${esc(p.project_name || '')}" data-pid="${esc(p.project_id)}">${esc(p.project_name || p.project_id)}</span>
                 ${p.stale ? '<span class="ts-badge warn" title="進行中但 7 天沒工時">停滯</span>' : ''}</td>
             <td style="color:#888;">${esc(p.status || '')}</td>
             <td class="num">${p.hours_used}</td>
@@ -679,20 +681,37 @@ function _bars(pairs) {
     return hbars(pairs.map(([label, value, pct]) => ({ label, value, pct })),
                  { formatValue: v => `${v} h`, showPct: pairs.some(p => p[2] != null), emptyText: '—' });
 }
+/** 逐日流水按月分段（每月小計），專案時間軸用：整個案的執行狀態一路看到底。 */
+function _dayLogByMonth(days, primary) {
+    if (!days.length) return '<div style="color:#666;">還沒有紀錄</div>';
+    const groups = [];
+    for (const day of days) {
+        const m = day.date.slice(0, 7);
+        if (!groups.length || groups[groups.length - 1].m !== m) groups.push({ m, days: [], hours: 0 });
+        const g = groups[groups.length - 1];
+        g.days.push(day);
+        g.hours += day.items.reduce((a, i) => a + (i.hours || 0), 0);
+    }
+    return groups.map(g => `<div style="margin:10px 0 4px;padding:4px 8px;background:#262626;border-radius:4px;color:#ddd;font-size:12.5px;">
+            <b>${esc(g.m)}</b><span style="color:#888;"> ｜ ${g.days.length} 天 ｜ ${Math.round(g.hours * 10) / 10} h</span></div>${_dayLog(g.days, primary)}`).join('');
+}
 function _renderProject(d) {
     const pct = d.pct == null ? '—' : d.pct + '%';
-    const inCompare = _compareNames.includes(d.project_name);
-    return `${_head('專案檔案：這個案誰在哪天做了什麼、花了多少、跟類似的案比起來如何。')}
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+    const key = d.project_id ? 'id:' + d.project_id : d.project_name;    // 比較清單的鍵：整個案用 id
+    const inCompare = _compareNames.includes(key);
+    const statusPill = d.status ? `<span class="ts-badge" style="font-size:12px;padding:2px 8px;">${esc(d.status)}</span>` : (d.mapped ? '' : '<span class="ts-badge warn">未對映</span>');
+    const sheetNames = (d.sheet_names || []).filter(n => n !== d.project_name);
+    return `${_head('專案檔案：這個案的整個執行狀態 —— 誰在哪天做了什麼、花了多少、跟類似的案比起來如何。')}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
             <button class="ts-btn ghost" data-ts-action="view" data-view="projects">‹ 專案清單</button>
-            <b style="color:#eee;font-size:15px;">${esc(d.project_name)}</b>
-            <span style="color:#888;">${esc(d.status || (d.mapped ? '' : '未對映'))}</span>
+            <b style="color:#eee;font-size:15px;">${esc(d.project_name)}</b>${statusPill}
             <span style="flex:1;"></span>
-            <button class="ts-btn ghost" data-ts-action="compare-add" data-name="${esc(d.project_name)}">${inCompare ? '已在比較清單' : '加入比較'}</button>
+            <button class="ts-btn ghost" data-ts-action="compare-add" data-name="${esc(key)}">${inCompare ? '已在比較清單' : '加入比較'}</button>
             ${_compareNames.length ? `<button class="ts-btn" data-ts-action="view" data-view="compare">並排比較（${_compareNames.length}）</button>` : ''}
             ${d.mapped ? `<button class="ts-btn ghost" data-ts-action="budget" data-pid="${esc(d.project_id)}" data-cur="${d.budget_hours ?? ''}">改預算</button>` : ''}
-            <button class="ts-btn ghost" data-ts-action="export-project" data-name="${esc(d.project_name)}">匯出 CSV</button>
+            <button class="ts-btn ghost" data-ts-action="export-project" data-name="${esc(d.project_name)}" data-pid="${esc(d.project_id || '')}">匯出 CSV</button>
         </div>
+        ${sheetNames.length ? `<div class="ts-note" style="margin:0 0 10px;">Sheet 上的案名：${sheetNames.map(esc).join('、')}</div>` : ''}
         <div style="margin-bottom:12px;">
             <span class="ts-chip"><b>${d.total}</b>總時數</span>
             <span class="ts-chip"><b>${d.people}</b>人</span>
@@ -712,8 +731,8 @@ function _renderProject(d) {
                 : '<div style="color:#666;">沒有像的案（同客戶／案名相似／時數量級接近）</div>'}
             </div>
         </div>
-        <div class="ts-card" style="margin-top:14px;"><h3>時間軸（最近 90 個有紀錄的日子）</h3>
-            ${_dayLog(d.timeline, 'staff_name')}
+        <div class="ts-card" style="margin-top:14px;"><h3>時間軸（整個案，共 ${d.timeline.length} 個有紀錄的日子）</h3>
+            ${_dayLogByMonth(d.timeline, 'staff_name')}
         </div>`;
 }
 function _renderCompare(d) {
@@ -723,10 +742,10 @@ function _renderCompare(d) {
     return `${_head('類似專案並排：總時數、跨了幾天、幾個人、分類組成、各人 —— 接類似案時的參考。')}
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
             <button class="ts-btn ghost" data-ts-action="view" data-view="projects">‹ 專案清單</button>
-            ${_compareNames.map(n => `<span class="ts-chip" style="padding:4px 10px;">${esc(n)} <span class="ts-link" data-ts-action="compare-remove" data-name="${esc(n)}" style="margin-left:6px;">×</span></span>`).join('')}
+            ${_compareNames.map(n => `<span class="ts-chip" style="padding:4px 10px;">${esc((cols.find(c => c.key === n) || {}).project_name || n)} <span class="ts-link" data-ts-action="compare-remove" data-name="${esc(n)}" style="margin-left:6px;">×</span></span>`).join('')}
         </div>
         <div class="ts-card" style="overflow-x:auto;"><table>
-            <thead><tr><th></th>${cols.map(c => `<th><span class="ts-link" data-ts-action="open-project" data-name="${esc(c.project_name)}">${esc(c.project_name)}</span></th>`).join('')}</tr></thead>
+            <thead><tr><th></th>${cols.map(c => `<th><span class="ts-link" data-ts-action="open-project" data-name="${esc(c.key || c.project_name)}">${esc(c.project_name)}</span></th>`).join('')}</tr></thead>
             <tbody>
                 ${row('總時數', c => `<b>${c.total}</b> h`)}
                 ${row('人數', c => c.people)}
@@ -1025,7 +1044,13 @@ async function _onAction(btn) {
                 return refresh();
             }
             if (act === 'board-days') { _boardDays = Number(btn.dataset.days); return refresh(); }
-            if (act === 'open-project') { _view = 'project:' + btn.dataset.name; return refresh(); }
+            if (act === 'open-project') {
+                // 帶 pid＝撈整個案（所有對到它的 Sheet 案名）；比較清單的 id:<pid> 鍵也走這裡
+                const key = btn.dataset.name || '';
+                _projectPid = btn.dataset.pid || (key.startsWith('id:') ? key.slice(3) : '');
+                _view = 'project:' + (key.startsWith('id:') ? '' : key);
+                return refresh();
+            }
             if (act === 'open-person') { _view = 'person:' + btn.dataset.name; return refresh(); }
             if (act === 'compare-add' || act === 'compare-remove') {
                 const n = btn.dataset.name;
@@ -1049,7 +1074,8 @@ async function _onAction(btn) {
             }
             if (act === 'export-month' || act === 'export-project') {
                 const key = act === 'export-month' ? _month : btn.dataset.name;
-                const q = act === 'export-month' ? 'month=' + _month : 'project=' + encodeURIComponent(key);
+                const q = act === 'export-month' ? 'month=' + _month
+                    : (btn.dataset.pid ? 'project_id=' + encodeURIComponent(btn.dataset.pid) : 'project=' + encodeURIComponent(key));
                 return authDownload('/api/v1/timesheets/export.csv?' + q, `timesheets_${key}.csv`, '匯出');
             }
             if (act === 'digest-toggle') {

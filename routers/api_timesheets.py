@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from fastapi.responses import Response
-from sqlalchemy import func as safunc, select, update
+from sqlalchemy import func as safunc, or_, select, update
 
 import core.state as state
 from config import load_settings, save_settings
@@ -41,7 +41,7 @@ from routers.crm._shared import project_names_map
 from services import timesheet_digest, timesheet_puller
 from services.timesheet_conflicts import list_conflicts, resolve_conflict
 from services.timesheet_ingest import ingest, parse_date as _parse_date
-from services.timesheet_lookup import burn_rows, load_project_lookup
+from services.timesheet_lookup import burn_rows, load_project_lookup, project_names
 from services.timesheet_manual import insert_manual_rows, project_options
 from services.timesheet_self import (add_rows, admin_delete_row, admin_update_row, bound_ident, delete_row,
                                      list_rows, metrics_input, month_or_422, rows_by_month, ts_dict, update_row)
@@ -323,33 +323,44 @@ def _day_log(rows, limit: Optional[int] = None) -> list:
 
 
 @router.get("/project")
-async def project_file(request: Request, name: str = ""):
-    """專案檔案頁（Sheet 案名）：摘要、分類組成、時間軸（逐日工作項）、各人、各月、預算、
-    報價人日、類似專案（自動推薦，人再挑）。"""
+async def project_file(request: Request, name: str = "", project_id: str = ""):
+    """專案檔案頁＝這個案的**整個**執行狀態：摘要、分類組成、逐日時間軸（全部，不截）、各人、各月、
+    預算、報價人日、類似專案（自動推薦，人再挑）。
+
+    給 project_id（burn 表點進來）或 Sheet 案名對到了案 → 撈**整個案**（所有對到它的 Sheet 案名），
+    標題用 CRM 案名；沒對映的 Sheet 案名才只撈那個名字（owner 2026-09-03：要看每個專案的執行狀態，
+    不是近 90 天）。"""
     check_admin_or_module(request, "timesheets")
     name = (name or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name 必填")
+    pid = (project_id or "").strip()
+    if not name and not pid:
+        raise HTTPException(status_code=422, detail="name 或 project_id 至少一個")
     factory = db_factory_or_503()
     async with factory() as session:
+        if not pid:      # Sheet 案名 → 對到案就升級成整個案
+            pid = (await session.execute(
+                select(Timesheet.project_id).where(Timesheet.project_name == name)
+                .where(Timesheet.project_id.isnot(None)).limit(1))).scalar() or ""
+        cond = (Timesheet.project_id == pid) if pid else (Timesheet.project_name == name)
         rows = (await session.execute(
-            select(Timesheet).where(Timesheet.project_name == name)
-            .order_by(Timesheet.work_date.desc(), Timesheet.staff_name))).scalars().all()
-        pid = next((r.project_id for r in rows if r.project_id), None)
+            select(Timesheet).where(cond).order_by(Timesheet.work_date.desc(), Timesheet.staff_name))).scalars().all()
         proj = await session.get(CrmProject, pid) if pid else None
         quote_days = await _quote_days(session, pid)
         cands = await _project_candidates(session)
     m = project_metrics(metrics_input(rows))
     budget = getattr(proj, "budget_hours", None)
+    sheet_names = sorted({r.project_name for r in rows if r.project_name})
+    title = (getattr(proj, "name", "") or name or (sheet_names[0] if sheet_names else ""))
+    sim_name = name or (sheet_names[0] if sheet_names else title)     # 類似案用 Sheet 案名的規則（客戶前綴）
     return {
-        "project_name": name, "project_id": pid or "", "status": getattr(proj, "status", ""),
-        "mapped": bool(pid), **m,
+        "project_name": title, "project_id": pid or "", "status": getattr(proj, "status", ""),
+        "mapped": bool(pid), "sheet_names": sheet_names, **m,
         "budget_hours": budget, **budget_burn(m["total"], budget),
         "quote_days": quote_days,
         "quote_hours": quote_days * HOURS_PER_WORKDAY if quote_days else None,
         "by_month": rows_by_month(rows),
-        "timeline": _day_log(rows, limit=90),
-        "similar": similar_projects(name, split_sheet_name(name)[0], m["total"], cands),
+        "timeline": _day_log(rows),                 # 全部逐日，不截（前端按月分段）
+        "similar": similar_projects(sim_name, split_sheet_name(sim_name)[0], m["total"], cands),
     }
 
 
@@ -359,13 +370,18 @@ async def compare_projects(request: Request, names: str = ""):
     check_admin_or_module(request, "timesheets")
     wanted = [n.strip() for n in (names or "").split("|") if n.strip()][:6]
     if not wanted:
-        raise HTTPException(status_code=422, detail="names 必填（| 分隔）")
+        raise HTTPException(status_code=422, detail="names 必填（| 分隔；id:<project_id> 代表整個案）")
+    ids = [w[3:] for w in wanted if w.startswith("id:")]
+    plain = [w for w in wanted if not w.startswith("id:")]
     factory = db_factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
-            select(Timesheet).where(Timesheet.project_name.in_(wanted)))).scalars().all()
-    return {"items": [{"project_name": n, **project_metrics(metrics_input(r for r in rows if r.project_name == n))}
-                      for n in wanted]}
+            select(Timesheet).where(or_(Timesheet.project_name.in_(plain), Timesheet.project_id.in_(ids))))).scalars().all()
+        titles = await project_names(session, ids)
+    def pick(w):
+        return (r for r in rows if (r.project_id == w[3:] if w.startswith("id:") else r.project_name == w))
+    return {"items": [{"key": w, "project_name": titles.get(w[3:], w[3:]) if w.startswith("id:") else w,
+                       **project_metrics(metrics_input(pick(w)))} for w in wanted]}
 
 
 @router.get("/person")
@@ -457,17 +473,19 @@ async def dashboard(request: Request):
 
 
 @router.get("/export.csv")
-async def export_csv(request: Request, month: str = "", project: str = ""):
-    """匯出 CSV（給會計／結算）：month=YYYY-MM 或 project=Sheet 案名，至少一個。"""
+async def export_csv(request: Request, month: str = "", project: str = "", project_id: str = ""):
+    """匯出 CSV（給會計／結算）：month=YYYY-MM、project=Sheet 案名或 project_id=整個案，至少一個。"""
     check_admin_or_module(request, "timesheets")
-    if not month and not project:
-        raise HTTPException(status_code=422, detail="month 或 project 至少一個")
+    if not month and not project and not project_id:
+        raise HTTPException(status_code=422, detail="month、project 或 project_id 至少一個")
     q = select(Timesheet).order_by(Timesheet.work_date, Timesheet.staff_name)
     if month:
         m0, m1 = month_or_422(month)
         q = q.where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
     if project:
         q = q.where(Timesheet.project_name == project.strip())
+    if project_id:
+        q = q.where(Timesheet.project_id == project_id.strip())
     factory = db_factory_or_503()
     async with factory() as session:
         rows = (await session.execute(q)).scalars().all()
@@ -478,7 +496,7 @@ async def export_csv(request: Request, month: str = "", project: str = ""):
         it = ts_dict(r)
         w.writerow([it["date"], it["staff_name"], it["project_name"], it["work_type"], it["task_note"],
                     it["planned_hours"] if it["planned_hours"] is not None else "", it["hours"], it["source"], it["status"]])
-    fname = f"timesheets_{month or project}.csv"
+    fname = f"timesheets_{month or project or project_id}.csv"
     return Response(content="﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"})
 
