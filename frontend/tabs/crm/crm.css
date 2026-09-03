@@ -1874,15 +1874,14 @@
    剩下的空間給會長的文字欄按比例分。
    ⚠️ 選擇器要壓過上面那條 `#cash-list-body .crm-row > div:not(.crm-kebab-wrap)`
    （特異度 (1,2,1)），所以資料列這邊也帶 :not() 保持同級並排在後面。 */
-/* 🔴 資料列的選擇器一定要帶 :not(.crm-kebab-wrap)。沒帶的話
-   `#cash-list-body .crm-row > *:nth-child(N)` 是 (1,2,0)，輸給上面那條
-   `#cash-list-body .crm-row > div:not(.crm-kebab-wrap)`(1,2,1) —— 結果只有表頭
-   套到新寬度、資料列還是均分 flex:1，整排欄位對不到標題（2026-08-20 實測）。
-   帶了 :not() 之後是 (1,3,0)，b 段 3>2 勝出。 */
-#cash-list-panel .acct-header > span:nth-child(1),
-#cash-list-body .crm-row > *:nth-child(1):not(.crm-kebab-wrap) { flex: 0 0 122px; }                     /* 日期＋星期小標 */
-#cash-list-panel .acct-header > span:nth-child(2),
-#cash-list-body .crm-row > *:nth-child(2):not(.crm-kebab-wrap) { flex: 3.4 1 0; min-width: 0; text-align: left; }  /* 內容（折行，給寬一點：卡單摘要長） */
+/* 2026-09-03 起欄寬綁 **class**（cash-c-<key>，表頭與列同一套），不再綁 nth-child：
+   表頭與列的格子數／順序不必再一模一樣（欄位選擇器藏欄、拆項列、舊 JS 撞新 CSS 都不會整排錯位）。
+   🔴 資料列的選擇器仍要帶 :not(.crm-kebab-wrap)：(1,3,0) 才壓得過上面那條
+   `#cash-list-body .crm-row > div:not(.crm-kebab-wrap)` (1,2,1)。 */
+#cash-list-panel .acct-header > span.cash-c-date,
+#cash-list-body .crm-row > .cash-c-date:not(.crm-kebab-wrap) { flex: 0 0 122px; }                     /* 日期＋星期小標 */
+#cash-list-panel .acct-header > span.cash-c-summary,
+#cash-list-body .crm-row > .cash-c-summary:not(.crm-kebab-wrap) { flex: 3.4 1 0; min-width: 0; text-align: left; }  /* 內容（折行，給寬一點：卡單摘要長） */
 /* 六日／國定假日（owner 2026-08-27「假日的功能也做在收支」）：日期後面掛一個
    星期小標，六日藍、假日紅褐 —— 判斷這筆屬公屬私時，那天是不是假日是關鍵線索。
    ⚠️ 日期欄是 flex 0 0 92px 的固定寬，小標要能擠進去 → 字級壓到 10px、
@@ -1910,46 +1909,45 @@
    owner 2026-08-27 要求超過就折行。覆寫的是上面資料列那條共用 ellipsis 規則，
    所以 white-space / overflow / text-overflow 三個都要寫回來（只改 white-space 的話，
    overflow:hidden 仍會把第二行切掉）。break-word 讓沒有空白的長英數字串也能斷。 */
-#cash-list-body .crm-row > *:nth-child(2):not(.crm-kebab-wrap) {
+#cash-list-body .crm-row > .cash-c-summary:not(.crm-kebab-wrap) {
   white-space: normal; overflow: visible; text-overflow: clip;
   overflow-wrap: break-word; line-height: 1.4;
 }
-#cash-list-panel .acct-header > span:nth-child(3),
-#cash-list-body .crm-row > *:nth-child(3):not(.crm-kebab-wrap) { flex: 0 0 84px; text-align: right; }   /* 收入（金額欄收窄，寬度讓給內容） */
-#cash-list-panel .acct-header > span:nth-child(4),
-#cash-list-body .crm-row > *:nth-child(4):not(.crm-kebab-wrap) { flex: 0 0 82px; text-align: right; }   /* 信用卡 */
-#cash-list-panel .acct-header > span:nth-child(5),
-#cash-list-body .crm-row > *:nth-child(5):not(.crm-kebab-wrap) { flex: 0 0 84px; text-align: right; }   /* 支出 */
+#cash-list-panel .acct-header > span.cash-c-deposit,
+#cash-list-body .crm-row > .cash-c-deposit:not(.crm-kebab-wrap) { flex: 0 0 84px; text-align: right; }   /* 收入（金額欄收窄，寬度讓給內容） */
+#cash-list-panel .acct-header > span.cash-c-card,
+#cash-list-body .crm-row > .cash-c-card:not(.crm-kebab-wrap) { flex: 0 0 82px; text-align: right; }   /* 信用卡 */
+#cash-list-panel .acct-header > span.cash-c-expense,
+#cash-list-body .crm-row > .cash-c-expense:not(.crm-kebab-wrap) { flex: 0 0 84px; text-align: right; }   /* 支出 */
 
 /* 信用卡欄只在「這本帳真的有刷卡列」時出現（母公司帳 0 筆，永遠空的欄＝雜訊）。
-   🔴 用 display:none 而不是不渲染 —— nth-child 數的是 DOM 位置，抽掉節點會讓
-   後面每一欄的欄寬規則整排錯位。 */
+   （欄寬 2026-09-03 起綁 class，抽不抽節點都不會錯位；留 display:none 是最省事的做法。） */
 #cash-list-panel:not(.has-card) .cash-col-card { display: none; }
 /* 私帳不開發票（owner 2026-09-01）：那一欄讓給「請款單」——支出列可直接勾記
    （同日「支出的請款單勾記我希望也可以在這裡直接勾，比照專案」）。所以這一欄
    在兩本帳都留著、只有標題與內容不同，不需要 display:none。 */
-#cash-list-panel .acct-header > span:nth-child(6),
-#cash-list-body .crm-row > *:nth-child(6):not(.crm-kebab-wrap) { flex: 0 0 78px; }                      /* 類別（公司/個人/家用…） */
-#cash-list-panel .acct-header > span:nth-child(7),
-#cash-list-body .crm-row > *:nth-child(7):not(.crm-kebab-wrap) { flex: 0 0 92px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* 項目 */
-#cash-list-panel .acct-header > span:nth-child(8),
-#cash-list-body .crm-row > *:nth-child(8):not(.crm-kebab-wrap) { flex: 0 0 92px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* 子項目 */
-#cash-list-panel .acct-header > span:nth-child(9),
-#cash-list-body .crm-row > *:nth-child(9):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; color: #7a7a7a; }  /* 銀行資訊（機器來源） */
-#cash-list-panel .acct-header > span:nth-child(10),
-#cash-list-body .crm-row > *:nth-child(10):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; color: #b9b9b9; }  /* 附註（手寫） */
-#cash-list-panel .acct-header > span:nth-child(11),
-#cash-list-body .crm-row > *:nth-child(11):not(.crm-kebab-wrap) { flex: 1 1 0; min-width: 0; text-align: left; }    /* 專案 */
-#cash-list-panel .acct-header > span:nth-child(12),
-#cash-list-body .crm-row > *:nth-child(12):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 發票 */
-#cash-list-panel .acct-header > span:nth-child(13),
-#cash-list-body .crm-row > *:nth-child(13):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 請款單（owner 2026-09-03：獨立一欄，可連結） */
-#cash-list-panel .acct-header > span:nth-child(14),
-#cash-list-body .crm-row > *:nth-child(14):not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
-#cash-list-panel .acct-header > span:nth-child(15),
+#cash-list-panel .acct-header > span.cash-c-book,
+#cash-list-body .crm-row > .cash-c-book:not(.crm-kebab-wrap) { flex: 0 0 78px; }                      /* 類別（公司/個人/家用…） */
+#cash-list-panel .acct-header > span.cash-c-item,
+#cash-list-body .crm-row > .cash-c-item:not(.crm-kebab-wrap) { flex: 0 0 92px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* 項目 */
+#cash-list-panel .acct-header > span.cash-c-sub_item,
+#cash-list-body .crm-row > .cash-c-sub_item:not(.crm-kebab-wrap) { flex: 0 0 92px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* 子項目 */
+#cash-list-panel .acct-header > span.cash-c-bank_memo,
+#cash-list-body .crm-row > .cash-c-bank_memo:not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; color: #7a7a7a; }  /* 銀行資訊（機器來源） */
+#cash-list-panel .acct-header > span.cash-c-note,
+#cash-list-body .crm-row > .cash-c-note:not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; color: #b9b9b9; }  /* 附註（手寫） */
+#cash-list-panel .acct-header > span.cash-c-project,
+#cash-list-body .crm-row > .cash-c-project:not(.crm-kebab-wrap) { flex: 1 1 0; min-width: 0; text-align: left; }    /* 專案 */
+#cash-list-panel .acct-header > span.cash-c-invoice,
+#cash-list-body .crm-row > .cash-c-invoice:not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 發票 */
+#cash-list-panel .acct-header > span.cash-c-payment,
+#cash-list-body .crm-row > .cash-c-payment:not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 請款單（owner 2026-09-03：獨立一欄，可連結） */
+#cash-list-panel .acct-header > span.cash-c-account,
+#cash-list-body .crm-row > .cash-c-account:not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
+#cash-list-panel .acct-header > span:last-child,
 #cash-list-body .crm-row > .crm-kebab-wrap { flex: 0 0 36px; }
 /* 「欄位」鈕藏掉的欄：JS 在 #cash-col-style 裡生 `#cash-list-panel .cash-c-<key>{display:none}`
-   —— 一樣用 display:none 不抽節點（nth-child 欄寬）。 */
+   —— 用 display:none，表頭與列一起藏（欄寬綁 class，藏了也不會錯位）。 */
 #cash-cols-pop label { display: flex; gap: 8px; align-items: center; color: #ccc; font-size: 12.5px; padding: 3px 0; cursor: pointer; }
 
 /* 行內可編輯格（類別/項目/子項目/銀行資訊/附註）：**單擊就編輯**
