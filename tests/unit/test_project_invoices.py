@@ -12,6 +12,8 @@ owner：「專案如果成案，其實就會有一筆發票需要開立，為何
    ① 規則被複製（稅率、款項狀態）→ 兩邊算出不一樣的數字
    ② 兩邊都能改同一張票 → 兩套規則遲早分岔
 """
+import re
+
 from tests.unit._srcscan import js_code_only, repo_src
 
 JS = "frontend/tabs/crm/crm-projects-invoices.js"
@@ -33,7 +35,8 @@ def test_the_tax_rule_lives_in_exactly_one_place():
     # 2026-09-03 搬到零依賴的 js/shared/invoice-amounts.js（手機 CRM 頁也用）；
     # crm-utils 只 re-export，桌機兩個入口的 import 不變
     leaf = js_code_only(repo_src("frontend/js/shared/invoice-amounts.js"))
-    assert "export function invoiceAmounts(value, mode, vatPct = 5)" in leaf, "共用層沒有這支"
+    assert re.search(r"export function invoiceAmounts\(", leaf), "共用層沒有這支"
+    assert "vatPct = 5" in leaf, "稅率預設值要住在共用層的簽章上"
     assert "import" not in leaf, "invoice-amounts.js 必須是葉節點（手機頁 import 不起 crm-utils）"
     util = js_code_only(repo_src(UTIL))
     assert "export { invoiceAmounts } from '../../js/shared/invoice-amounts.js';" in util

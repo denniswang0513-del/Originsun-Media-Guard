@@ -125,8 +125,8 @@ function _showLogin(msg = '') {
     root.innerHTML = `
       <div class="m-login">
         <div class="m-login-brand"><span>Originsun</span> CRM</div>
-        <div id="m-gsi"></div>
-        <div id="m-gsi-div" class="m-login-div" hidden>或</div>
+        <div id="m-gsi" style="display:none"></div>
+        <div id="m-gsi-div" class="m-login-div" style="display:none">或</div>
         <form id="m-login-form" autocomplete="on">
           <label>帳號</label><input id="m-login-user" autocomplete="username" autocapitalize="none">
           <label>密碼</label><input id="m-login-pass" type="password" autocomplete="current-password">

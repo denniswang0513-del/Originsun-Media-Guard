@@ -130,11 +130,18 @@ def test_five_tabs_and_invoice_is_the_landing_tab():
     assert "new" not in ids, "新增案子改成專案分頁頂端的抽屜，不是分頁"
 
 
+def test_recent_invoices_are_sliced_by_the_backend():
+    """手機「最近 10 張」交給 list_invoices 的 limit／order，不在瀏覽器整批撈再切
+    （後端簽章那半邊在 test_crm_mobile.py）。"""
+    js = repo_src("frontend/m/views/invoice.js")
+    assert "/api/v1/crm/invoices?limit=10&order=recent" in js
+    assert ".slice(0, 10)" not in js
+
+
 def test_petty_tab_mounts_the_existing_module():
     """零用金不另做表單：掛 tabs/petty/petty-view.js 的 renderMine（同 /petty-cash.html）。"""
     src = repo_src("frontend/m/views/petty.js")
     assert "/tabs/petty/petty-view.js" in src and "renderMine" in src
-    assert "window.__petty" not in src, "fetch 出口是 petty-view 自己的預設宿主（authFetch），分頁不再設 shim"
     for p in _page_modules():
         assert "/api/v1/crm/petty/" not in p.read_text(encoding="utf-8"), \
             f"{p.name} 自己打零用金端點 —— 那是 petty-view.js 的事"

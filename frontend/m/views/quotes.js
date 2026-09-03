@@ -38,7 +38,7 @@ async function change(btn, host) {
         try {
             await mfetch(`/api/v1/crm/m/quotations/${encodeURIComponent(id)}/status`, { method: 'POST', body: { status: to, activate } });
             toast('報價已改為 ' + to + (activate ? '，專案已啟動' : ''));
-            markStale('quotes', 'projects');     // 簽回啟動專案：專案分頁的階段與首頁數字都變了
+            markStale('projects');     // 簽回啟動專案：專案分頁的階段與首頁數字都變了
             await load(host);
         } catch (e) { toast(e.message, 'err'); }
     });

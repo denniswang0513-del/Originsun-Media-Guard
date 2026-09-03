@@ -5,7 +5,7 @@
  * 取消   → PATCH /payments/batch-unpay {payment_ids:[id]}。月結鎖帳 409 的 detail 原樣進 toast。
  */
 import { mfetch, toast, esc, money, fmtDate, todayLocal } from '../shell.js';
-import { paidStatus, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad } from '../ui.js';
+import { paidStatus, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad } from '../ui.js';
 
 function cardHtml(p, paid) {
     const btn = paid
@@ -54,7 +54,6 @@ async function act(btn, host) {
                 await mfetch('/api/v1/crm/payments/batch-unpay', { method: 'PATCH', body: { payment_ids: [unpayId] } });
                 toast('已取消付款');
             }
-            markStale('payments');
             await load(host);
         } catch (e) { toast(e.message, 'err'); }
     });

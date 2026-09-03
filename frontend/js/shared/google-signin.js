@@ -1,5 +1,8 @@
 /**
- * google-signin.js — Google GIS 登入按鈕的**唯一**一份 bootstrap。**零 import**（葉節點）。
+ * google-signin.js — Google GIS 登入按鈕的共用 bootstrap。**零 import**（葉節點）。
+ * ES module 的殼（SPA 的 js/auth/google-oauth.js、手機 CRM 的 m/shell.js、petty-cash.html）
+ * 都從這裡 import；my.html／project.html／reference.html／website-admin.html／
+ * media-log-workspace.html 是 classic script（import 不起），各自還留著一份抄本——已知殘留。
  *
  * 流程：GET /api/v1/auth/google/config（沒開就靜靜不畫）→ 等 gsi/client 載好
  * （40 次 × 150ms）→ initialize + renderButton → 拿到 credential 打
@@ -13,11 +16,12 @@
  * @param {HTMLElement|null} o.container   按鈕要畫進去的容器（沒有就不畫）
  * @param {HTMLElement|null} [o.divider]   「或」分隔線，按鈕畫出來才顯示
  * @param {number} [o.width=268]           按鈕寬度（GIS 的 px）
+ * @param {string} [o.theme='filled_black'] GIS 按鈕主題（淺色頁用 'outline'）
  * @param {(data: object) => void} o.onSuccess   登入回應（含 token）
  * @param {(msg: string) => void} [o.onError]     伺服器 detail 或連線失敗文案
  * @returns {Promise<boolean>} 按鈕有沒有畫出來
  */
-export async function initGoogleSignIn({ container, divider = null, width = 268, onSuccess, onError }) {
+export async function initGoogleSignIn({ container, divider = null, width = 268, theme = 'filled_black', onSuccess, onError }) {
     const fail = (msg) => { if (onError) onError(msg); };
     try {
         const r = await fetch('/api/v1/auth/google/config');
@@ -42,12 +46,12 @@ export async function initGoogleSignIn({ container, divider = null, width = 268,
             },
         });
         google.accounts.id.renderButton(container, {
-            theme: 'filled_black', size: 'large', width, text: 'signin_with',
+            theme, size: 'large', width, text: 'signin_with',
             shape: 'rectangular', logo_alignment: 'left',
         });
-        // 兩個殼藏法不同（SPA 用 inline display:none、手機頁用 hidden 屬性）——兩種都解開
-        container.hidden = false; container.style.display = 'flex';
-        if (divider) { divider.hidden = false; divider.style.display = 'flex'; }
+        // 呼叫端一律用 inline display:none 藏（容器與分隔線），這裡只解 inline style
+        container.style.display = 'flex';
+        if (divider) divider.style.display = 'flex';
         return true;
     } catch (e) {
         console.warn('[GIS] init failed', e);

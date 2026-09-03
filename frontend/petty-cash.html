@@ -78,7 +78,7 @@
           <input id="in-pwd" type="password" placeholder="密碼" autocomplete="current-password">
           <button type="submit">登入</button>
         </form>
-        <div class="divider" id="login-divider">或</div>
+        <div class="divider" id="login-divider" style="display:none">或</div>
         <div id="g_id_signin_container" style="display:none;justify-content:center;"></div>
       </div>
     </div>
@@ -100,6 +100,7 @@ import { renderMine, renderAccounts, renderClaims, renderLabels, renderOverview 
     from "/tabs/petty/petty-view.js";
 
 import { authFetch } from "/js/shared/utils.js";
+import { initGoogleSignIn } from "/js/shared/google-signin.js";
 
 const TOKEN_KEY = "auth_token";
 const $ = (id) => document.getElementById(id);
@@ -138,33 +139,10 @@ window.doPwdLogin = async (ev) => {
 let _gisInited = false;
 async function initGoogle() {
     if (_gisInited) return;
-    try {
-        const r = await fetch("/api/v1/auth/google/config");
-        if (!r.ok) return;
-        const cfg = await r.json();
-        if (!cfg.enabled || !cfg.client_id) return;
-        for (let i = 0; i < 40 && (typeof google === "undefined" || !google.accounts); i++)
-            await new Promise(res => setTimeout(res, 150));
-        if (typeof google === "undefined" || !google.accounts) return;
-        google.accounts.id.initialize({
-            client_id: cfg.client_id, auto_select: false, cancel_on_tap_outside: true,
-            callback: async (resp) => {
-                try {
-                    const r2 = await fetch("/api/v1/auth/google/login", {
-                        method: "POST", headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ credential: resp.credential }) });
-                    const d = await r2.json();
-                    if (!r2.ok) { showLogin(d.detail || "Google 登入失敗"); return; }
-                    onLoginOk(d);
-                } catch (_) { showLogin("連線失敗，請稍後再試"); }
-            },
-        });
-        google.accounts.id.renderButton($("g_id_signin_container"),
-            { theme: "outline", size: "large", width: 320, text: "signin_with" });
-        $("g_id_signin_container").style.display = "flex";
-        $("login-divider").style.display = "flex";
-        _gisInited = true;
-    } catch (e) { console.warn("[GIS] init failed", e); }
+    _gisInited = await initGoogleSignIn({
+        container: $("g_id_signin_container"), divider: $("login-divider"),
+        theme: "outline", width: 320, onSuccess: onLoginOk, onError: showLogin,
+    });
 }
 
 // 分頁定義 —— `need` 為空＝人人可見；其餘要模組（管理員一律有全部）

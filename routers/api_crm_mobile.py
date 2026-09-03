@@ -159,7 +159,7 @@ async def mobile_options(request: Request):
 
 
 @router.get("/home")
-async def mobile_home(request: Request):
+async def mobile_home():
     """首頁兩個數字：進行中專案數、待回覆報價數（專案分頁頂端的 strip 用）。"""
     async with _crm_session() as session:
         active = (await session.execute(

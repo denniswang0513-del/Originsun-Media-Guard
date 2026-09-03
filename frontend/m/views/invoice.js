@@ -8,7 +8,7 @@
  */
 import { invoiceAmounts } from '/js/shared/invoice-amounts.js';
 import { mfetch, toast, esc, todayLocal, money, fmtDate } from '../shell.js';
-import { state, opt, selectOpts, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad } from '../ui.js';
+import { state, opt, selectOpts, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad } from '../ui.js';
 
 const F = (id) => document.getElementById('inv-' + id);
 const VOLATILE = ['title', 'invoice_number', 'amount_ex_tax', 'amount_total', 'company_name', 'tax_id', 'item_type', 'notes'];
@@ -126,7 +126,6 @@ async function submit(ev) {
             for (const k of VOLATILE) F(k).value = '';
             F('invoice_date').value = todayLocal();
             window.scrollTo({ top: 0, behavior: 'smooth' });
-            markStale('invoice');
             loadRecent();
         } catch (e) { toast(e.message || '建立失敗', 'err'); }
     });
@@ -154,11 +153,9 @@ export async function render(host, { first }) {
         host.innerHTML = formHtml();
         wireAmounts();
         document.getElementById('inv-form').addEventListener('submit', submit);
-        shouldLoad('invoice', { first });
-        await Promise.all([loadProjects(), loadRecent()]);
-        return;
     }
-    // 從專案抽屜「開發票」過來：新案子可能還不在清單裡，重載一次再套預設
-    if (state.invoicePreset) await loadProjects();
-    if (shouldLoad('invoice', { first })) loadRecent();
+    // 專案下拉跟最近 10 張一起重抓：專案分頁新建案子會 markStale('invoice')，切過來才看得到它
+    if (shouldLoad('invoice', { first })) await Promise.all([loadProjects(), loadRecent()]);
+    // 從專案抽屜「開發票」過來（60 秒內沒被標髒）：清單可能是舊的，重載一次再套預設
+    else if (state.invoicePreset) await loadProjects();
 }

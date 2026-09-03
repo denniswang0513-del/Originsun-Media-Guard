@@ -134,7 +134,6 @@ function actionBox(kind, p) {
             try {
                 await mfetch(`/api/v1/crm/projects/${encodeURIComponent(p.id)}/status`, { method: 'PATCH', body });
                 toast('已推到 ' + body.status);
-                markStale('projects');
                 await openProject(p.id);
                 loadList(true);
             } catch (e) {
@@ -206,7 +205,7 @@ function openNewProject() {
             try {
                 const r = await mfetch('/api/v1/crm/projects', { method: 'POST', body: payload });
                 toast('已建立「' + payload.name + '」');
-                markStale('projects');
+                markStale('invoice');       // 發票分頁的專案下拉要看得到新案子
                 loadList(true); loadHome();
                 const id = r && r.project && r.project.id;
                 if (id) await openProject(id); else closeSheet();

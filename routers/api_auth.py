@@ -366,15 +366,7 @@ async def login(req: LoginRequest):
                 'first_login': True,
             }
             await _persist_user(user_data)
-            token = create_token({
-                'sub': 'admin', 'role_name': 'admin',
-                'access_level': access_level, 'modules': modules,
-            })
-            return {
-                'token': token, 'username': 'admin',
-                'role_name': 'admin', 'access_level': access_level,
-                'modules': modules, 'first_login': True,
-            }
+            return _issue_token(user_data, first_login=True)
 
     if not user:
         raise HTTPException(status_code=401, detail="帳號或密碼錯誤")

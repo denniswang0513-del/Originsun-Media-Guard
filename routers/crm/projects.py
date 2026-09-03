@@ -583,6 +583,8 @@ async def project_wire(session, project) -> dict:
 
     單筆 GET／PUT／PATCH status 與手機版詳情四處共用 —— 各自拼一次的話，
     哪天多一個鍵（例如 proposal_status 當初）就會有一條路徑漏掉。
+    例外：create_project／duplicate_project 回的是不含 proposal_status 的單筆形狀
+    ——刻意的，它們的回應在 session 外組（剛建的案子也還沒有提案可查）。
     """
     client = await session.get(Client, project.client_id) if project.client_id else None
     return {**_to_project_dict(project, client.short_name if client else ""),

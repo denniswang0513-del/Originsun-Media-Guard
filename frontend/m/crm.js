@@ -18,7 +18,6 @@ const VIEWS = { invoice: invoiceView, petty: pettyView, projects: projectsView,
 
 const gate = (me) => (me.access_level || 0) >= 3 || (me.modules || []).includes('crm_projects');
 
-let _tab = '';
 const hosts = {};
 
 function _host(tab) {
@@ -44,7 +43,6 @@ async function render() {
     window.scrollTo(0, 0);
     const first = !host.dataset.ready;
     host.dataset.ready = '1';
-    _tab = tab;
     try {
         await VIEWS[tab].render(host, { first });
     } catch (e) {
@@ -77,6 +75,3 @@ async function main() {
 }
 
 main();
-
-// 讓分頁模組可以要求「重畫目前分頁」（例如新增案子後）
-window.addEventListener('m-rerender', () => { if (hosts[_tab]) VIEWS[_tab].render(hosts[_tab], { first: false }); });

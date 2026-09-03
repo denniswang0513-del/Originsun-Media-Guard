@@ -629,7 +629,7 @@ async def list_invoices(
     limit: int = Query(0), order: str = Query(""),
 ):
     """`limit`（0＝全部）與 `order="recent"`（建立時間新→舊）給手機版「最近 10 張」用；
-    不帶就是桌機發票本原本的整批＋日期排序。"""
+    不帶就是桌機發票本原本的整批＋日期排序。帶 limit 時 total＝本頁筆數。"""
     # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
     # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
     ent = require_entity(request, entity, level="full")

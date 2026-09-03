@@ -10,6 +10,8 @@
 單元環境沒有 DB，所以 200 那條在 e2e 驗；這裡只釘「不是被權限擋掉」
 （同 tests/unit/test_crm_read_guard 的寫法）。
 """
+import re
+
 import pytest
 
 from core.crm_logic import prepend_note
@@ -56,7 +58,7 @@ def test_write_endpoints_call_the_single_write_guard():
     （空 tuple＝只有 Lv3；要開給助理填 ('crm_projects',) 一行）。"""
     src = repo_src(MOBILE)
     code = code_only(src)
-    assert "MOBILE_WRITE_MODULES: tuple[str, ...] = ()" in code, "一期只給 Lv3；要開給助理改這一行"
+    assert re.search(r"MOBILE_WRITE_MODULES\s*(:[^=]*)?=\s*\(\)", code), "一期只給 Lv3；要開給助理改這一行"
     assert "_check_write = _module_guard(*MOBILE_WRITE_MODULES)" in code
     for header in ("async def mobile_add_note(", "async def mobile_quotation_status("):
         body = code_only(func_body(src, header))
@@ -99,13 +101,11 @@ def test_project_wire_is_shared_by_mobile_and_desktop():
 
 
 def test_recent_invoices_are_sliced_by_the_backend():
-    """手機「最近 10 張」交給 list_invoices 的 limit／order，不在瀏覽器整批撈再切。"""
+    """手機「最近 10 張」交給 list_invoices 的 limit／order，不在瀏覽器整批撈再切
+    （前端那半邊在 test_crm_mobile_frontend.py）。"""
     body = repo_src("routers/crm/finance.py")
     sig = body[body.index("async def list_invoices("):body.index("):", body.index("async def list_invoices("))]
     assert "limit: int = Query(0)" in sig and 'order: str = Query("")' in sig
-    js = repo_src("frontend/m/views/invoice.js")
-    assert "/api/v1/crm/invoices?limit=10&order=recent" in js
-    assert ".slice(0, 10)" not in js
 
 
 def test_read_endpoints_do_not_require_admin():
@@ -159,16 +159,15 @@ def test_refresh_endpoint_reissues_from_db_not_from_old_payload():
 
 def test_login_paths_issue_tokens_through_one_helper():
     """密碼登入／Google 登入／續期／重設密碼四條路都走 _issue_token —— 各拼一次的話
-    payload 多一個 claim 就會有一條漏掉。（login 裡「沒有任何帳號時的 bootstrap admin」
-    那段是用字面值拼的，不在此限。）"""
+    payload 多一個 claim 就會有一條漏掉。login 裡「沒有任何帳號時的 bootstrap admin」
+    那段也一樣（2026-09-03 收掉最後一份字面值）。"""
     src = repo_src("routers/api_auth.py")
-    assert "def _issue_token(user: dict, **extra) -> dict:" in src
+    assert re.search(r"def _issue_token\(", src)
     for header in ("async def login(", "async def google_login(", "async def refresh_token(",
                    "async def reset_password("):
         body = code_only(func_body(src, header))
         assert "_issue_token(" in body, f"{header} 沒走 _issue_token"
-        assert body.count("create_token(") <= (1 if header == "async def login(" else 0), \
-            f"{header} 還自己簽 token"
+        assert body.count("create_token(") == 0, f"{header} 還自己簽 token"
 
 
 def test_project_lists_decide_about_mine_and_skip_mirrors():

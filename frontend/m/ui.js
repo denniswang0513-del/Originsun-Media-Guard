@@ -96,7 +96,6 @@ export function closeSheet() {
     sheet().hidden = true;
     document.body.style.overflow = '';
 }
-export function sheetBody() { return document.getElementById('m-sheet-body'); }
 
 export function initSheet() {
     sheet().querySelector('.bd').addEventListener('click', closeSheet);
