@@ -43,7 +43,10 @@ def test_request_payment_from_cash_row():
     inc = between(js, "async function _cashPayForProject(e, pid, pname, o = {})", "function _cashCustomPay(")
     # 列的是專案頁「執行人員」那張表、開的單跟專案頁一樣（人|金額）——規則只有 crm-utils.groupCostStaff 一份
     assert "/cost-lines" in inc and "/payments?project_id=" in inc and "groupCostStaff(" in inc
-    assert "payee_name: g.name, amount: g.subtotal, summary: g.items.join('、')" in inc and "payee_type: ptype" in inc
+    assert "payee_name: g.name, amount: g.subtotal, summary: g.items.join('、'), project_id: g.pid" in inc and "payee_type: ptype" in inc
+    # 案可複數（owner「複數專案內部代開就開複數張請款單」）：每案一區、各開各的、可再連一個案（掛在發票的 project_ids）
+    assert "const pids = Array.isArray(pid) ? pid : [pid];" in inc and 'data-act="more"' in inc
+    assert "project_ids: [...(full.project_ids || []), picked]" in inc
     utils = js_code_only(repo_src("frontend/tabs/crm/crm-utils.js"))
     assert utils.count("export function groupCostStaff(") == 1
     grp = js_func_body(utils, "export function groupCostStaff(")
@@ -70,9 +73,10 @@ def test_passthrough_income_row_goes_through_the_project_and_deducts_the_fee():
     assert "const passthru = _kindOf(e) === 'passthrough';" in disp
     assert "remit: inv ? (inv.commission_due || inv.commission || 0) : 0" in disp and "0.92" not in disp
     assert "passthru ? '' : '<button" in disp, "代開列沒案時不給「直接請款」"
-    assert "if (pid) return _cashPayForProject(e, pid, pname, { kai });" in disp
+    assert "if (pids.length) return _cashPayForProject(e, pids, pnames, { kai });" in disp
+    assert "pids = inv.project_ids.slice()" in disp, "發票掛的案可複數"
     # 案掛在發票上、不掛在代開的收支列（後端 core.project_link.CASH_CATEGORIES 不含發票代開：代開的錢不是案子的收入）
-    assert "{ ...full, project_id: picked }" in disp and "if (passthru && !e.invoice_id) {" in disp
+    assert "{ ...full, project_id: picked, project_ids: [picked] }" in disp and "if (passthru && !e.invoice_id) {" in disp
     from core.project_link import CASH_CATEGORIES
     assert "發票代開" not in CASH_CATEGORIES
     inc = between(js, "async function _cashPayForProject(e, pid, pname, o = {})", "function _cashCustomPay(")
@@ -97,10 +101,11 @@ def test_project_income_row_shows_which_day_it_was_requested():
     assert project_pay_label([(None, "應付款")]) == "日期空 ×1"
     py = repo_src("routers/crm/cash.py")
     body = code_only(func_body(py, "async def _project_payments_map("))
-    assert "CrmPaymentRequest.is_advance != 1" in body and "project_pay_label(items)" in body
+    assert "CrmPaymentRequest.is_advance != 1" in body
     lst = code_only(func_body(py, "async def list_cash_entries("))
-    assert "_project_payments_map(" in lst and "projpay.get(eff_pid.get(r[0].id" in lst
-    assert "inv_proj.get(r[0].invoice_id)" in lst, "發票代開列的案掛在發票上：請款單欄也要標得到"
+    assert "_project_payments_map(" in lst and "projpay.get(r[0].id" in lst
+    assert "project_pay_label([it for p in ps for it in projitems.get(p, [])])" in lst, "一列可能掛好幾個案：標籤合併各案的請款單"
+    assert "inv_proj.get(r[0].invoice_id, [])" in lst, "發票代開列的案掛在發票上（可複數）：請款單欄也要標得到"
     js = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
     assert "(e.project_pay_label || (e.kai_payment_label ?" in js, "掂了案先標幾號請款的，沒有才退回代開應匯那張"
     inc = between(js, "async function _cashPayForProject(e, pid, pname, o = {})", "function _cashCustomPay(")

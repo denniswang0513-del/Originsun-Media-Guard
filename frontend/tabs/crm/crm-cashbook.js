@@ -452,10 +452,15 @@ window._cashRequestPay = async (id) => {
     let pid = e.project_id || '', pname = e.project_name || '';
     let inv = null;
     if (e.invoice_id) { try { inv = await _fetch('/invoices/' + e.invoice_id); } catch (_) {} }
-    // 收款列常只掛發票沒掛專案：發票有案就用發票的案
-    if (!pid && inv && inv.project_id) { pid = inv.project_id; pname = inv.project_name || ''; }
+    // 收款列常只掛發票沒掛專案：發票有案就用發票的案（可複數：project_ids／project_names）
+    let pids = pid ? [pid] : [], pnames = pid ? [pname] : [];
+    if (!pids.length && inv) {
+        // 後端還沒帶 project_ids（舊版）時退回單一 project_id —— 前端先熱複製、後端晚一版是常態
+        if ((inv.project_ids || []).length) { pids = inv.project_ids.slice(); pnames = (inv.project_names || []).slice(); }
+        else if (inv.project_id) { pids = [inv.project_id]; pnames = [inv.project_name || '']; }
+    }
     const kai = passthru ? { inv, total: inv ? (inv.amount_total || 0) : 0, remit: inv ? (inv.commission_due || inv.commission || 0) : 0 } : null;
-    if (pid) return _cashPayForProject(e, pid, pname, { kai });
+    if (pids.length) return _cashPayForProject(e, pids, pnames, { kai });
     if (passthru && !e.invoice_id) {
         const ov0 = _payOverlay('請款 — 發票代開', `<div style="color:#ddd;line-height:1.7;">這一列是代開發票的收款，還沒連結發票。代開的錢要扣掉代開費、給案子裡的執行人員：
             先在「發票」欄連結那張代開發票（發票掛的案就是要請款的案，也才算得出代開費）。</div>`,
@@ -486,7 +491,7 @@ window._cashRequestPay = async (id) => {
                 if (passthru) {
                     // 案掛在發票上（PUT 是整包寫回：先 GET 再改一欄，同 crm-invoices._invApplyNumber）
                     const full = await _fetch('/invoices/' + e.invoice_id);
-                    await _fetch('/invoices/' + e.invoice_id, { method: 'PUT', body: JSON.stringify({ ...full, project_id: picked }) });
+                    await _fetch('/invoices/' + e.invoice_id, { method: 'PUT', body: JSON.stringify({ ...full, project_id: picked, project_ids: [picked] }) });
                 } else {
                     await _fetch('/cash-entries/' + id, { method: 'PUT', body: JSON.stringify({ project_id: picked }) });
                     e.project_id = picked;
@@ -509,10 +514,16 @@ async function _cashPayForProject(e, pid, pname, o = {}) {
     // 列的是專案頁「執行人員」那張表（同一份規則 groupCostStaff：分人、小計、配這個案的請款單），
     // 開的單也跟專案頁的「請款」長一樣（收款人＝人、金額＝小計、摘要＝項目），所以請完款回專案頁
     // 那一列就是「已請款」——owner 2026-09-04「請款單列出的是要這裡，然後跟專案連動請款」。
+    // 案可複數（owner「複數專案內部代開就開複數張請款單」）：每個案一區，各開各的單。
+    const pids = Array.isArray(pid) ? pid : [pid];
+    const pnames = Array.isArray(pname) ? pname : [pname];
     let groups = [];
     try {
-        const [cl, pays] = await Promise.all([_fetch(`/projects/${pid}/cost-lines`), _fetch(`/payments?project_id=${encodeURIComponent(pid)}${ent ? '&entity=' + ent : ''}`)]);
-        groups = groupCostStaff(cl.cost_lines || [], pays.payments || []);
+        const per = await Promise.all(pids.map((p) => Promise.all([
+            _fetch(`/projects/${p}/cost-lines`), _fetch(`/payments?project_id=${encodeURIComponent(p)}${ent ? '&entity=' + ent : ''}`)])));
+        per.forEach(([cl, pays], i) => {
+            groupCostStaff(cl.cost_lines || [], pays.payments || []).forEach((g) => groups.push({ ...g, pid: pids[i], pname: pnames[i] || '' }));
+        });
     } catch (err) { crmToast('執行人員載入失敗：' + err.message, true); return; }
     const total = groups.reduce((a, g) => a + g.subtotal, 0);
     const kai = o.kai || null;
@@ -530,29 +541,50 @@ async function _cashPayForProject(e, pid, pname, o = {}) {
         done.length ? `<div style="color:#f59e0b;font-size:12px;margin-top:4px;">案子裡的錢已請過：${done.length} 人 $${_fmtNum(doneSum)}（已付 ${donePaid}）${done.length === groups.length ? ' —— 執行人員都請過了，沒有可再請的。' : '，下面已灰掉、不能再勾。'}</div>` : '',
         remitReq ? `<div style="color:#f59e0b;font-size:12px;margin-top:4px;">這張發票已有代開應匯請款單：${_esc(remitReq.label || '')} $${_fmtNum(remitReq.amount || 0)}（${_esc(remitReq.status || '')}）—— 若改由執行人員請款，那張要收回，不然同一筆錢會付兩次。</div>` : '',
     ].join('');
-    const rows = groups.map((g, i) => {
+    let rows = '', lastPid = null;
+    groups.forEach((g, i) => {
+        if (pids.length > 1 && g.pid !== lastPid) {
+            rows += `<div style="color:#9ca3af;font-size:12px;font-weight:600;padding:10px 6px 2px;">${_esc(g.pname || g.pid)}</div>`;
+            lastPid = g.pid;
+        }
         const p = g.payment;
         const status = !p ? '' : p.payment_status === '已付款'
             ? '<span style="color:#86efac;font-size:12px;">已付款 ✓</span>'
             : '<span style="color:#fb923c;font-size:12px;">已請款</span>';
         const adv = p && p.advance_by ? `<span style="color:#fb923c;font-size:11px;margin-right:6px;">${_esc(p.payee_name || '')} 代墊</span>` : '';
-        return `<label class="cash-pay-line" style="display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid #2e2e2e;${p ? 'opacity:.6;' : 'cursor:pointer;'}">
+        rows += `<label class="cash-pay-line" style="display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid #2e2e2e;${p ? 'opacity:.6;' : 'cursor:pointer;'}">
           <input type="checkbox" name="cash-pay-lines" value="${i}"${p ? ' disabled' : (g.subtotal ? ' checked' : '')}>
           <span style="width:90px;font-weight:600;color:#d1d5db;flex-shrink:0;">${_esc(g.name)}</span>
           <span style="flex:1;min-width:0;color:#888;font-size:12px;">${_esc(g.items.join('、'))}</span>
           <span style="width:90px;text-align:right;font-weight:600;color:#e0e0e0;flex-shrink:0;">$${_fmtNum(g.subtotal)}</span>
           <span style="width:110px;text-align:right;flex-shrink:0;">${adv}${status}</span>
-        </label>`; }).join('');
-    const ov = _payOverlay('請款 — ' + (ent === 'mine' ? '私帳｜' : '') + (pname || ''),
+        </label>`;
+    });
+    // 沒有執行人員的案也要看得到它在清單裡（不然「再連一個案」連了像沒連）
+    pids.forEach((p, i) => { if (pids.length > 1 && !groups.some((g) => g.pid === p)) rows += `<div style="color:#9ca3af;font-size:12px;padding:10px 6px 2px;">${_esc(pnames[i] || p)} <span style="color:#666;">（沒有執行人員）</span></div>`; });
+    const ov = _payOverlay('請款 — ' + (ent === 'mine' ? '私帳｜' : '') + pnames.filter(Boolean).join('、'),
         `<div style="color:#888;font-size:12px;margin-bottom:6px;">${head} 下面是案子的執行人員（同專案頁）：勾要付的人，一人開一張應付款（請款日＝今天、預計付款月＝本月）。</div>${notes}
          <div style="display:flex;align-items:center;gap:8px;margin:6px 0 8px;"><span style="color:#888;font-size:12px;flex-shrink:0;">報支項目</span><select id="cpay-type" class="crm-input" style="width:auto;flex:0 0 auto;padding:2px 8px;"><option value="內部人員">內部人員</option><option value="現金">現金</option><option value="勞報">勞報</option><option value="核銷">核銷</option></select></div>
-         ${rows ? rows + `<div style="display:flex;padding:8px 6px;border-top:2px solid #3a3a3a;font-weight:700;"><span style="flex:1;">合計</span><span>$${_fmtNum(total)}</span><span style="width:110px;"></span></div>` : '<div class="crm-empty">這個案子還沒有執行人員（費用配置沒填人）</div>'}
-`,
+         ${rows ? rows + `<div style="display:flex;padding:8px 6px;border-top:2px solid #3a3a3a;font-weight:700;"><span style="flex:1;">合計</span><span>$${_fmtNum(total)}</span><span style="width:110px;"></span></div>` : '<div class="crm-empty">這個案子還沒有執行人員（費用配置沒填人）</div>'}`,
         `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
+         ${kai && e.invoice_id ? '<button class="crm-btn crm-btn-secondary" data-act="more">再連一個案</button>' : ''}
          ${kai ? '' : '<button class="crm-btn crm-btn-secondary" data-act="custom">自訂一張</button>'}
          ${groups.length && done.length === groups.length ? '' : '<button class="crm-btn crm-btn-primary" data-act="go">開請款單</button>'}`);
     const cb = ov.querySelector('[data-act="custom"]');
-    if (cb) cb.addEventListener('click', () => { ov.remove(); _cashCustomPay(e, { project_id: pid, entity: ent }); });
+    if (cb) cb.addEventListener('click', () => { ov.remove(); _cashCustomPay(e, { project_id: pids[0], entity: ent }); });
+    const mb = ov.querySelector('[data-act="more"]');
+    if (mb) mb.addEventListener('click', () => {
+        // 代開發票掛第二、第三個案（案掛在發票上，清單 project_ids；第一個＝project_id）
+        ov.remove();
+        openProjectPicker(_projPickerOpts(e, async (picked) => {
+            if (!picked || pids.includes(picked)) return;
+            try {
+                const full = await _fetch('/invoices/' + e.invoice_id);
+                await _fetch('/invoices/' + e.invoice_id, { method: 'PUT', body: JSON.stringify({ ...full, project_ids: [...(full.project_ids || []), picked] }) });
+                window._cashRequestPay(e.id);
+            } catch (err) { crmToast('連結失敗：' + err.message, true); }
+        }));
+    });
     const gb = ov.querySelector('[data-act="go"]');
     if (gb) gb.addEventListener('click', async (ev) => {
         const picked = [...ov.querySelectorAll('input[name="cash-pay-lines"]:checked')].map((c) => groups[Number(c.value)]);
@@ -564,7 +596,7 @@ async function _cashPayForProject(e, pid, pname, o = {}) {
             try {
                 // 跟專案頁 _costCreatePayment 送的同一張：專案頁用「人|金額」認單，欄位對不上就變成沒請過款
                 await _fetch('/payments', { method: 'POST', body: JSON.stringify(_payBody({
-                    payee_name: g.name, amount: g.subtotal, summary: g.items.join('、'), project_id: pid, project_label: pname || '',
+                    payee_name: g.name, amount: g.subtotal, summary: g.items.join('、'), project_id: g.pid, project_label: g.pname || '',
                     category: ptype, payee_type: ptype, ...(ent ? { entity: ent } : {}) })) });
                 ok += 1;
             } catch (err) { fails.push(g.name + '：' + err.message); }

@@ -30,7 +30,7 @@ from core.cash_taxonomy import SEP as _TAX_SEP, split_category as _tax_split
 # 請款單顯示名的正本在 core（關聯面板的 _ALLOC_KINDS 也吃同一支）
 from core.crm_logic import payment_label, project_pay_label
 from core.ledger import (not_mine as _cli_not_mine, require_entity)
-from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES
+from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES, invoice_project_ids as _inv_pids
 from core.schemas import (CashEntryPayload,
                           CashInvoiceLinksPayload, CashPaymentLinksPayload)
 
@@ -138,7 +138,7 @@ async def _project_payments_map(session, project_ids, entity: str) -> dict:
     out: dict = {}
     for pid, d, st in rows:
         out.setdefault(pid, []).append((d, st or ""))
-    return {pid: project_pay_label(items) for pid, items in out.items()}
+    return out          # {pid: [(request_date, status), ...]}；標籤由呼叫端合併（一列可能掛好幾個案）
 
 
 def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
@@ -590,11 +590,14 @@ async def list_cash_entries(
         # 收入列的「案」：列自己掛的，沒有就看發票掛的案（發票代開列的案只准掛在發票上——
         # core.project_link.CASH_CATEGORIES 不含發票代開，代開的錢不是案子的收入）
         inv_ids = {r[0].invoice_id for r in rows if (r[0].deposit or 0) > 0 and r[0].invoice_id and not r[0].project_id}
-        inv_proj = dict((await session.execute(
-            select(CrmInvoice.id, CrmInvoice.project_id).where(CrmInvoice.id.in_(inv_ids)))).all()) if inv_ids else {}
-        eff_pid = {r[0].id: (r[0].project_id or inv_proj.get(r[0].invoice_id) or "")
-                   for r in rows if (r[0].deposit or 0) > 0}
-        projpay = await _project_payments_map(session, eff_pid.values(), ent)
+        inv_proj = {iid: _inv_pids(pid, pids) for iid, pid, pids in (await session.execute(
+            select(CrmInvoice.id, CrmInvoice.project_id, CrmInvoice.project_ids)
+            .where(CrmInvoice.id.in_(inv_ids)))).all()} if inv_ids else {}
+        eff_pids = {r[0].id: ([r[0].project_id] if r[0].project_id else inv_proj.get(r[0].invoice_id, []))
+                    for r in rows if (r[0].deposit or 0) > 0}
+        projitems = await _project_payments_map(session, [p for ps in eff_pids.values() for p in ps], ent)
+        projpay = {rid: project_pay_label([it for p in ps for it in projitems.get(p, [])])
+                   for rid, ps in eff_pids.items()}
     out = []
     for r in rows:
         d = _to_cash_dict(r[0], r[1] or "", r[2] or "", r[3] or "",
@@ -602,7 +605,7 @@ async def list_cash_entries(
                           payment_label(r[5] or "", r[4] or ""),
                           paylinks.get(r[0].id, ()), invlinks.get(r[0].id, ()),
                           kaimap.get(r[0].invoice_id),
-                          projpay.get(eff_pid.get(r[0].id, ""), ""))
+                          projpay.get(r[0].id, ""))
         subs = smap.get(r[0].id, [])
         d["splits"] = [_split_to_dict(s, paths.get(s.taxonomy_node_id),
                                       amap.get(s.id),

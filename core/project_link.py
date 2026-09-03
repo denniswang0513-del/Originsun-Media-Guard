@@ -50,3 +50,41 @@ def linkable_categories(entity: str, categories=()) -> list:
     """
     src = categories if (entity or "parent") == "mine" else CASH_CATEGORIES
     return [c for c in src if cash_can_link(entity, c)]
+
+
+def invoice_project_ids(project_id, project_ids) -> list:
+    """發票掛的案，**可複數**（owner 2026-09-04「連結的專案可以複數；複數專案內部代開就開複數張請款單」）。
+    `project_ids` 是 JSON 清單（欄位 crm_invoices.project_ids），`project_id` 永遠＝第一個
+    （舊碼、SQL JOIN、代開應匯單的 project_id 都只認它）。讀法只有這一份。"""
+    import json
+    try:
+        ids = json.loads(project_ids or "[]")
+    except (TypeError, ValueError):
+        ids = []
+    ids = [i for i in ids if isinstance(i, str) and i]
+    if project_id and project_id not in ids:
+        ids.insert(0, project_id)
+    return list(dict.fromkeys(ids))
+
+
+def normalize_invoice_projects(data: dict, existing_ids=None) -> None:
+    """payload → `project_id`（第一個）＋ `project_ids`（JSON；只有一個以下＝None）。
+    沒送 project_ids（發票分頁的單案表單）＝保留既有清單，但表單那欄換成清單外的案時清單重來。"""
+    import json
+    sent = data.get("project_ids")
+    pid = data.get("project_id") or None
+    if sent is None:
+        ids = list(existing_ids or [])
+        if not pid:
+            ids = []
+        elif pid not in ids:
+            ids = [pid]
+    else:
+        ids = [i for i in sent if i]
+        if pid and pid not in ids:
+            ids.insert(0, pid)
+    if pid and pid in ids:
+        ids = [pid] + [i for i in ids if i != pid]
+    ids = list(dict.fromkeys(ids))
+    data["project_id"] = ids[0] if ids else None
+    data["project_ids"] = json.dumps(ids) if len(ids) > 1 else None

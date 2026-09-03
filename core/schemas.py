@@ -925,6 +925,7 @@ class InvoicePayload(BaseModel):
     # 兩個 0。規則正本 core.crm_logic.normalize_tax_id（有單元測試）。
     _norm_tax_id = field_validator("tax_id")(lambda v: normalize_tax_id(v))
     project_id: Optional[str] = None
+    project_ids: Optional[List[str]] = None     # 掛的案可複數（沒送＝保留既有；見 core.project_link.normalize_invoice_projects）
     recipient: str = ""
     recipient_phone: str = ""
     recipient_address: str = ""

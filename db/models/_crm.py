@@ -481,7 +481,8 @@ class CrmInvoice(Base):
     company_name = Column(String(255), nullable=True)                   # 抬頭
     tax_id = Column(String(16), nullable=True)                          # 統編
     item_type = Column(String(64), nullable=True)                       # 品項（影片製作/展場攝影...）
-    project_id = Column(String(32), nullable=True)                      # 可選關聯 → crm_projects
+    project_id = Column(String(32), nullable=True)                      # 可選關聯 → crm_projects（＝第一個）
+    project_ids = Column(Text, nullable=True)                           # 掛的案可複數：JSON 清單（core.project_link.invoice_project_ids）
     recipient = Column(String(128), nullable=True)                       # 紙本發票收件人
     recipient_phone = Column(String(32), nullable=True)                  # 紙本發票收件電話
     recipient_address = Column(String(255), nullable=True)               # 紙本發票收件地址

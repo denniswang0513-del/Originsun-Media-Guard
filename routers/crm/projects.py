@@ -18,6 +18,8 @@ from config import load_settings as _load_settings
 
 from core.ledger import hide_mine_projects, not_mine
 from core.ledger_project import parent_receipt_fields
+from core.finance_logic import CASH_INVOICE_PASSTHROUGH_CATEGORIES as _PASSTHRU_CATS
+from core.project_link import invoice_project_ids as _inv_pids
 from core.schemas import (CrmProjectPayload, CrmProjectPatchPayload, ProjectTypeOpPayload,
                           ProjectLedgerMovePayload, ProjectMirrorPayload)
 
@@ -82,14 +84,21 @@ async def linked_receipts_map(session, project_ids) -> dict:
     ids = {i for i in project_ids if i}
     if not ids:
         return {}
-    inv_proj = dict((await session.execute(
-        select(CrmInvoice.id, CrmInvoice.project_id).where(CrmInvoice.project_id.in_(ids)))).all())
+    # 發票掛好幾個案（內部代開分攤）時一筆錢分不出誰的 → 只認掛單一案的發票
+    inv_proj = {iid: pids[0] for iid, pid, pids in (
+        (r[0], r[1], _inv_pids(r[1], r[2])) for r in (await session.execute(
+            select(CrmInvoice.id, CrmInvoice.project_id, CrmInvoice.project_ids)
+            .where(CrmInvoice.project_id.in_(ids)))).all())
+        if len(pids) == 1 and pids[0] in ids}
     conds = [CrmCashEntry.project_id.in_(ids)]
     if inv_proj:
         conds.append(CrmCashEntry.invoice_id.in_(set(inv_proj)))
     rows = (await session.execute(
         select(CrmCashEntry.project_id, CrmCashEntry.invoice_id, CrmCashEntry.deposit, CrmCashEntry.bank_fee)
-        .where(CrmCashEntry.entity == "parent", CrmCashEntry.deposit > 0, or_(*conds)))).all()
+        .where(CrmCashEntry.entity == "parent", CrmCashEntry.deposit > 0,
+               # 發票代開的收款不是案子的錢（要扣代開費、給執行人員），不算到帳
+               or_(CrmCashEntry.category.is_(None), CrmCashEntry.category.notin_(_PASSTHRU_CATS)),
+               or_(*conds)))).all()
     out: dict = {}
     for pid, iid, dep, fee in rows:
         eff = pid if pid in ids else inv_proj.get(iid)

@@ -26,6 +26,7 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 is_passthrough_category, month_of,
                                 normalize_invoice_status, passthrough_commission)
 from core.auth import check_logged_in
+from core.project_link import invoice_project_ids as _inv_pids, normalize_invoice_projects as _norm_inv_projects
 from core.ledger import (require_entity)
 from core.schemas import (InvoicePayload)
 
@@ -109,6 +110,7 @@ def _to_invoice_dict(inv, project_name: str = "") -> dict:
         "commission": inv.commission, "company_name": inv.company_name or "",
         "tax_id": inv.tax_id or "", "item_type": inv.item_type or "",
         "project_id": inv.project_id or "", "project_name": project_name,
+        "project_ids": _inv_pids(inv.project_id, getattr(inv, "project_ids", None)),   # 可複數；第一個＝project_id
         "recipient": getattr(inv, 'recipient', '') or "",
         "recipient_phone": getattr(inv, 'recipient_phone', '') or "",
         "recipient_address": getattr(inv, 'recipient_address', '') or "",
@@ -709,8 +711,10 @@ async def create_invoice(req: InvoicePayload, request: Request):
     factory = await _get_factory()
     now = _now()
     data = req.model_dump(exclude={"invoice_date", "entity"})
+    _norm_inv_projects(data)
     async with factory() as _s:
-        await _assert_project_link(_s, request, data.get("project_id"), data.get("category"))
+        for _pid in _inv_pids(data.get("project_id"), data.get("project_ids")):
+            await _assert_project_link(_s, request, _pid, data.get("category"))
     # 款項狀態在**入口**定案，不留給客戶端：
     #   · 舊客戶端可能送改名前的字（已轉撥）→ 正規化
     #   · 沒送或送空字串 → 依方向推（收款＝未收款、代開＝未付款）
@@ -823,6 +827,11 @@ async def get_invoice(invoice_id: str, request: Request):
         covered_from = (await session.execute(
             select(safunc.min(CrmCashEntry.entry_date))
             .where(CrmCashEntry.entity == (inv.entity or "parent")))).scalar()
+        # 掛的案可複數：名字照清單順序（第一個＝project_id）
+        _ids = _inv_pids(inv.project_id, getattr(inv, "project_ids", None))
+        _nm = dict((await session.execute(
+            select(CrmProject.id, CrmProject.name).where(CrmProject.id.in_(_ids)))).all()) if _ids else {}
+        names = [_nm.get(i, "") for i in _ids]
     d = _to_invoice_dict(inv, pn)
     d["collection_checkable"] = bool(
         covered_from and inv.invoice_date and inv.invoice_date >= covered_from)
@@ -833,6 +842,7 @@ async def get_invoice(invoice_id: str, request: Request):
     from config import load_settings
     d["commission_due"] = int(inv.commission or 0) or passthrough_commission(
         inv.amount_total, inv.category, load_settings().get("invoice_fee_rates"))
+    d["project_names"] = names
     return d
 
 
@@ -852,7 +862,9 @@ async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request)
         await _assert_month_open(session, inv.invoice_date, new_date, entity=ent)
         old_status = inv.payment_status
         upd = req.model_dump(exclude={"invoice_date", "entity"})
-        await _assert_project_link(session, request, upd.get("project_id"), upd.get("category"))
+        _norm_inv_projects(upd, _inv_pids(inv.project_id, getattr(inv, "project_ids", None)))
+        for _pid in _inv_pids(upd.get("project_id"), upd.get("project_ids")):
+            await _assert_project_link(session, request, _pid, upd.get("category"))
         # 同上：舊字正規化、空的就依方向推（PUT 會整包寫回，空字串照樣會寫進去）
         upd["payment_status"] = (
             normalize_invoice_status(upd.get("payment_status") or "")
