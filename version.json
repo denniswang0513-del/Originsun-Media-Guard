@@ -1,5 +1,5 @@
 {
-  "version": "2.4.311",
-  "build_date": "2026-09-03",
-  "notes": "行事曆：拍攝場次＋器材登記（手機版第五分頁取代付款，付款成隱藏頁）；場次連專案（拍攝日自動算）與 Google 日曆（服務帳號寫入）；器材預約沿用器材庫領用紀錄（已領／已還共用規則）；新表 crm_shoots、equipment_checkouts.shoot_id"
+  "version": "2.4.312",
+  "build_date": "2026-09-04",
+  "notes": "案型清單合一（正本＝私帳毛利表，CRM 工具列「案型清單」可加／改名／刪，GET/POST /api/v1/crm/project-types）；工作日誌專案下拉分「進行中（預設）／已結案（收著）」；行事曆 /simplify 兩輪重構（_finish 收尾、母公司案檢查合一）"
 }
