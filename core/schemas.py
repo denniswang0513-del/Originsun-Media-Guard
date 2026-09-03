@@ -1186,6 +1186,11 @@ class EquipmentMaintenancePayload(BaseModel):
     note: Optional[str] = None
 
 
+class ProjectTypesPayload(BaseModel):
+    """CRM「編輯案型」：settings.project_types 整份覆寫（私帳毛利表裡的案型不在這份、改不到）。"""
+    project_types: List[str] = []
+
+
 class ShootCreate(BaseModel):
     """拍攝場次（行事曆）新增；日期 'YYYY-MM-DD'、時間 'HH:MM'。"""
     project_id: Optional[str] = None

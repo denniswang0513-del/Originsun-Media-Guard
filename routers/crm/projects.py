@@ -17,7 +17,7 @@ from sqlalchemy import func as _sa_func
 from config import load_settings as _load_settings
 
 from core.ledger import hide_mine_projects, not_mine
-from core.schemas import (CrmProjectPayload, CrmProjectPatchPayload,
+from core.schemas import (CrmProjectPayload, CrmProjectPatchPayload, ProjectTypesPayload,
                           ProjectLedgerMovePayload, ProjectMirrorPayload)
 
 from ._shared import (router, _check_auth, _check_status_auth, _check_project_write_auth,
@@ -115,6 +115,33 @@ _hide_mine = hide_mine_projects
 
 
 # ── Project Endpoints ───────────────────────────────────────
+
+@router.get("/project-types")
+async def get_project_types(request: Request):
+    """案型清單**一份**（owner 2026-09-03「這裡的案型跟私帳同步」）：settings.project_types（CRM「編輯案型」）
+    ∪ 私帳毛利表的項目（core.finance_logic.project_type_vocab）。CRM 專案表下拉、編輯案型、私帳設定頁、
+    工時 burn 表、手機版都吃同一份；margin_types 讓前端知道哪些要去財務設定的毛利表改。"""
+    from core.finance_logic import load_margin_model, project_type_vocab
+    margin = [t for t in ((r.get("type") or "").strip() for r in (load_margin_model("mine").get("rows") or [])) if t]
+    return {"project_types": project_type_vocab(), "margin_types": margin,
+            "settings_types": [t for t in (_load_settings().get("project_types") or []) if t]}
+
+
+@router.put("/project-types")
+async def put_project_types(payload: ProjectTypesPayload, request: Request):
+    """覆寫 settings.project_types（同 /api/settings/save 的守衛：Lv3）；毛利表那半邊不動。"""
+    _check_auth(request)
+    from config import save_settings
+    names = []
+    for t in payload.project_types or []:
+        t = (t or "").strip()
+        if t and t not in names:
+            names.append(t)
+    s = _load_settings()
+    s["project_types"] = names
+    save_settings(s)
+    return await get_project_types(request)
+
 
 @router.get("/projects")
 async def list_projects(

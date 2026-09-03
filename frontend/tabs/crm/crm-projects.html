@@ -46,6 +46,7 @@
   <div class="crm-toolbar-right">
     <button id="proj-btn-expense" class="crm-btn crm-btn-secondary" onclick="window._projOpenExpensePage()">雜支登記</button>
     <button id="proj-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
+    <button id="proj-btn-types" class="crm-btn crm-btn-secondary" onclick="window._projEditTypes()" title="案型清單（跟私帳同一份）">案型清單</button>
     <button id="proj-btn-add" class="crm-btn crm-btn-primary">+ 新增專案</button>
   </div>
 </div>
@@ -143,7 +144,7 @@
           </select>
         </div>
         <div class="crm-field">
-          <label>案件類型 <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projEditTypes()" title="編輯類型" style="padding:2px 6px;margin-left:4px;">✎</button></label>
+          <label>案件類型 <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projEditTypes()" title="案型清單（跟私帳同一份）" style="padding:2px 6px;margin-left:4px;">編輯</button></label>
           <select id="proj-f-project_type" class="crm-input">
             <option value="">—</option>
           </select>

@@ -29,15 +29,21 @@ const _sorter = createSortable({
     },
 });
 
-// ── Project Types (dynamic from settings) ─────────────────
+// ── 案型清單：一份（GET /api/v1/crm/project-types ＝ settings.project_types ∪ 私帳毛利表）──
+// owner 2026-09-03「這裡的案型跟私帳同步」：專案表下拉、這裡的編輯器、私帳設定頁、工時 burn 表都吃同一份。
+// 毛利表來的案型在這裡只能看（要改去財務設定的毛利表）；settings 那份可以在這裡加／改名／刪。
 const _DEFAULT_TYPES = ['紀實影片', '活動紀實', '形象影片', '廣告', 'MV'];
 let _projectTypes = [..._DEFAULT_TYPES];
+let _marginTypes = new Set();      // 私帳毛利表的案型（唯讀）
+
+function _applyTypes(d) {
+    _projectTypes = (d.project_types && d.project_types.length) ? d.project_types : [..._DEFAULT_TYPES];
+    _marginTypes = new Set(d.margin_types || []);
+}
 
 export async function loadProjectTypes() {
-    try {
-        const s = await fetch('/api/settings/load').then(r => r.json());
-        _projectTypes = s.project_types && s.project_types.length > 0 ? s.project_types : [..._DEFAULT_TYPES];
-    } catch (_) { _projectTypes = [..._DEFAULT_TYPES]; }
+    try { _applyTypes(await _fetch('/project-types')); }
+    catch (_) { _projectTypes = [..._DEFAULT_TYPES]; _marginTypes = new Set(); }
     _populateTypeSelects();
 }
 
@@ -53,7 +59,9 @@ function _populateTypeSelects() {
 }
 
 async function _saveTypes() {
-    await saveSettings({ project_types: _projectTypes });
+    // 只存 settings 那半邊；毛利表的案型由後端 union 回來
+    _applyTypes(await _fetch('/project-types', { method: 'PUT',
+        body: JSON.stringify({ project_types: _projectTypes.filter(t => !_marginTypes.has(t)) }) }));
 }
 
 window._projEditTypes = function() {
@@ -68,20 +76,22 @@ window._projEditTypes = function() {
     function _render() {
         overlay.innerHTML = `
           <div class="crm-modal" style="max-width:360px;">
-            <div class="crm-modal-header"><h3>編輯案件類型</h3>
-              <button onclick="document.getElementById('proj-types-overlay').remove()" class="crm-detail-close">✕</button>
+            <div class="crm-modal-header"><h3>案型清單</h3>
+              <button onclick="document.getElementById('proj-types-overlay').remove()" class="crm-detail-close">關閉</button>
             </div>
             <div class="crm-modal-body" style="max-height:400px;overflow-y:auto;">
+              <div style="font-size:12px;color:#888;margin-bottom:6px;">跟私帳同一份。標「毛利表」的案型要去財務設定的預期毛利表改。</div>
               ${_projectTypes.map((t, i) => `<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid #2a2a2a;">
                 <span style="flex:1;font-size:14px;">${_esc(t)}</span>
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="rename" data-idx="${i}" style="padding:2px 6px;">✎</button>
-                <button class="crm-btn crm-btn-danger crm-btn-sm" data-action="delete" data-idx="${i}" style="padding:2px 6px;">✕</button>
+                ${_marginTypes.has(t) ? '<span class="crm-badge" style="font-size:11px;">毛利表</span>' : `
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="rename" data-idx="${i}" style="padding:2px 6px;">改名</button>
+                <button class="crm-btn crm-btn-danger crm-btn-sm" data-action="delete" data-idx="${i}" style="padding:2px 6px;">刪除</button>`}
               </div>`).join('')}
-              <button class="crm-btn crm-btn-primary crm-btn-sm" data-action="add" style="margin-top:8px;width:100%;">+ 新增類型</button>
+              <button class="crm-btn crm-btn-primary crm-btn-sm" data-action="add" style="margin-top:8px;width:100%;">新增案型</button>
             </div>
           </div>`;
         overlay.querySelectorAll('[data-action="add"]').forEach(b => b.addEventListener('click', async () => {
-            const n = prompt('輸入新案件類型：'); if (!n?.trim()) return;
+            const n = prompt('新案型名稱：'); if (!n?.trim()) return;
             if (_projectTypes.includes(n.trim())) { alert('已存在'); return; }
             _projectTypes.push(n.trim()); await _saveTypes(); _populateTypeSelects(); _render();
         }));
@@ -312,8 +322,8 @@ export function renderList() {
 }
 
 // ── 案型：列上直接改（owner 2026-09-03「在專案表裡頭可以調整設定案型」）──
-// 案型是私帳「預期毛利」表的鍵：改了案型，工時預算的建議就跟著換。字彙＝settings.project_types
-//（「編輯案型」那份）；列上目前的值不在清單裡也照列，不會被洗掉。沒案型的列標橘框提醒。
+// 案型是私帳「預期毛利」表的鍵：改了案型，工時預算的建議就跟著換。字彙＝GET /project-types 那一份
+//（settings ∪ 私帳毛利表）；列上目前的值不在清單裡也照列，不會被洗掉。沒案型的列標橘框提醒。
 function _typeSelectHtml(p) {
     // 平時只畫文字（433 列 × 11 個 option ＝ 5,000 個節點，畫一次 4 秒）；點到那一格才變成下拉
     const cur = p.project_type || '';
