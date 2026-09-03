@@ -82,6 +82,7 @@ function applyPreset() {
 }
 
 async function onProject(pid) {
+    if (!pid) { loadRecent(''); return; }     // 選擇器剛掛上／清空時會帶空值進來，別去打 /projects//cost-groups
     await Promise.all([loadGroups(pid), loadRecent(pid)]);
 }
 
