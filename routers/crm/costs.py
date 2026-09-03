@@ -13,6 +13,7 @@ import uuid
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
+from core.no_store import no_store_file
 
 from core.auth import check_admin
 from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
@@ -743,8 +744,7 @@ async def serve_receipt(path: str = Query(""), request: Request = None):
             )).scalars().all()
         if not any(rp and abs_path.startswith(os.path.abspath(rp)) for rp in rows):
             raise HTTPException(status_code=403, detail="無權存取此路徑")
-    from starlette.responses import FileResponse
-    return FileResponse(path)
+    return no_store_file(path)
 
 
 @router.get("/petty/receipts-root")

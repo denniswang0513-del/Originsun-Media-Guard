@@ -78,7 +78,7 @@ export async function submitVerify() {
     const vfMode = payload.mode;
 
     // 讀取處理主機
-    const vfHostObj = window.collectSelectedHost ? window.collectSelectedHost('vf_host_checkboxes') : { name: '本機', ip: 'local' };
+    const vfHostObj = window.collectSelectedHost('vf_host_checkboxes');
     const isLocal = vfHostObj.ip === 'local';
     const vfHostUrl = isLocal ? getComputeBaseUrl() : 'http://' + vfHostObj.ip;
 

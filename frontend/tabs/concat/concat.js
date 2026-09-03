@@ -94,7 +94,7 @@ export async function submitConcat() {
     if (!collected.valid) return;
     const payload = collected.payload;
 
-    const ccHostObj = window.collectSelectedHost ? window.collectSelectedHost('cc_host_checkboxes') : { name: '本機', ip: 'local' };
+    const ccHostObj = window.collectSelectedHost('cc_host_checkboxes');
     const isLocal = ccHostObj.ip === 'local';
     const ccHostUrl = isLocal ? getComputeBaseUrl() : 'http://' + ccHostObj.ip;
     const ccHostName = ccHostObj.name || ccHostObj.ip;

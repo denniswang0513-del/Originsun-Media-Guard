@@ -15,7 +15,6 @@ let _selectedId = null;
 let _editingId = null;  // null=新增, string=編輯
 let _editingProjectId = null;
 let _filters = { q: '', status: '', client_id: '' };
-let _tabInitDone = false;  // idempotent guard — multiple lazy-loaders may call
 
 // ── Data Loading ─────────────────────────────────────────────
 
@@ -549,14 +548,9 @@ export async function quoteDup(id) {
 export const openQuoteForProject = (projectId) => openModal(null, projectId);
 
 export async function initCrmQuotesTab() {
-    // Guard against double-init: this Tab has two lazy-loaders (the outer
-    // "報價總覽" sub-tab in crm-projects.js and the project-detail "報價管理"
-    // sub-tab via crm-projects-quotes.js). Each had its own loaded flag,
-    // so without this guard event listeners would double-bind on the second
-    // entry path → duplicate fetches, stacked modals, etc.
-    if (_tabInitDone) return;
-    _tabInitDone = true;
-
+    // 只有 app.js 的載入器會呼叫（它自己去重：載過不再載、進行中只載一次）；以前這裡另有一個
+    // init 守衛擋第二條載入路，那條路 2026-09-03 已收進載入器——守衛留著反而會在 init
+    // 中途炸掉時把重試也擋掉
     for (const id of ['quote-modal', 'quote-template-modal']) {
         const el = document.getElementById(id);
         if (el) document.body.appendChild(el);
@@ -570,7 +564,6 @@ export async function initCrmQuotesTab() {
     };
     window._quoteDup = quoteDup;
     window._quoteRemoveItem = removeItemRow;
-    window._openQuoteModalForProject = openQuoteForProject;
     window._quoteActivateProject = async (projectId) => {
         if (!confirm('確定將此專案狀態切為「製作」？')) return;
         try {

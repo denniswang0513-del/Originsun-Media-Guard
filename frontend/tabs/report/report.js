@@ -33,7 +33,7 @@ export async function submitReportJob() {
     };
 
     // 讀取處理主機
-    const rptHostObj = window.collectSelectedHost ? window.collectSelectedHost('rpt_host_checkboxes') : { name: '本機', ip: 'local' };
+    const rptHostObj = window.collectSelectedHost('rpt_host_checkboxes');
     const isLocal = rptHostObj.ip === 'local';
     const rptHostUrl = isLocal ? getComputeBaseUrl() : 'http://' + rptHostObj.ip;
 

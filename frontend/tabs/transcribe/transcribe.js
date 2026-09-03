@@ -208,7 +208,7 @@ export async function submitTranscribeJob() {
     btn.classList.add('opacity-70', 'cursor-not-allowed');
 
     // 讀取處理主機
-    const trHostObj = window.collectSelectedHost ? window.collectSelectedHost('tr_host_checkboxes') : { name: '本機', ip: 'local' };
+    const trHostObj = window.collectSelectedHost('tr_host_checkboxes');
     const isLocal = trHostObj.ip === 'local';
     const trHostUrl = isLocal ? getAgentBaseUrl() : 'http://' + trHostObj.ip;
 
@@ -885,9 +885,7 @@ export async function submitAlignJob() {
 
     // 處理主機 — 對齊需要 stable-ts/Whisper 環境，多數 agent 沒裝；
     // 讓使用者把任務派到有完整 ML 環境的主機（通常是錄音室電腦）。
-    const alHostObj = window.collectSelectedHost
-        ? window.collectSelectedHost('al_host_checkboxes')
-        : { name: '本機', ip: 'local' };
+    const alHostObj = window.collectSelectedHost('al_host_checkboxes');
     const isLocal = alHostObj.ip === 'local';
     const alHostUrl = isLocal ? getAgentBaseUrl() : 'http://' + alHostObj.ip;
 

@@ -580,8 +580,9 @@ def _emit_sync(event: str, data: dict) -> None:
 - `switchTab` 派的 `tab-changed` 事件帶 `fresh`（＝這次切換才載進來）。「切回來要重抓」的鉤子
   （提案庫、CRM 專案、財務）看到 `fresh` 就不再抓——init 剛抓過。
 - 分頁 DOM 開機時不存在：預設值、勾選監聽都住在各分頁自己的 `initTab`；機隊勾選面板由載入器在分頁長出來時補。
-- 靜態檔回 `cache-control: no-cache`（走 ETag／304），`/api/*`、`/socket.io`、`/download*`、`/healthz`、`/e/`
-  維持 no-store。
+- 快取三層（main.py NoCacheMiddleware，不認得任何路徑）：handler 自己宣告的 Cache-Control 優先（index.html、
+  影像紀錄縮圖、財務文件／OTA 包用 `core.no_store.no_store_file()`）→ 有 ETag 的靜態檔 no-cache（304）→
+  沒驗證器的 JSON 一律 no-store。
 - 背景輪詢預算：無限期的狀態輪詢一律 `startVisiblePolling(fn, ms, { sectionId })`（`js/shared/utils.js`；
   分頁在背景或 SPA 分頁被藏起來就不打）；本機代理每 3 秒問 `/api/v1/health`（不是會回整段 log 的 `/status`）、
   版本比對 60 秒一次、機隊燈號 30 秒一輪且畫面上沒燈不打。規則釘在 `tests/unit/test_frontend_request_budget.py`。

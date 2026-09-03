@@ -279,7 +279,7 @@ window.submitTtsJob = async function() {
     };
 
     // 讀取處理主機
-    const ttsHostObj = window.collectSelectedHost ? window.collectSelectedHost('tts_host_checkboxes') : { name: '本機', ip: 'local' };
+    const ttsHostObj = window.collectSelectedHost('tts_host_checkboxes');
     const isLocal = ttsHostObj.ip === 'local';
     const ttsHostUrl = isLocal ? getAgentBaseUrl() : 'http://' + ttsHostObj.ip;
 
@@ -608,7 +608,7 @@ window.submitCloneJob = async function() {
     if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
 
     // 讀取處理主機（聲音複製）
-    const cloneHostObj = window.collectSelectedHost ? window.collectSelectedHost('tts_clone_host_checkboxes') : { name: '本機', ip: 'local' };
+    const cloneHostObj = window.collectSelectedHost('tts_clone_host_checkboxes');
     const cloneIsLocal = cloneHostObj.ip === 'local';
     const cloneHostUrl = cloneIsLocal ? getAgentBaseUrl() : 'http://' + cloneHostObj.ip;
 

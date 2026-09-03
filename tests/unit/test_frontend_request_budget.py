@@ -50,7 +50,6 @@ def test_tab_defaults_live_in_their_own_init():
 
 
 async def test_static_files_revalidate_with_etag_api_stays_no_store(async_client):
-    from main import _NO_STORE_FILES
     r = await async_client.get("/app.js")
     assert r.status_code == 200 and r.headers["cache-control"] == "no-cache" and r.headers.get("etag")
     r304 = await async_client.get("/app.js", headers={"If-None-Match": r.headers["etag"]})
@@ -61,7 +60,18 @@ async def test_static_files_revalidate_with_etag_api_stays_no_store(async_client
     # handler 自己宣告的以它為準（index.html 要 no-store，而且只有一個 Cache-Control，不是疊兩層）
     idx = await async_client.get("/")
     assert idx.headers["cache-control"] == "no-store, no-cache, must-revalidate, max-age=0"
-    assert _NO_STORE_FILES == ("/download", "/e/")   # 例外要留著理由（OTA 安裝包、分享連結的財務文件）
+
+
+
+def test_files_that_must_not_be_cached_declare_it_themselves():
+    """財務文件／OTA 包有 ETag 卻不該進磁碟快取——由 handler 用 core.no_store 宣告，middleware 不認路徑
+    （以前用網址前綴列例外，同一份發票 PDF 三條路只擋到一條）。"""
+    assert "_NO_STORE_FILES" not in repo_src("main.py")
+    for rel, plain_left in (("routers/crm/invoice_files.py", 0), ("routers/crm/costs.py", 0),
+                            ("routers/api_ota.py", 0), ("main.py", 2)):   # main.py 剩 index.html 兩處（它自己設 no-store）
+        src = repo_src(rel)
+        assert "no_store_file(" in src, rel
+        assert src.count("FileResponse(") == plain_left, rel
 
 
 def test_background_polling_is_light():
@@ -87,6 +97,16 @@ def test_no_dead_utils_guards(rel):
     src = js_code_only(repo_src(rel))
     for name in ("appendLog", "resetProgress", "loadReportHistory"):
         assert f"typeof {name}" not in src, name
+
+
+def test_no_dead_host_picker_guards():
+    """utils.js 的 collectSelectedHost 開機就在；`window.collectSelectedHost ? … : { 本機 }` 的 fallback
+    跟它對沒有容器時的回傳一字不差，守衛只是把同一個預設值再抄一份。"""
+    import pathlib
+    root = pathlib.Path(repo_src.__globals__["_REPO"]) / "frontend" / "tabs"
+    for f in root.rglob("*.js"):
+        assert "collectSelectedHost ?" not in js_code_only(f.read_text(encoding="utf-8")), f.name
+        assert "typeof window.renderStandaloneHostPanels" not in f.read_text(encoding="utf-8"), f.name
 
 
 def test_dispatch_state_is_one_ctx():

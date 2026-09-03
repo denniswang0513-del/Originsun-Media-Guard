@@ -19,6 +19,7 @@ if _sys.platform == "win32":
 import socketio  # type: ignore
 import uvicorn  # type: ignore
 from fastapi import FastAPI, Request  # type: ignore
+from core.no_store import no_store_file
 from fastapi.staticfiles import StaticFiles  # type: ignore
 from fastapi.responses import FileResponse, RedirectResponse  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
@@ -61,12 +62,6 @@ from core.api_docs import docs_urls  # noqa: E402
 
 app = FastAPI(title="Originsun Media Guard Web API", **docs_urls())
 
-# 有驗證器（ETag／Last-Modified）的回應才值得 no-cache（瀏覽器帶條件式請求、304 不重傳本體）；
-# JSON／串流沒有驗證器，no-cache 只會退化成每次全抓 → 一律 no-store。這樣不必手列 API 前綴。
-# 例外（有驗證器仍 no-store）：OTA 安裝包（~1GB，不值得進磁碟快取）、/e/ 分享連結的財務文件（不留快取）。
-_NO_STORE_FILES = ("/download", "/e/")
-
-
 class NoCacheMiddleware:
     """Pure ASGI middleware — does NOT buffer streaming responses (unlike BaseHTTPMiddleware).
     This is critical for SSE endpoints like /drone_meta/scan_stream."""
@@ -102,15 +97,13 @@ class NoCacheMiddleware:
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
-                # handler 自己宣告了 Cache-Control（index.html 的 no-store、影像紀錄縮圖的 private max-age）
-                # 就以它為準，不再疊一層；其餘 GET 才套下面的通則
-                declared = any(k.lower() == b"cache-control" for k, _ in headers)
-                if method == "GET" and not declared:
-                    # 靜態檔（分頁 html／js／css／圖）no-cache：瀏覽器每次帶 ETag 問一句、主機回 304
-                    # 不重傳本體 —— 遠端（Cloudflare）開頁少下載 ~1.5 MB，發版換檔 ETag 就變
-                    # （owner 2026-09-03「存取都有點慢」）。判準見 _NO_STORE_FILES 上方。
-                    has_validator = any(k.lower() in (b"etag", b"last-modified") for k, _ in headers)
-                    if has_validator and not scope.get("path", "").startswith(_NO_STORE_FILES):
+                # 三層：handler 自己宣告了 Cache-Control（index.html 的 no-store、影像紀錄縮圖的 private
+                # max-age、財務文件／OTA 包的 core.no_store）就以它為準；否則有驗證器（ETag／Last-Modified）
+                # 的靜態檔 no-cache——瀏覽器每次帶 ETag 問一句、主機回 304 不重傳本體，遠端（Cloudflare）
+                # 開頁少下載 ~1.5 MB、發版換檔 ETag 就變（owner 2026-09-03「存取都有點慢」）；
+                # 沒驗證器的 JSON／串流 no-cache 只會退化成每次全抓 → no-store。middleware 不認得任何路徑。
+                if method == "GET" and not any(k.lower() == b"cache-control" for k, _ in headers):
+                    if any(k.lower() in (b"etag", b"last-modified") for k, _ in headers):
                         headers.append((b"cache-control", b"no-cache"))
                     else:
                         headers.append((b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"))
@@ -1206,14 +1199,14 @@ async def _periodic_version_check():
 async def download_agent():
     file_path = "Originsun_Agent.zip"
     if os.path.exists(file_path):
-        return FileResponse(file_path, filename="Originsun_Agent.zip")
+        return no_store_file(file_path, filename="Originsun_Agent.zip")
     return {"error": "系統尚未打包 Originsun_Agent.zip，請聯絡管理員。"}
 
 @app.get("/download_installer")
 async def download_installer():
     file_path = "Install_Originsun_Agent.bat"
     if os.path.exists(file_path):
-        return FileResponse(file_path, filename="Install_Originsun_Agent.bat")
+        return no_store_file(file_path, filename="Install_Originsun_Agent.bat")
     return {"error": "找不到自動安裝腳本。"}
 
 @app.get("/proposal-plan.html", include_in_schema=False)

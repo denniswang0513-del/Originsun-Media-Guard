@@ -11,7 +11,8 @@ import sys
 import asyncio
 from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, Query, Request  # type: ignore
-from fastapi.responses import JSONResponse, FileResponse  # type: ignore
+from core.no_store import no_store_file
+from fastapi.responses import JSONResponse  # type: ignore
 
 router = APIRouter()
 
@@ -158,7 +159,7 @@ async def admin_restart(request: Request):
 async def download_agent():
     file_path = "Originsun_Agent.zip"
     if os.path.exists(file_path):
-        return FileResponse(file_path, filename="Originsun_Agent.zip")
+        return no_store_file(file_path, filename="Originsun_Agent.zip")
     return {"error": "系統尚未打包 Originsun_Agent.zip，請聯絡管理員放置此檔案於伺服器根目錄。"}
 
 
@@ -206,7 +207,7 @@ async def download_update(background_tasks: BackgroundTasks):
     try:
         zip_path = await asyncio.to_thread(_build_zip)
         background_tasks.add_task(os.unlink, zip_path)
-        return FileResponse(zip_path, filename="Originsun_Update.zip",
+        return no_store_file(zip_path, filename="Originsun_Update.zip",
                             media_type="application/zip")
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -393,7 +394,7 @@ async def download_installer():
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     file_path = os.path.join(base, "Install_or_Update.bat")
     if os.path.exists(file_path):
-        return FileResponse(file_path, filename="Install_or_Update.bat")
+        return no_store_file(file_path, filename="Install_or_Update.bat")
     return {"error": "Install_or_Update.bat not found."}
 
 

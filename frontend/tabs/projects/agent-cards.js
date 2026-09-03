@@ -21,9 +21,7 @@ function _syncComputeHosts() {
         name: a.name,
         ip: (a.url || '').replace(/^https?:\/\//, '')
     }));
-    if (typeof window.renderStandaloneHostPanels === 'function') {
-        window.renderStandaloneHostPanels();
-    }
+    window.renderStandaloneHostPanels();
 }
 
 export async function _loadAgents() {

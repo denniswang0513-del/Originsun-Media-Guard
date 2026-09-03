@@ -891,14 +891,6 @@ export function resetProgress() {
 
 // ── 共用主機選擇模組 ──
 
-/**
- * 將 compute_hosts 渲染為 checkbox 到指定容器。
- * @param {string} containerId - 容器 DOM id
- * @param {object} [opts] - 選項
- * @param {boolean} [opts.includeLocal=true] - 是否包含「本機」選項
- * @param {boolean} [opts.localChecked=true] - 「本機」預設勾選
- * @param {string}  [opts.idPrefix] - checkbox id 前綴（避免多個選擇器 id 衝突），預設為 containerId
- */
 // 格式化 IP：去掉 port（:8000）
 function _displayIp(ip) {
     if (!ip || ip === 'local') return '';
@@ -928,15 +920,6 @@ function _isLocalHost(agentIp) {
         || (hostname === '127.0.0.1' && ip === 'localhost');
 }
 
-// 偵測所有主機連線狀態，更新狀態燈。
-//
-// 走 server proxy（/api/v1/agents/{id}/health）讓主控端代為 ping agent，而不是
-// 瀏覽器直連 http://<agent-LAN-IP>/...。直連的舊作法在「從遠端 https 網域
-// （foundry.originsun-studio.com / cloudflared）開後台」時會全滅：
-//   1. mixed content — https 頁面不准 fetch http 資源，瀏覽器直接擋
-//   2. 網段不通 — 遠端瀏覽器不在 192.168.1.x 內網，連不到 LAN IP
-// 這也讓本面板的燈號與「專案總覽」的機器卡片（agent-cards.js 早就用 proxy）一致。
-
 // 「看得見才打」的輪詢：立刻打一發（同樣過閘門——背景分頁開頁不白打），之後每 ms 一次；
 // 瀏覽器分頁在背景就跳過，給了 sectionId 時該 SPA 分頁被 switchTab 藏起來也跳過。
 // 只給無限期的狀態輪詢用（本機代理燈、機隊燈、官網健康／收件匣徽章）；有終點的工作輪詢不該停。
@@ -948,6 +931,14 @@ export function startVisiblePolling(fn, ms, { sectionId } = {}) {
     return setInterval(tick, ms);
 }
 
+// 偵測所有主機連線狀態，更新狀態燈。
+//
+// 走 server proxy（/api/v1/agents/{id}/health）讓主控端代為 ping agent，而不是
+// 瀏覽器直連 http://<agent-LAN-IP>/...。直連的舊作法在「從遠端 https 網域
+// （foundry.originsun-studio.com / cloudflared）開後台」時會全滅：
+//   1. mixed content — https 頁面不准 fetch http 資源，瀏覽器直接擋
+//   2. 網段不通 — 遠端瀏覽器不在 192.168.1.x 內網，連不到 LAN IP
+// 這也讓本面板的燈號與「專案總覽」的機器卡片（agent-cards.js 早就用 proxy）一致。
 let _hostHealthTimer = null;
 async function _checkHostHealth() {
     const hosts = window._computeHosts || [];
@@ -980,6 +971,12 @@ function _startHostHealthPolling() {
     _hostHealthTimer = startVisiblePolling(_checkHostHealth, 30000); // 每 30 秒（燈號走主控 proxy，不必等本機 IP）
 }
 
+/**
+ * 將 compute_hosts 渲染為 checkbox 到指定容器。
+ * @param {string} containerId - 容器 DOM id
+ * @param {object} [opts] - 選項
+ * @param {string}  [opts.idPrefix] - checkbox id 前綴（避免多個選擇器 id 衝突），預設為 containerId
+ */
 export function renderHostCheckboxes(containerId, opts = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;

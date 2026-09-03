@@ -550,7 +550,7 @@ async function submitDroneMeta() {
         if (!collected.valid) return;
         const payload = collected.payload;
 
-        const host = window.collectSelectedHost ? window.collectSelectedHost('dm_host_checkboxes') : { name: '本機', ip: 'local' };
+        const host = window.collectSelectedHost('dm_host_checkboxes');
         const isLocal = host.ip === 'local';
         const hostUrl = isLocal ? getComputeBaseUrl() : 'http://' + host.ip;
         const hostName = host.name || host.ip;

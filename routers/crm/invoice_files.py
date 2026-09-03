@@ -19,6 +19,7 @@ import re
 import shutil
 
 from fastapi import Depends, File, HTTPException, Query, Request, UploadFile
+from core.no_store import no_store_file
 
 from core.auth import check_admin
 from core.finance_logic import PASSTHROUGH_FEE_RATES
@@ -237,8 +238,7 @@ async def serve_invoice_file(path: str = Query(""), request: Request = None):
     abs_path = os.path.abspath(path)
     if not abs_path.startswith(os.path.abspath(_invoices_root())):
         raise HTTPException(status_code=403, detail="無權存取此路徑")
-    from starlette.responses import FileResponse
-    return FileResponse(abs_path, filename=os.path.basename(abs_path))
+    return no_store_file(abs_path, filename=os.path.basename(abs_path))
 
 
 # 短碼長度：secrets.token_urlsafe(9) → 12 字元（72 bits）。這串是要寄給客戶、
@@ -332,8 +332,7 @@ async def serve_invoice_by_share_token(token: str):
     # 免登入端點更不能讓 DB 裡一個被改壞的路徑變成任意檔案讀取
     if not os.path.abspath(path).startswith(os.path.abspath(_invoices_root())):
         raise HTTPException(status_code=403, detail="無權存取此路徑")
-    from starlette.responses import FileResponse
-    return FileResponse(os.path.abspath(path), filename=os.path.basename(path))
+    return no_store_file(os.path.abspath(path), filename=os.path.basename(path))
 
 
 @token_router.get("/public/invoice-file/{token}")
