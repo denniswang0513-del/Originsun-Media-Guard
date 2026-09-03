@@ -172,6 +172,16 @@ def _run(name, wf, token):
                                    if not (isinstance(v, list) and len(v) == 2
                                            and isinstance(v[1], int))}, ensure_ascii=False)))
 
+    dump = os.environ.get('DUMP_API')
+    if dump:
+        # A fixed workflow only needs converting once. Save the API-format graph
+        # and callers can POST it directly, swapping just the input filename -
+        # no browser, no frontend, no subgraph flattening at run time.
+        io.open(dump, 'w', encoding='utf-8', newline=chr(10)).write(
+            json.dumps(prompt, ensure_ascii=False, indent=1))
+        print('api graph written to', dump)
+        return
+
     if os.environ.get('DRY'):
         types = {}
         for node in prompt.values():

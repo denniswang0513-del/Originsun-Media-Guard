@@ -396,3 +396,69 @@ ComfySwitchNode  id=102  switch <- 105
 - **app 在使用者之間怎麼共享** —— 工作流存在 `user/default/` 底下，大家共用同一個
   ComfyUI 實例。沒實測過另一個帳號登入後看不看得到。
 - **產出沒有按人分開** —— 全部落在同一個 `output/video/`。
+
+---
+
+## 12. 圖片放大 app
+
+`docs/comfyui_gateway/app_image_upscale.json`（機器上叫 `圖片放大.json`）。
+同事只看得到「選圖片」+「執行」。用的是與影片修復**同一組模型**
+（`seedvr2_3b_int8` + `seedvr2_ema_vae_fp16`），不需要另外下載。
+
+同樣把倍率換成固定長邊 —— 官方範本預設 **×4**，那對使用者不安全（丟一張
+4000 px 的圖進來就是 16000 px）。改成 **`scale longer dimension = 4096`**。
+
+實測（RTX 5060 Ti 16GB）：
+
+| 來源 | 目標長邊 | 時間 | 峰值 VRAM |
+|---|---|---|---|
+| 768×768 | 2048 | 15 s | 6809 MiB（42%）|
+| 768×768 | 4096 | 60 s | 11641 MiB（71%）|
+| 640×352（真實照片）| 4096 | 30 s | 8345 MiB（51%）|
+
+圖片比影片便宜非常多（影片是 95%+ 且一次只能一支），所以 4096 有充足餘裕。
+
+> ⚠️ 測試素材要挑對。第一次我用 `example.png`（純色塊抽象圖）比對，
+> 上下兩張幾乎一樣 —— **那不是「放大器沒效果」，是那張圖沒有細節可以還原**。
+> 換成真實照片（640 px → 4096，6.4 倍）才看得出差別：臉部五官、髮絲、
+> 標示牌文字、牆面石材質感全部重建出來。
+
+---
+
+## 13. 用 API 接出去
+
+ComfyUI 的 REST API 可以直接被 Media Guard 呼叫，**認證是現成的** —— 閘門吃的就是
+同一把 `jwt_secret` 簽的 JWT：
+
+```python
+from core.auth import create_token
+cookie = 'og_comfy=' + create_token({'sub': 'mediaguard', 'access_level': 3,
+                                     'modules': ['comfyui']})
+```
+
+固定的工作流**只要轉一次** API 格式就好，本目錄已經備妥：
+
+| 檔案 | 呼叫端唯一要填的欄位 |
+|---|---|
+| `api_image_upscale.json`（13 節點）| `graph['1']['inputs']['image']` |
+| `api_restore_upscale.json`（20 節點）| `graph['73']['inputs']['file']` |
+
+（用 `run_template.py` 加 `DUMP_API=<路徑>` 可以重新產生。）
+
+可跑的範例：`api_client_demo.py`。實測 `POST /prompt` 回 `prompt_id`、
+`node_errors: none`，全程沒有瀏覽器。
+
+| 端點 | 用途 |
+|---|---|
+| `POST /upload/image` | 上傳輸入檔（影片也走這支）|
+| `POST /prompt` | 送出，回 `prompt_id` |
+| `GET /history/{id}` | 結果（輸出檔名、成功與否）|
+| `GET /view?filename=..&subfolder=..&type=output` | 下載產出 |
+| `GET /queue`、`POST /interrupt`、`POST /queue {"clear":true}` | 佇列控制 |
+| `WS /ws` | 即時進度 |
+
+`/api/` 前綴也通（`/queue` 與 `/api/queue` 等價）。
+
+**設計上要注意**：這是長工作（10 秒影片＝13.5 分），必須非同步 —— 送出拿
+`prompt_id`、記進 DB、背景輪詢 `/history`，不能做成 request-response。
+而且同時只能跑一支。
