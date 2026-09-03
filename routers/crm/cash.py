@@ -28,7 +28,7 @@ from core.auth import check_logged_in
 from sqlalchemy import and_ as _sa_and
 from core.cash_taxonomy import SEP as _TAX_SEP, split_category as _tax_split
 # 請款單顯示名的正本在 core（關聯面板的 _ALLOC_KINDS 也吃同一支）
-from core.crm_logic import payment_label
+from core.crm_logic import payment_label, project_pay_label
 from core.ledger import (not_mine as _cli_not_mine, require_entity)
 from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES
 from core.schemas import (CashEntryPayload,
@@ -126,9 +126,25 @@ async def _kai_payments_map(session, invoice_ids, entity: str) -> dict:
     return out
 
 
+async def _project_payments_map(session, project_ids, entity: str) -> dict:
+    """掛了專案的收入列 → 那個案子的請款單（日期、狀態）。預支款不算（那是借錢，不是請款）。"""
+    ids = {i for i in project_ids if i}
+    if not ids:
+        return {}
+    rows = (await session.execute(
+        select(CrmPaymentRequest.project_id, CrmPaymentRequest.request_date, CrmPaymentRequest.payment_status)
+        .where(CrmPaymentRequest.project_id.in_(ids), CrmPaymentRequest.entity == entity,
+               CrmPaymentRequest.is_advance != 1))).all()
+    out: dict = {}
+    for pid, d, st in rows:
+        out.setdefault(pid, []).append((d, st or ""))
+    return {pid: project_pay_label(items) for pid, items in out.items()}
+
+
 def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
                   petty_status: str = "", tax_path=None,
-                  pay_label: str = "", payment_ids=(), invoice_ids=(), kai=None) -> dict:
+                  pay_label: str = "", payment_ids=(), invoice_ids=(), kai=None,
+                  project_pay: str = "") -> dict:
     kai = kai or {}
     return {
         "id": e.id,
@@ -178,6 +194,8 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
         "kai_payment_label": kai.get("label", ""),
         "kai_payment_status": kai.get("status", ""),
         "kai_payment_amount": kai.get("amount", 0),
+        # 掛了專案的收入列：這個案子開過幾號的請款單（規則 core.crm_logic.project_pay_label）
+        "project_pay_label": project_pay or "",
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 
@@ -569,13 +587,22 @@ async def list_cash_entries(
         paylinks = await load_alloc_links_map(session, 'payment', entity=ent)
         invlinks = await load_alloc_links_map(session, 'invoice', entity=ent)
         kaimap = await _kai_payments_map(session, [r[0].invoice_id for r in rows], ent)
+        # 收入列的「案」：列自己掛的，沒有就看發票掛的案（發票代開列的案只准掛在發票上——
+        # core.project_link.CASH_CATEGORIES 不含發票代開，代開的錢不是案子的收入）
+        inv_ids = {r[0].invoice_id for r in rows if (r[0].deposit or 0) > 0 and r[0].invoice_id and not r[0].project_id}
+        inv_proj = dict((await session.execute(
+            select(CrmInvoice.id, CrmInvoice.project_id).where(CrmInvoice.id.in_(inv_ids)))).all()) if inv_ids else {}
+        eff_pid = {r[0].id: (r[0].project_id or inv_proj.get(r[0].invoice_id) or "")
+                   for r in rows if (r[0].deposit or 0) > 0}
+        projpay = await _project_payments_map(session, eff_pid.values(), ent)
     out = []
     for r in rows:
         d = _to_cash_dict(r[0], r[1] or "", r[2] or "", r[3] or "",
                           paths.get(r[0].taxonomy_node_id),
                           payment_label(r[5] or "", r[4] or ""),
                           paylinks.get(r[0].id, ()), invlinks.get(r[0].id, ()),
-                          kaimap.get(r[0].invoice_id))
+                          kaimap.get(r[0].invoice_id),
+                          projpay.get(eff_pid.get(r[0].id, ""), ""))
         subs = smap.get(r[0].id, [])
         d["splits"] = [_split_to_dict(s, paths.get(s.taxonomy_node_id),
                                       amap.get(s.id),

@@ -5,7 +5,7 @@
 發票代開＝category 在 passthrough_categories（後端 finance_category_map treatment=passthrough，不在前端寫死字）、
 沒填類別＝none。底色與快篩都吃它。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import between, code_only, func_body, js_code_only, js_func_body, repo_src
 
 
 def test_backend_options_expose_passthrough_categories_from_category_map():
@@ -40,34 +40,75 @@ def test_request_payment_from_cash_row():
     assert "const _isIncomeRow = (e) =>" in js and "..._payMenu(e)" in js
     assert "if (e.split_count || !_isIncomeRow(e)) return [];" in code_only(func_body(js, "function _payMenu(e)"))
     assert "window._cashRequestPay = async (id) =>" in js and "/invoices/' + e.invoice_id" in js
-    inc = code_only(func_body(js, "async function _cashPayForProject(e, pid, pname, o = {})"))
-    assert "/cost-lines" in inc and "/payments?project_id=" in inc and "cost_line_id: l.id" in inc
+    inc = between(js, "async function _cashPayForProject(e, pid, pname, o = {})", "function _cashCustomPay(")
+    # 列的是專案頁「執行人員」那張表、開的單跟專案頁一樣（人|金額）——規則只有 crm-utils.groupCostStaff 一份
+    assert "/cost-lines" in inc and "/payments?project_id=" in inc and "groupCostStaff(" in inc
+    assert "payee_name: g.name, amount: g.subtotal, summary: g.items.join('、')" in inc and "payee_type: ptype" in inc
+    utils = js_code_only(repo_src("frontend/tabs/crm/crm-utils.js"))
+    assert utils.count("export function groupCostStaff(") == 1
+    grp = js_func_body(utils, "export function groupCostStaff(")
+    assert "(p.advance_by || p.payee_name) + '|' + p.amount" in grp, "代墊單配費用歸屬人"
+    proj = js_code_only(repo_src("frontend/tabs/crm/crm-projects-finance.js"))
+    assert "groupCostStaff(lines, payments)" in js_func_body(proj, "async function _loadCostStaff(")
+    assert "_payByOwnerAmount" not in proj, "分人配單的規則不可在專案頁再長一份"
     assert "batch-pay" not in js and "/cash-entries/${e.id}/payments" not in js, "請款不掛回這一列、不標已付"
     assert "payment_status: '應付款'" in js
     assert 'data-act="link"' in js and 'data-act="custom"' in js, "沒案時要有「連結專案」與「直接請款」"
     # 連結專案的挑選視窗多列私帳案（有 finance_mine 才抓）；選到私帳案不掛這一列，直接開它的費用配置、應付款記在私帳
     assert "hasModule('finance_mine')" in js and "'/projects?entity=mine'" in js and "'私帳｜' + (p.name || '')" in js
-    assert "_cashPayForProject(e, picked, mp ? mp.name : '', { entity: 'mine' })" in js
+    assert "_cashPayForProject(e, picked, mp ? mp.name : '', { entity: 'mine', kai })" in js
     assert "...(ent ? { entity: ent } : {})" in js and "&entity=' + ent" in js
 
 
-def test_passthrough_income_row_requests_the_remit_payment_and_shows_it():
-    """發票代開的收入列（owner 2026-09-04）：請款＝這張發票的代開應匯（面額−代開費）開給代開人——
-    後端在發票標已收款時自動建那張（source_invoice_id 為鍵），前端確保它在、沒有就照同一套補一張；
-    列的請款單欄標註它（kai_payment_*），**不**掛成分配（掛了會被當成已付款）。"""
+def test_passthrough_income_row_goes_through_the_project_and_deducts_the_fee():
+    """發票代開的收入列（owner 2026-09-04 第二版「代開發票不能直接跳出這個，要連結專案」）：請款一樣走專案的執行人員表，
+    只是可請款的錢＝面額 − 代開費（費率後端算：GET /invoices/{id}.commission_due）；沒案→只給「連結專案」（不給直接請款）；
+    案子裡已請過的要說明；發票已有自動建的代開應匯單也要講。請款單欄：掛了案標幾號請款的，沒有才退回代開應匯那張。"""
     js = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
-    assert "if (_kindOf(e) === 'passthrough') return _cashKaiPay(e);" in js
-    kai = js_func_body(js, "async function _cashKaiPay(e)")     # func_body 的結尾只認 def，JS 會吃到檔尾
-    assert "p.source_invoice_id === e.invoice_id" in kai and "source_invoice_id: inv.id" in kai
-    assert "inv.commission_due || inv.commission" in kai and "/cash-entries/" not in kai and "batch-pay" not in kai
-    assert "0.92" not in kai and "* 8" not in kai, "費率不在前端猜：commission_due 由後端照 settings 費率算"
+    assert "_cashKaiPay" not in js, "代開列不再有自己的請款視窗"
+    disp = js_func_body(js, "window._cashRequestPay = async (id) => {")
+    assert "const passthru = _kindOf(e) === 'passthrough';" in disp
+    assert "remit: inv ? (inv.commission_due || inv.commission || 0) : 0" in disp and "0.92" not in disp
+    assert "passthru ? '' : '<button" in disp, "代開列沒案時不給「直接請款」"
+    assert "if (pid) return _cashPayForProject(e, pid, pname, { kai });" in disp
+    # 案掛在發票上、不掛在代開的收支列（後端 core.project_link.CASH_CATEGORIES 不含發票代開：代開的錢不是案子的收入）
+    assert "{ ...full, project_id: picked }" in disp and "if (passthru && !e.invoice_id) {" in disp
+    from core.project_link import CASH_CATEGORIES
+    assert "發票代開" not in CASH_CATEGORIES
+    inc = between(js, "async function _cashPayForProject(e, pid, pname, o = {})", "function _cashCustomPay(")
+    assert "可請款 $${_fmtNum(kai.remit)}" in inc and "案子裡的錢已請過" in inc and "執行人員都請過了" in inc
+    assert "e.kai_payment_id ? { label: e.kai_payment_label" in inc, "發票已自動建的代開應匯單要講（吃列上的 kai_payment_*）"
+    assert "(e.project_pay_label || (e.kai_payment_label ?" in js
     get = code_only(func_body(repo_src("routers/crm/finance.py"), "async def get_invoice("))
     assert 'd["commission_due"] = int(inv.commission or 0) or passthrough_commission(' in get
-    assert "e.kai_payment_amount" in js, "同一個代開人很多張，請款單欄要帶金額才分得出是哪一張"
-    assert 'data-act="proj"' in kai and "_cashPayForProject(e, inv.project_id" in kai, "連到的發票不是代開類別→改走案子的費用配置"
-    assert "e.kai_payment_label" in js
     py = code_only(func_body(repo_src("routers/crm/cash.py"), "async def _kai_payments_map("))
     assert "CrmPaymentRequest.source_invoice_id.in_(ids)" in py
-    lst = code_only(func_body(repo_src("routers/crm/cash.py"), "async def list_cash_entries("))
-    assert "_kai_payments_map(session" in lst and "kaimap.get(r[0].invoice_id)" in lst
-    assert '"kai_payment_label": kai.get("label", "")' in repo_src("routers/crm/cash.py")
+
+
+def test_project_income_row_shows_which_day_it_was_requested():
+    """掛了專案的收入列（owner 2026-09-04「如果專案有連結上的話 標注幾號請款的」）：請款單欄寫這個案子
+    幾號開了幾張請款單（已付幾張）；規則在 core（project_pay_label），後端一次 IN 撈，預支款不算。"""
+    from datetime import datetime, timezone
+    from core.crm_logic import project_pay_label
+    d = lambda m, dd: datetime(2026, m, dd, tzinfo=timezone.utc)
+    assert project_pay_label([]) == ""
+    assert project_pay_label([(d(9, 4), "應付款")] * 4) == "9/4 請款 4 張"
+    assert project_pay_label([(d(9, 4), "已付款"), (d(9, 4), "應付款"), (d(8, 20), "已付款")]) == "9/4 ×2、8/20 ×1（已付 2）"
+    assert project_pay_label([(None, "應付款")]) == "日期空 ×1"
+    py = repo_src("routers/crm/cash.py")
+    body = code_only(func_body(py, "async def _project_payments_map("))
+    assert "CrmPaymentRequest.is_advance != 1" in body and "project_pay_label(items)" in body
+    lst = code_only(func_body(py, "async def list_cash_entries("))
+    assert "_project_payments_map(" in lst and "projpay.get(eff_pid.get(r[0].id" in lst
+    assert "inv_proj.get(r[0].invoice_id)" in lst, "發票代開列的案掛在發票上：請款單欄也要標得到"
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
+    assert "(e.project_pay_label || (e.kai_payment_label ?" in js, "掂了案先標幾號請款的，沒有才退回代開應匯那張"
+    inc = between(js, "async function _cashPayForProject(e, pid, pname, o = {})", "function _cashCustomPay(")
+    assert "loadEntries({ cards: false });" in inc, "請完款要重抓，請款單欄才會標日期"
+
+
+def test_cash_pay_overlay_keeps_the_type_select_above_the_list():
+    """報支項目下拉要在清單上面（owner 2026-09-04「這裡被遮住了」）：視窗 body overflow-y:auto，放在最底下拉往下開就被截掉。"""
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
+    inc = between(js, "async function _cashPayForProject(e, pid, pname, o = {})", "function _cashCustomPay(")
+    assert inc.index('id="cpay-type"') < inc.index("${rows ?"), "報支項目要在人員清單之前"

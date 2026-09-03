@@ -4,7 +4,7 @@
  */
 
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum, moneyGate, today } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, moneyGate, today, groupCostStaff } from './crm-utils.js';
 import { loadProjectStaff } from '../proposals/staff-view.js';
 
 // ── Load Project Staff ──────────────────────────────────────────
@@ -33,56 +33,31 @@ async function _loadCostStaff(projectId) {
     try {
         var data = await _fetch('/projects/' + projectId + '/cost-lines');
         var lines = data.cost_lines || [];
-        // Group by actual_staff_id
-        var staffMap = {};
-        for (var i = 0; i < lines.length; i++) {
-            var ln = lines[i];
-            if (!ln.actual_staff_id) continue;
-            var key = ln.actual_staff_id;
-            if (!staffMap[key]) {
-                staffMap[key] = { name: ln.actual_staff_name || '未知', items: [] };
-            }
-            staffMap[key].items.push({ item_name: ln.item_name, amount: ln.actual_amount || 0 });
-        }
-        var keys = Object.keys(staffMap);
-        if (keys.length === 0) {
-            container.innerHTML = '<div class="crm-empty" style="padding:8px 0;font-size:12px;">尚無執行人員</div>';
-            return;
-        }
         // Fetch payment requests for this project to check payment status
         var payments = [];
         try {
             var payData = await _fetch('/payments?project_id=' + projectId);
             payments = payData.payments || [];
         } catch(_) {}
-
-        // 這張單是**誰的費用** —— 一般單就是收款人；代墊單的收款人是代墊人，
-        // 費用歸屬在 advance_by。
-        // 🔴 只比 payee_name 的話，代墊單永遠配不到費用歸屬人那一列：那一列會
-        // 一直顯示三顆按鈕，同一筆費用可以再請一次款（而畫面上看不出來）。
-        // 建表不逐列掃：原本是 |人員| × |請款單| 次比較，而且比較函式每列重配一次。
-        var _payByOwnerAmount = new Map();
-        for (var pi = 0; pi < payments.length; pi++) {
-            var _p = payments[pi];
-            var _k = (_p.advance_by || _p.payee_name) + '|' + _p.amount;
-            if (!_payByOwnerAmount.has(_k)) { _payByOwnerAmount.set(_k, _p); }
+        // 分人＋配請款單的規則只有 crm-utils.groupCostStaff 這一份 —— 收支明細的「請款」
+        // 列的就是同一張表、開的單也長一樣，所以這裡才配得到（owner 2026-09-04）。
+        var groups = groupCostStaff(lines, payments);
+        if (groups.length === 0) {
+            container.innerHTML = '<div class="crm-empty" style="padding:8px 0;font-size:12px;">尚無執行人員</div>';
+            return;
         }
 
         var proj = state.projects.find(function(p) { return p.id === projectId; });
         var projName = proj ? proj.name : '';
         var grandTotal = 0;
         var html = '<div style="font-size:12px;">';
-        for (var k = 0; k < keys.length; k++) {
-            var s = staffMap[keys[k]];
-            var subtotal = 0;
-            var itemNames = [];
-            for (var j = 0; j < s.items.length; j++) {
-                subtotal += s.items[j].amount;
-                itemNames.push(s.items[j].item_name);
-            }
+        for (var k = 0; k < groups.length; k++) {
+            var s = groups[k];
+            var subtotal = s.subtotal;
+            var itemNames = s.items;
             grandTotal += subtotal;
 
-            var matchedPayment = _payByOwnerAmount.get(s.name + '|' + subtotal) || null;
+            var matchedPayment = s.payment;
 
             var statusHtml = '';
             if (matchedPayment) {

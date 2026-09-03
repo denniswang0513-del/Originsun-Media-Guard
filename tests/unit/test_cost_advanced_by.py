@@ -87,10 +87,14 @@ def test_an_advanced_payment_matches_the_row_of_whose_cost_it_is():
     判準只有一條：這張單是誰的費用＝`advance_by || payee_name`。
     """
     js = js_code_only(repo_src(JS))
-    # 配對建成一張表（|人員| × |請款單| 的逐列掃描是白費），key 就是判準本身
-    assert "(_p.advance_by || _p.payee_name) + '|' + _p.amount" in js
-    assert "_payByOwnerAmount.get(s.name + '|' + subtotal)" in js
-    assert "payments[pi].payee_name === s.name" not in js, "舊的單一判準還在"
+    # 2026-09-04 規則搬到 crm-utils.groupCostStaff（專案頁與收支明細的「請款」共用）：專案頁只吃它、自己不再配
+    utils = js_code_only(repo_src("frontend/tabs/crm/crm-utils.js"))
+    grp = js_func_body(utils, "export function groupCostStaff(")
+    assert "(p.advance_by || p.payee_name) + '|' + p.amount" in grp
+    assert "byOwnerAmount.get(s.name + '|' + s.subtotal)" in grp
+    assert "groupCostStaff(lines, payments)" in js_func_body(js, "async function _loadCostStaff(")
+    for bad in ("payments[pi].payee_name === s.name", "_payByOwnerAmount", "actual_staff_id]"):
+        assert bad not in js, "舊的判準／自己分人還在：" + bad
 
 
 def test_the_row_says_who_fronted_the_money():

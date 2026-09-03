@@ -405,3 +405,29 @@ def rank_items(items, counts: dict, top: int = 10, min_count: int = 3) -> list:
     common = ranked[:top]
     return ([{"name": n, "count": counts.get(n, 0), "common": True} for n in common]
             + [{"name": n, "count": counts.get(n, 0), "common": False} for n in names if n not in common])
+
+
+def project_pay_label(items) -> str:
+    """收支明細裡「掛了專案的收入列」的請款單欄：這個案子開過哪幾天的請款單、幾張、幾張已付
+    （owner 2026-09-04「如果專案有連結上的話 標注幾號請款的」）。
+
+    items＝[(request_date | None, payment_status), ...]。最近的日期在前；同一天合成一組。
+    例：「9/4 請款 4 張（已付 1）」、「9/4 ×4、8/20 ×1（已付 2）」。沒有就空字串。
+    """
+    by_day: dict = {}
+    for d, status in items or ():
+        key = (d.year, d.month, d.day) if d else None
+        by_day[key] = by_day.get(key, 0) + 1
+    if not by_day:
+        return ""
+    paid = sum(1 for _, st in items if st == "已付款")
+    days = sorted((k for k in by_day if k), reverse=True)
+    parts = [f"{m}/{dd} ×{by_day[(y, m, dd)]}" for (y, m, dd) in days]
+    if None in by_day:
+        parts.append(f"日期空 ×{by_day[None]}")
+    if len(parts) == 1 and days:
+        y, m, dd = days[0]
+        label = f"{m}/{dd} 請款 {by_day[days[0]]} 張"
+    else:
+        label = "、".join(parts)
+    return label + (f"（已付 {paid}）" if paid else "")

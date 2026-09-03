@@ -738,3 +738,27 @@ export function autoFee(outstanding, amt) {
     const gap = Math.round((outstanding || 0) - (amt || 0));
     return gap > 0 && gap <= FEE_TOLERANCE ? gap : 0;
 }
+
+
+/** 專案「執行人員」的一份規則（專案頁與收支明細的「請款」都吃它 —— owner 2026-09-04
+ *  「請款單列出的是要這裡，然後跟專案連動」）：cost-lines 依 actual_staff_id 分人（項目 × 小計），
+ *  再用「費用歸屬人|金額」配這個案的請款單。
+ *  🔴 代墊單的收款人是代墊人，費用歸屬在 advance_by —— 只比 payee_name 的話，那一列永遠配不到，
+ *  同一筆費用可以再請一次款（而畫面上看不出來）。 */
+export function groupCostStaff(lines, payments) {
+    const map = new Map();
+    for (const ln of lines || []) {
+        if (!ln.actual_staff_id) continue;
+        let s = map.get(ln.actual_staff_id);
+        if (!s) { s = { staff_id: ln.actual_staff_id, name: ln.actual_staff_name || '未知', items: [], subtotal: 0, payment: null }; map.set(ln.actual_staff_id, s); }
+        s.items.push(ln.item_name || '');
+        s.subtotal += ln.actual_amount || 0;
+    }
+    const byOwnerAmount = new Map();
+    for (const p of payments || []) {
+        const k = (p.advance_by || p.payee_name) + '|' + p.amount;
+        if (!byOwnerAmount.has(k)) byOwnerAmount.set(k, p);
+    }
+    for (const s of map.values()) s.payment = byOwnerAmount.get(s.name + '|' + s.subtotal) || null;
+    return [...map.values()];
+}
