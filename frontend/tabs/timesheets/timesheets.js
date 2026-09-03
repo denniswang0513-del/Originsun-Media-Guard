@@ -188,20 +188,16 @@ export async function initTimesheetsTab() {
     if (!_content) return;
     // 委派：只註冊一次，之後任何局部重繪（加列、複製昨天、改列）都不用再綁
     _content.addEventListener('click', (ev) => {
-        const hq = ev.target.closest('[data-hq]');
-        if (hq) {
-            const inp = hq.closest('td').querySelector('[data-f="hours"]');
-            if (inp) inp.value = hq.dataset.hq;
-            return;
-        }
         const btn = ev.target.closest('[data-ts-action]');
         if (btn && _content.contains(btn)) _onAction(btn);
     });
     // 起訖時間 → 實際小時（委派，新增列也吃得到）
     _content.addEventListener('change', (ev) => {
         const t = ev.target.closest('[data-f="t0"], [data-f="t1"]');
-        if (t) _applyTimeRange(t.closest('td'));
+        if (t) _applyTimeRange(t.closest('tr'));
     });
+    _content.addEventListener('keydown', _sheetKeydown);
+    _content.addEventListener('input', _sheetGrow);
     await refresh();
 }
 
@@ -356,35 +352,66 @@ function _typeSelect(cur, attr) {
     return `<select ${attr}><option value="">分類</option>${_workTypes.map(t =>
         `<option value="${esc(t)}"${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
 }
-/** 一個工作項的五格輸入（專案／分類／內容／計畫／實際）；我的一天新增、改列與總表改列同一份。 */
-function _rowCells(v = {}, quick = false) {
+/** 一個工作項的五格輸入（專案／分類／內容／計畫／實際）；總表改列用。 */
+function _rowCells(v = {}) {
     return `<td><input list="ts-proj-list" data-f="project" value="${esc(v.project || '')}" placeholder="專案（可打字）" style="width:100%;"></td>
         <td>${_typeSelect(v.work_type || '', 'data-f="type"')}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}" placeholder="做了什麼" style="width:100%;"></td>
         <td><input type="number" data-f="planned" min="0" step="0.25" value="${v.planned ?? ''}" placeholder="計畫" style="width:64px;"></td>
-        <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}" placeholder="實際" style="width:64px;">
-            ${quick ? [0.5, 1, 2, 4, 8].map(h => `<button class="ts-btn ghost" data-hq="${h}" style="padding:2px 6px;font-size:11px;margin-left:2px;">${h}</button>`).join('')
-                + `<div style="margin-top:4px;font-size:11.5px;color:#888;white-space:nowrap;">起訖
-                    <input type="time" data-f="t0" style="width:92px;background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;padding:2px 4px;">
-                    ～ <input type="time" data-f="t1" style="width:92px;background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;padding:2px 4px;">
-                    <span data-f="t-out" style="color:#93c5fd;"></span></div>` : ''}</td>`;
+        <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}" placeholder="實際" style="width:64px;"></td>`;
 }
-/** 起訖時間 → 實際小時（兩位小數；訖比起早＝跨午夜）；填進同一格的「實際」欄。 */
-function _applyTimeRange(cell) {
-    const t0 = cell.querySelector('[data-f="t0"]')?.value, t1 = cell.querySelector('[data-f="t1"]')?.value;
-    const out = cell.querySelector('[data-f="t-out"]');
-    if (!t0 || !t1) { if (out) out.textContent = ''; return; }
+/** 起訖時間 → 實際小時（兩位小數；訖比起早＝跨午夜）；填進同一列的「實際」欄。 */
+function _applyTimeRange(tr) {
+    const t0 = tr.querySelector('[data-f="t0"]')?.value, t1 = tr.querySelector('[data-f="t1"]')?.value;
+    if (!t0 || !t1) return;
     const m = s => { const [h, mm] = s.split(':').map(Number); return h * 60 + mm; };
     let mins = m(t1) - m(t0);
     if (mins < 0) mins += 24 * 60;
-    const hours = Math.round(mins / 60 * 100) / 100;
-    cell.querySelector('[data-f="hours"]').value = hours;
-    if (out) out.textContent = `＝ ${hours} h`;
+    tr.querySelector('[data-f="hours"]').value = Math.round(mins / 60 * 100) / 100;
 }
+// ── 我的一天的新增區：像 Google Sheet 的格子（owner 2026-09-03）──
+// 一列＝一個工作項；Enter／↓／↑ 在同一欄上下走，走到底自動多一列；在最後一列打字也會自動多一列。
+const _SHEET_COLS = [['project', '專案'], ['type', '分類'], ['note', '做了什麼'], ['t0', '起'], ['t1', '訖'], ['hours', '實際 h'], ['planned', '計畫 h']];
 function _newRowHtml(v = {}) {
-    return `<tr class="ts-mine-row">${_rowCells(v, true)}
-        <td><button class="ts-btn ghost" data-ts-action="row-remove" style="padding:2px 8px;">×</button></td>
+    return `<tr class="ts-mine-row">
+        <td class="ts-sheet-num"></td>
+        <td><input list="ts-proj-list" data-f="project" value="${esc(v.project || '')}"></td>
+        <td>${_typeSelect(v.work_type || '', 'data-f="type"')}</td>
+        <td><input type="text" data-f="note" value="${esc(v.note || '')}"></td>
+        <td><input type="time" data-f="t0"></td>
+        <td><input type="time" data-f="t1"></td>
+        <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}"></td>
+        <td><input type="number" data-f="planned" min="0" step="0.25" value="${v.planned ?? ''}"></td>
+        <td class="ts-sheet-del"><button data-ts-action="row-remove" title="刪這一列">×</button></td>
     </tr>`;
+}
+function _sheetTableHtml(rowsHtml, id = 'ts-mine-add') {
+    return `<table ${id ? `id="${id}"` : ''} class="ts-sheet">
+        <thead><tr><th class="ts-sheet-num"></th>${_SHEET_COLS.map(([, l]) => `<th>${l}</th>`).join('')}<th class="ts-sheet-del"></th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+    </table>`;
+}
+/** 鍵盤：Enter／↓ 到下一列同欄（沒有就長一列）、↑ 上一列同欄；分類（select）的上下鍵留給它自己。 */
+function _sheetKeydown(ev) {
+    const inp = ev.target.closest('#ts-mine-add [data-f]');
+    if (!inp) return;
+    const down = ev.key === 'Enter' || ev.key === 'ArrowDown', up = ev.key === 'ArrowUp';
+    if (!down && !up) return;
+    if (inp.tagName === 'SELECT' && ev.key !== 'Enter') return;
+    const tr = inp.closest('tr');
+    let target = up ? tr.previousElementSibling : tr.nextElementSibling;
+    if (!target && down) { tr.insertAdjacentHTML('afterend', _newRowHtml()); target = tr.nextElementSibling; }
+    if (!target) return;
+    ev.preventDefault();
+    const next = target.querySelector(`[data-f="${inp.dataset.f}"]`);
+    if (next) { next.focus(); if (next.select) next.select(); }
+}
+/** 在最後一列打了東西 → 自動再長一列（Sheet 的感覺：永遠有空列可以往下填）。 */
+function _sheetGrow(ev) {
+    const inp = ev.target.closest('#ts-mine-add [data-f]');
+    if (!inp) return;
+    const tr = inp.closest('tr');
+    if (!tr.nextElementSibling && inp.value) tr.insertAdjacentHTML('afterend', _newRowHtml());
 }
 function _mineItemRow(i) {
     const acts = i.editable ? `
@@ -416,11 +443,8 @@ function _renderMine(d, err) {
             </table>
         </div>
         <div class="ts-card" style="border-color:#3b82f6;">
-            <h3>新增</h3>
-            <table id="ts-mine-add">
-                <thead><tr><th style="width:26%;">專案</th><th style="width:110px;">分類</th><th>做了什麼</th><th style="width:70px;">計畫</th><th style="width:250px;">實際</th><th style="width:36px;"></th></tr></thead>
-                <tbody>${_newRowHtml()}</tbody>
-            </table>
+            <h3>新增（像 Sheet 一樣直接在格子裡填）</h3>
+            ${_sheetTableHtml(_newRowHtml() + _newRowHtml() + _newRowHtml())}
             <datalist id="ts-proj-list"></datalist>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
                 <button class="ts-btn ghost" data-ts-action="row-add">＋ 一列</button>
@@ -428,8 +452,8 @@ function _renderMine(d, err) {
                 <button class="ts-btn" data-ts-action="mine-submit">送出</button>
                 <span id="ts-mine-result" style="font-size:12px;color:#888;"></span>
             </div>
-            <div class="ts-note">實際或計畫至少填一個。實際可以直接填小時、按快捷鈕，或填起訖時間讓它自己算。只填計畫＝先排；之後按「完成（照計畫）」或改實際小時。
-                同一天同一案 Sheet 已有的列會標「Sheet」，不用再填一次。</div>
+            <div class="ts-note">空白列不會送。實際 h 可以直接填，或填起／訖讓它自己算。Enter 或 ↓ 往下一列、↑ 往上；走到底自動多一列。
+                只填計畫＝先排；之後按「完成（照計畫）」或改實際小時。同一天同一案 Sheet 已有的列會標「Sheet」，不用再填一次。</div>
         </div>`;
 }
 /** 一列輸入 → 送給後端的 body（我的一天新增／改列、總表改列同一形狀；沒日期欄就用當天）。 */
@@ -471,12 +495,14 @@ async function _mineEdit(id) {
     const i = (_mineCache.items || []).find(x => x.id === id);
     const tr = document.querySelector(`[data-mine-id="${id}"]`);
     if (!i || !tr) return;
-    tr.outerHTML = `<tr data-mine-edit="${esc(id)}"><td colspan="4"><table><tbody>
-        ${_newRowHtml({ project: i.project_name, work_type: i.work_type, note: i.task_note, planned: i.planned_hours, hours: i.hours || '' }).replace('data-ts-action="row-remove"', 'data-ts-action="mine-cancel"')}
-        <tr><td colspan="6"><button class="ts-btn" data-ts-action="mine-save" data-id="${esc(id)}">儲存</button>
+    // 改列＝同一種格子（沒有 id：鍵盤上下走／自動長列只給「新增」那張）
+    tr.outerHTML = `<tr data-mine-edit="${esc(id)}"><td colspan="4">
+        ${_sheetTableHtml(_newRowHtml({ project: i.project_name, work_type: i.work_type, note: i.task_note, planned: i.planned_hours, hours: i.hours || '' })
+            .replace('data-ts-action="row-remove"', 'data-ts-action="mine-cancel"'), '')}
+        <div style="margin-top:6px;"><button class="ts-btn" data-ts-action="mine-save" data-id="${esc(id)}">儲存</button>
             <button class="ts-btn ghost" data-ts-action="mine-cancel">取消</button>
-            <span data-err style="color:#fca5a5;font-size:12px;margin-left:8px;"></span></td></tr>
-    </tbody></table></td></tr>`;
+            <span data-err style="color:#fca5a5;font-size:12px;margin-left:8px;"></span></div>
+    </td></tr>`;
 }
 async function _mineSave(id) {
     const box = document.querySelector(`[data-mine-edit="${id}"]`);

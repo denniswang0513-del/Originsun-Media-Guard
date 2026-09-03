@@ -86,5 +86,6 @@ def test_tab_has_the_seven_views_and_the_daily_board_shows_what_not_how_much():
     code = js_code_only(js)
     assert "/api/v1/timesheets/board?date=" in code
     assert "/api/v1/timesheets/mine?date=" in code and "/api/v1/timesheets/mine/rows" in code
-    # 時數快捷鈕與「複製昨天」（員工角度的兩個減負擔）
-    assert "data-ts-action=\"copy-yesterday\"" in js and "data-hq=" in js
+    # 「複製昨天」＋ Sheet 式格子（起訖自動算、Enter／↑↓ 走列、走到底自動長列）—— 員工角度的減負擔
+    assert "data-ts-action=\"copy-yesterday\"" in js and 'data-f="t0"' in js
+    assert "_sheetKeydown" in code and "_sheetGrow" in code and "_applyTimeRange(" in code
