@@ -100,7 +100,7 @@ function detailHtml(d) {
         <button type="button" class="m-btn" data-act="phase">推階段</button>
         <button type="button" class="m-btn" data-act="note">加備註</button>
         <button type="button" class="m-btn" data-act="expense">記雜支</button>
-        <button type="button" class="m-btn pri" data-act="invoice">開發票</button>
+        <button type="button" class="m-btn" data-act="invoice">開發票</button>
       </div>
       <div id="pj-act-box"></div>
       ${section('報價', (d.quotes || []).map(q => li(`${esc(q.version || '')} ${pill(q.status)}`,
@@ -168,9 +168,14 @@ export async function openProject(id) {
     catch (e) { body.innerHTML = errBox(e); return; }
     const p = d.project || {};
     body.innerHTML = detailHtml(d);
-    body.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
+    // 四顆動作像分段按鈕：打開哪個功能哪顆就藍（owner 2026-09-03），再按一次收起來；開發票／記雜支是跳到別的畫面
+    const acts = body.querySelectorAll('[data-act]');
+    acts.forEach(b => b.addEventListener('click', () => {
         if (b.dataset.act === 'invoice') { state.invoicePreset = p.id; closeSheet(); switchTab('invoice'); return; }
         if (b.dataset.act === 'expense') { state.expensePreset = p.id; closeSheet(); switchTab('expense'); return; }   // 頁內畫面，不開 /expense.html（主畫面模式會彈內建瀏覽器）
+        const again = b.classList.contains('pri');
+        acts.forEach(x => x.classList.toggle('pri', x === b && !again));
+        if (again) { document.getElementById('pj-act-box').innerHTML = ''; return; }
         actionBox(b.dataset.act, p);
     }));
 }
