@@ -73,7 +73,7 @@ def test_returned_dicts_never_repeat_a_key():
     import ast
     for path in ("routers/api_me.py", "routers/api_timesheets.py", "services/timesheet_self.py",
                  "services/timesheet_manual.py", "services/timesheet_lookup.py", "services/timesheet_digest.py",
-                 "services/timesheet_puller.py", "services/timesheet_ingest.py", "core/hr_logic.py"):
+                 "services/timesheet_puller.py", "services/timesheet_ingest.py", "services/timesheet_conflicts.py", "core/hr_logic.py"):
         for node in ast.walk(ast.parse(repo_src(path))):
             if isinstance(node, ast.Dict):
                 keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]

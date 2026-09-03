@@ -559,6 +559,8 @@ async def _on_startup():
                         ("timesheets", "planned_hours", "DOUBLE PRECISION"),
                         ("timesheets", "work_type", "VARCHAR(32)"),
                         ("timesheets", "note", "TEXT"),
+                        ("timesheets", "edited_at", "TIMESTAMPTZ"),
+                        ("timesheets", "edited_by", "VARCHAR(64)"),
                         # 影像紀錄：子資料夾名（首次生成後固定，見 media_log._ensure_folder_name）
                         ("project_media_log", "folder_name", "VARCHAR(255)"),
                         # 提案庫資產夾名（core.project_folders，2026-08-06）

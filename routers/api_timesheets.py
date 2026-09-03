@@ -34,10 +34,12 @@ from core.hr_logic import (fillers_on, HOURS_PER_WORKDAY, WORK_TYPES, Misses, ac
                            split_sheet_name, tw_day, type_composition)
 from core.schemas import (MeTimesheetBatch, MeTimesheetUpdate, TimesheetBudgetRequest, TimesheetBudgetSet,
                           TimesheetDigestSettings, TimesheetIngestRequest, TimesheetManualRequest,
-                          TimesheetProjectMapRequest, TimesheetPullSettings, TimesheetRowAdminUpdate)
+                          TimesheetConflictResolve, TimesheetProjectMapRequest, TimesheetPullSettings,
+                          TimesheetRowAdminUpdate)
 from db.models import CrmProject, CrmQuotation, CrmQuotationItem, CrmStaff, Timesheet, TimesheetProjectMap
 from routers.crm._shared import project_names_map
 from services import timesheet_digest, timesheet_puller
+from services.timesheet_conflicts import list_conflicts, resolve_conflict
 from services.timesheet_ingest import ingest, parse_date as _parse_date
 from services.timesheet_lookup import burn_rows, load_project_lookup
 from services.timesheet_manual import insert_manual_rows, project_options
@@ -255,7 +257,24 @@ async def ledger_update_row(row_id: str, body: TimesheetRowAdminUpdate, request:
     check_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
-        return await admin_update_row(session, row_id, body)
+        return await admin_update_row(session, row_id, body, current_username(request))
+
+
+@router.get("/conflicts")
+async def ledger_conflicts(request: Request):
+    """待決的衝突（Sheet 與總表改過的同一列內容不同）；管理員。"""
+    check_admin(request)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        return {"items": await list_conflicts(session)}
+
+
+@router.post("/conflicts/{cid}/resolve")
+async def ledger_resolve_conflict(cid: str, body: TimesheetConflictResolve, request: Request):
+    check_admin(request)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        return await resolve_conflict(session, cid, body.choice, current_username(request))
 
 
 @router.delete("/rows/{row_id}")

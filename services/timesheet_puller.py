@@ -64,7 +64,8 @@ async def run_pull(force: bool = False) -> dict:
             factory = get_session_factory()
             if factory is None:
                 return {"status": "error", "message": "資料庫離線"}
-            tot = {"inserted": 0, "skipped": 0, "skipped_manual_priority": 0, "skipped_deleted": 0}
+            tot = {"inserted": 0, "skipped": 0, "skipped_manual_priority": 0, "skipped_deleted": 0,
+                   "conflicts": 0, "skipped_conflict": 0}
             sets = {k: set() for k in ("ambiguous_projects", "unmatched_projects",
                                        "staff_ambiguous", "staff_unmatched")}
             async with factory() as session:      # 查表建一次，20 批共用
@@ -82,9 +83,16 @@ async def run_pull(force: bool = False) -> dict:
                    "seconds": round(time.time() - t0, 1)}
             summary = (f"{datetime.now():%m/%d %H:%M} 拉 {len(good)} 列：新增 {tot['inserted']}、"
                        f"重複 {tot['skipped']}、總表已刪 {tot['skipped_deleted']}、壞列 {len(bad)}；撞案 {len(sets['ambiguous_projects'])}、"
-                       f"找不到 {len(sets['unmatched_projects'])}")
+                       f"找不到 {len(sets['unmatched_projects'])}"
+                       + (f"；⚠ 衝突 {tot['conflicts']}（到總表決定）" if tot["conflicts"] else ""))
             settings.mark(last_run_at=time.time(), last_summary=summary)
             logger.info("[timesheet_puller] %s", summary)
+            if tot["conflicts"]:
+                try:                                   # 提醒 owner 去總表選；沒 webhook 就靜靜略過
+                    from notifier import notify_tab_async
+                    await notify_tab_async("timesheet_conflict", count=tot["conflicts"])
+                except Exception:
+                    logger.exception("[timesheet_puller] 衝突通知失敗")
             return out
         except Exception as e:
             logger.exception("[timesheet_puller] 拉取失敗")

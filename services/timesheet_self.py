@@ -6,6 +6,8 @@ routers/api_me.py（員工端 /my.html）與 routers/api_timesheets.py（CRM tab
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import HTTPException, Request
 from sqlalchemy import or_, select
 
@@ -34,6 +36,7 @@ def ts_dict(r, staff_id: str | None = None, *, with_note: bool = False) -> dict:
         "work_type": r.work_type or "",
         "source": r.source or "",
         "status": r.status or "",
+        "edited": r.edited_at is not None,      # 總表改過（Sheet 同格再變會記衝突）
     }
     if with_note:
         out["note"] = r.note or ""
@@ -141,13 +144,22 @@ async def delete_row(session, ident: dict, row_id: str) -> dict:
 
 # ── 總表（管理員）：任一列都能調，含 Sheet 列；守衛在端點（check_admin）──
 
-async def admin_update_row(session, row_id: str, body) -> dict:
+async def add_tombstone(session, row_hash: str, who: str, *, staff_name="", project_name="", work_date=None, hours=0) -> None:
+    """留 Sheet 列指紋：下次拉取不插回（總表刪列、衝突選「用總表的」都走這）。已有就不重複。"""
+    from db.models import TimesheetTombstone
+    if not await session.get(TimesheetTombstone, row_hash):
+        session.add(TimesheetTombstone(row_hash=row_hash, staff_name=staff_name or "", project_name=project_name or "",
+                                       work_date=work_date, hours=float(hours or 0), deleted_by=who or ""))
+
+async def admin_update_row(session, row_id: str, body, who: str = "") -> dict:
     """管理員改任一列（欄位同 apply_update）＋ 管理員備註。改過的 Sheet 列 row_hash 不變，
     下次拉取仍認得它、不會再插一次；但 Sheet 那一格之後若也改了，會以新 hash 另插一列。"""
     r = await get_row(session, row_id)
     await apply_update(session, r, body)
     if body.note is not None:
         r.note = body.note.strip() or None
+    if r.source != "manual":                 # Sheet 列被總表改過：之後 Sheet 同格再變就記衝突（ingest 看 edited_at）
+        r.edited_at, r.edited_by = datetime.now(timezone.utc), who or None
     await session.commit()
     return {**ts_dict(r, with_note=True), "editable": True}
 
@@ -155,11 +167,10 @@ async def admin_update_row(session, row_id: str, body) -> dict:
 async def admin_delete_row(session, row_id: str, who: str = "") -> dict:
     """管理員刪任一列。Sheet 拉進來的列另留指紋（TimesheetTombstone），下次拉取不再插回來 ——
     總表為準（owner 2026-09-03）。手填列沒有 Sheet 對應，不用留。"""
-    from db.models import TimesheetTombstone
     r = await get_row(session, row_id)
-    if r.source != "manual" and not await session.get(TimesheetTombstone, r.row_hash):
-        session.add(TimesheetTombstone(row_hash=r.row_hash, staff_name=r.staff_name or "", project_name=r.project_name or "",
-                                       work_date=r.work_date, hours=float(r.hours or 0), deleted_by=who or ""))
+    if r.source != "manual":
+        await add_tombstone(session, r.row_hash, who, staff_name=r.staff_name, project_name=r.project_name,
+                            work_date=r.work_date, hours=r.hours)
     await session.delete(r)
     await session.commit()
     return {"deleted": row_id, "tombstoned": r.source != "manual"}

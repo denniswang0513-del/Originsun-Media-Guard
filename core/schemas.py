@@ -394,6 +394,11 @@ class TimesheetRowAdminUpdate(TimesheetManualRow):
     note: Optional[str] = None
 
 
+class TimesheetConflictResolve(BaseModel):
+    """總表決定衝突：keep_mine 用總表的／use_sheet 用 Sheet 的／keep_both 兩列都留。"""
+    choice: str
+
+
 class BulletinAsk(BaseModel):
     message: str
 

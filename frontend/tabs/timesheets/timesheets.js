@@ -48,6 +48,7 @@ let _projectCache = null;   // 最近一次 /project（專案檔案頁）
 let _compareNames = [];     // 類似專案並排：目前選的案名
 let _digestCache = null;    // GET /timesheets/digest
 let _ledgerCache = null;    // GET /timesheets/rows（總表：一個月所有列）
+let _conflictsCache = [];   // GET /timesheets/conflicts（Sheet 與總表改過的列撞到，等 owner 選；管理員才拉）
 const _ledgerFilter = { staff: '', project: '', source: '', q: '' };   // 總表篩選（前端做）
 
 function _shiftDay(ymd, delta) {
@@ -218,6 +219,7 @@ async function refresh() {
         } else if (_view === 'ledger') {
             _ledgerCache = await tfetch('/api/v1/timesheets/rows?month=' + _month);
             _workTypes = _ledgerCache.work_types || [];
+            _conflictsCache = _ledgerCache.editable ? ((await tfetch('/api/v1/timesheets/conflicts')).items || []) : [];
             _content.innerHTML = _renderLedger(_ledgerCache);
         } else if (_view === 'dash') {
             _content.innerHTML = _renderDash(await tfetch('/api/v1/timesheets/dashboard'));
@@ -481,7 +483,7 @@ const _srcLabel = i => (i.source === 'manual' ? '手填' : 'Sheet');
 function _ledgerTbodyHtml() {
     const can = _ledgerCache && _ledgerCache.editable;
     return _ledgerSorter.sorted(_ledgerRows()).map(i => `<tr data-ledger-id="${esc(i.id)}">
-        <td style="white-space:nowrap;">${esc(i.date)}</td>
+        <td style="white-space:nowrap;">${esc(i.date)}${i.edited ? ' <span class="ts-badge" title="總表改過：Sheet 同格之後再變會記成衝突，不自動蓋">改過</span>' : ''}</td>
         <td>${esc(i.staff_name)}</td>
         <td>${esc(i.project_name || '(空白)')}${i.project_id ? '' : ' <span class="ts-badge">未對映</span>'}</td>
         <td style="color:#9ca3af;">${esc(i.work_type || '')}</td>
@@ -514,6 +516,27 @@ function _ledgerEditHtml(i) {
             <div data-err style="color:#fca5a5;font-size:11px;"></div></td>
     </tr>`;
 }
+/** 衝突待決：總表改過的列 vs Sheet 新版並排（不同的格標色），三個決定鈕。 */
+function _conflictsHtml() {
+    if (!_conflictsCache.length) return '';
+    const cols = [['date', '日期'], ['staff_name', '人員'], ['project_name', '專案'], ['task_note', '內容'], ['hours', '時數']];
+    const row = (label, v, other) => `<tr><td style="color:#888;white-space:nowrap;">${label}</td>${cols.map(([k]) => {
+        const diff = String(v[k] ?? '') !== String(other[k] ?? '');
+        return `<td style="${diff ? 'color:#fbbf24;font-weight:600;' : ''}">${esc(String(v[k] ?? ''))}</td>`;
+    }).join('')}</tr>`;
+    return `<div class="ts-card" style="border-color:#f59e0b;">
+        <h3>Sheet 與總表衝突（${_conflictsCache.length}）—— 這幾列你在總表改過，Sheet 那格之後又變了；沒有自動覆蓋，選一個</h3>
+        ${_conflictsCache.map(c => `<div style="margin:8px 0 12px;padding:8px;border:1px solid #333;border-radius:6px;">
+            <table style="margin-bottom:6px;"><thead><tr><th></th>${cols.map(([, l]) => `<th>${l}</th>`).join('')}</tr></thead>
+                <tbody>${row('總表', c.mine, c.sheet)}${row('Sheet 新版', c.sheet, c.mine)}</tbody></table>
+            ${c.mine.note ? `<div class="ts-note" style="margin:0 0 6px;">總表備註：${esc(c.mine.note)}</div>` : ''}
+            <button class="ts-btn" data-ts-action="conflict" data-id="${esc(c.id)}" data-choice="keep_mine">用總表的</button>
+            <button class="ts-btn ghost" data-ts-action="conflict" data-id="${esc(c.id)}" data-choice="use_sheet">用 Sheet 的</button>
+            <button class="ts-btn ghost" data-ts-action="conflict" data-id="${esc(c.id)}" data-choice="keep_both">兩列都留</button>
+        </div>`).join('')}
+        <div class="ts-note">用總表的＝Sheet 這個版本以後不再進來；用 Sheet 的＝把 Sheet 內容套回這列（備註／分類／計畫保留）；兩列都留＝Sheet 版本另插一列。</div>
+    </div>`;
+}
 function _renderLedger(d) {
     const items = d.items || [];
     const sel = 'style="background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;padding:5px 8px;"';
@@ -532,6 +555,7 @@ function _renderLedger(d) {
             <span id="ts-ledger-count"></span>
             <button class="ts-btn ghost" data-ts-action="export-month">匯出 CSV</button>
         </div>
+        ${_conflictsHtml()}
         <div class="ts-card" style="overflow-x:auto;">
             <table id="ts-ledger-table">
                 <thead><tr>${sortableTh('date', '日期')}${sortableTh('staff', '人員')}${sortableTh('project', '專案')}${sortableTh('type', '分類')}${sortableTh('task', '內容')}${sortableTh('planned', '計畫', 'class="num"')}${sortableTh('hours', '實際', 'class="num"')}${sortableTh('source', '來源')}${sortableTh('note', '備註')}<th></th></tr></thead>
@@ -994,6 +1018,12 @@ async function _onAction(btn) {
                     if (act === 'digest-send') _digestCache = await tfetch('/api/v1/timesheets/digest').catch(() => _digestCache);
                 } catch (e) { pre.style.display = ''; pre.textContent = '失敗：' + (e.message || e); }
                 return;
+            }
+            if (act === 'conflict') {
+                try {
+                    await tfetch(`/api/v1/timesheets/conflicts/${btn.dataset.id}/resolve`, { method: 'POST', body: { choice: btn.dataset.choice } });
+                    return refresh();
+                } catch (e) { alert('決定失敗：' + (e.message || e)); return; }
             }
             if (act === 'ledger-edit') {
                 const i = (_ledgerCache.items || []).find(x => x.id === btn.dataset.id);

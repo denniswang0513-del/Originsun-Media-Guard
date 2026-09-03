@@ -24,6 +24,8 @@ class Timesheet(Base):
     planned_hours = Column(Float, nullable=True)                 # 計畫小時（docs/WORK_TRACKING_UI_PLAN.md §2；Sheet 列 NULL）
     work_type = Column(String(32), nullable=True)                # 工作分類（core.hr_logic.WORK_TYPES；可空）
     note = Column(Text, nullable=True)                           # 管理員備註（總表手動調整時寫；員工端不顯示）
+    edited_at = Column(DateTime(timezone=True), nullable=True)   # 總表改過（管理員）；Sheet 同格之後再變＝記衝突不自動蓋
+    edited_by = Column(String(64), nullable=True)
     status = Column(String(16), nullable=False, default="import")  # import／draft（實際）／plan（只有計畫）
     source = Column(String(16), nullable=False, default="sheet")  # sheet/manual/schedule
     row_hash = Column(String(40), nullable=False, unique=True)   # 去重：date|staff|project|task|hours
@@ -50,6 +52,22 @@ class TimesheetTombstone(Base):
     hours = Column(Float, nullable=False, default=0.0)
     deleted_by = Column(String(64), nullable=False, default="")
     deleted_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class TimesheetConflict(Base):
+    """Sheet 進來的列與總表改過的同一列（同人同日同案）內容不同：不自動插、不自動蓋，記下來等
+    owner 在總表選（keep_mine 用總表的／use_sheet 用 Sheet 的／keep_both 兩列都留）。
+    incoming_hash 唯一：同一個 Sheet 版本只記一次衝突。"""
+    __tablename__ = "timesheet_conflicts"
+
+    id = Column(String(32), primary_key=True)
+    row_id = Column(String(32), nullable=False, index=True)        # 總表那列
+    incoming_hash = Column(String(40), nullable=False, unique=True)
+    incoming = Column(JSONB, nullable=False, default=dict)         # {date, staff, project, task, hours}（Sheet 原字）
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolution = Column(String(16), nullable=True)                # keep_mine／use_sheet／keep_both／orphan
+    resolved_by = Column(String(64), nullable=True)
 
 
 class HrLeaveRequest(Base):

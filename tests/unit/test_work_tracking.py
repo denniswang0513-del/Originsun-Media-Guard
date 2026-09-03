@@ -53,17 +53,30 @@ def test_board_and_my_day_are_gated_by_the_timesheets_module():
     assert 'check_admin_or_module(request, "timesheets")' in func_body(src, "async def ledger_rows(")
     for fn in ("async def ledger_update_row(", "async def ledger_delete_row("):
         assert "check_admin(request)" in func_body(src, fn), fn
-    assert "admin_update_row(session, row_id, body)" in func_body(src, "async def ledger_update_row(")
+    assert "admin_update_row(session, row_id, body, current_username(request))" in func_body(src, "async def ledger_update_row(")
     # 管理員備註只進管理員的 JSON（總表依 is_admin、抽查列 admin-only）；ts_dict 預設不帶
     assert "ts_dict(r, with_note=is_admin)" in func_body(src, "async def ledger_rows(")
     svc = code_only(repo_src("services/timesheet_self.py"))
     assert "if with_note:" in func_body(svc, "def ts_dict(")
     # 總表刪掉的 Sheet 列留指紋、ingest 看到就跳過（總表為準；手填列不留）
     dele = func_body(svc, "async def admin_delete_row(")
-    assert "TimesheetTombstone(row_hash=r.row_hash" in dele and 'r.source != "manual"' in dele
+    assert "add_tombstone(session, r.row_hash" in dele and 'r.source != "manual"' in dele
     ing = code_only(repo_src("services/timesheet_ingest.py"))
     assert "select(TimesheetTombstone.row_hash)" in func_body(ing, "async def ingest_context(")
     assert "if h in tombstones:" in func_body(ing, "async def ingest(")
+    # 總表改過的同一列、Sheet 又變 → 記衝突不插不蓋；改過就標 edited_at；三種決定只在 services
+    ib = func_body(ing, "async def ingest(")
+    assert "edited_keys.get(manual_dup_key(" in ib and "TimesheetConflict(" in ib
+    assert ib.index("if h in tombstones:") < ib.index("edited_keys.get(")
+    upd = func_body(svc, "async def admin_update_row(")
+    assert 'r.source != "manual"' in upd and "r.edited_at" in upd
+    cf = code_only(repo_src("services/timesheet_conflicts.py"))
+    assert 'CHOICES = ("keep_mine", "use_sheet", "keep_both")' in cf
+    rc = func_body(cf, "async def resolve_conflict(")
+    assert "add_tombstone(" in rc and "r.row_hash = c.incoming_hash" in rc and '"sheet", ctx)' in rc
+    for fn in ("async def ledger_conflicts(", "async def ledger_resolve_conflict("):
+        assert "check_admin(request)" in func_body(src, fn), fn
+    assert '("timesheets", "edited_at", "TIMESTAMPTZ")' in repo_src("main.py")
 
 
 def test_tab_has_the_seven_views_and_the_daily_board_shows_what_not_how_much():

@@ -107,6 +107,8 @@ def notify_tab(template_key: str, **variables) -> None:
         # N-hr H2 請假申請（依 owner 2026-07-17 設計鐵則：通知文字無 emoji）
         "leave_request":     "【請假申請】{staff_name}：{leave_type} {start} ~ {end}（{days} 天）\n事由：{reason}\n→ 後台 人事管理 › 出缺勤",
         "works_published":   "🌐 【上架驗證 ✓】{count} 件作品已確認在對外網站上線\n{titles}",
+        # 工時：Sheet 與總表改過的列撞到（沒自動蓋）；owner 鐵則：新通知無 emoji
+        "timesheet_conflict": "【工時衝突】Sheet 有 {count} 列與總表改過的列內容不同，沒有自動覆蓋。到 後台 人事管理 › 專案工時 › 總表 決定用哪一列",
     }
 
     raw_tpl = tpls.get(template_key) or _defaults.get(template_key, "")

@@ -125,6 +125,11 @@ owner 2026-09-03 兩次釐清：「大家看到大家」是要知道**彼此每�
   若也改了，會以新 hash 另插一列（兩邊都改＝兩列，總表上看得到、刪一列即可）。
 - **總表刪掉的 Sheet 列不會再插回來**（2026-09-03）：刪時留指紋到 `timesheet_tombstones`，ingest 看到就跳過
   （拉取摘要顯示「總表已刪 N」）。手填列沒有 Sheet 對應，不留。
+- **總表改過的列，Sheet 同格之後又變 → 衝突待決，不自動插、不自動蓋**（2026-09-03）：改過的 Sheet 列標
+  `edited_at`；拉取時同人同日同案且指紋不同的新列記進 `timesheet_conflicts`（同一版本只記一次），
+  總表頂端並排兩版（不同的格標色），三選一：用總表的（Sheet 版本留指紋）／用 Sheet 的（內容套回、
+  備註／分類／計畫保留、指紋換成 Sheet 版）／兩列都留（Sheet 版另插一列）。拉取摘要「衝突 N」＋
+  Google Chat 通知 `timesheet_conflict`。沒改過的列 Sheet 變了仍照舊另插一列（沒有可比的基準）。
 - 套欄位與員工改自己的列是同一支 `services.timesheet_self.apply_update`，只差守衛（check_admin）與 404。
 - 管理員備註只進管理員端點的 JSON（總表依 is_admin、抽查列）；看板／時間軸／員工頁／團隊頁一律不帶。
 - Sheet 列不套「實際或計畫至少一個 > 0」（0 小時的 Sheet 列也能改、status 保留 import）。
