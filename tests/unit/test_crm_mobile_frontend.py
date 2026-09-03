@@ -93,6 +93,8 @@ def test_invoice_is_a_request_to_issue():
     assert "invoice_number: ''" in src and "applicant: F('applicant').value" in src
     assert "showNotice(noticeText(body))" in src and "copyText(" in src
     assert "if (!body.project_id) { toast(" in src
+    # 紙本發票要收件人／電話／地址（同桌機發票本）；哪一種是紙本由 options.invoice.paper_kind 說
+    assert "paper_kind" in src and "recipient_address" in src and "'inv-paper'" in src
     api = code_only(repo_src("routers/api_crm_mobile.py"))
     assert "get_invoice_applicants(request)" in api and "INVOICE_PASSTHROUGH_CATEGORIES" in api
 

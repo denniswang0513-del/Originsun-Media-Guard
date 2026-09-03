@@ -29,6 +29,11 @@ function formHtml() {
         <label>統編</label><input id="inv-tax_id" maxlength="8" inputmode="numeric" pattern="[0-9]*">
         <label>品項</label>${pickerHtml('inv-item_type')}
         <label>電子或紙本</label>${segHtml('inv-invoice_kind', inv.kinds || [])}
+        <div id="inv-paper" hidden>
+          <label class="req">收件人</label><input id="inv-recipient">
+          <label>收件電話</label><input id="inv-recipient_phone" type="tel" inputmode="tel">
+          <label class="req">收件地址</label><input id="inv-recipient_address">
+        </div>
         <div class="row2">
           <div><label>未稅</label><input id="inv-amount_ex_tax" type="number" inputmode="numeric" min="0"></div>
           <div><label>含稅</label><input id="inv-amount_total" type="number" inputmode="numeric" min="0"></div>
@@ -69,9 +74,13 @@ function applyProjectDefaults(pid) {
     if (!F('title').value.trim()) F('title').value = p.name || '';
 }
 
+// 紙本發票要寄：收件人／電話／地址（同桌機發票本），電子的不用
+const isPaper = () => F('invoice_kind').value === ((opt().invoice || {}).paper_kind || '');
+const syncPaper = () => { document.getElementById('inv-paper').hidden = !isPaper(); };
+
 const LAST_APPLICANT = 'm.invoice.applicant';   // 申請人記在這支手機上（純方便，不是資料）
 function wireAmounts() {
-    mountSeg('inv-invoice_kind');
+    mountSeg('inv-invoice_kind', syncPaper); syncPaper();
     mountSeg('inv-category');
     const applicants = (opt().invoice || {}).applicants || [];
     let last = '';
@@ -125,6 +134,9 @@ function payload() {
         item_type: F('item_type').value.trim(),
         category: F('category').value,
         applicant: F('applicant').value,
+        recipient: isPaper() ? F('recipient').value.trim() : '',
+        recipient_phone: isPaper() ? F('recipient_phone').value.trim() : '',
+        recipient_address: isPaper() ? F('recipient_address').value.trim() : '',
         notes: F('notes').value.trim(),
         // 請款發票＝還沒收：狀態字是 options 給的；issue_status 由後端看發票號碼
         payment_status: unpaidStatus(), issue_status: '',
@@ -143,6 +155,8 @@ function noticeText(body) {
         `抬頭：${body.company_name || '—'}${body.tax_id ? `（統編 ${body.tax_id}）` : ''}`,
         `品項：${body.item_type || '—'}`,
         `種類：${body.invoice_kind}`,
+        ...(body.recipient || body.recipient_address
+            ? [`收件：${body.recipient || '—'}${body.recipient_phone ? ' ' + body.recipient_phone : ''}`, `地址：${body.recipient_address || '—'}`] : []),
         `金額：未稅 ${money(body.amount_ex_tax)}／含稅 ${money(body.amount_total)}`,
         `（${todayLocal()} ${who} 從手機登記，發票本待開立）`,
     ];
@@ -165,6 +179,7 @@ async function submit(ev) {
     if (!body.project_id) { toast('請先選專案', 'err'); F('project_id-q').focus(); return; }
     if (!body.title) { toast('請選專案，或在「更多欄位」填名稱', 'err'); F('project_id-q').focus(); return; }
     if (body.tax_id && !/^\d{8}$/.test(body.tax_id)) { toast('統編要 8 位數字', 'err'); F('tax_id').focus(); return; }
+    if (isPaper() && !(body.recipient && body.recipient_address)) { toast('紙本發票要填收件人與地址', 'err'); F(body.recipient ? 'recipient_address' : 'recipient').focus(); return; }
     await withBusy(F('submit'), async () => {
         try {
             await mfetch('/api/v1/crm/invoices', { method: 'POST', body });

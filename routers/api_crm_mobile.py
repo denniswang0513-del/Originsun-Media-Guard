@@ -62,6 +62,7 @@ PAYMENT_STATUSES = ("未付款", "應付款", "已付款")
 INVOICE_VOCAB = {
     "payment_types": ["收款", "付款"],
     "kinds": ["電子發票", "紙本發票"],
+    "paper_kind": "紙本發票",          # 這一種要收件人／電話／地址（同桌機發票本）
     "categories": ["專案", *INVOICE_PASSTHROUGH_CATEGORIES],   # 桌機發票本同一套三種
 }
 ACTIVE_STATUS = "製作"
