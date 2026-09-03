@@ -31,6 +31,7 @@ def ts_dict(r, staff_id: str | None = None, *, with_note: bool = False) -> dict:
         "project_name": r.project_name or "",
         "project_id": r.project_id or "",
         "task_note": r.task_note or "",
+        "remark": r.remark or "",
         "hours": round(float(r.hours or 0), 2),
         "planned_hours": round(float(r.planned_hours), 2) if r.planned_hours is not None else None,
         "work_type": r.work_type or "",
@@ -162,6 +163,46 @@ async def admin_update_row(session, row_id: str, body, who: str = "") -> dict:
         r.edited_at, r.edited_by = datetime.now(timezone.utc), who or None
     await session.commit()
     return {**ts_dict(r, with_note=True), "editable": True}
+
+
+async def admin_batch_update(session, ids: list, patch: dict, who: str = "") -> dict:
+    """勾選的列一次改（owner 2026-09-03「批次調整」）：只動 patch 有給的欄。專案給名字就走同一支
+    resolve_project（對不到就留 NULL、名字照存），給 id 就用 id；Sheet 列一樣標 edited_at。"""
+    from sqlalchemy import select
+    from core.hr_logic import norm_work_type, resolve_project
+    from db.models import Timesheet
+    from services.timesheet_lookup import load_project_lookup, project_names
+    ids = [i for i in (ids or []) if i]
+    if not ids:
+        raise HTTPException(status_code=422, detail="沒有勾任何列")
+    proj = None
+    if patch.get("project_id"):
+        pid = patch["project_id"]
+        proj = (pid, (await project_names(session, [pid])).get(pid, "") or (patch.get("project_name") or "").strip())
+    elif (patch.get("project_name") or "").strip():
+        pname = patch["project_name"].strip()
+        pid, _why = resolve_project(pname, await load_project_lookup(session))
+        proj = (pid, pname)
+    wt = None
+    if "work_type" in patch and patch["work_type"] is not None:
+        try:
+            wt = norm_work_type(patch["work_type"])
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    rows = (await session.execute(select(Timesheet).where(Timesheet.id.in_(ids)))).scalars().all()
+    for r in rows:
+        if proj:
+            r.project_id, r.project_name = proj
+        if "work_type" in patch and patch["work_type"] is not None:
+            r.work_type = wt
+        if patch.get("remark") is not None:
+            r.remark = patch["remark"].strip() or None
+        if patch.get("note") is not None:
+            r.note = patch["note"].strip() or None
+        if r.source != "manual":
+            r.edited_at, r.edited_by = datetime.now(timezone.utc), who or None
+    await session.commit()
+    return {"status": "ok", "updated": len(rows)}
 
 
 async def admin_delete_row(session, row_id: str, who: str = "") -> dict:

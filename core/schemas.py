@@ -370,6 +370,7 @@ class TimesheetManualRow(BaseModel):
     project_id: Optional[str] = None
     project_name: str = ""     # 無 id 時以名稱對映（同 ingest 邏輯）
     task_note: Optional[str] = None
+    remark: Optional[str] = None      # 員工備註（內容之外的補充）
     hours: Optional[float] = None
     planned_hours: Optional[float] = None
     work_type: Optional[str] = None   # core.hr_logic.WORK_TYPES 之一，可空
@@ -391,6 +392,16 @@ class MeTimesheetUpdate(TimesheetManualRow):
 
 class TimesheetRowAdminUpdate(TimesheetManualRow):
     """管理員在總表改任一列（含 Sheet 列）；多一個管理員備註。"""
+    note: Optional[str] = None
+
+
+class TimesheetRowsBatch(BaseModel):
+    """總表批次調整：勾選的列一次改專案／分類／備註／管理員備註（只改有給的欄）。"""
+    ids: List[str]
+    project_name: Optional[str] = None
+    project_id: Optional[str] = None
+    work_type: Optional[str] = None
+    remark: Optional[str] = None
     note: Optional[str] = None
 
 

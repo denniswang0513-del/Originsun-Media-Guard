@@ -52,6 +52,8 @@ let _compareNames = [];     // 類似專案並排：目前選的案名
 let _digestCache = null;    // GET /timesheets/digest
 let _ledgerCache = null;    // GET /timesheets/rows（總表：一個月所有列）
 let _conflictsCache = [];   // GET /timesheets/conflicts（Sheet 與總表改過的列撞到，等 owner 選；管理員才拉）
+let _monthTo = '';          // 總表：迄月（空＝只看 _month 那個月；最多 12 個月）
+let _ledgerSel = new Set(); // 總表：勾選的列 id（批次調整）
 const _ledgerFilter = { staff: '', project: '', source: '', q: '' };   // 總表篩選（前端做）
 
 function _shiftDay(ymd, delta) {
@@ -127,7 +129,7 @@ const _ledgerSorter = createSortable({
     onChange: () => _ledgerRedraw(),
     getters: {
         date: i => i.date, staff: i => i.staff_name, project: i => i.project_name || '',
-        type: i => i.work_type || '', task: i => i.task_note || '', planned: i => i.planned_hours ?? '',
+        type: i => i.work_type || '', task: i => i.task_note || '', remark: i => i.remark || '', planned: i => i.planned_hours ?? '',
         hours: i => i.hours, source: i => i.source, note: i => i.note || '',
     },
 });
@@ -203,6 +205,10 @@ export async function initTimesheetsTab() {
         if (cell) _mineScheduleSave(cell.closest('tr'));       // 選單／時間／數字改了就存
         const ts = ev.target.closest('select[data-set-type]');
         if (ts) _setProjectType(ts.dataset.setType, ts.value);   // burn 表改案型
+        const pk = ev.target.closest('input[data-pick]');
+        if (pk) { if (pk.checked) _ledgerSel.add(pk.dataset.pick); else _ledgerSel.delete(pk.dataset.pick); _ledgerRedraw(); }
+        const pa = ev.target.closest('input[data-pick-all]');
+        if (pa) { _ledgerSel = pa.checked ? new Set(_ledgerRows().map(i => i.id)) : new Set(); _ledgerRedraw(); }
     });
     _content.addEventListener('keydown', _sheetKeydown);
     _content.addEventListener('input', (ev) => {
@@ -230,7 +236,8 @@ async function refresh() {
             _staffCache = d;
             _content.innerHTML = _renderStaffView(d);
         } else if (_view === 'ledger') {
-            _ledgerCache = await tfetch('/api/v1/timesheets/rows?month=' + _month);
+            _ledgerCache = await tfetch('/api/v1/timesheets/rows?month=' + _month + (_monthTo ? '&to=' + _monthTo : ''));
+            _ledgerSel = new Set();
             _workTypes = _ledgerCache.work_types || [];
             _conflictsCache = _ledgerCache.editable ? ((await tfetch('/api/v1/timesheets/conflicts')).items || []) : [];
             _content.innerHTML = _renderLedger(_ledgerCache);
@@ -317,11 +324,12 @@ function _dayLogRows(days, primary) {
         <td style="white-space:nowrap;color:#888;">${k === 0 ? esc(_dayLabel(day.date)) : ''}</td>
         <td style="white-space:nowrap;">${primary === 'project_name' ? _projLink(i.project_name, i.project_id) : `<span style="color:#eee;">${esc(i[primary] || '(空白)')}</span>`}</td>
         <td style="color:#bbb;">${_typeTag(i)}${esc(i.task_note || '')}</td>
+        <td style="color:#9ca3af;">${esc(i.remark || '')}</td>
         <td class="num" style="white-space:nowrap;">${_hoursLabel(i)}</td>
     </tr>`).join('')).join('');
 }
 function _dayLogTable(bodyHtml, primary) {
-    return `<table class="ts-daylog"><thead><tr><th style="width:110px;">日期</th><th style="width:160px;">${primary === 'project_name' ? '專案' : '人員'}</th><th>內容</th><th class="num" style="width:110px;">使用時數</th></tr></thead>
+    return `<table class="ts-daylog"><thead><tr><th style="width:110px;">日期</th><th style="width:160px;">${primary === 'project_name' ? '專案' : '人員'}</th><th>內容</th><th style="width:22%;">備註</th><th class="num" style="width:110px;">使用時數</th></tr></thead>
         <tbody>${bodyHtml}</tbody></table>`;
 }
 function _dayLog(days, primary) {
@@ -333,6 +341,7 @@ function _itemCard(i) {
     return `<div style="padding:6px 8px;border:1px solid #333;border-radius:6px;margin:4px 0;background:${_isPlan(i) ? '#1a2233' : '#1f1f1f'};">
         <div style="color:#ddd;font-size:12.5px;">${_typeTag(i)}${_projLink(i.project_name, i.project_id)}</div>
         ${i.task_note ? `<div style="color:#999;font-size:11.5px;">${esc(i.task_note)}</div>` : ''}
+        ${i.remark ? `<div style="color:#777;font-size:11px;">備註：${esc(i.remark)}</div>` : ''}
         <div style="font-size:11.5px;margin-top:2px;">${_hoursLabel(i)}${_srcTag(i)}</div>
     </div>`;
 }
@@ -382,6 +391,7 @@ function _rowCells(v = {}) {
     return `<td><input list="ts-proj-list" data-f="project" value="${esc(v.project || '')}" placeholder="專案（可打字）" style="width:100%;"></td>
         <td>${_typeSelect(v.work_type || '', 'data-f="type"')}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}" placeholder="做了什麼" style="width:100%;"></td>
+        <td><input type="text" data-f="remark" value="${esc(v.remark || '')}" placeholder="備註" style="width:100%;"></td>
         <td><input type="number" data-f="planned" min="0" step="0.25" value="${v.planned ?? ''}" placeholder="計畫" style="width:64px;"></td>
         <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}" placeholder="實際" style="width:64px;"></td>`;
 }
@@ -396,7 +406,7 @@ function _applyTimeRange(tr) {
 }
 // ── 我的一天的新增區：像 Google Sheet 的格子（owner 2026-09-03）──
 // 一列＝一個工作項；Enter／↓／↑ 在同一欄上下走，走到底自動多一列；在最後一列打字也會自動多一列。
-const _SHEET_COLS = [['project', '專案'], ['type', '分類'], ['note', '做了什麼'], ['t0', '起'], ['t1', '訖'], ['hours', '實際 h'], ['planned', '計畫 h'], ['state', '']];
+const _SHEET_COLS = [['project', '專案'], ['type', '分類'], ['note', '做了什麼'], ['remark', '備註'], ['t0', '起'], ['t1', '訖'], ['hours', '實際 h'], ['planned', '計畫 h'], ['state', '']];
 function _newRowHtml(v = {}, o = {}) {
     // Sheet 列：input 用 readonly（文字還能選取、複製貼到下一列）；select 沒有 readonly 只能 disabled
     const ro = o.readonly ? ' readonly' : '';
@@ -407,6 +417,7 @@ function _newRowHtml(v = {}, o = {}) {
         <td><input list="ts-proj-list" data-f="project" value="${esc(v.project || '')}"${ro}></td>
         <td>${_typeSelect(v.work_type || '', `data-f="type"${rosel}`)}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}"${ro}></td>
+        <td><input type="text" data-f="remark" value="${esc(v.remark || '')}"${ro}></td>
         <td><input ${t} data-f="t0" value="${esc(v.t0 || '')}"${ro}></td>
         <td><input ${t} data-f="t1" value="${esc(v.t1 || '')}"${ro}></td>
         <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}"${ro}></td>
@@ -444,7 +455,7 @@ function _sheetGrow(ev) {
     if (!tr.nextElementSibling && inp.value) tr.insertAdjacentHTML('afterend', _newRowHtml());
 }
 function _mineRowHtml(i) {
-    return _newRowHtml({ project: i.project_name, work_type: i.work_type, note: i.task_note, planned: i.planned_hours, hours: i.hours || '' },
+    return _newRowHtml({ project: i.project_name, work_type: i.work_type, note: i.task_note, remark: i.remark, planned: i.planned_hours, hours: i.hours || '' },
                        { id: i.id, readonly: !i.editable });
 }
 function _mineChips(d) {
@@ -484,7 +495,7 @@ function _rowBody(tr) {
     const v = f => tr.querySelector(`[data-f="${f}"]`)?.value ?? '';
     return {
         work_date: v('date') || _day, ..._projectFromInput(v('project')), work_type: v('type') || null,
-        task_note: v('note'), planned_hours: v('planned') ? parseFloat(v('planned')) : null,
+        task_note: v('note'), remark: v('remark'), planned_hours: v('planned') ? parseFloat(v('planned')) : null,
         hours: v('hours') ? parseFloat(v('hours')) : null,
     };
 }
@@ -556,26 +567,29 @@ async function _mineRemove(tr) {
 function _ledgerRows() {
     const f = _ledgerFilter, q = f.q.trim().toLowerCase();
     return ((_ledgerCache && _ledgerCache.items) || []).filter(i =>
-        (!f.staff || i.staff_name === f.staff) && (!f.project || i.project_name === f.project)
+        (!f.staff || i.staff_name === f.staff)
+        && (!f.project || (f.project === '__blank__' ? !i.project_name : i.project_name === f.project))
         && (!f.source || (f.source === 'manual') === (i.source === 'manual'))
-        && (!q || [i.project_name, i.task_note, i.note, i.staff_name].some(s => (s || '').toLowerCase().includes(q))));
+        && (!q || [i.project_name, i.task_note, i.remark, i.note, i.staff_name].some(s => (s || '').toLowerCase().includes(q))));
 }
 const _srcLabel = i => (i.source === 'manual' ? '手填' : 'Sheet');
 function _ledgerTbodyHtml() {
     const can = _ledgerCache && _ledgerCache.editable;
     return _ledgerSorter.sorted(_ledgerRows()).map(i => `<tr data-ledger-id="${esc(i.id)}">
+        ${can ? `<td style="width:26px;text-align:center;"><input type="checkbox" data-pick="${esc(i.id)}" ${_ledgerSel.has(i.id) ? 'checked' : ''} style="accent-color:#3b82f6;"></td>` : ''}
         <td style="white-space:nowrap;">${esc(i.date)}${i.edited ? ' <span class="ts-badge" title="總表改過：Sheet 同格之後再變會記成衝突，不自動蓋">改過</span>' : ''}</td>
         <td>${esc(i.staff_name)}</td>
         <td>${_projLink(i.project_name, i.project_id)}${i.project_id ? '' : ' <span class="ts-badge">未對映</span>'}</td>
         <td style="color:#9ca3af;">${esc(i.work_type || '')}</td>
         <td style="color:#bbb;">${esc(i.task_note || '')}</td>
+        <td style="color:#9ca3af;">${esc(i.remark || '')}</td>
         <td class="num" style="color:#93c5fd;">${i.planned_hours ?? ''}</td>
         <td class="num">${_isPlan(i) ? '<span style="color:#666;">計畫</span>' : `<b>${i.hours}</b>`}</td>
         <td style="color:#777;">${_srcLabel(i)}</td>
         <td style="color:#fbbf24;">${esc(i.note || '')}</td>
         <td style="white-space:nowrap;">${can ? `<button class="ts-btn ghost" data-ts-action="ledger-edit" data-id="${esc(i.id)}" style="padding:2px 8px;">改</button>
             <button class="ts-btn ghost" data-ts-action="ledger-del" data-id="${esc(i.id)}" style="padding:2px 8px;">刪</button>` : ''}</td>
-    </tr>`).join('') || '<tr><td colspan="10" style="color:#666;text-align:center;">沒有符合的列</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="12" style="color:#666;text-align:center;">沒有符合的列</td></tr>';
 }
 /** 篩選／排序／改列後只重繪表身與計數（不重繪整頁 → 搜尋框不失焦）。 */
 function _ledgerRedraw() {
@@ -583,15 +597,18 @@ function _ledgerRedraw() {
     const rows = _ledgerRows();
     const c = document.getElementById('ts-ledger-count');
     if (c) c.innerHTML = `<span class="ts-chip"><b>${rows.length}</b>列</span><span class="ts-chip"><b>${Math.round(rows.reduce((a, i) => a + (i.hours || 0), 0) * 10) / 10}</b>實際 h</span>`;
+    const bar = document.getElementById('ts-batch-bar'), n = document.getElementById('ts-batch-n');
+    if (bar) bar.style.display = _ledgerSel.size ? 'flex' : 'none';
+    if (n) n.textContent = _ledgerSel.size;
 }
 function _ledgerEditHtml(i) {
     const inp = 'style="background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;padding:3px 6px;"';
     return `<tr data-ledger-edit="${esc(i.id)}">
         <td><input type="date" data-f="date" value="${esc(i.date)}" ${inp}></td>
         <td>${esc(i.staff_name)}</td>
-        ${_rowCells({ project: i.project_name, work_type: i.work_type, note: i.task_note, planned: i.planned_hours, hours: i.hours || '' })}
+        ${_rowCells({ project: i.project_name, work_type: i.work_type, note: i.task_note, remark: i.remark, planned: i.planned_hours, hours: i.hours || '' })}
         <td style="color:#777;">${_srcLabel(i)}</td>
-        <td><input type="text" data-f="remark" value="${esc(i.note)}" placeholder="管理員備註" style="width:100%;"></td>
+        <td><input type="text" data-f="admnote" value="${esc(i.note)}" placeholder="管理員備註" style="width:100%;"></td>
         <td style="white-space:nowrap;"><button class="ts-btn" data-ts-action="ledger-save" data-id="${esc(i.id)}" style="padding:2px 8px;">存</button>
             <button class="ts-btn ghost" data-ts-action="ledger-cancel" style="padding:2px 8px;">取消</button>
             <div data-err style="color:#fca5a5;font-size:11px;"></div></td>
@@ -627,8 +644,13 @@ function _renderLedger(d) {
     return `${_head(d.editable ? '總表：這個月每一列（每人每案每項）。可以逐列改日期／專案／分類／內容／時數，加管理員備註（員工端看不到）。'
                                 : '總表：這個月每一列（每人每案每項）。')}
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-            <input type="month" id="ts-month" value="${esc(_month)}" ${sel}>
-            ${opts('staff', uniq('staff_name'), '全部人員')}${opts('project', uniq('project_name'), '全部專案')}
+            <input type="month" id="ts-month" value="${esc(_month)}" ${sel} title="起月">
+            <span style="color:#666;">～</span>
+            <input type="month" id="ts-month-to" value="${esc(_monthTo)}" ${sel} title="迄月（空＝只看起月；最多 12 個月）">
+            ${opts('staff', uniq('staff_name'), '全部人員')}
+            <select id="ts-lf-project" ${sel}><option value="">全部專案</option>
+                <option value="__blank__"${_ledgerFilter.project === '__blank__' ? ' selected' : ''}>(空白專案)</option>
+                ${uniq('project_name').map(v => `<option value="${esc(v)}"${_ledgerFilter.project === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>
             <select id="ts-lf-source" ${sel}><option value="">全部來源</option>
                 <option value="sheet"${_ledgerFilter.source === 'sheet' ? ' selected' : ''}>Sheet</option>
                 <option value="manual"${_ledgerFilter.source === 'manual' ? ' selected' : ''}>手填</option></select>
@@ -637,9 +659,18 @@ function _renderLedger(d) {
             <button class="ts-btn ghost" data-ts-action="export-month">匯出 CSV</button>
         </div>
         ${_conflictsHtml()}
+        ${d.editable ? `<div id="ts-batch-bar" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;border:1px solid #3b82f6;border-radius:6px;background:#1a2233;">
+            <span style="color:#ddd;">已勾 <b id="ts-batch-n">0</b> 列 → 一次改：</span>
+            <input list="ts-proj-list" id="ts-batch-project" placeholder="專案（留空不改）" ${sel}>
+            ${_typeSelect('', `id="ts-batch-type" ${sel}`).replace('>分類<', '>分類（不改）<')}
+            <input type="text" id="ts-batch-remark" placeholder="備註（留空不改）" ${sel}>
+            <input type="text" id="ts-batch-note" placeholder="管理員備註（留空不改）" ${sel}>
+            <button class="ts-btn" data-ts-action="batch-apply">套用</button>
+            <button class="ts-btn ghost" data-ts-action="batch-clear">取消勾選</button>
+        </div>` : ''}
         <div class="ts-card" style="overflow-x:auto;">
             <table id="ts-ledger-table">
-                <thead><tr>${sortableTh('date', '日期')}${sortableTh('staff', '人員')}${sortableTh('project', '專案')}${sortableTh('type', '分類')}${sortableTh('task', '內容')}${sortableTh('planned', '計畫', 'class="num"')}${sortableTh('hours', '實際', 'class="num"')}${sortableTh('source', '來源')}${sortableTh('note', '備註')}<th></th></tr></thead>
+                <thead><tr>${d.editable ? '<th style="width:26px;"><input type="checkbox" data-pick-all title="勾選目前篩出來的全部" style="accent-color:#3b82f6;"></th>' : ''}${sortableTh('date', '日期')}${sortableTh('staff', '人員')}${sortableTh('project', '專案')}${sortableTh('type', '分類')}${sortableTh('task', '內容')}${sortableTh('remark', '備註')}${sortableTh('planned', '計畫', 'class="num"')}${sortableTh('hours', '實際', 'class="num"')}${sortableTh('source', '來源')}${sortableTh('note', '管理員備註')}<th></th></tr></thead>
                 <tbody></tbody>   <!-- _bind → _ledgerRedraw 填（不在這裡建一次又重建一次） -->
             </table>
             <datalist id="ts-proj-list"></datalist>
@@ -778,7 +809,7 @@ function _dayLogByMonth(days, primary) {
         g.hours += day.items.reduce((a, i) => a + (i.hours || 0), 0);
     }
     // 一張表：每月一列小計當分隔，底下接那個月的逐日列
-    return _dayLogTable(groups.map(g => `<tr class="ts-month"><td colspan="4" style="background:#262626;color:#ddd;padding:6px 8px;">
+    return _dayLogTable(groups.map(g => `<tr class="ts-month"><td colspan="5" style="background:#262626;color:#ddd;padding:6px 8px;">
             <b>${esc(g.m)}</b><span style="color:#888;"> ｜ ${g.days.length} 天 ｜ ${Math.round(g.hours * 10) / 10} h</span></td></tr>${_dayLogRows(g.days, primary)}`).join(''), primary);
 }
 function _renderProject(d, modal = false) {
@@ -1119,6 +1150,8 @@ function _bind() {
         const ub = document.getElementById('ts-unmatched-proj-body');
         if (ub) ub.innerHTML = _unmatchedProjRowsHtml();
     });
+    const mt = document.getElementById('ts-month-to');
+    if (mt) mt.addEventListener('change', () => { _monthTo = mt.value; refresh(); });
     ['staff', 'project', 'source', 'q'].forEach(k => {
         const el = document.getElementById('ts-lf-' + k);
         if (el) el.addEventListener(k === 'q' ? 'input' : 'change', () => { _ledgerFilter[k] = el.value; _ledgerRedraw(); });
@@ -1204,6 +1237,23 @@ async function _onAction(btn) {
                     return refresh();
                 } catch (e) { alert('決定失敗：' + (e.message || e)); return; }
             }
+            if (act === 'batch-clear') { _ledgerSel = new Set(); return _ledgerRedraw(); }
+            if (act === 'batch-apply') {
+                const g = id => (document.getElementById(id) || {}).value || '';
+                const body = { ids: [..._ledgerSel] };
+                const proj = g('ts-batch-project').trim();
+                if (proj) Object.assign(body, _projectFromInput(proj));
+                if (g('ts-batch-type')) body.work_type = g('ts-batch-type');
+                if (g('ts-batch-remark').trim()) body.remark = g('ts-batch-remark').trim();
+                if (g('ts-batch-note').trim()) body.note = g('ts-batch-note').trim();
+                if (Object.keys(body).length === 1) return alert('專案／分類／備註至少填一個');
+                if (!confirm(`把 ${body.ids.length} 列一次改掉？`)) return;
+                try {
+                    const r = await tfetch('/api/v1/timesheets/rows/batch', { method: 'POST', body });
+                    alert(`已改 ${r.updated} 列`);
+                    return refresh();
+                } catch (e) { return alert('批次沒存：' + (e.message || e)); }
+            }
             if (act === 'ledger-edit') {
                 const i = (_ledgerCache.items || []).find(x => x.id === btn.dataset.id);
                 const tr = document.querySelector(`[data-ledger-id="${btn.dataset.id}"]`);
@@ -1216,7 +1266,7 @@ async function _onAction(btn) {
                 const tr = btn.closest('tr');
                 try {
                     const it = await tfetch('/api/v1/timesheets/rows/' + btn.dataset.id, { method: 'PUT',
-                        body: { ..._rowBody(tr), note: tr.querySelector('[data-f="remark"]').value } });
+                        body: { ..._rowBody(tr), note: tr.querySelector('[data-f="admnote"]').value } });
                     const k = _ledgerCache.items.findIndex(x => x.id === it.id);
                     if (k >= 0) _ledgerCache.items[k] = it;
                     _ledgerRedraw();

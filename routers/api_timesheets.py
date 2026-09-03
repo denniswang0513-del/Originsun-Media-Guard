@@ -35,7 +35,7 @@ from core.hr_logic import (fillers_on, HOURS_PER_WORKDAY, WORK_TYPES, Misses, ac
 from core.schemas import (MeTimesheetBatch, MeTimesheetUpdate, TimesheetBudgetRequest, TimesheetBudgetSet,
                           TimesheetDigestSettings, TimesheetIngestRequest, TimesheetManualRequest,
                           TimesheetConflictResolve, TimesheetProjectMapRequest, TimesheetPullSettings,
-                          TimesheetRowAdminUpdate)
+                          TimesheetRowAdminUpdate, TimesheetRowsBatch)
 from db.models import CrmProject, CrmQuotation, CrmQuotationItem, CrmStaff, Timesheet, TimesheetProjectMap
 from routers.crm._shared import project_names_map
 from services import timesheet_digest, timesheet_puller
@@ -43,7 +43,7 @@ from services.timesheet_conflicts import list_conflicts, resolve_conflict
 from services.timesheet_ingest import ingest, parse_date as _parse_date
 from services.timesheet_lookup import burn_rows, load_project_lookup, project_names
 from services.timesheet_manual import insert_manual_rows, project_options
-from services.timesheet_self import (add_rows, admin_delete_row, admin_update_row, bound_ident, delete_row,
+from services.timesheet_self import (add_rows, admin_batch_update, admin_delete_row, admin_update_row, bound_ident, delete_row,
                                      list_rows, metrics_input, month_or_422, rows_by_month, ts_dict, update_row)
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
@@ -238,18 +238,35 @@ async def my_delete_row(row_id: str, request: Request):
 # ── 總表（像發票總表那樣一列一列看；管理員逐列調細節與備註）──────────────────
 
 @router.get("/rows")
-async def ledger_rows(request: Request, month: str = ""):
-    """該月所有列（每人每案每項）。篩選（人／案／關鍵字／來源）在前端做 —— 一個月至多千列。
-    editable 只給管理員（一般成員看得到、改不了）。"""
+async def ledger_rows(request: Request, month: str = "", to: str = ""):
+    """month（起）～ to（迄，含；最多 12 個月）的所有列（每人每案每項）。篩選（人／案／關鍵字／來源）
+    在前端做。editable 只給管理員（一般成員看得到、改不了）。"""
     is_admin = payload_grants(check_admin_or_module(request, "timesheets"))
     m0, m1 = month_or_422(month)
+    if to:
+        t0, t1 = month_or_422(to)
+        if t0 < m0:
+            raise HTTPException(status_code=422, detail="迄月不能早於起月")
+        if (t0.year - m0.year) * 12 + (t0.month - m0.month) >= 12:
+            raise HTTPException(status_code=422, detail="區間最多 12 個月")
+        m1 = t1
     factory = db_factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
             select(Timesheet).where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
             .order_by(Timesheet.work_date.desc(), Timesheet.staff_name, Timesheet.created_at))).scalars().all()
-    return {"month": month_key(m0), "editable": is_admin,
+    return {"month": month_key(m0), "to": month_key(t0) if to else "", "editable": is_admin,
             "items": [ts_dict(r, with_note=is_admin) for r in rows], "work_types": list(WORK_TYPES)}
+
+
+@router.post("/rows/batch")
+async def ledger_batch(body: TimesheetRowsBatch, request: Request):
+    """總表批次調整（管理員）：勾選的列一次改專案／分類／備註／管理員備註。"""
+    check_admin(request)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        return await admin_batch_update(session, body.ids, body.model_dump(exclude_unset=True, exclude={"ids"}),
+                                        current_username(request))
 
 
 @router.put("/rows/{row_id}")
@@ -523,10 +540,10 @@ async def export_csv(request: Request, month: str = "", project: str = "", proje
         rows = (await session.execute(q)).scalars().all()
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["日期", "人員", "專案", "分類", "內容", "計畫小時", "實際小時", "來源", "狀態"])
+    w.writerow(["日期", "人員", "專案", "分類", "內容", "備註", "計畫小時", "實際小時", "來源", "狀態"])
     for r in rows:
         it = ts_dict(r)
-        w.writerow([it["date"], it["staff_name"], it["project_name"], it["work_type"], it["task_note"],
+        w.writerow([it["date"], it["staff_name"], it["project_name"], it["work_type"], it["task_note"], it["remark"],
                     it["planned_hours"] if it["planned_hours"] is not None else "", it["hours"], it["source"], it["status"]])
     fname = f"timesheets_{month or project or project_id}.csv"
     return Response(content="﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",

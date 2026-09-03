@@ -64,11 +64,16 @@
     #ts-root table.ts-sheet { table-layout: fixed; border-collapse: collapse; counter-reset: sheetrow; background: #1b1b1b; }
     #ts-root table.ts-sheet th, #ts-root table.ts-sheet td { border: 1px solid #3a3a3a; padding: 0; height: 32px; }
     #ts-root table.ts-sheet th { background: #262626; color: #bbb; font-weight: 500; font-size: 12px; text-align: center; padding: 6px 4px; }
-    #ts-root table.ts-sheet th:nth-child(2) { width: 24%; }
-    #ts-root table.ts-sheet th:nth-child(3) { width: 110px; }
-    #ts-root table.ts-sheet th:nth-child(5), #ts-root table.ts-sheet th:nth-child(6) { width: 104px; }
-    #ts-root table.ts-sheet th:nth-child(7), #ts-root table.ts-sheet th:nth-child(8) { width: 76px; }
-    #ts-root table.ts-sheet th:nth-child(9) { width: 64px; }
+    /* # | 專案 | 分類 | 做了什麼 | 備註 | 起 | 訖 | 實際 | 計畫 | 狀態 | × */
+    #ts-root table.ts-sheet th:nth-child(2) { width: 20%; }
+    #ts-root table.ts-sheet th:nth-child(3) { width: 104px; }
+    #ts-root table.ts-sheet th:nth-child(5) { width: 18%; }
+    #ts-root table.ts-sheet th:nth-child(6), #ts-root table.ts-sheet th:nth-child(7) { width: 96px; }
+    #ts-root table.ts-sheet th:nth-child(8), #ts-root table.ts-sheet th:nth-child(9) { width: 72px; }
+    #ts-root table.ts-sheet th:nth-child(10) { width: 60px; }
+    /* 逐日／時間軸表：內容靠左（owner 2026-09-03） */
+    #ts-root table.ts-daylog th, #ts-root table.ts-daylog td { text-align: left; vertical-align: top; }
+    #ts-root table.ts-daylog th.num, #ts-root table.ts-daylog td.num { text-align: right; }
     #ts-root table.ts-sheet td.ts-sheet-state { font-size: 11px; color: #777; text-align: center; white-space: nowrap; padding: 0 4px; }
     #ts-root table.ts-sheet tr[data-readonly] td { color: #888; background: #1f1f1f; }
     #ts-root table.ts-sheet td input:disabled, #ts-root table.ts-sheet td select:disabled, #ts-root table.ts-sheet td input[readonly] { color: #888; opacity: 1; }

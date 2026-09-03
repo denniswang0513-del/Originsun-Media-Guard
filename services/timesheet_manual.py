@@ -46,6 +46,7 @@ def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, keep: tuple |
     return {
         "work_date": wd, "project_id": pid, "project_name": pname,
         "task_note": (r.task_note or "").strip() or None,
+        "remark": (getattr(r, "remark", None) or "").strip() or None,
         "hours": float(r.hours or 0),
         "planned_hours": float(r.planned_hours) if r.planned_hours is not None else None,
         "work_type": wt, "status": status,

@@ -24,6 +24,7 @@ class Timesheet(Base):
     planned_hours = Column(Float, nullable=True)                 # 計畫小時（docs/WORK_TRACKING_UI_PLAN.md §2；Sheet 列 NULL）
     work_type = Column(String(32), nullable=True)                # 工作分類（core.hr_logic.WORK_TYPES；可空）
     note = Column(Text, nullable=True)                           # 管理員備註（總表手動調整時寫；員工端不顯示）
+    remark = Column(Text, nullable=True)                         # 員工備註（我的一天填；內容之外的補充，大家看得到）
     edited_at = Column(DateTime(timezone=True), nullable=True)   # 總表改過（管理員）；Sheet 同格之後再變＝記衝突不自動蓋
     edited_by = Column(String(64), nullable=True)
     status = Column(String(16), nullable=False, default="import")  # import／draft（實際）／plan（只有計畫）
