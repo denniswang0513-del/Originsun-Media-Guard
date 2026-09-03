@@ -11,6 +11,9 @@ from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
 def test_backend_options_expose_passthrough_categories_from_category_map():
     body = code_only(func_body(repo_src("routers/crm/cash.py"), "async def cash_entry_options("))
     assert '_FCM.treatment == "passthrough"' in body and '"passthrough_categories": passthrough' in body
+    assert "CASH_INVOICE_PASSTHROUGH_CATEGORIES" in body, "只認發票代開（代收薪資／代收代付也是 passthrough，但不是代開）"
+    from core.finance_logic import CASH_INVOICE_PASSTHROUGH_CATEGORIES
+    assert CASH_INVOICE_PASSTHROUGH_CATEGORIES == ("發票代開",)
 
 
 def test_frontend_kind_is_one_rule_for_color_and_filter():

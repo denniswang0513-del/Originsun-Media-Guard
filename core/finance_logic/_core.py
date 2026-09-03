@@ -655,6 +655,9 @@ INVOICE_PASSTHROUGH_COLLECTED = (INVOICE_PENDING_REMIT, INVOICE_RECEIVED)
 INVOICE_PASSTHROUGH_CATEGORIES = ("內部代開", "外部代開")
 # 三種類別都能掛專案（owner 2026-09-04）；只有這一種能掛**私帳**案，而且要有私帳權限（hide_mine_projects 為 False）
 MINE_LINK_INVOICE_CATEGORY = "內部代開"
+# 收支明細裡「發票代開」那一類（列底色／快篩用）。finance_category_map 的 treatment=passthrough 比這寬
+#（生產把代收薪資、代收代付也標 passthrough，那些是代收代付不是代開）—— owner 2026-09-04 只要發票代開。
+CASH_INVOICE_PASSTHROUGH_CATEGORIES = ("發票代開",)
 
 
 def is_passthrough_category(category: str) -> bool:
