@@ -74,8 +74,7 @@ def test_invoice_amounts_come_from_the_shared_leaf():
 
 # ── 2. 不寫死字彙 ─────────────────────────────────────────
 
-VOCAB = ("未收款", "已收款", "已撥款", "草稿", "已寄送", "已簽核", "電子發票", "已付款", "應付款",
-         "排定", "預約", "已還")   # 行事曆：場次／器材預約狀態。「完成」「取消」是按鈕動詞、「已領」是「器材已領」按鈕的子字串，不列
+VOCAB = ("未收款", "已收款", "已撥款", "草稿", "已寄送", "已簽核", "電子發票", "已付款", "應付款")
 
 
 def test_page_modules_have_no_hardcoded_vocab():
@@ -262,7 +261,9 @@ def test_calendar_tab_contract():
         assert f"pickerHtml('{pid}')" in cal and f"mountPicker('{pid}'" in cal, pid
     assert "/api/v1/shoots" in cal and "renderPaged(" in cal
     assert "calendar/status" in cal and "calendar/config" in cal and "calendar/test" in cal
-    assert "_o.statuses" in cal and "equipment_states" in cal     # 狀態字不寫死：VOCAB 掃描（test_page_modules_have_no_hardcoded_vocab）管全部頁面模組
+    assert "_o.statuses" in cal and "equipment_states" in cal
+    # 狀態字只准從 options 推：不准拿字面當狀態比對或送出（提示文字裡出現「預約」這種字是給人看的，不算）
+    assert not re.search(r"(===|!==|status:)\s*['\"](排定|完成|取消|預約|已領|已還)['\"]", cal), "calendar.js 用字面狀態字比對／送出"
     assert "=== doneStatus()" in cal and "=== cancelled()" in cal
     pj = js_code_only(repo_src("frontend/m/views/projects.js"))
     assert 'data-act="shoot"' in pj and "shootPreset" in pj and "ensureView(view)" in pj
