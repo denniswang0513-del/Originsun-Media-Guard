@@ -188,6 +188,9 @@
     <button type="button" class="nav" id="m-back" aria-label="上一頁">‹ 上一頁</button>
     <div class="ttl"><div class="brand"><span>Originsun</span> CRM</div><div class="page" id="m-page"></div></div>
     <button type="button" class="nav" id="m-home" aria-label="首頁">首頁</button>
+    <!-- 舊版 crm.js 開頭會找這個元素填帳號；Cloudflare 對 .js 給瀏覽器 4 小時快取而 html 是即時的，
+         發版後有一段時間會是「新 html＋舊 js」——元素留著（藏起來）舊 js 才不會在這裡中斷（2026-09-03 實際踩到） -->
+    <div id="m-who" hidden></div>
   </header>
   <main id="m-view"></main>
   <nav class="m-tabbar" id="m-tabbar">
