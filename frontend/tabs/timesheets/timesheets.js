@@ -383,7 +383,7 @@ async function _projectOptions() {
     return _projOpts;
 }
 function _typeSelect(cur, attr) {
-    return `<select ${attr}><option value="">分類</option>${_workTypes.map(t =>
+    return `<select ${attr} data-no-search><option value="">分類</option>${_workTypes.map(t =>
         `<option value="${esc(t)}"${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
 }
 /** 一個工作項的五格輸入（專案／分類／內容／計畫／實際）；總表改列用。 */
@@ -689,11 +689,10 @@ function _pctStyle(pct) {
 
 /** burn 表的案型下拉：字彙＝/summary 回的 project_types（settings ∪ 毛利表 ∪ 在用的）。改了就 PUT 專案，建議預算跟著重算。 */
 function _burnTypeSelect(p) {
+    // 平時只畫文字，點到才變成下拉（317 列 × 11 個 option 畫一次就是幾千個節點）
     const cur = p.project_type || '';
-    const opts = (_summaryCache && _summaryCache.project_types) || [];
-    return `<select data-set-type="${esc(p.project_id)}" title="案型（預期毛利／建議預算照這個算）"
-                style="background:#1a1a1a;border:1px solid ${cur ? '#333' : '#78350f'};color:${cur ? '#ccc' : '#f59e0b'};border-radius:4px;padding:2px 4px;font-size:12px;max-width:130px;">
-        <option value="">— 案型 —</option>${opts.map(t => `<option value="${esc(t)}"${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+    return `<span class="ts-link" data-ts-action="type-edit" data-pid="${esc(p.project_id)}" data-cur="${esc(cur)}"
+                style="color:${cur ? '#ccc' : '#f59e0b'};" title="點一下改案型（預期毛利／建議預算照這個算）">${cur ? esc(cur) : '— 案型 —'} ▾</span>`;
 }
 function _burnTbodyHtml() {
     const rows = _burnSorter.sorted(((_summaryCache && _summaryCache.projects) || [])
@@ -1237,6 +1236,16 @@ async function _onAction(btn) {
                     await tfetch(`/api/v1/timesheets/conflicts/${btn.dataset.id}/resolve`, { method: 'POST', body: { choice: btn.dataset.choice } });
                     return refresh();
                 } catch (e) { alert('決定失敗：' + (e.message || e)); return; }
+            }
+            if (act === 'type-edit') {
+                const opts = (_summaryCache && _summaryCache.project_types) || [];
+                const sel = document.createElement('select');
+                sel.setAttribute('data-set-type', btn.dataset.pid); sel.setAttribute('data-no-search', '');
+                sel.style.cssText = 'background:#1a1a1a;border:1px solid #333;color:#ccc;border-radius:4px;padding:2px 4px;font-size:12px;max-width:130px;';
+                sel.innerHTML = `<option value="">— 案型 —</option>${opts.map(t => `<option value="${esc(t)}"${t === btn.dataset.cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}`;
+                sel.addEventListener('blur', () => { if (sel.isConnected) sel.replaceWith(Object.assign(document.createElement('div'), { innerHTML: _burnTypeSelect({ project_id: btn.dataset.pid, project_type: sel.value }) }).firstElementChild); });
+                btn.replaceWith(sel); sel.focus();
+                return;
             }
             if (act === 'batch-clear') { _ledgerSel = new Set(); return _ledgerRedraw(); }
             if (act === 'batch-apply') {

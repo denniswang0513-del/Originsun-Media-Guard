@@ -186,6 +186,9 @@
 .crm-row-type { flex: 0.8; min-width: 90px; }
 .crm-row-type select { width: 100%; max-width: 150px; background: #1a1a1a; border: 1px solid #333; color: #ccc; border-radius: 4px; padding: 2px 4px; font-size: 12px; }
 .crm-row-type select.is-empty { color: #f59e0b; border-color: #78350f; }
+.crm-row-type-txt { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ccc; font-size: 12px; cursor: pointer; border: 1px solid transparent; border-radius: 4px; padding: 2px 4px; }
+.crm-row-type-txt:hover { border-color: #444; background: #1a1a1a; }
+.crm-row-type-txt.is-empty { color: #f59e0b; }
 .crm-row-am { flex: 0.8; min-width: 40px; display: flex; align-items: center; gap: 4px; color: #9ca3af; font-size: 12px; overflow: hidden; white-space: nowrap; }
 .crm-row-am span { overflow: hidden; text-overflow: ellipsis; }
 .crm-row-proj { flex: 0.3; min-width: 30px; text-align: center; font-size: 13px; color: #e0e0e0; }

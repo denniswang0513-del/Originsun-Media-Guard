@@ -315,12 +315,26 @@ export function renderList() {
 // 案型是私帳「預期毛利」表的鍵：改了案型，工時預算的建議就跟著換。字彙＝settings.project_types
 //（「編輯案型」那份）；列上目前的值不在清單裡也照列，不會被洗掉。沒案型的列標橘框提醒。
 function _typeSelectHtml(p) {
+    // 平時只畫文字（433 列 × 11 個 option ＝ 5,000 個節點，畫一次 4 秒）；點到那一格才變成下拉
     const cur = p.project_type || '';
-    const opts = [...new Set([..._projectTypes, ...(cur ? [cur] : [])])];
-    return `<select class="${cur ? '' : 'is-empty'}" title="案型（預期毛利／工時預算建議照這個算）"
-                onclick="event.stopPropagation()" onchange="window._projSetType('${p.id}', this)">
-        <option value="">— 案型 —</option>${opts.map(t => `<option value="${_esc(t)}"${t === cur ? ' selected' : ''}>${_esc(t)}</option>`).join('')}</select>`;
+    return `<span class="crm-row-type-txt${cur ? '' : ' is-empty'}" title="點一下改案型（預期毛利／工時預算建議照這個算）"
+                onclick="event.stopPropagation();window._projTypeEdit('${p.id}', this)">${cur ? _esc(cur) : '— 案型 —'} ▾</span>`;
 }
+window._projTypeEdit = (id, span) => {
+    const p = state.projects.find(x => x.id === id);
+    const cur = (p && p.project_type) || '';
+    const opts = [...new Set([..._projectTypes, ...(cur ? [cur] : [])])];
+    const sel = document.createElement('select');
+    sel.className = cur ? '' : 'is-empty';
+    sel.setAttribute('data-no-search', '');
+    sel.innerHTML = `<option value="">— 案型 —</option>${opts.map(t => `<option value="${_esc(t)}"${t === cur ? ' selected' : ''}>${_esc(t)}</option>`).join('')}`;
+    sel.addEventListener('click', (e) => e.stopPropagation());
+    sel.addEventListener('change', () => window._projSetType(id, sel));
+    sel.addEventListener('blur', () => { sel.replaceWith(_spanOf(sel.value)); });
+    const _spanOf = (v) => { const d = document.createElement('div'); d.innerHTML = _typeSelectHtml({ id, project_type: v }); return d.firstElementChild; };
+    span.replaceWith(sel);
+    sel.focus();
+};
 window._projSetType = async (id, sel) => {
     const p = state.projects.find(x => x.id === id);
     const prev = p ? p.project_type : '';
