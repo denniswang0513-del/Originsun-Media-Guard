@@ -64,12 +64,16 @@ async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> d
     lk = await load_project_lookup(session)
     id_to_name = await names_for(session, rows)
     misses = Misses()
+    ids = []
     for r in rows:
         fields, why = normalize_row(r, lk, id_to_name)
         misses.note(why, fields["project_name"])
-        session.add(Timesheet(id=uuid.uuid4().hex, staff_name=staff_name, staff_id=staff_id,
+        rid = uuid.uuid4().hex
+        session.add(Timesheet(id=rid, staff_name=staff_name, staff_id=staff_id,
                               source="manual", row_hash="manual_" + uuid.uuid4().hex, **fields))
-    return {"inserted": len(rows), **misses.report()}
+        ids.append(rid)
+    # ids 照送進來的順序回：我的一天的格子存完要把 id 掛回那一列，之後改就是 PUT 同一列
+    return {"inserted": len(rows), "ids": ids, **misses.report()}
 
 
 async def project_options(session, staff_name: str | None = None) -> list:

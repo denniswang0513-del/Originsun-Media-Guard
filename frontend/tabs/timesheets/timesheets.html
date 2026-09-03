@@ -51,6 +51,15 @@
     }
     #ts-root ol { color: #bbb; font-size: 13px; line-height: 2; padding-left: 20px; margin: 8px 0; }
 
+    /* 專案彈窗：點案名就地看執行狀態 */
+    #ts-root .ts-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.62); z-index: 200;
+        display: flex; align-items: flex-start; justify-content: center; padding: 36px 20px; overflow: auto; }
+    #ts-root .ts-modal { position: relative; background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 10px;
+        width: 100%; max-width: 1180px; padding: 18px 22px 14px; box-shadow: 0 16px 48px rgba(0,0,0,.6); }
+    #ts-root .ts-modal-x { position: absolute; top: 8px; right: 10px; background: none; border: none; color: #888;
+        font-size: 22px; cursor: pointer; line-height: 1; }
+    #ts-root .ts-modal-x:hover { color: #eee; }
+
     /* 我的一天「新增」：像 Google Sheet 的格子 —— 格線、格子填滿、選到的格子藍框、左邊列號 */
     #ts-root table.ts-sheet { table-layout: fixed; border-collapse: collapse; counter-reset: sheetrow; background: #1b1b1b; }
     #ts-root table.ts-sheet th, #ts-root table.ts-sheet td { border: 1px solid #3a3a3a; padding: 0; height: 32px; }
@@ -59,6 +68,10 @@
     #ts-root table.ts-sheet th:nth-child(3) { width: 110px; }
     #ts-root table.ts-sheet th:nth-child(5), #ts-root table.ts-sheet th:nth-child(6) { width: 104px; }
     #ts-root table.ts-sheet th:nth-child(7), #ts-root table.ts-sheet th:nth-child(8) { width: 76px; }
+    #ts-root table.ts-sheet th:nth-child(9) { width: 64px; }
+    #ts-root table.ts-sheet td.ts-sheet-state { font-size: 11px; color: #777; text-align: center; white-space: nowrap; padding: 0 4px; }
+    #ts-root table.ts-sheet tr[data-readonly] td { color: #888; background: #1f1f1f; }
+    #ts-root table.ts-sheet td input:disabled, #ts-root table.ts-sheet td select:disabled { color: #888; opacity: 1; }
     #ts-root table.ts-sheet td input, #ts-root table.ts-sheet td select {
         width: 100%; height: 32px; box-sizing: border-box; margin: 0; padding: 4px 8px;
         background: transparent; border: none; border-radius: 0; color: #eee; font-size: 13px; font-family: inherit;
