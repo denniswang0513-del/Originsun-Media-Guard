@@ -180,6 +180,13 @@
 /* 批次掛專案的選取狀態（crm-payments 的批次模式）—— 跟 .selected 分開：
    一個是「正在看這一列」，一個是「這一列在待處理的那批裡」。 */
 .crm-row.batch-picked { background: #1e3a2a; box-shadow: inset 3px 0 0 #22c55e; }
+/* 收支明細的列依種類上底色（owner 2026-09-04）：專案＝藍、發票代開＝紫、沒填類別＝淺紅提醒。
+   選中／批次選取的顏色在後面宣告，蓋得過去。 */
+.crm-row.cash-kind-project { background: rgba(59,130,246,.10); }
+.crm-row.cash-kind-passthrough { background: rgba(168,85,247,.12); }
+.crm-row.cash-kind-none { background: rgba(239,68,68,.14); }
+.crm-row.cash-kind-project:hover, .crm-row.cash-kind-passthrough:hover, .crm-row.cash-kind-none:hover { filter: brightness(1.15); }
+.crm-row.cash-kind-project.selected, .crm-row.cash-kind-passthrough.selected, .crm-row.cash-kind-none.selected { background: #1e3a5f; }
 
 .crm-row-name { flex: 1.5; min-width: 60px; font-weight: 600; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .crm-row-status { flex: 0.6; min-width: 50px; }

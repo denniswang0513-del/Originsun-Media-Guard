@@ -23,6 +23,12 @@
        純前端篩（列都已在手上），不打後端。 -->
   <button id="cash-filter-off" type="button" class="crm-btn crm-btn-secondary crm-btn-sm"
           aria-pressed="false" title="只看落在六日或國定假日的收支">六日／假日</button>
+  <!-- 類別快篩（owner 2026-09-04）：專案／發票代開／未分類，跟列的底色同一份判定（_kindOf）；再按一次取消 -->
+  <span id="cash-filter-kind" style="display:flex;gap:4px;">
+    <button type="button" class="crm-btn crm-btn-secondary crm-btn-sm" data-kind="project" aria-pressed="false" title="只看掛專案類別的列">專案</button>
+    <button type="button" class="crm-btn crm-btn-secondary crm-btn-sm" data-kind="passthrough" aria-pressed="false" title="只看發票代開的列">發票代開</button>
+    <button type="button" class="crm-btn crm-btn-secondary crm-btn-sm" data-kind="none" aria-pressed="false" title="只看還沒填類別的列">未分類</button>
+  </span>
   <div class="crm-toolbar-right">
     <!-- 對帳與匯入 CSV 本來是兩顆 —— 對使用者是同一件事（把外面的帳弄進來），
          合成一個入口，兩者都在展開的面板裡。 -->

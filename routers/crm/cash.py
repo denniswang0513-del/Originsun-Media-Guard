@@ -368,6 +368,11 @@ async def cash_entry_options(request: Request, entity: str = Query("")):
                 CrmCashEntry.sub_item != "").distinct())).scalars())
     from core.project_link import linkable_categories
     linkable = linkable_categories(ent, cats)
+    # 發票代開那一類（treatment=passthrough，代收代付不進損益）：前端列的底色與快篩用，規則正本在 finance_category_map
+    from db.models import FinanceCategoryMap as _FCM
+    async with factory() as session:
+        passthrough = list((await session.execute(
+            select(_FCM.category_text).where(_FCM.source == "cash", _FCM.treatment == "passthrough"))).scalars())
     # 舊的 taxonomy 扁平欄位先留一版：前端已全面改吃 tree，但發版當下還開著的
     # 舊分頁仍讀它；下一版可以連同 core.cash_taxonomy.taxonomy() 一起收掉。
     # 它的值域＝**這本帳實際用到的類別** ∪ 值域裡同一本底下的（還沒用過的新
@@ -376,6 +381,7 @@ async def cash_entry_options(request: Request, entity: str = Query("")):
     tax_cats = used + [c for c in cats if book_of(c) in books_used and c not in used]
     return {"categories": cats,
             "project_link_categories": linkable,
+            "passthrough_categories": passthrough,
             "taxonomy": taxonomy(tax_cats, subs),
             "tree": tree}
 

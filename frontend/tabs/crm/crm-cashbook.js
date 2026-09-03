@@ -655,7 +655,8 @@ function _rowHtml(e) {
     const mine = _MINE_LEDGER;
     return `
         <div class="crm-row${e.id === _selectedId && !_batch.on ? ' selected' : ''}${
-            _batch.on && _batch.sel.has(e.id) ? ' batch-picked' : ''}" data-id="${e.id}"
+            _batch.on && _batch.sel.has(e.id) ? ' batch-picked' : ''}${
+            _kindOf(e) ? ' cash-kind-' + _kindOf(e) : ''}" data-id="${e.id}"
              onclick="window._cashRowClick(event,'${e.id}')">
             <div class="crm-row-date cash-c-date${_dayCls(dm)}">${_dayHtml(dm)}</div>
             <div class="crm-row-name cash-c-summary">${_esc(e.summary)}${_pettyTag(e)}</div>
@@ -759,10 +760,11 @@ function renderList() {
         return;
     }
     // 六日／假日是純前端篩（日期已在手上，不必為了它多跑一趟後端）
-    const _rows = _offOnly
+    let _rows = _offOnly
         ? _entries.filter((e) => { const m = _dayMark(e.entry_date);
                                    return m.holiday || m.weekend; })
         : _entries;
+    if (_kindOnly) _rows = _rows.filter((e) => _kindOf(e) === _kindOnly);     // 類別快篩（同上，純前端）
     _shown = _sorter.sorted(_rows);
     _drawn = 0;
     body.innerHTML = '';
@@ -1079,6 +1081,11 @@ function _bankOut(e) {
 // /petty/options）。這裡的值只是**斷線時的 fallback** —— 規則的正本在
 // core/project_link.py，前端寫死一份就會跟後端漂（同一個問題本來散在三個檔案）。
 let _LINKABLE = ['專案', '專案雜支', '專案外包'];
+let _PASSTHROUGH = [];          // 發票代開那一類（後端 finance_category_map treatment=passthrough）
+// 列的「種類」（owner 2026-09-04：專案與發票代開用底色分開、沒填類別的淺紅底）——同一份判定給底色與快篩用
+const _kindOf = (e) => (!e.category ? 'none' : _LINKABLE.includes(e.category) ? 'project'
+                       : _PASSTHROUGH.includes(e.category) ? 'passthrough' : '');
+let _kindOnly = '';             // 類別快篩：'' 全部／project／passthrough／none（純前端，列已在手上）
 // 類別下拉的選項（正本是後端 finance_category_map）。這裡的值只是斷線 fallback ——
 // 寫死一份就會跟種子脫節：貸款繳款／貸款補貼／銀行借款 就是這樣漏掉的，
 // 結果對帳單匯入自己寫出來的列，使用者在編輯視窗選不到它的類別。
@@ -1091,6 +1098,7 @@ async function _loadCashOptions() {
     try {
         const o = await _fetch('/cash-entries/options?entity=' + _pinEntity());
         if (o.project_link_categories?.length) _LINKABLE = o.project_link_categories;
+        if (o.passthrough_categories) _PASSTHROUGH = o.passthrough_categories;
         if (o.categories?.length) _CATEGORIES = o.categories;
         if (o.tree) { _taxTree = o.tree; _taxById = _indexTaxShared(_taxTree); }
     } catch (_) { /* 用 fallback，不擋畫面 */ }
@@ -1748,6 +1756,17 @@ export async function initCrmCashbookTab() {
         _t = setTimeout(() => loadEntries({ cards: false }), 300);   // 搜尋不影響卡片餘額
     });
     // 篩選控件同理 —— 卡片餘額只跟 entity 有關
+    // 類別快篩（專案／發票代開／未分類）：跟六日一樣純前端；按鈕的 aria-pressed 就是狀態
+    document.getElementById('cash-filter-kind')?.addEventListener('click', (ev) => {
+        const b = ev.target.closest('button[data-kind]'); if (!b) return;
+        _kindOnly = b.dataset.kind === _kindOnly ? '' : b.dataset.kind;
+        for (const x of b.parentElement.querySelectorAll('button[data-kind]')) {
+            const on = x.dataset.kind === _kindOnly;
+            x.setAttribute('aria-pressed', String(on));
+            x.classList.toggle('crm-btn-primary', on); x.classList.toggle('crm-btn-secondary', !on);
+        }
+        renderList();
+    });
     const _offBtn = document.getElementById('cash-filter-off');
     if (_offBtn) {
         _offBtn.addEventListener('click', () => {
