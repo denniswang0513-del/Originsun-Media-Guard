@@ -918,7 +918,7 @@ function _rowHtml(e) {
                 pick: (e.deposit && !mine) ? `window._cashInvPick(event,'${e.id}')` : '',
                 hint: '連結發票（可搜尋、可多張）' })}
             ${/* 支出列＝可點連結；發票代開的收入列＝顯示那張代開應匯請款單（owner 2026-09-04「請款後標註哪一張」）*/ ''}
-            ${_linkCell(e.expense ? (e.payment_label || '') : (e.kai_payment_label ? `${e.kai_payment_label} $${_fmtNum(e.kai_payment_amount || 0)}（${e.kai_payment_status || ''}）` : ''), {
+            ${_linkCell(e.expense ? (e.payment_label || '') : (e.kai_payment_label ? `$${_fmtNum(e.kai_payment_amount || 0)} ${e.kai_payment_label}（${e.kai_payment_status || ''}）` : ''), {
                 cls: 'cash-c-payment',
                 pick: e.expense ? `window._cashPayPick(event,'${e.id}')` : '',
                 hint: '連結請款單（可搜尋、可多張）' })}
