@@ -17,6 +17,7 @@ from sqlalchemy import func as _sa_func
 from config import load_settings as _load_settings
 
 from core.ledger import hide_mine_projects, not_mine
+from core.ledger_project import parent_receipt_fields
 from core.schemas import (CrmProjectPayload, CrmProjectPatchPayload, ProjectTypeOpPayload,
                           ProjectLedgerMovePayload, ProjectMirrorPayload)
 
@@ -75,7 +76,37 @@ async def resolve_mine_link(session, p):
         .limit(1))).scalars().first()
 
 
-def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False) -> dict:
+async def linked_receipts_map(session, project_ids) -> dict:
+    """母公司案 → (Σ deposit, Σ bank_fee)：掛在本案的收入列（列自己 project_id、或列掛的發票是本案的）。
+    一次兩句 SQL，不逐案查。私帳案不走這裡（私帳是 _sync_mine_project_received 的增量制）。"""
+    ids = {i for i in project_ids if i}
+    if not ids:
+        return {}
+    inv_proj = dict((await session.execute(
+        select(CrmInvoice.id, CrmInvoice.project_id).where(CrmInvoice.project_id.in_(ids)))).all())
+    conds = [CrmCashEntry.project_id.in_(ids)]
+    if inv_proj:
+        conds.append(CrmCashEntry.invoice_id.in_(set(inv_proj)))
+    rows = (await session.execute(
+        select(CrmCashEntry.project_id, CrmCashEntry.invoice_id, CrmCashEntry.deposit, CrmCashEntry.bank_fee)
+        .where(CrmCashEntry.entity == "parent", CrmCashEntry.deposit > 0, or_(*conds)))).all()
+    out: dict = {}
+    for pid, iid, dep, fee in rows:
+        eff = pid if pid in ids else inv_proj.get(iid)
+        if not eff:
+            continue
+        r, f = out.get(eff, (0, 0))
+        out[eff] = (r + int(dep or 0), f + int(fee or 0))
+    return out
+
+
+def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False, receipts=None) -> dict:
+    # 母公司案有掛帳收入列 → 已收／匯費／應收／收款狀態一律推導（core.ledger_project.parent_receipt_fields），
+    # 沒有掛的老案維持手填欄位
+    received, fee = (receipts or {}).get(p.id, (0, 0))
+    derived = (p.entity or "parent") != "mine" and (received or fee)
+    if derived:
+        receivable, status = parent_receipt_fields(int(p.contract_amount or 0), received, fee)
     return {
         "id": p.id, "name": p.name,
         "client_id": p.client_id, "client_short_name": client_short_name,
@@ -101,10 +132,11 @@ def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False) -> 
         "contract_amount": p.contract_amount,
         "tax_rate": p.tax_rate, "profit_target_pct": p.profit_target_pct,
         "misc_budget_pct": p.misc_budget_pct,
-        "payment_status": p.payment_status or "未到帳",
-        "amount_receivable": p.amount_receivable,
-        "amount_received": p.amount_received,
-        "transfer_fee": p.transfer_fee,
+        "payment_status": status if derived else (p.payment_status or "未到帳"),
+        "amount_receivable": receivable if derived else p.amount_receivable,
+        "amount_received": received if derived else p.amount_received,
+        "transfer_fee": fee if derived else p.transfer_fee,
+        "receipts_linked": bool(derived),      # True＝上面四欄是掛帳收入推的，不是手填
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -229,6 +261,8 @@ async def list_projects(
             mirrored_ids = set((await session.execute(
                 select(CrmProject.source_project_id)
                 .where(CrmProject.source_project_id.isnot(None)))).scalars())
+        receipts = await linked_receipts_map(
+            session, [p.id for p, _c, _ps in rows if (p.entity or "parent") != "mine"])
 
     return {
         "projects": [
@@ -236,7 +270,7 @@ async def list_projects(
                 p, cname or "",
                 # 看不到私帳的人：mirrored_ids 是空的，`mine_link_id` 這半邊也
                 # 要一起關掉，否則標籤照樣洩漏「owner 私帳有這一案」。
-                show_mine and is_mirrored(p, mirrored_ids)),
+                show_mine and is_mirrored(p, mirrored_ids), receipts),
              "proposal_status": ps or ""}
             for p, cname, ps in rows
         ],
@@ -616,7 +650,8 @@ async def project_wire(session, project) -> dict:
     ——刻意的，它們的回應在 session 外組（剛建的案子也還沒有提案可查）。
     """
     client = await session.get(Client, project.client_id) if project.client_id else None
-    return {**_to_project_dict(project, client.short_name if client else ""),
+    receipts = await linked_receipts_map(session, [project.id]) if (project.entity or "parent") != "mine" else {}
+    return {**_to_project_dict(project, client.short_name if client else "", receipts=receipts),
             "proposal_status": await _latest_proposal_status(session, project.id)}
 
 

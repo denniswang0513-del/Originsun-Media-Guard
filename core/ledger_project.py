@@ -459,3 +459,16 @@ def compute(contract: int, d: dict) -> tuple:
     net = (contract - d["outsource"] - d["invoice_fee"]
            - d["personal_tax"] - d["misc"] - d["shareholder"])
     return net, net - sum(d["split"].values())
+
+
+def parent_receipt_fields(contract: int, received: int, fee: int) -> tuple:
+    """母公司案（CRM）的 (應收, 收款狀態) —— 從**掛在本案的收入列**推導
+    （owner 2026-09-04「發票與收支連結好了的話，收到多少款＋匯費 等於合約金額的時候，這裡要改已到帳」）。
+
+    received＝Σ 掛在本案（列自己掛的、或掛在本案發票上的）收入列的 deposit（淨入帳），
+    fee＝Σ 那些列的 bank_fee（銀行扣走的匯費）。客戶匯的是 deposit＋fee，所以拿毛額比合約：
+    到齊＝全額到帳、有就部分到帳、沒有＝未到帳；應收＝合約 − 毛額（溢收為負，看得見）。
+    """
+    gross = int(received or 0) + int(fee or 0)
+    c = int(contract or 0)
+    return c - gross, receivable_status(c, gross)
