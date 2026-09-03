@@ -80,6 +80,7 @@ select:focus, input:focus { border-color: #3b82f6; }
 </div>
 
 <script>
+location.replace('/m/crm.html#invoice'); // 取代於 2026-09-03，殼與字彙改由 m/ 提供（docs/CRM_MOBILE_PLAN.md）
 const BASE = location.origin + '/api/v1/crm';
 let _token = localStorage.getItem('auth_token') || '';
 const _e = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

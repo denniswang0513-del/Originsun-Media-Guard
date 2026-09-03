@@ -1,0 +1,13 @@
+{
+  "name": "Originsun CRM",
+  "short_name": "CRM",
+  "start_url": "/m/crm.html",
+  "scope": "/m/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#1a1a1a",
+  "icons": [
+    { "src": "/m/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/m/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

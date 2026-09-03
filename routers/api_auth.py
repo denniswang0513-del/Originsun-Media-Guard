@@ -384,6 +384,41 @@ async def login(req: LoginRequest):
     }
 
 
+@router.post("/refresh")
+async def refresh_token(request: Request):
+    """拿一顆**還沒過期**的登入 token 換一顆新的（預設效期同登入：7 天）。
+
+    給手機版殼（frontend/m/shell.js）用：加到主畫面的頁面沒人會重新登入，
+    token 到期就是「按鈕突然沒反應」。權限**從 DB 重讀**、不是把舊 payload
+    重簽 —— 這段期間被拔掉的模組要在下一次續期就消失。
+
+    只認登入 token：API key 走 `_extract_token` 也拿得到 payload，但那把鑰匙
+    有自己的效期與撤銷機制，不能拿來鑄一顆 7 天的 JWT（等於繞過 is_active）。
+    帳號已不存在 → 401（本系統沒有「停用」欄，刪帳號就是停用）。
+    """
+    payload = _extract_token(request)
+    if not payload or payload.get('auth_method') == 'api_key':
+        raise HTTPException(status_code=401, detail="未登入或 token 已過期")
+    user = await _find_user_by('username', payload.get('sub') or '')
+    if not user:
+        raise HTTPException(status_code=401, detail="帳號不存在或已停用")
+
+    role_name = _get_user_role_name(user)
+    access_level = user.get('access_level', 0)
+    modules = user.get('modules', [])
+    token = create_token({
+        'sub': user['username'], 'role_name': role_name,
+        'access_level': access_level, 'modules': modules,
+    })
+    return {
+        'token': token,
+        'username': user['username'],
+        'role_name': role_name,
+        'access_level': access_level,
+        'modules': modules,
+    }
+
+
 @router.get("/register/config")
 async def register_config():
     """註冊頁題目設定（公開）— 只回選項不回答案，正解比對在 /register 伺服端。"""

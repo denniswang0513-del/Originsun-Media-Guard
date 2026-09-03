@@ -379,3 +379,18 @@ def split_gross(amount, fee=0) -> int:
     —— 而那正是這一輪在追的那種差額。順帶白拿它的 `fee < 0` 守衛。
     """
     return recognize_receipt_fee(amount, 0, fee)[0]
+
+
+def prepend_note(notes, line) -> str:
+    """把一行新備註**前插**到專案 notes（手機版「加一則備註」）。
+
+    最新的在最上面：手機上打開專案是要看「最近發生什麼」，追加在尾端的話得先
+    捲過整段歷史。舊內容原樣保留、以空一行隔開；行本身的樣子（時間、誰、內容）
+    由呼叫端組，這裡只管「怎麼接」——規則只有這一份，桌機哪天也要「加一則」
+    就直接呼叫，不會長出第二種接法。
+    """
+    line = (line or "").strip()
+    old = (notes or "").strip()
+    if not line:
+        return old
+    return f"{line}\n\n{old}" if old else line

@@ -761,6 +761,26 @@ async def delete_project(project_id: str, request: Request):
     return {"status": "ok"}
 
 
+async def apply_project_status(session, project, new_status: str,
+                               outcome_reason: str | None = None) -> None:
+    """改專案階段的**單一正本**（不 commit，caller 統一）：寫 status →
+    結案副作用 → 衛星提案 win/loss → updated_at → 客戶分級重算。
+
+    桌機 PATCH /projects/{id}/status 與手機版「簽回報價順便啟動專案」
+    （routers/api_crm_mobile.py）都走這裡。拆出來的理由跟
+    `_apply_status_side_effects` 當初一樣：兩條路徑各抄一份，第二條就會漏掉
+    其中一個副作用（例如只改了 status 沒標成案，成案率就此虛低）。
+    未成案缺原因時由 `_sync_linked_proposals` 丟 422，整筆變更一起擋下。
+    """
+    old_status = project.status or ""
+    project.status = new_status
+    _apply_status_side_effects(project, old_status)
+    await _sync_linked_proposals(session, project, old_status, outcome_reason)
+    project.updated_at = _now()
+    # 狀態變動可能跨越『有效專案』門檻（如 洽詢→製作）→ 重算客戶分級
+    await _auto_update_client_status(session, project.client_id)
+
+
 @router.patch("/projects/{project_id}/status")
 async def update_project_status(project_id: str, request: Request):
     _check_status_auth(request)          # 政策：core.project_flow.ADVANCE_MODULES
@@ -779,18 +799,12 @@ async def update_project_status(project_id: str, request: Request):
         project = await session.get(CrmProject, project_id)
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
-        old_status = project.status or ""
-        project.status = new_status
-        _apply_status_side_effects(project, old_status)
-        await _sync_linked_proposals(session, project, old_status,
-                                     body.get("outcome_reason"))
+        await apply_project_status(session, project, new_status,
+                                   body.get("outcome_reason"))
         if contract_amount is not None:
             project.contract_amount = int(contract_amount)
         if amount_receivable is not None:
             project.amount_receivable = int(amount_receivable)
-        project.updated_at = _now()
-        # 狀態變動可能跨越『有效專案』門檻（如 洽詢→製作）→ 重算客戶分級
-        await _auto_update_client_status(session, project.client_id)
         await session.commit()
         await session.refresh(project)
         client = await session.get(Client, project.client_id)

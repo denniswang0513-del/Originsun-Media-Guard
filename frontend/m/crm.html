@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#1a1a1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CRM">
+<link rel="manifest" href="/m/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/m/icon-180.png">
+<link rel="icon" href="/m/icon-192.png">
+<title>Originsun CRM</title>
+<!-- CRM 手機版（docs/CRM_MOBILE_PLAN.md）：現場輸入＋快看，跟桌機版分開。
+     五個分頁（專案／發票／報價／付款／新增），hash 路由；殼只有 ./shell.js 一份。
+     閘門：管理員（Lv3）或擁有「crm_projects」模組；寫入鈕再看 /options 的 me.can_write。
+     字彙（階段／案型／狀態／款項／發票種類）全部來自 GET /api/v1/crm/m/options，
+     這裡一個都不寫死 —— /invoice.html 寫死 payment_status 的下場見計畫 §7。
+     只掛 master / foundry（NAS 對外容器沒有 CRM 後端）；不進 core/public_assets。 -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root { --bg:#1a1a1a; --card:#2a2a2a; --line:#3a3a3a; --ink:#e0e0e0; --sub:#9ca3af;
+          --pri:#3b82f6; --ok:#86efac; --warn:#fbbf24; --bad:#fca5a5; --field:#1e1e1e;
+          --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px); }
+  * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  html, body { background:var(--bg); color:var(--ink); min-height:100vh;
+    font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif; font-size:15px; }
+  input[type=date], input[type=month] { color-scheme:dark; }
+  button { font-family:inherit; }
+  a { color:var(--pri); text-decoration:none; }
+  [hidden] { display:none !important; }
+
+  /* ── 登入／無權限 ── */
+  #m-auth { padding:calc(24px + var(--sat)) 16px 24px; max-width:420px; margin:0 auto; }
+  .m-login { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px 18px; }
+  .m-login-brand { text-align:center; font-size:20px; font-weight:700; color:#fff; margin-bottom:18px; }
+  .m-login-brand span { color:var(--pri); }
+  #m-gsi { display:flex; justify-content:center; }
+  .m-login-div { display:flex; align-items:center; gap:10px; color:var(--sub); font-size:12px; margin:14px 0; }
+  .m-login-div::before, .m-login-div::after { content:""; flex:1; height:1px; background:var(--line); }
+  .m-login label, .m-form label { display:block; font-size:12px; color:var(--sub); margin-bottom:4px; font-weight:600; }
+  .m-login input, .m-form input, .m-form select, .m-form textarea, .m-search {
+    width:100%; background:var(--field); border:1px solid var(--line); border-radius:8px; color:var(--ink);
+    padding:11px 12px; font-size:16px; margin-bottom:12px; outline:none; min-height:44px; font-family:inherit; }
+  .m-form textarea { min-height:70px; resize:vertical; }
+  .m-login input:focus, .m-form :is(input,select,textarea):focus, .m-search:focus { border-color:var(--pri); }
+  .m-login-err { background:#3b1f1f; border:1px solid #7f1d1d; border-radius:8px; padding:10px; color:var(--bad);
+    font-size:13px; margin-top:10px; line-height:1.5; }
+  .m-btn-primary { width:100%; min-height:46px; background:var(--pri); color:#fff; border:0; border-radius:10px;
+    font-size:16px; font-weight:700; cursor:pointer; }
+  .m-btn-primary:disabled { opacity:.5; }
+  .m-btn-primary:active { background:#2563eb; }
+
+  /* ── App 殼 ── */
+  #m-app { display:flex; flex-direction:column; min-height:100vh; }
+  .m-hdr { position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between;
+    padding:calc(10px + var(--sat)) 16px 10px; background:rgba(26,26,26,.94); backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line); }
+  .m-hdr .brand { font-weight:700; color:#fff; }
+  .m-hdr .brand span { color:var(--pri); }
+  .m-hdr .who { font-size:12px; color:var(--sub); }
+  #m-view { flex:1; padding:12px 12px calc(76px + var(--sab)); max-width:560px; width:100%; margin:0 auto; }
+  .m-tabbar { position:fixed; left:0; right:0; bottom:0; z-index:30; display:flex; background:#202020;
+    border-top:1px solid var(--line); padding-bottom:var(--sab); }
+  .m-tabbar button { flex:1; min-height:56px; background:none; border:0; color:var(--sub); font-size:12px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; cursor:pointer; }
+  .m-tabbar button .ico { width:22px; height:22px; border-radius:6px; border:2px solid currentColor; opacity:.7; }
+  .m-tabbar button.on { color:var(--pri); }
+  .m-tabbar button.on .ico { opacity:1; background:rgba(59,130,246,.18); }
+
+  /* ── 內容元件 ── */
+  .m-card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
+  .m-card.tap { cursor:pointer; }
+  .m-card.tap:active { border-color:var(--pri); }
+  .m-card .t { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .m-card .name { font-weight:600; color:#fff; line-height:1.35; }
+  .m-card .sub { color:var(--sub); font-size:12px; margin-top:4px; line-height:1.5; }
+  .m-card .row { display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:13px; }
+  .amt { font-variant-numeric:tabular-nums; font-weight:600; }
+  .amt.sub { font-weight:400; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:11px; border:1px solid var(--line);
+    color:var(--sub); white-space:nowrap; }
+  .pill.pri { color:var(--pri); border-color:var(--pri); }
+  .pill.ok { color:var(--ok); border-color:#166534; }
+  .pill.warn { color:var(--warn); border-color:#92400e; }
+  .m-strip { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+  .m-strip .k { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+  .m-strip .k .n { font-size:24px; font-weight:700; color:#fff; font-variant-numeric:tabular-nums; }
+  .m-strip .k .l { font-size:12px; color:var(--sub); }
+  .m-chips { display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; margin-bottom:6px; scrollbar-width:none; }
+  .m-chips::-webkit-scrollbar { display:none; }
+  .m-chips button { flex:none; min-height:36px; padding:0 14px; border-radius:999px; border:1px solid var(--line);
+    background:var(--card); color:var(--sub); font-size:13px; cursor:pointer; }
+  .m-chips button.on { background:rgba(59,130,246,.18); border-color:var(--pri); color:var(--pri); }
+  .m-h { font-size:12px; letter-spacing:.12em; color:var(--sub); font-weight:600; margin:16px 0 8px; text-transform:uppercase; }
+  .m-h:first-child { margin-top:2px; }
+  .m-empty { color:var(--sub); font-size:13px; text-align:center; padding:28px 0; }
+  .m-err { background:#3b1f1f; border:1px solid #7f1d1d; border-radius:10px; padding:12px; color:var(--bad);
+    font-size:13px; line-height:1.5; margin-bottom:10px; }
+  .m-sk { height:14px; border-radius:6px; background:linear-gradient(90deg,#2a2a2a,#353535,#2a2a2a);
+    background-size:200% 100%; animation:m-sk 1.2s infinite; margin:10px 0; }
+  .m-sk.w60 { width:60%; } .m-sk.w40 { width:40%; }
+  @keyframes m-sk { from { background-position:200% 0; } to { background-position:-200% 0; } }
+  .m-btn { min-height:44px; padding:0 14px; border-radius:10px; border:1px solid var(--line); background:var(--card);
+    color:var(--ink); font-size:14px; font-weight:600; cursor:pointer; }
+  .m-btn.pri { background:var(--pri); border-color:var(--pri); color:#fff; }
+  .m-btn.danger { color:var(--bad); border-color:#7f1d1d; }
+  .m-btn.sm { min-height:36px; font-size:13px; padding:0 12px; }
+  .m-btn:disabled { opacity:.5; }
+  .m-btn:active { filter:brightness(1.15); }
+  .m-btn.wide { width:100%; margin-top:6px; }
+  .m-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .m-actions .m-btn { flex:1 1 calc(50% - 4px); }
+  .m-more { width:100%; min-height:44px; background:none; border:1px dashed var(--line); border-radius:10px;
+    color:var(--sub); font-size:14px; cursor:pointer; margin:4px 0 12px; }
+  .m-form .row2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .m-form .req::after { content:" *"; color:var(--bad); }
+  details.m-fold summary { list-style:none; cursor:pointer; min-height:44px; display:flex; align-items:center;
+    justify-content:space-between; color:var(--sub); font-size:13px; font-weight:600; }
+  details.m-fold summary::-webkit-details-marker { display:none; }
+  details.m-fold summary::after { content:"+"; font-size:18px; }
+  details.m-fold[open] summary::after { content:"–"; }
+  body.no-write .w { display:none !important; }
+
+  /* ── 底部抽屜 ── */
+  #m-sheet { position:fixed; inset:0; z-index:40; }
+  #m-sheet .bd { position:absolute; inset:0; background:rgba(0,0,0,.55); }
+  #m-sheet .pn { position:absolute; left:0; right:0; bottom:0; max-height:92vh; overflow-y:auto; background:#222;
+    border-radius:16px 16px 0 0; border-top:1px solid var(--line); padding:8px 14px calc(20px + var(--sab));
+    animation:m-up .18s ease-out; -webkit-overflow-scrolling:touch; }
+  @keyframes m-up { from { transform:translateY(40px); opacity:.6; } to { transform:none; opacity:1; } }
+  #m-sheet .grip { width:40px; height:4px; border-radius:2px; background:var(--line); margin:4px auto 12px; }
+  #m-sheet .ttl { font-size:17px; font-weight:700; color:#fff; line-height:1.35; margin-bottom:4px; }
+  .kv { display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px solid #2e2e2e; font-size:14px; }
+  .kv .k { color:var(--sub); flex:none; }
+  .kv .v { text-align:right; word-break:break-word; }
+  .burn { height:8px; background:#333; border-radius:4px; overflow:hidden; margin:6px 0 2px; }
+  .burn i { display:block; height:100%; background:var(--pri); }
+  .burn i.over { background:#c9372c; }
+  .li { padding:8px 0; border-bottom:1px solid #2e2e2e; font-size:13px; display:flex; justify-content:space-between; gap:8px; }
+  .li .l { color:var(--ink); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .li .r { flex:none; color:var(--sub); }
+  .notes { white-space:pre-wrap; font-size:13px; color:var(--ink); line-height:1.6; background:var(--field);
+    border:1px solid var(--line); border-radius:8px; padding:10px; max-height:220px; overflow:auto; }
+
+  /* ── 零用金宿主：petty-view.js 自帶的 <style> 吃白底主題的變數名，這裡給深色值 ── */
+  #petty { --ink:#e0e0e0; --sub:#9ca3af; --line:#3a3a3a; --red:#e35b4f; --ok:#6fc08c; --warn:#d9a83a;
+    --bg-soft:#222; --primary:#3b82f6; color:var(--ink); }
+  #petty .pc-btn { background:var(--primary); color:#fff; min-height:44px; border-radius:8px; }
+  #petty .pc-btn.ghost, #petty .pc-btn.danger { background:none; }
+  #petty .pc-form input, #petty .pc-form select, #petty .pc-form textarea,
+  #petty input, #petty select, #petty textarea { background:var(--field); color:var(--ink);
+    border:1px solid var(--line); border-radius:8px; min-height:44px; font-size:16px; }
+  #petty .pc-sum, #petty .pc-form { border-radius:12px; background:var(--card); }
+
+  /* ── toast ── */
+  #m-toast { position:fixed; left:12px; right:12px; bottom:calc(84px + var(--sab)); z-index:60; padding:12px 14px;
+    border-radius:10px; font-size:14px; text-align:center; opacity:0; transform:translateY(8px);
+    transition:.18s; pointer-events:none; line-height:1.5; }
+  #m-toast.show { opacity:1; transform:none; }
+  #m-toast.ok { background:#14532d; border:1px solid #166534; color:var(--ok); }
+  #m-toast.err { background:#3b1f1f; border:1px solid #7f1d1d; color:var(--bad); }
+</style>
+</head>
+<body>
+<div id="m-auth" hidden></div>
+
+<div id="m-app" hidden>
+  <header class="m-hdr">
+    <div class="brand"><span>Originsun</span> CRM</div>
+    <div class="who" id="m-who"></div>
+  </header>
+  <main id="m-view"></main>
+  <nav class="m-tabbar" id="m-tabbar">
+    <button type="button" data-tab="invoice"><i class="ico"></i>發票</button>
+    <button type="button" data-tab="petty"><i class="ico"></i>零用金</button>
+    <button type="button" data-tab="projects"><i class="ico"></i>專案</button>
+    <button type="button" data-tab="quotes"><i class="ico"></i>報價</button>
+    <button type="button" data-tab="payments"><i class="ico"></i>付款</button>
+  </nav>
+</div>
+
+<div id="m-sheet" hidden>
+  <div class="bd"></div>
+  <div class="pn"><div class="grip"></div><div id="m-sheet-body"></div></div>
+</div>
+
+<script type="module" src="./crm.js"></script>
+</body>
+</html>
