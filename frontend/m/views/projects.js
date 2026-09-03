@@ -4,7 +4,7 @@
  * 階段／案型／客戶字彙全部來自 options；金額鍵不在＝被抹掉→不畫。
  */
 import { mfetch, toast, esc, money, fmtDate } from '../shell.js';
-import { state, list, lostPhase, opt, selectOpts, skeleton, emptyBox, errBox, pill, statusPill,
+import { state, list, lostPhase, opt, selectOpts, pickerHtml, mountPicker, skeleton, emptyBox, errBox, pill, statusPill,
          moneyCell, withBusy, openSheet, closeSheet, switchTab, markStale, shouldLoad } from '../ui.js';
 
 const PAGE = 30;
@@ -184,13 +184,14 @@ function openNewProject() {
       <div class="ttl">新案子</div>
       <form class="m-form" id="np-form" style="margin-top:8px">
         <label class="req">名稱</label><input id="np-name" required>
-        <label class="req">客戶</label><select id="np-client" required>${selectOpts(clients, '', '選擇客戶')}</select>
+        <label class="req">客戶</label>${pickerHtml('np-client')}
         <div class="row2">
           <div><label>案型</label><select id="np-type">${selectOpts(list('project_types'), '', '未定')}</select></div>
           <div><label>階段</label><select id="np-status">${selectOpts(phases, def, null)}</select></div>
         </div>
         <button type="submit" class="m-btn-primary" id="np-go">建立</button>
       </form>`);
+    mountPicker('np-client', { items: clients, placeholder: '打字找客戶' });
     body.querySelector('#np-form').addEventListener('submit', (ev) => {
         ev.preventDefault();
         withBusy(body.querySelector('#np-go'), async () => {

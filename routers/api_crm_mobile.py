@@ -78,6 +78,7 @@ def _slim_project(p, client_short_name: str) -> dict:
     """卡片用的瘦欄位；兩個金額鍵都在 MONEY_FIELDS 名單裡，抹除自動生效。"""
     return {
         "id": p.id, "name": p.name,
+        "client_id": p.client_id or "",
         "client_short_name": client_short_name or "",
         "status": p.status or "洽詢",
         "project_type": p.project_type or "",
@@ -122,7 +123,7 @@ async def mobile_options(request: Request):
     payload = check_logged_in(request)
     async with _crm_session() as session:
         clients = (await session.execute(
-            select(Client.id, Client.short_name)
+            select(Client.id, Client.short_name, Client.full_name, Client.tax_id)
             .where(not_mine(Client.entity))          # 同桌機 list_clients 預設：私帳那筆不混進來
             .order_by(Client.short_name))).all()
         # 最近常用的品項：手機上打字最貴，前 20 個當選單，其餘照樣可以手打
@@ -136,7 +137,9 @@ async def mobile_options(request: Request):
         "phases": [*PIPELINE, LOST],
         "lost_phase": LOST,                       # 前端據此在推階段前就先要「未成案原因」
         "project_types": project_type_vocab(),
-        "clients": [{"id": cid, "short_name": name or ""} for cid, name in clients],
+        # full_name／tax_id 給發票表單：選了專案就把抬頭、統編帶進來（owner：表單要「選就好」）
+        "clients": [{"id": cid, "short_name": name or "", "full_name": full or "", "tax_id": tid or ""}
+                    for cid, name, full, tid in clients],
         "quote_statuses": list(QUOTE_STATUSES),
         "payment_statuses": list(PAYMENT_STATUSES),
         "invoice": {

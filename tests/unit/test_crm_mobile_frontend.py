@@ -96,6 +96,19 @@ def test_invoice_form_lets_the_server_decide_status():
     assert "initial_invoice_status(pt, unpaid=True)" in api      # 選項由規則算，不是另一份手抄
 
 
+def test_long_lists_are_typeable_pickers():
+    """owner 2026-09-03「所有的搜尋都要可以打字搜尋」：專案（發票）與客戶（新案子）這兩個上百筆的清單
+    走 ui.mountPicker（hidden input＋搜尋框＋結果列），不是原生 <select>。"""
+    ui = js_code_only(repo_src("frontend/m/ui.js"))
+    assert "export function mountPicker(" in ui and "onpointerdown" in ui     # blur 先於 click，選取要用 pointerdown
+    inv = js_code_only(repo_src("frontend/m/views/invoice.js"))
+    assert "pickerHtml('inv-project_id')" in inv and "mountPicker('inv-project_id'" in inv
+    assert '<select id="inv-project_id"' not in inv
+    pj = js_code_only(repo_src("frontend/m/views/projects.js"))
+    assert "pickerHtml('np-client')" in pj and "mountPicker('np-client'" in pj
+    assert '<select id="np-client"' not in pj
+
+
 def test_options_is_fetched_once_at_boot():
     assert "/api/v1/crm/m/options" in CRM_JS
     for p in _page_modules():

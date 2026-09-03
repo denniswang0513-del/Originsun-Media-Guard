@@ -45,6 +45,64 @@ export const list = (k) => (Array.isArray(opt()[k]) ? opt()[k] : []);
 export const paidStatus = () => { const l = list('payment_statuses'); return l.length ? l[l.length - 1] : ''; };
 export const lostPhase = () => opt().lost_phase || '';
 
+// 打字就過濾的選擇器（owner 2026-09-03「所有的搜尋都要可以打字搜尋」）：手機上原生 <select> 不能打字，
+// 清單一長（138 個客戶、上百個案子）就找不到。結構＝hidden input（id＝欄位名，既有程式照讀 .value）
+// ＋搜尋框（id-q）＋結果列（id-list，最多 40 筆）。用 pointerdown 選，因為 blur 會先於 click 把結果列收掉。
+export const pickerHtml = (id) =>
+    `<input type="hidden" id="${id}"><input type="search" id="${id}-q" autocomplete="off" autocorrect="off">` +
+    `<div class="m-pick" id="${id}-list" hidden></div>`;
+
+// 分段按鈕：兩三個選項的欄位（電子／紙本、收款／付款、已收／未收）用按鈕比 <select> 好按；
+// 值放 hidden input（id＝欄位名），既有程式照讀 .value
+export const segHtml = (id, values, selected) =>
+    `<input type="hidden" id="${id}" value="${esc(selected ?? values[0] ?? '')}"><div class="m-seg" id="${id}-seg">` +
+    values.map(v => `<button type="button" data-v="${esc(v)}" class="${v === (selected ?? values[0]) ? 'on' : ''}">${esc(v)}</button>`).join('') + `</div>`;
+
+export function mountSeg(id, onChange) {
+    const hidden = document.getElementById(id), seg = document.getElementById(id + '-seg');
+    if (!hidden || !seg) return;
+    seg.onclick = (ev) => {
+        const b = ev.target.closest('button[data-v]'); if (!b) return;
+        hidden.value = b.dataset.v;
+        seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+        if (onChange) onChange(hidden.value);
+    };
+}
+
+export function setSeg(id, values, selected) {
+    const seg = document.getElementById(id + '-seg'), hidden = document.getElementById(id);
+    if (!seg || !hidden) return;
+    const v = values.includes(selected) ? selected : values[0] || '';
+    hidden.value = v;
+    seg.innerHTML = values.map(x => `<button type="button" data-v="${esc(x)}" class="${x === v ? 'on' : ''}">${esc(x)}</button>`).join('');
+}
+
+// free：沒選到清單項目時保留打的字當值（品項這種「有建議但可以自己打」的欄位）
+export function mountPicker(id, { items = [], placeholder = '', value = '', free = false, onPick = null } = {}) {
+    const hidden = document.getElementById(id), q = document.getElementById(id + '-q'), box = document.getElementById(id + '-list');
+    if (!hidden || !q || !box) return;
+    const label = (v) => (items.find(i => String(i.value) === String(v)) || {}).label || (free ? String(v || '') : '');
+    const set = (v) => { hidden.value = label(v) ? String(v) : ''; q.value = label(v); box.hidden = true; if (onPick) onPick(hidden.value); };
+    const draw = () => {
+        const s = q.value.trim().toLowerCase();
+        const hits = items.filter(i => !s || i.label.toLowerCase().includes(s)).slice(0, 40);
+        box.innerHTML = hits.map(i => `<div class="m-pick-row" data-v="${esc(i.value)}">${esc(i.label)}</div>`).join('')
+            || '<div class="m-pick-none">沒有符合的</div>';
+        box.hidden = false;
+    };
+    hidden._items = items; hidden._set = set;          // applyPreset／表單重置用
+    q.placeholder = placeholder;
+    q.oninput = draw; q.onfocus = draw;
+    // 收起結果列；打了字卻沒選 → 退回已選的那個（或清空），不留下「看起來選了其實沒選」
+    q.onblur = () => setTimeout(() => {
+        box.hidden = true;
+        if (free) { hidden.value = q.value.trim(); if (onPick) onPick(hidden.value); }
+        else q.value = label(hidden.value);
+    }, 150);
+    box.onpointerdown = (ev) => { const r = ev.target.closest('.m-pick-row'); if (r) { ev.preventDefault(); set(r.dataset.v); } };
+    set(value);
+}
+
 export function selectOpts(values, selected = '', blank = '') {
     const head = blank !== null && blank !== undefined && blank !== false
         ? `<option value="">${esc(blank)}</option>` : '';

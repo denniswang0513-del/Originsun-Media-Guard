@@ -45,6 +45,17 @@
     width:100%; background:var(--field); border:1px solid var(--line); border-radius:8px; color:var(--ink);
     padding:11px 12px; font-size:16px; margin-bottom:12px; outline:none; min-height:44px; font-family:inherit; }
   .m-form textarea { min-height:70px; resize:vertical; }
+  .m-seg { display:flex; gap:6px; margin-bottom:12px; }
+  .m-seg button { flex:1; min-height:44px; background:var(--field); border:1px solid var(--line); border-radius:8px; color:var(--sub); font-size:14px; }
+  .m-seg button.on { background:var(--pri); border-color:var(--pri); color:#fff; font-weight:600; }
+  details.m-more { margin:4px 0 12px; } details.m-more summary { color:var(--sub); font-size:13px; padding:8px 0; cursor:pointer; list-style:none; }
+  details.m-more summary::before { content:"＋ "; } details.m-more[open] summary::before { content:"－ "; }
+  .m-hint { color:var(--sub); font-size:12px; margin:-6px 0 12px; }
+  .m-pick { border:1px solid var(--line); border-radius:8px; background:var(--card); max-height:230px; overflow:auto; margin:-6px 0 12px; }
+  .m-pick-row { padding:11px 12px; border-bottom:1px solid var(--line); font-size:14px; }
+  .m-pick-row:last-child { border-bottom:0; }
+  .m-pick-row:active { background:var(--field); }
+  .m-pick-none { padding:11px 12px; color:var(--sub); font-size:13px; }
   .m-login input:focus, .m-form :is(input,select,textarea):focus, .m-search:focus { border-color:var(--pri); }
   .m-login-err { background:#3b1f1f; border:1px solid #7f1d1d; border-radius:8px; padding:10px; color:var(--bad);
     font-size:13px; margin-top:10px; line-height:1.5; }

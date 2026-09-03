@@ -8,7 +8,7 @@
  */
 import { invoiceAmounts } from '/js/shared/invoice-amounts.js';
 import { mfetch, toast, esc, todayLocal, money, fmtDate } from '../shell.js';
-import { state, opt, selectOpts, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad } from '../ui.js';
+import { state, opt, selectOpts, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad, pickerHtml, mountPicker, segHtml, mountSeg, setSeg } from '../ui.js';
 
 const F = (id) => document.getElementById('inv-' + id);
 const VOLATILE = ['title', 'invoice_number', 'amount_ex_tax', 'amount_total', 'company_name', 'tax_id', 'item_type', 'notes'];
@@ -21,30 +21,29 @@ function formHtml() {
     return `
       <div class="m-h">登記發票</div>
       <form class="m-form m-card w" id="inv-form" autocomplete="off">
-        <label class="req">專案</label><select id="inv-project_id"><option value="">選擇專案（從專案分頁點「開發票」會自動帶入）</option></select>
-        <div class="row2">
-          <div><label>款項</label><select id="inv-payment_type">${selectOpts(inv.payment_types || [], (inv.payment_types || [])[0], null)}</select></div>
-          <div><label>款項狀態</label><select id="inv-payment_status"></select></div>
-        </div>
-        <label>發票種類</label><select id="inv-invoice_kind">${selectOpts(inv.kinds || [], (inv.kinds || [])[0], null)}</select>
-        <label class="req">名稱</label><input id="inv-title" placeholder="案件／項目名稱" required>
-        <div class="row2">
-          <div><label>發票編號</label><input id="inv-invoice_number" autocapitalize="characters"></div>
-          <div><label>日期</label><input id="inv-invoice_date" type="date" value="${todayLocal()}"></div>
-        </div>
-        <div class="row2">
-          <div><label>未稅</label><input id="inv-amount_ex_tax" type="number" inputmode="numeric" min="0"></div>
-          <div><label>含稅</label><input id="inv-amount_total" type="number" inputmode="numeric" min="0"></div>
-        </div>
+        <label class="req">專案</label>${pickerHtml('inv-project_id')}
+        <div class="m-hint" id="inv-client-hint">選了專案會自動帶客戶、抬頭、統編</div>
         <div class="row2">
           <div><label>抬頭</label><input id="inv-company_name"></div>
           <div><label>統編</label><input id="inv-tax_id" maxlength="8" inputmode="numeric" pattern="[0-9]*"></div>
         </div>
+        <label>品項</label>${pickerHtml('inv-item_type')}
+        <label>發票種類</label>${segHtml('inv-invoice_kind', inv.kinds || [])}
+        <label>款項</label>${segHtml('inv-payment_type', inv.payment_types || [])}
+        <label>款項狀態</label>${segHtml('inv-payment_status', [])}
         <div class="row2">
-          <div><label>類別</label><select id="inv-category">${selectOpts(inv.categories || [], (inv.categories || [])[0], null)}</select></div>
-          <div><label>品項</label><input id="inv-item_type" list="inv-item-list"><datalist id="inv-item-list">${(inv.item_types || []).map(t => `<option value="${esc(t)}">`).join('')}</datalist></div>
+          <div><label>未稅</label><input id="inv-amount_ex_tax" type="number" inputmode="numeric" min="0"></div>
+          <div><label>含稅</label><input id="inv-amount_total" type="number" inputmode="numeric" min="0"></div>
         </div>
-        <label>備註</label><input id="inv-notes">
+        <details class="m-more"><summary>更多欄位（名稱、發票編號、日期、類別、備註）</summary>
+          <label>名稱</label><input id="inv-title" placeholder="空白＝用案名">
+          <div class="row2">
+            <div><label>發票編號</label><input id="inv-invoice_number" autocapitalize="characters"></div>
+            <div><label>日期</label><input id="inv-invoice_date" type="date" value="${todayLocal()}"></div>
+          </div>
+          <label>類別</label><select id="inv-category">${selectOpts(inv.categories || [], (inv.categories || [])[0], null)}</select>
+          <label>備註</label><input id="inv-notes">
+        </details>
         <button type="submit" class="m-btn-primary" id="inv-submit">送出</button>
       </form>
       ${state.canWrite ? '' : '<div class="m-empty">此帳號沒有登記權限</div>'}
@@ -56,36 +55,51 @@ function formHtml() {
 function syncStatusOptions() {
     const by = (opt().invoice || {}).statuses_by_type || {};
     const list = by[F('payment_type').value] || [];
-    F('payment_status').innerHTML = selectOpts(list, list[0], null);
+    setSeg('inv-payment_status', list, list[0]);
+}
+
+// 選了專案：客戶、抬頭、統編從客戶檔帶進來，名稱空著就用案名（都可以再改）
+function applyProjectDefaults(pid) {
+    const p = (F('project_id')._rows || []).find(x => x.id === pid);
+    const hint = document.getElementById('inv-client-hint');
+    if (!p) { hint.textContent = '選了專案會自動帶客戶、抬頭、統編'; return; }
+    const c = (opt().clients || []).find(x => x.id === p.client_id) || {};
+    hint.textContent = '客戶：' + (c.short_name || p.client_short_name || '—');
+    if (c.full_name) F('company_name').value = c.full_name;
+    if (c.tax_id) F('tax_id').value = c.tax_id;
+    if (!F('title').value.trim()) F('title').value = p.name || '';
 }
 
 function wireAmounts() {
-    F('payment_type').addEventListener('change', syncStatusOptions);
+    mountSeg('inv-invoice_kind');
+    mountSeg('inv-payment_type', syncStatusOptions);
+    mountSeg('inv-payment_status');
     syncStatusOptions();
+    mountPicker('inv-item_type', { items: ((opt().invoice || {}).item_types || []).map(t => ({ value: t, label: t })),
+                                   placeholder: '打字找或自己打', free: true });
     const ex = F('amount_ex_tax'), tot = F('amount_total');
     ex.addEventListener('input', () => { tot.value = invoiceAmounts(ex.value, 'ex', vatPct()).amount_total ?? ''; });
     tot.addEventListener('input', () => { ex.value = invoiceAmounts(tot.value, 'total', vatPct()).amount_ex_tax ?? ''; });
 }
 
 async function loadProjects() {
-    const sel = F('project_id');
+    let items = [], placeholder = '打字找案名或客戶（不掛專案：不建議）';
     try {
         const d = await mfetch('/api/v1/crm/m/projects?limit=100&offset=0');
-        const rows = (d.projects || d.items || []).slice()
-            .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
-        sel.innerHTML = '<option value="">選擇專案（不掛專案：不建議）</option>' + rows.map(p =>
-            `<option value="${esc(p.id)}">${esc([p.client_short_name, p.name].filter(Boolean).join('｜'))}</option>`).join('');
+        F('project_id')._rows = d.projects || [];
+        items = (d.projects || []).map(p => ({ value: p.id, label: [p.client_short_name, p.name].filter(Boolean).join('｜') }));
     } catch (e) {
-        sel.innerHTML = `<option value="">專案清單載入失敗：${esc(e.message)}</option>`;
+        placeholder = '專案清單載入失敗：' + e.message;
     }
+    mountPicker('inv-project_id', { items, placeholder, value: F('project_id').value, onPick: applyProjectDefaults });
     applyPreset();
 }
 
 function applyPreset() {
     if (!state.invoicePreset) return;
-    const sel = F('project_id');
-    if (sel && [...sel.options].some(o => o.value === String(state.invoicePreset))) {
-        sel.value = String(state.invoicePreset);
+    const hidden = F('project_id');
+    if (hidden && hidden._set && (hidden._items || []).some(i => String(i.value) === String(state.invoicePreset))) {
+        hidden._set(String(state.invoicePreset));
         state.invoicePreset = null;
     }
 }
@@ -115,15 +129,16 @@ function payload() {
 async function submit(ev) {
     ev.preventDefault();
     const body = payload();
-    if (!body.title) { toast('請填寫名稱', 'err'); F('title').focus(); return; }
+    if (!body.title) { toast('請選專案，或在「更多欄位」填名稱', 'err'); F('project_id-q').focus(); return; }
     if (body.tax_id && !/^\d{8}$/.test(body.tax_id)) { toast('統編要 8 位數字', 'err'); F('tax_id').focus(); return; }
     // 發票要跟專案綁（owner 2026-09-03）：主路徑是專案抽屜的「開發票」；沒選就先問一句
-    if (!body.project_id && !window.confirm('這張發票不掛任何專案？（不建議——之後對帳要自己找）')) { F('project_id').focus(); return; }
+    if (!body.project_id && !window.confirm('這張發票不掛任何專案？（不建議——之後對帳要自己找）')) { F('project_id-q').focus(); return; }
     await withBusy(F('submit'), async () => {
         try {
             await mfetch('/api/v1/crm/invoices', { method: 'POST', body });
             toast('發票已登記');
             for (const k of VOLATILE) F(k).value = '';
+            F('item_type-q').value = '';
             F('invoice_date').value = todayLocal();
             window.scrollTo({ top: 0, behavior: 'smooth' });
             loadRecent();
