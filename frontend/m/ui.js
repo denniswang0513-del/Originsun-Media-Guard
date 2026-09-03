@@ -9,14 +9,17 @@ export const state = {
     options: null,        // /options 整包
     canWrite: false,
     invoicePreset: null,  // 從專案抽屜「開發票」帶過來的 project_id
+    expensePreset: null,  // 從專案抽屜「記雜支」帶過來的 project_id
 };
 
 export const TABS = ['invoice', 'petty', 'projects', 'quotes', 'payments'];
 export const DEFAULT_TAB = 'invoice';
+/** 有畫面但不在分頁列的路由（從別的畫面進、上一頁回去）：記雜支。 */
+export const ROUTES = [...TABS, 'expense'];
 
 export function currentTab() {
     const h = (location.hash || '').replace(/^#/, '').split('?')[0];
-    return TABS.includes(h) ? h : DEFAULT_TAB;
+    return ROUTES.includes(h) ? h : DEFAULT_TAB;
 }
 
 /** 換分頁＝改 hash（crm.js 聽 hashchange 畫）；已經在那一頁就什麼都不做。 */

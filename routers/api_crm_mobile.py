@@ -66,6 +66,9 @@ INVOICE_VOCAB = {
     "categories": ["專案", *INVOICE_PASSTHROUGH_CATEGORIES],   # 桌機發票本同一套三種
     "project_category": "專案",     # 只有這一種類別必須掛專案（代開的可以不掛）
 }
+# 雜支粗分類：桌機 frontend/tabs/crm/crm-projects-state.js 的 EXPENSE_CATEGORIES 同一份
+#（tests/unit/test_crm_mobile.py 釘兩邊一致）；手機記雜支的類別按鈕從這裡拿。
+EXPENSE_CATEGORIES = ("交通", "住宿", "飲食", "提案", "器材", "其他")
 ACTIVE_STATUS = "製作"
 # 「製作」之前的階段＝還在賣：簽回報價才有「啟動專案」這件事；
 # 已經在製作／結案的案子按了不動（不會把結案的案子拉回製作）。
@@ -162,6 +165,7 @@ async def mobile_options(request: Request):
             # 營業稅率：發票表單未稅／含稅互推用後端的那一份，不在瀏覽器再寫一個 5
             "vat_pct": VAT_PCT,
         },
+        "expense": {"categories": list(EXPENSE_CATEGORIES)},
         "me": {
             "username": payload.get("username") or payload.get("sub") or "",
             "access_level": payload.get("access_level", 0),

@@ -234,3 +234,13 @@ def test_refresh_rejects_anonymous_and_unknown_user(app_client, user_token):
     tok = user_token(sub="__nobody_crm_mobile__", username="__nobody_crm_mobile__")
     r = app_client.post("/api/v1/auth/refresh", headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 401
+
+
+def test_expense_categories_match_desktop():
+    """手機記雜支的類別字彙（/options.expense.categories）跟桌機 crm-projects-state.js 的 EXPENSE_CATEGORIES 同一份。"""
+    import re as _re
+    js = repo_src("frontend/tabs/crm/crm-projects-state.js")
+    m = _re.search(r"export const EXPENSE_CATEGORIES = \[(.*?)\]", js)
+    desktop = _re.findall(r"'([^']+)'", m.group(1))
+    from routers.api_crm_mobile import EXPENSE_CATEGORIES
+    assert list(EXPENSE_CATEGORIES) == desktop

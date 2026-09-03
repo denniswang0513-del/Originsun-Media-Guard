@@ -99,7 +99,7 @@ function detailHtml(d) {
       <div class="m-actions w">
         <button type="button" class="m-btn" data-act="phase">推階段</button>
         <button type="button" class="m-btn" data-act="note">加備註</button>
-        <a class="m-btn" style="display:flex;align-items:center;justify-content:center" href="/expense.html?project=${encodeURIComponent(p.id)}">記雜支</a>
+        <button type="button" class="m-btn" data-act="expense">記雜支</button>
         <button type="button" class="m-btn pri" data-act="invoice">開發票</button>
       </div>
       <div id="pj-act-box"></div>
@@ -170,6 +170,7 @@ export async function openProject(id) {
     body.innerHTML = detailHtml(d);
     body.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
         if (b.dataset.act === 'invoice') { state.invoicePreset = p.id; closeSheet(); switchTab('invoice'); return; }
+        if (b.dataset.act === 'expense') { state.expensePreset = p.id; closeSheet(); switchTab('expense'); return; }   // 頁內畫面，不開 /expense.html（主畫面模式會彈內建瀏覽器）
         actionBox(b.dataset.act, p);
     }));
 }

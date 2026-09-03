@@ -3,18 +3,20 @@
  *
  * 閘門：管理員（access_level ≥ 3）或模組 crm_projects；殼由 ./shell.js 提供。
  * 開頁：boot → GET /api/v1/crm/m/options 一次（所有字彙）→ 依 hash 畫分頁。
- * 分頁：#invoice（預設）／#petty／#projects／#quotes／#payments，畫面在 views/。
+ * 分頁：#invoice（預設）／#petty／#projects／#quotes／#payments，畫面在 views/；#expense（記雜支）有畫面但不在分頁列。
  */
 import { boot, mfetch, toast, esc } from './shell.js';
-import { state, TABS, DEFAULT_TAB, currentTab, initSheet, closeSheet, errBox } from './ui.js';
+import { state, DEFAULT_TAB, currentTab, initSheet, closeSheet, errBox } from './ui.js';
 import * as invoiceView from './views/invoice.js';
 import * as pettyView from './views/petty.js';
 import * as projectsView from './views/projects.js';
 import * as quotesView from './views/quotes.js';
 import * as paymentsView from './views/payments.js';
+import * as expenseView from './views/expense.js';
 
 const VIEWS = { invoice: invoiceView, petty: pettyView, projects: projectsView,
-                quotes: quotesView, payments: paymentsView };
+                quotes: quotesView, payments: paymentsView, expense: expenseView };
+const ROUTE_LABELS = { expense: '記雜支' };   // 分頁列上沒有的路由，頂欄名稱在這
 
 const gate = (me) => (me.access_level || 0) >= 3 || (me.modules || []).includes('crm_projects');
 
@@ -22,7 +24,7 @@ const hosts = {};
 let _depth = 0;      // 這次開頁後往前走了幾步（上一頁按到底就回首頁，不會退出這個 app）
 
 // 分頁名從底部 tabbar 的按鈕文字拿，不另外抄一份
-const tabLabel = (tab) => (document.querySelector(`#m-tabbar button[data-tab="${tab}"]`) || {}).textContent || '';
+const tabLabel = (tab) => (document.querySelector(`#m-tabbar button[data-tab="${tab}"]`) || {}).textContent || ROUTE_LABELS[tab] || '';
 
 function _host(tab) {
     if (!hosts[tab]) {
@@ -41,7 +43,7 @@ async function render() {
     document.getElementById('m-page').textContent = tabLabel(tab) + (state.me && state.me.username ? '｜' + state.me.username : '');
     for (const b of document.querySelectorAll('#m-tabbar button'))
         b.classList.toggle('on', b.dataset.tab === tab);
-    for (const t of TABS) if (hosts[t]) hosts[t].hidden = t !== tab;
+    for (const t in hosts) hosts[t].hidden = t !== tab;
     const host = _host(tab);
     host.hidden = false;
     closeSheet();

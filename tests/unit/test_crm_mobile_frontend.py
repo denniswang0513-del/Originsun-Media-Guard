@@ -231,3 +231,19 @@ def test_every_list_tab_has_load_more():
         assert ".slice(0, 10)" not in src, f"{name}.js 不准自己截 10 筆——剩下的要能載入更多"
     assert "offset: int = Query(0)" in repo_src("routers/crm/finance.py"), "list_invoices 要收 offset 才能載入更多"
     assert "載入更多" in repo_src("frontend/m/ui.js")
+
+
+def test_expense_is_an_in_app_route_not_a_popup():
+    """owner 2026-09-03「記雜支不要用彈出頁」：/expense.html 在 /m/ 範圍外，加到主畫面後 iOS 會用內建瀏覽器彈出。
+    手機版自己有 views/expense.js（路由 #expense，從專案抽屜進），專案抽屜不准再連 /expense.html。"""
+    pj = js_code_only(repo_src("frontend/m/views/projects.js"))
+    assert "/expense.html" not in pj and "data-act=\"expense\"" in pj
+    assert "switchTab('expense')" in pj
+    ui = repo_src("frontend/m/ui.js")
+    assert "export const ROUTES = [...TABS, 'expense']" in ui, "expense 是路由不是分頁（分頁列維持五個）"
+    exp = js_code_only(repo_src("frontend/m/views/expense.js"))
+    assert "pickerHtml('exp-project_id')" in exp and "renderPaged(" in exp
+    assert "opt().expense" in exp and "'交通'" not in exp, "類別從 options.expense.categories 拿，不寫死"
+    assert "/receipts/" in exp and "FormData" in exp
+    sh = repo_src("frontend/m/shell.js")
+    assert "instanceof FormData" in sh, "multipart 也走 mfetch（殼只有一份）"

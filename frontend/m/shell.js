@@ -79,11 +79,12 @@ export async function refreshTokenIfNeeded() {
 
 /** JSON 進 JSON 出；`opts.body` 傳物件。!ok 丟 Error(伺服器 detail)，`.status` 帶狀態碼。 */
 export async function mfetch(path, opts = {}) {
-    const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+    const isForm = typeof FormData !== 'undefined' && opts.body instanceof FormData;   // multipart（收據上傳）：讓瀏覽器自己定 boundary
+    const headers = Object.assign(isForm ? {} : { 'Content-Type': 'application/json' }, opts.headers || {});
     const tok = _token();
     if (tok) headers.Authorization = 'Bearer ' + tok;
     const r = await fetch(path, Object.assign({}, opts, {
-        headers, body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+        headers, body: isForm ? opts.body : (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
     }));
     if (r.status === 401) {
         localStorage.removeItem(TOKEN_KEY);

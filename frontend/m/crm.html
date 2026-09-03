@@ -81,7 +81,7 @@
   .m-hdr .nav { min-width:64px; min-height:40px; padding:0 10px; background:transparent; border:1px solid var(--line); border-radius:8px; color:var(--ink); font-size:14px; }
   .m-hdr .nav:active { border-color:var(--pri); color:var(--pri); }
   #m-view { flex:1; padding:calc(70px + var(--sat)) 12px calc(76px + var(--sab)); max-width:560px; width:100%; margin:0 auto; }   /* 上面留頂列（fixed 60px＋加到主畫面時的狀態列 safe-area）的高度 */
-  .m-tabbar { position:fixed; left:0; right:0; bottom:0; z-index:30; display:flex; background:#202020;
+  .m-tabbar { position:fixed; left:0; right:0; bottom:0; z-index:45; display:flex; background:#202020;   /* 高過抽屜(40)、低於頂列(50)：抽屜開著也能切分頁 */
     border-top:1px solid var(--line); padding-bottom:var(--sab); }
   .m-tabbar button { flex:1; min-height:56px; background:none; border:0; color:var(--sub); font-size:12px;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; cursor:pointer; }
@@ -135,6 +135,9 @@
     color:var(--sub); font-size:14px; cursor:pointer; margin:4px 0 12px; }
   .m-form .row2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   .m-form .req::after { content:" *"; color:var(--bad); }
+  .m-photo { display:flex; align-items:center; justify-content:center; min-height:96px; border:1px dashed var(--line); border-radius:10px; color:var(--sub); font-size:14px; margin-bottom:12px; overflow:hidden; }
+  .m-photo.has-img { border-style:solid; }
+  .m-photo img { max-width:100%; max-height:240px; display:block; }
   details.m-fold summary { list-style:none; cursor:pointer; min-height:44px; display:flex; align-items:center;
     justify-content:space-between; color:var(--sub); font-size:13px; font-weight:600; }
   details.m-fold summary::-webkit-details-marker { display:none; }
@@ -143,10 +146,10 @@
   body.no-write .w { display:none !important; }
 
   /* ── 底部抽屜 ── */
-  #m-sheet { position:fixed; inset:0; z-index:40; }
+  #m-sheet { position:fixed; inset:0 0 calc(57px + var(--sab)) 0; z-index:40; }   /* 底下留分頁列（56px＋1px 邊線＋safe-area），抽屜不蓋它 */
   #m-sheet .bd { position:absolute; inset:0; background:rgba(0,0,0,.55); }
-  #m-sheet .pn { position:absolute; left:0; right:0; bottom:0; max-height:92vh; overflow-y:auto; background:#222;
-    border-radius:16px 16px 0 0; border-top:1px solid var(--line); padding:8px 14px calc(20px + var(--sab));
+  #m-sheet .pn { position:absolute; left:0; right:0; bottom:0; max-height:calc(100% - 64px - var(--sat)); overflow-y:auto; background:#222;
+    border-radius:16px 16px 0 0; border-top:1px solid var(--line); padding:8px 14px 20px;
     animation:m-up .18s ease-out; -webkit-overflow-scrolling:touch; }
   @keyframes m-up { from { transform:translateY(40px); opacity:.6; } to { transform:none; opacity:1; } }
   #m-sheet .grip { width:40px; height:4px; border-radius:2px; background:var(--line); margin:4px auto 12px; }
