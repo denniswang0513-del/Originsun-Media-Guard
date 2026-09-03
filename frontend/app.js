@@ -21,6 +21,7 @@ import { initPasteImage } from './js/shared/paste-image.js';
 // window.appendLog / resetProgress / bearerHeader … 在開機就存在（socket handler 會用）
 import { tabLoadError, startVisiblePolling } from './js/shared/utils.js';
 import { _LOADING_HTML } from './js/shared/subview-loader.js';
+import { loadReportHistory } from './js/shared/report-history.js';
 import { updateProgress, showCompletionSummary, _showErrorPanelIfNeeded, _hideErrorPanel } from './js/app/progress.js';
 import './js/app/remote-dispatch.js';
 
@@ -66,8 +67,7 @@ import './js/app/remote-dispatch.js';
             _loadedTabs.add(sectionId);
             // 開機時套的權限（管理員限定元素）與機隊勾選面板都發生在這頁長出來之前 → 對新 DOM 補一次
             window._applyAuthState(window._accessLevel >= 3);
-            renderHostSelector();
-            renderStandaloneHostPanels();
+            _refreshHostPanels();
             return true;
         }
         window._ensureTabLoaded = _loadTab;
@@ -124,8 +124,7 @@ import './js/app/remote-dispatch.js';
                         name: a.name,
                         ip: (a.url || '').replace(/^https?:\/\//, '')
                     }));
-                    renderHostSelector();
-                    renderStandaloneHostPanels();
+                    _refreshHostPanels();
                 }).catch(() => {});
         });
 
@@ -163,9 +162,7 @@ import './js/app/remote-dispatch.js';
             });
 
             socket.on('log', (data) => {
-                if (typeof appendLog === 'function') {
-                    appendLog(data.msg, data.type);
-                }
+                appendLog(data.msg, data.type);
                 // 收集錯誤訊息到 _taskErrors（標記當前階段）
                 if (data.type === 'error' && data.msg) {
                     if (!window._taskErrors) window._taskErrors = [];
@@ -230,10 +227,10 @@ import './js/app/remote-dispatch.js';
                     // 本機補轉完成追蹤：遞減 pending 計數，到 0 時重新驗證
                     if (window._retryLocalPending && window._retryLocalPending > 0 && data.summary?.task_type === 'transcode') {
                         window._retryLocalPending--;
-                        if (typeof appendLog === 'function') appendLog(`[OK] 本機補轉完成，剩餘 ${window._retryLocalPending} 個`, 'system');
+                        appendLog(`[OK] 本機補轉完成，剩餘 ${window._retryLocalPending} 個`, 'system');
                         if (window._retryLocalPending <= 0) {
                             window._retryLocalPending = 0;
-                            if (typeof appendLog === 'function') appendLog('[>] 本機補轉全部完成，重新驗證...', 'system');
+                            appendLog('[>] 本機補轉全部完成，重新驗證...', 'system');
                             const _rlFlags = window._retryLocalFlags;
                             const _rlProxyRoot = window._retryProxyRoot;
                             const _rlProjName = window._retryProjName;
@@ -252,7 +249,7 @@ import './js/app/remote-dispatch.js';
 
                     // 分散式轉檔：備份 done 後立即派發，不顯示完成摘要
                     if (window._remoteDispatch) {
-                        if (typeof appendLog === 'function') appendLog('系統：備份完成，開始派發分散式轉檔...', 'system');
+                        appendLog('系統：備份完成，開始派發分散式轉檔...', 'system');
                         window.dispatchRemoteTranscode(window._remoteDispatch);
                         window._remoteDispatch = null;
                         return;
@@ -263,10 +260,10 @@ import './js/app/remote-dispatch.js';
                     if (mc && mc.total > 1 && data.summary?.task_type === 'concat') {
                         mc.done++;
                         if (mc.done < mc.total) {
-                            if (typeof appendLog === 'function') appendLog(`🎞️ 串帶 ${mc.done}/${mc.total} 張卡完成`, 'system');
+                            appendLog(`🎞️ 串帶 ${mc.done}/${mc.total} 張卡完成`, 'system');
                             return;
                         }
-                        if (typeof appendLog === 'function') appendLog(`✅ 串帶全部完成（${mc.total} 張卡）`, 'system');
+                        appendLog(`✅ 串帶全部完成（${mc.total} 張卡）`, 'system');
                         window._concatMultiCard = null;
                     }
 
@@ -291,7 +288,7 @@ import './js/app/remote-dispatch.js';
                         if (pl.pending.size > 0) return;
                     }
 
-                    if (typeof appendLog === 'function') appendLog('系統：所有排定任務執行完畢！', 'system');
+                    appendLog('系統：所有排定任務執行完畢！', 'system');
                     showCompletionSummary(data.summary, window._activeJobTab);
                     updateActionBarState('idle');
                     if (retryBtn) retryBtn.style.display = 'none';
@@ -299,7 +296,7 @@ import './js/app/remote-dispatch.js';
 
                 } else if (data.status === 'error') {
                     updateActionBarState('idle');
-                    if (typeof appendLog === 'function') appendLog('系統提示：任務執行發生錯誤：' + data.detail, 'error');
+                    appendLog('系統提示：任務執行發生錯誤：' + data.detail, 'error');
                     if (retryBtn && window._lastJob) retryBtn.style.display = 'inline-block';
                     // 顯示錯誤面板
                     _showErrorPanelIfNeeded();
@@ -307,7 +304,7 @@ import './js/app/remote-dispatch.js';
                 } else if (data.status === 'cancelled') {
                     updateActionBarState('idle');
                     if (typeof resetProgress === 'function') resetProgress();
-                    if (typeof appendLog === 'function') appendLog('❌ 任務已被中止', 'error');
+                    appendLog('❌ 任務已被中止', 'error');
                 }
             });
 
@@ -358,9 +355,7 @@ import './js/app/remote-dispatch.js';
                     bar.style.width = '100%';
                     bar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)';
                 }
-                if (typeof appendLog === 'function') {
-                    appendLog('✅ 逐字稿生成完畢！目的地：' + data.dest_dir, 'system');
-                }
+                appendLog('✅ 逐字稿生成完畢！目的地：' + data.dest_dir, 'system');
             });
 
             // Report progress updates (report tab + backup tab chained report)
@@ -477,8 +472,8 @@ import './js/app/remote-dispatch.js';
                 const retryBtn = document.getElementById('btn_retry');
                 if (retryBtn) retryBtn.style.display = 'none';
 
-                // Refresh the history dashboard on both tabs（report.js 點到報表／備份分頁才載）
-                window.loadReportHistory?.();
+                // Refresh the history dashboard on both tabs
+                loadReportHistory();
 
                 playDing();
 
@@ -534,7 +529,7 @@ import './js/app/remote-dispatch.js';
                 if (pctEl) pctEl.textContent = '100%';
                 if (barEl) barEl.style.width = '100%';
 
-                if (typeof appendLog === 'function') appendLog('系統：所有排定任務執行完畢！', 'system');
+                appendLog('系統：所有排定任務執行完畢！', 'system');
                 playDing();
 
                 // Open output folder directly
@@ -558,9 +553,7 @@ import './js/app/remote-dispatch.js';
             // Disabled — task completion sound removed per user request
         }
 
-        // 本機代理燈：立刻問一次，之後每 3 秒（分頁在背景不打）
-        pollLocalAgent();
-        startVisiblePolling(pollLocalAgent, 3000);
+        startVisiblePolling(pollLocalAgent, 3000);   // 本機代理燈：立刻問一次，之後每 3 秒（分頁在背景不打）
         // ---------------------------
 
         // Variables related to sources and setup were moved to backup.js
@@ -586,6 +579,9 @@ import './js/app/remote-dispatch.js';
 
         // ===== Multi-host: render host selector checkboxes =====
         window._computeHosts = [];
+
+        // 分頁長出來／機隊清單到手時：備份頁的多機面板＋各獨立分頁的勾選面板都補一次
+        function _refreshHostPanels() { renderHostSelector(); renderStandaloneHostPanels(); }
 
         function renderHostSelector() {
             const panel = document.getElementById('host_selector_panel');
@@ -819,9 +815,9 @@ import './js/app/remote-dispatch.js';
             if (!_section) return; // unknown/orphan tabId (e.g. a granted-but-pageless module) — no-op
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
             _section.classList.remove('hidden');
-            // 第一次切到這頁：現在才載（html + js + init）。fresh＝這次真的載進來了
-            if (!_loadedTabs.has(tabId) && !_section.children.length) _section.innerHTML = _LOADING_HTML;
-            const fresh = _loadedTabs.has(tabId) ? false : await _loadTab(tabId);
+            // 第一次切到這頁：現在才載（html + js + init）。fresh＝這次真的載進來了（載過的回 false）
+            if (!_section.children.length) _section.innerHTML = _LOADING_HTML;
+            const fresh = await _loadTab(tabId);
 
             // Sync grouped-nav chrome (top-bar highlight + left sidebar)
             _syncGroupChrome(tabId);
@@ -833,17 +829,6 @@ import './js/app/remote-dispatch.js';
             // 通知各分頁「你被切到了」。fresh＝這次切換才把它載進來，init 剛抓過資料，
             // 「切回來要重抓」的鉤子看到 fresh 就別再抓一次（提案庫、CRM 專案、財務）
             document.dispatchEvent(new CustomEvent('tab-changed', { detail: { tab: tabId, fresh } }));
-
-            // Auto-fill output directory when entering report tab
-            if (tabId === 'tab_report') {
-                // Default output directory = local_root (專案素材區)
-                const rptOut = document.getElementById('rpt_output');
-                const localRoot = document.getElementById('local_root');
-                if (rptOut && localRoot && !rptOut.value.trim() && localRoot.value.trim()) {
-                    rptOut.value = localRoot.value.trim();
-                }
-                if (window.loadReportHistory) window.loadReportHistory();
-            }
 
             // Reflect the active tab in the URL (shareable/bookmarkable). replaceState
             // fires no hashchange, so this can't loop with the hashchange listener.

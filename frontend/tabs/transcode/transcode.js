@@ -1,4 +1,4 @@
-import { getComputeBaseUrl, appendLog, pickPath, setupDragAndDrop, setupInputDrop, validateRemotePaths, toUncPath, ensureDriveMap } from '../../js/shared/utils.js';
+import { getComputeBaseUrl, appendLog, pickPath, setupDragAndDrop, setupInputDrop, validateRemotePaths, toUncPath, ensureDriveMap, todayStamp } from '../../js/shared/utils.js';
 
 let tcSourceIndex = 0;
 
@@ -29,11 +29,7 @@ export function addSourceRowTc(defaultName = '', defaultPath = '') {
 }
 
 export function setTodayNameTc() {
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    document.getElementById('tc_proj_name').value = `${yyyy}${mm}${dd}_Standalone`;
+    document.getElementById('tc_proj_name').value = todayStamp('_Standalone');
 }
 
 export function getTcSelectedHosts() {

@@ -61,6 +61,12 @@ from core.api_docs import docs_urls  # noqa: E402
 
 app = FastAPI(title="Originsun Media Guard Web API", **docs_urls())
 
+# 有驗證器（ETag／Last-Modified）的回應才值得 no-cache（瀏覽器帶條件式請求、304 不重傳本體）；
+# JSON／串流沒有驗證器，no-cache 只會退化成每次全抓 → 一律 no-store。這樣不必手列 API 前綴。
+# 例外（有驗證器仍 no-store）：OTA 安裝包（~1GB，不值得進磁碟快取）、/e/ 分享連結的財務文件（不留快取）。
+_NO_STORE_FILES = ("/download", "/e/")
+
+
 class NoCacheMiddleware:
     """Pure ASGI middleware — does NOT buffer streaming responses (unlike BaseHTTPMiddleware).
     This is critical for SSE endpoints like /drone_meta/scan_stream."""
@@ -97,16 +103,16 @@ class NoCacheMiddleware:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
                 if method == "GET":
-                    # API／socket 一律不存；靜態檔（分頁 html／js／css／圖）改 no-cache：瀏覽器每次
-                    # 帶 ETag 問一句、主機回 304 不重傳本體 —— 遠端（Cloudflare）開頁少下載 ~1.5 MB
-                    # 而發版換檔 ETag 就變，不會吃到舊的（owner 2026-09-03「存取都有點慢」）。
-                    path = scope.get("path", "")
-                    if path.startswith(("/api/", "/socket.io", "/download", "/healthz", "/e/")):
+                    # 靜態檔（分頁 html／js／css／圖）no-cache：瀏覽器每次帶 ETag 問一句、主機回 304
+                    # 不重傳本體 —— 遠端（Cloudflare）開頁少下載 ~1.5 MB，發版換檔 ETag 就變
+                    # （owner 2026-09-03「存取都有點慢」）。判準見 _NO_STORE_FILES 上方。
+                    has_validator = any(k.lower() in (b"etag", b"last-modified") for k, _ in headers)
+                    if has_validator and not scope.get("path", "").startswith(_NO_STORE_FILES):
+                        headers.append((b"cache-control", b"no-cache"))
+                    else:
                         headers.append((b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"))
                         headers.append((b"pragma", b"no-cache"))
                         headers.append((b"expires", b"0"))
-                    else:
-                        headers.append((b"cache-control", b"no-cache"))
                 headers.append((b"access-control-allow-private-network", b"true"))
                 message = {**message, "headers": headers}
             await send(message)

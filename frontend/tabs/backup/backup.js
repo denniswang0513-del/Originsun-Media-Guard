@@ -1,4 +1,5 @@
-import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop, renderHostCheckboxes, collectSelectedHosts } from '../../js/shared/utils.js';
+import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop, renderHostCheckboxes, collectSelectedHosts, todayStamp } from '../../js/shared/utils.js';
+import { loadReportHistory } from '../../js/shared/report-history.js';
 
 let sourceIndex = 0;
 
@@ -29,11 +30,7 @@ export function addSourceRow(defaultName = '', defaultPath = '') {
 }
 
 export function setTodayName() {
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    document.getElementById('proj_name').value = `${yyyy}${mm}${dd}`;
+    document.getElementById('proj_name').value = todayStamp();
 }
 
 function getSelectedHosts() {
@@ -408,19 +405,10 @@ export function initBackupTab() {
         if (e.target.value) bkApplyBookmark(e.target.value);
     });
 
-    // 專案名稱預設今天（原本在 app.js 開機段——分頁點到才載後，這頁的 DOM 開機時不存在）
-    const today = new Date();
-    const projNameEl = document.getElementById('proj_name');
-    if (projNameEl && !projNameEl.value) {
-        projNameEl.value = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
-    }
-    // 勾了轉檔才露出多機勾選面板
-    document.getElementById('chk_transcode')?.addEventListener('change', (e) => {
-        const hp = document.getElementById('host_selector_panel');
-        if (hp && (window._computeHosts || []).length > 0) hp.classList.toggle('hidden', !e.target.checked);
-    });
-    // 「最新備份報表」清單由 report.js 填（也給它的重新載入鈕用）——把報表分頁一起載進來
-    window._ensureTabLoaded?.('tab_report').then(() => window.loadReportHistory?.());
+    // 專案名稱預設今天（原本在 app.js 開機段——分頁點到才載後，這頁的 DOM 開機時不存在）；
+    // 轉檔／合併勾選→多機面板的顯示由 html 上的 onchange="renderHostSelector()" 管
+    if (!document.getElementById('proj_name')?.value) setTodayName();
+    loadReportHistory();   // 「最新備份報表」清單（js/shared/report-history.js，跟報表頁共用）
 }
 
 

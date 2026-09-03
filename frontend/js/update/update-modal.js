@@ -107,7 +107,7 @@ async function updateAgent() {
 
         // 4) 開始輪詢：偵測版本升級完成後自動重整
         _pollForMigrationDone();
-        if (typeof appendLog === 'function') appendLog('已下載升級工具，請在 Chrome 下載列執行它。', 'system');
+        appendLog('已下載升級工具，請在 Chrome 下載列執行它。', 'system');
         return;
     }
 
@@ -123,7 +123,7 @@ async function updateAgent() {
         const headers = {};
         if (window._authToken) headers['Authorization'] = 'Bearer ' + window._authToken;
         fetch('http://127.0.0.1:8000/api/v1/control/update', { method: 'POST', headers }).catch(e => console.log('Expected disconnect:', e));
-        if (typeof appendLog === 'function') appendLog('更新指令已送出，稍後連線指示燈將會變為紅色，數秒後將自動重新載入網頁。', 'system');
+        appendLog('更新指令已送出，稍後連線指示燈將會變為紅色，數秒後將自動重新載入網頁。', 'system');
     } catch (err) {
         // 忽略錯誤，絕對不把 isUpdating 設為 false，讓畫面維持藍色等待直到 polling 醒來
         console.warn('Update trigger network drop:', err);
@@ -189,7 +189,7 @@ function _pollForMigrationDone() {
                 clearInterval(timer);
                 const overlay = document.getElementById('migrationOverlay');
                 if (overlay) overlay.remove();
-                if (typeof appendLog === 'function') appendLog('升級完成！正在重新載入頁面...', 'system');
+                appendLog('升級完成！正在重新載入頁面...', 'system');
                 setTimeout(() => window.location.reload(), 1500);
             }
         } catch (e) { /* agent 尚未重啟，繼續等 */ }

@@ -11,7 +11,7 @@
 
 import { getApiBase, websiteFetch, esc } from './website-utils.js';
 import { initRebuildBar, destroyRebuildBar } from './rebuild-bar.js';
-import { createSubviewLoader } from '../../js/shared/subview-loader.js';
+import { createSubviewLoader, _LOADING_HTML } from '../../js/shared/subview-loader.js';
 import { startVisiblePolling } from '../../js/shared/utils.js';
 
 const SUBVIEWS = [
@@ -83,8 +83,6 @@ function _initRebuildBarOnce() {
 
 window.initWebsiteTab = initWebsiteTab;
 
-const _LOADING_HTML = '<div style="color:#888;padding:40px;text-align:center;">載入中…</div>';
-
 async function switchSubview(name) {
     if (!SUBVIEWS.includes(name)) return;
     _activeSubview = name;
@@ -129,7 +127,6 @@ function _startHealthCheck() {
             el.title = e.message;
         }
     };
-    ping();
     if (_healthTimer) clearInterval(_healthTimer);
     _healthTimer = startVisiblePolling(ping, 30000, { sectionId: 'tab_website' });
 }
@@ -152,7 +149,6 @@ async function _refreshInquiryBadge() {
 }
 
 function _startBadgeRefresh() {
-    _refreshInquiryBadge();
     if (_badgeTimer) clearInterval(_badgeTimer);
     _badgeTimer = startVisiblePolling(_refreshInquiryBadge, 60000, { sectionId: 'tab_website' });
 }

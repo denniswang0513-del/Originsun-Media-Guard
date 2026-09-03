@@ -572,7 +572,7 @@ def _emit_sync(event: str, data: dict) -> None:
 
 2026-09-03 起開頁**只載落地那一頁**（原本 30+ 分頁全載、首屏 ~80 支 API），其餘分頁第一次
 `switchTab` 到它時才 `_loadTab(sectionId)`：`fetch('./tabs/<name>/<name>.html')` 填進 section →
-`await import('./tabs/<name>/<name>.js')` → `initTab()` → 補套 auth／可見分頁狀態。載過的分頁記在
+`await import('./tabs/<name>/<name>.js')` → `initTab()` → 補套 auth 與機隊勾選面板。載過的分頁記在
 `_loadedTabs`，之後切換只是 show/hide，**不會卸掉**。
 
 - 跨分頁要用到別頁模組時走 `window._ensureTabLoaded(sectionId, { embed })`（同時兩處要同一頁只載一次；

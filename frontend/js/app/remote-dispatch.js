@@ -3,6 +3,12 @@
 // 派發（dispatchRemoteTranscode）、合併輸出＋合併後任務＋補跑缺檔。八個頁籤都只透過 window.* 呼叫，
 // 名字全部維持不變（tests/e2e/test_host_failover.py 釘著 startHeartbeatMonitor / _activeRemoteHosts）。
 // 回頭用到 app.js 的 updateActionBarState / playDing 一律走 window.（模組作用域看不到彼此）。
+
+// 派工時定住的 Proxy Root／案名：合併發生在幾分鐘後，發起派工的分頁不一定還在（分頁點到才載）。
+// 目的地根由這兩個推導、不另存；window._dispatchCtx 只給 e2e 灌假狀態用。
+const _dispatch = { proxyRoot: '', projectName: '' };
+window._dispatchCtx = _dispatch;
+const _destRoot = () => _dispatch.proxyRoot ? _dispatch.proxyRoot + '/' + _dispatch.projectName : '';
 // ===== Multi-host runtime (Steps 3-8) =====
 window._remoteDispatch = null;
 window._activeRemoteHosts = {};
@@ -163,7 +169,7 @@ async function reassignFromDeadHost(deadIp, info) {
     }
 
     const _unc = window.toUncPath || window._toUnc || (x => x);
-    const destRoot = window._dispatchDestRoot || '';
+    const destRoot = _destRoot();
     const slots = live.map(h => ({ host: h, byCard: {} }));
     outstanding.forEach((a, i) => {
         const slot = slots[i % slots.length];
@@ -264,13 +270,11 @@ function startHeartbeatMonitor() {
 
                     if (d.logs && d.logs.length > 0) {
                         d.logs.forEach(msg => {
-                            if (typeof appendLog === 'function') {
-                                const cleanMsg = msg.replace(/^\[.*?\]\s*/, '');
-                                let _lt = 'info';
-                                if (_RE_SYSTEM_LOG.test(cleanMsg)) _lt = 'system';
-                                if (_RE_ERROR_LOG.test(cleanMsg)) _lt = 'error';
-                                appendLog(`[${info.host.name}] ${cleanMsg}`, _lt);
-                            }
+                            const cleanMsg = msg.replace(/^\[.*?\]\s*/, '');
+                            let _lt = 'info';
+                            if (_RE_SYSTEM_LOG.test(cleanMsg)) _lt = 'system';
+                            if (_RE_ERROR_LOG.test(cleanMsg)) _lt = 'error';
+                            appendLog(`[${info.host.name}] ${cleanMsg}`, _lt);
                         });
                     }
 
@@ -328,9 +332,7 @@ function startHeartbeatMonitor() {
             if (_hostState(info) === 'running' && now - info.lastSeen > _HOST_TIMEOUT_MS) {
                 info.state = 'timeout';
                 updateHostProgress(ip, info.pct || 0, '⚠️ 失聯', '#b45309');
-                if (typeof appendLog === 'function') {
-                    appendLog(`⚠️ ${info.host.name} (${ip}) 失去聯絡超過 ${Math.round(_HOST_TIMEOUT_MS / 1000)} 秒 — 任務結果不明`, 'error');
-                }
+                appendLog(`⚠️ ${info.host.name} (${ip}) 失去聯絡超過 ${Math.round(_HOST_TIMEOUT_MS / 1000)} 秒 — 任務結果不明`, 'error');
                 timedOut.push([ip, info]);
             }
         }));
@@ -343,7 +345,7 @@ function startHeartbeatMonitor() {
                 try {
                     await reassignFromDeadHost(ip, info);
                 } catch (err) {
-                    if (typeof appendLog === 'function') appendLog('重派失敗: ' + err.message, 'error');
+                    appendLog('重派失敗: ' + err.message, 'error');
                 }
             }
         }
@@ -395,7 +397,7 @@ function startHeartbeatMonitor() {
         // 接手的主機會是新的 running 紀錄，這裡自然會繼續等它。
         if (hosts.length > 0 && hosts.every(h => _hostState(h) !== 'running')) {
             stopHeartbeatMonitor();
-            if (_lostCount && typeof appendLog === 'function') {
+            if (_lostCount) {
                 appendLog(`⚠️ 有 ${_lostCount} 台失聯且沒有主機接手 —— 以下流程是在「結果不完整」的前提下進行，`
                           + `合併後的驗證會列出缺件並嘗試補轉`, 'error');
             }
@@ -405,12 +407,12 @@ function startHeartbeatMonitor() {
                 const _rjt = window._remoteJobType || 'transcode';
                 // 只有 transcode（多機備份流程）才需要合併
                 if (_rjt === 'transcode') {
-                    if (typeof appendLog === 'function') appendLog('系統提示：所有遠端任務已完成，自動觸發合併與驗證程序...', 'system');
+                    appendLog('系統提示：所有遠端任務已完成，自動觸發合併與驗證程序...', 'system');
                     mergeHostOutputs();
                 } else {
                     // 其他 TAB（verify/concat/report/transcribe/tts）：直接顯示完成
                     const _jl = JOB_LABELS[_rjt] || '任務';
-                    if (typeof appendLog === 'function') appendLog(`✅ 遠端${_jl}任務已完成。`, 'system');
+                    appendLog(`✅ 遠端${_jl}任務已完成。`, 'system');
                     // 更新主進度條為完成狀態（嘗試 dash 和 underscore 兩種命名）
                     const _tab = window._activeJobTab || 'backup';
                     const _pfxMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts', drone_meta: 'dm' };
@@ -522,7 +524,7 @@ async function dispatchRemoteTranscode(ctx) {
     window._retryLocalPending = 0;
     window._retryLocalFlags = null;
     if (!ctx || !ctx.hosts || !ctx.hosts.length) { window._remoteDispatching = false; return; }
-    if (typeof appendLog === 'function') appendLog('🖥️ 分派轉檔任務給遠端主機...', 'system');
+    appendLog('🖥️ 分派轉檔任務給遠端主機...', 'system');
     showRemoteMainProgress('分散式轉檔：派發中...');
     initRemoteHostProgress(ctx.hosts);
 
@@ -537,19 +539,19 @@ async function dispatchRemoteTranscode(ctx) {
             clearTimeout(t);
             if (r.ok) {
                 updateHostProgress(h.ip, 5, '✅ 連線正常', '#228b22');
-                if (typeof appendLog === 'function') appendLog('✅ ' + h.name + ' (' + h.ip + ') OK', 'system');
+                appendLog('✅ ' + h.name + ' (' + h.ip + ') OK', 'system');
                 reachable.push(h);
             } else {
                 updateHostProgress(h.ip, 0, '❌ HTTP ' + r.status, '#8b0000');
             }
         } catch (_) {
             updateHostProgress(h.ip, 0, '❌ 無法連線', '#8b0000');
-            if (typeof appendLog === 'function') appendLog('❌ ' + h.name + ' 無法連線', 'error');
+            appendLog('❌ ' + h.name + ' 無法連線', 'error');
         }
     }));
 
     if (!reachable.length) {
-        if (typeof appendLog === 'function') appendLog('❌ 所有遠端主機均無法連線，分派取消。', 'error');
+        appendLog('❌ 所有遠端主機均無法連線，分派取消。', 'error');
         return;
     }
 
@@ -563,7 +565,7 @@ async function dispatchRemoteTranscode(ctx) {
     const _toUnc = window.toUncPath || (x => x);
     window._toUnc = _toUnc; // 保留給補轉邏輯的向後相容
     const mapCount = Object.keys(window._driveMap || {}).length;
-    if (mapCount > 0 && typeof appendLog === 'function') {
+    if (mapCount > 0) {
         appendLog('[UNC] 已載入 ' + mapCount + ' 個磁碟映射，來源與遠端路徑將自動轉換', 'system');
     }
 
@@ -590,20 +592,20 @@ async function dispatchRemoteTranscode(ctx) {
                 const missing = Object.entries(results).filter(([_p, v]) => !v.path_exists).map(([p]) => p);
                 if (missing.length) {
                     updateHostProgress(h.ip, 0, '✗ 看不到來源', '#8b0000');
-                    if (typeof appendLog === 'function') appendLog(`⚠️ ${h.name} 看不到來源 (${missing.join(', ')}) — 跳過此主機`, 'error');
+                    appendLog(`⚠️ ${h.name} 看不到來源 (${missing.join(', ')}) — 跳過此主機`, 'error');
                 } else {
                     accessible.push(h);
                 }
             } catch (e) {
                 updateHostProgress(h.ip, 0, '✗ 驗證失敗', '#8b0000');
-                if (typeof appendLog === 'function') appendLog(`⚠️ ${h.name} 路徑驗證失敗: ${e.message} — 跳過此主機`, 'error');
+                appendLog(`⚠️ ${h.name} 路徑驗證失敗: ${e.message} — 跳過此主機`, 'error');
             }
         }));
         if (!accessible.length) {
-            if (typeof appendLog === 'function') appendLog('❌ 沒有任何主機能存取來源路徑，分派取消。請確認來源放在 NAS 共享路徑或只勾有掛到該路徑的主機。', 'error');
+            appendLog('❌ 沒有任何主機能存取來源路徑，分派取消。請確認來源放在 NAS 共享路徑或只勾有掛到該路徑的主機。', 'error');
             return;
         }
-        if (accessible.length < reachable.length && typeof appendLog === 'function') {
+        if (accessible.length < reachable.length) {
             appendLog(`📋 改派給 ${accessible.length} 台能存取來源的主機`, 'system');
         }
         reachable.length = 0;
@@ -645,15 +647,15 @@ async function dispatchRemoteTranscode(ctx) {
                         // 之前檢查錯欄位，「路徑不存在」被誤報成「資料夾裡沒影片」，
                         // 使用者看不到掃的是哪條路徑（2026-08-12 赤兔派發除錯的教訓）
                         if (d.error) {
-                            if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] ' + d.error, 'error');
+                            appendLog('⚠️ [' + cardName + '] ' + d.error, 'error');
                         } else if (d.files && d.files.length > 0) {
                             cardEntries.push({ cardName, files: d.files, cardDir: absoluteSrcPath });
-                            if (typeof appendLog === 'function') appendLog('📁 ' + cardName + ': ' + d.files.length + ' 個影片 (Standalone)', 'system');
+                            appendLog('📁 ' + cardName + ': ' + d.files.length + ' 個影片 (Standalone)', 'system');
                         } else {
-                            if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] 資料夾存在但沒有任何符合的影片檔案（' + absoluteSrcPath + '）', 'error');
+                            appendLog('⚠️ [' + cardName + '] 資料夾存在但沒有任何符合的影片檔案（' + absoluteSrcPath + '）', 'error');
                         }
                     }
-                } catch (e) { if (typeof appendLog === 'function') appendLog('⚠️ 掃描 ' + cardName + ' 失敗: ' + e.message, 'error'); }
+                } catch (e) { appendLog('⚠️ 掃描 ' + cardName + ' 失敗: ' + e.message, 'error'); }
             }
         } else {
             // 有記憶卡資訊：按卡掃 (Main Flow - requires backup structure mapping)
@@ -669,15 +671,15 @@ async function dispatchRemoteTranscode(ctx) {
                         const d = await r.json();
                         // 同上：認 d.error、訊息帶掃描路徑，別把「路徑不存在」講成「沒影片」
                         if (d.error) {
-                            if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] ' + d.error, 'error');
+                            appendLog('⚠️ [' + cardName + '] ' + d.error, 'error');
                         } else if (d.files && d.files.length > 0) {
                             cardEntries.push({ cardName, files: d.files, cardDir });
-                            if (typeof appendLog === 'function') appendLog('📁 ' + cardName + ': ' + d.files.length + ' 個影片', 'system');
+                            appendLog('📁 ' + cardName + ': ' + d.files.length + ' 個影片', 'system');
                         } else {
-                            if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] 資料夾存在但沒有任何符合的影片檔案（' + cardDir + '）', 'error');
+                            appendLog('⚠️ [' + cardName + '] 資料夾存在但沒有任何符合的影片檔案（' + cardDir + '）', 'error');
                         }
                     }
-                } catch (e) { if (typeof appendLog === 'function') appendLog('⚠️ 掃描 ' + cardName + ' 失敗: ' + e.message, 'error'); }
+                } catch (e) { appendLog('⚠️ 掃描 ' + cardName + ' 失敗: ' + e.message, 'error'); }
             }
         }
     } else {
@@ -690,13 +692,13 @@ async function dispatchRemoteTranscode(ctx) {
                     body: JSON.stringify({ path: projDir })
                 });
                 if (r.ok) { const d = await r.json(); if (d.files && d.files.length) cardEntries.push({ cardName: '', files: d.files }); }
-            } catch (e) { if (typeof appendLog === 'function') appendLog('⚠️ 無法掃描來源: ' + e.message, 'error'); }
+            } catch (e) { appendLog('⚠️ 無法掃描來源: ' + e.message, 'error'); }
         }
     }
 
     const totalFiles = cardEntries.reduce((s, c) => s + c.files.length, 0);
     if (totalFiles === 0) {
-        if (typeof appendLog === 'function') appendLog('⚠️ 找不到來源檔案，分派取消。', 'error');
+        appendLog('⚠️ 找不到來源檔案，分派取消。', 'error');
         reachable.forEach(h => updateHostProgress(h.ip, 0, '找不到來源', '#8b0000'));
         return;
     }
@@ -732,7 +734,7 @@ async function dispatchRemoteTranscode(ctx) {
     }
 
     const n = reachable.length;
-    if (typeof appendLog === 'function') appendLog('📋 共 ' + totalFiles + ' 個檔案（' + cardEntries.length + ' 張卡），分配給 ' + n + ' 台主機', 'system');
+    appendLog('📋 共 ' + totalFiles + ' 個檔案（' + cardEntries.length + ' 張卡），分配給 ' + n + ' 台主機', 'system');
 
     const hostCardMaps = reachable.map(() => ({}));
     allCardFiles.forEach(({ cardName, file }, idx) => {
@@ -741,11 +743,8 @@ async function dispatchRemoteTranscode(ctx) {
         hostCardMaps[hostIdx][cardName].push(file);
     });
 
-    // 派工的目的地根 —— 失聯重派要用它組接手主機的 HostDispatch 夾；
-    // Proxy Root／案名也在這裡定住：合併發生在幾分鐘後，那時發起派工的分頁不一定還在
-    window._dispatchDestRoot = ctx.proxy_root ? ctx.proxy_root + '/' + ctx.project_name : '';
-    window._dispatchProxyRoot = ctx.proxy_root || '';
-    window._dispatchProjectName = ctx.project_name || '';
+    _dispatch.proxyRoot = ctx.proxy_root || '';       // 失聯重派／合併都從這裡拿（見檔頭）
+    _dispatch.projectName = ctx.project_name || '';
 
     window._activeRemoteHosts = {};
     for (let i = 0; i < reachable.length; i++) {
@@ -757,9 +756,7 @@ async function dispatchRemoteTranscode(ctx) {
         const totalForHost = cardNames.reduce((s, c) => s + cardMap[c].length, 0);
         updateHostProgress(h.ip, 10, '送出中... (' + totalForHost + ' 個)', '#1f538d');
 
-        const hostDestBase = window._dispatchDestRoot
-            ? window._dispatchDestRoot + '/HostDispatch_' + h.name.replace(/\s+/g, '_')
-            : '';
+        const hostDestBase = _destRoot() ? _destRoot() + '/HostDispatch_' + h.name.replace(/\s+/g, '_') : '';
         let hostOk = false;
         // 🔴 記下這台「真的接下了哪些檔案」—— 它中途掛掉時，重派要靠這份
         // 清單才知道該補什麼。原本這裡存的是全部檔案（每台都一樣），
@@ -770,7 +767,7 @@ async function dispatchRemoteTranscode(ctx) {
             const cardSuffix = cardName ? '/' + cardName : '';
             const dest = _toUnc(hostDestBase ? hostDestBase + cardSuffix : '');
             try {
-                if (typeof appendLog === 'function') appendLog('→ 送出 [' + (cardName || '(all)') + '] ' + files.length + ' 個給 ' + h.name, 'system');
+                appendLog('→ 送出 [' + (cardName || '(all)') + '] ' + files.length + ' 個給 ' + h.name, 'system');
                 const r = await fetch('http://' + h.ip + '/api/v1/jobs/transcode', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ sources: files, dest_dir: dest })
@@ -779,11 +776,11 @@ async function dispatchRemoteTranscode(ctx) {
                 // 🔴 不看 r.ok 的話，遠端回 422/500 也會被記成「已接收」，
                 // 接著 heartbeat 看它閒著就報「轉檔完成」—— 什麼都沒轉（2026-08-12）
                 if (!r.ok) throw new Error(res.detail || res.message || ('HTTP ' + r.status));
-                if (typeof appendLog === 'function') appendLog('✅ ' + h.name + ' [' + (cardName || 'all') + '] 接收，任務 ID: ' + (res.job_id || '?'), 'system');
+                appendLog('✅ ' + h.name + ' [' + (cardName || 'all') + '] 接收，任務 ID: ' + (res.job_id || '?'), 'system');
                 files.forEach(f => acceptedFiles.push({ cardName, file: f }));
                 hostOk = true;
             } catch (err) {
-                if (typeof appendLog === 'function') appendLog('❌ ' + h.name + ' 拒收 [' + (cardName || 'all') + ']: ' + err.message, 'error');
+                appendLog('❌ ' + h.name + ' 拒收 [' + (cardName || 'all') + ']: ' + err.message, 'error');
             }
         }
         if (hostOk) {
@@ -806,17 +803,13 @@ async function dispatchRemoteTranscode(ctx) {
 
 // Step 6: Merge
 async function mergeHostOutputs() {
-    // 派工時定住的值優先（dispatchRemoteTranscode）；沒有才回頭讀分頁欄位
-    const proxyRoot = window._dispatchProxyRoot || (window._isStandaloneTranscode
-        ? (document.getElementById('tc_dest') || {}).value || ''
-        : (document.getElementById('proxy_root') || {}).value || '');
-    const projName = window._dispatchProjectName || (window._isStandaloneTranscode
-        ? (document.getElementById('tc_proj_name') || {}).value || ''
-        : (document.getElementById('proj_name') || {}).value || '');
+    // 派工時定住的值（心跳只會在 dispatchRemoteTranscode 之後才走到這裡）
+    const proxyRoot = _dispatch.proxyRoot;
+    const projName = _dispatch.projectName;
     if (!proxyRoot || !projName) {
-        if (typeof appendLog === 'function') appendLog('請先填寫 Proxy Root 與專案名稱。', 'error'); return;
+        appendLog('請先填寫 Proxy Root 與專案名稱。', 'error'); return;
     }
-    if (typeof appendLog === 'function') appendLog('📁 合併遠端主機輸出...', 'system');
+    appendLog('📁 合併遠端主機輸出...', 'system');
     try {
         const r = await fetch(getComputeBaseUrl() + '/api/v1/merge_host_outputs', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -824,9 +817,9 @@ async function mergeHostOutputs() {
         });
         const d = await r.json();
         if (d.status === 'ok') {
-            if (typeof appendLog === 'function') appendLog('✅ 合併完成！共 ' + d.merged + ' 個檔案。', 'system');
+            appendLog('✅ 合併完成！共 ' + d.merged + ' 個檔案。', 'system');
             // 個別檔案搬移失敗要講出來（後端此時也不會刪來源目錄）
-            if (Array.isArray(d.errors) && d.errors.length && typeof appendLog === 'function') {
+            if (Array.isArray(d.errors) && d.errors.length) {
                 appendLog('⚠️ 有 ' + d.errors.length + ' 個檔案沒搬成（來源目錄保留）：', 'error');
                 d.errors.slice(0, 10).forEach(e => appendLog('   • ' + e, 'error'));
             }
@@ -835,7 +828,7 @@ async function mergeHostOutputs() {
             // 先定義驗證過關後執行的後續作業
             window.executePostMergeJobs = function(flags) {
                 if (flags && (flags.do_concat || flags.do_report)) {
-                    if (typeof appendLog === 'function') appendLog('🔄 自動觸發後續作業...', 'system');
+                    appendLog('🔄 自動觸發後續作業...', 'system');
                     setTimeout(async () => {
                         try {
                             // ── 串帶：優先遠端 (扣黑名單) → 失敗退回本機 ──
@@ -860,7 +853,7 @@ async function mergeHostOutputs() {
                                 }
                                 const concatUrl = concatHost ? ('http://' + concatHost.ip + '/api/v1/jobs/concat') : (localUrl + '/api/v1/jobs/concat');
                                 const concatHostName = concatHost ? concatHost.name : '本機';
-                                if (typeof appendLog === 'function') appendLog('🏗️ 串帶將由 [' + concatHostName + '] 執行' + (concatHost ? '（遠端優先）' : '（遠端不可用，退回本機）'), 'system');
+                                appendLog('🏗️ 串帶將由 [' + concatHostName + '] 執行' + (concatHost ? '（遠端優先）' : '（遠端不可用，退回本機）'), 'system');
                                 window._concatMultiCard = { total: flags.cards.length, done: 0, jobIds: [] };
                                 for (let ci = 0; ci < flags.cards.length; ci++) {
                                     const cardEntry = flags.cards[ci];
@@ -886,10 +879,10 @@ async function mergeHostOutputs() {
                                         const j3 = await r3.json().catch(() => ({}));
                                         // 非 2xx 也要退回本機，不能當成已排隊（2026-08-12）
                                         if (!r3.ok) throw new Error(j3.detail || j3.message || ('HTTP ' + r3.status));
-                                        if (typeof appendLog === 'function') appendLog('📌 串帶 [' + cardName + '] 排隊中 @ ' + concatHostName + '，任務 ID: ' + (j3.job_id || '?'), 'system');
+                                        appendLog('📌 串帶 [' + cardName + '] 排隊中 @ ' + concatHostName + '，任務 ID: ' + (j3.job_id || '?'), 'system');
                                         submitted = true;
                                     } catch (err) {
-                                        if (typeof appendLog === 'function') appendLog('⚠️ 遠端串帶失敗 (' + err.message + ') — 退回本機', 'error');
+                                        appendLog('⚠️ 遠端串帶失敗 (' + err.message + ') — 退回本機', 'error');
                                     }
                                     if (!submitted && concatHost) {
                                         // Remote died mid-dispatch → fall back to local for this card.
@@ -899,9 +892,9 @@ async function mergeHostOutputs() {
                                             });
                                             const j3b = await r3b.json().catch(() => ({}));
                                             if (!r3b.ok) throw new Error(j3b.detail || j3b.message || ('HTTP ' + r3b.status));
-                                            if (typeof appendLog === 'function') appendLog('📌 串帶 [' + cardName + '] 改由本機排隊，任務 ID: ' + (j3b.job_id || '?'), 'system');
+                                            appendLog('📌 串帶 [' + cardName + '] 改由本機排隊，任務 ID: ' + (j3b.job_id || '?'), 'system');
                                         } catch (err2) {
-                                            if (typeof appendLog === 'function') appendLog('❌ 串帶 [' + cardName + '] 本機也失敗: ' + err2.message, 'error');
+                                            appendLog('❌ 串帶 [' + cardName + '] 本機也失敗: ' + err2.message, 'error');
                                         }
                                     }
                                 }
@@ -930,11 +923,11 @@ async function mergeHostOutputs() {
                                     window._myReportJobIds = window._myReportJobIds || new Set();
                                     window._myReportJobIds.add(j4.job_id);
                                 }
-                                if (typeof appendLog === 'function') appendLog('📊 報表任務已提交: ' + j4.status, 'system');
+                                appendLog('📊 報表任務已提交: ' + j4.status, 'system');
                             }
                             window._postMergeFlags = null;
                         } catch (e2) {
-                            if (typeof appendLog === 'function') appendLog('❌ 後續作業提交失敗: ' + e2.message, 'error');
+                            appendLog('❌ 後續作業提交失敗: ' + e2.message, 'error');
                         }
                     }, 1500);
                 }
@@ -951,7 +944,7 @@ async function mergeHostOutputs() {
                     return;
                 }
 
-                if (typeof appendLog === 'function') appendLog('🔍 正在驗證 Proxy 轉檔完整性（後端掃描比對）...', 'system');
+                appendLog('🔍 正在驗證 Proxy 轉檔完整性（後端掃描比對）...', 'system');
                 try {
                     const allMissing = [];
                     const sharedProxyDir = proxyRoot.replace(/\\/g, '/') + '/' + projName;
@@ -966,7 +959,7 @@ async function mergeHostOutputs() {
                         let sourceDir = cardSrcPath || backupCopyDir;
                         const proxyDir  = sharedProxyDir + '/' + cardName;
 
-                        if (typeof appendLog === 'function') appendLog(`🔍 [${cardName}] 比對來源: ${sourceDir} → ${proxyDir}`, 'system');
+                        appendLog(`🔍 [${cardName}] 比對來源: ${sourceDir} → ${proxyDir}`, 'system');
 
                         try {
                             let r = await fetch(getComputeBaseUrl() + '/api/v1/compare_source', {
@@ -976,7 +969,7 @@ async function mergeHostOutputs() {
                             let d = await r.json();
 
                             if (d.status === 'error' && cardSrcPath && sourceDir === cardSrcPath) {
-                                if (typeof appendLog === 'function') appendLog(`⚠️ [${cardName}] 原始路徑不可達，改用備份副本: ${backupCopyDir}`, 'system');
+                                appendLog(`⚠️ [${cardName}] 原始路徑不可達，改用備份副本: ${backupCopyDir}`, 'system');
                                 sourceDir = backupCopyDir;
                                 r = await fetch(getComputeBaseUrl() + '/api/v1/compare_source', {
                                     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -987,28 +980,28 @@ async function mergeHostOutputs() {
 
                             if (d.status === 'ok') {
                                 const missing = Array.isArray(d.missing) ? d.missing : [];
-                                if (typeof appendLog === 'function') appendLog(`📋 [${cardName}] 來源 ${d.source_count} 個，Proxy ${d.proxy_count} 個，缺少 ${missing.length} 個`, 'system');
+                                appendLog(`📋 [${cardName}] 來源 ${d.source_count} 個，Proxy ${d.proxy_count} 個，缺少 ${missing.length} 個`, 'system');
                                 missing.forEach(srcPath => allMissing.push({ cardName, sourceFile: srcPath }));
                             } else {
-                                if (typeof appendLog === 'function') appendLog(`⚠️ [${cardName}] 驗證仍失敗: ${d.message || JSON.stringify(d)}`, 'error');
+                                appendLog(`⚠️ [${cardName}] 驗證仍失敗: ${d.message || JSON.stringify(d)}`, 'error');
                             }
                         } catch (cardErr) {
-                            if (typeof appendLog === 'function') appendLog(`⚠️ [${cardName}] 驗證失敗: ${cardErr.message}`, 'error');
+                            appendLog(`⚠️ [${cardName}] 驗證失敗: ${cardErr.message}`, 'error');
                         }
                     }
 
                     if (allMissing.length === 0) {
-                        if (typeof appendLog === 'function') appendLog('✅ 所有 Proxy 檔案皆已正常產出！', 'system');
+                        appendLog('✅ 所有 Proxy 檔案皆已正常產出！', 'system');
                         if (ms) ms.textContent = '驗證完成';
                         if (window.executePostMergeJobs) window.executePostMergeJobs(flags);
                         return;
                     }
 
                     window._remoteDispatchExpectedRetryCount = (window._remoteDispatchExpectedRetryCount || 0) + 1;
-                    if (typeof appendLog === 'function') appendLog(`[!] 發現 ${allMissing.length} 個缺失的 Proxy 檔案，啟動補轉 (第 ${window._remoteDispatchExpectedRetryCount} 次)...`, 'error');
+                    appendLog(`[!] 發現 ${allMissing.length} 個缺失的 Proxy 檔案，啟動補轉 (第 ${window._remoteDispatchExpectedRetryCount} 次)...`, 'error');
 
                     if (window._remoteDispatchExpectedRetryCount > 3) {
-                        if (typeof appendLog === 'function') appendLog('[X] 補件重試已達上限 (3次)，放棄重試，啟動後續作業。', 'error');
+                        appendLog('[X] 補件重試已達上限 (3次)，放棄重試，啟動後續作業。', 'error');
                         if (window.executePostMergeJobs) window.executePostMergeJobs(flags);
                         return;
                     }
@@ -1022,20 +1015,20 @@ async function mergeHostOutputs() {
 
                     if (!useLocal) {
                         const blacklist = new Set(window._retryFailedHosts || []);
-                        if (blacklist.size > 0 && typeof appendLog === 'function') {
+                        if (blacklist.size > 0) {
                             appendLog(`[i] 跳過黑名單主機 (${[...blacklist].join(', ')})`, 'system');
                         }
                         // 與失聯重派共用同一套「誰能接活」判定（ping + 看得到來源）
                         liveRemoteHosts = await pickLiveDispatchHosts();
                         if (liveRemoteHosts.length === 0) {
-                            if (typeof appendLog === 'function') appendLog('[>] 目前無可執行的遠端主機（黑名單外都不可達或看不到來源），改用本機補轉', 'system');
+                            appendLog('[>] 目前無可執行的遠端主機（黑名單外都不可達或看不到來源），改用本機補轉', 'system');
                             useLocal = true;
                         }
                     }
 
                     if (useLocal) {
                         // 本機補轉：直接送到 localhost，100% 路徑可達
-                        if (typeof appendLog === 'function') appendLog(`[>] 第 ${retryCount} 次補轉：使用本機轉檔（保證路徑可達）`, 'system');
+                        appendLog(`[>] 第 ${retryCount} 次補轉：使用本機轉檔（保證路徑可達）`, 'system');
                         // 補轉送到主任務跑的同一台 = serve 這頁的那台
                         const localUrl = window.location.origin;
                         let localStarted = 0;
@@ -1054,16 +1047,16 @@ async function mergeHostOutputs() {
                                 });
                                 const j = await r.json().catch(() => ({}));
                                 if (!r.ok) throw new Error(j.detail || j.message || ('HTTP ' + r.status));
-                                if (typeof appendLog === 'function') appendLog(`[OK] 本機補轉 [${cardName}] ${srcFiles.length} 個檔案排隊，任務 ID: ${j.job_id || '?'}`, 'system');
+                                appendLog(`[OK] 本機補轉 [${cardName}] ${srcFiles.length} 個檔案排隊，任務 ID: ${j.job_id || '?'}`, 'system');
                                 localStarted++;
                             } catch (err) {
-                                if (typeof appendLog === 'function') appendLog(`[X] 本機補轉 [${cardName}] 失敗: ${err.message}`, 'error');
+                                appendLog(`[X] 本機補轉 [${cardName}] 失敗: ${err.message}`, 'error');
                             }
                         }
 
                         if (localStarted > 0) {
                             // 本機轉檔：用 Socket.IO task_status 事件偵測完成，再跑驗證
-                            if (typeof appendLog === 'function') appendLog(`[>] 本機補轉中，等待 ${localStarted} 個任務完成...`, 'system');
+                            appendLog(`[>] 本機補轉中，等待 ${localStarted} 個任務完成...`, 'system');
                             window._retryLocalPending = localStarted;
                             window._retryLocalFlags = flags;
                             window._retryProxyRoot = proxyRoot;
@@ -1075,7 +1068,7 @@ async function mergeHostOutputs() {
                         }
                     } else {
                         // 遠端補轉：平均派給當下 ping+path 驗證都通過的主機
-                        if (typeof appendLog === 'function') appendLog(`[>] 第 ${retryCount} 次補轉：平均派給 ${liveRemoteHosts.length} 台可執行的遠端主機`, 'system');
+                        appendLog(`[>] 第 ${retryCount} 次補轉：平均派給 ${liveRemoteHosts.length} 台可執行的遠端主機`, 'system');
 
                         const distributions = liveRemoteHosts.map(h => ({ host: h, byCard: {} }));
                         allMissing.forEach(({ cardName, sourceFile }, i) => {
@@ -1087,9 +1080,8 @@ async function mergeHostOutputs() {
                         let requestsStarted = 0;
                         window._activeRemoteHosts = {}; // 重置，只追蹤補轉主機
                         const _unc = window.toUncPath || window._toUnc || (x => x);
-                        window._dispatchDestRoot = proxyRoot + '/' + projName;
                         for (const dist of distributions) {
-                            const retryBase = _unc(window._dispatchDestRoot + '/HostDispatch_Retry_'
+                            const retryBase = _unc(_destRoot() + '/HostDispatch_Retry_'
                                                    + dist.host.name.replace(/\s+/g, '_'));
                             for (const [cardName, srcFiles] of Object.entries(dist.byCard)) {
                                 const destDir = retryBase + '/' + cardName;
@@ -1102,7 +1094,7 @@ async function mergeHostOutputs() {
                                     const j = await r.json().catch(() => ({}));
                                     // 拒收要走 catch 的黑名單邏輯，別把該機標成補轉中
                                     if (!r.ok) throw new Error(j.detail || j.message || ('HTTP ' + r.status));
-                                    if (typeof appendLog === 'function') appendLog(`[OK] ${dist.host.name} [${cardName}] 補轉排隊，任務 ID: ${j.job_id || '?'}`, 'system');
+                                    appendLog(`[OK] ${dist.host.name} [${cardName}] 補轉排隊，任務 ID: ${j.job_id || '?'}`, 'system');
                                     requestsStarted++;
                                     // 補轉中的機器也可能掛掉 —— 一樣要留派工紀錄供重派
                                     const prevR = window._activeRemoteHosts[dist.host.ip] || {};
@@ -1116,7 +1108,7 @@ async function mergeHostOutputs() {
                                         expectedJobs: Object.keys(dist.byCard).length
                                     };
                                 } catch (err) {
-                                    if (typeof appendLog === 'function') appendLog(`[X] ${dist.host.name} [${cardName}] 補轉失敗: ${err.message}`, 'error');
+                                    appendLog(`[X] ${dist.host.name} [${cardName}] 補轉失敗: ${err.message}`, 'error');
                                     // Blacklist so next retry round skips this host.
                                     window._retryFailedHosts = [...new Set([...(window._retryFailedHosts || []), dist.host.ip])];
                                 }
@@ -1129,14 +1121,14 @@ async function mergeHostOutputs() {
                             startHeartbeatMonitor();
                         } else {
                             // 遠端全部失敗 → 直接走本機
-                            if (typeof appendLog === 'function') appendLog('[>] 遠端補轉全部失敗，改用本機', 'system');
+                            appendLog('[>] 遠端補轉全部失敗，改用本機', 'system');
                             window._remoteDispatchExpectedRetryCount = 2;
                             window.verifyAndRetryMissingProxies(proxyRoot, projName, flags);
                         }
                     }
 
                 } catch (e) {
-                    if (typeof appendLog === 'function') appendLog('❌ 驗證時發生錯誤: ' + e.message, 'error');
+                    appendLog('❌ 驗證時發生錯誤: ' + e.message, 'error');
                     if (window.executePostMergeJobs) window.executePostMergeJobs(flags);
                 }
             };
@@ -1152,6 +1144,6 @@ async function mergeHostOutputs() {
                 }
             }, 2500);
 
-        } else { if (typeof appendLog === 'function') appendLog('❌ 合併失敗: ' + (d.message || d.detail || ('HTTP ' + r.status)), 'error'); }
-    } catch (e) { if (typeof appendLog === 'function') appendLog('❌ 合併錯誤: ' + e.message, 'error'); }
+        } else { appendLog('❌ 合併失敗: ' + (d.message || d.detail || ('HTTP ' + r.status)), 'error'); }
+    } catch (e) { appendLog('❌ 合併錯誤: ' + e.message, 'error'); }
 }

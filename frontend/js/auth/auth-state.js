@@ -231,9 +231,6 @@ export function _applyModuleTabs() {
     // Grouped nav (top bar + left sidebar) is RBAC-rendered in app.js; re-render it
     // for the new auth state — hides unauthorized groups/items and redirects off the
     // current tab if it is no longer allowed.
-    if (typeof window._refreshGroupNav === 'function') window._refreshGroupNav();
+    window._refreshGroupNav();   // app.js 模組本體就掛上了；這支只在登入／登出（使用者動作）時跑
 }
-// Legacy alias
-window._applyVisibleTabs = _applyModuleTabs;
-window._applyModuleTabs = _applyModuleTabs;
 window._applyAuthState = _applyAuthState;

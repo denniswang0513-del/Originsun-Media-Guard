@@ -14,6 +14,7 @@
  */
 
 import { esc, toastOk, toastErr, openModal, closeModal } from '../website/website-utils.js';
+import { _LOADING_HTML } from '../../js/shared/subview-loader.js';
 
 // ── 同源 fetch helper（帶 JWT，master /api/v1/bulletin）──
 async function bfetch(path, opts = {}) {
@@ -58,8 +59,6 @@ const STATUS = {
     doing: ['進行中', '#1e3a5f', '#93c5fd'],
     done:  ['完成',   '#064e3b', '#6ee7b7'],
 };
-
-const _LOADING_HTML = '<div style="color:#888;padding:40px;text-align:center;">載入中…</div>';
 
 function _inp() {
     return 'background:#0d0d0d;border:1px solid #333;color:#f0f0f0;padding:7px 9px;border-radius:4px;width:100%;box-sizing:border-box;font-size:13px;font-family:inherit;';

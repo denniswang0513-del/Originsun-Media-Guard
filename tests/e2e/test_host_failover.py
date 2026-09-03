@@ -26,7 +26,7 @@ FAKE_JS = """
         { name: 'HostB', ip: HOST_B },
     ];
     window._originalSourceDirs = [];
-    window._dispatchDestRoot = '//nas/proxy/PROJ';
+    window._dispatchCtx.proxyRoot = '//nas/proxy'; window._dispatchCtx.projectName = 'PROJ';
 
     // HostA 分到兩支，其中 A001 已經產出、A002 還沒
     window._activeRemoteHosts = {};
@@ -52,8 +52,7 @@ FAKE_JS = """
         window._activeRemoteHosts = {};
         window._retryFailedHosts = [];
         window._remoteJobType = null;
-        window._dispatchDestRoot = '';
-        window._dispatchProxyRoot = ''; window._dispatchProjectName = '';
+        window._dispatchCtx.proxyRoot = ''; window._dispatchCtx.projectName = '';
         if (window._heartbeatTimer) { clearInterval(window._heartbeatTimer); window._heartbeatTimer = null; }
     })(window.fetch.bind(window));
 
@@ -150,9 +149,7 @@ NO_TAKEOVER_JS = """
     window._retryFailedHosts = [];
     window._originalDispatchHosts = [{ name: 'HostA', ip: HOST_A }];   // 沒有別台可接手
     window._originalSourceDirs = [];
-    window._dispatchDestRoot = '//nas/proxy/PROJ';
-    window._dispatchProxyRoot = '//nas/proxy';      // 派工時定住的值（合併不再讀分頁欄位）
-    window._dispatchProjectName = 'PROJ';
+    window._dispatchCtx.proxyRoot = '//nas/proxy'; window._dispatchCtx.projectName = 'PROJ';   // 派工時定住的值
     window._isStandaloneTranscode = true;
 
     window._activeRemoteHosts = {};

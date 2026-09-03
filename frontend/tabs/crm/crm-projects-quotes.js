@@ -157,31 +157,19 @@ async function _renderQuoteDetail(quoteId) {
 
 // crm-quotes.js (the one that registers _openQuoteModalForProject /
 // _openQuoteModalForEdit / _openQuoteModalForDuplicate) is normally loaded by
-// the top-level 報價管理 tab (crm_quotes). A user with crm_projects but WITHOUT the
-// crm_quotes module never gets that tab — so load it through app.js's loader with
-// embed（跳過分頁權限閘門；報價 API 守的是 money_view）. 同一支載入器會記在 _loadedTabs，
-// 之後真的切到報價分頁不會再 init 一次；並行呼叫也只載一次。
-async function _ensureQuotesModule() {
-    if (window._openQuoteModalForProject) return;
+// 報價彈窗住在 crm-quotes.js；每個入口先把那頁載進來（embed：沒有 crm_quotes 分頁權限的人也載——
+// 報價 API 守的是 money_view）。同一支載入器記在 _loadedTabs，之後切到報價分頁不會再 init 一次。
+const _quoteModal = (fn) => async (id) => {
     await window._ensureTabLoaded('tab_crm_quotes', { embed: true });
-}
+    window[fn]?.(id);
+};
 
 function initQuoteHandlers() {
     window._pqSelect = (quoteId) => _renderQuoteDetail(quoteId);
-
-    window._pqEdit = async (quoteId) => {
-        await _ensureQuotesModule();
-        if (window._openQuoteModalForEdit) {
-            window._openQuoteModalForEdit(quoteId);
-        }
-    };
-
-    window._pqDuplicate = async (quoteId) => {
-        await _ensureQuotesModule();
-        if (window._openQuoteModalForDuplicate) {
-            window._openQuoteModalForDuplicate(quoteId);
-        }
-    };
+    // 編輯／複製走 crm-quotes.js 掛在 window 的 _quoteEdit / _quoteDup（原本接的 _openQuoteModalForEdit /
+    // _openQuoteModalForDuplicate 從來沒有人定義，這兩顆按鈕點了一直沒反應——2026-09-03 /simplify 抓到）
+    window._pqEdit = _quoteModal('_quoteEdit');
+    window._pqDuplicate = _quoteModal('_quoteDup');
 
     window._pqDelete = async (quoteId) => {
         if (!confirm('確定刪除此報價？')) return;
@@ -192,11 +180,7 @@ function initQuoteHandlers() {
     };
 
     window._projAddQuote = async () => {
-        if (!state.selectedId) return;
-        await _ensureQuotesModule();
-        if (window._openQuoteModalForProject) {
-            window._openQuoteModalForProject(state.selectedId);
-        }
+        if (state.selectedId) await _quoteModal('_openQuoteModalForProject')(state.selectedId);
     };
 
     window._projRefreshQuotes = (projectId) => {

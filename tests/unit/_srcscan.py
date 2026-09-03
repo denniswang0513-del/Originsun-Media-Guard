@@ -33,6 +33,19 @@ def func_body(src: str, header: str) -> str:
     return src[i:i + len(header) + (min(ends) if ends else len(rest))]
 
 
+def between(src: str, start: str, end: str) -> str:
+    """從 `start` 切到它之後第一個 `end` 之前；哪個標記找不到就講哪個。
+
+    給 `func_body`／`js_func_body` 切不準的區段用（非函式的段落、要跨好幾個宣告的一段）。
+    不要在測試檔各寫一份 `src[src.index(a):src.index(b)]` —— 找不到時只會噴一個沒頭沒尾的
+    ValueError，看不出是哪個檔的哪個標記。
+    """
+    assert start in src, f"找不到起點 {start!r}"
+    i = src.index(start)
+    assert end in src[i:], f"{start!r} 之後找不到終點 {end!r}"
+    return src[i:src.index(end, i)]
+
+
 def flow_body(src: str, header: str) -> str:
     """一條**流程**的程式碼：那支函式，加上它在同一個檔裡呼叫的自家 helper。
 
@@ -99,14 +112,19 @@ def js_func_body(src: str, header: str) -> str:
     吃到檔尾 —— 於是 `assert X in fn` 幾乎必定成立，斷言看起來很嚴格，其實
     整個檔案都算數。
 
-    判準：函式內的每一行都有縮排（或是收尾的 `}` / `});`），所以第一個
-    「頂在第 0 欄、又不是收尾符號」的行就是下一個宣告。
+    判準：函式內的每一行都比 header 縮得更深（或是收尾的 `}` / `});`），所以第一個
+    「縮排不深於 header、又不是收尾符號」的行就是下一個宣告。header 本身可以有縮排
+    （app.js 全檔縮在 8 格底下；2026-09-03 之前這裡假設 header 在第 0 欄，對它切出來的
+    「函式本體」會一路吃到檔尾）。
     """
     i = src.index(header)
+    line_start = src.rfind("\n", 0, i) + 1
+    indent = len(src[line_start:i]) - len(src[line_start:i].lstrip())
     lines = src[i + len(header):].splitlines(True)
     out = lines[:1]                      # header 之後的殘句一定屬於本體
     for ln in lines[1:]:
-        if ln[:1].strip() and not ln.startswith(("}", ")", "]")):
+        body = ln.lstrip()
+        if body.strip() and len(ln) - len(body) <= indent and not body.startswith(("}", ")", "]")):
             break
         out.append(ln)
     return header + "".join(out)

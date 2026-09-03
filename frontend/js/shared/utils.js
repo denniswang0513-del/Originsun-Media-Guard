@@ -960,11 +960,19 @@ _detectLocalIp();
 //   1. mixed content — https 頁面不准 fetch http 資源，瀏覽器直接擋
 //   2. 網段不通 — 遠端瀏覽器不在 192.168.1.x 內網，連不到 LAN IP
 // 這也讓本面板的燈號與「專案總覽」的機器卡片（agent-cards.js 早就用 proxy）一致。
-// 「看得見才打」的輪詢：瀏覽器分頁在背景就跳過；給了 sectionId 時該 SPA 分頁被 switchTab 藏起來也跳過。
-// 只給無限期的狀態輪詢用（本機代理燈、機隊燈、官網健康／收件匣徽章）；有終點的工作輪詢不該停。
+// 今天的 YYYYMMDD（備份專案名／報表名／獨立轉檔名的預設都用它，別再各寫一份）
+export function todayStamp(suffix = '') {
+    const t = new Date();
+    return `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, '0')}${String(t.getDate()).padStart(2, '0')}${suffix}`;
+}
+
+// 「看得見才打」的輪詢：立刻打一發，之後每 ms 一次；瀏覽器分頁在背景就跳過，給了 sectionId 時
+// 該 SPA 分頁被 switchTab 藏起來也跳過。只給無限期的狀態輪詢用（本機代理燈、機隊燈、官網健康／
+// 收件匣徽章）；有終點的工作輪詢不該停。
 export function startVisiblePolling(fn, ms, { sectionId } = {}) {
     const visible = () => !document.hidden
         && (!sectionId || !document.getElementById(sectionId)?.classList.contains('hidden'));
+    fn();
     return setInterval(() => { if (visible()) fn(); }, ms);
 }
 
@@ -997,8 +1005,7 @@ async function _checkHostHealth() {
 
 function _startHostHealthPolling() {
     if (_hostHealthTimer) return;
-    _detectLocalIp().then(() => _checkHostHealth()); // 先偵測本機 IP 再檢查健康
-    _hostHealthTimer = startVisiblePolling(_checkHostHealth, 30000); // 每 30 秒
+    _hostHealthTimer = startVisiblePolling(_checkHostHealth, 30000); // 每 30 秒（燈號走主控 proxy，不必等本機 IP）
 }
 
 export function renderHostCheckboxes(containerId, opts = {}) {

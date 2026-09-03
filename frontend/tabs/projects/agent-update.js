@@ -25,7 +25,7 @@ export async function _triggerAgentUpdate(agentId) {
     } catch (e) {
         delete _updatingAgents[agentId];
         window._updateMachineCard(agentId);
-        if (typeof appendLog === 'function') appendLog(`❌ 更新 ${agentId} 失敗：${e.message}`, 'error');
+        appendLog(`❌ 更新 ${agentId} 失敗：${e.message}`, 'error');
         return;
     }
 
@@ -40,7 +40,7 @@ export async function _pollUpdateStatus(agentId, _retries = 0) {
     if (_retries > 90) { // 90 × 2s = 3 分鐘 timeout
         delete _updatingAgents[agentId];
         window._updateMachineCard(agentId);
-        if (typeof appendLog === 'function') appendLog(`⚠️ ${agentId} 更新超時（3 分鐘未完成）`, 'error');
+        appendLog(`⚠️ ${agentId} 更新超時（3 分鐘未完成）`, 'error');
         return;
     }
     try {
@@ -63,7 +63,7 @@ export async function _pollUpdateStatus(agentId, _retries = 0) {
             }
             window._updateMachineCard(agentId);
             _updateBatchButton();
-            if (typeof appendLog === 'function') appendLog(`✅ ${agentId} 更新完成（${d.version || ''})`, 'system');
+            appendLog(`✅ ${agentId} 更新完成（${d.version || ''})`, 'system');
             // If batch update is running, trigger next
             if (window._batchUpdateQueue && window._batchUpdateQueue.length > 0) {
                 const next = window._batchUpdateQueue.shift();
@@ -79,7 +79,7 @@ export async function _pollUpdateStatus(agentId, _retries = 0) {
             // Update failed — stop polling, show error
             delete _updatingAgents[agentId];
             window._updateMachineCard(agentId);
-            if (typeof appendLog === 'function') appendLog(`❌ ${agentId} 更新失敗：${d.detail || 'Agent 無回應'}。請手動執行 Install_or_Update.bat`, 'error');
+            appendLog(`❌ ${agentId} 更新失敗：${d.detail || 'Agent 無回應'}。請手動執行 Install_or_Update.bat`, 'error');
             // Continue batch if running
             if (window._batchUpdateQueue && window._batchUpdateQueue.length > 0) {
                 const next = window._batchUpdateQueue.shift();
