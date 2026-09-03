@@ -98,7 +98,10 @@ def test_invoice_is_a_request_to_issue():
     assert "paper_kind" in src and "recipient_address" in src and "'inv-paper'" in src
     # 還沒開立的票可以修改：只在 issue_status＝options.unissued_status 時給按鈕；PUT 整包寫回，表單沒有的欄位從原票帶
     assert "data-edit=" in src and "inv.issue_status === unissued()" in src
-    assert "method: 'PUT'" in src and "invoice_number: _editing.invoice_number" in src and "payment_status: _editing.payment_status" in src
+    # 修改常常是為了作廢：修改模式顯示開立狀態，作廢由 options.invoice.void_status 給字，開立與款項一起記作廢
+    assert "issue_statuses" in src and "issue === issuedStatus() && !F('invoice_number').value.trim()" in src   # 選已開立要填號碼
+    assert "issue_status: issue === voided() ? voided() : ''" in src                                              # 作廢是人的決定，其餘交回後端看號碼
+    assert "method: 'PUT'" in src and "commission: _editing.commission" in src and "_editing.payment_status || body.payment_status" in src
     api = code_only(repo_src("routers/api_crm_mobile.py"))
     assert "get_invoice_applicants(request)" in api and "INVOICE_PASSTHROUGH_CATEGORIES" in api
 

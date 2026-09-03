@@ -39,6 +39,11 @@ function formHtml() {
           <label>收件電話</label><input id="inv-recipient_phone" type="tel" inputmode="tel">
           <label class="req">收件地址</label><input id="inv-recipient_address">
         </div>
+        <div id="inv-issue-row" hidden>
+          <label>開立狀態</label>${segHtml('inv-issue_status', [])}
+          <div id="inv-number-row" hidden><label class="req">發票號碼</label><input id="inv-invoice_number" autocapitalize="characters" placeholder="同事開好了把號碼填回來"></div>
+          <div class="m-hint" id="inv-void-hint" hidden>儲存後這張會作廢（開立狀態與款項狀態都記作廢）</div>
+        </div>
         <details class="m-more"><summary>更多欄位（備註）</summary>
           <label>備註</label><input id="inv-notes">
         </details>
@@ -155,7 +160,8 @@ function noticeText(body) {
     const p = (F('project_id')._rows || []).find(x => x.id === body.project_id) || {};
     const who = (state.me || {}).username || '';
     const lines = [
-        '請開發票',
+        body.issue_status === voided() ? '發票作廢' : '請開發票',
+        ...(body.invoice_number ? [`號碼：${body.invoice_number}`] : []),
         `專案：${[p.client_short_name, p.name].filter(Boolean).join('｜') || '—（未掛專案）'}`,
         `類別：${body.category}`,
         `申請人：${body.applicant || '—'}`,
@@ -183,27 +189,43 @@ function showNotice(text) {
 // ── 修改還沒開立的票（owner 2026-09-03）：清單按「修改」把資料帶回表單，送出走 PUT ──
 // PUT 是整包寫回，手機表單沒有的欄位（號碼、日期、款項狀態、代開費）從原票帶著，不能靠預設值
 let _editing = null;
-const unissued = () => (opt().invoice || {}).unissued_status || '';
+const invo = () => opt().invoice || {};
+const unissued = () => invo().unissued_status || '';
+const voided = () => invo().void_status || '';
+const issuedStatus = () => (invo().issue_statuses || [])[1] || '';   // 有號碼那一種
+
+// 修改模式的開立狀態：三選（未開立／已開立／作廢）；選已開立要填號碼，選作廢會提示款項也一起作廢
+function syncIssueRow() {
+    const row = document.getElementById('inv-issue-row');
+    row.hidden = !_editing;
+    if (!_editing) return;
+    const v = F('issue_status').value;
+    document.getElementById('inv-number-row').hidden = v !== issuedStatus();
+    document.getElementById('inv-void-hint').hidden = !(v === voided() && _editing.issue_status !== voided());
+}
 
 function startEdit(inv) {
     _editing = inv;
-    const invo = opt().invoice || {};
-    setSeg('inv-applicant', invo.applicants || [], inv.applicant);
-    setSeg('inv-category', invo.categories || [], inv.category); syncProjectLabel();
-    setSeg('inv-invoice_kind', invo.kinds || [], inv.invoice_kind); syncPaper();
+    setSeg('inv-issue_status', invo().issue_statuses || [], inv.issue_status);
+    F('invoice_number').value = inv.invoice_number || '';
+    setSeg('inv-applicant', invo().applicants || [], inv.applicant);
+    setSeg('inv-category', invo().categories || [], inv.category); syncProjectLabel();
+    setSeg('inv-invoice_kind', invo().kinds || [], inv.invoice_kind); syncPaper();
     F('project_id')._set?.(inv.project_id || '');
     F('amount_ex_tax').value = inv.amount_ex_tax ?? ''; F('amount_total').value = inv.amount_total ?? '';
     F('item_type')._set?.(inv.item_type || '');
     F('company_name')._set?.(inv.company_name || ''); F('tax_id').value = inv.tax_id || '';
     F('recipient').value = inv.recipient || ''; F('recipient_phone').value = inv.recipient_phone || ''; F('recipient_address').value = inv.recipient_address || '';
     F('title').value = inv.title || ''; F('notes').value = inv.notes || '';
-    document.getElementById('inv-mode-hint').textContent = '修改中：' + (inv.title || '') + '（還沒開立，改完送出會覆蓋這張）';
+    document.getElementById('inv-mode-hint').textContent = '修改中：' + (inv.title || '') + '（改完送出會覆蓋這張；要作廢或補號碼在「開立狀態」那列）';
     F('submit').textContent = '儲存修改'; F('cancel-edit').hidden = false;
+    syncIssueRow();
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function stopEdit() {
     _editing = null;
+    syncIssueRow();
     document.getElementById('inv-mode-hint').textContent = '送出＝登記一張待開立、還沒收到錢的請款發票，並產生一段可複製的通知給同事開票';
     F('submit').textContent = '送出並產生通知'; F('cancel-edit').hidden = true;
 }
@@ -213,11 +235,17 @@ async function submit(ev) {
     const body = payload();
     if (_editing) {
         // 表單沒有的欄位照原票；有的以表單為準
+        const issue = F('issue_status').value;
+        if (issue === issuedStatus() && !F('invoice_number').value.trim()) { toast('已開立要填發票號碼', 'err'); F('invoice_number').focus(); return; }
+        const wasVoid = _editing.issue_status === voided();
         Object.assign(body, {
-            invoice_number: _editing.invoice_number || '',
+            // 號碼：選已開立就用填的；選未開立就清掉（後端看號碼決定開立狀態）；作廢維持原號碼
+            invoice_number: issue === issuedStatus() ? F('invoice_number').value.trim() : (issue === voided() ? (_editing.invoice_number || '') : ''),
             invoice_date: _editing.invoice_date || body.invoice_date,   // 完整 ISO 原樣送回，後端會歸一（切前 10 碼會落到 UTC 那天）
-            payment_status: _editing.payment_status || body.payment_status,
             commission: _editing.commission ?? null,
+            // 作廢＝開立與款項一起記作廢（同桌機發票本）；從作廢改回來＝款項回到未收；其餘維持原款項狀態
+            issue_status: issue === voided() ? voided() : '',
+            payment_status: issue === voided() ? voided() : (wasVoid ? body.payment_status : (_editing.payment_status || body.payment_status)),
         });
     }
     if (needsProject() && !body.project_id) { toast('類別是專案就要選專案', 'err'); F('project_id-q').focus(); return; }
@@ -260,7 +288,7 @@ async function loadRecent() {
             <div class="sub">${esc(inv.payment_type || '')} · ${esc(inv.payment_status || '')}${inv.invoice_number ? ' · ' + esc(inv.invoice_number) : ''}${inv.project_name ? ' · ' + esc(inv.project_name) : ''}</div>
             <div class="row"><span class="sub">${esc(fmtDate(inv.invoice_date))}</span>
               ${'amount_total' in inv ? `<span class="amt">${money(inv.amount_total)}</span>` : ''}</div>
-            ${state.canWrite && inv.issue_status === unissued() ? `<div class="row"><button type="button" class="m-btn w" data-edit="${esc(inv.id)}">修改</button></div>` : ''}
+            ${state.canWrite ? `<div class="row"><button type="button" class="m-btn w" data-edit="${esc(inv.id)}">修改</button></div>` : ''}
           </div>`).join('');
     } catch (e) { box.innerHTML = errBox(e); }
 }
@@ -271,6 +299,7 @@ export async function render(host, { first }) {
         wireAmounts();
         document.getElementById('inv-form').addEventListener('submit', submit);
         F('cancel-edit').addEventListener('click', () => { stopEdit(); for (const k of VOLATILE) F(k).value = ''; F('item_type-q').value = ''; });
+        mountSeg('inv-issue_status', syncIssueRow);
         document.getElementById('inv-recent').addEventListener('click', (ev) => {
             const b = ev.target.closest('button[data-edit]'); if (!b) return;
             const inv = (document.getElementById('inv-recent')._rows || []).find(x => x.id === b.dataset.edit);

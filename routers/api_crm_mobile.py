@@ -155,6 +155,10 @@ async def mobile_options(request: Request):
             "applicants": (await get_invoice_applicants(request))["applicants"],
             # 「還沒開」的字由規則算（沒號碼就是這個）：手機只給這種票「修改」按鈕
             "unissued_status": issue_status_for(""),
+            # 修改模式的開立狀態三選：沒號碼／有號碼／作廢——前兩個由規則算，作廢是人的決定
+            # （issue_status_for 不會推翻它）。選「已開立」時手機要求填號碼。
+            "issue_statuses": [issue_status_for(""), issue_status_for("X"), issue_status_for("", "作廢")],
+            "void_status": issue_status_for("", "作廢"),
             # 營業稅率：發票表單未稅／含稅互推用後端的那一份，不在瀏覽器再寫一個 5
             "vat_pct": VAT_PCT,
         },
