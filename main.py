@@ -19,9 +19,9 @@ if _sys.platform == "win32":
 import socketio  # type: ignore
 import uvicorn  # type: ignore
 from fastapi import FastAPI, Request  # type: ignore
-from core.no_store import no_store_file
+from core.no_store import NO_STORE, no_store_file
 from fastapi.staticfiles import StaticFiles  # type: ignore
-from fastapi.responses import FileResponse, RedirectResponse  # type: ignore
+from fastapi.responses import RedirectResponse  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 # BaseHTTPMiddleware removed — it buffers streaming responses (breaks SSE)
 
@@ -106,7 +106,7 @@ class NoCacheMiddleware:
                     if any(k.lower() in (b"etag", b"last-modified") for k, _ in headers):
                         headers.append((b"cache-control", b"no-cache"))
                     else:
-                        headers.append((b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"))
+                        headers.append((b"cache-control", NO_STORE.encode()))
                         headers.append((b"pragma", b"no-cache"))
                         headers.append((b"expires", b"0"))
                 headers.append((b"access-control-allow-private-network", b"true"))
@@ -1195,20 +1195,6 @@ async def _periodic_version_check():
             pass
         await asyncio.sleep(600)  # 10 分鐘
 
-@app.get("/download_agent")
-async def download_agent():
-    file_path = "Originsun_Agent.zip"
-    if os.path.exists(file_path):
-        return no_store_file(file_path, filename="Originsun_Agent.zip")
-    return {"error": "系統尚未打包 Originsun_Agent.zip，請聯絡管理員。"}
-
-@app.get("/download_installer")
-async def download_installer():
-    file_path = "Install_Originsun_Agent.bat"
-    if os.path.exists(file_path):
-        return no_store_file(file_path, filename="Install_Originsun_Agent.bat")
-    return {"error": "找不到自動安裝腳本。"}
-
 @app.get("/proposal-plan.html", include_in_schema=False)
 async def _legacy_proposal_plan(request: Request):
     """舊網址 → `/project.html`（2026-08-15 改名，主鍵早已從提案換成專案）。
@@ -1241,15 +1227,9 @@ async def _short_invoice_file(code: str):
 
 @app.get("/")
 async def serve_index():
-    """Serve index.html with aggressive no-cache headers."""
-    index_path = os.path.join("frontend", "index.html")
-    if os.path.exists(index_path):
-        resp = FileResponse(index_path, media_type="text/html")
-        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        resp.headers["Pragma"] = "no-cache"
-        resp.headers["Expires"] = "0"
-        return resp
-    return FileResponse("frontend/index.html")
+    """index.html 永遠不留快取（殼層一換版就要拿到新的）。"""
+    return no_store_file(os.path.join("frontend", "index.html"), media_type="text/html",
+                         headers={"Pragma": "no-cache", "Expires": "0"})
 
 os.makedirs("uploads", exist_ok=True)
 import mimetypes as _mt  # 精簡 Python mimetypes 可能不認 .webp → StaticFiles 回 text/plain

@@ -23,6 +23,7 @@ from typing import Optional
 from fastapi import File, Form, HTTPException, Request, UploadFile
 
 from core.bg_status import settle
+from core.no_store import no_store_file
 from core.bg_task import fire
 from core.project_folders import safe_rel_path
 
@@ -221,8 +222,7 @@ async def download_proposal_quote(pid: str, fid: str, request: Request):
         if not prop.project_id:
             raise HTTPException(status_code=404, detail="找不到檔案（提案未連結專案）")
         path = await resolve_asset_file(session, prop.project_id, f.rel)
-    from fastapi.responses import FileResponse
-    return FileResponse(path, filename=f.filename)
+    return no_store_file(path, filename=f.filename)   # 報價檔＝財務文件，不留快取
 
 
 @router.post("/proposals/{pid}/quotes/analyze")

@@ -17,6 +17,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
 from core.schemas import StaffPayload, ResumePayload, ProjectStaffPayload
+from core.no_store import no_store_file
 
 from ._shared import (router, token_router, _check_auth, _check_project_write_auth, money_dep,
                       _require_db, _get_factory, _fmt_day, _now,
@@ -686,10 +687,9 @@ async def staff_resume_pdf(staff_id: str):
         except OSError:
             pass
 
-    from starlette.responses import FileResponse
     from starlette.background import BackgroundTask
     safe_name = (staff.get("name") or "staff").replace(" ", "_")
-    return FileResponse(
+    return no_store_file(          # 個資：不留任何快取（檔案送完就刪，快取一份等於留了副本）
         tmp_pdf, media_type="application/pdf",
         filename=f"{safe_name}_Resume.pdf",
         background=BackgroundTask(lambda: os.unlink(tmp_pdf) if os.path.exists(tmp_pdf) else None),

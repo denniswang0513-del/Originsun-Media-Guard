@@ -11,7 +11,7 @@
 """
 import pytest
 
-from tests.unit._srcscan import between, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import _REPO, between, js_code_only, js_func_body, py_trees, repo_src
 
 
 def test_tabs_load_on_first_switch_not_at_boot():
@@ -57,21 +57,49 @@ async def test_static_files_revalidate_with_etag_api_stays_no_store(async_client
     for path in ("/api/v1/version", "/healthz"):
         rr = await async_client.get(path)
         assert rr.headers["cache-control"].startswith("no-store"), path
-    # handler 自己宣告的以它為準（index.html 要 no-store，而且只有一個 Cache-Control，不是疊兩層）
-    idx = await async_client.get("/")
-    assert idx.headers["cache-control"] == "no-store, no-cache, must-revalidate, max-age=0"
+    # handler 自己宣告的以它為準（index.html 要 no-store，而且只有一個 Cache-Control，不是疊兩層）；
+    # 有 ETag 但不該進磁碟快取的檔案（OTA 安裝 bat 是 git 追蹤的，免 fixture 就能真的打）同樣
+    from core.no_store import NO_STORE
+    for path in ("/", "/download_installer"):
+        rr = await async_client.get(path)
+        assert rr.status_code == 200 and rr.headers["cache-control"] == NO_STORE, path
+    assert (await async_client.get("/download_installer")).headers.get("etag")
 
 
 
-def test_files_that_must_not_be_cached_declare_it_themselves():
-    """財務文件／OTA 包有 ETag 卻不該進磁碟快取——由 handler 用 core.no_store 宣告，middleware 不認路徑
-    （以前用網址前綴列例外，同一份發票 PDF 三條路只擋到一條）。"""
+# 可以進瀏覽器快取的出檔（走 ETag／304）：給客戶看的影片、簡報、媒體原檔、縮圖。
+# 其餘一律 core.no_store.no_store_file()——財務文件（發票、收據、報價）、個資（履歷）、OTA 包。
+# 新的出檔 handler 要嘛用 no_store_file，要嘛在這裡登記並說明為什麼可以快取。
+CACHEABLE_FILE_HANDLERS = {
+    "routers/api_portal.py:public_stream_video",            # 看片門戶影片（Range，不快取會很慘）
+    "routers/api_references.py:archive_video",              # 參考影片庫
+    "routers/api_proposals.py:_deck_file_response",         # 提案簡報（發給客戶的）
+    "routers/api_proposals.py:download_shared_folder_file",
+    "routers/crm/media_log.py:media_log_folder_thumb",      # 影像紀錄縮圖（handler 自己設 private max-age）
+    "routers/crm/media_log.py:media_log_folder_file",
+    "routers/crm/media_log.py:public_media_log_file",
+    "routers/crm/proposal_assets.py:download_proposal_asset",
+    "routers/crm/proposal_assets.py:proposal_folder_file",
+    "routers/crm/proposal_meetings.py:download_meeting_audio",   # 會議錄音，大檔
+}
+
+
+def test_private_files_never_land_in_disk_cache():
+    """財務文件／個資／OTA 包有 ETag 卻不該進磁碟快取——由 handler 用 core.no_store 宣告，middleware
+    不認路徑（以前用網址前綴列例外，同一份發票 PDF 三條路只擋到一條）。掃 AST：直接 return
+    FileResponse( 的 handler 必須在 CACHEABLE_FILE_HANDLERS 裡有名字。"""
+    import ast
     assert "_NO_STORE_FILES" not in repo_src("main.py")
-    for rel, plain_left in (("routers/crm/invoice_files.py", 0), ("routers/crm/costs.py", 0),
-                            ("routers/api_ota.py", 0), ("main.py", 2)):   # main.py 剩 index.html 兩處（它自己設 no-store）
-        src = repo_src(rel)
-        assert "no_store_file(" in src, rel
-        assert src.count("FileResponse(") == plain_left, rel
+    bare = set()
+    for rel, tree in py_trees("routers", "main.py"):
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if any(isinstance(n, ast.Return) and isinstance(n.value, ast.Call)
+                   and getattr(n.value.func, "id", "") == "FileResponse" for n in ast.walk(fn)):
+                bare.add(f"{rel}:{fn.name}")
+    assert bare <= CACHEABLE_FILE_HANDLERS, f"直接回 FileResponse 又沒登記為可快取：{sorted(bare - CACHEABLE_FILE_HANDLERS)}"
+    assert CACHEABLE_FILE_HANDLERS <= bare, f"白名單有死項：{sorted(CACHEABLE_FILE_HANDLERS - bare)}"
 
 
 def test_background_polling_is_light():
@@ -103,10 +131,9 @@ def test_no_dead_host_picker_guards():
     """utils.js 的 collectSelectedHost 開機就在；`window.collectSelectedHost ? … : { 本機 }` 的 fallback
     跟它對沒有容器時的回傳一字不差，守衛只是把同一個預設值再抄一份。"""
     import pathlib
-    root = pathlib.Path(repo_src.__globals__["_REPO"]) / "frontend" / "tabs"
-    for f in root.rglob("*.js"):
-        assert "collectSelectedHost ?" not in js_code_only(f.read_text(encoding="utf-8")), f.name
-        assert "typeof window.renderStandaloneHostPanels" not in f.read_text(encoding="utf-8"), f.name
+    for f in (pathlib.Path(_REPO) / "frontend" / "tabs").rglob("*.js"):
+        src = js_code_only(f.read_text(encoding="utf-8"))
+        assert "collectSelectedHost ?" not in src and "typeof window.renderStandaloneHostPanels" not in src, f.name
 
 
 def test_dispatch_state_is_one_ctx():
