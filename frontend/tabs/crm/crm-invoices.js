@@ -351,11 +351,6 @@ window._invQuickAdd = async function () {
     }
 };
 
-// 列依類別上底色（owner 2026-09-04：專案／內外部代開分開、沒填類別淺紅）——類別字彙＝_INV_CATEGORIES 那三個
-function _kindClass(cat) {
-    const i = _INV_CATEGORIES.indexOf(cat || '');
-    return i < 0 ? 'inv-kind-none' : ['inv-kind-project', 'inv-kind-internal', 'inv-kind-external'][i];
-}
 function renderList() {
     const body = document.getElementById('inv-list-body');
     if (!body) return;
@@ -366,7 +361,7 @@ function renderList() {
         return;
     }
     body.innerHTML = _quickAddRow() + _sorter.sorted(_invoices).map(inv => `
-        <div class="crm-row${inv.id === _selectedId ? ' selected' : ''} ${_kindClass(inv.category)}" onclick="window._invSelect('${inv.id}')">
+        <div class="crm-row${inv.id === _selectedId ? ' selected' : ''}" onclick="window._invSelect('${inv.id}')">
             <div class="crm-row-date">${inv.invoice_date ? inv.invoice_date.substring(0, 10) : '—'}</div>
             <div title="${_esc(inv.applicant)}">${_esc(inv.applicant)}</div>
             <!-- 名稱後接專案：清單 11 欄本來沒有一欄看得到「這張是哪個案子的」，

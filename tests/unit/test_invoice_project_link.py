@@ -31,7 +31,5 @@ def test_frontend_project_field_for_all_categories_and_mine_only_for_internal():
     pop = code_only(func_body(js, "function _populateProjectSelect(selectedId, category)"))
     assert "cat === _MINE_LINK_CAT" in pop and "_mineProjects" in pop and "私帳｜" in pop
     assert "hasModule('finance_mine')" in js and "'/projects?entity=mine'" in js, "沒私帳權限的人不打私帳專案清單"
-    assert "function _kindClass(cat)" in js and "${_kindClass(inv.category)}" in js
-    css = repo_src("frontend/tabs/crm/crm.css")
-    for k in ("project", "internal", "external", "none"):
-        assert f".crm-row.inv-kind-{k} {{" in css, k
+    # 發票清單不上底色（owner 2026-09-04「發票的部分不用改色」）——底色只在收支明細
+    assert "inv-kind-" not in js and "inv-kind-" not in repo_src("frontend/tabs/crm/crm.css")

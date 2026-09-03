@@ -182,12 +182,6 @@
 .crm-row.batch-picked { background: #1e3a2a; box-shadow: inset 3px 0 0 #22c55e; }
 /* 收支明細的列依種類上底色（owner 2026-09-04）：專案＝藍、發票代開＝同色更淺、沒填類別＝淺紅提醒。
    選中／批次選取的顏色在後面宣告，蓋得過去。 */
-/* 發票清單同一套（專案藍／內部代開紫／外部代開琥珀／沒填類別淺紅） */
-.crm-row.inv-kind-project { background: rgba(59,130,246,.16); }
-.crm-row.inv-kind-internal { background: rgba(168,85,247,.20); }
-.crm-row.inv-kind-external { background: rgba(245,158,11,.16); }
-.crm-row.inv-kind-none { background: rgba(239,68,68,.20); }
-.crm-row[class*='inv-kind-'].selected { background: #1e3a5f; }
 .crm-row.cash-kind-project { background: rgba(59,130,246,.16); }
 .crm-row.cash-kind-passthrough { background: rgba(59,130,246,.07); }   /* 跟專案同色、更淺（owner 2026-09-04：低調一點） */
 .crm-row.cash-kind-none { background: rgba(239,68,68,.20); }
