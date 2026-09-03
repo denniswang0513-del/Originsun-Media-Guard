@@ -1684,16 +1684,18 @@ function _initColumnChooser() {
     // 樣式全部內嵌：這個小視窗不靠 crm.css（瀏覽器快取到舊 CSS 時也不會擠成一團）
     const chip = (k, l) => {
         const on = !hidden.has(k);
-        return `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;
-                    border:1px solid ${on ? '#3b82f6' : '#333'};background:${on ? '#1e3a5f' : '#1b1b1b'};color:${on ? '#eee' : '#777'};font-size:12.5px;white-space:nowrap;">
-                <input type="checkbox" data-col="${k}" ${on ? 'checked' : ''} style="accent-color:#3b82f6;margin:0;width:14px;height:14px;">${l}</label>`;
+        // 一直列、每列一欄（owner：「最重要是要直列排整齊」）：勾選框固定寬、文字靠左對齊
+        return `<label style="display:grid;grid-template-columns:18px 1fr;align-items:center;gap:10px;padding:6px 8px;border-radius:6px;cursor:pointer;
+                    color:${on ? '#eee' : '#6b7280'};font-size:13px;line-height:1.2;background:${on ? '#232b36' : 'transparent'};">
+                <input type="checkbox" data-col="${k}" ${on ? 'checked' : ''} style="accent-color:#3b82f6;margin:0;width:15px;height:15px;justify-self:center;">
+                <span style="text-align:left;">${l}</span></label>`;
     };
     const draw = () => {
-        pop.style.cssText = 'position:absolute;right:0;top:36px;z-index:50;width:300px;background:#1f1f1f;border:1px solid #3a3a3a;border-radius:10px;padding:12px 14px;box-shadow:0 10px 28px rgba(0,0,0,.55);text-align:left;';
+        pop.style.cssText = 'position:absolute;right:0;top:36px;z-index:50;width:220px;background:#1f1f1f;border:1px solid #3a3a3a;border-radius:10px;padding:12px 14px;box-shadow:0 10px 28px rgba(0,0,0,.55);text-align:left;';
         pop.innerHTML = `<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;">
                 <b style="color:#eee;font-size:13px;">顯示哪些欄</b>
                 <span style="color:#777;font-size:11px;">${hidden.size ? `藏了 ${hidden.size} 欄` : '全部顯示中'}</span></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">${_COLS.map(([k, l]) => chip(k, l)).join('')}</div>
+            <div style="display:flex;flex-direction:column;gap:2px;">${_COLS.map(([k, l]) => chip(k, l)).join('')}</div>
             <div style="color:#666;font-size:11px;margin:10px 0 8px;">日期、內容固定顯示；選擇只記在這台瀏覽器。</div>
             <div style="display:flex;gap:8px;justify-content:flex-end;">
                 <button type="button" class="crm-btn crm-btn-secondary crm-btn-sm" data-cols-all>全部顯示</button>
