@@ -432,13 +432,14 @@ function _sheetTableHtml(rowsHtml, id = 'ts-mine-add') {
         <tbody>${rowsHtml}</tbody>
     </table>`;
 }
-/** 鍵盤：Enter／↓ 到下一列同欄（沒有就長一列）、↑ 上一列同欄；分類（select）的上下鍵留給它自己。 */
+/** 鍵盤：↓ 到下一列同欄（沒有就長一列）、↑ 上一列同欄；Enter **不跳列**（owner 2026-09-03：留在原格，
+ *  專案格的 Enter 就是選取下拉建議）；分類（select）的上下鍵留給它自己。 */
 function _sheetKeydown(ev) {
     const inp = ev.target.closest('#ts-mine-add [data-f]');
     if (!inp) return;
-    const down = ev.key === 'Enter' || ev.key === 'ArrowDown', up = ev.key === 'ArrowUp';
+    const down = ev.key === 'ArrowDown', up = ev.key === 'ArrowUp';
     if (!down && !up) return;
-    if (inp.tagName === 'SELECT' && ev.key !== 'Enter') return;
+    if (inp.tagName === 'SELECT') return;
     const tr = inp.closest('tr');
     let target = up ? tr.previousElementSibling : tr.nextElementSibling;
     if (!target && down) { tr.insertAdjacentHTML('afterend', _newRowHtml()); target = tr.nextElementSibling; }
@@ -480,7 +481,7 @@ function _renderMine(d, err) {
                 <span id="ts-mine-result" style="font-size:12px;color:#888;"></span>
             </div>
             <div class="ts-note">專案＋時數（實際或計畫）填齊那一列就自動存成當天的工項，之後改任何一格也自動存。
-                起訖用 24 小時制，打「9」「930」「1730」都可以，會自己算出實際 h。Enter 或 ↓ 往下一列、↑ 往上，走到底自動多一列。
+                起訖用 24 小時制，打「9」「930」「1730」都可以，會自己算出實際 h。↓ 往下一列、↑ 往上，走到底自動多一列（Enter 不跳列）。
                 Sheet 拉進來的列會標「Sheet」、不能改。</div>
         </div>`;
 }
