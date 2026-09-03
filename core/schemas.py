@@ -1201,6 +1201,20 @@ class FinanceCategoryMapPut(BaseModel):
     items: List[FinanceCategoryMapItem] = []
 
 
+class MarginModelRow(BaseModel):
+    group: str = ""          # 類別：規格品／客製化／開發中／其他
+    type: str                # 項目＝crm_projects.project_type
+    margin_pct: float        # 預期毛利 %
+    note: str = ""
+
+
+class MarginModelPut(BaseModel):
+    """私帳設定：預期毛利表＋人力日成本（工時預算＝合約未稅 ×（1−毛利）÷ 日成本 × 每日工時）。"""
+    daily_cost: float
+    hours_per_day: float = 8
+    rows: List[MarginModelRow] = []
+
+
 class BookkeepingFeePut(BaseModel):
     """調整記帳費（換會計、漲價）。使用者只填這三格，歷史由後端自己留。
 

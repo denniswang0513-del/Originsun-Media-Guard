@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from core.finance_logic import load_margin_model, margin_for_type, suggested_budget_hours
 from core.hr_logic import ProjectLookup, budget_burn, group_by_name, is_stale, lookup_row, tw_day
 from core.ledger import is_mine
 
@@ -66,17 +67,23 @@ async def burn_rows(session) -> list:
         .where(Timesheet.project_id.isnot(None)).where(Timesheet.hours > 0)   # 只算實際，同 /me/team/projects
         .group_by(Timesheet.project_id))).all()
     pids = [m[0] for m in matched]
-    projs = {pid: (name, status, budget) for pid, name, status, budget in (await session.execute(
-        select(CrmProject.id, CrmProject.name, CrmProject.status, CrmProject.budget_hours)
+    projs = {row[0]: row[1:] for row in (await session.execute(
+        select(CrmProject.id, CrmProject.name, CrmProject.status, CrmProject.budget_hours,
+               CrmProject.contract_amount, CrmProject.tax_rate, CrmProject.project_type)
         .where(CrmProject.id.in_(pids)))).all()} if pids else {}
+    model = load_margin_model("mine")            # 自動對映只認私帳案 → burn 表都是私帳案
     today = date.today()
     items = []
     for pid, total, cnt, last_date in matched:
-        name, status, budget = projs.get(pid, ("", "", None))
+        name, status, budget, contract, tax_rate, ptype = projs.get(pid, ("", "", None, 0, None, ""))
         last_day = tw_day(last_date)
+        # 建議預算：合約未稅 ×（1−該案型預期毛利）÷ 日成本 × 每日工時（core.finance_logic）
+        suggested = suggested_budget_hours(contract, tax_rate, margin_for_type(model, ptype),
+                                           model["daily_cost"], model["hours_per_day"])
         items.append({
             "project_id": pid, "project_name": name or "", "status": status or "",
             "hours_used": round(total or 0, 1), "budget_hours": budget, **budget_burn(total, budget),
+            "suggested_hours": suggested, "project_type": ptype or "",
             "rows": cnt, "last_entry": last_day.isoformat() if last_day else None,
             "stale": is_stale(status or "", last_day, today),
         })

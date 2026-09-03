@@ -1337,3 +1337,70 @@ def bank_balances_asof(bank_accounts, cash_entries, as_of_month: str) -> list:
             for b in bank_accounts]
 
 
+# ── 預期毛利 × 人力日成本 → 工時預算（owner 2026-09-03，私帳設定）─────────────
+#
+# owner 的 Sheet：每種案（項目）一個預期毛利，員工成本一天 4,000；專案的工時預算就是
+# 「合約未稅 ×（1 − 預期毛利）÷ 日成本 × 每日工時」。拿生產 301 個有預算又有合約的案驗過：
+# 中位數落在公式的 0.85～1.6 倍，很多案幾乎一樣（平面攝影 5h vs 5h、紀實 45h vs 43h）。
+# 出廠預設＝owner 那張表；改了就存 settings.json `finance.margin_model.<entity>`。
+DEFAULT_MARGIN_MODEL = {
+    "daily_cost": 4000,          # 員工成本／天
+    "hours_per_day": 8,
+    "rows": [
+        {"group": "規格品", "type": "紀實影片", "margin_pct": 40, "note": ""},
+        {"group": "規格品", "type": "商業廣告", "margin_pct": 40, "note": ""},
+        {"group": "規格品", "type": "影視服務", "margin_pct": 50, "note": ""},
+        {"group": "規格品", "type": "活動紀錄", "margin_pct": 50, "note": ""},
+        {"group": "規格品", "type": "媒體顧問", "margin_pct": 60, "note": ""},
+        {"group": "規格品", "type": "平面攝影", "margin_pct": 20, "note": ""},
+        {"group": "規格品", "type": "劇情片", "margin_pct": 40, "note": ""},
+        {"group": "客製化", "type": "客製紀實", "margin_pct": 20, "note": ""},
+        {"group": "開發中", "type": "動態設計", "margin_pct": 20, "note": ""},
+        {"group": "其他", "type": "其他", "margin_pct": 30, "note": ""},
+        {"group": "規格品", "type": "錄混音", "margin_pct": 30, "note": ""},
+    ],
+}
+
+
+def _copy_model(m: dict) -> dict:
+    return {"daily_cost": float(m.get("daily_cost") or 0), "hours_per_day": float(m.get("hours_per_day") or 8),
+            "rows": [dict(r) for r in (m.get("rows") or [])]}
+
+
+def load_margin_model(entity: str = "mine") -> dict:
+    """設定裡那本帳的預期毛利表；沒設定過就回出廠預設（**複本**）。"""
+    try:
+        from config import load_settings
+        saved = ((load_settings().get("finance") or {}).get("margin_model") or {}).get(entity)
+    except Exception:
+        saved = None
+    return _copy_model(saved or DEFAULT_MARGIN_MODEL)
+
+
+def save_margin_model(entity: str, model: dict) -> dict:
+    """整份取代（表很小；逐列 PATCH 反而讓前端與設定各講各的）。"""
+    from config import load_settings, save_settings
+    s = load_settings()
+    s.setdefault("finance", {}).setdefault("margin_model", {})[entity] = _copy_model(model)
+    save_settings(s)
+    return load_margin_model(entity)
+
+
+def margin_for_type(model: dict, project_type: str):
+    """案型 → 預期毛利 %；表上沒有這個案型 → None（不猜）。"""
+    t = (project_type or "").strip()
+    for r in model.get("rows") or []:
+        if (r.get("type") or "").strip() == t:
+            return float(r.get("margin_pct") or 0)
+    return None
+
+
+def suggested_budget_hours(contract, tax_rate, margin_pct, daily_cost, hours_per_day=8):
+    """工時預算＝合約未稅 ×（1 − 預期毛利）÷ 日成本 × 每日工時，取到 0.5 小時。
+    合約 0／沒毛利／日成本 0 → None（沒有建議，不填 0 假裝有）。"""
+    if not contract or margin_pct is None or not daily_cost:
+        return None
+    ex_tax = float(contract) / (1 + float(tax_rate or 5) / 100)     # 稅率缺值／0 視同 5：同 core.crm_logic.project_margin
+    hours = ex_tax * (1 - float(margin_pct) / 100) / float(daily_cost) * float(hours_per_day or 8)
+    return round(hours * 2) / 2 if hours > 0 else None
+

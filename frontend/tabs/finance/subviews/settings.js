@@ -16,6 +16,7 @@ let _coa = [];        // 會計科目
 let _map = [];        // 類別對映列
 let _unmapped = [];   // 待歸類
 let _fee = null;      // 記帳費費率（含歷史 + 未來幾期預覽）
+let _margin = null;   // 預期毛利表＋人力日成本（工時預算的基礎；owner 2026-09-03）
 let _tax = [];        // 收支分類樹（**只有私帳有**，母公司走上面那張平面對映表）
 
 // 精靈帳戶列狀態（re-render 前先 _syncWizRows 保住已輸入值）
@@ -80,6 +81,7 @@ export default async function render(container, ctx = {}) {
             () => finFetch('/category-map'),
             () => finFetch('/category-map/unmapped').catch(() => ({ items: [] })),
             () => finFetch('/bookkeeping-fee').catch(() => null),
+            () => finFetch('/margin-model').catch(() => null),
             // 🔴 分類樹只有私帳有；母公司那本用的是平面的類別對映表（詞彙不同，
             // 混在一起私帳的類別下拉會從 5 個爆成 37 個 —— 見 core/cash_taxonomy.py）
             () => (finIsMine()
@@ -88,9 +90,10 @@ export default async function render(container, ctx = {}) {
         ],
     });
     if (!results) return;
-    const [bank, coa, map, unmapped, fee, tax] = results;
+    const [bank, coa, map, unmapped, fee, margin, tax] = results;
     _tax = (tax && tax.tree) || [];
     _fee = fee;
+    _margin = margin;
     _bankAccounts = bank.items || [];
     _coa = coa.items || [];
     _map = map.items || [];
@@ -141,6 +144,7 @@ function _renderShell() {
         ${_unmappedHtml()}
         ${_taxHtml()}
         ${_feeHtml()}
+        ${_marginHtml()}
         ${_mapHtml()}
     `;
     if (_bankAccounts.length === 0) _renderWizRows();
@@ -409,6 +413,86 @@ _fs.saveFee = async (btn) => {
         finToast(e.message, true);
         btn.disabled = false;
     }
+};
+
+// ── 預期毛利 × 人力日成本（工時預算的基礎）────────────────────
+//
+// owner 2026-09-03：「這是我的專案利潤率，我的員工成本一天 4000，專案的使用率是用這個基礎算出來的，
+// 這一塊在我的私帳設定」。表上的「項目」＝專案的 project_type；工時預算＝合約未稅 ×（1−預期毛利）
+// ÷ 日成本 × 每日工時。規則本體在 core.finance_logic（burn 表、專案檔案頁、財務摘要都吃它）。
+function _marginHtml() {
+    if (!_margin) return '';
+    const inp = 'class="crm-input" style="width:100%;box-sizing:border-box;"';
+    const rows = (_margin.rows || []).map((r, i) => `
+        <tr data-mrow="${i}">
+            <td><input ${inp} data-f="group" value="${esc(r.group || '')}" placeholder="規格品"></td>
+            <td><input ${inp} data-f="type" value="${esc(r.type || '')}" placeholder="項目（＝專案的案型）"></td>
+            <td><input ${inp} data-f="margin_pct" type="number" min="0" max="99" step="1" value="${r.margin_pct ?? ''}" style="width:90px;text-align:right;"></td>
+            <td><input ${inp} data-f="note" value="${esc(r.note || '')}" placeholder="說明"></td>
+            <td style="width:30px;text-align:center;"><span style="color:#777;cursor:pointer;" title="拿掉這列" onclick="window._finSet.marginDelRow(${i})">×</span></td>
+        </tr>`).join('');
+    return `
+    <div id="finset-margin-card" style="background:#1b1b1b;border:1px solid #2e2e2e;border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+        <h3 style="color:#eee;margin:0 0 4px;font-size:14px;">預期毛利與人力成本（工時預算的基礎）</h3>
+        <p style="color:#888;font-size:12px;margin:0 0 12px;">
+            每種案（＝專案的<b>案型</b>）一個預期毛利；員工成本以「一天」計。
+            專案的<b>工時預算</b>＝合約未稅 ×（1 − 預期毛利）÷ 日成本 × 每日工時 ——
+            專案工時的 burn 表會用它給還沒設預算的案一個「建議」，專案檔案頁「改預算」也預帶這個數。</p>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
+            <div><label style="display:block;color:#9ca3af;font-size:11px;margin-bottom:3px;">員工成本／天</label>
+                 <input id="finset-margin-daily" class="crm-input" type="number" min="1" value="${_margin.daily_cost || ''}" style="width:120px;text-align:right;"></div>
+            <div><label style="display:block;color:#9ca3af;font-size:11px;margin-bottom:3px;">每日工時</label>
+                 <input id="finset-margin-hpd" class="crm-input" type="number" min="1" max="24" step="0.5" value="${_margin.hours_per_day || 8}" style="width:90px;text-align:right;"></div>
+            <div style="color:#6b7280;font-size:11px;">例：合約 105,000（未稅 100,000）、紀實影片 40% → 60,000 ÷ ${fmtNum(_margin.daily_cost || 4000)} × ${_margin.hours_per_day || 8} ＝ ${Math.round(60000 / (_margin.daily_cost || 4000) * (_margin.hours_per_day || 8) * 2) / 2} h</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+            <thead><tr style="color:#888;text-align:left;"><th style="padding:4px 6px;width:110px;">類別</th><th style="padding:4px 6px;">項目（案型）</th><th style="padding:4px 6px;width:100px;">預期毛利 %</th><th style="padding:4px 6px;">說明</th><th></th></tr></thead>
+            <tbody id="finset-margin-rows">${rows}</tbody>
+        </table>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finSet.marginAddRow()">＋ 一列</button>
+            <span style="flex:1;"></span>
+            <button class="crm-btn crm-btn-primary" onclick="window._finSet.saveMargin(this)">儲存</button>
+        </div>
+    </div>`;
+}
+
+/** 表格目前的輸入 → rows（加列／刪列前先收，才不會把打到一半的洗掉）。 */
+function _marginReadRows() {
+    return [...document.querySelectorAll('#finset-margin-rows tr')].map(tr => {
+        const v = f => tr.querySelector(`[data-f="${f}"]`).value;
+        return { group: v('group').trim(), type: v('type').trim(), margin_pct: Number(v('margin_pct') || 0), note: v('note').trim() };
+    });
+}
+function _marginRedraw() {
+    const card = document.getElementById('finset-margin-card');
+    if (card) card.outerHTML = _marginHtml();
+}
+_fs.marginAddRow = () => {
+    _margin.rows = [..._marginReadRows(), { group: '', type: '', margin_pct: 30, note: '' }];
+    _margin.daily_cost = Number(document.getElementById('finset-margin-daily')?.value || _margin.daily_cost);
+    _margin.hours_per_day = Number(document.getElementById('finset-margin-hpd')?.value || _margin.hours_per_day);
+    _marginRedraw();
+};
+_fs.marginDelRow = (i) => {
+    const rows = _marginReadRows(); rows.splice(i, 1); _margin.rows = rows;
+    _margin.daily_cost = Number(document.getElementById('finset-margin-daily')?.value || _margin.daily_cost);
+    _margin.hours_per_day = Number(document.getElementById('finset-margin-hpd')?.value || _margin.hours_per_day);
+    _marginRedraw();
+};
+_fs.saveMargin = async (btn) => {
+    const daily_cost = Number(document.getElementById('finset-margin-daily')?.value || 0);
+    const hours_per_day = Number(document.getElementById('finset-margin-hpd')?.value || 8);
+    const rows = _marginReadRows().filter(r => r.type);
+    if (!(daily_cost > 0)) { finToast('員工成本／天要大於 0', true); return; }
+    btn.disabled = true;
+    try {
+        _margin = await finFetch('/margin-model', { method: 'PUT', body: JSON.stringify({ daily_cost, hours_per_day, rows }) });
+        finToast(`已存：日成本 $${fmtNum(daily_cost)}、${rows.length} 種案型`);
+        _marginRedraw();
+    } catch (e) {
+        finToast(e.message, true);
+    } finally { btn.disabled = false; }
 };
 
 // ── 類別對映表 ──────────────────────────────────────────────

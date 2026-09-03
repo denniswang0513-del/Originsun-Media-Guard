@@ -633,7 +633,9 @@ function _burnTbodyHtml() {
                 ${p.stale ? '<span class="ts-badge warn" title="進行中但 7 天沒工時">停滯</span>' : ''}</td>
             <td style="color:#888;">${esc(p.status || '')}</td>
             <td class="num">${p.hours_used}</td>
-            <td class="num">${p.budget_hours ?? '<span style="color:#666;">未設</span>'}</td>
+            <td class="num">${p.budget_hours ?? (p.suggested_hours != null
+                ? `<span class="ts-link" data-ts-action="budget" data-pid="${esc(p.project_id)}" data-cur="${p.suggested_hours}" title="依私帳設定的預期毛利（${esc(p.project_type || '')}）與日成本算的建議，點一下就套用">建議 ${p.suggested_hours}</span>`
+                : '<span style="color:#666;">未設</span>')}</td>
             <td class="num">${p.remaining ?? '—'}</td>
             <td class="num"><span class="ts-pct" style="${_pctStyle(p.pct)}">${p.pct != null ? p.pct + '%' : '—'}</span></td>
             <td class="num" style="color:#777;">${p.rows}</td>
@@ -669,6 +671,8 @@ function _renderProjects(s) {
             <button class="ts-btn ghost" data-ts-action="refresh" style="vertical-align:top;">↻ 重新整理</button>
             <button class="ts-btn ghost" data-ts-action="recent" style="vertical-align:top;">最近同步列</button>
             <button class="ts-btn ghost" data-ts-action="export-month" style="vertical-align:top;">匯出本月 CSV</button>
+            ${(() => { const n = s.projects.filter(p => p.budget_hours == null && p.suggested_hours != null).length;
+                return n ? `<button class="ts-btn ghost" data-ts-action="budget-suggest" data-n="${n}" style="vertical-align:top;" title="工時預算＝合約未稅 ×（1−預期毛利）÷ 日成本 × 每日工時；只填沒設的案，已設的不動">套用建議預算（${n} 案沒設）</button>` : ''; })()}
         </div>
         ${unmatched.length ? `<div class="ts-card"><h3>未對映（${unmatched.length}）—— 對到案之後才有預算與 burn</h3>
             <table><thead><tr><th>Sheet 案名</th><th class="num">時數</th><th></th></tr></thead><tbody id="ts-unmatched-proj-body">${_unmatchedProjRowsHtml()}</tbody></table></div>` : ''}
@@ -718,7 +722,7 @@ function _renderProject(d) {
             <span style="flex:1;"></span>
             <button class="ts-btn ghost" data-ts-action="compare-add" data-name="${esc(key)}">${inCompare ? '已在比較清單' : '加入比較'}</button>
             ${_compareNames.length ? `<button class="ts-btn" data-ts-action="view" data-view="compare">並排比較（${_compareNames.length}）</button>` : ''}
-            ${d.mapped ? `<button class="ts-btn ghost" data-ts-action="budget" data-pid="${esc(d.project_id)}" data-cur="${d.budget_hours ?? ''}">改預算</button>` : ''}
+            ${d.mapped ? `<button class="ts-btn ghost" data-ts-action="budget" data-pid="${esc(d.project_id)}" data-cur="${d.budget_hours ?? d.suggested_hours ?? ''}">改預算</button>` : ''}
             <button class="ts-btn ghost" data-ts-action="export-project" data-name="${esc(d.project_name)}" data-pid="${esc(d.project_id || '')}">匯出 CSV</button>
         </div>
         ${sheetNames.length ? `<div class="ts-note" style="margin:0 0 10px;">Sheet 上的案名：${sheetNames.map(esc).join('、')}</div>` : ''}
@@ -728,6 +732,7 @@ function _renderProject(d) {
             <span class="ts-chip"><b>${d.span_days}</b>天（${esc(d.first || '—')} → ${esc(d.last || '—')}）</span>
             <span class="ts-chip"><b>${d.budget_hours ?? '—'}</b>預算 h　<span class="ts-pct" style="${_pctStyle(d.pct)}">${pct}</span></span>
             ${d.quote_days != null ? `<span class="ts-chip"><b>${d.quote_days}</b>報價人日（≈ ${d.quote_hours} h）</span>` : ''}
+            ${d.suggested_hours != null ? `<span class="ts-chip" title="依私帳設定：合約未稅 ×（1−${esc(d.project_type || '')}預期毛利）÷ 日成本 × 每日工時"><b>${d.suggested_hours}</b>建議預算 h</span>` : ''}
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;">
             <div class="ts-card" style="margin:0;"><h3>分類組成</h3>${_bars(d.composition)}</div>
@@ -1078,6 +1083,15 @@ async function _onAction(btn) {
                 // 只是切前端的比較清單：專案檔案頁用快取重繪，不再打一次最重的 /project
                 if (_view.startsWith('project:') && _projectCache) { _content.innerHTML = _renderProject(_projectCache); _bind(); return; }
                 return refresh();
+            }
+            if (act === 'budget-suggest') {
+                if (!confirm(`把建議預算填進 ${btn.dataset.n} 個還沒設預算的案？（已設的不會動）`)) return;
+                try {
+                    const r = await tfetch('/api/v1/timesheets/budgets/suggest', { method: 'POST' });
+                    _summaryCache = null;
+                    alert(`已填 ${r.applied} 案`);
+                    return refresh();
+                } catch (e) { return alert('套用失敗：' + (e.message || e)); }
             }
             if (act === 'budget') {
                 const v = prompt('這個案的預算小時（清空＝拿掉預算）', btn.dataset.cur || '');

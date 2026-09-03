@@ -1,0 +1,47 @@
+# -*- coding: utf-8 -*-
+"""預期毛利 × 人力日成本 → 工時預算（owner 2026-09-03：「我的員工成本一天 4000，專案的使用率是用這個
+基礎算出來的，這一塊在我的私帳設定」）。規則只有 core.finance_logic 一份；burn 表、專案檔案頁、
+財務摘要、設定頁都吃它。"""
+from core.finance_logic import DEFAULT_MARGIN_MODEL, margin_for_type, suggested_budget_hours
+from tests.unit._srcscan import code_only, func_body, repo_src
+
+
+def test_default_model_is_owners_table():
+    rows = {r["type"]: r["margin_pct"] for r in DEFAULT_MARGIN_MODEL["rows"]}
+    assert DEFAULT_MARGIN_MODEL["daily_cost"] == 4000 and DEFAULT_MARGIN_MODEL["hours_per_day"] == 8
+    assert rows == {"紀實影片": 40, "商業廣告": 40, "影視服務": 50, "活動紀錄": 50, "媒體顧問": 60, "平面攝影": 20,
+                    "劇情片": 40, "客製紀實": 20, "動態設計": 20, "其他": 30, "錄混音": 30}
+    assert margin_for_type(DEFAULT_MARGIN_MODEL, "媒體顧問") == 60
+    assert margin_for_type(DEFAULT_MARGIN_MODEL, "沒有這種") is None      # 不猜
+
+
+def test_budget_hours_formula():
+    # 合約 105,000 含稅 5% → 未稅 100,000；紀實 40% → 成本預算 60,000 ÷ 4000 × 8 ＝ 120 h
+    assert suggested_budget_hours(105000, 5, 40, 4000, 8) == 120
+    assert suggested_budget_hours(105000, 5, 40, 4000, 10) == 150
+    # 取到 0.5 小時
+    assert suggested_budget_hours(3500, 5, 20, 4000, 8) == 5.5
+    # 沒合約／沒毛利／沒日成本 → None，不填 0 假裝有
+    assert suggested_budget_hours(0, 5, 40, 4000) is None
+    assert suggested_budget_hours(105000, 5, None, 4000) is None
+    assert suggested_budget_hours(105000, 5, 40, 0) is None
+
+
+def test_every_surface_uses_the_one_rule():
+    lk = code_only(repo_src("services/timesheet_lookup.py"))
+    assert "suggested_budget_hours(contract, tax_rate, margin_for_type(model, ptype)" in func_body(lk, "async def burn_rows(")
+    ts = code_only(repo_src("routers/api_timesheets.py"))
+    assert "suggested_budget_hours(" in func_body(ts, "def _suggested_for(")
+    assert '"suggested_hours": _suggested_for(proj)' in func_body(ts, "async def project_file(")
+    # 套用建議：私帳 full；預設只填沒設的（Sheet 灌的預算是 owner 的決定）
+    ap = func_body(ts, "async def apply_suggested_budgets(")
+    assert '_require_mine_admin(request, level="full")' in ap and 'overwrite or not i["budget_hours"]' in ap
+    costs = code_only(repo_src("routers/crm/costs.py"))
+    assert '"suggested_budget_hours": _suggested_hours' in func_body(costs, "async def project_financial_summary(")
+    fin = code_only(repo_src("routers/api_finance.py"))
+    assert "_guard(request, entity)" in func_body(fin, "async def get_margin_model(")
+    assert '_guard(request, entity, level="full")' in func_body(fin, "async def put_margin_model(")
+    js = repo_src("frontend/tabs/finance/subviews/settings.js")
+    assert "finFetch('/margin-model'" in js and "finset-margin-card" in js
+    tabjs = repo_src("frontend/tabs/timesheets/timesheets.js")
+    assert "budget-suggest" in tabjs and "suggested_hours" in tabjs

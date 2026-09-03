@@ -50,7 +50,7 @@ from core.finance_logic import (BOOKKEEPING_EXTRA_ON_MONTH,
                                 statement_line_status, today_start,
                                 workbench_summary)
 from core.schemas import (BankAccountPayload,
-                          BookkeepingFeePut,
+                          BookkeepingFeePut, MarginModelPut,
                           BulkAssignAccountPayload,
                           TransferFeeRecognize,
                           FinanceAdjustmentPayload, FinanceCategoryMapPut,
@@ -300,6 +300,36 @@ async def recognize_transfer_fees(payload: TransferFeeRecognize, request: Reques
     return {"ok": True, "recognized": done, "skipped": skipped,
             "message": f"{len(done)} 組已認列成手續費"
                        + (f"；{skipped} 組已經拆好或配不到，沒有動" if skipped else "")}
+
+
+@router.get("/margin-model")
+async def get_margin_model(request: Request, entity: str = ""):
+    """預期毛利表＋人力日成本（owner 2026-09-03：「我的員工成本一天 4000，專案的使用率是用這個
+    基礎算出來的，這一塊在我的私帳設定」）。出廠預設＝owner 的表。"""
+    ent = _guard(request, entity)
+    from core.finance_logic import load_margin_model
+    return {"entity": ent, **load_margin_model(ent)}
+
+
+@router.put("/margin-model")
+async def put_margin_model(payload: MarginModelPut, request: Request, entity: str = ""):
+    ent = _guard(request, entity, level="full")
+    if payload.daily_cost <= 0:
+        raise HTTPException(status_code=422, detail="日成本要大於 0")
+    if not 0 < payload.hours_per_day <= 24:
+        raise HTTPException(status_code=422, detail="每日工時要在 0～24 之間")
+    seen = set()
+    for r in payload.rows:
+        t = (r.type or "").strip()
+        if not t:
+            raise HTTPException(status_code=422, detail="項目不可空白")
+        if t in seen:
+            raise HTTPException(status_code=422, detail=f"項目重複：{t}")
+        seen.add(t)
+        if not 0 <= r.margin_pct < 100:
+            raise HTTPException(status_code=422, detail=f"{t} 的預期毛利要在 0～99%")
+    from core.finance_logic import save_margin_model
+    return {"entity": ent, **save_margin_model(ent, payload.model_dump())}
 
 
 @router.get("/bookkeeping-fee")

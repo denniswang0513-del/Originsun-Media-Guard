@@ -286,16 +286,16 @@ def test_api_finance_has_no_bare_check_money_call():
     assert "check_money(request)" not in AF_SRC
 
 
-def test_api_finance_view_endpoints_exactly_seven():
+def test_api_finance_view_endpoints_exactly_eight():
     """view 層（合夥人可及）＝不帶 level 的 `_guard(request, entity)` 呼叫，
-    恰好 7 處：dashboard/statements/drilldown/tax-package/accounts GET/
-    category-map GET/unmapped GET（plan §2.4）。
+    恰好 8 處：dashboard/statements/drilldown/tax-package/accounts GET/
+    category-map GET/unmapped GET（plan §2.4）＋ margin-model GET（預期毛利表，2026-09-03）。
 
     多了＝有寫入面被降到報表層（合夥人摸得到）；少了＝報表端點被鎖成 full
     （合夥人整個看不到，功能壞）。兩個方向都要爆。
     """
     n = len(re.findall(r"_guard\(request, entity\)", AF_SRC))
-    assert n == 7, f"不帶 level 的 _guard(request, entity) 有 {n} 處（應為 7）"
+    assert n == 8, f"不帶 level 的 _guard(request, entity) 有 {n} 處（應為 8）"
 
 
 def test_statement_import_has_no_view_level_endpoint():

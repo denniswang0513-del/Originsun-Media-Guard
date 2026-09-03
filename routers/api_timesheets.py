@@ -311,6 +311,16 @@ async def _quote_days(session, project_id: str) -> Optional[float]:
     return float(days) if days else None
 
 
+def _suggested_for(proj):
+    """專案檔案頁的建議預算（同 burn 表那條規則；沒案／沒合約／案型不在表上 → None）。"""
+    if proj is None:
+        return None
+    from core.finance_logic import load_margin_model, margin_for_type, suggested_budget_hours
+    model = load_margin_model(getattr(proj, "entity", "mine") or "mine")
+    return suggested_budget_hours(proj.contract_amount, proj.tax_rate, margin_for_type(model, proj.project_type),
+                                  model["daily_cost"], model["hours_per_day"])
+
+
 def _day_log(rows, limit: Optional[int] = None) -> list:
     """逐日流水：[{date, items:[ts_dict…]}, …] 新的在前（專案時間軸與人員逐日同一形狀）。"""
     days: dict = {}
@@ -358,6 +368,8 @@ async def project_file(request: Request, name: str = "", project_id: str = ""):
         "budget_hours": budget, **budget_burn(m["total"], budget),
         "quote_days": quote_days,
         "quote_hours": quote_days * HOURS_PER_WORKDAY if quote_days else None,
+        "suggested_hours": _suggested_for(proj),
+        "project_type": getattr(proj, "project_type", "") or "",
         "by_month": rows_by_month(rows),
         "timeline": _day_log(rows),                 # 全部逐日，不截（前端按月分段）
         "similar": similar_projects(sim_name, split_sheet_name(sim_name)[0], m["total"], cands),
@@ -412,6 +424,26 @@ async def person_file(request: Request, name: str = "", month: str = ""):
         "composition": type_composition((r.work_type, r.hours) for r in rows),
         "trend": rows_by_month(year_rows),
     }
+
+
+@router.post("/budgets/suggest")
+async def apply_suggested_budgets(request: Request, overwrite: bool = False):
+    """把「預期毛利 × 日成本」算出來的建議預算寫進 budget_hours。預設只填**沒設**的案；
+    overwrite=1 才連已設的一起蓋（Sheet 灌進來的預算是 owner 的決定，不預設洗掉）。"""
+    _require_mine_admin(request, level="full")
+    factory = db_factory_or_503()
+    applied = 0
+    async with factory() as session:
+        items = await burn_rows(session)
+        targets = {i["project_id"]: i["suggested_hours"] for i in items
+                   if i["suggested_hours"] and (overwrite or not i["budget_hours"])}
+        projs = (await session.execute(
+            select(CrmProject).where(CrmProject.id.in_(targets)))).scalars().all() if targets else []
+        for p in projs:
+            p.budget_hours = targets[p.id]
+            applied += 1
+        await session.commit()
+    return {"status": "ok", "applied": applied}
 
 
 @router.put("/project_budget")

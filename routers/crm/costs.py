@@ -855,6 +855,10 @@ async def project_financial_summary(project_id: str):
     m = project_margin(contract, tax_rate, expense_actual, staff_actual)
     ex_tax = m["ex_tax"]
     profit_target = int(ex_tax * (project.profit_target_pct or 20) / 100)
+    from core.finance_logic import load_margin_model, margin_for_type, suggested_budget_hours
+    _model = load_margin_model(project.entity or "mine")
+    _type_margin = margin_for_type(_model, project.project_type)
+    _suggested_hours = suggested_budget_hours(contract, tax_rate, _type_margin, _model["daily_cost"], _model["hours_per_day"])
     misc_budget = int(ex_tax * (project.misc_budget_pct or 5) / 100)
     outsource_budget = ex_tax - profit_target - misc_budget
 
@@ -867,6 +871,8 @@ async def project_financial_summary(project_id: str):
         "profit_target": profit_target, "profit_target_pct": project.profit_target_pct or 20,
         "misc_budget": misc_budget, "misc_budget_pct": project.misc_budget_pct or 5,
         "outsource_budget": outsource_budget,
+        # 私帳設定的預期毛利表（owner 2026-09-03）：這個案型預期多少毛利、換算成多少工時預算
+        "type_margin_pct": _type_margin, "suggested_budget_hours": _suggested_hours,
         "expense_estimated": expense_estimated, "expense_actual": expense_actual,
         "staff_estimated": staff_estimated, "staff_actual": staff_actual,
         "total_cost": total_cost, "actual_profit": actual_profit, "profit_rate": profit_rate,
