@@ -6,16 +6,15 @@
  *    認得的狀態（計畫 §7）。
  * 字彙（款項／種類／類別／品項）全部來自 /options.invoice。
  */
+import { invoiceAmounts } from '/js/shared/invoice-amounts.js';
 import { mfetch, toast, esc, todayLocal, money, fmtDate } from '../shell.js';
-import { state, invoiceVocab, opt, selectOpts, skeleton, emptyBox, errBox, pill, withBusy } from '../ui.js';
+import { state, opt, selectOpts, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad } from '../ui.js';
 
 const F = (id) => document.getElementById('inv-' + id);
 const VOLATILE = ['title', 'invoice_number', 'amount_ex_tax', 'amount_total', 'company_name', 'tax_id', 'item_type', 'notes'];
 
-function taxRate() {
-    const pct = Number((opt().invoice || {}).vat_pct);
-    return 1 + (Number.isFinite(pct) ? pct : 5) / 100;
-}
+// 稅率是後端的那一份（/options.invoice.vat_pct）；沒給就讓 invoiceAmounts 用它的預設
+const vatPct = () => (opt().invoice || {}).vat_pct;
 
 function formHtml() {
     const inv = opt().invoice || {};
@@ -64,14 +63,8 @@ function wireAmounts() {
     F('payment_type').addEventListener('change', syncStatusOptions);
     syncStatusOptions();
     const ex = F('amount_ex_tax'), tot = F('amount_total');
-    ex.addEventListener('input', () => {
-        const n = parseInt(ex.value) || 0;
-        tot.value = n ? Math.round(n * taxRate()) : '';
-    });
-    tot.addEventListener('input', () => {
-        const n = parseInt(tot.value) || 0;
-        ex.value = n ? Math.round(n / taxRate()) : '';
-    });
+    ex.addEventListener('input', () => { tot.value = invoiceAmounts(ex.value, 'ex', vatPct()).amount_total ?? ''; });
+    tot.addEventListener('input', () => { ex.value = invoiceAmounts(tot.value, 'total', vatPct()).amount_ex_tax ?? ''; });
 }
 
 async function loadProjects() {
@@ -133,6 +126,7 @@ async function submit(ev) {
             for (const k of VOLATILE) F(k).value = '';
             F('invoice_date').value = todayLocal();
             window.scrollTo({ top: 0, behavior: 'smooth' });
+            markStale('invoice');
             loadRecent();
         } catch (e) { toast(e.message || '建立失敗', 'err'); }
     });
@@ -141,10 +135,9 @@ async function submit(ev) {
 async function loadRecent() {
     const box = document.getElementById('inv-recent');
     try {
-        const d = await mfetch('/api/v1/crm/invoices');
-        const rows = (d.invoices || []).slice()
-            .sort((a, b) => String(b.created_at || b.invoice_date || '').localeCompare(String(a.created_at || a.invoice_date || '')))
-            .slice(0, 10);
+        // 排序與筆數交給後端（order=recent：建立時間新→舊）
+        const d = await mfetch('/api/v1/crm/invoices?limit=10&order=recent');
+        const rows = d.invoices || [];
         if (!rows.length) { box.innerHTML = emptyBox('尚無發票'); return; }
         box.innerHTML = rows.map(inv => `
           <div class="m-card">
@@ -161,10 +154,11 @@ export async function render(host, { first }) {
         host.innerHTML = formHtml();
         wireAmounts();
         document.getElementById('inv-form').addEventListener('submit', submit);
+        shouldLoad('invoice', { first });
         await Promise.all([loadProjects(), loadRecent()]);
         return;
     }
     // 從專案抽屜「開發票」過來：新案子可能還不在清單裡，重載一次再套預設
     if (state.invoicePreset) await loadProjects();
-    loadRecent();
+    if (shouldLoad('invoice', { first })) loadRecent();
 }

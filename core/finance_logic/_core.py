@@ -898,6 +898,14 @@ def issue_status_for(invoice_number, current: str = "") -> str:
     return INVOICE_ISSUED if (invoice_number or "").strip() else INVOICE_NOT_ISSUED
 
 
+#: 報價狀態字彙的唯一家（順序＝工作流：草稿→寄送→簽核／拒絕）。
+#: 桌機報價本的 `_QUOTE_STATUSES`（frontend/tabs/crm/crm-quotes.js）是它的鏡射；
+#: 手機版 /options 與 `quotation_stats` 的 pending 都從這裡拿字，不各自寫一份。
+QUOTE_STATUSES = ("草稿", "已寄送", "已簽核", "已拒絕")
+#: 「待回覆」＝已寄出還沒簽回的那一格。
+QUOTE_PENDING = "已寄送"
+
+
 def initial_invoice_status(payment_type: str, unpaid: bool = False) -> str:
     """開一張發票時的初始款項狀態。方向決定，不是呼叫端各自決定。
 

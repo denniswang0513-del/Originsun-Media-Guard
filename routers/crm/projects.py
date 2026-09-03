@@ -578,6 +578,17 @@ async def _latest_proposal_status(session, project_id: str) -> str:
     )).scalar() or ""
 
 
+async def project_wire(session, project) -> dict:
+    """單筆專案的回應形狀（_to_project_dict ＋ 客戶代稱 ＋ proposal_status）。
+
+    單筆 GET／PUT／PATCH status 與手機版詳情四處共用 —— 各自拼一次的話，
+    哪天多一個鍵（例如 proposal_status 當初）就會有一條路徑漏掉。
+    """
+    client = await session.get(Client, project.client_id) if project.client_id else None
+    return {**_to_project_dict(project, client.short_name if client else ""),
+            "proposal_status": await _latest_proposal_status(session, project.id)}
+
+
 @router.get("/projects/{project_id}")
 async def get_project(project_id: str, request: Request):
     _require_db()
@@ -591,12 +602,7 @@ async def get_project(project_id: str, request: Request):
         # 403 等於承認「有這個案子只是你不能看」，那本身就是洩漏。
         if (project.entity or "parent") == "mine" and _hide_mine(request):
             raise HTTPException(status_code=404, detail="找不到此專案")
-        client = await session.get(Client, project.client_id)
-        client_name = client.short_name if client else ""
-        prop_status = await _latest_proposal_status(session, project_id)
-
-    return {**_to_project_dict(project, client_name),
-            "proposal_status": prop_status}
+        return await project_wire(session, project)
 
 
 def _apply_status_side_effects(project, old_status: str) -> None:
@@ -732,13 +738,9 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
                     else await _rename_asset_folders(session, project))
         await session.commit()
         await session.refresh(project)
-        client = await session.get(Client, project.client_id)
-        client_name = client.short_name if client else ""
-        prop_status = await _latest_proposal_status(session, project_id)
+        wire = await project_wire(session, project)
 
-    result = {"status": "ok",
-              "project": {**_to_project_dict(project, client_name),
-                          "proposal_status": prop_status}}
+    result = {"status": "ok", "project": wire}
     if warnings:
         result["warning"] = "；".join(warnings)
     return result
@@ -807,13 +809,9 @@ async def update_project_status(project_id: str, request: Request):
             project.amount_receivable = int(amount_receivable)
         await session.commit()
         await session.refresh(project)
-        client = await session.get(Client, project.client_id)
-        client_name = client.short_name if client else ""
-        prop_status = await _latest_proposal_status(session, project_id)
+        wire = await project_wire(session, project)
 
-    return {"status": "ok",
-            "project": {**_to_project_dict(project, client_name),
-                        "proposal_status": prop_status}}
+    return {"status": "ok", "project": wire}
 
 
 # ── Project CSV Import ──────────────────────────────────────

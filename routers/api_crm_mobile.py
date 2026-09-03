@@ -5,7 +5,7 @@
 其餘寫入直接打既有 CRM 端點 —— 狀態規則在後端已經定案，手機頁不自己寫死。
 
 守衛：讀 `check_logged_in`（router 層，跟 CRM 主 router 同一條底線）；
-寫 `_check_write`（一期只給 Lv3）。路徑落在 CRM_PREFIX 底下，所以
+寫 `_check_write`（`MOBILE_WRITE_MODULES`，一期空＝只給 Lv3）。路徑落在 CRM_PREFIX 底下，所以
 tests/unit/test_crm_read_guard（每支 GET 匿名要 401）與
 tests/unit/test_money_visibility（每條路由要掛 MoneyRedactRoute）都會管到這裡。
 
@@ -16,34 +16,31 @@ route class 自動抹掉。報價／請款／發票那幾組回應帶著名單�
 """
 from __future__ import annotations
 
-from datetime import date
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from core.auth import check_admin, check_logged_in
+from core.auth import check_logged_in, payload_grants
 from core.crm_logic import prepend_note
-from core.finance_logic import initial_invoice_status, project_type_vocab
+from core.finance_logic import (QUOTE_PENDING, QUOTE_STATUSES, VAT_PCT,
+                                initial_invoice_status, project_type_vocab)
 from core.hr_logic import budget_burn, day_iso
 from core.ledger import hide_mine_projects, not_mine
 from core.money import MoneyRedactRoute, can_see_money, viewer_has_mine_scope
 from core.project_flow import LOST, PIPELINE
 from core.schemas import MobileNotePayload, MobileQuoteStatusPayload
 
-from routers.crm._shared import (CRM_PREFIX, _crm_session, _fmt_minute, _now,
+from routers.crm._shared import (CRM_PREFIX, _check_status_auth, _crm_session,
+                                 _fmt_minute, _module_guard, _now,
                                  _project_or_404, _username)
-from routers.crm.cash import payables_summary, receivables_summary
 from routers.crm.costs import project_financial_summary
 from routers.crm.finance import _to_invoice_dict
 from routers.crm.payments import _to_payment_dict
-from routers.crm.projects import (_latest_proposal_status, _to_project_dict,
-                                  apply_project_status)
+from routers.crm.projects import apply_project_status, project_wire
 from routers.crm.quotes import _to_quotation_dict, project_quotation_rows
-from services.timesheet_lookup import budgets_for
 
 try:
     from sqlalchemy import func, or_, select
     from db.models import (Client, CrmInvoice, CrmPaymentRequest, CrmProject,
-                           CrmProjectExpense, CrmQuotation, Timesheet, User)
+                           CrmProjectExpense, CrmQuotation, Timesheet)
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同 CRM 套件的 try/except
     pass
 
@@ -51,36 +48,26 @@ router = APIRouter(prefix=f"{CRM_PREFIX}/m", tags=["CRM 手機版"],
                    dependencies=[Depends(check_logged_in)],
                    route_class=MoneyRedactRoute)
 
-# 寫入守衛：一期只給 Lv3（owner＋財務）。
-# 要開給助理改成 `lambda r: check_admin_or_module(r, "crm_projects")` 這一行就好 ——
-# /options 的 `me.can_write` 也是問這一支，畫面上的按鈕會跟著一起開。
-_check_write = check_admin
+# 寫入守衛的模組清單：一期只給 Lv3（owner＋財務）＝空 tuple（`_module_guard()` 零 key
+# 等同 check_admin）。要開給助理填 ('crm_projects',) 這一行就好 ——
+# /options 的 `me.can_write` 問的是同一份清單（payload_grants），按鈕會跟著一起開。
+MOBILE_WRITE_MODULES: tuple[str, ...] = ()
+_check_write = _module_guard(*MOBILE_WRITE_MODULES)
 
 # 字彙（手機頁不寫死任何一份：docs/CRM_MOBILE_PLAN.md §7 坑 1）。
-# 報價／請款狀態的正本是 db/models/_crm.py 那兩欄的註解；
-# `quotation_stats` 也拿「已寄送」當 pending，跟 /home 同一個字。
-QUOTE_STATUSES = ("草稿", "已寄送", "已簽核", "已拒絕")
+# 報價狀態的家在 core.finance_logic（QUOTE_STATUSES / QUOTE_PENDING，
+# `quotation_stats` 的 pending 也用同一個字）；請款狀態的正本是 db/models/_crm.py 那欄的註解。
 PAYMENT_STATUSES = ("未付款", "應付款", "已付款")
 INVOICE_VOCAB = {
     "payment_types": ["收款", "付款"],
     "kinds": ["電子發票", "紙本發票"],
     "categories": ["專案", "內部代開"],
 }
-QUOTE_PENDING = "已寄送"
 ACTIVE_STATUS = "製作"
 # 「製作」之前的階段＝還在賣：簽回報價才有「啟動專案」這件事；
 # 已經在製作／結案的案子按了不動（不會把結案的案子拉回製作）。
 PRESALE = PIPELINE[:PIPELINE.index(ACTIVE_STATUS)]
 NOTE_MAX = 500
-
-
-def _can_write(request: Request) -> bool:
-    """`me.can_write`：問的是同一支守衛，守衛換人時按鈕跟著換。"""
-    try:
-        _check_write(request)
-        return True
-    except HTTPException:
-        return False
 
 
 def _iso(dt) -> str | None:
@@ -127,26 +114,17 @@ def _money_visible(request: Request, project) -> bool:
     return (project.entity or "parent") != "mine" or viewer_has_mine_scope(request)
 
 
-async def _project_wire(session, project, project_id: str) -> dict:
-    """桌機詳情的回應形狀（_to_project_dict ＋ proposal_status），兩處共用。"""
-    client = await session.get(Client, project.client_id) if project.client_id else None
-    return {**_to_project_dict(project, client.short_name if client else ""),
-            "proposal_status": await _latest_proposal_status(session, project_id)}
-
-
 # ── 端點 ─────────────────────────────────────────────────────
 
 @router.get("/options")
 async def mobile_options(request: Request):
-    """表單字彙一次給齊：階段、案型、客戶、AM、報價／請款狀態、發票欄位選項、我是誰。"""
+    """表單字彙一次給齊：階段、案型、客戶、報價／請款狀態、發票欄位選項、我是誰。"""
     payload = check_logged_in(request)
     async with _crm_session() as session:
         clients = (await session.execute(
             select(Client.id, Client.short_name)
             .where(not_mine(Client.entity))          # 同桌機 list_clients 預設：私帳那筆不混進來
             .order_by(Client.short_name))).all()
-        users = (await session.execute(
-            select(User.username).order_by(User.username))).all()
         # 最近常用的品項：手機上打字最貴，前 20 個當選單，其餘照樣可以手打
         item_types = (await session.execute(
             select(CrmInvoice.item_type, func.count(CrmInvoice.id))
@@ -159,8 +137,6 @@ async def mobile_options(request: Request):
         "lost_phase": LOST,                       # 前端據此在推階段前就先要「未成案原因」
         "project_types": project_type_vocab(),
         "clients": [{"id": cid, "short_name": name or ""} for cid, name in clients],
-        # 帳號沒有顯示名欄位，display_name 先等於 username —— 鍵留著，將來加了欄位前端不用改
-        "users": [{"username": u, "display_name": u} for (u,) in users],
         "quote_statuses": list(QUOTE_STATUSES),
         "payment_statuses": list(PAYMENT_STATUSES),
         "invoice": {
@@ -169,11 +145,14 @@ async def mobile_options(request: Request):
             # 由 initial_invoice_status 算出來，手機頁只負責讓人選，不自己寫字
             "statuses_by_type": {pt: [initial_invoice_status(pt), initial_invoice_status(pt, unpaid=True)]
                                  for pt in INVOICE_VOCAB["payment_types"]},
+            # 營業稅率：發票表單未稅／含稅互推用後端的那一份，不在瀏覽器再寫一個 5
+            "vat_pct": VAT_PCT,
         },
         "me": {
             "username": payload.get("username") or payload.get("sub") or "",
             "access_level": payload.get("access_level", 0),
-            "can_write": _can_write(request),
+            # 跟 _check_write 問同一份清單：零 key＝只有管理員（同 check_admin_or_module）
+            "can_write": payload_grants(payload, *MOBILE_WRITE_MODULES),
             "money_view": can_see_money(request),
         },
     }
@@ -181,11 +160,7 @@ async def mobile_options(request: Request):
 
 @router.get("/home")
 async def mobile_home(request: Request):
-    """首頁數字：進行中專案數、待回覆報價數、應收／本月應付合計、最近更新 5 案。
-
-    兩個合計借既有 /receivables/summary（全部未收：那支沒有月份桶）與
-    /payables/summary?month=本月 的 grand_total；沒 money_view 的人鍵不在。
-    """
+    """首頁兩個數字：進行中專案數、待回覆報價數（專案分頁頂端的 strip 用）。"""
     async with _crm_session() as session:
         active = (await session.execute(
             select(func.count(CrmProject.id))
@@ -197,27 +172,7 @@ async def mobile_home(request: Request):
             .join(CrmProject, CrmProject.id == CrmQuotation.project_id)
             .where(not_mine(CrmProject.entity))
             .where(CrmQuotation.status == QUOTE_PENDING))).scalar() or 0
-        recent = (await session.execute(
-            _company_projects().order_by(CrmProject.updated_at.desc(), CrmProject.id)
-            .limit(5))).all()
-    out = {
-        "projects_active": int(active),
-        "quotes_pending": int(pending),
-        "recent": [_slim_project(p, cname) for p, cname in recent],
-    }
-    if can_see_money(request):
-        # 直接呼叫端點函式（它們的 money_dep 只掛在 router 上），scope 由 require_entity 再驗一次；
-        # 驗不過（例如只有合夥人 key）就當「沒有這個數字」，不讓首頁整頁 403。
-        # 參數要全部明給：直接呼叫時 `Query("")` 預設值是 Query 物件不是字串。
-        month = date.today().strftime("%Y-%m")
-        try:
-            out["receivable_month"] = (await receivables_summary(
-                request, status="", entity=""))["grand_total"]
-            out["payable_month"] = (await payables_summary(
-                request, month=month, status="", entity=""))["grand_total"]
-        except HTTPException:
-            out["receivable_month"] = out["payable_month"] = None
-    return out
+    return {"projects_active": int(active), "quotes_pending": int(pending)}
 
 
 @router.get("/projects")
@@ -248,7 +203,7 @@ async def mobile_project_detail(project_id: str, request: Request):
     async with _crm_session() as session:
         project = await _project_visible_or_404(session, request, project_id)
         show_money = _money_visible(request, project)
-        out = {"project": await _project_wire(session, project, project_id),
+        out = {"project": await project_wire(session, project),
                "notes": project.notes or ""}
         if show_money:
             out["quotes"] = [_to_quotation_dict(q, project_name=project.name or "")
@@ -278,15 +233,16 @@ async def mobile_project_detail(project_id: str, request: Request):
         hours = (await session.execute(
             select(func.coalesce(func.sum(Timesheet.hours), 0))
             .where(Timesheet.project_id == project_id, Timesheet.hours > 0))).scalar() or 0
-        budget = (await budgets_for(session, [project_id])).get(project_id)
+        # 預算直接讀專案列（services.timesheet_lookup.budgets_for 讀的也是這一欄；0＝沒預算）
+        budget = project.budget_hours or None
     burn = budget_burn(hours, budget)
     out["burn"] = {"hours_used": round(float(hours), 1), "budget_hours": budget,
                    "pct": None if burn["pct"] is None else int(round(burn["pct"]))}
     if show_money:
+        # 只夾 `project` 沒有的鍵（合約／應收／已收／款項狀態 _to_project_dict 已經帶了）
         s = await project_financial_summary(project_id)
         out["summary"] = {k: s.get(k) for k in (
-            "contract_amount", "ex_tax", "amount_receivable", "amount_received",
-            "payment_status", "expense_actual", "staff_actual", "total_cost",
+            "ex_tax", "expense_actual", "staff_actual", "total_cost",
             "actual_profit", "profit_rate")}
     return out
 
@@ -328,6 +284,9 @@ async def mobile_quotation_status(quotation_id: str, req: MobileQuoteStatusPaylo
         q.status = req.status
         q.updated_at = _now()
         if req.activate and project is not None and (project.status or "") in PRESALE:
+            # 推階段的政策跟桌機 PATCH /projects/{id}/status 同一支（ADVANCE_MODULES）：
+            # 能改報價狀態不等於能把案子推進製作
+            _check_status_auth(request)
             await apply_project_status(session, project, ACTIVE_STATUS)
         await session.commit()
         await session.refresh(q)
@@ -338,7 +297,7 @@ async def mobile_quotation_status(quotation_id: str, req: MobileQuoteStatusPaylo
             client = await session.get(Client, project.client_id) if project.client_id else None
             client_name = client.short_name if client else ""
             if req.activate:
-                project_out = await _project_wire(session, project, project.id)
+                project_out = await project_wire(session, project)
         quotation = _to_quotation_dict(q, project_name=project.name if project else "",
                                        client_short_name=client_name)
     return {"status": "ok", "quotation": quotation, "project": project_out}

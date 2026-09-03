@@ -53,6 +53,25 @@ def test_shell_refreshes_token_silently():
     assert "/api/v1/auth/refresh" in SHELL
 
 
+def test_shell_borrows_shared_leaves_instead_of_copying():
+    """esc 只有 dom.js 一份；GIS 登入按鈕只有 js/shared/google-signin.js 一份
+    （SPA 的 js/auth/google-oauth.js 與手機殼都只是呼叫端）。"""
+    body = js_code_only(SHELL)
+    assert "import { esc } from '/js/shared/dom.js'" in body
+    assert "export const esc" not in body and "export function esc" not in body
+    assert "initGoogleSignIn(" in body and "renderButton" not in body
+    oauth = js_code_only(repo_src("frontend/js/auth/google-oauth.js"))
+    assert "initGoogleSignIn(" in oauth and "renderButton" not in oauth, "SPA 殼又抄了一份 GIS"
+    leaf = js_code_only(repo_src("frontend/js/shared/google-signin.js"))
+    assert "renderButton" in leaf and "import" not in leaf, "google-signin.js 必須是零 import 的葉節點"
+
+
+def test_invoice_amounts_come_from_the_shared_leaf():
+    src = js_code_only(repo_src("frontend/m/views/invoice.js"))
+    assert "from '/js/shared/invoice-amounts.js'" in src
+    assert "1.05" not in src and "taxRate" not in src, "手機頁自己算稅率"
+
+
 # ── 2. 不寫死字彙 ─────────────────────────────────────────
 
 VOCAB = ("未收款", "已收款", "已撥款", "草稿", "已寄送", "已簽核", "電子發票", "已付款", "應付款")
@@ -71,7 +90,7 @@ def test_invoice_form_lets_the_server_decide_status():
     issue_status 只准送空字串（後端看發票號碼）。"""
     src = js_code_only(repo_src("frontend/m/views/invoice.js"))
     assert "/api/v1/crm/invoices" in src
-    assert "statuses_by_type" in src and "F('payment_status').value || ''" in src
+    assert "statuses_by_type" in src
     assert "issue_status: ''" in src, "issue_status 只准送空字串，不准自己決定（後端看發票號碼）"
     api = code_only(repo_src("routers/api_crm_mobile.py"))
     assert "initial_invoice_status(pt, unpaid=True)" in api      # 選項由規則算，不是另一份手抄
@@ -115,7 +134,7 @@ def test_petty_tab_mounts_the_existing_module():
     """零用金不另做表單：掛 tabs/petty/petty-view.js 的 renderMine（同 /petty-cash.html）。"""
     src = repo_src("frontend/m/views/petty.js")
     assert "/tabs/petty/petty-view.js" in src and "renderMine" in src
-    assert "mfetch: authFetch" in src and "bearerHeader()" in src, "宿主合約同 petty-cash.html"
+    assert "window.__petty" not in src, "fetch 出口是 petty-view 自己的預設宿主（authFetch），分頁不再設 shim"
     for p in _page_modules():
         assert "/api/v1/crm/petty/" not in p.read_text(encoding="utf-8"), \
             f"{p.name} 自己打零用金端點 —— 那是 petty-view.js 的事"
@@ -140,7 +159,11 @@ def test_no_emoji_in_ui_text():
 # ── 4. 舊頁退場 ───────────────────────────────────────────
 
 def test_old_invoice_page_redirects_first():
+    """/invoice.html 只剩轉址殼（meta refresh ＋ location.replace ＋ 純連結後備），沒有表單。"""
     src = repo_src("frontend/invoice.html")
     script = src.split("<script>", 1)[1]
     first = next(l for l in script.splitlines() if l.strip())
     assert first.strip().startswith("location.replace('/m/crm.html#invoice')"), first
+    assert 'content="0;url=/m/crm.html#invoice"' in src
+    assert 'href="/m/crm.html#invoice"' in src
+    assert "<form" not in src and "fetch(" not in src, "舊表單要整個退場，不是留一半"

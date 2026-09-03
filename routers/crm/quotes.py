@@ -9,6 +9,7 @@ from datetime import datetime
 
 from fastapi import Depends, HTTPException, Request, Query
 
+from core.finance_logic import QUOTE_PENDING
 from core.schemas import QuotationPayload, QuotationTemplatePayload
 
 from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory,
@@ -148,7 +149,7 @@ async def quotation_stats():
         row = (await session.execute(
             select(
                 sa_func.count().label("total_count"),
-                sa_func.sum(case((CrmQuotation.status == "已寄送", 1), else_=0)).label("pending"),
+                sa_func.sum(case((CrmQuotation.status == QUOTE_PENDING, 1), else_=0)).label("pending"),
                 sa_func.sum(case((CrmQuotation.status == "已簽核", 1), else_=0)).label("signed"),
                 sa_func.sum(case((CrmQuotation.created_at >= month_start, price_col), else_=0)).label("month_total"),
             )

@@ -14,7 +14,7 @@
 """
 import re
 from pathlib import Path
-from tests.unit._srcscan import js_func_body
+from tests.unit._srcscan import js_code_only, js_func_body
 
 
 import pytest
@@ -374,26 +374,31 @@ def test_project_page_imports_stay_inside_the_closure():
     assert (FRONTEND / "tabs/proposals/expense-view.js").exists()
 
 
-def test_both_hosts_share_one_fetch_contract():
-    """🔴 零用金元件有**兩個宿主**（獨立頁 /petty-cash.html、CRM 財務子視圖）。
+PETTY_HOSTS = ("petty-cash.html", "tabs/finance/subviews/petty.js", "m/views/petty.js")
 
-    元件把 body 當**物件**交出去，由宿主的 fetch 包裝 stringify（對齊
-    `js/shared/utils.authFetch`）。任一邊改成自己 stringify，就變成雙重編碼，
-    後端收到的是一個 JSON 字串而不是物件 → 422，而且只壞一個宿主。
+
+def test_all_hosts_share_one_fetch_contract():
+    """🔴 零用金元件有**三個宿主**（獨立頁 /petty-cash.html、CRM 財務子視圖、手機 CRM 分頁）。
+
+    元件把 body 當**物件**交出去，由 fetch 包裝 stringify（對齊
+    `js/shared/utils.authFetch`）。元件自己 stringify 就變成雙重編碼，後端收到的
+    是一個 JSON 字串而不是物件 → 422。
+
+    fetch 出口只有元件自己的預設宿主一份（DEFAULT_HOST＝authFetch；上傳走
+    bearerHeader() 讓瀏覽器補 multipart boundary）。三個宿主都不再各設一次
+    `window.__petty` —— 第三個宿主出現時三份 shim 就漂了。
     """
     send = PETTY_VIEW.split("async function send(")[1].split("\n}")[0]
     assert "JSON.stringify" not in send, "元件不該自己 stringify（宿主負責）"
 
-    # 兩個宿主現在接的是**同一個函式**（js/shared/utils.authFetch）——
-    # 合約不可能分岔；這裡釘住誰都不准再長出自己的本地版
-    standalone = (FRONTEND / "petty-cash.html").read_text(encoding="utf-8")
-    assert "mfetch: authFetch" in standalone, "獨立頁該直接接 authFetch"
-    assert "async function mfetch(" not in standalone, "獨立頁不准再有本地 mfetch 複本"
-    sub = (FRONTEND / "tabs" / "finance" / "subviews" / "petty.js").read_text(encoding="utf-8")
-    assert "mfetch: authFetch" in sub, "子視圖應直接接 authFetch（同一份合約）"
-    # 上傳例外：authFetch 會補 JSON header 並 stringify FormData
-    assert "bearerHeader()" in sub and "bearerHeader()" in standalone, \
-        "FormData 上傳不能走 authFetch"
+    head = PETTY_VIEW.split("async function get(")[0]
+    assert "const DEFAULT_HOST = {" in head and "mfetch: authFetch" in head, "元件沒有自己的預設宿主"
+    assert "bearerHeader()" in head, "FormData 上傳不能走 authFetch"
+    assert "window.__petty || DEFAULT_HOST" in head, "沒有 shim 時要退回預設宿主"
+    for rel in PETTY_HOSTS:
+        src = js_code_only((FRONTEND / rel).read_text(encoding="utf-8"))
+        assert "window.__petty" not in src, f"{rel} 又長出自己的 fetch shim"
+        assert "async function mfetch(" not in src, f"{rel} 不准再有本地 mfetch 複本"
 
 
 def test_binding_a_project_also_attaches_a_cost_group():

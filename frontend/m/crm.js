@@ -70,7 +70,7 @@ async function main() {
         return;
     }
     const meOpt = state.options.me || {};
-    state.canWrite = meOpt.can_write !== undefined ? !!meOpt.can_write : (me.access_level || 0) >= 3;
+    state.canWrite = !!meOpt.can_write;
     document.body.classList.toggle('no-write', !state.canWrite);
     if (!state.canWrite) toast('此帳號只能檢視，寫入功能已隱藏', 'err');
     await render();

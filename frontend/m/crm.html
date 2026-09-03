@@ -14,7 +14,7 @@
 <link rel="icon" href="/m/icon-192.png">
 <title>Originsun CRM</title>
 <!-- CRM 手機版（docs/CRM_MOBILE_PLAN.md）：現場輸入＋快看，跟桌機版分開。
-     五個分頁（專案／發票／報價／付款／新增），hash 路由；殼只有 ./shell.js 一份。
+     五個分頁（發票／零用金／專案／報價／付款），hash 路由；殼只有 ./shell.js 一份。
      閘門：管理員（Lv3）或擁有「crm_projects」模組；寫入鈕再看 /options 的 me.can_write。
      字彙（階段／案型／狀態／款項／發票種類）全部來自 GET /api/v1/crm/m/options，
      這裡一個都不寫死 —— /invoice.html 寫死 payment_status 的下場見計畫 §7。
@@ -79,7 +79,6 @@
   .m-card .sub { color:var(--sub); font-size:12px; margin-top:4px; line-height:1.5; }
   .m-card .row { display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:13px; }
   .amt { font-variant-numeric:tabular-nums; font-weight:600; }
-  .amt.sub { font-weight:400; }
   .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:11px; border:1px solid var(--line);
     color:var(--sub); white-space:nowrap; }
   .pill.pri { color:var(--pri); border-color:var(--pri); }

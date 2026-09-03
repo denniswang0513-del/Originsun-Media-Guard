@@ -99,18 +99,11 @@
 import { renderMine, renderAccounts, renderClaims, renderLabels, renderOverview }
     from "/tabs/petty/petty-view.js";
 
-import { authFetch, bearerHeader } from "/js/shared/utils.js";
+import { authFetch } from "/js/shared/utils.js";
 
 const TOKEN_KEY = "auth_token";
 const $ = (id) => document.getElementById(id);
-// fetch 出口與 CRM 子視圖宿主**同一份**（utils.js：「新分頁一律 import 這份，
-// 勿再複製第 N 份」）。上傳不能走 authFetch —— 它會補 JSON header 並把
-// FormData 拿去 stringify，走 bearerHeader() 讓瀏覽器自己補 boundary。
-window.__petty = {
-    mfetch: authFetch,
-    ufetch: (path, form) => fetch(path, {
-        method: "POST", headers: bearerHeader(), body: form }),
-};
+// 元件的 fetch 出口（authFetch）是 petty-view.js 自己的預設宿主，這裡不用再設。
 
 function _show(view) {
     for (const v of ["login-view", "noperm-view", "app-view"])

@@ -5,17 +5,20 @@
  */
 import { mfetch, toast, esc, money, fmtDate } from '../shell.js';
 import { state, list, lostPhase, opt, selectOpts, skeleton, emptyBox, errBox, pill, statusPill,
-         moneyCell, withBusy, openSheet, closeSheet, sheetBody, switchTab } from '../ui.js';
+         moneyCell, withBusy, openSheet, closeSheet, switchTab, markStale, shouldLoad } from '../ui.js';
 
 const PAGE = 30;
 const st = { phase: '', q: '', items: [], offset: 0, total: 0, loading: false };
 let _debounce = null;
 
+// 詳情抽屜的錢：前三列在 d.project（_to_project_dict 就帶著），其餘在 d.summary
+// （project_financial_summary 的白名單，鍵不在＝沒 money_view 被抹掉 → 整列不畫）
+const PROJECT_MONEY = [['contract_amount', '合約'], ['amount_received', '已收'], ['amount_receivable', '應收']];
 const SUMMARY_LABELS = [
-    ['contract_amount', '合約'], ['amount_receivable', '應收'], ['amount_received', '已收'],
-    ['quoted_total', '報價'], ['expenses_total', '雜支'], ['payments_total', '請款'],
-    ['invoiced_total', '已開票'], ['profit', '毛利'], ['profit_pct', '毛利率'],
+    ['ex_tax', '未稅'], ['expense_actual', '雜支實際'], ['staff_actual', '人力實際'],
+    ['total_cost', '總成本'], ['actual_profit', '毛利'], ['profit_rate', '毛利率'],
 ];
+const PCT_KEYS = new Set(['profit_rate']);
 
 function layout() {
     return `
@@ -77,8 +80,11 @@ const section = (title, rows, empty) => `<div class="m-h">${esc(title)}</div>${r
 function detailHtml(d) {
     const p = d.project || {}, s = d.summary || {}, b = d.burn || null;
     const amt = (o, k) => (k in o ? money(o[k]) : null);
-    const summaryRows = SUMMARY_LABELS.filter(([k]) => k in s)
-        .map(([k, lab]) => kv(lab, `<span class="amt">${k.endsWith('_pct') ? esc(String(s[k])) + '%' : money(s[k])}</span>`));
+    const moneyRow = (o, k, lab) => kv(lab, `<span class="amt">${PCT_KEYS.has(k) ? esc(String(o[k] ?? '–')) + '%' : money(o[k])}</span>`);
+    const summaryRows = [
+        ...PROJECT_MONEY.filter(([k]) => k in p).map(([k, lab]) => moneyRow(p, k, lab)),
+        ...SUMMARY_LABELS.filter(([k]) => k in s).map(([k, lab]) => moneyRow(s, k, lab)),
+    ];
     const burnHtml = b ? `
       <div class="m-h">工時</div>
       <div class="kv"><span class="k">已用 / 預算</span><span class="v amt">${esc(String(b.hours_used ?? '–'))} / ${esc(String(b.budget_hours ?? '–'))} 小時</span></div>
@@ -103,8 +109,8 @@ function detailHtml(d) {
           `<span class="amt">${amt(x, 'amount') ?? ''}</span> ${esc(x.planned_month || '')}`)), '沒有請款')}
       ${section('發票', (d.invoices || []).map(x => li(`${esc(x.title || x.invoice_number || '')} ${pill(x.payment_status)}`,
           `<span class="amt">${amt(x, 'amount_total') ?? ''}</span> ${esc(fmtDate(x.invoice_date))}`)), '沒有發票')}
-      ${section('最近雜支', (d.expenses_recent || []).map(x => li(`${esc(x.category || '')} ${esc(x.description || x.note || '')}`,
-          `<span class="amt">${amt(x, 'amount') ?? ''}</span> ${esc(fmtDate(x.expense_date || x.date))}`)), '沒有雜支')}
+      ${section('最近雜支', (d.expenses_recent || []).map(x => li(`${esc(x.sub_item || x.category || '')} ${esc(x.payee || '')}`,
+          `<span class="amt">${amt(x, 'actual') ?? ''}</span> ${esc(fmtDate(x.created_at))}`)), '沒有雜支')}
       <div class="m-h">備註</div>
       <div class="notes" id="pj-notes">${esc(d.notes || p.notes || '') || '<span style="color:var(--sub)">（無）</span>'}</div>`;
 }
@@ -128,6 +134,7 @@ function actionBox(kind, p) {
             try {
                 await mfetch(`/api/v1/crm/projects/${encodeURIComponent(p.id)}/status`, { method: 'PATCH', body });
                 toast('已推到 ' + body.status);
+                markStale('projects');
                 await openProject(p.id);
                 loadList(true);
             } catch (e) {
@@ -148,6 +155,7 @@ function actionBox(kind, p) {
                 const r = await mfetch(`/api/v1/crm/m/projects/${encodeURIComponent(p.id)}/note`, { method: 'POST', body: { text } });
                 document.getElementById('pj-notes').textContent = r.notes || '';
                 box.innerHTML = '';
+                markStale('projects');       // updated_at 動了，清單排序跟著變
                 toast('備註已加入');
             } catch (e) { toast(e.message, 'err'); }
         }));
@@ -198,6 +206,7 @@ function openNewProject() {
             try {
                 const r = await mfetch('/api/v1/crm/projects', { method: 'POST', body: payload });
                 toast('已建立「' + payload.name + '」');
+                markStale('projects');
                 loadList(true); loadHome();
                 const id = r && r.project && r.project.id;
                 if (id) await openProject(id); else closeSheet();
@@ -207,7 +216,12 @@ function openNewProject() {
 }
 
 export async function render(host, { first }) {
-    if (!first) { if (!st.items.length) loadList(true); return; }
+    if (!first) {
+        // 切回來：60 秒內沒人改過（markStale）就不重抓；清單空著（上次抓失敗）照樣補
+        if (shouldLoad('projects', { first }) || !st.items.length) await Promise.all([loadHome(), loadList(true)]);
+        return;
+    }
+    shouldLoad('projects', { first });
     host.innerHTML = layout();
     host.querySelector('#pj-new').addEventListener('click', openNewProject);
     host.querySelector('#pj-chips').addEventListener('click', (ev) => {

@@ -215,9 +215,8 @@ def test_blank_payment_status_never_reaches_the_database():
         assert 'initial_invoice_status(' in body, f'{fn} 沒有補上空白狀態'
         assert 'normalize_invoice_status(' in body, f'{fn} 沒有正規化舊字'
 
-    # 手機登記頁不該自己決定狀態（它是獨立 HTML，沒有模組可 import）
-    html = repo_src('frontend/invoice.html')
-    assert "'已轉撥'" not in html and '"已轉撥"' not in html
+    # 手機登記頁（frontend/invoice.html）2026-09-03 起只剩轉址到 /m/crm.html#invoice；
+    # 「手機端不寫死款項狀態」的規則改由 tests/unit/test_crm_mobile_frontend 守
 
 
 def test_invoice_direction_is_never_guessed_in_the_browser():

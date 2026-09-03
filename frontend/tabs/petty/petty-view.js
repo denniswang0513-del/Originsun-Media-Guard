@@ -1,10 +1,19 @@
 // 零用金各分頁的畫面（docs/PETTY_CASH_PLAN.md §3；分頁清單見兩個宿主的 TABS）。
 //
 // import 閉包只准 `tabs/petty/` 與 `js/shared/` —— 同 /project.html 的規則。
-// fetch 包裝由宿主放在 `window.__petty` 上：**兩個宿主**（獨立頁
-// petty-cash.html、CRM 財務子視圖），合約由 test_both_hosts_share_one_fetch_contract
-// 釘住；第三個宿主出現時再改成參數注入。
-const F = () => window.__petty;
+//
+// fetch 出口：預設就是 js/shared/utils 的 authFetch（三個宿主 —— 獨立頁
+// petty-cash.html、CRM 財務子視圖、手機 CRM 分頁 —— 用的都是同一份，所以不必
+// 各自再設一次 `window.__petty`）。要換掉才設 `window.__petty = { mfetch, ufetch }`。
+// body 傳**物件**由 mfetch stringify（對齊 authFetch 合約；元件自己 stringify 就變雙重編碼）；
+// 上傳不能走 authFetch —— 它會補 JSON header 並把 FormData 拿去 stringify，
+// 走 bearerHeader() 讓瀏覽器自己補 multipart boundary。
+import { authFetch, bearerHeader } from "../../js/shared/utils.js";
+const DEFAULT_HOST = {
+    mfetch: authFetch,
+    ufetch: (path, form) => fetch(path, { method: "POST", headers: bearerHeader(), body: form }),
+};
+const F = () => window.__petty || DEFAULT_HOST;
 
 // dom.js 的 esc 是純字串替換（零依賴、公開頁也 import 得起）——
 // 帳冊一次渲染叫上萬次也扛得住；別換回 createElement 版（實測慢兩秒多）。

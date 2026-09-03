@@ -134,6 +134,26 @@ def _get_user_role_name(u: dict) -> str:
     return u.get('role_name') or u.get('role') or DEFAULT_ROLE
 
 
+def _issue_token(user: dict, **extra) -> dict:
+    """簽一顆登入 JWT 並回 login 形狀的 dict（token／username／role_name／access_level／modules）。
+
+    密碼登入、重設密碼、Google 登入、token 續期四條路都從這裡出去 —— 各自拼一次的話，
+    payload 多一個 claim 就會有一條路漏掉（續期那條當初就是這樣長出來的）。
+    `extra` 是各入口自己的附加鍵（first_login／email／avatar_url／auth_method）。
+    """
+    role_name = _get_user_role_name(user)
+    access_level = user.get('access_level', 0)
+    modules = user.get('modules', [])
+    token = create_token({
+        'sub': user['username'], 'role_name': role_name,
+        'access_level': access_level, 'modules': modules,
+    })
+    return {
+        'token': token, 'username': user['username'], 'role_name': role_name,
+        'access_level': access_level, 'modules': modules, **extra,
+    }
+
+
 def _compute_auth_method(u: dict) -> str:
     """Compute auth method string from a user dict."""
     has_pwd = bool(u.get('password_hash'))
@@ -366,22 +386,7 @@ async def login(req: LoginRequest):
     if not verify_password(req.password, user['password_hash']):
         raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
 
-    role_name = _get_user_role_name(user)
-    access_level = user.get('access_level', 0)
-    modules = user.get('modules', [])
-
-    token = create_token({
-        'sub': user['username'], 'role_name': role_name,
-        'access_level': access_level, 'modules': modules,
-    })
-    return {
-        'token': token,
-        'username': user['username'],
-        'role_name': role_name,
-        'access_level': access_level,
-        'modules': modules,
-        'first_login': user.get('first_login', False),
-    }
+    return _issue_token(user, first_login=user.get('first_login', False))
 
 
 @router.post("/refresh")
@@ -402,21 +407,7 @@ async def refresh_token(request: Request):
     user = await _find_user_by('username', payload.get('sub') or '')
     if not user:
         raise HTTPException(status_code=401, detail="帳號不存在或已停用")
-
-    role_name = _get_user_role_name(user)
-    access_level = user.get('access_level', 0)
-    modules = user.get('modules', [])
-    token = create_token({
-        'sub': user['username'], 'role_name': role_name,
-        'access_level': access_level, 'modules': modules,
-    })
-    return {
-        'token': token,
-        'username': user['username'],
-        'role_name': role_name,
-        'access_level': access_level,
-        'modules': modules,
-    }
+    return _issue_token(user)
 
 
 @router.get("/register/config")
@@ -611,19 +602,7 @@ async def reset_password(req: ResetRequest):
     user['password_hash'] = hash_password(req.new_password)
     user['first_login'] = False
     await _persist_user(user)
-
-    role_name = _get_user_role_name(user)
-    access_level = user.get('access_level', 0)
-    modules = user.get('modules', [])
-    token = create_token({
-        'sub': user['username'], 'role_name': role_name,
-        'access_level': access_level, 'modules': modules,
-    })
-    return {
-        'token': token, 'username': user['username'], 'role_name': role_name,
-        'access_level': access_level, 'modules': modules,
-        'first_login': False,
-    }
+    return _issue_token(user, first_login=False)
 
 
 @router.get("/me")
@@ -975,22 +954,6 @@ async def google_login(req: GoogleLoginRequest):
             await _save_user_to_db(user)
 
     # Issue JWT (same as password login)
-    role_name = _get_user_role_name(user)
-    access_level = user.get('access_level', 0)
-    modules = user.get('modules', [])
-
-    token = create_token({
-        'sub': user['username'], 'role_name': role_name,
-        'access_level': access_level, 'modules': modules,
-    })
-    return {
-        'token': token,
-        'username': user['username'],
-        'role_name': role_name,
-        'access_level': access_level,
-        'modules': modules,
-        'email': user.get('email'),
-        'avatar_url': user.get('avatar_url'),
-        'first_login': user.get('first_login', False),
-        'auth_method': _compute_auth_method(user),
-    }
+    return _issue_token(
+        user, email=user.get('email'), avatar_url=user.get('avatar_url'),
+        first_login=user.get('first_login', False), auth_method=_compute_auth_method(user))

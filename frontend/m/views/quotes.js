@@ -5,7 +5,7 @@
  * 按鈕文字是動作（寄出／簽回／拒絕），目標狀態字從 options 取，不寫死。
  */
 import { mfetch, toast, esc, money, fmtDate } from '../shell.js';
-import { list, skeleton, emptyBox, errBox, pill, withBusy } from '../ui.js';
+import { list, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad } from '../ui.js';
 
 function transitions(status) {
     const v = list('quote_statuses');
@@ -38,6 +38,7 @@ async function change(btn, host) {
         try {
             await mfetch(`/api/v1/crm/m/quotations/${encodeURIComponent(id)}/status`, { method: 'POST', body: { status: to, activate } });
             toast('報價已改為 ' + to + (activate ? '，專案已啟動' : ''));
+            markStale('quotes', 'projects');     // 簽回啟動專案：專案分頁的階段與首頁數字都變了
             await load(host);
         } catch (e) { toast(e.message, 'err'); }
     });
@@ -71,5 +72,5 @@ export async function render(host, { first }) {
             if (b) change(b, host);
         });
     }
-    await load(host);
+    if (shouldLoad('quotes', { first })) await load(host);
 }

@@ -30,9 +30,14 @@ def _js():
 def test_the_tax_rule_lives_in_exactly_one_place():
     """🔴 稅率不是永恆的 5%。複製一份的話，兩個入口開出來的發票尾差會不一樣 ——
     而且是對帳時才會發現的那種差。"""
+    # 2026-09-03 搬到零依賴的 js/shared/invoice-amounts.js（手機 CRM 頁也用）；
+    # crm-utils 只 re-export，桌機兩個入口的 import 不變
+    leaf = js_code_only(repo_src("frontend/js/shared/invoice-amounts.js"))
+    assert "export function invoiceAmounts(value, mode, vatPct = 5)" in leaf, "共用層沒有這支"
+    assert "import" not in leaf, "invoice-amounts.js 必須是葉節點（手機頁 import 不起 crm-utils）"
     util = js_code_only(repo_src(UTIL))
-    assert "export function invoiceAmounts(" in util, "共用層沒有這支"
-    assert "const TAX_RATE = 1.05;" in util
+    assert "export { invoiceAmounts } from '../../js/shared/invoice-amounts.js';" in util
+    assert "TAX_RATE" not in util and "1.05" not in util, "crm-utils 又留了一份稅率"
     inv = js_code_only(repo_src(INV))
     assert "const TAX_RATE" not in inv, "發票本又自己留了一份稅率"
     assert "1.05" not in inv, "發票本裡還有寫死的稅率"

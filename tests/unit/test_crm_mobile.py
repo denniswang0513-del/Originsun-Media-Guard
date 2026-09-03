@@ -52,11 +52,60 @@ def test_router_has_redact_class_and_logged_in_read_guard():
 
 
 def test_write_endpoints_call_the_single_write_guard():
+    """寫入守衛與 /options 的 `me.can_write` 問的是同一份 MOBILE_WRITE_MODULES
+    （空 tuple＝只有 Lv3；要開給助理填 ('crm_projects',) 一行）。"""
     src = repo_src(MOBILE)
-    assert "_check_write = check_admin" in code_only(src), "一期只給 Lv3；要開給助理改這一行"
+    code = code_only(src)
+    assert "MOBILE_WRITE_MODULES: tuple[str, ...] = ()" in code, "一期只給 Lv3；要開給助理改這一行"
+    assert "_check_write = _module_guard(*MOBILE_WRITE_MODULES)" in code
     for header in ("async def mobile_add_note(", "async def mobile_quotation_status("):
         body = code_only(func_body(src, header))
         assert "_check_write(request)" in body, f"{header} 沒過寫入守衛"
+    options = code_only(func_body(src, "async def mobile_options("))
+    assert "payload_grants(payload, *MOBILE_WRITE_MODULES)" in options, \
+        "can_write 要跟守衛問同一份清單（payload_grants 零 key＝只有管理員）"
+
+
+def test_activation_obeys_the_desktop_status_policy():
+    """簽回順便啟動專案＝推階段：要過 _check_status_auth（ADVANCE_MODULES），
+    跟桌機 PATCH /projects/{id}/status 同一支，而且要在 apply_project_status 之前。"""
+    body = code_only(func_body(repo_src(MOBILE), "async def mobile_quotation_status("))
+    assert "_check_status_auth(request)" in body
+    assert body.index("_check_status_auth(request)") < body.index("apply_project_status(")
+
+
+def test_quote_vocabulary_has_one_home():
+    """報價狀態字彙只住 core.finance_logic；手機 router 與 quotation_stats 都從那裡拿。"""
+    code = code_only(repo_src(MOBILE))
+    assert "QUOTE_STATUSES = (" not in code and "QUOTE_PENDING = " not in code, "router 裡又長出一份字彙"
+    import re
+    assert re.search(r"from core\.finance_logic import \([^)]*QUOTE_STATUSES", code)
+    from core.finance_logic import QUOTE_PENDING, QUOTE_STATUSES
+    assert QUOTE_PENDING in QUOTE_STATUSES
+    stats = code_only(func_body(repo_src("routers/crm/quotes.py"), "async def quotation_stats("))
+    assert "QUOTE_PENDING" in stats and '"已寄送"' not in stats
+
+
+def test_project_wire_is_shared_by_mobile_and_desktop():
+    """單筆專案的回應形狀只有 routers/crm/projects.project_wire 一份。"""
+    mobile = code_only(repo_src(MOBILE))
+    assert "project_wire(" in mobile and "_project_wire" not in mobile
+    projects = repo_src("routers/crm/projects.py")
+    for header in ("async def get_project(", "async def update_project(",
+                   "async def update_project_status("):
+        body = code_only(func_body(projects, header))
+        assert "project_wire(session, project)" in body, f"{header} 沒走 project_wire"
+        assert '"proposal_status"' not in body, f"{header} 又自己拼了一次形狀"
+
+
+def test_recent_invoices_are_sliced_by_the_backend():
+    """手機「最近 10 張」交給 list_invoices 的 limit／order，不在瀏覽器整批撈再切。"""
+    body = repo_src("routers/crm/finance.py")
+    sig = body[body.index("async def list_invoices("):body.index("):", body.index("async def list_invoices("))]
+    assert "limit: int = Query(0)" in sig and 'order: str = Query("")' in sig
+    js = repo_src("frontend/m/views/invoice.js")
+    assert "/api/v1/crm/invoices?limit=10&order=recent" in js
+    assert ".slice(0, 10)" not in js
 
 
 def test_read_endpoints_do_not_require_admin():
@@ -82,7 +131,7 @@ def test_quotation_activate_and_desktop_status_share_one_helper():
         assert stale not in desktop, f"桌機端點不該再自己呼叫 {stale}，規則只有 apply_project_status 一份"
     helper = code_only(func_body(projects, "async def apply_project_status("))
     for step in ("_apply_status_side_effects(", "_sync_linked_proposals(",
-                 "project.updated_at = _now()", "_auto_update_client_status("):
+                 "_now()", "_auto_update_client_status("):
         assert step in helper, f"apply_project_status 少了 {step}"
 
 
@@ -103,9 +152,23 @@ def test_refresh_endpoint_reissues_from_db_not_from_old_payload():
     src = repo_src("routers/api_auth.py")
     body = code_only(func_body(src, "async def refresh_token("))
     assert '@router.post("/refresh")' in src
-    assert "create_token(" in body
+    assert "_issue_token(user" in body
     assert "_find_user_by('username'" in body, "權限要從 DB 重讀，不是把舊 payload 重簽"
     assert "'api_key'" in body, "API key 不能換成 7 天的登入 JWT"
+
+
+def test_login_paths_issue_tokens_through_one_helper():
+    """密碼登入／Google 登入／續期／重設密碼四條路都走 _issue_token —— 各拼一次的話
+    payload 多一個 claim 就會有一條漏掉。（login 裡「沒有任何帳號時的 bootstrap admin」
+    那段是用字面值拼的，不在此限。）"""
+    src = repo_src("routers/api_auth.py")
+    assert "def _issue_token(user: dict, **extra) -> dict:" in src
+    for header in ("async def login(", "async def google_login(", "async def refresh_token(",
+                   "async def reset_password("):
+        body = code_only(func_body(src, header))
+        assert "_issue_token(" in body, f"{header} 沒走 _issue_token"
+        assert body.count("create_token(") <= (1 if header == "async def login(" else 0), \
+            f"{header} 還自己簽 token"
 
 
 def test_project_lists_decide_about_mine_and_skip_mirrors():

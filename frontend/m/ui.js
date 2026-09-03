@@ -19,15 +19,28 @@ export function currentTab() {
     return TABS.includes(h) ? h : DEFAULT_TAB;
 }
 
+/** 換分頁＝改 hash（crm.js 聽 hashchange 畫）；已經在那一頁就什麼都不做。 */
 export function switchTab(tab) {
-    if (location.hash === '#' + tab) window.dispatchEvent(new HashChangeEvent('hashchange'));
-    else location.hash = tab;
+    location.hash = tab;
+}
+
+// ── 重抓守門：切回來的分頁 60 秒內沒人改過就不再打 API ──
+const _loadedAt = {};
+const _stale = new Set();
+/** 寫入路徑呼叫：這幾個分頁的資料變了，下次切到要重抓。 */
+export function markStale(...tabs) { tabs.forEach(t => _stale.add(t)); }
+/** render 呼叫：第一次、被標髒、或上次抓到現在超過 maxAgeMs → true（並記下這次抓的時間）。 */
+export function shouldLoad(tab, { first = false, maxAgeMs = 60000 } = {}) {
+    const fresh = _loadedAt[tab] && Date.now() - _loadedAt[tab] < maxAgeMs;
+    if (!first && !_stale.has(tab) && fresh) return false;
+    _stale.delete(tab);
+    _loadedAt[tab] = Date.now();
+    return true;
 }
 
 // ── 字彙（全部來自 options）──
 export const opt = () => state.options || {};
 export const list = (k) => (Array.isArray(opt()[k]) ? opt()[k] : []);
-export const invoiceVocab = (k) => ((opt().invoice || {})[k]) || [];
 /** 已付款＝payment_statuses 的最後一項（後端排序：應付…→已付）。 */
 export const paidStatus = () => { const l = list('payment_statuses'); return l.length ? l[l.length - 1] : ''; };
 export const lostPhase = () => opt().lost_phase || '';
@@ -41,11 +54,6 @@ export function selectOpts(values, selected = '', blank = '') {
         return `<option value="${esc(val)}"${String(val) === String(selected) ? ' selected' : ''}>${esc(lab)}</option>`;
     }).join('');
 }
-
-export const clientName = (id) => {
-    const c = list('clients').find(x => String(x.id) === String(id));
-    return c ? (c.short_name || c.name || '') : '';
-};
 
 // ── 狀態畫面 ──
 export const skeleton = (n = 4) => Array.from({ length: n }, (_, i) =>

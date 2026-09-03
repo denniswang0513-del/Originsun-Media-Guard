@@ -72,6 +72,7 @@ async function loadTemplates() {
 
 // ── Rendering ────────────────────────────────────────────────
 
+// 正本在後端 core.finance_logic.QUOTE_STATUSES（手機版從 /crm/m/options 拿）；這裡是桌機鏡射，改要一起改
 const _QUOTE_STATUSES = ['草稿', '已寄送', '已簽核', '已拒絕'];
 
 function _qBadge(status) {

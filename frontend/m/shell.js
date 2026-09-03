@@ -8,15 +8,18 @@
  * 🔴 日期一律 todayLocal()：`toISOString()` 是 UTC，台北早上 8 點前會寫成昨天，
  *    跨月時連會計月都錯。
  */
+// esc 只有 dom.js 一份（test_one_esc）；GIS 登入按鈕跟 SPA 殼共用 google-signin.js
+import { esc } from '/js/shared/dom.js';
+import { initGoogleSignIn } from '/js/shared/google-signin.js';
+
+export { esc };
+
 const TOKEN_KEY = 'auth_token';     // 與內部 App 同 key（js/auth/auth-state.js）
 const REFRESH_BEFORE_SEC = 2 * 86400;
 
 let _gate = null;
 let _started = false;
 let _resolveBoot = null;
-
-export const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
-    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export function todayLocal() {
     const d = new Date();
@@ -171,37 +174,12 @@ async function _pwdLogin(ev) {
     } catch (_) { _loginErr('連線失敗，請稍後再試'); }
 }
 
-async function _initGoogle() {
-    try {
-        const r = await fetch('/api/v1/auth/google/config');
-        if (!r.ok) return;
-        const cfg = await r.json();
-        if (!cfg.enabled || !cfg.client_id) return;
-        for (let i = 0; i < 40 && (typeof google === 'undefined' || !google.accounts); i++)
-            await new Promise(res => setTimeout(res, 150));
-        const box = document.getElementById('m-gsi');
-        if (typeof google === 'undefined' || !google.accounts || !box) return;
-        google.accounts.id.initialize({
-            client_id: cfg.client_id, auto_select: false, cancel_on_tap_outside: true,
-            callback: async (resp) => {
-                try {
-                    const r2 = await fetch('/api/v1/auth/google/login', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ credential: resp.credential }),
-                    });
-                    const d = await r2.json().catch(() => ({}));
-                    if (!r2.ok || !d.token) { _loginErr(d.detail || 'Google 登入失敗'); return; }
-                    _onLoginOk(d);
-                } catch (_) { _loginErr('連線失敗，請稍後再試'); }
-            },
-        });
-        google.accounts.id.renderButton(box, {
-            theme: 'filled_black', size: 'large', width: 300, text: 'signin_with',
-            shape: 'rectangular', logo_alignment: 'left',
-        });
-        const div = document.getElementById('m-gsi-div');
-        if (div) div.hidden = false;
-    } catch (e) { console.warn('[GIS] init failed', e); }
+function _initGoogle() {
+    return initGoogleSignIn({
+        container: document.getElementById('m-gsi'),
+        divider: document.getElementById('m-gsi-div'),
+        width: 300, onSuccess: _onLoginOk, onError: _loginErr,
+    });
 }
 
 function _onLoginOk(d) {

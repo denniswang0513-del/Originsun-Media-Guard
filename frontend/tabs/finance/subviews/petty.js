@@ -6,10 +6,10 @@
  * 連過去的按鈕」—— 實際用起來那是把已經登入的人踢去另一個登入頁，所以改成
  * 就地掛載；`/petty-cash.html` 仍在（手機現場登記走那條）。
  *
- * 元件透過 `window.__petty` 取 fetch 包裝（獨立頁的殼會設）。這裡是第二個宿主，
- * 所以也要設一份 —— 用 SPA 的 authFetch，不自己造 token 讀取邏輯。
+ * 元件的 fetch 出口（authFetch）是 petty-view.js 自己的預設宿主 —— 三個宿主用的
+ * 都是同一份，這裡不再設 `window.__petty`。
  */
-import { authFetch, bearerHeader } from '../../../js/shared/utils.js';
+import { authFetch } from '../../../js/shared/utils.js';
 // 逃脫走 dom.js（本檔原本那份連 > 都不逃脫）
 import { esc } from '../../../js/shared/dom.js';
 import { hasModule, canSeeMoney } from '../../crm/crm-utils.js';
@@ -24,15 +24,6 @@ const TABS = [
 
 export default async function render(container, opts = {}) {
     const isCurrent = opts.isCurrent || (() => true);
-
-    // 元件的 fetch 出口（與 /petty-cash.html 的殼同一個合約）。
-    // ⚠️ 上傳**不能**走 authFetch —— 它會補 Content-Type: application/json 並把
-    // FormData 拿去 stringify。走 bearerHeader() 讓瀏覽器自己補 boundary。
-    window.__petty = {
-        mfetch: authFetch,
-        ufetch: (path, form) => fetch(path, {
-            method: 'POST', headers: bearerHeader(), body: form }),
-    };
 
     const visible = TABS.filter(t => t.need());
     container.innerHTML = `
