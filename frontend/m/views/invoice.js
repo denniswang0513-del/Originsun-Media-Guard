@@ -52,8 +52,9 @@ function formHtml() {
         <button type="button" class="m-btn wide" id="inv-cancel-edit" hidden>取消修改</button>
       </form>
       ${state.canWrite ? '' : '<div class="m-empty">此帳號沒有登記權限</div>'}
-      <div class="m-h">最近 10 張</div>
-      <div id="inv-recent">${skeleton(3)}</div>`;
+      <div class="m-h">最近登記</div>
+      <div id="inv-recent">${skeleton(3)}</div>
+      <button type="button" class="m-more" id="inv-more" hidden>載入更多</button>`;
 }
 
 // 手機登記的一定是「請款發票、還沒開」（owner 2026-09-03）：方向＝options 第一個（收款），
@@ -274,22 +275,33 @@ async function submit(ev) {
     if (saved && editing) stopEdit();   // withBusy 收尾會把按鈕文字寫回，所以要在它之後
 }
 
-async function loadRecent() {
-    const box = document.getElementById('inv-recent');
+const PAGE = 10;
+const recent = { offset: 0, rows: [] };   // 後端 offset 分頁（同專案分頁）：載入更多＝再抓下一頁接在後面
+
+function recentCardHtml(inv) {
+    return `
+      <div class="m-card">
+        <div class="t"><div class="name">${esc(inv.title)}</div>${pill(inv.issue_status, inv.issue_status === unissued() ? '' : 'pri')}</div>
+        <div class="sub">${esc(inv.payment_type || '')} · ${esc(inv.payment_status || '')}${inv.invoice_number ? ' · ' + esc(inv.invoice_number) : ''}${inv.project_name ? ' · ' + esc(inv.project_name) : ''}</div>
+        <div class="row"><span class="sub">${esc(fmtDate(inv.invoice_date))}</span>
+          ${'amount_total' in inv ? `<span class="amt">${money(inv.amount_total)}</span>` : ''}</div>
+        ${state.canWrite ? `<div class="row"><button type="button" class="m-btn w" data-edit="${esc(inv.id)}">修改</button></div>` : ''}
+      </div>`;
+}
+
+async function loadRecent(reset = true) {
+    const box = document.getElementById('inv-recent'), more = document.getElementById('inv-more');
+    if (reset) { recent.offset = 0; recent.rows = []; box.innerHTML = skeleton(3); more.hidden = true; }
     try {
         // 排序與筆數交給後端（order=recent：建立時間新→舊）
-        const d = await mfetch('/api/v1/crm/invoices?limit=10&order=recent');
-        const rows = d.invoices || [];
-        if (!rows.length) { box.innerHTML = emptyBox('尚無發票'); return; }
-        box._rows = rows;
-        box.innerHTML = rows.map(inv => `
-          <div class="m-card">
-            <div class="t"><div class="name">${esc(inv.title)}</div>${pill(inv.issue_status, inv.issue_status === unissued() ? '' : 'pri')}</div>
-            <div class="sub">${esc(inv.payment_type || '')} · ${esc(inv.payment_status || '')}${inv.invoice_number ? ' · ' + esc(inv.invoice_number) : ''}${inv.project_name ? ' · ' + esc(inv.project_name) : ''}</div>
-            <div class="row"><span class="sub">${esc(fmtDate(inv.invoice_date))}</span>
-              ${'amount_total' in inv ? `<span class="amt">${money(inv.amount_total)}</span>` : ''}</div>
-            ${state.canWrite ? `<div class="row"><button type="button" class="m-btn w" data-edit="${esc(inv.id)}">修改</button></div>` : ''}
-          </div>`).join('');
+        const d = await mfetch(`/api/v1/crm/invoices?limit=${PAGE}&offset=${recent.offset}&order=recent`);
+        const seen = new Set(recent.rows.map(x => x.id));
+        const rows = (d.invoices || []).filter(x => !seen.has(x.id));   // 後端不認 offset（舊版）時會回同一頁：去重後按鈕自動藏
+        recent.rows = recent.rows.concat(rows);
+        recent.offset += rows.length;
+        box._rows = recent.rows;
+        box.innerHTML = recent.rows.length ? recent.rows.map(recentCardHtml).join('') : emptyBox('尚無發票');
+        more.hidden = rows.length < PAGE;
     } catch (e) { box.innerHTML = errBox(e); }
 }
 
@@ -300,13 +312,14 @@ export async function render(host, { first }) {
         document.getElementById('inv-form').addEventListener('submit', submit);
         F('cancel-edit').addEventListener('click', () => { stopEdit(); for (const k of VOLATILE) F(k).value = ''; F('item_type-q').value = ''; });
         mountSeg('inv-issue_status', syncIssueRow);
+        document.getElementById('inv-more').addEventListener('click', () => loadRecent(false));
         document.getElementById('inv-recent').addEventListener('click', (ev) => {
             const b = ev.target.closest('button[data-edit]'); if (!b) return;
             const inv = (document.getElementById('inv-recent')._rows || []).find(x => x.id === b.dataset.edit);
             if (inv) startEdit(inv);
         });
     }
-    // 專案下拉跟最近 10 張一起重抓：專案分頁新建案子會 markStale('invoice')，切過來才看得到它
+    // 專案下拉跟最近登記清單一起重抓：專案分頁新建案子會 markStale('invoice')，切過來才看得到它
     if (shouldLoad('invoice', { first })) await Promise.all([loadProjects(), loadRecent()]);
     // 從專案抽屜「開發票」過來（60 秒內沒被標髒）：清單可能是舊的，重載一次再套預設
     else if (state.invoicePreset) await loadProjects();

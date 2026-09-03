@@ -132,6 +132,25 @@ export const skeleton = (n = 4) => Array.from({ length: n }, (_, i) =>
 export const emptyBox = (msg = '沒有資料') => `<div class="m-empty">${esc(msg)}</div>`;
 export const errBox = (e) => `<div class="m-err">${esc((e && e.message) || String(e))}</div>`;
 export const pill = (text, cls = '') => text ? `<span class="pill ${cls}">${esc(text)}</span>` : '';
+/** 前端分頁清單（整批資料已在手上）：先顯示 page 筆，底下「載入更多」每按一次多 page 筆，沒更多就藏——
+ *  跟專案分頁（後端 offset 分頁）同一顆 .m-more 按鈕、同一種手感。同一容器可重複呼叫（重抓時整個重畫）。 */
+export function renderPaged(el, rows, cardFn, { page = 10, empty = '沒有資料' } = {}) {
+    if (!rows.length) { el._pg = null; el.innerHTML = emptyBox(empty); return; }
+    el._pg = { rows, cardFn, page, shown: 0 };
+    el.innerHTML = '<div class="pg-items"></div><button type="button" class="m-more" data-more hidden>載入更多</button>';
+    if (!el._pgBound) {
+        el._pgBound = true;
+        el.addEventListener('click', (ev) => { if (ev.target.closest('button[data-more]')) _showMore(el); });
+    }
+    _showMore(el);
+}
+function _showMore(el) {
+    const s = el._pg; if (!s) return;
+    const next = s.rows.slice(s.shown, s.shown + s.page);
+    el.querySelector('.pg-items').insertAdjacentHTML('beforeend', next.map(s.cardFn).join(''));
+    s.shown += next.length;
+    el.querySelector('button[data-more]').hidden = s.shown >= s.rows.length;
+}
 /** 狀態 pill 的顏色：依它在字彙清單裡的位置（前段=進行中、最後=完成），不認字。 */
 export function statusPill(text, vocab) {
     const i = vocab.indexOf(text);

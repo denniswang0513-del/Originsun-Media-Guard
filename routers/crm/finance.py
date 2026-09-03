@@ -626,10 +626,10 @@ async def list_invoices(
     q: str = Query(""), payment_type: str = Query(""),
     category: str = Query(""), project_id: str = Query(""),
     issue_status: str = Query(""), entity: str = Query(""),
-    limit: int = Query(0), order: str = Query(""),
+    limit: int = Query(0), order: str = Query(""), offset: int = Query(0),
 ):
-    """`limit`（0＝全部）與 `order="recent"`（建立時間新→舊）給手機版「最近 10 張」用；
-    不帶就是桌機發票本原本的整批＋日期排序。帶 limit 時 total＝本頁筆數。"""
+    """`limit`（0＝全部）／`offset`（只在帶 limit 時生效）與 `order="recent"`（建立時間新→舊）
+    給手機版「最近登記＋載入更多」用；不帶就是桌機發票本原本的整批＋日期排序。帶 limit 時 total＝本頁筆數。"""
     # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
     # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
     ent = require_entity(request, entity, level="full")
@@ -664,7 +664,7 @@ async def list_invoices(
             # 「最近登記的」看建立時間不看發票日期（補登舊票也要浮到最上面）；id 當 tiebreaker
             query = query.order_by(None).order_by(CrmInvoice.created_at.desc(), CrmInvoice.id.desc())
         if limit > 0:
-            query = query.limit(limit)
+            query = query.limit(limit).offset(max(offset, 0))
         rows = (await session.execute(query)).all()
         coll = await _invoice_collections(session, [r[0].id for r in rows])
     out = []

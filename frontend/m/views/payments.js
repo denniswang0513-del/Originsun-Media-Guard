@@ -1,11 +1,11 @@
 /**
- * 付款分頁：GET /api/v1/crm/payments，前端分「未付」（payment_status ≠ 已付）與「最近已付 10 筆」。
+ * 付款分頁：GET /api/v1/crm/payments，前端分「待付」（payment_status ≠ 已付）與「已付」，兩段各自 10 筆一頁＋載入更多。
  * 已付的字＝options.payment_statuses 最後一項（不寫死）。
  * 標已付 → PATCH /payments/batch-pay {payment_ids:[id], payment_date: 今天(本地)}；
  * 取消   → PATCH /payments/batch-unpay {payment_ids:[id]}。月結鎖帳 409 的 detail 原樣進 toast。
  */
 import { mfetch, toast, esc, money, fmtDate, todayLocal } from '../shell.js';
-import { paidStatus, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad } from '../ui.js';
+import { paidStatus, skeleton, errBox, pill, withBusy, shouldLoad, renderPaged } from '../ui.js';
 
 function cardHtml(p, paid) {
     const btn = paid
@@ -33,13 +33,12 @@ async function load(host) {
         const unpaid = rows.filter(p => p.payment_status !== PAID)
             .sort((a, b) => String(a.planned_month || '9999').localeCompare(String(b.planned_month || '9999')));
         const paid = rows.filter(p => p.payment_status === PAID)
-            .sort((a, b) => String(b.payment_date || '').localeCompare(String(a.payment_date || ''))).slice(0, 10);
+            .sort((a, b) => String(b.payment_date || '').localeCompare(String(a.payment_date || '')));
         box.innerHTML = `
-          <div class="m-h">待付（${unpaid.length}）</div>
-          ${unpaid.length ? unpaid.map(p => cardHtml(p, false)).join('') : emptyBox('沒有待付的請款')}
-          <details class="m-fold"><summary>最近已付 ${paid.length} 筆</summary>
-            ${paid.length ? paid.map(p => cardHtml(p, true)).join('') : emptyBox('沒有已付紀錄')}
-          </details>`;
+          <div class="m-h">待付（${unpaid.length}）</div><div id="py-unpaid"></div>
+          <details class="m-fold"><summary>已付（${paid.length}）</summary><div id="py-paid"></div></details>`;
+        renderPaged(box.querySelector('#py-unpaid'), unpaid, p => cardHtml(p, false), { empty: '沒有待付的請款' });
+        renderPaged(box.querySelector('#py-paid'), paid, p => cardHtml(p, true), { empty: '沒有已付紀錄' });
     } catch (e) { box.innerHTML = errBox(e); }
 }
 

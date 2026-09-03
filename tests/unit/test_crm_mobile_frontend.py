@@ -174,10 +174,10 @@ def test_five_tabs_and_invoice_is_the_landing_tab():
 
 
 def test_recent_invoices_are_sliced_by_the_backend():
-    """手機「最近 10 張」交給 list_invoices 的 limit／order，不在瀏覽器整批撈再切
+    """手機「最近登記」交給 list_invoices 的 limit／offset／order，不在瀏覽器整批撈再切
     （後端簽章那半邊在 test_crm_mobile.py）。"""
     js = repo_src("frontend/m/views/invoice.js")
-    assert "/api/v1/crm/invoices?limit=10&order=recent" in js
+    assert "/api/v1/crm/invoices?limit=${PAGE}&offset=${recent.offset}&order=recent" in js
     assert ".slice(0, 10)" not in js
 
 
@@ -217,3 +217,17 @@ def test_old_invoice_page_redirects_first():
     assert 'content="0;url=/m/crm.html#invoice"' in src
     assert 'href="/m/crm.html#invoice"' in src
     assert "<form" not in src and "fetch(" not in src, "舊表單要整個退場，不是留一半"
+
+
+def test_every_list_tab_has_load_more():
+    """owner 2026-09-03：每個清單超過一頁都要像專案分頁那樣，底下一顆「載入更多」。
+    專案／發票走後端 offset 分頁（自己的 .m-more 按鈕）；付款／報價整批在手上，走 ui.renderPaged。"""
+    for name in ("projects", "invoice"):
+        src = repo_src(f"frontend/m/views/{name}.js")
+        assert 'class="m-more"' in src and "offset" in src, f"{name}.js 要有 .m-more 按鈕＋offset 分頁"
+    for name in ("payments", "quotes"):
+        src = repo_src(f"frontend/m/views/{name}.js")
+        assert "renderPaged(" in src, f"{name}.js 清單要走 renderPaged（10 筆一頁＋載入更多）"
+        assert ".slice(0, 10)" not in src, f"{name}.js 不准自己截 10 筆——剩下的要能載入更多"
+    assert "offset: int = Query(0)" in repo_src("routers/crm/finance.py"), "list_invoices 要收 offset 才能載入更多"
+    assert "載入更多" in repo_src("frontend/m/ui.js")

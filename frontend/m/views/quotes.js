@@ -1,11 +1,11 @@
 /**
- * 報價分頁：GET /api/v1/crm/quotations 依狀態分組（順序＝options.quote_statuses）。
+ * 報價分頁：GET /api/v1/crm/quotations 依狀態分組（順序＝options.quote_statuses），每組 10 筆一頁＋載入更多。
  * 狀態轉換由**位置**推：[0]草稿→寄出、[1]已寄出→簽回([2])／拒絕([3])；
  * 改狀態打 POST /api/v1/crm/m/quotations/{id}/status {status, activate}。
  * 按鈕文字是動作（寄出／簽回／拒絕），目標狀態字從 options 取，不寫死。
  */
 import { mfetch, toast, esc, money, fmtDate } from '../shell.js';
-import { list, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad } from '../ui.js';
+import { list, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad, renderPaged } from '../ui.js';
 
 function transitions(status) {
     const v = list('quote_statuses');
@@ -57,10 +57,10 @@ async function load(host) {
             if (!groups.has(q.status)) groups.set(q.status, []);
             groups.get(q.status).push(q);
         }
-        box.innerHTML = [...groups].filter(([, arr]) => arr.length).map(([s, arr]) =>
-            `<div class="m-h">${esc(s)}（${arr.length}）</div>` + arr
-                .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))
-                .map(cardHtml).join('')).join('');
+        const shown = [...groups].filter(([, arr]) => arr.length);
+        box.innerHTML = shown.map(([s, arr], i) => `<div class="m-h">${esc(s)}（${arr.length}）</div><div data-group="${i}"></div>`).join('');
+        shown.forEach(([, arr], i) => renderPaged(box.querySelector(`[data-group="${i}"]`),
+            arr.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || ''))), cardHtml));
     } catch (e) { box.innerHTML = errBox(e); }
 }
 
