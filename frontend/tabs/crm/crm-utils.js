@@ -220,8 +220,20 @@ export function searchableSelect(sel, opts = {}) {
     // 下拉點開只會看到它自己那一項，使用者得先手動清空才換得掉（實測專案下拉
     // 32 個選項，選過之後再點開只剩 1 個）。開始打字才過濾。
     input.addEventListener('focus', () => { _buildItems(); _render(''); });
-    input.addEventListener('input', () => { _buildItems(); _render(input.value); });
-    input.addEventListener('blur', () => { setTimeout(() => panel.style.display = 'none', 150); });
+    input.addEventListener('input', () => {
+        _buildItems(); _render(input.value);
+        // 🔴 把字刪光＝要取消這個篩選（owner 2026-09-04「搜尋沒有填東西他就卡住了」）：
+        // 原本只過濾清單，底層 <select> 還留著上次選的值，畫面空白、清單卻一直被篩住，而且每一頁都這樣。
+        if (!input.value.trim() && sel.value) _pick('', '');
+    });
+    input.addEventListener('blur', () => {
+        setTimeout(() => {
+            panel.style.display = 'none';
+            // 打到一半離開：文字對回目前真的選著的那個（不然框裡的字跟篩選對不上）
+            const o = sel.options[sel.selectedIndex];
+            input.value = (o && o.value) ? o.textContent : '';
+        }, 150);
+    });
     input.addEventListener('keydown', e => {
         const visible = panel.querySelectorAll('.ss-item');
         if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, visible.length - 1); _highlight(visible); }
