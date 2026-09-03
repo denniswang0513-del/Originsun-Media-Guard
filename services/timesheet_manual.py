@@ -81,17 +81,19 @@ async def project_options(session, staff_name: str | None = None) -> list:
     """補登用專案下拉：進行中（製作/結案）+ 該員最近填過的專案名。"""
     from db.models import Client, CrmProject, Timesheet
     rows = (await session.execute(
-        select(CrmProject.id, CrmProject.name, Client.short_name, CrmProject.start_date, CrmProject.shoot_date, CrmProject.created_at)
+        select(CrmProject.id, CrmProject.name, Client.short_name, CrmProject.start_date, CrmProject.shoot_date, CrmProject.created_at,
+               CrmProject.status)
         .outerjoin(Client, Client.id == CrmProject.client_id)
         .where(CrmProject.status.in_(("製作", "結案")))
         .order_by(CrmProject.name)
     )).all()
     opts = []
-    for pid, n, client, sd, shd, cd in rows:
+    for pid, n, client, sd, shd, cd, st in rows:
         d = sd or shd or cd
         year = str(d.year) if d else ""
         # label＝「年份 客戶 案名」（owner 2026-09-03：跟零用金一樣的呈現）；前端用它當下拉的字，存的時候對回 id
-        opts.append({"id": pid, "name": n or "", "client": client or "", "year": year,
+        # closed：前端把下拉分「進行中（預設）／已結案（收著）」（owner 2026-09-03）——分組規則住這裡，前端只看旗標
+        opts.append({"id": pid, "name": n or "", "client": client or "", "year": year, "closed": st == "結案",
                      "label": " ".join(x for x in (year, client or "", n or "") if x)})
     if staff_name:
         have = {o["name"] for o in opts}
@@ -102,7 +104,7 @@ async def project_options(session, staff_name: str | None = None) -> list:
             .order_by(safunc.max(Timesheet.work_date).desc())
             .limit(10)
         )).all()
-        opts.extend({"id": None, "name": p, "client": "", "year": "", "label": p} for p, _ in recent if p and p not in have)
+        opts.extend({"id": None, "name": p, "client": "", "year": "", "closed": False, "label": p} for p, _ in recent if p and p not in have)
     return opts
 
 

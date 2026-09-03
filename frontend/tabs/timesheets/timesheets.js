@@ -210,6 +210,7 @@ export async function initTimesheetsTab() {
         const pa = ev.target.closest('input[data-pick-all]');
         if (pa) { _ledgerSel = pa.checked ? new Set(_ledgerRows().map(i => i.id)) : new Set(); _ledgerRedraw(); }
     });
+    _bindProjectPop(_content);                       // 要在 _sheetKeydown 前綁（capture），浮層開著時 ↓↑ 歸浮層
     _content.addEventListener('keydown', _sheetKeydown);
     _content.addEventListener('input', (ev) => {
         _sheetGrow(ev);
@@ -382,13 +383,93 @@ async function _projectOptions() {
     catch (_) { _projOpts = []; }
     return _projOpts;
 }
+// ── 專案格的下拉：分「進行中（預設展開）／已結案（收著，打字會搜到、也可點開）」（owner 2026-09-03）──
+// 原生 datalist 分不了組，改成自己的浮層。顯示「年份 客戶 案名」（同零用金）；選了把字填回格子並觸發 input／change，
+// 存檔還是 _projectFromInput 對回 id。鍵盤：浮層開著時 ↓↑ 在浮層裡走、Enter 選、Esc／Tab 關；關著時 ↓↑ 才是列的上下移動。
+let _pop = null;   // {el, input, idx, showClosed, flat}
+function _projPopClose() { if (_pop) { _pop.el.remove(); _pop = null; } }
+function _projPopSplit(q, showClosed) {
+    const needle = (q || '').trim().toLowerCase();
+    const hit = p => !needle || (p.label || p.name || '').toLowerCase().includes(needle);
+    const opts = _projOpts || [];
+    return { active: opts.filter(p => !p.closed && hit(p)), closed: opts.filter(p => p.closed && hit(p)), show: showClosed || !!needle };
+}
+function _projPopRender() {
+    const { el, input } = _pop;
+    const { active, closed, show } = _projPopSplit(input.value, _pop.showClosed);
+    const flat = [];
+    const item = (p) => { flat.push(p); const i = flat.length - 1; return `<div class="ts-pp-item${i === _pop.idx ? ' on' : ''}" data-i="${i}">${esc(p.label || p.name)}</div>`; };
+    let html = `<div class="ts-pp-h">進行中（${active.length}）</div>` + (active.length ? active.map(item).join('') : '<div class="ts-pp-empty">沒有符合的</div>');
+    html += `<div class="ts-pp-h ts-pp-toggle" data-toggle="1">已結案（${closed.length}）${show ? '' : '　點一下展開'}</div>`;
+    if (show) html += closed.length ? closed.map(item).join('') : '<div class="ts-pp-empty">沒有符合的</div>';
+    _pop.flat = flat;
+    el.innerHTML = html;
+    const r = input.getBoundingClientRect();
+    el.style.left = `${r.left + window.scrollX}px`; el.style.top = `${r.bottom + window.scrollY}px`;
+    el.style.minWidth = `${Math.max(r.width, 320)}px`;
+    el.querySelector('.ts-pp-item.on')?.scrollIntoView({ block: 'nearest' });
+}
+async function _projPopOpen(input) {
+    await _projectOptions();
+    if (document.activeElement !== input) return;      // 抓完選項時人已經離開那一格
+    if (!_pop || _pop.input !== input) {
+        _projPopClose();
+        const el = document.createElement('div');
+        el.className = 'ts-proj-pop';
+        el.addEventListener('pointerdown', (ev) => {        // pointerdown：blur 會先於 click 把浮層收掉
+            ev.preventDefault();
+            const it = ev.target.closest('.ts-pp-item');
+            if (it) { _projPopPick(_pop.flat[Number(it.dataset.i)]); return; }
+            if (ev.target.closest('[data-toggle]')) { _pop.showClosed = !_pop.showClosed; _pop.idx = -1; _projPopRender(); }
+        });
+        document.body.appendChild(el);
+        _pop = { el, input, idx: -1, showClosed: false, flat: [] };
+    }
+    _projPopRender();
+}
+function _projPopPick(p) {
+    if (!p || !_pop) return;
+    const input = _pop.input;
+    input.value = p.label || p.name;
+    _projPopClose();
+    const ev = new Event('input', { bubbles: true });
+    ev._fromPick = true;                                  // 讓下面的 input 監聽別把浮層又打開
+    input.dispatchEvent(ev);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function _projPopKeydown(ev) {   // capture 階段：浮層開著時先於 _sheetKeydown 吃掉 ↓↑ Enter Esc
+    if (!_pop || ev.target !== _pop.input) return;
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault(); ev.stopPropagation();
+        const n = _pop.flat.length; if (!n) return;
+        _pop.idx = (_pop.idx + (ev.key === 'ArrowDown' ? 1 : -1) + n) % n;
+        _projPopRender();
+    } else if (ev.key === 'Enter') {
+        if (_pop.idx >= 0) { ev.preventDefault(); ev.stopPropagation(); _projPopPick(_pop.flat[_pop.idx]); }
+        else _projPopClose();
+    } else if (ev.key === 'Escape' || ev.key === 'Tab') {
+        _projPopClose();
+    }
+}
+function _bindProjectPop(root) {
+    root.addEventListener('keydown', _projPopKeydown, true);
+    root.addEventListener('focusin', (ev) => { const inp = ev.target.closest?.('input[data-proj-pick]'); if (inp && !inp.readOnly) _projPopOpen(inp); });
+    root.addEventListener('input', (ev) => {
+        const inp = ev.target.closest?.('input[data-proj-pick]'); if (!inp || ev._fromPick) return;
+        if (_pop && _pop.input === inp) { _pop.idx = -1; _projPopRender(); } else _projPopOpen(inp);
+    });
+    root.addEventListener('focusout', (ev) => {
+        if (!ev.target.closest?.('input[data-proj-pick]')) return;
+        setTimeout(() => { if (_pop && document.activeElement !== _pop.input) _projPopClose(); }, 120);
+    });
+}
 function _typeSelect(cur, attr) {
     return `<select ${attr} data-no-search><option value="">分類</option>${_workTypes.map(t =>
         `<option value="${esc(t)}"${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
 }
 /** 一個工作項的五格輸入（專案／分類／內容／計畫／實際）；總表改列用。 */
 function _rowCells(v = {}) {
-    return `<td><input list="ts-proj-list" data-f="project" value="${esc(v.project || '')}" placeholder="專案（可打字）" style="width:100%;"></td>
+    return `<td><input data-proj-pick autocomplete="off" data-f="project" value="${esc(v.project || '')}" placeholder="專案（可打字）" style="width:100%;"></td>
         <td>${_typeSelect(v.work_type || '', 'data-f="type"')}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}" placeholder="做了什麼" style="width:100%;"></td>
         <td><input type="text" data-f="remark" value="${esc(v.remark || '')}" placeholder="備註" style="width:100%;"></td>
@@ -414,7 +495,7 @@ function _newRowHtml(v = {}, o = {}) {
     const t = 'type="text" inputmode="numeric" maxlength="5" placeholder="09:00" autocomplete="off"';
     return `<tr class="ts-mine-row"${o.id ? ` data-id="${esc(o.id)}"` : ''}${o.readonly ? ' data-readonly="1"' : ''}>
         <td class="ts-sheet-num"></td>
-        <td><input list="ts-proj-list" data-f="project" value="${esc(v.project || '')}"${ro}></td>
+        <td><input data-proj-pick autocomplete="off" data-f="project" value="${esc(v.project || '')}"${ro}></td>
         <td>${_typeSelect(v.work_type || '', `data-f="type"${rosel}`)}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}"${ro}></td>
         <td><input type="text" data-f="remark" value="${esc(v.remark || '')}"${ro}></td>
@@ -474,7 +555,6 @@ function _renderMine(d, err) {
         <div class="ts-card" style="border-color:#3b82f6;">
             <h3>${esc(_dayLabel(d.date))} 的工作項</h3>
             ${_sheetTableHtml(items.map(_mineRowHtml).join('') + _newRowHtml().repeat(5))}
-            <datalist id="ts-proj-list"></datalist>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
                 <button class="ts-btn ghost" data-ts-action="row-add">＋ 五列</button>
                 <button class="ts-btn ghost" data-ts-action="copy-yesterday" ${(d.yesterday || []).length ? '' : 'disabled'}>複製昨天（${(d.yesterday || []).length} 列）</button>
@@ -662,7 +742,7 @@ function _renderLedger(d) {
         ${_conflictsHtml()}
         ${d.editable ? `<div id="ts-batch-bar" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;border:1px solid #3b82f6;border-radius:6px;background:#1a2233;">
             <span style="color:#ddd;">已勾 <b id="ts-batch-n">0</b> 列 → 一次改：</span>
-            <input list="ts-proj-list" id="ts-batch-project" placeholder="專案（留空不改）" ${sel}>
+            <input data-proj-pick autocomplete="off" id="ts-batch-project" placeholder="專案（留空不改）" ${sel}>
             ${_typeSelect('', `id="ts-batch-type" ${sel}`).replace('>分類<', '>分類（不改）<')}
             <input type="text" id="ts-batch-remark" placeholder="備註（留空不改）" ${sel}>
             <input type="text" id="ts-batch-note" placeholder="管理員備註（留空不改）" ${sel}>
@@ -674,7 +754,6 @@ function _renderLedger(d) {
                 <thead><tr>${d.editable ? '<th style="width:26px;"><input type="checkbox" data-pick-all title="勾選目前篩出來的全部" style="accent-color:#3b82f6;"></th>' : ''}${sortableTh('date', '日期')}${sortableTh('staff', '人員')}${sortableTh('project', '專案')}${sortableTh('type', '分類')}${sortableTh('task', '內容')}${sortableTh('remark', '備註')}${sortableTh('planned', '計畫', 'class="num"')}${sortableTh('hours', '實際', 'class="num"')}${sortableTh('source', '來源')}${sortableTh('note', '管理員備註')}<th></th></tr></thead>
                 <tbody></tbody>   <!-- _bind → _ledgerRedraw 填（不在這裡建一次又重建一次） -->
             </table>
-            <datalist id="ts-proj-list"></datalist>
         </div>`;
 }
 
@@ -1128,13 +1207,6 @@ async function _mapProject(sheetName) {
     });
 }
 
-async function _fillProjectDatalist() {
-    const dl = document.getElementById('ts-proj-list');
-    if (!dl || dl.children.length) return;
-    const opts = await _projectOptions();
-    // 顯示「年份 客戶 案名」（同零用金）；存檔時 _projectFromInput 對回 id
-    dl.innerHTML = opts.map(p => `<option value="${esc(p.label || p.name)}"></option>`).join('');
-}
 
 /** 每次整頁重繪後：輸入框的 change（按鈕的 click 走 initTimesheetsTab 的委派，不在這裡綁）。 */
 function _bind() {
@@ -1142,7 +1214,7 @@ function _bind() {
     if (monthInp) monthInp.addEventListener('change', () => { _month = monthInp.value; refresh(); });
     const dayInp = document.getElementById('ts-day');
     if (dayInp) dayInp.addEventListener('change', () => { if (dayInp.value) { _day = dayInp.value; refresh(); } });
-    if (_view === 'mine' || _view === 'ledger') _fillProjectDatalist();
+    if (_view === 'mine' || _view === 'ledger') _projectOptions();     // 先抓好，專案格一點就有得選
     const pq = document.getElementById('ts-proj-q');
     if (pq) pq.addEventListener('input', () => {
         _projQ = pq.value;
