@@ -653,6 +653,8 @@ INVOICE_PASSTHROUGH_COLLECTED = (INVOICE_PENDING_REMIT, INVOICE_RECEIVED)
 # 前端再一份），彼此不一致：一個叫「代開」的類別會走過路狀態、生請款單，
 # 卻沒有科目對映也不進業外收入。
 INVOICE_PASSTHROUGH_CATEGORIES = ("內部代開", "外部代開")
+# 三種類別都能掛專案（owner 2026-09-04）；只有這一種能掛**私帳**案，而且要有私帳權限（hide_mine_projects 為 False）
+MINE_LINK_INVOICE_CATEGORY = "內部代開"
 
 
 def is_passthrough_category(category: str) -> bool:

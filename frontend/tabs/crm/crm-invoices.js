@@ -3,7 +3,7 @@
  */
 import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, invoiceAmounts as _amountsFrom, invoicePayBadge as _payBadge, invoiceIssueBadge,
          INV_PENDING_REMIT, INV_REMITTED, projectOptionsHtml,
-         today as _today } from './crm-utils.js';
+         today as _today, hasModule } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
@@ -16,6 +16,8 @@ import { copyText } from '../../js/shared/utils.js';
 
 let _invoices = [];
 let _projects = [];
+let _mineProjects = [];     // 私帳案：只有「內部代開」＋有 finance_mine 的人才列（owner 2026-09-04）
+const _MINE_LINK_CAT = '內部代開';   // 同 core.finance_logic.MINE_LINK_INVOICE_CATEGORY
 let _clients = [];
 let _selectedId = null;
 let _editingId = null;
@@ -110,6 +112,8 @@ async function loadInvoices() {
 
 async function loadProjects() {
     try { _projects = (await crmCacheFetch('projects', '/projects')).projects || []; } catch(_) { _projects = []; }
+    // 私帳案：沒權限的人連打都不打（後端也擋：_assert_project_link）
+    if (hasModule('finance_mine')) { try { _mineProjects = (await crmCacheFetch('projects_mine', '/projects?entity=mine')).projects || []; } catch(_) { _mineProjects = []; } }
     _populateProjectFilter();
 }
 
@@ -347,6 +351,11 @@ window._invQuickAdd = async function () {
     }
 };
 
+// 列依類別上底色（owner 2026-09-04：專案／內外部代開分開、沒填類別淺紅）——類別字彙＝_INV_CATEGORIES 那三個
+function _kindClass(cat) {
+    const i = _INV_CATEGORIES.indexOf(cat || '');
+    return i < 0 ? 'inv-kind-none' : ['inv-kind-project', 'inv-kind-internal', 'inv-kind-external'][i];
+}
 function renderList() {
     const body = document.getElementById('inv-list-body');
     if (!body) return;
@@ -357,7 +366,7 @@ function renderList() {
         return;
     }
     body.innerHTML = _quickAddRow() + _sorter.sorted(_invoices).map(inv => `
-        <div class="crm-row${inv.id === _selectedId ? ' selected' : ''}" onclick="window._invSelect('${inv.id}')">
+        <div class="crm-row${inv.id === _selectedId ? ' selected' : ''} ${_kindClass(inv.category)}" onclick="window._invSelect('${inv.id}')">
             <div class="crm-row-date">${inv.invoice_date ? inv.invoice_date.substring(0, 10) : '—'}</div>
             <div title="${_esc(inv.applicant)}">${_esc(inv.applicant)}</div>
             <!-- 名稱後接專案：清單 11 欄本來沒有一欄看得到「這張是哪個案子的」，
@@ -447,7 +456,10 @@ function _wireEditDynamics() {
 
     function _toggleCategory() {
         const cat = catSel?.value;
-        if (projectRow) projectRow.style.display = cat === '專案' ? '' : 'none';
+        // 專案欄三種類別都給（owner 2026-09-04：內外部代開都可以連結專案）；選項依類別換（內部代開才有私帳案）
+        if (projectRow) projectRow.style.display = '';
+        const projSel = document.getElementById('inv-f-project_id');
+        if (projSel) _populateProjectSelect(projSel.value, cat);
         if (commRow) {
             commRow.style.display = (cat === '內部代開' || cat === '外部代開') ? '' : 'none';
             // Update label
@@ -913,11 +925,16 @@ const _FIELDS = ['issue_status', 'invoice_number', 'invoice_date', 'title',
     'recipient', 'recipient_phone', 'recipient_address'];
 const _INT_FIELDS = ['amount_ex_tax', 'amount_total', 'tax_amount', 'commission'];
 
-function _populateProjectSelect(selectedId) {
+function _populateProjectSelect(selectedId, category) {
     const sel = document.getElementById('inv-f-project_id');
     if (!sel) return;
+    const cat = category ?? document.getElementById('inv-f-category')?.value ?? '';
+    // 三種類別都可以掛專案；只有內部代開多列私帳案（標「私帳｜」），而且要有私帳權限（_mineProjects 才有東西）
+    const rows = cat === _MINE_LINK_CAT
+        ? _projects.concat(_mineProjects.map(p => ({ ...p, _mine: true })))
+        : _projects;
     sel.innerHTML = `<option value="">— 不關聯 —</option>` +
-        _projects.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${_esc(p.name)}</option>`).join('');
+        rows.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${p._mine ? '私帳｜' : ''}${_esc(p.name)}</option>`).join('');
 }
 
 function _populateClientSelect(selectedName) {
@@ -967,7 +984,9 @@ function _updateCommission() {
 
 function _updateCategoryVisibility() {
     const cat = document.getElementById('inv-f-category').value;
-    document.getElementById('inv-cond-project').style.display = cat === '專案' ? '' : 'none';
+    // 專案欄三種類別都給（owner 2026-09-04：內外部代開都可以連結專案）；選項依類別換（內部代開才多列私帳案）
+    document.getElementById('inv-cond-project').style.display = '';
+    _populateProjectSelect(document.getElementById('inv-f-project_id').value, cat);
     document.getElementById('inv-cond-internal').style.display = cat === '內部代開' ? '' : 'none';
     document.getElementById('inv-cond-external').style.display = cat === '外部代開' ? '' : 'none';
     _updateCommission();

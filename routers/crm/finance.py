@@ -637,7 +637,7 @@ async def list_invoices(
     factory = await _get_factory()
     async with factory() as session:
         query = (
-            select(CrmInvoice, CrmProject.name.label("pn"))
+            select(CrmInvoice, CrmProject.name.label("pn"), CrmProject.entity.label("pent"))
             .outerjoin(CrmProject, CrmProject.id == CrmInvoice.project_id)
             .where(CrmInvoice.entity == ent)
             # 🔴 日期後面一定要有 tiebreaker：一天開 5-10 張發票很常見，只用
@@ -667,15 +667,38 @@ async def list_invoices(
             query = query.limit(limit).offset(max(offset, 0))
         rows = (await session.execute(query)).all()
         coll = await _invoice_collections(session, [r[0].id for r in rows])
+    from core.ledger import hide_mine_projects
+    _hide = hide_mine_projects(request)
     out = []
     for r in rows:
-        d = _to_invoice_dict(r[0], r[1] or "")
+        # 內部代開可以掛私帳案：案名對沒私帳權限的人不顯示（列的可見性規則同 list_projects）
+        pn = "" if (_hide and (r[2] or "parent") == "mine") else (r[1] or "")
+        d = _to_invoice_dict(r[0], pn)
         c = coll.get(r[0].id) or {}
         # 清單只帶合計與最後到款日（逐筆明細在 GET /invoices/{id}）—— 分期收款
         # 要能一眼看出「開了多少、收了多少、還欠多少」。
         d.update(collection_fields(r[0].amount_total, c))
         out.append(d)
     return {"invoices": out, "total": len(out)}
+
+
+
+async def _assert_project_link(session, request: Request, project_id, category) -> None:
+    """發票掛專案的規則（owner 2026-09-04）：三種類別都可以掛；私帳案只能掛在「內部代開」、且請求者要有私帳權限。
+    沒這條的話，沒有 finance_mine 的人挑不到私帳案（下拉不給），但直接送 id 還是掛得上。"""
+    pid = (project_id or "").strip() if isinstance(project_id, str) else project_id
+    if not pid:
+        return
+    from core.finance_logic import MINE_LINK_INVOICE_CATEGORY
+    from core.ledger import hide_mine_projects
+    p = await session.get(CrmProject, pid)
+    if not p:
+        raise HTTPException(status_code=404, detail="找不到要關聯的專案")
+    if (p.entity or "parent") == "mine":
+        if (category or "") != MINE_LINK_INVOICE_CATEGORY:
+            raise HTTPException(status_code=422, detail=f"私帳案只能掛在「{MINE_LINK_INVOICE_CATEGORY}」發票")
+        if hide_mine_projects(request):
+            raise HTTPException(status_code=403, detail="沒有私帳權限，不能把發票掛到私帳案")
 
 
 @router.post("/invoices")
@@ -686,6 +709,8 @@ async def create_invoice(req: InvoicePayload, request: Request):
     factory = await _get_factory()
     now = _now()
     data = req.model_dump(exclude={"invoice_date", "entity"})
+    async with factory() as _s:
+        await _assert_project_link(_s, request, data.get("project_id"), data.get("category"))
     # 款項狀態在**入口**定案，不留給客戶端：
     #   · 舊客戶端可能送改名前的字（已轉撥）→ 正規化
     #   · 沒送或送空字串 → 依方向推（收款＝未收款、代開＝未付款）
@@ -821,6 +846,7 @@ async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request)
         await _assert_month_open(session, inv.invoice_date, new_date, entity=ent)
         old_status = inv.payment_status
         upd = req.model_dump(exclude={"invoice_date", "entity"})
+        await _assert_project_link(session, request, upd.get("project_id"), upd.get("category"))
         # 同上：舊字正規化、空的就依方向推（PUT 會整包寫回，空字串照樣會寫進去）
         upd["payment_status"] = (
             normalize_invoice_status(upd.get("payment_status") or "")

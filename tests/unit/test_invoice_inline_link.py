@@ -61,7 +61,9 @@ def test_only_income_rows_get_the_invoice_picker():
     """支出列沒有「這筆收款對到哪張發票」這回事 —— 那一欄在私帳讓給請款單，
     在母公司則只有收入列可點。"""
     js = js_code_only(repo_src(CB))
-    seg = js.split("cls: 'cash-col-inv',")[-1].split("</div>")[0]
+    # 錨在發票欄那個 cell 的 cls 上（含 cash-c-invoice 那個）；原本錨的字串早已不存在，靠「檔案裡第一個 </div>」矇對，
+    # 2026-09-04 加了請款浮層之後就被更前面的 </div> 截斷。
+    seg = js.split("cls: 'cash-col-inv cash-c-invoice',")[-1].split("</div>")[0]
     assert "e.deposit ?" in seg
 
 

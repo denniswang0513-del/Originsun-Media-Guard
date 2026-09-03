@@ -395,6 +395,136 @@ let _drawn = 0;
 // 有拆項的列：分類三格換成「已拆 N 項」badge（分類的正本在拆項），
 // 金額/分類/專案改由「拆內容」進 —— 後端對這幾欄也是 409。
 
+// ── 列的「請款」（owner 2026-09-04）：支出列一鍵開請款單。有連專案 → 列出那個案的費用配置（成本格），
+// 挑一行就以它開單（帶 cost_line_id，後端擋重複請款）；沒連專案 → 先提示去連，或直接自訂一張。
+// 開完：把請款單掛回這一列（PUT /cash-entries/{id}/payments），並因為錢已經出去了，直接標已付（付款日＝這列日期）。
+function _payMenu(e) {
+    if (!(e.expense || 0) || e.split_count) return [];      // 拆項列各自掛，不在父列請
+    return [{ label: '請款', fn: '_cashRequestPay' }];
+}
+
+function _payOverlay(title, bodyHtml, footHtml) {
+    const overlay = document.createElement('div');
+    overlay.className = 'crm-modal-overlay';
+    overlay.style.display = 'flex';
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+    overlay.innerHTML = `<div class="crm-modal" style="max-width:560px;">
+        <div class="crm-modal-header"><h3>${_esc(title)}</h3>
+          <button class="crm-detail-close" data-close>關閉</button></div>
+        <div class="crm-modal-body" style="max-height:60vh;overflow-y:auto;">${bodyHtml}</div>
+        <div class="crm-modal-footer">${footHtml}</div></div>`;
+    overlay.querySelector('[data-close]').addEventListener('click', () => overlay.remove());
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+/** 開請款單 → 掛回這一列 → 標已付。回請款單 id；任一步失敗丟 toast、不半途留一張沒掛的單（掛失敗就把單的狀態留著讓人手動處理）。 */
+async function _cashCreateAndLinkPayment(e, body) {
+    const day = (e.entry_date || '').slice(0, 10);
+    const created = await _fetch('/payments', { method: 'POST', body: JSON.stringify({
+        request_date: day || null, planned_month: day.slice(0, 7), payment_status: '應付款', ...body }) });
+    const pid = created.id || (created.payment && created.payment.id) || created.payment_id;
+    if (!pid) throw new Error('請款單建立了但沒拿到 id');
+    const amt = Math.max(0, Math.min(body.amount || 0, e.expense || 0));
+    await _fetch(`/cash-entries/${e.id}/payments`, { method: 'PUT', body: JSON.stringify({ items: [{ payment_request_id: pid, amount: amt }] }) });
+    await _fetch('/payments/batch-pay', { method: 'PATCH', body: JSON.stringify({ payment_ids: [pid], payment_date: day }) });
+    return pid;
+}
+
+window._cashRequestPay = async (id) => {
+    const e = _entries.find((x) => x.id === id);
+    if (!e) return;
+    if (!e.project_id) {
+        const ov = _payOverlay('請款', `<div style="color:#ddd;line-height:1.7;">這一列還沒連結專案。連了專案才能從案子的費用配置挑一行請款；
+            也可以直接開一張不掛案的請款單。</div>`,
+            `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
+             <button class="crm-btn crm-btn-secondary" data-act="custom">直接請款</button>
+             <button class="crm-btn crm-btn-primary" data-act="link">連結專案</button>`);
+        ov.querySelector('[data-close]:not(.crm-detail-close)').addEventListener('click', () => ov.remove());
+        ov.querySelector('[data-act="link"]').addEventListener('click', () => {
+            ov.remove();
+            openProjectPicker(_projPickerOpts(e, async (pid) => {
+                if (!pid) return;
+                try {
+                    await _fetch('/cash-entries/' + id, { method: 'PUT', body: JSON.stringify({ project_id: pid }) });
+                    e.project_id = pid;
+                    e.project_name = ((_projectList.find((p) => p.id === pid) || {}).name || '');
+                    _patchRow(id);
+                    window._cashRequestPay(id);           // 連好了接著挑費用配置
+                } catch (err) { crmToast('連結失敗：' + err.message, true); }
+            }));
+        });
+        ov.querySelector('[data-act="custom"]').addEventListener('click', () => { ov.remove(); _cashCustomPay(e); });
+        return;
+    }
+    let lines = [];
+    try { lines = (await _fetch(`/projects/${e.project_id}/cost-lines`)).cost_lines || []; }
+    catch (err) { crmToast('費用配置載入失敗：' + err.message, true); return; }
+    const amtOf = (l) => (l.actual_amount || l.estimated_amount || 0);
+    const whoOf = (l) => (l.actual_staff_name || l.estimated_staff_name || '');
+    const rows = lines.map((l, i) => `
+        <label class="cash-pay-line" style="display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid #2e2e2e;cursor:pointer;">
+          <input type="radio" name="cash-pay-line" value="${i}">
+          <span style="flex:1;min-width:0;"><b>${_esc(l.item_name || '')}</b>
+            <span style="color:#888;font-size:12px;"> ${_esc(l.phase || '')}${whoOf(l) ? ' · ' + _esc(whoOf(l)) : ''}</span></span>
+          <span style="color:#fca5a5;">$${_fmtNum(amtOf(l))}</span>
+        </label>`).join('');
+    const ov = _payOverlay('請款 — ' + (e.project_name || ''),
+        `<div style="color:#888;font-size:12px;margin-bottom:6px;">這一列支出 $${_fmtNum(e.expense || 0)}（${_esc(e.summary || '')}）。挑一行費用配置開請款單；金額會照那一行帶，可在下一步改。</div>
+         ${rows || '<div class="crm-empty">這個案子還沒有費用配置</div>'}
+         <label class="cash-pay-line" style="display:flex;gap:10px;align-items:center;padding:8px 6px;cursor:pointer;">
+           <input type="radio" name="cash-pay-line" value="custom"><span style="flex:1;">不對應費用配置，自訂一張</span></label>`,
+        `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
+         <button class="crm-btn crm-btn-primary" data-act="next">下一步</button>`);
+    ov.querySelector('[data-close]:not(.crm-detail-close)').addEventListener('click', () => ov.remove());
+    ov.querySelector('[data-act="next"]').addEventListener('click', () => {
+        const picked = ov.querySelector('input[name="cash-pay-line"]:checked');
+        if (!picked) { crmToast('先挑一行', true); return; }
+        ov.remove();
+        if (picked.value === 'custom') { _cashCustomPay(e); return; }
+        const l = lines[Number(picked.value)];
+        _cashCustomPay(e, { summary: l.item_name || '', amount: amtOf(l) || (e.expense || 0), payee_name: whoOf(l), cost_line_id: l.id });
+    });
+};
+
+/** 請款單的欄位確認（自訂或帶費用配置那一行）：摘要／金額／收款人／類別，送出＝開單＋掛回＋標已付。 */
+function _cashCustomPay(e, pre = {}) {
+    const ov = _payOverlay('請款單', `
+        <div class="crm-form-grid">
+          <div class="crm-field crm-field-full"><label>摘要</label><input id="cpay-summary" class="crm-input" value="${_esc(pre.summary || e.summary || '')}"></div>
+          <div class="crm-field"><label>金額</label><input id="cpay-amount" type="number" class="crm-input" value="${pre.amount || e.expense || 0}"></div>
+          <div class="crm-field"><label>收款人</label><input id="cpay-payee" class="crm-input" value="${_esc(pre.payee_name || e.payee || '')}"></div>
+          <div class="crm-field crm-field-full"><label>類別</label><input id="cpay-cat" class="crm-input" value="${_esc(pre.cost_line_id ? '專案外包' : (e.category || '專案外包'))}"></div>
+          <div style="color:#888;font-size:12px;">${pre.cost_line_id ? '會帶上這一行費用配置（同一行不能請兩次）。' : ''}錢已經出去了：開單後自動掛回這一列並標已付（付款日＝${_esc((e.entry_date || '').slice(0, 10))}）。</div>
+        </div>`,
+        `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
+         <button class="crm-btn crm-btn-primary" data-act="go">開請款單</button>`);
+    ov.querySelector('[data-close]:not(.crm-detail-close)').addEventListener('click', () => ov.remove());
+    ov.querySelector('[data-act="go"]').addEventListener('click', async (ev) => {
+        const btn = ev.currentTarget;
+        const body = {
+            summary: (document.getElementById('cpay-summary').value || '').trim(),
+            amount: parseInt(document.getElementById('cpay-amount').value, 10) || 0,
+            payee_name: (document.getElementById('cpay-payee').value || '').trim(),
+            category: (document.getElementById('cpay-cat').value || '').trim() || '專案外包',
+            project_id: e.project_id || null,
+            cost_line_id: pre.cost_line_id || null,
+        };
+        if (!body.summary || !body.amount) { crmToast('摘要與金額必填', true); return; }
+        btn.disabled = true; btn.textContent = '處理中…';
+        try {
+            await _cashCreateAndLinkPayment(e, body);
+            ov.remove();
+            crmToast('已開請款單並掛回這一列（已付）');
+            crmCacheInvalidate();
+            loadEntries({ cards: false });
+        } catch (err) {
+            btn.disabled = false; btn.textContent = '開請款單';
+            crmToast(err.message || '請款失敗', true);
+        }
+    });
+}
+
 /** 拆項父列的「專案」格：本列的 project_id 已讓位給拆項，把拆項連的案名
  *  秀回來 —— 不然整列看起來像沒連結（owner 就是這樣以為帳沒連完）。 */
 const _splitProjNames = (e) => [...new Set(
@@ -700,7 +830,7 @@ function _rowHtml(e) {
             <div class="cash-c-account">${_esc(_acctName(e.bank_account_id))}</div>
             ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup',
                                    onDelete: '_cashDelete',
-                                   extra: [..._splitMenu(e), ..._pettyMenu(e)] })}
+                                   extra: [..._splitMenu(e), ..._payMenu(e), ..._pettyMenu(e)] })}
         </div>
     `;
 }
