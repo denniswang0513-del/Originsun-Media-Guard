@@ -96,6 +96,9 @@ def test_invoice_is_a_request_to_issue():
     assert "project_category" in src
     # 紙本發票要收件人／電話／地址（同桌機發票本）；哪一種是紙本由 options.invoice.paper_kind 說
     assert "paper_kind" in src and "recipient_address" in src and "'inv-paper'" in src
+    # 還沒開立的票可以修改：只在 issue_status＝options.unissued_status 時給按鈕；PUT 整包寫回，表單沒有的欄位從原票帶
+    assert "data-edit=" in src and "inv.issue_status === unissued()" in src
+    assert "method: 'PUT'" in src and "invoice_number: _editing.invoice_number" in src and "payment_status: _editing.payment_status" in src
     api = code_only(repo_src("routers/api_crm_mobile.py"))
     assert "get_invoice_applicants(request)" in api and "INVOICE_PASSTHROUGH_CATEGORIES" in api
 

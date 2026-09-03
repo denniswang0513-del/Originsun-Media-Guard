@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from core.auth import check_logged_in, payload_grants
 from core.crm_logic import prepend_note
-from core.finance_logic import (INVOICE_PASSTHROUGH_CATEGORIES, QUOTE_PENDING, QUOTE_STATUSES, VAT_PCT,
+from core.finance_logic import (INVOICE_PASSTHROUGH_CATEGORIES, QUOTE_PENDING, QUOTE_STATUSES, VAT_PCT, issue_status_for,
                                 initial_invoice_status, project_type_vocab)
 from core.hr_logic import budget_burn, day_iso
 from core.ledger import hide_mine_projects, not_mine
@@ -153,6 +153,8 @@ async def mobile_options(request: Request):
                                  for pt in INVOICE_VOCAB["payment_types"]},
             # 申請人名單跟桌機發票本同一份（settings.invoice_applicants，沒設就用實際用過的人）
             "applicants": (await get_invoice_applicants(request))["applicants"],
+            # 「還沒開」的字由規則算（沒號碼就是這個）：手機只給這種票「修改」按鈕
+            "unissued_status": issue_status_for(""),
             # 營業稅率：發票表單未稅／含稅互推用後端的那一份，不在瀏覽器再寫一個 5
             "vat_pct": VAT_PCT,
         },

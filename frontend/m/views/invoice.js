@@ -21,6 +21,7 @@ function formHtml() {
       <div class="m-h">請開發票</div>
       <div id="inv-notice" hidden></div>
       <form class="m-form m-card w" id="inv-form" autocomplete="off">
+        <label>標題</label><input id="inv-title" placeholder="空白＝用案名或品項（CRM 發票的「名稱」）">
         <label>申請人</label>${segHtml('inv-applicant', inv.applicants || [])}
         <label>類別</label>${segHtml('inv-category', inv.categories || [])}
         <label id="inv-project-label">專案</label>${pickerHtml('inv-project_id')}
@@ -38,12 +39,12 @@ function formHtml() {
           <label>收件電話</label><input id="inv-recipient_phone" type="tel" inputmode="tel">
           <label class="req">收件地址</label><input id="inv-recipient_address">
         </div>
-        <details class="m-more"><summary>更多欄位（名稱、備註）</summary>
-          <label>名稱</label><input id="inv-title" placeholder="空白＝用案名或品項">
+        <details class="m-more"><summary>更多欄位（備註）</summary>
           <label>備註</label><input id="inv-notes">
         </details>
-        <div class="m-hint">送出＝登記一張待開立、還沒收到錢的請款發票，並產生一段可複製的通知給同事開票</div>
+        <div class="m-hint" id="inv-mode-hint">送出＝登記一張待開立、還沒收到錢的請款發票，並產生一段可複製的通知給同事開票</div>
         <button type="submit" class="m-btn-primary" id="inv-submit">送出並產生通知</button>
+        <button type="button" class="m-btn wide" id="inv-cancel-edit" hidden>取消修改</button>
       </form>
       ${state.canWrite ? '' : '<div class="m-empty">此帳號沒有登記權限</div>'}
       <div class="m-h">最近 10 張</div>
@@ -179,17 +180,62 @@ function showNotice(text) {
     });
 }
 
+// ── 修改還沒開立的票（owner 2026-09-03）：清單按「修改」把資料帶回表單，送出走 PUT ──
+// PUT 是整包寫回，手機表單沒有的欄位（號碼、日期、款項狀態、代開費）從原票帶著，不能靠預設值
+let _editing = null;
+const unissued = () => (opt().invoice || {}).unissued_status || '';
+
+function startEdit(inv) {
+    _editing = inv;
+    const invo = opt().invoice || {};
+    setSeg('inv-applicant', invo.applicants || [], inv.applicant);
+    setSeg('inv-category', invo.categories || [], inv.category); syncProjectLabel();
+    setSeg('inv-invoice_kind', invo.kinds || [], inv.invoice_kind); syncPaper();
+    F('project_id')._set?.(inv.project_id || '');
+    F('amount_ex_tax').value = inv.amount_ex_tax ?? ''; F('amount_total').value = inv.amount_total ?? '';
+    F('item_type')._set?.(inv.item_type || '');
+    F('company_name')._set?.(inv.company_name || ''); F('tax_id').value = inv.tax_id || '';
+    F('recipient').value = inv.recipient || ''; F('recipient_phone').value = inv.recipient_phone || ''; F('recipient_address').value = inv.recipient_address || '';
+    F('title').value = inv.title || ''; F('notes').value = inv.notes || '';
+    document.getElementById('inv-mode-hint').textContent = '修改中：' + (inv.title || '') + '（還沒開立，改完送出會覆蓋這張）';
+    F('submit').textContent = '儲存修改'; F('cancel-edit').hidden = false;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function stopEdit() {
+    _editing = null;
+    document.getElementById('inv-mode-hint').textContent = '送出＝登記一張待開立、還沒收到錢的請款發票，並產生一段可複製的通知給同事開票';
+    F('submit').textContent = '送出並產生通知'; F('cancel-edit').hidden = true;
+}
+
 async function submit(ev) {
     ev.preventDefault();
     const body = payload();
+    if (_editing) {
+        // 表單沒有的欄位照原票；有的以表單為準
+        Object.assign(body, {
+            invoice_number: _editing.invoice_number || '',
+            invoice_date: _editing.invoice_date || body.invoice_date,   // 完整 ISO 原樣送回，後端會歸一（切前 10 碼會落到 UTC 那天）
+            payment_status: _editing.payment_status || body.payment_status,
+            commission: _editing.commission ?? null,
+        });
+    }
     if (needsProject() && !body.project_id) { toast('類別是專案就要選專案', 'err'); F('project_id-q').focus(); return; }
-    if (!body.title) { toast('請填品項或抬頭（名稱用它們補）', 'err'); F('item_type-q').focus(); return; }
+    if (!body.title) { toast('請填標題，或填品項／抬頭讓它自動補', 'err'); F('title').focus(); return; }
     if (body.tax_id && !/^\d{8}$/.test(body.tax_id)) { toast('統編要 8 位數字', 'err'); F('tax_id').focus(); return; }
     if (isPaper() && !(body.recipient && body.recipient_address)) { toast('紙本發票要填收件人與地址', 'err'); F(body.recipient ? 'recipient_address' : 'recipient').focus(); return; }
+    const editing = _editing;
+    let saved = false;
     await withBusy(F('submit'), async () => {
         try {
-            await mfetch('/api/v1/crm/invoices', { method: 'POST', body });
-            toast('已登記，通知在上方');
+            if (editing) {
+                await mfetch('/api/v1/crm/invoices/' + editing.id, { method: 'PUT', body });
+                toast('已修改，通知在上方');
+            } else {
+                await mfetch('/api/v1/crm/invoices', { method: 'POST', body });
+                toast('已登記，通知在上方');
+            }
+            saved = true;
             showNotice(noticeText(body));
             for (const k of VOLATILE) F(k).value = '';          // 專案／類別／申請人／抬頭留著，同一案常連開幾張
             F('item_type-q').value = '';
@@ -197,6 +243,7 @@ async function submit(ev) {
             loadRecent();
         } catch (e) { toast(e.message || '建立失敗', 'err'); }
     });
+    if (saved && editing) stopEdit();   // withBusy 收尾會把按鈕文字寫回，所以要在它之後
 }
 
 async function loadRecent() {
@@ -206,12 +253,14 @@ async function loadRecent() {
         const d = await mfetch('/api/v1/crm/invoices?limit=10&order=recent');
         const rows = d.invoices || [];
         if (!rows.length) { box.innerHTML = emptyBox('尚無發票'); return; }
+        box._rows = rows;
         box.innerHTML = rows.map(inv => `
           <div class="m-card">
-            <div class="t"><div class="name">${esc(inv.title)}</div>${pill(inv.payment_status, 'pri')}</div>
-            <div class="sub">${esc(inv.payment_type || '')}${inv.invoice_number ? ' · ' + esc(inv.invoice_number) : ''}${inv.project_name ? ' · ' + esc(inv.project_name) : ''}</div>
+            <div class="t"><div class="name">${esc(inv.title)}</div>${pill(inv.issue_status, inv.issue_status === unissued() ? '' : 'pri')}</div>
+            <div class="sub">${esc(inv.payment_type || '')} · ${esc(inv.payment_status || '')}${inv.invoice_number ? ' · ' + esc(inv.invoice_number) : ''}${inv.project_name ? ' · ' + esc(inv.project_name) : ''}</div>
             <div class="row"><span class="sub">${esc(fmtDate(inv.invoice_date))}</span>
               ${'amount_total' in inv ? `<span class="amt">${money(inv.amount_total)}</span>` : ''}</div>
+            ${state.canWrite && inv.issue_status === unissued() ? `<div class="row"><button type="button" class="m-btn w" data-edit="${esc(inv.id)}">修改</button></div>` : ''}
           </div>`).join('');
     } catch (e) { box.innerHTML = errBox(e); }
 }
@@ -221,6 +270,12 @@ export async function render(host, { first }) {
         host.innerHTML = formHtml();
         wireAmounts();
         document.getElementById('inv-form').addEventListener('submit', submit);
+        F('cancel-edit').addEventListener('click', () => { stopEdit(); for (const k of VOLATILE) F(k).value = ''; F('item_type-q').value = ''; });
+        document.getElementById('inv-recent').addEventListener('click', (ev) => {
+            const b = ev.target.closest('button[data-edit]'); if (!b) return;
+            const inv = (document.getElementById('inv-recent')._rows || []).find(x => x.id === b.dataset.edit);
+            if (inv) startEdit(inv);
+        });
     }
     // 專案下拉跟最近 10 張一起重抓：專案分頁新建案子會 markStale('invoice')，切過來才看得到它
     if (shouldLoad('invoice', { first })) await Promise.all([loadProjects(), loadRecent()]);
