@@ -197,6 +197,11 @@ export async function initTimesheetsTab() {
         const btn = ev.target.closest('[data-ts-action]');
         if (btn && _content.contains(btn)) _onAction(btn);
     });
+    // 起訖時間 → 實際小時（委派，新增列也吃得到）
+    _content.addEventListener('change', (ev) => {
+        const t = ev.target.closest('[data-f="t0"], [data-f="t1"]');
+        if (t) _applyTimeRange(t.closest('td'));
+    });
     await refresh();
 }
 
@@ -357,8 +362,24 @@ function _rowCells(v = {}, quick = false) {
         <td>${_typeSelect(v.work_type || '', 'data-f="type"')}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}" placeholder="做了什麼" style="width:100%;"></td>
         <td><input type="number" data-f="planned" min="0" step="0.25" value="${v.planned ?? ''}" placeholder="計畫" style="width:64px;"></td>
-        <td><input type="number" data-f="hours" min="0" step="0.25" value="${v.hours ?? ''}" placeholder="實際" style="width:64px;">
-            ${quick ? [0.5, 1, 2, 4, 8].map(h => `<button class="ts-btn ghost" data-hq="${h}" style="padding:2px 6px;font-size:11px;margin-left:2px;">${h}</button>`).join('') : ''}</td>`;
+        <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}" placeholder="實際" style="width:64px;">
+            ${quick ? [0.5, 1, 2, 4, 8].map(h => `<button class="ts-btn ghost" data-hq="${h}" style="padding:2px 6px;font-size:11px;margin-left:2px;">${h}</button>`).join('')
+                + `<div style="margin-top:4px;font-size:11.5px;color:#888;white-space:nowrap;">起訖
+                    <input type="time" data-f="t0" style="width:92px;background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;padding:2px 4px;">
+                    ～ <input type="time" data-f="t1" style="width:92px;background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;padding:2px 4px;">
+                    <span data-f="t-out" style="color:#93c5fd;"></span></div>` : ''}</td>`;
+}
+/** 起訖時間 → 實際小時（兩位小數；訖比起早＝跨午夜）；填進同一格的「實際」欄。 */
+function _applyTimeRange(cell) {
+    const t0 = cell.querySelector('[data-f="t0"]')?.value, t1 = cell.querySelector('[data-f="t1"]')?.value;
+    const out = cell.querySelector('[data-f="t-out"]');
+    if (!t0 || !t1) { if (out) out.textContent = ''; return; }
+    const m = s => { const [h, mm] = s.split(':').map(Number); return h * 60 + mm; };
+    let mins = m(t1) - m(t0);
+    if (mins < 0) mins += 24 * 60;
+    const hours = Math.round(mins / 60 * 100) / 100;
+    cell.querySelector('[data-f="hours"]').value = hours;
+    if (out) out.textContent = `＝ ${hours} h`;
 }
 function _newRowHtml(v = {}) {
     return `<tr class="ts-mine-row">${_rowCells(v, true)}
@@ -407,7 +428,7 @@ function _renderMine(d, err) {
                 <button class="ts-btn" data-ts-action="mine-submit">送出</button>
                 <span id="ts-mine-result" style="font-size:12px;color:#888;"></span>
             </div>
-            <div class="ts-note">實際或計畫至少填一個。只填計畫＝先排；之後按「完成（照計畫）」或改實際小時。
+            <div class="ts-note">實際或計畫至少填一個。實際可以直接填小時、按快捷鈕，或填起訖時間讓它自己算。只填計畫＝先排；之後按「完成（照計畫）」或改實際小時。
                 同一天同一案 Sheet 已有的列會標「Sheet」，不用再填一次。</div>
         </div>`;
 }
