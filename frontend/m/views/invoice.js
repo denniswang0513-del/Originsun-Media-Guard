@@ -282,6 +282,7 @@ function recentCardHtml(inv) {
     return `
       <div class="m-card">
         <div class="t"><div class="name">${esc(inv.title)}</div>${pill(inv.issue_status, inv.issue_status === unissued() ? '' : 'pri')}</div>
+        <div class="sub">${esc(inv.company_name || '（沒有抬頭）')}${inv.tax_id ? ' · ' + esc(inv.tax_id) : ''}</div>
         <div class="sub">${esc(inv.payment_type || '')} · ${esc(inv.payment_status || '')}${inv.invoice_number ? ' · ' + esc(inv.invoice_number) : ''}${inv.project_name ? ' · ' + esc(inv.project_name) : ''}</div>
         <div class="row"><span class="sub">${esc(fmtDate(inv.invoice_date))}</span>
           ${'amount_total' in inv ? `<span class="amt">${money(inv.amount_total)}</span>` : ''}</div>
