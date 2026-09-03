@@ -16,8 +16,9 @@ export const state = {
 // owner 2026-09-03：第五顆改「行事曆」（拍攝排程＋器材登記，docs/SHOOT_CALENDAR_PLAN.md）；付款退成隱藏路由
 export const TABS = ['invoice', 'petty', 'projects', 'quotes', 'calendar'];
 export const DEFAULT_TAB = 'invoice';
-/** 有畫面但不在分頁列的路由（從別的畫面進、上一頁回去）：記雜支、付款（專案抽屜「請款」段的「付款清單」進）。 */
-export const ROUTES = [...TABS, 'expense', 'payments'];
+/** 有畫面但不在分頁列的路由 → 頂欄名稱（分頁列的名稱從按鈕文字拿）：記雜支、付款（都從專案抽屜進，上一頁回去）。 */
+export const HIDDEN_ROUTES = { expense: '記雜支', payments: '付款' };
+export const ROUTES = [...TABS, ...Object.keys(HIDDEN_ROUTES)];
 
 export function currentTab() {
     const h = (location.hash || '').replace(/^#/, '').split('?')[0];
@@ -49,6 +50,8 @@ export const list = (k) => (Array.isArray(opt()[k]) ? opt()[k] : []);
 /** 已付款＝payment_statuses 的最後一項（後端排序：應付…→已付）。 */
 export const paidStatus = () => { const l = list('payment_statuses'); return l.length ? l[l.length - 1] : ''; };
 export const lostPhase = () => opt().lost_phase || '';
+/** 專案在選擇器／通知裡的名字：「客戶｜案名」（發票、記雜支、行事曆同一條規則）。 */
+export const projectLabel = (p) => [p.client_short_name, p.name].filter(Boolean).join('｜');
 
 // 打字就過濾的選擇器（owner 2026-09-03「所有的搜尋都要可以打字搜尋」）：手機上原生 <select> 不能打字，
 // 清單一長（138 個客戶、上百個案子）就找不到。結構＝hidden input（id＝欄位名，既有程式照讀 .value）

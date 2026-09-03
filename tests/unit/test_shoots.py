@@ -157,8 +157,14 @@ def test_every_write_endpoint_recomputes_project_shoot_date_and_syncs():
     for header in ("async def create_shoot(", "async def update_shoot(", "async def set_shoot_status("):
         body = code_only(func_body(src, header))
         assert "_recompute_project_shoot_date(" in body, header
-        assert "_sync_calendar(" in body, header
+        assert "_finish(" in body, header      # _finish＝同步日曆＋回最新列（唯一收尾）
         assert "_check_write(request)" in body, header
+
+
+def test_finish_is_the_only_sync_path():
+    src = repo_src(API)
+    assert "_sync_calendar(" in code_only(func_body(src, "async def _finish("))
+    assert code_only(src).count("await _sync_calendar(") == 1, "同步只從 _finish 進"
 
 
 def test_equipment_state_flip_is_shared_with_equipment_tab():

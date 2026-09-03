@@ -7,7 +7,7 @@
  */
 import { invoiceAmounts } from '/js/shared/invoice-amounts.js';
 import { mfetch, toast, esc, todayLocal, money, fmtDate } from '../shell.js';
-import { state, opt, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad, pickerHtml, mountPicker, segHtml, mountSeg, setSeg, copyText } from '../ui.js';
+import { state, opt, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad, pickerHtml, mountPicker, segHtml, mountSeg, setSeg, copyText, projectLabel } from '../ui.js';
 
 const F = (id) => document.getElementById('inv-' + id);
 const VOLATILE = ['title', 'amount_ex_tax', 'amount_total', 'item_type', 'notes'];
@@ -111,7 +111,7 @@ async function loadProjects() {
     try {
         const d = await mfetch('/api/v1/crm/m/projects?limit=100&offset=0');
         F('project_id')._rows = d.projects || [];
-        items = (d.projects || []).map(p => ({ value: p.id, label: [p.client_short_name, p.name].filter(Boolean).join('｜') }));
+        items = (d.projects || []).map(p => ({ value: p.id, label: projectLabel(p) }));
     } catch (e) {
         placeholder = '專案清單載入失敗：' + e.message;
     }
@@ -163,7 +163,7 @@ function noticeText(body) {
     const lines = [
         body.issue_status === voided() ? '發票作廢' : '請開發票',
         ...(body.invoice_number ? [`號碼：${body.invoice_number}`] : []),
-        `專案：${[p.client_short_name, p.name].filter(Boolean).join('｜') || '—（未掛專案）'}`,
+        `專案：${projectLabel(p) || '—（未掛專案）'}`,
         `類別：${body.category}`,
         `申請人：${body.applicant || '—'}`,
         `抬頭：${body.company_name || '—'}${body.tax_id ? `（統編 ${body.tax_id}）` : ''}`,

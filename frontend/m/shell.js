@@ -21,10 +21,11 @@ let _gate = null;
 let _started = false;
 let _resolveBoot = null;
 
-export function todayLocal() {
-    const d = new Date();
+/** Date → 本地 'YYYY-MM-DD'（不是 toISOString：那是 UTC，台北早上 8 點前會變昨天）。 */
+export function dateIso(d) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+export const todayLocal = () => dateIso(new Date());
 
 export function money(n) {
     if (n === null || n === undefined || n === '') return '—';

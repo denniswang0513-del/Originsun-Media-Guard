@@ -24,8 +24,10 @@ from core.ledger import not_mine   # 手機版只看母公司案（同 api_crm_m
 from routers.crm._shared import _parse_shoot_date
 from core.schemas import (CalendarConfigPayload, ShootCreate, ShootEquipmentPayload,
                           ShootStatusPayload, ShootUpdate)
-from core.shoot_logic import (CANCELLED, EQUIPMENT_STATES, PICKED_UP, RESERVED, RETURNED, SCHEDULED,
-                              SHOOT_STATUSES, checkout_state, derive_project_shoot_date, event_body, overlaps)
+from core.shoot_logic import (CANCELLED, EQUIPMENT_STATES, SCHEDULED, SHOOT_STATUSES, checkout_state,
+                              derive_project_shoot_date, event_body, overlaps)
+# api_crm_mobile 那邊反過來在函式內延遲 import 這裡的 shoots_for_project，所以這裡可以直接 import
+from routers.api_crm_mobile import _company_projects, _slim_project
 
 try:
     from sqlalchemy import or_, select
@@ -223,39 +225,38 @@ async def _recompute_project_shoot_date(session, project_id: str) -> None:
         p.shoot_date = _parse_shoot_date(d.isoformat()) if d else None
 
 
-async def _sync_calendar(sid: str) -> None:
-    """best-effort：憑證／日曆沒設就什麼都不做；失敗寫 sync_error。"""
+async def _sync_calendar(sid: str) -> dict:
+    """best-effort 同步 Google 日曆，回**最新的 ShootRow**（寫入端點的唯一收尾，見 _finish）。
+    憑證／日曆沒設就不動同步欄位（保持中性）；失敗只寫 sync_error。"""
     from services import google_calendar as gc
-    sa, cal_id, err = await gc.load_config()
+    sa, cal_id, _err = await gc.load_config()
     factory = _require_factory()
     async with factory() as session:
-        s = (await session.execute(select(CrmShoot).where(CrmShoot.id == sid))).scalars().first()
-        if s is None:
-            return
+        s = await _shoot_or_404(session, sid)
+        row = await _row(session, s)
         if sa is None or not cal_id:
-            return   # 未設定：保持中性（synced_at／sync_error 都空）
+            return row
         now = datetime.now(timezone.utc)
         if s.status == CANCELLED:
-            if s.google_event_id:
-                ok, e = await asyncio.to_thread(gc.delete_event, sa, cal_id, s.google_event_id)
-                if ok:
-                    s.google_event_id = None
-                    s.synced_at = now
-                    s.sync_error = None
-                else:
-                    s.sync_error = e[:500]
-            await session.commit()
-            return
-        body = event_body(await _row(session, s))
-        eid, e = await asyncio.to_thread(gc.upsert_event, sa, cal_id, s.google_event_id, body)
-        if eid:
-            s.google_event_id = eid
-            s.synced_at = now
-            s.sync_error = None
+            ok, e = (True, "") if not s.google_event_id else await asyncio.to_thread(gc.delete_event, sa, cal_id, s.google_event_id)
+            if ok:
+                s.google_event_id, s.synced_at, s.sync_error = None, now, None
+            else:
+                s.sync_error = e[:500]
         else:
-            s.sync_error = (e or "同步失敗")[:500]
+            eid, e = await asyncio.to_thread(gc.upsert_event, sa, cal_id, s.google_event_id, event_body(row))
+            if eid:
+                s.google_event_id, s.synced_at, s.sync_error = eid, now, None
+            else:
+                s.sync_error = (e or "同步失敗")[:500]
         await session.commit()
+        row.update(google_event_id=s.google_event_id or "", synced_at=_ts(s.synced_at), sync_error=s.sync_error or "")
+        return row
 
+
+async def _finish(sid: str) -> dict:
+    """寫入端點的收尾：同步日曆 → 回 {"shoot": 最新 ShootRow}。"""
+    return {"shoot": await _sync_calendar(sid)}
 
 def _apply_fields(s, req, partial: bool) -> None:
     """ShootCreate / ShootUpdate 的欄位落到 model；partial＝只動有給的欄位。"""
@@ -317,7 +318,6 @@ async def _reserve_equipment(session, s, equipment_ids: list[str]) -> None:
 @router.get("/options")
 async def shoot_options(request: Request, date_: str = Query("", alias="date"), end_date: str = Query("")):
     """表單字彙一次給：狀態、器材（帶日期時附 busy）、地點、人員、專案。"""
-    from routers.api_crm_mobile import _company_projects, _slim_project
     d0 = _parse_date(date_, "date")
     d1 = _parse_date(end_date, "end_date") if d0 else None
     factory = _require_factory()
@@ -346,10 +346,7 @@ async def shoot_options(request: Request, date_: str = Query("", alias="date"), 
             select(CrmStaff.id, CrmStaff.name, CrmStaff.role, CrmStaff.status).order_by(CrmStaff.name))).all()
         projects = (await session.execute(
             _company_projects().order_by(CrmProject.updated_at.desc(), CrmProject.id).limit(200))).all()
-    cats = []
-    for e in equips:
-        if (e.category or "其他") not in cats:
-            cats.append(e.category or "其他")
+    cats = list(dict.fromkeys((e.category or "其他") for e in equips))
     return {
         "statuses": list(SHOOT_STATUSES), "scheduled_status": SCHEDULED,
         "done_status": SHOOT_STATUSES[1], "cancelled_status": CANCELLED,
@@ -466,9 +463,7 @@ async def create_shoot(req: ShootCreate, request: Request):
         await _recompute_project_shoot_date(session, pid)
         await session.commit()
         sid = s.id
-    await _sync_calendar(sid)
-    async with factory() as session:
-        return {"shoot": await _row(session, await _shoot_or_404(session, sid))}
+    return await _finish(sid)
 
 
 @router.put("/{sid}")
@@ -487,7 +482,7 @@ async def update_shoot(sid: str, req: ShootUpdate, request: Request):
         s.updated_at = datetime.now(timezone.utc)
         if "equipment_ids" in req.model_fields_set and req.equipment_ids is not None:
             await _reserve_equipment(session, s, req.equipment_ids)
-        elif s.end_date is not None or True:
+        else:
             # 日期改了：預約列的應還日跟著走
             due = (_d(s.end_date) or _d(s.date)) + timedelta(days=1)
             for c in (await session.execute(
@@ -499,9 +494,7 @@ async def update_shoot(sid: str, req: ShootUpdate, request: Request):
         if old_pid and old_pid != s.project_id:
             await _recompute_project_shoot_date(session, old_pid)
         await session.commit()
-    await _sync_calendar(sid)
-    async with factory() as session:
-        return {"shoot": await _row(session, await _shoot_or_404(session, sid))}
+    return await _finish(sid)
 
 
 @router.post("/{sid}/status")
@@ -524,9 +517,7 @@ async def set_shoot_status(sid: str, req: ShootStatusPayload, request: Request):
                 await session.delete(c)
         await _recompute_project_shoot_date(session, s.project_id)
         await session.commit()
-    await _sync_calendar(sid)
-    async with factory() as session:
-        return {"shoot": await _row(session, await _shoot_or_404(session, sid))}
+    return await _finish(sid)
 
 
 async def _pickup_or_return(sid: str, req: ShootEquipmentPayload, request: Request, pickup: bool) -> dict:
@@ -573,6 +564,4 @@ async def resync_shoot(sid: str, request: Request):
     factory = _require_factory()
     async with factory() as session:
         await _shoot_or_404(session, sid)
-    await _sync_calendar(sid)
-    async with factory() as session:
-        return {"shoot": await _row(session, await _shoot_or_404(session, sid))}
+    return await _finish(sid)

@@ -9,7 +9,7 @@
  * 🔴 消費日期預設今天（本地日）但要自己改：成本認列看消費日不看登記日（db/models CrmProjectExpense）。
  */
 import { mfetch, toast, esc, money, fmtDate, todayLocal } from '../shell.js';
-import { state, opt, skeleton, errBox, pill, withBusy, pickerHtml, mountPicker, segHtml, mountSeg, markStale, renderPaged } from '../ui.js';
+import { state, opt, skeleton, errBox, pill, withBusy, pickerHtml, mountPicker, segHtml, mountSeg, markStale, renderPaged, projectLabel } from '../ui.js';
 
 const F = (id) => document.getElementById('exp-' + id);
 const cats = () => ((opt().expense || {}).categories) || [];
@@ -64,7 +64,7 @@ async function loadProjects() {
     let items = [], placeholder = '打字找案名或客戶';
     try {
         const d = await mfetch('/api/v1/crm/m/projects?limit=100&offset=0');
-        items = (d.projects || []).map(p => ({ value: p.id, label: [p.client_short_name, p.name].filter(Boolean).join('｜') }));
+        items = (d.projects || []).map(p => ({ value: p.id, label: projectLabel(p) }));
     } catch (e) {
         placeholder = '專案清單載入失敗：' + e.message;
     }

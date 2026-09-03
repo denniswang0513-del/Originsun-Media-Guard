@@ -39,7 +39,8 @@ def urlopen_json(req, timeout: int, api_name: str) -> dict:
     """
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode())
+            raw = r.read()
+            return json.loads(raw.decode()) if raw else {}     # 204／DELETE 沒 body
     except urllib.error.HTTPError as e:
         try:
             body = json.loads(e.read().decode())

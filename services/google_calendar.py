@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import json
-import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -96,20 +95,14 @@ def delete_event(sa: dict, cal_id: str, event_id: str) -> tuple[bool, str]:
     if not event_id:
         return True, ""
     try:
-        token = get_access_token(sa, SCOPE)
-        req = urllib.request.Request(_events_url(cal_id, event_id), method="DELETE")
-        req.add_header("Authorization", "Bearer " + token)
-        try:
-            with urllib.request.urlopen(req, timeout=20):
-                pass
-        except urllib.error.HTTPError as e:
-            if e.code in (404, 410):
-                return True, ""
-            raise RuntimeError(f"{_API} API {e.code}") from e
+        _request("DELETE", _events_url(cal_id, event_id), sa)
         return True, ""
+    except RuntimeError as e:
+        if " 404" in str(e) or " 410" in str(e):
+            return True, ""
+        return False, str(e)
     except Exception as e:
         return False, str(e)
-
 
 def test_connection(sa: dict, cal_id: str) -> tuple[bool, str, str]:
     """對日曆列一筆事件（calendar.events scope 能做的最小動作）；回 (ok, message, calendar_summary)。"""

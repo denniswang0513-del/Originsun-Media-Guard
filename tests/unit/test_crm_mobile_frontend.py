@@ -40,7 +40,7 @@ def test_login_form_lives_only_in_shell():
 
 def test_shell_uses_local_date_not_utc():
     body = js_code_only(SHELL)
-    assert "export function todayLocal" in body
+    assert "export function dateIso" in body and "export const todayLocal = () => dateIso(new Date())" in body   # 一份日期格式化，其他頁不自抄
     assert "toISOString().slice(0, 10)" not in body and "toISOString().slice(0,10)" not in body, \
         "toISOString 是 UTC：台北早上 8 點前會寫成昨天"
     for p in _page_modules():
@@ -74,7 +74,8 @@ def test_invoice_amounts_come_from_the_shared_leaf():
 
 # ── 2. 不寫死字彙 ─────────────────────────────────────────
 
-VOCAB = ("未收款", "已收款", "已撥款", "草稿", "已寄送", "已簽核", "電子發票", "已付款", "應付款")
+VOCAB = ("未收款", "已收款", "已撥款", "草稿", "已寄送", "已簽核", "電子發票", "已付款", "應付款",
+         "排定", "預約", "已還")   # 行事曆：場次／器材預約狀態。「完成」「取消」是按鈕動詞、「已領」是「器材已領」按鈕的子字串，不列
 
 
 def test_page_modules_have_no_hardcoded_vocab():
@@ -168,7 +169,8 @@ def test_five_tabs_and_invoice_is_the_landing_tab():
     tabs = re.search(r"export const TABS = \[(.*?)\]", ui).group(1)
     ids = re.findall(r"'(\w+)'", tabs)
     assert ids == ["invoice", "petty", "projects", "quotes", "calendar"], ids
-    assert "export const ROUTES = [...TABS, 'expense', 'payments']" in ui
+    hidden = re.search(r"export const HIDDEN_ROUTES = \{(.*?)\}", ui).group(1)
+    assert "payments:" in hidden and "expense:" in hidden and "export const ROUTES = [...TABS, ...Object.keys(HIDDEN_ROUTES)]" in ui
     assert "export const DEFAULT_TAB = 'invoice'" in ui
     html_tabs = re.findall(r'data-tab="(\w+)"', CRM_HTML)
     assert html_tabs == ids, "tab bar 的順序要跟 TABS 一致"
@@ -243,7 +245,7 @@ def test_expense_is_an_in_app_route_not_a_popup():
     assert "ensureView(" in pj and "embedHost(" in pj, "開發票／記雜支在抽屜裡原地展開（owner：不要跳到另一個畫面）"
     assert "switchTab('expense')" not in pj and "switchTab('invoice')" not in pj
     ui = repo_src("frontend/m/ui.js")
-    assert "'expense'" in re.search(r"export const ROUTES = \[(.*?)\]", ui).group(1), "expense 是路由不是分頁（分頁列維持五個）"
+    assert "expense:" in re.search(r"export const HIDDEN_ROUTES = \{(.*?)\}", ui).group(1), "expense 是隱藏路由不是分頁（分頁列維持五個）"
     exp = js_code_only(repo_src("frontend/m/views/expense.js"))
     assert "pickerHtml('exp-project_id')" in exp and "renderPaged(" in exp
     assert "opt().expense" in exp and "'交通'" not in exp, "類別從 options.expense.categories 拿，不寫死"
@@ -260,9 +262,7 @@ def test_calendar_tab_contract():
         assert f"pickerHtml('{pid}')" in cal and f"mountPicker('{pid}'" in cal, pid
     assert "/api/v1/shoots" in cal and "renderPaged(" in cal
     assert "calendar/status" in cal and "calendar/config" in cal and "calendar/test" in cal
-    assert "_o.statuses" in cal and "equipment_states" in cal
-    for word in ("'排定'", "'預約'", "'已領'", "'已還'"):     # 「完成」「取消」是按鈕動作字，狀態比對一律走 options
-        assert word not in cal, f"calendar.js 寫死了字彙 {word}"
+    assert "_o.statuses" in cal and "equipment_states" in cal     # 狀態字不寫死：VOCAB 掃描（test_page_modules_have_no_hardcoded_vocab）管全部頁面模組
     assert "=== doneStatus()" in cal and "=== cancelled()" in cal
     pj = js_code_only(repo_src("frontend/m/views/projects.js"))
     assert 'data-act="shoot"' in pj and "shootPreset" in pj and "ensureView(view)" in pj

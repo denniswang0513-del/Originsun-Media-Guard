@@ -184,10 +184,10 @@ export async function openProject(id) {
         if (again) return;
         const kind = b.dataset.act;
         if (kind === 'payments') { closeSheet(); switchTab('payments'); return; }   // 付款是隱藏路由（owner 2026-09-03 行事曆取代付款分頁）
-        const PRESET = { invoice: 'invoicePreset', expense: 'expensePreset', shoot: 'shootPreset' };
-        if (PRESET[kind]) {
-            state[PRESET[kind]] = p.id;
-            const view = kind === 'shoot' ? 'calendar' : kind;
+        const EMBED = { invoice: ['invoice', 'invoicePreset'], expense: ['expense', 'expensePreset'], shoot: ['calendar', 'shootPreset'] };   // 動作 → [搬進來的宿主, 帶專案的 preset 鍵]
+        if (EMBED[kind]) {
+            const [view, key] = EMBED[kind];
+            state[key] = p.id;
             box.innerHTML = skeleton(2);
             try { const host = await state.ensureView(view); box.innerHTML = ''; embedHost(box, host); }
             catch (e) { box.innerHTML = errBox(e); }

@@ -11,8 +11,8 @@
  * 字彙（狀態、器材狀態）全部來自 options：這裡不寫死任何一個狀態字（計畫 §7）。
  * 從專案抽屜「登記拍攝」進來：state.shootPreset 帶 project_id，render 套進專案欄並把表單展開。
  */
-import { mfetch, toast, esc, todayLocal, fmtDate } from '../shell.js';
-import { state, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad, markStale, pickerHtml, mountPicker, renderPaged } from '../ui.js';
+import { mfetch, toast, esc, todayLocal, dateIso, fmtDate } from '../shell.js';
+import { state, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad, markStale, pickerHtml, mountPicker, renderPaged, projectLabel } from '../ui.js';
 
 const API = '/api/v1/shoots';
 const F = (id) => document.getElementById('cal-' + id);
@@ -40,11 +40,7 @@ const isAdmin = () => ((state.me || {}).access_level || 0) >= 3;
 /** 狀態 pill 顏色：完成綠、取消紅、其餘灰——認的是 options 給的字，不是字面。 */
 const statusCls = (s) => (s === doneStatus() ? 'ok' : (s === cancelled() ? 'bad' : ''));
 
-// ── 日期（本地日；toISOString 是 UTC，早上 8 點前會差一天）──
-function isoLocal(d) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-function addDays(iso, n) { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return isoLocal(d); }
+function addDays(iso, n) { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return dateIso(d); }
 const weekday = (iso) => (iso ? '（' + WEEKDAY[new Date(iso + 'T00:00:00').getDay()] + '）' : '');
 const cnt = (n, arr) => (n ?? (Array.isArray(arr) ? arr.length : 0));
 const eqOf = (id) => (_o.equipment || []).find(x => String(x.id) === String(id)) || {};
@@ -83,7 +79,7 @@ function layout() {
 }
 
 // ── 選擇器（全部打字就過濾；人員／器材選一個就變 chip、再選下一個）──
-const projectItems = () => (_o.projects || []).map(p => ({ value: p.id, label: [p.client_short_name, p.name].filter(Boolean).join('｜') }));
+const projectItems = () => (_o.projects || []).map(p => ({ value: p.id, label: projectLabel(p) }));
 function mountProject(value, extra = null) {
     const items = projectItems();
     if (extra && extra.value && !items.some(i => String(i.value) === String(extra.value))) items.push(extra);   // 修改一場不在清單裡（已結案）的案子
