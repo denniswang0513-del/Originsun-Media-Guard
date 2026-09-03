@@ -45,7 +45,9 @@
     width:100%; background:var(--field); border:1px solid var(--line); border-radius:8px; color:var(--ink);
     padding:11px 12px; font-size:16px; margin-bottom:12px; outline:none; min-height:44px; font-family:inherit; }
   .m-form textarea { min-height:70px; resize:vertical; }
-  .m-seg { display:flex; gap:6px; margin-bottom:12px; }
+  .m-seg { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+  .m-notice { background:#1f2a1f; border:1px solid #2f6b3a; border-radius:12px; padding:12px 14px; margin-bottom:12px; }
+  .m-notice pre { white-space:pre-wrap; font:inherit; font-size:13px; line-height:1.6; margin:0 0 10px; color:var(--ink); }
   .m-seg button { flex:1; min-height:44px; background:var(--field); border:1px solid var(--line); border-radius:8px; color:var(--sub); font-size:14px; }
   .m-seg button.on { background:var(--pri); border-color:var(--pri); color:#fff; font-weight:600; }
   details.m-more { margin:4px 0 12px; } details.m-more summary { color:var(--sub); font-size:13px; padding:8px 0; cursor:pointer; list-style:none; }

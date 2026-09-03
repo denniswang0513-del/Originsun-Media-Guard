@@ -85,6 +85,18 @@ def test_page_modules_have_no_hardcoded_vocab():
         assert not hit, f"{p.relative_to(M)} 寫死了字彙 {hit}"
 
 
+def test_invoice_is_a_request_to_issue():
+    """owner 2026-09-03：手機登記的一定是請款發票、還沒開——方向與狀態從 options 取（第一個方向、
+    第二個狀態），不送發票號碼（後端給未開立）；送出後有可複製的通知；專案必選。"""
+    src = js_code_only(repo_src("frontend/m/views/invoice.js"))
+    assert "payment_type: receivableType()" in src and "payment_status: unpaidStatus()" in src
+    assert "invoice_number: ''" in src and "applicant: F('applicant').value" in src
+    assert "showNotice(noticeText(body))" in src and "copyText(" in src
+    assert "if (!body.project_id) { toast(" in src
+    api = code_only(repo_src("routers/api_crm_mobile.py"))
+    assert "get_invoice_applicants(request)" in api and "INVOICE_PASSTHROUGH_CATEGORIES" in api
+
+
 def test_invoice_form_lets_the_server_decide_status():
     """發票狀態的字不在手機端：款項狀態下拉吃 /options.invoice.statuses_by_type（後端規則算的），
     issue_status 只准送空字串（後端看發票號碼）。"""

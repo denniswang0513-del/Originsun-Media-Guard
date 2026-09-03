@@ -103,6 +103,19 @@ export function mountPicker(id, { items = [], placeholder = '', value = '', free
     set(value);
 }
 
+export async function copyText(text) {
+    try {
+        if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+    } catch (_) { /* 退回下面 */ }
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+}
+
 export function selectOpts(values, selected = '', blank = '') {
     const head = blank !== null && blank !== undefined && blank !== false
         ? `<option value="">${esc(blank)}</option>` : '';

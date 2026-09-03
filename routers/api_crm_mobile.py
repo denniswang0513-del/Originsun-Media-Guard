@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from core.auth import check_logged_in, payload_grants
 from core.crm_logic import prepend_note
-from core.finance_logic import (QUOTE_PENDING, QUOTE_STATUSES, VAT_PCT,
+from core.finance_logic import (INVOICE_PASSTHROUGH_CATEGORIES, QUOTE_PENDING, QUOTE_STATUSES, VAT_PCT,
                                 initial_invoice_status, project_type_vocab)
 from core.hr_logic import budget_burn, day_iso
 from core.ledger import hide_mine_projects, not_mine
@@ -33,6 +33,7 @@ from routers.crm._shared import (CRM_PREFIX, _check_status_auth, _crm_session,
                                  _project_or_404, _username)
 from routers.crm.costs import project_financial_summary
 from routers.crm.finance import _to_invoice_dict
+from routers.crm.invoice_files import get_invoice_applicants
 from routers.crm.payments import _to_payment_dict
 from routers.crm.projects import apply_project_status, project_wire
 from routers.crm.quotes import _to_quotation_dict, project_quotation_rows
@@ -61,7 +62,7 @@ PAYMENT_STATUSES = ("未付款", "應付款", "已付款")
 INVOICE_VOCAB = {
     "payment_types": ["收款", "付款"],
     "kinds": ["電子發票", "紙本發票"],
-    "categories": ["專案", "內部代開"],
+    "categories": ["專案", *INVOICE_PASSTHROUGH_CATEGORIES],   # 桌機發票本同一套三種
 }
 ACTIVE_STATUS = "製作"
 # 「製作」之前的階段＝還在賣：簽回報價才有「啟動專案」這件事；
@@ -148,6 +149,8 @@ async def mobile_options(request: Request):
             # 由 initial_invoice_status 算出來，手機頁只負責讓人選，不自己寫字
             "statuses_by_type": {pt: [initial_invoice_status(pt), initial_invoice_status(pt, unpaid=True)]
                                  for pt in INVOICE_VOCAB["payment_types"]},
+            # 申請人名單跟桌機發票本同一份（settings.invoice_applicants，沒設就用實際用過的人）
+            "applicants": (await get_invoice_applicants(request))["applicants"],
             # 營業稅率：發票表單未稅／含稅互推用後端的那一份，不在瀏覽器再寫一個 5
             "vat_pct": VAT_PCT,
         },
