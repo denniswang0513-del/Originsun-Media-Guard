@@ -153,8 +153,8 @@ const _sorter = createSortable({
         sub_item: e => e.sub_item || '',
         bank_memo: e => e.bank_memo || '',
         project:  e => e.project_name || '',
-        // 那一欄兩本帳裝的東西不同（母公司＝發票、私帳＝請款單）——排序鍵跟著走
-        invoice:  e => e.invoice_title || e.payment_label || '',
+        invoice:  e => e.invoice_title || '',
+        payment:  e => e.payment_label || '',
         account:  e => _acctName(e.bank_account_id),
         note:     e => e.note || '',
     },
@@ -657,47 +657,46 @@ function _rowHtml(e) {
         <div class="crm-row${e.id === _selectedId && !_batch.on ? ' selected' : ''}${
             _batch.on && _batch.sel.has(e.id) ? ' batch-picked' : ''}" data-id="${e.id}"
              onclick="window._cashRowClick(event,'${e.id}')">
-            <div class="crm-row-date${_dayCls(dm)}">${_dayHtml(dm)}</div>
-            <div class="crm-row-name">${_esc(e.summary)}${_pettyTag(e)}</div>
-            <div style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
-            <div class="cash-col-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
-            <div style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
+            <div class="crm-row-date cash-c-date${_dayCls(dm)}">${_dayHtml(dm)}</div>
+            <div class="crm-row-name cash-c-summary">${_esc(e.summary)}${_pettyTag(e)}</div>
+            <div class="cash-c-deposit" style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
+            <div class="cash-col-card cash-c-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
+            <div class="cash-c-expense" style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
             ${/* 🔴 拆項列一樣要吐**三個**格子（分類/項目/子項目各一）：這個列表是
                  flex，欄寬是 `nth-child(N)` 給的 —— `grid-column:span 3` 在 flex
                  底下完全無效，少吐兩個節點就讓後面每一欄整排前移（銀行資訊跑到
                  附註欄、專案名跑到銀行資訊欄，owner 2026-09-01 截圖）。
                  badge 放第一格、後兩格留白（badge 比 78px 寬一點，溢到空格上剛好）。*/ ''}
             ${e.split_count ? `
-            <div style="cursor:pointer;white-space:nowrap;" onclick="event.stopPropagation();window._cashSplitOpen('${e.id}')"
+            <div class="cash-c-book" style="cursor:pointer;white-space:nowrap;" onclick="event.stopPropagation();window._cashSplitOpen('${e.id}')"
                  title="${_esc((e.splits || []).map((s) => `$${_fmtNum(s.amount)} ${(s.taxonomy_path || []).join(' ▸ ') || s.category || '未分類'}`).join('\n'))}">
                 ${splitBadgeHtml(e.split_count)}
-            </div><div></div><div></div>` : `
-            <div class="cash-ed" onclick="window._cashTaxEdit(event,'${e.id}',0)"
+            </div><div class="cash-c-item"></div><div class="cash-c-sub_item"></div>` : `
+            <div class="cash-ed cash-c-book" onclick="window._cashTaxEdit(event,'${e.id}',0)"
                  title="${tf}">${e.category ? _esc(e.book) : _NO_VAL_DOT}</div>
-            <div class="cash-ed" onclick="window._cashTaxEdit(event,'${e.id}',1)"
+            <div class="cash-ed cash-c-item" onclick="window._cashTaxEdit(event,'${e.id}',1)"
                  style="color:#c9c9c9;" title="${tf}">${e.item ? _esc(e.item) : _NO_VAL_DOT}</div>
-            <div class="cash-ed" onclick="window._cashTaxEdit(event,'${e.id}',2)"
+            <div class="cash-ed cash-c-sub_item" onclick="window._cashTaxEdit(event,'${e.id}',2)"
                  style="color:#9a9a9a;" title="${tf}">${deep ? _esc(deep) : _NO_VAL_DOT}</div>`}
-            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','bank_memo')"
+            <div class="cash-ed cash-c-bank_memo" onclick="window._cashInline(event,'${e.id}','bank_memo')"
                  title="${_esc(bm)}">${_esc(_flat(e.bank_memo, ' · '))}</div>
-            <div class="cash-ed" onclick="window._cashInline(event,'${e.id}','note')"
+            <div class="cash-ed cash-c-note" onclick="window._cashInline(event,'${e.id}','note')"
                  title="${_esc(nt)}">${_esc(_flat(e.note, ' · '))}</div>
             ${_linkCell(projName, {
+                cls: 'cash-c-project',
                 pick: canPickProj ? `window._cashProjPick(event,'${e.id}')` : '',
                 hint: '連結專案（可搜尋）' })}
-            ${/* 那一欄裝什麼由帳本決定：母公司＝發票（唯讀），私帳沒有發票，
-                 讓給請款單 —— 支出列可點、收入列留白。 */ ''}
-            ${mine
-                ? _linkCell(e.expense ? (e.payment_label || '') : '', {
-                    cls: 'cash-col-inv',
-                    pick: e.expense ? `window._cashPayPick(event,'${e.id}')` : '',
-                    hint: '連結請款單（可搜尋）' })
-                : _linkCell(e.invoice_title || '', {
-                    cls: 'cash-col-inv',
-                    // 收入列才掛發票（支出沒有「收款對到哪張發票」這回事）
-                    pick: e.deposit ? `window._cashInvPick(event,'${e.id}')` : '',
-                    hint: '連結發票（可搜尋、可多張）' })}
-            <div>${_esc(_acctName(e.bank_account_id))}</div>
+            ${/* 發票欄只裝發票（收入列可點；私帳沒有發票 → 預設藏、不可點）。
+                 請款單自己一欄（owner 2026-09-03）：支出列可點、兩本帳都有。 */ ''}
+            ${_linkCell(e.invoice_title || '', {
+                cls: 'cash-col-inv cash-c-invoice',
+                pick: (e.deposit && !mine) ? `window._cashInvPick(event,'${e.id}')` : '',
+                hint: '連結發票（可搜尋、可多張）' })}
+            ${_linkCell(e.expense ? (e.payment_label || '') : '', {
+                cls: 'cash-c-payment',
+                pick: e.expense ? `window._cashPayPick(event,'${e.id}')` : '',
+                hint: '連結請款單（可搜尋、可多張）' })}
+            <div class="cash-c-account">${_esc(_acctName(e.bank_account_id))}</div>
             ${kebabMenuHtml(e.id, { onEdit: '_cashSelect', onDuplicate: '_cashDup',
                                    onDelete: '_cashDelete',
                                    extra: [..._splitMenu(e), ..._pettyMenu(e)] })}
@@ -1654,6 +1653,63 @@ async function doImport() {
     } finally { btn.disabled = false; btn.textContent = '開始匯入'; }
 }
 
+// ── 欄位選擇（owner 2026-09-03：「一個編輯按鈕，讓我選擇哪一些欄要出現」）──
+//
+// 表頭與列的每一格都帶 cash-c-<key>；藏＝display:none（不抽節點：欄寬是 nth-child），
+// 規則寫進 #cash-col-style。選擇記在瀏覽器（localStorage），跟排序一樣是個人偏好。
+// 日期／內容固定不給藏；私帳沒有發票，發票欄預設藏（還是可以自己打開，只是空的）。
+const _COLS = [
+    ['deposit', '收入'], ['card', '信用卡'], ['expense', '支出'], ['book', '類別'], ['item', '項目'],
+    ['sub_item', '子項目'], ['bank_memo', '銀行資訊'], ['note', '附註'], ['project', '專案'],
+    ['invoice', '發票'], ['payment', '請款單'], ['account', '帳戶'],
+];
+const _COLS_KEY = 'cash_hidden_cols';
+function _hiddenCols() {
+    try {
+        const v = JSON.parse(localStorage.getItem(_COLS_KEY) || 'null');
+        if (Array.isArray(v)) return new Set(v);
+    } catch (_) { /* 壞值當沒存 */ }
+    return new Set(ledgerHasInvoices() ? [] : ['invoice']);
+}
+function _applyCols(hidden) {
+    let st = document.getElementById('cash-col-style');
+    if (!st) { st = document.createElement('style'); st.id = 'cash-col-style'; document.head.appendChild(st); }
+    st.textContent = [...hidden].map((k) => `#cash-list-panel .cash-c-${k}{display:none;}`).join('');
+}
+function _initColumnChooser() {
+    const btn = document.getElementById('cash-btn-cols'), pop = document.getElementById('cash-cols-pop');
+    if (!btn || !pop) return;
+    let hidden = _hiddenCols();
+    _applyCols(hidden);
+    const draw = () => {
+        pop.innerHTML = `<div style="color:#888;font-size:11px;margin-bottom:6px;">要顯示的欄（日期、內容固定）</div>`
+            + _COLS.map(([k, l]) => `<label><input type="checkbox" data-col="${k}" ${hidden.has(k) ? '' : 'checked'}> ${l}</label>`).join('')
+            + `<div style="margin-top:8px;display:flex;gap:6px;"><button type="button" class="crm-btn crm-btn-secondary crm-btn-sm" data-cols-all>全部顯示</button>
+               <button type="button" class="crm-btn crm-btn-secondary crm-btn-sm" data-cols-close>關閉</button></div>`;
+    };
+    btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (pop.style.display === 'none') { draw(); pop.style.display = 'block'; } else { pop.style.display = 'none'; }
+    });
+    pop.addEventListener('click', (ev) => ev.stopPropagation());
+    pop.addEventListener('change', (ev) => {
+        const cb = ev.target.closest('input[data-col]');
+        if (!cb) return;
+        if (cb.checked) hidden.delete(cb.dataset.col); else hidden.add(cb.dataset.col);
+        try { localStorage.setItem(_COLS_KEY, JSON.stringify([...hidden])); } catch (_) { /* 私密視窗 */ }
+        _applyCols(hidden);
+    });
+    pop.addEventListener('click', (ev) => {
+        if (ev.target.closest('[data-cols-all]')) {
+            hidden = new Set();
+            try { localStorage.setItem(_COLS_KEY, '[]'); } catch (_) { /* 同上 */ }
+            _applyCols(hidden); draw();
+        }
+        if (ev.target.closest('[data-cols-close]')) pop.style.display = 'none';
+    });
+    document.addEventListener('click', () => { pop.style.display = 'none'; });
+}
+
 // ── Init ────────────────────────────────────────────────────
 
 export async function initCrmCashbookTab() {
@@ -1661,13 +1717,7 @@ export async function initCrmCashbookTab() {
         const el = document.getElementById(id);
         if (el) document.body.appendChild(el);
     }
-    // 私帳不開發票（owner 2026-09-01）：那一欄讓給「請款單」（支出列可直接勾）。
-    // 🔴 改標題而不是隱藏整欄：欄寬規則是 nth-child，表頭與列的格子數必須一直
-    // 相等 —— 只藏表頭或只藏列都會讓後面每一欄錯位。
-    if (!ledgerHasInvoices()) {
-        const _h = document.querySelector('#cash-list-panel .acct-header .cash-col-inv');
-        if (_h) { _h.childNodes[0].nodeValue = '請款單 '; }
-    }
+    _initColumnChooser();
     window._cashSelect = selectEntry;
     window._cashRefresh = loadEntries;
     window._cashEdit = (id) => { const e = _entries.find(x => x.id === id); if (e) openModal(e); };

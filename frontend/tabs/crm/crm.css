@@ -1943,9 +1943,14 @@
 #cash-list-panel .acct-header > span:nth-child(12),
 #cash-list-body .crm-row > *:nth-child(12):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 發票 */
 #cash-list-panel .acct-header > span:nth-child(13),
-#cash-list-body .crm-row > *:nth-child(13):not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
+#cash-list-body .crm-row > *:nth-child(13):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 請款單（owner 2026-09-03：獨立一欄，可連結） */
 #cash-list-panel .acct-header > span:nth-child(14),
+#cash-list-body .crm-row > *:nth-child(14):not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
+#cash-list-panel .acct-header > span:nth-child(15),
 #cash-list-body .crm-row > .crm-kebab-wrap { flex: 0 0 36px; }
+/* 「欄位」鈕藏掉的欄：JS 在 #cash-col-style 裡生 `#cash-list-panel .cash-c-<key>{display:none}`
+   —— 一樣用 display:none 不抽節點（nth-child 欄寬）。 */
+#cash-cols-pop label { display: flex; gap: 8px; align-items: center; color: #ccc; font-size: 12.5px; padding: 3px 0; cursor: pointer; }
 
 /* 行內可編輯格（類別/項目/子項目/銀行資訊/附註）：**單擊就編輯**
    （owner 2026-08-27：「這裡是要點擊就可以調整」）。整列不再開右側詳情 ——

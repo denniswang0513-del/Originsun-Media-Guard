@@ -28,6 +28,11 @@
          合成一個入口，兩者都在展開的面板裡。 -->
     <!-- 批次分類（owner 2026-08-28）：信用卡明細同一家店一個月十幾筆，
          一筆一筆點三格分類要按上千次。 -->
+    <!-- 欄位：自己選要顯示哪些欄（owner 2026-09-03）；記在瀏覽器 -->
+    <span style="position:relative;">
+      <button id="cash-btn-cols" class="crm-btn crm-btn-secondary" title="選擇要顯示哪些欄">欄位</button>
+      <div id="cash-cols-pop" style="display:none;position:absolute;right:0;top:36px;z-index:50;background:#1f1f1f;border:1px solid #3a3a3a;border-radius:8px;padding:10px 12px;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,.5);"></div>
+    </span>
     <button id="cash-btn-batch" class="crm-btn crm-btn-secondary"
             title="點列選取（Shift 選一整段），一次把它們分到同一個分類">批次分類</button>
     <button id="cash-btn-recon" class="crm-btn crm-btn-secondary"
@@ -74,19 +79,21 @@
       <button id="cash-batch-exit" class="crm-btn crm-btn-secondary crm-btn-sm">結束批次</button>
     </div>
     <div class="crm-list-header acct-header">
-      <span data-sort-key="date">日期 <span class="crm-sort-ind">↕</span></span>
-      <span data-sort-key="summary">內容 <span class="crm-sort-ind">↕</span></span>
-      <span data-sort-key="deposit">收入 <span class="crm-sort-ind">↕</span></span>
-      <span class="cash-col-card" data-sort-key="card">信用卡 <span class="crm-sort-ind">↕</span></span>
-      <span data-sort-key="expense">支出 <span class="crm-sort-ind">↕</span></span>
-      <span data-sort-key="book">類別 <span class="crm-sort-ind">↕</span></span>
-      <span data-sort-key="item">項目 <span class="crm-sort-ind">↕</span></span>
-      <span data-sort-key="sub_item">子項目 <span class="crm-sort-ind">↕</span></span>
-      <span data-sort-key="bank_memo">銀行資訊 <span class="crm-sort-ind">↕</span></span>
-      <span data-sort-key="note">附註 <span class="crm-sort-ind">↕</span></span>
-      <span data-sort-key="project">專案 <span class="crm-sort-ind">↕</span></span>
-      <span class="cash-col-inv" data-sort-key="invoice">發票 <span class="crm-sort-ind">↕</span></span>
-      <span data-sort-key="account">帳戶 <span class="crm-sort-ind">↕</span></span>
+      <!-- 每格帶 cash-c-<key>：「欄位」鈕選要顯示哪些欄（display:none，不抽節點 —— 欄寬是 nth-child） -->
+      <span class="cash-c-date" data-sort-key="date">日期 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-c-summary" data-sort-key="summary">內容 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-c-deposit" data-sort-key="deposit">收入 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-col-card cash-c-card" data-sort-key="card">信用卡 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-c-expense" data-sort-key="expense">支出 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-c-book" data-sort-key="book">類別 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-c-item" data-sort-key="item">項目 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-c-sub_item" data-sort-key="sub_item">子項目 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-c-bank_memo" data-sort-key="bank_memo">銀行資訊 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-c-note" data-sort-key="note">附註 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-c-project" data-sort-key="project">專案 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-col-inv cash-c-invoice" data-sort-key="invoice">發票 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-c-payment" data-sort-key="payment">請款單 <span class="crm-sort-ind">↕</span></span>
+      <span class="cash-c-account" data-sort-key="account">帳戶 <span class="crm-sort-ind">↕</span></span>
       <span style="flex:0 0 36px;"></span>
     </div>
     <div id="cash-list-body"><div class="crm-empty">載入中...</div></div>

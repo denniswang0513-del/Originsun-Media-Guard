@@ -68,7 +68,9 @@ def test_cells_are_click_to_edit_and_detail_comes_from_kebab():
     js = _read("frontend/tabs/crm/crm-cashbook.js")
     # 列的 HTML 2026-08-28 起抽成 _rowHtml（renderList 與 _patchRow 共用）
     row = js.split("function _rowHtml(e) {")[1].split("return `")[1][:2400]
-    assert row.count('class="cash-ed" onclick="window._cash') >= 5, "五個格子都要單擊即編輯"
+    import re
+    # 格子帶 cash-c-<key>（欄位選擇器用）—— 釘「cash-ed 且掛 _cash* onclick」，不釘 class 的拼法
+    assert len(re.findall(r'class="cash-ed[^"]*" onclick="window\._cash', row)) >= 5, "五個格子都要單擊即編輯"
     assert "_PEN(" not in row, "✎ 那一版已退回"
     assert 'class="crm-row${e.id === _selectedId' in row
     assert "onclick=\"window._cashSelect" not in row, "整列不可再開右側詳情"
