@@ -29,21 +29,19 @@ const _sorter = createSortable({
     },
 });
 
-// ── 案型清單：一份（GET /api/v1/crm/project-types ＝ settings.project_types ∪ 私帳毛利表）──
-// owner 2026-09-03「這裡的案型跟私帳同步」：專案表下拉、這裡的編輯器、私帳設定頁、工時 burn 表都吃同一份。
-// 毛利表來的案型在這裡只能看（要改去財務設定的毛利表）；settings 那份可以在這裡加／改名／刪。
+// ── 案型清單：一份（GET /api/v1/crm/project-types；正本＝私帳毛利表的列，settings.project_types 是它的鏡射）──
+// owner 2026-09-03「這裡的案型跟私帳同步」：專案表下拉、這裡的編輯器、私帳設定頁、工時 burn 表都吃同一份；
+// 這裡的新增／改名／刪除直接改毛利表（POST /project-types），用 CRM 的人不用看得到那張表。
 const _DEFAULT_TYPES = ['紀實影片', '活動紀實', '形象影片', '廣告', 'MV'];
 let _projectTypes = [..._DEFAULT_TYPES];
-let _marginTypes = new Set();      // 私帳毛利表的案型（唯讀）
 
 function _applyTypes(d) {
     _projectTypes = (d.project_types && d.project_types.length) ? d.project_types : [..._DEFAULT_TYPES];
-    _marginTypes = new Set(d.margin_types || []);
 }
 
 export async function loadProjectTypes() {
     try { _applyTypes(await _fetch('/project-types')); }
-    catch (_) { _projectTypes = [..._DEFAULT_TYPES]; _marginTypes = new Set(); }
+    catch (_) { _projectTypes = [..._DEFAULT_TYPES]; }
     _populateTypeSelects();
 }
 
@@ -58,10 +56,13 @@ function _populateTypeSelects() {
     }
 }
 
-async function _saveTypes() {
-    // 只存 settings 那半邊；毛利表的案型由後端 union 回來
-    _applyTypes(await _fetch('/project-types', { method: 'PUT',
-        body: JSON.stringify({ project_types: _projectTypes.filter(t => !_marginTypes.has(t)) }) }));
+/** 一個動作（add／rename／remove）打後端改毛利表，回來的清單直接套；失敗丟 toast、清單不動。 */
+async function _typeOp(op, name, newName = '') {
+    try {
+        _applyTypes(await _fetch('/project-types', { method: 'POST', body: JSON.stringify({ op, name, new_name: newName }) }));
+        _populateTypeSelects();
+        return true;
+    } catch (e) { crmToast(e.message || '案型沒存', true); return false; }
 }
 
 window._projEditTypes = function() {
@@ -80,30 +81,28 @@ window._projEditTypes = function() {
               <button onclick="document.getElementById('proj-types-overlay').remove()" class="crm-detail-close">關閉</button>
             </div>
             <div class="crm-modal-body" style="max-height:400px;overflow-y:auto;">
-              <div style="font-size:12px;color:#888;margin-bottom:6px;">跟私帳同一份。標「毛利表」的案型要去財務設定的預期毛利表改。</div>
+              <div style="font-size:12px;color:#888;margin-bottom:6px;">跟私帳的預期毛利表同一份：這裡加的案型預期毛利先照「其他」那列，之後可在財務設定調。</div>
               ${_projectTypes.map((t, i) => `<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid #2a2a2a;">
                 <span style="flex:1;font-size:14px;">${_esc(t)}</span>
-                ${_marginTypes.has(t) ? '<span class="crm-badge" style="font-size:11px;">毛利表</span>' : `
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="rename" data-idx="${i}" style="padding:2px 6px;">改名</button>
-                <button class="crm-btn crm-btn-danger crm-btn-sm" data-action="delete" data-idx="${i}" style="padding:2px 6px;">刪除</button>`}
+                <button class="crm-btn crm-btn-danger crm-btn-sm" data-action="delete" data-idx="${i}" style="padding:2px 6px;">刪除</button>
               </div>`).join('')}
               <button class="crm-btn crm-btn-primary crm-btn-sm" data-action="add" style="margin-top:8px;width:100%;">新增案型</button>
             </div>
           </div>`;
         overlay.querySelectorAll('[data-action="add"]').forEach(b => b.addEventListener('click', async () => {
             const n = prompt('新案型名稱：'); if (!n?.trim()) return;
-            if (_projectTypes.includes(n.trim())) { alert('已存在'); return; }
-            _projectTypes.push(n.trim()); await _saveTypes(); _populateTypeSelects(); _render();
+            if (await _typeOp('add', n.trim())) _render();
         }));
         overlay.querySelectorAll('[data-action="rename"]').forEach(b => b.addEventListener('click', async () => {
-            const i = parseInt(b.dataset.idx), old = _projectTypes[i];
+            const old = _projectTypes[parseInt(b.dataset.idx)];
             const n = prompt('修改名稱：', old); if (!n?.trim() || n.trim() === old) return;
-            _projectTypes[i] = n.trim(); await _saveTypes(); _populateTypeSelects(); _render();
+            if (await _typeOp('rename', old, n.trim())) _render();
         }));
         overlay.querySelectorAll('[data-action="delete"]').forEach(b => b.addEventListener('click', async () => {
-            const i = parseInt(b.dataset.idx);
-            if (!confirm(`確定刪除「${_projectTypes[i]}」？`)) return;
-            _projectTypes.splice(i, 1); await _saveTypes(); _populateTypeSelects(); _render();
+            const t = _projectTypes[parseInt(b.dataset.idx)];
+            if (!confirm(`確定刪除「${t}」？還掛著這個案型的專案不會被改。`)) return;
+            if (await _typeOp('remove', t)) _render();
         }));
     }
     _render();

@@ -17,7 +17,7 @@ from sqlalchemy import func as _sa_func
 from config import load_settings as _load_settings
 
 from core.ledger import hide_mine_projects, not_mine
-from core.schemas import (CrmProjectPayload, CrmProjectPatchPayload, ProjectTypesPayload,
+from core.schemas import (CrmProjectPayload, CrmProjectPatchPayload, ProjectTypeOpPayload,
                           ProjectLedgerMovePayload, ProjectMirrorPayload)
 
 from ._shared import (router, _check_auth, _check_status_auth, _check_project_write_auth,
@@ -118,29 +118,31 @@ _hide_mine = hide_mine_projects
 
 @router.get("/project-types")
 async def get_project_types(request: Request):
-    """案型清單**一份**（owner 2026-09-03「這裡的案型跟私帳同步」）：settings.project_types（CRM「編輯案型」）
-    ∪ 私帳毛利表的項目（core.finance_logic.project_type_vocab）。CRM 專案表下拉、編輯案型、私帳設定頁、
-    工時 burn 表、手機版都吃同一份；margin_types 讓前端知道哪些要去財務設定的毛利表改。"""
-    from core.finance_logic import load_margin_model, project_type_vocab
-    margin = [t for t in ((r.get("type") or "").strip() for r in (load_margin_model("mine").get("rows") or [])) if t]
-    return {"project_types": project_type_vocab(), "margin_types": margin,
-            "settings_types": [t for t in (_load_settings().get("project_types") or []) if t]}
+    """案型清單**一份**（owner 2026-09-03「這裡的案型跟私帳同步」）：正本＝私帳毛利表的列
+    （core.finance_logic.project_type_vocab 再併上 settings／在用的）。CRM 專案表下拉、案型清單、私帳設定頁、
+    工時 burn 表、手機版都吃同一份。"""
+    from core.finance_logic import project_type_vocab
+    return {"project_types": project_type_vocab()}
 
 
-@router.put("/project-types")
-async def put_project_types(payload: ProjectTypesPayload, request: Request):
-    """覆寫 settings.project_types（同 /api/settings/save 的守衛：Lv3）；毛利表那半邊不動。"""
+@router.post("/project-types")
+async def edit_project_types(payload: ProjectTypeOpPayload, request: Request):
+    """CRM「案型清單」的新增／改名／刪除：直接改私帳毛利表（案型的正本），save_margin_model 會鏡射進
+    settings.project_types。守衛同 /api/settings/save（Lv3）。改名把舊名記進 aliases，舊案還對得到毛利。"""
     _check_auth(request)
-    from config import save_settings
-    names = []
-    for t in payload.project_types or []:
-        t = (t or "").strip()
-        if t and t not in names:
-            names.append(t)
-    s = _load_settings()
-    s["project_types"] = names
-    save_settings(s)
-    return await get_project_types(request)
+    from core.finance_logic import (load_margin_model, model_add_type, model_remove_type, model_rename_type,
+                                    project_type_vocab, save_margin_model)
+    model = load_margin_model("mine")
+    ops = {"add": lambda: model_add_type(model, payload.name),
+           "rename": lambda: model_rename_type(model, payload.name, payload.new_name),
+           "remove": lambda: model_remove_type(model, payload.name)}
+    if payload.op not in ops:
+        raise HTTPException(status_code=422, detail="op 必須是 add／rename／remove")
+    if not ops[payload.op]():
+        raise HTTPException(status_code=409, detail={"add": "這個案型已經有了", "rename": "找不到舊案型，或新名字已存在",
+                                                     "remove": "找不到這個案型"}[payload.op])
+    save_margin_model("mine", model)
+    return {"project_types": project_type_vocab()}
 
 
 @router.get("/projects")

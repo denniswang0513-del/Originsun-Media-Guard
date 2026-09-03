@@ -1418,6 +1418,44 @@ def save_margin_model(entity: str, model: dict) -> dict:
     return load_margin_model(entity)
 
 
+def model_add_type(model: dict, name: str, group: str = "其他") -> bool:
+    """CRM「案型清單」新增：在毛利表補一列（預期毛利先抄「其他」那列，沒有就 30）。已存在→False。
+    毛利表的列就是案型的正本（save_margin_model 會把 type 鏡射進 settings.project_types）。"""
+    name = (name or "").strip()
+    rows = model.setdefault("rows", [])
+    if not name or any((r.get("type") or "").strip() == name for r in rows):
+        return False
+    other = next((r for r in rows if (r.get("type") or "").strip() == "其他"), None)
+    rows.append({"group": group, "type": name, "margin_pct": (other or {}).get("margin_pct", 30), "note": ""})
+    return True
+
+
+def model_rename_type(model: dict, old: str, new: str) -> bool:
+    """改名：那一列的 type 換掉；舊名進 aliases（專案還掛舊名的照樣對得到毛利）。新名已存在→False。"""
+    old, new = (old or "").strip(), (new or "").strip()
+    rows = model.get("rows") or []
+    if not old or not new or old == new or any((r.get("type") or "").strip() == new for r in rows):
+        return False
+    hit = [r for r in rows if (r.get("type") or "").strip() == old]
+    if not hit:
+        return False
+    for r in hit:
+        r["type"] = new
+    model.setdefault("aliases", {})[old] = new
+    return True
+
+
+def model_remove_type(model: dict, name: str) -> bool:
+    """刪除：拿掉那一列（專案還掛著的案型不動，下拉會照列它、標橘框）。"""
+    name = (name or "").strip()
+    rows = model.get("rows") or []
+    keep = [r for r in rows if (r.get("type") or "").strip() != name]
+    if len(keep) == len(rows):
+        return False
+    model["rows"] = keep
+    return True
+
+
 def canonical_type(model: dict, project_type: str) -> str:
     """舊案型 → 你的版本（沒對應就原樣）。"""
     t = (project_type or "").strip()

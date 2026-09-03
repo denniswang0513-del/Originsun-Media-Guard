@@ -1186,9 +1186,11 @@ class EquipmentMaintenancePayload(BaseModel):
     note: Optional[str] = None
 
 
-class ProjectTypesPayload(BaseModel):
-    """CRM「編輯案型」：settings.project_types 整份覆寫（私帳毛利表裡的案型不在這份、改不到）。"""
-    project_types: List[str] = []
+class ProjectTypeOpPayload(BaseModel):
+    """CRM「案型清單」的一個動作：add／rename／remove，直接改私帳毛利表那份（案型的正本）。"""
+    op: str = ""
+    name: str = ""
+    new_name: str = ""
 
 
 class ShootCreate(BaseModel):
