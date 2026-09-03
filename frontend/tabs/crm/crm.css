@@ -1948,7 +1948,6 @@
 #cash-list-body .crm-row > .crm-kebab-wrap { flex: 0 0 36px; }
 /* 「欄位」鈕藏掉的欄：JS 在 #cash-col-style 裡生 `#cash-list-panel .cash-c-<key>{display:none}`
    —— 用 display:none，表頭與列一起藏（欄寬綁 class，藏了也不會錯位）。 */
-#cash-cols-pop label { display: flex; gap: 8px; align-items: center; color: #ccc; font-size: 12.5px; padding: 3px 0; cursor: pointer; }
 
 /* 行內可編輯格（類別/項目/子項目/銀行資訊/附註）：**單擊就編輯**
    （owner 2026-08-27：「這裡是要點擊就可以調整」）。整列不再開右側詳情 ——
