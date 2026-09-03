@@ -561,7 +561,6 @@ export async function renderOverview(host) {
         + Object.keys(idOfLabel).map(l => `<option value="${esc(l)}"></option>`).join("")
         + "</datalist>";
     // 新增列仍用 select（只有一個，238 個選項無所謂，而且可直接挑）
-    const PROJ_OPTS = projectOptions(opts.projects, '<option value="">（無專案）</option>', labelOf);
     // 只有「專案雜支」開放連結專案（owner 2026-08-17）。規則來自後端的
     // `project_link_items`，不在前端寫死 —— 兩邊各寫一份就會漂。
     const LINKABLE = linkableSet(opts);
@@ -632,7 +631,8 @@ export async function renderOverview(host) {
             <td><input id="n-note" placeholder="發票號／附註"></td>
             <td><select data-no-search id="n-item">${ITEM_OPTS}</select></td>
             <td><select data-no-search id="n-staff">${STAFF_OPTS}</select></td>
-            <td><select data-no-search id="n-proj" disabled>${PROJ_OPTS}</select></td>
+            <td><input id="n-proj" list="pc-proj-dl" disabled placeholder="打字搜尋專案（年份／客戶／案名）"
+                       title="打字搜尋專案；留空＝不歸專案"></td>
             <td><button class="pc-btn" id="n-add"
                         style="padding:5px 10px;font-size:12px;">新增</button></td>
           </tr>
@@ -743,6 +743,10 @@ export async function renderOverview(host) {
         const amt = parseInt(host.querySelector("#n-amt").value, 10);
         if (!staffId) { alert("請先選收款人（這筆錢是誰墊的）"); return; }
         if (!amt) { alert("金額不可為 0"); return; }
+        // 專案欄是 datalist 自由文字（owner 2026-09-04：要能打字搜）：非空就必須反查得到 id，打錯字不能靜默變無專案
+        const nProjText = host.querySelector("#n-proj").value.trim();
+        const nProjId = nProjText ? (idOfLabel[nProjText] || null) : null;
+        if (nProjText && !nProjId) { alert("找不到專案「" + nProjText + "」，請從清單挑一個，或清空表示不歸專案。"); return; }
         nAdd.disabled = true;
         try {
             const r = await send("POST", `/api/v1/crm/petty/staff/${encodeURIComponent(staffId)}/expenses`, {
@@ -751,7 +755,7 @@ export async function renderOverview(host) {
                 summary: host.querySelector("#n-sum").value.trim(),
                 item: host.querySelector("#n-item").value,
                 invoice_no: host.querySelector("#n-note").value.trim(),
-                project_id: host.querySelector("#n-proj").value || null,
+                project_id: nProjId,
             });
             rerun();
         } catch (e) { alert(String(e.message || e)); nAdd.disabled = false; }
