@@ -181,8 +181,7 @@ def test_bank_only_dropdowns_exclude_shareholder():
     # 🔴 逐一釘四個呼叫點，不要只數次數 —— 數次數時拿掉一個仍然過
     #    （定義那行自己也含 "_bankOnly()"，破壞測試實測沒咬到）。
     assert "const actives = _bankOnly();" in banking, "貸款扣款下拉沒換成 _bankOnly"
-    for site in ("const actives = _bankOnly();",           # 對帳工作台
-                 "const opts = _bankOnly().map(a =>",       # 對帳單匯入
+    for site in ("const opts = _bankOnly().map(a =>",       # 對帳單匯入（對帳工作台那個下拉 2026-09-03 移除）
                  "+ _bankOnly()"):                          # 分類規則
         assert site in recon, f"這個下拉沒換成 _bankOnly：{site}"
     for js in (banking, recon):

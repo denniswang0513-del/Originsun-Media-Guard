@@ -39,8 +39,7 @@ EXEMPT = {
         "SPA 殼層 —— 頁籤載入、Socket.IO、OTA、分散式派發全在裡面，還沒分過",
     "core_engine.py":
         "備份/轉檔/串接/驗證四個引擎共用暫停停止狀態，切點不明顯",
-    "frontend/tabs/finance/subviews/recon.js":
-        "對帳工作台（三週改 17 次、每次都連著測試改，是活躍但受控的）",
+    # frontend/tabs/finance/subviews/recon.js 2026-09-03 移掉對帳工作台後回到上限之內
     # db/models.py 2026-08-31 已拆成套件（db/models/，最大段 701 行）——
     # 它曾同時是 fan-in 85／2,121 行／三週改 47 次的最大爆炸半徑
     "frontend/tabs/crm/crm-cashbook.js":

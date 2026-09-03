@@ -28,8 +28,7 @@ BANKING = "frontend/tabs/finance/subviews/banking.js"
 RECON_MARKERS = (
     "/bank-statement/preview",   # 對帳單解析
     "/import-rules",             # 分類規則
-    "/statement-lines",          # 對帳工作台逐列勾銷
-    "/reconciliations",          # 核對餘額
+    # /statement-lines（對帳工作台）與 /reconciliations（核對餘額）2026-09-03 從 UI 移除（owner：實質用不動）
 )
 
 

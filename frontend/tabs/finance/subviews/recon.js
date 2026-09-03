@@ -1,5 +1,6 @@
 /**
- * recon.js — 🔍 對帳系統：上傳對帳單 → 分類規則 → 對帳工作台 → 核對餘額。
+ * recon.js — 🔍 對帳系統：上傳對帳單／信用卡帳單 → 分類規則 → 寫進收支明細；草稿；帳戶間轉存。
+ * （對帳工作台與「核對月底餘額」那一塊 owner 2026-09-03 說實質用不動，整段移除；後端端點還在。）
  *
  * 2026-08-22 從 banking.js 整段搬出來（**純搬移**，一行邏輯沒改、端點一條沒變）。
  * owner 的原話：「對帳系統按了之後就直接在收支表這裡對帳，不要跳轉到銀行帳戶；
@@ -29,10 +30,7 @@ let _isCurrent = () => true;
 let _accounts = [];       // 銀行帳戶（這一台自己抓，不跟 banking.js 共用狀態）
 let _drafts = [];         // 對帳單匯入草稿（掛到一半的）
 let _xfer = null;     // 帳戶間轉存的配對狀況（/transfer-pairs）
-let _wb = null;           // 對帳工作台：{acct, month, data}；null=未開
-let _wbImportRows = null; // 匯入流程暫存：貼上解析後的儲存格陣列
 let _stmtPreview = null;  // 對帳單匯入：preview 回來的列（確認後才寫入）
-let _reconItems = null;   // 最近一次月結對帳歷史 items（排序重繪用）
 
 const _fr = (window._finRecon = window._finRecon || {});
 
@@ -40,47 +38,6 @@ const _fr = (window._finRecon = window._finRecon || {});
 function _bankOnly() {
     return bankOnly(_accounts);
 }
-
-const _reconSorter = createSortable({
-    storageKey: 'finance_recon_history_sort',
-    defaultSort: { key: '', dir: 'asc' },
-    panelId: 'finbank-recon-history',
-    onChange: () => _renderReconHistory(),
-    getters: {
-        month: r => r.month || '',
-        stmt: r => r.statement_balance ?? '',
-        sys: r => r.system_balance ?? '',
-        diff: r => r.diff ?? 0,
-        status: r => (((r.diff || 0) === 0 || r.status === 'balanced') ? 1 : 0),
-    },
-});
-
-const _wbLinesSorter = createSortable({
-    storageKey: 'finance_wb_lines_sort',
-    defaultSort: { key: '', dir: 'asc' },
-    panelId: 'finbank-wb-lines',
-    onChange: () => _wbRender(),
-    getters: {
-        date: l => l.line_date || '',
-        desc: l => l.description || '',
-        amount: l => l.amount ?? '',
-        status: l => enumIndex(['unmatched', 'noted', 'matched'], l.status),
-    },
-});
-
-const _wbEntriesSorter = createSortable({
-    storageKey: 'finance_wb_entries_sort',
-    defaultSort: { key: '', dir: 'asc' },
-    panelId: 'finbank-wb-entries',
-    onChange: () => _wbRender(),
-    getters: {
-        date: e => e.entry_date || '',
-        summary: e => e.summary || '',
-        category: e => e.category || '',
-        amount: e => e.amount ?? '',
-        matched: e => (e.matched ? 1 : 0),
-    },
-});
 
 /** 掛載：container 可以是子視圖容器，也可以是收支表裡的面板。 */
 export default async function render(container, ctx = {}) {
@@ -104,8 +61,6 @@ export default async function render(container, ctx = {}) {
     _accounts = bank.items || [];
     _drafts = drafts.drafts || [];
     _renderShell();
-    const sel = _c.querySelector('#finbank-recon-acct');
-    if (sel && sel.value) _loadReconHistory(sel.value);
     _loadTransferPairs();
 }
 
@@ -232,15 +187,8 @@ _fr.xferShowUnpaired = () => {
 };
 
 function _renderShell() {
-    const actives = _bankOnly();
-    const reconOpts = actives.map((a, i) =>
-        `<option value="${esc(a.id)}"${i === 0 ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
-    // 月底對帳預設 = 上個月
-    const d = new Date(); d.setMonth(d.getMonth() - 1);
-    const defMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-
     _c.innerHTML = `
-        <!-- 月底對帳（工作台：明細逐筆勾銷 → 最後核對餘額） -->
+        <!-- 對帳單進帳（上傳 → 分類 → 收支明細）；草稿 -->
         <div style="background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:16px;margin-bottom:16px;">
             <h3 style="color:#eee;margin:0 0 4px;font-size:14px;">🔍 對帳系統</h3>
             <p style="color:#888;font-size:12px;margin:0 0 10px;">
@@ -253,22 +201,6 @@ function _renderShell() {
                 <button class="crm-btn crm-btn-secondary" onclick="window._finRecon.rulesOpen()">⚙️ 分類規則</button>
             </div>
             ${_draftsStrip()}
-            ${actives.length === 0 ? '<div style="color:#888;font-size:13px;">先新增帳戶才能對帳。</div>' : `
-            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
-                <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">帳戶</div>
-                    <select id="finbank-recon-acct" class="crm-select">${reconOpts}</select></div>
-                <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">月份</div>
-                    <input id="finbank-recon-month" type="month" class="crm-input" value="${defMonth}" onchange="window._finRecon.wbTargetChanged()"></div>
-                <button class="crm-btn crm-btn-primary" onclick="window._finRecon.wbOpen(this)">📋 開啟對帳工作台</button>
-            </div>
-            <div id="finbank-wb" style="margin-top:12px;"></div>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:14px;padding-top:12px;border-top:1px solid #2a2a2a;">
-                <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">核對：對帳單月底餘額</div>
-                    <input id="finbank-recon-balance" type="number" class="crm-input" placeholder="照對帳單抄" style="width:150px;"></div>
-                <button class="crm-btn crm-btn-secondary" onclick="window._finRecon.reconcile(this)">核對餘額</button>
-            </div>
-            <div id="finbank-recon-result" style="margin-top:10px;font-size:13px;"></div>
-            <div id="finbank-recon-history" style="margin-top:12px;"></div>`}
         </div>
 
         <!-- 帳戶間轉存（跨行手續費）—— owner 2026-08-24：「不太可能每次都逐一填寫」 -->
@@ -283,7 +215,7 @@ function _renderShell() {
             <div id="finbank-xfer-body" style="color:#666;font-size:12px;">載入中…</div>
         </div>
 
-        <!-- 對帳工作台共用 Modal（匯入/手動列/配對/補記/註記 動態換內容） -->
+        <!-- 這個 subview 的視窗共用一個外框（上傳對帳單／信用卡帳單／分類規則 動態換內容） -->
         <div id="finbank-wb-modal" class="crm-modal-overlay" style="display:none;">
             <div class="crm-modal" style="max-width:760px;">
                 <div class="crm-modal-header">
@@ -295,106 +227,11 @@ function _renderShell() {
         </div>
     `;
 
-    const reconSel = _c.querySelector('#finbank-recon-acct');
-    if (reconSel) reconSel.addEventListener('change', () => {
-        const resEl = _c.querySelector('#finbank-recon-result');
-        if (resEl) resEl.innerHTML = '';
-        _loadReconHistory(reconSel.value);
-        _fr.wbTargetChanged();   // 工作台已開 → 跟著切帳戶
-    });
     const m = _c.querySelector('#finbank-wb-modal');
     if (m) m.addEventListener('click', (e) => { if (e.target === m) m.style.display = 'none'; });
 }
 
-// ── 對帳 ────────────────────────────────────────────────────
-
-_fr.reconcile = async (btn) => {
-    const acct = _c.querySelector('#finbank-recon-acct')?.value;
-    const month = _c.querySelector('#finbank-recon-month')?.value;
-    const balRaw = _c.querySelector('#finbank-recon-balance')?.value;
-    const resEl = _c.querySelector('#finbank-recon-result');
-    if (!acct || !month || balRaw === '' || balRaw == null) {
-        finToast('請選帳戶、月份並填對帳單月底餘額', true);
-        return;
-    }
-    btn.disabled = true; btn.textContent = '對帳中...';
-    try {
-        const r = await finFetch('/reconciliations', {
-            method: 'POST',
-            body: JSON.stringify({ bank_account_id: acct, month, statement_balance: parseFloat(balRaw) || 0 }),
-        });
-        const diff = r.diff || 0;
-        if (diff === 0) {
-            resEl.innerHTML = `<span style="color:#86efac;">對平了 ✓（系統餘額 $${fmtNum(r.system_balance)} = 對帳單餘額）</span>`;
-        } else {
-            resEl.innerHTML = `<span style="color:#fca5a5;">差 $${fmtNum(Math.abs(diff))} —
-                可能有漏記或銀行手續費/利息未入帳，去收支明細補一筆。
-                （系統 $${fmtNum(r.system_balance)} vs 對帳單 $${fmtNum(parseFloat(balRaw) || 0)}）</span>`;
-        }
-        _loadReconHistory(acct);
-    } catch (e) {
-        resEl.innerHTML = `<span style="color:#fca5a5;">對帳失敗：${esc(e.message)}</span>`;
-    } finally {
-        btn.disabled = false; btn.textContent = '核對餘額';
-    }
-};
-
-async function _loadReconHistory(acctId) {
-    const el = _c.querySelector('#finbank-recon-history');
-    if (!el) return;
-    el.innerHTML = '<div style="color:#666;font-size:12px;">載入對帳紀錄…</div>';
-    try {
-        _reconItems = (await finFetch('/reconciliations?bank_account_id=' + encodeURIComponent(acctId))).items || [];
-    } catch (e) {
-        el.innerHTML = `<div style="color:#fca5a5;font-size:12px;">對帳紀錄載入失敗：${esc(e.message)}</div>`;
-        return;
-    }
-    _renderReconHistory();
-}
-
-function _renderReconHistory() {
-    const el = _c && _c.querySelector('#finbank-recon-history');
-    if (!el) return;
-    const items = _reconItems || [];
-    if (!items.length) { el.innerHTML = '<div style="color:#666;font-size:12px;">此帳戶尚無對帳紀錄</div>'; return; }
-    const row = (r) => {
-        const diff = r.diff || 0;
-        const ok = diff === 0 || r.status === 'balanced';
-        return `<tr style="border-top:1px solid #2a2a2a;">
-            <td style="padding:5px 10px;">${esc(r.month)}</td>
-            <td style="padding:5px 10px;text-align:right;">$${fmtNum(r.statement_balance)}</td>
-            <td style="padding:5px 10px;text-align:right;">$${fmtNum(r.system_balance)}</td>
-            <td style="padding:5px 10px;text-align:right;color:${ok ? '#86efac' : '#fca5a5'};">${diff === 0 ? '—' : '$' + fmtNum(diff)}</td>
-            <td style="padding:5px 10px;color:${ok ? '#86efac' : '#fca5a5'};">${ok ? '✓ 平' : '✗ 不平'}</td>
-        </tr>`;
-    };
-    el.innerHTML = `
-        <table style="border-collapse:collapse;font-size:12px;color:#ccc;min-width:420px;">
-            <thead><tr style="color:#888;text-align:left;">
-                ${sortableTh('month', '月份', 'style="padding:5px 10px;"')}
-                ${sortableTh('stmt', '對帳單餘額', 'style="padding:5px 10px;text-align:right;"')}
-                ${sortableTh('sys', '系統餘額', 'style="padding:5px 10px;text-align:right;"')}
-                ${sortableTh('diff', '差額', 'style="padding:5px 10px;text-align:right;"')}
-                ${sortableTh('status', '狀態', 'style="padding:5px 10px;"')}
-            </tr></thead>
-            <tbody>${_reconSorter.sorted(items).map(row).join('')}</tbody>
-        </table>`;
-    _reconSorter.attach();
-}
-
-// ── 對帳工作台（對帳單明細逐筆勾銷）──────────────────────────
-
-const _WB_CHIP = {
-    matched: '<span style="font-size:10px;padding:1px 7px;border-radius:8px;background:#14351c;color:#86efac;white-space:nowrap;">✓ 已配對</span>',
-    noted: '<span style="font-size:10px;padding:1px 7px;border-radius:8px;background:#3a2a12;color:#fbbf24;white-space:nowrap;">📝 已註記</span>',
-    unmatched: '<span style="font-size:10px;padding:1px 7px;border-radius:8px;background:#3a1215;color:#fca5a5;white-space:nowrap;">未配對</span>',
-};
-
-/** 有號金額上色：正=綠(存入)、負=紅(支出) */
-function _wbAmt(v) {
-    const n = v || 0;
-    return `<span style="color:${n >= 0 ? '#86efac' : '#fca5a5'};">${n > 0 ? '+' : (n < 0 ? '−' : '')}$${fmtNum(Math.abs(n))}</span>`;
-}
+// ── 視窗共用件（上傳對帳單／卡單／分類規則都用）──────────────
 
 /** 這組視窗共用同一個外框。width 給欄位多的內容用（預設 760 太窄，
  *  對帳單預覽有 9 欄含兩個下拉，全部擠在一起，owner 2026-08-21 反應）。 */
@@ -418,228 +255,13 @@ _fr.wbCloseModal = _wbCloseModal;
 
 /** 工作台變更請求共用骨架：打 API →（可選 toast）→（可選關 modal）→ 整台重載。
  *  失敗 toast 錯誤訊息（409 月結鎖帳等直接顯示後端 detail）。 */
-async function _wbApi(path, opts, { btn, okMsg, close } = {}) {
-    if (btn) btn.disabled = true;
-    try {
-        const r = await finFetch(path, opts);
-        if (okMsg) finToast(typeof okMsg === 'function' ? okMsg(r) : okMsg);
-        if (close) _wbCloseModal();
-        await _fr.wbReload();
-        return r;
-    } catch (e) {
-        finToast(e.message, true);
-    } finally {
-        if (btn) btn.disabled = false;
-    }
-}
-
-const _wbLine = (id) => (_wb.data.lines || []).find(l => l.id === id);
-
-/** modal 頂部「現在在操作哪一列」橫幅 */
-function _wbBanner(ln, extra = '') {
-    return `<div style="color:#ccc;font-size:13px;margin-bottom:10px;">${esc(ln.line_date || '—')}　${esc(ln.description || '')}　${_wbAmt(ln.amount)}${extra}</div>`;
-}
-
-/** 收支列共用四格（日期/摘要/類別/金額）— 工作台右表與配對候選表共用 */
-function _wbEntryCells(e) {
-    return `<td style="padding:4px 8px;white-space:nowrap;">${esc(e.entry_date || '—')}</td>
-        <td style="padding:4px 8px;">${esc(e.summary || '')}</td>
-        <td style="padding:4px 8px;color:#9ca3af;">${esc(e.category || '')}</td>
-        <td style="padding:4px 8px;text-align:right;white-space:nowrap;">${_wbAmt(e.amount)}</td>`;
-}
-
-/** 可捲動表格容器。data-wb-scroll 給 _wbRender 記位置用（見下）。 */
+/** 可捲動表格容器（分類規則清單用）。 */
 function _wbTable(inner, maxH = 420) {
     return `<div data-wb-scroll style="max-height:${maxH}px;overflow:auto;border:1px solid #2a2a2a;border-radius:6px;">
         <table style="border-collapse:collapse;font-size:12px;color:#ccc;width:100%;">${inner}</table></div>`;
 }
 
-/** 月份切換（帳戶下拉的歷史重載走 _renderShell 的既有 listener）：工作台已開就跟著重載 */
-_fr.wbTargetChanged = () => { if (_wb) _fr.wbOpen(); };
-
-_fr.wbOpen = async (btn) => {
-    const acct = _c.querySelector('#finbank-recon-acct')?.value;
-    const month = _c.querySelector('#finbank-recon-month')?.value;
-    if (!acct || !month) { finToast('請先選帳戶與月份', true); return; }
-    if (btn) { btn.disabled = true; btn.textContent = '載入中...'; }
-    try {
-        const data = await finFetch(`/reconciliations/workbench?bank_account_id=${encodeURIComponent(acct)}&month=${encodeURIComponent(month)}`);
-        _wb = { acct, month, data };
-        _wbRender();
-    } catch (e) {
-        finToast(e.message, true);
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = '📋 開啟對帳工作台'; }
-    }
-};
-
-_fr.wbReload = () => _fr.wbOpen();
-
-function _wbLineRow(l) {
-    let acts;
-    if (l.status === 'matched') {
-        const e = (_wb.data.entries || []).find(en => en.id === l.matched_entry_id);
-        acts = `<button class="crm-btn crm-btn-secondary crm-btn-sm" title="配對到：${esc(e ? e.summary : '（其他月份的收支）')}" onclick="window._finRecon.wbUnmatch('${l.id}')">取消配對</button>`;
-    } else {
-        acts = `<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finRecon.wbMatchOpen('${l.id}')">配對</button>
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finRecon.wbCreateOpen('${l.id}')">補記入帳</button>
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finRecon.wbNoteOpen('${l.id}')">${l.note ? '改註記' : '註記'}</button>
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" title="刪除這列（只刪對帳單明細，不動帳）" onclick="window._finRecon.wbDelLine('${l.id}')">✕</button>`;
-    }
-    return `<tr style="border-top:1px solid #2a2a2a;">
-        <td style="padding:4px 8px;white-space:nowrap;">${esc(l.line_date || '—')}</td>
-        <td style="padding:4px 8px;"${l.note ? ` title="註記：${esc(l.note)}"` : ''}>${esc(l.description || '')}</td>
-        <td style="padding:4px 8px;text-align:right;white-space:nowrap;">${_wbAmt(l.amount)}</td>
-        <td style="padding:4px 8px;">${_WB_CHIP[l.status] || ''}</td>
-        <td style="padding:4px 8px;white-space:nowrap;">${acts}</td>
-    </tr>`;
-}
-
-function _wbEntryRow(e) {
-    return `<tr style="border-top:1px solid #2a2a2a;${e.matched ? 'opacity:.5;' : ''}">
-        ${_wbEntryCells(e)}
-        <td style="padding:4px 8px;color:#86efac;">${e.matched ? '✓' : ''}</td>
-    </tr>`;
-}
-
-function _wbRender() {
-    const el = _c.querySelector('#finbank-wb');
-    if (!el) return;
-    if (!_wb) { el.innerHTML = ''; return; }
-    // 🔴 重畫前記住捲軸位置（owner 2026-08-21：「編輯後不要跳到最上面」）。
-    // 每配對／註記／補記一列就整塊重畫（那些動作真的改了伺服器狀態，不能像
-    // 匯入預覽那樣只換一列），對帳到第 30 列時每按一次就被彈回第 1 列。
-    const keep = [...el.querySelectorAll('[data-wb-scroll]')].map(x => x.scrollTop);
-    const { data, month } = _wb;
-    const s = data.summary || {};
-    const lines = data.lines || [];
-    const entries = data.entries || [];
-    const bankMiss = s.lines_bank_only || 0;   // 桶規則由後端 workbench_summary 單一定義
-    const lineHead = `<thead><tr style="color:#888;text-align:left;">
-        ${sortableTh('date', '日期', 'style="padding:4px 8px;"')}${sortableTh('desc', '摘要', 'style="padding:4px 8px;"')}
-        ${sortableTh('amount', '金額', 'style="padding:4px 8px;text-align:right;"')}${sortableTh('status', '狀態', 'style="padding:4px 8px;"')}<th style="padding:4px 8px;"></th></tr></thead>`;
-    const entryHead = `<thead><tr style="color:#888;text-align:left;">
-        ${sortableTh('date', '日期', 'style="padding:4px 8px;"')}${sortableTh('summary', '摘要', 'style="padding:4px 8px;"')}${sortableTh('category', '類別', 'style="padding:4px 8px;"')}
-        ${sortableTh('amount', '金額', 'style="padding:4px 8px;text-align:right;"')}${sortableTh('matched', '勾銷', 'style="padding:4px 8px;"')}</tr></thead>`;
-    el.innerHTML = `
-        <div style="border:1px solid #2e2e2e;border-radius:8px;padding:12px;background:#1c1c1c;">
-            <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:#ccc;margin-bottom:10px;">
-                <span>已配對 <b style="color:#86efac;">${s.lines_matched || 0}</b> / ${s.lines_total || 0} 筆</span>
-                <span>銀行有・系統沒有 <b style="color:${bankMiss ? '#fca5a5' : '#86efac'};">${bankMiss}</b> 筆
-                    ${s.lines_noted ? `（含已註記 ${s.lines_noted}）` : ''}（${_wbAmt(s.lines_unmatched_sum)}）</span>
-                <span>系統有・銀行沒有 <b style="color:${s.entries_unmatched ? '#fbbf24' : '#86efac'};">${s.entries_unmatched || 0}</b> 筆（${_wbAmt(s.entries_unmatched_sum)}）</span>
-                <span style="color:#888;">系統月底餘額 $${fmtNum(data.system_balance)}</span>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finRecon.wbImportOpen()">📥 匯入對帳單明細</button>
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finRecon.wbAddOpen()">＋ 手動新增一列</button>
-                <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finRecon.wbAutoMatch(this)">⚡ 自動配對</button>
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finRecon.wbReload()">🔄 重新整理</button>
-            </div>
-            <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;">
-                <div id="finbank-wb-lines" style="flex:1 1 460px;min-width:380px;">
-                    <div style="color:#9ca3af;font-size:12px;margin-bottom:4px;">🏦 銀行對帳單明細（${esc(month)}）</div>
-                    ${lines.length ? _wbTable(`${lineHead}<tbody>${_wbLinesSorter.sorted(lines).map(_wbLineRow).join('')}</tbody>`)
-                    : '<div style="color:#666;font-size:12px;border:1px dashed #333;border-radius:6px;padding:14px;">還沒有明細 — 從網銀/存摺把這個月的交易「📥 匯入」進來，或「＋ 手動新增」。</div>'}
-                </div>
-                <div id="finbank-wb-entries" style="flex:1 1 400px;min-width:360px;">
-                    <div style="color:#9ca3af;font-size:12px;margin-bottom:4px;">📒 系統收支明細（${esc(month)}，掛此帳戶）</div>
-                    ${entries.length ? _wbTable(`${entryHead}<tbody>${_wbEntriesSorter.sorted(entries).map(_wbEntryRow).join('')}</tbody>`)
-                    : '<div style="color:#666;font-size:12px;border:1px dashed #333;border-radius:6px;padding:14px;">這個月此帳戶沒有掛帳的收支明細。</div>'}
-                </div>
-            </div>
-        </div>`;
-    _wbLinesSorter.attach();
-    _wbEntriesSorter.attach();
-    // 捲軸放回去（依序對回同一個容器；表格結構固定，兩個容器順序不會變）
-    el.querySelectorAll('[data-wb-scroll]').forEach((x, i) => {
-        if (keep[i]) x.scrollTop = keep[i];
-    });
-}
-
-_fr.wbAutoMatch = (btn) => _wbApi('/statement-lines/auto-match', {
-    method: 'POST', body: JSON.stringify({ bank_account_id: _wb.acct, month: _wb.month }),
-}, { btn, okMsg: r => r.matched ? `自動配對成功 ${r.matched} 筆` : '沒有可自動配對的（金額相同且日期相近才會自動配）' });
-
-_fr.wbUnmatch = (lineId) => _wbApi(`/statement-lines/${lineId}/unmatch`, { method: 'POST' });
-
-_fr.wbDelLine = (lineId) => {
-    if (!confirm('刪除這列對帳單明細？（只刪工作底稿，收支明細不動）')) return;
-    _wbApi(`/statement-lines/${lineId}`, { method: 'DELETE' });
-};
-
-// ── 工作台：手動新增一列 ─────────────────────────────────────
-
-_fr.wbAddOpen = () => {
-    _wbModal('手動新增對帳單明細', `
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
-            <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">交易日</div>
-                <input id="finbank-wb-add-date" type="date" class="crm-input" value="${_wb.month}-01"></div>
-            <div style="flex:1;min-width:160px;"><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">摘要</div>
-                <input id="finbank-wb-add-desc" type="text" class="crm-input" style="width:100%;box-sizing:border-box;" placeholder="照對帳單抄"></div>
-            <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">方向</div>
-                <select id="finbank-wb-add-dir" class="crm-select"><option value="out">支出（提出）</option><option value="in">存入</option></select></div>
-            <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">金額</div>
-                <input id="finbank-wb-add-amt" type="number" min="1" class="crm-input" style="width:120px;"></div>
-        </div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
-            <button class="crm-btn crm-btn-primary" onclick="window._finRecon.wbAddSave(this)">新增</button>
-        </div>`);
-};
-
-_fr.wbAddSave = (btn) => {
-    const body = document.getElementById('finbank-wb-modal-body');
-    const amt = Math.abs(parseInt(body.querySelector('#finbank-wb-add-amt')?.value, 10) || 0);
-    if (!amt) { finToast('請填金額', true); return; }
-    const dir = body.querySelector('#finbank-wb-add-dir')?.value;
-    return _wbApi('/statement-lines', {
-        method: 'POST',
-        body: JSON.stringify({
-            bank_account_id: _wb.acct, month: _wb.month,
-            lines: [{
-                line_date: body.querySelector('#finbank-wb-add-date')?.value || null,
-                description: body.querySelector('#finbank-wb-add-desc')?.value || '',
-                amount: dir === 'in' ? amt : -amt,
-            }],
-        }),
-    }, { btn, close: true });
-};
-
-// ── 工作台：匯入對帳單明細 ──────────────────────────────────
-//
-// 解析走**後端**的 core/bank_statement.py（POST /bank-statement/preview）。
-// 這裡本來有一整套前端解析器（_wbParsePaste/_wbParseDate/_wbParseAmt/_wbGuessRoles，
-// 約 70 行），連同「請人逐欄指定角色」的步驟一起收掉了 —— 那份的註解自己寫著
-// 「若日後有第二個消費者（如後端匯入路徑）再搬去鎖黃金測試」，而後端匯入路徑
-// 就是第二個消費者。留兩份的代價是：民國年與會計括號的規則只存在其中一邊，
-// 兩支對同一份對帳單會得到不同答案，而且錯的那支永遠不會被測到。
-//
-// 換過來之後不必再問「哪一欄是支出」：金額的正負由**餘額鏈**推（本列餘額 −
-// 上列餘額），再跟銀行自己印的總計對帳。人要確認的是「這些列對不對」，
-// 不是「這欄叫什麼」。
-
-_fr.wbImportOpen = () => {
-    _wbImportRows = null;
-    _wbModal('匯入對帳單明細', `
-        <p style="color:#888;font-size:12px;margin:0 0 8px;">
-            從網銀交易明細整塊選取複製，直接貼進來。金額的正負由<b>餘額欄</b>推算，
-            不必指定哪一欄是支出 —— 所以請把<b>餘額那一欄一起複製</b>。</p>
-        <textarea id="finbank-wb-paste" class="crm-input" rows="10"
-            style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;"
-            placeholder="例：&#10;2026/07/01\t跨行轉入\t\t50,000\t120,000&#10;2026/07/03\t轉帳手續費\t15\t\t119,985"></textarea>
-        <div id="finbank-wb-imp-err" style="display:none;color:#fca5a5;font-size:12px;margin-top:8px;white-space:pre-wrap;"></div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
-            <button class="crm-btn crm-btn-primary" onclick="window._finRecon.wbImportParse(this)">下一步：確認明細</button>
-        </div>`);
-};
-
-// ── 對帳單預覽：兩個入口（工作台貼上、貸款區上傳檔案）共用 ────────────
-//
-// 兩邊打的是同一支 /bank-statement/preview，只有「送什麼欄位」和「拿到之後
-// 畫成什麼」不同。錯誤處理、忙碌狀態、摘要列本來各寫一份 —— 尤其
-// multipart 這段：finFetch 會硬塞 Content-Type: application/json，boundary
-// 就被蓋掉，所以必須走原生 fetch 讓瀏覽器自己帶。這種一寫錯就整條壞掉的
-// 細節只該存在一份。
+// ── 對帳單／卡單共用（解析上傳、預覽摘要列）—— 原本夾在工作台區塊裡，2026-09-03 拆工作台時留下 ──
 
 /** POST 預覽。失敗/未通過檢查 → 呼叫 show(原因) 並回 null。 */
 async function _stmtFetchPreview(fd, { btn, doneLabel, show, failMsg,
@@ -677,165 +299,6 @@ function _stmtSummaryBar(d, extra = '') {
         ${warn}`;
 }
 
-_fr.wbImportParse = async (btn) => {
-    const text = (document.getElementById('finbank-wb-paste')?.value || '').trim();
-    const err = document.getElementById('finbank-wb-imp-err');
-    const show = (m) => { err.textContent = m; err.style.display = 'block'; };
-    err.style.display = 'none';
-    if (!text) return show('請先貼上交易明細');
-    const fd = new FormData();
-    fd.append('bank_account_id', _wb.acct);
-    fd.append('text', text);
-    const d = await _stmtFetchPreview(fd, {
-        btn, doneLabel: '下一步：確認明細', show,
-        failMsg: '這份明細沒通過檢查，所以不匯入：',
-    });
-    if (!d) return;
-    _wbImportRows = d.rows || [];
-    _wbRenderImportPreview(d);
-};
-
-function _wbRenderImportPreview(d) {
-    const rows = d.rows || [];
-    const body = rows.slice(0, 8).map(r => `
-        <tr style="border-top:1px solid #2a2a2a;">
-            <td style="padding:3px 6px;white-space:nowrap;">${esc(r.date)}</td>
-            <td style="padding:3px 6px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.description || '')}</td>
-            <td style="padding:3px 6px;text-align:right;white-space:nowrap;">${_wbAmt(r.amount)}</td>
-        </tr>`).join('');
-    _wbModal('匯入對帳單明細 — 確認', `
-        ${_stmtSummaryBar(d)}
-        <div style="overflow-x:auto;border:1px solid #2a2a2a;border-radius:6px;">
-            <table style="border-collapse:collapse;font-size:12px;color:#ccc;width:100%;">
-                <tbody>${body}</tbody>
-            </table>
-        </div>
-        ${rows.length > 8 ? `<div style="color:#666;font-size:11px;margin-top:4px;">…（預覽前 8 列，實際匯入 ${fmtNum(rows.length)} 筆）</div>` : ''}
-        <label style="display:block;color:#ccc;font-size:12px;margin-top:10px;">
-            <input type="checkbox" id="finbank-wb-replace">
-            取代這幾個月已匯入的明細（重新來過）
-            <span style="color:#9ca3af;">—— 不勾的話只補新的，重複的自動跳過；
-            勾了會連已經勾銷好的紀錄一起清掉。</span></label>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
-            <button class="crm-btn crm-btn-secondary" onclick="window._finRecon.wbImportOpen()">← 重貼</button>
-            <button class="crm-btn crm-btn-primary" onclick="window._finRecon.wbImportSave(this)">匯入</button>
-        </div>`);
-}
-
-_fr.wbImportSave = async (btn) => {
-    const body = document.getElementById('finbank-wb-modal-body');
-    const replace = body.querySelector('#finbank-wb-replace')?.checked || false;
-    // 對帳工作底稿只要 (日期, 摘要, 帶號金額)；後端已經把三者算好了
-    const lines = (_wbImportRows || [])
-        .filter(r => r.amount)
-        .map(r => ({ line_date: r.date, description: (r.description || '').slice(0, 255),
-                     amount: r.amount }));
-    if (!lines.length) { finToast('沒有可匯入的明細（每列要有非 0 金額）', true); return; }
-    // 🔴 不傳 month —— 每一列自己的日期決定它屬於哪個月，跨月的對帳單一次傳完
-    // 就好（月份只當「該列沒有日期」時的後備，這條路每列都有日期）。
-    return _wbApi('/statement-lines', {
-        method: 'POST',
-        body: JSON.stringify({ bank_account_id: _wb.acct, lines, replace }),
-    }, {
-        btn, close: true,
-        okMsg: (r) => {
-            const ms = r.months || [];
-            return `已匯入 ${fmtNum(r.added)} 筆`
-                + (ms.length > 1 ? `（涵蓋 ${ms[0]} ～ ${ms[ms.length - 1]}，共 ${ms.length} 個月）` : '')
-                + (r.skipped ? `；跳過 ${fmtNum(r.skipped)} 筆重複` : '')
-                + (r.dropped_matched ? `；⚠ 覆蓋掉 ${fmtNum(r.dropped_matched)} 筆已勾銷的` : '');
-        },
-    });
-};
-
-// ── 工作台：手動配對 / 註記 / 補記入帳 ───────────────────────
-
-_fr.wbMatchOpen = (lineId) => {
-    const ln = _wbLine(lineId);
-    if (!ln) return;
-    const cands = (_wb.data.entries || []).filter(e => !e.matched && e.amount === ln.amount);
-    const rows = cands.map(e => `<tr style="border-top:1px solid #2a2a2a;">
-        ${_wbEntryCells(e)}
-        <td style="padding:4px 8px;"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finRecon.wbMatchPick('${lineId}','${e.id}')">選這筆</button></td>
-    </tr>`).join('');
-    _wbModal('配對到系統收支', `
-        ${_wbBanner(ln)}
-        ${cands.length ? `${_wbTable(`<tbody>${rows}</tbody>`, 320)}
-        <div style="color:#666;font-size:11px;margin-top:6px;">只列同金額且未勾銷的收支（金額不同不能配 — 漏記請用「補記入帳」）。</div>`
-        : '<div style="color:#888;font-size:13px;border:1px dashed #333;border-radius:6px;padding:14px;">這個月沒有同金額的未勾銷收支。若系統確實漏記，關掉這個視窗改按「補記入帳」；若是跨月時間差，用「註記」寫明。</div>'}`);
-};
-
-_fr.wbMatchPick = (lineId, entryId) => _wbApi(`/statement-lines/${lineId}/match`, {
-    method: 'POST', body: JSON.stringify({ entry_id: entryId }),
-}, { close: true });
-
-_fr.wbNoteOpen = (lineId) => {
-    const ln = _wbLine(lineId);
-    if (!ln) return;
-    _wbModal('註記（不入帳的說明）', `
-        ${_wbBanner(ln)}
-        <p style="color:#888;font-size:12px;margin:0 0 8px;">這筆銀行有、但不需要（或不是這個月）入系統帳時，寫清楚原因 — 例如「上月已入帳，跨月入帳時間差」。</p>
-        <textarea id="finbank-wb-note" class="crm-input" rows="3" style="width:100%;box-sizing:border-box;">${esc(ln.note || '')}</textarea>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
-            <button class="crm-btn crm-btn-primary" onclick="window._finRecon.wbNoteSave(this,'${lineId}')">儲存</button>
-        </div>`);
-};
-
-_fr.wbNoteSave = (btn, lineId) => _wbApi(`/statement-lines/${lineId}`, {
-    method: 'PUT',
-    body: JSON.stringify({ note: document.getElementById('finbank-wb-note')?.value || '' }),
-}, { btn, close: true });
-
-_fr.wbCreateOpen = async (lineId) => {
-    const ln = _wbLine(lineId);
-    if (!ln) return;
-    // 🔴 類別清單只有一份：_ensureCashCats（後端的 cash_category_texts）。
-    // 這裡本來自己抓 /category-map 再在前端篩一遍 —— 而且篩法跟後端不一樣
-    // （後端 active.is_(True) 排除 NULL、這邊 active !== false 收進 NULL），
-    // 於是這個 datalist 會給出後端不認得的類別，而這一欄會直接寫進真的收支列。
-    const cats = await _ensureCashCats();
-    _wbModal('補記入帳（系統漏記 → 建收支明細）', `
-        ${_wbBanner(ln, `<span style="color:#888;font-size:11px;">（${ln.amount >= 0 ? '存入' : '支出'}，日期金額照對帳單帶入）</span>`)}
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
-            ${ln.line_date ? '' : `<div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">交易日（這列匯入時沒日期，先補上）</div>
-                <input id="finbank-wb-ce-date" type="date" class="crm-input" value="${_wb.month}-01"></div>`}
-            <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">類別（報表靠它歸科目）</div>
-                <input id="finbank-wb-ce-cat" class="crm-input" list="finbank-wb-cats" style="width:170px;" placeholder="選或輸入類別">
-                <datalist id="finbank-wb-cats">${cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
-            <div style="flex:1;min-width:160px;"><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">摘要</div>
-                <input id="finbank-wb-ce-summary" class="crm-input" style="width:100%;box-sizing:border-box;" value="${esc(ln.description || '')}"></div>
-            <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">收款/付款人（可空）</div>
-                <input id="finbank-wb-ce-payee" class="crm-input" style="width:140px;"></div>
-        </div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
-            <button class="crm-btn crm-btn-primary" onclick="window._finRecon.wbCreateSave(this,'${lineId}')">補記並勾銷</button>
-        </div>`);
-};
-
-_fr.wbCreateSave = async (btn, lineId) => {
-    const body = document.getElementById('finbank-wb-modal-body');
-    const category = body.querySelector('#finbank-wb-ce-cat')?.value?.trim() || '';
-    if (!category) { finToast('請選擇類別（報表要靠它歸科目）', true); return; }
-    const dateEl = body.querySelector('#finbank-wb-ce-date');   // 無日期匯入列才有這欄
-    if (dateEl) {
-        if (!dateEl.value) { finToast('這列沒有交易日，請先填日期', true); return; }
-        btn.disabled = true;
-        try {
-            await finFetch(`/statement-lines/${lineId}`, {
-                method: 'PUT', body: JSON.stringify({ line_date: dateEl.value }),
-            });
-        } catch (e) { finToast(e.message, true); btn.disabled = false; return; }
-        btn.disabled = false;
-    }
-    return _wbApi(`/statement-lines/${lineId}/create-entry`, {
-        method: 'POST',
-        body: JSON.stringify({
-            category,
-            summary: body.querySelector('#finbank-wb-ce-summary')?.value || '',
-            payee: body.querySelector('#finbank-wb-ce-payee')?.value || '',
-        }),
-    }, { btn, okMsg: '已補記收支並勾銷 ✓', close: true });  // 409：該月已鎖帳 → 顯示後端 detail
-};
 // ── 銀行對帳單匯入（上傳/貼上 → 逐列確認 → 寫帳）──────────────
 //
 // 為什麼要「預覽再確認」而不是解析完直接匯：對帳單解析得再穩，把錢寫進帳這件事
@@ -2162,14 +1625,23 @@ _fr.stmtApply = async (btn) => {
         // 後端會擋掉帳上已有的同日同額列（全選會把「已匯過」一起勾起來，
         // 逾時重按也是）—— 跳過幾筆一定要講，否則使用者以為全部匯進去了。
         const dup = (r.skipped_duplicates || []).length;
+        // 草稿：全部匯完就自動刪（owner 2026-09-03「匯入後沒有刪除」）；還有沒勾、也沒匯過的列
+        // 才留著（分幾次匯的情況），並說清楚剩幾列。
+        let draftMsg = '';
+        if (d.draft_id) {
+            const left = (d.rows || []).filter(x => !x.selected && !x.duplicate).length;
+            if (!left) {
+                try { await finFetch('/bank-statement/drafts/' + d.draft_id, { method: 'DELETE' }); draftMsg = '；草稿已自動刪除'; }
+                catch (_) { draftMsg = '；草稿刪不掉，請到草稿列手動刪'; }
+            } else draftMsg = `；草稿保留（還有 ${left} 列沒匯）`;
+            _refreshDrafts();
+        }
         finToast(`已匯入 ${r.entries} 筆收支、${r.loan_payments} 期貸款繳款`
             + (r.petty_claims ? `；${r.petty_claims} 筆已送源日請款（草稿）` : '')
             + (r.linked_invoices ? `；掛上 ${r.linked_invoices} 張發票` : '')
             + (r.statement_lines ? `；對帳工作台同步 ${r.statement_lines} 列（已自動配對）` : '')
             + (dup ? `；跳過 ${dup} 筆重複（帳上已有）` : '')
-            // 從草稿匯入時草稿**留著** —— 常常是分幾次匯（先匯確定的、剩下的再查）。
-            // 匯過的列下次開啟會自動標「已匯過」且不勾，所以留著不會重複匯。
-            + (d.draft_id ? '；草稿仍保留（剩下的列可以之後再匯，做完記得刪掉）' : ''));
+            + draftMsg);
         // 🔴 源日請款推不動的**要講出來**：帳已經匯進去了，但那幾筆沒進請款
         // 流程。不講的話使用者以為都送出去了，那筆錢就跟公司要不回來。
         if ((r.petty_failed || []).length) {
