@@ -5,7 +5,7 @@
 發票代開＝category 在 passthrough_categories（後端 finance_category_map treatment=passthrough，不在前端寫死字）、
 沒填類別＝none。底色與快篩都吃它。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
 
 
 def test_backend_options_expose_passthrough_categories_from_category_map():
@@ -49,3 +49,25 @@ def test_request_payment_from_cash_row():
     assert "hasModule('finance_mine')" in js and "'/projects?entity=mine'" in js and "'私帳｜' + (p.name || '')" in js
     assert "_cashPayForProject(e, picked, mp ? mp.name : '', { entity: 'mine' })" in js
     assert "...(ent ? { entity: ent } : {})" in js and "&entity=' + ent" in js
+
+
+def test_passthrough_income_row_requests_the_remit_payment_and_shows_it():
+    """發票代開的收入列（owner 2026-09-04）：請款＝這張發票的代開應匯（面額−代開費）開給代開人——
+    後端在發票標已收款時自動建那張（source_invoice_id 為鍵），前端確保它在、沒有就照同一套補一張；
+    列的請款單欄標註它（kai_payment_*），**不**掛成分配（掛了會被當成已付款）。"""
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
+    assert "if (_kindOf(e) === 'passthrough') return _cashKaiPay(e);" in js
+    kai = js_func_body(js, "async function _cashKaiPay(e)")     # func_body 的結尾只認 def，JS 會吃到檔尾
+    assert "p.source_invoice_id === e.invoice_id" in kai and "source_invoice_id: inv.id" in kai
+    assert "inv.commission_due || inv.commission" in kai and "/cash-entries/" not in kai and "batch-pay" not in kai
+    assert "0.92" not in kai and "* 8" not in kai, "費率不在前端猜：commission_due 由後端照 settings 費率算"
+    get = code_only(func_body(repo_src("routers/crm/finance.py"), "async def get_invoice("))
+    assert 'd["commission_due"] = int(inv.commission or 0) or passthrough_commission(' in get
+    assert "e.kai_payment_amount" in js, "同一個代開人很多張，請款單欄要帶金額才分得出是哪一張"
+    assert 'data-act="proj"' in kai and "_cashPayForProject(e, inv.project_id" in kai, "連到的發票不是代開類別→改走案子的費用配置"
+    assert "e.kai_payment_label" in js
+    py = code_only(func_body(repo_src("routers/crm/cash.py"), "async def _kai_payments_map("))
+    assert "CrmPaymentRequest.source_invoice_id.in_(ids)" in py
+    lst = code_only(func_body(repo_src("routers/crm/cash.py"), "async def list_cash_entries("))
+    assert "_kai_payments_map(session" in lst and "kaimap.get(r[0].invoice_id)" in lst
+    assert '"kai_payment_label": kai.get("label", "")' in repo_src("routers/crm/cash.py")

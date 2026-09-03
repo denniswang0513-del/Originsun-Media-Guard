@@ -108,9 +108,28 @@ async def load_alloc_links_map(session, kind: str, *, entity=None) -> dict:
     return out
 
 
+async def _kai_payments_map(session, invoice_ids, entity: str) -> dict:
+    """發票代開的收入列 → 那張「代開應匯」請款單（finance._sync_passthrough_request 在發票標已收款時自動建，
+    鍵＝source_invoice_id）。owner 2026-09-04：請款後請款單欄要標註是哪一張。同一張發票有多張時取最早那張（自動建的）。"""
+    ids = {i for i in invoice_ids if i}
+    if not ids:
+        return {}
+    rows = (await session.execute(
+        select(CrmPaymentRequest).where(CrmPaymentRequest.source_invoice_id.in_(ids),
+                                        CrmPaymentRequest.entity == entity)
+        .order_by(CrmPaymentRequest.created_at))).scalars().all()
+    out = {}
+    for p in rows:
+        out.setdefault(p.source_invoice_id, {
+            "id": p.id, "label": payment_label(p.payee_name or "", p.summary or ""),
+            "status": p.payment_status or "", "amount": p.amount or 0})
+    return out
+
+
 def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
                   petty_status: str = "", tax_path=None,
-                  pay_label: str = "", payment_ids=(), invoice_ids=()) -> dict:
+                  pay_label: str = "", payment_ids=(), invoice_ids=(), kai=None) -> dict:
+    kai = kai or {}
     return {
         "id": e.id,
         "entity": e.entity or "parent",
@@ -153,6 +172,12 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "",
         # 掛到的發票（全部）。只帶 `invoice_id`（金額最大的那張）的話，就地連結
         # 的挑選視窗只勾得回一張 —— 存檔就把其餘的洗掉（同 payment_ids）。
         "invoice_ids": list(invoice_ids or []),
+        # 發票代開的收入列：這張發票的「代開應匯」請款單（顯示在請款單欄；不是 allocation 連結——
+        # 掛成分配會把那張請款單標成已付款，但錢還沒匯出去）
+        "kai_payment_id": kai.get("id", ""),
+        "kai_payment_label": kai.get("label", ""),
+        "kai_payment_status": kai.get("status", ""),
+        "kai_payment_amount": kai.get("amount", 0),
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 
@@ -543,12 +568,14 @@ async def list_cash_entries(
         pnames = await project_names_map(session, page_splits)
         paylinks = await load_alloc_links_map(session, 'payment', entity=ent)
         invlinks = await load_alloc_links_map(session, 'invoice', entity=ent)
+        kaimap = await _kai_payments_map(session, [r[0].invoice_id for r in rows], ent)
     out = []
     for r in rows:
         d = _to_cash_dict(r[0], r[1] or "", r[2] or "", r[3] or "",
                           paths.get(r[0].taxonomy_node_id),
                           payment_label(r[5] or "", r[4] or ""),
-                          paylinks.get(r[0].id, ()), invlinks.get(r[0].id, ()))
+                          paylinks.get(r[0].id, ()), invlinks.get(r[0].id, ()),
+                          kaimap.get(r[0].invoice_id))
         subs = smap.get(r[0].id, [])
         d["splits"] = [_split_to_dict(s, paths.get(s.taxonomy_node_id),
                                       amap.get(s.id),

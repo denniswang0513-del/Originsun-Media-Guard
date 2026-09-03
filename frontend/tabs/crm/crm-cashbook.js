@@ -446,6 +446,7 @@ const _payBody = (extra) => ({ request_date: today(), planned_month: today().sli
 window._cashRequestPay = async (id) => {
     const e = _entries.find((x) => x.id === id);
     if (!e) return;
+    if (_kindOf(e) === 'passthrough') return _cashKaiPay(e);      // 發票代開：請款＝代開應匯（扣掉代開費）給代開人
     let pid = e.project_id || '', pname = e.project_name || '';
     if (!pid && e.invoice_id) {
         // 收款列常只掛發票沒掛專案：發票有案就用發票的案
@@ -482,6 +483,62 @@ window._cashRequestPay = async (id) => {
     });
     ov.querySelector('[data-act="custom"]').addEventListener('click', () => { ov.remove(); _cashCustomPay(e); });
 };
+
+/** 發票代開的收入列：請款＝這張發票的「代開應匯」（面額 − 代開費）開給代開人。
+ *  發票標已收款時後端會自動建那張請款單（finance._sync_passthrough_request）；這裡確保它在（沒有就照同一套規則補一張），
+ *  然後列的請款單欄就會標註它。錢還沒匯出去，所以不掛成這一列的分配、不標已付。 */
+async function _cashKaiPay(e) {
+    if (!e.invoice_id) {
+        const ov = _payOverlay('請款 — 發票代開', `<div style="color:#ddd;line-height:1.7;">這一列還沒連結代開發票。先在「發票」欄連結那張發票，
+            系統會照發票的面額算出代開應匯（扣掉代開費）並開請款單。</div>`,
+            `<button class="crm-btn crm-btn-secondary" data-close>關閉</button>
+             <button class="crm-btn crm-btn-primary" data-act="inv">連結發票</button>`);
+        ov.querySelector('[data-act="inv"]').addEventListener('click', () => { ov.remove(); window._cashInvPick({ stopPropagation() {} }, e.id); });
+        return;
+    }
+    let inv, pays;
+    try { [inv, pays] = await Promise.all([_fetch('/invoices/' + e.invoice_id), _fetch('/payments?entity=parent')]); }
+    catch (err) { crmToast('讀不到發票或請款單：' + err.message, true); return; }
+    const kai = (pays.payments || []).filter((p) => p.source_invoice_id === e.invoice_id)
+        .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))[0];
+    const total = inv.amount_total || 0, remit = inv.commission_due || inv.commission || 0, fee = total - remit;   // commission_due＝後端照費率現算
+    if (!remit) {
+        // 後端算不出代開應匯＝這張發票不是代開類別（或面額 0）。列被分到「發票代開」是分類錯了，或這其實是案子的收款。
+        const ov = _payOverlay('請款 — 發票代開', `<div style="color:#ddd;line-height:1.7;">連結的發票「${_esc(inv.title || inv.invoice_number || '')}」類別是「${_esc(inv.category || '未填')}」，
+            不是代開發票，沒有「扣掉代開費」的應匯金額。${inv.project_id ? '這張發票掛在案子「' + _esc(inv.project_name || '') + '」，要幫案子裡的人請款請走費用配置。' : '若這是案子的收款，請先把發票掛上專案。'}</div>`,
+            `<button class="crm-btn crm-btn-secondary" data-close>關閉</button>
+             ${inv.project_id ? '<button class="crm-btn crm-btn-primary" data-act="proj">案子的費用配置</button>' : ''}`);
+        const pb = ov.querySelector('[data-act="proj"]');
+        if (pb) pb.addEventListener('click', () => { ov.remove(); _cashPayForProject(e, inv.project_id, inv.project_name || ''); });
+        return;
+    }
+    const body = `<div class="kv"><span class="k">發票</span><span>${_esc(inv.title || inv.invoice_number || '')}</span></div>
+        <div class="kv"><span class="k">面額（含稅）</span><span>$${_fmtNum(total)}</span></div>
+        <div class="kv"><span class="k">代開費</span><span>$${_fmtNum(fee)}</span></div>
+        <div class="kv"><span class="k">應匯給代開人</span><span style="color:#fca5a5;">$${_fmtNum(remit)}</span></div>
+        <div class="kv"><span class="k">代開人</span><span>${_esc(inv.applicant || '（發票沒填申請人）')}</span></div>
+        ${kai ? `<div style="color:#6ee7b7;font-size:12px;margin-top:8px;">請款單已在：${_esc(paymentLabel(kai))}（${_esc(kai.payment_status || '')}，$${_fmtNum(kai.amount || 0)}）—— 列的請款單欄會標註它。</div>`
+              : `<div style="color:#f59e0b;font-size:12px;margin-top:8px;">還沒有請款單（發票可能還沒標已收款）。按「開請款單」照上面的應匯金額開給代開人。</div>`}`;
+    const ov = _payOverlay('請款 — 發票代開', body,
+        `<button class="crm-btn crm-btn-secondary" data-close>關閉</button>
+         ${kai ? '' : '<button class="crm-btn crm-btn-primary" data-act="go">開請款單</button>'}`);
+    if (kai) return;
+    ov.querySelector('[data-act="go"]').addEventListener('click', async (ev) => {
+        if (!remit) { crmToast('發票沒有應匯金額（面額或代開費率不對）', true); return; }
+        const btn = ev.currentTarget; btn.disabled = true; btn.textContent = '處理中…';
+        try {
+            // 跟後端 _sync_passthrough_request 同一張的長相（source_invoice_id 是它的冪等鍵）
+            await _fetch('/payments', { method: 'POST', body: JSON.stringify(_payBody({
+                summary: inv.title || ('代開 ' + (inv.invoice_number || '')), amount: remit, category: '發票代開',
+                payee_name: inv.applicant || '', needs_invoice: 1, invoice_number: inv.invoice_number || '',
+                invoice_amount: total, project_id: inv.project_id || null, source_invoice_id: inv.id })) });
+            ov.remove();
+            crmToast('已開代開應匯請款單');
+            crmCacheInvalidate();
+            loadEntries({ cards: false });
+        } catch (err) { btn.disabled = false; btn.textContent = '開請款單'; crmToast(err.message || '請款失敗', true); }
+    });
+}
 
 /** 幫這個案子裡的人請款：列出費用配置，勾幾行開幾張應付款（帶 cost_line_id；已請過的標示、不能再勾）。 */
 async function _cashPayForProject(e, pid, pname, o = {}) {
@@ -860,7 +917,8 @@ function _rowHtml(e) {
                 cls: 'cash-col-inv cash-c-invoice',
                 pick: (e.deposit && !mine) ? `window._cashInvPick(event,'${e.id}')` : '',
                 hint: '連結發票（可搜尋、可多張）' })}
-            ${_linkCell(e.expense ? (e.payment_label || '') : '', {
+            ${/* 支出列＝可點連結；發票代開的收入列＝顯示那張代開應匯請款單（owner 2026-09-04「請款後標註哪一張」）*/ ''}
+            ${_linkCell(e.expense ? (e.payment_label || '') : (e.kai_payment_label ? `${e.kai_payment_label} $${_fmtNum(e.kai_payment_amount || 0)}（${e.kai_payment_status || ''}）` : ''), {
                 cls: 'cash-c-payment',
                 pick: e.expense ? `window._cashPayPick(event,'${e.id}')` : '',
                 hint: '連結請款單（可搜尋、可多張）' })}

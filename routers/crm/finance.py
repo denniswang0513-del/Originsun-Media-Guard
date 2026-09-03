@@ -827,6 +827,12 @@ async def get_invoice(invoice_id: str, request: Request):
     d["collection_checkable"] = bool(
         covered_from and inv.invoice_date and inv.invoice_date >= covered_from)
     d.update(collection_fields(inv.amount_total, coll, with_detail=True))
+    # 代開應匯（面額 − 代開費）：commission 是開票時存下的；還沒算（發票未標已收款）就照
+    # _sync_passthrough_request 同一條規則現算 —— 收支明細的「請款」視窗拿這個顯示／開單，
+    # 費率留在 core／settings，前端不猜 8%。非代開類別為 0。
+    from config import load_settings
+    d["commission_due"] = int(inv.commission or 0) or passthrough_commission(
+        inv.amount_total, inv.category, load_settings().get("invoice_fee_rates"))
     return d
 
 
