@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from core.auth import check_admin, check_admin_or_module, check_logged_in, payload_grants
 from core.ledger import not_mine   # 手機版只看母公司案（同 api_crm_mobile._company_projects）：私帳案的場次不列、也不准建
 from routers.crm._shared import _parse_shoot_date
+from services import google_calendar as gc
 from core.schemas import (CalendarConfigPayload, ShootCreate, ShootEquipmentPayload,
                           ShootStatusPayload, ShootUpdate)
 from core.shoot_logic import (CANCELLED, EQUIPMENT_STATES, SCHEDULED, SHOOT_STATUSES, checkout_state,
@@ -188,6 +189,13 @@ async def _row(session, shoot) -> dict:
     return (await _rows_for(session, [shoot]))[0]
 
 
+async def _project_or_404_not_mine(session, pid: str) -> str:
+    """場次只能掛母公司案（手機版看不到私帳案，同 api_crm_mobile._company_projects）。"""
+    if (await session.execute(select(CrmProject.id).where(CrmProject.id == pid, not_mine(CrmProject.entity)))).scalar() is None:
+        raise HTTPException(status_code=404, detail="找不到專案")
+    return pid
+
+
 async def _shoot_or_404(session, sid: str):
     s = (await session.execute(select(CrmShoot).where(CrmShoot.id == sid))).scalars().first()
     if not s:
@@ -228,7 +236,6 @@ async def _recompute_project_shoot_date(session, project_id: str) -> None:
 async def _sync_calendar(sid: str) -> dict:
     """best-effort 同步 Google 日曆，回**最新的 ShootRow**（寫入端點的唯一收尾，見 _finish）。
     憑證／日曆沒設就不動同步欄位（保持中性）；失敗只寫 sync_error。"""
-    from services import google_calendar as gc
     sa, cal_id, _err = await gc.load_config()
     factory = _require_factory()
     async with factory() as session:
@@ -257,6 +264,7 @@ async def _sync_calendar(sid: str) -> dict:
 async def _finish(sid: str) -> dict:
     """寫入端點的收尾：同步日曆 → 回 {"shoot": 最新 ShootRow}。"""
     return {"shoot": await _sync_calendar(sid)}
+
 
 def _apply_fields(s, req, partial: bool) -> None:
     """ShootCreate / ShootUpdate 的欄位落到 model；partial＝只動有給的欄位。"""
@@ -393,7 +401,6 @@ async def calendar_status(request: Request):
 
 
 async def _calendar_status() -> dict:
-    from services import google_calendar as gc
     sa, cal_id, err = await gc.load_config()
     factory = _require_factory()
     async with factory() as session:
@@ -427,7 +434,6 @@ async def calendar_config(req: CalendarConfigPayload, request: Request):
 @router.post("/calendar/test")
 async def calendar_test(request: Request):
     check_admin(request)
-    from services import google_calendar as gc
     sa, cal_id, err = await gc.load_config()
     if sa is None:
         return {"ok": False, "message": err}
@@ -452,8 +458,7 @@ async def create_shoot(req: ShootCreate, request: Request):
     factory = _require_factory()
     now = datetime.now(timezone.utc)
     async with factory() as session:
-        if (await session.execute(select(CrmProject.id).where(CrmProject.id == pid, not_mine(CrmProject.entity)))).scalar() is None:
-            raise HTTPException(status_code=404, detail="找不到專案")
+        await _project_or_404_not_mine(session, pid)
         s = CrmShoot(id=uuid.uuid4().hex, project_id=pid, status=SCHEDULED,
                      created_by=(user or {}).get("username") or "", created_at=now, updated_at=now)
         _apply_fields(s, req, partial=False)
@@ -474,10 +479,7 @@ async def update_shoot(sid: str, req: ShootUpdate, request: Request):
         s = await _shoot_or_404(session, sid)
         old_pid = s.project_id
         if "project_id" in req.model_fields_set and (req.project_id or "").strip():
-            npid = req.project_id.strip()
-            if (await session.execute(select(CrmProject.id).where(CrmProject.id == npid, not_mine(CrmProject.entity)))).scalar() is None:
-                raise HTTPException(status_code=404, detail="找不到專案")
-            s.project_id = npid
+            s.project_id = await _project_or_404_not_mine(session, req.project_id.strip())
         _apply_fields(s, req, partial=True)
         s.updated_at = datetime.now(timezone.utc)
         if "equipment_ids" in req.model_fields_set and req.equipment_ids is not None:
