@@ -46,6 +46,8 @@ let _mineCache = null;      // 最近一次 /mine（我的一天）
 let _projOpts = null;       // project_options（我的一天的專案 datalist）
 let _projectCache = null;   // 最近一次 /project（專案檔案頁）
 let _projectPid = '';       // 專案檔案頁：從 burn 表點進來帶的 project_id（撈整個案）；Sheet 案名進來就空
+let _projQ = '';            // 專案頁搜尋列（同時篩未對映表與 burn 表；前端篩、不重打 API）
+const _projHit = (s) => !_projQ || String(s || '').toLowerCase().includes(_projQ.trim().toLowerCase());
 let _compareNames = [];     // 類似專案並排：目前選的案名
 let _digestCache = null;    // GET /timesheets/digest
 let _ledgerCache = null;    // GET /timesheets/rows（總表：一個月所有列）
@@ -624,7 +626,8 @@ function _pctStyle(pct) {
 }
 
 function _burnTbodyHtml() {
-    const rows = _burnSorter.sorted((_summaryCache && _summaryCache.projects) || []).map(p => `
+    const rows = _burnSorter.sorted(((_summaryCache && _summaryCache.projects) || [])
+        .filter(p => _projHit(p.project_name) || _projHit(p.status))).map(p => `
         <tr>
             <td><span class="ts-link" data-ts-action="open-project" data-name="${esc(p.project_name || '')}" data-pid="${esc(p.project_id)}">${esc(p.project_name || p.project_id)}</span>
                 ${p.stale ? '<span class="ts-badge warn" title="進行中但 7 天沒工時">停滯</span>' : ''}</td>
@@ -636,21 +639,28 @@ function _burnTbodyHtml() {
             <td class="num" style="color:#777;">${p.rows}</td>
             <td style="color:#777;">${esc(p.last_entry || '')}</td>
         </tr>`).join('');
-    return rows || '<tr><td colspan="8" style="color:#666;text-align:center;">尚無已對映專案</td></tr>';
+    return rows || `<tr><td colspan="8" style="color:#666;text-align:center;">${_projQ ? '沒有符合的' : '尚無已對映專案'}</td></tr>`;
 }
 
+/** 專案頁的未對映表身（搜尋列會重畫它；內部桶不列）。 */
+function _unmatchedProjRowsHtml() {
+    const rows = ((_summaryCache && _summaryCache.unmatched) || []).filter(u => u.reason !== 'bucket' && _projHit(u.project_name));
+    return rows.map(u => `
+        <tr><td><span class="ts-link" data-ts-action="open-project" data-name="${esc(u.project_name)}">${esc(u.project_name)}</span>
+                <span class="ts-badge">未對映</span></td>
+            <td class="num">${u.hours_used}</td>
+            <td><button class="ts-btn ghost" data-ts-action="map" data-name="${esc(u.project_name)}" style="padding:2px 8px;">指定專案</button></td></tr>`).join('')
+        || '<tr><td colspan="3" style="color:#666;text-align:center;">沒有符合的</td></tr>';
+}
 function _renderProjects(s) {
     const totalHours = s.projects.reduce((a, p) => a + (p.hours_used || 0), 0)
         + s.unmatched.reduce((a, u) => a + (u.hours_used || 0), 0);
     const stale = s.projects.filter(p => p.stale).length;
     const unmatched = s.unmatched.filter(u => u.reason !== 'bucket');
-    const unmatchedRows = unmatched.map(u => `
-        <tr><td><span class="ts-link" data-ts-action="open-project" data-name="${esc(u.project_name)}">${esc(u.project_name)}</span>
-                <span class="ts-badge">未對映</span></td>
-            <td class="num">${u.hours_used}</td>
-            <td><button class="ts-btn ghost" data-ts-action="map" data-name="${esc(u.project_name)}" style="padding:2px 8px;">指定專案</button></td></tr>`).join('');
     return `${_head('專案：每案投入時數對預算。點案名進檔案頁（時間軸、分類組成、類似專案並排）。')}
-        <div style="margin-bottom:12px;">
+        <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="search" id="ts-proj-q" value="${esc(_projQ)}" placeholder="搜案名／狀態（兩張表一起篩）"
+                   style="background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;padding:6px 10px;min-width:260px;">
             <span class="ts-chip"><b>${s.total_rows}</b>總列數</span>
             <span class="ts-chip"><b>${s.projects.length}</b>已對映專案</span>
             <span class="ts-chip"><b>${unmatched.length}</b>未對映</span>
@@ -660,8 +670,8 @@ function _renderProjects(s) {
             <button class="ts-btn ghost" data-ts-action="recent" style="vertical-align:top;">最近同步列</button>
             <button class="ts-btn ghost" data-ts-action="export-month" style="vertical-align:top;">匯出本月 CSV</button>
         </div>
-        ${unmatchedRows ? `<div class="ts-card"><h3>未對映（${unmatched.length}）—— 對到案之後才有預算與 burn</h3>
-            <table><thead><tr><th>Sheet 案名</th><th class="num">時數</th><th></th></tr></thead><tbody>${unmatchedRows}</tbody></table></div>` : ''}
+        ${unmatched.length ? `<div class="ts-card"><h3>未對映（${unmatched.length}）—— 對到案之後才有預算與 burn</h3>
+            <table><thead><tr><th>Sheet 案名</th><th class="num">時數</th><th></th></tr></thead><tbody id="ts-unmatched-proj-body">${_unmatchedProjRowsHtml()}</tbody></table></div>` : ''}
         <div class="ts-card">
             <h3>📊 專案 Burn（消耗率高在前）</h3>
             <table id="ts-burn-table">
@@ -1024,6 +1034,13 @@ function _bind() {
     const dayInp = document.getElementById('ts-day');
     if (dayInp) dayInp.addEventListener('change', () => { if (dayInp.value) { _day = dayInp.value; refresh(); } });
     if (_view === 'mine' || _view === 'ledger') _fillProjectDatalist();
+    const pq = document.getElementById('ts-proj-q');
+    if (pq) pq.addEventListener('input', () => {
+        _projQ = pq.value;
+        _redrawTbody('ts-burn-table', _burnTbodyHtml, _burnSorter);
+        const ub = document.getElementById('ts-unmatched-proj-body');
+        if (ub) ub.innerHTML = _unmatchedProjRowsHtml();
+    });
     ['staff', 'project', 'source', 'q'].forEach(k => {
         const el = document.getElementById('ts-lf-' + k);
         if (el) el.addEventListener(k === 'q' ? 'input' : 'change', () => { _ledgerFilter[k] = el.value; _ledgerRedraw(); });
