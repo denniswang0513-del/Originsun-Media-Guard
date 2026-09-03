@@ -1364,7 +1364,10 @@ DEFAULT_MARGIN_MODEL = {
 
 def _copy_model(m: dict) -> dict:
     return {"daily_cost": float(m.get("daily_cost") or 0), "hours_per_day": float(m.get("hours_per_day") or 8),
-            "rows": [dict(r) for r in (m.get("rows") or [])]}
+            "rows": [dict(r) for r in (m.get("rows") or [])],
+            # 舊版本的案型 → 你的版本（CRM 與私帳曾有好幾套；owner 2026-09-03「以我的這個版本為主，
+            # 不同的讓我設定連結」）。統一時專案會被改成右邊；還沒改到的也照右邊算毛利。
+            "aliases": {str(k).strip(): str(v).strip() for k, v in (m.get("aliases") or {}).items() if str(k).strip()}}
 
 
 def load_margin_model(entity: str = "mine") -> dict:
@@ -1377,18 +1380,45 @@ def load_margin_model(entity: str = "mine") -> dict:
     return _copy_model(saved or DEFAULT_MARGIN_MODEL)
 
 
+def project_type_vocab(extra=()) -> list:
+    """案型字彙一份：settings.project_types（CRM「編輯案型」）∪ 毛利表的項目 ∪ 呼叫端補的（在用的）。
+    專案表、burn 表的案型下拉都吃這個，不各自維護一份。"""
+    # 以毛利表（你的版本）為主、settings.project_types 其次 —— 統一之後兩邊會是同一份
+    model = load_margin_model("mine")
+    try:
+        from config import load_settings
+        base = list(load_settings().get("project_types") or [])
+    except Exception:
+        base = []
+    out = []
+    for t in [*(r.get("type") for r in model.get("rows") or []), *base, *extra]:
+        t = (t or "").strip()
+        if t and t not in out:
+            out.append(t)
+    return out
+
+
 def save_margin_model(entity: str, model: dict) -> dict:
-    """整份取代（表很小；逐列 PATCH 反而讓前端與設定各講各的）。"""
+    """整份取代（表很小；逐列 PATCH 反而讓前端與設定各講各的）。
+    毛利表新出現的項目一併補進 settings.project_types —— 專案表的案型下拉才選得到。"""
     from config import load_settings, save_settings
     s = load_settings()
     s.setdefault("finance", {}).setdefault("margin_model", {})[entity] = _copy_model(model)
+    # CRM「編輯案型」那份字彙改成跟你的版本一樣（順序照表）—— 以你的版本為主
+    s["project_types"] = [t for t in ((r.get("type") or "").strip() for r in model.get("rows") or []) if t]
     save_settings(s)
     return load_margin_model(entity)
 
 
-def margin_for_type(model: dict, project_type: str):
-    """案型 → 預期毛利 %；表上沒有這個案型 → None（不猜）。"""
+def canonical_type(model: dict, project_type: str) -> str:
+    """舊案型 → 你的版本（沒對應就原樣）。"""
     t = (project_type or "").strip()
+    return (model.get("aliases") or {}).get(t, t)
+
+
+def margin_for_type(model: dict, project_type: str):
+    """案型 → 預期毛利 %；先把舊案型換成你的版本；表上沒有 → None（不猜）。"""
+    t = canonical_type(model, project_type)
     for r in model.get("rows") or []:
         if (r.get("type") or "").strip() == t:
             return float(r.get("margin_pct") or 0)

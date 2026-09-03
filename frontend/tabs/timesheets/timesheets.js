@@ -139,6 +139,7 @@ const _burnSorter = createSortable({
     getters: {
         project: p => p.project_name || p.project_id || '',
         status: p => p.status || '',
+        type: p => p.project_type || '',
         used: p => p.hours_used ?? '',
         budget: p => p.budget_hours ?? '',
         remaining: p => p.remaining ?? '',
@@ -200,6 +201,8 @@ export async function initTimesheetsTab() {
         if (t) { t.value = _normTime(t.value); _applyTimeRange(t.closest('tr')); }
         const cell = ev.target.closest('#ts-mine-add [data-f]');
         if (cell) _mineScheduleSave(cell.closest('tr'));       // 選單／時間／數字改了就存
+        const ts = ev.target.closest('select[data-set-type]');
+        if (ts) _setProjectType(ts.dataset.setType, ts.value);   // burn 表改案型
     });
     _content.addEventListener('keydown', _sheetKeydown);
     _content.addEventListener('input', (ev) => {
@@ -307,13 +310,22 @@ const _projLink = (name, pid) => (name || pid)
     : '<span style="color:#777;">(空白)</span>';   // 沒案名沒 id 的列沒有東西可以看
 const _srcTag = i => (i.source === 'manual' ? '' : '<span style="color:#666;"> · Sheet</span>');
 /** 逐日流水：[{date, items}] → 每天一段；primary＝每項第一個字（時間軸放人名、人員頁放案名）。 */
+/** 逐日流水＝四欄表（owner 2026-09-03「日期、人員、內容、使用時數」）；primary＝第二欄放什麼
+ *  （專案頁放人名、人員頁放案名可點）。同一天多列只在第一列印日期。 */
+function _dayLogRows(days, primary) {
+    return days.map(day => day.items.map((i, k) => `<tr>
+        <td style="white-space:nowrap;color:#888;">${k === 0 ? esc(_dayLabel(day.date)) : ''}</td>
+        <td style="white-space:nowrap;">${primary === 'project_name' ? _projLink(i.project_name, i.project_id) : `<span style="color:#eee;">${esc(i[primary] || '(空白)')}</span>`}</td>
+        <td style="color:#bbb;">${_typeTag(i)}${esc(i.task_note || '')}</td>
+        <td class="num" style="white-space:nowrap;">${_hoursLabel(i)}</td>
+    </tr>`).join('')).join('');
+}
+function _dayLogTable(bodyHtml, primary) {
+    return `<table class="ts-daylog"><thead><tr><th style="width:110px;">日期</th><th style="width:160px;">${primary === 'project_name' ? '專案' : '人員'}</th><th>內容</th><th class="num" style="width:110px;">使用時數</th></tr></thead>
+        <tbody>${bodyHtml}</tbody></table>`;
+}
 function _dayLog(days, primary) {
-    return days.map(day => `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid #2c2c2c;font-size:12.5px;">
-        <span style="width:100px;color:#888;white-space:nowrap;">${esc(_dayLabel(day.date))}</span>
-        <div style="flex:1;">${day.items.map(i => `<div>${_typeTag(i)}${primary === 'project_name' ? _projLink(i.project_name, i.project_id) : `<span style="color:#eee;">${esc(i[primary] || '(空白)')}</span>`}
-            <span style="color:#bbb;"> ${esc(i.task_note || '')}</span>
-            <span style="float:right;">${_hoursLabel(i)}</span></div>`).join('')}</div>
-    </div>`).join('') || '<div style="color:#666;">還沒有紀錄</div>';
+    return days.length ? _dayLogTable(_dayLogRows(days, primary), primary) : '<div style="color:#666;">還沒有紀錄</div>';
 }
 
 // ── 今日：每日看板（每個人每天做了什麼；實際為主，計畫加分；不排名、不標紅）──
@@ -635,6 +647,14 @@ function _pctStyle(pct) {
     return 'background:#064e3b;color:#6ee7b7;';
 }
 
+/** burn 表的案型下拉：字彙＝/summary 回的 project_types（settings ∪ 毛利表 ∪ 在用的）。改了就 PUT 專案，建議預算跟著重算。 */
+function _burnTypeSelect(p) {
+    const cur = p.project_type || '';
+    const opts = (_summaryCache && _summaryCache.project_types) || [];
+    return `<select data-set-type="${esc(p.project_id)}" title="案型（預期毛利／建議預算照這個算）"
+                style="background:#1a1a1a;border:1px solid ${cur ? '#333' : '#78350f'};color:${cur ? '#ccc' : '#f59e0b'};border-radius:4px;padding:2px 4px;font-size:12px;max-width:130px;">
+        <option value="">— 案型 —</option>${opts.map(t => `<option value="${esc(t)}"${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+}
 function _burnTbodyHtml() {
     const rows = _burnSorter.sorted(((_summaryCache && _summaryCache.projects) || [])
         .filter(p => _projHit(p.project_name) || _projHit(p.status))).map(p => `
@@ -642,6 +662,7 @@ function _burnTbodyHtml() {
             <td><span class="ts-link" data-ts-action="open-project" data-name="${esc(p.project_name || '')}" data-pid="${esc(p.project_id)}">${esc(p.project_name || p.project_id)}</span>
                 ${p.stale ? '<span class="ts-badge warn" title="進行中但 7 天沒工時">停滯</span>' : ''}</td>
             <td style="color:#888;">${esc(p.status || '')}</td>
+            <td>${_burnTypeSelect(p)}</td>
             <td class="num">${p.hours_used}</td>
             <td class="num">${p.budget_hours ?? (p.suggested_hours != null
                 ? `<span class="ts-link" data-ts-action="budget" data-pid="${esc(p.project_id)}" data-cur="${p.suggested_hours}" title="依私帳設定的預期毛利（${esc(p.project_type || '')}）與日成本算的建議，點一下就套用">建議 ${p.suggested_hours}</span>`
@@ -651,7 +672,7 @@ function _burnTbodyHtml() {
             <td class="num" style="color:#777;">${p.rows}</td>
             <td style="color:#777;">${esc(p.last_entry || '')}</td>
         </tr>`).join('');
-    return rows || `<tr><td colspan="8" style="color:#666;text-align:center;">${_projQ ? '沒有符合的' : '尚無已對映專案'}</td></tr>`;
+    return rows || `<tr><td colspan="9" style="color:#666;text-align:center;">${_projQ ? '沒有符合的' : '尚無已對映專案'}</td></tr>`;
 }
 
 /** 專案頁的未對映表身（搜尋列會重畫它；內部桶不列）。 */
@@ -690,7 +711,7 @@ function _renderProjects(s) {
             <h3>📊 專案 Burn（消耗率高在前）</h3>
             <table id="ts-burn-table">
                 <thead><tr>
-                    ${sortableTh('project', '專案')}${sortableTh('status', '狀態')}${sortableTh('used', '已投入(h)', 'class="num"')}${sortableTh('budget', '預算(h)', 'class="num"')}
+                    ${sortableTh('project', '專案')}${sortableTh('status', '狀態')}${sortableTh('type', '案型')}${sortableTh('used', '已投入(h)', 'class="num"')}${sortableTh('budget', '預算(h)', 'class="num"')}
                     ${sortableTh('remaining', '剩餘(h)', 'class="num"')}${sortableTh('pct', '消耗率', 'class="num"')}${sortableTh('rows', '列數', 'class="num"')}${sortableTh('last', '最後填報')}
                 </tr></thead>
                 <tbody>${_burnTbodyHtml()}</tbody>
@@ -700,6 +721,14 @@ function _renderProjects(s) {
 }
 
 // ── 專案彈窗：在看板／人員頁／總表點案名，就地看這個案的執行狀態（不離開目前頁）──
+/** 改案型（PUT CRM 專案，部分更新）→ 建議預算跟著重算 → 重畫 burn 表。 */
+async function _setProjectType(pid, type) {
+    try {
+        await tfetch('/api/v1/crm/projects/' + encodeURIComponent(pid), { method: 'PUT', body: { project_type: type } });
+        _summaryCache = null;
+        refresh();
+    } catch (e) { alert('案型沒存：' + (e.message || e)); }
+}
 async function _openProjectModal(name, pid) {
     let bg = document.getElementById('ts-proj-modal');
     if (!bg) {
@@ -740,8 +769,9 @@ function _dayLogByMonth(days, primary) {
         g.days.push(day);
         g.hours += day.items.reduce((a, i) => a + (i.hours || 0), 0);
     }
-    return groups.map(g => `<div style="margin:10px 0 4px;padding:4px 8px;background:#262626;border-radius:4px;color:#ddd;font-size:12.5px;">
-            <b>${esc(g.m)}</b><span style="color:#888;"> ｜ ${g.days.length} 天 ｜ ${Math.round(g.hours * 10) / 10} h</span></div>${_dayLog(g.days, primary)}`).join('');
+    // 一張表：每月一列小計當分隔，底下接那個月的逐日列
+    return _dayLogTable(groups.map(g => `<tr class="ts-month"><td colspan="4" style="background:#262626;color:#ddd;padding:6px 8px;">
+            <b>${esc(g.m)}</b><span style="color:#888;"> ｜ ${g.days.length} 天 ｜ ${Math.round(g.hours * 10) / 10} h</span></td></tr>${_dayLogRows(g.days, primary)}`).join(''), primary);
 }
 function _renderProject(d, modal = false) {
     const pct = d.pct == null ? '—' : d.pct + '%';

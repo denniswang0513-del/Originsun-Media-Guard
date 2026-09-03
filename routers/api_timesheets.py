@@ -723,7 +723,9 @@ async def burn_summary(request: Request):
                       **explain_miss(n or "", lk)}       # candidates 已是 {id,name,client}
                      for n, h, c in unmatched]
     # 已對映＋未對映正好是整張表，不用再 count 一次
+    from core.finance_logic import project_type_vocab
     return {"projects": items, "unmatched": out_unmatched,
+            "project_types": project_type_vocab(i["project_type"] for i in items),
             "total_rows": sum(i["rows"] for i in items) + sum(c for _n, _h, c in unmatched)}
 
 

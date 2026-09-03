@@ -1213,6 +1213,12 @@ class MarginModelPut(BaseModel):
     daily_cost: float
     hours_per_day: float = 8
     rows: List[MarginModelRow] = []
+    aliases: dict = {}       # 舊案型 → 你的版本
+
+
+class MarginUnifyPayload(BaseModel):
+    """統一案型：{舊案型: 你的版本}，專案（兩本帳）一併改過去。"""
+    aliases: dict = {}
 
 
 class BookkeepingFeePut(BaseModel):

@@ -449,6 +449,7 @@ function _marginHtml() {
             <thead><tr style="color:#888;text-align:left;"><th style="padding:4px 6px;width:110px;">類別</th><th style="padding:4px 6px;">項目（案型）</th><th style="padding:4px 6px;width:100px;">預期毛利 %</th><th style="padding:4px 6px;">說明</th><th></th></tr></thead>
             <tbody id="finset-margin-rows">${rows}</tbody>
         </table>
+        ${_unifyHtml()}
         <div style="display:flex;gap:8px;margin-top:10px;">
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finSet.marginAddRow()">＋ 一列</button>
             <span style="flex:1;"></span>
@@ -456,6 +457,44 @@ function _marginHtml() {
         </div>
     </div>`;
 }
+
+/** 統一案型：CRM 與私帳有好幾套版本（owner 2026-09-03「以我的這個版本為主，不同的讓我設定連結」）。
+ *  列出專案在用、但不在上面表裡的案型，每個對到你的版本，一鍵把專案改過去。 */
+function _unifyHtml() {
+    const canon = (_margin.rows || []).map(r => r.type).filter(Boolean);
+    const have = new Set(canon);
+    const outside = (_margin.in_use || []).filter(u => u.type && !have.has(u.type));
+    if (!outside.length) return `<div style="color:#6ee7b7;font-size:11.5px;margin-top:8px;">專案在用的案型都在你的表裡（CRM 與私帳已統一）。</div>`;
+    const opt = (u) => canon.map(t => `<option value="${esc(t)}"${(_margin.aliases || {})[u.type] === t ? ' selected' : ''}>${esc(t)}</option>`).join('');
+    return `
+    <div style="margin-top:12px;border-top:1px solid #2a2a2a;padding-top:10px;">
+        <div style="color:#f59e0b;font-size:12.5px;margin-bottom:6px;"><b>統一案型</b> —— 這些案型在專案上用著，但不在你的表裡（CRM 與私帳各有一套舊版本）。對到你的版本，按套用就把專案改過去。</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+            <thead><tr style="color:#888;text-align:left;"><th style="padding:4px 6px;">舊案型</th><th style="padding:4px 6px;width:120px;">幾個案</th><th style="padding:4px 6px;">對到你的版本</th></tr></thead>
+            <tbody>${outside.map(u => `<tr>
+                <td style="padding:4px 6px;color:#eee;">${esc(u.type)}</td>
+                <td style="padding:4px 6px;color:#9ca3af;">${u.count}（${Object.entries(u.entities || {}).map(([e, n]) => `${e === 'mine' ? '私帳' : 'CRM'} ${n}`).join('、')}）</td>
+                <td style="padding:4px 6px;"><select class="crm-input" data-unify="${esc(u.type)}" style="max-width:220px;">
+                    <option value="">— 先不動 —</option>${opt(u)}</select></td></tr>`).join('')}</tbody>
+        </table>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+            <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finSet.unifyApply(this)">套用統一（改專案的案型）</button>
+            <span style="color:#6b7280;font-size:11px;">沒選的先不動；之後拉進來的舊名也會照對應算毛利。</span>
+        </div>
+    </div>`;
+}
+_fs.unifyApply = async (btn) => {
+    const aliases = {};
+    document.querySelectorAll('#finset-margin-card select[data-unify]').forEach(sel => { if (sel.value) aliases[sel.dataset.unify] = sel.value; });
+    if (!Object.keys(aliases).length) { finToast('先把舊案型對到你的版本', true); return; }
+    if (!confirm(`把 ${Object.keys(aliases).length} 種舊案型的專案改成你的版本？（CRM 與私帳一起）`)) return;
+    btn.disabled = true;
+    try {
+        const r = await finFetch('/margin-model/unify', { method: 'POST', body: JSON.stringify({ aliases }) });
+        finToast(`已改 ${r.changed_total} 個案的案型` + (r.still_outside.length ? `；還有沒對應的：${r.still_outside.join('、')}` : ''));
+        _fs.reload();
+    } catch (e) { finToast(e.message, true); btn.disabled = false; }
+};
 
 /** 表格目前的輸入 → rows（加列／刪列前先收，才不會把打到一半的洗掉）。 */
 function _marginReadRows() {
@@ -487,7 +526,7 @@ _fs.saveMargin = async (btn) => {
     if (!(daily_cost > 0)) { finToast('員工成本／天要大於 0', true); return; }
     btn.disabled = true;
     try {
-        _margin = await finFetch('/margin-model', { method: 'PUT', body: JSON.stringify({ daily_cost, hours_per_day, rows }) });
+        _margin = await finFetch('/margin-model', { method: 'PUT', body: JSON.stringify({ daily_cost, hours_per_day, rows, aliases: _margin.aliases || {} }) });
         finToast(`已存：日成本 $${fmtNum(daily_cost)}、${rows.length} 種案型`);
         _marginRedraw();
     } catch (e) {

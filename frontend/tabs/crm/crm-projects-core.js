@@ -24,6 +24,7 @@ const _sorter = createSortable({
         name:   p => (p.name || '').toLowerCase(),
         client: p => (p.client_short_name || '').toLowerCase(),
         am:     p => (p.am_username || '').toLowerCase(),
+        type:   p => (p.project_type || ''),
         date:   p => p.start_date || '',
     },
 });
@@ -300,6 +301,7 @@ export function renderList() {
                 ? _esc(p.client_short_name)
                 : '<span class="crm-muted">待補客戶</span>'}</div>
             <div class="crm-row-status">${_badge(p.status)}${_propSubBadge(p)}</div>
+            <div class="crm-row-type">${_typeSelectHtml(p)}</div>
             <div class="crm-row-am">
                 ${p.am_username ? _avatar(p.am_username) + _esc(p.am_username) : '<span class="crm-muted">—</span>'}
             </div>
@@ -308,6 +310,32 @@ export function renderList() {
         </div>
     `).join('');
 }
+
+// ── 案型：列上直接改（owner 2026-09-03「在專案表裡頭可以調整設定案型」）──
+// 案型是私帳「預期毛利」表的鍵：改了案型，工時預算的建議就跟著換。字彙＝settings.project_types
+//（「編輯案型」那份）；列上目前的值不在清單裡也照列，不會被洗掉。沒案型的列標橘框提醒。
+function _typeSelectHtml(p) {
+    const cur = p.project_type || '';
+    const opts = [...new Set([..._projectTypes, ...(cur ? [cur] : [])])];
+    return `<select class="${cur ? '' : 'is-empty'}" title="案型（預期毛利／工時預算建議照這個算）"
+                onclick="event.stopPropagation()" onchange="window._projSetType('${p.id}', this)">
+        <option value="">— 案型 —</option>${opts.map(t => `<option value="${_esc(t)}"${t === cur ? ' selected' : ''}>${_esc(t)}</option>`).join('')}</select>`;
+}
+window._projSetType = async (id, sel) => {
+    const p = state.projects.find(x => x.id === id);
+    const prev = p ? p.project_type : '';
+    if (p) p.project_type = sel.value;
+    sel.classList.toggle('is-empty', !sel.value);
+    try {
+        await _fetch(`/projects/${id}`, { method: 'PUT', body: JSON.stringify({ project_type: sel.value }) });
+        crmCacheInvalidate();
+        crmToast(sel.value ? `案型改為「${sel.value}」` : '案型已清空');
+    } catch (e) {
+        if (p) p.project_type = prev;
+        sel.value = prev || '';
+        crmToast(e.message || '案型沒存', true);
+    }
+};
 
 // ── Selection & Close ───────────────────────────────────────
 

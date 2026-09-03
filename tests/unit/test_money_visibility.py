@@ -387,6 +387,9 @@ def test_every_project_enumeration_decides_about_mine():
         # 工時：查表在 services/timesheet_lookup（is_mine 表態）；router 裡剩的
         # select(CrmProject) 是 burn 摘要與預算回寫，端點整支守 _require_mine_admin
         "routers/api_timesheets.py",
+        # 預期毛利表的 GET／統一案型：只 group by 案型算幾個案（不回名字不回錢），且只算請求者
+        # 看得到的帳本（_ledger_scope＝core.ledger.allowed_entities）
+        "routers/api_finance.py",
         # 手填的專案下拉（進行中案的 id／名，不帶錢）：CRM tab（timesheets 模組）與員工頁
         # /me/timesheet_options（me_finance）都用；員工填工時本來就要選到私帳案名（對映只認私帳）
         "services/timesheet_manual.py",

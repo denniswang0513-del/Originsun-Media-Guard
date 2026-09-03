@@ -2,7 +2,7 @@
 """預期毛利 × 人力日成本 → 工時預算（owner 2026-09-03：「我的員工成本一天 4000，專案的使用率是用這個
 基礎算出來的，這一塊在我的私帳設定」）。規則只有 core.finance_logic 一份；burn 表、專案檔案頁、
 財務摘要、設定頁都吃它。"""
-from core.finance_logic import DEFAULT_MARGIN_MODEL, margin_for_type, suggested_budget_hours
+from core.finance_logic import DEFAULT_MARGIN_MODEL, canonical_type, margin_for_type, suggested_budget_hours
 from tests.unit._srcscan import code_only, func_body, repo_src
 
 
@@ -13,6 +13,11 @@ def test_default_model_is_owners_table():
                     "劇情片": 40, "客製紀實": 20, "動態設計": 20, "其他": 30, "錄混音": 30}
     assert margin_for_type(DEFAULT_MARGIN_MODEL, "媒體顧問") == 60
     assert margin_for_type(DEFAULT_MARGIN_MODEL, "沒有這種") is None      # 不猜
+    # 舊版本的案型（CRM 那套：廣告／活動紀實…）對到你的版本後照右邊算
+    m = {**DEFAULT_MARGIN_MODEL, "aliases": {"廣告": "商業廣告", "活動紀實": "活動紀錄"}}
+    assert canonical_type(m, "廣告") == "商業廣告" and canonical_type(m, "紀實影片") == "紀實影片"
+    assert margin_for_type(m, "廣告") == 40 and margin_for_type(m, "活動紀實") == 50
+    assert margin_for_type(m, "MV") is None                                # 沒對應就沒有
 
 
 def test_budget_hours_formula():
@@ -39,6 +44,10 @@ def test_every_surface_uses_the_one_rule():
     costs = code_only(repo_src("routers/crm/costs.py"))
     assert '"suggested_budget_hours": _suggested_hours' in func_body(costs, "async def project_financial_summary(")
     fin = code_only(repo_src("routers/api_finance.py"))
+    # 統一：full 守衛、對應目標必須在表裡、兩本帳的專案一起改、對應記回模型
+    un = func_body(fin, "async def unify_project_types(")
+    assert '_guard(request, entity, level="full")' in un and "update(CrmProject).where(CrmProject.project_type == old)" in un
+    assert 'model["aliases"]' in un and "save_margin_model(ent, model)" in un
     assert "_guard(request, entity)" in func_body(fin, "async def get_margin_model(")
     assert '_guard(request, entity, level="full")' in func_body(fin, "async def put_margin_model(")
     js = repo_src("frontend/tabs/finance/subviews/settings.js")

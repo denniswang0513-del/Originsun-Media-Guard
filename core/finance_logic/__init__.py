@@ -98,5 +98,5 @@ from ._flows import (  # noqa: F401
     cash_entry_activity, cashflow_lines, client_concentration, merge_cf,
     paired_transfer_ids, runway_months, statement_interpretation,
     statement_warnings, transfer_pairs)
-from ._core import (DEFAULT_MARGIN_MODEL, load_margin_model, margin_for_type,  # noqa: F401,E402
-                    save_margin_model, suggested_budget_hours)
+from ._core import (DEFAULT_MARGIN_MODEL, canonical_type, load_margin_model, margin_for_type,  # noqa: F401,E402
+                    project_type_vocab, save_margin_model, suggested_budget_hours)

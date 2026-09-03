@@ -152,6 +152,7 @@
 
 .crm-col-name    { flex: 1.5; min-width: 60px; }
 .crm-col-status  { flex: 0.6; min-width: 50px; }
+.crm-col-type    { flex: 0.8; min-width: 90px; }
 .crm-col-am      { flex: 0.8; min-width: 40px; }
 .crm-col-proj    { flex: 0.3; text-align: center; min-width: 30px; }
 .crm-col-revenue { flex: 0.8; text-align: right; min-width: 60px; }
@@ -182,6 +183,9 @@
 
 .crm-row-name { flex: 1.5; min-width: 60px; font-weight: 600; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .crm-row-status { flex: 0.6; min-width: 50px; }
+.crm-row-type { flex: 0.8; min-width: 90px; }
+.crm-row-type select { width: 100%; max-width: 150px; background: #1a1a1a; border: 1px solid #333; color: #ccc; border-radius: 4px; padding: 2px 4px; font-size: 12px; }
+.crm-row-type select.is-empty { color: #f59e0b; border-color: #78350f; }
 .crm-row-am { flex: 0.8; min-width: 40px; display: flex; align-items: center; gap: 4px; color: #9ca3af; font-size: 12px; overflow: hidden; white-space: nowrap; }
 .crm-row-am span { overflow: hidden; text-overflow: ellipsis; }
 .crm-row-proj { flex: 0.3; min-width: 30px; text-align: center; font-size: 13px; color: #e0e0e0; }

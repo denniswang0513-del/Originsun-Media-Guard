@@ -50,7 +50,7 @@ from core.finance_logic import (BOOKKEEPING_EXTRA_ON_MONTH,
                                 statement_line_status, today_start,
                                 workbench_summary)
 from core.schemas import (BankAccountPayload,
-                          BookkeepingFeePut, MarginModelPut,
+                          BookkeepingFeePut, MarginModelPut, MarginUnifyPayload,
                           BulkAssignAccountPayload,
                           TransferFeeRecognize,
                           FinanceAdjustmentPayload, FinanceCategoryMapPut,
@@ -302,13 +302,68 @@ async def recognize_transfer_fees(payload: TransferFeeRecognize, request: Reques
                        + (f"；{skipped} 組已經拆好或配不到，沒有動" if skipped else "")}
 
 
+def _ledger_scope(request: Request, level: str = "view") -> list:
+    """請求者看得到（或寫得到）的帳本集合 —— 跨帳本的統計／改寫只涵蓋這些。"""
+    from core.auth import _extract_token
+    from core.ledger import allowed_entities
+    return sorted(allowed_entities(_extract_token(request), level=level)) or ["parent"]
+
+
 @router.get("/margin-model")
 async def get_margin_model(request: Request, entity: str = ""):
     """預期毛利表＋人力日成本（owner 2026-09-03：「我的員工成本一天 4000，專案的使用率是用這個
     基礎算出來的，這一塊在我的私帳設定」）。出廠預設＝owner 的表。"""
     ent = _guard(request, entity)
-    from core.finance_logic import load_margin_model
-    return {"entity": ent, **load_margin_model(ent)}
+    from sqlalchemy import func, select
+    from core.finance_logic import load_margin_model, project_type_vocab
+    from db.models import CrmProject
+    scope = _ledger_scope(request)        # 私帳的案只有看得到私帳的人才算進去（統一是兩本帳一起，但要看得到才算）
+    factory = _factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmProject.project_type, CrmProject.entity, func.count(CrmProject.id))
+            .where(CrmProject.entity.in_(scope))
+            .group_by(CrmProject.project_type, CrmProject.entity))).all()
+    in_use: dict = {}
+    for t, e, n in rows:
+        d = in_use.setdefault((t or "").strip(), {"type": (t or "").strip(), "count": 0, "entities": {}})
+        d["count"] += n
+        d["entities"][e or "parent"] = d["entities"].get(e or "parent", 0) + n
+    return {"entity": ent, **load_margin_model(ent), "project_types": project_type_vocab(),
+            "in_use": sorted(in_use.values(), key=lambda x: -x["count"])}
+
+
+@router.post("/margin-model/unify")
+async def unify_project_types(payload: MarginUnifyPayload, request: Request, entity: str = ""):
+    """統一案型（owner 2026-09-03：CRM 跟私帳有多套版本，以他的表為主）：把專案的舊案型改成對應的
+    你的版本（兩本帳一起），對應記進模型 aliases（之後拉進來的舊名也照右邊算毛利），
+    CRM「編輯案型」的字彙改成你的版本。"""
+    ent = _guard(request, entity, level="full")
+    from sqlalchemy import select, update
+    from core.finance_logic import load_margin_model, save_margin_model
+    from db.models import CrmProject
+    model = load_margin_model(ent)
+    canon = {(r.get("type") or "").strip() for r in model["rows"]}
+    aliases = {str(k).strip(): str(v).strip() for k, v in (payload.aliases or {}).items() if str(k).strip() and str(v).strip()}
+    bad = sorted(v for v in aliases.values() if v not in canon)
+    if bad:
+        raise HTTPException(status_code=422, detail=f"對應的目標要在你的案型表裡：{bad}")
+    changed = {}
+    scope = _ledger_scope(request, level="full")      # 只改看得到、寫得到的那幾本帳的專案
+    factory = _factory_or_503()
+    async with factory() as session:
+        for old, new in aliases.items():
+            if old == new:
+                continue
+            res = await session.execute(update(CrmProject).where(CrmProject.project_type == old)
+                                        .where(CrmProject.entity.in_(scope)).values(project_type=new))
+            changed[old] = res.rowcount or 0
+        await session.commit()
+        left = (await session.execute(select(CrmProject.project_type).where(CrmProject.entity.in_(scope)).distinct())).scalars().all()
+    model["aliases"] = {**model.get("aliases", {}), **aliases}
+    save_margin_model(ent, model)
+    return {"status": "ok", "changed": changed, "changed_total": sum(changed.values()),
+            "still_outside": sorted(t for t in ((x or "").strip() for x in left) if t and t not in canon)}
 
 
 @router.put("/margin-model")
