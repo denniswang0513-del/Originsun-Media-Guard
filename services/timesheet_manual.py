@@ -78,13 +78,20 @@ async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> d
 
 async def project_options(session, staff_name: str | None = None) -> list:
     """補登用專案下拉：進行中（製作/結案）+ 該員最近填過的專案名。"""
-    from db.models import CrmProject, Timesheet
+    from db.models import Client, CrmProject, Timesheet
     rows = (await session.execute(
-        select(CrmProject.id, CrmProject.name)
+        select(CrmProject.id, CrmProject.name, Client.short_name, CrmProject.start_date, CrmProject.shoot_date, CrmProject.created_at)
+        .outerjoin(Client, Client.id == CrmProject.client_id)
         .where(CrmProject.status.in_(("製作", "結案")))
         .order_by(CrmProject.name)
     )).all()
-    opts = [{"id": pid, "name": n or ""} for pid, n in rows]
+    opts = []
+    for pid, n, client, sd, shd, cd in rows:
+        d = sd or shd or cd
+        year = str(d.year) if d else ""
+        # label＝「年份 客戶 案名」（owner 2026-09-03：跟零用金一樣的呈現）；前端用它當下拉的字，存的時候對回 id
+        opts.append({"id": pid, "name": n or "", "client": client or "", "year": year,
+                     "label": " ".join(x for x in (year, client or "", n or "") if x)})
     if staff_name:
         have = {o["name"] for o in opts}
         recent = (await session.execute(
@@ -94,7 +101,7 @@ async def project_options(session, staff_name: str | None = None) -> list:
             .order_by(safunc.max(Timesheet.work_date).desc())
             .limit(10)
         )).all()
-        opts.extend({"id": None, "name": p} for p, _ in recent if p and p not in have)
+        opts.extend({"id": None, "name": p, "client": "", "year": "", "label": p} for p, _ in recent if p and p not in have)
     return opts
 
 

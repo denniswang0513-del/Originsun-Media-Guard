@@ -398,12 +398,14 @@ function _applyTimeRange(tr) {
 // 一列＝一個工作項；Enter／↓／↑ 在同一欄上下走，走到底自動多一列；在最後一列打字也會自動多一列。
 const _SHEET_COLS = [['project', '專案'], ['type', '分類'], ['note', '做了什麼'], ['t0', '起'], ['t1', '訖'], ['hours', '實際 h'], ['planned', '計畫 h'], ['state', '']];
 function _newRowHtml(v = {}, o = {}) {
-    const ro = o.readonly ? ' disabled' : '';
+    // Sheet 列：input 用 readonly（文字還能選取、複製貼到下一列）；select 沒有 readonly 只能 disabled
+    const ro = o.readonly ? ' readonly' : '';
+    const rosel = o.readonly ? ' disabled' : '';
     const t = 'type="text" inputmode="numeric" maxlength="5" placeholder="09:00" autocomplete="off"';
     return `<tr class="ts-mine-row"${o.id ? ` data-id="${esc(o.id)}"` : ''}${o.readonly ? ' data-readonly="1"' : ''}>
         <td class="ts-sheet-num"></td>
         <td><input list="ts-proj-list" data-f="project" value="${esc(v.project || '')}"${ro}></td>
-        <td>${_typeSelect(v.work_type || '', `data-f="type"${ro}`)}</td>
+        <td>${_typeSelect(v.work_type || '', `data-f="type"${rosel}`)}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}"${ro}></td>
         <td><input ${t} data-f="t0" value="${esc(v.t0 || '')}"${ro}></td>
         <td><input ${t} data-f="t1" value="${esc(v.t1 || '')}"${ro}></td>
@@ -459,10 +461,10 @@ function _renderMine(d, err) {
         ${_dayNav(`<span id="ts-mine-chips">${_mineChips(d)}</span><span style="color:#777;font-size:12px;">${esc(d.staff_name)}</span>`)}
         <div class="ts-card" style="border-color:#3b82f6;">
             <h3>${esc(_dayLabel(d.date))} 的工作項</h3>
-            ${_sheetTableHtml(items.map(_mineRowHtml).join('') + _newRowHtml() + _newRowHtml() + _newRowHtml())}
+            ${_sheetTableHtml(items.map(_mineRowHtml).join('') + _newRowHtml().repeat(5))}
             <datalist id="ts-proj-list"></datalist>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
-                <button class="ts-btn ghost" data-ts-action="row-add">＋ 一列</button>
+                <button class="ts-btn ghost" data-ts-action="row-add">＋ 五列</button>
                 <button class="ts-btn ghost" data-ts-action="copy-yesterday" ${(d.yesterday || []).length ? '' : 'disabled'}>複製昨天（${(d.yesterday || []).length} 列）</button>
                 <span id="ts-mine-result" style="font-size:12px;color:#888;"></span>
             </div>
@@ -471,11 +473,17 @@ function _renderMine(d, err) {
                 Sheet 拉進來的列會標「Sheet」、不能改。</div>
         </div>`;
 }
+/** 專案格打的字 → {project_id, project_name}：對得到下拉的「年份 客戶 案名」或案名就帶 id；對不到就照打的字送（後端再對映）。 */
+function _projectFromInput(text) {
+    const t = (text || '').trim();
+    const hit = (_projOpts || []).find(p => p.id && (p.label === t || p.name === t));
+    return hit ? { project_id: hit.id, project_name: hit.name } : { project_id: null, project_name: t };
+}
 /** 一列輸入 → 送給後端的 body（我的一天新增／改列、總表改列同一形狀；沒日期欄就用當天）。 */
 function _rowBody(tr) {
     const v = f => tr.querySelector(`[data-f="${f}"]`)?.value ?? '';
     return {
-        work_date: v('date') || _day, project_name: v('project').trim(), work_type: v('type') || null,
+        work_date: v('date') || _day, ..._projectFromInput(v('project')), work_type: v('type') || null,
         task_note: v('note'), planned_hours: v('planned') ? parseFloat(v('planned')) : null,
         hours: v('hours') ? parseFloat(v('hours')) : null,
     };
@@ -1093,7 +1101,8 @@ async function _fillProjectDatalist() {
     const dl = document.getElementById('ts-proj-list');
     if (!dl || dl.children.length) return;
     const opts = await _projectOptions();
-    dl.innerHTML = opts.map(p => `<option value="${esc(p.name)}"></option>`).join('');
+    // 顯示「年份 客戶 案名」（同零用金）；存檔時 _projectFromInput 對回 id
+    dl.innerHTML = opts.map(p => `<option value="${esc(p.label || p.name)}"></option>`).join('');
 }
 
 /** 每次整頁重繪後：輸入框的 change（按鈕的 click 走 initTimesheetsTab 的委派，不在這裡綁）。 */
@@ -1227,7 +1236,7 @@ async function _onAction(btn) {
             }
             if (act === 'row-add') {
                 const tb = document.querySelector('#ts-mine-add tbody');
-                if (tb) tb.insertAdjacentHTML('beforeend', _newRowHtml());
+                if (tb) tb.insertAdjacentHTML('beforeend', _newRowHtml().repeat(5));   // owner：一次五列
                 return;
             }
             if (act === 'row-remove') return _mineRemove(btn.closest('tr'));

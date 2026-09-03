@@ -301,7 +301,7 @@ export function renderList() {
                 ? _esc(p.client_short_name)
                 : '<span class="crm-muted">待補客戶</span>'}</div>
             <div class="crm-row-status">${_badge(p.status)}${_propSubBadge(p)}</div>
-            <div class="crm-row-type">${_typeSelectHtml(p)}</div>
+            <div class="crm-row-type" onclick="event.stopPropagation()">${_typeSelectHtml(p)}</div>
             <div class="crm-row-am">
                 ${p.am_username ? _avatar(p.am_username) + _esc(p.am_username) : '<span class="crm-muted">—</span>'}
             </div>
