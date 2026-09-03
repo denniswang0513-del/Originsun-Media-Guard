@@ -64,7 +64,7 @@ def test_only_income_rows_get_the_invoice_picker():
     # 錨在發票欄那個 cell 的 cls 上（含 cash-c-invoice 那個）；原本錨的字串早已不存在，靠「檔案裡第一個 </div>」矇對，
     # 2026-09-04 加了請款浮層之後就被更前面的 </div> 截斷。
     seg = js.split("cls: 'cash-col-inv cash-c-invoice',")[-1].split("</div>")[0]
-    assert "e.deposit ?" in seg
+    assert "e.deposit && !mine" in seg or "e.deposit ?" in seg     # 只有收入列（且不是私帳）才有發票挑選
 
 
 def test_the_picker_says_it_does_not_touch_amounts():
