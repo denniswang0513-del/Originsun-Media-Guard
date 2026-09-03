@@ -21,25 +21,25 @@ function formHtml() {
       <div class="m-h">請開發票</div>
       <div id="inv-notice" hidden></div>
       <form class="m-form m-card w" id="inv-form" autocomplete="off">
-        <label class="req">專案</label>${pickerHtml('inv-project_id')}
-        <div class="m-hint" id="inv-client-hint">選了專案會自動帶客戶、抬頭、統編</div>
-        <label>類別</label>${segHtml('inv-category', inv.categories || [])}
         <label>申請人</label>${segHtml('inv-applicant', inv.applicants || [])}
-        <label>抬頭</label>${pickerHtml('inv-company_name')}
-        <label>統編</label><input id="inv-tax_id" maxlength="8" inputmode="numeric" pattern="[0-9]*">
+        <label>類別</label>${segHtml('inv-category', inv.categories || [])}
+        <label id="inv-project-label">專案</label>${pickerHtml('inv-project_id')}
+        <div class="m-hint" id="inv-client-hint">選了專案會自動帶客戶、抬頭、統編</div>
+        <div class="row2">
+          <div><label>未稅</label><input id="inv-amount_ex_tax" type="number" inputmode="numeric" min="0"></div>
+          <div><label>含稅</label><input id="inv-amount_total" type="number" inputmode="numeric" min="0"></div>
+        </div>
         <label>品項</label>${pickerHtml('inv-item_type')}
+        <label>客戶（抬頭）</label>${pickerHtml('inv-company_name')}
+        <label>統編</label><input id="inv-tax_id" maxlength="8" inputmode="numeric" pattern="[0-9]*">
         <label>電子或紙本</label>${segHtml('inv-invoice_kind', inv.kinds || [])}
         <div id="inv-paper" hidden>
           <label class="req">收件人</label><input id="inv-recipient">
           <label>收件電話</label><input id="inv-recipient_phone" type="tel" inputmode="tel">
           <label class="req">收件地址</label><input id="inv-recipient_address">
         </div>
-        <div class="row2">
-          <div><label>未稅</label><input id="inv-amount_ex_tax" type="number" inputmode="numeric" min="0"></div>
-          <div><label>含稅</label><input id="inv-amount_total" type="number" inputmode="numeric" min="0"></div>
-        </div>
         <details class="m-more"><summary>更多欄位（名稱、備註）</summary>
-          <label>名稱</label><input id="inv-title" placeholder="空白＝用案名">
+          <label>名稱</label><input id="inv-title" placeholder="空白＝用案名或品項">
           <label>備註</label><input id="inv-notes">
         </details>
         <div class="m-hint">送出＝登記一張待開立、還沒收到錢的請款發票，並產生一段可複製的通知給同事開票</div>
@@ -74,6 +74,10 @@ function applyProjectDefaults(pid) {
     if (!F('title').value.trim()) F('title').value = p.name || '';
 }
 
+// 專案只在類別是「專案」時必填（代開的票可以不掛專案）；哪一種類別由 options.invoice.project_category 說
+const needsProject = () => F('category').value === ((opt().invoice || {}).project_category || '');
+const syncProjectLabel = () => { document.getElementById('inv-project-label').classList.toggle('req', needsProject()); };
+
 // 紙本發票要寄：收件人／電話／地址（同桌機發票本），電子的不用
 const isPaper = () => F('invoice_kind').value === ((opt().invoice || {}).paper_kind || '');
 const syncPaper = () => { document.getElementById('inv-paper').hidden = !isPaper(); };
@@ -81,7 +85,7 @@ const syncPaper = () => { document.getElementById('inv-paper').hidden = !isPaper
 const LAST_APPLICANT = 'm.invoice.applicant';   // 申請人記在這支手機上（純方便，不是資料）
 function wireAmounts() {
     mountSeg('inv-invoice_kind', syncPaper); syncPaper();
-    mountSeg('inv-category');
+    mountSeg('inv-category', syncProjectLabel); syncProjectLabel();
     const applicants = (opt().invoice || {}).applicants || [];
     let last = '';
     try { last = localStorage.getItem(LAST_APPLICANT) || ''; } catch (_) { /* 私密模式 */ }
@@ -123,7 +127,7 @@ function payload() {
     return {
         payment_type: receivableType(),
         invoice_kind: F('invoice_kind').value,
-        title: F('title').value.trim(),
+        title: F('title').value.trim() || projectName() || F('item_type').value.trim() || F('company_name').value.trim() || F('category').value,
         invoice_number: '',                       // 還沒開：沒號碼，後端會給「未開立」
         invoice_date: todayLocal(),
         amount_ex_tax: ex, amount_total: total,
@@ -144,12 +148,14 @@ function payload() {
 }
 
 // 給同事開票的通知：純文字，長按或按「複製」貼到 LINE／Chat
+const projectName = () => ((F('project_id')._rows || []).find(x => x.id === F('project_id').value) || {}).name || '';
+
 function noticeText(body) {
     const p = (F('project_id')._rows || []).find(x => x.id === body.project_id) || {};
     const who = (state.me || {}).username || '';
     const lines = [
         '請開發票',
-        `專案：${[p.client_short_name, p.name].filter(Boolean).join('｜') || body.title}`,
+        `專案：${[p.client_short_name, p.name].filter(Boolean).join('｜') || '—（未掛專案）'}`,
         `類別：${body.category}`,
         `申請人：${body.applicant || '—'}`,
         `抬頭：${body.company_name || '—'}${body.tax_id ? `（統編 ${body.tax_id}）` : ''}`,
@@ -176,8 +182,8 @@ function showNotice(text) {
 async function submit(ev) {
     ev.preventDefault();
     const body = payload();
-    if (!body.project_id) { toast('請先選專案', 'err'); F('project_id-q').focus(); return; }
-    if (!body.title) { toast('請選專案，或在「更多欄位」填名稱', 'err'); F('project_id-q').focus(); return; }
+    if (needsProject() && !body.project_id) { toast('類別是專案就要選專案', 'err'); F('project_id-q').focus(); return; }
+    if (!body.title) { toast('請填品項或抬頭（名稱用它們補）', 'err'); F('item_type-q').focus(); return; }
     if (body.tax_id && !/^\d{8}$/.test(body.tax_id)) { toast('統編要 8 位數字', 'err'); F('tax_id').focus(); return; }
     if (isPaper() && !(body.recipient && body.recipient_address)) { toast('紙本發票要填收件人與地址', 'err'); F(body.recipient ? 'recipient_address' : 'recipient').focus(); return; }
     await withBusy(F('submit'), async () => {

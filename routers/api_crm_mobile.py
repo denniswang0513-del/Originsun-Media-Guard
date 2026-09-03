@@ -64,6 +64,7 @@ INVOICE_VOCAB = {
     "kinds": ["電子發票", "紙本發票"],
     "paper_kind": "紙本發票",          # 這一種要收件人／電話／地址（同桌機發票本）
     "categories": ["專案", *INVOICE_PASSTHROUGH_CATEGORIES],   # 桌機發票本同一套三種
+    "project_category": "專案",     # 只有這一種類別必須掛專案（代開的可以不掛）
 }
 ACTIVE_STATUS = "製作"
 # 「製作」之前的階段＝還在賣：簽回報價才有「啟動專案」這件事；
