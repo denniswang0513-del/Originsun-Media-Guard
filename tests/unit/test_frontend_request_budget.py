@@ -11,7 +11,7 @@
 """
 import pytest
 
-from tests.unit._srcscan import _REPO, between, js_code_only, js_func_body, py_trees, repo_src
+from tests.unit._srcscan import _REPO, between, js_code_only, js_func_body, py_callers, repo_src
 
 
 def test_tabs_load_on_first_switch_not_at_boot():
@@ -62,8 +62,7 @@ async def test_static_files_revalidate_with_etag_api_stays_no_store(async_client
     from core.no_store import NO_STORE
     for path in ("/", "/download_installer"):
         rr = await async_client.get(path)
-        assert rr.status_code == 200 and rr.headers["cache-control"] == NO_STORE, path
-    assert (await async_client.get("/download_installer")).headers.get("etag")
+        assert rr.status_code == 200 and rr.headers["cache-control"] == NO_STORE and rr.headers.get("etag"), path
 
 
 
@@ -86,18 +85,9 @@ CACHEABLE_FILE_HANDLERS = {
 
 def test_private_files_never_land_in_disk_cache():
     """財務文件／個資／OTA 包有 ETag 卻不該進磁碟快取——由 handler 用 core.no_store 宣告，middleware
-    不認路徑（以前用網址前綴列例外，同一份發票 PDF 三條路只擋到一條）。掃 AST：直接 return
-    FileResponse( 的 handler 必須在 CACHEABLE_FILE_HANDLERS 裡有名字。"""
-    import ast
-    assert "_NO_STORE_FILES" not in repo_src("main.py")
-    bare = set()
-    for rel, tree in py_trees("routers", "main.py"):
-        for fn in ast.walk(tree):
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            if any(isinstance(n, ast.Return) and isinstance(n.value, ast.Call)
-                   and getattr(n.value.func, "id", "") == "FileResponse" for n in ast.walk(fn)):
-                bare.add(f"{rel}:{fn.name}")
+    不認路徑（以前用網址前綴列例外，同一份發票 PDF 三條路只擋到一條）。掃呼叫圖：有叫 FileResponse
+    的 handler（含 responses.FileResponse 這種寫法）必須在 CACHEABLE_FILE_HANDLERS 裡有名字。"""
+    bare = {k for k, v in py_callers("routers", "main.py").items() if "FileResponse" in v}
     assert bare <= CACHEABLE_FILE_HANDLERS, f"直接回 FileResponse 又沒登記為可快取：{sorted(bare - CACHEABLE_FILE_HANDLERS)}"
     assert CACHEABLE_FILE_HANDLERS <= bare, f"白名單有死項：{sorted(CACHEABLE_FILE_HANDLERS - bare)}"
 

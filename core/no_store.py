@@ -9,8 +9,8 @@
 from fastapi.responses import FileResponse
 
 NO_STORE = "no-store, no-cache, must-revalidate, max-age=0"
+NO_STORE_B = NO_STORE.encode()   # middleware 那側是 bytes header
 
 
 def no_store_file(path, **kwargs) -> FileResponse:
-    headers = {"Cache-Control": NO_STORE, **(kwargs.pop("headers", None) or {})}
-    return FileResponse(path, headers=headers, **kwargs)
+    return FileResponse(path, headers={"Cache-Control": NO_STORE}, **kwargs)

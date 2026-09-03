@@ -19,7 +19,7 @@ if _sys.platform == "win32":
 import socketio  # type: ignore
 import uvicorn  # type: ignore
 from fastapi import FastAPI, Request  # type: ignore
-from core.no_store import NO_STORE, no_store_file
+from core.no_store import NO_STORE_B, no_store_file
 from fastapi.staticfiles import StaticFiles  # type: ignore
 from fastapi.responses import RedirectResponse  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
@@ -106,7 +106,7 @@ class NoCacheMiddleware:
                     if any(k.lower() in (b"etag", b"last-modified") for k, _ in headers):
                         headers.append((b"cache-control", b"no-cache"))
                     else:
-                        headers.append((b"cache-control", NO_STORE.encode()))
+                        headers.append((b"cache-control", NO_STORE_B))
                         headers.append((b"pragma", b"no-cache"))
                         headers.append((b"expires", b"0"))
                 headers.append((b"access-control-allow-private-network", b"true"))
@@ -1228,8 +1228,7 @@ async def _short_invoice_file(code: str):
 @app.get("/")
 async def serve_index():
     """index.html 永遠不留快取（殼層一換版就要拿到新的）。"""
-    return no_store_file(os.path.join("frontend", "index.html"), media_type="text/html",
-                         headers={"Pragma": "no-cache", "Expires": "0"})
+    return no_store_file(os.path.join("frontend", "index.html"), media_type="text/html")
 
 os.makedirs("uploads", exist_ok=True)
 import mimetypes as _mt  # 精簡 Python mimetypes 可能不認 .webp → StaticFiles 回 text/plain
