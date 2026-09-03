@@ -87,7 +87,7 @@ function _bindTabHook() {
         if (e.detail?.tab !== 'tab_crm_projects') return;
         const jump = sessionStorage.getItem('omgJumpCrmProject');
         if (!jump && (window._allDirtyCount?.() > 0)) return;
-        await loadProjects();                    // 自帶 renderList
+        if (!e.detail.fresh) await loadProjects();   // 自帶 renderList；剛載入的分頁 init 抓過了
         if (jump) {
             sessionStorage.removeItem('omgJumpCrmProject');
             selectProject(jump);                 // 自帶未存編修 confirm

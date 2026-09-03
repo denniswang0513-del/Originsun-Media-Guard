@@ -19,6 +19,7 @@ window._updateStartTime = 0;
 window._localAgentVersion = null;
 
 export async function pollLocalAgent() {
+    if (document.hidden) return;   // 背景分頁不打（切回來下一輪就補）
     // 外網存取時不需要偵測本機代理 — 直接連伺服器
     if (window._isExternalAccess) {
         window._localAgentActive = true;
@@ -29,7 +30,8 @@ export async function pollLocalAgent() {
     }
     try {
         const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const targetUrl = isLocal ? '/api/v1/status' : 'http://127.0.0.1:8000/api/v1/status';
+        // 只問「活著嗎」：health 幾十 bytes；status 會把整段 log 緩衝（上限 2000 行）帶回來
+        const targetUrl = isLocal ? '/api/v1/health' : 'http://127.0.0.1:8000/api/v1/health';
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 1000);
@@ -91,7 +93,12 @@ export function updateAgentBadge(isActive) {
     }
 }
 
+// 版本比對每 60 秒一次就夠（後端另有每 10 分鐘的 update_available 推播）；
+// pollLocalAgent 每 3 秒呼叫 updateAgentBadge(true)，沒節流會 3 秒打兩支版本 API
+let _versionCheckedAt = 0;
 export async function checkAgentVersion() {
+    if (Date.now() - _versionCheckedAt < 60000) return;
+    _versionCheckedAt = Date.now();
     try {
         // 外網存取：只顯示伺服器版本，不顯示更新按鈕
         if (window._isExternalAccess) {

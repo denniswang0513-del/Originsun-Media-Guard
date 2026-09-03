@@ -97,9 +97,16 @@ class NoCacheMiddleware:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
                 if method == "GET":
-                    headers.append((b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"))
-                    headers.append((b"pragma", b"no-cache"))
-                    headers.append((b"expires", b"0"))
+                    # API／socket 一律不存；靜態檔（分頁 html／js／css／圖）改 no-cache：瀏覽器每次
+                    # 帶 ETag 問一句、主機回 304 不重傳本體 —— 遠端（Cloudflare）開頁少下載 ~1.5 MB
+                    # 而發版換檔 ETag 就變，不會吃到舊的（owner 2026-09-03「存取都有點慢」）。
+                    path = scope.get("path", "")
+                    if path.startswith("/api/") or path.startswith("/socket.io") or path.startswith("/download"):
+                        headers.append((b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"))
+                        headers.append((b"pragma", b"no-cache"))
+                        headers.append((b"expires", b"0"))
+                    else:
+                        headers.append((b"cache-control", b"no-cache"))
                 headers.append((b"access-control-allow-private-network", b"true"))
                 message = {**message, "headers": headers}
             await send(message)

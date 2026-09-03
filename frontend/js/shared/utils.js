@@ -962,6 +962,7 @@ _detectLocalIp();
 // 這也讓本面板的燈號與「專案總覽」的機器卡片（agent-cards.js 早就用 proxy）一致。
 let _hostHealthTimer = null;
 async function _checkHostHealth() {
+    if (document.hidden) return;   // 背景分頁不逐台 ping
     const hosts = window._computeHosts || [];
     for (const h of hosts) {
         const dotId = 'host-dot-' + (h.ip || '').replace(/[.:]/g, '_');

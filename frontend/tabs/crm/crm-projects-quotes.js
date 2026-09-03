@@ -167,6 +167,12 @@ async function _ensureQuotesModule() {
     if (window._openQuoteModalForProject) return;
     if (!_ensurePromise) {
         _ensurePromise = (async () => {
+            // 分頁 2026-09-03 起「點到才載」：有權限的人走 app.js 同一支載入器（會記在 _loadedTabs，
+            // 之後切到報價分頁不會再載一次、init 兩次）；沒權限的才走下面的 fallback 灌 html
+            if (typeof window._ensureTabLoaded === 'function') {
+                await window._ensureTabLoaded('tab_crm_quotes');
+                if (window._openQuoteModalForProject) return;
+            }
             const container = document.getElementById('tab_crm_quotes');
             if (container && !container.innerHTML.trim()) {
                 try {

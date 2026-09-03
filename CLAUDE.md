@@ -301,7 +301,8 @@ Originsun-Media-Guard/
 │   │                        #   - 各頁籤的 HTML 結構都在這個檔案內
 │   │                        #   - 底部載入 app.js 作為 type="module"
 │   │
-│   ├── app.js               # 主要應用邏輯（🔴 破兩千行，讀不完，見規則 B）
+│   ├── app.js               # SPA 殼層（2026-09-03 拆到 1,100 行左右；分散式派發在 js/app/remote-dispatch.js、
+│   │                        #   進度條／完成摘要／錯誤面板在 js/app/progress.js，兩邊都只透過 window.* 互相呼叫）
 │   │                        #   - Socket.IO 連線管理（io()、'connect'、'disconnect'）
 │   │                        #   - 所有 Socket 事件的監聽（見第 4.1 節完整事件清單）
 │   │                        #   - 分散式轉檔派發（dispatchRemoteTranscode）
@@ -567,19 +568,19 @@ def _emit_sync(event: str, data: dict) -> None:
 
 ## 6. 前端架構詳解 (SPA & WebSockets)
 
-### 6.1 頁籤動態載入邏輯 (`app.js` → `loadTabs()`)
+### 6.1 頁籤「點到才載」(`app.js` → `loadTabs()` / `switchTab()`)
 
-為了維持首頁開啟速度並落實模組化，本機代理使用**非同步動態載入**頁籤：
+2026-09-03 起開頁**只載落地那一頁**（原本 30+ 分頁全載、首屏 ~80 支 API），其餘分頁第一次
+`switchTab` 到它時才 `_loadTab(sectionId)`：`fetch('./tabs/<name>/<name>.html')` 填進 section →
+`await import('./tabs/<name>/<name>.js')` → `initTab()` → 補套 auth／可見分頁狀態。載過的分頁記在
+`_loadedTabs`，之後切換只是 show/hide，**不會卸掉**。
 
-1. `app.js` 啟動後執行 `loadTabs()`。
-2. 對每個頁籤執行 `fetch('./tabs/<name>/<name>.html')`。
-3. 取得內容後填入 `index.html` 的對應 `section`。
-4. 使用 `await import('./tabs/<name>/<name>.js')` 動態載入該頁籤的邏輯。
-5. 呼叫 `module.initTab()` 完成初始化。
-
-**載入順序**：backup → verify → transcode → concat → report → transcribe → tts
-
-**容錯設計**：TTS 頁籤的載入包裹在獨立 try-catch 中，即使載入失敗也不影響其他頁籤。
+- 跨分頁要用到別頁 DOM／模組時（專案頁的報價子頁、e2e 驅動合併）走 `window._ensureTabLoaded(sectionId)`。
+- `switchTab` 派的 `tab-changed` 事件帶 `fresh`（＝這次切換才載進來）。「切回來要重抓」的鉤子
+  （提案庫、CRM 專案）看到 `fresh` 就不再抓——init 剛抓過。
+- 靜態檔回 `cache-control: no-cache`（走 ETag／304），`/api/*`、`/socket.io`、`/download*` 維持 no-store。
+- 背景輪詢預算：本機代理每 3 秒問 `/api/v1/health`（不是會回整段 log 的 `/status`）、版本比對 60 秒一次、
+  機隊燈號 30 秒一輪；分頁在背景時全部跳過。規則釘在 `tests/unit/test_frontend_request_budget.py`。
 
 ### 6.2 智慧路徑解析策略 (`utils.js` → `resolveDropPath`)
 

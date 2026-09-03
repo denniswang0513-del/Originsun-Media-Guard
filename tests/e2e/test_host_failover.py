@@ -193,6 +193,9 @@ def test_no_takeover_available_still_reaches_merge(page):
     卻在區塊外被讀取 —— ReferenceError 直接把 heartbeat 的這一輪炸掉，
     停在 stopHeartbeatMonitor() 之後、觸發合併之前，畫面就這樣不動了。
     """
+    # 2026-09-03 分頁改成點到才載：合併函式從轉檔分頁的 tc_dest / tc_proj_name 讀值，
+    # 先把那個分頁載進來（真人派發一定是從轉檔分頁按的，載過的分頁不會卸掉）
+    page.evaluate("() => window._ensureTabLoaded('tab_transcode')")
     page.evaluate(NO_TAKEOVER_JS)
     try:
         page.wait_for_timeout(11000)   # 一輪偵測 + 2 秒緩衝後才觸發合併

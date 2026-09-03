@@ -35,8 +35,8 @@ SKIP = ("node_modules", "__pycache__", ".venv", "python_embed", "/dist/",
 # 強連通分量確認零環，再把界畫在既有的分節註解上，就能做到零函式搬家（那次
 # 139 個頂層定義的 AST 逐字相同）。
 EXEMPT = {
-    "frontend/app.js":
-        "SPA 殼層 —— 頁籤載入、Socket.IO、OTA、分散式派發全在裡面，還沒分過",
+    # frontend/app.js 2026-09-03 拆掉分散式派發（js/app/remote-dispatch.js）與進度條
+    # （js/app/progress.js）後回到上限之內；剩 Socket.IO、分組導覽、排程彈窗
     "core_engine.py":
         "備份/轉檔/串接/驗證四個引擎共用暫停停止狀態，切點不明顯",
     # frontend/tabs/finance/subviews/recon.js 2026-09-03 移掉對帳工作台後回到上限之內

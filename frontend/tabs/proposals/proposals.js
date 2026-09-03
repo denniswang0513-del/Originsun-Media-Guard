@@ -72,7 +72,7 @@ function _bindTabHook() {
     _tabHookBound = true;
     document.addEventListener('tab-changed', (e) => {
         if (!e.detail) return;
-        if (e.detail.tab === SECTION_ID) { refreshList({ stats: true }); return; }
+        if (e.detail.tab === SECTION_ID) { if (!e.detail.fresh) refreshList({ stats: true }); return; }
         // 🔴 切走就關詳情。overlay 是 position:fixed 掛在 body 上（不在 tab
         // section 裡），所以切了 tab 它會**留在畫面上蓋著別人的分頁**。
         // 收在這裡而不是各個離開路徑上：側欄點按、上一頁、貼網址、進度分頁的
