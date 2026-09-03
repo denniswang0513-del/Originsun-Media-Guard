@@ -398,7 +398,11 @@ function _projPopRender() {
     const { el, input } = _pop;
     const { active, closed, show } = _projPopSplit(input.value, _pop.showClosed);
     const flat = [];
-    const item = (p) => { flat.push(p); const i = flat.length - 1; return `<div class="ts-pp-item${i === _pop.idx ? ' on' : ''}" data-i="${i}">${esc(p.label || p.name)}</div>`; };
+    const item = (p) => {
+        flat.push(p); const i = flat.length - 1;
+        const sub = [p.year, p.client].filter(Boolean).join(' · ');
+        return `<div class="ts-pp-item${i === _pop.idx ? ' on' : ''}" data-i="${i}"><div class="ts-pp-name">${esc(p.name || p.label)}</div>${sub ? `<div class="ts-pp-sub">${esc(sub)}</div>` : ''}</div>`;
+    };
     let html = `<div class="ts-pp-h">進行中（${active.length}）</div>` + (active.length ? active.map(item).join('') : '<div class="ts-pp-empty">沒有符合的</div>');
     html += `<div class="ts-pp-h ts-pp-toggle" data-toggle="1">已結案（${closed.length}）${show ? '' : '　點一下展開'}</div>`;
     if (show) html += closed.length ? closed.map(item).join('') : '<div class="ts-pp-empty">沒有符合的</div>';
@@ -430,7 +434,11 @@ async function _projPopOpen(input) {
 function _projPopPick(p) {
     if (!p || !_pop) return;
     const input = _pop.input;
-    input.value = p.label || p.name;
+    // 格子只放案名（「年份 客戶全名 案名」太長）；id 記在 data-pid、完整名稱放 title（owner 2026-09-04）
+    input.value = p.id ? (p.name || p.label) : (p.label || p.name);
+    input.dataset.pid = p.id || '';
+    input.dataset.pname = input.value;
+    input.title = p.label || p.name || '';
     _projPopClose();
     const ev = new Event('input', { bubbles: true });
     ev._fromPick = true;                                  // 讓下面的 input 監聽別把浮層又打開
@@ -456,6 +464,7 @@ function _bindProjectPop(root) {
     root.addEventListener('focusin', (ev) => { const inp = ev.target.closest?.('input[data-proj-pick]'); if (inp && !inp.readOnly) _projPopOpen(inp); });
     root.addEventListener('input', (ev) => {
         const inp = ev.target.closest?.('input[data-proj-pick]'); if (!inp || ev._fromPick) return;
+        if (inp.dataset.pid && inp.value.trim() !== inp.dataset.pname) { delete inp.dataset.pid; delete inp.dataset.pname; inp.title = ''; }
         if (_pop && _pop.input === inp) { _pop.idx = -1; _projPopRender(); } else _projPopOpen(inp);
     });
     root.addEventListener('focusout', (ev) => {
@@ -566,8 +575,9 @@ function _renderMine(d, err) {
         </div>`;
 }
 /** 專案格打的字 → {project_id, project_name}：對得到下拉的「年份 客戶 案名」或案名就帶 id；對不到就照打的字送（後端再對映）。 */
-function _projectFromInput(text) {
+function _projectFromInput(text, el = null) {
     const t = (text || '').trim();
+    if (el && el.dataset && el.dataset.pid && t === el.dataset.pname) return { project_id: el.dataset.pid, project_name: t };   // 從浮層選的
     const hit = (_projOpts || []).find(p => p.id && (p.label === t || p.name === t));
     return hit ? { project_id: hit.id, project_name: hit.name } : { project_id: null, project_name: t };
 }
@@ -575,7 +585,7 @@ function _projectFromInput(text) {
 function _rowBody(tr) {
     const v = f => tr.querySelector(`[data-f="${f}"]`)?.value ?? '';
     return {
-        work_date: v('date') || _day, ..._projectFromInput(v('project')), work_type: v('type') || null,
+        work_date: v('date') || _day, ..._projectFromInput(v('project'), tr.querySelector('[data-f="project"]')), work_type: v('type') || null,
         task_note: v('note'), remark: v('remark'), planned_hours: v('planned') ? parseFloat(v('planned')) : null,
         hours: v('hours') ? parseFloat(v('hours')) : null,
     };
@@ -1324,7 +1334,7 @@ async function _onAction(btn) {
                 const g = id => (document.getElementById(id) || {}).value || '';
                 const body = { ids: [..._ledgerSel] };
                 const proj = g('ts-batch-project').trim();
-                if (proj) Object.assign(body, _projectFromInput(proj));
+                if (proj) Object.assign(body, _projectFromInput(proj, document.getElementById('ts-batch-project')));
                 if (g('ts-batch-type')) body.work_type = g('ts-batch-type');
                 if (g('ts-batch-remark').trim()) body.remark = g('ts-batch-remark').trim();
                 if (g('ts-batch-note').trim()) body.note = g('ts-batch-note').trim();

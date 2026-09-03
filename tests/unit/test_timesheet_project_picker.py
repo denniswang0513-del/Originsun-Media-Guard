@@ -25,3 +25,15 @@ def test_frontend_uses_grouped_popover_not_datalist():
     assert "ev.stopPropagation();" in code_only(func_body(js, "function _projPopKeydown(ev)"))
     html = repo_src("frontend/tabs/timesheets/timesheets.html")
     assert ".ts-proj-pop" in html and ".ts-pp-toggle" in html
+
+
+def test_pick_keeps_id_on_the_cell_and_shows_short_name():
+    """名稱太長（年份＋客戶全名＋案名）：浮層兩行、格子只放案名、id 記在 data-pid，存檔先認 id 再退回字串比對。"""
+    js = js_code_only(repo_src("frontend/tabs/timesheets/timesheets.js"))
+    pick = code_only(func_body(js, "function _projPopPick(p)"))
+    assert "input.dataset.pid = p.id || ''" in pick and "input.title = p.label" in pick
+    assert 'class="ts-pp-sub"' in js and 'class="ts-pp-name"' in js
+    body = code_only(func_body(js, "function _projectFromInput(text, el = null)"))
+    assert "el.dataset.pid" in body
+    assert "_projectFromInput(v('project'), tr.querySelector" in js and "_projectFromInput(proj, document.getElementById('ts-batch-project'))" in js
+    assert "delete inp.dataset.pid" in js, "手打改了字要清掉 id"
