@@ -1,7 +1,7 @@
 /**
  * crm-cashbook.js — 收支明細子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today, autoFee, crmToast, searchableSelect, crmCacheInvalidate } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today, autoFee, crmToast, searchableSelect, crmCacheInvalidate, hasModule } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
@@ -414,6 +414,13 @@ let _drawn = 0;
 // 列出案子的費用配置，勾幾行開幾張（帶 cost_line_id，後端擋同一行請兩次）；不掛回這一列、不標已付（錢還沒付出去）。
 // 沒掛案：先看掛著的發票是哪個案；再沒有 → 提示連結專案，或直接開一張不掛案的應付款。支出列不放（owner：支出的請款拿掉）。
 const _isIncomeRow = (e) => !!(e.deposit || 0) && !(e.expense || 0);
+let _mineProjects = null;     // 私帳案（請款的「連結專案」多列這些；母公司收支列不能真的掛私帳案，只拿來開它的應付款）
+async function _mineProjectList() {
+    if (_mineProjects) return _mineProjects;
+    if (!hasModule('finance_mine')) return (_mineProjects = []);
+    try { _mineProjects = ((await _fetch('/projects?entity=mine')).projects || []); } catch (_) { _mineProjects = []; }
+    return _mineProjects;
+}
 function _payMenu(e) {
     if (e.split_count || !_isIncomeRow(e)) return [];
     return [{ label: '請款', fn: '_cashRequestPay' }];
@@ -450,10 +457,18 @@ window._cashRequestPay = async (id) => {
         `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
          <button class="crm-btn crm-btn-secondary" data-act="custom">直接請款</button>
          <button class="crm-btn crm-btn-primary" data-act="link">連結專案</button>`);
-    ov.querySelector('[data-act="link"]').addEventListener('click', () => {
+    ov.querySelector('[data-act="link"]').addEventListener('click', async () => {
         ov.remove();
-        openProjectPicker(_projPickerOpts(e, async (picked) => {
+        // 有私帳權限：挑選視窗多列私帳案（標「私帳｜」）。選到私帳案不掛這一列（母公司收支列掛私帳案會被跨帳本守衛擋），
+        // 直接開那個案的費用配置，應付款記在私帳那本帳（owner 2026-09-04）
+        const mine = await _mineProjectList();
+        const mineIds = new Set(mine.map((p) => p.id));
+        const opts = _projPickerOpts(e, async (picked) => {
             if (!picked) return;
+            if (mineIds.has(picked)) {
+                const mp = mine.find((p) => p.id === picked);
+                return _cashPayForProject(e, picked, mp ? mp.name : '', { entity: 'mine' });
+            }
             try {
                 await _fetch('/cash-entries/' + id, { method: 'PUT', body: JSON.stringify({ project_id: picked }) });
                 e.project_id = picked;
@@ -461,16 +476,19 @@ window._cashRequestPay = async (id) => {
                 _patchRow(id);
                 window._cashRequestPay(id);           // 連好了接著挑人
             } catch (err) { crmToast('連結失敗：' + err.message, true); }
-        }));
+        });
+        opts.projects = _projectList.concat(mine.map((p) => ({ ...p, name: '私帳｜' + (p.name || '') })));
+        openProjectPicker(opts);
     });
     ov.querySelector('[data-act="custom"]').addEventListener('click', () => { ov.remove(); _cashCustomPay(e); });
 };
 
 /** 幫這個案子裡的人請款：列出費用配置，勾幾行開幾張應付款（帶 cost_line_id；已請過的標示、不能再勾）。 */
-async function _cashPayForProject(e, pid, pname) {
+async function _cashPayForProject(e, pid, pname, o = {}) {
+    const ent = o.entity || '';           // 'mine'＝私帳案：請款單開在私帳那本帳
     let lines = [], requested = new Set();
     try {
-        const [cl, pays] = await Promise.all([_fetch(`/projects/${pid}/cost-lines`), _fetch(`/payments?project_id=${encodeURIComponent(pid)}`)]);
+        const [cl, pays] = await Promise.all([_fetch(`/projects/${pid}/cost-lines`), _fetch(`/payments?project_id=${encodeURIComponent(pid)}${ent ? '&entity=' + ent : ''}`)]);
         lines = cl.cost_lines || [];
         (pays.payments || []).forEach((p) => { if (p.cost_line_id) requested.add(p.cost_line_id); });
     } catch (err) { crmToast('費用配置載入失敗：' + err.message, true); return; }
@@ -484,13 +502,13 @@ async function _cashPayForProject(e, pid, pname) {
             <span style="color:#888;font-size:12px;"> ${_esc(l.phase || '')}${whoOf(l) ? ' · ' + _esc(whoOf(l)) : ' · （沒填人員）'}</span>${done ? '<span style="color:#6ee7b7;font-size:11px;"> 已請款</span>' : ''}</span>
           <span style="color:#fca5a5;">$${_fmtNum(amtOf(l))}</span>
         </label>`; }).join('');
-    const ov = _payOverlay('幫案子裡的人請款 — ' + (pname || ''),
+    const ov = _payOverlay('幫案子裡的人請款 — ' + (ent === 'mine' ? '私帳｜' : '') + (pname || ''),
         `<div style="color:#888;font-size:12px;margin-bottom:6px;">收到 $${_fmtNum(e.deposit || 0)}（${_esc(e.summary || '')}）。勾要付的人／項目，一行開一張應付款（請款日＝今天、預計付款月＝本月）；金額照費用配置，之後在請款單改。</div>
          ${rows || '<div class="crm-empty">這個案子還沒有費用配置</div>'}`,
         `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
          <button class="crm-btn crm-btn-secondary" data-act="custom">自訂一張</button>
          <button class="crm-btn crm-btn-primary" data-act="go">開請款單</button>`);
-    ov.querySelector('[data-act="custom"]').addEventListener('click', () => { ov.remove(); _cashCustomPay(e, { project_id: pid }); });
+    ov.querySelector('[data-act="custom"]').addEventListener('click', () => { ov.remove(); _cashCustomPay(e, { project_id: pid, entity: ent }); });
     ov.querySelector('[data-act="go"]').addEventListener('click', async (ev) => {
         const picked = [...ov.querySelectorAll('input[name="cash-pay-lines"]:checked')].map((c) => lines[Number(c.value)]);
         if (!picked.length) { crmToast('先勾要請款的行', true); return; }
@@ -499,7 +517,7 @@ async function _cashPayForProject(e, pid, pname) {
         for (const l of picked) {
             try {
                 await _fetch('/payments', { method: 'POST', body: JSON.stringify(_payBody({
-                    summary: l.item_name || '', amount: amtOf(l), payee_name: whoOf(l), project_id: pid, cost_line_id: l.id })) });
+                    summary: l.item_name || '', amount: amtOf(l), payee_name: whoOf(l), project_id: pid, cost_line_id: l.id, ...(ent ? { entity: ent } : {}) })) });
                 ok += 1;
             } catch (err) { fails.push((l.item_name || '') + '：' + err.message); }
         }
@@ -528,7 +546,7 @@ function _cashCustomPay(e, pre = {}) {
             amount: parseInt(document.getElementById('cpay-amount').value, 10) || 0,
             payee_name: (document.getElementById('cpay-payee').value || '').trim(),
             category: (document.getElementById('cpay-cat').value || '').trim() || '專案外包',
-            project_id: pre.project_id || null,
+            project_id: pre.project_id || null, ...(pre.entity ? { entity: pre.entity } : {}),
         });
         if (!body.summary || !body.amount) { crmToast('摘要與金額必填', true); return; }
         btn.disabled = true; btn.textContent = '處理中…';

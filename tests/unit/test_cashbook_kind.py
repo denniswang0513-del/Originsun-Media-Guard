@@ -40,8 +40,12 @@ def test_request_payment_from_cash_row():
     assert "const _isIncomeRow = (e) =>" in js and "..._payMenu(e)" in js
     assert "if (e.split_count || !_isIncomeRow(e)) return [];" in code_only(func_body(js, "function _payMenu(e)"))
     assert "window._cashRequestPay = async (id) =>" in js and "/invoices/' + e.invoice_id" in js
-    inc = code_only(func_body(js, "async function _cashPayForProject(e, pid, pname)"))
+    inc = code_only(func_body(js, "async function _cashPayForProject(e, pid, pname, o = {})"))
     assert "/cost-lines" in inc and "/payments?project_id=" in inc and "cost_line_id: l.id" in inc
     assert "batch-pay" not in js and "/cash-entries/${e.id}/payments" not in js, "請款不掛回這一列、不標已付"
     assert "payment_status: '應付款'" in js
     assert 'data-act="link"' in js and 'data-act="custom"' in js, "沒案時要有「連結專案」與「直接請款」"
+    # 連結專案的挑選視窗多列私帳案（有 finance_mine 才抓）；選到私帳案不掛這一列，直接開它的費用配置、應付款記在私帳
+    assert "hasModule('finance_mine')" in js and "'/projects?entity=mine'" in js and "'私帳｜' + (p.name || '')" in js
+    assert "_cashPayForProject(e, picked, mp ? mp.name : '', { entity: 'mine' })" in js
+    assert "...(ent ? { entity: ent } : {})" in js and "&entity=' + ent" in js
