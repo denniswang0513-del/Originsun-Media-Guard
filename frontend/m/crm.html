@@ -68,7 +68,7 @@
 
   /* ── App 殼 ── */
   #m-app { display:flex; flex-direction:column; min-height:100vh; }
-  .m-hdr { position:sticky; top:0; z-index:50; display:flex; align-items:center; justify-content:space-between;
+  .m-hdr { position:fixed; top:0; left:0; right:0; height:60px; box-sizing:border-box; z-index:50; display:flex; align-items:center; justify-content:space-between;
     padding:calc(10px + var(--sat)) 16px 10px; background:rgba(26,26,26,.94); backdrop-filter:blur(10px);
     border-bottom:1px solid var(--line); }
   .m-hdr .brand { font-weight:700; color:#fff; }
@@ -78,7 +78,7 @@
   .m-hdr .page { font-size:12px; color:var(--sub); margin-top:2px; }
   .m-hdr .nav { min-width:64px; min-height:40px; padding:0 10px; background:transparent; border:1px solid var(--line); border-radius:8px; color:var(--ink); font-size:14px; }
   .m-hdr .nav:active { border-color:var(--pri); color:var(--pri); }
-  #m-view { flex:1; padding:12px 12px calc(76px + var(--sab)); max-width:560px; width:100%; margin:0 auto; }
+  #m-view { flex:1; padding:70px 12px calc(76px + var(--sab)); max-width:560px; width:100%; margin:0 auto; }   /* 上面留頂列（fixed 60px）的高度 */
   .m-tabbar { position:fixed; left:0; right:0; bottom:0; z-index:30; display:flex; background:#202020;
     border-top:1px solid var(--line); padding-bottom:var(--sab); }
   .m-tabbar button { flex:1; min-height:56px; background:none; border:0; color:var(--sub); font-size:12px;
