@@ -1,7 +1,7 @@
 /**
  * crm-cashbook.js — 收支明細子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today, autoFee, crmToast, searchableSelect } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today, autoFee, crmToast, searchableSelect, crmCacheInvalidate } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
@@ -202,22 +202,38 @@ function _taxSelects(box, o) {
 function _syncTaxFilter() {
     const box = document.getElementById('cash-filter-tax');
     if (!box) return;
-    const chain = _filters.node_id ? (_taxById[_filters.node_id] || []) : [];
-    _taxSelects(box, {
-        chain,
-        cls: 'crm-select cash-taxf',
-        blank: (i) => (i === 0 ? '全部類別' : '全部'),
-        extraFirst: `<option value="__none__"${
-            _filters.category === '__none__' ? ' selected' : ''}>（未分類）</option>`,
-        onPick: (i, v) => {
-            // 🔴 「（未分類）」是**類別欄為空**的快篩，不是一個叫 __none__ 的節點 ——
-            // 當成 node_id 送出去一列都篩不到（舊版當成 book 送，實測 0 筆）
-            _filters.category = v === '__none__' ? '__none__' : '';
-            _filters.node_id = v === '__none__' ? '' : v
-                || (i > 0 && chain[i - 1] ? chain[i - 1].id : '');   // 選「全部」＝退回上一層
-            loadEntries({ cards: false });
-        },
-    });
+    // 清單＝分類樹每個節點的完整路徑（深度不定）＋「（未分類）」；datalist 原生可打字過濾
+    // 母公司那本是平的（沒有樹）：清單就是類別名；私帳有樹：每個節點的完整路徑
+    const paths = (Object.keys(_taxById).length
+        ? Object.values(_taxById).map((chain) => chain.map((n) => n.name).join(' ▸ '))
+        : _CATEGORIES.slice()).sort();
+    const cur = _filters.category === '__none__' ? '（未分類）'
+        : _filters.category ? _filters.category
+        : (_filters.node_id && _taxById[_filters.node_id] ? _taxById[_filters.node_id].map((n) => n.name).join(' ▸ ') : '');
+    if (!box.querySelector('#cash-filter-cat')) {
+        box.innerHTML = `<input id="cash-filter-cat" class="crm-input" list="cash-filter-cat-dl" autocomplete="off"
+                                placeholder="類別（打字篩選）" title="打類別／項目／子項目的字；選到清單裡的路徑＝精確篩那一節點" style="width:200px;">
+                         <datalist id="cash-filter-cat-dl"></datalist>`;
+        const inp = box.querySelector('#cash-filter-cat');
+        let _t;
+        inp.addEventListener('input', () => {
+            clearTimeout(_t);
+            _t = setTimeout(() => {
+                const v = inp.value.trim();
+                const byPath = {};
+                Object.entries(_taxById).forEach(([id, chain]) => { byPath[chain.map((n) => n.name).join(' ▸ ')] = id; });
+                // 🔴 「（未分類）」是**類別欄為空**的快篩，不是一個叫 __none__ 的節點（舊版當成 book 送，實測 0 筆）
+                if (v === '（未分類）') { _filters.category = '__none__'; _filters.node_id = ''; _catQ = ''; }
+                else if (byPath[v]) { _filters.category = ''; _filters.node_id = byPath[v]; _catQ = ''; }
+                else if (_CATEGORIES.includes(v)) { _filters.category = v; _filters.node_id = ''; _catQ = ''; }     // 平的類別：後端精確篩
+                else { _filters.category = ''; _filters.node_id = ''; _catQ = v.toLowerCase(); }
+                loadEntries({ cards: false });
+            }, 250);
+        });
+    }
+    const inp = box.querySelector('#cash-filter-cat');
+    if (document.activeElement !== inp) inp.value = cur || (_catQ ? inp.value : '');
+    box.querySelector('#cash-filter-cat-dl').innerHTML = ['（未分類）', ...paths].map((p) => `<option value="${_esc(p)}"></option>`).join('');
 }
 
 /** 篩選器選項依**實際資料**生成 —— 寫死的清單會跟使用中的類別脫節，
@@ -359,7 +375,6 @@ const _NO_VAL_DOT =
     + 'background:#ef4444;vertical-align:middle;"></span>';
 // 舊名保留給類別那格的既有呼叫點（語意相同：沒填就是一顆紅點）
 
-let _offOnly = false;   // 只看六日／假日（純前端篩，日期已在手上）
 
 /** 子項目格顯示**第三層以後的全部**（`醫療保健 ▸ 乳癌治療 ▸ 台北馬偕`）。
  *  🔴 只印第三層的話，第四、五層在畫面上會整個消失 —— 資料在那裡卻看不到，
@@ -395,11 +410,12 @@ let _drawn = 0;
 // 有拆項的列：分類三格換成「已拆 N 項」badge（分類的正本在拆項），
 // 金額/分類/專案改由「拆內容」進 —— 後端對這幾欄也是 409。
 
-// ── 列的「請款」（owner 2026-09-04）：支出列一鍵開請款單。有連專案 → 列出那個案的費用配置（成本格），
-// 挑一行就以它開單（帶 cost_line_id，後端擋重複請款）；沒連專案 → 先提示去連，或直接自訂一張。
-// 開完：把請款單掛回這一列（PUT /cash-entries/{id}/payments），並因為錢已經出去了，直接標已付（付款日＝這列日期）。
+// ── 收入列的「請款」（owner 2026-09-04）：收到案子（或代開）的款了，幫這個案子裡的人開應付款——
+// 列出案子的費用配置，勾幾行開幾張（帶 cost_line_id，後端擋同一行請兩次）；不掛回這一列、不標已付（錢還沒付出去）。
+// 沒掛案：先看掛著的發票是哪個案；再沒有 → 提示連結專案，或直接開一張不掛案的應付款。支出列不放（owner：支出的請款拿掉）。
+const _isIncomeRow = (e) => !!(e.deposit || 0) && !(e.expense || 0);
 function _payMenu(e) {
-    if (!(e.expense || 0) || e.split_count) return [];      // 拆項列各自掛，不在父列請
+    if (e.split_count || !_isIncomeRow(e)) return [];
     return [{ label: '請款', fn: '_cashRequestPay' }];
 }
 
@@ -413,111 +429,114 @@ function _payOverlay(title, bodyHtml, footHtml) {
           <button class="crm-detail-close" data-close>關閉</button></div>
         <div class="crm-modal-body" style="max-height:60vh;overflow-y:auto;">${bodyHtml}</div>
         <div class="crm-modal-footer">${footHtml}</div></div>`;
-    overlay.querySelector('[data-close]').addEventListener('click', () => overlay.remove());
+    overlay.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => overlay.remove()));
     document.body.appendChild(overlay);
     return overlay;
 }
 
-/** 開請款單 → 掛回這一列 → 標已付。回請款單 id；任一步失敗丟 toast、不半途留一張沒掛的單（掛失敗就把單的狀態留著讓人手動處理）。 */
-async function _cashCreateAndLinkPayment(e, body) {
-    const day = (e.entry_date || '').slice(0, 10);
-    const created = await _fetch('/payments', { method: 'POST', body: JSON.stringify({
-        request_date: day || null, planned_month: day.slice(0, 7), payment_status: '應付款', ...body }) });
-    const pid = created.id || (created.payment && created.payment.id) || created.payment_id;
-    if (!pid) throw new Error('請款單建立了但沒拿到 id');
-    const amt = Math.max(0, Math.min(body.amount || 0, e.expense || 0));
-    await _fetch(`/cash-entries/${e.id}/payments`, { method: 'PUT', body: JSON.stringify({ items: [{ payment_request_id: pid, amount: amt }] }) });
-    await _fetch('/payments/batch-pay', { method: 'PATCH', body: JSON.stringify({ payment_ids: [pid], payment_date: day }) });
-    return pid;
-}
+const _payBody = (extra) => ({ request_date: today(), planned_month: today().slice(0, 7), payment_status: '應付款', category: '專案外包', ...extra });
 
 window._cashRequestPay = async (id) => {
     const e = _entries.find((x) => x.id === id);
     if (!e) return;
-    if (!e.project_id) {
-        const ov = _payOverlay('請款', `<div style="color:#ddd;line-height:1.7;">這一列還沒連結專案。連了專案才能從案子的費用配置挑一行請款；
-            也可以直接開一張不掛案的請款單。</div>`,
-            `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
-             <button class="crm-btn crm-btn-secondary" data-act="custom">直接請款</button>
-             <button class="crm-btn crm-btn-primary" data-act="link">連結專案</button>`);
-        ov.querySelector('[data-close]:not(.crm-detail-close)').addEventListener('click', () => ov.remove());
-        ov.querySelector('[data-act="link"]').addEventListener('click', () => {
-            ov.remove();
-            openProjectPicker(_projPickerOpts(e, async (pid) => {
-                if (!pid) return;
-                try {
-                    await _fetch('/cash-entries/' + id, { method: 'PUT', body: JSON.stringify({ project_id: pid }) });
-                    e.project_id = pid;
-                    e.project_name = ((_projectList.find((p) => p.id === pid) || {}).name || '');
-                    _patchRow(id);
-                    window._cashRequestPay(id);           // 連好了接著挑費用配置
-                } catch (err) { crmToast('連結失敗：' + err.message, true); }
-            }));
-        });
-        ov.querySelector('[data-act="custom"]').addEventListener('click', () => { ov.remove(); _cashCustomPay(e); });
-        return;
+    let pid = e.project_id || '', pname = e.project_name || '';
+    if (!pid && e.invoice_id) {
+        // 收款列常只掛發票沒掛專案：發票有案就用發票的案
+        try { const inv = await _fetch('/invoices/' + e.invoice_id); if (inv && inv.project_id) { pid = inv.project_id; pname = inv.project_name || ''; } } catch (_) {}
     }
-    let lines = [];
-    try { lines = (await _fetch(`/projects/${e.project_id}/cost-lines`)).cost_lines || []; }
-    catch (err) { crmToast('費用配置載入失敗：' + err.message, true); return; }
-    const amtOf = (l) => (l.actual_amount || l.estimated_amount || 0);
-    const whoOf = (l) => (l.actual_staff_name || l.estimated_staff_name || '');
-    const rows = lines.map((l, i) => `
-        <label class="cash-pay-line" style="display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid #2e2e2e;cursor:pointer;">
-          <input type="radio" name="cash-pay-line" value="${i}">
-          <span style="flex:1;min-width:0;"><b>${_esc(l.item_name || '')}</b>
-            <span style="color:#888;font-size:12px;"> ${_esc(l.phase || '')}${whoOf(l) ? ' · ' + _esc(whoOf(l)) : ''}</span></span>
-          <span style="color:#fca5a5;">$${_fmtNum(amtOf(l))}</span>
-        </label>`).join('');
-    const ov = _payOverlay('請款 — ' + (e.project_name || ''),
-        `<div style="color:#888;font-size:12px;margin-bottom:6px;">這一列支出 $${_fmtNum(e.expense || 0)}（${_esc(e.summary || '')}）。挑一行費用配置開請款單；金額會照那一行帶，可在下一步改。</div>
-         ${rows || '<div class="crm-empty">這個案子還沒有費用配置</div>'}
-         <label class="cash-pay-line" style="display:flex;gap:10px;align-items:center;padding:8px 6px;cursor:pointer;">
-           <input type="radio" name="cash-pay-line" value="custom"><span style="flex:1;">不對應費用配置，自訂一張</span></label>`,
+    if (pid) return _cashPayForProject(e, pid, pname);
+    const ov = _payOverlay('請款', `<div style="color:#ddd;line-height:1.7;">這一列還沒連結專案（掛著的發票也沒有案）。連了專案才能從案子的費用配置挑人請款；
+        也可以直接開一張不掛案的應付款。</div>`,
         `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
-         <button class="crm-btn crm-btn-primary" data-act="next">下一步</button>`);
-    ov.querySelector('[data-close]:not(.crm-detail-close)').addEventListener('click', () => ov.remove());
-    ov.querySelector('[data-act="next"]').addEventListener('click', () => {
-        const picked = ov.querySelector('input[name="cash-pay-line"]:checked');
-        if (!picked) { crmToast('先挑一行', true); return; }
+         <button class="crm-btn crm-btn-secondary" data-act="custom">直接請款</button>
+         <button class="crm-btn crm-btn-primary" data-act="link">連結專案</button>`);
+    ov.querySelector('[data-act="link"]').addEventListener('click', () => {
         ov.remove();
-        if (picked.value === 'custom') { _cashCustomPay(e); return; }
-        const l = lines[Number(picked.value)];
-        _cashCustomPay(e, { summary: l.item_name || '', amount: amtOf(l) || (e.expense || 0), payee_name: whoOf(l), cost_line_id: l.id });
+        openProjectPicker(_projPickerOpts(e, async (picked) => {
+            if (!picked) return;
+            try {
+                await _fetch('/cash-entries/' + id, { method: 'PUT', body: JSON.stringify({ project_id: picked }) });
+                e.project_id = picked;
+                e.project_name = ((_projectList.find((p) => p.id === picked) || {}).name || '');
+                _patchRow(id);
+                window._cashRequestPay(id);           // 連好了接著挑人
+            } catch (err) { crmToast('連結失敗：' + err.message, true); }
+        }));
     });
+    ov.querySelector('[data-act="custom"]').addEventListener('click', () => { ov.remove(); _cashCustomPay(e); });
 };
 
-/** 請款單的欄位確認（自訂或帶費用配置那一行）：摘要／金額／收款人／類別，送出＝開單＋掛回＋標已付。 */
+/** 幫這個案子裡的人請款：列出費用配置，勾幾行開幾張應付款（帶 cost_line_id；已請過的標示、不能再勾）。 */
+async function _cashPayForProject(e, pid, pname) {
+    let lines = [], requested = new Set();
+    try {
+        const [cl, pays] = await Promise.all([_fetch(`/projects/${pid}/cost-lines`), _fetch(`/payments?project_id=${encodeURIComponent(pid)}`)]);
+        lines = cl.cost_lines || [];
+        (pays.payments || []).forEach((p) => { if (p.cost_line_id) requested.add(p.cost_line_id); });
+    } catch (err) { crmToast('費用配置載入失敗：' + err.message, true); return; }
+    const amtOf = (l) => (l.actual_amount || l.estimated_amount || 0);
+    const whoOf = (l) => (l.actual_staff_name || l.estimated_staff_name || '');
+    const rows = lines.map((l, i) => {
+        const done = requested.has(l.id);
+        return `<label class="cash-pay-line" style="display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid #2e2e2e;${done ? 'opacity:.5;' : 'cursor:pointer;'}">
+          <input type="checkbox" name="cash-pay-lines" value="${i}"${done ? ' disabled' : ''}${!done && whoOf(l) && amtOf(l) ? ' checked' : ''}>
+          <span style="flex:1;min-width:0;"><b>${_esc(l.item_name || '')}</b>
+            <span style="color:#888;font-size:12px;"> ${_esc(l.phase || '')}${whoOf(l) ? ' · ' + _esc(whoOf(l)) : ' · （沒填人員）'}</span>${done ? '<span style="color:#6ee7b7;font-size:11px;"> 已請款</span>' : ''}</span>
+          <span style="color:#fca5a5;">$${_fmtNum(amtOf(l))}</span>
+        </label>`; }).join('');
+    const ov = _payOverlay('幫案子裡的人請款 — ' + (pname || ''),
+        `<div style="color:#888;font-size:12px;margin-bottom:6px;">收到 $${_fmtNum(e.deposit || 0)}（${_esc(e.summary || '')}）。勾要付的人／項目，一行開一張應付款（請款日＝今天、預計付款月＝本月）；金額照費用配置，之後在請款單改。</div>
+         ${rows || '<div class="crm-empty">這個案子還沒有費用配置</div>'}`,
+        `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
+         <button class="crm-btn crm-btn-secondary" data-act="custom">自訂一張</button>
+         <button class="crm-btn crm-btn-primary" data-act="go">開請款單</button>`);
+    ov.querySelector('[data-act="custom"]').addEventListener('click', () => { ov.remove(); _cashCustomPay(e, { project_id: pid }); });
+    ov.querySelector('[data-act="go"]').addEventListener('click', async (ev) => {
+        const picked = [...ov.querySelectorAll('input[name="cash-pay-lines"]:checked')].map((c) => lines[Number(c.value)]);
+        if (!picked.length) { crmToast('先勾要請款的行', true); return; }
+        const btn = ev.currentTarget; btn.disabled = true; btn.textContent = '處理中…';
+        let ok = 0; const fails = [];
+        for (const l of picked) {
+            try {
+                await _fetch('/payments', { method: 'POST', body: JSON.stringify(_payBody({
+                    summary: l.item_name || '', amount: amtOf(l), payee_name: whoOf(l), project_id: pid, cost_line_id: l.id })) });
+                ok += 1;
+            } catch (err) { fails.push((l.item_name || '') + '：' + err.message); }
+        }
+        ov.remove();
+        crmToast(`已開 ${ok} 張請款單` + (fails.length ? `；${fails.length} 張失敗：${fails.join('、')}` : ''), fails.length > 0);
+        crmCacheInvalidate();
+    });
+}
+
+/** 直接開一張應付款（沒掛案、或案子沒有對應的費用配置）：摘要／金額／收款人／類別。 */
 function _cashCustomPay(e, pre = {}) {
     const ov = _payOverlay('請款單', `
         <div class="crm-form-grid">
-          <div class="crm-field crm-field-full"><label>摘要</label><input id="cpay-summary" class="crm-input" value="${_esc(pre.summary || e.summary || '')}"></div>
-          <div class="crm-field"><label>金額</label><input id="cpay-amount" type="number" class="crm-input" value="${pre.amount || e.expense || 0}"></div>
-          <div class="crm-field"><label>收款人</label><input id="cpay-payee" class="crm-input" value="${_esc(pre.payee_name || e.payee || '')}"></div>
-          <div class="crm-field crm-field-full"><label>類別</label><input id="cpay-cat" class="crm-input" value="${_esc(pre.cost_line_id ? '專案外包' : (e.category || '專案外包'))}"></div>
-          <div style="color:#888;font-size:12px;">${pre.cost_line_id ? '會帶上這一行費用配置（同一行不能請兩次）。' : ''}錢已經出去了：開單後自動掛回這一列並標已付（付款日＝${_esc((e.entry_date || '').slice(0, 10))}）。</div>
+          <div class="crm-field crm-field-full"><label>摘要</label><input id="cpay-summary" class="crm-input" value="${_esc(e.summary || '')}"></div>
+          <div class="crm-field"><label>金額</label><input id="cpay-amount" type="number" class="crm-input" value="${e.deposit || 0}"></div>
+          <div class="crm-field"><label>收款人</label><input id="cpay-payee" class="crm-input" value=""></div>
+          <div class="crm-field crm-field-full"><label>類別</label><input id="cpay-cat" class="crm-input" value="專案外包"></div>
+          <div style="color:#888;font-size:12px;">開一張應付款（請款日＝今天、預計付款月＝本月）${pre.project_id ? '，掛在這個案子' : ''}。</div>
         </div>`,
         `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
          <button class="crm-btn crm-btn-primary" data-act="go">開請款單</button>`);
-    ov.querySelector('[data-close]:not(.crm-detail-close)').addEventListener('click', () => ov.remove());
     ov.querySelector('[data-act="go"]').addEventListener('click', async (ev) => {
         const btn = ev.currentTarget;
-        const body = {
+        const body = _payBody({
             summary: (document.getElementById('cpay-summary').value || '').trim(),
             amount: parseInt(document.getElementById('cpay-amount').value, 10) || 0,
             payee_name: (document.getElementById('cpay-payee').value || '').trim(),
             category: (document.getElementById('cpay-cat').value || '').trim() || '專案外包',
-            project_id: e.project_id || null,
-            cost_line_id: pre.cost_line_id || null,
-        };
+            project_id: pre.project_id || null,
+        });
         if (!body.summary || !body.amount) { crmToast('摘要與金額必填', true); return; }
         btn.disabled = true; btn.textContent = '處理中…';
         try {
-            await _cashCreateAndLinkPayment(e, body);
+            await _fetch('/payments', { method: 'POST', body: JSON.stringify(body) });
             ov.remove();
-            crmToast('已開請款單並掛回這一列（已付）');
+            crmToast('已開請款單');
             crmCacheInvalidate();
-            loadEntries({ cards: false });
         } catch (err) {
             btn.disabled = false; btn.textContent = '開請款單';
             crmToast(err.message || '請款失敗', true);
@@ -889,12 +908,8 @@ function renderList() {
         _shown = []; _drawn = 0;
         return;
     }
-    // 六日／假日是純前端篩（日期已在手上，不必為了它多跑一趟後端）
-    let _rows = _offOnly
-        ? _entries.filter((e) => { const m = _dayMark(e.entry_date);
-                                   return m.holiday || m.weekend; })
-        : _entries;
-    if (_kindOnly) _rows = _rows.filter((e) => _kindOf(e) === _kindOnly);     // 類別快篩（同上，純前端）
+    // 類別框打的字對不到分類樹節點時＝前端子字串篩（對得到節點的走後端 node_id，列已經是篩過的）
+    const _rows = _catQ ? _entries.filter((e) => _taxFull(e).toLowerCase().includes(_catQ)) : _entries;
     _shown = _sorter.sorted(_rows);
     _drawn = 0;
     body.innerHTML = '';
@@ -1215,7 +1230,7 @@ let _PASSTHROUGH = [];          // 發票代開那一類（後端 finance_catego
 // 列的「種類」（owner 2026-09-04：專案與發票代開用底色分開、沒填類別的淺紅底）——同一份判定給底色與快篩用
 const _kindOf = (e) => (!e.category ? 'none' : _LINKABLE.includes(e.category) ? 'project'
                        : _PASSTHROUGH.includes(e.category) ? 'passthrough' : '');
-let _kindOnly = '';             // 類別快篩：'' 全部／project／passthrough／none（純前端，列已在手上）
+let _catQ = '';                 // 類別框打的字（小寫）對不到節點時的前端子字串篩
 // 類別下拉的選項（正本是後端 finance_category_map）。這裡的值只是斷線 fallback ——
 // 寫死一份就會跟種子脫節：貸款繳款／貸款補貼／銀行借款 就是這樣漏掉的，
 // 結果對帳單匯入自己寫出來的列，使用者在編輯視窗選不到它的類別。
@@ -1886,27 +1901,6 @@ export async function initCrmCashbookTab() {
         _t = setTimeout(() => loadEntries({ cards: false }), 300);   // 搜尋不影響卡片餘額
     });
     // 篩選控件同理 —— 卡片餘額只跟 entity 有關
-    // 類別快篩（專案／發票代開／未分類）：跟六日一樣純前端；按鈕的 aria-pressed 就是狀態
-    document.getElementById('cash-filter-kind')?.addEventListener('click', (ev) => {
-        const b = ev.target.closest('button[data-kind]'); if (!b) return;
-        _kindOnly = b.dataset.kind === _kindOnly ? '' : b.dataset.kind;
-        for (const x of b.parentElement.querySelectorAll('button[data-kind]')) {
-            const on = x.dataset.kind === _kindOnly;
-            x.setAttribute('aria-pressed', String(on));
-            x.classList.toggle('crm-btn-primary', on); x.classList.toggle('crm-btn-secondary', !on);
-        }
-        renderList();
-    });
-    const _offBtn = document.getElementById('cash-filter-off');
-    if (_offBtn) {
-        _offBtn.addEventListener('click', () => {
-            _offOnly = !_offOnly;
-            _offBtn.setAttribute('aria-pressed', String(_offOnly));
-            _offBtn.classList.toggle('crm-btn-primary', _offOnly);
-            _offBtn.classList.toggle('crm-btn-secondary', !_offOnly);
-            renderList();
-        });
-    }
     // 批次分類（分類下拉的監聽在 _batchTaxDraw 裡 —— 動態長出來的，這裡綁不到）
     document.getElementById('cash-btn-batch')?.addEventListener('click',
         () => _batchSetMode(!_batch.on));

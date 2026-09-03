@@ -126,6 +126,7 @@ def _to_payment_dict(p, project_name: str = "", invoice_id: str = "",
         # （_invoice_link_for）。前端不必知道還有一條號碼比對的舊路 —— 那條規則
         # 抄到前端就會變成第三、第四份，而且空號比對的坑要在每一份各修一次。
         "source_invoice_id": invoice_id or p.source_invoice_id or "",
+        "cost_line_id": p.cost_line_id or "",   # 收支明細「請款」用它標「已請款」的費用配置行
         "project_id": p.project_id or "", "project_name": project_name,
         "project_label": p.project_label or "",
         "payment_date": p.payment_date.isoformat() if p.payment_date else None,

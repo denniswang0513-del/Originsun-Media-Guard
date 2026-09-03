@@ -160,13 +160,10 @@ def test_cashbook_marks_weekends_and_holidays():
         assert day in cal, f"假日清單少了 {day}"
     js = _read("frontend/tabs/crm/crm-cashbook.js")
     assert "tw-calendar.js" in js and "_dayMark" in js
-    # helper 要在模組層 —— 曾經被塞進 renderList 內部，事件處理器就抓不到 _offOnly
-    assert "\nlet _offOnly" in js, "篩選狀態要在模組層"
     assert "\nfunction _dayHtml" in js and "\nfunction _dayCls" in js
-    seg = js.split("function renderList")[1]
-    assert "_offOnly" in seg.split("_sorter.sorted(")[0], "renderList 要吃到六日/假日篩選"
+    # 六日／假日的**篩選鈕**已拿掉（owner 2026-09-04），日期格的假日標記還在
     html = _read("frontend/tabs/crm/crm-cashbook.html")
-    assert 'id="cash-filter-off"' in html
+    assert 'id="cash-filter-off"' not in html and "_offOnly" not in js
     css = _read("frontend/tabs/crm/crm.css")
     assert ".cash-wd" in css and "is-holiday" in css and "is-weekend" in css
 

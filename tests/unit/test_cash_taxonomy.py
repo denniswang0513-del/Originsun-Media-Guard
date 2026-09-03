@@ -78,9 +78,9 @@ def test_cashbook_ui_three_columns_and_cascading_filters():
     assert "o.tree" in js and "_indexTax" in js, "樹要從後端來並建索引"
     # 連動：每一層只列上一層底下的（規則只有 _taxKidsAt 一份，篩選與編輯共用）
     assert "_taxKidsAt = (chain, i)" in js
-    # 選「全部」＝退回上一層，不是整個清空（不然一路點下去就回不去了）
+    # 篩選框（owner 2026-09-04）：一個可打字的框，清單＝每個節點的完整路徑＋（未分類）；對到節點走 node_id、對不到走前端子字串
     seg = js_func_body(js, "function _syncTaxFilter()")
-    assert "chain[i - 1].id" in seg
+    assert 'id="cash-filter-cat"' in seg and "（未分類）" in seg and "_filters.node_id = byPath[v]" in seg and "_catQ = v.toLowerCase()" in seg
     ed = js.split("window._cashTaxEdit = (ev")[1].split("/** 刷卡金額")[0]
     assert "Math.min(level, chain.length)" in ed, "上層沒值時要從頭問（形不成路徑）"
     assert "_taxKidsAt(sel, i)" in ed, "每層的值域＝上一層的子節點（共用那份規則）"

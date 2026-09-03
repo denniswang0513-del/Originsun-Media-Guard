@@ -18,28 +18,30 @@ def test_backend_options_expose_passthrough_categories_from_category_map():
 
 def test_frontend_kind_is_one_rule_for_color_and_filter():
     js = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
-    assert "const _kindOf = (e) =>" in js and js.count("_kindOf(") >= 3
+    assert "const _kindOf = (e) =>" in js and js.count("_kindOf(") >= 2     # 底色（快篩鈕已改成打字框）
     kind = js[js.index("const _kindOf = (e) =>"):js.index("let _kindOnly")]
     assert "代開" not in kind, "種類判定不寫死類別名：代開那組從後端 passthrough_categories 拿"
     assert "_PASSTHROUGH = o.passthrough_categories" in js
     assert "' cash-kind-' + _kindOf(e)" in js
-    assert "_rows.filter((e) => _kindOf(e) === _kindOnly)" in js
+    # 快篩鈕已改成一個打字的類別框（owner 2026-09-04）；種類判定只剩底色在用
     html = repo_src("frontend/tabs/crm/crm-cashbook.html")
-    assert 'id="cash-filter-kind"' in html and html.count("data-kind=") == 3
+    assert 'id="cash-filter-kind"' not in html and 'id="cash-filter-off"' not in html
     css = repo_src("frontend/tabs/crm/crm.css")
-    for k in ("project", "passthrough", "none"):
+    for k in ("project", "passthrough"):
         assert f".crm-row.cash-kind-{k} {{" in css, k
+    assert ".crm-row.cash-kind-none {" not in css, "只有專案與發票代開上色（owner 2026-09-04）"
     assert ".crm-row.cash-kind-project.selected" in css, "選中色要蓋得過種類底色"
 
 
 def test_request_payment_from_cash_row():
-    """收支明細列的「請款」（owner 2026-09-04）：有連專案→列該案費用配置挑一行開單（帶 cost_line_id，後端擋重複）；
-    沒連→提示連結專案或直接自訂一張。開完掛回這一列並標已付（錢已經出去了）。"""
+    """收入列的「請款」（owner 2026-09-04）：收到案子的款→幫案子裡的人開應付款（多選費用配置、一行一張、帶 cost_line_id、
+    不掛回這一列、不標已付）。沒掛案→先看發票的案；再沒有→提示連結專案或直接開一張。支出列不放（owner：支出的請款拿掉）。"""
     js = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
-    assert "function _payMenu(e)" in js and "..._payMenu(e)" in js
-    assert "window._cashRequestPay = async (id) =>" in js and "/cost-lines" in js
-    link = code_only(func_body(js, "async function _cashCreateAndLinkPayment(e, body)"))
-    assert "_fetch('/payments', { method: 'POST'" in link
-    assert "/payments`, { method: 'PUT'" in link and "/payments/batch-pay" in link, "開單後要掛回這一列並標已付"
-    assert "cost_line_id: pre.cost_line_id || null" in js
-    assert "data-act=\"link\"" in js and "data-act=\"custom\"" in js, "沒專案時要有「連結專案」與「直接請款」"
+    assert "const _isIncomeRow = (e) =>" in js and "..._payMenu(e)" in js
+    assert "if (e.split_count || !_isIncomeRow(e)) return [];" in code_only(func_body(js, "function _payMenu(e)"))
+    assert "window._cashRequestPay = async (id) =>" in js and "/invoices/' + e.invoice_id" in js
+    inc = code_only(func_body(js, "async function _cashPayForProject(e, pid, pname)"))
+    assert "/cost-lines" in inc and "/payments?project_id=" in inc and "cost_line_id: l.id" in inc
+    assert "batch-pay" not in js and "/cash-entries/${e.id}/payments" not in js, "請款不掛回這一列、不標已付"
+    assert "payment_status: '應付款'" in js
+    assert 'data-act="link"' in js and 'data-act="custom"' in js, "沒案時要有「連結專案」與「直接請款」"
