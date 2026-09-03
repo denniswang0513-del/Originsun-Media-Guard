@@ -57,6 +57,15 @@ async function render() {
     }
 }
 
+/** 借一個畫好的分頁宿主（不切 hash）：專案抽屜把發票／記雜支表單搬進去用。preset 先設好再呼叫，render 會套。 */
+state.ensureView = async (tab) => {
+    const host = _host(tab);
+    const first = !host.dataset.ready;
+    host.dataset.ready = '1';
+    await VIEWS[tab].render(host, { first });
+    return host;
+};
+
 async function main() {
     const me = await boot({ gate });
     state.me = me;

@@ -5,7 +5,7 @@
  */
 import { mfetch, toast, esc, money, fmtDate } from '../shell.js';
 import { state, list, lostPhase, opt, selectOpts, pickerHtml, mountPicker, skeleton, emptyBox, errBox, pill, statusPill,
-         moneyCell, withBusy, openSheet, closeSheet, switchTab, markStale, shouldLoad } from '../ui.js';
+         moneyCell, withBusy, openSheet, closeSheet, embedHost, unembedHost, markStale, shouldLoad } from '../ui.js';
 
 const PAGE = 30;
 const st = { phase: '', q: '', items: [], offset: 0, total: 0, loading: false };
@@ -168,15 +168,25 @@ export async function openProject(id) {
     catch (e) { body.innerHTML = errBox(e); return; }
     const p = d.project || {};
     body.innerHTML = detailHtml(d);
-    // 四顆動作像分段按鈕：打開哪個功能哪顆就藍（owner 2026-09-03），再按一次收起來；開發票／記雜支是跳到別的畫面
+    // 四顆動作像分段按鈕：打開哪個功能哪顆就藍（owner 2026-09-03），再按一次收起來。
+    // 開發票／記雜支也在按鈕下面原地展開（owner：不要跳到另一個畫面）：把那個分頁的宿主搬進來，不開 /expense.html。
     const acts = body.querySelectorAll('[data-act]');
-    acts.forEach(b => b.addEventListener('click', () => {
-        if (b.dataset.act === 'invoice') { state.invoicePreset = p.id; closeSheet(); switchTab('invoice'); return; }
-        if (b.dataset.act === 'expense') { state.expensePreset = p.id; closeSheet(); switchTab('expense'); return; }   // 頁內畫面，不開 /expense.html（主畫面模式會彈內建瀏覽器）
+    acts.forEach(b => b.addEventListener('click', async () => {
+        const box = document.getElementById('pj-act-box');
         const again = b.classList.contains('pri');
         acts.forEach(x => x.classList.toggle('pri', x === b && !again));
-        if (again) { document.getElementById('pj-act-box').innerHTML = ''; return; }
-        actionBox(b.dataset.act, p);
+        unembedHost();
+        box.innerHTML = '';
+        if (again) return;
+        const kind = b.dataset.act;
+        if (kind === 'invoice' || kind === 'expense') {
+            if (kind === 'invoice') state.invoicePreset = p.id; else state.expensePreset = p.id;
+            box.innerHTML = skeleton(2);
+            try { const host = await state.ensureView(kind); box.innerHTML = ''; embedHost(box, host); }
+            catch (e) { box.innerHTML = errBox(e); }
+            return;
+        }
+        actionBox(kind, p);
     }));
 }
 

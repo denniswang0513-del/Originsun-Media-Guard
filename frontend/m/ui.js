@@ -177,8 +177,25 @@ export async function withBusy(btn, fn) {
 
 // ── 底部抽屜 ──
 const sheet = () => document.getElementById('m-sheet');
+/** 把某個分頁的宿主搬進別的容器：專案抽屜「開發票／記雜支」在按鈕下面原地展開（owner 2026-09-03「不要跳到另一個畫面」），
+ *  表單程式與 DOM 都只有一份（id 不會撞）。關抽屜、換動作、重畫抽屜時 unembedHost 搬回 #m-view 藏起來。 */
+export function embedHost(container, host) {
+    unembedHost();
+    container.appendChild(host);
+    host.hidden = false;
+    state._embedded = host;
+}
+export function unembedHost() {
+    const h = state._embedded;
+    if (!h) return;
+    document.getElementById('m-view').appendChild(h);
+    h.hidden = true;
+    state._embedded = null;
+}
+
 export function openSheet(html) {
     const s = sheet();
+    unembedHost();     // innerHTML 會把搬進來的宿主一起清掉，先搬回去
     document.getElementById('m-sheet-body').innerHTML = html;
     s.hidden = false;
     document.body.style.overflow = 'hidden';
@@ -186,6 +203,7 @@ export function openSheet(html) {
     return document.getElementById('m-sheet-body');
 }
 export function closeSheet() {
+    unembedHost();
     sheet().hidden = true;
     document.body.style.overflow = '';
 }

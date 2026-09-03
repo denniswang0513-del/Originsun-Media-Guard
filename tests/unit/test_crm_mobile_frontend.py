@@ -238,7 +238,8 @@ def test_expense_is_an_in_app_route_not_a_popup():
     手機版自己有 views/expense.js（路由 #expense，從專案抽屜進），專案抽屜不准再連 /expense.html。"""
     pj = js_code_only(repo_src("frontend/m/views/projects.js"))
     assert "/expense.html" not in pj and "data-act=\"expense\"" in pj
-    assert "switchTab('expense')" in pj
+    assert "ensureView(" in pj and "embedHost(" in pj, "開發票／記雜支在抽屜裡原地展開（owner：不要跳到另一個畫面）"
+    assert "switchTab('expense')" not in pj and "switchTab('invoice')" not in pj
     ui = repo_src("frontend/m/ui.js")
     assert "export const ROUTES = [...TABS, 'expense']" in ui, "expense 是路由不是分頁（分頁列維持五個）"
     exp = js_code_only(repo_src("frontend/m/views/expense.js"))
