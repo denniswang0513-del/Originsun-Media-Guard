@@ -163,6 +163,8 @@
     border-radius:16px 16px 0 0; border-top:1px solid var(--line); padding:8px 14px 20px;
     animation:m-up .18s ease-out; -webkit-overflow-scrolling:touch; }
   @keyframes m-up { from { transform:translateY(40px); opacity:.6; } to { transform:none; opacity:1; } }
+  #m-sheet .x { position:sticky; top:0; float:right; z-index:1; width:40px; height:40px; margin:0 -6px 0 0; border:0; border-radius:20px;
+    background:#333; color:#fff; font-size:26px; line-height:40px; text-align:center; padding:0; }   /* 打叉關閉（owner 2026-09-04）；sticky 讓抽屜捲下去也還在 */
   #m-sheet .grip { width:40px; height:4px; border-radius:2px; background:var(--line); margin:4px auto 12px; }
   #m-sheet .ttl { font-size:17px; font-weight:700; color:#fff; line-height:1.35; margin-bottom:4px; }
   .kv { display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px solid #2e2e2e; font-size:14px; }
@@ -221,7 +223,7 @@
 
 <div id="m-sheet" hidden>
   <div class="bd"></div>
-  <div class="pn"><div class="grip"></div><div id="m-sheet-body"></div></div>
+  <div class="pn"><button type="button" class="x" id="m-sheet-x" aria-label="關閉">&times;</button><div class="grip"></div><div id="m-sheet-body"></div></div>
 </div>
 
 <script type="module" src="./crm.js"></script>

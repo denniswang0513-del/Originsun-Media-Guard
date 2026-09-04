@@ -283,3 +283,10 @@ def test_invoice_segments_can_be_blank_and_cards_can_be_deleted():
         assert "{ blank: true }" in src.split(f"segHtml('{seg}'", 1)[1].split("}")[0] + "}", seg
     assert "data-del=" in src and "method: 'DELETE'" in src and "window.confirm(" in src
     assert "applicants[0]" not in src, "申請人沒記過就空白，不預選第一個"
+
+
+def test_sheet_has_a_close_button():
+    """owner 2026-09-04：底部抽屜要有打叉，不只點暗處才能關。"""
+    html = repo_src("frontend/m/crm.html")
+    assert 'id="m-sheet-x"' in html and "#m-sheet .x" in html
+    assert "querySelector('.x').addEventListener('click', closeSheet)" in js_code_only(repo_src("frontend/m/ui.js"))

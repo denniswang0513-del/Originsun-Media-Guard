@@ -221,4 +221,5 @@ export function closeSheet() {
 
 export function initSheet() {
     sheet().querySelector('.bd').addEventListener('click', closeSheet);
+    sheet().querySelector('.x').addEventListener('click', closeSheet);
 }
