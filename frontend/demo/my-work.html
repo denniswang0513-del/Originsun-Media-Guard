@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>示範｜我的工作（員工視角）</title>
+<style>
+  :root { --bg:#1a1a1a; --card:#2a2a2a; --line:#3a3a3a; --ink:#e0e0e0; --sub:#9ca3af;
+          --pri:#3b82f6; --ok:#86efac; --warn:#fbbf24; --bad:#fca5a5; --field:#1e1e1e; --num:#f59e0b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#111; color:var(--ink); font:14px/1.5 -apple-system,"Segoe UI","Noto Sans TC",sans-serif; }
+  a { color:var(--pri); }
+
+  /* ── 示範頁外殼 ── */
+  .top { position:sticky; top:0; z-index:10; background:#111; border-bottom:1px solid var(--line); padding:10px 18px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .top h1 { font-size:16px; margin:0; }
+  .top .note { color:var(--sub); font-size:12px; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button { background:none; border:0; color:var(--sub); padding:6px 14px; cursor:pointer; font-size:13px; }
+  .seg button.on { background:var(--pri); color:#fff; }
+  .stage { display:flex; gap:24px; padding:20px 18px 60px; align-items:flex-start; }
+  .legend { width:300px; flex:none; position:sticky; top:58px; }
+  .legend h2 { font-size:13px; color:var(--sub); margin:0 0 8px; font-weight:600; }
+  .legend ol { margin:0; padding:0; list-style:none; }
+  .legend li { display:flex; gap:10px; padding:8px 0; border-bottom:1px solid #222; font-size:13px; }
+  .legend li b { display:block; color:#fff; font-weight:600; }
+  .legend li span { color:var(--sub); font-size:12px; }
+  .n { flex:none; width:22px; height:22px; border-radius:50%; background:var(--num); color:#111; font-weight:700; font-size:12px; display:inline-flex; align-items:center; justify-content:center; }
+  .tag { position:absolute; top:-9px; left:-9px; z-index:2; }
+  .rel { position:relative; }
+  @media (max-width:900px) { .stage { flex-direction:column; } .legend { width:auto; position:static; } }
+
+  /* ── 共用小元件 ── */
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; border:1px solid var(--line); color:var(--sub); font-size:11px; white-space:nowrap; }
+  .pill.pri { border-color:var(--pri); color:var(--pri); } .pill.ok { border-color:#2f6b3a; color:var(--ok); }
+  .pill.warn { border-color:#7a5a10; color:var(--warn); } .pill.bad { border-color:#7a2f2f; color:var(--bad); }
+  .bar { height:6px; background:#333; border-radius:3px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--pri); } .bar i.over { background:#c9372c; } .bar i.ok { background:#3a9d5d; }
+  .sub { color:var(--sub); font-size:12px; }
+  .btn { min-height:40px; border:1px solid var(--line); border-radius:10px; background:var(--field); color:var(--ink); padding:0 14px; font-size:14px; }
+  .btn.pri { background:var(--pri); border-color:var(--pri); color:#fff; font-weight:600; }
+  .btn.sm { min-height:30px; font-size:12px; padding:0 10px; border-radius:8px; }
+
+  /* ── 手機框 ── */
+  .phone { width:390px; flex:none; margin:0 auto; border:10px solid #000; border-radius:44px; background:var(--bg); overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+  .phone .bar-top { height:42px; display:flex; align-items:center; justify-content:center; font-size:13px; color:#fff; font-weight:600; background:#000; }
+  .m-hd { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--line); }
+  .m-hd .who { text-align:center; } .m-hd .who b { display:block; font-size:15px; } .m-hd .who span { font-size:11px; color:var(--sub); }
+  .m-hd .btn { min-height:34px; font-size:13px; padding:0 12px; }
+  .m-body { height:720px; overflow-y:auto; padding:12px 14px 20px; }
+  .m-h { font-size:12px; color:var(--sub); font-weight:700; margin:14px 0 8px; display:flex; justify-content:space-between; align-items:center; }
+  .m-card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px; }
+  .m-card .t { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; } .m-card .name { font-weight:600; font-size:15px; }
+  .m-card .row { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:8px; }
+  .m-tabs { display:flex; border-top:1px solid var(--line); background:var(--bg); }
+  .m-tabs div { flex:1; text-align:center; padding:10px 0 12px; font-size:12px; color:var(--sub); }
+  .m-tabs div i { display:block; width:22px; height:22px; margin:0 auto 4px; border:2px solid var(--sub); border-radius:6px; }
+  .m-tabs div.on { color:var(--pri); } .m-tabs div.on i { border-color:var(--pri); background:rgba(59,130,246,.25); }
+  .timer { display:flex; align-items:center; gap:12px; background:linear-gradient(135deg,#1e3a5f,#16324f); border:1px solid #2b5c9e; border-radius:12px; padding:12px; }
+  .timer .clock { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .timer .btn { margin-left:auto; }
+  .todo { display:flex; gap:10px; align-items:flex-start; padding:10px 0; border-bottom:1px solid #333; }
+  .todo:last-child { border-bottom:0; } .todo .dot { flex:none; width:8px; height:8px; border-radius:50%; margin-top:7px; }
+  .todo .dot.bad { background:var(--bad); } .todo .dot.warn { background:var(--warn); } .todo .dot.pri { background:var(--pri); }
+  .todo b { display:block; font-weight:600; } .todo .sub { display:block; }
+  .tl { position:relative; padding-left:18px; }
+  .tl::before { content:""; position:absolute; left:5px; top:6px; bottom:6px; width:2px; background:#333; }
+  .tl .ev { position:relative; padding:0 0 12px; } .tl .ev::before { content:""; position:absolute; left:-17px; top:5px; width:8px; height:8px; border-radius:50%; background:var(--pri); }
+  .tl .ev.done::before { background:var(--ok); }
+  .quick { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:6px; }
+  .quick .btn { font-size:13px; }
+
+  /* ── 電腦版 ── */
+  .desk { flex:1; min-width:0; background:var(--bg); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .d-top { display:flex; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--line); background:#202020; }
+  .d-top h2 { margin:0; font-size:17px; } .d-top .sp { flex:1; }
+  .d-top .tabs { display:flex; gap:4px; } .d-top .tabs span { padding:6px 12px; border-radius:8px; color:var(--sub); font-size:13px; } .d-top .tabs span.on { background:#2f2f2f; color:#fff; }
+  .d-grid { display:grid; grid-template-columns:300px 1fr 320px; gap:14px; padding:14px 18px; }
+  @media (max-width:1300px) { .d-grid { grid-template-columns:1fr 1fr; } } @media (max-width:900px) { .d-grid { grid-template-columns:1fr; } }
+  .d-card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
+  .d-card h3 { margin:0 0 10px; font-size:13px; color:var(--sub); font-weight:700; display:flex; justify-content:space-between; align-items:center; }
+  table.pj { width:100%; border-collapse:collapse; font-size:13px; }
+  table.pj th { text-align:left; color:var(--sub); font-weight:600; font-size:12px; padding:6px 8px; border-bottom:1px solid var(--line); }
+  table.pj td { padding:10px 8px; border-bottom:1px solid #333; vertical-align:top; }
+  table.pj tr:last-child td { border-bottom:0; }
+  table.pj .pn { font-weight:600; } table.pj .pn .sub { display:block; font-weight:400; }
+  table.pj .bar { width:120px; margin-top:4px; }
+  .week { display:flex; gap:6px; align-items:flex-end; height:90px; margin-top:8px; }
+  .week div { flex:1; background:#333; border-radius:4px 4px 0 0; position:relative; }
+  .week div i { position:absolute; left:0; right:0; bottom:0; background:var(--pri); border-radius:4px 4px 0 0; }
+  .week div i.shoot { background:#8b5cf6; }
+  .week div span { position:absolute; left:0; right:0; top:100%; text-align:center; font-size:11px; color:var(--sub); margin-top:4px; }
+  .kpi { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .kpi div { background:var(--field); border:1px solid var(--line); border-radius:10px; padding:10px; }
+  .kpi b { display:block; font-size:20px; } .kpi span { font-size:11px; color:var(--sub); }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>示範｜我的工作（員工視角）</h1>
+  <div class="seg" id="seg"><button class="on" data-v="m">手機版</button><button data-v="d">電腦版</button></div>
+  <span class="note">假資料，不連後端。橘色編號對應右側（手機下方）的設計說明；請直接指著編號給意見。</span>
+</div>
+
+<div class="stage">
+
+<!-- ═══════════ 手機版 ═══════════ -->
+<div class="phone rel" id="view-m">
+  <div class="bar-top">11:55</div>
+  <div class="m-hd">
+    <button class="btn">上一頁</button>
+    <div class="who"><b>源日 CRM</b><span>我的工作｜小葉（剪輯）</span></div>
+    <button class="btn">首頁</button>
+  </div>
+  <div class="m-body">
+
+    <div class="rel"><span class="tag n">1</span>
+    <div class="timer">
+      <div><div class="sub">正在做</div><div style="font-weight:600;">桃園環保局 循環杯廣告</div><div class="sub">初剪 · 從 09:12 開始</div></div>
+      <div class="clock">2:43</div>
+      <button class="btn sm">結束</button>
+    </div>
+    </div>
+
+    <div class="m-h">今天 9/5（五）<span class="pill">拍攝日</span></div>
+    <div class="m-card rel"><span class="tag n">2</span>
+      <div class="t"><div class="name">09:00 桃園環保局 現場側拍</div><span class="pill pri">現場</span></div>
+      <div class="sub">桃園市藝文廣場 · 導演 阿弘 · 我：攝影助理</div>
+      <div class="row"><span class="sub">器材：A7S3 ×1、燈 ×2 已領</span><button class="btn sm">到場打卡</button></div>
+    </div>
+    <div class="m-card">
+      <div class="t"><div class="name">14:00 南山人壽謝經理 定剪交件</div><span class="pill warn">今天到期</span></div>
+      <div class="sub">客戶看片連結要在 17:00 前送出</div>
+    </div>
+
+    <div class="m-h">大家今天在做什麼<span class="sub">9 人</span></div>
+    <div class="m-card rel"><span class="tag n">9</span>
+      <div class="todo"><span class="dot pri"></span><div><b>阿弘 · 現場</b><span class="sub">桃園環保局 側拍（導演）· 09:00 起 · 桃園市藝文廣場</span></div></div>
+      <div class="todo"><span class="dot pri"></span><div><b>小葉（我）· 現場 → 後製</b><span class="sub">上午桃園環保局攝助，下午南山人壽定剪</span></div></div>
+      <div class="todo"><span class="dot warn"></span><div><b>王士源 · 外出</b><span class="sub">14:00 台新基金會 提案會議</span></div></div>
+      <div class="todo"><span class="dot ok" style="background:var(--ok)"></span><div><b>Amy · 後製</b><span class="sub">煥民新村 粗剪 · 辦公室</span></div></div>
+      <div class="todo"><span class="dot" style="background:#555"></span><div><b>阿凱 · 休假</b><span class="sub">9/5–9/6</span></div></div>
+      <button class="btn sm" style="margin-top:8px;">看全部 9 人</button>
+    </div>
+
+    <div class="m-h">等我處理 <span class="pill bad">3</span></div>
+    <div class="m-card rel"><span class="tag n">3</span>
+      <div class="todo"><span class="dot bad"></span><div><b>工時被退回：8/29 台新高德亮個展 6 小時</b><span class="sub">主管：那天是外拍，工項要選「拍攝」不是「後製」</span></div></div>
+      <div class="todo"><span class="dot warn"></span><div><b>客戶審批待你回覆</b><span class="sub">南山人壽 v2 看片有 2 則留言，第 00:42 要改字幕</span></div></div>
+      <div class="todo"><span class="dot pri"></span><div><b>器材未歸還：Ronin RS3</b><span class="sub">9/2 領的，明天有別場要用</span></div></div>
+    </div>
+
+    <div class="m-h">我的案子（本週）<span class="sub">4 案 · 32 / 40 小時</span></div>
+    <div class="m-card rel"><span class="tag n">4</span>
+      <div class="t"><div class="name">桃園環保局 循環杯廣告</div><span class="pill pri">製作中</span></div>
+      <div class="sub">桃園市環保局 · 我：剪輯、攝助 · AM 蘇家弘</div>
+      <div class="row"><span class="sub">我的工時 14 / 20 小時</span><span class="sub">70%</span></div>
+      <div class="bar"><i style="width:70%"></i></div>
+      <div class="row"><span class="sub">下一步：9/8 初剪給客戶</span><span class="pill">已請款</span></div>
+    </div>
+    <div class="m-card">
+      <div class="t"><div class="name">南山人壽謝經理</div><span class="pill warn">定剪</span></div>
+      <div class="sub">域創股份有限公司 · 我：剪輯 · AM 蘇家弘</div>
+      <div class="row"><span class="sub">我的工時 22 / 18 小時</span><span class="sub" style="color:var(--bad)">超 4 小時</span></div>
+      <div class="bar"><i class="over" style="width:100%"></i></div>
+      <div class="row"><span class="sub">下一步：今天交件</span><span class="pill ok">已付款</span></div>
+    </div>
+    <div class="m-card">
+      <div class="t"><div class="name">台新高德亮個展</div><span class="pill ok">結案</span></div>
+      <div class="sub">台新銀行文化藝術基金會 · 我：攝影 · AM 蘇家弘</div>
+      <div class="row"><span class="sub">我的工時 6 / 6 小時</span><span class="pill">未收款</span></div>
+      <div class="bar"><i class="ok" style="width:100%"></i></div>
+    </div>
+    <button class="btn" style="width:100%;">看全部 8 案</button>
+
+    <div class="m-h">我做過的</div>
+    <div class="m-card rel"><span class="tag n">5</span>
+      <div class="tl">
+        <div class="ev done"><div>9/3 <b>台新高德亮個展</b> 結案上架</div><div class="sub">作品集已公開 · 你掛名攝影</div></div>
+        <div class="ev done"><div>9/1 <b>南山人壽</b> v2 初剪送審</div><div class="sub">客戶 2 則留言</div></div>
+        <div class="ev"><div>8/29 <b>台新高德亮個展</b> 外拍 6 小時</div><div class="sub">工時退回待修</div></div>
+        <div class="ev done"><div>8/27 <b>煥民新村開村活動</b> 素材備份完成</div><div class="sub">532 檔 · 報表已出</div></div>
+      </div>
+    </div>
+
+    <div class="m-h">本週工時<span class="sub">32 / 40</span></div>
+    <div class="m-card rel"><span class="tag n">6</span>
+      <div class="week">
+        <div style="height:100%"><i style="height:80%"></i><span>一</span></div>
+        <div style="height:100%"><i style="height:90%"></i><span>二</span></div>
+        <div style="height:100%"><i class="shoot" style="height:100%"></i><span>三</span></div>
+        <div style="height:100%"><i style="height:60%"></i><span>四</span></div>
+        <div style="height:100%"><i style="height:30%"></i><span>五</span></div>
+      </div>
+      <div class="row" style="margin-top:22px;"><span class="sub">紫＝拍攝、藍＝後製</span><span class="sub">還差 8 小時填齊</span></div>
+    </div>
+
+    <div class="m-h">查專案<span class="sub">全公司 312 案</span></div>
+    <div class="m-card rel"><span class="tag n">10</span>
+      <input class="btn" style="width:100%; text-align:left; color:var(--sub);" value="打字找案名、客戶、年份、誰做的…" readonly>
+      <div class="row" style="margin-top:8px;"><span class="pill pri">2026</span><span class="pill">2025</span><span class="pill">結案</span><span class="pill">製作中</span><span class="pill">我參與的</span></div>
+      <div class="todo" style="margin-top:6px;"><span class="dot" style="background:var(--ok)"></span><div><b>2026 台灣光環境獎</b><span class="sub">中強光電文化藝術基金會 · 結案 8/20 · 拍攝 6/12–6/14 · 導演 阿弘、攝影 小葉 · 作品已上架</span></div></div>
+      <div class="todo"><span class="dot pri"></span><div><b>煥民新村開村活動</b><span class="sub">新北市文化局 · 後製中 · 拍攝 8/14–8/16 · 下一步 9/10 粗剪 · 素材報表 3 份</span></div></div>
+      <div class="todo"><span class="dot" style="background:#555"></span><div><b>26_0420 捕鯨 淡水謝新曦田調</b><span class="sub">自製 · 田調完成 6/19 · 素材 74 檔 · 未立案</span></div></div>
+      <div class="sub" style="margin-top:8px;">點進去看：階段時間線、拍攝日與地點、誰做了什麼、素材／報表／看片連結、作品頁。不顯示報價與帳款金額。</div>
+    </div>
+
+    <div class="m-h">快速記錄</div>
+    <div class="quick rel"><span class="tag n">7</span>
+      <button class="btn">記工時</button><button class="btn">記雜支</button><button class="btn">登記拍攝</button>
+    </div>
+  </div>
+  <div class="m-tabs">
+    <div class="on"><i></i>我的工作</div><div><i></i>發票</div><div><i></i>零用金</div><div><i></i>專案</div><div><i></i>行事曆</div>
+  </div>
+</div>
+
+<!-- ═══════════ 電腦版 ═══════════ -->
+<div class="desk hidden" id="view-d">
+  <div class="d-top">
+    <h2>你好，小葉</h2>
+    <div class="tabs"><span class="on">我的工作</span><span>我的一天</span><span>週誌</span><span>請假</span><span>福委會</span><span>私帳</span></div>
+    <div class="sp"></div>
+    <span class="sub">9/1 – 9/5 這週</span>
+    <button class="btn sm">上一週</button><button class="btn sm">下一週</button>
+  </div>
+  <div class="d-grid">
+
+    <div>
+      <div class="d-card rel"><span class="tag n">1</span>
+        <h3>正在做</h3>
+        <div class="timer"><div><div style="font-weight:600;">桃園環保局 循環杯廣告</div><div class="sub">初剪 · 09:12 起</div></div><div class="clock">2:43</div><button class="btn sm">結束</button></div>
+        <div class="sub" style="margin-top:8px;">結束時自動填一列工時：案子、工項、時數都帶好，你只要確認。</div>
+      </div>
+      <div class="d-card rel"><span class="tag n">2</span>
+        <h3>今天 9/5（五）<span class="pill">拍攝日</span></h3>
+        <div class="todo"><span class="dot pri"></span><div><b>09:00 桃園環保局 現場側拍</b><span class="sub">桃園市藝文廣場 · 導演 阿弘 · 器材 3 件已領</span></div></div>
+        <div class="todo"><span class="dot warn"></span><div><b>14:00 南山人壽 定剪交件</b><span class="sub">看片連結 17:00 前送出</span></div></div>
+      </div>
+      <div class="d-card rel"><span class="tag n">9</span>
+        <h3>大家今天在做什麼<span class="sub">9 人 · 3 現場 · 4 後製 · 1 外出 · 1 休假</span></h3>
+        <div class="todo"><span class="dot pri"></span><div><b>阿弘 · 現場</b><span class="sub">桃園環保局 側拍（導演）· 桃園市藝文廣場</span></div></div>
+        <div class="todo"><span class="dot pri"></span><div><b>小葉（我）· 現場 → 後製</b><span class="sub">上午桃園環保局，下午南山人壽定剪</span></div></div>
+        <div class="todo"><span class="dot warn"></span><div><b>王士源 · 外出</b><span class="sub">14:00 台新基金會 提案會議</span></div></div>
+        <div class="todo"><span class="dot" style="background:var(--ok)"></span><div><b>Amy · 後製</b><span class="sub">煥民新村 粗剪</span></div></div>
+        <div class="todo"><span class="dot" style="background:#555"></span><div><b>阿凱 · 休假</b><span class="sub">9/5–9/6</span></div></div>
+        <div class="sub" style="margin-top:8px;">來源：行事曆拍攝場次、請假、正在做的計時器。沒開計時器的人顯示「今天還沒紀錄」，不猜。</div>
+      </div>
+      <div class="d-card rel"><span class="tag n">3</span>
+        <h3>等我處理 <span class="pill bad">3</span></h3>
+        <div class="todo"><span class="dot bad"></span><div><b>工時被退回</b><span class="sub">8/29 台新高德亮個展 6 小時：工項要選「拍攝」</span><button class="btn sm" style="margin-top:6px;">改一下</button></div></div>
+        <div class="todo"><span class="dot warn"></span><div><b>客戶審批待回覆</b><span class="sub">南山人壽 v2：2 則留言</span></div></div>
+        <div class="todo"><span class="dot pri"></span><div><b>器材未歸還：Ronin RS3</b><span class="sub">明天有別場要用</span></div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="d-card rel"><span class="tag n">4</span>
+        <h3>我的案子（本週有動的 4 案）<span class="sub">只看我參與的 · 金額不顯示，只有狀態</span></h3>
+        <table class="pj">
+          <thead><tr><th>案子</th><th>我的角色</th><th>我的工時 / 預算</th><th>下一步</th><th>階段</th><th>帳款</th></tr></thead>
+          <tbody>
+            <tr><td class="pn">桃園環保局 循環杯廣告<span class="sub">桃園市環保局 · AM 蘇家弘</span></td><td>剪輯、攝助</td><td>14 / 20 小時<div class="bar"><i style="width:70%"></i></div></td><td>9/8 初剪給客戶</td><td><span class="pill pri">製作中</span></td><td><span class="pill">已請款</span></td></tr>
+            <tr><td class="pn">南山人壽謝經理<span class="sub">域創股份有限公司 · AM 蘇家弘</span></td><td>剪輯</td><td>22 / 18 小時 <span style="color:var(--bad)">超 4</span><div class="bar"><i class="over" style="width:100%"></i></div></td><td>今天 14:00 交件</td><td><span class="pill warn">定剪</span></td><td><span class="pill ok">已付款</span></td></tr>
+            <tr><td class="pn">台新高德亮個展<span class="sub">台新銀行文化藝術基金會</span></td><td>攝影</td><td>6 / 6 小時<div class="bar"><i class="ok" style="width:100%"></i></div></td><td>—</td><td><span class="pill ok">結案</span></td><td><span class="pill">未收款</span></td></tr>
+            <tr><td class="pn">煥民新村開村活動<span class="sub">新北市文化局</span></td><td>DIT、攝助</td><td>4 / 8 小時<div class="bar"><i style="width:50%"></i></div></td><td>9/10 粗剪</td><td><span class="pill pri">後製</span></td><td><span class="pill">已請款</span></td></tr>
+          </tbody>
+        </table>
+        <div class="sub" style="margin-top:8px;">點案名進專案頁只看得到自己相關的分頁（企劃、素材、拍攝紀錄）；報價、收付款對沒權限的人不出現。</div>
+      </div>
+      <div class="d-card rel"><span class="tag n">10</span>
+        <h3>查專案<span class="sub">全公司 312 案，所有人都可查</span></h3>
+        <div style="display:flex; gap:8px; margin-bottom:8px;"><input class="btn" style="flex:1; text-align:left; color:var(--sub);" value="打字找案名、客戶、年份、誰做的…" readonly><span class="pill pri">2026</span><span class="pill">結案</span><span class="pill">我參與的</span></div>
+        <table class="pj">
+          <thead><tr><th>案子</th><th>客戶</th><th>拍攝</th><th>階段</th><th>做的人</th><th>成果</th></tr></thead>
+          <tbody>
+            <tr><td class="pn">2026 台灣光環境獎</td><td>中強光電文化藝術基金會</td><td>6/12–6/14</td><td><span class="pill ok">結案 8/20</span></td><td>阿弘、小葉</td><td><a href="#">作品頁</a> · 報表 2</td></tr>
+            <tr><td class="pn">煥民新村開村活動</td><td>新北市文化局</td><td>8/14–8/16</td><td><span class="pill pri">後製 · 9/10 粗剪</span></td><td>阿弘、Amy、小葉</td><td>報表 3 · 看片 v1</td></tr>
+            <tr><td class="pn">三日苗 Report</td><td>自製</td><td>4/28–5/1</td><td><span class="pill">歸檔</span></td><td>阿凱</td><td>報表 1</td></tr>
+            <tr><td class="pn">26_0420 捕鯨 淡水謝新曦田調</td><td>自製</td><td>6/19</td><td><span class="pill">田調完成</span></td><td>王士源</td><td>素材 74 檔</td></tr>
+          </tbody>
+        </table>
+        <div class="sub" style="margin-top:8px;">點進去：階段時間線、拍攝日與地點、誰做了什麼、素材／報表／看片連結、作品頁。報價與帳款金額不出現，帳款只有狀態字。</div>
+      </div>
+      <div class="d-card rel"><span class="tag n">6</span>
+        <h3>本週工時<span class="sub">32 / 40 · 還差 8 小時填齊</span></h3>
+        <div class="kpi"><div><b>32</b><span>已填小時</span></div><div><b>1</b><span>拍攝日</span></div><div><b>78%</b><span>掛在專案上</span></div></div>
+        <div class="week" style="margin-top:14px;">
+          <div style="height:100%"><i style="height:80%"></i><span>一 6.5</span></div>
+          <div style="height:100%"><i style="height:90%"></i><span>二 7</span></div>
+          <div style="height:100%"><i class="shoot" style="height:100%"></i><span>三 9</span></div>
+          <div style="height:100%"><i style="height:60%"></i><span>四 5</span></div>
+          <div style="height:100%"><i style="height:30%"></i><span>五 2.5 +</span></div>
+        </div>
+        <div class="sub" style="margin-top:24px;">「掛在專案上」低於七成會提醒：內部桶（行政、進修）不算產能。這是給自己看的，不是考核。</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="d-card rel"><span class="tag n">5</span>
+        <h3>我做過的</h3>
+        <div class="tl">
+          <div class="ev done"><div>9/3 <b>台新高德亮個展</b> 結案上架</div><div class="sub">作品集已公開，你掛名攝影 <a href="#">看作品</a></div></div>
+          <div class="ev done"><div>9/1 <b>南山人壽</b> v2 初剪送審</div><div class="sub">客戶 2 則留言</div></div>
+          <div class="ev"><div>8/29 <b>台新高德亮個展</b> 外拍 6 小時</div><div class="sub">工時退回待修</div></div>
+          <div class="ev done"><div>8/27 <b>煥民新村</b> 素材備份完成</div><div class="sub">532 檔，報表已出</div></div>
+          <div class="ev done"><div>8/22 <b>煥民新村開村活動</b> 三天拍攝</div><div class="sub">DIT、攝助</div></div>
+        </div>
+        <button class="btn sm" style="margin-top:6px;">今年做過的 23 案</button>
+      </div>
+      <div class="d-card rel"><span class="tag n">7</span>
+        <h3>快速記錄</h3>
+        <div class="quick"><button class="btn">記工時</button><button class="btn">記雜支</button><button class="btn">登記拍攝</button></div>
+        <div class="sub" style="margin-top:8px;">跟手機同一套表單、同一組字彙；電腦版多「一週整批填」的格子模式。</div>
+      </div>
+      <div class="d-card rel"><span class="tag n">8</span>
+        <h3>紀錄可以改，改了留痕</h3>
+        <div class="sub">自己填的工時、拍攝紀錄可以直接改；已被主管核過或已進總表的列，改了會變「衝突待決」，主管三選一（用你的／用總表的／合併），不會靜默蓋掉。</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════ 設計說明 ═══════════ -->
+<div class="legend">
+  <h2>設計說明（員工視角）</h2>
+  <ol>
+    <li><span class="n">1</span><div><b>正在做，一鍵開始／結束</b><span>當下記比事後回填準。結束時自動生一列工時，只要確認。</span></div></li>
+    <li><span class="n">2</span><div><b>今天：行程與到期</b><span>拍攝場次、交件時限、器材是否領了，開頁第一眼就看到。</span></div></li>
+    <li><span class="n">3</span><div><b>等我處理，浮在最上面</b><span>被退回的工時、客戶留言、器材未歸還。這比工時報表更急。</span></div></li>
+    <li><span class="n">4</span><div><b>我的案子：以「我」為主詞</b><span>只列我參與的；我的角色、我的工時對預算、下一步。帳款只給狀態字，不給金額。</span></div></li>
+    <li><span class="n">5</span><div><b>我做過的：時間線</b><span>交付、拍攝、上架，員工對「做過的東西」有感，對數字沒感。作品上架掛名可連到官網。</span></div></li>
+    <li><span class="n">6</span><div><b>本週工時：回饋給自己</b><span>填齊沒有、掛在專案上的比例、拍攝日。用色分拍攝／後製。這是自我管理，不是考核畫面。</span></div></li>
+    <li><span class="n">7</span><div><b>快速記錄，手機優先</b><span>記工時、記雜支、登記拍攝三顆常駐；表單與字彙和現有 /m/ 共用。</span></div></li>
+    <li><span class="n">8</span><div><b>可修正、留痕</b><span>自己的紀錄可改；已核過的變衝突待決，主管三選一，沿用工作追蹤現有機制。</span></div></li>
+    <li><span class="n">9</span><div><b>大家今天在做什麼</b><span>誰在現場、誰在後製、誰外出、誰休假。來源是行事曆場次、請假、計時器，不用另外填。找人、借器材、排會議都靠這格。</span></div></li>
+    <li><span class="n">10</span><div><b>查專案：全公司都能查，看得到過程與成果</b><span>打字找案名、客戶、年份、誰做的；進去是階段時間線、拍攝日、參與者、素材／報表／看片／作品頁。金額一律不出現。</span></div></li>
+  </ol>
+  <h2 style="margin-top:16px;">要拍板的三件事</h2>
+  <ol>
+    <li><div><b>放哪裡</b><span>手機：/m/ 第一顆分頁「我的工作」（發票退第二）。電腦：個人工作台（/my.html）第一個分頁。</span></div></li>
+    <li><div><b>帳款狀態字給不給</b><span>示範是給狀態不給金額。全部不給也可以，只是員工會少了「案子有沒有收到錢」的體感。</span></div></li>
+    <li><div><b>計時器要不要做</b><span>最有用也最花工。不做的話「正在做」那格改成「今天還沒填工時」的提醒。</span></div></li>
+  </ol>
+</div>
+
+</div>
+
+<script>
+  const seg = document.getElementById('seg');
+  seg.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    document.getElementById('view-m').classList.toggle('hidden', b.dataset.v !== 'm');
+    document.getElementById('view-d').classList.toggle('hidden', b.dataset.v !== 'd');
+  });
+  // 手機打開這頁：直接看手機版（電腦版在小螢幕也能捲）
+</script>
+</body>
+</html>
