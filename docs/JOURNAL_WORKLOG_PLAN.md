@@ -288,3 +288,10 @@ timesheets 我的一天                  work_journals + 四張 entries         
 - 示範頁列高問題是頁面外框 `.stage` 與工作階段 `.stage` 撞名，已改 `.wstage`；正式版元件不會有這問題。
 
 **待拍板只剩**：主管回覆要不要即時通知本人（D1）。
+
+## 15. 拍板與開工（owner 2026-09-05）
+
+- **主管回覆即時通知本人**：要（D1）。第一版走全域 Google Chat webhook（`notifier.send_google_chat`），內容「{人名} 的週記有主管回覆：{前 80 字}｜連結」；
+  個人通道（LINE／個人 webhook、通知偏好 D3）留到之後。
+- **一次全部執行**：建置規格在 session scratchpad `BUILD_SPEC.md`（§1 資料模型、§2 API 契約、§3 前端、§4 分工），後端與前端兩個子代理分頭做，整合者驗收。
+  本批範圍＝桌機 `/my.html`＋`/journal.html`＋工作追蹤共用元件；**手機 `/m/` 的「紀錄」分頁（A8、B12）與提醒排程（A9、B7、D2、D3）不在本批**。
