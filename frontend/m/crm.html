@@ -158,10 +158,10 @@
 
   /* ── 底部抽屜 ── */
   #m-sheet { position:fixed; inset:0 0 calc(57px + var(--sab)) 0; z-index:40; }   /* 底下留分頁列（56px＋1px 邊線＋safe-area），抽屜不蓋它 */
-  #m-sheet .bd { position:absolute; inset:0; background:rgba(0,0,0,.55); }
+  #m-sheet .bd { position:absolute; inset:0; background:rgba(0,0,0,.55); touch-action:none; }
   #m-sheet .pn { position:absolute; left:0; right:0; bottom:0; max-height:calc(100% - 64px - var(--sat)); overflow-y:auto; background:#222;
     border-radius:16px 16px 0 0; border-top:1px solid var(--line); padding:8px 14px 20px;
-    animation:m-up .18s ease-out; -webkit-overflow-scrolling:touch; }
+    animation:m-up .18s ease-out; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }   /* 捲到底不要把手勢丟給後面的頁面 */
   @keyframes m-up { from { transform:translateY(40px); opacity:.6; } to { transform:none; opacity:1; } }
   #m-sheet .x { position:sticky; top:0; float:right; z-index:1; width:40px; height:40px; margin:0 -6px 0 0; border:0; border-radius:20px;
     background:#333; color:#fff; font-size:26px; line-height:40px; text-align:center; padding:0; }   /* 打叉關閉（owner 2026-09-04）；sticky 讓抽屜捲下去也還在 */

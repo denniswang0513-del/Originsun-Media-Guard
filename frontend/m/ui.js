@@ -204,19 +204,32 @@ export function unembedHost() {
     state._embedded = null;
 }
 
+// iOS 的 overflow:hidden 鎖不住 body：抽屜裡滑，手勢穿透去捲後面的頁面、抽屜本身不動（owner 2026-09-04）。
+// 標準解法＝body 釘成 fixed 並記住捲到哪，關抽屜再捲回去。
+let _lockedY = 0;
+function lockBody() {
+    _lockedY = window.scrollY || 0;
+    Object.assign(document.body.style, { position: 'fixed', top: `-${_lockedY}px`, left: '0', right: '0', width: '100%', overflow: 'hidden' });
+}
+function unlockBody() {
+    Object.assign(document.body.style, { position: '', top: '', left: '', right: '', width: '', overflow: '' });
+    window.scrollTo(0, _lockedY);
+}
+
 export function openSheet(html) {
     const s = sheet();
     unembedHost();     // innerHTML 會把搬進來的宿主一起清掉，先搬回去
     document.getElementById('m-sheet-body').innerHTML = html;
+    if (s.hidden) lockBody();   // 已開著（重畫抽屜）就別再記一次位置，不然會記到 0
     s.hidden = false;
-    document.body.style.overflow = 'hidden';
     s.querySelector('.pn').scrollTop = 0;
     return document.getElementById('m-sheet-body');
 }
 export function closeSheet() {
     unembedHost();
-    sheet().hidden = true;
-    document.body.style.overflow = '';
+    const s = sheet();
+    if (!s.hidden) unlockBody();
+    s.hidden = true;
 }
 
 export function initSheet() {
