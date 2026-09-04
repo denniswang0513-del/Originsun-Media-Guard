@@ -2030,3 +2030,36 @@
 .ppay-closing .ppay-sh { align-items: center; }
 .payable-item-proj { color: #3b82f6; font-size: 11px; cursor: pointer; white-space: nowrap; margin-left: 6px; }
 .payable-item-proj:hover { text-decoration: underline; }
+
+/* 收付款分頁——照示範頁的表格與狀態鏈 */
+.ppay-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 4px 0 10px; color: #8b8f96; font-size: 12px; align-items: center; }
+.ppay-meta b { color: #e0e0e0; font-weight: 500; }
+.ppay-meta .crm-am-row { display: inline-flex; align-items: center; gap: 4px; }
+.ppay-sh-act { margin-left: auto; display: flex; gap: 6px; }
+.ppay-tbl { border: 1px solid #2e2e2e; border-radius: 8px; overflow: auto; background: #1e1e1e; }
+.ppay-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ppay-table th { text-align: left; color: #8b8f96; font-weight: 500; font-size: 11px; padding: 6px 8px; border-bottom: 1px solid #3a3a3a; white-space: nowrap; }
+.ppay-table td { padding: 8px; border-bottom: 1px solid #2e2e2e; vertical-align: middle; }
+.ppay-table tr:last-child td { border-bottom: 0; }
+.ppay-table .r { text-align: right; }
+.ppay-table .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ppay-table .who { font-weight: 600; color: #d1d5db; white-space: nowrap; }
+.ppay-table .role { color: #8b8f96; }
+.ppay-table .dim { color: #5f6470; }
+.ppay-table tr.tot td { border-top: 2px solid #3a3a3a; font-weight: 700; background: #242424; }
+.ppay-acts { display: flex; gap: 4px; justify-content: flex-end; align-items: center; white-space: nowrap; }
+.ppay-link { color: #3b82f6; cursor: pointer; font-size: 11px; margin-right: 4px; }
+.ppay-link:hover { text-decoration: underline; }
+.ppay-note { color: #8b8f96; font-size: 12px; border-left: 2px solid #3a3a3a; padding: 2px 0 2px 10px; margin: 6px 0 0; }
+.ppay-chain { display: inline-flex; align-items: center; white-space: nowrap; }
+.ppay-chain .st { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #5f6470; }
+.ppay-chain .st::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #3a3a3a; }
+.ppay-chain .st.on { color: #e0e0e0; }
+.ppay-chain .st.on::before { background: #fbbf24; }
+.ppay-chain .st.wait { color: #fbbf24; }
+.ppay-chain .st.wait::before { background: #fbbf24; }
+.ppay-chain .st.done { color: #86efac; }
+.ppay-chain .st.done::before { background: #86efac; }
+.ppay-chain .sep { width: 16px; height: 1px; background: #3a3a3a; margin: 0 6px; }
+.ppay-chain .sep.done { background: #86efac; }
+.ppay-chain .d { color: #8b8f96; font-size: 10.5px; font-variant-numeric: tabular-nums; }

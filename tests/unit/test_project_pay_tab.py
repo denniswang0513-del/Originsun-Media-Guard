@@ -11,11 +11,16 @@ PAY = "frontend/tabs/crm/crm-projects-pay.js"
 def test_tab_composes_existing_pieces_instead_of_new_data():
     js = js_code_only(repo_src(PAY))
     assert "groupCostStaff" in js, "執行人員分人配單走 crm-utils 那一份"
-    assert "_loadCostStaff(projectId)" in js and "_loadAdvances(projectId)" in js and "loadInvoicesTab(projectId, 'proj-pay-invoices')" in js
-    assert "_loadProjectStaff" in js, "派工不刪，收在可展開區"
+    # 版面照示範頁（owner 2026-09-04 第二版「跟 demo 一樣，派工拿掉」）：自己畫表格，動作沿用既有那組
+    assert "loadInvoicesTab(projectId, 'proj-pay-invoices')" in js, "發票模組載進藏著的容器（開票視窗／setMeta／del 靠它）"
+    assert "_loadProjectStaff" not in js and "proj-staff-list" not in repo_src("frontend/tabs/crm/crm-projects-detail.js"), "派工已拿掉"
+    assert "window._costCreatePayment(" in js and "window._costPayBtns" in js and "window._costCreateAdvance()" in js
     assert "POST" not in js and "method: 'PUT'" not in js and "DELETE" not in js, "收付款分頁自己不寫資料——動作都是既有那組"
+    for sec in ("function _recvHtml(", "function _payHtml(", "function _chain(", "function _cashHtml(", "function _checksHtml(", "function _metaHtml("):
+        assert sec in js, sec
+    assert "未請款" in js and "已請款" in js and "已付款" in js, "狀態鏈三段"
     detail = repo_src("frontend/tabs/crm/crm-projects-detail.js")
-    for hid in ("proj-pay-strip", "proj-pay-invoices", "proj-cost-staff", "proj-advance-list", "proj-staff-list", "proj-pay-cash", "proj-pay-check"):
+    for hid in ("proj-pay-root", "proj-pay-ampm-src", "proj-am-display", "proj-pm-display"):
         assert f'id="{hid}"' in detail, hid
     assert 'data-tab="team"' in repo_src("frontend/tabs/crm/crm-projects.html")
 
@@ -31,7 +36,7 @@ def test_status_and_next_steps_are_pure_and_money_gated():
     ck = between(js, "export function closingChecks(", "let _cur")
     for label in ("發票全開且已收", "應付全付", "雜支結清", "預支款結清"):
         assert label in ck, label
-    assert "不擋結案" in repo_src("frontend/tabs/crm/crm-projects-detail.js"), "結案檢查目前只提醒"
+    assert "不擋結案" in js, "結案檢查只軟擋"
 
 
 def test_actions_refresh_the_strip():
@@ -44,7 +49,7 @@ def test_actions_refresh_the_strip():
 def test_phase_two_and_three_hooks():
     """二期：完稿結案分頁頂端有收付檢查提示條（只提醒）；三期：應付帳款可跳回案子的收付款分頁、手機版抽屜有收付款摘要。"""
     pay = js_code_only(repo_src(PAY))
-    assert "export async function loadClosingBanner(" in pay and "closingChecks(s, adv?.advances, exp?.expenses)" in pay
+    assert "export async function loadClosingBanner(" in pay and "closingChecks(s, d.adv, d.exp)" in pay
     assert "window._crmGoToProjectPay = (projectId) =>" in pay
     main = js_code_only(repo_src("frontend/tabs/crm/crm-projects.js"))
     assert "loadClosingBanner(pid, host)" in main
@@ -59,8 +64,8 @@ def test_closing_is_soft_blocked_on_every_status_path():
     專案詳情狀態欄 inline、提案企劃「推階段」（走 window 不跨分頁 import）、手機版推階段（字彙走 options.closed_phases）。"""
     pay = js_code_only(repo_src(PAY))
     fn = between(pay, "export async function confirmClosing(", "window._crmGoToProjectPay")
-    assert "closingChecks(s, adv?.advances, exp?.expenses).filter((c) => !c.ok)" in fn and "return confirm(" in fn
-    assert "if (!proj) return true;" in fn, "抓不到資料（沒權限）要放行"
+    assert "closingChecks(s, d.adv, d.exp).filter((c) => !c.ok)" in fn and "return confirm(" in fn
+    assert "if (!d.proj) return true;" in fn, "抓不到資料（沒權限）要放行"
     detail = js_code_only(repo_src("frontend/tabs/crm/crm-projects-detail.js"))
     assert "CLOSED_STATUSES.includes(val) && !CLOSED_STATUSES.includes(orig) && window._projPay?.confirmClosing" in detail
     flow = js_code_only(repo_src("frontend/tabs/proposals/flow-view.js"))

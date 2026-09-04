@@ -181,7 +181,7 @@ def test_the_tab_is_wired_in_all_three_places():
     assert "loadPayTab(state.selectedId)" in main and "callbacks.loadPayTab = loadPayTab" in main
     pay = js_code_only(repo_src("frontend/tabs/crm/crm-projects-pay.js"))
     assert "loadInvoicesTab(projectId, 'proj-pay-invoices')" in pay, "發票要嵌進收付款"
-    assert 'id="proj-pay-invoices"' in repo_src("frontend/tabs/crm/crm-projects-detail.js")
+    assert 'id="proj-pay-invoices"' in repo_src("frontend/tabs/crm/crm-projects-pay.js")
     inv = js_code_only(repo_src(JS))
     assert "export async function loadInvoicesTab(projectId, hostId)" in inv and "document.getElementById(_hostId)" in inv
 

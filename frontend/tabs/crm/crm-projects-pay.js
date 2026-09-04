@@ -1,25 +1,26 @@
 /**
  * 專案詳情「收付款」分頁（owner 2026-09-04：人員配置改成收付款、與發票整合，用業務的觀點——
- * 這一案的錢走到哪、下一步該做什麼，一頁看完、一頁做完）。
+ * 這一案的錢走到哪、下一步該做什麼，一頁看完、一頁做完；版面照示範頁，派工拿掉）。
  *
- * 這一頁**不新增資料**：人的正本＝派工、錢的正本＝費用配置／請款單／發票／收支列。它只是同一份資料的業務視角：
+ * 這一頁**不新增資料**：錢的正本＝費用配置／請款單／發票／收支列。它只是同一份資料的業務視角：
+ *   資訊列（客戶／類型／狀態／AM／PM／稅率）
  *   狀態列（合約／已開發票／已收／未收／應付／已付／未付／毛利）＋ 下一步提示（規則產生）
- *   收款區＝本案發票（crm-projects-invoices 原分頁整個嵌進來）
- *   付款區＝執行人員（crm-projects-finance._loadCostStaff，三顆建立鈕與付款動作都是它的）＋ 預支款
- *   派工設定（收著；派工＝人的正本，tabs/proposals/staff-view）
+ *   收款＝本案發票一張一列（號碼／日期／抬頭／面額／狀態／收到／入帳日）＋ 開發票／標已收款
+ *   付款＝執行人員一人一列（角色／金額／狀態鏈 未請款→已請款→已付款）＋ 委外／雜支／代墊／預支 各一列
+ *         動作沿用 crm-projects-finance 那組（_costCreatePayment／_costPayBtns／_costCreateAdvance）
  *   掛在本案的收支（收支明細裡掛到本案的列）
- *   結案檢查（四項；先只警告不硬擋——owner 沒拍板前不擋人）
+ *   結案檢查（四項；軟擋：推到結案時沒結清要人確認，見 confirmClosing）
  *
- * 金額權限：沒有 money_view 的人看得到狀態字（幾張、到帳了沒、誰還沒請款），看不到金額；
- * 執行人員那張表本來就由 moneyGate 擋（錢的正本跟著金額權走）。
+ * 金額權限：沒有 money_view 的人看得到狀態字（幾張、到帳了沒、誰還沒請款），看不到金額。
+ * 發票模組（crm-projects-invoices）仍載進一個藏著的容器：開發票視窗與 setMeta／del 靠它的狀態。
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum, canSeeMoney, groupCostStaff } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, canSeeMoney, groupCostStaff, invoicePayBadge } from './crm-utils.js';
 import { state } from './crm-projects-state.js';
 import { loadInvoicesTab } from './crm-projects-invoices.js';
-import { _loadCostStaff, _loadAdvances, _loadProjectStaff } from './crm-projects-finance.js';
 
 const INVOICE_VOID = new Set(['作廢']);
 const PAID = '已付款';
+const COLLECTED_RE = /已收款|待撥款|已撥款/;
 
 /** 一案的收付狀態：純算式（給狀態列、提示、結案檢查三處共用）。 */
 export function payStatus(project, invoices, payments, costLines) {
@@ -40,11 +41,11 @@ export function payStatus(project, invoices, payments, costLines) {
     const unrequested = unrequestedGroups.reduce((a, g) => a + g.subtotal, 0);
     const kai = inv.filter((i) => /代開/.test(i.category || ''));
     return {
-        contract, invoiced, invoiceCount: inv.length, received, fee, unreceived,
+        invoices: inv, contract, invoiced, invoiceCount: inv.length, received, fee, unreceived,
         status: p.payment_status || '未到帳',
         payable, paid, requested, unrequested, unrequestedGroups, paidCount: pays.filter((x) => x.payment_status === PAID).length,
         payCount: pays.length, margin: contract - payable, groups, others, kai,
-        uncollected: inv.filter((i) => !/已收款|待撥款|已撥款/.test(i.payment_status || '')),
+        uncollected: inv.filter((i) => !COLLECTED_RE.test(i.payment_status || '')),
     };
 }
 
@@ -62,7 +63,7 @@ export function nextSteps(s, opts = {}) {
     return out;
 }
 
-/** 結案檢查四項：先只警告（owner 未拍板硬擋）。 */
+/** 結案檢查四項（軟擋：confirmClosing 用同一份）。 */
 export function closingChecks(s, advances, expenses) {
     const adv = advances || [], exp = expenses || [];
     return [
@@ -75,12 +76,27 @@ export function closingChecks(s, advances, expenses) {
     ];
 }
 
+// ── 畫面 ──────────────────────────────────────────────────────
 let _cur = null;
+const _d = (v) => (v ? String(v).slice(0, 10) : '');
+const _md = (v) => { const s = _d(v); return s ? s.slice(5).replace('-', '/') : ''; };
+const _q = (path) => _fetch(path).catch(() => null);
+const _sq = (s) => _esc(s || '').replace(/'/g, "\\'");
+
+async function _load(projectId) {
+    const ent = state.projects.find((p) => p.id === projectId)?.entity === 'mine' ? '&entity=mine' : '';
+    const [proj, inv, pays, lines, cash, adv, exp] = await Promise.all([
+        _q('/projects/' + projectId), _q('/invoices?project_id=' + encodeURIComponent(projectId)),
+        _q('/payments?project_id=' + encodeURIComponent(projectId) + ent),
+        _q(`/projects/${projectId}/cost-lines`), _q('/cash-entries?project_id=' + encodeURIComponent(projectId) + ent),
+        _q('/payments/advances?project_id=' + encodeURIComponent(projectId)), _q(`/projects/${projectId}/expenses`)]);
+    return { proj, inv: inv?.invoices || [], pays: pays?.payments || [], lines: lines?.cost_lines || [],
+             cash: cash ? (cash.entries || []) : null, adv: adv?.advances || [], exp: exp?.expenses || [] };
+}
 
 function _strip(s, money) {
     const m = (n) => (money ? '$' + fmtNum(n) : '—');
     const st = s.status;
-    const stCls = st === '全額到帳' ? 'good' : st === '部分到帳' ? 'warn' : 'bad';
     const tile = (l, v, sub, cls = '') => `<div class="ppay-kpi ${cls}"><div class="ppay-l">${l}</div><div class="ppay-v">${v}</div><div class="ppay-s">${sub || ''}</div></div>`;
     return `<div class="ppay-kpis">
         ${tile('合約金額', m(s.contract), '含稅', 'hl')}
@@ -94,89 +110,181 @@ function _strip(s, money) {
     </div>`;
 }
 
+const _GO = {
+    invoice: ['開發票', () => window._projInv?.create?.()],
+    invoices: ['看發票', () => document.getElementById('proj-pay-recv')?.scrollIntoView({ behavior: 'smooth' })],
+    cash: ['看收支', () => document.getElementById('proj-pay-cash')?.scrollIntoView({ behavior: 'smooth' })],
+    staff: ['看付款', () => document.getElementById('proj-pay-pay')?.scrollIntoView({ behavior: 'smooth' })],
+};
 function _hints(list) {
-    const go = { invoice: ['開發票', () => window._projInv?.create?.()], invoices: ['看發票', () => document.getElementById('proj-pay-invoices')?.scrollIntoView({ behavior: 'smooth' })],
-                 cash: ['看收支', () => document.getElementById('proj-pay-cash')?.scrollIntoView({ behavior: 'smooth' })], staff: ['看付款', () => document.getElementById('proj-cost-staff')?.scrollIntoView({ behavior: 'smooth' })] };
-    return `<div class="ppay-next"><span class="ppay-next-t">下一步</span>${list.map((h, i) => `<span class="ppay-hint ${h.level}">${_esc(h.text)}${h.act && go[h.act] ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" data-ppay-act="${i}">${go[h.act][0]}</button>` : ''}</span>`).join('')}</div>`;
+    return `<div class="ppay-next"><span class="ppay-next-t">下一步</span>${list.map((h) => `<span class="ppay-hint ${h.level}">${_esc(h.text)}${h.act && _GO[h.act] ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" data-ppay-act="${h.act}">${_GO[h.act][0]}</button>` : ''}</span>`).join('')}</div>`;
+}
+
+/** 收款：本案發票一張一列（同示範頁）。 */
+function _recvHtml(s, money) {
+    const m = (n) => (money ? '$' + fmtNum(n) : '—');
+    const rows = s.invoices.map((i) => {
+        const got = Number(i.collected || 0);
+        const collected = COLLECTED_RE.test(i.payment_status || '');
+        return `<tr>
+            <td class="num">${_esc(i.invoice_number || '（未開立）')}</td>
+            <td class="num">${_esc(_d(i.invoice_date))}</td>
+            <td>${_esc(i.title || '')}${i.category && i.category !== '專案' ? ` <span class="crm-badge" style="background:#2a2a2a;color:#9ca3af;">${_esc(i.category)}</span>` : ''}</td>
+            <td class="r num">${m(i.amount_total || 0)}</td>
+            <td>${invoicePayBadge(i.payment_status)}</td>
+            <td class="r num">${got ? m(got) : '<span class="dim">—</span>'}</td>
+            <td class="num">${_esc(_d(i.last_paid_date)) || '<span class="dim">—</span>'}</td>
+            <td><div class="ppay-acts">
+                ${collected ? '' : `<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projPay.markCollected('${_esc(i.id)}')">標已收款</button>`}
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projInv.del('${_esc(i.id)}')" title="刪除這張發票">刪除</button>
+            </div></td></tr>`;
+    }).join('');
+    return `<div class="ppay-tbl"><table class="ppay-table">
+        <thead><tr><th>發票號碼</th><th>日期</th><th>抬頭／摘要</th><th class="r">面額</th><th>狀態</th><th class="r">收到</th><th>入帳日</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="8" class="dim" style="padding:12px;">還沒開發票</td></tr>'}
+        <tr class="tot"><td colspan="3">合計</td><td class="r num">${m(s.invoiced)}</td><td></td><td class="r num">${m(s.received)}</td><td colspan="2"></td></tr></tbody></table></div>
+        ${s.kai.length ? `<p class="ppay-note">代開發票：客戶匯的是面額，公司留代開費，其餘要匯給代開人 —— 在收支明細的那筆收款列按「請款」整筆請過去。</p>` : ''}`;
+}
+
+/** 狀態鏈：未請款 → 已請款（日期）→ 已付款（日期）。 */
+function _chain(p) {
+    const stage = !p ? 1 : p.payment_status === PAID ? 3 : 2;
+    const st = (i, label, date) => `<span class="st ${stage > i ? 'done' : stage === i ? (i === 1 ? 'on' : 'wait') : ''}">${label}${date ? ` <span class="d">${_esc(date)}</span>` : ''}</span>`;
+    return `<span class="ppay-chain">${st(1, '未請款')}<span class="sep ${stage > 1 ? 'done' : ''}"></span>${st(2, '已請款', p ? _md(p.request_date) : '')}<span class="sep ${stage > 2 ? 'done' : ''}"></span>${st(3, '已付款', p ? _md(p.payment_date) : '')}</span>`;
+}
+
+/** 付款：一人一列＋其他請款單＋預支款（同示範頁）。動作沿用 crm-projects-finance 那組。 */
+function _payHtml(s, adv, money) {
+    const m = (n) => (money ? '$' + fmtNum(n) : '—');
+    const rows = [];
+    for (const g of s.groups) {
+        const p = g.payment;
+        const items = g.items.join('、');
+        const advTag = p && p.advance_by ? `<span style="color:#fb923c;font-size:10px;margin-right:6px;" title="這筆費用由 ${_esc(p.payee_name || '')} 先代墊，公司要還的是他">${_esc(p.payee_name || '')} 代墊</span>` : '';
+        const acts = p
+            ? `${advTag}<span class="ppay-link" onclick="window._costViewPayment('${_esc(p.id)}')">看單</span>${window._costPayBtns ? window._costPayBtns(p) : ''}`
+            : `<button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._costCreatePayment('${_sq(g.name)}',${g.subtotal},'${_sq(items)}','應付款')">請款</button>
+               <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._costCreatePayment('${_sq(g.name)}',${g.subtotal},'${_sq(items)}','已付款')">現金已付款</button>
+               <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._costCreatePayment('${_sq(g.name)}',${g.subtotal},'${_sq(items)}','應付款',true)" title="這筆費用由別人先代墊 —— 收款人改成代墊人">費用已代墊</button>`;
+        rows.push(`<tr><td class="who">${_esc(g.name)}</td><td class="role">${_esc(items)}</td><td class="r num">${m(g.subtotal)}</td><td>${_chain(p)}</td><td><div class="ppay-acts">${acts}</div></td></tr>`);
+    }
+    for (const x of s.others) {
+        rows.push(`<tr><td class="who">${_esc(x.payee_name || '—')} <span class="crm-badge" style="background:#2a2a2a;color:#9ca3af;">${_esc(x.category || '其他')}</span></td>
+            <td class="role">${_esc(x.summary || '')}${x.advance_by ? ` · <span style="color:#fb923c;">代墊（費用歸屬 ${_esc(x.advance_by)}）</span>` : ''}</td>
+            <td class="r num">${m(x.amount || 0)}</td><td>${_chain(x)}</td>
+            <td><div class="ppay-acts"><span class="ppay-link" onclick="window._costViewPayment('${_esc(x.id)}')">看單</span>${window._costPayBtns ? window._costPayBtns(x) : ''}</div></td></tr>`);
+    }
+    for (const a of adv) {
+        const st = a.is_settled ? '<span style="color:#86efac;font-size:12px;">已結清</span>'
+            : a.is_paid ? `<span style="color:#fb923c;font-size:12px;">已發款${money && a.balance ? '，餘額 ' + m(a.balance) : ''}</span>`
+            : '<span style="color:#fbbf24;font-size:12px;">未發款</span>';
+        rows.push(`<tr><td class="who">${_esc(a.payee_name || '')} <span class="crm-badge" style="background:#2a2a2a;color:#9ca3af;">預支</span></td>
+            <td class="role">${_esc(a.summary || '')}</td><td class="r num">${m(a.amount || 0)}</td><td>${st}</td>
+            <td><div class="ppay-acts"><button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._advShareLink('${_esc(a.id)}')">分享登記連結</button>
+                ${a.is_settled ? '' : `<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._advDeleteAdvance('${_esc(a.id)}','${_sq(a.payee_name)}')">刪除</button>`}</div></td></tr>`);
+    }
+    const proj = state.projects.find((p) => p.id === state.selectedId);
+    const budget = s.contract ? Math.round(s.contract * (1 - Number(proj?.profit_target_pct ?? 20) / 100)) : 0;
+    return `<div class="ppay-tbl"><table class="ppay-table">
+        <thead><tr><th>人員</th><th>角色／項目</th><th class="r">金額</th><th>狀態</th><th></th></tr></thead>
+        <tbody>${rows.join('') || '<tr><td colspan="5" class="dim" style="padding:12px;">還沒有執行人員（預算結算分頁的費用配置還沒填人）</td></tr>'}
+        <tr class="tot"><td colspan="2">合計${money && budget ? ` <span class="dim" style="font-weight:400;">額度 ${m(budget)}</span>` : ''}</td>
+            <td class="r num">${m(s.payable)}</td><td colspan="2"><span class="dim" style="font-weight:400;">已付 ${m(s.paid)} · 已請未付 ${m(s.requested)} · 未請 ${m(s.unrequested)}</span></td></tr></tbody></table></div>`;
 }
 
 function _cashHtml(entries, money) {
-    if (!entries) return '';
+    if (!entries) return '<div class="crm-empty" style="padding:8px 0;font-size:12px;">沒有權限看收支明細</div>';
     if (!entries.length) return '<div class="crm-empty" style="padding:8px 0;font-size:12px;">收支明細裡還沒有掛到本案的列</div>';
     const m = (n) => (money ? fmtNum(n) : '—');
     const dep = entries.reduce((a, e) => a + Number(e.deposit || 0), 0), exp = entries.reduce((a, e) => a + Number(e.expense || 0), 0);
-    return `<table class="crm-table" style="width:100%;font-size:12px;">
-        <thead><tr><th>日期</th><th>摘要</th><th style="text-align:right;">存入</th><th style="text-align:right;">支出</th><th>對到</th></tr></thead>
+    return `<div class="ppay-tbl"><table class="ppay-table">
+        <thead><tr><th>日期</th><th>摘要</th><th class="r">存入</th><th class="r">支出</th><th>對到</th></tr></thead>
         <tbody>${entries.map((e) => `<tr>
-            <td style="white-space:nowrap;">${_esc((e.entry_date || '').slice(0, 10))}</td>
-            <td>${_esc(e.summary || '')}</td>
-            <td style="text-align:right;color:#86efac;">${e.deposit ? m(e.deposit) : ''}</td>
-            <td style="text-align:right;color:#fca5a5;">${e.expense ? m(e.expense) : ''}</td>
-            <td style="color:#888;">${_esc(e.invoice_title || e.payment_label || e.project_pay_label || '')}</td></tr>`).join('')}
-        <tr style="font-weight:700;"><td colspan="2">合計</td><td style="text-align:right;color:#86efac;">${m(dep)}</td><td style="text-align:right;color:#fca5a5;">${m(exp)}</td><td></td></tr></tbody></table>`;
+            <td class="num">${_esc(_d(e.entry_date))}</td><td>${_esc(e.summary || '')}</td>
+            <td class="r num" style="color:#86efac;">${e.deposit ? m(e.deposit) : ''}</td>
+            <td class="r num" style="color:#fca5a5;">${e.expense ? m(e.expense) : ''}</td>
+            <td class="dim">${_esc(e.invoice_title || e.payment_label || e.project_pay_label || '')}</td></tr>`).join('')}
+        <tr class="tot"><td colspan="2">合計</td><td class="r num" style="color:#86efac;">${m(dep)}</td><td class="r num" style="color:#fca5a5;">${m(exp)}</td><td></td></tr></tbody></table></div>`;
 }
 
 function _checksHtml(checks) {
     return `<div class="ppay-checks">${checks.map((c) => `<div class="ppay-ck ${c.ok ? 'ok' : 'no'}"><span class="ppay-dot"></span><div><div class="ppay-ck-l">${_esc(c.label)}</div><div class="ppay-ck-s">${_esc(c.sub)}</div></div></div>`).join('')}</div>`;
 }
 
-/** 狀態列＋提示＋掛帳收支＋結案檢查 —— 請款／付款／開票之後由 window._projPay.refresh() 重算。 */
-export async function loadPayStrip(projectId) {
-    const strip = document.getElementById('proj-pay-strip');
-    if (!strip || !projectId) return;
-    const money = canSeeMoney();
-    const ent = state.projects.find((p) => p.id === projectId)?.entity === 'mine' ? '&entity=mine' : '';
-    const q = (path) => _fetch(path).catch(() => null);
-    const [proj, inv, pays, lines, cash, adv, exp] = await Promise.all([
-        q('/projects/' + projectId), q('/invoices?project_id=' + encodeURIComponent(projectId)),
-        q('/payments?project_id=' + encodeURIComponent(projectId) + ent),
-        q(`/projects/${projectId}/cost-lines`), q('/cash-entries?project_id=' + encodeURIComponent(projectId) + ent),
-        q('/payments/advances?project_id=' + encodeURIComponent(projectId)), q(`/projects/${projectId}/expenses`)]);
-    if (state.selectedId !== projectId) return;      // 切走了就別畫到別的案上
-    const s = payStatus(proj, inv?.invoices, pays?.payments, lines?.cost_lines);
-    _cur = s;
-    strip.innerHTML = _strip(s, money) + _hints(nextSteps(s, { money }));
-    strip.querySelectorAll('[data-ppay-act]').forEach((b) => b.addEventListener('click', () => {
-        const h = nextSteps(s, { money })[Number(b.dataset.ppayAct)];
-        const go = { invoice: () => window._projInv?.create?.(), invoices: () => document.getElementById('proj-pay-invoices')?.scrollIntoView({ behavior: 'smooth' }),
-                     cash: () => document.getElementById('proj-pay-cash')?.scrollIntoView({ behavior: 'smooth' }), staff: () => document.getElementById('proj-cost-staff')?.scrollIntoView({ behavior: 'smooth' }) };
-        go[h.act]?.();
-    }));
-    const cashHost = document.getElementById('proj-pay-cash');
-    if (cashHost) cashHost.innerHTML = cash ? _cashHtml(cash.entries || [], money) : '<div class="crm-empty" style="padding:8px 0;font-size:12px;">沒有權限看收支明細</div>';
-    const ck = document.getElementById('proj-pay-check');
-    if (ck) ck.innerHTML = _checksHtml(closingChecks(s, adv?.advances, exp?.expenses));
+function _metaHtml(p) {
+    const proj = p || {};
+    return `<div class="ppay-meta">
+        <span>客戶 <b>${_esc(proj.client_short_name || '—')}</b></span>
+        <span>類型 <b>${_esc(proj.project_type || '—')}</b></span>
+        <span>狀態 <b>${_esc(proj.status || '—')}</b></span>
+        <span class="ppay-meta-ampm" data-ppay-ampm></span>
+        <span>稅率 <b>${_esc(String(proj.tax_rate ?? 5))}%</b></span>
+        ${(proj.entity || 'parent') === 'mine' ? '<span class="crm-badge" style="background:#2a2a2a;color:#9ca3af;">私帳</span>' : ''}
+    </div>`;
 }
 
-/** 整個分頁：狀態列 → 發票（原分頁嵌入）→ 執行人員／預支 → 派工 → 掛帳收支 → 結案檢查。 */
+/** 整頁重畫（動作做完也走這裡：window._projPay.refresh）。 */
 export async function loadPayTab(projectId) {
-    if (!projectId) return;
-    loadPayStrip(projectId);
+    const host = document.getElementById('proj-pay-root');
+    if (!host || !projectId) return;
+    const money = canSeeMoney();
+    const d = await _load(projectId);
+    if (state.selectedId !== projectId) return;      // 切走了就別畫到別的案上
+    const s = payStatus(d.proj, d.inv, d.pays, d.lines);
+    _cur = s;
+    // AM／PM 可編輯格由 detail.js 畫在 #proj-pay-ampm-src；第一次在 host 外、重畫時已經搬進 host 裡 ——
+    // 先抓住再覆寫 innerHTML，不然第二次 loadPayTab 會把它連同舊畫面一起清掉
+    const ampm = document.getElementById('proj-pay-ampm-src');
+    host.innerHTML = `
+        ${_metaHtml(d.proj)}
+        ${_strip(s, money)}
+        ${_hints(nextSteps(s, { money }))}
+        <div class="ppay-sec" id="proj-pay-recv">
+            <div class="ppay-sh"><span class="ppay-h">收款</span><span class="ppay-sub">本案的發票，和它連到的匯款</span>
+                <span class="ppay-sh-act"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projInv.create()">開發票</button></span></div>
+            ${_recvHtml(s, money)}
+        </div>
+        <div class="ppay-sec" id="proj-pay-pay">
+            <div class="ppay-sh"><span class="ppay-h">付款</span><span class="ppay-sub">人員與費用一列一人，狀態鏈：未請款 → 已請款 → 已付款</span>
+                <span class="ppay-sh-act">
+                    <button class="crm-btn crm-btn-secondary crm-btn-sm" data-ppay-go-budget title="人員與金額在預算結算分頁的費用配置">加人員</button>
+                    <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._costCreatePayment('',0,'委外','應付款')">委外</button>
+                    <button class="crm-btn crm-btn-secondary crm-btn-sm" data-ppay-go-budget title="行政雜支在預算結算分頁登記">行政雜支</button>
+                    <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._costCreateAdvance()">預支</button>
+                </span></div>
+            ${_payHtml(s, d.adv, money)}
+        </div>
+        <div class="ppay-sec" id="proj-pay-cash">
+            <div class="ppay-sh"><span class="ppay-h">掛在本案的收支</span><span class="ppay-sub">收支明細裡掛到本案（或本案發票）的列</span></div>
+            ${_cashHtml(d.cash, money)}
+        </div>
+        <div class="ppay-sec" id="proj-pay-check">
+            <div class="ppay-sh"><span class="ppay-h">結案檢查</span><span class="ppay-sub">四項都綠才算收付結清（推到結案時沒結清會先問，不擋結案）</span></div>
+            ${_checksHtml(closingChecks(s, d.adv, d.exp))}
+        </div>
+        <div id="proj-pay-invoices" hidden></div>`;
+    const slot = host.querySelector('[data-ppay-ampm]');
+    if (ampm && slot) { slot.appendChild(ampm); ampm.style.display = 'inline-flex'; }
+    host.querySelectorAll('[data-ppay-act]').forEach((b) => b.addEventListener('click', () => _GO[b.dataset.ppayAct]?.[1]?.()));
+    host.querySelectorAll('[data-ppay-go-budget]').forEach((b) => b.addEventListener('click', () => document.querySelector('#proj-detail-tabs .crm-tab[data-tab="finance"]')?.click()));
+    // 發票模組載進藏著的容器：開發票視窗、setMeta／del 都靠它的狀態
     loadInvoicesTab(projectId, 'proj-pay-invoices');
-    _loadCostStaff(projectId);
-    _loadAdvances(projectId);
-    const staff = document.getElementById('proj-staff-list');
-    if (staff && staff.closest('details')?.open) _loadProjectStaff(projectId);
 }
 
-/** 完稿結案分頁頂端的「收付檢查」提示條（規劃第二期：結案檢查與完稿結案連動；只提醒不擋）。 */
+/** 完稿結案分頁頂端的「收付檢查」提示條（只提醒不擋）。 */
 export async function loadClosingBanner(projectId, host) {
     if (!host || !projectId) return;
     let box = host.querySelector('.ppay-closing');
     if (!box) { box = document.createElement('div'); box.className = 'ppay-closing'; host.insertAdjacentElement('afterbegin', box); }
     box.innerHTML = '<div class="ppay-sh"><span class="ppay-h">收付檢查</span><span class="ppay-sub">載入中…</span></div>';
-    const q = (path) => _fetch(path).catch(() => null);
-    const [proj, inv, pays, lines, adv, exp] = await Promise.all([
-        q('/projects/' + projectId), q('/invoices?project_id=' + encodeURIComponent(projectId)),
-        q('/payments?project_id=' + encodeURIComponent(projectId)), q(`/projects/${projectId}/cost-lines`),
-        q('/payments/advances?project_id=' + encodeURIComponent(projectId)), q(`/projects/${projectId}/expenses`)]);
+    const d = await _load(projectId);
     if (state.selectedId !== projectId) return;
-    const s = payStatus(proj, inv?.invoices, pays?.payments, lines?.cost_lines);
-    const checks = closingChecks(s, adv?.advances, exp?.expenses);
+    const s = payStatus(d.proj, d.inv, d.pays, d.lines);
+    const checks = closingChecks(s, d.adv, d.exp);
     const open = checks.filter((c) => !c.ok);
     box.innerHTML = `<div class="ppay-sh"><span class="ppay-h">收付檢查</span>
         <span class="ppay-sub">${open.length ? `${open.length} 項還沒結清 —— 先提醒，不擋結案` : '收付都結清了'}</span>
-        <span style="margin-left:auto;"><button class="crm-btn crm-btn-secondary crm-btn-sm" data-ppay-go-pay>到收付款分頁</button></span></div>
+        <span class="ppay-sh-act"><button class="crm-btn crm-btn-secondary crm-btn-sm" data-ppay-go-pay>到收付款分頁</button></span></div>
         ${_checksHtml(checks)}`;
     box.querySelector('[data-ppay-go-pay]')?.addEventListener('click', () => document.querySelector('#proj-detail-tabs .crm-tab[data-tab="team"]')?.click());
 }
@@ -185,14 +293,10 @@ export async function loadClosingBanner(projectId, host) {
  *  回 true＝可以推；false＝使用者取消。抓不到資料（沒權限）就放行——不能因為看不到錢就不准結案。 */
 export async function confirmClosing(projectId) {
     if (!projectId) return true;
-    const q = (path) => _fetch(path).catch(() => null);
-    const [proj, inv, pays, lines, adv, exp] = await Promise.all([
-        q('/projects/' + projectId), q('/invoices?project_id=' + encodeURIComponent(projectId)),
-        q('/payments?project_id=' + encodeURIComponent(projectId)), q(`/projects/${projectId}/cost-lines`),
-        q('/payments/advances?project_id=' + encodeURIComponent(projectId)), q(`/projects/${projectId}/expenses`)]);
-    if (!proj) return true;
-    const s = payStatus(proj, inv?.invoices, pays?.payments, lines?.cost_lines);
-    const open = closingChecks(s, adv?.advances, exp?.expenses).filter((c) => !c.ok);
+    const d = await _load(projectId);
+    if (!d.proj) return true;
+    const s = payStatus(d.proj, d.inv, d.pays, d.lines);
+    const open = closingChecks(s, d.adv, d.exp).filter((c) => !c.ok);
     if (!open.length) return true;
     return confirm(`收付還有 ${open.length} 項沒結清：\n${open.map((c) => `• ${c.label}（${c.sub}）`).join('\n')}\n\n仍要推到結案？`);
 }
@@ -207,7 +311,12 @@ window._crmGoToProjectPay = (projectId) => {
 
 window._projPay = {
     confirmClosing,
-    refresh: () => { if (state.selectedId) loadPayStrip(state.selectedId); },
-    staff: () => { if (state.selectedId) _loadProjectStaff(state.selectedId); },
+    refresh: () => { if (state.selectedId) loadPayTab(state.selectedId); },
     current: () => _cur,
+    /** 標已收款：走發票模組的 setMeta（PUT 整包寫回），做完重畫。 */
+    markCollected: async (id) => {
+        if (!window._projInv?.setMeta) return;
+        await window._projInv.setMeta(id, 'payment_status', { value: '已收款' });
+        window._projPay.refresh();
+    },
 };
