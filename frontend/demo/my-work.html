@@ -28,7 +28,7 @@
   .n { flex:none; width:22px; height:22px; border-radius:50%; background:var(--num); color:#111; font-weight:700; font-size:12px; display:inline-flex; align-items:center; justify-content:center; }
   .tag { position:absolute; top:-9px; left:-9px; z-index:2; }
   .rel { position:relative; }
-  @media (max-width:900px) { .stage { flex-direction:column; } .legend { width:auto; position:static; } }
+  @media (max-width:900px) { .stage { flex-direction:column; align-items:stretch; } .legend { width:auto; position:static; } .desk { width:100%; } .d-top .tabs { flex-wrap:wrap; } }
 
   /* ── 共用小元件 ── */
   .pill { display:inline-block; padding:1px 8px; border-radius:999px; border:1px solid var(--line); color:var(--sub); font-size:11px; white-space:nowrap; }
@@ -72,12 +72,12 @@
 
   /* ── 電腦版 ── */
   .desk { flex:1; min-width:0; background:var(--bg); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
-  .d-top { display:flex; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--line); background:#202020; }
+  .d-top { display:flex; flex-wrap:wrap; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--line); background:#202020; }
   .d-top h2 { margin:0; font-size:17px; } .d-top .sp { flex:1; }
   .d-top .tabs { display:flex; gap:4px; } .d-top .tabs span { padding:6px 12px; border-radius:8px; color:var(--sub); font-size:13px; } .d-top .tabs span.on { background:#2f2f2f; color:#fff; }
   .d-grid { display:grid; grid-template-columns:300px 1fr 320px; gap:14px; padding:14px 18px; }
   @media (max-width:1300px) { .d-grid { grid-template-columns:1fr 1fr; } } @media (max-width:900px) { .d-grid { grid-template-columns:1fr; } }
-  .d-card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
+  .d-card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; overflow-x:auto; }   /* 表格在窄螢幕自己捲，不撐頁面 */
   .d-card h3 { margin:0 0 10px; font-size:13px; color:var(--sub); font-weight:700; display:flex; justify-content:space-between; align-items:center; }
   table.pj { width:100%; border-collapse:collapse; font-size:13px; }
   table.pj th { text-align:left; color:var(--sub); font-weight:600; font-size:12px; padding:6px 8px; border-bottom:1px solid var(--line); }
