@@ -63,18 +63,22 @@ export const pickerHtml = (id) =>
     `<div class="m-pick" id="${id}-list" hidden></div>`;
 
 // 分段按鈕：兩三個選項的欄位（電子／紙本、收款／付款、已收／未收）用按鈕比 <select> 好按；
-// 值放 hidden input（id＝欄位名），既有程式照讀 .value
-export const segHtml = (id, values, selected) =>
-    `<input type="hidden" id="${id}" value="${esc(selected ?? values[0] ?? '')}"><div class="m-seg" id="${id}-seg">` +
-    values.map(v => `<button type="button" data-v="${esc(v)}" class="${v === (selected ?? values[0]) ? 'on' : ''}">${esc(v)}</button>`).join('') + `</div>`;
+// 值放 hidden input（id＝欄位名），既有程式照讀 .value。
+// blank:true（owner 2026-09-04「選單沒有選的話可以空白」）＝不預選第一個、再點一次亮著的那顆會取消 → 值空白。
+export const segHtml = (id, values, selected, { blank = false } = {}) => {
+    const v = blank ? (values.includes(selected) ? selected : '') : (selected ?? values[0] ?? '');
+    return `<input type="hidden" id="${id}" value="${esc(v)}"><div class="m-seg" id="${id}-seg"${blank ? ' data-blank="1"' : ''}>` +
+        values.map(x => `<button type="button" data-v="${esc(x)}" class="${x === v ? 'on' : ''}">${esc(x)}</button>`).join('') + `</div>`;
+};
 
 export function mountSeg(id, onChange) {
     const hidden = document.getElementById(id), seg = document.getElementById(id + '-seg');
     if (!hidden || !seg) return;
     seg.onclick = (ev) => {
         const b = ev.target.closest('button[data-v]'); if (!b) return;
-        hidden.value = b.dataset.v;
-        seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+        const clear = seg.dataset.blank && b.classList.contains('on');   // 可空白的欄位：再點一次＝取消
+        hidden.value = clear ? '' : b.dataset.v;
+        seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', !clear && x === b));
         if (onChange) onChange(hidden.value);
     };
 }
@@ -82,7 +86,7 @@ export function mountSeg(id, onChange) {
 export function setSeg(id, values, selected) {
     const seg = document.getElementById(id + '-seg'), hidden = document.getElementById(id);
     if (!seg || !hidden) return;
-    const v = values.includes(selected) ? selected : values[0] || '';
+    const v = values.includes(selected) ? selected : (seg.dataset.blank ? '' : values[0] || '');
     hidden.value = v;
     seg.innerHTML = values.map(x => `<button type="button" data-v="${esc(x)}" class="${x === v ? 'on' : ''}">${esc(x)}</button>`).join('');
 }

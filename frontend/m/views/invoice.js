@@ -22,8 +22,8 @@ function formHtml() {
       <div id="inv-notice" hidden></div>
       <form class="m-form m-card w" id="inv-form" autocomplete="off">
         <label>標題</label><input id="inv-title" placeholder="空白＝用案名或品項（CRM 發票的「名稱」）">
-        <label>申請人</label>${segHtml('inv-applicant', inv.applicants || [])}
-        <label>類別</label>${segHtml('inv-category', inv.categories || [])}
+        <label>申請人</label>${segHtml('inv-applicant', inv.applicants || [], '', { blank: true })}
+        <label>類別</label>${segHtml('inv-category', inv.categories || [], '', { blank: true })}
         <label id="inv-project-label">專案</label>${pickerHtml('inv-project_id')}
         <div class="m-hint" id="inv-client-hint">選了專案會自動帶客戶、抬頭、統編</div>
         <div class="row2">
@@ -33,7 +33,7 @@ function formHtml() {
         <label>品項</label>${pickerHtml('inv-item_type')}
         <label>客戶（抬頭）</label>${pickerHtml('inv-company_name')}
         <label>統編</label><input id="inv-tax_id" maxlength="8" inputmode="numeric" pattern="[0-9]*">
-        <label>電子或紙本</label>${segHtml('inv-invoice_kind', inv.kinds || [])}
+        <label>電子或紙本</label>${segHtml('inv-invoice_kind', inv.kinds || [], '', { blank: true })}
         <div id="inv-paper" hidden>
           <label class="req">收件人</label><input id="inv-recipient">
           <label>收件電話</label><input id="inv-recipient_phone" type="tel" inputmode="tel">
@@ -96,7 +96,7 @@ function wireAmounts() {
     const applicants = (opt().invoice || {}).applicants || [];
     let last = '';
     try { last = localStorage.getItem(LAST_APPLICANT) || ''; } catch (_) { /* 私密模式 */ }
-    setSeg('inv-applicant', applicants, applicants.includes(last) ? last : applicants[0]);
+    setSeg('inv-applicant', applicants, last);   // 沒記過＝空白（申請人／類別／電子或紙本都可空白，owner 2026-09-04）
     mountSeg('inv-applicant', (v) => { try { localStorage.setItem(LAST_APPLICANT, v); } catch (_) { /* 同上 */ } });
     mountPicker('inv-company_name', { items: clientItems(), placeholder: '打字找抬頭或自己打', free: true, onPick: applyCompany });
     mountPicker('inv-item_type', { items: ((opt().invoice || {}).item_types || []).map(t => ({ value: t, label: t })),
@@ -275,6 +275,21 @@ async function submit(ev) {
     if (saved && editing) stopEdit();   // withBusy 收尾會把按鈕文字寫回，所以要在它之後
 }
 
+// 刪除（owner 2026-09-04）：走桌機同一支 DELETE（會順手清掉收支對它的連結）；正在修改的那張被刪就退出修改模式
+async function removeInvoice(inv, btn) {
+    const label = [inv.title, inv.invoice_number, money(inv.amount_total)].filter(Boolean).join(' ');
+    if (!window.confirm(`刪除這張發票？${label}
+收支明細對它的連結會一起清掉，不能復原。`)) return;
+    await withBusy(btn, async () => {
+        try {
+            await mfetch('/api/v1/crm/invoices/' + inv.id, { method: 'DELETE' });
+            if (_editing && _editing.id === inv.id) { stopEdit(); for (const k of VOLATILE) F(k).value = ''; F('item_type-q').value = ''; }
+            toast('已刪除');
+            await loadRecent();
+        } catch (e) { toast(e.message || '刪除失敗', 'err'); }
+    });
+}
+
 const PAGE = 10;
 const recent = { offset: 0, rows: [] };   // 後端 offset 分頁（同專案分頁）：載入更多＝再抓下一頁接在後面
 
@@ -286,7 +301,7 @@ function recentCardHtml(inv) {
         <div class="sub">${esc(inv.payment_type || '')} · ${esc(inv.payment_status || '')}${inv.invoice_number ? ' · ' + esc(inv.invoice_number) : ''}${inv.project_name ? ' · ' + esc(inv.project_name) : ''}</div>
         <div class="row"><span class="sub">${esc(fmtDate(inv.invoice_date))}</span>
           ${'amount_total' in inv ? `<span class="amt">${money(inv.amount_total)}</span>` : ''}</div>
-        ${state.canWrite ? `<div class="row"><button type="button" class="m-btn w" data-edit="${esc(inv.id)}">修改</button></div>` : ''}
+        ${state.canWrite ? `<div class="row"><button type="button" class="m-btn w" data-edit="${esc(inv.id)}">修改</button><button type="button" class="m-btn" data-del="${esc(inv.id)}">刪除</button></div>` : ''}
       </div>`;
 }
 
@@ -315,9 +330,11 @@ export async function render(host, { first }) {
         mountSeg('inv-issue_status', syncIssueRow);
         document.getElementById('inv-more').addEventListener('click', () => loadRecent(false));
         document.getElementById('inv-recent').addEventListener('click', (ev) => {
-            const b = ev.target.closest('button[data-edit]'); if (!b) return;
-            const inv = (document.getElementById('inv-recent')._rows || []).find(x => x.id === b.dataset.edit);
-            if (inv) startEdit(inv);
+            const b = ev.target.closest('button[data-edit],button[data-del]'); if (!b) return;
+            const rows = document.getElementById('inv-recent')._rows || [];
+            if (b.dataset.edit) { const inv = rows.find(x => x.id === b.dataset.edit); if (inv) startEdit(inv); return; }
+            const inv = rows.find(x => x.id === b.dataset.del);
+            if (inv) removeInvoice(inv, b);
         });
     }
     // 專案下拉跟最近登記清單一起重抓：專案分頁新建案子會 markStale('invoice')，切過來才看得到它

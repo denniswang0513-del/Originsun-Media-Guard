@@ -270,3 +270,16 @@ def test_calendar_tab_contract():
     assert 'data-act="payments"' in pj and "switchTab('payments')" in pj
     html_tabs = re.findall(r'data-tab="(\w+)"', CRM_HTML)
     assert html_tabs[-1] == "calendar" and "payments" not in html_tabs
+
+
+def test_invoice_segments_can_be_blank_and_cards_can_be_deleted():
+    """owner 2026-09-04：申請人／類別／電子或紙本沒選就空白（不預選第一個、再點一次取消），
+    最近登記的卡片有刪除鈕（走桌機同一支 DELETE，先 confirm）。"""
+    ui = js_code_only(repo_src("frontend/m/ui.js"))
+    assert "data-blank" in ui and "seg.dataset.blank && b.classList.contains('on')" in ui
+    src = js_code_only(repo_src("frontend/m/views/invoice.js"))
+    for seg in ("inv-applicant", "inv-category", "inv-invoice_kind"):
+        assert f"segHtml('{seg}'" in src and f"segHtml('{seg}', inv." in src, seg
+        assert "{ blank: true }" in src.split(f"segHtml('{seg}'", 1)[1].split("}")[0] + "}", seg
+    assert "data-del=" in src and "method: 'DELETE'" in src and "window.confirm(" in src
+    assert "applicants[0]" not in src, "申請人沒記過就空白，不預選第一個"
