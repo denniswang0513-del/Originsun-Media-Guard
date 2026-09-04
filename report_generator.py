@@ -210,6 +210,8 @@ async def _render_pdf(local_html_path: str, output_pdf_path: str) -> None:
         page = await browser.new_page()
         # Wait for all resources (e.g. Base64 images) to fully load
         await page.goto(file_url, wait_until="networkidle")
+        # 膠卷圖在瀏覽器裡是進視窗才解碼（templates/report.html 尾端的 script）；PDF 要整份，先全部載進來
+        await page.evaluate("() => window.__reportLoadAll ? window.__reportLoadAll() : null")
         # Chromium PDF treats <table> as monolithic — convert to divs for proper pagination
         await page.evaluate("""() => {
             const wrapper = document.querySelector('.files-table-wrapper');

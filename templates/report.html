@@ -134,6 +134,9 @@
 
         .file-entry {
             border-bottom: 1px solid #eee;
+            /* 幾百個檔案的報表：看不到的列不排版不畫（手機 WebKit 記憶體） */
+            content-visibility: auto;
+            contain-intrinsic-size: auto 60px;
         }
 
         .file-entry:nth-child(even) {
@@ -439,7 +442,7 @@
                 </div>
                 {% if rec.film_strip_b64 %}
                 <div class="filmstrip-scroll">
-                    <img class="filmstrip-img" src="data:image/jpeg;base64,{{ rec.film_strip_b64 }}" alt="film strip for {{ rec.filename }}">
+                    <img class="filmstrip-img" data-src="data:image/jpeg;base64,{{ rec.film_strip_b64 }}" alt="film strip for {{ rec.filename }}" width="2400" height="135">
                 </div>
                 {% endif %}
                 <div class="mobile-detail-row">
@@ -463,6 +466,31 @@
         </div>
 
     </div>
+
+    <script>
+    // 膠卷圖進視窗才解碼、離開就卸掉（2026-09-04）：一份 532 檔的報表 36 MB、532 張 2400px 寬的膠卷全部解碼
+    // ≈ 700 MB 點陣圖，手機 Chrome／Safari 往下捲直接被系統砍掉（「無法開啟這個網頁」）。base64 還是留在
+    // data-src（報表仍是單一檔、離線可開），只是同時解碼的只有視窗附近那幾張。PDF 轉檔前呼叫 __reportLoadAll。
+    (function () {
+        var imgs = Array.prototype.slice.call(document.querySelectorAll('img.filmstrip-img[data-src]'));
+        if (!imgs.length) return;
+        function show(img) { if (!img.src) img.src = img.getAttribute('data-src'); }
+        function hide(img) { if (img.src) img.removeAttribute('src'); }
+        window.__reportLoadAll = function () {
+            if (window.__reportObserver) { window.__reportObserver.disconnect(); window.__reportObserver = null; }
+            imgs.forEach(show);
+            return Promise.all(imgs.map(function (img) {
+                return img.complete ? null : new Promise(function (res) { img.onload = img.onerror = res; });
+            }));
+        };
+        if (!('IntersectionObserver' in window)) { imgs.forEach(show); return; }
+        var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (en) { (en.isIntersecting ? show : hide)(en.target); });
+        }, { rootMargin: '800px 0px' });
+        imgs.forEach(function (img) { io.observe(img); });
+        window.__reportObserver = io;
+    })();
+    </script>
 
 </body>
 
