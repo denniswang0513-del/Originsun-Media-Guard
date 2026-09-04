@@ -243,3 +243,37 @@ timesheets 我的一天                  work_journals + 四張 entries         
    再疊場次（藍）、外出（橘）、休假（灰）。守衛從 timesheets 模組放寬到「登入＋`User.staff_id`」（唯讀）。
    §10 那條「去掉小時」作廢。
 4. 「不顯示個人累計」的鐵則範圍收斂為：**不做個人的本週／當日／每案合計卡與超時提醒**；逐列小時、團隊看板、專案表的全案數字都照 CRM 顯示。
+
+## 12. v5 修正（owner 2026-09-05）：工作階段跟著分類走、格子五列往下長
+
+- **工作階段不是一棵路徑樹，是「每個分類自己的階段清單」**：一列只有一個階段，顯示只有階段名（例：分類「剪接」→ 階段「A-copy」）。
+  結構仍用 `work_stage_nodes`（同分類樹表），但固定兩層：parent＝分類（對應 `WORK_TYPES` 九類，名稱以分類為 key），child＝階段。
+  預設種子：剪接 → A-copy、B-copy、Fine cut、Fine cut 修改、定剪、輸出；拍攝 → 勘景、現場、備份；前期企劃 → 提案、分鏡、會議；
+  動態／特效 → 分鏡、初版、修改、定版；調光 → 初調、修改、定版；聲音 → 配樂、混音、定版；會議溝通 → 內部、客戶；行政 → 指派事項、庶務；其他 → （空）。
+  種子只在表空時寫入，之後 owner 在 CRM 設定分頁改（新增、改名、排序、停用不刪）。
+- **格子行為**：選了分類，階段下拉只列那個分類的階段（分類改了、階段不在清單裡就清空並提示）。
+  `timesheets.stage_id` soft FK；`stage_name` 鏡射字串（報表、Sheet 匯出、週記自動區顯示用）。
+- **一次五列、像 CRM 往下加**：預設五空列，最後一列有內容就自動再長五列；也有「＋ 加五列」；儲存只送有專案或內容的列。
+- 週記自動區、團隊的一週、專案時間軸顯示「分類 · 階段」（例：剪接 · A-copy）。
+
+## 13. v6 修正（owner 2026-09-05）：週記草稿→送出、原功能全部保留
+
+**草稿與送出**
+- `work_journals.status`（`draft`／`submitted`，預設 draft）＋ `submitted_at`。打字就自動存草稿（沿用 `PUT /journal/mine`，body 加 `status`）；
+  按「送出」→ `POST /journal/mine/submit`。送出後仍可改、再送出（`submitted_at` 更新）。不設截止，可寫窗口照原規則。
+- `GET /journal/week`、`/journal/person`、`/journal/learnings` **只回 submitted**；自己的草稿只有自己看得到（`/journal/mine`）。
+  「大家的回顧」把草稿中的人標「草稿」、沒動過的人標「還沒寫」。
+- 手機端草稿另存 localStorage（離線打字不掉），回線送 draft。
+
+**原功能保留清單**（改版不動它們）
+| 功能 | 現況 | 保留方式 |
+|------|------|---------|
+| 貼圖片 | 全站 `paste-image.js`：貼上 → `POST /paste_upload` 轉 WebP 進 NAS 圖床 → 內容存 `![圖片](paste:<hex>.webp)` token；顯示面 `renderRich` 轉 `<img>` | 新版四問與「其他」的 textarea 照樣掛在這層下；大家的回顧、專案「週記片段」都用 `renderRich` |
+| 四問、一行一條、上限 | `clean_entries`、`MAX_ENTRIES_PER_SECTION` | 照舊 |
+| 可寫窗口 | `editable_window_ok`（過往、本週、下週） | 照舊 |
+| 學習庫 | `GET /journal/learnings` 跨週搜「學到了什麼」 | 照舊，只回 submitted |
+| 某人歷週、本週有寫的人 | `/journal/person`、`/journal/week`、`/journal/people` | 照舊，只回 submitted |
+| Notion 週誌匯入 | 既有匯入工具 | 匯入的視為 submitted |
+| 連結自動可點 | `renderRich` | 照舊 |
+
+示範頁的週記格可以真的貼圖試（本機預覽、不上傳）；正式版走上面那條 token 契約。
