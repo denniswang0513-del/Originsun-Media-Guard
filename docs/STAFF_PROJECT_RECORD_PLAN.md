@@ -196,3 +196,20 @@ project_people(session, project_id) -> [{staff_id, name, roles[]}]    # 查專�
 
 **API**：`build_staff_record` 的每個 project 帶 `burn: {budget_hours, used, planned, remaining, pct}`（沒預算全 None）；
 員工端與主管端同一份，因為它本來就不是個人數字。單元測試釘：`burn` 只能來自 `budget_burn`（掃原始碼，不准另抄一份除法）。
+
+## 13. 精簡版（只用現有功能，owner 2026-09-05「以現有功能改一個精簡版」）
+
+示範頁：`/demo/my-workspace-lite.html`。七塊，六塊直接接現有端點，**只有「我的案子」要寫約 40 行後端**：
+
+| 塊 | 來源（既有） | 要做的 |
+|----|-------------|--------|
+| 今天一條 | `GET /shoots?from=今天&to=今天`（crew 含我）＋ `/me/workspace` 的 todos、leave | 前端組一條 |
+| 我的案子 | **改 `/me/workspace.projects` 的來源**：`timesheets.staff_id`（近 60 天）∪ `crm_shoots.crew` → 專案；最近一筆 `task_note`、拍攝日、帳款狀態字；工時池接 `budget_burn`（`/timesheets/project` summary 那條） | 後端 ~40 行＋前端卡 |
+| 我的待辦 | `/me/workspace.todos` | 搬位置、去 emoji |
+| 我要記錄四顆 | `/hours.html`、`/petty-cash.html`、`/m/crm.html#invoice`、`/m/crm.html#calendar` | 純連結 |
+| 請假／請款進度／福委會 | 既有三卡；「工時與薪酬」只留請款那半 | 搬位置 |
+| 簡歷與作品集 | `/me/profile` ＋ `credit_service.find_projects_by_staff` | 個人資料卡加掛名清單 |
+| 查專案 | `/crm/m/projects?q=` | 前端一格 |
+
+先不做（等 §4 服務）：我做過的時間線、大家今天、等我處理三來源、通告單、交付清單、客戶窗口、代墊與勞報年度累計、通知偏好、計時器。
+估工：一個工作天（後端半天、前端半天、探針驗收）。完整版（§4–§6）約兩到三週。
