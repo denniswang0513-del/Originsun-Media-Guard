@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>示範｜工作紀錄與週記（電腦版）</title>
+<style>
+  :root { --red:#c9372c; --ink:#262626; --sub:#737373; --line:#e5e5e5; --soft:#fafafa; --num:#f59e0b; --blue:#1d4ed8; --ok:#15803d; --warn:#b45309; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#f3f3f3; color:var(--ink); font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI","Noto Sans TC","Microsoft JhengHei",sans-serif; -webkit-font-smoothing:antialiased; }
+  .top { position:sticky; top:0; z-index:10; background:#fff; border-bottom:1px solid var(--line); padding:10px 18px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .top h1 { font-size:16px; margin:0; } .top .note { color:var(--sub); font-size:12px; }
+  .stage { display:flex; gap:24px; padding:20px 18px 60px; align-items:flex-start; }
+  .legend { width:330px; flex:none; position:sticky; top:58px; }
+  .legend h2 { font-size:12px; letter-spacing:.3em; text-transform:uppercase; color:var(--sub); margin:0 0 8px; font-weight:600; }
+  .legend ol { margin:0 0 14px; padding:0; list-style:none; }
+  .legend li { display:flex; gap:10px; padding:7px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .legend li b { display:block; font-weight:600; } .legend li span { color:var(--sub); font-size:12px; }
+  .legend .src { display:block; margin-top:2px; font-size:11px; color:var(--blue); }
+  .n { flex:none; width:22px; height:22px; border-radius:50%; background:var(--num); color:#111; font-weight:700; font-size:11px; display:inline-flex; align-items:center; justify-content:center; }
+  .tag { position:absolute; top:-10px; left:-10px; z-index:2; }
+  .rel { position:relative; }
+  @media (max-width:1000px) { .stage { flex-direction:column; align-items:stretch; } .legend { width:auto; position:static; } }
+
+  .desk { flex:1; min-width:0; background:#fff; border:1px solid #ddd; border-radius:12px; overflow:hidden; }
+  .d-hd { display:flex; align-items:center; gap:14px; padding:14px 28px; border-bottom:1px solid var(--line); }
+  .d-hd .brand { font-weight:700; } .d-hd .brand i { color:var(--red); font-style:normal; font-size:11px; letter-spacing:.35em; margin-left:6px; }
+  .d-hd .sp { flex:1; } .d-hd .tabs { display:flex; gap:14px; font-size:13px; color:var(--sub); } .d-hd .tabs span.on { color:var(--ink); border-bottom:2px solid var(--red); }
+  .d-wrap { padding:22px 28px 40px; }
+  .greet .eyebrow { font-size:11px; letter-spacing:.35em; text-transform:uppercase; color:var(--sub); } .greet .eyebrow b { color:var(--red); font-weight:400; }
+  .greet h2 { margin:4px 0 6px; font-size:24px; font-weight:600; }
+  .greet .sub { margin-bottom:18px; }
+  .sub { color:var(--sub); font-size:12px; }
+  .zone-h { font-size:11px; letter-spacing:.35em; text-transform:uppercase; color:var(--sub); border-bottom:1px solid var(--line); padding-bottom:8px; margin:6px 0 14px; }
+  .zone-h b { color:var(--red); font-weight:400; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  @media (max-width:1200px) { .cols { grid-template-columns:1fr; } }
+  .card { border:1px solid var(--line); padding:18px 20px 16px; margin-bottom:18px; background:#fff; }
+  .card-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:10px; }
+  .card-head .ey { font-size:11px; letter-spacing:.3em; text-transform:uppercase; color:var(--sub); } .card-head .ey b { color:var(--red); font-weight:400; letter-spacing:0; margin-left:6px; font-size:14px; }
+  .card-head .count { font-size:12px; color:var(--sub); }
+  .btn { min-height:34px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); padding:0 12px; font-size:13px; cursor:pointer; }
+  .btn.pri { background:var(--ink); border-color:var(--ink); color:#fff; }
+  .btn.sm { min-height:26px; font-size:12px; padding:0 8px; border-radius:6px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .notice { background:#fff7ed; border:1px solid #fed7aa; color:var(--warn); padding:8px 12px; border-radius:8px; font-size:13px; margin-bottom:12px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; border:1px solid currentColor; font-size:11px; white-space:nowrap; }
+  .pill.ms { color:var(--blue); background:#eff6ff; border-color:#bfdbfe; } .pill.plan { color:var(--sub); } .pill.done { color:var(--ok); border-color:#bbf7d0; background:#f0fdf4; }
+  .pill.help { color:var(--red); border-color:#fecaca; background:#fef2f2; } .pill.talk { color:var(--warn); border-color:#fed7aa; background:#fff7ed; }
+
+  table.day { width:100%; border-collapse:collapse; font-size:13px; }
+  table.day th { text-align:left; font-size:11px; color:var(--sub); font-weight:600; padding:6px 8px; border-bottom:1px solid var(--line); }
+  table.day td { padding:8px; border-bottom:1px solid #f0f0f0; vertical-align:top; }
+  table.day tr.new td { background:var(--soft); }
+  table.day .sel { border:1px solid var(--line); border-radius:6px; padding:3px 6px; font-size:12px; background:#fff; color:var(--ink); min-width:80px; }
+  table.day .in { border:1px solid var(--line); border-radius:6px; padding:4px 6px; font-size:13px; width:100%; }
+  a.lk { color:var(--blue); text-decoration:underline; } .path { font-family:ui-monospace,monospace; font-size:12px; background:#f5f5f5; padding:1px 5px; border-radius:4px; }
+
+  .wl { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:10px; background:var(--soft); }
+  .wl .pj { font-weight:600; display:flex; justify-content:space-between; align-items:center; }
+  .wl ul { margin:6px 0 0; padding-left:18px; } .wl li { margin:3px 0; } .wl li .d { color:var(--sub); font-size:12px; margin-right:6px; }
+  .q { margin:14px 0 6px; font-weight:600; display:flex; justify-content:space-between; align-items:baseline; } .q small { color:var(--sub); font-weight:400; font-size:12px; }
+  .entry { display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid #f0f0f0; }
+  .entry .txt { flex:1; min-width:0; } .entry .meta { margin-top:4px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .entry .sel { border:1px solid var(--line); border-radius:6px; padding:2px 6px; font-size:11px; background:#fff; color:var(--sub); }
+  .reply { margin-top:6px; background:#f5f5f5; border-left:3px solid #d4d4d4; padding:6px 10px; font-size:13px; }
+  .reply b { font-weight:600; margin-right:6px; } .reply .t { color:var(--sub); font-size:11px; margin-left:6px; }
+  textarea.add { width:100%; border:1px dashed var(--line); border-radius:8px; padding:8px 10px; font:inherit; font-size:13px; min-height:38px; resize:vertical; margin-top:6px; }
+  .team { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }
+  .tcard { border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:13px; }
+  .tcard b { display:flex; justify-content:space-between; } .tcard .sub { display:block; margin-top:4px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--red); margin-left:6px; }
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>示範｜工作紀錄與週記（電腦版，個人工作台「我要記錄」區）</h1>
+  <span class="note">假資料。橘色編號對應右側說明與規劃文件的功能代號（A＝工作紀錄、B＝週記）。畫面上沒有任何工時合計。</span>
+</div>
+
+<div class="stage">
+<div class="desk">
+  <div class="d-hd">
+    <span class="brand">個人工作台<i>WORKSPACE</i></span><div class="sp"></div>
+    <div class="tabs"><span class="on">工作台</span><span>週誌</span><span>零用金</span><span>私帳</span><span>登出</span></div>
+  </div>
+  <div class="d-wrap">
+    <div class="greet"><div class="eyebrow">Record <b>我要記錄</b></div><h2>你好，小葉</h2><div class="sub">9/5（五）· 本週週記 16:00 前寫完 · 今天還沒記</div></div>
+
+    <div class="cols">
+      <!-- ── 左：我的一天 ── -->
+      <div>
+        <div class="card rel"><span class="tag n">A1</span>
+          <div class="card-head"><span class="ey">Today<b>我的一天 9/5（五）</b></span><span class="count">3 列 · 1 列計畫</span></div>
+          <div class="row rel" style="margin-bottom:10px;"><span class="tag n" style="left:auto; right:-10px;">A2–A4</span>
+            <button class="btn sm">從今天的場次帶入（1 場）</button><button class="btn sm">從待辦帶入（2 件）</button><button class="btn sm">複製昨天</button><button class="btn sm">複製上週五</button>
+          </div>
+          <table class="day">
+            <thead><tr><th style="width:26%">案子</th><th style="width:14%">分類</th><th>內容</th><th style="width:15%">里程碑</th><th style="width:9%">狀態</th><th style="width:6%"></th></tr></thead>
+            <tbody>
+              <tr><td>桃園環保局 循環杯廣告<div class="sub">桃園市環保局</div></td><td>拍攝</td><td>現場側拍，藝文廣場，導演阿弘。<span class="sub">（由場次帶入）</span></td><td><span class="pill ms">備份完成</span></td><td><span class="pill done">實際</span></td><td><button class="btn sm">改</button></td></tr>
+              <tr class="rel"><td>南山人壽謝經理<div class="sub">域創股份有限公司</div></td><td>剪接</td><td>定剪 v3，字幕 00:42 依客戶留言改。看片 <a class="lk" href="#">review/8f2c…</a>　母帶 <span class="path">V:\2026\南山\定剪\v3</span> <button class="btn sm">複製</button><span class="tag n" style="left:auto; right:-10px; top:-6px;">A6</span></td><td><span class="pill ms">交付</span></td><td><span class="pill done">實際</span></td><td><button class="btn sm">改</button></td></tr>
+              <tr><td>（公布欄）補上光環境獎花絮照</td><td>行政</td><td>指派：王士源。<span class="sub">（由待辦帶入，標實際時待辦一併完成）</span></td><td>—</td><td><span class="pill plan">計畫</span></td><td><button class="btn sm pri">完成</button></td></tr>
+              <tr class="new rel"><span class="tag n" style="top:6px;">A5</span><td><input class="in" placeholder="打字找案子…"></td><td><select class="sel"><option>剪接</option><option>拍攝</option><option>前期企劃</option><option>動態／特效</option><option>調光</option><option>聲音</option><option>會議溝通</option><option>行政</option><option>其他</option></select></td><td><input class="in" placeholder="做了什麼（可貼連結、路徑）"></td><td><select class="sel"><option>—</option><option>交付</option><option>送審</option><option>修改回</option><option>上架</option><option>結案</option><option>會議</option><option>備份完成</option></select></td><td><select class="sel"><option>實際</option><option>計畫</option></select></td><td><button class="btn sm">加</button></td></tr>
+            </tbody>
+          </table>
+          <div class="sub" style="margin-top:8px;">案子與分類打字找；里程碑一列最多一個；改過的列留痕，與 Sheet 撞到變衝突待決。這裡不顯示任何小時合計。</div>
+        </div>
+
+        <div class="card rel"><span class="tag n">A11</span>
+          <div class="card-head"><span class="ey">Find<b>查自己的紀錄</b></span><span class="count">只列不算</span></div>
+          <div class="row"><input class="in" style="flex:1; border:1px solid var(--line); border-radius:6px; padding:5px 8px;" placeholder="關鍵字…"><select class="sel" style="border:1px solid var(--line); border-radius:6px; padding:4px 6px;"><option>所有案子</option></select><select class="sel" style="border:1px solid var(--line); border-radius:6px; padding:4px 6px;"><option>所有里程碑</option><option>交付</option></select><button class="btn sm">找</button></div>
+          <div class="sub" style="margin-top:8px;">例：里程碑＝交付 → 9/5 南山人壽 定剪 v3、8/27 煥民新村 素材備份、8/20 光環境獎 母帶。</div>
+        </div>
+      </div>
+
+      <!-- ── 右：本週週記 ── -->
+      <div>
+        <div class="card rel"><span class="tag n">B1</span>
+          <div class="card-head"><span class="ey">Weekly<b>本週週記 9/1 – 9/5</b></span><span class="count">可寫到 9/7（日）</span></div>
+          <div class="notice rel"><span class="tag n" style="left:auto; right:-10px;">B7</span>今天 16:00 前寫完；沒寫會在 16:00 收到一則提醒。</div>
+
+          <div class="q">本週做了什麼 <small>自動從工作紀錄整理，唯讀；勾選可帶進「順利的事」</small></div>
+          <div class="wl"><div class="pj">桃園環保局 循環杯廣告 <span class="sub">3 天</span></div>
+            <ul><li><span class="d">9/2</span>分鏡確認、與客戶會議 <span class="pill ms">會議</span></li><li><span class="d">9/4</span>初剪 v1 <span class="pill ms">送審</span> <label><input type="checkbox"> 帶入</label></li><li><span class="d">9/5</span>現場側拍，素材備份 <span class="pill ms">備份完成</span></li></ul></div>
+          <div class="wl"><div class="pj">南山人壽謝經理 <span class="sub">4 天</span></div>
+            <ul><li><span class="d">9/1</span>初剪 v2 送客戶 <span class="pill ms">送審</span></li><li><span class="d">9/3</span>客戶留言 2 則，字幕修改 <span class="pill ms">修改回</span></li><li><span class="d">9/5</span>定剪 v3 交件 <span class="pill ms">交付</span> <label><input type="checkbox" checked> 帶入</label></li></ul></div>
+          <div class="wl"><div class="pj">煥民新村開村活動 <span class="sub">1 天</span></div><ul><li><span class="d">9/2</span>素材整理、Proxy</li></ul></div>
+
+          <div class="q rel">順利的事與想感謝的人 <small>一行一條</small></div>
+          <div class="entry rel"><span class="tag n" style="top:2px;">B3</span><div class="txt">南山定剪 v3 一次過，客戶只改字幕。感謝阿弘幫忙看色。<div class="meta"><select class="sel"><option>南山人壽謝經理</option></select><span class="sub">掛案子</span></div></div></div>
+          <div class="entry"><div class="txt">桃園環保局現場備份流程順，用新的 DIT 清單沒漏。<div class="meta"><select class="sel"><option>桃園環保局 循環杯廣告</option></select></div></div></div>
+          <textarea class="add" placeholder="再加一條…"></textarea>
+
+          <div class="q rel">遇到哪些挑戰 <small>可標「需要協助」或「想討論」</small></div>
+          <div class="entry rel"><span class="tag n" style="top:2px;">B4</span><div class="txt">煥民新村素材 532 檔，Proxy 轉了整晚還沒完，下週粗剪會卡。<div class="meta"><select class="sel"><option>煥民新村開村活動</option></select><span class="pill help">需要協助</span><button class="btn sm">改成想討論</button></div>
+            <div class="reply rel"><span class="tag n" style="top:-8px;">B5</span><b>王士源</b>先用分散派發，轉檔丟兩台機器；明早我開給你。<span class="t">9/5 11:20</span></div></div></div>
+          <div class="entry"><div class="txt">客戶看片留言散在門戶，容易漏。<div class="meta"><select class="sel"><option>不掛案子</option></select><span class="pill talk">想討論</span></div></div></div>
+          <textarea class="add" placeholder="再加一條…"></textarea>
+
+          <div class="q">學到了什麼</div>
+          <div class="entry"><div class="txt">DaVinci 字幕批次改字型的方法（Edit → Subtitle → Track style）。<div class="meta"><span class="sub">會進學習庫</span></div></div></div>
+          <textarea class="add" placeholder="再加一條…"></textarea>
+
+          <div class="q">其他</div>
+          <textarea class="add" placeholder="任何想說的…"></textarea>
+
+          <div class="row" style="margin-top:14px; justify-content:space-between;">
+            <span class="sub rel"><span class="tag n" style="left:-28px; top:-2px;">B6</span>逾期沒寫？按「申請補寫」，主管開窗 7 天。</span>
+            <span class="row"><button class="btn">申請補寫</button><button class="btn pri">儲存週記</button></span>
+          </div>
+        </div>
+
+        <div class="card rel"><span class="tag n">B8</span>
+          <div class="card-head"><span class="ey">Team<b>本週大家</b></span><span class="count">7 人寫了 · 2 人還沒</span></div>
+          <div class="team">
+            <div class="tcard"><b>小葉（我）<span class="pill help">求助 1</span></b><span class="sub">南山定剪一次過 · 煥民 Proxy 卡</span></div>
+            <div class="tcard"><b>阿弘</b><span class="sub">桃園環保局拍攝順 · 想討論燈光租借</span></div>
+            <div class="tcard"><b>Amy</b><span class="sub">煥民粗剪開工 · 學到 Resolve 代理流程</span></div>
+            <div class="tcard"><b>阿凱<span class="dot"></span></b><span class="sub">還沒寫（休假中）</span></div>
+          </div>
+          <div class="sub" style="margin-top:8px;">全員可讀；「需要協助」由主管在求助清單統一回。點卡片看全文與自動區。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <h2>工作紀錄（每日）</h2>
+  <ol>
+    <li><span class="n">A1</span><div><b>我的一天</b><span>案子、分類、內容、里程碑、計畫或實際。沒有合計。</span><span class="src">既有 /timesheets/mine，前端不畫 planned_total／actual_total</span></div></li>
+    <li><span class="n">A2–A4</span><div><b>三顆帶入鈕</b><span>今天我在 crew 的場次、公布欄指派給我的、昨天或上週同一天。</span><span class="src">/shoots?from=今天、/me/workspace.todos、list_rows 多取一天</span></div></li>
+    <li><span class="n">A5</span><div><b>里程碑</b><span>交付、送審、修改回、上架、結案、會議、備份完成。是週記自動區與專案時間線的來源。</span><span class="src">timesheets.tag 新欄；字彙在 core.hr_logic</span></div></li>
+    <li><span class="n">A6</span><div><b>內容帶連結</b><span>看片連結可點、NAS 路徑可複製。不加欄位。</span></div></li>
+    <li><span class="n">A11</span><div><b>查自己的紀錄</b><span>關鍵字、案子、里程碑、期間。只列不算。</span></div></li>
+  </ol>
+  <h2>週記（每週）</h2>
+  <ol>
+    <li><span class="n">B1</span><div><b>本週做了什麼（自動區）</b><span>本週工作紀錄按案子分組，附里程碑；勾選帶進順利的事。</span><span class="src">GET /journal/mine 加 worklog；core.journal_logic.group_worklog</span></div></li>
+    <li><span class="n">B3</span><div><b>條目掛案子</b><span>每條可選一個案子；掛了的出現在專案紀錄「週記片段」。</span><span class="src">journal_* 加 project_id</span></div></li>
+    <li><span class="n">B4</span><div><b>需要協助／想討論</b><span>挑戰與其他可標；標了進主管的求助清單。</span><span class="src">journal_* 加 flag</span></div></li>
+    <li><span class="n">B5</span><div><b>主管回覆</b><span>灰底顯示在條目下，不改原文。</span><span class="src">新表 journal_replies</span></div></li>
+    <li><span class="n">B6</span><div><b>補寫窗口</b><span>逾期按申請，主管開 7 天。</span><span class="src">work_journals.reopen_until</span></div></li>
+    <li><span class="n">B7</span><div><b>提醒</b><span>週五 16:00 沒寫提醒本人；週一提醒主管誰沒寫。可關。</span><span class="src">core/scheduler ＋ 通知偏好</span></div></li>
+    <li><span class="n">B8</span><div><b>本週大家</b><span>卡片流，求助紅點，沒寫的標出。</span><span class="src">既有 /journal/week 加 flag 計數</span></div></li>
+  </ol>
+  <h2>待拍板</h2>
+  <ol>
+    <li><div><span>里程碑字彙夠不夠；逾期補寫要不要主管開窗；主管回覆要不要即時通知；「需要協助」全員可讀還是只給主管。</span></div></li>
+  </ol>
+</div>
+</div>
+</body>
+</html>
