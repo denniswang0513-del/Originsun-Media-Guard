@@ -83,7 +83,16 @@ def test_passthrough_income_row_requests_the_whole_remit_on_the_linked_projects(
     assert "category: '發票代開'" in remit and "source_invoice_id: inv.id" in remit and "project_id: it.pid" in remit
     assert "p.source_invoice_id === e.invoice_id" in remit and "e.kai_payment_id" in remit, "已請過的（含沒掛案的自動單）要講"
     assert "data-kai-payee" in remit and "_fetch('/staff')" in remit, "收款人可挑"
+    # 沒掛案的自動單（開給代開人、還沒付）可收回改開在案子上，不然「還可請 0」卡死（思沙龍）；付掉的不能收回
+    assert "x.payment_status !== '已付款'" in remit and "_fetch('/payments/' + x.id, { method: 'DELETE' })" in remit
+    assert 'id="kai-withdraw"' in remit
     assert "/cost-lines" not in remit and "groupCostStaff" not in remit, "代開列不是執行人員表"
+    # 內部代開掛私帳案（思沙龍）：代開列選到私帳案一樣掛到發票、整筆請款開在私帳那本帳（owner 2026-09-04「思沙龍的私帳走到這裡就卡住了」）
+    assert "if (mineIds.has(picked) && !passthru) {" in disp
+    assert "const mineIds = new Set((await _mineProjectList()).map((p) => p.id));" in remit
+    assert "...(entOf(it.pid) ? { entity: 'mine' } : {})" in remit and "'&entity=mine'" in remit
+    add = between(js, "async function _cashKaiAddProject(e, pids)", "async function _cashPayForProject(")   # 註解會被 js_code_only 剝掉，錨下一個函式
+    assert "_mineProjectList()" in add and "'私帳｜' + (p.name || '')" in add
     inc = between(js, "async function _cashPayForProject(e, pid, pname, o = {})", "function _cashCustomPay(")
     assert "kai" not in inc, "執行人員表只給一般收入列"
     assert "(e.project_pay_label || (e.kai_payment_label ?" in js
@@ -119,3 +128,16 @@ def test_cash_pay_overlay_keeps_the_type_select_above_the_list():
     js = js_code_only(repo_src("frontend/tabs/crm/crm-cashbook.js"))
     inc = between(js, "async function _cashPayForProject(e, pid, pname, o = {})", "function _cashCustomPay(")
     assert inc.index('id="cpay-type"') < inc.index("${rows ?"), "報支項目要在人員清單之前"
+
+
+def test_private_ledger_passthrough_requests_still_label_the_parent_row():
+    """內部代開掛私帳案（思沙龍）：代開請款單開在私帳，母公司收支列的請款單欄也要標得到——只給看得到私帳的人
+    （標籤帶收款人名字，對沒 mine scope 的人就是洩漏）。"""
+    src = repo_src("routers/crm/cash.py")
+    lst = code_only(func_body(src, "async def list_cash_entries("))
+    assert "_inc_mine = not _hide_mine(request)" in lst
+    assert "_kai_payments_map(session, [r[0].invoice_id for r in rows], ent, _inc_mine)" in lst
+    assert "_project_payments_map(session, [p for ps in eff_pids.values() for p in ps], ent, _inc_mine)" in lst
+    for fn in ("async def _kai_payments_map(", "async def _project_payments_map("):
+        body = code_only(func_body(src, fn))
+        assert 'include_mine and entity != "mine"' in body, fn

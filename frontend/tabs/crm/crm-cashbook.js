@@ -483,12 +483,13 @@ window._cashRequestPay = async (id) => {
         const mineIds = new Set(mine.map((p) => p.id));
         const opts = _projPickerOpts(e, async (picked) => {
             if (!picked) return;
-            if (mineIds.has(picked)) {
+            if (mineIds.has(picked) && !passthru) {
                 const mp = mine.find((p) => p.id === picked);
                 return _cashPayForProject(e, picked, mp ? mp.name : '', { entity: 'mine' });
             }
             try {
                 if (passthru) {
+                    // 代開列（含選到私帳案：內部代開可掛私帳案，思沙龍就是）——案掛在發票上，再回來走整筆代開請款
                     // 案掛在發票上（PUT 是整包寫回：先 GET 再改一欄，同 crm-invoices._invApplyNumber）
                     const full = await _fetch('/invoices/' + e.invoice_id);
                     await _fetch('/invoices/' + e.invoice_id, { method: 'PUT', body: JSON.stringify({ ...full, project_id: picked, project_ids: [picked] }) });
@@ -516,17 +517,29 @@ async function _cashKaiRemit(e, pids, pnames, kai) {
     const inv = kai.inv;
     const remit = kai.remit, fee = kai.total - remit;
     let existing = [], staff = [];
+    // 哪些案是私帳的（思沙龍：內部代開掛私帳案）→ 那幾張開在私帳那本帳、請款單也從私帳撈。
+    // 用私帳專案清單判，不靠發票多帶欄位（前端先熱複製、後端晚一版也能動）
+    const mineIds = new Set((await _mineProjectList()).map((p) => p.id));
+    const entOf = (p) => (mineIds.has(p) ? 'mine' : '');
     try {
         const [per, st] = await Promise.all([
-            Promise.all(pids.map((p) => _fetch(`/payments?project_id=${encodeURIComponent(p)}`))),
+            Promise.all(pids.map((p) => _fetch(`/payments?project_id=${encodeURIComponent(p)}${entOf(p) ? '&entity=mine' : ''}`))),
             _fetch('/staff').then((r) => r.staff || []).catch(() => [])]);
         per.forEach((r, i) => (r.payments || []).filter((p) => p.source_invoice_id === e.invoice_id).forEach((p) => existing.push({ ...p, pid: pids[i] })));
         staff = st;
     } catch (err) { crmToast('請款單載入失敗：' + err.message, true); return; }
     // 發票掛案之前自動建的那張（沒掛案）也算已請過 —— 列上後端帶的 kai_payment_*
     if (e.kai_payment_id && !existing.some((p) => p.id === e.kai_payment_id)) existing.push({ id: e.kai_payment_id, amount: e.kai_payment_amount, payment_status: e.kai_payment_status, payee_name: e.kai_payment_label, pid: '' });
-    const doneSum = existing.reduce((a, p) => a + (p.amount || 0), 0);
-    const left = Math.max(remit - doneSum, 0);
+    // 沒掛案的自動單（發票標已收款時後端開給代開人的那張）：還沒付的可以收回、改開在下面的案子上 ——
+    // 不然「已請過＝整筆、還可請 0」就卡死在這裡（owner 2026-09-04「思沙龍的私帳走到這裡就卡住了」）。付掉的不能收回，照算已請過。
+    const orphan = existing.filter((x) => !x.pid);
+    const withdrawable = orphan.filter((x) => x.payment_status !== '已付款');
+    const wdSum = withdrawable.reduce((a, p) => a + (p.amount || 0), 0);
+    const doneSumAll = existing.reduce((a, p) => a + (p.amount || 0), 0);
+    let withdraw = withdrawable.length > 0;                 // 預設收回（勾選框可取消）
+    const leftOf = () => Math.max(remit - doneSumAll + (withdraw ? wdSum : 0), 0);
+    const doneSum = doneSumAll - (withdraw ? wdSum : 0);
+    const left = leftOf();
     const payees = [...new Set([inv.applicant || '', ...staff.map((s) => s.name || '')].filter(Boolean))];
     const payeeSel = (i) => `<select class="crm-input" data-kai-payee="${i}" style="width:130px;padding:2px 6px;">${payees.map((n) => `<option value="${_esc(n)}"${n === (inv.applicant || '') ? ' selected' : ''}>${_esc(n)}</option>`).join('')}<option value="">其他…</option></select>`;
     const rows = pids.map((p, i) => {
@@ -536,15 +549,16 @@ async function _cashKaiRemit(e, pids, pnames, kai) {
             <span style="color:#fb923c;font-size:12px;">已請款：${had.map((x) => `${_esc(x.payee_name || '')} $${_fmtNum(x.amount || 0)}（${_esc(x.payment_status || '')}）`).join('、')}</span></div>`;
         return `<label class="cash-pay-line" style="display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid #2e2e2e;cursor:pointer;">
             <input type="checkbox" name="kai-lines" value="${i}"${i === 0 && left > 0 ? ' checked' : ''}>
-            <span style="flex:1;min-width:0;font-weight:600;color:#d1d5db;">${_esc(pnames[i] || p)}</span>
+            <span style="flex:1;min-width:0;font-weight:600;color:#d1d5db;">${entOf(p) ? '私帳｜' : ''}${_esc(pnames[i] || p)}</span>
             ${payeeSel(i)}<input class="crm-input" data-kai-other="${i}" placeholder="收款人" style="width:110px;display:none;padding:2px 6px;">
             <input type="number" class="crm-input" data-kai-amt="${i}" value="${i === 0 ? left : 0}" style="width:110px;text-align:right;padding:2px 6px;"></label>`;
     }).join('');
-    const orphan = existing.filter((x) => !x.pid);
     const ov = _payOverlay('請款 — 發票代開｜' + pnames.filter(Boolean).join('、'),
         `<div style="color:#888;font-size:12px;margin-bottom:6px;">收到 $${_fmtNum(e.deposit || 0)}。代開發票「${_esc(inv.title || inv.invoice_number || '')}」面額 $${_fmtNum(kai.total)}、代開費 $${_fmtNum(fee)}
             → <b style="color:#fca5a5;">可請款 $${_fmtNum(remit)}</b>。整筆請過去，類別「發票代開」，掛哪個案就開在哪個案（幾個案就幾張，金額自己分）；收款人預設代開人，可以改。</div>
-         ${doneSum ? `<div style="color:#f59e0b;font-size:12px;margin:4px 0;">已請過 $${_fmtNum(doneSum)}${orphan.length ? `（含沒掛案的：${orphan.map((x) => `${_esc(x.payee_name || '')} $${_fmtNum(x.amount || 0)}（${_esc(x.payment_status || '')}）`).join('、')}）` : ''}，還可請 $${_fmtNum(left)}。</div>` : ''}
+         ${withdrawable.length ? `<label style="display:flex;gap:6px;align-items:center;color:#f59e0b;font-size:12px;margin:4px 0;cursor:pointer;"><input type="checkbox" id="kai-withdraw" checked>
+            收回沒掛案的自動單：${withdrawable.map((x) => `${_esc(x.payee_name || '')} $${_fmtNum(x.amount || 0)}（${_esc(x.payment_status || '')}）`).join('、')} —— 改開在下面的案子上</label>` : ''}
+         <div id="kai-left" style="color:#f59e0b;font-size:12px;margin:4px 0;">${doneSum ? `已請過 $${_fmtNum(doneSum)}${orphan.filter((x) => x.payment_status === '已付款').length ? '（含沒掛案、已付掉的）' : ''}，` : ''}還可請 $${_fmtNum(left)}。</div>
          ${rows}`,
         `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
          <button class="crm-btn crm-btn-secondary" data-act="more">再連一個案</button>
@@ -554,6 +568,12 @@ async function _cashKaiRemit(e, pids, pnames, kai) {
         const other = ov.querySelector(`[data-kai-other="${sel.dataset.kaiPayee}"]`);
         other.style.display = sel.value ? 'none' : ''; if (!sel.value) other.focus();
     }));
+    const wd = ov.querySelector('#kai-withdraw');
+    if (wd) wd.addEventListener('change', () => {
+        withdraw = wd.checked;
+        ov.querySelector('#kai-left').textContent = `還可請 $${_fmtNum(leftOf())}。`;
+        const first = ov.querySelector('[data-kai-amt="0"]'); if (first) first.value = leftOf();
+    });
     ov.querySelector('[data-act="more"]').addEventListener('click', () => { ov.remove(); _cashKaiAddProject(e, pids); });
     const gb = ov.querySelector('[data-act="go"]');
     if (gb) gb.addEventListener('click', async (ev) => {
@@ -567,15 +587,21 @@ async function _cashKaiRemit(e, pids, pnames, kai) {
         if (items.some((it) => !it.payee)) { crmToast('收款人必填', true); return; }
         if (items.some((it) => it.amount <= 0)) { crmToast('金額要大於 0（不請的案把勾拿掉）', true); return; }
         const sum = items.reduce((a, it) => a + it.amount, 0);
-        if (sum > left && !confirm(`合計 $${_fmtNum(sum)} 超過還可請的 $${_fmtNum(left)}，確定要開？`)) return;
+        if (sum > leftOf() && !confirm(`合計 $${_fmtNum(sum)} 超過還可請的 $${_fmtNum(leftOf())}，確定要開？`)) return;
         const btn = ev.currentTarget; btn.disabled = true; btn.textContent = '處理中…';
         let ok = 0; const fails = [];
+        if (withdraw) {
+            for (const x of withdrawable) {
+                try { await _fetch('/payments/' + x.id, { method: 'DELETE' }); }
+                catch (err) { crmToast('收回自動單失敗：' + err.message, true); btn.disabled = false; btn.textContent = '開請款單'; return; }
+            }
+        }
         for (const it of items) {
             try {
                 await _fetch('/payments', { method: 'POST', body: JSON.stringify(_payBody({
                     summary: inv.title || ('代開 ' + (inv.invoice_number || '')), amount: it.amount, category: '發票代開',
                     payee_name: it.payee, needs_invoice: 1, invoice_number: inv.invoice_number || '', invoice_amount: kai.total,
-                    project_id: it.pid, project_label: it.name, source_invoice_id: inv.id })) });
+                    project_id: it.pid, project_label: it.name, source_invoice_id: inv.id, ...(entOf(it.pid) ? { entity: 'mine' } : {}) })) });
                 ok += 1;
             } catch (err) { fails.push(it.name + '：' + err.message); }
         }
@@ -587,15 +613,18 @@ async function _cashKaiRemit(e, pids, pnames, kai) {
 }
 
 /** 代開發票掛第二、第三個案（案掛在發票的 project_ids；第一個＝project_id），連好回到請款視窗。 */
-function _cashKaiAddProject(e, pids) {
-    openProjectPicker(_projPickerOpts(e, async (picked) => {
+async function _cashKaiAddProject(e, pids) {
+    const mine = await _mineProjectList();
+    const opts = _projPickerOpts(e, async (picked) => {
         if (!picked || pids.includes(picked)) return;
         try {
             const full = await _fetch('/invoices/' + e.invoice_id);
             await _fetch('/invoices/' + e.invoice_id, { method: 'PUT', body: JSON.stringify({ ...full, project_ids: [...(full.project_ids || []), picked] }) });
             window._cashRequestPay(e.id);
         } catch (err) { crmToast('連結失敗：' + err.message, true); }
-    }));
+    });
+    opts.projects = _projectList.concat(mine.map((p) => ({ ...p, name: '私帳｜' + (p.name || '') })));
+    openProjectPicker(opts);
 }
 
 /** 幫這個案子裡的人請款：列的是專案頁的執行人員表，勾幾人開幾張應付款（已請過的標示、不能再勾）。 */

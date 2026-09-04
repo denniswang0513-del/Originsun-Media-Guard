@@ -108,15 +108,16 @@ async def load_alloc_links_map(session, kind: str, *, entity=None) -> dict:
     return out
 
 
-async def _kai_payments_map(session, invoice_ids, entity: str) -> dict:
+async def _kai_payments_map(session, invoice_ids, entity: str, include_mine: bool = False) -> dict:
     """發票代開的收入列 → 那張「代開應匯」請款單（finance._sync_passthrough_request 在發票標已收款時自動建，
     鍵＝source_invoice_id）。owner 2026-09-04：請款後請款單欄要標註是哪一張。同一張發票有多張時取最早那張（自動建的）。"""
     ids = {i for i in invoice_ids if i}
     if not ids:
         return {}
+    ents = [entity, "mine"] if include_mine and entity != "mine" else [entity]
     rows = (await session.execute(
         select(CrmPaymentRequest).where(CrmPaymentRequest.source_invoice_id.in_(ids),
-                                        CrmPaymentRequest.entity == entity)
+                                        CrmPaymentRequest.entity.in_(ents))
         .order_by(CrmPaymentRequest.created_at))).scalars().all()
     out = {}
     for p in rows:
@@ -126,14 +127,15 @@ async def _kai_payments_map(session, invoice_ids, entity: str) -> dict:
     return out
 
 
-async def _project_payments_map(session, project_ids, entity: str) -> dict:
+async def _project_payments_map(session, project_ids, entity: str, include_mine: bool = False) -> dict:
     """掛了專案的收入列 → 那個案子的請款單（日期、狀態）。預支款不算（那是借錢，不是請款）。"""
     ids = {i for i in project_ids if i}
     if not ids:
         return {}
     rows = (await session.execute(
         select(CrmPaymentRequest.project_id, CrmPaymentRequest.request_date, CrmPaymentRequest.payment_status)
-        .where(CrmPaymentRequest.project_id.in_(ids), CrmPaymentRequest.entity == entity,
+        .where(CrmPaymentRequest.project_id.in_(ids),
+               CrmPaymentRequest.entity.in_([entity, "mine"] if include_mine and entity != "mine" else [entity]),
                CrmPaymentRequest.is_advance != 1))).all()
     out: dict = {}
     for pid, d, st in rows:
@@ -586,7 +588,10 @@ async def list_cash_entries(
         pnames = await project_names_map(session, page_splits)
         paylinks = await load_alloc_links_map(session, 'payment', entity=ent)
         invlinks = await load_alloc_links_map(session, 'invoice', entity=ent)
-        kaimap = await _kai_payments_map(session, [r[0].invoice_id for r in rows], ent)
+        # 內部代開掛私帳案（思沙龍）：那些單開在私帳，母公司列也要標——只給看得到私帳的人
+        from core.ledger import hide_mine_projects as _hide_mine
+        _inc_mine = not _hide_mine(request)
+        kaimap = await _kai_payments_map(session, [r[0].invoice_id for r in rows], ent, _inc_mine)
         # 收入列的「案」：列自己掛的，沒有就看發票掛的案（發票代開列的案只准掛在發票上——
         # core.project_link.CASH_CATEGORIES 不含發票代開，代開的錢不是案子的收入）
         inv_ids = {r[0].invoice_id for r in rows if (r[0].deposit or 0) > 0 and r[0].invoice_id and not r[0].project_id}
@@ -595,7 +600,7 @@ async def list_cash_entries(
             .where(CrmInvoice.id.in_(inv_ids)))).all()} if inv_ids else {}
         eff_pids = {r[0].id: ([r[0].project_id] if r[0].project_id else inv_proj.get(r[0].invoice_id, []))
                     for r in rows if (r[0].deposit or 0) > 0}
-        projitems = await _project_payments_map(session, [p for ps in eff_pids.values() for p in ps], ent)
+        projitems = await _project_payments_map(session, [p for ps in eff_pids.values() for p in ps], ent, _inc_mine)
         projpay = {rid: project_pay_label([it for p in ps for it in projitems.get(p, [])])
                    for rid, ps in eff_pids.items()}
     out = []
