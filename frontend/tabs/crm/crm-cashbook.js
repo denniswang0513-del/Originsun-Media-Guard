@@ -535,7 +535,7 @@ async function _cashKaiRemit(e, pids, pnames, kai) {
             <span style="flex:1;font-weight:600;color:#d1d5db;">${_esc(pnames[i] || p)}</span>
             <span style="color:#fb923c;font-size:12px;">已請款：${had.map((x) => `${_esc(x.payee_name || '')} $${_fmtNum(x.amount || 0)}（${_esc(x.payment_status || '')}）`).join('、')}</span></div>`;
         return `<label class="cash-pay-line" style="display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid #2e2e2e;cursor:pointer;">
-            <input type="checkbox" name="kai-lines" value="${i}" checked>
+            <input type="checkbox" name="kai-lines" value="${i}"${i === 0 && left > 0 ? ' checked' : ''}>
             <span style="flex:1;min-width:0;font-weight:600;color:#d1d5db;">${_esc(pnames[i] || p)}</span>
             ${payeeSel(i)}<input class="crm-input" data-kai-other="${i}" placeholder="收款人" style="width:110px;display:none;padding:2px 6px;">
             <input type="number" class="crm-input" data-kai-amt="${i}" value="${i === 0 ? left : 0}" style="width:110px;text-align:right;padding:2px 6px;"></label>`;
