@@ -85,6 +85,7 @@ def group_payables(rows) -> dict:
             "category": p.category or "",
             "payment_status": p.payment_status or "",
             "payment_date": p.payment_date.strftime("%Y-%m-%d") if p.payment_date else "",
+            "project_id": getattr(p, "project_id", None) or "", "project_label": getattr(p, "project_label", None) or "",   # 應付帳款要能跳回案子的收付款分頁
             "planned_month": p.planned_month or "",
         })
 

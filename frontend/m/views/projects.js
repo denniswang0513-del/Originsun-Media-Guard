@@ -4,7 +4,7 @@
  * 階段／案型／客戶字彙全部來自 options；金額鍵不在＝被抹掉→不畫。
  */
 import { mfetch, toast, esc, money, fmtDate } from '../shell.js';
-import { state, list, lostPhase, opt, selectOpts, pickerHtml, mountPicker, skeleton, emptyBox, errBox, pill, statusPill,
+import { state, list, lostPhase, opt, paidStatus, selectOpts, pickerHtml, mountPicker, skeleton, emptyBox, errBox, pill, statusPill,
          moneyCell, withBusy, openSheet, closeSheet, embedHost, unembedHost, switchTab, markStale, shouldLoad } from '../ui.js';
 
 const PAGE = 30;
@@ -77,6 +77,17 @@ function kv(k, v) { return `<div class="kv"><span class="k">${esc(k)}</span><spa
 function li(l, r) { return `<div class="li"><span class="l">${l}</span><span class="r">${r}</span></div>`; }
 const section = (title, rows, empty) => `<div class="m-h">${esc(title)}</div>${rows.length ? rows.join('') : `<div class="sub" style="font-size:13px;color:var(--sub)">${esc(empty)}</div>`}`;
 
+/** 抽屜的收付款摘要（規劃第三期）：帳款狀況、未收、應付幾張未付。錢的鍵沒權限時被抹掉，只剩狀態字。 */
+function _payRows(p, d) {
+    const pays = (d.payments || []).filter((x) => !x.is_advance);
+    const unpaid = pays.filter((x) => x.payment_status !== paidStatus());   // 字彙從 options 推，不寫死
+    const unpaidSum = unpaid.reduce((a, x) => a + (Number(x.amount) || 0), 0);
+    const hasMoney = 'amount_receivable' in p;
+    const recv = hasMoney ? `未收 <span class="amt">${money(Math.max(Number(p.amount_receivable) || 0, 0))}</span>` : '';
+    const pay = pays.length ? `應付 ${unpaid.length} / ${pays.length} 張未付${hasMoney && unpaid.length ? ` <span class="amt">${money(unpaidSum)}</span>` : ''}` : '沒有應付';
+    return `<div class="kv"><span class="k">收付款</span><span class="v">${pill(p.payment_status || '')} ${recv}</span></div>
+      <div class="kv"><span class="k"></span><span class="v">${pay}</span></div>`;
+}
 function detailHtml(d) {
     const p = d.project || {}, s = d.summary || {}, b = d.burn || null;
     const amt = (o, k) => (k in o ? money(o[k]) : null);
@@ -95,6 +106,7 @@ function detailHtml(d) {
       <div class="sub" style="color:var(--sub);font-size:13px;margin-bottom:8px">${esc(p.client_short_name || p.client_name || '')} ${statusPill(p.status, list('phases'))} ${pill(p.project_type)}</div>
       ${kv('AM', esc(p.am_username || '—'))}${kv('拍攝日', esc(fmtDate(p.shoot_date) || '—'))}
       ${summaryRows.join('')}
+      ${_payRows(p, d)}
       ${burnHtml}
       <div class="m-actions w">
         <button type="button" class="m-btn" data-act="phase">推階段</button>

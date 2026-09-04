@@ -163,7 +163,7 @@ function renderDetail(p, month) {
         const isPaid = it.payment_status === '已付款';
         itemsHtml += `
         <div class="payable-item" id="payable-row-${it.id}">
-            <span class="payable-item-summary">${_esc(it.summary)}</span>
+            <span class="payable-item-summary">${_esc(it.summary)}${it.project_id ? `<span class="payable-item-proj" title="到這個案子的收付款分頁" onclick="window._crmGoToProjectPay('${_esc(it.project_id)}')">${_esc(it.project_label || '案子')} →</span>` : ''}</span>
             <span class="payable-item-cat">${_esc(it.category)}</span>
             <span class="payable-item-amt">$${_fmtNum(it.amount)}</span>
             <span style="min-width:260px;display:flex;align-items:center;justify-content:flex-end;gap:6px;font-size:11px;">

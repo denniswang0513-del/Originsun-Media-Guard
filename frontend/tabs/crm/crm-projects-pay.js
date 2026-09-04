@@ -159,6 +159,36 @@ export async function loadPayTab(projectId) {
     if (staff && staff.closest('details')?.open) _loadProjectStaff(projectId);
 }
 
+/** 完稿結案分頁頂端的「收付檢查」提示條（規劃第二期：結案檢查與完稿結案連動；只提醒不擋）。 */
+export async function loadClosingBanner(projectId, host) {
+    if (!host || !projectId) return;
+    let box = host.querySelector('.ppay-closing');
+    if (!box) { box = document.createElement('div'); box.className = 'ppay-closing'; host.insertAdjacentElement('afterbegin', box); }
+    box.innerHTML = '<div class="ppay-sh"><span class="ppay-h">收付檢查</span><span class="ppay-sub">載入中…</span></div>';
+    const q = (path) => _fetch(path).catch(() => null);
+    const [proj, inv, pays, lines, adv, exp] = await Promise.all([
+        q('/projects/' + projectId), q('/invoices?project_id=' + encodeURIComponent(projectId)),
+        q('/payments?project_id=' + encodeURIComponent(projectId)), q(`/projects/${projectId}/cost-lines`),
+        q('/payments/advances?project_id=' + encodeURIComponent(projectId)), q(`/projects/${projectId}/expenses`)]);
+    if (state.selectedId !== projectId) return;
+    const s = payStatus(proj, inv?.invoices, pays?.payments, lines?.cost_lines);
+    const checks = closingChecks(s, adv?.advances, exp?.expenses);
+    const open = checks.filter((c) => !c.ok);
+    box.innerHTML = `<div class="ppay-sh"><span class="ppay-h">收付檢查</span>
+        <span class="ppay-sub">${open.length ? `${open.length} 項還沒結清 —— 先提醒，不擋結案` : '收付都結清了'}</span>
+        <span style="margin-left:auto;"><button class="crm-btn crm-btn-secondary crm-btn-sm" data-ppay-go-pay>到收付款分頁</button></span></div>
+        ${_checksHtml(checks)}`;
+    box.querySelector('[data-ppay-go-pay]')?.addEventListener('click', () => document.querySelector('#proj-detail-tabs .crm-tab[data-tab="team"]')?.click());
+}
+
+/** 別的分頁（應付帳款、客戶）直接跳到某案的收付款分頁。 */
+window._crmGoToProjectPay = (projectId) => {
+    if (!projectId) return;
+    if (window._crmGoToProject) window._crmGoToProject(projectId);
+    else if (window._projSelect) window._projSelect(projectId);
+    setTimeout(() => document.querySelector('#proj-detail-tabs .crm-tab[data-tab="team"]')?.click(), 700);
+};
+
 window._projPay = {
     refresh: () => { if (state.selectedId) loadPayStrip(state.selectedId); },
     staff: () => { if (state.selectedId) _loadProjectStaff(state.selectedId); },

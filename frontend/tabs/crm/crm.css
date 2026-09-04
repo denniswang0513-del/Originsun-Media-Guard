@@ -2026,3 +2026,7 @@
 .ppay-ck-l { font-weight: 500; }
 .ppay-ck-s { color: #8b8f96; font-size: 11px; }
 @media (max-width: 1100px) { .ppay-kpis { grid-template-columns: repeat(4, 1fr); } .ppay-kpi:nth-child(4) { border-right: 0; } .ppay-kpi:nth-child(-n+4) { border-bottom: 1px solid #2e2e2e; } .ppay-checks { grid-template-columns: 1fr 1fr; } }
+.ppay-closing { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #2e2e2e; }
+.ppay-closing .ppay-sh { align-items: center; }
+.payable-item-proj { color: #3b82f6; font-size: 11px; cursor: pointer; white-space: nowrap; margin-left: 6px; }
+.payable-item-proj:hover { text-decoration: underline; }

@@ -39,3 +39,16 @@ def test_actions_refresh_the_strip():
     assert fin.count("window._projPay?.refresh?.()") >= 2, "請款／付款動作做完要重算狀態列"
     inv = js_code_only(repo_src("frontend/tabs/crm/crm-projects-invoices.js"))
     assert "window._projPay?.refresh?.()" in inv, "開完票要重算狀態列"
+
+
+def test_phase_two_and_three_hooks():
+    """二期：完稿結案分頁頂端有收付檢查提示條（只提醒）；三期：應付帳款可跳回案子的收付款分頁、手機版抽屜有收付款摘要。"""
+    pay = js_code_only(repo_src(PAY))
+    assert "export async function loadClosingBanner(" in pay and "closingChecks(s, adv?.advances, exp?.expenses)" in pay
+    assert "window._crmGoToProjectPay = (projectId) =>" in pay
+    main = js_code_only(repo_src("frontend/tabs/crm/crm-projects.js"))
+    assert "loadClosingBanner(pid, host)" in main
+    assert '"project_id": getattr(p, "project_id", None) or ""' in repo_src("core/crm_logic.py").split("def group_payables")[1].split("def ")[0]
+    assert "window._crmGoToProjectPay('${_esc(it.project_id)}')" in js_code_only(repo_src("frontend/tabs/crm/crm-payables.js"))
+    m = js_code_only(repo_src("frontend/m/views/projects.js"))
+    assert "function _payRows(p, d)" in m and "${_payRows(p, d)}" in m and "'amount_receivable' in p" in m, "沒金額權限只剩狀態字"

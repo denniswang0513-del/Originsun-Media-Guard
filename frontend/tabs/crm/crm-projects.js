@@ -31,11 +31,16 @@ import { loadDeliveryTab, initDeliveryHandlers } from '../proposals/delivery-vie
 /** CRM 這一側的完稿結案入口 —— 注入的內容兩個呼叫點完全一樣，寫一次就好。
  *  host 每次現查：與這個檔案其他分頁的慣例一致（面板是靜態 markup，但不必
  *  為此在模組層建立一個載入順序的耦合）。 */
-const _openDelivery = (pid) => loadDeliveryTab(pid, {
-    host: document.getElementById('proj-detail-delivery'), fetcher: _fetch });
+const _openDelivery = (pid) => {
+    const host = document.getElementById('proj-detail-delivery');
+    const r = loadDeliveryTab(pid, { host, fetcher: _fetch });
+    // 收付檢查提示條放最上面（loadDeliveryTab 一開始就重設 innerHTML，之後只動它自己的區塊）
+    loadClosingBanner(pid, host);
+    return r;
+};
 import { loadProjectTypes } from './crm-projects-core.js';
 import { loadInvoicesTab } from './crm-projects-invoices.js';
-import { loadPayTab } from './crm-projects-pay.js';
+import { loadPayTab, loadClosingBanner } from './crm-projects-pay.js';
 import { loadCostGroups, renderGroupSwitcher, initCostGroupsHandlers } from './crm-projects-cost-groups.js';
 
 // ── 回呼串接（解耦跨模組依賴） ──────────────────────────────
