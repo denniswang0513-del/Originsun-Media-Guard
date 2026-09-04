@@ -106,7 +106,7 @@
 
 <div class="stage">
 <div class="desk">
-  <div class="d-hd"><span class="brand">個人工作台<i>WORKSPACE</i></span><div class="sp"></div><span class="who">小葉（剪輯） · 9/8（一）</span></div>
+  <div class="d-hd"><span class="brand">個人工作台<i>WORKSPACE</i></span><div class="sp"></div><span class="who">小葉（剪輯） · 9/8（一） · <span style="color:var(--red)">今天週一：上週回顧還沒寫</span></span></div>
   <div class="d-wrap">
 
     <!-- 最上排：功能鍵 -->
@@ -116,10 +116,10 @@
     </div>
 
     <!-- 第一區 -->
-    <div class="zone-h"><span>Today <b>今天與這週</b></span><small>每天進來先看這一排</small></div>
+    <div class="zone-h"><span>Today <b>今天與這週</b></span><small>每天的習慣：進來先把今天做的案子記下來</small></div>
     <div class="block1">
       <div class="card rel"><span class="tag n">1</span>
-        <div class="card-head"><span class="ey">My Day<b>我的一天 9/8（一）</b></span><span class="count">2 列 · 1 列計畫</span></div>
+        <div class="card-head"><span class="ey">Project Log<b>今天的專案紀錄 9/8（一）</b></span><span class="count">2 列 · 1 列計畫</span></div>
         <div class="row" style="margin-bottom:8px;"><button class="btn sm">從場次帶入</button><button class="btn sm">從待辦帶入（2）</button><button class="btn sm">複製上個工作日</button></div>
         <table class="day">
           <thead><tr><th style="width:30%">案子</th><th style="width:14%">分類</th><th>內容</th><th style="width:16%">里程碑</th><th style="width:8%"></th></tr></thead>
@@ -156,10 +156,10 @@
     </div>
 
     <!-- 第二區 -->
-    <div class="zone-h"><span>Weekly <b>週記</b></span><small>不設截止；過往、本週、下週都可寫（原規則）。多數人週一寫上一週。</small></div>
+    <div class="zone-h rel"><span class="tag n" style="left:-28px;">M</span><span>Weekly <b>上週回顧</b></span><small>每週一的習慣：寫上一週。不設截止；過往、本週、下週都可寫（原規則）。</small></div>
     <div class="block2">
       <div class="card rel"><span class="tag n">4</span>
-        <div class="card-head"><span class="ey">Mine<b>我的週記</b></span>
+        <div class="card-head"><span class="ey">Mine<b>我的上週回顧</b></span>
           <span class="wk-nav"><button class="btn sm">‹ 前一週</button><span class="count">上週 9/1 – 9/5（還沒寫）</span><button class="btn sm">後一週 ›</button></span></div>
 
         <div class="q">上週做了什麼 <small>自動從工作紀錄整理，唯讀；勾選可帶進「順利的事」</small></div>
@@ -189,7 +189,7 @@
       </div>
 
       <div class="card rel"><span class="tag n">5</span>
-        <div class="card-head"><span class="ey">Everyone<b>大家的週記 9/1 – 9/5</b></span><span class="count">6 人寫了 · 3 人還沒 · 求助 2</span></div>
+        <div class="card-head"><span class="ey">Everyone<b>大家的回顧 9/1 – 9/5</b></span><span class="count">6 人寫了 · 3 人還沒 · 求助 2</span></div>
         <details class="person" open>
           <summary><b>阿弘</b><span class="sub">桃園環保局拍攝順 · 想討論燈光租借</span><span class="pill talk">想討論</span></summary>
           <div class="body">
@@ -229,7 +229,8 @@
     <li><span class="n">2</span><div><b>公司的一週</b><span>週一到週五，每格＝場次（誰去）、外出、休假、各人計畫列。沒排的不猜。</span><span class="src">/shoots?from&to（crew）＋ hr_leave ＋ timesheets(status=plan)；新端點 /me/company_week</span></div></li>
     <li><span class="n">3</span><div><b>專案查詢</b><span>全公司可查；案名、客戶、年份、誰做的。金額不出現。</span><span class="src">/crm/m/projects?q=（既有）＋ people 欄</span></div></li>
     <li><span class="n">4</span><div><b>我的週記</b><span>預設開上一週；自動區「上週做了什麼」；四問可掛案子、可求助；主管回覆灰底。可寫窗口照原規則（過往、本週、下週），不設截止。</span><span class="src">GET/PUT /journal/mine 加 worklog、project_id、flag、replies</span></div></li>
-    <li><span class="n">5</span><div><b>大家的週記（展開）</b><span>每人一列，預設摺疊，點開看做了什麼與四問；還沒寫的標出；求助紅標。前一週可往回翻。</span><span class="src">/journal/week 加 worklog 與 flag</span></div></li>
+    <li><span class="n">M</span><div><b>週一提示</b><span>週一進來頂欄一行字「上週回顧還沒寫」，第二區標題亮起；不推播、不擋。其他日子不出現。</span></div></li>
+    <li><span class="n">5</span><div><b>大家的回顧（展刊）</b><span>每人一列，預設摺疊，點開看做了什麼與四問；還沒寫的標出；求助紅標。前一週可往回翻。</span><span class="src">/journal/week 加 worklog 與 flag</span></div></li>
   </ol>
   <h2>跟上一版的差別</h2>
   <ol>
