@@ -54,7 +54,8 @@ function formHtml() {
       ${state.canWrite ? '' : '<div class="m-empty">此帳號沒有登記權限</div>'}
       <div class="m-h">最近登記</div>
       <div id="inv-recent">${skeleton(3)}</div>
-      <button type="button" class="m-more" id="inv-more" hidden>載入更多</button>`;
+      <button type="button" class="m-more" id="inv-more" hidden>載入更多</button>
+      <details class="m-more" id="inv-trash-box"><summary>垃圾桶（刪掉的發票 30 天內可還原）</summary><div id="inv-trash"></div></details>`;
 }
 
 // 手機登記的一定是「請款發票、還沒開」（owner 2026-09-03）：方向＝options 第一個（收款），
@@ -279,14 +280,44 @@ async function submit(ev) {
 async function removeInvoice(inv, btn) {
     const label = [inv.title, inv.invoice_number, money(inv.amount_total)].filter(Boolean).join(' ');
     if (!window.confirm(`刪除這張發票？${label}
-收支明細對它的連結會一起清掉，不能復原。`)) return;
+會先放進垃圾桶，30 天內可以從下面的「垃圾桶」還原。`)) return;
     await withBusy(btn, async () => {
         try {
             await mfetch('/api/v1/crm/invoices/' + inv.id, { method: 'DELETE' });
             if (_editing && _editing.id === inv.id) { stopEdit(); for (const k of VOLATILE) F(k).value = ''; F('item_type-q').value = ''; }
-            toast('已刪除');
+            toast('已移到垃圾桶，30 天內可還原');
             await loadRecent();
+            if (document.getElementById('inv-trash-box').open) loadTrash();
         } catch (e) { toast(e.message || '刪除失敗', 'err'); }
+    });
+}
+
+// 垃圾桶（owner 2026-09-04）：展開才抓；還原＝POST /invoices/trash/{id}/restore（原 id 建回、收支連結補回）
+async function loadTrash() {
+    const box = document.getElementById('inv-trash');
+    box.innerHTML = skeleton(2);
+    try {
+        const d = await mfetch('/api/v1/crm/invoices/trash');
+        const items = d.items || [];
+        box._rows = items;
+        box.innerHTML = items.length ? items.map(t => `
+          <div class="m-card">
+            <div class="t"><div class="name">${esc(t.title)}</div>${pill(t.days_left == null ? '' : `剩 ${t.days_left} 天`)}</div>
+            <div class="sub">${esc(t.company_name || '（沒有抬頭）')}${t.invoice_number ? ' · ' + esc(t.invoice_number) : ''}</div>
+            <div class="row"><span class="sub">${esc(fmtDate(t.deleted_at))} ${esc(t.deleted_by || '')} 刪除</span>
+              ${t.amount_total == null ? '' : `<span class="amt">${money(t.amount_total)}</span>`}</div>
+            ${state.canWrite ? `<div class="row"><button type="button" class="m-btn w" data-restore="${esc(t.id)}">還原</button></div>` : ''}
+          </div>`).join('') : emptyBox('垃圾桶是空的');
+    } catch (e) { box.innerHTML = errBox(e); }
+}
+
+async function restoreInvoice(id, btn) {
+    await withBusy(btn, async () => {
+        try {
+            const r = await mfetch('/api/v1/crm/invoices/trash/' + id + '/restore', { method: 'POST' });
+            toast(r.restored_links ? `已還原，補回 ${r.restored_links} 筆收支連結` : '已還原');
+            await Promise.all([loadTrash(), loadRecent()]);
+        } catch (e) { toast(e.message || '還原失敗', 'err'); }
     });
 }
 
@@ -329,6 +360,10 @@ export async function render(host, { first }) {
         F('cancel-edit').addEventListener('click', () => { stopEdit(); for (const k of VOLATILE) F(k).value = ''; F('item_type-q').value = ''; });
         mountSeg('inv-issue_status', syncIssueRow);
         document.getElementById('inv-more').addEventListener('click', () => loadRecent(false));
+        document.getElementById('inv-trash-box').addEventListener('toggle', (ev) => { if (ev.target.open) loadTrash(); });
+        document.getElementById('inv-trash').addEventListener('click', (ev) => {
+            const b = ev.target.closest('button[data-restore]'); if (b) restoreInvoice(b.dataset.restore, b);
+        });
         document.getElementById('inv-recent').addEventListener('click', (ev) => {
             const b = ev.target.closest('button[data-edit],button[data-del]'); if (!b) return;
             const rows = document.getElementById('inv-recent')._rows || [];

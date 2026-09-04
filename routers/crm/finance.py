@@ -10,7 +10,10 @@ import csv
 import io
 import os
 import re
+import json
+import math
 import uuid
+from datetime import datetime
 
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
@@ -28,6 +31,7 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
 from core.auth import check_logged_in
 from core.project_link import invoice_project_ids as _inv_pids, normalize_invoice_projects as _norm_inv_projects
 from core.ledger import (require_entity)
+from core.auth import _extract_token
 from core.schemas import (InvoicePayload)
 
 from ._shared import (router, _check_auth, money_dep, _require_db,
@@ -42,6 +46,8 @@ try:
     from ._shared import (select, or_, func, CrmProject, CrmInvoice,
                           CrmPaymentRequest, CrmCashEntry,
                           CrmCashInvoiceLink, CrmCashPaymentLink)
+    from db.models import CrmInvoiceTrash
+    from sqlalchemy import DateTime
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
     pass
 
@@ -804,6 +810,150 @@ async def _invoice_collections(session, invoice_ids):
     return out
 
 
+# ── 發票垃圾桶（owner 2026-09-04）─────────────────────────────
+# 🔴 這幾條路由要排在 /invoices/{invoice_id} 前面：FastAPI 照註冊順序配對，
+#    排後面的話 GET /invoices/trash 會被當成 invoice_id="trash" → 404。
+
+TRASH_KEEP_DAYS = 30   # owner：30 天後自己清空
+
+
+def _json_safe(v):
+    return v.isoformat() if isinstance(v, datetime) else v
+
+
+def _invoice_row_snapshot(inv) -> dict:
+    """整列欄位（含之後才加的欄）→ 可 JSON 的 dict；還原時逐欄寫回，不靠預設值。"""
+    return {c.name: _json_safe(getattr(inv, c.name, None)) for c in inv.__table__.columns}
+
+
+def _parse_dt(v):
+    if not v:
+        return None
+    try:
+        return datetime.fromisoformat(v)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _purge_expired_trash(session) -> int:
+    """30 天沒還原的自動清掉。沒有排程器：列垃圾桶／刪發票時順手做，夠用。"""
+    from datetime import timedelta
+    from sqlalchemy import delete as _sadel
+    cutoff = _now() - timedelta(days=TRASH_KEEP_DAYS)
+    res = await session.execute(_sadel(CrmInvoiceTrash).where(CrmInvoiceTrash.deleted_at < cutoff))
+    return res.rowcount or 0
+
+
+def _trash_to_dict(t) -> dict:
+    from datetime import timedelta
+    expires = (t.deleted_at + timedelta(days=TRASH_KEEP_DAYS)) if t.deleted_at else None
+    days_left = max(0, math.ceil((expires - _now()).total_seconds() / 86400)) if expires else None   # 剛刪的顯示 30 不是 29
+    try:
+        row = (json.loads(t.payload) or {}).get("row") or {}
+    except (TypeError, ValueError):
+        row = {}
+    return {
+        "id": t.id, "entity": t.entity or "parent", "title": t.title or "",
+        "invoice_number": t.invoice_number or "", "amount_total": t.amount_total,
+        "invoice_date": t.invoice_date.isoformat() if t.invoice_date else None,
+        "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
+        "deleted_by": t.deleted_by or "", "days_left": days_left,
+        "company_name": row.get("company_name") or "", "category": row.get("category") or "",
+        "payment_type": row.get("payment_type") or "", "project_id": row.get("project_id") or "",
+    }
+
+
+@router.get("/invoices/trash", dependencies=[Depends(money_dep)])
+async def list_invoice_trash(request: Request):
+    _check_auth(request)
+    _require_db()
+    from core.ledger import hide_mine_projects
+    factory = await _get_factory()
+    async with factory() as session:
+        await _purge_expired_trash(session)
+        q = select(CrmInvoiceTrash).order_by(CrmInvoiceTrash.deleted_at.desc()).limit(300)
+        if hide_mine_projects(request):
+            q = q.where(or_(CrmInvoiceTrash.entity.is_(None), CrmInvoiceTrash.entity != "mine"))
+        rows = (await session.execute(q)).scalars().all()
+        await session.commit()
+        return {"items": [_trash_to_dict(t) for t in rows], "keep_days": TRASH_KEEP_DAYS}
+
+
+@router.post("/invoices/trash/{trash_id}/restore")
+async def restore_invoice_from_trash(trash_id: str, request: Request):
+    """用原 id 建回發票；當初被清掉的收支分配，收支列還在的就補回去、已經掛了別張的不搶。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        t = await session.get(CrmInvoiceTrash, trash_id)
+        if not t:
+            raise HTTPException(status_code=404, detail="垃圾桶裡沒有這張發票（可能已超過 30 天被清掉）")
+        require_entity(request, t.entity or "parent", level="full")
+        if await session.get(CrmInvoice, trash_id):
+            raise HTTPException(status_code=409, detail="同一個 id 的發票已存在，不用還原")
+        try:
+            data = json.loads(t.payload) or {}
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=500, detail="垃圾桶資料損毀，無法還原")
+        row = dict(data.get("row") or {})
+        await _assert_month_open(session, _parse_dt(row.get("invoice_date")), entity=t.entity or "parent")
+        cols = {c.name: c for c in CrmInvoice.__table__.columns}
+        kwargs = {}
+        for k, v in row.items():
+            if k not in cols:
+                continue   # 舊快照裡有、現在表已拿掉的欄位
+            kwargs[k] = _parse_dt(v) if isinstance(cols[k].type, DateTime) else v
+        kwargs["id"] = trash_id
+        kwargs["updated_at"] = _now()
+        inv = CrmInvoice(**kwargs)
+        session.add(inv)
+        await session.flush()
+        # 分配連結只能經由 replace_invoice_allocs_bulk 寫（它同時動分配表、收支列主要發票、發票收款狀態）：
+        # 每筆收支＝「現在還掛著的其他發票」＋「補回這張」整組重寫；被刪的那段時間掛上的別張不動。
+        pairs, fees, restored_links = [], {}, 0
+        for lk in data.get("links") or []:
+            e = await session.get(CrmCashEntry, lk.get("cash_entry_id") or "")
+            if not e:
+                continue
+            rows = []
+            for l in (await session.execute(
+                    select(CrmCashInvoiceLink).where(CrmCashInvoiceLink.cash_entry_id == e.id))).scalars().all():
+                other = await session.get(CrmInvoice, l.invoice_id) if l.invoice_id != trash_id else None
+                if other:
+                    rows.append((other, int(l.amount or 0)))
+                    fees[(e.id, other.id)] = int(getattr(l, "fee", 0) or 0)
+            rows.append((inv, int(lk.get("amount") or 0)))
+            fees[(e.id, trash_id)] = int(lk.get("fee") or 0)
+            pairs.append((e, rows))
+            restored_links += 1
+        if pairs:
+            await replace_invoice_allocs_bulk(session, pairs, fees=fees)
+        # 直接指著它、沒進分配表的舊資料：這段期間沒掛上別張才指回來
+        for eid in data.get("primary_of") or []:
+            e = await session.get(CrmCashEntry, eid)
+            if e and not e.invoice_id:
+                _set_primary_invoice(e, inv)
+        await session.delete(t)
+        await session.commit()
+    return {"status": "ok", "id": trash_id, "restored_links": restored_links}
+
+
+@router.delete("/invoices/trash/{trash_id}")
+async def purge_invoice_trash(trash_id: str, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        t = await session.get(CrmInvoiceTrash, trash_id)
+        if not t:
+            raise HTTPException(status_code=404, detail="垃圾桶裡沒有這張發票")
+        require_entity(request, t.entity or "parent", level="full")
+        await session.delete(t)
+        await session.commit()
+    return {"status": "ok"}
+
+
 @router.get("/invoices/{invoice_id}", dependencies=[Depends(money_dep)])
 async def get_invoice(invoice_id: str, request: Request):
     from sqlalchemy import func as safunc
@@ -904,9 +1054,24 @@ async def delete_invoice(invoice_id: str, request: Request):
         # allocated → 那筆收款判成「分配與實收相符」，實際上那些錢沒對到任何
         # 存在的發票。收支列也會繼續顯示已刪發票的號碼、has_invoice=1。
         from sqlalchemy import delete as _sadel
-        affected = (await session.execute(
-            select(CrmCashInvoiceLink.cash_entry_id)
-            .where(CrmCashInvoiceLink.invoice_id == invoice_id))).scalars().all()
+        link_rows = (await session.execute(
+            select(CrmCashInvoiceLink.cash_entry_id, CrmCashInvoiceLink.amount, CrmCashInvoiceLink.fee)
+            .where(CrmCashInvoiceLink.invoice_id == invoice_id))).all()
+        affected = [r[0] for r in link_rows]
+        # 先進垃圾桶再硬刪（owner 2026-09-04）：整列 + 被清掉的分配連結 + 直接指著它的收支，還原時照著補回
+        primary_of = (await session.execute(
+            select(CrmCashEntry.id).where(CrmCashEntry.invoice_id == invoice_id))).scalars().all()
+        who = (_extract_token(request) or {}).get("username") or ""
+        snapshot = json.dumps({
+            "row": _invoice_row_snapshot(inv),
+            "links": [{"cash_entry_id": r[0], "amount": r[1], "fee": r[2]} for r in link_rows],
+            "primary_of": list(primary_of),
+        }, ensure_ascii=False)
+        await session.merge(CrmInvoiceTrash(
+            id=inv.id, entity=inv.entity or "parent", title=inv.title, invoice_number=inv.invoice_number,
+            amount_total=inv.amount_total, invoice_date=inv.invoice_date,
+            deleted_at=_now(), deleted_by=who, payload=snapshot))
+        await _purge_expired_trash(session)
         await session.execute(_sadel(CrmCashInvoiceLink).where(
             CrmCashInvoiceLink.invoice_id == invoice_id))
         for eid in set(affected):

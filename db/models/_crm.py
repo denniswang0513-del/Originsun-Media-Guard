@@ -502,6 +502,27 @@ class CrmInvoice(Base):
     )
 
 
+class CrmInvoiceTrash(Base):
+    """帳務 — 發票垃圾桶（owner 2026-09-04「不小心刪掉的發票要救得回來」）。
+
+    刪發票不改成軟刪除（`deleted_at` 欄位）——發票被十幾條查詢讀（列表、應收、統計、
+    收支連結、專案收款推導、手機端…），漏掉任何一條，刪掉的票就會從報表裡冒回來。
+    改成：刪的瞬間把整列（＋被清掉的收支分配連結）序列化進這張表，正本照舊硬刪；
+    還原＝用同一個 id 建回來、連結還在的收支補回去。30 天沒還原自動清掉（列表／刪除時順手做）。
+    """
+    __tablename__ = "crm_invoice_trash"
+
+    id = Column(String(32), primary_key=True)                             # ＝原發票 id（還原後 id 不變，舊連結、分享碼都認得）
+    entity = Column(String(16), nullable=False, server_default="parent")
+    title = Column(String(255), nullable=True)
+    invoice_number = Column(String(32), nullable=True)
+    amount_total = Column(Integer, nullable=True)
+    invoice_date = Column(DateTime(timezone=True), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), server_default=func.now())
+    deleted_by = Column(String(64), nullable=True)
+    payload = Column(Text, nullable=False)                                # JSON：{"row": 整列欄位, "links": [被清掉的分配], "primary_of": [直接指著它的收支 id]}
+
+
 class CrmPaymentRequest(Base):
     """帳務 — 請款單。"""
     __tablename__ = "crm_payment_requests"

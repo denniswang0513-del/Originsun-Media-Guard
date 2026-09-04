@@ -34,6 +34,7 @@
   <div class="crm-toolbar-right">
     <!-- 管理員才看得到（後端 check_admin）；由 _initInvoicesRootCard 決定顯不顯示 -->
     <a href="javascript:void(0)" id="inv-root-toggle" class="inv-root-link" style="display:none;">發票資料夾</a>
+    <button id="inv-btn-trash" class="crm-btn crm-btn-secondary" title="刪掉的發票 30 天內可還原">垃圾桶</button>
     <button id="inv-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
     <button id="inv-btn-add" class="crm-btn crm-btn-primary">+ 新增發票</button>
   </div>
@@ -90,6 +91,20 @@
 <div id="inv-receivables-view" style="display:none;flex-direction:column;flex:1;min-height:0;"></div>
 <!-- Cashflow view (lazy-loaded, B3 現金流+付款節點+F1 月結) -->
 <div id="inv-cashflow-view" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:auto;"></div>
+</div>
+
+<!-- 垃圾桶（owner 2026-09-04）：刪掉的發票 30 天內可還原 -->
+<div id="inv-trash-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal" style="max-width:760px;">
+    <div class="crm-modal-header">
+      <h3>發票垃圾桶</h3>
+      <button onclick="document.getElementById('inv-trash-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+    </div>
+    <div class="crm-modal-body">
+      <div class="crm-hint" style="margin-bottom:8px;">刪掉的發票先放這裡，30 天後自動清空。還原會用原來的 id 建回，還在的收支連結一併補回。</div>
+      <div id="inv-trash-list"><div class="crm-empty">載入中...</div></div>
+    </div>
+  </div>
 </div>
 
 <!-- Add/Edit Modal -->

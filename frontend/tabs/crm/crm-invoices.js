@@ -1107,10 +1107,52 @@ async function saveInvoice() {
 }
 
 async function deleteInvoice(inv) {
-    if (!confirm(`確定刪除「${inv.title}」？`)) return;
-    try { await _fetch('/invoices/' + inv.id, { method: 'DELETE' }); closeDetail(); await loadInvoices(); }
+    if (!confirm(`確定刪除「${inv.title}」？\n會先放進垃圾桶，30 天內可以從工具列的「垃圾桶」還原。`)) return;
+    try { await _fetch('/invoices/' + inv.id, { method: 'DELETE' }); closeDetail(); await loadInvoices(); crmToast('已移到垃圾桶，30 天內可還原'); }
     catch (e) { alert(e.message); }
 }
+
+// ── 垃圾桶（owner 2026-09-04）：GET /invoices/trash、還原 POST .../restore、永久刪除 DELETE /invoices/trash/{id} ──
+async function openTrash() {
+    const modal = document.getElementById('inv-trash-modal');
+    modal.style.display = 'flex';
+    await loadTrash();
+}
+
+async function loadTrash() {
+    const box = document.getElementById('inv-trash-list');
+    try {
+        const d = await _fetch('/invoices/trash');
+        const items = d.items || [];
+        if (!items.length) { box.innerHTML = '<div class="crm-empty">垃圾桶是空的</div>'; return; }
+        box.innerHTML = `<table class="crm-table"><thead><tr><th>刪除時間</th><th>名稱</th><th>抬頭</th><th>發票號</th><th style="text-align:right;">金額</th><th>剩餘</th><th>刪除者</th><th></th></tr></thead><tbody>` +
+            items.map(t => `<tr>
+                <td>${_esc((t.deleted_at || '').slice(0, 16).replace('T', ' '))}</td>
+                <td>${_esc(t.title)}</td>
+                <td>${_esc(t.company_name)}</td>
+                <td>${_esc(t.invoice_number)}</td>
+                <td style="text-align:right;">${t.amount_total == null ? '' : _fmtNum(t.amount_total)}</td>
+                <td>${t.days_left == null ? '' : t.days_left + ' 天'}</td>
+                <td>${_esc(t.deleted_by)}</td>
+                <td style="white-space:nowrap;">
+                  <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._invTrashRestore('${_esc(t.id)}')">還原</button>
+                  <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._invTrashPurge('${_esc(t.id)}')">永久刪除</button>
+                </td></tr>`).join('') + '</tbody></table>';
+    } catch (e) { box.innerHTML = `<div class="crm-empty">${_esc(e.message)}</div>`; }
+}
+
+window._invTrashRestore = async function (id) {
+    try {
+        const r = await _fetch('/invoices/trash/' + id + '/restore', { method: 'POST' });
+        crmToast(`已還原${r.restored_links ? `，補回 ${r.restored_links} 筆收支連結` : ''}`);
+        await Promise.all([loadTrash(), loadInvoices()]);
+    } catch (e) { alert(e.message); }
+};
+window._invTrashPurge = async function (id) {
+    if (!confirm('永久刪除這張？之後就救不回來了。')) return;
+    try { await _fetch('/invoices/trash/' + id, { method: 'DELETE' }); await loadTrash(); }
+    catch (e) { alert(e.message); }
+};
 
 function _showErr(msg) { const el = document.getElementById('inv-modal-error'); el.textContent = msg; el.style.display = 'block'; }
 
@@ -1270,7 +1312,7 @@ async function doImport() {
 // ── Init ─────────────────────────────────────────────────────
 
 export async function initCrmInvoicesTab() {
-    for (const id of ['inv-modal', 'inv-import-modal', 'inv-calc-popup', 'inv-commission-popup', 'inv-applicant-popup']) {
+    for (const id of ['inv-modal', 'inv-trash-modal', 'inv-import-modal', 'inv-calc-popup', 'inv-commission-popup', 'inv-applicant-popup']) {
         const el = document.getElementById(id);
         if (el) document.body.appendChild(el);
     }
@@ -1298,6 +1340,7 @@ export async function initCrmInvoicesTab() {
 
     _initInvoicesRootCard();   // 管理員限定，非管理員入口保持隱藏（不 await，別擋住 tab 載入）
     document.getElementById('inv-btn-add').addEventListener('click', () => openModal());
+    document.getElementById('inv-btn-trash')?.addEventListener('click', openTrash);
     document.getElementById('inv-btn-import').addEventListener('click', openImportModal);
     document.getElementById('inv-btn-save').addEventListener('click', saveInvoice);
     document.getElementById('inv-detail-close').addEventListener('click', closeDetail);
