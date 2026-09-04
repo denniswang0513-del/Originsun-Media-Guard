@@ -26,6 +26,9 @@ class Timesheet(Base):
     work_type = Column(String(32), nullable=True)                # 工作分類（core.hr_logic.WORK_TYPES；可空）
     note = Column(Text, nullable=True)                           # 管理員備註（總表手動調整時寫；員工端不顯示）
     remark = Column(Text, nullable=True)                         # 員工備註（我的一天填；內容之外的補充，大家看得到）
+    stage_id = Column(String(32), nullable=True)                 # soft FK → work_stage_nodes.id（該列分類底下的階段）
+    stage_name = Column(String(64), nullable=True)               # 鏡射（報表／Sheet 匯出／週記自動區）；只由 timesheet_self.set_stage 寫
+    bulletin_id = Column(String(32), nullable=True)              # 從待辦帶入的那筆公布欄項目；標成實際＝待辦 done
     edited_at = Column(DateTime(timezone=True), nullable=True)   # 總表改過（管理員）；Sheet 同格之後再變＝記衝突不自動蓋
     edited_by = Column(String(64), nullable=True)
     status = Column(String(16), nullable=False, default="import")  # import／draft（實際）／plan（只有計畫）
@@ -36,6 +39,31 @@ class Timesheet(Base):
     __table_args__ = (
         Index("idx_ts_project", "project_id"),
         Index("idx_ts_staff_date", "staff_name", "work_date"),
+    )
+
+
+class WorkStageNode(Base):
+    """工作階段（docs/JOURNAL_WORKLOG_PLAN.md §12）—— **每個分類自己的階段清單**。
+
+    結構同 CashTaxonomyNode（parent_id 用空字串當根、停用不刪），但固定兩層：
+    depth1＝分類（name 對應 core.hr_logic.WORK_TYPES 九類）、depth2＝階段。
+    種子 core.hr_logic.STAGE_SEED 只在表空時寫；之後 owner 在編輯器改名／排序／新增／停用。
+    timesheets.stage_id 是 soft FK，stage_name 鏡射（只由 services.timesheet_self.set_stage 寫）。
+    """
+    __tablename__ = "work_stage_nodes"
+
+    id = Column(String(32), primary_key=True)
+    parent_id = Column(String(32), nullable=False, server_default="", index=True)   # '' 為根（分類）
+    name = Column(String(64), nullable=False)
+    depth = Column(Integer, nullable=False, default=1)      # 1=分類 2=階段
+    sort = Column(Integer, nullable=False, default=0)
+    active = Column(Integer, nullable=False, default=1)     # 停用＝新列挑不到，舊列照樣顯示
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("parent_id", "name", name="uq_work_stage_node"),
+        Index("idx_work_stage_parent", "parent_id", "sort"),
     )
 
 

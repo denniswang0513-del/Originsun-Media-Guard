@@ -27,6 +27,56 @@ export const SUBTITLE = `每週${'一二三四五六七八九'[BLOCKS.length - 1
 export const HINT_EDIT_WINDOW = '僅能編輯至下一週';
 export const MSG_EDIT_WINDOW = '已超出可編輯期間（僅能編輯至下一週）';
 
+// 條目旗標（owner 2026-09-05 §14：求助條目大家都看得到）。只有「挑戰」「其他」兩區可標。
+export const FLAGS = [['help', '需要協助'], ['discuss', '想討論']];
+export const FLAG_LABEL = Object.fromEntries(FLAGS);
+export const FLAGGABLE = new Set(['challenges', 'others']);
+// 回覆掛在哪張表：後端 journal_replies.entry_table（journal_wins／journal_challenges／…）
+export const entryTable = (k) => 'journal_' + k;
+
+/** 一區的條目，統一成物件：後端新版回 entries.{k}=[{id, content, project_id, flag}]；舊版只有字串陣列。 */
+export function entriesOf(j, k) {
+    const rich = j && j.entries && Array.isArray(j.entries[k]) ? j.entries[k] : null;
+    if (rich) return rich.map(e => (typeof e === 'string' ? { id: '', content: e, project_id: '', project_name: '', flag: '' }
+        : { id: e.id || '', content: e.content || '', project_id: e.project_id || '', project_name: e.project_name || '', flag: e.flag || '' }));
+    return ((j && j[k]) || []).map(s => ({ id: '', content: String(s || ''), project_id: '', project_name: '', flag: '' }));
+}
+
+/** 某條目的主管回覆（entry_table 認 journal_<k> 或 <k> 兩種寫法）。 */
+export function repliesFor(j, k, entryId) {
+    if (!entryId) return [];
+    return ((j && j.replies) || []).filter(r => r.entry_id === entryId && (r.entry_table === entryTable(k) || r.entry_table === k));
+}
+
+/** 自動區「上週做了什麼」：worklog=[{project_id, project_name, days:[{date, items:[{note, work_type, stage_name}]}]}]（不含小時）。
+ *  c.wl／c.wlProj／c.wlDay 是 class；pickable＝每項旁勾「帶入」（data-pick 帶文字）。 */
+export function worklogHtml(worklog, c = {}, { pickable = false } = {}) {
+    const list = worklog || [];
+    if (!list.length) return `<div class="${c.empty || ''}">（這週沒有專案紀錄）</div>`;
+    const md = (iso) => { const [, m, d] = String(iso || '').split('-'); return m && d ? `${Number(m)}/${Number(d)}` : ''; };
+    return list.map(p => `<div class="${c.wl || 'wl'}">
+        <div class="${c.wlProj || 'wl-pj'}">${_esc(p.project_name || '（未掛案）')}<span class="${c.wlDays || 'wl-days'}">${(p.days || []).length} 天</span></div>
+        <ul>${(p.days || []).map(d => (d.items || []).map(i => {
+            const stage = [i.work_type, i.stage_name].filter(Boolean).join(' · ');
+            const text = `${p.project_name || ''}${p.project_name ? '：' : ''}${i.note || ''}`;
+            return `<li><span class="${c.wlDay || 'wl-day'}">${md(d.date)}</span>${_esc(i.note || '')}${stage ? ` <span class="${c.pillStage || 'pill-stage'}">${_esc(stage)}</span>` : ''}${
+                pickable ? ` <label class="${c.pick || 'wl-pick'}"><input type="checkbox" data-pick="${_esc(text)}"> 帶入</label>` : ''}</li>`;
+        }).join('')).join('')}</ul></div>`).join('');
+}
+
+/** 帶 Bearer token 的 payload（modules／access_level）——前端只拿它決定要不要畫回覆框／設定鈕，守衛在後端。 */
+export function tokenGrants() {
+    try {
+        const tok = localStorage.getItem('auth_token') || '';
+        const part = tok.split('.')[1] || '';
+        const json = atob(part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '='));
+        const p = JSON.parse(decodeURIComponent(Array.from(json, ch => '%' + ch.charCodeAt(0).toString(16).padStart(2, '0')).join('')));
+        const modules = Array.isArray(p.modules) ? p.modules : [];
+        const admin = Number(p.access_level || 0) >= 3;
+        return { username: p.username || p.sub || '', modules, admin, has: (m) => admin || modules.includes(m) };
+    } catch (_) { return { username: '', modules: [], admin: false, has: () => false }; }
+}
+
 // ── 週期 helpers（週=週一起算，日期一律當地時區手動組字避免 UTC 偏移） ──
 const pad2 = (n) => String(n).padStart(2, '0');
 const parseISO = (s) => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d); };
@@ -72,11 +122,38 @@ export function blockList(label, arr, blockCls) {
     return `<div class="${blockCls}"><h4>${_esc(label)}</h4><ul>${arr.map(x => `<li>${_renderRich(x)}</li>`).join('')}</ul></div>`;
 }
 
-// c = {card, name, empty, block} class 名；title 由呼叫端決定（人名或週區間）並自行 esc
-export function personCard(j, title, c) {
-    const empty = BLOCKS.every(([k]) => !(j[k] || []).length);
-    return `<div class="${c.card}"><div class="${c.name}">${title}</div>
-        ${empty ? `<div class="${c.empty}">（空白）</div>` : BLOCKS.map(([k, label]) => blockList(label, j[k], c.block)).join('')}
+/** 一條回覆（灰底）。 */
+export function replyHtml(r, c = {}) {
+    const t = r.created_at ? String(r.created_at).slice(5, 16).replace('T', ' ') : '';
+    return `<div class="${c.reply || 'reply'}"><b>${_esc(r.display_name || r.username || '')}</b>${_renderRich(r.content || '')}${t ? `<span class="${c.replyTime || 'reply-t'}">${_esc(t)}</span>` : ''}</div>`;
+}
+
+/** 一區的條目清單（新版：含掛案／旗標／回覆／回覆框）。opts：projectName(id)、canReply、journalId。 */
+export function entryBlock(j, k, label, c, opts = {}) {
+    const items = entriesOf(j, k);
+    if (!items.length) return '';
+    const name = opts.projectName || (() => '');
+    return `<div class="${c.block}"><h4>${_esc(label)}</h4><ul>${items.map(e => {
+        const pj = e.project_name || (e.project_id ? name(e.project_id) : '');
+        const reps = repliesFor(j, k, e.id);
+        return `<li>${_renderRich(e.content)}${pj ? ` <span class="${c.pillProj || 'pill-proj'}">${_esc(pj)}</span>` : ''}${
+            e.flag && FLAG_LABEL[e.flag] ? ` <span class="${(c.pillFlag || 'pill-flag') + ' ' + e.flag}">${FLAG_LABEL[e.flag]}</span>` : ''}${
+            reps.map(r => replyHtml(r, c)).join('')}${
+            opts.canReply && e.id && opts.journalId
+                ? `<div class="${c.replyBox || 'reply-box'}"><textarea rows="1" data-no-paste-image data-reply-j="${_esc(opts.journalId)}" data-reply-t="${entryTable(k)}" data-reply-e="${_esc(e.id)}" placeholder="回覆…"></textarea><button type="button" data-reply-send>回覆</button></div>` : ''}</li>`;
+    }).join('')}</ul></div>`;
+}
+
+// c = {card, name, empty, block} class 名；title 由呼叫端決定（人名或週區間）並自行 esc。
+// opts（可省，舊呼叫端不變）：worklog（畫自動區）、projectName(id)、canReply、flags（標題旁的求助 pill）。
+export function personCard(j, title, c, opts = {}) {
+    const empty = BLOCKS.every(([k]) => !entriesOf(j, k).length);
+    const flags = j.flags || {};
+    const pills = FLAGS.map(([f, l]) => (flags[f] ? `<span class="${(c.pillFlag || 'pill-flag') + ' ' + f}">${l} ${flags[f]}</span>` : '')).join('');
+    const worklog = opts.worklog && (j.worklog || []).length
+        ? `<div class="${c.block}"><h4>做了什麼</h4>${worklogHtml(j.worklog, c)}</div>` : '';
+    return `<div class="${c.card}"><div class="${c.name}">${title}${pills}</div>${worklog}
+        ${empty && !worklog ? `<div class="${c.empty}">（空白）</div>` : BLOCKS.map(([k, label]) => entryBlock(j, k, label, c, { ...opts, journalId: j.id || j.journal_id || '' })).join('')}
     </div>`;
 }
 
@@ -85,9 +162,23 @@ export function personCard(j, title, c) {
 const _q = (start) => start ? '?start=' + encodeURIComponent(start) : '';
 const _safe = (p) => p.catch(() => ({ ok: false, status: 0 }));
 
+let _projOptsPromise = null;
 export const api = {
     mine: (start) => _safe(authFetch('/api/v1/journal/mine' + _q(start))),
     saveMine: (start, body) => _safe(authFetch('/api/v1/journal/mine' + _q(start), { method: 'PUT', body })),
+    submitMine: (start) => _safe(authFetch('/api/v1/journal/mine/submit' + _q(start), { method: 'POST', body: {} })),
+    reply: (body) => _safe(authFetch('/api/v1/journal/reply', { method: 'POST', body })),
+    help: (weeks = 8) => _safe(authFetch('/api/v1/journal/help?weeks=' + weeks)),
+    // 掛案子用的專案清單：先問工時的 project_options（timesheets 模組）；沒那把鑰匙就退到員工自己的 /me/timesheet_options（同一份查表）
+    projectOptions: () => {
+        if (!_projOptsPromise) {
+            _projOptsPromise = _safe(authFetch('/api/v1/timesheets/project_options'))
+                .then(r => (r.ok ? r.json() : _safe(authFetch('/api/v1/me/timesheet_options')).then(r2 => (r2.ok ? r2.json() : { projects: [] }))))
+                .then(d => (d && d.projects) || [])
+                .catch(() => []);
+        }
+        return _projOptsPromise;
+    },
     week: (start) => _safe(authFetch('/api/v1/journal/week' + _q(start))),
     // 空字串/null 參數自動剔除 — 呼叫端直接把 state 丟進來即可
     learnings: (params) => _safe(authFetch('/api/v1/journal/learnings?' + new URLSearchParams(

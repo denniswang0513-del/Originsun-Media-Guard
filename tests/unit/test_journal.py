@@ -115,7 +115,8 @@ class TestSectionRegistryConsistency:
         # → 該區永遠收不到資料。兩邊互為鏡像，這裡釘死。
         from core.schemas import JournalPut
         from routers.api_journal import _SECTION_MODELS
-        assert [k for k, _ in _SECTION_MODELS] == list(JournalPut.model_fields)
+        # 2026-09-05 §13：body 多了 status（草稿旗標），它不是區 —— 其餘欄位仍與 registry 一一鏡像
+        assert [k for k, _ in _SECTION_MODELS] == [f for f in JournalPut.model_fields if f != "status"]
 
     def test_frontend_blocks_match_registry(self):
         # 前端 BLOCKS 漏一個後端 key → saveMine 的 PUT body 少該欄 → 預設 []

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator, model_validator  # type: ignore
-from typing import List, Literal, Optional, Tuple
+from typing import List, Literal, Optional, Tuple, Union
 
 from core.crm_logic import normalize_tax_id
 from core.media_exts import sorted_video_exts
@@ -374,6 +374,8 @@ class TimesheetManualRow(BaseModel):
     hours: Optional[float] = None
     planned_hours: Optional[float] = None
     work_type: Optional[str] = None   # core.hr_logic.WORK_TYPES 之一，可空
+    stage_id: Optional[str] = None    # 工作階段（work_stage_nodes；須屬於該列分類）。更新時 "" ＝清空、不帶＝不動
+    bulletin_id: Optional[str] = None # 從待辦帶入的公布欄項目；列標成實際＝那筆待辦 done
 
 
 class TimesheetManualRequest(BaseModel):
@@ -1435,11 +1437,40 @@ class BookmarkUpdateRequest(BaseModel):
 # ── 每週工作日誌（journal）──
 
 class JournalPut(BaseModel):
-    """PUT /api/v1/journal/mine — 四區塊全量替換（strip/去空/上限在 core.journal_logic）。"""
-    wins: List[str] = []
-    challenges: List[str] = []
-    learnings: List[str] = []
-    others: List[str] = []       # 其他主題（2026-07-24 第四問）
+    """PUT /api/v1/journal/mine — 四區塊全量替換（strip/去空/上限在 core.journal_logic）。
+
+    每項可為字串或 {id?, content, project_id?, flag?}（§13：掛案子、求助標記；帶 id 沿用同一條）。
+    `status` 只接受 'draft'（草稿自動存）；送出走 POST /journal/mine/submit。
+    🔴 四區的欄位名＝routers.api_journal._SECTION_MODELS 的 key（測試釘死）；status 不是區。
+    """
+    wins: List[Union[str, dict]] = []
+    challenges: List[Union[str, dict]] = []
+    learnings: List[Union[str, dict]] = []
+    others: List[Union[str, dict]] = []       # 其他主題（2026-07-24 第四問）
+    status: Optional[str] = None
+
+
+class JournalReplyPost(BaseModel):
+    """POST /api/v1/journal/reply — 主管回覆某一條（entry_table＝四張條目表之一的 __tablename__）。"""
+    journal_id: str
+    entry_table: str
+    entry_id: str
+    content: str = ""
+
+
+# ── 工作階段（work_stage_nodes；docs/JOURNAL_WORKLOG_PLAN.md §12）──
+
+class WorkStageNodePayload(BaseModel):
+    """新增一個階段：parent_id＝分類節點（必填，階段只能掛在分類底下）。"""
+    parent_id: str = ""
+    name: str = ""
+
+
+class WorkStageNodeUpdate(BaseModel):
+    """改名／排序／停用（部分更新，只送要改的欄）。"""
+    name: Optional[str] = None
+    sort: Optional[int] = None
+    active: Optional[int] = None
 
 
 # ── 影像紀錄分塊上傳（繞開 Cloudflare 的 100MB 單請求上限）──

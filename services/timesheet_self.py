@@ -11,7 +11,8 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 from sqlalchemy import or_, select
 
-from core.hr_logic import EDIT_BLOCK_TEXT, by_month, can_edit_timesheet, day_iso, month_span, tw_day
+from core.hr_logic import (EDIT_BLOCK_TEXT, by_month, can_edit_timesheet, day_iso, month_span, resolve_stage,
+                           stage_index, tw_day)
 from core.identity import require_bound_staff
 from services.timesheet_lookup import load_project_lookup
 from services.timesheet_manual import insert_manual_rows, names_for, normalize_row
@@ -35,6 +36,9 @@ def ts_dict(r, staff_id: str | None = None, *, with_note: bool = False) -> dict:
         "hours": round(float(r.hours or 0), 2),
         "planned_hours": round(float(r.planned_hours), 2) if r.planned_hours is not None else None,
         "work_type": r.work_type or "",
+        "stage_id": getattr(r, "stage_id", None) or "",        # 工作階段（§12）；stage_name 是鏡射，只由 set_stage 寫
+        "stage_name": getattr(r, "stage_name", None) or "",
+        "bulletin_id": getattr(r, "bulletin_id", None) or "",  # 從待辦帶入的那筆
         "source": r.source or "",
         "status": r.status or "",
         "edited": r.edited_at is not None,      # 總表改過（Sheet 同格再變會記衝突）
@@ -107,9 +111,78 @@ async def list_rows(session, ident: dict, d0, d1) -> list:
     return [ts_dict(r, ident["staff_id"]) for r in rows]
 
 
+async def search_rows(session, ident: dict, d0, d1, *, q: str = "", project_id: str = "", stage_id: str = "",
+                      limit: int = 500) -> list:
+    """本人 [d0, d1) 的列加篩選（關鍵字＝內容／備註／案名、案、階段）—— **只列不算**（§2-A11）。"""
+    from db.models import Timesheet
+    stmt = own_rows(ident).where(Timesheet.work_date >= d0).where(Timesheet.work_date < d1)
+    if (q or "").strip():
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(or_(Timesheet.task_note.ilike(like), Timesheet.remark.ilike(like),
+                              Timesheet.project_name.ilike(like)))
+    if (project_id or "").strip():
+        stmt = stmt.where(Timesheet.project_id == project_id.strip())
+    if (stage_id or "").strip():
+        stmt = stmt.where(Timesheet.stage_id == stage_id.strip())
+    rows = (await session.execute(
+        stmt.order_by(Timesheet.work_date.desc(), Timesheet.created_at.desc()).limit(max(1, min(int(limit or 500), 500)))
+    )).scalars().all()
+    return [ts_dict(r, ident["staff_id"]) for r in rows]
+
+
+# ── 工作階段（§12）＋ 待辦互連（§2-C4）────────────────────────────────────
+
+def set_stage(row, node) -> None:
+    """timesheets.stage_id／stage_name **唯一的寫入點**：node＝resolve_stage 回的 dict，None＝清空。
+    鏡射欄只能從這裡動，報表／Sheet 匯出／週記自動區讀的都是 stage_name。"""
+    row.stage_id = node["id"] if node else None
+    row.stage_name = node["name"] if node else None
+
+
+async def load_stage_index(session) -> dict:
+    from db.models import WorkStageNode
+    return stage_index((await session.execute(select(WorkStageNode))).scalars().all())
+
+
+def _stage_or_422(index: dict, stage_id, work_type):
+    try:
+        return resolve_stage(stage_id, work_type, index)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+async def _mark_bulletin_done(session, row, username: str) -> None:
+    """列標成實際（hours>0）且是從待辦帶入的 → 那筆公布欄 done（只動「與我有關」的那筆）。
+    同一交易內做、失敗不擋工時（savepoint 回滾，工時照存）。"""
+    if not getattr(row, "bulletin_id", None) or float(row.hours or 0) <= 0:
+        return
+    from db.models import BulletinItem
+    try:
+        async with session.begin_nested():
+            b = (await session.execute(
+                select(BulletinItem).where(BulletinItem.id == row.bulletin_id)
+                .where(BulletinItem.mine_filter(username or "")))).scalar_one_or_none()
+            if b is not None and b.status != "done":
+                b.status = "done"
+                b.done_at = datetime.now()
+    except Exception:
+        pass
+
+
 async def add_rows(session, ident: dict, rows) -> dict:
-    """本人一次填多列（實際或計畫；規則在 insert_manual_rows）。caller 不必 commit。"""
+    """本人一次填多列（實際或計畫；規則在 insert_manual_rows）。caller 不必 commit。
+    階段先驗（不屬於該列分類 → 422，一列都不插）、插完再鏡射；帶 bulletin_id 且是實際列＝待辦 done。"""
+    from db.models import Timesheet
+    rows = list(rows or [])
+    index = await load_stage_index(session) if any((getattr(r, "stage_id", None) or "").strip() for r in rows) else {}
+    stages = [_stage_or_422(index, getattr(r, "stage_id", None), (r.work_type or "").strip()) for r in rows]
     result = await insert_manual_rows(session, staff_id=ident["staff_id"], staff_name=ident["staff"].name, rows=rows)
+    await session.flush()
+    for rid, r, st in zip(result["ids"], rows, stages):
+        obj = await session.get(Timesheet, rid)
+        set_stage(obj, st)
+        obj.bulletin_id = (getattr(r, "bulletin_id", None) or "").strip() or None
+        await _mark_bulletin_done(session, obj, ident.get("username") or "")
     await session.commit()
     return result
 
@@ -127,11 +200,23 @@ async def apply_update(session, r, body) -> None:
     for k, v in fields.items():
         setattr(r, k, v)
     # 對不到案的名字不擋（project_id 空 → 前端標「未對映」，管理員再指定），跟插入同一規則
+    # 工作階段：給了就以它為準（"" ＝清空）；沒給但分類換了、原階段不屬於新分類 → 清空（鏡射不能對不上）
+    sid = getattr(body, "stage_id", None)
+    if sid is not None:
+        set_stage(r, _stage_or_422(await load_stage_index(session), sid, r.work_type or ""))
+    elif getattr(r, "stage_id", None):
+        st = (await load_stage_index(session)).get(r.stage_id)
+        if st is None or st["category"] != (r.work_type or ""):
+            set_stage(r, None)
+    bid = getattr(body, "bulletin_id", None)
+    if bid is not None:
+        r.bulletin_id = bid.strip() or None
 
 
 async def update_row(session, ident: dict, row_id: str, body) -> dict:
     r = await own_row(session, row_id, ident)
     await apply_update(session, r, body)
+    await _mark_bulletin_done(session, r, ident.get("username") or "")
     await session.commit()
     return ts_dict(r, ident["staff_id"])
 

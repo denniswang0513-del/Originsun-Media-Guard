@@ -16,7 +16,7 @@ core.identity.resolve_current_staff（token → users.staff_id → crm_staff）�
 
 管理員（Lv3）經 grant_admin_all_modules 自動擁有全部 key。
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from sqlalchemy import func, select  # type: ignore
@@ -24,17 +24,21 @@ from sqlalchemy import func, select  # type: ignore
 from core.auth import check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (budget_burn, day_iso, hours_rollup, leave_balance, leave_to_dict,
-                           month_key, month_span, months_back, project_metrics, tw_day)
+                           month_key, month_span, months_back, parse_ymd, project_metrics, tw_day)
 from core.identity import require_bound_staff, resolve_current_staff
+from core.journal_logic import shell_status, week_start_of
 from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetUpdate, MeTodoUpdate)
+from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
-                       CrmProjectStaff, HrLeaveRequest, Timesheet)
+                       CrmProjectStaff, CrmShoot, HrLeaveRequest, PreprodLocation, Timesheet, WorkJournal)
 from services.timesheet_lookup import budgets_for
 from services.timesheet_manual import project_options
 from services.timesheet_self import (add_rows, bound_ident, delete_row, list_rows, metrics_input, month_or_422,
                                      own_filter, rows_by_month, ts_dict, update_row)
 from routers.api_hr import approved_annual_used, new_leave_request
+from routers.api_shoots import _crew_list
+from routers.api_timesheets import _board_days
 
 router = APIRouter(prefix="/api/v1/me", tags=["me"])
 
@@ -63,6 +67,24 @@ def _profile_dict(s) -> dict:
         "hire_date": day_iso(s.hire_date) or "",
         "status": s.status or "在職",
     }
+
+
+async def _todos_for(session, username: str) -> list:
+    """我的待辦（公布欄「與我有關」且未完成）—— workspace 與 /today 同一份。"""
+    rows = (await session.execute(
+        select(BulletinItem)
+        .where(BulletinItem.mine_filter(username))
+        .where(BulletinItem.status != "done")
+        .order_by(BulletinItem.pinned.desc(), BulletinItem.sort_order,
+                  BulletinItem.created_at)
+    )).scalars().all()
+    return [{
+        "id": o.id, "title": o.title, "note": o.note or "",
+        "status": o.status, "priority": o.priority,
+        "pinned": bool(o.pinned),
+        "assigned_to_me": o.assignee_username == username,
+        "created_at": o.created_at.isoformat() if o.created_at else None,
+    } for o in rows]
 
 
 @router.get("/workspace")
@@ -121,20 +143,7 @@ async def my_workspace(request: Request):
 
         if "me_todos" in allowed:
             # 鍵 username — 不需綁定人員檔案也能用
-            rows = (await session.execute(
-                select(BulletinItem)
-                .where(BulletinItem.mine_filter(ident["username"] or ""))
-                .where(BulletinItem.status != "done")
-                .order_by(BulletinItem.pinned.desc(), BulletinItem.sort_order,
-                          BulletinItem.created_at)
-            )).scalars().all()
-            out["todos"] = [{
-                "id": o.id, "title": o.title, "note": o.note or "",
-                "status": o.status, "priority": o.priority,
-                "pinned": bool(o.pinned),
-                "assigned_to_me": o.assignee_username == ident["username"],
-                "created_at": o.created_at.isoformat() if o.created_at else None,
-            } for o in rows]
+            out["todos"] = await _todos_for(session, ident["username"] or "")
 
         if "me_finance" in allowed and staff is not None:
             name = staff.name                       # 應付款那段還是認收款人姓名
@@ -293,6 +302,130 @@ async def cancel_my_leave(leave_id: str, request: Request):
     return {"deleted": leave_id}
 
 
+# ── 今天與這週（docs/JOURNAL_WORKLOG_PLAN.md §8–§11；員工頁第一區）──────────────
+#
+# 守衛＝任何 me_* 鑰匙＋綁定人員檔案（409 原句只在 core.identity.require_bound_staff）。
+
+async def _me_bound(request: Request) -> dict:
+    payload = check_admin_or_module(request, *ME_MODULE_KEYS)
+    mods = grant_admin_all_modules(payload.get("access_level"), payload.get("modules") or [])
+    key = next((k for k in ME_MODULE_KEYS if k in mods), ME_MODULE_KEYS[0])
+    return await require_bound_staff(request, key)
+
+
+def _in_crew(crew: list, staff_id: str, name: str) -> bool:
+    """場次 crew 含我：比 staff_id，退回比姓名（舊場次只存名字）。"""
+    for c in crew:
+        if c.get("staff_id") and c["staff_id"] == staff_id:
+            return True
+        if not c.get("staff_id") and name and c.get("name") == name:
+            return True
+    return False
+
+
+async def _shoots_between(session, d0: date, d1: date) -> list:
+    """[d0, d1] 有排（未取消）的場次，帶案名與地點字：[{shoot, project_name, location, crew}]。"""
+    rows = (await session.execute(
+        select(CrmShoot, CrmProject.name)
+        .outerjoin(CrmProject, CrmProject.id == CrmShoot.project_id)
+        .where(CrmShoot.date <= d1)
+        .where(func.coalesce(CrmShoot.end_date, CrmShoot.date) >= d0)
+        .where(CrmShoot.status != SHOOT_CANCELLED)
+        .order_by(CrmShoot.date, CrmShoot.start_time))).all()
+    loc_ids = {s.location_id for s, _ in rows if s.location_id and not (s.location_text or "").strip()}
+    loc_names = {}
+    if loc_ids:
+        loc_names = dict((await session.execute(
+            select(PreprodLocation.id, PreprodLocation.name).where(PreprodLocation.id.in_(loc_ids)))).all())
+    return [{"shoot": s, "project_name": pname or "",
+             "location": (s.location_text or "").strip() or loc_names.get(s.location_id, "") or "",
+             "crew": _crew_list(s.crew)} for s, pname in rows]
+
+
+def _shoot_days(s) -> list:
+    """一場拍攝涵蓋的每一天（多日拍攝展開）。"""
+    end = s.end_date or s.date
+    n = max(0, (end - s.date).days)
+    return [s.date + timedelta(days=i) for i in range(n + 1)]
+
+
+@router.get("/today")
+async def my_today(request: Request):
+    """今天那一條：我在 crew 的場次、我的待辦、待審請假、上週回顧狀態（none／draft／submitted）。"""
+    ident = await _me_bound(request)
+    today = date.today()
+    factory = db_factory_or_503()
+    async with factory() as session:
+        shoots = [{"id": x["shoot"].id, "title": (x["shoot"].title or "").strip() or x["project_name"],
+                   "project_id": x["shoot"].project_id, "project_name": x["project_name"],
+                   "location": x["location"], "start_time": x["shoot"].start_time or "",
+                   "end_time": x["shoot"].end_time or "", "crew": [c["name"] for c in x["crew"] if c.get("name")]}
+                  for x in await _shoots_between(session, today, today)
+                  if _in_crew(x["crew"], ident["staff_id"], ident["staff"].name)]
+        todos = await _todos_for(session, ident["username"] or "")
+        leaves = (await session.execute(
+            select(HrLeaveRequest).where(HrLeaveRequest.staff_id == ident["staff_id"])
+            .where(HrLeaveRequest.status == "待審")
+            .order_by(HrLeaveRequest.start_date))).scalars().all()
+        last_week = week_start_of(today) - timedelta(days=7)
+        shell = (await session.execute(
+            select(WorkJournal).where(WorkJournal.username == (ident["username"] or ""))
+            .where(WorkJournal.week_start == last_week))).scalar_one_or_none()
+    return {
+        "date": today.isoformat(), "shoots": shoots, "todos": todos,
+        "leave_pending": [{"date_from": day_iso(l.start_date) or "", "date_to": day_iso(l.end_date) or "",
+                           "status": l.status} for l in leaves],
+        "last_week_journal": shell_status(shell), "last_week_start": last_week.isoformat(),
+    }
+
+
+@router.get("/team_week")
+async def team_week(request: Request, start: str = ""):
+    """團隊的一週（§11）：人×日格子＝既有看板的週模式（案名＋小時＋內容、計畫淺灰），疊場次與休假。
+    people 的計算直接用 routers.api_timesheets._board_days（不抄第二份）。"""
+    ident = await _me_bound(request)
+    if (start or "").strip() and parse_ymd(start) is None:
+        raise HTTPException(status_code=422, detail="start 需為 YYYY-MM-DD")
+    week = week_start_of(parse_ymd(start).date() if (start or "").strip() else date.today())
+    days = [(week + timedelta(days=i)).isoformat() for i in range(7)]
+    d0 = datetime(week.year, week.month, week.day)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        board = await _board_days(session, d0, 7)
+        shoot_rows = await _shoots_between(session, week, week + timedelta(days=6))
+        leaves = (await session.execute(
+            select(HrLeaveRequest).where(HrLeaveRequest.status == "已核准")
+            .where(HrLeaveRequest.start_date < d0 + timedelta(days=7))
+            .where(HrLeaveRequest.end_date >= d0))).scalars().all()
+    people: dict = {}
+    for day in board:
+        for p in day["people"]:
+            cells = people.setdefault(p["name"], {})
+            cells[day["date"]] = [{"project": it["project_name"], "note": it["task_note"], "hours": it["hours"],
+                                   "planned_hours": it["planned_hours"], "status": it["status"],
+                                   "stage_name": it["stage_name"], "work_type": it["work_type"]} for it in p["items"]]
+    shoots: dict = {d: [] for d in days}
+    for x in shoot_rows:
+        s = x["shoot"]
+        for d in _shoot_days(s):
+            k = d.isoformat()
+            if k in shoots:
+                shoots[k].append({"title": (s.title or "").strip() or x["project_name"], "project_name": x["project_name"],
+                                  "location": x["location"], "start_time": s.start_time or "",
+                                  "crew": [c["name"] for c in x["crew"] if c.get("name")]})
+    leave: dict = {d: [] for d in days}
+    for l in leaves:
+        a, b = tw_day(l.start_date), tw_day(l.end_date)
+        if not a or not b:
+            continue
+        for d in days:
+            if a.isoformat() <= d <= b.isoformat() and l.staff_name not in leave[d]:
+                leave[d].append(l.staff_name)
+    return {"week_start": week.isoformat(), "days": days, "me": ident["staff"].name,
+            "people": [{"name": n, "cells": c} for n, c in sorted(people.items())],
+            "shoots": shoots, "leave": leave}
+
+
 @router.get("/timesheet_options")
 async def my_timesheet_options(request: Request):
     """補登工時的專案下拉：進行中（製作/結案）+ 本人最近填過的專案。"""
@@ -424,3 +557,21 @@ async def team_project_detail(request: Request, name: str = ""):
         "by_month": rows_by_month(rows),
         "recent": [_team_row(r) for r in rows[:60]],
     }
+
+
+@router.get("/projects_burn")
+async def my_projects_burn(request: Request):
+    """員工端「專案查詢」：工作追蹤專案表的唯讀版（owner 2026-09-05「讓員工可以看到這個」）。
+
+    只給全案的工時數字（已投入／預算／剩餘／消耗率／列數／最後填報），沒有金額、沒有
+    「建議預算」（那是從預期毛利算出來的，等於間接揭露錢）、沒有未對映診斷。
+    /timesheets/summary 仍守私帳 wall＋管理員，這裡是唯一刻意放行的讀取面。
+    """
+    await _me_bound(request)
+    from services.timesheet_lookup import burn_rows
+    factory = db_factory_or_503()
+    async with factory() as session:
+        items = await burn_rows(session)
+    keep = ("project_id", "project_name", "status", "project_type", "hours_used",
+            "budget_hours", "remaining", "pct", "rows", "last_entry", "stale")
+    return {"projects": [{k: it.get(k) for k in keep} for it in items]}

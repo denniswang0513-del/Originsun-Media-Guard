@@ -338,6 +338,89 @@ def norm_work_type(v) -> Optional[str]:
     return s
 
 
+#: 工作階段種子（docs/JOURNAL_WORKLOG_PLAN.md §12）：**每個分類自己的階段清單**，不是一棵路徑樹。
+#: 存 work_stage_nodes（固定兩層：depth1＝分類、名稱以 WORK_TYPES 為 key；depth2＝階段）。
+#: 🔴 只在表空時寫入（routers/crm/work_stages.seed_if_empty），之後全由 owner 在編輯器改。
+STAGE_SEED = {
+    "前期企劃": ("提案", "分鏡", "會議"),
+    "拍攝": ("勘景", "現場", "備份"),
+    "剪接": ("A-copy", "B-copy", "Fine cut", "Fine cut 修改", "定剪", "輸出"),
+    "動態／特效": ("分鏡", "初版", "修改", "定版"),
+    "調光": ("初調", "修改", "定版"),
+    "聲音": ("配樂", "混音", "定版"),
+    "會議溝通": ("內部", "客戶"),
+    "行政": ("指派事項", "庶務"),
+    "其他": (),
+}
+
+
+def _node_get(n, key, default=None):
+    """work_stage_nodes 的列可能是 ORM 物件或 dict —— 純函式兩種都吃。"""
+    if isinstance(n, dict):
+        return n.get(key, default)
+    return getattr(n, key, default)
+
+
+def stage_categories(nodes, include_inactive: bool = True) -> list:
+    """work_stage_nodes 全部列 → `[{id, name, sort, active, stages:[{id, name, sort, active}]}]`。
+
+    分類（depth1）依 WORK_TYPES 的順序、不在九類的排最後；階段依 sort 再名稱。
+    include_inactive=False 時停用的階段不列（下拉用）；分類本身永遠列（九格固定）。
+    """
+    cats = [n for n in nodes if int(_node_get(n, "depth", 1) or 1) == 1]
+    kids: dict = {}
+    for n in nodes:
+        if int(_node_get(n, "depth", 1) or 1) == 2:
+            kids.setdefault(_node_get(n, "parent_id", "") or "", []).append(n)
+    order = {name: i for i, name in enumerate(WORK_TYPES)}
+
+    def _key(n):
+        return (order.get(_node_get(n, "name", ""), len(order)), int(_node_get(n, "sort", 0) or 0), _node_get(n, "name", "") or "")
+
+    out = []
+    for c in sorted(cats, key=_key):
+        stages = sorted(kids.get(_node_get(c, "id"), []),
+                        key=lambda s: (int(_node_get(s, "sort", 0) or 0), _node_get(s, "name", "") or ""))
+        out.append({
+            "id": _node_get(c, "id"), "name": _node_get(c, "name", "") or "",
+            "sort": int(_node_get(c, "sort", 0) or 0), "active": bool(_node_get(c, "active", 1)),
+            "stages": [{"id": _node_get(s, "id"), "name": _node_get(s, "name", "") or "",
+                        "sort": int(_node_get(s, "sort", 0) or 0), "active": bool(_node_get(s, "active", 1))}
+                       for s in stages if include_inactive or _node_get(s, "active", 1)],
+        })
+    return out
+
+
+def stages_by_category(nodes) -> dict:
+    """`GET /timesheets/options` 的 `stages`：{分類名: [{id, name}]}，只回 active。"""
+    return {c["name"]: [{"id": s["id"], "name": s["name"]} for s in c["stages"]]
+            for c in stage_categories(nodes, include_inactive=False)}
+
+
+def stage_index(nodes) -> dict:
+    """{stage_id: {id, name, category, active}}（只收 depth2；分類名從 parent 反查）—— 正規化用。"""
+    cat_name = {_node_get(n, "id"): (_node_get(n, "name", "") or "")
+                for n in nodes if int(_node_get(n, "depth", 1) or 1) == 1}
+    return {_node_get(n, "id"): {"id": _node_get(n, "id"), "name": _node_get(n, "name", "") or "",
+                                 "category": cat_name.get(_node_get(n, "parent_id", "") or "", ""),
+                                 "active": bool(_node_get(n, "active", 1))}
+            for n in nodes if int(_node_get(n, "depth", 1) or 1) == 2}
+
+
+def resolve_stage(stage_id, work_type, index: dict):
+    """一列的 stage_id → 節點 dict；空＝None。找不到、或不屬於該列分類 → ValueError（端點回 422）。
+    停用的階段**不擋**：舊列重存還帶著它，不該因為 owner 後來停用而存不回去。"""
+    s = (stage_id or "").strip()
+    if not s:
+        return None
+    st = index.get(s)
+    if st is None:
+        raise ValueError("找不到這個工作階段")
+    if st["category"] != (work_type or ""):
+        raise ValueError(f"工作階段「{st['name']}」不屬於分類「{work_type or '（未填）'}」")
+    return st
+
+
 def row_state(hours, planned_hours) -> str:
     """一列是「只有計畫」還是「有實際」：hours>0 → draft（實際）；否則有 planned → plan；
     兩個都沒有＝不合法（呼叫端先擋）。計畫列的 hours 存 0，燒錄／匯總只算 hours。"""

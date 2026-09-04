@@ -42,8 +42,11 @@ def test_manual_rows_accept_plan_only_and_store_the_two_columns():
 def test_board_and_my_day_are_gated_by_the_timesheets_module():
     src = code_only(repo_src("routers/api_timesheets.py"))
     assert 'check_admin_or_module(request, "timesheets")' in func_body(src, "async def day_board(")
+    # 我的一天：timesheets 模組 **或** 任何 me_* 鑰匙（員工頁 /my.html 也打同一支）；兩條路都要綁定人員檔案
     for fn in ("async def my_day(", "async def my_add_rows(", "async def my_update_row(", "async def my_delete_row("):
-        assert 'bound_ident(request, "timesheets")' in func_body(src, fn), fn
+        assert "_mine_ident(request)" in func_body(src, fn), fn
+    mine = func_body(src, "async def _mine_ident(")
+    assert 'bound_ident(request, "timesheets")' in mine and "check_admin_or_module(request, *_ME_KEYS)" in mine and "require_bound_staff(" in mine
     # 看板不排名、不標紅：回的是每個人的工作項，沒有「漏填」欄位
     board = func_body(src, "async def day_board(")
     assert '"missing' not in board and '"rank' not in board
@@ -85,7 +88,10 @@ def test_tab_has_the_seven_views_and_the_daily_board_shows_what_not_how_much():
         assert f"b('{key}'," in js, key
     code = js_code_only(js)
     assert "/api/v1/timesheets/board?date=" in code
-    assert "/api/v1/timesheets/mine?date=" in code and "/api/v1/timesheets/mine/rows" in code
-    # 「複製昨天」＋ Sheet 式格子（起訖自動算、Enter／↑↓ 走列、走到底自動長列）—— 員工角度的減負擔
-    assert "data-ts-action=\"copy-yesterday\"" in js and 'data-f="t0"' in js
-    assert "_sheetKeydown" in code and "_sheetGrow" in code and "_applyTimeRange(" in code
+    assert "/api/v1/timesheets/mine?date=" in code
+    # 「複製昨天」＋ Sheet 式格子（起訖自動算、Enter／↑↓ 走列、走到底自動長列）—— 員工角度的減負擔。
+    # 2026-09-05 起格子本體抽到 js/shared/ts-sheet.js（/my.html 同一份），tab 只剩「複製昨天」動作與掛載
+    assert "data-ts-action=\"copy-yesterday\"" in js and "renderSheet(" in code
+    sheet = js_code_only(repo_src("frontend/js/shared/ts-sheet.js"))
+    assert 'data-f="t0"' in sheet and "/api/v1/timesheets/mine/rows" in sheet
+    assert "function _keydown(" in sheet and "function _grow(" in sheet and "applyTimeRange(" in sheet

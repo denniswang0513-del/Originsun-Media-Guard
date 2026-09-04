@@ -4,15 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>工作日誌｜ORIGINSUN</title>
-<!-- 每週工作日誌（員工自助頁家族：my.html / media-log.html 同語彙）：
-     白底/旭日紅/大字距/髮絲邊框。三檢視：週誌（我的編輯卡+團隊牆）/學習庫/依人回溯
-     —— 2026-07-24 起 pill 暫隱藏只顯示週誌（見 .pill-row 註解）；內部分頁 tabs/journal
+<title>上週回顧｜ORIGINSUN</title>
+<!-- 每週回顧（員工自助頁家族：my.html / media-log.html 同語彙）：
+     白底/旭日紅/大字距/髮絲邊框。三檢視：回顧（我的回顧＋大家的回顧）/學習庫/依人回溯
+     —— 2026-07-24 起 pill 暫隱藏只顯示回顧（見 .pill-row 註解）；內部分頁 tabs/journal
      （管理/HR 用）仍顯示三檢視，刻意不同步。
-     共用核心 /js/shared/journal-core.js（四問標籤、週期運算、API）；本頁只做渲染。
+     2026-09-05（docs/JOURNAL_WORKLOG_PLAN.md §13–§14）：預設開上一週；自動區「上週做了什麼」（worklog，唯讀，可勾「帶入」）；
+     四問每條可掛案子、「挑戰」「其他」可標需要協助／想討論；主管回覆灰底；打字 1.5 秒自動存草稿、「送出」才進大家的回顧；
+     大家的回顧只列 submitted、預設全部展開，沒送出的人標「草稿」「還沒寫」；有 timesheets 模組的人每條下有回覆框。
+     共用核心 /js/shared/journal-core.js（四問標籤、週期運算、API、條目／回覆渲染）；本頁只做版面。
      後端契約：/api/v1/journal/*（Bearer token；週=週一起算；可編輯窗由後端 editable 旗標決定）。 -->
 <style>
-:root { --red: #c9372c; --ink: #262626; --sub: #737373; --line: #e5e5e5; }
+:root { --red: #c9372c; --ink: #262626; --sub: #737373; --line: #e5e5e5; --blue: #1d4ed8; --ok: #15803d; --warn: #b45309; --soft: #fafafa; }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
     background: #fff; color: var(--ink);
@@ -31,19 +34,18 @@ header {
     border-bottom: 1px solid rgba(229,229,229,0.6);
 }
 .header-inner {
-    max-width: 880px; margin: 0 auto; padding: 0 20px; height: 64px;
+    max-width: 1100px; margin: 0 auto; padding: 0 20px; height: 64px;
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
 }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300; color: var(--ink); }
 .btn-ghost {
-    background: none; border: 1px solid var(--line); border-radius: 2px;
-    padding: 6px 14px; font-size: 11px; letter-spacing: 0.2em;
-    color: var(--sub); cursor: pointer; transition: all .15s;
+    background: none; border: 1px solid var(--line); border-radius: 2px; padding: 6px 14px;
+    font-size: 11px; letter-spacing: 0.2em; color: var(--sub); cursor: pointer; transition: all .15s;
 }
 .btn-ghost:hover { color: var(--red); border-color: var(--red); }
 
-main { max-width: 880px; margin: 0 auto; padding: 104px 20px 80px; }
+main { max-width: 1100px; margin: 0 auto; padding: 104px 20px 80px; }
 
 /* ── Embed 模式（內嵌 /my.html 工作台 iframe；iframe 自動偵測、?embed=0 可逃）
    照 showcase-edit.html 同一套：隱藏自身 chrome + postMessage 回傳高度 ── */
@@ -58,8 +60,6 @@ html.embed-mode main { max-width: none; padding: 0; }
    → 又一條父子互相放大的回饋路徑（收斂但會多繞好幾圈） */
 html.embed-mode .state-block { padding: 36px 0; }
 html.embed-mode .gate-wrap { margin: 0 auto; }
-html.embed-mode .card { border: none; padding: 0 0 6px; margin-bottom: 18px; }
-html.embed-mode .card + .card { border-top: 1px solid var(--line); padding-top: 18px; }
 
 /* ── 載入 / 連線失敗狀態 ── */
 .state-block { padding: 12vh 0; text-align: center; }
@@ -92,7 +92,7 @@ html.embed-mode .card + .card { border-top: 1px solid var(--line); padding-top: 
 .pill-btn.on { background: var(--ink); border-color: var(--ink); color: #fff; }
 
 /* ── 週導覽 ── */
-.weeknav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+.weeknav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
 .wk-title { display: flex; align-items: center; gap: 12px; font-size: 15px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
 .wk-btn {
     background: none; border: 1px solid var(--line); border-radius: 2px; padding: 6px 14px;
@@ -101,17 +101,38 @@ html.embed-mode .card + .card { border-top: 1px solid var(--line); padding-top: 
 .wk-btn:hover { color: var(--red); border-color: var(--red); }
 .wk-btn.small { padding: 3px 10px; font-size: 11px; }
 
+/* ── 兩欄：左＝我的回顧、右＝大家的回顧 ── */
+.block2 { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; align-items: start; }
+@media (max-width: 1000px) { .block2 { grid-template-columns: 1fr; } }
+
 /* ── 卡片 ── */
-.card { border: 1px solid var(--line); padding: 26px 26px 22px; margin-bottom: 26px; min-width: 0; }
+.card { border: 1px solid var(--line); padding: 22px 22px 18px; margin-bottom: 18px; min-width: 0; }
 .card-head {
-    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
-    border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 8px;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 8px;
 }
 .card-head .count { font-size: 12px; color: var(--sub); }
 .empty { padding: 22px 0; font-size: 13px; color: #a3a3a3; text-align: center; }
 .empty.pad-sm { padding: 12px 0; }   /* 人卡內的（空白）用較小留白 */
+.jstate { font-size: 12px; color: var(--sub); }
+.jstate.draft b { color: var(--warn); font-weight: 600; }
+.jstate.submitted { color: var(--ok); }
 
-/* ── 我的週誌（四問 textarea）── */
+/* ── 自動區（上週做了什麼）── */
+.wl { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 6px 0; background: var(--soft); font-size: 13px; }
+.wl-pj { font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+.wl-days { color: var(--sub); font-size: 12px; font-weight: 400; }
+.wl ul { margin: 4px 0 0; padding-left: 18px; } .wl li { margin: 2px 0; line-height: 1.6; }
+.wl-day { color: var(--sub); font-size: 12px; margin-right: 6px; }
+.wl-pick { font-size: 11px; color: var(--sub); margin-left: 6px; white-space: nowrap; cursor: pointer; }
+.wl-pick input { accent-color: var(--red); vertical-align: -1px; }
+.pill-stage, .pill-proj, .pill-flag { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid currentColor; font-size: 11px; line-height: 17px; white-space: nowrap; vertical-align: 1px; }
+.pill-stage { color: var(--blue); background: #eff6ff; border-color: #bfdbfe; }
+.pill-proj { color: var(--sub); border-color: var(--line); background: #fff; }
+.pill-flag.help { color: var(--red); border-color: #fecaca; background: #fef2f2; }
+.pill-flag.discuss { color: var(--warn); border-color: #fed7aa; background: #fff7ed; }
+
+/* ── 我的回顧（四問 textarea＋每條的掛案／旗標）── */
 .blk h4 { font-size: 12px; letter-spacing: 0.12em; color: var(--sub); font-weight: 500; margin: 16px 0 6px; }
 .blk textarea {
     width: 100%; min-height: 74px; border: 1px solid var(--line); border-radius: 2px;
@@ -123,6 +144,12 @@ html.embed-mode .card + .card { border-top: 1px solid var(--line); padding-top: 
 .blk ul { list-style: none; }
 .blk li { position: relative; padding: 2px 0 2px 14px; font-size: 13px; line-height: 1.7; overflow-wrap: break-word; }
 .blk li::before { content: "\2022"; position: absolute; left: 1px; color: #c9c9c9; }
+.meta-list { margin-top: 4px; }
+.em { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid #f5f5f5; font-size: 12px; }
+.em-t { flex: 1 1 160px; min-width: 0; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.em input.em-proj, .em select.em-flag { border: 1px solid var(--line); border-radius: 2px; padding: 3px 6px; font-size: 12px; font-family: inherit; color: var(--ink); background: #fff; }
+.em input.em-proj { width: 180px; } .em select.em-flag { width: 96px; }
+.em .reply { flex-basis: 100%; }
 /* 貼圖縮圖（journal-core renderRich 產出；點開新分頁看原圖） */
 .paste-img {
     display: block; max-width: 100%; max-height: 180px; margin: 4px 0;
@@ -146,7 +173,26 @@ html.embed-mode .card + .card { border-top: 1px solid var(--line); padding-top: 
 .save-msg.err { color: var(--red); }
 .hint { font-size: 12px; color: #a3a3a3; }
 
-/* ── 團隊週誌牆 ── */
+/* ── 主管回覆（灰底）與回覆框 ── */
+.reply { margin: 4px 0 2px; background: #f5f5f5; border-left: 3px solid #d4d4d4; padding: 5px 10px; font-size: 12.5px; line-height: 1.6; }
+.reply b { font-weight: 600; margin-right: 6px; } .reply-t { color: var(--sub); font-size: 11px; margin-left: 6px; }
+.reply-box { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0 2px; }
+.reply-box textarea { flex: 1; min-height: 30px; border: 1px dashed var(--line); border-radius: 2px; padding: 5px 8px; font-size: 12px; font-family: inherit; resize: vertical; }
+.reply-box button { border: 1px solid var(--line); background: #fff; border-radius: 2px; padding: 4px 10px; font-size: 11px; color: var(--sub); cursor: pointer; }
+.reply-box button:hover { color: var(--red); border-color: var(--red); }
+
+/* ── 大家的回顧（每人一列 details，預設全開）── */
+.person { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0; }
+.person summary { list-style: none; cursor: pointer; padding: 9px 12px; display: flex; gap: 8px; align-items: center; font-size: 13px; flex-wrap: wrap; }
+.person summary::-webkit-details-marker { display: none; }
+.person summary b { font-weight: 600; }
+.person summary .pill-st { color: var(--sub); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; font-size: 11px; line-height: 17px; }
+.person[open] summary { background: var(--soft); border-bottom: 1px solid #f0f0f0; }
+.person .body { padding: 2px 12px 10px; font-size: 13px; }
+.person .body .blk h4 { margin-top: 10px; }
+.tools-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+/* ── 團隊週誌牆（學習庫／依人回溯的人卡仍用）── */
 .wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; padding-top: 10px; }
 .p-card { border: 1px solid var(--line); border-radius: 2px; padding: 16px 18px 14px; min-width: 0; }
 .p-name { font-size: 13px; font-weight: 500; letter-spacing: 0.08em; border-bottom: 1px solid #f5f5f5; padding-bottom: 8px; }
@@ -171,7 +217,7 @@ html.embed-mode .card + .card { border-top: 1px solid var(--line); padding-top: 
 .timeline-card { border: 1px solid var(--line); border-radius: 2px; padding: 16px 18px 14px; margin-top: 12px; }
 .timeline-card .p-name { font-variant-numeric: tabular-nums; }
 
-footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; }
+footer { max-width: 1100px; margin: 0 auto; padding: 0 20px 40px; }
 footer .eyebrow { font-size: 10px; }
 
 @media (max-width: 640px) {
@@ -182,6 +228,7 @@ footer .eyebrow { font-size: 10px; }
     .weeknav { justify-content: center; }
     .wk-title { width: 100%; justify-content: center; order: -1; }
     .filter-bar select { width: 100%; }
+    .em input.em-proj { width: 100%; }
 }
 </style>
 </head>
@@ -191,7 +238,7 @@ footer .eyebrow { font-size: 10px; }
   <div class="header-inner">
     <a class="brand" href="/my.html" title="回個人工作台">
       <img src="/img/originsun-logo.webp" alt="源日影像" style="height:34px;width:auto;display:block;">
-      <span class="brand-name">工作日誌 <span class="accent">JOURNAL</span></span>
+      <span class="brand-name">上週回顧 <span class="accent">REVIEW</span></span>
     </a>
     <a class="btn-ghost" href="/my.html">個人工作台</a>
   </div>
@@ -209,7 +256,7 @@ footer .eyebrow { font-size: 10px; }
     <div class="gate-card">
       <div class="eyebrow">Sign in <span class="accent">Required</span></div>
       <h1>請先登入個人工作台</h1>
-      <div class="sub">工作日誌需要登入後使用。請先在個人工作台完成登入，再回到本頁即可。</div>
+      <div class="sub">每週回顧需要登入後使用。請先在個人工作台完成登入，再回到本頁即可。</div>
       <a class="btn-primary" href="/my.html">前往個人工作台</a>
     </div>
   </div>
@@ -223,16 +270,16 @@ footer .eyebrow { font-size: 10px; }
   <!-- 主內容 -->
   <div id="app-view" style="display:none;">
     <div class="hero">
-      <div class="eyebrow">Weekly Journal <span class="accent">工作日誌</span></div>
-      <h1>每週工作日誌</h1>
+      <div class="eyebrow">Weekly Review <span class="accent">上週回顧</span></div>
+      <h1>每週一，寫上週回顧</h1>
       <!-- 文字由 journal-core SUBTITLE 覆寫（BLOCKS 導出）— 這裡只是 JS 前的佔位 -->
       <div class="sub" id="hero-sub">每週四問。一行一條，週一起算。</div>
     </div>
 
-    <!-- owner 2026-07-24：三檢視切換先隱藏（只留週誌）。學習庫/依人回溯的程式碼
+    <!-- owner 2026-07-24：三檢視切換先隱藏（只留回顧）。學習庫/依人回溯的程式碼
          保留，要恢復把 style="display:none" 拿掉即可 -->
     <div class="pill-row" style="display:none;">
-      <button class="pill-btn on" type="button" data-view="week">週誌</button>
+      <button class="pill-btn on" type="button" data-view="week">回顧</button>
       <button class="pill-btn" type="button" data-view="learn">學習庫</button>
       <button class="pill-btn" type="button" data-view="person">依人回溯</button>
     </div>
@@ -244,10 +291,11 @@ footer .eyebrow { font-size: 10px; }
 <footer><div class="eyebrow">© Originsun Studio · Internal</div></footer>
 
 <script type="module">
-import { BLOCKS, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, SUBTITLE, api, blockList,
-         debounce, ensurePasteBase, esc, isAuthFail, itemsToLines, linesToItems,
-         pasteThumbs, personCard, renderRich, shiftWeek, thisWeekStart, weekRange } from '/js/shared/journal-core.js';
+import { BLOCKS, FLAGS, FLAGGABLE, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, SUBTITLE, api, debounce, ensurePasteBase,
+         entriesOf, entryBlock, entryTable, esc, isAuthFail, itemsToLines, linesToItems, pasteThumbs, personCard,
+         renderRich, repliesFor, replyHtml, shiftWeek, thisWeekStart, tokenGrants, weekRange, worklogHtml } from '/js/shared/journal-core.js';
 import { initPasteImage } from '/js/shared/paste-image.js';
+import { attachProjectPop } from '/js/shared/project-pop.js';
 
 initPasteImage();   // 四問 textarea 可直接貼圖（截圖 → 上傳圖床 → 插 token）
 
@@ -284,16 +332,23 @@ if (EMBED) {
 }
 // 官網風白底語彙的 class 組（SPA 分頁傳 jr-* 的一組）
 const CARD_CLS = { name: 'p-name', empty: 'empty pad-sm', block: 'blk' };
+const GRANTS = tokenGrants();
+const CAN_REPLY = GRANTS.has('timesheets');   // 回覆框只畫給有工作追蹤模組的人；守衛在後端 /journal/reply
 
 // ── 狀態 ────────────────────────────────────────────────────────────────
 let view = 'week';
-// 預設落在「上一週」：團隊慣例是當週寫上一週的日誌（上一週仍在可編輯窗內——
+// 預設落在「上一週」：團隊慣例是週一寫上一週的回顧（上一週仍在可編輯窗內——
 // 後端 editable_window_ok 只擋未來，過去週恆可編）。使用者可用「回到本週／下一週」前進。
 let weekStart = shiftWeek(thisWeekStart(), -1);
+let mine = null;                    // 最近一次 /mine
+let weekData = null;                // 最近一次 /week
+let meta = {};                      // {k: [{project_id, project_name, flag}]}，與 textarea 的行對齊
+let projOpts = null;                // 掛案子的專案清單（api.projectOptions）
+let savedAt = '';                   // 最近一次草稿自動存的時間（HH:MM）
+let dirty = false;                  // 有沒有還沒存的變更
 let people = null;                  // people 快取（學習庫 / 依人回溯共用）
 let learn = { q: '', username: '', limit: 20, offset: 0, items: [], total: 0 };
 let personSel = '';
-let flashMsg = '';                  // 儲存成功訊息（跨 re-render 顯示一次）
 
 // ── 頂層視圖切換 ────────────────────────────────────────────────────────
 function showTop(id) {
@@ -308,6 +363,13 @@ function authFail(...rs) {
 }
 // api.* 網路錯誤回 {ok:false, status:0} sentinel — 各檢視統一顯連線文案
 const failMsg = (r) => r.status === 0 ? NET_ERR : `載入失敗（${r.status}），請稍後再試`;
+const hhmm = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return isNaN(d) ? String(iso).slice(11, 16) : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+const nowHHMM = () => hhmm(new Date().toISOString());
+const projName = (id) => ((projOpts || []).find(p => p.id === id) || {}).name || '';
 
 async function showView(v) {
     view = v;
@@ -320,7 +382,7 @@ async function showView(v) {
 document.querySelectorAll('.pill-btn[data-view]')
     .forEach(b => { b.onclick = () => showView(b.dataset.view); });
 
-// ── 檢視 1：週誌 ────────────────────────────────────────────────────────
+// ── 檢視 1：回顧（我的＋大家的）────────────────────────────────────────
 async function loadWeek() {
     const v = $('view');
     v.innerHTML = '<div class="empty">載入中…</div>';
@@ -330,60 +392,153 @@ async function loadWeek() {
     renderWeek(await mr.json(), await wr.json());
 }
 
-function renderWeek(mine, week) {
-    const isThisWeek = weekStart === thisWeekStart();
+function stateHtml() {
+    const st = (mine && mine.status) || 'none';
+    if (st === 'submitted') return `<span class="jstate submitted">已送出 ${esc(hhmm(mine.submitted_at))}${dirty ? '（有未送出的修改）' : ''}</span>`;
+    if (st === 'draft' || savedAt) return `<span class="jstate draft"><b>草稿</b>${savedAt ? ` · 自動存 ${esc(savedAt)}` : ''}</span>`;
+    return '<span class="jstate">還沒寫</span>';
+}
+function refreshState() { const el = $('j-state'); if (el) el.outerHTML = `<span id="j-state">${stateHtml()}</span>`; const b = $('btn-submit'); if (b) b.textContent = mine && mine.status === 'submitted' ? '再送出' : '送出'; }
+
+/** 一區的「每條的掛案／旗標／回覆」列（跟 textarea 的行對齊；行變了就重畫這一段，不動 textarea）。 */
+function metaListHtml(k) {
+    const ta = $('ta-' + k);
+    const lines = linesToItems(ta ? ta.value : itemsToLines(mine[k]));
+    const ents = entriesOf(mine, k);
+    meta[k] = lines.map((_, i) => meta[k]?.[i] || { project_id: '', project_name: '', flag: '' });
+    return lines.map((line, i) => {
+        const m = meta[k][i];
+        const e = ents[i] || {};
+        const reps = repliesFor(mine, k, e.id);
+        return `<div class="em"><span class="em-t" title="${esc(line)}">${esc(line.replace(/!\[[^\]]*\]\(paste:[^)]*\)/g, '[圖]'))}</span>
+            <input class="em-proj" data-proj-pick autocomplete="off" data-k="${k}" data-i="${i}" placeholder="掛案子（打字找）" value="${esc(m.project_name || '')}"${m.project_id ? ` data-pid="${esc(m.project_id)}" data-pname="${esc(m.project_name || '')}"` : ''}>
+            ${FLAGGABLE.has(k) ? `<select class="em-flag" data-k="${k}" data-i="${i}"><option value="">不標</option>${FLAGS.map(([f, l]) => `<option value="${f}"${m.flag === f ? ' selected' : ''}>${l}</option>`).join('')}</select>` : ''}
+            ${reps.map(r => replyHtml(r)).join('')}</div>`;
+    }).join('');
+}
+function redrawMeta(k) { const el = $('ml-' + k); if (el) el.innerHTML = metaListHtml(k); }
+
+function teamPerson(j) {
+    const flags = j.flags || {};
+    const pills = FLAGS.map(([f, l]) => (flags[f] ? `<span class="pill-flag ${f}">${l} ${flags[f]}</span>` : '')).join('');
+    const opts = { projectName: projName, canReply: CAN_REPLY, journalId: j.id || j.journal_id || '' };
+    const cls = { ...CARD_CLS, pillFlag: 'pill-flag', pillProj: 'pill-proj', reply: 'reply', replyTime: 'reply-t', replyBox: 'reply-box' };
+    const worklog = (j.worklog || []).length ? `<div class="blk"><h4>做了什麼</h4>${worklogHtml(j.worklog, cls)}</div>` : '';
+    const blocks = BLOCKS.map(([k, label]) => entryBlock(j, k, label, cls, opts)).join('');
+    return `<details class="person" open data-user="${esc(j.username)}" data-week="${esc(weekData.week_start || weekStart)}">
+        <summary><b>${esc(j.display_name || j.username)}</b>${pills}<span class="count" style="margin-left:auto;">${j.submitted_at ? '送出 ' + esc(String(j.submitted_at).slice(5, 16).replace('T', ' ')) : ''}</span></summary>
+        <div class="body">${worklog}${blocks || '<div class="empty pad-sm">（空白）</div>'}</div>
+    </details>`;
+}
+function teamCardHtml() {
+    const week = weekData;
     const journals = week.journals || [];
+    const status = week.people_status || [];
+    const drafts = status.filter(p => p.status === 'draft').length, none = status.length - drafts;
+    const help = journals.reduce((a, j) => a + ((j.flags || {}).help || 0) + ((j.flags || {}).discuss || 0), 0);
+    return `<div class="card-head">
+            <span class="eyebrow">Everyone <span class="accent">大家的回顧</span></span>
+            <span class="count">${journals.length} 人送出${drafts ? ` · 草稿 ${drafts}` : ''}${none ? ` · 還沒 ${none}` : ''}${help ? ` · 求助 ${help}` : ''}</span>
+        </div>
+        ${journals.length ? journals.map(teamPerson).join('') : '<div class="empty">這一週還沒有人送出回顧</div>'}
+        ${status.map(p => `<details class="person" open><summary><b>${esc(p.display_name || p.username)}</b><span class="pill-st">${p.status === 'draft' ? '草稿' : '還沒寫'}</span></summary><div class="body"></div></details>`).join('')}
+        ${journals.length || status.length ? '<div class="tools-row"><button class="wk-btn small" type="button" id="btn-fold">全部收合</button></div>' : ''}`;
+}
+function wireTeam() {
+    const fold = $('btn-fold');
+    if (!fold) return;
+    fold.onclick = () => {
+        const all = [...document.querySelectorAll('#team-card details.person')];
+        const open = all.some(d => d.open);
+        all.forEach(d => { d.open = !open; });
+        fold.textContent = open ? '全部展開' : '全部收合';
+    };
+}
+
+function renderWeek(m, week) {
+    mine = m; weekData = week;
+    savedAt = ''; dirty = false;
+    meta = {};
+    for (const [k] of BLOCKS) meta[k] = entriesOf(mine, k).map(e => ({ project_id: e.project_id || '', project_name: e.project_name || projName(e.project_id) || '', flag: e.flag || '' }));
+    const isThisWeek = weekStart === thisWeekStart();
+    const isLastWeek = weekStart === shiftWeek(thisWeekStart(), -1);
+    const who = isLastWeek ? '上週' : (isThisWeek ? '本週' : '這週');
     $('view').innerHTML = `
         <div class="weeknav">
-            <button class="wk-btn" type="button" id="wk-prev">&lsaquo; 上一週</button>
+            <button class="wk-btn" type="button" id="wk-prev">&lsaquo; 前一週</button>
             <div class="wk-title">
                 <span>${weekRange(week.week_start || weekStart)}</span>
-                ${isThisWeek ? '' : '<button class="wk-btn small" type="button" id="wk-today">回到本週</button>'}
+                ${isLastWeek ? '' : '<button class="wk-btn small" type="button" id="wk-last">回到上週</button>'}
             </div>
-            <button class="wk-btn" type="button" id="wk-next">下一週 &rsaquo;</button>
+            <button class="wk-btn" type="button" id="wk-next">後一週 &rsaquo;</button>
         </div>
-
-        <div class="card">
-            <div class="card-head"><span class="eyebrow">My Journal <span class="accent">我的週誌</span></span></div>
+        <div class="block2">
+        <div class="card" id="mine-card">
+            <div class="card-head"><span class="eyebrow">Mine <span class="accent">我的${who}回顧</span></span><span id="j-state">${stateHtml()}</span></div>
+            <div class="blk"><h4>${who}做了什麼</h4>${worklogHtml(mine.worklog, {}, { pickable: !!mine.editable })}</div>
             ${BLOCKS.map(([k, label]) => `
                 <div class="blk">
                     <h4>${label}</h4>
                     <textarea id="ta-${k}" placeholder="一行一條" ${mine.editable ? '' : 'disabled'}>${esc(itemsToLines(mine[k]))}</textarea>
                     <div class="paste-preview" id="pv-${k}"></div>
+                    <div class="meta-list" id="ml-${k}"></div>
                 </div>`).join('')}
             <div class="save-row">
                 ${mine.editable
-                    ? '<button class="btn-save" type="button" id="btn-save">儲存</button><span class="save-msg" id="save-msg"></span>'
+                    ? `<button class="btn-save" type="button" id="btn-submit">${mine.status === 'submitted' ? '再送出' : '送出'}</button><span class="save-msg" id="save-msg"></span><span class="hint">打字就自動存草稿（只有自己看得到）；按送出才進大家的回顧與學習庫。</span>`
                     : `<span class="hint">${HINT_EDIT_WINDOW}</span>`}
             </div>
         </div>
-
-        <div class="card">
-            <div class="card-head">
-                <span class="eyebrow">Team <span class="accent">團隊週誌</span></span>
-                ${journals.length ? `<span class="count">${journals.length} 人</span>` : ''}
-            </div>
-            ${journals.length
-                ? `<div class="wall">${journals.map(j => personCard(j, esc(j.display_name || j.username), { ...CARD_CLS, card: 'p-card' })).join('')}</div>`
-                : '<div class="empty">這一週還沒有人寫日誌</div>'}
+        <div class="card" id="team-card">${teamCardHtml()}</div>
         </div>`;
     $('wk-prev').onclick = () => { weekStart = shiftWeek(weekStart, -1); loadWeek(); };
     $('wk-next').onclick = () => { weekStart = shiftWeek(weekStart, 1); loadWeek(); };
-    const today = $('wk-today');
-    if (today) today.onclick = () => { weekStart = thisWeekStart(); loadWeek(); };
-    const save = $('btn-save');
-    if (save) save.onclick = saveMine;
+    const last = $('wk-last');
+    if (last) last.onclick = () => { weekStart = shiftWeek(thisWeekStart(), -1); loadWeek(); };
+    const submit = $('btn-submit');
+    if (submit) submit.onclick = submitMine;
     // 貼圖即時預覽：每個欄位下方縮圖列，載入時渲染既有貼圖、編輯／貼上時即時更新
     // （paste-image.js 上傳完成會 dispatch 'input'，縮圖隨 token 落定即現）。
     for (const [k] of BLOCKS) {
         const ta = $('ta-' + k), pv = $('pv-' + k);
         if (!ta || !pv) continue;
         const upd = () => { pv.innerHTML = pasteThumbs(ta.value); };
-        ta.addEventListener('input', upd);
+        ta.addEventListener('input', () => { upd(); redrawMeta(k); markDirty(); });
         upd();
+        redrawMeta(k);
     }
-    if (flashMsg) { flash(flashMsg); flashMsg = ''; }
+    wireTeam();
+    // 掛案子的清單晚一步到也沒關係：到了把既有條目的案名補上
+    api.projectOptions().then(list => { projOpts = list; for (const [k] of BLOCKS) { (meta[k] || []).forEach(m => { if (m.project_id && !m.project_name) m.project_name = projName(m.project_id); }); redrawMeta(k); } });
 }
+
+// ── 草稿自動存（1.5 秒 debounce PUT，status=draft）→ 送出 ──
+function draftBody() {
+    const body = { status: 'draft' };
+    for (const [k] of BLOCKS) {
+        const lines = linesToItems($('ta-' + k)?.value ?? itemsToLines(mine[k]));
+        body[k] = lines.map((c, i) => ({ content: c, project_id: (meta[k]?.[i] || {}).project_id || '', flag: (meta[k]?.[i] || {}).flag || '' }));
+    }
+    return body;
+}
+async function saveDraft() {
+    if (!mine || !mine.editable) return false;
+    const r = await api.saveMine(weekStart, draftBody());
+    if (!r.ok) {
+        const d = r.json ? await r.json().catch(() => ({})) : {};
+        flash(r.status === 403 ? MSG_EDIT_WINDOW : r.status === 401 ? '登入已過期，請重新登入' : r.status === 0 ? NET_ERR : (d.detail || `儲存失敗（${r.status}）`), true);
+        return false;
+    }
+    const d = await r.json();
+    // 只更新條目 id／狀態（回覆對得上），不重畫 textarea（正在打字）
+    mine = { ...mine, ...d, editable: mine.editable };
+    if (mine.status !== 'submitted') mine.status = 'draft';
+    savedAt = nowHHMM(); dirty = false;
+    refreshState();
+    return true;
+}
+const scheduleDraft = debounce(() => { saveDraft(); }, 1500);
+function markDirty() { dirty = true; refreshState(); scheduleDraft(); }
 
 function flash(text, isErr) {
     const m = $('save-msg');
@@ -394,29 +549,81 @@ function flash(text, isErr) {
     if (!isErr) setTimeout(() => { m.style.opacity = '0'; }, 2200);   // 幾秒後淡出（CSS transition）
 }
 
-async function saveMine() {
-    const body = {};
-    for (const [k] of BLOCKS)
-        body[k] = linesToItems($('ta-' + k).value);
-    const btn = $('btn-save');
+async function submitMine() {
+    const btn = $('btn-submit');
     btn.disabled = true;
-    const r = await api.saveMine(weekStart, body);
-    btn.disabled = false;
-    if (!r.ok) {
-        const d = r.json ? await r.json().catch(() => ({})) : {};
-        flash(r.status === 403 ? MSG_EDIT_WINDOW
-            : r.status === 401 ? '登入已過期，請重新登入'
-            : r.status === 0 ? NET_ERR
-            : (d.detail || `儲存失敗（${r.status}）`), true);
+    try {
+        if (!(await saveDraft())) return;
+        const r = await api.submitMine(weekStart);
+        if (!r.ok) {
+            const d = r.json ? await r.json().catch(() => ({})) : {};
+            flash(r.status === 403 ? MSG_EDIT_WINDOW : r.status === 0 ? NET_ERR : (d.detail || `送出失敗（${r.status}）`), true);
+            return;
+        }
+        const d = await r.json();
+        mine.status = 'submitted'; mine.submitted_at = d.submitted_at || new Date().toISOString();
+        dirty = false;
+        refreshState();
+        flash('已送出');
+        await refreshTeam();
+    } finally { btn.disabled = false; }
+}
+async function refreshTeam() {
+    const wr = await api.week(weekStart);
+    if (!wr.ok) return;
+    weekData = await wr.json();
+    const card = $('team-card');
+    if (card) { card.innerHTML = teamCardHtml(); wireTeam(); }
+}
+
+// 委派：掛案子（浮層選到 / 手打）、旗標、帶入、回覆 —— #view 不會被換掉，掛一次就好
+attachProjectPop($('view'), { options: () => api.projectOptions(), value: (p) => p.name || p.label || '' });
+$('view').addEventListener('change', (ev) => {
+    const proj = ev.target.closest('input.em-proj');
+    if (proj) {
+        const m = meta[proj.dataset.k]?.[Number(proj.dataset.i)];
+        if (m) {
+            const t = proj.value.trim();
+            const hit = (proj.dataset.pid && t === proj.dataset.pname) ? { id: proj.dataset.pid, name: t } : (projOpts || []).find(p => p.id && (p.name === t || p.label === t));
+            m.project_id = hit ? hit.id : ''; m.project_name = hit ? hit.name : t;
+            markDirty();
+        }
         return;
     }
-    flashMsg = '已儲存';
-    // PUT 已回 /mine 同形回應 — 只重抓 /week 讓團隊牆同步，省一次 /mine
-    const mine = await r.json();
-    const wr = await api.week(weekStart);
-    if (wr.ok) renderWeek(mine, await wr.json());
-    else loadWeek();
-}
+    const flag = ev.target.closest('select.em-flag');
+    if (flag) {
+        const m = meta[flag.dataset.k]?.[Number(flag.dataset.i)];
+        if (m) { m.flag = flag.value; markDirty(); }
+        return;
+    }
+    const pick = ev.target.closest('input[data-pick]');
+    if (pick) {
+        const ta = $('ta-wins');
+        if (!ta || ta.disabled) return;
+        const line = pick.dataset.pick;
+        const lines = linesToItems(ta.value);
+        const has = lines.includes(line);
+        if (pick.checked && !has) lines.push(line);
+        if (!pick.checked && has) lines.splice(lines.indexOf(line), 1);
+        ta.value = itemsToLines(lines);
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+});
+$('view').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('[data-reply-send]');
+    if (!b) return;
+    const box = b.closest('.reply-box'), ta = box && box.querySelector('textarea');
+    const content = (ta && ta.value.trim()) || '';
+    if (!content) return;
+    const det = b.closest('details.person');
+    b.disabled = true;
+    // journal_id 由 /journal/week 每人帶；沒帶時多送 username＋week_start 讓後端能找到那份週記
+    const r = await api.reply({ journal_id: ta.dataset.replyJ || '', entry_table: ta.dataset.replyT, entry_id: ta.dataset.replyE, content,
+                                username: det ? det.dataset.user : '', week_start: det ? det.dataset.week : weekStart });
+    b.disabled = false;
+    if (!r.ok) { const d = r.json ? await r.json().catch(() => ({})) : {}; alert(d.detail || `回覆沒送出（${r.status || '連線失敗'}）`); return; }
+    await refreshTeam();
+});
 
 // ── people（學習庫 / 依人回溯共用） ─────────────────────────────────────
 async function fetchPeople() {
@@ -514,9 +721,9 @@ async function refreshPerson() {
     if (authFail(r)) return;
     if (!r.ok) { list.innerHTML = `<div class="empty">${failMsg(r)}</div>`; return; }
     const journals = (await r.json()).journals || [];
-    if (!journals.length) { list.innerHTML = '<div class="empty">此人還沒有週誌</div>'; return; }
+    if (!journals.length) { list.innerHTML = '<div class="empty">此人還沒有回顧</div>'; return; }
     list.innerHTML = journals.map(j =>
-        personCard(j, weekRange(j.week_start), { ...CARD_CLS, card: 'timeline-card' })).join('');
+        personCard(j, weekRange(j.week_start), { ...CARD_CLS, card: 'timeline-card', pillFlag: 'pill-flag', pillProj: 'pill-proj', reply: 'reply', replyTime: 'reply-t' }, { projectName: projName })).join('');
 }
 
 // ── boot：mine+week 並行首載（mine 兼權限判定：401/403 → 登入提示卡；
@@ -527,9 +734,9 @@ async function refreshPerson() {
     if (mr.status === 401 || mr.status === 403) { showTop('auth-view'); return; }
     if (mr.status === 0) { showError(); return; }
     if (!mr.ok || !wr.ok) { showError(failMsg(mr.ok ? wr : mr)); return; }
-    const mine = await mr.json(), week = await wr.json();
+    const m = await mr.json(), week = await wr.json();
     showTop('app-view');
-    renderWeek(mine, week);
+    renderWeek(m, week);
 })();
 </script>
 </body>

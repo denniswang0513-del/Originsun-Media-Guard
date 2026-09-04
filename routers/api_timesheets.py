@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request  # type: ignore
+from fastapi import APIRouter, HTTPException, Query, Request  # type: ignore
 from fastapi.responses import Response
 from sqlalchemy import func as safunc, or_, select, update
 
@@ -30,13 +30,14 @@ from core.auth import check_admin, check_admin_or_module, current_username, payl
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (fillers_on, HOURS_PER_WORKDAY, WORK_TYPES, Misses, active_fillers, bucket_hours, budget_burn,
                            day_iso, explain_miss, hours_rollup, missing_fillers, month_key, month_span, months_back,
-                           prev_workday, project_metrics, remap_target, resolve_project, similar_projects,
-                           split_sheet_name, tw_day, type_composition)
+                           parse_ymd, prev_workday, project_metrics, remap_target, resolve_project, similar_projects,
+                           split_sheet_name, stages_by_category, tw_day, type_composition)
+from core.identity import resolve_current_staff
 from core.schemas import (MeTimesheetBatch, MeTimesheetUpdate, TimesheetBudgetRequest, TimesheetBudgetSet,
                           TimesheetDigestSettings, TimesheetIngestRequest, TimesheetManualRequest,
                           TimesheetConflictResolve, TimesheetProjectMapRequest, TimesheetPullSettings,
                           TimesheetRowAdminUpdate, TimesheetRowsBatch)
-from db.models import CrmProject, CrmQuotation, CrmQuotationItem, CrmStaff, Timesheet, TimesheetProjectMap
+from db.models import CrmProject, CrmQuotation, CrmQuotationItem, CrmStaff, Timesheet, TimesheetProjectMap, WorkStageNode
 from routers.crm._shared import project_names_map
 from services import timesheet_digest, timesheet_puller
 from services.timesheet_conflicts import list_conflicts, resolve_conflict
@@ -44,7 +45,7 @@ from services.timesheet_ingest import ingest, parse_date as _parse_date
 from services.timesheet_lookup import burn_rows, load_project_lookup, project_names
 from services.timesheet_manual import insert_manual_rows, project_options
 from services.timesheet_self import (add_rows, admin_batch_update, admin_delete_row, admin_update_row, bound_ident, delete_row,
-                                     list_rows, metrics_input, month_or_422, rows_by_month, ts_dict, update_row)
+                                     list_rows, metrics_input, month_or_422, rows_by_month, search_rows, ts_dict, update_row)
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
 
@@ -78,6 +79,38 @@ def _day_or_422(day: str) -> datetime:
     if d is None:
         raise HTTPException(status_code=422, detail=f"日期格式錯誤：{day}")
     return d.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+async def _ts_or_bound(request: Request) -> None:
+    """唯讀端點放寬（docs/JOURNAL_WORKLOG_PLAN.md §10／§11）：timesheets 模組 **或** 登入＋綁定人員檔案
+    （員工頁的專案查詢、工作階段下拉）。只給讀；寫入端點（改預算等）守衛不變。
+    🔴 這支不碰私帳 wall：_require_mine_admin 守的端點（/projects 私帳案清單、/summary）不走這裡。"""
+    try:
+        check_admin_or_module(request, "timesheets")
+        return
+    except HTTPException as e:
+        if e.status_code != 403:
+            raise
+    ident = await resolve_current_staff(request)
+    if ident["staff"] is None:
+        raise HTTPException(status_code=403, detail="權限不足（需要工作追蹤模組，或帳號綁定人員檔案）")
+
+
+# 員工頁（/my.html）的鑰匙是 me_*，工作追蹤分頁是 timesheets；「我的一天」兩邊都要能用，
+# 綁定人員檔案的 409 原句仍只在 core.identity.require_bound_staff。
+_ME_KEYS = ("me_finance", "me_projects", "me_profile", "me_todos", "me_leave", "me_petty", "me_benefits")
+
+
+async def _mine_ident(request: Request) -> dict:
+    """timesheets 模組 → 照舊；否則任何 me_* 鑰匙＋綁定人員檔案。"""
+    try:
+        return await bound_ident(request, "timesheets")
+    except HTTPException as e:
+        if e.status_code != 403:
+            raise
+    check_admin_or_module(request, *_ME_KEYS)
+    from core.identity import require_bound_staff
+    return await require_bound_staff(request, _ME_KEYS[0])
 
 
 @router.get("/ingest_token")
@@ -162,20 +195,14 @@ async def send_digest_now(request: Request, preview: bool = False):
 # 閘門＝timesheets 模組（進得了 tab 就看得到大家每天做了什麼，owner 拍板）；
 # 「我的一天」的讀改刪再加「綁定人員檔案」（services.timesheet_self.bound_ident）。
 
-@router.get("/board")
-async def day_board(request: Request, date: str = "", days: int = 1):
-    """每日看板：從 date 起 days 天（1＝當天、7＝週模式），每天每個人做了什麼（實際＋計畫）。
-    只顯示有列的人；不排名、不標紅（主管層另做）。"""
-    check_admin_or_module(request, "timesheets")
-    days = max(1, min(int(days or 1), 14))
-    d0 = _day_or_422(date)
+async def _board_days(session, d0: datetime, days: int) -> list:
+    """看板的計算（唯一一份）：[{date, people:[{name, items, hours, planned}]}]。
+    /board 與員工頁的 /me/team_week 都吃這個 —— 團隊的一週不抄第二份。"""
     d1 = d0 + timedelta(days=days)
-    factory = db_factory_or_503()
-    async with factory() as session:
-        rows = (await session.execute(
-            select(Timesheet).where(Timesheet.work_date >= d0).where(Timesheet.work_date < d1)
-            .order_by(Timesheet.work_date, Timesheet.staff_name, Timesheet.created_at)
-        )).scalars().all()
+    rows = (await session.execute(
+        select(Timesheet).where(Timesheet.work_date >= d0).where(Timesheet.work_date < d1)
+        .order_by(Timesheet.work_date, Timesheet.staff_name, Timesheet.created_at)
+    )).scalars().all()
     by_day: dict = {}
     for r in rows:
         it = ts_dict(r)
@@ -187,13 +214,38 @@ async def day_board(request: Request, date: str = "", days: int = 1):
                    "planned": round(sum(x["planned_hours"] or 0 for x in its), 1)}
                   for n, its in sorted(by_day.get(k, {}).items())]
         out_days.append({"date": k, "people": people})
+    return out_days
+
+
+@router.get("/board")
+async def day_board(request: Request, date: str = "", days: int = 1):
+    """每日看板：從 date 起 days 天（1＝當天、7＝週模式），每天每個人做了什麼（實際＋計畫）。
+    只顯示有列的人；不排名、不標紅（主管層另做）。"""
+    check_admin_or_module(request, "timesheets")
+    days = max(1, min(int(days or 1), 14))
+    d0 = _day_or_422(date)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        out_days = await _board_days(session, d0, days)
     return {"from": d0.date().isoformat(), "days": days, "items": out_days}
+
+
+@router.get("/options")
+async def timesheet_options(request: Request):
+    """格子用的字彙：工作分類 ＋ 每個分類自己的階段（只回 active；編輯器要含停用的走 /crm/work-stages/nodes）。
+    守衛放寬到綁定人員（員工頁的專案紀錄格子也要它）。"""
+    await _ts_or_bound(request)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        nodes = (await session.execute(select(WorkStageNode))).scalars().all()
+    return {"work_types": list(WORK_TYPES), "stages": stages_by_category(nodes)}
 
 
 @router.get("/mine")
 async def my_day(request: Request, date: str = ""):
-    """我的一天：本人該日的工作項（實際＋計畫）＋ 計畫／實際合計 ＋ 昨天的列（供「複製昨天」）。"""
-    ident = await bound_ident(request, "timesheets")
+    """我的一天：本人該日的工作項（實際＋計畫）＋ 計畫／實際合計 ＋ 昨天的列（供「複製昨天」）。
+    合計兩欄留給工作追蹤分頁；員工頁（/my.html）不畫它們（owner 鐵則：不做個人合計卡）。"""
+    ident = await _mine_ident(request)
     d0 = _day_or_422(date)
     factory = db_factory_or_503()
     async with factory() as session:
@@ -210,9 +262,29 @@ async def my_day(request: Request, date: str = ""):
     }
 
 
+@router.get("/mine/rows")
+async def my_rows(request: Request, from_: str = Query("", alias="from"), to: str = "", q: str = "",
+                  project_id: str = "", stage_id: str = ""):
+    """查自己的紀錄（§2-A11）：from／to（YYYY-MM-DD，含；預設近 30 天）、q（內容／備註／案名）、
+    project_id、stage_id；**只列不算**，最多 500 列。"""
+    ident = await _mine_ident(request)
+    for label, raw in (("to", to), ("from", from_)):
+        if (raw or "").strip() and parse_ymd(raw) is None:
+            raise HTTPException(status_code=422, detail=f"{label} 日期格式錯誤：{raw}")
+    to_dt = (parse_ymd(to) or datetime.now()).replace(hour=0, minute=0, second=0, microsecond=0)
+    from_dt = parse_ymd(from_) or (to_dt - timedelta(days=29))
+    if from_dt > to_dt:
+        raise HTTPException(status_code=422, detail="from 不能晚於 to")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        items = await search_rows(session, ident, from_dt, to_dt + timedelta(days=1),
+                                  q=q, project_id=project_id, stage_id=stage_id, limit=500)
+    return {"from": from_dt.date().isoformat(), "to": to_dt.date().isoformat(), "items": items}
+
+
 @router.post("/mine/rows")
 async def my_add_rows(body: MeTimesheetBatch, request: Request):
-    ident = await bound_ident(request, "timesheets")
+    ident = await _mine_ident(request)
     factory = db_factory_or_503()
     async with factory() as session:
         return await add_rows(session, ident, body.rows)
@@ -221,7 +293,7 @@ async def my_add_rows(body: MeTimesheetBatch, request: Request):
 @router.put("/mine/{row_id}")
 async def my_update_row(row_id: str, body: MeTimesheetUpdate, request: Request):
     """改自己的一列（含「完成」：把 hours 填上，計畫列就變實際）。"""
-    ident = await bound_ident(request, "timesheets")
+    ident = await _mine_ident(request)
     factory = db_factory_or_503()
     async with factory() as session:
         return await update_row(session, ident, row_id, body)
@@ -229,7 +301,7 @@ async def my_update_row(row_id: str, body: MeTimesheetUpdate, request: Request):
 
 @router.delete("/mine/{row_id}")
 async def my_delete_row(row_id: str, request: Request):
-    ident = await bound_ident(request, "timesheets")
+    ident = await _mine_ident(request)
     factory = db_factory_or_503()
     async with factory() as session:
         return await delete_row(session, ident, row_id)
@@ -356,8 +428,8 @@ async def project_file(request: Request, name: str = "", project_id: str = ""):
 
     給 project_id（burn 表點進來）或 Sheet 案名對到了案 → 撈**整個案**（所有對到它的 Sheet 案名），
     標題用 CRM 案名；沒對映的 Sheet 案名才只撈那個名字（owner 2026-09-03：要看每個專案的執行狀態，
-    不是近 90 天）。"""
-    check_admin_or_module(request, "timesheets")
+    不是近 90 天）。守衛放寬到綁定人員（§10 專案查詢開放給員工看全案數字；唯讀）。"""
+    await _ts_or_bound(request)
     name = (name or "").strip()
     pid = (project_id or "").strip()
     if not name and not pid:

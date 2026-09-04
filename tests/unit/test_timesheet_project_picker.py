@@ -6,7 +6,7 @@
 項目 common＝core.crm_logic.rank_items（過去用量 ≥3 次、最多 10 個）。
 浮層開著時 ↓↑ 歸浮層（capture），關著時才輪到宿主（工作日誌的換列）；選了記 data-pid，存檔先認 id。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
 
 POP = "frontend/js/shared/project-pop.js"
 
@@ -48,11 +48,16 @@ def test_shared_popover_contract():
 def test_timesheets_and_petty_use_the_shared_popover_not_datalist():
     ts = js_code_only(repo_src("frontend/tabs/timesheets/timesheets.js"))
     assert "from '../../js/shared/project-pop.js'" in ts and "attachProjectPop(_content," in ts
-    assert ts.index("attachProjectPop(_content,") < ts.index("_content.addEventListener('keydown', _sheetKeydown);"), "浮層要先掛"
+    init = js_func_body(ts, "export async function initTimesheetsTab() {")
+    assert init.index("attachProjectPop(_content,") < init.index("await refresh();"), "浮層要先掛（格子畫出來之前）"
+    # 2026-09-05：格子（含 ↓↑ 走列）抽到 js/shared/ts-sheet.js；浮層在 root 用 capture、格子的 keydown 不用 capture → 開著時先歸浮層
+    sheet = js_code_only(repo_src("frontend/js/shared/ts-sheet.js"))
+    assert "host.addEventListener('keydown', (ev) => _keydown(ev, host));" in sheet
+    assert "root.addEventListener('keydown', _keydown, true);" in js_code_only(repo_src("frontend/js/shared/project-pop.js"))
     assert "<datalist" not in ts and 'list="ts-proj-list"' not in ts and "ts-proj-pop" not in ts
-    assert ts.count("data-proj-pick") >= 3
-    assert "el.dataset.pid" in code_only(func_body(ts, "function _projectFromInput(text, el = null)"))
-    assert "_projectFromInput(v('project'), tr.querySelector" in ts
+    assert ts.count("data-proj-pick") + sheet.count("data-proj-pick") >= 3
+    assert "el.dataset.pid" in code_only(func_body(sheet, "export function projectFromInput(text, el = null, projects = [])"))
+    assert "projectFromInput(v('project'), tr.querySelector" in sheet
 
     pt = js_code_only(repo_src("frontend/tabs/petty/petty-view.js"))
     assert 'from "../../js/shared/project-pop.js"' in pt

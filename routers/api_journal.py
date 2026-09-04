@@ -11,31 +11,51 @@ learnings 學到了什麼 / others 其他主題 — owner 明確要求分表，�
 可編輯窗（伺服端強制，owner 規則 2026-07-22）：week_start <= 本週週一 + 7 天
 ＝ 過往任何週、當週、下一週恆可編；更遠未來 403「只能編輯到下一週」。
 
-權限：check_admin_or_module(request, 'journal')。純函式在 core/journal_logic.py。
+2026-09-05（docs/JOURNAL_WORKLOG_PLAN.md §13–§14）：
+- 草稿→送出：PUT /mine 只存草稿（status=draft；已送出的再改不降回草稿），POST /mine/submit 送出。
+  /week、/person、/learnings、/people、/help **只回 submitted** —— 草稿只有本人（/mine）看得到。
+- 「上週做了什麼」自動區：本人該週 timesheets 按案子分組（core.journal_logic.group_worklog，不含 hours）。
+- 條目可掛案子（project_id）、「挑戰」「其他」可標 help／discuss；主管（timesheets 模組）逐條回覆
+  （journal_replies），回覆時推一則 Google Chat 給本人（best-effort）。
+- PUT 全量替換時盡量沿用條目 id（帶 id 或內容相同）—— 回覆才跟得住自動存草稿。
+
+權限：check_admin_or_module(request, 'journal')；回覆／求助清單另守 'timesheets'。純函式在 core/journal_logic.py。
 """
+import asyncio
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
-from sqlalchemy import delete as sa_delete, func, select  # type: ignore
+from sqlalchemy import delete as sa_delete, func, or_, select  # type: ignore
 
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503
 from core.hr_logic import parse_ymd
-from core.journal_logic import clean_entries, editable_window_ok, week_start_of
-from core.schemas import JournalPut
-from db.models import (CrmStaff, JournalChallenge, JournalLearning,
-                       JournalOther, JournalWin, User, WorkJournal)
+from core.journal_logic import (FLAG_SECTIONS, clean_rich_entries, editable_window_ok, flag_counts,
+                                group_worklog, shell_status, status_after_put, unanswered_flagged,
+                                week_start_of)
+from core.schemas import JournalPut, JournalReplyPost
+from db.models import (CrmStaff, JournalChallenge, JournalLearning, JournalOther, JournalReply,
+                       JournalWin, Timesheet, User, WorkJournal)
+from services.timesheet_lookup import project_names
+from services.timesheet_self import ts_dict
 
 router = APIRouter(prefix="/api/v1/journal", tags=["journal"])
 
-# 四區塊 ↔ 表 對映。key 集合必須與 JournalPut 欄位、前端 journal-core.js 的
+# 四區塊 ↔ 表 對映。key 集合必須與 JournalPut 四區欄位、前端 journal-core.js 的
 # BLOCKS 一致（守衛：tests/unit/test_journal.py TestSectionRegistryConsistency）
 # —— 前端漏 key 的後果是 PUT 全量替換把該區已存資料靜默清空，不是顯示問題。
 _SECTION_MODELS = (("wins", JournalWin),
                    ("challenges", JournalChallenge),
                    ("learnings", JournalLearning),
                    ("others", JournalOther))
+# 回覆用的 entry_table（表名）→ (區 key, model)
+_TABLE_MODELS = {m.__tablename__: (key, m) for key, m in _SECTION_MODELS}
+
+
+def _submitted_only():
+    """只回送出的：status 空（migration 前的舊殼）視同 submitted。"""
+    return or_(WorkJournal.status == "submitted", WorkJournal.status.is_(None))
 
 
 def _week_from_param(start: str) -> date:
@@ -48,9 +68,17 @@ def _week_from_param(start: str) -> date:
     return week_start_of(dt.date())
 
 
+def _iso(dt) -> str | None:
+    return dt.isoformat() if dt else None
+
+
+def _empty_sections() -> dict:
+    return {key: [] for key, _ in _SECTION_MODELS}
+
+
 async def _entries_by_journal(session, journal_ids: list) -> dict:
-    """{journal_id: {各區 key: [str]}}（key 集合=_SECTION_MODELS，依 sort_order）。"""
-    out = {jid: {key: [] for key, _ in _SECTION_MODELS} for jid in journal_ids}
+    """{journal_id: {各區 key: [{id, content, project_id, flag}]}}（依 sort_order）。"""
+    out = {jid: _empty_sections() for jid in journal_ids}
     if not journal_ids:
         return out
     for key, model in _SECTION_MODELS:
@@ -59,8 +87,24 @@ async def _entries_by_journal(session, journal_ids: list) -> dict:
             .order_by(model.sort_order, model.id)
         )).scalars().all()
         for r in rows:
-            out[r.journal_id][key].append(r.content or "")
+            out[r.journal_id][key].append({"id": r.id, "content": r.content or "",
+                                           "project_id": r.project_id or None, "flag": r.flag or None})
     return out
+
+
+def _strings(rich: dict) -> dict:
+    """§13 之前的字串陣列形狀（journal-core personCard 還在用）—— 從 rich 導出，不另查。"""
+    return {key: [it["content"] for it in rich.get(key, [])] for key, _ in _SECTION_MODELS}
+
+
+async def _project_names_for(session, rich_list) -> dict:
+    ids = {it["project_id"] for rich in rich_list for items in rich.values() for it in items if it.get("project_id")}
+    return await project_names(session, ids) if ids else {}
+
+
+def _with_names(rich: dict, pnames: dict) -> dict:
+    return {key: [{**it, "project_name": pnames.get(it["project_id"], "") if it.get("project_id") else ""}
+                  for it in items] for key, items in rich.items()}
 
 
 async def _display_names(session, usernames) -> dict:
@@ -81,6 +125,58 @@ async def _display_names(session, usernames) -> dict:
     return names
 
 
+async def _worklog_by_user(session, usernames, week: date) -> dict:
+    """{username: worklog}（§2-B1）：本人列＝users.staff_id 或人員本名（同 timesheet_self.own_filter 的規則），
+    該週 [週一, 下週一)，分組在 core.journal_logic.group_worklog（不含 hours）。"""
+    usernames = list(usernames)
+    out = {u: [] for u in usernames}
+    if not usernames:
+        return out
+    people = (await session.execute(
+        select(User.username, User.staff_id, CrmStaff.name)
+        .outerjoin(CrmStaff, CrmStaff.id == User.staff_id)
+        .where(User.username.in_(usernames)))).all()
+    by_sid = {sid: u for u, sid, _n in people if sid}
+    by_name = {n: u for u, _sid, n in people if n}
+    if not by_sid and not by_name:
+        return out
+    d0 = datetime(week.year, week.month, week.day)
+    d1 = d0 + timedelta(days=7)
+    conds = []
+    if by_sid:
+        conds.append(Timesheet.staff_id.in_(list(by_sid)))
+    if by_name:
+        conds.append(Timesheet.staff_name.in_(list(by_name)))
+    rows = (await session.execute(
+        select(Timesheet).where(or_(*conds))
+        .where(Timesheet.work_date >= d0).where(Timesheet.work_date < d1)
+        .order_by(Timesheet.work_date, Timesheet.created_at))).scalars().all()
+    per = {u: [] for u in usernames}
+    for r in rows:
+        u = by_sid.get(r.staff_id) or by_name.get(r.staff_name)
+        if u in per:
+            per[u].append(ts_dict(r))
+    return {u: group_worklog(rs) for u, rs in per.items()}
+
+
+async def _replies_by_journal(session, journal_ids: list) -> dict:
+    """{journal_id: [{id, entry_table, entry_id, username, display_name, content, created_at}]}（時間升冪）。"""
+    out = {jid: [] for jid in journal_ids}
+    if not journal_ids:
+        return out
+    rows = (await session.execute(
+        select(JournalReply).where(JournalReply.journal_id.in_(journal_ids))
+        .order_by(JournalReply.created_at, JournalReply.id))).scalars().all()
+    names = await _display_names(session, {r.username for r in rows})
+    for r in rows:
+        out[r.journal_id].append({
+            "id": r.id, "entry_table": r.entry_table, "entry_id": r.entry_id,
+            "username": r.username, "display_name": names.get(r.username, r.username),
+            "content": r.content or "", "created_at": _iso(r.created_at),
+        })
+    return out
+
+
 async def _get_shell(session, username: str, week: date):
     return (await session.execute(
         select(WorkJournal).where(WorkJournal.username == username)
@@ -88,26 +184,61 @@ async def _get_shell(session, username: str, week: date):
     )).scalar_one_or_none()
 
 
+async def _mine_payload(session, username: str, week: date, shell) -> dict:
+    rich = (await _entries_by_journal(session, [shell.id]))[shell.id] if shell is not None else _empty_sections()
+    pnames = await _project_names_for(session, [rich])
+    worklog = (await _worklog_by_user(session, [username], week))[username]
+    replies = (await _replies_by_journal(session, [shell.id]))[shell.id] if shell is not None else []
+    return {"week_start": week.isoformat(), **_strings(rich),
+            "entries": _with_names(rich, pnames),
+            "status": shell_status(shell),
+            "submitted_at": _iso(getattr(shell, "submitted_at", None)) if shell is not None else None,
+            "worklog": worklog, "replies": replies,
+            "editable": editable_window_ok(week)}
+
+
 @router.get("/mine")
 async def my_journal(request: Request, start: str = ""):
-    """本人某週日誌（無記錄回各區空陣列）。"""
+    """本人某週日誌（無記錄回各區空陣列、status=none）＋ 自動區 worklog ＋ 主管回覆。"""
     payload = check_admin_or_module(request, "journal")
     username = (payload or {}).get("sub") or ""
     week = _week_from_param(start)
     factory = db_factory_or_503()
     async with factory() as session:
         shell = await _get_shell(session, username, week)
-        sections = {key: [] for key, _ in _SECTION_MODELS}
-        if shell is not None:
-            sections = (await _entries_by_journal(session, [shell.id]))[shell.id]
-    return {"week_start": week.isoformat(), **sections,
-            "editable": editable_window_ok(week)}
+        return await _mine_payload(session, username, week, shell)
+
+
+async def _upsert_section(session, model, journal_id: str, items: list) -> None:
+    """一區的全量替換，但**盡量沿用 id**：帶 id 且還在 → 同一條；沒帶 id 就找內容相同、還沒被認領的
+    既有條。沒對上的才是新條；剩下沒被認領的刪掉（連同掛在它上面的回覆）。"""
+    existing = (await session.execute(
+        select(model).where(model.journal_id == journal_id).order_by(model.sort_order, model.id))).scalars().all()
+    by_id = {r.id: r for r in existing}
+    unclaimed = list(existing)
+    for i, it in enumerate(items):
+        row = by_id.get(it.get("id") or "")
+        if row is None or row not in unclaimed:
+            row = next((r for r in unclaimed if (r.content or "") == it["content"]), None)
+        if row is not None:
+            unclaimed.remove(row)
+        else:
+            row = model(id=uuid.uuid4().hex, journal_id=journal_id)
+            session.add(row)
+        row.content = it["content"]
+        row.project_id = it.get("project_id") or None
+        row.flag = it.get("flag") or None
+        row.sort_order = i
+    for r in unclaimed:
+        await session.execute(sa_delete(JournalReply).where(JournalReply.entry_id == r.id))
+        await session.delete(r)
 
 
 @router.put("/mine")
 async def put_my_journal(body: JournalPut, request: Request, start: str = ""):
-    """全量替換四區 entries（刪舊插新，sort_order=列表順序）；四區皆空＝刪掉
-    整份週誌（殼+entries，語意=清空）。回應同 GET 形狀。"""
+    """全量替換四區 entries（sort_order=列表順序；沿用 id 見 _upsert_section）；四區皆空＝刪掉
+    整份週誌（殼+entries+回覆，語意=清空）。body.status 只接受 draft；未有殼＝建 draft。
+    回應同 GET 形狀。"""
     payload = check_admin_or_module(request, "journal")
     username = (payload or {}).get("sub") or ""
     week = _week_from_param(start)
@@ -115,74 +246,124 @@ async def put_my_journal(body: JournalPut, request: Request, start: str = ""):
         raise HTTPException(status_code=403, detail="只能編輯到下一週")
     cleaned = {}
     for key, _ in _SECTION_MODELS:
-        entries, err = clean_entries(getattr(body, key))
+        entries, err = clean_rich_entries(getattr(body, key), allow_flag=key in FLAG_SECTIONS)
         if err:
             raise HTTPException(status_code=400, detail=f"{key}：{err}")
         cleaned[key] = entries
     factory = db_factory_or_503()
     async with factory() as session:
         shell = await _get_shell(session, username, week)
+        try:
+            new_status = status_after_put(shell_status(shell) if shell is not None else None, body.status)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
         if not any(cleaned.values()):
-            # 四區皆空 → 刪殼 + entries（清空語意）
+            # 四區皆空 → 刪殼 + entries + 回覆（清空語意）
             if shell is not None:
                 for _, model in _SECTION_MODELS:
-                    await session.execute(
-                        sa_delete(model).where(model.journal_id == shell.id))
+                    await session.execute(sa_delete(model).where(model.journal_id == shell.id))
+                await session.execute(sa_delete(JournalReply).where(JournalReply.journal_id == shell.id))
                 await session.delete(shell)
                 await session.commit()
+            shell = None
         else:
             if shell is None:
-                shell = WorkJournal(id=uuid.uuid4().hex, username=username,
-                                    week_start=week)
+                shell = WorkJournal(id=uuid.uuid4().hex, username=username, week_start=week, status=new_status)
                 session.add(shell)
                 await session.flush()
             else:
                 # 殼欄位沒變時 onupdate 不觸發 — 內容更新一律手動戳
                 shell.updated_at = datetime.now(timezone.utc)
+                shell.status = new_status
             for key, model in _SECTION_MODELS:
-                await session.execute(
-                    sa_delete(model).where(model.journal_id == shell.id))
-                for i, content in enumerate(cleaned[key]):
-                    session.add(model(id=uuid.uuid4().hex, journal_id=shell.id,
-                                      content=content, sort_order=i))
+                await _upsert_section(session, model, shell.id, cleaned[key])
             await session.commit()
-    return {"week_start": week.isoformat(), **cleaned,
-            "editable": editable_window_ok(week)}
+            shell = await _get_shell(session, username, week)
+        return await _mine_payload(session, username, week, shell)
+
+
+@router.post("/mine/submit")
+async def submit_my_journal(request: Request, start: str = ""):
+    """送出（status=submitted、submitted_at=now）；可重複送（只更新時間）。沒殼＝建一份空的送出殼。"""
+    payload = check_admin_or_module(request, "journal")
+    username = (payload or {}).get("sub") or ""
+    week = _week_from_param(start)
+    if not editable_window_ok(week):
+        raise HTTPException(status_code=403, detail="只能編輯到下一週")
+    now = datetime.now(timezone.utc)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        shell = await _get_shell(session, username, week)
+        if shell is None:
+            shell = WorkJournal(id=uuid.uuid4().hex, username=username, week_start=week)
+            session.add(shell)
+        shell.status = "submitted"
+        shell.submitted_at = now
+        shell.updated_at = now
+        await session.commit()
+    return {"week_start": week.isoformat(), "status": "submitted", "submitted_at": now.isoformat()}
+
+
+async def _people_candidates(session) -> set:
+    """「大家的回顧」該列的人：帳號有 journal 模組的、加上寫過週記的（admin 隱含模組不算——
+    service 帳號不該永遠掛「還沒寫」）。"""
+    users = (await session.execute(select(User.username, User.modules))).all()
+    cands = {u for u, mods in users if isinstance(mods, list) and "journal" in mods}
+    cands |= {u for (u,) in (await session.execute(select(WorkJournal.username).distinct())).all()}
+    return {u for u in cands if u}
 
 
 @router.get("/week")
 async def week_journals(request: Request, start: str = ""):
-    """該週有寫的人（username 排序）— 全員可讀。"""
+    """該週**送出**的人（username 排序）— 全員可讀；每人帶自動區、flag 計數、條目（含 flag／案子）、回覆。
+    people_status：還沒送出的人（draft＝草稿中、none＝還沒寫）。"""
     check_admin_or_module(request, "journal")
     week = _week_from_param(start)
     factory = db_factory_or_503()
     async with factory() as session:
-        shells = (await session.execute(
+        all_shells = (await session.execute(
             select(WorkJournal).where(WorkJournal.week_start == week)
             .order_by(WorkJournal.username)
         )).scalars().all()
+        shells = [s for s in all_shells if shell_status(s) == "submitted"]
+        drafts = {s.username for s in all_shells if shell_status(s) == "draft"}
         entries = await _entries_by_journal(session, [s.id for s in shells])
-        names = await _display_names(session, {s.username for s in shells})
+        pnames = await _project_names_for(session, list(entries.values()))
+        replies = await _replies_by_journal(session, [s.id for s in shells])
+        worklog = await _worklog_by_user(session, [s.username for s in shells], week)
+        submitted = {s.username for s in shells}
+        pending = sorted(await _people_candidates(session) - submitted)
+        names = await _display_names(session, submitted | set(pending))
         return {"week_start": week.isoformat(), "journals": [{
+            "id": s.id,                      # 主管回覆要指定殼（POST /journal/reply 的 journal_id）
             "username": s.username,
             "display_name": names[s.username],
-            **entries[s.id],
-            "updated_at": s.updated_at.isoformat() if s.updated_at else None,
-        } for s in shells]}
+            **_strings(entries[s.id]),
+            "entries": _with_names(entries[s.id], pnames),
+            "flags": flag_counts(entries[s.id]),
+            "worklog": worklog.get(s.username, []),
+            "replies": replies[s.id],
+            "status": "submitted",
+            "submitted_at": _iso(s.submitted_at),
+            "updated_at": _iso(s.updated_at),
+        } for s in shells], "people_status": [{
+            "username": u, "display_name": names[u], "status": "draft" if u in drafts else "none",
+        } for u in pending]}
 
 
 @router.get("/learnings")
 async def learning_library(request: Request, q: str = "", username: str = "",
                            limit: int = 100, offset: int = 0):
     """學習庫 — 跨週彙整「學到了什麼」（week_start DESC、sort_order ASC；
-    q = content ILIKE 模糊；limit 上限 300）。"""
+    q = content ILIKE 模糊；limit 上限 300）。只回送出的。"""
     check_admin_or_module(request, "journal")
     limit = max(1, min(int(limit or 100), 300))
     offset = max(0, int(offset or 0))
     factory = db_factory_or_503()
     async with factory() as session:
         base = (select(JournalLearning, WorkJournal.username, WorkJournal.week_start)
-                .join(WorkJournal, WorkJournal.id == JournalLearning.journal_id))
+                .join(WorkJournal, WorkJournal.id == JournalLearning.journal_id)
+                .where(_submitted_only()))
         if (q or "").strip():
             base = base.where(JournalLearning.content.ilike(f"%{q.strip()}%"))
         if (username or "").strip():
@@ -200,18 +381,20 @@ async def learning_library(request: Request, q: str = "", username: str = "",
             "username": r[1], "display_name": names[r[1]],
             "week_start": r[2].isoformat(),
             "content": r[0].content or "",
+            "project_id": r[0].project_id or None,
         } for r in rows], "total": int(total)}
 
 
 @router.get("/people")
 async def journal_people(request: Request):
-    """有寫過週誌的人：{username, weeks=寫過幾週, last_week=最近一週}。"""
+    """有送出過週誌的人：{username, weeks=送出幾週, last_week=最近一週}。"""
     check_admin_or_module(request, "journal")
     factory = db_factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
             select(WorkJournal.username, func.count(WorkJournal.id),
                    func.max(WorkJournal.week_start))
+            .where(_submitted_only())
             .group_by(WorkJournal.username)
             .order_by(WorkJournal.username)
         )).all()
@@ -224,7 +407,7 @@ async def journal_people(request: Request):
 
 @router.get("/person")
 async def person_journals(request: Request, username: str = "", limit: int = 26):
-    """某人的歷週日誌（week DESC）。"""
+    """某人的歷週日誌（week DESC）。只回送出的。"""
     check_admin_or_module(request, "journal")
     username = (username or "").strip()
     if not username:
@@ -234,10 +417,91 @@ async def person_journals(request: Request, username: str = "", limit: int = 26)
     async with factory() as session:
         shells = (await session.execute(
             select(WorkJournal).where(WorkJournal.username == username)
+            .where(_submitted_only())
             .order_by(WorkJournal.week_start.desc()).limit(limit)
         )).scalars().all()
         entries = await _entries_by_journal(session, [s.id for s in shells])
+        pnames = await _project_names_for(session, list(entries.values()))
+        replies = await _replies_by_journal(session, [s.id for s in shells])
         return {"journals": [{
             "week_start": s.week_start.isoformat(),
-            **entries[s.id],
+            **_strings(entries[s.id]),
+            "entries": _with_names(entries[s.id], pnames),
+            "flags": flag_counts(entries[s.id]),
+            "replies": replies[s.id],
+            "submitted_at": _iso(s.submitted_at),
         } for s in shells]}
+
+
+# ── 主管面：回覆、求助清單（守衛＝timesheets 模組；owner §14 回覆全員可見）──────────────
+
+def _notify_reply(display_name: str, content: str) -> None:
+    """回覆推一則 Google Chat 給本人（owner 拍板要即時通知；先走全域 webhook）。
+    best-effort：沒 notifier／沒 webhook／失敗都不擋回覆。"""
+    try:
+        from notifier import send_google_chat
+        from routers.api_auth import _MY_PAGE_URL
+        send_google_chat(f"{display_name} 的週記有主管回覆：{content[:80]}｜{_MY_PAGE_URL}#journal")
+    except Exception:
+        pass
+
+
+@router.post("/reply")
+async def reply_entry(body: JournalReplyPost, request: Request):
+    """主管回覆某一條（不改原文）。entry_table＝四張條目表之一的表名；條目必須屬於那份週記。"""
+    payload = check_admin_or_module(request, "timesheets")
+    who = (payload or {}).get("sub") or ""
+    content = (body.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=422, detail="回覆內容必填")
+    if body.entry_table not in _TABLE_MODELS:
+        raise HTTPException(status_code=422, detail=f"entry_table 只能是：{'／'.join(_TABLE_MODELS)}")
+    _key, model = _TABLE_MODELS[body.entry_table]
+    factory = db_factory_or_503()
+    async with factory() as session:
+        shell = await session.get(WorkJournal, body.journal_id)
+        if shell is None:
+            raise HTTPException(status_code=404, detail="找不到這份週記")
+        entry = await session.get(model, body.entry_id)
+        if entry is None or entry.journal_id != shell.id:
+            raise HTTPException(status_code=404, detail="找不到這一條（可能已被改掉）")
+        reply = JournalReply(id=uuid.uuid4().hex, journal_id=shell.id, entry_table=body.entry_table,
+                             entry_id=entry.id, username=who, content=content)
+        session.add(reply)
+        await session.commit()
+        await session.refresh(reply)
+        names = await _display_names(session, {shell.username, who})
+        out = {"id": reply.id, "journal_id": shell.id, "entry_table": reply.entry_table, "entry_id": reply.entry_id,
+               "username": who, "display_name": names.get(who, who), "content": content,
+               "created_at": _iso(reply.created_at)}
+    await asyncio.to_thread(_notify_reply, names.get(shell.username, shell.username), content)
+    return {"status": "ok", "reply": out}
+
+
+@router.get("/help")
+async def help_queue(request: Request, weeks: int = 8):
+    """等我處理（§2-E2）：近 N 週**送出的**週記裡，標了 help／discuss 且還沒有任何回覆的條目。"""
+    check_admin_or_module(request, "timesheets")
+    weeks = max(1, min(int(weeks or 8), 52))
+    since = week_start_of(date.today()) - timedelta(days=7 * (weeks - 1))
+    factory = db_factory_or_503()
+    async with factory() as session:
+        shells = (await session.execute(
+            select(WorkJournal).where(WorkJournal.week_start >= since).where(_submitted_only())
+            .order_by(WorkJournal.week_start.desc(), WorkJournal.username))).scalars().all()
+        entries = await _entries_by_journal(session, [s.id for s in shells])
+        pnames = await _project_names_for(session, list(entries.values()))
+        replied = {r for (r,) in (await session.execute(
+            select(JournalReply.entry_id).where(JournalReply.journal_id.in_([s.id for s in shells])))).all()} \
+            if shells else set()
+        names = await _display_names(session, {s.username for s in shells})
+        table_of = {key: m.__tablename__ for key, m in _SECTION_MODELS}
+        items = []
+        for s in shells:
+            for it in unanswered_flagged(entries[s.id], replied):
+                items.append({"journal_id": s.id, "username": s.username, "display_name": names[s.username],
+                              "week_start": s.week_start.isoformat(), "entry_table": table_of[it["section"]],
+                              "section": it["section"], "entry_id": it["id"], "content": it["content"],
+                              "flag": it["flag"], "project_id": it.get("project_id"),
+                              "project_name": pnames.get(it.get("project_id") or "", "")})
+        return {"since": since.isoformat(), "weeks": weeks, "items": items}

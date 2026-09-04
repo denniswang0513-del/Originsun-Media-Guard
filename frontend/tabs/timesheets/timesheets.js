@@ -18,6 +18,14 @@ import { openProjectPicker } from '../../js/shared/project-picker.js';   // 指�
 import { authDownload } from '../../js/shared/utils.js';
 import { attachProjectPop } from '../../js/shared/project-pop.js';   // 專案格的浮層（進行中／已結案），零用金也用同一個
 import { hbars } from '../../js/shared/svg-charts.js';
+// Sheet 式格子（列 html／鍵盤走列／起訖算小時／逐列自動存）與專案表／專案檔案的渲染只有 js/shared/ 那一份，
+// /my.html 也 import 同一份（tests/unit/test_ts_shared_components.py）
+import { renderSheet, appendBlankRows, appendRow, dropEmptyRows, saveRowNow, removeRow, wireAutosave,
+         rowBody, projectFromInput, typeSelectHtml, setStages } from '../../js/shared/ts-sheet.js';
+import { dayLabel as _dayLabel, isPlan as _isPlan, hoursLabel as _hoursLabel, typeTag as _typeTag, projLink as _projLink,
+         srcTag as _srcTag, dayLog as _dayLog, pctStyle as _pctStyle, createBurnSorter, burnTbodyHtml, burnTableHtml, burnTypeCellHtml,
+         bars as _bars, projectFileHtml } from '../../js/shared/ts-projects.js';
+import { openStageEditor, stagesMapFrom } from '../../js/shared/stage-editor.js';
 
 async function tfetch(path, opts = {}) {
     const token = localStorage.getItem('auth_token');
@@ -44,6 +52,7 @@ let _staffCache = null;     // 最近一次 by_staff
 let _recentCache = null;    // 最近一次 recent rows
 let _pullCache = null;      // GET /timesheets/pull（主控端定時拉 Sheet 的設定與上次結果）
 let _mineCache = null;      // 最近一次 /mine（我的一天）
+let _stagesCache = null;    // /timesheets/options 的 stages（{分類: [{id, name}]}；工作階段設定改完就換）
 let _projOpts = null;       // project_options（我的一天的專案 datalist）
 let _projectCache = null;   // 最近一次 /project（專案檔案頁）
 let _projectPid = '';       // 專案檔案頁：從 burn 表點進來帶的 project_id（撈整個案）；Sheet 案名進來就空
@@ -63,10 +72,6 @@ function _shiftDay(ymd, delta) {
     return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 }
 const _WD = ['日', '一', '二', '三', '四', '五', '六'];
-function _dayLabel(ymd) {
-    const [y, m, d] = ymd.split('-').map(Number);
-    return `${m}/${d}（${_WD[new Date(y, m - 1, d).getDay()]}）`;
-}
 
 // ── 設定分頁：Sheet 拉取狀態列 ──
 function _pullBar() {
@@ -134,22 +139,10 @@ const _ledgerSorter = createSortable({
         hours: i => i.hours, source: i => i.source, note: i => i.note || '',
     },
 });
-const _burnSorter = createSortable({
+const _burnSorter = createBurnSorter({
     storageKey: 'timesheets_burn_sort',
-    defaultSort: { key: '', dir: 'asc' },
     panelId: 'ts-burn-table',
     onChange: () => _redrawTbody('ts-burn-table', _burnTbodyHtml, _burnSorter),
-    getters: {
-        project: p => p.project_name || p.project_id || '',
-        status: p => p.status || '',
-        type: p => p.project_type || '',
-        used: p => p.hours_used ?? '',
-        budget: p => p.budget_hours ?? '',
-        remaining: p => p.remaining ?? '',
-        pct: p => p.pct ?? '',
-        rows: p => p.rows ?? '',
-        last: p => p.last_entry || '',
-    },
 });
 
 const _unmatchedSorter = createSortable({
@@ -198,12 +191,7 @@ export async function initTimesheetsTab() {
         const btn = ev.target.closest('[data-ts-action]');
         if (btn && _content.contains(btn)) _onAction(btn);
     });
-    // 起訖時間 → 實際小時（委派，新增列也吃得到）
     _content.addEventListener('change', (ev) => {
-        const t = ev.target.closest('[data-f="t0"], [data-f="t1"]');
-        if (t) { t.value = _normTime(t.value); _applyTimeRange(t.closest('tr')); }
-        const cell = ev.target.closest('#ts-mine-add [data-f]');
-        if (cell) _mineScheduleSave(cell.closest('tr'));       // 選單／時間／數字改了就存
         const ts = ev.target.closest('select[data-set-type]');
         if (ts) _setProjectType(ts.dataset.setType, ts.value);   // burn 表改案型
         const pk = ev.target.closest('input[data-pick]');
@@ -211,14 +199,10 @@ export async function initTimesheetsTab() {
         const pa = ev.target.closest('input[data-pick-all]');
         if (pa) { _ledgerSel = pa.checked ? new Set(_ledgerRows().map(i => i.id)) : new Set(); _ledgerRedraw(); }
     });
-    // 專案格浮層要先掛（capture）：開著時 ↓↑ 歸浮層，關著時才輪到 _sheetKeydown 的換列。格子只放案名（整串太長），id 記在 data-pid
+    // 專案格浮層掛在整個 tab（總表的批次列、改列、我的一天的格子都吃）：capture，開著時 ↓↑ 歸浮層，
+    // 關著時才輪到 ts-sheet 的換列。格子只放案名（整串太長），id 記在 data-pid。
+    // 我的一天的格子（renderSheet）不再自己掛一份 —— 同一個 input 掛兩個 root 會讓 ↓↑ 走兩格。
     attachProjectPop(_content, { options: _projectOptions, value: (p) => (p.id ? (p.name || p.label) : (p.label || p.name)) });
-    _content.addEventListener('keydown', _sheetKeydown);
-    _content.addEventListener('input', (ev) => {
-        _sheetGrow(ev);
-        const cell = ev.target.closest('#ts-mine-add [data-f]');
-        if (cell && cell.dataset.f !== 't0' && cell.dataset.f !== 't1') _mineScheduleSave(cell.closest('tr'));   // 起訖等離開格子再算
-    });
     await refresh();
 }
 
@@ -233,6 +217,7 @@ async function refresh() {
             catch (e) { err = e.message || String(e); }
             _mineCache = d;
             if (d) _workTypes = d.work_types || [];
+            if (_stagesCache === null) _stagesCache = await _loadStages();
             _content.innerHTML = _renderMine(d, err);
         } else if (_view === 'staff') {
             const d = await tfetch('/api/v1/timesheets/by_staff?month=' + _month);
@@ -307,37 +292,7 @@ function _dayNav(extra = '') {
     </div>`;
 }
 
-// ── 一列的共用片段（看板卡片／週表格／我的一天／時間軸／逐日都吃這幾支）──
-const _isPlan = i => i.status === 'plan';                       // 後端 row_state 決定，這裡不重判
-function _hoursLabel(i) {
-    return _isPlan(i)
-        ? `<span style="color:#93c5fd;">計畫 ${i.planned_hours} h</span>`
-        : `<b style="color:#eee;">${i.hours} h</b>${i.planned_hours ? `<span style="color:#666;"> ／計畫 ${i.planned_hours}</span>` : ''}`;
-}
-const _typeTag = i => (i.work_type ? `<span style="color:#9ca3af;">[${esc(i.work_type)}]</span> ` : '');
-const _projLink = (name, pid) => (name || pid)
-    ? `<span class="ts-link" data-ts-action="proj-pop" data-name="${esc(name || '')}" data-pid="${esc(pid || '')}" title="點開這個案的執行狀態">${esc(name || '(空白)')}</span>`
-    : '<span style="color:#777;">(空白)</span>';   // 沒案名沒 id 的列沒有東西可以看
-const _srcTag = i => (i.source === 'manual' ? '' : '<span style="color:#666;"> · Sheet</span>');
-/** 逐日流水：[{date, items}] → 每天一段；primary＝每項第一個字（時間軸放人名、人員頁放案名）。 */
-/** 逐日流水＝四欄表（owner 2026-09-03「日期、人員、內容、使用時數」）；primary＝第二欄放什麼
- *  （專案頁放人名、人員頁放案名可點）。同一天多列只在第一列印日期。 */
-function _dayLogRows(days, primary) {
-    return days.map(day => day.items.map((i, k) => `<tr>
-        <td style="white-space:nowrap;color:#888;">${k === 0 ? esc(_dayLabel(day.date)) : ''}</td>
-        <td style="white-space:nowrap;">${primary === 'project_name' ? _projLink(i.project_name, i.project_id) : `<span style="color:#eee;">${esc(i[primary] || '(空白)')}</span>`}</td>
-        <td style="color:#bbb;">${_typeTag(i)}${esc(i.task_note || '')}</td>
-        <td style="color:#9ca3af;">${esc(i.remark || '')}</td>
-        <td class="num" style="white-space:nowrap;">${_hoursLabel(i)}</td>
-    </tr>`).join('')).join('');
-}
-function _dayLogTable(bodyHtml, primary) {
-    return `<table class="ts-daylog"><thead><tr><th style="width:110px;">日期</th><th style="width:160px;">${primary === 'project_name' ? '專案' : '人員'}</th><th>內容</th><th style="width:22%;">備註</th><th class="num" style="width:110px;">使用時數</th></tr></thead>
-        <tbody>${bodyHtml}</tbody></table>`;
-}
-function _dayLog(days, primary) {
-    return days.length ? _dayLogTable(_dayLogRows(days, primary), primary) : '<div style="color:#666;">還沒有紀錄</div>';
-}
+// ── 一列的共用片段（_isPlan／_hoursLabel／_typeTag／_projLink／_srcTag／_dayLog）在 js/shared/ts-projects.js ──
 
 // ── 今日：每日看板（每個人每天做了什麼；實際為主，計畫加分；不排名、不標紅）──
 function _itemCard(i) {
@@ -385,9 +340,11 @@ async function _projectOptions() {
     catch (_) { _projOpts = []; }
     return _projOpts;
 }
-function _typeSelect(cur, attr) {
-    return `<select ${attr} data-no-search><option value="">分類</option>${_workTypes.map(t =>
-        `<option value="${esc(t)}"${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+const _typeSelect = (cur, attr) => typeSelectHtml(cur, attr, _workTypes);
+/** /timesheets/options 的 stages（{分類: [{id, name}]}）；還沒有這支端點或 403 → 空（格子照樣能用，只是沒階段可選）。 */
+async function _loadStages() {
+    try { return (await tfetch('/api/v1/timesheets/options')).stages || {}; }
+    catch (_) { return {}; }
 }
 /** 一個工作項的五格輸入（專案／分類／內容／計畫／實際）；總表改列用。 */
 function _rowCells(v = {}) {
@@ -398,70 +355,8 @@ function _rowCells(v = {}) {
         <td><input type="number" data-f="planned" min="0" step="0.25" value="${v.planned ?? ''}" placeholder="計畫" style="width:64px;"></td>
         <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}" placeholder="實際" style="width:64px;"></td>`;
 }
-/** 起訖時間 → 實際小時（兩位小數；訖比起早＝跨午夜）；填進同一列的「實際」欄。 */
-function _applyTimeRange(tr) {
-    const t0 = tr.querySelector('[data-f="t0"]')?.value, t1 = tr.querySelector('[data-f="t1"]')?.value;
-    if (!t0 || !t1) return;
-    const m = s => { const [h, mm] = s.split(':').map(Number); return h * 60 + mm; };
-    let mins = m(t1) - m(t0);
-    if (mins < 0) mins += 24 * 60;
-    tr.querySelector('[data-f="hours"]').value = Math.round(mins / 60 * 100) / 100;
-}
-// ── 我的一天的新增區：像 Google Sheet 的格子（owner 2026-09-03）──
-// 一列＝一個工作項；Enter／↓／↑ 在同一欄上下走，走到底自動多一列；在最後一列打字也會自動多一列。
-const _SHEET_COLS = [['project', '專案'], ['type', '分類'], ['note', '做了什麼'], ['remark', '備註'], ['t0', '起'], ['t1', '訖'], ['hours', '實際 h'], ['planned', '計畫 h'], ['state', '']];
-function _newRowHtml(v = {}, o = {}) {
-    // Sheet 列：input 用 readonly（文字還能選取、複製貼到下一列）；select 沒有 readonly 只能 disabled
-    const ro = o.readonly ? ' readonly' : '';
-    const rosel = o.readonly ? ' disabled' : '';
-    const t = 'type="text" inputmode="numeric" maxlength="5" placeholder="09:00" autocomplete="off"';
-    return `<tr class="ts-mine-row"${o.id ? ` data-id="${esc(o.id)}"` : ''}${o.readonly ? ' data-readonly="1"' : ''}>
-        <td class="ts-sheet-num"></td>
-        <td><input data-proj-pick autocomplete="off" data-f="project" value="${esc(v.project || '')}"${ro}></td>
-        <td>${_typeSelect(v.work_type || '', `data-f="type"${rosel}`)}</td>
-        <td><input type="text" data-f="note" value="${esc(v.note || '')}"${ro}></td>
-        <td><input type="text" data-f="remark" value="${esc(v.remark || '')}"${ro}></td>
-        <td><input ${t} data-f="t0" value="${esc(v.t0 || '')}"${ro}></td>
-        <td><input ${t} data-f="t1" value="${esc(v.t1 || '')}"${ro}></td>
-        <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}"${ro}></td>
-        <td><input type="number" data-f="planned" min="0" step="0.25" value="${v.planned ?? ''}"${ro}></td>
-        <td class="ts-sheet-state" data-f="state">${o.readonly ? 'Sheet' : (o.id ? '已存' : '')}</td>
-        <td class="ts-sheet-del">${o.readonly ? '' : '<button data-ts-action="row-remove" title="刪這一列">×</button>'}</td>
-    </tr>`;
-}
-function _sheetTableHtml(rowsHtml, id = 'ts-mine-add') {
-    return `<table ${id ? `id="${id}"` : ''} class="ts-sheet">
-        <thead><tr><th class="ts-sheet-num"></th>${_SHEET_COLS.map(([, l]) => `<th>${l}</th>`).join('')}<th class="ts-sheet-del"></th></tr></thead>
-        <tbody>${rowsHtml}</tbody>
-    </table>`;
-}
-/** 鍵盤：↓ 到下一列同欄（沒有就長一列）、↑ 上一列同欄；Enter **不跳列**（owner 2026-09-03：留在原格，
- *  專案格的 Enter 就是選取下拉建議）；分類（select）的上下鍵留給它自己。 */
-function _sheetKeydown(ev) {
-    const inp = ev.target.closest('#ts-mine-add [data-f]');
-    if (!inp) return;
-    const down = ev.key === 'ArrowDown', up = ev.key === 'ArrowUp';
-    if (!down && !up) return;
-    if (inp.tagName === 'SELECT') return;
-    const tr = inp.closest('tr');
-    let target = up ? tr.previousElementSibling : tr.nextElementSibling;
-    if (!target && down) { tr.insertAdjacentHTML('afterend', _newRowHtml()); target = tr.nextElementSibling; }
-    if (!target) return;
-    ev.preventDefault();
-    const next = target.querySelector(`[data-f="${inp.dataset.f}"]`);
-    if (next) { next.focus(); if (next.select) next.select(); }
-}
-/** 在最後一列打了東西 → 自動再長一列（Sheet 的感覺：永遠有空列可以往下填）。 */
-function _sheetGrow(ev) {
-    const inp = ev.target.closest('#ts-mine-add [data-f]');
-    if (!inp) return;
-    const tr = inp.closest('tr');
-    if (!tr.nextElementSibling && inp.value) tr.insertAdjacentHTML('afterend', _newRowHtml());
-}
-function _mineRowHtml(i) {
-    return _newRowHtml({ project: i.project_name, work_type: i.work_type, note: i.task_note, remark: i.remark, planned: i.planned_hours, hours: i.hours || '' },
-                       { id: i.id, readonly: !i.editable });
-}
+// ── 我的一天的新增區：像 Google Sheet 的格子（owner 2026-09-03）——
+// 列的 html／鍵盤走列／自動長列／起訖算小時／逐列自動存都在 js/shared/ts-sheet.js（/my.html 同一份）。
 function _mineChips(d) {
     return `<span class="ts-chip"><b>${d.actual_total}</b>實際 h</span>${d.planned_total ? `<span class="ts-chip"><b>${d.planned_total}</b>計畫 h</span>` : ''}`;
 }
@@ -471,81 +366,39 @@ function _renderMine(d, err) {
             <div class="ts-card" style="color:#fca5a5;">${esc(err || '載入失敗')}
                 <div class="ts-note">要用「我的一天」，帳號要在「使用者管理」綁定人員檔案。</div></div>`;
     }
-    const items = d.items || [];
     return `${_head('我的一天：今天做了什麼，直接在格子裡填，填了就存（不審核，隨時可改）。')}
         ${_dayNav(`<span id="ts-mine-chips">${_mineChips(d)}</span><span style="color:#777;font-size:12px;">${esc(d.staff_name)}</span>`)}
         <div class="ts-card" style="border-color:#3b82f6;">
             <h3>${esc(_dayLabel(d.date))} 的工作項</h3>
-            ${_sheetTableHtml(items.map(_mineRowHtml).join('') + _newRowHtml().repeat(5))}
+            <div id="ts-mine-host"></div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
                 <button class="ts-btn ghost" data-ts-action="row-add">＋ 五列</button>
                 <button class="ts-btn ghost" data-ts-action="copy-yesterday" ${(d.yesterday || []).length ? '' : 'disabled'}>複製昨天（${(d.yesterday || []).length} 列）</button>
+                <button class="ts-btn ghost" data-ts-action="stages">工作階段設定</button>
                 <span id="ts-mine-result" style="font-size:12px;color:#888;"></span>
             </div>
             <div class="ts-note">專案＋時數（實際或計畫）填齊那一列就自動存成當天的工項，之後改任何一格也自動存。
                 起訖用 24 小時制，打「9」「930」「1730」都可以，會自己算出實際 h。↓ 往下一列、↑ 往上，走到底自動多一列（Enter 不跳列）。
-                Sheet 拉進來的列會標「Sheet」、不能改。</div>
+                工作階段只列該列分類的階段（分類改了、階段不在清單就清空）。Sheet 拉進來的列會標「Sheet」、不能改。</div>
         </div>`;
 }
-/** 專案格打的字 → {project_id, project_name}：對得到下拉的「年份 客戶 案名」或案名就帶 id；對不到就照打的字送（後端再對映）。 */
-function _projectFromInput(text, el = null) {
-    const t = (text || '').trim();
-    if (el && el.dataset && el.dataset.pid && t === el.dataset.pname) return { project_id: el.dataset.pid, project_name: t };   // 從浮層選的
-    const hit = (_projOpts || []).find(p => p.id && (p.label === t || p.name === t));
-    return hit ? { project_id: hit.id, project_name: hit.name } : { project_id: null, project_name: t };
+/** 整頁畫完後把格子畫進 #ts-mine-host（renderSheet 只在這裡叫；專案浮層掛在 _content 那一份）。 */
+function _mountMineSheet() {
+    const host = document.getElementById('ts-mine-host');
+    if (!host || !_mineCache) return;
+    renderSheet(host, _mineCache.items || [], { workTypes: _workTypes, stages: _stagesCache || {} });
+    wireAutosave(host, {
+        tfetch, day: () => _day, projects: () => _projOpts || [],
+        onSaved: () => _mineTotals(),
+        onUnmatched: (names) => {
+            const el = document.getElementById('ts-mine-result');
+            if (el) el.textContent = `「${names.join('、')}」對不到案（已存下來，管理員會指定）`;
+        },
+    });
 }
-/** 一列輸入 → 送給後端的 body（我的一天新增／改列、總表改列同一形狀；沒日期欄就用當天）。 */
-function _rowBody(tr) {
-    const v = f => tr.querySelector(`[data-f="${f}"]`)?.value ?? '';
-    return {
-        work_date: v('date') || _day, ..._projectFromInput(v('project'), tr.querySelector('[data-f="project"]')), work_type: v('type') || null,
-        task_note: v('note'), remark: v('remark'), planned_hours: v('planned') ? parseFloat(v('planned')) : null,
-        hours: v('hours') ? parseFloat(v('hours')) : null,
-    };
-}
-/** 「9」「930」「0930」「9:30」「17.30」→ "09:30"；看不懂 → ""。 */
-function _normTime(v) {
-    const m = String(v || '').trim().replace(/[.．：]/g, ':').match(/^(\d{1,2})(?::?(\d{2}))?$/);
-    if (!m) return '';
-    const h = Number(m[1]), mm = Number(m[2] || 0);
-    if (h > 23 || mm > 59) return '';
-    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-}
-const _saveTimers = new WeakMap();
-function _mineScheduleSave(tr) {
-    clearTimeout(_saveTimers.get(tr));
-    _saveTimers.set(tr, setTimeout(() => _mineSaveRow(tr), 600));
-}
-/** 一列的存檔：沒 id＝填齊（專案＋實際或計畫）才 POST，回來把 id 掛上；有 id＝PUT。同列上一筆還在飛就排在後面。 */
-async function _mineSaveRow(tr) {
-    if (!tr.isConnected || tr.dataset.readonly) return;
-    if (tr._saving) { tr._again = true; return; }
-    const st = tr.querySelector('[data-f="state"]');
-    const body = _rowBody(tr);
-    const complete = body.project_name && ((body.hours || 0) > 0 || (body.planned_hours || 0) > 0);
-    if (!complete) { st.textContent = body.project_name || body.task_note ? '再填時數' : ''; st.style.color = '#777'; return; }
-    tr._saving = true;
-    st.textContent = '儲存中…'; st.style.color = '#93c5fd';
-    try {
-        if (tr.dataset.id) {
-            await tfetch('/api/v1/timesheets/mine/' + tr.dataset.id, { method: 'PUT', body });
-        } else {
-            const r = await tfetch('/api/v1/timesheets/mine/rows', { method: 'POST', body: { rows: [body] } });
-            tr.dataset.id = (r.ids || [])[0] || '';
-            if ((r.unmatched_projects || []).length) {
-                const el = document.getElementById('ts-mine-result');
-                if (el) el.textContent = `「${r.unmatched_projects.join('、')}」對不到案（已存下來，管理員會指定）`;
-            }
-        }
-        st.textContent = '已存'; st.style.color = '#6ee7b7';
-        _mineTotals();
-    } catch (e) {
-        st.textContent = '沒存：' + (e.message || e); st.style.color = '#fca5a5';
-    } finally {
-        tr._saving = false;
-        if (tr._again) { tr._again = false; _mineScheduleSave(tr); }
-    }
-}
+/** 一列輸入 → 送給後端的 body（總表改列、代填同一形狀；沒日期欄就用當天）。正本在 ts-sheet.rowBody。 */
+const _rowBody = (tr) => rowBody(tr, { day: _day, projects: _projOpts || [] });
+const _projectFromInput = (text, el = null) => projectFromInput(text, el, _projOpts || []);
 /** 存完只更新上面的合計 chip（不重畫表：正在打字的格子不能被洗掉）。 */
 async function _mineTotals() {
     try {
@@ -555,16 +408,13 @@ async function _mineTotals() {
         if (el) el.innerHTML = _mineChips(d);
     } catch (_) { /* 合計晚點再更新就好 */ }
 }
-async function _mineRemove(tr) {
-    if (tr.dataset.id) {
-        if (!confirm('刪掉這一列？')) return;
-        try { await tfetch('/api/v1/timesheets/mine/' + tr.dataset.id, { method: 'DELETE' }); }
-        catch (e) { return alert('刪除失敗：' + (e.message || e)); }
-    }
-    const tb = tr.parentElement;
-    tr.remove();
-    if (tb && !tb.children.length) tb.insertAdjacentHTML('beforeend', _newRowHtml());
-    _mineTotals();
+/** 工作階段設定（同 /my.html 那顆鈕）：改完把新清單餵給格子，新列的下拉立即更新。 */
+function _openStages() {
+    return openStageEditor({ tfetch, onSaved: (map) => {
+        _stagesCache = map;
+        const host = document.getElementById('ts-mine-host');
+        if (host) setStages(host, map);
+    } });
 }
 
 // ── 總表：這個月每一列；管理員逐列改細節與備註（像發票總表）──
@@ -680,40 +530,11 @@ function _renderLedger(d) {
         </div>`;
 }
 
-// ── 專案：burn 表（消耗率高在前）＋ 最近同步列 ──
-function _pctStyle(pct) {
-    if (pct == null) return 'background:#2c2c2c;color:#777;';
-    if (pct >= 100) return 'background:#7f1d1d;color:#fca5a5;';
-    if (pct >= 90) return 'background:#78350f;color:#fbbf24;';
-    if (pct >= 60) return 'background:#1e3a5f;color:#93c5fd;';
-    return 'background:#064e3b;color:#6ee7b7;';
-}
-
-/** burn 表的案型下拉：字彙＝/summary 回的 project_types（settings ∪ 毛利表 ∪ 在用的）。改了就 PUT 專案，建議預算跟著重算。 */
-function _burnTypeSelect(p) {
-    // 平時只畫文字，點到才變成下拉（317 列 × 11 個 option 畫一次就是幾千個節點）
-    const cur = p.project_type || '';
-    return `<span class="ts-link" data-ts-action="type-edit" data-pid="${esc(p.project_id)}" data-cur="${esc(cur)}"
-                style="color:${cur ? '#ccc' : '#f59e0b'};" title="點一下改案型（預期毛利／建議預算照這個算）">${cur ? esc(cur) : '— 案型 —'} ▾</span>`;
-}
+// ── 專案：burn 表（消耗率高在前）＋ 最近同步列 ——表身／專案檔案的渲染在 js/shared/ts-projects.js ──
+/** burn 表的案型：點到才變下拉（type-edit 動作在 _onAction）；字彙＝/summary 回的 project_types。 */
 function _burnTbodyHtml() {
-    const rows = _burnSorter.sorted(((_summaryCache && _summaryCache.projects) || [])
-        .filter(p => _projHit(p.project_name) || _projHit(p.status))).map(p => `
-        <tr>
-            <td><span class="ts-link" data-ts-action="open-project" data-name="${esc(p.project_name || '')}" data-pid="${esc(p.project_id)}">${esc(p.project_name || p.project_id)}</span>
-                ${p.stale ? '<span class="ts-badge warn" title="進行中但 7 天沒工時">停滯</span>' : ''}</td>
-            <td style="color:#888;">${esc(p.status || '')}</td>
-            <td>${_burnTypeSelect(p)}</td>
-            <td class="num">${p.hours_used}</td>
-            <td class="num">${p.budget_hours ?? (p.suggested_hours != null
-                ? `<span class="ts-link" data-ts-action="budget" data-pid="${esc(p.project_id)}" data-cur="${p.suggested_hours}" title="依私帳設定的預期毛利（${esc(p.project_type || '')}）與日成本算的建議，點一下就套用">建議 ${p.suggested_hours}</span>`
-                : '<span style="color:#666;">未設</span>')}</td>
-            <td class="num">${p.remaining ?? '—'}</td>
-            <td class="num"><span class="ts-pct" style="${_pctStyle(p.pct)}">${p.pct != null ? p.pct + '%' : '—'}</span></td>
-            <td class="num" style="color:#777;">${p.rows}</td>
-            <td style="color:#777;">${esc(p.last_entry || '')}</td>
-        </tr>`).join('');
-    return rows || `<tr><td colspan="9" style="color:#666;text-align:center;">${_projQ ? '沒有符合的' : '尚無已對映專案'}</td></tr>`;
+    return burnTbodyHtml(_burnSorter.sorted(((_summaryCache && _summaryCache.projects) || [])
+        .filter(p => _projHit(p.project_name) || _projHit(p.status))), { editable: true, emptyText: _projQ ? '沒有符合的' : '尚無已對映專案' });
 }
 
 /** 專案頁的未對映表身（搜尋列會重畫它；內部桶不列）。 */
@@ -749,14 +570,8 @@ function _renderProjects(s) {
         ${unmatched.length ? `<div class="ts-card"><h3>未對映（${unmatched.length}）—— 對到案之後才有預算與 burn</h3>
             <table><thead><tr><th>Sheet 案名</th><th class="num">時數</th><th></th></tr></thead><tbody id="ts-unmatched-proj-body">${_unmatchedProjRowsHtml()}</tbody></table></div>` : ''}
         <div class="ts-card">
-            <h3>📊 專案 Burn（消耗率高在前）</h3>
-            <table id="ts-burn-table">
-                <thead><tr>
-                    ${sortableTh('project', '專案')}${sortableTh('status', '狀態')}${sortableTh('type', '案型')}${sortableTh('used', '已投入(h)', 'class="num"')}${sortableTh('budget', '預算(h)', 'class="num"')}
-                    ${sortableTh('remaining', '剩餘(h)', 'class="num"')}${sortableTh('pct', '消耗率', 'class="num"')}${sortableTh('rows', '列數', 'class="num"')}${sortableTh('last', '最後填報')}
-                </tr></thead>
-                <tbody>${_burnTbodyHtml()}</tbody>
-            </table>
+            <h3>專案 Burn（消耗率高在前）</h3>
+            ${burnTableHtml(_burnTbodyHtml())}
         </div>
         <div id="ts-recent-slot"></div>`;
 }
@@ -793,67 +608,13 @@ async function _openProjectModal(name, pid) {
     }
 }
 
-// ── 專案檔案頁：摘要／分類組成／時間軸／各人各月／預算／報價人日／類似專案 ──
-/** [(label, hours, pct?)…] → 共用的水平佔比條（js/shared/svg-charts.hbars）。 */
-function _bars(pairs) {
-    return hbars(pairs.map(([label, value, pct]) => ({ label, value, pct })),
-                 { formatValue: v => `${v} h`, showPct: pairs.some(p => p[2] != null), emptyText: '—' });
-}
-/** 逐日流水按月分段（每月小計），專案時間軸用：整個案的執行狀態一路看到底。 */
-function _dayLogByMonth(days, primary) {
-    if (!days.length) return '<div style="color:#666;">還沒有紀錄</div>';
-    const groups = [];
-    for (const day of days) {
-        const m = day.date.slice(0, 7);
-        if (!groups.length || groups[groups.length - 1].m !== m) groups.push({ m, days: [], hours: 0 });
-        const g = groups[groups.length - 1];
-        g.days.push(day);
-        g.hours += day.items.reduce((a, i) => a + (i.hours || 0), 0);
-    }
-    // 一張表：每月一列小計當分隔，底下接那個月的逐日列
-    return _dayLogTable(groups.map(g => `<tr class="ts-month"><td colspan="5" style="background:#262626;color:#ddd;padding:6px 8px;">
-            <b>${esc(g.m)}</b><span style="color:#888;"> ｜ ${g.days.length} 天 ｜ ${Math.round(g.hours * 10) / 10} h</span></td></tr>${_dayLogRows(g.days, primary)}`).join(''), primary);
-}
+// ── 專案檔案頁：摘要／分類組成／時間軸／各人各月／預算／報價人日／類似專案（渲染在 ts-projects.projectFileHtml）──
 function _renderProject(d, modal = false) {
-    const pct = d.pct == null ? '—' : d.pct + '%';
-    const key = d.project_id ? 'id:' + d.project_id : d.project_name;    // 比較清單的鍵：整個案用 id
-    const inCompare = _compareNames.includes(key);
-    const statusPill = d.status ? `<span class="ts-badge" style="font-size:12px;padding:2px 8px;">${esc(d.status)}</span>` : (d.mapped ? '' : '<span class="ts-badge warn">未對映</span>');
-    const sheetNames = (d.sheet_names || []).filter(n => n !== d.project_name);
-    return `${modal ? '' : _head('專案檔案：這個案的整個執行狀態 —— 誰在哪天做了什麼、花了多少、跟類似的案比起來如何。')}
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
-            ${modal ? '' : '<button class="ts-btn ghost" data-ts-action="view" data-view="projects">‹ 專案清單</button>'}
-            <b style="color:#eee;font-size:15px;">${esc(d.project_name)}</b>${statusPill}
-            <span style="flex:1;"></span>
-            <button class="ts-btn ghost" data-ts-action="compare-add" data-name="${esc(key)}">${inCompare ? '已在比較清單' : '加入比較'}</button>
-            ${_compareNames.length ? `<button class="ts-btn" data-ts-action="view" data-view="compare">並排比較（${_compareNames.length}）</button>` : ''}
-            ${d.mapped ? `<button class="ts-btn ghost" data-ts-action="budget" data-pid="${esc(d.project_id)}" data-cur="${d.budget_hours ?? d.suggested_hours ?? ''}">改預算</button>` : ''}
-            <button class="ts-btn ghost" data-ts-action="export-project" data-name="${esc(d.project_name)}" data-pid="${esc(d.project_id || '')}">匯出 CSV</button>
-        </div>
-        ${sheetNames.length ? `<div class="ts-note" style="margin:0 0 10px;">Sheet 上的案名：${sheetNames.map(esc).join('、')}</div>` : ''}
-        <div style="margin-bottom:12px;">
-            <span class="ts-chip"><b>${d.total}</b>總時數</span>
-            <span class="ts-chip"><b>${d.people}</b>人</span>
-            <span class="ts-chip"><b>${d.span_days}</b>天（${esc(d.first || '—')} → ${esc(d.last || '—')}）</span>
-            <span class="ts-chip"><b>${d.budget_hours ?? '—'}</b>預算 h　<span class="ts-pct" style="${_pctStyle(d.pct)}">${pct}</span></span>
-            ${d.quote_days != null ? `<span class="ts-chip"><b>${d.quote_days}</b>報價人日（≈ ${d.quote_hours} h）</span>` : ''}
-            ${d.suggested_hours != null ? `<span class="ts-chip" title="依私帳設定：合約未稅 ×（1−${esc(d.project_type || '')}預期毛利）÷ 日成本 × 每日工時"><b>${d.suggested_hours}</b>建議預算 h</span>` : ''}
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;">
-            <div class="ts-card" style="margin:0;"><h3>分類組成</h3>${_bars(d.composition)}</div>
-            <div class="ts-card" style="margin:0;"><h3>各人</h3>${_bars(d.by_person)}</div>
-            <div class="ts-card" style="margin:0;"><h3>各月</h3>${_bars(d.by_month)}</div>
-            <div class="ts-card" style="margin:0;"><h3>類似專案（自動推薦，人再挑）</h3>
-                ${d.similar.length ? d.similar.map(([n, sc]) => `<div style="display:flex;gap:8px;align-items:center;font-size:12px;margin:4px 0;">
-                    <span class="ts-link" data-ts-action="open-project" data-name="${esc(n)}" style="flex:1;">${esc(n)}</span>
-                    <span style="color:#666;">${Math.round(sc * 100)}%</span>
-                    <button class="ts-btn ghost" data-ts-action="compare-add" data-name="${esc(n)}" style="padding:2px 8px;">${_compareNames.includes(n) ? '已加' : '加入比較'}</button></div>`).join('')
-                : '<div style="color:#666;">沒有像的案（同客戶／案名相似／時數量級接近）</div>'}
-            </div>
-        </div>
-        <div class="ts-card" style="margin-top:14px;"><h3>時間軸（整個案，共 ${d.timeline.length} 個有紀錄的日子）</h3>
-            ${_dayLogByMonth(d.timeline, 'staff_name')}
-        </div>`;
+    return projectFileHtml(d, {
+        modal, editable: true, compareNames: _compareNames,
+        head: _head('專案檔案：這個案的整個執行狀態 —— 誰在哪天做了什麼、花了多少、跟類似的案比起來如何。'),
+        backHtml: '<button class="ts-btn ghost" data-ts-action="view" data-view="projects">‹ 專案清單</button>',
+    });
 }
 function _renderCompare(d) {
     const cols = d.items;
@@ -1024,8 +785,13 @@ function _renderSettings(s) {
             <button class="ts-btn ghost" data-ts-action="digest-send">立即發送</button>
             <pre id="ts-digest-preview" style="display:none;white-space:pre-wrap;color:#bbb;font-size:12px;background:#1a1a1a;padding:8px;border-radius:4px;margin-top:8px;"></pre>
         </div>` : '';
-    return `${_head('設定：Sheet 拉取、未對映指定、代填、週一 digest、同步 token（管理員）')}
+    return `${_head('設定：工作階段、Sheet 拉取、未對映指定、代填、週一 digest、同步 token（管理員）')}
         ${_pullBar()}
+        <div class="ts-card">
+            <h3>工作階段</h3>
+            <div class="ts-note" style="margin:0 0 8px;">每個分類（剪接、拍攝、前期企劃…）自己的階段清單；改名、上下排序、新增、停用不刪。「我的一天」與員工工作台的格子都用這份。</div>
+            <button class="ts-btn ghost" data-ts-action="stages">編輯工作階段</button>
+        </div>
         ${digestCard}
         ${unmatchedCard}
         <div class="ts-card">
@@ -1138,6 +904,7 @@ function _bind() {
     const dayInp = document.getElementById('ts-day');
     if (dayInp) dayInp.addEventListener('change', () => { if (dayInp.value) { _day = dayInp.value; refresh(); } });
     if (_view === 'mine' || _view === 'ledger') _projectOptions();     // 先抓好，專案格一點就有得選
+    if (_view === 'mine') _mountMineSheet();
     const pq = document.getElementById('ts-proj-q');
     if (pq) pq.addEventListener('input', () => {
         _projQ = pq.value;
@@ -1238,7 +1005,7 @@ async function _onAction(btn) {
                 sel.setAttribute('data-set-type', btn.dataset.pid); sel.setAttribute('data-no-search', '');
                 sel.style.cssText = 'background:#1a1a1a;border:1px solid #333;color:#ccc;border-radius:4px;padding:2px 4px;font-size:12px;max-width:130px;';
                 sel.innerHTML = `<option value="">— 案型 —</option>${opts.map(t => `<option value="${esc(t)}"${t === btn.dataset.cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}`;
-                sel.addEventListener('blur', () => { if (sel.isConnected) sel.replaceWith(Object.assign(document.createElement('div'), { innerHTML: _burnTypeSelect({ project_id: btn.dataset.pid, project_type: sel.value }) }).firstElementChild); });
+                sel.addEventListener('blur', () => { if (sel.isConnected) sel.replaceWith(Object.assign(document.createElement('div'), { innerHTML: burnTypeCellHtml({ project_id: btn.dataset.pid, project_type: sel.value }, true) }).firstElementChild); });
                 btn.replaceWith(sel); sel.focus();
                 return;
             }
@@ -1289,19 +1056,27 @@ async function _onAction(btn) {
                 } catch (e) { alert('刪除失敗：' + (e.message || e)); }
                 return;
             }
+            if (act === 'stages') return _openStages();
             if (act === 'row-add') {
-                const tb = document.querySelector('#ts-mine-add tbody');
-                if (tb) tb.insertAdjacentHTML('beforeend', _newRowHtml().repeat(5));   // owner：一次五列
+                const host = document.getElementById('ts-mine-host');
+                if (host) appendBlankRows(host);   // owner：一次五列
                 return;
             }
-            if (act === 'row-remove') return _mineRemove(btn.closest('tr'));
+            if (act === 'row-remove') {
+                const host = document.getElementById('ts-mine-host');
+                if (host && await removeRow(host, btn.closest('tr'), { tfetch })) _mineTotals();
+                return;
+            }
             if (act === 'copy-yesterday') {
-                const tb = document.querySelector('#ts-mine-add tbody');
-                if (!tb || !_mineCache) return;
-                [...tb.querySelectorAll('.ts-mine-row')].filter(tr => !tr.querySelector('[data-f="project"]').value).forEach(tr => tr.remove());
-                (_mineCache.yesterday || []).forEach(i => tb.insertAdjacentHTML('beforeend',
-                    _newRowHtml({ project: i.project_name, work_type: i.work_type, note: i.task_note, planned: i.planned_hours, hours: '' })));
-                [...tb.querySelectorAll('.ts-mine-row:not([data-id])')].forEach(_mineScheduleSave);   // 有計畫的立刻存成今天的計畫
+                const host = document.getElementById('ts-mine-host');
+                if (!host || !_mineCache) return;
+                dropEmptyRows(host);
+                (_mineCache.yesterday || []).forEach(i => {
+                    const tr = appendRow(host, { project: i.project_name, project_id: i.project_id, work_type: i.work_type, stage_id: i.stage_id, stage_name: i.stage_name,
+                                                 note: i.task_note, planned: i.planned_hours, hours: '' });
+                    if (tr) saveRowNow(host, tr);   // 有計畫的立刻存成今天的計畫
+                });
+                appendBlankRows(host);
                 return;
             }
             if (act === 'toggle-manual') {

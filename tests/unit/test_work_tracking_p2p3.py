@@ -57,9 +57,13 @@ def test_missing_and_digest_text():
 
 def test_endpoints_are_thin_and_gated():
     src = code_only(repo_src("routers/api_timesheets.py"))
-    for fn in ("async def project_file(", "async def compare_projects(", "async def person_file(",
+    for fn in ("async def compare_projects(", "async def person_file(",
                "async def dashboard(", "async def export_csv("):
         assert 'check_admin_or_module(request, "timesheets")' in func_body(src, fn), fn
+    # 2026-09-05（JOURNAL_WORKLOG_PLAN §10）：專案檔案頁開放給綁定人員唯讀 —— 守衛換成
+    # 「timesheets 模組或綁定人員」那一支；那支裡面仍是同一句模組守衛先試
+    assert "_ts_or_bound(request)" in func_body(src, "async def project_file(")
+    assert 'check_admin_or_module(request, "timesheets")' in func_body(src, "async def _ts_or_bound(")
     assert "project_metrics(metrics_input(rows))" in func_body(src, "async def project_file(")
     assert "similar_projects(" in func_body(src, "async def project_file(")
     assert "project_metrics(metrics_input(" in func_body(src, "async def compare_projects(")
@@ -96,7 +100,10 @@ def test_tab_wires_the_new_views():
                  "/api/v1/timesheets/project_budget", "/api/v1/timesheets/export.csv?",
                  "/api/v1/timesheets/digest"):
         assert path in code, path
+    # 2026-09-05：專案檔案的鈕（加入比較／改預算／匯出）畫在 js/shared/ts-projects.js，動作仍由 tab 的 _onAction 接
+    shared = repo_src("frontend/js/shared/ts-projects.js")
     for act in ("open-project", "open-person", "compare-add", "budget", "export-month", "digest-send"):
-        assert f"data-ts-action=\"{act}\"" in js, act
+        assert f"data-ts-action=\"{act}\"" in js + shared, act
+        assert f"act === '{act}'" in code, f"tab 沒接 {act}"
     # 停滯／未對映徽章與可點案名
     assert "ts-badge warn" in js and "class=\"ts-link\"" in js

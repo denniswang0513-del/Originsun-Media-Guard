@@ -14,6 +14,7 @@ from . import cash       # noqa: F401  收支明細 + 應付/應收 + 收款↔�
 from . import cash_splits  # noqa: F401  收支拆項（帳目一筆、內容拆裂；依賴 cash/finance）
 from . import payments   # noqa: F401  請款單 + 預支款 + 批次付款
 from . import taxonomy   # noqa: F401  私帳收支分類樹（/cash-taxonomy）
+from . import work_stages  # noqa: F401  工作階段（/work-stages；路徑獨立，順序無關）
 from . import invoice_files  # noqa: F401  電子發票檔（上傳/下載/分享連結）＋發票根目錄設定
 from . import showcase   # noqa: F401  Showcase + token 編輯 + Site API
 from . import works      # noqa: F401  1:N 作品子端點（依賴 projects/showcase，須在其後）

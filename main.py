@@ -573,6 +573,21 @@ async def _on_startup():
                         ("timesheets", "edited_at", "TIMESTAMPTZ"),
                         ("timesheets", "edited_by", "VARCHAR(64)"),
                         ("timesheets", "remark", "TEXT"),
+                        # 工作階段＋待辦互連（docs/JOURNAL_WORKLOG_PLAN.md §12／§2-C4）；work_stage_nodes 新表由 create_all 建
+                        ("timesheets", "stage_id", "VARCHAR(32)"),
+                        ("timesheets", "stage_name", "VARCHAR(64)"),
+                        ("timesheets", "bulletin_id", "VARCHAR(32)"),
+                        # 週記草稿→送出（§13）＋ 條目掛案子／求助標記（§2-B3／B4）；journal_replies 新表由 create_all 建
+                        ("work_journals", "status", "VARCHAR(16)"),
+                        ("work_journals", "submitted_at", "TIMESTAMPTZ"),
+                        ("journal_wins", "project_id", "VARCHAR(32)"),
+                        ("journal_wins", "flag", "VARCHAR(16)"),
+                        ("journal_challenges", "project_id", "VARCHAR(32)"),
+                        ("journal_challenges", "flag", "VARCHAR(16)"),
+                        ("journal_learnings", "project_id", "VARCHAR(32)"),
+                        ("journal_learnings", "flag", "VARCHAR(16)"),
+                        ("journal_others", "project_id", "VARCHAR(32)"),
+                        ("journal_others", "flag", "VARCHAR(16)"),
                         # 影像紀錄：子資料夾名（首次生成後固定，見 media_log._ensure_folder_name）
                         ("project_media_log", "folder_name", "VARCHAR(255)"),
                         # 提案庫資產夾名（core.project_folders，2026-08-06）
@@ -627,6 +642,15 @@ async def _on_startup():
                             await _s.commit()
                         except Exception:
                             await _s.rollback()
+                    # 既有週誌視為已送出（§13）：status 欄剛加上去是 NULL；程式建的殼一定帶 status，
+                    # 所以重跑命中 0 列（冪等）
+                    try:
+                        await _s.execute(_t(
+                            "UPDATE work_journals SET status='submitted', "
+                            "submitted_at=COALESCE(updated_at, created_at) WHERE status IS NULL"))
+                        await _s.commit()
+                    except Exception:
+                        await _s.rollback()
                     # 參考影片引用：舊 preprod_proposal_refs → preprod_reference_links
                     # （階段 3 一次性、冪等；舊表保留不再寫入，見 models.py 該類 docstring）
                     try:
@@ -1008,6 +1032,18 @@ async def _on_startup():
                 await backfill_category_map_entity(_ftax)
         except Exception as _e_tax:
             print(f"[startup] cash taxonomy seed failed: {_e_tax}")
+
+    # ── 種子：工作階段（每個分類自己的階段清單；**只在表空時寫**，之後 owner 在編輯器改）──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _fws = get_session_factory()
+            if _fws:
+                from routers.crm.work_stages import seed_if_empty as _seed_stages
+                async with _fws() as _sws:
+                    await _seed_stages(_sws)
+        except Exception as _e_ws:
+            print(f"[startup] work stage seed failed: {_e_ws}")
 
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())

@@ -74,6 +74,9 @@ class WorkJournal(Base):
     id = Column(String(32), primary_key=True)                    # uuid4 hex
     username = Column(String(64), index=True, nullable=False)    # token sub（users.username）
     week_start = Column(Date, index=True, nullable=False)        # 該週週一
+    # 草稿→送出（docs/JOURNAL_WORKLOG_PLAN.md §13）：draft／submitted；migration 把既有列補成 submitted
+    status = Column(String(16), nullable=True, default="draft")
+    submitted_at = Column(DateTime(timezone=True), nullable=True)   # 再送出會更新
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -88,6 +91,8 @@ class JournalWin(Base):
     id = Column(String(32), primary_key=True)                    # uuid4 hex
     journal_id = Column(String(32), index=True, nullable=False)  # soft FK → work_journals.id
     content = Column(Text)
+    project_id = Column(String(32), nullable=True)               # 掛案子（§2-B3；soft FK → crm_projects.id）
+    flag = Column(String(16), nullable=True)                     # help／discuss（§2-B4；core.journal_logic.ENTRY_FLAGS）
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -99,6 +104,8 @@ class JournalChallenge(Base):
     id = Column(String(32), primary_key=True)                    # uuid4 hex
     journal_id = Column(String(32), index=True, nullable=False)  # soft FK → work_journals.id
     content = Column(Text)
+    project_id = Column(String(32), nullable=True)               # 掛案子（§2-B3；soft FK → crm_projects.id）
+    flag = Column(String(16), nullable=True)                     # help／discuss（§2-B4；core.journal_logic.ENTRY_FLAGS）
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -110,6 +117,8 @@ class JournalLearning(Base):
     id = Column(String(32), primary_key=True)                    # uuid4 hex
     journal_id = Column(String(32), index=True, nullable=False)  # soft FK → work_journals.id
     content = Column(Text)
+    project_id = Column(String(32), nullable=True)               # 掛案子（§2-B3；soft FK → crm_projects.id）
+    flag = Column(String(16), nullable=True)                     # help／discuss（§2-B4；core.journal_logic.ENTRY_FLAGS）
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -121,7 +130,23 @@ class JournalOther(Base):
     id = Column(String(32), primary_key=True)                    # uuid4 hex
     journal_id = Column(String(32), index=True, nullable=False)  # soft FK → work_journals.id
     content = Column(Text)
+    project_id = Column(String(32), nullable=True)               # 掛案子（§2-B3；soft FK → crm_projects.id）
+    flag = Column(String(16), nullable=True)                     # help／discuss（§2-B4；core.journal_logic.ENTRY_FLAGS）
     sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class JournalReply(Base):
+    """主管對週記某一條的回覆（§2-B5）。回覆不改原文；(entry_table, entry_id) 指到四張條目表之一。
+    條目在 PUT 全量替換時盡量沿用 id（帶 id 或內容相同），回覆才跟得住。"""
+    __tablename__ = "journal_replies"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    journal_id = Column(String(32), index=True, nullable=False)  # soft FK → work_journals.id
+    entry_table = Column(String(32), nullable=False)             # journal_wins／journal_challenges／journal_learnings／journal_others
+    entry_id = Column(String(32), index=True, nullable=False)
+    username = Column(String(64), nullable=False)                # 回覆的人（token sub）
+    content = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -20,11 +20,12 @@
     }
     #ts-root .ts-card h3 { color: #ddd; font-size: 14px; margin: 0 0 10px 0; font-weight: 600; }
     #ts-root table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-    #ts-root th {
+    /* Sheet 式格子（table.ts-sheet）的格線／列號／藍框由 js/shared/ts-sheet.js 自帶，這裡的通用 th/td 不套它 */
+    #ts-root table:not(.ts-sheet) th {
         text-align: left; color: #888; font-weight: 500; padding: 6px 8px;
         border-bottom: 1px solid #333; white-space: nowrap;
     }
-    #ts-root td { padding: 6px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc; }
+    #ts-root table:not(.ts-sheet) td { padding: 6px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc; }
     #ts-root td.num, #ts-root th.num { text-align: right; font-variant-numeric: tabular-nums; }
     #ts-root .ts-pct {
         display: inline-block; min-width: 64px; text-align: right; padding: 2px 8px;
@@ -60,36 +61,9 @@
         font-size: 22px; cursor: pointer; line-height: 1; }
     #ts-root .ts-modal-x:hover { color: #eee; }
 
-    /* 我的一天「新增」：像 Google Sheet 的格子 —— 格線、格子填滿、選到的格子藍框、左邊列號 */
-    #ts-root table.ts-sheet { table-layout: fixed; border-collapse: collapse; counter-reset: sheetrow; background: #1b1b1b; }
-    #ts-root table.ts-sheet th, #ts-root table.ts-sheet td { border: 1px solid #3a3a3a; padding: 0; height: 32px; }
-    #ts-root table.ts-sheet th { background: #262626; color: #bbb; font-weight: 500; font-size: 12px; text-align: center; padding: 6px 4px; }
-    /* # | 專案 | 分類 | 做了什麼 | 備註 | 起 | 訖 | 實際 | 計畫 | 狀態 | × */
-    #ts-root table.ts-sheet th:nth-child(2) { width: 20%; }
-    #ts-root table.ts-sheet th:nth-child(3) { width: 104px; }
-    #ts-root table.ts-sheet th:nth-child(5) { width: 18%; }
-    #ts-root table.ts-sheet th:nth-child(6), #ts-root table.ts-sheet th:nth-child(7) { width: 96px; }
-    #ts-root table.ts-sheet th:nth-child(8), #ts-root table.ts-sheet th:nth-child(9) { width: 72px; }
-    #ts-root table.ts-sheet th:nth-child(10) { width: 60px; }
+    /* 我的一天的 Sheet 式格子：樣式在 js/shared/ts-sheet.js（與 /my.html 同一份，這裡不再放第二份） */
     /* 逐日／時間軸表：內容靠左（owner 2026-09-03） */
     #ts-root table.ts-daylog th, #ts-root table.ts-daylog td { text-align: left; vertical-align: top; }
     #ts-root table.ts-daylog th.num, #ts-root table.ts-daylog td.num { text-align: right; }
-    #ts-root table.ts-sheet td.ts-sheet-state { font-size: 11px; color: #777; text-align: center; white-space: nowrap; padding: 0 4px; }
-    #ts-root table.ts-sheet tr[data-readonly] td { color: #888; background: #1f1f1f; }
-    #ts-root table.ts-sheet td input:disabled, #ts-root table.ts-sheet td select:disabled, #ts-root table.ts-sheet td input[readonly] { color: #888; opacity: 1; }
-    #ts-root table.ts-sheet td input, #ts-root table.ts-sheet td select {
-        width: 100%; height: 32px; box-sizing: border-box; margin: 0; padding: 4px 8px;
-        background: transparent; border: none; border-radius: 0; color: #eee; font-size: 13px; font-family: inherit;
-    }
-    #ts-root table.ts-sheet td input[type="number"] { text-align: right; }
-    #ts-root table.ts-sheet td input[type="time"] { color-scheme: dark; text-align: center; }
-    #ts-root table.ts-sheet td select option { background: #1b1b1b; }
-    #ts-root table.ts-sheet td:focus-within { outline: 2px solid #3b82f6; outline-offset: -2px; background: #1f2937; }
-    #ts-root table.ts-sheet tbody tr:hover td { background: #202020; }
-    #ts-root table.ts-sheet .ts-sheet-num { width: 34px; background: #262626; color: #777; text-align: center; font-size: 11px; }
-    #ts-root table.ts-sheet tbody tr { counter-increment: sheetrow; }
-    #ts-root table.ts-sheet tbody td.ts-sheet-num::before { content: counter(sheetrow); }
-    #ts-root table.ts-sheet .ts-sheet-del { width: 30px; text-align: center; border-left: none; background: transparent; border-color: transparent; }
-    #ts-root table.ts-sheet .ts-sheet-del button { background: none; border: none; color: #666; cursor: pointer; font-size: 14px; }
-    #ts-root table.ts-sheet .ts-sheet-del button:hover { color: #f87171; }
+    #ts-root tr.ts-month td { background: #262626; }
 </style>
