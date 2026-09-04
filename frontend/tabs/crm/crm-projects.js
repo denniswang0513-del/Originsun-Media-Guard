@@ -35,6 +35,7 @@ const _openDelivery = (pid) => loadDeliveryTab(pid, {
     host: document.getElementById('proj-detail-delivery'), fetcher: _fetch });
 import { loadProjectTypes } from './crm-projects-core.js';
 import { loadInvoicesTab } from './crm-projects-invoices.js';
+import { loadPayTab } from './crm-projects-pay.js';
 import { loadCostGroups, renderGroupSwitcher, initCostGroupsHandlers } from './crm-projects-cost-groups.js';
 
 // ── 回呼串接（解耦跨模組依賴） ──────────────────────────────
@@ -49,7 +50,7 @@ function _reloadActiveDetailTab(projectId) {
     else if (tab === 'plan') _loadPlanTab(projectId);
     else if (tab === 'refs') _loadRefsTab(projectId);
     else if (tab === 'delivery') _openDelivery(projectId);
-    else if (tab === 'team') { _loadCostStaff(projectId); _loadAdvances(projectId); }
+    else if (tab === 'team') loadPayTab(projectId);        // 收付款（人員配置＋發票併在一頁）
     else if (tab === 'invoices') loadInvoicesTab(projectId);
     // info/finance 由 renderDetail 涵蓋、quotes 由 selectProject 的 loadQuotations 涵蓋
 }
@@ -67,6 +68,7 @@ callbacks.loadQuotations = loadProjectQuotes;
 callbacks.loadFinancialSummary = _loadFinancialSummary;
 callbacks.loadCostStaff = _loadCostStaff;
 callbacks.loadAdvances = _loadAdvances;
+callbacks.loadPayTab = loadPayTab;
 callbacks.closeDetail = closeDetail;
 callbacks.loadCostGroups = loadCostGroups;
 callbacks.renderGroupSwitcher = renderGroupSwitcher;
@@ -349,7 +351,7 @@ export async function initCrmProjectsTab() {
             document.getElementById('proj-detail-quotes').classList.toggle('hidden', tab !== 'quotes');
             document.getElementById('proj-detail-team').classList.toggle('hidden', tab !== 'team');
             if (tab === 'quotes' && state.selectedId) { loadProjectQuotes(state.selectedId); }
-            if (tab === 'team' && state.selectedId) { _loadCostStaff(state.selectedId); _loadAdvances(state.selectedId); }
+            if (tab === 'team' && state.selectedId) { loadPayTab(state.selectedId); }
             document.getElementById('proj-detail-invoices').classList.toggle('hidden', tab !== 'invoices');
             if (tab === 'invoices' && state.selectedId) { loadInvoicesTab(state.selectedId); }
             document.getElementById('proj-detail-finance').classList.toggle('hidden', tab !== 'finance');

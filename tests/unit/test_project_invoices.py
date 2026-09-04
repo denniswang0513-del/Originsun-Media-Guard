@@ -172,13 +172,18 @@ def test_voided_and_payable_invoices_stay_out_of_the_summary():
 # ── 分頁三處要同步 ────────────────────────────────────────────
 
 def test_the_tab_is_wired_in_all_three_places():
-    """按鈕、容器、切換 handler 缺任一個，分頁就是點了沒反應（而且不報錯）。"""
+    """發票 2026-09-04 起併進「收付款」分頁（owner：人員配置改成收付款、與發票整合）：
+    按鈕只剩 team＝收付款、內容嵌在 #proj-pay-invoices、切換由 loadPayTab 帶。缺任一個，分頁就是點了沒反應（而且不報錯）。"""
     html = repo_src(HTML)
-    assert 'data-tab="invoices"' in html, "沒有分頁按鈕"
-    assert 'id="proj-detail-invoices"' in html, "沒有內容容器"
+    assert 'data-tab="invoices"' not in html, "發票分頁按鈕已併進收付款，不該再有"
+    assert 'data-tab="team"' in html and ">收付款<" in html, "收付款分頁按鈕"
     main = js_code_only(repo_src(MAIN))
-    assert "'proj-detail-invoices'" in main, "切換時沒有處理這個容器"
-    assert "loadInvoicesTab" in main, "沒有接上載入函式"
+    assert "loadPayTab(state.selectedId)" in main and "callbacks.loadPayTab = loadPayTab" in main
+    pay = js_code_only(repo_src("frontend/tabs/crm/crm-projects-pay.js"))
+    assert "loadInvoicesTab(projectId, 'proj-pay-invoices')" in pay, "發票要嵌進收付款"
+    assert 'id="proj-pay-invoices"' in repo_src("frontend/tabs/crm/crm-projects-detail.js")
+    inv = js_code_only(repo_src(JS))
+    assert "export async function loadInvoicesTab(projectId, hostId)" in inv and "document.getElementById(_hostId)" in inv
 
 
 def test_switching_project_reloads_an_open_invoice_tab():
@@ -187,8 +192,8 @@ def test_switching_project_reloads_an_open_invoice_tab():
     main = js_code_only(repo_src(MAIN))
     i = main.index("function _reloadActiveDetailTab")
     seg = main[i:main.index("callbacks.renderDetail", i)]
-    assert "invoices" in seg and "loadInvoicesTab" in seg, \
-        "換專案時發票分頁不會跟著換 —— 會看到上一個案子的發票"
+    assert "tab === 'team'" in seg and "loadPayTab(projectId)" in seg, \
+        "換專案時收付款分頁不會跟著換 —— 會看到上一個案子的發票與請款"
 
 
 # ── 發票本這一側：綁了就要看得見（owner 2026-08-23）──────────

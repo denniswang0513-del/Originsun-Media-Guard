@@ -331,8 +331,10 @@ _P.del = async (id) => {
 };
 
 /** 分頁入口。專案換了就整頁重畫（跟其他 lazy 分頁同一個約定）。 */
-export async function loadInvoicesTab(projectId) {
-    const host = document.getElementById('proj-detail-invoices');
+let _hostId = 'proj-detail-invoices';
+export async function loadInvoicesTab(projectId, hostId) {
+    if (hostId) _hostId = hostId;            // 收付款分頁把發票嵌進 #proj-pay-invoices
+    const host = document.getElementById(_hostId);
     if (!host || !projectId) return;
     host.innerHTML = '<div style="color:#888;padding:20px;">載入中…</div>';
     try {
@@ -366,7 +368,7 @@ export async function loadInvoicesTab(projectId) {
 
 /** 只重畫，不重抓 —— 開完票之後用得到。 */
 function _renderTab() {
-    const host = document.getElementById('proj-detail-invoices');
+    const host = document.getElementById(_hostId);
     if (!host) return;
     host.innerHTML = `
       <div style="padding:14px;">
@@ -382,4 +384,4 @@ function _renderTab() {
       <div id="proj-inv-modal" class="crm-modal-overlay" style="display:none;"></div>`;
 }
 
-_P.reload = (id) => { const pid = id || _cur?.id; if (pid) loadInvoicesTab(pid); };
+_P.reload = (id) => { const pid = id || _cur?.id; if (pid) { loadInvoicesTab(pid); window._projPay?.refresh?.(); } };

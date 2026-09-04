@@ -1994,3 +1994,35 @@
     color: #7fb0dd; border: 1px solid #2f4d68; background: #1b2a38;
     vertical-align: 1px;
 }
+
+
+/* ── 專案詳情「收付款」分頁（crm-projects-pay.js）── */
+.ppay-strip { padding: 4px 0 6px; }
+.ppay-kpis { display: grid; grid-template-columns: repeat(8, 1fr); border: 1px solid #2e2e2e; border-radius: 8px; overflow: hidden; }
+.ppay-kpi { padding: 10px 12px; border-right: 1px solid #2e2e2e; background: #1e1e1e; min-width: 0; }
+.ppay-kpi:last-child { border-right: 0; }
+.ppay-l { color: #8b8f96; font-size: 11px; }
+.ppay-v { font-size: 17px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ppay-s { color: #6b7280; font-size: 11px; margin-top: 2px; }
+.ppay-kpi.hl .ppay-v { color: #3b82f6; }
+.ppay-kpi.good .ppay-v { color: #86efac; }
+.ppay-kpi.warn .ppay-v { color: #fbbf24; }
+.ppay-kpi.bad .ppay-v { color: #fca5a5; }
+.ppay-next { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; }
+.ppay-next-t { color: #8b8f96; font-size: 12px; }
+.ppay-hint { display: inline-flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; border-radius: 6px; background: #1e1e1e; border: 1px solid #3a3a3a; font-size: 12px; }
+.ppay-hint.warn { border-color: rgba(251,191,36,.45); }
+.ppay-hint.bad { border-color: rgba(252,165,165,.45); }
+.ppay-hint.good { border-color: rgba(134,239,172,.35); color: #8b8f96; }
+.ppay-sec { margin-top: 16px; border-top: 1px solid #2e2e2e; padding-top: 12px; }
+.ppay-sh { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.ppay-h { font-size: 12px; font-weight: 700; color: #6b7280; }
+.ppay-sub { color: #5f6470; font-size: 11px; }
+.ppay-checks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ppay-ck { padding: 8px 10px; border: 1px solid #2e2e2e; border-radius: 8px; background: #1e1e1e; display: flex; gap: 10px; align-items: flex-start; font-size: 12px; }
+.ppay-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; background: #3a3a3a; }
+.ppay-ck.ok .ppay-dot { background: #86efac; }
+.ppay-ck.no .ppay-dot { background: #fca5a5; }
+.ppay-ck-l { font-weight: 500; }
+.ppay-ck-s { color: #8b8f96; font-size: 11px; }
+@media (max-width: 1100px) { .ppay-kpis { grid-template-columns: repeat(4, 1fr); } .ppay-kpi:nth-child(4) { border-right: 0; } .ppay-kpi:nth-child(-n+4) { border-bottom: 1px solid #2e2e2e; } .ppay-checks { grid-template-columns: 1fr 1fr; } }

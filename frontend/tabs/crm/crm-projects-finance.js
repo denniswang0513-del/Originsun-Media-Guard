@@ -563,6 +563,7 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
             });
             overlay.remove();
             if (opts.onDone) { opts.onDone(); } else { _loadCostStaff(state.selectedId); }
+            window._projPay?.refresh?.();
         } catch (e) {
             alert('建立失敗：' + e.message);
             btn.disabled = false; btn.textContent = '確定';
@@ -603,6 +604,7 @@ function _costAfterPay(onDone) {
     if (ov) ov.remove();
     if (onDone) { onDone(); }
     else if (state.selectedId) { _loadCostStaff(state.selectedId); }
+    window._projPay?.refresh?.();          // 收付款分頁的狀態列／提示／結案檢查跟著變
 }
 
 window._costPayMark = async function(id, paid, onDone) {

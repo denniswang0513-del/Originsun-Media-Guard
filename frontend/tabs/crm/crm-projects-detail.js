@@ -444,28 +444,49 @@ function renderDetail(project) {
         : '<span class="crm-prop-value empty">未指派</span>';
 
     document.getElementById('proj-detail-team').innerHTML = `
-        <div class="crm-detail-prop">
-            <div class="crm-prop-label">AM</div>
-            <div class="crm-prop-value" id="proj-am-display"><span class="pi-edit-cell" data-field="am_username" onclick="window._projEdit(this)" style="cursor:pointer;display:inline-block;">${_amHtmlT}</span></div>
+        <div id="proj-pay-strip" class="ppay-strip">載入中...</div>
+        <div class="ppay-sec">
+            <div class="ppay-sh"><span class="ppay-h">收款</span><span class="ppay-sub">本案的發票，和它連到的匯款</span></div>
+            <div id="proj-pay-invoices"></div>
         </div>
-        <div class="crm-detail-prop">
-            <div class="crm-prop-label">PM</div>
-            <div class="crm-prop-value" id="proj-pm-display"><span class="pi-edit-cell" data-field="pm_usernames" onclick="window._projEdit(this)" style="cursor:pointer;display:inline-block;">${_pmHtmlT}</span></div>
-        </div>
-        <div style="margin-top:12px;border-top:1px solid #2e2e2e;padding-top:12px;">
-            <div style="margin-bottom:8px;">
-                <span style="font-size:12px;font-weight:700;color:#6b7280;">執行人員</span>
+        <div class="ppay-sec">
+            <div class="ppay-sh"><span class="ppay-h">付款</span><span class="ppay-sub">執行人員一列一人：未請款 → 已請款 → 已付款；動作沿用專案帳目那組</span></div>
+            <div class="crm-detail-prop">
+                <div class="crm-prop-label">AM</div>
+                <div class="crm-prop-value" id="proj-am-display"><span class="pi-edit-cell" data-field="am_username" onclick="window._projEdit(this)" style="cursor:pointer;display:inline-block;">${_amHtmlT}</span></div>
             </div>
-            <div id="proj-cost-staff">載入中...</div>
-        </div>
-        <div style="margin-top:12px;border-top:1px solid #2e2e2e;padding-top:12px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <span style="font-size:12px;font-weight:700;color:#6b7280;">預支款</span>
-                <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._costCreateAdvance()">+ 新增預支</button>
+            <div class="crm-detail-prop">
+                <div class="crm-prop-label">PM</div>
+                <div class="crm-prop-value" id="proj-pm-display"><span class="pi-edit-cell" data-field="pm_usernames" onclick="window._projEdit(this)" style="cursor:pointer;display:inline-block;">${_pmHtmlT}</span></div>
             </div>
-            <div id="proj-advance-list">載入中...</div>
+            <div style="margin-top:12px;border-top:1px solid #2e2e2e;padding-top:12px;">
+                <div style="margin-bottom:8px;">
+                    <span style="font-size:12px;font-weight:700;color:#6b7280;">執行人員</span>
+                </div>
+                <div id="proj-cost-staff">載入中...</div>
+            </div>
+            <div style="margin-top:12px;border-top:1px solid #2e2e2e;padding-top:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="font-size:12px;font-weight:700;color:#6b7280;">預支款</span>
+                    <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._costCreateAdvance()">+ 新增預支</button>
+                </div>
+                <div id="proj-advance-list">載入中...</div>
+            </div>
+            <details style="margin-top:12px;border-top:1px solid #2e2e2e;padding-top:10px;" ontoggle="if(this.open) window._projPay?.staff?.()">
+                <summary style="font-size:12px;font-weight:700;color:#6b7280;cursor:pointer;">派工設定（誰做什麼；錢在上面的執行人員）</summary>
+                <div id="proj-staff-list" style="margin-top:8px;">載入中...</div>
+            </details>
+        </div>
+        <div class="ppay-sec">
+            <div class="ppay-sh"><span class="ppay-h">掛在本案的收支</span><span class="ppay-sub">收支明細裡掛到本案（或本案發票）的列</span></div>
+            <div id="proj-pay-cash">載入中...</div>
+        </div>
+        <div class="ppay-sec">
+            <div class="ppay-sh"><span class="ppay-h">結案檢查</span><span class="ppay-sub">四項都綠才算收付結清（目前只提醒，不擋結案）</span></div>
+            <div id="proj-pay-check">載入中...</div>
         </div>
     `;
+    callbacks.loadPayTab?.(project.id);
     callbacks.loadCostStaff?.(project.id);
     callbacks.loadAdvances?.(project.id);
 
