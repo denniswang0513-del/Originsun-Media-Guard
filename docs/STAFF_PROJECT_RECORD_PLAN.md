@@ -1,7 +1,8 @@
 # 專案紀錄整合到人力資源（staff）— 規劃
 
 > 2026-09-05 草案。owner 拍板：專案紀錄的正本住在 staff 底下；員工端（個人工作台、手機「我的工作」）
-> 讀同一份；**不要本週工時**區塊。示範頁：`/demo/my-work.html`（編號對應下文）。
+> 讀同一份；**員工端完全不出現工時數字**（本週工時、當日累計、每案累計、超時——一張卡都不要，owner 2026-09-05）。
+> 記工時是「輸入」，保留；工時報表與超時判讀留在工作追蹤給主管看。示範頁：`/demo/my-work.html`（編號對應下文）。
 
 ## 1. 現況與問題
 
@@ -27,7 +28,7 @@
 |------|---------|---------|
 | 拍攝 | `crm_shoots.crew`（JSON `[{staff_id,name}]`）、`date/end_date/location_text/status` | 拍攝日、地點、場次狀態 |
 | 執行工項 | `crm_project_cost_lines.actual_staff_id`（沒有就 `estimated_staff_id`）、`item_name/phase` | 我的角色（導演／剪輯…）、階段、金額（money 才給） |
-| 工時 | `timesheets.staff_id + project_id`、`work_date/hours/task_note` | 每案累計小時、最近工作內容、首末日 |
+| 工時 | `timesheets.staff_id + project_id`、`work_date/task_note` | 「我有做過這案」的證據、最近工作內容、首末日（**不聚合 hours**） |
 | 上架掛名 | showcase credits（既有 `credit_service.find_projects_by_staff`） | 作品頁連結、掛名角色 |
 | 墊錢 | `crm_project_expenses.staff_id` | 筆數＋是否已核銷（不給金額） |
 | 舊派工 | `crm_project_staff` | **唯讀相容**：歷史資料照列，標「派工（舊）」；不再是主來源 |
@@ -41,12 +42,12 @@
 
 ```
 build_staff_record(session, staff_id, *, money: bool, hide_mine: bool) -> {
-  "summary": {"projects": n, "shoots": n, "hours": h, "credits": n},
+  "summary": {"projects": n, "shoots": n, "credits": n},          # 沒有 hours
   "projects": [{
      "project_id", "name", "client_short_name", "status", "entity", "am",
      "roles": ["剪輯","攝助"], "phases": ["現場拍攝","後期製作"],
      "shoots": [{"date","end_date","location","status"}],
-     "hours": 22.0, "last_task": "定剪 v2", "first_seen": "2026-08-14", "last_seen": "2026-09-04",
+     "last_task": "定剪 v2", "first_seen": "2026-08-14", "last_seen": "2026-09-04",   # 沒有 hours
      "credits": [{"role_zh","showcase_url"}],
      "expenses": {"count": 2, "settled": true},
      "pay_word": "已請款",              # core.crm_logic 那組狀態字；沒 money 也給字不給數
@@ -58,7 +59,7 @@ project_people(session, project_id) -> [{staff_id, name, roles[]}]    # 查專�
 ```
 
 - 純聚合、無寫入；`hide_mine=True` 時私帳案整個不出現（同 `core.ledger.hide_mine_projects`）。
-- 單元測試釘：五個來源都要進 `projects`；同案多筆工項角色合併；沒 money 時 `amounts` 鍵不存在；
+- 單元測試釘：五個來源都要進 `projects`；同案多筆工項角色合併；沒 money 時 `amounts` 鍵不存在；回應裡任何層級都沒有 `hours` 鍵；
   舊派工列標 `legacy=True`。
 
 ## 5. API
@@ -75,8 +76,8 @@ project_people(session, project_id) -> [{staff_id, name, roles[]}]    # 查專�
 ## 6. 前端
 
 **一期｜人力資源詳情「專案紀錄」分頁重做**（`frontend/tabs/crm/crm-staff.js` `_loadStaffProjects`）
-- 頂端 chips：案數、拍攝場次、累計小時、上架作品（money 再加「工項金額合計」）。
-- 每案一張卡：案名｜客戶｜階段 pill；我的角色（工項合併）；拍攝日列；累計小時＋最近工作內容；
+- 頂端 chips：案數、拍攝場次、上架作品（money 再加「工項金額合計」）。工時合計不放這裡，主管看工作追蹤。
+- 每案一張卡：案名｜客戶｜階段 pill；我的角色（工項合併）；拍攝日列；最近工作內容；
   上架掛名連到作品頁；墊錢筆數；帳款狀態字。舊派工列標「派工（舊）」灰字。
 - 篩選：年份、階段（進行中／結案）、角色。
 - 簡歷管理「公司專案」改吃 `record.projects`（角色＝合併後的 roles）。
@@ -125,7 +126,7 @@ project_people(session, project_id) -> [{staff_id, name, roles[]}]    # 查專�
 | 今天 | **今天一條**：拍攝場次（我在 crew）、到期交付、等我處理計數 | `crm_shoots.crew`、`TimesheetConflict`、`PortalComment`、`EquipmentCheckout`、公布欄指派、請假核准結果 | 新，置頂、不可收合 |
 | 我的工作 | **我的案子**：案名｜客戶｜階段、我的角色、下一步、拍攝日；點案名開只讀專案頁（企劃／素材報表／看片／作品頁） | §4 `build_staff_record` | 取代現在的「我的專案」 |
 | 我的工作 | **我的待辦**（公布欄 own-scope） | 既有 | 保留，去 emoji |
-| 我要記錄 | **記工時**：我的一天（當天列）＋「一週整批填」格子 | 工作追蹤既有元件 | 從「工時與薪酬」拆出來；**不做本週工時圖** |
+| 我要記錄 | **記工時**：我的一天（當天列）＋「一週整批填」格子，純輸入 | 工作追蹤既有元件 | 從「工時與薪酬」拆出來；**不顯示任何累計／超時數字** |
 | 我要記錄 | **記雜支／零用金** | 既有零用金卡 | 保留，改名 |
 | 我要記錄 | **請開發票** | 手機 `/m/#invoice` 那套表單（同一份字彙） | 新（桌機也能請同事開票） |
 | 我要記錄 | **登記拍攝／領器材** | 行事曆拍攝場次＋器材登記 | 新（連到行事曆分頁，帶 project 預設） |
@@ -147,3 +148,25 @@ project_people(session, project_id) -> [{staff_id, name, roles[]}]    # 查專�
 （owner 之前拍板「請款要單獨控制」的那把）；團隊兩卡 → 任何有 `User.staff_id` 的登入者。
 
 **分期**：先做「今天 ＋ 我的案子 ＋ 我做過的」（吃 §4 服務，一起上）；再拆「工時與薪酬」成兩卡、拉請開發票與登記拍攝；最後團隊兩卡。
+
+## 11. 功能缺漏建議（員工角度，2026-09-05）
+
+依「現場拍攝 → 後製 → 交付 → 領錢」一天的動線盤，CRM 裡**已有資料但員工端拿不到**的，和**真的沒有**的：
+
+| 缺什麼 | 為什麼員工需要 | 有沒有現成的 | 建議 |
+|--------|--------------|------------|------|
+| **通告單（call sheet）** | 拍攝前一天要知道集合時間、地點、誰來、器材、客戶窗口電話 | 沒有；`crm_shoots` 有時間／地點／crew／器材，客戶聯絡在 `clients` | 從場次一鍵產通告單（頁面＋可複製文字），推到 Google Chat；WORK_OS_BLUEPRINT 有提過 |
+| **個人通知** | 被指派、看片留言、請款已付、請假核准，現在要自己進來翻 | `notifier` 只有任務完成通知；公布欄有指派 | 事件推 Chat／LINE 給本人；每天早上一則「今天」摘要（場次＋等我處理） |
+| **看片留言直接回** | 客戶在審批門戶留言，剪輯師要開另一個系統 | `PortalComment` 有資料，沒有員工端入口 | 「等我處理」點進去就能回、標已處理 |
+| **交付清單** | 結案前常漏：素材備份、Proxy、字幕、母帶、上架 | 結案檢查只管錢（收付款） | 案子詳情加「交付清單」，每項打勾；結案軟擋一併看 |
+| **我借的器材** | 借了什麼、幾號要還、下一場誰要用 | `EquipmentCheckout` 有，只在器材分頁 | 「今天」與「等我處理」帶到期歸還；案子詳情列這案的器材 |
+| **素材／報表／影像紀錄入口** | 後製要找檔案在哪、報表連結、現場照片 | 視覺報表、影像紀錄 token 頁、素材庫都有 | 案子詳情一格列出：NAS 路徑（可複製）、報表、影像紀錄、看片連結 |
+| **企劃／會議記錄／參考片** | 開工前要看企劃書、會議結論、參考片 | 提案企劃、會議記錄、參考影片庫都有 | 案子詳情連過去（唯讀） |
+| **勞報／所得年度累計** | 外包與兼職報稅要對；現在只看得到未付請款 | `crm_payment_requests` payee_type＝勞報 | 「請款與勞報進度」加年度累計與可下載清單（金額只給本人） |
+| **代墊款進度** | 墊了錢不知道核銷到哪 | `crm_project_expenses.staff_id`、`CrmReimbursement` | 零用金卡加「我的代墊：待核／已核／已還」 |
+| **客戶窗口聯絡** | 現場要打電話給客戶窗口 | `clients` 有聯絡人 | 案子詳情給窗口姓名電話（業務授權才顯示） |
+| **交接** | 請假／離職時案子要交給誰 | 沒有 | 案子詳情「交接給」：把我的角色標到另一人、產交接摘要（企劃、素材位置、進度、未完事項） |
+| **問 Claude（案子）** | 「這案上次拍在哪、客戶要求什麼」 | 公布欄有「問 Claude」 | 案子詳情加同一條路，唯讀諮詢 |
+| **個人設定** | 通知走哪裡、密碼、Google 綁定 | 登入頁有部分 | 個人資料卡加「通知偏好」 |
+
+不建議做：打卡鐘（HR H2 明確不做）、工時儀表（owner 拿掉）、員工端任何金額（除本人勞報／代墊）。
