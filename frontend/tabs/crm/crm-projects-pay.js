@@ -181,6 +181,22 @@ export async function loadClosingBanner(projectId, host) {
     box.querySelector('[data-ppay-go-pay]')?.addEventListener('click', () => document.querySelector('#proj-detail-tabs .crm-tab[data-tab="team"]')?.click());
 }
 
+/** 推到結案前的「軟擋」（owner 2026-09-04 採建議：不硬擋，但沒結清要列出來讓人確認）。
+ *  回 true＝可以推；false＝使用者取消。抓不到資料（沒權限）就放行——不能因為看不到錢就不准結案。 */
+export async function confirmClosing(projectId) {
+    if (!projectId) return true;
+    const q = (path) => _fetch(path).catch(() => null);
+    const [proj, inv, pays, lines, adv, exp] = await Promise.all([
+        q('/projects/' + projectId), q('/invoices?project_id=' + encodeURIComponent(projectId)),
+        q('/payments?project_id=' + encodeURIComponent(projectId)), q(`/projects/${projectId}/cost-lines`),
+        q('/payments/advances?project_id=' + encodeURIComponent(projectId)), q(`/projects/${projectId}/expenses`)]);
+    if (!proj) return true;
+    const s = payStatus(proj, inv?.invoices, pays?.payments, lines?.cost_lines);
+    const open = closingChecks(s, adv?.advances, exp?.expenses).filter((c) => !c.ok);
+    if (!open.length) return true;
+    return confirm(`收付還有 ${open.length} 項沒結清：\n${open.map((c) => `• ${c.label}（${c.sub}）`).join('\n')}\n\n仍要推到結案？`);
+}
+
 /** 別的分頁（應付帳款、客戶）直接跳到某案的收付款分頁。 */
 window._crmGoToProjectPay = (projectId) => {
     if (!projectId) return;
@@ -190,6 +206,7 @@ window._crmGoToProjectPay = (projectId) => {
 };
 
 window._projPay = {
+    confirmClosing,
     refresh: () => { if (state.selectedId) loadPayStrip(state.selectedId); },
     staff: () => { if (state.selectedId) _loadProjectStaff(state.selectedId); },
     current: () => _cur,

@@ -530,6 +530,8 @@ async function _advance(host, btn) {
         // 字被靜默丟掉
         const reason = await _confirmAdvance(next, f.missing, f.collectsReason, f.ctx);
         if (reason === null) return;      // 取消
+        // 收付軟擋（CRM 專案詳情的收付款分頁掛在 window，這裡不跨分頁 import；沒掛就不擋）
+        if (['結案', '歸檔'].includes(next) && window._projPay?.confirmClosing && !(await window._projPay.confirmClosing(f.pid))) return;
         const body = { status: next };
         if (reason) body.outcome_reason = reason;
         await tfetch(`/api/v1/crm/projects/${encodeURIComponent(f.pid)}/status`,

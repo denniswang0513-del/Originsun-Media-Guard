@@ -50,6 +50,8 @@ export const list = (k) => (Array.isArray(opt()[k]) ? opt()[k] : []);
 /** 已付款＝payment_statuses 的最後一項（後端排序：應付…→已付）。 */
 export const paidStatus = () => { const l = list('payment_statuses'); return l.length ? l[l.length - 1] : ''; };
 export const lostPhase = () => opt().lost_phase || '';
+/** 哪些階段算結案（推過去前要做收付軟擋）。 */
+export const closedPhases = () => opt().closed_phases || [];
 /** 專案在選擇器／通知裡的名字：「客戶｜案名」（發票、記雜支、行事曆同一條規則）。 */
 export const projectLabel = (p) => [p.client_short_name, p.name].filter(Boolean).join('｜');
 

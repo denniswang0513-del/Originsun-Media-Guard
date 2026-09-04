@@ -173,6 +173,17 @@ window._projEdit = function(cell) {
             }
             window._projDirtyMap['outcome_reason'] = reason.trim();
         }
+        // 收付軟擋（owner 2026-09-04）：推到結案／歸檔時，收付沒結清就列出來要人確認；取消就還原不送
+        if (changed && field === 'status' && CLOSED_STATUSES.includes(val) && !CLOSED_STATUSES.includes(orig) && window._projPay?.confirmClosing) {
+            cell.innerHTML = _projDisplayValue(field, val, fieldDef);
+            window._projPay.confirmClosing(project.id).then((ok) => {
+                if (!ok) { cell.innerHTML = _projDisplayValue(field, orig, fieldDef); return; }
+                window._projDirtyMap[field] = stored;
+                project[field] = stored;
+                window._costScheduleAutoSave?.();
+            });
+            return;
+        }
         if (changed) {
             window._projDirtyMap[field] = stored;
             project[field] = stored;

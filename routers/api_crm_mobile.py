@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from core.auth import check_logged_in, payload_grants
 from core.crm_logic import prepend_note
+from core.project_flow import CLOSED_STATUSES
 from core.finance_logic import (INVOICE_PASSTHROUGH_CATEGORIES, QUOTE_PENDING, QUOTE_STATUSES, VAT_PCT, issue_status_for,
                                 initial_invoice_status, project_type_vocab)
 from core.hr_logic import budget_burn, day_iso
@@ -142,6 +143,7 @@ async def mobile_options(request: Request):
     return {
         "phases": [*PIPELINE, LOST],
         "lost_phase": LOST,                       # 前端據此在推階段前就先要「未成案原因」
+        "closed_phases": [p for p in CLOSED_STATUSES if p != LOST],   # 推到結案前的收付軟擋要認得哪些是結案
         "project_types": project_type_vocab(),
         # full_name／tax_id 給發票表單：選了專案就把抬頭、統編帶進來（owner：表單要「選就好」）
         "clients": [{"id": cid, "short_name": name or "", "full_name": full or "", "tax_id": tid or ""}

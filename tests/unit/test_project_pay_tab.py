@@ -52,3 +52,19 @@ def test_phase_two_and_three_hooks():
     assert "window._crmGoToProjectPay('${_esc(it.project_id)}')" in js_code_only(repo_src("frontend/tabs/crm/crm-payables.js"))
     m = js_code_only(repo_src("frontend/m/views/projects.js"))
     assert "function _payRows(p, d)" in m and "${_payRows(p, d)}" in m and "'amount_receivable' in p" in m, "沒金額權限只剩狀態字"
+
+
+def test_closing_is_soft_blocked_on_every_status_path():
+    """owner 2026-09-04 採建議：結案檢查不硬擋，但推到結案時沒結清要列出來讓人確認。三條推狀態的路都要問：
+    專案詳情狀態欄 inline、提案企劃「推階段」（走 window 不跨分頁 import）、手機版推階段（字彙走 options.closed_phases）。"""
+    pay = js_code_only(repo_src(PAY))
+    fn = between(pay, "export async function confirmClosing(", "window._crmGoToProjectPay")
+    assert "closingChecks(s, adv?.advances, exp?.expenses).filter((c) => !c.ok)" in fn and "return confirm(" in fn
+    assert "if (!proj) return true;" in fn, "抓不到資料（沒權限）要放行"
+    detail = js_code_only(repo_src("frontend/tabs/crm/crm-projects-detail.js"))
+    assert "CLOSED_STATUSES.includes(val) && !CLOSED_STATUSES.includes(orig) && window._projPay?.confirmClosing" in detail
+    flow = js_code_only(repo_src("frontend/tabs/proposals/flow-view.js"))
+    assert "window._projPay.confirmClosing(f.pid)" in flow and "import" not in flow.split("window._projPay.confirmClosing")[0].splitlines()[-1]
+    m = js_code_only(repo_src("frontend/m/views/projects.js"))
+    assert "closedPhases().includes(body.status)" in m and "paidStatus()" in m
+    assert '"closed_phases"' in repo_src("routers/api_crm_mobile.py") and "export const closedPhases" in repo_src("frontend/m/ui.js")

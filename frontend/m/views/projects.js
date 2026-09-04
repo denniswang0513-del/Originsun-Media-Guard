@@ -4,7 +4,7 @@
  * 階段／案型／客戶字彙全部來自 options；金額鍵不在＝被抹掉→不畫。
  */
 import { mfetch, toast, esc, money, fmtDate } from '../shell.js';
-import { state, list, lostPhase, opt, paidStatus, selectOpts, pickerHtml, mountPicker, skeleton, emptyBox, errBox, pill, statusPill,
+import { state, list, lostPhase, closedPhases, opt, paidStatus, selectOpts, pickerHtml, mountPicker, skeleton, emptyBox, errBox, pill, statusPill,
          moneyCell, withBusy, openSheet, closeSheet, embedHost, unembedHost, switchTab, markStale, shouldLoad } from '../ui.js';
 
 const PAGE = 30;
@@ -146,6 +146,15 @@ function actionBox(kind, p) {
             if (!wrap.hidden) {
                 body.outcome_reason = box.querySelector('#pj-reason').value.trim();
                 if (!body.outcome_reason) { toast('請填未成案原因', 'err'); return; }
+            }
+            // 收付軟擋：推到結案時，還有未收的發票或未付的請款就先問（抽屜手上的資料就夠判；沒金額權限也判得出張數）
+            if (closedPhases().includes(body.status) && !closedPhases().includes(p.status)) {
+                const unpaid = (d.payments || []).filter((x) => !x.is_advance && x.payment_status !== paidStatus()).length;
+                const uncollected = (d.invoices || []).filter((x) => x.payment_status && !/收款|撥款/.test(x.payment_status) || x.payment_status === list('invoice_unpaid') ).length;
+                const parts = [];
+                if (uncollected) parts.push(`${uncollected} 張發票未收`);
+                if (unpaid) parts.push(`${unpaid} 張請款未付`);
+                if (parts.length && !confirm(`收付還沒結清：${parts.join('、')}。仍要推到 ${body.status}？`)) return;
             }
             try {
                 await mfetch(`/api/v1/crm/projects/${encodeURIComponent(p.id)}/status`, { method: 'PATCH', body });
