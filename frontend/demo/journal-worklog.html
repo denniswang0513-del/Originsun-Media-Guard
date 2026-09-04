@@ -59,10 +59,22 @@
   table.find th { text-align:left; font-size:11px; color:var(--sub); font-weight:600; padding:6px 8px; border-bottom:1px solid var(--line); }
   table.find td { padding:8px; border-bottom:1px solid #f0f0f0; vertical-align:top; }
   .find-bar { display:flex; gap:8px; align-items:center; margin-bottom:10px; } .find-bar .in { flex:1; }
+  /* 我的一天：照工作追蹤 ts-sheet —— 列號、格線、格子填滿、選到藍框 */
+  table.sheet { width:100%; table-layout:fixed; border-collapse:collapse; counter-reset:r; font-size:13px; }
+  table.sheet th, table.sheet td { border:1px solid var(--line); padding:0; height:32px; }
+  table.sheet th { background:#f5f5f5; color:var(--sub); font-weight:500; font-size:12px; text-align:center; padding:6px 4px; }
+  table.sheet td { padding:0 6px; vertical-align:middle; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  table.sheet td.n { text-align:center; color:var(--sub); font-size:11px; } table.sheet tbody tr td.n::before { counter-increment:r; content:counter(r); }
+  table.sheet td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  table.sheet td.st { font-size:11px; color:var(--sub); text-align:center; }
+  table.sheet td.sel { box-shadow:inset 0 0 0 2px var(--blue); }
+  table.sheet tr.new td { background:var(--soft); }
+  table.sheet td input, table.sheet td select { width:100%; border:0; background:transparent; font:inherit; font-size:13px; padding:0; color:var(--ink); }
+  table.sheet td .stage { color:var(--blue); }
   table.grid { width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed; }
   table.grid th { text-align:left; font-size:12px; color:var(--sub); font-weight:600; padding:8px 8px; border-bottom:1px solid var(--line); } table.grid th small { color:var(--red); margin-left:4px; font-weight:400; }
   table.grid td { padding:8px; border-bottom:1px solid #f0f0f0; vertical-align:top; } table.grid td.who { font-weight:600; }
-  table.grid .c { margin:2px 0 6px; line-height:1.35; } table.grid .c i { display:block; font-style:normal; color:var(--sub); font-size:12px; }
+  table.grid .c { margin:2px 0 6px; line-height:1.35; } table.grid .c i { display:block; font-style:normal; color:var(--sub); font-size:12px; } table.grid .c b { font-weight:600; margin-left:4px; }
   table.grid .c.plan { color:var(--sub); } table.grid .c.shoot { color:var(--blue); background:#eff6ff; border-radius:4px; padding:3px 6px; }
   table.grid .c.out { color:var(--warn); background:#fff7ed; border-radius:4px; padding:3px 6px; } table.grid .c.off { color:var(--sub); background:#f5f5f5; border-radius:4px; padding:3px 6px; }
   table.grid .pill { margin-left:4px; }
@@ -139,7 +151,7 @@
     <div class="block1 rel"><span class="tag n">1</span>
       <div class="views" id="views">
         <button class="view-btn active" data-v="log">今天的專案紀錄<span class="cnt">2 列</span></button>
-        <button class="view-btn" data-v="week">公司的一週<span class="cnt">場次 4</span></button>
+        <button class="view-btn" data-v="week">團隊的一週<span class="cnt">場次 4</span></button>
         <button class="view-btn" data-v="find">專案查詢</button>
       </div>
 
@@ -147,52 +159,53 @@
         <div class="card-head"><span class="ey">Project Log<b>今天的專案紀錄 9/8（一）</b></span>
           <span class="row"><button class="btn sm">‹ 9/5（五）</button><span class="count">今天</span><button class="btn sm" disabled>9/9 ›</button></span></div>
         <div class="row" style="margin-bottom:10px;"><button class="btn sm">從場次帶入</button><button class="btn sm">從待辦帶入（2）</button><button class="btn sm">複製上個工作日</button></div>
-        <table class="day">
-          <thead><tr><th style="width:24%">案子</th><th style="width:10%">分類</th><th>內容</th><th style="width:12%">里程碑</th><th style="width:8%">狀態</th><th style="width:6%"></th></tr></thead>
+        <table class="sheet">
+          <thead><tr><th style="width:28px">#</th><th style="width:17%">專案</th><th style="width:84px">分類</th><th style="width:150px">工作階段</th><th>做了什麼</th><th style="width:14%">備註</th><th style="width:64px">起</th><th style="width:64px">訖</th><th style="width:56px">實際</th><th style="width:56px">計畫</th><th style="width:52px">狀態</th><th style="width:30px"></th></tr></thead>
           <tbody>
-            <tr><td>桃園環保局 循環杯廣告<div class="sub">桃園市環保局</div></td><td>剪接</td><td>初剪 v1 送客戶。看片 <a class="lk" href="#">review/8f2c…</a>　母帶 <span class="path">V:\2026\桃園\初剪\v1</span> <button class="btn sm">複製</button></td><td><span class="pill ms">送審</span></td><td><span class="pill done">實際</span></td><td><button class="btn sm">改</button></td></tr>
-            <tr><td>（公布欄）補上光環境獎花絮照</td><td>行政</td><td>指派：王士源。<span class="sub">標實際時待辦一併完成</span></td><td>—</td><td><span class="pill plan">計畫</span></td><td><button class="btn sm pri">完成</button></td></tr>
-            <tr class="new"><td><input class="in" placeholder="打字找案子…"></td><td><select class="sel"><option>剪接</option><option>拍攝</option><option>前期企劃</option><option>動態／特效</option><option>調光</option><option>聲音</option><option>會議溝通</option><option>行政</option><option>其他</option></select></td><td><input class="in" placeholder="做了什麼（可貼連結、路徑）"></td><td><select class="sel"><option>—</option><option>交付</option><option>送審</option><option>修改回</option><option>上架</option><option>結案</option><option>會議</option><option>備份完成</option></select></td><td><select class="sel"><option>實際</option><option>計畫</option></select></td><td><button class="btn sm">加</button></td></tr>
+            <tr><td class="n"></td><td>桃園環保局 循環杯廣告</td><td>剪接</td><td><span class="stage">後製 › 初剪 › 送審</span></td><td>初剪 v1 送客戶。看片 <a class="lk" href="#">review/8f2c…</a></td><td>母帶 <span class="path">V:\2026\桃園\初剪\v1</span></td><td class="num">09:30</td><td class="num">12:00</td><td class="num">2.5</td><td class="num"></td><td class="st">實際</td><td class="st">×</td></tr>
+            <tr><td class="n"></td><td>南山人壽謝經理</td><td>剪接</td><td><span class="stage">後製 › 定剪 › 修改</span></td><td>定剪 v3，字幕 00:42 依客戶留言改</td><td></td><td class="num">13:00</td><td class="num">15:30</td><td class="num">2.5</td><td class="num"></td><td class="st">實際</td><td class="st">×</td></tr>
+            <tr><td class="n"></td><td>（公布欄）補上光環境獎花絮照</td><td>行政</td><td><span class="stage">行政 › 公布欄待辦</span></td><td>指派：王士源。標實際時待辦一併完成</td><td></td><td class="num"></td><td class="num"></td><td class="num"></td><td class="num">1</td><td class="st">計畫</td><td class="st">×</td></tr>
+            <tr class="new"><td class="n"></td><td class="sel"><input placeholder="打字找案子…"></td><td><select><option>剪接</option><option>拍攝</option><option>前期企劃</option><option>動態／特效</option><option>調光</option><option>聲音</option><option>會議溝通</option><option>行政</option><option>其他</option></select></td><td><select><option>—</option><option>前期 › 企劃</option><option>前期 › 分鏡</option><option>拍攝 › 勘景</option><option>拍攝 › 現場</option><option>後製 › 初剪</option><option>後製 › 初剪 › 送審</option><option>後製 › 定剪</option><option>後製 › 定剪 › 修改</option><option>後製 › 調光</option><option>後製 › 聲音</option><option>交付 › 母帶</option><option>交付 › 上架</option><option>行政 › 公布欄待辦</option></select></td><td><input placeholder="做了什麼（可貼連結、路徑）"></td><td><input placeholder="備註"></td><td><input placeholder="起"></td><td><input placeholder="訖"></td><td><input placeholder="h"></td><td><input placeholder="h"></td><td class="st">實際</td><td class="st"></td></tr>
           </tbody>
         </table>
-        <div class="sub" style="margin-top:8px;">用左上的日期往前翻補記；不顯示合計。</div>
+        <div class="sub" style="margin-top:8px;">格子完全照工作追蹤「我的一天」（列號、格線、起訖、實際／計畫、狀態）；多一欄「工作階段」，字彙是 CRM 裡可編的樹。用左上的日期往前翻補記；這裡不畫合計。</div>
       </div>
 
       <div class="card view" data-view="week">
-        <div class="card-head"><span class="ey">Company Week<b>公司的一週 9/8 – 9/12</b></span>
-          <span class="row"><button class="btn sm">‹</button><input class="in" style="width:130px" value="2026/09/08"><button class="btn sm">›</button><button class="btn sm">本週</button><span class="count" style="margin-left:8px">同工作追蹤「今日看板」的週模式，只是不顯示小時</span></span></div>
+        <div class="card-head"><span class="ey">Team Week<b>團隊的一週 9/8 – 9/12</b></span>
+          <span class="row"><button class="btn sm">‹</button><input class="in" style="width:130px" value="2026/09/08"><button class="btn sm">›</button><button class="btn sm">本週</button><span class="count" style="margin-left:8px">同工作追蹤「今日看板」的週模式，含工時</span></span></div>
         <table class="grid">
           <thead><tr><th style="width:80px">人員</th><th>9/8（一）<small>今天</small></th><th>9/9（二）</th><th>9/10（三）</th><th>9/11（四）</th><th>9/12（五）</th></tr></thead>
           <tbody>
             <tr><td class="who">小葉（我）</td>
-              <td><div class="c">南山人壽謝經理<i>定剪 v3 字幕修正</i></div><div class="c">桃園環保局 循環杯廣告<i>初剪 v1 送客戶</i><span class="pill ms">送審</span></div></td>
-              <td><div class="c plan">桃園環保局 循環杯廣告<i>初剪修改</i></div></td>
+              <td><div class="c">南山人壽謝經理 <b>2.5 h</b><i>定剪 v3 字幕修正</i></div><div class="c">桃園環保局 循環杯廣告 <b>2.5 h</b><i>初剪 v1 送客戶 · 後製 › 初剪 › 送審</i></div></td>
+              <td><div class="c plan">桃園環保局 循環杯廣告 計畫 6 h<i>初剪修改</i></div></td>
               <td><div class="c off">休假</div></td>
               <td><div class="c shoot">桃園環保局 訪談<i>桃園 · 09:30 · 阿弘、小葉</i></div></td>
               <td><div class="c shoot">南山人壽 客戶看片<i>15:00 · 王士源、小葉</i></div></td></tr>
             <tr><td class="who">阿弘</td>
-              <td><div class="c plan">光環境獎 補拍<i>勘景</i></div></td>
+              <td><div class="c plan">光環境獎 補拍 計畫 3 h<i>勘景</i></div></td>
               <td><div class="c shoot">光環境獎 補拍<i>台中 · 08:00 集合 · 阿弘、阿凱</i></div></td>
               <td><div class="c">—</div></td>
               <td><div class="c shoot">桃園環保局 訪談<i>桃園 · 09:30</i></div></td>
               <td><div class="c">—</div></td></tr>
             <tr><td class="who">Amy</td>
-              <td><div class="c">南山人壽謝經理<i>調光</i></div><div class="c">行政庶務<i>器材盤點</i></div></td>
-              <td><div class="c plan">煥民新村開村活動<i>粗剪</i></div></td>
-              <td><div class="c plan">煥民新村開村活動<i>粗剪</i></div></td>
-              <td><div class="c plan">煥民新村開村活動<i>粗剪 v1 送審</i></div></td>
+              <td><div class="c">南山人壽謝經理 <b>5 h</b><i>調光</i></div><div class="c">行政庶務 <b>1.5 h</b><i>器材盤點</i></div></td>
+              <td><div class="c plan">煥民新村開村活動 計畫 8 h<i>粗剪</i></div></td>
+              <td><div class="c plan">煥民新村開村活動 計畫 8 h<i>粗剪</i></div></td>
+              <td><div class="c plan">煥民新村開村活動 計畫 4 h<i>粗剪 v1 送審</i></div></td>
               <td><div class="c">—</div></td></tr>
             <tr><td class="who">阿凱</td>
               <td><div class="c">—</div></td>
               <td><div class="c shoot">光環境獎 補拍<i>台中 · 攝影</i></div></td>
               <td><div class="c">—</div></td><td><div class="c">—</div></td><td><div class="c">—</div></td></tr>
             <tr><td class="who">王士源</td>
-              <td><div class="c out">外出 14:00<i>台新基金會 提案會議</i></div><div class="c">提案企劃<i>光環境獎 2027 企劃書</i></div></td>
+              <td><div class="c out">外出 14:00<i>台新基金會 提案會議</i></div><div class="c">提案企劃 <b>3 h</b><i>光環境獎 2027 企劃書</i></div></td>
               <td><div class="c">—</div></td><td><div class="c">—</div></td><td><div class="c">—</div></td>
               <td><div class="c shoot">南山人壽 客戶看片<i>15:00</i></div></td></tr>
           </tbody>
         </table>
-        <div class="sub" style="margin-top:10px;">填了就出現；有先排計畫的人先看到計畫（淺灰），做完變實際。藍＝行事曆場次（點開看地點、器材）；橘＝外出；灰＝休假。沒填的格子就是「—」，不猜。<b>沒有小時</b>。</div>
+        <div class="sub" style="margin-top:10px;">同工作追蹤「今日看板」週模式：填了就出現、含工時；有先排計畫的人先看到計畫（淺灰），做完變實際。藍＝行事曆場次（點開看地點、器材）；橘＝外出；灰＝休假。沒填的格子就是「—」，不猜。</div>
       </div>
 
       <div class="card view" data-view="find">
@@ -220,11 +233,11 @@
         <div class="card-head"><span class="ey">Mine<b>我的上週回顧</b></span>
           <span class="wk-nav"><button class="btn sm">‹ 前一週</button><span class="count">上週 9/1 – 9/5（還沒寫）</span><button class="btn sm">後一週 ›</button></span></div>
 
-        <div class="q">上週做了什麼 <small>自動從工作紀錄整理，唯讀；勾選可帶進「順利的事」</small></div>
+        <div class="q">上週做了什麼 <small>自動從專案紀錄整理（案子、內容、工作階段），唯讀；勾選可帶進「順利的事」</small></div>
         <div class="wl"><div class="pj">南山人壽謝經理 <span class="sub">4 天</span></div>
-          <ul><li><span class="d">9/1</span>初剪 v2 送客戶 <span class="pill ms">送審</span></li><li><span class="d">9/3</span>客戶留言 2 則，字幕修改 <span class="pill ms">修改回</span></li><li><span class="d">9/5</span>定剪 v3 交件 <span class="pill ms">交付</span> <label><input type="checkbox" checked> 帶入</label></li></ul></div>
+          <ul><li><span class="d">9/1</span>初剪 v2 送客戶 <span class="pill ms">後製 › 初剪 › 送審</span></li><li><span class="d">9/3</span>客戶留言 2 則，字幕修改 <span class="pill ms">後製 › 定剪 › 修改</span></li><li><span class="d">9/5</span>定剪 v3 交件 <span class="pill ms">交付 › 母帶</span> <label><input type="checkbox" checked> 帶入</label></li></ul></div>
         <div class="wl"><div class="pj">桃園環保局 循環杯廣告 <span class="sub">3 天</span></div>
-          <ul><li><span class="d">9/2</span>分鏡確認、客戶會議 <span class="pill ms">會議</span></li><li><span class="d">9/5</span>現場側拍，素材備份 <span class="pill ms">備份完成</span></li></ul></div>
+          <ul><li><span class="d">9/2</span>分鏡確認、客戶會議 <span class="pill ms">前期 › 會議</span></li><li><span class="d">9/5</span>現場側拍，素材備份 <span class="pill ms">拍攝 › 現場 › 備份</span></li></ul></div>
         <div class="wl"><div class="pj">煥民新村開村活動 <span class="sub">1 天</span></div><ul><li><span class="d">9/2</span>素材整理、Proxy</li></ul></div>
 
         <div class="q">順利的事與想感謝的人 <small>一行一條，可掛案子</small></div>
@@ -251,7 +264,7 @@
         <details class="person" open>
           <summary><b>阿弘</b><span class="sub">桃園環保局拍攝順 · 想討論燈光租借</span><span class="pill talk">想討論</span></summary>
           <div class="body">
-            <h5>做了什麼</h5><ul><li>9/2 桃園環保局 分鏡確認 <span class="pill ms">會議</span></li><li>9/5 桃園環保局 現場側拍（導演）</li></ul>
+            <h5>做了什麼</h5><ul><li>9/2 桃園環保局 分鏡確認 <span class="pill ms">前期 › 會議</span></li><li>9/5 桃園環保局 現場側拍（導演）</li></ul>
             <h5>順利的事</h5><ul><li>現場一天收工，客戶在場很滿意。</li></ul>
             <h5>挑戰</h5><ul><li>燈光租借每次都臨時，想討論固定配合的廠商。<span class="pill talk">想討論</span></li></ul>
             <h5>學到了什麼</h5><ul><li>藝文廣場下午逆光，要早上拍。</li></ul>
@@ -284,8 +297,9 @@
   <ol>
     <li><span class="n">0</span><div><b>最上排功能鍵</b><span>零用金、請款、請開發票、登記拍攝、領用器材、請假、福委會；其餘收「更多」。全是既有頁面。</span></div></li>
     <li><span class="n">1</span><div><b>第一區＝三個視圖，按鈕切換（同 CRM 帳務子視圖）</b><span>一次一個、用滿寬；預設開「今天的專案紀錄」。</span></div></li>
-    <li><span class="n">1a</span><div><b>今天的專案紀錄</b><span>案子、分類、內容、里程碑；三顆帶入鈕；往前翻補記。沒有合計。</span><span class="src">既有 /timesheets/mine；新欄 timesheets.tag</span></div></li>
-    <li><span class="n">1b</span><div><b>公司的一週</b><span>週一到週五，每格＝場次（誰去）、外出、休假、各人計畫列。沒排的不猜。</span><span class="src">/shoots?from&to（crew）＋ hr_leave ＋ timesheets(status=plan)；新端點 /me/company_week</span></div></li>
+    <li><span class="n">1a</span><div><b>今天的專案紀錄＝工作追蹤「我的一天」的格子</b><span>列號、格線、專案、分類、工作階段、做了什麼、備註、起訖、實際／計畫、狀態；三顆帶入鈕；往前翻補記。不畫合計。</span><span class="src">既有 ts-sheet 元件 ＋ /timesheets/mine；新欄 timesheets.stage_id</span></div></li>
+    <li><span class="n">1a'</span><div><b>工作階段＝CRM 可編的樹</b><span>像收支分類樹：前期 › 企劃／分鏡；拍攝 › 勘景／現場；後製 › 初剪／定剪／調光／聲音；交付 › 母帶／上架。深度不限、可停用不刪。管理員在 CRM 設定裡改。</span><span class="src">新表 work_stage_nodes（同 cash_taxonomy_nodes 結構）；GET/POST/PUT/DELETE /work-stages/nodes</span></div></li>
+    <li><span class="n">1b</span><div><b>團隊的一週＝今日看板週模式，含工時</b><span>人×日，格子是案名＋工時＋內容，計畫淺灰；疊場次（藍）、外出（橘）、休假（灰）。沒填的不猜。</span><span class="src">既有 GET /timesheets/board?days=7 ＋ shoots crew ＋ hr_leave；守衛放寬到登入＋綁定人員</span></div></li>
     <li><span class="n">1c</span><div><b>專案查詢＝工作追蹤「專案」表，開放給員工</b><span>全公司可查；案名、客戶、年份、誰做的。金額不出現。</span><span class="src">/crm/m/projects?q=（既有）＋ people 欄</span></div></li>
     <li><span class="n">4</span><div><b>我的週記</b><span>預設開上一週；自動區「上週做了什麼」；四問可掛案子、可求助；主管回覆灰底。可寫窗口照原規則（過往、本週、下週），不設截止。</span><span class="src">GET/PUT /journal/mine 加 worklog、project_id、flag、replies</span></div></li>
     <li><span class="n">M</span><div><b>週一提示</b><span>週一進來頂欄一行字「上週回顧還沒寫」，第二區標題亮起；不推播、不擋。其他日子不出現。</span></div></li>
