@@ -30,7 +30,7 @@ export function payStatus(project, invoices, payments, costLines) {
     const contract = Number(p.contract_amount || 0);
     const invoiced = inv.reduce((a, i) => a + Number(i.amount_total || 0), 0);
     const received = Number(p.amount_received || 0), fee = Number(p.transfer_fee || 0);
-    const unreceived = p.amount_receivable != null ? Number(p.amount_receivable) : contract - received - fee;
+    const unreceived = p.amount_receivable != null ? Number(p.amount_receivable) : contract - received;   // received＝客戶匯出毛額（含匯費），匯費只是銀行扣走的
     const groups = groupCostStaff(costLines || [], pays);
     const matched = new Set(groups.filter((g) => g.payment).map((g) => g.payment.id));
     const others = pays.filter((x) => !matched.has(x.id));
@@ -107,7 +107,7 @@ function _strip(s, money, fin = null) {
     return `<div class="ppay-kpis">
         ${tile('合約金額', m(s.contract), '含稅', 'hl')}
         ${tile('已開發票', m(s.invoiced), `${s.invoiceCount} 張`)}
-        ${tile('客戶已匯', m(s.received + s.fee), money && s.fee ? `實入帳 ${m(s.received)} · 匯費 ${m(s.fee)}` : (money ? `實入帳 ${m(s.received)}` : ''), 'good')}
+        ${tile('客戶已匯', m(s.received), money && s.fee ? `實入帳 ${m(s.received - s.fee)} · 匯費 ${m(s.fee)}` : '', 'good')}
         ${tile('未收', m(Math.max(s.unreceived, 0)), `<span class="crm-badge crm-pay-${st === '全額到帳' ? '全額到帳' : '未到帳'}">${_esc(st)}</span>`, s.unreceived > 0 ? 'bad' : '')}
         ${tile('應付合計', m(s.payable), `${s.groups.length} 人${s.others.length ? '＋' + s.others.length + ' 筆其他' : ''}${s.unassigned ? '＋未指派 ' + m(s.unassigned) : ''}`, s.unassigned ? 'warn' : '')}
         ${tile('已付', m(s.paid), `${s.paidCount} 張`, 'good')}

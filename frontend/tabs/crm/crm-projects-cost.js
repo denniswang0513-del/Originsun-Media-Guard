@@ -121,7 +121,6 @@ async function _loadFinancialSummary(projectId) {
               <span>執行預算 <b style="color:#60a5fa;">$${fmtNum(d.execBudget)}</b></span>
               <span>預估雜支 <b>$${fmtNum(d.miscEstimated)}</b>（${d.miscAuto ? `未稅 ${d.miscPct}%` : '子表設定'}）<button class="cda-edit" onclick="window._miscPctModal()">編輯</button></span>
               <span>實際毛利 <b id="cd-anchor-pf"></b></span>
-              <span>距目標 <b id="cd-anchor-gap"></b></span>
               ${f.transfer_fee ? `<span style="color:#6b7280;">帳款匯費 $${fmtNum(f.transfer_fee)}</span>` : ''}
             </div>
             <div class="cost-dash-grid">
@@ -193,14 +192,6 @@ function _fillDashGrid(parts) {
     // 錨點列的實際毛利跟對照表同格同源，inline 編輯後一起動
     set('cd-anchor-pf', '$' + fmtNum(d.actualProfit) + '（' + d.profitPct + '%）',
         profitColor(d.profitPct));
-    // 距目標＝實際毛利 − 目標利潤：負＝超支（owner 會在自己的費用扣掉）、正＝還有餘裕、0＝剛好 20%；
-    // 後面附雜支比預估超／剩多少，讓「超支 682 從哪來」一眼看到（owner 2026-09-05）
-    const gap = d.actualProfit - d.profitTarget;
-    const miscDiff = d.miscActual - d.miscEstimated;
-    const miscNote = miscDiff ? `，雜支${miscDiff > 0 ? '超' : '剩'} $${fmtNum(Math.abs(miscDiff))}` : '';
-    set('cd-anchor-gap',
-        gap < 0 ? `−$${fmtNum(-gap)}（超支${miscNote}）` : gap > 0 ? `+$${fmtNum(gap)}（還有餘裕${miscNote}）` : `$0（剛好${miscNote}）`,
-        gap < 0 ? '#fca5a5' : gap > 0 ? '#86efac' : '#9ca3af');
     // 差額列：花錢欄 剩/超（剩餘雜支就住在雜支欄這格）；推導欄 ±（比計畫好＝綠）
     const setDL = (id, dl) => set(id, dl.text, dl.color);
     setDL('cd-cost-diff', diffLabel(d.costActual - d.costEstimated,

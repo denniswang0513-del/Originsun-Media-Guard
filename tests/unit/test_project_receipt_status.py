@@ -6,9 +6,11 @@ from tests.unit._srcscan import code_only, func_body, repo_src
 
 def test_rule_gross_receipts_against_contract():
     from core.ledger_project import parent_receipt_fields
-    assert parent_receipt_fields(150000, 149970, 30) == (0, "全額到帳")        # 淨入帳＋匯費＝合約
+    # deposit 記的是客戶匯出的毛額（cash_entry_flow ＝ deposit − expense − bank_fee），匯費是從中扣走的，
+    # 拿 deposit 比合約；不能再加 fee（2026-09-04 加過一次 → 東仁社宅溢收 −15，owner 2026-09-05 抓到）
+    assert parent_receipt_fields(150000, 150000, 30) == (0, "全額到帳")        # 客戶匯 150,000、銀行扣 30
     assert parent_receipt_fields(150000, 150000, 0) == (0, "全額到帳")
-    assert parent_receipt_fields(150000, 100000, 30) == (49970, "部分到帳")
+    assert parent_receipt_fields(150000, 100000, 30) == (50000, "部分到帳")
     assert parent_receipt_fields(150000, 0, 0) == (150000, "未到帳")
     assert parent_receipt_fields(150000, 152000, 0) == (-2000, "全額到帳")     # 溢收看得見
 
