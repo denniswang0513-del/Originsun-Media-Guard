@@ -122,13 +122,29 @@ export function blockList(label, arr, blockCls) {
     return `<div class="${blockCls}"><h4>${_esc(label)}</h4><ul>${arr.map(x => `<li>${_renderRich(x)}</li>`).join('')}</ul></div>`;
 }
 
+/** 心情（owner 2026-09-05：讚／愛心／笑）—— 順序與後端 core.journal_logic.REACTION_KINDS 一致。 */
+export const REACTIONS = [['like', '\u{1F44D}'], ['love', '\u2764\uFE0F'], ['laugh', '\u{1F602}']];
+
+/** 一條條目下的心情列；r={like,love,laugh,mine:[]}；canReact=false 只顯示有數字的。 */
+export function reactionBar(r, ids, c = {}, canReact = false) {
+    const d = r || { like: 0, love: 0, laugh: 0, mine: [] };
+    const mine = new Set(d.mine || []);
+    const btns = REACTIONS.map(([k, g]) => {
+        const n = d[k] || 0;
+        if (!canReact && !n) return '';
+        const attrs = canReact ? ` data-react="${k}" data-react-j="${_esc(ids.journalId || '')}" data-react-t="${_esc(ids.entryTable || '')}" data-react-e="${_esc(ids.entryId || '')}"` : ' disabled';
+        return `<button type="button" class="${c.reactBtn || 'react-btn'}${mine.has(k) ? ' on' : ''}"${attrs}>${g}${n ? ` <span class="n">${n}</span>` : ''}</button>`;
+    }).join('');
+    return btns ? `<div class="${c.react || 'react'}">${btns}</div>` : '';
+}
+
 /** 一條回覆（灰底）。 */
 export function replyHtml(r, c = {}) {
     const t = r.created_at ? String(r.created_at).slice(5, 16).replace('T', ' ') : '';
     return `<div class="${c.reply || 'reply'}"><b>${_esc(r.display_name || r.username || '')}</b>${_renderRich(r.content || '')}${t ? `<span class="${c.replyTime || 'reply-t'}">${_esc(t)}</span>` : ''}</div>`;
 }
 
-/** 一區的條目清單（新版：含掛案／旗標／回覆／回覆框）。opts：projectName(id)、canReply、journalId。 */
+/** 一區的條目清單（新版：含掛案／旗標／既有回覆／心情列）。opts：projectName(id)、canReact、reactions、journalId。 */
 export function entryBlock(j, k, label, c, opts = {}) {
     const items = entriesOf(j, k);
     if (!items.length) return '';
@@ -139,8 +155,7 @@ export function entryBlock(j, k, label, c, opts = {}) {
         return `<li>${_renderRich(e.content)}${pj ? ` <span class="${c.pillProj || 'pill-proj'}">${_esc(pj)}</span>` : ''}${
             e.flag && FLAG_LABEL[e.flag] ? ` <span class="${(c.pillFlag || 'pill-flag') + ' ' + e.flag}">${FLAG_LABEL[e.flag]}</span>` : ''}${
             reps.map(r => replyHtml(r, c)).join('')}${
-            opts.canReply && e.id && opts.journalId
-                ? `<div class="${c.replyBox || 'reply-box'}"><textarea rows="1" data-no-paste-image data-reply-j="${_esc(opts.journalId)}" data-reply-t="${entryTable(k)}" data-reply-e="${_esc(e.id)}" placeholder="回覆…"></textarea><button type="button" data-reply-send>回覆</button></div>` : ''}</li>`;
+            e.id ? reactionBar((opts.reactions || {})[e.id], { journalId: opts.journalId, entryTable: entryTable(k), entryId: e.id }, c, !!opts.canReact) : ''}</li>`;
     }).join('')}</ul></div>`;
 }
 
@@ -180,6 +195,7 @@ export const api = {
         return _projOptsPromise;
     },
     week: (start) => _safe(authFetch('/api/v1/journal/week' + _q(start))),
+    react: (body) => _safe(authFetch('/api/v1/journal/react', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
     // 空字串/null 參數自動剔除 — 呼叫端直接把 state 丟進來即可
     learnings: (params) => _safe(authFetch('/api/v1/journal/learnings?' + new URLSearchParams(
         Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v != null))).toString())),

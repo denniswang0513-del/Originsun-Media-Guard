@@ -31,10 +31,10 @@ from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503
 from core.hr_logic import parse_ymd
 from core.journal_logic import (FLAG_SECTIONS, clean_rich_entries, editable_window_ok, flag_counts,
-                                group_worklog, shell_status, status_after_put, unanswered_flagged,
-                                week_start_of)
-from core.schemas import JournalPut, JournalReplyPost
-from db.models import (CrmStaff, JournalChallenge, JournalLearning, JournalOther, JournalReply,
+                                group_worklog, norm_reaction, reaction_summary, shell_status, status_after_put,
+                                unanswered_flagged, week_start_of)
+from core.schemas import JournalPut, JournalReactPost, JournalReplyPost
+from db.models import (CrmStaff, JournalChallenge, JournalLearning, JournalOther, JournalReaction, JournalReply,
                        JournalWin, Timesheet, User, WorkJournal)
 from services.timesheet_lookup import project_names
 from services.timesheet_self import ts_dict
@@ -176,6 +176,22 @@ async def _replies_by_journal(session, journal_ids: list) -> dict:
     return out
 
 
+async def _reactions_by_journal(session, journal_ids: list, me: str) -> dict:
+    """{journal_id: {entry_id: {"like": n, "love": n, "laugh": n, "mine": [kind]}}}（規則在 core.journal_logic.reaction_summary）。"""
+    out = {jid: {} for jid in journal_ids}
+    if not journal_ids:
+        return out
+    rows = (await session.execute(
+        select(JournalReaction.journal_id, JournalReaction.entry_id, JournalReaction.username, JournalReaction.kind)
+        .where(JournalReaction.journal_id.in_(journal_ids)))).all()
+    by = {}
+    for jid, eid, u, k in rows:
+        by.setdefault(jid, []).append((eid, u, k))
+    for jid, lst in by.items():
+        out[jid] = reaction_summary(lst, me)
+    return out
+
+
 async def _get_shell(session, username: str, week: date):
     return (await session.execute(
         select(WorkJournal).where(WorkJournal.username == username)
@@ -188,11 +204,12 @@ async def _mine_payload(session, username: str, week: date, shell) -> dict:
     pnames = await _project_names_for(session, [rich])
     worklog = (await _worklog_by_user(session, [username], week))[username]
     replies = (await _replies_by_journal(session, [shell.id]))[shell.id] if shell is not None else []
+    reactions = (await _reactions_by_journal(session, [shell.id], username))[shell.id] if shell is not None else {}
     return {"week_start": week.isoformat(), **_strings(rich),
             "entries": _with_names(rich, pnames),
             "status": shell_status(shell),
             "submitted_at": _iso(getattr(shell, "submitted_at", None)) if shell is not None else None,
-            "worklog": worklog, "replies": replies,
+            "worklog": worklog, "replies": replies, "reactions": reactions,
             "editable": editable_window_ok(week)}
 
 
@@ -329,6 +346,7 @@ async def week_journals(request: Request, start: str = ""):
         entries = await _entries_by_journal(session, [s.id for s in shells])
         pnames = await _project_names_for(session, list(entries.values()))
         replies = await _replies_by_journal(session, [s.id for s in shells])
+        reactions = await _reactions_by_journal(session, [s.id for s in shells], _me(request))
         worklog = await _worklog_by_user(session, [s.username for s in shells], week)
         submitted = {s.username for s in shells}
         pending = sorted(await _people_candidates(session) - submitted)
@@ -342,6 +360,7 @@ async def week_journals(request: Request, start: str = ""):
             "flags": flag_counts(entries[s.id]),
             "worklog": worklog.get(s.username, []),
             "replies": replies[s.id],
+            "reactions": reactions[s.id],
             "status": "submitted",
             "submitted_at": _iso(s.submitted_at),
             "updated_at": _iso(s.updated_at),
@@ -422,12 +441,14 @@ async def person_journals(request: Request, username: str = "", limit: int = 26)
         entries = await _entries_by_journal(session, [s.id for s in shells])
         pnames = await _project_names_for(session, list(entries.values()))
         replies = await _replies_by_journal(session, [s.id for s in shells])
+        reactions = await _reactions_by_journal(session, [s.id for s in shells], _me(request))
         return {"journals": [{
             "week_start": s.week_start.isoformat(),
             **_strings(entries[s.id]),
             "entries": _with_names(entries[s.id], pnames),
             "flags": flag_counts(entries[s.id]),
             "replies": replies[s.id],
+            "reactions": reactions[s.id],
             "submitted_at": _iso(s.submitted_at),
         } for s in shells]}
 
@@ -436,6 +457,49 @@ async def person_journals(request: Request, username: str = "", limit: int = 26)
 
 # 主管回覆的即時通知：owner 2026-09-05 先拿掉（只在頁面上看到）。要加回來時走個人通道（通知偏好 D3），
 # 不要再用全域 Chat webhook 廣播——那會把每個人的週記回覆都推到同一個群。
+
+
+def _me(request: Request) -> str:
+    """token sub（心情的 mine 判定用）。列表端點已過守衛，這裡只取名字。"""
+    from core.auth import _extract_token
+    return ((_extract_token(request) or {}).get("sub")) or ""
+
+
+@router.post("/react")
+async def react_entry(body: JournalReactPost, request: Request):
+    """對某一條按心情（owner 2026-09-05：讚／愛心／笑）。同一人同一種再按＝取消。只能對送出的週記按。"""
+    payload = check_admin_or_module(request, "journal")
+    who = (payload or {}).get("sub") or ""
+    kind = norm_reaction(body.kind)
+    if not kind:
+        raise HTTPException(status_code=422, detail="kind 只能是 like／love／laugh")
+    if body.entry_table not in _TABLE_MODELS:
+        raise HTTPException(status_code=422, detail=f"entry_table 只能是：{'／'.join(_TABLE_MODELS)}")
+    _key, model = _TABLE_MODELS[body.entry_table]
+    factory = db_factory_or_503()
+    async with factory() as session:
+        shell = await session.get(WorkJournal, body.journal_id)
+        if shell is None:
+            raise HTTPException(status_code=404, detail="找不到這份週記")
+        if shell.status not in (None, "submitted"):
+            raise HTTPException(status_code=409, detail="還沒送出的週記不能按")
+        entry = await session.get(model, body.entry_id)
+        if entry is None or entry.journal_id != shell.id:
+            raise HTTPException(status_code=404, detail="找不到這一條（可能已被改掉）")
+        existing = (await session.execute(
+            select(JournalReaction).where(JournalReaction.entry_id == entry.id)
+            .where(JournalReaction.username == who).where(JournalReaction.kind == kind))).scalar_one_or_none()
+        if existing is not None:
+            await session.delete(existing)
+            on = False
+        else:
+            session.add(JournalReaction(id=uuid.uuid4().hex, journal_id=shell.id, entry_table=body.entry_table,
+                                        entry_id=entry.id, username=who, kind=kind))
+            on = True
+        await session.commit()
+        summary = (await _reactions_by_journal(session, [shell.id], who))[shell.id].get(entry.id) or \
+            ({k: 0 for k in ("like", "love", "laugh")} | {"mine": []})
+    return {"status": "ok", "on": on, "entry_id": entry.id, "reactions": summary}
 
 
 @router.post("/reply")

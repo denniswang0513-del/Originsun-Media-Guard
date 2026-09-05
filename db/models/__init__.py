@@ -51,4 +51,4 @@ from ._finance import (  # noqa: F401
 from ._workspace import (  # noqa: F401
     CashTaxonomyNode, CrmExpenseLink, HrBenefitAllowance, HrBenefitEntry,
     HrBenefitFunding, HrBenefitPool, JournalChallenge, JournalLearning,
-    JournalOther, JournalReply, JournalWin, ProjectMediaFile, ProjectMediaLog, WorkJournal)
+    JournalOther, JournalReaction, JournalReply, JournalWin, ProjectMediaFile, ProjectMediaLog, WorkJournal)

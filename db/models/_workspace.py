@@ -136,6 +136,21 @@ class JournalOther(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class JournalReaction(Base):
+    """週記條目的心情（owner 2026-09-05：不用回覆，大家可以按讚／愛心／笑）。
+    一人對同一條同一種心情只有一筆（再按＝取消）；kind 字彙在 core.journal_logic.REACTION_KINDS。"""
+    __tablename__ = "journal_reactions"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    journal_id = Column(String(32), index=True, nullable=False)  # soft FK → work_journals.id
+    entry_table = Column(String(32), nullable=False)
+    entry_id = Column(String(32), index=True, nullable=False)
+    username = Column(String(64), nullable=False)
+    kind = Column(String(16), nullable=False)                    # like／love／laugh
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (UniqueConstraint("entry_id", "username", "kind", name="uq_journal_reaction"),)
+
+
 class JournalReply(Base):
     """主管對週記某一條的回覆（§2-B5）。回覆不改原文；(entry_table, entry_id) 指到四張條目表之一。
     條目在 PUT 全量替換時盡量沿用 id（帶 id 或內容相同），回覆才跟得住。"""

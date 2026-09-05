@@ -161,3 +161,25 @@ def group_worklog(rows) -> list:
             days.append({"date": d, "items": []})
         days[-1]["items"].append({"note": note, "work_type": wt, "stage_name": stage})
     return [projects[k] for k in order]
+
+
+# ── 心情（owner 2026-09-05：週記不用回覆，大家可以按讚／愛心／笑）──
+REACTION_KINDS = ("like", "love", "laugh")
+
+
+def norm_reaction(kind) -> str | None:
+    k = (kind or "").strip().lower()
+    return k if k in REACTION_KINDS else None
+
+
+def reaction_summary(rows, me: str) -> dict:
+    """[(entry_id, username, kind)] → {entry_id: {"like": n, "love": n, "laugh": n, "mine": [kind]}}。"""
+    out: dict = {}
+    for entry_id, username, kind in rows:
+        if kind not in REACTION_KINDS:
+            continue
+        d = out.setdefault(entry_id, {k: 0 for k in REACTION_KINDS} | {"mine": []})
+        d[kind] += 1
+        if username == me and kind not in d["mine"]:
+            d["mine"].append(kind)
+    return out

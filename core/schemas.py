@@ -1450,6 +1450,14 @@ class JournalPut(BaseModel):
     status: Optional[str] = None
 
 
+class JournalReactPost(BaseModel):
+    """POST /api/v1/journal/react — 對某一條按心情（再按同一種＝取消）。kind：like／love／laugh。"""
+    journal_id: str
+    entry_table: str
+    entry_id: str
+    kind: str
+
+
 class JournalReplyPost(BaseModel):
     """POST /api/v1/journal/reply — 主管回覆某一條（entry_table＝四張條目表之一的 __tablename__）。"""
     journal_id: str
