@@ -14,7 +14,7 @@
 <link rel="icon" href="/m/icon-192.png">
 <title>源日 CRM</title>
 <!-- CRM 手機版（docs/CRM_MOBILE_PLAN.md）：現場輸入＋快看，跟桌機版分開。
-     五個分頁（發票／零用金／專案／報價／行事曆），hash 路由；殼只有 ./shell.js 一份。
+     六個分頁（發票／零用金／專案／報價／行事曆／工作紀錄），hash 路由；殼只有 ./shell.js 一份。
      付款（owner 2026-09-03 被行事曆取代）與記雜支是隱藏路由，從專案抽屜進。
      閘門：管理員（Lv3）或擁有「crm_projects」模組；寫入鈕再看 /options 的 me.can_write。
      字彙（階段／案型／狀態／款項／發票種類）全部來自 GET /api/v1/crm/m/options，
@@ -218,6 +218,7 @@
     <button type="button" data-tab="projects"><i class="ico"></i>專案</button>
     <button type="button" data-tab="quotes"><i class="ico"></i>報價</button>
     <button type="button" data-tab="calendar"><i class="ico"></i>行事曆</button>
+    <button type="button" data-tab="worklog"><i class="ico"></i>工作紀錄</button>
   </nav>
 </div>
 

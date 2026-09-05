@@ -167,7 +167,8 @@ def test_five_tabs_and_invoice_is_the_landing_tab():
     ui = repo_src("frontend/m/ui.js")
     tabs = re.search(r"export const TABS = \[(.*?)\]", ui).group(1)
     ids = re.findall(r"'(\w+)'", tabs)
-    assert ids == ["invoice", "petty", "projects", "quotes", "calendar"], ids
+    # 2026-09-06 owner：第六顆「工作紀錄」（每日工作紀錄的填表，views/worklog.js）
+    assert ids == ["invoice", "petty", "projects", "quotes", "calendar", "worklog"], ids
     hidden = re.search(r"export const HIDDEN_ROUTES = \{(.*?)\}", ui).group(1)
     assert "payments:" in hidden and "expense:" in hidden and "export const ROUTES = [...TABS, ...Object.keys(HIDDEN_ROUTES)]" in ui
     assert "export const DEFAULT_TAB = 'invoice'" in ui
@@ -198,6 +199,20 @@ def test_m_is_not_on_the_public_surface():
     """手機 CRM 只掛 master / foundry；NAS 對外容器沒有 CRM 後端。"""
     assert not any(d.startswith("m") for d in MODULE_DIRS)
     assert "m" not in MODULE_DIRS and "frontend/m" not in MODULE_DIRS
+
+
+def test_worklog_tab_reuses_the_self_timesheet_endpoints():
+    """每日工作紀錄（owner 2026-09-06）跟 /my.html 今天的專案紀錄同一套端點與 body 形狀，
+    字彙（分類／階段）從 /timesheets/options 拿；寫入守衛是本人＋綁定人員，按鈕不掛 .w；不畫個人合計。"""
+    src = js_code_only(repo_src("frontend/m/views/worklog.js"))
+    for ep in ("'/api/v1/timesheets/mine?date='", "'/api/v1/timesheets/mine/rows'", "'/api/v1/timesheets/mine/' + encodeURIComponent(",
+               "'/api/v1/timesheets/options'", "'/api/v1/timesheets/project_options'", "'/api/v1/me/timesheet_options'"):
+        assert ep in src, ep
+    assert "start_time: F('t0').value" in src and "end_time: F('t1').value" in src
+    assert "mountPicker('wl-project'" in src and "segHtml('wl-type'" in src
+    assert "actual_total" not in src and "planned_total" not in src
+    assert 'class="m-btn pri" data-add' in src and 'class="m-btn pri w"' not in src
+    assert "worklog: worklogView" in js_code_only(CRM_JS)
 
 
 def test_no_emoji_in_ui_text():
@@ -269,7 +284,7 @@ def test_calendar_tab_contract():
     assert 'data-act="shoot"' in pj and "shootPreset" in pj and "ensureView(view)" in pj
     assert 'data-act="payments"' in pj and "switchTab('payments')" in pj
     html_tabs = re.findall(r'data-tab="(\w+)"', CRM_HTML)
-    assert html_tabs[-1] == "calendar" and "payments" not in html_tabs
+    assert "calendar" in html_tabs and "payments" not in html_tabs   # 2026-09-06 起第六顆是工作紀錄，行事曆不再是最後一顆
 
 
 def test_invoice_segments_can_be_blank_and_cards_can_be_deleted():
