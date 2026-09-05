@@ -60,7 +60,8 @@
   details.m-more { margin:4px 0 12px; } details.m-more summary { color:var(--sub); font-size:13px; padding:8px 0; cursor:pointer; list-style:none; }
   details.m-more summary::before { content:"＋ "; } details.m-more[open] summary::before { content:"－ "; }
   .m-hint { color:var(--sub); font-size:12px; margin:-6px 0 12px; }
-  .m-pick { border:1px solid var(--line); border-radius:8px; background:var(--card); max-height:230px; overflow:auto; margin:-6px 0 12px; }
+  .m-pick { border:1px solid var(--line); border-radius:8px; background:var(--card); max-height:230px; overflow:auto; margin:-6px 0 12px;
+    -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
   .m-pick-row { padding:11px 12px; border-bottom:1px solid var(--line); font-size:14px; }
   .m-pick-row:last-child { border-bottom:0; }
   .m-pick-row:active { background:var(--field); }

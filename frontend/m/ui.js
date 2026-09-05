@@ -58,7 +58,9 @@ export const projectLabel = (p) => [p.client_short_name, p.name].filter(Boolean)
 
 // 打字就過濾的選擇器（owner 2026-09-03「所有的搜尋都要可以打字搜尋」）：手機上原生 <select> 不能打字，
 // 清單一長（138 個客戶、上百個案子）就找不到。結構＝hidden input（id＝欄位名，既有程式照讀 .value）
-// ＋搜尋框（id-q）＋結果列（id-list，最多 40 筆）。用 pointerdown 選，因為 blur 會先於 click 把結果列收掉。
+// ＋搜尋框（id-q）＋結果列（id-list，最多 40 筆）。結果列 pointerdown 只 preventDefault（焦點留在搜尋框、blur 不會
+// 先把清單收掉；preventDefault 不擋捲動），真的點到才 click 選 —— 之前 pointerdown 就選，手指一碰要捲清單就選走了
+// （owner 2026-09-06「這個選單無法滾動」）。
 export const pickerHtml = (id) =>
     `<input type="hidden" id="${id}"><input type="search" id="${id}-q" autocomplete="off" autocorrect="off">` +
     `<div class="m-pick" id="${id}-list" hidden></div>`;
@@ -114,7 +116,8 @@ export function mountPicker(id, { items = [], placeholder = '', value = '', free
         if (free) { hidden.value = q.value.trim(); if (onPick) onPick(hidden.value); }
         else q.value = label(hidden.value);
     }, 150);
-    box.onpointerdown = (ev) => { const r = ev.target.closest('.m-pick-row'); if (r) { ev.preventDefault(); set(r.dataset.v); } };
+    box.onpointerdown = (ev) => { ev.preventDefault(); };
+    box.onclick = (ev) => { const r = ev.target.closest('.m-pick-row'); if (r) set(r.dataset.v); };
     set(value);
 }
 
