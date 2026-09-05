@@ -30,7 +30,7 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 normalize_invoice_status, passthrough_commission)
 from core.auth import check_logged_in
 from core.project_link import invoice_project_ids as _inv_pids, normalize_invoice_projects as _norm_inv_projects
-from core.ledger import (require_entity)
+from core.ledger import (require_entity, is_mine)
 from core.auth import _extract_token
 from core.schemas import (InvoicePayload)
 
@@ -43,7 +43,7 @@ from ._shared import (router, _check_auth, _check_finance_auth, money_dep,
 from .invoice_files import _resync_invoice_file
 
 try:
-    from ._shared import (select, or_, func, CrmProject, CrmInvoice,
+    from ._shared import (select, or_, func, Client, CrmProject, CrmInvoice,
                           CrmPaymentRequest, CrmCashEntry,
                           CrmCashInvoiceLink, CrmCashPaymentLink)
     from db.models import CrmInvoiceTrash
@@ -712,6 +712,99 @@ async def _assert_project_link(session, request: Request, project_id, category) 
         if hide_mine_projects(request):
             raise HTTPException(status_code=403, detail="沒有私帳權限，不能把發票掛到私帳案")
 
+
+@router.get("/projects/{project_id}/invoice-candidates", dependencies=[Depends(money_dep)])
+async def invoice_candidates(project_id: str, request: Request, q: str = ""):
+    """可以連到這個專案的發票（owner 2026-09-05「加一個連結發票的按鈕」）。
+
+    為什麼需要：發票是先開、後歸戶的 —— 開的時候還不知道要掛哪一案，之後就
+    沒有一條路把它掛回來（只能整張重編）。快樂學游泳那案 7 張裡有 1 張
+    （錄音租借 $630）就這樣一直沒進來，而畫面上完全看不出少了什麼。
+
+    排序＝**最可能是這一案的排前面**：同抬頭 ＋ 標題含案名 → 同抬頭 → 其餘。
+    已經掛在**本案**的不列（那些畫面上已經有了）；掛在**別案**的照列但標出來 ——
+    掛錯案要能改回來，藏起來只會讓人以為那張發票不見了。
+    作廢的不列（那不是漏掉，是刻意作廢）。
+    """
+    _require_db()
+    check_logged_in(request)
+    factory = await _get_factory()
+    from core.ledger import hide_mine_projects
+    async with factory() as session:
+        p = await session.get(CrmProject, project_id)
+        if not p:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        # level="full"：這支吐的是**原始發票列**（號碼／面額／狀態），
+        # 合夥人的 view scope 不可及（兩本帳 plan §2.4，同本檔其他端點）
+        require_entity(request, p.entity or "parent", level="full")
+        title = ""
+        if p.client_id:
+            cl = await session.get(Client, p.client_id)
+            title = (cl.full_name or cl.short_name or "") if cl else ""
+        rows = (await session.execute(
+            select(CrmInvoice)
+            .where(CrmInvoice.entity == (p.entity or "parent"),
+                   or_(CrmInvoice.issue_status.is_(None), CrmInvoice.issue_status != "作廢"),
+                   or_(CrmInvoice.project_id.is_(None), CrmInvoice.project_id != project_id))
+            .order_by(CrmInvoice.invoice_date.desc().nullslast())
+            .limit(400))).scalars().all()
+        # 掛在別案的要顯示案名
+        other = {x.project_id for x in rows if x.project_id}
+        names = dict((await session.execute(
+            select(CrmProject.id, CrmProject.name)
+            .where(CrmProject.id.in_(other)))).all()) if other else {}
+        hide_mine = hide_mine_projects(request)
+        mine_ids = set((await session.execute(
+            select(CrmProject.id).where(is_mine(CrmProject.entity)))).scalars()) if hide_mine else set()
+
+    kw = (q or "").strip().lower()
+    pname = (p.name or "").strip()
+    out = []
+    for x in rows:
+        # 沒有私帳權限的人：別案是私帳案時連案名都不給（同 is_mirrored 的可見性線）
+        if x.project_id and x.project_id in mine_ids:
+            continue
+        same_title = bool(title) and (x.company_name or "") == title
+        hit_name = bool(pname) and pname[:6] in (x.title or "")
+        score = (2 if (same_title and hit_name) else 1 if same_title else 0)
+        if kw and kw not in ((x.invoice_number or "") + (x.title or "")
+                             + (x.company_name or "")).lower():
+            continue
+        if not kw and not score:
+            continue          # 沒搜尋字時只給有關聯的，不要倒 400 張出來
+        out.append({**_to_invoice_dict(x), "score": score,
+                    "linked_to": names.get(x.project_id or "", ""),
+                    "same_title": same_title, "hit_name": hit_name})
+    out.sort(key=lambda d: (-d["score"], d.get("invoice_date") or ""), reverse=False)
+    out.sort(key=lambda d: -d["score"])
+    return {"candidates": out[:60], "client_title": title}
+
+
+@router.patch("/invoices/{invoice_id}/project")
+async def set_invoice_project(invoice_id: str, request: Request):
+    """把一張發票掛到某個專案，或取消（body: {project_id: id|null}）。
+
+    只改「這張發票屬於哪個案」—— 金額、日期、狀態一個字都不動，所以**不掛
+    月結守衛**（判準同 payments.batch_assign_project：帳沒變）。類別守衛照掛
+    （`_assert_project_link`：私帳案只收「內部代開」，且要有私帳權限）。
+    """
+    _check_finance_auth(request)
+    _require_db()
+    body = await request.json()
+    target = (body.get("project_id") or "").strip() or None
+    factory = await _get_factory()
+    async with factory() as session:
+        inv = await session.get(CrmInvoice, invoice_id)
+        if not inv:
+            raise HTTPException(status_code=404, detail="找不到此發票")
+        require_entity(request, inv.entity or "parent", level="full")
+        if target:
+            await _assert_project_link(session, request, target, inv.category)
+        inv.project_id = target
+        inv.updated_at = _now()
+        await session.commit()
+        d = _to_invoice_dict(inv)
+    return {"status": "ok", "invoice": d}
 
 @router.post("/invoices")
 async def create_invoice(req: InvoicePayload, request: Request):

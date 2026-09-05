@@ -1,60 +1,60 @@
 # -*- coding: utf-8 -*-
-"""發票掛專案（owner 2026-09-04）：三種類別都可以掛；私帳案只能掛在「內部代開」、且要有私帳權限。
-清單依類別上底色（專案／內部代開／外部代開／沒填類別淺紅）。
+"""發票掛專案（owner 2026-09-05「加一個連結發票的按鈕」）。
 
-規則正本：core.finance_logic.MINE_LINK_INVOICE_CATEGORY；後端 _assert_project_link 在 create／update 都擋
-（下拉不給只是 UX，直接送 id 也要擋）；清單對沒私帳權限的人不顯示私帳案名。
+為什麼需要：發票是**先開、後歸戶**的 —— 開的時候還不知道要掛哪一案，之後就
+沒有一條路把它掛回來。快樂學游泳那案 7 張裡有 1 張（錄音租借 $630）就這樣
+一直沒進來，而畫面上完全看不出少了什麼（只顯示「已開發票 4 張」）。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import js_code_only, repo_src
 
 
-def test_backend_rule_is_enforced_on_create_and_update_and_list_hides_mine_names():
-    from core.finance_logic import INVOICE_PASSTHROUGH_CATEGORIES, MINE_LINK_INVOICE_CATEGORY
-    assert MINE_LINK_INVOICE_CATEGORY in INVOICE_PASSTHROUGH_CATEGORIES
+def test_candidates_endpoint_excludes_what_should_not_be_offered():
+    """候選清單三條排除，每一條都有理由。"""
     src = repo_src("routers/crm/finance.py")
-    body = code_only(func_body(src, "async def _assert_project_link("))
-    assert "MINE_LINK_INVOICE_CATEGORY" in body and "hide_mine_projects(request)" in body
-    assert "status_code=422" in body and "status_code=403" in body
-    for header in ("async def create_invoice(", "async def update_invoice("):
-        assert "_assert_project_link(" in code_only(func_body(src, header)), header
-    lst = code_only(func_body(src, "async def list_invoices("))
-    assert 'CrmProject.entity.label("pent")' in lst and '== "mine"' in lst and "hide_mine_projects(request)" in lst
+    fn = src.split("async def invoice_candidates(")[1].split("\n@router")[0]
+    # 作廢的不是漏掉，是刻意作廢
+    assert 'CrmInvoice.issue_status != "作廢"' in fn
+    # 已經掛在本案的畫面上已經有了
+    assert "CrmInvoice.project_id != project_id" in fn
+    # 帳本牆：只找同一本帳的
+    assert "CrmInvoice.entity ==" in fn
+    # 沒有私帳權限的人，連「這張掛在某個私帳案」都不該看到
+    assert "hide_mine_projects(request)" in fn and "mine_ids" in fn
+    # 沒搜尋字時不倒整份出來
+    assert "if not kw and not score:" in fn
 
 
-def test_frontend_project_field_for_all_categories_and_mine_only_for_internal():
-    js = js_code_only(repo_src("frontend/tabs/crm/crm-invoices.js"))
-    toggle = js[js.index("function _toggleCategory()"):js.index("if (kindSel)")]
-    assert "projectRow.style.display = ''" in toggle and "cat === '專案' ? '' : 'none'" not in toggle
-    assert "_populateProjectSelect(projSel.value, cat)" in toggle
-    vis = code_only(func_body(js, "function _updateCategoryVisibility()"))     # 編輯視窗那套（跟詳情面板分開）
-    assert "inv-cond-project').style.display = ''" in vis and "_populateProjectSelect(" in vis and "cat === '專案' ? '' : 'none'" not in vis
-    pop = code_only(func_body(js, "function _populateProjectSelect(selectedId, category)"))
-    assert "cat === _MINE_LINK_CAT" in pop and "_mineProjects" in pop and "私帳｜" in pop
-    assert "hasModule('finance_mine')" in js and "'/projects?entity=mine'" in js, "沒私帳權限的人不打私帳專案清單"
-    # 發票清單不上底色（owner 2026-09-04「發票的部分不用改色」）——底色只在收支明細
-    # （inv-kind-badge／inv-kind-電子 是既有的發票種類 badge，不是列底色）
-    assert "_kindClass(" not in js and ".crm-row.inv-kind-" not in repo_src("frontend/tabs/crm/crm.css")
-
-
-def test_invoice_can_hang_on_several_projects_and_the_first_stays_project_id():
-    """owner 2026-09-04「連結的專案可以複數；複數專案內部代開就開複數張請款單」：crm_invoices.project_ids（JSON），
-    project_id 永遠＝第一個；讀法／正規化只有 core.project_link 一份；create／update 每個案都過 _assert_project_link。"""
-    from core.project_link import invoice_project_ids, normalize_invoice_projects
-    assert invoice_project_ids("a", None) == ["a"]
-    assert invoice_project_ids("a", '["a","b"]') == ["a", "b"]
-    assert invoice_project_ids("z", '["a","b"]') == ["z", "a", "b"], "project_id 不在清單＝插到最前"
-    assert invoice_project_ids(None, "not json") == []
-    d = {"project_id": "a", "project_ids": ["b", "a", "c"]}; normalize_invoice_projects(d)
-    assert d["project_id"] == "a" and d["project_ids"] == '["a", "b", "c"]'
-    d = {"project_id": "a", "project_ids": None}; normalize_invoice_projects(d, ["a", "b"])
-    assert d["project_ids"] == '["a", "b"]', "單案表單沒送清單＝保留既有"
-    d = {"project_id": "z", "project_ids": None}; normalize_invoice_projects(d, ["a", "b"])
-    assert d["project_id"] == "z" and d["project_ids"] is None, "表單換成清單外的案＝清單重來"
-    d = {"project_id": None, "project_ids": None}; normalize_invoice_projects(d, ["a", "b"])
-    assert d["project_id"] is None and d["project_ids"] is None
+def test_candidates_rank_by_how_likely_it_is_this_project():
+    """同抬頭 ＋ 標題含案名 → 同抬頭 → 其餘。"""
     src = repo_src("routers/crm/finance.py")
-    for header in ("async def create_invoice(", "async def update_invoice("):
-        body = code_only(func_body(src, header))
-        assert "_norm_inv_projects(" in body and "for _pid in _inv_pids(" in body, header
-    assert '"project_ids": _inv_pids(inv.project_id' in src
-    assert '("crm_invoices", "project_ids", "TEXT")' in repo_src("main.py")
+    fn = src.split("async def invoice_candidates(")[1].split("\n@router")[0]
+    assert "same_title = " in fn and "hit_name = " in fn
+    assert "score = (2 if (same_title and hit_name) else 1 if same_title else 0)" in fn
+    # 掛在別案的照列但要標出來 —— 掛錯案要能改回來
+    assert '"linked_to": names.get(' in fn
+
+
+def test_link_endpoint_only_touches_the_attribution():
+    """🔴 只改「屬於哪個案」：金額、日期、狀態一個字都不動。
+
+    所以不掛月結守衛（判準同 payments.batch_assign_project：帳沒變），
+    但**類別守衛照掛**（私帳案只收「內部代開」且要有私帳權限）。
+    """
+    src = repo_src("routers/crm/finance.py")
+    fn = src.split("async def set_invoice_project(")[1].split("\n@router")[0]
+    assert "inv.project_id = target" in fn
+    for forbidden in ("amount_total", "amount_ex_tax", "payment_status", "invoice_date"):
+        assert f"inv.{forbidden} =" not in fn, forbidden
+    assert "_assert_project_link(session, request, target, inv.category)" in fn
+    assert 'require_entity(request, inv.entity or "parent", level="full")' in fn
+    assert "_check_finance_auth(request)" in fn
+    assert "_assert_month_open" not in fn, "只改歸屬，帳沒變 —— 不該擋月結"
+
+
+def test_the_button_sits_next_to_the_invoice_button():
+    """按鈕放「收款」標題列，跟「開發票」並排 —— 那正是發現少了一張的地方。"""
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-pay.js"))
+    assert "window._projPay.linkInvoice()" in js
+    assert "linkInvoice: () =>" in js and "doLink: async (invoiceId)" in js
+    assert "/invoice-candidates" in js
+    assert "method: 'PATCH'" in js

@@ -249,7 +249,7 @@ export async function loadPayTab(projectId) {
         ${_hints(nextSteps(s, { money }))}
         <div class="ppay-sec" id="proj-pay-recv">
             <div class="ppay-sh"><span class="ppay-h">收款</span><span class="ppay-sub">本案的發票，和它連到的匯款</span>
-                <span class="ppay-sh-act"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projInv.create()">開發票</button></span></div>
+                <span class="ppay-sh-act"><button class="crm-btn crm-btn-secondary crm-btn-sm" title="把已經開好、但還沒掛到任何專案的發票連過來" onclick="window._projPay.linkInvoice()">連結發票</button><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projInv.create()">開發票</button></span></div>
             ${_recvHtml(s, money)}
         </div>
         <div class="ppay-sec" id="proj-pay-pay">
@@ -317,8 +317,85 @@ window._crmGoToProjectPay = (projectId) => {
     setTimeout(() => document.querySelector('#proj-detail-tabs .crm-tab[data-tab="team"]')?.click(), 700);
 };
 
+
+// ── 連結發票（owner 2026-09-05）───────────────────────────────
+// 發票是先開、後歸戶的：開的時候還不知道掛哪一案，之後就沒有一條路掛回來。
+// 快樂學游泳那案 7 張有 1 張（錄音租借 $630）就這樣一直沒進來，而畫面上
+// 看不出少了什麼 —— 所以按鈕放在「收款」標題列，跟「開發票」並排。
+function _linkRow(c, money) {
+    const tag = c.linked_to
+        ? `<span class="ppay-badge" style="background:#78350f;color:#fcd34d;">已掛：${_esc(c.linked_to)}</span>`
+        : c.score === 2 ? '<span class="ppay-badge" style="background:#064e3b;color:#86efac;">抬頭與案名都吻合</span>'
+        : c.score === 1 ? '<span class="ppay-badge" style="background:#1e3a5f;color:#bfdbfe;">同抬頭</span>' : '';
+    const dir = (c.payment_type || '收款') === '付款'
+        ? '<span class="ppay-badge" style="background:#3f2a1a;color:#fbbf24;">付款</span>' : '';
+    return `<tr>
+        <td>${_esc(c.invoice_number || '—')}</td>
+        <td class="dim">${_esc(c.invoice_date || '')}</td>
+        <td>${_esc(c.title || '')} ${dir} ${tag}</td>
+        <td style="text-align:right;">${money ? '$' + fmtNum(c.amount_total || 0) : '—'}</td>
+        <td class="dim">${_esc(c.payment_status || '')}</td>
+        <td style="text-align:right;"><button class="crm-btn crm-btn-primary crm-btn-sm"
+            onclick="window._projPay.doLink('${_esc(c.id)}')">連結</button></td></tr>`;
+}
+
+async function _openLinkPicker(projectId) {
+    const money = canSeeMoney();
+    document.getElementById('ppay-link-modal')?.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'ppay-link-modal';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:400;'
+        + 'display:flex;align-items:center;justify-content:center;';
+    wrap.onclick = (e) => { if (e.target === wrap) wrap.remove(); };
+    wrap.innerHTML = `<div style="background:#202020;border:1px solid #3a3a3a;border-radius:10px;
+            width:860px;max-width:94vw;max-height:82vh;display:flex;flex-direction:column;">
+        <div style="padding:12px 16px;border-bottom:1px solid #2e2e2e;display:flex;align-items:center;gap:12px;">
+            <b style="color:#fff;">連結發票</b>
+            <span class="dim" style="font-size:12px;">同抬頭或標題含案名的排前面；打字可搜全部</span>
+            <input id="ppay-link-q" class="crm-input" placeholder="發票號碼 / 抬頭 / 摘要"
+                   style="margin-left:auto;width:230px;">
+            <button class="crm-btn crm-btn-secondary crm-btn-sm"
+                    onclick="document.getElementById('ppay-link-modal').remove()">關閉</button>
+        </div>
+        <div id="ppay-link-body" style="overflow:auto;padding:4px 16px 16px;">
+            <div class="dim" style="padding:16px;">載入中…</div></div></div>`;
+    document.body.appendChild(wrap);
+
+    const draw = async (q) => {
+        const body = document.getElementById('ppay-link-body');
+        const d = await _q(`/projects/${projectId}/invoice-candidates`
+            + (q ? '?q=' + encodeURIComponent(q) : ''));
+        const list = d?.candidates || [];
+        body.innerHTML = list.length
+            ? `<table class="crm-table" style="width:100%;font-size:12px;"><thead><tr>
+                 <th>號碼</th><th>日期</th><th>抬頭 / 摘要</th>
+                 <th style="text-align:right;">面額</th><th>狀態</th><th></th></tr></thead>
+               <tbody>${list.map((c) => _linkRow(c, money)).join('')}</tbody></table>`
+            : `<div class="dim" style="padding:18px;">${q
+                ? '沒有符合的發票' : '沒有找到同抬頭或標題吻合的發票 —— 打字可以搜全部'}</div>`;
+    };
+    await draw('');
+    const inp = document.getElementById('ppay-link-q');
+    let t = null;
+    inp.oninput = () => { clearTimeout(t); t = setTimeout(() => draw(inp.value.trim()), 250); };
+    inp.focus();
+}
+
 window._projPay = {
     confirmClosing,
+    linkInvoice: () => { if (state.selectedId) _openLinkPicker(state.selectedId); },
+    /** 挑好了：只改「這張發票屬於哪個案」，金額與狀態一個字都不動。 */
+    doLink: async (invoiceId) => {
+        try {
+            await _fetch(`/invoices/${invoiceId}/project`, {
+                method: 'PATCH', body: JSON.stringify({ project_id: state.selectedId }),
+            });
+            document.getElementById('ppay-link-modal')?.remove();
+            window._projPay.refresh();
+        } catch (e) {
+            alert('連結失敗：' + (e.message || e));
+        }
+    },
     refresh: () => { if (state.selectedId) loadPayTab(state.selectedId); },
     current: () => _cur,
     /** 標已收款：走發票模組的 setMeta（PUT 整包寫回），做完重畫。 */
