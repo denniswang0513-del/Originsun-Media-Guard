@@ -14,8 +14,9 @@ def test_kinds_and_normalize():
 def test_reaction_summary_counts_and_mine():
     rows = [("e1", "amy", "like"), ("e1", "bob", "like"), ("e1", "amy", "love"), ("e2", "bob", "laugh"), ("e2", "bob", "nope")]
     out = reaction_summary(rows, "amy")
-    assert out["e1"] == {"like": 2, "love": 1, "laugh": 0, "mine": ["like", "love"]}
-    assert out["e2"] == {"like": 0, "love": 0, "laugh": 1, "mine": []}     # 不認識的 kind 丟掉
+    assert out["e1"] == {"like": 2, "love": 1, "laugh": 0, "mine": ["like", "love"],
+                         "users": {"like": ["amy", "bob"], "love": ["amy"], "laugh": []}}   # users 依按的先後（頭像列用）
+    assert out["e2"] == {"like": 0, "love": 0, "laugh": 1, "mine": [], "users": {"like": [], "love": [], "laugh": ["bob"]}}   # 不認識的 kind 丟掉
 
 
 def test_model_and_endpoint():

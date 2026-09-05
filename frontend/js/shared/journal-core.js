@@ -138,16 +138,35 @@ export function reactionBar(r, ids, c = {}, canReact = false) {
     return btns ? `<div class="${c.react || 'react'}">${btns}</div>` : '';
 }
 
-/** 標題列的愛心（owner 2026-09-05）：整份週記一個心情。r={like,love,laugh,mine:[]}。
- *  沒人按＝空心低調；有人按＝實心＋總數；自己按過＝顯示自己那種的圖示。canReact=false 只顯示。 */
+/** 縮寫圓頭（同 Google Chat）：中文取後兩字、英文取前兩字母；顏色由名字決定。 */
+const _AV_COLORS = ['#c9372c', '#b45309', '#15803d', '#1d4ed8', '#7c3aed', '#0f766e', '#be185d', '#4d7c0f'];
+export function avatarHtml(name, c = {}) {
+    const n = String(name || '').trim();
+    const cjk = /[\u3400-\u9fff]/.test(n);
+    const ini = cjk ? n.slice(-2) : n.slice(0, 2).toUpperCase();
+    let h = 0; for (const ch of n) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return `<span class="${c.av || 'av'}" style="background:${_AV_COLORS[h % _AV_COLORS.length]}" title="${_esc(n)}">${_esc(ini)}</span>`;
+}
+
+/** 標題列的愛心（owner 2026-09-05）：整份週記一個心情；人列只留姓名＋愛心。
+ *  r={like,love,laugh,mine:[],names:{kind:[顯示名]}}。有人按了 → 愛心前面出現他們的頭（最多 3 顆＋N），
+ *  滑過／點頭像出浮層列「誰按了什麼」；沒人按＝空心低調。canReact=false 只顯示。 */
 export function heartHtml(r, ids, canReact = false, c = {}) {
-    const d = r || { like: 0, love: 0, laugh: 0, mine: [] };
+    const d = r || { like: 0, love: 0, laugh: 0, mine: [], names: {} };
+    const names = d.names || {};
     const total = (d.like || 0) + (d.love || 0) + (d.laugh || 0);
     const mine = (d.mine || [])[0] || '';
     const glyph = mine ? (REACTIONS.find(([k]) => k === mine) || [])[1] : (total ? '\u2764\uFE0F' : '\u2661');
-    const title = total ? REACTIONS.map(([k, g]) => (d[k] ? `${g} ${d[k]}` : '')).filter(Boolean).join('　') : '點一下給愛心，長按換心情';
+    const everyone = REACTIONS.flatMap(([k, g]) => (names[k] || []).map(n => ({ n, g })));
+    const shown = everyone.slice(0, 3), more = everyone.length - shown.length;
+    const avs = everyone.length
+        ? `<span class="${c.avs || 'avs'}" data-heart-pop>${shown.map(x => avatarHtml(x.n, c)).join('')}${more > 0 ? `<span class="${c.av || 'av'} more">+${more}</span>` : ''}</span>` : '';
+    const pop = everyone.length
+        ? `<div class="${c.heartPop || 'heart-pop'}">${REACTIONS.map(([k, g]) => (names[k] || []).length
+            ? `<div class="hp-kind"><span class="hp-g">${g}</span>${(names[k] || []).map(n => `<span class="hp-who">${avatarHtml(n, c)}${_esc(n)}</span>`).join('')}</div>` : '').join('')}</div>` : '';
     const attrs = canReact ? ` data-heart data-heart-j="${_esc(ids.journalId || '')}" data-heart-t="${_esc(ids.entryTable || 'work_journals')}" data-heart-e="${_esc(ids.entryId || '')}"` : ' disabled';
-    return `<button type="button" class="${c.heart || 'heart'}${mine ? ' on' : ''}${total ? ' has' : ''}" title="${_esc(title)}"${attrs}>${glyph}${total ? `<span class="n">${total}</span>` : ''}</button>`;
+    const title = total ? '' : (canReact ? '點一下給愛心，長按換心情' : '');
+    return `<span class="${c.heartWrap || 'heart-wrap'}">${avs}<button type="button" class="${c.heart || 'heart'}${mine ? ' on' : ''}${total ? ' has' : ''}"${title ? ` title="${_esc(title)}"` : ''}${attrs}>${glyph}</button>${pop}</span>`;
 }
 
 /** 一條回覆（灰底）。 */

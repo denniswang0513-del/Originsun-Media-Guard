@@ -173,13 +173,15 @@ def norm_reaction(kind) -> str | None:
 
 
 def reaction_summary(rows, me: str) -> dict:
-    """[(entry_id, username, kind)] → {entry_id: {"like": n, "love": n, "laugh": n, "mine": [kind]}}。"""
+    """[(entry_id, username, kind)] → {entry_id: {"like": n, "love": n, "laugh": n, "mine": [kind],
+    "users": {"like": [username…], …}}}（users 依 rows 順序＝按的先後；頭像列與「誰按了什麼」浮層用）。"""
     out: dict = {}
     for entry_id, username, kind in rows:
         if kind not in REACTION_KINDS:
             continue
-        d = out.setdefault(entry_id, {k: 0 for k in REACTION_KINDS} | {"mine": []})
+        d = out.setdefault(entry_id, {k: 0 for k in REACTION_KINDS} | {"mine": [], "users": {k: [] for k in REACTION_KINDS}})
         d[kind] += 1
+        d["users"][kind].append(username)
         if username == me and kind not in d["mine"]:
             d["mine"].append(kind)
     return out

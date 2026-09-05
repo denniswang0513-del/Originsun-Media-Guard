@@ -68,3 +68,12 @@ def test_action_bar_links_to_existing_pages_only():
         assert href in html, href
     # 領用器材沒權限就不顯示（equipment／preprod_plan 任一）
     assert 'g.has("equipment", "preprod_plan")' in html
+
+
+def test_find_view_has_advanced_search():
+    """owner 2026-09-05：專案查詢加進階搜尋——最後填報日期區間、案型多選、消耗率上下限；全在瀏覽器端篩。"""
+    src = repo_src("frontend/my.html")
+    assert 'id="z1-find-adv"' in src and "z1-fa-from" in src and "z1-fa-max" in src and "data-type=" in src
+    assert "st.types.has(p.project_type" in src and "Number(p.pct) >= min" in src and "(p.last_entry || \"\") >= st.from" in src
+    shared = repo_src("frontend/js/shared/ts-projects.js")
+    assert "export function pctClass(" in shared and "ts-pct ${pctClass(p.pct)}" in shared

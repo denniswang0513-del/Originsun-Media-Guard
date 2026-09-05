@@ -99,6 +99,13 @@ export function dayLogByMonth(days, primary) {
 }
 
 // ── 專案表（burn）──
+export function pctClass(pct) {
+    if (pct == null) return 'none';
+    if (pct >= 100) return 'over';
+    if (pct >= 90) return 'hi';
+    if (pct >= 60) return 'mid';
+    return 'low';
+}
 export function pctStyle(pct) {
     if (pct == null) return 'background:#2c2c2c;color:#999;';
     if (pct >= 100) return 'background:#7f1d1d;color:#fca5a5;';
@@ -161,8 +168,8 @@ export function burnTbodyHtml(projects, opts = {}) {
             <td>${_typeCell(p, opts.editable)}</td>
             <td class="num">${p.hours_used}</td>
             <td class="num">${_budgetCell(p, opts.editable)}</td>
-            <td class="num">${p.remaining ?? '—'}</td>
-            <td class="num"><span class="ts-pct" style="${pctStyle(p.pct)}">${p.pct != null ? p.pct + '%' : '—'}</span></td>
+            <td class="num${p.remaining != null && p.remaining < 0 ? ' neg' : ''}">${p.remaining ?? '—'}</td>
+            <td class="num"><span class="ts-pct ${pctClass(p.pct)}" style="${pctStyle(p.pct)}">${p.pct != null ? p.pct + '%' : '—'}</span></td>
             <td class="num tsp-sub">${p.rows}</td>
             <td class="tsp-sub">${esc(p.last_entry || '')}</td>
         </tr>`).join('');
@@ -211,7 +218,7 @@ export function projectFileHtml(d, opts = {}) {
             <span class="ts-chip"><b>${d.total}</b>總時數</span>
             <span class="ts-chip"><b>${d.people}</b>人</span>
             <span class="ts-chip"><b>${d.span_days}</b>天（${esc(d.first || '—')} → ${esc(d.last || '—')}）</span>
-            <span class="ts-chip"><b>${d.budget_hours ?? '—'}</b>預算 h　<span class="ts-pct" style="${pctStyle(d.pct)}">${pct}</span></span>
+            <span class="ts-chip"><b>${d.budget_hours ?? '—'}</b>預算 h　<span class="ts-pct ${pctClass(d.pct)}" style="${pctStyle(d.pct)}">${pct}</span></span>
             ${d.quote_days != null ? `<span class="ts-chip"><b>${d.quote_days}</b>報價人日（≈ ${d.quote_hours} h）</span>` : ''}
             ${d.suggested_hours != null ? `<span class="ts-chip" title="依私帳設定：合約未稅 ×（1−${esc(d.project_type || '')}預期毛利）÷ 日成本 × 每日工時"><b>${d.suggested_hours}</b>建議預算 h</span>` : ''}
         </div>

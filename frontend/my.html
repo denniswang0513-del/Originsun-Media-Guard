@@ -173,22 +173,59 @@ footer .eyebrow { font-size: 10px; }
 .sheet-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .sheet-note { font-size: 12px; color: var(--sub); line-height: 1.6; margin-top: 6px; }
 /* 共用元件的白底配色（ts-sheet / ts-projects / stage-editor 的 CSS 變數）*/
-table.ts-sheet { --sh-bg: #fff; --sh-line: #e5e5e5; --sh-head: #f5f5f5; --sh-head-ink: #737373; --sh-ink: #262626; --sh-sub: #8a8a8a; --sh-ro: #fafafa; --sh-ro-ink: #8a8a8a; --sh-hover: #fff; --sh-focus: #fff; --sh-accent: #1d4ed8; --sh-del: #a3a3a3; --sh-del-hover: #c9372c; --sh-ok: #15803d; --sh-busy: #1d4ed8; --sh-err: #c9372c; font-size: 13px; }
+#ws-view table.ts-sheet { --sh-bg: #fff; --sh-line: #e5e5e5; --sh-head: #f5f5f5; --sh-head-ink: #737373; --sh-ink: #262626; --sh-sub: #8a8a8a; --sh-ro: #fafafa; --sh-ro-ink: #8a8a8a; --sh-hover: #fff; --sh-focus: #fff; --sh-accent: #1d4ed8; --sh-del: #a3a3a3; --sh-del-hover: #c9372c; --sh-ok: #15803d; --sh-busy: #1d4ed8; --sh-err: #c9372c; font-size: 13px; }
 /* 示範頁的格子手感：34px 列、表頭淺灰置中、列號不塗底、選到藍框、階段藍字、新列淡底 */
-table.ts-sheet th, table.ts-sheet td { height: 34px; }
-table.ts-sheet th { font-weight: 500; font-size: 12px; }
-table.ts-sheet .ts-sheet-num { background: transparent; color: var(--sub); }
-table.ts-sheet td input, table.ts-sheet td select { height: 34px; padding: 0 6px; font-size: 13px; }
-table.ts-sheet td:focus-within { outline: none; box-shadow: inset 0 0 0 2px var(--sh-accent); }
-table.ts-sheet td select[data-f="stage"] { color: #1d4ed8; }
-table.ts-sheet tr.ts-mine-row:not([data-id]) td { background: #fafafa; }
-table.ts-sheet tbody tr:hover td { background: inherit; }
+#ws-view table.ts-sheet th, #ws-view table.ts-sheet td { height: 34px; }
+#ws-view table.ts-sheet th { font-weight: 500; font-size: 12px; }
+#ws-view table.ts-sheet .ts-sheet-num { background: transparent; color: var(--sub); }
+#ws-view table.ts-sheet td input, #ws-view table.ts-sheet td select { height: 34px; padding: 0 6px; font-size: 13px; }
+#ws-view table.ts-sheet td:focus-within { outline: none; box-shadow: inset 0 0 0 2px var(--sh-accent); }
+#ws-view table.ts-sheet td select[data-f="stage"] { color: #1d4ed8; }
+#ws-view table.ts-sheet tr.ts-mine-row:not([data-id]) td { background: #fafafa; }
+#ws-view table.ts-sheet tbody tr:hover td { background: inherit; }
 .sheet-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; gap: 10px; flex-wrap: wrap; }
 .sheet-note { display: none; }
-.tsp { --tsp-ink: #262626; --tsp-sub: #737373; --tsp-dim: #a3a3a3; --tsp-tag: #737373; --tsp-plan: #1d4ed8; --tsp-warn: #b45309; --tsp-link: #1d4ed8; --tsp-card: #fff; --tsp-line: #e5e5e5; --tsp-row: #f0f0f0; --tsp-chip-ink: #737373; --tsp-badge: #f3f3f3; --tsp-badge-ink: #737373; --tsp-month: #f5f5f5; }
-.tsp .ts-btn { display: none; }               /* 唯讀：分頁才有的動作鈕不畫 */
-.tsp svg text { fill: #737373; }              /* svg-charts 的字色是深色版寫死的，白底改用 CSS 覆蓋 */
-.tsp svg rect[fill="#2a2a2a"] { fill: #f0f0f0; }
+#ws-view .tsp { --tsp-ink: #262626; --tsp-sub: #737373; --tsp-dim: #a3a3a3; --tsp-tag: #737373; --tsp-plan: #1d4ed8; --tsp-warn: #b45309; --tsp-link: #1d4ed8; --tsp-card: #fff; --tsp-line: #e5e5e5; --tsp-row: #f0f0f0; --tsp-chip-ink: #737373; --tsp-badge: #f3f3f3; --tsp-badge-ink: #737373; --tsp-month: #f5f5f5; }
+#ws-view .tsp .ts-btn { display: none; }               /* 唯讀：分頁才有的動作鈕不畫 */
+#ws-view .tsp svg text { fill: #737373; }              /* svg-charts 的字色是深色版寫死的，白底改用 CSS 覆蓋 */
+#ws-view .tsp svg rect[fill="#2a2a2a"] { fill: #f0f0f0; }
+/* 團隊的一週（示範頁的格子）：人一列、日一欄；案名粗＋小時、內容灰；場次藍底、休假灰底、計畫淡字 */
+#ws-view table.week { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+#ws-view table.week th { text-align: left; font-size: 12px; color: var(--sub); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+#ws-view table.week th.today { color: var(--red); }
+#ws-view table.week td { padding: 8px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+#ws-view table.week td.who { font-weight: 600; white-space: nowrap; }
+#ws-view table.week .c { margin: 2px 0 8px; line-height: 1.35; }
+#ws-view table.week .c i { display: block; font-style: normal; color: var(--sub); font-size: 12px; }
+#ws-view table.week .c b { font-weight: 600; margin-left: 4px; }
+#ws-view table.week .c.plan { color: var(--sub); }
+#ws-view table.week .c.shoot { color: #1d4ed8; background: #eff6ff; border-radius: 4px; padding: 3px 6px; }
+#ws-view table.week .c.off { color: var(--sub); background: #f5f5f5; border-radius: 4px; padding: 3px 6px; }
+#ws-view table.week .none { color: #c4c4c4; }
+/* 專案表：數字用正文色、可排序表頭灰；專案檔案卡片白底細框 */
+#ws-view .tsp td.num { color: var(--ink); font-variant-numeric: tabular-nums; }
+#ws-view .tsp .ts-card { background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+#ws-view .tsp .ts-chip { background: #fff; border: 1px solid var(--line); }
+/* 進階搜尋列 */
+.find-adv { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft, #fafafa); }
+.find-adv .fa-l { font-size: 12px; color: var(--sub); margin-left: 4px; }
+.find-adv .in { width: auto; min-width: 120px; }
+.find-adv input[type="number"] { width: 90px; min-width: 0; }
+.find-adv .fa-types { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.btn.sm { min-height: 26px; font-size: 12px; padding: 0 8px; border-radius: 6px; }
+/* 示範頁的格子：已存的列橘色圓列號，空列灰數字 */
+#ws-view table.ts-sheet td.ts-sheet-num { padding: 0; }
+#ws-view table.ts-sheet tr[data-id] td.ts-sheet-num::before { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: #f59e0b; color: #fff; font-weight: 700; font-size: 11px; }
+#ws-view table.ts-sheet tr[data-readonly] td.ts-sheet-num::before { background: #d4d4d4; }
+/* 示範頁的專案表：淡色消耗率標籤、負數紅、案名藍底線 */
+#ws-view .tsp .ts-pct { border-radius: 999px; padding: 1px 8px; font-size: 12px; border: 1px solid transparent; }
+#ws-view .tsp .ts-pct.over { background: #fef2f2 !important; color: #c9372c !important; border-color: #fecaca; }
+#ws-view .tsp .ts-pct.hi { background: #fff7ed !important; color: #b45309 !important; border-color: #fed7aa; }
+#ws-view .tsp .ts-pct.mid, #ws-view .tsp .ts-pct.low { background: #eff6ff !important; color: #1d4ed8 !important; border-color: #bfdbfe; }
+#ws-view .tsp .ts-pct.none { background: #f5f5f5 !important; color: #737373 !important; }
+#ws-view .tsp td.num.neg { color: var(--red); }
+#ws-view .tsp .ts-link { color: #1d4ed8; text-decoration: underline; cursor: pointer; }
+#ws-view .tsp .ts-badge { background: #fff7ed; color: #b45309; border: 1px solid #fed7aa; border-radius: 999px; padding: 0 6px; font-size: 11px; margin-left: 6px; }
 .stage-editor { --se-bg: #fff; --se-ink: #262626; --se-sub: #737373; --se-line: #e5e5e5; --se-box: #fafafa; --se-off: #a3a3a3; --se-btn: #262626; --se-input: #fff; }
 /* 團隊的一週（人×日，案名＋小時＋內容；計畫淺灰、場次藍、休假灰）*/
 table.week { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
@@ -1329,7 +1366,7 @@ let _todayInfo = null;      // /me/today（場次、待辦、上週回顧狀態�
 let _z1Week = _mondayOf(_localToday());
 let _findRows = null;       // 專案查詢的表資料
 let _findSorter = null;
-const _findState = { q: "", status: "" };
+const _findState = { q: "", status: "", adv: false, from: "", to: "", types: new Set(), pctMin: "", pctMax: "" };   // 進階：最後填報區間、案型、消耗率
 const _WD_Z1 = ["日", "一", "二", "三", "四", "五", "六"];
 
 function _shiftDays(ymd, n) {
@@ -1532,8 +1569,7 @@ async function loadTeamWeek() {
             <span class="vrow"><button type="button" class="btn" data-z1="week" data-start="${_shiftDays(_z1Week, -7)}">‹</button>
                 <span class="meta">${esc(_z1Week)} 起</span>
                 <button type="button" class="btn" data-z1="week" data-start="${_shiftDays(_z1Week, 7)}">›</button>
-                ${_z1Week === _mondayOf(today) ? "" : '<button type="button" class="btn" data-z1="week">本週</button>'}
-                <span class="meta">同工作追蹤「今日看板」的週模式，含工時；疊場次（藍）、休假（灰）。沒排的不猜。</span></span></div>
+                ${_z1Week === _mondayOf(today) ? "" : '<button type="button" class="btn" data-z1="week">本週</button>'}</span></div>
         ${names.length ? `<div style="overflow-x:auto;"><table class="week">
             <thead><tr><th style="width:84px;">人員</th>${cols.map(iso => `<th class="${iso === today ? "today" : ""}">${esc(_mdLabel(iso))}</th>`).join("")}</tr></thead>
             <tbody>${names.map(n => `<tr><td class="who">${esc(n)}</td>${cols.map(iso => `<td>${cell(n, iso)}</td>`).join("")}</tr>`).join("")}</tbody>
@@ -1565,9 +1601,17 @@ async function loadFind() {
 }
 function _findFiltered() {
     const q = _findState.q.trim().toLowerCase();
-    return (_findRows || []).filter(p => (!_findState.status || (p.status || "") === _findState.status)
-        && (!q || [p.project_name, p.status, p.project_type].some(s => String(s || "").toLowerCase().includes(q))));
+    const st = _findState;
+    const min = st.pctMin === "" ? null : Number(st.pctMin), max = st.pctMax === "" ? null : Number(st.pctMax);
+    return (_findRows || []).filter(p => (!st.status || (p.status || "") === st.status)
+        && (!q || [p.project_name, p.status, p.project_type].some(s => String(s || "").toLowerCase().includes(q)))
+        && (!st.from || (p.last_entry || "") >= st.from)
+        && (!st.to || (p.last_entry || "") <= st.to)
+        && (!st.types.size || st.types.has(p.project_type || ""))
+        && (min == null || (p.pct != null && Number(p.pct) >= min))
+        && (max == null || (p.pct != null && Number(p.pct) <= max)));
 }
+function _findAdvActive() { const st = _findState; return !!(st.from || st.to || st.types.size || st.pctMin !== "" || st.pctMax !== ""); }
 async function _redrawFindBody() {
     const TS = await TS_READY;
     const tb = document.querySelector("#my-burn-table tbody");
@@ -1578,12 +1622,23 @@ async function _renderFindTable() {
     const TS = await TS_READY;
     const host = $("z1-find");
     const statuses = [...new Set((_findRows || []).map(p => p.status).filter(Boolean))];
+    const types = [...new Set((_findRows || []).map(p => p.project_type).filter(Boolean))].sort();
     host.innerHTML = `
-        <div class="vhead"><span class="ey">Find<b>專案查詢</b></span><span class="meta">同工作追蹤「專案」表：全案的投入與預算（不是個人累計）。點案名開專案檔案。</span></div>
+        <div class="vhead"><span class="ey">Find<b>專案查詢</b></span></div>
         <div class="find-bar"><input class="in" id="z1-find-q" placeholder="案名、狀態、案型…" value="${esc(_findState.q)}">
             <button type="button" class="btn ${_findState.status ? "" : "on"}" data-status="">全部</button>
             ${statuses.map(s => `<button type="button" class="btn ${_findState.status === s ? "on" : ""}" data-status="${esc(s)}">${esc(s)}</button>`).join("")}
+            <button type="button" class="btn ${_findState.adv || _findAdvActive() ? "on" : ""}" id="z1-find-adv-toggle">進階</button>
             <span class="meta" id="z1-find-count"></span></div>
+        <div class="find-adv" id="z1-find-adv" ${_findState.adv ? "" : "hidden"}>
+            <span class="fa-l">最後填報</span>
+            <input type="date" class="in" id="z1-fa-from" value="${esc(_findState.from)}"><span class="meta">～</span><input type="date" class="in" id="z1-fa-to" value="${esc(_findState.to)}">
+            <span class="fa-l">消耗率</span>
+            <input type="number" class="in" id="z1-fa-min" placeholder="最低 %" min="0" value="${esc(_findState.pctMin)}"><span class="meta">～</span><input type="number" class="in" id="z1-fa-max" placeholder="最高 %" min="0" value="${esc(_findState.pctMax)}">
+            <span class="fa-l">案型</span>
+            <span class="fa-types">${types.map(t => `<button type="button" class="btn sm ${_findState.types.has(t) ? "on" : ""}" data-type="${esc(t)}">${esc(t)}</button>`).join("")}</span>
+            <button type="button" class="btn sm" id="z1-fa-clear">清除</button>
+        </div>
         <div class="tsp" id="z1-find-body" style="overflow-x:auto;">${TS.burnTableHtml(TS.burnTbodyHtml(_findSorter.sorted(_findFiltered()), { editable: false, emptyText: "沒有符合的" }), "my-burn-table")}</div>`;
     _findSorter.attach();
     const c = $("z1-find-count"); if (c) c.textContent = `${_findFiltered().length} 案`;
@@ -1593,6 +1648,24 @@ async function _renderFindTable() {
         host.querySelectorAll(".find-bar [data-status]").forEach(x => x.classList.toggle("on", x === b));
         _redrawFindBody();
     }));
+    // 進階搜尋：最後填報區間、消耗率上下限、案型多選（都在瀏覽器端篩，資料已在手上）
+    const adv = $("z1-find-adv"), tog = $("z1-find-adv-toggle");
+    tog.addEventListener("click", () => { _findState.adv = adv.hidden; adv.hidden = !adv.hidden; tog.classList.toggle("on", _findState.adv || _findAdvActive()); });
+    const bind = (id, key) => $(id).addEventListener("input", (e) => { _findState[key] = e.target.value; tog.classList.toggle("on", true); _redrawFindBody(); });
+    bind("z1-fa-from", "from"); bind("z1-fa-to", "to"); bind("z1-fa-min", "pctMin"); bind("z1-fa-max", "pctMax");
+    adv.querySelectorAll("[data-type]").forEach(b => b.addEventListener("click", () => {
+        const t = b.dataset.type;
+        if (_findState.types.has(t)) _findState.types.delete(t); else _findState.types.add(t);
+        b.classList.toggle("on", _findState.types.has(t));
+        _redrawFindBody();
+    }));
+    $("z1-fa-clear").addEventListener("click", () => {
+        Object.assign(_findState, { from: "", to: "", pctMin: "", pctMax: "" }); _findState.types.clear();
+        ["z1-fa-from", "z1-fa-to", "z1-fa-min", "z1-fa-max"].forEach(id => { $(id).value = ""; });
+        adv.querySelectorAll("[data-type]").forEach(b => b.classList.remove("on"));
+        tog.classList.toggle("on", _findState.adv);
+        _redrawFindBody();
+    });
 }
 async function _openFindProject(name, pid) {
     const TS = await TS_READY;

@@ -183,12 +183,16 @@ async def _reactions_by_journal(session, journal_ids: list, me: str) -> dict:
         return out
     rows = (await session.execute(
         select(JournalReaction.journal_id, JournalReaction.entry_id, JournalReaction.username, JournalReaction.kind)
-        .where(JournalReaction.journal_id.in_(journal_ids)))).all()
+        .where(JournalReaction.journal_id.in_(journal_ids)).order_by(JournalReaction.created_at, JournalReaction.id))).all()
+    names = await _display_names(session, {u for _j, _e, u, _k in rows})
     by = {}
     for jid, eid, u, k in rows:
         by.setdefault(jid, []).append((eid, u, k))
     for jid, lst in by.items():
-        out[jid] = reaction_summary(lst, me)
+        summ = reaction_summary(lst, me)
+        for d in summ.values():                       # 帳號 → 顯示名（頭像與浮層用；帳號不外露）
+            d["names"] = {k: [names.get(u, u) for u in us] for k, us in d.pop("users", {}).items()}
+        out[jid] = summ
     return out
 
 
