@@ -206,12 +206,8 @@ footer .eyebrow { font-size: 10px; }
 #ws-view .tsp td.num { color: var(--ink); font-variant-numeric: tabular-nums; }
 #ws-view .tsp .ts-card { background: #fff; border: 1px solid var(--line); border-radius: 8px; }
 #ws-view .tsp .ts-chip { background: #fff; border: 1px solid var(--line); }
-/* 進階搜尋列 */
-.find-adv { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft, #fafafa); }
-.find-adv .fa-l { font-size: 12px; color: var(--sub); margin-left: 4px; }
-.find-adv .in { width: auto; min-width: 120px; }
-.find-adv input[type="number"] { width: 90px; min-width: 0; }
-.find-adv .fa-types { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+/* 篩選列：一列搞定（搜尋框撐滿，其餘是下拉）*/
+.find-bar .sel { min-height: 34px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); padding: 0 8px; font-size: 13px; font-family: inherit; }
 .btn.sm { min-height: 26px; font-size: 12px; padding: 0 8px; border-radius: 6px; }
 /* 示範頁的格子：已存的列橘色圓列號，空列灰數字 */
 #ws-view table.ts-sheet td.ts-sheet-num { padding: 0; }
@@ -224,7 +220,8 @@ footer .eyebrow { font-size: 10px; }
 #ws-view .tsp .ts-pct.mid, #ws-view .tsp .ts-pct.low { background: #eff6ff !important; color: #1d4ed8 !important; border-color: #bfdbfe; }
 #ws-view .tsp .ts-pct.none { background: #f5f5f5 !important; color: #737373 !important; }
 #ws-view .tsp td.num.neg { color: var(--red); }
-#ws-view .tsp .ts-link { color: #1d4ed8; text-decoration: underline; cursor: pointer; }
+#ws-view .tsp .ts-link { color: var(--ink); font-weight: 500; text-decoration: none; cursor: pointer; }
+#ws-view .tsp .ts-link:hover { color: #1d4ed8; text-decoration: underline; }
 #ws-view .tsp .ts-badge { background: #fff7ed; color: #b45309; border: 1px solid #fed7aa; border-radius: 999px; padding: 0 6px; font-size: 11px; margin-left: 6px; }
 .stage-editor { --se-bg: #fff; --se-ink: #262626; --se-sub: #737373; --se-line: #e5e5e5; --se-box: #fafafa; --se-off: #a3a3a3; --se-btn: #262626; --se-input: #fff; }
 /* 團隊的一週（人×日，案名＋小時＋內容；計畫淺灰、場次藍、休假灰）*/
@@ -1366,7 +1363,7 @@ let _todayInfo = null;      // /me/today（場次、待辦、上週回顧狀態�
 let _z1Week = _mondayOf(_localToday());
 let _findRows = null;       // 專案查詢的表資料
 let _findSorter = null;
-const _findState = { q: "", status: "", adv: false, from: "", to: "", types: new Set(), pctMin: "", pctMax: "" };   // 進階：最後填報區間、案型、消耗率
+const _findState = { q: "", status: "", type: "", pct: "", recent: "" };   // 一列篩選：狀態、案型、消耗率區間、最後填報多久內
 const _WD_Z1 = ["日", "一", "二", "三", "四", "五", "六"];
 
 function _shiftDays(ymd, n) {
@@ -1460,7 +1457,6 @@ async function loadLog() {
         <div class="vrow" style="margin-bottom:10px;">
             <button type="button" class="btn" data-z1="import-shoots" ${shoots.length && isToday ? "" : "disabled"}>從場次帶入（${shoots.length}）</button>
             <button type="button" class="btn" data-z1="import-todos" ${todos.length ? "" : "disabled"}>從待辦帶入（${todos.length}）</button>
-            <button type="button" class="btn" data-z1="copy-prev">複製上個工作日（${esc(_mdLabel(_prevWorkday(_logDay)))}）</button>
         </div>
         <div id="z1-sheet"></div>
         <div class="sheet-foot">
@@ -1468,7 +1464,6 @@ async function loadLog() {
                 <button type="button" class="btn" data-z1="row-add">＋ 加五列</button>
                 <button type="button" class="btn pri" data-z1="save">儲存</button>
                 <span id="z1-log-msg" class="meta"></span></span>
-            <span class="meta">${esc(mine.staff_name || "")}</span>
         </div>
         <div class="sheet-note">一列＝一個案子做了什麼；專案＋時數（實際或計畫）填齊就自動存，之後改任何一格也自動存。起訖用 24 小時制（打「9」「930」「1730」都可以），會自己算出實際 h。
             工作階段只列該列分類的階段。往前翻可以補記；Sheet 拉進來的列會標「Sheet」、不能改。</div>`
@@ -1508,22 +1503,6 @@ async function _z1Action(btn, ev) {
         } else {
             (t.todos || []).forEach(td => TS.appendRow(sheet, { work_type: "行政", note: td.title || "", bulletin_id: td.id }));
         }
-        TS.appendBlankRows(sheet);
-        return;
-    }
-    if (act === "copy-prev") {
-        if (!sheet) return;
-        const prev = _prevWorkday(_logDay);
-        let items = [];
-        try { items = (await mjson("/api/v1/timesheets/mine?date=" + prev)).items || []; }
-        catch (e) { const el = $("z1-log-msg"); if (el) el.textContent = "讀不到上個工作日：" + e.message; return; }
-        if (!items.length) { const el = $("z1-log-msg"); if (el) el.textContent = `${_mdLabel(prev)} 沒有紀錄可複製`; return; }
-        TS.dropEmptyRows(sheet);
-        items.forEach(i => {
-            const tr = TS.appendRow(sheet, { project: i.project_name, project_id: i.project_id, work_type: i.work_type, stage_id: i.stage_id, stage_name: i.stage_name,
-                                             note: i.task_note, planned: i.planned_hours, hours: "" });
-            if (tr) TS.saveRowNow(sheet, tr);   // 有計畫的立刻存成今天的計畫
-        });
         TS.appendBlankRows(sheet);
         return;
     }
@@ -1599,19 +1578,30 @@ async function loadFind() {
     if (!_findSorter) _findSorter = TS.createBurnSorter({ storageKey: "my_find_sort", panelId: "my-burn-table", onChange: () => _redrawFindBody() });
     _renderFindTable();
 }
-function _findFiltered() {
-    const q = _findState.q.trim().toLowerCase();
-    const st = _findState;
-    const min = st.pctMin === "" ? null : Number(st.pctMin), max = st.pctMax === "" ? null : Number(st.pctMax);
-    return (_findRows || []).filter(p => (!st.status || (p.status || "") === st.status)
-        && (!q || [p.project_name, p.status, p.project_type].some(s => String(s || "").toLowerCase().includes(q)))
-        && (!st.from || (p.last_entry || "") >= st.from)
-        && (!st.to || (p.last_entry || "") <= st.to)
-        && (!st.types.size || st.types.has(p.project_type || ""))
-        && (min == null || (p.pct != null && Number(p.pct) >= min))
-        && (max == null || (p.pct != null && Number(p.pct) <= max)));
+// 消耗率區間與最後填報區間都是固定選項（下拉），不用打數字
+const PCT_BANDS = [["", "消耗率：全部"], ["none", "未設預算"], ["lt60", "60% 以下"], ["60-90", "60–90%"], ["90-100", "90–100%"], ["over", "超過 100%"]];
+const RECENT_BANDS = [["", "最後填報：不限"], ["7", "7 天內"], ["30", "30 天內"], ["90", "90 天內"], ["stale", "超過 90 天沒填"]];
+function _pctInBand(pct, band) {
+    if (!band) return true;
+    if (band === "none") return pct == null;
+    if (pct == null) return false;
+    const v = Number(pct);
+    return band === "lt60" ? v < 60 : band === "60-90" ? (v >= 60 && v < 90) : band === "90-100" ? (v >= 90 && v <= 100) : v > 100;
 }
-function _findAdvActive() { const st = _findState; return !!(st.from || st.to || st.types.size || st.pctMin !== "" || st.pctMax !== ""); }
+function _recentInBand(lastEntry, band) {
+    if (!band) return true;
+    if (!lastEntry) return band === "stale";
+    const days = Math.floor((Date.now() - new Date(lastEntry + "T00:00:00").getTime()) / 86400000);
+    return band === "stale" ? days > 90 : days <= Number(band);
+}
+function _findFiltered() {
+    const q = _findState.q.trim().toLowerCase(), st = _findState;
+    return (_findRows || []).filter(p => (!st.status || (p.status || "") === st.status)
+        && (!st.type || (p.project_type || "") === st.type)
+        && _pctInBand(p.pct, st.pct) && _recentInBand(p.last_entry, st.recent)
+        && (!q || [p.project_name, p.status, p.project_type].some(x => String(x || "").toLowerCase().includes(q))));
+}
+function _findActive() { const st = _findState; return !!(st.q || st.status || st.type || st.pct || st.recent); }
 async function _redrawFindBody() {
     const TS = await TS_READY;
     const tb = document.querySelector("#my-burn-table tbody");
@@ -1625,46 +1615,26 @@ async function _renderFindTable() {
     const types = [...new Set((_findRows || []).map(p => p.project_type).filter(Boolean))].sort();
     host.innerHTML = `
         <div class="vhead"><span class="ey">Find<b>專案查詢</b></span></div>
-        <div class="find-bar"><input class="in" id="z1-find-q" placeholder="案名、狀態、案型…" value="${esc(_findState.q)}">
-            <button type="button" class="btn ${_findState.status ? "" : "on"}" data-status="">全部</button>
-            ${statuses.map(s => `<button type="button" class="btn ${_findState.status === s ? "on" : ""}" data-status="${esc(s)}">${esc(s)}</button>`).join("")}
-            <button type="button" class="btn ${_findState.adv || _findAdvActive() ? "on" : ""}" id="z1-find-adv-toggle">進階</button>
+        <div class="find-bar">
+            <input class="in" id="z1-find-q" placeholder="搜尋案名、狀態、案型…" value="${esc(_findState.q)}">
+            <select class="sel" id="z1-f-status"><option value="">狀態：全部</option>${statuses.map(x => `<option value="${esc(x)}" ${_findState.status === x ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>
+            <select class="sel" id="z1-f-type"><option value="">案型：全部</option>${types.map(x => `<option value="${esc(x)}" ${_findState.type === x ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>
+            <select class="sel" id="z1-f-pct">${PCT_BANDS.map(([v, l]) => `<option value="${v}" ${_findState.pct === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+            <select class="sel" id="z1-f-recent">${RECENT_BANDS.map(([v, l]) => `<option value="${v}" ${_findState.recent === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+            <button type="button" class="btn" id="z1-f-clear" ${_findActive() ? "" : "hidden"}>清除</button>
             <span class="meta" id="z1-find-count"></span></div>
-        <div class="find-adv" id="z1-find-adv" ${_findState.adv ? "" : "hidden"}>
-            <span class="fa-l">最後填報</span>
-            <input type="date" class="in" id="z1-fa-from" value="${esc(_findState.from)}"><span class="meta">～</span><input type="date" class="in" id="z1-fa-to" value="${esc(_findState.to)}">
-            <span class="fa-l">消耗率</span>
-            <input type="number" class="in" id="z1-fa-min" placeholder="最低 %" min="0" value="${esc(_findState.pctMin)}"><span class="meta">～</span><input type="number" class="in" id="z1-fa-max" placeholder="最高 %" min="0" value="${esc(_findState.pctMax)}">
-            <span class="fa-l">案型</span>
-            <span class="fa-types">${types.map(t => `<button type="button" class="btn sm ${_findState.types.has(t) ? "on" : ""}" data-type="${esc(t)}">${esc(t)}</button>`).join("")}</span>
-            <button type="button" class="btn sm" id="z1-fa-clear">清除</button>
-        </div>
         <div class="tsp" id="z1-find-body" style="overflow-x:auto;">${TS.burnTableHtml(TS.burnTbodyHtml(_findSorter.sorted(_findFiltered()), { editable: false, emptyText: "沒有符合的" }), "my-burn-table")}</div>`;
     _findSorter.attach();
     const c = $("z1-find-count"); if (c) c.textContent = `${_findFiltered().length} 案`;
-    $("z1-find-q").addEventListener("input", (e) => { _findState.q = e.target.value; _redrawFindBody(); });
-    host.querySelectorAll(".find-bar [data-status]").forEach(b => b.addEventListener("click", () => {
-        _findState.status = b.dataset.status;
-        host.querySelectorAll(".find-bar [data-status]").forEach(x => x.classList.toggle("on", x === b));
-        _redrawFindBody();
-    }));
-    // 進階搜尋：最後填報區間、消耗率上下限、案型多選（都在瀏覽器端篩，資料已在手上）
-    const adv = $("z1-find-adv"), tog = $("z1-find-adv-toggle");
-    tog.addEventListener("click", () => { _findState.adv = adv.hidden; adv.hidden = !adv.hidden; tog.classList.toggle("on", _findState.adv || _findAdvActive()); });
-    const bind = (id, key) => $(id).addEventListener("input", (e) => { _findState[key] = e.target.value; tog.classList.toggle("on", true); _redrawFindBody(); });
-    bind("z1-fa-from", "from"); bind("z1-fa-to", "to"); bind("z1-fa-min", "pctMin"); bind("z1-fa-max", "pctMax");
-    adv.querySelectorAll("[data-type]").forEach(b => b.addEventListener("click", () => {
-        const t = b.dataset.type;
-        if (_findState.types.has(t)) _findState.types.delete(t); else _findState.types.add(t);
-        b.classList.toggle("on", _findState.types.has(t));
-        _redrawFindBody();
-    }));
-    $("z1-fa-clear").addEventListener("click", () => {
-        Object.assign(_findState, { from: "", to: "", pctMin: "", pctMax: "" }); _findState.types.clear();
-        ["z1-fa-from", "z1-fa-to", "z1-fa-min", "z1-fa-max"].forEach(id => { $(id).value = ""; });
-        adv.querySelectorAll("[data-type]").forEach(b => b.classList.remove("on"));
-        tog.classList.toggle("on", _findState.adv);
-        _redrawFindBody();
+    const clear = $("z1-f-clear");
+    const sync = () => { clear.hidden = !_findActive(); _redrawFindBody(); };
+    $("z1-find-q").addEventListener("input", (e) => { _findState.q = e.target.value; sync(); });
+    [["z1-f-status", "status"], ["z1-f-type", "type"], ["z1-f-pct", "pct"], ["z1-f-recent", "recent"]].forEach(([id, key]) =>
+        $(id).addEventListener("change", (e) => { _findState[key] = e.target.value; sync(); }));
+    clear.addEventListener("click", () => {
+        Object.assign(_findState, { q: "", status: "", type: "", pct: "", recent: "" });
+        $("z1-find-q").value = ""; ["z1-f-status", "z1-f-type", "z1-f-pct", "z1-f-recent"].forEach(id => { $(id).value = ""; });
+        sync();
     });
 }
 async function _openFindProject(name, pid) {

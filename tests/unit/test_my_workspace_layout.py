@@ -56,7 +56,7 @@ def test_journal_iframe_and_zones_stay():
     assert 'id="ws-zone1"' in html and 'id="ws-actions"' in html and 'id="ws-grid"' in html
     assert "journal-embed-height" in html
     # 三顆帶入鈕與工作階段設定鈕
-    for act in ("import-shoots", "import-todos", "copy-prev", "stages", "row-add", "save"):
+    for act in ("import-shoots", "import-todos", "stages", "row-add", "save"):
         assert f'data-z1="{act}"' in html, act
     # 複製上個工作日跳過週末
     assert "function _prevWorkday(" in html and "_dow(d) === 0 || _dow(d) === 6" in html
@@ -70,10 +70,12 @@ def test_action_bar_links_to_existing_pages_only():
     assert 'g.has("equipment", "preprod_plan")' in html
 
 
-def test_find_view_has_advanced_search():
-    """owner 2026-09-05：專案查詢加進階搜尋——最後填報日期區間、案型多選、消耗率上下限；全在瀏覽器端篩。"""
+def test_find_view_filters_are_one_row():
+    """owner 2026-09-05：搜尋篩選整併成一列——搜尋框、狀態、案型、消耗率區間、最後填報多久內、清除；沒有進階面板。"""
     src = repo_src("frontend/my.html")
-    assert 'id="z1-find-adv"' in src and "z1-fa-from" in src and "z1-fa-max" in src and "data-type=" in src
-    assert "st.types.has(p.project_type" in src and "Number(p.pct) >= min" in src and "(p.last_entry || \"\") >= st.from" in src
+    for i in ("z1-find-q", "z1-f-status", "z1-f-type", "z1-f-pct", "z1-f-recent", "z1-f-clear"):
+        assert f'id="{i}"' in src, i
+    assert "z1-find-adv" not in src and "data-type=" not in src
+    assert "PCT_BANDS" in src and "RECENT_BANDS" in src and "_pctInBand(p.pct, st.pct)" in src and "_recentInBand(p.last_entry, st.recent)" in src
     shared = repo_src("frontend/js/shared/ts-projects.js")
     assert "export function pctClass(" in shared and "ts-pct ${pctClass(p.pct)}" in shared

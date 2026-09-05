@@ -48,13 +48,19 @@ export function calcDashboardParts(p) {
 }
 
 export function calcDashboard(f) {
-    const miscAuto = f.misc_budget_total == null;
+    // 預估雜支的來源（owner 2026-09-05：子表預算連雜支一起包，成本扣完剛好 20%）：
+    //   1. 子表有設「雜支預算」→ 加總（misc_budget_total）
+    //   2. 沒設，但子表有預算 → Σ子表預算 − Σ工項預估（miscFrom='alloc'）
+    //   3. 連子表預算都沒有 → 未稅 × 雜支比自動推算（miscAuto）
+    const alloc = Number(f.allocated_budget_sum || 0), costEst = Number(f.costline_estimated || 0);
+    const fromAlloc = f.misc_budget_total == null && alloc > 0;
+    const miscAuto = f.misc_budget_total == null && !fromAlloc;
     return calcDashboardParts({
         exTax: f.ex_tax, profitTarget: f.profit_target,
-        costEstimated: f.costline_estimated || 0,
+        costEstimated: costEst,
         costActual: f.costline_actual || 0,
-        miscEstimated: miscAuto ? (f.misc_budget || 0) : f.misc_budget_total,
-        miscAuto,
+        miscEstimated: miscAuto ? (f.misc_budget || 0) : (fromAlloc ? Math.max(0, alloc - costEst) : f.misc_budget_total),
+        miscAuto, miscFrom: fromAlloc ? 'alloc' : (miscAuto ? 'auto' : 'groups'),
         miscPct: f.misc_budget_pct != null ? f.misc_budget_pct : 5,
         miscActual: f.expense_actual || 0,
     });
