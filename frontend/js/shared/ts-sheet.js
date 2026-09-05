@@ -18,7 +18,7 @@ import { attachProjectPop } from './project-pop.js';
 
 export const SHEET_COLS = [
     ['project', '專案'], ['type', '分類'], ['stage', '工作階段'], ['note', '做了什麼'], ['remark', '備註'],
-    ['t0', '起'], ['t1', '訖'], ['hours', '實際 h'], ['planned', '計畫 h'], ['state', ''],
+    ['t0', '起'], ['t1', '訖'], ['hours', '時數 h'], ['state', ''],
 ];
 export const BLANK_ROWS = 5;
 
@@ -31,10 +31,10 @@ table.ts-sheet th, table.ts-sheet td { border:1px solid var(--sh-line); padding:
 table.ts-sheet th { background:var(--sh-head); color:var(--sh-head-ink); font-weight:500; font-size:12px; text-align:center; padding:6px 4px; white-space:nowrap; }
 table.ts-sheet th[data-col="project"] { width:18%; }
 table.ts-sheet th[data-col="type"] { width:96px; }
-table.ts-sheet th[data-col="stage"] { width:120px; }
+table.ts-sheet th[data-col="stage"] { width:96px; }
 table.ts-sheet th[data-col="remark"] { width:15%; }
 table.ts-sheet th[data-col="t0"], table.ts-sheet th[data-col="t1"] { width:64px; }
-table.ts-sheet th[data-col="hours"], table.ts-sheet th[data-col="planned"] { width:66px; }
+table.ts-sheet th[data-col="hours"] { width:54px; }
 table.ts-sheet th[data-col="state"] { width:60px; }
 table.ts-sheet td.ts-sheet-state { font-size:11px; color:var(--sh-sub); text-align:center; white-space:nowrap; padding:0 4px; overflow:hidden; text-overflow:ellipsis; }
 table.ts-sheet tr[data-readonly] td { color:var(--sh-ro-ink); background:var(--sh-ro); }
@@ -42,6 +42,10 @@ table.ts-sheet td input:disabled, table.ts-sheet td select:disabled, table.ts-sh
 table.ts-sheet td input, table.ts-sheet td select { width:100%; height:32px; box-sizing:border-box; margin:0; padding:4px 8px;
     background:transparent; border:none; border-radius:0; color:var(--sh-ink); font-size:13px; font-family:inherit; }
 table.ts-sheet td input[type="number"] { text-align:right; }
+table.ts-sheet td textarea { width:100%; height:32px; min-height:32px; box-sizing:border-box; margin:0; padding:7px 8px; display:block;
+    background:transparent; border:none; border-radius:0; color:var(--sh-ink); font-size:13px; font-family:inherit; line-height:18px;
+    resize:none; overflow:hidden; white-space:pre-wrap; word-break:break-all; }
+table.ts-sheet td textarea[readonly] { color:var(--sh-ro-ink); opacity:1; }
 table.ts-sheet td select option { background:var(--sh-bg); color:var(--sh-ink); }
 table.ts-sheet td:focus-within { outline:2px solid var(--sh-accent); outline-offset:-2px; background:var(--sh-focus); }
 table.ts-sheet tbody tr:hover td { background:var(--sh-hover); }
@@ -97,7 +101,7 @@ export function rowHtml(v = {}, o = {}, ctx = {}) {
     const pid = v.project_id ? ` data-pid="${esc(v.project_id)}" data-pname="${esc(v.project || '')}"` : '';
     return `<tr class="ts-mine-row"${o.id ? ` data-id="${esc(o.id)}"` : ''}${o.readonly ? ' data-readonly="1"' : ''}${v.bulletin_id ? ` data-bulletin="${esc(v.bulletin_id)}"` : ''}>
         <td class="ts-sheet-num"></td>
-        <td><input data-proj-pick autocomplete="off" data-f="project" value="${esc(v.project || '')}"${pid}${ro}></td>
+        <td><textarea data-proj-pick autocomplete="off" data-f="project" rows="1"${pid}${ro}>${esc(v.project || '')}</textarea></td>
         <td>${typeSelectHtml(v.work_type || '', `data-f="type"${rosel}`, ctx.workTypes)}</td>
         <td>${stageSelectHtml({ id: v.stage_id || '', name: v.stage_name || '' }, `data-f="stage"${rosel}`, stagesFor(ctx.stages, v.work_type))}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}"${ro}></td>
@@ -105,7 +109,6 @@ export function rowHtml(v = {}, o = {}, ctx = {}) {
         <td><input ${t} data-f="t0" value="${esc(v.t0 || '')}"${ro}></td>
         <td><input ${t} data-f="t1" value="${esc(v.t1 || '')}"${ro}></td>
         <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}"${ro}></td>
-        <td><input type="number" data-f="planned" min="0" step="0.25" value="${v.planned ?? ''}"${ro}></td>
         <td class="ts-sheet-state" data-f="state">${o.readonly ? 'Sheet' : (o.id ? '已存' : '')}</td>
         <td class="ts-sheet-del">${o.readonly ? '' : '<button type="button" data-ts-action="row-remove" title="刪這一列">×</button>'}</td>
     </tr>`;
@@ -140,6 +143,7 @@ export function renderSheet(host, rows, opts = {}) {
     host.innerHTML = tableHtml(body + (opts.readonly ? '' : rowHtml({}, {}, ctx).repeat(opts.blankRows ?? BLANK_ROWS)), opts.id ?? 'ts-mine-add');
     if (opts.projectPicker) attachProjectPop(host, { options: opts.projectPicker, value: (p) => (p.id ? (p.name || p.label) : (p.label || p.name)) });
     _wire(host);
+    fitTextareas(host);
     return host.querySelector('table.ts-sheet');
 }
 
@@ -153,6 +157,7 @@ export function appendRow(host, v = {}) {
     const tb = _tbody(host);
     if (!tb) return null;
     tb.insertAdjacentHTML('beforeend', rowHtml(v, {}, _ctx(host)));
+    fitTextareas(tb.lastElementChild);
     return tb.lastElementChild;
 }
 
@@ -202,9 +207,11 @@ export function rowBody(tr, { day = '', projects = [] } = {}) {
     const body = {
         work_date: v('date') || day, ...projectFromInput(v('project'), tr.querySelector('[data-f="project"]'), projects),
         work_type: v('type') || null,
-        task_note: v('note'), remark: v('remark'), planned_hours: v('planned') ? parseFloat(v('planned')) : null,
+        task_note: v('note'), remark: v('remark'),
         hours: v('hours') ? parseFloat(v('hours')) : null,
     };
+    // 計畫 h 欄 2026-09-06 從格子拿掉；有那欄的格子才送，沒有就不碰既有的 planned_hours
+    if (tr.querySelector('[data-f="planned"]')) body.planned_hours = v('planned') ? parseFloat(v('planned')) : null;
     // 只有格子本身有階段欄才送 stage_id（空字串＝清空）；總表改列／代填的列沒這欄，不能把人家的階段洗掉
     if (tr.querySelector('[data-f="stage"]')) body.stage_id = v('stage') || '';
     if (tr.dataset.bulletin) body.bulletin_id = tr.dataset.bulletin;
@@ -248,10 +255,21 @@ function _syncStage(tr, host, keep = false) {
     }
 }
 
-/** 鍵盤：↓ 到下一列同欄（沒有就長一列）、↑ 上一列同欄；Enter 不跳列（專案格的 Enter 是選取浮層建議）；分類（select）的上下鍵留給它自己。 */
+/** 折行的格子（textarea）：高度回到 CSS 的一列，內容放不下才長到剛好（owner 2026-09-06：案名太長要折行）。 */
+export function fitTextareas(root) {
+    (root?.querySelectorAll ? root.querySelectorAll('table.ts-sheet td textarea, td textarea') : []).forEach(fitTextarea);
+}
+function fitTextarea(ta) {
+    if (!ta || ta.tagName !== 'TEXTAREA') return;
+    ta.style.height = '';
+    if (ta.scrollHeight > ta.clientHeight) ta.style.height = ta.scrollHeight + 'px';
+}
+
+/** 鍵盤：↓ 到下一列同欄（沒有就長一列）、↑ 上一列同欄；Enter 不跳列也不換行（專案格的 Enter 是選取浮層建議）；分類（select）的上下鍵留給它自己。 */
 function _keydown(ev, host) {
     const inp = ev.target.closest('table.ts-sheet [data-f]');
     if (!inp || _ctx(host).readonly) return;
+    if (ev.key === 'Enter' && inp.tagName === 'TEXTAREA') { ev.preventDefault(); return; }   // 折行格：Enter 不是換行
     const down = ev.key === 'ArrowDown', up = ev.key === 'ArrowUp';
     if (!down && !up) return;
     if (inp.tagName === 'SELECT') return;
@@ -278,6 +296,7 @@ function _wire(host) {
     host.addEventListener('keydown', (ev) => _keydown(ev, host));
     host.addEventListener('input', (ev) => {
         _grow(ev, host);
+        fitTextarea(ev.target);
         const cell = ev.target.closest('table.ts-sheet [data-f]');
         if (cell && cell.dataset.f !== 't0' && cell.dataset.f !== 't1') host._tsSchedule?.(cell.closest('tr'));   // 起訖等離開格子再算
     });

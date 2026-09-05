@@ -60,7 +60,7 @@ async def burn_rows(session) -> list:
     只選要用的四欄 —— CrmProject 六十多欄含幾個 JSONB／Text，三百案整列撈是白費。"""
     from datetime import date
     from sqlalchemy import func as safunc
-    from db.models import CrmProject, Timesheet
+    from db.models import Client, CrmProject, Timesheet
     matched = (await session.execute(
         select(Timesheet.project_id, safunc.sum(Timesheet.hours), safunc.count(Timesheet.id),
                safunc.max(Timesheet.work_date))
@@ -69,19 +69,23 @@ async def burn_rows(session) -> list:
     pids = [m[0] for m in matched]
     projs = {row[0]: row[1:] for row in (await session.execute(
         select(CrmProject.id, CrmProject.name, CrmProject.status, CrmProject.budget_hours,
-               CrmProject.contract_amount, CrmProject.tax_rate, CrmProject.project_type)
+               CrmProject.contract_amount, CrmProject.tax_rate, CrmProject.project_type, CrmProject.client_id)
         .where(CrmProject.id.in_(pids)))).all()} if pids else {}
+    # 客戶欄（owner 2026-09-06）：代稱優先、沒有才全稱
+    cids = [v[6] for v in projs.values() if v[6]]
+    clients = {row[0]: (row[1] or row[2] or "") for row in (await session.execute(
+        select(Client.id, Client.short_name, Client.full_name).where(Client.id.in_(cids)))).all()} if cids else {}
     model = load_margin_model("mine")            # 自動對映只認私帳案 → burn 表都是私帳案
     today = date.today()
     items = []
     for pid, total, cnt, last_date in matched:
-        name, status, budget, contract, tax_rate, ptype = projs.get(pid, ("", "", None, 0, None, ""))
+        name, status, budget, contract, tax_rate, ptype, cid = projs.get(pid, ("", "", None, 0, None, "", None))
         last_day = tw_day(last_date)
         # 建議預算：合約未稅 ×（1−該案型預期毛利）÷ 日成本 × 每日工時（core.finance_logic）
         suggested = suggested_budget_hours(contract, tax_rate, margin_for_type(model, ptype),
                                            model["daily_cost"], model["hours_per_day"])
         items.append({
-            "project_id": pid, "project_name": name or "", "status": status or "",
+            "project_id": pid, "project_name": name or "", "status": status or "", "client": clients.get(cid, ""),
             "hours_used": round(total or 0, 1), "budget_hours": budget, **budget_burn(total, budget),
             "suggested_hours": suggested, "project_type": ptype or "",
             "rows": cnt, "last_entry": last_day.isoformat() if last_day else None,

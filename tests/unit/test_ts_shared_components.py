@@ -65,7 +65,8 @@ def test_the_sheet_has_the_stage_column_after_type_and_stages_follow_the_categor
     m = re.search(r"export const SHEET_COLS = \[(.*?)\];", sheet, re.S)
     assert m
     keys = re.findall(r"\['(\w+)',", m.group(1))
-    assert keys == ["project", "type", "stage", "note", "remark", "t0", "t1", "hours", "planned", "state"], keys
+    # 2026-09-06 owner：計畫 h 整欄拿掉、實際 h 改名時數 h（planned_hours 後端留著，格子不送）
+    assert keys == ["project", "type", "stage", "note", "remark", "t0", "t1", "hours", "state"], keys
     # 分類變了 → 階段下拉換清單；原階段不在裡面就清空並提示
     assert "_syncStage(" in sheet and "階段已清空" in sheet
     assert 'data-f="stage"' in sheet and "stagesFor(" in sheet

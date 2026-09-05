@@ -179,6 +179,7 @@ footer .eyebrow { font-size: 10px; }
 #ws-view table.ts-sheet th { font-weight: 500; font-size: 12px; }
 #ws-view table.ts-sheet .ts-sheet-num { background: transparent; color: var(--sub); }
 #ws-view table.ts-sheet td input, #ws-view table.ts-sheet td select { height: 34px; padding: 0 6px; font-size: 13px; }
+#ws-view table.ts-sheet td textarea { height: 34px; min-height: 34px; padding: 8px 6px; font-size: 13px; }
 #ws-view table.ts-sheet td:focus-within { outline: none; box-shadow: inset 0 0 0 2px var(--sh-accent); }
 #ws-view table.ts-sheet td select[data-f="stage"] { color: #1d4ed8; }
 #ws-view table.ts-sheet tr.ts-mine-row:not([data-id]) td { background: #fafafa; }
@@ -195,9 +196,19 @@ footer .eyebrow { font-size: 10px; }
 #ws-view table.week th.today { color: var(--red); }
 #ws-view table.week td { padding: 8px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
 #ws-view table.week td.who { font-weight: 600; white-space: nowrap; }
-#ws-view table.week .c { margin: 2px 0 8px; line-height: 1.35; }
+#ws-view table.week .c { margin: 0 0 8px; line-height: 1.35; padding-bottom: 6px; border-bottom: 1px dashed #ececec; }
+#ws-view table.week .c:last-child { border-bottom: 0; padding-bottom: 0; }
 #ws-view table.week .c i { display: block; font-style: normal; color: var(--sub); font-size: 12px; }
 #ws-view table.week .c b { font-weight: 600; margin-left: 4px; }
+#ws-view table.week .ch { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+#ws-view table.week .ch .cp { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+#ws-view table.week .ch .cp.ts-link { color: var(--ink); cursor: pointer; text-decoration: none; }
+#ws-view table.week .ch .cp.ts-link:hover { color: #1d4ed8; text-decoration: underline; }
+#ws-view table.week .ch .cp.blank { color: #b5b5b5; font-weight: 500; }
+#ws-view table.week .ch .hrs { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; font-size: 12px; background: #f3f4f6; border-radius: 999px; padding: 0 7px; line-height: 18px; }
+#ws-view table.week .ch .hrs.plan { background: transparent; color: var(--sub); font-weight: 500; }
+#ws-view table.week .cn { color: var(--ink); font-size: 12.5px; margin-top: 2px; overflow-wrap: anywhere; }
+#ws-view table.week .ct { color: var(--sub); font-size: 11px; margin-top: 2px; letter-spacing: 0.02em; }
 #ws-view table.week .c.plan { color: var(--sub); }
 #ws-view table.week .c.shoot { color: #1d4ed8; background: #eff6ff; border-radius: 4px; padding: 3px 6px; }
 #ws-view table.week .c.off { color: var(--sub); background: #f5f5f5; border-radius: 4px; padding: 3px 6px; }
@@ -235,6 +246,12 @@ table.week .c b { font-weight: 600; margin-left: 4px; }
 table.week .c.plan { color: var(--sub); } table.week .c.shoot { color: #1d4ed8; background: #eff6ff; border-radius: 4px; padding: 3px 6px; }
 table.week .c.off { color: var(--sub); background: #f5f5f5; border-radius: 4px; padding: 3px 6px; }
 table.week .none { color: #c9c9c9; }
+/* 專案浮層（格子的專案格）：官網風格——白底、細框、淡陰影、標題紅字字距 */
+.proj-pop { --pp-bg:#fff; --pp-line:var(--line); --pp-shadow:0 10px 30px rgba(0,0,0,.08); --pp-head:#fafafa; --pp-head-ink:var(--red); --pp-toggle:var(--red);
+    --pp-ink:var(--ink); --pp-sub:var(--sub); --pp-on:#f5f5f5; --pp-on-ink:var(--ink); --pp-empty:#b5b5b5; border-radius:8px; }
+.proj-pop .pp-h { letter-spacing:.2em; text-transform:uppercase; border-bottom:1px solid var(--line); }
+.proj-pop .pp-item { border-bottom:1px solid #f3f3f3; padding:8px 12px; }
+.proj-pop .pp-item.on { box-shadow: inset 3px 0 0 var(--red); }
 /* 專案查詢 */
 .find-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; } .find-bar .in { flex: 1; min-width: 180px; }
 @media (max-width: 640px) {
@@ -1413,7 +1430,8 @@ function switchZ1(v) {
     document.querySelectorAll("#z1-views .view-btn").forEach(b => b.classList.toggle("active", b.dataset.view === v));
     document.querySelectorAll("#ws-zone1 .view").forEach(el => el.classList.toggle("on", el.dataset.view === v));
     const el = $("z1-" + v);
-    if (el && !el.dataset.loaded) { el.dataset.loaded = "1"; ({ log: loadLog, week: loadTeamWeek, find: loadFind })[v](); }
+    if (el && !el.dataset.loaded) { el.dataset.loaded = "1"; el._ready = ({ log: loadLog, week: loadTeamWeek, find: loadFind })[v](); }
+    return el && el._ready;   // 第一次載入的 promise（別的視圖要跳過來開東西時等它）
 }
 
 // ── 視圖 1：今天的專案紀錄（ts-sheet 格子；不畫合計）──
@@ -1512,7 +1530,10 @@ async function _z1Action(btn, ev) {
     }
     if (act === "week") { _z1Week = btn.dataset.start || _mondayOf(_localToday()); return loadTeamWeek(); }
     if (act === "find-back") return _renderFindTable();
-    if (act === "open-project" || act === "proj-pop") return _openFindProject(btn.dataset.name || "", btn.dataset.pid || "");
+    if (act === "open-project" || act === "proj-pop") {
+        if (_z1View !== "find") await switchZ1("find");   // 團隊的一週點案名：切到專案查詢再開專案檔案
+        return _openFindProject(btn.dataset.name || "", btn.dataset.pid || "");
+    }
 }
 
 // ── 視圖 2：團隊的一週（人×日，案名＋小時＋內容；計畫淺灰、場次藍、休假灰）──
@@ -1536,13 +1557,19 @@ async function loadTeamWeek() {
         const parts = [];
         if (leaveOf(iso).includes(name)) parts.push('<div class="c off">休假</div>');
         shootsOf(iso).filter(s => (s.crew || []).includes(name)).forEach(s => parts.push(`<div class="c shoot">${esc(s.title || s.project_name || "場次")}<i>${[s.project_name && s.project_name !== s.title ? s.project_name : "", s.location, s.start_time, (s.crew || []).join("、")].filter(Boolean).map(esc).join(" · ")}</i></div>`));
+        // 每筆＝案名（可點開專案檔案）＋右側小時、內容、分類·階段（不放任何個人合計——員工頁的鐵則）
         items.forEach(i => {
             const plan = i.status === "plan";
             const stage = [i.work_type, i.stage_name].filter(Boolean).join(" · ");
-            parts.push(`<div class="c${plan ? " plan" : ""}">${esc(i.project || "(空白)")}${plan ? ` 計畫 ${i.planned_hours ?? ""} h` : ` <b>${i.hours ?? ""} h</b>`}<i>${[i.note, stage].filter(Boolean).map(esc).join(" · ")}</i></div>`);
+            const proj = i.project
+                ? `<span class="cp ts-link" data-ts-action="proj-pop" data-name="${esc(i.project)}" data-pid="${esc(i.project_id || "")}" title="點開這個案的執行狀態">${esc(i.project)}</span>`
+                : '<span class="cp blank">未填專案</span>';
+            const hrs = plan ? `<span class="hrs plan">計畫 ${i.planned_hours ?? ""} h</span>` : `<span class="hrs">${i.hours ?? ""} h</span>`;
+            parts.push(`<div class="c${plan ? " plan" : ""}"><div class="ch">${proj}${hrs}</div>${i.note ? `<div class="cn">${esc(i.note)}</div>` : ""}${stage ? `<div class="ct">${esc(stage)}</div>` : ""}</div>`);
         });
         return parts.join("") || '<span class="none">—</span>';
     };
+
     const range = cols.length ? `${_mdLabel(cols[0]).slice(0, -3)} – ${_mdLabel(cols[cols.length - 1]).slice(0, -3)}` : "";
     host.innerHTML = `
         <div class="vhead"><span class="ey">Team Week<b>團隊的一週 ${esc(range)}</b></span>

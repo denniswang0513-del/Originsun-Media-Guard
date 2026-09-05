@@ -401,7 +401,7 @@ async def team_week(request: Request, start: str = ""):
     for day in board:
         for p in day["people"]:
             cells = people.setdefault(p["name"], {})
-            cells[day["date"]] = [{"project": it["project_name"], "note": it["task_note"], "hours": it["hours"],
+            cells[day["date"]] = [{"project": it["project_name"], "project_id": it["project_id"], "note": it["task_note"], "hours": it["hours"],
                                    "planned_hours": it["planned_hours"], "status": it["status"],
                                    "stage_name": it["stage_name"], "work_type": it["work_type"]} for it in p["items"]]
     shoots: dict = {d: [] for d in days}
@@ -572,6 +572,6 @@ async def my_projects_burn(request: Request):
     factory = db_factory_or_503()
     async with factory() as session:
         items = await burn_rows(session)
-    keep = ("project_id", "project_name", "status", "project_type", "hours_used",
+    keep = ("project_id", "project_name", "client", "status", "project_type", "hours_used",
             "budget_hours", "remaining", "pct", "rows", "last_entry", "stale")
     return {"projects": [{k: it.get(k) for k in keep} for it in items]}

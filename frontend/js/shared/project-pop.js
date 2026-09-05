@@ -1,7 +1,7 @@
 /**
  * js/shared/project-pop.js — 專案打字浮層：分「進行中（預設展開）／已結案（收著，打字會搜到、也可點開）」。
  * owner 2026-09-03（工作日誌）／2026-09-04（零用金）：原生 datalist／select 分不了組，所以是自己的浮層；
- * 任何 `<input data-proj-pick>` 都能掛：工作日誌的格子、零用金的三個專案欄。
+ * 任何 `<input data-proj-pick>`／`<textarea data-proj-pick>` 都能掛：工作日誌的格子、零用金的三個專案欄。
  *
  * rows：[{ id, name, label, client, year, closed }]——分組旗標 closed 由後端給（core.project_flow.is_closed），這裡不認狀態字。
  * 選了：input.value = cfg.value(p)（預設整串 label）、data-pid／data-pname 記 id、title 放整串；
@@ -11,14 +11,17 @@
  */
 import { esc } from './dom.js';
 
+// 顏色全走變數：內部系統深色皮是預設值；員工工作台（/my.html）覆寫成官網風格的白底細框
 const CSS = `
-.proj-pop { position:absolute; z-index:1000; max-width:560px; max-height:320px; overflow-y:auto; background:#1f1f1f; border:1px solid #3a3a3a; border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,.5); font-size:13px; }
-.proj-pop .pp-h { padding:6px 10px; color:#9ca3af; font-size:11px; letter-spacing:.08em; background:#262626; position:sticky; top:0; }
-.proj-pop .pp-toggle { cursor:pointer; color:#60a5fa; }
-.proj-pop .pp-item { padding:6px 10px; color:#ddd; cursor:pointer; line-height:1.3; }
-.proj-pop .pp-item.on, .proj-pop .pp-item:hover { background:#2a3b55; color:#fff; }
-.proj-pop .pp-sub { color:#9ca3af; font-size:11px; }
-.proj-pop .pp-empty { padding:6px 10px; color:#666; }`;
+.proj-pop { --pp-bg:#1f1f1f; --pp-line:#3a3a3a; --pp-shadow:0 8px 24px rgba(0,0,0,.5); --pp-head:#262626; --pp-head-ink:#9ca3af; --pp-toggle:#60a5fa;
+    --pp-ink:#ddd; --pp-sub:#9ca3af; --pp-on:#2a3b55; --pp-on-ink:#fff; --pp-empty:#666;
+    position:absolute; z-index:1000; max-width:560px; max-height:320px; overflow-y:auto; background:var(--pp-bg); border:1px solid var(--pp-line); border-radius:6px; box-shadow:var(--pp-shadow); font-size:13px; }
+.proj-pop .pp-h { padding:6px 10px; color:var(--pp-head-ink); font-size:11px; letter-spacing:.08em; background:var(--pp-head); position:sticky; top:0; }
+.proj-pop .pp-toggle { cursor:pointer; color:var(--pp-toggle); }
+.proj-pop .pp-item { padding:6px 10px; color:var(--pp-ink); cursor:pointer; line-height:1.3; }
+.proj-pop .pp-item.on, .proj-pop .pp-item:hover { background:var(--pp-on); color:var(--pp-on-ink); }
+.proj-pop .pp-sub { color:var(--pp-sub); font-size:11px; }
+.proj-pop .pp-empty { padding:6px 10px; color:var(--pp-empty); }`;
 
 let _pop = null;   // 全頁只有一個浮層：{ el, input, cfg, idx, showClosed, flat }
 
@@ -113,12 +116,12 @@ function _keydown(ev) {
 }
 
 /**
- * 在 root 底下的所有 `input[data-proj-pick]` 掛浮層（事件委派，之後 innerHTML 重畫也照用；同一個 root 只掛一次）。
+ * 在 root 底下的所有 `[data-proj-pick]`（input／textarea）掛浮層（事件委派，之後 innerHTML 重畫也照用；同一個 root 只掛一次）。
  * cfg.options：() => rows 或 Promise<rows>（每次打開都會問一次，宿主可以回快取）；
- * cfg.value：選到的案要填進格子的字（預設整串 label）；cfg.match：自訂選擇器（預設 input[data-proj-pick]）。
+ * cfg.value：選到的案要填進格子的字（預設整串 label）；cfg.match：自訂選擇器（預設 input／textarea 的 [data-proj-pick]）。
  */
 export function attachProjectPop(root, cfg = {}) {
-    const match = cfg.match || 'input[data-proj-pick]';
+    const match = cfg.match || 'input[data-proj-pick], textarea[data-proj-pick]';   // 工作紀錄的專案格是會折行的 textarea
     const flag = 'pop_' + match.replace(/[^a-z0-9]/gi, '');     // 同一個 root 可以掛不同欄位（專案、項目），各掛一次
     if (!root || root.dataset[flag]) return;
     root.dataset[flag] = '1';

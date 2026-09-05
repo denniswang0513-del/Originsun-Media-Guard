@@ -84,13 +84,20 @@ async def project_options(session, staff_name: str | None = None) -> list:
     from db.models import Client, CrmProject, Timesheet
     rows = (await session.execute(
         select(CrmProject.id, CrmProject.name, Client.short_name, CrmProject.start_date, CrmProject.shoot_date, CrmProject.created_at,
-               CrmProject.status)
+               CrmProject.status, CrmProject.entity, CrmProject.mine_link_id, CrmProject.source_project_id)
         .outerjoin(Client, Client.id == CrmProject.client_id)
         .where(CrmProject.status.in_(("製作", "結案")))
         .order_by(CrmProject.name)
     )).all()
+    # 已連結的母私帳只列一個（owner 2026-09-06：同名出現兩次）。工時對映只認私帳，所以留私帳那筆、
+    # 母帳那筆若它的私帳分身也在清單裡就不列；連結兩種形狀都認（母帳 mine_link_id／私帳 source_project_id）
+    ids = {r[0] for r in rows}
+    shadowed = {r[0] for r in rows if r[7] != "mine" and r[8] in ids}
+    shadowed |= {r[9] for r in rows if r[7] == "mine" and r[9] in ids}
     opts = []
-    for pid, n, client, sd, shd, cd, st in rows:
+    for pid, n, client, sd, shd, cd, st, _ent, _ml, _src in rows:
+        if pid in shadowed:
+            continue
         d = sd or shd or cd
         year = str(d.year) if d else ""
         # label＝「年份 客戶 案名」（owner 2026-09-03：跟零用金一樣的呈現）；前端用它當下拉的字，存的時候對回 id

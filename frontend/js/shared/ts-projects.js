@@ -120,6 +120,7 @@ export function createBurnSorter({ storageKey, panelId, onChange, defaultSort })
         storageKey, panelId, onChange,
         defaultSort: defaultSort || { key: '', dir: 'asc' },
         getters: {
+            client: p => p.client || '',
             project: p => p.project_name || p.project_id || '',
             status: p => p.status || '',
             type: p => p.project_type || '',
@@ -134,7 +135,7 @@ export function createBurnSorter({ storageKey, panelId, onChange, defaultSort })
 }
 
 export const BURN_THEAD = `<tr>
-    ${sortableTh('project', '專案')}${sortableTh('status', '狀態')}${sortableTh('type', '案型')}${sortableTh('used', '已投入(h)', 'class="num"')}${sortableTh('budget', '預算(h)', 'class="num"')}
+    ${sortableTh('client', '客戶')}${sortableTh('project', '專案')}${sortableTh('status', '狀態')}${sortableTh('type', '案型')}${sortableTh('used', '已投入(h)', 'class="num"')}${sortableTh('budget', '預算(h)', 'class="num"')}
     ${sortableTh('remaining', '剩餘(h)', 'class="num"')}${sortableTh('pct', '消耗率', 'class="num"')}${sortableTh('rows', '列數', 'class="num"')}${sortableTh('last', '最後填報')}
 </tr>`;
 
@@ -162,6 +163,7 @@ function _budgetCell(p, editable) {
 export function burnTbodyHtml(projects, opts = {}) {
     const rows = (projects || []).map(p => `
         <tr>
+            <td class="tsp-sub" style="white-space:nowrap;">${p.client ? esc(p.client) : '<span class="tsp-dim">—</span>'}</td>
             <td><span class="ts-link" data-ts-action="open-project" data-name="${esc(p.project_name || '')}" data-pid="${esc(p.project_id)}">${esc(p.project_name || p.project_id)}</span>
                 ${p.stale ? '<span class="ts-badge warn" title="進行中但 7 天沒工時">停滯</span>' : ''}</td>
             <td class="tsp-sub">${esc(p.status || '')}</td>
@@ -173,7 +175,7 @@ export function burnTbodyHtml(projects, opts = {}) {
             <td class="num tsp-sub">${p.rows}</td>
             <td class="tsp-sub">${esc(p.last_entry || '')}</td>
         </tr>`).join('');
-    return rows || `<tr><td colspan="9" class="tsp-dim" style="text-align:center;">${esc(opts.emptyText || '尚無已對映專案')}</td></tr>`;
+    return rows || `<tr><td colspan="10" class="tsp-dim" style="text-align:center;">${esc(opts.emptyText || '尚無已對映專案')}</td></tr>`;
 }
 
 export function burnTableHtml(tbodyHtml, id = 'ts-burn-table') {
