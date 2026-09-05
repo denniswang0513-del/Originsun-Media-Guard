@@ -246,6 +246,12 @@ table.week .c b { font-weight: 600; margin-left: 4px; }
 table.week .c.plan { color: var(--sub); } table.week .c.shoot { color: #1d4ed8; background: #eff6ff; border-radius: 4px; padding: 3px 6px; }
 table.week .c.off { color: var(--sub); background: #f5f5f5; border-radius: 4px; padding: 3px 6px; }
 table.week .none { color: #c9c9c9; }
+/* 專案檔案彈窗（團隊的一週點案名）：白底、右上打叉、Esc／點背景關 */
+.ws-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 300; display: flex; align-items: flex-start; justify-content: center; padding: 36px 16px; overflow: auto; }
+.ws-modal { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 10px; width: 100%; max-width: 1180px; padding: 22px 24px 16px; box-shadow: 0 20px 60px rgba(0,0,0,.18); }
+.ws-modal-x { position: absolute; top: 8px; right: 12px; background: none; border: none; color: var(--sub); font-size: 24px; cursor: pointer; line-height: 1; font-family: inherit; }
+.ws-modal-x:hover { color: var(--ink); }
+@media (max-width: 640px) { .ws-modal-bg { padding: 12px 6px; } .ws-modal { padding: 18px 12px 12px; } }
 /* 專案浮層（格子的專案格）：官網風格——白底、細框、淡陰影、標題紅字字距 */
 .proj-pop { --pp-bg:#fff; --pp-line:var(--line); --pp-shadow:0 10px 30px rgba(0,0,0,.08); --pp-head:#fafafa; --pp-head-ink:var(--red); --pp-toggle:var(--red);
     --pp-ink:var(--ink); --pp-sub:var(--sub); --pp-on:#f5f5f5; --pp-on-ink:var(--ink); --pp-empty:#b5b5b5; border-radius:8px; }
@@ -1530,9 +1536,30 @@ async function _z1Action(btn, ev) {
     }
     if (act === "week") { _z1Week = btn.dataset.start || _mondayOf(_localToday()); return loadTeamWeek(); }
     if (act === "find-back") return _renderFindTable();
-    if (act === "open-project" || act === "proj-pop") {
-        if (_z1View !== "find") await switchZ1("find");   // 團隊的一週點案名：切到專案查詢再開專案檔案
-        return _openFindProject(btn.dataset.name || "", btn.dataset.pid || "");
+    if (act === "proj-pop") return _openProjectModal(btn.dataset.name || "", btn.dataset.pid || "");   // 團隊的一週點案名：彈窗
+    if (act === "open-project") return _openFindProject(btn.dataset.name || "", btn.dataset.pid || "");
+}
+
+// ── 專案檔案彈窗（團隊的一週點案名；owner 2026-09-06：要彈出視窗可打叉，不是跳頁）──
+async function _openProjectModal(name, pid) {
+    const TS = await TS_READY;
+    const root = $("ws-view") || document.body;
+    let bg = $("ws-proj-modal");
+    if (!bg) {
+        bg = document.createElement("div");
+        bg.id = "ws-proj-modal"; bg.className = "ws-modal-bg";
+        bg.addEventListener("click", (e) => { if (e.target === bg || e.target.closest(".ws-modal-x")) bg.remove(); });
+        root.appendChild(bg);
+        const esc_ = (e) => { if (e.key === "Escape" && bg.isConnected) bg.remove(); else if (!bg.isConnected) document.removeEventListener("keydown", esc_); };
+        document.addEventListener("keydown", esc_);
+    }
+    const x = '<button type="button" class="ws-modal-x" title="關閉">×</button>';
+    bg.innerHTML = `<div class="ws-modal">${x}<div class="empty">載入中…</div></div>`;
+    try {
+        const d = await mjson("/api/v1/timesheets/project?name=" + encodeURIComponent(name) + (pid ? "&project_id=" + encodeURIComponent(pid) : ""));
+        bg.innerHTML = `<div class="ws-modal">${x}<div class="tsp">${TS.projectFileHtml(d, { modal: true, editable: false, chartWidth: 340 })}</div></div>`;
+    } catch (e) {
+        bg.innerHTML = `<div class="ws-modal">${x}<div class="notice">${esc(e.message)}</div></div>`;
     }
 }
 
