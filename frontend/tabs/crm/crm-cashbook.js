@@ -1714,7 +1714,7 @@ function _buildEditFields(currentBankAccountId, currentInvoiceId) {
             options: [{ value: '', label: '— 不關聯 —' }].concat(
                 _invoiceCandidates(currentInvoiceId).map(
                     (inv) => ({ value: inv.id, label: _invoiceLabel(inv) })))}]),
-        {name:'bank_fee', label:'匯費', type:'number'},
+        {name:'bank_fee', label:'匯費（收款時入帳請填銀行實際入帳的淨額）', type:'number'},
     ];
     // 帳戶（財務模組）— 清單載入成功才提供（降級時不出現，PUT payload 不含此鍵、不洗掉既有值）
     if (_bankAccounts && _bankAccounts.length) {

@@ -107,7 +107,7 @@ function _strip(s, money, fin = null) {
     return `<div class="ppay-kpis">
         ${tile('合約金額', m(s.contract), '含稅', 'hl')}
         ${tile('已開發票', m(s.invoiced), `${s.invoiceCount} 張`)}
-        ${tile('已收（含匯費）', m(s.received + s.fee), money && s.fee ? '匯費 ' + m(s.fee) : '', 'good')}
+        ${tile('客戶已匯', m(s.received + s.fee), money && s.fee ? `實入帳 ${m(s.received)} · 匯費 ${m(s.fee)}` : (money ? `實入帳 ${m(s.received)}` : ''), 'good')}
         ${tile('未收', m(Math.max(s.unreceived, 0)), `<span class="crm-badge crm-pay-${st === '全額到帳' ? '全額到帳' : '未到帳'}">${_esc(st)}</span>`, s.unreceived > 0 ? 'bad' : '')}
         ${tile('應付合計', m(s.payable), `${s.groups.length} 人${s.others.length ? '＋' + s.others.length + ' 筆其他' : ''}${s.unassigned ? '＋未指派 ' + m(s.unassigned) : ''}`, s.unassigned ? 'warn' : '')}
         ${tile('已付', m(s.paid), `${s.paidCount} 張`, 'good')}
