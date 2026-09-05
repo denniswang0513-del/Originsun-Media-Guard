@@ -77,8 +77,14 @@ def test_passthrough_income_row_requests_the_whole_remit_on_the_linked_projects(
     assert "kai ? _cashKaiRemit(e, pids, pnames, kai) : _cashPayForProject(e, pids, pnames)" in disp
     assert "pids = inv.project_ids.slice()" in disp and "{ ...full, project_id: picked, project_ids: [picked] }" in disp
     assert "if (passthru && !e.invoice_id) {" in disp
+    # 🔴 2026-09-05 翻案（owner：「發票代開的收支要可以連專案」）：
+    # 原本這裡釘的是「案掛在發票上、不掛在代開的收支列」（2026-09-04 拍板）。
+    # 實際用起來的後果是：快樂學游泳那案收到的 $161,700 記在一列 category=
+    # 「發票代開」的收支上，那列**存不進專案** → 專案頁「客戶已匯 $0」，
+    # 而錢明明收到了。所以改成收支列也可以掛。
+    # 掛在發票上那條路沒有退場（整筆請款仍走 _cashKaiRemit），兩條並存。
     from core.project_link import CASH_CATEGORIES
-    assert "發票代開" not in CASH_CATEGORIES, "案掛在發票上、不掛在代開的收支列（代開的錢不是案子的收入）"
+    assert "發票代開" in CASH_CATEGORIES
     remit = between(js, "async function _cashKaiRemit(e, pids, pnames, kai)", "function _cashKaiAddProject(")
     assert "category: '發票代開'" in remit and "source_invoice_id: inv.id" in remit and "project_id: it.pid" in remit
     assert "p.source_invoice_id === e.invoice_id" in remit and "e.kai_payment_id" in remit, "已請過的（含沒掛案的自動單）要講"
