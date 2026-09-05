@@ -236,11 +236,23 @@ function _renderAllocationAlert(f, d) {
         msgs.push('<div class="cg-alert cg-alert-danger">子表預算加總 $' + fmtNum(allocated) + ' 超出執行預算 $' + fmtNum(execBudget) + '，超 $' + fmtNum(diff) + '</div>');
     }
     // 沒超過執行預算，但比「規劃」（人員預估＋預估雜支）多：owner 2026-09-05 要看得到——
-    // 這個差就是預估階段沒分配出去、之後會被雜支或人員吃掉的那塊（東仁：271,239 − 270,557 ＝ 682）
+    // 這個差就是預估階段沒分配出去、之後會被雜支或人員吃掉的那塊
     const planned = (d.costEstimated || 0) + (d.miscEstimated || 0);
     const overPlan = allocated - planned;
     if (allocated > 0 && planned > 0 && overPlan > 0 && !(execBudget > 0 && diff > 0)) {
         msgs.push('<div class="cg-alert cg-alert-hint">子表預算加總 $' + fmtNum(allocated) + ' 比規劃（人員預估 $' + fmtNum(d.costEstimated || 0) + ' ＋ 預估雜支 $' + fmtNum(d.miscEstimated || 0) + '）多 $' + fmtNum(overPlan) + '</div>');
+    }
+    // 🔴 執行預算沒分配到任何子表的那塊（owner 2026-09-05）。沒有它，
+    // 「子表卡的剩餘加總」永遠對不上上面那格「剩餘預算」，而畫面上沒有
+    // 任何地方解釋差在哪 —— 東仁社宅：2min 剩 23,381 ＋ 3min 剩 0 ＝ 23,381，
+    // 但剩餘預算(實際) 是 24,063，差的 682 正是這裡。
+    const unalloc = execBudget - allocated;
+    if (execBudget > 0 && allocated > 0 && unalloc > 0) {
+        msgs.push('<div class="cg-alert cg-alert-hint" title="子表卡上的「剩餘」只看得到分配到子表的錢；這 $'
+            + fmtNum(unalloc) + ' 沒有分給任何一張子表，但它算在上面的剩餘預算裡。'
+            + '所以：Σ子表剩餘 ＋ $' + fmtNum(unalloc) + ' ＝ 剩餘預算。">'
+            + '執行預算還有 $' + fmtNum(unalloc) + ' 未分配到子表'
+            + '<span class="cg-muted">（子表卡的剩餘加總會比上面的剩餘預算少這個數）</span></div>');
     }
     if (missing > 0) {
         msgs.push('<div class="cg-alert cg-alert-hint">還有 ' + missing + ' 張子表未設預算</div>');

@@ -1850,6 +1850,8 @@
 .cg-alert-danger { background: #7f1d1d; color: #fca5a5; }
 .cg-alert-ok { background: #064e3b; color: #86efac; font-size: 11px; padding: 4px 10px; }
 .cg-alert-hint { background: #1e3a5f; color: #60a5fa; font-size: 11px; padding: 4px 10px; }
+/* 提示列裡的補充說明（.cg-muted 原本只在 .cg-chip 底下生效，放進提示列會沒顏色） */
+.cg-alert .cg-muted { color: #7f9fc4; margin-left: 6px; }
 
 /* Modal allocation hint */
 .cg-alloc-hint { margin: 12px 0 0; }

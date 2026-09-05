@@ -42,6 +42,20 @@ def test_estimated_misc_is_always_the_sub_table_sum():
     assert "miscEstimated: miscAuto ? (f.misc_budget" not in js
 
 
+def test_the_unallocated_slice_is_shown():
+    """🔴 執行預算沒分配到任何子表的那塊要講出來（owner 2026-09-05）。
+
+    沒有它，「子表卡的剩餘加總」永遠對不上上面那格「剩餘預算」，而畫面上
+    沒有任何地方解釋差在哪 —— 東仁社宅：2min 剩 23,381 ＋ 3min 剩 0 ＝ 23,381，
+    剩餘預算(實際) 卻是 24,063，差的 682 ＝ 執行預算 271,239 − Σ子表預算 270,557。
+    """
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-cost.js"))
+    assert "const unalloc = execBudget - allocated;" in js
+    assert "未分配到子表" in js
+    # 只有真的有沒分配的才畫（同這支函式其他兩條提示的規矩：正常時安靜）
+    assert "execBudget > 0 && allocated > 0 && unalloc > 0" in js
+
+
 def test_admin_phase_cost_lines_never_double_count():
     """🔴 phase='行政雜支' 的成本行不算人員成本 —— 那個階段值跟
     crm_project_expenses 講的是同一件事，兩邊都算＝同一筆錢在對照表的
