@@ -50,3 +50,10 @@ def test_frontend_reacts_instead_of_replying():
     api = code_only(repo_src("routers/api_journal.py"))
     body = func_body(api, "async def react_entry(")
     assert "WorkJournal.__tablename__" in body and "for r in mine:" in body, "整份週記可按；一人一個目標只留一種"
+
+
+def test_react_call_passes_an_object_body_like_the_other_calls():
+    """authFetch 自己 JSON 化 body；react 曾多包一層 JSON.stringify → 後端收到字串 → 422（前端 alert 出 [object Object]）。"""
+    core = js_code_only(repo_src("frontend/js/shared/journal-core.js"))
+    line = next(l for l in core.splitlines() if "react: (body)" in l)
+    assert "JSON.stringify" not in line and "body })" in line

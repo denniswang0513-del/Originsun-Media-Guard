@@ -226,7 +226,7 @@ export const api = {
         return _projOptsPromise;
     },
     week: (start) => _safe(authFetch('/api/v1/journal/week' + _q(start))),
-    react: (body) => _safe(authFetch('/api/v1/journal/react', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
+    react: (body) => _safe(authFetch('/api/v1/journal/react', { method: 'POST', body })),   // authFetch 自己 JSON 化：再 stringify 一次會變成字串 body → 422（2026-09-05 踩到）
     // 空字串/null 參數自動剔除 — 呼叫端直接把 state 丟進來即可
     learnings: (params) => _safe(authFetch('/api/v1/journal/learnings?' + new URLSearchParams(
         Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v != null))).toString())),
