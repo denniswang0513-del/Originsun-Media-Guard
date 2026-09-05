@@ -57,6 +57,15 @@ class CrmProject(Base):
     # 私帳案那側仍保留 source_project_id＝**第一個**來源（清單顯示、
     # 「這是分身」的判定沿用它，不必全樹改讀）。
     mine_link_id = Column(String(32), nullable=True)
+    # 顯示名覆寫（owner 2026-09-05）。空＝走自動規則（連到 1 個母帳案就顯示
+    # 母帳案名，否則顯示 `name`）。鏈的正本＝core.ledger_project.linked_display_name。
+    # 🔴 為什麼不直接改 `name`：那一欄是 Sheet 工時案名對映的查表鍵
+    # （services/timesheet_lookup.py），改了之後新進的 Sheet 列會對不到案。
+    display_name = Column(String(255), nullable=True)
+    # 合約金額怎麼來的：'mine'＝從連結的私帳案帶過來的佔位（待人工確認），
+    # NULL＝正常。佔位偏低（那是「我拿到的那段」），母公司專案毛利與現金流
+    # 預測要排除，見 docs/LEDGER_UNIFY_PLAN.md §2.2。
+    contract_amount_source = Column(String(8), nullable=True)
     flow_checks = Column(JSONB, nullable=True)                 # 工作流手動里程碑（範本正本在 core/project_flow.py）
     status = Column(String(32), nullable=False, default="洽詢")
     am_username = Column(String(64), nullable=True)

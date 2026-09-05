@@ -217,7 +217,10 @@ def test_editable_cost_fields_match_the_payload_schema():
     但數字不見）；COST_FIELDS 多一欄 → UI 畫得出來卻送不上去。"""
     from core.ledger_project import COST_KEYS
     from core.schemas import LedgerDetailPayload
-    non_cost = {"split", "contract_amount", "close_date", "crm_pushed", "source", "fee_pct"}
+    # display_name＝顯示名覆寫（owner 2026-09-05），跟 crm_pushed 一樣是
+    # 「PUT 收下但不進 ledger_detail」的那一類，不是費用欄
+    non_cost = {"split", "contract_amount", "close_date", "crm_pushed", "source",
+                "fee_pct", "display_name"}
     assert set(LedgerDetailPayload.model_fields) - non_cost == set(COST_KEYS)
 
 

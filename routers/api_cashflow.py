@@ -154,6 +154,14 @@ async def apply_template(project_id: str, request: Request):
         total = proj.contract_amount or 0
         if total <= 0:
             raise HTTPException(status_code=422, detail="專案未填合約金額，無法套模板")
+        # 🔴 佔位金額（從私帳帶過來、還沒人確認）不給套模板 —— 那是「我拿到的
+        # 那段」不是公司合約額，照它排出來的 30/40/30 節點全部偏低，而節點一旦
+        # 生成就變成現金流預測的來源。擋下來比默默算錯好（LEDGER_UNIFY_PLAN §2.2）。
+        if getattr(proj, "contract_amount_source", None) == "mine":
+            raise HTTPException(
+                status_code=422,
+                detail="這一案的合約金額是從私帳帶過來的佔位值（待確認），"
+                       "請先在專案頁填上公司實際的合約金額再套模板")
         created = []
         acc = 0
         for i, (label, pct) in enumerate(_DEFAULT_TEMPLATE):

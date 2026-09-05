@@ -107,6 +107,17 @@ FINANCE_AND_CRM_COLUMNS = [
         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS mine_link_id VARCHAR(32)",
         "CREATE INDEX IF NOT EXISTS idx_project_mine_link"
         " ON crm_projects (mine_link_id)",
+        # 顯示名覆寫（owner 2026-09-05「可以在顯示層讓我自訂名稱嗎」）——
+        # 連到多個母帳案時自動規則挑不出誰對，由 owner 自己命名。
+        # 空＝走自動規則。鏈的正本 core.ledger_project.linked_display_name。
+        "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS"
+        " display_name VARCHAR(255)",
+        # 合約金額的來源標記（owner 2026-09-05「母帳如果沒有 先填私帳的
+        # 後面再改」）：'mine'＝從私帳帶過來的**佔位**，還沒人確認過。
+        # 佔位是「我拿到的那段」不是公司合約額，一定偏低 —— 母公司專案毛利
+        # 與現金流預測都要排除它，見 docs/LEDGER_UNIFY_PLAN.md §2.2。
+        "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS"
+        " contract_amount_source VARCHAR(8)",
         # 規則命中後要寫進那一列的備註（owner 2026-09-01「也可以記憶備註」）。
         # 跟既有的 `note`（規則自己的備忘）是兩件事，見 BankImportRule 的註解。
         "ALTER TABLE bank_import_rules ADD COLUMN IF NOT EXISTS"

@@ -1731,6 +1731,9 @@ class LedgerDetailPayload(BaseModel):
     crm_pushed: Optional[int] = None
     source: Optional[str] = None     # 案源（meta，經 norm_detail 白名單）
     fee_pct: Optional[float] = None  # 服務費率 %（代開發票；預設 8）
+    # 顯示名覆寫（owner 2026-09-05）。空字串＝清掉退回自動規則。同樣要在
+    # PUT 端點先 pop 掉，不能落進 ledger_detail JSON。
+    display_name: Optional[str] = None
     """逐案損益的可編輯欄（api_finance_projects）。
 
     費用欄用 Optional：只送有改的欄，None＝維持原值（整包 model_dump 寫回

@@ -906,6 +906,12 @@ async def _project_margins(session, *, top=5) -> dict:
             # core/ledger.not_mine）
             .where(CrmProject.contract_amount.isnot(None),
                    CrmProject.contract_amount > 0,
+                   # 🔴 排除「從私帳帶過來的佔位金額」（owner 2026-09-05）——
+                   # 那是「我拿到的那段」不是公司合約額，一定偏低（生產實例
+                   # 落差 3～17 倍）。收入低估、成本卻是公司全額 → 毛利會變
+                   # 負的，還把 top/bottom 排名整個帶歪。人工確認過金額時
+                   # 標記會被清掉，那時才進得來。見 LEDGER_UNIFY_PLAN §2.2。
+                   CrmProject.contract_amount_source.is_(None),
                    not_mine(CrmProject.entity)))).all()
         if not projects:
             return {"available": False, "top": [], "bottom": []}

@@ -169,10 +169,40 @@ function _settleMatch(p) {
     return true;
 }
 
+/** 這一案所有找得到它的名字（顯示名／私帳原名／連到的母帳案名）—— 搜尋與
+ *  tooltip 共用一份，兩邊才不會一邊改一邊漏。 */
+function _names(p) {
+    return [p.name, p.orig_name, ...(p.parent_names || [])].filter(Boolean);
+}
+
+
+/** 列上的 tooltip：顯示名之外把私帳原名與母帳案名一起講清楚。 */
+function _nameTip(p) {
+    const t = [p.name];
+    if (p.orig_name) { t.push('私帳原名：' + p.orig_name); }
+    if ((p.parent_names || []).length) { t.push('母帳：' + p.parent_names.join('、')); }
+    return t.join('\n');
+}
+
+
+/** 名字後面那顆小標。連多個母帳案時自動規則挑不出誰對（見後端
+ *  linked_display_name），標出來讓人知道要自己命名；自訂過的也標一下。 */
+function _nameTag(p) {
+    const n = (p.parent_names || []).length;
+    const tag = (t) => ` <span style="font-size:10px;color:#6b7280;">${t}</span>`;
+    if (p.custom_name) { return tag('自訂'); }
+    return n > 1 ? tag(`連 ${n} 案`) : '';
+}
+
+
 function _visible() {
     const q = _q.toLowerCase();
     return (_data.projects || []).filter(p =>
-        (!q || p.name.toLowerCase().includes(q) || (p.client || '').toLowerCase().includes(q))
+        // 🔴 搜尋要吃**三個**名字：顯示名、私帳原名、連到的母帳案名。顯示名換成
+        // 母帳的之後，用舊名（「開村影片」）還是要找得到，否則這個功能會變成
+        // 「東西不見了」。正本說明見 core.ledger_project.linked_display_name。
+        (!q || _names(p).some((n) => n.toLowerCase().includes(q))
+            || (p.client || '').toLowerCase().includes(q))
         && _settleMatch(p)
         && (!_fy || (_fy === 'open' ? !p.close_date : _closeFY(p) === +_fy)));
 }
@@ -360,7 +390,7 @@ function _renderList() {
             <span style="text-align:center;">${_stHtml(p)}</span>
             <span style="color:${p.close_date ? '#9ca3af' : '#6b7280'};white-space:nowrap;">${esc(p.close_date || '未結案')}</span>
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e0e0e0;"
-                  title="${esc(p.name)}">${esc(p.name)}</span>
+                  title="${esc(_nameTip(p))}">${esc(p.name)}${_nameTag(p)}</span>
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9ca3af;"
                   title="${esc(p.client)}">${esc(p.client)}</span>
             <span style="text-align:right;">${fmtNum(p.contract)}</span>
@@ -518,6 +548,18 @@ function _renderDetail() {
                 <div>
                     <div style="color:#ddd;font-size:12px;font-weight:600;margin-bottom:6px;">營收與費用</div>
                     <table class="crm-table" style="width:100%;font-size:12px;">
+                        ${!_isMine() ? '' : `
+                        <tr><td style="color:#bbb;" title="空白＝自動：連到 1 個母帳案就顯示母帳案名，否則顯示私帳原名。這裡改的是顯示名，私帳原名不動。">顯示名</td>
+                            <td><input class="crm-input fpl-num" id="fpl-dispname"
+                                value="${esc(p.custom_name || '')}"
+                                placeholder="${esc(p.orig_name || p.name || '')}"
+                                style="width:100%;"></td></tr>
+                        ${!(p.parent_names || []).length ? '' : `
+                        <tr><td></td><td style="font-size:11px;color:#6b7280;padding-top:0;">
+                            母帳：${(p.parent_names || []).map((n, i) => `<a href="#" style="color:#7aa2f7;"
+                                onclick="event.preventDefault();window._finProjLedger.useParentName(${i});">${esc(n)}</a>`).join('、')}
+                            ${p.orig_name ? `<br>私帳原名：${esc(p.orig_name)}` : ''}
+                        </td></tr>`}`}
                         <tr><td style="color:#bbb;">結案日</td>
                             <td style="width:130px;"><input type="date" class="crm-input fpl-num" id="fpl-close"
                                 value="${esc(p.close_date || '')}" style="width:100%;"></td></tr>
@@ -994,6 +1036,15 @@ _fp.outsourceAdd = async (btn) => {
     } finally { btn.disabled = false; }
 };
 
+/** 「用這個母帳案名」——把母帳案名填進顯示名欄（連多個母帳案時自動規則
+ *  挑不出誰對，點一下就不用自己打）。要按儲存才會存。 */
+_fp.useParentName = (i) => {
+    const el = document.getElementById('fpl-dispname');
+    const n = ((_detail && _detail.project && _detail.project.parent_names) || [])[i];
+    if (el && n) { el.value = n; el.focus(); _dirty = true; }
+};
+
+
 _fp.gotoCrm = () => {
     if (!_sel) return;
     sessionStorage.setItem('omgJumpCrmProject', _sel);
@@ -1045,6 +1096,8 @@ _fp.save = async (btn) => {
     if (dEl) body.close_date = dEl.value || '';     // 空＝清成未結案
     const sEl = document.getElementById('fpl-source');
     if (sEl) body.source = sEl.value;               // 空＝清掉案源
+    const nEl = document.getElementById('fpl-dispname');
+    if (nEl) body.display_name = nEl.value.trim();   // 空＝清掉，退回自動規則
     const fEl = document.getElementById('fpl-feepct');
     // 空白＝用後端的預設費率（正本 DEFAULT_FEE_PCT），不在這裡寫死一個 8
     if (fEl && sEl && sEl.value === '代開發票') {
@@ -1102,6 +1155,11 @@ function _applySaved(r) {
     const next = {
         ...old,
         detail: r.detail, net: r.net, check: r.check,
+        // 顯示名由後端重算後回傳（自訂清掉時要退回自動規則 —— 前端自己推等於
+        // 把 linked_display_name 抄第二份）
+        name: r.name != null ? r.name : old.name,
+        orig_name: r.orig_name != null ? r.orig_name : old.orig_name,
+        custom_name: r.custom_name != null ? r.custom_name : old.custom_name,
         contract: r.contract != null ? r.contract : old.contract,
         close_date: r.close_date != null ? r.close_date : old.close_date,
         updated_at: r.updated_at || old.updated_at,

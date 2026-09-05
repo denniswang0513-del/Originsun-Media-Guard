@@ -477,3 +477,39 @@ def parent_receipt_fields(contract: int, received: int, fee: int) -> tuple:
     gross = int(received or 0)
     c = int(contract or 0)
     return c - gross, receivable_status(c, gross)
+
+
+def linked_display_name(mine_name: str, parent_names, custom: str = "") -> tuple:
+    """一個案要顯示成什麼名字。**這條鏈只有這一份**（owner 2026-09-05）。
+
+    依序取第一個有值的，回 `(顯示名, 副標)`：
+
+      1. `custom`（`crm_projects.display_name`，人工指定）→ `(自訂名, 私帳原名)`
+      2. 恰好連到 **1 個**母帳案 → `(母帳案名, 私帳原名)`
+      3. 其餘（沒連、或 N:1）→ `(私帳原名, "")`
+
+    副標＝私帳原名，只在顯示名不等於它時才回（相同就沒有東西好副標的）。
+
+    N:1 自動規則不套用是因為挑不出哪一個才對 —— 生產庫現有兩例
+    （`總統創新獎頒獎影片` 連著產科會與獎盃製作兩案、`南山人壽頒獎影片`
+    連著王經理與謝經理），強行取第一個等於隨機。那兩案由 owner 自己填
+    `display_name`（第 1 層），沒填就退回原名 ＋ 呼叫端標「連結 N 個母帳案」。
+
+    🔴 **這是顯示層的事，`crm_projects.name` 一律不改寫**，兩個理由：
+      · Sheet 工時的 `resolve_project()` 靠 `project_name` 查
+        `services.timesheet_lookup.load_project_lookup()` 的名稱索引 —— 改掉私帳
+        案名，之後新進的 Sheet 列就對不到案（既有列 project_id 已寫入，
+        所以症狀會延遲一週才出現）。這也正是要有第 1 層的原因：想改名字時
+        改 `display_name`，不要去動那個有負擔的 `name`。
+      · 私帳原名是 owner 自己的語彙（「開村影片」vs「蟾蜍山｜煥民新村 館所介紹」），
+        改掉找不回來，而收支明細／對帳／匯入預覽都還在用它認案。
+
+    🔴 搜尋要吃**三個**名字（自訂／母帳／私帳原名）—— 顯示名換掉之後還要
+    搜得到，否則這個功能會變成「找不到東西」。述詞在呼叫端，別忘了。
+
+    規劃見 docs/LEDGER_UNIFY_PLAN.md §2.1。
+    """
+    orig = mine_name or ""
+    names = [n for n in (parent_names or ()) if n]
+    shown = (custom or "").strip() or (names[0] if len(names) == 1 else orig)
+    return shown, ("" if shown == orig else orig)

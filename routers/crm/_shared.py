@@ -34,6 +34,8 @@ from core.project_flow import ADVANCE_MODULES, CHECK_MODULES
 
 import core.state as state
 from core.finance_logic import month_of
+from core.ledger import MINE
+from core.ledger_project import linked_display_name
 
 try:
     from sqlalchemy import select, or_, delete, func, update as sa_update
@@ -686,6 +688,47 @@ async def project_names_map(session, rows) -> dict:
     if not ids:
         return {}
     rows2 = (await session.execute(
-        select(CrmProject.id, CrmProject.name)
+        select(CrmProject.id, CrmProject.name, CrmProject.display_name,
+               CrmProject.entity)
         .where(CrmProject.id.in_(list(ids))))).all()
-    return {pid: (name or "") for pid, name in rows2}
+    # 顯示名（owner 2026-09-05）：自訂 → 連到的母帳案名 → 私帳原名。這裡是
+    # 收支明細／拆項／應付／雜支的案名共同出口，接在這條就全部一起跟著走。
+    parents = await mine_parent_names(
+        session, [pid for pid, _n, _d, ent in rows2 if ent == MINE])
+    return {pid: linked_display_name(name or "", parents.get(pid, ()), disp or "")[0]
+            for pid, name, disp, ent in rows2}
+
+
+async def mine_parent_names(session, mine_ids) -> dict:
+    """`{私帳案 id: [母帳案名, …]}` —— 一次撈齊，給顯示名鏈用。
+
+    🔴 連結有**兩種形狀**（見 routers/crm/projects.resolve_mine_link）：新的記在
+    來源那一側（`crm_projects.mine_link_id`），舊的記在私帳案上
+    （`source_project_id` 回指來源）。**兩種都要查，而且要對 (母帳案, 私帳案)
+    去重** —— 生產庫 12 組連結裡有 6 組兩種形狀都寫了，不去重會數成 17 組，
+    把 6 個 1:1 誤判成 N:1（起草 docs/LEDGER_UNIFY_PLAN.md 時就先錯過一次）。
+    """
+    ids = [i for i in set(mine_ids or ()) if i]
+    if not ids:
+        return {}
+    # 新形狀：母帳案自己指向私帳案
+    pairs = {(mid, pid): (name or "") for mid, pid, name in (await session.execute(
+        select(CrmProject.mine_link_id, CrmProject.id, CrmProject.name)
+        .where(CrmProject.mine_link_id.in_(ids)))).all()}
+    # 舊形狀：私帳案回指來源；只補新形狀沒收到的那些（去重就在這一句）
+    legacy = [(mid, src) for mid, src in (await session.execute(
+        select(CrmProject.id, CrmProject.source_project_id)
+        .where(CrmProject.id.in_(ids),
+               CrmProject.source_project_id.isnot(None)))).all()
+        if (mid, src) not in pairs]
+    if legacy:
+        names = dict((await session.execute(
+            select(CrmProject.id, CrmProject.name)
+            .where(CrmProject.id.in_([src for _m, src in legacy])))).all())
+        for mid, src in legacy:
+            if src in names:
+                pairs[(mid, src)] = names[src] or ""
+    out: dict = {}
+    for (mid, _pid), name in pairs.items():
+        out.setdefault(mid, []).append(name)
+    return {k: sorted(v) for k, v in out.items()}

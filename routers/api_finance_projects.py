@@ -38,7 +38,8 @@ from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, NHI_MIN_PAYMENT,
                                  to_collect,
                                  SELECTABLE_SOURCES, SUM_KEYS, apply_source_fee,
                                  code_of, compute,
-                                 income_items, norm_detail, receivable_fields)
+                                 income_items, linked_display_name,
+                                 norm_detail, receivable_fields)
 from core.schemas import LedgerDetailPayload, LedgerProjectCreate
 from routers.crm._shared import _fmt_day
 
@@ -238,6 +239,11 @@ async def project_ledger(request: Request, entity: str = ""):
         rows = (await session.execute(query)).all()
         cash, ap = await _rollups(session, ent)
         crm_costs = await _crm_costs(session, ent)
+        # 顯示名（owner 2026-09-05）：自訂 → 連到的母帳案名 → 私帳原名。
+        # 母帳本身沒有「連到的母帳案」，那一趟就不用查。
+        from routers.crm._shared import mine_parent_names
+        parents = await mine_parent_names(
+            session, [p.id for p, _c in rows]) if ent == "mine" else {}
 
     items, tot = [], {"contract": 0, "received": 0, "receivable": 0,
                       "spent": 0, "ap_open": 0, "net": 0,
@@ -252,8 +258,16 @@ async def project_ledger(request: Request, entity: str = ""):
         net, check = compute(contract, detail)
         _tc = to_collect(int(p.contract_amount or 0),
                          int(p.amount_received or 0), detail)
+        _pn = parents.get(p.id, ())
+        _shown, _orig = linked_display_name(p.name or "", _pn, p.display_name or "")
         item = {
-            "id": p.id, "name": p.name, "client": cname or "",
+            # name＝顯示名（前端畫這個）；orig_name＝私帳原名（副標＋搜尋要吃它）；
+            # custom_name＝有沒有自訂（前端據此標「自訂」與清空）；
+            # parent_names＝連到的母帳案（N:1 時畫「連結 N 個母帳案」）。
+            # 🔴 `crm_projects.name` 不改寫，見 core.ledger_project.linked_display_name。
+            "id": p.id, "name": _shown, "orig_name": _orig,
+            "custom_name": p.display_name or "", "parent_names": list(_pn),
+            "client": cname or "",
             "status": p.status or "", "type": p.project_type or "",
             "close_date": _fmt_day(p.completion_date),
             # 排序的次要鍵 —— 前端改完結案日要就地重排，少了它排不出與這裡
@@ -454,11 +468,17 @@ async def project_ledger_detail(project_id: str, request: Request,
             .order_by(CrmPaymentRequest.created_at))).scalars().all()
         _crm = (await _crm_costs(session, ent, project_id)).get(project_id)
         _lines = await _crm_lines(session, project_id)
+        from routers.crm._shared import mine_parent_names
+        _pn = (await mine_parent_names(session, [project_id])).get(project_id, ()) \
+            if ent == "mine" else ()
+    _shown, _orig = linked_display_name(p.name or "", _pn, p.display_name or "")
     _d, _cost_src = apply_crm_costs(norm_detail(p.ledger_detail), _crm)
     _net, _check = compute(int(p.contract_amount or 0), _d)
     return {
         "project": {
-            "id": p.id, "name": p.name, "client": client.short_name if client else "",
+            "id": p.id, "name": _shown, "orig_name": _orig,
+            "custom_name": p.display_name or "", "parent_names": list(_pn),
+            "client": client.short_name if client else "",
             "status": p.status or "", "type": p.project_type or "",
             "close_date": _fmt_day(p.completion_date),
             "contract": int(p.contract_amount or 0),
@@ -527,6 +547,11 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         contract = data.pop("contract_amount", None)
         if contract is not None:
             p.contract_amount = int(contract)
+        # 顯示名覆寫（owner 2026-09-05）：空字串＝清掉，退回自動規則
+        # （連到 1 個母帳案就顯示母帳案名）。`name` 一律不動 ——
+        # 它是 Sheet 工時案名對映的查表鍵，見 linked_display_name。
+        if "display_name" in data:
+            p.display_name = (data.pop("display_name") or "").strip()[:255] or None
         # 結案日：owner 的流程是「先整理專案再記帳」，日期在這張表就要能改。
         # 空字串＝清空（未結案）。日期慣例走 _parse_shoot_date（UTC 午夜）。
         if "close_date" in data:
@@ -572,8 +597,15 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         await session.commit()
         d, cost_src = apply_crm_costs(d, crm_now)
         net, check = compute(int(p.contract_amount or 0), d)
+        # 顯示名重算後一起回 —— 前端就地更新那一列，不必為了改名重抓整份
+        from routers.crm._shared import mine_parent_names
+        _pn = (await mine_parent_names(session, [project_id])).get(project_id, ()) \
+            if ent == "mine" else ()
+    _shown, _orig = linked_display_name(p.name or "", _pn, p.display_name or "")
     return {"status": "ok", "detail": d, "net": net, "check": check,
             "cost_sources": cost_src,
+            "name": _shown, "orig_name": _orig,
+            "custom_name": p.display_name or "", "parent_names": list(_pn),
             "contract": int(contract) if contract is not None else None,
             "close_date": _fmt_day(p.completion_date),
             "crm_pushed": int(p.crm_pushed or 0),

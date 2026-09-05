@@ -385,6 +385,51 @@ async def mine_client_links(request: Request):
     return {"mine": mine, "crm": parents, "shared": shared}
 
 
+@router.post("/clients/{client_id}/crm-create")
+async def create_crm_client_from_mine(client_id: str, request: Request):
+    """私帳客戶 → 在母帳（CRM）建一筆同樣的客戶並連結（owner 2026-09-05
+    「連結不到的客戶……直接有一個按鈕讓我在母帳建立新客戶」，目標是
+    「私帳的客戶母帳都有包含」）。
+
+    只複製客戶主檔那幾欄（代稱／全稱／統編）—— 匯款資訊、聯絡人、合作契機
+    是私帳自己談的關係，不往母帳倒。已連結的直接回現況（按第二次不會多建）。
+
+    🔴 `short_name` 有 `(entity, short_name)` 唯一約束 —— 母帳已經有同代稱的
+    那一家時**不建新的，直接連過去**，否則會撞約束回 500，而人要的本來就是
+    那一筆。
+    """
+    from core.auth import check_logged_in
+    from core.ledger import not_mine
+    check_logged_in(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        c = await session.get(Client, client_id)
+        if not c:
+            raise HTTPException(status_code=404, detail="找不到此客戶")
+        _client_write_guard(request, c)
+        if (c.entity or "parent") != "mine":
+            raise HTTPException(status_code=422, detail="只有私帳客戶能建立 CRM 對應")
+        if c.crm_link_id:
+            return {"status": "ok", "crm_link_id": c.crm_link_id, "created": False}
+        exist = (await session.execute(
+            select(Client).where(not_mine(Client.entity),
+                                 Client.short_name == c.short_name))).scalars().first()
+        if exist is None:
+            exist = Client(id=uuid.uuid4().hex, entity="parent",
+                           short_name=c.short_name, full_name=c.full_name or "",
+                           tax_id=c.tax_id or "", status="潛在客戶")
+            session.add(exist)
+            created = True
+        else:
+            created = False
+        c.crm_link_id = exist.id
+        c.updated_at = _now()
+        await session.commit()
+        return {"status": "ok", "crm_link_id": exist.id,
+                "crm_link_name": exist.short_name, "created": created}
+
+
 @router.put("/clients/{client_id}/crm-link")
 async def set_client_crm_link(client_id: str, request: Request):
     """設定/清除私帳客戶的 CRM 對應（body: {crm_link_id: id|null}）。

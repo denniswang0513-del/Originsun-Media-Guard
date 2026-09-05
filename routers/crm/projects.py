@@ -9,6 +9,7 @@ import csv
 import io
 import os
 import shutil
+import re as _re
 import uuid
 
 from fastapi import HTTPException, Request, UploadFile, File, Query
@@ -26,7 +27,7 @@ from core.schemas import (CrmProjectPayload, CrmProjectPatchPayload, ProjectType
 from ._shared import (router, _check_auth, _check_status_auth, _check_project_write_auth,
                       _check_website_auth, _require_db,
                       _get_factory, _now, _parse_shoot_date,
-                      _auto_update_client_status, map_csv_row)
+                      _auto_update_client_status, map_csv_row, _fmt_day)
 
 try:
     from ._shared import (select, or_,
@@ -1373,3 +1374,203 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
         invalidate_mine_projects()
     return {"status": "ok", "id": new_id, "amount": mir["total"],
             "mode": mode, "imported": imported}
+
+
+# ── 母私帳專案對應表（owner 2026-09-05）──────────────────────────────────
+#
+# 目標：「母帳的專案私帳都可以對齊」。既有的 mirror-to-mine 是**母帳 → 私帳**
+# （公司發包給我，把成本行鏡射成私帳收入）；這裡是**反過來的那半邊** ——
+# 私帳先有的案，在母帳補一個對應的專案並連結。
+#
+# 連結欄位共用同一組（`crm_projects.mine_link_id` 記在母帳那一側、私帳那側的
+# `source_project_id` 留第一個來源），所以兩條路連出來的東西一模一樣，
+# `is_mirrored` / `resolve_mine_link` / `mine_parent_names` 都認得。
+
+_RE_YEAR = _re.compile(r"^20\d{2}")
+
+
+def _norm_name(s: str) -> str:
+    """比對用的正規化案名：去空白、去年份前綴，兩邊才對得起來
+    （「2026 臺北城市形象片」vs「臺北城市形象片」）。"""
+    return _RE_YEAR.sub("", "".join((s or "").split()))
+
+
+async def _mine_link_guard(request):
+    """對應表三支端點的共同守衛：要有私帳的完整權限。
+
+    看得到「私帳有哪些案」本身就是私帳資料（見 is_mirrored 的可見性註解），
+    而這三支還會寫母帳 —— 所以用跟 mirror-to-mine 同一道門。
+    """
+    from core.ledger import require_entity
+    require_entity(request, "mine", level="full")
+    _require_db()
+    return await _get_factory()
+
+
+@router.get("/projects-mine-links")
+async def projects_mine_links(request: Request):
+    """對應表的資料：私帳每一案的連結狀態 ＋ 可挑的母帳案清單。
+
+    `parent_names` 兩種連結形狀都收（見 mine_parent_names）；`suggest_id`
+    只在**唯一**候選時給 —— 多個就不猜（同 clients 那張對照表的規矩）。
+    """
+    from ._shared import mine_parent_names
+    factory = await _mine_link_guard(request)
+    async with factory() as session:
+        mine_rows = (await session.execute(
+            select(CrmProject, Client.short_name)
+            .outerjoin(Client, Client.id == CrmProject.client_id)
+            .where(CrmProject.entity == "mine")
+            .order_by(CrmProject.completion_date.desc().nullsfirst(),
+                      CrmProject.id))).all()
+        parent_rows = (await session.execute(
+            select(CrmProject, Client.short_name)
+            .outerjoin(Client, Client.id == CrmProject.client_id)
+            .where(not_mine(CrmProject.entity))
+            .order_by(CrmProject.name))).all()
+        links = await mine_parent_names(session, [p.id for p, _c in mine_rows])
+        cli = {c.id: c for c in (await session.execute(
+            select(Client))).scalars().all()}
+    by_name: dict = {}
+    for p, _c in parent_rows:
+        by_name.setdefault(_norm_name(p.name), []).append(p)
+    parents = [{"id": p.id, "name": p.name, "client": c or "",
+                "contract": int(p.contract_amount or 0),
+                "linked_mine_id": p.mine_link_id or ""} for p, c in parent_rows]
+    mine = []
+    for p, cname in mine_rows:
+        names = links.get(p.id, [])
+        sug = [] if names else by_name.get(_norm_name(p.name), [])
+        c = cli.get(p.client_id) if p.client_id else None
+        mine.append({
+            "id": p.id, "name": p.name, "client": cname or "",
+            "display_name": p.display_name or "",
+            "contract": int(p.contract_amount or 0),
+            "close_date": _fmt_day(p.completion_date),
+            "parent_names": names,
+            # 客戶在母帳的狀態：ok＝本來就是 CRM 客戶或已連結；none＝連不到
+            # （「在母帳建立」會順手把客戶也建起來 —— owner「私帳的客戶母帳
+            # 都有包含」，不然補建的專案會掛在一個母帳看不到的客戶上）
+            "client_state": ("ok" if c is not None
+                             and ((c.entity or "parent") != "mine" or c.crm_link_id)
+                             else "none"),
+            "suggest_id": sug[0].id if len(sug) == 1 else "",
+            "suggest_name": sug[0].name if len(sug) == 1 else "",
+        })
+    return {"mine": mine, "parents": parents}
+
+
+async def _crm_client_for(session, client_id: str):
+    """私帳案的客戶 → 母帳該用哪一筆（沒有就建，owner「私帳的客戶母帳都有包含」）。
+
+    三種狀況：本來就是 CRM 客戶（直接用）／私帳客戶已連結（用連到的那筆）／
+    私帳客戶還沒連（建一筆同代稱的並連結 —— 與 clients.crm-create 同一條規則：
+    母帳已有同代稱就連過去不建重複的，`(entity, short_name)` 有唯一約束）。
+    """
+    if not client_id:
+        return None
+    c = await session.get(Client, client_id)
+    if c is None:
+        return None
+    if (c.entity or "parent") != "mine":
+        return c.id
+    if c.crm_link_id:
+        return c.crm_link_id
+    exist = (await session.execute(
+        select(Client).where(not_mine(Client.entity),
+                             Client.short_name == c.short_name))).scalars().first()
+    if exist is None:
+        exist = Client(id=uuid.uuid4().hex, entity="parent",
+                       short_name=c.short_name, full_name=c.full_name or "",
+                       tax_id=c.tax_id or "", status="潛在客戶")
+        session.add(exist)
+        await session.flush()
+    c.crm_link_id = exist.id
+    c.updated_at = _now()
+    return exist.id
+
+
+@router.post("/projects/{mine_id}/parent-create")
+async def create_parent_from_mine(mine_id: str, request: Request):
+    """私帳案 → 在母帳建一個對應的專案並連結（owner 2026-09-05）。
+
+    帶過去的只有「這是哪一個案」需要的欄位：案名、客戶、結案日、案型；
+    金額照 owner 拍板「母帳如果沒有 先填私帳的 後面再改」帶私帳的，並標
+    `contract_amount_source='mine'`（＝佔位、待確認）。
+
+    🔴 私帳金額是「我拿到的那段」，公司跟客戶的合約額一定 ≥ 它 —— 這個數字
+    是**下限占位不是真值**，所以一定要留標記，母公司專案毛利與現金流預測
+    才排除得掉（見 docs/LEDGER_UNIFY_PLAN.md §2.2）。
+
+    成本行、派工、報價一律不帶：那些是公司自己的執行面，私帳沒有那份資料，
+    憑空生出來的假數字比空的更難發現。
+    """
+    from core.project_flow import PIPELINE
+    factory = await _mine_link_guard(request)
+    async with factory() as session:
+        m = await session.get(CrmProject, mine_id)
+        if m is None:
+            raise HTTPException(status_code=404, detail="找不到此私帳專案")
+        if (m.entity or "parent") != "mine":
+            raise HTTPException(status_code=422, detail="這一案不在私帳")
+        already = (await session.execute(
+            select(CrmProject.id)
+            .where(CrmProject.mine_link_id == mine_id))).first()
+        if already or m.source_project_id:
+            raise HTTPException(status_code=409, detail="這一案已經連到母帳了")
+        amt = int(m.contract_amount or 0)
+        p = CrmProject(
+            id=uuid.uuid4().hex, entity="parent", name=m.name,
+            client_id=await _crm_client_for(session, m.client_id),
+            contract_amount=amt or None,
+            contract_amount_source="mine" if amt else None,
+            completion_date=m.completion_date,
+            project_type=m.project_type or "",
+            status="結案" if m.completion_date else "製作",
+            notes="[私帳對應] 由私帳案「%s」在母帳補建" % m.name,
+            mine_link_id=mine_id, created_at=_now(), updated_at=_now())
+        session.add(p)
+        m.source_project_id = p.id
+        m.updated_at = _now()
+        await session.commit()
+        pid, pname = p.id, p.name
+    assert PIPELINE  # 狀態字面值與管線同一組（"結案"／"製作"）
+    return {"status": "ok", "id": pid, "name": pname}
+
+
+@router.put("/projects/{mine_id}/parent-link")
+async def set_parent_link(mine_id: str, request: Request):
+    """把一個**既有的**母帳案連到這個私帳案，或解除（body: {parent_id: id|null}）。
+
+    連結一律寫在母帳那一側（`mine_link_id`）—— 一個私帳案可以承接多個母帳案
+    （owner 2026-09-01），所以連新的不會動到已經連上來的別案。
+    解除：清掉**所有**指向這個私帳案的母帳連結；私帳那側的 `source_project_id`
+    一起清（不然「這是分身」的舊判定會留著指向一個已解除的連結）。
+    """
+    factory = await _mine_link_guard(request)
+    body = await request.json()
+    target = (body.get("parent_id") or "").strip()
+    async with factory() as session:
+        m = await session.get(CrmProject, mine_id)
+        if m is None or (m.entity or "parent") != "mine":
+            raise HTTPException(status_code=404, detail="找不到此私帳專案")
+        if target:
+            p = await session.get(CrmProject, target)
+            if p is None or (p.entity or "parent") == "mine":
+                raise HTTPException(status_code=422, detail="要連結的目標必須是母帳專案")
+            if p.mine_link_id and p.mine_link_id != mine_id:
+                raise HTTPException(status_code=409, detail="這個母帳案已經連到別的私帳案")
+            p.mine_link_id = mine_id
+            p.updated_at = _now()
+            if not m.source_project_id:
+                m.source_project_id = p.id
+        else:
+            for p in (await session.execute(
+                    select(CrmProject)
+                    .where(CrmProject.mine_link_id == mine_id))).scalars().all():
+                p.mine_link_id = None
+                p.updated_at = _now()
+            m.source_project_id = None
+        m.updated_at = _now()
+        await session.commit()
+    return {"status": "ok", "parent_id": target}

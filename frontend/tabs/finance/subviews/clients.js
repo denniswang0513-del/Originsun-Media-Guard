@@ -55,7 +55,13 @@ function _render() {
                     ? `建議：${esc(m.suggest_name)}
                        <button class="crm-btn crm-btn-primary crm-btn-sm" style="margin-left:6px;"
                                onclick="window._finCli.link('${m.id}','${m.suggest_id}')">採用</button>`
-                    : '（未對應）'}</td></tr>`;
+                    // 連不到的就在母帳建一筆（owner 2026-09-05「私帳的客戶
+                    // 母帳都有包含」）—— 只複製代稱／全稱／統編，匯款資訊與
+                    // 聯絡人是私帳自己談的關係，不往母帳倒。
+                    : `（未對應）
+                       <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:6px;"
+                               title="在 CRM 建一筆同名客戶並連結（只帶代稱／全稱／統編）"
+                               onclick="window._finCli.createInCrm('${m.id}','${esc(m.short_name)}')">在 CRM 建立</button>`}</td></tr>`;
 
     _c.innerHTML = `
         <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
@@ -106,6 +112,20 @@ _fc.link = async (id, crmId) => {
         finToast('儲存失敗：' + e.message, 'error');
     }
 };
+
+_fc.createInCrm = async (id, name) => {
+    if (!window.confirm(`在 CRM（母帳）建立客戶「${name}」並連結？`)) return;
+    try {
+        const r = await crmFetch(`/clients/${id}/crm-create`, { method: 'POST' });
+        // 母帳已經有同代稱的那一家時後端不建新的、直接連過去 —— 要講出來，
+        // 否則使用者會以為多了一筆
+        finToast(r.created ? '已在 CRM 建立並連結' : `CRM 已有「${name}」，直接連結`);
+        _fc.reload();
+    } catch (e) {
+        finToast('建立失敗：' + e.message, 'error');
+    }
+};
+
 
 _fc.pick = (ev, id) => {
     // 格內可搜尋下拉挑 CRM 客戶（同收支類別格的模式）——選定即存
