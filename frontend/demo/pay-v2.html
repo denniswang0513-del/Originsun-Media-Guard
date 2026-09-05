@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>收付款 — 東仁社宅金安獎影片</title>
+<!-- 產品模擬（靜態）。資料＝東仁社宅金安獎影片 2026-09-06 真實快照，不連 API。 -->
+<style>
+  :root{
+    --bg:#1a1a1a; --panel:#202020; --panel2:#242424; --line:#2e2e2e; --line2:#3a3a3a;
+    --tx:#e0e0e0; --dim:#9ca3af; --mute:#6b7280;
+    --blue:#60a5fa; --green:#86efac; --red:#fca5a5; --amber:#fbbf24; --violet:#c4b5fd;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--tx);
+       font-family:-apple-system,"Segoe UI","Noto Sans TC",sans-serif;font-size:13px;line-height:1.55;}
+  .num{font-variant-numeric:tabular-nums;}
+  .g{color:var(--green);} .r{color:var(--red);} .b{color:var(--blue);} .a{color:var(--amber);} .v{color:var(--violet);}
+  .dash{color:var(--mute);}
+
+  .top{display:flex;align-items:center;gap:2px;padding:0 16px;border-bottom:1px solid var(--line2);
+       background:#181818;position:sticky;top:0;z-index:5;}
+  .top .pn{font-weight:700;color:#fff;margin-right:14px;white-space:nowrap;}
+  .tab{padding:12px;font-size:13px;color:var(--mute);cursor:pointer;border-bottom:2px solid transparent;text-decoration:none;}
+  .tab.on{color:#fff;border-bottom-color:var(--blue);}
+  .tab:hover{color:var(--tx);}
+  .top .sp{flex:1;}
+  .btn{background:#2a2a2a;border:1px solid var(--line2);color:var(--tx);border-radius:6px;
+       padding:5px 11px;font-size:12px;cursor:pointer;white-space:nowrap;}
+  .btn:hover{background:#333;}
+  .btn.pri{background:#2563eb;border-color:#2563eb;color:#fff;}
+  .btn.sm{padding:2px 8px;font-size:11px;}
+
+  .meta{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:9px 20px;
+        border-bottom:1px solid var(--line);color:var(--dim);font-size:12px;background:#1c1c1c;}
+  .meta b{color:#fff;font-size:13px;}
+  .st{background:#064e3b;color:var(--green);border-radius:999px;padding:1px 10px;font-size:11px;}
+  .av{display:inline-flex;align-items:center;gap:5px;}
+  .av i{width:18px;height:18px;border-radius:50%;background:#16a34a;color:#fff;font-size:10px;display:inline-flex;align-items:center;justify-content:center;font-style:normal;}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:18px 20px 70px;}
+  h2{font-size:13px;margin:24px 0 9px;color:var(--dim);font-weight:700;letter-spacing:.03em;display:flex;align-items:center;gap:10px;}
+  h2 .sub{font-weight:400;color:var(--mute);font-size:11px;}
+  h2 .act{margin-left:auto;display:flex;gap:6px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 17px;}
+
+  .kpis{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px;}
+  .kpi .l{font-size:11px;color:var(--mute);}
+  .kpi .vv{font-size:19px;font-weight:800;color:#fff;line-height:1.2;margin:2px 0;}
+  .kpi .s{font-size:11px;color:var(--dim);}
+  .kpi.good .vv{color:var(--green);} .kpi.bad .vv{color:var(--red);} .kpi.warn .vv{color:var(--amber);} .kpi.hl .vv{color:var(--blue);}
+
+  .next{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .hint{display:inline-flex;align-items:center;gap:8px;font-size:12px;border:1px solid #92400e;background:#1f1a12;border-radius:8px;padding:6px 10px;}
+  .hint.bad{border-color:#991b1b;background:#231616;}
+  .hint.good{border-color:#065f46;background:#12201a;}
+
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .flow{display:grid;gap:5px;}
+  .frow{display:grid;grid-template-columns:120px 1fr 96px;align-items:center;gap:12px;}
+  .frow .fl{font-size:12px;color:var(--dim);}
+  .frow .fl.i1{padding-left:14px;color:var(--mute);}
+  .bar{height:14px;border-radius:4px;display:flex;overflow:hidden;background:#181818;}
+  .seg{height:100%;}
+  .frow .fv{text-align:right;font-weight:700;font-size:12px;}
+
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th{font-size:11px;color:var(--mute);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap;}
+  td{padding:8px;text-align:right;border-top:1px solid #262626;vertical-align:middle;}
+  th:first-child,td:first-child,th.l,td.l{text-align:left;}
+  tr.sum td{font-weight:700;border-top:1px solid var(--line2);color:#fff;}
+  tr.done td{color:var(--dim);}
+  .tag{font-size:10px;border-radius:999px;padding:1px 8px;white-space:nowrap;}
+  .tag.none{background:#7f1d1d;color:#fca5a5;}
+  .tag.req{background:#78350f;color:#fcd34d;}
+  .tag.paid{background:#064e3b;color:var(--green);}
+  .tag.kai{background:#2a2a2a;color:#9ca3af;}
+  .chain{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--mute);white-space:nowrap;}
+  .chain i{width:7px;height:7px;border-radius:50%;background:#3a3a3a;display:inline-block;}
+  .chain i.on{background:var(--amber);}
+  .chain i.ok{background:var(--green);}
+  .chain span.on{color:var(--amber);} .chain span.ok{color:var(--green);}
+  .items{color:var(--mute);font-size:11px;}
+  .note{font-size:11px;color:var(--mute);margin-top:8px;}
+  .note b{color:var(--tx);}
+
+  .pill{font-size:11px;color:var(--dim);background:var(--panel2);border:1px solid var(--line2);
+        border-radius:999px;padding:3px 11px;cursor:pointer;user-select:none;}
+  .pill.on{background:#1e3a5f;border-color:#2563eb;color:#bfdbfe;}
+
+  .t{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
+     background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);
+     border-radius:8px;padding:9px 12px;margin-bottom:7px;}
+  .t.hot{border-left-color:#ef4444;}
+  .t.info{border-left-color:var(--blue);}
+  .t .txt{font-size:12px;}
+  .t .txt b{color:#fff;}
+  .t .txt small{display:block;color:var(--mute);font-size:11px;}
+  .sub-row td{background:#1c1c1c;color:var(--dim);font-size:11px;padding:5px 8px 5px 26px;}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <span class="pn">東仁社宅金安獎影片</span>
+  <span class="tab">專案總覽</span><span class="tab">提案企劃</span><span class="tab">影像紀錄</span>
+  <span class="tab">參考影片</span><span class="tab">報價管理</span>
+  <a class="tab" href="budget-v2.html">預算結算</a>
+  <span class="tab on">收付款</span><span class="tab">完稿結案</span>
+  <span class="sp"></span>
+  <button class="btn">推送至私帳</button><button class="btn">連結私帳</button>
+</div>
+
+<div class="meta">
+  <b>豐譽營造</b><span class="st">結案</span><span>紀實影片</span>
+  <span class="av"><i>王</i>王士源</span><span class="dash">PM 未指派</span>
+  <span style="margin-left:auto;">稅率 5%　合約 <b class="num">$356,000</b> 含稅（未稅 $339,048）</span>
+</div>
+
+<div class="wrap">
+
+  <div class="kpis" id="kpis"></div>
+  <div class="next" id="next"></div>
+
+  <h2>錢怎麼走</h2>
+  <div class="panel split">
+    <div class="flow" id="flow-in"></div>
+    <div class="flow" id="flow-out"></div>
+  </div>
+
+  <h2>收款<span class="sub">本案的發票，和它連到的匯款</span>
+    <span class="act"><button class="btn">連結發票</button><button class="btn pri">開發票</button></span></h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th class="l">發票號碼</th><th class="l">日期</th><th class="l">抬頭 / 摘要</th>
+        <th>面額</th><th class="l">狀態</th><th>收到</th><th class="l">入帳日</th><th></th></tr></thead>
+      <tbody>
+        <tr><td class="l num">DQ45891559</td><td class="l num">2026-07-23</td><td class="l">金安獎影片拍攝</td>
+          <td class="num">$356,000</td><td class="l"><span class="tag paid">已收款</span></td>
+          <td class="num g">$356,000</td><td class="l num">2026-08-27</td><td><button class="btn sm">刪除</button></td></tr>
+        <tr class="sub-row"><td class="l" colspan="5">↳ 2026-08-27 匯入款　收入 $356,000　匯費 $15　實入帳 $355,985</td><td colspan="3"></td></tr>
+        <tr class="sum"><td class="l" colspan="3">合計</td><td class="num">$356,000</td><td></td><td class="num">$356,000</td><td colspan="2"></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>付款<span class="sub">一人一列：工項 ＋ 代墊，狀態鏈 未請款 → 已請款 → 已付款</span>
+    <span class="act">
+      <span class="pill on" data-f="all">全部</span><span class="pill" data-f="todo">還沒請款</span><span class="pill" data-f="req">已請未付</span>
+      <button class="btn">加人員</button><button class="btn">委外</button><button class="btn">行政雜支</button><button class="btn">預支</button>
+    </span></h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th class="l">人員</th><th class="l">角色 / 項目</th><th>工項</th><th>代墊雜支</th><th>應付</th>
+        <th class="l" style="width:230px;">狀態</th><th style="width:220px;"></th></tr></thead>
+      <tbody id="ppl-body"></tbody>
+    </table>
+    <div class="note" id="ppl-note"></div>
+  </div>
+
+  <h2>請款單<span class="sub" id="claims-sub"></span>
+    <span class="act"><button class="btn" onclick="payAll()">全部標已付款</button></span></h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th class="l">收款人</th><th class="l">摘要</th><th class="l">類別</th><th>金額</th><th class="l">請款日</th><th class="l">狀態</th><th class="l">付款日</th><th></th></tr></thead>
+      <tbody id="claims-body"></tbody>
+    </table>
+  </div>
+
+  <h2>本案的收支<span class="sub">收支明細裡掛到本案（或本案發票）的列</span></h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th class="l">日期</th><th class="l">摘要</th><th class="l">類別</th><th>收入</th><th>支出</th><th class="l">對到</th></tr></thead>
+      <tbody id="cash-body"></tbody>
+    </table>
+  </div>
+
+  <h2>要你決定的</h2>
+  <div id="todo"></div>
+
+</div>
+
+<script>
+const money = (n) => "$" + Math.round(n || 0).toLocaleString("zh-TW");
+const EX_TAX = 339048, CONTRACT = 356000, RECEIVED = 356000, FEE = 15;
+const COST_TOTAL = 270457;                // 預算結算的「已花成本」＝工項 252,823 ＋ 雜支 17,634
+const PROFIT = EX_TAX - COST_TOTAL;       // 68,591
+
+// 人員（真實：工項實際 ＋ 代墊雜支）
+const PEOPLE = [
+  { name:"王士源", items:"製片/專案管理、導演、腳本、剪輯、調光、視覺包裝、動態設計", lines:169823, adv:13089, advN:8 },
+  { name:"廖育慶", items:"攝影與空拍、動態攝影", lines:41000, adv:0 },
+  { name:"陳志廷", items:"攝影與訪問、動態攝影", lines:36000, adv:3745, advN:2 },
+  { name:"李科模", items:"燈光", lines:6000, adv:0 },
+  { name:"蔡念栩", items:"", lines:0, adv:800, advN:1 },
+];
+// 請款單（真實 5 張，全部應付款；state: req＝已請未付、paid＝已付款）
+const CLAIMS = [
+  { payee:"廖育慶", summary:"動態攝影、攝影與空拍", cat:"勞報", amt:41000, on:"2026-08-30", state:"req" },
+  { payee:"陳志廷", summary:"攝影與訪問、動態攝影", cat:"勞報", amt:36000, on:"2026-08-30", state:"req" },
+  { payee:"李科模", summary:"燈光", cat:"勞報", amt:6000, on:"2026-08-30", state:"req" },
+  { payee:"陳志廷", summary:"雜支：住宿", cat:"現金", amt:2250, on:"2026-08-30", state:"req" },
+  { payee:"陳志廷", summary:"雜支：交通", cat:"現金", amt:1495, on:"2026-08-30", state:"req" },
+];
+let filter = "all";
+
+const claimedOf = (n) => CLAIMS.filter((c) => c.payee === n).reduce((a, c) => a + c.amt, 0);
+const paidOf    = (n) => CLAIMS.filter((c) => c.payee === n && c.state === "paid").reduce((a, c) => a + c.amt, 0);
+const dueOf     = (p) => p.lines + p.adv;
+const stateOf = (p) => {
+  const cl = claimedOf(p.name), pd = paidOf(p.name), due = dueOf(p);
+  if (due === 0) return "none";
+  if (pd >= due) return "paid";
+  if (cl >= due) return "req";
+  return "todo";
+};
+
+function calc(){
+  const payable = PEOPLE.reduce((a, p) => a + dueOf(p), 0);            // 270,457
+  const requested = CLAIMS.filter((c) => c.state === "req").reduce((a, c) => a + c.amt, 0);
+  const paid = CLAIMS.filter((c) => c.state === "paid").reduce((a, c) => a + c.amt, 0);
+  const unrequested = payable - requested - paid;
+  return { payable, requested, paid, unrequested, unpaid: payable - paid };
+}
+
+function renderKpis(){
+  const c = calc();
+  const k = (l, v, s, cls = "") => `<div class="kpi ${cls}"><div class="l">${l}</div><div class="vv num">${v}</div><div class="s">${s || ""}</div></div>`;
+  document.getElementById("kpis").innerHTML =
+    k("合約金額", money(CONTRACT), "含稅・未稅 $339,048", "hl") +
+    k("已開發票", money(CONTRACT), "1 張") +
+    k("客戶已匯", money(RECEIVED), `實入帳 ${money(RECEIVED - FEE)} · 匯費 ${money(FEE)}`, "good") +
+    k("已開未收", "$0", '<span class="tag paid">全額到帳</span>') +
+    k("應付合計", money(c.payable), `工項 $252,823 ＋ 代墊雜支 $17,634`) +
+    k("未付", money(c.unpaid), `已請未付 ${money(c.requested)} · 未請 ${money(c.unrequested)}`, c.unpaid ? "warn" : "good") +
+    k("毛利", money(PROFIT), "20% · 已扣營業稅", "good");
+  const todo = PEOPLE.filter((p) => stateOf(p) === "todo");
+  const hints = [];
+  if (todo.length) hints.push(`<span class="hint">${todo.length} 人還沒請款，合計 ${money(todo.reduce((a, p) => a + dueOf(p) - claimedOf(p.name), 0))}：${todo.map((p) => p.name).join("、")} <button class="btn sm">看付款</button></span>`);
+  if (c.requested) hints.push(`<span class="hint">${CLAIMS.filter((x) => x.state === "req").length} 張應付款還沒付，合計 ${money(c.requested)} <button class="btn sm">看請款單</button></span>`);
+  if (!hints.length) hints.push('<span class="hint good">收付都完成了，可以結案</span>');
+  document.getElementById("next").innerHTML = `<span class="dash" style="font-size:12px;align-self:center;">下一步</span>` + hints.join("");
+}
+
+function renderFlow(){
+  const c = calc();
+  const row = (l, amt, color, base, ind) => `<div class="frow"><div class="fl ${ind ? "i1" : ""}">${l}</div>
+      <div class="bar"><div class="seg" style="width:${Math.max(amt / base * 100, amt ? 0.6 : 0)}%;background:${color};"></div></div>
+      <div class="fv num">${money(amt)}</div></div>`;
+  document.getElementById("flow-in").innerHTML =
+    `<div class="dash" style="font-size:11px;margin-bottom:2px;">客戶 → 源日</div>` +
+    row("合約含稅", CONTRACT, "#1e3a5f", CONTRACT) +
+    row("已匯進來", RECEIVED, "#16a34a", CONTRACT, true) +
+    row("營業稅", CONTRACT - EX_TAX, "#3f3f46", CONTRACT, true) +
+    row("未稅", EX_TAX, "#2563eb", CONTRACT, true);
+  document.getElementById("flow-out").innerHTML =
+    `<div class="dash" style="font-size:11px;margin-bottom:2px;">源日 → 人員（未稅 $339,048）</div>` +
+    row("已付款", c.paid, "#16a34a", EX_TAX, true) +
+    row("已請未付", c.requested, "#b45309", EX_TAX, true) +
+    row("還沒請款", c.unrequested, "#dc2626", EX_TAX, true) +
+    row("留下（毛利）", PROFIT, "#4f46e5", EX_TAX, true);
+}
+
+function chain(st){
+  const on = (k) => st === k ? "on" : (["todo", "req", "paid"].indexOf(st) > ["todo", "req", "paid"].indexOf(k) ? "ok" : "");
+  return `<span class="chain"><i class="${on("todo")}"></i><span class="${on("todo")}">未請款</span>
+    <i class="${on("req")}"></i><span class="${on("req")}">已請款</span>
+    <i class="${on("paid")}"></i><span class="${on("paid")}">已付款</span></span>`;
+}
+
+function renderPeople(){
+  const rows = PEOPLE.filter((p) => filter === "all" || (filter === "todo" ? stateOf(p) === "todo" : stateOf(p) === "req"));
+  document.getElementById("ppl-body").innerHTML = rows.map((p) => {
+    const st = stateOf(p), due = dueOf(p), cl = claimedOf(p.name);
+    const act = st === "todo"
+      ? `<button class="btn sm pri" onclick="claim('${p.name}')">請款</button> <button class="btn sm">現金已付款</button> <button class="btn sm">費用已代墊</button>`
+      : st === "req" ? `<button class="btn sm pri" onclick="payPerson('${p.name}')">標已付款</button>` : "";
+    return `<tr class="${st === "paid" ? "done" : ""}">
+      <td class="l" style="color:var(--tx);">${p.name}</td>
+      <td class="l"><div class="items">${p.items || "—"}</div>${p.adv ? `<div class="items">代墊雜支 ${p.advN} 筆</div>` : ""}</td>
+      <td class="num">${p.lines ? money(p.lines) : '<span class="dash">—</span>'}</td>
+      <td class="num">${p.adv ? money(p.adv) : '<span class="dash">—</span>'}</td>
+      <td class="num" style="font-weight:700;">${money(due)}</td>
+      <td class="l">${chain(st)}${st === "todo" && cl ? `<div class="items">已請 ${money(cl)}，還有 ${money(due - cl)} 沒請</div>` : ""}</td>
+      <td>${act}</td></tr>`;
+  }).join("") + `<tr class="sum"><td class="l">合計</td><td></td>
+      <td class="num">$252,823</td><td class="num">$17,634</td><td class="num">$270,457</td><td colspan="2"></td></tr>`;
+  document.getElementById("ppl-note").innerHTML =
+    `應付合計 <b>$270,457</b> ＝ 預算結算的已花成本（工項 $252,823 ＋ 雜支 $17,634）；未稅 $339,048 − $270,457 ＝ 毛利 <b>$68,591</b>。`;
+}
+
+function renderClaims(){
+  const c = calc();
+  document.getElementById("claims-sub").textContent = `${CLAIMS.length} 張・已請未付 ${money(c.requested)}・已付 ${money(c.paid)}`;
+  document.getElementById("claims-body").innerHTML = CLAIMS.map((x, i) => `<tr class="${x.state === "paid" ? "done" : ""}">
+      <td class="l" style="color:var(--tx);">${x.payee}</td><td class="l">${x.summary}</td><td class="l"><span class="tag kai">${x.cat}</span></td>
+      <td class="num">${money(x.amt)}</td><td class="l num">${x.on}</td>
+      <td class="l">${x.state === "paid" ? '<span class="tag paid">已付款</span>' : '<span class="tag req">應付款</span>'}</td>
+      <td class="l num">${x.paidOn || '<span class="dash">—</span>'}</td>
+      <td>${x.state === "paid" ? "" : `<button class="btn sm pri" onclick="payClaim(${i})">標已付款</button>`}</td></tr>`).join("")
+    + `<tr class="sum"><td class="l" colspan="3">合計</td><td class="num">${money(CLAIMS.reduce((a, x) => a + x.amt, 0))}</td><td colspan="4"></td></tr>`;
+}
+
+function renderCash(){
+  const out = CLAIMS.filter((x) => x.state === "paid").map((x) => `<tr>
+      <td class="l num">${x.paidOn}</td><td class="l">付款 ${x.payee}</td><td class="l"><span class="tag kai">專案外包</span></td>
+      <td class="num dash">—</td><td class="num r">${money(x.amt)}</td><td class="l">請款單・${x.summary}</td></tr>`);
+  document.getElementById("cash-body").innerHTML = `<tr>
+      <td class="l num">2026-08-27</td><td class="l">匯入款</td><td class="l"><span class="tag kai">專案</span></td>
+      <td class="num g">$356,000</td><td class="num dash">—</td><td class="l">DQ45891559・匯費 $15</td></tr>` + out.join("");
+}
+
+function renderTodo(){
+  const c = calc();
+  const items = [];
+  const w = PEOPLE.find((p) => p.name === "王士源");
+  if (stateOf(w) === "todo") items.push({ hot:true, txt:`王士源：工項 ${money(w.lines)} ＋ 代墊 ${money(w.adv)} 都還沒開請款單`,
+    sub:"七個工項、八筆代墊雜支（住宿 9,080、油錢 2,251、餐費 2,558）。", go:"請款" });
+  const cai = PEOPLE.find((p) => p.name === "蔡念栩");
+  if (stateOf(cai) === "todo") items.push({ txt:"蔡念栩：代墊 $800 還沒請款", sub:"台北雲林來回油資。", go:"請款" });
+  if (c.requested) items.push({ txt:`${CLAIMS.filter((x) => x.state === "req").length} 張應付款還沒付，合計 ${money(c.requested)}`,
+    sub:"廖育慶 41,000、陳志廷 39,745、李科模 6,000。請款日 8/30。", go:"去付款" });
+  if (!items.length) items.push({ info:true, txt:"收付都完成了", sub:"可以進完稿結案。", go:"結案" });
+  document.getElementById("todo").innerHTML = items.map((i) =>
+    `<div class="t ${i.hot ? "hot" : i.info ? "info" : ""}"><div class="txt"><b>${i.txt}</b><small>${i.sub}</small></div><button class="btn">${i.go}</button></div>`).join("");
+}
+
+function claim(name){
+  const p = PEOPLE.find((x) => x.name === name);
+  const left = dueOf(p) - claimedOf(name);
+  if (left <= 0) return;
+  if (p.lines && p.lines > claimedOf(name) - (p.adv || 0)) CLAIMS.push({ payee:name, summary:p.items, cat:"勞報", amt:p.lines, on:"2026-09-06", state:"req" });
+  if (p.adv && !CLAIMS.some((c) => c.payee === name && c.cat === "現金")) CLAIMS.push({ payee:name, summary:`代墊雜支 ${p.advN} 筆`, cat:"現金", amt:p.adv, on:"2026-09-06", state:"req" });
+  render();
+}
+function payClaim(i){ CLAIMS[i].state = "paid"; CLAIMS[i].paidOn = "2026-09-06"; render(); }
+function payPerson(name){ CLAIMS.forEach((c) => { if (c.payee === name && c.state === "req") { c.state = "paid"; c.paidOn = "2026-09-06"; } }); render(); }
+function payAll(){ CLAIMS.forEach((c) => { if (c.state === "req") { c.state = "paid"; c.paidOn = "2026-09-06"; } }); render(); }
+function render(){ renderKpis(); renderFlow(); renderPeople(); renderClaims(); renderCash(); renderTodo();
+  document.querySelectorAll(".pill[data-f]").forEach((p) => p.classList.toggle("on", p.dataset.f === filter)); }
+document.querySelectorAll(".pill[data-f]").forEach((p) => p.onclick = () => { filter = p.dataset.f; render(); });
+render();
+</script>
+</body>
+</html>

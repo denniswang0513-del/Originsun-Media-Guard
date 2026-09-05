@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex,nofollow">
 <title>預算結算 — 東仁社宅金安獎影片</title>
-<!-- 產品模擬（靜態）。資料＝東仁社宅金安獎影片 2026-09-05 真實快照，不連 API。
-     兩個視角：業務（賺多少／夠不夠花）、製片（找誰／付多少／雜支登記）。 -->
+<!-- 產品模擬（靜態）。資料＝東仁社宅金安獎影片 2026-09-06 真實快照，不連 API。
+     工項表照原本的登記格式（左預估／右結算），格子可以直接打字。 -->
 <style>
   :root{
     --bg:#1a1a1a; --panel:#202020; --panel2:#242424; --line:#2e2e2e; --line2:#3a3a3a;
@@ -17,33 +17,39 @@
   body{margin:0;background:var(--bg);color:var(--tx);
        font-family:-apple-system,"Segoe UI","Noto Sans TC",sans-serif;font-size:13px;line-height:1.55;}
   .num{font-variant-numeric:tabular-nums;}
-  .g{color:var(--green);} .r{color:var(--red);} .b{color:var(--blue);} .a{color:var(--amber);}
+  .g{color:var(--green);} .r{color:var(--red);} .b{color:var(--blue);} .a{color:var(--amber);} .v{color:var(--violet);}
   .dash{color:var(--mute);}
 
   .top{display:flex;align-items:center;gap:2px;padding:0 16px;border-bottom:1px solid var(--line2);
        background:#181818;position:sticky;top:0;z-index:5;}
   .top .pn{font-weight:700;color:#fff;margin-right:14px;white-space:nowrap;}
-  .tab{padding:12px;font-size:13px;color:var(--mute);cursor:pointer;border-bottom:2px solid transparent;}
+  .tab{padding:12px;font-size:13px;color:var(--mute);cursor:pointer;border-bottom:2px solid transparent;text-decoration:none;}
   .tab.on{color:#fff;border-bottom-color:var(--blue);}
+  .tab:hover{color:var(--tx);}
   .top .sp{flex:1;}
   .btn{background:#2a2a2a;border:1px solid var(--line2);color:var(--tx);border-radius:6px;
-       padding:5px 11px;font-size:12px;cursor:pointer;}
+       padding:5px 11px;font-size:12px;cursor:pointer;white-space:nowrap;}
   .btn:hover{background:#333;}
   .btn.pri{background:#2563eb;border-color:#2563eb;color:#fff;}
   .btn.sm{padding:2px 8px;font-size:11px;}
+  .btn.xs{padding:0 6px;font-size:11px;line-height:20px;}
+  .btn.del{background:#7f1d1d;border-color:#7f1d1d;color:#fca5a5;padding:0 7px;line-height:20px;}
   .save{font-size:11px;color:var(--green);margin-right:10px;}
 
   .meta{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:9px 20px;
         border-bottom:1px solid var(--line);color:var(--dim);font-size:12px;background:#1c1c1c;}
   .meta b{color:#fff;font-size:13px;}
   .st{background:#064e3b;color:var(--green);border-radius:999px;padding:1px 10px;font-size:11px;}
-  .seg-sw{display:flex;gap:0;border:1px solid var(--line2);border-radius:7px;overflow:hidden;}
+  .seg-sw{display:flex;border:1px solid var(--line2);border-radius:7px;overflow:hidden;}
   .seg-sw span{padding:4px 14px;font-size:12px;color:var(--dim);cursor:pointer;background:#1f1f1f;}
   .seg-sw span.on{background:#2563eb;color:#fff;}
 
-  .wrap{max-width:1180px;margin:0 auto;padding:18px 20px 70px;}
-  h2{font-size:13px;margin:24px 0 9px;color:var(--dim);font-weight:700;letter-spacing:.03em;}
+  .wrap{max-width:1240px;margin:0 auto;padding:18px 20px 70px;}
+  h2{font-size:13px;margin:24px 0 9px;color:var(--dim);font-weight:700;letter-spacing:.03em;display:flex;align-items:center;gap:10px;}
+  h2 .sub{font-weight:400;color:var(--mute);font-size:11px;}
+  h2 .act{margin-left:auto;display:flex;gap:6px;align-items:center;}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 17px;}
+  .hide{display:none;}
 
   .verdict{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-end;
            background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 20px;}
@@ -77,8 +83,7 @@
   .mini i{display:block;height:100%;}
 
   .cards{display:flex;gap:11px;flex-wrap:wrap;}
-  .card{width:262px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;
-        padding:13px;cursor:pointer;transition:border-color .12s;}
+  .card{width:262px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:13px;cursor:pointer;}
   .card:hover{border-color:#555;}
   .card.on{border-color:#b45309;background:#231c10;}
   .card h3{margin:0 0 8px;font-size:14px;color:#fff;}
@@ -88,36 +93,58 @@
   .warn{font-size:11px;color:var(--amber);margin-top:6px;line-height:1.4;}
   .card.add{border-style:dashed;display:flex;align-items:center;justify-content:center;color:var(--mute);min-height:150px;}
 
-  .lt-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:9px;}
+  /* ── 工項登記表（原本的格式） ── */
   .pill{font-size:11px;color:var(--dim);background:var(--panel2);border:1px solid var(--line2);
         border-radius:999px;padding:3px 11px;cursor:pointer;user-select:none;}
-  .pill:hover{background:#2c2c2c;}
   .pill.on{background:#1e3a5f;border-color:#2563eb;color:#bfdbfe;}
-  .lt td{padding:7px 9px;border-top:1px solid #262626;font-size:12px;}
-  .lt tr.ph td{background:#191919;color:var(--dim);font-weight:700;border-top:1px solid var(--line2);}
-  .lt .who{color:var(--mute);font-size:11px;margin-left:6px;}
-  .lt .calc{color:var(--mute);font-size:11px;}
-  .lt tr.dif td{background:#231c10;}
-  .lt tr.foot td{border-top:1px solid var(--line2);font-weight:700;color:#fff;}
-  .lt tr.foot.grand td{border-top:2px solid var(--line2);}
-  .lt tr.empty td{color:var(--mute);font-size:11px;background:#1c1c1c;}
-  .lt tr.exp td{color:var(--dim);font-size:11px;}
-  .lk{color:var(--blue);cursor:pointer;}
+  .grid{width:100%;border-collapse:collapse;font-size:12px;}
+  .grid th{padding:6px 6px;white-space:nowrap;}
+  .grid th.l{text-align:left;}
+  .grid th.side{border-left:1px solid var(--line2);}
+  .grid td{padding:4px 6px;border-top:1px solid #262626;vertical-align:middle;white-space:nowrap;}
+  .grid td.l{text-align:left;}
+  .grid td.side{border-left:1px solid var(--line2);}
+  .grid tr.ph td{background:#191919;color:#fff;font-weight:700;padding:7px 6px;border-top:1px solid var(--line2);}
+  .grid tr.ph .phact{float:right;display:flex;gap:4px;}
+  .grid tr.sub td{background:#1c1c1c;color:var(--dim);font-style:italic;font-weight:700;}
+  .grid tr.dif td{background:#231c10;}
+  .grid tr.empty td{color:var(--mute);}
+  .grid tr.foot td{border-top:1px solid var(--line2);font-weight:700;color:#fff;background:#1c1c1c;}
+  .grid tr.foot.grand td{border-top:2px solid var(--line2);}
+  .grid tr.fold td{color:var(--mute);font-size:11px;background:#1c1c1c;text-align:left;}
+  .cell{width:68px;background:#141414;border:1px solid #303030;color:var(--tx);border-radius:5px;
+        padding:4px 6px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;}
+  .cell.qty{width:42px;}
+  .cell:focus{outline:none;border-color:#2563eb;background:#101a2a;}
+  .cell.empty{color:var(--mute);}
+  .cell.inherit{color:var(--mute);font-style:italic;}
+  select.cell{width:56px;text-align:left;padding:3px 4px;}
+  select.cell.who{width:118px;}
+  select.cell.who.inherit{color:var(--mute);font-style:italic;}
+  select.cell.who.missing{border-color:#b45309;color:var(--amber);}
+  .amt{display:inline-block;min-width:74px;text-align:right;font-variant-numeric:tabular-nums;}
+  .amt.dim{color:var(--mute);}
+  .arrow{color:var(--mute);}
+  .eqbtn{background:#2a2a2a;border:1px solid var(--line2);color:var(--dim);border-radius:4px;width:22px;height:22px;
+         cursor:pointer;font-size:12px;line-height:20px;padding:0;}
+  .eqbtn:hover{background:#1e3a5f;color:#bfdbfe;border-color:#2563eb;}
+  .eqbtn.done{opacity:.35;cursor:default;}
+  .rowname{color:var(--tx);}
   .foot-note{font-size:11px;color:var(--mute);margin-top:9px;}
   .foot-note b{color:var(--tx);}
+  .tips{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--mute);margin-top:8px;}
+  .tips kbd{background:#2a2a2a;border:1px solid var(--line2);border-radius:3px;padding:0 5px;font-size:10px;color:var(--dim);}
 
   .tag{font-size:10px;border-radius:999px;padding:1px 8px;white-space:nowrap;}
   .tag.due{background:#78350f;color:#fcd34d;}
   .tag.none{background:#7f1d1d;color:#fca5a5;}
   .tag.paid{background:#064e3b;color:var(--green);}
-  .tag.self{background:#312e81;color:#c7d2fe;}
 
   .qf{display:flex;gap:7px;align-items:center;flex-wrap:wrap;background:#1c1c1c;
       border:1px solid var(--line2);border-radius:8px;padding:9px 11px;margin-bottom:10px;}
-  .qf input,.qf select{background:#141414;border:1px solid var(--line2);color:var(--tx);
-      border-radius:6px;padding:5px 8px;font-size:12px;}
+  .qf input,.qf select{background:#141414;border:1px solid var(--line2);color:var(--tx);border-radius:6px;padding:5px 8px;font-size:12px;}
   .qf input.wide{flex:1;min-width:150px;}
-  .qf input.amt{width:100px;text-align:right;}
+  .qf input.amtin{width:100px;text-align:right;}
 
   .t{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
      background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);
@@ -127,7 +154,6 @@
   .t .txt{font-size:12px;}
   .t .txt b{color:#fff;}
   .t .txt small{display:block;color:var(--mute);font-size:11px;}
-  .hide{display:none;}
 </style>
 </head>
 <body>
@@ -136,16 +162,16 @@
   <span class="pn">東仁社宅金安獎影片</span>
   <span class="tab">專案總覽</span><span class="tab">提案企劃</span><span class="tab">影像紀錄</span>
   <span class="tab">參考影片</span><span class="tab">報價管理</span>
-  <span class="tab on">預算結算</span><span class="tab">收付款</span><span class="tab">完稿結案</span>
+  <span class="tab on">預算結算</span><a class="tab" href="pay-v2.html">收付款</a><span class="tab">完稿結案</span>
   <span class="sp"></span>
-  <span class="save">已自動儲存</span>
+  <span class="save" id="save">已自動儲存</span>
   <button class="btn">推送至私帳</button><button class="btn">連結私帳</button>
 </div>
 
 <div class="meta">
   <b>豐譽營造</b><span class="st">結案</span><span>紀實影片</span><span>王士源</span>
   <span style="margin-left:auto;display:flex;align-items:center;gap:14px;">
-    <span>2026-03-19　合約 $356,000</span>
+    <span>合約 $356,000（未稅 $339,048）</span>
     <span class="seg-sw"><span id="vw-biz" class="on">業務</span><span id="vw-prod">製片</span></span>
   </span>
 </div>
@@ -155,122 +181,69 @@
   <!-- ═══ 業務視角 ═══ -->
   <div id="view-biz">
     <h2>毛利</h2>
-    <div class="verdict">
-      <div class="v-main">
-        <div class="lab">目前毛利</div>
-        <div class="big num g">$68,591<span style="font-size:17px;"> · 20%</span></div>
-        <div class="sub">目標 $67,809（20%）　<span class="g">比目標多 $782</span></div>
-      </div>
-      <div class="v-sep"></div>
-      <div class="v-item"><div class="lab">合約未稅</div><div class="val num">$339,048</div></div>
-      <div class="v-item"><div class="lab">已花成本</div><div class="val num">$270,457</div></div>
-      <div class="v-item"><div class="lab">還可以花</div><div class="val num b">$782</div>
-        <div class="lab a">其中 $682 未分配</div></div>
-    </div>
-
+    <div class="verdict" id="verdict"></div>
     <h2>錢的流向</h2>
-    <div class="panel">
-      <div class="frow"><div class="fl">合約未稅</div>
-        <div class="bar"><div class="seg" style="width:20%;background:#4c1d95;"></div><div class="seg" style="width:80%;background:#1e3a5f;"></div></div>
-        <div class="fv num">$339,048</div></div>
-      <div class="frow s"><div class="fl i1">目標毛利（20%）</div>
-        <div class="bar"><div class="seg" style="width:20%;background:#6d28d9;"></div></div>
-        <div class="fv num" style="color:var(--violet);">$67,809</div></div>
-      <div class="frow s"><div class="fl i1">執行預算</div>
-        <div class="bar"><div class="seg" style="width:80%;background:#2563eb;"></div></div>
-        <div class="fv num b">$271,239</div></div>
-      <div class="frow s"><div class="fl i2">2min 影片</div>
-        <div class="bar"><div class="seg" style="width:64.9%;background:#b45309;"></div></div>
-        <div class="fv num">$220,270</div></div>
-      <div class="frow s"><div class="fl i2">3min 協力影片</div>
-        <div class="bar"><div class="seg" style="width:14.8%;background:#b45309;"></div></div>
-        <div class="fv num">$50,287</div></div>
-      <div class="frow s"><div class="fl i2 a">未分配</div>
-        <div class="bar"><div class="seg" style="width:0.2%;min-width:3px;background:#fbbf24;"></div></div>
-        <div class="fv num a">$682</div></div>
-      <div class="eq">子表剩餘 <b>$100</b>　＋　未分配 <b>$682</b>　＝　還可以花 <b>$782</b></div>
-    </div>
-
+    <div class="panel" id="flow"></div>
     <h2>花在哪</h2>
-    <div class="panel">
-      <table>
-        <thead><tr><th>　</th><th>預估</th><th>實際</th><th>差</th><th style="width:160px;">　</th></tr></thead>
-        <tbody>
-          <tr><td>人員（工項）</td><td class="num">$257,029</td><td class="num">$252,823</td>
-            <td class="num g">剩 $4,206</td><td><div class="mini"><i style="width:98.4%;background:#3b82f6;"></i></div></td></tr>
-          <tr><td>雜支</td><td class="num">$13,528</td><td class="num">$17,634</td>
-            <td class="num r">超 $4,106</td><td><div class="mini"><i style="width:100%;background:#ef4444;"></i></div></td></tr>
-          <tr class="sum"><td>成本合計</td><td class="num">$270,557</td><td class="num">$270,457</td>
-            <td class="num g">剩 $100</td><td><div class="mini"><i style="width:99.7%;background:#f59e0b;"></i></div></td></tr>
-        </tbody>
-      </table>
-    </div>
+    <div class="panel"><table id="spend"></table></div>
   </div>
 
   <!-- ═══ 製片視角 ═══ -->
   <div id="view-prod" class="hide">
     <h2>這案要付出去多少</h2>
-    <div class="verdict">
-      <div class="v-main">
-        <div class="lab">尚未付款</div>
-        <div class="big num a">$266,712</div>
-        <div class="sub">工項 $252,823 ＋ 代墊雜支 $13,889（陳志廷的 $3,745 已開單）</div>
-      </div>
-      <div class="v-sep"></div>
-      <div class="v-item"><div class="lab">已開請款單</div><div class="val num">$86,745</div>
-        <div class="lab">5 張・全部應付款</div></div>
-      <div class="v-item"><div class="lab">還沒開請款</div><div class="val num r">$183,712</div>
-        <div class="lab r">工項 $169,823 ＋ 代墊 $13,889</div></div>
-      <div class="v-item"><div class="lab">已付款</div><div class="val num dash">$0</div></div>
-    </div>
-
+    <div class="verdict" id="verdict-prod"></div>
     <h2>依人員</h2>
-    <div class="panel">
-      <table>
-        <thead><tr><th>人員</th><th style="text-align:left;width:230px;">工項</th><th>工項金額</th>
-          <th>代墊雜支</th><th>請款單</th><th style="width:110px;text-align:left;">狀態</th><th style="width:90px;"></th></tr></thead>
-        <tbody id="ppl-body"></tbody>
-      </table>
-    </div>
+    <div class="panel"><table>
+      <thead><tr><th>人員</th><th style="text-align:left;width:230px;">工項</th><th>工項金額</th>
+        <th>代墊雜支</th><th>請款單</th><th style="width:110px;text-align:left;">狀態</th><th style="width:90px;"></th></tr></thead>
+      <tbody id="ppl-body"></tbody></table></div>
   </div>
 
-  <!-- ═══ 兩個視角共用 ═══ -->
+  <!-- ═══ 共用 ═══ -->
   <h2>成本子表</h2>
   <div class="cards" id="cards"></div>
 
-  <h2 id="lt-title">工項明細</h2>
-  <div class="panel">
-    <div class="lt-head">
+  <h2 id="lt-title">成本估算 / 實際結算
+    <span class="act">
       <span class="pill" id="p-empty">顯示未使用的項目</span>
       <span class="pill" id="p-diff">只看有差異的</span>
-      <span class="pill" id="p-exp">展開雜支明細</span>
-      <span style="margin-left:auto;"><button class="btn">套用範本</button>
-        <button class="btn pri">新增工項</button></span>
-    </div>
-    <table class="lt">
-      <thead><tr><th>工項</th><th style="text-align:left;width:210px;">內容</th>
-        <th style="width:100px;">預估</th><th style="width:100px;">實際</th><th style="width:105px;">差</th>
-        <th style="width:80px;text-align:left;" class="col-pay">請款</th></tr></thead>
-      <tbody id="lt-body"></tbody>
+      <button class="btn" onclick="settleAll()" title="還沒填結算的列，全部照預估帶入（人員也帶）">未結算的照預估帶入</button>
+      <button class="btn">雜支登記</button><button class="btn">套用範本 ▾</button><button class="btn">儲存為範本</button>
+    </span></h2>
+  <div class="panel">
+    <table class="grid">
+      <thead><tr>
+        <th class="l" style="width:150px;">項目</th>
+        <th>單價</th><th>數量</th><th>單位</th><th>預估金額</th><th class="l">預估人員</th>
+        <th class="side" style="width:34px;"></th>
+        <th>單價</th><th>數量</th><th>單位</th><th>結算金額</th><th class="l">執行人員</th>
+        <th class="side">差異</th><th style="width:30px;"></th>
+      </tr></thead>
+      <tbody id="grid-body"></tbody>
     </table>
+    <div class="tips">
+      <span><kbd>Tab</kbd> 往右一格</span><span><kbd>Enter</kbd> 往下一列</span>
+      <span>結算格空白＝顯示預估值（灰），按 <b style="color:var(--dim);">＝</b> 照預估帶入</span>
+      <span>執行人員空白＝沿用預估人員（灰）</span>
+      <span>選了人員、單價空白 → 帶該人員日費</span>
+    </div>
     <div class="foot-note" id="lt-foot"></div>
   </div>
 
-  <h2 id="exp-title">雜支登記</h2>
+  <h2 id="exp-title">行政雜支</h2>
   <div class="panel">
     <div class="qf">
-      <input type="date" value="2026-09-05">
+      <input type="date" value="2026-09-06">
       <select><option>交通</option><option>飲食</option><option>住宿</option><option>耗材</option><option>其他</option></select>
       <input class="wide" placeholder="細項（Enter 儲存）">
-      <input class="amt" placeholder="金額">
-      <select><option>墊付人…</option><option>王士源</option><option>陳志廷</option><option>廖育慶</option><option>蔡念栩</option></select>
+      <input class="amtin" placeholder="金額">
+      <select id="qf-who"></select>
       <button class="btn pri">新增</button>
       <span style="margin-left:auto;"><button class="btn">雜支登記連結</button></span>
     </div>
     <table>
       <thead><tr><th>分類</th><th style="text-align:left;width:230px;">細項</th><th>金額</th>
-        <th style="text-align:left;width:90px;">墊付人</th><th style="text-align:left;width:110px;">請款</th>
-        <th style="width:80px;">子表</th></tr></thead>
+        <th style="text-align:left;width:90px;">墊付人</th><th style="text-align:left;width:110px;">請款</th><th style="width:80px;"></th></tr></thead>
       <tbody id="exp-body"></tbody>
     </table>
   </div>
@@ -281,29 +254,45 @@
 </div>
 
 <script>
-const money = n => "$" + (n || 0).toLocaleString("zh-TW");
-const diffCell = d => d === 0 ? '<span class="dash">—</span>'
-    : d < 0 ? '<span class="g">剩 ' + money(-d) + '</span>' : '<span class="r">超 ' + money(d) + '</span>';
+const money = (n) => "$" + Math.round(n || 0).toLocaleString("zh-TW");
+const diffCell = (d) => d === 0 ? '<span class="dash">—</span>'
+  : d < 0 ? '<span class="g">剩 ' + money(-d) + '</span>' : '<span class="r">超 ' + money(d) + '</span>';
 const PHASES = ["前期製作", "現場拍攝", "後期製作"];
+const UNITS = ["", "式", "日", "班", "時", "支", "套", "件"];
+const STAFF = ["王士源", "陳志廷", "廖育慶", "李科模", "蘇家弘", "蔡念栩", "黃聖鈞"];
+const EX_TAX = 339048, PROFIT_TARGET = 67809, EXEC = 271239;
 
+// 真實資料。結算側：ap/aq/au/as 為 null ＝ 還沒填（畫面顯示預估值灰字）
+const L = (ph, it, ep, eq, eu, es, ap, aq, au, as) => ({ ph, it, ep, eq, eu, es, ap, aq, au, as });
 const GROUPS = [
-  { id:"g1", name:"2min 影片", budget:220270, misc:11014, miscSet:false,
+  { id:"g1", name:"2min 影片", budget:220270, misc:11014,
     lines:[
-      {ph:"前期製作", it:"製片/專案管理", ep:27487, eq:1, eu:"式", ea:27487, es:"王士源", ap:23281, aq:1, au:"式", aa:23281, as:"王士源"},
-      {ph:"前期製作", it:"導演", ep:30000, eq:1, eu:"支", ea:30000, es:"王士源", ap:30000, aq:1, au:"支", aa:30000, as:"王士源"},
-      {ph:"前期製作", it:"腳本", ep:15000, eq:1, eu:"", ea:15000, es:"王士源", ap:15000, aq:1, au:"", aa:15000, as:"王士源"},
-      {ph:"現場拍攝", it:"攝影與訪問", ep:30000, eq:1, eu:"式", ea:30000, es:"陳志廷", ap:30000, aq:1, au:"式", aa:30000, as:"陳志廷"},
-      {ph:"現場拍攝", it:"攝影與空拍", ep:35000, eq:1, eu:"式", ea:35000, es:"廖育慶", ap:35000, aq:1, au:"式", aa:35000, as:"廖育慶"},
-      {ph:"現場拍攝", it:"燈光", ep:6000, eq:1, eu:"日", ea:6000, es:"李科模", ap:6000, aq:1, au:"日", aa:6000, as:"李科模"},
-      {ph:"後期製作", it:"剪輯", ep:30000, eq:1, eu:"支", ea:30000, es:"王士源", ap:30000, aq:1, au:"支", aa:30000, as:"王士源"},
-      {ph:"後期製作", it:"調光", ep:14000, eq:1, eu:"支", ea:14000, es:"王士源", ap:14000, aq:1, au:"支", aa:14000, as:"王士源"},
-      {ph:"後期製作", it:"視覺包裝", ep:12000, eq:1, eu:"支", ea:12000, es:"王士源", ap:12000, aq:1, au:"支", aa:12000, as:"王士源"},
-      {ph:"後期製作", it:"動態設計", ep:11000, eq:1, eu:"支", ea:11000, es:"王士源", ap:11000, aq:1, au:"支", aa:11000, as:"王士源"},
+      L("前期製作","製片/專案管理", 27487,1,"式","王士源", 23281,1,"式","王士源"),
+      L("前期製作","導演",          30000,1,"支","王士源", 30000,1,"支","王士源"),
+      L("前期製作","腳本",          15000,1,"",  "王士源", 15000,1,"",  "王士源"),
+      L("前期製作","視覺設計",      null,null,"",null, null,null,"",null),
+      L("前期製作","分鏡圖",        null,null,"",null, null,null,"",null),
+      L("前期製作","其他",          null,null,"",null, null,null,"",null),
+      L("現場拍攝","攝影與訪問",    30000,1,"式","陳志廷", 30000,1,"式","陳志廷"),
+      L("現場拍攝","攝影與空拍",    35000,1,"式","廖育慶", 35000,1,"式","廖育慶"),
+      L("現場拍攝","燈光",           6000,1,"日","李科模",  6000,1,"日","李科模"),
+      L("現場拍攝","空拍",          null,null,"",null, null,null,"",null),
+      L("現場拍攝","收音師",        null,null,"",null, null,null,"",null),
+      L("現場拍攝","美術",          null,null,"",null, null,null,"",null),
+      L("現場拍攝","服裝",          null,null,"",null, null,null,"",null),
+      L("現場拍攝","梳化",          null,null,"",null, null,null,"",null),
+      L("現場拍攝","翻譯",          null,null,"",null, null,null,"",null),
+      L("現場拍攝","其他",          null,null,"",null, null,null,"",null),
+      L("後期製作","剪輯",          30000,1,"支","王士源", 30000,1,"支","王士源"),
+      L("後期製作","調光",          14000,1,"支","王士源", 14000,1,"支","王士源"),
+      L("後期製作","視覺包裝",      12000,1,"支","王士源", 12000,1,"支","王士源"),
+      L("後期製作","動態設計",      11000,1,"支","王士源", 11000,1,"支","王士源"),
+      L("後期製作","混音",          null,null,"",null, null,null,"",null),
+      L("後期製作","錄音",          null,null,"",null, null,null,"",null),
+      L("後期製作","配音",          null,null,"",null, null,null,"",null),
+      L("後期製作","翻譯",          null,null,"",null, null,null,"",null),
+      L("後期製作","其他",          null,null,"",null, null,null,"",null),
     ],
-    empty:[["前期製作","視覺設計"],["前期製作","分鏡圖"],["前期製作","其他"],
-           ["現場拍攝","空拍"],["現場拍攝","收音師"],["現場拍攝","美術"],["現場拍攝","服裝"],
-           ["現場拍攝","梳化"],["現場拍攝","翻譯"],["現場拍攝","其他"],
-           ["後期製作","混音"],["後期製作","錄音"],["後期製作","配音"],["後期製作","翻譯"],["後期製作","其他"]],
     exp:[{c:"住宿", it:"0421-0422 住宿", a:9080, by:"王士源", claim:false},
          {c:"交通", it:"油錢", a:1451, by:"王士源", claim:false},
          {c:"交通", it:"台北雲林來回油資", a:800, by:"蔡念栩", claim:false},
@@ -313,199 +302,278 @@ const GROUPS = [
          {c:"飲食", it:"0422 飲料", a:314, by:"王士源", claim:false},
          {c:"飲食", it:"0423 早餐", a:194, by:"王士源", claim:false},
          {c:"飲食", it:"0422 早餐", a:40, by:"王士源", claim:false}] },
-  { id:"g2", name:"3min 協力影片", budget:50287, misc:2514, miscSet:false,
+  { id:"g2", name:"3min 協力影片", budget:50287, misc:2514,
     lines:[
-      {ph:"前期製作", it:"導演", ep:8000, eq:1, eu:"支", ea:8000, es:"王士源", ap:8000, aq:1, au:"支", aa:8000, as:"王士源"},
-      {ph:"前期製作", it:"腳本", ep:8000, eq:1, eu:"支", ea:8000, es:"王士源", ap:8000, aq:1, au:"支", aa:8000, as:"王士源"},
-      {ph:"現場拍攝", it:"動態攝影", ep:6000, eq:1, eu:"日", ea:6000, es:"廖育慶", ap:6000, aq:1, au:"日", aa:6000, as:"廖育慶"},
-      {ph:"現場拍攝", it:"動態攝影", ep:6000, eq:1, eu:"日", ea:6000, es:"陳志廷", ap:6000, aq:1, au:"日", aa:6000, as:"陳志廷"},
-      {ph:"後期製作", it:"剪輯", ep:18542, eq:1, eu:"套", ea:18542, es:"王士源", ap:18542, aq:1, au:"套", aa:18542, as:"王士源"},
+      L("前期製作","導演",   8000,1,"支","王士源", 8000,1,"支","王士源"),
+      L("前期製作","腳本",   8000,1,"支","王士源", 8000,1,"支","王士源"),
+      L("前期製作","製片/專案管理", null,null,"",null, null,null,"",null),
+      L("前期製作","視覺設計", null,null,"",null, null,null,"",null),
+      L("前期製作","分鏡圖",  null,null,"",null, null,null,"",null),
+      L("前期製作","其他",    null,null,"",null, null,null,"",null),
+      L("現場拍攝","動態攝影", 6000,1,"日","廖育慶", 6000,1,"日","廖育慶"),
+      L("現場拍攝","動態攝影", 6000,1,"日","陳志廷", 6000,1,"日","陳志廷"),
+      L("現場拍攝","攝影助理", null,null,"",null, null,null,"",null),
+      L("現場拍攝","燈光師",  null,null,"",null, null,null,"",null),
+      L("現場拍攝","收音師",  null,null,"",null, null,null,"",null),
+      L("現場拍攝","美術",    null,null,"",null, null,null,"",null),
+      L("現場拍攝","服裝",    null,null,"",null, null,null,"",null),
+      L("現場拍攝","梳化",    null,null,"",null, null,null,"",null),
+      L("現場拍攝","翻譯",    null,null,"",null, null,null,"",null),
+      L("現場拍攝","其他",    null,null,"",null, null,null,"",null),
+      L("後期製作","剪輯",   18542,1,"套","王士源", 18542,1,"套","王士源"),
+      L("後期製作","調光",    null,null,"",null, null,null,"",null),
+      L("後期製作","視覺包裝", null,null,"",null, null,null,"",null),
+      L("後期製作","動態設計", null,null,"",null, null,null,"",null),
+      L("後期製作","混音",    null,null,"",null, null,null,"",null),
+      L("後期製作","錄音",    null,null,"",null, null,null,"",null),
+      L("後期製作","配音",    null,null,"",null, null,null,"",null),
+      L("後期製作","翻譯",    null,null,"",null, null,null,"",null),
+      L("後期製作","其他",    null,null,"",null, null,null,"",null),
     ],
-    empty:[["前期製作","製片/專案管理"],["前期製作","視覺設計"],["前期製作","分鏡圖"],["前期製作","其他"],
-           ["現場拍攝","攝影助理"],["現場拍攝","燈光師"],["現場拍攝","收音師"],["現場拍攝","美術"],
-           ["現場拍攝","服裝"],["現場拍攝","梳化"],["現場拍攝","翻譯"],["現場拍攝","其他"],
-           ["後期製作","調光"],["後期製作","視覺包裝"],["後期製作","動態設計"],["後期製作","混音"],
-           ["後期製作","錄音"],["後期製作","配音"],["後期製作","翻譯"],["後期製作","其他"]],
-    exp:[{c:"住宿", it:"", a:2250, by:"陳志廷", claim:true},
-         {c:"交通", it:"", a:1495, by:"陳志廷", claim:true}] },
+    exp:[{c:"住宿", it:"", a:2250, by:"陳志廷", claim:true},{c:"交通", it:"", a:1495, by:"陳志廷", claim:true}] },
 ];
-
-// 已開的請款單（真實 5 張，全部應付款）
 const CLAIMS = [
-  {payee:"陳志廷", summary:"攝影與訪問、動態攝影", amt:36000, kind:"勞報", status:"應付款"},
-  {payee:"廖育慶", summary:"動態攝影、攝影與空拍", amt:41000, kind:"勞報", status:"應付款"},
-  {payee:"李科模", summary:"燈光", amt:6000, kind:"勞報", status:"應付款"},
-  {payee:"陳志廷", summary:"雜支：住宿", amt:2250, kind:"現金", status:"應付款"},
-  {payee:"陳志廷", summary:"雜支：交通", amt:1495, kind:"現金", status:"應付款"},
+  {payee:"陳志廷", amt:36000, kind:"勞報"}, {payee:"廖育慶", amt:41000, kind:"勞報"}, {payee:"李科模", amt:6000, kind:"勞報"},
+  {payee:"陳志廷", amt:2250, kind:"現金"}, {payee:"陳志廷", amt:1495, kind:"現金"},
 ];
 
-let sel = "g1", view = "biz", showEmpty = false, onlyDiff = false, showExp = false;
-const sum = (a, k) => a.reduce((s, x) => s + (x[k] || 0), 0);
-function calc(g){
-  const est = sum(g.lines, "ea"), act = sum(g.lines, "aa"), exp = sum(g.exp, "a");
-  return { est, act, exp, totEst: est + g.misc, totAct: act + exp,
-           remain: g.budget - (act + exp), forLines: g.budget - g.misc,
-           overPlan: Math.max(0, est - (g.budget - g.misc)) };
-}
-const claimFor = name => CLAIMS.filter(c => c.payee === name && c.kind === "勞報")
-                               .reduce((s, c) => s + c.amt, 0);
+let sel = "g1", view = "biz", showEmpty = false, onlyDiff = false;
+const sum = (a, f) => a.reduce((s, x) => s + (f(x) || 0), 0);
+const ea = (l) => (l.ep || 0) * (l.eq || 0);
+// 結算側「空白＝沿用預估」：有填就用填的，沒填就等於預估
+const AP = (l) => l.ap != null ? l.ap : l.ep;
+const AQ = (l) => l.aq != null ? l.aq : l.eq;
+const AU = (l) => l.au != null && l.au !== "" ? l.au : l.eu;
+const AS = (l) => l.as || l.es;
+const aa = (l) => (AP(l) || 0) * (AQ(l) || 0);
+const used = (l) => ea(l) > 0 || aa(l) > 0;
+const isEmptyLine = (l) => !used(l) && !l.es && !l.as;
+const settled = (l) => l.ap != null || l.aq != null || l.as;
 
-function renderPeople(){
+function calc(g){
+  const est = sum(g.lines, ea), act = sum(g.lines, aa), exp = sum(g.exp, (e) => e.a);
+  return { est, act, exp, totEst: est + g.misc, totAct: act + exp, remain: g.budget - (act + exp),
+           forLines: g.budget - g.misc, overPlan: Math.max(0, est - (g.budget - g.misc)) };
+}
+function calcAll(){
+  const est = sum(GROUPS, (g) => calc(g).est), act = sum(GROUPS, (g) => calc(g).act);
+  const miscE = sum(GROUPS, (g) => g.misc), miscA = sum(GROUPS, (g) => calc(g).exp);
+  const alloc = sum(GROUPS, (g) => g.budget);
+  return { est, act, miscE, miscA, totE: est + miscE, totA: act + miscA, alloc, unalloc: EXEC - alloc,
+           profit: EX_TAX - (act + miscA), remainA: EXEC - (act + miscA) };
+}
+
+// ── 上半部 ──
+function renderBiz(){
+  const c = calcAll();
+  document.getElementById("verdict").innerHTML = `
+    <div class="v-main"><div class="lab">目前毛利</div>
+      <div class="big num g">${money(c.profit)}<span style="font-size:17px;"> · ${Math.round(c.profit / EX_TAX * 100)}%</span></div>
+      <div class="sub">目標 ${money(PROFIT_TARGET)}（20%）　<span class="${c.profit >= PROFIT_TARGET ? "g" : "r"}">${c.profit >= PROFIT_TARGET ? "比目標多" : "比目標少"} ${money(Math.abs(c.profit - PROFIT_TARGET))}</span></div></div>
+    <div class="v-sep"></div>
+    <div class="v-item"><div class="lab">合約未稅</div><div class="val num">${money(EX_TAX)}</div></div>
+    <div class="v-item"><div class="lab">已花成本</div><div class="val num">${money(c.totA)}</div></div>
+    <div class="v-item"><div class="lab">還可以花</div><div class="val num b">${money(c.remainA)}</div>
+      ${c.unalloc ? `<div class="lab a">其中 ${money(c.unalloc)} 未分配</div>` : ""}</div>`;
+  const row = (l, amt, color, ind, cls) => `<div class="frow ${ind ? "s" : ""}"><div class="fl ${ind === 2 ? "i2" : ind ? "i1" : ""} ${cls || ""}">${l}</div>
+    <div class="bar"><div class="seg" style="width:${Math.max(amt / EX_TAX * 100, amt ? 0.4 : 0)}%;background:${color};"></div></div>
+    <div class="fv num ${cls || ""}">${money(amt)}</div></div>`;
+  document.getElementById("flow").innerHTML =
+    row("合約未稅", EX_TAX, "#1e3a5f") + row("目標毛利（20%）", PROFIT_TARGET, "#6d28d9", 1, "v") + row("執行預算", EXEC, "#2563eb", 1, "b") +
+    GROUPS.map((g) => row(g.name, g.budget, "#b45309", 2)).join("") +
+    row("未分配", c.unalloc, "#fbbf24", 2, "a") +
+    `<div class="eq">子表剩餘 <b>${money(sum(GROUPS, (g) => calc(g).remain))}</b>　＋　未分配 <b>${money(c.unalloc)}</b>　＝　還可以花 <b>${money(c.remainA)}</b></div>`;
+  const bar = (a, b, col) => `<div class="mini"><i style="width:${Math.min(b ? a / b * 100 : 0, 100)}%;background:${col};"></i></div>`;
+  document.getElementById("spend").innerHTML = `
+    <thead><tr><th>　</th><th>預估</th><th>實際</th><th>差</th><th style="width:160px;">　</th></tr></thead>
+    <tbody>
+      <tr><td>人員（工項）</td><td class="num">${money(c.est)}</td><td class="num">${money(c.act)}</td><td class="num">${diffCell(c.act - c.est)}</td><td>${bar(c.act, c.est, "#3b82f6")}</td></tr>
+      <tr><td>雜支</td><td class="num">${money(c.miscE)}</td><td class="num">${money(c.miscA)}</td><td class="num">${diffCell(c.miscA - c.miscE)}</td><td>${bar(c.miscA, c.miscE, c.miscA > c.miscE ? "#ef4444" : "#3b82f6")}</td></tr>
+      <tr class="sum"><td>成本合計</td><td class="num">${money(c.totE)}</td><td class="num">${money(c.totA)}</td><td class="num">${diffCell(c.totA - c.totE)}</td><td>${bar(c.totA, EXEC, "#f59e0b")}</td></tr>
+    </tbody>`;
+}
+
+function renderProd(){
   const map = {};
-  GROUPS.forEach(g => g.lines.forEach(l => {
-    const k = l.as || "（未指定）";
-    (map[k] = map[k] || {items:[], amt:0, adv:0, advClaim:0})
-    map[k].items.push(l.it); map[k].amt += l.aa || 0;
-  }));
-  GROUPS.forEach(g => g.exp.forEach(e => {
-    const k = e.by || "（未指定）";
-    map[k] = map[k] || {items:[], amt:0, adv:0, advClaim:0};
-    map[k].adv += e.a; if (e.claim) map[k].advClaim += e.a;
-  }));
+  GROUPS.forEach((g) => g.lines.forEach((l) => { if (!aa(l)) return; const k = AS(l) || "（未指定）";
+    (map[k] = map[k] || {items:[], amt:0, adv:0, advClaim:0}); map[k].items.push(l.it); map[k].amt += aa(l); }));
+  GROUPS.forEach((g) => g.exp.forEach((e) => { const k = e.by || "（未指定）";
+    map[k] = map[k] || {items:[], amt:0, adv:0, advClaim:0}; map[k].adv += e.a; if (e.claim) map[k].advClaim += e.a; }));
+  const claimFor = (n) => CLAIMS.filter((c) => c.payee === n && c.kind === "勞報").reduce((s, c) => s + c.amt, 0);
   const rows = Object.entries(map).sort((a, b) => (b[1].amt + b[1].adv) - (a[1].amt + a[1].adv));
+  const totAmt = sum(rows, ([, v]) => v.amt), totAdv = sum(rows, ([, v]) => v.adv);
+  const claimed = sum(CLAIMS, (c) => c.amt);
+  document.getElementById("verdict-prod").innerHTML = `
+    <div class="v-main"><div class="lab">尚未付款</div><div class="big num a">${money(totAmt + totAdv)}</div>
+      <div class="sub">工項 ${money(totAmt)} ＋ 代墊雜支 ${money(totAdv)}</div></div>
+    <div class="v-sep"></div>
+    <div class="v-item"><div class="lab">已開請款單</div><div class="val num">${money(claimed)}</div><div class="lab">${CLAIMS.length} 張・全部應付款</div></div>
+    <div class="v-item"><div class="lab">還沒開請款</div><div class="val num r">${money(totAmt + totAdv - claimed)}</div></div>
+    <div class="v-item"><div class="lab">已付款</div><div class="val num dash">$0</div></div>`;
   document.getElementById("ppl-body").innerHTML = rows.map(([name, v]) => {
-    const cl = claimFor(name);
-    const noClaim = v.amt - cl, advNo = v.adv - v.advClaim;
-    let tag;
-    if (noClaim > 0 || advNo > 0) tag = '<span class="tag none">還沒開請款</span>';
-    else if (cl || v.advClaim) tag = '<span class="tag due">應付款</span>';
-    else tag = '<span class="dash">—</span>';
-    const items = [...new Set(v.items)].join("、");
-    return `<tr>
-      <td style="color:var(--tx);">${name}</td>
-      <td style="text-align:left;color:var(--mute);font-size:11px;">${items || "—"}</td>
+    const cl = claimFor(name), no = v.amt - cl, advNo = v.adv - v.advClaim;
+    const tag = (no > 0 || advNo > 0) ? '<span class="tag none">還沒開請款</span>' : (cl || v.advClaim) ? '<span class="tag due">應付款</span>' : '<span class="dash">—</span>';
+    return `<tr><td style="color:var(--tx);${name === "（未指定）" ? "color:var(--amber);" : ""}">${name}</td>
+      <td style="text-align:left;color:var(--mute);font-size:11px;">${[...new Set(v.items)].join("、") || "—"}</td>
       <td class="num">${v.amt ? money(v.amt) : '<span class="dash">—</span>'}</td>
       <td class="num">${v.adv ? money(v.adv) : '<span class="dash">—</span>'}</td>
       <td class="num">${(cl + v.advClaim) ? money(cl + v.advClaim) : '<span class="dash">—</span>'}</td>
       <td style="text-align:left;">${tag}</td>
-      <td style="text-align:right;">${(noClaim > 0 || advNo > 0)
-          ? '<button class="btn sm">開請款單</button>' : ""}</td></tr>`;
-  }).join("") + `<tr class="sum"><td>合計</td><td></td>
-      <td class="num">$252,823</td><td class="num">$17,634</td><td class="num">$86,745</td>
-      <td colspan="2"></td></tr>`;
+      <td style="text-align:right;">${(no > 0 || advNo > 0) ? '<button class="btn sm">開請款單</button>' : ""}</td></tr>`;
+  }).join("") + `<tr class="sum"><td>合計</td><td></td><td class="num">${money(totAmt)}</td><td class="num">${money(totAdv)}</td><td class="num">${money(claimed)}</td><td colspan="2"></td></tr>`;
 }
 
 function renderCards(){
-  document.getElementById("cards").innerHTML = GROUPS.map(g => {
+  document.getElementById("cards").innerHTML = GROUPS.map((g) => {
     const c = calc(g), pct = Math.round(c.totAct / g.budget * 100);
     return `<div class="card ${g.id === sel ? "on" : ""}" data-g="${g.id}">
       <h3>${g.name}</h3>
       <div class="krow"><span>核給預算</span><b class="num">${money(g.budget)}</b></div>
       <div class="krow"><span>　工項預估</span><span class="num">${money(c.est)}</span></div>
-      <div class="krow"><span>　預計雜支${g.miscSet ? "" : "（5%）"}</span><span class="num">${money(g.misc)}</span></div>
+      <div class="krow"><span>　預計雜支（5%）</span><span class="num">${money(g.misc)}</span></div>
       <div class="krow"><span>實際工項</span><span class="num">${money(c.act)}</span></div>
-      <div class="krow"><span>實際雜支</span><span class="num">${money(c.exp)}${
-        c.exp > g.misc ? '<span class="r">　超 ' + money(c.exp - g.misc) + "</span>" : ""}</span></div>
-      <div class="krow tot"><span>已花 / 剩餘</span><span class="num">${money(c.totAct)} /
-        <b class="${c.remain < 0 ? "r" : c.remain > 0 ? "g" : ""}">${money(c.remain)}</b></span></div>
+      <div class="krow"><span>實際雜支</span><span class="num">${money(c.exp)}${c.exp > g.misc ? '<span class="r">　超 ' + money(c.exp - g.misc) + "</span>" : ""}</span></div>
+      <div class="krow tot"><span>已花 / 剩餘</span><span class="num">${money(c.totAct)} / <b class="${c.remain < 0 ? "r" : c.remain > 0 ? "g" : ""}">${money(c.remain)}</b></span></div>
       ${c.overPlan ? `<div class="warn">工項預估超出可用 ${money(c.forLines)}　<b>${money(c.overPlan)}</b></div>` : ""}
       <div class="mini" style="margin-top:9px;"><i style="width:${Math.min(pct,100)}%;background:${pct>100?"#ef4444":pct>80?"#f59e0b":"#3b82f6"};"></i></div>
     </div>`;
   }).join("") + '<div class="card add">＋ 新增子表</div>';
-  document.querySelectorAll(".card[data-g]").forEach(el =>
-    el.onclick = () => { sel = el.dataset.g; render(); });
+  document.querySelectorAll(".card[data-g]").forEach((el) => el.onclick = () => { sel = el.dataset.g; render(); });
 }
 
-function payTag(l){
-  const cl = CLAIMS.find(c => c.payee === l.as && c.kind === "勞報");
-  if (!cl) return '<span class="tag none">未開</span>';
-  return '<span class="tag due">應付款</span>';
+// ── 工項登記表 ──
+const opt = (list, cur, blank) => (blank ? `<option value="">${blank}</option>` : "") +
+  list.map((u) => `<option value="${u}"${u === cur ? " selected" : ""}>${u || "—"}</option>`).join("");
+function numCell(g, idx, key, val, cls, ph){
+  const v = val == null ? "" : val;
+  return `<input class="cell ${cls || ""} ${v === "" ? "empty" : ""}" value="${v}" placeholder="${ph || ""}"
+    data-g="${g}" data-i="${idx}" data-k="${key}" inputmode="numeric">`;
 }
-
-function renderLines(){
-  const g = GROUPS.find(x => x.id === sel), c = calc(g);
-  document.getElementById("lt-title").textContent = "工項明細 · " + g.name;
-  const pay = view === "prod";
-  document.querySelectorAll(".col-pay").forEach(e => e.classList.toggle("hide", !pay));
-  const cols = pay ? 6 : 5;
+function whoCell(g, idx, key, val, inheritFrom){
+  const cls = val ? "" : (inheritFrom ? "inherit" : "missing");
+  return `<select class="cell who ${cls}" data-g="${g}" data-i="${idx}" data-k="${key}">${
+    opt(STAFF, val || inheritFrom, val ? "" : (inheritFrom ? `沿用 ${inheritFrom}` : "搜尋人員…"))}</select>`;
+}
+function renderGrid(){
+  const g = GROUPS.find((x) => x.id === sel), c = calc(g);
+  document.getElementById("lt-title").firstChild.textContent = `成本估算 / 實際結算 · ${g.name}　`;
   let html = "";
-  PHASES.forEach(ph => {
-    let rows = g.lines.filter(l => l.ph === ph);
-    if (onlyDiff) rows = rows.filter(l => (l.aa || 0) !== (l.ea || 0));
-    const emp = g.empty.filter(e => e[0] === ph);
-    if (!rows.length && !(showEmpty && emp.length)) return;
-    const pe = sum(g.lines.filter(l => l.ph === ph), "ea");
-    const pa = sum(g.lines.filter(l => l.ph === ph), "aa");
-    html += `<tr class="ph"><td>${ph}</td><td></td><td class="num">${money(pe)}</td>
-             <td class="num">${money(pa)}</td><td class="num">${diffCell(pa - pe)}</td>
-             ${pay ? "<td></td>" : ""}</tr>`;
-    rows.forEach(l => {
-      const d = (l.aa || 0) - (l.ea || 0);
-      const changed = l.ep !== l.ap || l.eq !== l.aq || l.eu !== l.au;
-      const who = l.es === l.as ? l.es : `${l.es} <span class="dash">→</span> ${l.as}`;
-      html += `<tr class="${d ? "dif" : ""}">
-        <td>${l.it}<span class="who">${who}</span></td>
-        <td class="calc">${money(l.ep)} × ${l.eq} ${l.eu}${changed ? `　<span class="dash">→</span>　${money(l.ap)} × ${l.aq} ${l.au}` : ""}</td>
-        <td class="num">${money(l.ea)}</td><td class="num">${money(l.aa)}</td>
-        <td class="num">${diffCell(d)}</td>${pay ? `<td style="text-align:left;">${payTag(l)}</td>` : ""}</tr>`;
+  PHASES.forEach((ph) => {
+    const idxs = g.lines.map((l, i) => [l, i]).filter(([l]) => l.ph === ph);
+    let rows = idxs.filter(([l]) => showEmpty || !isEmptyLine(l));
+    if (onlyDiff) rows = rows.filter(([l]) => aa(l) !== ea(l));
+    const hidden = idxs.length - idxs.filter(([l]) => showEmpty || !isEmptyLine(l)).length;
+    const pe = sum(idxs, ([l]) => ea(l)), pa = sum(idxs, ([l]) => aa(l));
+    const unsettled = idxs.filter(([l]) => used(l) && !settled(l)).length;
+    html += `<tr class="ph"><td class="l" colspan="6">${ph}</td><td class="side"></td><td colspan="5" class="l">
+      <span class="phact">${unsettled ? `<button class="btn xs" onclick="settlePhase('${ph}')" title="這個階段還沒填結算的 ${unsettled} 列照預估帶入">照預估結算（${unsettled}）</button>` : ""}
+      <button class="btn xs" onclick="addLine('${ph}')">＋</button><button class="btn del">✕</button></span></td><td class="side"></td><td></td></tr>`;
+    rows.forEach(([l, i]) => {
+      const e = ea(l), a = aa(l), d = a - e, isE = isEmptyLine(l);
+      html += `<tr class="${d ? "dif" : ""} ${isE ? "empty" : ""}">
+        <td class="l rowname">${l.it}</td>
+        <td>${numCell(sel, i, "ep", l.ep, "", "—")}</td><td>${numCell(sel, i, "eq", l.eq, "qty", "—")}</td>
+        <td><select class="cell" data-g="${sel}" data-i="${i}" data-k="eu">${opt(UNITS, l.eu || "")}</select></td>
+        <td><span class="amt ${e ? "" : "dim"}">${e ? money(e) : "—"}</span></td>
+        <td class="l">${whoCell(sel, i, "es", l.es, "")}</td>
+        <td class="side"><button class="eqbtn ${settled(l) || !used(l) ? "done" : ""}" title="照預估帶入結算" onclick="settleLine('${sel}',${i})">${settled(l) ? "→" : "＝"}</button></td>
+        <td>${numCell(sel, i, "ap", l.ap, l.ap == null && l.ep != null ? "inherit" : "", l.ep != null ? l.ep : "—")}</td>
+        <td>${numCell(sel, i, "aq", l.aq, "qty " + (l.aq == null && l.eq != null ? "inherit" : ""), l.eq != null ? l.eq : "—")}</td>
+        <td><select class="cell ${l.au == null || l.au === "" ? "inherit" : ""}" data-g="${sel}" data-i="${i}" data-k="au">${opt(UNITS, AU(l) || "")}</select></td>
+        <td><span class="amt ${a ? "" : "dim"} ${!settled(l) && a ? "dim" : ""}">${a ? money(a) : "—"}</span></td>
+        <td class="l">${whoCell(sel, i, "as", l.as, l.es)}</td>
+        <td class="side num">${used(l) ? diffCell(d) : '<span class="dash">—</span>'}</td>
+        <td><button class="btn del" title="刪除">✕</button></td></tr>`;
     });
-    if (showEmpty) emp.forEach(e =>
-      html += `<tr class="empty"><td>${e[1]}</td><td class="calc">未使用</td>
-               <td class="num dash">—</td><td class="num dash">—</td><td class="num dash">—</td>
-               ${pay ? "<td></td>" : ""}</tr>`);
+    if (hidden && !showEmpty) html += `<tr class="fold"><td colspan="14">未使用的 ${hidden} 個項目已收起（${idxs.filter(([l]) => isEmptyLine(l)).map(([l]) => l.it).join("、")}）
+      <span class="b" style="cursor:pointer;margin-left:6px;" onclick="document.getElementById('p-empty').click()">展開</span></td></tr>`;
+    html += `<tr class="sub"><td class="l">${ph} 小計</td><td colspan="3"></td><td class="num">${money(pe)}</td><td></td><td class="side"></td>
+      <td colspan="3"></td><td class="num">${money(pa)}</td><td></td><td class="side num">${diffCell(pa - pe)}</td><td></td></tr>`;
   });
-  if (!showEmpty && g.empty.length)
-    html += `<tr class="empty"><td colspan="${cols}">未使用的 ${g.empty.length} 個工項已收起
-             <span class="lk" onclick="document.getElementById('p-empty').click()">展開</span></td></tr>`;
-  html += `<tr class="foot"><td>工項合計</td><td></td><td class="num">${money(c.est)}</td>
-           <td class="num">${money(c.act)}</td><td class="num">${diffCell(c.act - c.est)}</td>
-           ${pay ? "<td></td>" : ""}</tr>`;
-  html += `<tr class="foot"><td>行政雜支</td>
-           <td class="calc">${g.exp.length} 筆　<span class="lk" onclick="document.getElementById('p-exp').click()">${showExp ? "收起" : "明細"}</span></td>
-           <td class="num">${money(g.misc)}</td><td class="num">${money(c.exp)}</td>
-           <td class="num">${diffCell(c.exp - g.misc)}</td>${pay ? "<td></td>" : ""}</tr>`;
-  if (showExp) g.exp.forEach(e =>
-    html += `<tr class="exp"><td style="padding-left:26px;">${e.c}</td><td>${e.it || "—"}
-             <span class="who">${e.by} 代墊</span></td>
-             <td class="num dash">—</td><td class="num">${money(e.a)}</td><td class="num dash">—</td>
-             ${pay ? `<td style="text-align:left;">${e.claim ? '<span class="tag due">應付款</span>' : '<span class="tag none">未開</span>'}</td>` : ""}</tr>`);
-  html += `<tr class="foot grand"><td>本子表合計</td><td></td><td class="num">${money(c.totEst)}</td>
-           <td class="num">${money(c.totAct)}</td><td class="num">${diffCell(c.totAct - c.totEst)}</td>
-           ${pay ? "<td></td>" : ""}</tr>`;
-  document.getElementById("lt-body").innerHTML = html;
+  html += `<tr class="foot"><td class="l">工項合計</td><td colspan="3"></td><td class="num">${money(c.est)}</td><td></td><td class="side"></td>
+    <td colspan="3"></td><td class="num">${money(c.act)}</td><td></td><td class="side num">${diffCell(c.act - c.est)}</td><td></td></tr>`;
+  html += `<tr class="foot"><td class="l">行政雜支 小計</td><td colspan="3" class="l dash" style="font-weight:400;font-size:11px;">預計＝核給 × 5%</td><td class="num">${money(g.misc)}</td><td></td><td class="side"></td>
+    <td colspan="3" class="l dash" style="font-weight:400;font-size:11px;">${g.exp.length} 筆登記</td><td class="num">${money(c.exp)}</td><td></td><td class="side num">${diffCell(c.exp - g.misc)}</td><td></td></tr>`;
+  html += `<tr class="foot grand"><td class="l">本子表合計</td><td colspan="3"></td><td class="num">${money(c.totEst)}</td><td></td><td class="side"></td>
+    <td colspan="3"></td><td class="num">${money(c.totAct)}</td><td></td><td class="side num">${diffCell(c.totAct - c.totEst)}</td><td></td></tr>`;
+  document.getElementById("grid-body").innerHTML = html;
   document.getElementById("lt-foot").innerHTML =
-    `核給預算 <b>${money(g.budget)}</b>　→　實際剩餘 <b class="${c.remain ? "g" : ""}">${money(c.remain)}</b>`
+    `核給預算 <b>${money(g.budget)}</b>　→　實際剩餘 <b class="${c.remain < 0 ? "r" : "g"}">${money(c.remain)}</b>`
     + (c.overPlan ? `；<b class="a">預估合計 ${money(c.totEst)} 超出核給 ${money(c.overPlan)}</b>` : "");
+  bindGrid();
 }
+
+function bindGrid(){
+  document.querySelectorAll("#grid-body .cell").forEach((el) => {
+    const g = GROUPS.find((x) => x.id === el.dataset.g), l = g.lines[+el.dataset.i], k = el.dataset.k;
+    const commit = () => {
+      let v = el.value;
+      if (k === "ep" || k === "eq" || k === "ap" || k === "aq") v = v === "" ? null : Number(String(v).replace(/[^\d.]/g, "")) || 0;
+      if (k === "au" || k === "eu") v = v;
+      if (k === "as" || k === "es") v = v || null;
+      l[k] = v;
+      // 選了人員、預估單價空白 → 帶預設日費（示範：沒有日費資料就不動）
+      if (k === "eq" && l.ep == null && v) l.eq = v;
+      flash(); render();
+    };
+    el.addEventListener("change", commit);
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); commit(); moveDown(el); }
+    });
+    el.addEventListener("focus", () => { if (el.classList.contains("inherit") && el.tagName === "INPUT") el.select(); });
+  });
+}
+function moveDown(el){
+  const cells = [...document.querySelectorAll(`#grid-body .cell[data-k="${el.dataset.k}"]`)];
+  const i = cells.indexOf(document.querySelector(`#grid-body .cell[data-k="${el.dataset.k}"][data-i="${el.dataset.i}"]`));
+  const nx = cells[i + 1]; if (nx) nx.focus();
+}
+function settleLine(gid, i){ const l = GROUPS.find((x) => x.id === gid).lines[i]; if (!used(l)) return;
+  l.ap = l.ep; l.aq = l.eq; l.au = l.eu; l.as = l.es; flash(); render(); }
+function settlePhase(ph){ const g = GROUPS.find((x) => x.id === sel);
+  g.lines.forEach((l) => { if (l.ph === ph && used(l) && !settled(l)) { l.ap = l.ep; l.aq = l.eq; l.au = l.eu; l.as = l.es; } }); flash(); render(); }
+function settleAll(){ const g = GROUPS.find((x) => x.id === sel);
+  g.lines.forEach((l) => { if (used(l) && !settled(l)) { l.ap = l.ep; l.aq = l.eq; l.au = l.eu; l.as = l.es; } }); flash(); render(); }
+function addLine(ph){ const g = GROUPS.find((x) => x.id === sel);
+  const last = g.lines.map((l, i) => [l, i]).filter(([l]) => l.ph === ph).pop();
+  g.lines.splice(last ? last[1] + 1 : g.lines.length, 0, L(ph, "新工項", null, 1, last ? last[0].eu : "", null, null, null, "", null));
+  showEmpty = true; render();
+  const first = document.querySelector(`#grid-body .rowname`); }
+let flashT = null;
+function flash(){ const s = document.getElementById("save"); s.textContent = "儲存中…"; s.style.color = "#fbbf24";
+  clearTimeout(flashT); flashT = setTimeout(() => { s.textContent = "已自動儲存 剛剛"; s.style.color = ""; }, 600); }
 
 function renderExpenses(){
-  const g = GROUPS.find(x => x.id === sel);
-  document.getElementById("exp-title").textContent = "雜支登記 · " + g.name;
-  document.getElementById("exp-body").innerHTML = g.exp.map(e => `
-    <tr><td>${e.c}</td><td style="text-align:left;color:var(--tx);">${e.it || "—"}</td>
-      <td class="num">${money(e.a)}</td>
+  const g = GROUPS.find((x) => x.id === sel);
+  document.getElementById("exp-title").textContent = "行政雜支 · " + g.name;
+  document.getElementById("qf-who").innerHTML = opt(STAFF, "", "墊付人…");
+  document.getElementById("exp-body").innerHTML = g.exp.map((e) => `
+    <tr><td>${e.c}</td><td style="text-align:left;color:var(--tx);">${e.it || "—"}</td><td class="num">${money(e.a)}</td>
       <td style="text-align:left;">${e.by}</td>
       <td style="text-align:left;">${e.claim ? '<span class="tag due">應付款</span>' : '<span class="tag none">未開請款</span>'}</td>
       <td style="text-align:right;"><button class="btn sm">${e.claim ? "看單" : "開請款"}</button></td></tr>`).join("")
-    + `<tr class="sum"><td>合計</td><td></td><td class="num">${money(sum(g.exp, "a"))}</td>
-       <td colspan="3" style="text-align:left;color:var(--mute);font-weight:400;font-size:11px;">
-       預計 ${money(g.misc)}　${sum(g.exp,"a") > g.misc
-         ? '<span class="r">超 ' + money(sum(g.exp,"a") - g.misc) + "</span>" : ""}</td></tr>`;
+    + `<tr class="sum"><td>合計</td><td></td><td class="num">${money(sum(g.exp, (e) => e.a))}</td>
+       <td colspan="3" style="text-align:left;color:var(--mute);font-weight:400;font-size:11px;">預計 ${money(g.misc)}　${sum(g.exp, (e) => e.a) > g.misc ? '<span class="r">超 ' + money(sum(g.exp, (e) => e.a) - g.misc) + "</span>" : ""}</td></tr>`;
 }
 
 function renderTodo(){
-  const items = [];
-  if (view === "prod"){
-    items.push({hot:true, txt:"王士源：工項 $169,823 還沒開請款單",
-      sub:"導演／腳本／剪輯／調光／視覺包裝／動態設計／製片，兩張子表合計。", go:"開請款單"});
-    items.push({hot:true, txt:"代墊雜支 $13,889 還沒開請款",
-      sub:"王士源 $13,089（8 筆）、蔡念栩 $800（台北雲林來回油資）。", go:"開請款單"});
-    items.push({txt:"5 張請款單都還是「應付款」，合計 $86,745",
-      sub:"陳志廷 $39,745、廖育慶 $41,000、李科模 $6,000。", go:"去付款"});
+  const c = calcAll(), items = [];
+  const g = GROUPS.find((x) => x.id === sel);
+  const unsettled = g.lines.filter((l) => used(l) && !settled(l)).length;
+  const missing = g.lines.filter((l) => used(l) && !AS(l)).length;
+  if (view === "prod") {
+    if (missing) items.push({hot:true, txt:`${g.name}：${missing} 個工項還沒指定人員`, sub:"沒有人就開不了請款單。", go:"去填"});
+    if (unsettled) items.push({txt:`${g.name}：${unsettled} 個工項還沒填結算`, sub:"跟預估一樣的話按「照預估結算」一次帶入。", go:"去填"});
+    items.push({hot:true, txt:"王士源：工項 $169,823 ＋ 代墊 $13,089 還沒開請款單", sub:"七個工項、八筆代墊雜支。", go:"開請款單"});
+    items.push({txt:"5 張請款單都還是「應付款」，合計 $86,745", sub:"陳志廷 $39,745、廖育慶 $41,000、李科模 $6,000。", go:"去付款"});
   } else {
-    items.push({txt:"執行預算還有 $682 沒分配到子表",
-      sub:"「還可以花 $782」裡有 $682 不屬於任何一張子表。", go:"去分配"});
-    GROUPS.forEach(g => { const c = calc(g);
-      if (c.overPlan) items.push({txt:`${g.name}：工項預估超出核給 ${money(c.overPlan)}`,
-        sub:`核給 ${money(g.budget)} 扣掉預計雜支 ${money(g.misc)}，能給工項 ${money(c.forLines)}，工項估了 ${money(c.est)}。`,
-        go:"調整"}); });
-    items.push({info:true, txt:"雜支已超出預計 $4,106",
-      sub:"2min 超 $2,875、3min 超 $1,231；目前靠工項省下的 $4,206 蓋過去。", go:"看明細"});
+    if (c.unalloc > 0) items.push({txt:`執行預算還有 ${money(c.unalloc)} 沒分配到子表`, sub:`「還可以花 ${money(c.remainA)}」裡有 ${money(c.unalloc)} 不屬於任何一張子表。`, go:"去分配"});
+    GROUPS.forEach((gg) => { const cc = calc(gg); if (cc.overPlan) items.push({txt:`${gg.name}：工項預估超出核給 ${money(cc.overPlan)}`,
+      sub:`核給 ${money(gg.budget)} 扣掉預計雜支 ${money(gg.misc)}，能給工項 ${money(cc.forLines)}，工項估了 ${money(cc.est)}。`, go:"調整"}); });
+    if (c.miscA > c.miscE) items.push({info:true, txt:`雜支已超出預計 ${money(c.miscA - c.miscE)}`, sub:`目前靠工項省下的 ${money(Math.max(c.est - c.act, 0))} 蓋過去。`, go:"看明細"});
   }
-  document.getElementById("todo").innerHTML = items.map(i =>
-    `<div class="t ${i.hot ? "hot" : i.info ? "info" : ""}">
-       <div class="txt"><b>${i.txt}</b><small>${i.sub}</small></div>
-       <button class="btn">${i.go}</button></div>`).join("");
+  document.getElementById("todo").innerHTML = items.map((i) => `<div class="t ${i.hot ? "hot" : i.info ? "info" : ""}">
+    <div class="txt"><b>${i.txt}</b><small>${i.sub}</small></div><button class="btn">${i.go}</button></div>`).join("");
 }
 
 function render(){
@@ -513,19 +581,17 @@ function render(){
   document.getElementById("view-prod").classList.toggle("hide", view !== "prod");
   document.getElementById("vw-biz").classList.toggle("on", view === "biz");
   document.getElementById("vw-prod").classList.toggle("on", view === "prod");
-  if (view === "prod") renderPeople();
-  renderCards(); renderLines(); renderExpenses(); renderTodo();
+  if (view === "biz") renderBiz(); else renderProd();
+  renderCards(); renderGrid(); renderExpenses(); renderTodo();
   document.getElementById("p-empty").classList.toggle("on", showEmpty);
   document.getElementById("p-diff").classList.toggle("on", onlyDiff);
-  document.getElementById("p-exp").classList.toggle("on", showExp);
 }
 document.getElementById("p-empty").onclick = () => { showEmpty = !showEmpty; render(); };
 document.getElementById("p-diff").onclick  = () => { onlyDiff = !onlyDiff; render(); };
-document.getElementById("p-exp").onclick   = () => { showExp = !showExp; render(); };
 document.getElementById("vw-biz").onclick  = () => { view = "biz"; render(); };
 document.getElementById("vw-prod").onclick = () => { view = "prod"; render(); };
-document.querySelectorAll(".top .tab").forEach(t =>
-  t.onclick = () => { document.querySelectorAll(".top .tab").forEach(x => x.classList.remove("on")); t.classList.add("on"); });
+document.querySelectorAll(".top .tab:not(a)").forEach((t) => t.onclick = () => {
+  document.querySelectorAll(".top .tab").forEach((x) => x.classList.remove("on")); t.classList.add("on"); });
 render();
 </script>
 </body>
