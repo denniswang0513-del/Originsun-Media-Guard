@@ -34,10 +34,26 @@ from core.ledger import (require_entity)
 from core.auth import _extract_token
 from core.schemas import (InvoicePayload)
 
-from ._shared import (router, _check_auth, money_dep, _require_db,
+from ._shared import (router, _check_auth, _module_guard, money_dep, _require_db,
                       _get_factory, _fmt_day, _now,
                       _parse_shoot_date, _assert_month_open, _assert_rows_open,
                       map_csv_row)
+
+# 發票的日常寫入 —— 管理員 OR 持有發票模組（owner 2026-09-05 拍板 B 案）。
+#
+# 為什麼改：`core.ledger.allowed_entities` 早就認定「crm_invoices ＋ money_view
+# ＝母帳 full scope（可寫）」，但這幾支的 `_check_auth` 只認 Lv3 —— 兩條規則
+# 互相矛盾，結果是**模組發了、按鈕看得到、按下去 403**（黃聖鈞 Ryansnap
+# Lv1＋crm_invoices＋money_view，2026-09-05 回報「無法開發票」）。
+# 那正是這個 repo 反覆踩到的「權限是空頭支票」。
+#
+# 🔴 刻意**不**包含的兩支，維持 Lv3：
+#   · 垃圾桶永久清除（purge）—— 刪除進垃圾桶可還原，永久清除不可逆
+#   · CSV 批次匯入 —— 一次寫幾百列、還牽動月結守衛
+# 🔴 私帳完全不受影響：finance_mine 是指名制，這兩個帳號沒有；
+#   每一支自己的 `require_entity(..., level="full")` / `_entity_for_write`
+#   仍然逐列驗帳本，這裡放寬的只有「要不要是管理員」那一層。
+_check_invoice_auth = _module_guard('crm_invoices')
 
 # 這個檔案唯一用得到發票檔那邊的東西：改發票時要跟著改檔名
 from .invoice_files import _resync_invoice_file
@@ -72,7 +88,8 @@ def _parse_money(val: str) -> int:
 
 # ── 兩本帳（entity）helpers — docs/LEDGER_ENTITY_PLAN.md §2.4/§3 ──────
 
-def _entity_for_write(request: Request, payload_entity, row=None) -> str:
+def _entity_for_write(request: Request, payload_entity, row=None,
+                      parent_guard=None) -> str:
     """建立/更新端點的 entity 決策 —— 回傳該列最終應落的 entity。
 
     - payload.entity 為 None → 建立落 'parent'（母公司，預設）、更新維持既有值
@@ -90,6 +107,12 @@ def _entity_for_write(request: Request, payload_entity, row=None) -> str:
     寫入守衛也在這裡定案（_mine_or_admin_write：母公司=Lv3、私帳=mine full）——
     這支是所有建立/更新端點的咽喉，守衛放咽喉，下一個端點就不會忘了呼叫。
     刪除/批次端點沒有 payload 不走這裡，各自明呼 _mine_or_admin_write。
+
+    🔴 `parent_guard`（owner 2026-09-05 B 案）：母公司那一半改用哪支守衛。
+    預設 None＝維持 Lv3。**只有發票的建立／更新**傳 `_check_invoice_auth`
+    （管理員 OR 持有 crm_invoices 模組）—— 端點自己那行守衛擋不住這裡，
+    2026-09-05 實測：把 create_invoice 的 `_check_auth` 換掉之後仍然 403，
+    因為真正擋人的是這支咽喉。收支／請款／分類樹一個字都沒動。
     """
     if payload_entity is None:
         ent = (row.entity or "parent") if row is not None else "parent"
@@ -97,7 +120,7 @@ def _entity_for_write(request: Request, payload_entity, row=None) -> str:
         ent = require_entity(request, payload_entity, level="full")
         if row is not None and (row.entity or "parent") != ent:
             raise HTTPException(status_code=422, detail="這筆帳不可跨帳本搬移")
-    _mine_or_admin_write(request, ent)
+    _mine_or_admin_write(request, ent, parent_guard=parent_guard)
     return ent
 
 
@@ -711,9 +734,9 @@ async def _assert_project_link(session, request: Request, project_id, category) 
 
 @router.post("/invoices")
 async def create_invoice(req: InvoicePayload, request: Request):
-    _check_auth(request)
+    _check_invoice_auth(request)
     _require_db()
-    ent = _entity_for_write(request, req.entity)
+    ent = _entity_for_write(request, req.entity, parent_guard=_check_invoice_auth)
     factory = await _get_factory()
     now = _now()
     data = req.model_dump(exclude={"invoice_date", "entity"})
@@ -865,7 +888,7 @@ def _trash_to_dict(t) -> dict:
 
 @router.get("/invoices/trash", dependencies=[Depends(money_dep)])
 async def list_invoice_trash(request: Request):
-    _check_auth(request)
+    _check_invoice_auth(request)
     _require_db()
     from core.ledger import hide_mine_projects
     factory = await _get_factory()
@@ -882,7 +905,7 @@ async def list_invoice_trash(request: Request):
 @router.post("/invoices/trash/{trash_id}/restore")
 async def restore_invoice_from_trash(trash_id: str, request: Request):
     """用原 id 建回發票；當初被清掉的收支分配，收支列還在的就補回去、已經掛了別張的不搶。"""
-    _check_auth(request)
+    _check_invoice_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -998,7 +1021,7 @@ async def get_invoice(invoice_id: str, request: Request):
 
 @router.put("/invoices/{invoice_id}")
 async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request):
-    _check_auth(request)
+    _check_invoice_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -1006,7 +1029,8 @@ async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request)
         if not inv:
             raise HTTPException(status_code=404, detail="找不到此發票")
         # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422
-        ent = _entity_for_write(request, req.entity, inv)
+        ent = _entity_for_write(request, req.entity, inv,
+                                parent_guard=_check_invoice_auth)
         # 舊/新 invoice_date 的月份都要開著（搬進或搬出鎖定月都算改帳）
         new_date = _parse_shoot_date(req.invoice_date)
         await _assert_month_open(session, inv.invoice_date, new_date, entity=ent)
@@ -1040,7 +1064,7 @@ async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request)
 
 @router.delete("/invoices/{invoice_id}")
 async def delete_invoice(invoice_id: str, request: Request):
-    _check_auth(request)
+    _check_invoice_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -1237,20 +1261,22 @@ async def _get_mine_project(session, project_id):
     return p
 
 
-def _mine_or_admin_write(request, target_entity):
+def _mine_or_admin_write(request, target_entity, parent_guard=None):
     """CRM 帳務的寫入守衛：Lv3 照舊全放行；**私帳的列**另開給 mine full scope。
 
     🔴 為什麼要開：owner 的帳號是 lv1＋finance_mine（指名制，刻意不是管理員），
     但這批端點原本 `_check_auth`＝只限 Lv3 —— 帳本主人在生產上**連一筆帳都記
     不進去**（2026-08-25 用真實帳號形狀實測 403；先前測試全用 Lv3 token 所以
     沒炸）。記自己的帳不需要是管理員。
-    🔴 母公司路徑維持 Lv3-only：parent full scope（crm_invoices+money_view）
-    是財務同事的「看」，寫仍是管理員 —— 這裡只開私帳，不動母公司的權限面。
+    🔴 母公司路徑**這裡**仍是 Lv3-only —— 但注意這句話 2026-09-05 起只適用於
+    **批次**端點：單張發票的新增／修改／刪除／還原已經放寬到 `crm_invoices`
+    模組（見檔頭 `_check_invoice_auth`，owner 拍板 B 案）。批次一次動幾十列、
+    而且是「標記已收款／已付款」這種對帳動作，刻意留在管理員。
     """
     if (target_entity or "parent") == "mine":
         require_entity(request, "mine", level="full")
     else:
-        _check_auth(request)
+        (parent_guard or _check_auth)(request)
 
 
 def _mine_or_admin_write_rows(request, rows):

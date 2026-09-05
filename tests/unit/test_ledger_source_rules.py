@@ -189,10 +189,13 @@ def test_owner_can_write_own_book_but_parent_stays_admin_only():
     src = finance_src()   # 四個帳務檔串起來（2026-08-30 拆檔）
     helper = src.split("def _mine_or_admin_write(")[1].split("\ndef ")[0]
     assert 'require_entity(request, "mine", level="full")' in helper
-    assert "_check_auth(request)" in helper          # 母公司路徑原樣
+    # 2026-09-05 起母公司那半邊可由呼叫端指定守衛（發票走模組），預設仍是 Lv3
+    assert "(parent_guard or _check_auth)(request)" in helper   # 母公司路徑原樣
     # 建立/更新走 _entity_for_write 咽喉（守衛收在裡面 —— 逐端點明呼會忘）
     throat = src.split("def _entity_for_write(")[1].split("\ndef ")[0]
-    assert "_mine_or_admin_write(request, ent)" in throat
+    # 咽喉自己就會呼守衛（2026-09-05 起母公司那半邊可由呼叫端指定，
+    # 發票傳模組守衛、其餘不傳＝預設 Lv3）
+    assert "_mine_or_admin_write(request, ent, parent_guard=parent_guard)" in throat
     for fn_name in ("create_cash_entry", "update_cash_entry",
                     "create_payment", "update_payment"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
@@ -214,10 +217,13 @@ def test_owner_can_write_own_book_but_parent_stays_admin_only():
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
         assert "_mine_or_admin_write_rows(request, rows)" in fn, fn_name
         assert "_check_auth(" not in fn, f"{fn_name}：Lv3-only 會把帳本主人擋在門外"
-    # 沒動的端點維持 Lv3（發票單筆建立／CSV 匯入／分配）
-    for fn_name in ("create_invoice",):
-        fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
-        assert "_check_auth(request)" in fn, fn_name
+    # 發票單筆寫入 2026-09-05 改走模組守衛（owner 拍板 B 案：模組發了卻按下去
+    # 403＝空頭支票）。細節與「哪幾支不放寬」在 test_invoice_write_permission.py。
+    fn = src.split("async def create_invoice(")[1].split("\n@router")[0]
+    assert "_check_invoice_auth(request)" in fn
+    # 不可逆與批次的仍是 Lv3
+    fn = src.split("async def purge_invoice_trash(")[1].split("\n@router")[0]
+    assert "_check_auth(request)" in fn
 
 
 def test_batch_receive_cannot_touch_the_other_ledger():
