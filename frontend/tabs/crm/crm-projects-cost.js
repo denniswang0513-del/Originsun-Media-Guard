@@ -124,10 +124,10 @@ async function _loadFinancialSummary(projectId) {
               ${f.transfer_fee ? `<span style="color:#6b7280;">帳款匯費 $${fmtNum(f.transfer_fee)}</span>` : ''}
             </div>
             <div class="cost-dash-grid">
-              <span></span><span class="cdg-h">成本</span><span class="cdg-h">雜支</span><span class="cdg-h">剩餘預算</span><span class="cdg-h">毛利</span>
-              <span class="cdg-r">預估</span><span id="cd-cost-est"></span><span id="cd-misc-est"></span><span id="cd-rem-est"></span><span id="cd-pf-est"></span>
-              <span class="cdg-r">實際</span><span id="cd-cost-act"></span><span id="cd-misc-act"></span><span id="cd-rem-act"></span><span id="cd-pf-act"></span>
-              <span class="cdg-r">差額</span><span id="cd-cost-diff"></span><span id="cd-misc-diff"></span><span id="cd-rem-diff"></span><span id="cd-pf-diff"></span>
+              <span></span><span class="cdg-h">人員</span><span class="cdg-h">雜支</span><span class="cdg-h">成本</span><span class="cdg-h">剩餘預算</span><span class="cdg-h">毛利</span>
+              <span class="cdg-r">預估</span><span id="cd-staff-est"></span><span id="cd-misc-est"></span><span id="cd-cost-est"></span><span id="cd-rem-est"></span><span id="cd-pf-est"></span>
+              <span class="cdg-r">實際</span><span id="cd-staff-act"></span><span id="cd-misc-act"></span><span id="cd-cost-act"></span><span id="cd-rem-act"></span><span id="cd-pf-act"></span>
+              <span class="cdg-r">差額</span><span id="cd-staff-diff"></span><span id="cd-misc-diff"></span><span id="cd-cost-diff"></span><span id="cd-rem-diff"></span><span id="cd-pf-diff"></span>
             </div>
             <div class="cost-progress-wrap">
               <div class="cost-progress-bar"></div>
@@ -178,30 +178,33 @@ function _fillDashGrid(parts) {
         const el = document.getElementById(id);
         if (el) { el.textContent = text; el.style.color = color || ''; }
     };
-    set('cd-cost-est', '$' + fmtNum(d.costEstimated));
+    // 欄位定義（owner 2026-09-05）：人員＝工項、雜支、成本＝人員＋雜支、剩餘預算＝執行預算−成本、毛利＝未稅−執行預算
+    set('cd-staff-est', '$' + fmtNum(d.costEstimated));
     // 自動推算的雜支淡色提示；比例的說明與編輯統一在錨點列「預估雜支」的彈窗
     set('cd-misc-est', '$' + fmtNum(d.miscEstimated), d.miscAuto ? '#6b7280' : '');
+    set('cd-cost-est', '$' + fmtNum(d.totalEstimated));
     set('cd-rem-est', '$' + fmtNum(d.remaining), remainColor(d.remaining));
-    set('cd-pf-est', '$' + fmtNum(d.estProfit) + '（' + d.estProfitPct + '%）');
-    set('cd-cost-act', '$' + fmtNum(d.costActual));
+    set('cd-pf-est', '$' + fmtNum(d.budgetProfit) + '（' + d.budgetProfitPct + '%）');
+    set('cd-staff-act', '$' + fmtNum(d.costActual));
     set('cd-misc-act', '$' + fmtNum(d.miscActual));
+    set('cd-cost-act', '$' + fmtNum(d.totalActual));
     set('cd-rem-act', '$' + fmtNum(d.remainingActual), remainColor(d.remainingActual));
-    // 毛利不掛箭頭 —— 顏色（達標綠/未達黃/虧損紅）就是語義（owner 2026-08-18）
-    set('cd-pf-act', '$' + fmtNum(d.actualProfit) + '（' + d.profitPct + '%）',
-        profitColor(d.profitPct));
+    set('cd-pf-act', '$' + fmtNum(d.budgetProfit) + '（' + d.budgetProfitPct + '%）', profitColor(d.budgetProfitPct));
     // 錨點列的實際毛利跟對照表同格同源，inline 編輯後一起動
     set('cd-anchor-pf', '$' + fmtNum(d.actualProfit) + '（' + d.profitPct + '%）',
         profitColor(d.profitPct));
     // 差額列：花錢欄 剩/超（剩餘雜支就住在雜支欄這格）；推導欄 ±（比計畫好＝綠）
     const setDL = (id, dl) => set(id, dl.text, dl.color);
-    setDL('cd-cost-diff', diffLabel(d.costActual - d.costEstimated,
+    setDL('cd-staff-diff', diffLabel(d.costActual - d.costEstimated,
         !d.costEstimated && !d.costActual, true, ['剩 ', '超 ']));
+    setDL('cd-cost-diff', diffLabel(d.totalActual - d.totalEstimated,
+        !d.totalEstimated && !d.totalActual, true, ['剩 ', '超 ']));
     setDL('cd-misc-diff', diffLabel(d.miscActual - d.miscEstimated,
         !d.miscEstimated && !d.miscActual, true, ['剩 ', '超 ']));
     const drift = (id, val) => set(id, (val >= 0 ? '+$' : '−$') + fmtNum(Math.abs(val)),
                                    remainColor(val));
     drift('cd-rem-diff', d.remainingActual - d.remaining);
-    drift('cd-pf-diff', d.actualProfit - d.estProfit);
+    drift('cd-pf-diff', 0);   // 毛利＝未稅−預算，預估與實際同一個數
     // 進度條：實際填充 + 預估刻度（實際追過刻度＝超出原計畫）
     const bar = document.querySelector('.cost-progress-bar');
     if (bar) { bar.style.width = Math.min(d.usagePct, 100) + '%'; bar.style.background = barColor(d.usagePct); }
@@ -446,7 +449,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
       <div style="display:flex;gap:6px;align-items:center;">
         <span class="exp-mini">
           雜支預算 <span class="cost-editable" onclick="window._miscBudgetEdit(this)"
-                title="點一下直接改本子表的雜支預算">${groupMisc == null ? '未設' : '$' + fmtNum(groupMisc)}</span>
+                title="點一下直接改本子表的雜支預算">${groupMisc == null ? (grp && grp.misc_budget_default ? '預設 $' + fmtNum(grp.misc_budget_default) + '（預算 5%）' : '未設') : '$' + fmtNum(groupMisc)}</span>
           ｜ 已用 $${fmtNum(expActualTotal)}${groupMisc == null ? '' : `
           ｜ 剩餘 <span style="color:${remainColor(miscLeft)};">$${fmtNum(miscLeft)}</span>`}
         </span>

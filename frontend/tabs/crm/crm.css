@@ -1410,7 +1410,7 @@
 }
 .cost-dash-anchors .cda-edit:hover { color: #d1d5db; text-decoration: underline; }
 .cost-dash-grid {
-    display: grid; grid-template-columns: 44px repeat(4, 1fr);
+    display: grid; grid-template-columns: 44px repeat(5, 1fr);   /* 人員｜雜支｜成本｜剩餘預算｜毛利（owner 2026-09-05）*/
     gap: 4px 14px; align-items: baseline;
     background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
     padding: 10px 14px; margin-bottom: 10px;
@@ -1736,7 +1736,7 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .cg-chip-date { font-size: 11px; color: #9ca3af; margin-bottom: 3px; }
-.cg-chip-budget, .cg-chip-actual { font-size: 11px; color: #d1d5db; }
+.cg-chip-budget, .cg-chip-actual, .cg-chip-misc { font-size: 11px; color: #d1d5db; }
 .cg-chip .cg-muted { color: #6b7280; }
 .cg-chip-bar {
     height: 3px; background: #374151; border-radius: 2px;

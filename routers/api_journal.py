@@ -325,12 +325,10 @@ async def submit_my_journal(request: Request, start: str = ""):
 
 
 async def _people_candidates(session) -> set:
-    """「大家的回顧」該列的人：帳號有 journal 模組的、加上寫過週記的（admin 隱含模組不算——
-    service 帳號不該永遠掛「還沒寫」）。"""
-    users = (await session.execute(select(User.username, User.modules))).all()
-    cands = {u for u, mods in users if isinstance(mods, list) and "journal" in mods}
-    cands |= {u for (u,) in (await session.execute(select(WorkJournal.username).distinct())).all()}
-    return {u for u in cands if u}
+    """「大家的回顧」該列的人＝**寫過週記的人**（任何一週有殼）。
+    owner 2026-09-05「這三位不用寫」：光有 journal 模組不算（OriginsunFinance／staf 這類 service 帳號、老闆本人
+    會永遠掛「還沒寫」）。第一次寫了之後才進名單。"""
+    return {u for (u,) in (await session.execute(select(WorkJournal.username).distinct())).all() if u}
 
 
 @router.get("/week")

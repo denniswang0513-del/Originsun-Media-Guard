@@ -630,14 +630,18 @@ function renderWorkspace() {
 
     const grid = $("ws-grid");
     grid.innerHTML = "";
-    if (ws.allowed.includes("me_todos"))    grid.appendChild(cardTodos(ws.todos || []));
-    if (ws.allowed.includes("me_leave"))    grid.appendChild(cardLeave(ws.leave));
-    if (ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
-    if (ws.allowed.includes("me_petty"))    grid.appendChild(cardPettyCash());
-    if (ws.allowed.includes("me_benefits")) grid.appendChild(cardBenefits(ws.bound));
-    if (ws.allowed.includes("me_profile"))  grid.appendChild(cardProfile(ws.profile));
-    if (ws.allowed.includes("media_log"))   grid.appendChild(cardMediaLog());
-    if (ws.allowed.includes("proposal_plan")) grid.appendChild(cardProposalPlan());
+    // owner 2026-09-05：「我的權益與資料」這區先只留零用金，其餘卡（待辦／請假／請款與薪酬／福委會／個人資料／影像紀錄／提案企劃）
+    // 還在規劃中，先不畫；程式留著，之後照規劃逐張放回。
+    const ME_ZONE_ON = new Set(["me_petty"]);   // 規劃好一張放回一張
+    const on = (k) => ME_ZONE_ON.has(k);
+    if (on("me_todos") && ws.allowed.includes("me_todos"))    grid.appendChild(cardTodos(ws.todos || []));
+    if (on("me_leave") && ws.allowed.includes("me_leave"))    grid.appendChild(cardLeave(ws.leave));
+    if (on("me_finance") && ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
+    if (on("me_petty") && ws.allowed.includes("me_petty"))    grid.appendChild(cardPettyCash());
+    if (on("me_benefits") && ws.allowed.includes("me_benefits")) grid.appendChild(cardBenefits(ws.bound));
+    if (on("me_profile") && ws.allowed.includes("me_profile"))  grid.appendChild(cardProfile(ws.profile));
+    if (on("media_log") && ws.allowed.includes("media_log"))   grid.appendChild(cardMediaLog());
+    if (on("proposal_plan") && ws.allowed.includes("proposal_plan")) grid.appendChild(cardProposalPlan());
     $("ws-grid-h").style.display = grid.childElementCount ? "" : "none";
     // 上週回顧在 grid 之外自成一區（見 #ws-journal 註解）：只建一次，之後只切顯示
     const jr = $("ws-journal");
@@ -667,12 +671,9 @@ function renderActions(ws) {
     const has = k => ws.allowed.includes(k);
     const items = [
         has("me_petty")    && { label: "零用金", href: "/petty-cash.html" },
-        has("me_finance")  && { label: "請款", card: "finance" },
         g.has("crm_invoices", "finance_partner") && { label: "請開發票", href: "/m/crm.html#invoice" },
         g.has("crm_projects") && { label: "登記拍攝", href: "/m/crm.html#calendar" },
         g.has("equipment", "preprod_plan") && { label: "領用器材", href: "/index.html#tab_equipment" },
-        has("me_leave")    && { label: "請假", card: "leave" },
-        has("me_benefits") && { label: "福委會", card: "benefits" },
     ].filter(Boolean);
     $("ws-actions").innerHTML = items.map(it => it.href
         ? `<a class="act" href="${it.href}">${it.label}</a>`
@@ -1363,7 +1364,7 @@ let _todayInfo = null;      // /me/today（場次、待辦、上週回顧狀態�
 let _z1Week = _mondayOf(_localToday());
 let _findRows = null;       // 專案查詢的表資料
 let _findSorter = null;
-const _findState = { q: "", status: "", type: "", pct: "", recent: "" };   // 一列篩選：狀態、案型、消耗率區間、最後填報多久內
+const _findState = { q: "", status: "", type: "", pct: "", from: "", to: "" };   // 一列篩選：狀態、案型、消耗率區間、最後填報日期區間
 const _WD_Z1 = ["日", "一", "二", "三", "四", "五", "六"];
 
 function _shiftDays(ymd, n) {
@@ -1575,12 +1576,11 @@ async function loadFind() {
     host.innerHTML = `<div class="empty">載入中…</div>`;
     const TS = await TS_READY;
     try { await _loadFindRows(); } catch (e) { host.innerHTML = `<div class="notice">${esc(e.message)}</div>`; return; }
-    if (!_findSorter) _findSorter = TS.createBurnSorter({ storageKey: "my_find_sort", panelId: "my-burn-table", onChange: () => _redrawFindBody() });
+    if (!_findSorter) _findSorter = TS.createBurnSorter({ storageKey: "my_find_sort_v2", panelId: "my-burn-table", onChange: () => _redrawFindBody(), defaultSort: { key: "last", dir: "desc" } });   // 預設最新填報在最上面（owner 2026-09-05）
     _renderFindTable();
 }
 // 消耗率區間與最後填報區間都是固定選項（下拉），不用打數字
 const PCT_BANDS = [["", "消耗率：全部"], ["none", "未設預算"], ["lt60", "60% 以下"], ["60-90", "60–90%"], ["90-100", "90–100%"], ["over", "超過 100%"]];
-const RECENT_BANDS = [["", "最後填報：不限"], ["7", "7 天內"], ["30", "30 天內"], ["90", "90 天內"], ["stale", "超過 90 天沒填"]];
 function _pctInBand(pct, band) {
     if (!band) return true;
     if (band === "none") return pct == null;
@@ -1588,20 +1588,19 @@ function _pctInBand(pct, band) {
     const v = Number(pct);
     return band === "lt60" ? v < 60 : band === "60-90" ? (v >= 60 && v < 90) : band === "90-100" ? (v >= 90 && v <= 100) : v > 100;
 }
-function _recentInBand(lastEntry, band) {
-    if (!band) return true;
-    if (!lastEntry) return band === "stale";
-    const days = Math.floor((Date.now() - new Date(lastEntry + "T00:00:00").getTime()) / 86400000);
-    return band === "stale" ? days > 90 : days <= Number(band);
+function _lastInRange(lastEntry, from, to) {
+    if (!from && !to) return true;
+    if (!lastEntry) return false;
+    return (!from || lastEntry >= from) && (!to || lastEntry <= to);
 }
 function _findFiltered() {
     const q = _findState.q.trim().toLowerCase(), st = _findState;
     return (_findRows || []).filter(p => (!st.status || (p.status || "") === st.status)
         && (!st.type || (p.project_type || "") === st.type)
-        && _pctInBand(p.pct, st.pct) && _recentInBand(p.last_entry, st.recent)
+        && _pctInBand(p.pct, st.pct) && _lastInRange(p.last_entry, st.from, st.to)
         && (!q || [p.project_name, p.status, p.project_type].some(x => String(x || "").toLowerCase().includes(q))));
 }
-function _findActive() { const st = _findState; return !!(st.q || st.status || st.type || st.pct || st.recent); }
+function _findActive() { const st = _findState; return !!(st.q || st.status || st.type || st.pct || st.from || st.to); }
 async function _redrawFindBody() {
     const TS = await TS_READY;
     const tb = document.querySelector("#my-burn-table tbody");
@@ -1620,7 +1619,7 @@ async function _renderFindTable() {
             <select class="sel" id="z1-f-status"><option value="">狀態：全部</option>${statuses.map(x => `<option value="${esc(x)}" ${_findState.status === x ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>
             <select class="sel" id="z1-f-type"><option value="">案型：全部</option>${types.map(x => `<option value="${esc(x)}" ${_findState.type === x ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>
             <select class="sel" id="z1-f-pct">${PCT_BANDS.map(([v, l]) => `<option value="${v}" ${_findState.pct === v ? "selected" : ""}>${l}</option>`).join("")}</select>
-            <select class="sel" id="z1-f-recent">${RECENT_BANDS.map(([v, l]) => `<option value="${v}" ${_findState.recent === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+            <span class="meta">最後填報</span><input type="date" class="sel" id="z1-f-from" value="${esc(_findState.from)}"><span class="meta">～</span><input type="date" class="sel" id="z1-f-to" value="${esc(_findState.to)}">
             <button type="button" class="btn" id="z1-f-clear" ${_findActive() ? "" : "hidden"}>清除</button>
             <span class="meta" id="z1-find-count"></span></div>
         <div class="tsp" id="z1-find-body" style="overflow-x:auto;">${TS.burnTableHtml(TS.burnTbodyHtml(_findSorter.sorted(_findFiltered()), { editable: false, emptyText: "沒有符合的" }), "my-burn-table")}</div>`;
@@ -1629,11 +1628,11 @@ async function _renderFindTable() {
     const clear = $("z1-f-clear");
     const sync = () => { clear.hidden = !_findActive(); _redrawFindBody(); };
     $("z1-find-q").addEventListener("input", (e) => { _findState.q = e.target.value; sync(); });
-    [["z1-f-status", "status"], ["z1-f-type", "type"], ["z1-f-pct", "pct"], ["z1-f-recent", "recent"]].forEach(([id, key]) =>
+    [["z1-f-status", "status"], ["z1-f-type", "type"], ["z1-f-pct", "pct"], ["z1-f-from", "from"], ["z1-f-to", "to"]].forEach(([id, key]) =>
         $(id).addEventListener("change", (e) => { _findState[key] = e.target.value; sync(); }));
     clear.addEventListener("click", () => {
-        Object.assign(_findState, { q: "", status: "", type: "", pct: "", recent: "" });
-        $("z1-find-q").value = ""; ["z1-f-status", "z1-f-type", "z1-f-pct", "z1-f-recent"].forEach(id => { $(id).value = ""; });
+        Object.assign(_findState, { q: "", status: "", type: "", pct: "", from: "", to: "" });
+        $("z1-find-q").value = ""; ["z1-f-status", "z1-f-type", "z1-f-pct", "z1-f-from", "z1-f-to"].forEach(id => { $(id).value = ""; });
         sync();
     });
 }

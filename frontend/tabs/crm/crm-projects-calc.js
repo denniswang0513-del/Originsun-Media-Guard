@@ -35,8 +35,13 @@ export function calcDashboardParts(p) {
     const totalActual = p.costActual + p.miscActual;
     const estProfit = p.exTax - totalEstimated;
     const actualProfit = p.exTax - totalActual;
+    // owner 2026-09-05 的定義：成本＝人員＋雜支（totalEstimated／totalActual）、剩餘預算＝執行預算−成本、
+    // 毛利（對照表那欄）＝未稅−執行預算＝目標利潤（budgetProfit，預估與實際同一個數；多省的錢住在「剩餘預算」）。
+    // 錨點列的「實際毛利」仍是未稅−實際成本（actualProfit），跟財務摘要／收付款同源。
+    const budgetProfit = p.exTax - execBudget;
     return {
-        ...p, execBudget, totalEstimated, totalActual, estProfit, actualProfit,
+        ...p, execBudget, totalEstimated, totalActual, estProfit, actualProfit, budgetProfit,
+        budgetProfitPct: calcProfitPct(p.exTax, budgetProfit),
         remaining: execBudget - totalEstimated,       // 預估剩餘（排完還能排多少）
         remainingActual: execBudget - totalActual,    // 實際剩餘（真的還能花多少）
         miscRemaining: p.miscEstimated - p.miscActual,  // 剩餘雜支（雜支自己的信封）

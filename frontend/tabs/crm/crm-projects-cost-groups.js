@@ -54,7 +54,7 @@ export function renderGroupSwitcher() {
 
 function _renderChip(g, active, canDelete) {
     const s = g.summary || {};
-    const total = (g.budget_amount || 0) + (g.misc_budget_amount || 0);
+    const total = g.budget_amount || 0;          // 預算含委外與雜支（owner 2026-09-05）
     const used = s.total_actual || 0;
     const remain = total - used;
     const pct = _usagePct(used, total);
@@ -94,6 +94,7 @@ function _renderChip(g, active, canDelete) {
             <div class="cg-chip-name">${_esc(g.name)}</div>
             ${date}
             <div class="cg-chip-budget">預算 ${hasBudget ? '$' + fmtNum(total) : '<span class="cg-muted">未設</span>'}</div>
+            <div class="cg-chip-misc">預計雜支 ${hasBudget ? '$' + fmtNum(g.misc_budget_effective ?? 0) + (g.misc_budget_amount == null ? '<span class="cg-muted">（5%）</span>' : '') : '<span class="cg-muted">—</span>'}</div>
             <div class="cg-chip-actual">結算 ${used > 0 ? '$' + fmtNum(used) : '<span class="cg-muted">—</span>'}</div>
             ${remainRow}
             ${barRow}
@@ -139,7 +140,7 @@ async function _openEditModal(gid = null) {
     if (!projectId) return;
     const allocatedOther = state.costGroups
         .filter(x => !isEdit || x.id !== gid)
-        .reduce((sum, x) => sum + (x.budget_amount || 0) + (x.misc_budget_amount || 0), 0);
+        .reduce((sum, x) => sum + (x.budget_amount || 0), 0);
 
     // 執行預算在 modal 開啟期間不會變，只抓一次
     let execBudget = 0;
@@ -184,12 +185,12 @@ async function _openEditModal(gid = null) {
             <div class="crm-form-section">預算設定（可留空，之後再設）</div>
             <div class="crm-form-grid">
               <div class="crm-field">
-                <label>成本預算（未稅）</label>
+                <label>預算（未稅，含委外與雜支）</label>
                 <input id="cg-f-budget_amount" type="number" class="crm-input" placeholder="0" value="${g?.budget_amount ?? ''}" min="0">
               </div>
               <div class="crm-field">
-                <label>雜支預算</label>
-                <input id="cg-f-misc_budget_amount" type="number" class="crm-input" placeholder="0" value="${g?.misc_budget_amount ?? ''}" min="0">
+                <label>雜支預算（預設預算 5%，可改）</label>
+                <input id="cg-f-misc_budget_amount" type="number" class="crm-input" placeholder="預算 × 5%" value="${g?.misc_budget_amount ?? (g?.misc_budget_default ?? '')}" min="0" data-auto="${g?.misc_budget_amount == null ? '1' : ''}">
               </div>
               <div class="crm-field">
                 <label>自訂目標毛利率（%）</label>
@@ -217,9 +218,10 @@ async function _openEditModal(gid = null) {
 
     const renderHint = () => _renderAllocHint(execBudget, allocatedOther);
     renderHint();
-    ['cg-f-budget_amount', 'cg-f-misc_budget_amount'].forEach(id => {
-        document.getElementById(id).addEventListener('input', renderHint);
-    });
+    // 雜支預算預設＝預算 × 5%：沒手動改過（data-auto）就跟著預算跑；使用者一改就變手動
+    const bEl = document.getElementById('cg-f-budget_amount'), mEl = document.getElementById('cg-f-misc_budget_amount');
+    bEl.addEventListener('input', () => { if (mEl.dataset.auto) mEl.value = Math.round((parseInt(bEl.value) || 0) * 0.05) || ''; renderHint(); });
+    mEl.addEventListener('input', () => { mEl.dataset.auto = ''; renderHint(); });
 
     document.getElementById('cg-f-receipt_path-pick').addEventListener('click', async () => {
         const inputEl = document.getElementById('cg-f-receipt_path');
@@ -236,14 +238,15 @@ function _renderAllocHint(execBudget, allocatedOther) {
     if (!el) return;
     const b = parseInt(document.getElementById('cg-f-budget_amount').value) || 0;
     const mb = parseInt(document.getElementById('cg-f-misc_budget_amount').value) || 0;
-    const totalAllocated = allocatedOther + b + mb;
+    const totalAllocated = allocatedOther + b;     // 預算含雜支，不再外加
     const remain = execBudget - totalAllocated;
     const over = execBudget > 0 && totalAllocated > execBudget;
     el.innerHTML = `
         <div class="${over ? 'cg-alloc-danger' : 'cg-alloc-ok'}">
             ${over ? '⚠' : '💡'} 合約執行預算：$${fmtNum(execBudget)}<br>
             已分配（含本筆）：$${fmtNum(totalAllocated)}<br>
-            ${remain >= 0 ? `尚可分配：$${fmtNum(remain)}` : `已超出：$${fmtNum(-remain)}`}
+            ${remain >= 0 ? `尚可分配：$${fmtNum(remain)}` : `已超出：$${fmtNum(-remain)}`}<br>
+            本筆：委外可用 $${fmtNum(Math.max(0, b - mb))}，雜支 $${fmtNum(mb)}
         </div>
     `;
 }

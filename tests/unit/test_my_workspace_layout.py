@@ -73,9 +73,10 @@ def test_action_bar_links_to_existing_pages_only():
 def test_find_view_filters_are_one_row():
     """owner 2026-09-05：搜尋篩選整併成一列——搜尋框、狀態、案型、消耗率區間、最後填報多久內、清除；沒有進階面板。"""
     src = repo_src("frontend/my.html")
-    for i in ("z1-find-q", "z1-f-status", "z1-f-type", "z1-f-pct", "z1-f-recent", "z1-f-clear"):
+    for i in ("z1-find-q", "z1-f-status", "z1-f-type", "z1-f-pct", "z1-f-from", "z1-f-to", "z1-f-clear"):
         assert f'id="{i}"' in src, i
     assert "z1-find-adv" not in src and "data-type=" not in src
-    assert "PCT_BANDS" in src and "RECENT_BANDS" in src and "_pctInBand(p.pct, st.pct)" in src and "_recentInBand(p.last_entry, st.recent)" in src
+    assert "PCT_BANDS" in src and "_pctInBand(p.pct, st.pct)" in src and "_lastInRange(p.last_entry, st.from, st.to)" in src
+    assert 'defaultSort: { key: "last", dir: "desc" }' in src, "預設最新填報在最上面"
     shared = repo_src("frontend/js/shared/ts-projects.js")
     assert "export function pctClass(" in shared and "ts-pct ${pctClass(p.pct)}" in shared

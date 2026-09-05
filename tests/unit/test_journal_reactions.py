@@ -63,3 +63,9 @@ def test_heart_rerender_replaces_the_whole_wrap():
     """連按愛心一直長頭像：只換 <button> 會把新的一組（頭像＋愛心）塞進舊的 wrap 裡；要整組換。"""
     page = js_code_only(repo_src("frontend/journal.html"))
     assert "btn.closest('.heart-wrap')" in page and "(wrap || btn).outerHTML = heartHtml(" in page
+
+
+def test_not_yet_written_list_only_includes_people_who_have_ever_written():
+    """owner 2026-09-05「這三位不用寫」：還沒寫的名單只列寫過週記的人；光有 journal 模組（service 帳號、老闆）不列。"""
+    body = func_body(code_only(repo_src("routers/api_journal.py")), "async def _people_candidates(")
+    assert "select(WorkJournal.username).distinct()" in body and "User.modules" not in body

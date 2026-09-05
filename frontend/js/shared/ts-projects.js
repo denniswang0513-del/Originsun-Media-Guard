@@ -115,10 +115,10 @@ export function pctStyle(pct) {
 }
 
 /** 點欄頭排序器（同 crm-utils.createSortable；getters 只寫這一份）。 */
-export function createBurnSorter({ storageKey, panelId, onChange }) {
+export function createBurnSorter({ storageKey, panelId, onChange, defaultSort }) {
     return createSortable({
         storageKey, panelId, onChange,
-        defaultSort: { key: '', dir: 'asc' },
+        defaultSort: defaultSort || { key: '', dir: 'asc' },
         getters: {
             project: p => p.project_name || p.project_id || '',
             status: p => p.status || '',

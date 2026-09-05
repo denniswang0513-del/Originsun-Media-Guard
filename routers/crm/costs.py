@@ -831,10 +831,8 @@ async def project_financial_summary(project_id: str):
         from sqlalchemy import case as _case
         g_row = (await session.execute(
             select(
-                sa_func.coalesce(sa_func.sum(
-                    sa_func.coalesce(CrmProjectCostGroup.budget_amount, 0)
-                    + sa_func.coalesce(CrmProjectCostGroup.misc_budget_amount, 0)
-                ), 0),
+                # 子表預算含委外與雜支（owner 2026-09-05）：雜支是預算裡的信封，不外加
+                sa_func.coalesce(sa_func.sum(sa_func.coalesce(CrmProjectCostGroup.budget_amount, 0)), 0),
                 sa_func.count(CrmProjectCostGroup.id),
                 sa_func.coalesce(sa_func.sum(_case(
                     (CrmProjectCostGroup.budget_amount.is_(None)
@@ -1435,8 +1433,10 @@ async def _compute_group_summary(session, group_id: str) -> dict:
     }
 
 
-def _cost_group_to_dict(g, summary: Optional[dict] = None) -> dict:
-    total_budget = (g.budget_amount or 0) + (g.misc_budget_amount or 0)
+def _cost_group_to_dict(g, summary: Optional[dict] = None, misc_pct: int = 5) -> dict:
+    # 子表預算含委外與雜支（owner 2026-09-05）；雜支預算沒設＝預設 預算 × 專案雜支比
+    total_budget = g.budget_amount or 0
+    misc_default = int(round(total_budget * (misc_pct or 5) / 100)) if total_budget else 0
     d = {
         "id": g.id, "project_id": g.project_id, "name": g.name,
         "shoot_date": _fmt_date(g.shoot_date),
@@ -1444,6 +1444,8 @@ def _cost_group_to_dict(g, summary: Optional[dict] = None) -> dict:
         "sort_order": g.sort_order,
         "budget_amount": g.budget_amount,
         "misc_budget_amount": g.misc_budget_amount,
+        "misc_budget_default": misc_default,                                          # 沒設時畫「預設 $X（5%）」
+        "misc_budget_effective": g.misc_budget_amount if g.misc_budget_amount is not None else misc_default,
         "profit_target_pct": g.profit_target_pct,
         "receipt_path": g.receipt_path or "",
         "total_budget": total_budget if (g.budget_amount is not None or g.misc_budget_amount is not None) else None,
