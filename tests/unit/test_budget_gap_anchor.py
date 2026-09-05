@@ -36,3 +36,21 @@ def test_sub_table_misc_section_uses_the_default_when_unset():
     js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-cost.js"))
     assert "const miscBudget = groupMisc != null ? groupMisc : ((grp && grp.misc_budget_effective) || 0);" in js
     assert "const totalEst = grandEst + miscBudget;" in js
+
+
+def test_project_misc_estimate_is_sum_of_sub_table_misc():
+    """owner 2026-09-05「統一成同一個口徑」：整案預估雜支＝各子表預計雜支加總（設了用設的、沒設用子表預算 × 雜支比）；
+    連子表預算都沒有才回 None（前端退回未稅 × 雜支比）。financial-summary 與 expenses 清單兩支都走同一條純函式。"""
+    from core.crm_logic import misc_budget_total_of, group_misc_default
+    assert group_misc_default(220_960, 5) == 11_048 and group_misc_default(50_280, 5) == 2_514 and group_misc_default(None, 5) == 0
+    assert misc_budget_total_of([(220_960, None), (50_280, None)], 5) == 13_562
+    assert misc_budget_total_of([(220_960, 9_000), (50_280, None)], 5) == 11_514
+    assert misc_budget_total_of([(None, 0), (None, None)], 5) == 0      # 明填 0 算「有設」
+    assert misc_budget_total_of([(None, None), (0, None)], 5) is None   # 什麼都沒填 → 退回未稅比例
+    assert misc_budget_total_of([], None) is None
+    api = repo_src("routers/crm/costs.py")
+    assert api.count("misc_budget_total_of(") == 2, "financial-summary 與 list_project_expenses 都要走同一條"
+    assert "misc_default = group_misc_default(total_budget, misc_pct)" in api
+    assert "_cost_group_to_dict(g, summary)" not in api, "子表 dict 要帶專案雜支比，不能用預設 5"
+    js = repo_src("frontend/tabs/crm/crm-projects-cost.js")
+    assert "'子表加總'" in js and "'子表設定'" not in js

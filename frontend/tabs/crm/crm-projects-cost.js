@@ -119,7 +119,7 @@ async function _loadFinancialSummary(projectId) {
               <span>合約未稅 <b>$${fmtNum(f.ex_tax)}</b></span>
               <span>目標利潤 <b>$${fmtNum(f.profit_target)}</b>（${f.profit_target_pct}%）</span>
               <span>執行預算 <b style="color:#60a5fa;">$${fmtNum(d.execBudget)}</b></span>
-              <span>預估雜支 <b>$${fmtNum(d.miscEstimated)}</b>（${d.miscAuto ? `未稅 ${d.miscPct}%` : '子表設定'}）<button class="cda-edit" onclick="window._miscPctModal()">編輯</button></span>
+              <span>預估雜支 <b>$${fmtNum(d.miscEstimated)}</b>（${d.miscAuto ? `未稅 ${d.miscPct}%` : '子表加總'}）<button class="cda-edit" onclick="window._miscPctModal()">編輯</button></span>
               <span>實際毛利 <b id="cd-anchor-pf"></b></span>
               ${f.transfer_fee ? `<span style="color:#6b7280;">帳款匯費 $${fmtNum(f.transfer_fee)}</span>` : ''}
             </div>

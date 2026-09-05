@@ -432,3 +432,22 @@ def project_pay_label(items) -> str:
     else:
         label = "、".join(parts)
     return label + (f"（已付 {paid}）" if paid else "")
+
+
+def group_misc_default(budget_amount, misc_pct) -> int:
+    """子表雜支預算沒設時的預設：子表預算 × 專案雜支比（owner 2026-09-05：子表預算含委外與雜支，雜支預設 5%）。"""
+    b = int(budget_amount or 0)
+    return int(round(b * (misc_pct or 5) / 100)) if b else 0
+
+
+def misc_budget_total_of(groups, misc_pct) -> int | None:
+    """整案預估雜支（owner 2026-09-05「統一成同一個口徑」）：各子表預計雜支加總——
+    設了雜支預算用設的，沒設用 group_misc_default；**連子表預算都沒有的案回 None**（呼叫端退回合約未稅 × 雜支比）。
+    groups：[(budget_amount, misc_budget_amount)]。子表小計、子表卡、整案對照表都吃這一條，上下才對得起來。"""
+    total, any_budget = 0, False
+    for budget, misc in groups:
+        if misc is not None:
+            total += int(misc); any_budget = True
+        elif budget:
+            total += group_misc_default(budget, misc_pct); any_budget = True
+    return total if any_budget else None

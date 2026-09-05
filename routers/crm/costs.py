@@ -201,6 +201,7 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
             .where(CrmProjectCostGroup.project_id == project_id)
             .order_by(CrmProjectCostGroup.sort_order, CrmProjectCostGroup.created_at)
         )).scalars().all()
+        _pct = await _project_misc_pct(session, project_id)
 
         # 墊錢的人：一次查完，不在迴圈裡逐筆撈
         sids = {e.staff_id for e in rows if e.staff_id}
@@ -258,9 +259,10 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
     # 雜支預算：跨子表加總。全部未設 → None（畫面要畫「未設」而不是「預算 0」）。
     # ⚠ 同語義的 SQL 版在 financial-summary 的 misc_budget_total（SUM 忽略
     # NULL）—— 改「0 是否視為未設」這類語義時兩處要一起動。
-    budgets = [g.misc_budget_amount for g in groups if g.misc_budget_amount is not None]
+    from core.crm_logic import misc_budget_total_of
+    misc_budget_total = misc_budget_total_of([(g.budget_amount, g.misc_budget_amount) for g in groups], _pct)
     return {"expenses": expenses, "grouped_by_group": grouped_by_group,
-            "misc_budget_total": sum(budgets) if budgets else None}
+            "misc_budget_total": misc_budget_total}
 
 
 def _guard_claimed(e):
@@ -839,10 +841,6 @@ async def project_financial_summary(project_id: str):
                      & CrmProjectCostGroup.misc_budget_amount.is_(None), 1),
                     else_=0,
                 )), 0),
-                # 手動雜支預算加總：SUM 忽略 NULL；全部未設 → NULL（≠ 0，
-                # 前端據此決定退回 misc_budget_pct 自動推算）。
-                # ⚠ Python 版同語義在 list_project_expenses 的 misc_budget_total
-                # —— 語義變動兩處要一起動。
                 sa_func.sum(CrmProjectCostGroup.misc_budget_amount),
             )
             .where(CrmProjectCostGroup.project_id == project_id)
@@ -850,7 +848,12 @@ async def project_financial_summary(project_id: str):
         allocated_budget_sum = int(g_row[0] or 0) if g_row else 0
         groups_count = int(g_row[1] or 0) if g_row else 0
         groups_missing_budget_count = int(g_row[2] or 0) if g_row else 0
-        misc_budget_total = int(g_row[3]) if g_row and g_row[3] is not None else None
+        # 整案預估雜支＝各子表預計雜支加總（owner 2026-09-05 統一口徑；規則正本 core.crm_logic.misc_budget_total_of）
+        from core.crm_logic import misc_budget_total_of
+        _g_rows = (await session.execute(
+            select(CrmProjectCostGroup.budget_amount, CrmProjectCostGroup.misc_budget_amount)
+            .where(CrmProjectCostGroup.project_id == project_id))).all()
+        misc_budget_total = misc_budget_total_of([(b, mi) for b, mi in _g_rows], project.misc_budget_pct)
 
     from core.crm_logic import project_margin
     contract = project.contract_amount or 0
@@ -1433,10 +1436,17 @@ async def _compute_group_summary(session, group_id: str) -> dict:
     }
 
 
+async def _project_misc_pct(session, project_id: str):
+    """專案雜支比（%），沒有就 5。子表預設雜支與整案加總都用它。"""
+    p = await session.get(CrmProject, project_id)
+    return (p.misc_budget_pct if p is not None else None) or 5
+
+
 def _cost_group_to_dict(g, summary: Optional[dict] = None, misc_pct: int = 5) -> dict:
-    # 子表預算含委外與雜支（owner 2026-09-05）；雜支預算沒設＝預設 預算 × 專案雜支比
+    # 子表預算含委外與雜支（owner 2026-09-05）；雜支預算沒設＝預設 預算 × 專案雜支比（core.crm_logic.group_misc_default）
+    from core.crm_logic import group_misc_default
     total_budget = g.budget_amount or 0
-    misc_default = int(round(total_budget * (misc_pct or 5) / 100)) if total_budget else 0
+    misc_default = group_misc_default(total_budget, misc_pct)
     d = {
         "id": g.id, "project_id": g.project_id, "name": g.name,
         "shoot_date": _fmt_date(g.shoot_date),
@@ -1509,7 +1519,7 @@ async def list_project_cost_groups(project_id: str):
             "total_estimated": ce + ee, "total_actual": ca + ea,
             "cost_lines_count": cc, "expenses_count": ec,
         }
-        result.append(_cost_group_to_dict(g, summary))
+        result.append(_cost_group_to_dict(g, summary, await _project_misc_pct(session, g.project_id)))
     return {"cost_groups": result}
 
 
@@ -1536,7 +1546,7 @@ async def create_cost_group(project_id: str, req: CostGroupCreate, request: Requ
         await session.commit()
         await session.refresh(g)
         summary = await _compute_group_summary(session, g.id)
-    return {"status": "ok", "cost_group": _cost_group_to_dict(g, summary)}
+    return {"status": "ok", "cost_group": _cost_group_to_dict(g, summary, await _project_misc_pct(session, g.project_id))}
 
 
 @router.put("/cost-groups/{group_id}")
@@ -1571,7 +1581,7 @@ async def update_cost_group(group_id: str, req: CostGroupUpdate, request: Reques
         await session.commit()
         await session.refresh(g)
         summary = await _compute_group_summary(session, g.id)
-    return {"status": "ok", "cost_group": _cost_group_to_dict(g, summary)}
+    return {"status": "ok", "cost_group": _cost_group_to_dict(g, summary, await _project_misc_pct(session, g.project_id))}
 
 
 @router.delete("/cost-groups/{group_id}")
@@ -1656,7 +1666,7 @@ async def duplicate_cost_group(group_id: str, req: CostGroupDuplicate, request: 
         await session.commit()
         await session.refresh(new_g)
         summary = await _compute_group_summary(session, new_g.id)
-    return {"status": "ok", "cost_group": _cost_group_to_dict(new_g, summary), "lines_copied": len(src_lines)}
+    return {"status": "ok", "cost_group": _cost_group_to_dict(new_g, summary, await _project_misc_pct(session, new_g.project_id)), "lines_copied": len(src_lines)}
 
 
 @router.get("/cost-groups/{group_id}/summary", dependencies=[Depends(money_dep)])
@@ -1680,5 +1690,5 @@ async def get_cost_group_summary(group_id: str, request: Request):
         if proj is not None:
             require_entity(request, proj.entity or "parent", level="full")
         summary = await _compute_group_summary(session, group_id)
-    return {"cost_group": _cost_group_to_dict(g, summary)}
+    return {"cost_group": _cost_group_to_dict(g, summary, await _project_misc_pct(session, g.project_id))}
 
