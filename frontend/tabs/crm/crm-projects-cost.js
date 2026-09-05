@@ -232,10 +232,17 @@ function _renderAllocationAlert(f, d) {
     const diff = allocated - execBudget;
     let msgs = [];
     if (execBudget > 0 && diff > 0) {
-        msgs.push('<div class="cg-alert cg-alert-danger">⚠ 子表預算加總超出合約執行預算 $' + fmtNum(diff) + ' — 建議調整</div>');
+        msgs.push('<div class="cg-alert cg-alert-danger">子表預算加總 $' + fmtNum(allocated) + ' 超出執行預算 $' + fmtNum(execBudget) + '，超 $' + fmtNum(diff) + '</div>');
+    }
+    // 沒超過執行預算，但比「規劃」（人員預估＋預估雜支）多：owner 2026-09-05 要看得到——
+    // 這個差就是預估階段沒分配出去、之後會被雜支或人員吃掉的那塊（東仁：271,239 − 270,557 ＝ 682）
+    const planned = (d.costEstimated || 0) + (d.miscEstimated || 0);
+    const overPlan = allocated - planned;
+    if (allocated > 0 && planned > 0 && overPlan > 0 && !(execBudget > 0 && diff > 0)) {
+        msgs.push('<div class="cg-alert cg-alert-hint">子表預算加總 $' + fmtNum(allocated) + ' 比規劃（人員預估 $' + fmtNum(d.costEstimated || 0) + ' ＋ 預估雜支 $' + fmtNum(d.miscEstimated || 0) + '）多 $' + fmtNum(overPlan) + '</div>');
     }
     if (missing > 0) {
-        msgs.push('<div class="cg-alert cg-alert-hint">💡 還有 ' + missing + ' 張子表未設預算</div>');
+        msgs.push('<div class="cg-alert cg-alert-hint">還有 ' + missing + ' 張子表未設預算</div>');
     }
     return msgs.join('');
 }
