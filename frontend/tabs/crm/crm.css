@@ -2072,3 +2072,23 @@
 /* 掛在本案但方向是付款的發票（代開撥款）——列出來但不計入已開發票合計。
    底色與一般收款列分開，免得看成客戶要匯進來的錢。 */
 .ppay-payside td { background: #211a12; }
+
+/* ── 預算結算工項表：緊湊版（owner 2026-09-06「我覺得有點大，我的版面不大」）──
+   .crm-input 預設 padding 7px 10px / 13px，一格 36px 高；25 列就是 900px 起跳。
+   這裡只縮**工項表裡**的格子，其他表單不受影響。 */
+.cost-row .crm-input { padding: 2px 5px; font-size: 11px; border-radius: 4px; line-height: 1.35; }
+.cost-row .ss-input { padding: 2px 5px; font-size: 11px; }
+.cost-row .ss-panel { font-size: 12px; }
+.cost-row { padding: 2px 0; }
+.cost-row .crm-btn-sm { padding: 0 5px; font-size: 11px; line-height: 18px; }
+.cost-col-staff { width: 96px; }
+/* 收起的範本項目：摺疊列一行字＋展開 */
+.cost-row-fold { padding: 3px 0; font-size: 11px; color: #6b7280; }
+.cost-fold-toggle { color: #60a5fa; cursor: pointer; margin-left: 8px; }
+.cost-fold-toggle:hover { text-decoration: underline; }
+.cost-toggle-on { background: #1e3a5f; border-color: #2563eb; color: #bfdbfe; }
+/* 子表卡片也縮一號 */
+.cg-chip { padding: 8px 9px 6px; gap: 2px; }
+.cg-chip.active { padding: 7px 8px 5px; }
+.cg-chip-name { font-size: 12px; }
+.cg-chip-budget, .cg-chip-actual, .cg-chip-misc, .cg-chip-remain { font-size: 10.5px; line-height: 1.4; }

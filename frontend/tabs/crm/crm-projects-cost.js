@@ -282,10 +282,18 @@ function _showExpenseForm(editId = null, cat = '', est = 0, act = 0, notes = '')
 
 // ── Cost Table Rendering ───────────────────────────────────────
 const _UNIT_TYPES = ['式','日','班','時','支','套','件'];
+// 未使用的範本項目要不要攤開（owner 2026-09-06「版面不大」，預設收起）。
+// 只影響畫面：收起的列兩側都是空的，任何加總都不動。
+let _showEmpty = false;
+window._costToggleEmpty = function() {
+    _showEmpty = !_showEmpty;
+    if (state.selectedId) _loadFinancialSummary(state.selectedId);   // 同刪工項後的重畫路徑
+};
 
 function _renderCostLines(grouped, expenses, financialSummary) {
     const staffOpts = '<option value="">— 未指定 —</option>' +
-        state.staffList.map(s => `<option value="${s.id}">${_esc(s.name)} (${_esc(s.role || '')})</option>`).join('');
+        // 沒填職稱就不要畫「王士源 ()」—— 空括號只是佔寬（owner 2026-09-06「版面不大」）
+        state.staffList.map(s => `<option value="${s.id}">${_esc(s.name)}${s.role ? ' (' + _esc(s.role) + ')' : ''}</option>`).join('');
     const _unitOpts = function(curVal) {
         return '<option value="">—</option>' +
             _UNIT_TYPES.map(function(u) { return '<option value="' + u + '"' + (curVal === u ? ' selected' : '') + '>' + u + '</option>'; }).join('');
@@ -301,6 +309,8 @@ function _renderCostLines(grouped, expenses, financialSummary) {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;margin-top:12px;border-top:1px solid #2e2e2e;padding-top:10px;">
         <span style="font-size:12px;font-weight:700;color:#6b7280;">成本估算 / 實際結算</span>
         <div style="display:flex;gap:6px;align-items:center;">
+          <button class="crm-btn crm-btn-secondary crm-btn-sm ${_showEmpty ? 'cost-toggle-on' : ''}" onclick="window._costToggleEmpty()"
+                  title="套範本帶進來但還沒填的項目，預設收起">${_showEmpty ? '收起未使用' : '顯示未使用'}</button>
           <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projShowExpenseModal()">雜支登記</button>
           <div style="position:relative;display:inline-block;" id="cost-tpl-dropdown-wrap">
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._costToggleTplDropdown()">套用範本 ▾</button>
@@ -358,7 +368,16 @@ function _renderCostLines(grouped, expenses, financialSummary) {
               </span>
             </div>`;
 
+            // 🔴 未使用的範本項目預設收起（owner 2026-09-06「版面不大」）：東仁 2min
+            // 25 列裡 15 列是套範本帶進來的空項目，每列照樣佔一整行輸入框。
+            // 「空」＝兩側都沒金額、沒單價、沒人（只有名字）。收起的列名字列在摺疊列上，
+            // 一鍵展開；收起的都是 0，所以任何加總都不受影響。
+            const _emptyLine = (l) => l.estimated_amount == null && l.actual_amount == null
+                && l.estimated_unit_price == null && l.actual_unit_price == null
+                && !l.estimated_staff_id && !l.actual_staff_id;
+            const _folded = _showEmpty ? [] : group.lines.filter(_emptyLine);
             for (const ln of group.lines) {
+                if (!_showEmpty && _emptyLine(ln)) continue;
                 const diff = (ln.actual_amount || 0) - (ln.estimated_amount || 0);
                 const bothZero = !ln.estimated_amount && !ln.actual_amount;
                 const _d = diffLabel(diff, bothZero);
@@ -430,6 +449,12 @@ function _renderCostLines(grouped, expenses, financialSummary) {
                   </div>`;
             }
 
+            if (_folded.length) {
+                html += `<div class="cost-row cost-row-fold">
+                    <span class="cost-col-item" style="flex:1;white-space:normal;">未使用 ${_folded.length} 項：${_esc(_folded.map(l => l.item_name).join('、'))}
+                      <span class="cost-fold-toggle" onclick="window._costToggleEmpty()">展開</span></span>
+                  </div>`;
+            }
             html += `
               <div class="cost-row cost-row-subtotal">
                 <span class="cost-col-item" style="color:#9ca3af;font-style:italic;">${_esc(group.phase)} 小計</span>
@@ -1285,7 +1310,7 @@ window._costAddItem = function(phase) {
     if (!target) return;
     if (document.getElementById('cost-add-form')) document.getElementById('cost-add-form').remove();
     var unitOpts = '<option value="">—</option>' + _UNIT_TYPES.map(function(u) { return '<option value="' + u + '">' + u + '</option>'; }).join('');
-    var staffOpts = '<option value="">— 未指定 —</option>' + state.staffList.map(function(s) { return '<option value="' + s.id + '">' + _esc(s.name) + ' (' + _esc(s.role || '') + ')</option>'; }).join('');
+    var staffOpts = '<option value="">— 未指定 —</option>' + state.staffList.map(function(s) { return '<option value="' + s.id + '">' + _esc(s.name) + (s.role ? ' (' + _esc(s.role) + ')' : '') + '</option>'; }).join('');
     var form = document.createElement('div');
     form.id = 'cost-add-form';
     form.className = 'cost-row';
