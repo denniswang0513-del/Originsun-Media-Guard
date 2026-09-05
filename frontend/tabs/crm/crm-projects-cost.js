@@ -204,7 +204,7 @@ function _fillDashGrid(parts) {
     const drift = (id, val) => set(id, (val >= 0 ? '+$' : '−$') + fmtNum(Math.abs(val)),
                                    remainColor(val));
     drift('cd-rem-diff', d.remainingActual - d.remaining);
-    drift('cd-pf-diff', 0);   // 毛利＝未稅−預算，預估與實際同一個數
+    set('cd-pf-diff', '—', '#9ca3af');   // 毛利＝未稅−預算，預估與實際同一個數，差額恆為 0 → 畫 —
     // 進度條：實際填充 + 預估刻度（實際追過刻度＝超出原計畫）
     const bar = document.querySelector('.cost-progress-bar');
     if (bar) { bar.style.width = Math.min(d.usagePct, 100) + '%'; bar.style.background = barColor(d.usagePct); }
