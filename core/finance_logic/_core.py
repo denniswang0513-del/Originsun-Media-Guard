@@ -1462,9 +1462,16 @@ def model_remove_type(model: dict, name: str) -> bool:
 
 
 def canonical_type(model: dict, project_type: str) -> str:
-    """舊案型 → 你的版本（沒對應就原樣）。"""
+    """舊案型 → 你的版本（沒對應就原樣）。已經是表上現行的列就不換（A→B 再 B→A 之後 A 是現行列）；
+    鏈式改名（A→B→C）跟著走到底，最多走 aliases 的長度以防環。"""
     t = (project_type or "").strip()
-    return (model.get("aliases") or {}).get(t, t)
+    rows = {(r.get("type") or "").strip() for r in model.get("rows") or []}
+    aliases = model.get("aliases") or {}
+    for _ in range(len(aliases) + 1):
+        if t in rows or t not in aliases:
+            break
+        t = aliases[t]
+    return t
 
 
 def margin_for_type(model: dict, project_type: str):
@@ -1472,7 +1479,7 @@ def margin_for_type(model: dict, project_type: str):
     t = canonical_type(model, project_type)
     for r in model.get("rows") or []:
         if (r.get("type") or "").strip() == t:
-            return float(r.get("margin_pct") or 0)
+            return float(r["margin_pct"]) if r.get("margin_pct") is not None else None   # 列上沒填毛利＝不知道，不是 0%
     return None
 
 

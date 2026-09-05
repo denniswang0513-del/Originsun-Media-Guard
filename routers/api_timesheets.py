@@ -81,6 +81,15 @@ def _day_or_422(day: str) -> datetime:
     return d.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def _has_ts_module(request: Request) -> bool:
+    """有工作追蹤模組（或管理員）才看得到會洩露私帳金額的衍生值（建議預算）。"""
+    try:
+        check_admin_or_module(request, "timesheets")
+        return True
+    except HTTPException:
+        return False
+
+
 async def _ts_or_bound(request: Request) -> None:
     """唯讀端點放寬（docs/JOURNAL_WORKLOG_PLAN.md §10／§11）：timesheets 模組 **或** 登入＋綁定人員檔案
     （員工頁的專案查詢、工作階段下拉）。只給讀；寫入端點（改預算等）守衛不變。
@@ -102,15 +111,10 @@ _ME_KEYS = ("me_finance", "me_projects", "me_profile", "me_todos", "me_leave", "
 
 
 async def _mine_ident(request: Request) -> dict:
-    """timesheets 模組 → 照舊；否則任何 me_* 鑰匙＋綁定人員檔案。"""
-    try:
-        return await bound_ident(request, "timesheets")
-    except HTTPException as e:
-        if e.status_code != 403:
-            raise
-    check_admin_or_module(request, *_ME_KEYS)
+    """timesheets 模組或任一把 me_* 鑰匙 ＋ 綁定人員檔案。
+    （2026-09-06 review：原本第二段只拿 me_finance 再驗一次，只有 me_projects 之類的員工會被 403）"""
     from core.identity import require_bound_staff
-    return await require_bound_staff(request, _ME_KEYS[0])
+    return await require_bound_staff(request, "timesheets", *_ME_KEYS)
 
 
 @router.get("/ingest_token")
@@ -405,7 +409,7 @@ def _suggested_for(proj):
     if proj is None:
         return None
     from core.finance_logic import load_margin_model, margin_for_type, suggested_budget_hours
-    model = load_margin_model(getattr(proj, "entity", "mine") or "mine")
+    model = load_margin_model("mine")       # 同 costs.py：毛利表只有私帳那份在維護
     return suggested_budget_hours(proj.contract_amount, proj.tax_rate, margin_for_type(model, proj.project_type),
                                   model["daily_cost"], model["hours_per_day"])
 
@@ -457,7 +461,8 @@ async def project_file(request: Request, name: str = "", project_id: str = ""):
         "budget_hours": budget, **budget_burn(m["total"], budget),
         "quote_days": quote_days,
         "quote_hours": quote_days * HOURS_PER_WORKDAY if quote_days else None,
-        "suggested_hours": _suggested_for(proj),
+        # 建議預算是從私帳合約×預期毛利算的：只綁人員檔案的員工拿得到就等於能反推私帳合約 → 只給 timesheets 模組
+        "suggested_hours": _suggested_for(proj) if _has_ts_module(request) else None,
         "project_type": getattr(proj, "project_type", "") or "",
         "by_month": rows_by_month(rows),
         "timeline": _day_log(rows),                 # 全部逐日，不截（前端按月分段）

@@ -875,10 +875,11 @@ async def project_financial_summary(project_id: str):
     ex_tax = m["ex_tax"]
     profit_target = int(ex_tax * (project.profit_target_pct or 20) / 100)
     from core.finance_logic import load_margin_model, margin_for_type, suggested_budget_hours
-    _model = load_margin_model(project.entity or "mine")
+    _model = load_margin_model("mine")      # 毛利表只有私帳設定頁在維護；母帳案 entity='parent' 拿到的是出廠預設表
     _type_margin = margin_for_type(_model, project.project_type)
     _suggested_hours = suggested_budget_hours(contract, tax_rate, _type_margin, _model["daily_cost"], _model["hours_per_day"])
-    misc_budget = int(ex_tax * (project.misc_budget_pct or 5) / 100)
+    _mpct = project.misc_budget_pct if project.misc_budget_pct is not None else 5
+    misc_budget = int(ex_tax * _mpct / 100)
     outsource_budget = ex_tax - profit_target - misc_budget
 
     total_cost = m["cost"]
@@ -888,7 +889,7 @@ async def project_financial_summary(project_id: str):
     return {
         "contract_amount": contract, "ex_tax": ex_tax,
         "profit_target": profit_target, "profit_target_pct": project.profit_target_pct or 20,
-        "misc_budget": misc_budget, "misc_budget_pct": project.misc_budget_pct or 5,
+        "misc_budget": misc_budget, "misc_budget_pct": _mpct,
         "outsource_budget": outsource_budget,
         # 私帳設定的預期毛利表（owner 2026-09-03）：這個案型預期多少毛利、換算成多少工時預算
         "type_margin_pct": _type_margin, "suggested_budget_hours": _suggested_hours,
@@ -1425,6 +1426,7 @@ async def _compute_group_summary(session, group_id: str) -> dict:
                _fn.coalesce(_fn.sum(CrmProjectCostLine.actual_amount), 0),
                _fn.count(CrmProjectCostLine.id))
         .where(CrmProjectCostLine.cost_group_id == group_id)
+        .where(CrmProjectCostLine.phase != ADMIN_PHASE)     # 同清單／financial-summary：行政雜支工項不算人員成本
     )).first()
     ex_row = (await session.execute(
         select(_fn.coalesce(_fn.sum(CrmProjectExpense.estimated), 0),
@@ -1451,13 +1453,14 @@ async def _compute_group_summary(session, group_id: str) -> dict:
 async def _project_misc_pct(session, project_id: str):
     """專案雜支比（%），沒有就 5。子表預設雜支與整案加總都用它。"""
     p = await session.get(CrmProject, project_id)
-    return (p.misc_budget_pct if p is not None else None) or 5
+    pct = p.misc_budget_pct if p is not None else None
+    return pct if pct is not None else 5        # 明填 0 就是 0
 
 
 def _cost_group_to_dict(g, summary: Optional[dict] = None, misc_pct: int = 5) -> dict:
     # 子表預算含委外與雜支（owner 2026-09-05）；雜支預算沒設＝預設 預算 × 專案雜支比（core.crm_logic.group_misc_default）
     from core.crm_logic import group_misc_default
-    total_budget = g.budget_amount or 0
+    total_budget = g.budget_amount if g.budget_amount is not None else 0
     misc_default = group_misc_default(total_budget, misc_pct)
     d = {
         "id": g.id, "project_id": g.project_id, "name": g.name,
@@ -1470,7 +1473,7 @@ def _cost_group_to_dict(g, summary: Optional[dict] = None, misc_pct: int = 5) ->
         "misc_budget_effective": g.misc_budget_amount if g.misc_budget_amount is not None else misc_default,
         "profit_target_pct": g.profit_target_pct,
         "receipt_path": g.receipt_path or "",
-        "total_budget": total_budget if (g.budget_amount is not None or g.misc_budget_amount is not None) else None,
+        "total_budget": total_budget if g.budget_amount is not None else None,      # 只設雜支不算「有預算」（別畫 $0／剩餘負數）
         "created_at": g.created_at.isoformat() if g.created_at else None,
         "updated_at": g.updated_at.isoformat() if g.updated_at else None,
     }
@@ -1712,6 +1715,6 @@ async def get_cost_group_summary(group_id: str, request: Request):
         summary = await _compute_group_summary(session, group_id)
         # 雜支比在 session 還開著時查（同清單那支：原本寫在 return 裡，
         # 那時 `async with` 已經結束）
-        _pct = (proj.misc_budget_pct if proj is not None else None) or 5
+        _pct = proj.misc_budget_pct if proj is not None and proj.misc_budget_pct is not None else 5
     return {"cost_group": _cost_group_to_dict(g, summary, _pct)}
 

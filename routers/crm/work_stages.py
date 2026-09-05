@@ -110,6 +110,9 @@ async def update_work_stage_node(node_id: str, req: WorkStageNodeUpdate, request
         node = await session.get(WorkStageNode, node_id)
         if node is None:
             raise HTTPException(status_code=404, detail="找不到這個工作階段")
+        if "name" in data and int(node.depth or 0) <= 1:
+            # 分類名是工時列的分類鍵（timesheets.work_type 與 stage.category 以名字對）：改了就整個分類對不上 → 422
+            raise HTTPException(status_code=422, detail="分類名稱不能在這裡改（工時列以分類名對階段）")
         if "name" in data:
             new_name = (data.get("name") or "").strip()
             if not new_name:
@@ -142,6 +145,8 @@ async def delete_work_stage_node(node_id: str, request: Request):
         node = await session.get(WorkStageNode, node_id)
         if node is None:
             raise HTTPException(status_code=404, detail="找不到這個工作階段")
+        if int(node.depth or 0) <= 1:
+            raise HTTPException(status_code=409, detail="分類不能刪（工作分類是固定的一組，只能停用底下的階段）")
         kids = (await session.execute(
             select(func.count()).select_from(WorkStageNode).where(WorkStageNode.parent_id == node_id))).scalar() or 0
         if kids:

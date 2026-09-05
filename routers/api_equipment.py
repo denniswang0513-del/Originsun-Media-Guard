@@ -219,9 +219,10 @@ async def list_equipment(request: Request, q: str = "", category: str = "",
             query = query.where(or_(Equipment.name.ilike(ql), Equipment.serial.ilike(ql)))
         rows = (await session.execute(query)).scalars().all()
 
+        # 「領用中」＝已領（out_at 有值）且未歸還；場次預約列 out_at 是 NULL，不算（2026-09-06 review）
         open_rows = (await session.execute(
             select(EquipmentCheckout)
-            .where(EquipmentCheckout.returned_at.is_(None))
+            .where(EquipmentCheckout.returned_at.is_(None), EquipmentCheckout.out_at.isnot(None))
             .order_by(EquipmentCheckout.out_at.desc())
         )).scalars().all()
         pnames = await project_names_map(session, open_rows)
@@ -411,7 +412,7 @@ async def checkout_equipment(eid: str, req: EquipmentCheckoutPayload, request: R
         open_row = (await session.execute(
             select(EquipmentCheckout)
             .where(EquipmentCheckout.equipment_id == eid,
-                   EquipmentCheckout.returned_at.is_(None))
+                   EquipmentCheckout.returned_at.is_(None), EquipmentCheckout.out_at.isnot(None))
         )).scalars().first()
         if open_row:
             raise HTTPException(status_code=409, detail="此器材已有未歸還的領用紀錄")
@@ -451,7 +452,7 @@ async def return_equipment(eid: str, req: EquipmentReturnPayload, request: Reque
         open_row = (await session.execute(
             select(EquipmentCheckout)
             .where(EquipmentCheckout.equipment_id == eid,
-                   EquipmentCheckout.returned_at.is_(None))
+                   EquipmentCheckout.returned_at.is_(None), EquipmentCheckout.out_at.isnot(None))
             .order_by(EquipmentCheckout.out_at.desc())
         )).scalars().first()
         if not open_row:

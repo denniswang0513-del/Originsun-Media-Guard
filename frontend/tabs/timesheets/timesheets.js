@@ -458,6 +458,7 @@ function _ledgerRedraw() {
 function _ledgerEditHtml(i) {
     const inp = 'style="background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;padding:3px 6px;"';
     return `<tr data-ledger-edit="${esc(i.id)}">
+        <td></td>
         <td><input type="date" data-f="date" value="${esc(i.date)}" ${inp}></td>
         <td>${esc(i.staff_name)}</td>
         ${_rowCells({ project: i.project_name, work_type: i.work_type, note: i.task_note, remark: i.remark, planned: i.planned_hours, hours: i.hours || '' })}

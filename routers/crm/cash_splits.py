@@ -201,6 +201,8 @@ async def _apply_splits(session, e, items: list, *, paths: dict,
     old_deltas = _project_deltas(side, e.deposit, e.project_id, old)
 
     if not items:                        # ── 解除拆項（父列回到未分類）──
+        if not old:
+            return []                        # 本來就沒拆：什麼都不動（原本會把父列自己掛的案扣一次已收）
         await _shift_project_received(session, ent, old_deltas, {})
         await _drop_splits(session, old)
         return []
@@ -318,7 +320,8 @@ async def replace_cash_entry_splits(entry_id: str, request: Request):
     factory = await _get_factory()
     from core.cash_tree import path_map
     async with factory() as session:
-        e = await session.get(CrmCashEntry, entry_id)
+        # 鎖收支列：_sync_mine_project_received 是 ±delta，兩個併發的重存會各自從 old=[] 算、加兩次
+        e = await session.get(CrmCashEntry, entry_id, with_for_update=True)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此收支紀錄")
         _mine_or_admin_write(request, e.entity)

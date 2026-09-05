@@ -1550,8 +1550,10 @@ async function _openProjectModal(name, pid) {
         bg.id = "ws-proj-modal"; bg.className = "ws-modal-bg";
         bg.addEventListener("click", (e) => { if (e.target === bg || e.target.closest(".ws-modal-x")) bg.remove(); });
         root.appendChild(bg);
-        const esc_ = (e) => { if (e.key === "Escape" && bg.isConnected) bg.remove(); else if (!bg.isConnected) document.removeEventListener("keydown", esc_); };
-        document.addEventListener("keydown", esc_);
+        if (!window.__wsModalEsc) {       // 全頁只掛一次（每開一次掛一個會累積）
+            window.__wsModalEsc = true;
+            document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("ws-proj-modal")?.remove(); });
+        }
     }
     const x = '<button type="button" class="ws-modal-x" title="關閉">×</button>';
     bg.innerHTML = `<div class="ws-modal">${x}<div class="empty">載入中…</div></div>`;

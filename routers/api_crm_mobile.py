@@ -235,8 +235,10 @@ async def mobile_project_detail(project_id: str, request: Request):
                 .order_by(CrmPaymentRequest.request_date.desc().nulls_last(),
                           CrmPaymentRequest.created_at.desc(), CrmPaymentRequest.id))).scalars().all()
             out["payments"] = [_to_payment_dict(p, project_name=project.name or "") for p in payments]
+            from sqlalchemy import or_ as _sa_or
             invoices = (await session.execute(
-                select(CrmInvoice).where(CrmInvoice.project_id == project_id)
+                select(CrmInvoice).where(_sa_or(CrmInvoice.project_id == project_id,
+                                                CrmInvoice.project_ids.like('%"' + project_id + '"%')))
                 .order_by(CrmInvoice.invoice_date.desc().nulls_last(),
                           CrmInvoice.created_at.desc(), CrmInvoice.id))).scalars().all()
             out["invoices"] = [_to_invoice_dict(inv, project_name=project.name or "") for inv in invoices]

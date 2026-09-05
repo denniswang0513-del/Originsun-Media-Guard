@@ -104,7 +104,8 @@ export function closingChecks(s, advances, expenses) {
           sub: s.invoiceCount ? `${s.invoiceCount} 張${s.uncollected.length ? '，' + s.uncollected.length + ' 張未收' : '，已收齊'}` : '沒有發票' },
         { label: '應付全付', ok: s.payCount > 0 && s.paidCount === s.payCount && !s.unrequestedGroups.length,
           sub: s.payCount ? `${s.paidCount} / ${s.payCount} 張已付${s.unrequestedGroups.length ? '，' + s.unrequestedGroups.length + ' 人未請款' : ''}` : (s.groups.length ? `${s.groups.length} 人都還沒請款` : '沒有應付') },
-        { label: '雜支結清', ok: exp.every((e) => e.claim_id || e.status === '已付款' || e.paid), sub: exp.length ? `${exp.length} 筆` : '沒有雜支' },
+        // /projects/{id}/expenses 的送請款狀態是 payment_id／payment_status（零用金那套才是 claim_id／status）
+        { label: '雜支結清', ok: exp.every((e) => e.claim_id || e.payment_id || e.status === '已付款' || e.payment_status === '已付款' || e.paid), sub: exp.length ? `${exp.length} 筆` : '沒有雜支' },
         { label: '預支款結清', ok: adv.every((a) => a.is_settled || a.settled), sub: adv.length ? `${adv.length} 筆` : '沒有預支' },
     ];
 }

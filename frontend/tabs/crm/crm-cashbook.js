@@ -541,7 +541,8 @@ async function _cashKaiRemit(e, pids, pnames, kai) {
     const doneSum = doneSumAll - (withdraw ? wdSum : 0);
     const left = leftOf();
     const payees = [...new Set([inv.applicant || '', ...staff.map((s) => s.name || '')].filter(Boolean))];
-    const payeeSel = (i) => `<select class="crm-input" data-kai-payee="${i}" style="width:130px;padding:2px 6px;">${payees.map((n) => `<option value="${_esc(n)}"${n === (inv.applicant || '') ? ' selected' : ''}>${_esc(n)}</option>`).join('')}<option value="">其他…</option></select>`;
+    // 沒有申請人的代開票：不預選第一個員工（會開給錯的人），先留空要人選
+    const payeeSel = (i) => `<select class="crm-input" data-kai-payee="${i}" style="width:130px;padding:2px 6px;">${inv.applicant ? '' : '<option value="" selected>— 選收款人 —</option>'}${payees.map((n) => `<option value="${_esc(n)}"${n === (inv.applicant || '') ? ' selected' : ''}>${_esc(n)}</option>`).join('')}<option value="">其他…</option></select>`;
     const rows = pids.map((p, i) => {
         const had = existing.filter((x) => x.pid === p);
         if (had.length) return `<div style="display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid #2e2e2e;opacity:.7;">

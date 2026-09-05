@@ -21,6 +21,7 @@ from core.ledger import hide_mine_projects, not_mine
 from core.ledger_project import parent_receipt_fields
 from core.finance_logic import CASH_INVOICE_PASSTHROUGH_CATEGORIES as _PASSTHRU_CATS
 from core.project_link import invoice_project_ids as _inv_pids
+from db.models import CrmCashSplit    # 拆項列（母帳收款歸案要看它；_shared 沒 re-export）
 from core.schemas import (CrmProjectPayload, CrmProjectPatchPayload, ProjectTypeOpPayload,
                           ProjectLedgerMovePayload, ProjectMirrorPayload)
 
@@ -31,7 +32,7 @@ from ._shared import (router, _check_auth, _check_status_auth, _check_project_wr
 
 try:
     from ._shared import (select, or_,
-                          Client, CrmCashEntry, CrmInvoice, CrmPaymentRequest,
+                          Client, CrmCashEntry, CrmCashInvoiceLink, CrmInvoice, CrmPaymentRequest,
                           CrmProject, CrmProjectCostGroup,
                           CrmProjectCostLine, CrmProjectExpense,
                           CrmProjectStaff, CrmProjectShowcase)
@@ -91,22 +92,49 @@ async def linked_receipts_map(session, project_ids) -> dict:
             select(CrmInvoice.id, CrmInvoice.project_id, CrmInvoice.project_ids)
             .where(CrmInvoice.project_id.in_(ids)))).all())
         if len(pids) == 1 and pids[0] in ids}
+    # 分配表：一筆收款分給好幾張發票（invoice_id 只記最大那張）→ 照分配金額給各案，不把整筆都算給第一案
+    links: dict = {}
+    if inv_proj:
+        for eid, iid, amt in (await session.execute(
+                select(CrmCashInvoiceLink.cash_entry_id, CrmCashInvoiceLink.invoice_id, CrmCashInvoiceLink.amount)
+                .where(CrmCashInvoiceLink.invoice_id.in_(set(inv_proj))))).all():
+            links.setdefault(eid, []).append((iid, int(amt or 0)))
+    # 拆項：父列的專案歸屬已讓位給拆項（core.cash_splits）；拆項 fee＝代開費，專案按毛額（amount＋fee）結清
+    split_rows = (await session.execute(
+        select(CrmCashSplit.entry_id, CrmCashSplit.project_id, CrmCashSplit.amount, CrmCashSplit.fee)
+        .where(CrmCashSplit.project_id.in_(ids)))).all()
+    split_entries = {r[0] for r in (await session.execute(
+        select(CrmCashSplit.entry_id).where(CrmCashSplit.entry_id.in_({r[0] for r in split_rows} or {""})))).all()}
     conds = [CrmCashEntry.project_id.in_(ids)]
     if inv_proj:
         conds.append(CrmCashEntry.invoice_id.in_(set(inv_proj)))
+    if links:
+        conds.append(CrmCashEntry.id.in_(set(links)))
+    # 🔴 發票代開的收款也算客戶匯進來的錢（owner 2026-09-05 把「發票代開」開放掛專案就是為了讓它進「客戶已匯」；
+    # 撥給代開人的那半邊是應付，不影響「客戶付了沒」）
     rows = (await session.execute(
-        select(CrmCashEntry.project_id, CrmCashEntry.invoice_id, CrmCashEntry.deposit, CrmCashEntry.bank_fee)
-        .where(CrmCashEntry.entity == "parent", CrmCashEntry.deposit > 0,
-               # 發票代開的收款不是案子的錢（要扣代開費、給執行人員），不算到帳
-               or_(CrmCashEntry.category.is_(None), CrmCashEntry.category.notin_(_PASSTHRU_CATS)),
-               or_(*conds)))).all()
+        select(CrmCashEntry.id, CrmCashEntry.project_id, CrmCashEntry.invoice_id, CrmCashEntry.deposit, CrmCashEntry.bank_fee)
+        .where(CrmCashEntry.entity == "parent", CrmCashEntry.deposit > 0, or_(*conds)))).all()
     out: dict = {}
-    for pid, iid, dep, fee in rows:
-        eff = pid if pid in ids else inv_proj.get(iid)
-        if not eff:
-            continue
+    def _add(eff, dep, fee):
         r, f = out.get(eff, (0, 0))
         out[eff] = (r + int(dep or 0), f + int(fee or 0))
+    for eid, pid, iid, dep, fee in rows:
+        if eid in split_entries:
+            continue                                   # 這一列的歸屬在拆項上
+        if eid in links:
+            fee_taken = False
+            for liid, amt in links[eid]:
+                eff = inv_proj.get(liid)
+                if eff:
+                    _add(eff, amt, 0 if fee_taken else fee)   # 匯費只給一次（顯示用）
+                    fee_taken = True
+            continue
+        eff = pid if pid in ids else inv_proj.get(iid)
+        if eff:
+            _add(eff, dep, fee)
+    for _eid, spid, amt, sfee in split_rows:
+        _add(spid, int(amt or 0) + int(sfee or 0), sfee)
     return out
 
 
@@ -114,7 +142,8 @@ def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False, rec
     # 母公司案有掛帳收入列 → 已收／匯費／應收／收款狀態一律推導（core.ledger_project.parent_receipt_fields），
     # 沒有掛的老案維持手填欄位
     received, fee = (receipts or {}).get(p.id, (0, 0))
-    derived = (p.entity or "parent") != "mine" and (received or fee)
+    # 佔位合約（母私帳對齊從私帳抄來的下限，contract_amount_source='mine'）不是真合約：拿它比收款會誤報全額到帳／溢收
+    derived = (p.entity or "parent") != "mine" and (received or fee) and (p.contract_amount_source or "") != "mine"
     if derived:
         receivable, status = parent_receipt_fields(int(p.contract_amount or 0), received, fee)
     return {
@@ -164,7 +193,19 @@ async def get_project_types(request: Request):
     （core.finance_logic.project_type_vocab 再併上 settings／在用的）。CRM 專案表下拉、案型清單、私帳設定頁、
     工時 burn 表、手機版都吃同一份。"""
     from core.finance_logic import project_type_vocab
-    return {"project_types": project_type_vocab()}
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        extra = await _types_in_use(session)
+    return {"project_types": project_type_vocab(extra)}
+
+
+async def _types_in_use(session) -> list:
+    """專案還掛著的案型：改名／刪除後下拉仍要列得到它（core.finance_logic.model_remove_type 的承諾）。"""
+    rows = (await session.execute(
+        select(CrmProject.project_type).where(CrmProject.project_type.isnot(None), CrmProject.project_type != "")
+        .distinct())).scalars().all()
+    return [r for r in rows if r]
 
 
 @router.post("/project-types")
@@ -184,7 +225,10 @@ async def edit_project_types(payload: ProjectTypeOpPayload, request: Request):
         raise HTTPException(status_code=409, detail={"add": "這個案型已經有了", "rename": "找不到舊案型，或新名字已存在",
                                                      "remove": "找不到這個案型"}[payload.op])
     save_margin_model("mine", model)
-    return {"project_types": project_type_vocab()}
+    factory = await _get_factory()
+    async with factory() as session:
+        extra = await _types_in_use(session)
+    return {"project_types": project_type_vocab(extra)}
 
 
 @router.get("/projects")
@@ -651,7 +695,7 @@ async def _latest_proposal_status(session, project_id: str) -> str:
     )).scalar() or ""
 
 
-async def project_wire(session, project) -> dict:
+async def project_wire(session, project, request=None) -> dict:
     """單筆專案的回應形狀（_to_project_dict ＋ 客戶代稱 ＋ proposal_status）。
 
     單筆 GET／PUT／PATCH status 與手機版詳情四處共用 —— 各自拼一次的話，
@@ -661,7 +705,12 @@ async def project_wire(session, project) -> dict:
     """
     client = await session.get(Client, project.client_id) if project.client_id else None
     receipts = await linked_receipts_map(session, [project.id]) if (project.entity or "parent") != "mine" else {}
-    return {**_to_project_dict(project, client.short_name if client else "", receipts=receipts),
+    # mirrored：同清單那條可見性線（看不到私帳的人一律 False）。原本這裡不算，PUT 回來的單筆把列表上的
+    # 「已連結私帳」標籤洗掉（2026-09-06 review）
+    mirrored = False
+    if request is not None and (project.entity or "parent") != "mine" and not _hide_mine(request):
+        mirrored = (await resolve_mine_link(session, project)) is not None
+    return {**_to_project_dict(project, client.short_name if client else "", mirrored=mirrored, receipts=receipts),
             "proposal_status": await _latest_proposal_status(session, project.id)}
 
 
@@ -678,7 +727,7 @@ async def get_project(project_id: str, request: Request):
         # 403 等於承認「有這個案子只是你不能看」，那本身就是洩漏。
         if (project.entity or "parent") == "mine" and _hide_mine(request):
             raise HTTPException(status_code=404, detail="找不到此專案")
-        return await project_wire(session, project)
+        return await project_wire(session, project, request)
 
 
 def _apply_status_side_effects(project, old_status: str) -> None:
@@ -802,6 +851,8 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
                 setattr(project, k, _parse_shoot_date(v))
             else:
                 setattr(project, k, v)
+        if "contract_amount" in update_data:
+            project.contract_amount_source = None      # 人填了真合約 → 佔位旗標（母私帳對齊抄來的下限）解除
         _apply_status_side_effects(project, old_status)
         await _sync_linked_proposals(session, project, old_status, outcome_reason)
         project.updated_at = _now()
@@ -814,7 +865,7 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
                     else await _rename_asset_folders(session, project))
         await session.commit()
         await session.refresh(project)
-        wire = await project_wire(session, project)
+        wire = await project_wire(session, project, request)
 
     result = {"status": "ok", "project": wire}
     if warnings:
@@ -881,11 +932,12 @@ async def update_project_status(project_id: str, request: Request):
                                    body.get("outcome_reason"))
         if contract_amount is not None:
             project.contract_amount = int(contract_amount)
+            project.contract_amount_source = None
         if amount_receivable is not None:
             project.amount_receivable = int(amount_receivable)
         await session.commit()
         await session.refresh(project)
-        wire = await project_wire(session, project)
+        wire = await project_wire(session, project, request)
 
     return {"status": "ok", "project": wire}
 
@@ -1338,6 +1390,12 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 # 會把前一個 CRM 案鏡射進來的錢洗掉，而那筆錢也是他該拿的。
                 # 併法（同名工項相加／取代）的正本在 core.ledger_project，
                 # 它回 delta 而不是 total —— 私帳案的合約金額未必等於 Σ(split)
+                if mode == "overwrite":
+                    from routers.crm._shared import mine_parent_names
+                    _others = (await mine_parent_names(session, [t.id])).get(t.id) or ()
+                    if len(_others) > 1:
+                        raise HTTPException(status_code=409, detail="這個私帳案承接了 %d 個母帳案（%s），用「取代」會洗掉別案鏡射進來的錢；請改用「加上去」"
+                                            % (len(_others), "、".join(_others)))
                 merged, delta = merge_split(keep.get("split") or {},
                                             mir["split"] or {},
                                             add=(mode == "add"))
@@ -1449,6 +1507,8 @@ async def projects_mine_links(request: Request):
             select(Client))).scalars().all()}
     by_name: dict = {}
     for p, _c in parent_rows:
+        if p.mine_link_id:
+            continue            # 已連到別的私帳案的母帳案不當建議（按「採用」只會 409，而且每次重載都再冒出來）
         by_name.setdefault(_norm_name(p.name), []).append(p)
     # 母帳 → 私帳那個方向要畫的東西（owner 2026-09-05「增加一個切換鈕」）：
     # 連到哪一個私帳案、客戶、結案日、金額是不是佔位、以及同名建議。
@@ -1564,8 +1624,9 @@ async def create_parent_from_mine(mine_id: str, request: Request):
             project_type=m.project_type or "",
             status="結案" if m.completion_date else "製作",
             notes="[私帳對應] 由私帳案「%s」在母帳補建" % m.name,
-            mine_link_id=mine_id, created_at=_now(), updated_at=_now())
+            created_at=_now(), updated_at=_now())
         session.add(p)
+        _write_link(p, m)          # 連結唯一寫入者（同 create_mine_from_parent）
         m.source_project_id = p.id
         m.updated_at = _now()
         await session.commit()
@@ -1668,7 +1729,7 @@ async def create_mine_from_parent(parent_id: str, request: Request):
         p = await session.get(CrmProject, parent_id)
         if p is None or (p.entity or "parent") == "mine":
             raise HTTPException(status_code=404, detail="找不到此母帳專案")
-        if p.mine_link_id:
+        if await resolve_mine_link(session, p) is not None:      # 兩種連結形狀都認（舊形狀只看 mine_link_id 會再建一個分身）
             raise HTTPException(status_code=409, detail="這一案已經連到私帳了")
         lines = (await session.execute(
             select(CrmProjectCostLine)

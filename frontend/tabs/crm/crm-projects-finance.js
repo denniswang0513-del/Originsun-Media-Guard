@@ -600,7 +600,8 @@ async function _costPayAction(id, paid) {
 
 /** 動作做完要重畫哪一區 —— 人員費用與雜支各自不同，所以由呼叫端帶。 */
 function _costAfterPay(onDone) {
-    var ov = document.querySelector('.crm-modal-overlay');
+    // 只收動態長出來的那層；#proj-modal／#proj-import-modal 是靜態的（init 時搬到 body），刪掉之後「新增專案」就死了
+    var ov = document.querySelector('.crm-modal-overlay:not(#proj-modal):not(#proj-import-modal):not(#proj-inv-modal)');
     if (ov) ov.remove();
     if (onDone) { onDone(); }
     else if (state.selectedId) { _loadCostStaff(state.selectedId); }

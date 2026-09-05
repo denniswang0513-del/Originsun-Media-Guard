@@ -307,10 +307,7 @@ async def cancel_my_leave(leave_id: str, request: Request):
 # 守衛＝任何 me_* 鑰匙＋綁定人員檔案（409 原句只在 core.identity.require_bound_staff）。
 
 async def _me_bound(request: Request) -> dict:
-    payload = check_admin_or_module(request, *ME_MODULE_KEYS)
-    mods = grant_admin_all_modules(payload.get("access_level"), payload.get("modules") or [])
-    key = next((k for k in ME_MODULE_KEYS if k in mods), ME_MODULE_KEYS[0])
-    return await require_bound_staff(request, key)
+    return await require_bound_staff(request, *ME_MODULE_KEYS)   # 任一把 me_* 鑰匙＋綁定人員檔案
 
 
 def _in_crew(crew: list, staff_id: str, name: str) -> bool:
@@ -401,7 +398,8 @@ async def team_week(request: Request, start: str = ""):
     for day in board:
         for p in day["people"]:
             cells = people.setdefault(p["name"], {})
-            cells[day["date"]] = [{"project": it["project_name"], "project_id": it["project_id"], "note": it["task_note"], "hours": it["hours"],
+            # 不吐 project_id：私帳案 id 對任何 me_* 員工都不該外洩（同 _team_row）；彈窗用案名查
+            cells[day["date"]] = [{"project": it["project_name"], "note": it["task_note"], "hours": it["hours"],
                                    "planned_hours": it["planned_hours"], "status": it["status"],
                                    "stage_name": it["stage_name"], "work_type": it["work_type"]} for it in p["items"]]
     shoots: dict = {d: [] for d in days}

@@ -54,7 +54,8 @@ def test_phase_two_and_three_hooks():
     main = js_code_only(repo_src("frontend/tabs/crm/crm-projects.js"))
     assert "loadClosingBanner(pid, host)" in main
     assert '"project_id": getattr(p, "project_id", None) or ""' in repo_src("core/crm_logic.py").split("def group_payables")[1].split("def ")[0]
-    assert "window._crmGoToProjectPay('${_esc(it.project_id)}')" in js_code_only(repo_src("frontend/tabs/crm/crm-payables.js"))
+    pay_src = js_code_only(repo_src("frontend/tabs/crm/crm-payables.js"))
+    assert "window._crmPayableGo('${_esc(it.project_id)}')" in pay_src and "window._crmPayableGo = async function" in pay_src   # 2026-09-06 review: bridge loads the projects tab first
     m = js_code_only(repo_src("frontend/m/views/projects.js"))
     assert "function _payRows(p, d)" in m and "${_payRows(p, d)}" in m and "'amount_receivable' in p" in m, "沒金額權限只剩狀態字"
 

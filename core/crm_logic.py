@@ -415,8 +415,10 @@ def project_pay_label(items) -> str:
     items＝[(request_date | None, payment_status), ...]。最近的日期在前；同一天合成一組。
     例：「9/4 請款 4 張（已付 1）」、「9/4 ×4、8/20 ×1（已付 2）」。沒有就空字串。
     """
+    from core.hr_logic import tw_day
     by_day: dict = {}
     for d, status in items or ():
+        d = tw_day(d)          # 台北日期（request_date 可能是 UTC now 或台北午夜存成前一天 16:00Z）
         key = (d.year, d.month, d.day) if d else None
         by_day[key] = by_day.get(key, 0) + 1
     if not by_day:
@@ -437,7 +439,8 @@ def project_pay_label(items) -> str:
 def group_misc_default(budget_amount, misc_pct) -> int:
     """子表雜支預算沒設時的預設：子表預算 × 專案雜支比（owner 2026-09-05：子表預算含委外與雜支，雜支預設 5%）。"""
     b = int(budget_amount or 0)
-    return int(round(b * (misc_pct or 5) / 100)) if b else 0
+    pct = misc_pct if misc_pct is not None else 5      # 明填 0 就是 0（不是「沒設」）
+    return int(round(b * pct / 100)) if b else 0
 
 
 def misc_budget_total_of(groups, misc_pct) -> int | None:

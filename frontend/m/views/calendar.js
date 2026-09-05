@@ -73,7 +73,7 @@ function layout() {
         <button type="submit" class="m-btn-primary" id="cal-submit">送出</button>
         <button type="button" class="m-btn wide" id="cal-cancel-edit" hidden>取消修改</button>
       </form>
-      ${state.canWrite ? '' : '<div class="m-empty">此帳號只能檢視拍攝排程</div>'}
+      ${state.canWrite ? '' : '<div class="m-empty" id="cal-ro-note">此帳號只能檢視拍攝排程</div>'}
       <div id="cal-list">${skeleton(3)}</div>
       <div id="cal-cfg"></div>`;
 }
@@ -169,6 +169,12 @@ async function loadOptions() {
     const keep = { project: F('project_id').value, loc: F('location').value };
     try { _o = await mfetch(`${API}/options?${optionsQuery()}`); }
     catch (e) { _o = {}; toast('行事曆字彙載入失敗：' + e.message, 'err'); }
+    // 行事曆的寫入權限是 crm_projects 模組（api_shoots._check_write），不是 CRM 的 can_write（Lv3）：
+    // /shoots/options 回 me.can_write 就是給這裡用的，能寫的人把 .w 的遮罩拿掉
+    if (_o.me && _o.me.can_write) {
+        const root = document.getElementById('tab-calendar');
+        if (root) { root.querySelectorAll('.w').forEach((el) => el.classList.remove('w')); const n = root.querySelector('#cal-ro-note'); if (n) n.hidden = true; }
+    }
     computeBusy(_o.equipment);
     mountProject(keep.project, _editing ? { value: _editing.project_id, label: shootName(_editing) } : null);
     mountLocation(keep.loc);

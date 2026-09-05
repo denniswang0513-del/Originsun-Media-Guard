@@ -11,8 +11,8 @@
  * 寫入守衛是「本人＋綁定人員檔案」，不看 CRM 的 can_write，所以這頁的按鈕不掛 .w。
  * 鐵則：不畫任何個人工時合計（/mine 回的 planned_total／actual_total 這裡不用）。
  */
-import { mfetch, toast, esc, todayLocal } from '../shell.js';
-import { skeleton, errBox, pill, withBusy, pickerHtml, mountPicker, segHtml, mountSeg, selectOpts, openSheet, closeSheet } from '../ui.js';
+import { mfetch, toast, esc, todayLocal, dateIso } from '../shell.js';
+import { skeleton, errBox, pill, withBusy, pickerHtml, mountPicker, segHtml, mountSeg, selectOpts, openSheet, closeSheet, shouldLoad, markStale } from '../ui.js';
 
 const F = (id) => document.getElementById('wl-' + id);
 let _day = todayLocal();
@@ -24,7 +24,7 @@ const dayLabel = (iso) => {
     const d = new Date(iso + 'T00:00:00');
     return isNaN(d) ? iso : `${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`;
 };
-const shiftDay = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const shiftDay = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return dateIso(d); };   // 本地日期只有 shell.dateIso 一份
 const stagesOf = (type) => ((_vocab && _vocab.stages) || {})[type] || [];
 
 async function loadVocab() {
@@ -144,6 +144,7 @@ async function openForm(host, row = {}) {
                     if ((r.unmatched_projects || []).length) toast('已存，但「' + r.unmatched_projects.join('、') + '」對不到案，管理員會再指定');
                 }
                 toast(row.id ? '已更新' : '已新增');
+                markStale('worklog');
                 closeSheet();
                 await load(host);
             } catch (e) { toast(e.message, 'err'); }
@@ -152,7 +153,7 @@ async function openForm(host, row = {}) {
     F('del')?.addEventListener('click', async () => {
         if (!confirm('刪掉這一筆？')) return;
         await withBusy(F('del'), async () => {
-            try { await mfetch('/api/v1/timesheets/mine/' + encodeURIComponent(row.id), { method: 'DELETE' }); toast('已刪除'); closeSheet(); await load(host); }
+            try { await mfetch('/api/v1/timesheets/mine/' + encodeURIComponent(row.id), { method: 'DELETE' }); toast('已刪除'); markStale('worklog'); closeSheet(); await load(host); }
             catch (e) { toast(e.message, 'err'); }
         });
     });
@@ -183,5 +184,5 @@ export async function render(host, { first }) {
         });
         host.querySelector('#wl-date').addEventListener('change', (ev) => { if (ev.target.value) { _day = ev.target.value; load(host); } });
     }
-    await load(host);
+    if (shouldLoad('worklog', { first })) await load(host);   // 切回來 60 秒內沒改過就不重抓（同其他分頁）
 }

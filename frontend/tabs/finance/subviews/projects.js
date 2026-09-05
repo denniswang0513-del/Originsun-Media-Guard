@@ -125,7 +125,8 @@ const _payBtn = (x) => (x.payment_status === '已付款'
               onclick="window._finProjLedger.pay('${esc(x.id)}')">標記付款</button>
        <button class="crm-btn crm-btn-secondary crm-btn-sm" title="撤掉這張請款單（這筆不用請了）"
               style="font-size:10px;padding:1px 6px;color:#fca5a5;margin-left:4px;"
-              onclick="window._finProjLedger.withdraw('${esc(x.id)}','${esc(x.summary || '')}')">收回請款</button>`);
+              data-id="${esc(x.id)}" data-sum="${esc(x.summary || '')}"
+              onclick="window._finProjLedger.withdraw(this.dataset.id, this.dataset.sum)">收回請款</button>`);   // 摘要走 data-（內插進 JS 字串遇到 ' 會 SyntaxError）
 
 export default async function render(container, ctx = {}) {
     _c = container;

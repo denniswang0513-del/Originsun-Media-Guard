@@ -656,10 +656,19 @@ def main():
     print("\n[*] 執行前端 lint gate (eslint frontend)...")
     _npx = shutil.which("npx")
     if _npx and os.path.isdir(os.path.join(_repo, "node_modules")):
-        e_result = subprocess.run(
-            [_npx, "eslint", "frontend"],
-            capture_output=True, text=True, timeout=300, cwd=_repo,
-        )
+        try:
+            e_result = subprocess.run(
+                [_npx, "eslint", "frontend"],
+                capture_output=True, text=True, timeout=300, cwd=_repo,
+            )
+        except subprocess.TimeoutExpired:
+            # 逾時也是沒過：版號要回滾，不然留下「跳了版號、什麼都沒發」的狀態
+            print("\n[ERROR] 前端 lint 逾時（300s），不允許發布")
+            v_data["version"] = current_version
+            atomic_json_write(VERSION_FILE, v_data)
+            sync_docs_version(current_version)
+            print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+            return 1
         if e_result.returncode != 0:
             print("\n[ERROR] 前端 lint 未過！不允許發布（CI 也會擋）：")
             print((e_result.stdout or e_result.stderr or "")[-2000:])

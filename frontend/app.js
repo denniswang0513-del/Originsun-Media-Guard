@@ -439,7 +439,9 @@ import './js/app/remote-dispatch.js';
                     prevLbls.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '100%'; });
                 }
 
-                rptLog(msg, data.type || 'info');
+                // 報表分頁點到才載：rptLog 只有它載了才在，沒載就落到共用的 appendLog（別讓 handler 炸掉）
+                if (typeof window.rptLog === 'function') window.rptLog(msg, data.type || 'info');
+                else if (typeof window.appendLog === 'function') window.appendLog(msg, data.type || 'info');
             });
 
             // Report job finished
@@ -493,7 +495,9 @@ import './js/app/remote-dispatch.js';
                     } else if (data.drive_url) {
                         window.open(data.drive_url, '_blank');
                     } else if (data.local_path) {
-                        openReportFile(data.local_path, '');
+                        // openReportFile 早就不存在（2026-03 拿掉）：直接請本機代理開檔
+                        fetch('/api/v1/utils/open_file', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                               body: JSON.stringify({ path: data.local_path }) }).catch(() => {});
                     }
                 }
             });
@@ -806,6 +810,7 @@ import './js/app/remote-dispatch.js';
         }
 
         // ================= Tab 切換邏輯 =================
+        let _switchGen = 0;      // 併發切換：慢的那次載入回來不能蓋掉現在畫面上那頁的 chrome／hash
         async function switchTab(tabId) {
             if (typeof window._costCheckUnsaved === 'function' && Object.keys(window._costDirtyMap || {}).length > 0) {
                 window._costCheckUnsaved(function() { window._costDirtyMap = {}; switchTab(tabId); });
@@ -817,7 +822,9 @@ import './js/app/remote-dispatch.js';
             _section.classList.remove('hidden');
             // 第一次切到這頁：現在才載（html + js + init）。fresh＝這次真的載進來了（載過的回 false）
             if (!_section.children.length) _section.innerHTML = _LOADING_HTML;
+            const gen = ++_switchGen;
             const fresh = await _loadTab(tabId);
+            if (gen !== _switchGen) return;      // 等載入時使用者又切走了：那一次會做完它自己的收尾
 
             // Sync grouped-nav chrome (top-bar highlight + left sidebar)
             _syncGroupChrome(tabId);

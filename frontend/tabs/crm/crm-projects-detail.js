@@ -461,7 +461,9 @@ function renderDetail(project) {
         </div>
         <div id="proj-pay-root">載入中...</div>
     `;
-    callbacks.loadPayTab?.(project.id);
+    // 收付款分頁要抓 ~11 支：只有它正開著才抓（切到那頁時 crm-projects.js 的分頁點擊本來就會 loadPayTab）
+    const _actTab = document.querySelector('#proj-detail-tabs .crm-tab.active')?.dataset.tab;
+    if (!_actTab || _actTab === 'team') callbacks.loadPayTab?.(project.id);
 
     const actions = document.getElementById('proj-bar-actions');
     if (actions) {

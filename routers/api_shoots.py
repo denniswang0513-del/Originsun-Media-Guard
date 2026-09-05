@@ -37,8 +37,12 @@ try:
 except ImportError:  # 機隊 agent 沒裝 DB 套件
     pass
 
+from core.money import MoneyRedactRoute
+
+# route_class=MoneyRedactRoute：/options 帶 _slim_project（合約金額、已收）給行事曆表單，沒 money_view 的人
+# 出口統一抹掉（同 api_crm_mobile／routers/crm）—— 2026-09-06 code review 抓到這支漏了
 router = APIRouter(prefix="/api/v1/shoots", tags=["shoots"],
-                   dependencies=[Depends(check_logged_in)])
+                   dependencies=[Depends(check_logged_in)], route_class=MoneyRedactRoute)
 
 _TW = ZoneInfo("Asia/Taipei")
 WRITE_MODULE = "crm_projects"
@@ -226,11 +230,13 @@ async def _recompute_project_shoot_date(session, project_id: str) -> None:
     rows = (await session.execute(
         select(CrmShoot.date, CrmShoot.status).where(CrmShoot.project_id == project_id))).all()
     d = derive_project_shoot_date([(_d(r[0]), r[1]) for r in rows], _today())
+    if not d:
+        return      # 沒有活著的場次＝算不出來：不動專案上手填的拍攝日（2026-09-06 review：全取消曾把它洗成 NULL）
     p = (await session.execute(select(CrmProject).where(CrmProject.id == project_id))).scalars().first()
     if p is not None:
         # 日期欄寫入慣例＝該日 UTC 午夜（routers/crm/_shared._parse_shoot_date；tests/unit/test_shoot_date_convention）
         # —— 寫台北午夜會存成前一天 16:00Z，手機／桌機取 ISO 前 10 碼就少一天
-        p.shoot_date = _parse_shoot_date(d.isoformat()) if d else None
+        p.shoot_date = _parse_shoot_date(d.isoformat())
 
 
 async def _sync_calendar(sid: str) -> dict:
@@ -484,14 +490,13 @@ async def update_shoot(sid: str, req: ShootUpdate, request: Request):
         s.updated_at = datetime.now(timezone.utc)
         if "equipment_ids" in req.model_fields_set and req.equipment_ids is not None:
             await _reserve_equipment(session, s, req.equipment_ids)
-        else:
-            # 日期改了：預約列的應還日跟著走
-            due = (_d(s.end_date) or _d(s.date)) + timedelta(days=1)
-            for c in (await session.execute(
-                    select(EquipmentCheckout).where(EquipmentCheckout.shoot_id == s.id,
-                                                    EquipmentCheckout.returned_at.is_(None)))).scalars().all():
-                c.due_at = _parse_shoot_date(due.isoformat())
-                c.project_id = s.project_id
+        # 日期／專案改了：預約列的應還日、專案跟著走（手機每次都送 equipment_ids，原本放在 else 裡永遠不跑）
+        due = (_d(s.end_date) or _d(s.date)) + timedelta(days=1)
+        for c in (await session.execute(
+                select(EquipmentCheckout).where(EquipmentCheckout.shoot_id == s.id,
+                                                EquipmentCheckout.returned_at.is_(None)))).scalars().all():
+            c.due_at = _parse_shoot_date(due.isoformat())
+            c.project_id = s.project_id
         await _recompute_project_shoot_date(session, s.project_id)
         if old_pid and old_pid != s.project_id:
             await _recompute_project_shoot_date(session, old_pid)

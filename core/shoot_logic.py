@@ -63,6 +63,8 @@ def event_body(s: dict, link: str = "") -> dict:
     st, et = (s.get("start_time") or "").strip(), (s.get("end_time") or "").strip()
     if st:
         start = {"dateTime": f"{start_d}T{st}:00", "timeZone": TAIPEI_TZ}
+        if et and et < st and end_d == start_d:
+            end_d = (date.fromisoformat(end_d) + timedelta(days=1)).isoformat()   # 跨午夜（22:00–02:00）：結束日隔天，不然 Google 回 400
         end = {"dateTime": f"{end_d}T{et or st}:00", "timeZone": TAIPEI_TZ}
     else:
         nxt = date.fromisoformat(end_d) + timedelta(days=1)

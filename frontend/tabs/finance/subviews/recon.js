@@ -610,7 +610,7 @@ function _stmtCacheCats(d) {
  */
 /** 這一列能不能送源日請款：私帳的**流出**列才有意義（那是我先墊、要跟公司
  *  收回來的錢）。收入列、母公司的列都沒有這回事。 */
-const _stmtCanPetty = (r) => finIsMine() && (r.amount || 0) < 0;
+const _stmtCanPetty = (r) => finIsMine() && (r.amount || 0) < 0 && !(r.splits || []).length;   // 已拆項不能再請款（後端 _splits_are_exclusive）
 
 _fr.stmtPettyToggle = (i, btn) => {
     const r = _stmtPreview && _stmtPreview.rows[i];
@@ -1302,6 +1302,7 @@ const _stmtRowPayload = (x) => ({
 function _stmtAllocCell(r, i) {
     const S = _sideOf(r);
     if (!S) return '<span style="color:#4b5563;font-size:11px;">—</span>';
+    if ((r.splits || []).length) return '<span style="color:#4b5563;font-size:11px;" title="已拆項的列不能再掛發票／請款（送出會整批被擋）">—（已拆項）</span>';
     const allocs = r[S.field] || [];
     const byId = _stmtIndex()[S.idx];
     let label = S.empty;

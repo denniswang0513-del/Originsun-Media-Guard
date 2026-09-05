@@ -33,8 +33,8 @@ def test_today_and_team_week_are_gated_by_any_me_key_plus_binding():
         assert "_me_bound(request)" in body, fn
         assert "body.staff_id" not in body and "username=" not in body.split("select(")[0], fn
     gate = func_body(src, "async def _me_bound(")
-    assert "check_admin_or_module(request, *ME_MODULE_KEYS)" in gate
-    assert "require_bound_staff(request, key)" in gate        # 409 原句只在 core.identity
+    assert "require_bound_staff(request, *ME_MODULE_KEYS)" in gate   # 2026-09-06：守衛收成一行（任一把 me_* 鑰匙＋綁定）
+    assert "require_bound_staff(request, *ME_MODULE_KEYS)" in gate        # 409 原句只在 core.identity
 
 
 def test_team_week_reuses_the_board_calculation():

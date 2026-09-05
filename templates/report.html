@@ -483,6 +483,8 @@
                 return img.complete ? null : new Promise(function (res) { img.onload = img.onerror = res; });
             }));
         };
+        // 使用者自己 Ctrl+P／另存 PDF：先把膠卷全載回來（不然只有視窗附近那幾張印得出來）
+        window.addEventListener('beforeprint', function () { window.__reportLoadAll && window.__reportLoadAll(); });
         if (!('IntersectionObserver' in window)) { imgs.forEach(show); return; }
         var io = new IntersectionObserver(function (entries) {
             entries.forEach(function (en) { (en.isIntersecting ? show : hide)(en.target); });

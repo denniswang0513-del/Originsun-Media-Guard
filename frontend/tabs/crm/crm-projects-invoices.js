@@ -157,8 +157,13 @@ function _listHtml() {
  *  而且選錯了沒有人會知道。 */
 _P.create = function _openCreate() {
     if (!_cur) return;
-    const host = document.getElementById('proj-inv-modal');
+    let host = document.getElementById('proj-inv-modal');
     if (!host) return;
+    // 發票模組現在住在收付款分頁的 hidden 宿主裡：浮層在 display:none 的祖先底下永遠畫不出來 → 搬到 body
+    if (host.closest('[hidden]')) {
+        document.querySelectorAll('body > #proj-inv-modal').forEach((x) => { if (x !== host) x.remove(); });
+        document.body.appendChild(host);
+    }
     const left = _remaining();
     host.className = 'crm-modal-overlay';   // 背景、置中、z-index 都交給 crm.css
     host.innerHTML = `

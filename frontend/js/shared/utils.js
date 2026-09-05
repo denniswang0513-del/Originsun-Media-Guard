@@ -928,6 +928,7 @@ export function startVisiblePolling(fn, ms, { sectionId } = {}) {
         && (!sectionId || !document.getElementById(sectionId)?.classList.contains('hidden'));
     const tick = () => { if (visible()) fn(); };
     tick();
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });   // 回前景立刻補一發，別等下一輪
     return setInterval(tick, ms);
 }
 

@@ -149,8 +149,12 @@ function actionBox(kind, p) {
             }
             // 收付軟擋：推到結案時，還有未收的發票或未付的請款就先問（抽屜手上的資料就夠判；沒金額權限也判得出張數）
             if (closedPhases().includes(body.status) && !closedPhases().includes(p.status)) {
-                const unpaid = (d.payments || []).filter((x) => !x.is_advance && x.payment_status !== paidStatus()).length;
-                const uncollected = (d.invoices || []).filter((x) => x.payment_status && !/收款|撥款/.test(x.payment_status) || x.payment_status === list('invoice_unpaid') ).length;
+                const dd = _drawer || {};
+                const unpaid = (dd.payments || []).filter((x) => !x.is_advance && x.payment_status !== paidStatus()).length;
+                // 未收＝款項狀態等於該方向的「未收／未付」那個字（options.invoice.statuses_by_type[方向][1]）；作廢不算
+                const _inv = opt().invoice || {};
+                const unpaidOf = (x) => (((_inv.statuses_by_type || {})[x.payment_type]) || [])[1] || '';
+                const uncollected = (dd.invoices || []).filter((x) => x.issue_status !== _inv.void_status && x.payment_status && x.payment_status === unpaidOf(x)).length;
                 const parts = [];
                 if (uncollected) parts.push(`${uncollected} 張發票未收`);
                 if (unpaid) parts.push(`${unpaid} 張請款未付`);
@@ -186,11 +190,13 @@ function actionBox(kind, p) {
     }
 }
 
+let _drawer = null;     // 目前抽屜裡那一案的整包（project／payments／invoices…）；actionBox 的收付軟擋要看它
 export async function openProject(id) {
     const body = openSheet(skeleton(3));
     let d;
     try { d = await mfetch('/api/v1/crm/m/projects/' + encodeURIComponent(id)); }
     catch (e) { body.innerHTML = errBox(e); return; }
+    _drawer = d;
     const p = d.project || {};
     body.innerHTML = detailHtml(d);
     // 四顆動作像分段按鈕：打開哪個功能哪顆就藍（owner 2026-09-03），再按一次收起來。

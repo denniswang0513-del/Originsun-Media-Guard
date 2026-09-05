@@ -360,6 +360,8 @@ export const saveRowNow = (host, tr) => host._tsSaveNow?.(tr);
 /** 刪一列：有 id 先問再 DELETE；表空了補一列。 */
 export async function removeRow(host, tr, cfg = {}) {
     const f = cfg.tfetch || tsFetch;
+    // 第一次自動存（POST）還在飛：等它回來拿到 id 再刪，不然 DOM 拿掉了、伺服器卻多一列孤兒
+    for (let i = 0; tr._saving && i < 50; i++) await new Promise((r) => setTimeout(r, 100));
     if (tr.dataset.id) {
         if (!confirm('刪掉這一列？')) return false;
         try { await f('/api/v1/timesheets/mine/' + tr.dataset.id, { method: 'DELETE' }); }

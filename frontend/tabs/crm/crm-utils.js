@@ -188,6 +188,7 @@ export function searchableSelect(sel, opts = {}) {
     function _buildItems() {
         items = [];
         for (const o of sel.options) {
+            if (o.disabled) continue;            // 呼叫端標 disabled 的（例如已對應的母帳案）不給選
             items.push({ value: o.value, label: o.textContent });
         }
     }
@@ -220,15 +221,13 @@ export function searchableSelect(sel, opts = {}) {
     // 下拉點開只會看到它自己那一項，使用者得先手動清空才換得掉（實測專案下拉
     // 32 個選項，選過之後再點開只剩 1 個）。開始打字才過濾。
     input.addEventListener('focus', () => { _buildItems(); _render(''); });
-    input.addEventListener('input', () => {
-        _buildItems(); _render(input.value);
-        // 🔴 把字刪光＝要取消這個篩選（owner 2026-09-04「搜尋沒有填東西他就卡住了」）：
-        // 原本只過濾清單，底層 <select> 還留著上次選的值，畫面空白、清單卻一直被篩住，而且每一頁都這樣。
-        if (!input.value.trim() && sel.value) _pick('', '');
-    });
+    input.addEventListener('input', () => { _buildItems(); _render(input.value); });
     input.addEventListener('blur', () => {
         setTimeout(() => {
             panel.style.display = 'none';
+            // 🔴 把字刪光再離開＝要取消這個篩選（owner 2026-09-04「搜尋沒有填東西他就卡住了」）。
+            // 改在 blur 才清（原本打字一刪光就送空值：inline 編輯的人員／客戶下拉退格重打就被存成空，2026-09-06 review）
+            if (!input.value.trim() && sel.value) { _pick('', ''); return; }
             // 打到一半離開：文字對回目前真的選著的那個（不然框裡的字跟篩選對不上）
             const o = sel.options[sel.selectedIndex];
             input.value = (o && o.value) ? o.textContent : '';
@@ -659,6 +658,7 @@ export function invoiceIssueBadge(status) {
 export { invoiceAmounts } from '../../js/shared/invoice-amounts.js';
 
 export function crmToast(msg, ms = 2000) {
+    if (typeof ms !== 'number') ms = 2000;      // 有些呼叫端傳 true 當「錯誤」旗標：不是毫秒，別變成 1ms 就消失
     let el = document.getElementById('cg-toast');
     if (el) el.remove();
     el = document.createElement('div');

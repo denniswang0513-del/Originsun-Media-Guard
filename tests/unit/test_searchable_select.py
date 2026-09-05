@@ -7,7 +7,7 @@ from tests.unit._srcscan import js_code_only, js_func_body, repo_src
 
 def test_clearing_text_clears_the_underlying_select_and_blur_resyncs():
     fn = js_func_body(js_code_only(repo_src("frontend/tabs/crm/crm-utils.js")), "export function searchableSelect(sel, opts = {}) {")
-    assert "if (!input.value.trim() && sel.value) _pick('', '');" in fn
+    assert "if (!input.value.trim() && sel.value) { _pick('', ''); return; }" in fn   # 2026-09-06 review: clear on blur, not mid-typing
     blur = fn[fn.index("input.addEventListener('blur'"):]
     blur = blur[:blur.index("input.addEventListener('keydown'")]
     assert "input.value = (o && o.value) ? o.textContent : '';" in blur

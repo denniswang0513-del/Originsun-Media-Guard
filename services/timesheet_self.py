@@ -193,6 +193,10 @@ async def apply_update(session, r, body) -> None:
     """把 body（TimesheetManualRow 形狀）套到一列，員工改自己的（update_row）與管理員總表
     （admin_update_row）同一份。手填列：實際或計畫至少一個 > 0、status 重算；Sheet 列：不套那條、
     status 保留 import。案名沒動就沿用原對映（不載查表）；動了才重新對映。不 commit。"""
+    # 計畫 h 欄 2026-09-06 從格子拿掉：body 沒帶 planned_hours 就沿用列上的（不然計畫列一改就被洗成 NULL、
+    # 只改內容還會 422「至少一個 > 0」）；有帶（含明確 null）才照 body
+    if "planned_hours" not in getattr(body, "model_fields_set", set()) and getattr(r, "planned_hours", None) is not None:
+        body = body.model_copy(update={"planned_hours": r.planned_hours})
     unchanged = not body.project_id and (body.project_name or "").strip() == (r.project_name or "")
     lk = None if unchanged else await load_project_lookup(session)
     fields, _why = normalize_row(body, lk, await names_for(session, [body]), manual=r.source == "manual",

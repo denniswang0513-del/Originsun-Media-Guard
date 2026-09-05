@@ -66,7 +66,8 @@ def test_admin_phase_cost_lines_never_double_count():
     """
     src = repo_src("routers/crm/costs.py")
     assert 'ADMIN_PHASE = "行政雜支"' in src, "述詞要有單一來源"
-    assert src.count("CrmProjectCostLine.phase != ADMIN_PHASE") == 2, \
+    # 整案／子表清單／單一子表（_compute_group_summary，2026-09-06 review 補）：三處聚合都要排除行政雜支
+    assert src.count("CrmProjectCostLine.phase != ADMIN_PHASE") == 3, \
         "整案與子表兩處聚合都要排除行政雜支階段"
     # 逐案損益那支早就這樣濾了 —— 三處口徑要一致
     assert 'CrmProjectCostLine.phase != "行政雜支"' in \

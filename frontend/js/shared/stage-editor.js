@@ -110,7 +110,7 @@ export async function openStageEditor(cfg = {}) {
                 const r = await f(API, { method: 'POST', body: { parent_id: b.dataset.parent, name: '新階段' } });
                 dirty = true;
                 await load();
-                const inp = grid.querySelector(`input[data-id="${CSS_escape(r.id || '')}"]`);
+                const inp = grid.querySelector(`input[data-id="${CSS_escape((r.node && r.node.id) || r.id || '')}"]`);   // 端點回 {node:{id}}
                 if (inp) { inp.focus(); inp.select(); }
                 return;
             }

@@ -236,6 +236,7 @@ async function submit(ev) {
     ev.preventDefault();
     const body = payload();
     if (_editing) {
+        if (_editing.payment_type) body.payment_type = _editing.payment_type;   // 修改不改方向（代開票是付款方向，別被改回收款）
         // 表單沒有的欄位照原票；有的以表單為準
         const issue = F('issue_status').value;
         if (issue === issuedStatus() && !F('invoice_number').value.trim()) { toast('已開立要填發票號碼', 'err'); F('invoice_number').focus(); return; }

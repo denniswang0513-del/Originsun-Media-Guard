@@ -61,7 +61,8 @@ function _render() {
                     : `（未對應）
                        <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:6px;"
                                title="在 CRM 建一筆同名客戶並連結（只帶代稱／全稱／統編）"
-                               onclick="window._finCli.createInCrm('${m.id}','${esc(m.short_name)}')">在 CRM 建立</button>`}</td></tr>`;
+                               data-id="${esc(m.id)}" data-name="${esc(m.short_name)}"
+                               onclick="window._finCli.createInCrm(this.dataset.id, this.dataset.name)">在 CRM 建立</button>`}</td></tr>`;
 
     _c.innerHTML = `
         <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:12px;">

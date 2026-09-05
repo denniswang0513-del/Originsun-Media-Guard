@@ -96,7 +96,7 @@ def test_project_wire_is_shared_by_mobile_and_desktop():
     for header in ("async def get_project(", "async def update_project(",
                    "async def update_project_status("):
         body = code_only(func_body(projects, header))
-        assert "project_wire(session, project)" in body, f"{header} 沒走 project_wire"
+        assert "project_wire(session, project" in body, f"{header} 沒走 project_wire"
         assert '"proposal_status"' not in body, f"{header} 又自己拼了一次形狀"
 
 

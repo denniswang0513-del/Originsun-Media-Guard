@@ -665,7 +665,9 @@ async def list_invoices(
         if category:
             query = query.where(CrmInvoice.category == category)
         if project_id:
-            query = query.where(CrmInvoice.project_id == project_id)
+            # 發票可掛多案（project_ids JSON 清單，project_id 只是第一個）：兩邊都認，不然掛在第二案的票在那案看不到
+            query = query.where(or_(CrmInvoice.project_id == project_id,
+                                    CrmInvoice.project_ids.like('%"' + project_id + '"%')))
         if q:
             ql = f"%{q}%"
             query = query.where(or_(
@@ -766,7 +768,7 @@ async def invoice_candidates(project_id: str, request: Request, q: str = ""):
         same_title = bool(title) and (x.company_name or "") == title
         hit_name = bool(pname) and pname[:6] in (x.title or "")
         score = (2 if (same_title and hit_name) else 1 if same_title else 0)
-        in_project = x.project_id == project_id
+        in_project = project_id in invoice_project_ids(x.project_id, x.project_ids)
         if kw and kw not in ((x.invoice_number or "") + (x.title or "")
                              + (x.company_name or "")).lower():
             continue
@@ -807,7 +809,10 @@ async def set_invoice_project(invoice_id: str, request: Request):
         require_entity(request, inv.entity or "parent", level="full")
         if target:
             await _assert_project_link(session, request, target, inv.category)
+        # 連結＝這張票就屬於這一案（單案，多案清單重來）；取消＝整個清單清掉。
+        # 只改 project_id 不動 project_ids 會留下「取消了卻還掛在 A、B」的殘影（invoice_project_ids 讀的是清單）
         inv.project_id = target
+        inv.project_ids = None
         inv.updated_at = _now()
         await session.commit()
         d = _to_invoice_dict(inv)
@@ -1016,8 +1021,13 @@ async def restore_invoice_from_trash(trash_id: str, request: Request):
         # 分配連結只能經由 replace_invoice_allocs_bulk 寫（它同時動分配表、收支列主要發票、發票收款狀態）：
         # 每筆收支＝「現在還掛著的其他發票」＋「補回這張」整組重寫；被刪的那段時間掛上的別張不動。
         pairs, fees, restored_links = [], {}, 0
+        seen_entries: set = set()
         for lk in data.get("links") or []:
-            e = await session.get(CrmCashEntry, lk.get("cash_entry_id") or "")
+            eid_ = lk.get("cash_entry_id") or ""
+            if eid_ in seen_entries:
+                continue            # 舊資料同一筆收支對這張票有兩列連結：重複的 pair 會讓 replace_invoice_allocs_bulk 500
+            seen_entries.add(eid_)
+            e = await session.get(CrmCashEntry, eid_)
             if not e:
                 continue
             rows = []
@@ -1038,6 +1048,8 @@ async def restore_invoice_from_trash(trash_id: str, request: Request):
             e = await session.get(CrmCashEntry, eid)
             if e and not e.invoice_id:
                 _set_primary_invoice(e, inv)
+        # 收款狀態與代開應付單照現在的分配重算（刪除時未付的代開應付單一起收掉了，還原要長回來）
+        await resettle_invoices(session, [inv.id])
         await session.delete(t)
         await session.commit()
     return {"status": "ok", "id": trash_id, "restored_links": restored_links}
@@ -1194,6 +1206,11 @@ async def delete_invoice(invoice_id: str, request: Request):
                 select(CrmCashEntry)
                 .where(CrmCashEntry.invoice_id == invoice_id))).scalars().all():
             _set_primary_invoice(e, None)
+        # 這張票自動長出的代開應付單：還沒付的一起收掉（留著會變沒有票的孤兒請款單、被付出去）；已付的留當紀錄
+        for pr in (await session.execute(
+                select(CrmPaymentRequest).where(CrmPaymentRequest.source_invoice_id == invoice_id,
+                                                CrmPaymentRequest.payment_status != "已付款"))).scalars().all():
+            await session.delete(pr)
         await session.delete(inv)
         await session.commit()
     return {"status": "ok"}

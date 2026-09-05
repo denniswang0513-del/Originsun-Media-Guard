@@ -2,7 +2,7 @@
  * crm-invoices.js — 帳務管理 Tab
  */
 import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, invoiceAmounts as _amountsFrom, invoicePayBadge as _payBadge, invoiceIssueBadge,
-         INV_PENDING_REMIT, INV_REMITTED, projectOptionsHtml,
+         INV_PENDING_REMIT, INV_REMITTED, projectOptionsHtml, crmToast,
          today as _today, hasModule } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
