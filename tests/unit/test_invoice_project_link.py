@@ -14,8 +14,11 @@ def test_candidates_endpoint_excludes_what_should_not_be_offered():
     fn = src.split("async def invoice_candidates(")[1].split("\n@router")[0]
     # 作廢的不是漏掉，是刻意作廢
     assert 'CrmInvoice.issue_status != "作廢"' in fn
-    # 已經掛在本案的畫面上已經有了
-    assert "CrmInvoice.project_id != project_id" in fn
+    # 已掛本案的：預設不列（畫面上已經有了），但**有搜尋字時要列**並標 in_project
+    # —— 原本一律排除，使用者打發票號碼卻得到「沒有符合的發票」，而那張就在本案上
+    # （收款表因為 payment_type=付款 沒畫它）。搜尋回「找不到」是在說謊。
+    assert "if in_project and not kw:" in fn
+    assert '"in_project": in_project' in fn
     # 帳本牆：只找同一本帳的
     assert "CrmInvoice.entity ==" in fn
     # 沒有私帳權限的人，連「這張掛在某個私帳案」都不該看到
@@ -31,7 +34,7 @@ def test_candidates_rank_by_how_likely_it_is_this_project():
     assert "same_title = " in fn and "hit_name = " in fn
     assert "score = (2 if (same_title and hit_name) else 1 if same_title else 0)" in fn
     # 掛在別案的照列但要標出來 —— 掛錯案要能改回來
-    assert '"linked_to": names.get(' in fn
+    assert '"linked_to": "" if in_project else names.get(' in fn
 
 
 def test_link_endpoint_only_touches_the_attribution():
@@ -55,6 +58,20 @@ def test_the_button_sits_next_to_the_invoice_button():
     """按鈕放「收款」標題列，跟「開發票」並排 —— 那正是發現少了一張的地方。"""
     js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-pay.js"))
     assert "window._projPay.linkInvoice()" in js
-    assert "linkInvoice: () =>" in js and "doLink: async (invoiceId)" in js
+    assert "linkInvoice: () =>" in js and "doLink: async (invoiceId, unlink)" in js
     assert "/invoice-candidates" in js
     assert "method: 'PATCH'" in js
+
+
+def test_payment_direction_invoices_are_visible_somewhere():
+    """🔴 掛在本案、方向是**付款**的發票（代開撥款）原本兩邊都沒有家：
+    收款表用 payment_type==='收款' 濾掉、付款表只吃工項與請款單。
+    owner 2026-09-05 找不到快樂學游泳的 PJ00158178（$161,700）就是這個洞。
+
+    現在列在收款表尾巴、標「付款方向」、**不計入已開發票合計**。
+    """
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-pay.js"))
+    assert "const payside = " in js and "=== '付款'" in js
+    assert "ppay-payside" in js and "不計入已開發票" in js
+    # invoiced 仍然只加收款方向的（payside 不能混進去）
+    assert "const invoiced = inv.reduce(" in js

@@ -43,11 +43,18 @@ export function payStatus(project, invoices, payments, costLines) {
     const unrequestedGroups = groups.filter((g) => !g.payment);
     const unrequested = unrequestedGroups.reduce((a, g) => a + g.subtotal, 0);
     const kai = inv.filter((i) => /代開/.test(i.category || ''));
+    // 🔴 掛在本案、但方向是**付款**的發票（代開撥款給代開人）。收款表的
+    // payment_type==='收款' 會濾掉它，而付款表只吃工項與請款單 —— 於是它在
+    // 整個系統裡沒有家（owner 2026-09-05 找不到 PJ00158178 $161,700 就是這個）。
+    // 列出來但**不進 invoiced 合計**：那不是跟客戶收的錢。
+    const payside = (invoices || []).filter((i) => !INVOICE_VOID.has(i.issue_status)
+        && (i.payment_type || '收款') === '付款');
     return {
         invoices: inv, contract, invoiced, invoiceCount: inv.length, received, fee, unreceived,
         status: p.payment_status || '未到帳',
         payable, paid, requested, unrequested, unrequestedGroups, paidCount: pays.filter((x) => x.payment_status === PAID).length,
-        payCount: pays.length, margin: contract - payable, groups, others, kai, unassigned, unassignedLines,
+        payCount: pays.length, margin: contract - payable, groups, others, kai, payside,
+        unassigned, unassignedLines,
         uncollected: inv.filter((i) => !COLLECTED_RE.test(i.payment_status || '')),
     };
 }
@@ -150,7 +157,17 @@ function _recvHtml(s, money) {
     return `<div class="ppay-tbl"><table class="ppay-table">
         <thead><tr><th>發票號碼</th><th>日期</th><th>抬頭／摘要</th><th class="r">面額</th><th>狀態</th><th class="r">收到</th><th>入帳日</th><th></th></tr></thead>
         <tbody>${rows || '<tr><td colspan="8" class="dim" style="padding:12px;">還沒開發票</td></tr>'}
-        <tr class="tot"><td colspan="3">合計</td><td class="r num">${m(s.invoiced)}</td><td></td><td class="r num">${m(s.received)}</td><td colspan="2"></td></tr></tbody></table></div>
+        <tr class="tot"><td colspan="3">合計</td><td class="r num">${m(s.invoiced)}</td><td></td><td class="r num">${m(s.received)}</td><td colspan="2"></td></tr>
+        ${s.payside.map((i) => `<tr class="ppay-payside">
+            <td class="num">${_esc(i.invoice_number || '（未開立）')}</td>
+            <td class="num">${_esc(_d(i.invoice_date))}</td>
+            <td>${_esc(i.title || '')} <span class="crm-badge" style="background:#3f2a1a;color:#fbbf24;">付款方向</span></td>
+            <td class="r num">${m(i.amount_total || 0)}</td>
+            <td>${invoicePayBadge(i.payment_status)}</td>
+            <td colspan="2" class="dim" style="font-size:11px;">不計入已開發票</td>
+            <td><div class="ppay-acts"><button class="crm-btn crm-btn-secondary crm-btn-sm"
+                onclick="window._projPay.doLink('${_esc(i.id)}', true)" title="這張不屬於本案就取消">取消連結</button></div></td></tr>`).join('')}
+        </tbody></table></div>
         ${s.kai.length ? `<p class="ppay-note">代開發票：客戶匯的是面額，公司留代開費，其餘要匯給代開人 —— 在收支明細的那筆收款列按「請款」整筆請過去。</p>` : ''}`;
 }
 
@@ -323,7 +340,9 @@ window._crmGoToProjectPay = (projectId) => {
 // 快樂學游泳那案 7 張有 1 張（錄音租借 $630）就這樣一直沒進來，而畫面上
 // 看不出少了什麼 —— 所以按鈕放在「收款」標題列，跟「開發票」並排。
 function _linkRow(c, money) {
-    const tag = c.linked_to
+    const tag = c.in_project
+        ? '<span class="ppay-badge" style="background:#064e3b;color:#86efac;">已在本案</span>'
+        : c.linked_to
         ? `<span class="ppay-badge" style="background:#78350f;color:#fcd34d;">已掛：${_esc(c.linked_to)}</span>`
         : c.score === 2 ? '<span class="ppay-badge" style="background:#064e3b;color:#86efac;">抬頭與案名都吻合</span>'
         : c.score === 1 ? '<span class="ppay-badge" style="background:#1e3a5f;color:#bfdbfe;">同抬頭</span>' : '';
@@ -335,8 +354,11 @@ function _linkRow(c, money) {
         <td>${_esc(c.title || '')} ${dir} ${tag}</td>
         <td style="text-align:right;">${money ? '$' + fmtNum(c.amount_total || 0) : '—'}</td>
         <td class="dim">${_esc(c.payment_status || '')}</td>
-        <td style="text-align:right;"><button class="crm-btn crm-btn-primary crm-btn-sm"
-            onclick="window._projPay.doLink('${_esc(c.id)}')">連結</button></td></tr>`;
+        <td style="text-align:right;">${c.in_project
+            ? `<button class="crm-btn crm-btn-secondary crm-btn-sm"
+                 onclick="window._projPay.doLink('${_esc(c.id)}', true)">取消連結</button>`
+            : `<button class="crm-btn crm-btn-primary crm-btn-sm"
+                 onclick="window._projPay.doLink('${_esc(c.id)}')">連結</button>`}</td></tr>`;
 }
 
 async function _openLinkPicker(projectId) {
@@ -385,10 +407,11 @@ window._projPay = {
     confirmClosing,
     linkInvoice: () => { if (state.selectedId) _openLinkPicker(state.selectedId); },
     /** 挑好了：只改「這張發票屬於哪個案」，金額與狀態一個字都不動。 */
-    doLink: async (invoiceId) => {
+    doLink: async (invoiceId, unlink) => {
         try {
             await _fetch(`/invoices/${invoiceId}/project`, {
-                method: 'PATCH', body: JSON.stringify({ project_id: state.selectedId }),
+                method: 'PATCH',
+                body: JSON.stringify({ project_id: unlink ? null : state.selectedId }),
             });
             document.getElementById('ppay-link-modal')?.remove();
             window._projPay.refresh();

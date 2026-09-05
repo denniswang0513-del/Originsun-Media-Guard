@@ -2068,3 +2068,7 @@
 .ppay-chain .sep { width: 16px; height: 1px; background: #3a3a3a; margin: 0 6px; }
 .ppay-chain .sep.done { background: #86efac; }
 .ppay-chain .d { color: #8b8f96; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+
+/* 掛在本案但方向是付款的發票（代開撥款）——列出來但不計入已開發票合計。
+   底色與一般收款列分開，免得看成客戶要匯進來的錢。 */
+.ppay-payside td { background: #211a12; }

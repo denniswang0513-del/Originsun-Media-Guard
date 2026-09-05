@@ -744,8 +744,7 @@ async def invoice_candidates(project_id: str, request: Request, q: str = ""):
         rows = (await session.execute(
             select(CrmInvoice)
             .where(CrmInvoice.entity == (p.entity or "parent"),
-                   or_(CrmInvoice.issue_status.is_(None), CrmInvoice.issue_status != "作廢"),
-                   or_(CrmInvoice.project_id.is_(None), CrmInvoice.project_id != project_id))
+                   or_(CrmInvoice.issue_status.is_(None), CrmInvoice.issue_status != "作廢"))
             .order_by(CrmInvoice.invoice_date.desc().nullslast())
             .limit(400))).scalars().all()
         # 掛在別案的要顯示案名
@@ -767,13 +766,21 @@ async def invoice_candidates(project_id: str, request: Request, q: str = ""):
         same_title = bool(title) and (x.company_name or "") == title
         hit_name = bool(pname) and pname[:6] in (x.title or "")
         score = (2 if (same_title and hit_name) else 1 if same_title else 0)
+        in_project = x.project_id == project_id
         if kw and kw not in ((x.invoice_number or "") + (x.title or "")
                              + (x.company_name or "")).lower():
+            continue
+        # 🔴 已經掛在本案的：**有搜尋字時要回**，標成「已在本案」。
+        # 原本一律排除 —— 使用者打發票號碼卻得到「沒有符合的發票」，
+        # 而那張就在本案上（收款表因為 payment_type=付款 沒畫它）。
+        # 搜尋回「找不到」是在說謊，比不給搜還糟。
+        if in_project and not kw:
             continue
         if not kw and not score:
             continue          # 沒搜尋字時只給有關聯的，不要倒 400 張出來
         out.append({**_to_invoice_dict(x), "score": score,
-                    "linked_to": names.get(x.project_id or "", ""),
+                    "linked_to": "" if in_project else names.get(x.project_id or "", ""),
+                    "in_project": in_project,
                     "same_title": same_title, "hit_name": hit_name})
     out.sort(key=lambda d: (-d["score"], d.get("invoice_date") or ""), reverse=False)
     out.sort(key=lambda d: -d["score"])
