@@ -25,12 +25,31 @@ const COLLECTED_RE = /已收款|待撥款|已撥款/;
 /** 一案的收付狀態：純算式（給狀態列、提示、結案檢查三處共用）。 */
 export function payStatus(project, invoices, payments, costLines) {
     const p = project || {};
-    const inv = (invoices || []).filter((i) => !INVOICE_VOID.has(i.issue_status) && !INVOICE_VOID.has(i.payment_status) && (i.payment_type || '收款') === '收款');
+    // 🔴 代開發票不看 payment_type：那一欄在代開流程裡是**生命週期**不是錢的方向
+    // （收款/未收款 → 付款/待撥款 → 付款/已撥款；全庫 171 筆「付款」代開全部對到
+    // 客戶匯進來的收入）。用方向濾掉會讓客戶已付的期款整張消失（owner 2026-09-05：
+    // 快樂學游泳第一期款 161,700 收到了、畫面「客戶已匯 $0」）。
+    const isKai = (i) => /代開/.test(i.category || '');
+    const inv = (invoices || []).filter((i) => !INVOICE_VOID.has(i.issue_status) && !INVOICE_VOID.has(i.payment_status)
+        && ((i.payment_type || '收款') === '收款' || isKai(i)));
     const pays = (payments || []).filter((x) => !x.is_advance);
     const contract = Number(p.contract_amount || 0);
     const invoiced = inv.reduce((a, i) => a + Number(i.amount_total || 0), 0);
-    const received = Number(p.amount_received || 0), fee = Number(p.transfer_fee || 0);
+    // 客戶已匯：專案欄位有值就是它（收支同步寫的）；空的話從發票推 —— 分配到的
+    // 收入，沒分配但已走到「待撥款／已撥款」的代開票就算面額（那個階段＝客戶付了）
+    const collectedOf = (i) => Number(i.collected || 0)
+        || (COLLECTED_RE.test(i.payment_status || '') ? Number(i.amount_total || 0) : 0);
+    const receivedInv = inv.reduce((a, i) => a + collectedOf(i), 0);
+    const received = p.amount_received != null ? Number(p.amount_received) : receivedInv;
+    const fee = Number(p.transfer_fee || 0);
+    // 「未收」拆兩件事（owner 2026-09-05）：已開未收（要催款）vs 還沒開發票（要開票）
+    const invoicedUnreceived = Math.max(invoiced - received, 0);
+    const uninvoiced = Math.max(contract - invoiced, 0);
     const unreceived = p.amount_receivable != null ? Number(p.amount_receivable) : contract - received;   // received＝客戶匯出毛額（含匯費），匯費只是銀行扣走的
+    // 代開：客戶付了之後要撥給代開人的（面額 − 代開費＝commission）
+    const kaiPaid = inv.filter((i) => isKai(i) && COLLECTED_RE.test(i.payment_status || ''));
+    const kaiDue = kaiPaid.filter((i) => i.payment_status !== '已撥款').reduce((a, i) => a + Number(i.commission || 0), 0);
+    const kaiRemitted = kaiPaid.filter((i) => i.payment_status === '已撥款').reduce((a, i) => a + Number(i.commission || 0), 0);
     const groups = groupCostStaff(costLines || [], pays);
     const matched = new Set(groups.filter((g) => g.payment).map((g) => g.payment.id));
     const others = pays.filter((x) => !matched.has(x.id));
@@ -48,9 +67,10 @@ export function payStatus(project, invoices, payments, costLines) {
     // 整個系統裡沒有家（owner 2026-09-05 找不到 PJ00158178 $161,700 就是這個）。
     // 列出來但**不進 invoiced 合計**：那不是跟客戶收的錢。
     const payside = (invoices || []).filter((i) => !INVOICE_VOID.has(i.issue_status)
-        && (i.payment_type || '收款') === '付款');
+        && (i.payment_type || '收款') === '付款' && !isKai(i));
     return {
         invoices: inv, contract, invoiced, invoiceCount: inv.length, received, fee, unreceived,
+        invoicedUnreceived, uninvoiced, kaiDue, kaiRemitted,
         status: p.payment_status || '未到帳',
         payable, paid, requested, unrequested, unrequestedGroups, paidCount: pays.filter((x) => x.payment_status === PAID).length,
         payCount: pays.length, margin: contract - payable, groups, others, kai, payside,
@@ -66,7 +86,9 @@ export function nextSteps(s, opts = {}) {
     const out = [];
     if (!s.invoiceCount) out.push({ level: 'bad', text: '發票還沒開', act: 'invoice' });
     if (s.unassignedLines && s.unassignedLines.length) out.push({ level: 'warn', text: `${s.unassignedLines.length} 條工項還沒指定人員${money ? '，合計 ' + m(s.unassigned) : ''}：${s.unassignedLines.slice(0, 3).map((ln) => ln.item_name || '').filter(Boolean).join('、')}`, act: 'finance' });
-    if (s.uncollected.length) out.push({ level: 'warn', text: `${s.uncollected.length} 張發票還沒收到款${money && s.unreceived > 0 ? '，未收 ' + m(s.unreceived) : ''}`, act: 'invoices' });
+    if (s.uncollected.length) out.push({ level: 'warn', text: `${s.uncollected.length} 張發票還沒收到款${money && s.invoicedUnreceived > 0 ? '，未收 ' + m(s.invoicedUnreceived) : ''}`, act: 'invoices' });
+    if (s.uninvoiced > 0 && s.invoiceCount) out.push({ level: 'warn', text: `合約還有${money ? ' ' + m(s.uninvoiced) + ' ' : ''}沒開發票`, act: 'invoice' });
+    if (s.kaiDue > 0) out.push({ level: 'warn', text: `代開款已收到，應撥給代開人${money ? ' ' + m(s.kaiDue) : ''}`, act: 'invoices' });
     if (s.invoiceCount && !s.uncollected.length && s.unreceived > 0) out.push({ level: 'warn', text: `發票都標已收，但帳上未收還有 ${m(s.unreceived)} —— 匯款列可能還沒連結到本案`, act: 'cash' });
     if (s.unrequestedGroups.length) out.push({ level: 'warn', text: `${s.unrequestedGroups.length} 人還沒請款${money ? '，合計 ' + m(s.unrequested) : ''}：${s.unrequestedGroups.map((g) => g.name).join('、')}`, act: 'staff' });
     if (s.requested > 0 || (s.payCount - s.paidCount) > 0) out.push({ level: 'warn', text: `${s.payCount - s.paidCount} 張應付款還沒付${money ? '，合計 ' + m(s.requested) : ''}`, act: 'staff' });
@@ -114,8 +136,14 @@ function _strip(s, money, fin = null) {
     return `<div class="ppay-kpis">
         ${tile('合約金額', m(s.contract), '含稅', 'hl')}
         ${tile('已開發票', m(s.invoiced), `${s.invoiceCount} 張`)}
-        ${tile('客戶已匯', m(s.received), money && s.fee ? `實入帳 ${m(s.received - s.fee)} · 匯費 ${m(s.fee)}` : '', 'good')}
-        ${tile('未收', m(Math.max(s.unreceived, 0)), `<span class="crm-badge crm-pay-${st === '全額到帳' ? '全額到帳' : '未到帳'}">${_esc(st)}</span>`, s.unreceived > 0 ? 'bad' : '')}
+        ${tile('客戶已匯', m(s.received), money
+            ? [s.fee ? `實入帳 ${m(s.received - s.fee)} · 匯費 ${m(s.fee)}` : '',
+               s.kaiDue ? `應撥代開人 ${m(s.kaiDue)}` : '',
+               s.kaiRemitted ? `已撥代開人 ${m(s.kaiRemitted)}` : ''].filter(Boolean).join(' · ')
+            : '', 'good')}
+        ${tile('已開未收', m(s.invoicedUnreceived),
+            `${money && s.uninvoiced ? `未開發票 ${m(s.uninvoiced)} · ` : ''}<span class="crm-badge crm-pay-${st === '全額到帳' ? '全額到帳' : '未到帳'}">${_esc(st)}</span>`,
+            s.invoicedUnreceived > 0 ? 'bad' : '')}
         ${tile('應付合計', m(s.payable), `${s.groups.length} 人${s.others.length ? '＋' + s.others.length + ' 筆其他' : ''}${s.unassigned ? '＋未指派 ' + m(s.unassigned) : ''}`, s.unassigned ? 'warn' : '')}
         ${tile('已付', m(s.paid), `${s.paidCount} 張`, 'good')}
         ${tile('未付', m(s.payable - s.paid), money ? `已請未付 ${m(s.requested)}` : `${s.payCount - s.paidCount} 張`, s.payable - s.paid > 0 ? 'warn' : '')}
