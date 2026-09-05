@@ -589,7 +589,6 @@ function _renderCostLines(grouped, expenses, financialSummary) {
     const totalEst = grandEst + miscBudget;
     const totalAct = grandAct + expActualTotal;
     const totalDiff = totalAct - totalEst;
-    const totalDiffColor = totalDiff < 0 ? '#86efac' : totalDiff > 0 ? '#fca5a5' : '#9ca3af';
     html += `
       <div class="cost-row cost-row-total">
         <span class="cost-col-item">本子表合計</span>

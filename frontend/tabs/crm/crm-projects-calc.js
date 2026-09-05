@@ -13,9 +13,11 @@ export function calcProfitPct(exTax, actualProfit) {
     return exTax > 0 ? Math.round(actualProfit / exTax * 100) : 0;
 }
 
-/** 預算使用率 % */
-export function calcUsagePct(execBudget, totalEstimated) {
-    return execBudget > 0 ? Math.round(totalEstimated / execBudget * 100) : 0;
+/** 預算使用率 % —— 呼叫端決定分子是實際（usagePct）還是預估（estPct）。
+ *  參數名原本寫死 totalEstimated，但兩個呼叫點一個傳實際一個傳預估，
+ *  照名字讀會以為進度條畫的是預估。 */
+export function calcUsagePct(execBudget, spent) {
+    return execBudget > 0 ? Math.round(spent / execBudget * 100) : 0;
 }
 
 /** 從 financial-summary API 回應計算所有儀表板數值（2026-08-18 owner 定案）。
@@ -33,7 +35,6 @@ export function calcDashboardParts(p) {
     const execBudget = calcExecBudget(p.exTax, p.profitTarget);
     const totalEstimated = p.costEstimated + p.miscEstimated;
     const totalActual = p.costActual + p.miscActual;
-    const estProfit = p.exTax - totalEstimated;
     const actualProfit = p.exTax - totalActual;
     // owner 2026-09-05 的定義：成本＝人員＋雜支（totalEstimated／totalActual）、剩餘預算＝執行預算−成本。
     // 毛利兩格**不同源**（owner 2026-09-05「剩餘預算要加到實際毛利」）：
@@ -43,12 +44,13 @@ export function calcDashboardParts(p) {
     // actualProfit，跟財務摘要／收付款同源 —— 三處會是同一個數字。
     const budgetProfit = p.exTax - execBudget;
     return {
-        ...p, execBudget, totalEstimated, totalActual, estProfit, actualProfit, budgetProfit,
+        // estProfit／estProfitPct／miscRemaining 2026-09-05 移除 —— 算了兩年沒有
+        // 任何呼叫點用（對照表的「預估毛利」畫的是 budgetProfit＝目標毛利）。
+        // 留著只會讓下一個人以為那格是 未稅−預估成本。
+        ...p, execBudget, totalEstimated, totalActual, actualProfit, budgetProfit,
         budgetProfitPct: calcProfitPct(p.exTax, budgetProfit),
         remaining: execBudget - totalEstimated,       // 預估剩餘（排完還能排多少）
         remainingActual: execBudget - totalActual,    // 實際剩餘（真的還能花多少）
-        miscRemaining: p.miscEstimated - p.miscActual,  // 剩餘雜支（雜支自己的信封）
-        estProfitPct: calcProfitPct(p.exTax, estProfit),
         profitPct: calcProfitPct(p.exTax, actualProfit),
         usagePct: calcUsagePct(execBudget, totalActual),
         estPct: calcUsagePct(execBudget, totalEstimated),

@@ -46,6 +46,16 @@ except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 tr
 # token 打不到任何東西。曝露面由 tests/unit/test_public_surface.py 列舉斷言。
 EXPENSE_LINK_SCOPE = "expense_link"
 
+# 「行政雜支」這個階段值跟 crm_project_expenses 講的是同一件事（雜支現在有自己
+# 的登記區）。成本行那邊再算一次＝同一筆錢在對照表的「人員」與「雜支」兩欄各
+# 出現一次，成本與毛利一起走味。
+#
+# 🔴 述詞收成一份，因為**整案（financial-summary）與子表（cost-groups）兩處都要
+# 用同一條** —— 只濾一邊的話 Σ子表 ≠ 整案，而那正是 2026-09-05 稽核在查的東西。
+# api_finance_projects._crm_costs 早就這樣濾了，costs.py 這兩處原本沒有。
+# （稽核當下全庫 0 筆，所以還沒發作，但那是現況不是保證。）
+ADMIN_PHASE = "行政雜支"
+
 
 async def _resolve_link(session, token: str):
     """驗 token → 回 (link_row, project_id, fixed_group_id)。
@@ -818,7 +828,9 @@ async def project_financial_summary(project_id: str):
         costline_row = (await session.execute(
             select(sa_func.coalesce(sa_func.sum(CrmProjectCostLine.estimated_amount), 0),
                    sa_func.coalesce(sa_func.sum(CrmProjectCostLine.actual_amount), 0))
-            .where(CrmProjectCostLine.project_id == project_id)
+            # 行政雜支階段不算人員成本（述詞說明見 ADMIN_PHASE）
+            .where(CrmProjectCostLine.project_id == project_id,
+                   CrmProjectCostLine.phase != ADMIN_PHASE)
         )).first()
         costline_estimated = costline_row[0] if costline_row else 0
         costline_actual = costline_row[1] if costline_row else 0
@@ -1494,7 +1506,9 @@ async def list_project_cost_groups(project_id: str):
                    _fn.coalesce(_fn.sum(CrmProjectCostLine.estimated_amount), 0),
                    _fn.coalesce(_fn.sum(CrmProjectCostLine.actual_amount), 0),
                    _fn.count(CrmProjectCostLine.id))
-            .where(CrmProjectCostLine.project_id == project_id)
+            # 同 financial-summary：行政雜支階段不算人員成本（見 ADMIN_PHASE）
+            .where(CrmProjectCostLine.project_id == project_id,
+                   CrmProjectCostLine.phase != ADMIN_PHASE)
             .group_by(CrmProjectCostLine.cost_group_id)
         )).all()
         cl_map = {r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in cl_rows}
@@ -1508,6 +1522,9 @@ async def list_project_cost_groups(project_id: str):
             .group_by(CrmProjectExpense.cost_group_id)
         )).all()
         ex_map = {r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in ex_rows}
+        # 🔴 在 session 還開著的時候查、而且**只查一次** —— 原本寫在下面的迴圈裡，
+        # 那時 `async with` 已經結束（session 被 close），而且每張子表查一次。
+        _pct = await _project_misc_pct(session, project_id)
 
     result = []
     for g in rows:
@@ -1519,7 +1536,7 @@ async def list_project_cost_groups(project_id: str):
             "total_estimated": ce + ee, "total_actual": ca + ea,
             "cost_lines_count": cc, "expenses_count": ec,
         }
-        result.append(_cost_group_to_dict(g, summary, await _project_misc_pct(session, g.project_id)))
+        result.append(_cost_group_to_dict(g, summary, _pct))
     return {"cost_groups": result}
 
 
@@ -1546,7 +1563,8 @@ async def create_cost_group(project_id: str, req: CostGroupCreate, request: Requ
         await session.commit()
         await session.refresh(g)
         summary = await _compute_group_summary(session, g.id)
-    return {"status": "ok", "cost_group": _cost_group_to_dict(g, summary, await _project_misc_pct(session, g.project_id))}
+        _pct = await _project_misc_pct(session, g.project_id)
+    return {"status": "ok", "cost_group": _cost_group_to_dict(g, summary, _pct)}
 
 
 @router.put("/cost-groups/{group_id}")
@@ -1581,7 +1599,8 @@ async def update_cost_group(group_id: str, req: CostGroupUpdate, request: Reques
         await session.commit()
         await session.refresh(g)
         summary = await _compute_group_summary(session, g.id)
-    return {"status": "ok", "cost_group": _cost_group_to_dict(g, summary, await _project_misc_pct(session, g.project_id))}
+        _pct = await _project_misc_pct(session, g.project_id)
+    return {"status": "ok", "cost_group": _cost_group_to_dict(g, summary, _pct)}
 
 
 @router.delete("/cost-groups/{group_id}")
@@ -1666,7 +1685,8 @@ async def duplicate_cost_group(group_id: str, req: CostGroupDuplicate, request: 
         await session.commit()
         await session.refresh(new_g)
         summary = await _compute_group_summary(session, new_g.id)
-    return {"status": "ok", "cost_group": _cost_group_to_dict(new_g, summary, await _project_misc_pct(session, new_g.project_id)), "lines_copied": len(src_lines)}
+        _pct = await _project_misc_pct(session, new_g.project_id)
+    return {"status": "ok", "cost_group": _cost_group_to_dict(new_g, summary, _pct), "lines_copied": len(src_lines)}
 
 
 @router.get("/cost-groups/{group_id}/summary", dependencies=[Depends(money_dep)])
@@ -1690,5 +1710,8 @@ async def get_cost_group_summary(group_id: str, request: Request):
         if proj is not None:
             require_entity(request, proj.entity or "parent", level="full")
         summary = await _compute_group_summary(session, group_id)
-    return {"cost_group": _cost_group_to_dict(g, summary, await _project_misc_pct(session, g.project_id))}
+        # 雜支比在 session 還開著時查（同清單那支：原本寫在 return 裡，
+        # 那時 `async with` 已經結束）
+        _pct = (proj.misc_budget_pct if proj is not None else None) or 5
+    return {"cost_group": _cost_group_to_dict(g, summary, _pct)}
 
