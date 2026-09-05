@@ -81,9 +81,13 @@ def test_placeholder_contract_is_excluded_from_reports():
 
 
 def test_link_endpoints_guard_mine_scope():
-    """對應表三支都要私帳完整權限 —— 「私帳有哪些案」本身就是私帳資料。"""
+    """對應表五支都要私帳完整權限 —— 「私帳有哪些案」本身就是私帳資料。
+
+    五支＝清單 ＋ 兩個方向各自的 連結／建立
+    （parent-create／parent-link／mine-create／mine-link）。
+    """
     proj = repo_src("routers/crm/projects.py")
-    assert proj.count("await _mine_link_guard(request)") == 3
+    assert proj.count("await _mine_link_guard(request)") == 5
     assert 'require_entity(request, "mine", level="full")' in proj
 
 
@@ -102,3 +106,27 @@ def test_client_backfill_reuses_existing_crm_row():
     assert "Client.short_name == c.short_name" in cli
     proj = repo_src("routers/crm/projects.py")
     assert "async def _crm_client_for" in proj, "補建專案時客戶也要一起對齊"
+
+
+def test_link_has_one_writer():
+    """🔴 連結寫入只有 `_write_link` 一份 —— 兩個方向各寫一遍就會長出
+    「一邊清了、另一邊沒清」的半連結（母帳側清了、私帳側 source_project_id 還指著）。"""
+    proj = repo_src("routers/crm/projects.py")
+    assert proj.count("def _write_link(") == 1
+    # 直接指派 mine_link_id 的地方**只有 _write_link 自己**（解除一次、連結一次）。
+    # 多出來的就是有人繞過了唯一寫入者 —— mirror-to-mine 兩條路一開始就是
+    # 各寫一遍，於是「母帳側清了、私帳側 source_project_id 還指著」有機會發生。
+    assert proj.count(".mine_link_id = ") == 2, "有人繞過 _write_link 直接寫連結欄"
+
+
+def test_both_directions_exist():
+    """對應表兩個方向都要有（owner 2026-09-05「增加一個切換鈕」）。"""
+    proj = repo_src("routers/crm/projects.py")
+    for path in ("/projects/{mine_id}/parent-create", "/projects/{mine_id}/parent-link",
+                 "/projects/{parent_id}/mine-create", "/projects/{parent_id}/mine-link"):
+        assert path in proj, path
+    js = repo_src("frontend/tabs/finance/subviews/projlinks.js")
+    assert "_p.dir = " in js and "_rowParent" in js
+    assert "'母帳 → 私帳'" in js and "'私帳 → 母帳'" in js
+    # 下拉浮層那段只留一份（兩個方向共用）
+    assert js.count("function _pickCell(") == 1 and js.count("searchableSelect(sel") == 1

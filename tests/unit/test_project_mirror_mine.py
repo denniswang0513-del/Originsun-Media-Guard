@@ -243,10 +243,15 @@ def test_keep_mode_touches_no_money():
     """「保留私帳」＝只建立連結。金額一毛不動 —— 那份數字可能是他照實際
     請款填的，比 CRM 的成本行準。"""
     fn = _fn(_src(), "mirror_project_to_mine")
-    seg = fn.split('elif mode in ("overwrite", "add"):')[1].split("p.mine_link_id")[0]
-    # 只有 overwrite/add 那條動錢；keep 落在所有分支之外，只走到連結那兩行
+    seg = fn.split('elif mode in ("overwrite", "add"):')[1].split("_write_link(")[0]
+    # 只有 overwrite/add 那條動錢；keep 落在所有分支之外，只走到 _write_link
     assert "t.contract_amount = " in seg and "resync_receivable" in seg
-    assert "t.source_project_id = project_id" in fn
+    # 私帳那側的第一個來源由 _write_link 記（2026-09-05 收成單一寫入者，
+    # 原本 mirror 這支自己寫一份、對應表那兩支各寫一份）
+    body = code_only(func_body(repo_src("routers/crm/projects.py"),
+                               "def _write_link("))
+    assert "if not mine.source_project_id:" in body
+    assert "mine.source_project_id = parent.id" in body
 
 
 def test_import_mode_writes_into_crm_and_leaves_the_private_ledger_alone():
@@ -290,10 +295,14 @@ def test_many_crm_projects_can_share_one_mine_project():
     """
     src = repo_src("routers/crm/projects.py")
     body = code_only(func_body(src, "async def mirror_project_to_mine("))
-    assert "p.mine_link_id = t.id" in body, "連結沒記在來源側 —— 多對一表達不出來"
+    # 連結寫入 2026-09-05 收成單一 `_write_link(母帳列, 私帳列)` —— 它做的正是
+    # 「記在來源側」：`parent.mine_link_id = mine.id`
+    assert "_write_link(p, t)" in body, "連結沒走唯一寫入者"
     assert "已經是別案的分身了" not in body, "還擋著第二個來源"
+    writer = code_only(func_body(src, "def _write_link("))
+    assert "parent.mine_link_id = mine.id" in writer, "連結沒記在來源側 —— 多對一表達不出來"
     # 私帳案那側只記第一個來源（清單的「這是分身」判定沿用它）
-    assert "if not t.source_project_id:" in body
+    assert "if not mine.source_project_id:" in writer
     # 候選清單不再排除已被連結的
     opts = code_only(func_body(src, "async def check_project_mirror("))
     assert "source_project_id.is_(None)" not in opts, "候選還在排除已連結的私帳案"

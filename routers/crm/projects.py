@@ -1348,25 +1348,19 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 # 營收換了 → 應收跟著重算，否則這一案的應收停在舊數字
                 resync_receivable(t, keep)
             # mode == "keep"：只建立連結，金額一毛不動
-            # 連結記在**來源這一側** → 同一個私帳案可以被多個 CRM 案指到
-            p.mine_link_id = t.id
-            p.updated_at = _now()
-            # 私帳案那側只記**第一個**來源（清單的「這是分身」判定沿用它）
-            if not t.source_project_id:
-                t.source_project_id = project_id
-            t.updated_at = _now()
+            _write_link(p, t)            # 連結的唯一寫入者（兩側欄位一起顧）
             new_id = t.id
         else:
             new_id = _uuid.uuid4().hex
-            session.add(new_ledger_project(
+            t = new_ledger_project(
                 project_id=new_id, name=p.name, client_id=p.client_id,
                 entity="mine", contract=mir["total"],
                 detail=mirror_detail(mir["split"]),
                 close=p.completion_date,
                 notes=f"[私帳連結] 來自母公司專案：{p.name}",
-                source_project_id=project_id))
-            p.mine_link_id = new_id      # 來源側也記一份（解除／重連都看這欄）
-            p.updated_at = _now()
+                source_project_id=project_id)
+            session.add(t)
+            _write_link(p, t)
         await session.commit()
         # 新建的是私帳案 —— is_mine_project 的 60 秒 id-set 快取要清，
         # 否則這一分鐘內它會被當成母公司的（同 move-ledger 的理由）
@@ -1393,6 +1387,28 @@ def _norm_name(s: str) -> str:
     """比對用的正規化案名：去空白、去年份前綴，兩邊才對得起來
     （「2026 臺北城市形象片」vs「臺北城市形象片」）。"""
     return _RE_YEAR.sub("", "".join((s or "").split()))
+
+
+
+def _write_link(parent, mine):
+    """連結的**唯一寫入者**：母帳那一列指向哪個私帳案（`mine` 為 None＝解除）。
+
+    連結記在母帳側（一個私帳案可以承接多個母帳案，owner 2026-09-01）；私帳那側
+    的 `source_project_id` 只留**第一個**來源，給「這是分身」的舊判定沿用。
+    對應表兩個方向、mirror-to-mine 的解除都走這裡 —— 三處各寫一遍就會長出
+    「一邊清了、另一邊沒清」的半連結狀態。
+    """
+    if mine is None:
+        parent.mine_link_id = None
+        parent.updated_at = _now()
+        return
+    if parent.mine_link_id and parent.mine_link_id != mine.id:
+        raise HTTPException(status_code=409, detail="這個母帳案已經連到別的私帳案")
+    parent.mine_link_id = mine.id
+    parent.updated_at = _now()
+    if not mine.source_project_id:
+        mine.source_project_id = parent.id
+    mine.updated_at = _now()
 
 
 async def _mine_link_guard(request):
@@ -1434,9 +1450,29 @@ async def projects_mine_links(request: Request):
     by_name: dict = {}
     for p, _c in parent_rows:
         by_name.setdefault(_norm_name(p.name), []).append(p)
-    parents = [{"id": p.id, "name": p.name, "client": c or "",
-                "contract": int(p.contract_amount or 0),
-                "linked_mine_id": p.mine_link_id or ""} for p, c in parent_rows]
+    # 母帳 → 私帳那個方向要畫的東西（owner 2026-09-05「增加一個切換鈕」）：
+    # 連到哪一個私帳案、客戶、結案日、金額是不是佔位、以及同名建議。
+    mine_by_id = {p.id: p for p, _c in mine_rows}
+    by_mine_name: dict = {}
+    for p, _c in mine_rows:
+        by_mine_name.setdefault(_norm_name(p.name), []).append(p)
+    # 舊形狀（私帳案回指來源）也算連結 —— 只看 mine_link_id 會漏掉舊資料
+    legacy = {p.source_project_id: p.id for p, _c in mine_rows if p.source_project_id}
+    parents = []
+    for p, c in parent_rows:
+        mid = p.mine_link_id or legacy.get(p.id, "")
+        sug = [] if mid else by_mine_name.get(_norm_name(p.name), [])
+        parents.append({
+            "id": p.id, "name": p.name, "client": c or "",
+            "contract": int(p.contract_amount or 0),
+            "close_date": _fmt_day(p.completion_date),
+            # 佔位金額（從私帳帶過來、還沒人確認）—— 畫面要標出來提醒回填
+            "placeholder": (p.contract_amount_source or "") == "mine",
+            "linked_mine_id": mid,
+            "linked_mine_name": (mine_by_id[mid].name if mid in mine_by_id else ""),
+            "suggest_id": sug[0].id if len(sug) == 1 else "",
+            "suggest_name": sug[0].name if len(sug) == 1 else "",
+        })
     mine = []
     for p, cname in mine_rows:
         names = links.get(p.id, [])
@@ -1558,19 +1594,99 @@ async def set_parent_link(mine_id: str, request: Request):
             p = await session.get(CrmProject, target)
             if p is None or (p.entity or "parent") == "mine":
                 raise HTTPException(status_code=422, detail="要連結的目標必須是母帳專案")
-            if p.mine_link_id and p.mine_link_id != mine_id:
-                raise HTTPException(status_code=409, detail="這個母帳案已經連到別的私帳案")
-            p.mine_link_id = mine_id
-            p.updated_at = _now()
-            if not m.source_project_id:
-                m.source_project_id = p.id
+            _write_link(p, m)
         else:
             for p in (await session.execute(
                     select(CrmProject)
                     .where(CrmProject.mine_link_id == mine_id))).scalars().all():
-                p.mine_link_id = None
-                p.updated_at = _now()
+                _write_link(p, None)
             m.source_project_id = None
         m.updated_at = _now()
         await session.commit()
     return {"status": "ok", "parent_id": target}
+
+
+@router.put("/projects/{parent_id}/mine-link")
+async def set_mine_link(parent_id: str, request: Request):
+    """對應表**母帳 → 私帳**那個方向：這個母帳案連到哪一個私帳案
+    （body: {mine_id: id|null}；null＝解除**這一案**的連結）。
+
+    跟 `parent-link` 是同一件事的兩個入口，寫入都走 `_write_link` ——
+    差別只在解除的範圍：這支解**這一個**母帳案，那支解「所有指向該私帳案的」。
+    兩張表方向不同，能解的粒度本來就不同（一個私帳案可能連著好幾個母帳案）。
+    """
+    factory = await _mine_link_guard(request)
+    body = await request.json()
+    target = (body.get("mine_id") or "").strip()
+    async with factory() as session:
+        p = await session.get(CrmProject, parent_id)
+        if p is None or (p.entity or "parent") == "mine":
+            raise HTTPException(status_code=404, detail="找不到此母帳專案")
+        m = None
+        if target:
+            m = await session.get(CrmProject, target)
+            if m is None or (m.entity or "parent") != "mine":
+                raise HTTPException(status_code=422, detail="要連結的目標必須是私帳專案")
+        _write_link(p, m)
+        if m is None and p.id:
+            # 私帳那側的舊形狀只裝得下第一個來源 —— 解掉的正好是它時要清掉，
+            # 不然「這是分身」的舊判定會留著指向一個已解除的連結
+            for x in (await session.execute(
+                    select(CrmProject)
+                    .where(CrmProject.source_project_id == parent_id))).scalars().all():
+                x.source_project_id = None
+                x.updated_at = _now()
+        await session.commit()
+    return {"status": "ok", "mine_id": target}
+
+
+@router.post("/projects/{parent_id}/mine-create")
+async def create_mine_from_parent(parent_id: str, request: Request):
+    """母帳案 → 在私帳建一個對應的案並連結（對應表反方向的「建立」）。
+
+    金額＝**掛給我的成本行**加總（`mirror_lines`，跟「連結私帳」那顆按鈕同一份
+    算法）；一筆都沒有就開 0，由 owner 自己填實際拿到多少。工項（split）一併帶。
+
+    🔴 跟 `mirror-to-mine` 的差別只有「擋不擋」：那支在沒有我的成本行時 409
+    （它的語意是「把公司發包給我的錢鏡射過來」），這支是對應表的補件動作 ——
+    案子確實存在、只是私帳還沒記，所以照建不擋。算法共用不另寫一份。
+    """
+    import uuid as _uuid
+    from core.ledger_project import mirror_detail, mirror_lines
+    from routers.api_finance_projects import new_ledger_project
+
+    factory = await _mine_link_guard(request)
+    # 🔴 沒綁人員檔案**不擋**（`_me_staff_id` 本來會 409）—— 這支的語意是
+    # 「這個案私帳還沒記，補一列」，不是「把公司發包給我的錢鏡射過來」。
+    # 認不出哪幾行是我的就開 0，由 owner 自己填實際拿到多少；回傳 staff_bound
+    # 讓畫面說得出為什麼是 0，而不是讓人以為系統算錯。
+    try:
+        sid = await _me_staff_id(request)
+    except HTTPException:
+        sid = ""
+    async with factory() as session:
+        p = await session.get(CrmProject, parent_id)
+        if p is None or (p.entity or "parent") == "mine":
+            raise HTTPException(status_code=404, detail="找不到此母帳專案")
+        if p.mine_link_id:
+            raise HTTPException(status_code=409, detail="這一案已經連到私帳了")
+        lines = (await session.execute(
+            select(CrmProjectCostLine)
+            .where(CrmProjectCostLine.project_id == parent_id)
+            .order_by(CrmProjectCostLine.sort_order))).scalars().all()
+        mir = mirror_lines(lines, sid) if sid else {"total": 0, "split": {}}
+        new_id = _uuid.uuid4().hex
+        m = new_ledger_project(
+            project_id=new_id, name=p.name, client_id=p.client_id,
+            entity="mine", contract=mir["total"],
+            detail=mirror_detail(mir["split"]),
+            close=p.completion_date,
+            notes="[母帳對應] 由母帳案「%s」在私帳補建" % p.name,
+            source_project_id=parent_id)
+        session.add(m)
+        _write_link(p, m)
+        await session.commit()
+        from core.ledger import invalidate_mine_projects
+        invalidate_mine_projects()
+    return {"status": "ok", "id": new_id, "amount": mir["total"],
+            "staff_bound": bool(sid)}
