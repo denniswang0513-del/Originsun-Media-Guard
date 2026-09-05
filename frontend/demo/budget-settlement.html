@@ -78,6 +78,23 @@
   .cbar{height:5px;border-radius:3px;background:#181818;margin-top:10px;overflow:hidden;}
   .cbar i{display:block;height:100%;}
 
+  /* ── 6. 工項明細 ── */
+  .lt-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px;}
+  .lt-head .pill{font-size:11px;color:var(--dim);background:#242424;border:1px solid var(--line2);
+                 border-radius:999px;padding:2px 10px;}
+  .lt-head .pill.on{background:#1e3a5f;border-color:#2563eb;color:#bfdbfe;}
+  .lt{width:100%;border-collapse:collapse;font-size:12px;}
+  .lt th{font-size:11px;color:var(--mute);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line2);}
+  .lt td{padding:7px 8px;border-top:1px solid #262626;}
+  .lt .ph td{background:#191919;color:var(--dim);font-weight:700;border-top:1px solid var(--line2);}
+  .lt .who{color:var(--mute);font-size:11px;margin-left:6px;}
+  .lt .calc{color:var(--mute);font-size:11px;}
+  .lt td.n{text-align:right;font-variant-numeric:tabular-nums;}
+  .lt tr.diff td{background:#231c10;}
+  .lt tr.foot td{border-top:1px solid var(--line2);font-weight:700;color:#fff;}
+  .lt tr.foot.grand td{border-top:2px solid var(--line2);}
+  .dash{color:var(--mute);}
+  .empty-row td{color:var(--mute);font-size:11px;background:#1c1c1c;}
   /* ── 5. 待辦 ── */
   .todo{display:grid;gap:8px;}
   .t{display:grid;grid-template-columns:20px 1fr auto;gap:10px;align-items:start;
@@ -243,6 +260,82 @@
     </div>
   </div>
 
+  <!-- ══ 6. 工項明細 ══ -->
+  <h2>工項明細<small>選中的子表：2min 影片　—　30 列裡真正有事發生的只有 1 列</small></h2>
+  <div class="panel">
+    <div class="lt-head">
+      <span class="pill on">只看有金額的（10）</span>
+      <span class="pill">顯示未使用的 15 項</span>
+      <span class="pill">只看有差異的（1）</span>
+      <span style="margin-left:auto;color:var(--mute);font-size:11px;">單價 × 數量收成一格；換人才會顯示箭頭</span>
+    </div>
+    <table class="lt">
+      <thead><tr>
+        <th style="text-align:left;">工項</th>
+        <th style="text-align:left;width:190px;">內容</th>
+        <th style="width:100px;">預估</th><th style="width:100px;">實際</th><th style="width:110px;">差</th>
+      </tr></thead>
+      <tbody>
+        <tr class="ph"><td>前期製作</td><td></td>
+          <td class="n">$72,487</td><td class="n">$68,281</td><td class="n g">剩 $4,206</td></tr>
+        <tr class="diff">
+          <td>製片/專案管理<span class="who">王士源</span></td>
+          <td class="calc">$27,487 × 1 式　<span class="dash">→</span>　$23,281 × 1 式</td>
+          <td class="n">$27,487</td><td class="n">$23,281</td><td class="n g">剩 $4,206</td></tr>
+        <tr><td>導演<span class="who">王士源</span></td>
+          <td class="calc">$30,000 × 1 支</td>
+          <td class="n">$30,000</td><td class="n">$30,000</td><td class="n dash">—</td></tr>
+        <tr><td>腳本<span class="who">王士源</span></td>
+          <td class="calc">$15,000 × 1</td>
+          <td class="n">$15,000</td><td class="n">$15,000</td><td class="n dash">—</td></tr>
+
+        <tr class="ph"><td>現場拍攝</td><td></td>
+          <td class="n">$71,000</td><td class="n">$71,000</td><td class="n dash">—</td></tr>
+        <tr><td>攝影與訪問<span class="who">陳志廷</span></td>
+          <td class="calc">$30,000 × 1 式</td>
+          <td class="n">$30,000</td><td class="n">$30,000</td><td class="n dash">—</td></tr>
+        <tr><td>攝影與空拍<span class="who">廖育慶</span></td>
+          <td class="calc">$35,000 × 1 式</td>
+          <td class="n">$35,000</td><td class="n">$35,000</td><td class="n dash">—</td></tr>
+        <tr><td>燈光<span class="who">李科模</span></td>
+          <td class="calc">$6,000 × 1 日</td>
+          <td class="n">$6,000</td><td class="n">$6,000</td><td class="n dash">—</td></tr>
+
+        <tr class="ph"><td>後期製作</td><td></td>
+          <td class="n">$67,000</td><td class="n">$67,000</td><td class="n dash">—</td></tr>
+        <tr><td>剪輯<span class="who">王士源</span></td>
+          <td class="calc">$30,000 × 1 支</td>
+          <td class="n">$30,000</td><td class="n">$30,000</td><td class="n dash">—</td></tr>
+        <tr><td>調光<span class="who">王士源</span></td>
+          <td class="calc">$14,000 × 1 支</td>
+          <td class="n">$14,000</td><td class="n">$14,000</td><td class="n dash">—</td></tr>
+        <tr><td>視覺包裝<span class="who">王士源</span></td>
+          <td class="calc">$12,000 × 1 支</td>
+          <td class="n">$12,000</td><td class="n">$12,000</td><td class="n dash">—</td></tr>
+        <tr><td>動態設計<span class="who">王士源</span></td>
+          <td class="calc">$11,000 × 1 支</td>
+          <td class="n">$11,000</td><td class="n">$11,000</td><td class="n dash">—</td></tr>
+
+        <tr class="empty-row"><td colspan="5">
+          未使用的 15 個工項（分鏡圖、空拍、收音師、美術、服裝、梳化、配音、錄音、混音、翻譯…）已收起
+          <span style="color:var(--blue);margin-left:8px;">展開 ▾</span></td></tr>
+
+        <tr class="foot"><td>工項合計</td><td></td>
+          <td class="n">$210,487</td><td class="n">$206,281</td><td class="n g">剩 $4,206</td></tr>
+        <tr class="foot"><td>行政雜支</td>
+          <td class="calc">預計＝核給 × 5%；實際來自雜支登記 9 筆</td>
+          <td class="n">$11,014</td><td class="n">$13,889</td><td class="n r">超 $2,875</td></tr>
+        <tr class="foot grand"><td>本子表合計</td><td></td>
+          <td class="n">$221,501</td><td class="n">$220,170</td><td class="n g">剩 $1,331</td></tr>
+      </tbody>
+    </table>
+    <div class="hint">
+      核給預算 <b style="color:var(--tx);">$220,270</b>　→　實際剩餘 <b class="g">$100</b>
+      （$220,270 − $220,170）；<b class="a">預估合計 $221,501 從一開始就超出核給 $1,231</b>。
+      兩個數字都在，而且各自說清楚是跟誰比。
+    </div>
+  </div>
+
   <!-- ══ 5. 待辦 ══ -->
   <h2>要你決定的<small>原本散在三條不同顏色的提示列裡，收成一區</small></h2>
   <div class="todo">
@@ -291,6 +384,13 @@
       <li>
         <span class="was">舊：</span>工項在規劃階段就超出核給，畫面完全沒說，最後靠實際少花蓋過去。<br>
         <span class="now">新：</span>子表卡直接標「工項預估超出可用 $1,231」，並收進「要你決定的」。
+      </li>
+      <li>
+        <span class="was">舊：</span>工項表 12 欄（預估的單價／數量／單位／金額／人員，實際再一整組），
+        同一項要左右跨很遠才對得上；30 列裡有 20 列是範本帶進來的<b>空白列</b>，
+        而真正有差異的只有 <b>1 列</b>。<br>
+        <span class="now">新：</span>單價×數量收成一格、人員收進工項名後面、換人才畫箭頭；
+        空白列預設收起（「未使用的 15 項」），有差異的那列上底色。表格從 12 欄降到 5 欄。
       </li>
     </ol>
     <p style="font-size:12px;color:var(--dim);">
