@@ -25,6 +25,23 @@ def test_dashboard_chain_is_closed():
     assert "const actualProfit = p.exTax - totalActual;" in js
 
 
+def test_estimated_misc_is_always_the_sub_table_sum():
+    """🔴 預估雜支**永遠**是各子表預計雜支加總（owner 2026-09-05 拍板 A 案）。
+
+    一張子表都沒設預算時它就是 0；未稅×雜支比只當**建議值**顯示，不進數字。
+    原本那條退路讓對照表寫 6,666 而子表小計是 0 —— 兩個基準本來就不同
+    （子表預設＝**子表預算**×%、整案退路＝**未稅**×%），生產 3 案上下差
+    6,666／1,904／19,047。
+    """
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-calc.js"))
+    assert "miscEstimated: miscAuto ? 0 : f.misc_budget_total," in js
+    assert "miscSuggested: f.misc_budget || 0," in js, "建議值要另外帶，不能混進 miscEstimated"
+    cost = js_code_only(repo_src("frontend/tabs/crm/crm-projects-cost.js"))
+    assert "d.miscSuggested" in cost, "沒設預算時要把建議值講出來，不然那格只是個 0"
+    # 建議值不准回頭參與任何加總
+    assert "miscEstimated: miscAuto ? (f.misc_budget" not in js
+
+
 def test_admin_phase_cost_lines_never_double_count():
     """🔴 phase='行政雜支' 的成本行不算人員成本 —— 那個階段值跟
     crm_project_expenses 講的是同一件事，兩邊都算＝同一筆錢在對照表的

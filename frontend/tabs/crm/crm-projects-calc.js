@@ -23,9 +23,10 @@ export function calcUsagePct(execBudget, spent) {
 /** 從 financial-summary API 回應計算所有儀表板數值（2026-08-18 owner 定案）。
  *
  * 兩套並排：預估（計畫）與實際（執行），每套各有 成本/雜支/剩餘/毛利。
- * 🔴 預估雜支 ＝ 子表「雜支預算」手動加總（misc_budget_total）；全部未設才
- * 退回 misc_budget（未稅×雜支比自動推算，miscAuto=true）。不再用逐列
- * estimated 加總（expense_estimated）—— $0 佔位列退場後那個數字恆為 0。
+ * 🔴 預估雜支 ＝ 各子表預計雜支加總（misc_budget_total）—— 設了用設的、沒設用
+ * 「子表預算 × 雜支比」。一張子表都沒設預算時是 **0**（miscAuto=true），
+ * 未稅×雜支比只當建議值（miscSuggested）顯示，不進數字。不用逐列 estimated
+ * 加總（expense_estimated）—— $0 佔位列退場後那個數字恆為 0。
  * usagePct 是**實際**口徑（實際結算/執行預算）；estPct 是預估刻度。 */
 /** 對照表衍生鏈的**單一正本** —— 初次 render（calcDashboard 包這支）與
  * inline 編輯後的即時重算（cost.js `_fillDashGrid`）都走這裡，公式改一處生效。
@@ -58,13 +59,19 @@ export function calcDashboardParts(p) {
 }
 
 export function calcDashboard(f) {
-    const miscAuto = f.misc_budget_total == null;
+    // 🔴 預估雜支**永遠**是「各子表預計雜支加總」（owner 2026-09-05 拍板 A 案）。
+    // 一張子表都沒設預算時它就是 0，未稅×雜支比只當**建議值**顯示，不進數字 ——
+    // 原本那條退路讓對照表寫 6,666 而子表小計是 0，上下差一個未稅 5%
+    // （2026-09-05 稽核在生產抓到 3 案：6,666／1,904／19,047）。
+    // 兩個基準本來就不同：子表預設＝**子表預算**×%，整案退路＝**未稅**×%。
+    const miscAuto = f.misc_budget_total == null;   // 一張子表都沒設預算
     return calcDashboardParts({
         exTax: f.ex_tax, profitTarget: f.profit_target,
         costEstimated: f.costline_estimated || 0,
         costActual: f.costline_actual || 0,
-        miscEstimated: miscAuto ? (f.misc_budget || 0) : f.misc_budget_total,
+        miscEstimated: miscAuto ? 0 : f.misc_budget_total,
         miscAuto,
+        miscSuggested: f.misc_budget || 0,          // 未稅×% —— 只當提示
         miscPct: f.misc_budget_pct != null ? f.misc_budget_pct : 5,
         miscActual: f.expense_actual || 0,
     });

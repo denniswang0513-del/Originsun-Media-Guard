@@ -119,7 +119,10 @@ async function _loadFinancialSummary(projectId) {
               <span>合約未稅 <b>$${fmtNum(f.ex_tax)}</b></span>
               <span>目標利潤 <b>$${fmtNum(f.profit_target)}</b>（${f.profit_target_pct}%）</span>
               <span>執行預算 <b style="color:#60a5fa;">$${fmtNum(d.execBudget)}</b></span>
-              <span>預估雜支 <b>$${fmtNum(d.miscEstimated)}</b>（${d.miscAuto ? `未稅 ${d.miscPct}%` : '子表加總'}）<button class="cda-edit" onclick="window._miscPctModal()">編輯</button></span>
+              <span>預估雜支 <b>$${fmtNum(d.miscEstimated)}</b>（${d.miscAuto
+                    // 一張子表都沒設預算 → 數字是 0，未稅×% 只給建議（owner 2026-09-05 A 案）
+                    ? `子表未設預算・建議 $${fmtNum(d.miscSuggested)}（未稅 ${d.miscPct}%）`
+                    : '子表加總'}）<button class="cda-edit" onclick="window._miscPctModal()">編輯</button></span>
               <span>實際毛利 <b id="cd-anchor-pf"></b></span>
               ${f.transfer_fee ? `<span style="color:#6b7280;">帳款匯費 $${fmtNum(f.transfer_fee)}</span>` : ''}
             </div>
@@ -149,7 +152,7 @@ async function _loadFinancialSummary(projectId) {
         _dashBase = {
             exTax: f.ex_tax, profitTarget: f.profit_target,
             miscEstimated: d.miscEstimated, miscAuto: d.miscAuto,
-            miscPct: d.miscPct,
+            miscSuggested: d.miscSuggested, miscPct: d.miscPct,
             otherCostEst: d.costEstimated - curCostEst,
             otherCostAct: d.costActual - curCostAct,
             otherMiscAct: d.miscActual - curMiscAct,
@@ -775,7 +778,7 @@ function _costUpdateDashboard() {
     _fillDashGrid({
         exTax: _dashBase.exTax, profitTarget: _dashBase.profitTarget,
         miscEstimated: _dashBase.miscEstimated, miscAuto: _dashBase.miscAuto,
-        miscPct: _dashBase.miscPct,
+        miscSuggested: _dashBase.miscSuggested, miscPct: _dashBase.miscPct,
         costEstimated: _dashBase.otherCostEst + totals.costEst,
         costActual: _dashBase.otherCostAct + totals.costAct,
         miscActual: _dashBase.otherMiscAct + totals.miscAct,

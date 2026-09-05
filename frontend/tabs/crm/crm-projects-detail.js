@@ -578,7 +578,7 @@ async function _loadBudgetOverview(projectId, isClosed) {
                 &nbsp;·&nbsp;
                 預估排定 ${d.estPct}%（$${fmtNum(d.totalEstimated)}）
                 &nbsp;·&nbsp;
-                雜支 $${fmtNum(d.miscActual)} / $${fmtNum(d.miscEstimated)}${d.miscAuto ? '（自動）' : ''}
+                雜支 $${fmtNum(d.miscActual)} / $${fmtNum(d.miscEstimated)}${d.miscAuto ? '（子表未設預算）' : ''}
               </div>
             `;
         }
