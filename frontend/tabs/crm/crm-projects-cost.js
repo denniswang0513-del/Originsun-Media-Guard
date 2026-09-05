@@ -439,7 +439,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
     // 這一區是「本子表」範圍，預算也要跟著本子表走。
     const grp = (state.costGroups || []).find(g => g.id === state.selectedGroupId);
     const groupMisc = grp ? grp.misc_budget_amount : null;   // null＝未設，不是 0
-    const miscBudget = groupMisc || 0;
+    const miscBudget = groupMisc != null ? groupMisc : ((grp && grp.misc_budget_effective) || 0);   // owner 2026-09-05: unset = default 5% of the sub-table budget
     const expActualTotal = (expenses || []).reduce((s, e) => s + (e.actual || 0), 0);
     const miscLeft = miscBudget - expActualTotal;   // 剩餘雜支（差額欄用它的負值）
     const expDiff = -miscLeft;
@@ -450,8 +450,8 @@ function _renderCostLines(grouped, expenses, financialSummary) {
         <span class="exp-mini">
           雜支預算 <span class="cost-editable" onclick="window._miscBudgetEdit(this)"
                 title="點一下直接改本子表的雜支預算">${groupMisc == null ? (grp && grp.misc_budget_default ? '預設 $' + fmtNum(grp.misc_budget_default) + '（預算 5%）' : '未設') : '$' + fmtNum(groupMisc)}</span>
-          ｜ 已用 $${fmtNum(expActualTotal)}${groupMisc == null ? '' : `
-          ｜ 剩餘 <span style="color:${remainColor(miscLeft)};">$${fmtNum(miscLeft)}</span>`}
+          ｜ 已用 $${fmtNum(expActualTotal)}${miscBudget ? `
+          ｜ 剩餘 <span style="color:${remainColor(miscLeft)};">$${fmtNum(miscLeft)}</span>` : ''}
         </span>
         <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projShowExpenseModal()">+</button>
         <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projBrowseReceipts()" title="瀏覽收據">&#128065;</button>
@@ -566,7 +566,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
         <span class="cost-col-price"></span>
         <span class="cost-col-qty"></span>
         <span class="cost-col-unit"></span>
-        <span class="cost-col-amt" style="font-weight:600;">${groupMisc == null ? '—' : '$' + fmtNum(miscBudget)}</span>
+        <span class="cost-col-amt" style="font-weight:600;${groupMisc == null ? 'color:#9ca3af;' : ''}" title="${groupMisc == null ? '預設：子表預算 5%' : ''}">${miscBudget ? '$' + fmtNum(miscBudget) : '—'}</span>
         <span class="cost-col-staff cost-divider"></span>
         <span class="cost-col-price"></span>
         <span class="cost-col-qty"></span>

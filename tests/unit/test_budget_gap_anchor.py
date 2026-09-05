@@ -29,3 +29,10 @@ def test_sub_table_budget_includes_misc_and_defaults_to_five_percent():
     assert "+ sa_func.coalesce(CrmProjectCostGroup.misc_budget_amount, 0)" not in api, "雜支不再外加在子表預算上"
     fe = repo_src("frontend/tabs/crm/crm-projects-cost-groups.js")
     assert "const total = g.budget_amount || 0;" in fe and "預計雜支" in fe and "mEl.dataset.auto" in fe
+
+
+def test_sub_table_misc_section_uses_the_default_when_unset():
+    """3min 協力影片：雜支預算沒設時小計預估曾是「—」（當 0 算），已用 3,745 就整筆標超支；改用預設 5%（2,514）→ 超 1,231。"""
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-cost.js"))
+    assert "const miscBudget = groupMisc != null ? groupMisc : ((grp && grp.misc_budget_effective) || 0);" in js
+    assert "const totalEst = grandEst + miscBudget;" in js
