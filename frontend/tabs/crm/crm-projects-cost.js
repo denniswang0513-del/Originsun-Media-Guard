@@ -119,7 +119,7 @@ async function _loadFinancialSummary(projectId) {
               <span>合約未稅 <b>$${fmtNum(f.ex_tax)}</b></span>
               <span>目標利潤 <b>$${fmtNum(f.profit_target)}</b>（${f.profit_target_pct}%）</span>
               <span>執行預算 <b style="color:#60a5fa;">$${fmtNum(d.execBudget)}</b></span>
-              <span>預估雜支 <b>$${fmtNum(d.miscEstimated)}</b>（${d.miscAuto ? `未稅 ${d.miscPct}%` : d.miscFrom === 'alloc' ? '子表預算 − 工項' : '子表設定'}）<button class="cda-edit" onclick="window._miscPctModal()">編輯</button></span>
+              <span>預估雜支 <b>$${fmtNum(d.miscEstimated)}</b>（${d.miscAuto ? `未稅 ${d.miscPct}%` : '子表設定'}）<button class="cda-edit" onclick="window._miscPctModal()">編輯</button></span>
               <span>實際毛利 <b id="cd-anchor-pf"></b></span>
               ${f.transfer_fee ? `<span style="color:#6b7280;">帳款匯費 $${fmtNum(f.transfer_fee)}</span>` : ''}
             </div>
@@ -148,7 +148,7 @@ async function _loadFinancialSummary(projectId) {
         const curMiscAct = (expData.expenses || []).reduce((s, e) => s + (e.actual || 0), 0);
         _dashBase = {
             exTax: f.ex_tax, profitTarget: f.profit_target,
-            miscEstimated: d.miscEstimated, miscAuto: d.miscAuto, miscFrom: d.miscFrom,
+            miscEstimated: d.miscEstimated, miscAuto: d.miscAuto,
             miscPct: d.miscPct,
             otherCostEst: d.costEstimated - curCostEst,
             otherCostAct: d.costActual - curCostAct,
@@ -761,7 +761,7 @@ function _costUpdateDashboard() {
     if (!_dashBase || !document.getElementById('cd-cost-est')) return;
     _fillDashGrid({
         exTax: _dashBase.exTax, profitTarget: _dashBase.profitTarget,
-        miscEstimated: _dashBase.miscEstimated, miscAuto: _dashBase.miscAuto, miscFrom: _dashBase.miscFrom,
+        miscEstimated: _dashBase.miscEstimated, miscAuto: _dashBase.miscAuto,
         miscPct: _dashBase.miscPct,
         costEstimated: _dashBase.otherCostEst + totals.costEst,
         costActual: _dashBase.otherCostAct + totals.costAct,
