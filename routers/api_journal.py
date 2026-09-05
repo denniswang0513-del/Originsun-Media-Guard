@@ -16,7 +16,7 @@ learnings 學到了什麼 / others 其他主題 — owner 明確要求分表，�
   /week、/person、/learnings、/people、/help **只回 submitted** —— 草稿只有本人（/mine）看得到。
 - 「上週做了什麼」自動區：本人該週 timesheets 按案子分組（core.journal_logic.group_worklog，不含 hours）。
 - 條目可掛案子（project_id）、「挑戰」「其他」可標 help／discuss；主管（timesheets 模組）逐條回覆
-  （journal_replies），回覆時推一則 Google Chat 給本人（best-effort）。
+  （journal_replies）。回覆不推通知（owner 2026-09-05 先拿掉；要加回來走個人通道）。
 - PUT 全量替換時盡量沿用條目 id（帶 id 或內容相同）—— 回覆才跟得住自動存草稿。
 
 權限：check_admin_or_module(request, 'journal')；回覆／求助清單另守 'timesheets'。純函式在 core/journal_logic.py。
