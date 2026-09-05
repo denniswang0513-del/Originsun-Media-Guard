@@ -113,7 +113,7 @@ function _strip(s, money, fin = null) {
         ${tile('已付', m(s.paid), `${s.paidCount} 張`, 'good')}
         ${tile('未付', m(s.payable - s.paid), money ? `已請未付 ${m(s.requested)}` : `${s.payCount - s.paidCount} 張`, s.payable - s.paid > 0 ? 'warn' : '')}
         ${money ? (fin && fin.actual_profit != null
-            ? tile('毛利', m(fin.actual_profit), `${fin.profit_rate}% · 同預算結算`, fin.actual_profit >= 0 ? 'good' : 'bad')
+            ? tile('毛利', m(fin.actual_profit), `${fin.profit_rate}% · 已扣營業稅`, fin.actual_profit >= 0 ? 'good' : 'bad')
             : tile('毛利', m(s.margin), s.contract ? Math.round(s.margin / s.contract * 100) + '%（僅扣已請款）' : '', s.margin >= 0 ? 'good' : 'bad')) : ''}
     </div>`;
 }
