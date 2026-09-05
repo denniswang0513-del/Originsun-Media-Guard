@@ -1644,7 +1644,7 @@ async function _openFindProject(name, pid) {
     body.innerHTML = `<div class="empty">載入中…</div>`;
     try {
         const d = await mjson("/api/v1/timesheets/project?name=" + encodeURIComponent(name) + (pid ? "&project_id=" + encodeURIComponent(pid) : ""));
-        body.innerHTML = TS.projectFileHtml(d, { editable: false, backHtml: '<button type="button" class="btn" data-z1="find-back">‹ 專案清單</button>' });
+        body.innerHTML = TS.projectFileHtml(d, { editable: false, chartWidth: 340, backHtml: '<button type="button" class="btn" data-z1="find-back">‹ 專案清單</button>' });
         body.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
         body.innerHTML = `<div class="notice">${esc(e.message)}</div><button type="button" class="btn" data-z1="find-back">‹ 專案清單</button>`;

@@ -183,9 +183,11 @@ export function burnTableHtml(tbodyHtml, id = 'ts-burn-table') {
 
 // ── 專案檔案 ──
 /** [(label, hours, pct?)…] → 共用的水平佔比條（js/shared/svg-charts.hbars）。 */
-export function bars(pairs) {
+export function bars(pairs, width) {
+    // width＝viewBox 的設計寬；卡片比它窄時整張圖（含字）等比縮小，白底工作台的三欄卡只有 300 多 px，
+    // 用預設 560 字會縮到 9px（owner 2026-09-05「小到看不見」）→ 呼叫端依卡寬傳 chartWidth
     return hbars((pairs || []).map(([label, value, pct]) => ({ label, value, pct })),
-                 { formatValue: v => `${v} h`, showPct: (pairs || []).some(p => p[2] != null), emptyText: '—' });
+                 { width: width || 560, formatValue: v => `${v} h`, showPct: (pairs || []).some(p => p[2] != null), emptyText: '—' });
 }
 
 /**
@@ -223,9 +225,9 @@ export function projectFileHtml(d, opts = {}) {
             ${d.suggested_hours != null ? `<span class="ts-chip" title="依私帳設定：合約未稅 ×（1−${esc(d.project_type || '')}預期毛利）÷ 日成本 × 每日工時"><b>${d.suggested_hours}</b>建議預算 h</span>` : ''}
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;">
-            <div class="ts-card" style="margin:0;"><h3>分類組成</h3>${bars(d.composition)}</div>
-            <div class="ts-card" style="margin:0;"><h3>各人</h3>${bars(d.by_person)}</div>
-            <div class="ts-card" style="margin:0;"><h3>各月</h3>${bars(d.by_month)}</div>
+            <div class="ts-card" style="margin:0;"><h3>分類組成</h3>${bars(d.composition, opts.chartWidth)}</div>
+            <div class="ts-card" style="margin:0;"><h3>各人</h3>${bars(d.by_person, opts.chartWidth)}</div>
+            <div class="ts-card" style="margin:0;"><h3>各月</h3>${bars(d.by_month, opts.chartWidth)}</div>
             <div class="ts-card" style="margin:0;"><h3>類似專案（自動推薦，人再挑）</h3>
                 ${similar.length ? similar.map(([n, sc]) => `<div style="display:flex;gap:8px;align-items:center;font-size:12px;margin:4px 0;">
                     <span class="ts-link" data-ts-action="open-project" data-name="${esc(n)}" style="flex:1;">${esc(n)}</span>
