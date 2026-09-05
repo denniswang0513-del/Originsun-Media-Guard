@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>預算結算 — 重新規劃（示範）</title>
+<!--
+  示範頁（靜態、不連 API）。資料＝東仁社宅金安獎影片 2026-09-05 當下的真實數字快照。
+  目的：把「預算結算」這一頁從業務視角重排，解掉 2026-09-05 一天之內出現的四次
+  「這數字不對」。設計理由寫在頁尾「為什麼這樣改」。
+-->
+<style>
+  :root{
+    --bg:#1a1a1a; --panel:#202020; --line:#2e2e2e; --line2:#3a3a3a;
+    --tx:#e0e0e0; --dim:#9ca3af; --mute:#6b7280;
+    --blue:#60a5fa; --green:#86efac; --red:#fca5a5; --amber:#fbbf24; --violet:#c4b5fd;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--tx);
+       font-family:-apple-system,"Segoe UI","Noto Sans TC",sans-serif;font-size:13px;line-height:1.6;}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 80px;}
+  .demo-note{background:#1e3a5f;color:#bfdbfe;border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:22px;}
+  .demo-note b{color:#fff;}
+  h2{font-size:15px;margin:28px 0 10px;color:#fff;font-weight:700;}
+  h2 small{font-weight:400;color:var(--mute);font-size:11px;margin-left:8px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;}
+  .num{font-variant-numeric:tabular-nums;}
+
+  .phead{display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--dim);
+         background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:6px;}
+  .phead b{color:#fff;font-size:15px;}
+  .phead .st{font-style:normal;background:#064e3b;color:var(--green);border-radius:999px;padding:1px 10px;font-size:11px;}
+  /* ── 1. 結論列 ── */
+  .verdict{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-end;
+           background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;}
+  .v-main .lab{font-size:11px;color:var(--mute);letter-spacing:.08em;}
+  .v-main .big{font-size:30px;font-weight:800;color:var(--green);line-height:1.15;}
+  .v-main .sub{font-size:12px;color:var(--dim);}
+  .v-sep{width:1px;align-self:stretch;background:var(--line2);}
+  .v-item .lab{font-size:11px;color:var(--mute);}
+  .v-item .val{font-size:17px;font-weight:700;}
+
+  /* ── 2. 錢的流向 ── */
+  .flow{display:grid;gap:6px;}
+  .frow{display:grid;grid-template-columns:150px 1fr 120px;align-items:center;gap:12px;}
+  .frow .fl{font-size:12px;color:var(--dim);}
+  .frow .fl.ind{padding-left:16px;color:var(--mute);}
+  .frow .fl.ind2{padding-left:34px;color:var(--mute);}
+  .bar{height:20px;border-radius:4px;display:flex;overflow:hidden;background:#181818;}
+  .seg{height:100%;}
+  .frow .fv{text-align:right;font-weight:700;}
+  .frow.small .fv,.frow.small .fl{font-size:12px;font-weight:600;}
+  .frow.small .bar{height:13px;}
+  .eq{font-size:11px;color:var(--mute);margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2);}
+  .eq b{color:var(--tx);}
+
+  /* ── 3. 花在哪 ── */
+  table{width:100%;border-collapse:collapse;}
+  th,td{padding:9px 10px;text-align:right;}
+  th{font-size:11px;color:var(--mute);font-weight:600;border-bottom:1px solid var(--line2);}
+  td:first-child,th:first-child{text-align:left;color:var(--dim);}
+  tbody tr+tr td{border-top:1px solid #262626;}
+  tr.sum td{font-weight:700;border-top:1px solid var(--line2)!important;color:#fff;}
+  .g{color:var(--green);} .r{color:var(--red);} .b{color:var(--blue);} .a{color:var(--amber);}
+  .hint{font-size:11px;color:var(--mute);margin-top:8px;}
+
+  /* ── 4. 子表 ── */
+  .cards{display:flex;gap:12px;flex-wrap:wrap;}
+  .card{width:270px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:14px;}
+  .card.on{border-color:#b45309;background:#231c10;}
+  .card h3{margin:0 0 2px;font-size:14px;color:#fff;}
+  .card .cdate{font-size:11px;color:var(--mute);margin-bottom:10px;}
+  .krow{display:flex;justify-content:space-between;font-size:12px;padding:2px 0;}
+  .krow span:first-child{color:var(--dim);}
+  .krow.tot{border-top:1px solid var(--line);margin-top:6px;padding-top:6px;font-weight:700;}
+  .warn{font-size:11px;color:var(--amber);margin-top:6px;line-height:1.45;}
+  .cbar{height:5px;border-radius:3px;background:#181818;margin-top:10px;overflow:hidden;}
+  .cbar i{display:block;height:100%;}
+
+  /* ── 5. 待辦 ── */
+  .todo{display:grid;gap:8px;}
+  .t{display:grid;grid-template-columns:20px 1fr auto;gap:10px;align-items:start;
+     background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);
+     border-radius:8px;padding:10px 12px;}
+  .t.info{border-left-color:var(--blue);}
+  .t .n{color:var(--mute);font-size:11px;padding-top:2px;}
+  .t .txt{font-size:12px;}
+  .t .txt b{color:#fff;}
+  .t .txt small{display:block;color:var(--mute);font-size:11px;}
+  .t .go{font-size:11px;color:var(--blue);white-space:nowrap;padding-top:2px;}
+
+  /* ── 頁尾對照 ── */
+  .why{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px 18px 14px;}
+  .why ol{padding-left:20px;margin:10px 0;}
+  .why li{margin-bottom:12px;font-size:12px;}
+  .why .was{color:var(--red);}
+  .why .now{color:var(--green);}
+  .why code{background:#181818;padding:1px 5px;border-radius:3px;color:var(--violet);font-size:11px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="demo-note">
+    <b>示範頁</b>　東仁社宅金安獎影片・2026-09-05 的真實數字快照（靜態，不連 API）。
+    這一頁把「預算結算」從業務視角重排：先回答「賺多少 / 夠不夠花」，再回答「分到哪 / 哪裡失控」，
+    最後才是「要我做什麼」。改動理由見頁尾。
+  </div>
+
+  <div class="phead">
+    <b>東仁社宅金安獎影片</b>
+    <span>豐譽營造</span>
+    <em class="st">結案</em>
+    <span>紀實影片</span>
+    <span>王士源</span>
+    <span style="margin-left:auto;color:var(--mute);">2026-03-19　合約 $356,000（未稅 $339,048）</span>
+  </div>
+
+  <!-- ══ 1. 結論：這案賺多少 ══ -->
+  <h2>這案賺多少<small>打開這一頁第一個想知道的事</small></h2>
+  <div class="verdict">
+    <div class="v-main">
+      <div class="lab">目前毛利</div>
+      <div class="big num">$68,591<span style="font-size:18px;"> · 20%</span></div>
+      <div class="sub">目標 $67,809（20%）　<span class="g">比目標多 $782</span></div>
+    </div>
+    <div class="v-sep"></div>
+    <div class="v-item">
+      <div class="lab">合約未稅</div>
+      <div class="val num">$339,048</div>
+    </div>
+    <div class="v-item">
+      <div class="lab">已花成本</div>
+      <div class="val num">$270,457</div>
+    </div>
+    <div class="v-item">
+      <div class="lab">還可以花</div>
+      <div class="val num b">$782</div>
+      <div class="lab" style="color:var(--amber);">其中 $682 還沒分到子表</div>
+    </div>
+  </div>
+
+  <!-- ══ 2. 錢的流向 ══ -->
+  <h2>錢的流向<small>一條線把「為什麼子表剩餘加起來對不上」講死</small></h2>
+  <div class="panel flow">
+    <div class="frow">
+      <div class="fl">合約未稅</div>
+      <div class="bar"><div class="seg" style="width:20%;background:#4c1d95;"></div><div class="seg" style="width:80%;background:#1e3a5f;"></div></div>
+      <div class="fv num">$339,048</div>
+    </div>
+    <div class="frow small">
+      <div class="fl ind">目標毛利（20%）</div>
+      <div class="bar"><div class="seg" style="width:20%;background:#6d28d9;"></div></div>
+      <div class="fv num" style="color:var(--violet);">$67,809</div>
+    </div>
+    <div class="frow small">
+      <div class="fl ind">執行預算</div>
+      <div class="bar"><div class="seg" style="width:80%;background:#2563eb;"></div></div>
+      <div class="fv num b">$271,239</div>
+    </div>
+    <div class="frow small">
+      <div class="fl ind2">2min 影片</div>
+      <div class="bar"><div class="seg" style="width:64.9%;background:#b45309;"></div></div>
+      <div class="fv num">$220,270</div>
+    </div>
+    <div class="frow small">
+      <div class="fl ind2">3min 協力影片</div>
+      <div class="bar"><div class="seg" style="width:14.8%;background:#b45309;"></div></div>
+      <div class="fv num">$50,287</div>
+    </div>
+    <div class="frow small">
+      <div class="fl ind2" style="color:var(--amber);">還沒分配</div>
+      <div class="bar"><div class="seg" style="width:0.25%;min-width:3px;background:#fbbf24;"></div></div>
+      <div class="fv num a">$682</div>
+    </div>
+    <div class="eq">
+      子表剩餘 <b>$100</b>（2min $100 ＋ 3min $0）　＋　還沒分配 <b>$682</b>　＝　還可以花 <b>$782</b>
+    </div>
+  </div>
+
+  <!-- ══ 3. 花在哪 ══ -->
+  <h2>花在哪<small>只比「預估 vs 實際」這一件事；毛利已經在上面講完了，不放進來</small></h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th>　</th><th>預估</th><th>實際</th><th>差</th><th style="width:150px;">　</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>人員（工項）</td>
+          <td class="num">$257,029</td><td class="num">$252,823</td>
+          <td class="num g">剩 $4,206</td>
+          <td><div class="cbar"><i style="width:98%;background:#3b82f6;"></i></div></td>
+        </tr>
+        <tr>
+          <td>雜支</td>
+          <td class="num">$13,528</td><td class="num">$17,634</td>
+          <td class="num r">超 $4,106</td>
+          <td><div class="cbar"><i style="width:100%;background:#ef4444;"></i></div></td>
+        </tr>
+        <tr class="sum">
+          <td>成本合計</td>
+          <td class="num">$270,557</td><td class="num">$270,457</td>
+          <td class="num g">剩 $100</td>
+          <td><div class="cbar"><i style="width:99.7%;background:#f59e0b;"></i></div></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="hint">
+      預估雜支＝各子表預計雜支加總（$11,014 ＋ $2,514）。子表都沒設預算時這格是 0，
+      「未稅 5%」只當建議值不進數字。
+    </div>
+  </div>
+
+  <!-- ══ 4. 子表 ══ -->
+  <h2>分到哪去了<small>每張子表：核給多少、花掉多少、還剩多少</small></h2>
+  <div class="cards">
+    <div class="card on">
+      <h3>2min 影片</h3>
+      <div class="cdate">未填拍攝日</div>
+      <div class="krow"><span>核給預算</span><b class="num">$220,270</b></div>
+      <div class="krow"><span>　工項預估</span><span class="num">$210,487</span></div>
+      <div class="krow"><span>　預計雜支（5%）</span><span class="num">$11,014</span></div>
+      <div class="krow"><span>實際工項</span><span class="num">$206,281</span></div>
+      <div class="krow"><span>實際雜支</span><span class="num r">$13,889　超 $2,875</span></div>
+      <div class="krow tot"><span>已花 / 剩餘</span><span class="num">$220,170 / <b class="g">$100</b></span></div>
+      <div class="warn">工項預估 $210,487 超出可用 $209,256（核給 − 預計雜支）<b>$1,231</b><br>
+        <span style="color:var(--mute);">規劃階段就超了，跟實際花多少無關</span></div>
+      <div class="cbar"><i style="width:100%;background:#f59e0b;"></i></div>
+    </div>
+    <div class="card">
+      <h3>3min 協力影片</h3>
+      <div class="cdate">未填拍攝日</div>
+      <div class="krow"><span>核給預算</span><b class="num">$50,287</b></div>
+      <div class="krow"><span>　工項預估</span><span class="num">$46,542</span></div>
+      <div class="krow"><span>　預計雜支（5%）</span><span class="num">$2,514</span></div>
+      <div class="krow"><span>實際工項</span><span class="num">$46,542</span></div>
+      <div class="krow"><span>實際雜支</span><span class="num r">$3,745　超 $1,231</span></div>
+      <div class="krow tot"><span>已花 / 剩餘</span><span class="num">$50,287 / <b>$0</b></span></div>
+      <div class="cbar"><i style="width:100%;background:#f59e0b;"></i></div>
+    </div>
+    <div class="card" style="border-style:dashed;display:flex;align-items:center;justify-content:center;color:var(--mute);">
+      ＋ 新增子表
+    </div>
+  </div>
+
+  <!-- ══ 5. 待辦 ══ -->
+  <h2>要你決定的<small>原本散在三條不同顏色的提示列裡，收成一區</small></h2>
+  <div class="todo">
+    <div class="t">
+      <div class="n">1</div>
+      <div class="txt"><b>執行預算還有 $682 沒分配到子表</b>
+        <small>不分配也可以，但「還可以花 $782」裡有 $682 不屬於任何一張子表 —— 它不會出現在任何卡片上。</small></div>
+      <div class="go">去分配 →</div>
+    </div>
+    <div class="t">
+      <div class="n">2</div>
+      <div class="txt"><b>2min 影片：工項預估超出核給 $1,231</b>
+        <small>核給 $220,270 扣掉預計雜支 $11,014，能給工項的是 $209,256，但工項估了 $210,487。</small></div>
+      <div class="go">調整 →</div>
+    </div>
+    <div class="t info">
+      <div class="n">3</div>
+      <div class="txt"><b>雜支已超出預計 $4,106</b>
+        <small>兩張子表都超（2min $2,875、3min $1,231）。目前靠工項省下的 $4,206 蓋過去，淨剩 $100。</small></div>
+      <div class="go">看明細 →</div>
+    </div>
+  </div>
+
+  <!-- ══ 為什麼這樣改 ══ -->
+  <h2>為什麼這樣改</h2>
+  <div class="why">
+    <p style="font-size:12px;color:var(--dim);margin:12px 0 0;">
+      2026-09-05 一天之內，同一頁出現四次「這數字不對」。四次都不是算錯，是
+      <b style="color:#fff;">同一個詞在畫面上指四種東西</b>：執行預算、規劃（預估合計）、
+      子表預算加總、單張子表核給 —— 全部叫「預算」。
+    </p>
+    <ol>
+      <li>
+        <span class="was">舊：</span>卡片說「剩餘 $0」，同一頁表尾說「預算結餘 $1,913」。<br>
+        <span class="now">新：</span>卡片只講<b>核給</b>，表格只講<b>預估 vs 實際</b>，兩個字不再共用。
+      </li>
+      <li>
+        <span class="was">舊：</span>子表剩餘加總 $23,381，整案剩餘預算 $24,063，差的 $682 畫面上沒有任何地方解釋。<br>
+        <span class="now">新：</span>「錢的流向」把 $682 畫成一條獨立的橫條，底下直接寫出等式。
+      </li>
+      <li>
+        <span class="was">舊：</span>毛利那一列的「預估」是目標毛利、「實際」是未稅−實際成本，兩格<b>不同源</b>，
+        差額欄因此看起來像在比較兩個同類的東西。<br>
+        <span class="now">新：</span>毛利<b>移出對照表</b>，放到最上面單獨一行「目前 vs 目標」。表格只剩人員／雜支／合計，每一列都同源。
+      </li>
+      <li>
+        <span class="was">舊：</span>工項在規劃階段就超出核給，畫面完全沒說，最後靠實際少花蓋過去。<br>
+        <span class="now">新：</span>子表卡直接標「工項預估超出可用 $1,231」，並收進「要你決定的」。
+      </li>
+    </ol>
+    <p style="font-size:12px;color:var(--dim);">
+      另外兩個小改：子表卡補上<b>實際雜支</b>（原本只有預計，所以「剩餘」看起來沒來由）；
+      三條散落的提示列收成一區「要你決定的」，每條都帶一個動作。
+    </p>
+    <p style="font-size:11px;color:var(--mute);margin-bottom:4px;">
+      沒有動的：所有算式與資料來源完全不變 —— 這是<b>重排與命名</b>，不是改算法。
+      目前線上那一頁的每個數字在這裡都找得到。
+    </p>
+  </div>
+
+</div>
+</body>
+</html>
