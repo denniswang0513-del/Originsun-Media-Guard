@@ -57,3 +57,9 @@ def test_react_call_passes_an_object_body_like_the_other_calls():
     core = js_code_only(repo_src("frontend/js/shared/journal-core.js"))
     line = next(l for l in core.splitlines() if "react: (body)" in l)
     assert "JSON.stringify" not in line and "body })" in line
+
+
+def test_heart_rerender_replaces_the_whole_wrap():
+    """連按愛心一直長頭像：只換 <button> 會把新的一組（頭像＋愛心）塞進舊的 wrap 裡；要整組換。"""
+    page = js_code_only(repo_src("frontend/journal.html"))
+    assert "btn.closest('.heart-wrap')" in page and "(wrap || btn).outerHTML = heartHtml(" in page

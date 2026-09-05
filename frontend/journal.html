@@ -663,7 +663,8 @@ async function sendHeart(btn, kind) {
     btn.disabled = false;
     if (!r.ok) { const d = r.json ? await r.json().catch(() => ({})) : {}; alert(d.detail || `沒送出（${r.status || '連線失敗'}）`); return; }
     const d = await r.json();
-    btn.outerHTML = heartHtml(d.reactions, { journalId: btn.dataset.heartJ }, true);
+    const wrap = btn.closest('.heart-wrap');   // 整組換掉（頭像列＋愛心＋浮層）；只換按鈕會把新的一組塞進舊的裡面，連按就一直長頭像
+    (wrap || btn).outerHTML = heartHtml(d.reactions, { journalId: btn.dataset.heartJ }, true);
 }
 $('view').addEventListener('pointerdown', (ev) => {
     const b = ev.target.closest('button[data-heart]'); if (!b) return;
