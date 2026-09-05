@@ -149,11 +149,8 @@ def test_reply_is_manager_only_and_notifies_the_author():
     rep = func_body(src, "async def reply_entry(")
     assert 'check_admin_or_module(request, "timesheets")' in rep
     assert "entry.journal_id != shell.id" in rep                 # 條目必須屬於那份週記
-    assert "asyncio.to_thread(_notify_reply" in rep
-    # 這段要看原始碼（code_only 會把 f-string 裡的 "#journal" 當註解切掉）
-    notif = func_body(repo_src("routers/api_journal.py"), "def _notify_reply(")
-    assert "send_google_chat(" in notif and "#journal" in notif and "except Exception" in notif
-    assert "有主管回覆" in notif and "_MY_PAGE_URL" in notif
+    # owner 2026-09-05：主管回覆先不通知本人（只在頁面上看到）。要加回來走個人通道，不准用全域 Chat webhook 廣播
+    assert "_notify_reply" not in rep and "send_google_chat" not in src
     assert 'check_admin_or_module(request, "timesheets")' in func_body(src, "async def help_queue(")
     assert "unanswered_flagged(" in func_body(src, "async def help_queue(")
 

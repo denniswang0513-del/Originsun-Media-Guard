@@ -21,7 +21,6 @@ learnings 學到了什麼 / others 其他主題 — owner 明確要求分表，�
 
 權限：check_admin_or_module(request, 'journal')；回覆／求助清單另守 'timesheets'。純函式在 core/journal_logic.py。
 """
-import asyncio
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -435,15 +434,8 @@ async def person_journals(request: Request, username: str = "", limit: int = 26)
 
 # ── 主管面：回覆、求助清單（守衛＝timesheets 模組；owner §14 回覆全員可見）──────────────
 
-def _notify_reply(display_name: str, content: str) -> None:
-    """回覆推一則 Google Chat 給本人（owner 拍板要即時通知；先走全域 webhook）。
-    best-effort：沒 notifier／沒 webhook／失敗都不擋回覆。"""
-    try:
-        from notifier import send_google_chat
-        from routers.api_auth import _MY_PAGE_URL
-        send_google_chat(f"{display_name} 的週記有主管回覆：{content[:80]}｜{_MY_PAGE_URL}#journal")
-    except Exception:
-        pass
+# 主管回覆的即時通知：owner 2026-09-05 先拿掉（只在頁面上看到）。要加回來時走個人通道（通知偏好 D3），
+# 不要再用全域 Chat webhook 廣播——那會把每個人的週記回覆都推到同一個群。
 
 
 @router.post("/reply")
@@ -474,7 +466,6 @@ async def reply_entry(body: JournalReplyPost, request: Request):
         out = {"id": reply.id, "journal_id": shell.id, "entry_table": reply.entry_table, "entry_id": reply.entry_id,
                "username": who, "display_name": names.get(who, who), "content": content,
                "created_at": _iso(reply.created_at)}
-    await asyncio.to_thread(_notify_reply, names.get(shell.username, shell.username), content)
     return {"status": "ok", "reply": out}
 
 
