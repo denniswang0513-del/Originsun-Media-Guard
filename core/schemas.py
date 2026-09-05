@@ -371,6 +371,8 @@ class TimesheetManualRow(BaseModel):
     project_name: str = ""     # 無 id 時以名稱對映（同 ingest 邏輯）
     task_note: Optional[str] = None
     remark: Optional[str] = None      # 員工備註（內容之外的補充）
+    start_time: Optional[str] = None  # 起「HH:MM」；不帶＝不動、"" ＝清空（格子的起訖要存，owner 2026-09-06）
+    end_time: Optional[str] = None    # 訖「HH:MM」
     hours: Optional[float] = None
     planned_hours: Optional[float] = None
     work_type: Optional[str] = None   # core.hr_logic.WORK_TYPES 之一，可空

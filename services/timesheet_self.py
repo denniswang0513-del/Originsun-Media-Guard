@@ -33,6 +33,8 @@ def ts_dict(r, staff_id: str | None = None, *, with_note: bool = False) -> dict:
         "project_id": r.project_id or "",
         "task_note": r.task_note or "",
         "remark": r.remark or "",
+        "start_time": getattr(r, "start_time", None) or "",   # 格子的起／訖
+        "end_time": getattr(r, "end_time", None) or "",
         "hours": round(float(r.hours or 0), 2),
         "planned_hours": round(float(r.planned_hours), 2) if r.planned_hours is not None else None,
         "work_type": r.work_type or "",

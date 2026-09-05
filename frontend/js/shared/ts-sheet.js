@@ -124,7 +124,8 @@ export function tableHtml(rowsHtml, id = 'ts-mine-add') {
 /** 後端的一列（ts_dict）→ 格子的值。 */
 export function rowFromItem(i) {
     return { project: i.project_name, project_id: i.project_id, work_type: i.work_type, stage_id: i.stage_id, stage_name: i.stage_name,
-             note: i.task_note, remark: i.remark, planned: i.planned_hours, hours: i.hours || '', bulletin_id: i.bulletin_id };
+             note: i.task_note, remark: i.remark, t0: i.start_time || '', t1: i.end_time || '',
+             planned: i.planned_hours, hours: i.hours || '', bulletin_id: i.bulletin_id };
 }
 
 const _ctx = (host) => host._tsCtx || {};
@@ -210,6 +211,8 @@ export function rowBody(tr, { day = '', projects = [] } = {}) {
         task_note: v('note'), remark: v('remark'),
         hours: v('hours') ? parseFloat(v('hours')) : null,
     };
+    // 起／訖：有那兩欄的格子才送（"" ＝清空）；重新整理要還在（owner 2026-09-06）
+    if (tr.querySelector('[data-f="t0"]')) { body.start_time = v('t0'); body.end_time = v('t1'); }
     // 計畫 h 欄 2026-09-06 從格子拿掉；有那欄的格子才送，沒有就不碰既有的 planned_hours
     if (tr.querySelector('[data-f="planned"]')) body.planned_hours = v('planned') ? parseFloat(v('planned')) : null;
     // 只有格子本身有階段欄才送 stage_id（空字串＝清空）；總表改列／代填的列沒這欄，不能把人家的階段洗掉

@@ -577,6 +577,9 @@ async def _on_startup():
                         ("timesheets", "stage_id", "VARCHAR(32)"),
                         ("timesheets", "stage_name", "VARCHAR(64)"),
                         ("timesheets", "bulletin_id", "VARCHAR(32)"),
+                        # 我的一天格子的起／訖（owner 2026-09-06：重新整理不能消失）
+                        ("timesheets", "start_time", "VARCHAR(5)"),
+                        ("timesheets", "end_time", "VARCHAR(5)"),
                         # 週記草稿→送出（§13）＋ 條目掛案子／求助標記（§2-B3／B4）；journal_replies 新表由 create_all 建
                         ("work_journals", "status", "VARCHAR(16)"),
                         ("work_journals", "submitted_at", "TIMESTAMPTZ"),

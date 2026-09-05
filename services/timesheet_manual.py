@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from core.project_flow import is_closed
 
+import re
 import uuid
 
 from fastapi import HTTPException
@@ -23,6 +24,20 @@ from services.timesheet_lookup import load_project_lookup, project_names
 async def names_for(session, rows) -> dict:
     """下拉只給 id 沒給名的那幾列才回查案名（有界 IN；目前兩個前端都只送名字，這是 API 路）。"""
     return await project_names(session, [r.project_id for r in rows if r.project_id and not (r.project_name or "").strip()])
+
+
+_HHMM = re.compile(r"^(\d{1,2}):?(\d{2})$")
+
+
+def hhmm_or_none(v) -> str | None:
+    """「9:30」「0930」「17:30」→ "09:30"／"17:30"；空或看不懂 → None（跟格子的 normTime 同一套寬鬆）。"""
+    m = _HHMM.match(str(v or "").strip())
+    if not m:
+        return None
+    h, mm = int(m.group(1)), int(m.group(2))
+    if h > 23 or mm > 59:
+        return None
+    return f"{h:02d}:{mm:02d}"
 
 
 def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, keep: tuple | None = None) -> tuple:
@@ -49,6 +64,8 @@ def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, keep: tuple |
         "work_date": wd, "project_id": pid, "project_name": pname,
         "task_note": (r.task_note or "").strip() or None,
         "remark": (getattr(r, "remark", None) or "").strip() or None,
+        # 起／訖：body 帶了才進 fields（沒帶＝更新時不碰既有值；"" 或看不懂＝清空）
+        **{k: hhmm_or_none(getattr(r, k)) for k in ("start_time", "end_time") if getattr(r, k, None) is not None},
         "hours": float(r.hours or 0),
         "planned_hours": float(r.planned_hours) if r.planned_hours is not None else None,
         "work_type": wt, "status": status,
