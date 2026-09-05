@@ -158,6 +158,19 @@ token_router = APIRouter(tags=["CRM token 自驗（master 限定）"],
 # CRM 一般寫入 —— 管理員限定（歷史預設）。
 _check_auth = _module_guard()
 
+# 母帳帳務的寫入 —— 管理員 OR 擁有「財務管理」模組（模組鍵 `crm_invoices`；
+# 使用者管理 UI 上的標籤就是「財務管理」，見 js/admin/user-mgmt.MODULE_LABELS）。
+#
+# owner 2026-09-05：「權限管理也沒有什麼 lv 幾，都在這裡管理就好」——
+# 「管理員」在那張表上的說明是**使用者 / 設定 / 發版**，它不是業務功能的閘門。
+# 帳務能不能寫，看的是那個勾。
+#
+# 🔴 這條**只管母帳**：私帳仍走 `finance_mine`（指名制，管理員也不隱含）、
+# 看不看得到金額仍走 `money_view`、合夥人唯讀仍是 `finance_partner`。
+# 帳本牆在各端點自己的 `require_entity(..., level="full")` —— 這裡只決定
+# 「要不要是管理員」那一層。
+_check_finance_auth = _module_guard('crm_invoices')
+
 # 官網製作授權 — 管理員 OR 擁有 website_admin 模組即可（不需全域 admin）。
 # 給「結案製作」看板 + showcase 編輯端點用：非管理員的官網製作人員只要帳號
 # modules 含 'website_admin' 就能操作，跟官網管理 Tab 寫入守衛（website 路由）一致。

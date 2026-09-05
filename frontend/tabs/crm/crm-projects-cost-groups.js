@@ -57,6 +57,14 @@ function _renderChip(g, active, canDelete) {
     const total = g.budget_amount || 0;          // 預算含委外與雜支（owner 2026-09-05）
     const used = s.total_actual || 0;
     const remain = total - used;
+    // 🔴 工項在**填的當下**就超出核給預算了嗎（owner 2026-09-05）。
+    // 預算含雜支，所以留給工項的是 預算 − 預計雜支。東仁社宅 2min：
+    // 220,270 − 11,014 = 209,256 可用，工項卻估了 211,169 → 一開始就超 1,913。
+    // 畫面上原本沒有任何地方講這件事，最後靠工項實際少花把它蓋過去，
+    // 於是卡片顯示「剩餘 0」、表尾顯示「結餘 1,913」，兩個都對卻互相矛盾。
+    // 只有超出才畫 —— 沒超就安靜（同 _renderAllocationAlert 的規矩）。
+    const forLines = total - (g.misc_budget_effective ?? 0);
+    const overPlan = total > 0 ? Math.max(0, (s.cost_estimated || 0) - forLines) : 0;
     const pct = _usagePct(used, total);
     const hasBudget = total > 0;
     const over = hasBudget && remain < 0;
@@ -94,6 +102,9 @@ function _renderChip(g, active, canDelete) {
             <div class="cg-chip-name">${_esc(g.name)}</div>
             ${date}
             <div class="cg-chip-budget">預算 ${hasBudget ? '$' + fmtNum(total) : '<span class="cg-muted">未設</span>'}</div>
+            ${overPlan ? `<div class="cg-chip-overplan"
+                 title="預算 $${fmtNum(total)} − 預計雜支 $${fmtNum(g.misc_budget_effective ?? 0)} = 可給工項 $${fmtNum(forLines)}；工項預估填了 $${fmtNum(s.cost_estimated || 0)}。這是規劃階段就超出，跟實際花多少無關。"
+                 >工項預估超出 $${fmtNum(overPlan)}</div>` : ''}
             <div class="cg-chip-misc">預計雜支 ${hasBudget ? '$' + fmtNum(g.misc_budget_effective ?? 0) + (g.misc_budget_amount == null ? '<span class="cg-muted">（5%）</span>' : '') : '<span class="cg-muted">—</span>'}</div>
             <div class="cg-chip-actual">結算 ${used > 0 ? '$' + fmtNum(used) : '<span class="cg-muted">—</span>'}</div>
             ${remainRow}

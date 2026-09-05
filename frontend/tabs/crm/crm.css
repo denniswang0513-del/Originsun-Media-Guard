@@ -1765,6 +1765,9 @@
 /* Chip rows — 剩餘 / 進度條 + % / 未設預算提示 / 編輯按鈕 */
 .cg-chip-remain { font-size: 11px; color: #d1d5db; }
 .cg-chip-remain-over { color: #fca5a5; font-weight: 700; }
+/* 工項預估在規劃階段就超出核給預算（owner 2026-09-05）—— 只有超出才會畫出來，
+   所以刻意做得看得見；跟 cg-chip-remain-over（實際超支）同一組紅。 */
+.cg-chip-overplan { font-size: 10px; color: #fbbf24; line-height: 1.3; }
 .cg-chip .cg-muted.cg-chip-remain,
 .cg-chip-remain.cg-muted { color: #6b7280; }
 

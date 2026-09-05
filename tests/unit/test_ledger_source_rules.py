@@ -182,20 +182,24 @@ def test_the_update_endpoint_passes_what_the_user_sent():
     assert "_lastProTax" not in js, "又長出第二個「人調過了沒」的答案"
 
 
-def test_owner_can_write_own_book_but_parent_stays_admin_only():
-    """🔴 owner＝lv1＋finance_mine（指名制），原本 CRM 寫入全是 Lv3-only ——
-    帳本主人在生產連一筆帳都記不進去（真實帳號形狀實測 403 才發現；先前
-    測試全用 Lv3 token）。開 mine full 路徑；母公司維持 Lv3（不放寬同事）。"""
+def test_each_ledger_has_its_own_write_key():
+    """🔴 兩本帳各有各的鑰匙，**都不是「管理員」**：
+
+    · 私帳 → `finance_mine`（指名制）。owner＝lv1＋finance_mine，原本 CRM 寫入
+      全是管理員限定 —— 帳本主人在生產連一筆帳都記不進去（真實帳號形狀實測
+      403 才發現；先前測試全用管理員 token）。
+    · 母帳 → 「財務管理」模組（`crm_invoices`）。2026-09-05 起不再要管理員 ——
+      owner：「權限管理也沒有什麼 lv 幾，都在這裡管理就好」，而使用者管理上
+      「管理員」的說明是**使用者 / 設定 / 發版**。
+    """
     src = finance_src()   # 四個帳務檔串起來（2026-08-30 拆檔）
     helper = src.split("def _mine_or_admin_write(")[1].split("\ndef ")[0]
     assert 'require_entity(request, "mine", level="full")' in helper
-    # 2026-09-05 起母公司那半邊可由呼叫端指定守衛（發票走模組），預設仍是 Lv3
-    assert "(parent_guard or _check_auth)(request)" in helper   # 母公司路徑原樣
-    # 建立/更新走 _entity_for_write 咽喉（守衛收在裡面 —— 逐端點明呼會忘）
+    assert "_check_finance_auth(request)" in helper      # 母帳＝財務管理模組
+    # 建立/更新走 _entity_for_write 咽喉（守衛收在裡面 —— 逐端點明呼會忘，
+    # 而且端點自己那行**擋不住**咽喉：2026-09-05 實測過）
     throat = src.split("def _entity_for_write(")[1].split("\ndef ")[0]
-    # 咽喉自己就會呼守衛（2026-09-05 起母公司那半邊可由呼叫端指定，
-    # 發票傳模組守衛、其餘不傳＝預設 Lv3）
-    assert "_mine_or_admin_write(request, ent, parent_guard=parent_guard)" in throat
+    assert "_mine_or_admin_write(request, ent)" in throat
     for fn_name in ("create_cash_entry", "update_cash_entry",
                     "create_payment", "update_payment"):
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
@@ -217,13 +221,10 @@ def test_owner_can_write_own_book_but_parent_stays_admin_only():
         fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
         assert "_mine_or_admin_write_rows(request, rows)" in fn, fn_name
         assert "_check_auth(" not in fn, f"{fn_name}：Lv3-only 會把帳本主人擋在門外"
-    # 發票單筆寫入 2026-09-05 改走模組守衛（owner 拍板 B 案：模組發了卻按下去
-    # 403＝空頭支票）。細節與「哪幾支不放寬」在 test_invoice_write_permission.py。
-    fn = src.split("async def create_invoice(")[1].split("\n@router")[0]
-    assert "_check_invoice_auth(request)" in fn
-    # 不可逆與批次的仍是 Lv3
-    fn = src.split("async def purge_invoice_trash(")[1].split("\n@router")[0]
-    assert "_check_auth(request)" in fn
+    # 發票的寫入 2026-09-05 起走模組守衛（細節在 test_invoice_write_permission.py）
+    for fn_name in ("create_invoice", "purge_invoice_trash"):
+        fn = src.split(f"async def {fn_name}(")[1].split("\n@router")[0]
+        assert "_check_finance_auth(request)" in fn, fn_name
 
 
 def test_batch_receive_cannot_touch_the_other_ledger():

@@ -25,7 +25,7 @@ from core.auth import check_admin
 from core.finance_logic import PASSTHROUGH_FEE_RATES
 from core.ledger import require_entity
 
-from ._shared import (router, token_router, _check_auth, money_dep, _require_db,
+from ._shared import (router, token_router, _check_finance_auth, money_dep, _require_db,
                       _get_factory, _fmt_day, _now)
 
 try:
@@ -152,7 +152,7 @@ def _resync_invoice_file(inv) -> str:
 async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFile = File(...)):
     """上傳這張發票開好的電子發票檔。同一張再傳一次＝取代（舊檔留在磁碟不刪，
     避免誤傳覆蓋掉唯一的正本；要清掉走 DELETE）。"""
-    _check_auth(request)
+    _check_finance_auth(request)
     _require_db()
     from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
 
@@ -214,7 +214,7 @@ async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFil
 async def clear_invoice_file(invoice_id: str, request: Request):
     """解除關聯。**不刪磁碟上的檔** —— 那可能是唯一一份正本，且稅務憑證誤刪
     救不回來；要清檔案由人到資料夾裡處理。"""
-    _check_auth(request)
+    _check_finance_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -232,7 +232,7 @@ async def clear_invoice_file(invoice_id: str, request: Request):
 async def serve_invoice_file(path: str = Query(""), request: Request = None):
     """提供電子發票檔下載/檢視。路徑白名單：只放行 invoices_root 底下的檔
     （比照 costs.serve_receipt —— 沒有這道，這支就是任意檔案讀取）。"""
-    _check_auth(request)
+    _check_finance_auth(request)
     if not path or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="檔案不存在")
     abs_path = os.path.abspath(path)
@@ -265,7 +265,7 @@ async def create_invoice_share_link(invoice_id: str, request: Request):
     短碼掛在根路徑 `/e/{code}`（約 49 字元）。**舊的長網址仍然有效**（見
     download_invoice_file_public），已經寄出去的連結不會因為這次改版失效。
     """
-    _check_auth(request)
+    _check_finance_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -296,7 +296,7 @@ async def create_invoice_share_link(invoice_id: str, request: Request):
 @router.delete("/invoices/{invoice_id}/share")
 async def revoke_invoice_share_link(invoice_id: str, request: Request):
     """作廢已發出的下載連結（寄錯人、客戶換窗口時用）。之後可再產一張新的。"""
-    _check_auth(request)
+    _check_finance_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:

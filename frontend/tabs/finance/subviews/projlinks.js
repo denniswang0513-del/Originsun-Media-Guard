@@ -94,16 +94,10 @@ function _rowParent(p) {
 }
 
 
-function _render() {
-    const d = _d;
-    const mineSide = _dir === 'mine';
-    const linked = mineSide
-        ? (d.mine || []).filter(_linked) : (d.parents || []).filter(_linkedP);
-    const total = (mineSide ? d.mine : d.parents) || [];
-    const rows = _visible();
-
+/** 私帳 → 母帳那個方向的一列。 */
+function _rowMine(m) {
     // 按鈕放最左欄（同 clients.js：擠在名字右邊很容易按到隔壁那列）
-    const cell = (m) => _linked(m)
+    const cell = _linked(m)
         ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" style="color:#f87171;width:60px;"
                    title="解除與母帳的對應（只解連結，兩邊資料都不動）"
                    onclick="window._finPL.link('${m.id}','')">解除</button>`
@@ -114,8 +108,8 @@ function _render() {
                    title="在母帳補建一個對應的專案並連結（案名／客戶／結案日照帶，金額先用私帳的）"
                    onclick="window._finPL.create('${m.id}')">建立</button>`;
 
-    const row = (m) => `
-        <tr><td class="fpl-link" data-id="${m.id}" style="overflow:visible;width:76px;">${cell(m)}</td>
+    return `
+        <tr><td class="fpl-link" data-id="${m.id}" style="overflow:visible;width:76px;">${cell}</td>
             <td style="color:#e0e0e0;">${esc(m.name)}${
                 m.display_name ? ` <span style="font-size:10px;color:#6b7280;">顯示：${esc(m.display_name)}</span>` : ''}</td>
             <td style="color:#9ca3af;">${esc(m.client)}${
@@ -134,7 +128,29 @@ function _render() {
                            <button class="crm-btn crm-btn-primary crm-btn-sm" style="margin-left:6px;"
                                    onclick="window._finPL.link('${m.id}','${m.suggest_id}')">採用</button>`
                         : '（未對應）'}</td></tr>`;
+}
 
+
+/** 只有列 —— 搜尋每敲一鍵重畫的就是這一段（不能碰到 input，見 _render 尾端）。 */
+function _rowsHtml() {
+    const rows = _visible();
+    return rows.map(_dir === 'mine' ? _rowMine : _rowParent).join('')
+        || '<tr><td colspan="6" style="color:#666;padding:14px;">（這個篩選下沒有案子）</td></tr>';
+}
+
+
+function _renderRows() {
+    const body = document.getElementById('fpl-body');
+    if (body) body.innerHTML = _rowsHtml();
+}
+
+
+function _render() {
+    const d = _d;
+    const mineSide = _dir === 'mine';
+    const linked = mineSide
+        ? (d.mine || []).filter(_linked) : (d.parents || []).filter(_linkedP);
+    const total = (mineSide ? d.mine : d.parents) || [];
     _c.innerHTML = `
         <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
             <h2 style="color:#eee;margin:0;font-size:18px;">🔗 專案對應</h2>
@@ -162,8 +178,7 @@ function _render() {
                 <th>對應</th><th>${mineSide ? '私帳專案' : '母帳專案'}</th><th>客戶</th><th>結案日</th>
                 <th style="text-align:right;">${mineSide ? '私帳金額' : '合約金額'}</th>
                 <th>對應的${mineSide ? '母帳' : '私帳'}專案</th></tr></thead>
-            <tbody>${rows.map(mineSide ? row : _rowParent).join('')
-                || '<tr><td colspan="6" style="color:#666;padding:14px;">（這個篩選下沒有案子）</td></tr>'}</tbody>
+            <tbody id="fpl-body">${_rowsHtml()}</tbody>
         </table></div>
         <div style="color:#666;font-size:11px;margin-top:10px;">
             對應＝確認「這兩筆是同一個案」，兩邊資料都不動；對應後案名顯示母帳那一份（可在執行專案頁自訂）。<br>
@@ -179,7 +194,11 @@ function _render() {
 
     const q = document.getElementById('fpl-q');
     if (q) {
-        q.oninput = () => { _q = q.value; _render(); document.getElementById('fpl-q').focus(); };
+        // 🔴 **只重畫 tbody，不重畫整頁**（owner 2026-09-05「無法打字」）。
+        // 原本每敲一個鍵就 _render()＝把 input 整個換掉再 focus 回去，
+        // 中文輸入法的組字階段被打斷 → 選字視窗一出現就消失，等於打不了字。
+        // 英數看起來「還能用」（只是游標跳到尾巴），所以很容易漏掉。
+        q.oninput = () => { _q = q.value; _renderRows(); };
     }
     const only = document.getElementById('fpl-only');
     if (only) { only.onchange = () => { _only = only.value; _render(); }; }
