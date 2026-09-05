@@ -62,12 +62,18 @@ def test_journal_iframe_and_zones_stay():
     assert "function _prevWorkday(" in html and "_dow(d) === 0 || _dow(d) === 6" in html
 
 
-def test_action_bar_links_to_existing_pages_only():
+def test_action_bar_is_just_petty_cash():
+    """owner 2026-09-05：「先只留下零用金」。
+
+    原本七顆（零用金／請款／請開發票／登記拍攝／領用器材／請假／福委會），
+    一次擺七顆等於沒有重點。要放回來就一顆一顆放，不要整排長回去。
+    連結仍指既有頁面、仍受 me_petty 閘門。
+    """
     html = repo_src(MY)
-    for href in ("/petty-cash.html", "/m/crm.html#invoice", "/m/crm.html#calendar", "/index.html#tab_equipment"):
-        assert href in html, href
-    # 領用器材沒權限就不顯示（equipment／preprod_plan 任一）
-    assert 'g.has("equipment", "preprod_plan")' in html
+    fn = html.split("function renderActions(")[1].split("\n}")[0]
+    assert '{ label: "零用金", href: "/petty-cash.html" }' in fn
+    assert 'has("me_petty")' in fn, "閘門不能一起拿掉"
+    assert fn.count("label:") == 1, "最上排先只留零用金"
 
 
 def test_find_view_filters_are_one_row():

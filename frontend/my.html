@@ -665,15 +665,15 @@ function grants() {
     } catch (_) { return { admin: false, has: () => false }; }
 }
 
-// ── 最上排功能鍵：零用金｜請款｜請開發票｜登記拍攝｜領用器材｜請假｜福委會（全是既有頁面／卡片）──
+// ── 最上排功能鍵 ──
+// owner 2026-09-05：「先只留下零用金」。原本還有請開發票／登記拍攝／領用器材
+// （更早的版本還有請款／請假／福委會）—— 一次擺七顆等於沒有重點，先收到只剩
+// 真的每天在用的那一顆，其餘等要用了再一顆一顆放回來。
+// 卡片區同一天也做了同樣的收斂（見 renderWorkspace 裡「先只留零用金」那段）。
 function renderActions(ws) {
-    const g = grants();
     const has = k => ws.allowed.includes(k);
     const items = [
-        has("me_petty")    && { label: "零用金", href: "/petty-cash.html" },
-        g.has("crm_invoices", "finance_partner") && { label: "請開發票", href: "/m/crm.html#invoice" },
-        g.has("crm_projects") && { label: "登記拍攝", href: "/m/crm.html#calendar" },
-        g.has("equipment", "preprod_plan") && { label: "領用器材", href: "/index.html#tab_equipment" },
+        has("me_petty") && { label: "零用金", href: "/petty-cash.html" },
     ].filter(Boolean);
     $("ws-actions").innerHTML = items.map(it => it.href
         ? `<a class="act" href="${it.href}">${it.label}</a>`
