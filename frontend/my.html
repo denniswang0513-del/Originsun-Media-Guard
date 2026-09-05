@@ -160,10 +160,10 @@ footer .eyebrow { font-size: 10px; }
 .vhead .ey { font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--sub); }
 .vhead .ey b { color: var(--red); font-weight: 400; letter-spacing: 0; margin-left: 6px; font-size: 14px; }
 .vrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.btn { min-height: 30px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); padding: 0 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
-.btn:hover { color: var(--red); border-color: var(--red); }
+.btn { min-height: 34px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); padding: 0 12px; font-size: 13px; cursor: pointer; font-family: inherit; }
+.btn:hover { border-color: var(--ink); }
 .btn.pri { background: var(--ink); border-color: var(--ink); color: #fff; }
-.btn.pri:hover { background: var(--red); border-color: var(--red); }
+.btn.pri:hover { background: #000; border-color: #000; }
 .btn:disabled { opacity: .45; cursor: default; }
 .btn.on { background: var(--ink); border-color: var(--ink); color: #fff; }
 .in { border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-size: 13px; font-family: inherit; color: var(--ink); background: #fff; }
@@ -173,7 +173,18 @@ footer .eyebrow { font-size: 10px; }
 .sheet-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .sheet-note { font-size: 12px; color: var(--sub); line-height: 1.6; margin-top: 6px; }
 /* 共用元件的白底配色（ts-sheet / ts-projects / stage-editor 的 CSS 變數）*/
-table.ts-sheet { --sh-bg: #fff; --sh-line: #e5e5e5; --sh-head: #f5f5f5; --sh-head-ink: #737373; --sh-ink: #262626; --sh-sub: #8a8a8a; --sh-ro: #fafafa; --sh-ro-ink: #8a8a8a; --sh-hover: #fafafa; --sh-focus: #eff6ff; --sh-accent: #1d4ed8; --sh-del: #a3a3a3; --sh-del-hover: #c9372c; --sh-ok: #15803d; --sh-busy: #1d4ed8; --sh-err: #c9372c; }
+table.ts-sheet { --sh-bg: #fff; --sh-line: #e5e5e5; --sh-head: #f5f5f5; --sh-head-ink: #737373; --sh-ink: #262626; --sh-sub: #8a8a8a; --sh-ro: #fafafa; --sh-ro-ink: #8a8a8a; --sh-hover: #fff; --sh-focus: #fff; --sh-accent: #1d4ed8; --sh-del: #a3a3a3; --sh-del-hover: #c9372c; --sh-ok: #15803d; --sh-busy: #1d4ed8; --sh-err: #c9372c; font-size: 13px; }
+/* 示範頁的格子手感：34px 列、表頭淺灰置中、列號不塗底、選到藍框、階段藍字、新列淡底 */
+table.ts-sheet th, table.ts-sheet td { height: 34px; }
+table.ts-sheet th { font-weight: 500; font-size: 12px; }
+table.ts-sheet .ts-sheet-num { background: transparent; color: var(--sub); }
+table.ts-sheet td input, table.ts-sheet td select { height: 34px; padding: 0 6px; font-size: 13px; }
+table.ts-sheet td:focus-within { outline: none; box-shadow: inset 0 0 0 2px var(--sh-accent); }
+table.ts-sheet td select[data-f="stage"] { color: #1d4ed8; }
+table.ts-sheet tr.ts-mine-row:not([data-id]) td { background: #fafafa; }
+table.ts-sheet tbody tr:hover td { background: inherit; }
+.sheet-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; gap: 10px; flex-wrap: wrap; }
+.sheet-note { display: none; }
 .tsp { --tsp-ink: #262626; --tsp-sub: #737373; --tsp-dim: #a3a3a3; --tsp-tag: #737373; --tsp-plan: #1d4ed8; --tsp-warn: #b45309; --tsp-link: #1d4ed8; --tsp-card: #fff; --tsp-line: #e5e5e5; --tsp-row: #f0f0f0; --tsp-chip-ink: #737373; --tsp-badge: #f3f3f3; --tsp-badge-ink: #737373; --tsp-month: #f5f5f5; }
 .tsp .ts-btn { display: none; }               /* 唯讀：分頁才有的動作鈕不畫 */
 .tsp svg text { fill: #737373; }              /* svg-charts 的字色是深色版寫死的，白底改用 CSS 覆蓋 */

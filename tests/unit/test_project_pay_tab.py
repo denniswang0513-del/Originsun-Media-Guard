@@ -73,3 +73,23 @@ def test_closing_is_soft_blocked_on_every_status_path():
     m = js_code_only(repo_src("frontend/m/views/projects.js"))
     assert "closedPhases().includes(body.status)" in m and "paidStatus()" in m
     assert '"closed_phases"' in repo_src("routers/api_crm_mobile.py") and "export const closedPhases" in repo_src("frontend/m/ui.js")
+
+
+def test_pay_tab_margin_comes_from_financial_summary():
+    """owner 2026-09-05：收付款的毛利曾算成「含稅合約 − 已請款」（32%），跟預算結算（未稅 − 雜支 − 人力，20%）對不上。
+    毛利只認 /financial-summary 那一份（core.crm_logic.project_margin），沒拿到才退回舊算法並標明。"""
+    src = repo_src("frontend/tabs/crm/crm-projects-pay.js")
+    assert "/financial-summary`" in src and "fin.actual_profit" in src and "fin.profit_rate" in src
+    assert "_strip(s, money, d.fin)" in src
+
+
+def test_financial_summary_staff_cost_comes_from_cost_lines():
+    """owner 2026-09-05：東仁社宅 API 毛利 95%、預算結算畫面 20%——/financial-summary 的人力只算退場的派工表。
+    子表有數字就以子表為準。"""
+    body = func_body(repo_src("routers/crm/costs.py"), "async def get_financial_summary(") if "async def get_financial_summary(" in repo_src("routers/crm/costs.py") else repo_src("routers/crm/costs.py")
+    assert "staff_actual = costline_actual" in body and "staff_estimated = costline_estimated" in body
+
+
+def test_pay_tab_counts_unassigned_cost_lines():
+    src = repo_src("frontend/tabs/crm/crm-projects-pay.js")
+    assert "unassignedLines" in src and "+ unassigned;" in src and "未指派" in src

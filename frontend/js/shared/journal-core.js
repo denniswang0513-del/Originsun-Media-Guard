@@ -138,6 +138,18 @@ export function reactionBar(r, ids, c = {}, canReact = false) {
     return btns ? `<div class="${c.react || 'react'}">${btns}</div>` : '';
 }
 
+/** 標題列的愛心（owner 2026-09-05）：整份週記一個心情。r={like,love,laugh,mine:[]}。
+ *  沒人按＝空心低調；有人按＝實心＋總數；自己按過＝顯示自己那種的圖示。canReact=false 只顯示。 */
+export function heartHtml(r, ids, canReact = false, c = {}) {
+    const d = r || { like: 0, love: 0, laugh: 0, mine: [] };
+    const total = (d.like || 0) + (d.love || 0) + (d.laugh || 0);
+    const mine = (d.mine || [])[0] || '';
+    const glyph = mine ? (REACTIONS.find(([k]) => k === mine) || [])[1] : (total ? '\u2764\uFE0F' : '\u2661');
+    const title = total ? REACTIONS.map(([k, g]) => (d[k] ? `${g} ${d[k]}` : '')).filter(Boolean).join('　') : '點一下給愛心，長按換心情';
+    const attrs = canReact ? ` data-heart data-heart-j="${_esc(ids.journalId || '')}" data-heart-t="${_esc(ids.entryTable || 'work_journals')}" data-heart-e="${_esc(ids.entryId || '')}"` : ' disabled';
+    return `<button type="button" class="${c.heart || 'heart'}${mine ? ' on' : ''}${total ? ' has' : ''}" title="${_esc(title)}"${attrs}>${glyph}${total ? `<span class="n">${total}</span>` : ''}</button>`;
+}
+
 /** 一條回覆（灰底）。 */
 export function replyHtml(r, c = {}) {
     const t = r.created_at ? String(r.created_at).slice(5, 16).replace('T', ' ') : '';

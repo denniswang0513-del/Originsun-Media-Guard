@@ -34,7 +34,10 @@ export function payStatus(project, invoices, payments, costLines) {
     const groups = groupCostStaff(costLines || [], pays);
     const matched = new Set(groups.filter((g) => g.payment).map((g) => g.payment.id));
     const others = pays.filter((x) => !matched.has(x.id));
-    const payable = groups.reduce((a, g) => a + g.subtotal, 0) + others.reduce((a, x) => a + Number(x.amount || 0), 0);
+    // 還沒指定人員的工項（有結算金額、沒人）：也是應付的一部分，不算進去就跟預算結算的成本對不上（owner 2026-09-05）
+    const unassignedLines = (costLines || []).filter((ln) => !ln.actual_staff_id && Number(ln.actual_amount || 0) > 0);
+    const unassigned = unassignedLines.reduce((a, ln) => a + Number(ln.actual_amount || 0), 0);
+    const payable = groups.reduce((a, g) => a + g.subtotal, 0) + others.reduce((a, x) => a + Number(x.amount || 0), 0) + unassigned;
     const paid = pays.filter((x) => x.payment_status === PAID).reduce((a, x) => a + Number(x.amount || 0), 0);
     const requested = pays.filter((x) => x.payment_status !== PAID).reduce((a, x) => a + Number(x.amount || 0), 0);
     const unrequestedGroups = groups.filter((g) => !g.payment);
@@ -44,7 +47,7 @@ export function payStatus(project, invoices, payments, costLines) {
         invoices: inv, contract, invoiced, invoiceCount: inv.length, received, fee, unreceived,
         status: p.payment_status || '未到帳',
         payable, paid, requested, unrequested, unrequestedGroups, paidCount: pays.filter((x) => x.payment_status === PAID).length,
-        payCount: pays.length, margin: contract - payable, groups, others, kai,
+        payCount: pays.length, margin: contract - payable, groups, others, kai, unassigned, unassignedLines,
         uncollected: inv.filter((i) => !COLLECTED_RE.test(i.payment_status || '')),
     };
 }
@@ -55,6 +58,7 @@ export function nextSteps(s, opts = {}) {
     const m = (n) => (money ? '$' + fmtNum(n) : '');
     const out = [];
     if (!s.invoiceCount) out.push({ level: 'bad', text: '發票還沒開', act: 'invoice' });
+    if (s.unassignedLines && s.unassignedLines.length) out.push({ level: 'warn', text: `${s.unassignedLines.length} 條工項還沒指定人員${money ? '，合計 ' + m(s.unassigned) : ''}：${s.unassignedLines.slice(0, 3).map((ln) => ln.item_name || '').filter(Boolean).join('、')}`, act: 'finance' });
     if (s.uncollected.length) out.push({ level: 'warn', text: `${s.uncollected.length} 張發票還沒收到款${money && s.unreceived > 0 ? '，未收 ' + m(s.unreceived) : ''}`, act: 'invoices' });
     if (s.invoiceCount && !s.uncollected.length && s.unreceived > 0) out.push({ level: 'warn', text: `發票都標已收，但帳上未收還有 ${m(s.unreceived)} —— 匯款列可能還沒連結到本案`, act: 'cash' });
     if (s.unrequestedGroups.length) out.push({ level: 'warn', text: `${s.unrequestedGroups.length} 人還沒請款${money ? '，合計 ' + m(s.unrequested) : ''}：${s.unrequestedGroups.map((g) => g.name).join('、')}`, act: 'staff' });
@@ -85,16 +89,18 @@ const _sq = (s) => _esc(s || '').replace(/'/g, "\\'");
 
 async function _load(projectId) {
     const ent = state.projects.find((p) => p.id === projectId)?.entity === 'mine' ? '&entity=mine' : '';
-    const [proj, inv, pays, lines, cash, adv, exp] = await Promise.all([
+    const [proj, inv, pays, lines, cash, adv, exp, fin] = await Promise.all([
         _q('/projects/' + projectId), _q('/invoices?project_id=' + encodeURIComponent(projectId)),
         _q('/payments?project_id=' + encodeURIComponent(projectId) + ent),
         _q(`/projects/${projectId}/cost-lines`), _q('/cash-entries?project_id=' + encodeURIComponent(projectId) + ent),
-        _q('/payments/advances?project_id=' + encodeURIComponent(projectId)), _q(`/projects/${projectId}/expenses`)]);
+        _q('/payments/advances?project_id=' + encodeURIComponent(projectId)), _q(`/projects/${projectId}/expenses`),
+        // 毛利只認財務摘要那一份（core.crm_logic.project_margin：未稅 − 雜支實際 − 人力實際），跟預算結算同一個數
+        _q(`/projects/${projectId}/financial-summary`)]);
     return { proj, inv: inv?.invoices || [], pays: pays?.payments || [], lines: lines?.cost_lines || [],
-             cash: cash ? (cash.entries || []) : null, adv: adv?.advances || [], exp: exp?.expenses || [] };
+             cash: cash ? (cash.entries || []) : null, adv: adv?.advances || [], exp: exp?.expenses || [], fin: fin || null };
 }
 
-function _strip(s, money) {
+function _strip(s, money, fin = null) {
     const m = (n) => (money ? '$' + fmtNum(n) : '—');
     const st = s.status;
     const tile = (l, v, sub, cls = '') => `<div class="ppay-kpi ${cls}"><div class="ppay-l">${l}</div><div class="ppay-v">${v}</div><div class="ppay-s">${sub || ''}</div></div>`;
@@ -103,10 +109,12 @@ function _strip(s, money) {
         ${tile('已開發票', m(s.invoiced), `${s.invoiceCount} 張`)}
         ${tile('已收（含匯費）', m(s.received + s.fee), money && s.fee ? '匯費 ' + m(s.fee) : '', 'good')}
         ${tile('未收', m(Math.max(s.unreceived, 0)), `<span class="crm-badge crm-pay-${st === '全額到帳' ? '全額到帳' : '未到帳'}">${_esc(st)}</span>`, s.unreceived > 0 ? 'bad' : '')}
-        ${tile('應付合計', m(s.payable), `${s.groups.length} 人${s.others.length ? '＋' + s.others.length + ' 筆其他' : ''}`)}
+        ${tile('應付合計', m(s.payable), `${s.groups.length} 人${s.others.length ? '＋' + s.others.length + ' 筆其他' : ''}${s.unassigned ? '＋未指派 ' + m(s.unassigned) : ''}`, s.unassigned ? 'warn' : '')}
         ${tile('已付', m(s.paid), `${s.paidCount} 張`, 'good')}
         ${tile('未付', m(s.payable - s.paid), money ? `已請未付 ${m(s.requested)}` : `${s.payCount - s.paidCount} 張`, s.payable - s.paid > 0 ? 'warn' : '')}
-        ${money ? tile('毛利', m(s.margin), s.contract ? Math.round(s.margin / s.contract * 100) + '%' : '', s.margin >= 0 ? 'good' : 'bad') : ''}
+        ${money ? (fin && fin.actual_profit != null
+            ? tile('毛利', m(fin.actual_profit), `${fin.profit_rate}% · 同預算結算`, fin.actual_profit >= 0 ? 'good' : 'bad')
+            : tile('毛利', m(s.margin), s.contract ? Math.round(s.margin / s.contract * 100) + '%（僅扣已請款）' : '', s.margin >= 0 ? 'good' : 'bad')) : ''}
     </div>`;
 }
 
@@ -237,7 +245,7 @@ export async function loadPayTab(projectId) {
     const ampm = document.getElementById('proj-pay-ampm-src');
     host.innerHTML = `
         ${_metaHtml(d.proj)}
-        ${_strip(s, money)}
+        ${_strip(s, money, d.fin)}
         ${_hints(nextSteps(s, { money }))}
         <div class="ppay-sec" id="proj-pay-recv">
             <div class="ppay-sh"><span class="ppay-h">收款</span><span class="ppay-sub">本案的發票，和它連到的匯款</span>

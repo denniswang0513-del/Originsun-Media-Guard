@@ -820,6 +820,12 @@ async def project_financial_summary(project_id: str):
         )).first()
         costline_estimated = costline_row[0] if costline_row else 0
         costline_actual = costline_row[1] if costline_row else 0
+        # 🔴 人力成本的正本是成本子表（cost lines）；派工表 crm_project_staff 已退場（2026-09-04 拿掉 UI）。
+        # 之前毛利只算派工 → 有子表沒派工的案毛利虛高（東仁社宅：API 95%、預算結算畫面 20%，owner 2026-09-05 抓到）。
+        # 子表有數字就以子表為準；完全沒子表的舊案才退回派工。
+        if costline_actual or costline_estimated:
+            staff_actual = costline_actual
+            staff_estimated = costline_estimated
 
         # 跨子表彙總（預算分配）— 單次聚合，不 hydrate ORM 物件
         from sqlalchemy import case as _case

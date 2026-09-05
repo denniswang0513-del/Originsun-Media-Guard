@@ -205,7 +205,7 @@ async def _mine_payload(session, username: str, week: date, shell) -> dict:
     worklog = (await _worklog_by_user(session, [username], week))[username]
     replies = (await _replies_by_journal(session, [shell.id]))[shell.id] if shell is not None else []
     reactions = (await _reactions_by_journal(session, [shell.id], username))[shell.id] if shell is not None else {}
-    return {"week_start": week.isoformat(), **_strings(rich),
+    return {"week_start": week.isoformat(), "id": shell.id if shell is not None else None, **_strings(rich),
             "entries": _with_names(rich, pnames),
             "status": shell_status(shell),
             "submitted_at": _iso(getattr(shell, "submitted_at", None)) if shell is not None else None,
@@ -467,15 +467,16 @@ def _me(request: Request) -> str:
 
 @router.post("/react")
 async def react_entry(body: JournalReactPost, request: Request):
-    """對某一條按心情（owner 2026-09-05：讚／愛心／笑）。同一人同一種再按＝取消。只能對送出的週記按。"""
+    """按心情（owner 2026-09-05：讚／愛心／笑）。entry_table 可以是四張條目表之一，或 "work_journals"（整份週記一個心情，
+    entry_id＝journal_id）。一人對同一個目標只留一種：按同一種＝取消、按別種＝換掉。只能對送出的週記按。"""
     payload = check_admin_or_module(request, "journal")
     who = (payload or {}).get("sub") or ""
     kind = norm_reaction(body.kind)
     if not kind:
         raise HTTPException(status_code=422, detail="kind 只能是 like／love／laugh")
-    if body.entry_table not in _TABLE_MODELS:
-        raise HTTPException(status_code=422, detail=f"entry_table 只能是：{'／'.join(_TABLE_MODELS)}")
-    _key, model = _TABLE_MODELS[body.entry_table]
+    whole = body.entry_table == WorkJournal.__tablename__
+    if not whole and body.entry_table not in _TABLE_MODELS:
+        raise HTTPException(status_code=422, detail=f"entry_table 只能是：{'／'.join(_TABLE_MODELS)}／{WorkJournal.__tablename__}")
     factory = db_factory_or_503()
     async with factory() as session:
         shell = await session.get(WorkJournal, body.journal_id)
@@ -483,23 +484,28 @@ async def react_entry(body: JournalReactPost, request: Request):
             raise HTTPException(status_code=404, detail="找不到這份週記")
         if shell.status not in (None, "submitted"):
             raise HTTPException(status_code=409, detail="還沒送出的週記不能按")
-        entry = await session.get(model, body.entry_id)
-        if entry is None or entry.journal_id != shell.id:
-            raise HTTPException(status_code=404, detail="找不到這一條（可能已被改掉）")
-        existing = (await session.execute(
-            select(JournalReaction).where(JournalReaction.entry_id == entry.id)
-            .where(JournalReaction.username == who).where(JournalReaction.kind == kind))).scalar_one_or_none()
-        if existing is not None:
-            await session.delete(existing)
-            on = False
+        if whole:
+            target_id = shell.id
         else:
+            _key, model = _TABLE_MODELS[body.entry_table]
+            entry = await session.get(model, body.entry_id)
+            if entry is None or entry.journal_id != shell.id:
+                raise HTTPException(status_code=404, detail="找不到這一條（可能已被改掉）")
+            target_id = entry.id
+        mine = (await session.execute(
+            select(JournalReaction).where(JournalReaction.entry_id == target_id)
+            .where(JournalReaction.username == who))).scalars().all()
+        same = next((r for r in mine if r.kind == kind), None)
+        for r in mine:                       # 一人一個目標只留一種
+            await session.delete(r)
+        on = same is None
+        if on:
             session.add(JournalReaction(id=uuid.uuid4().hex, journal_id=shell.id, entry_table=body.entry_table,
-                                        entry_id=entry.id, username=who, kind=kind))
-            on = True
+                                        entry_id=target_id, username=who, kind=kind))
         await session.commit()
-        summary = (await _reactions_by_journal(session, [shell.id], who))[shell.id].get(entry.id) or \
+        summary = (await _reactions_by_journal(session, [shell.id], who))[shell.id].get(target_id) or \
             ({k: 0 for k in ("like", "love", "laugh")} | {"mine": []})
-    return {"status": "ok", "on": on, "entry_id": entry.id, "reactions": summary}
+    return {"status": "ok", "on": on, "entry_id": target_id, "reactions": summary}
 
 
 @router.post("/reply")

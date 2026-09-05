@@ -178,6 +178,17 @@ html.embed-mode .gate-wrap { margin: 0 auto; }
 .reply { margin: 4px 0 2px; background: #f5f5f5; border-left: 3px solid #d4d4d4; padding: 5px 10px; font-size: 12.5px; line-height: 1.6; }
 .reply b { font-weight: 600; margin-right: 6px; } .reply-t { color: var(--sub); font-size: 11px; margin-left: 6px; }
 
+/* ── 標題列的愛心（低調；有人按才有數字；長按選單）── */
+.heart { border: 0; background: none; color: #c4c4c4; font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.heart:hover { color: var(--red); background: #fef2f2; }
+.heart.has { color: var(--red); } .heart.on { background: #fef2f2; }
+.heart .n { font-size: 11px; color: var(--sub); font-variant-numeric: tabular-nums; }
+.heart:disabled { cursor: default; }
+.heart-menu { display: inline-flex; gap: 2px; border: 1px solid var(--line); border-radius: 999px; background: #fff; padding: 2px 4px; box-shadow: 0 6px 18px rgba(0,0,0,.12); margin-left: 4px; }
+.heart-menu button { border: 0; background: none; font-size: 16px; padding: 2px 6px; border-radius: 999px; cursor: pointer; }
+.heart-menu button:hover { background: #f5f5f5; }
+.vrow2 { display: inline-flex; gap: 10px; align-items: center; }
+
 /* ── 心情列（讚／愛心／笑）── */
 .react { display: flex; gap: 6px; margin: 4px 0 2px; }
 .react-btn { border: 1px solid var(--line); background: #fff; border-radius: 999px; min-height: 24px; padding: 0 8px; font-size: 12px; color: var(--sub); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
@@ -300,7 +311,7 @@ footer .eyebrow { font-size: 10px; }
 <script type="module">
 import { BLOCKS, FLAGS, FLAGGABLE, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, SUBTITLE, api, debounce, ensurePasteBase,
          entriesOf, entryBlock, entryTable, esc, isAuthFail, itemsToLines, linesToItems, pasteThumbs, personCard,
-         reactionBar, renderRich, repliesFor, replyHtml, shiftWeek, thisWeekStart, tokenGrants, weekRange, worklogHtml } from '/js/shared/journal-core.js';
+         heartHtml, REACTIONS, reactionBar, renderRich, repliesFor, replyHtml, shiftWeek, thisWeekStart, tokenGrants, weekRange, worklogHtml } from '/js/shared/journal-core.js';
 import { initPasteImage } from '/js/shared/paste-image.js';
 import { attachProjectPop } from '/js/shared/project-pop.js';
 
@@ -340,7 +351,8 @@ if (EMBED) {
 // 官網風白底語彙的 class 組（SPA 分頁傳 jr-* 的一組）
 const CARD_CLS = { name: 'p-name', empty: 'empty pad-sm', block: 'blk' };
 const GRANTS = tokenGrants();
-// 回覆框已拿掉（owner 2026-09-05）：大家改按心情，見 journal-core.reactionBar
+// 回覆框已拿掉（owner 2026-09-05）：大家改在標題列按愛心（journal-core.heartHtml），長按換心情
+const ME = (() => { try { return JSON.parse(atob((localStorage.getItem('auth_token') || '').split('.')[1] || '') || '{}').sub || ''; } catch (_) { return ''; } })();
 
 // ── 狀態 ────────────────────────────────────────────────────────────────
 let view = 'week';
@@ -420,7 +432,7 @@ function metaListHtml(k) {
         return `<div class="em"><span class="em-t" title="${esc(line)}">${esc(line.replace(/!\[[^\]]*\]\(paste:[^)]*\)/g, '[圖]'))}</span>
             <input class="em-proj" data-proj-pick autocomplete="off" data-k="${k}" data-i="${i}" placeholder="掛案子（打字找）" value="${esc(m.project_name || '')}"${m.project_id ? ` data-pid="${esc(m.project_id)}" data-pname="${esc(m.project_name || '')}"` : ''}>
             ${FLAGGABLE.has(k) ? `<select class="em-flag" data-k="${k}" data-i="${i}"><option value="">不標</option>${FLAGS.map(([f, l]) => `<option value="${f}"${m.flag === f ? ' selected' : ''}>${l}</option>`).join('')}</select>` : ''}
-            ${reps.map(r => replyHtml(r)).join('')}${e.id ? reactionBar((mine.reactions || {})[e.id], {}, {}, false) : ''}</div>`;
+            ${reps.map(r => replyHtml(r)).join('')}</div>`;
     }).join('');
 }
 function redrawMeta(k) { const el = $('ml-' + k); if (el) el.innerHTML = metaListHtml(k); }
@@ -428,14 +440,14 @@ function redrawMeta(k) { const el = $('ml-' + k); if (el) el.innerHTML = metaLis
 function teamPerson(j) {
     const flags = j.flags || {};
     const pills = FLAGS.map(([f, l]) => (flags[f] ? `<span class="pill-flag ${f}">${l} ${flags[f]}</span>` : '')).join('');
-    const opts = { projectName: projName, canReact: true, reactions: j.reactions || {}, journalId: j.id || j.journal_id || '' };
+    const opts = { projectName: projName, journalId: j.id || j.journal_id || '' };   // 每條下面不放心情，只有標題列的愛心
     const cls = { ...CARD_CLS, pillFlag: 'pill-flag', pillProj: 'pill-proj', reply: 'reply', replyTime: 'reply-t', replyBox: 'reply-box' };
     // owner 2026-09-05：大家的回顧只看四問，不放「做了什麼」（自動區只在自己那份）
     const blocks = BLOCKS.map(([k, label]) => entryBlock(j, k, label, cls, opts)).join('');
     const first = BLOCKS.map(([k]) => (j[k] || [])[0] || '').find(Boolean) || '';
     const excerpt = first.replace(/!\[[^\]]*\]\(paste:[^)]*\)/g, '[圖]').slice(0, 40);
     return `<details class="person" open data-user="${esc(j.username)}" data-week="${esc(weekData.week_start || weekStart)}">
-        <summary><b>${esc(j.display_name || j.username)}</b><span class="sub-x">${esc(excerpt)}</span>${pills}<span class="count">${j.submitted_at ? '送出 ' + esc(String(j.submitted_at).slice(5, 16).replace('T', ' ')) : ''}</span></summary>
+        <summary><b>${esc(j.display_name || j.username)}</b><span class="sub-x">${esc(excerpt)}</span>${pills}${heartHtml((j.reactions || {})[j.id], { journalId: j.id }, j.username !== ME)}<span class="count">${j.submitted_at ? '送出 ' + esc(String(j.submitted_at).slice(5, 16).replace('T', ' ')) : ''}</span></summary>
         <div class="body">${blocks || '<div class="empty pad-sm">（空白）</div>'}</div>
     </details>`;
 }
@@ -483,7 +495,7 @@ function renderWeek(m, week) {
         </div>
         <div class="block2">
         <div class="card" id="mine-card">
-            <div class="card-head"><span class="eyebrow">Mine <span class="accent">我的${who}回顧</span></span><span id="j-state">${stateHtml()}</span></div>
+            <div class="card-head"><span class="eyebrow">Mine <span class="accent">我的${who}回顧</span></span><span class="vrow2"><span id="mine-heart">${mine.id ? heartHtml((mine.reactions || {})[mine.id], {}, false) : ''}</span><span id="j-state">${stateHtml()}</span></span></div>
             <div class="blk"><h4>${who}做了什麼</h4>${worklogHtml(mine.worklog, {}, { pickable: !!mine.editable })}</div>
             ${BLOCKS.map(([k, label]) => `
                 <div class="blk">
@@ -618,16 +630,45 @@ $('view').addEventListener('change', (ev) => {
         ta.dispatchEvent(new Event('input', { bubbles: true }));
     }
 });
-$('view').addEventListener('click', async (ev) => {
-    const b = ev.target.closest('button[data-react]');
-    if (!b) return;
-    b.disabled = true;
-    const r = await api.react({ journal_id: b.dataset.reactJ, entry_table: b.dataset.reactT, entry_id: b.dataset.reactE, kind: b.dataset.react });
-    b.disabled = false;
+// 標題列的愛心：點一下＝愛心（已按過＝取消）；長按 450ms 或右鍵＝選讚／愛心／笑
+let _pressTimer = null, _pressed = false;
+function heartMenu(btn) {
+    document.querySelectorAll('.heart-menu').forEach(m => m.remove());
+    const menu = document.createElement('div');
+    menu.className = 'heart-menu';
+    menu.innerHTML = REACTIONS.map(([k, g]) => `<button type="button" data-heart-kind="${k}">${g}</button>`).join('');
+    btn.insertAdjacentElement('afterend', menu);
+    const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('pointerdown', close, true); } };
+    setTimeout(() => document.addEventListener('pointerdown', close, true), 0);
+}
+async function sendHeart(btn, kind) {
+    btn.disabled = true;
+    const r = await api.react({ journal_id: btn.dataset.heartJ, entry_table: btn.dataset.heartT || 'work_journals', entry_id: btn.dataset.heartE || btn.dataset.heartJ, kind });
+    btn.disabled = false;
     if (!r.ok) { const d = r.json ? await r.json().catch(() => ({})) : {}; alert(d.detail || `沒送出（${r.status || '連線失敗'}）`); return; }
     const d = await r.json();
-    const bar = b.closest('.react');
-    if (bar) bar.outerHTML = reactionBar(d.reactions, { journalId: b.dataset.reactJ, entryTable: b.dataset.reactT, entryId: b.dataset.reactE }, {}, true);
+    btn.outerHTML = heartHtml(d.reactions, { journalId: btn.dataset.heartJ }, true);
+}
+$('view').addEventListener('pointerdown', (ev) => {
+    const b = ev.target.closest('button[data-heart]'); if (!b) return;
+    _pressed = false;
+    _pressTimer = setTimeout(() => { _pressed = true; heartMenu(b); }, 450);
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach(t => $('view').addEventListener(t, () => { clearTimeout(_pressTimer); }, true));
+$('view').addEventListener('contextmenu', (ev) => { const b = ev.target.closest('button[data-heart]'); if (b) { ev.preventDefault(); heartMenu(b); } });
+$('view').addEventListener('click', async (ev) => {
+    const pick = ev.target.closest('button[data-heart-kind]');
+    if (pick) {
+        ev.preventDefault(); ev.stopPropagation();
+        const menu = pick.closest('.heart-menu'), btn = menu && menu.previousElementSibling;
+        menu.remove();
+        if (btn && btn.dataset.heart !== undefined) await sendHeart(btn, pick.dataset.heartKind);
+        return;
+    }
+    const b = ev.target.closest('button[data-heart]'); if (!b) return;
+    ev.preventDefault(); ev.stopPropagation();          // 別把 details 收起來
+    if (_pressed) { _pressed = false; return; }         // 長按已開選單
+    await sendHeart(b, b.classList.contains('on') ? ((b.textContent.trim().startsWith('\u{1F44D}') ? 'like' : b.textContent.trim().startsWith('\u{1F602}') ? 'laugh' : 'love')) : 'love');
 });
 
 // ── people（學習庫 / 依人回溯共用） ─────────────────────────────────────
