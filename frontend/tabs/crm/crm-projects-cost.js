@@ -189,7 +189,10 @@ function _fillDashGrid(parts) {
     set('cd-misc-act', '$' + fmtNum(d.miscActual));
     set('cd-cost-act', '$' + fmtNum(d.totalActual));
     set('cd-rem-act', '$' + fmtNum(d.remainingActual), remainColor(d.remainingActual));
-    set('cd-pf-act', '$' + fmtNum(d.budgetProfit) + '（' + d.budgetProfitPct + '%）', profitColor(d.budgetProfitPct));
+    // 實際毛利＝未稅−實際成本（owner 2026-09-05「剩餘預算要加到實際毛利」）——
+    // 預算沒花完的那段留在公司，本來就是賺到的。預估那格仍是目標毛利（未稅−執行預算），
+    // 所以差額那格＝實際比目標多賺／少賺多少，不再恆為 0。
+    set('cd-pf-act', '$' + fmtNum(d.actualProfit) + '（' + d.profitPct + '%）', profitColor(d.profitPct));
     // 錨點列的實際毛利跟對照表同格同源，inline 編輯後一起動
     set('cd-anchor-pf', '$' + fmtNum(d.actualProfit) + '（' + d.profitPct + '%）',
         profitColor(d.profitPct));
@@ -204,7 +207,8 @@ function _fillDashGrid(parts) {
     const drift = (id, val) => set(id, (val >= 0 ? '+$' : '−$') + fmtNum(Math.abs(val)),
                                    remainColor(val));
     drift('cd-rem-diff', d.remainingActual - d.remaining);
-    set('cd-pf-diff', '—', '#9ca3af');   // 毛利＝未稅−預算，預估與實際同一個數，差額恆為 0 → 畫 —
+    // 毛利差額＝實際毛利−目標毛利（＝剩餘預算）。正的是好事，跟剩餘同一套配色。
+    drift('cd-pf-diff', d.actualProfit - d.budgetProfit);
     // 進度條：實際填充 + 預估刻度（實際追過刻度＝超出原計畫）
     const bar = document.querySelector('.cost-progress-bar');
     if (bar) { bar.style.width = Math.min(d.usagePct, 100) + '%'; bar.style.background = barColor(d.usagePct); }

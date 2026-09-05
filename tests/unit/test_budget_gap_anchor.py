@@ -22,6 +22,23 @@ def test_dashboard_columns_are_staff_misc_cost_remaining_profit():
     assert "repeat(5, 1fr)" in repo_src("frontend/tabs/crm/crm.css")
 
 
+def test_actual_profit_absorbs_the_remaining_budget():
+    """owner 2026-09-05「剩餘預算要加到實際毛利」：實際毛利＝未稅−實際成本
+    （＝目標毛利＋實際剩餘預算），跟錨點列／財務摘要同一個數；預估格仍是目標毛利。
+
+    東仁社宅金安獎：未稅 339,048、執行預算 271,239、實際成本 270,557
+    → 目標毛利 67,809、實際毛利 68,491（多 682）。之前兩格都畫 budgetProfit，
+    實際那格看起來永遠剛好等於目標，差額那格恆為 0。
+    """
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-cost.js"))
+    assert "set('cd-pf-act', '$' + fmtNum(d.actualProfit)" in js, "實際毛利要用 actualProfit"
+    assert "set('cd-pf-est', '$' + fmtNum(d.budgetProfit)" in js, "預估毛利仍是目標毛利"
+    assert "drift('cd-pf-diff', d.actualProfit - d.budgetProfit);" in js
+    assert "set('cd-pf-diff', '—'" not in js, "差額不再恆為 0，別再畫破折號"
+    # 錨點列與對照表實際格同源 —— 兩處都是 actualProfit
+    assert js.count("fmtNum(d.actualProfit)") == 2
+
+
 def test_sub_table_budget_includes_misc_and_defaults_to_five_percent():
     """子表預算含委外與雜支；雜支預算沒設＝預算 × 5%（後端給 misc_budget_default／effective，卡片顯示預計雜支）。"""
     api = repo_src("routers/crm/costs.py")
