@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import re
 import json
 import urllib.parse
 import urllib.request
@@ -84,17 +85,19 @@ def upsert_event(sa: dict, cal_id: str, event_id: str | None, body: dict) -> tup
             except RuntimeError as e:
                 if " 404" not in str(e) and " 410" not in str(e):
                     raise
-        # 沒 event_id 先用 extendedProperties 找同一場的舊事件（上次 insert 成功但我們這邊 commit 失敗），有就 PATCH，別長第二個
-        try:
-            key = ((body.get("extendedProperties") or {}).get("private") or {}).get("originsun_shoot_id")
-            if key:
-                found = _request("GET", _events_url(cal_id) + "?privateExtendedProperty=originsun_shoot_id%3D" + str(key) + "&maxResults=1", sa)
-                items = (found or {}).get("items") or []
-                if items and items[0].get("id"):
-                    got = _request("PATCH", _events_url(cal_id, items[0]["id"]), sa, body)
-                    return got.get("id") or items[0]["id"], ""
-        except Exception:
-            pass                                    # 找不到就照常 insert
+        # 事件 id 用我們的 shoot id（uuid hex 是合法的 base32hex）→ insert 冪等：上次 insert 成功但本地 commit 失敗，
+        # 再來一次 Google 回 409，就改 PATCH 同一個 id，不會長第二個事件
+        key = str(((body.get("extendedProperties") or {}).get("private") or {}).get("originsun_shoot_id") or "")
+        if key and re.fullmatch(r"[a-v0-9]{5,1024}", key):
+            body = {**body, "id": key}
+            try:
+                got = _request("POST", _events_url(cal_id), sa, body)
+                return got.get("id") or key, ""
+            except RuntimeError as e:
+                if " 409" not in str(e):
+                    raise
+                got = _request("PATCH", _events_url(cal_id, key), sa, {k: v for k, v in body.items() if k != "id"})
+                return got.get("id") or key, ""
         got = _request("POST", _events_url(cal_id), sa, body)
         return got.get("id"), ""
     except Exception as e:

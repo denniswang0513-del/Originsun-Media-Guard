@@ -230,14 +230,19 @@ export function normTime(v) {
     return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
-/** 起訖時間 → 實際小時（兩位小數；訖比起早＝跨午夜）；填進同一列的「實際」欄。 */
-export function applyTimeRange(tr) {
-    const t0 = tr.querySelector('[data-f="t0"]')?.value, t1 = tr.querySelector('[data-f="t1"]')?.value;
-    if (!t0 || !t1) return;
+/** 起訖「HH:MM」→ 小時（兩位小數；訖比起早＝跨午夜）；兩邊沒填齊回 null。格子與手機表單同一份。 */
+export function hoursBetween(t0, t1) {
+    if (!t0 || !t1) return null;
     const m = s => { const [h, mm] = s.split(':').map(Number); return h * 60 + mm; };
     let mins = m(t1) - m(t0);
     if (mins < 0) mins += 24 * 60;
-    tr.querySelector('[data-f="hours"]').value = Math.round(mins / 60 * 100) / 100;
+    return Math.round(mins / 60 * 100) / 100;
+}
+
+/** 起訖時間 → 實際小時；填進同一列的「實際」欄。 */
+export function applyTimeRange(tr) {
+    const h = hoursBetween(tr.querySelector('[data-f="t0"]')?.value, tr.querySelector('[data-f="t1"]')?.value);
+    if (h != null) tr.querySelector('[data-f="hours"]').value = h;
 }
 
 /** 分類變了 → 階段下拉換成該分類的清單；原階段不在裡面就清空（提示在狀態格）。keep＝重畫但值照舊（換清單用）。 */

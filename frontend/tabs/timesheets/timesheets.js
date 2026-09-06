@@ -12,7 +12,7 @@
  * 新增 UI 依 owner 鐵則無 emoji（既有元素不回溯）。
  */
 
-import { esc } from '../website/website-utils.js';
+import { esc, debounce } from '../website/website-utils.js';
 import { createSortable, sortableTh, today as _today } from '../crm/crm-utils.js';
 import { openProjectPicker } from '../../js/shared/project-picker.js';   // 指定專案：共用挑選視窗
 import { authDownload } from '../../js/shared/utils.js';
@@ -334,7 +334,8 @@ function _renderToday(d) {
 }
 
 // ── 我的一天：登入者自己記（實際或計畫）；時數快捷鈕；複製昨天；改／刪 ──
-let _projOptsAt = 0, _ledgerQTimer = null;
+let _projOptsAt = 0;
+const _ledgerRedrawQ = debounce(() => _ledgerRedraw(), 200);
 async function _projectOptions() {
     if (_projOpts && Date.now() - _projOptsAt < 5 * 60 * 1000) return _projOpts;   // 5 分鐘內用快取；同事新建的案之後打得到
     try { _projOpts = (await tfetch('/api/v1/timesheets/project_options')).projects || []; _projOptsAt = Date.now(); }
@@ -920,8 +921,7 @@ function _bind() {
         const el = document.getElementById('ts-lf-' + k);
         if (el) el.addEventListener(k === 'q' ? 'input' : 'change', () => {
             _ledgerFilter[k] = el.value;
-            if (k !== 'q') { _ledgerRedraw(); return; }
-            clearTimeout(_ledgerQTimer); _ledgerQTimer = setTimeout(_ledgerRedraw, 200);   // 打字去抖：整表重畫一次幾百毫秒
+            (k === 'q' ? _ledgerRedrawQ : _ledgerRedraw)();      // 打字去抖：整表重畫一次幾百毫秒
         });
     });
     if (_view === 'ledger') _ledgerRedraw();   // 計數 chip

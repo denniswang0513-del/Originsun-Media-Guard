@@ -103,8 +103,7 @@ async def linked_receipts_map(session, project_ids) -> dict:
     split_rows = (await session.execute(
         select(CrmCashSplit.entry_id, CrmCashSplit.project_id, CrmCashSplit.amount, CrmCashSplit.fee)
         .where(CrmCashSplit.project_id.in_(ids)))).all()
-    split_entries = {r[0] for r in (await session.execute(
-        select(CrmCashSplit.entry_id).where(CrmCashSplit.entry_id.in_({r[0] for r in split_rows} or {""})))).all()}
+    split_entries = {r[0] for r in split_rows}          # 有拆項歸到本案的父列（歸屬在拆項上，父列本身不算）
     conds = [CrmCashEntry.project_id.in_(ids)]
     if inv_proj:
         conds.append(CrmCashEntry.invoice_id.in_(set(inv_proj)))
@@ -133,8 +132,9 @@ async def linked_receipts_map(session, project_ids) -> dict:
         eff = pid if pid in ids else inv_proj.get(iid)
         if eff:
             _add(eff, dep, fee)
+    from core.crm_logic import split_gross
     for _eid, spid, amt, sfee in split_rows:
-        _add(spid, int(amt or 0) + int(sfee or 0), sfee)
+        _add(spid, split_gross(amt, sfee), sfee)       # 專案按毛額結清：加法只有 split_gross 一份
     return out
 
 
@@ -192,20 +192,20 @@ async def get_project_types(request: Request):
     """案型清單**一份**（owner 2026-09-03「這裡的案型跟私帳同步」）：正本＝私帳毛利表的列
     （core.finance_logic.project_type_vocab 再併上 settings／在用的）。CRM 專案表下拉、案型清單、私帳設定頁、
     工時 burn 表、手機版都吃同一份。"""
+    return await _project_types_payload()
+
+
+async def _project_types_payload() -> dict:
+    """案型清單＝毛利表 ∪ settings ∪ 專案還掛著的（改名／刪除後下拉仍要列得到它，model_remove_type 的承諾）。
+    GET 與 POST 都回這一份。"""
     from core.finance_logic import project_type_vocab
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        extra = await _types_in_use(session)
-    return {"project_types": project_type_vocab(extra)}
-
-
-async def _types_in_use(session) -> list:
-    """專案還掛著的案型：改名／刪除後下拉仍要列得到它（core.finance_logic.model_remove_type 的承諾）。"""
-    rows = (await session.execute(
-        select(CrmProject.project_type).where(CrmProject.project_type.isnot(None), CrmProject.project_type != "")
-        .distinct())).scalars().all()
-    return [r for r in rows if r]
+        in_use = (await session.execute(
+            select(CrmProject.project_type).where(CrmProject.project_type.isnot(None), CrmProject.project_type != "")
+            .distinct())).scalars().all()
+    return {"project_types": project_type_vocab(list(in_use))}
 
 
 @router.post("/project-types")
@@ -214,7 +214,7 @@ async def edit_project_types(payload: ProjectTypeOpPayload, request: Request):
     settings.project_types。守衛同 /api/settings/save（Lv3）。改名把舊名記進 aliases，舊案還對得到毛利。"""
     _check_auth(request)
     from core.finance_logic import (load_margin_model, model_add_type, model_remove_type, model_rename_type,
-                                    project_type_vocab, save_margin_model)
+                                    save_margin_model)
     model = load_margin_model("mine")
     ops = {"add": lambda: model_add_type(model, payload.name),
            "rename": lambda: model_rename_type(model, payload.name, payload.new_name),
@@ -225,10 +225,7 @@ async def edit_project_types(payload: ProjectTypeOpPayload, request: Request):
         raise HTTPException(status_code=409, detail={"add": "這個案型已經有了", "rename": "找不到舊案型，或新名字已存在",
                                                      "remove": "找不到這個案型"}[payload.op])
     save_margin_model("mine", model)
-    factory = await _get_factory()
-    async with factory() as session:
-        extra = await _types_in_use(session)
-    return {"project_types": project_type_vocab(extra)}
+    return await _project_types_payload()
 
 
 @router.get("/projects")

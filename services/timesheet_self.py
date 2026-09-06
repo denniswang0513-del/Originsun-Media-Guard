@@ -193,14 +193,15 @@ async def apply_update(session, r, body) -> None:
     """把 body（TimesheetManualRow 形狀）套到一列，員工改自己的（update_row）與管理員總表
     （admin_update_row）同一份。手填列：實際或計畫至少一個 > 0、status 重算；Sheet 列：不套那條、
     status 保留 import。案名沒動就沿用原對映（不載查表）；動了才重新對映。不 commit。"""
-    # 計畫 h 欄 2026-09-06 從格子拿掉：body 沒帶 planned_hours 就沿用列上的（不然計畫列一改就被洗成 NULL、
-    # 只改內容還會 422「至少一個 > 0」）；有帶（含明確 null）才照 body
-    if "planned_hours" not in getattr(body, "model_fields_set", set()) and getattr(r, "planned_hours", None) is not None:
-        body = body.model_copy(update={"planned_hours": r.planned_hours})
-    if "remark" not in getattr(body, "model_fields_set", set()) and r.remark:
-        body = body.model_copy(update={"remark": r.remark})          # 沒帶備註＝不動（/my.html 的改列表單沒這欄）
+    # 「body 沒帶的欄位＝沿用列上的」只有這一條規則：格子沒那欄（計畫 h 拿掉了）、/my.html 改列表單沒備註欄、
+    # 手機表單沒起訖……都靠它；有帶（含明確 null／""）才照 body。專案兩欄都沒帶也一樣。
+    sent = getattr(body, "model_fields_set", set())
+    carry = {k: getattr(r, k) for k in ("planned_hours", "remark", "start_time", "end_time", "hours", "task_note", "work_type")
+             if k not in sent and getattr(r, k, None) is not None}
     if not body.project_id and not (body.project_name or "").strip() and (r.project_name or r.project_id):
-        body = body.model_copy(update={"project_name": r.project_name or ""})   # 沒帶專案＝不動，不是清空
+        carry["project_name"] = r.project_name or ""
+    if carry:
+        body = body.model_copy(update=carry)
     unchanged = not body.project_id and (body.project_name or "").strip() == (r.project_name or "")
     lk = None if unchanged else await load_project_lookup(session)
     fields, _why = normalize_row(body, lk, await names_for(session, [body]), manual=r.source == "manual",

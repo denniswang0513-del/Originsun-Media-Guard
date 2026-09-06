@@ -26,15 +26,15 @@ def test_scan_sees_raw_but_does_not_dispatch_it(tmp_path):
     (src / "B" / "only.BRAW").write_bytes(b"x")          # 只有 RAW 的資料夾：整包不派
     dest.mkdir()
 
-    cands = dw._scan_candidates(str(src), str(dest))
+    cands, skipped = dw._scan_candidates(str(src), str(dest))
     by_folder = {os.path.basename(p): [os.path.basename(f) for f in files] for p, files in cands}
     assert set(by_folder) == {"A"}, by_folder
     assert sorted(by_folder["A"]) == ["DJI_0001.MP4", "DJI_0002.mov"]
-    assert dw._SKIPPED_RAW == {"A": ["A001_C001.R3D", "A001_C002.braw"], "B": ["only.BRAW"]}
+    assert skipped == {"A": ["A001_C001.R3D", "A001_C002.braw"], "B": ["only.BRAW"]}
 
 
 def test_scan_record_and_notification_mention_the_skipped_raw():
     src = dw.__file__ and open(dw.__file__, encoding="utf-8").read()
     body = src[src.index("def run_watcher_scan("):]
     assert 'entry["skipped_raw"]' in body and "略過 RAW" in body, "掃描紀錄要記下沒處理的 RAW（不能靜默）"
-    assert "notify_tab(\"drone_watcher_success\"" in body
+    assert body.count("notify_tab(") == 1 and "raw_note" in body, "通知只發一次，RAW 的話併在同一則"

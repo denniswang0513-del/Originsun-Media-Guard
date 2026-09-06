@@ -26,7 +26,10 @@ def test_columns_migration_schema_and_serializer_are_wired():
     assert "start_time: Optional[str] = None" in schema and "end_time: Optional[str] = None" in schema
     manual = repo_src("services/timesheet_manual.py")
     # body 沒帶＝不進 fields（總表管理員改列不能把員工填的起訖洗掉）
-    assert 'for k in ("start_time", "end_time") if getattr(r, k, None) is not None' in manual
+    assert '"start_time": start, "end_time": end' in manual
+    # 「body 沒帶＝沿用列上的」只有 apply_update 的 carry 一條規則（含起訖／備註／計畫）
+    self_src = repo_src("services/timesheet_self.py")
+    assert 'for k in ("planned_hours", "remark", "start_time", "end_time"' in self_src
     self_ = repo_src("services/timesheet_self.py")
     assert '"start_time": getattr(r, "start_time", None) or ""' in self_ and '"end_time": getattr(r, "end_time", None) or ""' in self_
 

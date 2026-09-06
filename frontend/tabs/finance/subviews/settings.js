@@ -526,8 +526,7 @@ _fs.saveMargin = async (btn) => {
     if (!(daily_cost > 0)) { finToast('員工成本／天要大於 0', true); return; }
     btn.disabled = true;
     try {
-        await finFetch('/margin-model', { method: 'PUT', body: JSON.stringify({ daily_cost, hours_per_day, rows, aliases: _margin.aliases || {} }) });
-        _margin = await finFetch('/margin-model');      // PUT 回的沒有 in_use（統一案型那段要它），重抓 GET
+        _margin = await finFetch('/margin-model', { method: 'PUT', body: JSON.stringify({ daily_cost, hours_per_day, rows, aliases: _margin.aliases || {} }) });   // 回應含 in_use
         finToast(`已存：日成本 $${fmtNum(daily_cost)}、${rows.length} 種案型`);
         _marginRedraw();
     } catch (e) {

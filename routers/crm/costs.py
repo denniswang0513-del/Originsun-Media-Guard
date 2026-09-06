@@ -878,7 +878,8 @@ async def project_financial_summary(project_id: str):
     _model = load_margin_model("mine")      # 毛利表只有私帳設定頁在維護；母帳案 entity='parent' 拿到的是出廠預設表
     _type_margin = margin_for_type(_model, project.project_type)
     _suggested_hours = suggested_budget_hours(contract, tax_rate, _type_margin, _model["daily_cost"], _model["hours_per_day"])
-    _mpct = project.misc_budget_pct if project.misc_budget_pct is not None else 5
+    from core.crm_logic import effective_misc_pct
+    _mpct = effective_misc_pct(project.misc_budget_pct)
     misc_budget = int(ex_tax * _mpct / 100)
     outsource_budget = ex_tax - profit_target - misc_budget
 
@@ -1452,15 +1453,15 @@ async def _compute_group_summary(session, group_id: str) -> dict:
 
 async def _project_misc_pct(session, project_id: str):
     """專案雜支比（%），沒有就 5。子表預設雜支與整案加總都用它。"""
+    from core.crm_logic import effective_misc_pct
     p = await session.get(CrmProject, project_id)
-    pct = p.misc_budget_pct if p is not None else None
-    return pct if pct is not None else 5        # 明填 0 就是 0
+    return effective_misc_pct(p.misc_budget_pct if p is not None else None)
 
 
 def _cost_group_to_dict(g, summary: Optional[dict] = None, misc_pct: int = 5) -> dict:
     # 子表預算含委外與雜支（owner 2026-09-05）；雜支預算沒設＝預設 預算 × 專案雜支比（core.crm_logic.group_misc_default）
     from core.crm_logic import group_misc_default
-    total_budget = g.budget_amount if g.budget_amount is not None else 0
+    total_budget = g.budget_amount or 0
     misc_default = group_misc_default(total_budget, misc_pct)
     d = {
         "id": g.id, "project_id": g.project_id, "name": g.name,
@@ -1715,6 +1716,6 @@ async def get_cost_group_summary(group_id: str, request: Request):
         summary = await _compute_group_summary(session, group_id)
         # 雜支比在 session 還開著時查（同清單那支：原本寫在 return 裡，
         # 那時 `async with` 已經結束）
-        _pct = proj.misc_budget_pct if proj is not None and proj.misc_budget_pct is not None else 5
+        _pct = await _project_misc_pct(session, g.project_id)
     return {"cost_group": _cost_group_to_dict(g, summary, _pct)}
 

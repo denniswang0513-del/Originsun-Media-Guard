@@ -923,12 +923,14 @@ function _isLocalHost(agentIp) {
 // 「看得見才打」的輪詢：立刻打一發（同樣過閘門——背景分頁開頁不白打），之後每 ms 一次；
 // 瀏覽器分頁在背景就跳過，給了 sectionId 時該 SPA 分頁被 switchTab 藏起來也跳過。
 // 只給無限期的狀態輪詢用（本機代理燈、機隊燈、官網健康／收件匣徽章）；有終點的工作輪詢不該停。
+const _visibleTicks = new Set();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) _visibleTicks.forEach((t) => t()); });
 export function startVisiblePolling(fn, ms, { sectionId } = {}) {
     const visible = () => !document.hidden
         && (!sectionId || !document.getElementById(sectionId)?.classList.contains('hidden'));
     const tick = () => { if (visible()) fn(); };
     tick();
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });   // 回前景立刻補一發，別等下一輪
+    _visibleTicks.add(tick);              // 回前景立刻補一發（一個 document 監聽跑所有輪詢，不是每支各掛一個）
     return setInterval(tick, ms);
 }
 

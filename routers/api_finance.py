@@ -314,8 +314,14 @@ async def get_margin_model(request: Request, entity: str = ""):
     """預期毛利表＋人力日成本（owner 2026-09-03：「我的員工成本一天 4000，專案的使用率是用這個
     基礎算出來的，這一塊在我的私帳設定」）。出廠預設＝owner 的表。"""
     ent = _guard(request, entity)
-    from sqlalchemy import func, select
     from core.finance_logic import load_margin_model, project_type_vocab
+    return {"entity": ent, **load_margin_model(ent), "project_types": project_type_vocab(),
+            "in_use": await _margin_in_use(request)}
+
+
+async def _margin_in_use(request: Request) -> list:
+    """各案型有幾個專案在用（統一案型那段要它）。GET 與 PUT 的回應都帶，前端存完不必再 GET。"""
+    from sqlalchemy import func, select
     from db.models import CrmProject
     scope = _ledger_scope(request)        # 私帳的案只有看得到私帳的人才算進去（統一是兩本帳一起，但要看得到才算）
     factory = _factory_or_503()
@@ -329,8 +335,7 @@ async def get_margin_model(request: Request, entity: str = ""):
         d = in_use.setdefault((t or "").strip(), {"type": (t or "").strip(), "count": 0, "entities": {}})
         d["count"] += n
         d["entities"][e or "parent"] = d["entities"].get(e or "parent", 0) + n
-    return {"entity": ent, **load_margin_model(ent), "project_types": project_type_vocab(),
-            "in_use": sorted(in_use.values(), key=lambda x: -x["count"])}
+    return sorted(in_use.values(), key=lambda x: -x["count"])
 
 
 @router.post("/margin-model/unify")
@@ -384,7 +389,7 @@ async def put_margin_model(payload: MarginModelPut, request: Request, entity: st
         if not 0 <= r.margin_pct < 100:
             raise HTTPException(status_code=422, detail=f"{t} 的預期毛利要在 0～99%")
     from core.finance_logic import save_margin_model
-    return {"entity": ent, **save_margin_model(ent, payload.model_dump())}
+    return {"entity": ent, **save_margin_model(ent, payload.model_dump()), "in_use": await _margin_in_use(request)}
 
 
 @router.get("/bookkeeping-fee")

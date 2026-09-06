@@ -110,7 +110,8 @@ function wireAmounts() {
 async function loadProjects() {
     let items = [], placeholder = '打字找案名或客戶（不掛專案：不建議）';
     try {
-        const d = await mfetch('/api/v1/crm/m/projects?limit=100&offset=0');
+        const inc = state.invoicePreset ? '&include=' + encodeURIComponent(state.invoicePreset) : '';   // 抽屜帶進來的案一定在清單裡
+        const d = await mfetch('/api/v1/crm/m/projects?limit=100&offset=0' + inc);
         F('project_id')._rows = d.projects || [];
         items = (d.projects || []).map(p => ({ value: p.id, label: projectLabel(p) }));
     } catch (e) {
@@ -120,17 +121,9 @@ async function loadProjects() {
     applyPreset();
 }
 
-async function applyPreset() {
+function applyPreset() {
     if (!state.invoicePreset) return;
     const hidden = F('project_id');
-    if (hidden && hidden._set && !(hidden._items || []).some(i => String(i.value) === String(state.invoicePreset))) {
-        // 清單只抓最近 100 案：老案從抽屜帶進來會不在裡面 → 補抓那一案
-        try {
-            const d = await mfetch('/api/v1/crm/m/projects/' + encodeURIComponent(String(state.invoicePreset)));
-            const p = d.project || {};
-            if (p.id) { hidden._rows = [p, ...(hidden._rows || [])]; mountPicker('inv-project_id', { items: [{ value: p.id, label: projectLabel(p) }, ...(hidden._items || [])], placeholder: '打字找案名或客戶', value: '', onPick: applyProjectDefaults }); }
-        } catch (_) { /* 下面照原本判 */ }
-    }
     if (hidden && hidden._set && (hidden._items || []).some(i => String(i.value) === String(state.invoicePreset))) {
         hidden._set(String(state.invoicePreset));
         state.invoicePreset = null;

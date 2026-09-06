@@ -104,9 +104,7 @@ class NoCacheMiddleware:
                 # 開頁少下載 ~1.5 MB、發版換檔 ETag 就變（owner 2026-09-03「存取都有點慢」）；
                 # 沒驗證器的 JSON／串流 no-cache 只會退化成每次全抓 → no-store。middleware 不認得任何路徑。
                 if method == "GET" and not any(k.lower() == b"cache-control" for k, _ in headers):
-                    if scope.get("path", "").startswith("/uploads/"):
-                        headers.append((b"cache-control", NO_STORE_B))     # 收據／發票影像：不留任何快取副本（同 core.no_store）
-                    elif any(k.lower() in (b"etag", b"last-modified") for k, _ in headers):
+                    if any(k.lower() in (b"etag", b"last-modified") for k, _ in headers):
                         headers.append((b"cache-control", b"no-cache"))
                     else:
                         headers.append((b"cache-control", NO_STORE_B))
@@ -1281,7 +1279,16 @@ os.makedirs("uploads", exist_ok=True)
 import mimetypes as _mt  # 精簡 Python mimetypes 可能不認 .webp → StaticFiles 回 text/plain
 _mt.add_type("image/webp", ".webp")
 _mt.add_type("image/avif", ".avif")
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+class _NoStoreStaticFiles(StaticFiles):
+    """收據／發票影像：不留任何快取副本（同 core.no_store）。handler 自己宣告 Cache-Control，
+    NoCacheMiddleware 的「handler 宣告了就以它為準」規則接手，middleware 不必認路徑。"""
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers["cache-control"] = NO_STORE_B.decode()
+        return resp
+
+
+app.mount("/uploads", _NoStoreStaticFiles(directory="uploads"), name="uploads")
 if os.path.exists("frontend"):
     app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
 else:

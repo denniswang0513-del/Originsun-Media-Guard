@@ -489,6 +489,14 @@ def sync_docs_version(version: str) -> None:
             print(f"[WARN] {fname} 版本標記同步失敗（不擋發版）: {e}")
 
 
+def _rollback_version(v_data: dict, current_version: str) -> None:
+    """任何 gate 沒過：version.json 與文件檔頭退回發布前的版號（不留「跳了版號、什麼都沒發」的狀態）。"""
+    v_data["version"] = current_version
+    atomic_json_write(VERSION_FILE, v_data)
+    sync_docs_version(current_version)
+    print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+
+
 def main():
     print("=" * 60)
     print("[*] Originsun SaaS - Auto Publisher (v2)")
@@ -578,10 +586,7 @@ def main():
             print(f"\n[ERROR] Preflight 失敗！不允許發布壞版本：")
             print(pf_result.stdout)
             # Rollback version.json
-            v_data["version"] = current_version
-            atomic_json_write(VERSION_FILE, v_data)
-            sync_docs_version(current_version)
-            print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+            _rollback_version(v_data, current_version)
             return 1
         print("[OK] Preflight 通過")
     else:
@@ -608,10 +613,7 @@ def main():
         if t_result.returncode != 0:
             print("\n[ERROR] 單元測試失敗！不允許發布壞版本：")
             print((t_result.stdout or t_result.stderr or "")[-2000:])
-            v_data["version"] = current_version
-            atomic_json_write(VERSION_FILE, v_data)
-            sync_docs_version(current_version)
-            print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+            _rollback_version(v_data, current_version)
             return 1
         _t_tail = (t_result.stdout or "").strip().splitlines()
         print(f"[OK] 單元測試通過（{_t_tail[-1] if _t_tail else 'ok'}）")
@@ -638,18 +640,12 @@ def main():
             )
         except subprocess.TimeoutExpired:
             print("\n[ERROR] ruff 逾時（120s），不允許發布")
-            v_data["version"] = current_version
-            atomic_json_write(VERSION_FILE, v_data)
-            sync_docs_version(current_version)
-            print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+            _rollback_version(v_data, current_version)
             return 1
         if l_result.returncode != 0:
             print("\n[ERROR] lint 未過！不允許發布（CI 也會擋）：")
             print((l_result.stdout or l_result.stderr or "")[-2000:])
-            v_data["version"] = current_version
-            atomic_json_write(VERSION_FILE, v_data)
-            sync_docs_version(current_version)
-            print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+            _rollback_version(v_data, current_version)
             return 1
         print("[OK] lint 通過")
     else:
@@ -672,18 +668,12 @@ def main():
         except subprocess.TimeoutExpired:
             # 逾時也是沒過：版號要回滾，不然留下「跳了版號、什麼都沒發」的狀態
             print("\n[ERROR] 前端 lint 逾時（300s），不允許發布")
-            v_data["version"] = current_version
-            atomic_json_write(VERSION_FILE, v_data)
-            sync_docs_version(current_version)
-            print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+            _rollback_version(v_data, current_version)
             return 1
         if e_result.returncode != 0:
             print("\n[ERROR] 前端 lint 未過！不允許發布（CI 也會擋）：")
             print((e_result.stdout or e_result.stderr or "")[-2000:])
-            v_data["version"] = current_version
-            atomic_json_write(VERSION_FILE, v_data)
-            sync_docs_version(current_version)
-            print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+            _rollback_version(v_data, current_version)
             return 1
         print("[OK] 前端 lint 通過")
     else:
@@ -741,10 +731,7 @@ def main():
         print(f"  目前 AGENT_DIRS: {dirs_to_include}")
         print(f"  自動發現的目錄: {[d for d in dirs_to_include if d not in AGENT_DIRS]}")
         # Rollback version.json
-        v_data["version"] = current_version
-        atomic_json_write(VERSION_FILE, v_data)
-        sync_docs_version(current_version)
-        print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+        _rollback_version(v_data, current_version)
         return 1
     print(f"[OK] OTA 大小正常 ({ota_mb:.1f} MB)")
 

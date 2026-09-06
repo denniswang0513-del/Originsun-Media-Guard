@@ -12,7 +12,7 @@ import json
 import subprocess
 import threading
 from datetime import datetime
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 from core_engine import is_junk_file  # type: ignore
 
@@ -29,10 +29,6 @@ from core.media_exts import IMAGE_EXTS as _IMAGE_EXTS
 from core.media_exts import MEDIA_EXTS as _MEDIA_EXTS
 from core.media_exts import RAW_CAMERA_EXTS as _RAW_EXTS
 
-# 這一輪掃描裡「看得到但不處理」的 RAW（.r3d／.braw）：{資料夾名: [檔名]}。
-# 看得到＝素材不會靜默消失（2026-08-30 拍板）；不處理＝ffmpeg 解不開，餵進去只會每天失敗一次、
-# 而且失敗的檔不進 manifest 會被天天重派（2026-09-06 review）。
-_SKIPPED_RAW: dict = {}
 
 _file_lock = threading.Lock()
 
@@ -201,9 +197,10 @@ def _probe_creation_time(path: str) -> str:
 
 # ── 掃描邏輯 ──────────────────────────────────────────────────
 
-def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[str]]]:
+def _scan_candidates(source_root: str, dest_root: str) -> Tuple[List[Tuple[str, List[str]]], Dict[str, List[str]]]:
     """
-    回傳 [(子資料夾絕對路徑, [媒體檔絕對路徑, ...]), ...]
+    回傳 ([(子資料夾絕對路徑, [媒體檔絕對路徑, ...]), ...], {資料夾名: [略過的 RAW 檔名]})。
+    RAW（.r3d／.braw）看得到但不派：ffmpeg 解不開，餵進去只會每天失敗一次、失敗的檔不進 manifest 又天天重派。
 
     每個子資料夾的處理狀態判定：
     - dest 有 manifest (`_drone_meta_manifest.json`) → 用 manifest 對比 source。
@@ -219,8 +216,7 @@ def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[s
 
     _MAX_OUT_EXTS = (".MOV",) + tuple(e.upper() for e in _IMAGE_EXTS)
 
-    candidates = []
-    _SKIPPED_RAW.clear()
+    candidates, skipped_raw = [], {}
     for name in sorted(os.listdir(source_root)):
         sub = os.path.join(source_root, name)
         if not os.path.isdir(sub):
@@ -236,7 +232,7 @@ def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[s
                     media.append(os.path.join(root, fn))
         media.sort()
         if raw:
-            _SKIPPED_RAW[name] = sorted(raw)
+            skipped_raw[name] = sorted(raw)
         if not media:
             continue
 
@@ -286,7 +282,7 @@ def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[s
 
         candidates.append((sub, media))
 
-    return candidates
+    return candidates, skipped_raw
 
 
 def _read_manifest(dest_sub: str) -> Optional[dict]:
@@ -335,7 +331,8 @@ def run_watcher_scan(cfg: Optional[dict] = None, trigger: str = "scheduled") -> 
             })
             return {"error": msg, "folders": 0, "files": 0}
 
-    candidates = _scan_candidates(source_root, dest_root)
+    candidates, skipped_raw = _scan_candidates(source_root, dest_root)
+    raw_note = ("略過 RAW（ffmpeg 不支援 .r3d／.braw）：" + "；".join(f"{k} {len(v)} 支" for k, v in skipped_raw.items())) if skipped_raw else ""
     if not candidates:
         entry = {
             "ts": start_ts.isoformat(timespec="seconds"),
@@ -433,7 +430,7 @@ def run_watcher_scan(cfg: Optional[dict] = None, trigger: str = "scheduled") -> 
             folder_count=len(candidates),
             file_count=total_files,
             duration=f"{duration_sec:.1f}s",
-            trigger=trigger,
+            trigger=trigger + ("｜" + raw_note if raw_note else ""),   # RAW 沒處理要說出來（不算錯誤：來源沒動、其他檔照常）
         )
     except Exception:
         pass
@@ -448,18 +445,8 @@ def run_watcher_scan(cfg: Optional[dict] = None, trigger: str = "scheduled") -> 
     }
     if errors:
         entry["errors"] = errors
-    if _SKIPPED_RAW:
-        # RAW 沒處理要說出來（不能靜默），但不算錯誤：來源檔沒動、其他檔照常處理
-        skipped = {k: list(v) for k, v in _SKIPPED_RAW.items()}
-        entry["skipped_raw"] = skipped
-        entry["note"] = "略過 RAW（ffmpeg 不支援 .r3d／.braw）：" + "；".join(
-            f"{k} {len(v)} 支" for k, v in skipped.items())
-        try:
-            from notifier import notify_tab  # type: ignore
-            notify_tab("drone_watcher_success", folder_count=len(candidates), file_count=total_files,
-                       duration=f"{duration_sec:.1f}s", trigger=trigger + "｜" + entry["note"])
-        except Exception:
-            pass
+    if skipped_raw:
+        entry["skipped_raw"], entry["note"] = skipped_raw, raw_note
     append_history(entry)
 
     return {

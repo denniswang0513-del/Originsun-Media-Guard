@@ -60,13 +60,15 @@ async function _flushAutoSave() {
     if (_autosaveTimer) { clearTimeout(_autosaveTimer); _autosaveTimer = null; }
     if (window._allDirtyCount() === 0) return true;
     _setAutosaveState('saving');
+    // 只有錢動過才重抓子表卡片（改人員／備註不影響 summary）；要在存之前看，存完 dirty map 會被清掉
+    const touchesMoney = Object.values(window._costDirtyMap || {}).some((d) => Object.keys(d || {}).some((k) => /amount|price|quantity|qty|actual|estimated/.test(k)));
     try {
         await _autoSaveCostExpenses();
         _setAutosaveState('saved', Date.now());
         // 🔴 子表卡片要跟著重畫。inline 編輯後上面的對照表是 _fillDashGrid 就地重算，
         // 但卡片吃的是 /cost-groups 回的 summary —— 不重抓就停在舊數字：owner 2026-09-06
         // 把製片費 23,281→24,063 存了，卡片還寫「結算 220,170／剩餘 $100」，真值是超支 682。
-        if (state.selectedId) {
+        if (state.selectedId && touchesMoney) {
             await callbacks.loadCostGroups?.(state.selectedId);
             callbacks.renderGroupSwitcher?.();
         }

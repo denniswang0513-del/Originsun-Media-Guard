@@ -56,10 +56,10 @@ def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, keep: tuple |
     """一列輸入（TimesheetManualRow 形狀）→ (要落庫的欄位, 對映原因 why)；規則錯 → 422。
     manual=False（改 Sheet 列）不套 row_state：status 保留、0 小時也放行（Sheet 本來就收 0）。
     keep=(案名, project_id)：沿用這個對映、不查表（caller 已判定案名沒動，lk 可為 None）。"""
-    if not (r.hours or 0) and _hours_from_range(getattr(r, "start_time", None), getattr(r, "end_time", None)):
-        r = r.model_copy(update={"hours": _hours_from_range(r.start_time, r.end_time)}) if hasattr(r, "model_copy") else r
+    start, end = hhmm_or_none(getattr(r, "start_time", None)), hhmm_or_none(getattr(r, "end_time", None))
+    hours = float(r.hours or 0) or _hours_from_range(start, end)     # 起訖都給、時數沒給 → 算出來（只算這一次）
     try:
-        status = row_state(r.hours, r.planned_hours) if manual else None
+        status = row_state(hours, r.planned_hours) if manual else None
         wt = norm_work_type(r.work_type)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -78,9 +78,8 @@ def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, keep: tuple |
         "work_date": wd, "project_id": pid, "project_name": pname,
         "task_note": (r.task_note or "").strip() or None,
         "remark": (getattr(r, "remark", None) or "").strip() or None,
-        # 起／訖：body 帶了才進 fields（沒帶＝更新時不碰既有值；"" 或看不懂＝清空）
-        **{k: hhmm_or_none(getattr(r, k)) for k in ("start_time", "end_time") if getattr(r, k, None) is not None},
-        "hours": float(r.hours or 0) or _hours_from_range(getattr(r, "start_time", None), getattr(r, "end_time", None)),
+        "start_time": start, "end_time": end,          # 沒帶＝apply_update 先從列上補回來（同 remark／planned_hours）
+        "hours": hours,
         "planned_hours": float(r.planned_hours) if r.planned_hours is not None else None,
         "work_type": wt, "status": status,
     }, why
@@ -121,15 +120,13 @@ async def project_options(session, staff_name: str | None = None) -> list:
         .order_by(CrmProject.name)
     )).all()
     # 最近有更新的排前面（owner 2026-09-06）：最近一筆工時的日期 vs 專案本身 updated_at，取較新者
+    from core.hr_logic import tw_day
+    ids = [r[0] for r in rows]
     last_ts = {pid: d for pid, d in (await session.execute(
-        select(Timesheet.project_id, safunc.max(Timesheet.work_date)).where(Timesheet.project_id.isnot(None))
-        .group_by(Timesheet.project_id))).all()}
-    def _day(x):
-        return x.date() if hasattr(x, "date") else x      # datetime → date；date 照舊
-    def _touched(r):
-        cands = [_day(x) for x in (last_ts.get(r[0]), r[10]) if x is not None]
-        return max(cands) if cands else None
-    rows = sorted(rows, key=lambda r: (_touched(r) is None, -(_touched(r).toordinal() if _touched(r) else 0), r[1] or ""))
+        select(Timesheet.project_id, safunc.max(Timesheet.work_date)).where(Timesheet.project_id.in_(ids))
+        .group_by(Timesheet.project_id))).all()} if ids else {}
+    touched = {r[0]: max((d for d in (tw_day(last_ts.get(r[0])), tw_day(r[10])) if d), default=None) for r in rows}
+    rows = sorted(rows, key=lambda r: (touched[r[0]] is None, -(touched[r[0]].toordinal() if touched[r[0]] else 0), r[1] or ""))
     # 已連結的母私帳只列一個（owner 2026-09-06：同名出現兩次）。工時對映只認私帳，所以留私帳那筆、
     # 母帳那筆若它的私帳分身也在清單裡就不列；連結兩種形狀都認（母帳 mine_link_id／私帳 source_project_id）
     ids = {r[0] for r in rows}

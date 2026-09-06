@@ -13,7 +13,7 @@ from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
 def test_backend_endpoints_share_project_type_vocab():
     proj = repo_src("routers/crm/projects.py")
     assert '@router.get("/project-types")' in proj and '@router.post("/project-types")' in proj
-    assert "project_type_vocab(extra)" in code_only(func_body(proj, "async def get_project_types("))
+    assert "_project_types_payload()" in code_only(func_body(proj, "async def get_project_types(")) and "project_type_vocab(list(in_use))" in code_only(func_body(proj, "async def _project_types_payload("))
     edit = code_only(func_body(proj, "async def edit_project_types("))
     assert "_check_auth(request)" in edit, "改案型＝Lv3（同 /api/settings/save）"
     assert 'load_margin_model("mine")' in edit and 'save_margin_model("mine", model)' in edit, "改的是毛利表那份（正本），不是 settings"

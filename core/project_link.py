@@ -76,6 +76,14 @@ def invoice_project_ids(project_id, project_ids) -> list:
     return list(dict.fromkeys(ids))
 
 
+def invoice_in_project(project_id: str):
+    """SQL 版的「這張發票掛在這個案」：project_id（第一個）或 project_ids JSON 清單裡有它。
+    invoice_project_ids 是 Python 讀法，這支是 WHERE 條件；兩邊同一條規則。"""
+    from sqlalchemy import or_
+    from db.models import CrmInvoice
+    return or_(CrmInvoice.project_id == project_id, CrmInvoice.project_ids.like('%"' + project_id + '"%'))
+
+
 def normalize_invoice_projects(data: dict, existing_ids=None) -> None:
     """payload → `project_id`（第一個）＋ `project_ids`（JSON；只有一個以下＝None）。
     沒送 project_ids（發票分頁的單案表單）＝保留既有清單，但表單那欄換成清單外的案時清單重來。"""

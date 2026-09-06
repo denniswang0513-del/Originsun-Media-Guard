@@ -436,11 +436,18 @@ def project_pay_label(items) -> str:
     return label + (f"（已付 {paid}）" if paid else "")
 
 
+DEFAULT_MISC_PCT = 5
+
+
+def effective_misc_pct(misc_pct) -> int:
+    """專案雜支比：沒設＝5%，明填 0 就是 0（不是「沒設」）。所有讀 misc_budget_pct 的地方都走這裡。"""
+    return int(misc_pct) if misc_pct is not None else DEFAULT_MISC_PCT
+
+
 def group_misc_default(budget_amount, misc_pct) -> int:
     """子表雜支預算沒設時的預設：子表預算 × 專案雜支比（owner 2026-09-05：子表預算含委外與雜支，雜支預設 5%）。"""
     b = int(budget_amount or 0)
-    pct = misc_pct if misc_pct is not None else 5      # 明填 0 就是 0（不是「沒設」）
-    return int(round(b * pct / 100)) if b else 0
+    return int(round(b * effective_misc_pct(misc_pct) / 100)) if b else 0
 
 
 def misc_budget_total_of(groups, misc_pct) -> int | None:

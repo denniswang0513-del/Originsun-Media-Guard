@@ -324,6 +324,9 @@ async def _reserve_equipment(session, s, equipment_ids: list[str]) -> None:
     due = (_d(s.end_date) or _d(s.date)) + timedelta(days=1)
     for eid in want:
         if eid in have:
+            c = have[eid]
+            if c.returned_at is None:                    # 留著的預約列：日期／專案改了跟著走
+                c.due_at, c.project_id = _parse_shoot_date(due.isoformat()), s.project_id
             continue
         session.add(EquipmentCheckout(
             id=uuid.uuid4().hex, equipment_id=eid, project_id=s.project_id, shoot_id=s.id,
@@ -493,14 +496,15 @@ async def update_shoot(sid: str, req: ShootUpdate, request: Request):
         _apply_fields(s, req, partial=True)
         s.updated_at = datetime.now(timezone.utc)
         if "equipment_ids" in req.model_fields_set and req.equipment_ids is not None:
-            await _reserve_equipment(session, s, req.equipment_ids)
-        # 日期／專案改了：預約列的應還日、專案跟著走（手機每次都送 equipment_ids，原本放在 else 裡永遠不跑）
-        due = (_d(s.end_date) or _d(s.date)) + timedelta(days=1)
-        for c in (await session.execute(
-                select(EquipmentCheckout).where(EquipmentCheckout.shoot_id == s.id,
-                                                EquipmentCheckout.returned_at.is_(None)))).scalars().all():
-            c.due_at = _parse_shoot_date(due.isoformat())
-            c.project_id = s.project_id
+            await _reserve_equipment(session, s, req.equipment_ids)     # 留著的預約列的應還日／專案也在裡面更新
+        else:
+            # 沒動器材、只改日期／專案：預約列的應還日跟著走
+            due = (_d(s.end_date) or _d(s.date)) + timedelta(days=1)
+            for c in (await session.execute(
+                    select(EquipmentCheckout).where(EquipmentCheckout.shoot_id == s.id,
+                                                    EquipmentCheckout.returned_at.is_(None)))).scalars().all():
+                c.due_at = _parse_shoot_date(due.isoformat())
+                c.project_id = s.project_id
         await _recompute_project_shoot_date(session, s.project_id)
         if old_pid and old_pid != s.project_id:
             await _recompute_project_shoot_date(session, old_pid)

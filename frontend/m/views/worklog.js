@@ -11,7 +11,8 @@
  * 寫入守衛是「本人＋綁定人員檔案」，不看 CRM 的 can_write，所以這頁的按鈕不掛 .w。
  * 鐵則：不畫任何個人工時合計（/mine 回的 planned_total／actual_total 這裡不用）。
  */
-import { mfetch, toast, esc, todayLocal, dateIso } from '../shell.js';
+import { mfetch, toast, esc, todayLocal, addDays } from '../shell.js';
+import { hoursBetween, projectFromInput } from '../../js/shared/ts-sheet.js';   // 起訖→時數、案名→id 跟格子同一份
 import { skeleton, errBox, pill, withBusy, pickerHtml, mountPicker, segHtml, mountSeg, selectOpts, openSheet, closeSheet, shouldLoad, markStale } from '../ui.js';
 
 const F = (id) => document.getElementById('wl-' + id);
@@ -24,7 +25,6 @@ const dayLabel = (iso) => {
     const d = new Date(iso + 'T00:00:00');
     return isNaN(d) ? iso : `${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`;
 };
-const shiftDay = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return dateIso(d); };   // 本地日期只有 shell.dateIso 一份
 const stagesOf = (type) => ((_vocab && _vocab.stages) || {})[type] || [];
 
 async function loadVocab() {
@@ -94,20 +94,16 @@ function formHtml(row) {
 }
 
 function hoursFromRange() {
-    const t0 = F('t0').value, t1 = F('t1').value;
-    if (!t0 || !t1) return;
-    const m = (s) => { const [h, mm] = s.split(':').map(Number); return h * 60 + mm; };
-    let mins = m(t1) - m(t0);
-    if (mins < 0) mins += 24 * 60;
-    F('hours').value = Math.round(mins / 60 * 100) / 100;
+    const h = hoursBetween(F('t0').value, F('t1').value);
+    if (h != null) F('hours').value = h;
 }
 
 function bodyFromForm() {
     const raw = (F('project').value || '').trim();
-    const hit = (_projects || []).find(p => p.id && (p.id === raw || p.label === raw || p.name === raw));
+    const byId = (_projects || []).find(p => p.id && p.id === raw);          // 從清單選的：hidden 值是 id
     const body = {
         work_date: _day,
-        project_id: hit ? hit.id : null, project_name: hit ? hit.name : raw,
+        ...(byId ? { project_id: byId.id, project_name: byId.name } : projectFromInput(raw, null, _projects || [])),
         work_type: F('type').value || null,
         task_note: F('note').value.trim(), remark: F('remark').value.trim(),
         start_time: F('t0').value || '', end_time: F('t1').value || '',
@@ -176,7 +172,7 @@ export async function render(host, { first }) {
           <div id="wl-list"></div>`;
         host.addEventListener('click', (ev) => {
             const s = ev.target.closest('button[data-shift]');
-            if (s) { _day = shiftDay(_day, Number(s.dataset.shift)); load(host); return; }
+            if (s) { _day = addDays(_day, Number(s.dataset.shift)); load(host); return; }
             if (ev.target.closest('button[data-today]')) { _day = todayLocal(); load(host); return; }
             if (ev.target.closest('button[data-add]')) { openForm(host, {}); return; }
             const card = ev.target.closest('.m-card[data-id]');

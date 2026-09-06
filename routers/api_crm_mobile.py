@@ -197,8 +197,9 @@ async def mobile_home():
 
 @router.get("/projects")
 async def mobile_projects(request: Request, phase: str = Query(""), q: str = Query(""),
-                          limit: int = Query(30), offset: int = Query(0)):
-    """卡片清單（30 筆一頁、往下捲再抓）。`phase` 篩階段、`q` 找案名或客戶代稱。"""
+                          limit: int = Query(30), offset: int = Query(0), include: str = Query("")):
+    """卡片清單（30 筆一頁、往下捲再抓）。`phase` 篩階段、`q` 找案名或客戶代稱。
+    `include`＝這一案一定要在（排第一）：記雜支／開發票／登記拍攝從抽屜帶進來的老案，不在最近 100 筆裡也要選得到。"""
     limit = max(1, min(int(limit), 100))
     offset = max(0, int(offset))
     async with _crm_session() as session:
@@ -210,9 +211,13 @@ async def mobile_projects(request: Request, phase: str = Query(""), q: str = Que
             query = query.where(or_(CrmProject.name.ilike(ql), Client.short_name.ilike(ql)))
         total = (await session.execute(
             select(func.count()).select_from(query.subquery()))).scalar() or 0
-        rows = (await session.execute(
+        rows = list((await session.execute(
             query.order_by(CrmProject.updated_at.desc(), CrmProject.id)
-            .limit(limit).offset(offset))).all()
+            .limit(limit).offset(offset))).all())
+        if include and not any(p.id == include for p, _c in rows):
+            extra = (await session.execute(_company_projects().where(CrmProject.id == include))).first()
+            if extra:
+                rows.insert(0, extra)
     return {"projects": [_slim_project(p, cname) for p, cname in rows], "total": int(total)}
 
 
@@ -235,10 +240,9 @@ async def mobile_project_detail(project_id: str, request: Request):
                 .order_by(CrmPaymentRequest.request_date.desc().nulls_last(),
                           CrmPaymentRequest.created_at.desc(), CrmPaymentRequest.id))).scalars().all()
             out["payments"] = [_to_payment_dict(p, project_name=project.name or "") for p in payments]
-            from sqlalchemy import or_ as _sa_or
+            from core.project_link import invoice_in_project
             invoices = (await session.execute(
-                select(CrmInvoice).where(_sa_or(CrmInvoice.project_id == project_id,
-                                                CrmInvoice.project_ids.like('%"' + project_id + '"%')))
+                select(CrmInvoice).where(invoice_in_project(project_id))
                 .order_by(CrmInvoice.invoice_date.desc().nulls_last(),
                           CrmInvoice.created_at.desc(), CrmInvoice.id))).scalars().all()
             out["invoices"] = [_to_invoice_dict(inv, project_name=project.name or "") for inv in invoices]

@@ -200,8 +200,8 @@ async function _openEditModal(gid = null) {
                 <input id="cg-f-budget_amount" type="number" class="crm-input" placeholder="0" value="${g?.budget_amount ?? ''}" min="0">
               </div>
               <div class="crm-field">
-                <label>雜支預算（預設預算 5%，可改）</label>
-                <input id="cg-f-misc_budget_amount" type="number" class="crm-input" placeholder="預算 × 5%" value="${g?.misc_budget_amount ?? (g?.misc_budget_default ?? '')}" min="0" data-auto="${g?.misc_budget_amount == null ? '1' : ''}">
+                <label>雜支預算（留空＝預算 × 專案雜支比）</label>
+                <input id="cg-f-misc_budget_amount" type="number" class="crm-input" placeholder="空白＝預算 × 專案雜支比" value="${g?.misc_budget_amount ?? ''}" min="0">
               </div>
               <div class="crm-field">
                 <label>自訂目標毛利率（%）</label>
@@ -232,9 +232,8 @@ async function _openEditModal(gid = null) {
     // 雜支預算留空＝交給後端用「專案雜支比」算預設（core.crm_logic.group_misc_default）；前端不再自己填 5%
     //（之前一填就存成手動值，專案雜支比不是 5% 的案子整案口徑就漂掉）
     const bEl = document.getElementById('cg-f-budget_amount'), mEl = document.getElementById('cg-f-misc_budget_amount');
-    if (!mEl.value) mEl.placeholder = '空白＝預算 × 專案雜支比';
     bEl.addEventListener('input', renderHint);
-    mEl.addEventListener('input', () => { mEl.dataset.auto = ''; renderHint(); });
+    mEl.addEventListener('input', renderHint);
 
     document.getElementById('cg-f-receipt_path-pick').addEventListener('click', async () => {
         const inputEl = document.getElementById('cg-f-receipt_path');

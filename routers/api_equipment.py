@@ -26,6 +26,13 @@ from routers.crm._shared import project_names_map
 
 router = APIRouter(prefix="/api/v1/equipment", tags=["equipment"])
 
+
+def _open_checkout() -> tuple:
+    """「領用中」的 WHERE：已領（out_at 有值）且未歸還。場次預約列 out_at 是 NULL、不算
+    （api_shoots 自己查預約列）。三個端點都用這一份，規則只寫一次。"""
+    from db.models import EquipmentCheckout
+    return (EquipmentCheckout.returned_at.is_(None), EquipmentCheckout.out_at.isnot(None))
+
 # 封面檔案落地：<repo>/uploads/equipment/{equipment_id}/（main.py 已 mount /uploads）
 _UPLOAD_BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
 _ALLOWED_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp"}
@@ -222,7 +229,7 @@ async def list_equipment(request: Request, q: str = "", category: str = "",
         # 「領用中」＝已領（out_at 有值）且未歸還；場次預約列 out_at 是 NULL，不算（2026-09-06 review）
         open_rows = (await session.execute(
             select(EquipmentCheckout)
-            .where(EquipmentCheckout.returned_at.is_(None), EquipmentCheckout.out_at.isnot(None))
+            .where(*_open_checkout())
             .order_by(EquipmentCheckout.out_at.desc())
         )).scalars().all()
         pnames = await project_names_map(session, open_rows)
@@ -412,7 +419,7 @@ async def checkout_equipment(eid: str, req: EquipmentCheckoutPayload, request: R
         open_row = (await session.execute(
             select(EquipmentCheckout)
             .where(EquipmentCheckout.equipment_id == eid,
-                   EquipmentCheckout.returned_at.is_(None), EquipmentCheckout.out_at.isnot(None))
+                   *_open_checkout())
         )).scalars().first()
         if open_row:
             raise HTTPException(status_code=409, detail="此器材已有未歸還的領用紀錄")
@@ -452,7 +459,7 @@ async def return_equipment(eid: str, req: EquipmentReturnPayload, request: Reque
         open_row = (await session.execute(
             select(EquipmentCheckout)
             .where(EquipmentCheckout.equipment_id == eid,
-                   EquipmentCheckout.returned_at.is_(None), EquipmentCheckout.out_at.isnot(None))
+                   *_open_checkout())
             .order_by(EquipmentCheckout.out_at.desc())
         )).scalars().first()
         if not open_row:

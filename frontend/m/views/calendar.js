@@ -11,7 +11,7 @@
  * 字彙（狀態、器材狀態）全部來自 options：這裡不寫死任何一個狀態字（計畫 §7）。
  * 從專案抽屜「登記拍攝」進來：state.shootPreset 帶 project_id，render 套進專案欄並把表單展開。
  */
-import { mfetch, toast, esc, todayLocal, dateIso, fmtDate } from '../shell.js';
+import { mfetch, toast, esc, todayLocal, dateIso, fmtDate, addDays } from '../shell.js';
 import { state, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad, markStale, pickerHtml, mountPicker, renderPaged, projectLabel } from '../ui.js';
 
 const API = '/api/v1/shoots';
@@ -40,7 +40,6 @@ const isAdmin = () => ((state.me || {}).access_level || 0) >= 3;
 /** 狀態 pill 顏色：完成綠、取消紅、其餘灰——認的是 options 給的字，不是字面。 */
 const statusCls = (s) => (s === doneStatus() ? 'ok' : (s === cancelled() ? 'bad' : ''));
 
-function addDays(iso, n) { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return dateIso(d); }
 const weekday = (iso) => (iso ? '（' + WEEKDAY[new Date(iso + 'T00:00:00').getDay()] + '）' : '');
 const cnt = (n, arr) => (n ?? (Array.isArray(arr) ? arr.length : 0));
 const eqOf = (id) => (_o.equipment || []).find(x => String(x.id) === String(id)) || {};

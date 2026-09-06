@@ -42,10 +42,11 @@ def test_actual_profit_absorbs_the_remaining_budget():
 def test_sub_table_budget_includes_misc_and_defaults_to_five_percent():
     """子表預算含委外與雜支；雜支預算沒設＝預算 × 5%（後端給 misc_budget_default／effective，卡片顯示預計雜支）。"""
     api = repo_src("routers/crm/costs.py")
-    assert "total_budget = g.budget_amount if g.budget_amount is not None else 0" in api and '"misc_budget_effective"' in api and '"misc_budget_default"' in api
+    assert "total_budget = g.budget_amount or 0" in api and '"misc_budget_effective"' in api and '"misc_budget_default"' in api
     assert "+ sa_func.coalesce(CrmProjectCostGroup.misc_budget_amount, 0)" not in api, "雜支不再外加在子表預算上"
     fe = repo_src("frontend/tabs/crm/crm-projects-cost-groups.js")
-    assert "const total = g.budget_amount || 0;" in fe and "預計雜支" in fe and "mEl.dataset.auto" in fe
+    assert "const total = g.budget_amount || 0;" in fe and "預計雜支" in fe
+    assert "* 0.05" not in fe, "子表雜支預設不在前端算（留空交給後端的專案雜支比）"
 
 
 def test_sub_table_misc_section_uses_the_default_when_unset():

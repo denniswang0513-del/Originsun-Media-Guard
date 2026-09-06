@@ -26,7 +26,7 @@ from sqlalchemy import func as safunc, or_, select, update
 
 import core.state as state
 from config import load_settings, save_settings
-from core.auth import check_admin, check_admin_or_module, current_username, payload_grants
+from core.auth import _extract_token, check_admin, check_admin_or_module, current_username, payload_grants
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (fillers_on, HOURS_PER_WORKDAY, WORK_TYPES, Misses, active_fillers, bucket_hours, budget_burn,
                            day_iso, explain_miss, hours_rollup, missing_fillers, month_key, month_span, months_back,
@@ -44,7 +44,7 @@ from services.timesheet_conflicts import list_conflicts, resolve_conflict
 from services.timesheet_ingest import ingest, parse_date as _parse_date
 from services.timesheet_lookup import burn_rows, load_project_lookup, project_names
 from services.timesheet_manual import insert_manual_rows, project_options
-from services.timesheet_self import (add_rows, admin_batch_update, admin_delete_row, admin_update_row, bound_ident, delete_row,
+from services.timesheet_self import (add_rows, admin_batch_update, admin_delete_row, admin_update_row, delete_row,
                                      list_rows, metrics_input, month_or_422, rows_by_month, search_rows, ts_dict, update_row)
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
@@ -83,11 +83,7 @@ def _day_or_422(day: str) -> datetime:
 
 def _has_ts_module(request: Request) -> bool:
     """有工作追蹤模組（或管理員）才看得到會洩露私帳金額的衍生值（建議預算）。"""
-    try:
-        check_admin_or_module(request, "timesheets")
-        return True
-    except HTTPException:
-        return False
+    return payload_grants(_extract_token(request) or {}, "timesheets")
 
 
 async def _ts_or_bound(request: Request) -> None:

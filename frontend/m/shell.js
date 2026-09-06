@@ -26,6 +26,8 @@ export function dateIso(d) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 export const todayLocal = () => dateIso(new Date());
+/** 本地日期 ±n 天（行事曆、工作紀錄的前一天／後一天）。 */
+export function addDays(iso, n) { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return dateIso(d); }
 
 export function money(n) {
     if (n === null || n === undefined || n === '') return '—';

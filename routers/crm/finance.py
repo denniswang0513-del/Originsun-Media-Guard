@@ -665,9 +665,8 @@ async def list_invoices(
         if category:
             query = query.where(CrmInvoice.category == category)
         if project_id:
-            # 發票可掛多案（project_ids JSON 清單，project_id 只是第一個）：兩邊都認，不然掛在第二案的票在那案看不到
-            query = query.where(or_(CrmInvoice.project_id == project_id,
-                                    CrmInvoice.project_ids.like('%"' + project_id + '"%')))
+            from core.project_link import invoice_in_project
+            query = query.where(invoice_in_project(project_id))   # 發票可掛多案：清單裡有它也算
         if q:
             ql = f"%{q}%"
             query = query.where(or_(

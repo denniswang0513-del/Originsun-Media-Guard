@@ -226,6 +226,7 @@ window._costCreateAdvance = function() {
     var projName = proj ? proj.name : '';
     var overlay = document.createElement('div');
     overlay.className = 'crm-modal-overlay';
+    overlay.dataset.dynamic = '1';        // _costAfterPay 只收這種動態長出來的
     overlay.style.display = 'flex';
     overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
     overlay.innerHTML = '<div class="crm-modal" style="max-width:420px;">' +
@@ -381,6 +382,7 @@ window._advLinkExpenses = async function(advanceId) {
     if (orphans.length === 0) { alert('沒有未綁定的支出'); return; }
     var overlay = document.createElement('div');
     overlay.className = 'crm-modal-overlay';
+    overlay.dataset.dynamic = '1';        // _costAfterPay 只收這種動態長出來的
     overlay.style.display = 'flex';
     overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
     var listHtml = '';
@@ -429,6 +431,7 @@ window._advAddExpense = function(payeeName, advanceId) {
     var projName = proj ? proj.name : '';
     var overlay = document.createElement('div');
     overlay.className = 'crm-modal-overlay';
+    overlay.dataset.dynamic = '1';        // _costAfterPay 只收這種動態長出來的
     overlay.style.display = 'flex';
     overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
     overlay.innerHTML = '<div class="crm-modal" style="max-width:420px;">' +
@@ -494,6 +497,7 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
     var projName = proj ? proj.name : '';
     var overlay = document.createElement('div');
     overlay.className = 'crm-modal-overlay';
+    overlay.dataset.dynamic = '1';        // _costAfterPay 只收這種動態長出來的
     overlay.style.display = 'flex';
     overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
     overlay.innerHTML = '<div class="crm-modal" style="max-width:420px;">' +
@@ -600,8 +604,8 @@ async function _costPayAction(id, paid) {
 
 /** 動作做完要重畫哪一區 —— 人員費用與雜支各自不同，所以由呼叫端帶。 */
 function _costAfterPay(onDone) {
-    // 只收動態長出來的那層；#proj-modal／#proj-import-modal 是靜態的（init 時搬到 body），刪掉之後「新增專案」就死了
-    var ov = document.querySelector('.crm-modal-overlay:not(#proj-modal):not(#proj-import-modal):not(#proj-inv-modal)');
+    // 只收動態長出來的那層（data-dynamic）；靜態的 #proj-modal 刪掉之後「新增專案」就死了
+    var ov = document.querySelector('.crm-modal-overlay[data-dynamic]');
     if (ov) ov.remove();
     if (onDone) { onDone(); }
     else if (state.selectedId) { _loadCostStaff(state.selectedId); }
@@ -654,6 +658,7 @@ window._costViewPayment = async function(paymentId, onDoneName) {
         var statusColor = p.payment_status === '已付款' ? '#86efac' : '#fb923c';
         var overlay = document.createElement('div');
         overlay.className = 'crm-modal-overlay';
+    overlay.dataset.dynamic = '1';        // _costAfterPay 只收這種動態長出來的
         overlay.style.display = 'flex';
         overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
         overlay.innerHTML = '<div class="crm-modal" style="max-width:400px;">' +
