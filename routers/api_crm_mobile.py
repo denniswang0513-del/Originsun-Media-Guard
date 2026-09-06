@@ -26,7 +26,7 @@ from core.finance_logic import (INVOICE_PASSTHROUGH_CATEGORIES, QUOTE_PENDING, Q
 from core.hr_logic import budget_burn, day_iso, iso_ts
 from core.ledger import hide_mine_projects, not_mine
 from core.money import MoneyRedactRoute, can_see_money, viewer_has_mine_scope
-from core.project_flow import LOST, PIPELINE
+from core.project_flow import LOST, PIPELINE, QUOTE_PHASE
 from core.schemas import MobileNotePayload, MobileQuoteStatusPayload
 
 from routers.crm._shared import (CRM_PREFIX, _check_status_auth, _crm_session,
@@ -148,6 +148,8 @@ async def mobile_options(request: Request):
         "clients": [{"id": cid, "short_name": name or "", "full_name": full or "", "tax_id": tid or ""}
                     for cid, name, full, tid in clients],
         "quote_statuses": list(QUOTE_STATUSES),
+        "quote_phase": QUOTE_PHASE,               # 手機開報價單順手建案時用哪一階
+
         "payment_statuses": list(PAYMENT_STATUSES),
         "invoice": {
             **INVOICE_VOCAB, "item_types": [t for t, _n in item_types],

@@ -106,6 +106,17 @@ def test_mobile_quote_form_writes_through_the_desktop_endpoints():
     assert "openSheet(" in src and "closeSheet()" in src
 
 
+def test_mobile_quote_starts_from_client_not_project():
+    """owner 2026-09-07：報價時案子通常還沒成立 —— 入口是客戶（必選、可現場建），
+    專案自己打字；沒連結既有案就先建殼專案再掛報價，階段字從 options 來不寫死。"""
+    src = js_code_only(repo_src("frontend/m/views/quotes.js"))
+    assert "qf-client_id" in src and "qf-project_name" in src and "qf-link_project" in src
+    assert "'/api/v1/crm/clients'" in src, "沒有現場建客戶"
+    assert "'/api/v1/crm/projects'" in src and "opt().quote_phase" in src, "建殼專案要用 options 的階段"
+    assert "client_id=${encodeURIComponent(clientId)}" in src, "連結既有案要拿這個客戶的全部案子"
+    assert "'提案'" not in src and "'洽詢'" not in src, "階段字彙寫死了"
+
+
 def test_invoice_is_a_request_to_issue():
     """owner 2026-09-03：手機登記的一定是請款發票、還沒開——方向與狀態從 options 取（第一個方向、
     第二個狀態），不送發票號碼（後端給未開立）；送出後有可複製的通知；專案必選。"""

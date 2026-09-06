@@ -7,13 +7,15 @@
  *
  * 開報價單（owner 2026-09-06，推翻 CRM_MOBILE_PLAN §「報價項目編輯不做」）：底部抽屜開表單，
  * 新增打 POST /crm/projects/{id}/quotations、編輯打 PUT /crm/quotations/{id}——跟桌機同兩支端點。
+ * 🔴 報價時案子通常還沒成立（owner 2026-09-07），所以入口是**客戶**不是專案：客戶必選（可現場建），
+ *    專案自己打字；沒連結既有專案就在儲存時先建一個殼專案（階段＝options.quote_phase）再掛報價。
  * 🔴 這兩支的守衛是 `_check_auth`＝**管理員限定**，所以入口只給管理員（不是 canWrite）。
  * 🔴 金額試算用 js/shared/quote-amounts.js（跟後端 _calc_quotation 同一份規則），手機不自己算稅。
  */
 import { quoteTotals, parsePaymentStages, paymentStagesToText } from '/js/shared/quote-amounts.js';
 import { mfetch, mdownload, toast, esc, money, fmtDate, todayLocal, quotePdfFilename } from '../shell.js';
-import { list, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad, renderPaged,
-    isAdmin, openSheet, closeSheet, pickerHtml, mountPicker, projectLabel } from '../ui.js';
+import { list, opt, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad, renderPaged,
+    isAdmin, openSheet, closeSheet, pickerHtml, mountPicker } from '../ui.js';
 
 function transitions(status) {
     const v = list('quote_statuses');
@@ -102,14 +104,18 @@ function recalc() {
       <div class="row"><span><b>報價總額</b>（含稅）</span><span class="amt"><b>${money(finalPrice || t.total)}</b></span></div>`;
 }
 
-function formHtml(projects, templates, q) {
+function formHtml(templates, q) {
     const editing = !!q;
     return `
       <div class="m-h">${editing ? `編輯報價 v${q.version}` : '開報價單'}</div>
       <form class="m-form" id="qf-form" autocomplete="off">
         ${editing
             ? `<label>專案</label><div class="m-card" style="padding:10px">${esc(_form.project_label || '（未連專案）')}</div>`
-            : `<label class="req">專案</label>${pickerHtml('qf-project_id')}`}
+            : `<label class="req">客戶</label>${pickerHtml('qf-client_id')}
+        <button type="button" class="m-more" id="qf-new-client">＋ 建立新客戶</button>
+        <label class="req">專案</label><input id="qf-project_name" placeholder="直接打案名，例：2026 品牌形象短片">
+        <label>連結既有專案</label>${pickerHtml('qf-link_project')}
+        <div class="m-hint" id="qf-project-hint">選了客戶才找得到他的案子；沒連結就照上面的案名建一個新案</div>`}
         ${editing ? '' : `<label>套用範本</label>${pickerHtml('qf-template')}
         <div class="m-hint">選了範本會帶入項目、稅率、備註、付款方式，帶進來還可以改</div>`}
         <label>規格</label><input id="qf-spec" placeholder="用、分隔，例：形象短片 90 秒 1 支、含中文字幕">
@@ -131,36 +137,30 @@ function formHtml(projects, templates, q) {
 }
 
 async function openForm(host, id) {
-    let projects = [], templates = [], q = null;
+    let templates = [], q = null;
     try {
-        if (id) {
-            q = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(id)}`);
-        } else {
-            const [pj, tp] = await Promise.all([
-                mfetch('/api/v1/crm/m/projects?limit=100&offset=0'),
-                mfetch('/api/v1/crm/quotation-templates').catch(() => ({ templates: [] })),
-            ]);
-            projects = pj.projects || [];
-            templates = tp.templates || [];
-        }
+        // 專案清單不在這裡抓：選了客戶才抓他的案子（loadClientProjects），沒選客戶前抓了也用不到
+        if (id) q = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(id)}`);
+        else templates = (await mfetch('/api/v1/crm/quotation-templates').catch(() => ({ templates: [] }))).templates || [];
     } catch (e) { toast(e.message, 'err'); return; }
 
     _form = {
         id: id || null,
-        project_id: q ? q.project_id : '',
+        project_id: q ? q.project_id : '',        // 有值＝掛既有案；空＝儲存時照 project_name 建一個
+        project_name: '',
+        client_id: '',
         project_label: q ? [q.client_short_name, q.project_name].filter(Boolean).join('｜') : '',
         status: q ? q.status : (list('quote_statuses')[0] || ''),   // 字彙只從 options 來
         items: q && q.items && q.items.length ? q.items.map(it => ({ ...it })) : [{ ...EMPTY_ROW }],
     };
 
-    openSheet(formHtml(projects, templates, q));
+    openSheet(formHtml(templates, q));
 
     if (!id) {
-        mountPicker('qf-project_id', {
-            items: projects.map(p => ({ value: p.id, label: projectLabel(p) })),
-            placeholder: '打字找案名或客戶',
-            onPick: (v) => { _form.project_id = v; },
-        });
+        mountClientPicker();
+        document.getElementById('qf-new-client').onclick = createClient;
+        // 打字改案名＝要建新案，剛才連結的那個就不算了
+        F('project_name').oninput = () => { _form.project_name = F('project_name').value; _form.project_id = ''; };
         mountPicker('qf-template', {
             items: templates.map(t => ({ value: t.id, label: t.name })),
             placeholder: '（不套用）',
@@ -196,6 +196,47 @@ async function openForm(host, id) {
     document.getElementById('qf-form').onsubmit = (ev) => { ev.preventDefault(); save(host); };
 }
 
+// 客戶清單來自 options（跟發票分頁同一份，母帳的客戶），現場建的也 push 回去
+function mountClientPicker(selected = '') {
+    mountPicker('qf-client_id', {
+        items: (opt().clients || []).map(c => ({ value: c.id, label: c.short_name || c.full_name || c.id })),
+        placeholder: '打字找客戶', value: selected,
+        onPick: (v) => { _form.client_id = v; loadClientProjects(v); },
+    });
+}
+
+async function createClient() {
+    const name = (prompt('客戶名稱（代稱）：') || '').trim();
+    if (!name) return;
+    try {
+        const r = await mfetch('/api/v1/crm/clients', { method: 'POST', body: { short_name: name } });
+        const c = r.client || r;
+        (opt().clients || []).push({ id: c.id, short_name: c.short_name || name, full_name: c.full_name || '', tax_id: c.tax_id || '' });
+        _form.client_id = c.id;
+        mountClientPicker(c.id);
+        loadClientProjects(c.id);
+        toast('客戶已建立：' + (c.short_name || name));
+    } catch (e) { toast(e.message, 'err'); }
+}
+
+// 連結既有專案：拿這個客戶的全部案子（不是最近 100 筆），免得打同名再建一個重複的案
+async function loadClientProjects(clientId) {
+    let rows = [];
+    try {
+        const d = await mfetch(`/api/v1/crm/projects?client_id=${encodeURIComponent(clientId)}`);
+        rows = d.projects || [];
+    } catch (_) { /* 找不到就只走「打字建新案」那條 */ }
+    mountPicker('qf-link_project', {
+        items: rows.map(p => ({ value: p.id, label: p.name })),
+        placeholder: rows.length ? '（不連結，照上面的案名建新案）' : '這個客戶還沒有案子',
+        onPick: (v) => {
+            _form.project_id = v;
+            const hit = rows.find(r => r.id === v);
+            if (hit) { F('project_name').value = hit.name; _form.project_name = hit.name; }
+        },
+    });
+}
+
 function applyTemplate(t) {
     if (!t) return;
     if (Array.isArray(t.items) && t.items.length) _form.items = t.items.map(it => ({ ...EMPTY_ROW, ...it }));
@@ -207,9 +248,12 @@ function applyTemplate(t) {
 
 async function save(host) {
     const err = document.getElementById('qf-err');
+    const fail = (msg) => { err.hidden = false; err.textContent = msg; };
     const items = _form.items.filter(it => (it.description || '').trim());
-    if (!_form.id && !_form.project_id) { err.hidden = false; err.textContent = '請先選專案'; return; }
-    if (!items.length) { err.hidden = false; err.textContent = '至少要有一個有說明的項目'; return; }
+    const projectName = _form.id ? '' : F('project_name').value.trim();
+    if (!_form.id && !_form.client_id) return fail('請先選客戶');
+    if (!_form.id && !_form.project_id && !projectName) return fail('請填專案名稱，或連結一個既有專案');
+    if (!items.length) return fail('至少要有一個有說明的項目');
     err.hidden = true;
 
     const body = {
@@ -231,8 +275,20 @@ async function save(host) {
     const btn = document.getElementById('qf-submit');
     await withBusy(btn, async () => {
         try {
-            if (_form.id) await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(_form.id)}`, { method: 'PUT', body });
-            else await mfetch(`/api/v1/crm/projects/${encodeURIComponent(_form.project_id)}/quotations`, { method: 'POST', body });
+            if (_form.id) {
+                await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(_form.id)}`, { method: 'PUT', body });
+            } else {
+                let pid = _form.project_id;
+                if (!pid) {                       // 案子還沒成立：先開一個殼專案（階段由後端 options 給）
+                    const np = await mfetch('/api/v1/crm/projects', {
+                        method: 'POST',
+                        body: { name: projectName, client_id: _form.client_id, ...(opt().quote_phase ? { status: opt().quote_phase } : {}) },
+                    });
+                    pid = (np.project || np).id;
+                    markStale('projects');
+                }
+                await mfetch(`/api/v1/crm/projects/${encodeURIComponent(pid)}/quotations`, { method: 'POST', body });
+            }
             toast(_form.id ? '報價已更新' : '報價已建立');
             _form = null;
             closeSheet();

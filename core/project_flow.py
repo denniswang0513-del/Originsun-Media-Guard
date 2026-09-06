@@ -164,6 +164,9 @@ def wins_proposal(new_status: str, proposal_count: int, already_won: bool) -> bo
 # 由 NEXT_STATUS 直接跳到「提案」。
 PIPELINE = ("投標", "開發", "洽詢", "提案", "製作", "結案", "歸檔")
 LOST = "未成案"
+# 報價時順手建的殼專案落在這一階（案子還沒成立，但已經在報價了）——
+# 桌機報價彈窗的 inline 建案與手機「開報價單」都用它，別各寫各的。
+QUOTE_PHASE = "提案"
 # 專案選單的「已結案」那一組（工作日誌、零用金的浮層都吃這個旗標）：結案之後的階段＋未成案
 CLOSED_STATUSES = ("結案", "歸檔", LOST)
 
