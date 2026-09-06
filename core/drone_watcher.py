@@ -27,6 +27,12 @@ _HISTORY_MAX = 50
 # 照片與影片走的是同一個 os.scandir 迴圈）
 from core.media_exts import IMAGE_EXTS as _IMAGE_EXTS
 from core.media_exts import MEDIA_EXTS as _MEDIA_EXTS
+from core.media_exts import RAW_CAMERA_EXTS as _RAW_EXTS
+
+# 這一輪掃描裡「看得到但不處理」的 RAW（.r3d／.braw）：{資料夾名: [檔名]}。
+# 看得到＝素材不會靜默消失（2026-08-30 拍板）；不處理＝ffmpeg 解不開，餵進去只會每天失敗一次、
+# 而且失敗的檔不進 manifest 會被天天重派（2026-09-06 review）。
+_SKIPPED_RAW: dict = {}
 
 _file_lock = threading.Lock()
 
@@ -214,17 +220,23 @@ def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[s
     _MAX_OUT_EXTS = (".MOV",) + tuple(e.upper() for e in _IMAGE_EXTS)
 
     candidates = []
+    _SKIPPED_RAW.clear()
     for name in sorted(os.listdir(source_root)):
         sub = os.path.join(source_root, name)
         if not os.path.isdir(sub):
             continue
 
-        media = []
+        media, raw = [], []
         for root, _dirs, files in os.walk(sub):
             for fn in files:
-                if os.path.splitext(fn)[1].lower() in _MEDIA_EXTS:
+                ext = os.path.splitext(fn)[1].lower()
+                if ext in _RAW_EXTS:
+                    raw.append(fn)                  # 看得到、不派：ffmpeg 解不開 RAW
+                elif ext in _MEDIA_EXTS:
                     media.append(os.path.join(root, fn))
         media.sort()
+        if raw:
+            _SKIPPED_RAW[name] = sorted(raw)
         if not media:
             continue
 
@@ -436,6 +448,18 @@ def run_watcher_scan(cfg: Optional[dict] = None, trigger: str = "scheduled") -> 
     }
     if errors:
         entry["errors"] = errors
+    if _SKIPPED_RAW:
+        # RAW 沒處理要說出來（不能靜默），但不算錯誤：來源檔沒動、其他檔照常處理
+        skipped = {k: list(v) for k, v in _SKIPPED_RAW.items()}
+        entry["skipped_raw"] = skipped
+        entry["note"] = "略過 RAW（ffmpeg 不支援 .r3d／.braw）：" + "；".join(
+            f"{k} {len(v)} 支" for k, v in skipped.items())
+        try:
+            from notifier import notify_tab  # type: ignore
+            notify_tab("drone_watcher_success", folder_count=len(candidates), file_count=total_files,
+                       duration=f"{duration_sec:.1f}s", trigger=trigger + "｜" + entry["note"])
+        except Exception:
+            pass
     append_history(entry)
 
     return {

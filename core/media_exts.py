@@ -34,7 +34,10 @@ VIDEO_EXTS = frozenset({
 })
 
 # ffmpeg 解得開的（轉檔 / 語音辨識）
+# 原廠 RAW：是素材（索引／備份要看到），但隨附的 ffmpeg 8 沒有 REDCODE 解碼器、沒有 BRAW demuxer，
+# 任何會餵 ffmpeg 的管線（轉檔／串帶／空拍寫入）都要把它們挑出來另外處理，不能靜默丟進去失敗
 _RAW_CAMERA_EXTS = frozenset({".r3d", ".braw"})
+RAW_CAMERA_EXTS = _RAW_CAMERA_EXTS
 _WEB_EXTS = frozenset({".webm", ".ts"})
 TRANSCRIBE_EXTS = (VIDEO_EXTS - _RAW_CAMERA_EXTS) | _WEB_EXTS
 
