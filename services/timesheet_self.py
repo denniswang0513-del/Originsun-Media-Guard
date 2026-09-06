@@ -197,6 +197,10 @@ async def apply_update(session, r, body) -> None:
     # 只改內容還會 422「至少一個 > 0」）；有帶（含明確 null）才照 body
     if "planned_hours" not in getattr(body, "model_fields_set", set()) and getattr(r, "planned_hours", None) is not None:
         body = body.model_copy(update={"planned_hours": r.planned_hours})
+    if "remark" not in getattr(body, "model_fields_set", set()) and r.remark:
+        body = body.model_copy(update={"remark": r.remark})          # 沒帶備註＝不動（/my.html 的改列表單沒這欄）
+    if not body.project_id and not (body.project_name or "").strip() and (r.project_name or r.project_id):
+        body = body.model_copy(update={"project_name": r.project_name or ""})   # 沒帶專案＝不動，不是清空
     unchanged = not body.project_id and (body.project_name or "").strip() == (r.project_name or "")
     lk = None if unchanged else await load_project_lookup(session)
     fields, _why = normalize_row(body, lk, await names_for(session, [body]), manual=r.source == "manual",
@@ -243,10 +247,19 @@ async def add_tombstone(session, row_hash: str, who: str, *, staff_name="", proj
         session.add(TimesheetTombstone(row_hash=row_hash, staff_name=staff_name or "", project_name=project_name or "",
                                        work_date=work_date, hours=float(hours or 0), deleted_by=who or ""))
 
+def _remember_sheet_key(r) -> None:
+    """Sheet 列第一次被總表改之前，把（人,日,案）原鍵記下來：之後管理員改了案名／人／日期，
+    拉取還認得 Sheet 那一列是它（不然 Sheet 再變就插成第二列、時數加倍）。"""
+    if r.source != "manual" and not getattr(r, "sheet_key", None):
+        from core.hr_logic import manual_dup_key
+        r.sheet_key = manual_dup_key(r.staff_name, r.work_date, r.project_name)
+
+
 async def admin_update_row(session, row_id: str, body, who: str = "") -> dict:
     """管理員改任一列（欄位同 apply_update）＋ 管理員備註。改過的 Sheet 列 row_hash 不變，
     下次拉取仍認得它、不會再插一次；但 Sheet 那一格之後若也改了，會以新 hash 另插一列。"""
     r = await get_row(session, row_id)
+    _remember_sheet_key(r)
     await apply_update(session, r, body)
     if body.note is not None:
         r.note = body.note.strip() or None
@@ -282,6 +295,7 @@ async def admin_batch_update(session, ids: list, patch: dict, who: str = "") -> 
             raise HTTPException(status_code=422, detail=str(e))
     rows = (await session.execute(select(Timesheet).where(Timesheet.id.in_(ids)))).scalars().all()
     for r in rows:
+        _remember_sheet_key(r)
         if proj:
             r.project_id, r.project_name = proj
         if "work_type" in patch and patch["work_type"] is not None:

@@ -37,7 +37,7 @@ export default async function render(container, ctx = {}) {
     _c = container;
     if (ctx.isCurrent) _isCurrent = ctx.isCurrent;
     const r = await finSubviewBoot(_c, {
-        title: '🔗 專案對應', isCurrent: _isCurrent,
+        title: '專案對應', isCurrent: _isCurrent,
         fetchers: [() => crmFetch('/projects-mine-links')],
         retry: 'window._finPL.reload()',
     });
@@ -153,7 +153,7 @@ function _render() {
     const total = (mineSide ? d.mine : d.parents) || [];
     _c.innerHTML = `
         <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
-            <h2 style="color:#eee;margin:0;font-size:18px;">🔗 專案對應</h2>
+            <h2 style="color:#eee;margin:0;font-size:18px;">專案對應</h2>
             <div style="display:flex;gap:2px;">
                 ${[['mine', '私帳 → 母帳'], ['parent', '母帳 → 私帳']].map(([k, t]) => `
                 <button class="crm-btn ${_dir === k ? 'crm-btn-primary' : 'crm-btn-secondary'} crm-btn-sm"
@@ -258,6 +258,7 @@ _p.link = async (id, parentId) => {
         _p.reload();
     } catch (e) {
         finToast('儲存失敗：' + e.message, 'error');
+        _p.reload();          // 重畫：不然那一格卡在下拉模式、再選也沒反應
     }
 };
 

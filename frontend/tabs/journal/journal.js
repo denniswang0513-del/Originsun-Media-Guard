@@ -88,7 +88,7 @@ function _renderWeek(mine, week) {
                 </div>`).join('')}
             <div class="jr-form">
                 ${mine.editable
-                    ? '<button class="jr-btn" id="jr-save">儲存</button><span id="jr-save-msg"></span>'
+                    ? '<button class="jr-btn" id="jr-save">儲存</button><button class="jr-btn" id="jr-submit">送出</button><span id="jr-save-msg"></span>'
                     : `<span class="jr-hint">${HINT_EDIT_WINDOW}</span>`}
             </div>
         </div>
@@ -105,11 +105,23 @@ function _renderWeek(mine, week) {
     if (today) today.onclick = () => { _weekStart = _thisWeekStart(); _loadWeek(); };
     const save = el('jr-save');
     if (save) save.onclick = _saveMine;
+    const submit = el('jr-submit');
+    if (submit) submit.onclick = _submitMine;      // 這頁存的是草稿；不送出的話團隊牆／求助清單都看不到
     if (_flashMsg) {
         const m = el('jr-save-msg');
         if (m) { m.textContent = _flashMsg; m.className = 'jr-msg-ok'; setTimeout(() => { m.textContent = ''; }, 2500); }
         _flashMsg = '';
     }
+}
+
+async function _submitMine() {
+    const ok = await _saveMine();
+    if (ok === false) return;
+    const r = await api.submitMine(_weekStart);
+    const msg = el('jr-save-msg');
+    if (!r.ok) { if (msg) { msg.textContent = '送出失敗'; msg.className = 'jr-msg-err'; } return; }
+    _flashMsg = '已送出';
+    _loadWeek();
 }
 
 async function _saveMine() {
@@ -124,7 +136,7 @@ async function _saveMine() {
             : (d.detail || '儲存失敗');
         const msg = el('jr-save-msg');
         if (msg) { msg.textContent = text; msg.className = 'jr-msg-err'; }
-        return;
+        return false;
     }
     _flashMsg = '已儲存';
     // PUT 已回 /mine 同形回應 — 只重抓 /week 讓團隊牆同步，省一次 /mine

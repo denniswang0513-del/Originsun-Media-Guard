@@ -334,10 +334,11 @@ function _renderToday(d) {
 }
 
 // ── 我的一天：登入者自己記（實際或計畫）；時數快捷鈕；複製昨天；改／刪 ──
+let _projOptsAt = 0, _ledgerQTimer = null;
 async function _projectOptions() {
-    if (_projOpts) return _projOpts;
-    try { _projOpts = (await tfetch('/api/v1/timesheets/project_options')).projects || []; }
-    catch (_) { _projOpts = []; }
+    if (_projOpts && Date.now() - _projOptsAt < 5 * 60 * 1000) return _projOpts;   // 5 分鐘內用快取；同事新建的案之後打得到
+    try { _projOpts = (await tfetch('/api/v1/timesheets/project_options')).projects || []; _projOptsAt = Date.now(); }
+    catch (_) { _projOpts = _projOpts || []; }
     return _projOpts;
 }
 const _typeSelect = (cur, attr) => typeSelectHtml(cur, attr, _workTypes);
@@ -812,7 +813,7 @@ function _recentTbodyHtml() {
     return _recentSorter.sorted(_recentCache || []).map(r => `
                                     <tr><td>${esc(r.date || '')}</td><td>${esc(r.staff_name)}</td>
                                         <td>${esc(r.project_name)}</td>
-                                        <td>${r.project_id ? '✅' : '<span style="color:#f59e0b;">—</span>'}</td>
+                                        <td>${r.project_id ? '<span style="color:#6ee7b7;">對到</span>' : '<span style="color:#f59e0b;">—</span>'}</td>
                                         <td style="color:#999;">${esc(r.task_note || '')}</td>
                                         <td class="num">${r.hours}</td></tr>`).join('');
 }
@@ -917,7 +918,11 @@ function _bind() {
     if (mt) mt.addEventListener('change', () => { _monthTo = mt.value; refresh(); });
     ['staff', 'project', 'source', 'q'].forEach(k => {
         const el = document.getElementById('ts-lf-' + k);
-        if (el) el.addEventListener(k === 'q' ? 'input' : 'change', () => { _ledgerFilter[k] = el.value; _ledgerRedraw(); });
+        if (el) el.addEventListener(k === 'q' ? 'input' : 'change', () => {
+            _ledgerFilter[k] = el.value;
+            if (k !== 'q') { _ledgerRedraw(); return; }
+            clearTimeout(_ledgerQTimer); _ledgerQTimer = setTimeout(_ledgerRedraw, 200);   // 打字去抖：整表重畫一次幾百毫秒
+        });
     });
     if (_view === 'ledger') _ledgerRedraw();   // 計數 chip
 }

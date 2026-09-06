@@ -1417,8 +1417,10 @@ def save_margin_model(entity: str, model: dict) -> dict:
     from config import load_settings, save_settings
     s = load_settings()
     s.setdefault("finance", {}).setdefault("margin_model", {})[entity] = _copy_model(model)
-    # CRM「編輯案型」那份字彙改成跟你的版本一樣（順序照表）—— 以你的版本為主
-    s["project_types"] = [t for t in ((r.get("type") or "").strip() for r in model.get("rows") or []) if t]
+    # CRM「編輯案型」那份字彙改成跟你的版本一樣（順序照表）—— 案型的正本是**私帳**那份表；
+    # 從母公司視角存表不該把全域字彙洗成母公司那份（project_type_vocab 讀的也是 mine）
+    if entity == "mine":
+        s["project_types"] = [t for t in ((r.get("type") or "").strip() for r in model.get("rows") or []) if t]
     save_settings(s)
     return load_margin_model(entity)
 
@@ -1479,7 +1481,10 @@ def margin_for_type(model: dict, project_type: str):
     t = canonical_type(model, project_type)
     for r in model.get("rows") or []:
         if (r.get("type") or "").strip() == t:
-            return float(r["margin_pct"]) if r.get("margin_pct") is not None else None   # 列上沒填毛利＝不知道，不是 0%
+            try:
+                return float(r["margin_pct"]) if r.get("margin_pct") is not None else None   # 列上沒填毛利＝不知道，不是 0%
+            except (TypeError, ValueError):
+                return None                     # settings.json 手改成 '' 或字串：當不知道，不要整頁 500
     return None
 
 

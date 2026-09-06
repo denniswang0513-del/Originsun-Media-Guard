@@ -45,7 +45,7 @@ def test_the_backfill_asks_the_taxonomy_tree_not_the_underscore():
     assert "ledger_category_domain(session, \"mine\")" in body
     assert 'FinanceCategoryMap.source == "cash"' in body, "只判 cash，別動共用的那兩種"
     # 🔴 只跑一次：不然使用者手動改判之後，下次開機就被改回去
-    assert 'FinanceCategoryMap.entity == "mine"' in body and "return 0" in body
+    assert "category_map_entity_backfilled" in body and "return 0" in body   # 2026-09-06：sentinel 改 settings 旗標（手動先加一列不會讓 backfill 永遠不跑）
     # 分類樹還沒種好時不要亂判（回填排在 seed_cash_taxonomy 之後）
     assert "if not mine:" in body
     boot = repo_src("main.py")

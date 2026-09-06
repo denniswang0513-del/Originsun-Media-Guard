@@ -578,7 +578,7 @@ async def _petty_item_domain(session) -> list:
     return items or list(FALLBACK_ITEMS)
 
 
-async def _push_from_cash(session, staff, body: PettyFromCashPayload) -> dict:
+async def _push_from_cash(session, staff, body: PettyFromCashPayload, *, commit: bool = True) -> dict:
     """本人推送／代為推送共用的正本（可先 `preview=True` 試算）。"""
     if not body.entry_id:
         raise HTTPException(status_code=400, detail="沒有選到收支列")
@@ -628,7 +628,10 @@ async def _push_from_cash(session, staff, body: PettyFromCashPayload) -> dict:
     await _attach_cost_group(session, exp)
     session.add(exp)
     entry.expense_id = exp.id            # 兩邊釘死 —— 重推會被 blocked 擋
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()            # 對帳單匯入：整批一個交易，由呼叫端 commit
     return {"status": "ok", "staff": {"id": staff.id, "name": staff.name},
             "expense_id": exp.id, "amount": exp.actual, "item": exp.item}
 

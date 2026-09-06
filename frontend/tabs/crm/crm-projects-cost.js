@@ -500,7 +500,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
       <div style="display:flex;gap:6px;align-items:center;">
         <span class="exp-mini">
           雜支預算 <span class="cost-editable" onclick="window._miscBudgetEdit(this)"
-                title="點一下直接改本子表的雜支預算">${groupMisc == null ? (grp && grp.misc_budget_default ? '預設 $' + fmtNum(grp.misc_budget_default) + '（預算 5%）' : '未設') : '$' + fmtNum(groupMisc)}</span>
+                title="點一下直接改本子表的雜支預算">${groupMisc == null ? (grp && grp.misc_budget_default ? '預設 $' + fmtNum(grp.misc_budget_default) + '（預算 × 雜支比）' : '未設') : '$' + fmtNum(groupMisc)}</span>
           ｜ 已用 $${fmtNum(expActualTotal)}${miscBudget ? `
           ｜ 剩餘 <span style="color:${remainColor(miscLeft)};">$${fmtNum(miscLeft)}</span>` : ''}
         </span>

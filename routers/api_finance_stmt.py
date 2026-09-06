@@ -992,7 +992,7 @@ async def _push_one_petty(session, staff, entry, item: str = "") -> None:
 
     await session.flush()          # 需要 entry.id
     await _push_from_cash(session, staff,
-                          PettyFromCashPayload(entry_id=entry.id, item=item))
+                          PettyFromCashPayload(entry_id=entry.id, item=item), commit=False)   # 整批一交易：由 apply_bank_statement 最後 commit
 
 
 async def _fill_workbench_column(session, bank_account_id: str, stmt_lines: list) -> None:

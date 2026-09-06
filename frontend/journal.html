@@ -440,7 +440,8 @@ function metaListHtml(k) {
     const ta = $('ta-' + k);
     const lines = linesToItems(ta ? ta.value : itemsToLines(mine[k]));
     const ents = entriesOf(mine, k);
-    meta[k] = lines.map((_, i) => meta[k]?.[i] || { project_id: '', project_name: '', flag: '' });
+    // id 一起記著：草稿送出時帶 id，後端才知道「這條只是改字」，不會刪掉重建（主管回覆跟著沒了）
+    meta[k] = lines.map((_, i) => meta[k]?.[i] || { id: (ents[i] || {}).id || '', project_id: '', project_name: '', flag: '' });
     return lines.map((line, i) => {
         const m = meta[k][i];
         const e = ents[i] || {};
@@ -554,7 +555,7 @@ function draftBody() {
     const body = { status: 'draft' };
     for (const [k] of BLOCKS) {
         const lines = linesToItems($('ta-' + k)?.value ?? itemsToLines(mine[k]));
-        body[k] = lines.map((c, i) => ({ content: c, project_id: (meta[k]?.[i] || {}).project_id || '', flag: (meta[k]?.[i] || {}).flag || '' }));
+        body[k] = lines.map((c, i) => ({ id: (meta[k]?.[i] || {}).id || '', content: c, project_id: (meta[k]?.[i] || {}).project_id || '', flag: (meta[k]?.[i] || {}).flag || '' }));
     }
     return body;
 }
@@ -671,7 +672,10 @@ $('view').addEventListener('pointerdown', (ev) => {
     _pressed = false;
     _pressTimer = setTimeout(() => { _pressed = true; heartMenu(b); }, 450);
 });
-['pointerup', 'pointercancel', 'pointerleave'].forEach(t => $('view').addEventListener(t, () => { clearTimeout(_pressTimer); }, true));
+['pointerup', 'pointercancel', 'pointerleave'].forEach(t => $('view').addEventListener(t, () => {
+    clearTimeout(_pressTimer);
+    setTimeout(() => { _pressed = false; }, 400);   // 觸控長按之後不會有 click 來把 _pressed 清掉，自己清，不然下一次點被吞
+}, true));
 $('view').addEventListener('click', (ev) => {
     const avs = ev.target.closest('[data-heart-pop]');
     if (!avs) { document.querySelectorAll('.heart-wrap.open').forEach(w => w.classList.remove('open')); return; }

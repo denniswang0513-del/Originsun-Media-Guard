@@ -451,6 +451,6 @@ def misc_budget_total_of(groups, misc_pct) -> int | None:
     for budget, misc in groups:
         if misc is not None:
             total += int(misc); any_budget = True
-        elif budget:
+        elif budget:                              # 預算 0 ＝ 沒填（子表卡片同一規則：0 也畫「未設」）
             total += group_misc_default(budget, misc_pct); any_budget = True
     return total if any_budget else None

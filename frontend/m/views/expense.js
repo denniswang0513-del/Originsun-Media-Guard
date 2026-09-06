@@ -71,14 +71,24 @@ async function loadProjects() {
     mountPicker('exp-project_id', { items, placeholder, value: F('project_id').value, onPick: onProject });
 }
 
-function applyPreset() {
+async function applyPreset() {
     if (!state.expensePreset) return;
-    const hidden = F('project_id');
-    if (hidden._set && (hidden._items || []).some(i => String(i.value) === String(state.expensePreset))) {
-        hidden._set(String(state.expensePreset));
-        onProject(String(state.expensePreset));
-    }
+    const id = String(state.expensePreset);
     state.expensePreset = null;
+    const hidden = F('project_id');
+    if (!hidden._set) return;
+    if (!(hidden._items || []).some(i => String(i.value) === id)) {
+        // 清單只抓最近 100 案：從抽屜帶進來的老案不在裡面 → 補抓那一案塞進清單，不然表單空著、打字也找不到
+        try {
+            const d = await mfetch('/api/v1/crm/m/projects/' + encodeURIComponent(id));
+            const p = d.project || {};
+            if (p.id) mountPicker('exp-project_id', { items: [{ value: p.id, label: projectLabel(p) }, ...(hidden._items || [])], placeholder: '打字找案名或客戶', value: '', onPick: onProject });
+        } catch (_) { /* 下面照原本判 */ }
+    }
+    if ((hidden._items || []).some(i => String(i.value) === id)) {
+        hidden._set(id);
+        onProject(id);
+    }
 }
 
 async function onProject(pid) {

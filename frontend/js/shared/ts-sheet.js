@@ -329,7 +329,11 @@ export function wireAutosave(host, cfg = {}) {
         const st = tr.querySelector('[data-f="state"]');
         const body = rowBody(tr, { day: cfg.day ? cfg.day() : '', projects: cfg.projects ? (cfg.projects() || []) : [] });
         const complete = body.project_name && ((body.hours || 0) > 0 || (body.planned_hours || 0) > 0);
-        if (!complete) { st.textContent = body.project_name || body.task_note ? '再填時數' : ''; st.style.color = ''; return; }
+        if (!complete) {
+            // 已存過的列把時數／專案清掉：伺服器還是舊值，要說清楚（不然畫面空、資料還在）
+            if (tr.dataset.id) { st.textContent = '沒存（時數不能空，伺服器仍是舊值）'; st.style.color = 'var(--sh-err)'; return; }
+            st.textContent = body.project_name || body.task_note ? '再填時數' : ''; st.style.color = ''; return;
+        }
         tr._saving = true;
         st.textContent = '儲存中…'; st.style.color = 'var(--sh-busy)';
         try {

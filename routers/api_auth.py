@@ -396,10 +396,17 @@ async def refresh_token(request: Request):
     payload = _extract_token(request)
     if not payload or payload.get('auth_method') == 'api_key':
         raise HTTPException(status_code=401, detail="未登入或 token 已過期")
+    if payload.get('scope') or payload.get('purpose'):
+        raise HTTPException(status_code=401, detail="分享連結的 token 不能換登入 token")
+    # 絕對壽命：從第一次登入（login_at；舊 token 退回 iat）起 90 天，續期只能在這之內滾；遺失的手機 token 不能無限續
+    import time as _t
+    _login_at = int(payload.get('login_at') or payload.get('iat') or 0)
+    if _login_at and _t.time() - _login_at > 90 * 86400:
+        raise HTTPException(status_code=401, detail="登入已超過 90 天，請重新登入")
     user = await _find_user_by('username', payload.get('sub') or '')
     if not user:
         raise HTTPException(status_code=401, detail="帳號不存在或已停用")
-    return _issue_token(user)
+    return _issue_token(user, login_at=_login_at or int(_t.time()))   # 第一次登入的時間跟著續下去，90 天絕對壽命才算得到
 
 
 @router.get("/register/config")

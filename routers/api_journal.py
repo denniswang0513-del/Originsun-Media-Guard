@@ -278,11 +278,12 @@ async def put_my_journal(body: JournalPut, request: Request, start: str = ""):
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         if not any(cleaned.values()):
-            # 四區皆空 → 刪殼 + entries + 回覆（清空語意）
+            # 四區皆空 → 刪殼 + entries + 回覆 + 讚（清空語意；讚不刪會變孤兒列）
             if shell is not None:
                 for _, model in _SECTION_MODELS:
                     await session.execute(sa_delete(model).where(model.journal_id == shell.id))
                 await session.execute(sa_delete(JournalReply).where(JournalReply.journal_id == shell.id))
+                await session.execute(sa_delete(JournalReaction).where(JournalReaction.journal_id == shell.id))
                 await session.delete(shell)
                 await session.commit()
             shell = None
@@ -504,7 +505,11 @@ async def react_entry(body: JournalReactPost, request: Request):
         if on:
             session.add(JournalReaction(id=uuid.uuid4().hex, journal_id=shell.id, entry_table=body.entry_table,
                                         entry_id=target_id, username=who, kind=kind))
-        await session.commit()
+        try:
+            await session.commit()
+        except Exception:                 # 連點兩下：兩個請求都讀到「沒按過」、都 INSERT → 撞 UNIQUE；當作已經按了
+            await session.rollback()
+            on = True
         summary = (await _reactions_by_journal(session, [shell.id], who))[shell.id].get(target_id) or \
             ({k: 0 for k in ("like", "love", "laugh")} | {"mine": []})
     return {"status": "ok", "on": on, "entry_id": target_id, "reactions": summary}
@@ -526,6 +531,8 @@ async def reply_entry(body: JournalReplyPost, request: Request):
         shell = await session.get(WorkJournal, body.journal_id)
         if shell is None:
             raise HTTPException(status_code=404, detail="找不到這份週記")
+        if shell.status not in (None, "submitted"):
+            raise HTTPException(status_code=409, detail="還沒送出的週記不能回覆（草稿只有本人看得到）")
         entry = await session.get(model, body.entry_id)
         if entry is None or entry.journal_id != shell.id:
             raise HTTPException(status_code=404, detail="找不到這一條（可能已被改掉）")

@@ -311,9 +311,10 @@ async def _month_snapshot(session, month: str, entity: str = "parent") -> dict:
         .group_by(CrmCashSplit.category))).all()
     for c, v in split_cats:
         amt = int(v or 0)
-        cats[c or "未分類"] = cats.get(c or "未分類", 0) + amt
-        if c:                                     # 從「未分類」把父列那份移出
-            cats["未分類"] = cats.get("未分類", 0) - amt
+        if not c:
+            continue                              # 拆項也沒分類：父列那份本來就在未分類裡，不要再加一次
+        cats[c] = cats.get(c, 0) + amt
+        cats["未分類"] = cats.get("未分類", 0) - amt   # 從「未分類」把父列那份移出
     if not cats.get("未分類"):
         cats.pop("未分類", None)
     return {

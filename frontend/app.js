@@ -56,13 +56,19 @@ import './js/app/remote-dispatch.js';
             if (!ld || !el || (!embed && !_authed(ld.key))) return false;
             const fail = (status) => { el.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">${tabLoadError(status)}</div>`; return false; };
             try {
-                const [res, mod] = await Promise.all([fetch(ld.html), import(ld.js)]);
+                // 帶版號：Cloudflare 對 .js 給 4 小時瀏覽器快取而 html 即時，發版後會拿到「新 html＋舊 js」；
+                // 版號變了網址就變，兩邊永遠成對（app.js 自己在 index.html 也是 ?v=）
+                const v = await _verTag;
+                const [res, mod] = await Promise.all([fetch(`${ld.html}?v=${v}`), import(`${ld.js}?v=${v}`)]);
                 if (!res.ok) return fail(res.status);
                 el.innerHTML = await res.text();
                 if (typeof mod[ld.init] === 'function') await mod[ld.init]();
             } catch (e) {
                 console.warn(`[${sectionId}] 載入失敗:`, e);
-                return fail(0);
+                // init 跑到一半炸掉：它已經掛上的 document 監聽／輪詢收不回來，再跑一次會掛兩份 → 標成載過、請人重新整理
+                _loadedTabs.add(sectionId);
+                el.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">${tabLoadError(0)}<br><span style="color:#9ca3af;font-size:12px;">請重新整理頁面再試</span></div>`;
+                return false;
             }
             _loadedTabs.add(sectionId);
             // 開機時套的權限（管理員限定元素）與機隊勾選面板都發生在這頁長出來之前 → 對新 DOM 補一次
@@ -71,6 +77,8 @@ import './js/app/remote-dispatch.js';
             return true;
         }
         window._ensureTabLoaded = _loadTab;
+        // 分頁檔案的版號（同 /api/v1/version）；拿不到就用開頁時間戳（退回舊行為：每次開頁重抓）
+        const _verTag = fetch('/api/v1/version').then((r) => r.json()).then((j) => encodeURIComponent(j.version || Date.now())).catch(() => String(Date.now()));
 
         async function loadTabs() {
             try {
@@ -502,50 +510,7 @@ import './js/app/remote-dispatch.js';
                 }
             });
 
-            // Transcribe progress updates
-            socket.on('transcribe_progress', (data) => {
-                const pct = parseFloat(data.pct) || 0;
-                const msg = data.msg || '';
-                const pctStr = `${pct.toFixed(0)}%`;
-
-                const lblEl = document.getElementById('transcribe_prog_label');
-                const pctEl = document.getElementById('transcribe_prog_pct');
-                const barEl = document.getElementById('transcribe_prog_bar');
-
-                if (lblEl) lblEl.textContent = msg;
-                if (pctEl) pctEl.textContent = pctStr;
-                if (barEl) barEl.style.width = pctStr;
-
-                if (msg && !msg.includes('正在寫入')) {
-                    appendLog(`🎙️ [逐字稿] ${msg}`, data.type || 'info');
-                }
-            });
-
-            // Transcribe job finished
-            socket.on('transcribe_done', (data) => {
-                appendLog(`✅ 逐字稿生成完成！輸出目錄：${data.dest_dir || ''}`, 'system');
-
-                const lblEl = document.getElementById('transcribe_prog_label');
-                const pctEl = document.getElementById('transcribe_prog_pct');
-                const barEl = document.getElementById('transcribe_prog_bar');
-
-                if (lblEl) lblEl.textContent = '完成！';
-                if (pctEl) pctEl.textContent = '100%';
-                if (barEl) barEl.style.width = '100%';
-
-                appendLog('系統：所有排定任務執行完畢！', 'system');
-                playDing();
-
-                // Open output folder directly
-                if (data.dest_dir) {
-                    fetch(window.getLocalAgentBase() + '/api/v1/utils/open_folder', {
-                        method: 'POST',
-                        headers: Object.assign({'Content-Type': 'application/json'},
-                                               window.bearerHeader ? window.bearerHeader() : {}),
-                        body: JSON.stringify({path: data.dest_dir})
-                    }).catch(e => console.error(e));
-                }
-            });
+            // transcribe_progress／transcribe_done 只掛一次（上面 317／342 那份）；這裡原本又掛了一份，每個事件跑兩次
         }
         window.setupSocket = setupSocket;
 
@@ -818,6 +783,11 @@ import './js/app/remote-dispatch.js';
             }
             const _section = document.getElementById(tabId);
             if (!_section) return; // unknown/orphan tabId (e.g. a granted-but-pageless module) — no-op
+            if (!_isNavigable(tabId)) {     // 沒權限的分頁（別頁程式直接叫 switchTab）：不要留一片「載入中…」的空白
+                _section.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">${tabLoadError(403)}</div>`;
+                _section.classList.remove('hidden');
+                return;
+            }
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
             _section.classList.remove('hidden');
             // 第一次切到這頁：現在才載（html + js + init）。fresh＝這次真的載進來了（載過的回 false）

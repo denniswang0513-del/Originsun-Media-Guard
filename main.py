@@ -104,7 +104,9 @@ class NoCacheMiddleware:
                 # 開頁少下載 ~1.5 MB、發版換檔 ETag 就變（owner 2026-09-03「存取都有點慢」）；
                 # 沒驗證器的 JSON／串流 no-cache 只會退化成每次全抓 → no-store。middleware 不認得任何路徑。
                 if method == "GET" and not any(k.lower() == b"cache-control" for k, _ in headers):
-                    if any(k.lower() in (b"etag", b"last-modified") for k, _ in headers):
+                    if scope.get("path", "").startswith("/uploads/"):
+                        headers.append((b"cache-control", NO_STORE_B))     # 收據／發票影像：不留任何快取副本（同 core.no_store）
+                    elif any(k.lower() in (b"etag", b"last-modified") for k, _ in headers):
                         headers.append((b"cache-control", b"no-cache"))
                     else:
                         headers.append((b"cache-control", NO_STORE_B))
@@ -401,7 +403,8 @@ _self_heal_scheduled_task()
 
 @app.on_event("startup")
 async def _on_startup():
-    # 開機 migration 的 SQL 全部住在 db/migrations.py（只有資料，沒有控制流程）
+    # 開機 migration 的 SQL：索引／CREATE TABLE 類住 db/migrations.py（只有資料）；ADD COLUMN 清單 _crm_cols 仍在本檔下面
+    # （兩處都要看；加欄位就在對應清單末端補一行）
     from db import migrations as _MIG
     _loop = asyncio.get_running_loop()
     state.set_main_loop(_loop)
@@ -578,6 +581,7 @@ async def _on_startup():
                         ("timesheets", "stage_name", "VARCHAR(64)"),
                         ("timesheets", "bulletin_id", "VARCHAR(32)"),
                         # 我的一天格子的起／訖（owner 2026-09-06：重新整理不能消失）
+                        ("timesheets", "sheet_key", "VARCHAR(255)"),
                         ("timesheets", "start_time", "VARCHAR(5)"),
                         ("timesheets", "end_time", "VARCHAR(5)"),
                         # 週記草稿→送出（§13）＋ 條目掛案子／求助標記（§2-B3／B4）；journal_replies 新表由 create_all 建

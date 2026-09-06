@@ -631,10 +631,18 @@ def main():
     import importlib.util
     _has_ruff = importlib.util.find_spec("ruff") is not None
     if _has_ruff:
-        l_result = subprocess.run(
-            [sys.executable, "-m", "ruff", "check", "."],
-            capture_output=True, text=True, timeout=120, cwd=_repo,
-        )
+        try:
+            l_result = subprocess.run(
+                [sys.executable, "-m", "ruff", "check", "."],
+                capture_output=True, text=True, timeout=120, cwd=_repo,
+            )
+        except subprocess.TimeoutExpired:
+            print("\n[ERROR] ruff 逾時（120s），不允許發布")
+            v_data["version"] = current_version
+            atomic_json_write(VERSION_FILE, v_data)
+            sync_docs_version(current_version)
+            print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+            return 1
         if l_result.returncode != 0:
             print("\n[ERROR] lint 未過！不允許發布（CI 也會擋）：")
             print((l_result.stdout or l_result.stderr or "")[-2000:])

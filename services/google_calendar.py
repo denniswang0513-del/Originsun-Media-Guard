@@ -84,6 +84,17 @@ def upsert_event(sa: dict, cal_id: str, event_id: str | None, body: dict) -> tup
             except RuntimeError as e:
                 if " 404" not in str(e) and " 410" not in str(e):
                     raise
+        # 沒 event_id 先用 extendedProperties 找同一場的舊事件（上次 insert 成功但我們這邊 commit 失敗），有就 PATCH，別長第二個
+        try:
+            key = ((body.get("extendedProperties") or {}).get("private") or {}).get("originsun_shoot_id")
+            if key:
+                found = _request("GET", _events_url(cal_id) + "?privateExtendedProperty=originsun_shoot_id%3D" + str(key) + "&maxResults=1", sa)
+                items = (found or {}).get("items") or []
+                if items and items[0].get("id"):
+                    got = _request("PATCH", _events_url(cal_id, items[0]["id"]), sa, body)
+                    return got.get("id") or items[0]["id"], ""
+        except Exception:
+            pass                                    # 找不到就照常 insert
         got = _request("POST", _events_url(cal_id), sa, body)
         return got.get("id"), ""
     except Exception as e:

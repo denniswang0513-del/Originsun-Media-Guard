@@ -204,6 +204,10 @@ async def _shoot_or_404(session, sid: str):
     s = (await session.execute(select(CrmShoot).where(CrmShoot.id == sid))).scalars().first()
     if not s:
         raise HTTPException(status_code=404, detail="找不到這場拍攝")
+    # 專案後來被推到私帳：場次對所有人都消失（同清單／建立時的 not_mine 規則；by-id 也不能繞）
+    if s.project_id and (await session.execute(
+            select(CrmProject.id).where(CrmProject.id == s.project_id, not_mine(CrmProject.entity)))).scalar() is None:
+        raise HTTPException(status_code=404, detail="找不到這場拍攝")
     return s
 
 

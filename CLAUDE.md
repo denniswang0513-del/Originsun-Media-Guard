@@ -552,12 +552,13 @@ def _emit_sync(event: str, data: dict) -> None:
 
 ### 5.6 RBAC + Google OAuth 認證系統
 
-- **雙寫架構**：使用者資料同時存 `users.json`（JSON 檔）和 PostgreSQL（`db/models.py`，NAS 上的 mediaguard 庫）。
+- **雙寫架構**：使用者資料同時存 `users.json`（JSON 檔）和 PostgreSQL（`db/models/` 套件，NAS 上的 mediaguard 庫）。
   每次修改必須呼叫 `_persist_user(user_data)` 統一寫入，不可分開呼叫 `sync_user_to_json` + `_save_user_to_db`。
 - **Google OAuth 使用 GIS Credential 模式**：不需 client_secret，不需 redirect URI。
   前端載入 `accounts.google.com/gsi/client`，Google 返回 ID Token JWT，後端用 `google-auth` 庫驗證。
 - **DB Migration**：`main.py` startup 用 `ALTER TABLE users ADD COLUMN IF NOT EXISTS` 加欄位，
-  不另建 migration 檔案。新增欄位時加在同一個迴圈裡。
+  🔴 2026-09 起分兩處：`db/migrations.py` 的清單（CRM_INDEXES 等，只有資料）＋ `main.py` startup 的 `_crm_cols`
+  （ADD COLUMN IF NOT EXISTS 清單，本週新欄位都加在這裡）。加欄位時在對應清單末端補一行，兩邊都要看。
 - **`_find_user_by(column, value)`**：統一的使用者查找函式，支援 DB 和 JSON fallback。
   不要再新增 `_find_user_by_xxx` 單獨函式。
 - **前端登入成功統一用 `_onLoginSuccess(d)`**，不要在密碼和 Google 兩條路徑各寫一次。
@@ -809,7 +810,7 @@ CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 **RBAC 模組**：`crm_clients`, `crm_projects`, `crm_quotes`, `crm_staff`, `crm_invoices`
 
 **新增 CRM 功能 checklist**：
-1. DB Model → `db/models.py`（新欄位需在 `main.py` startup 加 `ALTER TABLE ADD COLUMN IF NOT EXISTS`）
+1. DB Model → `db/models/`（`_crm.py`／`_workos.py`／`_system.py`；新欄位需在 `main.py` startup 的 `_crm_cols` 加 `ALTER TABLE ADD COLUMN IF NOT EXISTS`）
 2. Schema → `core/schemas.py`
 3. API → `routers/crm/<領域>.py`（共用 helper 進 `_shared.py`；純錢流判定進 `core/crm_logic.py` 並加單元測試）
 4. 前端 → `frontend/tabs/crm/` 對應 `.html` + `.js`
@@ -1082,8 +1083,8 @@ e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe -m py_compile <modified_fi
 **Bash 那側用 `wc -l` 即可**（它數 `\n`，沒有這兩個問題）。
 
 需要全貌時產生即時清單（破千行檔案，2026-08-30 用對的量法重數是 30 個；
-超過 2,000 硬上限的 5 個：app.js 2,659 / core_engine.py 2,309 /
-finance/subviews/recon.js 2,253 / db/models.py 2,121 / crm-cashbook.js 2,012）：
+2026-09-03 app.js 已拆到 ~1,000 行、db/models.py 已拆成套件；剩下仍超過 2,000 硬上限的：core_engine.py、
+finance/subviews/recon.js、crm-cashbook.js —— 以 `tests/unit/test_files_stay_readable.py` 的現值為準）：
 
 ```powershell
 Get-ChildItem -Recurse -Include *.py,*.js -Exclude node_modules |

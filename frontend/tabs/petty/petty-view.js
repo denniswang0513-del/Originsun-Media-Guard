@@ -301,6 +301,8 @@ export async function renderMine(host) {
         const projLabel = host.querySelector("#f-proj").value.trim();
         const projId = projLabel ? (formIdOfLabel[projLabel] || null) : null;
         if (projLabel && !projId) { msg.textContent = "專案對不上，請從清單挑選"; return; }
+        const typedItem = host.querySelector("#f-item").value.trim();
+        if (typedItem && !(host._itemRows || []).some((r) => r.name === typedItem)) { msg.textContent = "項目「" + typedItem + "」不在清單裡，請從清單挑選"; return; }
         btn.disabled = true; msg.textContent = "送出中…";
         try {
             const r = await send("POST", _base() + "/expenses", {
@@ -758,6 +760,8 @@ export async function renderOverview(host) {
         const nProjText = host.querySelector("#n-proj").value.trim();
         const nProjId = nProjText ? (idOfLabel[nProjText] || null) : null;
         if (nProjText && !nProjId) { alert("找不到專案「" + nProjText + "」，請從清單挑一個，或清空表示不歸專案。"); return; }
+        const nItem = host.querySelector("#n-item").value.trim();
+        if (nItem && !ITEM_SET.has(nItem)) { alert("項目「" + nItem + "」不在清單裡，請從清單挑一個。"); return; }
         nAdd.disabled = true;
         try {
             const r = await send("POST", `/api/v1/crm/petty/staff/${encodeURIComponent(staffId)}/expenses`, {

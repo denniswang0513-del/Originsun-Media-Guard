@@ -29,6 +29,7 @@ class Timesheet(Base):
     stage_id = Column(String(32), nullable=True)                 # soft FK → work_stage_nodes.id（該列分類底下的階段）
     stage_name = Column(String(64), nullable=True)               # 鏡射（報表／Sheet 匯出／週記自動區）；只由 timesheet_self.set_stage 寫
     bulletin_id = Column(String(32), nullable=True)              # 從待辦帶入的那筆公布欄項目；標成實際＝待辦 done
+    sheet_key = Column(String(255), nullable=True)               # Sheet 列被總表改鍵欄位（人／日／案）前的原鍵；拉取比對衝突用它
     start_time = Column(String(5), nullable=True)                # 起「HH:MM」（我的一天格子填的；時數由前端從起訖算）
     end_time = Column(String(5), nullable=True)                  # 訖「HH:MM」
     edited_at = Column(DateTime(timezone=True), nullable=True)   # 總表改過（管理員）；Sheet 同格之後再變＝記衝突不自動蓋

@@ -329,9 +329,17 @@ async function loadList() {
     const box = F('list');
     if (!_rows.length) box.innerHTML = skeleton(3);
     try {
-        const qs = new URLSearchParams({ from: addDays(todayLocal(), -PAST_DAYS), limit: '300', offset: '0' });
-        const d = await mfetch(`${API}?${qs}`);
-        _rows = d.shoots || [];
+        // 後端一頁最多 200：分頁抓到齊（旺季 60 天窗超過 200 場時，被切掉的是最後面＝未來的場次）
+        const rows = [];
+        for (let offset = 0, page = 0; page < 10; page++) {
+            const qs = new URLSearchParams({ from: addDays(todayLocal(), -PAST_DAYS), limit: '200', offset: String(offset) });
+            const d = await mfetch(`${API}?${qs}`);
+            const got = d.shoots || [];
+            rows.push(...got);
+            offset += got.length;
+            if (got.length < 200 || (d.total != null && rows.length >= d.total)) break;
+        }
+        _rows = rows;
         drawList();
     } catch (e) { box.innerHTML = errBox(e); }
 }

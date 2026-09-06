@@ -37,10 +37,8 @@ async def list_conflicts(session) -> list:
     out = []
     for c in rows:
         r = await session.get(Timesheet, c.row_id)
-        if r is None:                        # 總表那列後來被刪了：沒東西可比，Sheet 版本也不該再進來
-            await add_tombstone(session, c.incoming_hash, "system", staff_name=c.incoming.get("staff", ""),
-                                project_name=c.incoming.get("project", ""), hours=c.incoming.get("hours", 0))
-            c.resolution, c.resolved_at, c.resolved_by = "orphan", datetime.now(timezone.utc), "system"
+        if r is None:                        # 總表那列後來被刪了：沒東西可比 → 衝突作廢（不種指紋：Sheet 的新版本下次照一般拉取進來，要不要留由總表決定）
+            await session.delete(c)
             continue
         out.append({"id": c.id, "created_at": c.created_at.isoformat() if c.created_at else None,
                     "mine": ts_dict(r, with_note=True), "sheet": _sheet_view(c.incoming or {})})
@@ -68,8 +66,15 @@ async def resolve_conflict(session, cid: str, choice: str, who: str) -> dict:
         pname = (inc.get("project") or "").strip()
         pid, _why = resolve_project(pname, await load_project_lookup(session))
         r.work_date = parse_date(inc.get("date", "")) or r.work_date
-        r.staff_name = (inc.get("staff") or "").strip() or r.staff_name
+        new_staff = (inc.get("staff") or "").strip()
+        if new_staff and new_staff != (r.staff_name or ""):
+            from core.hr_logic import resolve_staff
+            from services.timesheet_lookup import load_staff_index
+            r.staff_name = new_staff
+            r.staff_id, _swhy = resolve_staff(new_staff, await load_staff_index(session))   # 人換了 id 要跟著換
         r.project_id, r.project_name = pid, pname
+        from core.hr_logic import manual_dup_key
+        r.sheet_key = manual_dup_key(r.staff_name, r.work_date, r.project_name)
         r.task_note = (inc.get("task") or "").strip() or None
         r.hours = float(inc.get("hours") or 0)
         r.row_hash = c.incoming_hash              # 之後這個 Sheet 版本就是「已有」
@@ -77,7 +82,10 @@ async def resolve_conflict(session, cid: str, choice: str, who: str) -> dict:
     else:                                          # keep_both：照一般拉取插進來（不看衝突鍵，不然又記一次）
         ctx = await ingest_context(session, [inc.get("staff", "")])
         ctx["edited_keys"], ctx["conflict_hashes"], ctx["tombstones"] = {}, set(), set()
-        await ingest(session, [TimesheetRow(**{k: inc.get(k, "") for k in ("date", "staff", "project", "task")}, hours=float(inc.get("hours") or 0))], "sheet", ctx)
+        res = await ingest(session, [TimesheetRow(**{k: inc.get(k, "") for k in ("date", "staff", "project", "task")}, hours=float(inc.get("hours") or 0))], "sheet", ctx)
+        if not (res or {}).get("inserted"):
+            why = "已有同人同日同案的手填列（手填優先）" if (res or {}).get("skipped_manual_priority") else "這一版已經在總表裡了"
+            raise HTTPException(status_code=409, detail=f"Sheet 版本沒有插進來：{why}")
         c = await session.get(TimesheetConflict, cid)   # ingest commit 過，重抓
     c.resolution, c.resolved_at, c.resolved_by = choice, datetime.now(timezone.utc), who or None
     await session.commit()

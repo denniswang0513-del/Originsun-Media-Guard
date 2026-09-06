@@ -257,25 +257,30 @@ async def backfill_category_map_entity(session_factory) -> int:
 
     from db.models import FinanceCategoryMap
 
+    from config import load_settings, save_settings
+    if (load_settings().get("finance") or {}).get("category_map_entity_backfilled"):
+        return 0                          # 跑過一次就不再跑（不然使用者手動改判給另一本帳的對映，下次開機被改回去）
+    def _mark_done():
+        s = load_settings()
+        s.setdefault("finance", {})["category_map_entity_backfilled"] = True
+        save_settings(s)
     async with session_factory() as session:
-        done = (await session.execute(
-            select(FinanceCategoryMap.id)
-            .where(FinanceCategoryMap.entity == "mine").limit(1))).scalar()
-        if done:
-            return 0
         from routers.crm._shared import ledger_category_domain
         mine = await ledger_category_domain(session, "mine")
         if not mine:
-            return 0                      # 分類樹還沒種好 —— 下次開機再說
+            return 0                      # 分類樹還沒種好 —— 下次開機再說（旗標不設）
+        # 以前的 sentinel 是「任一列已經是 mine」：使用者手動先加一列私帳對映，backfill 就永遠不跑 → 改用 settings 旗標
         rows = (await session.execute(
             select(FinanceCategoryMap)
             .where(FinanceCategoryMap.source == "cash"))).scalars().all()
         ids = [r.id for r in rows if r.category_text in mine]
         if not ids:
+            _mark_done()                  # 沒東西要搬也算跑過
             return 0
         await session.execute(
             update(FinanceCategoryMap)
             .where(FinanceCategoryMap.id.in_(ids)).values(entity="mine"))
         await session.commit()
         logger.info("[seed_finance] 科目對映帳本回填：%d 筆判給私帳", len(ids))
+        _mark_done()
         return len(ids)

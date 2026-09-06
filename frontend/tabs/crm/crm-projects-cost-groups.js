@@ -229,9 +229,11 @@ async function _openEditModal(gid = null) {
 
     const renderHint = () => _renderAllocHint(execBudget, allocatedOther);
     renderHint();
-    // 雜支預算預設＝預算 × 5%：沒手動改過（data-auto）就跟著預算跑；使用者一改就變手動
+    // 雜支預算留空＝交給後端用「專案雜支比」算預設（core.crm_logic.group_misc_default）；前端不再自己填 5%
+    //（之前一填就存成手動值，專案雜支比不是 5% 的案子整案口徑就漂掉）
     const bEl = document.getElementById('cg-f-budget_amount'), mEl = document.getElementById('cg-f-misc_budget_amount');
-    bEl.addEventListener('input', () => { if (mEl.dataset.auto) mEl.value = Math.round((parseInt(bEl.value) || 0) * 0.05) || ''; renderHint(); });
+    if (!mEl.value) mEl.placeholder = '空白＝預算 × 專案雜支比';
+    bEl.addEventListener('input', renderHint);
     mEl.addEventListener('input', () => { mEl.dataset.auto = ''; renderHint(); });
 
     document.getElementById('cg-f-receipt_path-pick').addEventListener('click', async () => {

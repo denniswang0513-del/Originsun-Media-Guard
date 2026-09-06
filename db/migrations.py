@@ -44,6 +44,9 @@ CRM_INDEXES = [
         "CREATE INDEX IF NOT EXISTS idx_payreq_payee ON crm_payment_requests(payee_name)",
         # 提案=專案合體：專案列表附掛提案子狀態的 scalar subquery 用
         "CREATE INDEX IF NOT EXISTS idx_pprop_project ON preprod_proposals(project_id, updated_at)",
+        # 工時：看板／總表／匯出都只用日期範圍過濾（staff_name,work_date 的複合索引吃不到）；場次器材預約查 shoot_id
+        "CREATE INDEX IF NOT EXISTS idx_ts_work_date ON timesheets(work_date)",
+        "CREATE INDEX IF NOT EXISTS ix_equipment_checkouts_shoot_id ON equipment_checkouts(shoot_id)",
         # §14 工作流的聚合查詢（EXPLAIN 實測補的四顆）：
         # ① timesheets 用名稱對映那一臂原本是 Seq Scan，而「查不到」
         #    才是年輕專案的常態 —— 也就是每次開進度分頁都掃全表

@@ -1473,7 +1473,7 @@ def _cost_group_to_dict(g, summary: Optional[dict] = None, misc_pct: int = 5) ->
         "misc_budget_effective": g.misc_budget_amount if g.misc_budget_amount is not None else misc_default,
         "profit_target_pct": g.profit_target_pct,
         "receipt_path": g.receipt_path or "",
-        "total_budget": total_budget if g.budget_amount is not None else None,      # 只設雜支不算「有預算」（別畫 $0／剩餘負數）
+        "total_budget": total_budget if g.budget_amount else None,      # 只設雜支、或預算 0 都不算「有預算」（同 misc_budget_total_of；別畫 $0／剩餘負數）
         "created_at": g.created_at.isoformat() if g.created_at else None,
         "updated_at": g.updated_at.isoformat() if g.updated_at else None,
     }

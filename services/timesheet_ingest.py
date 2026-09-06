@@ -39,10 +39,14 @@ async def ingest_context(session, staff_names) -> dict:
     names = {n for n in ((s or "").strip() for s in staff_names) if n}
     tombstones = set((await session.execute(select(TimesheetTombstone.row_hash))).scalars())   # 總表刪過的 Sheet 列
     # 總表改過的 Sheet 列（同人同日同案鍵 → 列 id）：Sheet 那格之後又變＝衝突，等人選，不自動插／蓋
+    # 鍵＝改鍵欄位前記下的 sheet_key（沒有就現值）；同鍵可能好幾列（一人一天一案多條），存成 list，配對時看內容
     edited = (await session.execute(
-        select(Timesheet.id, Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name)
+        select(Timesheet.id, Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name,
+               Timesheet.sheet_key, Timesheet.task_note, Timesheet.hours)
         .where(Timesheet.source != "manual").where(Timesheet.edited_at.isnot(None)))).all()
-    edited_keys = {manual_dup_key(n, d, p): rid for rid, n, d, p in edited}
+    edited_keys: dict = {}
+    for rid, n, d, p, sk, task, hrs in edited:
+        edited_keys.setdefault(sk or manual_dup_key(n, d, p), []).append((rid, (task or "").strip(), float(hrs or 0)))
     conflict_hashes = set((await session.execute(select(TimesheetConflict.incoming_hash))).scalars())   # 記過的不重記
     manual_keys: set = set()
     if names:
@@ -53,6 +57,25 @@ async def ingest_context(session, staff_names) -> dict:
     return {"lk": await load_project_lookup(session), "staff_index": await load_staff_index(session),
             "manual_keys": manual_keys, "tombstones": tombstones,
             "edited_keys": edited_keys, "conflict_hashes": conflict_hashes}
+
+
+def _match_edited(cands, r):
+    """同（人,日,案）鍵底下總表改過的列 → 哪一列是這條 Sheet 新版的「同一列」：內容（做了什麼）相同優先，
+    其次時數相同；都對不上就不是同一列（一人一天一案本來就可以好幾條），照一般插入。"""
+    if not cands:
+        return None
+    task = (getattr(r, "task", "") or "").strip()
+    try:
+        hrs = float(getattr(r, "hours", 0) or 0)
+    except (TypeError, ValueError):
+        hrs = 0.0
+    for rid, t, h in cands:
+        if task and t == task:
+            return rid
+    for rid, t, h in cands:
+        if abs(h - hrs) < 1e-6:
+            return rid
+    return None
 
 
 async def ingest(session, rows, source: str, ctx: dict | None = None) -> dict:
@@ -98,7 +121,7 @@ async def ingest(session, rows, source: str, ctx: dict | None = None) -> dict:
         if h in conflict_hashes:                 # 這個 Sheet 版本已經記過衝突（待決或已決）
             skipped_conflict += 1
             continue
-        rid = edited_keys.get(manual_dup_key(r.staff, wd, r.project))
+        rid = _match_edited(edited_keys.get(manual_dup_key(r.staff, wd, r.project)), r)
         if rid:                                  # 總表改過的同一列，Sheet 那格之後又變了 → 記衝突等 owner 選
             from db.models import TimesheetConflict
             session.add(TimesheetConflict(id=uuid.uuid4().hex, row_id=rid, incoming_hash=h,
