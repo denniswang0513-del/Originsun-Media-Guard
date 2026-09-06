@@ -85,6 +85,27 @@ def test_page_modules_have_no_hardcoded_vocab():
         assert not hit, f"{p.relative_to(M)} 寫死了字彙 {hit}"
 
 
+def test_quote_amounts_come_from_the_shared_leaf():
+    """報價的稅額／小計跟後端 _calc_quotation 同一份規則（js/shared/quote-amounts.js）：
+    手機開報價單時畫面上的數字，要跟存進去的一樣。"""
+    src = js_code_only(repo_src("frontend/m/views/quotes.js"))
+    assert "from '/js/shared/quote-amounts.js'" in src
+    assert "quoteTotals(" in src and "Math.floor" not in src, "手機頁自己算稅"
+    leaf = js_code_only(repo_src("frontend/js/shared/quote-amounts.js"))
+    assert "import" not in leaf, "quote-amounts.js 必須是零 import 的葉節點（手機頁要吃）"
+    desk = js_code_only(repo_src("frontend/tabs/crm/crm-quotes.js"))
+    assert "quoteTotals(" in desk and "parsePaymentStages(" in desk, "桌機也要用同一份，別各算各的"
+
+
+def test_mobile_quote_form_writes_through_the_desktop_endpoints():
+    """開報價單／編輯打的是桌機那兩支（POST /projects/{id}/quotations、PUT /quotations/{id}），
+    不另開手機專用寫入端點；入口只給管理員（那兩支的守衛是 _check_auth＝管理員限定）。"""
+    src = js_code_only(repo_src("frontend/m/views/quotes.js"))
+    assert "/quotations`, { method: 'POST'" in src and "method: 'PUT'" in src
+    assert "isAdmin() ?" in src and "data-edit=" in src
+    assert "openSheet(" in src and "closeSheet()" in src
+
+
 def test_invoice_is_a_request_to_issue():
     """owner 2026-09-03：手機登記的一定是請款發票、還沒開——方向與狀態從 options 取（第一個方向、
     第二個狀態），不送發票號碼（後端給未開立）；送出後有可複製的通知；專案必選。"""

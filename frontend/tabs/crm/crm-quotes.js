@@ -2,6 +2,7 @@
  * crm-quotes.js — 報價管理 Tab
  */
 
+import { quoteTotals, parsePaymentStages, paymentStagesToText } from '../../js/shared/quote-amounts.js';
 import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, quotePdfFilename } from './crm-utils.js';
 import { authDownload } from '../../js/shared/utils.js';
 
@@ -281,18 +282,18 @@ function _renderItemRows() {
 }
 
 function _recalcTotals() {
-    const subtotal = _itemRows.reduce((s, it) => s + (it.quantity * it.unit_price), 0);
-    const costTotal = _itemRows.reduce((s, it) => s + ((it.internal_cost || 0) * (it.quantity || 1)), 0);
-    const discount = parseInt(document.getElementById('quote-f-discount')?.value) || 0;
+    // 金額規則跟後端 _calc_quotation 同一份（js/shared/quote-amounts.js）；成本／利潤率是桌機獨有
     const taxRate = parseInt(document.getElementById('quote-f-tax_rate')?.value) || 0;
-    const taxable = Math.max(subtotal - discount, 0);
-    const taxAmount = Math.floor(taxable * taxRate / 100);
-    const total = taxable + taxAmount;
+    const { subtotal, tax, total } = quoteTotals({
+        items: _itemRows, taxRate,
+        discount: document.getElementById('quote-f-discount')?.value,
+    });
+    const costTotal = _itemRows.reduce((s, it) => s + ((it.internal_cost || 0) * (it.quantity || 1)), 0);
     const profitRate = subtotal > 0 ? Math.round((subtotal - costTotal) / subtotal * 100) : 0;
 
     document.getElementById('quote-calc-subtotal').textContent = '$' + _fmtNum(subtotal);
     document.getElementById('quote-calc-tax-pct').textContent = taxRate;
-    document.getElementById('quote-calc-tax').textContent = '$' + _fmtNum(taxAmount);
+    document.getElementById('quote-calc-tax').textContent = '$' + _fmtNum(tax);
     document.getElementById('quote-calc-total').textContent = '$' + _fmtNum(total);
 
     const costEl = document.getElementById('quote-calc-cost');
@@ -371,18 +372,6 @@ function _populateClientFilter() {
     populateClientSelect('quote-filter-client', _clients);
 }
 
-function _parsePaymentStages(text) {
-    if (!text) return [];
-    return text.split(/[,，\/]/).map(s => {
-        const m = s.trim().match(/^(.+?)\s*(\d+)%?$/);
-        return m ? { label: m[1].trim(), pct: parseInt(m[2]) } : null;
-    }).filter(Boolean);
-}
-
-function _paymentStagesToText(stages) {
-    return (stages || []).map(s => `${s.label} ${s.pct}%`).join(', ');
-}
-
 async function openModal(quotation = null, projectId = null) {
     _editingId = quotation ? quotation.id : null;
     _editingProjectId = projectId;
@@ -401,7 +390,7 @@ async function openModal(quotation = null, projectId = null) {
     document.getElementById('quote-f-tax_rate').value = q.tax_rate ?? 5;
     document.getElementById('quote-f-discount').value = q.discount || 0;
     document.getElementById('quote-f-final_price').value = q.final_price ?? '';
-    document.getElementById('quote-f-payment_stages').value = _paymentStagesToText(q.payment_stages);
+    document.getElementById('quote-f-payment_stages').value = paymentStagesToText(q.payment_stages);
     document.getElementById('quote-f-terms').value = q.terms || '';
     document.getElementById('quote-f-spec').value = q.spec || '';
     document.getElementById('quote-f-template').value = '';
@@ -426,7 +415,7 @@ async function saveQuotation() {
         tax_rate: parseInt(document.getElementById('quote-f-tax_rate').value) || 5,
         discount: parseInt(document.getElementById('quote-f-discount').value) || 0,
         final_price: document.getElementById('quote-f-final_price').value ? parseInt(document.getElementById('quote-f-final_price').value) : null,
-        payment_stages: _parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
+        payment_stages: parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
         terms: document.getElementById('quote-f-terms').value,
         spec: document.getElementById('quote-f-spec').value.trim(),
         items: _itemRows.filter(it => it.description).map(it => ({
@@ -481,7 +470,7 @@ function _applyTemplate(templateId) {
     _renderItemRows();
     document.getElementById('quote-f-tax_rate').value = t.tax_rate ?? 5;
     document.getElementById('quote-f-terms').value = t.terms || '';
-    document.getElementById('quote-f-payment_stages').value = _paymentStagesToText(t.payment_stages);
+    document.getElementById('quote-f-payment_stages').value = paymentStagesToText(t.payment_stages);
     _recalcTotals();
 }
 
@@ -518,7 +507,7 @@ function _saveCurrentAsTemplate(name) {
         name, items: _itemRows.filter(it => it.description),
         tax_rate: parseInt(document.getElementById('quote-f-tax_rate').value) || 5,
         terms: document.getElementById('quote-f-terms').value,
-        payment_stages: _parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
+        payment_stages: parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
     });
 }
 
