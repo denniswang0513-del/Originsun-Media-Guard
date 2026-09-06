@@ -30,7 +30,7 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 normalize_invoice_status, passthrough_commission)
 from core.auth import check_logged_in
 from core.project_link import invoice_project_ids as _inv_pids, normalize_invoice_projects as _norm_inv_projects
-from core.ledger import (require_entity, is_mine, hide_mine_projects, mine_project_ids)
+from core.ledger import (require_entity, hide_mine_projects, mine_project_ids)
 from core.auth import _extract_token
 from core.schemas import (InvoicePayload)
 
@@ -761,7 +761,7 @@ async def invoice_candidates(project_id: str, request: Request, q: str = ""):
         same_title = bool(title) and (x.company_name or "") == title
         hit_name = bool(pname) and pname[:6] in (x.title or "")
         score = (2 if (same_title and hit_name) else 1 if same_title else 0)
-        in_project = project_id in invoice_project_ids(x.project_id, x.project_ids)
+        in_project = project_id in _inv_pids(x.project_id, x.project_ids)
         if kw and kw not in ((x.invoice_number or "") + (x.title or "")
                              + (x.company_name or "")).lower():
             continue

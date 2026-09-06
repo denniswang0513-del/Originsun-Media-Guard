@@ -17,7 +17,7 @@ import { dayMark as _dayMark } from '../../js/shared/tw-calendar.js';
 // 私帳 405 個專案塞原生下拉等於沒得選）。共用件，別在這裡再刻一份。
 import { openInvoicePicker, openPaymentPicker, openProjectPicker,
          paymentHay, paymentLabel } from '../../js/shared/project-picker.js';
-import { splitBadgeHtml, splitGross } from '../../js/shared/cash-split-editor.js';
+import { openCashSplitEditor, splitBadgeHtml, splitGross } from '../../js/shared/cash-split-editor.js';
 import { indexTax as _indexTaxShared, taxKidsAt as _kidsAt, taxSelects }
     from '../../js/shared/cash-tax-picker.js';
 
@@ -753,7 +753,6 @@ function _splitMenu(e) {
 window._cashSplitOpen = async (id) => {
     const e = _entries.find((x) => x.id === id);
     if (!e) { return; }
-    const { openCashSplitEditor } = await import('../../js/shared/cash-split-editor.js');
     openCashSplitEditor({
         entity: _pinEntity(),
         amount: (e.deposit || 0) || (e.expense || 0),
@@ -1009,9 +1008,8 @@ function _rowHtml(e) {
             <div class="cash-col-card cash-c-card" style="color:#c4b5fd;">${card ? '$' + _fmtNum(card) : ''}</div>
             <div class="cash-c-expense" style="color:#fca5a5;">${out ? '$' + _fmtNum(out) : ''}</div>
             ${/* 🔴 拆項列一樣要吐**三個**格子（分類/項目/子項目各一）：這個列表是
-                 flex，欄寬是 `nth-child(N)` 給的 —— `grid-column:span 3` 在 flex
-                 底下完全無效，少吐兩個節點就讓後面每一欄整排前移（銀行資訊跑到
-                 附註欄、專案名跑到銀行資訊欄，owner 2026-09-01 截圖）。
+                 flex，`grid-column:span 3` 無效，少吐節點後面每一欄整排前移
+                 （owner 2026-09-01 截圖）。欄寬綁 cash-c-<key> class，三格是為了對齊。
                  badge 放第一格、後兩格留白（badge 比 78px 寬一點，溢到空格上剛好）。*/ ''}
             ${e.split_count ? `
             <div class="cash-c-book" style="cursor:pointer;white-space:nowrap;" onclick="event.stopPropagation();window._cashSplitOpen('${e.id}')"
@@ -2007,7 +2005,7 @@ async function doImport() {
 
 // ── 欄位選擇（owner 2026-09-03：「一個編輯按鈕，讓我選擇哪一些欄要出現」）──
 //
-// 表頭與列的每一格都帶 cash-c-<key>；藏＝display:none（不抽節點：欄寬是 nth-child），
+// 表頭與列的每一格都帶 cash-c-<key>；藏＝display:none（欄寬綁 class，抽不抽節點都不會位移，藏最省事），
 // 規則寫進 #cash-col-style。選擇記在瀏覽器（localStorage），跟排序一樣是個人偏好。
 // 日期／內容固定不給藏；私帳沒有發票，發票欄預設藏（還是可以自己打開，只是空的）。
 const _COLS = [

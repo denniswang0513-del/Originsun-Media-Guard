@@ -79,7 +79,7 @@ def _day_or_422(day: str) -> datetime:
     d = _parse_date(day) if day else datetime.now()
     if d is None:
         raise HTTPException(status_code=422, detail=f"日期格式錯誤：{day}")
-    return d.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight_of(d)
 
 
 def _has_ts_module(request: Request) -> bool:
@@ -253,7 +253,7 @@ async def my_rows(request: Request, from_: str = Query("", alias="from"), to: st
     for label, raw in (("to", to), ("from", from_)):
         if (raw or "").strip() and parse_ymd(raw) is None:
             raise HTTPException(status_code=422, detail=f"{label} 日期格式錯誤：{raw}")
-    to_dt = (parse_ymd(to) or datetime.now()).replace(hour=0, minute=0, second=0, microsecond=0)
+    to_dt = midnight_of(parse_ymd(to) or datetime.now())
     from_dt = parse_ymd(from_) or (to_dt - timedelta(days=29))
     if from_dt > to_dt:
         raise HTTPException(status_code=422, detail="from 不能晚於 to")

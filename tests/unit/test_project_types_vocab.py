@@ -5,7 +5,6 @@
 CRM 專案表（GET /api/v1/crm/project-types）、私帳設定頁（api_finance margin）、工時 burn 表（api_timesheets）、
 手機版（api_crm_mobile options）。桌機下拉不准再自己讀 /api/settings/load 湊一份。
 """
-import re
 
 from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
 

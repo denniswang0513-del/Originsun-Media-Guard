@@ -42,7 +42,7 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
 from config import load_settings, save_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
-from core.finance_logic import (BOOKKEEPING_EXTRA_ON_MONTH,
+from core.finance_logic import (is_account_move, BOOKKEEPING_EXTRA_ON_MONTH,
                                 amortization_schedule,
                                 auto_match_statement_lines,
                                 bank_running_balance, cash_entry_flow,
@@ -211,7 +211,7 @@ async def list_transfer_pairs(request: Request, entity: str = ""):
        這種明細不在裡面。tests/unit/test_ledger_entity.py 會盯著 view 層的數量。
     """
     ent = _guard(request, entity or "parent", level="full")
-    from core.finance_logic import is_account_move, transfer_pairs
+    from core.finance_logic import transfer_pairs
     from services.finance_statements import _load_inputs
     factory = _factory_or_503()
     async with factory() as session:
@@ -255,8 +255,7 @@ async def recognize_transfer_fees_in(session, ent: str, only_ids=None,
        「支出 − 配對的存入」。2026-08-24 差點出事的第一版判準是「支出裡看起來
        有零頭就減掉」—— 那會把 37 筆早就拆好的歷史各再減 15（一路改到 2024 年）。
     """
-    from core.finance_logic import (is_account_move, recognize_bank_fee,
-                                    transfer_pairs)
+    from core.finance_logic import recognize_bank_fee, transfer_pairs
     from db.models import CrmCashEntry
     from services.finance_statements import _load_inputs
     inputs = await _load_inputs(session, entity=ent)

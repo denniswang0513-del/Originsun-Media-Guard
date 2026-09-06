@@ -39,7 +39,6 @@ const _openDelivery = (pid) => {
     return r;
 };
 import { loadProjectTypes } from './crm-projects-core.js';
-import { loadInvoicesTab } from './crm-projects-invoices.js';
 import { loadPayTab, loadClosingBanner } from './crm-projects-pay.js';
 import { loadCostGroups, renderGroupSwitcher, initCostGroupsHandlers } from './crm-projects-cost-groups.js';
 
@@ -56,7 +55,6 @@ function _reloadActiveDetailTab(projectId) {
     else if (tab === 'refs') _loadRefsTab(projectId);
     else if (tab === 'delivery') _openDelivery(projectId);
     else if (tab === 'team') loadPayTab(projectId);        // 收付款（人員配置＋發票併在一頁）
-    else if (tab === 'invoices') loadInvoicesTab(projectId);
     // info/finance 由 renderDetail 涵蓋、quotes 由 selectProject 的 loadQuotations 涵蓋
 }
 
@@ -355,8 +353,6 @@ export async function initCrmProjectsTab() {
             document.getElementById('proj-detail-team').classList.toggle('hidden', tab !== 'team');
             if (tab === 'quotes' && state.selectedId) { loadProjectQuotes(state.selectedId); }
             if (tab === 'team' && state.selectedId) { loadPayTab(state.selectedId); }
-            document.getElementById('proj-detail-invoices').classList.toggle('hidden', tab !== 'invoices');
-            if (tab === 'invoices' && state.selectedId) { loadInvoicesTab(state.selectedId); }
             document.getElementById('proj-detail-finance').classList.toggle('hidden', tab !== 'finance');
             document.getElementById('proj-detail-delivery').classList.toggle('hidden', tab !== 'delivery');
             if (tab === 'delivery' && state.selectedId) { _openDelivery(state.selectedId); }

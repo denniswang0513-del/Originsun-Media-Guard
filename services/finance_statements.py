@@ -188,7 +188,7 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
     equipment 是母公司域（plan §1.2）→ entity!='parent' 回空；科目表兩本共用。
     對映表只有 `source='cash'` 那批按帳本分家（2026-08-30），payment／invoice 共用。
     """
-    from sqlalchemy import or_, select
+    from sqlalchemy import select
     from db.models import (BankAccount, CrmCashEntry, CrmInvoice,
                            CrmPaymentRequest, Equipment, FinanceAccount,
                            FinanceAdjustment, FinanceCategoryMap, FinanceLoan,

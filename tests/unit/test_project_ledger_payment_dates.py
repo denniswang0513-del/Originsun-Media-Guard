@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """專案詳情的「應付／請款單」列要有請款日與付款日（owner 2026-09-04「新增付款與請款日期」）。"""
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import js_code_only, repo_src
 
 
 def test_project_ledger_detail_carries_both_dates_and_the_row_shows_them():

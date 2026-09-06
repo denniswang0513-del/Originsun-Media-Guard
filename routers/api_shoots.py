@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from core.auth import check_admin, check_admin_or_module, check_logged_in, payload_grants
+from core.auth import check_admin, check_logged_in, payload_grants
 from core.ledger import not_mine   # 手機版只看母公司案（同 api_crm_mobile._company_projects）：私帳案的場次不列、也不准建
 from core.hr_logic import day_iso, iso_ts, tw_day
 from routers.crm._shared import _check_project_write_auth, _parse_shoot_date

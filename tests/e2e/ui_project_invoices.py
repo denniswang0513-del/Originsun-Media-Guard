@@ -106,11 +106,11 @@ with sync_playwright() as p:
 
     print("")
     print("[2] 發票分頁打得開")
-    tab = pg.locator("#proj-detail-tabs .crm-tab[data-tab='invoices']")
+    tab = pg.locator("#proj-detail-tabs .crm-tab[data-tab='team']")
     check(tab.count() == 1, "分頁按鈕在", str(tab.count()))
     tab.click()
     pg.wait_for_timeout(3000)
-    host = pg.locator("#proj-detail-invoices")
+    host = pg.locator("#proj-pay-invoices")
     check(host.is_visible(), "分頁內容顯示了")
     txt = host.inner_text()
     for word in ("已開發票", "已收", "尚欠", "開發票"):
@@ -120,13 +120,13 @@ with sync_playwright() as p:
     check("300,000" in txt, "已收 300,000")
     check("100,000" in txt, "尚欠 100,000")
     check("還能開" in txt and "100,000" in txt, "還能開 100,000（合約 500,000 − 已開 400,000）")
-    rows = pg.locator("#proj-detail-invoices tbody tr").count()
+    rows = pg.locator("#proj-pay-invoices tbody tr").count()
     check(rows > 0, "發票清單有列", str(rows))
     check("帳務 → 發票" in txt, "有告訴人編輯要去哪一頁")
 
     print("")
     print("[3] 🔴 開發票視窗的預設值從專案與客戶帶過來")
-    pg.click("#proj-detail-invoices button:has-text('開發票')")
+    pg.click("#proj-pay-invoices button:has-text('開發票')")
     pg.wait_for_timeout(1500)
     check(pg.locator("#proj-inv-modal").is_visible(), "視窗開了")
     title = pg.input_value("#proj-inv-title")
@@ -167,10 +167,10 @@ with sync_playwright() as p:
 
     print("")
     print("[6] 🔴 換到另一個專案，分頁內容要跟著換")
-    before = pg.locator("#proj-detail-invoices").inner_text()[:400]
+    before = pg.locator("#proj-pay-invoices").inner_text()[:400]
     pg.evaluate("(id) => window._projSelect && window._projSelect(id)", OTHER_ID)
     pg.wait_for_timeout(3500)
-    after = pg.locator("#proj-detail-invoices").inner_text()
+    after = pg.locator("#proj-pay-invoices").inner_text()
     check(after[:400] != before, "內容換了（沒殘留上一案）")
     check("還沒有發票" in after, "另一個案子顯示「還沒有發票」", after[:60])
     check("400,000" not in after, "🔴 上一案的金額沒有殘留")

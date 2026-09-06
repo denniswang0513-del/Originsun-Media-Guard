@@ -21,7 +21,7 @@
  */
 import { esc } from './dom.js';
 import { authFetch } from './utils.js';
-import { indexTax, taxSelects } from './cash-tax-picker.js';
+import { indexTax, taxPick, taxSelects } from './cash-tax-picker.js';
 import { fmtNum } from '../../tabs/crm/crm-utils.js';   // modal-styles 同款先例：shared → crm-utils
 
 /** 一個收入拆項對**專案**的貢獻＝實匯淨額 ＋ 被扣走的代開費。
@@ -310,8 +310,7 @@ export async function openCashSplitEditor(o) {
                 blank: (lv) => (lv === 0 ? '（選分類）' : '（不細分）'),
                 keepOne: true,
                 onPick: (lv, v) => {
-                    const chain = byId[rows[i].taxonomy_node_id] || [];
-                    rows[i].taxonomy_node_id = v || (lv > 0 ? (chain[lv - 1] || {}).id || '' : '');
+                    rows[i].taxonomy_node_id = taxPick(byId, rows[i].taxonomy_node_id, lv, v).id;   // 「（不細分）＝停在上一層」只有 cash-tax-picker 一份
                     draw();
                 },
             });

@@ -3,8 +3,7 @@
 // main_history_list（備份頁）兩個容器；住在報表頁裡會逼備份頁為了一支函式把整個報表分頁載進來，
 // 而且沒有 report 權限的人清單永遠停在「NAS 尚無歷史報表紀錄」（/api/v1/reports/history 本身不擋）。
 // 清單裡的按鈕是 inline onclick → 三支都要掛在 window 上。
-import { getComputeBaseUrl } from './utils.js';
-import { copyText } from './utils.js';
+import { getComputeBaseUrl, copyText } from './utils.js';
 
 export async function loadReportHistory() {
     const listEls = [

@@ -1,10 +1,10 @@
 /**
  * crm-projects-finance.js — CRM 專案財務模組
- * 功能：cost staff loading, advances, payments, expenses, receipt browsing, share links
+ * 功能：payments, expenses, receipt browsing, share links（執行人員／預支款畫面在 crm-projects-pay.js）
  */
 
-import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum, moneyGate, today, groupCostStaff } from './crm-utils.js';
+import { state } from './crm-projects-state.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, today, groupCostStaff } from './crm-utils.js';
 import { loadProjectStaff } from '../proposals/staff-view.js';
 
 // ── Load Project Staff ──────────────────────────────────────────
@@ -20,12 +20,6 @@ async function _loadProjectStaff(projectId) {
         // 注入的話會確認兩次 —— 元件問一次、被注入的那支再問一次。
     });
 }
-
-// ── Load Cost Staff ─────────────────────────────────────────────
-
-
-// ── Load Advances ───────────────────────────────────────────────
-
 
 // ── Window Handlers ─────────────────────────────────────────────
 
@@ -247,7 +241,7 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
                 })
             });
             overlay.remove();
-            if (opts.onDone) { opts.onDone(); } else { _refreshPayIfOpen(); }
+            if (opts.onDone) { opts.onDone(); }
             _refreshPayIfOpen();
         } catch (e) {
             alert('建立失敗：' + e.message);

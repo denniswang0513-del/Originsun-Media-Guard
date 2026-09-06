@@ -336,7 +336,7 @@ _P.del = async (id) => {
 };
 
 /** 分頁入口。專案換了就整頁重畫（跟其他 lazy 分頁同一個約定）。 */
-let _hostId = 'proj-detail-invoices';
+let _hostId = 'proj-pay-invoices';   // 唯一的宿主：收付款分頁（舊的獨立發票分頁 2026-09-04 併掉了）
 export async function loadInvoicesTab(projectId, hostId, preloaded = null) {
     if (hostId) _hostId = hostId;            // 收付款分頁把發票嵌進 #proj-pay-invoices
     const host = document.getElementById(_hostId);

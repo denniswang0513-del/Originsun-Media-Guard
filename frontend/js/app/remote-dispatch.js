@@ -3,7 +3,7 @@
 // 派發（dispatchRemoteTranscode）、合併輸出＋合併後任務＋補跑缺檔。八個頁籤都只透過 window.* 呼叫，
 // 名字全部維持不變（tests/e2e/test_host_failover.py 釘著 startHeartbeatMonitor / _activeRemoteHosts）。
 // 回頭用到 app.js 的 updateActionBarState / playDing 一律走 window.（模組作用域看不到彼此）。
-import { resetProgress } from '../shared/utils.js';
+import { resetProgress, toUncPath as _toUnc } from '../shared/utils.js';
 import { loadReportHistory } from '../shared/report-history.js';
 
 // 派工時定住的 Proxy Root／案名：合併發生在幾分鐘後，發起派工的分頁不一定還在（分頁點到才載）。
@@ -14,7 +14,6 @@ const _destRoot = () => _dispatch.proxyRoot ? _dispatch.proxyRoot + '/' + _dispa
 // ===== Multi-host runtime (Steps 3-8) =====
 window._remoteDispatch = null;
 window._activeRemoteHosts = {};
-window._missingFiles = [];
 window._heartbeatTimer = null;
 window._remoteJobType = null;
 
@@ -170,7 +169,7 @@ async function reassignFromDeadHost(deadIp, info) {
         return false;
     }
 
-    const _unc = window.toUncPath || window._toUnc || (x => x);
+    const _unc = _toUnc;
     const destRoot = _destRoot();
     const slots = live.map(h => ({ host: h, byCard: {} }));
     outstanding.forEach((a, i) => {
@@ -564,8 +563,6 @@ async function dispatchRemoteTranscode(ctx) {
     // 前端這層是機隊 rollout 過渡的 belt-and-braces，機隊全數 ≥ 2.4.10 後
     // 可整批退場改以後端為唯一權威（勿只刪一半）。
     await window.ensureDriveMap();
-    const _toUnc = window.toUncPath || (x => x);
-    window._toUnc = _toUnc; // 保留給補轉邏輯的向後相容
     const mapCount = Object.keys(window._driveMap || {}).length;
     if (mapCount > 0) {
         appendLog('[UNC] 已載入 ' + mapCount + ' 個磁碟映射，來源與遠端路徑將自動轉換', 'system');
@@ -1081,7 +1078,7 @@ async function mergeHostOutputs() {
 
                         let requestsStarted = 0;
                         window._activeRemoteHosts = {}; // 重置，只追蹤補轉主機
-                        const _unc = window.toUncPath || window._toUnc || (x => x);
+                        const _unc = _toUnc;
                         for (const dist of distributions) {
                             const retryBase = _unc(_destRoot() + '/HostDispatch_Retry_'
                                                    + dist.host.name.replace(/\s+/g, '_'));

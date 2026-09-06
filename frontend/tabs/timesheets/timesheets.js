@@ -25,7 +25,7 @@ import { renderSheet, appendBlankRows, appendRow, dropEmptyRows, saveRowNow, rem
 import { dayLabel as _dayLabel, shiftDays, isPlan as _isPlan, hoursLabel as _hoursLabel, typeTag as _typeTag, projLink as _projLink,
          srcTag as _srcTag, dayLog as _dayLog, pctStyle as _pctStyle, createBurnSorter, burnTbodyHtml, burnTableHtml, burnTypeCellHtml,
          bars as _bars, projectFileHtml } from '../../js/shared/ts-projects.js';
-import { openStageEditor, stagesMapFrom } from '../../js/shared/stage-editor.js';
+import { openStageEditor } from '../../js/shared/stage-editor.js';
 
 
 let _content = null;
@@ -1061,8 +1061,8 @@ async function _onAction(btn) {
                 dropEmptyRows(host);
                 (_mineCache.yesterday || []).forEach(i => {
                     const tr = appendRow(host, { project: i.project_name, project_id: i.project_id, work_type: i.work_type, stage_id: i.stage_id, stage_name: i.stage_name,
-                                                 note: i.task_note, planned: i.planned_hours, hours: '' });
-                    if (tr) saveRowNow(host, tr);   // 有計畫的立刻存成今天的計畫
+                                                 note: i.task_note, hours: '' });
+                    if (tr) saveRowNow(host, tr);   // 時數空著存不了，但狀態格會提示「再填時數」
                 });
                 appendBlankRows(host);
                 return;

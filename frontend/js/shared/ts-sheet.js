@@ -5,7 +5,7 @@
  * （/my.html）都 import 這裡；列的 html、格線／列號／選到藍框的 CSS、鍵盤走列、
  * 起訖算小時、工作階段跟著分類走、逐列自動存，全部只有這一份（tests/unit/test_ts_shared_components.py 釘住）。
  *
- * 欄位：# | 專案 | 分類 | 工作階段 | 做了什麼 | 備註 | 起 | 訖 | 實際 h | 計畫 h | 狀態 | ×
+ * 欄位：# | 專案 | 分類 | 工作階段 | 做了什麼 | 備註 | 起 | 訖 | 時數 h | 狀態 | ×（計畫 h 欄 2026-09-06 拿掉）
  * - 專案格掛 project-pop（進行中／已結案浮層），選到的 id 記在 data-pid。
  * - 工作階段：select 只列「該列分類」的階段（opts.stages ＝ {分類名: [{id, name}]}，來自
  *   /timesheets/options 的 stages）；分類改了、原階段不在新清單 → 清空並在狀態格提示。
@@ -14,6 +14,7 @@
  * - 主題：CSS 變數 --sh-*，預設深色（SPA），白底頁在 table.ts-sheet 上覆寫變數即可。
  */
 import { esc, ensureStyle } from './dom.js';
+import { authFetch } from './utils.js';
 import { attachProjectPop } from './project-pop.js';
 
 export const SHEET_COLS = [
@@ -58,15 +59,10 @@ table.ts-sheet .ts-sheet-del button { background:none; border:none; color:var(--
 table.ts-sheet .ts-sheet-del button:hover { color:var(--sh-del-hover); }
 `;
 
-/** 帶 Bearer 的 JSON fetch（工作台頁沒有 tab 的 tfetch 時用這支；錯誤丟 Error(detail)）。 */
+/** JSON fetch：Bearer／Content-Type／stringify 交給 utils.authFetch（唯一正本），這裡只管
+ *  Accept 與「非 2xx 丟 Error(detail)」。工作追蹤分頁、階段編輯器、/my.html 都用這支。 */
 export async function tsFetch(path, opts = {}) {
-    const token = localStorage.getItem('auth_token');
-    const r = await fetch(path, {
-        method: opts.method || 'GET',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json',
-                   ...(token ? { 'Authorization': 'Bearer ' + token } : {}) },
-        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    });
+    const r = await authFetch(path, { ...opts, headers: { 'Accept': 'application/json', ...(opts.headers || {}) } });
     if (!r.ok) {
         const err = new Error((await r.json().catch(() => ({}))).detail || ('HTTP ' + r.status));
         err.status = r.status;
@@ -125,7 +121,7 @@ export function tableHtml(rowsHtml, id = 'ts-mine-add') {
 export function rowFromItem(i) {
     return { project: i.project_name, project_id: i.project_id, work_type: i.work_type, stage_id: i.stage_id, stage_name: i.stage_name,
              note: i.task_note, remark: i.remark, t0: i.start_time || '', t1: i.end_time || '',
-             planned: i.planned_hours, hours: i.hours || '', bulletin_id: i.bulletin_id };
+             hours: i.hours || '', bulletin_id: i.bulletin_id };
 }
 
 const _ctx = (host) => host._tsCtx || {};
@@ -185,7 +181,7 @@ export function rowValues(tr) {
         project: v('project').trim(), project_pid: (proj && proj.dataset.pid && v('project').trim() === proj.dataset.pname) ? proj.dataset.pid : '',
         work_type: v('type'), stage_id: v('stage'), stage_name: q('stage')?.selectedOptions?.[0]?.textContent || '',
         note: v('note'), remark: v('remark'), t0: v('t0'), t1: v('t1'),
-        hours: v('hours') ? parseFloat(v('hours')) : null, planned: v('planned') ? parseFloat(v('planned')) : null,
+        hours: v('hours') ? parseFloat(v('hours')) : null,
     };
 }
 

@@ -698,16 +698,7 @@ function renderActions(ws) {
     const items = [
         has("me_petty") && { label: "零用金", href: "/petty-cash.html" },
     ].filter(Boolean);
-    $("ws-actions").innerHTML = items.map(it => it.href
-        ? `<a class="act" href="${it.href}">${it.label}</a>`
-        : `<button type="button" class="act" onclick="scrollToCard('${it.card}')">${it.label}</button>`).join("");
-}
-/** 捲到某張卡（收合的先展開）。 */
-function scrollToCard(key) {
-    const card = document.querySelector(`.card[data-card="${key}"]`);
-    if (!card) return;
-    if (card.classList.contains("folded")) card.querySelector(".card-head").click();
-    card.scrollIntoView({ behavior: "smooth", block: "start" });
+    $("ws-actions").innerHTML = items.map(it => `<a class="act" href="${it.href}">${it.label}</a>`).join("");
 }
 
 // ── 第二區：上週回顧 —— 直接內嵌完整的 /journal.html（embed 模式；左＝我的上週回顧、右＝大家的回顧）──
@@ -1613,15 +1604,9 @@ async function loadTeamWeek() {
 // ── 視圖 3：專案查詢（工作追蹤「專案」表＋專案檔案，開放給員工，唯讀）──
 async function _loadFindRows() {
     if (_findRows) return _findRows;
-    // 契約：放寬後的 /timesheets/projects；它若還是薄清單（沒有 hours_used）就試 /summary，再不行就列薄清單
-    let rows = null;
-    // 員工端唯讀版（只有全案工時數字，沒金額、沒建議預算）；/timesheets/summary 仍守私帳 wall 給管理員
-    try { rows = (await mjson("/api/v1/me/projects_burn")).projects || []; } catch (_) { rows = null; }
-    if (!rows) { try { rows = (await mjson("/api/v1/timesheets/projects")).projects || []; } catch (_) { rows = null; } }
-    if (!rows || (rows.length && rows[0].hours_used === undefined)) {
-        try { rows = (await mjson("/api/v1/timesheets/summary")).projects || []; }
-        catch (_) { rows = (rows || []).map(p => ({ project_id: p.id, project_name: p.name, status: p.status || "", project_type: p.client || "", hours_used: "—", rows: "—", last_entry: "" })); }
-    }
+    // 員工端唯讀版（只有全案工時數字，沒金額、沒建議預算）；守衛跟這一區一樣是「有綁員工」，
+    // 失敗就讓 loadFind 的 catch 顯示原因（以前的 /timesheets/projects → /summary 三段備援已拿掉）
+    const rows = (await mjson("/api/v1/me/projects_burn")).projects || [];
     _findRows = rows;
     return rows;
 }

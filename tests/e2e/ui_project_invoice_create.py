@@ -124,11 +124,11 @@ with sync_playwright() as p:
     pg.wait_for_timeout(4000)
     pg.evaluate("(id) => window._projSelect && window._projSelect(id)", PID)
     pg.wait_for_timeout(2500)
-    pg.locator("#proj-detail-tabs .crm-tab[data-tab='invoices']").click()
+    pg.locator("#proj-detail-tabs .crm-tab[data-tab='team']").click()
     pg.wait_for_timeout(3000)
 
     print("[1] 從專案頁開一張票（含稅 166,950）")
-    pg.click("#proj-detail-invoices button:has-text('開發票')")
+    pg.click("#proj-pay-invoices button:has-text('開發票')")
     pg.wait_for_timeout(1500)
     pg.fill("#proj-inv-title", TAG + " 第一期款")
     # 申請人與品項（owner 2026-08-24：「這裡要可以填申請人跟品項」）——
@@ -169,7 +169,7 @@ with sync_playwright() as p:
 
     print("")
     print("[3] 專案頁的清單與摘要跟著更新")
-    txt = pg.locator("#proj-detail-invoices").inner_text()
+    txt = pg.locator("#proj-pay-invoices").inner_text()
     check(TAG + " 第一期款" in txt, "新的那張出現在清單裡")
     check("166,950" in txt, "已開發票 166,950")
     check("333,050" in txt, "還能開 333,050（500,000 − 166,950）", txt[:200])
@@ -216,12 +216,12 @@ with sync_playwright() as p:
     pg.wait_for_timeout(3000)
     pg.evaluate("(id) => window._projSelect && window._projSelect(id)", PID)
     pg.wait_for_timeout(2500)
-    pg.locator("#proj-detail-tabs .crm-tab[data-tab='invoices']").click()
+    pg.locator("#proj-detail-tabs .crm-tab[data-tab='team']").click()
     pg.wait_for_timeout(3000)
-    cell = pg.locator("#proj-detail-invoices [data-inv-meta='item_type']").first
+    cell = pg.locator("#proj-pay-invoices [data-inv-meta='item_type']").first
     check(cell.input_value() == "影片製作", "品項那一格顯示的是存進去的值",
           cell.input_value())
-    sel = pg.locator("#proj-detail-invoices [data-inv-meta='applicant']").first
+    sel = pg.locator("#proj-pay-invoices [data-inv-meta='applicant']").first
     check(sel.input_value() == APPLICANT, "申請人那一格選的是存進去的人",
           sel.input_value())
     cell.fill("展場攝影")
@@ -238,11 +238,11 @@ with sync_playwright() as p:
     print("")
     print("[7] 🔴 在專案頁刪票 —— 發票本那邊也要不見（同一張票，同一支端點）")
     pg.on("dialog", lambda d: d.accept())
-    pg.locator("#proj-detail-invoices button:has-text('刪除')").first.click()
+    pg.locator("#proj-pay-invoices button:has-text('刪除')").first.click()
     pg.wait_for_timeout(3500)
     gone = arun(read_back())
     check(gone is None, "DB 裡真的沒了", str(gone))
-    txt3 = pg.locator("#proj-detail-invoices").inner_text()
+    txt3 = pg.locator("#proj-pay-invoices").inner_text()
     check(TAG + " 第一期款" not in txt3, "專案頁清單上不見了")
     pg.evaluate("window.switchTab('tab_crm_invoices')")
     pg.wait_for_timeout(3000)

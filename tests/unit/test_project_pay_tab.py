@@ -3,7 +3,7 @@
 
 不新增資料：狀態列／提示／結案檢查是純算式（payStatus／nextSteps／closingChecks），吃的是專案 dict（已收／匯費／帳款狀況
 由後端推導）、發票、請款單、費用配置。三個決定（owner 未拍板前的保守做法）：派工不刪、收在可展開區；沒金額權限只看狀態字；結案檢查只提醒不硬擋。"""
-from tests.unit._srcscan import between, js_code_only, repo_src
+from tests.unit._srcscan import between, func_body, js_code_only, repo_src
 
 PAY = "frontend/tabs/crm/crm-projects-pay.js"
 

@@ -170,8 +170,8 @@ function _settleMatch(p) {
     return true;
 }
 
-/** 這一案所有找得到它的名字（顯示名／私帳原名／連到的母帳案名）—— 搜尋與
- *  tooltip 共用一份，兩邊才不會一邊改一邊漏。 */
+/** 這一案所有找得到它的名字（顯示名／私帳原名／連到的母帳案名），給 _visible 的搜尋用；
+ *  tooltip（_nameTip）要帶「私帳原名：」「母帳：」標籤所以自己排，加名字來源兩邊都要補。 */
 function _names(p) {
     return [p.name, p.orig_name, ...(p.parent_names || [])].filter(Boolean);
 }

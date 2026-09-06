@@ -30,7 +30,9 @@ def test_three_view_buttons_and_the_remembered_view():
     assert '"/api/v1/me/today"' in code
     assert '"/api/v1/me/team_week?start="' in code
     assert '"/api/v1/timesheets/mine?date="' in code and '"/api/v1/timesheets/options"' in code
-    assert '"/api/v1/timesheets/projects"' in code and '"/api/v1/timesheets/project?name="' in code
+    # 專案查詢：員工端唯讀版 /me/projects_burn（2026-09-06 拿掉往 /timesheets/projects、/summary 的三段備援）
+    assert '"/api/v1/me/projects_burn"' in code and '"/api/v1/timesheets/project?name="' in code
+    assert '"/api/v1/timesheets/summary"' not in code
 
 
 def test_no_personal_hours_totals_anywhere():

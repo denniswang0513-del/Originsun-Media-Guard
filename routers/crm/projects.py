@@ -9,7 +9,6 @@ import csv
 import io
 import os
 import shutil
-import re as _re
 import uuid
 
 from fastapi import HTTPException, Request, UploadFile, File, Query

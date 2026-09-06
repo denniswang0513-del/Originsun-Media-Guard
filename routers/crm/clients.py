@@ -13,6 +13,7 @@ from fastapi import HTTPException, Request, UploadFile, File, Query
 from core.crm_logic import normalize_tax_id
 from core.schemas import ClientPayload
 
+from core.ledger import not_mine, require_entity
 from ._shared import (router, _check_auth, _require_db, _get_factory,
                       _now, _to_dict, _auto_update_client_status,
                       _CLIENT_TIER_EXCLUDE_STATUSES, map_csv_row)
@@ -43,7 +44,6 @@ async def list_clients(
     """
     _require_db()
     if entity == "mine":
-        from core.ledger import require_entity
         require_entity(request, "mine", level="full")
     factory = await _get_factory()
 
@@ -55,8 +55,6 @@ async def list_clients(
     # 兩本帳 §8：成案「數」照算（客戶關係是真的），但金額合計**排除 mine**——
     # owner 私帳的營收不得混進母公司的客戶績效（合夥人看了會多出憑空的營收）。
     from sqlalchemy import and_ as _and
-
-    from core.ledger import not_mine
     money_filter = _and(active_filter, not_mine(CrmProject.entity))
     proj_sub = (
         select(
@@ -113,7 +111,6 @@ async def create_client(req: ClientPayload, request: Request):
     try:
         _check_auth(request)
     except HTTPException:
-        from core.ledger import require_entity
         require_entity(request, "mine", level="full")
     _require_db()
     factory = await _get_factory()
@@ -196,7 +193,6 @@ def _client_write_guard(request, client):
     與 routers/crm/finance._mine_or_admin_write 同一條政策（客戶表在另一個
     領域檔，故就地一份小的；行為要一致）。"""
     if (client.entity or "parent") == "mine":
-        from core.ledger import require_entity
         require_entity(request, "mine", level="full")
     else:
         _check_auth(request)
@@ -341,7 +337,6 @@ async def mine_client_links(request: Request):
     """連結清單的資料源（owner 2026-08-26「留下這個連結的清單好做日後使用」）：
     私帳客戶（含對應狀態＋名稱建議）＋CRM 客戶名錄（picker 用）＋私帳直接用
     CRM 客戶的那些（本來就同一筆，不需要連結）。"""
-    from core.ledger import not_mine, require_entity
     require_entity(request, "mine", level="full")
     _require_db()
     factory = await _get_factory()
@@ -420,7 +415,6 @@ async def create_crm_client_from_mine(client_id: str, request: Request):
     那一筆。
     """
     from core.auth import check_logged_in
-    from core.ledger import not_mine
     check_logged_in(request)
     _require_db()
     factory = await _get_factory()

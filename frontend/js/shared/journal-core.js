@@ -191,7 +191,7 @@ export function entryBlock(j, k, label, c, opts = {}) {
 }
 
 // c = {card, name, empty, block} class 名；title 由呼叫端決定（人名或週區間）並自行 esc。
-// opts（可省，舊呼叫端不變）：worklog（畫自動區）、projectName(id)、canReply、flags（標題旁的求助 pill）。
+// opts（可省，舊呼叫端不變）：worklog（畫自動區）、projectName(id)、canReact、flags（標題旁的求助 pill）。
 /** 週記的旗標 pill（求助／學到／…）：personCard 與 journal.html 的團隊牆同一份標記。 */
 export function flagPills(j, c = {}) {
     const flags = j.flags || {};

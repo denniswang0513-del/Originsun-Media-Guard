@@ -8,12 +8,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
 from sqlalchemy import or_, select
 
 from core.hr_logic import (EDIT_BLOCK_TEXT, by_month, can_edit_timesheet, day_iso, month_span, resolve_stage,
                            stage_index, tw_day)
-from core.identity import require_bound_staff
 from services.timesheet_lookup import load_project_lookup
 from services.timesheet_manual import insert_manual_rows, names_for, normalize_row
 
@@ -321,7 +320,6 @@ async def admin_delete_row(session, row_id: str, who: str = "") -> dict:
 async def board_days(session, d0: datetime, days: int) -> list:
     """看板的計算（唯一一份）：[{date, people:[{name, items, hours, planned}]}]。
     /board 與員工頁的 /me/team_week 都吃這個 —— 團隊的一週不抄第二份。"""
-    from datetime import timedelta
     from db.models import Timesheet
     d1 = d0 + timedelta(days=days)
     rows = (await session.execute(
