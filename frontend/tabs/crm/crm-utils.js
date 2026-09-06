@@ -132,13 +132,8 @@ export function today() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-// 報價單 PDF 的檔名（報價分頁與專案頁報價子頁共用）：YYYYMMDD_客戶代稱_專案名_源日報價單.pdf
-// 日期取 quote_date、沒有就今天；空段落略過（不留兩個底線）；檔名禁字一律換 -
-export function quotePdfFilename(q, projectName = q.project_name, clientShort = q.client_short_name) {
-    const d = ((q.quote_date || '').substring(0, 10) || today()).replace(/-/g, '');
-    const stem = [d, clientShort || '', projectName || '', '源日報價單'].filter(Boolean).join('_');
-    return stem.replace(/[\\/:*?"<>|]/g, '-') + '.pdf';
-}
+// 報價單 PDF 的檔名：正本在 js/shared/quote-file.js（手機版 shell.js 也 re-export 同一份）
+export { quotePdfFilename } from '../../js/shared/quote-file.js';
 
 export function populateClientSelect(elementId, clients, placeholder = '全部客戶') {
     const sel = document.getElementById(elementId);

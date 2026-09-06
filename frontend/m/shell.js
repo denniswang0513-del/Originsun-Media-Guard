@@ -13,6 +13,7 @@ import { esc } from '/js/shared/dom.js';
 import { initGoogleSignIn } from '/js/shared/google-signin.js';
 
 export { esc };
+export { quotePdfFilename } from '/js/shared/quote-file.js';
 
 const TOKEN_KEY = 'auth_token';     // 與內部 App 同 key（js/auth/auth-state.js）
 const REFRESH_BEFORE_SEC = 2 * 86400;
@@ -104,6 +105,27 @@ export async function mfetch(path, opts = {}) {
         const e = new Error(msg); e.status = r.status; e.data = data; throw e;
     }
     return data;
+}
+
+/** 帶權限下載檔案（報價 PDF）：`<a href>` 送不了 Authorization，fetch 成 blob 再開。
+ *  Android 會直接存檔；iOS 會在分頁開 PDF 再由使用者分享／存檔。401 一樣導回登入。 */
+export async function mdownload(path, filename) {
+    const tok = _token();
+    const r = await fetch(path, { headers: tok ? { Authorization: 'Bearer ' + tok } : {} });
+    if (r.status === 401) {
+        localStorage.removeItem(TOKEN_KEY);
+        _showLogin('登入已過期，請重新登入');
+        const e = new Error('登入已過期'); e.status = 401; throw e;
+    }
+    if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(typeof d.detail === 'string' ? d.detail : `HTTP ${r.status}`);
+    }
+    const href = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = href; a.download = filename || 'file'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 60_000);
 }
 
 // ── 視圖 ──────────────────────────────────────────────────

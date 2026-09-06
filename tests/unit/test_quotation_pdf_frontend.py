@@ -19,6 +19,9 @@ from tests.unit._srcscan import js_code_only, js_func_body, repo_src
 QUOTES_JS = "frontend/tabs/crm/crm-quotes.js"
 PQ_JS = "frontend/tabs/crm/crm-projects-quotes.js"
 UTILS_JS = "frontend/tabs/crm/crm-utils.js"
+QUOTE_FILE_JS = "frontend/js/shared/quote-file.js"
+M_QUOTES_JS = "frontend/m/views/quotes.js"
+M_SHELL_JS = "frontend/m/shell.js"
 SETTINGS_JS = "frontend/js/settings/settings-modal.js"
 
 # 與 config.py DEFAULT_SETTINGS["company"] 同一份 key 清單
@@ -41,16 +44,32 @@ def test_pdf_download_goes_through_auth_download(rel):
     assert "window.open(" not in src
 
 
-def test_pdf_filename_is_one_helper_shared_by_both_pages():
-    utils = js_code_only(repo_src(UTILS_JS))
-    fn = js_func_body(utils, "export function quotePdfFilename(")
+def test_pdf_filename_is_one_helper_shared_by_all_pages():
+    """檔名正本只有 js/shared/quote-file.js 一份：桌機兩頁經 crm-utils re-export、手機經 shell.js re-export。"""
+    shared = js_code_only(repo_src(QUOTE_FILE_JS))
+    assert "import" not in shared, "quote-file.js 要是零 import 的葉節點（手機 shell 才能吃）"
+    fn = js_func_body(shared, "export function quotePdfFilename(")
     assert "源日報價單" in fn and ".pdf'" in fn
     assert "quote_date" in fn and "today()" in fn                 # 日期取 quote_date、沒有就今天
     assert re.search(r'replace\(/\[\\\\/:\*\?"<>\|\]/g', fn), "檔名禁字要換掉"
-    for rel in (QUOTES_JS, PQ_JS):
+    assert "export { quotePdfFilename } from '../../js/shared/quote-file.js'" in js_code_only(repo_src(UTILS_JS))
+    assert "export { quotePdfFilename } from '/js/shared/quote-file.js'" in js_code_only(repo_src(M_SHELL_JS))
+    for rel in (QUOTES_JS, PQ_JS, M_QUOTES_JS, UTILS_JS, M_SHELL_JS):
         src = js_code_only(repo_src(rel))
-        assert "quotePdfFilename(" in src, rel
-        assert "源日報價單" not in src, f"{rel} 自己再拼一份檔名？正本在 crm-utils.quotePdfFilename"
+        assert "quotePdfFilename" in src, rel
+        assert "源日報價單" not in src, f"{rel} 自己再拼一份檔名？正本在 js/shared/quote-file.js"
+
+
+def test_mobile_quotes_download_pdf_through_shell():
+    """手機版：卡片有 PDF 鈕，下載走 shell.js 的 mdownload（帶 token、401 導回登入），不自己 fetch。"""
+    src = js_code_only(repo_src(M_QUOTES_JS))
+    assert 'data-pdf="' in src and "button[data-pdf]" in src
+    pdf_lines = [ln for ln in src.splitlines() if "/pdf`" in ln]
+    assert pdf_lines and all("mdownload(" in ln and "quotePdfFilename(" in ln for ln in pdf_lines), pdf_lines
+    assert "from '../shell.js'" in src and "fetch(" not in src.replace("mfetch(", "")
+    shell = js_code_only(repo_src(M_SHELL_JS))
+    body = js_func_body(shell, "export async function mdownload(")
+    assert "Authorization" in body and "401" in body and "createObjectURL" in body
 
 
 def test_project_page_pdf_button_is_wired():

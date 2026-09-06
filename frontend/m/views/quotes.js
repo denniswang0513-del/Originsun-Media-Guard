@@ -3,8 +3,9 @@
  * 狀態轉換由**位置**推：[0]草稿→寄出、[1]已寄出→簽回([2])／拒絕([3])；
  * 改狀態打 POST /api/v1/crm/m/quotations/{id}/status {status, activate}。
  * 按鈕文字是動作（寄出／簽回／拒絕），目標狀態字從 options 取，不寫死。
+ * 每張卡都有「PDF」：GET /api/v1/crm/quotations/{id}/pdf（跟桌機同一份 PDF、同一個檔名規則）。
  */
-import { mfetch, toast, esc, money, fmtDate } from '../shell.js';
+import { mfetch, mdownload, toast, esc, money, fmtDate, quotePdfFilename } from '../shell.js';
 import { list, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad, renderPaged } from '../ui.js';
 
 function transitions(status) {
@@ -18,9 +19,13 @@ function transitions(status) {
     return [];
 }
 
+// 動作列跟金額同一列：按鈕不吃 .m-actions 的「各半」flex，照內容寬、文字不換行（「寄出」被擠成兩行過）
+const BTN = 'flex:0 0 auto;white-space:nowrap';
+
 function cardHtml(q) {
     const btns = transitions(q.status).map(t =>
-        `<button type="button" class="m-btn sm ${t.danger ? 'danger' : 'pri'}" data-id="${esc(q.id)}" data-to="${esc(t.to)}"${t.ask ? ' data-ask="1"' : ''}>${esc(t.label)}</button>`).join('');
+        `<button type="button" class="m-btn sm ${t.danger ? 'danger' : 'pri'}" style="${BTN}" data-id="${esc(q.id)}" data-to="${esc(t.to)}"${t.ask ? ' data-ask="1"' : ''}>${esc(t.label)}</button>`).join('')
+        + `<button type="button" class="m-btn sm" style="${BTN}" data-pdf="${esc(q.id)}">PDF</button>`;
     return `
       <div class="m-card">
         <div class="t"><div class="name">${esc(q.project_name || '（未連專案）')}</div>${pill(q.version)}</div>
@@ -44,12 +49,24 @@ async function change(btn, host) {
     });
 }
 
+async function downloadPdf(btn, rows) {
+    const q = rows.find(r => r.id === btn.dataset.pdf);
+    if (!q) return;
+    await withBusy(btn, async () => {
+        try { await mdownload(`/api/v1/crm/quotations/${encodeURIComponent(q.id)}/pdf`, quotePdfFilename(q)); }
+        catch (e) { toast(e.message, 'err'); }
+    });
+}
+
+let _rows = [];      // 目前畫面上的報價（PDF 鈕要拿 quote_date／專案／客戶組檔名）
+
 async function load(host) {
     const box = host.querySelector('#qt-list');
     box.innerHTML = skeleton(3);
     try {
         const d = await mfetch('/api/v1/crm/quotations');
         const rows = d.quotations || [];
+        _rows = rows;
         if (!rows.length) { box.innerHTML = emptyBox('沒有報價'); return; }
         const order = list('quote_statuses');
         const groups = new Map(order.map(s => [s, []]));
@@ -69,7 +86,9 @@ export async function render(host, { first }) {
         host.innerHTML = '<div id="qt-list"></div>';
         host.addEventListener('click', (ev) => {
             const b = ev.target.closest('button[data-to]');
-            if (b) change(b, host);
+            if (b) return change(b, host);
+            const p = ev.target.closest('button[data-pdf]');
+            if (p) downloadPdf(p, _rows);
         });
     }
     if (shouldLoad('quotes', { first })) await load(host);
