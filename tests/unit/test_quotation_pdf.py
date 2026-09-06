@@ -111,3 +111,13 @@ def test_pdf_endpoint_is_money_guarded_and_never_caches():
     body = code_only(func_body(src, "async def quotation_pdf("))
     assert "no_store_file(" in body and "html_to_pdf(" in body and "build_quotation_view(" in body
     assert "spec" in code_only(func_body(src, "def _to_quotation_dict(")), "序列化要帶 spec，前端與 PDF 都靠它"
+
+
+def test_spec_absent_from_payload_means_unchanged_not_cleared():
+    """🔴 CF 給 .js 4 小時快取：舊分頁的 PUT 不帶 spec，不可以把別人剛填的規格洗掉。
+    schema 用 Optional[str] = None、更新端點只有 `is not None` 才寫。"""
+    from core.schemas import QuotationPayload
+    assert QuotationPayload().spec is None
+    assert QuotationPayload(spec="").spec == ""          # 有送空字串＝真的要清掉
+    body = code_only(func_body(repo_src("routers/crm/quotes.py"), "async def update_quotation("))
+    assert "if req.spec is not None:" in body, "沒送 spec 就不該動它"

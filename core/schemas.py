@@ -632,7 +632,9 @@ class QuotationPayload(BaseModel):
     final_price: Optional[int] = None
     payment_stages: List[dict] = []
     terms: str = ""
-    spec: str = ""                     # 規格（報價單抬頭；「、」或換行分隔多項）
+    # 🔴 Optional：沒送＝不動（不是清空）。CF 給 .js 4 小時快取，舊分頁 PUT 不帶 spec，
+    # 用 `str = ""` 會把別人剛填的規格洗掉（同型事故見 reference_cloudflare_js_cache）。
+    spec: Optional[str] = None         # 規格（報價單抬頭；「、」或換行分隔多項）
     items: List[QuotationItemPayload] = []
 
 

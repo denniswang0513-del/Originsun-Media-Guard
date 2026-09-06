@@ -252,22 +252,22 @@ async def quotation_pdf(quotation_id: str):
         client = await session.get(Client, project.client_id) if project and project.client_id else None
     company = dict(load_settings().get("company") or {})
     client_name = ((client.full_name or "").strip() or client.short_name) if client else ""
-    view = build_quotation_view(
-        _to_quotation_dict(q, items=items, project_name=project.name if project else "",
-                           client_short_name=client.short_name if client else ""),
-        company, client_name=client_name, project_name=project.name if project else "")
-    html_doc = render_template(
-        "quotation_pdf.html", v=view,
-        logo_src=file_data_uri(company.get("logo_path") or "frontend/img/originsun-logo.webp"),
-        seal_src=file_data_uri(company.get("seal_path") or ""),
-    )
-    footer = (
-        '<div style="width:100%;margin:0 16mm;font-family:\'Noto Sans TC\',\'Microsoft JhengHei\',sans-serif;'
-        'font-size:7px;color:#767676;display:flex;justify-content:space-between;">'
-        f'<span>{_html.escape(footer_line(view))}</span>'
-        '<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>'
-    )
-    try:
+    try:                                   # 組資料／渲染／產 PDF 同一個出口：壞在哪一段對使用者都是「PDF 生成失敗」
+        view = build_quotation_view(
+            _to_quotation_dict(q, items=items, project_name=project.name if project else "",
+                               client_short_name=client.short_name if client else ""),
+            company, client_name=client_name, project_name=project.name if project else "")
+        html_doc = render_template(
+            "quotation_pdf.html", v=view,
+            logo_src=file_data_uri(company.get("logo_path") or "frontend/img/originsun-logo.webp"),
+            seal_src=file_data_uri(company.get("seal_path") or ""),
+        )
+        footer = (
+            '<div style="width:100%;margin:0 16mm;font-family:\'Noto Sans TC\',\'Microsoft JhengHei\',sans-serif;'
+            'font-size:7px;color:#767676;display:flex;justify-content:space-between;">'
+            f'<span>{_html.escape(footer_line(view))}</span>'
+            '<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>'
+        )
         tmp_pdf = await html_to_pdf(html_doc, prefix="quotation_", footer_html=footer,
                                     margin={"top": "12mm", "right": "16mm", "bottom": "14mm", "left": "16mm"})
     except Exception as exc:
@@ -303,7 +303,8 @@ async def update_quotation(quotation_id: str, req: QuotationPayload, request: Re
         q.final_price = req.final_price
         q.payment_stages = req.payment_stages or None
         q.terms = req.terms
-        q.spec = req.spec or None
+        if req.spec is not None:                 # 沒送＝不動（舊分頁的 PUT 不該洗掉規格）
+            q.spec = req.spec or None
         q.updated_at = _now()
         await session.commit()
         await session.refresh(q)

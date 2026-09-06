@@ -105,8 +105,11 @@ def test_template_add_button_is_bound():
     src = js_code_only(repo_src(QUOTES_JS))
     init = js_func_body(src, "export async function initCrmQuotesTab(")
     assert "getElementById('quote-tpl-btn-add').addEventListener('click'" in init
-    add = js_func_body(src, "async function _addTemplate(")
-    assert "_saveCurrentAsTemplate(" in add and "items: []" in add   # 表單開著存表單、否則建空範本
+    assert "getElementById('quote-btn-as-template').addEventListener('click'" in init
+    # 兩個入口分開：範本彈窗建空範本、報價彈窗存目前表單（別再用「表單開著嗎」判斷——那條走不到）
+    assert "_addTemplate = () => _promptTemplate(" in src and "items: []" in src
+    assert "_addTemplateFromForm = () => _promptTemplate(_saveCurrentAsTemplate)" in src
+    assert "style.display === 'flex'" not in src
 
 
 # ── 設定頁「公司資訊」 ─────────────────────────────────────────
@@ -118,6 +121,7 @@ def test_settings_modal_has_company_tab():
     for k in COMPANY_KEYS:
         assert f'id="company_{k}"' in html, k
     assert 'type="number" id="company_quote_valid_days"' in html
+    assert 'id="quote-btn-as-template"' in repo_src("frontend/tabs/crm/crm-quotes.html")
 
 
 def test_settings_modal_reads_and_writes_all_company_keys():

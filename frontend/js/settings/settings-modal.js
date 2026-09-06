@@ -10,7 +10,10 @@ function fillCompany(company) {
     COMPANY_KEYS.forEach(k => { const el = _companyEl(k); if (el) el.value = c[k] ?? ''; });
 }
 
+// 🔴 欄位不在 DOM（舊 html 配新 js，CF 只快取 .js）就回 null → 整個 company 不送，
+// 讓後端 merge-on-save 留住原值；照送會把公司資訊寫成一片空字串。
 function readCompany() {
+    if (!_companyEl('name')) return null;
     return Object.fromEntries(COMPANY_KEYS.map(k => {
         const v = (_companyEl(k)?.value ?? '').trim();
         return [k, k === 'quote_valid_days' ? (parseInt(v) || 14) : v];
@@ -91,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 transcribe_success: document.getElementById('tpl_transcribe_success').value,
             },
             // 後端 save_settings 是 merge-on-save（頂層鍵逐一覆蓋、dict 淺合併），沒送的區塊不會被洗掉
-            company: readCompany(),
+            ...(readCompany() ? { company: readCompany() } : {}),
             // ── Channel toggles ──────────────────────────────
             notification_channels: Object.fromEntries(
                 ['backup', 'report', 'transcode', 'concat', 'verify', 'transcribe'].map(tab => [

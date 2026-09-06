@@ -522,19 +522,19 @@ function _saveCurrentAsTemplate(name) {
     });
 }
 
-// 範本管理彈窗的「+ 新增範本」：報價彈窗開著就把目前表單存成範本，否則建一個空範本
-// （之後在報價彈窗套用它再調整）。這顆按鈕曾經沒綁任何事件、_saveCurrentAsTemplate 也沒人呼叫。
-async function _addTemplate() {
+// 兩個入口都會問名字：範本管理彈窗的「+ 新增範本」建空範本（之後套用它再調整）、
+// 報價彈窗的「存成範本」把目前表單存起來。兩顆都曾經沒綁事件、_saveCurrentAsTemplate 沒人呼叫。
+// 🔴 別把「表單開著就存表單」塞進 _addTemplate：範本彈窗從工具列開，那時報價彈窗必定是關的。
+async function _promptTemplate(save) {
     const name = (prompt('範本名稱：') || '').trim();
     if (!name) return;
-    const formOpen = document.getElementById('quote-modal').style.display === 'flex';
-    try {
-        if (formOpen) await _saveCurrentAsTemplate(name);
-        else await _createTemplate({ name, items: [], tax_rate: 5, terms: '', payment_stages: [] });
-    } catch (e) {
-        alert('儲存失敗：' + e.message);
-    }
+    try { await save(name); } catch (e) { alert('儲存失敗：' + e.message); }
 }
+
+const _addTemplate = () => _promptTemplate(
+    name => _createTemplate({ name, items: [], tax_rate: 5, terms: '', payment_stages: [] }));
+
+const _addTemplateFromForm = () => _promptTemplate(_saveCurrentAsTemplate);
 
 async function _deleteTemplate(id) {
     if (!confirm('確定刪除此範本？')) return;
@@ -620,6 +620,7 @@ export async function initCrmQuotesTab() {
         document.getElementById('quote-template-modal').style.display = 'flex';
     });
     document.getElementById('quote-tpl-btn-add').addEventListener('click', _addTemplate);
+    document.getElementById('quote-btn-as-template').addEventListener('click', _addTemplateFromForm);
 
     // Template apply
     document.getElementById('quote-f-template').addEventListener('change', e => {
