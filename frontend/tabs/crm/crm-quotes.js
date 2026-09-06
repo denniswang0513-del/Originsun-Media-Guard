@@ -2,7 +2,8 @@
  * crm-quotes.js — 報價管理 Tab
  */
 
-import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, quotePdfFilename } from './crm-utils.js';
+import { authDownload } from '../../js/shared/utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -125,6 +126,7 @@ const _QUOTE_EDIT_FIELDS = [
     ]},
     {name:'quote_date', label:'報價日期', type:'date'},
     {name:'valid_until', label:'有效期限', type:'date'},
+    {name:'spec', label:'規格', type:'textarea'},
     {name:'discount', label:'折扣', type:'number'},
     {name:'tax_rate', label:'稅率(%)', type:'number'},
     {name:'final_price', label:'最終報價', type:'number'},
@@ -149,6 +151,7 @@ function renderDetail(q) {
         <div class="crm-detail-prop"><div class="crm-prop-label">狀態</div><div class="crm-prop-value">${_qBadge(q.status)}</div></div>
         ${prop('報價日期', q.quote_date ? q.quote_date.substring(0, 10) : '')}
         ${prop('有效期限', q.valid_until ? q.valid_until.substring(0, 10) : '')}
+        ${prop('規格', q.spec)}
         ${prop('小計', '$' + _fmtNum(q.subtotal))}
         ${prop('折扣', q.discount ? '-$' + _fmtNum(q.discount) : '')}
         ${prop('稅額', '$' + _fmtNum(q.tax_amount) + ' (' + q.tax_rate + '%)')}
@@ -183,8 +186,11 @@ function renderDetail(q) {
 
     const actions = document.getElementById('quote-bar-actions');
     if (actions) {
-        actions.innerHTML = `<button class="crm-detail-close" title="關閉">&#x2715;</button>`;
+        actions.innerHTML = `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-pdf">下載 PDF</button>
+            <button class="crm-detail-close" title="關閉">&#x2715;</button>`;
         actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
+        actions.querySelector('#quote-btn-pdf').addEventListener('click', () =>
+            authDownload('/api/v1/crm/quotations/' + q.id + '/pdf', quotePdfFilename(q), '下載 PDF'));
     }
     addEditButton('quote-bar-actions', () => {
         enableInlineEdit('quote-detail-info', 'quote-bar-actions', _QUOTE_EDIT_FIELDS, q,
@@ -397,6 +403,7 @@ async function openModal(quotation = null, projectId = null) {
     document.getElementById('quote-f-final_price').value = q.final_price ?? '';
     document.getElementById('quote-f-payment_stages').value = _paymentStagesToText(q.payment_stages);
     document.getElementById('quote-f-terms').value = q.terms || '';
+    document.getElementById('quote-f-spec').value = q.spec || '';
     document.getElementById('quote-f-template').value = '';
 
     _itemRows = (q.items || []).map(it => ({ ...it }));
@@ -421,6 +428,7 @@ async function saveQuotation() {
         final_price: document.getElementById('quote-f-final_price').value ? parseInt(document.getElementById('quote-f-final_price').value) : null,
         payment_stages: _parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
         terms: document.getElementById('quote-f-terms').value,
+        spec: document.getElementById('quote-f-spec').value.trim(),
         items: _itemRows.filter(it => it.description).map(it => ({
             group_name: it.group_name || '', description: it.description,
             unit: it.unit || '式', quantity: it.quantity || 1,
@@ -497,22 +505,32 @@ function _renderTemplateList() {
     }).join('');
 }
 
-async function _saveCurrentAsTemplate() {
-    const name = prompt('範本名稱：');
+async function _createTemplate(body) {
+    await _fetch('/quotation-templates', { method: 'POST', body: JSON.stringify(body) });
+    await loadTemplates();
+    _renderTemplateList();
+    _populateTemplateSelect();
+}
+
+// 報價彈窗目前的表單（稅率／條款／付款階段／項目）→ 一個範本
+function _saveCurrentAsTemplate(name) {
+    return _createTemplate({
+        name, items: _itemRows.filter(it => it.description),
+        tax_rate: parseInt(document.getElementById('quote-f-tax_rate').value) || 5,
+        terms: document.getElementById('quote-f-terms').value,
+        payment_stages: _parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
+    });
+}
+
+// 範本管理彈窗的「+ 新增範本」：報價彈窗開著就把目前表單存成範本，否則建一個空範本
+// （之後在報價彈窗套用它再調整）。這顆按鈕曾經沒綁任何事件、_saveCurrentAsTemplate 也沒人呼叫。
+async function _addTemplate() {
+    const name = (prompt('範本名稱：') || '').trim();
     if (!name) return;
+    const formOpen = document.getElementById('quote-modal').style.display === 'flex';
     try {
-        await _fetch('/quotation-templates', {
-            method: 'POST',
-            body: JSON.stringify({
-                name, items: _itemRows.filter(it => it.description),
-                tax_rate: parseInt(document.getElementById('quote-f-tax_rate').value) || 5,
-                terms: document.getElementById('quote-f-terms').value,
-                payment_stages: _parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
-            }),
-        });
-        await loadTemplates();
-        _populateTemplateSelect();
-        alert('範本已儲存');
+        if (formOpen) await _saveCurrentAsTemplate(name);
+        else await _createTemplate({ name, items: [], tax_rate: 5, terms: '', payment_stages: [] });
     } catch (e) {
         alert('儲存失敗：' + e.message);
     }
@@ -601,6 +619,7 @@ export async function initCrmQuotesTab() {
         _renderTemplateList();
         document.getElementById('quote-template-modal').style.display = 'flex';
     });
+    document.getElementById('quote-tpl-btn-add').addEventListener('click', _addTemplate);
 
     // Template apply
     document.getElementById('quote-f-template').addEventListener('change', e => {

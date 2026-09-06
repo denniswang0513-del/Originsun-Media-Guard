@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>示範｜報價單 PDF 版面（照 2025-07 龍應台案）</title>
+<style>
+  :root { --bg:#111; --bar:#1f1f1f; --line:#3a3a3a; --ink:#e0e0e0; --sub:#9ca3af; --pri:#3b82f6; --warn:#fbbf24; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system,"Segoe UI","Microsoft JhengHei","Noto Sans TC",sans-serif; }
+
+  /* ── 示範外殼（列印時隱藏） ── */
+  .shell { position:sticky; top:0; z-index:5; background:var(--bar); border-bottom:1px solid var(--line); padding:10px 18px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .shell .tag { background:#3a2a00; color:var(--warn); border:1px solid #6b4f00; border-radius:4px; padding:2px 8px; font-size:12px; }
+  .shell b { font-weight:600; }
+  .shell .sp { flex:1; }
+  .shell label { display:flex; align-items:center; gap:6px; color:var(--sub); font-size:13px; cursor:pointer; }
+  .shell button { background:var(--pri); color:#fff; border:0; border-radius:6px; padding:7px 14px; font-size:13px; cursor:pointer; }
+  .shell button.ghost { background:transparent; border:1px solid var(--line); color:var(--ink); }
+  .notes { max-width:820px; margin:16px auto 0; padding:0 18px; color:var(--sub); font-size:13px; }
+  .notes li { margin:3px 0; }
+  .notes code { color:#93c5fd; background:#1e293b; padding:1px 5px; border-radius:3px; }
+
+  /* ── A4 紙 ── */
+  .paper { width:210mm; min-height:297mm; margin:18px auto 40px; background:#fff; color:#111; padding:14mm 15mm 12mm; box-shadow:0 8px 40px rgba(0,0,0,.6); font-family:"Microsoft JhengHei","Noto Sans TC","PingFang TC",sans-serif; font-size:10.5pt; line-height:1.4; }
+
+  .hd { display:flex; justify-content:space-between; align-items:flex-start; }
+  .hd h1 { margin:0 0 4px; font-size:16pt; font-weight:600; letter-spacing:.5px; }
+  .hd .meta { font-size:10pt; }
+  .hd .meta div { margin:1px 0; }
+  .hd img { height:46px; }
+
+  table.q { width:100%; border-collapse:collapse; margin-top:8px; }
+  table.q th, table.q td { border:1px solid #111; padding:1px 5px; font-size:9pt; line-height:1.35; }
+  table.q th { font-weight:600; text-align:center; background:#fff; }
+  table.q td.num { text-align:right; white-space:nowrap; }
+  table.q td.c { text-align:center; white-space:nowrap; }
+  table.q td.desc { word-break:break-word; }
+  table.q td.desc small { color:#555; }
+  table.q tr.grp td { text-align:center; font-weight:600; background:#fff; }
+  table.q tr.sub td { background:#eee; font-weight:600; text-align:right; }
+  table.q tr.tot td { font-weight:600; text-align:right; }
+  table.q tr.tot td.lab { background:#eee; }
+  col.desc { width:auto; } col.qty { width:46px; } col.unit { width:44px; } col.price { width:82px; } col.amt { width:118px; }
+
+  .final { display:flex; justify-content:flex-end; gap:60px; margin:10px 4px 0; font-weight:700; font-size:11pt; }
+  .stages { margin-top:6px; font-size:9pt; }
+  .stages b { font-weight:600; }
+
+  .foot { display:grid; grid-template-columns:1fr 150px; gap:18px; margin-top:12px; font-size:8.5pt; }
+  .foot h4 { margin:7px 0 2px; font-size:9.5pt; font-weight:700; }
+  .foot h4:first-child { margin-top:0; }
+  .foot p { margin:0 0 2px; white-space:pre-line; }
+  .sign { text-align:center; padding-top:6px; }
+  .sign .box { height:84px; display:flex; align-items:center; justify-content:center; }
+  .sign .line { border-top:1px solid #111; margin-top:6px; padding-top:3px; font-size:8.5pt; }
+  .sign .gap { height:34px; }
+  /* 章的佔位：正式版換成設定裡上傳的去背 PNG */
+  .seal { width:86px; height:86px; border:2px solid #c0392b; border-radius:50%; color:#c0392b; font-size:7pt; line-height:1.25; display:flex; align-items:center; justify-content:center; text-align:center; opacity:.85; transform:rotate(-6deg); }
+
+  @media print {
+    body { background:#fff; }
+    .shell, .notes { display:none !important; }
+    .paper { width:auto; min-height:auto; margin:0; padding:0; box-shadow:none; }
+    @page { size:A4 portrait; margin:10mm 15mm 9mm; }
+    table.q tr { page-break-inside:avoid; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <span class="tag">示範</span>
+  <b>報價單 PDF 版面</b>
+  <span style="color:var(--sub)">資料照 2025-07-15 龍應台文化基金會「和平行動者系列影片」那張，欄位全部對到現有的 <code style="color:#93c5fd">crm_quotations</code> 結構</span>
+  <span class="sp"></span>
+  <label><input type="checkbox" id="opt-stages"> 印付款階段（有填才印）</label>
+  <label><input type="checkbox" id="opt-discount"> 示範稅前折扣列</label>
+  <button class="ghost" onclick="toggleSeal()">章：佔位 / 隱藏</button>
+  <button onclick="window.print()">列印 / 存成 PDF</button>
+</div>
+
+<div class="paper" id="paper"></div>
+
+<ul class="notes">
+  <li>外殼與這段說明列印時不會出現；正式版是後端 Jinja2 同一份版面丟給 Playwright 產 A4。</li>
+  <li><b>專案優惠</b>不是資料表的 <code>discount</code>（那個是稅前折扣），而是「含稅總計 − <code>final_price</code>」算出來的差額，沒差額就不印這列。</li>
+  <li><b>贈項</b>＝單價 0 的項目，「原價 10,000」來自項目的 <code>note</code> 欄。</li>
+  <li><b>有效期</b>同時印天數與到期日；<code>valid_until</code> 空的時候預設報價日加 14 天。</li>
+  <li>抬頭、logo、匯款資訊、交檔條款、章：全部從新的 <code>company</code> 設定區塊帶，每張報價不用重打；<code>terms</code> 只放這張案子的備註。</li>
+</ul>
+
+<script>
+// ── 對應後端 _to_quotation_dict 的形狀（金額全是整數 NT$） ──
+const quotation = {
+  id: 31, version: 1, status: "已簽核",
+  project_name: "和平行動者系列影片",
+  client_name: "龍應台文化基金會",
+  quote_date: "2025-07-15", valid_until: null,   // 空 → 預設 +14 天
+  tax_rate: 5, discount: 0,
+  subtotal: 802800, tax_amount: 40140, total: 842940,
+  final_price: 840000,
+  payment_stages: [{label:"簽約", pct:30}, {label:"拍攝完成", pct:40}, {label:"交片", pct:30}],
+  terms: "1. 拍攝次數規劃 9 次，若超過 9 次，每人次 12,000。",
+  items: [
+    g("拍攝與前期製作", [
+      ["專案管理", 1, "套", 15000],
+      ["導演與企劃", 1, "式", 50000],
+      ["攝影師(含器材)", 9, "人次", 12000],
+      ["行政雜支(臺北市外交通與住宿實報實銷，或由主辦單位安排)", 9, "人次", 1200],
+    ]),
+    g("後期製作(前導影片 2 支)", [
+      ["活動前導短片 2 min 內 (含剪輯、調光、動態字卡)", 1, "支", 28000],
+      ["Fellow 行動紀錄影像播放 5 min 內 (含剪輯、調光、動態字卡)", 1, "支", 28000],
+    ]),
+    g("後期製作(和平論壇 3 支 60 分鐘)", [
+      ["動態視覺包裝", 1, "式", 18000],
+      ["完整版(60 min 講座)_(剪輯、文案、插入 PPT、切 AB 機、平台上架)", 3, "支", 35000],
+      ["中英字幕製作", 180, "分鐘", 320],
+    ]),
+    g("後期製作(Fellow 個人影音 6 支 45 分鐘)", [
+      ["動態視覺包裝", 1, "式", 18000],
+      ["Fellow 個人影音(45 min)_順剪(剪輯、文案、插入 PPT、切 AB 機、平台上架)", 6, "支", 35000],
+      ["中英字幕製作", 270, "分鐘", 320],
+    ]),
+    g("後期製作(花絮與 2026 宣傳片)", [
+      ["2026 宣傳短片剪輯與後期製作(90 秒內)", 1, "支", 28000],
+      ["2025 和平計畫花絮剪輯與後期製作(5 min 內)", 1, "支", 28000],
+    ]),
+    g("後期製作(其他)", [
+      ["音樂版權", 1, "套", 12000],
+    ]),
+    g("贈項", [
+      ["逐字稿、原始檔", 1, "套", 0, "原價 10,000"],
+    ]),
+  ].flat(),
+};
+function g(group, rows) {
+  return rows.map(([description, quantity, unit, unit_price, note], i) =>
+    ({ group_name: group, sort_order: i, description, quantity, unit, unit_price, amount: quantity * unit_price, note: note || "" }));
+}
+
+// ── 新的 company 設定區塊（設定頁可編，全站共用） ──
+const company = {
+  name: "源日有限公司", logo: "../img/originsun-logo.webp",
+  tax_id: "90371657",
+  bank: "012 台北富邦 中山分行", account_name: "源日有限公司", account_no: "82120000062728",
+  quote_valid_days: 14,
+  delivery_terms: "完成檔以雲端儲存連結交檔。若須 DVD、USB、硬碟，與任何實體儲存裝置交檔，實報實銷。",
+  seal: null,   // 之後放去背 PNG 的路徑
+};
+
+const nt = n => "NT$" + Math.round(n).toLocaleString("en-US");
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ymd = d => `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+let sealMode = "placeholder";
+
+function render() {
+  const q = quotation, showStages = document.getElementById("opt-stages").checked;
+  const demoDiscount = document.getElementById("opt-discount").checked ? 10000 : 0;
+
+  // 金額鏈（跟後端 _calc_quotation 一樣：稅前折扣 → 稅 → 含稅總計；專案優惠是 total − final_price）
+  const subtotal = q.items.reduce((s, it) => s + it.amount, 0);
+  const taxable = Math.max(subtotal - demoDiscount, 0);
+  const tax = Math.floor(taxable * q.tax_rate / 100);
+  const total = taxable + tax;
+  const promo = q.final_price != null && q.final_price < total ? total - q.final_price : 0;
+  const finalPrice = q.final_price ?? total;
+
+  const qd = new Date(q.quote_date);
+  const vu = q.valid_until ? new Date(q.valid_until) : new Date(qd.getTime() + company.quote_valid_days * 864e5);
+  const validDays = Math.round((vu - qd) / 864e5);
+
+  // 分組
+  const groups = [];
+  for (const it of q.items) {
+    let grp = groups[groups.length - 1];
+    if (!grp || grp.name !== it.group_name) groups.push(grp = { name: it.group_name, rows: [] });
+    grp.rows.push(it);
+  }
+  const body = groups.map(grp => `
+    <tr class="grp"><td colspan="5">${esc(grp.name)}</td></tr>
+    ${grp.rows.map(it => `
+      <tr>
+        <td class="desc">${esc(it.description)}${it.note ? ` <small>(${esc(it.note)})</small>` : ""}</td>
+        <td class="c">${it.quantity}</td><td class="c">${esc(it.unit)}</td>
+        <td class="num">${nt(it.unit_price)}</td><td class="num">${nt(it.amount)}</td>
+      </tr>`).join("")}
+    <tr class="sub"><td colspan="4">小結</td><td class="num">${nt(grp.rows.reduce((s, r) => s + r.amount, 0))}</td></tr>`).join("");
+
+  const totRow = (lab, val) => `<tr class="tot"><td colspan="4" class="lab">${lab}</td><td class="num">${val}</td></tr>`;
+  const totals =
+    totRow("合計", nt(subtotal)) +
+    (demoDiscount ? totRow("折扣", "−" + nt(demoDiscount)) : "") +
+    totRow(`稅額 (${q.tax_rate}%)`, nt(tax)) +
+    (promo ? totRow("專案優惠", "−" + nt(promo)) : "");
+
+  const stages = showStages && q.payment_stages.length
+    ? `<div class="stages"><b>付款方式：</b>${q.payment_stages.map(s => `${esc(s.label)} ${s.pct}%（${nt(finalPrice * s.pct / 100)}）`).join("　／　")}</div>` : "";
+
+  const seal = sealMode === "placeholder"
+    ? `<div class="seal">源日有限公司<br>統一發票專用章<br>統一編號<br>${company.tax_id}</div>`
+    : (company.seal ? `<img src="${company.seal}" style="height:86px">` : "");
+
+  document.getElementById("paper").innerHTML = `
+    <div class="hd">
+      <div>
+        <h1>報價單 / PROJECT ESTIMATE</h1>
+        <div class="meta">
+          <div><b>客戶：</b>${esc(q.client_name)}</div>
+          <div><b>項目：</b>${esc(q.project_name)}</div>
+        </div>
+      </div>
+      <img src="${company.logo}" alt="${esc(company.name)}">
+    </div>
+    <table class="q">
+      <colgroup><col class="desc"><col class="qty"><col class="unit"><col class="price"><col class="amt"></colgroup>
+      <thead><tr><th style="text-align:left">項目</th><th>數量</th><th>單位</th><th>單價</th><th>小計</th></tr></thead>
+      <tbody>${body}${totals}</tbody>
+    </table>
+    <div class="final"><span>報價</span><span>${nt(finalPrice)} 含稅</span></div>
+    ${stages}
+    <div class="foot">
+      <div>
+        <h4>備註</h4><p>${esc(q.terms)}</p>
+        <h4>匯款資訊</h4>
+        <p>銀行：${esc(company.bank)}　戶名：${esc(company.account_name)}
+帳號：${esc(company.account_no)}　統一編號：${esc(company.tax_id)}</p>
+        <h4>報價日期</h4><p>${ymd(qd)}
+報價有效期限 ${validDays} 日（至 ${ymd(vu)}）</p>
+        <h4>完成檔交檔</h4><p>${esc(company.delivery_terms)}</p>
+      </div>
+      <div class="sign">
+        <div class="box">${seal}</div>
+        <div class="line">源日簽章</div>
+        <div class="gap"></div>
+        <div class="line">客戶簽章</div>
+      </div>
+    </div>`;
+}
+function toggleSeal() { sealMode = sealMode === "placeholder" ? "none" : "placeholder"; render(); }
+document.getElementById("opt-stages").addEventListener("change", render);
+document.getElementById("opt-discount").addEventListener("change", render);
+render();
+</script>
+</body>
+</html>

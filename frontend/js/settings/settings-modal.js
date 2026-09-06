@@ -1,5 +1,22 @@
 // ─── Settings Modal (extracted from app.js) ─── //
 
+// settings.json 的 company 區塊（config.py 預設值是正本）；index.html 的欄位 id = company_<key>
+const COMPANY_KEYS = ['name', 'name_en', 'tax_id', 'address', 'phone', 'email', 'bank',
+    'account_name', 'account_no', 'quote_valid_days', 'delivery_terms', 'logo_path', 'seal_path'];
+const _companyEl = (k) => document.getElementById('company_' + k);
+
+function fillCompany(company) {
+    const c = company || {};
+    COMPANY_KEYS.forEach(k => { const el = _companyEl(k); if (el) el.value = c[k] ?? ''; });
+}
+
+function readCompany() {
+    return Object.fromEntries(COMPANY_KEYS.map(k => {
+        const v = (_companyEl(k)?.value ?? '').trim();
+        return [k, k === 'quote_valid_days' ? (parseInt(v) || 14) : v];
+    }));
+}
+
 function showInstallModal() {
     document.getElementById('install-modal').classList.remove('hidden');
 }
@@ -36,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('tpl_concat_success').value = t.concat_success || '';
                 document.getElementById('tpl_verify_success').value = t.verify_success || '';
                 document.getElementById('tpl_transcribe_success').value = t.transcribe_success || '';
+                fillCompany(data.company);
                 // ── Load channel toggles ──────────────────────────────────────
                 const ch = data.notification_channels || {};
                 const tabs = ['backup', 'report', 'transcode', 'concat', 'verify', 'transcribe'];
@@ -72,6 +90,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 verify_success: document.getElementById('tpl_verify_success').value,
                 transcribe_success: document.getElementById('tpl_transcribe_success').value,
             },
+            // 後端 save_settings 是 merge-on-save（頂層鍵逐一覆蓋、dict 淺合併），沒送的區塊不會被洗掉
+            company: readCompany(),
             // ── Channel toggles ──────────────────────────────
             notification_channels: Object.fromEntries(
                 ['backup', 'report', 'transcode', 'concat', 'verify', 'transcribe'].map(tab => [

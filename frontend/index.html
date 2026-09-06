@@ -414,6 +414,7 @@
             <div class="modal-tabs">
                 <button class="tab-btn active" onclick="switchSettingsTab('api_keys', event)">🔑 通訊金鑰</button>
                 <button class="tab-btn" onclick="switchSettingsTab('templates', event)">📝 訊息樣板</button>
+                <button class="tab-btn" onclick="switchSettingsTab('company', event)">公司資訊</button>
                 <!-- 使用者管理已搬到 👤 下拉選單的獨立面板 -->
             </div>
             <div id="tab_api_keys" class="tab-content">
@@ -475,6 +476,66 @@
                                 data-ch="gchat">Chat</span></span></label>
                     <textarea id="tpl_transcribe_success" rows="2">🎙️ 【逐字稿完成】{project_name} 已生成！
 📂 輸出至：{dest_dir} | 共 {file_count} 個檔案</textarea>
+                </div>
+            </div>
+
+            <!-- 公司資訊：報價單 PDF 的抬頭／匯款／交檔條款（settings.json 的 company 區塊；
+                 欄位 id = company_<key>，載入與儲存由 js/settings/settings-modal.js 的 COMPANY_KEYS 驅動） -->
+            <div id="tab_company" class="tab-content" style="display: none;">
+                <p class="template-hint">報價單 PDF 抬頭與匯款資訊。Logo 與章的路徑留空時：Logo 用預設圖、章不印。</p>
+                <div class="form-group">
+                    <label>公司名稱</label>
+                    <input type="text" id="company_name" placeholder="源日有限公司">
+                </div>
+                <div class="form-group">
+                    <label>英文名稱</label>
+                    <input type="text" id="company_name_en" placeholder="ORIGINSUN STUDIO">
+                </div>
+                <div class="form-group">
+                    <label>統一編號</label>
+                    <input type="text" id="company_tax_id" placeholder="8 位數字">
+                </div>
+                <div class="form-group">
+                    <label>地址</label>
+                    <input type="text" id="company_address">
+                </div>
+                <div class="form-group">
+                    <label>電話</label>
+                    <input type="text" id="company_phone">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="text" id="company_email">
+                </div>
+                <div class="form-group">
+                    <label>匯款銀行</label>
+                    <input type="text" id="company_bank" placeholder="例：012 台北富邦 中山分行">
+                </div>
+                <div class="form-group">
+                    <label>帳戶名稱</label>
+                    <input type="text" id="company_account_name">
+                </div>
+                <div class="form-group">
+                    <label>帳號</label>
+                    <input type="text" id="company_account_no">
+                </div>
+                <div class="form-group">
+                    <label>報價有效天數</label>
+                    <input type="number" id="company_quote_valid_days" min="1" max="365" placeholder="14">
+                    <small style="color:#888;">新報價未填有效期限時，PDF 以報價日加這個天數。</small>
+                </div>
+                <div class="form-group">
+                    <label>交檔條款</label>
+                    <textarea id="company_delivery_terms" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Logo 路徑</label>
+                    <input type="text" id="company_logo_path" placeholder="留空 = 預設 Logo">
+                    <small style="color:#888;">主控端本機路徑，或 frontend/ 底下的相對路徑。</small>
+                </div>
+                <div class="form-group">
+                    <label>印章路徑</label>
+                    <input type="text" id="company_seal_path" placeholder="留空 = 不印章">
                 </div>
             </div>
 

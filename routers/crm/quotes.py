@@ -10,6 +10,8 @@ from datetime import datetime
 from fastapi import Depends, HTTPException, Request, Query
 
 from core.finance_logic import QUOTE_PENDING
+from core.no_store import no_store_file
+from core.quotation_pdf import build_quotation_view, footer_line
 from core.schemas import QuotationPayload, QuotationTemplatePayload
 
 from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory,
@@ -46,6 +48,7 @@ def _to_quotation_dict(q, items=None, project_name="", client_short_name="") -> 
         "tax_rate": q.tax_rate, "tax_amount": q.tax_amount,
         "total": q.total, "final_price": q.final_price,
         "payment_stages": q.payment_stages or [], "terms": q.terms or "",
+        "spec": q.spec or "",
         "items": items or [],
         "created_at": q.created_at.isoformat() if q.created_at else None,
         "updated_at": q.updated_at.isoformat() if q.updated_at else None,
@@ -202,6 +205,7 @@ async def create_quotation(project_id: str, req: QuotationPayload, request: Requ
             subtotal=subtotal, discount=req.discount, tax_rate=req.tax_rate,
             tax_amount=tax_amount, total=total, final_price=req.final_price,
             payment_stages=req.payment_stages or None, terms=req.terms,
+            spec=req.spec or None,
             created_at=now, updated_at=now,
         )
         session.add(q)
@@ -226,6 +230,52 @@ async def get_quotation(quotation_id: str):
         client = await session.get(Client, project.client_id) if project else None
         cn = client.short_name if client else ""
     return _to_quotation_dict(q, items=items, project_name=pn, client_short_name=cn)
+
+
+@router.get("/quotations/{quotation_id}/pdf", dependencies=[Depends(money_dep)])
+async def quotation_pdf(quotation_id: str):
+    """報價單 PDF。版面正本 frontend/demo/quotation-pdf.html（2026-09-06 定稿）→ templates/quotation_pdf.html；
+    金額／備註／檔名規則在 core/quotation_pdf.py（純函式，有測試）。抬頭／匯款／章讀 settings.company。"""
+    import html as _html
+    from starlette.background import BackgroundTask
+    from config import load_settings
+    from services.html_pdf import file_data_uri, html_to_pdf, render_template, unlink_later
+
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
+        if not q:
+            raise HTTPException(status_code=404, detail="找不到此報價")
+        items = await _load_items(session, q.id)
+        project = await session.get(CrmProject, q.project_id)
+        client = await session.get(Client, project.client_id) if project and project.client_id else None
+    company = dict(load_settings().get("company") or {})
+    client_name = ((client.full_name or "").strip() or client.short_name) if client else ""
+    view = build_quotation_view(
+        _to_quotation_dict(q, items=items, project_name=project.name if project else "",
+                           client_short_name=client.short_name if client else ""),
+        company, client_name=client_name, project_name=project.name if project else "")
+    html_doc = render_template(
+        "quotation_pdf.html", v=view,
+        logo_src=file_data_uri(company.get("logo_path") or "frontend/img/originsun-logo.webp"),
+        seal_src=file_data_uri(company.get("seal_path") or ""),
+    )
+    footer = (
+        '<div style="width:100%;margin:0 16mm;font-family:\'Noto Sans TC\',\'Microsoft JhengHei\',sans-serif;'
+        'font-size:7px;color:#767676;display:flex;justify-content:space-between;">'
+        f'<span>{_html.escape(footer_line(view))}</span>'
+        '<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>'
+    )
+    try:
+        tmp_pdf = await html_to_pdf(html_doc, prefix="quotation_", footer_html=footer,
+                                    margin={"top": "12mm", "right": "16mm", "bottom": "14mm", "left": "16mm"})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"PDF 生成失敗：{exc}")
+    return no_store_file(              # 金額文件：不留快取副本，送完就刪
+        tmp_pdf, media_type="application/pdf", filename=view["filename"],
+        background=BackgroundTask(unlink_later(tmp_pdf)),
+    )
 
 
 @router.put("/quotations/{quotation_id}")
@@ -253,6 +303,7 @@ async def update_quotation(quotation_id: str, req: QuotationPayload, request: Re
         q.final_price = req.final_price
         q.payment_stages = req.payment_stages or None
         q.terms = req.terms
+        q.spec = req.spec or None
         q.updated_at = _now()
         await session.commit()
         await session.refresh(q)

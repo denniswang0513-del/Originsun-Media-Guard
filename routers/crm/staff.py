@@ -639,60 +639,22 @@ async def staff_resume_pdf(staff_id: str):
     for key in ("id_number", "address", "bank_name", "bank_account", "phone", "email"):
         staff.pop(key, None)
 
-    # Render Jinja2 template → HTML string
-    from jinja2 import Environment, FileSystemLoader, select_autoescape as _sa
-    _base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    _env = Environment(loader=FileSystemLoader(os.path.join(_base, "templates")),
-                       autoescape=_sa(["html"]))
-    _tmpl = _env.get_template("resume_pdf.html")
-    html_content = _tmpl.render(
-        staff=staff, portfolio=portfolio, projects=projects,
+    from services.html_pdf import html_to_pdf, render_template, unlink_later
+    html_content = render_template(
+        "resume_pdf.html", staff=staff, portfolio=portfolio, projects=projects,
         generated_at=datetime.now().strftime("%Y-%m-%d"),
     )
-
-    # Write to temp file, convert to PDF via Playwright
-    import tempfile
-    tmp_fd, tmp_html = tempfile.mkstemp(suffix=".html", prefix="resume_")
-    os.close(tmp_fd)
-    with open(tmp_html, "w", encoding="utf-8") as f:
-        f.write(html_content)
-
-    tmp_pdf = tmp_html.replace(".html", ".pdf")
     try:
-        from playwright.async_api import async_playwright
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            file_url = f"file:///{tmp_html.replace(os.sep, '/')}"
-            await page.goto(file_url, wait_until="networkidle")
-            await page.pdf(
-                path=tmp_pdf, format="A4", print_background=True,
-                margin={"top": "20mm", "bottom": "20mm",
-                        "left": "15mm", "right": "15mm"},
-            )
-            await browser.close()
+        tmp_pdf = await html_to_pdf(html_content, prefix="resume_")
     except Exception as exc:
-        # Clean up temp files on error
-        for _f in (tmp_html, tmp_pdf):
-            try:
-                os.unlink(_f)
-            except OSError:
-                pass
-        raise HTTPException(status_code=500,
-                            detail=f"PDF 生成失敗：{exc}")
-    finally:
-        # Always remove the temp HTML
-        try:
-            os.unlink(tmp_html)
-        except OSError:
-            pass
+        raise HTTPException(status_code=500, detail=f"PDF 生成失敗：{exc}")
 
     from starlette.background import BackgroundTask
     safe_name = (staff.get("name") or "staff").replace(" ", "_")
     return no_store_file(          # 個資：不留任何快取（檔案送完就刪，快取一份等於留了副本）
         tmp_pdf, media_type="application/pdf",
         filename=f"{safe_name}_Resume.pdf",
-        background=BackgroundTask(lambda: os.unlink(tmp_pdf) if os.path.exists(tmp_pdf) else None),
+        background=BackgroundTask(unlink_later(tmp_pdf)),
     )
 
 

@@ -2,11 +2,13 @@
  * crm-projects-quotes.js — 專案內報價管理 Tab
  * 報價列表 + 明細展示 + 啟動專案
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, quotePdfFilename } from './crm-utils.js';
+import { authDownload } from '../../js/shared/utils.js';
 import { state, callbacks, PRESALE_STATUSES } from './crm-projects-state.js';
 import { _badge } from './crm-projects-core.js';
 
 let _selectedQuoteId = null;
+let _detailQuote = null;   // 目前展開那版的完整報價（PDF 檔名要它的日期／客戶／專案名）
 
 function _qBadge(status) {
     const s = status || '草稿';
@@ -74,6 +76,7 @@ async function _renderQuoteDetail(quoteId) {
 
     try {
         const q = await _fetch('/quotations/' + quoteId);
+        _detailQuote = q;
         const items = q.items || [];
 
         // Group items
@@ -115,6 +118,7 @@ async function _renderQuoteDetail(quoteId) {
               <div style="display:flex;gap:6px;">
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._pqEdit('${q.id}')">編輯</button>
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._pqDuplicate('${q.id}')">複製新版</button>
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._pqPdf('${q.id}')">PDF</button>
                 <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._pqDelete('${q.id}')">刪除</button>
               </div>
             </div>
@@ -167,6 +171,17 @@ function initQuoteHandlers() {
     window._pqSelect = (quoteId) => _renderQuoteDetail(quoteId);
     window._pqEdit = (id) => _withQuotes(m => m.quoteEdit(id));
     window._pqDuplicate = (id) => _withQuotes(m => m.quoteDup(id));
+
+    window._pqPdf = async (id) => {
+        let q;
+        try {
+            q = _detailQuote && _detailQuote.id === id ? _detailQuote : await _fetch('/quotations/' + id);
+        } catch (e) { alert('下載 PDF 失敗：' + e.message); return; }
+        const proj = state.projects.find(p => p.id === state.selectedId);
+        const name = quotePdfFilename(q, q.project_name || proj?.name || '',
+                                      q.client_short_name || proj?.client_short_name || '');
+        await authDownload('/api/v1/crm/quotations/' + id + '/pdf', name, '下載 PDF');
+    };
 
     window._pqDelete = async (quoteId) => {
         if (!confirm('確定刪除此報價？')) return;

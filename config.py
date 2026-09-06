@@ -37,6 +37,23 @@ _DEFAULT_SETTINGS: dict = {
     "finance": {
         "report_remind_hour": 9,
     },
+    # 公司資訊：報價單 PDF 的抬頭／匯款資訊／交檔條款／章（templates/quotation_pdf.html 讀），設定頁「公司資訊」分頁可編。
+    # logo_path／seal_path 是主控端本機路徑或 frontend 相對路徑（空＝logo 用 frontend/img/originsun-logo.webp、章不印）。
+    "company": {
+        "name": "源日有限公司",
+        "name_en": "ORIGINSUN STUDIO",
+        "tax_id": "90371657",
+        "address": "",
+        "phone": "",
+        "email": "",
+        "bank": "012 台北富邦 中山分行",
+        "account_name": "源日有限公司",
+        "account_no": "82120000062728",
+        "quote_valid_days": 14,
+        "delivery_terms": "完成檔以雲端儲存連結交檔。若須 DVD、USB、硬碟，與任何實體儲存裝置交檔，實報實銷。",
+        "logo_path": "",
+        "seal_path": "",
+    },
     # 工時 Google Sheet（services/timesheet_puller，只在 master 跑）：ingest_token 給
     # Apps Script／腳本推；pull 是主控端定時拉整本 xlsx（公開連結），enabled 由 owner 開。
     "timesheet": {

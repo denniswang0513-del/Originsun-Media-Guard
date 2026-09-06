@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>示範｜報價單 PDF 版面（定稿方向）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#111; --bar:#1f1f1f; --line:#3a3a3a; --ink:#e0e0e0; --sub:#9ca3af; --pri:#3b82f6; --warn:#fbbf24; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 "Noto Sans TC","Microsoft JhengHei",sans-serif; }
+
+  /* ── 示範外殼（列印時隱藏） ── */
+  .shell { position:sticky; top:0; z-index:5; background:var(--bar); border-bottom:1px solid var(--line); padding:10px 18px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .shell .tag { background:#3a2a00; color:var(--warn); border:1px solid #6b4f00; border-radius:4px; padding:2px 8px; font-size:12px; }
+  .shell b { font-weight:600; }
+  .shell .sp { flex:1; }
+  .shell a { color:#93c5fd; font-size:13px; }
+  .shell label { display:flex; align-items:center; gap:6px; color:var(--sub); font-size:13px; cursor:pointer; }
+  .shell button { background:var(--pri); color:#fff; border:0; border-radius:6px; padding:7px 14px; font-size:13px; cursor:pointer; }
+  .shell button.ghost { background:transparent; border:1px solid var(--line); color:var(--ink); }
+  .notes { max-width:820px; margin:16px auto 0; padding:0 18px; color:var(--sub); font-size:13px; }
+  .notes li { margin:3px 0; }
+  .notes code { color:#93c5fd; background:#1e293b; padding:1px 5px; border-radius:3px; }
+
+  /* ── A4 紙：全黑灰、只有線與字重，沒有色塊 ── */
+  .paper { --k:#111; --mute:#737373; --hair:#dcdcdc;
+    width:210mm; min-height:297mm; margin:18px auto 40px; background:#fff; color:var(--k); padding:14mm 16mm 12mm;
+    box-shadow:0 8px 40px rgba(0,0,0,.6); font-family:"Noto Sans TC","Microsoft JhengHei",sans-serif; font-size:9.5pt; line-height:1.5;
+    font-variant-numeric:tabular-nums; display:flex; flex-direction:column; }
+
+  .hd { display:flex; justify-content:space-between; align-items:center; }
+  .hd h1 { margin:0; font-size:14pt; font-weight:500; letter-spacing:.14em; line-height:1; }
+  .hd .sub { font-size:7.5pt; letter-spacing:.2em; color:var(--mute); margin-top:5px; }
+  .hd img { height:48px; }
+
+  /* 抬頭資訊：標籤在左、值在右，兩欄兩列（客戶／報價日期、專案／規格） */
+  .meta { display:grid; grid-template-columns:1.15fr 1fr; gap:2px 28px; margin-top:8px; padding-top:7px; border-top:1px solid var(--k); }
+  .meta .kv { display:grid; grid-template-columns:44px 1fr; gap:0 6px; align-items:baseline; }
+  .meta .kv .lab { font-size:7.5pt; color:var(--mute); }
+  .meta .kv .val { font-size:10pt; font-weight:500; }
+  /* 規格：用「、」或換行切成項目，一項一行，數字跟單位不會被拆開 */
+  .meta .kv .val.spec { font-size:8.5pt; font-weight:400; line-height:1.35; }
+  .meta .kv .val.spec span { display:block; }
+
+  table.q { width:100%; border-collapse:collapse; margin-top:8px; }
+  table.q th { font-size:7.5pt; color:var(--mute); font-weight:400; text-align:right; padding:0 6px 5px 0; border-bottom:1px solid var(--k); }
+  table.q th.l { text-align:left; padding-left:8px; }
+  table.q td { padding:1px 0 1px 8px; font-size:9pt; border-bottom:1px solid var(--hair); vertical-align:top; }
+  table.q td.num { text-align:right; white-space:nowrap; padding-right:6px; }
+  table.q td.c { text-align:right; white-space:nowrap; color:#444; }
+  table.q td.desc { word-break:break-word; padding-left:8px; }
+  table.q td.desc .note { color:var(--mute); font-size:8pt; margin-left:6px; }
+  table.q tr.grp td { padding:3px 8px 3px 0; background:#f2f2f2; border-bottom:0; }
+  table.q tr.grp td.name { padding-left:8px; }
+  table.q tr.grp { border-top:4px solid #fff; }
+  table.q tr.grp td:last-child { padding-right:6px; }
+  table.q tr.grp td.name { font-weight:700; font-size:9pt; }
+  table.q tr.grp td.num { font-weight:500; }
+  table.q tr.grp td.mute { color:var(--mute); font-size:7.5pt; text-align:right; }
+  col.desc { width:auto; } col.qty { width:44px; } col.unit { width:44px; } col.price { width:78px; } col.amt { width:96px; }
+
+  .sum-wrap { display:flex; justify-content:flex-end; margin-top:6px; }
+  .sum { width:72mm; padding-right:6px; }
+  .sum .row { display:flex; justify-content:space-between; padding:2px 0; font-size:9pt; }
+  .sum .row .l { color:var(--mute); }
+  .sum .grand { display:flex; justify-content:space-between; align-items:baseline; border-top:1px solid var(--k); margin-top:5px; padding-top:6px; }
+  .sum .grand .l { font-size:9pt; font-weight:500; }
+  .sum .grand .l small { color:var(--mute); font-weight:400; font-size:7.5pt; margin-left:6px; }
+  .sum .grand .v { font-size:14pt; font-weight:700; }
+
+  .stages { margin-top:10px; font-size:9pt; display:flex; gap:0; }
+  .stages .h { color:var(--mute); font-size:7.5pt; width:60px; padding-top:2px; }
+  .stages .cells { display:flex; gap:26px; }
+  .stages .cell .lab { font-weight:500; }
+  .stages .cell .pct { margin-left:5px; }
+  .stages .cell .amt { color:var(--mute); margin-left:6px; }
+
+  .foot { margin-top:auto; padding-top:6px; font-size:8.3pt; line-height:1.45; }
+  .foot .row1 { display:grid; grid-template-columns:1.7fr 1fr; gap:24px; }
+  .foot ol { margin:0; padding-left:14px; }
+  .foot ol li { padding-left:2px; }
+  .foot ol li::marker { color:var(--mute); }
+  .foot h5 { margin:0 0 1px; font-size:7.5pt; color:var(--mute); font-weight:400; }
+  .foot h5 + p { margin:0 0 8px; white-space:pre-line; }
+  .foot p:last-child { margin-bottom:0; }
+  .bank .kv { display:grid; grid-template-columns:32px 1fr; gap:0 6px; }
+  .bank .kv span:nth-child(odd) { color:var(--mute); }
+  /* 簽章：整寬兩格，高度 24mm，足夠蓋公司大小章 */
+  .sign { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:8px; }
+  .sign .blk { position:relative; height:22mm; border:1px solid var(--hair); }
+  .sign .blk .lab { position:absolute; left:8px; top:5px; font-size:7.5pt; color:var(--mute); }
+  .sign .blk .stamp { position:absolute; right:14px; bottom:6px; }
+  .seal { width:72px; height:72px; border:2px solid #c0392b; border-radius:50%; color:#c0392b; font-size:6.5pt; line-height:1.25; display:flex; align-items:center; justify-content:center; text-align:center; opacity:.8; transform:rotate(-6deg); }
+
+  .pfoot { display:flex; justify-content:space-between; margin-top:6px; font-size:7pt; color:var(--mute); }
+
+  @media print {
+    body { background:#fff; }
+    .shell, .notes { display:none !important; }
+    .paper { width:auto; min-height:auto; margin:0; padding:0; box-shadow:none; }
+    .paper.pin { min-height:281mm; }   /* 頁尾貼底：297 − 上下邊界 */
+    @page { size:A4 portrait; margin:8mm 16mm 7mm; }
+    table.q tr { page-break-inside:avoid; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <span class="tag">示範</span>
+  <b>報價單 PDF 版面（定稿方向）</b>
+  <a href="./quotation-pdf-classic.html">經典版</a>
+  <a href="./quotation-pdf-blocks.html">功能區塊版</a>
+  <span class="sp"></span>
+  <label>資料量 <select id="opt-data"><option value="full">完整（19 項）</option><option value="short">精簡（5 項）</option></select></label>
+  <label><input type="checkbox" id="opt-stages" checked> 備註帶付款方式（有填才印）</label>
+  <label><input type="checkbox" id="opt-discount"> 示範稅前折扣列</label>
+  <label><input type="checkbox" id="opt-pin"> 頁尾貼底（列印）</label>
+  <button class="ghost" onclick="toggleSeal()">章：佔位 / 隱藏</button>
+  <button onclick="window.print()">列印 / 存成 PDF</button>
+</div>
+
+<div class="paper" id="paper"></div>
+
+<ul class="notes">
+  <li>全張只用 Noto Sans TC、黑與灰、兩條黑線（抬頭下、總額上），沒有色塊與標籤；標題 14pt。</li>
+  <li>分組小結併在分組標題列右側；贈項用單價 0 加「原價」小字表達，不另做標籤。</li>
+  <li>金額規則：<b>專案優惠</b>＝含稅總計 − <code>final_price</code>；有效期同時印天數與到期日。</li>
+  <li>抬頭、logo、匯款資訊、交檔條款、章：從 <code>company</code> 設定區塊帶；<code>terms</code> 只放這張案子的備註。</li>
+</ul>
+
+<script>
+// ── 對應後端 _to_quotation_dict 的形狀（金額全是整數 NT$） ──
+const quotation = {
+  id: 31, version: 1, status: "已簽核",
+  project_name: "和平行動者系列影片",
+  spec: "前導短片 2 支、講座完整版 60 分 3 支、Fellow 個人影音 45 分 6 支、宣傳與花絮 2 支",
+  client_name: "龍應台文化基金會",
+  quote_date: "2025-07-15", valid_until: null,   // 空 → 預設 +14 天
+  tax_rate: 5, discount: 0,
+  final_price: 840000,
+  payment_stages: [{label:"簽約", pct:30}, {label:"拍攝完成", pct:40}, {label:"交片", pct:30}],
+  terms: "拍攝次數規劃 9 次，若超過 9 次，每人次 12,000。",
+  items: [
+    g("拍攝與前期製作", [
+      ["專案管理", 1, "套", 15000],
+      ["導演與企劃", 1, "式", 50000],
+      ["攝影師(含器材)", 9, "人次", 12000],
+      ["行政雜支(臺北市外交通與住宿實報實銷，或由主辦單位安排)", 9, "人次", 1200],
+    ]),
+    g("後期製作(前導影片 2 支)", [
+      ["活動前導短片 2 min 內 (含剪輯、調光、動態字卡)", 1, "支", 28000],
+      ["Fellow 行動紀錄影像播放 5 min 內 (含剪輯、調光、動態字卡)", 1, "支", 28000],
+    ]),
+    g("後期製作(和平論壇 3 支 60 分鐘)", [
+      ["動態視覺包裝", 1, "式", 18000],
+      ["完整版(60 min 講座)_(剪輯、文案、插入 PPT、切 AB 機、平台上架)", 3, "支", 35000],
+      ["中英字幕製作", 180, "分鐘", 320],
+    ]),
+    g("後期製作(Fellow 個人影音 6 支 45 分鐘)", [
+      ["動態視覺包裝", 1, "式", 18000],
+      ["Fellow 個人影音(45 min)_順剪(剪輯、文案、插入 PPT、切 AB 機、平台上架)", 6, "支", 35000],
+      ["中英字幕製作", 270, "分鐘", 320],
+    ]),
+    g("後期製作(花絮與 2026 宣傳片)", [
+      ["2026 宣傳短片剪輯與後期製作(90 秒內)", 1, "支", 28000],
+      ["2025 和平計畫花絮剪輯與後期製作(5 min 內)", 1, "支", 28000],
+    ]),
+    g("後期製作(其他)", [
+      ["音樂版權", 1, "套", 12000],
+    ]),
+    g("贈項", [
+      ["逐字稿、原始檔", 1, "套", 0, "原價 10,000"],
+    ]),
+  ].flat(),
+};
+// 精簡案例：一支形象短片，兩組五項
+const quotationShort = {
+  ...quotation,
+  project_name: "2026 品牌形象短片",
+  spec: "形象短片 90 秒 1 支，含中文字幕",
+  client_name: "陽光食品股份有限公司",
+  final_price: 180000,
+  payment_stages: [{label:"簽約", pct:50}, {label:"交片", pct:50}],
+  terms: "拍攝一日（8 小時），超時每小時 3,000。\n修改兩次，第三次起每次 5,000。",
+  items: [
+    g("拍攝", [
+      ["導演與企劃", 1, "式", 40000],
+      ["攝影師(含器材)", 2, "人次", 12000],
+      ["燈光與收音", 1, "人次", 8000],
+    ]),
+    g("後期製作", [
+      ["剪輯、調光、動態字卡（90 秒內）", 1, "支", 85000],
+      ["中文字幕製作", 1, "式", 3000],
+    ]),
+  ].flat(),
+};
+function g(group, rows) {
+  return rows.map(([description, quantity, unit, unit_price, note], i) =>
+    ({ group_name: group, sort_order: i, description, quantity, unit, unit_price, amount: quantity * unit_price, note: note || "" }));
+}
+
+// ── 新的 company 設定區塊（設定頁可編，全站共用） ──
+const company = {
+  name: "源日有限公司", logo: "../img/originsun-logo.webp",
+  tax_id: "90371657",
+  bank: "012 台北富邦 中山分行", account_name: "源日有限公司", account_no: "82120000062728",
+  quote_valid_days: 14,
+  delivery_terms: "完成檔以雲端儲存連結交檔。若須 DVD、USB、硬碟，與任何實體儲存裝置交檔，實報實銷。",
+  seal: null,   // 之後放去背 PNG 的路徑
+};
+
+const nt = n => "NT$" + Math.round(n).toLocaleString("en-US");
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ymd = d => `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`;
+let sealMode = "placeholder";
+
+function render() {
+  const q = document.getElementById("opt-data").value === "short" ? quotationShort : quotation;
+  const showStages = document.getElementById("opt-stages").checked;
+  const demoDiscount = document.getElementById("opt-discount").checked ? 10000 : 0;
+
+  // 金額鏈（跟後端 _calc_quotation 一樣：稅前折扣 → 稅 → 含稅總計；專案優惠是 total − final_price）
+  const subtotal = q.items.reduce((s, it) => s + it.amount, 0);
+  const taxable = Math.max(subtotal - demoDiscount, 0);
+  const tax = Math.floor(taxable * q.tax_rate / 100);
+  const total = taxable + tax;
+  const promo = q.final_price != null && q.final_price < total ? total - q.final_price : 0;
+  const finalPrice = q.final_price ?? total;
+
+  const qd = new Date(q.quote_date);
+  const vu = q.valid_until ? new Date(q.valid_until) : new Date(qd.getTime() + company.quote_valid_days * 864e5);
+  const validDays = Math.round((vu - qd) / 864e5);
+
+  const groups = [];
+  for (const it of q.items) {
+    let grp = groups[groups.length - 1];
+    if (!grp || grp.name !== it.group_name) groups.push(grp = { name: it.group_name, rows: [] });
+    grp.rows.push(it);
+  }
+  const body = groups.map(grp => {
+    const sub = grp.rows.reduce((s, r) => s + r.amount, 0);
+    return `
+    <tr class="grp"><td class="name" colspan="3">${esc(grp.name)}</td><td class="mute">小結</td><td class="num">${nt(sub)}</td></tr>
+    ${grp.rows.map(it => `
+      <tr>
+        <td class="desc">${esc(it.description)}${it.note ? `<span class="note">${esc(it.note)}</span>` : ""}</td>
+        <td class="c">${it.quantity}</td><td class="c">${esc(it.unit)}</td>
+        <td class="num">${nt(it.unit_price)}</td><td class="num">${nt(it.amount)}</td>
+      </tr>`).join("")}`;
+  }).join("");
+
+  const row = (l, v) => `<div class="row"><span class="l">${l}</span><span>${v}</span></div>`;
+  const summary = `
+    <div class="sum-wrap"><div class="sum">
+      ${row("合計", nt(subtotal))}
+      ${demoDiscount ? row("折扣", "−" + nt(demoDiscount)) : ""}
+      ${row(`營業稅 ${q.tax_rate}%`, nt(tax))}
+      ${promo ? row("專案優惠", "−" + nt(promo)) : ""}
+      <div class="grand"><span class="l">報價總額<small>含稅</small></span><span class="v">${nt(finalPrice)}</span></div>
+    </div></div>`;
+
+  const nw = t => `<span style="white-space:nowrap">${t}</span>`;
+  const notes = String(q.terms || "").split(/\r?\n/).map(t => t.trim()).filter(Boolean).map(esc);
+  if (showStages && q.payment_stages.length)
+    notes.push("付款方式：" + q.payment_stages.map(s => nw(`${esc(s.label)} ${s.pct}%　${nt(finalPrice * s.pct / 100)}`)).join("　"));
+  notes.push("完成檔交檔：" + esc(company.delivery_terms));
+  notes.push(nw(`報價有效期限 ${validDays} 日（至 ${ymd(vu)}）`));
+
+  const seal = sealMode === "placeholder"
+    ? `<div class="seal">源日有限公司<br>統一發票專用章<br>統一編號<br>${company.tax_id}</div>`
+    : (company.seal ? `<img src="${company.seal}" style="height:70px">` : "");
+
+  document.getElementById("paper").innerHTML = `
+    <div class="hd">
+      <div><h1>報價單</h1><div class="sub">PROJECT ESTIMATE　·　v${q.version}</div></div>
+      <img src="${company.logo}" alt="${esc(company.name)}">
+    </div>
+    <div class="meta">
+      <div class="kv"><span class="lab">客戶</span><span class="val">${esc(q.client_name)}</span></div>
+      <div class="kv"><span class="lab">報價日期</span><span class="val">${ymd(qd)}</span></div>
+      <div class="kv"><span class="lab">專案</span><span class="val">${esc(q.project_name)}</span></div>
+      <div class="kv"><span class="lab">規格</span><span class="val spec">${String(q.spec || "").split(/[、\n]/).filter(Boolean).map(x => `<span>${esc(x.trim())}</span>`).join("")}</span></div>
+    </div>
+    <table class="q">
+      <colgroup><col class="desc"><col class="qty"><col class="unit"><col class="price"><col class="amt"></colgroup>
+      <thead><tr><th class="l">項目</th><th>數量</th><th>單位</th><th>單價</th><th>金額</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    ${summary}
+    <div class="foot">
+      <div class="row1">
+      <div>
+        <h5>備註</h5><ol>${notes.map(n => `<li>${n}</li>`).join("")}</ol>
+      </div>
+      <div class="bank">
+        <h5>匯款資訊</h5>
+        <div class="kv">
+          <span>銀行</span><span>${esc(company.bank)}</span>
+          <span>戶名</span><span>${esc(company.account_name)}</span>
+          <span>帳號</span><span>${esc(company.account_no)}</span>
+          <span>統編</span><span>${esc(company.tax_id)}</span>
+        </div>
+      </div>
+      </div>
+      <div class="sign">
+        <div class="blk"><div class="lab">源日有限公司　簽章</div><div class="stamp">${seal}</div></div>
+        <div class="blk"><div class="lab">${esc(q.client_name)}　簽章</div></div>
+      </div>
+    </div>
+    <div class="pfoot"><span>${esc(company.name)}　統一編號 ${esc(company.tax_id)}</span><span>1 / 1</span></div>`;
+}
+function toggleSeal() { sealMode = sealMode === "placeholder" ? "none" : "placeholder"; render(); }
+document.getElementById("opt-data").addEventListener("change", render);
+document.getElementById("opt-stages").addEventListener("change", render);
+document.getElementById("opt-pin").addEventListener("change", e => document.getElementById("paper").classList.toggle("pin", e.target.checked));
+document.getElementById("opt-discount").addEventListener("change", render);
+render();
+</script>
+</body>
+</html>

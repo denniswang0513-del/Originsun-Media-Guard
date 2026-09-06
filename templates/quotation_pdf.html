@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>報價單 {{ v.project_name }}</title>
+<style>
+  /* 視覺正本：frontend/demo/quotation-pdf.html（2026-09-06 定稿）。改版面先改示範頁，再同步到這裡。 */
+  *, *::before, *::after { box-sizing:border-box; }
+  html, body { margin:0; padding:0; background:#fff; }
+  body { --k:#1a1a1a; --mute:#767676; --hair:#d9d9d9;
+    color:var(--k); font-family:"Noto Sans TC","Microsoft JhengHei","PingFang TC",sans-serif;
+    font-size:9.2pt; line-height:1.7; font-variant-numeric:tabular-nums; }
+  .lab { font-size:7.5pt; color:var(--mute); letter-spacing:.04em; }
+
+  .hd { display:flex; justify-content:space-between; align-items:flex-start; }
+  .hd h1 { margin:0; font-size:17pt; font-weight:500; letter-spacing:.2em; line-height:1.1; }
+  .hd h1 small { display:block; font-size:7.5pt; letter-spacing:.22em; color:var(--mute); font-weight:400; margin-top:4px; }
+  .hd img { height:48px; }
+
+  .parties { margin-top:22px; }
+  .parties .cols { display:grid; grid-template-columns:1fr 1fr; gap:0 28px; }
+  .parties .kv { display:grid; grid-template-columns:60px 1fr; gap:2px 8px; line-height:1.8; align-content:start; }
+  .parties .kv .k { color:var(--mute); }
+  .parties .kv .v { color:#222; }
+  .parties .spec span { display:block; }
+
+  table.q { width:100%; border-collapse:collapse; margin-top:18px; }
+  table.q thead { display:table-header-group; }
+  table.q th { background:#e6e6e6; color:var(--k); font-size:8pt; font-weight:700; letter-spacing:.06em; text-align:right; padding:7px 8px; }
+  table.q th.l { text-align:left; }
+  table.q td { padding:5px 8px; border-bottom:1px solid var(--hair); vertical-align:top; }
+  table.q td.num { text-align:right; white-space:nowrap; }
+  table.q td.c { text-align:right; white-space:nowrap; color:#444; }
+  table.q td.desc { word-break:break-word; }
+  table.q td.desc .note { color:var(--mute); font-size:8pt; margin-left:6px; }
+  table.q tr { page-break-inside:avoid; }
+  table.q tr.grp td { background:#f4f4f4; padding:6px 8px; border-bottom:0; }
+  table.q tr.grp td.name { font-weight:700; }
+  table.q tr.grp td.mute { font-size:7.5pt; color:var(--mute); text-align:right; }
+  table.q tr.grp td.num { font-weight:500; }
+  col.desc { width:auto; } col.qty { width:52px; } col.unit { width:52px; } col.price { width:86px; } col.amt { width:100px; }
+
+  .lower { display:flex; justify-content:flex-end; margin-top:10px; break-inside:avoid; page-break-inside:avoid; }
+  .sum { width:78mm; }
+  .sum .row { display:grid; grid-template-columns:1fr 110px; align-items:baseline; border-bottom:1px solid var(--hair); padding:5px 8px 3px 0; }
+  .sum .row .l { text-align:right; font-size:7.5pt; letter-spacing:.06em; color:#333; font-weight:500; }
+  .sum .row .v { text-align:right; }
+  .sum .grand { display:grid; grid-template-columns:1fr 130px; align-items:baseline; margin-top:6px; padding:8px 8px 0 0; }
+  .sum .grand .l { text-align:right; font-size:10pt; font-weight:700; }
+  .sum .grand .l small { font-size:7.5pt; color:var(--mute); font-weight:400; margin-left:6px; }
+  .sum .grand .v { text-align:right; font-size:14pt; font-weight:700; }
+
+  .remarks { margin-top:16px; padding-top:12px; border-top:1px solid var(--hair); break-inside:avoid; page-break-inside:avoid; }
+  h5 { margin:0 0 6px; font-size:7.5pt; letter-spacing:.08em; color:var(--k); font-weight:700; }
+  .remarks ol { margin:0; padding-left:16px; font-size:8.6pt; line-height:1.75; max-width:150mm; }
+  .remarks ol li { padding-left:2px; }
+  .remarks ol li::marker { color:var(--mute); }
+  .nw { white-space:nowrap; }
+
+  .bank { display:flex; align-items:baseline; gap:20px; margin-top:12px; padding-top:8px; border-top:1px solid var(--hair); font-size:8.3pt; break-inside:avoid; page-break-inside:avoid; }
+  .bank h5 { margin:0; }
+  .bank span .lab { margin-right:5px; }
+
+  .sign { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:18px; break-inside:avoid; page-break-inside:avoid; }
+  .sign .blk { position:relative; height:26mm; border:1px solid var(--hair); }
+  .sign .blk .lab { position:absolute; left:10px; top:7px; }
+  .sign .blk .stamp { position:absolute; right:16px; bottom:8px; }
+  .sign .blk .stamp img { height:74px; }
+
+  /* 單頁時簽章貼底：紙高 297 − 上下邊界（12＋14）。多頁時 .page 自然長，簽章跟在內容後。 */
+  .page { min-height:271mm; display:flex; flex-direction:column; }
+  .sign { margin-top:auto; padding-top:18px; }
+  @page { size:A4 portrait; margin:12mm 16mm 14mm; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="hd">
+    <h1>報價單<small>PROJECT ESTIMATE</small></h1>
+    {% if logo_src %}<img src="{{ logo_src }}" alt="">{% endif %}
+  </div>
+
+  <div class="parties">
+    <div class="cols">
+      <div class="kv">
+        <span class="k">客戶</span><span class="v">{{ v.client_name }}</span>
+        <span class="k">專案</span><span class="v">{{ v.project_name }}</span>
+      </div>
+      <div class="kv">
+        {% if v.spec_lines %}
+        <span class="k">規格</span><span class="v spec">{% for line in v.spec_lines %}<span>{{ line }}</span>{% endfor %}</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <table class="q">
+    <colgroup><col class="desc"><col class="qty"><col class="unit"><col class="price"><col class="amt"></colgroup>
+    <thead><tr><th class="l">項目</th><th>數量</th><th>單位</th><th>單價</th><th>金額</th></tr></thead>
+    <tbody>
+    {% for g in v.groups %}
+      {% if g.name %}<tr class="grp"><td class="name" colspan="3">{{ g.name }}</td><td class="mute">小結</td><td class="num">{{ g.subtotal_fmt }}</td></tr>{% endif %}
+      {% for r in g.rows %}
+      <tr>
+        <td class="desc">{{ r.description }}{% if r.note %}<span class="note">{{ r.note }}</span>{% endif %}</td>
+        <td class="c">{{ r.quantity }}</td><td class="c">{{ r.unit }}</td>
+        <td class="num">{{ r.unit_price_fmt }}</td><td class="num">{{ r.amount_fmt }}</td>
+      </tr>
+      {% endfor %}
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="lower"><div class="sum">
+    <div class="row"><span class="l">合計</span><span class="v">{{ v.subtotal_fmt }}</span></div>
+    {% if v.discount %}<div class="row"><span class="l">折扣</span><span class="v">−{{ v.discount_fmt }}</span></div>{% endif %}
+    <div class="row"><span class="l">營業稅 {{ v.tax_rate }}%</span><span class="v">{{ v.tax_fmt }}</span></div>
+    {% if v.promo %}<div class="row"><span class="l">專案優惠</span><span class="v">−{{ v.promo_fmt }}</span></div>{% endif %}
+    <div class="grand"><span class="l">報價總額<small>含稅</small></span><span class="v">{{ v.final_fmt }}</span></div>
+  </div></div>
+
+  <div class="remarks">
+    <h5>備註</h5>
+    <ol>
+      {% for t in v.terms_lines %}<li>{{ t }}</li>{% endfor %}
+      {% if v.payment %}<li>付款方式：{% for s in v.payment %}<span class="nw">{{ s.label }} {{ s.pct }}%　{{ s.amount_fmt }}</span>{% if not loop.last %}　{% endif %}{% endfor %}</li>{% endif %}
+      {% if v.delivery_terms %}<li>完成檔交檔：{{ v.delivery_terms }}</li>{% endif %}
+      <li><span class="nw">報價有效期限 {{ v.valid_days }} 日（至 {{ v.valid_until }}）</span></li>
+    </ol>
+  </div>
+
+  {% if v.company.bank or v.company.account_no %}
+  <div class="bank">
+    <h5>匯款資訊</h5>
+    {% if v.company.bank %}<span><span class="lab">銀行</span>{{ v.company.bank }}</span>{% endif %}
+    {% if v.company.account_name %}<span><span class="lab">戶名</span>{{ v.company.account_name }}</span>{% endif %}
+    {% if v.company.account_no %}<span><span class="lab">帳號</span>{{ v.company.account_no }}</span>{% endif %}
+    {% if v.company.tax_id %}<span><span class="lab">統編</span>{{ v.company.tax_id }}</span>{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="sign">
+    <div class="blk"><div class="lab">{{ v.company.name }}　簽章</div>{% if seal_src %}<div class="stamp"><img src="{{ seal_src }}" alt=""></div>{% endif %}</div>
+    <div class="blk"><div class="lab">客戶簽章</div></div>
+  </div>
+</div>
+</body>
+</html>

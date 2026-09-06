@@ -45,6 +45,7 @@ MONEY_ONLY_PATHS = [
     "/api/v1/crm/receivables/summary",
     "/api/v1/crm/quotations",
     "/api/v1/crm/quotations/stats",
+    "/api/v1/crm/quotations/__probe__/pdf",
     "/api/v1/crm/quotation-templates",
     "/api/v1/crm/cost-line-templates",
     "/api/v1/crm/projects/__probe__/expenses",

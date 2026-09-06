@@ -632,6 +632,7 @@ class QuotationPayload(BaseModel):
     final_price: Optional[int] = None
     payment_stages: List[dict] = []
     terms: str = ""
+    spec: str = ""                     # 規格（報價單抬頭；「、」或換行分隔多項）
     items: List[QuotationItemPayload] = []
 
 
