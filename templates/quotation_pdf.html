@@ -70,6 +70,7 @@
   /* 單頁時簽章貼底：紙高 297 − 上下邊界（12＋14）。多頁時 .page 自然長，簽章跟在內容後。 */
   .page { min-height:271mm; display:flex; flex-direction:column; }
   .sign { margin-top:auto; padding-top:18px; }
+  /* 🔴 這組邊界＝core.quotation_pdf.PDF_MARGIN（產 PDF 時傳給 Playwright），改一邊要改兩邊 */
   @page { size:A4 portrait; margin:12mm 16mm 14mm; }
 </style>
 </head>

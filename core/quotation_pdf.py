@@ -18,6 +18,10 @@ from core.hr_logic import tw_day
 _FILENAME_BAD = re.compile(r'[\\/:*?"<>|\r\n\t]+')
 _SPEC_SEP = re.compile(r"[、\r\n]+")
 
+# PDF 頁面邊界：**必須跟 templates/quotation_pdf.html 的 `@page` 一致**（模板還用它算
+# 「單頁時簽章貼底」的 .page min-height：297 − 上 − 下）。改一邊沒改另一邊，簽章框會浮起來。
+PDF_MARGIN = {"top": "12mm", "right": "16mm", "bottom": "14mm", "left": "16mm"}
+
 COMPANY_DEFAULTS = {
     "name": "源日有限公司", "name_en": "ORIGINSUN STUDIO", "tax_id": "",
     "address": "", "phone": "", "email": "",
@@ -32,6 +36,7 @@ def nt(n) -> str:
 
 
 def ymd(d: Optional[date]) -> str:
+    """日期 → `2026.09.06`（報價單上的寫法）；None → 空字串。"""
     return f"{d.year}.{d.month:02d}.{d.day:02d}" if d else ""
 
 
@@ -68,22 +73,10 @@ def pdf_filename(quote_date: Optional[date], client_name: str, project_name: str
     return "_".join(p for p in parts if p) + f"_{suffix}.pdf"
 
 
-def build_quotation_view(q: dict, company: Optional[dict] = None, *,
-                         client_name: str = "", project_name: str = "",
-                         today: Optional[date] = None) -> dict:
-    """`_to_quotation_dict` 的輸出 → 模板要的一切（金額字串、分組、備註清單、檔名）。"""
-    co = {**COMPANY_DEFAULTS, **(company or {})}
-    try:
-        valid_days = int(co.get("quote_valid_days") or 14)
-    except (TypeError, ValueError):
-        valid_days = 14
-
-    quote_date = _as_date(q.get("quote_date")) or today or date.today()
-    valid_until = _as_date(q.get("valid_until")) or (quote_date + timedelta(days=valid_days))
-    valid_days = max((valid_until - quote_date).days, 0)
-
+def _group_items(items) -> list[dict]:
+    """項目照 group_name 收成一段一段（相鄰同名才算同一組，跟示範頁一致），每組帶小結。"""
     groups: list[dict] = []
-    for it in q.get("items") or []:
+    for it in items or []:
         name = (it.get("group_name") or "").strip()
         if not groups or groups[-1]["name"] != name:
             groups.append({"name": name, "rows": [], "subtotal": 0})
@@ -99,6 +92,22 @@ def build_quotation_view(q: dict, company: Optional[dict] = None, *,
         groups[-1]["subtotal"] += amount
     for g in groups:
         g["subtotal_fmt"] = nt(g["subtotal"])
+    return groups
+
+
+def build_quotation_view(q: dict, company: Optional[dict] = None, *,
+                         client_name: str = "", project_name: str = "",
+                         today: Optional[date] = None) -> dict:
+    """`_to_quotation_dict` 的輸出 → 模板要的一切（金額字串、分組、備註清單、檔名）。"""
+    co = {**COMPANY_DEFAULTS, **(company or {})}
+    try:
+        valid_days = int(co.get("quote_valid_days") or 14)
+    except (TypeError, ValueError):
+        valid_days = 14
+
+    quote_date = _as_date(q.get("quote_date")) or today or date.today()
+    valid_until = _as_date(q.get("valid_until")) or (quote_date + timedelta(days=valid_days))
+    valid_days = max((valid_until - quote_date).days, 0)
 
     total = int(q.get("total") or 0)
     final_price = q.get("final_price")
@@ -122,7 +131,7 @@ def build_quotation_view(q: dict, company: Optional[dict] = None, *,
         "quote_date": ymd(quote_date),
         "valid_until": ymd(valid_until),
         "valid_days": valid_days,
-        "groups": groups,
+        "groups": _group_items(q.get("items")),
         "subtotal_fmt": nt(q.get("subtotal")),
         "discount": int(q.get("discount") or 0),
         "discount_fmt": nt(q.get("discount")),

@@ -1234,3 +1234,33 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 > `tests/integration`／`tests/e2e` 的 fixture 會自己拉起一個真伺服器（`tests/conftest.py` 的 `real_server`），
 > 不是純函式測試，所以 /polish 的「全套測試」以單元套件為準（publish gate 也是跑 `tests/unit`）。
 > 這條分支相對於 master 的 diff 極大（整條 feature/website-m），跑 /polish 時請用 `focus on <範圍>` 縮小。
+
+---
+
+## 模組職責
+
+> /polish 逐次累積：**這次新增或大改的模組**各一行。不是全 repo 目錄表（那在第 3 節）。
+
+| 模組 | 職責 | 邊界 |
+|------|------|------|
+| [`core/quotation_pdf.py`](core/quotation_pdf.py) | 報價單 PDF 的**純檢視模型**：分組小結、金額字串、專案優惠倒算、備註組成、有效期預設、檔名 | 無 I/O、不碰 DB／設定檔；金額規則改這裡並補測試 |
+| [`services/html_pdf.py`](services/html_pdf.py) | HTML 字串 → A4 PDF 的**唯一**管線（Playwright）＋ Jinja2 渲染＋圖檔轉 data URI | 報價單與人員履歷共用；**不准再有第二處 inline `async_playwright`**（測試釘著） |
+| [`templates/quotation_pdf.html`](templates/quotation_pdf.html) | 報價單版面（2026-09-06 owner 定稿） | 視覺正本是 [`frontend/demo/quotation-pdf.html`](frontend/demo/quotation-pdf.html)，**先改示範頁再同步模板** |
+| [`frontend/js/shared/quote-file.js`](frontend/js/shared/quote-file.js) | 報價 PDF 檔名規則（`YYYYMMDD_客戶_專案_源日報價單.pdf`） | 零 import 葉節點；桌機 `crm-utils` 與手機 `m/shell.js` 各 re-export 一份，**別再拼第二份檔名** |
+| `frontend/m/shell.js` 的 `mdownload` | 手機版帶權限下載（blob；401 導回登入） | 手機分頁只准 `import './shell.js'`，下載一律走它，不要自己 `fetch` |
+
+## 不要動的地方
+
+> /polish 逐次累積的地雷。動之前先讀對應那一行。
+
+- **報價單版面**：owner 逐項拍板過（無公司抬頭區塊、無上下色帶、灰表頭、總額無粗線、備註在結算下方、
+  頁尾只留數字）。要調版面先開示範頁比對，別直接改模板。
+- **`core.quotation_pdf.PDF_MARGIN` 與模板 `@page` 必須一致**：模板還用它算「單頁時簽章貼底」的
+  `.page min-height`（297 − 上 − 下）。改一邊沒改另一邊，簽章框會浮起來。
+- **給既有 payload 加新欄位一律 `Optional[...] = None`，寫入端 `if x is not None`**：Cloudflare 給
+  `.js` 4 小時瀏覽器快取，舊分頁的 PUT 不帶新欄位，用 `str = ""` 會把別人剛填的值洗掉
+  （見 `reference_cloudflare_js_cache`；`crm_quotations.spec` 就是這樣修的）。
+- **設定 Modal 的分區只在欄位真的在 DOM 裡才送**：舊 html 配新 js 會把整區寫成空字串
+  （`readCompany()` 回 `null` 就整個不送，靠後端 merge-on-save 留住原值）。
+- **範本彈窗是從工具列開的**，那時報價彈窗必定關著 —— 別再寫「報價彈窗開著嗎」來分流，那條走不到。
+- **Playwright 測手機頁**：塞 token 進 localStorage 後要**換 URL 重載**（同頁只改 hash，殼不會重跑登入閘門）。

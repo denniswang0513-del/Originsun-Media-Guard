@@ -11,7 +11,7 @@ from fastapi import Depends, HTTPException, Request, Query
 
 from core.finance_logic import QUOTE_PENDING
 from core.no_store import no_store_file
-from core.quotation_pdf import build_quotation_view, footer_line
+from core.quotation_pdf import PDF_MARGIN, build_quotation_view, footer_line
 from core.schemas import QuotationPayload, QuotationTemplatePayload
 
 from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory,
@@ -269,8 +269,7 @@ async def quotation_pdf(quotation_id: str):
             f'<span>{_html.escape(footer_line(view))}</span>'
             '<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>'
         )
-        tmp_pdf = await html_to_pdf(html_doc, prefix="quotation_", footer_html=footer,
-                                    margin={"top": "12mm", "right": "16mm", "bottom": "14mm", "left": "16mm"})
+        tmp_pdf = await html_to_pdf(html_doc, prefix="quotation_", footer_html=footer, margin=PDF_MARGIN)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"PDF 生成失敗：{exc}")
     return no_store_file(              # 金額文件：不留快取副本，送完就刪
