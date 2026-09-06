@@ -106,6 +106,15 @@ def test_mobile_quote_form_writes_through_the_desktop_endpoints():
     assert "openSheet(" in src and "closeSheet()" in src
 
 
+def test_mobile_quote_promo_and_final_are_reciprocal():
+    """優惠 ↔ 最終報價 兩格互推（同發票的未稅／含稅）；存進去的仍只有 final_price ——
+    報價單上的「專案優惠」是 含稅總計 − final_price 倒算的，優惠格只是輸入輔助。"""
+    src = js_code_only(repo_src("frontend/m/views/quotes.js"))
+    assert "qf-promo" in src and "_form.anchor" in src
+    assert "anchor = 'promo'" in src and "anchor = 'final'" in src
+    assert "promo:" not in src and "discount:" not in src, "優惠不是新欄位，別送進 payload"
+
+
 def test_mobile_quote_starts_from_client_not_project():
     """owner 2026-09-07：報價時案子通常還沒成立 —— 入口是客戶（必選、可現場建），
     專案自己打字；沒連結既有案就先建殼專案再掛報價，階段字從 options 來不寫死。"""

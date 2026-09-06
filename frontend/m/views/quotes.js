@@ -95,7 +95,14 @@ function drawItems() {
 
 function recalc() {
     const t = quoteTotals({ items: _form.items, taxRate: F('tax_rate').value });
-    const finalPrice = parseInt(F('final_price').value) || 0;
+    // 優惠 ↔ 最終報價 互推（同發票的未稅／含稅）：只寫「不是正在打的那一格」，免得游標被搶
+    const promoEl = F('promo'), finalEl = F('final_price');
+    if (_form.anchor === 'promo') {
+        finalEl.value = promoEl.value === '' ? '' : Math.max(t.total - (parseInt(promoEl.value) || 0), 0);
+    } else if (_form.anchor === 'final') {
+        promoEl.value = finalEl.value === '' ? '' : Math.max(t.total - (parseInt(finalEl.value) || 0), 0);
+    }
+    const finalPrice = parseInt(finalEl.value) || 0;
     const promo = finalPrice && finalPrice < t.total ? t.total - finalPrice : 0;
     document.getElementById('qf-calc').innerHTML = `
       <div class="row"><span>合計</span><span class="amt">${money(t.subtotal)}</span></div>
@@ -122,11 +129,12 @@ function formHtml(templates, q) {
         <div class="m-h">項目</div>
         <div id="qf-items"></div>
         <button type="button" class="m-more" id="qf-add">＋ 加一列</button>
+        <label>稅率 %</label><input id="qf-tax_rate" type="number" inputmode="numeric" min="0" value="5">
         <div class="row2">
-          <div><label>稅率 %</label><input id="qf-tax_rate" type="number" inputmode="numeric" min="0" value="5"></div>
+          <div><label>優惠</label><input id="qf-promo" type="number" inputmode="numeric" min="0" placeholder="折多少"></div>
           <div><label>最終報價（含稅）</label><input id="qf-final_price" type="number" inputmode="numeric" min="0" placeholder="空白＝照算出來的"></div>
         </div>
-        <div class="m-hint">最終報價填了就是它，差額會印成「專案優惠」</div>
+        <div class="m-hint">兩格互推：打優惠就算出最終報價，打最終報價就算出優惠。報價單上印成「專案優惠」</div>
         <label>付款方式</label><input id="qf-stages" placeholder="簽約 30%, 拍攝 40%, 交片 30%">
         <label>備註</label><textarea id="qf-terms" rows="3" placeholder="一行一條"></textarea>
         <div class="m-card" id="qf-calc" style="margin-top:12px"></div>
@@ -149,6 +157,7 @@ async function openForm(host, id) {
         project_id: q ? q.project_id : '',        // 有值＝掛既有案；空＝儲存時照 project_name 建一個
         project_name: '',
         client_id: '',
+        anchor: q && q.final_price != null ? 'final' : null,   // 優惠／最終報價 哪一格是人填的
         project_label: q ? [q.client_short_name, q.project_name].filter(Boolean).join('｜') : '',
         status: q ? q.status : (list('quote_statuses')[0] || ''),   // 字彙只從 options 來
         items: q && q.items && q.items.length ? q.items.map(it => ({ ...it })) : [{ ...EMPTY_ROW }],
@@ -192,7 +201,8 @@ async function openForm(host, id) {
         drawItems();
     };
     F('tax_rate').oninput = recalc;
-    F('final_price').oninput = recalc;
+    F('promo').oninput = () => { _form.anchor = 'promo'; recalc(); };
+    F('final_price').oninput = () => { _form.anchor = 'final'; recalc(); };
     document.getElementById('qf-form').onsubmit = (ev) => { ev.preventDefault(); save(host); };
 }
 
