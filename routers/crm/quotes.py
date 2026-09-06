@@ -252,11 +252,12 @@ async def quotation_pdf(quotation_id: str):
         client = await session.get(Client, project.client_id) if project and project.client_id else None
     company = dict(load_settings().get("company") or {})
     client_name = ((client.full_name or "").strip() or client.short_name) if client else ""
+    project_name = project.name if project else ""
     try:                                   # 組資料／渲染／產 PDF 同一個出口：壞在哪一段對使用者都是「PDF 生成失敗」
         view = build_quotation_view(
-            _to_quotation_dict(q, items=items, project_name=project.name if project else "",
+            _to_quotation_dict(q, items=items, project_name=project_name,
                                client_short_name=client.short_name if client else ""),
-            company, client_name=client_name, project_name=project.name if project else "")
+            company, client_name=client_name, project_name=project_name)
         html_doc = render_template(
             "quotation_pdf.html", v=view,
             logo_src=file_data_uri(company.get("logo_path") or "frontend/img/originsun-logo.webp"),

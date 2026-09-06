@@ -111,11 +111,13 @@ def build_quotation_view(q: dict, company: Optional[dict] = None, *,
     } for s in (q.get("payment_stages") or []) if isinstance(s, dict)]
 
     terms_lines = [t.strip() for t in str(q.get("terms") or "").splitlines() if t.strip()]
+    client = client_name or q.get("client_short_name") or ""      # 客戶全稱優先，退回代稱
+    project = project_name or q.get("project_name") or ""
 
     return {
         "version": q.get("version") or 1,
-        "client_name": client_name or q.get("client_short_name") or "",
-        "project_name": project_name or q.get("project_name") or "",
+        "client_name": client,
+        "project_name": project,
         "spec_lines": spec_lines(q.get("spec")),
         "quote_date": ymd(quote_date),
         "valid_until": ymd(valid_until),
@@ -133,8 +135,7 @@ def build_quotation_view(q: dict, company: Optional[dict] = None, *,
         "terms_lines": terms_lines,
         "delivery_terms": (co.get("delivery_terms") or "").strip(),
         "company": co,
-        "filename": pdf_filename(quote_date, client_name or q.get("client_short_name") or "",
-                                 project_name or q.get("project_name") or ""),
+        "filename": pdf_filename(quote_date, client, project),
     }
 
 
