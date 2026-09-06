@@ -1223,3 +1223,14 @@ llms.txt / indexable / ai_allow 等）8 步流程：
 - [ ] **J-3 備份 Tab 整合**：選專案自動帶入路徑
 - [ ] **行動端適配**：目前 UI 針對大螢幕優化，行動端排版仍需加強
 - [x] **Phase M：對外官方網站（✅ 已上線，持續迭代）** — `originsun-studio.com`，2026-04-29 完整版 A 部署完成（NAS 容器 24/7 對外）；後續持續加功能（AI SEO、英文翻譯、301 轉址、結案上架收件匣等）。完整規劃：[`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)
+
+---
+
+## polish
+
+polish.base: master
+polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
+
+> `tests/integration`／`tests/e2e` 的 fixture 會自己拉起一個真伺服器（`tests/conftest.py` 的 `real_server`），
+> 不是純函式測試，所以 /polish 的「全套測試」以單元套件為準（publish gate 也是跑 `tests/unit`）。
+> 這條分支相對於 master 的 diff 極大（整條 feature/website-m），跑 /polish 時請用 `focus on <範圍>` 縮小。
