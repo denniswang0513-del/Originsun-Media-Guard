@@ -482,6 +482,31 @@ def manual_dup_key(staff_name: str, work_date: Optional[datetime],
     return ((staff_name or "").strip(), tw_day(work_date), (project_name or "").strip())
 
 
+# timesheets.sheet_key 是 VARCHAR：鍵存進去要編成字串、讀出來要解回 manual_dup_key 的 tuple 才對得上
+# （2026-09-06 三個寫入點直接塞 tuple → asyncpg DataError，總表改任何一列都 500）。編解碼只有這一份。
+_SHEET_KEY_SEP = "\x1f"
+
+
+def sheet_key_of(staff_name: str, work_date: Optional[datetime], project_name: str) -> str:
+    """manual_dup_key 的可存字串版（人／日／案，以 \\x1f 分隔，日期 ISO）。"""
+    staff, d, proj = manual_dup_key(staff_name, work_date, project_name)
+    return _SHEET_KEY_SEP.join((staff, d.isoformat() if d else "", proj))
+
+
+def sheet_key_tuple(key: Optional[str]) -> Optional[tuple]:
+    """sheet_key 欄的字串 → manual_dup_key 同形 tuple；空／壞格式回 None（呼叫端退回現值鍵）。"""
+    if not key:
+        return None
+    parts = key.split(_SHEET_KEY_SEP)
+    if len(parts) != 3:
+        return None
+    try:
+        d = date.fromisoformat(parts[1]) if parts[1] else None
+    except ValueError:
+        return None
+    return (parts[0], d, parts[2])
+
+
 # ── 福委會（docs/BENEFIT_POOL_PLAN.md）純規則 ────────────────────────
 #
 # owner 2026-08-21：「我有幾個福利池，一個是快樂、一個是進修，這兩塊員工都可以

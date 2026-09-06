@@ -11,7 +11,7 @@ import hashlib
 import uuid
 from datetime import datetime
 
-from core.hr_logic import Misses, manual_dup_key, resolve_project, resolve_staff
+from core.hr_logic import Misses, manual_dup_key, resolve_project, resolve_staff, sheet_key_tuple
 from services.timesheet_lookup import load_project_lookup, load_staff_index
 
 
@@ -46,7 +46,7 @@ async def ingest_context(session, staff_names) -> dict:
         .where(Timesheet.source != "manual").where(Timesheet.edited_at.isnot(None)))).all()
     edited_keys: dict = {}
     for rid, n, d, p, sk, task, hrs in edited:
-        edited_keys.setdefault(sk or manual_dup_key(n, d, p), []).append((rid, (task or "").strip(), float(hrs or 0)))
+        edited_keys.setdefault(sheet_key_tuple(sk) or manual_dup_key(n, d, p), []).append((rid, (task or "").strip(), float(hrs or 0)))
     conflict_hashes = set((await session.execute(select(TimesheetConflict.incoming_hash))).scalars())   # 記過的不重記
     manual_keys: set = set()
     if names:

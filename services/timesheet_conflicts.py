@@ -75,8 +75,8 @@ async def resolve_conflict(session, cid: str, choice: str, who: str) -> dict:
             r.staff_name = new_staff
             r.staff_id, _swhy = resolve_staff(new_staff, await load_staff_index(session))   # 人換了 id 要跟著換
         r.project_id, r.project_name = pid, pname
-        from core.hr_logic import manual_dup_key
-        r.sheet_key = manual_dup_key(r.staff_name, r.work_date, r.project_name)
+        from core.hr_logic import sheet_key_of
+        r.sheet_key = sheet_key_of(r.staff_name, r.work_date, r.project_name)   # VARCHAR 欄：存字串，不是 tuple
         r.task_note = (inc.get("task") or "").strip() or None
         r.hours = float(inc.get("hours") or 0)
         r.row_hash = c.incoming_hash              # 之後這個 Sheet 版本就是「已有」

@@ -247,8 +247,8 @@ def _remember_sheet_key(r) -> None:
     """Sheet 列第一次被總表改之前，把（人,日,案）原鍵記下來：之後管理員改了案名／人／日期，
     拉取還認得 Sheet 那一列是它（不然 Sheet 再變就插成第二列、時數加倍）。"""
     if r.source != "manual" and not getattr(r, "sheet_key", None):
-        from core.hr_logic import manual_dup_key
-        r.sheet_key = manual_dup_key(r.staff_name, r.work_date, r.project_name)
+        from core.hr_logic import sheet_key_of
+        r.sheet_key = sheet_key_of(r.staff_name, r.work_date, r.project_name)   # VARCHAR 欄：存字串，不是 tuple
 
 
 async def admin_update_row(session, row_id: str, body, who: str = "") -> dict:
