@@ -23,200 +23,9 @@ async function _loadProjectStaff(projectId) {
 
 // ── Load Cost Staff ─────────────────────────────────────────────
 
-async function _loadCostStaff(projectId) {
-    var container = document.getElementById('proj-cost-staff');
-    if (!container) return;
-    // 「執行人員」畫的是 cost-lines（**錢的正本**：項目 × 金額 × 付款狀態），
-    // 所以它跟著金額權走。沒授權時人員配置要看 tabs/proposals 那條路
-    // （派工＝人的正本），不是把這張表閹掉。docs/MONEY_VISIBILITY.md §4
-    if (moneyGate(container)) return;
-    try {
-        var data = await _fetch('/projects/' + projectId + '/cost-lines');
-        var lines = data.cost_lines || [];
-        // Fetch payment requests for this project to check payment status
-        var payments = [];
-        try {
-            var payData = await _fetch('/payments?project_id=' + projectId);
-            payments = payData.payments || [];
-        } catch(_) {}
-        // 分人＋配請款單的規則只有 crm-utils.groupCostStaff 這一份 —— 收支明細的「請款」
-        // 列的就是同一張表、開的單也長一樣，所以這裡才配得到（owner 2026-09-04）。
-        var groups = groupCostStaff(lines, payments);
-        if (groups.length === 0) {
-            container.innerHTML = '<div class="crm-empty" style="padding:8px 0;font-size:12px;">尚無執行人員</div>';
-            return;
-        }
-
-        var proj = state.projects.find(function(p) { return p.id === projectId; });
-        var projName = proj ? proj.name : '';
-        var grandTotal = 0;
-        var html = '<div style="font-size:12px;">';
-        for (var k = 0; k < groups.length; k++) {
-            var s = groups[k];
-            var subtotal = s.subtotal;
-            var itemNames = s.items;
-            grandTotal += subtotal;
-
-            var matchedPayment = s.payment;
-
-            var statusHtml = '';
-            if (matchedPayment) {
-                // 代墊：錢是別人先掏的，這一列要標出來 —— 不標的話「已付款」
-                // 看起來像公司付給這個人，而實際上公司欠的是代墊人。
-                var advTag = matchedPayment.advance_by
-                    ? '<span style="color:#fb923c;font-size:10px;margin-right:6px;" title="這筆費用由 '
-                        + _esc(matchedPayment.payee_name || '') + ' 先代墊，公司要還的是他">'
-                        + _esc(matchedPayment.payee_name || '') + ' 代墊</span>'
-                    : '';
-                var _pid = matchedPayment.id;
-                var statusSpan = function(color, text) {
-                    return advTag + '<span style="color:' + color + ';cursor:pointer;font-size:11px;"'
-                        + ' onclick="window._costViewPayment(\'' + _pid + '\')">' + text + '</span>';
-                };
-                // 🔴 請款之後那一列不能只剩三個字 —— 按錯了要能當場收回或改
-                // 狀態，不用跑去別的 tab 找那張單（owner 2026-09-02，同私帳）。
-                statusHtml = (matchedPayment.payment_status === '已付款'
-                    ? statusSpan('#86efac', '已付款 ✓')
-                    : statusSpan('#fb923c', '已請款'))
-                    + window._costPayBtns(matchedPayment);
-            } else {
-                var _eName = _esc(s.name).replace(/'/g, "\\'");
-                var _eItems = _esc(itemNames.join('、')).replace(/'/g, "\\'");
-                // 三顆按鈕只差 status／字／代墊旗標 —— 逐字抄三份的話，改樣式或改
-                // _costCreatePayment 的簽章要改三處（加第五個參數時已經證明過）
-                var payBtn = function(status, label, opt) {
-                    opt = opt || {};
-                    return _smallBtn('window._costCreatePayment(\'' + _eName + '\',' + subtotal
-                        + ',\'' + _eItems + '\',' + '\'' + status + '\''
-                        + (opt.advanced ? ',true' : '') + ')', label, opt);
-                };
-                // 費用已代墊（owner 2026-09-02）：這筆錢別人先掏了，公司要還的
-                // 是**代墊人**。開的是同一個請款視窗、預先勾好代墊 —— 那個機制
-                // 本來就在（modal 裡的勾選框），只是藏著沒人找得到（生產 0 筆）。
-                statusHtml = payBtn('應付款', '請款')
-                    + payBtn('已付款', '現金已付款', { gap: true })
-                    + payBtn('應付款', '費用已代墊', { gap: true, advanced: true,
-                        title: '這筆費用由別人先代墊 —— 收款人改成代墊人，費用歸屬仍記在 ' + _eName + ' 身上' });
-            }
-
-            html += '<div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #2e2e2e;gap:8px;">';
-            html += '<span style="width:80px;font-weight:600;color:#d1d5db;flex-shrink:0;">' + _esc(s.name) + '</span>';
-            html += '<span style="flex:1;color:#6b7280;font-size:11px;">' + _esc(itemNames.join('、')) + '</span>';
-            html += '<span style="width:80px;text-align:right;font-weight:600;color:#e0e0e0;flex-shrink:0;">$' + fmtNum(subtotal) + '</span>';
-            html += '<span style="flex-shrink:0;">' + statusHtml + '</span>';
-            html += '</div>';
-        }
-        html += '<div style="display:flex;padding:6px 0;border-top:2px solid #3a3a3a;">';
-        html += '<span style="flex:1;font-weight:700;color:#e0e0e0;">合計</span>';
-        html += '<span style="width:80px;text-align:right;font-weight:700;color:#e0e0e0;">$' + fmtNum(grandTotal) + '</span>';
-        html += '<span style="width:120px;"></span>';
-        html += '</div></div>';
-        container.innerHTML = html;
-    } catch (e) {
-        container.innerHTML = '<div class="crm-empty">載入失敗</div>';
-    }
-}
 
 // ── Load Advances ───────────────────────────────────────────────
 
-async function _loadAdvances(projectId) {
-    var container = document.getElementById('proj-advance-list');
-    if (!container) return;
-    // 兩支端點都是錢（advances 與 expenses 都掛了 money_dep）。這裡漏掉閘門的
-    // 話，畫面上半截（執行人員）寫「沒有權限」、下半截紅字「載入失敗」——
-    // 它跟 _loadCostStaff 是同一個呼叫點一起叫的。
-    if (moneyGate(container)) return;
-    try {
-        var [advData, expData] = await Promise.all([
-            _fetch('/payments/advances?returned=-1&project_id=' + projectId),
-            _fetch('/projects/' + projectId + '/expenses'),
-        ]);
-        var advances = advData.advances || [];
-        var allExpenses = expData.expenses || [];
-        if (advances.length === 0) {
-            container.innerHTML = '<div class="crm-empty" style="padding:8px 0;font-size:12px;">尚無預支款</div>';
-            return;
-        }
-        var html = '';
-        for (var i = 0; i < advances.length; i++) {
-            var a = advances[i];
-            var balance = (a.balance != null) ? a.balance : a.amount - a.expense_total;
-            var balanceColor = balance > 0 ? '#fb923c' : balance < 0 ? '#fca5a5' : '#86efac';
-
-            // Payment status (發款)
-            var isPaid = a.is_paid;
-            var payStatusText = isPaid ? '已發款' : '未發款';
-            var payStatusColor = isPaid ? '#86efac' : '#6b7280';
-            // Return status (收款) — 標籤只顯示狀態文字，不帶金額
-            var isReturned = a.is_returned;
-            var returnStatusText = a.is_settled ? '已結清' : isReturned ? '已收款' : (a.expense_total > 0 ? '需還款' : '待收款');
-            var returnStatusColor = a.is_settled ? '#86efac' : isReturned ? '#fb923c' : balanceColor;
-
-            var canEdit = (a.cash_entries || []).length === 0 && a.expense_total === 0;
-            html += '<div style="background:#1a1a1a;border:1px solid #2e2e2e;border-radius:8px;padding:10px;margin-bottom:8px;">';
-            // Header row
-            html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
-            html += '<span style="font-weight:600;color:#d1d5db;font-size:13px;">' + _esc(a.payee_name) + '</span>';
-            html += '<span style="font-size:12px;color:#6b7280;">預支 $' + fmtNum(a.amount) + '</span>';
-            if (canEdit) {
-                html += '<span style="font-size:11px;color:#6b7280;cursor:pointer;" onclick="window._advEditAmount(\'' + a.id + '\',' + a.amount + ')" title="修改金額">✏️</span>';
-            }
-            html += '<span style="flex:1;"></span>';
-            if (canEdit) {
-                html += '<span style="font-size:11px;color:#6b7280;cursor:pointer;margin-right:4px;" onclick="window._advDeleteAdvance(\'' + a.id + '\',\'' + _esc(a.payee_name).replace(/'/g, "\\'") + '\')" title="刪除預支">🗑</span>';
-            }
-            html += '<span style="font-size:10px;color:' + payStatusColor + ';border:1px solid ' + payStatusColor + ';border-radius:4px;padding:1px 6px;cursor:pointer;" onclick="window._costViewPayment(\'' + a.id + '\')">' + payStatusText + '</span>';
-            html += '<span style="font-size:10px;color:' + returnStatusColor + ';border:1px solid ' + returnStatusColor + ';border-radius:4px;padding:1px 6px;cursor:pointer;" onclick="window._costViewPayment(\'' + a.id + '\')">' + returnStatusText + '</span>';
-            html += '</div>';
-            // Expense details — filter by advance_id
-            var payeeExpenses = allExpenses.filter(function(e) { return e.advance_id === a.id; });
-            if (payeeExpenses.length > 0) {
-                html += '<div style="margin:6px 0;border-top:1px solid #2e2e2e;padding-top:6px;">';
-                for (var ei = 0; ei < payeeExpenses.length; ei++) {
-                    var ex = payeeExpenses[ei];
-                    var exLabel = ex.sub_item ? _esc(ex.category) + ' · ' + _esc(ex.sub_item) : _esc(ex.category);
-                    html += '<div style="display:flex;align-items:center;padding:2px 0;font-size:11px;color:#9ca3af;">';
-                    html += '<span style="flex:1;">' + exLabel + '</span>';
-                    html += '<span>$' + fmtNum(ex.actual) + '</span>';
-                    html += '<span style="margin-left:8px;cursor:pointer;color:#6b7280;font-size:10px;" onclick="window._advUnlinkExpense(\'' + ex.id + '\')" title="解除關聯">✕</span>';
-                    html += '</div>';
-                }
-                html += '</div>';
-            }
-            // 收支明細（發款/收款記錄）
-            var cashEntries = a.cash_entries || [];
-            if (cashEntries.length > 0) {
-                html += '<div style="margin:6px 0;border-top:1px solid #2e2e2e;padding-top:6px;">';
-                for (var ci = 0; ci < cashEntries.length; ci++) {
-                    var ce = cashEntries[ci];
-                    var ceColor = ce.type === '發款' ? '#fca5a5' : '#86efac';
-                    var ceAmt = ce.type === '發款' ? ce.expense : ce.deposit;
-                    html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px;color:#9ca3af;">';
-                    html += '<span><span style="color:' + ceColor + ';font-size:10px;margin-right:4px;">' + ce.type + '</span>' + _esc(ce.summary) + (ce.entry_date ? ' <span style="color:#4b5563;">' + ce.entry_date + '</span>' : '') + '</span>';
-                    html += '<span style="color:' + ceColor + ';">$' + fmtNum(ceAmt) + '</span>';
-                    html += '</div>';
-                }
-                html += '</div>';
-            }
-            // Summary row
-            html += '<div style="display:flex;align-items:center;gap:12px;font-size:11px;color:#6b7280;border-top:1px solid #2e2e2e;padding-top:6px;margin-top:4px;">';
-            html += '<span>支出 $' + fmtNum(a.expense_total) + '</span>';
-            var balanceLabel = balance > 0 ? '餘額 $' + fmtNum(balance) : balance < 0 ? '超支 $' + fmtNum(Math.abs(balance)) : '已結清';
-            html += '<span style="color:' + balanceColor + ';font-weight:600;">' + balanceLabel + '</span>';
-            html += '<span style="flex:1;"></span>';
-            if (!a.is_settled) {
-                html += _smallBtn('window._advAddExpense(\'' + _esc(a.payee_name).replace(/'/g, "\\'") + '\',\'' + a.id + '\')', '+ 登記支出', {});
-                html += _smallBtn('window._advLinkExpenses(\'' + a.id + '\')', '關聯既有', { gap: true });
-                html += _smallBtn('window._advShareLink(\'' + a.id + '\')', '分享連結', { gap: true });
-            }
-            html += '</div>';
-            html += '</div>';
-        }
-        container.innerHTML = html;
-    } catch (e) {
-        container.innerHTML = '<div class="crm-empty">載入失敗</div>';
-    }
-}
 
 // ── Window Handlers ─────────────────────────────────────────────
 
@@ -271,7 +80,7 @@ window._costCreateAdvance = function() {
                 })
             });
             overlay.remove();
-            _loadAdvances(state.selectedId);
+            _refreshPayIfOpen();
         } catch (e) {
             alert('建立失敗：' + e.message);
             this.disabled = false; this.textContent = '確定';
@@ -283,23 +92,10 @@ window._advDeleteAdvance = async function(advanceId, payeeName) {
     if (!confirm('確定刪除「' + payeeName + '」的預支款？')) return;
     try {
         await _fetch('/payments/' + advanceId, { method: 'DELETE' });
-        if (state.selectedId) _loadAdvances(state.selectedId);
+        _refreshPayIfOpen();
     } catch (e) { alert('刪除失敗：' + e.message); }
 };
 
-window._advEditAmount = async function(advanceId, currentAmount) {
-    var input = prompt('修改預支金額：', currentAmount);
-    if (input === null) return;
-    var newAmount = parseInt(input);
-    if (!newAmount || newAmount <= 0) { alert('請輸入有效金額'); return; }
-    try {
-        var adv = await _fetch('/payments/' + advanceId);
-        adv.amount = newAmount;
-        delete adv.id; delete adv.created_at; delete adv.updated_at; delete adv.project_name;
-        await _fetch('/payments/' + advanceId, { method: 'PUT', body: JSON.stringify(adv) });
-        if (state.selectedId) _loadAdvances(state.selectedId);
-    } catch (e) { alert('修改失敗：' + e.message); }
-};
 
 window._projBrowseReceipts = async function() {
     if (!state.selectedId) return;
@@ -360,123 +156,8 @@ window._advShareLink = function(advanceId) {
     });
 };
 
-window._advUnlinkExpense = async function(expenseId) {
-    if (!confirm('確定解除此支出的預支關聯？')) return;
-    try {
-        var exps = await _fetch('/projects/' + state.selectedId + '/expenses');
-        var ex = (exps.expenses || []).find(function(e) { return e.id === expenseId; });
-        if (!ex) { alert('找不到此支出'); return; }
-        await _fetch('/project-expenses/' + expenseId, { method: 'PUT', body: JSON.stringify({
-            category: ex.category, estimated: ex.estimated || 0, actual: ex.actual || 0,
-            sub_item: ex.sub_item || '', payee: ex.payee || '', advance_id: '', notes: ex.notes || ''
-        })});
-        if (state.selectedId) { _loadAdvances(state.selectedId); callbacks.loadFinancialSummary?.(state.selectedId); }
-    } catch (e) { alert('解除失敗：' + e.message); }
-};
 
-window._advLinkExpenses = async function(advanceId) {
-    if (!state.selectedId) return;
-    var expData;
-    try { expData = await _fetch('/projects/' + state.selectedId + '/expenses'); } catch(_) { return; }
-    var orphans = (expData.expenses || []).filter(function(e) { return !e.advance_id; });
-    if (orphans.length === 0) { alert('沒有未綁定的支出'); return; }
-    var overlay = document.createElement('div');
-    overlay.className = 'crm-modal-overlay';
-    overlay.dataset.dynamic = '1';        // _costAfterPay 只收這種動態長出來的
-    overlay.style.display = 'flex';
-    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
-    var listHtml = '';
-    for (var i = 0; i < orphans.length; i++) {
-        var o = orphans[i];
-        var label = o.sub_item ? _esc(o.category) + ' · ' + _esc(o.sub_item) : _esc(o.category);
-        listHtml += '<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid #2e2e2e;border-radius:6px;margin-bottom:4px;cursor:pointer;background:#1a1a1a;">';
-        listHtml += '<input type="checkbox" value="' + o.id + '">';
-        listHtml += '<span style="flex:1;color:#d1d5db;font-size:12px;">' + label + (o.payee ? ' <span style="color:#6b7280;">(' + _esc(o.payee) + ')</span>' : '') + '</span>';
-        listHtml += '<span style="color:#9ca3af;font-size:12px;">$' + fmtNum(o.actual) + '</span>';
-        listHtml += '</label>';
-    }
-    overlay.innerHTML = '<div class="crm-modal" style="max-width:420px;">' +
-        '<div class="crm-modal-header"><h3>關聯既有支出</h3>' +
-        '<button onclick="this.closest(\'.crm-modal-overlay\').remove()" class="crm-detail-close">✕</button></div>' +
-        '<div class="crm-modal-body"><div style="font-size:12px;color:#6b7280;margin-bottom:8px;">勾選要歸入此預支的支出：</div>' +
-        '<div id="adv-link-list">' + listHtml + '</div></div>' +
-        '<div class="crm-modal-footer">' +
-        '<button onclick="this.closest(\'.crm-modal-overlay\').remove()" class="crm-btn crm-btn-secondary">取消</button>' +
-        '<button id="adv-link-submit" class="crm-btn crm-btn-primary">確定</button>' +
-        '</div></div>';
-    document.body.appendChild(overlay);
-    document.getElementById('adv-link-submit').addEventListener('click', async function() {
-        var checks = overlay.querySelectorAll('#adv-link-list input[type=checkbox]:checked');
-        var ids = [];
-        for (var j = 0; j < checks.length; j++) ids.push(checks[j].value);
-        if (ids.length === 0) { alert('請勾選至少一筆'); return; }
-        this.disabled = true; this.textContent = '處理中...';
-        try {
-            await _fetch('/project-expenses/link-advance', {
-                method: 'PATCH', body: JSON.stringify({ expense_ids: ids, advance_id: advanceId })
-            });
-            overlay.remove();
-            _loadAdvances(state.selectedId);
-            callbacks.loadFinancialSummary?.(state.selectedId);
-        } catch (e) {
-            alert('關聯失敗：' + e.message);
-            this.disabled = false; this.textContent = '確定';
-        }
-    });
-};
 
-window._advAddExpense = function(payeeName, advanceId) {
-    if (!state.selectedId) return;
-    var proj = state.projects.find(function(p) { return p.id === state.selectedId; });
-    var projName = proj ? proj.name : '';
-    var overlay = document.createElement('div');
-    overlay.className = 'crm-modal-overlay';
-    overlay.dataset.dynamic = '1';        // _costAfterPay 只收這種動態長出來的
-    overlay.style.display = 'flex';
-    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
-    overlay.innerHTML = '<div class="crm-modal" style="max-width:420px;">' +
-        '<div class="crm-modal-header"><h3>預支支出登記</h3>' +
-        '<button onclick="this.closest(\'.crm-modal-overlay\').remove()" class="crm-detail-close">✕</button></div>' +
-        '<div class="crm-modal-body">' +
-        '<div class="crm-field" style="margin-bottom:8px;"><label>專案</label><input class="crm-input" value="' + _esc(projName) + '" disabled style="opacity:0.6;"></div>' +
-        '<div class="crm-field" style="margin-bottom:8px;"><label>預支人</label><input class="crm-input" value="' + _esc(payeeName) + '" disabled style="opacity:0.6;"></div>' +
-        '<div class="crm-form-grid">' +
-        '<div class="crm-field crm-field-full"><label>類別 <span class="crm-required">*</span></label><select id="adv-exp-cat" class="crm-input">' + EXPENSE_CATEGORIES.map(c => '<option value="' + c + '">' + c + '</option>').join('') + '</select></div>' +
-        '<div class="crm-field crm-field-full"><label>細項</label><input id="adv-exp-sub" type="text" class="crm-input" placeholder="如：高鐵來回"></div>' +
-        '<div class="crm-field crm-field-full"><label>金額 <span class="crm-required">*</span></label><input id="adv-exp-amt" type="number" class="crm-input" min="0"></div>' +
-        '<div class="crm-field crm-field-full"><label>備註</label><input id="adv-exp-notes" type="text" class="crm-input" placeholder="選填"></div>' +
-        '</div></div>' +
-        '<div class="crm-modal-footer">' +
-        '<button onclick="this.closest(\'.crm-modal-overlay\').remove()" class="crm-btn crm-btn-secondary">取消</button>' +
-        '<button id="adv-exp-submit" class="crm-btn crm-btn-primary">確定</button>' +
-        '</div></div>';
-    document.body.appendChild(overlay);
-    document.getElementById('adv-exp-submit').addEventListener('click', async function() {
-        var amt = parseInt(document.getElementById('adv-exp-amt').value) || 0;
-        if (!amt) { alert('請填寫金額'); return; }
-        this.disabled = true; this.textContent = '處理中...';
-        try {
-            await _fetch('/projects/' + state.selectedId + '/expenses', {
-                method: 'POST', body: JSON.stringify({
-                    category: document.getElementById('adv-exp-cat').value,
-                    sub_item: document.getElementById('adv-exp-sub').value,
-                    estimated: 0,
-                    actual: amt,
-                    payee: payeeName,
-                    advance_id: advanceId || '',
-                    notes: document.getElementById('adv-exp-notes').value,
-                    cost_group_id: state.selectedGroupId,
-                })
-            });
-            overlay.remove();
-            _loadAdvances(state.selectedId);
-            callbacks.loadFinancialSummary?.(state.selectedId);
-        } catch (e) {
-            alert('登記失敗：' + e.message);
-            this.disabled = false; this.textContent = '確定';
-        }
-    });
-};
 
 /** 請款／現金已付款／費用已代墊 —— 同一個視窗。
  *
@@ -566,7 +247,7 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
                 })
             });
             overlay.remove();
-            if (opts.onDone) { opts.onDone(); } else { _loadCostStaff(state.selectedId); }
+            if (opts.onDone) { opts.onDone(); } else { _refreshPayIfOpen(); }
             _refreshPayIfOpen();
         } catch (e) {
             alert('建立失敗：' + e.message);
@@ -602,7 +283,8 @@ async function _costPayAction(id, paid) {
     }
 }
 
-/** 收付款分頁開著才重抓它（8＋2 支請求）；沒開著的話切過去時分頁點擊本來就會 loadPayTab。 */
+/** 收付款分頁開著才重抓它（8＋2 支請求）；沒開著的話切過去時分頁點擊本來就會 loadPayTab。
+ *  （舊的執行人員／預支款渲染器 _loadCostStaff／_loadAdvances 在收付款分頁上線後沒有容器可畫，2026-09-06 拿掉；活的畫面在 crm-projects-pay.js）*/
 function _refreshPayIfOpen() {
     if (document.querySelector('#proj-detail-tabs .crm-tab.active')?.dataset.tab === 'team') window._projPay?.refresh?.();
 }
@@ -613,7 +295,6 @@ function _costAfterPay(onDone) {
     var ov = document.querySelector('.crm-modal-overlay[data-dynamic]');
     if (ov) ov.remove();
     if (onDone) { onDone(); }
-    else if (state.selectedId) { _loadCostStaff(state.selectedId); }
     _refreshPayIfOpen();          // 收付款分頁的狀態列／提示／結案檢查跟著變
 }
 
@@ -706,4 +387,4 @@ function initFinanceHandlers() {
 
 // ── Exports ─────────────────────────────────────────────────────
 
-export { _loadCostStaff, _loadAdvances, _loadProjectStaff, initFinanceHandlers };
+export { _loadProjectStaff, initFinanceHandlers };

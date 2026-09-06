@@ -45,7 +45,7 @@ def test_link_endpoint_only_touches_the_attribution():
     """
     src = repo_src("routers/crm/finance.py")
     fn = src.split("async def set_invoice_project(")[1].split("\n@router")[0]
-    assert "inv.project_id = target" in fn
+    assert "_norm_inv_projects(_d)" in fn and 'inv.project_id, inv.project_ids = _d["project_id"], _d["project_ids"]' in fn   # 清單編碼只有 core.project_link 一份
     for forbidden in ("amount_total", "amount_ex_tax", "payment_status", "invoice_date"):
         assert f"inv.{forbidden} =" not in fn, forbidden
     assert "_assert_project_link(session, request, target, inv.category)" in fn

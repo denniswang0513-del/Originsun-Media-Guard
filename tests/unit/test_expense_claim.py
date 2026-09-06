@@ -114,7 +114,8 @@ def test_both_entry_points_share_one_set_of_actions():
     """人員費用（列上）與行政雜支（詳情視窗）共用同一份動作 —— 各寫一次的話，
     「已付款能不能收回」這條規則就會有兩個答案。"""
     fin = js_code_only(repo_src(FIN_JS))
-    assert "window._costPayBtns(matchedPayment)" in fin, "人員費用列沒接上"
+    pay = js_code_only(repo_src("frontend/tabs/crm/crm-projects-pay.js"))
+    assert "window._costPayBtns(p)" in pay, "人員費用列（收付款分頁）沒接上"
     assert "window._costPayBtns(p, onDoneName) +" in fin, "詳情視窗頁尾沒接上"
     # 雜支那側重畫的是雜支區，不是人員費用區
     cost = js_code_only(repo_src(COST_JS))

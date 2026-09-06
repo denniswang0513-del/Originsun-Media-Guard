@@ -26,10 +26,10 @@ from sqlalchemy import func as safunc, or_, select, update
 
 import core.state as state
 from config import load_settings, save_settings
-from core.auth import _extract_token, check_admin, check_admin_or_module, current_username, payload_grants
+from core.auth import ME_MODULE_KEYS, _extract_token, check_admin, check_admin_or_module, current_username, payload_grants
 from core.db_guard import db_factory_or_503
 from core.journal_logic import week_start_of
-from core.hr_logic import (fillers_on, HOURS_PER_WORKDAY, WORK_TYPES, Misses, active_fillers, bucket_hours, budget_burn,
+from core.hr_logic import (midnight_of, fillers_on, HOURS_PER_WORKDAY, WORK_TYPES, Misses, active_fillers, bucket_hours, budget_burn,
                            day_iso, explain_miss, hours_rollup, missing_fillers, month_key, month_span, months_back,
                            parse_ymd, prev_workday, project_metrics, remap_target, resolve_project, similar_projects,
                            split_sheet_name, stages_by_category, tw_day, type_composition)
@@ -104,14 +104,13 @@ async def _ts_or_bound(request: Request) -> None:
 
 # 員工頁（/my.html）的鑰匙是 me_*，工作追蹤分頁是 timesheets；「我的一天」兩邊都要能用，
 # 綁定人員檔案的 409 原句仍只在 core.identity.require_bound_staff。
-_ME_KEYS = ("me_finance", "me_projects", "me_profile", "me_todos", "me_leave", "me_petty", "me_benefits")
 
 
 async def _mine_ident(request: Request) -> dict:
     """timesheets 模組或任一把 me_* 鑰匙 ＋ 綁定人員檔案。
     （2026-09-06 review：原本第二段只拿 me_finance 再驗一次，只有 me_projects 之類的員工會被 403）"""
     from core.identity import require_bound_staff
-    return await require_bound_staff(request, "timesheets", *_ME_KEYS)
+    return await require_bound_staff(request, "timesheets", *ME_MODULE_KEYS)
 
 
 @router.get("/ingest_token")
@@ -136,6 +135,7 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
     factory = db_factory_or_503()
     # 寫入規則（去重／手填優先／對映）只有 services.timesheet_ingest 那一份 —— 拉取 runner 也走它
     async with factory() as session:
+        _CANDS_CACHE["val"] = None       # 工時變了，類似專案候選重算
         return await ingest(session, req.rows, req.source)
 
 
@@ -194,7 +194,7 @@ async def send_digest_now(request: Request, preview: bool = False):
 # ── 每日看板 ＋ 我的一天（P1）──────────────────────────────────────────────────
 #
 # 閘門＝timesheets 模組（進得了 tab 就看得到大家每天做了什麼，owner 拍板）；
-# 「我的一天」的讀改刪再加「綁定人員檔案」（services.timesheet_self.bound_ident）。
+# 「我的一天」的讀改刪再加「綁定人員檔案」（core.identity.require_bound_staff）。
 
 # 看板計算搬到 services.timesheet_self.board_days（/board 與 /me/team_week 同一份）
 
@@ -269,6 +269,7 @@ async def my_add_rows(body: MeTimesheetBatch, request: Request):
     ident = await _mine_ident(request)
     factory = db_factory_or_503()
     async with factory() as session:
+        _CANDS_CACHE["val"] = None
         return await add_rows(session, ident, body.rows)
 
 
@@ -278,6 +279,7 @@ async def my_update_row(row_id: str, body: MeTimesheetUpdate, request: Request):
     ident = await _mine_ident(request)
     factory = db_factory_or_503()
     async with factory() as session:
+        _CANDS_CACHE["val"] = None
         return await update_row(session, ident, row_id, body)
 
 
@@ -286,6 +288,7 @@ async def my_delete_row(row_id: str, request: Request):
     ident = await _mine_ident(request)
     factory = db_factory_or_503()
     async with factory() as session:
+        _CANDS_CACHE["val"] = None
         return await delete_row(session, ident, row_id)
 
 
@@ -319,6 +322,7 @@ async def ledger_batch(body: TimesheetRowsBatch, request: Request):
     check_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
+        _CANDS_CACHE["val"] = None
         return await admin_batch_update(session, body.ids, body.model_dump(exclude_unset=True, exclude={"ids"}),
                                         current_username(request))
 
@@ -328,6 +332,7 @@ async def ledger_update_row(row_id: str, body: TimesheetRowAdminUpdate, request:
     check_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
+        _CANDS_CACHE["val"] = None
         return await admin_update_row(session, row_id, body, current_username(request))
 
 
@@ -345,6 +350,7 @@ async def ledger_resolve_conflict(cid: str, body: TimesheetConflictResolve, requ
     check_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
+        _CANDS_CACHE["val"] = None
         return await resolve_conflict(session, cid, body.choice, current_username(request))
 
 
@@ -353,6 +359,7 @@ async def ledger_delete_row(row_id: str, request: Request):
     check_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
+        _CANDS_CACHE["val"] = None
         return await admin_delete_row(session, row_id, current_username(request))
 
 
@@ -558,8 +565,7 @@ async def dashboard(request: Request):
     is_admin = payload_grants(payload)          # 不帶模組鑰匙＝純管理員判定
     now = datetime.now()
     today = now.date()
-    _wk = week_start_of(now)
-    week_mon = datetime(_wk.year, _wk.month, _wk.day)      # 週一（規則只有 core.journal_logic.week_start_of 一份）
+    week_mon = midnight_of(week_start_of(now))      # 週一（規則只有 core.journal_logic.week_start_of 一份）
     m0, _ = month_span("")
     since = min(week_mon, m0) - timedelta(days=30)
     factory = db_factory_or_503()
@@ -751,6 +757,7 @@ async def add_manual_rows(body: TimesheetManualRequest, request: Request):
         staff = await session.get(CrmStaff, body.staff_id)
         if staff is None:
             raise HTTPException(status_code=404, detail="人員不存在")
+        _CANDS_CACHE["val"] = None
         result = await insert_manual_rows(session, staff_id=staff.id,
                                           staff_name=staff.name, rows=body.rows)
         await session.commit()

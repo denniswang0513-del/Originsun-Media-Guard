@@ -70,10 +70,6 @@ def rows_by_month(rows) -> list:
     return by_month((tw_day(r.work_date), r.hours) for r in rows)
 
 
-async def bound_ident(request: Request, module: str) -> dict:
-    """守衛（模組鑰匙由呼叫端給：員工頁 me_finance、CRM tab timesheets）＋ 必須綁定人員檔案。"""
-    return await require_bound_staff(request, module)
-
 
 def own_filter(ident: dict):
     """「本人的列」的 WHERE：認 staff_id；舊 Sheet 列若 staff_id 空則退回姓名比對。
@@ -273,10 +269,9 @@ async def admin_update_row(session, row_id: str, body, who: str = "") -> dict:
 async def admin_batch_update(session, ids: list, patch: dict, who: str = "") -> dict:
     """勾選的列一次改（owner 2026-09-03「批次調整」）：只動 patch 有給的欄。專案給名字就走同一支
     resolve_project（對不到就留 NULL、名字照存），給 id 就用 id；Sheet 列一樣標 edited_at。"""
-    from sqlalchemy import select
     from core.hr_logic import norm_work_type, resolve_project
     from db.models import Timesheet
-    from services.timesheet_lookup import load_project_lookup, project_names
+    from services.timesheet_lookup import project_names
     ids = [i for i in (ids or []) if i]
     if not ids:
         raise HTTPException(status_code=422, detail="沒有勾任何列")

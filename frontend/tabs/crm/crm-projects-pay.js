@@ -112,21 +112,21 @@ export function closingChecks(s, advances, expenses) {
 }
 
 // ── 畫面 ──────────────────────────────────────────────────────
-let _cur = null;
 const _d = (v) => (v ? String(v).slice(0, 10) : '');
 const _md = (v) => { const s = _d(v); return s ? s.slice(5).replace('-', '/') : ''; };
 const _q = (path) => _fetch(path).catch(() => null);
 const _sq = (s) => _esc(s || '').replace(/'/g, "\\'");
 
-async function _load(projectId) {
+async function _load(projectId, { full = true } = {}) {
     const ent = state.projects.find((p) => p.id === projectId)?.entity === 'mine' ? '&entity=mine' : '';
+    // full=false：結案檢查／結案軟擋只要狀態，不抓收支列與財務摘要那兩支
     const [proj, inv, pays, lines, cash, adv, exp, fin] = await Promise.all([
         _q('/projects/' + projectId), _q('/invoices?project_id=' + encodeURIComponent(projectId)),
         _q('/payments?project_id=' + encodeURIComponent(projectId) + ent),
-        _q(`/projects/${projectId}/cost-lines`), _q('/cash-entries?project_id=' + encodeURIComponent(projectId) + ent),
+        _q(`/projects/${projectId}/cost-lines`), full ? _q('/cash-entries?project_id=' + encodeURIComponent(projectId) + ent) : null,
         _q('/payments/advances?project_id=' + encodeURIComponent(projectId)), _q(`/projects/${projectId}/expenses`),
         // 毛利只認財務摘要那一份（core.crm_logic.project_margin：未稅 − 雜支實際 − 人力實際），跟預算結算同一個數
-        _q(`/projects/${projectId}/financial-summary`)]);
+        full ? _q(`/projects/${projectId}/financial-summary`) : null]);
     return { proj, inv: inv?.invoices || [], pays: pays?.payments || [], lines: lines?.cost_lines || [],
              cash: cash ? (cash.entries || []) : null, adv: adv?.advances || [], exp: exp?.expenses || [], fin: fin || null };
 }
@@ -212,15 +212,16 @@ function _chain(p) {
 function _payHtml(s, adv, money) {
     const m = (n) => (money ? '$' + fmtNum(n) : '—');
     const rows = [];
+    // 三顆請款鈕由同一支產生器產出（逐字抄三份的話，改 _costCreatePayment 的簽章要改三處）；代墊那顆只多帶 advanced
+    const payBtn = (g, items, status, label, advanced = false) =>
+        `<button class="crm-btn ${advanced || status !== '應付款' ? 'crm-btn-secondary' : 'crm-btn-primary'} crm-btn-sm" onclick="window._costCreatePayment('${_sq(g.name)}',${g.subtotal},'${_sq(items)}','${status}'${advanced ? ',true' : ''})"${advanced ? ' title="這筆費用由別人先代墊 —— 收款人改成代墊人"' : ''}>${label}</button>`;
     for (const g of s.groups) {
         const p = g.payment;
         const items = g.items.join('、');
         const advTag = p && p.advance_by ? `<span style="color:#fb923c;font-size:10px;margin-right:6px;" title="這筆費用由 ${_esc(p.payee_name || '')} 先代墊，公司要還的是他">${_esc(p.payee_name || '')} 代墊</span>` : '';
         const acts = p
             ? `${advTag}<span class="ppay-link" onclick="window._costViewPayment('${_esc(p.id)}')">看單</span>${window._costPayBtns ? window._costPayBtns(p) : ''}`
-            : `<button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._costCreatePayment('${_sq(g.name)}',${g.subtotal},'${_sq(items)}','應付款')">請款</button>
-               <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._costCreatePayment('${_sq(g.name)}',${g.subtotal},'${_sq(items)}','已付款')">現金已付款</button>
-               <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._costCreatePayment('${_sq(g.name)}',${g.subtotal},'${_sq(items)}','應付款',true)" title="這筆費用由別人先代墊 —— 收款人改成代墊人">費用已代墊</button>`;
+            : `${payBtn(g, items, '應付款', '請款')}${payBtn(g, items, '已付款', '現金已付款')}${payBtn(g, items, '應付款', '費用已代墊', true)}`;
         rows.push(`<tr><td class="who">${_esc(g.name)}</td><td class="role">${_esc(items)}</td><td class="r num">${m(g.subtotal)}</td><td>${_chain(p)}</td><td><div class="ppay-acts">${acts}</div></td></tr>`);
     }
     for (const x of s.others) {
@@ -286,7 +287,6 @@ export async function loadPayTab(projectId) {
     const d = await _load(projectId);
     if (state.selectedId !== projectId) return;      // 切走了就別畫到別的案上
     const s = payStatus(d.proj, d.inv, d.pays, d.lines);
-    _cur = s;
     // AM／PM 可編輯格由 detail.js 畫在 #proj-pay-ampm-src；第一次在 host 外、重畫時已經搬進 host 裡 ——
     // 先抓住再覆寫 innerHTML，不然第二次 loadPayTab 會把它連同舊畫面一起清掉
     const ampm = document.getElementById('proj-pay-ampm-src');
@@ -323,7 +323,7 @@ export async function loadPayTab(projectId) {
     host.querySelectorAll('[data-ppay-act]').forEach((b) => b.addEventListener('click', () => _GO[b.dataset.ppayAct]?.[1]?.()));
     host.querySelectorAll('[data-ppay-go-budget]').forEach((b) => b.addEventListener('click', () => document.querySelector('#proj-detail-tabs .crm-tab[data-tab="finance"]')?.click()));
     // 發票模組載進藏著的容器：開發票視窗、setMeta／del 都靠它的狀態
-    loadInvoicesTab(projectId, 'proj-pay-invoices');
+    loadInvoicesTab(projectId, 'proj-pay-invoices', { proj: d.proj, invoices: d.inv });   // 這兩支剛抓過，不再抓
 }
 
 /** 完稿結案分頁頂端的「收付檢查」提示條（只提醒不擋）。 */
@@ -332,7 +332,7 @@ export async function loadClosingBanner(projectId, host) {
     let box = host.querySelector('.ppay-closing');
     if (!box) { box = document.createElement('div'); box.className = 'ppay-closing'; host.insertAdjacentElement('afterbegin', box); }
     box.innerHTML = '<div class="ppay-sh"><span class="ppay-h">收付檢查</span><span class="ppay-sub">載入中…</span></div>';
-    const d = await _load(projectId);
+    const d = await _load(projectId, { full: false });
     if (state.selectedId !== projectId) return;
     const s = payStatus(d.proj, d.inv, d.pays, d.lines);
     const checks = closingChecks(s, d.adv, d.exp);
@@ -348,7 +348,7 @@ export async function loadClosingBanner(projectId, host) {
  *  回 true＝可以推；false＝使用者取消。抓不到資料（沒權限）就放行——不能因為看不到錢就不准結案。 */
 export async function confirmClosing(projectId) {
     if (!projectId) return true;
-    const d = await _load(projectId);
+    const d = await _load(projectId, { full: false });
     if (!d.proj) return true;
     const s = payStatus(d.proj, d.inv, d.pays, d.lines);
     const open = closingChecks(s, d.adv, d.exp).filter((c) => !c.ok);
@@ -450,7 +450,6 @@ window._projPay = {
         }
     },
     refresh: () => { if (state.selectedId) loadPayTab(state.selectedId); },
-    current: () => _cur,
     /** 標已收款：走發票模組的 setMeta（PUT 整包寫回），做完重畫。 */
     markCollected: async (id) => {
         if (!window._projInv?.setMeta) return;

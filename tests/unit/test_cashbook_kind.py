@@ -22,8 +22,8 @@ def test_frontend_kind_is_one_rule_for_color_and_filter():
     kind = js[js.index("const _kindOf = (e) =>"):js.index("let _catQ")]
     assert "代開" not in kind, "種類判定不寫死類別名：代開那組從後端 passthrough_categories 拿"
     assert "_PASSTHROUGH = o.passthrough_categories" in js
-    assert "' cash-kind-' + _kindOf(e)" in js
-    assert "const _kindOf = (e) => (finIsMine() ? '' :" in js, "私帳不上底色（owner 2026-09-04）"
+    assert "kind ? ' cash-kind-' + kind : ''" in js and "const kind = _kindOf(e);" in js   # 每列算一次
+    assert "const _kindOf = (e) => (_MINE_LEDGER ? '' :" in js, "私帳不上底色（owner 2026-09-04）——帳本 pin 渲染時釘一次"
     # 快篩鈕已改成一個打字的類別框（owner 2026-09-04）；種類判定只剩底色在用
     html = repo_src("frontend/tabs/crm/crm-cashbook.html")
     assert 'id="cash-filter-kind"' not in html and 'id="cash-filter-off"' not in html
@@ -53,7 +53,7 @@ def test_request_payment_from_cash_row():
     grp = js_func_body(utils, "export function groupCostStaff(")
     assert "(p.advance_by || p.payee_name) + '|' + p.amount" in grp, "代墊單配費用歸屬人"
     proj = js_code_only(repo_src("frontend/tabs/crm/crm-projects-finance.js"))
-    assert "groupCostStaff(lines, payments)" in js_func_body(proj, "async function _loadCostStaff(")
+    assert "groupCostStaff(costLines || [], pays)" in js_func_body(js_code_only(repo_src("frontend/tabs/crm/crm-projects-pay.js")), "export function payStatus(")   # 活的執行人員畫面在收付款分頁
     assert "_payByOwnerAmount" not in proj, "分人配單的規則不可在專案頁再長一份"
     assert "batch-pay" not in js and "/cash-entries/${e.id}/payments" not in js, "請款不掛回這一列、不標已付"
     assert "payment_status: '應付款'" in js
@@ -75,7 +75,7 @@ def test_passthrough_income_row_requests_the_whole_remit_on_the_linked_projects(
     assert "remit: inv ? (inv.commission_due || inv.commission || 0) : 0" in disp and "0.92" not in disp
     assert "passthru ? '' : '<button" in disp, "代開列沒案時不給「直接請款」"
     assert "kai ? _cashKaiRemit(e, pids, pnames, kai) : _cashPayForProject(e, pids, pnames)" in disp
-    assert "pids = inv.project_ids.slice()" in disp and "{ ...full, project_id: picked, project_ids: [picked] }" in disp
+    assert "pids = inv.project_ids.slice()" in disp and "{ ...inv, project_id: picked, project_ids: [picked] }" in disp   # 沿用開視窗抓的 inv，不再 GET 一次
     assert "if (passthru && !e.invoice_id) {" in disp
     # 🔴 2026-09-05 翻案（owner：「發票代開的收支要可以連專案」）：
     # 原本這裡釘的是「案掛在發票上、不掛在代開的收支列」（2026-09-04 拍板）。

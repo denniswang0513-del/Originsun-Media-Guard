@@ -12,7 +12,7 @@ def test_tab_composes_existing_pieces_instead_of_new_data():
     js = js_code_only(repo_src(PAY))
     assert "groupCostStaff" in js, "執行人員分人配單走 crm-utils 那一份"
     # 版面照示範頁（owner 2026-09-04 第二版「跟 demo 一樣，派工拿掉」）：自己畫表格，動作沿用既有那組
-    assert "loadInvoicesTab(projectId, 'proj-pay-invoices')" in js, "發票模組載進藏著的容器（開票視窗／setMeta／del 靠它）"
+    assert "loadInvoicesTab(projectId, 'proj-pay-invoices', { proj: d.proj, invoices: d.inv })" in js, "發票模組載進藏著的容器（開票視窗／setMeta／del 靠它）"
     assert "_loadProjectStaff" not in js and "proj-staff-list" not in repo_src("frontend/tabs/crm/crm-projects-detail.js"), "派工已拿掉"
     assert "window._costCreatePayment(" in js and "window._costPayBtns" in js and "window._costCreateAdvance()" in js
     assert "POST" not in js and "method: 'PUT'" not in js and "DELETE" not in js, "收付款分頁自己不寫資料——動作都是既有那組"
@@ -33,7 +33,7 @@ def test_status_and_next_steps_are_pure_and_money_gated():
     nx = between(js, "export function nextSteps(", "export function closingChecks(")
     assert "opts.money !== false" in nx and "發票還沒開" in nx and "還沒請款" in nx and "應付款還沒付" in nx and "可以結案" in nx
     assert "canSeeMoney()" in js, "沒 money_view 只看狀態字"
-    ck = between(js, "export function closingChecks(", "let _cur")
+    ck = between(js, "export function closingChecks(", "const _d = (v) =>")
     for label in ("發票全開且已收", "應付全付", "雜支結清", "預支款結清"):
         assert label in ck, label
     assert "不擋結案" in js, "結案檢查只軟擋"

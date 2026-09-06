@@ -101,7 +101,7 @@ def test_stage_editor_is_one_module_opened_from_both_hosts():
     assert "'/api/v1/crm/work-stages/nodes'" in st
     for verb in ("method: 'POST'", "method: 'PUT'"):
         assert verb in st, verb
-    assert "active: hit.s.active === false" in st, "停用不刪：切 active，不 DELETE"
+    assert "const on = hit.s.active === false; await put(hit.s.id, { active: on })" in st, "停用不刪：切 active，不 DELETE"
     assert "method: 'DELETE'" not in st
     tab = repo_src(TAB)
     assert 'data-ts-action="stages"' in tab and "openStageEditor(" in tab and "setStages(" in tab

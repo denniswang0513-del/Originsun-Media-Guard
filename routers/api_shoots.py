@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from core.auth import check_admin, check_admin_or_module, check_logged_in, payload_grants
 from core.ledger import not_mine   # 手機版只看母公司案（同 api_crm_mobile._company_projects）：私帳案的場次不列、也不准建
-from core.hr_logic import day_iso, tw_day
+from core.hr_logic import day_iso, iso_ts, tw_day
 from routers.crm._shared import _check_project_write_auth, _parse_shoot_date
 from services import google_calendar as gc
 from core.schemas import (CalendarConfigPayload, ShootCreate, ShootEquipmentPayload,
@@ -90,8 +90,7 @@ _d = tw_day          # DB 欄位（date 或 datetime）→ date：規則只有 c
 _iso = day_iso
 
 
-def _ts(dt) -> str | None:
-    return dt.isoformat() if dt else None
+_ts = iso_ts
 
 
 def _crew_list(raw) -> list:
@@ -192,15 +191,22 @@ async def _project_or_404_not_mine(session, pid: str) -> str:
     return pid
 
 
+def _visible_shoots():
+    """看得到的場次＝掛在母公司案上的（專案推到私帳後場次對所有人都消失）。清單與 by-id 同一句。"""
+    return (select(CrmShoot).join(CrmProject, CrmProject.id == CrmShoot.project_id)
+            .where(not_mine(CrmProject.entity)))
+
+
 async def _shoot_or_404(session, sid: str):
-    s = (await session.execute(select(CrmShoot).where(CrmShoot.id == sid))).scalars().first()
+    s = (await session.execute(_visible_shoots().where(CrmShoot.id == sid))).scalars().first()
     if not s:
         raise HTTPException(status_code=404, detail="找不到這場拍攝")
-    # 專案後來被推到私帳：場次對所有人都消失（同清單／建立時的 not_mine 規則；by-id 也不能繞）
-    if s.project_id and (await session.execute(
-            select(CrmProject.id).where(CrmProject.id == s.project_id, not_mine(CrmProject.entity)))).scalar() is None:
-        raise HTTPException(status_code=404, detail="找不到這場拍攝")
     return s
+
+
+def _due_at(s):
+    """預約列的應還日＝結束日（沒有就拍攝日）＋1。"""
+    return _parse_shoot_date(((_d(s.end_date) or _d(s.date)) + timedelta(days=1)).isoformat())
 
 
 async def shoots_for_project(session, project_id: str, upcoming: int = 5, past: int = 3) -> list[dict]:
@@ -297,11 +303,10 @@ def _apply_fields(s, req, partial: bool) -> None:
 
 async def _refresh_open_reservations(session, s) -> None:
     """這一場還沒歸還的預約列：應還日＝結束日＋1、專案跟著場次。"""
-    due = (_d(s.end_date) or _d(s.date)) + timedelta(days=1)
     for c in (await session.execute(
             select(EquipmentCheckout).where(EquipmentCheckout.shoot_id == s.id,
                                             EquipmentCheckout.returned_at.is_(None)))).scalars().all():
-        c.due_at, c.project_id = _parse_shoot_date(due.isoformat()), s.project_id
+        c.due_at, c.project_id = _due_at(s), s.project_id
 
 
 async def _reserve_equipment(session, s, equipment_ids: list[str]) -> None:
@@ -322,14 +327,13 @@ async def _reserve_equipment(session, s, equipment_ids: list[str]) -> None:
             if c.out_at is not None and c.returned_at is None:
                 raise HTTPException(status_code=422, detail="已領走的器材不能從場次拿掉，請先歸還")
             await session.delete(c)
-    due = (_d(s.end_date) or _d(s.date)) + timedelta(days=1)
     for eid in want:
         if eid in have:
             continue
         session.add(EquipmentCheckout(
             id=uuid.uuid4().hex, equipment_id=eid, project_id=s.project_id, shoot_id=s.id,
             person=None, out_at=None,
-            due_at=_parse_shoot_date(due.isoformat()), returned_at=None))
+            due_at=_due_at(s), returned_at=None))
 
 
 # ── 端點 ───────────────────────────────────────────────
@@ -390,8 +394,7 @@ async def list_shoots(request: Request, from_: str = Query("", alias="from"), to
     offset = max(0, int(offset))
     factory = _require_factory()
     async with factory() as session:
-        q = (select(CrmShoot).join(CrmProject, CrmProject.id == CrmShoot.project_id)
-             .where(not_mine(CrmProject.entity)).where(CrmShoot.date >= d_from))
+        q = _visible_shoots().where(CrmShoot.date >= d_from)
         if d_to:
             q = q.where(CrmShoot.date <= d_to)
         if project_id:
@@ -439,6 +442,7 @@ async def calendar_config(req: CalendarConfigPayload, request: Request):
     g["calendar_id"] = (req.calendar_id or "").strip()
     s["google_calendar"] = g
     save_settings(s)
+    gc.invalidate_config()          # 快取的舊設定作廢，下面的狀態才是剛存的那份
     return await _calendar_status()
 
 

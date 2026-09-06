@@ -111,9 +111,13 @@ async function loadInvoices() {
 }
 
 async function loadProjects() {
-    try { _projects = (await crmCacheFetch('projects', '/projects')).projects || []; } catch(_) { _projects = []; }
-    // 私帳案：沒權限的人連打都不打（後端也擋：_assert_project_link）
-    if (hasModule('finance_mine')) { try { _mineProjects = (await crmCacheFetch('projects_mine', '/projects?entity=mine')).projects || []; } catch(_) { _mineProjects = []; } }
+    // 私帳案：沒權限的人連打都不打（後端也擋：_assert_project_link）；兩份清單互不相干，一起抓
+    const [p, m] = await Promise.all([
+        crmCacheFetch('projects', '/projects').catch(() => ({})),
+        hasModule('finance_mine') ? crmCacheFetch('projects_mine', '/projects?entity=mine').catch(() => ({})) : Promise.resolve({}),
+    ]);
+    _projects = p.projects || [];
+    if (hasModule('finance_mine')) _mineProjects = m.projects || [];
     _populateProjectFilter();
 }
 

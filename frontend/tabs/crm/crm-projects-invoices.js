@@ -337,7 +337,7 @@ _P.del = async (id) => {
 
 /** 分頁入口。專案換了就整頁重畫（跟其他 lazy 分頁同一個約定）。 */
 let _hostId = 'proj-detail-invoices';
-export async function loadInvoicesTab(projectId, hostId) {
+export async function loadInvoicesTab(projectId, hostId, preloaded = null) {
     if (hostId) _hostId = hostId;            // 收付款分頁把發票嵌進 #proj-pay-invoices
     const host = document.getElementById(_hostId);
     if (!host || !projectId) return;
@@ -349,8 +349,8 @@ export async function loadInvoicesTab(projectId, hostId) {
         //    走 crmCacheFetch 的共用快取（列表本來就帶 full_name / tax_id），
         //    比逐次 GET /clients/{id} 少一趟序列往返，也不會跟別頁的客戶資料分岔。
         const [proj, inv, cli, app] = await Promise.all([
-            _fetch('/projects/' + projectId),
-            _fetch('/invoices?project_id=' + encodeURIComponent(projectId)),
+            preloaded?.proj ? Promise.resolve(preloaded.proj) : _fetch('/projects/' + projectId),      // 收付款分頁已抓過就直接用
+            preloaded?.invoices ? Promise.resolve({ invoices: preloaded.invoices }) : _fetch('/invoices?project_id=' + encodeURIComponent(projectId)),
             crmCacheFetch('clients', '/clients').catch(() => ({ clients: [] })),
             // 申請人清單撈不到不該讓整個分頁掛掉 —— 那只會讓下拉變空
             crmCacheFetch('invoice_applicants', '/invoice-applicants')

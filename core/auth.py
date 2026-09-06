@@ -123,6 +123,11 @@ LEGACY_ROLE_LEVELS = {'admin': 3, 'editor': 1, 'viewer': 0}
 # Canonical module keys (mirrors frontend tab-config.js ALL_MODULES). Source of
 # truth now that the role layer is gone — used for the bootstrap admin and as
 # the "grant everything" set.
+# 員工頁（/my.html／手機工作紀錄）的鑰匙：任一把＋綁定人員檔案就能用「我的」那些端點（api_me、api_timesheets 共用這一份）
+ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_leave",
+                  "me_petty",     # 零用金卡（2026-08-19 從 me_finance 拆出）
+                  "me_benefits")  # 福委會卡（2026-08-21，員工自己登記快樂/進修）
+
 ALL_MODULES = [
     'bulletin',
     'preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment',

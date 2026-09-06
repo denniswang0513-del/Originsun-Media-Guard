@@ -23,7 +23,7 @@ from core.crm_logic import prepend_note
 from core.project_flow import CLOSED_STATUSES
 from core.finance_logic import (INVOICE_PASSTHROUGH_CATEGORIES, QUOTE_PENDING, QUOTE_STATUSES, VAT_PCT, issue_status_for,
                                 initial_invoice_status, project_type_vocab)
-from core.hr_logic import budget_burn, day_iso
+from core.hr_logic import budget_burn, day_iso, iso_ts
 from core.ledger import hide_mine_projects, not_mine
 from core.money import MoneyRedactRoute, can_see_money, viewer_has_mine_scope
 from core.project_flow import LOST, PIPELINE
@@ -77,8 +77,7 @@ PRESALE = PIPELINE[:PIPELINE.index(ACTIVE_STATUS)]
 NOTE_MAX = 500
 
 
-def _iso(dt) -> str | None:
-    return dt.isoformat() if dt else None
+_iso = iso_ts
 
 
 def _slim_project(p, client_short_name: str) -> dict:
@@ -169,7 +168,7 @@ async def mobile_options(request: Request):
         },
         "expense": {"categories": list(EXPENSE_CATEGORIES)},
         "me": {
-            "username": payload.get("username") or payload.get("sub") or "",
+            "username": _username(request),
             "access_level": payload.get("access_level", 0),
             # 跟 _check_write 問同一份清單：零 key＝只有管理員（同 check_admin_or_module）
             "can_write": payload_grants(payload, *MOBILE_WRITE_MODULES),

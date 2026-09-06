@@ -30,7 +30,7 @@ from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
                                 normalize_invoice_status, passthrough_commission)
 from core.auth import check_logged_in
 from core.project_link import invoice_project_ids as _inv_pids, normalize_invoice_projects as _norm_inv_projects
-from core.ledger import (require_entity, is_mine)
+from core.ledger import (require_entity, is_mine, hide_mine_projects, mine_project_ids)
 from core.auth import _extract_token
 from core.schemas import (InvoicePayload)
 
@@ -680,7 +680,6 @@ async def list_invoices(
             query = query.limit(limit).offset(max(offset, 0))
         rows = (await session.execute(query)).all()
         coll = await _invoice_collections(session, [r[0].id for r in rows])
-    from core.ledger import hide_mine_projects
     _hide = hide_mine_projects(request)
     out = []
     for r in rows:
@@ -703,7 +702,6 @@ async def _assert_project_link(session, request: Request, project_id, category) 
     if not pid:
         return
     from core.finance_logic import MINE_LINK_INVOICE_CATEGORY
-    from core.ledger import hide_mine_projects
     p = await session.get(CrmProject, pid)
     if not p:
         raise HTTPException(status_code=404, detail="找不到要關聯的專案")
@@ -730,7 +728,6 @@ async def invoice_candidates(project_id: str, request: Request, q: str = ""):
     _require_db()
     check_logged_in(request)
     factory = await _get_factory()
-    from core.ledger import hide_mine_projects
     async with factory() as session:
         p = await session.get(CrmProject, project_id)
         if not p:
@@ -752,8 +749,7 @@ async def invoice_candidates(project_id: str, request: Request, q: str = ""):
         from ._shared import project_names_map
         names = await project_names_map(session, {x.project_id for x in rows if x.project_id})   # 顯示名鏈同收支／拆項
         hide_mine = hide_mine_projects(request)
-        mine_ids = set((await session.execute(
-            select(CrmProject.id).where(is_mine(CrmProject.entity)))).scalars()) if hide_mine else set()
+        mine_ids = await mine_project_ids(factory) if hide_mine else set()     # core.ledger 的 60 秒快取
 
     kw = (q or "").strip().lower()
     pname = (p.name or "").strip()
@@ -781,8 +777,7 @@ async def invoice_candidates(project_id: str, request: Request, q: str = ""):
                     "linked_to": "" if in_project else names.get(x.project_id or "", ""),
                     "in_project": in_project,
                     "same_title": same_title, "hit_name": hit_name})
-    out.sort(key=lambda d: (-d["score"], d.get("invoice_date") or ""), reverse=False)
-    out.sort(key=lambda d: -d["score"])
+    out.sort(key=lambda d: (-d["score"], d.get("invoice_date") or ""))
     return {"candidates": out[:60], "client_title": title}
 
 
@@ -808,8 +803,9 @@ async def set_invoice_project(invoice_id: str, request: Request):
             await _assert_project_link(session, request, target, inv.category)
         # 連結＝這張票就屬於這一案（單案，多案清單重來）；取消＝整個清單清掉。
         # 只改 project_id 不動 project_ids 會留下「取消了卻還掛在 A、B」的殘影（invoice_project_ids 讀的是清單）
-        inv.project_id = target
-        inv.project_ids = None
+        _d = {"project_id": target, "project_ids": []}
+        _norm_inv_projects(_d)                 # 清單編碼規則只有 core.project_link 一份（≤1 案＝None）
+        inv.project_id, inv.project_ids = _d["project_id"], _d["project_ids"]
         inv.updated_at = _now()
         await session.commit()
         d = _to_invoice_dict(inv)
@@ -973,7 +969,6 @@ def _trash_to_dict(t) -> dict:
 async def list_invoice_trash(request: Request):
     _check_finance_auth(request)
     _require_db()
-    from core.ledger import hide_mine_projects
     factory = await _get_factory()
     async with factory() as session:
         await _purge_expired_trash(session)

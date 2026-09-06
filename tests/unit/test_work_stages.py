@@ -128,7 +128,7 @@ def test_ts_dict_carries_stage_and_bulletin_fields():
 def test_work_stage_router_is_registered_and_gated_by_timesheets_module():
     assert "from . import work_stages" in repo_src("routers/crm/__init__.py")
     src = code_only(repo_src("routers/crm/work_stages.py"))
-    assert 'check_admin_or_module(request, "timesheets")' in func_body(src, "def _guard(")
+    assert '_guard = _module_guard("timesheets")' in src      # 守衛工廠只有 routers.crm._shared 一份
     for fn in ("async def list_work_stage_nodes(", "async def create_work_stage_node(",
                "async def update_work_stage_node(", "async def delete_work_stage_node("):
         assert "_guard(request)" in func_body(src, fn), fn

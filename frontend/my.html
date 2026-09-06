@@ -1237,7 +1237,7 @@ function _localToday() {
 async function _tsOptions() {
     if (_tsProjects) return _tsProjects;
     try {
-        const r = await mfetch("/api/v1/me/timesheet_options");
+        const r = await mfetch("/api/v1/timesheets/project_options");
         _tsProjects = r.ok ? ((await r.json()).projects || []) : [];
     } catch (_) { _tsProjects = []; }
     return _tsProjects;

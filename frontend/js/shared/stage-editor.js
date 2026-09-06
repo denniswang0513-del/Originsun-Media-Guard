@@ -118,9 +118,11 @@ export async function openStageEditor(cfg = {}) {
             if (!hit) return;
             const list = hit.c.stages.slice().sort((a, x) => (a.sort ?? 0) - (x.sort ?? 0));
             const i = list.findIndex(s => s.id === hit.s.id);
-            if (act === 'toggle') { await put(hit.s.id, { active: hit.s.active === false }); return load(); }
-            if (act === 'up' && i > 0) { const o = list[i - 1]; await put(hit.s.id, { sort: o.sort ?? i - 1 }); await put(o.id, { sort: hit.s.sort ?? i }); return load(); }
-            if (act === 'down' && i < list.length - 1) { const o = list[i + 1]; await put(hit.s.id, { sort: o.sort ?? i + 1 }); await put(o.id, { sort: hit.s.sort ?? i }); return load(); }
+            // 值就在手上：寫完就地改、重畫，不整棵樹重抓（只有「＋階段」要新 id 才 load）
+            if (act === 'toggle') { const on = hit.s.active === false; await put(hit.s.id, { active: on }); hit.s.active = on; dirty = true; return draw(); }
+            const swap = async (o, a, b) => { await Promise.all([put(hit.s.id, { sort: a }), put(o.id, { sort: b })]); hit.s.sort = a; o.sort = b; dirty = true; draw(); };
+            if (act === 'up' && i > 0) { const o = list[i - 1]; return swap(o, o.sort ?? i - 1, hit.s.sort ?? i); }
+            if (act === 'down' && i < list.length - 1) { const o = list[i + 1]; return swap(o, o.sort ?? i + 1, hit.s.sort ?? i); }
         } catch (e) { say('沒存：' + (e.message || e), true); }
     });
     bg.addEventListener('change', async (ev) => {

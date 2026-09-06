@@ -41,6 +41,11 @@ _CFG_CACHE: dict = {"at": 0.0, "val": None}
 _CFG_TTL = 60.0
 
 
+def invalidate_config() -> None:
+    """設定頁存了新的日曆 ID／服務帳號：下一次 load_config 重讀（不然 PUT 回的狀態還是舊的，最多 60 秒）。"""
+    _CFG_CACHE["val"] = None
+
+
 async def load_config() -> tuple[dict | None, str, str]:
     """回 (sa, calendar_id, error)。sa 來源：settings.json → website_settings 的 GA 服務帳號。
     60 秒內共用同一份（每次寫場次都撈整張 website_settings＋解析 SA 是白費）；改設定 60 秒後生效。"""

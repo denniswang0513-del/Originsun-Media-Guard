@@ -22,7 +22,7 @@ import {
 } from './crm-projects-core.js';
 import { renderDetail, initDetailHandlers } from './crm-projects-detail.js';
 import { _loadFinancialSummary, _showExpenseForm, initCostHandlers } from './crm-projects-cost.js';
-import { _loadCostStaff, _loadAdvances, _loadProjectStaff, initFinanceHandlers } from './crm-projects-finance.js';
+import { _loadProjectStaff, initFinanceHandlers } from './crm-projects-finance.js';
 import { loadProjectQuotes, initQuoteHandlers } from './crm-projects-quotes.js';
 // 完稿結案：元件搬到 tabs/proposals/（專案頁也用同一份，見 docs §15.2）——
 // host 與 fetcher 由呼叫端注入，所以這裡把 CRM 這邊的兩樣東西一次綁好。
@@ -71,8 +71,6 @@ callbacks.renderList = renderList;
 callbacks.loadProjects = loadProjects;
 callbacks.loadQuotations = loadProjectQuotes;
 callbacks.loadFinancialSummary = _loadFinancialSummary;
-callbacks.loadCostStaff = _loadCostStaff;
-callbacks.loadAdvances = _loadAdvances;
 callbacks.loadPayTab = loadPayTab;
 callbacks.closeDetail = closeDetail;
 callbacks.loadCostGroups = loadCostGroups;

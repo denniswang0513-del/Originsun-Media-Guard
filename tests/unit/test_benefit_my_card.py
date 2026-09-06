@@ -168,5 +168,5 @@ def test_card_is_gated_by_me_benefits_and_the_key_is_registered():
     assert "'me_benefits'," in repo_src("core/auth.py")
     assert "me_benefits" in repo_src("frontend/js/shared/tab-config.js")
     assert "me_benefits:'我的福委會'" in repo_src("frontend/js/admin/user-mgmt.js")
-    assert '"me_benefits"' in repo_src("routers/api_me.py"), \
-        "workspace 沒有把 me_benefits 帶進 allowed"
+    assert '"me_benefits"' in repo_src("core/auth.py").split("ME_MODULE_KEYS")[1][:400], \
+        "workspace 沒有把 me_benefits 帶進 allowed（ME_MODULE_KEYS 正本在 core/auth）"

@@ -676,8 +676,8 @@ def test_me_petty_is_the_standalone_key():
     assert 'mods.includes("me_finance")' not in page, "獨立頁還在收舊鑰匙"
     my = (FRONTEND / "my.html").read_text(encoding="utf-8")
     assert 'ws.allowed.includes("me_petty")' in my
-    api_me = (REPO / "routers" / "api_me.py").read_text(encoding="utf-8")
-    assert '"me_petty"' in api_me, "workspace allowed 沒帶新 key，卡片永遠不出現"
+    auth = (REPO / "core" / "auth.py").read_text(encoding="utf-8")
+    assert '"me_petty"' in auth.split("ME_MODULE_KEYS")[1][:400], "workspace allowed 沒帶新 key，卡片永遠不出現（正本 core.auth.ME_MODULE_KEYS）"
 
 
 def test_dashboard_misc_estimate_source():

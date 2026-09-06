@@ -180,10 +180,10 @@ def test_the_tab_is_wired_in_all_three_places():
     main = js_code_only(repo_src(MAIN))
     assert "loadPayTab(state.selectedId)" in main and "callbacks.loadPayTab = loadPayTab" in main
     pay = js_code_only(repo_src("frontend/tabs/crm/crm-projects-pay.js"))
-    assert "loadInvoicesTab(projectId, 'proj-pay-invoices')" in pay, "發票要嵌進收付款"
+    assert "loadInvoicesTab(projectId, 'proj-pay-invoices', { proj: d.proj, invoices: d.inv })" in pay, "發票要嵌進收付款（吃預載，不重抓兩支）"
     assert 'id="proj-pay-invoices"' in repo_src("frontend/tabs/crm/crm-projects-pay.js")
     inv = js_code_only(repo_src(JS))
-    assert "export async function loadInvoicesTab(projectId, hostId)" in inv and "document.getElementById(_hostId)" in inv
+    assert "export async function loadInvoicesTab(projectId, hostId, preloaded = null)" in inv and "document.getElementById(_hostId)" in inv
 
 
 def test_switching_project_reloads_an_open_invoice_tab():

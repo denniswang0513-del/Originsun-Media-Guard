@@ -578,7 +578,7 @@ async def _petty_item_domain(session) -> list:
     return items or list(FALLBACK_ITEMS)
 
 
-async def _push_from_cash(session, staff, body: PettyFromCashPayload, *, commit: bool = True) -> dict:
+async def _push_from_cash(session, staff, body: PettyFromCashPayload, *, commit: bool = True, items: list | None = None) -> dict:
     """本人推送／代為推送共用的正本（可先 `preview=True` 試算）。"""
     if not body.entry_id:
         raise HTTPException(status_code=400, detail="沒有選到收支列")
@@ -588,7 +588,7 @@ async def _push_from_cash(session, staff, body: PettyFromCashPayload, *, commit:
     pushed = (await session.get(CrmProjectExpense, entry.expense_id)
               if entry.expense_id else None)
     blocked = _cash_push_block(entry, pushed)
-    items = await _petty_item_domain(session)
+    items = items if items is not None else await _petty_item_domain(session)     # 對帳單整批推送時呼叫端算一次帶進來
     item = body.item or petty_item_for(entry.category, items)
 
     if body.preview:

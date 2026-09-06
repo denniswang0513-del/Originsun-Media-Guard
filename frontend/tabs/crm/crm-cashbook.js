@@ -1,7 +1,7 @@
 /**
  * crm-cashbook.js — 收支明細子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today, autoFee, crmToast, searchableSelect, crmCacheInvalidate, hasModule, groupCostStaff } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, projectOptionsHtml, today, autoFee, crmToast, searchableSelect, crmCacheInvalidate, hasModule, groupCostStaff } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
@@ -414,12 +414,10 @@ let _drawn = 0;
 // 列出案子的費用配置，勾幾行開幾張（帶 cost_line_id，後端擋同一行請兩次）；不掛回這一列、不標已付（錢還沒付出去）。
 // 沒掛案：先看掛著的發票是哪個案；再沒有 → 提示連結專案，或直接開一張不掛案的應付款。支出列不放（owner：支出的請款拿掉）。
 const _isIncomeRow = (e) => !!(e.deposit || 0) && !(e.expense || 0);
-let _mineProjects = null;     // 私帳案（請款的「連結專案」多列這些；母公司收支列不能真的掛私帳案，只拿來開它的應付款）
+// 私帳案（請款的「連結專案」多列這些；母公司收支列不能真的掛私帳案，只拿來開它的應付款）—— 走共用快取（發票本同一鍵，會被 invalidate）
 async function _mineProjectList() {
-    if (_mineProjects) return _mineProjects;
-    if (!hasModule('finance_mine')) return (_mineProjects = []);
-    try { _mineProjects = ((await _fetch('/projects?entity=mine')).projects || []); } catch (_) { _mineProjects = []; }
-    return _mineProjects;
+    if (!hasModule('finance_mine')) return [];
+    try { return (await crmCacheFetch('projects_mine', '/projects?entity=mine')).projects || []; } catch (_) { return []; }
 }
 function _payMenu(e) {
     if (e.split_count || !_isIncomeRow(e)) return [];
@@ -491,8 +489,7 @@ window._cashRequestPay = async (id) => {
                 if (passthru) {
                     // 代開列（含選到私帳案：內部代開可掛私帳案，思沙龍就是）——案掛在發票上，再回來走整筆代開請款
                     // 案掛在發票上（PUT 是整包寫回：先 GET 再改一欄，同 crm-invoices._invApplyNumber）
-                    const full = await _fetch('/invoices/' + e.invoice_id);
-                    await _fetch('/invoices/' + e.invoice_id, { method: 'PUT', body: JSON.stringify({ ...full, project_id: picked, project_ids: [picked] }) });
+                    await _fetch('/invoices/' + e.invoice_id, { method: 'PUT', body: JSON.stringify({ ...inv, project_id: picked, project_ids: [picked] }) });   // inv 開視窗時就抓過了
                 } else {
                     await _fetch('/cash-entries/' + id, { method: 'PUT', body: JSON.stringify({ project_id: picked }) });
                     e.project_id = picked;
@@ -1000,10 +997,11 @@ function _rowHtml(e) {
     const canPickProj = !e.split_count && _canLinkProj(e);
     // 帳本 pin 在一次渲染裡不會變 —— 200 列問 200 次沒有意義（同上）
     const mine = _MINE_LEDGER;
+    const kind = _kindOf(e);
     return `
         <div class="crm-row${e.id === _selectedId && !_batch.on ? ' selected' : ''}${
             _batch.on && _batch.sel.has(e.id) ? ' batch-picked' : ''}${
-            _kindOf(e) ? ' cash-kind-' + _kindOf(e) : ''}" data-id="${e.id}"
+            kind ? ' cash-kind-' + kind : ''}" data-id="${e.id}"
              onclick="window._cashRowClick(event,'${e.id}')">
             <div class="crm-row-date cash-c-date${_dayCls(dm)}">${_dayHtml(dm)}</div>
             <div class="crm-row-name cash-c-summary">${_esc(e.summary)}${_pettyTag(e)}</div>
@@ -1429,7 +1427,7 @@ let _PASSTHROUGH = [];          // 發票代開那一類（後端 finance_catego
 // 列的「種類」（owner 2026-09-04：專案與發票代開用底色分開、沒填類別的淺紅底）——同一份判定給底色與快篩用
 // 私帳不上底色（owner 2026-09-04「私帳不用標色 維持原來的顏色」）：底色是母公司帳「專案／發票代開」的視覺，私帳的
 // 「公司」類別會被 project_link_categories 認成專案而整頁變藍。判定回空字串＝沒有種類、沒有底色。
-const _kindOf = (e) => (finIsMine() ? '' : !e.category ? 'none' : _LINKABLE.includes(e.category) ? 'project'
+const _kindOf = (e) => (_MINE_LEDGER ? '' : !e.category ? 'none' : _LINKABLE.includes(e.category) ? 'project'
                        : _PASSTHROUGH.includes(e.category) ? 'passthrough' : '');
 let _catQ = '';                 // 類別框打的字（小寫）對不到節點時的前端子字串篩
 // 類別下拉的選項（正本是後端 finance_category_map）。這裡的值只是斷線 fallback ——

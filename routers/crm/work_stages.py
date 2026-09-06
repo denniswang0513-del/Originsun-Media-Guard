@@ -15,11 +15,10 @@ import uuid
 
 from fastapi import HTTPException, Request
 
-from core.auth import check_admin_or_module
 from core.hr_logic import STAGE_SEED, WORK_TYPES, stage_categories
 from core.schemas import WorkStageNodePayload, WorkStageNodeUpdate
 
-from ._shared import router, _require_db, _get_factory, _now
+from ._shared import _module_guard, router, _require_db, _get_factory, _now
 
 try:
     from ._shared import select, func
@@ -49,8 +48,7 @@ async def _all_nodes(session) -> list:
     return (await session.execute(select(WorkStageNode))).scalars().all()
 
 
-def _guard(request: Request):
-    return check_admin_or_module(request, "timesheets")
+_guard = _module_guard("timesheets")      # 模組守衛工廠只有 routers.crm._shared 一份
 
 
 @router.get("/work-stages/nodes")

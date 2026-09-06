@@ -35,6 +35,16 @@ def tw_day(dt) -> Optional[date]:
     return (dt.astimezone(_TW) if dt.tzinfo else dt).date()
 
 
+def iso_ts(dt) -> Optional[str]:
+    """時間戳的 API 字串（None → None）；週記／手機／場次三個 router 原本各寫一份。"""
+    return dt.isoformat() if dt else None
+
+
+def midnight_of(d) -> datetime:
+    """date → 那天 00:00 的 naive datetime（DB 範圍查詢的下界；週一起算的四個地方原本各拼一次）。"""
+    return datetime(d.year, d.month, d.day)
+
+
 def day_iso(dt) -> Optional[str]:
     """tw_day 的字串版 'YYYY-MM-DD'；None → None（API 回日期一律走這裡，不 strftime 面值）。"""
     d = tw_day(dt)

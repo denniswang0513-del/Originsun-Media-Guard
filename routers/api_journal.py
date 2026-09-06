@@ -29,7 +29,7 @@ from sqlalchemy import delete as sa_delete, func, or_, select  # type: ignore
 
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503
-from core.hr_logic import parse_ymd
+from core.hr_logic import iso_ts, midnight_of, parse_ymd
 from core.journal_logic import (REACTION_KINDS, FLAG_SECTIONS, clean_rich_entries, editable_window_ok, flag_counts,
                                 group_worklog, norm_reaction, reaction_summary, shell_status, status_after_put,
                                 unanswered_flagged, week_start_of)
@@ -67,8 +67,7 @@ def _week_from_param(start: str) -> date:
     return week_start_of(dt.date())
 
 
-def _iso(dt) -> str | None:
-    return dt.isoformat() if dt else None
+_iso = iso_ts
 
 
 def _empty_sections() -> dict:
@@ -139,7 +138,7 @@ async def _worklog_by_user(session, usernames, week: date) -> dict:
     by_name = {n: u for u, _sid, n in people if n}
     if not by_sid and not by_name:
         return out
-    d0 = datetime(week.year, week.month, week.day)
+    d0 = midnight_of(week)
     d1 = d0 + timedelta(days=7)
     conds = []
     if by_sid:
@@ -158,7 +157,16 @@ async def _worklog_by_user(session, usernames, week: date) -> dict:
     return {u: group_worklog(rs) for u, rs in per.items()}
 
 
-async def _replies_by_journal(session, journal_ids: list) -> dict:
+async def _names_plus(session, names, usernames) -> dict:
+    """端點已經查過的顯示名再補上還沒查到的（回覆／心情的人可能不在殼的名單裡）—— 一個請求最多兩趟。"""
+    names = dict(names or {})
+    missing = {u for u in usernames if u} - set(names)
+    if missing:
+        names.update(await _display_names(session, missing))
+    return names
+
+
+async def _replies_by_journal(session, journal_ids: list, names=None) -> dict:
     """{journal_id: [{id, entry_table, entry_id, username, display_name, content, created_at}]}（時間升冪）。"""
     out = {jid: [] for jid in journal_ids}
     if not journal_ids:
@@ -166,7 +174,7 @@ async def _replies_by_journal(session, journal_ids: list) -> dict:
     rows = (await session.execute(
         select(JournalReply).where(JournalReply.journal_id.in_(journal_ids))
         .order_by(JournalReply.created_at, JournalReply.id))).scalars().all()
-    names = await _display_names(session, {r.username for r in rows})
+    names = await _names_plus(session, names, {r.username for r in rows})
     for r in rows:
         out[r.journal_id].append({
             "id": r.id, "entry_table": r.entry_table, "entry_id": r.entry_id,
@@ -176,7 +184,7 @@ async def _replies_by_journal(session, journal_ids: list) -> dict:
     return out
 
 
-async def _reactions_by_journal(session, journal_ids: list, me: str) -> dict:
+async def _reactions_by_journal(session, journal_ids: list, me: str, names=None) -> dict:
     """{journal_id: {entry_id: {"like": n, "love": n, "laugh": n, "mine": [kind]}}}（規則在 core.journal_logic.reaction_summary）。"""
     out = {jid: {} for jid in journal_ids}
     if not journal_ids:
@@ -184,7 +192,7 @@ async def _reactions_by_journal(session, journal_ids: list, me: str) -> dict:
     rows = (await session.execute(
         select(JournalReaction.journal_id, JournalReaction.entry_id, JournalReaction.username, JournalReaction.kind)
         .where(JournalReaction.journal_id.in_(journal_ids)).order_by(JournalReaction.created_at, JournalReaction.id))).all()
-    names = await _display_names(session, {u for _j, _e, u, _k in rows})
+    names = await _names_plus(session, names, {u for _j, _e, u, _k in rows})
     by = {}
     for jid, eid, u, k in rows:
         by.setdefault(jid, []).append((eid, u, k))
@@ -298,8 +306,7 @@ async def put_my_journal(body: JournalPut, request: Request, start: str = ""):
                 shell.status = new_status
             for key, model in _SECTION_MODELS:
                 await _upsert_section(session, model, shell.id, cleaned[key])
-            await session.commit()
-            shell = await _get_shell(session, username, week)
+            await session.commit()          # expire_on_commit=False：shell 還在，不必重抓
         return await _mine_payload(session, username, week, shell)
 
 
@@ -348,12 +355,12 @@ async def week_journals(request: Request, start: str = ""):
         drafts = {s.username for s in all_shells if shell_status(s) == "draft"}
         entries = await _entries_by_journal(session, [s.id for s in shells])
         pnames = await _project_names_for(session, list(entries.values()))
-        replies = await _replies_by_journal(session, [s.id for s in shells])
-        reactions = await _reactions_by_journal(session, [s.id for s in shells], _who)
-        worklog = await _worklog_by_user(session, [s.username for s in shells], week)
         submitted = {s.username for s in shells}
         pending = sorted(await _people_candidates(session) - submitted)
         names = await _display_names(session, submitted | set(pending))
+        replies = await _replies_by_journal(session, [s.id for s in shells], names)     # 名字沿用上面查好的
+        reactions = await _reactions_by_journal(session, [s.id for s in shells], _who, names)
+        worklog = await _worklog_by_user(session, [s.username for s in shells], week)
         return {"week_start": week.isoformat(), "journals": [{
             "id": s.id,                      # 主管回覆要指定殼（POST /journal/reply 的 journal_id）
             "username": s.username,

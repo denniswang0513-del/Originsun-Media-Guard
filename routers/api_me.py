@@ -21,9 +21,9 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from sqlalchemy import func, select  # type: ignore
 
-from core.auth import check_admin_or_module, grant_admin_all_modules
+from core.auth import ME_MODULE_KEYS, check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
-from core.hr_logic import (budget_burn, day_iso, hours_rollup, leave_balance, leave_to_dict,
+from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup, leave_balance, leave_to_dict,
                            month_key, month_span, months_back, parse_ymd, project_metrics, tw_day)
 from core.identity import require_bound_staff, resolve_current_staff
 from core.journal_logic import shell_status, week_start_of
@@ -33,8 +33,7 @@ from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
                        CrmProjectStaff, CrmShoot, HrLeaveRequest, PreprodLocation, Timesheet, WorkJournal)
 from services.timesheet_lookup import budgets_for
-from services.timesheet_manual import project_options
-from services.timesheet_self import (add_rows, bound_ident, delete_row, list_rows, metrics_input, month_or_422,
+from services.timesheet_self import (add_rows, delete_row, list_rows, metrics_input, month_or_422,
                                      own_filter, rows_by_month, ts_dict, update_row)
 from routers.api_hr import approved_annual_used, new_leave_request
 from routers.api_shoots import _crew_list
@@ -42,9 +41,6 @@ from services.timesheet_self import board_days
 
 router = APIRouter(prefix="/api/v1/me", tags=["me"])
 
-ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_leave",
-                  "me_petty",     # 零用金卡（2026-08-19 從 me_finance 拆出）
-                  "me_benefits")  # 福委會卡（2026-08-21，員工自己登記快樂/進修）
 
 # 提案企劃卡的閘門 — 對齊 routers/api_proposals._check 的守衛集合（owner 2026-08-11
 # 拍板「權限全通」：打得開 /project.html 的人，工作台就有入口卡）。
@@ -385,7 +381,7 @@ async def team_week(request: Request, start: str = ""):
         raise HTTPException(status_code=422, detail="start 需為 YYYY-MM-DD")
     week = week_start_of(parse_ymd(start).date() if (start or "").strip() else date.today())
     days = [(week + timedelta(days=i)).isoformat() for i in range(7)]
-    d0 = datetime(week.year, week.month, week.day)
+    d0 = midnight_of(week)
     factory = db_factory_or_503()
     async with factory() as session:
         board = await board_days(session, d0, 7)
@@ -424,16 +420,6 @@ async def team_week(request: Request, start: str = ""):
             "shoots": shoots, "leave": leave}
 
 
-@router.get("/timesheet_options")
-async def my_timesheet_options(request: Request):
-    """補登工時的專案下拉：進行中（製作/結案）+ 本人最近填過的專案。"""
-    check_admin_or_module(request, "me_finance")
-    ident = await resolve_current_staff(request)
-    factory = db_factory_or_503()
-    async with factory() as session:
-        staff_name = ident["staff"].name if ident["staff"] else None
-        return {"projects": await project_options(session, staff_name)}
-
 
 # ── 我的工時：自己填、看自己的、改／刪自己填的（docs/TIMESHEET_SELF_ENTRY_PLAN.md 階段 1）──
 #
@@ -441,7 +427,7 @@ async def my_timesheet_options(request: Request):
 # 只差模組鑰匙）；own-scope 只認 token 解析出的 staff_id，舊 Sheet 列退回姓名比對。
 
 def _me_ident(request: Request):
-    return bound_ident(request, "me_finance")
+    return require_bound_staff(request, "me_finance")
 
 
 def _team_row(r) -> dict:

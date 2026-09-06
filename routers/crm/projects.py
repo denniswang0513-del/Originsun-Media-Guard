@@ -114,7 +114,7 @@ async def linked_receipts_map(session, project_ids) -> dict:
                 select(CrmCashInvoiceLink.cash_entry_id, CrmCashInvoiceLink.invoice_id, CrmCashInvoiceLink.amount)
                 .where(CrmCashInvoiceLink.invoice_id.in_(set(inv_proj))))).all():
             links.setdefault(eid, []).append((iid, int(amt or 0)))
-    # 拆項：父列的專案歸屬已讓位給拆項（core.cash_splits）；拆項 fee＝代開費，專案按毛額（amount＋fee）結清
+    # 拆項：父列的專案歸屬已讓位給拆項（routers/crm/cash_splits）；拆項 fee＝代開費，專案按毛額（amount＋fee）結清
     split_rows = (await session.execute(
         select(CrmCashSplit.entry_id, CrmCashSplit.project_id, CrmCashSplit.amount, CrmCashSplit.fee)
         .where(CrmCashSplit.project_id.in_(ids)))).all()
@@ -203,7 +203,7 @@ _hide_mine = hide_mine_projects
 # ── Project Endpoints ───────────────────────────────────────
 
 @router.get("/project-types")
-async def get_project_types(request: Request):
+async def get_project_types():
     """案型清單**一份**（owner 2026-09-03「這裡的案型跟私帳同步」）：正本＝私帳毛利表的列
     （core.finance_logic.project_type_vocab 再併上 settings／在用的）。CRM 專案表下拉、案型清單、私帳設定頁、
     工時 burn 表、手機版都吃同一份。"""
@@ -1349,7 +1349,6 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
     `source_project_id`。母公司那一列一個欄位都不動 —— 它跟客戶的合約與成本
     都還在原地。
     """
-    import uuid as _uuid
 
     from core.ledger import require_entity
     from core.ledger_project import (MIRROR_SOURCE, merge_split,
@@ -1421,7 +1420,7 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
             _write_link(p, t)            # 連結的唯一寫入者（兩側欄位一起顧）
             new_id = t.id
         else:
-            new_id = _uuid.uuid4().hex
+            new_id = uuid.uuid4().hex
             t = new_ledger_project(
                 project_id=new_id, name=p.name, client_id=p.client_id,
                 entity="mine", contract=mir["total"],
@@ -1706,7 +1705,6 @@ async def create_mine_from_parent(parent_id: str, request: Request):
     （它的語意是「把公司發包給我的錢鏡射過來」），這支是對應表的補件動作 ——
     案子確實存在、只是私帳還沒記，所以照建不擋。算法共用不另寫一份。
     """
-    import uuid as _uuid
     from core.ledger_project import mirror_detail, mirror_lines
     from routers.api_finance_projects import new_ledger_project
 
@@ -1730,7 +1728,7 @@ async def create_mine_from_parent(parent_id: str, request: Request):
             .where(CrmProjectCostLine.project_id == parent_id)
             .order_by(CrmProjectCostLine.sort_order))).scalars().all()
         mir = mirror_lines(lines, sid) if sid else {"total": 0, "split": {}}
-        new_id = _uuid.uuid4().hex
+        new_id = uuid.uuid4().hex
         m = new_ledger_project(
             project_id=new_id, name=p.name, client_id=p.client_id,
             entity="mine", contract=mir["total"],

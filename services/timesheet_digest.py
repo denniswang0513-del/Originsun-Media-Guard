@@ -14,7 +14,7 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from core.hr_logic import (fillers_on, ACTIVE_WINDOW_DAYS, active_fillers, digest_text, hours_rollup,
+from core.hr_logic import (midnight_of, fillers_on, ACTIVE_WINDOW_DAYS, active_fillers, digest_text, hours_rollup,
                            is_workday, tw_day, missing_fillers)
 from services.timesheet_settings import SettingsBlock
 
@@ -33,7 +33,7 @@ async def build_digest(session, today: date | None = None) -> dict:
     from core.journal_logic import week_start_of
     mon = week_start_of(today) - timedelta(days=7)          # 上週一（週一規則只有 week_start_of 一份）
     sun = mon + timedelta(days=6)
-    d0 = datetime(mon.year, mon.month, mon.day)
+    d0 = midnight_of(mon)
     rows = (await session.execute(
         select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name, Timesheet.hours)
         .where(Timesheet.work_date >= d0 - timedelta(days=ACTIVE_WINDOW_DAYS))

@@ -174,8 +174,8 @@ _MINE_IDS_AT: float = 0.0
 _MINE_IDS_TTL = 60.0
 
 
-async def is_mine_project(session_factory, project_id: str) -> bool:
-    """project_id 是否屬於私帳（帶 60s TTL 快取）。查不到專案＝False。"""
+async def mine_project_ids(session_factory) -> set:
+    """私帳案 id 集合（60s TTL 快取）；is_mine_project 與「候選清單要藏私帳案」都吃這一份。"""
     import time
     global _MINE_PROJECT_IDS, _MINE_IDS_AT
     now = time.monotonic()
@@ -189,7 +189,12 @@ async def is_mine_project(session_factory, project_id: str) -> bool:
                 .where(is_mine(CrmProject.entity)))).scalars().all()
         _MINE_PROJECT_IDS = set(ids)
         _MINE_IDS_AT = now
-    return project_id in _MINE_PROJECT_IDS
+    return _MINE_PROJECT_IDS
+
+
+async def is_mine_project(session_factory, project_id: str) -> bool:
+    """project_id 是否屬於私帳（帶 60s TTL 快取）。查不到專案＝False。"""
+    return project_id in await mine_project_ids(session_factory)
 
 
 def invalidate_mine_projects() -> None:

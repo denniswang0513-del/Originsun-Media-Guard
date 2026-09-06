@@ -25,8 +25,9 @@ def test_the_button_reuses_the_existing_payment_flow():
     # 代墊那顆只多帶 advanced 旗標。
     # 🔴 釘的是「只有一個地方在組那顆按鈕」，不是它的參數排版 ——
     # 釘字面的話，有人把參數換行或改成物件展開就紅，而行為一點都沒變。
-    body = js_func_body(js, "async function _loadCostStaff(")
-    assert body.count("var payBtn = function(") == 1, "按鈕又被抄成多份了"
+    # 活的執行人員畫面在收付款分頁（舊 _loadCostStaff 2026-09-06 拿掉）
+    body = js_func_body(js_code_only(repo_src("frontend/tabs/crm/crm-projects-pay.js")), "function _payHtml(")
+    assert body.count("const payBtn = (") == 1, "按鈕又被抄成多份了"
     # 小按鈕的 HTML 模板整檔只有 _smallBtn 那一份（請款三顆／付款動作／預支三顆都吃它）
     assert js.count('<button class="crm-btn crm-btn-secondary crm-btn-sm"') == 1, "小按鈕模板又被抄了"
     assert "advanced" in body and "費用已代墊" in body
@@ -92,7 +93,7 @@ def test_an_advanced_payment_matches_the_row_of_whose_cost_it_is():
     grp = js_func_body(utils, "export function groupCostStaff(")
     assert "(p.advance_by || p.payee_name) + '|' + p.amount" in grp
     assert "byOwnerAmount.get(s.name + '|' + s.subtotal)" in grp
-    assert "groupCostStaff(lines, payments)" in js_func_body(js, "async function _loadCostStaff(")
+    assert "groupCostStaff(costLines || [], pays)" in js_func_body(js_code_only(repo_src("frontend/tabs/crm/crm-projects-pay.js")), "export function payStatus(")
     for bad in ("payments[pi].payee_name === s.name", "_payByOwnerAmount", "actual_staff_id]"):
         assert bad not in js, "舊的判準／自己分人還在：" + bad
 
@@ -100,10 +101,7 @@ def test_an_advanced_payment_matches_the_row_of_whose_cost_it_is():
 def test_the_row_says_who_fronted_the_money():
     """owner 2026-09-02「要在那一列標出『○○○ 代墊』」—— 不標的話「已付款」
     看起來像公司付給這個人，而實際上公司欠的是代墊人。"""
-    js = js_code_only(repo_src(JS))
-    assert "' 代墊</span>'" in js
-    assert "matchedPayment.advance_by" in js
-    # 兩種狀態（已付款／已請款）都要帶標籤 —— 只加一邊是最容易漏的。
-    # 兩者由同一支 statusSpan 產出，所以標籤在定義處掛一次就兩邊都有。
-    assert "return advTag + '<span" in js
-    assert "statusSpan('#86efac'" in js and "statusSpan('#fb923c'" in js
+    # 活的執行人員列在收付款分頁（舊 _loadCostStaff 2026-09-06 拿掉）
+    pay = js_code_only(repo_src("frontend/tabs/crm/crm-projects-pay.js"))
+    assert "代墊</span>" in pay and "p.advance_by" in pay
+    assert "${advTag}" in pay, "代墊標籤要掛在動作列前面（已付／已請款兩種狀態都帶）"

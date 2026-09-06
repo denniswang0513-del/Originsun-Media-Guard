@@ -974,7 +974,7 @@ async def delete_statement_draft(draft_id: str, request: Request):
         return {"ok": True}
 
 
-async def _push_one_petty(session, staff, entry, item: str = "") -> None:
+async def _push_one_petty(session, staff, entry, item: str = "", items: list | None = None) -> None:
     """一列收支 → 母公司零用金的草稿單據（＝畫面上的「源日請款」）。
 
     🔴 **不另造流程**：呼叫零用金那支既有的 `_push_from_cash`（owner 2026-08-27
@@ -990,9 +990,8 @@ async def _push_one_petty(session, staff, entry, item: str = "") -> None:
     from core.schemas import PettyFromCashPayload
     from routers.crm.petty import _push_from_cash
 
-    await session.flush()          # 需要 entry.id
-    await _push_from_cash(session, staff,
-                          PettyFromCashPayload(entry_id=entry.id, item=item), commit=False)   # 整批一交易：由 apply_bank_statement 最後 commit
+    await _push_from_cash(session, staff,      # 裡面會 flush（需要 entry.id）；整批一交易：由 apply_bank_statement 最後 commit
+                          PettyFromCashPayload(entry_id=entry.id, item=item), commit=False, items=items)
 
 
 async def _fill_workbench_column(session, bank_account_id: str, stmt_lines: list) -> None:
@@ -1056,6 +1055,8 @@ async def _push_petty_drafts(session, request, petty_rows: list) -> tuple:
     # 每一列的失敗理由都是同一句 —— 在這裡就講清楚。
     from core.identity import resolve_current_staff
     staff = (await resolve_current_staff(request)).get("staff")
+    from routers.crm.petty import _petty_item_domain
+    items = await _petty_item_domain(session)      # 項目值域整批算一次（原本每列一趟）
     for r, ce in petty_rows:
         try:
             if staff is None:
@@ -1063,7 +1064,7 @@ async def _push_petty_drafts(session, request, petty_rows: list) -> tuple:
                     status_code=422,
                     detail="這個帳號還沒綁人員檔案，源日請款要有請款人 —— "
                            "請先到使用者管理綁定，或匯入後到收支明細逐列推送")
-            await _push_one_petty(session, staff, ce, (r.petty_item or "").strip())
+            await _push_one_petty(session, staff, ce, (r.petty_item or "").strip(), items=items)
             done += 1
         except HTTPException as e:
             failed.append(f"{r.date} {int(r.amount or 0):+,}：{e.detail}")
