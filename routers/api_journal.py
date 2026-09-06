@@ -30,7 +30,7 @@ from sqlalchemy import delete as sa_delete, func, or_, select  # type: ignore
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503
 from core.hr_logic import parse_ymd
-from core.journal_logic import (FLAG_SECTIONS, clean_rich_entries, editable_window_ok, flag_counts,
+from core.journal_logic import (REACTION_KINDS, FLAG_SECTIONS, clean_rich_entries, editable_window_ok, flag_counts,
                                 group_worklog, norm_reaction, reaction_summary, shell_status, status_after_put,
                                 unanswered_flagged, week_start_of)
 from core.schemas import JournalPut, JournalReactPost, JournalReplyPost
@@ -336,7 +336,7 @@ async def _people_candidates(session) -> set:
 async def week_journals(request: Request, start: str = ""):
     """該週**送出**的人（username 排序）— 全員可讀；每人帶自動區、flag 計數、條目（含 flag／案子）、回覆。
     people_status：還沒送出的人（draft＝草稿中、none＝還沒寫）。"""
-    check_admin_or_module(request, "journal")
+    _who = (check_admin_or_module(request, "journal") or {}).get("sub") or ""
     week = _week_from_param(start)
     factory = db_factory_or_503()
     async with factory() as session:
@@ -349,7 +349,7 @@ async def week_journals(request: Request, start: str = ""):
         entries = await _entries_by_journal(session, [s.id for s in shells])
         pnames = await _project_names_for(session, list(entries.values()))
         replies = await _replies_by_journal(session, [s.id for s in shells])
-        reactions = await _reactions_by_journal(session, [s.id for s in shells], _me(request))
+        reactions = await _reactions_by_journal(session, [s.id for s in shells], _who)
         worklog = await _worklog_by_user(session, [s.username for s in shells], week)
         submitted = {s.username for s in shells}
         pending = sorted(await _people_candidates(session) - submitted)
@@ -429,7 +429,7 @@ async def journal_people(request: Request):
 @router.get("/person")
 async def person_journals(request: Request, username: str = "", limit: int = 26):
     """某人的歷週日誌（week DESC）。只回送出的。"""
-    check_admin_or_module(request, "journal")
+    _who = (check_admin_or_module(request, "journal") or {}).get("sub") or ""
     username = (username or "").strip()
     if not username:
         raise HTTPException(status_code=422, detail="username 必填")
@@ -444,7 +444,7 @@ async def person_journals(request: Request, username: str = "", limit: int = 26)
         entries = await _entries_by_journal(session, [s.id for s in shells])
         pnames = await _project_names_for(session, list(entries.values()))
         replies = await _replies_by_journal(session, [s.id for s in shells])
-        reactions = await _reactions_by_journal(session, [s.id for s in shells], _me(request))
+        reactions = await _reactions_by_journal(session, [s.id for s in shells], _who)
         return {"journals": [{
             "week_start": s.week_start.isoformat(),
             **_strings(entries[s.id]),
@@ -462,10 +462,6 @@ async def person_journals(request: Request, username: str = "", limit: int = 26)
 # 不要再用全域 Chat webhook 廣播——那會把每個人的週記回覆都推到同一個群。
 
 
-def _me(request: Request) -> str:
-    """token sub（心情的 mine 判定用）。列表端點已過守衛，這裡只取名字。"""
-    from core.auth import _extract_token
-    return ((_extract_token(request) or {}).get("sub")) or ""
 
 
 @router.post("/react")
@@ -476,7 +472,7 @@ async def react_entry(body: JournalReactPost, request: Request):
     who = (payload or {}).get("sub") or ""
     kind = norm_reaction(body.kind)
     if not kind:
-        raise HTTPException(status_code=422, detail="kind 只能是 like／love／laugh")
+        raise HTTPException(status_code=422, detail="kind 只能是 " + "／".join(REACTION_KINDS))
     whole = body.entry_table == WorkJournal.__tablename__
     if not whole and body.entry_table not in _TABLE_MODELS:
         raise HTTPException(status_code=422, detail=f"entry_table 只能是：{'／'.join(_TABLE_MODELS)}／{WorkJournal.__tablename__}")
@@ -511,7 +507,7 @@ async def react_entry(body: JournalReactPost, request: Request):
             await session.rollback()
             on = True
         summary = (await _reactions_by_journal(session, [shell.id], who))[shell.id].get(target_id) or \
-            ({k: 0 for k in ("like", "love", "laugh")} | {"mine": []})
+            ({k: 0 for k in REACTION_KINDS} | {"mine": []})
     return {"status": "ok", "on": on, "entry_id": target_id, "reactions": summary}
 
 

@@ -7,7 +7,7 @@
  * #expense（記雜支）與 #payments（付款，owner 2026-09-03 被行事曆取代）有畫面但不在分頁列。
  */
 import { boot, mfetch, toast, esc } from './shell.js';
-import { state, DEFAULT_TAB, HIDDEN_ROUTES, currentTab, initSheet, closeSheet, errBox } from './ui.js';
+import { state, DEFAULT_TAB, HIDDEN_ROUTES, currentTab, initSheet, closeSheet, errBox, isAdmin } from './ui.js';
 import * as invoiceView from './views/invoice.js';
 import * as pettyView from './views/petty.js';
 import * as projectsView from './views/projects.js';
@@ -20,7 +20,7 @@ import * as worklogView from './views/worklog.js';
 const VIEWS = { invoice: invoiceView, petty: pettyView, projects: projectsView, quotes: quotesView,
                 calendar: calendarView, worklog: worklogView, payments: paymentsView, expense: expenseView };
 
-const gate = (me) => (me.access_level || 0) >= 3 || (me.modules || []).includes('crm_projects');
+const gate = (me) => isAdmin(me) || (me.modules || []).includes('crm_projects');
 
 const hosts = {};
 let _depth = 0;      // 這次開頁後往前走了幾步（上一頁按到底就回首頁，不會退出這個 app）

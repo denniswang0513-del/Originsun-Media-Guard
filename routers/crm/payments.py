@@ -34,7 +34,6 @@ from ._shared import (router, money_dep, _require_db,
                       _get_factory, _fmt_day, _now,
                       _parse_shoot_date, _assert_month_open, _locked_month_set, _raise_locked_batch, map_csv_row)
 
-# 這個檔案唯一用得到發票檔那邊的東西：改發票時要跟著改檔名
 
 try:
     from ._shared import (select, or_, CrmProject, CrmInvoice,
@@ -43,11 +42,8 @@ try:
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
     pass
 
-# ── CSV 匯入共用 ────────────────────────────────────────────
-
-
 # 正本在 finance.py 的共用 helper（單向依賴：finance 不用本檔）
-from .finance import (  # noqa: F401
+from .finance import (
     _entity_for_write,
     _get_mine_project,
     _import_money_csv,
@@ -327,47 +323,31 @@ async def list_advance_payments(request: Request, returned: int = -1,
             q = q.where(CrmPaymentRequest.project_id == project_id)
         rows = (await session.execute(q.order_by(CrmPaymentRequest.created_at.desc()))).scalars().all()
 
+        # 三張表各撈一次（原本每筆預支 5 趟往返）：核銷雜支合計、關聯收支列、專案名
+        ids = [p.id for p in rows]
+        # 私帳專案的花費不能拿來核銷母公司的預支款（owner 2026-08-28）—— 述詞正本 core.ledger
+        exp_by_adv = dict((await session.execute(
+            select(CrmProjectExpense.advance_id, sa_func.coalesce(sa_func.sum(CrmProjectExpense.actual), 0))
+            .where(CrmProjectExpense.advance_id.in_(ids), _not_mine_project(CrmProjectExpense))
+            .group_by(CrmProjectExpense.advance_id))).all()) if ids else {}
+        cash_by_adv: dict = {}
+        for c in (await session.execute(
+                select(CrmCashEntry).where(CrmCashEntry.advance_payment_id.in_(ids))
+                .order_by(CrmCashEntry.entry_date))).scalars().all() if ids else []:
+            cash_by_adv.setdefault(c.advance_payment_id, []).append(c)
+        from ._shared import project_names_map
+        pnames = await project_names_map(session, {p.project_id for p in rows if p.project_id and not p.project_label})
+        from core.crm_logic import compute_advance_status
         result = []
         for p in rows:
-            # Calculate expenses by this payee in this project
-            expense_total = 0
-            # 私帳專案的花費不能拿來核銷母公司的預支款（owner 2026-08-28）——
-            # 核銷等於「這筆預支變成公司的成本」，述詞正本 core.ledger
-            exp_sum = (await session.execute(
-                select(sa_func.coalesce(sa_func.sum(CrmProjectExpense.actual), 0))
-                .where(CrmProjectExpense.advance_id == p.id,
-                       _not_mine_project(CrmProjectExpense))
-            )).scalar() or 0
-            expense_total = exp_sum
-
-            # Get project name
-            project_name = p.project_label or ""
-            if p.project_id and not project_name:
-                proj = await session.get(CrmProject, p.project_id)
-                if proj:
-                    project_name = proj.name
-
+            expense_total = int(exp_by_adv.get(p.id) or 0)
+            project_name = p.project_label or pnames.get(p.project_id or "", "")
             amt = p.amount or 0
-            # 發款: 收支明細中關聯此預支的支出合計（判定規則在 core/crm_logic.py）
-            cash_pay_total = (await session.execute(
-                select(sa_func.coalesce(sa_func.sum(CrmCashEntry.expense), 0))
-                .where(CrmCashEntry.advance_payment_id == p.id)
-                .where(CrmCashEntry.expense > 0)
-            )).scalar() or 0
-            # 收款: 收支明細中關聯此預支的收入合計
-            cash_return_total = (await session.execute(
-                select(sa_func.coalesce(sa_func.sum(CrmCashEntry.deposit), 0))
-                .where(CrmCashEntry.advance_payment_id == p.id)
-                .where(CrmCashEntry.deposit > 0)
-            )).scalar() or 0
-            from core.crm_logic import compute_advance_status
+            linked_cash = cash_by_adv.get(p.id, [])
+            # 發款＝關聯此預支的支出合計；收款＝關聯的收入合計（判定規則在 core/crm_logic.py）
+            cash_pay_total = sum(int(c.expense or 0) for c in linked_cash if (c.expense or 0) > 0)
+            cash_return_total = sum(int(c.deposit or 0) for c in linked_cash if (c.deposit or 0) > 0)
             adv = compute_advance_status(amt, expense_total, cash_pay_total, cash_return_total)
-            # 關聯的收支明細（發款/收款記錄）
-            linked_cash = (await session.execute(
-                select(CrmCashEntry)
-                .where(CrmCashEntry.advance_payment_id == p.id)
-                .order_by(CrmCashEntry.entry_date)
-            )).scalars().all()
             cash_entries = [{
                 "id": c.id,
                 "entry_date": _fmt_day(c.entry_date) or None,
@@ -489,7 +469,7 @@ async def batch_update_month(request: Request):
         raise HTTPException(status_code=400, detail="請提供 payment_ids")
 
     async with factory() as session:
-        rows = [p for pid in ids if (p := await session.get(CrmPaymentRequest, pid))]
+        rows = list((await session.execute(select(CrmPaymentRequest).where(CrmPaymentRequest.id.in_(ids)))).scalars().all())
         _mine_or_admin_write_rows(request, rows)
         updated = 0
         for p in rows:
@@ -518,14 +498,8 @@ async def batch_pay(request: Request):
 
     async with factory() as session:
         # 先載入會變動的列（違規時一筆都不動）
-        rows = []
-        for pid in ids:
-            p = await session.get(CrmPaymentRequest, pid)
-            if not p:
-                continue
-            will_change = (p.payment_status != "已付款") or (p.payment_date != pay_date)
-            if will_change:
-                rows.append(p)
+        rows = [p for p in (await session.execute(select(CrmPaymentRequest).where(CrmPaymentRequest.id.in_(ids)))).scalars().all()
+                if (p.payment_status != "已付款") or (p.payment_date != pay_date)]      # 一次 IN，不逐 id 往返
         _mine_or_admin_write_rows(request, rows)
         # 兩本帳各自鎖月（plan §3）：涉及的 entity 分組、各查一次鎖定月集合
         locked_by_entity = {
@@ -579,11 +553,8 @@ async def batch_unpay(request: Request):
         raise HTTPException(status_code=400, detail="請提供 payment_ids")
 
     async with factory() as session:
-        rows = []
-        for pid in ids:
-            p = await session.get(CrmPaymentRequest, pid)
-            if p and p.payment_status == "已付款":
-                rows.append(p)
+        rows = [p for p in (await session.execute(select(CrmPaymentRequest).where(CrmPaymentRequest.id.in_(ids)))).scalars().all()
+                if p.payment_status == "已付款"]
         _mine_or_admin_write_rows(request, rows)
         # 兩本帳各自鎖月（plan §3）：涉及的 entity 分組、各查一次鎖定月集合
         locked_by_entity = {

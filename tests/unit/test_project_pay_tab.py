@@ -41,7 +41,8 @@ def test_status_and_next_steps_are_pure_and_money_gated():
 
 def test_actions_refresh_the_strip():
     fin = js_code_only(repo_src("frontend/tabs/crm/crm-projects-finance.js"))
-    assert fin.count("window._projPay?.refresh?.()") >= 2, "請款／付款動作做完要重算狀態列"
+    assert fin.count("_refreshPayIfOpen()") >= 2, "請款／付款動作做完要重算狀態列（收付款分頁開著才抓）"
+    assert "window._projPay?.refresh?.()" in between(fin, "function _refreshPayIfOpen(", "function _costAfterPay(")
     inv = js_code_only(repo_src("frontend/tabs/crm/crm-projects-invoices.js"))
     assert "window._projPay?.refresh?.()" in inv, "開完票要重算狀態列"
 

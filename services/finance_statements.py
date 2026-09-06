@@ -170,6 +170,17 @@ def explode_cash_splits(cash_entries: list, splits_by_entry: dict) -> list:
     return out
 
 
+def category_map_scope(entity: str):
+    """對映表的帳本過濾條件（三表輸入與 /category-map 路由同一份）。
+
+    🔴 只有 cash 分家：兩本帳的收支類別值域根本不重疊（母公司是平的科目、私帳是分類樹鏡射出來的複合鍵），
+    共用一份的下場是母公司的下拉列出 38 個私帳的類別，選了照樣存得進去、然後在三表裡變成「未歸類」。
+    請款／發票那兩種是公司流程的詞彙，兩本帳講的是同一件事，所以不分。"""
+    from sqlalchemy import or_
+    from db.models import FinanceCategoryMap
+    return or_(FinanceCategoryMap.source != "cash", FinanceCategoryMap.entity == entity)
+
+
 async def _load_inputs(session, entity: str = "parent") -> dict:
     """全表載入 → 純函式吃的 dict/list（欄位子集，含 drilldown 需要的識別欄）。
 
@@ -286,8 +297,7 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
                for r in (await session.execute(
                    select(FinanceCategoryMap).where(
                        FinanceCategoryMap.active.is_(True),
-                       or_(FinanceCategoryMap.source != "cash",
-                           FinanceCategoryMap.entity == entity)))).scalars().all()}
+                       category_map_scope(entity)))).scalars().all()}
 
     return {"invoices": invoices, "payments": payments,
             "cash_entries": cash_entries, "equipment": equipment,

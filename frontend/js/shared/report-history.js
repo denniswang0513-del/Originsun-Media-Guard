@@ -4,6 +4,7 @@
 // 而且沒有 report 權限的人清單永遠停在「NAS 尚無歷史報表紀錄」（/api/v1/reports/history 本身不擋）。
 // 清單裡的按鈕是 inline onclick → 三支都要掛在 window 上。
 import { getComputeBaseUrl } from './utils.js';
+import { copyText } from './utils.js';
 
 export async function loadReportHistory() {
     const listEls = [
@@ -71,48 +72,8 @@ export async function deleteReport(reportId) {
     }
 }
 
-/**
- * Copy URL to clipboard with fallback for HTTP (non-secure) contexts.
- * navigator.clipboard.writeText() only works on HTTPS or localhost.
- * For HTTP (e.g. 192.168.x.x:8000), use the legacy execCommand('copy') fallback.
- */
-export function copyPublicUrl(url, btnElement) {
-    if (!url) return;
-
-    function onSuccess() {
-        const oldHTML = btnElement.innerHTML;
-        const oldClass = btnElement.className;
-        btnElement.innerHTML = '✅ 已複製！';
-        btnElement.className = 'text-xs border border-green-500 bg-green-600/50 text-white px-2 py-1 rounded transition-colors whitespace-nowrap';
-        setTimeout(() => {
-            btnElement.innerHTML = oldHTML;
-            btnElement.className = oldClass;
-        }, 1500);
-    }
-
-    function fallbackCopy(text) {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.position = 'fixed';
-        ta.style.left = '-9999px';
-        document.body.appendChild(ta);
-        ta.select();
-        try {
-            const ok = document.execCommand('copy');
-            if (ok) { onSuccess(); }
-            else { alert('複製失敗，請手動複製: ' + text); }
-        } catch (e) {
-            alert('複製失敗，請手動複製: ' + text);
-        }
-        document.body.removeChild(ta);
-    }
-
-    if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(url).then(onSuccess).catch(() => fallbackCopy(url));
-    } else {
-        fallbackCopy(url);
-    }
-}
+/** 複製公開網址：剪貼簿的相容鏈只有 utils.copyText 一份（按鈕會閃「已複製」）。 */
+export const copyPublicUrl = (url, btn) => (url ? copyText(url, btn) : undefined);
 
 window.loadReportHistory = loadReportHistory;
 window.deleteReport = deleteReport;

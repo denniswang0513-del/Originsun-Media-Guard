@@ -385,6 +385,27 @@ async def mine_client_links(request: Request):
     return {"mine": mine, "crm": parents, "shared": shared}
 
 
+async def link_or_create_crm_client(session, c):
+    """私帳客戶 → 母帳那一筆：已連結就用它；母帳已有同代稱就連過去；都沒有才建一筆（代稱／全稱／統編）並連結。
+    回 (母帳客戶, 是否新建)。clients.crm-create 與 projects.parent-create 都走這一份（`(entity, short_name)` 有唯一約束）。"""
+    if c.crm_link_id:
+        exist = await session.get(Client, c.crm_link_id)
+        if exist is not None:
+            return exist, False
+    exist = (await session.execute(
+        select(Client).where(not_mine(Client.entity),
+                             Client.short_name == c.short_name))).scalars().first()
+    created = exist is None
+    if created:
+        exist = Client(id=uuid.uuid4().hex, entity="parent",
+                       short_name=c.short_name, full_name=c.full_name or "",
+                       tax_id=c.tax_id or "", status="潛在客戶")
+        session.add(exist)
+    c.crm_link_id = exist.id
+    c.updated_at = _now()
+    return exist, created
+
+
 @router.post("/clients/{client_id}/crm-create")
 async def create_crm_client_from_mine(client_id: str, request: Request):
     """私帳客戶 → 在母帳（CRM）建一筆同樣的客戶並連結（owner 2026-09-05
@@ -412,19 +433,7 @@ async def create_crm_client_from_mine(client_id: str, request: Request):
             raise HTTPException(status_code=422, detail="只有私帳客戶能建立 CRM 對應")
         if c.crm_link_id:
             return {"status": "ok", "crm_link_id": c.crm_link_id, "created": False}
-        exist = (await session.execute(
-            select(Client).where(not_mine(Client.entity),
-                                 Client.short_name == c.short_name))).scalars().first()
-        if exist is None:
-            exist = Client(id=uuid.uuid4().hex, entity="parent",
-                           short_name=c.short_name, full_name=c.full_name or "",
-                           tax_id=c.tax_id or "", status="潛在客戶")
-            session.add(exist)
-            created = True
-        else:
-            created = False
-        c.crm_link_id = exist.id
-        c.updated_at = _now()
+        exist, created = await link_or_create_crm_client(session, c)
         await session.commit()
         return {"status": "ok", "crm_link_id": exist.id,
                 "crm_link_name": exist.short_name, "created": created}

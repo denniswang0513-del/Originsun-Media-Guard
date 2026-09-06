@@ -6,7 +6,7 @@ routers/api_me.py（員工端 /my.html）與 routers/api_timesheets.py（CRM tab
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request
 from sqlalchemy import or_, select
@@ -321,3 +321,27 @@ async def admin_delete_row(session, row_id: str, who: str = "") -> dict:
     await session.delete(r)
     await session.commit()
     return {"deleted": row_id, "tombstoned": r.source != "manual"}
+
+
+async def board_days(session, d0: datetime, days: int) -> list:
+    """看板的計算（唯一一份）：[{date, people:[{name, items, hours, planned}]}]。
+    /board 與員工頁的 /me/team_week 都吃這個 —— 團隊的一週不抄第二份。"""
+    from datetime import timedelta
+    from db.models import Timesheet
+    d1 = d0 + timedelta(days=days)
+    rows = (await session.execute(
+        select(Timesheet).where(Timesheet.work_date >= d0).where(Timesheet.work_date < d1)
+        .order_by(Timesheet.work_date, Timesheet.staff_name, Timesheet.created_at)
+    )).scalars().all()
+    by_day: dict = {}
+    for r in rows:
+        it = ts_dict(r)
+        by_day.setdefault(it["date"], {}).setdefault(it["staff_name"] or "(空白)", []).append(it)
+    out_days = []
+    for i in range(days):
+        k = (d0 + timedelta(days=i)).date().isoformat()
+        people = [{"name": n, "items": its, "hours": round(sum(x["hours"] for x in its), 1),
+                   "planned": round(sum(x["planned_hours"] or 0 for x in its), 1)}
+                  for n, its in sorted(by_day.get(k, {}).items())]
+        out_days.append({"date": k, "people": people})
+    return out_days

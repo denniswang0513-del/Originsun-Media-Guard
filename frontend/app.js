@@ -510,7 +510,6 @@ import './js/app/remote-dispatch.js';
                 }
             });
 
-            // transcribe_progress／transcribe_done 只掛一次（上面 317／342 那份）；這裡原本又掛了一份，每個事件跑兩次
         }
         window.setupSocket = setupSocket;
 

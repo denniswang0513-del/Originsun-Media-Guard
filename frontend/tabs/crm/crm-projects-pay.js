@@ -57,11 +57,12 @@ export function payStatus(project, invoices, payments, costLines) {
     const unassignedLines = (costLines || []).filter((ln) => !ln.actual_staff_id && Number(ln.actual_amount || 0) > 0);
     const unassigned = unassignedLines.reduce((a, ln) => a + Number(ln.actual_amount || 0), 0);
     const payable = groups.reduce((a, g) => a + g.subtotal, 0) + others.reduce((a, x) => a + Number(x.amount || 0), 0) + unassigned;
-    const paid = pays.filter((x) => x.payment_status === PAID).reduce((a, x) => a + Number(x.amount || 0), 0);
+    const paidPays = pays.filter((x) => x.payment_status === PAID);
+    const paid = paidPays.reduce((a, x) => a + Number(x.amount || 0), 0);
     const requested = pays.filter((x) => x.payment_status !== PAID).reduce((a, x) => a + Number(x.amount || 0), 0);
     const unrequestedGroups = groups.filter((g) => !g.payment);
     const unrequested = unrequestedGroups.reduce((a, g) => a + g.subtotal, 0);
-    const kai = inv.filter((i) => /代開/.test(i.category || ''));
+    const kai = inv.filter(isKai);
     // 🔴 掛在本案、但方向是**付款**的發票（代開撥款給代開人）。收款表的
     // payment_type==='收款' 會濾掉它，而付款表只吃工項與請款單 —— 於是它在
     // 整個系統裡沒有家（owner 2026-09-05 找不到 PJ00158178 $161,700 就是這個）。
@@ -72,7 +73,7 @@ export function payStatus(project, invoices, payments, costLines) {
         invoices: inv, contract, invoiced, invoiceCount: inv.length, received, fee, unreceived,
         invoicedUnreceived, uninvoiced, kaiDue, kaiRemitted,
         status: p.payment_status || '未到帳',
-        payable, paid, requested, unrequested, unrequestedGroups, paidCount: pays.filter((x) => x.payment_status === PAID).length,
+        payable, paid, requested, unrequested, unrequestedGroups, paidCount: paidPays.length,
         payCount: pays.length, margin: contract - payable, groups, others, kai, payside,
         unassigned, unassignedLines,
         uncollected: inv.filter((i) => !COLLECTED_RE.test(i.payment_status || '')),

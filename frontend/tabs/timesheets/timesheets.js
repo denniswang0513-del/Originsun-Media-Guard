@@ -21,25 +21,12 @@ import { hbars } from '../../js/shared/svg-charts.js';
 // Sheet 式格子（列 html／鍵盤走列／起訖算小時／逐列自動存）與專案表／專案檔案的渲染只有 js/shared/ 那一份，
 // /my.html 也 import 同一份（tests/unit/test_ts_shared_components.py）
 import { renderSheet, appendBlankRows, appendRow, dropEmptyRows, saveRowNow, removeRow, wireAutosave,
-         rowBody, projectFromInput, typeSelectHtml, setStages } from '../../js/shared/ts-sheet.js';
-import { dayLabel as _dayLabel, isPlan as _isPlan, hoursLabel as _hoursLabel, typeTag as _typeTag, projLink as _projLink,
+         rowBody, projectFromInput, typeSelectHtml, setStages, tsFetch as tfetch } from '../../js/shared/ts-sheet.js';   // Bearer/JSON fetch 只有 ts-sheet 一份
+import { dayLabel as _dayLabel, shiftDays, isPlan as _isPlan, hoursLabel as _hoursLabel, typeTag as _typeTag, projLink as _projLink,
          srcTag as _srcTag, dayLog as _dayLog, pctStyle as _pctStyle, createBurnSorter, burnTbodyHtml, burnTableHtml, burnTypeCellHtml,
          bars as _bars, projectFileHtml } from '../../js/shared/ts-projects.js';
 import { openStageEditor, stagesMapFrom } from '../../js/shared/stage-editor.js';
 
-async function tfetch(path, opts = {}) {
-    const token = localStorage.getItem('auth_token');
-    const r = await fetch(path, {
-        method: opts.method || 'GET',
-        headers: {
-            'Accept': 'application/json', 'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
-        },
-        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ('HTTP ' + r.status));
-    return r.json();
-}
 
 let _content = null;
 let _view = 'today';   // today | mine | projects | staff | ledger | dash | settings | compare | project:<案名> | person:<人名>
@@ -66,11 +53,6 @@ let _monthTo = '';          // 總表：迄月（空＝只看 _month 那個月�
 let _ledgerSel = new Set(); // 總表：勾選的列 id（批次調整）
 const _ledgerFilter = { staff: '', project: '', source: '', q: '' };   // 總表篩選（前端做）
 
-function _shiftDay(ymd, delta) {
-    const [y, m, d] = ymd.split('-').map(Number);
-    const dt = new Date(y, m - 1, d + delta);
-    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
 const _WD = ['日', '一', '二', '三', '四', '五', '六'];
 
 // ── 設定分頁：Sheet 拉取狀態列 ──
@@ -936,7 +918,7 @@ async function _onAction(btn) {
             if (act === 'view') { _view = btn.dataset.view; return refresh(); }
             if (act === 'day') {
                 const delta = Number(btn.dataset.delta);
-                _day = delta === 0 ? _today() : _shiftDay(_day, delta);
+                _day = delta === 0 ? _today() : shiftDays(_day, delta);
                 return refresh();
             }
             if (act === 'board-days') { _boardDays = Number(btn.dataset.days); return refresh(); }

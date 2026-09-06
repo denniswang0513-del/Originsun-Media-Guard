@@ -186,7 +186,7 @@ def test_mobile_project_detail_carries_shoots():
 def test_guards():
     src = repo_src(API)
     assert "dependencies=[Depends(check_logged_in)]" in src
-    assert 'check_admin_or_module(request, WRITE_MODULE)' in src and 'WRITE_MODULE = "crm_projects"' in src
+    assert "_check_write = _check_project_write_auth" in src      # crm_projects 寫入守衛只有 routers.crm._shared 一份工廠
     for header in ("async def calendar_config(", "async def calendar_test("):
         assert "check_admin(request)" in code_only(func_body(src, header)), header
     vocab = code_only(func_body(src, "async def shoot_options("))

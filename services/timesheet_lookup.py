@@ -55,6 +55,13 @@ async def load_staff_index(session) -> dict:
     return group_by_name([lookup_row(sid, nm) for sid, nm in rows])
 
 
+def suggested_hours(model: dict, contract, tax_rate, ptype):
+    """建議工時預算＝合約未稅 ×（1−該案型預期毛利）÷ 日成本 × 每日工時（core.finance_logic）。
+    burn 表與專案檔案頁同一份。"""
+    return suggested_budget_hours(contract, tax_rate, margin_for_type(model, ptype),
+                                  model["daily_cost"], model["hours_per_day"])
+
+
 async def burn_rows(session) -> list:
     """burn 表的專案那一半（/summary 與 /dashboard 共用）：每個已對映案的已投入／預算／消耗率／停滯。
     只選要用的四欄 —— CrmProject 六十多欄含幾個 JSONB／Text，三百案整列撈是白費。"""
@@ -81,8 +88,7 @@ async def burn_rows(session) -> list:
         name, status, budget, contract, tax_rate, ptype, cname = projs.get(pid, ("", "", None, 0, None, "", ""))
         last_day = tw_day(last_date)
         # 建議預算：合約未稅 ×（1−該案型預期毛利）÷ 日成本 × 每日工時（core.finance_logic）
-        suggested = suggested_budget_hours(contract, tax_rate, margin_for_type(model, ptype),
-                                           model["daily_cost"], model["hours_per_day"])
+        suggested = suggested_hours(model, contract, tax_rate, ptype)
         items.append({
             "project_id": pid, "project_name": name or "", "status": status or "", "client": cname or "",
             "hours_used": round(total or 0, 1), "budget_hours": budget, **budget_burn(total, budget),

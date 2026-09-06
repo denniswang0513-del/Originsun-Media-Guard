@@ -34,9 +34,10 @@ def test_budget_hours_formula():
 
 def test_every_surface_uses_the_one_rule():
     lk = code_only(repo_src("services/timesheet_lookup.py"))
-    assert "suggested_budget_hours(contract, tax_rate, margin_for_type(model, ptype)" in func_body(lk, "async def burn_rows(")
+    assert "suggested_hours(model, contract, tax_rate, ptype)" in func_body(lk, "async def burn_rows(")
+    assert "suggested_budget_hours(contract, tax_rate, margin_for_type(model, ptype)" in func_body(lk, "def suggested_hours(")
     ts = code_only(repo_src("routers/api_timesheets.py"))
-    assert "suggested_budget_hours(" in func_body(ts, "def _suggested_for(")
+    assert "suggested_hours(load_margin_model(\"mine\")" in func_body(ts, "def _suggested_for(")   # 走 timesheet_lookup.suggested_hours 那一份
     assert '"suggested_hours": _suggested_for(proj)' in func_body(ts, "async def project_file(")
     # 套用建議：私帳 full；預設只填沒設的（Sheet 灌的預算是 owner 的決定）
     ap = func_body(ts, "async def apply_suggested_budgets(")

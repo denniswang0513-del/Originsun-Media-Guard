@@ -327,7 +327,7 @@ footer .eyebrow { font-size: 10px; }
 <script type="module">
 import { BLOCKS, FLAGS, FLAGGABLE, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, SUBTITLE, api, debounce, ensurePasteBase,
          entriesOf, entryBlock, entryTable, esc, isAuthFail, itemsToLines, linesToItems, pasteThumbs, personCard,
-         heartHtml, REACTIONS, reactionBar, renderRich, repliesFor, replyHtml, shiftWeek, thisWeekStart, tokenGrants, weekRange, worklogHtml } from '/js/shared/journal-core.js';
+         heartHtml, REACTIONS, reactionBar, renderRich, repliesFor, replyHtml, shiftWeek, thisWeekStart, tokenGrants, weekRange, worklogHtml, flagPills } from '/js/shared/journal-core.js';
 import { initPasteImage } from '/js/shared/paste-image.js';
 import { attachProjectPop } from '/js/shared/project-pop.js';
 
@@ -366,9 +366,8 @@ if (EMBED) {
 }
 // 官網風白底語彙的 class 組（SPA 分頁傳 jr-* 的一組）
 const CARD_CLS = { name: 'p-name', empty: 'empty pad-sm', block: 'blk' };
-const GRANTS = tokenGrants();
 // 回覆框已拿掉（owner 2026-09-05）：大家改在標題列按愛心（journal-core.heartHtml），長按換心情
-const ME = (() => { try { return JSON.parse(atob((localStorage.getItem('auth_token') || '').split('.')[1] || '') || '{}').sub || ''; } catch (_) { return ''; } })();
+const ME = tokenGrants().username;
 
 // ── 狀態 ────────────────────────────────────────────────────────────────
 let view = 'week';
@@ -455,8 +454,7 @@ function metaListHtml(k) {
 function redrawMeta(k) { const el = $('ml-' + k); if (el) el.innerHTML = metaListHtml(k); }
 
 function teamPerson(j) {
-    const flags = j.flags || {};
-    const pills = FLAGS.map(([f, l]) => (flags[f] ? `<span class="pill-flag ${f}">${l} ${flags[f]}</span>` : '')).join('');
+    const pills = flagPills(j);
     const opts = { projectName: projName, journalId: j.id || j.journal_id || '' };   // 每條下面不放心情，只有標題列的愛心
     const cls = { ...CARD_CLS, pillFlag: 'pill-flag', pillProj: 'pill-proj', reply: 'reply', replyTime: 'reply-t', replyBox: 'reply-box' };
     // owner 2026-09-05：大家的回顧只看四問，不放「做了什麼」（自動區只在自己那份）

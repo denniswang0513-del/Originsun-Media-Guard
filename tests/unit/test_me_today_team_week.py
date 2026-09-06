@@ -40,15 +40,15 @@ def test_today_and_team_week_are_gated_by_any_me_key_plus_binding():
 def test_team_week_reuses_the_board_calculation():
     src = code_only(repo_src("routers/api_me.py"))
     body = func_body(src, "async def team_week(")
-    assert "_board_days(session, d0, 7)" in body
+    assert "board_days(session, d0, 7)" in body        # 搬到 services.timesheet_self（不跨 router import 底線函式）
     assert "select(Timesheet)" not in body                     # 不抄第二份看板查詢
     for k in ('"people"', '"shoots"', '"leave"', '"days"', '"week_start"'):
         assert k in body, k
     for k in ('"project"', '"note"', '"hours"', '"planned_hours"', '"status"', '"stage_name"', '"work_type"'):
         assert k in body, k
-    assert "from routers.api_timesheets import _board_days" in src
+    assert "from services.timesheet_self import board_days" in src   # 看板計算住 service，不跨 router import 底線函式
     ts = code_only(repo_src("routers/api_timesheets.py"))
-    assert "_board_days(session, d0, days)" in func_body(ts, "async def day_board(")
+    assert "board_days(session, d0, days)" in func_body(ts, "async def day_board(")
 
 
 def test_today_lists_my_shoots_todos_pending_leave_and_last_week_journal():

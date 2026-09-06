@@ -449,7 +449,9 @@ def test_virtual_rows_carry_the_parent_pk_and_writers_skip_them():
                       "note": "", "project_id": None}]}
     assert explode_cash_splits(lump, splits)[0]["parent_id"] == "E1"
     fin = code_only(repo_src("routers/api_finance.py"))
-    assert fin.count('not e.get("parent_id")') >= 2,         "transfer-pairs 與匯費認列都要濾掉虛擬列"
+    # 篩選只有 _account_move_rows 一份（2026-09-06 simplify）；兩個消費端都走它
+    assert 'not e.get("parent_id")' in code_only(func_body(repo_src("routers/api_finance.py"), "def _account_move_rows("))
+    assert fin.count("transfer_pairs(_account_move_rows(inputs))") >= 2, "transfer-pairs 與匯費認列都要濾掉虛擬列"
 
 
 def test_the_edit_guard_compares_values_not_sent_keys():

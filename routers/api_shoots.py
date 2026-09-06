@@ -21,7 +21,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from core.auth import check_admin, check_admin_or_module, check_logged_in, payload_grants
 from core.ledger import not_mine   # 手機版只看母公司案（同 api_crm_mobile._company_projects）：私帳案的場次不列、也不准建
-from routers.crm._shared import _parse_shoot_date
+from core.hr_logic import day_iso, tw_day
+from routers.crm._shared import _check_project_write_auth, _parse_shoot_date
 from services import google_calendar as gc
 from core.schemas import (CalendarConfigPayload, ShootCreate, ShootEquipmentPayload,
                           ShootStatusPayload, ShootUpdate)
@@ -48,8 +49,7 @@ _TW = ZoneInfo("Asia/Taipei")
 WRITE_MODULE = "crm_projects"
 
 
-def _check_write(request: Request) -> dict:
-    return check_admin_or_module(request, WRITE_MODULE)
+_check_write = _check_project_write_auth      # crm_projects 寫入守衛只有 routers.crm._shared 一份工廠
 
 
 def _can_write(request: Request) -> bool:
@@ -86,16 +86,8 @@ def _parse_time(raw, field: str) -> str:
     return raw[:5]
 
 
-def _d(v) -> date | None:
-    """DB 欄位（date 或 datetime）→ date。"""
-    if v is None:
-        return None
-    return v.date() if isinstance(v, datetime) else v
-
-
-def _iso(v) -> str | None:
-    d = _d(v)
-    return d.isoformat() if d else None
+_d = tw_day          # DB 欄位（date 或 datetime）→ date：規則只有 core.hr_logic 一份（timestamptz 走台北日）
+_iso = day_iso
 
 
 def _ts(dt) -> str | None:
@@ -303,6 +295,15 @@ def _apply_fields(s, req, partial: bool) -> None:
         s.cost_group_id = (req.cost_group_id or "").strip() or None
 
 
+async def _refresh_open_reservations(session, s) -> None:
+    """這一場還沒歸還的預約列：應還日＝結束日＋1、專案跟著場次。"""
+    due = (_d(s.end_date) or _d(s.date)) + timedelta(days=1)
+    for c in (await session.execute(
+            select(EquipmentCheckout).where(EquipmentCheckout.shoot_id == s.id,
+                                            EquipmentCheckout.returned_at.is_(None)))).scalars().all():
+        c.due_at, c.project_id = _parse_shoot_date(due.isoformat()), s.project_id
+
+
 async def _reserve_equipment(session, s, equipment_ids: list[str]) -> None:
     """器材差異：新勾＝加預約列；取消勾且還沒領＝刪列；已領的不能拿掉（422）。"""
     want = [str(x).strip() for x in (equipment_ids or []) if str(x).strip()]
@@ -324,9 +325,6 @@ async def _reserve_equipment(session, s, equipment_ids: list[str]) -> None:
     due = (_d(s.end_date) or _d(s.date)) + timedelta(days=1)
     for eid in want:
         if eid in have:
-            c = have[eid]
-            if c.returned_at is None:                    # 留著的預約列：日期／專案改了跟著走
-                c.due_at, c.project_id = _parse_shoot_date(due.isoformat()), s.project_id
             continue
         session.add(EquipmentCheckout(
             id=uuid.uuid4().hex, equipment_id=eid, project_id=s.project_id, shoot_id=s.id,
@@ -496,15 +494,8 @@ async def update_shoot(sid: str, req: ShootUpdate, request: Request):
         _apply_fields(s, req, partial=True)
         s.updated_at = datetime.now(timezone.utc)
         if "equipment_ids" in req.model_fields_set and req.equipment_ids is not None:
-            await _reserve_equipment(session, s, req.equipment_ids)     # 留著的預約列的應還日／專案也在裡面更新
-        else:
-            # 沒動器材、只改日期／專案：預約列的應還日跟著走
-            due = (_d(s.end_date) or _d(s.date)) + timedelta(days=1)
-            for c in (await session.execute(
-                    select(EquipmentCheckout).where(EquipmentCheckout.shoot_id == s.id,
-                                                    EquipmentCheckout.returned_at.is_(None)))).scalars().all():
-                c.due_at = _parse_shoot_date(due.isoformat())
-                c.project_id = s.project_id
+            await _reserve_equipment(session, s, req.equipment_ids)
+        await _refresh_open_reservations(session, s)      # 日期／專案改了，留著的預約列跟著走（只寫一次）
         await _recompute_project_shoot_date(session, s.project_id)
         if old_pid and old_pid != s.project_id:
             await _recompute_project_shoot_date(session, old_pid)
@@ -560,7 +551,7 @@ async def _pickup_or_return(sid: str, req: ShootEquipmentPayload, request: Reque
             raise HTTPException(status_code=409, detail="沒有可以" + ("領取" if pickup else "歸還") + "的器材")
         s.updated_at = now
         await session.commit()
-        return {"shoot": await _row(session, await _shoot_or_404(session, sid))}
+        return {"shoot": await _row(session, s)}      # s 還在 session 裡（expire_on_commit=False），不必再查一次
 
 
 @router.post("/{sid}/equipment/pickup")
@@ -576,7 +567,4 @@ async def return_equipment(sid: str, req: ShootEquipmentPayload, request: Reques
 @router.post("/{sid}/resync")
 async def resync_shoot(sid: str, request: Request):
     _check_write(request)
-    factory = _require_factory()
-    async with factory() as session:
-        await _shoot_or_404(session, sid)
-    return await _finish(sid)
+    return await _finish(sid)          # _finish → _sync_calendar 自己會 _shoot_or_404

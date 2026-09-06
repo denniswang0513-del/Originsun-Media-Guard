@@ -502,8 +502,7 @@ window._cashRequestPay = async (id) => {
                 window._cashRequestPay(id);           // 連好了接著挑人
             } catch (err) { crmToast('連結失敗：' + err.message, true); }
         });
-        opts.projects = _projectList.concat(mine.map((p) => ({ ...p, name: '私帳｜' + (p.name || '') })));
-        openProjectPicker(opts);
+        _openPickerWithMine(opts, mine);
     });
     const cb = ov.querySelector('[data-act="custom"]');
     if (cb) cb.addEventListener('click', () => { ov.remove(); _cashCustomPay(e); });
@@ -613,6 +612,12 @@ async function _cashKaiRemit(e, pids, pnames, kai) {
     });
 }
 
+/** 挑選視窗多列私帳案（標「私帳｜」）：請款與代開加案兩處同一份。 */
+function _openPickerWithMine(opts, mine) {
+    opts.projects = _projectList.concat(mine.map((p) => ({ ...p, name: '私帳｜' + (p.name || '') })));
+    openProjectPicker(opts);
+}
+
 /** 代開發票掛第二、第三個案（案掛在發票的 project_ids；第一個＝project_id），連好回到請款視窗。 */
 async function _cashKaiAddProject(e, pids) {
     const mine = await _mineProjectList();
@@ -624,8 +629,7 @@ async function _cashKaiAddProject(e, pids) {
             window._cashRequestPay(e.id);
         } catch (err) { crmToast('連結失敗：' + err.message, true); }
     });
-    opts.projects = _projectList.concat(mine.map((p) => ({ ...p, name: '私帳｜' + (p.name || '') })));
-    openProjectPicker(opts);
+    _openPickerWithMine(opts, mine);
 }
 
 /** 幫這個案子裡的人請款：列的是專案頁的執行人員表，勾幾人開幾張應付款（已請過的標示、不能再勾）。 */

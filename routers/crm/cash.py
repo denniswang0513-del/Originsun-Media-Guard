@@ -39,7 +39,6 @@ from ._shared import (router, money_dep, _require_db,
                       _get_factory, _now,
                       _parse_shoot_date, _assert_month_open, _locked_month_set, _raise_locked_batch, map_csv_row)
 
-# 這個檔案唯一用得到發票檔那邊的東西：改發票時要跟著改檔名
 
 try:
     from ._shared import (select, or_, Client, CrmProject,
@@ -49,11 +48,9 @@ try:
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
     pass
 
-# ── CSV 匯入共用 ────────────────────────────────────────────
-
-
 # 正本在 finance.py 的共用 helper（單向依賴：finance 不用本檔）
-from .finance import (  # noqa: F401
+from core.cash_tree import path_map
+from .finance import (
     _ALLOC_KINDS,
     _alloc_verdict,
     _entity_for_write,
@@ -765,7 +762,9 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
             # 分配表、主要發票欄、相關發票的收款狀態一次到位；換掉的舊發票也會
             # 被重算（共用寫入者比對分配表的前後差異），不用在這裡再比一次
             await _sync_single_alloc(session, e)
-        await _sync_taxonomy(session, e, data)      # 同上：要在可掛專案判定之前
+        _tax_touched = bool({"taxonomy_node_id", "category", "item", "sub_item"} & set(data))
+        _paths = await path_map(session, ent) if _tax_touched else None    # 樹只撈一次：同步與回傳 patch 共用
+        await _sync_taxonomy(session, e, data, _paths)      # 同上：要在可掛專案判定之前
         _normalize_cash_fks(e)
         _enforce_cash_project_link(e)
         await _assert_project_same_entity(session, e)
@@ -778,18 +777,7 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
         # 分類是後端從節點路徑推導的（_sync_taxonomy）—— 把推導結果回給前端，
         # 它就地 patch 那一列就好，不必為了拿三欄鏡射把 4,700 列整表重載。
         # 只在這次真的動到分類時才多算（path_map 是一次 237 列的撈取）。
-        entry_patch = {}
-        if {"taxonomy_node_id", "category", "item", "sub_item"} & set(data):
-            from core.cash_tree import path_map
-            paths = await path_map(session, e.entity or "parent")
-            entry_patch = {
-                "category": e.category or "",
-                "book": _tax_split(e.category)[0],
-                "item": (e.item or "") or _tax_split(e.category)[1],
-                "sub_item": e.sub_item or "",
-                "taxonomy_node_id": e.taxonomy_node_id or "",
-                "taxonomy_path": list(paths.get(e.taxonomy_node_id) or []),
-            }
+        entry_patch = _taxonomy_fields(e, _paths) if _tax_touched else {}
     return {"status": "ok", "entry": entry_patch}
 
 
@@ -875,16 +863,20 @@ async def batch_set_taxonomy(request: Request):
             e.updated_at = now
         await session.commit()
         # 整批同一個節點 → 鏡射結果也只有一份，回一份給前端就地 patch 那幾列
-        e0 = rows[0]
-        entry_patch = {
-            "category": e0.category or "",
-            "book": _tax_split(e0.category)[0],
-            "item": (e0.item or "") or _tax_split(e0.category)[1],
-            "sub_item": e0.sub_item or "",
-            "taxonomy_node_id": e0.taxonomy_node_id or "",
-            "taxonomy_path": list(paths.get(e0.taxonomy_node_id) or []),
-        }
+        entry_patch = _taxonomy_fields(rows[0], paths)
     return {"status": "ok", "updated": len(rows), "entry": entry_patch}
+
+
+def _taxonomy_fields(e, paths) -> dict:
+    """分類鏡射六欄（前端就地 patch 那一列用）：改單列與批次改分類回的是同一個形狀。"""
+    return {
+        "category": e.category or "",
+        "book": _tax_split(e.category)[0],
+        "item": (e.item or "") or _tax_split(e.category)[1],
+        "sub_item": e.sub_item or "",
+        "taxonomy_node_id": e.taxonomy_node_id or "",
+        "taxonomy_path": list((paths or {}).get(e.taxonomy_node_id) or []),
+    }
 
 
 @router.delete("/cash-entries/{entry_id}")

@@ -1037,6 +1037,14 @@ def expense_slot(acct: dict | None) -> tuple:
 
 # ── 損益認列迭代器（build_pnl 與 statements drilldown 共用）──
 
+def _is_revenue_invoice(inv: dict) -> bool:
+    """「這張票算營收」只有這一條：沒作廢、專案類、收款方向。損益（iter_revenue_invoices）與
+    資產負債表的應收（ar_open_invoices）都問它，兩張表才不會各認各的。"""
+    return ((inv.get("issue_status") or "") != "作廢"
+            and (inv.get("category") or "專案") == "專案"
+            and (inv.get("payment_type") or "收款") == "收款")
+
+
 def iter_revenue_invoices(invoices, mset):
     """yield 認列為營業收入的發票（單一謂詞定義處）。
 
@@ -1044,13 +1052,7 @@ def iter_revenue_invoices(invoices, mset):
     專案）、payment_type=收款（缺值視同收款）。代開發票的手續費屬業外，不在此。
     """
     for inv in invoices:
-        if (inv.get("issue_status") or "") == "作廢":
-            continue
-        if month_of(inv.get("invoice_date")) not in mset:
-            continue
-        if (inv.get("category") or "專案") != "專案":
-            continue
-        if (inv.get("payment_type") or "收款") != "收款":
+        if not _is_revenue_invoice(inv) or month_of(inv.get("invoice_date")) not in mset:
             continue
         yield inv
 
@@ -1212,15 +1214,7 @@ def ar_open_invoices(invoices, baseline_month=None, as_of_month=None) -> list:
     """
     out = []
     for inv in invoices:
-        if (inv.get("issue_status") or "") == "作廢":
-            continue
-        if (inv.get("payment_status") or "") == "作廢":
-            continue
-        if (inv.get("payment_type") or "收款") != "收款":
-            continue
-        if (inv.get("category") or "專案") != "專案":
-            continue
-        if invoice_collected(inv):
+        if not _is_revenue_invoice(inv) or (inv.get("payment_status") or "") == "作廢" or invoice_collected(inv):
             continue
         m = month_of(inv.get("invoice_date"))
         if not m:

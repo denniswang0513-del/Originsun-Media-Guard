@@ -492,7 +492,9 @@ _fs.unifyApply = async (btn) => {
     try {
         const r = await finFetch('/margin-model/unify', { method: 'POST', body: JSON.stringify({ aliases }) });
         finToast(`已改 ${r.changed_total} 個案的案型` + (r.still_outside.length ? `；還有沒對應的：${r.still_outside.join('、')}` : ''));
-        _fs.reload();
+        _margin = await finFetch('/margin-model');      // 只有毛利表那張卡變了，不整頁重載（7 支請求）
+        _marginRedraw();
+        btn.disabled = false;
     } catch (e) { finToast(e.message, true); btn.disabled = false; }
 };
 
@@ -507,21 +509,25 @@ function _marginRedraw() {
     const card = document.getElementById('finset-margin-card');
     if (card) card.outerHTML = _marginHtml();
 }
+/** 表單→模型：表頭兩格＋列（加列／刪列／存都讀這一份，預設值不會各講各的）。 */
+function _marginReadForm() {
+    return { ..._margin,
+             daily_cost: Number(document.getElementById('finset-margin-daily')?.value || _margin.daily_cost || 0),
+             hours_per_day: Number(document.getElementById('finset-margin-hpd')?.value || _margin.hours_per_day || 8),
+             rows: _marginReadRows() };
+}
 _fs.marginAddRow = () => {
-    _margin.rows = [..._marginReadRows(), { group: '', type: '', margin_pct: 30, note: '' }];
-    _margin.daily_cost = Number(document.getElementById('finset-margin-daily')?.value || _margin.daily_cost);
-    _margin.hours_per_day = Number(document.getElementById('finset-margin-hpd')?.value || _margin.hours_per_day);
+    _margin = _marginReadForm();
+    _margin.rows.push({ group: '', type: '', margin_pct: 30, note: '' });
     _marginRedraw();
 };
 _fs.marginDelRow = (i) => {
-    const rows = _marginReadRows(); rows.splice(i, 1); _margin.rows = rows;
-    _margin.daily_cost = Number(document.getElementById('finset-margin-daily')?.value || _margin.daily_cost);
-    _margin.hours_per_day = Number(document.getElementById('finset-margin-hpd')?.value || _margin.hours_per_day);
+    _margin = _marginReadForm();
+    _margin.rows.splice(i, 1);
     _marginRedraw();
 };
 _fs.saveMargin = async (btn) => {
-    const daily_cost = Number(document.getElementById('finset-margin-daily')?.value || 0);
-    const hours_per_day = Number(document.getElementById('finset-margin-hpd')?.value || 8);
+    const { daily_cost, hours_per_day } = _marginReadForm();
     const rows = _marginReadRows().filter(r => r.type);
     if (!(daily_cost > 0)) { finToast('員工成本／天要大於 0', true); return; }
     btn.disabled = true;

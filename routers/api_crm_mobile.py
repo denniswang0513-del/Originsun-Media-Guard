@@ -316,12 +316,10 @@ async def mobile_quotation_status(quotation_id: str, req: MobileQuoteStatusPaylo
             # 能改報價狀態不等於能把案子推進製作
             _check_status_auth(request)
             await apply_project_status(session, project, ACTIVE_STATUS)
-        await session.commit()
-        await session.refresh(q)
+        await session.commit()          # expire_on_commit=False：物件還在、欄位都是 Python 設的，不用 refresh
         project_out = None
         client_name = ""
         if project is not None:
-            await session.refresh(project)
             client = await session.get(Client, project.client_id) if project.client_id else None
             client_name = client.short_name if client else ""
             if req.activate:

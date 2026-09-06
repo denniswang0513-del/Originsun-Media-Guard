@@ -583,7 +583,7 @@ function _renderDetail() {
                             </select></td></tr>
                         <tr id="fpl-fee-row">
                             <td style="color:#bbb;">服務費率 %</td>
-                            <td>${money('fpl-feepct', det.fee_pct || d.default_fee_pct || 0)}</td></tr>
+                            <td>${money('fpl-feepct', det.fee_pct || _defaultFeePct())}</td></tr>
                         ${costRows}`}
                     </table>
                     <table class="crm-table" style="width:100%;font-size:12px;margin-top:8px;">
@@ -700,8 +700,7 @@ function _renderDetail() {
             // 買發票=差額。🔴 兩個費率都吃後端回的（同 _wh() 那條）——
             // 寫死 8 與 5 的話，費率一改預覽就跟存進去的值不一致。
             const vat = Number((_detail && _detail.agency || {}).vat_pct) || 0;
-            const pct = Number(document.getElementById('fpl-feepct')?.value)
-                || Number(_defaultFeePct()) || 0;
+            const pct = Number(document.getElementById('fpl-feepct')?.value) || _defaultFeePct();
             const fee = Math.round(c * pct / 100);
             const tax = vat ? Math.round(c / (1 + vat / 100) * (vat / 100)) : 0;
             feeEl.value = fee || '';

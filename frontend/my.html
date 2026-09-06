@@ -1408,10 +1408,8 @@ async function mjson(path, opts) {
 /** 專案清單：先問工時的 project_options（timesheets 模組）；沒那把鑰匙就退到員工自己的 /me/timesheet_options（同一份查表）。 */
 async function _logProjectOptions() {
     if (_logProjects) return _logProjects;
-    try { _logProjects = (await mjson("/api/v1/timesheets/project_options")).projects || []; }
-    catch (_) {
-        try { _logProjects = (await mjson("/api/v1/me/timesheet_options")).projects || []; } catch (__) { _logProjects = []; }
-    }
+    try { _logProjects = (await mjson("/api/v1/timesheets/project_options")).projects || []; }   // timesheets 或 me_finance 都能拿
+    catch (_) { _logProjects = []; }
     return _logProjects;
 }
 
@@ -1678,9 +1676,8 @@ async function _renderFindTable() {
             <span class="meta">最後填報</span><input type="date" class="sel" id="z1-f-from" value="${esc(_findState.from)}"><span class="meta">～</span><input type="date" class="sel" id="z1-f-to" value="${esc(_findState.to)}">
             <button type="button" class="btn" id="z1-f-clear" ${_findActive() ? "" : "hidden"}>清除</button>
             <span class="meta" id="z1-find-count"></span></div>
-        <div class="tsp" id="z1-find-body" style="overflow-x:auto;">${TS.burnTableHtml(TS.burnTbodyHtml(_findSorter.sorted(_findFiltered()), { editable: false, emptyText: "沒有符合的" }), "my-burn-table")}</div>`;
-    _findSorter.attach();
-    const c = $("z1-find-count"); if (c) c.textContent = `${_findFiltered().length} 案`;
+        <div class="tsp" id="z1-find-body" style="overflow-x:auto;">${TS.burnTableHtml("", "my-burn-table")}</div>`;
+    _redrawFindBody();          // 表身、排序、計數只有它一份（殼先畫空的 tbody）
     const clear = $("z1-f-clear");
     const sync = () => { clear.hidden = !_findActive(); _redrawFindBody(); };
     $("z1-find-q").addEventListener("input", (e) => { _findState.q = e.target.value; sync(); });

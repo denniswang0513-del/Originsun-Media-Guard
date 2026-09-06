@@ -22,21 +22,16 @@ import uuid
 from fastapi import Depends, HTTPException, Request, Query
 
 from core.cash_taxonomy import SEP as _TAX_SEP
-from core.ledger import (require_entity)
+from core.ledger import require_entity
 from core.schemas import (CashTaxonomyNodePayload, CashTaxonomyNodeUpdate)
 
 from ._shared import (router, money_dep, _require_db,
                       _get_factory, _now)
 
-# 這個檔案唯一用得到發票檔那邊的東西：改發票時要跟著改檔名
-
 try:
     from ._shared import (select, func, CrmCashEntry)
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
     pass
-
-# ── CSV 匯入共用 ────────────────────────────────────────────
-
 
 # 正本在 finance.py 的共用 helper（單向依賴：finance 不用本檔）
 from .finance import (  # noqa: F401

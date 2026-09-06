@@ -35,7 +35,7 @@ from core.project_link import cash_can_link
 from db.models import (Client, CrmCashEntry, CrmCashSplit,
                        CrmCashSplitAdvanceLink, CrmProject)
 
-from ._shared import (_assert_month_open, _get_factory, _now, _require_db,
+from ._shared import (_fmt_day, _assert_month_open, _get_factory, _now, _require_db,
                       money_dep, project_names_map, router)
 from .cash import _sync_mine_project_received, _sync_taxonomy
 from .finance import _mine_or_admin_write
@@ -387,7 +387,7 @@ async def cash_splits_outstanding(request: Request, entity: str = Query("")):
             .limit(200))).all()
         advances = [{
             "entry_id": r.id,
-            "date": r.entry_date.date().isoformat() if r.entry_date else "",
+            "date": _fmt_day(r.entry_date) or "",
             "summary": r.summary or "", "amount": int(r.expense or 0),
             "open": advance_open_amount(r.expense, linked)}
             for r, linked in adv_q]

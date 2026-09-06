@@ -34,7 +34,7 @@ from core.ledger import (require_entity, is_mine)
 from core.auth import _extract_token
 from core.schemas import (InvoicePayload)
 
-from ._shared import (router, _check_auth, _check_finance_auth, money_dep,
+from ._shared import (router, _check_finance_auth, money_dep,
                       _require_db, _get_factory, _fmt_day, _now,
                       _parse_shoot_date, _assert_month_open, _assert_rows_open,
                       map_csv_row)
@@ -749,10 +749,8 @@ async def invoice_candidates(project_id: str, request: Request, q: str = ""):
             .order_by(CrmInvoice.invoice_date.desc().nullslast())
             .limit(400))).scalars().all()
         # 掛在別案的要顯示案名
-        other = {x.project_id for x in rows if x.project_id}
-        names = dict((await session.execute(
-            select(CrmProject.id, CrmProject.name)
-            .where(CrmProject.id.in_(other)))).all()) if other else {}
+        from ._shared import project_names_map
+        names = await project_names_map(session, {x.project_id for x in rows if x.project_id})   # 顯示名鏈同收支／拆項
         hide_mine = hide_mine_projects(request)
         mine_ids = set((await session.execute(
             select(CrmProject.id).where(is_mine(CrmProject.entity)))).scalars()) if hide_mine else set()
@@ -1093,9 +1091,9 @@ async def get_invoice(invoice_id: str, request: Request):
             select(safunc.min(CrmCashEntry.entry_date))
             .where(CrmCashEntry.entity == (inv.entity or "parent")))).scalar()
         # 掛的案可複數：名字照清單順序（第一個＝project_id）
+        from ._shared import project_names_map
         _ids = _inv_pids(inv.project_id, getattr(inv, "project_ids", None))
-        _nm = dict((await session.execute(
-            select(CrmProject.id, CrmProject.name).where(CrmProject.id.in_(_ids)))).all()) if _ids else {}
+        _nm = await project_names_map(session, set(_ids))
         names = [_nm.get(i, "") for i in _ids]
     d = _to_invoice_dict(inv, pn)
     d["collection_checkable"] = bool(

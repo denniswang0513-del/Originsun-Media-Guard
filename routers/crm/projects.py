@@ -19,7 +19,6 @@ from config import load_settings as _load_settings
 
 from core.ledger import hide_mine_projects, not_mine
 from core.ledger_project import parent_receipt_fields
-from core.finance_logic import CASH_INVOICE_PASSTHROUGH_CATEGORIES as _PASSTHRU_CATS
 from core.project_link import invoice_project_ids as _inv_pids
 from db.models import CrmCashSplit    # 拆項列（母帳收款歸案要看它；_shared 沒 re-export）
 from core.schemas import (CrmProjectPayload, CrmProjectPatchPayload, ProjectTypeOpPayload,
@@ -57,6 +56,22 @@ def is_mirrored(p, legacy_ids=()) -> bool:
     **兩種形狀的知識就這兩支**，舊形狀要退場時一起改。
     """
     return bool(p.mine_link_id) or p.id in legacy_ids
+
+
+async def mine_link_map(session, parent_ids) -> dict:
+    """批次版：{母帳案 id: 私帳案 id}，兩種形狀都認（新：母帳 mine_link_id；舊：私帳 source_project_id 回指）。
+    對照表與清單那條路用它，不各自再抄一次兩種形狀。"""
+    ids = {i for i in parent_ids if i}
+    if not ids:
+        return {}
+    out = dict((await session.execute(
+        select(CrmProject.id, CrmProject.mine_link_id)
+        .where(CrmProject.id.in_(ids), CrmProject.mine_link_id.isnot(None)))).all())
+    for mid, src in (await session.execute(
+            select(CrmProject.id, CrmProject.source_project_id)
+            .where(CrmProject.source_project_id.in_(ids)))).all():
+        out.setdefault(src, mid)
+    return out
 
 
 async def resolve_mine_link(session, p):
@@ -1435,13 +1450,13 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
 # `source_project_id` 留第一個來源），所以兩條路連出來的東西一模一樣，
 # `is_mirrored` / `resolve_mine_link` / `mine_parent_names` 都認得。
 
-_RE_YEAR = _re.compile(r"^20\d{2}")
 
 
 def _norm_name(s: str) -> str:
-    """比對用的正規化案名：去空白、去年份前綴，兩邊才對得起來
-    （「2026 臺北城市形象片」vs「臺北城市形象片」）。"""
-    return _RE_YEAR.sub("", "".join((s or "").split()))
+    """比對用的正規化案名（「2026 臺北城市形象片」vs「臺北城市形象片」）：正本 core.project_match.normalize
+    （NFKC 折全形、去年份前綴與分隔符），跟請款單→專案的建議同一條規則。"""
+    from core.project_match import normalize
+    return normalize(s or "")
 
 
 
@@ -1500,8 +1515,11 @@ async def projects_mine_links(request: Request):
             .where(not_mine(CrmProject.entity))
             .order_by(CrmProject.name))).all()
         links = await mine_parent_names(session, [p.id for p, _c in mine_rows])
-        cli = {c.id: c for c in (await session.execute(
-            select(Client))).scalars().all()}
+        mine_map = await mine_link_map(session, [p.id for p, _c in parent_rows])
+        # 私帳案客戶在母帳的狀態只要 entity／crm_link_id 兩欄，不整表 hydrate
+        cli = {cid: (ent, link) for cid, ent, link in (await session.execute(
+            select(Client.id, Client.entity, Client.crm_link_id)
+            .where(Client.id.in_({p.client_id for p, _c in mine_rows if p.client_id} or {""})))).all()}
     by_name: dict = {}
     for p, _c in parent_rows:
         if p.mine_link_id:
@@ -1513,11 +1531,9 @@ async def projects_mine_links(request: Request):
     by_mine_name: dict = {}
     for p, _c in mine_rows:
         by_mine_name.setdefault(_norm_name(p.name), []).append(p)
-    # 舊形狀（私帳案回指來源）也算連結 —— 只看 mine_link_id 會漏掉舊資料
-    legacy = {p.source_project_id: p.id for p, _c in mine_rows if p.source_project_id}
     parents = []
     for p, c in parent_rows:
-        mid = p.mine_link_id or legacy.get(p.id, "")
+        mid = mine_map.get(p.id, "")
         sug = [] if mid else by_mine_name.get(_norm_name(p.name), [])
         parents.append({
             "id": p.id, "name": p.name, "client": c or "",
@@ -1545,7 +1561,7 @@ async def projects_mine_links(request: Request):
             # （「在母帳建立」會順手把客戶也建起來 —— owner「私帳的客戶母帳
             # 都有包含」，不然補建的專案會掛在一個母帳看不到的客戶上）
             "client_state": ("ok" if c is not None
-                             and ((c.entity or "parent") != "mine" or c.crm_link_id)
+                             and ((c[0] or "parent") != "mine" or c[1])       # (entity, crm_link_id)
                              else "none"),
             "suggest_id": sug[0].id if len(sug) == 1 else "",
             "suggest_name": sug[0].name if len(sug) == 1 else "",
@@ -1555,11 +1571,7 @@ async def projects_mine_links(request: Request):
 
 async def _crm_client_for(session, client_id: str):
     """私帳案的客戶 → 母帳該用哪一筆（沒有就建，owner「私帳的客戶母帳都有包含」）。
-
-    三種狀況：本來就是 CRM 客戶（直接用）／私帳客戶已連結（用連到的那筆）／
-    私帳客戶還沒連（建一筆同代稱的並連結 —— 與 clients.crm-create 同一條規則：
-    母帳已有同代稱就連過去不建重複的，`(entity, short_name)` 有唯一約束）。
-    """
+    規則只有 clients.link_or_create_crm_client 一份（本來就是 CRM 客戶直接用；私帳客戶已連結用連到的；沒連就建同代稱並連結）。"""
     if not client_id:
         return None
     c = await session.get(Client, client_id)
@@ -1567,19 +1579,8 @@ async def _crm_client_for(session, client_id: str):
         return None
     if (c.entity or "parent") != "mine":
         return c.id
-    if c.crm_link_id:
-        return c.crm_link_id
-    exist = (await session.execute(
-        select(Client).where(not_mine(Client.entity),
-                             Client.short_name == c.short_name))).scalars().first()
-    if exist is None:
-        exist = Client(id=uuid.uuid4().hex, entity="parent",
-                       short_name=c.short_name, full_name=c.full_name or "",
-                       tax_id=c.tax_id or "", status="潛在客戶")
-        session.add(exist)
-        await session.flush()
-    c.crm_link_id = exist.id
-    c.updated_at = _now()
+    from .clients import link_or_create_crm_client
+    exist, _created = await link_or_create_crm_client(session, c)
     return exist.id
 
 
@@ -1598,7 +1599,6 @@ async def create_parent_from_mine(mine_id: str, request: Request):
     成本行、派工、報價一律不帶：那些是公司自己的執行面，私帳沒有那份資料，
     憑空生出來的假數字比空的更難發現。
     """
-    from core.project_flow import PIPELINE
     factory = await _mine_link_guard(request)
     async with factory() as session:
         m = await session.get(CrmProject, mine_id)
@@ -1623,12 +1623,9 @@ async def create_parent_from_mine(mine_id: str, request: Request):
             notes="[私帳對應] 由私帳案「%s」在母帳補建" % m.name,
             created_at=_now(), updated_at=_now())
         session.add(p)
-        _write_link(p, m)          # 連結唯一寫入者（同 create_mine_from_parent）
-        m.source_project_id = p.id
-        m.updated_at = _now()
+        _write_link(p, m)          # 連結唯一寫入者（兩側都在裡面寫；同 create_mine_from_parent）
         await session.commit()
         pid, pname = p.id, p.name
-    assert PIPELINE  # 狀態字面值與管線同一組（"結案"／"製作"）
     return {"status": "ok", "id": pid, "name": pname}
 
 

@@ -41,7 +41,7 @@ from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, NHI_MIN_PAYMENT,
                                  income_items, linked_display_name,
                                  norm_detail, receivable_fields)
 from core.schemas import LedgerDetailPayload, LedgerProjectCreate
-from routers.crm._shared import _fmt_day
+from routers.crm._shared import _fmt_day, mine_parent_names
 
 from .api_finance import _guard
 
@@ -212,6 +212,14 @@ async def _rollups(session, ent: str):
     return cash, ap
 
 
+def _display_fields(p, parent_names) -> dict:
+    """私帳案的四個顯示名鍵（清單／單筆／PUT 三處同一份）：name＝顯示名（前端畫這個）；orig_name＝私帳原名
+    （副標＋搜尋）；custom_name＝有沒有自訂；parent_names＝連到的母帳案（N:1 畫「連結 N 個母帳案」）。
+    🔴 `crm_projects.name` 不改寫，見 core.ledger_project.linked_display_name。"""
+    shown, orig = linked_display_name(p.name or "", parent_names, p.display_name or "")
+    return {"name": shown, "orig_name": orig, "custom_name": p.display_name or "", "parent_names": list(parent_names)}
+
+
 @router.get("/project-ledger")
 async def project_ledger(request: Request, entity: str = ""):
     """本帳本的逐案損益清單（含合計）。
@@ -241,7 +249,6 @@ async def project_ledger(request: Request, entity: str = ""):
         crm_costs = await _crm_costs(session, ent)
         # 顯示名（owner 2026-09-05）：自訂 → 連到的母帳案名 → 私帳原名。
         # 母帳本身沒有「連到的母帳案」，那一趟就不用查。
-        from routers.crm._shared import mine_parent_names
         parents = await mine_parent_names(
             session, [p.id for p, _c in rows]) if ent == "mine" else {}
 
@@ -258,15 +265,8 @@ async def project_ledger(request: Request, entity: str = ""):
         net, check = compute(contract, detail)
         _tc = to_collect(int(p.contract_amount or 0),
                          int(p.amount_received or 0), detail)
-        _pn = parents.get(p.id, ())
-        _shown, _orig = linked_display_name(p.name or "", _pn, p.display_name or "")
         item = {
-            # name＝顯示名（前端畫這個）；orig_name＝私帳原名（副標＋搜尋要吃它）；
-            # custom_name＝有沒有自訂（前端據此標「自訂」與清空）；
-            # parent_names＝連到的母帳案（N:1 時畫「連結 N 個母帳案」）。
-            # 🔴 `crm_projects.name` 不改寫，見 core.ledger_project.linked_display_name。
-            "id": p.id, "name": _shown, "orig_name": _orig,
-            "custom_name": p.display_name or "", "parent_names": list(_pn),
+            "id": p.id, **_display_fields(p, parents.get(p.id, ())),
             "client": cname or "",
             "status": p.status or "", "type": p.project_type or "",
             "close_date": _fmt_day(p.completion_date),
@@ -468,16 +468,13 @@ async def project_ledger_detail(project_id: str, request: Request,
             .order_by(CrmPaymentRequest.created_at))).scalars().all()
         _crm = (await _crm_costs(session, ent, project_id)).get(project_id)
         _lines = await _crm_lines(session, project_id)
-        from routers.crm._shared import mine_parent_names
         _pn = (await mine_parent_names(session, [project_id])).get(project_id, ()) \
             if ent == "mine" else ()
-    _shown, _orig = linked_display_name(p.name or "", _pn, p.display_name or "")
     _d, _cost_src = apply_crm_costs(norm_detail(p.ledger_detail), _crm)
     _net, _check = compute(int(p.contract_amount or 0), _d)
     return {
         "project": {
-            "id": p.id, "name": _shown, "orig_name": _orig,
-            "custom_name": p.display_name or "", "parent_names": list(_pn),
+            "id": p.id, **_display_fields(p, _pn),
             "client": client.short_name if client else "",
             "status": p.status or "", "type": p.project_type or "",
             "close_date": _fmt_day(p.completion_date),
@@ -598,14 +595,11 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         d, cost_src = apply_crm_costs(d, crm_now)
         net, check = compute(int(p.contract_amount or 0), d)
         # 顯示名重算後一起回 —— 前端就地更新那一列，不必為了改名重抓整份
-        from routers.crm._shared import mine_parent_names
         _pn = (await mine_parent_names(session, [project_id])).get(project_id, ()) \
             if ent == "mine" else ()
-    _shown, _orig = linked_display_name(p.name or "", _pn, p.display_name or "")
     return {"status": "ok", "detail": d, "net": net, "check": check,
             "cost_sources": cost_src,
-            "name": _shown, "orig_name": _orig,
-            "custom_name": p.display_name or "", "parent_names": list(_pn),
+            **_display_fields(p, _pn),
             "contract": int(contract) if contract is not None else None,
             "close_date": _fmt_day(p.completion_date),
             "crm_pushed": int(p.crm_pushed or 0),

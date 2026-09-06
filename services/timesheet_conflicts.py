@@ -34,9 +34,11 @@ async def list_conflicts(session) -> list:
     rows = (await session.execute(
         select(TimesheetConflict).where(TimesheetConflict.resolved_at.is_(None))
         .order_by(TimesheetConflict.created_at.desc()))).scalars().all()
+    mine_rows = {t.id: t for t in (await session.execute(
+        select(Timesheet).where(Timesheet.id.in_({c.row_id for c in rows} or {""})))).scalars().all()} if rows else {}
     out = []
     for c in rows:
-        r = await session.get(Timesheet, c.row_id)
+        r = mine_rows.get(c.row_id)
         if r is None:                        # 總表那列後來被刪了：沒東西可比 → 衝突作廢（不種指紋：Sheet 的新版本下次照一般拉取進來，要不要留由總表決定）
             await session.delete(c)
             continue

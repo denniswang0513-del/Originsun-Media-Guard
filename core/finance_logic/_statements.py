@@ -229,6 +229,21 @@ def _finalize_pnl(prim: dict, n_months: int) -> dict:
     }
 
 
+def _rederive_totals(out: dict, pnl: dict, *, revenue: int, cost_total: int, income_tax: int) -> None:
+    """損益的瀑布只有這一份：毛利＝營收−成本、營業利益＝毛利−費用、稅前＝營業利益＋業外、稅後＝稅前−所得稅。
+    權責營收重述（restate_revenue_accrual）與專案帳目重述（apply_ledger_project_costs）都換不同的輸入來算它。"""
+    opex_total = int((pnl.get("opex") or {}).get("total") or 0)
+    gross = revenue - cost_total
+    operating = gross - opex_total
+    pretax = operating + int((pnl.get("non_operating") or {}).get("total") or 0)
+    net = pretax - income_tax
+    out["gross"] = {"amount": gross, "rate": _pct(gross, revenue)}
+    out["operating"] = {"amount": operating, "rate": _pct(operating, revenue),
+                        "expense_rate": _pct(opex_total, revenue)}
+    out["pretax"] = pretax
+    out["net"] = {"amount": net, "rate": _pct(net, revenue)}
+
+
 def restate_revenue_accrual(pnl: dict, accrual_revenue: int, *,
                             cash_revenue: int | None = None, n_months: int = 0) -> dict:
     """把一份已 finalize 的損益表換成**權責**營收，並讓底下所有小計/比率跟著走。
@@ -252,17 +267,8 @@ def restate_revenue_accrual(pnl: dict, accrual_revenue: int, *,
                            "amount": total}] if total else [],
                 "by_collection": by_col})
     out["revenue"] = rev
-    cost_total = int((pnl.get("cost") or {}).get("total") or 0)
-    opex_total = int((pnl.get("opex") or {}).get("total") or 0)
-    gross = total - cost_total
-    operating = gross - opex_total
-    pretax = operating + int((pnl.get("non_operating") or {}).get("total") or 0)
-    net = pretax - int((pnl.get("tax") or {}).get("income_tax") or 0)
-    out["gross"] = {"amount": gross, "rate": _pct(gross, total)}
-    out["operating"] = {"amount": operating, "rate": _pct(operating, total),
-                        "expense_rate": _pct(opex_total, total)}
-    out["pretax"] = pretax
-    out["net"] = {"amount": net, "rate": _pct(net, total)}
+    _rederive_totals(out, pnl, revenue=total, cost_total=int((pnl.get("cost") or {}).get("total") or 0),
+                     income_tax=int((pnl.get("tax") or {}).get("income_tax") or 0))
     n = n_months or _implied_months(pnl, cash)
     if n:
         avg = dict(pnl.get("monthly_avg") or {})
@@ -311,19 +317,10 @@ def apply_ledger_project_costs(pnl: dict, *, outsource: int = 0, tax: int = 0,
     out["cost"] = cost
 
     revenue = int((pnl.get("revenue") or {}).get("total") or 0)
-    opex_total = int((pnl.get("opex") or {}).get("total") or 0)
-    gross = revenue - cost["total"]
-    operating = gross - opex_total
-    pretax = operating + int((pnl.get("non_operating") or {}).get("total") or 0)
     tax_block = dict(pnl.get("tax") or {})
     tax_block["income_tax"] = int(tax or 0)
     out["tax"] = tax_block
-    out["gross"] = {"amount": gross, "rate": _pct(gross, revenue)}
-    out["operating"] = {"amount": operating, "rate": _pct(operating, revenue),
-                        "expense_rate": _pct(opex_total, revenue)}
-    out["pretax"] = pretax
-    out["net"] = {"amount": pretax - int(tax or 0),
-                  "rate": _pct(pretax - int(tax or 0), revenue)}
+    _rederive_totals(out, pnl, revenue=revenue, cost_total=cost["total"], income_tax=int(tax or 0))
     avg = dict(pnl.get("monthly_avg") or {})
     n = _implied_months(pnl, int((pnl.get("revenue") or {}).get("by_collection", {})
                                  .get("cash") or 0)) or 0

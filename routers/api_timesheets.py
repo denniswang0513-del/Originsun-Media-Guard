@@ -28,6 +28,7 @@ import core.state as state
 from config import load_settings, save_settings
 from core.auth import _extract_token, check_admin, check_admin_or_module, current_username, payload_grants
 from core.db_guard import db_factory_or_503
+from core.journal_logic import week_start_of
 from core.hr_logic import (fillers_on, HOURS_PER_WORKDAY, WORK_TYPES, Misses, active_fillers, bucket_hours, budget_burn,
                            day_iso, explain_miss, hours_rollup, missing_fillers, month_key, month_span, months_back,
                            parse_ymd, prev_workday, project_metrics, remap_target, resolve_project, similar_projects,
@@ -44,7 +45,7 @@ from services.timesheet_conflicts import list_conflicts, resolve_conflict
 from services.timesheet_ingest import ingest, parse_date as _parse_date
 from services.timesheet_lookup import burn_rows, load_project_lookup, project_names
 from services.timesheet_manual import insert_manual_rows, project_options
-from services.timesheet_self import (add_rows, admin_batch_update, admin_delete_row, admin_update_row, delete_row,
+from services.timesheet_self import (add_rows, board_days, admin_batch_update, admin_delete_row, admin_update_row, delete_row,
                                      list_rows, metrics_input, month_or_422, rows_by_month, search_rows, ts_dict, update_row)
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
@@ -195,26 +196,7 @@ async def send_digest_now(request: Request, preview: bool = False):
 # 閘門＝timesheets 模組（進得了 tab 就看得到大家每天做了什麼，owner 拍板）；
 # 「我的一天」的讀改刪再加「綁定人員檔案」（services.timesheet_self.bound_ident）。
 
-async def _board_days(session, d0: datetime, days: int) -> list:
-    """看板的計算（唯一一份）：[{date, people:[{name, items, hours, planned}]}]。
-    /board 與員工頁的 /me/team_week 都吃這個 —— 團隊的一週不抄第二份。"""
-    d1 = d0 + timedelta(days=days)
-    rows = (await session.execute(
-        select(Timesheet).where(Timesheet.work_date >= d0).where(Timesheet.work_date < d1)
-        .order_by(Timesheet.work_date, Timesheet.staff_name, Timesheet.created_at)
-    )).scalars().all()
-    by_day: dict = {}
-    for r in rows:
-        it = ts_dict(r)
-        by_day.setdefault(it["date"], {}).setdefault(it["staff_name"] or "(空白)", []).append(it)
-    out_days = []
-    for i in range(days):
-        k = (d0 + timedelta(days=i)).date().isoformat()
-        people = [{"name": n, "items": its, "hours": round(sum(x["hours"] for x in its), 1),
-                   "planned": round(sum(x["planned_hours"] or 0 for x in its), 1)}
-                  for n, its in sorted(by_day.get(k, {}).items())]
-        out_days.append({"date": k, "people": people})
-    return out_days
+# 看板計算搬到 services.timesheet_self.board_days（/board 與 /me/team_week 同一份）
 
 
 @router.get("/board")
@@ -226,7 +208,7 @@ async def day_board(request: Request, date: str = "", days: int = 1):
     d0 = _day_or_422(date)
     factory = db_factory_or_503()
     async with factory() as session:
-        out_days = await _board_days(session, d0, days)
+        out_days = await board_days(session, d0, days)
     return {"from": d0.date().isoformat(), "days": days, "items": out_days}
 
 
@@ -376,12 +358,34 @@ async def ledger_delete_row(row_id: str, request: Request):
 
 # ── 專案檔案頁／類似專案並排／人員檔案頁／改預算（P2）──────────────────────────
 
+_CANDS_CACHE: dict = {"at": 0.0, "val": None}
+
+
 async def _project_candidates(session) -> list:
-    """類似專案的候選池：每個 Sheet 案名的總時數與客戶前綴（一次 group by）。"""
+    """類似專案的候選池：每個 Sheet 案名的總時數與客戶前綴（一次 group by 全表；每開一個專案檔案都算一次太貴，
+    5 分鐘內共用——工時本來就是每週拉一次、手填零星）。"""
+    import time as _t
+    if _CANDS_CACHE["val"] is not None and _t.time() - _CANDS_CACHE["at"] < 300:
+        return _CANDS_CACHE["val"]
     rows = (await session.execute(
         select(Timesheet.project_name, safunc.sum(Timesheet.hours))
         .where(Timesheet.project_name != "").group_by(Timesheet.project_name))).all()
-    return [{"name": n, "client": split_sheet_name(n)[0], "total": float(h or 0)} for n, h in rows]
+    val = [{"name": n, "client": split_sheet_name(n)[0], "total": float(h or 0)} for n, h in rows]
+    _CANDS_CACHE.update(at=_t.time(), val=val)
+    return val
+
+
+async def _write_budget_hours(session, wanted: dict) -> int:
+    """把 {project_id: hours} 寫進 crm_projects.budget_hours（一次 IN 載入；只數真的變的）。套建議與灌 Sheet 預算同一份。"""
+    projs = (await session.execute(
+        select(CrmProject).where(CrmProject.id.in_(wanted)))).scalars().all() if wanted else []
+    applied = 0
+    for p in projs:
+        if p.budget_hours != wanted[p.id]:
+            p.budget_hours = wanted[p.id]
+            applied += 1
+    await session.commit()
+    return applied
 
 
 async def _quote_days(session, project_id: str) -> Optional[float]:
@@ -404,10 +408,9 @@ def _suggested_for(proj):
     """專案檔案頁的建議預算（同 burn 表那條規則；沒案／沒合約／案型不在表上 → None）。"""
     if proj is None:
         return None
-    from core.finance_logic import load_margin_model, margin_for_type, suggested_budget_hours
-    model = load_margin_model("mine")       # 同 costs.py：毛利表只有私帳那份在維護
-    return suggested_budget_hours(proj.contract_amount, proj.tax_rate, margin_for_type(model, proj.project_type),
-                                  model["daily_cost"], model["hours_per_day"])
+    from core.finance_logic import load_margin_model
+    from services.timesheet_lookup import suggested_hours
+    return suggested_hours(load_margin_model("mine"), proj.contract_amount, proj.tax_rate, proj.project_type)
 
 
 def _day_log(rows, limit: Optional[int] = None) -> list:
@@ -527,12 +530,7 @@ async def apply_suggested_budgets(request: Request, overwrite: bool = False):
         items = await burn_rows(session)
         targets = {i["project_id"]: i["suggested_hours"] for i in items
                    if i["suggested_hours"] and (overwrite or not i["budget_hours"])}
-        projs = (await session.execute(
-            select(CrmProject).where(CrmProject.id.in_(targets)))).scalars().all() if targets else []
-        for p in projs:
-            p.budget_hours = targets[p.id]
-            applied += 1
-        await session.commit()
+        applied = await _write_budget_hours(session, targets)
     return {"status": "ok", "applied": applied}
 
 
@@ -560,7 +558,8 @@ async def dashboard(request: Request):
     is_admin = payload_grants(payload)          # 不帶模組鑰匙＝純管理員判定
     now = datetime.now()
     today = now.date()
-    week_mon = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now.weekday())
+    _wk = week_start_of(now)
+    week_mon = datetime(_wk.year, _wk.month, _wk.day)      # 週一（規則只有 core.journal_logic.week_start_of 一份）
     m0, _ = month_span("")
     since = min(week_mon, m0) - timedelta(days=30)
     factory = db_factory_or_503()
@@ -723,14 +722,7 @@ async def set_budgets(req: TimesheetBudgetRequest, request: Request):
             pid, why = resolve_project(it.sheet_name, lk)
             if not misses.note(why, it.sheet_name) and pid:
                 wanted[pid] = float(it.budget_hours)
-        # 一次載入要改的案（367 案逐案 session.get 是 367 趟）
-        projs = (await session.execute(
-            select(CrmProject).where(CrmProject.id.in_(wanted)))).scalars().all() if wanted else []
-        for proj in projs:
-            if getattr(proj, "budget_hours", None) != wanted[proj.id]:
-                proj.budget_hours = wanted[proj.id]
-                applied += 1
-        await session.commit()
+        applied = await _write_budget_hours(session, wanted)
     return {"status": "ok", "applied": applied, **misses.report()}   # 鍵名同 /ingest
 
 
@@ -738,11 +730,16 @@ async def set_budgets(req: TimesheetBudgetRequest, request: Request):
 
 @router.get("/project_options")
 async def get_project_options(request: Request):
-    """內部補登 grid／我的一天／總表的專案下拉（timesheets 模組可用；「本人最近填過的」只有員工頁那支帶名字）。"""
-    check_admin_or_module(request, "timesheets")
+    """專案下拉（補登 grid／我的一天／總表／員工頁／手機工作紀錄）：timesheets 模組拿整份；只有 me_finance 的員工也給，
+    多帶「本人最近填過的」。以前員工那半是 /me/timesheet_options 另一支、前端 403 再退回——同一份資料一支端點就夠。"""
+    payload = check_admin_or_module(request, "timesheets", "me_finance")
+    staff_name = None
+    if not payload_grants(payload, "timesheets"):
+        ident = await resolve_current_staff(request)
+        staff_name = ident["staff"].name if ident["staff"] else None
     factory = db_factory_or_503()
     async with factory() as session:
-        return {"projects": await project_options(session)}
+        return {"projects": await project_options(session, staff_name)}
 
 
 @router.post("/manual")

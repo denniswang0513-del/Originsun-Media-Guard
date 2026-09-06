@@ -841,31 +841,17 @@ async def project_financial_summary(project_id: str):
             staff_actual = costline_actual
             staff_estimated = costline_estimated
 
-        # 跨子表彙總（預算分配）— 單次聚合，不 hydrate ORM 物件
-        from sqlalchemy import case as _case
-        g_row = (await session.execute(
-            select(
-                # 子表預算含委外與雜支（owner 2026-09-05）：雜支是預算裡的信封，不外加
-                sa_func.coalesce(sa_func.sum(sa_func.coalesce(CrmProjectCostGroup.budget_amount, 0)), 0),
-                sa_func.count(CrmProjectCostGroup.id),
-                sa_func.coalesce(sa_func.sum(_case(
-                    (CrmProjectCostGroup.budget_amount.is_(None)
-                     & CrmProjectCostGroup.misc_budget_amount.is_(None), 1),
-                    else_=0,
-                )), 0),
-                sa_func.sum(CrmProjectCostGroup.misc_budget_amount),
-            )
-            .where(CrmProjectCostGroup.project_id == project_id)
-        )).first()
-        allocated_budget_sum = int(g_row[0] or 0) if g_row else 0
-        groups_count = int(g_row[1] or 0) if g_row else 0
-        groups_missing_budget_count = int(g_row[2] or 0) if g_row else 0
-        # 整案預估雜支＝各子表預計雜支加總（owner 2026-09-05 統一口徑；規則正本 core.crm_logic.misc_budget_total_of）
+        # 跨子表彙總（預算分配）：一案的子表是個位數，撈那兩欄在 Python 算就好（一趟，不另外聚合）
+        # 子表預算含委外與雜支（owner 2026-09-05）：雜支是預算裡的信封，不外加
         from core.crm_logic import misc_budget_total_of
         _g_rows = (await session.execute(
             select(CrmProjectCostGroup.budget_amount, CrmProjectCostGroup.misc_budget_amount)
             .where(CrmProjectCostGroup.project_id == project_id))).all()
-        misc_budget_total = misc_budget_total_of([(b, mi) for b, mi in _g_rows], project.misc_budget_pct)
+        allocated_budget_sum = sum(int(b or 0) for b, _mi in _g_rows)
+        groups_count = len(_g_rows)
+        groups_missing_budget_count = sum(1 for b, mi in _g_rows if b is None and mi is None)
+        # 整案預估雜支＝各子表預計雜支加總（owner 2026-09-05 統一口徑；規則正本 core.crm_logic.misc_budget_total_of）
+        misc_budget_total = misc_budget_total_of(_g_rows, project.misc_budget_pct)
 
     from core.crm_logic import project_margin
     contract = project.contract_amount or 0

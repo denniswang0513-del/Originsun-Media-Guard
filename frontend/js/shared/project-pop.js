@@ -9,7 +9,7 @@
  * 鍵盤：浮層開著時 ↓↑ 在浮層裡走、Enter 選、Esc／Tab 關——在 capture 階段吃掉，先於宿主自己的 keydown
  *       （工作日誌的 ↓↑ 是換列）；關著時鍵盤全部還給宿主。手打改了字就清掉 data-pid（不再是選到的那個案）。
  */
-import { esc } from './dom.js';
+import { esc, ensureStyle } from './dom.js';
 
 // 顏色全走變數：內部系統深色皮是預設值；員工工作台（/my.html）覆寫成官網風格的白底細框
 const CSS = `
@@ -24,14 +24,6 @@ const CSS = `
 .proj-pop .pp-empty { padding:6px 10px; color:var(--pp-empty); }`;
 
 let _pop = null;   // 全頁只有一個浮層：{ el, input, cfg, idx, showClosed, flat }
-
-function _ensureCss() {
-    if (document.getElementById('proj-pop-css')) return;
-    const st = document.createElement('style');
-    st.id = 'proj-pop-css';
-    st.textContent = CSS;
-    document.head.appendChild(st);
-}
 
 export function closeProjectPop() {
     if (_pop) { _pop.el.remove(); _pop = null; }
@@ -125,7 +117,7 @@ export function attachProjectPop(root, cfg = {}) {
     const flag = 'pop_' + match.replace(/[^a-z0-9]/gi, '');     // 同一個 root 可以掛不同欄位（專案、項目），各掛一次
     if (!root || root.dataset[flag]) return;
     root.dataset[flag] = '1';
-    _ensureCss();
+    ensureStyle('proj-pop-css', CSS);
     // groups：兩段的標題。專案＝進行中／已結案；零用金項目＝常用／其他（owner 2026-09-04：最常用的展開、其他收攏）
     const full = { options: cfg.options || (() => []), value: cfg.value || ((p) => p.label || p.name || ''),
                    groups: cfg.groups || ['進行中', '已結案'] };

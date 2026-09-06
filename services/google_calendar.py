@@ -37,8 +37,23 @@ def calendar_id() -> str:
     return str((load_settings().get("google_calendar") or {}).get("calendar_id") or "").strip()
 
 
+_CFG_CACHE: dict = {"at": 0.0, "val": None}
+_CFG_TTL = 60.0
+
+
 async def load_config() -> tuple[dict | None, str, str]:
-    """回 (sa, calendar_id, error)。sa 來源：settings.json → website_settings 的 GA 服務帳號。"""
+    """回 (sa, calendar_id, error)。sa 來源：settings.json → website_settings 的 GA 服務帳號。
+    60 秒內共用同一份（每次寫場次都撈整張 website_settings＋解析 SA 是白費）；改設定 60 秒後生效。"""
+    import time as _t
+    if _CFG_CACHE["val"] is not None and _t.time() - _CFG_CACHE["at"] < _CFG_TTL:
+        return _CFG_CACHE["val"]
+    val = await _load_config_uncached()
+    if val[0] is not None:                 # 沒憑證的錯誤不快取（貼上設定要馬上生效）
+        _CFG_CACHE.update(at=_t.time(), val=val)
+    return val
+
+
+async def _load_config_uncached() -> tuple[dict | None, str, str]:
     try:
         sa = load_sa_from_settings()
     except ValueError as e:

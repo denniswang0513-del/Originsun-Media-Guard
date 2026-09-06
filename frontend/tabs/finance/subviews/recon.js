@@ -20,8 +20,7 @@
 import { finFetch, finEntity, finIsMine, ledgerHasInvoices, esc, fmtNum,
          finToast, bankOnly, cardOnly } from '../fin-utils.js';
 import { indexTax, taxPick, taxSelects } from '../../../js/shared/cash-tax-picker.js';
-import { createSortable, sortableTh, enumIndex, autoFee as _autoFee }
-    from '../../crm/crm-utils.js';   // 匯費容差的正本在共用層（見 crm-utils）
+import { autoFee as _autoFee } from '../../crm/crm-utils.js';   // 匯費容差的正本在共用層（見 crm-utils）
 import { bearerHeader } from '../../../js/shared/utils.js';   // 送 FormData 時不能自帶 Content-Type
 import { splitBadgeHtml } from '../../../js/shared/cash-split-editor.js';   // 「已拆 N 項」badge 的唯一那顆
 
@@ -253,11 +252,9 @@ function _wbCloseModal() {
 // 不然按了完全沒反應（inline onclick 看不到模組作用域裡的函式）。
 _fr.wbCloseModal = _wbCloseModal;
 
-/** 工作台變更請求共用骨架：打 API →（可選 toast）→（可選關 modal）→ 整台重載。
- *  失敗 toast 錯誤訊息（409 月結鎖帳等直接顯示後端 detail）。 */
 /** 可捲動表格容器（分類規則清單用）。 */
 function _wbTable(inner, maxH = 420) {
-    return `<div data-wb-scroll style="max-height:${maxH}px;overflow:auto;border:1px solid #2a2a2a;border-radius:6px;">
+    return `<div style="max-height:${maxH}px;overflow:auto;border:1px solid #2a2a2a;border-radius:6px;">
         <table style="border-collapse:collapse;font-size:12px;color:#ccc;width:100%;">${inner}</table></div>`;
 }
 
@@ -1640,7 +1637,7 @@ _fr.stmtApply = async (btn) => {
         finToast(`已匯入 ${r.entries} 筆收支、${r.loan_payments} 期貸款繳款`
             + (r.petty_claims ? `；${r.petty_claims} 筆已送源日請款（草稿）` : '')
             + (r.linked_invoices ? `；掛上 ${r.linked_invoices} 張發票` : '')
-            + (r.statement_lines ? `；對帳工作台同步 ${r.statement_lines} 列（已自動配對）` : '')
+            + (r.statement_lines ? `；對帳單列 ${r.statement_lines} 列（已自動配對）` : '')
             + (dup ? `；跳過 ${dup} 筆重複（帳上已有）` : '')
             + draftMsg);
         // 🔴 源日請款推不動的**要講出來**：帳已經匯進去了，但那幾筆沒進請款

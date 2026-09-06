@@ -47,6 +47,12 @@ export function dayLabel(ymd) {
     if (!y) return '';
     return `${m}/${d}（${_WD[new Date(y, m - 1, d).getDay()]}）`;
 }
+/** YYYY-MM-DD ±n 天（本地日期，不走 toISOString）。工時分頁與員工頁同一份。 */
+export function shiftDays(ymd, n) {
+    const [y, m, d] = String(ymd || '').split('-').map(Number);
+    const dt = new Date(y, m - 1, d + n);
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
 
 // ── 一列的共用片段（看板卡片／週表格／時間軸／逐日都吃這幾支）──
 export const isPlan = i => i.status === 'plan';                       // 後端 row_state 決定，這裡不重判
@@ -140,8 +146,7 @@ export const BURN_THEAD = `<tr>
 </tr>`;
 
 /** burn 表的案型格：editable＝點到才變下拉（工作追蹤）；否則純文字。 */
-export function burnTypeCellHtml(p, editable) { return _typeCell(p, editable); }
-function _typeCell(p, editable) {
+export function burnTypeCellHtml(p, editable) {
     const cur = p.project_type || '';
     if (!editable) return `<span class="${cur ? 'tsp-tag' : 'tsp-dim'}">${cur ? esc(cur) : '—'}</span>`;
     // 平時只畫文字，點到才變成下拉（317 列 × 11 個 option 畫一次就是幾千個節點）
@@ -167,7 +172,7 @@ export function burnTbodyHtml(projects, opts = {}) {
             <td><span class="ts-link" data-ts-action="open-project" data-name="${esc(p.project_name || '')}" data-pid="${esc(p.project_id)}">${esc(p.project_name || p.project_id)}</span>
                 ${p.stale ? '<span class="ts-badge warn" title="進行中但 7 天沒工時">停滯</span>' : ''}</td>
             <td class="tsp-sub">${esc(p.status || '')}</td>
-            <td>${_typeCell(p, opts.editable)}</td>
+            <td>${burnTypeCellHtml(p, opts.editable)}</td>
             <td class="num">${p.hours_used}</td>
             <td class="num">${_budgetCell(p, opts.editable)}</td>
             <td class="num${p.remaining != null && p.remaining < 0 ? ' neg' : ''}">${p.remaining ?? '—'}</td>

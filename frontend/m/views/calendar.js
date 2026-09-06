@@ -11,8 +11,8 @@
  * 字彙（狀態、器材狀態）全部來自 options：這裡不寫死任何一個狀態字（計畫 §7）。
  * 從專案抽屜「登記拍攝」進來：state.shootPreset 帶 project_id，render 套進專案欄並把表單展開。
  */
-import { mfetch, toast, esc, todayLocal, dateIso, fmtDate, addDays } from '../shell.js';
-import { state, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad, markStale, pickerHtml, mountPicker, renderPaged, projectLabel } from '../ui.js';
+import { mfetch, toast, esc, todayLocal, fmtDate, addDays } from '../shell.js';
+import { state, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad, markStale, pickerHtml, mountPicker, renderPaged, projectLabel, isAdmin } from '../ui.js';
 
 const API = '/api/v1/shoots';
 const F = (id) => document.getElementById('cal-' + id);
@@ -36,7 +36,6 @@ const cancelled = () => _o.cancelled_status || statuses()[2] || '';
 const eqStates = () => (Array.isArray(_o.equipment_states) ? _o.equipment_states : []);
 const reserved = () => eqStates()[0] || '';     // 預約中
 const pickedUp = () => eqStates()[1] || '';     // 已領走
-const isAdmin = () => ((state.me || {}).access_level || 0) >= 3;
 /** 狀態 pill 顏色：完成綠、取消紅、其餘灰——認的是 options 給的字，不是字面。 */
 const statusCls = (s) => (s === doneStatus() ? 'ok' : (s === cancelled() ? 'bad' : ''));
 

@@ -50,7 +50,8 @@ def test_display_chain_has_one_source():
     assert "linked_display_name(" in shared, "案名共同出口 project_names_map 要走這條"
     assert "async def mine_parent_names" in shared
     api = repo_src("routers/api_finance_projects.py")
-    assert api.count("linked_display_name(") == 3, "清單／詳情／PUT 回傳三處"
+    assert api.count("_display_fields(") == 4, "清單／詳情／PUT 回傳三處都走 _display_fields（＋定義）"
+    assert api.count("linked_display_name(") == 1, "顯示名鏈只在 _display_fields 裡呼叫一次"
     js = repo_src("frontend/tabs/finance/subviews/projects.js")
     # 前端只顯示與搜尋，不自己判斷「該用哪個名字」
     assert "parent_names[0]" not in js and "parent_names.length === 1" not in js

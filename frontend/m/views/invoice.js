@@ -60,6 +60,7 @@ function formHtml() {
 
 // 手機登記的一定是「請款發票、還沒開」（owner 2026-09-03）：方向＝options 第一個（收款），
 // 款項狀態＝那個方向的第二個（未收），開立狀態交給後端（沒號碼＝未開立）。字都來自 options。
+let _projRows = [];      // 專案清單（表單帶入抬頭／統編用）
 const receivableType = () => ((opt().invoice || {}).payment_types || [])[0] || '';
 const unpaidStatus = () => (((opt().invoice || {}).statuses_by_type || {})[receivableType()] || [])[1] || '';
 
@@ -72,7 +73,7 @@ function applyCompany(name) {
 
 // 選了專案：客戶、抬頭、統編從客戶檔帶進來，名稱空著就用案名（都可以再改）
 function applyProjectDefaults(pid) {
-    const p = (F('project_id')._rows || []).find(x => x.id === pid);
+    const p = _projRows.find(x => x.id === pid);
     const hint = document.getElementById('inv-client-hint');
     if (!p) { hint.textContent = '選了專案會自動帶客戶、抬頭、統編'; return; }
     const c = (opt().clients || []).find(x => x.id === p.client_id) || {};
@@ -112,7 +113,7 @@ async function loadProjects() {
     try {
         const inc = state.invoicePreset ? '&include=' + encodeURIComponent(state.invoicePreset) : '';   // 抽屜帶進來的案一定在清單裡
         const d = await mfetch('/api/v1/crm/m/projects?limit=100&offset=0' + inc);
-        F('project_id')._rows = d.projects || [];
+        _projRows = d.projects || [];
         items = (d.projects || []).map(p => ({ value: p.id, label: projectLabel(p) }));
     } catch (e) {
         placeholder = '專案清單載入失敗：' + e.message;
@@ -157,10 +158,10 @@ function payload() {
 }
 
 // 給同事開票的通知：純文字，長按或按「複製」貼到 LINE／Chat
-const projectName = () => ((F('project_id')._rows || []).find(x => x.id === F('project_id').value) || {}).name || '';
+const projectName = () => (_projRows.find(x => x.id === F('project_id').value) || {}).name || '';
 
 function noticeText(body) {
-    const p = (F('project_id')._rows || []).find(x => x.id === body.project_id) || {};
+    const p = _projRows.find(x => x.id === body.project_id) || {};
     const who = (state.me || {}).username || '';
     const lines = [
         body.issue_status === voided() ? '發票作廢' : '請開發票',
@@ -301,7 +302,6 @@ async function loadTrash() {
     try {
         const d = await mfetch('/api/v1/crm/invoices/trash');
         const items = d.items || [];
-        box._rows = items;
         box.innerHTML = items.length ? items.map(t => `
           <div class="m-card">
             <div class="t"><div class="name">${esc(t.title)}</div>${pill(t.days_left == null ? '' : `剩 ${t.days_left} 天`)}</div>
@@ -348,7 +348,6 @@ async function loadRecent(reset = true) {
         const rows = (d.invoices || []).filter(x => !seen.has(x.id));   // 後端不認 offset（舊版）時會回同一頁：去重後按鈕自動藏
         recent.rows = recent.rows.concat(rows);
         recent.offset += rows.length;
-        box._rows = recent.rows;
         box.innerHTML = recent.rows.length ? recent.rows.map(recentCardHtml).join('') : emptyBox('尚無發票');
         more.hidden = rows.length < PAGE;
     } catch (e) { box.innerHTML = errBox(e); }
@@ -368,7 +367,7 @@ export async function render(host, { first }) {
         });
         document.getElementById('inv-recent').addEventListener('click', (ev) => {
             const b = ev.target.closest('button[data-edit],button[data-del]'); if (!b) return;
-            const rows = document.getElementById('inv-recent')._rows || [];
+            const rows = recent.rows || [];
             if (b.dataset.edit) { const inv = rows.find(x => x.id === b.dataset.edit); if (inv) startEdit(inv); return; }
             const inv = rows.find(x => x.id === b.dataset.del);
             if (inv) removeInvoice(inv, b);

@@ -192,10 +192,16 @@ export function entryBlock(j, k, label, c, opts = {}) {
 
 // c = {card, name, empty, block} class 名；title 由呼叫端決定（人名或週區間）並自行 esc。
 // opts（可省，舊呼叫端不變）：worklog（畫自動區）、projectName(id)、canReply、flags（標題旁的求助 pill）。
+/** 週記的旗標 pill（求助／學到／…）：personCard 與 journal.html 的團隊牆同一份標記。 */
+export function flagPills(j, c = {}) {
+    const flags = j.flags || {};
+    return FLAGS.map(([f, l]) => (flags[f] ? `<span class="${(c.pillFlag || 'pill-flag') + ' ' + f}">${l} ${flags[f]}</span>` : '')).join('');
+}
+
 export function personCard(j, title, c, opts = {}) {
     const empty = BLOCKS.every(([k]) => !entriesOf(j, k).length);
     const flags = j.flags || {};
-    const pills = FLAGS.map(([f, l]) => (flags[f] ? `<span class="${(c.pillFlag || 'pill-flag') + ' ' + f}">${l} ${flags[f]}</span>` : '')).join('');
+    const pills = flagPills(j, c);
     const worklog = opts.worklog && (j.worklog || []).length
         ? `<div class="${c.block}"><h4>做了什麼</h4>${worklogHtml(j.worklog, c)}</div>` : '';
     return `<div class="${c.card}"><div class="${c.name}">${title}${pills}</div>${worklog}
@@ -215,11 +221,11 @@ export const api = {
     submitMine: (start) => _safe(authFetch('/api/v1/journal/mine/submit' + _q(start), { method: 'POST', body: {} })),
     reply: (body) => _safe(authFetch('/api/v1/journal/reply', { method: 'POST', body })),
     help: (weeks = 8) => _safe(authFetch('/api/v1/journal/help?weeks=' + weeks)),
-    // 掛案子用的專案清單：先問工時的 project_options（timesheets 模組）；沒那把鑰匙就退到員工自己的 /me/timesheet_options（同一份查表）
+    // 掛案子用的專案清單：/timesheets/project_options 兩把鑰匙都收（timesheets 拿整份；只有 me_finance 也給）
     projectOptions: () => {
         if (!_projOptsPromise) {
             _projOptsPromise = _safe(authFetch('/api/v1/timesheets/project_options'))
-                .then(r => (r.ok ? r.json() : _safe(authFetch('/api/v1/me/timesheet_options')).then(r2 => (r2.ok ? r2.json() : { projects: [] }))))
+                .then(r => (r.ok ? r.json() : { projects: [] }))
                 .then(d => (d && d.projects) || [])
                 .catch(() => []);
         }

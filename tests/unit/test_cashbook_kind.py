@@ -98,7 +98,8 @@ def test_passthrough_income_row_requests_the_whole_remit_on_the_linked_projects(
     assert "const mineIds = new Set((await _mineProjectList()).map((p) => p.id));" in remit
     assert "...(entOf(it.pid) ? { entity: 'mine' } : {})" in remit and "'&entity=mine'" in remit
     add = between(js, "async function _cashKaiAddProject(e, pids)", "async function _cashPayForProject(")   # 註解會被 js_code_only 剝掉，錨下一個函式
-    assert "_mineProjectList()" in add and "'私帳｜' + (p.name || '')" in add
+    assert "_mineProjectList()" in add and "_openPickerWithMine(opts, mine)" in add
+    assert "'私帳｜' + (p.name || '')" in between(js, "function _openPickerWithMine(opts, mine)", "async function _cashKaiAddProject(")   # 私帳前綴只有 helper 一份
     inc = between(js, "async function _cashPayForProject(e, pid, pname, o = {})", "function _cashCustomPay(")
     assert "kai" not in inc, "執行人員表只給一般收入列"
     assert "(e.project_pay_label || (e.kai_payment_label ?" in js

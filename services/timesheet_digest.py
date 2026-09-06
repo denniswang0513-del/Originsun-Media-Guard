@@ -30,7 +30,8 @@ async def build_digest(session, today: date | None = None) -> dict:
     from sqlalchemy import select
     from db.models import Timesheet
     today = today or date.today()
-    mon = today - timedelta(days=today.weekday() + 7)        # 上週一
+    from core.journal_logic import week_start_of
+    mon = week_start_of(today) - timedelta(days=7)          # 上週一（週一規則只有 week_start_of 一份）
     sun = mon + timedelta(days=6)
     d0 = datetime(mon.year, mon.month, mon.day)
     rows = (await session.execute(

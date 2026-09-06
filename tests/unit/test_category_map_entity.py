@@ -75,10 +75,11 @@ def test_the_statements_engine_scopes_cash_but_shares_the_rest():
     """🔴 三表的 `cat_map` 是 `(source, category_text)` 的字典，決定科目與
     treatment。兩本帳哪天有同名類別，不過濾就會一邊蓋掉另一邊 —— 那批帳會被
     算進錯的科目。payment／invoice 兩本共用，照舊全收。"""
-    body = code_only(func_body(repo_src("services/finance_statements.py"),
-                               "async def _load_inputs("))
-    assert 'FinanceCategoryMap.source != "cash"' in body
-    assert "FinanceCategoryMap.entity == entity" in body
+    fs = repo_src("services/finance_statements.py")
+    body = code_only(func_body(fs, "async def _load_inputs("))
+    assert "category_map_scope(entity)" in body                 # 述詞只有 category_map_scope 一份
+    scope = code_only(func_body(fs, "def category_map_scope("))
+    assert 'FinanceCategoryMap.source != "cash"' in scope and "FinanceCategoryMap.entity == entity" in scope
 
 
 def test_the_admin_endpoints_are_scoped_too():
@@ -89,8 +90,7 @@ def test_the_admin_endpoints_are_scoped_too():
     """
     src = repo_src("routers/api_finance.py")
     scope = code_only(func_body(src, "def _map_scope("))
-    assert 'FinanceCategoryMap.source != "cash"' in scope
-    assert "FinanceCategoryMap.entity == ent" in scope
+    assert "category_map_scope(ent)" in scope                    # 轉呼叫 services.finance_statements 那一份
     for name in ("async def list_category_map(", "async def list_unmapped_categories("):
         body = code_only(func_body(src, name))
         assert "_map_scope(ent)" in body, name

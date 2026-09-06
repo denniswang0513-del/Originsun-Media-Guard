@@ -567,7 +567,7 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
             });
             overlay.remove();
             if (opts.onDone) { opts.onDone(); } else { _loadCostStaff(state.selectedId); }
-            window._projPay?.refresh?.();
+            _refreshPayIfOpen();
         } catch (e) {
             alert('建立失敗：' + e.message);
             btn.disabled = false; btn.textContent = '確定';
@@ -602,6 +602,11 @@ async function _costPayAction(id, paid) {
     }
 }
 
+/** 收付款分頁開著才重抓它（8＋2 支請求）；沒開著的話切過去時分頁點擊本來就會 loadPayTab。 */
+function _refreshPayIfOpen() {
+    if (document.querySelector('#proj-detail-tabs .crm-tab.active')?.dataset.tab === 'team') window._projPay?.refresh?.();
+}
+
 /** 動作做完要重畫哪一區 —— 人員費用與雜支各自不同，所以由呼叫端帶。 */
 function _costAfterPay(onDone) {
     // 只收動態長出來的那層（data-dynamic）；靜態的 #proj-modal 刪掉之後「新增專案」就死了
@@ -609,7 +614,7 @@ function _costAfterPay(onDone) {
     if (ov) ov.remove();
     if (onDone) { onDone(); }
     else if (state.selectedId) { _loadCostStaff(state.selectedId); }
-    window._projPay?.refresh?.();          // 收付款分頁的狀態列／提示／結案檢查跟著變
+    _refreshPayIfOpen();          // 收付款分頁的狀態列／提示／結案檢查跟著變
 }
 
 window._costPayMark = async function(id, paid, onDone) {

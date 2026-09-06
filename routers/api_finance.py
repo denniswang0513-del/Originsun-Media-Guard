@@ -183,20 +183,19 @@ def _map_dict(m) -> dict:
             "active": bool(m.active)}
 
 
+def _account_move_rows(inputs: dict) -> list:
+    """互轉配對的取數列（/transfer-pairs 與 recognize_transfer_fees_in 同一份判準 —— 兩份漂掉過一次）。
+    🔴 排除拆項展開的虛擬列（帶 parent_id）：id 是拆項 id，寫回 session.get 拿不到會靜默 continue；
+    而拆過的列金額正本在拆項，自動搬匯費會搬壞 Σ。"""
+    return [e for e in inputs["cash_entries"]
+            if not e.get("parent_id")
+            and is_account_move(e, inputs["cat_map"], inputs["accounts"])]
+
+
 def _map_scope(ent: str):
-    """對映表的帳本過濾條件（`source='cash'` 分家、payment／invoice 共用）。
-
-    🔴 只有 cash 分家：兩本帳的收支類別值域根本不重疊（母公司是平的科目、
-    私帳是分類樹鏡射出來的複合鍵），共用一份的下場是母公司的下拉列出 38 個
-    私帳的類別，選了照樣存得進去、然後在三表裡變成「未歸類」。
-    請款／發票那兩種是公司流程的詞彙，兩本帳講的是同一件事（私帳的 34 張請款
-    用的就是母公司那批類別），所以不分。
-    """
-    from sqlalchemy import or_
-
-    from db.models import FinanceCategoryMap
-    return or_(FinanceCategoryMap.source != "cash",
-               FinanceCategoryMap.entity == ent)
+    """對映表的帳本過濾條件：正本 services.finance_statements.category_map_scope（三表輸入用同一份）。"""
+    from services.finance_statements import category_map_scope
+    return category_map_scope(ent)
 
 
 @router.get("/transfer-pairs")
@@ -222,10 +221,7 @@ async def list_transfer_pairs(request: Request, entity: str = ""):
     # 「我只有富邦的幾個帳戶互轉有記帳，你表列的這些都不是互轉」。
     # 🔴 排除拆項展開的虛擬列（帶 parent_id）：id 是拆項 id，寫回 session.get
     # 拿不到會靜默 continue；而拆過的列金額正本在拆項，自動搬匯費會搬壞 Σ。
-    rows = [e for e in inputs["cash_entries"]
-            if not e.get("parent_id")
-            and is_account_move(e, inputs["cat_map"], inputs["accounts"])]
-    pairs, un_o, un_i, revs = transfer_pairs(rows)
+    pairs, un_o, un_i, revs = transfer_pairs(_account_move_rows(inputs))
 
     def _brief(e):
         return {"id": e.get("id"), "date": str(e.get("entry_date") or "")[:10],
@@ -268,10 +264,7 @@ async def recognize_transfer_fees_in(session, ent: str, only_ids=None,
     # 兩份判準漂掉造成的）
     # 🔴 排除拆項展開的虛擬列（帶 parent_id）：id 是拆項 id，寫回 session.get
     # 拿不到會靜默 continue；而拆過的列金額正本在拆項，自動搬匯費會搬壞 Σ。
-    rows = [e for e in inputs["cash_entries"]
-            if not e.get("parent_id")
-            and is_account_move(e, inputs["cat_map"], inputs["accounts"])]
-    pairs, _o, _i, _rev = transfer_pairs(rows)
+    pairs, _o, _i, _rev = transfer_pairs(_account_move_rows(inputs))
     todo = {p["out"]["id"]: p["gap"] for p in pairs if p["fee_inside"]}
     want = set(only_ids or ()) or set(todo)
     done = []

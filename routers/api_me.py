@@ -38,7 +38,7 @@ from services.timesheet_self import (add_rows, bound_ident, delete_row, list_row
                                      own_filter, rows_by_month, ts_dict, update_row)
 from routers.api_hr import approved_annual_used, new_leave_request
 from routers.api_shoots import _crew_list
-from routers.api_timesheets import _board_days
+from services.timesheet_self import board_days
 
 router = APIRouter(prefix="/api/v1/me", tags=["me"])
 
@@ -379,7 +379,7 @@ async def my_today(request: Request):
 @router.get("/team_week")
 async def team_week(request: Request, start: str = ""):
     """團隊的一週（§11）：人×日格子＝既有看板的週模式（案名＋小時＋內容、計畫淺灰），疊場次與休假。
-    people 的計算直接用 routers.api_timesheets._board_days（不抄第二份）。"""
+    people 的計算直接用 services.timesheet_self.board_days（不抄第二份）。"""
     ident = await _me_bound(request)
     if (start or "").strip() and parse_ymd(start) is None:
         raise HTTPException(status_code=422, detail="start 需為 YYYY-MM-DD")
@@ -388,7 +388,7 @@ async def team_week(request: Request, start: str = ""):
     d0 = datetime(week.year, week.month, week.day)
     factory = db_factory_or_503()
     async with factory() as session:
-        board = await _board_days(session, d0, 7)
+        board = await board_days(session, d0, 7)
         shoot_rows = await _shoots_between(session, week, week + timedelta(days=6))
         leaves = (await session.execute(
             select(HrLeaveRequest).where(HrLeaveRequest.status == "已核准")

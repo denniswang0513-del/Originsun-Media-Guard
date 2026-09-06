@@ -34,10 +34,8 @@ async function loadVocab() {
 }
 async function loadProjects() {
     if (_projects) return _projects;
-    try { _projects = (await mfetch('/api/v1/timesheets/project_options')).projects || []; }
-    catch (_) {
-        try { _projects = (await mfetch('/api/v1/me/timesheet_options')).projects || []; } catch (__) { _projects = []; }
-    }
+    try { _projects = (await mfetch('/api/v1/timesheets/project_options')).projects || []; }   // timesheets 或 me_finance 都能拿
+    catch (_) { _projects = []; }
     return _projects;
 }
 

@@ -46,6 +46,8 @@ export function shouldLoad(tab, { first = false, maxAgeMs = 60000 } = {}) {
 }
 
 // ── 字彙（全部來自 options）──
+/** 管理員（Lv3）判定：閘門、行事曆設定、零用金總表都問這一支，不各自寫 >= 3。 */
+export const isAdmin = (me = state.me) => ((me || {}).access_level || 0) >= 3;
 export const opt = () => state.options || {};
 export const list = (k) => (Array.isArray(opt()[k]) ? opt()[k] : []);
 /** 已付款＝payment_statuses 的最後一項（後端排序：應付…→已付）。 */

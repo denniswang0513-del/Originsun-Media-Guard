@@ -206,7 +206,7 @@ def test_worklog_tab_reuses_the_self_timesheet_endpoints():
     字彙（分類／階段）從 /timesheets/options 拿；寫入守衛是本人＋綁定人員，按鈕不掛 .w；不畫個人合計。"""
     src = js_code_only(repo_src("frontend/m/views/worklog.js"))
     for ep in ("'/api/v1/timesheets/mine?date='", "'/api/v1/timesheets/mine/rows'", "'/api/v1/timesheets/mine/' + encodeURIComponent(",
-               "'/api/v1/timesheets/options'", "'/api/v1/timesheets/project_options'", "'/api/v1/me/timesheet_options'"):
+               "'/api/v1/timesheets/options'", "'/api/v1/timesheets/project_options'"):   # 2026-09-06：專案下拉一支端點兩把鑰匙，不再退回 /me 那支
         assert ep in src, ep
     assert "start_time: F('t0').value" in src and "end_time: F('t1').value" in src
     assert "mountPicker('wl-project'" in src and "segHtml('wl-type'" in src
