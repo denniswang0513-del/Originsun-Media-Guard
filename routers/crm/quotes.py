@@ -8,13 +8,14 @@ import uuid
 from datetime import datetime
 
 from fastapi import Depends, HTTPException, Request, Query
+from fastapi.responses import HTMLResponse
 
 from core.finance_logic import QUOTE_PENDING
 from core.no_store import no_store_file
 from core.quotation_pdf import PDF_MARGIN, build_quotation_view, footer_line
 from core.schemas import QuotationPayload, QuotationTemplatePayload
 
-from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory,
+from ._shared import (router, token_router, _check_auth, money_dep, _require_db, _get_factory,
                       _now, _parse_shoot_date)
 
 try:
@@ -49,6 +50,7 @@ def _to_quotation_dict(q, items=None, project_name="", client_short_name="") -> 
         "total": q.total, "final_price": q.final_price,
         "payment_stages": q.payment_stages or [], "terms": q.terms or "",
         "spec": q.spec or "",
+        "share_url": f"/q/{q.share_token}" if getattr(q, "share_token", None) else None,
         "items": items or [],
         "created_at": q.created_at.isoformat() if q.created_at else None,
         "updated_at": q.updated_at.isoformat() if q.updated_at else None,
@@ -232,50 +234,121 @@ async def get_quotation(quotation_id: str):
     return _to_quotation_dict(q, items=items, project_name=pn, client_short_name=cn)
 
 
-@router.get("/quotations/{quotation_id}/pdf", dependencies=[Depends(money_dep)])
-async def quotation_pdf(quotation_id: str):
-    """報價單 PDF。版面正本 frontend/demo/quotation-pdf.html（2026-09-06 定稿）→ templates/quotation_pdf.html；
-    金額／備註／檔名規則在 core/quotation_pdf.py（純函式，有測試）。抬頭／匯款／章讀 settings.company。"""
-    import html as _html
-    from starlette.background import BackgroundTask
+async def _quotation_view_of(q) -> tuple[dict, dict]:
+    """撈齊報價的項目／專案／客戶 → (檢視模型, company 設定)。PDF 與線上檢視三支端點共用。"""
     from config import load_settings
-    from services.html_pdf import file_data_uri, html_to_pdf, render_template, unlink_later
-
-    _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        q = await session.get(CrmQuotation, quotation_id)
-        if not q:
-            raise HTTPException(status_code=404, detail="找不到此報價")
         items = await _load_items(session, q.id)
         project = await session.get(CrmProject, q.project_id)
         client = await session.get(Client, project.client_id) if project and project.client_id else None
     company = dict(load_settings().get("company") or {})
     client_name = ((client.full_name or "").strip() or client.short_name) if client else ""
     project_name = project.name if project else ""
-    try:                                   # 組資料／渲染／產 PDF 同一個出口：壞在哪一段對使用者都是「PDF 生成失敗」
-        view = build_quotation_view(
-            _to_quotation_dict(q, items=items, project_name=project_name,
-                               client_short_name=client.short_name if client else ""),
-            company, client_name=client_name, project_name=project_name)
-        html_doc = render_template(
-            "quotation_pdf.html", v=view,
-            logo_src=file_data_uri(company.get("logo_path") or "frontend/img/originsun-logo.webp"),
-            seal_src=file_data_uri(company.get("seal_path") or ""),
-        )
+    view = build_quotation_view(
+        _to_quotation_dict(q, items=items, project_name=project_name,
+                           client_short_name=client.short_name if client else ""),
+        company, client_name=client_name, project_name=project_name)
+    return view, company
+
+
+def _render_quotation_html(view: dict, company: dict, *, web_pdf_url: str = "") -> str:
+    """同一份模板：web_pdf_url 給了＝線上檢視（多一條「下載 PDF」列、頁面不撐 A4），沒給＝印 PDF。"""
+    from services.html_pdf import file_data_uri, render_template
+    return render_template(
+        "quotation_pdf.html", v=view,
+        logo_src=file_data_uri(company.get("logo_path") or "frontend/img/originsun-logo.webp"),
+        seal_src=file_data_uri(company.get("seal_path") or ""),
+        web_pdf_url=web_pdf_url,
+    )
+
+
+async def _quotation_pdf_response(q):
+    """組資料／渲染／產 PDF 同一個出口：壞在哪一段對使用者都是「PDF 生成失敗」。"""
+    import html as _html
+    from starlette.background import BackgroundTask
+    from services.html_pdf import html_to_pdf, unlink_later
+    try:
+        view, company = await _quotation_view_of(q)
         footer = (
             '<div style="width:100%;margin:0 16mm;font-family:\'Noto Sans TC\',\'Microsoft JhengHei\',sans-serif;'
             'font-size:7px;color:#767676;display:flex;justify-content:space-between;">'
             f'<span>{_html.escape(footer_line(view))}</span>'
             '<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>'
         )
-        tmp_pdf = await html_to_pdf(html_doc, prefix="quotation_", footer_html=footer, margin=PDF_MARGIN)
+        tmp_pdf = await html_to_pdf(_render_quotation_html(view, company), prefix="quotation_",
+                                    footer_html=footer, margin=PDF_MARGIN)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"PDF 生成失敗：{exc}")
     return no_store_file(              # 金額文件：不留快取副本，送完就刪
         tmp_pdf, media_type="application/pdf", filename=view["filename"],
         background=BackgroundTask(unlink_later(tmp_pdf)),
     )
+
+
+@router.get("/quotations/{quotation_id}/pdf", dependencies=[Depends(money_dep)])
+async def quotation_pdf(quotation_id: str):
+    """報價單 PDF。版面正本 frontend/demo/quotation-pdf.html（2026-09-06 定稿）→ templates/quotation_pdf.html；
+    金額／備註／檔名規則在 core/quotation_pdf.py（純函式，有測試）。抬頭／匯款／章讀 settings.company。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
+        if not q:
+            raise HTTPException(status_code=404, detail="找不到此報價")
+    return await _quotation_pdf_response(q)
+
+
+@router.post("/quotations/{quotation_id}/share")
+async def share_quotation(quotation_id: str, request: Request):
+    """取得／鑄造線上檢視連結（冪等：已有就回同一條，寄出去的連結不會因為再按一次就失效）。
+    短碼走 new_short_token（純亂數 12 字，網址短；驗證是逐字比對 DB，同電子發票 /e/{code}）。"""
+    from core.auth import new_short_token
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
+        if not q:
+            raise HTTPException(status_code=404, detail="找不到此報價")
+        if not q.share_token:
+            q.share_token = new_short_token()
+            q.updated_at = _now()
+            await session.commit()
+        token = q.share_token
+    return {"status": "ok", "token": token, "share_url": f"/q/{token}"}
+
+
+async def _quotation_by_share_token(token: str):
+    """免登入端點的憑證就是網址裡那串字：share_token 逐字等於來訪者出示的字串才給。"""
+    _require_db()
+    if not token:
+        raise HTTPException(status_code=401, detail="連結已失效")
+    factory = await _get_factory()
+    async with factory() as session:
+        q = (await session.execute(
+            select(CrmQuotation).where(CrmQuotation.share_token == token))).scalars().first()
+    if not q:
+        raise HTTPException(status_code=401, detail="連結已失效")
+    return q
+
+
+@token_router.get("/public/quote/{token}", response_class=HTMLResponse)
+async def public_quote_html(token: str):
+    """線上檢視（owner 2026-09-07）：同一份報價單版面直接當網頁看，頁上有「下載 PDF」。
+    掛 token_router（master 限定、不對 NAS 曝露）；回的是 HTML 不是 JSON，MoneyRedactRoute 抹不到、
+    也不該抹 —— 這頁就是要給客戶看金額的。"""
+    q = await _quotation_by_share_token(token)
+    view, company = await _quotation_view_of(q)
+    html_doc = _render_quotation_html(view, company, web_pdf_url=f"/q/{token}/pdf")
+    return HTMLResponse(html_doc, headers={"Cache-Control": "no-store"})
+
+
+@token_router.get("/public/quote/{token}/pdf")
+async def public_quote_pdf(token: str):
+    """線上檢視頁的「下載 PDF」：一般導覽下載（不是 blob），手機也能直接存。"""
+    q = await _quotation_by_share_token(token)
+    return await _quotation_pdf_response(q)
 
 
 @router.put("/quotations/{quotation_id}")

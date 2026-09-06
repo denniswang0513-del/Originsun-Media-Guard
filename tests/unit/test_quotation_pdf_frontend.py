@@ -140,3 +140,9 @@ def test_company_keys_match_config_defaults():
     block = cfg[cfg.index('"company": {'):]
     block = block[:block.index("\n    },")]
     assert set(re.findall(r'^\s+"(\w+)":', block, re.M)) == set(COMPANY_KEYS)
+
+
+def test_desktop_detail_has_share_link_button():
+    src = js_code_only(repo_src(QUOTES_JS))
+    assert 'id="quote-btn-share"' in src and "'/quotations/' + q.id + '/share', { method: 'POST' }" in src
+    assert "location.origin + q.share_url" in src

@@ -188,10 +188,24 @@ function renderDetail(q) {
     const actions = document.getElementById('quote-bar-actions');
     if (actions) {
         actions.innerHTML = `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-pdf">下載 PDF</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-share">${q.share_url ? '複製連結' : '分享連結'}</button>
             <button class="crm-detail-close" title="關閉">&#x2715;</button>`;
         actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
         actions.querySelector('#quote-btn-pdf').addEventListener('click', () =>
             authDownload('/api/v1/crm/quotations/' + q.id + '/pdf', quotePdfFilename(q), '下載 PDF'));
+        // 線上檢視連結（免登入、頁上可下載 PDF）：沒有就鑄一條（冪等），然後複製完整網址
+        actions.querySelector('#quote-btn-share').addEventListener('click', async (ev) => {
+            try {
+                if (!q.share_url) {
+                    const r = await _fetch('/quotations/' + q.id + '/share', { method: 'POST' });
+                    q.share_url = r.share_url;
+                    ev.currentTarget.textContent = '複製連結';
+                }
+                const full = location.origin + q.share_url;
+                try { await navigator.clipboard.writeText(full); alert('連結已複製：\n' + full); }
+                catch (_) { prompt('連結（請自行複製）：', full); }
+            } catch (e) { alert('建立連結失敗：' + e.message); }
+        });
     }
     addEditButton('quote-bar-actions', () => {
         enableInlineEdit('quote-detail-info', 'quote-bar-actions', _QUOTE_EDIT_FIELDS, q,

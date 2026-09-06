@@ -2,6 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
+{% if web_pdf_url %}<meta name="viewport" content="width=device-width, initial-scale=1">{% endif %}
 <title>報價單 {{ v.project_name }}</title>
 <style>
   /* 視覺正本：frontend/demo/quotation-pdf.html（2026-09-06 定稿）。改版面先改示範頁，再同步到這裡。 */
@@ -72,9 +73,20 @@
   .sign { margin-top:auto; padding-top:18px; }
   /* 🔴 這組邊界＝core.quotation_pdf.PDF_MARGIN（產 PDF 時傳給 Playwright），改一邊要改兩邊 */
   @page { size:A4 portrait; margin:12mm 16mm 14mm; }
+{% if web_pdf_url %}
+  /* 線上檢視：同一份版面當網頁看。紙張置中、手機縮排，列印時把工具列藏掉就是 PDF 那一份。 */
+  body { background:#ececec; }
+  .webbar { position:sticky; top:0; z-index:2; background:#1a1a1a; color:#fff; padding:10px 16px; display:flex; justify-content:space-between; align-items:center; font-size:14px; }
+  .webbar span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:12px; }
+  .webbar a { flex:none; color:#fff; background:#3b82f6; text-decoration:none; padding:8px 16px; border-radius:6px; font-weight:500; }
+  .page { background:#fff; max-width:210mm; margin:16px auto; padding:14mm 16mm; min-height:0; box-shadow:0 2px 12px rgba(0,0,0,.12); }
+  @media (max-width:640px) { .page { margin:0; padding:20px 14px; box-shadow:none; } .sign { grid-template-columns:1fr; } }
+  @media print { .webbar { display:none; } body { background:#fff; } .page { margin:0; padding:0; box-shadow:none; max-width:none; } }
+{% endif %}
 </style>
 </head>
 <body>
+{% if web_pdf_url %}<div class="webbar"><span>報價單　{{ v.client_name }}　{{ v.project_name }}</span><a href="{{ web_pdf_url }}">下載 PDF</a></div>{% endif %}
 <div class="page">
   <div class="hd">
     <h1>報價單<small>PROJECT ESTIMATE</small></h1>

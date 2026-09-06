@@ -108,8 +108,11 @@ def test_pdf_endpoint_is_money_guarded_and_never_caches():
     """報價 PDF 是錢：守衛跟其他報價端點一樣走 money_dep；檔案回應 no_store（不留快取副本）。"""
     src = repo_src("routers/crm/quotes.py")
     assert '@router.get("/quotations/{quotation_id}/pdf", dependencies=[Depends(money_dep)])' in src
-    body = code_only(func_body(src, "async def quotation_pdf("))
-    assert "no_store_file(" in body and "html_to_pdf(" in body and "build_quotation_view(" in body
+    # 端點本體薄：撈報價 → 交給共用的 _quotation_pdf_response（它才碰 html_to_pdf／no_store_file）
+    assert "_quotation_pdf_response(q)" in code_only(func_body(src, "async def quotation_pdf("))
+    resp = code_only(func_body(src, "async def _quotation_pdf_response("))
+    assert "no_store_file(" in resp and "html_to_pdf(" in resp and "_quotation_view_of(" in resp
+    assert "build_quotation_view(" in code_only(func_body(src, "async def _quotation_view_of("))
     assert "spec" in code_only(func_body(src, "def _to_quotation_dict(")), "序列化要帶 spec，前端與 PDF 都靠它"
 
 
@@ -121,3 +124,47 @@ def test_spec_absent_from_payload_means_unchanged_not_cleared():
     assert QuotationPayload(spec="").spec == ""          # 有送空字串＝真的要清掉
     body = code_only(func_body(repo_src("routers/crm/quotes.py"), "async def update_quotation("))
     assert "if req.spec is not None:" in body, "沒送 spec 就不該動它"
+
+
+def test_share_link_endpoints_are_token_scoped_and_reuse_one_view_helper():
+    """線上檢視（owner 2026-09-07）：鑄連結是寫入（_check_auth）；公開的 HTML／PDF 只認 share_token
+    逐字比對、掛 token_router（master 限定）；三支端點共用 _quotation_view_of，不各抄一份。"""
+    src = repo_src("routers/crm/quotes.py")
+    share = code_only(func_body(src, "async def share_quotation("))
+    assert "_check_auth(request)" in share and "new_short_token()" in share
+    assert "if not q.share_token:" in share, "鑄連結要冪等，寄出去的連結不能因為再按一次就變"
+    assert '@token_router.get("/public/quote/{token}", response_class=HTMLResponse)' in src
+    assert '@token_router.get("/public/quote/{token}/pdf")' in src
+    lookup = code_only(func_body(src, "async def _quotation_by_share_token("))
+    assert "CrmQuotation.share_token == token" in lookup and "401" in lookup
+    for fn in ("async def quotation_pdf(", "async def public_quote_html(", "async def public_quote_pdf("):
+        body = code_only(func_body(src, fn))
+        assert "_quotation_view_of(" in body or "_quotation_pdf_response(" in body, fn
+    assert code_only(func_body(src, "async def _quotation_pdf_response(")).count("html_to_pdf(") == 1
+    # 序列化帶 share_url，桌機／手機才知道要顯示「複製連結」還是「建立連結」
+    assert '"share_url"' in code_only(func_body(src, "def _to_quotation_dict("))
+    # 根路徑短網址（同 /e/{code}）
+    main = repo_src("main.py")
+    assert '@app.get("/q/{code}", include_in_schema=False)' in main and '@app.get("/q/{code}/pdf", include_in_schema=False)' in main
+
+
+def test_template_web_mode_adds_download_bar_only_when_asked():
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+    env = Environment(loader=FileSystemLoader("templates"), autoescape=select_autoescape(["html"]))
+    v = build_quotation_view(_q(), COMPANY, client_name="c", project_name="p")
+    pdf = env.get_template("quotation_pdf.html").render(v=v, logo_src="", seal_src="", web_pdf_url="")
+    web = env.get_template("quotation_pdf.html").render(v=v, logo_src="", seal_src="", web_pdf_url="/q/abc/pdf")
+    assert "webbar" not in pdf and 'href="/q/abc/pdf"' not in pdf
+    assert 'class="webbar"' in web and 'href="/q/abc/pdf">下載 PDF</a>' in web
+    assert "NT$165,000" in web                                  # 線上檢視就是要給客戶看金額
+
+
+def test_playwright_runs_in_its_own_proactor_loop():
+    """🔴 生產主 loop 是 SelectorEventLoop（asyncpg 需要），Windows 上起不了 subprocess ——
+    Playwright 開 Chromium 會丟空訊息的 NotImplementedError（8000 上「PDF 生成失敗：」）。
+    所以一定要在工作執行緒裡另起 ProactorEventLoop 跑。"""
+    src = code_only(repo_src("services/html_pdf.py"))
+    assert "asyncio.ProactorEventLoop()" in src
+    body = func_body(src, "async def html_to_pdf(")
+    assert "asyncio.to_thread(_run_in_proactor_thread" in body
+    assert "async_playwright()" not in body, "Playwright 不准直接在主 loop 上 await"

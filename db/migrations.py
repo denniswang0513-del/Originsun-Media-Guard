@@ -57,6 +57,7 @@ CRM_INDEXES = [
         #    inv_unpaid 是 COUNT 不能短路 → 會走遍全公司的未收款發票
         "CREATE INDEX IF NOT EXISTS idx_invoice_project_status ON crm_invoices(project_id, payment_status)",
         "CREATE INDEX IF NOT EXISTS idx_quote_project_status ON crm_quotations(project_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_quote_share_token ON crm_quotations(share_token)",
         # 提案=專案合體：前期草稿提案還沒定客戶也要能是專案
         # （ALTER 冪等 — 已 DROP 過再跑一次不會錯）
         "ALTER TABLE crm_projects ALTER COLUMN client_id DROP NOT NULL",

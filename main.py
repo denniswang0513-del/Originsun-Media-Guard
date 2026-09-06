@@ -551,6 +551,7 @@ async def _on_startup():
                         ("crm_projects", "transfer_fee", "INTEGER"),
                         ("crm_quotation_items", "internal_cost", "INTEGER DEFAULT 0"),
                         ("crm_quotations", "spec", "TEXT"),
+                        ("crm_quotations", "share_token", "VARCHAR(64)"),
                         ("crm_project_staff", "phase", "VARCHAR(32) DEFAULT ''"),
                         ("crm_project_staff", "actual_days", "INTEGER"),
                         ("crm_project_staff", "actual_cost", "INTEGER"),
@@ -1269,6 +1270,20 @@ async def _short_invoice_file(code: str):
     """
     from routers.crm.invoice_files import serve_invoice_by_share_token
     return await serve_invoice_by_share_token(code)
+
+
+@app.get("/q/{code}", include_in_schema=False)
+async def _short_quote_view(code: str):
+    """報價單線上檢視短網址：`/q/{12 碼}` → HTML（免登入，憑證就是那串碼；頁上有「下載 PDF」）。
+    同 /e/{code}：掛根路徑是為了短；實作在 routers/crm/quotes.py。"""
+    from routers.crm.quotes import public_quote_html
+    return await public_quote_html(code)
+
+
+@app.get("/q/{code}/pdf", include_in_schema=False)
+async def _short_quote_pdf(code: str):
+    from routers.crm.quotes import public_quote_pdf
+    return await public_quote_pdf(code)
 
 
 @app.get("/")

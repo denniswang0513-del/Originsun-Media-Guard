@@ -115,6 +115,17 @@ def test_mobile_quote_promo_and_final_are_reciprocal():
     assert "promo:" not in src and "discount:" not in src, "優惠不是新欄位，別送進 payload"
 
 
+def test_mobile_quote_card_shows_discounted_amount_with_original():
+    """owner 2026-09-07：清單金額要是折後的（最終報價），有優惠時原價（含稅總計）畫掉放旁邊；
+    「連結」已有就誰都能複製、沒有只有管理員能建（鑄連結是寫入）。"""
+    src = js_code_only(repo_src("frontend/m/views/quotes.js"))
+    assert "q.final_price < q.total" in src and "<s style=" in src
+    assert "money(hasFinal ? q.final_price : q.total)" in src
+    assert "data-share=" in src and "/share`, { method: 'POST' }" in src
+    assert "(q.share_url || isAdmin())" in src
+    assert "copyText(full)" in src and "location.origin + url" in src
+
+
 def test_mobile_quote_starts_from_client_not_project():
     """owner 2026-09-07：報價時案子通常還沒成立 —— 入口是客戶（必選、可現場建），
     專案自己打字；沒連結既有案就先建殼專案再掛報價，階段字從 options 來不寫死。"""

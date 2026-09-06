@@ -15,7 +15,7 @@
 import { quoteTotals, parsePaymentStages, paymentStagesToText } from '/js/shared/quote-amounts.js';
 import { mfetch, mdownload, toast, esc, money, fmtDate, todayLocal, quotePdfFilename } from '../shell.js';
 import { list, opt, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad, renderPaged,
-    isAdmin, openSheet, closeSheet, pickerHtml, mountPicker } from '../ui.js';
+    isAdmin, openSheet, closeSheet, pickerHtml, mountPicker, copyText } from '../ui.js';
 
 function transitions(status) {
     const v = list('quote_statuses');
@@ -35,12 +35,20 @@ function cardHtml(q) {
     const btns = transitions(q.status).map(t =>
         `<button type="button" class="m-btn sm ${t.danger ? 'danger' : 'pri'}" style="${BTN}" data-id="${esc(q.id)}" data-to="${esc(t.to)}"${t.ask ? ' data-ask="1"' : ''}>${esc(t.label)}</button>`).join('')
         + (isAdmin() ? `<button type="button" class="m-btn sm" style="${BTN}" data-edit="${esc(q.id)}">編輯</button>` : '')
-        + `<button type="button" class="m-btn sm" style="${BTN}" data-pdf="${esc(q.id)}">PDF</button>`;
+        + `<button type="button" class="m-btn sm" style="${BTN}" data-pdf="${esc(q.id)}">PDF</button>`
+        // 線上檢視連結：已有就誰都能複製；還沒有只有管理員能建（鑄連結是寫入）
+        + ((q.share_url || isAdmin()) ? `<button type="button" class="m-btn sm" style="${BTN}" data-share="${esc(q.id)}">${q.share_url ? '複製連結' : '建立連結'}</button>` : '');
+    // 金額：顯示折後價（最終報價），有優惠時原價（含稅總計）畫掉放旁邊（owner 2026-09-07）
+    const hasFinal = q.final_price !== null && q.final_price !== undefined;
+    const discounted = hasFinal && q.final_price < q.total;
+    const amount = 'total' in q
+        ? `<span class="amt">${money(hasFinal ? q.final_price : q.total)}${discounted ? ` <s style="color:var(--sub);font-weight:400;font-size:12px">${money(q.total)}</s>` : ''}</span>`
+        : '<span></span>';
     return `
       <div class="m-card">
         <div class="t"><div class="name">${esc(q.project_name || '（未連專案）')}</div>${pill(q.version)}</div>
         <div class="sub">${esc(q.client_short_name || '')}${q.quote_date ? ' · ' + esc(fmtDate(q.quote_date)) : ''}</div>
-        <div class="row">${'total' in q ? `<span class="amt">${money(q.total)}</span>` : '<span></span>'}
+        <div class="row">${amount}
           <span class="m-actions w" style="margin:0">${btns}</span></div>
       </div>`;
 }
@@ -55,6 +63,24 @@ async function change(btn, host) {
             toast('報價已改為 ' + to + (activate ? '，專案已啟動' : ''));
             markStale('projects');     // 簽回啟動專案：專案分頁的階段與首頁數字都變了
             await load(host);
+        } catch (e) { toast(e.message, 'err'); }
+    });
+}
+
+// 線上檢視連結：沒有就先鑄一條（冪等），然後複製完整網址；手機貼給客戶或自己開都行
+async function shareLink(btn, rows, host) {
+    const q = rows.find(r => r.id === btn.dataset.share);
+    if (!q) return;
+    await withBusy(btn, async () => {
+        try {
+            let url = q.share_url;
+            if (!url) {
+                const r = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(q.id)}/share`, { method: 'POST' });
+                url = r.share_url; q.share_url = url;
+            }
+            const full = location.origin + url;
+            toast((await copyText(full)) ? '連結已複製：' + full : '複製失敗，連結：' + full, 'ok');
+            if (btn.textContent !== '複製連結') await load(host);    // 第一次建完把按鈕字換掉
         } catch (e) { toast(e.message, 'err'); }
     });
 }
@@ -342,7 +368,9 @@ export async function render(host, { first }) {
             const e = ev.target.closest('button[data-edit]');
             if (e) return openForm(host, e.dataset.edit);
             const p = ev.target.closest('button[data-pdf]');
-            if (p) downloadPdf(p, _rows);
+            if (p) return downloadPdf(p, _rows);
+            const s = ev.target.closest('button[data-share]');
+            if (s) shareLink(s, _rows, host);
         });
     }
     if (shouldLoad('quotes', { first })) await load(host);

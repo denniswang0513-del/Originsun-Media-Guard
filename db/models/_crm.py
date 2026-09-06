@@ -164,6 +164,7 @@ class CrmQuotation(Base):
     payment_stages = Column(JSONB, nullable=True)               # [{"label":"腳本","pct":20},...]
     terms = Column(Text, nullable=True)                         # 備註/條款
     spec = Column(Text, nullable=True)                          # 規格（印在報價單抬頭；「、」或換行分隔多項）
+    share_token = Column(String(64), nullable=True)             # 線上檢視短碼（/q/{code}，逐字比對，同電子發票）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
