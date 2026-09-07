@@ -103,7 +103,7 @@ export function rowHtml(v = {}, o = {}, ctx = {}) {
         <td>${stageSelectHtml({ id: v.stage_id || '', name: v.stage_name || '' }, `data-f="stage"${rosel}`, stagesFor(ctx.stages, v.work_type))}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}"${ro}></td>
         <td><input type="text" data-f="remark" value="${esc(v.remark || '')}"${ro}></td>
-        <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}"${ro}></td>
+        <td><input type="text" inputmode="decimal" data-f="hours" value="${v.hours ?? ''}" title="可以打算式：2.5+1.1、或在原數字後面接 +1.1"${ro}></td>
         <td><input ${t} data-f="t0" value="${esc(v.t0 || '')}"${ro}></td>
         <td><input ${t} data-f="t1" value="${esc(v.t1 || '')}"${ro}></td>
         <td class="ts-sheet-state" data-f="state"${o.pending ? ' style="color:var(--sh-warn)"' : ''}>${o.readonly ? 'Sheet' : (o.id ? (o.pending ? '草稿（沒時數）' : '已存') : '')}</td>
@@ -182,8 +182,18 @@ export function rowValues(tr) {
         project: v('project').trim(), project_pid: (proj && proj.dataset.pid && v('project').trim() === proj.dataset.pname) ? proj.dataset.pid : '',
         work_type: v('type'), stage_id: v('stage'), stage_name: q('stage')?.selectedOptions?.[0]?.textContent || '',
         note: v('note'), remark: v('remark'), t0: v('t0'), t1: v('t1'),
-        hours: v('hours') ? parseFloat(v('hours')) : null,
+        hours: parseHours(v('hours')),
     };
+}
+
+/** 時數格的字 → 小時：接受算式「2.5+1.1」「3-0.5」（同事 2026-09-07：零碎時段要往上加），兩位小數；空或不是數字回 null。
+ *  格子與手機表單同一份（type=number 打不出「+」和第二個「.」，所以格子是 text）。 */
+export function parseHours(raw) {
+    const s = String(raw ?? '').replace(/\s+/g, '').replace(/[＋]/g, '+').replace(/[－—–]/g, '-');
+    if (!s) return null;
+    if (!/^[+-]?\d*\.?\d+([+-]\d*\.?\d+)*$/.test(s)) { const n = parseFloat(s); return Number.isFinite(n) ? n : null; }
+    const total = (s.match(/[+-]?\d*\.?\d+/g) || []).reduce((a, t) => a + parseFloat(t), 0);
+    return Math.round(total * 100) / 100;
 }
 
 /** 有專案或內容的列（儲存只送這些）；all=true 連空列一起回。 */
@@ -206,7 +216,7 @@ export function rowBody(tr, { day = '', projects = [] } = {}) {
         work_date: v('date') || day, ...projectFromInput(v('project'), tr.querySelector('[data-f="project"]'), projects),
         work_type: v('type') || null,
         task_note: v('note'), remark: v('remark'),
-        hours: v('hours') ? parseFloat(v('hours')) : null,
+        hours: parseHours(v('hours')),
     };
     // 起／訖：有那兩欄的格子才送（"" ＝清空）；重新整理要還在（owner 2026-09-06）
     if (tr.querySelector('[data-f="t0"]')) { body.start_time = v('t0'); body.end_time = v('t1'); }
@@ -310,6 +320,8 @@ function _wire(host) {
         if (t) { t.value = normTime(t.value); applyTimeRange(t.closest('tr')); }
         const ty = ev.target.closest('table.ts-sheet [data-f="type"]');
         if (ty) _syncStage(ty.closest('tr'), host);
+        const hr = ev.target.closest('table.ts-sheet [data-f="hours"]');
+        if (hr) { const n = parseHours(hr.value); hr.value = n == null ? '' : n; }   // 「2.5+1.1」離開格子就變 3.6
         const cell = ev.target.closest('table.ts-sheet [data-f]');
         if (cell) host._tsSchedule?.(cell.closest('tr'));       // 選單／時間／數字改了就存
     });

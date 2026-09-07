@@ -220,8 +220,21 @@ async def apply_update(session, r, body) -> None:
         r.bulletin_id = bid.strip() or None
 
 
+async def claim_sheet_row(session, r, who: str) -> None:
+    """本人改 Sheet 同步／CSV 匯入的列（2026-09-07 同事回饋「上週的紀錄改不了」）：先留指紋（下次拉取不插回），
+    再轉成手填列（source=manual、status=draft、新的 manual_ 指紋）。已是手填列就什麼都不做。"""
+    if getattr(r, "source", "") == "manual":
+        return
+    await add_tombstone(session, r.row_hash, who, staff_name=r.staff_name, project_name=r.project_name,
+                        work_date=r.work_date, hours=r.hours)
+    r.source = "manual"
+    r.status = "draft"
+    r.row_hash = "manual_" + uuid.uuid4().hex     # sheet_key 留著沒關係：手填列拉取不會再比它
+
+
 async def update_row(session, ident: dict, row_id: str, body) -> dict:
     r = await own_row(session, row_id, ident)
+    await claim_sheet_row(session, r, ident.get("username") or "")
     await apply_update(session, r, body)
     await _mark_bulletin_done(session, r, ident.get("username") or "")
     await session.commit()
@@ -230,6 +243,9 @@ async def update_row(session, ident: dict, row_id: str, body) -> dict:
 
 async def delete_row(session, ident: dict, row_id: str) -> dict:
     r = await own_row(session, row_id, ident)
+    if r.source != "manual":      # Sheet 列本人刪：留指紋，拉取不插回
+        await add_tombstone(session, r.row_hash, ident.get("username") or "", staff_name=r.staff_name,
+                            project_name=r.project_name, work_date=r.work_date, hours=r.hours)
     await session.delete(r)
     await session.commit()
     return {"deleted": row_id}
@@ -273,6 +289,12 @@ async def merge_day(session, ident: dict, day: datetime, *, dry_run: bool) -> di
         kept = await own_row(session, g["kept_id"], ident)
         absorbed = [await own_row(session, i, ident) for i in g["absorbed_ids"]]
         snapshot.append({"kept": _snap(kept), "absorbed": [_snap(a) for a in absorbed]})
+        who = ident.get("username") or ""
+        await claim_sheet_row(session, kept, who)              # Sheet 列被併：本體轉手填、被併的留指紋
+        for a in absorbed:
+            if a.source != "manual":
+                await add_tombstone(session, a.row_hash, who, staff_name=a.staff_name, project_name=a.project_name,
+                                    work_date=a.work_date, hours=a.hours)
         kept.hours = g["hours"]
         kept.task_note = g["task_note"] or None
         kept.remark = g["remark"] or None

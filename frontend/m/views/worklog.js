@@ -12,7 +12,7 @@
  * 鐵則：不畫任何個人工時合計（/mine 回的 planned_total／actual_total 這裡不用）。
  */
 import { mfetch, toast, esc, todayLocal, addDays } from '../shell.js';
-import { hoursBetween, projectFromInput } from '../../js/shared/ts-sheet.js';   // 起訖→時數、案名→id 跟格子同一份
+import { hoursBetween, parseHours, projectFromInput } from '../../js/shared/ts-sheet.js';   // 起訖→時數、時數算式、案名→id 跟格子同一份
 import { skeleton, errBox, pill, withBusy, pickerHtml, mountPicker, segHtml, mountSeg, selectOpts, openSheet, closeSheet, shouldLoad, markStale } from '../ui.js';
 
 const F = (id) => document.getElementById('wl-' + id);
@@ -85,8 +85,8 @@ function formHtml(row) {
           <div><label>起</label><input id="wl-t0" type="time" value="${esc(row.start_time || '')}"></div>
           <div><label>訖</label><input id="wl-t1" type="time" value="${esc(row.end_time || '')}"></div>
         </div>
-        <label class="req">時數 h</label><input id="wl-hours" type="number" inputmode="decimal" min="0" step="any" value="${row.hours ? row.hours : ''}">
-        <div class="m-hint">起訖都填了會自動算時數；也可以直接填時數</div>
+        <label class="req">時數 h</label><input id="wl-hours" type="text" inputmode="decimal" value="${row.hours ? row.hours : ''}">
+        <div class="m-hint">起訖都填了會自動算時數；也可以直接填時數，或打算式「2.5+1.1」往上加</div>
         <button type="submit" class="m-btn pri wide" id="wl-submit">儲存</button>
         ${row.id ? '<button type="button" class="m-btn danger wide" id="wl-del">刪除這一筆</button>' : ''}
       </form>`;
@@ -106,7 +106,7 @@ function bodyFromForm() {
         work_type: F('type').value || null,
         task_note: F('note').value.trim(), remark: F('remark').value.trim(),
         start_time: F('t0').value || '', end_time: F('t1').value || '',
-        hours: F('hours').value ? parseFloat(F('hours').value) : null,
+        hours: parseHours(F('hours').value),
     };
     if (F('stage')) body.stage_id = F('stage').value || '';
     return body;

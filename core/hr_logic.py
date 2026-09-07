@@ -474,13 +474,15 @@ EDIT_BLOCK_TEXT = {
 def can_edit_timesheet(row, staff_id: str) -> str:
     """本人能不能改這一列：回空字串＝可以，否則回代碼（EDIT_BLOCK_TEXT 的鍵）。
 
-    三個條件缺一不可：是本人的（staff_id）、是手填的（Sheet 同步進來的改 Sheet 那邊再拉）、
-    還沒鎖。`row` 只要有 .staff_id／.source／.status。
+    是本人的（staff_id）＋還沒鎖。Sheet 同步／CSV 匯入的列（source≠manual）本人也能改
+    （2026-09-07 同事回饋「上週的紀錄改不了」：大家改在系統記了，Sheet 那批舊列不該凍住）——
+    第一次改就由 services.timesheet_self.claim_sheet_row 轉成手填列並留指紋，拉取不會插回。
+    `row` 只要有 .staff_id／.source／.status。
     """
     if not staff_id or getattr(row, "staff_id", None) != staff_id:
         return "not_owner"
     if getattr(row, "source", "") != "manual":
-        return "not_manual"
+        return ""                                   # Sheet／匯入列：改的時候轉手填（claim）
     if getattr(row, "status", "") not in EDITABLE_STATUSES:
         return "locked"
     return ""

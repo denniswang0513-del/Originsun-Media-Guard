@@ -15,8 +15,10 @@ def test_can_edit_truth_table():
     assert can_edit_timesheet(NS(**mine), "s1") == ""
     assert can_edit_timesheet(NS(**mine), "s2") == "not_owner"
     assert can_edit_timesheet(NS(**mine), "") == "not_owner"            # 沒綁定＝誰的都不是
-    assert can_edit_timesheet(NS(**{**mine, "source": "sheet"}), "s1") == "not_manual"
-    assert can_edit_timesheet(NS(**{**mine, "source": "import"}), "s1") == "not_manual"
+    # 2026-09-07 同事回饋「上週的紀錄改不了」：Sheet 同步／匯入的列本人也能改（改時 claim_sheet_row 轉手填＋留指紋）
+    assert can_edit_timesheet(NS(**{**mine, "source": "sheet", "status": "import"}), "s1") == ""
+    assert can_edit_timesheet(NS(**{**mine, "source": "import", "status": "import"}), "s1") == ""
+    assert can_edit_timesheet(NS(**{**mine, "source": "sheet", "status": "import"}), "s2") == "not_owner"
     for st in ("approved", "locked", "import", "confirmed"):   # 不審核：這些狀態沒人寫得出來
         assert can_edit_timesheet(NS(**{**mine, "status": st}), "s1") == "locked", st
     # 代碼→給人看的原句只有一份（端點的 detail 從這裡拿）
