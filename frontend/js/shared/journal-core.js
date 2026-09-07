@@ -233,7 +233,7 @@ export const api = {
     submitMine: (start) => _safe(authFetch('/api/v1/journal/mine/submit' + _q(start), { method: 'POST', body: {} })),
     reply: (body) => _safe(authFetch('/api/v1/journal/reply', { method: 'POST', body })),
     help: (weeks = 8) => _safe(authFetch('/api/v1/journal/help?weeks=' + weeks)),
-    // 掛案子用的專案清單：/timesheets/project_options 兩把鑰匙都收（timesheets 拿整份；只有 me_finance 也給）
+    // 掛案子用的專案清單：/timesheets/project_options（timesheets 拿整份；綁定人員檔案的員工也給）
     projectOptions: () => {
         if (!_projOptsPromise) {
             _projOptsPromise = _safe(authFetch('/api/v1/timesheets/project_options'))

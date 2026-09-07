@@ -5,7 +5,7 @@
  *   GET  /api/v1/timesheets/mine?date=YYYY-MM-DD   當天的列（本人；沒綁人員檔案 → 409，畫提示）
  *   POST /api/v1/timesheets/mine/rows {rows:[body]} 新增；PUT /mine/{id} 改；DELETE /mine/{id} 刪
  *   GET  /api/v1/timesheets/options                 分類＋各分類的工作階段（字彙不寫死）
- *   GET  /api/v1/timesheets/project_options（沒權限退 /api/v1/me/timesheet_options）專案清單
+ *   GET  /api/v1/timesheets/project_options（timesheets 模組或綁定人員檔案）專案清單
  * body 形狀＝js/shared/ts-sheet.js rowBody：work_date、project_id／project_name、work_type、stage_id、
  * task_note、remark、start_time／end_time、hours。起訖都填了就自動算時數（同格子 applyTimeRange 的算法）。
  * 寫入守衛是「本人＋綁定人員檔案」，不看 CRM 的 can_write，所以這頁的按鈕不掛 .w。
@@ -34,7 +34,7 @@ async function loadVocab() {
 }
 async function loadProjects() {
     if (_projects) return _projects;
-    try { _projects = (await mfetch('/api/v1/timesheets/project_options')).projects || []; }   // timesheets 或 me_finance 都能拿
+    try { _projects = (await mfetch('/api/v1/timesheets/project_options')).projects || []; }   // timesheets 或綁定人員都能拿
     catch (_) { _projects = []; }
     return _projects;
 }

@@ -1405,10 +1405,10 @@ async function mjson(path, opts) {
     if (!r.ok) { const d = await r.json().catch(() => ({})); const e = new Error(d.detail || failText(r.status)); e.status = r.status; throw e; }
     return r.json();
 }
-/** 專案清單：先問工時的 project_options（timesheets 模組）；沒那把鑰匙就退到員工自己的 /me/timesheet_options（同一份查表）。 */
+/** 專案清單：工時的 project_options（timesheets 模組拿整份；綁定人員檔案的員工也給，多帶本人最近填過的）。 */
 async function _logProjectOptions() {
     if (_logProjects) return _logProjects;
-    try { _logProjects = (await mjson("/api/v1/timesheets/project_options")).projects || []; }   // timesheets 或 me_finance 都能拿
+    try { _logProjects = (await mjson("/api/v1/timesheets/project_options")).projects || []; }   // timesheets 或綁定人員都能拿
     catch (_) { _logProjects = []; }
     return _logProjects;
 }

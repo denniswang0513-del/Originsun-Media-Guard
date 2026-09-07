@@ -94,8 +94,7 @@ _NOT_TAB_GATES = {
         "api_cashflow：付款節點是專案側也要看的子功能，整個財務管理 tab 沒開放",
     ("crm_projects", "preprod_proposals"):
         "crm/proposal_assets：提案資產上傳（提案庫 tab 的按鈕），不是專案管理 tab 的門",
-    ("timesheets", "me_finance"):
-        "timesheets/project_options：專案下拉也給員工頁（只有 me_finance 的人拿到含本人最近填過的），不是工作追蹤 tab 的門",
+    # timesheets/project_options 曾在這裡（timesheets, me_finance）；2026-09-07 改走 _ts_or_bound（單 key＋綁定人員），不再是雙 key 閘門
 }
 
 

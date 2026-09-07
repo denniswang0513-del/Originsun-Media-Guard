@@ -88,19 +88,21 @@ def _has_ts_module(request: Request) -> bool:
     return payload_grants(_extract_token(request) or {}, "timesheets")
 
 
-async def _ts_or_bound(request: Request) -> None:
+async def _ts_or_bound(request: Request) -> Optional[str]:
     """唯讀端點放寬（docs/JOURNAL_WORKLOG_PLAN.md §10／§11）：timesheets 模組 **或** 登入＋綁定人員檔案
-    （員工頁的專案查詢、工作階段下拉）。只給讀；寫入端點（改預算等）守衛不變。
+    （員工頁的專案查詢、工作階段下拉、專案下拉）。只給讀；寫入端點（改預算等）守衛不變。
+    回傳：有 timesheets 模組 → None（整份）；靠綁定人員進來的 → 該員姓名（端點要縮到「本人」時用）。
     🔴 這支不碰私帳 wall：_require_mine_admin 守的端點（/projects 私帳案清單、/summary）不走這裡。"""
     try:
         check_admin_or_module(request, "timesheets")
-        return
+        return None
     except HTTPException as e:
         if e.status_code != 403:
             raise
     ident = await resolve_current_staff(request)
     if ident["staff"] is None:
         raise HTTPException(status_code=403, detail="權限不足（需要工作追蹤模組，或帳號綁定人員檔案）")
+    return ident["staff"].name
 
 
 # 員工頁（/my.html）的鑰匙是 me_*，工作追蹤分頁是 timesheets；「我的一天」兩邊都要能用，
@@ -756,13 +758,10 @@ async def set_budgets(req: TimesheetBudgetRequest, request: Request):
 
 @router.get("/project_options")
 async def get_project_options(request: Request):
-    """專案下拉（補登 grid／我的一天／總表／員工頁／手機工作紀錄）：timesheets 模組拿整份；只有 me_finance 的員工也給，
-    多帶「本人最近填過的」。以前員工那半是 /me/timesheet_options 另一支、前端 403 再退回——同一份資料一支端點就夠。"""
-    payload = check_admin_or_module(request, "timesheets", "me_finance")
-    staff_name = None
-    if not payload_grants(payload, "timesheets"):
-        ident = await resolve_current_staff(request)
-        staff_name = ident["staff"].name if ident["staff"] else None
+    """專案下拉（補登 grid／我的一天／總表／員工頁／手機工作紀錄）：timesheets 模組拿整份；綁定人員檔案的員工也給，
+    多帶「本人最近填過的」。守衛同 /options、/project（_ts_or_bound）——owner 2026-09-07「在職員工要能完整使用
+    今天與這週」：以前只認 timesheets／me_finance 兩把鑰匙，只有 me_profile 的員工（連婕妤）拿到 403、前端吞掉就變空清單。"""
+    staff_name = await _ts_or_bound(request)
     factory = db_factory_or_503()
     async with factory() as session:
         return {"projects": await project_options(session, staff_name)}
