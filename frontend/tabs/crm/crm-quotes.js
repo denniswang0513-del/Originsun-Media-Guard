@@ -589,7 +589,8 @@ export async function quoteDup(id) {
     try {
         const q = await _fetch('/quotations/' + id);
         openModal(q, q.project_id);
-        _editingId = null;
+        _editingId = null; _editingQuote = null;   // 複製＝新增：不帶舊的稅前折扣（表單沒有那一欄，帶了看不到也拿不掉）
+        _recalcTotals();
         document.getElementById('quote-modal-title').textContent = '複製報價';
     } catch (_) {}
 }
