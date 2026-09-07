@@ -125,13 +125,16 @@ def test_ts_dict_carries_stage_and_bulletin_fields():
 
 # ── 端點與註冊 ─────────────────────────────────────────────────────
 
-def test_work_stage_router_is_registered_and_gated_by_timesheets_module():
+def test_work_stage_router_is_registered_and_open_to_active_staff():
+    """owner 2026-09-07「工作階段的設定開放給在職員工調整」：管理員照舊；其他人＝綁了人員檔案且在職（不在職 403）。"""
     assert "from . import work_stages" in repo_src("routers/crm/__init__.py")
     src = code_only(repo_src("routers/crm/work_stages.py"))
-    assert '_guard = _module_guard("timesheets")' in src      # 守衛工廠只有 routers.crm._shared 一份
+    g = func_body(src, "async def _stage_guard(")
+    assert "check_admin(request)" in g and 'require_bound_staff(request, "timesheets", *ME_MODULE_KEYS)' in g and '!= "在職"' in g
     for fn in ("async def list_work_stage_nodes(", "async def create_work_stage_node(",
                "async def update_work_stage_node(", "async def delete_work_stage_node("):
-        assert "_guard(request)" in func_body(src, fn), fn
+        assert "await _stage_guard(request)" in func_body(src, fn), fn
+    assert "grants().has(\"timesheets\") ? '<button" not in repo_src("frontend/my.html"), "員工頁的鈕不再看模組"
     for path in ('"/work-stages/nodes"', '"/work-stages/nodes/{node_id}"'):
         assert path in src, path
 

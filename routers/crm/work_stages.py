@@ -6,7 +6,8 @@ docs/JOURNAL_WORKLOG_PLAN.md §12／§14：**每個分類自己的階段清單**
 URL `/api/v1/crm/work-stages/nodes`），但沒有收支那邊的鏡射遷移 —— timesheets.stage_name 的
 鏡射由 services.timesheet_self.set_stage 在寫列時做，改名不回頭改舊列（舊列留當時的名字）。
 
-守衛：check_admin_or_module(request, 'timesheets')（有工作追蹤模組就能編；owner §14）。
+守衛：管理員照舊；其他人＝有綁人員檔案且**在職**（owner 2026-09-07「工作階段的設定開放給在職員工調整」；
+鑰匙同 timesheets/mine：timesheets 模組或任一 me_* 鑰匙）。
 停用不刪：有列引用的節點 DELETE 會變成停用（回 {"status": "deactivated"}）。
 """
 from __future__ import annotations
@@ -18,7 +19,7 @@ from fastapi import HTTPException, Request
 from core.hr_logic import STAGE_SEED, WORK_TYPES, stage_categories
 from core.schemas import WorkStageNodePayload, WorkStageNodeUpdate
 
-from ._shared import _module_guard, router, _require_db, _get_factory, _now
+from ._shared import router, _require_db, _get_factory, _now
 
 try:
     from ._shared import select, func
@@ -48,13 +49,25 @@ async def _all_nodes(session) -> list:
     return (await session.execute(select(WorkStageNode))).scalars().all()
 
 
-_guard = _module_guard("timesheets")      # 模組守衛工廠只有 routers.crm._shared 一份
+async def _stage_guard(request: Request) -> None:
+    """管理員照舊；其他人＝有綁人員檔案且在職（owner 2026-09-07「工作階段的設定開放給在職員工調整」）。
+    鑰匙同 GET /timesheets/mine（timesheets 模組或任一 me_* 鑰匙）；沒綁 409、不在職 403。"""
+    from core.auth import ME_MODULE_KEYS, check_admin
+    from core.identity import require_bound_staff
+    try:
+        check_admin(request)
+        return
+    except HTTPException:
+        pass
+    ident = await require_bound_staff(request, "timesheets", *ME_MODULE_KEYS)
+    if (getattr(ident["staff"], "status", "") or "").strip() != "在職":
+        raise HTTPException(status_code=403, detail="工作階段只開放在職員工調整")
 
 
 @router.get("/work-stages/nodes")
 async def list_work_stage_nodes(request: Request):
     """九個分類各一格（**含停用**）—— 編輯器用；下拉請走 GET /timesheets/options（只回 active）。"""
-    _guard(request)
+    await _stage_guard(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -73,7 +86,7 @@ async def list_work_stage_nodes(request: Request):
 @router.post("/work-stages/nodes")
 async def create_work_stage_node(req: WorkStageNodePayload, request: Request):
     """新增一個階段（只能掛在分類底下）。同名已存在就回它（停用過的順手復活）。"""
-    _guard(request)
+    await _stage_guard(request)
     name = (req.name or "").strip()
     parent_id = (req.parent_id or "").strip()
     if not name:
@@ -109,7 +122,7 @@ async def create_work_stage_node(req: WorkStageNodePayload, request: Request):
 @router.put("/work-stages/nodes/{node_id}")
 async def update_work_stage_node(node_id: str, req: WorkStageNodeUpdate, request: Request):
     """改名／排序／停用（部分更新）。改名**不回頭改舊列的 stage_name**：舊列留當時的字。"""
-    _guard(request)
+    await _stage_guard(request)
     data = req.model_dump(exclude_unset=True)
     _require_db()
     factory = await _get_factory()
@@ -145,7 +158,7 @@ async def update_work_stage_node(node_id: str, req: WorkStageNodeUpdate, request
 @router.delete("/work-stages/nodes/{node_id}")
 async def delete_work_stage_node(node_id: str, request: Request):
     """有列引用 → 改成停用（回 deactivated；舊列照樣顯示）；沒人用才真的刪。分類底下還有階段不能刪。"""
-    _guard(request)
+    await _stage_guard(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
