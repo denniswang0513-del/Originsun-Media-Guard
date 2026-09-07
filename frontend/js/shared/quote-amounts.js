@@ -35,3 +35,26 @@ export function parsePaymentStages(text) {
 export function paymentStagesToText(stages) {
     return (stages || []).map(s => `${s.label} ${s.pct}%`).join(', ');
 }
+
+/**
+ * 項目（扁平、各帶 group_name）→ 大項目清單 `[{name, items}]`；同名就是同一組，順序＝第一次出現。
+ * 報價表單（桌機／手機）用它當編輯模型：先建大項目、再往裡面加子項目；存檔時 flattenQuoteGroups 攤平，
+ * 同一組的列連在一起，報價單上才不會被拆成兩段（owner 2026-09-07）。
+ */
+export function groupQuoteItems(items) {
+    const groups = [], byName = new Map();
+    (items || []).forEach(it => {
+        const name = String(it.group_name || '').trim();
+        let g = byName.get(name);
+        if (!g) { g = { name, items: [] }; byName.set(name, g); groups.push(g); }
+        const row = { ...it };
+        delete row.group_name;
+        g.items.push(row);
+    });
+    return groups;
+}
+
+/** `[{name, items}]` → 扁平項目（各帶 group_name），大項目一組接一組。 */
+export function flattenQuoteGroups(groups) {
+    return (groups || []).flatMap(g => g.items.map(it => ({ ...it, group_name: g.name })));
+}

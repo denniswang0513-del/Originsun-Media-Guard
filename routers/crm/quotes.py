@@ -256,14 +256,15 @@ async def _quotation_view_of(q) -> tuple[dict, dict]:
     return view, company
 
 
-def _render_quotation_html(view: dict, company: dict, *, web_pdf_url: str = "") -> str:
-    """同一份模板：web_pdf_url 給了＝線上檢視（多一條「下載 PDF」列、頁面不撐 A4），沒給＝印 PDF。"""
+def _render_quotation_html(view: dict, company: dict, *, web_pdf_url: str = "", web: bool = False) -> str:
+    """同一份模板：web_pdf_url 給了＝線上檢視（多一條「下載 PDF」列、頁面不撐 A4）；web=True＝只要網頁版面
+    不要那條列（後台預覽）；兩個都沒給＝印 PDF。"""
     from services.html_pdf import file_data_uri, render_template
     return render_template(
         "quotation_pdf.html", v=view,
         logo_src=file_data_uri(company.get("logo_path") or "frontend/img/originsun-logo.webp"),
         seal_src=file_data_uri(company.get("seal_path") or ""),
-        web_pdf_url=web_pdf_url,
+        web_pdf_url=web_pdf_url, web=bool(web or web_pdf_url),
     )
 
 
@@ -380,6 +381,20 @@ async def _quotation_pdf_response(q):
         tmp_pdf, media_type="application/pdf", filename=view["filename"],
         background=BackgroundTask(unlink_later(tmp_pdf)),
     )
+
+
+@router.get("/quotations/{quotation_id}/preview", dependencies=[Depends(money_dep)])
+async def quotation_preview(quotation_id: str):
+    """預覽（owner 2026-09-07「預覽點的時候讓我確認內容，不用建立報價單」）：同一份版面直接回 HTML，
+    任何狀態都能看；**不改狀態、不存檔、不開 Chromium**。手機端拿回來塞 iframe。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
+        if not q:
+            raise HTTPException(status_code=404, detail="找不到此報價")
+    view, company = await _quotation_view_of(q)
+    return HTMLResponse(_render_quotation_html(view, company, web=True), headers={"Cache-Control": "no-store"})
 
 
 @router.get("/quotations/{quotation_id}/pdf", dependencies=[Depends(money_dep)])

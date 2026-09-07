@@ -626,6 +626,12 @@
 .quote-item-edit-row .crm-input { padding: 5px 6px; font-size: 12px; }
 .qi-amount { width: 90px; text-align: right; color: #9ca3af; font-size: 12px; flex-shrink: 0; }
 .qi-remove { flex-shrink: 0; }
+/* 大項目 → 子項目（owner 2026-09-07）：一個大項目一個框，子項目列縮在裡面 */
+.quote-group-edit { border: 1px solid #333; border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+.quote-group-edit-head { display: flex; gap: 6px; align-items: center; }
+.quote-group-edit-label { font-size: 12px; color: #9ca3af; flex-shrink: 0; }
+.quote-group-edit .quote-item-edit-row { padding-left: 14px; }
+.quote-group-edit .qi-add-sub { align-self: flex-start; margin-left: 14px; }
 
 /* ── Quotation totals ── */
 .quote-totals {

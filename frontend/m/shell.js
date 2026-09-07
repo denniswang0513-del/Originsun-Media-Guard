@@ -107,6 +107,24 @@ export async function mfetch(path, opts = {}) {
     return data;
 }
 
+/** 帶權限拿一段 HTML／純文字（報價單預覽）：同 mfetch 的 401 處理，只是不解析 JSON。 */
+export async function mfetchText(path) {
+    const tok = _token();
+    const r = await fetch(path, { headers: tok ? { Authorization: 'Bearer ' + tok } : {} });
+    if (r.status === 401) {
+        localStorage.removeItem(TOKEN_KEY);
+        _showLogin('登入已過期，請重新登入');
+        const e = new Error('登入已過期'); e.status = 401; throw e;
+    }
+    const text = await r.text();
+    if (!r.ok) {
+        let d = null;
+        try { d = JSON.parse(text).detail; } catch (_) { /* 不是 JSON 就用狀態碼 */ }
+        throw new Error(typeof d === 'string' ? d : `HTTP ${r.status}`);
+    }
+    return text;
+}
+
 /** 帶權限下載檔案（報價 PDF）：`<a href>` 送不了 Authorization，fetch 成 blob 再開。
  *  Android 會直接存檔；iOS 會在分頁開 PDF 再由使用者分享／存檔。401 一樣導回登入。 */
 export async function mdownload(path, filename) {

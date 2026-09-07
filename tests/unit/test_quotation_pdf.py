@@ -42,6 +42,20 @@ def test_promo_is_total_minus_final_only_when_final_is_lower():
     assert promo_amount(168000, 170000) == 0
 
 
+def test_same_group_name_merges_even_when_not_adjacent():
+    """owner 2026-09-07：一列一列填、「後期製作」被「其他」隔開就印成兩段 → 同名就是同一組，順序照第一次出現。"""
+    items = [
+        {"group_name": "攝影", "description": "平面攝影", "quantity": 1, "unit": "日", "unit_price": 7500, "amount": 7500},
+        {"group_name": "後期製作", "description": "90秒內短影音", "quantity": 10, "unit": "支", "unit_price": 2000, "amount": 20000},
+        {"group_name": "其他", "description": "專案管理", "quantity": 1, "unit": "式", "unit_price": 1000, "amount": 1000},
+        {"group_name": "後期製作", "description": "字卡設計", "quantity": 1, "unit": "式", "unit_price": 5000, "amount": 5000},
+    ]
+    v = build_quotation_view(_q(items=items), COMPANY, client_name="c", project_name="p")
+    assert [g["name"] for g in v["groups"]] == ["攝影", "後期製作", "其他"]
+    assert [r["description"] for r in v["groups"][1]["rows"]] == ["90秒內短影音", "字卡設計"]
+    assert v["groups"][1]["subtotal_fmt"] == "NT$25,000"
+
+
 def test_view_money_and_groups():
     v = build_quotation_view(_q(), COMPANY, client_name="陽光食品股份有限公司", project_name="2026 品牌形象短片")
     assert [g["name"] for g in v["groups"]] == ["拍攝", "後期製作", "贈項"]

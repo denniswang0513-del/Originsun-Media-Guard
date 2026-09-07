@@ -74,14 +74,19 @@ def pdf_filename(quote_date: Optional[date], client_name: str, project_name: str
 
 
 def _group_items(items) -> list[dict]:
-    """項目照 group_name 收成一段一段（相鄰同名才算同一組，跟示範頁一致），每組帶小結。"""
+    """項目照 group_name 收成一組一組，每組帶小結。**同名就是同一組**，不管中間隔了誰——組的順序＝第一次出現的順序
+    （owner 2026-09-07：舊表單一列一列填，「後期製作」被夾在中間就印成兩段）。"""
     groups: list[dict] = []
+    by_name: dict[str, dict] = {}
     for it in items or []:
         name = (it.get("group_name") or "").strip()
-        if not groups or groups[-1]["name"] != name:
-            groups.append({"name": name, "rows": [], "subtotal": 0})
+        g = by_name.get(name)
+        if g is None:
+            g = {"name": name, "rows": [], "subtotal": 0}
+            by_name[name] = g
+            groups.append(g)
         amount = int(it.get("amount") or 0)
-        groups[-1]["rows"].append({
+        g["rows"].append({
             "description": it.get("description") or "",
             "note": it.get("note") or "",
             "quantity": it.get("quantity") or 0,
@@ -89,7 +94,7 @@ def _group_items(items) -> list[dict]:
             "unit_price_fmt": nt(it.get("unit_price")),
             "amount_fmt": nt(amount),
         })
-        groups[-1]["subtotal"] += amount
+        g["subtotal"] += amount
     for g in groups:
         g["subtotal_fmt"] = nt(g["subtotal"])
     return groups

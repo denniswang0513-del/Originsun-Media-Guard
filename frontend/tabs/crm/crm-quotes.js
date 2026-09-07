@@ -2,7 +2,7 @@
  * crm-quotes.js — 報價管理 Tab
  */
 
-import { quoteTotals, parsePaymentStages, paymentStagesToText } from '../../js/shared/quote-amounts.js';
+import { quoteTotals, parsePaymentStages, paymentStagesToText, groupQuoteItems, flattenQuoteGroups } from '../../js/shared/quote-amounts.js';
 import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, quotePdfFilename, initRootFolderCard } from './crm-utils.js';
 import { authDownload, copyText } from '../../js/shared/utils.js';
 
@@ -259,43 +259,63 @@ function closeDetail() {
 
 // ── Modal: Items ─────────────────────────────────────────────
 
-let _itemRows = [];
-
-function addItemRow(data = null) {
-    const d = data || { group_name: '', description: '', unit: '式', quantity: 1, unit_price: 0, internal_cost: 0, note: '' };
-    _itemRows.push(d);
+// 項目的編輯模型是「大項目 → 子項目」（owner 2026-09-07：一列一列填、同名大項目被隔開就印成兩段；同手機版）：
+// 進來時 groupQuoteItems 收成組，存檔／範本／重算都走 _flatItems() 攤平，同一組的列自然連在一起
+let _groups = [];      // [{ name, items[] }]
+const _emptyRow = () => ({ description: '', unit: '式', quantity: 1, unit_price: 0, internal_cost: 0, note: '' });
+const _flatItems = () => flattenQuoteGroups(_groups);
+function _setItems(items, { blankIfEmpty = false } = {}) {
+    _groups = groupQuoteItems(items);
+    if (!_groups.length && blankIfEmpty) _groups = [{ name: '', items: [_emptyRow()] }];
     _renderItemRows();
 }
 
-function removeItemRow(idx) {
-    _itemRows.splice(idx, 1);
+function addGroup() {
+    _groups.push({ name: '', items: [_emptyRow()] });
     _renderItemRows();
-    _recalcTotals();
+    const inputs = document.querySelectorAll('#quote-items-list .qi-group');
+    inputs[inputs.length - 1]?.focus();      // 新的大項目先取名
 }
 
 function _renderItemRows() {
     const container = document.getElementById('quote-items-list');
     if (!container) return;
-    container.innerHTML = _itemRows.map((it, i) => `
-        <div class="quote-item-edit-row" data-idx="${i}">
-            <input type="text" class="crm-input qi-group" value="${_esc(it.group_name)}" placeholder="群組" style="width:80px;">
-            <input type="text" class="crm-input qi-desc" value="${_esc(it.description)}" placeholder="項目描述" style="flex:2;">
-            <input type="text" class="crm-input qi-unit" value="${_esc(it.unit)}" placeholder="單位" style="width:50px;">
-            <input type="number" class="crm-input qi-qty" value="${it.quantity}" min="1" style="width:55px;text-align:right;">
-            <input type="number" class="crm-input qi-price" value="${it.unit_price}" min="0" style="width:90px;text-align:right;">
-            <span class="qi-amount">$${_fmtNum(it.quantity * it.unit_price)}</span>
-            <button type="button" class="crm-btn crm-btn-danger crm-btn-sm qi-remove" onclick="window._quoteRemoveItem(${i})">&#x2715;</button>
+    container.innerHTML = _groups.map((g, gi) => `
+        <div class="quote-group-edit" data-g="${gi}">
+            <div class="quote-group-edit-head">
+                <span class="quote-group-edit-label">大項目</span>
+                <input type="text" class="crm-input qi-group" value="${_esc(g.name)}" placeholder="例：拍攝／後期製作／其他" style="flex:1;">
+                <button type="button" class="crm-btn crm-btn-danger crm-btn-sm qi-remove-group" title="刪除大項目">&#x2715;</button>
+            </div>
+            ${g.items.map((it, i) => `
+            <div class="quote-item-edit-row" data-g="${gi}" data-i="${i}">
+                <input type="text" class="crm-input qi-desc" value="${_esc(it.description)}" placeholder="子項目描述" style="flex:2;">
+                <input type="text" class="crm-input qi-unit" value="${_esc(it.unit)}" placeholder="單位" style="width:50px;">
+                <input type="number" class="crm-input qi-qty" value="${it.quantity}" min="1" style="width:55px;text-align:right;">
+                <input type="number" class="crm-input qi-price" value="${it.unit_price}" min="0" style="width:90px;text-align:right;">
+                <span class="qi-amount">$${_fmtNum(it.quantity * it.unit_price)}</span>
+                <button type="button" class="crm-btn crm-btn-danger crm-btn-sm qi-remove" title="刪除子項目">&#x2715;</button>
+            </div>`).join('')}
+            <button type="button" class="crm-btn crm-btn-secondary crm-btn-sm qi-add-sub">＋ 子項目</button>
         </div>
     `).join('');
 
-    // Attach input listeners for recalc
+    container.querySelectorAll('.quote-group-edit').forEach(gEl => {
+        const gi = parseInt(gEl.dataset.g), g = _groups[gi];
+        gEl.querySelector('.qi-group').addEventListener('input', e => { g.name = e.target.value; });
+        gEl.querySelector('.qi-add-sub').addEventListener('click', () => { g.items.push(_emptyRow()); _renderItemRows(); });
+        gEl.querySelector('.qi-remove-group').addEventListener('click', () => {
+            if (g.items.some(it => (it.description || '').trim()) && !window.confirm('這個大項目底下還有子項目，一起刪掉？')) return;
+            _groups.splice(gi, 1); _renderItemRows(); _recalcTotals();
+        });
+    });
     container.querySelectorAll('.quote-item-edit-row').forEach(row => {
-        const idx = parseInt(row.dataset.idx);
-        row.querySelector('.qi-group').addEventListener('input', e => { _itemRows[idx].group_name = e.target.value; });
-        row.querySelector('.qi-desc').addEventListener('input', e => { _itemRows[idx].description = e.target.value; });
-        row.querySelector('.qi-unit').addEventListener('input', e => { _itemRows[idx].unit = e.target.value; });
-        row.querySelector('.qi-qty').addEventListener('input', e => { _itemRows[idx].quantity = parseInt(e.target.value) || 0; _recalcTotals(); });
-        row.querySelector('.qi-price').addEventListener('input', e => { _itemRows[idx].unit_price = parseInt(e.target.value) || 0; _recalcTotals(); });
+        const g = _groups[parseInt(row.dataset.g)], i = parseInt(row.dataset.i), it = g.items[i];
+        row.querySelector('.qi-desc').addEventListener('input', e => { it.description = e.target.value; });
+        row.querySelector('.qi-unit').addEventListener('input', e => { it.unit = e.target.value; });
+        row.querySelector('.qi-qty').addEventListener('input', e => { it.quantity = parseInt(e.target.value) || 0; _recalcTotals(); });
+        row.querySelector('.qi-price').addEventListener('input', e => { it.unit_price = parseInt(e.target.value) || 0; _recalcTotals(); });
+        row.querySelector('.qi-remove').addEventListener('click', () => { g.items.splice(i, 1); _renderItemRows(); _recalcTotals(); });
     });
 }
 
@@ -307,7 +327,7 @@ function _recalcTotals() {
     // 優惠一律走「最終報價」倒算，報價單上印成「專案優惠」。舊報價存著的稅前折扣仍要算進去，
     // 不然畫面的含稅總計跟後端存的對不上、優惠↔最終報價也會用錯底數
     const taxRate = parseInt(document.getElementById('quote-f-tax_rate')?.value) || 0;
-    const { subtotal, tax, total } = quoteTotals({ items: _itemRows, taxRate, discount: _editingQuote?.discount || 0 });
+    const { subtotal, tax, total } = quoteTotals({ items: _flatItems(), taxRate, discount: _editingQuote?.discount || 0 });
 
     document.getElementById('quote-calc-subtotal').textContent = '$' + _fmtNum(subtotal);
     document.getElementById('quote-calc-tax-pct').textContent = taxRate;
@@ -326,9 +346,8 @@ function _recalcTotals() {
     document.getElementById('quote-calc-final').textContent = '$' + _fmtNum(finalPrice != null ? finalPrice : total);
 
     document.querySelectorAll('.quote-item-edit-row').forEach(row => {
-        const idx = parseInt(row.dataset.idx);
-        const it = _itemRows[idx];
-        row.querySelector('.qi-amount').textContent = '$' + _fmtNum(it.quantity * it.unit_price);
+        const it = _groups[parseInt(row.dataset.g)]?.items[parseInt(row.dataset.i)];
+        if (it) row.querySelector('.qi-amount').textContent = '$' + _fmtNum(it.quantity * it.unit_price);
     });
 }
 
@@ -426,9 +445,7 @@ async function openModal(quotation = null, projectId = null) {
     document.getElementById('quote-f-spec').value = q.spec || '';
     document.getElementById('quote-f-template').value = '';
 
-    _itemRows = (q.items || []).map(it => ({ ...it }));
-    if (_itemRows.length === 0 && !quotation) addItemRow();
-    else _renderItemRows();
+    _setItems(q.items || [], { blankIfEmpty: !quotation });   // 新增：先給一個空的大項目
     _recalcTotals();
 
     document.getElementById('quote-modal').style.display = 'flex';
@@ -442,7 +459,8 @@ async function saveQuotation() {
         if (!_form.client_id) { _showModalError('請先選客戶'); return; }
         if (!projectId && !projectName) { _showModalError('請填專案名稱，或連結一個既有專案'); return; }
     }
-    if (_itemRows.length === 0 || !_itemRows.some(it => it.description)) { _showModalError('請至少新增一個項目'); return; }
+    const rows = _flatItems();      // 大項目一組接一組攤平，報價單上不會被拆開
+    if (!rows.some(it => it.description)) { _showModalError('請至少新增一個子項目'); return; }
 
     const payload = {
         status: document.getElementById('quote-f-status').value,
@@ -454,7 +472,7 @@ async function saveQuotation() {
         payment_stages: parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
         terms: document.getElementById('quote-f-terms').value,
         spec: document.getElementById('quote-f-spec').value.trim(),
-        items: _itemRows.filter(it => it.description).map(it => ({
+        items: rows.filter(it => it.description).map(it => ({
             group_name: it.group_name || '', description: it.description,
             unit: it.unit || '式', quantity: it.quantity || 1,
             unit_price: it.unit_price || 0, internal_cost: it.internal_cost || 0, note: it.note || '',
@@ -507,8 +525,7 @@ function _showModalError(msg) {
 function _applyTemplate(templateId) {
     const t = _templates.find(x => x.id === templateId);
     if (!t) return;
-    _itemRows = (t.items || []).map(it => ({ ...it }));
-    _renderItemRows();
+    _setItems(t.items || []);
     document.getElementById('quote-f-tax_rate').value = t.tax_rate ?? 5;
     document.getElementById('quote-f-terms').value = t.terms || '';
     document.getElementById('quote-f-payment_stages').value = paymentStagesToText(t.payment_stages);
@@ -545,7 +562,7 @@ async function _createTemplate(body) {
 // 報價彈窗目前的表單（稅率／條款／付款階段／項目）→ 一個範本
 function _saveCurrentAsTemplate(name) {
     return _createTemplate({
-        name, items: _itemRows.filter(it => it.description),
+        name, items: _flatItems().filter(it => it.description),
         tax_rate: parseInt(document.getElementById('quote-f-tax_rate').value) || 5,
         terms: document.getElementById('quote-f-terms').value,
         payment_stages: parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
@@ -613,7 +630,6 @@ export async function initCrmQuotesTab() {
         if (q) deleteQuotation(q);
     };
     window._quoteDup = quoteDup;
-    window._quoteRemoveItem = removeItemRow;
     window._quoteActivateProject = async (projectId) => {
         if (!confirm('確定將此專案狀態切為「製作」？')) return;
         try {
@@ -644,7 +660,7 @@ export async function initCrmQuotesTab() {
     // Buttons
     document.getElementById('quote-btn-add').addEventListener('click', () => openModal());
     document.getElementById('quote-btn-save').addEventListener('click', saveQuotation);
-    document.getElementById('quote-btn-add-item').addEventListener('click', () => { addItemRow(); _recalcTotals(); });
+    document.getElementById('quote-btn-add-item').addEventListener('click', () => { addGroup(); _recalcTotals(); });
     document.getElementById('quote-detail-close').addEventListener('click', closeDetail);
     // 公司資訊（報價單抬頭／匯款／Logo／章）就近開：系統設定 → 公司資訊分頁
     // （owner 2026-09-07「公司資訊的按鈕要放在報價管理的範本欄」）。設定只有管理員讀得到，別人不顯示這顆。

@@ -1,9 +1,11 @@
 /**
  * 報價分頁：GET /api/v1/crm/quotations 依狀態分組（順序＝options.quote_statuses），每組 10 筆一頁＋載入更多。
- * 狀態轉換由**位置**推：[0]草稿→寄出、[1]已寄出→成案([2])／拒絕([3])；
+ * 狀態轉換由**位置**推：[0]草稿→建立（＝已寄送）、[1]已寄送→成案([2])／拒絕([3])；
  * 改狀態打 POST /api/v1/crm/m/quotations/{id}/status {status, activate}。
- * 按鈕文字是動作（寄出／成案／拒絕；owner 2026-09-07 把「簽回」改叫「成案」），目標狀態字從 options 取，不寫死。
- * 每張卡都有「PDF」：GET /api/v1/crm/quotations/{id}/pdf（跟桌機同一份 PDF、同一個檔名規則）。
+ * 按鈕文字是動作（建立／成案／拒絕；owner 2026-09-07 把「簽回」改叫「成案」、「寄出」改叫「建立」），目標狀態字從 options 取，不寫死。
+ * 草稿卡多一顆「預覽」：GET /quotations/{id}/preview 回 HTML 塞 iframe，讓人先確認內容再建立（不改狀態、不存檔）。
+ * 建立後的卡才有「PDF」：GET /api/v1/crm/quotations/{id}/pdf（跟桌機同一份 PDF、同一個檔名規則）。
+ * 項目編輯是「大項目 → 子項目」（owner 2026-09-07），模型 js/shared/quote-amounts.js 的 groupQuoteItems／flattenQuoteGroups。
  *
  * 開報價單（owner 2026-09-06，推翻 CRM_MOBILE_PLAN §「報價項目編輯不做」）：底部抽屜開表單，
  * 新增打 POST /crm/projects/{id}/quotations、編輯打 PUT /crm/quotations/{id}——跟桌機同兩支端點。
@@ -12,15 +14,15 @@
  * 🔴 這兩支的守衛是 `_check_auth`＝**管理員限定**，所以入口只給管理員（不是 canWrite）。
  * 🔴 金額試算用 js/shared/quote-amounts.js（跟後端 _calc_quotation 同一份規則），手機不自己算稅。
  */
-import { quoteTotals, parsePaymentStages, paymentStagesToText } from '/js/shared/quote-amounts.js';
-import { mfetch, mdownload, toast, esc, money, fmtDate, todayLocal, quotePdfFilename } from '../shell.js';
+import { quoteTotals, parsePaymentStages, paymentStagesToText, groupQuoteItems, flattenQuoteGroups } from '/js/shared/quote-amounts.js';
+import { mfetch, mfetchText, mdownload, toast, esc, money, fmtDate, todayLocal, quotePdfFilename } from '../shell.js';
 import { list, opt, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad, renderPaged,
     isAdmin, openSheet, closeSheet, pickerHtml, mountPicker, copyText } from '../ui.js';
 
 function transitions(status) {
     const v = list('quote_statuses');
     const [draft, sent, signed, rejected] = v;
-    if (status === draft && sent) return [{ label: '寄出', to: sent }];
+    if (status === draft && sent) return [{ label: '建立', to: sent }];   // owner 2026-09-07：「寄出」改叫「建立」（草稿→正式建立這張報價單）
     if (status === sent) return [
         signed ? { label: '成案', to: signed, ask: true } : null,
         rejected ? { label: '拒絕', to: rejected, danger: true } : null,
@@ -37,6 +39,8 @@ function cardHtml(q) {
     const btns = transitions(q.status).map(t =>
         `<button type="button" class="m-btn sm ${t.danger ? 'danger' : 'pri'}" style="${BTN}" data-id="${esc(q.id)}" data-to="${esc(t.to)}"${t.ask ? ' data-ask="1"' : ''}>${esc(t.label)}</button>`).join('')
         + (isAdmin() ? `<button type="button" class="m-btn sm" style="${BTN}" data-edit="${esc(q.id)}">編輯</button>` : '')
+        // 預覽：只把版面畫給你確認，不建立、不存檔（owner 2026-09-07「預覽點的時候讓我確認內容，不用建立報價單」）
+        + (sent ? '' : `<button type="button" class="m-btn sm" style="${BTN}" data-preview="${esc(q.id)}">預覽</button>`)
         + (sent ? `<button type="button" class="m-btn sm" style="${BTN}" data-pdf="${esc(q.id)}">PDF</button>` : '')
         // 線上檢視連結：已有就誰都能複製；還沒有只有管理員能建（鑄連結是寫入）
         + (sent && (q.share_url || isAdmin()) ? `<button type="button" class="m-btn sm" style="${BTN}" data-share="${esc(q.id)}">${q.share_url ? '複製連結' : '建立連結'}</button>` : '');
@@ -88,6 +92,26 @@ async function shareLink(btn, rows, host) {
     if (q.share_url) btn.textContent = '複製連結';
 }
 
+/** 預覽：後端把同一份報價單版面渲染成 HTML（不改狀態、不存檔），塞進整頁的 iframe；關掉就回清單。 */
+async function previewQuote(btn) {
+    await withBusy(btn, async () => {
+        try {
+            const html = await mfetchText(`/api/v1/crm/quotations/${encodeURIComponent(btn.dataset.preview)}/preview`);
+            let ov = document.getElementById('qt-preview');
+            if (!ov) {
+                ov = document.createElement('div'); ov.id = 'qt-preview';
+                ov.style.cssText = 'position:fixed;inset:0;z-index:60;background:#fff;display:flex;flex-direction:column';
+                document.body.appendChild(ov);
+            }
+            ov.innerHTML = `<div style="flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;background:#1a1a1a;color:#fff;font-size:14px">
+                <span>預覽（還沒建立，關掉可以回去改）</span><button type="button" class="m-btn sm" id="qt-preview-close" style="${BTN}">關閉</button></div>
+                <iframe style="flex:1;border:0;width:100%;background:#fff"></iframe>`;
+            ov.querySelector('iframe').srcdoc = html;
+            ov.querySelector('#qt-preview-close').onclick = () => ov.remove();
+        } catch (e) { toast(e.message, 'err'); }
+    });
+}
+
 async function downloadPdf(btn, rows) {
     const q = rows.find(r => r.id === btn.dataset.pdf);
     if (!q) return;
@@ -100,30 +124,42 @@ async function downloadPdf(btn, rows) {
 // ── 開報價單 ─────────────────────────────────────────────────
 
 const F = (k) => document.getElementById('qf-' + k);
-const EMPTY_ROW = { group_name: '', description: '', unit: '式', quantity: 1, unit_price: 0 };
-let _form = null;      // { id, project_id, project_label, status, items[] }；null＝抽屜沒開
+const EMPTY_ROW = { description: '', unit: '式', quantity: 1, unit_price: 0 };
+let _form = null;      // { id, project_id, project_label, status, groups[{name, items[]}] }；null＝抽屜沒開
 
-const itemsHtml = () => _form.items.map((it, i) => `
-  <div class="m-card" data-i="${i}" style="padding:10px;margin-bottom:8px">
-    <input data-k="description" value="${esc(it.description || '')}" placeholder="項目說明（例：剪輯、調光、動態字卡）">
-    <div class="row2">
-      <div><label>數量</label><input data-k="quantity" type="number" inputmode="numeric" min="0" value="${it.quantity ?? 1}"></div>
-      <div><label>單價</label><input data-k="unit_price" type="number" inputmode="numeric" min="0" value="${it.unit_price ?? 0}"></div>
+// 項目的編輯模型是「大項目 → 子項目」（owner 2026-09-07：一列一列填、同名大項目被隔開就印成兩段）：
+// 進來時 groupQuoteItems 收成組，存檔時 flattenQuoteGroups 攤平，同一組的列自然連在一起
+const groupsOf = (items) => { const g = groupQuoteItems(items); return g.length ? g : [{ name: '', items: [{ ...EMPTY_ROW }] }]; };
+const flatItems = () => flattenQuoteGroups(_form.groups);
+
+const itemsHtml = () => _form.groups.map((g, gi) => `
+  <div class="m-card" data-g="${gi}" style="padding:10px;margin-bottom:8px">
+    <div class="row2" style="grid-template-columns:1fr auto;align-items:end">
+      <div><label>大項目</label><input data-gk="name" value="${esc(g.name)}" placeholder="例：拍攝／後期製作／其他"></div>
+      <button type="button" class="m-btn sm danger" data-delg="${gi}" style="${BTN}">刪除大項目</button>
     </div>
-    <div class="row2">
-      <div><label>單位</label><input data-k="unit" value="${esc(it.unit || '')}" placeholder="式／支／人次"></div>
-      <div><label>分組</label><input data-k="group_name" value="${esc(it.group_name || '')}" placeholder="拍攝／後期"></div>
-    </div>
-    <button type="button" class="m-btn sm danger" data-del="${i}" style="${BTN}">刪除這列</button>
+    ${g.items.map((it, i) => `
+    <div data-i="${i}" style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">
+      <input data-k="description" value="${esc(it.description || '')}" placeholder="子項目（例：剪輯、調光、動態字卡）">
+      <div class="row2">
+        <div><label>數量</label><input data-k="quantity" type="number" inputmode="numeric" min="0" value="${it.quantity ?? 1}"></div>
+        <div><label>單價</label><input data-k="unit_price" type="number" inputmode="numeric" min="0" value="${it.unit_price ?? 0}"></div>
+      </div>
+      <div class="row2" style="grid-template-columns:1fr auto;align-items:end">
+        <div><label>單位</label><input data-k="unit" value="${esc(it.unit || '')}" placeholder="式／支／人次"></div>
+        <button type="button" class="m-btn sm danger" data-del="${i}" style="${BTN}">刪除</button>
+      </div>
+    </div>`).join('')}
+    <button type="button" class="m-more" data-add="${gi}">＋ 子項目</button>
   </div>`).join('');
 
 function drawItems() {
-    document.getElementById('qf-items').innerHTML = _form.items.length ? itemsHtml() : '<div class="m-empty">還沒有項目</div>';
+    document.getElementById('qf-items').innerHTML = _form.groups.length ? itemsHtml() : '<div class="m-empty">還沒有大項目</div>';
     recalc();
 }
 
 function recalc() {
-    const t = quoteTotals({ items: _form.items, taxRate: F('tax_rate').value, discount: _form.discount });   // 舊報價的稅前折扣要算進去，跟後端存的總計一致
+    const t = quoteTotals({ items: flatItems(), taxRate: F('tax_rate').value, discount: _form.discount });   // 舊報價的稅前折扣要算進去，跟後端存的總計一致
     // 優惠 ↔ 最終報價 互推（同發票的未稅／含稅）：只寫「不是正在打的那一格」，免得游標被搶
     const promoEl = F('promo'), finalEl = F('final_price');
     if (_form.anchor === 'promo') {
@@ -157,8 +193,9 @@ function formHtml(templates, q) {
         <div class="m-hint">選了範本會帶入項目、稅率、備註、付款方式，帶進來還可以改</div>`}
         <label>規格</label><input id="qf-spec" placeholder="用、分隔，例：形象短片 90 秒 1 支、含中文字幕">
         <div class="m-h">項目</div>
+        <div class="m-hint">先加大項目（拍攝／後期製作／其他），再在裡面加子項目；同一個大項目的子項目在報價單上會連在一起、各自小結</div>
         <div id="qf-items"></div>
-        <button type="button" class="m-more" id="qf-add">＋ 加一列</button>
+        <button type="button" class="m-more" id="qf-add">＋ 大項目</button>
         <label>稅率 %</label><input id="qf-tax_rate" type="number" inputmode="numeric" min="0" value="5">
         <div class="row2">
           <div><label>優惠</label><input id="qf-promo" type="number" inputmode="numeric" min="0" placeholder="折多少"></div>
@@ -190,7 +227,7 @@ async function openForm(host, id) {
         discount: q ? (q.discount || 0) : 0,      // 稅前折扣已退場，舊值只拿來算總計（PUT 不送＝後端不動它）
         project_label: q ? [q.client_short_name, q.project_name].filter(Boolean).join('｜') : '',
         status: q ? q.status : (list('quote_statuses')[0] || ''),   // 字彙只從 options 來
-        items: q && q.items && q.items.length ? q.items.map(it => ({ ...it })) : [{ ...EMPTY_ROW }],
+        groups: groupsOf(q && q.items),
     };
 
     openSheet(formHtml(templates, q));
@@ -215,19 +252,31 @@ async function openForm(host, id) {
     }
     drawItems();
 
-    document.getElementById('qf-add').onclick = () => { _form.items.push({ ...EMPTY_ROW }); drawItems(); };
+    document.getElementById('qf-add').onclick = () => {
+        _form.groups.push({ name: '', items: [{ ...EMPTY_ROW }] });
+        drawItems();
+        const inputs = document.querySelectorAll('#qf-items input[data-gk="name"]');
+        inputs[inputs.length - 1]?.focus();      // 新的大項目先取名
+    };
     document.getElementById('qf-cancel').onclick = () => { _form = null; closeSheet(); };
     document.getElementById('qf-items').oninput = (ev) => {
-        const inp = ev.target.closest('input[data-k]');
+        const inp = ev.target.closest('input[data-k], input[data-gk]');
         if (!inp) return;
+        const g = _form.groups[Number(inp.closest('[data-g]').dataset.g)];
+        if (inp.dataset.gk) { g.name = inp.value; return; }      // 大項目改名：小結歸組在存檔時攤平才算
         const i = Number(inp.closest('[data-i]').dataset.i), k = inp.dataset.k;
-        _form.items[i][k] = (k === 'quantity' || k === 'unit_price') ? (parseInt(inp.value) || 0) : inp.value;
+        g.items[i][k] = (k === 'quantity' || k === 'unit_price') ? (parseInt(inp.value) || 0) : inp.value;
         recalc();                       // 只重算，不重畫（重畫會把游標踢掉）
     };
     document.getElementById('qf-items').onclick = (ev) => {
-        const b = ev.target.closest('button[data-del]');
+        const b = ev.target.closest('button[data-del], button[data-delg], button[data-add]');
         if (!b) return;
-        _form.items.splice(Number(b.dataset.del), 1);
+        const gi = Number(b.closest('[data-g]').dataset.g), g = _form.groups[gi];
+        if ('add' in b.dataset) g.items.push({ ...EMPTY_ROW });
+        else if ('delg' in b.dataset) {
+            if (g.items.some(it => (it.description || '').trim()) && !window.confirm('這個大項目底下還有子項目，一起刪掉？')) return;
+            _form.groups.splice(gi, 1);
+        } else g.items.splice(Number(b.dataset.del), 1);
         drawItems();
     };
     F('tax_rate').oninput = recalc;
@@ -279,7 +328,7 @@ async function loadClientProjects(clientId) {
 
 function applyTemplate(t) {
     if (!t) return;
-    if (Array.isArray(t.items) && t.items.length) _form.items = t.items.map(it => ({ ...EMPTY_ROW, ...it }));
+    if (Array.isArray(t.items) && t.items.length) _form.groups = groupsOf(t.items.map(it => ({ ...EMPTY_ROW, ...it })));
     if (t.tax_rate != null) F('tax_rate').value = t.tax_rate;
     if (t.terms) F('terms').value = t.terms;
     F('stages').value = paymentStagesToText(t.payment_stages);
@@ -299,7 +348,7 @@ async function createShellProject(projectName) {
 async function save(host) {
     const err = document.getElementById('qf-err');
     const fail = (msg) => { err.hidden = false; err.textContent = msg; };
-    const items = _form.items.filter(it => (it.description || '').trim());
+    const items = flatItems().filter(it => (it.description || '').trim());   // 大項目一組接一組攤平，報價單上不會被拆開
     const projectName = _form.id ? '' : F('project_name').value.trim();
     if (!_form.id && !_form.client_id) return fail('請先選客戶');
     if (!_form.id && !_form.project_id && !projectName) return fail('請填專案名稱，或連結一個既有專案');
@@ -375,6 +424,8 @@ export async function render(host, { first }) {
             if (e) return openForm(host, e.dataset.edit);
             const p = ev.target.closest('button[data-pdf]');
             if (p) return downloadPdf(p, _rows);
+            const v = ev.target.closest('button[data-preview]');
+            if (v) return previewQuote(v);
             const s = ev.target.closest('button[data-share]');
             if (s) shareLink(s, _rows, host);
         });
