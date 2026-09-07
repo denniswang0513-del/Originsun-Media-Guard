@@ -83,12 +83,31 @@
     <div class="crm-modal-body">
       <div class="crm-form-section">報價資訊</div>
       <div class="crm-form-grid">
-        <div class="crm-field crm-field-full">
+        <!-- 專案：跟手機版同一套（owner 2026-09-07「以手機版的為主」）——報價時案子多半還沒成立：
+             先選客戶（可當場建）、直接打案名（儲存時建殼案）或連結該客戶既有的案；編輯／從專案頁開＝固定顯示 -->
+        <div class="crm-field crm-field-full" id="quote-f-project-fixed" style="display:none;">
+          <label>專案</label>
+          <div class="crm-input" id="quote-f-project-label" style="background:#1e1e1e;color:#d1d5db;"></div>
+        </div>
+        <div class="crm-field" id="quote-f-client-field">
+          <label>客戶 <span class="crm-required">*</span></label>
+          <div style="display:flex;gap:6px;">
+            <select id="quote-f-client_id" class="crm-input" style="flex:1;min-width:0;">
+              <option value="">— 打字找客戶 —</option>
+            </select>
+            <button type="button" id="quote-btn-new-client" class="crm-btn crm-btn-secondary crm-btn-sm" title="建立新客戶" style="flex:0 0 auto;">＋ 新客戶</button>
+          </div>
+        </div>
+        <div class="crm-field" id="quote-f-name-field">
           <label>專案 <span class="crm-required">*</span></label>
-          <select id="quote-f-project_id" class="crm-input">
-            <option value="">— 選擇專案 —</option>
+          <input id="quote-f-project_name" type="text" class="crm-input" placeholder="直接打案名，例：2026 品牌形象短片">
+        </div>
+        <div class="crm-field crm-field-full" id="quote-f-link-field">
+          <label>連結既有專案</label>
+          <select id="quote-f-link_project" class="crm-input" data-no-search>
+            <option value="">（不連結，照上面的案名建新案）</option>
           </select>
-          <div id="quote-inline-project" style="display:none;"></div>
+          <small style="color:#888;">選了客戶才找得到他的案子；沒連結就照上面的案名建一個新案</small>
         </div>
         <div class="crm-field">
           <label>狀態</label>
@@ -130,13 +149,14 @@
       <div id="quote-items-list" class="quote-items-list"></div>
 
       <div class="quote-totals">
-        <div class="quote-total-row"><span>小計</span><span id="quote-calc-subtotal">$0</span></div>
-        <div class="quote-total-row"><span>折扣</span><input id="quote-f-discount" type="number" class="crm-input" value="0" min="0" style="width:120px;text-align:right;"></div>
-        <div class="quote-total-row"><span>稅額 (<span id="quote-calc-tax-pct">5</span>%)</span><span id="quote-calc-tax">$0</span></div>
-        <div class="quote-total-row total"><span>含稅總計</span><span id="quote-calc-total">$0</span></div>
-        <div class="quote-total-row"><span>最終報價（手動）</span><input id="quote-f-final_price" type="number" class="crm-input" placeholder="留空=同含稅總計" style="width:150px;text-align:right;"></div>
-        <div class="quote-total-row" style="margin-top:8px;border-top:1px solid #3a3a3a;padding-top:8px;"><span>內部成本合計</span><span id="quote-calc-cost" style="color:#fbbf24;">$0</span></div>
-        <div class="quote-total-row"><span>利潤率</span><span id="quote-calc-profit" style="color:#86efac;">0%</span></div>
+        <div class="quote-total-row"><span>合計</span><span id="quote-calc-subtotal">$0</span></div>
+        <div class="quote-total-row"><span>營業稅 (<span id="quote-calc-tax-pct">5</span>%)</span><span id="quote-calc-tax">$0</span></div>
+        <div class="quote-total-row"><span>含稅總計</span><span id="quote-calc-total">$0</span></div>
+        <!-- 優惠 ↔ 最終報價 互推（同手機版）：打優惠就算出最終報價，打最終報價就算出優惠；報價單上印成「專案優惠」 -->
+        <div class="quote-total-row"><span>優惠</span><input id="quote-f-promo" type="number" class="crm-input" min="0" placeholder="折多少" style="width:150px;text-align:right;"></div>
+        <div class="quote-total-row"><span>最終報價（含稅）</span><input id="quote-f-final_price" type="number" class="crm-input" min="0" placeholder="空白＝照算出來的" style="width:150px;text-align:right;"></div>
+        <div class="quote-total-row total"><span>報價總額</span><span id="quote-calc-final">$0</span></div>
+        <small style="color:#888;">兩格互推：打優惠就算出最終報價，打最終報價就算出優惠。報價單上印成「專案優惠」</small>
       </div>
 
       <div class="crm-form-section">付款與備註</div>
