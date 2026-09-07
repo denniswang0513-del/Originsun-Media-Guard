@@ -867,3 +867,12 @@ def suggest_projects(name: str, lk: ProjectLookup, limit: int = 2, floor: float 
             scored.append((k, round(sc, 2)))
     scored.sort(key=lambda x: -x[1])
     return scored[:limit]
+
+
+# ── 團隊清單的人員排序（owner 2026-09-07「吳宇晨、陳偉建（兼職）的排序在最下面」）──
+STAFF_RANK = {"在職": 0, "兼職": 1}
+
+
+def staff_rank(status) -> int:
+    """在職 → 兼職 → 其他／沒綁人員檔案。團隊的一週（api_me）與週記大家（api_journal）同一條。"""
+    return STAFF_RANK.get((status or "").strip(), 2)

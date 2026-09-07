@@ -30,6 +30,7 @@ from sqlalchemy import delete as sa_delete, func, or_, select  # type: ignore
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503
 from core.hr_logic import iso_ts, midnight_of, parse_ymd
+from core.hr_logic import staff_rank
 from core.journal_logic import (REACTION_KINDS, FLAG_SECTIONS, clean_rich_entries, editable_window_ok, flag_counts,
                                 group_worklog, norm_reaction, reaction_summary, shell_status, status_after_put,
                                 unanswered_flagged, week_start_of)
@@ -332,6 +333,16 @@ async def submit_my_journal(request: Request, start: str = ""):
     return {"week_start": week.isoformat(), "status": "submitted", "submitted_at": now.isoformat()}
 
 
+async def _staff_status_by_username(session, usernames) -> dict:
+    """{username: crm_staff.status}（沒綁人員檔案＝None → 排最後）；排序規則在 core.hr_logic.staff_rank。"""
+    us = [u for u in usernames if u]
+    if not us:
+        return {}
+    return {u: st for u, st in (await session.execute(
+        select(User.username, CrmStaff.status).join(CrmStaff, CrmStaff.id == User.staff_id)
+        .where(User.username.in_(us)))).all()}
+
+
 async def _people_candidates(session) -> set:
     """「大家的回顧」該列的人＝**寫過週記的人**（任何一週有殼）。
     owner 2026-09-05「這三位不用寫」：光有 journal 模組不算（OriginsunFinance／staf 這類 service 帳號、老闆本人
@@ -341,7 +352,8 @@ async def _people_candidates(session) -> set:
 
 @router.get("/week")
 async def week_journals(request: Request, start: str = ""):
-    """該週**送出**的人（username 排序）— 全員可讀；每人帶自動區、flag 計數、條目（含 flag／案子）、回覆。
+    """該週**送出**的人（在職 → 兼職 → 其他，同組內 username 排序；owner 2026-09-07「吳宇晨、陳偉建的排序在最下面」）
+    — 全員可讀；每人帶自動區、flag 計數、條目（含 flag／案子）、回覆。
     people_status：還沒送出的人（draft＝草稿中、none＝還沒寫）。"""
     _who = (check_admin_or_module(request, "journal") or {}).get("sub") or ""
     week = _week_from_param(start)
@@ -356,7 +368,11 @@ async def week_journals(request: Request, start: str = ""):
         entries = await _entries_by_journal(session, [s.id for s in shells])
         pnames = await _project_names_for(session, list(entries.values()))
         submitted = {s.username for s in shells}
-        pending = sorted(await _people_candidates(session) - submitted)
+        pending = await _people_candidates(session) - submitted
+        st = await _staff_status_by_username(session, submitted | pending)
+        order = lambda u: (staff_rank(st.get(u)), u)          # 在職 → 兼職 → 其他（core.hr_logic.staff_rank）
+        shells.sort(key=lambda s: order(s.username))
+        pending = sorted(pending, key=order)
         names = await _display_names(session, submitted | set(pending))
         replies = await _replies_by_journal(session, [s.id for s in shells], names)     # 名字沿用上面查好的
         reactions = await _reactions_by_journal(session, [s.id for s in shells], _who, names)
@@ -479,7 +495,7 @@ async def react_entry(body: JournalReactPost, request: Request):
     who = (payload or {}).get("sub") or ""
     kind = norm_reaction(body.kind)
     if not kind:
-        raise HTTPException(status_code=422, detail="kind 只能是 " + "／".join(REACTION_KINDS))
+        raise HTTPException(status_code=422, detail="kind 只能是 " + "／".join(REACTION_KINDS) + " 或一個 emoji")
     whole = body.entry_table == WorkJournal.__tablename__
     if not whole and body.entry_table not in _TABLE_MODELS:
         raise HTTPException(status_code=422, detail=f"entry_table 只能是：{'／'.join(_TABLE_MODELS)}／{WorkJournal.__tablename__}")

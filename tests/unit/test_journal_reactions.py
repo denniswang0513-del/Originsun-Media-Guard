@@ -9,6 +9,9 @@ from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
 def test_kinds_and_normalize():
     assert REACTION_KINDS == ("like", "love", "laugh")
     assert norm_reaction(" Love ") == "love" and norm_reaction("angry") is None and norm_reaction("") is None
+    # 2026-09-07 owner「可以更多元」：kind 可以是 emoji 本身（含變體／連接符）；文字、太長的不收
+    assert norm_reaction("\U0001F389") == "\U0001F389" and norm_reaction("\u2764\uFE0F") == "\u2764\uFE0F" and norm_reaction("\U0001FAF6") == "\U0001FAF6"
+    assert norm_reaction("<script>") is None and norm_reaction("\U0001F389" * 20) is None
 
 
 def test_reaction_summary_counts_and_mine():
@@ -17,6 +20,8 @@ def test_reaction_summary_counts_and_mine():
     assert out["e1"] == {"like": 2, "love": 1, "laugh": 0, "mine": ["like", "love"],
                          "users": {"like": ["amy", "bob"], "love": ["amy"], "laugh": []}}   # users 依按的先後（頭像列用）
     assert out["e2"] == {"like": 0, "love": 0, "laugh": 1, "mine": [], "users": {"like": [], "love": [], "laugh": ["bob"]}}   # 不認識的 kind 丟掉
+    out = reaction_summary([("e3", "amy", "\U0001F389"), ("e3", "bob", "\U0001F389"), ("e3", "amy", "like")], "bob")
+    assert out["e3"]["\U0001F389"] == 2 and out["e3"]["users"]["\U0001F389"] == ["amy", "bob"] and out["e3"]["mine"] == ["\U0001F389"]   # emoji 種類動態長出來
 
 
 def test_model_and_endpoint():
@@ -69,3 +74,14 @@ def test_not_yet_written_list_only_includes_people_who_have_ever_written():
     """owner 2026-09-05「這三位不用寫」：還沒寫的名單只列寫過週記的人；光有 journal 模組（service 帳號、老闆）不列。"""
     body = func_body(code_only(repo_src("routers/api_journal.py")), "async def _people_candidates(")
     assert "select(WorkJournal.username).distinct()" in body and "User.modules" not in body
+
+
+def test_frontend_menu_has_full_emoji_grid_with_recent_row():
+    core = js_code_only(repo_src("frontend/js/shared/journal-core.js"))
+    assert "export const EMOJI_MENU = [" in core and "export const kindOf" in core and "export const glyphOf" in core
+    assert "const btns = kindsIn(d).map(k => {" in core and "data-heart-mine=" in core, "心情列／愛心要吃動態種類"
+    assert "pickable" not in core and "帶入" not in core, "「帶入」勾選 2026-09-07 拿掉"
+    html = repo_src("frontend/journal.html")
+    assert "const RECENT_KEY = 'journal_recent_emoji';" in html and "hm-grid" in html and "最近使用" in html
+    assert "input[data-pick]" not in html and "pickable" not in html
+    assert "b.dataset.heartMine || 'love'" in html, "取消同一種要看 data-heart-mine，不猜圖"

@@ -9,7 +9,7 @@
      白底/旭日紅/大字距/髮絲邊框。三檢視：回顧（我的回顧＋大家的回顧）/學習庫/依人回溯
      —— 2026-07-24 起 pill 暫隱藏只顯示回顧（見 .pill-row 註解）；內部分頁 tabs/journal
      （管理/HR 用）仍顯示三檢視，刻意不同步。
-     2026-09-05（docs/JOURNAL_WORKLOG_PLAN.md §13–§14）：預設開上一週；自動區「上週做了什麼」（worklog，唯讀，可勾「帶入」）；
+     2026-09-05（docs/JOURNAL_WORKLOG_PLAN.md §13–§14）：預設開上一週；自動區「上週做了什麼」（worklog，唯讀；「帶入」勾選 2026-09-07 拿掉）；
      四問每條可掛案子、「挑戰」「其他」可標需要協助／想討論；主管回覆灰底；打字 1.5 秒自動存草稿、「送出」才進大家的回顧；
      大家的回顧只列 submitted、預設全部展開，沒送出的人標「草稿」「還沒寫」；有 timesheets 模組的人每條下有回覆框。
      共用核心 /js/shared/journal-core.js（四問標籤、週期運算、API、條目／回覆渲染）；本頁只做版面。
@@ -200,8 +200,10 @@ html.embed-mode .gate-wrap { margin: 0 auto; }
 .heart.has { color: var(--red); } .heart.on { background: #fef2f2; }
 .heart .n { font-size: 11px; color: var(--sub); font-variant-numeric: tabular-nums; }
 .heart:disabled { cursor: default; }
-.heart-menu { display: inline-flex; gap: 2px; border: 1px solid var(--line); border-radius: 999px; background: #fff; padding: 2px 4px; box-shadow: 0 6px 18px rgba(0,0,0,.12); margin-left: 4px; }
-.heart-menu button { border: 0; background: none; font-size: 16px; padding: 2px 6px; border-radius: 999px; cursor: pointer; }
+.heart-menu { display: inline-flex; flex-direction: column; gap: 4px; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 6px 8px; box-shadow: 0 6px 18px rgba(0,0,0,.12); margin-left: 4px; position: absolute; z-index: 30; }
+.heart-menu .hm-h { font-size: 11px; color: var(--sub); letter-spacing: .06em; }
+.heart-menu .hm-row, .heart-menu .hm-grid { display: grid; grid-template-columns: repeat(8, 30px); gap: 2px; }
+.heart-menu button { border: 0; background: none; font-size: 18px; line-height: 1; padding: 4px 0; border-radius: 6px; cursor: pointer; }
 .heart-menu button:hover { background: #f5f5f5; }
 .vrow2 { display: inline-flex; gap: 10px; align-items: center; }
 
@@ -327,7 +329,7 @@ footer .eyebrow { font-size: 10px; }
 <script type="module">
 import { BLOCKS, FLAGS, FLAGGABLE, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, SUBTITLE, api, debounce, ensurePasteBase,
          entriesOf, entryBlock, esc, isAuthFail, itemsToLines, linesToItems, pasteThumbs, personCard,
-         heartHtml, REACTIONS, renderRich, repliesFor, replyHtml, shiftWeek, thisWeekStart, tokenGrants, weekRange, worklogHtml, flagPills } from '/js/shared/journal-core.js';
+         heartHtml, REACTIONS, EMOJI_MENU, kindOf, renderRich, repliesFor, replyHtml, shiftWeek, thisWeekStart, tokenGrants, weekRange, worklogHtml, flagPills } from '/js/shared/journal-core.js';
 import { initPasteImage } from '/js/shared/paste-image.js';
 import { attachProjectPop } from '/js/shared/project-pop.js';
 
@@ -511,7 +513,7 @@ function renderWeek(m, week) {
         <div class="block2">
         <div class="card" id="mine-card">
             <div class="card-head"><span class="eyebrow">Mine <span class="accent">我的${who}回顧</span></span><span class="vrow2"><span id="mine-heart">${mine.id ? heartHtml((mine.reactions || {})[mine.id], {}, false) : ''}</span><span id="j-state">${stateHtml()}</span></span></div>
-            <div class="blk"><h4>${who}做了什麼</h4>${worklogHtml(mine.worklog, {}, { pickable: !!mine.editable })}</div>
+            <div class="blk"><h4>${who}做了什麼</h4>${worklogHtml(mine.worklog, {})}</div>
             ${BLOCKS.map(([k, label]) => `
                 <div class="blk">
                     <h4>${label}</h4>
@@ -612,7 +614,7 @@ async function refreshTeam() {
     if (card) { card.innerHTML = teamCardHtml(); wireTeam(); }
 }
 
-// 委派：掛案子（浮層選到 / 手打）、旗標、帶入、回覆 —— #view 不會被換掉，掛一次就好
+// 委派：掛案子（浮層選到 / 手打）、旗標、回覆 —— #view 不會被換掉，掛一次就好
 attachProjectPop($('view'), { options: () => api.projectOptions(), value: (p) => p.name || p.label || '' });
 $('view').addEventListener('change', (ev) => {
     const proj = ev.target.closest('input.em-proj');
@@ -632,26 +634,21 @@ $('view').addEventListener('change', (ev) => {
         if (m) { m.flag = flag.value; markDirty(); }
         return;
     }
-    const pick = ev.target.closest('input[data-pick]');
-    if (pick) {
-        const ta = $('ta-wins');
-        if (!ta || ta.disabled) return;
-        const line = pick.dataset.pick;
-        const lines = linesToItems(ta.value);
-        const has = lines.includes(line);
-        if (pick.checked && !has) lines.push(line);
-        if (!pick.checked && has) lines.splice(lines.indexOf(line), 1);
-        ta.value = itemsToLines(lines);
-        ta.dispatchEvent(new Event('input', { bubbles: true }));
-    }
 });
 // 標題列的愛心：點一下＝愛心（已按過＝取消）；長按 450ms 或右鍵＝選讚／愛心／笑
 let _pressTimer = null, _pressed = false;
+// 最近用過的心情（每個人自己的瀏覽器記，最多 8 個；owner 2026-09-07「可以有一個篩選是最近使用過的」）
+const RECENT_KEY = 'journal_recent_emoji';
+function recentEmoji() { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]').filter(g => EMOJI_MENU.includes(g)); } catch (_) { return []; } }
+function pushRecent(glyph) { try { localStorage.setItem(RECENT_KEY, JSON.stringify([glyph, ...recentEmoji().filter(g => g !== glyph)].slice(0, 8))); } catch (_) {} }
 function heartMenu(btn) {
     document.querySelectorAll('.heart-menu').forEach(m => m.remove());
     const menu = document.createElement('div');
     menu.className = 'heart-menu';
-    menu.innerHTML = REACTIONS.map(([k, g]) => `<button type="button" data-heart-kind="${k}">${g}</button>`).join('');
+    const row = (list) => list.map(g => `<button type="button" data-heart-kind="${kindOf(g)}" data-glyph="${g}">${g}</button>`).join('');
+    const recent = recentEmoji();
+    menu.innerHTML = (recent.length ? `<div class="hm-h">最近使用</div><div class="hm-row">${row(recent)}</div>` : '')
+        + `<div class="hm-h">全部</div><div class="hm-grid">${row(EMOJI_MENU)}</div>`;
     btn.insertAdjacentElement('afterend', menu);
     const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('pointerdown', close, true); } };
     setTimeout(() => document.addEventListener('pointerdown', close, true), 0);
@@ -687,13 +684,14 @@ $('view').addEventListener('click', async (ev) => {
         ev.preventDefault(); ev.stopPropagation();
         const menu = pick.closest('.heart-menu'), btn = menu && menu.previousElementSibling;
         menu.remove();
+        if (pick.dataset.glyph) pushRecent(pick.dataset.glyph);
         if (btn && btn.dataset.heart !== undefined) await sendHeart(btn, pick.dataset.heartKind);
         return;
     }
     const b = ev.target.closest('button[data-heart]'); if (!b) return;
     ev.preventDefault(); ev.stopPropagation();          // 別把 details 收起來
     if (_pressed) { _pressed = false; return; }         // 長按已開選單
-    await sendHeart(b, b.classList.contains('on') ? ((b.textContent.trim().startsWith('\u{1F44D}') ? 'like' : b.textContent.trim().startsWith('\u{1F602}') ? 'laugh' : 'love')) : 'love');
+    await sendHeart(b, b.classList.contains('on') ? (b.dataset.heartMine || 'love') : 'love');   // 已按過＝取消同一種（kind 在 data-heart-mine，不猜圖）
 });
 
 // ── people（學習庫 / 依人回溯共用） ─────────────────────────────────────

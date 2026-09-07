@@ -49,8 +49,8 @@ export function repliesFor(j, k, entryId) {
 }
 
 /** 自動區「上週做了什麼」：worklog=[{project_id, project_name, days:[{date, items:[{note, work_type, stage_name}]}]}]（不含小時）。
- *  c.wl／c.wlProj／c.wlDay 是 class；pickable＝每項旁勾「帶入」（data-pick 帶文字）。 */
-export function worklogHtml(worklog, c = {}, { pickable = false } = {}) {
+ *  c.wl／c.wlProj／c.wlDay 是 class。（「帶入」勾選 2026-09-07 owner 拿掉） */
+export function worklogHtml(worklog, c = {}) {
     const list = worklog || [];
     if (!list.length) return `<div class="${c.empty || ''}">（這週沒有專案紀錄）</div>`;
     const md = (iso) => { const [, m, d] = String(iso || '').split('-'); return m && d ? `${Number(m)}/${Number(d)}` : ''; };
@@ -58,9 +58,7 @@ export function worklogHtml(worklog, c = {}, { pickable = false } = {}) {
         <div class="${c.wlProj || 'wl-pj'}">${_esc(p.project_name || '（未掛案）')}<span class="${c.wlDays || 'wl-days'}">${(p.days || []).length} 天</span></div>
         <ul>${(p.days || []).map(d => (d.items || []).map(i => {
             const stage = [i.work_type, i.stage_name].filter(Boolean).join(' · ');
-            const text = `${p.project_name || ''}${p.project_name ? '：' : ''}${i.note || ''}`;
-            return `<li><span class="${c.wlDay || 'wl-day'}">${md(d.date)}</span>${_esc(i.note || '')}${stage ? ` <span class="${c.pillStage || 'pill-stage'}">${_esc(stage)}</span>` : ''}${
-                pickable ? ` <label class="${c.pick || 'wl-pick'}"><input type="checkbox" data-pick="${_esc(text)}"> 帶入</label>` : ''}</li>`;
+            return `<li><span class="${c.wlDay || 'wl-day'}">${md(d.date)}</span>${_esc(i.note || '')}${stage ? ` <span class="${c.pillStage || 'pill-stage'}">${_esc(stage)}</span>` : ''}</li>`;
         }).join('')).join('')}</ul></div>`).join('');
 }
 
@@ -123,13 +121,26 @@ export function blockList(label, arr, blockCls) {
 }
 
 /** 心情（owner 2026-09-05：讚／愛心／笑）—— 順序與後端 core.journal_logic.REACTION_KINDS 一致。 */
-export const REACTIONS = [['like', '\u{1F44D}'], ['love', '\u2764\uFE0F'], ['laugh', '\u{1F602}']];
+export const REACTIONS = [['like', '\u{1F44D}'], ['love', '\u2764\uFE0F'], ['laugh', '\u{1F602}']];   // 舊三種（DB 裡存的是這三個字）
+/** 長按選單的整格 emoji（owner 2026-09-07「可以更多元」）：新按的 kind 就是 emoji 本身；舊三種照舊存字。 */
+export const EMOJI_MENU = ['\u{1F44D}', '\u2764\uFE0F', '\u{1F602}', '\u{1F389}', '\u{1F44F}', '\u{1F525}', '\u{1F4AA}', '\u{1F64F}',
+    '\u{1F62E}', '\u{1F622}', '\u{1F914}', '\u{1F440}', '\u2728', '\u{1F4AF}', '\u{1F973}', '\u{1F60D}',
+    '\u{1F923}', '\u{1F60E}', '\u{1FAF6}', '\u{1F64C}', '\u{1F62D}', '\u{1F929}', '\u2615', '\u{1F37B}',
+    '\u{1F3AC}', '\u{1F3A5}', '\u{1F4F7}', '\u2705', '\u{1F680}', '\u2B50', '\u{1F4A1}', '\u{1F91D}'];
+const _LEGACY_KIND = { '\u{1F44D}': 'like', '\u2764\uFE0F': 'love', '\u{1F602}': 'laugh' };
+/** emoji → 要送給後端的 kind（舊三種送字，其餘送 emoji 本身）。 */
+export const kindOf = (glyph) => _LEGACY_KIND[glyph] || glyph;
+/** kind → 畫出來的 emoji。 */
+export const glyphOf = (kind) => (REACTIONS.find(([k]) => k === kind) || [])[1] || kind;
+/** r 裡真正的心情種類（去掉 mine／names／users 這些附帶欄位；舊三種排前面）。 */
+export const kindsIn = (r) => { const d = r || {}; const extra = Object.keys(d).filter(k => !['mine', 'names', 'users'].includes(k) && !REACTIONS.some(([x]) => x === k) && (d[k] || 0) > 0); return [...REACTIONS.map(([k]) => k), ...extra]; };
 
 /** 一條條目下的心情列；r={like,love,laugh,mine:[]}；canReact=false 只顯示有數字的。 */
 export function reactionBar(r, ids, c = {}, canReact = false) {
     const d = r || { like: 0, love: 0, laugh: 0, mine: [] };
     const mine = new Set(d.mine || []);
-    const btns = REACTIONS.map(([k, g]) => {
+    const btns = kindsIn(d).map(k => {
+        const g = glyphOf(k);
         const n = d[k] || 0;
         if (!canReact && !n) return '';
         const attrs = canReact ? ` data-react="${k}" data-react-j="${_esc(ids.journalId || '')}" data-react-t="${_esc(ids.entryTable || '')}" data-react-e="${_esc(ids.entryId || '')}"` : ' disabled';
@@ -154,17 +165,18 @@ export function avatarHtml(name, c = {}) {
 export function heartHtml(r, ids, canReact = false, c = {}) {
     const d = r || { like: 0, love: 0, laugh: 0, mine: [], names: {} };
     const names = d.names || {};
-    const total = (d.like || 0) + (d.love || 0) + (d.laugh || 0);
+    const kinds = kindsIn(d);
+    const total = kinds.reduce((s, k) => s + (d[k] || 0), 0);
     const mine = (d.mine || [])[0] || '';
-    const glyph = mine ? (REACTIONS.find(([k]) => k === mine) || [])[1] : (total ? '\u2764\uFE0F' : '\u2661');
-    const everyone = REACTIONS.flatMap(([k, g]) => (names[k] || []).map(n => ({ n, g })));
+    const glyph = mine ? glyphOf(mine) : (total ? '\u2764\uFE0F' : '\u2661');
+    const everyone = kinds.flatMap(k => (names[k] || []).map(n => ({ n, g: glyphOf(k) })));
     const shown = everyone.slice(0, 3), more = everyone.length - shown.length;
     const avs = everyone.length
         ? `<span class="${c.avs || 'avs'}" data-heart-pop>${shown.map(x => avatarHtml(x.n, c)).join('')}${more > 0 ? `<span class="${c.av || 'av'} more">+${more}</span>` : ''}</span>` : '';
     const pop = everyone.length
-        ? `<div class="${c.heartPop || 'heart-pop'}">${REACTIONS.map(([k, g]) => (names[k] || []).length
-            ? `<div class="hp-kind"><span class="hp-g">${g}</span>${(names[k] || []).map(n => `<span class="hp-who">${avatarHtml(n, c)}${_esc(n)}</span>`).join('')}</div>` : '').join('')}</div>` : '';
-    const attrs = canReact ? ` data-heart data-heart-j="${_esc(ids.journalId || '')}" data-heart-t="${_esc(ids.entryTable || 'work_journals')}" data-heart-e="${_esc(ids.entryId || '')}"` : ' disabled';
+        ? `<div class="${c.heartPop || 'heart-pop'}">${kinds.map(k => (names[k] || []).length
+            ? `<div class="hp-kind"><span class="hp-g">${glyphOf(k)}</span>${(names[k] || []).map(n => `<span class="hp-who">${avatarHtml(n, c)}${_esc(n)}</span>`).join('')}</div>` : '').join('')}</div>` : '';
+    const attrs = canReact ? ` data-heart data-heart-mine="${_esc(mine)}" data-heart-j="${_esc(ids.journalId || '')}" data-heart-t="${_esc(ids.entryTable || 'work_journals')}" data-heart-e="${_esc(ids.entryId || '')}"` : ' disabled';
     const title = total ? '' : (canReact ? '點一下給愛心，長按換心情' : '');
     return `<span class="${c.heartWrap || 'heart-wrap'}">${avs}<button type="button" class="${c.heart || 'heart'}${mine ? ' on' : ''}${total ? ' has' : ''}"${title ? ` title="${_esc(title)}"` : ''}${attrs}>${glyph}</button>${pop}</span>`;
 }

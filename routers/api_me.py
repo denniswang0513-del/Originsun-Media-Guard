@@ -26,12 +26,13 @@ from core.db_guard import db_factory_or_503
 from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup, leave_balance, leave_to_dict,
                            month_key, month_span, months_back, parse_ymd, project_metrics, tw_day)
 from core.identity import require_bound_staff, resolve_current_staff
+from core.hr_logic import staff_rank
 from core.journal_logic import shell_status, week_start_of
 from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetUpdate, MeTodoUpdate)
 from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
-                       CrmProjectStaff, CrmShoot, HrLeaveRequest, PreprodLocation, Timesheet, WorkJournal)
+                       CrmProjectStaff, CrmShoot, CrmStaff, HrLeaveRequest, PreprodLocation, Timesheet, WorkJournal)
 from services.timesheet_lookup import budgets_for
 from services.timesheet_self import (add_rows, delete_row, list_rows, metrics_input, month_or_422,
                                      own_filter, rows_by_month, ts_dict, update_row)
@@ -390,6 +391,10 @@ async def team_week(request: Request, start: str = ""):
             select(HrLeaveRequest).where(HrLeaveRequest.status == "已核准")
             .where(HrLeaveRequest.start_date < d0 + timedelta(days=7))
             .where(HrLeaveRequest.end_date >= d0))).scalars().all()
+        # 人員的在職狀態：清單排序用（在職 → 兼職 → 其他；core.hr_logic.staff_rank）
+        board_names = {p["name"] for day in board for p in day["people"]}
+        staff_st = {n: st for n, st in (await session.execute(
+            select(CrmStaff.name, CrmStaff.status).where(CrmStaff.name.in_(list(board_names))))).all()} if board_names else {}
     people: dict = {}
     for day in board:
         for p in day["people"]:
@@ -416,7 +421,7 @@ async def team_week(request: Request, start: str = ""):
             if a.isoformat() <= d <= b.isoformat() and l.staff_name not in leave[d]:
                 leave[d].append(l.staff_name)
     return {"week_start": week.isoformat(), "days": days, "me": ident["staff"].name,
-            "people": [{"name": n, "cells": c} for n, c in sorted(people.items())],
+            "people": [{"name": n, "cells": c} for n, c in sorted(people.items(), key=lambda kv: (staff_rank(staff_st.get(kv[0])), kv[0]))],
             "shoots": shoots, "leave": leave}
 
 

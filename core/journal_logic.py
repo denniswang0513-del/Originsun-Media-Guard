@@ -1,3 +1,4 @@
+import re
 """core/journal_logic.py — 每週工作日誌純函式：週正規化 + 可編輯窗 + 條目清洗
 + 草稿／送出狀態機 + 「上週做了什麼」分組 + 求助判定（docs/JOURNAL_WORKLOG_PLAN.md §13–§14）。
 
@@ -164,12 +165,17 @@ def group_worklog(rows) -> list:
 
 
 # ── 心情（owner 2026-09-05：週記不用回覆，大家可以按讚／愛心／笑）──
-REACTION_KINDS = ("like", "love", "laugh")
+REACTION_KINDS = ("like", "love", "laugh")          # 舊三種（DB 裡存的字；前端 REACTIONS 對應圖）
+# owner 2026-09-07「心情 emoji 可以更多元」：新的 kind 就是 emoji 本身（1–16 字元、只准 emoji 區段＋變體／連接符），
+# 不再限清單 —— 前端選單換一組圖不用改後端。
+_EMOJI_RE = re.compile(r"^[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u3030\u303D\u3297\u3299\uFE0F\u200D\u20E3]{1,16}$")
 
 
 def norm_reaction(kind) -> str | None:
-    k = (kind or "").strip().lower()
-    return k if k in REACTION_KINDS else None
+    k = (kind or "").strip()
+    if k.lower() in REACTION_KINDS:
+        return k.lower()
+    return k if _EMOJI_RE.match(k) else None
 
 
 def reaction_summary(rows, me: str) -> dict:
@@ -177,11 +183,11 @@ def reaction_summary(rows, me: str) -> dict:
     "users": {"like": [username…], …}}}（users 依 rows 順序＝按的先後；頭像列與「誰按了什麼」浮層用）。"""
     out: dict = {}
     for entry_id, username, kind in rows:
-        if kind not in REACTION_KINDS:
+        if norm_reaction(kind) is None:
             continue
         d = out.setdefault(entry_id, {k: 0 for k in REACTION_KINDS} | {"mine": [], "users": {k: [] for k in REACTION_KINDS}})
-        d[kind] += 1
-        d["users"][kind].append(username)
+        d[kind] = d.get(kind, 0) + 1                  # emoji 種類是動態的：舊三種永遠有欄位，其餘有人按才出現
+        d["users"].setdefault(kind, []).append(username)
         if username == me and kind not in d["mine"]:
             d["mine"].append(kind)
     return out
