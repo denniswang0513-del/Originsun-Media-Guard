@@ -1,8 +1,8 @@
 /**
  * 報價分頁：GET /api/v1/crm/quotations 依狀態分組（順序＝options.quote_statuses），每組 10 筆一頁＋載入更多。
- * 狀態轉換由**位置**推：[0]草稿→寄出、[1]已寄出→簽回([2])／拒絕([3])；
+ * 狀態轉換由**位置**推：[0]草稿→寄出、[1]已寄出→成案([2])／拒絕([3])；
  * 改狀態打 POST /api/v1/crm/m/quotations/{id}/status {status, activate}。
- * 按鈕文字是動作（寄出／簽回／拒絕），目標狀態字從 options 取，不寫死。
+ * 按鈕文字是動作（寄出／成案／拒絕；owner 2026-09-07 把「簽回」改叫「成案」），目標狀態字從 options 取，不寫死。
  * 每張卡都有「PDF」：GET /api/v1/crm/quotations/{id}/pdf（跟桌機同一份 PDF、同一個檔名規則）。
  *
  * 開報價單（owner 2026-09-06，推翻 CRM_MOBILE_PLAN §「報價項目編輯不做」）：底部抽屜開表單，
@@ -22,7 +22,7 @@ function transitions(status) {
     const [draft, sent, signed, rejected] = v;
     if (status === draft && sent) return [{ label: '寄出', to: sent }];
     if (status === sent) return [
-        signed ? { label: '簽回', to: signed, ask: true } : null,
+        signed ? { label: '成案', to: signed, ask: true } : null,
         rejected ? { label: '拒絕', to: rejected, danger: true } : null,
     ].filter(Boolean);
     return [];
@@ -61,7 +61,7 @@ async function change(btn, host) {
         try {
             await mfetch(`/api/v1/crm/m/quotations/${encodeURIComponent(id)}/status`, { method: 'POST', body: { status: to, activate } });
             toast('報價已改為 ' + to + (activate ? '，專案已啟動' : ''));
-            markStale('projects');     // 簽回啟動專案：專案分頁的階段與首頁數字都變了
+            markStale('projects');     // 成案啟動專案：專案分頁的階段與首頁數字都變了
             await load(host);
         } catch (e) { toast(e.message, 'err'); }
     });
