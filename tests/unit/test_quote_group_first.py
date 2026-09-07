@@ -34,7 +34,7 @@ def test_mobile_form_is_group_first():
 
 def test_desktop_form_is_group_first():
     src = js_code_only(repo_src(DESKTOP))
-    assert "groupQuoteItems, flattenQuoteGroups" in src
+    assert "_QA.groupQuoteItems ||" in src and "_QA.flattenQuoteGroups ||" in src
     assert "_itemRows" not in src and "_quoteRemoveItem" not in src, "扁平列模型退場"
     assert 'class="quote-group-edit"' in src and "qi-add-sub" in src and "qi-remove-group" in src
     assert "addGroup(); _recalcTotals();" in src
@@ -51,9 +51,20 @@ def test_mobile_draft_card_has_create_and_preview():
     card = js_func_body(src, "function cardHtml(q)")
     assert 'data-preview="${esc(q.id)}">預覽' in card and "sent ? '' :" in card, "預覽只在草稿卡"
     pv = js_func_body(src, "async function previewQuote(btn)")
-    assert "mfetchText(`/api/v1/crm/quotations/${encodeURIComponent(btn.dataset.preview)}/preview`)" in pv
+    assert "mfetch(`/api/v1/crm/quotations/${encodeURIComponent(btn.dataset.preview)}/preview?as=json`)).html" in pv
     assert ".srcdoc = html" in pv
-    assert "export async function mfetchText(path)" in repo_src("frontend/m/shell.js")
+    assert "mfetchText" not in repo_src("frontend/m/shell.js"), "預覽不在 shell.js 加新 export（舊快取的 shell 會炸）"
+
+
+def test_new_shared_exports_are_taken_with_a_fallback_for_one_release():
+    """🔴 reference_cloudflare_js_cache：CF 給 .js 4 小時瀏覽器快取，新分頁 js 配舊共用檔時 named import 拿不到的 export
+    會讓整個模組載入失敗（2026-09-07 報價管理分頁變「連不到伺服器」）。這一輪新加的 export 一律命名空間拿＋本地退路。"""
+    for f in (DESKTOP, MOBILE):
+        src = js_code_only(repo_src(f))
+        assert "import * as _QA from" in src and "_QA.groupQuoteItems ||" in src and "_QA.flattenQuoteGroups ||" in src, f
+        assert "paymentStagesToText, groupQuoteItems" not in src, f"{f}：新 export 不准走 named import（舊快取會炸）"
+    mob = js_code_only(repo_src(MOBILE))
+    assert "import { mfetch, mdownload," in mob and "mfetchText" not in mob
 
 
 def test_preview_endpoint_renders_web_layout_without_side_effects():
@@ -61,6 +72,7 @@ def test_preview_endpoint_renders_web_layout_without_side_effects():
     assert '@router.get("/quotations/{quotation_id}/preview", dependencies=[Depends(money_dep)])' in src
     body = func_body(src, "async def quotation_preview(")
     assert "_render_quotation_html(view, company, web=True)" in body and "HTMLResponse(" in body
+    assert 'if as_ == "json":' in body and 'return {"html": html_doc}' in body
     for forbidden in ("html_to_pdf", "_archive_quotation_pdf", "q.status =", "commit("):
         assert forbidden not in body, forbidden
     render = func_body(src, "def _render_quotation_html(")

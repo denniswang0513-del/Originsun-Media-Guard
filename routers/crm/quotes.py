@@ -384,9 +384,9 @@ async def _quotation_pdf_response(q):
 
 
 @router.get("/quotations/{quotation_id}/preview", dependencies=[Depends(money_dep)])
-async def quotation_preview(quotation_id: str):
+async def quotation_preview(quotation_id: str, as_: str = Query("", alias="as")):
     """預覽（owner 2026-09-07「預覽點的時候讓我確認內容，不用建立報價單」）：同一份版面直接回 HTML，
-    任何狀態都能看；**不改狀態、不存檔、不開 Chromium**。手機端拿回來塞 iframe。"""
+    任何狀態都能看；**不改狀態、不存檔、不開 Chromium**。`?as=json` 回 {html}（手機端用既有的 mfetch 拿，塞 iframe）。"""
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -394,7 +394,10 @@ async def quotation_preview(quotation_id: str):
         if not q:
             raise HTTPException(status_code=404, detail="找不到此報價")
     view, company = await _quotation_view_of(q)
-    return HTMLResponse(_render_quotation_html(view, company, web=True), headers={"Cache-Control": "no-store"})
+    html_doc = _render_quotation_html(view, company, web=True)
+    if as_ == "json":
+        return {"html": html_doc}
+    return HTMLResponse(html_doc, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/quotations/{quotation_id}/pdf", dependencies=[Depends(money_dep)])

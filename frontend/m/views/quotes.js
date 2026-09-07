@@ -14,8 +14,23 @@
  * 🔴 這兩支的守衛是 `_check_auth`＝**管理員限定**，所以入口只給管理員（不是 canWrite）。
  * 🔴 金額試算用 js/shared/quote-amounts.js（跟後端 _calc_quotation 同一份規則），手機不自己算稅。
  */
-import { quoteTotals, parsePaymentStages, paymentStagesToText, groupQuoteItems, flattenQuoteGroups } from '/js/shared/quote-amounts.js';
-import { mfetch, mfetchText, mdownload, toast, esc, money, fmtDate, todayLocal, quotePdfFilename } from '../shell.js';
+import { quoteTotals, parsePaymentStages, paymentStagesToText } from '/js/shared/quote-amounts.js';
+import * as _QA from '/js/shared/quote-amounts.js';
+import { mfetch, mdownload, toast, esc, money, fmtDate, todayLocal, quotePdfFilename } from '../shell.js';
+// 🔴 Cloudflare 給 .js 4 小時瀏覽器快取：新分頁 js 配舊 quote-amounts.js 時，named import 拿不到的 export 會讓
+//    整個模組載入失敗。新 export 先用命名空間拿、缺就退回同款本地實作（reference_cloudflare_js_cache：契約要相容一輪；
+//    快取過期後這兩條退路可以拿掉）。預覽刻意不在 shell.js 加新 export：走既有 mfetch＋端點 ?as=json。
+const groupQuoteItems = _QA.groupQuoteItems || ((items) => {
+    const groups = [], byName = new Map();
+    (items || []).forEach(it => {
+        const name = String(it.group_name || '').trim();
+        let g = byName.get(name);
+        if (!g) { g = { name, items: [] }; byName.set(name, g); groups.push(g); }
+        const row = { ...it }; delete row.group_name; g.items.push(row);
+    });
+    return groups;
+});
+const flattenQuoteGroups = _QA.flattenQuoteGroups || ((groups) => (groups || []).flatMap(g => g.items.map(it => ({ ...it, group_name: g.name }))));
 import { list, opt, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad, renderPaged,
     isAdmin, openSheet, closeSheet, pickerHtml, mountPicker, copyText } from '../ui.js';
 
@@ -96,7 +111,8 @@ async function shareLink(btn, rows, host) {
 async function previewQuote(btn) {
     await withBusy(btn, async () => {
         try {
-            const html = await mfetchText(`/api/v1/crm/quotations/${encodeURIComponent(btn.dataset.preview)}/preview`);
+            // 同一支預覽端點，?as=json 回 {html}：手機只走 shell 的 mfetch（不自己 fetch、不用新 export）
+            const html = (await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(btn.dataset.preview)}/preview?as=json`)).html;
             let ov = document.getElementById('qt-preview');
             if (!ov) {
                 ov = document.createElement('div'); ov.id = 'qt-preview';

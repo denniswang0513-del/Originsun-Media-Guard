@@ -2,7 +2,22 @@
  * crm-quotes.js — 報價管理 Tab
  */
 
-import { quoteTotals, parsePaymentStages, paymentStagesToText, groupQuoteItems, flattenQuoteGroups } from '../../js/shared/quote-amounts.js';
+import { quoteTotals, parsePaymentStages, paymentStagesToText } from '../../js/shared/quote-amounts.js';
+import * as _QA from '../../js/shared/quote-amounts.js';
+// 🔴 Cloudflare 給 .js 4 小時瀏覽器快取：新分頁 js 配舊 quote-amounts.js 時，named import 拿不到的 export 會讓整個模組
+//    載入失敗（分頁變「連不到伺服器」，2026-09-07 踩到）。新 export 先用命名空間拿、缺就退回同款本地實作
+//    （reference_cloudflare_js_cache：契約要相容一輪；快取過期後這兩條退路可以拿掉）
+const groupQuoteItems = _QA.groupQuoteItems || ((items) => {
+    const groups = [], byName = new Map();
+    (items || []).forEach(it => {
+        const name = String(it.group_name || '').trim();
+        let g = byName.get(name);
+        if (!g) { g = { name, items: [] }; byName.set(name, g); groups.push(g); }
+        const row = { ...it }; delete row.group_name; g.items.push(row);
+    });
+    return groups;
+});
+const flattenQuoteGroups = _QA.flattenQuoteGroups || ((groups) => (groups || []).flatMap(g => g.items.map(it => ({ ...it, group_name: g.name }))));
 import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, quotePdfFilename, initRootFolderCard } from './crm-utils.js';
 import { authDownload, copyText } from '../../js/shared/utils.js';
 
