@@ -605,7 +605,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
                onkeydown="if(event.key==='Enter')window._expQuickAdd()"></span>
         <span class="exp-col-amt"><input id="exp-qa-amt" type="number" min="0" placeholder="金額"
                onkeydown="if(event.key==='Enter')window._expQuickAdd()"></span>
-        <span class="exp-col-payee"><select id="exp-qa-payee" data-no-search title="收款人">${qaStaff}</select></span>
+        <span class="exp-col-payee"><select id="exp-qa-payee" title="收款人">${qaStaff}</select></span>
         <span class="exp-col-receipt"></span>
         <span class="exp-col-action">
           <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:1px 6px;"
@@ -1225,6 +1225,15 @@ window._expEdit = function(cell, expId, field, currentVal) {
         input.type = isAmount ? 'number' : (isDate ? 'date' : 'text');
         if (isAmount) input.min = '0';
         input.value = currentVal !== null && currentVal !== undefined ? currentVal : '';
+        if (field === 'payee') {
+            // 收款人：掛員工名單 datalist，打字就找得到（soca 2026-09-07「不能打字直接找名字」）；
+            // 非員工照樣可以自由輸入 —— payee 本來就是文字備援欄
+            let dl = document.getElementById('exp-payee-list');
+            if (!dl) { dl = document.createElement('datalist'); dl.id = 'exp-payee-list'; document.body.appendChild(dl); }
+            dl.innerHTML = (state.staffList || []).map(st => `<option value="${_esc(st.name)}">`).join('');
+            input.setAttribute('list', 'exp-payee-list');
+            input.placeholder = '打字找人員，或直接輸入';
+        }
     }
     input.className = 'crm-input';
     input.style.cssText = 'width:100%;max-width:100%;box-sizing:border-box;padding:2px 4px;font-size:11px;' +

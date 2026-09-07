@@ -1201,6 +1201,11 @@
 .cost-editable  { cursor: pointer; }
 .cost-editable:hover { color: #93c5fd; }
 .cost-editable:hover .crm-muted { color: #93c5fd; }
+/* 空的可編輯格（例：收款人沒填）：flex 列 align-items:center 下空 <span> 沒有高度，根本點不到
+   （soca 2026-09-07「輸入完不能直接編修收款人」）。給最小面積；列 hover 時露一個淡加號當提示，
+   平常維持「空值留白」。 */
+.cost-row-expense .cost-editable:empty { min-height: 16px; min-width: 24px; }
+.cost-row-expense:hover .cost-editable:empty::after { content: '＋'; color: #4b5563; }
 
 .cost-toolbar-btn {
     padding: 0 6px;
