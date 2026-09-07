@@ -26,7 +26,7 @@ from core.db_guard import db_factory_or_503
 from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup, leave_balance, leave_to_dict,
                            month_key, month_span, months_back, parse_ymd, project_metrics, tw_day)
 from core.identity import require_bound_staff, resolve_current_staff
-from core.hr_logic import staff_rank
+from core.hr_logic import STAFF_ACTIVE, staff_rank
 from core.journal_logic import shell_status, week_start_of
 from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetUpdate, MeTodoUpdate)
@@ -62,7 +62,7 @@ def _profile_dict(s) -> dict:
         "experience": s.experience or [], "awards": s.awards or [],
         "employment_type": s.employment_type or "",
         "hire_date": day_iso(s.hire_date) or "",
-        "status": s.status or "在職",
+        "status": s.status or STAFF_ACTIVE,
     }
 
 

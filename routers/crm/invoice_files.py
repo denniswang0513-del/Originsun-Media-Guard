@@ -544,6 +544,7 @@ async def get_invoices_root(request: Request):
 
 @router.post("/invoices-root")
 async def set_invoices_root(request: Request):
+    """設定電子發票根目錄（管理員）：空字串＝回到預設；路徑先 validate_root_dir（要存在、可寫）。"""
     check_admin(request)
     from config import load_settings, save_settings
     body = await request.json()

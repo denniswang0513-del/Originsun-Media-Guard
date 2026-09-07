@@ -132,7 +132,9 @@ def test_work_stage_router_is_registered_and_open_to_active_staff():
     src = code_only(repo_src("routers/crm/work_stages.py"))
     g = func_body(src, "async def _stage_guard(")
     assert 'check_admin_or_module(request, "timesheets")' in g and "e.status_code != 403" in g
-    assert "require_bound_staff(request, *ME_MODULE_KEYS)" in g and 'or "在職").strip() != "在職"' in g
+    assert "require_bound_staff(request, *ME_MODULE_KEYS)" in g and "or STAFF_ACTIVE).strip() != STAFF_ACTIVE" in g
+    from core.hr_logic import STAFF_ACTIVE
+    assert STAFF_ACTIVE == "在職"
     for fn in ("async def list_work_stage_nodes(", "async def create_work_stage_node(",
                "async def update_work_stage_node(", "async def delete_work_stage_node("):
         assert "await _stage_guard(request)" in func_body(src, fn), fn

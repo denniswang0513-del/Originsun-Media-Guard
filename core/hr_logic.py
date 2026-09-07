@@ -870,7 +870,8 @@ def suggest_projects(name: str, lk: ProjectLookup, limit: int = 2, floor: float 
 
 
 # ── 團隊清單的人員排序（owner 2026-09-07「吳宇晨、陳偉建（兼職）的排序在最下面」）──
-STAFF_RANK = {"在職": 0, "兼職": 1}
+STAFF_ACTIVE = "在職"          # crm_staff.status 的「在職」；空白視同在職（序列化與守衛都這樣預設）
+STAFF_RANK = {STAFF_ACTIVE: 0, "兼職": 1}
 
 
 def staff_rank(status) -> int:

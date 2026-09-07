@@ -284,6 +284,16 @@ function applyTemplate(t) {
     drawItems();
 }
 
+/** 案子還沒成立：照案名先開一個殼專案（階段由後端 options 的 quote_phase 給），回新案 id。 */
+async function createShellProject(projectName) {
+    const np = await mfetch('/api/v1/crm/projects', {
+        method: 'POST',
+        body: { name: projectName, client_id: _form.client_id, ...(opt().quote_phase ? { status: opt().quote_phase } : {}) },
+    });
+    markStale('projects');
+    return (np.project || np).id;
+}
+
 async function save(host) {
     const err = document.getElementById('qf-err');
     const fail = (msg) => { err.hidden = false; err.textContent = msg; };
@@ -316,15 +326,7 @@ async function save(host) {
             if (_form.id) {
                 await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(_form.id)}`, { method: 'PUT', body });
             } else {
-                let pid = _form.project_id;
-                if (!pid) {                       // 案子還沒成立：先開一個殼專案（階段由後端 options 給）
-                    const np = await mfetch('/api/v1/crm/projects', {
-                        method: 'POST',
-                        body: { name: projectName, client_id: _form.client_id, ...(opt().quote_phase ? { status: opt().quote_phase } : {}) },
-                    });
-                    pid = (np.project || np).id;
-                    markStale('projects');
-                }
+                const pid = _form.project_id || await createShellProject(projectName);
                 await mfetch(`/api/v1/crm/projects/${encodeURIComponent(pid)}/quotations`, { method: 'POST', body });
             }
             toast(_form.id ? '報價已更新' : '報價已建立');

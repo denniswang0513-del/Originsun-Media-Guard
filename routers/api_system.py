@@ -95,7 +95,16 @@ async def load_settings_api():
 # deploy 不 mirror-delete 所以發版不會被清掉。PDF 端讀 settings.company.<kind>_path（相對根目錄）。
 _COMPANY_IMAGE_KINDS = ("logo", "seal")
 _IMAGE_MAGIC = {b"\x89PNG\r\n\x1a\n": "png", b"\xff\xd8\xff": "jpg", b"RIFF": "webp"}
-_COMPANY_ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "company_assets")
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_COMPANY_ASSETS_DIR = os.path.join(_REPO_ROOT, "company_assets")
+_COMPANY_IMAGE_MAX_MB = 5
+
+
+def _company_image_kind_or_404(kind: str) -> str:
+    """路徑上的 {kind} 只認 logo／seal（上傳與取回同一個閘）。"""
+    if kind not in _COMPANY_IMAGE_KINDS:
+        raise HTTPException(status_code=404, detail="只有 logo／seal")
+    return kind
 
 
 def _image_ext(content: bytes) -> str:
@@ -110,12 +119,12 @@ def _image_ext(content: bytes) -> str:
 
 @router.post("/api/settings/company-image/{kind}")
 async def upload_company_image(kind: str, req: Request, file: UploadFile = File(...)):
+    """上傳公司 Logo／印章（管理員）：看檔頭驗格式、同 kind 只留一份、路徑直接寫進 settings.company。"""
     _check_admin(req)
-    if kind not in _COMPANY_IMAGE_KINDS:
-        raise HTTPException(status_code=404, detail="只有 logo／seal")
+    _company_image_kind_or_404(kind)
     content = await file.read()
-    if len(content) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="圖檔超過 5MB")
+    if len(content) > _COMPANY_IMAGE_MAX_MB * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"圖檔超過 {_COMPANY_IMAGE_MAX_MB}MB")
     ext = _image_ext(content)
     os.makedirs(_COMPANY_ASSETS_DIR, exist_ok=True)
     for old in os.listdir(_COMPANY_ASSETS_DIR):          # 同 kind 只留一份，換副檔名也不殘留
@@ -139,11 +148,9 @@ async def get_company_image(kind: str, req: Request):
     """設定頁預覽用（管理員）；找不到就 404，前端顯示「尚未上傳」。"""
     from core.no_store import no_store_file
     _check_admin(req)
-    if kind not in _COMPANY_IMAGE_KINDS:
-        raise HTTPException(status_code=404, detail="只有 logo／seal")
+    _company_image_kind_or_404(kind)
     rel = (load_settings().get("company") or {}).get(f"{kind}_path") or ""
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = rel if os.path.isabs(rel) else os.path.join(root, rel)
+    path = rel if os.path.isabs(rel) else os.path.join(_REPO_ROOT, rel)
     if not rel or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="尚未上傳")
     return no_store_file(path)

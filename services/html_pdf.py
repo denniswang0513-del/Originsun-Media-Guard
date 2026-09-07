@@ -15,6 +15,7 @@ _DEFAULT_MARGIN = {"top": "20mm", "bottom": "20mm", "left": "15mm", "right": "15
 
 
 async def _render(tmp_html: str, tmp_pdf: str, margin: dict, footer_html: Optional[str]) -> None:
+    """Playwright 本體：開 chromium 把 tmp_html 印成 A4 tmp_pdf。只准由 html_to_pdf（Proactor 執行緒）呼叫。"""
     from playwright.async_api import async_playwright
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)

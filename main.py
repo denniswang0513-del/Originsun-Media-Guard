@@ -1282,6 +1282,7 @@ async def _short_quote_view(code: str):
 
 @app.get("/q/{code}/pdf", include_in_schema=False)
 async def _short_quote_pdf(code: str):
+    """免登入：線上檢視頁的「下載 PDF」（憑證＝網址裡的 share_token，逐字比對）。"""
     from routers.crm.quotes import public_quote_pdf
     return await public_quote_pdf(code)
 

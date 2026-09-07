@@ -673,6 +673,10 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/api/v1/nas_version` | 從主控端 HTTP 取得最新版號（用於 OTA 版本比對） |
 | GET | `/api/settings/load` | 讀取 settings.json |
 | POST | `/api/settings/save` | 寫入 settings.json |
+| POST | `/api/settings/company-image/{kind}` | 上傳公司 Logo／印章（kind=logo/seal；存 repo `company_assets/`，直接寫進 settings.company；管理員） |
+| GET | `/api/settings/company-image/{kind}` | 取回公司 Logo／印章（帶 token；設定頁預覽用） |
+| GET | `/q/{code}` | **免登入**：報價單線上檢視頁（share_token 逐字比對；`main.py` 轉呼 `routers/crm/quotes`） |
+| GET | `/q/{code}/pdf` | **免登入**：同上，下載 PDF |
 | GET | `/api/v1/settings` | 取得設定（相容格式） |
 | POST | `/api/v1/list_dir` | 列出目錄下的影片檔案 |
 | GET | `/api/v1/models/status` | 檢查 Whisper 模型下載狀態 |
@@ -1248,6 +1252,11 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`templates/quotation_pdf.html`](templates/quotation_pdf.html) | 報價單版面（2026-09-06 owner 定稿） | 視覺正本是 [`frontend/demo/quotation-pdf.html`](frontend/demo/quotation-pdf.html)，**先改示範頁再同步模板** |
 | [`frontend/js/shared/quote-file.js`](frontend/js/shared/quote-file.js) | 報價 PDF 檔名規則（`YYYYMMDD_客戶_專案_源日報價單.pdf`） | 零 import 葉節點；桌機 `crm-utils` 與手機 `m/shell.js` 各 re-export 一份，**別再拼第二份檔名** |
 | `frontend/m/shell.js` 的 `mdownload` | 手機版帶權限下載（blob；401 導回登入） | 手機分頁只准 `import './shell.js'`，下載一律走它，不要自己 `fetch` |
+| [`frontend/js/shared/quote-amounts.js`](frontend/js/shared/quote-amounts.js) | 報價金額試算（小計／折扣／稅無條件捨去／總計）＋付款階段字串互轉 | 零 import 葉節點，桌機與手機共用；**算法逐字對齊 `routers/crm/quotes._calc_quotation`**（畫面數字＝存進去的數字） |
+| [`routers/crm/quotes.py`](routers/crm/quotes.py) 的 PDF／分享段 | 報價 PDF 出口（`_quotation_pdf_response`）、寄出即存檔（`archive_quotation_pdf_now` 背景）、線上檢視短碼（`share_quotation`／`/q/{code}`）、報價單資料夾設定 | 渲染只走 `_render_quotation_html`；印 PDF 不帶 `web_pdf_url`（否則「下載 PDF」列會印進去）；草稿 POST /share 回 422 |
+| [`routers/crm/work_stages.py`](routers/crm/work_stages.py) | 工作階段（每個分類自己的階段清單）CRUD | 守衛 `_stage_guard`＝管理員／工作追蹤模組／綁定人員且在職（status 空白視同在職）；停用不刪，`used==0` 才准刪 |
+| [`routers/api_system.py`](routers/api_system.py) 的公司圖上傳 | Logo／印章上傳＋取回（看檔頭不看副檔名；同 kind 只留一份） | 存 `company_assets/`（gitignore、不掛靜態）；PDF 端讀 `settings.company.<kind>_path` |
+| `core.hr_logic` 的草稿列（`PENDING_STATUS`／`row_state`） | 「填了任何一格就存、有時數才進彙整」：pending 列不算工時 | 前端 `ts-sheet.js` 的 content 判定與後端 `normalize_row` 的空白列 422 **要同一組欄位**（專案／做了什麼／備註／階段） |
 
 ## 不要動的地方
 
@@ -1264,3 +1273,11 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   （`readCompany()` 回 `null` 就整個不送，靠後端 merge-on-save 留住原值）。
 - **範本彈窗是從工具列開的**，那時報價彈窗必定關著 —— 別再寫「報價彈窗開著嗎」來分流，那條走不到。
 - **Playwright 測手機頁**：塞 token 進 localStorage 後要**換 URL 重載**（同頁只改 hash，殼不會重跑登入閘門）。
+- **`update_quotation` 只寫 `req.model_fields_set` 裡有的欄位**（status／quote_date／valid_until／discount）：手機的 PUT
+  不帶它們，整包寫回曾把報價日期洗成 NULL、舊折扣洗成 0。桌機刻意送 `null` 清空 valid_until 仍會清，別改成 `is not None`。
+- **桌機報價彈窗「正在編哪一筆」看 `_editingQuote`，不准從 `_quotations.find` 查**：那份清單有狀態篩選，
+  從專案頁開的草稿查不到就被當成新增（要客戶、折扣歸零）。`quoteDup` 要把 `_editingId`／`_editingQuote` 一起清。
+- **放寬守衛不能收回原本的鑰匙**：`/timesheets/project_options` 與 `work-stages` 都曾在「開放給員工」時把
+  只有 timesheets／me_finance、沒綁人員的帳號從 200 變成 403／409。改守衛先列出舊守衛放行的每一種帳號再改。
+- **請款彈窗 `_updateExtraFields` 重建專案下拉時要帶回目前選的值**：openModal 先選好再呼叫它，重建成空的會把編輯中的專案洗掉。
+- **週記心情選單掛在 body、`position:fixed`**：捲動／resize 要關掉，不然它脫離愛心浮在原地；別再塞回標題列（會被右邊界裁）。

@@ -274,6 +274,7 @@ _QUOTES_DEFAULT_ROOT = os.path.join(os.getcwd(), "uploads", "quotations")
 
 
 def _quotes_root() -> str:
+    """報價單資料夾：settings.quotes_root 有設就用它，否則 uploads/quotations。"""
     from config import load_settings
     return (load_settings().get("quotes_root") or "").strip() or _QUOTES_DEFAULT_ROOT
 
@@ -300,6 +301,7 @@ async def get_quotations_root(request: Request):
 
 @router.post("/quotations-root")
 async def set_quotations_root(request: Request):
+    """設定報價單資料夾（管理員）：空字串＝回到預設；路徑先 validate_root_dir（要存在、可寫）。"""
     from core.auth import check_admin
     from config import load_settings, save_settings
     from .invoice_files import validate_root_dir          # 與發票根目錄同一份驗證（完整路徑＋可寫）
@@ -317,6 +319,7 @@ async def set_quotations_root(request: Request):
 
 
 def _pdf_footer(view: dict) -> str:
+    """Playwright 頁尾模板（每頁的頁碼列）；頁尾字串本身來自 core.quotation_pdf.footer_line，這裡只包 HTML。"""
     import html as _html
     return (
         '<div style="width:100%;margin:0 16mm;font-family:\'Noto Sans TC\',\'Microsoft JhengHei\',sans-serif;'
@@ -449,6 +452,7 @@ async def public_quote_pdf(token: str):
 @router.put("/quotations/{quotation_id}")
 async def update_quotation(quotation_id: str, req: QuotationPayload, request: Request,
                            background: BackgroundTasks):
+    """改報價（項目整組換掉、金額重算）。只寫 payload 有送的欄位；狀態轉成「已寄送」就排背景存一份 PDF。"""
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
