@@ -24,6 +24,11 @@ def test_frontend_kind_is_one_rule_for_color_and_filter():
     assert "_PASSTHROUGH = o.passthrough_categories" in js
     assert "kind ? ' cash-kind-' + kind : ''" in js and "const kind = _kindOf(e);" in js   # 每列算一次
     assert "const _kindOf = (e) => (_MINE_LEDGER ? '' :" in js, "私帳不上底色（owner 2026-09-04）——帳本 pin 渲染時釘一次"
+    # 後端 project_link_categories 自 09-04 起也含「發票代開」（代開票可連結專案）：passthrough 必須先判，
+    # 否則代開列被當專案列、請款走到執行人員表（owner 2026-09-07「他還要填工作人員不太合理」）
+    assert kind.index("_PASSTHROUGH.includes(e.category)") < kind.index("_LINKABLE.includes(e.category)")
+    from core.project_link import linkable_categories
+    assert "發票代開" in linkable_categories("parent", ["發票代開", "專案"]), "前提變了就重看 _kindOf 的順序"
     # 快篩鈕已改成一個打字的類別框（owner 2026-09-04）；種類判定只剩底色在用
     html = repo_src("frontend/tabs/crm/crm-cashbook.html")
     assert 'id="cash-filter-kind"' not in html and 'id="cash-filter-off"' not in html
@@ -89,6 +94,9 @@ def test_passthrough_income_row_requests_the_whole_remit_on_the_linked_projects(
     assert "category: '發票代開'" in remit and "source_invoice_id: inv.id" in remit and "project_id: it.pid" in remit
     assert "p.source_invoice_id === e.invoice_id" in remit and "e.kai_payment_id" in remit, "已請過的（含沒掛案的自動單）要講"
     assert "data-kai-payee" in remit and "_fetch('/staff')" in remit, "收款人可挑"
+    # owner 2026-09-07「他還要填工作人員不太合理」：收款人是文字欄（預設代開人），員工只當 datalist 提示，不准再變回必選 select
+    assert '<select class="crm-input" data-kai-payee' not in remit and "data-kai-other" not in remit
+    assert 'list="kai-payee-list"' in remit and "value=\"${_esc(inv.applicant || '')}\"" in remit
     # 沒掛案的自動單（開給代開人、還沒付）可收回改開在案子上，不然「還可請 0」卡死（思沙龍）；付掉的不能收回
     assert "x.payment_status !== '已付款'" in remit and "_fetch('/payments/' + x.id, { method: 'DELETE' })" in remit
     assert 'id="kai-withdraw"' in remit
