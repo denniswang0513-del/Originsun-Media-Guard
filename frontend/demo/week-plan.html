@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>示範｜我的週規劃（規劃 → 今天帶入 → 實際狀態 → 團隊的一週）</title>
+<style>
+  :root { --red:#c9372c; --ink:#262626; --sub:#737373; --line:#e5e5e5; --warn:#b45309; --ok:#15803d; --late:#c9372c; --num:#f59e0b; --plan:#2563eb; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#fafafa; color:var(--ink); font:14px/1.6 -apple-system,"Segoe UI","Noto Sans TC",sans-serif; }
+  .top { position:sticky; top:0; z-index:10; background:#fff; border-bottom:1px solid var(--line); padding:10px 22px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .top h1 { font-size:15px; margin:0; }
+  .top .note { color:var(--sub); font-size:12px; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button { background:#fff; border:0; color:var(--sub); padding:6px 14px; cursor:pointer; font-size:13px; font-family:inherit; }
+  .seg button.on { background:#262626; color:#fff; }
+  .stage { display:flex; gap:26px; padding:22px 22px 80px; align-items:flex-start; }
+  .legend { width:320px; flex:none; position:sticky; top:56px; }
+  .legend h2 { font-size:12px; color:var(--sub); margin:0 0 6px; letter-spacing:.2em; text-transform:uppercase; font-weight:600; }
+  .legend ol { margin:0; padding:0; list-style:none; }
+  .legend li { display:flex; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .legend li b { display:block; font-weight:600; }
+  .legend li span { color:var(--sub); font-size:12px; }
+  .n { flex:none; width:22px; height:22px; border-radius:50%; background:var(--num); color:#111; font-weight:700; font-size:12px; display:inline-flex; align-items:center; justify-content:center; }
+  .tag { position:absolute; top:-10px; left:-10px; z-index:2; }
+  .rel { position:relative; }
+  .page { flex:1; min-width:0; max-width:1180px; background:#fff; border:1px solid var(--line); padding:26px 28px 30px; }
+  .zone-h { font-size:11px; letter-spacing:.35em; text-transform:uppercase; color:var(--sub); border-bottom:1px solid var(--line); padding-bottom:8px; margin:0 0 14px; }
+  .zone-h b { color:var(--red); font-weight:400; letter-spacing:0; margin-left:8px; font-size:13px; }
+  .views { display:flex; gap:4px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .view-btn { background:#f3f3f3; border:1px solid var(--line); border-bottom:0; color:var(--sub); font-size:13px; font-weight:600; padding:8px 20px; cursor:pointer; border-radius:6px 6px 0 0; font-family:inherit; }
+  .view-btn.active { background:#fff; color:var(--ink); position:relative; top:1px; }
+  .view-btn .cnt { font-weight:400; color:var(--sub); margin-left:6px; font-size:12px; }
+  .view { display:none; border:1px solid var(--line); border-top:0; padding:16px 18px 14px; }
+  .view.on { display:block; }
+  .vhead { display:flex; align-items:baseline; justify-content:space-between; gap:8px; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:10px; }
+  .vhead .ey { font-size:11px; letter-spacing:.3em; text-transform:uppercase; color:var(--sub); }
+  .vhead .ey b { color:var(--red); font-weight:400; letter-spacing:0; margin-left:6px; font-size:14px; }
+  .vrow { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .btn { background:#fff; border:1px solid var(--line); border-radius:8px; color:var(--ink); padding:6px 12px; font-size:13px; cursor:pointer; font-family:inherit; }
+  .btn.pri { background:#262626; color:#fff; border-color:#262626; }
+  .btn.sm { padding:3px 9px; font-size:12px; }
+  .btn.xs { padding:1px 7px; font-size:11px; border-radius:6px; }
+  .btn.link { border:0; color:var(--red); padding:0; text-decoration:underline; background:none; }
+  .meta { color:var(--sub); font-size:12px; }
+  .today-strip { display:flex; gap:22px; flex-wrap:wrap; border:1px solid var(--line); border-radius:8px; padding:10px 14px; font-size:13px; margin-bottom:12px; align-items:center; }
+  .today-strip .k { color:var(--sub); margin-right:6px; }
+  .today-strip .warn { color:var(--warn); }
+  .today-strip .late { color:var(--late); font-weight:600; }
+  /* 昨天沒執行的處理面板 */
+  .leftover { border:1px solid #f1c9c4; background:#fff4f2; border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:13px; }
+  .leftover .ey { font-size:11px; letter-spacing:.3em; text-transform:uppercase; color:var(--late); margin-bottom:6px; }
+  .leftover .it { display:flex; gap:10px; align-items:center; padding:4px 0; border-top:1px dashed #f1c9c4; }
+  .leftover .it:first-of-type { border-top:0; }
+  .leftover .it b { font-weight:600; }
+  .leftover .it .no { color:var(--sub); }
+  /* 格子 */
+  table.sheet { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.sheet th, table.sheet td { border:1px solid var(--line); padding:4px 8px; vertical-align:middle; }
+  table.sheet th { background:#f7f7f7; font-weight:600; color:var(--sub); font-size:11.5px; text-align:left; }
+  table.sheet td.num { color:var(--sub); text-align:center; width:30px; }
+  table.sheet input { width:100%; border:0; background:transparent; font:inherit; padding:2px 0; outline:none; }
+  table.sheet input:focus { background:#fffbe6; }
+  table.sheet td.hrs { width:78px; }
+  table.sheet td.hrs input { text-align:right; }
+  table.sheet td.st { width:150px; font-size:11.5px; white-space:nowrap; }
+  table.sheet td.st .plan { color:var(--plan); font-weight:600; }
+  table.sheet td.st .ok { color:var(--ok); }
+  table.sheet td.st .pend { color:var(--warn); }
+  table.sheet td.st .skip { color:var(--sub); }
+  table.sheet tr.isplan td { background:#f6f9ff; }
+  table.sheet tr.skipped td { color:var(--sub); text-decoration:line-through; background:#fafafa; }
+  table.sheet tr.skipped td.st { text-decoration:none; }
+  .sheet-foot { display:flex; justify-content:space-between; align-items:center; margin-top:8px; }
+  /* 我的一週 */
+  .wk-sum { display:flex; gap:18px; flex-wrap:wrap; font-size:13px; margin-bottom:10px; align-items:center; }
+  .wk-sum .k { color:var(--sub); margin-right:4px; }
+  .wk-sum .late { color:var(--late); font-weight:600; }
+  .wk-sum .ok { color:var(--ok); font-weight:600; }
+  .board { display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:8px; align-items:start; }
+  .col { border:1px solid var(--line); border-radius:8px; min-height:240px; background:#fcfcfc; display:flex; flex-direction:column; }
+  .col.today { border-color:var(--red); background:#fff; }
+  .col.past { background:#f7f7f7; }
+  .col.over { background:#eef4ff; border-color:var(--plan); }
+  .col .dh { padding:6px 10px; border-bottom:1px solid var(--line); font-weight:600; font-size:12.5px; color:var(--sub); display:flex; justify-content:space-between; align-items:baseline; }
+  .col.today .dh { color:var(--red); }
+  .col .dh small { font-weight:400; font-size:11px; }
+  .col .cards { padding:6px; display:flex; flex-direction:column; gap:6px; flex:1; }
+  .card { border:1px solid var(--line); border-radius:7px; background:#fff; padding:6px 8px; font-size:12px; position:relative; }
+  .card.plan { border-left:3px solid var(--plan); cursor:grab; }
+  .card.done { border-left:3px solid var(--ok); }
+  .card.late { border-left:3px solid var(--late); border-color:#f1c9c4; background:#fff4f2; }
+  .card.skip { color:var(--sub); background:#f6f6f6; }
+  .card.skip .p, .card.skip .t { text-decoration:line-through; }
+  .card.ms { border-style:dashed; }
+  .card .p { font-weight:600; line-height:1.35; }
+  .card .t { color:var(--ink); font-size:11.5px; margin-top:1px; }
+  .card .f { display:flex; justify-content:space-between; align-items:center; gap:6px; margin-top:4px; font-size:11px; color:var(--sub); flex-wrap:wrap; }
+  .card .f .s.plan { color:var(--plan); }
+  .card .f .s.done { color:var(--ok); }
+  .card .f .s.late { color:var(--late); font-weight:600; }
+  .card .f .acts { display:flex; gap:4px; }
+  .card .from { font-size:10px; color:var(--sub); border:1px solid var(--line); border-radius:3px; padding:0 4px; }
+  .card .x { position:absolute; top:3px; right:5px; border:0; background:none; color:#bbb; cursor:pointer; font-size:12px; padding:0 2px; line-height:1; }
+  .card .x:hover { color:var(--late); }
+  .card.dragging { opacity:.4; }
+  .col .add { margin:0 6px 6px; }
+  .col .add button { width:100%; border:1px dashed var(--line); background:none; color:var(--sub); border-radius:7px; padding:5px; cursor:pointer; font-size:12px; font-family:inherit; }
+  .col .add button:hover { color:var(--ink); border-color:#bbb; }
+  .col .add form { display:flex; flex-direction:column; gap:4px; border:1px solid var(--plan); border-radius:7px; padding:6px; background:#fff; }
+  .col .add select, .col .add input { width:100%; border:1px solid var(--line); border-radius:5px; padding:4px 6px; font:inherit; font-size:12px; }
+  .col .add .fr { display:flex; gap:4px; justify-content:flex-end; }
+  .col .empty { color:#bbb; font-size:12px; text-align:center; padding:14px 0; }
+  .src { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  /* 週表 */
+  table.week { width:100%; border-collapse:collapse; font-size:12px; }
+  table.week th, table.week td { border:1px solid var(--line); vertical-align:top; padding:6px 8px; }
+  table.week th { background:#f7f7f7; font-weight:600; color:var(--sub); }
+  table.week th.today { color:var(--red); }
+  table.week td.who { font-weight:600; width:84px; }
+  table.week tr.me td { background:#fffdf7; }
+  table.week .c { border-radius:6px; padding:4px 6px; margin-bottom:4px; background:#f7f7f7; }
+  table.week .c.shoot { background:#e8f0fe; }
+  table.week .c.off { background:#eee; color:var(--sub); }
+  table.week .c.plan { background:#fff; border:1px dashed #b9c8ef; color:var(--sub); }
+  table.week .c.plan .cp { color:var(--ink); }
+  table.week .c.late { background:#fff4f2; border:1px dashed #f1c9c4; }
+  table.week .c.skip { background:#fafafa; color:#aaa; text-decoration:line-through; }
+  table.week .c.ms { display:block; background:#fff4f2; border:1px solid #f1c9c4; font-size:11px; }
+  table.week .ch { display:flex; justify-content:space-between; gap:6px; }
+  table.week .cp { font-weight:600; }
+  table.week .hrs { color:var(--sub); white-space:nowrap; }
+  table.week .hrs.plan { color:var(--plan); }
+  table.week .hrs.late { color:var(--late); }
+  table.week .cn { color:var(--sub); font-size:11px; }
+  .hint { color:var(--sub); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>示範｜我的週規劃 —— 週一排好，每天的格子自動帶入，日期過了照實際更新</h1>
+  <div class="seg"><button class="on" data-state="mon">週一 排本週</button><button data-state="wed">週三 執行中</button><button data-state="sat">週六 回顧</button></div>
+  <span class="note">假資料，以「李宜庭」的視角。三顆按鈕是同一週的三個時間點；卡片都能加、拖、改、刪。</span>
+</div>
+<div class="stage">
+  <div class="legend">
+    <h2>看什麼</h2>
+    <ol>
+      <li><span class="n">1</span><div><b>「今天與這週」多一個子視圖「我的一週」</b><span>一天一欄、一張卡＝一個專案＋要做什麼，不填時數。加卡三種來源：直接打、「從里程碑帶入」（這週指定給我的，落在到期那天）、「複製上週」。卡可以拖到別天。</span></div></li>
+      <li><span class="n">2</span><div><b>今天的專案紀錄：今天的卡自動就在格子裡</b><span>同一筆資料，不用「帶入」動作。狀態顯示「計畫」；填了時數就變「已存」；不做了按「沒做」。自己臨時加的列照舊。</span></div></li>
+      <li><span class="n">3</span><div><b>日期過了，照實際更新</b><span>有時數的卡變「已做 X h」；沒時數的變「未執行」（紅）。「今天」那條會提醒「昨天 N 項沒執行」，一鍵「移到今天」或「沒做了」。移過的卡留一個「移自 9/8」的小標。</span></div></li>
+      <li><span class="n">4</span><div><b>團隊的一週：同一批卡，大家都看得到</b><span>未來天畫成淺藍虛線「計畫」，過去天畫實際時數；未執行的紅虛線，沒做了的灰劃線。主管一眼看到每個人這週排了什麼、做到哪。</span></div></li>
+    </ol>
+    <h2 style="margin-top:18px">資料</h2>
+    <ol>
+      <li><div><span>不加新表。一張卡＝一列工時（狀態 plan、時數 0），工時表本來就有這種列，團隊的一週也早就會畫。新增的只有：「我的一週」視圖、格子的「計畫」狀態與「沒做」、隔天的提醒、未執行／沒做了兩個狀態。</span></div></li>
+      <li><div><span>只能規劃自己的（主管要排別人的，走里程碑指定負責人，會自動變成他的卡）。</span></div></li>
+    </ol>
+  </div>
+
+  <div class="page">
+    <div class="zone-h">TODAY <b>今天與這週</b></div>
+    <div class="views">
+      <button class="view-btn" data-v="log">今天的專案紀錄</button>
+      <button class="view-btn active rel" data-v="plan"><span class="tag n">1</span>我的一週<span class="cnt" id="plan-cnt"></span></button>
+      <button class="view-btn" data-v="week">團隊的一週</button>
+      <button class="view-btn" data-v="find">專案查詢</button>
+    </div>
+
+    <!-- 今天的專案紀錄 -->
+    <div class="view" data-v="log">
+      <div class="vhead"><span class="ey">Project Log<b id="log-title"></b></span><span class="vrow"><button class="btn sm">存成草稿</button><button class="btn sm">合併同案</button><button class="btn sm pri">送出</button></span></div>
+      <div class="today-strip" id="strip"></div>
+      <div id="leftover"></div>
+      <div class="rel"><span class="tag n">2</span>
+      <table class="sheet">
+        <thead><tr><th>#</th><th style="width:22%">專案</th><th style="width:70px">分類</th><th style="width:90px">工作階段</th><th>做了什麼</th><th style="width:14%">備註</th><th>時數 h</th><th>狀態</th><th style="width:26px"></th></tr></thead>
+        <tbody id="sheet"></tbody>
+      </table></div>
+      <div class="sheet-foot"><span class="hint">藍底的列是「我的一週」排的；填時數就算做了。時數格可以打 +1.5。</span><button class="btn sm">加一列</button></div>
+    </div>
+
+    <!-- 我的一週 -->
+    <div class="view on" data-v="plan">
+      <div class="vhead"><span class="ey">My Week<b id="plan-title"></b></span>
+        <span class="vrow"><button class="btn">‹</button><span class="meta">2026-09-07 起</span><button class="btn">›</button>
+          <span class="src"><button class="btn" id="from-ms">從里程碑帶入</button><button class="btn" id="copy-last">複製上週</button></span></span></div>
+      <div class="wk-sum" id="wk-sum"></div>
+      <div class="board" id="board"></div>
+      <div class="hint" style="margin-top:8px">拖卡片到別的日子；點卡片右上的 × 刪；「未執行」的卡可以移到今天或標沒做了。</div>
+    </div>
+
+    <!-- 團隊的一週 -->
+    <div class="view" data-v="week">
+      <div class="vhead"><span class="ey">Team Week<b>團隊的一週 9/7 – 9/12</b></span>
+        <span class="vrow"><button class="btn">‹</button><span class="meta">2026-09-07 起</span><button class="btn">›</button><button class="btn pri">設定專案里程碑</button></span></div>
+      <div class="rel"><span class="tag n">4</span>
+      <div style="overflow-x:auto"><table class="week">
+        <thead id="week-head"></thead>
+        <tbody id="week-body"></tbody>
+      </table></div></div>
+      <div class="hint" style="margin-top:8px">虛線＝計畫（還沒到那天）、實底＝實際時數、紅虛線＝未執行、灰劃線＝沒做了。里程碑那張淡紅小卡照舊。</div>
+    </div>
+
+    <div class="view" data-v="find">
+      <div class="vhead"><span class="ey">Project<b>專案查詢</b></span></div>
+      <div class="meta">照舊。</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const ME = '李宜庭';
+const PEOPLE = ['王士源', '蔡念栩', '劉禮瑜', '連婕妤', '李宜庭', '蘇家弘'];
+const DAYS = ['2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-12'];
+const wd = (d) => ['日', '一', '二', '三', '四', '五', '六'][new Date(d + 'T00:00:00').getDay()];
+const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}（${wd(d)}）`;
+const mdS = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+const CATALOG = [
+  { id: 'p1', name: '2026 思沙龍 EP02', client: '龍應台文化基金會' },
+  { id: 'p2', name: '2026 光環境獎媒體茶敘紀錄', client: '中強光電文化藝術基金會' },
+  { id: 'p3', name: '搭著捷運去書店 書店影像紀錄', client: '台北捷運' },
+  { id: 'p4', name: '2026 臺北城市形象片', client: '臺北市觀傳局' },
+  { id: 'p6', name: '南山人壽獎勵旅遊', client: '南山人壽' },
+  { id: 'adm', name: '行政庶務', client: '' },
+];
+const proj = (id) => CATALOG.find(p => p.id === id);
+// 這週指定給我的里程碑（到期那天）
+const MY_MS = [
+  { id: 'ms6', pid: 'p3', title: '第 3 集 Fine cut', due: '2026-09-11' },
+  { id: 'ms3', pid: 'p1', title: '訪談逐字稿校對', due: '2026-09-08' },
+];
+// 上週的卡（複製上週用）
+const LAST_WEEK = [
+  { pid: 'p3', wt: '剪接', stage: '粗剪', note: '第 3 集剪接' },
+  { pid: 'adm', wt: '行政', stage: '', note: '工作安排' },
+  { pid: 'p2', wt: '剪接', stage: '粗剪', note: 'Reels 粗剪' },
+];
+// 別人的實際工時（靜態）
+const HOURS = { '王士源': { '2026-09-07': [['行政庶務', 2.5, '報價與會議']], '2026-09-08': [['2026 思沙龍 EP02', 3, '看 A-copy']], '2026-09-09': [['2026 思沙龍 EP02', 2, '客戶會議']] },
+  '蔡念栩': { '2026-09-07': [['2026 思沙龍 EP02', 6.5, 'A-copy 剪輯']], '2026-09-08': [['2026 思沙龍 EP02', 5, 'A-copy 修']], '2026-09-09': [['2026 思沙龍 EP02', 4, 'A-copy 交付']] },
+  '劉禮瑜': { '2026-09-07': [['2026 光環境獎媒體茶敘紀錄', 4, '照片整理']] },
+  '連婕妤': { '2026-09-07': [['2026 光環境獎媒體茶敘紀錄', 6, 'Reels 粗剪']], '2026-09-08': [['2026 光環境獎媒體茶敘紀錄', 4, 'Reels 粗剪']], '2026-09-09': [['2026 光環境獎媒體茶敘紀錄', 5, 'Reels 粗剪']] },
+  '蘇家弘': {} };
+const OTHERS_PLAN = { '連婕妤': { '2026-09-10': [['2026 光環境獎媒體茶敘紀錄', 'Reels 字卡']], '2026-09-11': [['2026 光環境獎媒體茶敘紀錄', '交 10 支 Reels']] },
+  '蔡念栩': { '2026-09-10': [['2026 思沙龍 EP02', 'B-copy']], '2026-09-11': [['2026 思沙龍 EP02', 'B-copy']] } };
+const SHOOTS = { '2026-09-10': { title: '2026 臺北城市形象片', crew: ['王士源', '蘇家弘'] } };
+const LEAVE = { '2026-09-11': ['劉禮瑜'] };
+
+// 一張卡＝一列工時：{id, day, pid, wt, stage, note, hours, state, from, movedFrom}
+//   state：plan（還沒到／沒填）｜skip（沒做了）；「已做」＝有時數；「未執行」＝day < TODAY 且沒時數且不是 skip
+const C = (id, day, pid, wt, stage, note, hours, extra) => ({ id, day, pid, wt, stage, note, hours: hours ?? null, state: 'plan', ...(extra || {}) });
+const STATES = {
+  mon: { today: '2026-09-07', cards: [
+    C('c1', '2026-09-07', 'p3', '剪接', '精剪', '第 3 集剪接'),
+    C('c2', '2026-09-07', 'adm', '行政', '', '工作安排'),
+  ] },
+  wed: { today: '2026-09-09', cards: [
+    C('c1', '2026-09-07', 'p3', '剪接', '精剪', '第 3 集剪接', 7.5),
+    C('c2', '2026-09-07', 'adm', '行政', '', '工作安排', 1),
+    C('c3', '2026-09-08', 'p3', '剪接', '精剪', '第 3 集修正', 4.2),
+    C('c4', '2026-09-08', 'p1', '後製', '校對', '訪談逐字稿校對', null, { from: '里程碑' }),
+    C('c5', '2026-09-09', 'p3', '剪接', '精剪', '第 3 集 fine cut'),
+    C('c6', '2026-09-09', 'p2', '後製', '字卡', 'Reels 字卡'),
+    C('c7', '2026-09-10', 'p3', '輸出', '交付', 'fine cut 輸出給客戶'),
+    C('c8', '2026-09-11', 'p3', '剪接', '精剪', '第 3 集 Fine cut', null, { from: '里程碑' }),
+    C('c9', '2026-09-11', 'p1', '剪接', '精剪', 'B-copy 協助'),
+  ] },
+  sat: { today: '2026-09-12', cards: [
+    C('c1', '2026-09-07', 'p3', '剪接', '精剪', '第 3 集剪接', 7.5),
+    C('c2', '2026-09-07', 'adm', '行政', '', '工作安排', 1),
+    C('c3', '2026-09-08', 'p3', '剪接', '精剪', '第 3 集修正', 4.2),
+    C('c4', '2026-09-09', 'p1', '後製', '校對', '訪談逐字稿校對', 2, { from: '里程碑', movedFrom: '2026-09-08' }),
+    C('c5', '2026-09-09', 'p3', '剪接', '精剪', '第 3 集 fine cut', 5),
+    C('c6', '2026-09-09', 'p2', '後製', '字卡', 'Reels 字卡', null, { state: 'skip' }),
+    C('c7', '2026-09-10', 'p3', '輸出', '交付', 'fine cut 輸出給客戶', 3),
+    C('c10', '2026-09-10', 'p2', '後製', '字卡', 'Reels 字卡（補）', 4.5, { adhoc: true }),
+    C('c8', '2026-09-11', 'p3', '剪接', '精剪', '第 3 集 Fine cut', 6, { from: '里程碑' }),
+    C('c9', '2026-09-11', 'p1', '剪接', '精剪', 'B-copy 協助'),
+  ] },
+};
+let TODAY = STATES.mon.today;
+let cards = clone(STATES.mon.cards);
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+function $(id) { return document.getElementById(id); }
+const isDone = (c) => c.hours != null && c.hours > 0;
+const isLate = (c) => !isDone(c) && c.state !== 'skip' && c.day < TODAY;
+const statusOf = (c) => c.state === 'skip' ? 'skip' : isDone(c) ? 'done' : isLate(c) ? 'late' : 'plan';
+const LABEL = { plan: '計畫', done: '已做', late: '未執行', skip: '沒做了' };
+
+function drawAll() {
+  const mine = cards;
+  const n = { plan: 0, done: 0, late: 0, skip: 0 };
+  mine.forEach(c => n[statusOf(c)]++);
+  $('plan-cnt').textContent = `${mine.length}`;
+  drawPlan(n); drawLog(); drawWeek();
+}
+
+// ── 我的一週 ──
+function drawPlan(n) {
+  $('plan-title').textContent = `我的一週 9/7 – 9/12`;
+  $('wk-sum').innerHTML = `<span><span class="k">這週排了</span>${cards.length} 項</span><span><span class="k">已做</span><span class="ok">${n.done}</span></span><span><span class="k">未執行</span><span class="${n.late ? 'late' : ''}">${n.late}</span></span><span><span class="k">沒做了</span>${n.skip}</span><span><span class="k">還沒到</span>${n.plan}</span>
+    <span class="meta">已做的時數在格子裡填，這裡只看排了什麼、做了沒。</span>`;
+  $('board').innerHTML = DAYS.map(d => {
+    const list = cards.filter(c => c.day === d);
+    const cls = d === TODAY ? 'today' : d < TODAY ? 'past' : '';
+    return `<div class="col ${cls}" data-day="${d}"><div class="dh"><span>${md(d)}</span><small>${d === TODAY ? '今天' : d < TODAY ? '' : ''}</small></div>
+      <div class="cards" data-drop="${d}">${list.length ? list.map(cardHtml).join('') : '<div class="empty">沒排</div>'}</div>
+      <div class="add" data-add="${d}"><button data-addbtn="${d}">加一項</button></div></div>`;
+  }).join('');
+}
+function cardHtml(c) {
+  const s = statusOf(c); const p = proj(c.pid);
+  const acts = s === 'late' ? `<span class="acts"><button class="btn xs" data-move-today="${c.id}">移到今天</button><button class="btn xs" data-skip="${c.id}">沒做了</button></span>` :
+    s === 'skip' ? `<span class="acts"><button class="btn xs" data-unskip="${c.id}">還原</button></span>` : '';
+  const tags = [c.from ? `<span class="from">${c.from}</span>` : '', c.movedFrom ? `<span class="from">移自 ${mdS(c.movedFrom)}</span>` : '', c.adhoc ? `<span class="from">當天加的</span>` : ''].join('');
+  return `<div class="card ${s} ${c.from ? 'ms' : ''}" draggable="${s === 'plan' || s === 'late'}" data-card="${c.id}"><button class="x" data-del="${c.id}" title="刪">×</button>
+    <div class="p">${p.name}</div><div class="t">${c.note}${c.wt ? `<span class="meta"> · ${[c.wt, c.stage].filter(Boolean).join(' · ')}</span>` : ''}</div>
+    <div class="f"><span class="s ${s}">${s === 'done' ? `已做 ${c.hours} h` : LABEL[s]}</span>${tags}${acts}</div></div>`;
+}
+
+// ── 今天的專案紀錄 ──
+function drawLog() {
+  $('log-title').textContent = `今天的專案紀錄 ${md(TODAY)}`;
+  const todays = cards.filter(c => c.day === TODAY);
+  const late = cards.filter(isLate);
+  const ms = MY_MS.filter(m => m.due === TODAY);
+  $('strip').innerHTML = `<span><span class="k">今天</span>${md(TODAY)}</span><span><span class="k">場次</span>${SHOOTS[TODAY] && SHOOTS[TODAY].crew.includes(ME) ? SHOOTS[TODAY].title : '沒有'}</span>
+    <span><span class="k">我的一週</span>今天排了 ${todays.filter(c => !c.adhoc).length} 項${todays.filter(isDone).length ? `、已做 ${todays.filter(isDone).length}` : ''}</span>
+    <span><span class="k">本週里程碑</span>${ms.length ? `今天到期 <span class="warn">${ms.length} 個</span>（${ms.map(m => m.title).join('、')}）` : '今天沒有到期的'}</span>
+    ${late.length ? `<span class="late">昨天以前有 ${late.length} 項計畫沒執行</span>` : ''}`;
+  $('leftover').innerHTML = late.length ? `<div class="leftover rel"><span class="tag n">3</span><div class="ey">Leftover　沒執行的計畫</div>${late.map(c => `<div class="it"><span class="meta">${mdS(c.day)}</span><b>${proj(c.pid).name}</b><span class="no">${c.note}</span><span style="flex:1"></span><button class="btn xs" data-move-today="${c.id}">移到今天</button><button class="btn xs" data-skip="${c.id}">沒做了</button></div>`).join('')}</div>` : '';
+  const rows = todays.length ? todays : [];
+  $('sheet').innerHTML = rows.map((c, i) => {
+    const s = statusOf(c);
+    const st = s === 'skip' ? '<span class="skip">沒做了</span> <button class="btn xs" data-unskip="' + c.id + '">還原</button>'
+      : s === 'done' ? '<span class="ok">已存</span>'
+      : c.adhoc ? '<span class="pend">草稿（沒時數）</span>'
+      : `<span class="plan">計畫</span> <button class="btn xs" data-skip="${c.id}">沒做</button>`;
+    return `<tr class="${c.adhoc || s === 'done' ? '' : 'isplan'} ${s === 'skip' ? 'skipped' : ''}" data-row="${c.id}"><td class="num">${i + 1}</td><td><input value="${proj(c.pid).name}"></td><td><input value="${c.wt}"></td><td><input value="${c.stage}"></td><td><input value="${c.note}"></td><td><input value=""></td><td class="hrs"><input data-hours="${c.id}" value="${c.hours ?? ''}" placeholder="${s === 'plan' ? '填時數' : ''}"></td><td class="st">${st}</td><td><button class="x" data-del="${c.id}" style="position:static;color:#bbb;border:0;background:none;cursor:pointer">×</button></td></tr>`;
+  }).join('') + (rows.length ? '' : '<tr><td colspan="9" class="meta" style="text-align:center;padding:14px">今天沒有排的，直接「加一列」。</td></tr>');
+}
+
+// ── 團隊的一週 ──
+function drawWeek() {
+  $('week-head').innerHTML = `<tr><th style="width:84px">人員</th>${DAYS.filter(d => d !== '2026-09-12').map(d => `<th class="${d === TODAY ? 'today' : ''}">${md(d)}</th>`).join('')}</tr>`;
+  $('week-body').innerHTML = PEOPLE.map(n => `<tr class="${n === ME ? 'me' : ''}"><td class="who">${n}</td>${DAYS.filter(d => d !== '2026-09-12').map(d => {
+    const parts = [];
+    if ((LEAVE[d] || []).includes(n)) parts.push('<div class="c off">休假</div>');
+    if (SHOOTS[d] && SHOOTS[d].crew.includes(n)) parts.push(`<div class="c shoot">${SHOOTS[d].title}<div class="cn">拍攝 · ${SHOOTS[d].crew.join('、')}</div></div>`);
+    MY_MS.filter(m => n === ME && m.due === d).forEach(m => parts.push(`<div class="c ms">里程碑：${m.title}<div class="cn">${proj(m.pid).name}</div></div>`));
+    if (n === ME) {
+      cards.filter(c => c.day === d).forEach(c => { const s = statusOf(c);
+        parts.push(`<div class="c ${s === 'done' ? '' : s}"><div class="ch"><span class="cp">${proj(c.pid).name}</span><span class="hrs ${s}">${s === 'done' ? c.hours + ' h' : LABEL[s]}</span></div><div class="cn">${c.note}</div></div>`); });
+    } else {
+      ((HOURS[n] || {})[d] || []).filter(() => d < TODAY || d === TODAY).forEach(([p, h, note]) => parts.push(`<div class="c"><div class="ch"><span class="cp">${p}</span><span class="hrs">${h} h</span></div><div class="cn">${note}</div></div>`));
+      ((OTHERS_PLAN[n] || {})[d] || []).filter(() => d >= TODAY).forEach(([p, note]) => parts.push(`<div class="c plan"><div class="ch"><span class="cp">${p}</span><span class="hrs plan">計畫</span></div><div class="cn">${note}</div></div>`));
+    }
+    return `<td>${parts.join('') || '<span class="meta">—</span>'}</td>`; }).join('')}</tr>`).join('');
+}
+
+// ── 互動 ──
+const byId = (id) => cards.find(c => c.id === id);
+document.body.addEventListener('click', (ev) => {
+  const v = ev.target.closest('.view-btn'); if (v) { document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b === v)); document.querySelectorAll('.view').forEach(x => x.classList.toggle('on', x.dataset.v === v.dataset.v)); return; }
+  const s = ev.target.closest('.seg button'); if (s) { document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b === s)); TODAY = STATES[s.dataset.state].today; cards = clone(STATES[s.dataset.state].cards); drawAll(); return; }
+  const t = ev.target;
+  if (t.dataset.del) { cards = cards.filter(c => c.id !== t.dataset.del); return drawAll(); }
+  if (t.dataset.skip) { byId(t.dataset.skip).state = 'skip'; return drawAll(); }
+  if (t.dataset.unskip) { byId(t.dataset.unskip).state = 'plan'; return drawAll(); }
+  if (t.dataset.moveToday) { const c = byId(t.dataset.moveToday); c.movedFrom = c.day; c.day = TODAY; return drawAll(); }
+  if (t.dataset.addbtn) { return openAdd(t.dataset.addbtn); }
+  if (t.dataset.addcancel) { return drawAll(); }
+  if (t.dataset.addok) { return submitAdd(t.dataset.addok); }
+  if (t.id === 'from-ms') {
+    let added = 0;
+    MY_MS.forEach(m => { if (!cards.some(c => c.from === '里程碑' && c.pid === m.pid && c.note === m.title)) { cards.push(C('c' + Date.now() + added, m.due, m.pid, '', '', m.title, null, { from: '里程碑' })); added++; } });
+    drawAll(); if (!added) alert('這週指定給你的里程碑都已經在板上了。'); return;
+  }
+  if (t.id === 'copy-last') {
+    // 示範：上週每張卡照星期幾貼到這週（真的做會照原本那天的星期幾）
+    const target = ['2026-09-07', '2026-09-08', '2026-09-09'];
+    LAST_WEEK.forEach((l, i) => cards.push(C('c' + Date.now() + i, target[i % 3], l.pid, l.wt, l.stage, l.note, null, { from: '上週' })));
+    drawAll(); return;
+  }
+});
+document.body.addEventListener('input', (ev) => {
+  const h = ev.target.dataset.hours; if (!h) return;
+  const c = byId(h); const raw = ev.target.value.trim();
+  const v = raw.startsWith('+') ? (c.hours || 0) + parseFloat(raw.slice(1) || 0) : parseFloat(raw);
+  c.hours = Number.isFinite(v) && v > 0 ? Math.round(v * 10) / 10 : null;
+  const tr = ev.target.closest('tr'); const st = tr.querySelector('.st');
+  st.innerHTML = c.hours ? '<span class="ok">已存</span>' : `<span class="plan">計畫</span> <button class="btn xs" data-skip="${c.id}">沒做</button>`;
+  tr.classList.toggle('isplan', !c.hours && !c.adhoc);
+  $('plan-cnt').textContent = cards.length; drawWeek(); drawPlanQuiet();
+});
+document.body.addEventListener('change', (ev) => { if (ev.target.dataset.hours) drawAll(); });
+function drawPlanQuiet() { const n = { plan: 0, done: 0, late: 0, skip: 0 }; cards.forEach(c => n[statusOf(c)]++); drawPlan(n); }
+function openAdd(day) {
+  const host = document.querySelector(`.add[data-add="${day}"]`);
+  host.innerHTML = `<form onsubmit="return false"><select data-addpid><option value="">選專案（打字可以找）</option>${CATALOG.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}</select>
+    <input data-addnote placeholder="要做什麼（Enter 加入）" autofocus><div class="fr"><button class="btn xs" data-addcancel="${day}">取消</button><button class="btn xs pri" data-addok="${day}">加入</button></div></form>`;
+  host.querySelector('[data-addnote]').focus();
+}
+function submitAdd(day) {
+  const host = document.querySelector(`.add[data-add="${day}"]`);
+  const pid = host.querySelector('[data-addpid]').value, note = host.querySelector('[data-addnote]').value.trim();
+  if (!pid) { host.querySelector('[data-addpid]').focus(); return; }
+  cards.push(C('c' + Date.now(), day, pid, '', '', note || '（未寫）')); drawAll();
+}
+document.body.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && ev.target.dataset.addnote !== undefined) { ev.preventDefault(); submitAdd(ev.target.closest('.add').dataset.add); } });
+// 拖到別天
+let dragId = null;
+document.body.addEventListener('dragstart', (ev) => { const c = ev.target.closest('.card'); if (!c) return; dragId = c.dataset.card; c.classList.add('dragging'); ev.dataTransfer.effectAllowed = 'move'; });
+document.body.addEventListener('dragend', () => { dragId = null; document.querySelectorAll('.col.over').forEach(x => x.classList.remove('over')); document.querySelectorAll('.card.dragging').forEach(x => x.classList.remove('dragging')); });
+document.body.addEventListener('dragover', (ev) => { const col = ev.target.closest('.col'); if (!col || !dragId) return; ev.preventDefault(); document.querySelectorAll('.col.over').forEach(x => x.classList.remove('over')); col.classList.add('over'); });
+document.body.addEventListener('drop', (ev) => { const col = ev.target.closest('.col'); if (!col || !dragId) return; ev.preventDefault(); const c = byId(dragId); if (c && c.day !== col.dataset.day) { if (c.day < TODAY) c.movedFrom = c.day; c.day = col.dataset.day; } dragId = null; drawAll(); });
+drawAll();
+</script>
+</body>
+</html>
