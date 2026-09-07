@@ -87,6 +87,20 @@ class TimesheetTombstone(Base):
     deleted_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class TimesheetMergeLog(Base):
+    """「合併同案」的一次操作（owner 2026-09-07）：本體併前的整列＋被併掉的整列都存在 snapshot，
+    「復原合併」照原 id 放回去。undone_at 有值＝已復原；同一天可連續合併多次，復原一次退一步（最近一筆未復原的）。"""
+    __tablename__ = "timesheet_merge_logs"
+
+    id = Column(String(32), primary_key=True)
+    staff_id = Column(String(32), nullable=False, index=True)
+    work_date = Column(DateTime(timezone=True), nullable=True)
+    groups = Column(Integer, nullable=False, default=0)
+    snapshot = Column(JSONB, nullable=False, default=list)       # [{kept:{整列}, absorbed:[{整列}, …]}, …]
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    undone_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class TimesheetConflict(Base):
     """Sheet 進來的列與總表改過的同一列（同人同日同案）內容不同：不自動插、不自動蓋，記下來等
     owner 在總表選（keep_mine 用總表的／use_sheet 用 Sheet 的／keep_both 兩列都留）。

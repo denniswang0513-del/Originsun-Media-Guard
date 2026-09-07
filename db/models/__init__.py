@@ -39,7 +39,7 @@ from ._workos import (  # noqa: F401
     PreprodBriefTemplate, PreprodLocation, PreprodLocationPhoto,
     PreprodLocationUsage, PreprodMeetingNote, PreprodProposal, PreprodProposalRef,
     PreprodQuoteAnalysis, PreprodQuoteFile, PreprodReference, PreprodReferenceLink,
-    PreprodReferenceShot, StaffRateHistory, Timesheet, TimesheetConflict, TimesheetProjectMap, TimesheetTombstone,
+    PreprodReferenceShot, StaffRateHistory, Timesheet, TimesheetConflict, TimesheetMergeLog, TimesheetProjectMap, TimesheetTombstone,
     WorkStageNode)
 
 # 財務管理：科目/對帳單匯入/淨值快照/持倉/科目對映/銀行帳戶/貸款

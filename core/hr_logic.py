@@ -889,3 +889,47 @@ STAFF_RANK = {STAFF_ACTIVE: 0, "兼職": 1}
 def staff_rank(status) -> int:
     """在職 → 兼職 → 其他／沒綁人員檔案。團隊的一週（api_me）與週記大家（api_journal）同一條。"""
     return STAFF_RANK.get((status or "").strip(), 2)
+
+
+# ── 合併同案（owner 2026-09-07：員工一天分好幾段記同一個案，「合併同案」把同案同分類同階段的列併成一列）──
+
+def _merge_key(r: dict) -> tuple:
+    return ((r.get("project_id") or r.get("project_name") or "").strip(), r.get("work_type") or "", r.get("stage_id") or "")
+
+
+def _joined(parts) -> str:
+    """去重後用「、」接起來（做了什麼／備註）：五列都是同一句就只剩一句，不同的接在後面讓人再刪減。"""
+    seen: list = []
+    for p in parts:
+        t = (p or "").strip()
+        if t and t not in seen:
+            seen.append(t)
+    return "、".join(seen)
+
+
+def merge_plan(rows) -> dict:
+    """rows＝ts_dict 列（含 editable）。只併「本人可改、有實際時數、不是計畫列」的列；鍵＝(專案 id 或案名, 分類, 階段)，
+    同鍵 ≥2 列才成組。本體＝起始時間最早的那列（沒起訖就照給的順序第一列）；時數相加、做了什麼／備註去重接起來、
+    起訖清空（那只是算時數的工具，併完再留會誤導）。草稿列（沒時數）、Sheet 列、計畫列都不動。
+    回 {"groups":[{label, kept_id, absorbed_ids, hours, task_note, remark, count}], "skipped": 沒併的列數}。"""
+    cand = [(i, r) for i, r in enumerate(rows)
+            if r.get("editable", True) and float(r.get("hours") or 0) > 0 and (r.get("status") or "") != "plan"]
+    buckets: dict = {}
+    for i, r in cand:
+        buckets.setdefault(_merge_key(r), []).append((i, r))
+    groups = []
+    for key, rs in buckets.items():
+        if len(rs) < 2:
+            continue
+        ordered = [r for _, r in sorted(rs, key=lambda ir: (ir[1].get("start_time") or "99:99", ir[0]))]
+        kept, rest = ordered[0], ordered[1:]
+        groups.append({
+            "label": "／".join([kept.get("project_name") or "（未填專案）", kept.get("work_type") or "—", kept.get("stage_name") or "—"]),
+            "kept_id": kept["id"], "absorbed_ids": [r["id"] for r in rest],
+            "hours": round(sum(float(r.get("hours") or 0) for r in ordered), 2),
+            "task_note": _joined(r.get("task_note") for r in ordered),
+            "remark": _joined(r.get("remark") for r in ordered),
+            "count": len(ordered),
+        })
+    merged_rows = sum(g["count"] for g in groups)
+    return {"groups": groups, "skipped": len(rows) - merged_rows}

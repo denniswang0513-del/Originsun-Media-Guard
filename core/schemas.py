@@ -462,6 +462,16 @@ class MeTimesheetUpdate(TimesheetManualRow):
     """員工改自己的一列（本人＋手填＋未鎖，規則在 core.hr_logic.can_edit_timesheet；不審核）。"""
 
 
+class TimesheetMergeRequest(BaseModel):
+    """合併同案（owner 2026-09-07）：date＝哪一天（空＝今天）；dry_run＝只回預覽不動資料。"""
+    date: str = ""
+    dry_run: bool = False
+
+
+class TimesheetMergeUndo(BaseModel):
+    log_id: str
+
+
 class TimesheetRowAdminUpdate(TimesheetManualRow):
     """管理員在總表改任一列（含 Sheet 列）；多一個管理員備註。"""
     note: Optional[str] = None

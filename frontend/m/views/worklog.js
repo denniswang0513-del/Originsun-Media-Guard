@@ -60,6 +60,7 @@ async function load(host) {
         const d = await mfetch('/api/v1/timesheets/mine?date=' + encodeURIComponent(_day));
         _items = d.items || [];
         box.innerHTML = _items.length ? _items.map(cardHtml).join('') : '<div class="m-empty">這天還沒有紀錄，按「新增一筆」開始填。</div>';
+        refreshUnmerge(host);
     } catch (e) {
         _items = [];
         box.innerHTML = e.status === 409
@@ -153,6 +154,38 @@ async function openForm(host, row = {}) {
     });
 }
 
+// ── 合併同案（owner 2026-09-07）：同案同分類同階段的列併成一列（時數相加、內容去重）；可復原一次 ──
+async function refreshUnmerge(host) {
+    const btn = host.querySelector('button[data-unmerge]');
+    if (!btn) return;
+    try {
+        const d = await mfetch('/api/v1/timesheets/mine/merge/last?date=' + encodeURIComponent(_day));
+        btn.hidden = !(d && d.last); btn.dataset.logId = d && d.last ? d.last.log_id : '';
+    } catch (_) { btn.hidden = true; }
+}
+async function mergeDay(host) {
+    const btn = host.querySelector('button[data-merge]');
+    await withBusy(btn, async () => {
+        try {
+            const pv = await mfetch('/api/v1/timesheets/mine/merge', { method: 'POST', body: { date: _day, dry_run: true } });
+            if (!pv.groups.length) { toast('沒有可以合併的列（要同案、同分類、同階段，而且都填了時數）'); return; }
+            const lines = pv.groups.map(g => `${g.label}：${g.count} 列 → 1 列，${g.hours} h`).join('\n');
+            if (!window.confirm(`會這樣合併（之後可以按「復原合併」退回）：\n\n${lines}\n\n不動：${pv.skipped} 列`)) return;
+            const r = await mfetch('/api/v1/timesheets/mine/merge', { method: 'POST', body: { date: _day, dry_run: false } });
+            toast(`已合併 ${r.groups.length} 組`); markStale('worklog'); await load(host);
+        } catch (e) { toast(e.message, 'err'); }
+    });
+}
+async function undoMerge(host) {
+    const btn = host.querySelector('button[data-unmerge]');
+    if (!btn || !btn.dataset.logId) return;
+    if (!window.confirm('復原最近一次合併？被併掉的列會放回來，合併後對那幾列的修改會被蓋掉。')) return;
+    await withBusy(btn, async () => {
+        try { await mfetch('/api/v1/timesheets/mine/merge/undo', { method: 'POST', body: { log_id: btn.dataset.logId } }); toast('已復原合併'); markStale('worklog'); await load(host); }
+        catch (e) { toast(e.message, 'err'); }
+    });
+}
+
 export async function render(host, { first }) {
     if (first) {
         host.innerHTML = `
@@ -166,6 +199,8 @@ export async function render(host, { first }) {
           <div class="m-actions" style="margin:0 0 12px">
             <button type="button" class="m-btn pri" data-add>新增一筆</button>
             <button type="button" class="m-btn" data-today>今天</button>
+            <button type="button" class="m-btn" data-merge>合併同案</button>
+            <button type="button" class="m-btn" data-unmerge hidden>復原合併</button>
           </div>
           <div id="wl-list"></div>`;
         host.addEventListener('click', (ev) => {
@@ -173,6 +208,8 @@ export async function render(host, { first }) {
             if (s) { _day = addDays(_day, Number(s.dataset.shift)); load(host); return; }
             if (ev.target.closest('button[data-today]')) { _day = todayLocal(); load(host); return; }
             if (ev.target.closest('button[data-add]')) { openForm(host, {}); return; }
+            if (ev.target.closest('button[data-merge]')) { mergeDay(host); return; }
+            if (ev.target.closest('button[data-unmerge]')) { undoMerge(host); return; }
             const card = ev.target.closest('.m-card[data-id]');
             if (card) { const row = _items.find(i => i.id === card.dataset.id); if (row) openForm(host, row); }
         });

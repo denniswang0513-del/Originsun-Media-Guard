@@ -38,7 +38,7 @@ from core.identity import resolve_current_staff
 from core.schemas import (MeTimesheetBatch, MeTimesheetUpdate, TimesheetBudgetRequest, TimesheetBudgetSet,
                           TimesheetDigestSettings, TimesheetIngestRequest, TimesheetManualRequest,
                           TimesheetConflictResolve, TimesheetProjectMapRequest, TimesheetPullSettings,
-                          TimesheetRowAdminUpdate, TimesheetRowsBatch)
+                          TimesheetMergeRequest, TimesheetMergeUndo, TimesheetRowAdminUpdate, TimesheetRowsBatch)
 from db.models import CrmProject, CrmQuotation, CrmQuotationItem, CrmStaff, Timesheet, TimesheetProjectMap, WorkStageNode
 from routers.crm._shared import project_names_map
 from services import timesheet_digest, timesheet_puller
@@ -264,6 +264,41 @@ async def my_incomplete_days(request: Request, days: int = Query(30, ge=1, le=12
             .where(Timesheet.status == PENDING_STATUS).where(Timesheet.work_date >= d0)
             .group_by(Timesheet.work_date).order_by(Timesheet.work_date))).all()
     return {"days": [{"date": tw_day(d).isoformat(), "count": int(n or 0)} for d, n in rows]}   # 台北日期（UTC 午夜存的列 .date() 會少一天）
+
+
+@router.post("/mine/merge")
+async def my_merge_day(body: TimesheetMergeRequest, request: Request):
+    """合併同案（owner 2026-09-07）：同案同分類同階段的列併成一列。dry_run 回預覽（哪幾組、各幾列幾小時）；
+    正式跑併列＋記合併紀錄（可復原）。規則在 core.hr_logic.merge_plan，I/O 在 services.timesheet_self.merge_day。"""
+    from services.timesheet_self import merge_day
+    ident = await _mine_ident(request)
+    d0 = _day_or_422(body.date)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        _CANDS_CACHE["val"] = None
+        return await merge_day(session, ident, d0, dry_run=body.dry_run)
+
+
+@router.post("/mine/merge/undo")
+async def my_merge_undo(body: TimesheetMergeUndo, request: Request):
+    """復原一次合併：被併掉的列照原 id 放回去、本體還原（合併後對它的修改會被蓋掉）。"""
+    from services.timesheet_self import undo_merge
+    ident = await _mine_ident(request)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        _CANDS_CACHE["val"] = None
+        return await undo_merge(session, ident, body.log_id)
+
+
+@router.get("/mine/merge/last")
+async def my_last_merge(request: Request, date: str = ""):
+    """那一天最近一筆還沒復原的合併（前端用來決定「復原合併」鈕出不出現）。"""
+    from services.timesheet_self import last_merge
+    ident = await _mine_ident(request)
+    d0 = _day_or_422(date)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        return {"last": await last_merge(session, ident, d0)}
 
 
 @router.get("/mine/rows")

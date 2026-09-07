@@ -6,12 +6,13 @@ routers/api_me.py（員工端 /my.html）與 routers/api_timesheets.py（CRM tab
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import or_, select
 
-from core.hr_logic import (EDIT_BLOCK_TEXT, by_month, can_edit_timesheet, day_iso, month_span, resolve_stage,
+from core.hr_logic import (EDIT_BLOCK_TEXT, by_month, can_edit_timesheet, day_iso, merge_plan, month_span, resolve_stage,
                            stage_index, tw_day)
 from services.timesheet_lookup import load_project_lookup
 from services.timesheet_manual import insert_manual_rows, names_for, normalize_row
@@ -232,6 +233,97 @@ async def delete_row(session, ident: dict, row_id: str) -> dict:
     await session.delete(r)
     await session.commit()
     return {"deleted": row_id}
+
+
+# ── 合併同案（owner 2026-09-07）：規則在 core.hr_logic.merge_plan；這裡做 I/O＋合併紀錄（可復原）──
+
+_SNAP_COLS = ("id", "work_date", "staff_name", "staff_id", "project_id", "project_name", "task_note", "hours", "planned_hours",
+              "work_type", "note", "remark", "stage_id", "stage_name", "bulletin_id", "sheet_key", "start_time", "end_time",
+              "edited_at", "edited_by", "status", "source", "row_hash", "created_at")
+_SNAP_DT = ("work_date", "edited_at", "created_at")
+
+
+def _snap(r) -> dict:
+    """整列存進 JSON（datetime → isoformat）；復原時 _unsnap 原樣放回、id 不變（待辦連結、指紋都保得住）。"""
+    out = {}
+    for k in _SNAP_COLS:
+        v = getattr(r, k, None)
+        out[k] = v.isoformat() if isinstance(v, datetime) else v
+    return out
+
+
+def _unsnap(d: dict) -> dict:
+    out = dict(d)
+    for k in _SNAP_DT:
+        if out.get(k):
+            out[k] = datetime.fromisoformat(out[k])
+    return out
+
+
+async def merge_day(session, ident: dict, day: datetime, *, dry_run: bool) -> dict:
+    """本人某日的列照 merge_plan 併。dry_run 只回預覽（groups／skipped）；正式跑＝改本體（時數相加、內容去重、起訖清空）、
+    刪被併的、記一筆 TimesheetMergeLog，同一個交易。回 {dry_run, log_id?, groups, skipped, rows}。"""
+    from db.models import TimesheetMergeLog
+    d1 = day + timedelta(days=1)
+    plan = merge_plan(await list_rows(session, ident, day, d1))
+    if dry_run or not plan["groups"]:
+        return {"dry_run": True, "log_id": None, **plan}
+    snapshot = []
+    for g in plan["groups"]:
+        kept = await own_row(session, g["kept_id"], ident)
+        absorbed = [await own_row(session, i, ident) for i in g["absorbed_ids"]]
+        snapshot.append({"kept": _snap(kept), "absorbed": [_snap(a) for a in absorbed]})
+        kept.hours = g["hours"]
+        kept.task_note = g["task_note"] or None
+        kept.remark = g["remark"] or None
+        kept.start_time = None
+        kept.end_time = None
+        for a in absorbed:
+            await session.delete(a)
+    log = TimesheetMergeLog(id=uuid.uuid4().hex, staff_id=ident["staff_id"], work_date=day, groups=len(snapshot), snapshot=snapshot)
+    session.add(log)
+    await session.commit()
+    return {"dry_run": False, "log_id": log.id, **plan, "rows": await list_rows(session, ident, day, d1)}
+
+
+async def undo_merge(session, ident: dict, log_id: str) -> dict:
+    """復原一次合併：本體還原成併前的樣子（合併後對它的修改會被蓋掉）、被併掉的列照原 id 放回去。已復原過的 409。"""
+    from db.models import Timesheet, TimesheetMergeLog
+    log = await session.get(TimesheetMergeLog, log_id)
+    if log is None or log.staff_id != ident["staff_id"]:
+        raise HTTPException(status_code=404, detail="找不到這筆合併紀錄")
+    if log.undone_at is not None:
+        raise HTTPException(status_code=409, detail="這筆合併已經復原過了")
+    for g in log.snapshot or []:
+        k = _unsnap(g["kept"])
+        kept = await session.get(Timesheet, k["id"])
+        if kept is None:
+            session.add(Timesheet(**k))
+        else:
+            for col, v in k.items():
+                if col != "id":
+                    setattr(kept, col, v)
+        for a in g.get("absorbed") or []:
+            d = _unsnap(a)
+            if await session.get(Timesheet, d["id"]) is None:
+                session.add(Timesheet(**d))
+    log.undone_at = datetime.now(timezone.utc)
+    await session.commit()
+    day = log.work_date
+    return {"log_id": log.id, "rows": await list_rows(session, ident, day, day + timedelta(days=1))}
+
+
+async def last_merge(session, ident: dict, day: datetime):
+    """那一天最近一筆還沒復原的合併（給「復原合併」鈕決定要不要出現）；沒有回 None。"""
+    from db.models import TimesheetMergeLog
+    log = (await session.execute(
+        select(TimesheetMergeLog).where(TimesheetMergeLog.staff_id == ident["staff_id"])
+        .where(TimesheetMergeLog.work_date >= day).where(TimesheetMergeLog.work_date < day + timedelta(days=1))
+        .where(TimesheetMergeLog.undone_at.is_(None))
+        .order_by(TimesheetMergeLog.created_at.desc()).limit(1))).scalar_one_or_none()
+    if log is None:
+        return None
+    return {"log_id": log.id, "groups": log.groups, "created_at": log.created_at.isoformat() if log.created_at else None}
 
 
 # ── 總表（管理員）：任一列都能調，含 Sheet 列；守衛在端點（check_admin）──

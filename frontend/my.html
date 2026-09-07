@@ -1595,6 +1595,8 @@ async function loadLog() {
             <span class="vrow"><button type="button" class="btn" data-z1="stages">工作階段設定</button>
                 <button type="button" class="btn" data-z1="row-add">＋ 加五列</button>
                 <button type="button" class="btn pri" data-z1="save">儲存草稿</button>
+                <button type="button" class="btn" data-z1="merge" title="同案、同分類、同階段的列併成一列：時數相加、內容去重">合併同案</button>
+                <button type="button" class="btn" data-z1="unmerge" id="z1-unmerge" hidden title="把最近一次合併退回去">復原合併</button>
                 <span id="z1-log-msg" class="meta"></span></span>
         </div>
         <div class="sheet-note">一列＝一個案子做了什麼；填了任何一格就自動存成草稿，時數填了才進彙整。起訖用 24 小時制（打「9」「930」「1730」都可以），會自己算出實際 h。
@@ -1606,7 +1608,19 @@ async function loadLog() {
     TS.wireAutosave(sheet, { day: () => _logDay, projects: () => _logProjects || [],
         onUnmatched: (names) => { const el = $("z1-log-msg"); if (el) el.textContent = `「${names.join("、")}」對不到案（已存下來，管理員會指定）`; } });
     _logProjectOptions();   // 先抓好，專案格一點就有得選
+    _refreshMergeBtn();
 }
+/** 「復原合併」只在這一天有還沒復原的合併紀錄時才出現（owner 2026-09-07：合併要能復原）。 */
+async function _refreshMergeBtn() {
+    const btn = $("z1-unmerge");
+    if (!btn) return;
+    try {
+        const d = await mjson("/api/v1/timesheets/mine/merge/last?date=" + _logDay);
+        btn.hidden = !(d && d.last);
+        btn.dataset.logId = d && d.last ? d.last.log_id : "";
+    } catch (_) { btn.hidden = true; }
+}
+const _POST = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 async function _z1Action(btn, ev) {
     const TS = await TS_READY;
     const act = btn.dataset.z1 || btn.dataset.tsAction;
@@ -1629,6 +1643,28 @@ async function _z1Action(btn, ev) {
         return;
     }
     if (act === "day-goto") { _logDay = btn.dataset.day || _localToday(); return loadLog(); }
+    if (act === "merge") {
+        // 合併同案：先 dry_run 拿預覽 → 確認 → 正式併（同案同分類同階段；時數相加、內容去重、起訖清空；可復原）
+        const msg = $("z1-log-msg");
+        try {
+            const pv = await mjson("/api/v1/timesheets/mine/merge", _POST({ date: _logDay, dry_run: true }));
+            if (!pv.groups.length) { if (msg) msg.textContent = "沒有可以合併的列（要同案、同分類、同階段，而且都填了時數）"; return; }
+            const lines = pv.groups.map(g => `${g.label}：${g.count} 列 → 1 列，${g.hours} h`).join("\n");
+            if (!window.confirm(`會這樣合併（合併後可以按「復原合併」退回）：\n\n${lines}\n\n不動：${pv.skipped} 列`)) return;
+            const r = await mjson("/api/v1/timesheets/mine/merge", _POST({ date: _logDay, dry_run: false }));
+            await loadLog();
+            const m2 = $("z1-log-msg"); if (m2) m2.textContent = `已合併 ${r.groups.length} 組，可以直接改內容；要退回按「復原合併」`;
+        } catch (e) { if (msg) msg.textContent = "合併失敗：" + e.message; }
+        return;
+    }
+    if (act === "unmerge") {
+        const logId = btn.dataset.logId;
+        if (!logId) return;
+        if (!window.confirm("復原最近一次合併？被併掉的列會放回來，合併後對那幾列的修改會被蓋掉。")) return;
+        try { await mjson("/api/v1/timesheets/mine/merge/undo", _POST({ log_id: logId })); await loadLog(); const m = $("z1-log-msg"); if (m) m.textContent = "已復原合併"; }
+        catch (e) { const m = $("z1-log-msg"); if (m) m.textContent = "復原失敗：" + e.message; }
+        return;
+    }
     if (act === "stages") {
         return TS.openStageEditor({ onSaved: (map) => { _logStages = map; if (sheet) TS.setStages(sheet, map); } });
     }
