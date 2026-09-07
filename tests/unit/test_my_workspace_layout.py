@@ -57,9 +57,10 @@ def test_journal_iframe_and_zones_stay():
     assert 'id="ws-journal"' in html and '/journal.html?embed=1' in html
     assert 'id="ws-zone1"' in html and 'id="ws-actions"' in html and 'id="ws-grid"' in html
     assert "journal-embed-height" in html
-    # 三顆帶入鈕與工作階段設定鈕
-    for act in ("import-shoots", "import-todos", "stages", "row-add", "save"):
+    # 工作階段設定／加五列／儲存草稿；帶入鈕 2026-09-07 owner 拿掉
+    for act in ("stages", "row-add", "save"):
         assert f'data-z1="{act}"' in html, act
+    assert "import-shoots" not in html and "import-todos" not in html
     # 複製上個工作日跳過週末
     assert "function _prevWorkday(" in html and "_dow(d) === 0 || _dow(d) === 6" in html
 

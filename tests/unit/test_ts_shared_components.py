@@ -66,7 +66,8 @@ def test_the_sheet_has_the_stage_column_after_type_and_stages_follow_the_categor
     assert m
     keys = re.findall(r"\['(\w+)',", m.group(1))
     # 2026-09-06 owner：計畫 h 整欄拿掉、實際 h 改名時數 h（planned_hours 後端留著，格子不送）
-    assert keys == ["project", "type", "stage", "note", "remark", "t0", "t1", "hours", "state"], keys
+    # 2026-09-07 owner：時數搬到起訖左邊（起訖只是幫忙算時數的工具）
+    assert keys == ["project", "type", "stage", "note", "remark", "hours", "t0", "t1", "state"], keys
     # 分類變了 → 階段下拉換清單；原階段不在裡面就清空並提示
     assert "_syncStage(" in sheet and "階段已清空" in sheet
     assert 'data-f="stage"' in sheet and "stagesFor(" in sheet
@@ -101,8 +102,9 @@ def test_stage_editor_is_one_module_opened_from_both_hosts():
     assert "'/api/v1/crm/work-stages/nodes'" in st
     for verb in ("method: 'POST'", "method: 'PUT'"):
         assert verb in st, verb
-    assert "const on = hit.s.active === false; await put(hit.s.id, { active: on })" in st, "停用不刪：切 active，不 DELETE"
-    assert "method: 'DELETE'" not in st
+    assert "const on = hit.s.active === false; await put(hit.s.id, { active: on })" in st, "停用：切 active"
+    # 2026-09-07 起 DELETE 只給「還沒有人用過」的階段（按鈕以 used===0 為閘；後端對有人用的仍改成停用）
+    assert st.count("method: 'DELETE'") == 1 and "act === 'del'" in st and "s.used === 0" in st
     tab = repo_src(TAB)
     assert 'data-ts-action="stages"' in tab and "openStageEditor(" in tab and "setStages(" in tab
     my = repo_src(MY)

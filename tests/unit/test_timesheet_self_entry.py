@@ -22,7 +22,7 @@ def test_can_edit_truth_table():
     # 代碼→給人看的原句只有一份（端點的 detail 從這裡拿）
     assert "不是你的" in EDIT_BLOCK_TEXT["not_owner"] and "Sheet" in EDIT_BLOCK_TEXT["not_manual"]
     assert "不能再改" in EDIT_BLOCK_TEXT["locked"]
-    assert EDITABLE_STATUSES == {"plan", "draft"}   # 不審核：計畫與實際都隨時可改
+    assert EDITABLE_STATUSES == {"plan", "draft", "pending"}   # 不審核：計畫、實際、草稿（2026-09-07）都隨時可改
 
 
 def test_own_scope_comes_from_the_token_never_the_body():

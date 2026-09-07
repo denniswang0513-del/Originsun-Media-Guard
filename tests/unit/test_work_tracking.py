@@ -13,10 +13,9 @@ def test_row_state_and_work_type_rules():
     assert row_state(3, 2) == "draft"            # 有實際就是實際
     assert row_state(None, 2) == "plan"
     assert row_state(0, 2) == "plan"
-    with pytest.raises(ValueError):
-        row_state(None, None)
-    with pytest.raises(ValueError):
-        row_state(0, 0)
+    # 2026-09-07 owner「儲存草稿」：兩個都沒有＝pending（草稿），不再 422；空白列由 normalize_row 擋
+    assert row_state(None, None) == "pending"
+    assert row_state(0, 0) == "pending"
     assert len(WORK_TYPES) == 9 and "拍攝" in WORK_TYPES and "剪接" in WORK_TYPES
     assert norm_work_type("") is None and norm_work_type(None) is None
     assert norm_work_type(" 拍攝 ") == "拍攝"

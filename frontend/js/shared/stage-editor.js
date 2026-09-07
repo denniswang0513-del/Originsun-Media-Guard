@@ -1,7 +1,8 @@
 /**
  * stage-editor.js — 工作階段設定（唯一正本）。
  *
- * 每個分類（core.hr_logic.WORK_TYPES 九類）自己的階段清單：改名、上下排序、新增、停用不刪。
+ * 每個分類（core.hr_logic.WORK_TYPES 九類）自己的階段清單：改名、上下排序、新增、停用不刪；
+ * 還沒有任何工時列用過的階段可以「刪除」（後端 GET 回 used 筆數；DELETE 對有人用的會改成停用）。
  * 資料存 work_stage_nodes（GET/POST/PUT/DELETE /api/v1/crm/work-stages/nodes）；每個動作立刻寫入，
  * 沒有「儲存」鈕——關閉時把最新的 active 清單（{分類: [{id, name}]}）回給呼叫端，新列的下拉立即更新。
  * 工作追蹤分頁「設定」與 /my.html「工作階段設定」鈕開的是同一個。
@@ -29,6 +30,7 @@ const CSS = `
 .stage-editor .se-ic { border:1px solid transparent; background:none; color:var(--se-sub); cursor:pointer; font-size:12px; padding:2px 5px; border-radius:4px; font-family:inherit; }
 .stage-editor .se-ic:hover { color:var(--se-ink); border-color:var(--se-line); }
 .stage-editor .se-ic:disabled { opacity:.35; cursor:default; }
+.stage-editor .se-del:hover { color:#f87171; border-color:#f87171; }
 .stage-editor .se-foot { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:14px; }
 .stage-editor .se-msg { color:var(--se-sub); font-size:12px; }
 .stage-editor .se-done { background:var(--se-btn); color:#fff; border:none; border-radius:6px; padding:7px 16px; font-size:13px; cursor:pointer; font-family:inherit; }
@@ -59,7 +61,7 @@ export async function openStageEditor(cfg = {}) {
     bg.innerHTML = `<div class="stage-editor" role="dialog" aria-label="工作階段設定">
         <button type="button" class="se-x" data-se="close" title="關閉">×</button>
         <h3>工作階段設定</h3>
-        <div class="se-sub">每個分類自己的階段。改名直接打字（離開格子就存）、上下鍵排序、「停用」不刪（舊列照樣顯示）；改完新列的階段下拉立即更新。</div>
+        <div class="se-sub">每個分類自己的階段。改名直接打字（離開格子就存）、上下鍵排序、「停用」不刪（舊列照樣顯示）；還沒有人用過的階段可以「刪除」。改完新列的階段下拉立即更新。</div>
         <div class="se-grid" data-se="grid"><div class="se-sub" style="padding:12px;">載入中…</div></div>
         <div class="se-foot"><span class="se-msg" data-se="msg"></span><button type="button" class="se-done" data-se="close">完成</button></div>
     </div>`;
@@ -76,6 +78,7 @@ export async function openStageEditor(cfg = {}) {
                     <button type="button" class="se-ic" data-se="up" data-id="${esc(s.id)}" ${i === 0 ? 'disabled' : ''} title="往上">↑</button>
                     <button type="button" class="se-ic" data-se="down" data-id="${esc(s.id)}" ${i === list.length - 1 ? 'disabled' : ''} title="往下">↓</button>
                     <button type="button" class="se-ic" data-se="toggle" data-id="${esc(s.id)}">${s.active === false ? '啟用' : '停用'}</button>
+                    ${s.used === 0 ? `<button type="button" class="se-ic se-del" data-se="del" data-id="${esc(s.id)}" title="還沒有人用過，可以直接移除">刪除</button>` : ''}
                 </li>`).join('') || '<li class="se-sub">（還沒有階段）</li>'}</ul></div>`;
         }).join('') || '<div class="se-sub" style="padding:12px;">還沒有分類。</div>';
     };
@@ -120,6 +123,14 @@ export async function openStageEditor(cfg = {}) {
             const i = list.findIndex(s => s.id === hit.s.id);
             // 值就在手上：寫完就地改、重畫，不整棵樹重抓（只有「＋階段」要新 id 才 load）
             if (act === 'toggle') { const on = hit.s.active === false; await put(hit.s.id, { active: on }); hit.s.active = on; return draw(); }
+            if (act === 'del') {
+                if (!confirm(`刪除「${hit.s.name}」？（還沒有人用過，會直接移除）`)) return;
+                const r = await f(`${API}/${encodeURIComponent(hit.s.id)}`, { method: 'DELETE' });
+                dirty = true;
+                if (r && r.status === 'deactivated') { hit.s.active = false; hit.s.used = r.used || 1; say('剛剛有人用了這個階段，改成停用'); }
+                else { hit.c.stages = (hit.c.stages || []).filter(x => x.id !== hit.s.id); say('已刪除 ' + hit.s.name); }
+                return draw();
+            }
             const swap = async (o, a, b) => { await Promise.all([put(hit.s.id, { sort: a }), put(o.id, { sort: b })]); hit.s.sort = a; o.sort = b; draw(); };
             if (act === 'up' && i > 0) { const o = list[i - 1]; return swap(o, o.sort ?? i - 1, hit.s.sort ?? i); }
             if (act === 'down' && i < list.length - 1) { const o = list[i + 1]; return swap(o, o.sort ?? i + 1, hit.s.sort ?? i); }

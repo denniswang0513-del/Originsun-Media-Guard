@@ -431,19 +431,24 @@ def resolve_stage(stage_id, work_type, index: dict):
     return st
 
 
+#: 草稿：內容存下、還沒填時數（owner 2026-09-07「儲存草稿」）。燒錄／匯總只算 hours>0，所以它自然不進彙整；
+#: 「日期 專案紀錄未完成」的提醒就是找這個狀態。
+PENDING_STATUS = "pending"
+
+
 def row_state(hours, planned_hours) -> str:
     """一列是「只有計畫」還是「有實際」：hours>0 → draft（實際）；否則有 planned → plan；
-    兩個都沒有＝不合法（呼叫端先擋）。計畫列的 hours 存 0，燒錄／匯總只算 hours。"""
+    兩個都沒有 → pending（草稿；呼叫端要求至少有內容）。計畫列的 hours 存 0，燒錄／匯總只算 hours。"""
     if (hours or 0) > 0:
         return "draft"
     if (planned_hours or 0) > 0:
         return "plan"
-    raise ValueError("時數或計畫小時至少一個要大於 0")
+    return PENDING_STATUS
 
 
 #: 本人可改／可刪的手填列狀態（docs/TIMESHEET_SELF_ENTRY_PLAN.md D3／D5）：
 #: 不審核，所以 plan／draft 都能改；locked 留給日後月結。
-EDITABLE_STATUSES = frozenset({"plan", "draft"})   # 不審核：沒有 confirmed／approved
+EDITABLE_STATUSES = frozenset({"plan", "draft", PENDING_STATUS})   # 不審核：沒有 confirmed／approved
 
 
 #: can_edit_timesheet 的代碼 → 給人看的原因；HTTP 狀態由代碼決定，不靠中文比對

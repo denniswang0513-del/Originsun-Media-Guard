@@ -5,7 +5,8 @@
  * （/my.html）都 import 這裡；列的 html、格線／列號／選到藍框的 CSS、鍵盤走列、
  * 起訖算小時、工作階段跟著分類走、逐列自動存，全部只有這一份（tests/unit/test_ts_shared_components.py 釘住）。
  *
- * 欄位：# | 專案 | 分類 | 工作階段 | 做了什麼 | 備註 | 起 | 訖 | 時數 h | 狀態 | ×（計畫 h 欄 2026-09-06 拿掉）
+ * 欄位：# | 專案 | 分類 | 工作階段 | 做了什麼 | 備註 | 時數 h | 起 | 訖 | 狀態 | ×（計畫 h 欄 2026-09-06 拿掉；
+ * 時數 2026-09-07 搬到起訖左邊——起訖只是幫忙算時數的工具）
  * - 專案格掛 project-pop（進行中／已結案浮層），選到的 id 記在 data-pid。
  * - 工作階段：select 只列「該列分類」的階段（opts.stages ＝ {分類名: [{id, name}]}，來自
  *   /timesheets/options 的 stages）；分類改了、原階段不在新清單 → 清空並在狀態格提示。
@@ -19,14 +20,14 @@ import { attachProjectPop } from './project-pop.js';
 
 export const SHEET_COLS = [
     ['project', '專案'], ['type', '分類'], ['stage', '工作階段'], ['note', '做了什麼'], ['remark', '備註'],
-    ['t0', '起'], ['t1', '訖'], ['hours', '時數 h'], ['state', ''],
+    ['hours', '時數 h'], ['t0', '起'], ['t1', '訖'], ['state', ''],
 ];
 export const BLANK_ROWS = 5;
 
 const CSS = `
 table.ts-sheet { --sh-bg:#1b1b1b; --sh-line:#3a3a3a; --sh-head:#262626; --sh-head-ink:#bbb; --sh-ink:#eee; --sh-sub:#777;
     --sh-ro:#1f1f1f; --sh-ro-ink:#888; --sh-hover:#202020; --sh-focus:#1f2937; --sh-accent:#3b82f6; --sh-del:#666; --sh-del-hover:#f87171;
-    --sh-ok:#6ee7b7; --sh-busy:#93c5fd; --sh-err:#fca5a5;
+    --sh-ok:#6ee7b7; --sh-warn:#f59e0b; --sh-busy:#93c5fd; --sh-err:#fca5a5;
     width:100%; table-layout:fixed; border-collapse:collapse; counter-reset:sheetrow; background:var(--sh-bg); font-size:12.5px; }
 table.ts-sheet th, table.ts-sheet td { border:1px solid var(--sh-line); padding:0; height:32px; color:var(--sh-ink); }
 table.ts-sheet th { background:var(--sh-head); color:var(--sh-head-ink); font-weight:500; font-size:12px; text-align:center; padding:6px 4px; white-space:nowrap; }
@@ -102,10 +103,10 @@ export function rowHtml(v = {}, o = {}, ctx = {}) {
         <td>${stageSelectHtml({ id: v.stage_id || '', name: v.stage_name || '' }, `data-f="stage"${rosel}`, stagesFor(ctx.stages, v.work_type))}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}"${ro}></td>
         <td><input type="text" data-f="remark" value="${esc(v.remark || '')}"${ro}></td>
+        <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}"${ro}></td>
         <td><input ${t} data-f="t0" value="${esc(v.t0 || '')}"${ro}></td>
         <td><input ${t} data-f="t1" value="${esc(v.t1 || '')}"${ro}></td>
-        <td><input type="number" data-f="hours" min="0" step="any" value="${v.hours ?? ''}"${ro}></td>
-        <td class="ts-sheet-state" data-f="state">${o.readonly ? 'Sheet' : (o.id ? '已存' : '')}</td>
+        <td class="ts-sheet-state" data-f="state"${o.pending ? ' style="color:var(--sh-warn)"' : ''}>${o.readonly ? 'Sheet' : (o.id ? (o.pending ? '草稿（沒時數）' : '已存') : '')}</td>
         <td class="ts-sheet-del">${o.readonly ? '' : '<button type="button" data-ts-action="row-remove" title="刪這一列">×</button>'}</td>
     </tr>`;
 }
@@ -136,7 +137,7 @@ export function renderSheet(host, rows, opts = {}) {
     ensureStyle('ts-sheet-css', CSS);
     host._tsCtx = { ...(host._tsCtx || {}), workTypes: opts.workTypes || [], stages: opts.stages || {}, readonly: !!opts.readonly };
     const ctx = host._tsCtx;
-    const body = (rows || []).map(r => rowHtml(rowFromItem(r), { id: r.id, readonly: opts.readonly || !r.editable }, ctx)).join('');
+    const body = (rows || []).map(r => rowHtml(rowFromItem(r), { id: r.id, readonly: opts.readonly || !r.editable, pending: r.status === 'pending' }, ctx)).join('');
     host.innerHTML = tableHtml(body + (opts.readonly ? '' : rowHtml({}, {}, ctx).repeat(opts.blankRows ?? BLANK_ROWS)), opts.id ?? 'ts-mine-add');
     if (opts.projectPicker) attachProjectPop(host, { options: opts.projectPicker, value: (p) => (p.id ? (p.name || p.label) : (p.label || p.name)) });
     _wire(host);
@@ -318,7 +319,8 @@ function _wire(host) {
 const _timers = new WeakMap();
 
 /**
- * 掛逐列自動存：填齊（專案＋實際或計畫）才 POST，回來把 id 掛上；有 id＝PUT；同列上一筆還在飛就排在後面。
+ * 掛逐列自動存：有內容（專案／做了什麼／階段／備註任一）就 POST，回來把 id 掛上；有 id＝PUT；同列上一筆還在飛就排在後面。
+ * 沒時數的列存成草稿（後端 status=pending，彙整不算）—— owner 2026-09-07「不管表單任何狀態每個格子的資訊都存下來」。
  * cfg：tfetch（預設 tsFetch）、day（() => YYYY-MM-DD）、projects（() => 專案清單，對 label 回 id）、
  *      onSaved(tr, body)、onUnmatched(names)。
  */
@@ -329,12 +331,13 @@ export function wireAutosave(host, cfg = {}) {
         if (tr._saving) { tr._again = true; return; }
         const st = tr.querySelector('[data-f="state"]');
         const body = rowBody(tr, { day: cfg.day ? cfg.day() : '', projects: cfg.projects ? (cfg.projects() || []) : [] });
-        const complete = body.project_name && ((body.hours || 0) > 0 || (body.planned_hours || 0) > 0);
-        if (!complete) {
-            // 已存過的列把時數／專案清掉：伺服器還是舊值，要說清楚（不然畫面空、資料還在）
-            if (tr.dataset.id) { st.textContent = '沒存（時數不能空，伺服器仍是舊值）'; st.style.color = 'var(--sh-err)'; return; }
-            st.textContent = body.project_name || body.task_note ? '再填時數' : ''; st.style.color = ''; return;
+        const content = body.project_name || body.task_note || body.stage_id || body.remark;
+        if (!content) {
+            // 已存過的列整列清空：伺服器還是舊值，要說清楚（要拿掉這列請按 ×）
+            if (tr.dataset.id) { st.textContent = '沒存（列清空了；要刪請按 ×）'; st.style.color = 'var(--sh-err)'; return; }
+            st.textContent = ''; st.style.color = ''; return;
         }
+        const pending = !((body.hours || 0) > 0 || (body.planned_hours || 0) > 0);
         tr._saving = true;
         st.textContent = '儲存中…'; st.style.color = 'var(--sh-busy)';
         try {
@@ -345,7 +348,7 @@ export function wireAutosave(host, cfg = {}) {
                 tr.dataset.id = (r.ids || [])[0] || '';
                 if ((r.unmatched_projects || []).length) cfg.onUnmatched?.(r.unmatched_projects);
             }
-            st.textContent = '已存'; st.style.color = 'var(--sh-ok)';
+            st.textContent = pending ? '草稿（沒時數）' : '已存'; st.style.color = pending ? 'var(--sh-warn)' : 'var(--sh-ok)';
             cfg.onSaved?.(tr, body);
         } catch (e) {
             st.textContent = '沒存：' + (e.message || e); st.style.color = 'var(--sh-err)';

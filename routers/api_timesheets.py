@@ -28,6 +28,7 @@ import core.state as state
 from config import load_settings, save_settings
 from core.auth import ME_MODULE_KEYS, _extract_token, check_admin, check_admin_or_module, current_username, payload_grants
 from core.db_guard import db_factory_or_503
+from core.hr_logic import _TW
 from core.journal_logic import week_start_of
 from core.hr_logic import (midnight_of, fillers_on, HOURS_PER_WORKDAY, WORK_TYPES, Misses, active_fillers, bucket_hours, budget_burn,
                            day_iso, explain_miss, hours_rollup, missing_fillers, month_key, month_span, months_back,
@@ -242,6 +243,25 @@ async def my_day(request: Request, date: str = ""):
         "yesterday": [i for i in rows if i["date"] < day],
         "work_types": list(WORK_TYPES),
     }
+
+
+@router.get("/mine/incomplete")
+async def my_incomplete_days(request: Request, days: int = Query(30, ge=1, le=120)):
+    """近 N 天「存了草稿但還沒填時數」的日期（owner 2026-09-07：今天那條提醒「日期 專案紀錄未完成」）。
+    路徑要排在 /mine/{row_id} 前面（不然 incomplete 會被當成 row_id）。"""
+    from core.hr_logic import PENDING_STATUS
+    from db.models import Timesheet
+    from services.timesheet_self import own_filter
+    from core.hr_logic import tw_day
+    ident = await _mine_ident(request)
+    d0 = datetime.now(_TW).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet.work_date, safunc.count()).where(own_filter(ident))
+            .where(Timesheet.status == PENDING_STATUS).where(Timesheet.work_date >= d0)
+            .group_by(Timesheet.work_date).order_by(Timesheet.work_date))).all()
+    return {"days": [{"date": tw_day(d).isoformat(), "count": int(n or 0)} for d, n in rows]}   # 台北日期（UTC 午夜存的列 .date() 會少一天）
 
 
 @router.get("/mine/rows")

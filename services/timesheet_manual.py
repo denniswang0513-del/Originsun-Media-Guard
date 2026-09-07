@@ -67,6 +67,8 @@ def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, keep: tuple |
     if wd is None:
         raise HTTPException(status_code=422, detail=f"日期格式錯誤：{r.work_date}")
     pname = (r.project_name or "").strip()
+    if status == "pending" and not (pname or (r.task_note or "").strip() or getattr(r, "stage_id", None)):
+        raise HTTPException(status_code=422, detail="空白列不存：至少要有專案、做了什麼或工作階段")
     if r.project_id:
         pid, why = r.project_id, "map"
         pname = pname or (id_to_name.get(pid) or "").strip()

@@ -170,10 +170,19 @@ footer .eyebrow { font-size: 10px; }
 .today-strip { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 13px; padding: 8px 12px; margin-bottom: 10px; background: #fafafa; border: 1px solid var(--line); border-radius: 6px; }
 .today-strip .k { color: var(--sub); font-size: 12px; margin-right: 4px; }
 .today-strip .warn { color: var(--red); }
+.today-strip .linkish { border: 0; background: none; padding: 0; font: inherit; cursor: pointer; text-decoration: underline dotted; }
 .sheet-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .sheet-note { font-size: 12px; color: var(--sub); line-height: 1.6; margin-top: 6px; }
 /* 共用元件的白底配色（ts-sheet / ts-projects / stage-editor 的 CSS 變數）*/
-#ws-view table.ts-sheet { --sh-bg: #fff; --sh-line: #e5e5e5; --sh-head: #f5f5f5; --sh-head-ink: #737373; --sh-ink: #262626; --sh-sub: #8a8a8a; --sh-ro: #fafafa; --sh-ro-ink: #8a8a8a; --sh-hover: #fff; --sh-focus: #fff; --sh-accent: #1d4ed8; --sh-del: #a3a3a3; --sh-del-hover: #c9372c; --sh-ok: #15803d; --sh-busy: #1d4ed8; --sh-err: #c9372c; font-size: 13px; }
+/* stage-editor 與 proj-pop 是掛在 body 上的共用元件（預設深色變數）：這頁白底，用 body 前綴蓋過它們執行期注入的 CSS
+   （owner 2026-09-07「調整版面配色」——深色視窗浮在白頁上、停用列幾乎看不到） */
+body .stage-editor { --se-bg: #fff; --se-ink: #262626; --se-sub: #737373; --se-line: #e5e5e5; --se-box: #fafafa; --se-off: #a3a3a3; --se-btn: #1d4ed8; --se-input: #fff;
+    box-shadow: 0 16px 48px rgba(0,0,0,.18); }
+body .stage-editor .se-g li input { border-color: #e5e5e5; }
+body .stage-editor-bg { background: rgba(0,0,0,.35); }
+body .proj-pop { --pp-bg: #fff; --pp-line: #e5e5e5; --pp-shadow: 0 8px 24px rgba(0,0,0,.14); --pp-head: #f5f5f5; --pp-head-ink: #737373; --pp-toggle: #1d4ed8;
+    --pp-ink: #262626; --pp-sub: #8a8a8a; --pp-on: #eef2ff; --pp-on-ink: #1e1b4b; --pp-empty: #a3a3a3; }
+#ws-view table.ts-sheet { --sh-warn: #b45309; --sh-bg: #fff; --sh-line: #e5e5e5; --sh-head: #f5f5f5; --sh-head-ink: #737373; --sh-ink: #262626; --sh-sub: #8a8a8a; --sh-ro: #fafafa; --sh-ro-ink: #8a8a8a; --sh-hover: #fff; --sh-focus: #fff; --sh-accent: #1d4ed8; --sh-del: #a3a3a3; --sh-del-hover: #c9372c; --sh-ok: #15803d; --sh-busy: #1d4ed8; --sh-err: #c9372c; font-size: 13px; }
 /* 示範頁的格子手感：34px 列、表頭淺灰置中、列號不塗底、選到藍框、階段藍字、新列淡底 */
 #ws-view table.ts-sheet th, #ws-view table.ts-sheet td { height: 34px; }
 #ws-view table.ts-sheet th { font-weight: 500; font-size: 12px; }
@@ -1435,7 +1444,7 @@ async function _loadToday() {
     try { _todayInfo = await mjson("/api/v1/me/today"); } catch (e) { _todayInfo = { error: e.message, shoots: [], todos: [] }; }
     return _todayInfo;
 }
-function _todayStripHtml(t) {
+function _todayStripHtml(t, incomplete = []) {
     if (!t || t.error) return `<div class="today-strip"><span class="meta">${esc((t && t.error) || "")}</span></div>`;
     const shoots = (t.shoots || []).map(s => `<span>${esc(s.title || s.project_name || "")}${s.location ? " · " + esc(s.location) : ""}${s.start_time ? " · " + esc(s.start_time) : ""}</span>`).join("　");
     const jr = t.last_week_journal;
@@ -1447,6 +1456,7 @@ function _todayStripHtml(t) {
         <span><span class="k">待辦</span>${(t.todos || []).length} 件</span>
         <span><span class="k">上週回顧</span><a href="#ws-journal" class="${monday && jr !== "submitted" ? "warn" : ""}">${monday && jr !== "submitted" ? "上週回顧還沒寫" : jrText}</a></span>
         ${(t.leave_pending || []).length ? `<span><span class="k">請假待審</span>${t.leave_pending.length} 件</span>` : ""}
+        ${incomplete.length ? `<span><span class="k">未完成</span>${incomplete.map(d => `<button type="button" class="linkish warn" data-z1="day-goto" data-day="${esc(d.date)}">${esc(_mdLabel(d.date))} 專案紀錄未完成</button>`).join("、")}</span>` : ""}
     </div>`;
 }
 async function loadLog() {
@@ -1454,32 +1464,29 @@ async function loadLog() {
     host.innerHTML = `<div class="empty">載入中…</div>`;
     const TS = await TS_READY;
     const today = await _loadToday();
-    let mine = null, err = "";
+    let mine = null, err = "", incomplete = [];
     try { mine = await mjson("/api/v1/timesheets/mine?date=" + _logDay); } catch (e) { err = e.message; }
+    // 近 30 天存了草稿卻沒填時數的日期 → 今天那條提醒「9/5 專案紀錄未完成」（owner 2026-09-07）
+    try { incomplete = ((await mjson("/api/v1/timesheets/mine/incomplete?days=30")).days || []).filter(d => d.date !== _localToday()); } catch (_) { incomplete = []; }
     if (_logStages === null) { try { _logStages = (await mjson("/api/v1/timesheets/options")).stages || {}; } catch (_) { _logStages = {}; } }
     if (mine) _logWorkTypes = mine.work_types || _logWorkTypes;
     const isToday = _logDay === _localToday();
-    const shoots = today.shoots || [], todos = today.todos || [];
     host.innerHTML = `
         <div class="vhead"><span class="ey">Project Log<b>今天的專案紀錄 ${esc(_mdLabel(_logDay))}</b></span>
             <span class="vrow"><button type="button" class="btn" data-z1="day" data-delta="-1">‹ ${esc(_mdLabel(_shiftDays(_logDay, -1)))}</button>
                 <span class="meta">${isToday ? "今天" : ""}</span>
                 <button type="button" class="btn" data-z1="day" data-delta="1" ${isToday ? "disabled" : ""}>${esc(_mdLabel(_shiftDays(_logDay, 1)))} ›</button>
                 ${isToday ? "" : '<button type="button" class="btn" data-z1="day" data-delta="0">今天</button>'}</span></div>
-        ${isToday ? _todayStripHtml(today) : ""}
+        ${isToday ? _todayStripHtml(today, incomplete) : ""}
         ${mine ? `
-        <div class="vrow" style="margin-bottom:10px;">
-            <button type="button" class="btn" data-z1="import-shoots" ${shoots.length && isToday ? "" : "disabled"}>從場次帶入（${shoots.length}）</button>
-            <button type="button" class="btn" data-z1="import-todos" ${todos.length ? "" : "disabled"}>從待辦帶入（${todos.length}）</button>
-        </div>
         <div id="z1-sheet"></div>
         <div class="sheet-foot">
             <span class="vrow">${grants().has("timesheets") ? '<button type="button" class="btn" data-z1="stages">工作階段設定</button>' : ""}
                 <button type="button" class="btn" data-z1="row-add">＋ 加五列</button>
-                <button type="button" class="btn pri" data-z1="save">儲存</button>
+                <button type="button" class="btn pri" data-z1="save">儲存草稿</button>
                 <span id="z1-log-msg" class="meta"></span></span>
         </div>
-        <div class="sheet-note">一列＝一個案子做了什麼；專案＋時數（實際或計畫）填齊就自動存，之後改任何一格也自動存。起訖用 24 小時制（打「9」「930」「1730」都可以），會自己算出實際 h。
+        <div class="sheet-note">一列＝一個案子做了什麼；填了任何一格就自動存成草稿，時數填了才進彙整。起訖用 24 小時制（打「9」「930」「1730」都可以），會自己算出實際 h。
             工作階段只列該列分類的階段。往前翻可以補記；Sheet 拉進來的列會標「Sheet」、不能改。</div>`
         : `<div class="notice">${esc(err || "載入失敗")}<br><span class="meta">要記專案紀錄，帳號要在「使用者管理」綁定人員檔案並開通工作紀錄。</span></div>`}`;
     if (!mine) return;
@@ -1501,25 +1508,16 @@ async function _z1Action(btn, ev) {
     if (act === "row-add") { if (sheet) TS.appendBlankRows(sheet); return; }
     if (act === "row-remove") { if (sheet) TS.removeRow(sheet, btn.closest("tr")); return; }
     if (act === "save") {
+        // 儲存草稿：每一列有內容就存（沒時數＝草稿，不進彙整）；其實每格改了就自動存，這顆只是催一次＋講清楚
         if (!sheet) return;
         const rows = TS.collectRows(sheet);
         rows.forEach(r => { if (!r.readonly) TS.saveRowNow(sheet, r.tr); });
-        const el = $("z1-log-msg"); if (el) el.textContent = rows.length ? `已送出 ${rows.length} 列（沒填時數的列會等你填）` : "還沒有填任何一列";
+        const noHours = rows.filter(r => !r.readonly && !(Number(r.hours) > 0)).length;
+        const el = $("z1-log-msg");
+        if (el) el.textContent = rows.length ? `已存 ${rows.length} 列` + (noHours ? `，其中 ${noHours} 列還沒填時數（草稿，不進彙整）` : "") : "還沒有填任何一列";
         return;
     }
-    if (act === "import-shoots" || act === "import-todos") {
-        if (!sheet) return;
-        const t = await _loadToday();
-        TS.dropEmptyRows(sheet);
-        if (act === "import-shoots") {
-            (t.shoots || []).forEach(s => TS.appendRow(sheet, { project: s.project_name || "", project_id: s.project_id || "", work_type: "拍攝",
-                note: [s.title, s.location].filter(Boolean).join(" ") }));
-        } else {
-            (t.todos || []).forEach(td => TS.appendRow(sheet, { work_type: "行政", note: td.title || "", bulletin_id: td.id }));
-        }
-        TS.appendBlankRows(sheet);
-        return;
-    }
+    if (act === "day-goto") { _logDay = btn.dataset.day || _localToday(); return loadLog(); }
     if (act === "stages") {
         return TS.openStageEditor({ onSaved: (map) => { _logStages = map; if (sheet) TS.setStages(sheet, map); } });
     }

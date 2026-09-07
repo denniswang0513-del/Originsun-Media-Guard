@@ -164,3 +164,21 @@ def test_migration_and_model_exports():
     uniques = [tuple(c.name for c in u.columns) for u in WorkStageNode.__table__.constraints
                if u.__class__.__name__ == "UniqueConstraint"]
     assert ("parent_id", "name") in uniques
+
+
+def test_editor_offers_delete_only_for_unused_stages():
+    """owner 2026-09-07「如果項目還沒有人使用可以移除」：GET 帶 used 筆數；編輯器只對 used===0 露出刪除；
+    DELETE 仍是「有人用→停用」的閘（前端拿到 deactivated 就改畫成停用）。"""
+    src = repo_src("routers/crm/work_stages.py")
+    body = code_only(func_body(src, "async def list_work_stage_nodes("))
+    assert "Timesheet.stage_id, func.count()" in body and 'st["used"] = used.get(st.get("id"), 0)' in body
+    js = repo_src("frontend/js/shared/stage-editor.js")
+    assert "${s.used === 0 ? `<button" in js and 'data-se="del"' in js
+    assert "r.status === 'deactivated'" in js and "method: 'DELETE'" in js
+
+
+def test_workspace_page_recolors_the_shared_popups_for_its_white_theme():
+    """個人工作台是白底：stage-editor／proj-pop 的深色預設變數在這頁要被蓋掉（owner 2026-09-07「調整版面配色」）。"""
+    html = repo_src("frontend/my.html")
+    assert "body .stage-editor { --se-bg: #fff;" in html
+    assert "body .proj-pop { --pp-bg: #fff;" in html

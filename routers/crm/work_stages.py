@@ -58,7 +58,16 @@ async def list_work_stage_nodes(request: Request):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        return {"categories": stage_categories(await _all_nodes(session), include_inactive=True)}
+        cats = stage_categories(await _all_nodes(session), include_inactive=True)
+        # 每個階段被幾列工時引用：編輯器只對 used=0 的露出「刪除」（owner 2026-09-07「還沒有人使用可以移除」）；
+        # 真正的閘在 DELETE（有人用→停用），這裡只是讓按鈕不要出現在按了也不會刪的地方
+        used = {sid: int(n or 0) for sid, n in (await session.execute(
+            select(Timesheet.stage_id, func.count()).where(Timesheet.stage_id.isnot(None))
+            .group_by(Timesheet.stage_id))).all()}
+        for c in cats:
+            for st in c.get("stages") or []:
+                st["used"] = used.get(st.get("id"), 0)
+        return {"categories": cats}
 
 
 @router.post("/work-stages/nodes")
