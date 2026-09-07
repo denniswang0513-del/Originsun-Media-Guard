@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>示範｜每週專案里程碑（整合進「今天與這週」）</title>
+<title>示範｜每週專案里程碑（團隊的一週 → 設定專案里程碑）</title>
 <style>
   :root { --red:#c9372c; --ink:#262626; --sub:#737373; --line:#e5e5e5; --warn:#b45309; --ok:#15803d; --late:#c9372c; --num:#f59e0b; }
   * { box-sizing:border-box; }
@@ -11,8 +11,11 @@
   .top { position:sticky; top:0; z-index:10; background:#fff; border-bottom:1px solid var(--line); padding:10px 22px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
   .top h1 { font-size:15px; margin:0; }
   .top .note { color:var(--sub); font-size:12px; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button { background:#fff; border:0; color:var(--sub); padding:6px 14px; cursor:pointer; font-size:13px; font-family:inherit; }
+  .seg button.on { background:#262626; color:#fff; }
   .stage { display:flex; gap:26px; padding:22px 22px 80px; align-items:flex-start; }
-  .legend { width:330px; flex:none; position:sticky; top:56px; }
+  .legend { width:320px; flex:none; position:sticky; top:56px; }
   .legend h2 { font-size:12px; color:var(--sub); margin:0 0 6px; letter-spacing:.2em; text-transform:uppercase; font-weight:600; }
   .legend ol { margin:0; padding:0; list-style:none; }
   .legend li { display:flex; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; }
@@ -27,7 +30,6 @@
   .views { display:flex; gap:4px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
   .view-btn { background:#f3f3f3; border:1px solid var(--line); border-bottom:0; color:var(--sub); font-size:13px; font-weight:600; padding:8px 20px; cursor:pointer; border-radius:6px 6px 0 0; font-family:inherit; }
   .view-btn.active { background:#fff; color:var(--ink); position:relative; top:1px; }
-  .view-btn .cnt { font-weight:400; color:var(--sub); margin-left:6px; font-size:12px; }
   .view { display:none; border:1px solid var(--line); border-top:0; padding:16px 18px 14px; }
   .view.on { display:block; }
   .vhead { display:flex; align-items:baseline; justify-content:space-between; gap:8px; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:10px; }
@@ -37,13 +39,15 @@
   .btn { background:#fff; border:1px solid var(--line); border-radius:8px; color:var(--ink); padding:6px 12px; font-size:13px; cursor:pointer; font-family:inherit; }
   .btn.pri { background:#262626; color:#fff; border-color:#262626; }
   .btn.sm { padding:3px 9px; font-size:12px; }
+  .btn.link { border:0; color:var(--red); padding:0; text-decoration:underline; background:none; }
   .meta { color:var(--sub); font-size:12px; }
   .today-strip { display:flex; gap:22px; flex-wrap:wrap; border:1px solid var(--line); border-radius:8px; padding:10px 14px; font-size:13px; margin-bottom:12px; }
   .today-strip .k { color:var(--sub); margin-right:6px; }
   .today-strip .warn { color:var(--warn); }
   /* 里程碑帶 */
   .ms-band { border:1px solid var(--line); border-left:3px solid var(--red); border-radius:8px; padding:10px 14px 6px; margin-bottom:14px; background:#fffdfb; }
-  .ms-band .ey { font-size:11px; letter-spacing:.3em; text-transform:uppercase; color:var(--sub); margin-bottom:8px; display:flex; justify-content:space-between; }
+  .ms-band .ey { font-size:11px; letter-spacing:.3em; text-transform:uppercase; color:var(--sub); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+  .ms-band .empty { color:var(--sub); font-size:13px; padding:6px 0 8px; }
   .ms-proj { display:flex; gap:10px; align-items:flex-start; padding:6px 0; border-top:1px dashed var(--line); }
   .ms-proj:first-of-type { border-top:0; }
   .ms-proj .pn { width:210px; flex:none; font-weight:600; font-size:13px; padding-top:3px; }
@@ -51,8 +55,7 @@
   .ms-list { display:flex; flex-wrap:wrap; gap:6px; flex:1; }
   .ms { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:999px; padding:3px 10px 3px 6px; font-size:12px; background:#fff; cursor:pointer; user-select:none; }
   .ms input { margin:0; }
-  .ms .due { color:var(--sub); }
-  .ms .who { color:var(--sub); }
+  .ms .due, .ms .who { color:var(--sub); }
   .ms.done { color:var(--sub); text-decoration:line-through; background:#f6f6f6; }
   .ms.late { border-color:var(--late); color:var(--late); }
   .ms.late .due { color:var(--late); font-weight:600; }
@@ -67,91 +70,89 @@
   table.week .c.shoot { background:#e8f0fe; }
   table.week .c.off { background:#eee; color:var(--sub); }
   table.week .c.ms { display:block; background:#fff4f2; border:1px solid #f1c9c4; font-size:11px; }
+  table.week .c.ms.done { color:var(--sub); background:#f6f6f6; border-color:var(--line); }
   table.week .ch { display:flex; justify-content:space-between; gap:6px; }
   table.week .cp { font-weight:600; }
   table.week .hrs { color:var(--sub); white-space:nowrap; }
   table.week .cn { color:var(--sub); font-size:11px; }
-  /* 里程碑編輯視圖 */
-  .ms-edit { display:grid; grid-template-columns:1fr; gap:10px; }
-  .ms-row { border:1px solid var(--line); border-radius:8px; padding:10px 14px; }
-  .ms-row .hd { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px; }
-  .ms-row .hd b { font-size:14px; }
-  .ms-row .hd .meta b { color:var(--ink); font-weight:600; }
-  .ms-items { display:flex; flex-direction:column; gap:4px; }
-  .ms-item { display:grid; grid-template-columns:20px 1fr 96px 96px 110px 120px; gap:8px; align-items:center; font-size:13px; padding:4px 0; border-top:1px dashed var(--line); }
+  /* 彈窗 */
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:flex-start; justify-content:center; padding:40px 16px; z-index:50; overflow:auto; }
+  .overlay.on { display:flex; }
+  .modal { background:#fff; border-radius:12px; width:min(980px, 100%); box-shadow:0 20px 60px rgba(0,0,0,.25); }
+  .modal .hd { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 20px; border-bottom:1px solid var(--line); }
+  .modal .hd h3 { margin:0; font-size:15px; }
+  .modal .hd .wk { display:flex; gap:6px; align-items:center; }
+  .modal .bd { padding:14px 20px; max-height:64vh; overflow:auto; }
+  .modal .ft { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 20px; border-top:1px solid var(--line); }
+  .ms-row { border:1px solid var(--line); border-radius:8px; padding:10px 14px; margin-bottom:10px; }
+  .ms-row .rh { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px; }
+  .ms-row .rh b { font-size:14px; }
+  .ms-row .rh .meta b { color:var(--ink); font-weight:600; }
+  .ms-items { display:flex; flex-direction:column; }
+  .ms-item { display:grid; grid-template-columns:20px 1fr 118px 112px 1fr 118px; gap:8px; align-items:center; font-size:13px; padding:5px 0; border-top:1px dashed var(--line); }
   .ms-item:first-child { border-top:0; }
   .ms-item input[type=text], .ms-item select, .ms-item input[type=date] { width:100%; border:1px solid var(--line); border-radius:6px; padding:4px 8px; font:inherit; font-size:12.5px; }
   .ms-item.done input[type=text] { color:var(--sub); text-decoration:line-through; }
-  .ms-item .st { font-size:11px; }
+  .ms-item .st { font-size:11px; color:var(--sub); }
   .ms-item .st.late { color:var(--late); font-weight:600; }
   .ms-item .st.ok { color:var(--ok); }
   .ms-add { display:flex; gap:8px; margin-top:8px; align-items:center; }
   .ms-add input { flex:1; border:1px solid var(--line); border-radius:6px; padding:5px 10px; font:inherit; font-size:13px; }
-  .hint { color:var(--sub); font-size:12px; margin-top:10px; }
-  .proj-detail { border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-top:14px; }
-  .proj-detail h4 { margin:0 0 8px; font-size:13px; }
-  .tl { display:flex; gap:6px; flex-wrap:wrap; }
-  .tl .wk { border:1px solid var(--line); border-radius:6px; padding:6px 8px; min-width:150px; font-size:12px; }
-  .tl .wk b { display:block; color:var(--sub); font-weight:400; font-size:11px; margin-bottom:3px; }
+  .ms-addproj { display:flex; gap:8px; align-items:center; margin-top:4px; }
+  .ms-addproj select { border:1px solid var(--line); border-radius:6px; padding:5px 10px; font:inherit; font-size:13px; min-width:280px; }
+  .hint { color:var(--sub); font-size:12px; }
+  .cols { display:grid; grid-template-columns:20px 1fr 118px 112px 1fr 118px; gap:8px; font-size:11px; color:var(--sub); letter-spacing:.1em; padding:0 0 4px; }
 </style>
 </head>
 <body>
 <div class="top">
-  <h1>示範｜每週專案里程碑 —— 整合進「今天與這週」</h1>
-  <span class="note">假資料，可以點：切子視圖、勾完成、加里程碑、延到下週。紅底大圓＝右側說明的編號。</span>
+  <h1>示範｜每週專案里程碑 —— 從「團隊的一週」的按鈕設定</h1>
+  <div class="seg"><button class="on" data-state="before">設定前</button><button data-state="after">設定後</button></div>
+  <span class="note">假資料。「設定前」按右上的「設定專案里程碑」自己加加看；「設定後」直接看填好的樣子。</span>
 </div>
 <div class="stage">
   <div class="legend">
     <h2>看什麼</h2>
     <ol>
-      <li><span class="n">1</span><div><b>「今天」那條多一格</b><span>本週里程碑幾個、今天到期幾個；指定了負責人的，對他說「你今天有一個到期」。</span></div></li>
-      <li><span class="n">2</span><div><b>「團隊的一週」上方一條里程碑帶</b><span>照專案分組，一顆一顆小卡：標題、到期星期、負責人、狀態。勾了變灰、過期沒完成變紅、上週沒完成的自動帶過來標「延自上週」。旁邊帶「本週已投入 X h」——那是工時表現成的數字。</span></div></li>
-      <li><span class="n">3</span><div><b>週表格子裡也看得到</b><span>到期那天、負責人那格多一張淡紅小卡，跟拍攝場次（藍）、休假（灰）並列。沒指定負責人的只出現在上方的帶。</span></div></li>
-      <li><span class="n">4</span><div><b>第四個子視圖「里程碑」＝編輯</b><span>大家都能編（owner 拍板）。選週 → 一列一個進行中的專案 → 加、改、指定負責人（可不指定）、標完成、延到下週。上週沒完成的自動帶進來。</span></div></li>
-      <li><span class="n">5</span><div><b>專案頁同一份</b><span>CRM 專案詳情與專案查詢的專案檔案頁，多一段「里程碑」按週排；資料同一張表，不另抄。</span></div></li>
+      <li><span class="n">1</span><div><b>「團隊的一週」標題列多一顆「設定專案里程碑」</b><span>誰都能按（owner 拍板）。開的是這一週的彈窗；切到別週再開就是別週的。</span></div></li>
+      <li><span class="n">2</span><div><b>彈窗：一列一個專案</b><span>預設列出這週有人填工時、或上週有里程碑的專案；底下的下拉可以把還沒排的案加進來。每個里程碑：標題、到期日（預設本週五）、負責人（可不指定）、備註；勾完成、延到下週、刪。上週沒完成的自動帶進來標「延自上週」。改完按「儲存」一次寫入。</span></div></li>
+      <li><span class="n">3</span><div><b>設定後：週表上方出現「本週里程碑」帶</b><span>照專案分組，一顆一顆小卡；直接在帶上勾完成不用再開彈窗；過期變紅、延自上週有標。每個專案旁邊帶「本週已投入 X h」（工時表現成的）。</span></div></li>
+      <li><span class="n">4</span><div><b>指定了負責人的，出現在他的格子</b><span>到期那天、他那一格多一張淡紅小卡，跟拍攝（藍）、休假（灰）並列；「今天」那條也會對他說「你今天有一個到期」。沒指定的只在上方的帶。</span></div></li>
     </ol>
-    <h2 style="margin-top:18px">不做的</h2>
+    <h2 style="margin-top:18px">資料</h2>
     <ol>
-      <li><div><span>不動專案階段（提案／製作／結案是案子的生命週期，里程碑是週的節奏）。</span></div></li>
-      <li><div><span>不審核、不通知（第一版）；要提醒再加「週一早上 Chat 貼本週里程碑」。</span></div></li>
+      <li><div><span>一張新表 crm_project_milestones（專案、週、標題、到期日、負責人、狀態、備註、誰建的、誰完成的）；專案詳情頁與專案檔案頁讀同一份。不動專案階段。</span></div></li>
     </ol>
   </div>
 
   <div class="page">
     <div class="zone-h">TODAY <b>今天與這週</b></div>
-    <div class="views" id="views">
+    <div class="views">
       <button class="view-btn" data-v="log">今天的專案紀錄</button>
       <button class="view-btn active" data-v="week">團隊的一週</button>
       <button class="view-btn" data-v="find">專案查詢</button>
-      <button class="view-btn" data-v="ms">里程碑<span class="cnt" id="ms-cnt"></span></button>
     </div>
 
-    <!-- 今天的專案紀錄（只畫今天那條，示範 1） -->
     <div class="view" data-v="log">
       <div class="vhead"><span class="ey">Project Log<b>今天的專案紀錄 9/8（二）</b></span></div>
-      <div class="rel"><span class="tag n">1</span>
-        <div class="today-strip">
-          <span><span class="k">今天</span>9/8（二）</span>
-          <span><span class="k">場次</span>沒有</span>
-          <span><span class="k">待辦</span>0 件</span>
-          <span><span class="k">上週回顧</span>已送出</span>
-          <span><span class="k">本週里程碑</span><span id="strip-ms"></span></span>
-        </div>
+      <div class="today-strip">
+        <span><span class="k">今天</span>9/8（二）</span><span><span class="k">場次</span>沒有</span><span><span class="k">待辦</span>0 件</span><span><span class="k">上週回顧</span>已送出</span>
+        <span><span class="k">本週里程碑</span><span id="strip-ms"></span></span>
       </div>
       <div class="meta">（下面就是原本的格子，示範不畫）</div>
     </div>
 
-    <!-- 團隊的一週（示範 2、3） -->
     <div class="view on" data-v="week">
       <div class="vhead"><span class="ey">Team Week<b>團隊的一週 9/7 – 9/12</b></span>
-        <span class="vrow"><button class="btn">‹</button><span class="meta">2026-09-07 起</span><button class="btn">›</button></span></div>
-      <div class="rel"><span class="tag n">2</span>
-        <div class="ms-band">
+        <span class="vrow rel"><span class="tag n">1</span><button class="btn">‹</button><span class="meta">2026-09-07 起</span><button class="btn">›</button>
+          <button class="btn pri" id="open-ms">設定專案里程碑</button></span></div>
+      <div class="rel"><span class="tag n">3</span>
+        <div class="ms-band" id="band-wrap">
           <div class="ey"><span>This week's milestones　本週里程碑</span><span id="band-sum"></span></div>
           <div id="band"></div>
         </div>
       </div>
-      <div class="rel"><span class="tag n">3</span>
+      <div class="rel"><span class="tag n">4</span>
       <div style="overflow-x:auto"><table class="week">
         <thead><tr><th style="width:84px">人員</th><th>9/7（一）</th><th class="today">9/8（二）</th><th>9/9（三）</th><th>9/10（四）</th><th>9/11（五）</th></tr></thead>
         <tbody id="week-body"></tbody>
@@ -159,51 +160,55 @@
       </div>
     </div>
 
-    <!-- 專案查詢（示範 5） -->
     <div class="view" data-v="find">
       <div class="vhead"><span class="ey">Project<b>專案檔案：2026 思沙龍 EP02</b></span></div>
-      <div class="meta">…（摘要、分類組成、逐日時間軸照舊）…</div>
-      <div class="rel"><span class="tag n">5</span>
-        <div class="proj-detail">
-          <h4>里程碑（按週）</h4>
-          <div class="tl" id="proj-tl"></div>
-        </div>
-      </div>
+      <div class="meta">…（摘要、分類組成、逐日時間軸照舊）… 多一段「里程碑（按週）」，讀同一張表。</div>
     </div>
+  </div>
+</div>
 
-    <!-- 里程碑編輯（示範 4） -->
-    <div class="view" data-v="ms">
-      <div class="vhead"><span class="ey">Milestones<b>本週里程碑 9/7 – 9/12</b></span>
-        <span class="vrow"><button class="btn" id="wk-prev">‹ 上週</button><span class="meta">2026-09-07 起</span><button class="btn" id="wk-next">下週 ›</button><button class="btn" id="add-proj">＋ 加一個專案</button></span></div>
-      <div class="rel"><span class="tag n">4</span>
-        <div class="ms-edit" id="ms-edit"></div>
-      </div>
-      <div class="hint">一列一個進行中的專案；每個里程碑：標題、到期日（預設本週五）、負責人（可不指定）、備註。上週沒完成的會自動帶到這週並標「延自上週」；「延到下週」把它整個搬過去。勾完成的人跟時間會記下來。</div>
+<!-- 彈窗（示範 2） -->
+<div class="overlay" id="overlay">
+  <div class="modal rel"><span class="tag n">2</span>
+    <div class="hd"><h3>設定專案里程碑</h3><div class="wk"><button class="btn sm">‹ 上週</button><b>9/7（一） – 9/12（六）</b><button class="btn sm">下週 ›</button></div></div>
+    <div class="bd">
+      <div class="cols"><span></span><span>里程碑</span><span>到期</span><span>負責人</span><span>備註</span><span></span></div>
+      <div id="ms-edit"></div>
+      <div class="ms-addproj"><span class="hint">還沒排的案：</span><select id="add-proj-sel"></select><button class="btn sm" id="add-proj">加進這週</button></div>
     </div>
+    <div class="ft"><span class="hint">到期預設本週五；負責人可不指定；上週沒完成的已自動帶進來（標「延自上週」）。儲存才寫入。</span>
+      <span class="vrow"><button class="btn" id="ms-cancel">取消</button><button class="btn pri" id="ms-save">儲存</button></span></div>
   </div>
 </div>
 
 <script>
 const PEOPLE = ['王士源', '蔡念栩', '劉禮瑜', '連婕妤', '李宜庭', '蘇家弘'];
 const DAYS = ['2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11'];
-const TODAY = '2026-09-08';
+const TODAY = '2026-09-08', FRI = '2026-09-11';
 const wd = (d) => ['日', '一', '二', '三', '四', '五', '六'][new Date(d + 'T00:00:00').getDay()];
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}（${wd(d)}）`;
-let projects = [
-  { id: 'p1', name: '2026 思沙龍 EP02', client: '龍應台文化基金會', hours: 14.5, ms: [
-    { id: 'm1', title: 'A-copy 給客戶', due: '2026-09-09', who: '蔡念栩', done: false, carried: false },
-    { id: 'm2', title: '字卡設計定稿', due: '2026-09-11', who: '', done: false, carried: false },
-    { id: 'm3', title: '訪談逐字稿校對', due: '2026-09-07', who: '李宜庭', done: true, carried: true },
-  ] },
-  { id: 'p2', name: '2026 光環境獎媒體茶敘紀錄', client: '中強光電文化藝術基金會', hours: 6, ms: [
-    { id: 'm4', title: '10 支 Reels 粗剪', due: '2026-09-10', who: '連婕妤', done: false, carried: false },
-    { id: 'm5', title: '平面照片挑選交付', due: '2026-09-08', who: '蔡念栩', done: false, carried: false },
-  ] },
-  { id: 'p3', name: '搭著捷運去書店 書店影像紀錄', client: '台北捷運', hours: 9.2, ms: [
-    { id: 'm6', title: '第 3 集 Fine cut', due: '2026-09-12', who: '李宜庭', done: false, carried: false },
-    { id: 'm7', title: '配樂授權確認', due: '2026-09-05', who: '蘇家弘', done: false, carried: true },
-  ] },
+const CATALOG = [
+  { id: 'p1', name: '2026 思沙龍 EP02', client: '龍應台文化基金會', hours: 14.5 },
+  { id: 'p2', name: '2026 光環境獎媒體茶敘紀錄', client: '中強光電文化藝術基金會', hours: 6 },
+  { id: 'p3', name: '搭著捷運去書店 書店影像紀錄', client: '台北捷運', hours: 9.2 },
+  { id: 'p4', name: '2026 臺北城市形象片', client: '臺北市觀傳局', hours: 0 },
+  { id: 'p5', name: '狄沅家人追思影片', client: '私人', hours: 1.5 },
+  { id: 'p6', name: '南山人壽獎勵旅遊', client: '南山人壽', hours: 2.3 },
 ];
+const SAMPLE = {
+  p1: [{ id: 'm1', title: 'A-copy 給客戶', due: '2026-09-09', who: '蔡念栩', note: '', done: false, carried: false },
+       { id: 'm2', title: '字卡設計定稿', due: '2026-09-11', who: '', note: '等客戶回 logo', done: false, carried: false },
+       { id: 'm3', title: '訪談逐字稿校對', due: '2026-09-07', who: '李宜庭', note: '', done: true, carried: true }],
+  p2: [{ id: 'm4', title: '10 支 Reels 粗剪', due: '2026-09-10', who: '連婕妤', note: '', done: false, carried: false },
+       { id: 'm5', title: '平面照片挑選交付', due: '2026-09-08', who: '蔡念栩', note: '', done: false, carried: false }],
+  p3: [{ id: 'm6', title: '第 3 集 Fine cut', due: '2026-09-12', who: '李宜庭', note: '', done: false, carried: false },
+       { id: 'm7', title: '配樂授權確認', due: '2026-09-05', who: '蘇家弘', note: '上週沒回', done: false, carried: true }],
+};
+// 設定前：上週有一個沒完成的會自動帶進來，其餘空
+const BEFORE = { p1: [{ id: 'm3', title: '訪談逐字稿校對', due: '2026-09-07', who: '李宜庭', note: '', done: false, carried: true }], p2: [], p3: [] };
+let saved = clone(BEFORE);      // 已儲存（畫在週表上）
+let draft = null;               // 彈窗裡正在改的
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
 const HOURS = { '王士源': { '2026-09-07': [['行政庶務', 2.5, '報價與會議']], '2026-09-08': [['2026 思沙龍 EP02', 3, '看 A-copy']] },
   '蔡念栩': { '2026-09-07': [['2026 思沙龍 EP02', 6.5, 'A-copy 剪輯']], '2026-09-08': [['2026 思沙龍 EP02', 5, 'A-copy 修']] },
   '劉禮瑜': { '2026-09-07': [['2026 光環境獎媒體茶敘紀錄', 4, '照片整理']] },
@@ -212,18 +217,19 @@ const HOURS = { '王士源': { '2026-09-07': [['行政庶務', 2.5, '報價與�
   '蘇家弘': {} };
 const SHOOTS = { '2026-09-10': { title: '2026 臺北城市形象片', crew: ['王士源', '蘇家弘'] } };
 const LEAVE = { '2026-09-11': ['劉禮瑜'] };
-const allMs = () => projects.flatMap(p => p.ms.map(m => ({ ...m, project: p.name })));
+const proj = (id) => CATALOG.find(p => p.id === id);
+const flat = (store) => Object.entries(store).flatMap(([pid, ms]) => ms.map(m => ({ ...m, pid, project: proj(pid).name })));
 const isLate = (m) => !m.done && m.due < TODAY;
-const state = (m) => m.done ? 'ok' : (isLate(m) ? 'late' : '');
-
 function $(id) { return document.getElementById(id); }
-function drawAll() {
-  const ms = allMs(), open = ms.filter(m => !m.done), todayDue = open.filter(m => m.due === TODAY);
-  $('strip-ms').innerHTML = `${ms.length} 個、今天到期 <span class="${todayDue.length ? 'warn' : ''}">${todayDue.length} 個</span>${todayDue.length ? '（' + todayDue.map(m => m.who ? m.who + '：' + m.title : m.title).join('、') + '）' : ''}`;
-  $('ms-cnt').textContent = `${open.length}`;
-  $('band-sum').textContent = `${ms.filter(m => m.done).length}/${ms.length} 完成 · 過期 ${ms.filter(isLate).length}`;
-  $('band').innerHTML = projects.map(p => `<div class="ms-proj"><div class="pn">${p.name}<small>${p.client} · 本週已投入 ${p.hours} h</small></div><div class="ms-list">${p.ms.map(m => `
-      <label class="ms ${m.done ? 'done' : ''} ${isLate(m) ? 'late' : ''} ${m.carried ? 'carried' : ''}"><input type="checkbox" data-m="${m.id}" ${m.done ? 'checked' : ''}> ${m.title} <span class="due">${md(m.due).slice(0, -3)}${m.due.slice(0, 7) !== '2026-09' || m.due < DAYS[0] ? '' : ''}</span>${m.who ? `<span class="who">· ${m.who}</span>` : ''}</label>`).join('')}</div></div>`).join('');
+
+function drawWeek() {
+  const ms = flat(saved), open = ms.filter(m => !m.done), todayDue = open.filter(m => m.due === TODAY);
+  $('strip-ms').innerHTML = ms.length ? `${ms.length} 個、今天到期 <span class="${todayDue.length ? 'warn' : ''}">${todayDue.length} 個</span>${todayDue.length ? '（' + todayDue.map(m => (m.who ? m.who + '：' : '') + m.title).join('、') + '）' : ''}` : '這週還沒設定';
+  $('band-sum').textContent = ms.length ? `${ms.filter(m => m.done).length}/${ms.length} 完成 · 過期 ${ms.filter(isLate).length}` : '';
+  const rows = Object.entries(saved).filter(([, arr]) => arr.length);
+  $('band').innerHTML = rows.length ? rows.map(([pid, arr]) => { const p = proj(pid); return `<div class="ms-proj"><div class="pn">${p.name}<small>${p.client} · 本週已投入 ${p.hours} h</small></div><div class="ms-list">${arr.map(m => `
+      <label class="ms ${m.done ? 'done' : ''} ${isLate(m) ? 'late' : ''} ${m.carried ? 'carried' : ''}"><input type="checkbox" data-band="${m.id}" ${m.done ? 'checked' : ''}> ${m.title} <span class="due">${md(m.due).slice(0, -3)}</span>${m.who ? `<span class="who">· ${m.who}</span>` : ''}</label>`).join('')}</div></div>`; }).join('')
+    : `<div class="empty">這週還沒有里程碑。<button class="btn link" id="open-ms-2">設定專案里程碑</button>${flat(saved).length ? '' : '（上週沒完成的會自動帶進來）'}</div>`;
   $('week-body').innerHTML = PEOPLE.map(n => `<tr><td class="who">${n}</td>${DAYS.map(d => {
     const parts = [];
     if ((LEAVE[d] || []).includes(n)) parts.push('<div class="c off">休假</div>');
@@ -231,27 +237,44 @@ function drawAll() {
     ms.filter(m => m.who === n && m.due === d).forEach(m => parts.push(`<div class="c ms ${m.done ? 'done' : ''}">${m.done ? '✓ ' : ''}里程碑：${m.title}<div class="cn">${m.project}</div></div>`));
     ((HOURS[n] || {})[d] || []).forEach(([p, h, note]) => parts.push(`<div class="c"><div class="ch"><span class="cp">${p}</span><span class="hrs">${h} h</span></div><div class="cn">${note}</div></div>`));
     return `<td>${parts.join('') || '<span class="meta">—</span>'}</td>`; }).join('')}</tr>`).join('');
-  $('ms-edit').innerHTML = projects.map(p => `<div class="ms-row" data-p="${p.id}"><div class="hd"><b>${p.name}</b><span class="meta">${p.client} · 本週已投入 <b>${p.hours} h</b> · ${p.ms.filter(m => m.done).length}/${p.ms.length} 完成</span></div>
-    <div class="ms-items">${p.ms.map(m => `<div class="ms-item ${m.done ? 'done' : ''}" data-m="${m.id}"><input type="checkbox" data-m="${m.id}" ${m.done ? 'checked' : ''}><input type="text" value="${m.title}"><input type="date" value="${m.due}"><select><option ${!m.who ? 'selected' : ''} value="">（不指定）</option>${PEOPLE.map(n => `<option ${m.who === n ? 'selected' : ''}>${n}</option>`).join('')}</select><span class="st ${state(m)}">${m.done ? '已完成 · 蔡念栩 9/8 10:20' : (isLate(m) ? '過期 ' + md(m.due).slice(0, -3) : (m.carried ? '延自上週' : '進行中'))}</span><span><button class="btn sm" data-defer="${m.id}">延到下週</button> <button class="btn sm" data-del="${m.id}">刪</button></span></div>`).join('')}</div>
-    <div class="ms-add"><input placeholder="加一個里程碑，例：B-copy 給客戶" data-add="${p.id}"><button class="btn sm pri" data-addbtn="${p.id}">加入</button></div></div>`).join('');
-  $('proj-tl').innerHTML = [['8/31 週', ['訪談逐字稿校對 ✓']], ['9/7 週（本週）', projects[0].ms.map(m => m.title + (m.done ? ' ✓' : ''))], ['9/14 週', ['B-copy', '客戶回饋整理']], ['9/21 週', ['定剪', '輸出交片']]]
-    .map(([w, items]) => `<div class="wk"><b>${w}</b>${items.map(i => `<div>${i}</div>`).join('')}</div>`).join('');
 }
-document.body.addEventListener('change', (ev) => {
-  const cb = ev.target.closest('input[type=checkbox][data-m]'); if (!cb) return;
-  allMsSet(cb.dataset.m, m => { m.done = cb.checked; }); drawAll();
-});
+function drawModal() {
+  const pids = Object.keys(draft);
+  $('ms-edit').innerHTML = pids.map(pid => { const p = proj(pid); const arr = draft[pid]; return `<div class="ms-row" data-p="${pid}"><div class="rh"><b>${p.name}</b><span class="meta">${p.client} · 本週已投入 <b>${p.hours} h</b>${arr.length ? ` · ${arr.filter(m => m.done).length}/${arr.length} 完成` : ''}</span></div>
+    <div class="ms-items">${arr.map(m => `<div class="ms-item ${m.done ? 'done' : ''}" data-m="${m.id}"><input type="checkbox" data-k="done" ${m.done ? 'checked' : ''}><input type="text" data-k="title" value="${m.title}" placeholder="里程碑"><input type="date" data-k="due" value="${m.due}"><select data-k="who"><option value="" ${!m.who ? 'selected' : ''}>（不指定）</option>${PEOPLE.map(n => `<option ${m.who === n ? 'selected' : ''}>${n}</option>`).join('')}</select><input type="text" data-k="note" value="${m.note || ''}" placeholder="備註"><span><span class="st ${m.done ? 'ok' : (isLate(m) ? 'late' : '')}">${m.done ? '已完成' : (isLate(m) ? '過期' : (m.carried ? '延自上週' : ''))}</span> <button class="btn sm" data-defer="${m.id}" title="搬到下週">延</button> <button class="btn sm" data-del="${m.id}" title="刪除">×</button></span></div>`).join('')}</div>
+    <div class="ms-add"><input placeholder="加一個里程碑，例：B-copy 給客戶（Enter 也可以）" data-add="${pid}"><button class="btn sm pri" data-addbtn="${pid}">加入</button></div></div>`; }).join('');
+  const rest = CATALOG.filter(p => !pids.includes(p.id));
+  $('add-proj-sel').innerHTML = rest.map(p => `<option value="${p.id}">${p.name}（${p.client}）</option>`).join('') || '<option value="">（進行中的案都排進來了）</option>';
+}
+function openModal() { draft = clone(saved); drawModal(); $('overlay').classList.add('on'); }
+function syncDraftFromDom() {
+  document.querySelectorAll('#ms-edit .ms-item').forEach(el => {
+    const m = flatFind(draft, el.dataset.m); if (!m) return;
+    m.done = el.querySelector('[data-k=done]').checked; m.title = el.querySelector('[data-k=title]').value.trim(); m.due = el.querySelector('[data-k=due]').value || FRI;
+    m.who = el.querySelector('[data-k=who]').value; m.note = el.querySelector('[data-k=note]').value.trim();
+  });
+}
+function flatFind(store, id) { for (const arr of Object.values(store)) { const m = arr.find(x => x.id === id); if (m) return m; } return null; }
 document.body.addEventListener('click', (ev) => {
   const v = ev.target.closest('.view-btn'); if (v) { document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b === v)); document.querySelectorAll('.view').forEach(x => x.classList.toggle('on', x.dataset.v === v.dataset.v)); return; }
-  const d = ev.target.closest('[data-defer]'); if (d) { allMsSet(d.dataset.defer, m => { const t = new Date(m.due + 'T00:00:00'); t.setDate(t.getDate() + 7); m.due = t.toISOString().slice(0, 10); m.carried = false; }); alert('已延到下週（示範：真的做會搬到下週的清單）'); drawAll(); return; }
-  const x = ev.target.closest('[data-del]'); if (x) { projects.forEach(p => { p.ms = p.ms.filter(m => m.id !== x.dataset.del); }); drawAll(); return; }
-  const a = ev.target.closest('[data-addbtn]'); if (a) { const inp = document.querySelector(`input[data-add="${a.dataset.addbtn}"]`); const t = (inp.value || '').trim(); if (!t) return;
-    projects.find(p => p.id === a.dataset.addbtn).ms.push({ id: 'm' + Date.now(), title: t, due: '2026-09-11', who: '', done: false, carried: false }); drawAll(); return; }
-  if (ev.target.id === 'add-proj') { const name = prompt('哪個專案？（示範：直接打名字）'); if (name) { projects.push({ id: 'p' + Date.now(), name, client: '', hours: 0, ms: [] }); drawAll(); } return; }
-  if (ev.target.id === 'wk-prev' || ev.target.id === 'wk-next') alert('示範：切週會換成那一週的里程碑');
+  const s = ev.target.closest('.seg button'); if (s) { document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b === s)); saved = clone(s.dataset.state === 'after' ? SAMPLE : BEFORE); drawWeek(); return; }
+  if (ev.target.id === 'open-ms' || ev.target.id === 'open-ms-2') return openModal();
+  if (ev.target.id === 'ms-cancel') { $('overlay').classList.remove('on'); return; }
+  if (ev.target.id === 'ms-save') { syncDraftFromDom(); Object.keys(draft).forEach(k => { draft[k] = draft[k].filter(m => m.title); }); saved = clone(draft); $('overlay').classList.remove('on'); drawWeek(); return; }
+  const d = ev.target.closest('[data-defer]'); if (d) { syncDraftFromDom(); const m = flatFind(draft, d.dataset.defer); const t = new Date(m.due + 'T00:00:00'); t.setDate(t.getDate() + 7); m.due = t.toISOString().slice(0, 10); m.carried = false; alert('示範：已搬到下週（真的做會從這週的清單消失、出現在下週）'); Object.keys(draft).forEach(k => { draft[k] = draft[k].filter(x => x.id !== m.id); }); drawModal(); return; }
+  const x = ev.target.closest('[data-del]'); if (x) { syncDraftFromDom(); Object.keys(draft).forEach(k => { draft[k] = draft[k].filter(m => m.id !== x.dataset.del); }); drawModal(); return; }
+  const a = ev.target.closest('[data-addbtn]'); if (a) return addMs(a.dataset.addbtn);
+  if (ev.target.id === 'add-proj') { syncDraftFromDom(); const pid = $('add-proj-sel').value; if (pid && !draft[pid]) draft[pid] = []; drawModal(); return; }
+  const cb = ev.target.closest('input[type=checkbox][data-band]'); if (cb) { const m = flatFind(saved, cb.dataset.band); m.done = cb.checked; drawWeek(); }
 });
-function allMsSet(id, fn) { projects.forEach(p => p.ms.forEach(m => { if (m.id === id) fn(m); })); }
-drawAll();
+document.body.addEventListener('keydown', (ev) => { const inp = ev.target.closest('input[data-add]'); if (inp && ev.key === 'Enter') { ev.preventDefault(); addMs(inp.dataset.add); } });
+function addMs(pid) {
+  syncDraftFromDom();
+  const inp = document.querySelector(`input[data-add="${pid}"]`); const t = (inp.value || '').trim(); if (!t) return;
+  draft[pid].push({ id: 'm' + Date.now(), title: t, due: FRI, who: '', note: '', done: false, carried: false }); drawModal();
+  document.querySelector(`input[data-add="${pid}"]`)?.focus();
+}
+drawWeek();
 </script>
 </body>
 </html>
