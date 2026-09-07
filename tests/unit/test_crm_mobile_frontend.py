@@ -222,7 +222,8 @@ def test_five_tabs_and_invoice_is_the_landing_tab():
     tabs = re.search(r"export const TABS = \[(.*?)\]", ui).group(1)
     ids = re.findall(r"'(\w+)'", tabs)
     # 2026-09-06 owner：第六顆「工作紀錄」（每日工作紀錄的填表，views/worklog.js）
-    assert ids == ["invoice", "petty", "projects", "quotes", "calendar", "worklog"], ids
+    # 2026-09-07：第七顆「假勤」（員工自己的請假，views/leave.js；docs/LEAVE_PLAN.md §7.6）
+    assert ids == ["invoice", "petty", "projects", "quotes", "calendar", "worklog", "leave"], ids
     hidden = re.search(r"export const HIDDEN_ROUTES = \{(.*?)\}", ui).group(1)
     assert "payments:" in hidden and "expense:" in hidden and "export const ROUTES = [...TABS, ...Object.keys(HIDDEN_ROUTES)]" in ui
     assert "export const DEFAULT_TAB = 'invoice'" in ui

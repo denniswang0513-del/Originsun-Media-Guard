@@ -134,6 +134,18 @@ def leave_to_dict(o) -> dict:
         "approved_at": o.approved_at.isoformat() if o.approved_at else None,
         "created_by": o.created_by or "",
         "created_at": o.created_at.isoformat() if o.created_at else None,
+        # 假勤重整（docs/LEAVE_PLAN.md §7.2）：小時正本／半天時段／退回與消假說明／日曆同步
+        # getattr 退路：舊列剛開機、欄位還沒回填時 hours 用 days×8 鏡射
+        "hours": (getattr(o, "hours", None) if getattr(o, "hours", None) is not None
+                  else round(float(o.days or 0) * 8, 2)),
+        "part": getattr(o, "part", None) or "all",
+        "start_time": getattr(o, "start_time", None) or "",
+        "end_time": getattr(o, "end_time", None) or "",
+        "reject_note": getattr(o, "reject_note", None) or "",
+        "cancel_note": getattr(o, "cancel_note", None) or "",
+        "google_event_id": getattr(o, "google_event_id", None) or "",
+        "synced_at": iso_ts(getattr(o, "synced_at", None)),
+        "sync_error": getattr(o, "sync_error", None) or "",
     }
 
 

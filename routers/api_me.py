@@ -28,15 +28,17 @@ from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup, leav
 from core.identity import require_bound_staff, resolve_current_staff
 from core.hr_logic import STAFF_ACTIVE, staff_rank
 from core.journal_logic import shell_status, week_start_of
-from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetBatch,
+from core.leave_logic import cancel_mode, in_crew, vocab as leave_vocab
+from core.schemas import (LeaveCancel, MeLeaveCreate, MeLeavePreview, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetUpdate, MeTodoUpdate)
 from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
                        CrmProjectStaff, CrmShoot, CrmStaff, HrLeaveRequest, PreprodLocation, Timesheet, WorkJournal)
+from services import leave_service
 from services.timesheet_lookup import budgets_for
 from services.timesheet_self import (add_rows, delete_row, list_rows, metrics_input, month_or_422,
                                      own_filter, rows_by_month, ts_dict, update_row)
-from routers.api_hr import approved_annual_used, new_leave_request
+from routers.api_hr import approved_annual_used
 from routers.api_shoots import _crew_list
 from services.timesheet_self import board_days
 
@@ -254,17 +256,52 @@ async def update_my_todo(item_id: str, body: MeTodoUpdate, request: Request):
     return {"status": "ok"}
 
 
-@router.post("/leave")
-async def apply_my_leave(body: MeLeaveCreate, request: Request):
-    """本人送請假單（staff_id 由 token 解析；固定進待審，管理端在人事 tab 簽核）。"""
+# ── 我的假勤（docs/LEAVE_PLAN.md §7.4）──────────────────────────────────────
+#
+# 規則在 core.leave_logic、查詢在 services.leave_service；這裡只有守衛與 HTTP 形狀。
+# summary 任一把 me_* 鑰匙可讀（卡片上的三個數字）；送單／撤回要 me_leave。
+
+@router.get("/leave/summary")
+async def my_leave_summary(request: Request):
+    """{vocab, balances:{特休:{available,reserved,expiring}, 補休:{…}}, sick:{used_days,cap_days},
+    requests:[最近 20 筆（已核准帶 cancel_mode）], pending_count, hire_date, annual_days_by_law}。"""
+    ident = await require_bound_staff(request, *ME_MODULE_KEYS)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        out = await leave_service.staff_leave_summary(session, ident["staff"])
+    out["vocab"] = leave_vocab()
+    return out
+
+
+@router.post("/leave/preview")
+async def preview_my_leave(body: MeLeavePreview, request: Request):
+    """算時數＋錯誤／警告，不寫入：{hours, days, errors:[{code,msg}], warnings:[{code,msg}], balance}。"""
     ident = await require_bound_staff(request, "me_leave")
     factory = db_factory_or_503()
     async with factory() as session:
-        obj = new_leave_request(ident["staff_id"], ident["staff"].name, body, ident["username"])
+        return await leave_service.evaluate(session, ident["staff_id"], ident["staff"].name, body)
+
+
+@router.post("/leave")
+async def apply_my_leave(body: MeLeaveCreate, request: Request):
+    """本人送請假單（staff_id 由 token 解析；固定進待審，管理端在人事 tab 簽核）。
+    errors 非空 → 422（detail 是逗號串起來的訊息；結構化的請先打 /leave/preview）。"""
+    ident = await require_bound_staff(request, "me_leave")
+    if not (body.reason or "").strip():
+        raise HTTPException(status_code=422, detail="事由必填（規章：提出時簡述理由）")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        holidays = await leave_service.holidays_map(session)
+        ev = await leave_service.evaluate(session, ident["staff_id"], ident["staff"].name, body, holidays=holidays)
+        if ev["errors"]:
+            raise HTTPException(status_code=422, detail="；".join(e["msg"] for e in ev["errors"]))
+        hours, part = leave_service.hours_from_body(body, holidays)
+        obj = leave_service.build_request(ident["staff_id"], ident["staff"].name, body, hours, part, ident["username"])
         session.add(obj)
         await session.commit()
         await session.refresh(obj)
-        result = leave_to_dict(obj)
+        result = leave_service.request_dict(obj, holidays)
+    result["warnings"] = ev["warnings"]
     # 通知管理者（best-effort；精簡 agent 可能沒帶 notifier）
     try:
         from notifier import notify_tab_async
@@ -272,16 +309,16 @@ async def apply_my_leave(body: MeLeaveCreate, request: Request):
             "leave_request",
             staff_name=result["staff_name"], leave_type=result["leave_type"],
             start=result["start_date"], end=result["end_date"],
-            days=result["days"], reason=result["reason"] or "-",
+            days=f"{result['days']:g}", reason=result["reason"] or "-",
         )
     except Exception:
         pass
     return result
 
 
-@router.delete("/leave/{leave_id}")
-async def cancel_my_leave(leave_id: str, request: Request):
-    """撤回自己的待審請假單（已核准/已退回不可自行刪除，找管理者）。"""
+async def _cancel_my_leave(leave_id: str, request: Request, note: str) -> dict:
+    """待審→已撤回；已核准依 core.leave_logic.cancel_mode：free→已撤回（釋放 allocations）／
+    apply→消假待審（cancel_note 必填）／locked→409。其餘狀態 409。"""
     ident = await require_bound_staff(request, "me_leave")
     factory = db_factory_or_503()
     async with factory() as session:
@@ -292,11 +329,44 @@ async def cancel_my_leave(leave_id: str, request: Request):
         )).scalar_one_or_none()
         if obj is None:
             raise HTTPException(status_code=404, detail="找不到這張請假單（或不是你的）")
-        if obj.status != "待審":
-            raise HTTPException(status_code=409, detail="僅待審單可自行撤回")
-        await session.delete(obj)
+        holidays = await leave_service.holidays_map(session)
+        mode = None
+        if obj.status == "待審":
+            obj.status = "已撤回"
+        elif obj.status == "已核准":
+            mode = cancel_mode(obj.start_date, date.today(), holidays)
+            if mode == "locked":
+                raise HTTPException(status_code=409, detail="颱風假公告當日不可消假（規章）")
+            if mode == "free":
+                await leave_service.release_allocations(session, obj.id)
+                obj.status = "已撤回"
+                obj.approved_by = None
+                obj.approved_at = None
+            else:
+                if not note:
+                    raise HTTPException(status_code=422, detail="距開始不到兩天，撤回要填說明由主管決定（規章：臨時消假要與主管討論）")
+                obj.status = "消假待審"
+        else:
+            raise HTTPException(status_code=409, detail=f"此單狀態是「{obj.status}」，不能撤回")
+        if note:
+            obj.cancel_note = note
         await session.commit()
-    return {"deleted": leave_id}
+        await session.refresh(obj)
+        out = leave_service.request_dict(obj, holidays)
+    out["mode"] = mode or "free"
+    return out
+
+
+@router.post("/leave/{leave_id}/cancel")
+async def cancel_my_leave(leave_id: str, body: LeaveCancel, request: Request):
+    return await _cancel_my_leave(leave_id, request, (body.note or "").strip())
+
+
+@router.delete("/leave/{leave_id}")
+async def cancel_my_leave_legacy(leave_id: str, request: Request):
+    """舊分頁的撤回（DELETE）：同 POST /cancel，不再硬刪 —— 待審變已撤回。"""
+    out = await _cancel_my_leave(leave_id, request, "")
+    return {"deleted": leave_id, **out}
 
 
 # ── 今天與這週（docs/JOURNAL_WORKLOG_PLAN.md §8–§11；員工頁第一區）──────────────
@@ -308,13 +378,8 @@ async def _me_bound(request: Request) -> dict:
 
 
 def _in_crew(crew: list, staff_id: str, name: str) -> bool:
-    """場次 crew 含我：比 staff_id，退回比姓名（舊場次只存名字）。"""
-    for c in crew:
-        if c.get("staff_id") and c["staff_id"] == staff_id:
-            return True
-        if not c.get("staff_id") and name and c.get("name") == name:
-            return True
-    return False
+    """場次 crew 含我：比 staff_id，退回比姓名（舊場次只存名字）。正本 core.leave_logic.in_crew（請假撞場次同一份）。"""
+    return in_crew(crew, staff_id, name)
 
 
 async def _shoots_between(session, d0: date, d1: date) -> list:

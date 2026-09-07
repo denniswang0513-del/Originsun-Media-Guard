@@ -15,7 +15,8 @@ export const state = {
 
 // owner 2026-09-03：第五顆改「行事曆」（拍攝排程＋器材登記，docs/SHOOT_CALENDAR_PLAN.md）；付款退成隱藏路由
 // owner 2026-09-06：第六顆「工作紀錄」＝每日工作紀錄的填表（views/worklog.js；資料同 /my.html 今天的專案紀錄）
-export const TABS = ['invoice', 'petty', 'projects', 'quotes', 'calendar', 'worklog'];
+// 2026-09-07：第七顆「假勤」＝員工自己的請假（views/leave.js；docs/LEAVE_PLAN.md §7.6，走 /api/v1/me/leave/*）
+export const TABS = ['invoice', 'petty', 'projects', 'quotes', 'calendar', 'worklog', 'leave'];
 export const DEFAULT_TAB = 'invoice';
 /** 有畫面但不在分頁列的路由 → 頂欄名稱（分頁列的名稱從按鈕文字拿）：記雜支、付款（都從專案抽屜進，上一頁回去）。 */
 export const HIDDEN_ROUTES = { expense: '記雜支', payments: '付款' };

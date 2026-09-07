@@ -224,6 +224,9 @@ FINANCE_AND_CRM_COLUMNS = [
         "TYPE DOUBLE PRECISION",
         "CREATE INDEX IF NOT EXISTS idx_cash_taxonomy_node "
         "ON crm_cash_entries (taxonomy_node_id)",
+        # 假勤重整（docs/LEAVE_PLAN.md §7.2）：小時成為正本，舊列 days×8 一次回填。
+        # 欄位在 main.py `_crm_cols` 加（那段先跑），這句每次開機跑、填過就命中 0 列。
+        "UPDATE hr_leave_requests SET hours = days * 8 WHERE hours IS NULL",
     ]
 
 # ── 專案成本行的欄位 ─────────────────────────

@@ -122,17 +122,83 @@ class HrLeaveRequest(Base):
     end_date = Column(DateTime(timezone=True), nullable=False)
     days = Column(Float, nullable=False, default=1.0)             # 0.5 步進（H2 文件以天計）
     reason = Column(Text, nullable=True)
-    status = Column(String(16), nullable=False, default="待審")    # 待審/已核准/已退回
+    status = Column(String(16), nullable=False, default="待審")    # core.leave_logic.REQUEST_STATUSES
     approved_by = Column(String(64), nullable=True)               # 核可人 username
     approved_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(String(64), nullable=True)                # 申請/代登者 username
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # ── 2026-09-07 假勤重整（docs/LEAVE_PLAN.md §7.2）：小時為正本、半天／時段、撤回不硬刪、日曆三欄 ──
+    hours = Column(Float, nullable=True)                          # 正本；days＝hours/8 鏡射（舊列開機回填 days×8）
+    part = Column(String(8), nullable=False, default="all", server_default="all")   # core.leave_logic.PARTS
+    start_time = Column(String(5), nullable=True)                 # 'HH:MM'（part=range 才有）
+    end_time = Column(String(5), nullable=True)
+    reject_note = Column(Text, nullable=True)                     # 已退回的理由（必填）
+    cancel_note = Column(Text, nullable=True)                     # 消假申請的說明（<2 天撤回時必填）
+    google_event_id = Column(String(255), nullable=True)          # 同 crm_shoots 三欄（二期接日曆）
+    synced_at = Column(DateTime(timezone=True), nullable=True)
+    sync_error = Column(Text, nullable=True)
 
     __table_args__ = (
         Index("idx_leave_status", "status"),
         Index("idx_leave_staff_start", "staff_id", "start_date"),
     )
+
+
+class HrLeaveCredit(Base):
+    """時數帳的貸方（docs/LEAVE_PLAN.md §2.1）：進來的時數 —— 特休（週年發／手開）、補休（加班）、其他。
+
+    餘額**不存快照**：可用＝Σ status=可用且未到期的 hours − Σ hr_leave_allocations.hours（core.leave_logic.balance）。
+    """
+    __tablename__ = "hr_leave_credits"
+
+    id = Column(String(32), primary_key=True)                     # uuid4 hex
+    staff_id = Column(String(32), nullable=False)                 # soft FK → crm_staff.id
+    staff_name = Column(String(64), nullable=False, default="")
+    kind = Column(String(16), nullable=False)                     # core.leave_logic.CREDIT_KINDS：特休/補休/其他
+    hours = Column(Float, nullable=False, default=0.0)
+    granted_on = Column(Date, nullable=False)                     # 生效日（特休＝週年日；補休＝加班日）
+    expires_on = Column(Date, nullable=True)                      # 到期日（特休＝隔年週年日；補休＝當年 12/31）
+    source = Column(String(16), nullable=False, default="manual")  # core.leave_logic.CREDIT_SOURCES
+    reason = Column(Text, nullable=True)
+    shoot_id = Column(String(32), nullable=True)                  # soft FK → crm_shoots.id（從場次帶入）
+    status = Column(String(16), nullable=False, default="可用")    # core.leave_logic.CREDIT_STATUSES
+    approved_by = Column(String(64), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    note = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_leave_credit_staff_status", "staff_id", "status"),
+    )
+
+
+class HrLeaveAllocation(Base):
+    """對帳列：這張申請單吃了哪幾筆 credit 多少小時（核准時 FIFO 寫入；撤回／退回時整批釋放）。"""
+    __tablename__ = "hr_leave_allocations"
+
+    id = Column(String(32), primary_key=True)
+    request_id = Column(String(32), nullable=False, index=True)   # soft FK → hr_leave_requests.id
+    credit_id = Column(String(32), nullable=False, index=True)    # soft FK → hr_leave_credits.id
+    hours = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("request_id", "credit_id", name="uq_leave_alloc_request_credit"),
+    )
+
+
+class HrHoliday(Base):
+    """假日表：國定假日／補班日（行政院行事曆 CSV 匯入）／颱風假（當天公告，管理員手加）。
+    時數怎麼扣只住 core.leave_logic.is_workday／working_hours。"""
+    __tablename__ = "hr_holidays"
+
+    date = Column(Date, primary_key=True)
+    name = Column(String(64), nullable=False, default="")
+    kind = Column(String(16), nullable=False, default="國定假日")  # core.leave_logic.HOLIDAY_KINDS
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class TimesheetProjectMap(Base):

@@ -330,31 +330,99 @@ class SeriesQuickAddPayload(BaseModel):
 # ── N-hr H2 出缺勤（請假）──
 
 class LeaveCreate(BaseModel):
-    """管理端建立/代登請假單。日期格式 YYYY-MM-DD。"""
+    """管理端建立/代登請假單。日期格式 YYYY-MM-DD。
+    2026-09-07 假勤重整（docs/LEAVE_PLAN.md §7）：小時為正本 —— part／start_time／end_time 有給就由
+    core.leave_logic.working_hours 算 hours；三者都沒給（舊分頁）才拿 days×8。新欄位一律 Optional＝None
+    （Cloudflare 給 .js 4 小時快取，舊分頁不帶新欄位）。"""
     staff_id: str
-    leave_type: str            # 特休/病假/事假/公假/婚假/喪假/其他
+    leave_type: str            # core.leave_logic.ALL_LEAVE_TYPES
     start_date: str
     end_date: str
-    days: float = 1.0          # 0.5 步進
+    days: Optional[float] = None       # 舊契約（0.5 步進）；新分頁不送
+    part: Optional[str] = None         # all/am/pm/range；None＝all
+    start_time: Optional[str] = None   # 'HH:MM'（part=range）
+    end_time: Optional[str] = None
+    hours: Optional[float] = None      # 直接指定（代登時管理員可覆寫）
     reason: Optional[str] = None
 
 
 class LeaveUpdate(BaseModel):
-    status: Optional[str] = None       # 待審/已核准/已退回（核准寫核可人+時間戳）
+    """PUT /hr/leave/{id} 只改欄位；`status` 留著只為了認出舊分頁還在送它 → 422（改狀態走 approve／reject／cancel_decide）。"""
+    status: Optional[str] = None
     leave_type: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     days: Optional[float] = None
+    part: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    hours: Optional[float] = None
     reason: Optional[str] = None
 
 
-class MeLeaveCreate(BaseModel):
-    """員工自助送單（staff_id 由 token 解析，不收）。"""
+class MeLeavePreview(BaseModel):
+    """POST /me/leave/preview：算時數＋錯誤／警告，不寫入。"""
     leave_type: str
     start_date: str
     end_date: str
-    days: float = 1.0
+    part: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+
+
+class MeLeaveCreate(BaseModel):
+    """員工自助送單（staff_id 由 token 解析，不收）。欄位同 MeLeavePreview ＋ reason（必填）；
+    舊分頁送 {days} 沒送 part／hours → 換算 days×8。"""
+    leave_type: str
+    start_date: str
+    end_date: str
+    days: Optional[float] = None
+    part: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    hours: Optional[float] = None
     reason: Optional[str] = None
+
+
+class LeaveCancel(BaseModel):
+    """POST /me/leave/{id}/cancel：已核准且 <2 天的撤回要說明（cancel_note）。"""
+    note: Optional[str] = None
+
+
+class LeaveReject(BaseModel):
+    """POST /hr/leave/{id}/reject：理由必填（端點驗空字串）。"""
+    note: Optional[str] = None
+
+
+class LeaveCancelDecide(BaseModel):
+    """POST /hr/leave/{id}/cancel_decide：消假待審 → approve=True 已撤回／False 回已核准。"""
+    approve: bool = True
+    note: Optional[str] = None
+
+
+class CreditCreate(BaseModel):
+    """POST /hr/credits 手開時數（管理員）：kind 特休/補休/其他；granted_on 必填、expires_on 可空＝永不到期。"""
+    staff_id: str
+    kind: str
+    hours: float
+    granted_on: str
+    expires_on: Optional[str] = None
+    reason: Optional[str] = None
+    shoot_id: Optional[str] = None
+    source: Optional[str] = None       # 預設 manual
+    note: Optional[str] = None
+
+
+class HolidayCreate(BaseModel):
+    date: str
+    name: Optional[str] = None
+    kind: Optional[str] = None         # 國定假日/補班日/颱風假；預設國定假日
+
+
+class HolidayImport(BaseModel):
+    """POST /hr/holidays/import：貼行政院人事總處的年度行事曆 CSV 原文。"""
+    csv: str
+    replace_year: Optional[int] = None  # 給了就先清掉該年的國定假日／補班日（颱風假不動）再匯入
 
 
 class AnnualLeaveSet(BaseModel):

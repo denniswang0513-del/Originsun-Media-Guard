@@ -33,7 +33,8 @@ from ._crm import (  # noqa: F401
 # Work OS：工時/請假/里程碑/月結 ＋ 前期（場景/提案/企劃/參考）＋ 情報/門戶/器材/素材
 from ._workos import (  # noqa: F401
     CrmShoot, Equipment, EquipmentCheckout, EquipmentMaintenance, FinanceMonthClose,
-    FootageIndex, HrLeaveRequest, IntelItem, IntelSource, PROPOSAL_CHILD_TABLES,
+    FootageIndex, HrHoliday, HrLeaveAllocation, HrLeaveCredit, HrLeaveRequest,
+    IntelItem, IntelSource, PROPOSAL_CHILD_TABLES,
     PaymentMilestone, PortalComment, PortalReviewLink, PreprodBrief,
     PreprodBriefTemplate, PreprodLocation, PreprodLocationPhoto,
     PreprodLocationUsage, PreprodMeetingNote, PreprodProposal, PreprodProposalRef,

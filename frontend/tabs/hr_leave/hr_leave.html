@@ -1,14 +1,31 @@
 <!--
-    hr_leave.html — 人事管理 › 出缺勤 Tab 殼（N-hr H2 極簡請假：申請/核可/額度）
-    內容由 hr_leave.js render 進 #hl-content。設計鐵則：UI 無 emoji（owner 2026-07-17）。
+    hr_leave.html — 人事管理 › 請補修 Tab 殼（docs/LEAVE_PLAN.md §7.6：時數帳＋申請單）
+    四塊由 hr_leave.js render：待核佇列 / 請假紀錄 / 時數帳 / 假日表。設計鐵則：UI 無 emoji（owner 2026-07-17）。
 -->
 <div id="hl-root">
+    <h2>請補修</h2>
+    <div class="hl-sub">員工從個人工作台送單、這裡簽核。特休／補休走時數帳（credit − 已扣），病假等只記事實。</div>
+    <div class="hl-nav" id="hl-nav">
+        <button type="button" data-hl-view="queue" class="active">待核佇列<span class="cnt" id="hl-nav-queue-cnt"></span></button>
+        <button type="button" data-hl-view="records">請假紀錄</button>
+        <button type="button" data-hl-view="balances">時數帳</button>
+        <button type="button" data-hl-view="holidays">假日表</button>
+    </div>
     <div id="hl-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
 </div>
 
 <style>
     #hl-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
-    #hl-root .hl-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    #hl-root .hl-sub { color: #777; font-size: 12px; margin-bottom: 12px; }
+    #hl-root .hl-nav { display: flex; gap: 4px; border-bottom: 1px solid #333; margin-bottom: 14px; flex-wrap: wrap; }
+    #hl-root .hl-nav button {
+        background: #1e1e1e; border: 1px solid #333; border-bottom: 0; color: #888;
+        font-size: 13px; font-weight: 600; padding: 8px 18px; cursor: pointer; border-radius: 6px 6px 0 0;
+    }
+    #hl-root .hl-nav button:hover { color: #ddd; }
+    #hl-root .hl-nav button.active { background: #232323; color: #fff; position: relative; top: 1px; }
+    #hl-root .hl-nav .cnt { font-weight: 400; color: #fbbf24; margin-left: 6px; font-size: 12px; }
+    #hl-root .hl-nav .cnt:empty { display: none; }
     #hl-root .hl-card {
         background: #232323; border: 1px solid #333; border-radius: 8px;
         padding: 14px 16px; margin-bottom: 14px;
@@ -19,13 +36,17 @@
         text-align: left; color: #888; font-weight: 500; padding: 6px 8px;
         border-bottom: 1px solid #333; white-space: nowrap;
     }
-    #hl-root td { padding: 6px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc; }
+    #hl-root td { padding: 6px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc; vertical-align: top; }
     #hl-root td.num, #hl-root th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    #hl-root tr.hl-row-click { cursor: pointer; }
+    #hl-root tr.hl-row-click:hover td { background: #262626; }
+    #hl-root tr.hl-detail td { background: #1c1c1c; padding: 10px 14px; }
     #hl-root .hl-btn {
         background: #3b82f6; color: #fff; border: none; padding: 6px 12px;
         border-radius: 4px; font-size: 12px; cursor: pointer;
     }
     #hl-root .hl-btn:hover { background: #2563eb; }
+    #hl-root .hl-btn:disabled { opacity: .45; cursor: default; }
     #hl-root .hl-btn.ok { background: #16a34a; }
     #hl-root .hl-btn.ok:hover { background: #15803d; }
     #hl-root .hl-btn.warn { background: transparent; border: 1px solid #a16207; color: #fbbf24; }
@@ -41,12 +62,26 @@
     #hl-root .hl-pill.pending { border-color: #a16207; color: #fbbf24; }
     #hl-root .hl-pill.approved { border-color: #166534; color: #4ade80; }
     #hl-root .hl-pill.rejected { border-color: #7f1d1d; color: #f87171; }
+    #hl-root .hl-pill.cancelled { border-color: #444; color: #777; }
     #hl-root select, #hl-root input, #hl-root textarea {
         background: #1a1a1a; border: 1px solid #333; color: #ddd; border-radius: 4px;
-        padding: 6px 8px; font-size: 12.5px;
+        padding: 6px 8px; font-size: 12.5px; font-family: inherit;
     }
     #hl-root input[type="number"] { width: 72px; }
+    #hl-root textarea { width: 100%; box-sizing: border-box; resize: vertical; }
     #hl-root .hl-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     #hl-root .hl-note { color: #777; font-size: 11.5px; margin-top: 8px; line-height: 1.6; }
     #hl-root .hl-empty { color: #666; padding: 14px 0; text-align: center; font-size: 12.5px; }
+    #hl-root .hl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+    #hl-root .hl-qcard { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 12px 14px; font-size: 12.5px; color: #ccc; }
+    #hl-root .hl-qcard .hl-qhead { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    #hl-root .hl-qcard .hl-qhead b { color: #fff; font-size: 14px; }
+    #hl-root .hl-qcard .hl-qline { margin: 3px 0; line-height: 1.6; }
+    #hl-root .hl-qcard .hl-qline .k { color: #777; margin-right: 6px; }
+    #hl-root .hl-ctx { border-top: 1px dashed #333; margin-top: 8px; padding-top: 8px; line-height: 1.7; }
+    #hl-root .hl-ctx .ok { color: #4ade80; }
+    #hl-root .hl-ctx .short { color: #f87171; }
+    #hl-root .hl-ctx .amber { color: #fbbf24; }
+    #hl-root .hl-ctx .dim { color: #777; }
+    #hl-root .hl-qacts { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 </style>

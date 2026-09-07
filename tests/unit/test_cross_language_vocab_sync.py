@@ -84,23 +84,40 @@ def test_the_presale_statuses_are_a_prefix_of_the_pipeline():
 
 # ── 人事：假別與狀態 ────────────────────────────────────────────
 
+def _leave_js_list(decl: str, obj_keys: bool = False):
+    """hr_leave.js 的 LEAVE_TYPES／STATUS_PILL；前端改成從 summary.vocab 拿（不寫死）時回 None。"""
+    src = repo_src("frontend/tabs/hr_leave/hr_leave.js")
+    if obj_keys:
+        m = re.search(rf"{decl}\s*=\s*\{{([^}}]*)\}}", src)
+        return re.findall(r"['\"]([^'\"]+)['\"]\s*:", m.group(1)) if m else None
+    m = re.search(rf"{decl}\s*=\s*\[([^\]]*)\]", src)
+    return re.findall(r"['\"]([^'\"]+)['\"]", m.group(1)) if m else None
+
+
 def test_leave_types_match():
+    """2026-09-07 假勤重整：後端字彙分兩份 —— core.hr_logic.LEAVE_TYPES（舊、鏡射用）⊂
+    core.leave_logic.ALL_LEAVE_TYPES（新端點認的）。前端那份寫死的清單要**夾在兩者之間**：
+    不能少一個舊值（帳上在用的列一打開就被迫改別的），也不能多一個後端不認的（送上去 422）。
+    前端改成從 /me/leave/summary.vocab 拿時（§7.1 的本意）就沒有寫死清單可比，跳過。"""
     from core.hr_logic import LEAVE_TYPES
-    got = _js_str_array(repo_src("frontend/tabs/hr_leave/hr_leave.js"), "const LEAVE_TYPES")
-    assert got == list(LEAVE_TYPES), (
-        f"hr_leave.js 的假別與 core.hr_logic.LEAVE_TYPES 不同步：{got} vs {list(LEAVE_TYPES)}")
+    from core.leave_logic import ALL_LEAVE_TYPES
+    got = _leave_js_list("const LEAVE_TYPES")
+    if got is None:
+        return
+    assert set(LEAVE_TYPES) <= set(got) <= set(ALL_LEAVE_TYPES), (
+        f"hr_leave.js 的假別要介於 hr_logic.LEAVE_TYPES 與 leave_logic.ALL_LEAVE_TYPES 之間：{got}")
+    assert len(got) == len(set(got))
 
 
 def test_leave_statuses_match_the_status_pill_map():
-    """前端把狀態拿去查 CSS class —— 查不到就畫成沒有樣式的裸文字。"""
+    """前端把狀態拿去查 CSS class —— 查不到就畫成沒有樣式的裸文字。同上：夾在舊 LEAVE_STATUSES 與新 REQUEST_STATUSES 之間。"""
     from core.hr_logic import LEAVE_STATUSES
-    src = repo_src("frontend/tabs/hr_leave/hr_leave.js")
-    m = re.search(r"const STATUS_PILL\s*=\s*\{([^}]*)\}", src)
-    assert m, "找不到 STATUS_PILL"
-    got = re.findall(r"['\"]([^'\"]+)['\"]\s*:", m.group(1))
-    assert set(got) == set(LEAVE_STATUSES), (
-        f"STATUS_PILL 的狀態與 core.hr_logic.LEAVE_STATUSES 不同步："
-        f"{sorted(got)} vs {sorted(LEAVE_STATUSES)}")
+    from core.leave_logic import REQUEST_STATUSES
+    got = _leave_js_list("const STATUS_PILL", obj_keys=True)
+    if got is None:
+        return
+    assert set(LEAVE_STATUSES) <= set(got) <= set(REQUEST_STATUSES), (
+        f"STATUS_PILL 的狀態要介於 hr_logic.LEAVE_STATUSES 與 leave_logic.REQUEST_STATUSES 之間：{sorted(got)}")
 
 
 # ── 參考影片庫：八族分類 ────────────────────────────────────────

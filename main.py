@@ -642,6 +642,17 @@ async def _on_startup():
                         ("crm_cash_invoice_links", "fee", "INTEGER NOT NULL DEFAULT 0"),
                         # 行事曆：器材預約列掛在哪一場拍攝（docs/SHOOT_CALENDAR_PLAN.md）
                         ("equipment_checkouts", "shoot_id", "VARCHAR(32)"),
+                        # 假勤重整（docs/LEAVE_PLAN.md §7.2）：小時正本／半天時段／退回與消假說明／日曆三欄；
+                        # hr_leave_credits／allocations／holidays 新表由 create_all 建，舊列 hours 回填在 db/migrations.py
+                        ("hr_leave_requests", "hours", "DOUBLE PRECISION"),
+                        ("hr_leave_requests", "part", "VARCHAR(8) NOT NULL DEFAULT 'all'"),
+                        ("hr_leave_requests", "start_time", "VARCHAR(5)"),
+                        ("hr_leave_requests", "end_time", "VARCHAR(5)"),
+                        ("hr_leave_requests", "reject_note", "TEXT"),
+                        ("hr_leave_requests", "cancel_note", "TEXT"),
+                        ("hr_leave_requests", "google_event_id", "VARCHAR(255)"),
+                        ("hr_leave_requests", "synced_at", "TIMESTAMPTZ"),
+                        ("hr_leave_requests", "sync_error", "TEXT"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

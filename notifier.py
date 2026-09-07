@@ -106,6 +106,8 @@ def notify_tab(template_key: str, **variables) -> None:
         "project_closing":   "📥 【結案】專案「{project_name}」進入官網上架收件匣\n→ 後台 業務管理 › 專案管理 › 結案看板",
         # N-hr H2 請假申請（依 owner 2026-07-17 設計鐵則：通知文字無 emoji）
         "leave_request":     "【請假申請】{staff_name}：{leave_type} {start} ~ {end}（{days} 天）\n事由：{reason}\n→ 後台 人事管理 › 出缺勤",
+        # 假勤重整（docs/LEAVE_PLAN.md §7.5）：核准／退回／消假決定 → 貼群 @申請人（一期先貼群；私訊要另接 Chat API）
+        "leave_result":      "【請假{result}】{staff_name}：{leave_type} {start}～{end}（{hours} 小時）{note}\n→ 員工頁 我的假勤",
         "works_published":   "🌐 【上架驗證 ✓】{count} 件作品已確認在對外網站上線\n{titles}",
         # 工時：Sheet 與總表改過的列撞到（沒自動蓋）；owner 鐵則：新通知無 emoji
         "timesheet_conflict": "【工時衝突】Sheet 有 {count} 列與總表改過的列內容不同，沒有自動覆蓋。到 後台 人事管理 › 專案工時 › 總表 決定用哪一列",

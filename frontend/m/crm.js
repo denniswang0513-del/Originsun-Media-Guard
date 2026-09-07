@@ -3,7 +3,7 @@
  *
  * 閘門：管理員（access_level ≥ 3）或模組 crm_projects；殼由 ./shell.js 提供。
  * 開頁：boot → GET /api/v1/crm/m/options 一次（所有字彙）→ 依 hash 畫分頁。
- * 分頁：#invoice（預設）／#petty／#projects／#quotes／#calendar／#worklog，畫面在 views/；
+ * 分頁：#invoice（預設）／#petty／#projects／#quotes／#calendar／#worklog／#leave，畫面在 views/；
  * #expense（記雜支）與 #payments（付款，owner 2026-09-03 被行事曆取代）有畫面但不在分頁列。
  */
 import { boot, mfetch, toast, esc } from './shell.js';
@@ -16,9 +16,10 @@ import * as calendarView from './views/calendar.js';
 import * as paymentsView from './views/payments.js';
 import * as expenseView from './views/expense.js';
 import * as worklogView from './views/worklog.js';
+import * as leaveView from './views/leave.js';
 
 const VIEWS = { invoice: invoiceView, petty: pettyView, projects: projectsView, quotes: quotesView,
-                calendar: calendarView, worklog: worklogView, payments: paymentsView, expense: expenseView };
+                calendar: calendarView, worklog: worklogView, leave: leaveView, payments: paymentsView, expense: expenseView };
 
 const gate = (me) => isAdmin(me) || (me.modules || []).includes('crm_projects');
 
