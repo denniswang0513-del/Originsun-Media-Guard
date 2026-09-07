@@ -146,7 +146,7 @@ window._authToggle = function() {
         // 工具
         html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
         html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
-        html += _item('⚙️', '通知設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
+        html += _item('⚙️', '系統設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
         html += _item('🔄', '重新啟動 Agent', "window._restartAgent();document.getElementById('auth-dropdown')?.remove()");
 
         if (window._accessLevel >= 3) {
@@ -163,7 +163,7 @@ window._authToggle = function() {
         // 未登入
         html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
         html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
-        html += _item('⚙️', '通知設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
+        html += _item('⚙️', '系統設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
         html += _item('🔄', '重新啟動 Agent', "window._restartAgent();document.getElementById('auth-dropdown')?.remove()");
         html += _sep;
         html += `<div style="padding:6px 14px;">
