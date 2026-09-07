@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>示範｜我的週規劃（規劃 → 今天帶入 → 實際狀態 → 團隊的一週）</title>
+<title>示範｜我的週規劃（規劃 → 今天帶入 → 填時數／挪到隔天 → 團隊的一週）</title>
 <style>
   :root { --red:#c9372c; --ink:#262626; --sub:#737373; --line:#e5e5e5; --warn:#b45309; --ok:#15803d; --late:#c9372c; --num:#f59e0b; --plan:#2563eb; }
   * { box-sizing:border-box; }
@@ -46,14 +46,6 @@
   .today-strip { display:flex; gap:22px; flex-wrap:wrap; border:1px solid var(--line); border-radius:8px; padding:10px 14px; font-size:13px; margin-bottom:12px; align-items:center; }
   .today-strip .k { color:var(--sub); margin-right:6px; }
   .today-strip .warn { color:var(--warn); }
-  .today-strip .late { color:var(--late); font-weight:600; }
-  /* 昨天沒執行的處理面板 */
-  .leftover { border:1px solid #f1c9c4; background:#fff4f2; border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:13px; }
-  .leftover .ey { font-size:11px; letter-spacing:.3em; text-transform:uppercase; color:var(--late); margin-bottom:6px; }
-  .leftover .it { display:flex; gap:10px; align-items:center; padding:4px 0; border-top:1px dashed #f1c9c4; }
-  .leftover .it:first-of-type { border-top:0; }
-  .leftover .it b { font-weight:600; }
-  .leftover .it .no { color:var(--sub); }
   /* 格子 */
   table.sheet { width:100%; border-collapse:collapse; font-size:12.5px; }
   table.sheet th, table.sheet td { border:1px solid var(--line); padding:4px 8px; vertical-align:middle; }
@@ -72,8 +64,6 @@
   /* 我的一週 */
   .wk-sum { display:flex; gap:18px; flex-wrap:wrap; font-size:13px; margin-bottom:10px; align-items:center; }
   .wk-sum .k { color:var(--sub); margin-right:4px; }
-  .wk-sum .late { color:var(--late); font-weight:600; }
-  .wk-sum .ok { color:var(--ok); font-weight:600; }
   .board { display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:8px; align-items:start; }
   .col { border:1px solid var(--line); border-radius:8px; min-height:240px; background:#fcfcfc; display:flex; flex-direction:column; }
   .col.today { border-color:var(--red); background:#fff; }
@@ -86,14 +76,12 @@
   .card { border:1px solid var(--line); border-radius:7px; background:#fff; padding:6px 8px; font-size:12px; position:relative; }
   .card.plan { border-left:3px solid var(--plan); cursor:grab; }
   .card.done { border-left:3px solid var(--ok); }
-  .card.late { border-left:3px solid var(--late); border-color:#f1c9c4; background:#fff4f2; }
   .card.ms { border-style:dashed; }
   .card .p { font-weight:600; line-height:1.35; }
   .card .t { color:var(--ink); font-size:11.5px; margin-top:1px; }
   .card .f { display:flex; justify-content:space-between; align-items:center; gap:6px; margin-top:4px; font-size:11px; color:var(--sub); flex-wrap:wrap; }
   .card .f .s.plan { color:var(--plan); }
   .card .f .s.done { color:var(--ok); }
-  .card .f .s.late { color:var(--late); font-weight:600; }
   .card .f .acts { display:flex; gap:4px; }
   .card .from { font-size:10px; color:var(--sub); border:1px solid var(--line); border-radius:3px; padding:0 4px; }
   .card .x { position:absolute; top:3px; right:5px; border:0; background:none; color:#bbb; cursor:pointer; font-size:12px; padding:0 2px; line-height:1; }
@@ -119,21 +107,19 @@
   table.week .c.off { background:#eee; color:var(--sub); }
   table.week .c.plan { background:#fff; border:1px dashed #b9c8ef; color:var(--sub); }
   table.week .c.plan .cp { color:var(--ink); }
-  table.week .c.late { background:#fff4f2; border:1px dashed #f1c9c4; }
   table.week .c.ms { display:block; background:#fff4f2; border:1px solid #f1c9c4; font-size:11px; }
   table.week .ch { display:flex; justify-content:space-between; gap:6px; }
   table.week .cp { font-weight:600; }
   table.week .hrs { color:var(--sub); white-space:nowrap; }
   table.week .hrs.plan { color:var(--plan); }
-  table.week .hrs.late { color:var(--late); }
   table.week .cn { color:var(--sub); font-size:11px; }
   .hint { color:var(--sub); font-size:12px; }
 </style>
 </head>
 <body>
 <div class="top">
-  <h1>示範｜我的週規劃 —— 週一排好，每天的格子自動帶入，日期過了照實際更新</h1>
-  <div class="seg"><button class="on" data-state="mon">週一 排本週</button><button data-state="wed">週三 執行中</button><button data-state="sat">週六 回顧</button></div>
+  <h1>示範｜我的週規劃 —— 週一排好，每天的格子自動帶入，填時數或挪到隔天</h1>
+  <div class="seg"><button class="on" data-state="mon">週一 排本週</button><button data-state="wed">週三 執行中</button><button data-state="sat">週六 看整週</button></div>
   <span class="note">假資料，以「李宜庭」的視角。三顆按鈕是同一週的三個時間點；卡片都能加、拖、改、刪。</span>
 </div>
 <div class="stage">
@@ -141,13 +127,13 @@
     <h2>看什麼</h2>
     <ol>
       <li><span class="n">1</span><div><b>「今天與這週」多一個子視圖「我的一週」</b><span>一天一欄、一張卡＝一個專案＋要做什麼，不填時數。加卡三種來源：直接打、「從里程碑帶入」（這週指定給我的，落在到期那天）、「複製上週」。卡可以拖到別天。</span></div></li>
-      <li><span class="n">2</span><div><b>今天的專案紀錄：今天的卡自動就在格子裡</b><span>同一筆資料，不用「帶入」動作。狀態顯示「計畫」；填了時數就變「已存」。自己臨時加的列照舊。不用按任何「沒做」。</span></div></li>
-      <li><span class="n">3</span><div><b>日期過了，用當天真的做的紀錄自動更新</b><span>卡自己有時數 → 已做；卡沒填但當天有同一個案的紀錄 → 自動對上，算已做（標「對到當天紀錄」）；都沒有 → 未執行（紅）。唯一的手動動作是「挪到隔天」：今天的卡可以挪到明天，過期的卡可以挪到今天。「今天」那條會提醒「昨天 N 項沒執行」。</span></div></li>
-      <li><span class="n">4</span><div><b>團隊的一週：同一批卡，大家都看得到</b><span>未來天畫成淺藍虛線「計畫」，過去天畫實際時數；未執行的紅虛線。主管一眼看到每個人這週排了什麼、做到哪。</span></div></li>
+      <li><span class="n">2</span><div><b>今天的專案紀錄：今天的卡自動就在格子裡</b><span>同一筆資料，不用「帶入」動作。狀態顯示「計畫」；填了時數就是一般的紀錄（「已存」）。自己臨時加的列照舊。</span></div></li>
+      <li><span class="n">3</span><div><b>執行的過程只有兩件事</b><span>填時數，或「挪到隔天」（卡上、格子的狀態格都有）。不判有做沒做、不標紅、不提醒；沒填時數的卡就一直是「計畫」，填了的顯示時數。挪過的卡帶「移自 9/8」小標。</span></div></li>
+      <li><span class="n">4</span><div><b>團隊的一週：同一批卡，大家都看得到</b><span>沒填時數的畫成淺藍虛線「計畫」，填了的畫實際時數。主管一眼看到每個人這週排了什麼、填到哪。</span></div></li>
     </ol>
     <h2 style="margin-top:18px">資料</h2>
     <ol>
-      <li><div><span>不加新表。一張卡＝一列工時（狀態 plan、時數 0），工時表本來就有這種列，團隊的一週也早就會畫。新增的只有：「我的一週」視圖、格子的「計畫」狀態、隔天的提醒、「挪到隔天」、未執行的判定（純推導，不存狀態）。</span></div></li>
+      <li><div><span>不加新表。一張卡＝一列工時（狀態 plan、時數 0），工時表本來就有這種列，團隊的一週也早就會畫。新增的只有：「我的一週」視圖、格子的「計畫」狀態、「挪到隔天」。</span></div></li>
       <li><div><span>只能規劃自己的（主管要排別人的，走里程碑指定負責人，會自動變成他的卡）。</span></div></li>
     </ol>
   </div>
@@ -165,13 +151,12 @@
     <div class="view" data-v="log">
       <div class="vhead"><span class="ey">Project Log<b id="log-title"></b></span><span class="vrow"><button class="btn sm">存成草稿</button><button class="btn sm">合併同案</button><button class="btn sm pri">送出</button></span></div>
       <div class="today-strip" id="strip"></div>
-      <div id="leftover"></div>
       <div class="rel"><span class="tag n">2</span>
       <table class="sheet">
         <thead><tr><th>#</th><th style="width:22%">專案</th><th style="width:70px">分類</th><th style="width:90px">工作階段</th><th>做了什麼</th><th style="width:14%">備註</th><th>時數 h</th><th>狀態</th><th style="width:26px"></th></tr></thead>
         <tbody id="sheet"></tbody>
       </table></div>
-      <div class="sheet-foot"><span class="hint">藍底的列是「我的一週」排的；填時數就算做了。時數格可以打 +1.5。</span><button class="btn sm">加一列</button></div>
+      <div class="sheet-foot"><span class="hint">藍底的列是「我的一週」排的；填時數就是一般紀錄。時數格可以打 +1.5。</span><button class="btn sm">加一列</button></div>
     </div>
 
     <!-- 我的一週 -->
@@ -181,7 +166,7 @@
           <span class="src"><button class="btn" id="from-ms">從里程碑帶入</button><button class="btn" id="copy-last">複製上週</button></span></span></div>
       <div class="wk-sum" id="wk-sum"></div>
       <div class="board" id="board"></div>
-      <div class="hint" style="margin-top:8px">拖卡片到別的日子；點卡片右上的 × 刪；今天的卡可以「挪到明天」，「未執行」的卡可以「挪到今天」。做了沒是照當天的紀錄自動判的。</div>
+      <div class="hint" style="margin-top:8px">拖卡片到別的日子；點卡片右上的 × 刪；還沒填時數的卡可以「挪到隔天」。這裡不判有做沒做。</div>
     </div>
 
     <!-- 團隊的一週 -->
@@ -193,7 +178,7 @@
         <thead id="week-head"></thead>
         <tbody id="week-body"></tbody>
       </table></div></div>
-      <div class="hint" style="margin-top:8px">虛線＝計畫（還沒到那天）、實底＝實際時數、紅虛線＝未執行。里程碑那張淡紅小卡照舊。</div>
+      <div class="hint" style="margin-top:8px">虛線＝計畫（還沒填時數）、實底＝實際時數。里程碑那張淡紅小卡照舊。</div>
     </div>
 
     <div class="view" data-v="find">
@@ -242,7 +227,7 @@ const SHOOTS = { '2026-09-10': { title: '2026 臺北城市形象片', crew: ['�
 const LEAVE = { '2026-09-11': ['劉禮瑜'] };
 
 // 一張卡＝一列工時：{id, day, pid, wt, stage, note, hours, state, from, movedFrom}
-//   沒有存狀態：「已做」＝卡自己有時數、或當天有同一個案的實際紀錄（自動對上）；「未執行」＝day < TODAY 且兩者都沒有
+//   沒有存狀態、不判有做沒做：有時數＝一般紀錄，沒時數＝計畫
 const C = (id, day, pid, wt, stage, note, hours, extra) => ({ id, day, pid, wt, stage, note, hours: hours ?? null, ...(extra || {}) });
 const STATES = {
   mon: { today: '2026-09-07', cards: [
@@ -279,27 +264,20 @@ let cards = clone(STATES.mon.cards);
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function $(id) { return document.getElementById(id); }
 const isDone = (c) => c.hours != null && c.hours > 0;
-// 卡沒填時數、但當天有同一個案的實際紀錄 → 自動對上（真的做：同日同案的實際列）
-const matchOf = (c) => isDone(c) ? null : cards.find(o => o.id !== c.id && o.day === c.day && o.pid === c.pid && isDone(o)) || null;
-const doneHours = (c) => isDone(c) ? c.hours : (matchOf(c) || {}).hours;
-const isLate = (c) => !isDone(c) && !matchOf(c) && c.day < TODAY;
-const statusOf = (c) => isDone(c) ? 'done' : matchOf(c) ? 'done' : isLate(c) ? 'late' : 'plan';
-const LABEL = { plan: '計畫', done: '已做', late: '未執行' };
+const statusOf = (c) => isDone(c) ? 'done' : 'plan';
+const LABEL = { plan: '計畫', done: '已填' };
 const nextDay = (d) => { const t = new Date(d + 'T00:00:00'); t.setDate(t.getDate() + 1); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
 
 function drawAll() {
-  const mine = cards;
-  const n = { plan: 0, done: 0, late: 0 };
-  mine.forEach(c => n[statusOf(c)]++);
-  $('plan-cnt').textContent = `${mine.length}`;
-  drawPlan(n); drawLog(); drawWeek();
+  $('plan-cnt').textContent = `${cards.length}`;
+  drawPlan(); drawLog(); drawWeek();
 }
 
 // ── 我的一週 ──
-function drawPlan(n) {
+function drawPlan() {
   $('plan-title').textContent = `我的一週 9/7 – 9/12`;
-  $('wk-sum').innerHTML = `<span><span class="k">這週排了</span>${cards.length} 項</span><span><span class="k">已做</span><span class="ok">${n.done}</span></span><span><span class="k">未執行</span><span class="${n.late ? 'late' : ''}">${n.late}</span></span><span><span class="k">還沒到</span>${n.plan}</span>
-    <span class="meta">做了沒是照當天格子裡的紀錄自動判的；這裡只看排了什麼。</span>`;
+  $('wk-sum').innerHTML = `<span><span class="k">這週排了</span>${cards.length} 項</span><span><span class="k">填了時數</span>${cards.filter(isDone).length} 項</span>
+    <span class="meta">只看排了什麼、填到哪；不判有做沒做。</span>`;
   $('board').innerHTML = DAYS.map(d => {
     const list = cards.filter(c => c.day === d);
     const cls = d === TODAY ? 'today' : d < TODAY ? 'past' : '';
@@ -310,31 +288,27 @@ function drawPlan(n) {
 }
 function cardHtml(c) {
   const s = statusOf(c); const p = proj(c.pid);
-  const acts = s === 'late' ? `<span class="acts"><button class="btn xs" data-move-today="${c.id}">挪到今天</button></span>` :
-    (s === 'plan' && c.day === TODAY) ? `<span class="acts"><button class="btn xs" data-move-next="${c.id}">挪到明天</button></span>` : '';
-  const tags = [c.from ? `<span class="from">${c.from}</span>` : '', c.movedFrom ? `<span class="from">移自 ${mdS(c.movedFrom)}</span>` : '', c.adhoc ? `<span class="from">當天加的</span>` : '', matchOf(c) ? `<span class="from">對到當天紀錄</span>` : ''].join('');
-  return `<div class="card ${s} ${c.from ? 'ms' : ''}" draggable="${s === 'plan' || s === 'late'}" data-card="${c.id}"><button class="x" data-del="${c.id}" title="刪">×</button>
+  const acts = s === 'plan' ? `<span class="acts"><button class="btn xs" data-move-next="${c.id}">挪到隔天</button></span>` : '';
+  const tags = [c.from ? `<span class="from">${c.from}</span>` : '', c.movedFrom ? `<span class="from">移自 ${mdS(c.movedFrom)}</span>` : '', c.adhoc ? `<span class="from">當天加的</span>` : ''].join('');
+  return `<div class="card ${s} ${c.from ? 'ms' : ''}" draggable="${s === 'plan'}" data-card="${c.id}"><button class="x" data-del="${c.id}" title="刪">×</button>
     <div class="p">${p.name}</div><div class="t">${c.note}${c.wt ? `<span class="meta"> · ${[c.wt, c.stage].filter(Boolean).join(' · ')}</span>` : ''}</div>
-    <div class="f"><span class="s ${s}">${s === 'done' ? `已做 ${doneHours(c)} h` : LABEL[s]}</span>${tags}${acts}</div></div>`;
+    <div class="f"><span class="s ${s}">${s === 'done' ? `${c.hours} h` : LABEL[s]}</span>${tags}${acts}</div></div>`;
 }
 
 // ── 今天的專案紀錄 ──
 function drawLog() {
   $('log-title').textContent = `今天的專案紀錄 ${md(TODAY)}`;
   const todays = cards.filter(c => c.day === TODAY);
-  const late = cards.filter(isLate);
   const ms = MY_MS.filter(m => m.due === TODAY);
   $('strip').innerHTML = `<span><span class="k">今天</span>${md(TODAY)}</span><span><span class="k">場次</span>${SHOOTS[TODAY] && SHOOTS[TODAY].crew.includes(ME) ? SHOOTS[TODAY].title : '沒有'}</span>
-    <span><span class="k">我的一週</span>今天排了 ${todays.filter(c => !c.adhoc).length} 項${todays.filter(isDone).length ? `、已做 ${todays.filter(isDone).length}` : ''}</span>
-    <span><span class="k">本週里程碑</span>${ms.length ? `今天到期 <span class="warn">${ms.length} 個</span>（${ms.map(m => m.title).join('、')}）` : '今天沒有到期的'}</span>
-    ${late.length ? `<span class="late">昨天以前有 ${late.length} 項計畫沒執行</span>` : ''}`;
-  $('leftover').innerHTML = late.length ? `<div class="leftover rel"><span class="tag n">3</span><div class="ey">Leftover　沒執行的計畫</div>${late.map(c => `<div class="it"><span class="meta">${mdS(c.day)}</span><b>${proj(c.pid).name}</b><span class="no">${c.note}</span><span style="flex:1"></span><button class="btn xs" data-move-today="${c.id}">挪到今天</button></div>`).join('')}<div class="meta" style="margin-top:4px">不挪就留著標未執行；做了沒是照當天格子裡的紀錄自動判的。</div></div>` : '';
+    <span><span class="k">我的一週</span>今天排了 ${todays.filter(c => !c.adhoc).length} 項</span>
+    <span><span class="k">本週里程碑</span>${ms.length ? `今天到期 <span class="warn">${ms.length} 個</span>（${ms.map(m => m.title).join('、')}）` : '今天沒有到期的'}</span>`;
   const rows = todays.length ? todays : [];
   $('sheet').innerHTML = rows.map((c, i) => {
     const s = statusOf(c);
     const st = isDone(c) ? '<span class="ok">已存</span>'
       : c.adhoc ? '<span class="pend">草稿（沒時數）</span>'
-      : `<span class="plan">計畫</span> <button class="btn xs" data-move-next="${c.id}">挪到明天</button>`;
+      : `<span class="plan">計畫</span> <button class="btn xs" data-move-next="${c.id}">挪到隔天</button>`;
     return `<tr class="${c.adhoc || isDone(c) ? '' : 'isplan'}" data-row="${c.id}"><td class="num">${i + 1}</td><td><input value="${proj(c.pid).name}"></td><td><input value="${c.wt}"></td><td><input value="${c.stage}"></td><td><input value="${c.note}"></td><td><input value=""></td><td class="hrs"><input data-hours="${c.id}" value="${c.hours ?? ''}" placeholder="${s === 'plan' ? '填時數' : ''}"></td><td class="st">${st}</td><td><button class="x" data-del="${c.id}" style="position:static;color:#bbb;border:0;background:none;cursor:pointer">×</button></td></tr>`;
   }).join('') + (rows.length ? '' : '<tr><td colspan="9" class="meta" style="text-align:center;padding:14px">今天沒有排的，直接「加一列」。</td></tr>');
 }
@@ -349,7 +323,6 @@ function drawWeek() {
     MY_MS.filter(m => n === ME && m.due === d).forEach(m => parts.push(`<div class="c ms">里程碑：${m.title}<div class="cn">${proj(m.pid).name}</div></div>`));
     if (n === ME) {
       cards.filter(c => c.day === d).forEach(c => { const s = statusOf(c);
-        if (!isDone(c) && matchOf(c)) return;   // 對到當天紀錄的卡不重畫，實際那列已經在
         parts.push(`<div class="c ${s === 'done' ? '' : s}"><div class="ch"><span class="cp">${proj(c.pid).name}</span><span class="hrs ${s}">${s === 'done' ? c.hours + ' h' : LABEL[s]}</span></div><div class="cn">${c.note}</div></div>`); });
     } else {
       ((HOURS[n] || {})[d] || []).filter(() => d < TODAY || d === TODAY).forEach(([p, h, note]) => parts.push(`<div class="c"><div class="ch"><span class="cp">${p}</span><span class="hrs">${h} h</span></div><div class="cn">${note}</div></div>`));
@@ -365,7 +338,6 @@ document.body.addEventListener('click', (ev) => {
   const s = ev.target.closest('.seg button'); if (s) { document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b === s)); TODAY = STATES[s.dataset.state].today; cards = clone(STATES[s.dataset.state].cards); drawAll(); return; }
   const t = ev.target;
   if (t.dataset.del) { cards = cards.filter(c => c.id !== t.dataset.del); return drawAll(); }
-  if (t.dataset.moveToday) { const c = byId(t.dataset.moveToday); c.movedFrom = c.day; c.day = TODAY; return drawAll(); }
   if (t.dataset.moveNext) { const c = byId(t.dataset.moveNext); c.movedFrom = c.day; c.day = nextDay(c.day); return drawAll(); }
   if (t.dataset.addbtn) { return openAdd(t.dataset.addbtn); }
   if (t.dataset.addcancel) { return drawAll(); }
@@ -388,12 +360,11 @@ document.body.addEventListener('input', (ev) => {
   const v = raw.startsWith('+') ? (c.hours || 0) + parseFloat(raw.slice(1) || 0) : parseFloat(raw);
   c.hours = Number.isFinite(v) && v > 0 ? Math.round(v * 10) / 10 : null;
   const tr = ev.target.closest('tr'); const st = tr.querySelector('.st');
-  st.innerHTML = c.hours ? '<span class="ok">已存</span>' : (c.adhoc ? '<span class="pend">草稿（沒時數）</span>' : `<span class="plan">計畫</span> <button class="btn xs" data-move-next="${c.id}">挪到明天</button>`);
+  st.innerHTML = c.hours ? '<span class="ok">已存</span>' : (c.adhoc ? '<span class="pend">草稿（沒時數）</span>' : `<span class="plan">計畫</span> <button class="btn xs" data-move-next="${c.id}">挪到隔天</button>`);
   tr.classList.toggle('isplan', !c.hours && !c.adhoc);
-  $('plan-cnt').textContent = cards.length; drawWeek(); drawPlanQuiet();
+  $('plan-cnt').textContent = cards.length; drawWeek(); drawPlan();
 });
 document.body.addEventListener('change', (ev) => { if (ev.target.dataset.hours) drawAll(); });
-function drawPlanQuiet() { const n = { plan: 0, done: 0, late: 0 }; cards.forEach(c => n[statusOf(c)]++); drawPlan(n); }
 function openAdd(day) {
   const host = document.querySelector(`.add[data-add="${day}"]`);
   host.innerHTML = `<form onsubmit="return false"><select data-addpid><option value="">選專案（打字可以找）</option>${CATALOG.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}</select>
