@@ -146,3 +146,16 @@ def test_desktop_detail_has_share_link_button():
     src = js_code_only(repo_src(QUOTES_JS))
     assert 'id="quote-btn-share"' in src and "'/quotations/' + q.id + '/share', { method: 'POST' }" in src
     assert "location.origin + q.share_url" in src
+
+
+def test_pdf_and_share_buttons_appear_only_after_sending():
+    """owner 2026-09-07「送出再產生連結與 pdf 按鈕」：草稿（狀態清單第一個）不給 PDF／連結，寄出後才出現；桌機與手機同一條規則。"""
+    from tests.unit._srcscan import js_code_only, js_func_body
+    m = js_code_only(js_func_body(repo_src("frontend/m/views/quotes.js"), "function cardHtml(q)"))
+    assert "const sent = q.status !== list('quote_statuses')[0];" in m
+    assert "(sent ? `<button type=\"button\" class=\"m-btn sm\" style=\"${BTN}\" data-pdf=" in m
+    assert "(sent && (q.share_url || isAdmin())" in m
+    d = js_code_only(repo_src("frontend/tabs/crm/crm-quotes.js"))
+    assert "const sent = q.status !== _QUOTE_STATUSES[0];" in d
+    assert "(sent ? `<button class=\"crm-btn crm-btn-secondary crm-btn-sm\" id=\"quote-btn-pdf\">" in d
+    assert "actions.querySelector('#quote-btn-pdf')?.addEventListener" in d and "actions.querySelector('#quote-btn-share')?.addEventListener" in d

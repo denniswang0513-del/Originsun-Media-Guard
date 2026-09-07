@@ -187,14 +187,16 @@ function renderDetail(q) {
 
     const actions = document.getElementById('quote-bar-actions');
     if (actions) {
-        actions.innerHTML = `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-pdf">下載 PDF</button>
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-share">${q.share_url ? '複製連結' : '分享連結'}</button>
-            <button class="crm-detail-close" title="關閉">&#x2715;</button>`;
+        // PDF 與分享連結要寄出之後才出現（owner 2026-09-07「送出再產生連結與 pdf 按鈕」）：草稿還在改，不該流出去
+        const sent = q.status !== _QUOTE_STATUSES[0];
+        actions.innerHTML = (sent ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-pdf">下載 PDF</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-share">${q.share_url ? '複製連結' : '分享連結'}</button>` : '')
+            + `<button class="crm-detail-close" title="關閉">&#x2715;</button>`;
         actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
-        actions.querySelector('#quote-btn-pdf').addEventListener('click', () =>
+        actions.querySelector('#quote-btn-pdf')?.addEventListener('click', () =>
             authDownload('/api/v1/crm/quotations/' + q.id + '/pdf', quotePdfFilename(q), '下載 PDF'));
         // 線上檢視連結（免登入、頁上可下載 PDF）：沒有就鑄一條（冪等），然後複製完整網址
-        actions.querySelector('#quote-btn-share').addEventListener('click', async (ev) => {
+        actions.querySelector('#quote-btn-share')?.addEventListener('click', async (ev) => {
             try {
                 if (!q.share_url) {
                     const r = await _fetch('/quotations/' + q.id + '/share', { method: 'POST' });

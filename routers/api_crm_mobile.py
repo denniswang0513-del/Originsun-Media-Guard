@@ -16,7 +16,7 @@ route class 自動抹掉。報價／請款／發票那幾組回應帶著名單�
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 from core.auth import check_logged_in, payload_grants
 from core.crm_logic import prepend_note
@@ -297,7 +297,7 @@ async def mobile_add_note(project_id: str, req: MobileNotePayload, request: Requ
 
 @router.post("/quotations/{quotation_id}/status")
 async def mobile_quotation_status(quotation_id: str, req: MobileQuoteStatusPayload,
-                                  request: Request):
+                                  request: Request, background: BackgroundTasks):
     """只改報價 status；`activate` 且專案還在售前 → 專案進「製作」
     （走 routers/crm/projects.apply_project_status，跟桌機推階段同一支）。"""
     _check_write(request)
@@ -310,6 +310,7 @@ async def mobile_quotation_status(quotation_id: str, req: MobileQuoteStatusPaylo
         project = await session.get(CrmProject, q.project_id) if q.project_id else None
         if project is not None and (project.entity or "parent") == "mine" and hide_mine_projects(request):
             raise HTTPException(status_code=404, detail="找不到此報價")
+        prev_status = q.status
         q.status = req.status
         q.updated_at = _now()
         if req.activate and project is not None and (project.status or "") in PRESALE:
@@ -327,4 +328,7 @@ async def mobile_quotation_status(quotation_id: str, req: MobileQuoteStatusPaylo
                 project_out = await project_wire(session, project)
         quotation = _to_quotation_dict(q, project_name=project.name if project else "",
                                        client_short_name=client_name)
+    from routers.crm.quotes import archive_quotation_pdf_now, quotation_sent_transition
+    if quotation_sent_transition(prev_status, q.status):     # 寄出＝存一份 PDF 到報價單資料夾（同桌機那條）
+        background.add_task(archive_quotation_pdf_now, q.id)
     return {"status": "ok", "quotation": quotation, "project": project_out}

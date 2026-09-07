@@ -10,7 +10,7 @@ import shutil
 import uuid
 from datetime import datetime
 
-from fastapi import Depends, HTTPException, Request, Query
+from fastapi import BackgroundTasks, Depends, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse
 
 from core.finance_logic import QUOTE_PENDING
@@ -315,21 +315,57 @@ async def set_quotations_root(request: Request):
     return {"status": "ok", "quotes_root": root, "effective": _quotes_root()}
 
 
+def _pdf_footer(view: dict) -> str:
+    import html as _html
+    return (
+        '<div style="width:100%;margin:0 16mm;font-family:\'Noto Sans TC\',\'Microsoft JhengHei\',sans-serif;'
+        'font-size:7px;color:#767676;display:flex;justify-content:space-between;">'
+        f'<span>{_html.escape(footer_line(view))}</span>'
+        '<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>'
+    )
+
+
+def quotation_sent_transition(prev_status, new_status) -> bool:
+    """「這次更新＝把報價寄出去」：狀態進 已寄送、而且之前不是（重存一張已寄送的不算）。"""
+    return new_status == QUOTE_PENDING and prev_status != QUOTE_PENDING
+
+
+async def archive_quotation_pdf_now(quotation_id: str):
+    """報價寄出時主動產一份 PDF 存進報價單資料夾（owner 2026-09-07「送出的時候就下載一個 pdf 到資料夾裡」）。
+    掛在 BackgroundTasks：寄出已經 commit 了，這裡任何失敗（資料夾不通、Playwright 掛掉）只記 log、不回滾。"""
+    from services.html_pdf import html_to_pdf
+    log = logging.getLogger(__name__)
+    try:
+        factory = await _get_factory()
+        async with factory() as session:
+            q = await session.get(CrmQuotation, quotation_id)
+        if q is None:
+            return None
+        view, company = await _quotation_view_of(q)
+        tmp_pdf = await html_to_pdf(_render_quotation_html(view, company), prefix="quotation_",
+                                    footer_html=_pdf_footer(view), margin=PDF_MARGIN)
+        try:
+            dest = _archive_quotation_pdf(tmp_pdf, view)
+        finally:
+            try:
+                os.remove(tmp_pdf)
+            except OSError:
+                pass
+        log.info("報價 %s 寄出，PDF 已存：%s", quotation_id, dest)
+        return dest
+    except Exception as exc:                       # noqa: BLE001 — 背景工作：記下來就好
+        log.warning("報價 %s 寄出存檔失敗（不影響寄出）：%s", quotation_id, exc)
+        return None
+
+
 async def _quotation_pdf_response(q):
     """組資料／渲染／產 PDF 同一個出口：壞在哪一段對使用者都是「PDF 生成失敗」。"""
-    import html as _html
     from starlette.background import BackgroundTask
     from services.html_pdf import html_to_pdf, unlink_later
     try:
         view, company = await _quotation_view_of(q)
-        footer = (
-            '<div style="width:100%;margin:0 16mm;font-family:\'Noto Sans TC\',\'Microsoft JhengHei\',sans-serif;'
-            'font-size:7px;color:#767676;display:flex;justify-content:space-between;">'
-            f'<span>{_html.escape(footer_line(view))}</span>'
-            '<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>'
-        )
         tmp_pdf = await html_to_pdf(_render_quotation_html(view, company), prefix="quotation_",
-                                    footer_html=footer, margin=PDF_MARGIN)
+                                    footer_html=_pdf_footer(view), margin=PDF_MARGIN)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"PDF 生成失敗：{exc}")
     try:                                   # 存一份到報價單資料夾：資料夾不通只記 log，不擋下載
@@ -408,7 +444,8 @@ async def public_quote_pdf(token: str):
 
 
 @router.put("/quotations/{quotation_id}")
-async def update_quotation(quotation_id: str, req: QuotationPayload, request: Request):
+async def update_quotation(quotation_id: str, req: QuotationPayload, request: Request,
+                           background: BackgroundTasks):
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
@@ -421,6 +458,7 @@ async def update_quotation(quotation_id: str, req: QuotationPayload, request: Re
         items_data = await _save_items(session, q.id, req.items)
         subtotal, tax_amount, total = _calc_quotation(items_data, req.discount, req.tax_rate)
 
+        prev_status = q.status
         q.status = req.status
         q.quote_date = _parse_shoot_date(req.quote_date)
         q.valid_until = _parse_shoot_date(req.valid_until)
@@ -438,6 +476,8 @@ async def update_quotation(quotation_id: str, req: QuotationPayload, request: Re
         await session.commit()
         await session.refresh(q)
         loaded_items = await _load_items(session, q.id)
+    if quotation_sent_transition(prev_status, q.status):     # 寄出＝存一份 PDF 到報價單資料夾（回應後做）
+        background.add_task(archive_quotation_pdf_now, q.id)
 
     return {"status": "ok", "quotation": _to_quotation_dict(q, items=loaded_items)}
 

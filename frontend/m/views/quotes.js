@@ -32,12 +32,14 @@ function transitions(status) {
 const BTN = 'flex:0 0 auto;white-space:nowrap';
 
 function cardHtml(q) {
+    // PDF 與線上連結要「寄出」之後才出現（owner 2026-09-07「送出再產生連結與 pdf 按鈕」）：草稿還在改，不該流出去
+    const sent = q.status !== list('quote_statuses')[0];
     const btns = transitions(q.status).map(t =>
         `<button type="button" class="m-btn sm ${t.danger ? 'danger' : 'pri'}" style="${BTN}" data-id="${esc(q.id)}" data-to="${esc(t.to)}"${t.ask ? ' data-ask="1"' : ''}>${esc(t.label)}</button>`).join('')
         + (isAdmin() ? `<button type="button" class="m-btn sm" style="${BTN}" data-edit="${esc(q.id)}">編輯</button>` : '')
-        + `<button type="button" class="m-btn sm" style="${BTN}" data-pdf="${esc(q.id)}">PDF</button>`
+        + (sent ? `<button type="button" class="m-btn sm" style="${BTN}" data-pdf="${esc(q.id)}">PDF</button>` : '')
         // 線上檢視連結：已有就誰都能複製；還沒有只有管理員能建（鑄連結是寫入）
-        + ((q.share_url || isAdmin()) ? `<button type="button" class="m-btn sm" style="${BTN}" data-share="${esc(q.id)}">${q.share_url ? '複製連結' : '建立連結'}</button>` : '');
+        + (sent && (q.share_url || isAdmin()) ? `<button type="button" class="m-btn sm" style="${BTN}" data-share="${esc(q.id)}">${q.share_url ? '複製連結' : '建立連結'}</button>` : '');
     // 金額：顯示折後價（最終報價），有優惠時原價（含稅總計）畫掉放旁邊（owner 2026-09-07）
     const hasFinal = q.final_price !== null && q.final_price !== undefined;
     const discounted = hasFinal && q.final_price < q.total;
