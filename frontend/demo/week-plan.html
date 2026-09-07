@@ -67,10 +67,7 @@
   table.sheet td.st .plan { color:var(--plan); font-weight:600; }
   table.sheet td.st .ok { color:var(--ok); }
   table.sheet td.st .pend { color:var(--warn); }
-  table.sheet td.st .skip { color:var(--sub); }
   table.sheet tr.isplan td { background:#f6f9ff; }
-  table.sheet tr.skipped td { color:var(--sub); text-decoration:line-through; background:#fafafa; }
-  table.sheet tr.skipped td.st { text-decoration:none; }
   .sheet-foot { display:flex; justify-content:space-between; align-items:center; margin-top:8px; }
   /* 我的一週 */
   .wk-sum { display:flex; gap:18px; flex-wrap:wrap; font-size:13px; margin-bottom:10px; align-items:center; }
@@ -90,8 +87,6 @@
   .card.plan { border-left:3px solid var(--plan); cursor:grab; }
   .card.done { border-left:3px solid var(--ok); }
   .card.late { border-left:3px solid var(--late); border-color:#f1c9c4; background:#fff4f2; }
-  .card.skip { color:var(--sub); background:#f6f6f6; }
-  .card.skip .p, .card.skip .t { text-decoration:line-through; }
   .card.ms { border-style:dashed; }
   .card .p { font-weight:600; line-height:1.35; }
   .card .t { color:var(--ink); font-size:11.5px; margin-top:1px; }
@@ -125,7 +120,6 @@
   table.week .c.plan { background:#fff; border:1px dashed #b9c8ef; color:var(--sub); }
   table.week .c.plan .cp { color:var(--ink); }
   table.week .c.late { background:#fff4f2; border:1px dashed #f1c9c4; }
-  table.week .c.skip { background:#fafafa; color:#aaa; text-decoration:line-through; }
   table.week .c.ms { display:block; background:#fff4f2; border:1px solid #f1c9c4; font-size:11px; }
   table.week .ch { display:flex; justify-content:space-between; gap:6px; }
   table.week .cp { font-weight:600; }
@@ -147,13 +141,13 @@
     <h2>看什麼</h2>
     <ol>
       <li><span class="n">1</span><div><b>「今天與這週」多一個子視圖「我的一週」</b><span>一天一欄、一張卡＝一個專案＋要做什麼，不填時數。加卡三種來源：直接打、「從里程碑帶入」（這週指定給我的，落在到期那天）、「複製上週」。卡可以拖到別天。</span></div></li>
-      <li><span class="n">2</span><div><b>今天的專案紀錄：今天的卡自動就在格子裡</b><span>同一筆資料，不用「帶入」動作。狀態顯示「計畫」；填了時數就變「已存」；不做了按「沒做」。自己臨時加的列照舊。</span></div></li>
-      <li><span class="n">3</span><div><b>日期過了，照實際更新</b><span>有時數的卡變「已做 X h」；沒時數的變「未執行」（紅）。「今天」那條會提醒「昨天 N 項沒執行」，一鍵「移到今天」或「沒做了」。移過的卡留一個「移自 9/8」的小標。</span></div></li>
-      <li><span class="n">4</span><div><b>團隊的一週：同一批卡，大家都看得到</b><span>未來天畫成淺藍虛線「計畫」，過去天畫實際時數；未執行的紅虛線，沒做了的灰劃線。主管一眼看到每個人這週排了什麼、做到哪。</span></div></li>
+      <li><span class="n">2</span><div><b>今天的專案紀錄：今天的卡自動就在格子裡</b><span>同一筆資料，不用「帶入」動作。狀態顯示「計畫」；填了時數就變「已存」。自己臨時加的列照舊。不用按任何「沒做」。</span></div></li>
+      <li><span class="n">3</span><div><b>日期過了，用當天真的做的紀錄自動更新</b><span>卡自己有時數 → 已做；卡沒填但當天有同一個案的紀錄 → 自動對上，算已做（標「對到當天紀錄」）；都沒有 → 未執行（紅）。唯一的手動動作是「挪到隔天」：今天的卡可以挪到明天，過期的卡可以挪到今天。「今天」那條會提醒「昨天 N 項沒執行」。</span></div></li>
+      <li><span class="n">4</span><div><b>團隊的一週：同一批卡，大家都看得到</b><span>未來天畫成淺藍虛線「計畫」，過去天畫實際時數；未執行的紅虛線。主管一眼看到每個人這週排了什麼、做到哪。</span></div></li>
     </ol>
     <h2 style="margin-top:18px">資料</h2>
     <ol>
-      <li><div><span>不加新表。一張卡＝一列工時（狀態 plan、時數 0），工時表本來就有這種列，團隊的一週也早就會畫。新增的只有：「我的一週」視圖、格子的「計畫」狀態與「沒做」、隔天的提醒、未執行／沒做了兩個狀態。</span></div></li>
+      <li><div><span>不加新表。一張卡＝一列工時（狀態 plan、時數 0），工時表本來就有這種列，團隊的一週也早就會畫。新增的只有：「我的一週」視圖、格子的「計畫」狀態、隔天的提醒、「挪到隔天」、未執行的判定（純推導，不存狀態）。</span></div></li>
       <li><div><span>只能規劃自己的（主管要排別人的，走里程碑指定負責人，會自動變成他的卡）。</span></div></li>
     </ol>
   </div>
@@ -187,7 +181,7 @@
           <span class="src"><button class="btn" id="from-ms">從里程碑帶入</button><button class="btn" id="copy-last">複製上週</button></span></span></div>
       <div class="wk-sum" id="wk-sum"></div>
       <div class="board" id="board"></div>
-      <div class="hint" style="margin-top:8px">拖卡片到別的日子；點卡片右上的 × 刪；「未執行」的卡可以移到今天或標沒做了。</div>
+      <div class="hint" style="margin-top:8px">拖卡片到別的日子；點卡片右上的 × 刪；今天的卡可以「挪到明天」，「未執行」的卡可以「挪到今天」。做了沒是照當天的紀錄自動判的。</div>
     </div>
 
     <!-- 團隊的一週 -->
@@ -199,7 +193,7 @@
         <thead id="week-head"></thead>
         <tbody id="week-body"></tbody>
       </table></div></div>
-      <div class="hint" style="margin-top:8px">虛線＝計畫（還沒到那天）、實底＝實際時數、紅虛線＝未執行、灰劃線＝沒做了。里程碑那張淡紅小卡照舊。</div>
+      <div class="hint" style="margin-top:8px">虛線＝計畫（還沒到那天）、實底＝實際時數、紅虛線＝未執行。里程碑那張淡紅小卡照舊。</div>
     </div>
 
     <div class="view" data-v="find">
@@ -248,8 +242,8 @@ const SHOOTS = { '2026-09-10': { title: '2026 臺北城市形象片', crew: ['�
 const LEAVE = { '2026-09-11': ['劉禮瑜'] };
 
 // 一張卡＝一列工時：{id, day, pid, wt, stage, note, hours, state, from, movedFrom}
-//   state：plan（還沒到／沒填）｜skip（沒做了）；「已做」＝有時數；「未執行」＝day < TODAY 且沒時數且不是 skip
-const C = (id, day, pid, wt, stage, note, hours, extra) => ({ id, day, pid, wt, stage, note, hours: hours ?? null, state: 'plan', ...(extra || {}) });
+//   沒有存狀態：「已做」＝卡自己有時數、或當天有同一個案的實際紀錄（自動對上）；「未執行」＝day < TODAY 且兩者都沒有
+const C = (id, day, pid, wt, stage, note, hours, extra) => ({ id, day, pid, wt, stage, note, hours: hours ?? null, ...(extra || {}) });
 const STATES = {
   mon: { today: '2026-09-07', cards: [
     C('c1', '2026-09-07', 'p3', '剪接', '精剪', '第 3 集剪接'),
@@ -272,11 +266,12 @@ const STATES = {
     C('c3', '2026-09-08', 'p3', '剪接', '精剪', '第 3 集修正', 4.2),
     C('c4', '2026-09-09', 'p1', '後製', '校對', '訪談逐字稿校對', 2, { from: '里程碑', movedFrom: '2026-09-08' }),
     C('c5', '2026-09-09', 'p3', '剪接', '精剪', '第 3 集 fine cut', 5),
-    C('c6', '2026-09-09', 'p2', '後製', '字卡', 'Reels 字卡', null, { state: 'skip' }),
+    C('c6', '2026-09-09', 'p2', '後製', '字卡', 'Reels 字卡'),
+    C('c10', '2026-09-09', 'p2', '後製', '字卡', 'Reels 字卡＋封面', 4.5, { adhoc: true }),
     C('c7', '2026-09-10', 'p3', '輸出', '交付', 'fine cut 輸出給客戶', 3),
-    C('c10', '2026-09-10', 'p2', '後製', '字卡', 'Reels 字卡（補）', 4.5, { adhoc: true }),
     C('c8', '2026-09-11', 'p3', '剪接', '精剪', '第 3 集 Fine cut', 6, { from: '里程碑' }),
     C('c9', '2026-09-11', 'p1', '剪接', '精剪', 'B-copy 協助'),
+    C('c11', '2026-09-11', 'adm', '行政', '', '週報', 1, { adhoc: true }),
   ] },
 };
 let TODAY = STATES.mon.today;
@@ -284,13 +279,17 @@ let cards = clone(STATES.mon.cards);
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function $(id) { return document.getElementById(id); }
 const isDone = (c) => c.hours != null && c.hours > 0;
-const isLate = (c) => !isDone(c) && c.state !== 'skip' && c.day < TODAY;
-const statusOf = (c) => c.state === 'skip' ? 'skip' : isDone(c) ? 'done' : isLate(c) ? 'late' : 'plan';
-const LABEL = { plan: '計畫', done: '已做', late: '未執行', skip: '沒做了' };
+// 卡沒填時數、但當天有同一個案的實際紀錄 → 自動對上（真的做：同日同案的實際列）
+const matchOf = (c) => isDone(c) ? null : cards.find(o => o.id !== c.id && o.day === c.day && o.pid === c.pid && isDone(o)) || null;
+const doneHours = (c) => isDone(c) ? c.hours : (matchOf(c) || {}).hours;
+const isLate = (c) => !isDone(c) && !matchOf(c) && c.day < TODAY;
+const statusOf = (c) => isDone(c) ? 'done' : matchOf(c) ? 'done' : isLate(c) ? 'late' : 'plan';
+const LABEL = { plan: '計畫', done: '已做', late: '未執行' };
+const nextDay = (d) => { const t = new Date(d + 'T00:00:00'); t.setDate(t.getDate() + 1); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
 
 function drawAll() {
   const mine = cards;
-  const n = { plan: 0, done: 0, late: 0, skip: 0 };
+  const n = { plan: 0, done: 0, late: 0 };
   mine.forEach(c => n[statusOf(c)]++);
   $('plan-cnt').textContent = `${mine.length}`;
   drawPlan(n); drawLog(); drawWeek();
@@ -299,8 +298,8 @@ function drawAll() {
 // ── 我的一週 ──
 function drawPlan(n) {
   $('plan-title').textContent = `我的一週 9/7 – 9/12`;
-  $('wk-sum').innerHTML = `<span><span class="k">這週排了</span>${cards.length} 項</span><span><span class="k">已做</span><span class="ok">${n.done}</span></span><span><span class="k">未執行</span><span class="${n.late ? 'late' : ''}">${n.late}</span></span><span><span class="k">沒做了</span>${n.skip}</span><span><span class="k">還沒到</span>${n.plan}</span>
-    <span class="meta">已做的時數在格子裡填，這裡只看排了什麼、做了沒。</span>`;
+  $('wk-sum').innerHTML = `<span><span class="k">這週排了</span>${cards.length} 項</span><span><span class="k">已做</span><span class="ok">${n.done}</span></span><span><span class="k">未執行</span><span class="${n.late ? 'late' : ''}">${n.late}</span></span><span><span class="k">還沒到</span>${n.plan}</span>
+    <span class="meta">做了沒是照當天格子裡的紀錄自動判的；這裡只看排了什麼。</span>`;
   $('board').innerHTML = DAYS.map(d => {
     const list = cards.filter(c => c.day === d);
     const cls = d === TODAY ? 'today' : d < TODAY ? 'past' : '';
@@ -311,12 +310,12 @@ function drawPlan(n) {
 }
 function cardHtml(c) {
   const s = statusOf(c); const p = proj(c.pid);
-  const acts = s === 'late' ? `<span class="acts"><button class="btn xs" data-move-today="${c.id}">移到今天</button><button class="btn xs" data-skip="${c.id}">沒做了</button></span>` :
-    s === 'skip' ? `<span class="acts"><button class="btn xs" data-unskip="${c.id}">還原</button></span>` : '';
-  const tags = [c.from ? `<span class="from">${c.from}</span>` : '', c.movedFrom ? `<span class="from">移自 ${mdS(c.movedFrom)}</span>` : '', c.adhoc ? `<span class="from">當天加的</span>` : ''].join('');
+  const acts = s === 'late' ? `<span class="acts"><button class="btn xs" data-move-today="${c.id}">挪到今天</button></span>` :
+    (s === 'plan' && c.day === TODAY) ? `<span class="acts"><button class="btn xs" data-move-next="${c.id}">挪到明天</button></span>` : '';
+  const tags = [c.from ? `<span class="from">${c.from}</span>` : '', c.movedFrom ? `<span class="from">移自 ${mdS(c.movedFrom)}</span>` : '', c.adhoc ? `<span class="from">當天加的</span>` : '', matchOf(c) ? `<span class="from">對到當天紀錄</span>` : ''].join('');
   return `<div class="card ${s} ${c.from ? 'ms' : ''}" draggable="${s === 'plan' || s === 'late'}" data-card="${c.id}"><button class="x" data-del="${c.id}" title="刪">×</button>
     <div class="p">${p.name}</div><div class="t">${c.note}${c.wt ? `<span class="meta"> · ${[c.wt, c.stage].filter(Boolean).join(' · ')}</span>` : ''}</div>
-    <div class="f"><span class="s ${s}">${s === 'done' ? `已做 ${c.hours} h` : LABEL[s]}</span>${tags}${acts}</div></div>`;
+    <div class="f"><span class="s ${s}">${s === 'done' ? `已做 ${doneHours(c)} h` : LABEL[s]}</span>${tags}${acts}</div></div>`;
 }
 
 // ── 今天的專案紀錄 ──
@@ -329,15 +328,14 @@ function drawLog() {
     <span><span class="k">我的一週</span>今天排了 ${todays.filter(c => !c.adhoc).length} 項${todays.filter(isDone).length ? `、已做 ${todays.filter(isDone).length}` : ''}</span>
     <span><span class="k">本週里程碑</span>${ms.length ? `今天到期 <span class="warn">${ms.length} 個</span>（${ms.map(m => m.title).join('、')}）` : '今天沒有到期的'}</span>
     ${late.length ? `<span class="late">昨天以前有 ${late.length} 項計畫沒執行</span>` : ''}`;
-  $('leftover').innerHTML = late.length ? `<div class="leftover rel"><span class="tag n">3</span><div class="ey">Leftover　沒執行的計畫</div>${late.map(c => `<div class="it"><span class="meta">${mdS(c.day)}</span><b>${proj(c.pid).name}</b><span class="no">${c.note}</span><span style="flex:1"></span><button class="btn xs" data-move-today="${c.id}">移到今天</button><button class="btn xs" data-skip="${c.id}">沒做了</button></div>`).join('')}</div>` : '';
+  $('leftover').innerHTML = late.length ? `<div class="leftover rel"><span class="tag n">3</span><div class="ey">Leftover　沒執行的計畫</div>${late.map(c => `<div class="it"><span class="meta">${mdS(c.day)}</span><b>${proj(c.pid).name}</b><span class="no">${c.note}</span><span style="flex:1"></span><button class="btn xs" data-move-today="${c.id}">挪到今天</button></div>`).join('')}<div class="meta" style="margin-top:4px">不挪就留著標未執行；做了沒是照當天格子裡的紀錄自動判的。</div></div>` : '';
   const rows = todays.length ? todays : [];
   $('sheet').innerHTML = rows.map((c, i) => {
     const s = statusOf(c);
-    const st = s === 'skip' ? '<span class="skip">沒做了</span> <button class="btn xs" data-unskip="' + c.id + '">還原</button>'
-      : s === 'done' ? '<span class="ok">已存</span>'
+    const st = isDone(c) ? '<span class="ok">已存</span>'
       : c.adhoc ? '<span class="pend">草稿（沒時數）</span>'
-      : `<span class="plan">計畫</span> <button class="btn xs" data-skip="${c.id}">沒做</button>`;
-    return `<tr class="${c.adhoc || s === 'done' ? '' : 'isplan'} ${s === 'skip' ? 'skipped' : ''}" data-row="${c.id}"><td class="num">${i + 1}</td><td><input value="${proj(c.pid).name}"></td><td><input value="${c.wt}"></td><td><input value="${c.stage}"></td><td><input value="${c.note}"></td><td><input value=""></td><td class="hrs"><input data-hours="${c.id}" value="${c.hours ?? ''}" placeholder="${s === 'plan' ? '填時數' : ''}"></td><td class="st">${st}</td><td><button class="x" data-del="${c.id}" style="position:static;color:#bbb;border:0;background:none;cursor:pointer">×</button></td></tr>`;
+      : `<span class="plan">計畫</span> <button class="btn xs" data-move-next="${c.id}">挪到明天</button>`;
+    return `<tr class="${c.adhoc || isDone(c) ? '' : 'isplan'}" data-row="${c.id}"><td class="num">${i + 1}</td><td><input value="${proj(c.pid).name}"></td><td><input value="${c.wt}"></td><td><input value="${c.stage}"></td><td><input value="${c.note}"></td><td><input value=""></td><td class="hrs"><input data-hours="${c.id}" value="${c.hours ?? ''}" placeholder="${s === 'plan' ? '填時數' : ''}"></td><td class="st">${st}</td><td><button class="x" data-del="${c.id}" style="position:static;color:#bbb;border:0;background:none;cursor:pointer">×</button></td></tr>`;
   }).join('') + (rows.length ? '' : '<tr><td colspan="9" class="meta" style="text-align:center;padding:14px">今天沒有排的，直接「加一列」。</td></tr>');
 }
 
@@ -351,6 +349,7 @@ function drawWeek() {
     MY_MS.filter(m => n === ME && m.due === d).forEach(m => parts.push(`<div class="c ms">里程碑：${m.title}<div class="cn">${proj(m.pid).name}</div></div>`));
     if (n === ME) {
       cards.filter(c => c.day === d).forEach(c => { const s = statusOf(c);
+        if (!isDone(c) && matchOf(c)) return;   // 對到當天紀錄的卡不重畫，實際那列已經在
         parts.push(`<div class="c ${s === 'done' ? '' : s}"><div class="ch"><span class="cp">${proj(c.pid).name}</span><span class="hrs ${s}">${s === 'done' ? c.hours + ' h' : LABEL[s]}</span></div><div class="cn">${c.note}</div></div>`); });
     } else {
       ((HOURS[n] || {})[d] || []).filter(() => d < TODAY || d === TODAY).forEach(([p, h, note]) => parts.push(`<div class="c"><div class="ch"><span class="cp">${p}</span><span class="hrs">${h} h</span></div><div class="cn">${note}</div></div>`));
@@ -366,9 +365,8 @@ document.body.addEventListener('click', (ev) => {
   const s = ev.target.closest('.seg button'); if (s) { document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b === s)); TODAY = STATES[s.dataset.state].today; cards = clone(STATES[s.dataset.state].cards); drawAll(); return; }
   const t = ev.target;
   if (t.dataset.del) { cards = cards.filter(c => c.id !== t.dataset.del); return drawAll(); }
-  if (t.dataset.skip) { byId(t.dataset.skip).state = 'skip'; return drawAll(); }
-  if (t.dataset.unskip) { byId(t.dataset.unskip).state = 'plan'; return drawAll(); }
   if (t.dataset.moveToday) { const c = byId(t.dataset.moveToday); c.movedFrom = c.day; c.day = TODAY; return drawAll(); }
+  if (t.dataset.moveNext) { const c = byId(t.dataset.moveNext); c.movedFrom = c.day; c.day = nextDay(c.day); return drawAll(); }
   if (t.dataset.addbtn) { return openAdd(t.dataset.addbtn); }
   if (t.dataset.addcancel) { return drawAll(); }
   if (t.dataset.addok) { return submitAdd(t.dataset.addok); }
@@ -390,12 +388,12 @@ document.body.addEventListener('input', (ev) => {
   const v = raw.startsWith('+') ? (c.hours || 0) + parseFloat(raw.slice(1) || 0) : parseFloat(raw);
   c.hours = Number.isFinite(v) && v > 0 ? Math.round(v * 10) / 10 : null;
   const tr = ev.target.closest('tr'); const st = tr.querySelector('.st');
-  st.innerHTML = c.hours ? '<span class="ok">已存</span>' : `<span class="plan">計畫</span> <button class="btn xs" data-skip="${c.id}">沒做</button>`;
+  st.innerHTML = c.hours ? '<span class="ok">已存</span>' : (c.adhoc ? '<span class="pend">草稿（沒時數）</span>' : `<span class="plan">計畫</span> <button class="btn xs" data-move-next="${c.id}">挪到明天</button>`);
   tr.classList.toggle('isplan', !c.hours && !c.adhoc);
   $('plan-cnt').textContent = cards.length; drawWeek(); drawPlanQuiet();
 });
 document.body.addEventListener('change', (ev) => { if (ev.target.dataset.hours) drawAll(); });
-function drawPlanQuiet() { const n = { plan: 0, done: 0, late: 0, skip: 0 }; cards.forEach(c => n[statusOf(c)]++); drawPlan(n); }
+function drawPlanQuiet() { const n = { plan: 0, done: 0, late: 0 }; cards.forEach(c => n[statusOf(c)]++); drawPlan(n); }
 function openAdd(day) {
   const host = document.querySelector(`.add[data-add="${day}"]`);
   host.innerHTML = `<form onsubmit="return false"><select data-addpid><option value="">選專案（打字可以找）</option>${CATALOG.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}</select>
