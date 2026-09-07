@@ -97,6 +97,12 @@ def test_passthrough_income_row_requests_the_whole_remit_on_the_linked_projects(
     # owner 2026-09-07「他還要填工作人員不太合理」：收款人是文字欄（預設代開人），員工只當 datalist 提示，不准再變回必選 select
     assert '<select class="crm-input" data-kai-payee' not in remit and "data-kai-other" not in remit
     assert 'list="kai-payee-list"' in remit and "value=\"${_esc(inv.applicant || '')}\"" in remit
+    # 連錯案要能解除（owner 2026-09-07）：兩種掛法都要處理——列自己的專案欄清掉、或發票 project_ids 拿掉它（第一個補成 project_id）；
+    # 已開過單的案不給解除（單掛在案上）
+    assert "data-kai-unlink" in remit and "if (e.project_id === p) {" in remit
+    assert "JSON.stringify({ project_id: '' })" in remit
+    assert "project_id: rest[0] || '', project_ids: rest" in remit
+    assert "已開單，不能解除" in remit and "if (had.length) return" in remit
     # 沒掛案的自動單（開給代開人、還沒付）可收回改開在案子上，不然「還可請 0」卡死（思沙龍）；付掉的不能收回
     assert "x.payment_status !== '已付款'" in remit and "_fetch('/payments/' + x.id, { method: 'DELETE' })" in remit
     assert 'id="kai-withdraw"' in remit
