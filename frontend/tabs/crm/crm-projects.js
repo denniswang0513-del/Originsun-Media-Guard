@@ -14,7 +14,7 @@
 import { crmFetch as _fetch, esc as _esc, setupResizeHandle, hasModule, today } from './crm-utils.js';
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import {
-    loadProjects, loadClients, loadUsers, loadStaffList,
+    loadProjects, loadClients, loadUsers, loadStaffList, createClientInline,
     renderList, selectProject, closeDetail,
     openModal, saveProject, deleteProject,
     openImportModal, setCsvFile, doImport,
@@ -323,6 +323,7 @@ export async function initCrmProjectsTab() {
 
     // ── Buttons ──
     document.getElementById('proj-btn-add').addEventListener('click', () => openModal());
+    document.getElementById('proj-btn-new-client')?.addEventListener('click', createClientInline);
     document.getElementById('proj-btn-import').addEventListener('click', openImportModal);
     document.getElementById('proj-btn-save').addEventListener('click', saveProject);
     document.getElementById('proj-detail-close').addEventListener('click', closeDetail);

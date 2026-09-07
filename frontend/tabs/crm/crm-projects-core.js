@@ -149,6 +149,22 @@ function _populateClientDropdown(elementId, selectedId) {
     sel._syncSsValue?.();
 }
 
+/** 專案表單的「沒有符合的？新增客戶」（owner 2026-09-07，桌機與手機都要）：建一筆只有代稱的客戶，
+ *  推進 state.clients、清掉 clients 快取、重畫下拉並選起來。同報價彈窗的 _createClientInline。 */
+export async function createClientInline() {
+    const name = (prompt('客戶名稱（代稱）：') || '').trim();
+    if (!name) return;
+    try {
+        const r = await _fetch('/clients', { method: 'POST', body: JSON.stringify({ short_name: name }) });
+        const c = r.client || r;
+        state.clients.push({ id: c.id, short_name: c.short_name || name, full_name: c.full_name || '' });
+        crmCacheInvalidate('clients');
+        _populateClientDropdown('proj-f-client_id', c.id);
+        _populateClientFilter();
+        crmToast('客戶已建立：' + (c.short_name || name));
+    } catch (e) { alert('建立客戶失敗：' + e.message); }
+}
+
 function _populatePmCheckboxes(selected = []) {
     // PM is a single-select — DB column is still a JSON array, so we
     // pre-select the first element if present and store back as `[name]`.

@@ -32,7 +32,7 @@ const groupQuoteItems = _QA.groupQuoteItems || ((items) => {
 });
 const flattenQuoteGroups = _QA.flattenQuoteGroups || ((groups) => (groups || []).flatMap(g => g.items.map(it => ({ ...it, group_name: g.name }))));
 import { list, opt, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad, renderPaged,
-    isAdmin, openSheet, closeSheet, pickerHtml, mountPicker, copyText } from '../ui.js';
+    isAdmin, openSheet, closeSheet, pickerHtml, mountPicker, createClientOption, copyText } from '../ui.js';
 
 function transitions(status) {
     const v = list('quote_statuses');
@@ -305,8 +305,9 @@ async function openForm(host, id) {
 function mountClientPicker(selected = '') {
     mountPicker('qf-client_id', {
         items: (opt().clients || []).map(c => ({ value: c.id, label: c.short_name || c.full_name || c.id })),
-        placeholder: '打字找客戶', value: selected,
+        placeholder: '打字找客戶，沒有就直接新增', value: selected,
         onPick: (v) => { _form.client_id = v; loadClientProjects(v); },
+        onCreate: createClientOption, createLabel: '新增客戶',     // 沒有符合的 → 清單裡直接建（同專案分頁）
     });
 }
 

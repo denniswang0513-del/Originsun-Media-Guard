@@ -4,7 +4,7 @@
  * 階段／案型／客戶字彙全部來自 options；金額鍵不在＝被抹掉→不畫。
  */
 import { mfetch, toast, esc, money, fmtDate } from '../shell.js';
-import { state, list, lostPhase, closedPhases, opt, paidStatus, selectOpts, pickerHtml, mountPicker, skeleton, emptyBox, errBox, pill, statusPill,
+import { state, list, lostPhase, closedPhases, opt, paidStatus, selectOpts, pickerHtml, mountPicker, createClientOption, skeleton, emptyBox, errBox, pill, statusPill,
          moneyCell, withBusy, openSheet, closeSheet, embedHost, unembedHost, switchTab, markStale, shouldLoad } from '../ui.js';
 
 const PAGE = 30;
@@ -241,7 +241,7 @@ function openNewProject() {
         </div>
         <button type="submit" class="m-btn-primary" id="np-go">建立</button>
       </form>`);
-    mountPicker('np-client', { items: clients, placeholder: '打字找客戶' });
+    mountPicker('np-client', { items: clients, placeholder: '打字找客戶，沒有就直接新增', onCreate: createClientOption, createLabel: '新增客戶' });
     body.querySelector('#np-form').addEventListener('submit', (ev) => {
         ev.preventDefault();
         withBusy(body.querySelector('#np-go'), async () => {

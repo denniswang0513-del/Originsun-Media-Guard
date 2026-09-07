@@ -2,7 +2,7 @@
  * frontend/m/ui.js — 手機 CRM 頁內共用：狀態、底部抽屜、骨架／空／錯狀態、字彙工具。
  * 字彙一律從 state.options 取（GET /api/v1/crm/m/options）；這裡不寫死任何狀態字。
  */
-import { esc } from './shell.js';
+import { esc, mfetch, toast } from './shell.js';
 
 export const state = {
     me: null,
@@ -98,15 +98,19 @@ export function setSeg(id, values, selected) {
 }
 
 // free：沒選到清單項目時保留打的字當值（品項這種「有建議但可以自己打」的欄位）
-export function mountPicker(id, { items = [], placeholder = '', value = '', free = false, onPick = null } = {}) {
+// onCreate(text) → Promise<{value,label}>：打的字沒有完全符合的項目時多一列「新增「…」」，點了就建（owner 2026-09-07：
+// 專案的客戶欄沒有符合的就直接新增客戶）；建好的項目推進清單並選起來。
+export function mountPicker(id, { items = [], placeholder = '', value = '', free = false, onPick = null, onCreate = null, createLabel = '新增' } = {}) {
     const hidden = document.getElementById(id), q = document.getElementById(id + '-q'), box = document.getElementById(id + '-list');
     if (!hidden || !q || !box) return;
     const label = (v) => (items.find(i => String(i.value) === String(v)) || {}).label || (free ? String(v || '') : '');
     const set = (v) => { hidden.value = label(v) ? String(v) : ''; q.value = label(v); box.hidden = true; if (onPick) onPick(hidden.value); };
     const draw = () => {
-        const s = q.value.trim().toLowerCase();
+        const raw = q.value.trim(), s = raw.toLowerCase();
         const hits = items.filter(i => !s || i.label.toLowerCase().includes(s)).slice(0, 40);
-        box.innerHTML = hits.map(i => `<div class="m-pick-row" data-v="${esc(i.value)}">${esc(i.label)}</div>`).join('')
+        const exact = hits.some(i => i.label.toLowerCase() === s);
+        const create = onCreate && raw && !exact ? `<div class="m-pick-row m-pick-create" data-create="${esc(raw)}">${esc(createLabel)}「${esc(raw)}」</div>` : '';
+        box.innerHTML = (hits.map(i => `<div class="m-pick-row" data-v="${esc(i.value)}">${esc(i.label)}</div>`).join('') + create)
             || '<div class="m-pick-none">沒有符合的</div>';
         box.hidden = false;
     };
@@ -120,8 +124,31 @@ export function mountPicker(id, { items = [], placeholder = '', value = '', free
         else q.value = label(hidden.value);
     }, 150);
     box.onpointerdown = (ev) => { ev.preventDefault(); };
-    box.onclick = (ev) => { const r = ev.target.closest('.m-pick-row'); if (r) set(r.dataset.v); };
+    box.onclick = async (ev) => {
+        const r = ev.target.closest('.m-pick-row');
+        if (!r) return;
+        if (r.dataset.create === undefined) return set(r.dataset.v);
+        r.textContent = '建立中…';
+        try {
+            const made = await onCreate(r.dataset.create);
+            if (made && made.value !== undefined) { items.push({ value: made.value, label: made.label || String(made.value) }); set(made.value); }
+            else draw();
+        } catch (_) { draw(); }          // 失敗的 toast 由 onCreate 自己發
+    };
     set(value);
+}
+
+/** 客戶欄的 onCreate：建一筆只有代稱的客戶，推進 options.clients（發票／專案／報價的下拉同一份），回 {value,label}。 */
+export async function createClientOption(name) {
+    name = String(name || '').trim();
+    if (!name) return null;
+    try {
+        const r = await mfetch('/api/v1/crm/clients', { method: 'POST', body: { short_name: name } });
+        const c = r.client || r;
+        (opt().clients || (state.options && (state.options.clients = [])) || []).push({ id: c.id, short_name: c.short_name || name, full_name: c.full_name || '', tax_id: c.tax_id || '' });
+        toast('客戶已建立：' + (c.short_name || name));
+        return { value: c.id, label: c.short_name || name };
+    } catch (e) { toast(e.message, 'err'); throw e; }
 }
 
 export async function copyText(text) {
