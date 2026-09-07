@@ -8,6 +8,45 @@ const _companyEl = (k) => document.getElementById('company_' + k);
 function fillCompany(company) {
     const c = company || {};
     COMPANY_KEYS.forEach(k => { const el = _companyEl(k); if (el) el.value = c[k] ?? ''; });
+    ['logo', 'seal'].forEach(_loadCompanyPreview);
+}
+
+// Logo／印章：上傳 → 後端存 company_assets/ 並直接寫進 settings；這裡只回填路徑欄與預覽。
+// 預覽走 fetch（全域 fetch 有帶 token）→ blob，不用 <img src> 直打（那條不帶 Authorization，會 401）。
+async function _loadCompanyPreview(kind) {
+    const img = document.getElementById(`company_${kind}_preview`), st = document.getElementById(`company_${kind}_status`);
+    if (!img) return;
+    try {
+        const r = await fetch(`/api/settings/company-image/${kind}`);
+        if (!r.ok) throw new Error();
+        img.src = URL.createObjectURL(await r.blob()); img.style.display = '';
+        if (st) st.textContent = '已上傳';
+    } catch (_) { img.style.display = 'none'; }
+}
+
+function _bindCompanyUploads() {
+    ['logo', 'seal'].forEach(kind => {
+        const btn = document.getElementById(`company_${kind}_upload`), file = document.getElementById(`company_${kind}_file`);
+        if (!btn || !file || btn.dataset.bound) return;
+        btn.dataset.bound = '1';
+        btn.addEventListener('click', () => file.click());
+        file.addEventListener('change', async () => {
+            const f = file.files && file.files[0];
+            if (!f) return;
+            const st = document.getElementById(`company_${kind}_status`);
+            if (st) st.textContent = '上傳中…';
+            try {
+                const fd = new FormData(); fd.append('file', f);
+                const r = await fetch(`/api/settings/company-image/${kind}`, { method: 'POST', body: fd });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+                const el = _companyEl(`${kind}_path`); if (el) el.value = d.path || '';
+                await _loadCompanyPreview(kind);
+                if (st) st.textContent = '已上傳，下一張 PDF 起生效';
+            } catch (e) { if (st) st.textContent = '上傳失敗：' + (e.message || e); }
+            file.value = '';
+        });
+    });
 }
 
 // 🔴 欄位不在 DOM（舊 html 配新 js，CF 只快取 .js）就回 null → 整個 company 不送，
@@ -37,6 +76,7 @@ function switchSettingsTab(tabId, event) {
 // is fully parsed before we try to bind event listeners.
 document.addEventListener('DOMContentLoaded', () => {
     const modal = document.getElementById('settingsModal');
+    _bindCompanyUploads();
 
     // ── Load settings when modal opens ───────────────────────
     document.getElementById('btnOpenSettings').addEventListener('click', async () => {

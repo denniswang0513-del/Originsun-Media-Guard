@@ -118,3 +118,5 @@ scripts/_placeholder_backup_*.json
 
 # 工時匯入 dry-run 產出物（腳本每跑一次整檔覆寫；結論記在 docs/TIMESHEET_IMPORT_PLAN.md）
 docs/timesheet_import_report.md
+# 公司 Logo／印章（設定頁上傳；主控端本機，不進 git、不掛靜態）
+company_assets/

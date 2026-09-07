@@ -10,7 +10,7 @@ import sys
 import socket
 import asyncio
 import urllib.request
-from fastapi import APIRouter, BackgroundTasks, Request  # type: ignore
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile  # type: ignore
 from fastapi.responses import JSONResponse  # type: ignore
 
 import core.state as state  # type: ignore
@@ -89,6 +89,65 @@ def _redact_settings(s: dict) -> dict:
 @router.get("/api/settings/load")
 async def load_settings_api():
     return _redact_settings(load_settings())
+
+# ── 公司 Logo／印章上傳（報價單 PDF 用）──────────────────────────
+# 存 repo 根目錄 company_assets/：不掛靜態（/uploads 是公開的，章不該無登入就抓得到）、gitignore、
+# deploy 不 mirror-delete 所以發版不會被清掉。PDF 端讀 settings.company.<kind>_path（相對根目錄）。
+_COMPANY_IMAGE_KINDS = ("logo", "seal")
+_IMAGE_MAGIC = {b"\x89PNG\r\n\x1a\n": "png", b"\xff\xd8\xff": "jpg", b"RIFF": "webp"}
+_COMPANY_ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "company_assets")
+
+
+def _image_ext(content: bytes) -> str:
+    """看檔頭不看副檔名：png／jpg／webp 才收（章要去背，PNG 最常見）。"""
+    for magic, ext in _IMAGE_MAGIC.items():
+        if content.startswith(magic):
+            if ext == "webp" and content[8:12] != b"WEBP":
+                continue
+            return ext
+    raise HTTPException(status_code=400, detail="只收 PNG／JPG／WebP 圖檔")
+
+
+@router.post("/api/settings/company-image/{kind}")
+async def upload_company_image(kind: str, req: Request, file: UploadFile = File(...)):
+    _check_admin(req)
+    if kind not in _COMPANY_IMAGE_KINDS:
+        raise HTTPException(status_code=404, detail="只有 logo／seal")
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="圖檔超過 5MB")
+    ext = _image_ext(content)
+    os.makedirs(_COMPANY_ASSETS_DIR, exist_ok=True)
+    for old in os.listdir(_COMPANY_ASSETS_DIR):          # 同 kind 只留一份，換副檔名也不殘留
+        if old.rsplit(".", 1)[0] == kind:
+            try:
+                os.remove(os.path.join(_COMPANY_ASSETS_DIR, old))
+            except OSError:
+                pass
+    with open(os.path.join(_COMPANY_ASSETS_DIR, f"{kind}.{ext}"), "wb") as f:
+        f.write(content)
+    rel = f"company_assets/{kind}.{ext}"
+    settings = load_settings()
+    company = dict(settings.get("company") or {})
+    company[f"{kind}_path"] = rel
+    save_settings({**settings, "company": company})     # 直接寫進設定：上傳完下一張 PDF 就用新圖
+    return {"status": "ok", "path": rel}
+
+
+@router.get("/api/settings/company-image/{kind}")
+async def get_company_image(kind: str, req: Request):
+    """設定頁預覽用（管理員）；找不到就 404，前端顯示「尚未上傳」。"""
+    from core.no_store import no_store_file
+    _check_admin(req)
+    if kind not in _COMPANY_IMAGE_KINDS:
+        raise HTTPException(status_code=404, detail="只有 logo／seal")
+    rel = (load_settings().get("company") or {}).get(f"{kind}_path") or ""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = rel if os.path.isabs(rel) else os.path.join(root, rel)
+    if not rel or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="尚未上傳")
+    return no_store_file(path)
+
 
 @router.post("/api/settings/save")
 async def save_settings_api(req: Request):
