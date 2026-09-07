@@ -321,8 +321,9 @@ function _recalcTotals() {
     } else if (_form.anchor === 'final') {
         promoEl.value = finalEl.value === '' ? '' : Math.max(total - (parseInt(finalEl.value) || 0), 0);
     }
-    const finalPrice = parseInt(finalEl.value) || 0;
-    document.getElementById('quote-calc-final').textContent = '$' + _fmtNum(finalPrice || total);
+    // 0 是合法的最終報價（全免）：只有空字串才算「沒填」（同手機版 recalc、同存檔規則）
+    const finalPrice = finalEl.value.trim() === '' ? null : (parseInt(finalEl.value) || 0);
+    document.getElementById('quote-calc-final').textContent = '$' + _fmtNum(finalPrice != null ? finalPrice : total);
 
     document.querySelectorAll('.quote-item-edit-row').forEach(row => {
         const idx = parseInt(row.dataset.idx);

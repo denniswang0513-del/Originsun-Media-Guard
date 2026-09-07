@@ -82,9 +82,10 @@ async function shareLink(btn, rows, host) {
             }
             const full = location.origin + url;
             toast((await copyText(full)) ? '連結已複製：' + full : '複製失敗，連結：' + full, 'ok');
-            btn.textContent = '複製連結';    // 第一次建完把按鈕字換掉（列上的 q.share_url 已更新，不必整份重抓重畫）
         } catch (e) { toast(e.message, 'err'); }
     });
+    // 第一次建完把按鈕字換掉：要在 withBusy 之後改（它的 finally 會把按鈕字還原成按下前的）；列上的 q.share_url 已更新，不必整份重抓重畫
+    if (q.share_url) btn.textContent = '複製連結';
 }
 
 async function downloadPdf(btn, rows) {
@@ -130,13 +131,14 @@ function recalc() {
     } else if (_form.anchor === 'final') {
         promoEl.value = finalEl.value === '' ? '' : Math.max(t.total - (parseInt(finalEl.value) || 0), 0);
     }
-    const finalPrice = parseInt(finalEl.value) || 0;
-    const promo = finalPrice && finalPrice < t.total ? t.total - finalPrice : 0;
+    // 0 是合法的最終報價（全免）：只有空字串才算「沒填」（跟 save 送出去的規則一樣）
+    const finalPrice = finalEl.value.trim() === '' ? null : (parseInt(finalEl.value) || 0);
+    const promo = finalPrice != null && finalPrice < t.total ? t.total - finalPrice : 0;
     document.getElementById('qf-calc').innerHTML = `
       <div class="row"><span>合計</span><span class="amt">${money(t.subtotal)}</span></div>
       <div class="row"><span>營業稅 ${parseInt(F('tax_rate').value) || 0}%</span><span class="amt">${money(t.tax)}</span></div>
       ${promo ? `<div class="row"><span>專案優惠</span><span class="amt">−${money(promo)}</span></div>` : ''}
-      <div class="row"><span><b>報價總額</b>（含稅）</span><span class="amt"><b>${money(finalPrice || t.total)}</b></span></div>`;
+      <div class="row"><span><b>報價總額</b>（含稅）</span><span class="amt"><b>${money(finalPrice != null ? finalPrice : t.total)}</b></span></div>`;
 }
 
 function formHtml(templates, q) {
