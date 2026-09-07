@@ -30,7 +30,9 @@ table.ts-sheet { --sh-bg:#1b1b1b; --sh-line:#3a3a3a; --sh-head:#262626; --sh-hea
     --sh-ok:#6ee7b7; --sh-warn:#f59e0b; --sh-busy:#93c5fd; --sh-err:#fca5a5;
     width:100%; table-layout:fixed; border-collapse:collapse; counter-reset:sheetrow; background:var(--sh-bg); font-size:12.5px; }
 table.ts-sheet th, table.ts-sheet td { border:1px solid var(--sh-line); padding:0; height:32px; color:var(--sh-ink); }
-table.ts-sheet th { background:var(--sh-head); color:var(--sh-head-ink); font-weight:500; font-size:12px; text-align:center; padding:6px 4px; white-space:nowrap; }
+table.ts-sheet th { background:var(--sh-head); color:var(--sh-head-ink); font-weight:500; font-size:12px; text-align:center; padding:6px 4px; white-space:nowrap; position:relative; }
+table.ts-sheet th .ts-sheet-rz { position:absolute; top:0; right:-4px; width:8px; height:100%; cursor:col-resize; z-index:1; }
+table.ts-sheet th .ts-sheet-rz:hover, table.ts-sheet th .ts-sheet-rz.on { background:var(--sh-accent); opacity:.5; }
 table.ts-sheet th[data-col="project"] { width:18%; }
 table.ts-sheet th[data-col="type"] { width:96px; }
 table.ts-sheet th[data-col="stage"] { width:96px; }
@@ -113,7 +115,7 @@ export function rowHtml(v = {}, o = {}, ctx = {}) {
 
 export function tableHtml(rowsHtml, id = 'ts-mine-add') {
     return `<table ${id ? `id="${id}"` : ''} class="ts-sheet">
-        <thead><tr><th class="ts-sheet-num"></th>${SHEET_COLS.map(([k, l]) => `<th data-col="${k}">${l}</th>`).join('')}<th class="ts-sheet-del"></th></tr></thead>
+        <thead><tr><th class="ts-sheet-num"></th>${SHEET_COLS.map(([k, l]) => `<th data-col="${k}">${l}${k === 'state' ? '' : '<span class="ts-sheet-rz" title="拖曳調整欄寬；點兩下恢復預設"></span>'}</th>`).join('')}<th class="ts-sheet-del"></th></tr></thead>
         <tbody>${rowsHtml}</tbody>
     </table>`;
 }
@@ -141,8 +143,40 @@ export function renderSheet(host, rows, opts = {}) {
     host.innerHTML = tableHtml(body + (opts.readonly ? '' : rowHtml({}, {}, ctx).repeat(opts.blankRows ?? BLANK_ROWS)), opts.id ?? 'ts-mine-add');
     if (opts.projectPicker) attachProjectPop(host, { options: opts.projectPicker, value: (p) => (p.id ? (p.name || p.label) : (p.label || p.name)) });
     _wire(host);
+    _applyColWidths(host);
     fitTextareas(host);
     return host.querySelector('table.ts-sheet');
+}
+
+// ── 欄寬可拖（owner 2026-09-07「填寫的格子都可以自己拉動寬度」）：拖表頭右緣，寬度記在 localStorage（同一台電腦下次還在）；點兩下恢復預設 ──
+const COLW_KEY = 'ts_sheet_colw';
+function _loadColWidths() { try { return JSON.parse(localStorage.getItem(COLW_KEY) || '{}') || {}; } catch (_) { return {}; } }
+function _saveColWidths(w) { try { localStorage.setItem(COLW_KEY, JSON.stringify(w)); } catch (_) { /* 私密模式等 */ } }
+function _applyColWidths(host) {
+    const w = _loadColWidths();
+    host.querySelectorAll('table.ts-sheet thead th[data-col]').forEach(th => { const px = w[th.dataset.col]; th.style.width = px ? px + 'px' : ''; });
+}
+function _startColResize(ev, host) {
+    const rz = ev.target.closest('.ts-sheet-rz');
+    if (!rz) return;
+    ev.preventDefault();
+    const th = rz.closest('th'), col = th.dataset.col, x0 = ev.clientX, w0 = th.getBoundingClientRect().width;
+    rz.classList.add('on');
+    const move = (e) => { th.style.width = Math.max(40, Math.round(w0 + e.clientX - x0)) + 'px'; };
+    const up = () => {
+        window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+        rz.classList.remove('on');
+        const w = _loadColWidths(); w[col] = Math.round(th.getBoundingClientRect().width); _saveColWidths(w);
+        fitTextareas(host);      // 專案／內容欄變寬變窄，textarea 高度要重算
+    };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+}
+function _resetColWidth(ev, host) {
+    const rz = ev.target.closest('.ts-sheet-rz');
+    if (!rz) return;
+    const th = rz.closest('th'), w = _loadColWidths();
+    delete w[th.dataset.col]; _saveColWidths(w); th.style.width = '';
+    fitTextareas(host);
 }
 
 export function appendBlankRows(host, n = BLANK_ROWS) {
@@ -308,6 +342,8 @@ function _grow(ev, host) {
 function _wire(host) {
     if (host.dataset.tsSheetWired) return;
     host.dataset.tsSheetWired = '1';
+    host.addEventListener('pointerdown', (ev) => _startColResize(ev, host));
+    host.addEventListener('dblclick', (ev) => _resetColWidth(ev, host));
     host.addEventListener('keydown', (ev) => _keydown(ev, host));
     host.addEventListener('input', (ev) => {
         _grow(ev, host);
