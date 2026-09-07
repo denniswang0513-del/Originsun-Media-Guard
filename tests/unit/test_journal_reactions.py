@@ -85,3 +85,6 @@ def test_frontend_menu_has_full_emoji_grid_with_recent_row():
     assert "const RECENT_KEY = 'journal_recent_emoji';" in html and "hm-grid" in html and "最近使用" in html
     assert "input[data-pick]" not in html and "pickable" not in html
     assert "b.dataset.heartMine || 'love'" in html, "取消同一種要看 data-heart-mine，不猜圖"
+    # 選單掛 body＋fixed（owner「emoji 被吃掉了」：塞在標題列裡會被右邊界裁掉）；點選事件在選單自己身上
+    assert "document.body.appendChild(menu);" in html and "position: fixed; z-index: 1000;" in html
+    assert "menu.addEventListener('click'" in html and "menu.previousElementSibling" not in html

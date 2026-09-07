@@ -200,7 +200,7 @@ html.embed-mode .gate-wrap { margin: 0 auto; }
 .heart.has { color: var(--red); } .heart.on { background: #fef2f2; }
 .heart .n { font-size: 11px; color: var(--sub); font-variant-numeric: tabular-nums; }
 .heart:disabled { cursor: default; }
-.heart-menu { display: inline-flex; flex-direction: column; gap: 4px; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 6px 8px; box-shadow: 0 6px 18px rgba(0,0,0,.12); margin-left: 4px; position: absolute; z-index: 30; }
+.heart-menu { display: inline-flex; flex-direction: column; gap: 4px; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 6px 8px; box-shadow: 0 6px 18px rgba(0,0,0,.12); position: fixed; z-index: 1000; }
 .heart-menu .hm-h { font-size: 11px; color: var(--sub); letter-spacing: .06em; }
 .heart-menu .hm-row, .heart-menu .hm-grid { display: grid; grid-template-columns: repeat(8, 30px); gap: 2px; }
 .heart-menu button { border: 0; background: none; font-size: 18px; line-height: 1; padding: 4px 0; border-radius: 6px; cursor: pointer; }
@@ -649,7 +649,20 @@ function heartMenu(btn) {
     const recent = recentEmoji();
     menu.innerHTML = (recent.length ? `<div class="hm-h">最近使用</div><div class="hm-row">${row(recent)}</div>` : '')
         + `<div class="hm-h">全部</div><div class="hm-grid">${row(EMOJI_MENU)}</div>`;
-    btn.insertAdjacentElement('afterend', menu);
+    // 掛在 body、fixed 定位（owner 2026-09-07「emoji 被吃掉了」：格子變 8 欄後，塞在標題列裡會被右邊界裁掉）；
+    // 靠右就往左展開、靠下就往上展開；點選事件掛在選單自己身上（它不在 #view 裡，委派聽不到）
+    document.body.appendChild(menu);
+    const r = btn.getBoundingClientRect(), w = menu.offsetWidth, h = menu.offsetHeight;
+    menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+    menu.style.top = ((r.bottom + 6 + h > window.innerHeight) ? Math.max(8, r.top - h - 6) : r.bottom + 6) + 'px';
+    menu.addEventListener('click', async (ev) => {
+        const pick = ev.target.closest('button[data-heart-kind]');
+        if (!pick) return;
+        ev.preventDefault(); ev.stopPropagation();
+        menu.remove();
+        if (pick.dataset.glyph) pushRecent(pick.dataset.glyph);
+        await sendHeart(btn, pick.dataset.heartKind);
+    });
     const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('pointerdown', close, true); } };
     setTimeout(() => document.addEventListener('pointerdown', close, true), 0);
 }
@@ -679,15 +692,6 @@ $('view').addEventListener('click', (ev) => {
 }, true);
 $('view').addEventListener('contextmenu', (ev) => { const b = ev.target.closest('button[data-heart]'); if (b) { ev.preventDefault(); heartMenu(b); } });
 $('view').addEventListener('click', async (ev) => {
-    const pick = ev.target.closest('button[data-heart-kind]');
-    if (pick) {
-        ev.preventDefault(); ev.stopPropagation();
-        const menu = pick.closest('.heart-menu'), btn = menu && menu.previousElementSibling;
-        menu.remove();
-        if (pick.dataset.glyph) pushRecent(pick.dataset.glyph);
-        if (btn && btn.dataset.heart !== undefined) await sendHeart(btn, pick.dataset.heartKind);
-        return;
-    }
     const b = ev.target.closest('button[data-heart]'); if (!b) return;
     ev.preventDefault(); ev.stopPropagation();          // 別把 details 收起來
     if (_pressed) { _pressed = false; return; }         // 長按已開選單
