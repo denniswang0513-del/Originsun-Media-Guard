@@ -574,7 +574,7 @@ const _isKaiInvoice = (inv) => ('' + (inv.category || '')).includes('代開');
  *  所以這裡只認 id —— 前端不該再抄一份號碼比對，那條規則的空號坑要修就得修每一份。 */
 const _invoiceOf = (p) => _invoiceList.find(i => i.id === p.source_invoice_id) || null;
 
-function _updateExtraFields(category) {
+function _updateExtraFields(category, invoiceId = '') {
     const invoiceField = document.getElementById('pay-invoice-field');
     const invoiceNumField = document.getElementById('pay-invoice-number-field');
     const projectField = document.getElementById('pay-project-field');
@@ -598,9 +598,10 @@ function _updateExtraFields(category) {
         }
         const sel = document.getElementById('pay-f-project_id');
         if (sel) {
-            const current = sel.value;
+            const current = invoiceId || sel.value;
             sel.innerHTML = `<option value="">— 選擇發票 —</option>` +
-                _invoiceList.filter(inv => inv.issue_status === '已開立').map(inv =>
+                // 目前掛著的那張一定要在（還沒開號的票也要能對到，不然編輯一存就把發票連結洗掉）
+                _invoiceList.filter(inv => inv.issue_status === '已開立' || inv.id === current).map(inv =>
                     `<option value="${inv.id}" data-num="${_esc(inv.invoice_number)}" data-amt="${inv.amount_total || 0}"${inv.id === current ? ' selected' : ''}>${_esc(inv.title)} $${(inv.amount_total||0).toLocaleString('zh-TW')} (${_esc(inv.company_name)})</option>`
                 ).join('');
         }
@@ -624,7 +625,11 @@ function _populateProject2Select(selectedId) {
 function _populatePayeeSelect(selectedName) {
     const sel = document.getElementById('pay-f-payee_name');
     if (!sel) return;
-    sel.innerHTML = `<option value="">— 選擇人員 —</option>` +
+    // 收款人不一定是員工（代開單的收款人＝代開人，多半是外面的人）：目前這個名字不在人員庫也要留著，
+    // 不然一開編輯就被清成空白、一存就把收款人洗掉
+    const extra = selectedName && !_staffList.some(s => s.name === selectedName)
+        ? `<option value="${_esc(selectedName)}" selected>${_esc(selectedName)}</option>` : '';
+    sel.innerHTML = `<option value="">— 選擇人員 —</option>` + extra +
         _staffList.map(s => `<option value="${_esc(s.name)}" data-id="${_esc(s.id_number)}"${s.name === selectedName ? ' selected' : ''}>${_esc(s.name)} (${_esc(s.role)})</option>`).join('');
 }
 
@@ -643,7 +648,9 @@ function openModal(p = null) {
         else el.value = p ? (p[f] ?? '') : '';
     }
     if (!p) document.getElementById('pay-f-request_date').value = today();
-    _updateExtraFields(p?.category || '');
+    // 發票代開：pay-f-project_id 那顆裝的是**發票**，回填要用 source_invoice_id（不是 project_id——
+    // 對不到就逼使用者重選發票，存檔時再把發票 id 當專案寫進去；2026-09-07 思沙龍兩張就是這樣壞的）
+    _updateExtraFields(p?.category || '', p?.source_invoice_id || '');
     document.getElementById('pay-modal').style.display = 'flex';
 }
 
@@ -655,15 +662,21 @@ async function savePayment() {
     const cat = document.getElementById('pay-f-category')?.value || '';
     for (const f of _FIELDS) {
         const el = document.getElementById('pay-f-' + f);
+        // 表單沒有的欄位（payment_status／payment_date 由應付帳款管）不送：送空字串會把狀態洗成 ''，
+        // 應付帳款只認「應付款」就看不到那張單（2026-09-07 思沙龍兩張）。後端 PUT 是 exclude_unset，不送＝保留。
+        if (!el && f !== 'project_id') continue;
         let val = el ? el.value.trim() : '';
         if (_INT_FIELDS.includes(f)) val = val ? parseInt(val) : 0;
         if (_DATE_FIELDS.includes(f)) val = val || null;
         if (f === 'project_id') {
-            // Use invoice select for 發票代開, project2 select for 專案外包/雜支
+            // 專案一律讀 pay-f-project_id2；發票代開那顆 pay-f-project_id 裝的是發票 → 寫進 source_invoice_id，
+            // 不是 project_id（寫進 project_id 就是「專案欄指到一張發票」：畫面空白、應付帳款也連不回案）
+            val = document.getElementById('pay-f-project_id2')?.value || null;
             if (cat === '發票代開') {
-                val = document.getElementById('pay-f-project_id')?.value || null;
-            } else {
-                val = document.getElementById('pay-f-project_id2')?.value || null;
+                const invSel = document.getElementById('pay-f-project_id');
+                payload.source_invoice_id = invSel?.value || null;
+                const opt = invSel?.selectedOptions?.[0];
+                if (opt?.dataset?.num && !document.getElementById('pay-f-invoice_number')?.value.trim()) payload.invoice_number = opt.dataset.num;
             }
         }
         payload[f] = val;

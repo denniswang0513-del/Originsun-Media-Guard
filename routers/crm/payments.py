@@ -214,6 +214,14 @@ async def list_payments(
     return {"payments": out, "total": len(out)}
 
 
+async def _assert_project_exists(session, project_id) -> None:
+    """project_id 只能是專案。2026-09-07 生產有 3 張代開單的 project_id 被寫成**發票 id**（請款分頁彈窗把
+    發票下拉當專案送）：專案欄空白、應付帳款也連不回案，而且兩邊畫面各自看起來都正常。在寫入口擋，
+    任何客戶端（桌機／手機／匯入）都不能再寫壞。"""
+    if project_id and await session.get(CrmProject, project_id) is None:
+        raise HTTPException(status_code=422, detail="project_id 不是專案（找不到這個案）")
+
+
 @router.post("/payments")
 async def create_payment(req: PaymentRequestPayload, request: Request):
     _require_db()
@@ -226,6 +234,7 @@ async def create_payment(req: PaymentRequestPayload, request: Request):
     p = CrmPaymentRequest(id=uuid.uuid4().hex, **dates, entity=ent,
                           created_at=now, updated_at=now, **data)
     async with factory() as session:
+        await _assert_project_exists(session, p.project_id)
         # F1 月結守衛：請款單的權責費用認列月 = request_date
         await _assert_month_open(session, dates.get("request_date"), entity=ent)
         # CRM 的一行（人員費用或行政雜支）只能請一次款。前端請完就把按鈕換成
@@ -622,6 +631,8 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
         if not p:
             raise HTTPException(status_code=404, detail="找不到此請款單")
         # 委外費用同步要用「改之前」的快照當減項（setattr 之後就沒了）
+        if "project_id" in data:
+            await _assert_project_exists(session, data.get("project_id"))
         _old_key = _outsource_key(p)
         # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422
         # （寫入守衛也在 _entity_for_write 裡定案）

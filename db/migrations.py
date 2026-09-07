@@ -159,6 +159,12 @@ FINANCE_AND_CRM_COLUMNS = [
         "WHERE status IS NULL AND claim_id IS NULL",
         "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS petty_float INTEGER DEFAULT 0",
         "UPDATE crm_staff SET petty_float=0 WHERE petty_float IS NULL",
+        # 2026-09-07：請款分頁彈窗曾把「發票代開」的發票 id 寫進 project_id（思沙龍 EP01/EP02、快樂學游泳），
+        # 專案欄空白、應付帳款連不回案。改回發票掛的案（發票沒案就清空）；每次 boot 跑、改過就不再命中。
+        "UPDATE crm_payment_requests p SET project_id = i.project_id FROM crm_invoices i "
+        "WHERE p.source_invoice_id IS NOT NULL AND p.project_id = p.source_invoice_id AND i.id = p.source_invoice_id",
+        # 同一批單的 payment_status 被彈窗洗成空字串（表單沒那格卻照送）；應付帳款只認「應付款／未付款」
+        "UPDATE crm_payment_requests SET payment_status='應付款' WHERE payment_status IS NULL OR payment_status=''",
         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS expense_id VARCHAR(32)",
         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS reimbursement_id VARCHAR(32)",
         # 費用歸屬人（後期雜支那類「別人墊、帳算你的」）

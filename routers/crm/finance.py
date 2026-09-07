@@ -510,8 +510,8 @@ async def resettle_payment_requests(session, request_ids, when=None) -> None:
         elif got:
             ap.payment_status = "應付款"      # 付了一部分，還沒結清
         else:
-            # 連結被拿光了 → 退回未付款，並清掉付款日（否則帳上永遠是已付）
-            ap.payment_status = "未付款"
+            # 連結被拿光了 → 退回應付款（現行詞彙；「未付款」是舊資料的字），並清掉付款日（否則帳上永遠是已付）
+            ap.payment_status = "應付款"
             ap.payment_date = None
         ap.updated_at = _now()
         # 🔴 代開單從這條路結清時，發票也要跟著收尾 —— 少了這一行，請款單會說
