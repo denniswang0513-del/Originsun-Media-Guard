@@ -430,8 +430,14 @@ async def my_today(request: Request):
         shell = (await session.execute(
             select(WorkJournal).where(WorkJournal.username == (ident["username"] or ""))
             .where(WorkJournal.week_start == last_week))).scalar_one_or_none()
+        # 本週里程碑（owner 2026-09-07）：幾個、今天到期哪幾個；失敗不擋今天那條
+        try:
+            from services.milestone_service import today_summary
+            milestones = await today_summary(session, today)
+        except Exception:      # noqa: BLE001 — 表還沒建／查詢壞掉都不該讓「今天」整條消失
+            milestones = None
     return {
-        "date": today.isoformat(), "shoots": shoots, "todos": todos,
+        "date": today.isoformat(), "shoots": shoots, "todos": todos, "milestones": milestones,
         "leave_pending": [{"date_from": day_iso(l.start_date) or "", "date_to": day_iso(l.end_date) or "",
                            "status": l.status} for l in leaves],
         "last_week_journal": shell_status(shell), "last_week_start": last_week.isoformat(),

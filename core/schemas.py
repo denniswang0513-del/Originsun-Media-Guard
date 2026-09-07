@@ -472,6 +472,32 @@ class TimesheetMergeUndo(BaseModel):
     log_id: str
 
 
+class MilestoneItem(BaseModel):
+    """彈窗裡的一列（POST /milestones/week/save 的 items[]）：有 id＝改既有的，沒 id＝新增；delete＝刪。"""
+    id: Optional[str] = None
+    project_id: str = ""
+    title: str = ""
+    due_date: Optional[str] = None
+    assignee_staff_id: Optional[str] = None
+    assignee_name: Optional[str] = None
+    note: Optional[str] = None
+    done: Optional[bool] = None
+    delete: bool = False
+
+
+class MilestoneSave(BaseModel):
+    week_start: str
+    items: List[MilestoneItem] = []
+
+
+class MilestoneDone(BaseModel):
+    done: bool = True
+
+
+class MilestoneDefer(BaseModel):
+    week_start: str = ""
+
+
 class TimesheetRowAdminUpdate(TimesheetManualRow):
     """管理員在總表改任一列（含 Sheet 列）；多一個管理員備註。"""
     note: Optional[str] = None

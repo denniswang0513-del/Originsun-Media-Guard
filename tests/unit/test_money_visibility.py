@@ -394,6 +394,9 @@ def test_every_project_enumeration_decides_about_mine():
         # 手填的專案下拉（進行中案的 id／名，不帶錢）：CRM tab（timesheets 模組）與員工頁
         # /me/timesheet_options（me_finance）都用；員工填工時本來就要選到私帳案名（對映只認私帳）
         "services/timesheet_manual.py",
+        # 每週里程碑（2026-09-07）：只回案名／客戶簡稱／里程碑，不帶錢；案的來源是工時表對到的案（對映只認私帳）
+        # 與同事自己加進這週的案 —— 跟 timesheet_manual 的下拉同一種可見性
+        "services/milestone_service.py",
         "routers/crm/proposal_assets.py", "routers/crm/flow.py",
         # 帳本自己的視角（entity 已經圈定範圍）
         "routers/api_finance_projects.py", "routers/api_finance_stmt.py",

@@ -256,6 +256,41 @@ table.week .c.plan { color: var(--sub); } table.week .c.shoot { color: #1d4ed8; 
 table.week .c.off { color: var(--sub); background: #f5f5f5; border-radius: 4px; padding: 3px 6px; }
 table.week .none { color: #c9c9c9; }
 /* 專案檔案彈窗（團隊的一週點案名）：白底、右上打叉、Esc／點背景關 */
+/* 本週里程碑（owner 2026-09-07；示範 /demo/milestones.html 定稿）：週表上方的帶＋設定彈窗 */
+.ms-band { border: 1px solid var(--line); border-left: 3px solid var(--red); border-radius: 8px; padding: 10px 14px 6px; margin-bottom: 12px; background: #fffdfb; }
+.ms-band .ey { font-size: 11px; letter-spacing: .3em; text-transform: uppercase; color: var(--sub); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ms-band .empty { color: var(--sub); font-size: 13px; padding: 4px 0 6px; }
+.ms-proj { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; border-top: 1px dashed var(--line); }
+.ms-proj:first-of-type { border-top: 0; }
+.ms-proj .pn { width: 210px; flex: none; font-weight: 600; font-size: 13px; padding-top: 3px; }
+.ms-proj .pn small { display: block; color: var(--sub); font-weight: 400; font-size: 11px; }
+.ms-list { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+.ms { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 6px; font-size: 12px; background: #fff; cursor: pointer; user-select: none; }
+.ms input { margin: 0; }
+.ms .due, .ms .who { color: var(--sub); }
+.ms.done { color: var(--sub); text-decoration: line-through; background: #f6f6f6; }
+.ms.late { border-color: var(--red); color: var(--red); }
+.ms.late .due { color: var(--red); font-weight: 600; }
+.ms.carried::before { content: "延自上週"; font-size: 10px; color: #b45309; border: 1px solid #b45309; border-radius: 3px; padding: 0 4px; margin-right: 2px; }
+table.week .c.ms { display: block; background: #fff4f2; border: 1px solid #f1c9c4; font-size: 11px; }
+table.week .c.ms.done { color: var(--sub); background: #f6f6f6; border-color: var(--line); }
+.msm-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.msm-hd h3 { margin: 0; font-size: 15px; }
+.msm-cols { display: grid; grid-template-columns: 20px 1fr 118px 112px 1fr 96px; gap: 8px; font-size: 11px; color: var(--sub); letter-spacing: .1em; padding: 0 0 4px; }
+.msm-row { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+.msm-row .rh { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
+.msm-row .rh b { font-size: 14px; }
+.msm-item { display: grid; grid-template-columns: 20px 1fr 118px 112px 1fr 96px; gap: 8px; align-items: center; font-size: 13px; padding: 5px 0; border-top: 1px dashed var(--line); }
+.msm-item:first-child { border-top: 0; }
+.msm-item input[type=text], .msm-item select, .msm-item input[type=date] { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12.5px; }
+.msm-item.done input[type=text] { color: var(--sub); text-decoration: line-through; }
+.msm-item .st { font-size: 11px; color: var(--sub); }
+.msm-item .st.late { color: var(--red); font-weight: 600; }
+.msm-add { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+.msm-add input { flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font: inherit; font-size: 13px; }
+.msm-addproj { display: flex; gap: 8px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
+.msm-addproj input { border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font: inherit; font-size: 13px; min-width: 300px; }
+.msm-ft { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); margin-top: 10px; }
 .ws-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 300; display: flex; align-items: flex-start; justify-content: center; padding: 36px 16px; overflow: auto; }
 .ws-modal { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 10px; width: 100%; max-width: 1180px; padding: 22px 24px 16px; box-shadow: 0 20px 60px rgba(0,0,0,.18); }
 .ws-modal-x { position: absolute; top: 8px; right: 12px; background: none; border: none; color: var(--sub); font-size: 24px; cursor: pointer; line-height: 1; font-family: inherit; }
@@ -1530,6 +1565,7 @@ function buildZone1() {
         <div class="view" data-view="find" id="z1-find"></div>`;
     z.querySelector("#z1-views").addEventListener("click", (e) => { const b = e.target.closest(".view-btn"); if (b) switchZ1(b.dataset.view); });
     z.addEventListener("click", (e) => { const b = e.target.closest("[data-z1], [data-ts-action]"); if (b) _z1Action(b, e); });
+    z.addEventListener("change", (e) => { const cb = e.target.closest("input[data-ms-done]"); if (cb) _msToggleDone(cb.dataset.msDone, cb.checked); });   // 週表那條帶上直接勾完成
     switchZ1(_z1View);
 }
 function switchZ1(v) {
@@ -1561,6 +1597,7 @@ function _todayStripHtml(t, incomplete = []) {
         <span><span class="k">待辦</span>${(t.todos || []).length} 件</span>
         <span><span class="k">上週回顧</span><a href="#ws-journal" class="${monday && jr !== "submitted" ? "warn" : ""}">${monday && jr !== "submitted" ? "上週回顧還沒寫" : jrText}</a></span>
         ${(t.leave_pending || []).length ? `<span><span class="k">請假待審</span>${t.leave_pending.length} 件</span>` : ""}
+        ${t.milestones && t.milestones.total ? `<span><span class="k">本週里程碑</span>${t.milestones.total} 個、今天到期 <span class="${t.milestones.due_today.length ? "warn" : ""}">${t.milestones.due_today.length} 個</span>${t.milestones.due_today.length ? "（" + t.milestones.due_today.map(m => esc((m.assignee_name ? m.assignee_name + "：" : "") + m.title)).join("、") + "）" : ""}</span>` : ""}
         ${incomplete.length ? `<span><span class="k">未完成</span>${incomplete.map(d => `<button type="button" class="linkish warn" data-z1="day-goto" data-day="${esc(d.date)}">${esc(_mdLabel(d.date))} 專案紀錄未完成</button>`).join("、")}</span>` : ""}
     </div>`;
 }
@@ -1669,6 +1706,7 @@ async function _z1Action(btn, ev) {
         return TS.openStageEditor({ onSaved: (map) => { _logStages = map; if (sheet) TS.setStages(sheet, map); } });
     }
     if (act === "week") { _z1Week = btn.dataset.start || _mondayOf(_localToday()); return loadTeamWeek(); }
+    if (act === "ms-open") return _openMsModal();
     if (act === "find-back") return _renderFindTable();
     if (act === "proj-pop") return _openProjectModal(btn.dataset.name || "", btn.dataset.pid || "");   // 團隊的一週點案名：彈窗
     if (act === "open-project") return _openFindProject(btn.dataset.name || "", btn.dataset.pid || "");
@@ -1706,12 +1744,18 @@ async function loadTeamWeek() {
     let d;
     try { d = await mjson("/api/v1/me/team_week?start=" + _z1Week); }
     catch (e) { host.innerHTML = `<div class="notice">${esc(e.message)}</div>`; return; }
+    // 本週里程碑（owner 2026-09-07）：抓不到就沒有那條帶，不擋週表
+    let ms = null;
+    try { ms = await mjson("/api/v1/milestones/week?start=" + _z1Week); } catch (_) { ms = null; }
+    _msWeek = ms;
+    const msOf = (name, iso) => ms ? ms.projects.flatMap(p => p.milestones.filter(m => m.assignee_name === name && m.due_date === iso).map(m => ({ ...m, project_name: p.name }))) : [];
     const days = d.days || [];
     const today = _localToday();
     const shootsOf = (iso) => (d.shoots && d.shoots[iso]) || [];
     const leaveOf = (iso) => (d.leave && d.leave[iso]) || [];
     const people = d.people || [];
-    const names = [...new Set([...people.map(p => p.name), ...days.flatMap(iso => [...shootsOf(iso).flatMap(s => s.crew || []), ...leaveOf(iso)])])];
+    const msNames = ms ? ms.projects.flatMap(p => p.milestones.map(m => m.assignee_name).filter(Boolean)) : [];   // 有里程碑的負責人也要有一列
+    const names = [...new Set([...people.map(p => p.name), ...days.flatMap(iso => [...shootsOf(iso).flatMap(s => s.crew || []), ...leaveOf(iso)]), ...msNames])];
     const hasAny = (iso) => people.some(p => (p.cells && p.cells[iso] || []).length) || shootsOf(iso).length || leaveOf(iso).length;
     const cols = days.filter(iso => { const w = _dow(iso); return (w !== 0 && w !== 6) || hasAny(iso); });   // 週末只有有東西才畫
     const cell = (name, iso) => {
@@ -1720,6 +1764,8 @@ async function loadTeamWeek() {
         const parts = [];
         if (leaveOf(iso).includes(name)) parts.push('<div class="c off">休假</div>');
         shootsOf(iso).filter(s => (s.crew || []).includes(name)).forEach(s => parts.push(`<div class="c shoot">${esc(s.title || s.project_name || "場次")}<i>${[s.project_name && s.project_name !== s.title ? s.project_name : "", s.location, s.start_time, (s.crew || []).join("、")].filter(Boolean).map(esc).join(" · ")}</i></div>`));
+        // 指定了負責人的里程碑：到期那天出現在他的格子（沒指定的只在上方的帶）
+        msOf(name, iso).forEach(m => parts.push(`<div class="c ms${m.done ? " done" : ""}">${m.done ? "已完成：" : "里程碑："}${esc(m.title)}<div class="cn">${esc(m.project_name)}</div></div>`));
         // 每筆＝案名（可點開專案檔案）＋右側小時、內容、分類·階段（不放任何個人合計——員工頁的鐵則）
         items.forEach(i => {
             const plan = i.status === "plan";
@@ -1739,11 +1785,127 @@ async function loadTeamWeek() {
             <span class="vrow"><button type="button" class="btn" data-z1="week" data-start="${_shiftDays(_z1Week, -7)}">‹</button>
                 <span class="meta">${esc(_z1Week)} 起</span>
                 <button type="button" class="btn" data-z1="week" data-start="${_shiftDays(_z1Week, 7)}">›</button>
-                ${_z1Week === _mondayOf(today) ? "" : '<button type="button" class="btn" data-z1="week">本週</button>'}</span></div>
+                ${_z1Week === _mondayOf(today) ? "" : '<button type="button" class="btn" data-z1="week">本週</button>'}
+                <button type="button" class="btn pri" data-z1="ms-open">設定專案里程碑</button></span></div>
+        ${ms ? _msBandHtml(ms) : ""}
         ${names.length ? `<div style="overflow-x:auto;"><table class="week">
             <thead><tr><th style="width:84px;">人員</th>${cols.map(iso => `<th class="${iso === today ? "today" : ""}">${esc(_mdLabel(iso))}</th>`).join("")}</tr></thead>
             <tbody>${names.map(n => `<tr><td class="who">${esc(n)}</td>${cols.map(iso => `<td>${cell(n, iso)}</td>`).join("")}</tr>`).join("")}</tbody>
         </table></div>` : `<div class="empty">這一週還沒有人填。</div>`}`;
+}
+
+// ── 本週里程碑（owner 2026-09-07；示範 /demo/milestones.html 定稿）：週表上方的帶＋「設定專案里程碑」彈窗 ──
+let _msWeek = null;          // GET /milestones/week 的結果（畫帶、開彈窗用）
+let _msDraft = null;         // 彈窗裡正在改的（儲存才寫入）
+function _msDue(m) { return m.due_date ? _mdLabel(m.due_date).slice(0, -3) : ""; }
+function _msBandHtml(ms) {
+    const withMs = ms.projects.filter(p => p.milestones.length);
+    const total = ms.open_count + ms.done_count;
+    const body = withMs.length ? withMs.map(p => `<div class="ms-proj"><div class="pn">${esc(p.name)}<small>${esc(p.client || "")}${p.client ? " · " : ""}本週已投入 ${p.hours_week} h</small></div><div class="ms-list">${p.milestones.map(m => `
+        <label class="ms${m.done ? " done" : ""}${m.late ? " late" : ""}${m.carried ? " carried" : ""}"><input type="checkbox" data-ms-done="${esc(m.id)}" ${m.done ? "checked" : ""}> ${esc(m.title)} <span class="due">${esc(_msDue(m))}</span>${m.assignee_name ? `<span class="who">· ${esc(m.assignee_name)}</span>` : ""}</label>`).join("")}</div></div>`).join("")
+        : `<div class="empty">這週還沒有里程碑。<button type="button" class="linkish" data-z1="ms-open">設定專案里程碑</button></div>`;
+    return `<div class="ms-band"><div class="ey"><span>This week's milestones　本週里程碑</span><span>${total ? `${ms.done_count}/${total} 完成${ms.late_count ? ` · 過期 ${ms.late_count}` : ""}` : ""}</span></div>${body}</div>`;
+}
+async function _msToggleDone(id, done) {
+    try { await mjson(`/api/v1/milestones/${encodeURIComponent(id)}/done`, _POST({ done })); await loadTeamWeek(); _todayInfo = null; }
+    catch (e) { alert("更新失敗：" + e.message); await loadTeamWeek(); }
+}
+async function _openMsModal() {
+    let ms = _msWeek;
+    try { ms = await mjson("/api/v1/milestones/week?start=" + _z1Week); } catch (e) { alert("抓不到里程碑：" + e.message); return; }
+    _msWeek = ms;
+    _msDraft = { week_start: ms.week_start, default_due: ms.default_due, staff: ms.staff, projects: ms.projects.map(p => ({ ...p, milestones: p.milestones.map(m => ({ ...m })) })), removed: [] };
+    const root = $("ws-view") || document.body;
+    let bg = $("ws-ms-modal");
+    if (!bg) {
+        bg = document.createElement("div"); bg.id = "ws-ms-modal"; bg.className = "ws-modal-bg";
+        bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
+        root.appendChild(bg);
+    }
+    bg.innerHTML = `<div class="ws-modal" style="max-width:980px;"><div id="ws-ms-body"></div></div>`;
+    _msRenderModal();
+    _logProjectOptions().then(list => { const dl = $("ms-proj-dl"); if (dl) dl.innerHTML = (list || []).filter(p => !p.closed).map(p => `<option value="${esc(p.label)}">`).join(""); });
+}
+function _msRenderModal() {
+    const d = _msDraft, host = $("ws-ms-body");
+    if (!d || !host) return;
+    const wk = d.week_start, wkEnd = _shiftDays(wk, 5);
+    const staffOpts = (sel) => `<option value="" ${!sel ? "selected" : ""}>（不指定）</option>` + (d.staff || []).map(s => `<option value="${esc(s.id)}" ${sel === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("");
+    host.innerHTML = `
+        <div class="msm-hd"><h3>設定專案里程碑</h3><span class="vrow"><button type="button" class="btn" data-ms="wk" data-delta="-7">‹ 上週</button><b>${esc(_mdLabel(wk))} – ${esc(_mdLabel(wkEnd))}</b><button type="button" class="btn" data-ms="wk" data-delta="7">下週 ›</button></span></div>
+        <div class="msm-cols"><span></span><span>里程碑</span><span>到期</span><span>負責人</span><span>備註</span><span></span></div>
+        ${d.projects.map((p, pi) => `<div class="msm-row" data-pi="${pi}"><div class="rh"><b>${esc(p.name)}</b><span class="meta">${esc(p.client || "")}${p.client ? " · " : ""}本週已投入 <b>${p.hours_week} h</b>${p.milestones.length ? ` · ${p.milestones.filter(m => m.done).length}/${p.milestones.length} 完成` : ""}</span></div>
+            <div>${p.milestones.map((m, mi) => `<div class="msm-item${m.done ? " done" : ""}" data-mi="${mi}"><input type="checkbox" data-k="done" ${m.done ? "checked" : ""}><input type="text" data-k="title" value="${esc(m.title)}" placeholder="里程碑"><input type="date" data-k="due_date" value="${esc(m.due_date || "")}"><select data-k="assignee_staff_id">${staffOpts(m.assignee_staff_id)}</select><input type="text" data-k="note" value="${esc(m.note || "")}" placeholder="備註"><span><span class="st${m.late ? " late" : ""}">${m.done ? "已完成" : (m.late ? "過期" : (m.carried ? "延自上週" : ""))}</span> ${m.id ? `<button type="button" class="btn sm" data-ms="defer" title="搬到下週">延</button>` : ""} <button type="button" class="btn sm" data-ms="del" title="刪除">×</button></span></div>`).join("")}</div>
+            <div class="msm-add"><input type="text" data-ms-add="${pi}" placeholder="加一個里程碑，例：B-copy 給客戶（Enter 也可以）"><button type="button" class="btn sm pri" data-ms="add">加入</button></div></div>`).join("")}
+        <div class="msm-addproj"><span class="meta">還沒排的案：</span><input type="text" id="ms-proj-q" list="ms-proj-dl" placeholder="打字找案名"><datalist id="ms-proj-dl"></datalist><button type="button" class="btn sm" data-ms="addproj">加進這週</button></div>
+        <div class="msm-ft"><span class="meta">到期預設本週五；負責人可不指定；上週沒完成的已自動帶進來（標「延自上週」）。儲存才寫入。</span>
+            <span class="vrow"><button type="button" class="btn" data-ms="cancel">取消</button><button type="button" class="btn pri" data-ms="save">儲存</button></span></div>`;
+    if (!host.dataset.wired) {
+        host.dataset.wired = "1";
+        host.addEventListener("click", (e) => { const b = e.target.closest("[data-ms]"); if (b) _msModalAction(b); });
+        host.addEventListener("keydown", (e) => { const inp = e.target.closest("input[data-ms-add]"); if (inp && e.key === "Enter") { e.preventDefault(); _msAdd(Number(inp.dataset.msAdd)); } });
+    }
+}
+function _msSync() {
+    // 把彈窗裡的欄位收回 draft（重畫前一定先收，不然打到一半的字會掉）
+    document.querySelectorAll("#ws-ms-body .msm-row").forEach(row => {
+        const p = _msDraft.projects[Number(row.dataset.pi)];
+        row.querySelectorAll(".msm-item").forEach(it => {
+            const m = p.milestones[Number(it.dataset.mi)]; if (!m) return;
+            const v = (k) => it.querySelector(`[data-k="${k}"]`);
+            m.done = v("done").checked; m.title = v("title").value.trim(); m.due_date = v("due_date").value || _msDraft.default_due;
+            m.assignee_staff_id = v("assignee_staff_id").value; m.assignee_name = v("assignee_staff_id").selectedOptions[0]?.textContent.replace("（不指定）", "") || "";
+            m.note = v("note").value.trim();
+        });
+    });
+}
+function _msAdd(pi) {
+    _msSync();
+    const inp = document.querySelector(`#ws-ms-body input[data-ms-add="${pi}"]`); const t = (inp?.value || "").trim(); if (!t) return;
+    _msDraft.projects[pi].milestones.push({ id: null, title: t, due_date: _msDraft.default_due, assignee_staff_id: "", assignee_name: "", note: "", done: false, late: false, carried: false });
+    _msRenderModal();
+    document.querySelector(`#ws-ms-body input[data-ms-add="${pi}"]`)?.focus();
+}
+async function _msModalAction(btn) {
+    const act = btn.dataset.ms, bg = $("ws-ms-modal");
+    if (act === "cancel") { bg?.remove(); return; }
+    if (act === "wk") { _z1Week = _shiftDays(_msDraft.week_start, Number(btn.dataset.delta)); await _openMsModal(); return; }
+    if (act === "add") { const row = btn.closest(".msm-row"); return _msAdd(Number(row.dataset.pi)); }
+    if (act === "del") {
+        _msSync();
+        const row = btn.closest(".msm-row"), it = btn.closest(".msm-item"), p = _msDraft.projects[Number(row.dataset.pi)];
+        const [m] = p.milestones.splice(Number(it.dataset.mi), 1);
+        if (m && m.id) _msDraft.removed.push(m.id);
+        return _msRenderModal();
+    }
+    if (act === "defer") {
+        _msSync();
+        const it = btn.closest(".msm-item"), row = btn.closest(".msm-row"), p = _msDraft.projects[Number(row.dataset.pi)], m = p.milestones[Number(it.dataset.mi)];
+        if (!m || !m.id) return;
+        if (!window.confirm(`「${m.title}」延到下週？`)) return;
+        try { await mjson(`/api/v1/milestones/${encodeURIComponent(m.id)}/defer`, _POST({ week_start: _msDraft.week_start })); p.milestones.splice(Number(it.dataset.mi), 1); _msRenderModal(); }
+        catch (e) { alert("延期失敗：" + e.message); }
+        return;
+    }
+    if (act === "addproj") {
+        _msSync();
+        const q = ($("ms-proj-q")?.value || "").trim(); if (!q) return;
+        const list = await _logProjectOptions();
+        const hit = (list || []).find(p => p.label === q || p.name === q);
+        if (!hit) { alert("找不到這個案，請從清單選"); return; }
+        if (_msDraft.projects.some(p => p.project_id === hit.id)) { alert("這個案已經在清單裡"); return; }
+        _msDraft.projects.push({ project_id: hit.id, name: hit.name, client: hit.client || "", hours_week: 0, milestones: [] });
+        _msRenderModal();
+        return;
+    }
+    if (act === "save") {
+        _msSync();
+        const items = [];
+        _msDraft.projects.forEach(p => p.milestones.forEach(m => items.push({ id: m.id || null, project_id: p.project_id, title: m.title, due_date: m.due_date, assignee_staff_id: m.assignee_staff_id || null, assignee_name: m.assignee_name || "", note: m.note || "", done: !!m.done })));
+        _msDraft.removed.forEach(id => items.push({ id, project_id: "", title: "", delete: true }));
+        try { await mjson("/api/v1/milestones/week/save", _POST({ week_start: _msDraft.week_start, items })); bg?.remove(); _todayInfo = null; await loadTeamWeek(); }
+        catch (e) { alert("儲存失敗：" + e.message); }
+    }
 }
 
 // ── 視圖 3：專案查詢（工作追蹤「專案」表＋專案檔案，開放給員工，唯讀）──

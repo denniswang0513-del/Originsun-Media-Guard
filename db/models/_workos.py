@@ -2,7 +2,7 @@
 
 對外一律從 `db.models` 匯入，別直接指名這個檔。
 """
-from ._base import (Base, BigInteger, Boolean, Column, DateTime, Float, Index, Integer, JSONB, String, Text, UniqueConstraint, func)
+from ._base import (Base, BigInteger, Boolean, Column, Date, DateTime, Float, Index, Integer, JSONB, String, Text, UniqueConstraint, func)
 from sqlalchemy import Date   # 拍攝日只有日期沒有時間（crm_shoots）
 
 class Timesheet(Base):
@@ -725,6 +725,29 @@ class EquipmentMaintenance(Base):
     cost = Column(Integer, nullable=True)                        # 保養費用
     note = Column(String(255), nullable=True)                    # 保養內容
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CrmProjectMilestone(Base):
+    """每週專案里程碑（owner 2026-09-07；示範 frontend/demo/milestones.html）：一列＝一個案在某一週要做到的事。
+    week_start＝屬於哪一週（週一）。沒完成的會一直在之後的週出現（帶「延自上週」）；「延到下週」＝week_start／due_date 各往後搬。
+    不動專案階段（那是案子的生命週期，里程碑是週的節奏）。"""
+    __tablename__ = "crm_project_milestones"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(32), nullable=False, index=True)        # soft FK → crm_projects.id
+    week_start = Column(Date, nullable=False, index=True)
+    title = Column(String(255), nullable=False, default="")
+    due_date = Column(Date, nullable=True)                              # 預設本週五
+    assignee_staff_id = Column(String(32), nullable=True)               # 可不指定（owner：可以做不強迫）
+    assignee_name = Column(String(64), nullable=False, default="")
+    note = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="open")         # open／done
+    done_by = Column(String(64), nullable=True)
+    done_at = Column(DateTime(timezone=True), nullable=True)
+    sort = Column(Integer, nullable=False, default=0)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class CrmShoot(Base):
