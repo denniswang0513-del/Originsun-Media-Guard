@@ -4,6 +4,9 @@
 """
 from __future__ import annotations
 
+import logging
+import os
+import shutil
 import uuid
 from datetime import datetime
 
@@ -263,6 +266,55 @@ def _render_quotation_html(view: dict, company: dict, *, web_pdf_url: str = "") 
     )
 
 
+# ── 報價單資料夾（owner 2026-09-07「跟發票一樣有個地方指定儲存位置」）────────
+# 骨架同電子發票根目錄：settings 可設 → {根}/{年}/{年-月}/{檔名}。差別：發票是使用者上傳、
+# 報價單是系統產的 —— 所以「存檔」發生在每次產 PDF，同名覆蓋（同一天同一版重產不堆檔）。
+_QUOTES_DEFAULT_ROOT = os.path.join(os.getcwd(), "uploads", "quotations")
+
+
+def _quotes_root() -> str:
+    from config import load_settings
+    return (load_settings().get("quotes_root") or "").strip() or _QUOTES_DEFAULT_ROOT
+
+
+def _archive_quotation_pdf(tmp_pdf: str, view: dict) -> str:
+    """產好的 PDF 存一份到報價單資料夾；檔名開頭是 YYYYMMDD，年／年-月從它來。"""
+    fn = view["filename"]
+    dest_dir = os.path.join(_quotes_root(), fn[:4], f"{fn[:4]}-{fn[4:6]}")
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = os.path.join(dest_dir, fn)
+    shutil.copyfile(tmp_pdf, dest)
+    return dest
+
+
+@router.get("/quotations-root")
+async def get_quotations_root(request: Request):
+    """報價單資料夾設定（admin）。刻意不走 settings/load 整包（那條對機密欄位有遮罩規則，這裡只要一個路徑）。"""
+    from core.auth import check_admin
+    from config import load_settings
+    check_admin(request)
+    return {"quotes_root": (load_settings().get("quotes_root") or ""),
+            "default": _QUOTES_DEFAULT_ROOT, "effective": _quotes_root()}
+
+
+@router.post("/quotations-root")
+async def set_quotations_root(request: Request):
+    from core.auth import check_admin
+    from config import load_settings, save_settings
+    from .invoice_files import validate_root_dir          # 與發票根目錄同一份驗證（完整路徑＋可寫）
+    check_admin(request)
+    body = await request.json()
+    root = (body.get("quotes_root") or "").strip()
+    validate_root_dir(root)
+    try:
+        s = load_settings()
+        s["quotes_root"] = root
+        save_settings(s)
+    except OSError as e:
+        raise HTTPException(status_code=503, detail=f"設定檔忙碌中，請再按一次儲存（{e}）")
+    return {"status": "ok", "quotes_root": root, "effective": _quotes_root()}
+
+
 async def _quotation_pdf_response(q):
     """組資料／渲染／產 PDF 同一個出口：壞在哪一段對使用者都是「PDF 生成失敗」。"""
     import html as _html
@@ -280,6 +332,10 @@ async def _quotation_pdf_response(q):
                                     footer_html=footer, margin=PDF_MARGIN)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"PDF 生成失敗：{exc}")
+    try:                                   # 存一份到報價單資料夾：資料夾不通只記 log，不擋下載
+        _archive_quotation_pdf(tmp_pdf, view)
+    except OSError as exc:
+        logging.getLogger(__name__).warning("報價單存檔失敗（不影響下載）：%s", exc)
     return no_store_file(              # 金額文件：不留快取副本，送完就刪
         tmp_pdf, media_type="application/pdf", filename=view["filename"],
         background=BackgroundTask(unlink_later(tmp_pdf)),

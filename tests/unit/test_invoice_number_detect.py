@@ -159,7 +159,9 @@ def test_invoice_root_must_be_absolute():
 
     判斷細節見 test_invoice_root_accepts_only_drive_or_unc —— isabs 不夠。"""
     src = _finance_src()
-    i = src.index("async def set_invoices_root(")
+    # 2026-09-07 起檢查住在 validate_root_dir（發票根目錄與報價單資料夾共用）；set_invoices_root 只能呼叫它
+    assert "validate_root_dir(root)" in src[src.index("async def set_invoices_root("):][:800]
+    i = src.index("def validate_root_dir(")
     body = src[i:i + 2500]
     guard = body.index("ntpath.splitdrive")
     assert guard < body.index("os.makedirs(root"),         "路徑檢查必須在 makedirs **之前** —— 否則資料夾已經被建出來了"
@@ -229,7 +231,7 @@ def test_invoice_root_accepts_only_drive_or_unc(root, ok, why):
 def test_invoice_root_validation_uses_splitdrive_not_isabs():
     """實作要真的用 splitdrive/UNC 判斷，不是回頭只靠 os.path.isabs。"""
     src = _finance_src()
-    i = src.index("async def set_invoices_root(")
+    i = src.index("def validate_root_dir(")          # 檢查住在共用 helper（發票根目錄／報價單資料夾共用）
     body = src[i:i + 2500]
     assert "ntpath.splitdrive" in body, "沒有用 splitdrive 判斷磁碟機"
     assert 'startswith("' + BS * 4 + '")' in body or "startswith('" + BS * 4 + "')" in body,         "沒有判斷 UNC 的兩個反斜線"

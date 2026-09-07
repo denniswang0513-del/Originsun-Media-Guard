@@ -3,7 +3,7 @@
  */
 
 import { quoteTotals, parsePaymentStages, paymentStagesToText } from '../../js/shared/quote-amounts.js';
-import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, quotePdfFilename } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, quotePdfFilename, initRootFolderCard } from './crm-utils.js';
 import { authDownload } from '../../js/shared/utils.js';
 
 // ── State ────────────────────────────────────────────────────
@@ -620,6 +620,14 @@ export async function initCrmQuotesTab() {
     document.getElementById('quote-detail-close').addEventListener('click', closeDetail);
     // 公司資訊（報價單抬頭／匯款／Logo／章）就近開：系統設定 → 公司資訊分頁
     // （owner 2026-09-07「公司資訊的按鈕要放在報價管理的範本欄」）。設定只有管理員讀得到，別人不顯示這顆。
+    // 報價單資料夾（owner 2026-09-07「跟發票一樣有個地方指定儲存位置」）：每次產 PDF 都存一份到那裡。管理員限定，不 await
+    initRootFolderCard({
+        linkId: 'quote-root-toggle', panelId: 'quote-root-panel', endpoint: '/quotations-root', key: 'quotes_root',
+        intro: `報價單 PDF 的存放根目錄：每次下載／線上檢視產出的 PDF 都會存一份到這裡（同名覆蓋）。
+        要集中到 NAS 就填那個路徑；底下會自動分 <code>{年}/{年-月}/</code>，檔名跟下載的 PDF 一樣（日期_客戶_專案）。`,
+        placeholder: '例：\\\\192.168.1.132\\Archive\\Quotations 或 T:\\報價單',
+        savedMsg: '已儲存（之後產出的報價單存到新位置；舊檔不搬）',
+    });
     const companyBtn = document.getElementById('quote-btn-company');
     if (companyBtn && (window._accessLevel || 0) >= 3) {
         companyBtn.style.display = '';

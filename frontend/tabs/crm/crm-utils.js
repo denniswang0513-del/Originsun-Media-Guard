@@ -765,3 +765,41 @@ export function groupCostStaff(lines, payments) {
     for (const s of map.values()) s.payment = byOwnerAmount.get(s.name + '|' + s.subtotal) || null;
     return [...map.values()];
 }
+
+/** 「檔案根目錄」設定卡（發票資料夾／報價單資料夾同一個互動形狀）：
+ *  入口連結預設隱藏，GET 端點過了（管理員）才顯示；面板＝說明＋路徑框＋儲存＋目前生效。
+ *  opts: { linkId, panelId, endpoint, key, intro(html), placeholder, savedMsg } */
+export async function initRootFolderCard(opts) {
+    const link = document.getElementById(opts.linkId);
+    const panel = document.getElementById(opts.panelId);
+    if (!link || !panel) return;
+    let cfg;
+    try {
+        cfg = await crmFetch(opts.endpoint);   // 403（非管理員）→ 進 catch，入口不顯示
+    } catch (_) { return; }
+
+    link.style.display = '';
+    panel.innerHTML = `${opts.intro}
+        留空＝主控機預設 <span style="color:#aaa;">${esc(cfg.default || '')}</span>。
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <input id="${opts.panelId}-input" class="crm-input" value="${esc(cfg[opts.key] || '')}"
+                 placeholder="${esc(opts.placeholder || '')}">
+          <button class="crm-btn crm-btn-primary crm-btn-sm" id="${opts.panelId}-save">儲存</button>
+          <span id="${opts.panelId}-msg" style="align-self:center;"></span>
+        </div>
+        <div style="margin-top:6px;">目前生效：<span id="${opts.panelId}-eff">${esc(cfg.effective || '')}</span></div>`;
+
+    link.onclick = () => { panel.style.display = panel.style.display === 'none' ? '' : 'none'; };
+    panel.querySelector(`#${opts.panelId}-save`).onclick = async () => {
+        const msg = panel.querySelector(`#${opts.panelId}-msg`);
+        msg.textContent = '儲存中…';
+        try {
+            const d = await crmFetch(opts.endpoint, {
+                method: 'POST',
+                body: JSON.stringify({ [opts.key]: panel.querySelector(`#${opts.panelId}-input`).value.trim() }),
+            });
+            panel.querySelector(`#${opts.panelId}-eff`).textContent = d.effective || '';
+            msg.textContent = opts.savedMsg || '已儲存';
+        } catch (e) { msg.textContent = '失敗：' + (e && e.message || e); }
+    };
+}

@@ -40,6 +40,9 @@ def test_settings_page_has_upload_buttons_and_blob_preview():
     html = repo_src("frontend/index.html")
     for kind in ("logo", "seal"):
         assert f'id="company_{kind}_upload"' in html and f'id="company_{kind}_file"' in html
+        # 設定視窗只有 .btn-save／.btn-cancel 兩種鈕樣式；套不存在的 class 會畫成純文字（owner 2026-09-07「沒有上傳按鈕」）
+        line = next(ln for ln in html.splitlines() if f'id="company_{kind}_upload"' in ln)
+        assert 'class="btn-save"' in line and "btn-secondary" not in line
         assert f'id="company_{kind}_preview"' in html and f'id="company_{kind}_path"' in html
     js = js_code_only(repo_src("frontend/js/settings/settings-modal.js"))
     assert "fetch(`/api/settings/company-image/${kind}`, { method: 'POST', body: fd })" in js

@@ -493,26 +493,9 @@ async def set_invoice_applicants(request: Request):
     return {"status": "ok", "applicants": clean}
 
 
-@router.get("/invoices-root")
-async def get_invoices_root(request: Request):
-    """電子發票根目錄設定（admin 專用）。
-
-    ⚠ 與 costs.get_receipts_root 同樣刻意不走 settings/load 整包 —— 那條回應對
-    機密欄位是遮罩過的，前端拿整包改一鍵再存回會把真密碼洗成遮罩值。
-    """
-    check_admin(request)
-    from config import load_settings
-    return {"invoices_root": (load_settings().get("invoices_root") or ""),
-            "default": os.path.join(os.getcwd(), "uploads", "invoices"),
-            "effective": _invoices_root()}
-
-
-@router.post("/invoices-root")
-async def set_invoices_root(request: Request):
-    check_admin(request)
-    from config import load_settings, save_settings
-    body = await request.json()
-    root = (body.get("invoices_root") or "").strip()
+def validate_root_dir(root: str) -> None:
+    """檔案根目錄設定的唯一驗證：完整路徑（磁碟機或 UNC）＋建得出來＋真的寫得進去。
+    發票根目錄與報價單資料夾共用（規則只此一份；422 的字也一樣）。"""
     if root:
         # 🔴 一定要擋相對路徑。`os.makedirs("192.168.1.132\\Archive\\…")` 會**成功** ——
         # 它在 agent 的工作目錄底下建出一整串資料夾，於是「存到 NAS」變成靜靜存進
@@ -543,6 +526,29 @@ async def set_invoices_root(request: Request):
             os.remove(probe)
         except OSError as e:
             raise HTTPException(status_code=422, detail=f"資料夾不可寫入：{e}")
+
+
+@router.get("/invoices-root")
+async def get_invoices_root(request: Request):
+    """電子發票根目錄設定（admin 專用）。
+
+    ⚠ 與 costs.get_receipts_root 同樣刻意不走 settings/load 整包 —— 那條回應對
+    機密欄位是遮罩過的，前端拿整包改一鍵再存回會把真密碼洗成遮罩值。
+    """
+    check_admin(request)
+    from config import load_settings
+    return {"invoices_root": (load_settings().get("invoices_root") or ""),
+            "default": os.path.join(os.getcwd(), "uploads", "invoices"),
+            "effective": _invoices_root()}
+
+
+@router.post("/invoices-root")
+async def set_invoices_root(request: Request):
+    check_admin(request)
+    from config import load_settings, save_settings
+    body = await request.json()
+    root = (body.get("invoices_root") or "").strip()
+    validate_root_dir(root)
     # settings.json 寫入也包起來 —— agent 自己會定期寫 settings，撞到檔案佔用
     # 會炸成裸 500（收據那支踩過，同一個坑）
     try:

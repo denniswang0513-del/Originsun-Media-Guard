@@ -3,7 +3,7 @@
  */
 import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, invoiceAmounts as _amountsFrom, invoicePayBadge as _payBadge, invoiceIssueBadge,
          INV_PENDING_REMIT, INV_REMITTED, projectOptionsHtml, crmToast,
-         today as _today, hasModule } from './crm-utils.js';
+         today as _today, hasModule, initRootFolderCard } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
 // window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
@@ -707,41 +707,13 @@ window._invFileClear = async function () {
  * 端點是 check_admin —— 非管理員拿到 403，就讓入口保持隱藏（不畫一個按下去
  * 必然失敗的按鈕）。比照零用金的「收據資料夾」卡，同一個互動形狀。 */
 async function _initInvoicesRootCard() {
-    const link = document.getElementById('inv-root-toggle');
-    const panel = document.getElementById('inv-root-panel');
-    if (!link || !panel) return;
-    let cfg;
-    try {
-        cfg = await _fetch('/invoices-root');   // 403（非管理員）→ 進 catch，入口不顯示
-    } catch (_) { return; }
-
-    link.style.display = '';
-    panel.innerHTML = `
-        已開立的電子發票檔存放根目錄。要集中到 NAS 或會計師的共用資料夾就填那個路徑；
-        留空＝主控機預設 <span style="color:#aaa;">${_esc(cfg.default)}</span>。
-        底下會自動分 <code>{年}/{年-月}/</code>，檔名為
-        <code>日期_發票號碼_抬頭_含稅金額</code>。
-        <div style="display:flex;gap:8px;margin-top:8px;">
-          <input id="inv-root-input" class="crm-input" value="${_esc(cfg.invoices_root)}"
-                 placeholder="例：\\\\OriginsunNAS\\Invoices 或 T:\\發票">
-          <button class="crm-btn crm-btn-primary crm-btn-sm" id="inv-root-save">儲存</button>
-          <span id="inv-root-msg" style="align-self:center;"></span>
-        </div>
-        <div style="margin-top:6px;">目前生效：<span id="inv-root-eff">${_esc(cfg.effective)}</span></div>`;
-
-    link.onclick = () => { panel.style.display = panel.style.display === 'none' ? '' : 'none'; };
-    panel.querySelector('#inv-root-save').onclick = async () => {
-        const msg = panel.querySelector('#inv-root-msg');
-        msg.textContent = '儲存中…';
-        try {
-            const d = await _fetch('/invoices-root', {
-                method: 'POST',
-                body: JSON.stringify({ invoices_root: panel.querySelector('#inv-root-input').value.trim() }),
-            });
-            panel.querySelector('#inv-root-eff').textContent = d.effective || '';
-            msg.textContent = '已儲存（之後上傳的發票存到新位置；舊檔不搬）';
-        } catch (e) { msg.textContent = '失敗：' + (e && e.message || e); }
-    };
+    await initRootFolderCard({
+        linkId: 'inv-root-toggle', panelId: 'inv-root-panel', endpoint: '/invoices-root', key: 'invoices_root',
+        intro: `已開立的電子發票檔存放根目錄。要集中到 NAS 或會計師的共用資料夾就填那個路徑；
+        底下會自動分 <code>{年}/{年-月}/</code>，檔名為 <code>日期_發票號碼_抬頭_含稅金額</code>。`,
+        placeholder: '例：\\\\OriginsunNAS\\Invoices 或 T:\\發票',
+        savedMsg: '已儲存（之後上傳的發票存到新位置；舊檔不搬）',
+    });
 }
 
 /** 收款紀錄區塊：這張發票實際收了幾次、每次多少、哪一天、還欠多少。
