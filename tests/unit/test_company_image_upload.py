@@ -55,3 +55,16 @@ def test_quote_toolbar_has_company_info_shortcut():
     assert "document.getElementById('btnOpenSettings')?.click();" in js
     assert "b.textContent.trim() === '公司資訊')?.click();" in js
     assert "(window._accessLevel || 0) >= 3" in js
+    # owner 2026-09-07「請拉出公司資訊就好，其他 tab 不用」：從報價頁開＝company-only（藏分頁列、標題換）；從頭像開＝完整
+    assert "modal.classList.add('company-only');" in js
+    sm = js_code_only(repo_src("frontend/js/settings/settings-modal.js"))
+    assert "modal.classList.remove('company-only');" in sm
+    assert "#settingsModal.company-only .modal-tabs { display: none; }" in repo_src("frontend/style.css")
+
+
+def test_settings_modal_scrolls_instead_of_overflowing_the_screen():
+    """owner 2026-09-07：公司資訊分頁比螢幕高，整個視窗溢出、儲存鈕在畫面外 → 視窗釘 92vh、只有分頁內容捲。"""
+    css = repo_src("frontend/style.css")
+    block = css[css.index(".originsun-modal-content {"):css.index("#settingsModal .tab-content")]
+    assert "max-height: 92vh;" in block and "flex-direction: column;" in block
+    assert "#settingsModal .tab-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; }" in css

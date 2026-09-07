@@ -80,6 +80,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Load settings when modal opens ───────────────────────
     document.getElementById('btnOpenSettings').addEventListener('click', async () => {
+        // 預設是完整的系統設定；報價頁的「公司資訊」鈕會在這之後加上 company-only（只留那一個分頁）
+        modal.classList.remove('company-only');
+        const h3 = modal.querySelector('.modal-header h3'); if (h3) h3.textContent = h3.dataset.full || h3.textContent;
         modal.style.display = 'flex';
         try {
             const res = await fetch('/api/settings/load');

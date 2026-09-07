@@ -85,7 +85,16 @@
             overflow: hidden;
             color: #e5e7eb;
             font-family: inherit;
+            /* 公司資訊分頁比一般螢幕高：視窗釘在 92vh 內，標題／分頁列／儲存鈕固定，只有分頁內容捲
+               （owner 2026-09-07「公司資訊的彈窗會卡住無法動作」——整個視窗溢出畫面、儲存鈕在畫面外） */
+            max-height: 92vh;
+            display: flex;
+            flex-direction: column;
         }
+        #settingsModal .tab-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+        #settingsModal .modal-header, #settingsModal .modal-tabs, #settingsModal .modal-footer { flex: 0 0 auto; }
+        /* 從報價頁開：只有公司資訊（分頁列藏起來） */
+        #settingsModal.company-only .modal-tabs { display: none; }
 
         .modal-header {
             display: flex;

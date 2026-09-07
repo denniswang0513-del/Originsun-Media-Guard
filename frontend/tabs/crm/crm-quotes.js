@@ -626,6 +626,13 @@ export async function initCrmQuotesTab() {
         companyBtn.addEventListener('click', () => {
             document.getElementById('btnOpenSettings')?.click();
             [...document.querySelectorAll('#settingsModal .tab-btn')].find((b) => b.textContent.trim() === '公司資訊')?.click();
+            // 只要公司資訊（owner 2026-09-07「請拉出公司資訊就好，其他 tab 不用」）：藏分頁列、標題改成公司資訊
+            const modal = document.getElementById('settingsModal');
+            if (modal) {
+                modal.classList.add('company-only');
+                const h3 = modal.querySelector('.modal-header h3');
+                if (h3) { h3.dataset.full = h3.dataset.full || h3.textContent; h3.textContent = '公司資訊'; }
+            }
         });
     }
     document.getElementById('quote-btn-templates').addEventListener('click', () => {
