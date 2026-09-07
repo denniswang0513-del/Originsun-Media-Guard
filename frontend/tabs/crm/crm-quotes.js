@@ -618,6 +618,16 @@ export async function initCrmQuotesTab() {
     document.getElementById('quote-btn-save').addEventListener('click', saveQuotation);
     document.getElementById('quote-btn-add-item').addEventListener('click', () => { addItemRow(); _recalcTotals(); });
     document.getElementById('quote-detail-close').addEventListener('click', closeDetail);
+    // 公司資訊（報價單抬頭／匯款／Logo／章）就近開：系統設定 → 公司資訊分頁
+    // （owner 2026-09-07「公司資訊的按鈕要放在報價管理的範本欄」）。設定只有管理員讀得到，別人不顯示這顆。
+    const companyBtn = document.getElementById('quote-btn-company');
+    if (companyBtn && (window._accessLevel || 0) >= 3) {
+        companyBtn.style.display = '';
+        companyBtn.addEventListener('click', () => {
+            document.getElementById('btnOpenSettings')?.click();
+            [...document.querySelectorAll('#settingsModal .tab-btn')].find((b) => b.textContent.trim() === '公司資訊')?.click();
+        });
+    }
     document.getElementById('quote-btn-templates').addEventListener('click', () => {
         _renderTemplateList();
         document.getElementById('quote-template-modal').style.display = 'flex';

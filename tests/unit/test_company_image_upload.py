@@ -45,3 +45,13 @@ def test_settings_page_has_upload_buttons_and_blob_preview():
     assert "fetch(`/api/settings/company-image/${kind}`, { method: 'POST', body: fd })" in js
     assert "URL.createObjectURL(await r.blob())" in js, "預覽要走 fetch→blob，<img src> 直打會 401"
     assert "_bindCompanyUploads();" in js
+
+
+def test_quote_toolbar_has_company_info_shortcut():
+    """owner 2026-09-07：公司資訊的入口放在報價管理的範本欄旁（開系統設定並切到公司資訊分頁；只給管理員）。"""
+    html = repo_src("frontend/tabs/crm/crm-quotes.html")
+    assert html.index('id="quote-btn-company"') < html.index('id="quote-btn-templates"')
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-quotes.js"))
+    assert "document.getElementById('btnOpenSettings')?.click();" in js
+    assert "b.textContent.trim() === '公司資訊')?.click();" in js
+    assert "(window._accessLevel || 0) >= 3" in js
