@@ -760,8 +760,14 @@ async def set_budgets(req: TimesheetBudgetRequest, request: Request):
 async def get_project_options(request: Request):
     """專案下拉（補登 grid／我的一天／總表／員工頁／手機工作紀錄）：timesheets 模組拿整份；綁定人員檔案的員工也給，
     多帶「本人最近填過的」。守衛同 /options、/project（_ts_or_bound）——owner 2026-09-07「在職員工要能完整使用
-    今天與這週」：以前只認 timesheets／me_finance 兩把鑰匙，只有 me_profile 的員工（連婕妤）拿到 403、前端吞掉就變空清單。"""
-    staff_name = await _ts_or_bound(request)
+    今天與這週」：以前只認 timesheets／me_finance 兩把鑰匙，只有 me_profile 的員工（連婕妤）拿到 403、前端吞掉就變空清單。
+    只有 me_finance、沒綁人員檔案的帳號照舊拿整份（原本的行為，不因放寬而收回）。"""
+    try:
+        staff_name = await _ts_or_bound(request)
+    except HTTPException as e:
+        if e.status_code != 403 or not payload_grants(_extract_token(request) or {}, "me_finance"):
+            raise
+        staff_name = None
     factory = db_factory_or_503()
     async with factory() as session:
         return {"projects": await project_options(session, staff_name)}

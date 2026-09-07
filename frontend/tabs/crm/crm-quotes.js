@@ -15,6 +15,7 @@ let _users = [];
 let _templates = [];
 let _selectedId = null;
 let _editingId = null;  // null=新增, string=編輯
+let _editingQuote = null;   // 正在編的那筆（openModal 帶進來的物件；不從 _quotations 查——那份清單有狀態篩選，查不到就被當成新增）
 let _editingProjectId = null;
 let _filters = { q: '', status: '', client_id: '' };
 
@@ -189,19 +190,22 @@ function renderDetail(q) {
     if (actions) {
         // PDF 與分享連結要寄出之後才出現（owner 2026-09-07「送出再產生連結與 pdf 按鈕」）：草稿還在改，不該流出去
         const sent = q.status !== _QUOTE_STATUSES[0];
-        actions.innerHTML = (sent ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-pdf">下載 PDF</button>
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-share">${q.share_url ? '複製連結' : '分享連結'}</button>` : '')
+        // 鑄連結是管理員限定（POST /share）：非管理員只有已經有連結時才給「複製」（同手機版）
+        const canShare = q.share_url || (window._accessLevel || 0) >= 3;
+        actions.innerHTML = (sent ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-pdf">下載 PDF</button>`
+            + (canShare ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-share">${q.share_url ? '複製連結' : '分享連結'}</button>` : '') : '')
             + `<button class="crm-detail-close" title="關閉">&#x2715;</button>`;
         actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
         actions.querySelector('#quote-btn-pdf')?.addEventListener('click', () =>
             authDownload('/api/v1/crm/quotations/' + q.id + '/pdf', quotePdfFilename(q), '下載 PDF'));
         // 線上檢視連結（免登入、頁上可下載 PDF）：沒有就鑄一條（冪等），然後複製完整網址
         actions.querySelector('#quote-btn-share')?.addEventListener('click', async (ev) => {
+            const btn = ev.currentTarget;      // await 之後 currentTarget 就是 null 了，先抓住
             try {
                 if (!q.share_url) {
                     const r = await _fetch('/quotations/' + q.id + '/share', { method: 'POST' });
                     q.share_url = r.share_url;
-                    ev.currentTarget.textContent = '複製連結';
+                    btn.textContent = '複製連結';
                 }
                 const full = location.origin + q.share_url;
                 try { await navigator.clipboard.writeText(full); alert('連結已複製：\n' + full); }
@@ -300,9 +304,10 @@ let _form = { client_id: '', project_id: '', anchor: null };
 
 function _recalcTotals() {
     // 金額規則跟後端 _calc_quotation 同一份（js/shared/quote-amounts.js）。稅前折扣已退場（同手機版）：
-    // 優惠一律走「最終報價」倒算，報價單上印成「專案優惠」
+    // 優惠一律走「最終報價」倒算，報價單上印成「專案優惠」。舊報價存著的稅前折扣仍要算進去，
+    // 不然畫面的含稅總計跟後端存的對不上、優惠↔最終報價也會用錯底數
     const taxRate = parseInt(document.getElementById('quote-f-tax_rate')?.value) || 0;
-    const { subtotal, tax, total } = quoteTotals({ items: _itemRows, taxRate });
+    const { subtotal, tax, total } = quoteTotals({ items: _itemRows, taxRate, discount: _editingQuote?.discount || 0 });
 
     document.getElementById('quote-calc-subtotal').textContent = '$' + _fmtNum(subtotal);
     document.getElementById('quote-calc-tax-pct').textContent = taxRate;
@@ -387,6 +392,7 @@ function _populateClientFilter() {
 
 async function openModal(quotation = null, projectId = null) {
     _editingId = quotation ? quotation.id : null;
+    _editingQuote = quotation;
     _editingProjectId = projectId;
     document.getElementById('quote-modal-title').textContent = quotation ? '編輯報價' : '新增報價';
     const errEl = document.getElementById('quote-modal-error');
@@ -428,7 +434,7 @@ async function openModal(quotation = null, projectId = null) {
 }
 
 async function saveQuotation() {
-    const editing = _quotations.find(x => x.id === _editingId) || null;
+    const editing = _editingQuote;
     let projectId = editing ? editing.project_id : (_editingProjectId || _form.project_id || '');
     const projectName = document.getElementById('quote-f-project_name').value.trim();
     if (!editing && !_editingProjectId) {

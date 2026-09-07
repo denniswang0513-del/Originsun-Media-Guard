@@ -122,7 +122,7 @@ function drawItems() {
 }
 
 function recalc() {
-    const t = quoteTotals({ items: _form.items, taxRate: F('tax_rate').value });
+    const t = quoteTotals({ items: _form.items, taxRate: F('tax_rate').value, discount: _form.discount });   // 舊報價的稅前折扣要算進去，跟後端存的總計一致
     // 優惠 ↔ 最終報價 互推（同發票的未稅／含稅）：只寫「不是正在打的那一格」，免得游標被搶
     const promoEl = F('promo'), finalEl = F('final_price');
     if (_form.anchor === 'promo') {
@@ -186,6 +186,7 @@ async function openForm(host, id) {
         project_name: '',
         client_id: '',
         anchor: q && q.final_price != null ? 'final' : null,   // 優惠／最終報價 哪一格是人填的
+        discount: q ? (q.discount || 0) : 0,      // 稅前折扣已退場，舊值只拿來算總計（PUT 不送＝後端不動它）
         project_label: q ? [q.client_short_name, q.project_name].filter(Boolean).join('｜') : '',
         status: q ? q.status : (list('quote_statuses')[0] || ''),   // 字彙只從 options 來
         items: q && q.items && q.items.length ? q.items.map(it => ({ ...it })) : [{ ...EMPTY_ROW }],
@@ -297,7 +298,7 @@ async function save(host) {
     const body = {
         ...(_form.status ? { status: _form.status } : {}),   // 拿不到字彙就不送，讓後端給它的預設
         tax_rate: parseInt(F('tax_rate').value) || 0,
-        final_price: parseInt(F('final_price').value) || null,
+        final_price: F('final_price').value.trim() === '' ? null : (parseInt(F('final_price').value) || 0),   // 0 是合法的最終報價（全免），不是「沒填」
         spec: F('spec').value.trim(),
         terms: F('terms').value.trim(),
         payment_stages: parsePaymentStages(F('stages').value),

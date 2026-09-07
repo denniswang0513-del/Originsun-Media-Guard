@@ -78,7 +78,9 @@ def test_readonly_relaxation_does_not_touch_the_mine_wall():
     # owner 2026-09-07「在職員工要能完整使用今天與這週」：專案下拉不再只認 timesheets／me_finance
     # （只有 me_profile 的員工拿 403 → 前端吞掉 → 下拉「進行中（0）」）
     po = func_body(src, "async def get_project_options(")
-    assert "staff_name = await _ts_or_bound(request)" in po and "me_finance" not in po
+    assert "staff_name = await _ts_or_bound(request)" in po
+    # 只有 me_finance、沒綁人員的帳號原本就拿整份：放寬不收回（polish review 2026-09-07）
+    assert 'payload_grants(_extract_token(request) or {}, "me_finance")' in po and "staff_name = None" in po
     # 私帳 wall 原封不動：私帳案清單、burn 摘要、改預算
     assert "_require_mine_admin(request)" in func_body(src, "async def timesheet_projects(")
     assert "_require_mine_admin(request)" in func_body(src, "async def burn_summary(")

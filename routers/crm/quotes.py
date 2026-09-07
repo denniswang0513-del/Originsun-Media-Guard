@@ -456,14 +456,21 @@ async def update_quotation(quotation_id: str, req: QuotationPayload, request: Re
             raise HTTPException(status_code=404, detail="找不到此報價")
 
         items_data = await _save_items(session, q.id, req.items)
-        subtotal, tax_amount, total = _calc_quotation(items_data, req.discount, req.tax_rate)
+        # 沒送的欄位不動（手機版的 PUT 不帶 quote_date／valid_until／discount／有時沒 status；
+        # 拿 schema 預設值整包寫回會把報價日期洗成 NULL、舊折扣洗成 0、狀態洗回草稿）
+        sent = req.model_fields_set
+        discount = req.discount if "discount" in sent else int(q.discount or 0)
+        subtotal, tax_amount, total = _calc_quotation(items_data, discount, req.tax_rate)
 
         prev_status = q.status
-        q.status = req.status
-        q.quote_date = _parse_shoot_date(req.quote_date)
-        q.valid_until = _parse_shoot_date(req.valid_until)
+        if "status" in sent:
+            q.status = req.status
+        if "quote_date" in sent:
+            q.quote_date = _parse_shoot_date(req.quote_date)
+        if "valid_until" in sent:
+            q.valid_until = _parse_shoot_date(req.valid_until)
         q.subtotal = subtotal
-        q.discount = req.discount
+        q.discount = discount
         q.tax_rate = req.tax_rate
         q.tax_amount = tax_amount
         q.total = total

@@ -10,7 +10,7 @@ import pathlib
 import re
 
 from core.public_assets import MODULE_DIRS
-from tests.unit._srcscan import _REPO, code_only, js_code_only, repo_src
+from tests.unit._srcscan import _REPO, code_only, js_code_only, js_func_body, repo_src
 
 M = pathlib.Path(_REPO) / "frontend" / "m"
 SHELL = repo_src("frontend/m/shell.js")
@@ -112,7 +112,9 @@ def test_mobile_quote_promo_and_final_are_reciprocal():
     src = js_code_only(repo_src("frontend/m/views/quotes.js"))
     assert "qf-promo" in src and "_form.anchor" in src
     assert "anchor = 'promo'" in src and "anchor = 'final'" in src
-    assert "promo:" not in src and "discount:" not in src, "優惠不是新欄位，別送進 payload"
+    # 釘的是 payload（save 本體）：舊報價存著的折扣可以留在 _form 拿來算總計，但不准送回去
+    save = js_func_body(src, "async function save(host)")
+    assert "promo:" not in save and "discount:" not in save, "優惠不是新欄位，別送進 payload"
 
 
 def test_mobile_quote_card_shows_discounted_amount_with_original():

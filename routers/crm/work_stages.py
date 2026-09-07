@@ -50,17 +50,19 @@ async def _all_nodes(session) -> list:
 
 
 async def _stage_guard(request: Request) -> None:
-    """管理員照舊；其他人＝有綁人員檔案且在職（owner 2026-09-07「工作階段的設定開放給在職員工調整」）。
-    鑰匙同 GET /timesheets/mine（timesheets 模組或任一 me_* 鑰匙）；沒綁 409、不在職 403。"""
-    from core.auth import ME_MODULE_KEYS, check_admin
+    """管理員與工作追蹤模組照舊（原本就是這把鑰匙，不能因為開放而收回）；其他人＝有綁人員檔案且在職
+    （owner 2026-09-07「工作階段的設定開放給在職員工調整」）：任一 me_* 鑰匙、沒綁 409、不在職 403。
+    status 空白視同在職（人員序列化 routers/crm/staff.py 也是這樣預設）。"""
+    from core.auth import ME_MODULE_KEYS, check_admin_or_module
     from core.identity import require_bound_staff
     try:
-        check_admin(request)
+        check_admin_or_module(request, "timesheets")
         return
-    except HTTPException:
-        pass
-    ident = await require_bound_staff(request, "timesheets", *ME_MODULE_KEYS)
-    if (getattr(ident["staff"], "status", "") or "").strip() != "在職":
+    except HTTPException as e:
+        if e.status_code != 403:
+            raise
+    ident = await require_bound_staff(request, *ME_MODULE_KEYS)
+    if (getattr(ident["staff"], "status", "") or "在職").strip() != "在職":
         raise HTTPException(status_code=403, detail="工作階段只開放在職員工調整")
 
 

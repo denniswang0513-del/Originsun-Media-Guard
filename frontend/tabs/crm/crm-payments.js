@@ -611,7 +611,8 @@ function _updateExtraFields(category, invoiceId = '') {
             const lbl = projectField.querySelector('label');
             if (lbl) lbl.innerHTML = '專案 <span class="crm-required">*</span>';
         }
-        _populateProject2Select('');
+        // 留住已選的案（openModal 先選好再呼叫這支；重建成空的會把編輯中的專案洗掉、一存就「請選擇專案」）
+        _populateProject2Select(document.getElementById('pay-f-project_id2')?.value || '');
     }
 }
 
