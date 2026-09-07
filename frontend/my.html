@@ -1463,14 +1463,20 @@ async function loadLog() {
     const host = $("z1-log");
     host.innerHTML = `<div class="empty">載入中…</div>`;
     const TS = await TS_READY;
-    const today = await _loadToday();
-    let mine = null, err = "", incomplete = [];
-    try { mine = await mjson("/api/v1/timesheets/mine?date=" + _logDay); } catch (e) { err = e.message; }
-    // 近 30 天存了草稿卻沒填時數的日期 → 今天那條提醒「9/5 專案紀錄未完成」（owner 2026-09-07）
-    try { incomplete = ((await mjson("/api/v1/timesheets/mine/incomplete?days=30")).days || []).filter(d => d.date !== _localToday()); } catch (_) { incomplete = []; }
-    if (_logStages === null) { try { _logStages = (await mjson("/api/v1/timesheets/options")).stages || {}; } catch (_) { _logStages = {}; } }
-    if (mine) _logWorkTypes = mine.work_types || _logWorkTypes;
     const isToday = _logDay === _localToday();
+    let mine = null, err = "", incomplete = [];
+    // 四支互不相依，一起發（原本串著等，翻一天要吃四趟來回）；未完成提醒只畫在今天那條，翻到別天不抓
+    const [today, mineRes, incRes, opts] = await Promise.all([
+        _loadToday(),
+        mjson("/api/v1/timesheets/mine?date=" + _logDay).catch(e => ({ __err: e.message })),
+        // 近 30 天存了草稿卻沒填時數的日期 → 今天那條提醒「9/5 專案紀錄未完成」（owner 2026-09-07）
+        isToday ? mjson("/api/v1/timesheets/mine/incomplete?days=30").catch(() => ({ days: [] })) : Promise.resolve({ days: [] }),
+        _logStages === null ? mjson("/api/v1/timesheets/options").catch(() => ({ stages: {} })) : Promise.resolve(null),
+    ]);
+    if (mineRes && mineRes.__err) err = mineRes.__err; else mine = mineRes;
+    incomplete = (incRes.days || []).filter(d => d.date !== _localToday());
+    if (opts) _logStages = opts.stages || {};
+    if (mine) _logWorkTypes = mine.work_types || _logWorkTypes;
     host.innerHTML = `
         <div class="vhead"><span class="ey">Project Log<b>今天的專案紀錄 ${esc(_mdLabel(_logDay))}</b></span>
             <span class="vrow"><button type="button" class="btn" data-z1="day" data-delta="-1">‹ ${esc(_mdLabel(_shiftDays(_logDay, -1)))}</button>

@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
@@ -13,7 +14,7 @@ from datetime import datetime
 from fastapi import BackgroundTasks, Depends, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse
 
-from core.finance_logic import QUOTE_PENDING
+from core.finance_logic import QUOTE_PENDING, QUOTE_STATUSES
 from core.no_store import no_store_file
 from core.quotation_pdf import PDF_MARGIN, build_quotation_view, footer_line
 from core.schemas import QuotationPayload, QuotationTemplatePayload
@@ -344,8 +345,8 @@ async def archive_quotation_pdf_now(quotation_id: str):
         view, company = await _quotation_view_of(q)
         tmp_pdf = await html_to_pdf(_render_quotation_html(view, company), prefix="quotation_",
                                     footer_html=_pdf_footer(view), margin=PDF_MARGIN)
-        try:
-            dest = _archive_quotation_pdf(tmp_pdf, view)
+        try:      # 存到報價單資料夾（可能是 NAS／UNC）：丟到執行緒，別讓 SMB 卡住整個 event loop
+            dest = await asyncio.to_thread(lambda: _archive_quotation_pdf(tmp_pdf, view))
         finally:
             try:
                 os.remove(tmp_pdf)
@@ -368,8 +369,8 @@ async def _quotation_pdf_response(q):
                                     footer_html=_pdf_footer(view), margin=PDF_MARGIN)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"PDF 生成失敗：{exc}")
-    try:                                   # 存一份到報價單資料夾：資料夾不通只記 log，不擋下載
-        _archive_quotation_pdf(tmp_pdf, view)
+    try:                                   # 存一份到報價單資料夾：資料夾不通只記 log，不擋下載；copy 丟執行緒（NAS 慢不卡 loop）
+        await asyncio.to_thread(lambda: _archive_quotation_pdf(tmp_pdf, view))
     except OSError as exc:
         logging.getLogger(__name__).warning("報價單存檔失敗（不影響下載）：%s", exc)
     return no_store_file(              # 金額文件：不留快取副本，送完就刪
@@ -403,6 +404,8 @@ async def share_quotation(quotation_id: str, request: Request):
         q = await session.get(CrmQuotation, quotation_id)
         if not q:
             raise HTTPException(status_code=404, detail="找不到此報價")
+        if q.status == QUOTE_STATUSES[0]:     # 草稿不該流出去（owner 2026-09-07「送出再產生連結」）：前端藏鈕之外，後端也擋
+            raise HTTPException(status_code=422, detail="草稿還不能建線上檢視連結，寄出後再建")
         if not q.share_token:
             q.share_token = new_short_token()
             q.updated_at = _now()

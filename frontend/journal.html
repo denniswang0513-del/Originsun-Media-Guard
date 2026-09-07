@@ -663,8 +663,11 @@ function heartMenu(btn) {
         if (pick.dataset.glyph) pushRecent(pick.dataset.glyph);
         await sendHeart(btn, pick.dataset.heartKind);
     });
-    const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('pointerdown', close, true); } };
-    setTimeout(() => document.addEventListener('pointerdown', close, true), 0);
+    // 選單是 fixed 定位：捲動或改視窗大小就關掉，不然它會脫離愛心浮在原地
+    const off = () => { document.removeEventListener('pointerdown', close, true); window.removeEventListener('scroll', closeNow, true); window.removeEventListener('resize', closeNow); };
+    const closeNow = () => { menu.remove(); off(); };
+    const close = (e) => { if (!menu.contains(e.target)) closeNow(); };
+    setTimeout(() => { document.addEventListener('pointerdown', close, true); window.addEventListener('scroll', closeNow, true); window.addEventListener('resize', closeNow); }, 0);
 }
 async function sendHeart(btn, kind) {
     btn.disabled = true;

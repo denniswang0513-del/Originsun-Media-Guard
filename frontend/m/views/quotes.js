@@ -82,7 +82,7 @@ async function shareLink(btn, rows, host) {
             }
             const full = location.origin + url;
             toast((await copyText(full)) ? '連結已複製：' + full : '複製失敗，連結：' + full, 'ok');
-            if (btn.textContent !== '複製連結') await load(host);    // 第一次建完把按鈕字換掉
+            btn.textContent = '複製連結';    // 第一次建完把按鈕字換掉（列上的 q.share_url 已更新，不必整份重抓重畫）
         } catch (e) { toast(e.message, 'err'); }
     });
 }
@@ -182,8 +182,7 @@ async function openForm(host, id) {
 
     _form = {
         id: id || null,
-        project_id: q ? q.project_id : '',        // 有值＝掛既有案；空＝儲存時照 project_name 建一個
-        project_name: '',
+        project_id: q ? q.project_id : '',        // 有值＝掛既有案；空＝儲存時照輸入框的案名建一個（案名只住在輸入框，不另存一份）
         client_id: '',
         anchor: q && q.final_price != null ? 'final' : null,   // 優惠／最終報價 哪一格是人填的
         discount: q ? (q.discount || 0) : 0,      // 稅前折扣已退場，舊值只拿來算總計（PUT 不送＝後端不動它）
@@ -198,7 +197,7 @@ async function openForm(host, id) {
         mountClientPicker();
         document.getElementById('qf-new-client').onclick = createClient;
         // 打字改案名＝要建新案，剛才連結的那個就不算了
-        F('project_name').oninput = () => { _form.project_name = F('project_name').value; _form.project_id = ''; };
+        F('project_name').oninput = () => { _form.project_id = ''; };
         mountPicker('qf-template', {
             items: templates.map(t => ({ value: t.id, label: t.name })),
             placeholder: '（不套用）',
@@ -271,7 +270,7 @@ async function loadClientProjects(clientId) {
         onPick: (v) => {
             _form.project_id = v;
             const hit = rows.find(r => r.id === v);
-            if (hit) { F('project_name').value = hit.name; _form.project_name = hit.name; }
+            if (hit) F('project_name').value = hit.name;
         },
     });
 }

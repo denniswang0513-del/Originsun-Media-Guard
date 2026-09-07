@@ -4,7 +4,7 @@
 
 import { quoteTotals, parsePaymentStages, paymentStagesToText } from '../../js/shared/quote-amounts.js';
 import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, quotePdfFilename, initRootFolderCard } from './crm-utils.js';
-import { authDownload } from '../../js/shared/utils.js';
+import { authDownload, copyText } from '../../js/shared/utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -208,8 +208,8 @@ function renderDetail(q) {
                     btn.textContent = '複製連結';
                 }
                 const full = location.origin + q.share_url;
-                try { await navigator.clipboard.writeText(full); alert('連結已複製：\n' + full); }
-                catch (_) { prompt('連結（請自行複製）：', full); }
+                // 共用的 copyText：非 https（LAN 直連）走 execCommand 退路，按鈕閃「已複製」；真的不行才 prompt
+                if (!(await copyText(full, btn))) prompt('連結（請自行複製）：', full);
             } catch (e) { alert('建立連結失敗：' + e.message); }
         });
     }

@@ -61,3 +61,18 @@ def test_internal_cost_is_out_of_the_form_for_now():
     # 既有 internal_cost 值不動：項目物件整個展開帶回
     save = js_func_body(js, "async function saveQuotation()")
     assert "internal_cost: it.internal_cost || 0" in save
+
+
+def test_backend_refuses_share_link_for_drafts_and_archives_off_the_loop():
+    """polish simplify 2026-09-07：「送出再產生連結」不能只靠兩個前端藏鈕（舊 .js 有 4 小時快取、API 可直打）——
+    POST /share 對草稿回 422。存檔 copy（可能是 NAS）丟執行緒，不卡 event loop。"""
+    from tests.unit._srcscan import code_only, func_body
+    src = code_only(repo_src("routers/crm/quotes.py"))
+    share = func_body(src, "async def share_quotation(")
+    assert "q.status == QUOTE_STATUSES[0]" in share and "status_code=422" in share
+    assert share.index("QUOTE_STATUSES[0]") < share.index("new_short_token()")
+    for fn in ("async def archive_quotation_pdf_now(", "async def _quotation_pdf_response("):
+        assert "asyncio.to_thread(lambda: _archive_quotation_pdf(tmp_pdf, view))" in func_body(src, fn), fn
+    # 桌機分享鈕改走共用 copyText（非 https 有 execCommand 退路），不再自己 navigator.clipboard
+    js = js_code_only(repo_src(JS))
+    assert "copyText(full, btn)" in js and "navigator.clipboard" not in js

@@ -19,6 +19,7 @@ async function _loadCompanyPreview(kind) {
     try {
         const r = await fetch(`/api/settings/company-image/${kind}`);
         if (!r.ok) throw new Error();
+        if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);   // 每開一次設定就重抓；舊 blob 不放掉會一路留到關頁
         img.src = URL.createObjectURL(await r.blob()); img.style.display = '';
         if (st) st.textContent = '已上傳';
     } catch (_) { img.style.display = 'none'; }
