@@ -446,6 +446,7 @@ class TimesheetManualRow(BaseModel):
     work_type: Optional[str] = None   # core.hr_logic.WORK_TYPES 之一，可空
     stage_id: Optional[str] = None    # 工作階段（work_stage_nodes；須屬於該列分類）。更新時 "" ＝清空、不帶＝不動
     bulletin_id: Optional[str] = None # 從待辦帶入的公布欄項目；列標成實際＝那筆待辦 done
+    plan: Optional[bool] = None       # 「我的一週」排的卡（owner 2026-09-08）：沒時數也是 plan 不是 pending；更新時不帶＝沿用列上的狀態
 
 
 class TimesheetManualRequest(BaseModel):

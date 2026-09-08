@@ -26,7 +26,7 @@ def test_row_state_and_work_type_rules():
 def test_manual_rows_accept_plan_only_and_store_the_two_columns():
     man = code_only(repo_src("services/timesheet_manual.py"))
     rule = func_body(man, "def normalize_row(")
-    assert "row_state(hours, r.planned_hours)" in rule   # hours＝body 的或起訖算出來的 and "norm_work_type(r.work_type)" in rule
+    assert "row_state(hours, r.planned_hours, plan=" in rule   # 2026-09-08 多了「我的一週」的 plan 旗標   # hours＝body 的或起訖算出來的 and "norm_work_type(r.work_type)" in rule
     assert "resolve_project(pname, lk)" in rule and "parse_date(r.work_date)" in rule
     body = func_body(man, "async def insert_manual_rows(")
     assert "normalize_row(" in body and 'source="manual"' in body

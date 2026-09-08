@@ -39,7 +39,7 @@ table.ts-sheet th[data-col="stage"] { width:96px; }
 table.ts-sheet th[data-col="remark"] { width:15%; }
 table.ts-sheet th[data-col="t0"], table.ts-sheet th[data-col="t1"] { width:64px; }
 table.ts-sheet th[data-col="hours"] { width:54px; }
-table.ts-sheet th[data-col="state"] { width:60px; }
+table.ts-sheet th[data-col="state"] { width:96px; }
 table.ts-sheet td.ts-sheet-state { font-size:11px; color:var(--sh-sub); text-align:center; white-space:nowrap; padding:0 4px; overflow:hidden; text-overflow:ellipsis; }
 table.ts-sheet tr[data-readonly] td { color:var(--sh-ro-ink); background:var(--sh-ro); }
 table.ts-sheet td input:disabled, table.ts-sheet td select:disabled, table.ts-sheet td input[readonly] { color:var(--sh-ro-ink); opacity:1; }
@@ -60,6 +60,10 @@ table.ts-sheet tbody td.ts-sheet-num::before { content:counter(sheetrow); }
 table.ts-sheet .ts-sheet-del { width:30px; text-align:center; border-left:none; background:transparent; border-color:transparent; }
 table.ts-sheet .ts-sheet-del button { background:none; border:none; color:var(--sh-del); cursor:pointer; font-size:14px; }
 table.ts-sheet .ts-sheet-del button:hover { color:var(--sh-del-hover); }
+table.ts-sheet tr[data-plan] td { background:var(--sh-plan-bg, rgba(59,130,246,.08)); }
+table.ts-sheet .ts-sheet-plan { color:var(--sh-busy); font-weight:600; }
+table.ts-sheet .ts-sheet-defer { background:none; border:1px solid var(--sh-line); border-radius:4px; color:var(--sh-sub); cursor:pointer; font-size:10px; padding:0 4px; line-height:16px; font-family:inherit; }
+table.ts-sheet .ts-sheet-defer:hover { color:var(--sh-ink); border-color:var(--sh-accent); }
 `;
 
 /** JSON fetch：Bearer／Content-Type／stringify 交給 utils.authFetch（唯一正本），這裡只管
@@ -91,14 +95,18 @@ export function stageSelectHtml(cur, attr, list) {
         `<option value="${esc(s.id)}"${s.id === curId ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>`;
 }
 
-/** 列的 html —— 唯一的一份。v＝格子的值；o＝{id, readonly}；ctx＝{workTypes, stages}。 */
+/** 「我的一週」排的列（status=plan、沒時數）在狀態格的樣子：「計畫」＋挪到隔天（owner 2026-09-08：執行過程只有填時數與挪到隔天）。 */
+export const planStateHtml = () => '<span class="ts-sheet-plan">計畫</span> <button type="button" class="ts-sheet-defer" data-ts-action="row-defer" title="這一列挪到隔天">隔天</button>';
+
+/** 列的 html —— 唯一的一份。v＝格子的值；o＝{id, readonly, pending, plan}；ctx＝{workTypes, stages}。 */
 export function rowHtml(v = {}, o = {}, ctx = {}) {
     // Sheet 列：input 用 readonly（文字還能選取、複製貼到下一列）；select 沒有 readonly 只能 disabled
     const ro = o.readonly ? ' readonly' : '';
     const rosel = o.readonly ? ' disabled' : '';
     const t = 'type="text" inputmode="numeric" maxlength="5" placeholder="09:00" autocomplete="off"';
     const pid = v.project_id ? ` data-pid="${esc(v.project_id)}" data-pname="${esc(v.project || '')}"` : '';
-    return `<tr class="ts-mine-row"${o.id ? ` data-id="${esc(o.id)}"` : ''}${o.readonly ? ' data-readonly="1"' : ''}${v.bulletin_id ? ` data-bulletin="${esc(v.bulletin_id)}"` : ''}>
+    const state = o.readonly ? 'Sheet' : (o.id ? (o.plan ? planStateHtml() : (o.pending ? '草稿（沒時數）' : '已存')) : '');
+    return `<tr class="ts-mine-row"${o.id ? ` data-id="${esc(o.id)}"` : ''}${o.readonly ? ' data-readonly="1"' : ''}${o.plan ? ' data-plan="1"' : ''}${v.bulletin_id ? ` data-bulletin="${esc(v.bulletin_id)}"` : ''}>
         <td class="ts-sheet-num"></td>
         <td><textarea data-proj-pick autocomplete="off" data-f="project" rows="1"${pid}${ro}>${esc(v.project || '')}</textarea></td>
         <td>${typeSelectHtml(v.work_type || '', `data-f="type"${rosel}`, ctx.workTypes)}</td>
@@ -108,7 +116,7 @@ export function rowHtml(v = {}, o = {}, ctx = {}) {
         <td><input type="text" inputmode="decimal" data-f="hours" value="${v.hours ?? ''}" title="可以打算式：2.5+1.1、或在原數字後面接 +1.1"${ro}></td>
         <td><input ${t} data-f="t0" value="${esc(v.t0 || '')}"${ro}></td>
         <td><input ${t} data-f="t1" value="${esc(v.t1 || '')}"${ro}></td>
-        <td class="ts-sheet-state" data-f="state"${o.pending ? ' style="color:var(--sh-warn)"' : ''}>${o.readonly ? 'Sheet' : (o.id ? (o.pending ? '草稿（沒時數）' : '已存') : '')}</td>
+        <td class="ts-sheet-state" data-f="state"${o.pending && !o.plan ? ' style="color:var(--sh-warn)"' : ''}>${state}</td>
         <td class="ts-sheet-del">${o.readonly ? '' : '<button type="button" data-ts-action="row-remove" title="刪這一列">×</button>'}</td>
     </tr>`;
 }
@@ -139,7 +147,7 @@ export function renderSheet(host, rows, opts = {}) {
     ensureStyle('ts-sheet-css', CSS);
     host._tsCtx = { ...(host._tsCtx || {}), workTypes: opts.workTypes || [], stages: opts.stages || {}, readonly: !!opts.readonly };
     const ctx = host._tsCtx;
-    const body = (rows || []).map(r => rowHtml(rowFromItem(r), { id: r.id, readonly: opts.readonly || !r.editable, pending: r.status === 'pending' }, ctx)).join('');
+    const body = (rows || []).map(r => rowHtml(rowFromItem(r), { id: r.id, readonly: opts.readonly || !r.editable, pending: r.status === 'pending', plan: r.status === 'plan' && !(r.hours > 0) }, ctx)).join('');
     host.innerHTML = tableHtml(body + (opts.readonly ? '' : rowHtml({}, {}, ctx).repeat(opts.blankRows ?? BLANK_ROWS)), opts.id ?? 'ts-mine-add');
     if (opts.projectPicker) attachProjectPop(host, { options: opts.projectPicker, value: (p) => (p.id ? (p.name || p.label) : (p.label || p.name)) });
     _wire(host);
@@ -259,6 +267,7 @@ export function rowBody(tr, { day = '', projects = [] } = {}) {
     // 只有格子本身有階段欄才送 stage_id（空字串＝清空）；總表改列／代填的列沒這欄，不能把人家的階段洗掉
     if (tr.querySelector('[data-f="stage"]')) body.stage_id = v('stage') || '';
     if (tr.dataset.bulletin) body.bulletin_id = tr.dataset.bulletin;
+    if (tr.dataset.plan) body.plan = true;          // 「我的一週」排的列：改內容還是計畫（後端填了時數就自己變實際）
     return body;
 }
 
@@ -396,7 +405,9 @@ export function wireAutosave(host, cfg = {}) {
                 tr.dataset.id = (r.ids || [])[0] || '';
                 if ((r.unmatched_projects || []).length) cfg.onUnmatched?.(r.unmatched_projects);
             }
-            st.textContent = pending ? '草稿（沒時數）' : '已存'; st.style.color = pending ? 'var(--sh-warn)' : 'var(--sh-ok)';
+            if (!pending) delete tr.dataset.plan;     // 計畫列填了時數＝一般紀錄
+            if (tr.dataset.plan) { st.innerHTML = planStateHtml(); st.style.color = ''; }
+            else { st.textContent = pending ? '草稿（沒時數）' : '已存'; st.style.color = pending ? 'var(--sh-warn)' : 'var(--sh-ok)'; }
             cfg.onSaved?.(tr, body);
         } catch (e) {
             st.textContent = '沒存：' + (e.message || e); st.style.color = 'var(--sh-err)';

@@ -448,12 +448,13 @@ def resolve_stage(stage_id, work_type, index: dict):
 PENDING_STATUS = "pending"
 
 
-def row_state(hours, planned_hours) -> str:
-    """一列是「只有計畫」還是「有實際」：hours>0 → draft（實際）；否則有 planned → plan；
-    兩個都沒有 → pending（草稿；呼叫端要求至少有內容）。計畫列的 hours 存 0，燒錄／匯總只算 hours。"""
+def row_state(hours, planned_hours, plan: bool = False) -> str:
+    """一列是「只有計畫」還是「有實際」：hours>0 → draft（實際）；否則有 planned、或 plan=True（「我的一週」排的卡，
+    owner 2026-09-08：不填時數）→ plan；兩個都沒有 → pending（草稿；呼叫端要求至少有內容）。
+    計畫列的 hours 存 0，燒錄／匯總只算 hours；「專案紀錄未完成」的提醒只找 pending，計畫列不算未完成。"""
     if (hours or 0) > 0:
         return "draft"
-    if (planned_hours or 0) > 0:
+    if (planned_hours or 0) > 0 or plan:
         return "plan"
     return PENDING_STATUS
 

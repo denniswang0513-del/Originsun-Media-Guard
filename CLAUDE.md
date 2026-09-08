@@ -1257,6 +1257,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`routers/crm/work_stages.py`](routers/crm/work_stages.py) | 工作階段（每個分類自己的階段清單）CRUD | 守衛 `_stage_guard`＝管理員／工作追蹤模組／綁定人員且在職（status 空白視同在職）；停用不刪，`used==0` 才准刪 |
 | [`routers/api_system.py`](routers/api_system.py) 的公司圖上傳 | Logo／印章上傳＋取回（看檔頭不看副檔名；同 kind 只留一份） | 存 `company_assets/`（gitignore、不掛靜態）；PDF 端讀 `settings.company.<kind>_path` |
 | `core.hr_logic` 的草稿列（`PENDING_STATUS`／`row_state`） | 「填了任何一格就存、有時數才進彙整」：pending 列不算工時 | 前端 `ts-sheet.js` 的 content 判定與後端 `normalize_row` 的空白列 422 **要同一組欄位**（專案／做了什麼／備註／階段） |
+| `frontend/my.html` 的「我的一週」＋ `ts-sheet.js` 的計畫列 | 個人週規劃（owner 2026-09-08）：一天一欄的板、一張卡＝一列工時（`status=plan`、沒時數，POST 帶 `plan:true`）；當天的卡就是格子裡的藍底「計畫」列；「挪到隔天」＝PUT 只帶 `work_date` | **不判有做沒做**（沒有未執行／自動對上／提醒）；只能排自己的；`row_state(plan=True)` 沒時數也是 plan，`apply_update` 不帶 plan 就沿用列上的狀態，填了時數才變 draft |
 
 ## 不要動的地方
 
@@ -1280,4 +1281,6 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **放寬守衛不能收回原本的鑰匙**：`/timesheets/project_options` 與 `work-stages` 都曾在「開放給員工」時把
   只有 timesheets／me_finance、沒綁人員的帳號從 200 變成 403／409。改守衛先列出舊守衛放行的每一種帳號再改。
 - **請款彈窗 `_updateExtraFields` 重建專案下拉時要帶回目前選的值**：openModal 先選好再呼叫它，重建成空的會把編輯中的專案洗掉。
+- **計畫列（`status=plan`）改內容一定要帶著 plan**：格子的 PUT 靠 `tr.dataset.plan → body.plan`、後端靠 `apply_update` 沿用；少一邊，員工改個字那張卡就變「草稿（沒時數）」並被「專案紀錄未完成」提醒抓到（提醒只找 pending，這是刻意的）。
+- **`<tr class="ts-mine-row">` 那個 class 字串不能改**（test_ts_shared_components 釘「列 html 只有一份」是找這個字串）：計畫列的藍底走 `data-plan` 屬性選擇器。
 - **週記心情選單掛在 body、`position:fixed`**：捲動／resize 要關掉，不然它脫離愛心浮在原地；別再塞回標題列（會被右邊界裁）。

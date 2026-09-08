@@ -59,7 +59,7 @@ def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, keep: tuple |
     start, end = hhmm_or_none(getattr(r, "start_time", None)), hhmm_or_none(getattr(r, "end_time", None))
     hours = float(r.hours or 0) or _hours_from_range(start, end)     # 起訖都給、時數沒給 → 算出來（只算這一次）
     try:
-        status = row_state(hours, r.planned_hours) if manual else None
+        status = row_state(hours, r.planned_hours, plan=bool(getattr(r, "plan", None))) if manual else None
         wt = norm_work_type(r.work_type)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

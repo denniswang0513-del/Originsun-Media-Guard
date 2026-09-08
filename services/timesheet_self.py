@@ -196,6 +196,8 @@ async def apply_update(session, r, body) -> None:
              if k not in sent and getattr(r, k, None) is not None}
     if not body.project_id and not (body.project_name or "").strip() and (r.project_name or r.project_id):
         carry["project_name"] = r.project_name or ""
+    if "plan" not in sent and r.status == "plan":     # 「我的一週」排的卡：改內容／挪日期還是計畫，填了時數才變實際
+        carry["plan"] = True
     if carry:
         body = body.model_copy(update=carry)
     unchanged = not body.project_id and (body.project_name or "").strip() == (r.project_name or "")

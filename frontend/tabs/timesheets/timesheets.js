@@ -1055,6 +1055,14 @@ async function _onAction(btn) {
                 if (host && await removeRow(host, btn.closest('tr'), { tfetch })) _mineTotals();
                 return;
             }
+            if (act === 'row-defer') {
+                // 「我的一週」排的計畫列挪到隔天（owner 2026-09-08）：只改 work_date；員工頁 my.html 同一顆鈕同一條路
+                const tr = btn.closest('tr'), el = document.getElementById('ts-mine-result');
+                if (!tr || !tr.dataset.id) return;
+                try { await tfetch('/api/v1/timesheets/mine/' + tr.dataset.id, { method: 'PUT', body: { work_date: shiftDays(_day, 1) } }); tr.remove(); _mineTotals(); if (el) el.textContent = `已挪到 ${shiftDays(_day, 1)}`; }
+                catch (e) { if (el) el.textContent = '沒挪：' + (e.message || e); }
+                return;
+            }
             if (act === 'copy-yesterday') {
                 const host = document.getElementById('ts-mine-host');
                 if (!host || !_mineCache) return;

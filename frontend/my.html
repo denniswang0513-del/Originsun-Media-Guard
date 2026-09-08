@@ -221,6 +221,38 @@ body .proj-pop { --pp-bg: #fff; --pp-line: #e5e5e5; --pp-shadow: 0 8px 24px rgba
 #ws-view table.week .c.plan { color: var(--sub); }
 #ws-view table.week .c.shoot { color: #1d4ed8; background: #eff6ff; border-radius: 4px; padding: 3px 6px; }
 #ws-view table.week .c.off { color: var(--sub); background: #f5f5f5; border-radius: 4px; padding: 3px 6px; }
+/* 我的一週（owner 2026-09-08；示範 /demo/week-plan.html 定稿）：一天一欄的規劃板，一張卡＝一列工時 */
+#ws-view .wk-sum { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; margin-bottom: 10px; align-items: center; }
+#ws-view .wk-sum .k { color: var(--sub); margin-right: 4px; }
+#ws-view .pboard { display: grid; gap: 8px; align-items: start; }
+#ws-view .pcol { border: 1px solid var(--line); border-radius: 8px; min-height: 220px; background: #fcfcfc; display: flex; flex-direction: column; }
+#ws-view .pcol.today { border-color: var(--red); background: #fff; }
+#ws-view .pcol.past { background: #f7f7f7; }
+#ws-view .pcol.over { background: #eef4ff; border-color: #2563eb; }
+#ws-view .pcol .dh { padding: 6px 10px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: 12.5px; color: var(--sub); display: flex; justify-content: space-between; align-items: baseline; }
+#ws-view .pcol.today .dh { color: var(--red); }
+#ws-view .pcol .dh small { font-weight: 400; font-size: 11px; }
+#ws-view .pcol .cards { padding: 6px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+#ws-view .pcol .none { color: #bbb; font-size: 12px; text-align: center; padding: 14px 0; }
+#ws-view .pcard { border: 1px solid var(--line); border-radius: 7px; background: #fff; padding: 6px 20px 6px 8px; font-size: 12px; position: relative; }
+#ws-view .pcard.plan { border-left: 3px solid #2563eb; cursor: grab; }
+#ws-view .pcard.done { border-left: 3px solid #15803d; }
+#ws-view .pcard.dragging { opacity: .4; }
+#ws-view .pcard .p { font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+#ws-view .pcard .t { font-size: 11.5px; margin-top: 1px; overflow-wrap: anywhere; }
+#ws-view .pcard .ct { color: var(--sub); font-size: 11px; margin-top: 1px; }
+#ws-view .pcard .f { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--sub); flex-wrap: wrap; }
+#ws-view .pcard .f .s.plan { color: #2563eb; }
+#ws-view .pcard .f .s.done { color: #15803d; font-weight: 600; }
+#ws-view .pcard .x { position: absolute; top: 3px; right: 5px; border: 0; background: none; color: #bbb; cursor: pointer; font-size: 13px; padding: 0 2px; line-height: 1; font-family: inherit; }
+#ws-view .pcard .x:hover { color: var(--red); }
+#ws-view .pcol .add { margin: 0 6px 6px; }
+#ws-view .pcol .addbtn { width: 100%; border: 1px dashed var(--line); background: none; color: var(--sub); border-radius: 7px; padding: 5px; cursor: pointer; font-size: 12px; font-family: inherit; }
+#ws-view .pcol .addbtn:hover { color: var(--ink); border-color: #bbb; }
+#ws-view .pcol .addform { display: flex; flex-direction: column; gap: 4px; border: 1px solid #2563eb; border-radius: 7px; padding: 6px; background: #fff; }
+#ws-view .pcol .addform input { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; font: inherit; font-size: 12px; }
+#ws-view .pcol .addform .fr { display: flex; gap: 4px; justify-content: flex-end; }
+#ws-view .btn.xs { padding: 1px 7px; font-size: 11px; border-radius: 6px; }
 #ws-view table.week .none { color: #c4c4c4; }
 /* 專案表：數字用正文色、可排序表頭灰；專案檔案卡片白底細框 */
 #ws-view .tsp td.num { color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -1557,27 +1589,34 @@ function buildZone1() {
     const z = $("ws-zone1");
     z.innerHTML = `<div class="views" id="z1-views">
             <button type="button" class="view-btn" data-view="log">今天的專案紀錄</button>
+            <button type="button" class="view-btn" data-view="plan">我的一週</button>
             <button type="button" class="view-btn" data-view="week">團隊的一週</button>
             <button type="button" class="view-btn" data-view="find">專案查詢</button>
         </div>
         <div class="view" data-view="log" id="z1-log"></div>
+        <div class="view" data-view="plan" id="z1-plan"></div>
         <div class="view" data-view="week" id="z1-week"></div>
         <div class="view" data-view="find" id="z1-find"></div>`;
     z.querySelector("#z1-views").addEventListener("click", (e) => { const b = e.target.closest(".view-btn"); if (b) switchZ1(b.dataset.view); });
     z.addEventListener("click", (e) => { const b = e.target.closest("[data-z1], [data-ts-action]"); if (b) _z1Action(b, e); });
     z.addEventListener("change", (e) => { const cb = e.target.closest("input[data-ms-done]"); if (cb) _msToggleDone(cb.dataset.msDone, cb.checked); });   // 週表那條帶上直接勾完成
+    z.addEventListener("keydown", (e) => { const f = e.target.closest("#z1-plan .addform"); if (f && e.key === "Enter") { e.preventDefault(); _planSubmitAdd(f.dataset.day); } });
+    _planWireDnd(z);
     switchZ1(_z1View);
 }
 function switchZ1(v) {
-    if (!["log", "week", "find"].includes(v)) v = "log";
+    if (!["log", "plan", "week", "find"].includes(v)) v = "log";
     _z1View = v;
     try { localStorage.setItem(Z1_KEY, v); } catch (_) {}
     document.querySelectorAll("#z1-views .view-btn").forEach(b => b.classList.toggle("active", b.dataset.view === v));
     document.querySelectorAll("#ws-zone1 .view").forEach(el => el.classList.toggle("on", el.dataset.view === v));
     const el = $("z1-" + v);
-    if (el && !el.dataset.loaded) { el.dataset.loaded = "1"; el._ready = ({ log: loadLog, week: loadTeamWeek, find: loadFind })[v](); }
+    if (el && !el.dataset.loaded) { el.dataset.loaded = "1"; el._ready = ({ log: loadLog, plan: loadMyWeek, week: loadTeamWeek, find: loadFind })[v](); }
+    else if (el && el.dataset.stale) { delete el.dataset.stale; el._ready = ({ log: loadLog, plan: loadMyWeek, week: loadTeamWeek, find: loadFind })[v](); }   // 別的視圖動過同一批列
     return el && el._ready;   // 第一次載入的 promise（別的視圖要跳過來開東西時等它）
 }
+/** 我的一週與今天的格子是同一批列：一邊動了，另一邊下次切過去要重抓。 */
+function _z1MarkStale(...ids) { ids.forEach(id => { const el = $(id); if (el && el.dataset.loaded) el.dataset.stale = "1"; }); }
 
 // ── 視圖 1：今天的專案紀錄（ts-sheet 格子；不畫合計）──
 async function _loadToday() {
@@ -1585,7 +1624,7 @@ async function _loadToday() {
     try { _todayInfo = await mjson("/api/v1/me/today"); } catch (e) { _todayInfo = { error: e.message, shoots: [], todos: [] }; }
     return _todayInfo;
 }
-function _todayStripHtml(t, incomplete = []) {
+function _todayStripHtml(t, incomplete = [], planned = 0) {
     if (!t || t.error) return `<div class="today-strip"><span class="meta">${esc((t && t.error) || "")}</span></div>`;
     const shoots = (t.shoots || []).map(s => `<span>${esc(s.title || s.project_name || "")}${s.location ? " · " + esc(s.location) : ""}${s.start_time ? " · " + esc(s.start_time) : ""}</span>`).join("　");
     const jr = t.last_week_journal;
@@ -1595,6 +1634,7 @@ function _todayStripHtml(t, incomplete = []) {
         <span><span class="k">今天</span>${esc(_mdLabel(t.date || _localToday()))}</span>
         <span><span class="k">場次</span>${shoots || "沒有"}</span>
         <span><span class="k">待辦</span>${(t.todos || []).length} 件</span>
+        ${planned ? `<span><span class="k">我的一週</span>今天排了 ${planned} 項</span>` : ""}
         <span><span class="k">上週回顧</span><a href="#ws-journal" class="${monday && jr !== "submitted" ? "warn" : ""}">${monday && jr !== "submitted" ? "上週回顧還沒寫" : jrText}</a></span>
         ${(t.leave_pending || []).length ? `<span><span class="k">請假待審</span>${t.leave_pending.length} 件</span>` : ""}
         ${t.milestones && t.milestones.total ? `<span><span class="k">本週里程碑</span>${t.milestones.total} 個、今天到期 <span class="${t.milestones.due_today.length ? "warn" : ""}">${t.milestones.due_today.length} 個</span>${t.milestones.due_today.length ? "（" + t.milestones.due_today.map(m => esc((m.assignee_name ? m.assignee_name + "：" : "") + m.title)).join("、") + "）" : ""}</span>` : ""}
@@ -1625,7 +1665,7 @@ async function loadLog() {
                 <span class="meta">${isToday ? "今天" : ""}</span>
                 <button type="button" class="btn" data-z1="day" data-delta="1" ${isToday ? "disabled" : ""}>${esc(_mdLabel(_shiftDays(_logDay, 1)))} ›</button>
                 ${isToday ? "" : '<button type="button" class="btn" data-z1="day" data-delta="0">今天</button>'}</span></div>
-        ${isToday ? _todayStripHtml(today, incomplete) : ""}
+        ${isToday ? _todayStripHtml(today, incomplete, mine ? (mine.items || []).filter(_isPlan).length : 0) : ""}
         ${mine ? `
         <div id="z1-sheet"></div>
         <div class="sheet-foot">
@@ -1636,7 +1676,7 @@ async function loadLog() {
                 <button type="button" class="btn" data-z1="unmerge" id="z1-unmerge" hidden title="把最近一次合併退回去">復原合併</button>
                 <span id="z1-log-msg" class="meta"></span></span>
         </div>
-        <div class="sheet-note">一列＝一個案子做了什麼；填了任何一格就自動存成草稿，時數填了才進彙整。起訖用 24 小時制（打「9」「930」「1730」都可以），會自己算出實際 h。
+        <div class="sheet-note">一列＝一個案子做了什麼；填了任何一格就自動存成草稿，時數填了才進彙整。藍底的列是「我的一週」排的（狀態「計畫」，可以按「隔天」挪過去）。起訖用 24 小時制（打「9」「930」「1730」都可以），會自己算出實際 h。
             工作階段只列該列分類的階段。往前翻可以補記；Sheet 拉進來的列會標「Sheet」、不能改。</div>`
         : `<div class="notice">${esc(err || "載入失敗")}<br><span class="meta">要記專案紀錄，帳號要在「使用者管理」綁定人員檔案並開通工作紀錄。</span></div>`}`;
     if (!mine) return;
@@ -1658,6 +1698,7 @@ async function _refreshMergeBtn() {
     } catch (_) { btn.hidden = true; }
 }
 const _POST = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const _PUT = (body) => ({ method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 async function _z1Action(btn, ev) {
     const TS = await TS_READY;
     const act = btn.dataset.z1 || btn.dataset.tsAction;
@@ -1668,7 +1709,23 @@ async function _z1Action(btn, ev) {
         return loadLog();
     }
     if (act === "row-add") { if (sheet) TS.appendBlankRows(sheet); return; }
-    if (act === "row-remove") { if (sheet) TS.removeRow(sheet, btn.closest("tr")); return; }
+    if (act === "row-remove") { if (sheet) { if (await TS.removeRow(sheet, btn.closest("tr"))) _z1MarkStale("z1-plan"); } return; }
+    if (act === "row-defer") {
+        // 計畫列挪到隔天（owner 2026-09-08）：只改 work_date，列本身不動；從今天的格子拿掉、我的一週下次切過去重抓
+        const tr = btn.closest("tr"), day = _shiftDays(_logDay, 1), el = $("z1-log-msg");
+        if (!tr || !tr.dataset.id) return;
+        try { await mjson("/api/v1/timesheets/mine/" + encodeURIComponent(tr.dataset.id), _PUT({ work_date: day })); tr.remove(); _z1MarkStale("z1-plan"); if (el) el.textContent = `已挪到 ${_mdLabel(day)}`; }
+        catch (e) { if (el) el.textContent = "沒挪：" + e.message; }
+        return;
+    }
+    if (act === "plan-week") { _planWeek = btn.dataset.start || _mondayOf(_localToday()); return loadMyWeek(); }
+    if (act === "plan-add") return _planOpenAdd(btn.dataset.day);
+    if (act === "plan-add-cancel") return _renderMyWeek();
+    if (act === "plan-add-ok") return _planSubmitAdd(btn.dataset.day);
+    if (act === "plan-del") return _planDelete(btn.dataset.id);
+    if (act === "plan-defer") { const i = _planRows.find(x => x.id === btn.dataset.id); return i && _planMove(i.id, _shiftDays(i.date, 1)); }
+    if (act === "plan-from-ms") return _planFromMilestones();
+    if (act === "plan-copy-last") return _planCopyLast();
     if (act === "save") {
         // 儲存草稿：每一列有內容就存（沒時數＝草稿，不進彙整）；其實每格改了就自動存，這顆只是催一次＋講清楚
         if (!sheet) return;
@@ -1737,6 +1794,153 @@ async function _openProjectModal(name, pid) {
     }
 }
 
+// ── 視圖 1.5：我的一週（owner 2026-09-08；示範 /demo/week-plan.html 定稿）：一天一欄的規劃板 ──
+// 一張卡＝一列工時（status=plan、沒時數；POST /timesheets/mine/rows 帶 plan:true）。當天的卡自動就在「今天的專案紀錄」的格子裡，
+// 時數在那裡填、填了就是一般紀錄。不判有做沒做；執行動作只有填時數與「挪到隔天」（PUT work_date）。只能排自己的。
+let _planWeek = _mondayOf(_localToday());
+let _planRows = [];          // 這週本人的列（GET /timesheets/mine/rows?from&to）
+let _myStaffName = "";       // 里程碑帶入要對負責人名字
+function _isPlan(i) { return i.status === "plan" && !(i.hours > 0); }
+function _planDays() { return [...Array(7)].map((_, k) => _shiftDays(_planWeek, k)); }
+async function loadMyWeek() {
+    const host = $("z1-plan");
+    host.innerHTML = `<div class="empty">載入中…</div>`;
+    const days = _planDays();
+    try {
+        _planRows = (await mjson(`/api/v1/timesheets/mine/rows?from=${days[0]}&to=${days[6]}`)).items || [];
+    } catch (e) {
+        host.innerHTML = `<div class="notice">${esc(e.message)}<br><span class="meta">要排我的一週，帳號要在「使用者管理」綁定人員檔案並開通工作紀錄。</span></div>`;
+        return;
+    }
+    _logProjectOptions();    // 加卡的專案清單先抓好
+    _renderMyWeek();
+}
+function _planCardHtml(i) {
+    const plan = _isPlan(i), done = i.hours > 0;
+    const stage = [i.work_type, i.stage_name].filter(Boolean).join(" · ");
+    const foot = done ? `<span class="s done">${i.hours} h</span>` : (plan ? '<span class="s plan">計畫</span>' : `<span class="s">${i.source && i.source !== "manual" ? "Sheet" : "草稿（沒時數）"}</span>`);
+    return `<div class="pcard${plan ? " plan" : ""}${done ? " done" : ""}" draggable="${plan}" data-card="${esc(i.id)}">
+        ${plan ? `<button type="button" class="x" data-z1="plan-del" data-id="${esc(i.id)}" title="刪掉這張卡">×</button>` : ""}
+        <div class="p">${i.project_name ? esc(i.project_name) : '<span class="meta">未填專案</span>'}</div>
+        ${i.task_note ? `<div class="t">${esc(i.task_note)}</div>` : ""}${stage ? `<div class="ct">${esc(stage)}</div>` : ""}
+        <div class="f">${foot}${plan ? `<button type="button" class="btn xs" data-z1="plan-defer" data-id="${esc(i.id)}">挪到隔天</button>` : ""}</div></div>`;
+}
+function _renderMyWeek() {
+    const host = $("z1-plan"), today = _localToday(), days = _planDays();
+    const byDay = (d) => _planRows.filter(i => i.date === d);
+    const cols = days.filter(d => { const w = _dow(d); return (w !== 0 && w !== 6) || byDay(d).length; });   // 週末有排才畫
+    const filled = _planRows.filter(i => i.hours > 0).length;
+    host.innerHTML = `
+        <div class="vhead"><span class="ey">My Week<b>我的一週 ${esc(_mdLabel(days[0]).slice(0, -3))} – ${esc(_mdLabel(days[6]).slice(0, -3))}</b></span>
+            <span class="vrow"><button type="button" class="btn" data-z1="plan-week" data-start="${_shiftDays(_planWeek, -7)}">‹</button>
+                <span class="meta">${esc(_planWeek)} 起</span>
+                <button type="button" class="btn" data-z1="plan-week" data-start="${_shiftDays(_planWeek, 7)}">›</button>
+                ${_planWeek === _mondayOf(today) ? "" : '<button type="button" class="btn" data-z1="plan-week">本週</button>'}
+                <button type="button" class="btn" data-z1="plan-from-ms" title="這週指定給我的里程碑，落在到期那天">從里程碑帶入</button>
+                <button type="button" class="btn" data-z1="plan-copy-last" title="上週的列照星期幾貼到這週（不帶時數）">複製上週</button></span></div>
+        <div class="wk-sum"><span><span class="k">這週排了</span>${_planRows.length} 項</span><span><span class="k">填了時數</span>${filled} 項</span><span class="meta" id="z1-plan-msg">只看排了什麼、填到哪；不判有做沒做。</span></div>
+        <div class="pboard" style="grid-template-columns:repeat(${cols.length}, minmax(0, 1fr));">${cols.map(d => `
+            <div class="pcol${d === today ? " today" : (d < today ? " past" : "")}" data-day="${d}">
+                <div class="dh"><span>${esc(_mdLabel(d))}</span>${d === today ? "<small>今天</small>" : ""}</div>
+                <div class="cards">${byDay(d).map(_planCardHtml).join("") || '<div class="none">沒排</div>'}</div>
+                <div class="add" data-add="${d}"><button type="button" class="addbtn" data-z1="plan-add" data-day="${d}">加一項</button></div>
+            </div>`).join("")}</div>
+        <div class="sheet-note">拖卡片到別的日子；卡片右上的 × 刪；還沒填時數的卡可以「挪到隔天」。當天的卡會自動出現在「今天的專案紀錄」的格子裡（藍底、狀態「計畫」），時數在那裡填。</div>`;
+}
+async function _planOpenAdd(day) {
+    const host = document.querySelector(`#z1-plan .add[data-add="${day}"]`);
+    if (!host) return;
+    const projects = await _logProjectOptions();
+    host.innerHTML = `<form class="addform" data-day="${esc(day)}" onsubmit="return false">
+        <input list="z1-plan-projects" data-f="project" placeholder="專案（打字找）" autocomplete="off">
+        <datalist id="z1-plan-projects">${projects.map(p => `<option value="${esc(p.label || p.name)}"></option>`).join("")}</datalist>
+        <input data-f="note" placeholder="要做什麼（Enter 加入）">
+        <div class="fr"><button type="button" class="btn xs" data-z1="plan-add-cancel">取消</button><button type="button" class="btn xs pri" data-z1="plan-add-ok" data-day="${esc(day)}">加入</button></div></form>`;
+    host.querySelector('[data-f="project"]').focus();
+}
+async function _planSubmitAdd(day) {
+    const form = document.querySelector(`#z1-plan .addform[data-day="${day}"]`);
+    if (!form) return;
+    const text = form.querySelector('[data-f="project"]').value.trim(), note = form.querySelector('[data-f="note"]').value.trim();
+    if (!text && !note) { form.querySelector('[data-f="project"]').focus(); return; }
+    const hit = (_logProjects || []).find(p => p.id && (p.label === text || p.name === text));   // 對得到清單的帶 id；對不到照打的字送（後端再對映）
+    await _planCreate([{ work_date: day, project_id: hit ? hit.id : null, project_name: hit ? hit.name : text, task_note: note, plan: true }]);
+}
+/** 一次建幾張卡（status=plan、沒時數）；建完整週重抓。回建了幾張。 */
+async function _planCreate(rows) {
+    if (!rows.length) return 0;
+    try {
+        const r = await mjson("/api/v1/timesheets/mine/rows", _POST({ rows }));
+        await loadMyWeek();
+        _z1MarkStale("z1-log", "z1-week");
+        if ((r.unmatched_projects || []).length) { const m = $("z1-plan-msg"); if (m) m.textContent = `「${r.unmatched_projects.join("、")}」對不到案（已存下來，管理員會指定）`; }
+        return rows.length;
+    } catch (e) { const m = $("z1-plan-msg"); if (m) m.textContent = "沒存：" + e.message; return 0; }
+}
+async function _planMove(id, day) {
+    const i = _planRows.find(x => x.id === id);
+    if (!i || i.date === day) return;
+    try { await mjson("/api/v1/timesheets/mine/" + encodeURIComponent(id), _PUT({ work_date: day })); }
+    catch (e) { const m = $("z1-plan-msg"); if (m) m.textContent = "沒挪：" + e.message; return; }
+    if (_mondayOf(day) !== _planWeek) _planWeek = _mondayOf(day);   // 週日挪到隔天＝下週一，板子跟著翻過去
+    _z1MarkStale("z1-log", "z1-week");
+    await loadMyWeek();
+}
+async function _planDelete(id) {
+    if (!window.confirm("刪掉這張卡？")) return;
+    try { await mjson("/api/v1/timesheets/mine/" + encodeURIComponent(id), { method: "DELETE" }); }
+    catch (e) { const m = $("z1-plan-msg"); if (m) m.textContent = "沒刪：" + e.message; return; }
+    _z1MarkStale("z1-log", "z1-week");
+    await loadMyWeek();
+}
+async function _myName() {
+    if (_myStaffName) return _myStaffName;
+    try { _myStaffName = (await mjson("/api/v1/timesheets/mine?date=" + _localToday())).staff_name || ""; } catch (_) {}
+    return _myStaffName;
+}
+/** 從里程碑帶入：這週指定給我、還沒完成的里程碑 → 到期那天一張卡（到期不在這週就落預設到期日）；已在板上的不重複。 */
+async function _planFromMilestones() {
+    const msg = $("z1-plan-msg");
+    let ms;
+    try { ms = await mjson("/api/v1/milestones/week?start=" + _planWeek); } catch (e) { if (msg) msg.textContent = e.message; return; }
+    const me = await _myName(), days = _planDays(), rows = [];
+    (ms.projects || []).forEach(p => (p.milestones || []).forEach(m => {
+        if (m.done || !me || (m.assignee_name || "") !== me) return;
+        const day = days.includes(m.due_date) ? m.due_date : ms.default_due;
+        if (_planRows.some(i => i.date === day && (i.project_id === p.project_id || i.project_name === p.name) && (i.task_note || "") === m.title)) return;
+        rows.push({ work_date: day, project_id: p.project_id, project_name: p.name, task_note: m.title, plan: true });
+    }));
+    if (!rows.length) { if (msg) msg.textContent = me ? "這週指定給你的里程碑都已經在板上了（或沒有指定給你的）。" : "抓不到你的人員名字，帶不了。"; return; }
+    const n = await _planCreate(rows);
+    if (n) { const m = $("z1-plan-msg"); if (m) m.textContent = `從里程碑帶入 ${n} 張`; }
+}
+/** 複製上週：上週有時數或是計畫的列，照星期幾貼到這週（案、分類、做了什麼；不帶時數、不帶階段）；已在板上的不重複。 */
+async function _planCopyLast() {
+    const msg = $("z1-plan-msg"), prev = _shiftDays(_planWeek, -7);
+    let r;
+    try { r = await mjson(`/api/v1/timesheets/mine/rows?from=${prev}&to=${_shiftDays(prev, 6)}`); } catch (e) { if (msg) msg.textContent = e.message; return; }
+    const rows = [];
+    (r.items || []).forEach(i => {
+        if (!(i.hours > 0) && !_isPlan(i)) return;
+        const day = _shiftDays(i.date, 7);
+        if (rows.some(x => x.work_date === day && x.project_name === i.project_name && x.task_note === (i.task_note || ""))) return;
+        if (_planRows.some(x => x.date === day && x.project_name === i.project_name && (x.task_note || "") === (i.task_note || ""))) return;
+        rows.push({ work_date: day, project_id: i.project_id || null, project_name: i.project_name, task_note: i.task_note || "", work_type: i.work_type || null, plan: true });
+    });
+    if (!rows.length) { if (msg) msg.textContent = "上週沒有可以抄的列（或都已經在板上了）。"; return; }
+    if (!window.confirm(`把上週 ${rows.length} 列照星期幾貼到這週（不帶時數）？`)) return;
+    const n = await _planCreate(rows);
+    if (n) { const m = $("z1-plan-msg"); if (m) m.textContent = `從上週複製 ${n} 張`; }
+}
+/** 拖卡到別的日子（只有計畫卡能拖；HTML5 drag，掛在第一區的容器上一次）。 */
+function _planWireDnd(z) {
+    let dragId = null;
+    z.addEventListener("dragstart", (e) => { const c = e.target.closest && e.target.closest("#z1-plan .pcard[draggable='true']"); if (!c) return; dragId = c.dataset.card; c.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
+    z.addEventListener("dragend", () => { dragId = null; z.querySelectorAll(".pcol.over, .pcard.dragging").forEach(x => x.classList.remove("over", "dragging")); });
+    z.addEventListener("dragover", (e) => { const col = e.target.closest && e.target.closest("#z1-plan .pcol"); if (!col || !dragId) return; e.preventDefault(); z.querySelectorAll(".pcol.over").forEach(x => x.classList.remove("over")); col.classList.add("over"); });
+    z.addEventListener("drop", (e) => { const col = e.target.closest && e.target.closest("#z1-plan .pcol"); if (!col || !dragId) return; e.preventDefault(); const id = dragId; dragId = null; _planMove(id, col.dataset.day); });
+}
+
 // ── 視圖 2：團隊的一週（人×日，案名＋小時＋內容；計畫淺灰、場次藍、休假灰）──
 async function loadTeamWeek() {
     const host = $("z1-week");
@@ -1773,7 +1977,9 @@ async function loadTeamWeek() {
             const proj = i.project
                 ? `<span class="cp ts-link" data-ts-action="proj-pop" data-name="${esc(i.project)}" data-pid="${esc(i.project_id || "")}" title="點開這個案的執行狀態">${esc(i.project)}</span>`
                 : '<span class="cp blank">未填專案</span>';
-            const hrs = plan ? `<span class="hrs plan">計畫 ${i.planned_hours ?? ""} h</span>` : `<span class="hrs">${i.hours ?? ""} h</span>`;
+            // 計畫列（「我的一週」排的多半沒計畫時數）→「計畫」；沒時數的草稿 →「草稿」；其餘實際小時
+            const hrs = plan ? `<span class="hrs plan">計畫${i.planned_hours ? " " + i.planned_hours + " h" : ""}</span>`
+                : (i.hours > 0 ? `<span class="hrs">${i.hours} h</span>` : '<span class="hrs plan">草稿</span>');
             parts.push(`<div class="c${plan ? " plan" : ""}"><div class="ch">${proj}${hrs}</div>${i.note ? `<div class="cn">${esc(i.note)}</div>` : ""}${stage ? `<div class="ct">${esc(stage)}</div>` : ""}</div>`);
         });
         return parts.join("") || '<span class="none">—</span>';
