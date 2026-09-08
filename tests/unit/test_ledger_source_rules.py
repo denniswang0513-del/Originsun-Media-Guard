@@ -195,7 +195,7 @@ def test_each_ledger_has_its_own_write_key():
     src = finance_src()   # 四個帳務檔串起來（2026-08-30 拆檔）
     helper = src.split("def _mine_or_admin_write(")[1].split("\ndef ")[0]
     assert 'require_entity(request, "mine", level="full")' in helper
-    assert "_check_finance_auth(request)" in helper      # 母帳＝財務管理模組
+    assert 'require_entity(request, "parent", level="full")' in helper      # 母帳＝帳務＋金額檢視（2026-09-08 第三批一把尺）
     # 建立/更新走 _entity_for_write 咽喉（守衛收在裡面 —— 逐端點明呼會忘，
     # 而且端點自己那行**擋不住**咽喉：2026-09-05 實測過）
     throat = src.split("def _entity_for_write(")[1].split("\ndef ")[0]

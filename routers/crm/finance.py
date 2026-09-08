@@ -1252,7 +1252,7 @@ async def _import_money_csv(request: Request, file: UploadFile, *,
     date_fields[0] 是月結守衛看的那一欄（權責認列日），其餘只是要 parse 的日期。
     build(data, dates) 回一個 ORM 物件 —— 三張表的欄位不同，那部分不共用。
     """
-    _check_finance_auth(request)
+    require_entity(request, "parent", level="full")   # 第三批一把尺：匯入＝母帳寫入
     _require_db()
     content = await file.read()
     try:
@@ -1365,7 +1365,10 @@ def _mine_or_admin_write(request, target_entity):
     if (target_entity or "parent") == "mine":
         require_entity(request, "mine", level="full")
     else:
-        _check_finance_auth(request)
+        # 2026-09-08 第三批「一把尺」：母帳寫入跟讀取同一把——crm_invoices＋money_view（require_entity full）。
+        # 之前寫只要 crm_invoices、讀要兩把，「有帳務沒金額檢視」的人 UI 到不了卻寫得動（做得到看不到）。
+        # 生產盤過：沒有任何帳號是這種形狀，收緊不鎖人。
+        require_entity(request, "parent", level="full")
 
 
 def _mine_or_admin_write_rows(request, rows):

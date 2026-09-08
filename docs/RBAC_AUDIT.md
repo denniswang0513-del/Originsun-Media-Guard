@@ -193,6 +193,8 @@
 
 ### 第三批：一把尺——要先盤帳號再動（約 1 天）
 
+✅ 已做（2026-09-08）。盤過生產：沒有任何帳號是「有帳務沒金額檢視」或「有報價沒金額檢視」，收緊不鎖人。母帳寫入（`_mine_or_admin_write` 母帳分支、三支匯入、發票影像）改 `require_entity('parent', full)`；`money_view` 成為帳務／報價的父鑰匙（範本 normalize 自動配、權限畫面 PERM_PARENT 縮排）；財務分頁對缺金額檢視的人直接說缺哪把；`tests/unit/test_batch3_one_ruler.py` 的 `ADMIN_ONLY_CRM` 白名單釘住「routers/crm 還是管理員限定的只能是這 27 支」。零用金自助端點加 me_petty、`/crm/clients/{id}` 私帳 404 兩項**沒做**（放寬守衛不能收回原本的鑰匙，先留）。
+
 | # | 修什麼 | 為什麼要先盤 |
 |---|---|---|
 | 1 | 母帳寫入統一 `require_entity('parent', full)`（發票／請款／收支寫入、三支 import、`GET /invoice-file`） | 這是**收緊**：生產若有「crm_invoices 沒 money_view」的帳號會失去寫入。合夥範本兩把都有，在職範本都沒有，所以套完範本後應該沒人受影響，但要先查 |

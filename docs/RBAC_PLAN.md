@@ -26,6 +26,8 @@
 
 ### 階段 0：先看得見（半天～1 天，先做）
 
+✅ 已做（2026-09-08，第三批一起）：`check_admin_or_module` 的 403 detail 說缺哪把（`core.auth.MODULE_LABELS` 後端正本、`denied_detail`）；每個 403 記進記憶體環形緩衝（`record_denial`，重啟就清、不建表）；`GET /auth/denials`（管理員）；使用者管理「使用者」分頁上方「最近授權不足」＋一鍵「開通『X』」（勾到那列、管理員再按儲存）。稽核腳本＝`docs/RBAC_AUDIT.md`。
+
 - **403 帶原因**：`check_admin_or_module` 等守衛回 403 時 `detail` 帶 `{"missing": [key...], "label": "專案管理"}`；共用前端 `authFetch` 的錯誤處理把它顯示成「缺少『專案管理』權限，請管理員開通」，不再是「權限不足」四個字。
 - **403 記錄**：`main.py` 加一個 middleware，每個 403 記 `username／path／method／missing` 到 DB（`auth_denials`，留 30 天）。
 - **使用者管理加一塊「最近授權不足」**：誰、什麼時候、缺哪把；旁邊就是「開通」按鈕（PUT modules 補那把）。

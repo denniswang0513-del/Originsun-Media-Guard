@@ -45,6 +45,8 @@ def normalize(templates: Optional[dict]) -> Dict[str, List[str]]:
         keep = {k for k in raw if isinstance(k, str) and k in ALL_MODULES}
         if keep & set(ME_ZONE1_KEYS):
             keep.add(ME_ZONE_MASTER)
+        if keep & {"crm_invoices", "crm_quotes"}:
+            keep.add("money_view")     # 第三批一把尺：帳務與報價的讀寫都要金額檢視，範本裡一定配
         out[ident] = [m for m in ALL_MODULES if m in keep]
     return out
 

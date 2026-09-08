@@ -477,6 +477,60 @@ def payload_grants(payload: Optional[dict], *module_keys: str) -> bool:
     return any(k in user_modules for k in module_keys)
 
 
+# 鑰匙的中文名（後端正本；前端 js/admin/user-mgmt.MODULE_LABELS 是鏡射，test_rbac_module_sync 釘鍵集相同）。
+# 403 的 detail 用它說「缺哪把」——同事看到的是「需要『專案管理』權限」而不是「權限不足」四個字。
+MODULE_LABELS = {
+    'bulletin': '公布欄', 'preprod_plan': '拍攝企劃', 'preprod_locations': '場景庫', 'preprod_proposals': '提案庫', 'intel': '產業情報',
+    'equipment': '器材庫', 'references': '片庫', 'backup': '備份', 'verify': '比對', 'transcode': '轉檔', 'concat': '串帶', 'report': '報表',
+    'transcribe': '逐字稿', 'tts': '語音', 'footage': '素材庫', 'comfyui': 'ComfyUI', 'drone_meta': '空拍寫入', 'projects': '專案總覽',
+    'crm_clients': '客戶管理', 'crm_projects': '專案管理', 'crm_quotes': '報價管理', 'crm_staff': '員工檔案', 'crm_invoices': '帳務（發票／請款）',
+    'money_view': '金額檢視', 'finance_approve': '零用金審核', 'finance_partner': '母公司報表', 'finance_mine': '私帳', 'timesheets': '工作追蹤',
+    'portal': '審批門戶', 'media_log': '影像紀錄', 'website_admin': '官網管理', 'me_projects': '我的專案', 'me_profile': '基本資料',
+    'me_todos': '我的待辦', 'me_finance': '我的工時請款', 'hr_leave': '請補修', 'hr_benefits': '福委會', 'me_benefits': '我的福委會',
+    'journal': '週誌', 'me_leave': '我的請假', 'me_petty': '零用金', 'me_worklog': '今天的專案紀錄', 'me_team_week': '團隊的一週',
+    'me_project_lookup': '專案查詢', 'me_plan_parttime': '兼職排班', 'me_today_zone': '今天與這週', 'me_week_plan': '我的一週',
+}
+
+
+def module_label(key: str) -> str:
+    return MODULE_LABELS.get(key, key)
+
+
+# 最近授權不足（階段 0）：每個 403 記一筆進環形緩衝（重啟就清；夠管理員看「誰、什麼時候、缺哪把」並一鍵開通）。
+_DENIALS = None   # collections.deque(maxlen=300)，lazy：避免 import 期就建
+
+
+def record_denial(payload: Optional[dict], request: Optional[Request], module_keys) -> None:
+    global _DENIALS
+    try:
+        if _DENIALS is None:
+            from collections import deque
+            _DENIALS = deque(maxlen=300)
+        _DENIALS.append({
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "username": (payload or {}).get("username") or (payload or {}).get("sub") or "",
+            "method": getattr(request, "method", "") if request is not None else "",
+            "path": str(getattr(getattr(request, "url", None), "path", "") or "") if request is not None else "",
+            "missing": list(module_keys or ()),
+            "labels": [module_label(k) for k in (module_keys or ())],
+        })
+    except Exception:
+        pass
+
+
+def recent_denials(limit: int = 100) -> list:
+    return list(_DENIALS)[-limit:][::-1] if _DENIALS else []
+
+
+def denied_detail(module_keys) -> str:
+    keys = [k for k in (module_keys or ()) if k]
+    if not keys:
+        return "權限不足：需要管理員"
+    names = "、".join(f"「{module_label(k)}」" for k in keys[:4])
+    joiner = "或" if len(keys) > 1 else ""
+    return f"權限不足：需要{names}{'（任一）' if joiner else ''}權限，請管理員在使用者管理開通"
+
+
 def check_admin_or_module(request: Request, *module_keys: str):
     """Like check_admin, but ALSO passes if the token grants any of module_keys.
 
@@ -492,7 +546,8 @@ def check_admin_or_module(request: Request, *module_keys: str):
         raise HTTPException(status_code=401, detail="未登入或 token 已過期")
     if payload_grants(payload, *module_keys):
         return payload
-    raise HTTPException(status_code=403, detail="權限不足")
+    record_denial(payload, request, module_keys)
+    raise HTTPException(status_code=403, detail=denied_detail(module_keys))
 
 
 def require_role(*roles: str):

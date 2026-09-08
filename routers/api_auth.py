@@ -1081,3 +1081,11 @@ async def put_public_access(body: PublicAccessPayload, request: Request):
     modes = normalize(body.modes)
     save_settings({"public_access": modes})
     return {"modes": modes}
+
+
+@router.get("/denials")
+async def get_recent_denials(request: Request):
+    """管理員：最近授權不足（記憶體環形緩衝，重啟就清）——誰、什麼時候、打哪支、缺哪把。使用者管理「使用者」分頁上方那塊。"""
+    _check_admin(request)
+    from core.auth import recent_denials
+    return {"items": recent_denials(100)}

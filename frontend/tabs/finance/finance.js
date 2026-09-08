@@ -64,6 +64,14 @@ export async function initFinanceTab() {
     // 就 403，載了只會畫一排空殼）。
     const mineMode = finIsMine();
     const fullParent = finHasFullParentScope();
+    // 第三批一把尺：有「帳務」鑰匙但沒「金額檢視」也沒「母公司報表」的人，後端每一支讀取都是 403——
+    // 不要載一排會紅掉的殼，直接說缺哪把（範本與使用者管理的父子鑰匙已經會自動配，這裡是最後一道）。
+    const _mods = window._modules || [];
+    if (!mineMode && !fullParent && (window._accessLevel || 0) < 3 && !_mods.includes('finance_partner')) {
+        const main = document.getElementById('finance-content');
+        if (main) main.innerHTML = '<div style="padding:40px 20px;color:#f59e0b;font-size:13px;">此帳號有「帳務」鑰匙但缺少「金額檢視」權限，財務分頁的每一頁都需要它。請管理員在使用者管理勾「金額檢視」。</div>';
+        return;
+    }
     const loadShell = mineMode || fullParent;
     const hideNav = (sel) => document.querySelectorAll('#finance-nav ' + sel)
         .forEach((el) => { el.style.display = 'none'; });

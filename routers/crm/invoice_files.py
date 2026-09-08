@@ -232,7 +232,7 @@ async def clear_invoice_file(invoice_id: str, request: Request):
 async def serve_invoice_file(path: str = Query(""), request: Request = None):
     """提供電子發票檔下載/檢視。路徑白名單：只放行 invoices_root 底下的檔
     （比照 costs.serve_receipt —— 沒有這道，這支就是任意檔案讀取）。"""
-    _check_finance_auth(request)
+    require_entity(request, "parent", level="full")   # 第三批一把尺：發票影像＝金額，跟讀取同一把
     if not path or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="檔案不存在")
     abs_path = os.path.abspath(path)

@@ -9,7 +9,8 @@ import { createSortable, sortableSpan, esc } from '../../tabs/crm/crm-utils.js';
 const MODULE_LABELS = {bulletin:'公布欄',preprod_plan:'拍攝企劃',preprod_locations:'場景庫',preprod_proposals:'提案庫',intel:'產業情報',equipment:'器材庫',references:'片庫',backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',footage:'素材庫',comfyui:'ComfyUI',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'財務管理',money_view:'金額檢視',finance_approve:'零用金審核',finance_partner:'母公司報表',finance_mine:'我的帳',timesheets:'工時檢核',portal:'審批門戶',media_log:'影像紀錄',website_admin:'官網',me_projects:'我的專案',me_profile:'我的資料',me_todos:'我的待辦',me_finance:'我的工時請款',hr_leave:'請補修',hr_benefits:'福委會',me_benefits:'我的福委會',journal:'工作日誌',me_leave:'我的請假',me_petty:'我的請款',me_worklog:'今天的專案紀錄',me_team_week:'團隊的一週',me_project_lookup:'專案查詢',me_plan_parttime:'兼職排班',me_today_zone:'今天與這週',me_week_plan:'我的一週'};
 
 // 有層級的鑰匙：子 → 父。父（總開關）沒勾時子鑰匙灰掉；勾子鑰匙時父自動一起勾（後端 require_zone_staff 兩者都要）。
-const PERM_PARENT = { me_worklog: 'me_today_zone', me_week_plan: 'me_today_zone', me_team_week: 'me_today_zone', me_project_lookup: 'me_today_zone' };
+const PERM_PARENT = { me_worklog: 'me_today_zone', me_week_plan: 'me_today_zone', me_team_week: 'me_today_zone', me_project_lookup: 'me_today_zone',
+    crm_invoices: 'money_view', crm_quotes: 'money_view' };   // 第三批一把尺：帳務／報價的讀寫都要金額檢視，勾子鑰匙自動配
 
 // The 4-group structure is identical for every user (it's all modules grouped),
 // so compute it once rather than per user row / per modal open.
@@ -177,6 +178,7 @@ async function _loadUserList() {
         } catch (_) {}
 
         await _fetchTemplates();
+        await _fetchDenials();
         _renderUserList();
     } catch (_) {
         container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗</div>';
@@ -188,7 +190,7 @@ function _renderUserList() {
     const container = document.getElementById('umgmt-list');
     if (!container) return;
     // Table header（grid 欄頭非 table：sortableSpan 標記；操作欄不排）
-    let html = `<div style="display:grid;grid-template-columns:170px 1fr auto;gap:0;font-size:11px;color:#666;padding:0 16px 8px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;">
+    let html = _denialsHtml() + `<div style="display:grid;grid-template-columns:170px 1fr auto;gap:0;font-size:11px;color:#666;padding:0 16px 8px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;">
         ${sortableSpan('username', '帳號')}${sortableSpan('perms', '權限')}<span>操作</span>
     </div>`;
     html += _userSorter.sorted(_usersCache).map(u => {
@@ -250,6 +252,42 @@ function _renderUserList() {
     });
     _userSorter.attach();
 }
+
+// ─── 最近授權不足（階段 0）：後端 403 環形緩衝；一鍵「開通」＝把那把鑰匙勾到該帳號那一列，管理員再按儲存 ─── //
+let _denialsCache = [];
+async function _fetchDenials() {
+    try { const r = await fetch('/api/v1/auth/denials', { headers: _hdr() }); if (r.ok) _denialsCache = (await r.json()).items || []; } catch (_) {}
+}
+function _denialsHtml() {
+    if (!_denialsCache.length) return '';
+    const seen = new Set(); const rows = [];
+    for (const d of _denialsCache) {                       // 同一人同一把只列一次（最近的）
+        const k = d.username + '|' + (d.missing || []).join(',');
+        if (seen.has(k) || !d.username) continue; seen.add(k); rows.push(d);
+        if (rows.length >= 8) break;
+    }
+    if (!rows.length) return '';
+    const fmt = (iso) => { try { return new Date(iso).toLocaleString('zh-TW', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch (_) { return iso; } };
+    return `<div style="margin:0 0 12px;padding:10px 14px;background:#1e1a14;border:1px solid #4a3a1a;border-radius:8px;font-size:11.5px;">
+        <div style="color:#f59e0b;font-weight:600;margin-bottom:6px;">最近授權不足（重啟後重算）</div>
+        ${rows.map(d => `<div style="display:flex;gap:10px;align-items:center;padding:3px 0;color:#bbb;flex-wrap:wrap;">
+            <span style="color:#666;font-variant-numeric:tabular-nums;">${fmt(d.at)}</span>
+            <b style="color:#e5e5e5;">${esc(d.username)}</b>
+            <span>缺 ${(d.labels || d.missing || []).map(esc).join('／') || '管理員'}</span>
+            <span style="color:#555;font-family:ui-monospace,Menlo,monospace;font-size:10px;">${esc(d.method)} ${esc(d.path)}</span>
+            ${(d.missing || []).length ? `<button type="button" onclick="window._grantFromDenial('${esc(d.username)}','${esc(d.missing[0])}')" class="_fm-btn-cancel" style="padding:1px 8px;font-size:11px;margin-left:auto;">開通「${esc((d.labels || d.missing)[0])}」</button>` : ''}
+        </div>`).join('')}</div>`;
+}
+window._grantFromDenial = function(username, key) {
+    const box = document.querySelector(`input[data-umod-user="${username}"][value="${key}"]`);
+    if (!box) { alert('找不到這個帳號的列（可能是已刪除的帳號）'); return; }
+    box.checked = true; box.disabled = false;
+    _PERM_GROUPS.forEach(g => window._syncUserGroupMaster(username, g.id));
+    window._syncPermParent(username, key);
+    box.closest('[data-uperm-user]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const save = [...document.querySelectorAll('#umgmt-list button')].find(b => b.textContent.includes('儲存') && (b.onclick?.toString() || '').includes(username));
+    if (save) { save.style.outline = '2px solid #f59e0b'; setTimeout(() => { save.style.outline = ''; }, 2500); }
+};
 
 // ─── 身份範本（owner 2026-09-08）：合夥／在職／兼職各一組「預設就有」的鑰匙 ─── //
 // 範本存 settings.json rbac.templates；只是「填勾選的捷徑」，帳號上仍是自己那份 modules（守衛與 token 不看範本）。

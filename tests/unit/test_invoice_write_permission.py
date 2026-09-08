@@ -24,7 +24,8 @@ def test_finance_writes_are_gated_by_the_module_not_by_admin():
     assert "    _check_auth(request)" not in fin, "帳務不該再有管理員限定的寫入"
     files = repo_src("routers/crm/invoice_files.py")
     assert "_check_auth(request)" not in files, "發票檔案端點也是帳務工作"
-    assert files.count("_check_finance_auth(request)") == 5
+    assert files.count("_check_finance_auth(request)") == 4   # 2026-09-08 第三批：invoice-file 改 require_entity(parent, full)
+    assert 'require_entity(request, "parent", level="full")' in files.split("async def serve_invoice_file(")[1][:600], "發票影像＝金額，跟讀取同一把"
 
 
 def test_the_real_chokepoint_is_mine_or_admin_write():
@@ -35,7 +36,8 @@ def test_the_real_chokepoint_is_mine_or_admin_write():
     j = fin.index("def _mine_or_admin_write(")
     seg = fin[j:j + 1400]
     assert 'require_entity(request, "mine", level="full")' in seg, "私帳仍是指名制"
-    assert "_check_finance_auth(request)" in seg, "母帳看模組"
+    assert 'require_entity(request, "parent", level="full")' in seg, "母帳寫入一把尺：crm_invoices＋money_view（2026-09-08 第三批）"
+    assert "_check_finance_auth(request)" not in seg
     # 上一版為了發票加的 parent_guard 管線退場（預設值本身改了就不需要）
     assert "parent_guard" not in fin
 
