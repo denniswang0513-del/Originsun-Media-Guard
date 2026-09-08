@@ -1276,6 +1276,10 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **`merge_plan` 不併沒有專案的列**：鍵會塌成 `("", 分類, 階段)`，不相干的兩件事被併成一列、第二列被刪。
 - **報價單無名分類只跟緊鄰的無名列同組**：`_group_items` 的「同名就是同一組」只適用於有名字的組，
   不然舊報價單（整批沒填分類）印出來的順序會跟輸入的不一樣。
+- **`frontend/my.html` 已經 2,2xx 行，超過單次讀取上限**：改它一定要 offset／limit 分段讀，
+  不要整檔讀了就動手（會被靜默截掉四分之一）。而且 `tests/unit/test_files_stay_readable.py`
+  只掃 `.py`／`.js`，**html 不在它的守備範圍**，所以它是無聲越線的 —— 下一個大改動之前先把
+  第一區（今天與這週）的 script 拆到 `frontend/js/my/` 再說。`frontend/showcase-edit.html` 同樣超標。
 - **報價單版面**：owner 逐項拍板過（無公司抬頭區塊、無上下色帶、灰表頭、總額無粗線、備註在結算下方、
   頁尾只留數字）。要調版面先開示範頁比對，別直接改模板。
 - **`core.quotation_pdf.PDF_MARGIN` 與模板 `@page` 必須一致**：模板還用它算「單頁時簽章貼底」的

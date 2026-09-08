@@ -240,6 +240,27 @@ async def decide_cancel(leave_id: str, body: LeaveCancelDecide, request: Request
     return out
 
 
+def _updated_hours(data: dict, obj, holidays) -> float:
+    """管理端改單後這張單該算幾小時（規則錯 → 422）。
+
+    明給 hours 用它；舊分頁只給 days（且沒給半天時段）用 days×8；其餘照改完的起迄／時段重算。
+    只有這條路准手調時數 —— 員工自助那條（MeLeaveCreate）不收 hours，一律由起迄算。"""
+    if data.get("hours") is not None:
+        hours = float(data["hours"])
+    elif data.get("days") is not None and not data.get("part"):
+        hours = float(data["days"]) * HOURS_PER_DAY
+    else:
+        try:
+            hours = working_hours(tw_day(obj.start_date), tw_day(obj.end_date), obj.part or "all",
+                                  obj.start_time, obj.end_time, holidays)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    try:
+        return check_hours_step(hours)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 @router.put("/leave/{leave_id}")
 async def update_leave(leave_id: str, body: LeaveUpdate, request: Request):
     """只改欄位（假別／起迄／半天時段／時數／事由）。**不接受 status**（422）—— 改狀態走 approve／reject／cancel_decide。
@@ -277,22 +298,8 @@ async def update_leave(leave_id: str, body: LeaveUpdate, request: Request):
         if obj.end_date < obj.start_date:
             raise HTTPException(status_code=422, detail="迄日不可早於起日")
         if touching:
-            # 時數：明給 hours 用它；舊分頁給 days 用 days×8；否則照起迄／半天時段重算
-            if data.get("hours") is not None:
-                hours = float(data["hours"])
-            elif data.get("days") is not None and not data.get("part"):
-                hours = float(data["days"]) * HOURS_PER_DAY
-            else:
-                try:
-                    hours = working_hours(tw_day(obj.start_date), tw_day(obj.end_date), obj.part or "all",
-                                          obj.start_time, obj.end_time, holidays)
-                except ValueError as e:
-                    raise HTTPException(status_code=422, detail=str(e))
-            try:
-                obj.hours = check_hours_step(hours)
-            except ValueError as e:
-                raise HTTPException(status_code=422, detail=str(e))
-            obj.days = hours_to_days(hours)
+            obj.hours = _updated_hours(data, obj, holidays)
+            obj.days = hours_to_days(obj.hours)
         await session.commit()
         await session.refresh(obj)
         return leave_service.request_dict(obj, holidays)
