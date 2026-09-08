@@ -129,20 +129,28 @@ ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_lea
                   "me_benefits",  # 福委會卡（2026-08-21，員工自己登記快樂/進修）
                   # 2026-09-08 owner「在權限管理裡控制員工各個功能的顯示狀態（包含兼職）」：
                   # 「今天與這週」那一區從「任一把 me_* 就整區出現」拆成一顆功能一把鑰匙
-                  "me_worklog",        # 今天的專案紀錄＋我的一週（自己的）→ /me/today、/timesheets/mine*
+                  "me_worklog",        # 今天的專案紀錄 → /me/today、/timesheets/mine*
                   "me_team_week",      # 團隊的一週（含設定專案里程碑）→ /me/team_week、/milestones 寫入
                   "me_project_lookup", # 專案查詢 → /me/projects_burn
-                  "me_plan_parttime")  # 兼職排班（幫狀態是「兼職」的人排我的一週；視窗與端點另做）
+                  "me_plan_parttime",  # 兼職排班（幫狀態是「兼職」的人排我的一週；視窗與端點另做）
+                  # 2026-09-08 晚：owner「今天與這週這個區塊要有一個單獨的控制」＋「只出現我的一週」
+                  "me_today_zone",     # 「今天與這週」整塊的總開關：關了四顆子視圖勾了也沒用（後端每支端點都要它）
+                  "me_week_plan")      # 我的一週（從 me_worklog 拆出來；卡＝格子的列，所以 /timesheets/mine* 兩把任一都收）
 
 # 🔴 me_profile＝「基本資料」，**只**開個人資料卡（owner 2026-09-08：剛註冊只能看到基本資料，其餘由我授權）。
-# 「今天與這週」那一區有任一把 ME_ZONE1_KEYS 才出現，各子視圖各看各的鑰匙（前端 my.html 同一份清單）。
+# 「今天與這週」＝總開關 ME_ZONE_MASTER **且** 任一把子視圖鑰匙 ME_ZONE1_KEYS 才出現；各子視圖各看各的
+# （前端 my.html 同一份清單；後端 core.identity.require_zone_staff＝總開關＋子鑰匙兩者都要）。
 # 新註冊預設只有 me_profile（api_auth._REGISTER_DEFAULT_MODULES），所以綁了人員檔案也還是只有那張卡。
-ME_ZONE1_KEYS = ("me_worklog", "me_team_week", "me_project_lookup")
+ME_ZONE_MASTER = "me_today_zone"
+ME_ZONE1_KEYS = ("me_worklog", "me_week_plan", "me_team_week", "me_project_lookup")
 
 # 拆鑰匙那一刻的一次性回填（main.py 開機）：拆之前「任一把工作鑰匙」就看得到整區，
-# 所以有這幾把之一的帳號補發 ME_ZONE1_KEYS 三把，大家看到的跟拆之前一樣，owner 再逐人收。
+# 所以有這幾把之一的帳號補發子視圖鑰匙，大家看到的跟拆之前一樣，owner 再逐人收。
 # 只跑一次（settings.json 旗標 rbac.me_zone_split_backfilled），之後 owner 收掉的不會被補回來。
 ME_ZONE1_BACKFILL_FROM = ("me_projects", "me_todos", "me_finance", "me_leave", "me_petty", "me_benefits")
+# 第二次（總開關＋我的一週拆出來，旗標 rbac.me_today_zone_backfilled）：有任一把子鑰匙 → 補總開關；
+# 有「今天的專案紀錄」→ 補「我的一週」（拆之前它們是同一把）。
+ME_ZONE_MASTER_BACKFILL_FROM = ("me_worklog", "me_team_week", "me_project_lookup")
 
 ALL_MODULES = [
     'bulletin',
@@ -202,6 +210,8 @@ ALL_MODULES = [
     # 員工工作台「今天與這週」拆成一顆功能一把（2026-09-08；正本與說明在上面的 ME_MODULE_KEYS）。
     # ⚠ 一律 append 在尾端 — modules[0] 決定 admin 落地頁。
     'me_worklog', 'me_team_week', 'me_project_lookup', 'me_plan_parttime',
+    # 同日晚：「今天與這週」總開關＋「我的一週」拆出來（說明同上）。⚠ append 在尾端。
+    'me_today_zone', 'me_week_plan',
 ]
 
 

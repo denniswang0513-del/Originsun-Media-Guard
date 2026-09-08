@@ -35,7 +35,7 @@ def test_today_and_team_week_are_gated_by_any_me_key_plus_binding():
         assert "body.staff_id" not in body and "username=" not in body.split("select(")[0], fn
     gate = func_body(src, "async def _me_bound(")
     # 2026-09-06：守衛收成一行；2026-09-08：改成各子視圖自己的鑰匙（timesheets 模組整區恆過）
-    assert 'require_bound_staff(request, "timesheets", *keys)' in gate
+    assert "require_zone_staff(request, *keys)" in gate     # 2026-09-08 晚：總開關＋子鑰匙兩道（core.identity）
     assert "ME_MODULE_KEYS" not in gate        # 409 原句只在 core.identity
     assert '_me_bound(request, "me_worklog")' in func_body(src, "async def my_today(")
     assert '_me_bound(request, "me_team_week")' in func_body(src, "async def team_week(")

@@ -30,9 +30,9 @@ def test_today_zone_endpoints_require_their_own_key():
     """/me/today、/me/team_week、/me/projects_burn、/timesheets/mine*：綁了人員檔案、只有 me_profile 的帳號也進不去
     （2026-09-08 起一顆功能一把，細節在 test_me_zone_keys.py）。"""
     me = code_only(repo_src("routers/api_me.py"))
-    assert 'require_bound_staff(request, "timesheets", *keys)' in func_body(me, "async def _me_bound(")
+    assert "require_zone_staff(request, *keys)" in func_body(me, "async def _me_bound(")
     ts = code_only(repo_src("routers/api_timesheets.py"))
-    assert 'require_bound_staff(request, "timesheets", "me_worklog")' in func_body(ts, "async def _mine_ident(")
+    assert 'require_zone_staff(request, "me_worklog", "me_week_plan")' in func_body(ts, "async def _mine_ident(")
     assert "ME_MODULE_KEYS" not in ts.split("from core.auth import")[1].split("\n")[0]
 
 
@@ -41,7 +41,7 @@ def test_workspace_draws_the_profile_card_and_hides_the_today_zone_for_profile_o
     zone = html[html.index("const ME_ZONE_ON = new Set("):]
     zone = zone[:zone.index(")")]
     assert '"me_profile"' in zone, "個人資料卡要在 ME_ZONE_ON，不然只有 me_profile 的新帳號整頁空白"
-    assert "ws.allowed.some(k => Z1_KEYS.includes(k))" in html and '"me_profile"' not in html[html.index("const Z1_KEYS"):html.index("const Z1_KEYS") + 120], \
+    assert "ws.allowed.some(k => Z1_KEYS.includes(k))" in html and '"me_profile"' not in html[html.index("const Z1_KEYS"):html.index("const Z1_KEYS") + 140], \
         "「今天與這週」不能因為 me_profile 就出現（後端 ME_ZONE1_KEYS 同一條）"
     # 沒綁人員檔案的提醒仍然靠 staffSections（含 me_profile）：新帳號要看得到「請管理員綁定」
     assert "!ws.bound && ws.allowed.some(k => staffSections.includes(k))" in html

@@ -110,10 +110,11 @@ async def _ts_or_bound(request: Request) -> Optional[str]:
 
 
 async def _mine_ident(request: Request) -> dict:
-    """timesheets 模組或「專案紀錄」那把（me_worklog）＋ 綁定人員檔案（owner 2026-09-08：員工工作台一顆功能一把，
-    在權限管理逐人開；me_profile 只開基本資料卡）。"""
-    from core.identity import require_bound_staff
-    return await require_bound_staff(request, "timesheets", "me_worklog")
+    """「我的一天／今天的專案紀錄／我的一週」的列：總開關（me_today_zone）＋「今天的專案紀錄」或「我的一週」任一把
+    （我的一週的卡就是格子的列，兩邊都要能讀寫）＋綁定人員檔案；timesheets 模組恆過。
+    （owner 2026-09-08：一顆功能一把、整塊一個總開關；me_profile 只開基本資料卡）"""
+    from core.identity import require_zone_staff
+    return await require_zone_staff(request, "me_worklog", "me_week_plan")
 
 
 @router.get("/ingest_token")

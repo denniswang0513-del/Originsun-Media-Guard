@@ -508,6 +508,30 @@ async def _on_startup():
             print(f"[migrate] 今天與這週拆鑰匙：補發 {_n_bf} 個帳號（只跑這一次）")
     except Exception as _e_bf:
         print(f"[migrate] 今天與這週拆鑰匙回填略過: {_e_bf}")
+    # ── 第二次（同日晚）：「今天與這週」總開關＋「我的一週」拆出來（旗標 rbac.me_today_zone_backfilled）──
+    # 有任一把子鑰匙的人補總開關；有「今天的專案紀錄」的人補「我的一週」（拆之前是同一把）。同上只跑一次。
+    try:
+        from config import load_settings as _ls_bf2, save_settings as _ss_bf2
+        _st_bf2 = _ls_bf2()
+        if not (_st_bf2.get("rbac") or {}).get("me_today_zone_backfilled"):
+            from core.auth import ME_ZONE_MASTER as _bf2_master, ME_ZONE_MASTER_BACKFILL_FROM as _bf2_from
+            from routers.api_auth import _get_all_users as _bf2_users, _persist_user as _bf2_persist
+            _n_bf2 = 0
+            for _u in await _bf2_users():
+                _mods = list(_u.get("modules") or [])
+                if int(_u.get("access_level") or 0) >= 3 or not any(k in _mods for k in _bf2_from):
+                    continue
+                _add = [k for k in ([_bf2_master] + (["me_week_plan"] if "me_worklog" in _mods else [])) if k not in _mods]
+                if not _add:
+                    continue
+                _u["modules"] = _mods + _add
+                await _bf2_persist(_u)
+                _n_bf2 += 1
+            _st_bf2.setdefault("rbac", {})["me_today_zone_backfilled"] = True
+            _ss_bf2(_st_bf2)
+            print(f"[migrate] 今天與這週總開關：補發 {_n_bf2} 個帳號（只跑這一次）")
+    except Exception as _e_bf2:
+        print(f"[migrate] 今天與這週總開關回填略過: {_e_bf2}")
     # ── 公布欄欄位 migration（新欄位 create_all 不補到既有表）+ 種子 ──
     if state.db_online:
         try:

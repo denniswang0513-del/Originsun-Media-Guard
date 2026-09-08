@@ -46,7 +46,7 @@ def test_board_and_my_day_are_gated_by_the_timesheets_module():
     for fn in ("async def my_day(", "async def my_add_rows(", "async def my_update_row(", "async def my_delete_row("):
         assert "_mine_ident(request)" in func_body(src, fn), fn
     mine = func_body(src, "async def _mine_ident(")
-    assert 'require_bound_staff(request, "timesheets", "me_worklog")' in mine
+    assert 'require_zone_staff(request, "me_worklog", "me_week_plan")' in mine   # 總開關＋兩把任一（我的一週的卡＝格子的列）
     # 看板不排名、不標紅：回的是每個人的工作項，沒有「漏填」欄位
     board = func_body(src, "async def day_board(")
     assert '"missing' not in board and '"rank' not in board

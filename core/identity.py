@@ -54,6 +54,15 @@ async def resolve_current_staff(request: Request) -> dict:
     return result
 
 
+async def require_zone_staff(request: Request, *sub_keys: str) -> dict:
+    """「今天與這週」那一區的守衛：**總開關（me_today_zone）＋那個子視圖自己的鑰匙**兩者都要，再加綁定人員檔案。
+    工作追蹤模組（timesheets）與管理員整區恆過。owner 2026-09-08：「這個區塊要有一個單獨的控制」——
+    子鑰匙勾了、總開關沒開，後端也要 403，不能只靠前端不畫按鈕。"""
+    from core.auth import ME_ZONE_MASTER
+    check_admin_or_module(request, "timesheets", ME_ZONE_MASTER)          # 第一道：總開關
+    return await require_bound_staff(request, "timesheets", *sub_keys)   # 第二道：子視圖＋綁定
+
+
 async def require_bound_staff(request: Request, *modules: str) -> dict:
     """守衛（模組鑰匙由呼叫端給，可多把：任一把即可）＋ 必須綁定人員檔案：回 resolve_current_staff 的 dict，
     沒綁 → 409。個人頁（profile／leave／timesheets）與 CRM tab 的「我的一天」都走這一支，409 原句只有這裡。"""

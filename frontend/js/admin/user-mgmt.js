@@ -6,7 +6,10 @@ import { createSortable, sortableSpan } from '../../tabs/crm/crm-utils.js';
 
 // key 集合必須 == core/auth.py ALL_MODULES == tab-config.js PERMISSION_GROUPS
 // （tests/unit/test_rbac_module_sync.py 三方同步測試把關，漏 key 會 fail）
-const MODULE_LABELS = {bulletin:'公布欄',preprod_plan:'拍攝企劃',preprod_locations:'場景庫',preprod_proposals:'提案庫',intel:'產業情報',equipment:'器材庫',references:'片庫',backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',footage:'素材庫',comfyui:'ComfyUI',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'財務管理',money_view:'金額檢視',finance_approve:'零用金審核',finance_partner:'母公司報表',finance_mine:'我的帳',timesheets:'工時檢核',portal:'審批門戶',media_log:'影像紀錄',website_admin:'官網',me_projects:'我的專案',me_profile:'我的資料',me_todos:'我的待辦',me_finance:'我的工時請款',hr_leave:'請補修',hr_benefits:'福委會',me_benefits:'我的福委會',journal:'工作日誌',me_leave:'我的請假',me_petty:'我的請款',me_worklog:'專案紀錄',me_team_week:'團隊的一週',me_project_lookup:'專案查詢',me_plan_parttime:'兼職排班'};
+const MODULE_LABELS = {bulletin:'公布欄',preprod_plan:'拍攝企劃',preprod_locations:'場景庫',preprod_proposals:'提案庫',intel:'產業情報',equipment:'器材庫',references:'片庫',backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',footage:'素材庫',comfyui:'ComfyUI',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'財務管理',money_view:'金額檢視',finance_approve:'零用金審核',finance_partner:'母公司報表',finance_mine:'我的帳',timesheets:'工時檢核',portal:'審批門戶',media_log:'影像紀錄',website_admin:'官網',me_projects:'我的專案',me_profile:'我的資料',me_todos:'我的待辦',me_finance:'我的工時請款',hr_leave:'請補修',hr_benefits:'福委會',me_benefits:'我的福委會',journal:'工作日誌',me_leave:'我的請假',me_petty:'我的請款',me_worklog:'今天的專案紀錄',me_team_week:'團隊的一週',me_project_lookup:'專案查詢',me_plan_parttime:'兼職排班',me_today_zone:'今天與這週',me_week_plan:'我的一週'};
+
+// 有層級的鑰匙：子 → 父。父（總開關）沒勾時子鑰匙灰掉；勾子鑰匙時父自動一起勾（後端 require_zone_staff 兩者都要）。
+const PERM_PARENT = { me_worklog: 'me_today_zone', me_week_plan: 'me_today_zone', me_team_week: 'me_today_zone', me_project_lookup: 'me_today_zone' };
 
 // The 4-group structure is identical for every user (it's all modules grouped),
 // so compute it once rather than per user row / per modal open.
@@ -46,12 +49,15 @@ function _renderUserPermCell(username, userModules, isAdminUser, locked, opts = 
         const total = g.modules.length;
         const checkedN = g.modules.filter(m => userModules.includes(m)).length;
         const allOn = checkedN === total && total > 0;
-        const boxes = g.modules.map(m => `
-            <label class="_fm-chk" style="min-width:auto;padding:2px 6px;">
-                <input type="checkbox" data-umod-user="${username}" data-group="${g.id}" value="${m}"
-                       ${userModules.includes(m) ? 'checked' : ''} ${boxDis(m)}
-                       onchange="window._syncUserGroupMaster('${username}','${g.id}')"> ${MODULE_LABELS[m] || m}
-            </label>`).join('');
+        const boxes = g.modules.map(m => {
+            const parent = PERM_PARENT[m];
+            const parentOff = parent && !userModules.includes(parent);
+            return `
+            <label class="_fm-chk" style="min-width:auto;padding:2px 6px;${parent ? 'margin-left:18px;' : ''}"${parent ? ` title="要先開「${MODULE_LABELS[parent] || parent}」"` : ''}>
+                <input type="checkbox" data-umod-user="${username}" data-group="${g.id}" value="${m}"${parent ? ` data-parent="${parent}"` : ''}
+                       ${userModules.includes(m) ? 'checked' : ''} ${boxDis(m) || (parentOff ? 'disabled' : '')}
+                       onchange="window._syncUserGroupMaster('${username}','${g.id}'); window._syncPermParent('${username}','${m}')"> ${parent ? '└ ' : ''}${MODULE_LABELS[m] || m}
+            </label>`; }).join('');
         return `
             <div style="margin-bottom:4px;">
                 <label class="_fm-chk" style="font-weight:600;color:#bbb;padding:2px 6px;">
@@ -290,6 +296,18 @@ window._syncUserGroupMaster = function(username, groupId) {
     }
     const count = document.querySelector(`span[data-ucount-user="${username}"][data-group="${groupId}"]`);
     if (count) count.textContent = `${checked}/${boxes.length}`;
+};
+
+// 父子鑰匙：勾了子 → 父跟著勾；父的勾／不勾 → 子鑰匙開／灰（灰掉的仍保留勾選，只是提醒「總開關沒開」）。
+window._syncPermParent = function(username, m) {
+    const box = (k) => document.querySelector(`input[data-umod-user="${username}"][value="${k}"]`);
+    const parent = PERM_PARENT[m];
+    if (parent && box(m)?.checked) { const p = box(parent); if (p && !p.checked) { p.checked = true; } }
+    const pKey = parent || m;
+    const pBox = box(pKey);
+    if (!pBox) return;
+    document.querySelectorAll(`input[data-umod-user="${username}"][data-parent="${pKey}"]`)
+        .forEach(cb => { cb.disabled = !pBox.checked; });
 };
 
 // 管理員 on = full access (modules implied) → dim the module grid. off = re-enable.

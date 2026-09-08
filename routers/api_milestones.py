@@ -20,7 +20,9 @@ def _who(request: Request) -> str:
 
 
 def _writer(request: Request) -> str:
-    """寫入端點：團隊的一週那把（me_team_week）或工作追蹤模組（管理員恆過）。"""
+    """寫入端點：「今天與這週」總開關（me_today_zone）＋團隊的一週那把（me_team_week）兩者都要；工作追蹤模組／管理員恆過。"""
+    from core.auth import ME_ZONE_MASTER
+    check_admin_or_module(request, "timesheets", ME_ZONE_MASTER)
     p = check_admin_or_module(request, "timesheets", "me_team_week")
     return p.get("username") or p.get("sub") or ""
 

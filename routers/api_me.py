@@ -25,7 +25,7 @@ from core.auth import ME_MODULE_KEYS, check_admin_or_module, grant_admin_all_mod
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup,
                            month_key, month_span, months_back, parse_ymd, project_metrics, tw_day)
-from core.identity import require_bound_staff, resolve_current_staff
+from core.identity import require_bound_staff, require_zone_staff, resolve_current_staff
 from core.hr_logic import STAFF_ACTIVE, staff_rank
 from core.journal_logic import shell_status, week_start_of
 from core.leave_logic import cancel_mode, in_crew, vocab as leave_vocab
@@ -364,9 +364,10 @@ async def cancel_my_leave_legacy(leave_id: str, request: Request):
 # 守衛＝任何 me_* 鑰匙＋綁定人員檔案（409 原句只在 core.identity.require_bound_staff）。
 
 async def _me_bound(request: Request, *keys: str) -> dict:
-    """「今天與這週」那一區的端點：**那個子視圖自己的鑰匙**＋綁定人員檔案（owner 2026-09-08：
-    一顆功能一把，在權限管理逐人開；me_profile 只開基本資料卡）。工作追蹤模組（timesheets）本來就整區能用。"""
-    return await require_bound_staff(request, "timesheets", *keys)
+    """「今天與這週」那一區的端點：總開關（me_today_zone）＋**那個子視圖自己的鑰匙**＋綁定人員檔案
+    （owner 2026-09-08：一顆功能一把、整塊一個總開關，在權限管理逐人開；me_profile 只開基本資料卡）。
+    工作追蹤模組（timesheets）本來就整區能用。守衛正本 core.identity.require_zone_staff。"""
+    return await require_zone_staff(request, *keys)
 
 
 async def _shoots_between(session, d0: date, d1: date) -> list:
