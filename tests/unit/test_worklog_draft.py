@@ -9,7 +9,9 @@ def test_pending_state_and_blank_row_guard():
     from core.hr_logic import EDITABLE_STATUSES, PENDING_STATUS, row_state
     assert row_state(0, None) == PENDING_STATUS == "pending" and PENDING_STATUS in EDITABLE_STATUSES
     body = code_only(func_body(repo_src("services/timesheet_manual.py"), "def normalize_row("))
-    assert 'if status == "pending" and not (pname or' in body and "空白列不存" in body
+    # 2026-09-08：守衛從「只擋 pending」擴到「pending 與 plan 都擋」——「我的一週」的 plan 旗標會讓
+    # row_state 直接回 "plan"，只看 pending 的話，帶 plan:true 的空 POST 就繞過去存進一列垃圾
+    assert 'if status in ("pending", "plan") and hours <= 0 and not (' in body and "空白列不存" in body
 
 
 def test_aggregation_ignores_pending_rows_by_hours_filter():

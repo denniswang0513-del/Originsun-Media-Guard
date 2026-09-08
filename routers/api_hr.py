@@ -13,7 +13,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
-from sqlalchemy import func, select  # type: ignore
+from sqlalchemy import func, or_, select  # type: ignore
 
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503
@@ -27,6 +27,10 @@ from db.models import CrmStaff, HrHoliday, HrLeaveAllocation, HrLeaveCredit, HrL
 from services import leave_service
 
 router = APIRouter(prefix="/api/v1/hr", tags=["hr"])
+
+#: 「在職」的 WHERE —— **空白視同在職**（core.hr_logic.is_active_staff 的 SQL 版；status 是後補的欄位，
+#: 舊人員列是 NULL／空字串）。嚴格比對會讓那些人在時數帳／特休總覽整個消失，但他自己送得出假單。
+_ACTIVE_STAFF = or_(CrmStaff.status == "在職", CrmStaff.status.is_(None), CrmStaff.status == "")
 
 
 def _actor(payload) -> str:
@@ -125,7 +129,7 @@ async def leave_quota(request: Request, year: int = 0):
     factory = db_factory_or_503()
     async with factory() as session:
         staff_rows = (await session.execute(
-            select(CrmStaff).where(CrmStaff.status == "在職").order_by(CrmStaff.name)
+            select(CrmStaff).where(_ACTIVE_STAFF).order_by(CrmStaff.name)
         )).scalars().all()
         used_map = await approved_annual_used(session, [s.id for s in staff_rows], year)
         return {"year": year, "staff": [{
@@ -318,7 +322,7 @@ async def all_balances(request: Request, year: int = 0):
     factory = db_factory_or_503()
     async with factory() as session:
         staff_rows = (await session.execute(
-            select(CrmStaff).where(CrmStaff.status == "在職").order_by(CrmStaff.name))).scalars().all()
+            select(CrmStaff).where(_ACTIVE_STAFF).order_by(CrmStaff.name))).scalars().all()   # 空白狀態也算在職
         ids = [s.id for s in staff_rows]
         bal = await leave_service.balances_for(session, ids, today)
         sick = await leave_service.sick_used_for(session, ids, year)

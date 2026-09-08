@@ -151,7 +151,8 @@ async def my_workspace(request: Request):
                        func.sum(Timesheet.hours), func.count(Timesheet.id),
                        func.max(Timesheet.work_date))
                 .where(own_filter(ident))           # own-scope 同「我的工時」那一條
-                .group_by(Timesheet.project_name)
+                .where(Timesheet.hours > 0)         # 只算做過的：「我的一週」往後排的計畫列（0 h）不能算進來，
+                .group_by(Timesheet.project_name)   # 不然只排沒做的案會憑空出現，「最後填報」還變成未來日期排到最上面
                 .order_by(func.max(Timesheet.work_date).desc())
             )).all()
             month_start = month_span("")[0]

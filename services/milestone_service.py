@@ -126,14 +126,21 @@ async def save_week(session, start: str, items: list, username: str) -> dict:
             m = await session.get(M, it.id)
             if m is None:
                 continue
-            if it.delete or not title:
+            if it.delete:                      # 只有明講 delete 才刪；標題空白＝那一格沒填，跳過不動
                 await session.delete(m)
+                continue
+            if not title:
                 continue
             m.title = title
             m.due_date = as_date(it.due_date) or m.due_date
-            m.assignee_staff_id = (it.assignee_staff_id or "").strip() or None
-            m.assignee_name = (it.assignee_name or "").strip()
-            m.note = (it.note or "").strip() or None
+            # 沒帶的欄位不動（舊分頁的 js 被 Cloudflare 快取四小時，它送的 item 沒有這幾欄；
+            # 無條件寫回會把別人剛指定的負責人、剛寫的備註清成空的）
+            if it.assignee_staff_id is not None:
+                m.assignee_staff_id = it.assignee_staff_id.strip() or None
+            if it.assignee_name is not None:
+                m.assignee_name = it.assignee_name.strip()
+            if it.note is not None:
+                m.note = it.note.strip() or None
             if it.done is not None and (m.status == STATUS_DONE) != bool(it.done):
                 m.status = STATUS_DONE if it.done else STATUS_OPEN
                 m.done_by = username if it.done else None

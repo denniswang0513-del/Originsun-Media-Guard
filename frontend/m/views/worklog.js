@@ -43,9 +43,11 @@ async function loadProjects() {
 function cardHtml(i) {
     const meta = [i.work_type, i.stage_name].filter(Boolean).join(' · ');
     const span = i.start_time && i.end_time ? `${i.start_time}–${i.end_time}` : (i.start_time || '');
+    // 「我的一週」排的計畫列沒有時數：畫「計畫」而不是「0 h」（不然跟真的忘了填的草稿分不出來）
+    const plan = i.status === 'plan' && !(i.hours > 0);
     return `
       <div class="m-card tap" data-id="${esc(i.id)}">
-        <div class="t"><div class="name">${i.project_name ? esc(i.project_name) : '<span style="color:var(--sub);font-weight:500">未填專案</span>'}</div>${pill((i.hours || 0) + ' h', 'pri')}</div>
+        <div class="t"><div class="name">${i.project_name ? esc(i.project_name) : '<span style="color:var(--sub);font-weight:500">未填專案</span>'}</div>${plan ? pill('計畫') : pill((i.hours || 0) + ' h', 'pri')}</div>
         ${i.task_note ? `<div class="sub" style="color:var(--ink)">${esc(i.task_note)}</div>` : ''}
         <div class="sub">${[meta, span, i.remark].filter(Boolean).map(esc).join(' · ')}</div>
       </div>`;

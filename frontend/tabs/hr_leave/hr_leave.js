@@ -31,6 +31,11 @@ let _credits = {};               // staff_id → credit 明細
 let _importResult = '';
 
 const el = (id) => document.getElementById(id);
+// 今天（本地時區）。🔴 不要用 toISOString().slice(0,10)：+08 的早上八點前會變成昨天。
+// （這個檔一律用雙斜線註解，不要用 JSDoc 區塊註解：檔頭第 4 行的路徑寫法帶了一個「斜線星號」，
+//   只要檔案裡再出現一個「星號斜線」，tests/unit/_srcscan.js_code_only 就會把中間整段當成區塊註解
+//   剝掉——真的程式碼會跟著消失，而測試只會說某個常數不見了。）
+const _localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const hget = (path) => authFetch(API + path);
 const hpost = (path, body) => authFetch(API + path, { method: 'POST', body: body ?? {} });
 const hdel = (path) => authFetch(API + path, { method: 'DELETE' });
@@ -392,7 +397,7 @@ function _balanceRow(s) {
 
 function _creditsHtml(staffId, name) {
     const list = _credits[staffId];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = _localToday();
     const rows = list === undefined ? '<div class="hl-empty">載入中…</div>'
         : !list.length ? '<div class="hl-empty">尚無 credit</div>'
         : `<table>
@@ -416,14 +421,14 @@ function _creditsHtml(staffId, name) {
         </table>`;
     return `<div style="color:#aaa;font-size:12px;margin-bottom:8px;">${esc(name)} 的 credit 明細</div>
         ${rows}
-        <div class="hl-form" style="margin-top:10px;padding-top:10px;border-top:1px solid #333;">
+        <div class="hl-form" data-credit-form="${esc(staffId)}" style="margin-top:10px;padding-top:10px;border-top:1px solid #333;">
             <span style="color:#888;font-size:12px;">手開：</span>
-            <select id="hl-c-kind">${CREDIT_KINDS.map(k => `<option>${k}</option>`).join('')}</select>
-            <input type="number" id="hl-c-hours" min="0.5" step="0.5" value="8" title="時數">
-            <span style="color:#777;font-size:12px;">發放</span><input type="date" id="hl-c-granted" value="${today}">
-            <span style="color:#777;font-size:12px;">到期</span><input type="date" id="hl-c-expires">
-            <input type="text" id="hl-c-reason" placeholder="事由（例：加班補休 9/1 拍攝）" style="width:220px;">
-            <button class="hl-btn" id="hl-c-add" data-staff="${esc(staffId)}">建立</button>
+            <select data-c="kind">${CREDIT_KINDS.map(k => `<option>${k}</option>`).join('')}</select>
+            <input type="number" data-c="hours" min="0.5" step="0.5" value="8" title="時數">
+            <span style="color:#777;font-size:12px;">發放</span><input type="date" data-c="granted" value="${today}">
+            <span style="color:#777;font-size:12px;">到期</span><input type="date" data-c="expires">
+            <input type="text" data-c="reason" placeholder="事由（例：加班補休 9/1 拍攝）" style="width:220px;">
+            <button class="hl-btn" data-c-add="${esc(staffId)}">建立</button>
         </div>`;
 }
 
@@ -456,14 +461,19 @@ async function _loadCredits(staffId) {
     }
 }
 
-async function _addCredit(staffId) {
+// 手開 credit：欄位一律從**這個人自己那張表單**讀（同時展開兩個人時，id 會撞到彼此的值）。
+async function _addCredit(staffId, btn) {
+    const form = btn ? btn.closest('[data-credit-form]')
+        : document.querySelector(`#hl-content [data-credit-form="${CSS.escape(String(staffId))}"]`);
+    if (!form) return;
+    const f = (k) => form.querySelector(`[data-c="${k}"]`)?.value ?? '';
     const body = {
         staff_id: staffId,
-        kind: el('hl-c-kind').value,
-        hours: parseFloat(el('hl-c-hours').value || '0'),
-        granted_on: el('hl-c-granted').value,
-        expires_on: el('hl-c-expires').value || null,
-        reason: el('hl-c-reason').value.trim(),
+        kind: f('kind'),
+        hours: parseFloat(f('hours') || '0'),
+        granted_on: f('granted'),
+        expires_on: f('expires') || null,
+        reason: f('reason').trim(),
     };
     if (!(body.hours > 0) || !body.granted_on) { alert('請填時數與發放日'); return; }
     const r = await hpost('/credits', body);
@@ -485,7 +495,7 @@ function _bindBalances() {
             await _loadBalances();
             return _renderBalances();
         }
-        if (btn && btn.id === 'hl-c-add') return _addCredit(btn.dataset.staff);
+        if (btn && btn.dataset.cAdd) return _addCredit(btn.dataset.cAdd, btn);
         if (btn && btn.id === 'hl-b-reload') { _credits = {}; await _loadBalances(); return _renderBalances(); }
         if (ev.target.closest('.hl-detail')) return;      // 明細列內的點擊不收合
         const tog = ev.target.closest('[data-toggle-credits]');

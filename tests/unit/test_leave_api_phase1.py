@@ -68,7 +68,12 @@ def test_employee_leave_endpoints_require_bound_staff_and_me_leave():
 def test_put_rejects_status_and_never_changes_it():
     body = code_only(func_body(HR, "async def update_leave("))
     assert 'data.get("status") is not None' in body and "422" in body
-    assert "obj.status =" not in body and "apply_leave_status" not in HR
+    assert "obj.status =" not in body
+    # 全檔只有這幾支能寫 leave／credit 的 status（原本這裡斷言一個從來不存在的識別字，等於沒守）。
+    # 多一支就要在這裡具名加進來，順便被人看見「又多了一條改狀態的路」。
+    writers = {fn for fn in re.findall(r"^async def (\w+)\(", HR, re.M)
+               if "obj.status =" in code_only(func_body(HR, f"async def {fn}("))}
+    assert writers == {"reject_leave", "decide_cancel", "_decide_credit"}, writers
 
 
 def test_approve_allocates_from_the_ledger_and_notifies():
@@ -184,15 +189,34 @@ def test_new_request_columns_are_in_the_boot_migration_with_backfill():
     assert "UPDATE hr_leave_requests SET hours" in repo_src("db/migrations.py")
 
 
+def _schema_body(src: str, cls: str) -> str:
+    body = src[src.index(f"class {cls}("):]
+    return body[:body.index("\nclass ")]
+
+
 def test_schemas_keep_new_fields_optional_for_old_clients():
     src = repo_src("core/schemas.py")
-    for cls in ("MeLeaveCreate", "LeaveCreate", "LeaveUpdate"):
-        body = src[src.index(f"class {cls}("):]
-        body = body[:body.index("\nclass ")]
+    for cls in ("LeaveCreate", "LeaveUpdate"):        # 管理端：時數可以手調，欄位要 Optional（舊分頁不帶）
+        body = _schema_body(src, cls)
         for f in ("part", "start_time", "end_time", "hours", "days"):
             assert re.search(rf"\n    {f}: Optional\[[^\]]+\] = None", body), f"{cls}.{f} 要 Optional=None（舊分頁不帶）"
+    body = _schema_body(src, "MeLeaveCreate")         # 員工自助：時段欄位照樣 Optional
+    for f in ("part", "start_time", "end_time"):
+        assert re.search(rf"\n    {f}: Optional\[[^\]]+\] = None", body), f"MeLeaveCreate.{f} 要 Optional=None"
     for cls in ("MeLeavePreview", "LeaveCancel", "LeaveReject", "LeaveCancelDecide", "CreditCreate", "HolidayCreate", "HolidayImport"):
         assert f"class {cls}(BaseModel)" in src, cls
+
+
+def test_employee_leave_never_takes_hours_from_the_client():
+    """🔴 員工自助送單**不收 hours／days**（2026-09-08 review）：收了的話可以送「五天特休、hours: 0.5」，
+    preview 顯示 40 小時、實際只從特休帳扣 0.5。時數一律由起迄／時段算（hours_from_body 走 working_hours）。
+    MeLeavePreview 本來就沒有這兩欄，兩條路要算出同一個答案。"""
+    from core.schemas import MeLeaveCreate, MeLeavePreview
+    assert "hours" not in MeLeaveCreate.model_fields and "days" not in MeLeaveCreate.model_fields
+    assert set(MeLeaveCreate.model_fields) - set(MeLeavePreview.model_fields) == {"reason"}, "送單只比 preview 多一個事由"
+    m = MeLeaveCreate(leave_type="特休", start_date="2026-10-05", end_date="2026-10-09", reason="x",
+                      hours=0.5, days=0.5)          # 舊分頁還在送 → 被忽略，不是 422
+    assert getattr(m, "hours", None) is None and getattr(m, "days", None) is None
 
 
 def test_rules_live_in_leave_logic_not_in_routers():

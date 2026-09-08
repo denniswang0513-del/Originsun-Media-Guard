@@ -55,7 +55,10 @@ def test_cancel_mode_has_three_branches():
     assert "r.cancel_mode === 'free'" in acts and 'data-mode="free"' in acts and "撤回" in acts
     assert "r.cancel_mode === 'apply'" in acts and 'data-mode="apply"' in acts and "申請消假" in acts
     assert "r.cancel_mode === 'locked'" in acts and "颱風假當日不可消" in acts and "data-locked=" in acts
-    assert "<button" not in acts.split("'locked'", 1)[1].split("\n", 1)[0], "locked 是文字不是按鈕"
+    # locked 分支整段（到 return 的分號為止）都不能有按鈕 —— 不是只看 'locked' 之後那一行，
+    # 不然把 markup 換行或把分支往上挪，這條就形同虛設
+    locked = re.search(r"cancel_mode === 'locked'\)\s*return\s*(.+?);", acts, re.S)
+    assert locked and "<button" not in locked.group(1) and "<span" in locked.group(1), "locked 是文字不是按鈕"
     cancel = js_func_body(SRC, "async function cancelRequest(btn, host)")
     assert "window.prompt(" in cancel and "body.note = note" in cancel and "if (!note) return" in cancel, "apply 要帶必填 note"
     assert "window.confirm(" in cancel, "撤回前要 confirm"

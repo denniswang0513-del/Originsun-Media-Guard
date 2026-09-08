@@ -128,6 +128,8 @@ export function mountPicker(id, { items = [], placeholder = '', value = '', free
         const r = ev.target.closest('.m-pick-row');
         if (!r) return;
         if (r.dataset.create === undefined) return set(r.dataset.v);
+        if (r.dataset.busy) return;      // 建立中再點一次會建出第二筆同名客戶
+        r.dataset.busy = '1';
         r.textContent = '建立中…';
         try {
             const made = await onCreate(r.dataset.create);

@@ -894,6 +894,15 @@ def staff_rank(status) -> int:
     return STAFF_RANK.get((status or "").strip(), 2)
 
 
+def is_active_staff(status) -> bool:
+    """「在職」＝在職，**或狀態空白**（status 是後來才加的欄位，舊人員列是 NULL／空字串）。
+
+    嚴格比對 `status == "在職"` 的地方會讓那些人整個消失 —— 假勤的時數帳與特休總覽踩過：
+    人自己送得出假單、也開得了 credit，管理員卻永遠看不到他的餘額。
+    （SQL 那側寫成 `or_(status == STAFF_ACTIVE, status.is_(None), status == "")`，同一條規則。）"""
+    return (status or "").strip() in ("", STAFF_ACTIVE)
+
+
 # ── 合併同案（owner 2026-09-07：員工一天分好幾段記同一個案，「合併同案」把同案同分類同階段的列併成一列）──
 
 def _merge_key(r: dict) -> tuple:
@@ -915,8 +924,11 @@ def merge_plan(rows) -> dict:
     同鍵 ≥2 列才成組。本體＝起始時間最早的那列（沒起訖就照給的順序第一列）；時數相加、做了什麼／備註去重接起來、
     起訖清空（那只是算時數的工具，併完再留會誤導）。草稿列（沒時數）、Sheet 列、計畫列都不動。
     回 {"groups":[{label, kept_id, absorbed_ids, hours, task_note, remark, count}], "skipped": 沒併的列數}。"""
+    # 沒對到案、也沒打案名的列不併：它們的鍵會全部塌成 ("", 分類, 階段)，
+    # 於是「行政庶務 2h」和「會議 3h」這兩件不相干的事被併成一列 5h，標籤還只寫「（未填專案）」
     cand = [(i, r) for i, r in enumerate(rows)
-            if r.get("editable", True) and float(r.get("hours") or 0) > 0 and (r.get("status") or "") != "plan"]
+            if r.get("editable", True) and float(r.get("hours") or 0) > 0 and (r.get("status") or "") != "plan"
+            and ((r.get("project_id") or "").strip() or (r.get("project_name") or "").strip())]
     buckets: dict = {}
     for i, r in cand:
         buckets.setdefault(_merge_key(r), []).append((i, r))

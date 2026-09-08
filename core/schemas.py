@@ -371,16 +371,17 @@ class MeLeavePreview(BaseModel):
 
 
 class MeLeaveCreate(BaseModel):
-    """員工自助送單（staff_id 由 token 解析，不收）。欄位同 MeLeavePreview ＋ reason（必填）；
-    舊分頁送 {days} 沒送 part／hours → 換算 days×8。"""
+    """員工自助送單（staff_id 由 token 解析，不收）。欄位同 MeLeavePreview ＋ reason（必填）。
+
+    🔴 **不收 hours／days**：時數一律由起迄／時段算（`leave_service.hours_from_body`）。收了的話
+    員工可以送「請五天特休、hours: 0.5」，preview 顯示 40 小時、實際只從時數帳扣 0.5 ——
+    而且 MeLeavePreview 本來就沒有這兩欄，兩條路會算出不同答案。管理端要手調時數走 /hr 的 LeaveUpdate。"""
     leave_type: str
     start_date: str
     end_date: str
-    days: Optional[float] = None
     part: Optional[str] = None
     start_time: Optional[str] = None
     end_time: Optional[str] = None
-    hours: Optional[float] = None
     reason: Optional[str] = None
 
 

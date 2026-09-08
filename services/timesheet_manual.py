@@ -67,8 +67,11 @@ def normalize_row(r, lk, id_to_name: dict, *, manual: bool = True, keep: tuple |
     if wd is None:
         raise HTTPException(status_code=422, detail=f"日期格式錯誤：{r.work_date}")
     pname = (r.project_name or "").strip()
-    if status == "pending" and not (pname or (r.task_note or "").strip() or getattr(r, "stage_id", None)
-                                    or (getattr(r, "remark", None) or "").strip()):   # 前端「填了任何一格就存」：備註也算一格
+    # 空白列不存。沒時數的列（草稿 pending、或「我的一週」排的計畫 plan）都要有內容才收 ——
+    # plan 旗標會讓 row_state 直接回 "plan"，只看 pending 的話，帶 plan:true 的空 POST 就繞過這道守衛存進一列垃圾
+    if status in ("pending", "plan") and hours <= 0 and not (
+            pname or (r.task_note or "").strip() or getattr(r, "stage_id", None)
+            or (getattr(r, "remark", None) or "").strip()):   # 前端「填了任何一格就存」：備註也算一格
         raise HTTPException(status_code=422, detail="空白列不存：至少要有專案、做了什麼、備註或工作階段")
     if r.project_id:
         pid, why = r.project_id, "map"

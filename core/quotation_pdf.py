@@ -80,10 +80,14 @@ def _group_items(items) -> list[dict]:
     by_name: dict[str, dict] = {}
     for it in items or []:
         name = (it.get("group_name") or "").strip()
-        g = by_name.get(name)
+        # 「同名就是同一組」只適用於**有名字**的組。沒填分類的列（group_name 可空，舊報價單一整批都是）
+        # 不能全部收到同一桶：那會把散在後面的無名列往上搬到第一列旁邊，印出來的順序跟輸入的不一樣。
+        # 無名列只跟**緊鄰的**無名列同組。
+        g = by_name.get(name) if name else (groups[-1] if groups and not groups[-1]["name"] else None)
         if g is None:
             g = {"name": name, "rows": [], "subtotal": 0}
-            by_name[name] = g
+            if name:
+                by_name[name] = g
             groups.append(g)
         amount = int(it.get("amount") or 0)
         g["rows"].append({

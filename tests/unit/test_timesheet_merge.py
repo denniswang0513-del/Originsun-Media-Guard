@@ -45,9 +45,22 @@ def test_merge_plan_keeps_earliest_start_and_falls_back_to_order():
     assert g["kept_id"] == "r2" and g["absorbed_ids"] == ["r1", "r3"]
 
 
-def test_merge_key_uses_project_name_when_no_id_and_empty_project_rows_merge_together():
-    rows = [_r(1, project_id="", project_name=""), _r(2, project_id="", project_name="")]
-    assert merge_plan(rows)["groups"][0]["label"].startswith("（未填專案）")
+def test_merge_key_uses_project_name_when_there_is_no_id():
+    """沒有 project_id 時用案名當鍵（Sheet 進來的列常常只有名字）。"""
+    rows = [_r(1, project_id="", project_name="ZZ 案"), _r(2, project_id="", project_name="ZZ 案")]
+    g = merge_plan(rows)["groups"][0]
+    assert g["label"].startswith("ZZ 案") and g["absorbed_ids"] == ["r2"]
+
+
+def test_rows_without_any_project_are_never_merged():
+    """🔴 2026-09-08 review：沒對到案、也沒打案名的列**不併**。
+
+    它們的鍵會全部塌成 ("", 分類, 階段)，於是「行政庶務 2h」和「會議 3h」這兩件不相干的事
+    被併成一列 5h、第二列被刪掉，標籤還只寫「（未填專案）」，人根本看不出併掉了什麼。"""
+    rows = [_r(1, project_id="", project_name="", task_note="行政庶務"),
+            _r(2, project_id="", project_name="", task_note="會議")]
+    plan = merge_plan(rows)
+    assert plan["groups"] == [] and plan["skipped"] == 2
 
 
 def test_service_merges_in_one_transaction_and_snapshots_for_undo():

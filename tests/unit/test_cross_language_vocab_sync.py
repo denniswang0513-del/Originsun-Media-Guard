@@ -84,6 +84,18 @@ def test_the_presale_statuses_are_a_prefix_of_the_pipeline():
 
 # ── 人事：假別與狀態 ────────────────────────────────────────────
 
+#: 找不到寫死清單時的兩條路：真的改成從後端字彙拿（放行），或只是改名／換寫法（要紅）。
+#: 沒有這道檢查，這兩支測試會在前端一改寫法時靜默退場，跨語言同步等於沒在守。
+_NO_LIST_MSG = ("hr_leave.js 找不到 {decl}，而且它也沒有從 /me/leave/summary 的 vocab 拿字彙。\n"
+                "要嘛把清單改回可比對的字面陣列，要嘛真的改吃 summary.vocab —— 不能只是換個寫法讓這條測試消失。")
+
+
+def _leave_js_reads_vocab() -> bool:
+    """前端改成吃後端字彙（§7.1 的本意）：有讀 summary 的 vocab 就算數。"""
+    src = repo_src("frontend/tabs/hr_leave/hr_leave.js")
+    return "vocab" in src and ("summary" in src or "_sum" in src)
+
+
 def _leave_js_list(decl: str, obj_keys: bool = False):
     """hr_leave.js 的 LEAVE_TYPES／STATUS_PILL；前端改成從 summary.vocab 拿（不寫死）時回 None。"""
     src = repo_src("frontend/tabs/hr_leave/hr_leave.js")
@@ -103,6 +115,7 @@ def test_leave_types_match():
     from core.leave_logic import ALL_LEAVE_TYPES
     got = _leave_js_list("const LEAVE_TYPES")
     if got is None:
+        assert _leave_js_reads_vocab(), _NO_LIST_MSG.format(decl="const LEAVE_TYPES")
         return
     assert set(LEAVE_TYPES) <= set(got) <= set(ALL_LEAVE_TYPES), (
         f"hr_leave.js 的假別要介於 hr_logic.LEAVE_TYPES 與 leave_logic.ALL_LEAVE_TYPES 之間：{got}")
@@ -115,6 +128,7 @@ def test_leave_statuses_match_the_status_pill_map():
     from core.leave_logic import REQUEST_STATUSES
     got = _leave_js_list("const STATUS_PILL", obj_keys=True)
     if got is None:
+        assert _leave_js_reads_vocab(), _NO_LIST_MSG.format(decl="const STATUS_PILL")
         return
     assert set(LEAVE_STATUSES) <= set(got) <= set(REQUEST_STATUSES), (
         f"STATUS_PILL 的狀態要介於 hr_logic.LEAVE_STATUSES 與 leave_logic.REQUEST_STATUSES 之間：{sorted(got)}")
