@@ -21,7 +21,7 @@ from core.schemas import (ProjectExpensePayload, ProjectExpensePatchPayload,
                           CostLinePayload, CostLineUpdatePayload, ExpenseLinkPayload,
                           CostGroupCreate, CostGroupUpdate, CostGroupDuplicate)
 
-from ._shared import (router, public_router, _check_auth, money_dep, _require_db,
+from ._shared import (router, public_router, _check_auth, _check_project_write_auth, money_dep, _require_db,
                       _get_factory, _fmt_day, _now, _parse_day, _parse_shoot_date,
                       _mint_token_generic, _verify_token_generic)
 
@@ -1045,7 +1045,7 @@ async def list_project_cost_lines(project_id: str, group_id: Optional[str] = Que
 async def init_project_cost_lines(project_id: str, request: Request):
     """用預設清單初始化成本項目（跳過已存在的）。
     預設目標為主表（第一張子表）；可傳 body `{"cost_group_id": "..."}` 指定。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     factory = await _get_factory()
     body = {}
@@ -1081,7 +1081,7 @@ async def init_project_cost_lines(project_id: str, request: Request):
 @router.post("/projects/{project_id}/cost-lines")
 async def add_project_cost_line(project_id: str, req: CostLinePayload, request: Request):
     """新增單一自訂成本項目。必須指定 cost_group_id，否則自動歸入主表。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -1119,7 +1119,7 @@ async def add_project_cost_line(project_id: str, req: CostLinePayload, request: 
 @router.put("/project-cost-lines/{line_id}")
 async def update_project_cost_line(line_id: str, req: CostLineUpdatePayload, request: Request):
     """部分更新成本項目。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -1156,7 +1156,7 @@ async def delete_project_cost_phase(project_id: str, request: Request):
     """刪除指定 phase 的所有成本項目。
     支援 body 或 query 的 `group_id` / `cost_group_id` — 有指定時只刪該子表的該 phase。
     未指定：刪該專案全部子表的此 phase（向後相容）。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     body = {}
     try:
@@ -1183,7 +1183,7 @@ async def delete_project_cost_phase(project_id: str, request: Request):
 @router.delete("/project-cost-lines/{line_id}")
 async def delete_project_cost_line(line_id: str, request: Request):
     """刪除成本項目。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -1216,7 +1216,7 @@ async def list_cost_line_templates():
 @router.post("/cost-line-templates")
 async def create_cost_line_template(request: Request):
     """從指定專案建立成本估算範本。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     body = await request.json()
     name = body.get("name", "").strip()
@@ -1249,7 +1249,7 @@ async def apply_cost_line_template(project_id: str, request: Request):
     """套用範本到指定子表（覆蓋該子表既有成本項目）。
     body: `{template_id, cost_group_id?}` — cost_group_id 未給則套到主表。
     不動任何雜支（範本只定義成本結構）。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     body = await request.json()
     template_id = body.get("template_id", "")
@@ -1283,7 +1283,7 @@ async def import_cost_lines_from_quotation(project_id: str, request: Request):
     """從報價單匯入成本項目到指定子表（覆蓋該子表既有項目，填入預估欄位）。
     body: `{quotation_id, cost_group_id?}` — cost_group_id 未給則匯入到主表。
     不動任何雜支。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     body = await request.json()
     quotation_id = body.get("quotation_id", "")
@@ -1330,7 +1330,7 @@ async def import_cost_lines_from_quotation(project_id: str, request: Request):
 @router.put("/cost-line-templates/{template_id}")
 async def update_cost_line_template(template_id: str, request: Request):
     """修改範本名稱。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     body = await request.json()
     name = body.get("name", "").strip()
@@ -1349,7 +1349,7 @@ async def update_cost_line_template(template_id: str, request: Request):
 @router.delete("/cost-line-templates/{template_id}")
 async def delete_cost_line_template(template_id: str, request: Request):
     """刪除成本估算範本。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -1533,7 +1533,7 @@ async def list_project_cost_groups(project_id: str):
 @router.post("/projects/{project_id}/cost-groups")
 async def create_cost_group(project_id: str, req: CostGroupCreate, request: Request):
     """新增子表。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -1565,7 +1565,7 @@ async def update_cost_group(group_id: str, req: CostGroupUpdate, request: Reques
     「未設」（≠ 0，未設才會退回 % 自動推算）靠這個；exclude_none 會把 null
     靜默丟掉，編輯視窗按了清空其實沒清（同 costs.py 收據路徑的前例）。
     """
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -1596,7 +1596,7 @@ async def update_cost_group(group_id: str, req: CostGroupUpdate, request: Reques
 @router.delete("/cost-groups/{group_id}")
 async def delete_cost_group(group_id: str, request: Request):
     """刪除子表（cascade cost_lines + expenses）。若只剩 1 張子表則禁止。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -1631,7 +1631,7 @@ async def delete_cost_group(group_id: str, request: Request):
 @router.post("/cost-groups/{group_id}/duplicate")
 async def duplicate_cost_group(group_id: str, req: CostGroupDuplicate, request: Request):
     """複製整張子表（含 cost_lines；結算值清空），雜支不複製。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 預算表：跟專案本體同一把 crm_projects（2026-09-08）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
