@@ -89,6 +89,7 @@ window._openUserMgmt = async function() {
             <div style="display:flex;align-items:center;gap:0;">
                 <button id="umgmt-tab-users" class="_umgmt-tab _umgmt-tab-active" onclick="window._switchMgmtTab('users')">使用者</button>
                 <button id="umgmt-tab-keys" class="_umgmt-tab" onclick="window._switchMgmtTab('keys')">API Keys</button>
+                <button id="umgmt-tab-tpl" class="_umgmt-tab" onclick="window._switchMgmtTab('tpl')">身份範本</button>
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
                 <button id="umgmt-action-btn" class="_fm-btn-submit" style="padding:5px 16px;font-size:12px;">+ 新增使用者</button>
@@ -101,6 +102,9 @@ window._openUserMgmt = async function() {
                 <div style="text-align:center;color:#666;padding:20px;">載入中...</div>
             </div>
             <div id="umgmt-panel-keys" style="font-size:12px;display:none;">
+                <div style="text-align:center;color:#666;padding:20px;">載入中...</div>
+            </div>
+            <div id="umgmt-panel-tpl" style="font-size:12px;display:none;">
                 <div style="text-align:center;color:#666;padding:20px;">載入中...</div>
             </div>
         </div>
@@ -126,22 +130,23 @@ window._openUserMgmt = async function() {
     // Remap panel IDs to match what _loadUserList / _loadApiKeyList expect
     document.getElementById('umgmt-panel-users').id = 'umgmt-list';
     document.getElementById('umgmt-panel-keys').id = 'apikey-list';
+    document.getElementById('umgmt-panel-tpl').id = 'umgmt-tpl';
 
     window._switchMgmtTab = function(tab) {
-        const usersPanel = document.getElementById('umgmt-list');
-        const keysPanel = document.getElementById('apikey-list');
-        const usersTab = document.getElementById('umgmt-tab-users');
-        const keysTab = document.getElementById('umgmt-tab-keys');
+        const panels = { users: 'umgmt-list', keys: 'apikey-list', tpl: 'umgmt-tpl' };
+        Object.entries(panels).forEach(([k, id]) => {
+            const el = document.getElementById(id); if (el) el.style.display = k === tab ? '' : 'none';
+            document.getElementById('umgmt-tab-' + k)?.classList.toggle('_umgmt-tab-active', k === tab);
+        });
         const actionBtn = document.getElementById('umgmt-action-btn');
         if (tab === 'users') {
-            usersPanel.style.display = ''; keysPanel.style.display = 'none';
-            usersTab.classList.add('_umgmt-tab-active'); keysTab.classList.remove('_umgmt-tab-active');
             actionBtn.textContent = '+ 新增使用者'; actionBtn.onclick = () => window._addUserPrompt();
-        } else {
-            usersPanel.style.display = 'none'; keysPanel.style.display = '';
-            usersTab.classList.remove('_umgmt-tab-active'); keysTab.classList.add('_umgmt-tab-active');
+        } else if (tab === 'keys') {
             actionBtn.textContent = '+ 產生新 Key'; actionBtn.onclick = () => window._createApiKey();
             if (typeof window._loadApiKeyList === 'function') window._loadApiKeyList();
+        } else {
+            actionBtn.textContent = '儲存範本'; actionBtn.onclick = () => window._saveRbacTemplates();
+            _loadTemplates();
         }
     };
 
@@ -163,6 +168,7 @@ async function _loadUserList() {
             if (rs.ok) _staffListCache = (await rs.json()).staff || [];
         } catch (_) {}
 
+        await _fetchTemplates();
         _renderUserList();
     } catch (_) {
         container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗</div>';
@@ -218,6 +224,7 @@ function _renderUserList() {
             <div style="min-width:0;">${_renderUserPermCell(u.username, modules, isAdminUser, locked, { canPlanParttime })}</div>
             <div style="display:flex;gap:6px;align-items:center;padding-top:4px;">
                 <button onclick="window._changeUserPwd('${u.username}')" class="_fm-btn-cancel" style="padding:3px 10px;font-size:11px;">改密碼</button>
+                ${(!locked && !isAdminUser && _tplCache && _tplCache[staffStatus]) ? `<button onclick="window._applyTemplateToUser('${u.username}','${staffStatus}')" class="_fm-btn-cancel" style="padding:3px 10px;font-size:11px;" title="把勾選換成「${staffStatus}」範本（換完還是要按儲存）">套${staffStatus}範本</button>` : ''}
                 ${locked ? '' : `<button onclick="window._saveUserSettings('${u.username}')" class="_fm-btn-submit" style="padding:3px 12px;font-size:11px;font-weight:500;">儲存</button>`}
                 ${u.username !== 'admin' ? `<button onclick="window._deleteUser('${u.username}')" style="background:transparent;border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;transition:all .15s;" onmouseenter="this.style.borderColor='#ef4444';this.style.background='rgba(239,68,68,0.08)'" onmouseleave="this.style.borderColor='rgba(239,68,68,0.3)';this.style.background='transparent'">刪除</button>` : ''}
             </div>
@@ -235,6 +242,128 @@ function _renderUserList() {
     });
     _userSorter.attach();
 }
+
+// ─── 身份範本（owner 2026-09-08）：合夥／在職／兼職各一組「預設就有」的鑰匙 ─── //
+// 範本存 settings.json rbac.templates；只是「填勾選的捷徑」，帳號上仍是自己那份 modules（守衛與 token 不看範本）。
+const TPL_IDENTITIES = ['合夥', '在職', '兼職'];
+const TPL_HIDDEN = new Set(['me_todos', 'me_finance']);   // 員工頁還沒放回的卡，範本不勾
+let _tplCache = null;      // {合夥:[...], 在職:[...], 兼職:[...]}（存過的或預設）
+let _tplDefaults = null;
+const _hdr = () => ({ 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || ''), 'Content-Type': 'application/json' });
+
+async function _fetchTemplates() {
+    try {
+        const r = await fetch('/api/v1/auth/rbac/templates', { headers: _hdr() });
+        if (!r.ok) return;
+        const d = await r.json(); _tplCache = d.templates || null; _tplDefaults = d.defaults || null;
+    } catch (_) {}
+}
+
+async function _loadTemplates() {
+    const host = document.getElementById('umgmt-tpl'); if (!host) return;
+    if (!_tplCache) await _fetchTemplates();
+    if (!_tplCache) { host.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">範本載入失敗</div>'; return; }
+    _renderTemplates();
+}
+
+// 「現在誰有」：Lv1 帳號依綁定人員的身份分組，數這把鑰匙幾個人有
+function _tplHolders() {
+    const by = {}; TPL_IDENTITIES.forEach(i => { by[i] = []; });
+    _usersCache.forEach(u => {
+        if ((u.access_level || 0) >= 3) return;
+        const st = _staffListCache.find(s => s.id === u.staff_id); if (!st) return;
+        const k = (st.status || '').trim() || '在職';
+        if (by[k]) by[k].push(new Set(u.modules || []));
+    });
+    return by;
+}
+
+function _renderTemplates() {
+    const host = document.getElementById('umgmt-tpl'); if (!host) return;
+    const holders = _tplHolders();
+    const cell = (id, m) => {
+        const on = _tplCache[id].includes(m);
+        const hidden = TPL_HIDDEN.has(m);
+        const parent = PERM_PARENT[m];
+        return `<td style="text-align:center;padding:3px 6px;"><input type="checkbox" data-tpl-id="${id}" data-tpl-key="${m}"${parent ? ` data-tpl-parent="${parent}"` : ''} ${on ? 'checked' : ''} ${hidden ? 'disabled title="員工頁還沒放回這張卡"' : ''} style="width:15px;height:15px;cursor:pointer;"></td>`;
+    };
+    const counts = TPL_IDENTITIES.map(id => `<span data-tpl-count="${id}">${_tplCache[id].length}</span>`);
+    let html = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:10px;">
+            <div style="color:#999;line-height:1.5;max-width:520px;">每一列是一把鑰匙，勾的是「這個身份預設就有」。管理員固定全部有、不套範本。
+                改完按右上「儲存範本」；要套到某個帳號，回「使用者」分頁按那一列的「套範本」再儲存。</div>
+            <button type="button" onclick="window._resetRbacTemplates()" class="_fm-btn-cancel" style="padding:3px 10px;font-size:11px;white-space:nowrap;">還原成建議值</button>
+        </div>
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr style="color:#888;font-size:11px;">
+                <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #333;">鑰匙</th>
+                <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #333;white-space:nowrap;">現在誰有</th>
+                <th style="padding:4px 6px;border-bottom:1px solid #333;color:#666;">管理員</th>
+                ${TPL_IDENTITIES.map((id, i) => `<th style="padding:4px 6px;border-bottom:1px solid #333;color:#ddd;">${id}<div style="font-weight:400;color:#666;">${counts[i]} 把</div></th>`).join('')}
+            </tr></thead><tbody>`;
+    _PERM_GROUPS.forEach(g => {
+        html += `<tr><td colspan="3" style="padding:8px 6px 3px;color:#bbb;font-weight:600;">${g.label}</td>
+            ${TPL_IDENTITIES.map(id => `<td style="text-align:center;padding:6px 2px 2px;white-space:nowrap;">
+                <button type="button" onclick="window._tplBulk('${g.id}','${id}',true)" style="background:transparent;border:1px solid #333;color:#888;border-radius:4px;font-size:10px;padding:0 5px;cursor:pointer;">全給</button>
+                <button type="button" onclick="window._tplBulk('${g.id}','${id}',false)" style="background:transparent;border:1px solid #333;color:#888;border-radius:4px;font-size:10px;padding:0 5px;cursor:pointer;">全收</button></td>`).join('')}</tr>`;
+        g.modules.forEach(m => {
+            const parent = PERM_PARENT[m];
+            const who = TPL_IDENTITIES.map(id => `${id} ${holders[id].filter(s => s.has(m)).length}/${holders[id].length}`).join(' · ');
+            html += `<tr data-tpl-group="${g.id}" style="border-top:1px solid #222;">
+                <td style="padding:3px 6px;${parent ? 'padding-left:22px;' : ''}color:#e5e5e5;">${parent ? '└ ' : ''}${MODULE_LABELS[m] || m}<span style="color:#555;font-family:ui-monospace,Menlo,monospace;font-size:10px;margin-left:6px;">${m}</span></td>
+                <td style="padding:3px 6px;color:#666;font-size:10.5px;white-space:nowrap;">${who}</td>
+                <td style="text-align:center;color:#555;">✓</td>
+                ${TPL_IDENTITIES.map(id => cell(id, m)).join('')}
+            </tr>`;
+        });
+    });
+    html += `</tbody></table></div>`;
+    host.innerHTML = html;
+    host.onchange = (e) => {
+        const cb = e.target; if (!cb.matches || !cb.matches('input[data-tpl-id]')) return;
+        const id = cb.dataset.tplId, m = cb.dataset.tplKey;
+        const set = new Set(_tplCache[id]);
+        if (cb.checked) { set.add(m); if (cb.dataset.tplParent) set.add(cb.dataset.tplParent); } else set.delete(m);
+        _tplCache[id] = ALL_MODULES.filter(k => set.has(k));
+        if (cb.checked && cb.dataset.tplParent) { const p = host.querySelector(`input[data-tpl-id="${id}"][data-tpl-key="${cb.dataset.tplParent}"]`); if (p) p.checked = true; }
+        const c = host.querySelector(`[data-tpl-count="${id}"]`); if (c) c.textContent = _tplCache[id].length;
+    };
+}
+
+window._tplBulk = function(groupId, id, on) {
+    const g = _PERM_GROUPS.find(x => x.id === groupId); if (!g || !_tplCache) return;
+    const set = new Set(_tplCache[id]);
+    g.modules.forEach(m => { if (TPL_HIDDEN.has(m)) return; if (on) set.add(m); else set.delete(m); });
+    _tplCache[id] = ALL_MODULES.filter(k => set.has(k));
+    _renderTemplates();
+};
+
+window._resetRbacTemplates = function() {
+    if (!_tplDefaults || !confirm('把三欄放回建議值？（還沒儲存，可以再改）')) return;
+    _tplCache = {}; TPL_IDENTITIES.forEach(id => { _tplCache[id] = (_tplDefaults[id] || []).slice(); });
+    _renderTemplates();
+};
+
+window._saveRbacTemplates = async function() {
+    if (!_tplCache) return;
+    const btn = document.getElementById('umgmt-action-btn');
+    try {
+        const r = await fetch('/api/v1/auth/rbac/templates', { method: 'PUT', headers: _hdr(), body: JSON.stringify({ templates: _tplCache }) });
+        if (!r.ok) { alert('儲存失敗'); return; }
+        _tplCache = (await r.json()).templates; _renderTemplates();
+        if (btn) { btn.textContent = '已儲存'; setTimeout(() => { btn.textContent = '儲存範本'; }, 1500); }
+    } catch (_) { alert('連線失敗'); }
+};
+
+// 使用者列的「套範本」：把這個帳號的勾選換成他身份的範本（例外要自己再勾；換完還是要按儲存）
+window._applyTemplateToUser = function(username, status) {
+    const tpl = _tplCache && _tplCache[status]; if (!tpl) return;
+    const want = new Set(tpl);
+    document.querySelectorAll(`input[data-umod-user="${username}"]`).forEach(cb => { cb.checked = want.has(cb.value); });
+    _PERM_GROUPS.forEach(g => window._syncUserGroupMaster(username, g.id));
+    Object.keys(PERM_PARENT).forEach(m => window._syncPermParent(username, m));
+};
 
 // ─── Add User (styled modal) ─── //
 window._addUserPrompt = async function() {

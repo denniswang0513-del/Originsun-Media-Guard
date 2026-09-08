@@ -990,3 +990,33 @@ async def google_login(req: GoogleLoginRequest):
     return _issue_token(
         user, email=user.get('email'), avatar_url=user.get('avatar_url'),
         first_login=user.get('first_login', False), auth_method=_compute_auth_method(user))
+
+
+# ── 身份範本（owner 2026-09-08）：合夥／在職／兼職各一組「預設就有」的鑰匙；規則在 core.rbac_templates ──
+class RbacTemplatesPayload(BaseModel):
+    templates: dict
+
+
+@router.get("/rbac/templates")
+async def get_rbac_templates(request: Request):
+    """管理員：三個身份的範本（settings.json rbac.templates；沒存過就是預設值）＋ 預設值（畫面「還原成建議」用）。"""
+    _check_admin(request)
+    from core.rbac_templates import DEFAULT_TEMPLATES, IDENTITIES, normalize
+    settings = load_settings()
+    return {"identities": list(IDENTITIES),
+            "templates": normalize((settings.get("rbac") or {}).get("templates")),
+            "defaults": DEFAULT_TEMPLATES}
+
+
+@router.put("/rbac/templates")
+async def put_rbac_templates(body: RbacTemplatesPayload, request: Request):
+    """管理員：存範本。只留 ALL_MODULES 裡的鑰匙、子鑰匙自動補總開關（normalize）。
+    只存範本、不動任何帳號——套用是使用者列上的「套範本」＋儲存。"""
+    _check_admin(request)
+    from config import save_settings
+    from core.rbac_templates import normalize
+    templates = normalize(body.templates)
+    rbac = dict((load_settings().get("rbac") or {}))
+    rbac["templates"] = templates
+    save_settings({"rbac": rbac})
+    return {"templates": templates}
