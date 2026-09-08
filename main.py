@@ -1336,16 +1336,20 @@ async def _short_invoice_file(code: str):
 
 
 @app.get("/q/{code}", include_in_schema=False)
-async def _short_quote_view(code: str):
+async def _short_quote_view(code: str, request: Request):
     """報價單線上檢視短網址：`/q/{12 碼}` → HTML（免登入，憑證就是那串碼；頁上有「下載 PDF」）。
     同 /e/{code}：掛根路徑是為了短；實作在 routers/crm/quotes.py。"""
+    from core.public_access import surface_gate
+    surface_gate(request)   # 公開區「報價單線上檢視」關閉 → 404
     from routers.crm.quotes import public_quote_html
     return await public_quote_html(code)
 
 
 @app.get("/q/{code}/pdf", include_in_schema=False)
-async def _short_quote_pdf(code: str):
+async def _short_quote_pdf(code: str, request: Request):
     """免登入：線上檢視頁的「下載 PDF」（憑證＝網址裡的 share_token，逐字比對）。"""
+    from core.public_access import surface_gate
+    surface_gate(request)
     from routers.crm.quotes import public_quote_pdf
     return await public_quote_pdf(code)
 

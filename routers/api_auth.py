@@ -439,8 +439,10 @@ async def refreshed_token_if_drifted(payload: Optional[dict], user: Optional[dic
 
 
 @router.get("/register/config")
-async def register_config():
+async def register_config(request: Request):
     """註冊頁題目設定（公開）— 只回選項不回答案，正解比對在 /register 伺服端。"""
+    from core.public_access import surface_gate
+    surface_gate(request)   # 公開區「員工自助註冊」關閉 → 404
     return {"company_choices": list(_REGISTER_COMPANY_CHOICES)}
 
 
@@ -450,6 +452,8 @@ async def register(req: RegisterRequest, request: Request):
 
     新帳號 access_level=1 + 只有 me_profile（基本資料卡），其餘功能管理員之後在使用者管理逐項開通。
     成功直接回 login 同形狀（自動登入）。"""
+    from core.public_access import surface_gate
+    surface_gate(request)
     import time as _time
     ip = (request.client.host if request.client else "") or "?"
     rec = _register_fails.get(ip)
@@ -1020,3 +1024,60 @@ async def put_rbac_templates(body: RbacTemplatesPayload, request: Request):
     rbac["templates"] = templates
     save_settings({"rbac": rbac})
     return {"templates": templates}
+
+
+# ── 公開區（owner 2026-09-08）：對外免登入的面集中一份登記表，owner 自己開關；規則在 core.public_access ──
+class PublicAccessPayload(BaseModel):
+    modes: dict
+
+
+async def _public_link_counts() -> dict:
+    """每一面「目前有效連結數」（有 token 表的面才算；查不到就 None，畫面顯示「—」）。唯讀，best-effort。"""
+    out: dict = {}
+    try:
+        from sqlalchemy import func, select  # type: ignore
+        from core.db_guard import db_factory_or_503
+        from db.models import CrmExpenseLink, CrmInvoice, CrmProjectShowcase, CrmQuotation, CrmStaff, PortalReviewLink, ProjectMediaLog
+        factory = db_factory_or_503()
+        specs = {
+            "expense": select(func.count()).select_from(CrmExpenseLink).where(CrmExpenseLink.edit_token.isnot(None), CrmExpenseLink.enabled.is_(True)),
+            "media_log": select(func.count()).select_from(ProjectMediaLog).where(ProjectMediaLog.edit_token.isnot(None), ProjectMediaLog.enabled.is_(True)),
+            "portal": select(func.count()).select_from(PortalReviewLink),
+            "quote": select(func.count()).select_from(CrmQuotation).where(CrmQuotation.share_token.isnot(None)),
+            "invoice_file": select(func.count()).select_from(CrmInvoice).where(CrmInvoice.share_token.isnot(None)),
+            "showcase_edit": select(func.count()).select_from(CrmProjectShowcase).where(CrmProjectShowcase.edit_token.isnot(None)),
+            "staff_edit": select(func.count()).select_from(CrmStaff).where(CrmStaff.edit_token.isnot(None)),
+            "resume": select(func.count()).select_from(CrmStaff).where(CrmStaff.resume_visible.is_(True)),
+        }
+        async with factory() as session:
+            for k, q in specs.items():
+                try:
+                    out[k] = int((await session.execute(q)).scalar() or 0)
+                except Exception:
+                    out[k] = None
+    except Exception:
+        pass
+    return out
+
+
+@router.get("/public-access")
+async def get_public_access(request: Request):
+    """管理員：登記表（每一面的名稱／誰在用／怎麼進／支援模式）＋目前模式＋有效連結數。"""
+    _check_admin(request)
+    from core.public_access import MODE_LABELS, PUBLIC_SURFACES, normalize
+    modes = normalize(load_settings().get("public_access"))
+    counts = await _public_link_counts()
+    return {"surfaces": [{**{k: v for k, v in s.items() if k != "prefixes"}, "mode": modes[s["key"]], "links": counts.get(s["key"])}
+                         for s in PUBLIC_SURFACES],
+            "modes": modes, "mode_labels": MODE_LABELS}
+
+
+@router.put("/public-access")
+async def put_public_access(body: PublicAccessPayload, request: Request):
+    """管理員：存模式。normalize 只留登記表的鍵與那一面支援的模式；守衛每次讀設定，改了立即生效。"""
+    _check_admin(request)
+    from config import save_settings
+    from core.public_access import normalize
+    modes = normalize(body.modes)
+    save_settings({"public_access": modes})
+    return {"modes": modes}

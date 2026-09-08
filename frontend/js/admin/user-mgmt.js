@@ -2,7 +2,7 @@
 // RBAC v2: 權限直接綁帳號（角色層已移除）。每個帳號 = 一組可勾選模組 + 「管理員」開關。
 import { _ensureModalStyles, _createFormModal } from '../shared/modal-styles.js';
 import { groupModules, ALL_MODULES } from '../shared/tab-config.js';
-import { createSortable, sortableSpan } from '../../tabs/crm/crm-utils.js';
+import { createSortable, sortableSpan, esc } from '../../tabs/crm/crm-utils.js';
 
 // key 集合必須 == core/auth.py ALL_MODULES == tab-config.js PERMISSION_GROUPS
 // （tests/unit/test_rbac_module_sync.py 三方同步測試把關，漏 key 會 fail）
@@ -90,6 +90,7 @@ window._openUserMgmt = async function() {
                 <button id="umgmt-tab-users" class="_umgmt-tab _umgmt-tab-active" onclick="window._switchMgmtTab('users')">使用者</button>
                 <button id="umgmt-tab-keys" class="_umgmt-tab" onclick="window._switchMgmtTab('keys')">API Keys</button>
                 <button id="umgmt-tab-tpl" class="_umgmt-tab" onclick="window._switchMgmtTab('tpl')">身份範本</button>
+                <button id="umgmt-tab-pub" class="_umgmt-tab" onclick="window._switchMgmtTab('pub')">公開區</button>
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
                 <button id="umgmt-action-btn" class="_fm-btn-submit" style="padding:5px 16px;font-size:12px;">+ 新增使用者</button>
@@ -105,6 +106,9 @@ window._openUserMgmt = async function() {
                 <div style="text-align:center;color:#666;padding:20px;">載入中...</div>
             </div>
             <div id="umgmt-panel-tpl" style="font-size:12px;display:none;">
+                <div style="text-align:center;color:#666;padding:20px;">載入中...</div>
+            </div>
+            <div id="umgmt-panel-pub" style="font-size:12px;display:none;">
                 <div style="text-align:center;color:#666;padding:20px;">載入中...</div>
             </div>
         </div>
@@ -131,9 +135,10 @@ window._openUserMgmt = async function() {
     document.getElementById('umgmt-panel-users').id = 'umgmt-list';
     document.getElementById('umgmt-panel-keys').id = 'apikey-list';
     document.getElementById('umgmt-panel-tpl').id = 'umgmt-tpl';
+    document.getElementById('umgmt-panel-pub').id = 'umgmt-pub';
 
     window._switchMgmtTab = function(tab) {
-        const panels = { users: 'umgmt-list', keys: 'apikey-list', tpl: 'umgmt-tpl' };
+        const panels = { users: 'umgmt-list', keys: 'apikey-list', tpl: 'umgmt-tpl', pub: 'umgmt-pub' };
         Object.entries(panels).forEach(([k, id]) => {
             const el = document.getElementById(id); if (el) el.style.display = k === tab ? '' : 'none';
             document.getElementById('umgmt-tab-' + k)?.classList.toggle('_umgmt-tab-active', k === tab);
@@ -144,9 +149,12 @@ window._openUserMgmt = async function() {
         } else if (tab === 'keys') {
             actionBtn.textContent = '+ 產生新 Key'; actionBtn.onclick = () => window._createApiKey();
             if (typeof window._loadApiKeyList === 'function') window._loadApiKeyList();
-        } else {
+        } else if (tab === 'tpl') {
             actionBtn.textContent = '儲存範本'; actionBtn.onclick = () => window._saveRbacTemplates();
             _loadTemplates();
+        } else {
+            actionBtn.textContent = '儲存公開區'; actionBtn.onclick = () => window._savePublicAccess();
+            _loadPublicAccess();
         }
     };
 
@@ -363,6 +371,61 @@ window._applyTemplateToUser = function(username, status) {
     document.querySelectorAll(`input[data-umod-user="${username}"]`).forEach(cb => { cb.checked = want.has(cb.value); });
     _PERM_GROUPS.forEach(g => window._syncUserGroupMaster(username, g.id));
     Object.keys(PERM_PARENT).forEach(m => window._syncPermParent(username, m));
+};
+
+// ─── 公開區（owner 2026-09-08）：對外免登入的面集中一份登記表，這裡開關；規則在 core/public_access.py ─── //
+let _pubCache = null;   // { surfaces:[{key,label,who,how,pages,modes,default,mode,links}], modes:{}, mode_labels:{} }
+
+async function _loadPublicAccess() {
+    const host = document.getElementById('umgmt-pub'); if (!host) return;
+    try {
+        const r = await fetch('/api/v1/auth/public-access', { headers: _hdr() });
+        if (!r.ok) { host.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">公開區載入失敗</div>'; return; }
+        _pubCache = await r.json();
+    } catch (_) { host.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">連線失敗</div>'; return; }
+    _renderPublicAccess();
+}
+
+function _renderPublicAccess() {
+    const host = document.getElementById('umgmt-pub'); if (!host || !_pubCache) return;
+    const L = _pubCache.mode_labels || { off: '關閉', link: '連結', open: '公開' };
+    let html = `
+        <div style="color:#999;line-height:1.5;margin-bottom:10px;max-width:640px;">這些是<b>不用登入</b>就能從外面進來的功能，每一面一列。
+            「連結」＝憑證是網址裡的連結（可撤銷）；「關閉」＝整面 404，連結全部失效；「公開」＝連連結都不用（只有履歷與註冊有）。
+            改完按右上「儲存公開區」，立即生效。</div>
+        <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead><tr style="color:#888;font-size:11px;">
+            <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #333;">功能</th>
+            <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #333;">誰在用</th>
+            <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #333;">怎麼進</th>
+            <th style="text-align:right;padding:4px 6px;border-bottom:1px solid #333;white-space:nowrap;">有效連結</th>
+            <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #333;">模式</th>
+        </tr></thead><tbody>`;
+    _pubCache.surfaces.forEach(sf => {
+        const cur = _pubCache.modes[sf.key] || sf.default;
+        html += `<tr style="border-top:1px solid #222;${cur === 'off' ? 'opacity:.6;' : ''}">
+            <td style="padding:6px;color:#e5e5e5;white-space:nowrap;">${esc(sf.label)}<div style="color:#555;font-family:ui-monospace,Menlo,monospace;font-size:10px;">${esc(sf.key)}</div></td>
+            <td style="padding:6px;color:#aaa;">${esc(sf.who)}</td>
+            <td style="padding:6px;color:#888;max-width:360px;">${esc(sf.how)}</td>
+            <td style="padding:6px;color:#aaa;text-align:right;font-variant-numeric:tabular-nums;">${sf.links == null ? '—' : sf.links}</td>
+            <td style="padding:6px;white-space:nowrap;">${sf.modes.map(m => `<label class="_fm-chk" style="min-width:auto;padding:2px 6px;display:inline-flex;">
+                <input type="radio" name="pub-${esc(sf.key)}" value="${m}" data-pub-key="${esc(sf.key)}" ${cur === m ? 'checked' : ''}> ${L[m] || m}</label>`).join('')}</td>
+        </tr>`;
+    });
+    html += `</tbody></table></div>`;
+    host.innerHTML = html;
+    host.onchange = (e) => { const el = e.target; if (el.matches && el.matches('input[data-pub-key]')) { _pubCache.modes[el.dataset.pubKey] = el.value; } };
+}
+
+window._savePublicAccess = async function() {
+    if (!_pubCache) return;
+    const btn = document.getElementById('umgmt-action-btn');
+    try {
+        const r = await fetch('/api/v1/auth/public-access', { method: 'PUT', headers: _hdr(), body: JSON.stringify({ modes: _pubCache.modes }) });
+        if (!r.ok) { alert('儲存失敗'); return; }
+        _pubCache.modes = (await r.json()).modes; _renderPublicAccess();
+        if (btn) { btn.textContent = '已儲存'; setTimeout(() => { btn.textContent = '儲存公開區'; }, 1500); }
+    } catch (_) { alert('連線失敗'); }
 };
 
 // ─── Add User (styled modal) ─── //

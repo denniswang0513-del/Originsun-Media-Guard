@@ -14,13 +14,14 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request  # type: ignore
+from fastapi import APIRouter, Depends, HTTPException, Request  # type: ignore
 from fastapi.responses import FileResponse  # type: ignore
 
 from core.auth import check_admin_or_module, tab_modules
 from core.schemas import PortalApprovePayload, PortalCommentPayload, PortalLinkPayload
 
-router = APIRouter(prefix="/api/v1/portal", tags=["portal"])
+from core.public_access import surface_gate  # type: ignore
+router = APIRouter(prefix="/api/v1/portal", tags=["portal"], dependencies=[Depends(surface_gate)])   # 只對 /public/ 前綴生效
 
 _LINK_STATUSES = ("待審", "修改中", "已核准")
 # 副檔名白名單 + 串流 media_type 對映（原生 <video> 可播的容器）

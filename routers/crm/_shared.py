@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 # （proposal_assets 模組層就 import 了），函式內 import 的 ImportError 退路是
 # 死碼，而守衛掛在 router 層＝每個請求都走一次。
 from core.auth import check_admin_or_module, check_logged_in
+from core.public_access import surface_gate
 from core.auth import current_username as _username  # noqa: F401  crm 呼叫端沿用這個名字
 from core.money import MoneyRedactRoute, money_dep  # money_dep 給領域模組 re-export
 from core.project_flow import ADVANCE_MODULES, CHECK_MODULES
@@ -133,7 +134,8 @@ router = APIRouter(prefix=CRM_PREFIX, tags=["CRM"],
 # 不存在 —— 而 core/money.py 宣稱「掛這裡，新端點預設就是安全的」，那句話就
 # 在這個子集上變成假的。公開／手機頁正是最可能夾帶金額的去處。
 public_router = APIRouter(tags=["CRM 公開（token 授權）"],
-                          route_class=MoneyRedactRoute)
+                          route_class=MoneyRedactRoute,
+                          dependencies=[Depends(surface_gate)])   # 公開區開關（core.public_access；關閉→404）
 
 # ── token_router：token 自我驗證的端點（匿名，但**不在 NAS 白名單**）──────
 #
@@ -150,7 +152,8 @@ public_router = APIRouter(tags=["CRM 公開（token 授權）"],
 # 守衛就是端點自己的 `_verify_token_generic`（逐字比對 DB）；MoneyRedactRoute
 # 照掛 —— 匿名＝沒有 money_view，人員搜尋回的 daily_rate 會被抹（前端已處理）。
 token_router = APIRouter(tags=["CRM token 自驗（master 限定）"],
-                         route_class=MoneyRedactRoute)
+                         route_class=MoneyRedactRoute,
+                         dependencies=[Depends(surface_gate)])   # 公開區開關
 
 
 # ── Helpers ──────────────────────────────────────────────────

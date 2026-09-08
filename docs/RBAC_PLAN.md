@@ -55,6 +55,8 @@ owner 2026-09-08 拍板：權限只有四種——**管理員、合夥、在職�
 
 ### 階段 1.5：「公開區」——對外免登入的功能集中一處、owner 自己開關（1 天）
 
+✅ 已做（2026-09-08）：`core/public_access.py` 登記表＋`surface_gate`（掛 public_router／token_router／portal；/q/ 與 /register 手動）；`GET/PUT /auth/public-access`；使用者管理第四分頁「公開區」（10 面、有效連結數、關閉／連結／公開）。
+
 owner 2026-09-08：「雜支與影像紀錄是公開給外部人員編輯的，列一個全公開的區塊讓我自己可以設定。」
 
 **現況**：對外免登入的入口散在 11 個地方、各自一種憑證、沒有任何開關——`public_router`（token 逐字比對）、`token_router`（短碼／編輯 token）、
@@ -72,8 +74,7 @@ owner 2026-09-08：「雜支與影像紀錄是公開給外部人員編輯的，�
 | `portal` | 客戶看片審批（review.html） | 客戶 | 看片連結 | 關閉／連結 | 連結 |
 | `quote` | 報價單線上檢視（/q/{code}） | 客戶 | 短碼連結 | 關閉／連結 | 連結 |
 | `invoice_file` | 發票影像分享 | 客戶／會計 | 分享連結 | 關閉／連結 | 連結 |
-| `proposal_share` | 提案企劃可寫分享（project.html?t=、meeting-note.html） | 客戶、外部顧問 | 分享連結（可寫） | 關閉／連結 | 連結 |
-| `references_share` | 片庫分享（reference.html 分享模式） | 外部 | 分享連結 | 關閉／連結 | 連結 |
+| `proposal_share` | 提案企劃可寫分享（project.html?t=、meeting-note.html；片庫分享是同一把 plan token，併在這面） | 客戶、外部顧問 | 分享連結（可寫） | 關閉／連結 | 連結 |
 | `showcase_edit` | 結案上架編輯（showcase-edit.html） | 外部剪接、企劃 | 編輯 token | 關閉／連結 | 連結 |
 | `staff_edit` | 員工自助編輯履歷（staff-edit.html） | 員工本人 | 編輯 token | 關閉／連結 | 連結 |
 | `resume` | 公開履歷（resume.html?staff=<id>） | 對外 | 員工檔勾 resume_visible 才看得到（沒有 token） | 關閉／公開 | 公開 |
