@@ -14,7 +14,7 @@
  * 金額權限：沒有 money_view 的人看得到狀態字（幾張、到帳了沒、誰還沒請款），看不到金額。
  * 發票模組（crm-projects-invoices）仍載進一個藏著的容器：開發票視窗與 setMeta／del 靠它的狀態。
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum, canSeeMoney, groupCostStaff, invoicePayBadge } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, canSeeMoney, hasModule, groupCostStaff, invoicePayBadge } from './crm-utils.js';
 import { state } from './crm-projects-state.js';
 import { loadInvoicesTab } from './crm-projects-invoices.js';
 
@@ -114,8 +114,16 @@ export function closingChecks(s, advances, expenses) {
 // ── 畫面 ──────────────────────────────────────────────────────
 const _d = (v) => (v ? String(v).slice(0, 10) : '');
 const _md = (v) => { const s = _d(v); return s ? s.slice(5).replace('-', '/') : ''; };
-const _q = (path) => _fetch(path).catch(() => null);
 const _sq = (s) => _esc(s || '').replace(/'/g, "\\'");
+
+// 錢流（發票／請款／預支款）的動作鈕要 crm_invoices＋money_view（RBAC 稽核第二批）；
+// 表格本身看後端給不給（finance_partner 只讀那種帳號要看得到、但一顆動作鈕都不能有）。
+const _canInvoice = () => hasModule('crm_invoices') && canSeeMoney();
+const NO_INVOICE_HTML = '<div class="crm-empty" style="padding:8px 0;font-size:12px;">沒有帳務權限（需要財務管理＋金額檢視）</div>';
+// 🔴 後端回 403 要跟「這一案還沒有發票」分開 —— 以前一律吞成 null，沒帳務權限的人看到的是
+// 「沒有發票／沒有應付」，結案檢查也跟著誤判成綠燈。
+const DENIED = Symbol('denied');
+const _q = (path) => _fetch(path).catch((e) => (e && e.status === 403 ? DENIED : null));
 
 async function _load(projectId, { full = true } = {}) {
     const ent = state.projects.find((p) => p.id === projectId)?.entity === 'mine' ? '&entity=mine' : '';
@@ -127,8 +135,12 @@ async function _load(projectId, { full = true } = {}) {
         _q('/payments/advances?project_id=' + encodeURIComponent(projectId)), _q(`/projects/${projectId}/expenses`),
         // 毛利只認財務摘要那一份（core.crm_logic.project_margin：未稅 − 雜支實際 − 人力實際），跟預算結算同一個數
         full ? _q(`/projects/${projectId}/financial-summary`) : null]);
-    return { proj, inv: inv?.invoices || [], pays: pays?.payments || [], lines: lines?.cost_lines || [],
-             cash: cash ? (cash.entries || []) : null, adv: adv?.advances || [], exp: exp?.expenses || [], fin: fin || null };
+    // denied＝帳務那三支（發票／請款單／預支款）任一被 403：畫「沒有帳務權限」而不是空表
+    const denied = [inv, pays, adv].some((v) => v === DENIED);
+    const ok = (v) => (v === DENIED ? null : v);
+    return { proj: ok(proj), inv: ok(inv)?.invoices || [], pays: ok(pays)?.payments || [], lines: ok(lines)?.cost_lines || [],
+             cash: ok(cash) ? (ok(cash).entries || []) : null, adv: ok(adv)?.advances || [], exp: ok(exp)?.expenses || [],
+             fin: ok(fin) || null, denied };
 }
 
 function _strip(s, money, fin = null) {
@@ -161,12 +173,14 @@ const _GO = {
     cash: ['看收支', () => document.getElementById('proj-pay-cash')?.scrollIntoView({ behavior: 'smooth' })],
     staff: ['看付款', () => document.getElementById('proj-pay-pay')?.scrollIntoView({ behavior: 'smooth' })],
 };
-function _hints(list) {
-    return `<div class="ppay-next"><span class="ppay-next-t">下一步</span>${list.map((h) => `<span class="ppay-hint ${h.level}">${_esc(h.text)}${h.act && _GO[h.act] ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" data-ppay-act="${h.act}">${_GO[h.act][0]}</button>` : ''}</span>`).join('')}</div>`;
+function _hints(list, canInv = true) {
+    // 「開發票」那顆是寫入動作，沒帳務寫入權就只留提示字
+    const go = (h) => h.act && _GO[h.act] && (canInv || h.act !== 'invoice');
+    return `<div class="ppay-next"><span class="ppay-next-t">下一步</span>${list.map((h) => `<span class="ppay-hint ${h.level}">${_esc(h.text)}${go(h) ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" data-ppay-act="${h.act}">${_GO[h.act][0]}</button>` : ''}</span>`).join('')}</div>`;
 }
 
-/** 收款：本案發票一張一列（同示範頁）。 */
-function _recvHtml(s, money) {
+/** 收款：本案發票一張一列（同示範頁）。canInv＝false 時只畫表，不畫任何動作鈕。 */
+function _recvHtml(s, money, canInv = true) {
     const m = (n) => (money ? '$' + fmtNum(n) : '—');
     const rows = s.invoices.map((i) => {
         const got = Number(i.collected || 0);
@@ -179,9 +193,9 @@ function _recvHtml(s, money) {
             <td>${invoicePayBadge(i.payment_status)}</td>
             <td class="r num">${got ? m(got) : '<span class="dim">—</span>'}</td>
             <td class="num">${_esc(_d(i.last_paid_date)) || '<span class="dim">—</span>'}</td>
-            <td><div class="ppay-acts">
+            <td><div class="ppay-acts">${canInv ? `
                 ${collected ? '' : `<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projPay.markCollected('${_esc(i.id)}')">標已收款</button>`}
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projInv.del('${_esc(i.id)}')" title="刪除這張發票">刪除</button>
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projInv.del('${_esc(i.id)}')" title="刪除這張發票">刪除</button>` : ''}
             </div></td></tr>`;
     }).join('');
     return `<div class="ppay-tbl"><table class="ppay-table">
@@ -195,8 +209,8 @@ function _recvHtml(s, money) {
             <td class="r num">${m(i.amount_total || 0)}</td>
             <td>${invoicePayBadge(i.payment_status)}</td>
             <td colspan="2" class="dim" style="font-size:11px;">不計入已開發票</td>
-            <td><div class="ppay-acts"><button class="crm-btn crm-btn-secondary crm-btn-sm"
-                onclick="window._projPay.doLink('${_esc(i.id)}', true)" title="這張不屬於本案就取消">取消連結</button></div></td></tr>`).join('')}
+            <td><div class="ppay-acts">${canInv ? `<button class="crm-btn crm-btn-secondary crm-btn-sm"
+                onclick="window._projPay.doLink('${_esc(i.id)}', true)" title="這張不屬於本案就取消">取消連結</button>` : ''}</div></td></tr>`).join('')}
         </tbody></table></div>
         ${s.kai.length ? `<p class="ppay-note">代開發票：客戶匯的是面額，公司留代開費，其餘要匯給代開人 —— 在收支明細的那筆收款列按「請款」整筆請過去。</p>` : ''}`;
 }
@@ -208,8 +222,9 @@ function _chain(p) {
     return `<span class="ppay-chain">${st(1, '未請款')}<span class="sep ${stage > 1 ? 'done' : ''}"></span>${st(2, '已請款', p ? _md(p.request_date) : '')}<span class="sep ${stage > 2 ? 'done' : ''}"></span>${st(3, '已付款', p ? _md(p.payment_date) : '')}</span>`;
 }
 
-/** 付款：一人一列＋其他請款單＋預支款（同示範頁）。動作沿用 crm-projects-finance 那組。 */
-function _payHtml(s, adv, money) {
+/** 付款：一人一列＋其他請款單＋預支款（同示範頁）。動作沿用 crm-projects-finance 那組；
+ *  canInv＝false 時請款三顆／預支刪除都不畫（_costPayBtns 自己會回空字串）。 */
+function _payHtml(s, adv, money, canInv = true) {
     const m = (n) => (money ? '$' + fmtNum(n) : '—');
     const rows = [];
     // 三顆請款鈕由同一支產生器產出（逐字抄三份的話，改 _costCreatePayment 的簽章要改三處）；代墊那顆只多帶 advanced
@@ -221,7 +236,7 @@ function _payHtml(s, adv, money) {
         const advTag = p && p.advance_by ? `<span style="color:#fb923c;font-size:10px;margin-right:6px;" title="這筆費用由 ${_esc(p.payee_name || '')} 先代墊，公司要還的是他">${_esc(p.payee_name || '')} 代墊</span>` : '';
         const acts = p
             ? `${advTag}<span class="ppay-link" onclick="window._costViewPayment('${_esc(p.id)}')">看單</span>${window._costPayBtns ? window._costPayBtns(p) : ''}`
-            : `${payBtn(g, items, '應付款', '請款')}${payBtn(g, items, '已付款', '現金已付款')}${payBtn(g, items, '應付款', '費用已代墊', true)}`;
+            : (canInv ? `${payBtn(g, items, '應付款', '請款')}${payBtn(g, items, '已付款', '現金已付款')}${payBtn(g, items, '應付款', '費用已代墊', true)}` : '');
         rows.push(`<tr><td class="who">${_esc(g.name)}</td><td class="role">${_esc(items)}</td><td class="r num">${m(g.subtotal)}</td><td>${_chain(p)}</td><td><div class="ppay-acts">${acts}</div></td></tr>`);
     }
     for (const x of s.others) {
@@ -237,7 +252,7 @@ function _payHtml(s, adv, money) {
         rows.push(`<tr><td class="who">${_esc(a.payee_name || '')} <span class="crm-badge" style="background:#2a2a2a;color:#9ca3af;">預支</span></td>
             <td class="role">${_esc(a.summary || '')}</td><td class="r num">${m(a.amount || 0)}</td><td>${st}</td>
             <td><div class="ppay-acts"><button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._advShareLink('${_esc(a.id)}')">分享登記連結</button>
-                ${a.is_settled ? '' : `<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._advDeleteAdvance('${_esc(a.id)}','${_sq(a.payee_name)}')">刪除</button>`}</div></td></tr>`);
+                ${a.is_settled || !canInv ? '' : `<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._advDeleteAdvance('${_esc(a.id)}','${_sq(a.payee_name)}')">刪除</button>`}</div></td></tr>`);
     }
     const proj = state.projects.find((p) => p.id === state.selectedId);
     const budget = s.contract ? Math.round(s.contract * (1 - Number(proj?.profit_target_pct ?? 20) / 100)) : 0;
@@ -287,27 +302,29 @@ export async function loadPayTab(projectId) {
     const d = await _load(projectId);
     if (state.selectedId !== projectId) return;      // 切走了就別畫到別的案上
     const s = payStatus(d.proj, d.inv, d.pays, d.lines);
+    // 動作鈕看鑰匙；表格看後端給不給（403 → 兩區各畫一行「沒有帳務權限」）
+    const canInv = _canInvoice() && !d.denied;
     // AM／PM 可編輯格由 detail.js 畫在 #proj-pay-ampm-src；第一次在 host 外、重畫時已經搬進 host 裡 ——
     // 先抓住再覆寫 innerHTML，不然第二次 loadPayTab 會把它連同舊畫面一起清掉
     const ampm = document.getElementById('proj-pay-ampm-src');
     host.innerHTML = `
         ${_metaHtml(d.proj)}
         ${_strip(s, money, d.fin)}
-        ${_hints(nextSteps(s, { money }))}
+        ${_hints(nextSteps(s, { money }), canInv)}
         <div class="ppay-sec" id="proj-pay-recv">
             <div class="ppay-sh"><span class="ppay-h">收款</span><span class="ppay-sub">本案的發票，和它連到的匯款</span>
-                <span class="ppay-sh-act"><button class="crm-btn crm-btn-secondary crm-btn-sm" title="把已經開好、但還沒掛到任何專案的發票連過來" onclick="window._projPay.linkInvoice()">連結發票</button><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projInv.create()">開發票</button></span></div>
-            ${_recvHtml(s, money)}
+                ${canInv ? `<span class="ppay-sh-act"><button class="crm-btn crm-btn-secondary crm-btn-sm" title="把已經開好、但還沒掛到任何專案的發票連過來" onclick="window._projPay.linkInvoice()">連結發票</button><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projInv.create()">開發票</button></span>` : ''}</div>
+            ${d.denied ? NO_INVOICE_HTML : _recvHtml(s, money, canInv)}
         </div>
         <div class="ppay-sec" id="proj-pay-pay">
             <div class="ppay-sh"><span class="ppay-h">付款</span><span class="ppay-sub">人員與費用一列一人，狀態鏈：未請款 → 已請款 → 已付款</span>
                 <span class="ppay-sh-act">
                     <button class="crm-btn crm-btn-secondary crm-btn-sm" data-ppay-go-budget title="人員與金額在預算結算分頁的費用配置">加人員</button>
-                    <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._costCreatePayment('',0,'委外','應付款')">委外</button>
+                    ${canInv ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._costCreatePayment('',0,'委外','應付款')">委外</button>` : ''}
                     <button class="crm-btn crm-btn-secondary crm-btn-sm" data-ppay-go-budget title="行政雜支在預算結算分頁登記">行政雜支</button>
-                    <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._costCreateAdvance()">預支</button>
+                    ${canInv ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._costCreateAdvance()">預支</button>` : ''}
                 </span></div>
-            ${_payHtml(s, d.adv, money)}
+            ${d.denied ? NO_INVOICE_HTML : _payHtml(s, d.adv, money, canInv)}
         </div>
         <div class="ppay-sec" id="proj-pay-cash">
             <div class="ppay-sh"><span class="ppay-h">掛在本案的收支</span><span class="ppay-sub">收支明細裡掛到本案（或本案發票）的列</span></div>
@@ -334,6 +351,10 @@ export async function loadClosingBanner(projectId, host) {
     box.innerHTML = '<div class="ppay-sh"><span class="ppay-h">收付檢查</span><span class="ppay-sub">載入中…</span></div>';
     const d = await _load(projectId, { full: false });
     if (state.selectedId !== projectId) return;
+    if (d.denied) {   // 沒帳務權限：四項檢查全是猜的（發票／請款單根本沒拿到），不要畫成綠燈
+        box.innerHTML = `<div class="ppay-sh"><span class="ppay-h">收付檢查</span><span class="ppay-sub">沒有帳務權限（需要財務管理＋金額檢視）</span></div>`;
+        return;
+    }
     const s = payStatus(d.proj, d.inv, d.pays, d.lines);
     const checks = closingChecks(s, d.adv, d.exp);
     const open = checks.filter((c) => !c.ok);
@@ -350,6 +371,7 @@ export async function confirmClosing(projectId) {
     if (!projectId) return true;
     const d = await _load(projectId, { full: false });
     if (!d.proj) return true;
+    if (d.denied) return true;      // 帳務三支 403：發票／請款單根本沒拿到，不能拿空表擋人結案
     const s = payStatus(d.proj, d.inv, d.pays, d.lines);
     const open = closingChecks(s, d.adv, d.exp).filter((c) => !c.ok);
     if (!open.length) return true;

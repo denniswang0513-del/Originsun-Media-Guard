@@ -48,7 +48,7 @@ from core.subproc import run_capture
 # 免登入端點掛它 → NAS 對外容器只掛這組，其餘 160+ 個 CRM 端點不會對外。
 # ⚠ QR 端點雖然也免登入，但**只有後台在用**（公開頁一次都沒呼叫）且需要 qrcode
 #   套件（對外容器沒裝）→ 留在 router，刻意不進 public_router。
-from ._shared import (router, public_router, _require_db,
+from ._shared import (router, public_router, _check_auth, _require_db,
                       _get_factory, _now, _UPLOAD_BASE, save_webp_or_none,
                       _verify_token_generic, _mint_token_generic)
 
@@ -671,6 +671,15 @@ def _check_media_log_auth(request, token: str = "") -> None:
     check_admin_or_module(request, 'media_log')
 
 
+def _check_media_log_read_auth(request) -> None:
+    """專案頁裡的影像紀錄**讀取**（`GET /projects/{id}/media-log`）：media_log
+    之外也放行 crm_projects（2026-09-08 權限稽核第二批 —— 專案頁的影像紀錄子頁
+    對有專案鑰匙的人要看得到）。寫入（token／enabled／刪檔）仍走上面那支；
+    全站設定與整棵重掃是管理員（`_check_auth`）。"""
+    from core.auth import check_admin_or_module
+    check_admin_or_module(request, 'media_log', 'crm_projects')
+
+
 # ── 資料夾綁 token（未連專案也能產 QR 收照片，之後再連結）─────────────
 # owner 2026-07-26：官網頁面開放給部分帳號代管；孤兒資料夾要能直接產 QR 現場收照，
 # 之後再「連結專案」或「開新專案」把整夾收進去。做法＝建一條 folder-only 的
@@ -798,7 +807,7 @@ async def get_project_media_log(project_id: str, request: Request, fast: int = 0
     + 檔案清單（created_at DESC）。
     fast=1（切專案自動重載用）：跳過資料夾↔DB 同步（秒級 NAS SMB 掃描），
     只回 DB 現況 — 前端拿到後會在背景再打一次全同步補真相。"""
-    _check_media_log_auth(request)
+    _check_media_log_read_auth(request)
     _require_db()
     db = await _db_settings()          # 一個 request 只查一次（root/cats 與分享網域共用）
     root, cats = _conf_from(db)
@@ -1187,7 +1196,7 @@ async def media_log_catchup_now(request: Request):
     """管理員手動觸發一輪縮圖補算（影片縮圖/時長 + 舊縮圖遷移）。
     平時由 master 背景每 10 分鐘自動跑；剛上傳一批影片想立刻看到縮圖時可手動戳。
     只在 master 有意義（有 ffmpeg + NAS 憑證）；回 {scanned, fixed}。"""
-    _check_media_log_auth(request)
+    _check_auth(request)     # 整棵重掃＝全系統動作，留管理員（owner 2026-09-08 ADMIN_ONLY_ACTIONS）
     from services.media_log_catchup import run_media_log_catchup_once
     return await run_media_log_catchup_once()
 
@@ -1198,7 +1207,7 @@ async def update_media_log_settings(project_id: str, request: Request):
     NAS 對外容器共讀，見 _media_log_conf）。root / categories 是全站共用
     （不分專案），path 帶 project_id 只是讓前端從專案面板順手改。
     缺的欄位不動（partial 語意）。root 存的是 master 視角的 UNC。"""
-    _check_media_log_auth(request)
+    _check_auth(request)     # 全站根目錄／分類＝全站設定，留管理員（owner 2026-09-08 ADMIN_ONLY_ACTIONS）
     _require_db()
     body = await request.json()
     patch: dict = {}

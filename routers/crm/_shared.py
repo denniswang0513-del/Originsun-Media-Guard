@@ -190,6 +190,16 @@ _check_website_auth = _module_guard('website_admin')
 # 其他 CRM 寫入（客戶、報價、帳務、成本）一起放行 —— 那些的使用者是財務。
 _check_project_write_auth = _module_guard('crm_projects')
 
+# 權限稽核第二批「看得到做得到」（owner 2026-09-08，docs/RBAC_AUDIT.md §4）：
+# 分頁鑰匙開什麼分頁，就能做那個分頁上畫出來的動作。留管理員的只有
+# ADMIN_ONLY_ACTIONS（docs/RBAC_PLAN.md §5 第 5 點）：刪除、CSV 匯入、全站根目錄。
+#
+# 員工檔案（新增／編輯／履歷／照片／作品集／編輯連結）—— 管理員 OR crm_staff。
+_check_staff_auth = _module_guard('crm_staff')
+
+# 報價（新增／編輯／分享／範本）—— 管理員 OR crm_quotes。
+_check_quotes_auth = _module_guard('crm_quotes')
+
 # 工作流手動里程碑 —— 模組級（owner 2026-08-14 拍板）。這是 CRM 寫入面第一道
 # 模組級鬆綁：生產有 3 個 lv1 帳號被授予 crm_projects 卻打不了任何 CRM 寫入
 # 端點（其餘寫入都是 Lv3），權限等於空頭支票。勾一個里程碑跟改專案狀態、

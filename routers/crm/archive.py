@@ -24,8 +24,12 @@ from fastapi import HTTPException, Request
 from core import project_archive as pa
 from core.project_folders import create_subfolder
 
-from ._shared import (router, _check_auth, _get_factory, _patch_project_json,
-                      _require_db, _with_project)
+from ._shared import (router, _check_auth, _check_project_write_auth, _get_factory,
+                      _patch_project_json, _require_db, _with_project)
+
+# 守衛（2026-09-08 權限稽核第二批）：歸檔清單的看／勾／加列／刪列跟專案本體
+# 同一把 crm_projects（完稿結案分頁就是專案頁的一塊）。留管理員的三支
+# —— 建資料夾、掃描（動磁碟）與 KPTA 回顧 —— 仍是 _check_auth。
 
 
 async def _payload(_session, project) -> dict:
@@ -53,14 +57,14 @@ async def _write(project_id: str, attr: str, call):
 @router.get("/projects/{project_id}/archive")
 async def get_project_archive(project_id: str, request: Request):
     """歸檔清單 + 回顧（範本每次讀時對齊 —— 之後加項目，舊專案也會長出來）。"""
-    _check_auth(request)
+    _check_project_write_auth(request)
     return await _with_project(project_id, _payload)
 
 
 @router.patch("/projects/{project_id}/archive")
 async def patch_project_archive(project_id: str, request: Request):
     """單格寫入：{key, field(status|note), value}。last-write-wins。"""
-    _check_auth(request)
+    _check_project_write_auth(request)
     body = await request.json()
     return await _write(project_id, "archive_checklist",
                         lambda cur: pa.apply_patch(cur, body.get("key"),
@@ -70,7 +74,7 @@ async def patch_project_archive(project_id: str, request: Request):
 @router.post("/projects/{project_id}/archive/rows")
 async def add_archive_row(project_id: str, request: Request):
     """加一列自訂歸檔項目：{label}。"""
-    _check_auth(request)
+    _check_project_write_auth(request)
     body = await request.json()
     return await _write(project_id, "archive_checklist",
                         lambda cur: pa.add_row(cur, body.get("label"),
@@ -80,7 +84,7 @@ async def add_archive_row(project_id: str, request: Request):
 @router.delete("/projects/{project_id}/archive/rows/{key}")
 async def delete_archive_row(project_id: str, key: str, request: Request):
     """刪一列自訂歸檔項目（範本列不給刪，標「不適用」即可）。"""
-    _check_auth(request)
+    _check_project_write_auth(request)
     return await _write(project_id, "archive_checklist",
                         lambda cur: pa.remove_row(cur, key))
 

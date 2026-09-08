@@ -42,7 +42,7 @@ def test_share_button_and_update_do_not_regress_on_review():
     手機 PUT 不帶 quote_date／valid_until／discount／status，後端整包寫回會洗掉。"""
     js = js_code_only(repo_src(JS))
     assert "const btn = ev.currentTarget;" in js and "ev.currentTarget.textContent" not in js
-    assert "const canShare = q.share_url || (window._accessLevel || 0) >= 3;" in js
+    assert "const canShare = q.share_url || hasModule('crm_quotes');" in js, "第二批：分享開給 crm_quotes（後端 /share 同步放行）"
     from tests.unit._srcscan import code_only, func_body
     upd = code_only(func_body(repo_src("routers/crm/quotes.py"), "async def update_quotation("))
     assert "sent = req.model_fields_set" in upd

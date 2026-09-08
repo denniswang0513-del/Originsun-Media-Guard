@@ -14,7 +14,7 @@ def test_backend_endpoints_share_project_type_vocab():
     assert '@router.get("/project-types")' in proj and '@router.post("/project-types")' in proj
     assert "_project_types_payload()" in code_only(func_body(proj, "async def get_project_types(")) and "project_type_vocab(list(in_use))" in code_only(func_body(proj, "async def _project_types_payload("))
     edit = code_only(func_body(proj, "async def edit_project_types("))
-    assert "_check_auth(request)" in edit, "改案型＝Lv3（同 /api/settings/save）"
+    assert "_check_project_write_auth(request)" in edit, "改案型＝crm_projects（2026-09-08 權限稽核第二批）"
     assert 'load_margin_model("mine")' in edit and 'save_margin_model("mine", model)' in edit, "改的是毛利表那份（正本），不是 settings"
     for f in ("routers/api_finance.py", "routers/api_timesheets.py", "routers/api_crm_mobile.py"):
         assert "project_type_vocab(" in repo_src(f), f

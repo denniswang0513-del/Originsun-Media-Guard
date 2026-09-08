@@ -123,16 +123,19 @@ DESTS: frozenset = frozenset(ITEM_DEST.values())
 # checkbox」兩處共用這一份 —— 分兩處寫的話，總有一天畫面說可以、後端回 403。
 CHECK_MODULES: tuple[str, ...] = ("crm_projects",)
 
-# 誰可以推進階段。空 tuple ＝ 只有管理員（`check_admin_or_module` 零 key 時
-# 等同 `check_admin`，同 `_module_guard()` 的既有慣例）。
+# 誰可以推進階段（啟動專案、改階段）。
 #
-# 🔴 為什麼要有這個常數，而不是兩邊各寫「admin」：推進的守衛在
-# `routers/crm/projects.py::update_project_status`，而「畫不畫按鈕」在
-# `routers/crm/flow.py::_payload` —— 兩者今天都是 admin 純屬**巧合**
-# （後者用的是 CRM 泛用寫入預設 `_check_auth`，那支被 85 個端點共用）。
-# CHECK_MODULES 剛開了 CRM 寫入面第一道模組級鬆綁，第二道遲早來；那天
-# 如果只鬆綁端點，按鈕會靜默維持 disabled，而且沒有任何測試會紅。
-ADVANCE_MODULES: tuple[str, ...] = ()
+# owner 2026-09-08 拍板（docs/RBAC_PLAN.md §5 第 2 點）：**開給 `crm_projects`**，
+# 跟建／改／刪專案、勾里程碑同一把 —— 有專案管理鑰匙的人看得到「啟動專案」
+# 按鈕，按下去就該過（權限稽核第二批「看得到做得到」）。在此之前是空 tuple
+# ＝ 只有管理員（`check_admin_or_module` 零 key 時等同 `check_admin`）。
+#
+# 🔴 為什麼要有這個常數，而不是兩邊各寫死：推進的守衛在
+# `routers/crm/projects.py::update_project_status`（PUT 整包送 status 也走
+# 同一道門）與 `routers/api_crm_mobile.py`（簽回順便啟動），而「畫不畫按鈕」在
+# `routers/crm/flow.py::_payload` —— 三處共用這一份，改政策只改這一行；
+# 分開寫的話總有一天畫面說可以、後端回 403（或反過來：端點開了、按鈕還是灰的）。
+ADVANCE_MODULES: tuple[str, ...] = ("crm_projects",)
 
 # 進到這些階段＝這個案子拿到了（衛星提案記「成案」）。
 # 正本在這裡（純模組、無 IO）—— 原本住在 routers 裡，害 core 的純邏輯只能

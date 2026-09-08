@@ -201,11 +201,14 @@ function _bind() {
             try {
                 if (act === 'save-fixed') {
                     const v = parseInt(document.getElementById('cf-fixed').value) || 0;
-                    await fetch('/api/settings/save', {
+                    // 單獨的 finance 鍵：後端分流給 crm_invoices；401/403 要說出來（之前不看回應，重整就消失）
+                    const r = await fetch('/api/settings/save', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') },
                         body: JSON.stringify({ finance: { monthly_fixed_costs: v } }),
                     });
+                    if (r.status === 401 || r.status === 403) return alert('儲存固定成本需要管理員或帳務管理（crm_invoices）權限。');
+                    if (!r.ok) return alert('儲存固定成本失敗: HTTP ' + r.status);
                     refresh();
                 } else if (act === 'cycle') {
                     const next = MS_STATUSES[(MS_STATUSES.indexOf(node.dataset.status) + 1) % MS_STATUSES.length];

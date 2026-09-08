@@ -4,8 +4,18 @@
  */
 
 import { state } from './crm-projects-state.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum, today, groupCostStaff } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, today, groupCostStaff, hasModule, canSeeMoney } from './crm-utils.js';
+import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 import { loadProjectStaff } from '../proposals/staff-view.js';
+
+// 錢流（請款單／預支款）的寫入要 crm_invoices＋money_view（RBAC 稽核第二批）。
+// 這幾支 window.* 是全域入口（收付款分頁、預算結算的雜支列都會叫），所以入口本身也擋一次，
+// 不只靠呼叫端不畫鈕 —— 舊快取的分頁 js 還是會畫出那顆鈕。
+const _INVOICE_NEED = '財務管理＋金額檢視';
+const _canInvoice = () => hasModule('crm_invoices') && canSeeMoney();
+function _denyInvoice() {
+    alert(_U.permDeniedMsg?.(_INVOICE_NEED) ?? '權限不足：需要「財務管理＋金額檢視」權限，請管理員在使用者管理開通');
+}
 
 // ── Load Project Staff ──────────────────────────────────────────
 
@@ -18,6 +28,7 @@ async function _loadProjectStaff(projectId) {
         host, fetcher: _fetch,
         // 不注入 onRemove：刪除由元件自己做（它已經有確認與重畫）。
         // 注入的話會確認兩次 —— 元件問一次、被注入的那支再問一次。
+        canAssign: hasModule('crm_projects'),   // 派工寫入是 crm_projects 的事，沒鑰匙不畫新增／移除
     });
 }
 
@@ -25,6 +36,7 @@ async function _loadProjectStaff(projectId) {
 
 window._costCreateAdvance = function() {
     if (!state.selectedId) return;
+    if (!_canInvoice()) { _denyInvoice(); return; }
     var proj = state.projects.find(function(p) { return p.id === state.selectedId; });
     var projName = proj ? proj.name : '';
     var overlay = document.createElement('div');
@@ -76,18 +88,19 @@ window._costCreateAdvance = function() {
             overlay.remove();
             _refreshPayIfOpen();
         } catch (e) {
-            alert('建立失敗：' + e.message);
+            alert(_U.permDeniedMsg?.(_INVOICE_NEED, e) ?? ('建立失敗：' + e.message));
             this.disabled = false; this.textContent = '確定';
         }
     });
 };
 
 window._advDeleteAdvance = async function(advanceId, payeeName) {
+    if (!_canInvoice()) { _denyInvoice(); return; }
     if (!confirm('確定刪除「' + payeeName + '」的預支款？')) return;
     try {
         await _fetch('/payments/' + advanceId, { method: 'DELETE' });
         _refreshPayIfOpen();
-    } catch (e) { alert('刪除失敗：' + e.message); }
+    } catch (e) { alert(_U.permDeniedMsg?.(_INVOICE_NEED, e) ?? ('刪除失敗：' + e.message)); }
 };
 
 
@@ -168,6 +181,7 @@ window._advShareLink = function(advanceId) {
 window._costCreatePayment = function(payeeName, amount, summary, status, advanced, opts) {
     opts = opts || {};
     if (!state.selectedId) return;
+    if (!_canInvoice()) { _denyInvoice(); return; }
     var proj = state.projects.find(function(p) { return p.id === state.selectedId; });
     var projName = proj ? proj.name : '';
     var overlay = document.createElement('div');
@@ -244,7 +258,7 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
             if (opts.onDone) { opts.onDone(); }
             _refreshPayIfOpen();
         } catch (e) {
-            alert('建立失敗：' + e.message);
+            alert(_U.permDeniedMsg?.(_INVOICE_NEED, e) ?? ('建立失敗：' + e.message));
             btn.disabled = false; btn.textContent = '確定';
         }
     });
@@ -272,7 +286,7 @@ async function _costPayAction(id, paid) {
         });
         return true;
     } catch (e) {
-        alert((paid ? '標記付款失敗：' : '改回應付失敗：') + e.message);
+        alert(_U.permDeniedMsg?.(_INVOICE_NEED, e) ?? ((paid ? '標記付款失敗：' : '改回應付失敗：') + e.message));
         return false;
     }
 }
@@ -293,11 +307,13 @@ function _costAfterPay(onDone) {
 }
 
 window._costPayMark = async function(id, paid, onDone) {
+    if (!_canInvoice()) { _denyInvoice(); return; }
     if (!paid && !confirm('把這張請款單改回應付款？（單子留著，只是取消付款）')) return;
     if (await _costPayAction(id, paid)) { _costAfterPay(onDone); }
 };
 
 window._costPayWithdraw = async function(id, summary, onDone) {
+    if (!_canInvoice()) { _denyInvoice(); return; }
     var msg = '收回這張請款單？' + '\n\n' + (summary || '')
         + '\n\n單子會被刪掉，那一列變回可以重新請款。\n'
         + '（已付的錢請改用「改回應付」）';
@@ -305,7 +321,7 @@ window._costPayWithdraw = async function(id, summary, onDone) {
     try {
         await _fetch('/payments/' + id, { method: 'DELETE' });
         _costAfterPay(onDone);
-    } catch (e) { alert('收回失敗：' + e.message); }
+    } catch (e) { alert(_U.permDeniedMsg?.(_INVOICE_NEED, e) ?? ('收回失敗：' + e.message)); }
 };
 
 /** 財務區的小按鈕（請款三顆／付款動作／預支三顆）只有這一份模板 ——
@@ -320,6 +336,7 @@ function _smallBtn(call, label, opt) {
 
 /** 這張單在畫面上該給哪幾顆動作鈕。列上與詳情視窗共用同一份。 */
 window._costPayBtns = function(p, onDoneName) {
+    if (!_canInvoice()) return '';       // 沒有錢流寫入權就一顆都不畫（看單仍可）
     var d = onDoneName ? (',' + onDoneName) : '';
     var sm = _esc(p.summary || '').replace(/'/g, "\\'");
     if (p.payment_status === '已付款') {

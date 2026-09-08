@@ -36,8 +36,8 @@ export async function loadReportHistory() {
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                     ${r.public_url ? `<button onclick="copyPublicUrl('${r.public_url}', this)" class="text-xs border border-[#0d9488] bg-[#0f766e]/30 hover:bg-[#0f766e] text-teal-200 px-2 py-1 rounded transition-colors whitespace-nowrap">🌐 複製公開網址</button>` : ''}
-                    <button onclick="deleteReport('${r.id}')"
-                        class="text-xs bg-[#500] hover:bg-[#800] text-red-300 px-2 py-1 rounded transition-colors">✕</button>
+                    ${window._isAdmin ? `<button onclick="deleteReport('${r.id}')"
+                        class="text-xs bg-[#500] hover:bg-[#800] text-red-300 px-2 py-1 rounded transition-colors">✕</button>` : ''}
                 </div>
             </div>
         `).join('');

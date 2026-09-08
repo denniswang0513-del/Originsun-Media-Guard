@@ -3,7 +3,7 @@
 以及工作追蹤唯讀端點的守衛放寬（timesheets 模組或綁定人員）。
 
 釘的規則：team_week 的人×日直接用看板那一份計算（不抄第二份）；場次 crew 比 staff_id 退回姓名；
-放寬只碰非私帳 wall 的端點（/projects、/summary 仍是 _require_mine_admin）。
+放寬只碰非私帳 wall 的端點（/projects、/summary 2026-09-08 起開給 timesheets 鑰匙、寫入仍是 _require_mine_admin）。
 """
 from tests.unit._srcscan import code_only, func_body, repo_src
 
@@ -86,9 +86,10 @@ def test_readonly_relaxation_does_not_touch_the_mine_wall():
     assert "staff_name = await _ts_or_bound(request)" in po
     # 只有 me_finance、沒綁人員的帳號原本就拿整份：放寬不收回（polish review 2026-09-07）
     assert 'payload_grants(_extract_token(request) or {}, "me_finance")' in po and "staff_name = None" in po
-    # 私帳 wall 原封不動：私帳案清單、burn 摘要、改預算
-    assert "_require_mine_admin(request)" in func_body(src, "async def timesheet_projects(")
-    assert "_require_mine_admin(request)" in func_body(src, "async def burn_summary(")
+    # 權限稽核第二批（2026-09-08）：私帳案清單、burn 摘要放給 timesheets 分頁鑰匙（摘要抹私帳欄位，
+    # 見 test_batch2_hr_guards）；寫私帳那半邊（改預算）仍守私帳 wall
+    assert 'check_admin_or_module(request, "timesheets")' in func_body(src, "async def timesheet_projects(")
+    assert 'check_admin_or_module(request, "timesheets")' in func_body(src, "async def burn_summary(")
     assert '_require_mine_admin(request, level="full")' in func_body(src, "async def set_project_budget(")
     assert "_ts_or_bound" not in func_body(src, "async def timesheet_projects(")
 

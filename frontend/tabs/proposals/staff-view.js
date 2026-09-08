@@ -16,11 +16,19 @@
  * 兩個掛載點的全域狀態不一樣，問旗標會在獨立頁上答錯。
  * 不畫 `***`、更不畫 0；詳見 docs/MONEY_VISIBILITY.md §4。
  *
- * 寫入（新增／修改派工）仍在 CRM，且是 Lv3。所以專案頁這一份是唯讀的：
- * 刪除鈕只有在呼叫端注入 `onRemove` 時才畫出來。
+ * 寫入（新增／移除派工）是 `crm_projects` 的事（RBAC 稽核第二批）。這支讀不到
+ * SPA 的 `window._modules`（另一個掛載點是獨立頁），所以「能不能寫」由呼叫端注入
+ * `opts.canAssign`：明確給 false 才不畫「＋ 新增派工」與移除鈕；沒給（舊呼叫端、
+ * 專案頁）維持原行為 —— Cloudflare 給 .js 4 小時快取，新元件配舊呼叫端不能把
+ * 管理員的按鈕藏掉。
  */
 
 import { esc, ensureStyle } from '../../js/shared/dom.js';
+
+// 403 的一致訊息（與 tabs/crm/crm-utils.permDeniedMsg 同一句；這裡 import 不到它）
+const _errText = (e, prefix) => (e && e.status === 403
+    ? '權限不足：需要「專案管理」權限，請管理員在使用者管理開通'
+    : prefix + (e && e.message ? e.message : e));
 
 const STYLE_ID = 'pstaff-style';
 const CSS = `
@@ -51,7 +59,8 @@ const _num = (n) => Number(n || 0).toLocaleString('zh-TW');
  * @param projectId
  * @param opts.host      掛載節點（必填）
  * @param opts.fetcher   CRM 前綴的 fetcher `(path, opts) => Promise<json>`
- * @param opts.onRemove  給了才畫刪除鈕；`(rowId) => any`。不給＝唯讀。
+ * @param opts.onRemove  給了就把移除交給呼叫端；`(rowId) => any`。不給＝元件自己打端點。
+ * @param opts.canAssign 明確 false＝唯讀（不畫新增／移除）；其他值＝可寫。
  */
 export async function loadProjectStaff(projectId, opts = {}) {
     const host = opts.host;
@@ -74,6 +83,7 @@ export async function loadProjectStaff(projectId, opts = {}) {
         // project.html —— 那頁沒有那些全域，問了會把管理員也判成沒授權。
         // 鍵在＝後端認可，這是唯一不會漂的判準。
         const showMoney = rows.some(r => 'cost' in r);
+        const canAssign = opts.canAssign !== false;
         host.innerHTML = rows.map(r => `
             <div class="pstaff-row">
               <span class="pstaff-who">${esc(r.staff_name || '未知')}
@@ -83,8 +93,8 @@ export async function loadProjectStaff(projectId, opts = {}) {
               <span class="pstaff-days">${r.days ?? 0} 天</span>
               ${showMoney ? `<span class="pstaff-money">$${_num(r.rate)}</span>
               <span class="pstaff-money">$${_num(r.cost)}</span>` : ''}
-              <button class="pstaff-del" data-rm="${esc(r.id)}"
-                      title="移除這筆派工">&#x2715;</button>
+              ${canAssign ? `<button class="pstaff-del" data-rm="${esc(r.id)}"
+                      title="移除這筆派工">&#x2715;</button>` : ''}
               ${r.notes ? `<span class="pstaff-note">${esc(r.notes)}</span>` : ''}
             </div>`).join('')
             + (showMoney
@@ -108,7 +118,7 @@ async function _remove(rowId, projectId, opts) {
     try {
         await opts.fetcher(`/project-staff/${rowId}`, { method: 'DELETE' });
         await loadProjectStaff(projectId, opts);
-    } catch (e) { alert('移除失敗：' + (e && e.message ? e.message : e)); }
+    } catch (e) { alert(_errText(e, '移除失敗：')); }
 }
 
 /** 「＋ 新增派工」：人員下拉 + 角色 + 天數。
@@ -118,6 +128,7 @@ async function _remove(rowId, projectId, opts) {
  *  要調費率請到 CRM 的成本估算（那裡本來就是錢的工作面）。
  */
 function _wireAdd(host, projectId, opts) {
+    if (opts.canAssign === false) return;     // 沒 crm_projects：唯讀，連入口都不畫
     const bar = document.createElement('div');
     bar.className = 'pstaff-add';
     bar.innerHTML = '<button class="pstaff-addbtn">＋ 新增派工</button>';
@@ -157,7 +168,7 @@ function _wireAdd(host, projectId, opts) {
                 await loadProjectStaff(projectId, opts);
                 opts.onChanged?.();
             } catch (e) {
-                alert('新增失敗：' + (e && e.message ? e.message : e));
+                alert(_errText(e, '新增失敗：'));
                 ev.target.disabled = false;
             }
         });

@@ -18,7 +18,11 @@ const groupQuoteItems = _QA.groupQuoteItems || ((items) => {
     return groups;
 });
 const flattenQuoteGroups = _QA.flattenQuoteGroups || ((groups) => (groups || []).flatMap(g => g.items.map(it => ({ ...it, group_name: g.name }))));
-import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, quotePdfFilename, initRootFolderCard } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, quotePdfFilename, initRootFolderCard, hasModule } from './crm-utils.js';
+import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
+
+// 刪除報價仍是管理員限定（RBAC 稽核第二批）—— 不是管理員就別畫那顆鈕
+const _isAdmin = () => (window._accessLevel || 0) >= 3;
 import { authDownload, copyText } from '../../js/shared/utils.js';
 
 // ── State ────────────────────────────────────────────────────
@@ -131,7 +135,7 @@ function renderList() {
             <div class="crm-row-status">${_qBadge(q.status)}</div>
             <div class="crm-row-amount">$${_fmtNum(price)}</div>
             <div class="crm-row-date">${q.quote_date ? q.quote_date.substring(0, 10) : '—'}</div>
-            ${kebabMenuHtml(q.id, { onEdit: '_quoteEdit', onDuplicate: '_quoteDup', onDelete: '_quoteDelete' })}
+            ${kebabMenuHtml(q.id, { onEdit: '_quoteEdit', onDuplicate: '_quoteDup', onDelete: _isAdmin() ? '_quoteDelete' : undefined })}
         </div>`;
     }).join('');
 }
@@ -206,7 +210,7 @@ function renderDetail(q) {
         // PDF 與分享連結要寄出之後才出現（owner 2026-09-07「送出再產生連結與 pdf 按鈕」）：草稿還在改，不該流出去
         const sent = q.status !== _QUOTE_STATUSES[0];
         // 鑄連結是管理員限定（POST /share）：非管理員只有已經有連結時才給「複製」（同手機版）
-        const canShare = q.share_url || (window._accessLevel || 0) >= 3;
+        const canShare = q.share_url || hasModule('crm_quotes');   // 第二批：分享開給 crm_quotes（後端 /share 同步放行）
         actions.innerHTML = (sent ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-pdf">下載 PDF</button>`
             + (canShare ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-share">${q.share_url ? '複製連結' : '分享連結'}</button>` : '') : '')
             + `<button class="crm-detail-close" title="關閉">&#x2715;</button>`;
@@ -526,7 +530,7 @@ async function deleteQuotation(q) {
         closeDetail();
         await Promise.all([loadQuotations(), loadStats()]);
     } catch (e) {
-        alert('刪除失敗：' + e.message);
+        alert(_U.permDeniedMsg?.('管理員', e) ?? ('刪除失敗：' + e.message));
     }
 }
 
@@ -688,7 +692,10 @@ export async function initCrmQuotesTab() {
         savedMsg: '已儲存（之後產出的報價單存到新位置；舊檔不搬）',
     });
     const companyBtn = document.getElementById('quote-btn-company');
-    if (companyBtn && (window._accessLevel || 0) >= 3) {
+    // 公司資訊存進 /api/settings/save 的 company 鍵：後端分流給 crm_quotes／crm_invoices，所以入口不只管理員
+    const canEditCompany = (window._accessLevel || 0) >= 3
+        || ['crm_quotes', 'crm_invoices'].some(m => (window._modules || []).includes(m));
+    if (companyBtn && canEditCompany) {
         companyBtn.style.display = '';
         companyBtn.addEventListener('click', () => {
             document.getElementById('btnOpenSettings')?.click();

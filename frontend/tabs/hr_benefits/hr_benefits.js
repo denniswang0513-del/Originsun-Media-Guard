@@ -8,6 +8,12 @@
 // 「待審算不算」這種判定就會有兩個答案，而畫面上那個一定是錯的那個。
 
 import { tabLoadError } from '../../js/shared/utils.js';
+import { hasModule } from '../crm/crm-utils.js';
+
+// 權限稽核第二批（2026-09-08）：池／撥款／登記的**讀取**放給 hr_benefits 這把鑰匙（後端 benefits._read_entity），
+// 審核／退回／登記匯款／代登／發額度／撥款／開關池／附件／心得／送會計仍是 finance_approve（管理員恆有）——
+// 沒有它的人看得到全部數字，但沒有那些鈕（後端 _check_approver 仍會再閘一次）。
+const canApprove = () => hasModule('finance_approve');
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -81,6 +87,12 @@ async function _loadDetail() {
  *  🔴 兩者都是**選填** —— 沒有不是錯誤，所以「補」是淡色的次要動作。
  *  管理端**不限狀態**都能補：匯進來的歷史紀錄（已付款）本來就沒有這兩樣。 */
 function _proof(e) {
+    if (!canApprove()) {
+        return (e.has_receipt
+            ? `<a class="hb-proof ok" href="/api/v1/crm/receipt-file?path=${encodeURIComponent(e.receipt_url)}"
+                  target="_blank" rel="noopener" title="開啟單據">單據</a>` : '')
+            + (e.has_reflection ? ` <span class="hb-proof ok" title="${esc(e.reflection)}">心得</span>` : '');
+    }
     const receipt = e.has_receipt
         ? `<a class="hb-proof ok" href="/api/v1/crm/receipt-file?path=${encodeURIComponent(e.receipt_url)}"
               target="_blank" rel="noopener" title="開啟單據">單據</a>
@@ -132,6 +144,7 @@ function poolsHtml() {
 }
 
 function poolFormHtml() {
+    if (!canApprove()) return '';
     return `
     <div class="hb-form" style="margin-top:12px;">
         <input id="hb-p-name" placeholder="名稱（例：快樂、進修、2026 LAZY KIT）" style="width:260px;">
@@ -157,9 +170,9 @@ function pendingHtml() {
         <td class="wrap">${esc(e.title)}</td>
         <td class="num">${fmt(e.amount)}</td>
         <td>${_proof(e)}</td>
-        <td>
+        <td>${canApprove() ? `
             <button class="hb-btn ok" onclick="window._hbApprove('${e.id}')">核准</button>
-            <button class="hb-btn ghost" onclick="window._hbReject('${e.id}')">退回</button>
+            <button class="hb-btn ghost" onclick="window._hbReject('${e.id}')">退回</button>` : ''}
         </td></tr>`).join('');
     return `
     <div class="hb-card">
@@ -184,6 +197,18 @@ function pendingHtml() {
 /** 說明與附件 —— owner 2026-08-21：健檢方案「可以就是一個可以打字、
  *  附上文件的說明」。共用桶的項目也用得到（券的圖就是附件）。 */
 function aboutHtml(p) {
+    if (!canApprove()) {
+        const links = (p.attachments || []).map(f => `
+            <div class="hb-file"><a href="/api/v1/crm/receipt-file?path=${encodeURIComponent(f.path)}"
+               target="_blank" rel="noopener">${esc(f.name)}</a></div>`).join('');
+        return `
+    <div class="hb-card">
+        <h3>${esc(p.name)} — 說明與附件</h3>
+        <div class="hb-note" style="white-space:pre-wrap;">${esc(p.description || '') || '（沒有說明）'}</div>
+        <div class="m" style="margin-top:6px;">有效期間：${p.valid_from || p.valid_to ? `${esc(p.valid_from || '不限')} ~ ${esc(p.valid_to || '不限')}` : '不限'}</div>
+        <div style="margin-top:10px;">${links || '<span class="m">還沒有附件</span>'}</div>
+    </div>`;
+    }
     const files = (p.attachments || []).map(f => `
         <div class="hb-file">
             <a href="/api/v1/crm/receipt-file?path=${encodeURIComponent(f.path)}"
@@ -225,9 +250,9 @@ function allowanceHtml(p) {
                 ? `${esc(a.valid_from || '—')} ~ ${esc(a.valid_to || '—')}`
                 : '<span class="m">同活動</span>'}</td>
             <td class="wrap">${esc(a.notes)}</td>
-            <td>
+            <td>${canApprove() ? `
                 <button class="hb-btn ghost" onclick="window._hbEditAllowance('${a.id}')">改額度</button>
-                <button class="hb-btn danger" onclick="window._hbDelAllowance('${a.id}')">刪除</button>
+                <button class="hb-btn danger" onclick="window._hbDelAllowance('${a.id}')">刪除</button>` : ''}
             </td></tr>`).join('')
         : '<tr><td colspan="7" class="hb-empty">還沒有發額度給任何人</td></tr>';
     const r = p.allowance_rollup || {};
@@ -246,14 +271,14 @@ function allowanceHtml(p) {
         </table>
         <div class="hb-note">已配 ${fmt(r.granted || 0)}　已用 ${fmt(r.used || 0)}
             ${r.people || 0} 人，其中 <b>${r.untouched || 0}</b> 人還沒動用。</div>
-        <div class="hb-form" style="margin-top:12px;">
+        ${canApprove() ? `<div class="hb-form" style="margin-top:12px;">
             <select id="hb-a-staff"><option value="">選員工</option>${staffOpts}</select>
             <input type="number" id="hb-a-amount" placeholder="額度">
             <button class="hb-btn" onclick="window._hbAddAllowance()">發給這個人</button>
             <button class="hb-btn ghost" onclick="window._hbBulkAllowance()">全部在職員工各發一份</button>
         </div>
         <div class="hb-note">資格不做成規則，做成名單 —— 誰在這張表上就是誰有資格。
-            批次那顆只補沒有額度的人，不會覆蓋已經發過的。</div>
+            批次那顆只補沒有額度的人，不會覆蓋已經發過的。</div>` : ''}
     </div>`;
 }
 
@@ -265,18 +290,19 @@ function detailHtml() {
             <td>${f.year}</td><td>${esc(f.fund_date)}</td>
             <td class="num">${fmt(f.amount)}</td>
             <td class="wrap">${esc(f.notes)}</td>
-            <td><button class="hb-btn danger" onclick="window._hbDelFunding('${f.id}')">刪除</button></td>
+            <td>${canApprove() ? `<button class="hb-btn danger" onclick="window._hbDelFunding('${f.id}')">刪除</button>` : ''}</td>
           </tr>`).join('')
         : '<tr><td colspan="5" class="hb-empty">還沒有撥款紀錄</td></tr>';
 
     const entRows = (_detail.entries || []).length
         ? _detail.entries.map(e => {
             const acts = [];
-            if (e.status === '待審') {
+            if (!canApprove()) { /* 沒審核權：看得到狀態，沒有動作 */ }
+            else if (e.status === '待審') {
                 acts.push(`<button class="hb-btn ok" onclick="window._hbApprove('${e.id}')">核准</button>`);
                 acts.push(`<button class="hb-btn ghost" onclick="window._hbReject('${e.id}')">退回</button>`);
             }
-            if (e.status === '已核准') {
+            else if (e.status === '已核准') {
                 acts.push(`<button class="hb-btn ok" onclick="window._hbPay('${e.id}')">登記匯款</button>`);
                 acts.push(`<button class="hb-btn ghost" onclick="window._hbReject('${e.id}')">退回</button>`);
             }
@@ -308,12 +334,12 @@ function detailHtml() {
                 <th>備註</th><th>操作</th></tr></thead>
             <tbody>${fundRows}</tbody>
         </table>
-        <div class="hb-form" style="margin-top:12px;">
+        ${canApprove() ? `<div class="hb-form" style="margin-top:12px;">
             <input id="hb-f-year" type="number" placeholder="年度" style="width:90px;">
             <input id="hb-f-amount" type="number" placeholder="撥款金額">
             <input id="hb-f-date" type="date">
             <button class="hb-btn" onclick="window._hbAddFunding()">撥款進池</button>
-        </div>
+        </div>` : ''}
     </div>`}
 
     <div class="hb-card">
@@ -326,18 +352,19 @@ function detailHtml() {
                 <th class="num">金額</th><th>單據／心得</th><th>狀態</th><th>操作</th></tr></thead>
             <tbody>${entRows}</tbody>
         </table>
-        <div class="hb-form" style="margin-top:12px;">
+        ${canApprove() ? `<div class="hb-form" style="margin-top:12px;">
             <select id="hb-e-staff"><option value="">選員工</option>${staffOpts}</select>
             <input id="hb-e-title" placeholder="項目（電影名／餐廳／課程名）" style="width:230px;">
             <input id="hb-e-amount" type="number" placeholder="金額">
             <input id="hb-e-date" type="date">
             <button class="hb-btn" onclick="window._hbAddEntry()">代員工登記</button>
         </div>
-        <div class="hb-note">員工自己登記走 <b>/my.html</b> 的福委會卡片；這裡是代登用的。</div>
+        <div class="hb-note">員工自己登記走 <b>/my.html</b> 的福委會卡片；這裡是代登用的。</div>` : ''}
     </div>`;
 }
 
 function packageHtml() {
+    if (!canApprove()) return '';
     const y = new Date().getFullYear();
     const opts = [y + 1, y, y - 1, y - 2, 0].map(v =>
         `<option value="${v}"${v === y ? ' selected' : ''}>${v ? v + ' 年' : '全部'}</option>`).join('');

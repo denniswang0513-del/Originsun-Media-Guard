@@ -131,7 +131,11 @@ def test_settings_modal_reads_and_writes_all_company_keys():
         assert f"'{k}'" in keys, k
     assert keys.count("'") == 2 * len(COMPANY_KEYS), "COMPANY_KEYS 與 config.py 的 13 個 key 要一樣多"
     assert "fillCompany(data.company)" in src                         # 載入回填
-    assert "company: readCompany()" in js_func_body(src, "const settingsData = {")   # 儲存併進整包
+    # 儲存：從報價頁開的 company-only 只送 company（後端 /api/settings/save 依頂層鍵分流給 crm_quotes／crm_invoices）；
+    # 從頭像開的完整設定把 company 併進整包（2026-09-08 權限稽核第二批）
+    save = js_func_body(src, "const settingsData = companyOnly ?")
+    assert "companyOnly ? { company: readCompany() } :" in save
+    assert "...(readCompany() ? { company: readCompany() } : {})" in save
     assert "parseInt(v) || 14" in js_func_body(src, "function readCompany(")
 
 

@@ -499,6 +499,12 @@ def _me_ident(request: Request):
     return require_bound_staff(request, "me_finance")
 
 
+def _team_ident(request: Request):
+    """/me/team/*：me_finance（員工頁）或 timesheets（CRM 工作追蹤分頁「人員」連到 /hours.html）任一把，
+    再綁定人員檔案（權限稽核第二批 2026-09-08）。/me/timesheets* 仍只認 me_finance（own-scope 的列）。"""
+    return require_bound_staff(request, "timesheets", "me_finance")
+
+
 def _team_row(r) -> dict:
     """團隊頁的一列：ts_dict 去掉 project_id（回 Sheet 案名與時數，不給 CRM 私帳案 id 當連結）。"""
     d = ts_dict(r)
@@ -545,13 +551,13 @@ async def delete_my_timesheet(row_id: str, request: Request):
 # ── 團隊工時（大家看得到彼此；docs/TIMESHEET_SELF_ENTRY_PLAN.md §5）──
 #
 # 閘門＝「看得到自己就看得到大家」（owner 2026-09-03「我希望大家可以看到彼此的工時」）：
-# 同 _me_ident（me_finance ＋ 綁定）。回的是 Sheet 原字案名與時數，沒有金額、沒有
+# 守 _team_ident（timesheets／me_finance 任一 ＋ 綁定）。回的是 Sheet 原字案名與時數，沒有金額、沒有
 # CRM 專案 id 的連結 —— 私帳「專案列」可見性那條線守的是錢，這裡是團隊自己的工時表。
 
 @router.get("/team/hours")
 async def team_hours(request: Request, month: str = ""):
     """團隊月表：每人合計／填了幾天／每週小計／各案小計，全體各案合計；參考工時＝工作日×8。"""
-    await _me_ident(request)
+    await _team_ident(request)
     m0, m1 = month_or_422(month)
     factory = db_factory_or_503()
     async with factory() as session:
@@ -566,7 +572,7 @@ async def team_hours(request: Request, month: str = ""):
 @router.get("/team/projects")
 async def team_projects(request: Request, months: int = 12):
     """專案工時匯總：近 N 個月每個 Sheet 案名的總時數、人數、預算（對到案才有）、最後填報。"""
-    await _me_ident(request)
+    await _team_ident(request)
     months = max(1, min(int(months or 12), 36))
     m0, _ = month_span("")
     since = months_back(m0, months - 1)
@@ -595,7 +601,7 @@ async def team_projects(request: Request, months: int = 12):
 @router.get("/team/project")
 async def team_project_detail(request: Request, name: str = ""):
     """單一案（Sheet 原字）的工時明細：各人合計、各月走勢、最近 60 列。"""
-    await _me_ident(request)
+    await _team_ident(request)
     name = (name or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail="name 必填")
@@ -618,13 +624,12 @@ async def my_projects_burn(request: Request):
 
     只給全案的工時數字（已投入／預算／剩餘／消耗率／列數／最後填報），沒有金額、沒有
     「建議預算」（那是從預期毛利算出來的，等於間接揭露錢）、沒有未對映診斷。
-    /timesheets/summary 仍守私帳 wall＋管理員，這裡是唯一刻意放行的讀取面。
+    /timesheets/summary 對 timesheets 分頁鑰匙也回同一份抹過的鍵（api_timesheets._redact_summary）。
     """
     await _me_bound(request, "me_project_lookup")
     from services.timesheet_lookup import burn_rows
     factory = db_factory_or_503()
     async with factory() as session:
         items = await burn_rows(session)
-    keep = ("project_id", "project_name", "client", "status", "project_type", "hours_used",
-            "budget_hours", "remaining", "pct", "rows", "last_entry", "stale")
-    return {"projects": [{k: it.get(k) for k in keep} for it in items]}
+    from routers.api_timesheets import SUMMARY_PUBLIC_KEYS      # /timesheets/summary 抹私帳後的那份鍵，兩邊同一份
+    return {"projects": [{k: it.get(k) for k in SUMMARY_PUBLIC_KEYS} for it in items]}

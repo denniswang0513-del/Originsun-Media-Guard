@@ -826,10 +826,11 @@ async def timesheet_projects(request: Request):
     不用 `/crm/projects?entity=mine`：那支回整包金額欄位給一個只要名字的用途、
     走 MoneyRedactRoute 白繞一圈。這裡同一份 load_project_lookup。
 
-    守衛見 `_require_mine_admin` —— 沒指名的管理員按「指定專案」會拿到 403
-    「沒有該帳本的檢視權限」，而不是打開一個空視窗。
+    權限稽核第二批（2026-09-08）：讀清單放給 timesheets 分頁鑰匙（只有 id／名稱／客戶，沒有錢；員工填工時
+    的下拉本來就選得到私帳案名）。寫入那半邊（project_map／remap／budgets）仍是 `_require_mine_admin`，
+    前端「指定專案」只在 Lv3 畫。
     """
-    _require_mine_admin(request)
+    check_admin_or_module(request, "timesheets")
     factory = db_factory_or_503()
     async with factory() as session:
         lk = await load_project_lookup(session)
@@ -989,10 +990,12 @@ async def hours_by_staff(request: Request, month: str = ""):
 async def burn_summary(request: Request):
     """每專案 burn 摘要：已投入時數 / 預算 / 消耗率。未對映專案以名稱聚合列出。
 
-    🔴 守 mine：自動對映只認私帳案（owner 2026-09-02），所以這張表上每一個案名
-    都是私帳案名 —— 可見性在端點決定一次，不逐欄位擋。
+    權限稽核第二批（2026-09-08）：timesheets 分頁鑰匙可讀（之前是 check_admin＋私帳 wall，非 Lv3 開
+    「專案」視圖第一支就 403）。沒有私帳 scope（finance_mine 指名制，Lv3 不隱含）的人拿的是
+    `_redact_summary` 抹過的那份：專案列只留 SUMMARY_PUBLIC_KEYS（同 /me/projects_burn），未對映列
+    不帶撞案候選／相似建議（那是私帳案名＋客戶）。
     """
-    _require_mine_admin(request)
+    check_admin_or_module(request, "timesheets")
     factory = db_factory_or_503()
     async with factory() as session:
         items = await burn_rows(session)     # 專案那一半與 /dashboard 共用（services）
@@ -1010,15 +1013,32 @@ async def burn_summary(request: Request):
                      for n, h, c in unmatched]
     # 已對映＋未對映正好是整張表，不用再 count 一次
     from core.finance_logic import project_type_vocab
-    return {"projects": items, "unmatched": out_unmatched,
-            "project_types": project_type_vocab(i["project_type"] for i in items),
-            "total_rows": sum(i["rows"] for i in items) + sum(c for _n, _h, c in unmatched)}
+    out = {"projects": items, "unmatched": out_unmatched,
+           "project_types": project_type_vocab(i["project_type"] for i in items),
+           "total_rows": sum(i["rows"] for i in items) + sum(c for _n, _h, c in unmatched)}
+    from core.money import viewer_has_mine_scope
+    return out if viewer_has_mine_scope(request) else _redact_summary(out)
+
+
+#: /summary 對沒有私帳 scope 的人只回這些鍵（＝ /me/projects_burn 的唯讀面）：沒有 suggested_hours
+#: （從私帳預期毛利倒算的，等於間接揭露錢）。
+SUMMARY_PUBLIC_KEYS = ("project_id", "project_name", "client", "status", "project_type", "hours_used",
+                       "budget_hours", "remaining", "pct", "rows", "last_entry", "stale")
+#: 未對映列留給非私帳讀者的鍵：Sheet 案名與時數（團隊頁本來就看得到），不帶 candidates／suggestions。
+UNMATCHED_PUBLIC_KEYS = ("project_name", "hours_used", "rows", "reason")
+
+
+def _redact_summary(out: dict) -> dict:
+    """抹掉 /summary 裡跟私帳有關的欄位（純函式，給 burn_summary 用）。"""
+    out["projects"] = [{k: it.get(k) for k in SUMMARY_PUBLIC_KEYS} for it in out["projects"]]
+    out["unmatched"] = [{k: u.get(k) for k in UNMATCHED_PUBLIC_KEYS} for u in out["unmatched"]]
+    return out
 
 
 @router.get("/recent")
 async def recent_rows(request: Request, limit: int = 50):
-    """最近同步進來的列（抽查用，admin）。"""
-    check_admin(request)
+    """最近同步進來的列（抽查用；timesheets 分頁鑰匙可讀）。"""
+    check_admin_or_module(request, "timesheets")
     factory = db_factory_or_503()
     limit = max(1, min(limit, 200))
     async with factory() as session:

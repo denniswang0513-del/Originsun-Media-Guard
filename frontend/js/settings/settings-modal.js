@@ -122,8 +122,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Save settings ────────────────────────────────────────
     document.getElementById('btnSaveSettings').addEventListener('click', async () => {
+        // 從報價頁「公司資訊」開的（company-only）只送 company 這一個頂層鍵：
+        // 後端 /api/settings/save 依頂層鍵分流，單獨的 company 給報價／帳務模組寫，夾了通知設定進去就變成要管理員
+        const companyOnly = modal.classList.contains('company-only');
+        if (companyOnly && !readCompany()) { alert('公司資訊欄位不在畫面上，請重新整理後再試。'); return; }
         // LINE Notify 服務已終止（2025-03-31），通道與 token 欄位已移除
-        const settingsData = {
+        const settingsData = companyOnly ? { company: readCompany() } : {
             notifications: {
                 google_chat_webhook: document.getElementById('gchat_webhook').value,
                 alert_webhook: document.getElementById('alert_webhook').value,
@@ -158,12 +162,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response.ok) {
                 alert('✅ 設定已成功儲存！');
                 modal.style.display = 'none';
+            } else if (response.status === 401 || response.status === 403) {
+                // 分流後的 403 是「缺哪把鑰匙」，不是連線問題
+                alert(companyOnly ? '儲存公司資訊需要管理員、報價管理或帳務管理權限。' : '儲存系統設定需要管理員權限。');
             } else {
-                alert('❌ 儲存失敗，請檢查伺服器連線。');
+                const d = await response.json().catch(() => ({}));
+                alert('儲存失敗：' + (d.message || d.detail || ('HTTP ' + response.status)));
             }
         } catch (error) {
             console.error('儲存設定發生錯誤:', error);
-            alert('❌ 儲存發生例外錯誤！');
+            alert('儲存失敗：' + (error.message || '網路錯誤'));
         }
     });
     // ── Restart Agent（已移至下拉選單 window._restartAgent）──

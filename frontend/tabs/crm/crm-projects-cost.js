@@ -5,8 +5,12 @@
 
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import { calcDashboard, calcDashboardParts, remainColor, profitColor, barColor, diffLabel } from './crm-projects-calc.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect, moneyGate, today }
+import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect, moneyGate, today, hasModule, canSeeMoney }
     from './crm-utils.js';
+
+// RBAC 稽核第二批：刪雜支仍是管理員限定；雜支「送請款」開的是請款單，要 crm_invoices＋money_view
+const _isAdmin = () => (window._accessLevel || 0) >= 3;
+const _canInvoice = () => hasModule('crm_invoices') && canSeeMoney();
 
 // ── Dirty map ──────────────────────────────────────────────────
 // 儀表板基準：render 時記下「其他子表」的數字，inline 重算＝基準＋當前子表即時值
@@ -544,6 +548,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
                        >${paid ? '已付款' : '已請款'}</span>`;
         }
         if (e.staff_id) return '';
+        if (!_canInvoice()) return '';      // 開請款單是錢流寫入（crm_invoices＋money_view）
         return `<button class="exp-claim" title="開一張請款單（這一列一張）"
                         onclick="window._expCreatePayment('${e.id}')">請款</button>`;
     };
@@ -584,9 +589,9 @@ function _renderCostLines(grouped, expenses, financialSummary) {
                 ${edCell('exp-col-amt', 'actual', e.actual || 0, '$' + fmtNum(e.actual))}
                 ${edCell('exp-col-payee', 'payee', e.payee, (payeeName ? _esc(payeeName) : '') + pill)}
                 <span class="exp-col-receipt">${e.receipt_url ? '<a href="' + e.receipt_url + '" target="_blank" style="color:#3b82f6;">📎</a>' : ''}</span>
-                <span class="exp-col-action">${locked ? '' : `${claimCell(e)}
+                <span class="exp-col-action">${locked ? '' : `${claimCell(e)}${_isAdmin() ? `
                   <button class="exp-del" title="刪除這筆"
-                          onclick="window._projDeleteExpense('${e.id}')">✕</button>`}
+                          onclick="window._projDeleteExpense('${e.id}')">✕</button>` : ''}`}
                 </span>
               </div>`;
         }

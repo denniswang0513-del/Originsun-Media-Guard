@@ -4,7 +4,8 @@
 六支手機用端點（字彙包、首頁數字、卡片清單、專案打包、加備註、報價改狀態），
 其餘寫入直接打既有 CRM 端點 —— 狀態規則在後端已經定案，手機頁不自己寫死。
 
-守衛：讀 `check_logged_in`（router 層，跟 CRM 主 router 同一條底線）；
+守衛：讀 `check_logged_in`（router 層，跟 CRM 主 router 同一條底線）＋端點層 `_check_read`
+（`MOBILE_READ_MODULES`＝crm_projects；`/options` 例外——登入即可，殼要靠它判斷自己能做什麼）；
 寫 `_check_write`（`MOBILE_WRITE_MODULES`，一期空＝只給 Lv3）。路徑落在 CRM_PREFIX 底下，所以
 tests/unit/test_crm_read_guard（每支 GET 匿名要 401）與
 tests/unit/test_money_visibility（每條路由要掛 MoneyRedactRoute）都會管到這裡。
@@ -55,6 +56,10 @@ router = APIRouter(prefix=f"{CRM_PREFIX}/m", tags=["CRM 手機版"],
 # /options 的 `me.can_write` 問的是同一份清單（payload_grants），按鈕會跟著一起開。
 MOBILE_WRITE_MODULES: tuple[str, ...] = ()
 _check_write = _module_guard(*MOBILE_WRITE_MODULES)
+# 讀取（首頁數字、卡片清單、專案打包）：router 層的登入之外再要 crm_projects（同殼的閘門 m/crm.js gate）。
+# 2026-09-08 權限稽核 §3.3：之前只驗登入，只有 me_profile 的新註冊也拿得到全部專案清單。
+MOBILE_READ_MODULES: tuple[str, ...] = ("crm_projects",)
+_check_read = _module_guard(*MOBILE_READ_MODULES)
 
 # 字彙（手機頁不寫死任何一份：docs/CRM_MOBILE_PLAN.md §7 坑 1）。
 # 報價狀態的家在 core.finance_logic（QUOTE_STATUSES / QUOTE_PENDING，
@@ -172,16 +177,21 @@ async def mobile_options(request: Request):
         "me": {
             "username": _username(request),
             "access_level": payload.get("access_level", 0),
-            # 跟 _check_write 問同一份清單：零 key＝只有管理員（同 check_admin_or_module）
+            # 跟 _check_write 問同一份清單：零 key＝只有管理員（同 check_admin_or_module）——加備註／改報價狀態
             "can_write": payload_grants(payload, *MOBILE_WRITE_MODULES),
+            # 發票／付款表單：端點收 crm_invoices，但列表讀取還要 money_view（兩把都要；Lv3 恆 true）
+            "can_invoice": payload_grants(payload, "crm_invoices") and payload_grants(payload, "money_view"),
+            # 記雜支：同專案頁雜支的寫入政策（crm_projects）
+            "can_expense": payload_grants(payload, "crm_projects"),
             "money_view": can_see_money(request),
         },
     }
 
 
 @router.get("/home")
-async def mobile_home():
+async def mobile_home(request: Request):
     """首頁兩個數字：進行中專案數、待回覆報價數（專案分頁頂端的 strip 用）。"""
+    _check_read(request)
     async with _crm_session() as session:
         active = (await session.execute(
             select(func.count(CrmProject.id))
@@ -201,6 +211,7 @@ async def mobile_projects(request: Request, phase: str = Query(""), q: str = Que
                           limit: int = Query(30), offset: int = Query(0), include: str = Query("")):
     """卡片清單（30 筆一頁、往下捲再抓）。`phase` 篩階段、`q` 找案名或客戶代稱。
     `include`＝這一案一定要在（排第一）：記雜支／開發票／登記拍攝從抽屜帶進來的老案，不在最近 100 筆裡也要選得到。"""
+    _check_read(request)
     limit = max(1, min(int(limit), 100))
     offset = max(0, int(offset))
     async with _crm_session() as session:
@@ -226,6 +237,7 @@ async def mobile_projects(request: Request, phase: str = Query(""), q: str = Que
 async def mobile_project_detail(project_id: str, request: Request):
     """專案一頁打包：本體、收款摘要、報價、請款、發票、最近雜支、工時 burn、備註。
     錢的那幾段（summary／quotes／payments／invoices）只在看得到錢時夾帶。"""
+    _check_read(request)
     async with _crm_session() as session:
         project = await _project_visible_or_404(session, request, project_id)
         show_money = _money_visible(request, project)

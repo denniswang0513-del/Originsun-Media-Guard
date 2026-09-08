@@ -16,8 +16,14 @@
  *   GET    /api/v1/crm/public/media-log/{token}/file/{fileId} → 原檔下載
  */
 
-import { crmFetch as _fetch, esc as _esc, crmToast as _toast } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, crmToast as _toast, hasModule } from './crm-utils.js';
+import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 import { uploadFile } from '../../js/shared/chunked-upload.js';
+
+// 讀取開給 crm_projects（RBAC 稽核第二批）；產 token／啟停公開連結／設定／刪檔這些寫入仍是 media_log 的事。
+// 上傳走公開端點（token 即授權），不在這把鑰匙底下。
+const _canWrite = () => hasModule('media_log');
+const _errMsg = (prefix, e) => _U.permDeniedMsg?.('影像紀錄', e) ?? (prefix + (e.message || e));
 
 const PUBLIC_API = '/api/v1/crm/public/media-log';
 
@@ -78,35 +84,36 @@ function _render() {
     _injectStyle();
     const d = _data;
     const shareUrl = _absShareUrl(d.share_url);
+    const canW = _canWrite();   // 沒 media_log：設定唯讀、沒有儲存／重置／啟停／刪檔
 
     _host.innerHTML = `
     <div class="pm-card">
       ${d.root_set ? '' : '<div class="pm-warn">尚未設定資料夾，公開頁無法上傳</div>'}
       <div class="pm-card-title">原檔資料夾</div>
       <div class="pm-row">
-        <input id="pm-root" type="text" class="crm-input" style="flex:1;" value="${_esc(d.root || '')}" placeholder="例：\\\\NAS\\media-log 或 D:\\MediaLog">
-        <button id="pm-root-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存</button>
+        <input id="pm-root" type="text" class="crm-input" style="flex:1;" value="${_esc(d.root || '')}" placeholder="例：\\\\NAS\\media-log 或 D:\\MediaLog"${canW ? '' : ' readonly'}>
+        ${canW ? '<button id="pm-root-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存</button>' : ''}
         <button id="pm-open-folder" class="crm-btn crm-btn-secondary crm-btn-sm">開啟資料夾</button>
       </div>
       <div class="pm-hint">所有專案共用根資料夾，各專案自動建立子資料夾</div>
       <div class="pm-card-title" style="margin-top:14px;">分類管理</div>
       <div id="pm-chips" class="pm-chips"></div>
-      <div class="pm-row" style="margin-top:8px;">
+      ${canW ? `<div class="pm-row" style="margin-top:8px;">
         <input id="pm-cat-new" type="text" class="crm-input" style="flex:1;" placeholder="新增分類名稱，例：花絮">
         <button id="pm-cat-add" class="crm-btn crm-btn-secondary crm-btn-sm">新增</button>
         <button id="pm-cat-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存分類</button>
-      </div>
+      </div>` : '<div class="pm-hint">改設定需要「影像紀錄」權限</div>'}
     </div>
 
     <div class="pm-card">
       <div class="pm-card-title">公開上傳連結</div>
-      <label class="pm-toggle"><input id="pm-enabled" type="checkbox"${d.enabled !== false ? ' checked' : ''}> 啟用公開連結</label>
+      <label class="pm-toggle"><input id="pm-enabled" type="checkbox"${d.enabled !== false ? ' checked' : ''}${canW ? '' : ' disabled'}> 啟用公開連結</label>
       <div id="pm-off-hint" class="pm-off-hint" style="display:none;">已停用 — 公開頁顯示連結失效</div>
       <div id="pm-share-blk">
         <div class="pm-row">
           <input id="pm-share" type="text" class="crm-input" style="flex:1;" readonly value="${_esc(shareUrl)}">
           <button id="pm-copy" class="crm-btn crm-btn-primary crm-btn-sm">複製連結</button>
-          <button id="pm-reset" class="crm-btn crm-btn-danger crm-btn-sm">重置連結</button>
+          ${canW ? '<button id="pm-reset" class="crm-btn crm-btn-danger crm-btn-sm">重置連結</button>' : ''}
         </div>
         ${d.token ? `<div class="pm-qr-row">
           <img id="pm-qr" class="pm-qr" src="${_esc(_qrUrl())}" alt="公開上傳連結 QR code" width="160" height="160">
@@ -133,12 +140,12 @@ function _render() {
       <div id="pm-grid" class="pm-grid"></div>
     </div>`;
 
-    // ── 設定卡 ──
-    document.getElementById('pm-root-save').addEventListener('click', _saveRoot);
+    // ── 設定卡（寫入鈕沒 media_log 就不在 DOM 裡，所以一律 ?.）──
+    document.getElementById('pm-root-save')?.addEventListener('click', _saveRoot);
     document.getElementById('pm-open-folder').addEventListener('click', _openFolder);
-    document.getElementById('pm-cat-add').addEventListener('click', _addCat);
-    document.getElementById('pm-cat-new').addEventListener('keydown', e => { if (e.key === 'Enter') _addCat(); });
-    document.getElementById('pm-cat-save').addEventListener('click', _saveCats);
+    document.getElementById('pm-cat-add')?.addEventListener('click', _addCat);
+    document.getElementById('pm-cat-new')?.addEventListener('keydown', e => { if (e.key === 'Enter') _addCat(); });
+    document.getElementById('pm-cat-save')?.addEventListener('click', _saveCats);
     document.getElementById('pm-chips').addEventListener('click', e => {
         const btn = e.target.closest('button[data-ci]');
         if (!btn) return;
@@ -148,7 +155,7 @@ function _render() {
 
     // ── 公開連結卡 ──
     document.getElementById('pm-copy').addEventListener('click', _copyLink);
-    document.getElementById('pm-reset').addEventListener('click', _resetToken);
+    document.getElementById('pm-reset')?.addEventListener('click', _resetToken);
     document.getElementById('pm-enabled').addEventListener('change', _toggleEnabled);
     _applyEnabledUI();
 
@@ -208,7 +215,7 @@ async function _saveRoot() {
         // root_set / project_folder 會跟著變 → 整個 tab 重載最省事
         await loadMediaTab(_projectId, _host);
     } catch (e) {
-        alert('儲存失敗：' + (e.message || e));
+        alert(_errMsg('儲存失敗：', e));
     }
 }
 
@@ -245,7 +252,7 @@ async function _saveCats() {
         _renderPills();
         _renderGrid();
     } catch (e) {
-        alert('儲存失敗：' + (e.message || e));
+        alert(_errMsg('儲存失敗：', e));
     }
 }
 
@@ -261,10 +268,12 @@ function _renderUploadCatOptions() {
 function _renderChips() {
     const box = document.getElementById('pm-chips');
     if (!box) return;
+    const canW = _canWrite();
     box.innerHTML = _cats.length
         ? _cats.map((c, i) =>
-            `<span class="pm-chip">${_esc(c)}<button data-ci="${i}" title="移除">✕</button></span>`).join('')
-        : '<span class="pm-hint">尚無分類，於下方輸入後按「新增」，記得按「儲存分類」</span>';
+            `<span class="pm-chip">${_esc(c)}${canW ? `<button data-ci="${i}" title="移除">✕</button>` : ''}</span>`).join('')
+        : (canW ? '<span class="pm-hint">尚無分類，於下方輸入後按「新增」，記得按「儲存分類」</span>'
+                : '<span class="pm-hint">尚無分類</span>');
 }
 
 // ── 公開連結 ─────────────────────────────────────────────────
@@ -284,7 +293,7 @@ async function _toggleEnabled(e) {
         _toast(_data.enabled ? '已啟用公開連結' : '已停用公開連結');
     } catch (err) {
         e.target.checked = !want;   // 失敗回滾 checkbox，不動 _data
-        alert('切換失敗：' + (err.message || err));
+        alert(_errMsg('切換失敗：', err));
         return;
     }
     _applyEnabledUI();
@@ -323,7 +332,7 @@ async function _resetToken() {
         if (qr) qr.src = _qrUrl();   // token 變了 → QR 同步刷新
         _toast('已重置連結');
     } catch (e) {
-        alert('重置失敗：' + (e.message || e));
+        alert(_errMsg('重置失敗：', e));
     }
 }
 
@@ -505,7 +514,7 @@ function _itemHtml(f, i) {
         ${thumb}${dur}
         <div class="pm-acts">
           <button data-act="dl" title="下載原檔">下載</button>
-          <button data-act="del" class="pm-act-del" title="刪除">刪除</button>
+          ${_canWrite() ? '<button data-act="del" class="pm-act-del" title="刪除">刪除</button>' : ''}
         </div>
       </div>
       <div class="pm-meta">${_esc(f.uploader_name || '—')} · ${_fmtTime(f.created_at)}</div>
@@ -535,7 +544,7 @@ async function _deleteFile(f) {
     try {
         await _fetch(`/media-log/files/${f.id}`, { method: 'DELETE' });
     } catch (e) {
-        alert('刪除失敗：' + (e.message || e));
+        alert(_errMsg('刪除失敗：', e));
         return;
     }
     _data.files = (_data.files || []).filter(x => x.id !== f.id);

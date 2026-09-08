@@ -30,7 +30,7 @@ from fastapi import File, Form, HTTPException, Request, UploadFile
 from config import load_settings, save_settings
 from core import chunked_upload as cu
 from core import pinned_assets as pa
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, tab_modules
 from core.drive_map import to_canonical_path, to_local_path
 from core.project_folders import (BLOCKED_UPLOAD_EXTS, clean_filename,
                                   create_subfolder, dedupe, list_folder_level,
@@ -57,11 +57,14 @@ def assets_auth(request: Request):
     就是給看不給用。改**根目錄**（全站共用設定）才需要 admin，那條走 _check_auth。
 
     ⚠️ 這裡不可以沿用 `_shared._check_auth` 這個裸名（Lv3 admin，語意不同）。
-    提案子分頁（briefs/quotes）用的是 `api_proposals.proposal_auth`（多放行
-    preprod_plan）—— 兩個守衛都是公開自述名，別再 alias 成 `_auth` 之類的
-    短名把語意藏起來。
+    提案子分頁（briefs/quotes）用的是 `api_proposals.proposal_auth` —— 兩個
+    守衛都是公開自述名，別再 alias 成 `_auth` 之類的短名把語意藏起來。
+
+    名單＝`tab_modules("preprod_proposals")`（core.auth.TAB_ACCESS：提案庫、
+    拍攝企劃、專案管理），跟 `proposal_auth` 同一份 —— 2026-09-08 第二批對齊：
+    原本這裡少放 preprod_plan，拍攝企劃的人開得了提案卻上傳不了資產。
     """
-    return check_admin_or_module(request, "crm_projects", "preprod_proposals")
+    return check_admin_or_module(request, *tab_modules("preprod_proposals"))
 
 
 _ROOT_SETTING_KEY = "proposals.root"

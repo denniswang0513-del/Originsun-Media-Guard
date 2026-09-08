@@ -27,7 +27,16 @@
  */
 
 import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum, invoiceAmounts,
-         invoicePayBadge, invoiceIssueBadge, crmToast, today } from './crm-utils.js';
+         invoicePayBadge, invoiceIssueBadge, crmToast, today, hasModule, canSeeMoney } from './crm-utils.js';
+import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
+
+// 開票／刪票／補標註都是錢流寫入：要 crm_invoices＋money_view（RBAC 稽核第二批）。
+// _P.* 是 window 上的全域入口（收付款分頁也叫），所以入口自己也擋一次。
+const _INVOICE_NEED = '財務管理＋金額檢視';
+const _canInvoice = () => hasModule('crm_invoices') && canSeeMoney();
+function _denyInvoice() {
+    alert(_U.permDeniedMsg?.(_INVOICE_NEED) ?? '權限不足：需要「財務管理＋金額檢視」權限，請管理員在使用者管理開通');
+}
 
 let _cur = null;          // 目前這個專案（渲染與預填都要）
 let _client = null;       // 這個案子的客戶 —— 抬頭與統編從這裡來
@@ -99,6 +108,7 @@ function _summaryHtml() {
  *    把那個名字真的清掉。畫面說謊在先，資料損毀在後。 */
 function _applicantCell(inv) {
     const cur = inv.applicant || '';
+    if (!_canInvoice()) return `<span style="font-size:11px;color:#9ca3af;">${_esc(cur || '—')}</span>`;
     const names = _applicants.includes(cur) || !cur ? _applicants : [cur, ..._applicants];
     return `<select class="crm-input" data-inv-meta="applicant"
                 style="font-size:11px;padding:2px 5px;min-width:76px;"
@@ -116,6 +126,7 @@ function _listHtml() {
     }
     const th = (t, r) => `<th style="padding:5px 8px;text-align:${r ? 'right' : 'left'};
         color:#9ca3af;font-weight:500;font-size:11px;">${t}</th>`;
+    const canInv = _canInvoice();     // 沒錢流寫入權：品項唯讀、沒有刪除鈕
     return `<div style="border:1px solid #2e2e2e;border-radius:6px;overflow:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead style="background:#242424;"><tr>
@@ -128,19 +139,20 @@ function _listHtml() {
             <td style="padding:5px 8px;color:#9ca3af;">${_esc((i.invoice_date || '').substring(0, 10))}</td>
             <td style="padding:5px 8px;color:#eee;">${_esc(i.title || '')}</td>
             <td style="padding:3px 6px;">${_applicantCell(i)}</td>
-            <td style="padding:3px 6px;">
+            <td style="padding:3px 6px;">${canInv ? `
               <input class="crm-input" data-inv-meta="item_type"
                      style="font-size:11px;padding:2px 5px;width:104px;"
                      value="${_esc(i.item_type || '')}" placeholder="影片製作…"
-                     onchange="window._projInv.setMeta('${_esc(i.id)}','item_type',this)">
+                     onchange="window._projInv.setMeta('${_esc(i.id)}','item_type',this)">`
+              : `<span style="font-size:11px;color:#9ca3af;">${_esc(i.item_type || '—')}</span>`}
             </td>
             <td style="padding:5px 8px;text-align:right;color:#eee;">$${fmtNum(i.amount_total || 0)}</td>
             <td style="padding:5px 8px;text-align:right;color:#9ca3af;">$${fmtNum(i.collected || 0)}</td>
             <td style="padding:5px 8px;">${invoiceIssueBadge(i.issue_status)}</td>
             <td style="padding:5px 8px;">${invoicePayBadge(i.payment_status)}</td>
-            <td style="padding:5px 8px;text-align:right;">
+            <td style="padding:5px 8px;text-align:right;">${canInv ? `
               <button class="crm-btn crm-btn-secondary crm-btn-sm" title="刪除這張發票"
-                      onclick="window._projInv.del('${_esc(i.id)}')">刪除</button>
+                      onclick="window._projInv.del('${_esc(i.id)}')">刪除</button>` : ''}
             </td>
           </tr>`).join('')}</tbody>
       </table>
@@ -157,6 +169,7 @@ function _listHtml() {
  *  而且選錯了沒有人會知道。 */
 _P.create = function _openCreate() {
     if (!_cur) return;
+    if (!_canInvoice()) { _denyInvoice(); return; }
     let host = document.getElementById('proj-inv-modal');
     if (!host) return;
     // 發票模組現在住在收付款分頁的 hidden 宿主裡：浮層在 display:none 的祖先底下永遠畫不出來 → 搬到 body
@@ -265,7 +278,7 @@ _P.save = async (btn) => {
         _invoices = inv.invoices || [];
         _renderTab();
     } catch (e) {
-        show(e.message || '開立失敗');
+        show(_U.permDeniedMsg?.(_INVOICE_NEED, e) ?? (e.message || '開立失敗'));
     } finally {
         btn.disabled = false;
         btn.textContent = '開立';
@@ -289,6 +302,7 @@ _P.save = async (btn) => {
 _P.setMeta = async (id, field, el) => {
     const inv = _invoices.find(x => x.id === id);
     if (!inv) return;
+    if (!_canInvoice()) { _denyInvoice(); el.value = inv[field] || ''; return; }
     const value = (el.value || '').trim();
     if ((inv[field] || '') === value) return;      // 沒真的改就不要打後端
     el.disabled = true;
@@ -300,7 +314,7 @@ _P.setMeta = async (id, field, el) => {
         crmToast('已更新');
     } catch (e) {
         el.value = inv[field] || '';               // 失敗要退回原值，別讓畫面說謊
-        alert(e.message || '更新失敗');
+        alert(_U.permDeniedMsg?.(_INVOICE_NEED, e) ?? (e.message || '更新失敗'));
     } finally {
         el.disabled = false;
     }
@@ -316,6 +330,7 @@ _P.setMeta = async (id, field, el) => {
 _P.del = async (id) => {
     const inv = _invoices.find(x => x.id === id);
     if (!inv) return;
+    if (!_canInvoice()) { _denyInvoice(); return; }
     const got = Number(inv.collected) || 0;
     const warn = got
         ? `\n\n⚠ 這張已收 $${fmtNum(got)} —— 刪掉會一併解除那些收款的配對，`
@@ -331,7 +346,7 @@ _P.del = async (id) => {
         _renderTab();
     } catch (e) {
         // 鎖帳月會回 409 —— 那是規則不是故障，原文照顯示比「刪除失敗」有用
-        alert(e.message || '刪除失敗');
+        alert(_U.permDeniedMsg?.(_INVOICE_NEED, e) ?? (e.message || '刪除失敗'));
     }
 };
 
@@ -380,8 +395,8 @@ function _renderTab() {
         <div style="display:flex;align-items:center;margin-bottom:12px;">
           <div style="color:#9ca3af;font-size:12px;">這個案子的收款發票</div>
           <span style="flex:1;"></span>
-          <button class="crm-btn crm-btn-primary crm-btn-sm"
-                  onclick="window._projInv.create()">＋ 開發票</button>
+          ${_canInvoice() ? `<button class="crm-btn crm-btn-primary crm-btn-sm"
+                  onclick="window._projInv.create()">＋ 開發票</button>` : ''}
         </div>
         ${_summaryHtml()}
         ${_listHtml()}

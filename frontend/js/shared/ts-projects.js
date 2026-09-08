@@ -200,7 +200,8 @@ export function bars(pairs, width) {
 /**
  * 專案檔案（/timesheets/project 的回應）。opts：
  *   modal（沒有頁首）、head（非 modal 的頁首 html）、backHtml（回清單鈕）、
- *   editable（加入比較／改預算／匯出 CSV 鈕；工作台不畫）、compareNames（比較清單）。
+ *   editable（加入比較／改預算／匯出 CSV 鈕；工作台不畫）、budgetEditable（改預算那顆單獨看；預設跟 editable，
+ *   工作追蹤分頁非 Lv3 傳 false——改預算是寫私帳）、compareNames（比較清單）。
  */
 /** 里程碑（按週）：GET /milestones/project/{id} 的 weeks → 一週一段（唯讀；編輯在員工頁「團隊的一週」的彈窗）。
  *  專案檔案（這裡）與 CRM 專案詳情（crm-projects-detail.js 動態 import 這支）同一份。 */
@@ -228,7 +229,7 @@ export function projectFileHtml(d, opts = {}) {
     const actions = opts.editable ? `
             <button class="ts-btn ghost" data-ts-action="compare-add" data-name="${esc(key)}">${inCompare ? '已在比較清單' : '加入比較'}</button>
             ${compare.length ? `<button class="ts-btn" data-ts-action="view" data-view="compare">並排比較（${compare.length}）</button>` : ''}
-            ${d.mapped ? `<button class="ts-btn ghost" data-ts-action="budget" data-pid="${esc(d.project_id)}" data-cur="${d.budget_hours ?? d.suggested_hours ?? ''}">改預算</button>` : ''}
+            ${d.mapped && (opts.budgetEditable ?? true) ? `<button class="ts-btn ghost" data-ts-action="budget" data-pid="${esc(d.project_id)}" data-cur="${d.budget_hours ?? d.suggested_hours ?? ''}">改預算</button>` : ''}
             <button class="ts-btn ghost" data-ts-action="export-project" data-name="${esc(d.project_name)}" data-pid="${esc(d.project_id || '')}">匯出 CSV</button>` : '';
     return `${opts.modal ? '' : (opts.head || '')}
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">

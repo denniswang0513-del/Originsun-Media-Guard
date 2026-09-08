@@ -659,8 +659,9 @@ def test_receipts_root_setting():
     assert 'strftime("%Y' not in save, "檔名日期繞過 _fmt_day"
     serve = COSTS_SRC.split("async def serve_receipt")[1].split("\n@router")[0]
     assert "_receipts_root()" in serve, "換了根目錄，舊/新收據連結會 403"
-    for fn in ("get_receipts_root", "set_receipts_root"):
-        assert "check_admin(request)" in COSTS_SRC.split(f"async def {fn}")[1].split("\n@router")[0]
+    # 2026-09-08 第二批：GET 給審核者（財務分頁零用金子視圖第一支就打它），設定仍限管理員
+    assert "check_admin_or_module(request, 'finance_approve')" in COSTS_SRC.split("async def get_receipts_root")[1].split("\n@router")[0]
+    assert "check_admin(request)" in COSTS_SRC.split("async def set_receipts_root")[1].split("\n@router")[0]
     sub = (FRONTEND / "tabs" / "finance" / "subviews" / "petty.js").read_text(encoding="utf-8")
     assert "petty/receipts-root" in sub
     assert "/api/settings/load" not in sub, "不准走遮罩過的 settings 整包（會洗掉機密）"

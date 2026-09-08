@@ -3,8 +3,12 @@
  * 功能：列表視圖 + 詳情面板 + 新增/編輯 Modal + CSV 匯入
  */
 
-import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, fmtNum as _fmtNum, renderAvatar, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, searchableSelect, canSeeMoney } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, fmtNum as _fmtNum, renderAvatar, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, searchableSelect, canSeeMoney, hasModule } from './crm-utils.js';
+import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 import { loadProjectStaff } from '../proposals/staff-view.js';
+
+// 刪除客戶、匯入 CSV 仍是管理員限定（RBAC 稽核第二批）—— 不是管理員就別畫那顆鈕
+const _isAdmin = () => (window._accessLevel || 0) >= 3;
 
 // 專案階段 → 圖表/圓點色（客戶績效視圖用；與 crm.css 的 .crm-proj-badge-* 是
 // 不同 render path 故不共用）。未知階段 fallback 灰色。保留 已取消 舊值(無 backfill
@@ -126,7 +130,7 @@ function renderList() {
             <div class="crm-row-proj">${c.project_count || 0}</div>
             <div class="crm-row-revenue">${c.total_contract ? '$' + _fmtNum(c.total_contract) : '<span class="crm-muted">—</span>'}</div>
             <div class="crm-row-contact">${c.updated_at ? c.updated_at.substring(0,10) : '—'}</div>
-            ${kebabMenuHtml(c.id, { onEdit: '_crmEditClient', onDuplicate: '_crmDupClient', onDelete: '_crmDeleteClient' })}
+            ${kebabMenuHtml(c.id, { onEdit: '_crmEditClient', onDuplicate: '_crmDupClient', onDelete: _isAdmin() ? '_crmDeleteClient' : undefined })}
         </div>
     `).join('');
 }
@@ -382,9 +386,11 @@ window._crmShowProjectDetail = async (projectId) => {
         </div>`;
 
         document.body.insertAdjacentHTML('beforeend', html);
-        // 唯讀（不注入 onRemove）—— 這個彈窗是客戶詳情的檢視面
+        // 唯讀（不注入 onRemove）—— 這個彈窗是客戶詳情的檢視面；
+        // 派工寫入是 crm_projects 的事（後端同一把），沒那把鑰匙就不畫新增／移除
         loadProjectStaff(projectId,
-                         { host: document.getElementById('pm-tab-staff'), fetcher: _fetch });
+                         { host: document.getElementById('pm-tab-staff'), fetcher: _fetch,
+                           canAssign: hasModule('crm_projects') });
 
         // Tab switching inside modal
         document.querySelectorAll('.crm-pm-tabs .crm-tab').forEach(btn => {
@@ -610,7 +616,7 @@ async function saveClient() {
             await loadClients();
         }
     } catch (e) {
-        _showModalError(e.message);
+        _showModalError(_U.permDeniedMsg?.('客戶', e) ?? e.message);
     } finally {
         btn.disabled = false;
         btn.textContent = '儲存';
@@ -633,7 +639,7 @@ async function deleteClient(client) {
         closeDetail();
         await loadClients();
     } catch (e) {
-        alert('刪除失敗：' + e.message);
+        alert(_U.permDeniedMsg?.('管理員', e) ?? ('刪除失敗：' + e.message));
     }
 }
 

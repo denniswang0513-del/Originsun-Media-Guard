@@ -20,7 +20,7 @@ function formHtml() {
     return `
       <div class="m-h">請開發票</div>
       <div id="inv-notice" hidden></div>
-      <form class="m-form m-card w" id="inv-form" autocomplete="off">
+      <form class="m-form m-card wi" id="inv-form" autocomplete="off">
         <label>標題</label><input id="inv-title" placeholder="空白＝用案名或品項（CRM 發票的「名稱」）">
         <label>申請人</label>${segHtml('inv-applicant', inv.applicants || [], '', { blank: true })}
         <label>類別</label>${segHtml('inv-category', inv.categories || [], '', { blank: true })}
@@ -51,7 +51,7 @@ function formHtml() {
         <button type="submit" class="m-btn-primary" id="inv-submit">送出並產生通知</button>
         <button type="button" class="m-btn wide" id="inv-cancel-edit" hidden>取消修改</button>
       </form>
-      ${state.canWrite ? '' : '<div class="m-empty">此帳號沒有登記權限</div>'}
+      ${state.canInvoice ? '' : '<div class="m-empty">此帳號沒有發票登記權限（需要帳務管理＋金額檢視）</div>'}
       <div class="m-h">最近登記</div>
       <div id="inv-recent">${skeleton(3)}</div>
       <button type="button" class="m-more" id="inv-more" hidden>載入更多</button>
@@ -308,7 +308,7 @@ async function loadTrash() {
             <div class="sub">${esc(t.company_name || '（沒有抬頭）')}${t.invoice_number ? ' · ' + esc(t.invoice_number) : ''}</div>
             <div class="row"><span class="sub">${esc(fmtDate(t.deleted_at))} ${esc(t.deleted_by || '')} 刪除</span>
               ${t.amount_total == null ? '' : `<span class="amt">${money(t.amount_total)}</span>`}</div>
-            ${state.canWrite ? `<div class="row"><button type="button" class="m-btn w" data-restore="${esc(t.id)}">還原</button></div>` : ''}
+            ${state.canInvoice ? `<div class="row"><button type="button" class="m-btn wi" data-restore="${esc(t.id)}">還原</button></div>` : ''}
           </div>`).join('') : emptyBox('垃圾桶是空的');
     } catch (e) { box.innerHTML = errBox(e); }
 }
@@ -334,7 +334,7 @@ function recentCardHtml(inv) {
         <div class="sub">${esc(inv.payment_type || '')} · ${esc(inv.payment_status || '')}${inv.invoice_number ? ' · ' + esc(inv.invoice_number) : ''}${inv.project_name ? ' · ' + esc(inv.project_name) : ''}</div>
         <div class="row"><span class="sub">${esc(fmtDate(inv.invoice_date))}</span>
           ${'amount_total' in inv ? `<span class="amt">${money(inv.amount_total)}</span>` : ''}</div>
-        ${state.canWrite ? `<div class="row"><button type="button" class="m-btn w" data-edit="${esc(inv.id)}">修改</button><button type="button" class="m-btn" data-del="${esc(inv.id)}">刪除</button></div>` : ''}
+        ${state.canInvoice ? `<div class="row"><button type="button" class="m-btn wi" data-edit="${esc(inv.id)}">修改</button><button type="button" class="m-btn wi" data-del="${esc(inv.id)}">刪除</button></div>` : ''}
       </div>`;
 }
 

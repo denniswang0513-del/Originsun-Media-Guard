@@ -12,6 +12,7 @@
  */
 
 import { crmFetch as _fetch, esc as _esc, setupResizeHandle, hasModule, today } from './crm-utils.js';
+import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import {
     loadProjects, loadClients, loadUsers, loadStaffList, createClientInline,
@@ -33,7 +34,11 @@ import { loadDeliveryTab, initDeliveryHandlers } from '../proposals/delivery-vie
  *  為此在模組層建立一個載入順序的耦合）。 */
 const _openDelivery = (pid) => {
     const host = document.getElementById('proj-detail-delivery');
-    const r = loadDeliveryTab(pid, { host, fetcher: _fetch });
+    // 官網上架編輯器（作品／編輯連結）要 website_admin；歸檔卡的建資料夾／掃描動 NAS，仍是管理員限定。
+    // 元件住在 tabs/proposals/（公開頁的 import 封閉範圍），讀不到 crm-utils，所以由這裡注入。
+    const r = loadDeliveryTab(pid, { host, fetcher: _fetch,
+                                     canEditShowcase: hasModule('website_admin'),
+                                     canManageFolders: (window._accessLevel || 0) >= 3 });
     // 收付檢查提示條放最上面（loadDeliveryTab 一開始就重設 innerHTML，之後只動它自己的區塊）
     loadClosingBanner(pid, host);
     return r;
@@ -242,7 +247,7 @@ export async function initCrmProjectsTab() {
             }
             document.getElementById('expense-modal-overlay').remove();
             _loadFinancialSummary(state.selectedId);
-        } catch (e) { alert('儲存失敗：' + e.message); }
+        } catch (e) { alert(_U.permDeniedMsg?.('專案管理', e) ?? ('儲存失敗：' + e.message)); }
     };
     window._projSaveExpense = async (editId) => {
         if (!state.selectedId) return;
@@ -271,14 +276,14 @@ export async function initCrmProjectsTab() {
                 });
             }
             _loadFinancialSummary(state.selectedId);
-        } catch (e) { alert('儲存失敗：' + e.message); }
+        } catch (e) { alert(_U.permDeniedMsg?.('專案管理', e) ?? ('儲存失敗：' + e.message)); }
     };
     window._projDeleteExpense = async (id) => {
         if (!confirm('確定刪除此雜支？')) return;
         try {
             await _fetch('/project-expenses/' + id, { method: 'DELETE' });
             _loadFinancialSummary(state.selectedId);
-        } catch (e) { alert(e.message); }
+        } catch (e) { alert(_U.permDeniedMsg?.('管理員', e) ?? ('刪除失敗：' + e.message)); }
     };
 
     // ── Staff handlers ──

@@ -225,8 +225,9 @@ async def _project_types_payload() -> dict:
 @router.post("/project-types")
 async def edit_project_types(payload: ProjectTypeOpPayload, request: Request):
     """CRM「案型清單」的新增／改名／刪除：直接改私帳毛利表（案型的正本），save_margin_model 會鏡射進
-    settings.project_types。守衛同 /api/settings/save（Lv3）。改名把舊名記進 aliases，舊案還對得到毛利。"""
-    _check_auth(request)
+    settings.project_types。守衛＝crm_projects（2026-09-08 第二批：案型清單就在專案表單旁邊）。
+    改名把舊名記進 aliases，舊案還對得到毛利。"""
+    _check_project_write_auth(request)
     from core.finance_logic import (load_margin_model, model_add_type, model_remove_type, model_rename_type,
                                     save_margin_model)
     model = load_margin_model("mine")
@@ -418,7 +419,7 @@ async def duplicate_project(project_id: str, request: Request):
       - staff：days/cost/rate_override 保留、actual_days/actual_cost/payment_* 清空
     不複製報價 / 發票 / 收支 / 官網作品 / 付款節點等交易與文件資料。
     """
-    _check_auth(request)
+    _check_project_write_auth(request)   # 複製＝建專案，同一把 crm_projects（2026-09-08）
     _require_db()
     factory = await _get_factory()
 

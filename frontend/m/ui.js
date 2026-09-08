@@ -18,6 +18,23 @@ export const state = {
 // 2026-09-07：第七顆「假勤」＝員工自己的請假（views/leave.js；docs/LEAVE_PLAN.md §7.6，走 /api/v1/me/leave/*）
 export const TABS = ['invoice', 'petty', 'projects', 'quotes', 'calendar', 'worklog', 'leave'];
 export const DEFAULT_TAB = 'invoice';
+// 權限稽核第二批（2026-09-08）：「工作紀錄」「假勤」兩顆依 me.modules 決定畫不畫（Lv3 恆畫）——之前固定畫，
+// 只有 crm_projects 的人點進去 403／409。鑰匙鏡射後端：工作紀錄＝總開關 me_today_zone ＋ me_worklog／me_week_plan 任一
+// （/timesheets/mine* 兩把任一都收）；假勤＝me_leave（/api/v1/me/leave/*）。其餘五顆跟殼的閘門一樣（admin‖crm_projects）。
+export const TAB_KEYS = { worklog: ['me_today_zone', ['me_worklog', 'me_week_plan']], leave: ['me_leave'] };
+/** 這個帳號看得到這顆分頁嗎：TAB_KEYS 沒列的一律看得到；列了的要每一項都成立（陣列項＝任一把）。 */
+export function canSeeTab(tab, me = state.me) {
+    if (isAdmin(me)) return true;
+    const need = TAB_KEYS[tab];
+    if (!need) return true;
+    const mods = (me || {}).modules || [];
+    return need.every(k => (Array.isArray(k) ? k.some(x => mods.includes(x)) : mods.includes(k)));
+}
+/** 開頁時把看不到的分頁鈕藏掉（crm.js 在 state.me 設好後呼叫一次）。 */
+export function applyTabVisibility(me = state.me) {
+    for (const b of document.querySelectorAll('#m-tabbar button[data-tab]'))
+        b.hidden = !canSeeTab(b.dataset.tab, me);
+}
 /** 有畫面但不在分頁列的路由 → 頂欄名稱（分頁列的名稱從按鈕文字拿）：記雜支、付款（都從專案抽屜進，上一頁回去）。 */
 export const HIDDEN_ROUTES = { expense: '記雜支', payments: '付款' };
 export const ROUTES = [...TABS, ...Object.keys(HIDDEN_ROUTES)];

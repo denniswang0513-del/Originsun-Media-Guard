@@ -45,6 +45,9 @@ let _projectCache = null;   // 最近一次 /project（專案檔案頁）
 let _projectPid = '';       // 專案檔案頁：從 burn 表點進來帶的 project_id（撈整個案）；Sheet 案名進來就空
 let _projQ = '';            // 專案頁搜尋列（同時篩未對映表與 burn 表；前端篩、不重打 API）
 const _projHit = (s) => !_projQ || String(s || '').toLowerCase().includes(_projQ.trim().toLowerCase());
+// 權限稽核第二批（2026-09-08）：/summary、/projects、/recent 對 timesheets 分頁鑰匙開放讀，但私帳對映與預算
+// （指定專案／project_map／remap／建議預算／改預算／案型）、Sheet 拉取、代填、同步 token 仍是管理員——這些鈕只在 Lv3 畫。
+const _isAdmin = () => (window._accessLevel || 0) >= 3;
 let _compareNames = [];     // 類似專案並排：目前選的案名
 let _digestCache = null;    // GET /timesheets/digest
 let _ledgerCache = null;    // GET /timesheets/rows（總表：一個月所有列）
@@ -255,7 +258,7 @@ function _viewBtns() {
     const b = (key, label) => `<button class="ts-btn ${_view === key ? '' : 'ghost'}"
         data-ts-action="view" data-view="${key}">${label}</button>`;
     return `<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        ${b('today', '今日')}${b('mine', '我的一天')}${b('projects', '專案')}${b('staff', '人員')}${b('ledger', '總表')}${b('dash', '儀表板')}${b('settings', '設定')}
+        ${b('today', '今日')}${b('mine', '我的一天')}${b('projects', '專案')}${b('staff', '人員')}${b('ledger', '總表')}${b('dash', '儀表板')}${_isAdmin() ? b('settings', '設定') : ''}
     </div>`;
 }
 
@@ -519,7 +522,7 @@ function _renderLedger(d) {
 /** burn 表的案型：點到才變下拉（type-edit 動作在 _onAction）；字彙＝/summary 回的 project_types。 */
 function _burnTbodyHtml() {
     return burnTbodyHtml(_burnSorter.sorted(((_summaryCache && _summaryCache.projects) || [])
-        .filter(p => _projHit(p.project_name) || _projHit(p.status))), { editable: true, emptyText: _projQ ? '沒有符合的' : '尚無已對映專案' });
+        .filter(p => _projHit(p.project_name) || _projHit(p.status))), { editable: _isAdmin(), emptyText: _projQ ? '沒有符合的' : '尚無已對映專案' });
 }
 
 /** 專案頁的未對映表身（搜尋列會重畫它；內部桶不列）。 */
@@ -529,7 +532,7 @@ function _unmatchedProjRowsHtml() {
         <tr><td><span class="ts-link" data-ts-action="open-project" data-name="${esc(u.project_name)}">${esc(u.project_name)}</span>
                 <span class="ts-badge">未對映</span></td>
             <td class="num">${u.hours_used}</td>
-            <td><button class="ts-btn ghost" data-ts-action="map" data-name="${esc(u.project_name)}" style="padding:2px 8px;">指定專案</button></td></tr>`).join('')
+            <td>${_isAdmin() ? `<button class="ts-btn ghost" data-ts-action="map" data-name="${esc(u.project_name)}" style="padding:2px 8px;">指定專案</button>` : ''}</td></tr>`).join('')
         || '<tr><td colspan="3" style="color:#666;text-align:center;">沒有符合的</td></tr>';
 }
 function _renderProjects(s) {
@@ -549,7 +552,7 @@ function _renderProjects(s) {
             <button class="ts-btn ghost" data-ts-action="refresh" style="vertical-align:top;">↻ 重新整理</button>
             <button class="ts-btn ghost" data-ts-action="recent" style="vertical-align:top;">最近同步列</button>
             <button class="ts-btn ghost" data-ts-action="export-month" style="vertical-align:top;">匯出本月 CSV</button>
-            ${(() => { const n = s.projects.filter(p => p.budget_hours == null && p.suggested_hours != null).length;
+            ${(() => { const n = _isAdmin() ? s.projects.filter(p => p.budget_hours == null && p.suggested_hours != null).length : 0;
                 return n ? `<button class="ts-btn ghost" data-ts-action="budget-suggest" data-n="${n}" style="vertical-align:top;" title="工時預算＝合約未稅 ×（1−預期毛利）÷ 日成本 × 每日工時；只填沒設的案，已設的不動">套用建議預算（${n} 案沒設）</button>` : ''; })()}
         </div>
         ${unmatched.length ? `<div class="ts-card"><h3>未對映（${unmatched.length}）—— 對到案之後才有預算與 burn</h3>
@@ -596,7 +599,7 @@ async function _openProjectModal(name, pid) {
 // ── 專案檔案頁：摘要／分類組成／時間軸／各人各月／預算／報價人日／類似專案（渲染在 ts-projects.projectFileHtml）──
 function _renderProject(d, modal = false) {
     return projectFileHtml(d, {
-        modal, editable: true, compareNames: _compareNames,
+        modal, editable: true, budgetEditable: _isAdmin(), compareNames: _compareNames,
         head: _head('專案檔案：這個案的整個執行狀態 —— 誰在哪天做了什麼、花了多少、跟類似的案比起來如何。'),
         backHtml: '<button class="ts-btn ghost" data-ts-action="view" data-view="projects">‹ 專案清單</button>',
     });
@@ -743,7 +746,7 @@ function _unmatchedTbodyHtml() {
                         <td class="num">${u.hours_used}</td>
                         <td class="num">${u.rows}</td>
                         <td>${_unmatchedWhyHtml(u)}</td>
-                        <td>${u.reason === 'bucket' ? '' : `
+                        <td>${u.reason === 'bucket' || !_isAdmin() ? '' : `
                             <button class="ts-btn ghost" data-ts-action="map"
                                     data-name="${esc(u.project_name)}">指定專案</button>`}</td></tr>`).join('');
 }
@@ -787,7 +790,7 @@ function _renderSettings(s) {
         <div class="ts-card">
             <h3>從 Sheet 那邊推（可選）</h3>
             <div class="ts-note">主控端已經每週六自動拉，不必裝。若要改成 Sheet 端推，裝 <code>docs/appsscript/timesheet_sync.gs</code>，token 按這裡取：
-                <button class="ts-btn ghost" data-ts-action="token" style="margin-left:6px;">顯示同步 Token</button>
+                ${_isAdmin() ? `<button class="ts-btn ghost" data-ts-action="token" style="margin-left:6px;">顯示同步 Token</button>` : ''}
                 <span id="ts-token-slot" style="margin-left:10px;"></span></div>
         </div>`;
 }

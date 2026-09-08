@@ -51,8 +51,10 @@ const BTN = 'flex:0 0 auto;white-space:nowrap';
 function cardHtml(q) {
     // PDF 與線上連結要「寄出」之後才出現（owner 2026-09-07「送出再產生連結與 pdf 按鈕」）：草稿還在改，不該流出去
     const sent = q.status !== list('quote_statuses')[0];
+    // 建立／成案／拒絕打 /m/quotations/{id}/status（_check_write＝can_write）：掛 .w 在按鈕上，
+    // 不掛在整列 span 上——預覽／PDF／複製連結是讀，只能看的人也要看得到
     const btns = transitions(q.status).map(t =>
-        `<button type="button" class="m-btn sm ${t.danger ? 'danger' : 'pri'}" style="${BTN}" data-id="${esc(q.id)}" data-to="${esc(t.to)}"${t.ask ? ' data-ask="1"' : ''}>${esc(t.label)}</button>`).join('')
+        `<button type="button" class="m-btn sm w ${t.danger ? 'danger' : 'pri'}" style="${BTN}" data-id="${esc(q.id)}" data-to="${esc(t.to)}"${t.ask ? ' data-ask="1"' : ''}>${esc(t.label)}</button>`).join('')
         + (isAdmin() ? `<button type="button" class="m-btn sm" style="${BTN}" data-edit="${esc(q.id)}">編輯</button>` : '')
         // 預覽：只把版面畫給你確認，不建立、不存檔（owner 2026-09-07「預覽點的時候讓我確認內容，不用建立報價單」）
         + (sent ? '' : `<button type="button" class="m-btn sm" style="${BTN}" data-preview="${esc(q.id)}">預覽</button>`)
@@ -70,7 +72,7 @@ function cardHtml(q) {
         <div class="t"><div class="name">${esc(q.project_name || '（未連專案）')}</div>${pill(q.version)}</div>
         <div class="sub">${esc(q.client_short_name || '')}${q.quote_date ? ' · ' + esc(fmtDate(q.quote_date)) : ''}</div>
         <div class="row">${amount}
-          <span class="m-actions w" style="margin:0">${btns}</span></div>
+          <span class="m-actions" style="margin:0">${btns}</span></div>
       </div>`;
 }
 

@@ -149,11 +149,12 @@ window._authToggle = function() {
         // 工具
         html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
         html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
-        html += _item('⚙️', '系統設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
-        html += _item('🔄', '重新啟動 Agent', "window._restartAgent();document.getElementById('auth-dropdown')?.remove()");
 
         if (window._accessLevel >= 3) {
+            // 系統設定（整份 settings/save）與重啟都是管理員限定的端點：非管理員畫了也只會 403（2026-09-08 權限稽核）
             html += _sep;
+            html += _item('⚙️', '系統設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
+            html += _item('🔄', '重新啟動 Agent', "window._restartAgent();document.getElementById('auth-dropdown')?.remove()");
             html += _item('👥', '使用者管理', "window._openUserMgmt();document.getElementById('auth-dropdown')?.remove()");
             html += _item('⇄', '磁碟對應', "window._openDriveMap();document.getElementById('auth-dropdown')?.remove()");
             html += _item('🚀', '版本發布', "window._openPublishMgmt();document.getElementById('auth-dropdown')?.remove()");
@@ -163,11 +164,9 @@ window._authToggle = function() {
         html += `<div style="padding:6px 14px;">
             <button onclick="window._authLogout()" style="background:transparent;border:1px solid #ef4444;color:#ef4444;border-radius:4px;padding:4px 0;cursor:pointer;font-size:12px;width:100%;">登出</button></div>`;
     } else {
-        // 未登入
+        // 未登入（系統設定／重啟只在登入的管理員區塊）
         html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
         html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
-        html += _item('⚙️', '系統設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
-        html += _item('🔄', '重新啟動 Agent', "window._restartAgent();document.getElementById('auth-dropdown')?.remove()");
         html += _sep;
         html += `<div style="padding:6px 14px;">
             <button onclick="document.getElementById('auth-dropdown')?.remove();window._showLoginModal()" style="background:#3b82f6;color:#fff;border:none;border-radius:4px;padding:4px 0;cursor:pointer;font-size:12px;width:100%;">登入</button></div>`;
@@ -182,9 +181,13 @@ window._authToggle = function() {
 
 window._restartAgent = async function() {
     if (!confirm('確定要重新啟動本機 Agent？\n伺服器將短暫離線約 10 秒。')) return;
+    let res = null;
     try {
-        await fetch('/api/admin/restart', { method: 'POST' });
+        res = await fetch('/api/admin/restart', { method: 'POST' });
     } catch (_) { /* server going down is expected */ }
+    // 端點是管理員限定：被擋要說出來，不能讓人白等 15 秒
+    if (res && (res.status === 401 || res.status === 403)) { alert('重新啟動 Agent 需要管理員權限。'); return; }
+    if (res && !res.ok) { alert('重新啟動失敗：HTTP ' + res.status); return; }
     alert('Agent 正在重新啟動中，請等待約 15 秒後重新整理頁面。');
 };
 

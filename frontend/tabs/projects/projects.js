@@ -211,16 +211,26 @@ async function _loadSettings() {
     } catch (_) { /* silent */ }
 }
 
+/** /api/settings/save 依頂層鍵分流：concurrency／nas_paths 給 projects 模組。401/403 要說出來（之前靜默吞，重整就消失）。 */
+function _settingsSaved(res, what) {
+    if (res.ok) return true;
+    alert(res.status === 401 || res.status === 403
+        ? `儲存${what}需要管理員或專案總覽（projects）權限。`
+        : `儲存${what}失敗: HTTP ${res.status}`);
+    return false;
+}
+
 async function saveLimits(key, val) {
     const numVal = parseInt(val, 10);
     if (!numVal || numVal < 1) return;
     try {
-        await fetch('/api/settings/save', {
+        const res = await fetch('/api/settings/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ concurrency: { [key]: numVal } }),
         });
-    } catch (_) { /* silent */ }
+        _settingsSaved(res, '系統參數');
+    } catch (ex) { alert('儲存系統參數失敗: ' + ex.message); }
 }
 
 async function saveAgentsDir() {
@@ -228,14 +238,15 @@ async function saveAgentsDir() {
     if (!input) return;
     const dir = input.value.trim();
     try {
-        await fetch('/api/settings/save', {
+        const res = await fetch('/api/settings/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nas_paths: { agents_dir: dir } }),
         });
+        if (!_settingsSaved(res, 'NAS 機器清單路徑')) return;
         // 重新載入機器列表
         await _loadAgents();
-    } catch (_) { /* silent */ }
+    } catch (ex) { alert('儲存 NAS 機器清單路徑失敗: ' + ex.message); }
 }
 
 async function _loadHistory() {

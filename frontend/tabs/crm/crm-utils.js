@@ -60,7 +60,9 @@ async function _doFetch(url, opts) {
         const detail = Array.isArray(err.detail)
             ? err.detail.map(e => e.msg || e.message || JSON.stringify(e)).join('; ')
             : (err.detail || '請求失敗');
-        throw new Error(detail);
+        const e = new Error(detail);
+        e.status = res.status;      // 呼叫端要分「沒權限」與「壞了」（permDeniedMsg）
+        throw e;
     }
     return surfaceWarning(await res.json());
 }
@@ -705,6 +707,19 @@ export const canSeeMoney = () => hasModule('money_view');
 export function hasModule(key) {
     return (window._accessLevel || 0) >= 3
         || (window._modules || []).includes(key);
+}
+
+/** 403 的一致訊息：「權限不足：需要『<分頁名>』權限，請管理員在使用者管理開通」。
+ *
+ *  帶 `e`（crmFetch 丟出來的 Error）時只在 `e.status === 403` 才回訊息，其他錯誤回 null ——
+ *  呼叫端寫 `alert(_U.permDeniedMsg?.('客戶', e) ?? ('刪除失敗：' + e.message))`，
+ *  「沒權限」與「壞了」就不會混成同一句「刪除失敗：權限不足」。
+ *
+ *  🔴 呼叫端一律 `import * as _U` 再 `_U.permDeniedMsg?.(…)`：Cloudflare 給 .js 4 小時
+ *  瀏覽器快取，新的分頁 js 配舊的 crm-utils 時 named import 會在連結階段就炸掉整個分頁。 */
+export function permDeniedMsg(label, e) {
+    if (e && e.status !== 403) return null;
+    return `權限不足：需要「${label}」權限，請管理員在使用者管理開通`;
 }
 
 // 整塊「這裡本來是錢」的替代畫面。多個呼叫端說的是同一句話 —— 各寫一份的話

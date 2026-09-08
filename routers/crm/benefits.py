@@ -44,7 +44,7 @@ from core.hr_logic import (BENEFIT_COMMITTED, BENEFIT_EDITABLE,
                            pool_allowance_rollup, staff_allowance_balance,
                            validate_against_allowance, validate_benefit_entry)
 from core.identity import resolve_current_staff
-from core.ledger import require_entity
+from core.ledger import ENTITIES, require_entity
 from core.schemas import (BenefitAllowancePayload, BenefitEntryPayload,
                           BenefitFundingPayload, BenefitPoolPayload)
 from db.models import (CrmCashEntry, CrmPaymentRequest, CrmStaff,
@@ -62,9 +62,29 @@ AP_CATEGORY = "員工福利"
 EDITABLE_TEXT = "／".join(BENEFIT_EDITABLE)
 
 
+# 讀取（池／撥款／登記／會計包）放行的鑰匙：福委會分頁本身、審核、財務（權限稽核第二批 2026-09-08：
+# 之前讀取也要 require_entity(full)＝crm_invoices＋money_view，hr_benefits 這把在後端零效力，整頁 403）。
+READ_MODULES = ("hr_benefits", APPROVE_MODULE, "crm_invoices")
+
+
 def _check_approver(request: Request):
     """審核／匯款：金額權限（money_dep 在路由層）＋ 審核模組。兩者都要。"""
     check_admin_or_module(request, APPROVE_MODULE)
+
+
+def _read_entity(request: Request, entity: str = "") -> str:
+    """讀取端的守衛：money_dep（路由層）＋ READ_MODULES 任一（管理員恆過），回傳解析後的 entity。
+
+    帳本牆只留私帳那一道：entity=mine 仍走 require_entity(full)（finance_mine 指名制，Lv3 不隱含）；
+    母帳不再要求 crm_invoices＋money_view 的 full scope。寫入／審核端不用這支，維持 _can_manage。
+    """
+    check_admin_or_module(request, *READ_MODULES)
+    entity = (entity or "parent").strip()
+    if entity not in ENTITIES:
+        raise HTTPException(status_code=422, detail=f"未知的帳本實體: {entity}")
+    if entity == "mine":
+        return require_entity(request, "mine", level="full")
+    return entity
 
 
 def _can_manage(request: Request, pool) -> bool:
@@ -197,7 +217,7 @@ async def _pool_rollup(session, pools) -> dict:
 
 @router.get("/benefits/pools", dependencies=[Depends(money_dep)])
 async def list_pools(request: Request, entity: str = ""):
-    ent = require_entity(request, entity, level="full")
+    ent = _read_entity(request, entity)
     async with _crm_session() as session:
         pools = (await session.execute(
             select(HrBenefitPool).where(HrBenefitPool.entity == ent)
@@ -294,7 +314,7 @@ async def pool_detail(pool_id: str, request: Request):
     """
     async with _crm_session() as session:
         p = await _pool_or_404(session, pool_id)
-        require_entity(request, p.entity or "parent", level="full")
+        _read_entity(request, p.entity or "parent")
         funds = (await session.execute(
             select(HrBenefitFunding).where(HrBenefitFunding.pool_id == pool_id)
             .order_by(HrBenefitFunding.year.desc()))).scalars().all()
@@ -790,7 +810,7 @@ async def set_entry_reflection(entry_id: str, body: BenefitEntryPayload,
 async def list_entries(request: Request, status: str = Query(""),
                        pool_id: str = Query(""), entity: str = ""):
     """待審佇列與全部登記。預設不篩 —— 前端自己決定要看哪一段。"""
-    ent = require_entity(request, entity, level="full")
+    ent = _read_entity(request, entity)
     async with _crm_session() as session:
         pools = (await session.execute(
             select(HrBenefitPool).where(HrBenefitPool.entity == ent))).scalars().all()
@@ -1020,8 +1040,7 @@ async def accounting_package(request: Request, year: int = 0, entity: str = ""):
 
     只收「已核准／已付款」—— 待審與退回還不是帳，送過去只會讓人對不起來。
     """
-    _check_approver(request)
-    ent = require_entity(request, entity, level="full")
+    ent = _read_entity(request, entity)
     async with _crm_session() as session:
         return await _package(session, ent, int(year or 0))
 
@@ -1030,8 +1049,7 @@ async def accounting_package(request: Request, year: int = 0, entity: str = ""):
 async def accounting_package_csv(request: Request, year: int = 0,
                                  entity: str = ""):
     """同一份的 CSV。會計要的是能丟進 Excel 的東西，不是 JSON。"""
-    _check_approver(request)
-    ent = require_entity(request, entity, level="full")
+    ent = _read_entity(request, entity)
     async with _crm_session() as session:
         pkg = await _package(session, ent, int(year or 0))
     buf = io.StringIO()

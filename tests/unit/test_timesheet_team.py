@@ -2,7 +2,7 @@
 """團隊工時互看＋匯總（docs/TIMESHEET_SELF_ENTRY_PLAN.md §5）。
 
 釘的規則：「幫大家算好」是純函式（每人合計／天數／每週／各案、參考工時＝工作日×8）；
-團隊端點的閘門＝看得到自己就看得到大家（_me_ident＝services.timesheet_self.bound_ident），回的是 Sheet 案名與時數、
+團隊端點的閘門＝看得到自己就看得到大家（_team_ident＝me_finance 或 timesheets 任一＋綁定），回的是 Sheet 案名與時數、
 沒有金額也沒有 CRM 專案 id；/hours.html 只打 /me/team/*。
 """
 import datetime as dt
@@ -40,7 +40,7 @@ def test_team_endpoints_are_gated_like_my_own_rows_and_carry_no_money():
     src = code_only(repo_src("routers/api_me.py"))
     for fn in ("async def team_hours(", "async def team_projects(", "async def team_project_detail("):
         body = func_body(src, fn)
-        assert "await _me_ident(request)" in body, fn
+        assert "await _team_ident(request)" in body, fn      # timesheets／me_finance 任一＋綁定（2026-09-08）
         for bad in ("amount", "contract", "cost", "daily_rate", "hourly_rate"):
             assert bad not in body, (fn, bad)
     assert "hours_rollup(data, m0.year, m0.month)" in func_body(src, "async def team_hours("), "端點自己算了"

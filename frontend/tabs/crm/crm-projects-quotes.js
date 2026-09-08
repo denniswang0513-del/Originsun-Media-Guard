@@ -3,7 +3,11 @@
  * 報價列表 + 明細展示 + 啟動專案
  */
 import { crmFetch as _fetch, esc as _esc, fmtNum, quotePdfFilename } from './crm-utils.js';
+import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 import { authDownload } from '../../js/shared/utils.js';
+
+// 刪除報價仍是管理員限定（RBAC 稽核第二批）—— 不是管理員就別畫那顆鈕
+const _isAdmin = () => (window._accessLevel || 0) >= 3;
 import { state, callbacks, PRESALE_STATUSES } from './crm-projects-state.js';
 import { _badge } from './crm-projects-core.js';
 
@@ -119,7 +123,7 @@ async function _renderQuoteDetail(quoteId) {
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._pqEdit('${q.id}')">編輯</button>
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._pqDuplicate('${q.id}')">複製新版</button>
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._pqPdf('${q.id}')">PDF</button>
-                <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._pqDelete('${q.id}')">刪除</button>
+                ${_isAdmin() ? `<button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._pqDelete('${q.id}')">刪除</button>` : ''}
               </div>
             </div>
 
@@ -188,7 +192,7 @@ function initQuoteHandlers() {
         try {
             await _fetch('/quotations/' + quoteId, { method: 'DELETE' });
             if (state.selectedId) loadProjectQuotes(state.selectedId);
-        } catch (e) { alert('刪除失敗：' + e.message); }
+        } catch (e) { alert(_U.permDeniedMsg?.('管理員', e) ?? ('刪除失敗：' + e.message)); }
     };
 
     window._projAddQuote = () => {

@@ -141,11 +141,12 @@ def test_spec_absent_from_payload_means_unchanged_not_cleared():
 
 
 def test_share_link_endpoints_are_token_scoped_and_reuse_one_view_helper():
-    """線上檢視（owner 2026-09-07）：鑄連結是寫入（_check_auth）；公開的 HTML／PDF 只認 share_token
-    逐字比對、掛 token_router（master 限定）；三支端點共用 _quotation_view_of，不各抄一份。"""
+    """線上檢視（owner 2026-09-07）：鑄連結是寫入（_check_quotes_auth，2026-09-08 第二批起＝crm_quotes）；
+    公開的 HTML／PDF 只認 share_token 逐字比對、掛 token_router（master 限定）；
+    三支端點共用 _quotation_view_of，不各抄一份。"""
     src = repo_src("routers/crm/quotes.py")
     share = code_only(func_body(src, "async def share_quotation("))
-    assert "_check_auth(request)" in share and "new_short_token()" in share
+    assert "_check_quotes_auth(request)" in share and "new_short_token()" in share
     assert "if not q.share_token:" in share, "鑄連結要冪等，寄出去的連結不能因為再按一次就變"
     assert '@token_router.get("/public/quote/{token}", response_class=HTMLResponse)' in src
     assert '@token_router.get("/public/quote/{token}/pdf")' in src

@@ -32,6 +32,57 @@ def _check_admin(request: Request):
         raise HTTPException(status_code=503, detail="Auth module unavailable")
 
 
+def _check_admin_or_module(request: Request, *module_keys: str):
+    """管理員 OR 帳號有任一指定模組（同 `_check_admin` 的 fail-closed 姿勢）。"""
+    try:
+        from core.auth import check_admin_or_module
+        return check_admin_or_module(request, *module_keys)
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Auth module unavailable")
+
+
+# ── /api/settings/save 的分流表（docs/RBAC_AUDIT.md §3.2「一把 admin 鎖擋住四條正常工作」）──
+# 頂層鍵 → 非管理員可以憑哪幾把鑰匙寫它。同一組鑰匙的鍵可以同一包送（concurrency＋nas_paths），
+# 表外的鍵（notifications／timesheet／jwt…）或跨組混包一律回到管理員。
+_SETTINGS_SAVE_KEYS: dict[str, tuple[str, ...]] = {
+    "staff_roles": ("crm_staff",),                  # 員工檔案「編輯職能選項」
+    "company": ("crm_quotes", "crm_invoices"),      # 報價頁「公司資訊」
+    "finance": ("crm_invoices",),                   # 現金流「固定成本」（finance.monthly_fixed_costs）
+    "concurrency": ("projects",),                   # 專案總覽「系統參數」
+    "nas_paths": ("projects",),                     # 專案總覽「NAS agents_dir」
+}
+# 頂層鍵底下只准非管理員碰的子鍵（沒列＝整塊都可以）：nas_paths 還放 ota_dir／web_report_dir／voice_dir，
+# 給 projects 模組的只有機器清單那一格。
+_SETTINGS_SAVE_SUBKEYS: dict[str, tuple[str, ...]] = {
+    "nas_paths": ("agents_dir",),
+}
+
+
+def _settings_save_guard_keys(payload_keys) -> tuple[str, ...] | None:
+    """這包設定要用哪幾把鑰匙守：全部頂層鍵都落在分流表**同一組**才回那組；
+    空包、表外鍵、跨組混包都回 None（＝管理員）。純函式，方便測。"""
+    keys = set(payload_keys)
+    if not keys:
+        return None
+    grants = {_SETTINGS_SAVE_KEYS.get(k) for k in keys}
+    if len(grants) != 1 or None in grants:
+        return None
+    return grants.pop()
+
+
+def _settings_save_restrict(payload: dict, grant: tuple[str, ...]) -> dict:
+    """非管理員的寫入只留分流表歸這組鑰匙的頂層鍵（防夾帶），有子鍵白名單的再往下過濾一層。"""
+    out = {}
+    for k, v in payload.items():
+        if _SETTINGS_SAVE_KEYS.get(k) != grant:
+            continue
+        allowed_sub = _SETTINGS_SAVE_SUBKEYS.get(k)
+        if allowed_sub is not None and isinstance(v, dict):
+            v = {sk: sv for sk, sv in v.items() if sk in allowed_sub}
+        out[k] = v
+    return out
+
+
 # ── Health & Settings ───────────────────────────────────────────────────
 
 @router.get("/api/v1/health")
@@ -177,10 +228,24 @@ async def get_company_image(kind: str, req: Request):
 
 @router.post("/api/settings/save")
 async def save_settings_api(req: Request):
-    _check_admin(req)
+    """依 payload 的頂層鍵分流（`_SETTINGS_SAVE_KEYS`）：單一組的鍵給該組模組，
+    其他一律管理員。非管理員只寫得進那組鍵（`_settings_save_restrict`）。"""
     try:
-        new_settings = await req.json()
-        save_settings(new_settings)
+        body = await req.json()
+    except Exception:
+        body = None
+    grant = _settings_save_guard_keys(body.keys()) if isinstance(body, dict) else None
+    if grant is None:
+        _check_admin(req)
+    else:
+        payload = _check_admin_or_module(req, *grant)
+        from core.auth import payload_grants
+        if not payload_grants(payload):          # 零 key＝只有管理員過：非管理員只寫得進這組鍵
+            body = _settings_save_restrict(body, grant)
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"status": "error", "message": "設定內容需為 JSON 物件"})
+    try:
+        save_settings(body)
         return {"status": "success", "message": "設定已儲存"}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})

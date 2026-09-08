@@ -7,7 +7,7 @@
  * #expense（記雜支）與 #payments（付款，owner 2026-09-03 被行事曆取代）有畫面但不在分頁列。
  */
 import { boot, mfetch, toast, esc } from './shell.js';
-import { state, DEFAULT_TAB, HIDDEN_ROUTES, currentTab, initSheet, closeSheet, errBox, isAdmin } from './ui.js';
+import { state, DEFAULT_TAB, HIDDEN_ROUTES, currentTab, initSheet, closeSheet, errBox, isAdmin, applyTabVisibility } from './ui.js';
 import * as invoiceView from './views/invoice.js';
 import * as pettyView from './views/petty.js';
 import * as projectsView from './views/projects.js';
@@ -72,6 +72,7 @@ state.ensureView = async (tab) => {
 async function main() {
     const me = await boot({ gate });
     state.me = me;
+    applyTabVisibility(me);     // 工作紀錄／假勤依 me.modules 藏（ui.TAB_KEYS）
     initSheet();
     // 頂欄：上一頁＝先關抽屜、再退一個分頁、退到底回首頁；首頁＝發票分頁（落地分頁）
     document.getElementById('m-back').addEventListener('click', () => {
@@ -93,10 +94,18 @@ async function main() {
             `<div class="m-err">字彙載入失敗（${esc(e.message)}）—— 這頁的表單需要它，請重新整理再試。</div>`;
         return;
     }
+    // 三把寫入旗標都由 /options.me 給（跟後端守衛問同一份清單）：
+    //   can_write   → body.no-write   藏 .w （加備註、改報價狀態、推階段：一期只有 Lv3）
+    //   can_invoice → body.no-invoice 藏 .wi（發票、付款：crm_invoices＋money_view）
+    //   can_expense → body.no-expense 藏 .we（記雜支：crm_projects）
     const meOpt = state.options.me || {};
     state.canWrite = !!meOpt.can_write;
+    state.canInvoice = !!meOpt.can_invoice;
+    state.canExpense = !!meOpt.can_expense;
     document.body.classList.toggle('no-write', !state.canWrite);
-    if (!state.canWrite) toast('此帳號只能檢視，寫入功能已隱藏', 'err');
+    document.body.classList.toggle('no-invoice', !state.canInvoice);
+    document.body.classList.toggle('no-expense', !state.canExpense);
+    if (!state.canWrite && !state.canInvoice && !state.canExpense) toast('此帳號只能檢視，寫入功能已隱藏', 'err');
     await render();
 }
 

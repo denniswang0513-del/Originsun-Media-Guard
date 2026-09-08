@@ -57,7 +57,8 @@ def test_create_always_lands_in_crm_and_owner_may_create():
     src = _read("routers/crm/clients.py")
     create = src.split("async def create_client(")[1].split(NL + "@router")[0]
     assert 'ent = "parent"' in create
-    assert "_check_auth(request)" in create
+    # 2026-09-08 第二批：母帳建客戶＝客戶／專案／報價三把鑰匙（_check_client_write），不再是 Lv3
+    assert "_check_client_write(request)" in create and "_check_auth(request)" not in create
     assert 'require_entity(request, "mine", level="full")' in create
     assert 'exclude={"entity"}' in create, "entity 不得跟著 model_dump 亂入"
 
@@ -67,7 +68,10 @@ def test_client_write_guard_is_row_scoped():
     for fn_name in ("update_client", "delete_client"):
         fn = src.split("async def " + fn_name + "(")[1].split(NL + "@router")[0]
         assert "check_logged_in(request)" in fn, fn_name + " 要先擋匿名"
-        assert "_client_write_guard(request, client)" in fn, fn_name + " 要按列帳本驗"
+        assert "_client_write_guard(request, client" in fn, fn_name + " 要按列帳本驗"
+    # 刪客戶留管理員（owner 2026-09-08 ADMIN_ONLY_ACTIONS）；改客戶走三把鑰匙
+    dele = src.split("async def delete_client(")[1].split(NL + "@router")[0]
+    assert "_client_write_guard(request, client, admin_only=True)" in dele
     upd = src.split("async def update_client(")[1].split(NL + "@router")[0]
     assert 'exclude={"status", "entity"}' in upd, "更新不得換帳本"
 

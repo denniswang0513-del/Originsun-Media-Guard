@@ -58,10 +58,11 @@ MONEY_ONLY_PATHS = [
     "/api/v1/cashflow/forecast",
 ]
 
-# 這幾支**另外**還收 Lv3（handler 內的 `_check_auth`）—— 費率史是薪資史，
-# 給了金額權也不代表看得到別人的調薪紀錄。所以只驗「沒授權要 403」那一面，
-# 正面留給管理員（下方 test_admin_always_sees_money）。
-ALSO_ADMIN_ONLY = {"/api/v1/crm/staff/__probe__/rate-history"}
+# 「另外還收 Lv3」的例外清單。2026-09-08 權限稽核第二批起是空的：費率史原本
+# 在 handler 內另疊 `_check_auth`（薪資史），改成只看路由層 money_dep ——
+# 員工檔案分頁配金額檢視就看得到費率欄，費率史是同一格的歷史。留著這個集合
+# 是給下一支真的要「金額權之外再要管理員」的端點用。
+ALSO_ADMIN_ONLY: set = set()
 
 
 # CRM 之外的兩支「整支都是錢」的 router。路由掃描只走 CRM 前綴，所以它們的

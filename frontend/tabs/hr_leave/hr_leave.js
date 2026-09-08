@@ -37,6 +37,9 @@ const el = (id) => document.getElementById(id);
 const hget = (path) => authFetch(API + path);
 const hpost = (path, body) => authFetch(API + path, { method: 'POST', body: body ?? {} });
 const hdel = (path) => authFetch(API + path, { method: 'DELETE' });
+// 假勤核准留管理員（owner 2026-09-08，docs/RBAC_PLAN.md §5）：核准／退回／消假決定、補休手開／刪除、假日表寫入
+// 只在 Lv3 畫；hr_leave 這把鑰匙看得到清單、能登記，但沒有那些鈕。後端 api_hr.py 同樣 check_admin 再閘一次。
+const isAdmin = () => (window._accessLevel || 0) >= 3;
 
 async function _fail(r, fallback) {
     const d = await r.json().catch(() => ({}));
@@ -128,7 +131,8 @@ async function _loadQueue() {
 
 function _queueCard(it) {
     const isCancel = it.status === '消假待審';
-    const acts = isCancel
+    const acts = !isAdmin() ? ''
+        : isCancel
         ? `<button class="hl-btn ok" data-cancel-decide="${esc(it.id)}" data-approve="1">同意消假</button>
            <button class="hl-btn warn" data-cancel-decide="${esc(it.id)}" data-approve="0">不同意</button>`
         : `<button class="hl-btn ok" data-approve-req="${esc(it.id)}">核准</button>
@@ -408,13 +412,13 @@ function _creditsHtml(staffId, name) {
                     <td>${esc(c.source) || '—'}</td>
                     <td>${esc(c.status) || '—'}</td>
                     <td>${esc(c.reason) || esc(c.note) || '—'}</td>
-                    <td>${used > 0 ? '' : `<button class="hl-btn danger" data-del-credit="${esc(c.id)}" data-staff="${esc(staffId)}">刪除</button>`}</td>
+                    <td>${used > 0 || !isAdmin() ? '' : `<button class="hl-btn danger" data-del-credit="${esc(c.id)}" data-staff="${esc(staffId)}">刪除</button>`}</td>
                 </tr>`;
             }).join('')}
         </table>`;
     return `<div style="color:#aaa;font-size:12px;margin-bottom:8px;">${esc(name)} 的 credit 明細</div>
         ${rows}
-        <div class="hl-form" data-credit-form="${esc(staffId)}" style="margin-top:10px;padding-top:10px;border-top:1px solid #333;">
+        ${!isAdmin() ? '' : `<div class="hl-form" data-credit-form="${esc(staffId)}" style="margin-top:10px;padding-top:10px;border-top:1px solid #333;">
             <span style="color:#888;font-size:12px;">手開：</span>
             <select data-c="kind">${CREDIT_KINDS.map(k => `<option>${k}</option>`).join('')}</select>
             <input type="number" data-c="hours" min="0.5" step="0.5" value="8" title="時數">
@@ -422,7 +426,7 @@ function _creditsHtml(staffId, name) {
             <span style="color:#777;font-size:12px;">到期</span><input type="date" data-c="expires">
             <input type="text" data-c="reason" placeholder="事由（例：加班補休 9/1 拍攝）" style="width:220px;">
             <button class="hl-btn" data-c-add="${esc(staffId)}">建立</button>
-        </div>`;
+        </div>`}`;
 }
 
 function _renderBalances() {
@@ -518,26 +522,26 @@ function _renderHolidays() {
         <h3>假日表（${_hyear} 年，${_holidays.length} 天）</h3>
         <div class="hl-form" style="margin-bottom:10px;">
             <select id="hl-h-year">${years.map(y => `<option value="${y}" ${_hyear === y ? 'selected' : ''}>${y} 年</option>`).join('')}</select>
-            <input type="date" id="hl-h-date">
+            ${!isAdmin() ? '' : `<input type="date" id="hl-h-date">
             <input type="text" id="hl-h-name" placeholder="名稱（例：端午節）" style="width:160px;">
             <select id="hl-h-kind">${HOLIDAY_KINDS.map(k => `<option>${k}</option>`).join('')}</select>
-            <button class="hl-btn" id="hl-h-add">新增</button>
+            <button class="hl-btn" id="hl-h-add">新增</button>`}
         </div>
         ${_holidays.length ? `<table id="hl-holidays-table">
             <tr><th>日期</th><th>名稱</th><th>種類</th><th></th></tr>
             ${_holidays.map(h => `<tr>
                 <td>${esc(h.date)}</td><td>${esc(h.name) || '—'}</td><td>${esc(h.kind) || '—'}</td>
-                <td><button class="hl-btn danger" data-del-holiday="${esc(h.date)}">刪除</button></td>
+                <td>${!isAdmin() ? '' : `<button class="hl-btn danger" data-del-holiday="${esc(h.date)}">刪除</button>`}</td>
             </tr>`).join('')}
         </table>` : '<div class="hl-empty">此年度沒有假日資料——貼行政院行事曆 CSV 匯入</div>'}
-        <div style="margin-top:14px;padding-top:12px;border-top:1px solid #333;">
+        ${!isAdmin() ? '' : `<div style="margin-top:14px;padding-top:12px;border-top:1px solid #333;">
             <div style="color:#888;font-size:12px;margin-bottom:6px;">貼上行政院行事曆 CSV（欄：西元日期、星期、是否放假、備註）：</div>
             <textarea id="hl-h-csv" rows="5" placeholder="西元日期,星期,是否放假,備註&#10;20260101,四,2,開國紀念日"></textarea>
             <div class="hl-form" style="margin-top:6px;">
                 <button class="hl-btn" id="hl-h-import">匯入</button>
                 <span id="hl-h-import-result" style="color:#aaa;font-size:12px;">${esc(_importResult)}</span>
             </div>
-        </div>
+        </div>`}
         <div class="hl-note">假日表決定請假時數怎麼算：週一～五且不在表內才算工作日；補班日的週六算工作日；颱風假當日已核准的假不可消。</div>
     </div>`;
     _bindHolidays();

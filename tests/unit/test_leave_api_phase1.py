@@ -45,12 +45,15 @@ def test_admin_routes_exist_per_contract():
 # ── 守衛 ────────────────────────────────────────────────────────────────
 
 def test_every_admin_endpoint_is_guarded_by_hr_leave():
+    """每支端點都有守：看清單／登記／改欄位＝hr_leave；核准類＝check_admin（owner 2026-09-08：假勤核准留管理員，
+    細節釘在 tests/unit/test_batch2_hr_guards.py）。"""
     body = code_only(HR)
     handlers = re.split(r"\n@router\.", body)[1:]
     for h in handlers:
         name = re.search(r"async def (\w+)\(", h).group(1)
-        # 直接守，或委派給同檔的 _decide_credit（它自己守）
-        assert 'check_admin_or_module(request, "hr_leave")' in h or "_decide_credit(" in h, f"{name} 沒守 hr_leave"
+        # 直接守（hr_leave 或管理員），或委派給同檔的 _decide_credit（它自己守）
+        assert ('check_admin_or_module(request, "hr_leave")' in h or "check_admin(request)" in h
+                or "_decide_credit(" in h), f"{name} 沒守"
 
 
 def test_employee_leave_endpoints_require_bound_staff_and_me_leave():

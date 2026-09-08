@@ -18,7 +18,7 @@ const base = (pid) => '/api/v1/crm/projects/' + encodeURIComponent(pid);
 function formHtml() {
     return `
       <div class="m-h">記雜支</div>
-      <form class="m-form m-card w" id="exp-form" autocomplete="off">
+      <form class="m-form m-card we" id="exp-form" autocomplete="off">
         <label class="req">專案</label>${pickerHtml('exp-project_id')}
         <div id="exp-group-row" hidden><label>子表</label><select id="exp-cost_group_id"></select></div>
         <label>類別</label>${cats().length ? segHtml('exp-category', cats()) : '<input id="exp-category" placeholder="主控端還沒給類別字彙，先手打">'}
@@ -30,8 +30,9 @@ function formHtml() {
         <label>備註</label><input id="exp-notes" placeholder="選填">
         <label>收據</label>
         <label class="m-photo" id="exp-photo"><input id="exp-file" type="file" accept="image/*,.pdf" hidden><span>拍照或選擇圖片</span></label>
-        <button type="submit" class="m-btn pri w" id="exp-submit">送出</button>
+        <button type="submit" class="m-btn pri we" id="exp-submit">送出</button>
       </form>
+      ${state.canExpense ? '' : '<div class="m-empty">此帳號沒有記雜支權限（需要專案管理）</div>'}
       <div class="m-h">這個專案最近的雜支</div>
       <div id="exp-recent"></div>`;
 }

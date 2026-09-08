@@ -26,12 +26,20 @@ import { renderArchiveCard } from './archive-card.js';
 
 let _embedMsgBound = false;
 
+// 權限旗標由呼叫端注入（這裡 import 不到 tabs/crm 的 hasModule）：
+//   opts.canEditShowcase   官網上架編輯器（作品／編輯連結，後端 website_admin）
+//   opts.canManageFolders  歸檔卡的建資料夾／掃描（動 NAS，管理員限定）
+// 🔴 只有**明確給 false** 才藏 —— 沒給（舊呼叫端、專案頁）維持原行為。Cloudflare 給 .js
+// 4 小時快取，新元件配舊呼叫端不能把管理員的按鈕藏掉（RBAC 稽核第二批）。
+const _PERM_WEBSITE = '權限不足：需要「官網」權限，請管理員在使用者管理開通';
+const _errText = (e, prefix) => (e && e.status === 403 ? _PERM_WEBSITE : prefix + (e && e.message ? e.message : e));
+
 // 歸檔清單 + 專案回顧掛在最上方。靜態 import 同目錄的鄰居即可 ——
 // 它的載入失敗由這裡的 try 接住，不會擋掉下面的編輯器。
-async function _mountArchive(host, projectId, fetcher) {
+async function _mountArchive(host, projectId, fetcher, opts = {}) {
     if (!host) return;
     try {
-        await renderArchiveCard(host, projectId, fetcher);
+        await renderArchiveCard(host, projectId, fetcher, { canManageFolders: opts.canManageFolders });
     } catch (e) {
         host.innerHTML = `<div class="crm-empty" style="padding:12px;">歸檔清單載入失敗：${_esc(e.message || e)}</div>`;
     }
@@ -70,8 +78,15 @@ export async function loadDeliveryTab(projectId, opts = {}) {
         <div class="delivery-archive"></div>
         <div class="delivery-showcase crm-empty">載入中...</div>`;
     // 不 await：歸檔要打 DB，別讓編輯器等它
-    _mountArchive(container.querySelector('.delivery-archive'), projectId, _fetch);
+    _mountArchive(container.querySelector('.delivery-archive'), projectId, _fetch, opts);
     const showcase = container.querySelector('.delivery-showcase');
+
+    // 沒 website_admin：編輯權杖（GET edit-token／POST generate-edit-token）與新增作品都是 403，
+    // 整塊編輯器換成一句話；歸檔清單（專案層級）照常在上面。
+    if (opts.canEditShowcase === false) {
+        showcase.innerHTML = `<div class="crm-empty" style="padding:12px;">${_esc(_PERM_WEBSITE)}</div>`;
+        return;
+    }
 
     // 先撈作品清單決定單/多作品 UI（端點失敗 → 走舊單作品路徑）
     let works = [];
@@ -157,7 +172,7 @@ function _renderDeliveryTabs(container, projectId, works, activeId, _fetch) {
             _renderDeliveryTabs(container, projectId, fresh, r.id, _fetch);
             await _selectDeliveryWork(container, r.id, _fetch);
         } catch (e) {
-            alert('新增作品失敗：' + (e.message || e));
+            alert(_errText(e, '新增作品失敗：'));
             addBtn.disabled = false;
         }
     });
@@ -182,7 +197,7 @@ async function _selectDeliveryWork(container, workId, _fetch) {
         }
         f.src = url;
     } catch (e) {
-        alert('切換作品失敗：' + (e.message || e));
+        alert(_errText(e, '切換作品失敗：'));
     }
 }
 

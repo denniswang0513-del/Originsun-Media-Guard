@@ -3,6 +3,10 @@
  */
 
 import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, saveSettings, createSortable } from './crm-utils.js';
+import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
+
+// 刪除人員、匯入 CSV 仍是管理員限定（RBAC 稽核第二批）—— 不是管理員就別畫那顆鈕
+const _isAdmin = () => (window._accessLevel || 0) >= 3;
 
 let _staff = [];
 let _selectedId = null;
@@ -66,7 +70,7 @@ function renderList() {
             <div class="crm-row-role">${_esc(s.role)}</div>
             <div class="crm-row-status">${_sBadge(s.status)}</div>
             <div class="crm-row-phone">${_esc(s.phone)}</div>
-            ${kebabMenuHtml(s.id, { onEdit: '_staffEdit', onDuplicate: '_staffDup', onDelete: '_staffDelete' })}
+            ${kebabMenuHtml(s.id, { onEdit: '_staffEdit', onDuplicate: '_staffDup', onDelete: _isAdmin() ? '_staffDelete' : undefined })}
         </div>
     `).join('');
 }
@@ -446,7 +450,7 @@ async function saveStaff() {
             await loadStaff();
         }
     } catch (e) {
-        _showModalError(e.message);
+        _showModalError(_U.permDeniedMsg?.('人力', e) ?? e.message);
     } finally {
         btn.disabled = false; btn.textContent = '儲存';
     }
@@ -458,7 +462,7 @@ async function deleteStaff(s) {
         await _fetch(`/staff/${s.id}`, { method: 'DELETE' });
         closeDetail();
         await loadStaff();
-    } catch (e) { alert('刪除失敗：' + e.message); }
+    } catch (e) { alert(_U.permDeniedMsg?.('管理員', e) ?? ('刪除失敗：' + e.message)); }
 }
 
 function _showModalError(msg) {
@@ -544,8 +548,17 @@ function _populateRoleSelects() {
     }
 }
 
-async function _saveRoles() {
-    await saveSettings({ staff_roles: _roles });
+/** 存職能清單：成功才把 `next` 換成 `_roles`。/api/settings/save 依頂層鍵分流，單獨的 staff_roles 給 crm_staff 寫；
+ *  401/403 要說出來（之前不看回應：畫面看似成功、重整就消失）。回傳存成功與否。 */
+async function _saveRoles(next) {
+    let r;
+    try {
+        r = await saveSettings({ staff_roles: next });
+    } catch (e) { alert('儲存職能選項失敗：' + (e.message || '網路錯誤')); return false; }
+    if (r.status === 401 || r.status === 403) { alert('儲存職能選項需要管理員或人力資源（crm_staff）權限。'); return false; }
+    if (!r.ok) { alert('儲存職能選項失敗：HTTP ' + r.status); return false; }
+    _roles = next;
+    return true;
 }
 
 window._staffEditRoles = function() {
@@ -580,8 +593,7 @@ window._staffEditRoles = function() {
         if (!name || !name.trim()) return;
         const n = name.trim();
         if (_roles.includes(n)) { alert('已存在'); return; }
-        _roles.push(n);
-        await _saveRoles();
+        if (!(await _saveRoles([..._roles, n]))) return;
         _populateRoleSelects();
         _render();
     };
@@ -589,15 +601,15 @@ window._staffEditRoles = function() {
         const old = _roles[i];
         const name = prompt('修改職能名稱：', old);
         if (!name || !name.trim() || name.trim() === old) return;
-        _roles[i] = name.trim();
-        await _saveRoles();
+        const next = _roles.slice();
+        next[i] = name.trim();
+        if (!(await _saveRoles(next))) return;
         _populateRoleSelects();
         _render();
     };
     window._staffRemoveRole = async (i) => {
         if (!confirm(`確定刪除「${_roles[i]}」？已有此職能的人員不受影響。`)) return;
-        _roles.splice(i, 1);
-        await _saveRoles();
+        if (!(await _saveRoles(_roles.filter((_, j) => j !== i)))) return;
         _populateRoleSelects();
         _render();
     };

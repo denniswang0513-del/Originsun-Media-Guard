@@ -98,7 +98,7 @@ function _mountAssetsCard(projectId, pid, host, d, pins) {
                 <span style="flex:1;"></span>
                 <button id="pp-open" class="crm-btn crm-btn-secondary crm-btn-sm"
                         title="在這台伺服器上開啟檔案總管 — 你人不在伺服器前的話請改用「點路徑複製」">開啟資料夾</button>
-                <button id="pp-cfg" class="crm-btn crm-btn-secondary crm-btn-sm" title="設定根目錄">⚙</button>
+                ${(window._accessLevel || 0) >= 3 ? '<button id="pp-cfg" class="crm-btn crm-btn-secondary crm-btn-sm" title="設定根目錄（全站共用，管理員限定）">⚙</button>' : ''}
             </div>
             <div id="pp-pins"></div>
             <div id="pp-files"></div>
@@ -123,7 +123,7 @@ function _mountAssetsCard(projectId, pid, host, d, pins) {
     const nav = _mountFiles(box.querySelector('#pp-files'), projectId, pid, d, pins);
     _mountPins(box.querySelector('#pp-pins'), projectId, pins, nav);
 
-    box.querySelector('#pp-cfg').addEventListener('click', () => {
+    box.querySelector('#pp-cfg')?.addEventListener('click', () => {     // 非管理員沒有這顆
         const row = box.querySelector('#pp-cfg-row');
         row.style.display = row.style.display === 'none' ? 'flex' : 'none';
     });

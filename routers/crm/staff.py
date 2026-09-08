@@ -19,7 +19,8 @@ from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 from core.schemas import StaffPayload, ResumePayload, ProjectStaffPayload
 from core.no_store import no_store_file
 
-from ._shared import (router, token_router, _check_auth, _check_project_write_auth, money_dep,
+from ._shared import (router, token_router, _check_auth, _check_staff_auth,
+                      _check_project_write_auth, money_dep,
                       _require_db, _get_factory, _fmt_day, _now,
                       STAFF_CREATED_VIA_ADMIN, _UPLOAD_BASE, _ALLOWED_IMG_EXT,
                       _verify_token_generic, map_csv_row)
@@ -113,7 +114,7 @@ async def list_staff(q: str = Query(""), role: str = Query(""), status: str = Qu
 
 @router.post("/staff")
 async def create_staff(req: StaffPayload, request: Request):
-    _check_auth(request)
+    _check_staff_auth(request)
     _require_db()
     # name 在 schema 已放寬為 Optional（讓 PUT 可部分更新）；新增時這裡明確要求。
     if not (req.name or "").strip():
@@ -150,8 +151,10 @@ async def get_staff(staff_id: str):
 
 @router.get("/staff/{staff_id}/rate-history", dependencies=[Depends(money_dep)])
 async def staff_rate_history(staff_id: str, request: Request):
-    """H1 費率歷史（新→舊）。N2 成本回寫與 B2 複盤以此按 work_date 取當時費率。"""
-    _check_auth(request)
+    """H1 費率歷史（新→舊）。N2 成本回寫與 B2 複盤以此按 work_date 取當時費率。
+
+    守衛只有路由層的 money_dep（2026-09-08 第二批：拿掉原本另疊的管理員限定 ——
+    員工檔案分頁配金額檢視就看得到費率欄，費率史是同一格的歷史）。"""
     _require_db()
     factory = await _get_factory()
     from db.models import StaffRateHistory
@@ -170,7 +173,7 @@ async def staff_rate_history(staff_id: str, request: Request):
 
 @router.put("/staff/{staff_id}")
 async def update_staff(staff_id: str, req: StaffPayload, request: Request):
-    _check_auth(request)
+    _check_staff_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -409,7 +412,7 @@ def _to_portfolio_dict(p) -> dict:
 @router.put("/staff/{staff_id}/resume")
 async def update_staff_resume(staff_id: str, req: ResumePayload, request: Request):
     """更新人員履歷/簡歷資訊。"""
-    _check_auth(request)
+    _check_staff_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -432,7 +435,7 @@ async def update_staff_resume(staff_id: str, req: ResumePayload, request: Reques
 @router.post("/staff/{staff_id}/photo")
 async def upload_staff_photo(staff_id: str, request: Request, file: UploadFile = File(...)):
     """上傳人員照片。"""
-    _check_auth(request)
+    _check_staff_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -470,7 +473,7 @@ async def upload_staff_photo(staff_id: str, request: Request, file: UploadFile =
 @router.get("/staff/{staff_id}/portfolio")
 async def list_staff_portfolio(staff_id: str, request: Request):
     """列出人員的作品集。"""
-    _check_auth(request)
+    _check_staff_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -488,7 +491,7 @@ async def add_staff_portfolio(staff_id: str, request: Request,
                               role_desc: str = Query(""), sort_order: int = Query(0),
                               thumbnail: Optional[UploadFile] = File(None)):
     """新增作品集項目（支援可選的縮圖上傳）。"""
-    _check_auth(request)
+    _check_staff_auth(request)
     _require_db()
     factory = await _get_factory()
     # Verify staff exists
@@ -527,7 +530,7 @@ async def update_staff_portfolio(item_id: str, request: Request,
                                  role_desc: str = Query(""), sort_order: int = Query(0),
                                  thumbnail: Optional[UploadFile] = File(None)):
     """更新作品集項目（支援可選的縮圖上傳）。"""
-    _check_auth(request)
+    _check_staff_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -557,7 +560,7 @@ async def update_staff_portfolio(item_id: str, request: Request,
 @router.delete("/staff-portfolio/{item_id}")
 async def delete_staff_portfolio(item_id: str, request: Request):
     """刪除作品集項目。"""
-    _check_auth(request)
+    _check_staff_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -669,7 +672,7 @@ async def _verify_edit_token(session, token: str, require_editable: bool = False
 @router.post("/staff/{staff_id}/generate-edit-token")
 async def generate_staff_edit_token(staff_id: str, request: Request):
     """產生人員自編履歷的永久連結 Token。"""
-    _check_auth(request)
+    _check_staff_auth(request)
     _require_db()
     from core.auth import new_share_token
     token = new_share_token(staff_id, "resume_edit", 36500)

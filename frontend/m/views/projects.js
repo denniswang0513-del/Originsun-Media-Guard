@@ -108,12 +108,12 @@ function detailHtml(d) {
       ${summaryRows.join('')}
       ${_payRows(p, d)}
       ${burnHtml}
-      <div class="m-actions w">
+      <div class="m-actions">
         <button type="button" class="m-btn" data-act="phase">推階段</button>
-        <button type="button" class="m-btn" data-act="note">加備註</button>
-        <button type="button" class="m-btn" data-act="expense">記雜支</button>
+        <button type="button" class="m-btn w" data-act="note">加備註</button>
+        <button type="button" class="m-btn we" data-act="expense">記雜支</button>
         <button type="button" class="m-btn" data-act="shoot">登記拍攝</button>
-        <button type="button" class="m-btn" data-act="invoice">開發票</button>
+        <button type="button" class="m-btn wi" data-act="invoice">開發票</button>
       </div>
       <div id="pj-act-box"></div>
       ${section('拍攝', (d.shoots || []).map(s => li(`${esc(fmtDate(s.date))}${s.start_time ? ' ' + esc(s.start_time) : ''} ${pill(s.status)}`,

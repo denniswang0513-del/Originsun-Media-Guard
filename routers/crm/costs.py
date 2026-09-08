@@ -16,6 +16,7 @@ from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 from core.no_store import no_store_file
 
 from core.auth import check_admin, check_admin_or_module
+from core.money import check_money
 from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
 from core.schemas import (ProjectExpensePayload, ProjectExpensePatchPayload,
                           CostLinePayload, CostLineUpdatePayload, ExpenseLinkPayload,
@@ -73,7 +74,9 @@ async def _resolve_link(session, token: str):
     return link, link.id, None
 
 
-@router.post("/expense-links", dependencies=[Depends(_check_auth)])
+# 雜支登記連結的發／停用 —— 跟雜支本體同一把 crm_projects（owner 2026-09-08：
+# 內部雜支寫入歸 crm_projects；連結是專案頁「雜支」區塊上的按鈕）。
+@router.post("/expense-links", dependencies=[Depends(_check_project_write_auth)])
 async def mint_expense_link(req: ExpenseLinkPayload):
     """發（或重置）一條雜支登記連結。冪等：`rotate=False` 時重用既有 token，
     所以後台重複點「複製連結」不會讓已發出去的那條失效。"""
@@ -96,7 +99,7 @@ async def mint_expense_link(req: ExpenseLinkPayload):
         return {"token": token, "kind": row.kind, "enabled": bool(row.enabled)}
 
 
-@router.post("/expense-links/{target_id}/enabled", dependencies=[Depends(_check_auth)])
+@router.post("/expense-links/{target_id}/enabled", dependencies=[Depends(_check_project_write_auth)])
 async def set_expense_link_enabled(target_id: str, enabled: bool = Query(True)):
     """停用／重新啟用一條連結（停用後那條網址回 403，不必換 token）。"""
     _require_db()
@@ -455,9 +458,11 @@ async def list_public_project_expenses(project_id: str, request: Request):
     } for e in rows]}
 
 
+# ── 雜支本體（內部路）：owner 2026-09-08 拍板歸 crm_projects（做專案的人自己登，
+# 跟同畫面的預算表一致）。留管理員的只有刪雜支與收據根目錄（ADMIN_ONLY_ACTIONS）。
 @router.post("/projects/{project_id}/expenses")
 async def add_project_expense(project_id: str, req: ProjectExpensePayload, request: Request):
-    _check_auth(request)
+    _check_project_write_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -468,7 +473,7 @@ async def add_project_expense(project_id: str, req: ProjectExpensePayload, reque
 @router.patch("/project-expenses/{expense_id}")
 async def patch_project_expense(expense_id: str, req: ProjectExpensePatchPayload, request: Request):
     """部分更新雜支欄位（供前端 inline edit 使用）。僅動 payload 有給的欄位。"""
-    _check_auth(request)
+    _check_project_write_auth(request)
     _require_db()
     data = req.model_dump(exclude_unset=True)  # 只要有帶就進，None 也算
     if not data:
@@ -499,7 +504,7 @@ async def patch_project_expense(expense_id: str, req: ProjectExpensePatchPayload
 @router.patch("/project-expenses/link-advance")
 async def link_expenses_to_advance(request: Request):
     """批次綁定/解除雜支與預支款。body: {expense_ids: [...], advance_id: "..." 或 ""}"""
-    _check_auth(request)
+    _check_project_write_auth(request)
     _require_db()
     body = await request.json()
     expense_ids = body.get("expense_ids", [])
@@ -519,7 +524,7 @@ async def link_expenses_to_advance(request: Request):
 
 @router.put("/project-expenses/{expense_id}")
 async def update_project_expense(expense_id: str, req: ProjectExpensePayload, request: Request):
-    _check_auth(request)
+    _check_project_write_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -548,7 +553,7 @@ async def update_project_expense(expense_id: str, req: ProjectExpensePayload, re
 
 @router.delete("/project-expenses/{expense_id}")
 async def delete_project_expense(expense_id: str, request: Request):
-    _check_auth(request)
+    _check_auth(request)      # 刪雜支留管理員（ADMIN_ONLY_ACTIONS，owner 2026-09-08）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -563,7 +568,7 @@ async def delete_project_expense(expense_id: str, request: Request):
 
 @router.post("/project-expenses/{expense_id}/receipt")
 async def upload_expense_receipt(expense_id: str, request: Request, file: UploadFile = File(...)):
-    _check_auth(request)
+    _check_project_write_auth(request)
     _require_db()
     factory = await _get_factory()
 
@@ -596,7 +601,7 @@ async def upload_expense_receipt(expense_id: str, request: Request, file: Upload
 @router.post("/projects/{project_id}/receipts/{expense_id}")
 async def upload_project_receipt(project_id: str, expense_id: str, request: Request, file: UploadFile = File(...)):
     """上傳收據到專案收據資料夾。"""
-    _check_auth(request)
+    _check_project_write_auth(request)
     return await _save_receipt(project_id, expense_id, file)
 
 
@@ -690,7 +695,8 @@ async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
 @router.get("/projects/{project_id}/receipts")
 async def list_project_receipts(project_id: str, request: Request):
     """列出專案下所有子表的收據檔（依 cost_group 聚合）。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 第二批：收據清單跟雜支寫入同一把（crm_projects）
+    check_money(request)                 # 收據＝金額：還要看得到錢（同專案頁預算結算的 moneyGate）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -723,7 +729,8 @@ async def list_project_receipts(project_id: str, request: Request):
 @router.get("/cost-groups/{group_id}/receipts")
 async def list_cost_group_receipts(group_id: str, request: Request):
     """列出單一子表收據資料夾內的所有檔案。"""
-    _check_auth(request)
+    _check_project_write_auth(request)   # 第二批：收據清單跟雜支寫入同一把（crm_projects）
+    check_money(request)                 # 收據＝金額：還要看得到錢（同專案頁預算結算的 moneyGate）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -778,7 +785,7 @@ async def get_receipts_root(request: Request):
     整包改一鍵再存回會把真密碼洗成遮罩值（2026-07-10 settings 外洩修補後的
     既定風險）。這裡 server 端只讀寫這一個鍵。
     """
-    check_admin(request)
+    check_admin_or_module(request, 'finance_approve')   # 第二批：審核者要看得到根目錄（設定仍限管理員）
     from config import load_settings
     return {"receipts_root": (load_settings().get("receipts_root") or ""),
             "default": os.path.join(os.getcwd(), "uploads", "receipts"),

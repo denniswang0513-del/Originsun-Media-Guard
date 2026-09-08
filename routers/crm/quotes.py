@@ -19,7 +19,8 @@ from core.no_store import no_store_file
 from core.quotation_pdf import PDF_MARGIN, build_quotation_view, footer_line
 from core.schemas import QuotationPayload, QuotationTemplatePayload
 
-from ._shared import (router, token_router, _check_auth, money_dep, _require_db, _get_factory,
+from ._shared import (router, token_router, _check_auth, _check_quotes_auth, money_dep,
+                      _require_db, _get_factory,
                       _now, _parse_shoot_date)
 
 try:
@@ -184,7 +185,7 @@ async def list_project_quotations(project_id: str):
 
 @router.post("/projects/{project_id}/quotations")
 async def create_quotation(project_id: str, req: QuotationPayload, request: Request):
-    _check_auth(request)
+    _check_quotes_auth(request)
     _require_db()
     factory = await _get_factory()
     now = _now()
@@ -418,7 +419,7 @@ async def share_quotation(quotation_id: str, request: Request):
     """取得／鑄造線上檢視連結（冪等：已有就回同一條，寄出去的連結不會因為再按一次就失效）。
     短碼走 new_short_token（純亂數 12 字，網址短；驗證是逐字比對 DB，同電子發票 /e/{code}）。"""
     from core.auth import new_short_token
-    _check_auth(request)
+    _check_quotes_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -471,7 +472,7 @@ async def public_quote_pdf(token: str):
 async def update_quotation(quotation_id: str, req: QuotationPayload, request: Request,
                            background: BackgroundTasks):
     """改報價（項目整組換掉、金額重算）。只寫 payload 有送的欄位；狀態轉成「已寄送」就排背景存一份 PDF。"""
-    _check_auth(request)
+    _check_quotes_auth(request)
     _require_db()
     factory = await _get_factory()
 
@@ -550,7 +551,7 @@ async def list_templates():
 
 @router.post("/quotation-templates")
 async def create_template(req: QuotationTemplatePayload, request: Request):
-    _check_auth(request)
+    _check_quotes_auth(request)
     _require_db()
     factory = await _get_factory()
     now = _now()
@@ -572,7 +573,7 @@ async def create_template(req: QuotationTemplatePayload, request: Request):
 
 @router.put("/quotation-templates/{template_id}")
 async def update_template(template_id: str, req: QuotationTemplatePayload, request: Request):
-    _check_auth(request)
+    _check_quotes_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -592,7 +593,7 @@ async def update_template(template_id: str, req: QuotationTemplatePayload, reque
 
 @router.delete("/quotation-templates/{template_id}")
 async def delete_template(template_id: str, request: Request):
-    _check_auth(request)
+    _check_quotes_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:

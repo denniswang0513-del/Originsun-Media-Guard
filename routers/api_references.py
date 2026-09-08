@@ -943,8 +943,10 @@ async def add_link(rid: str, request: Request, body: dict = Body(...)):
 async def delete_link(link_id: str, request: Request):
     """解除引用（只斷連結，片庫本體與其他引用不動）。
 
-    先讀出這筆掛在什麼對象上，再依**那個對象**把關 —— 否則只有 CRM 權限的人
-    能拿一個 link id 解掉提案的引用。"""
+    守衛＝片庫家族鑰匙（`tab_modules("references")`，同本檔其餘端點），不再看
+    目標型別（2026-09-08 權限稽核第二批）：原本依對象把關，而 crm_projects 本來
+    就在 references 家族裡，等於多一道只會擋自己人的門。"""
+    _check_auth(request)
     factory = _require_factory()
 
     from db.models import PreprodReferenceLink
@@ -953,7 +955,6 @@ async def delete_link(link_id: str, request: Request):
         link = await session.get(PreprodReferenceLink, link_id)
         if not link:
             raise HTTPException(status_code=404, detail="找不到這筆引用")
-        _check_target_auth(request, link.target_type)
         await session.delete(link)
         await session.commit()
     return {"status": "ok"}

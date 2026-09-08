@@ -92,8 +92,14 @@ def test_tab_extra_access_matches_backend():
 _NOT_TAB_GATES = {
     ("crm_invoices", "crm_projects"):
         "api_cashflow：付款節點是專案側也要看的子功能，整個財務管理 tab 沒開放",
-    ("crm_projects", "preprod_proposals"):
-        "crm/proposal_assets：提案資產上傳（提案庫 tab 的按鈕），不是專案管理 tab 的門",
+    # crm/proposal_assets 的 ("crm_projects", "preprod_proposals") 曾在這裡；2026-09-08 第二批改走
+    # tab_modules("preprod_proposals")（與 api_proposals.proposal_auth 同一份），不再是手寫雙 key
+    ("media_log", "crm_projects"):
+        "crm/media_log：專案頁裡的影像紀錄子頁**讀取**（GET /projects/{id}/media-log）多收 crm_projects；"
+        "影像紀錄 tab 本身、寫入與設定沒開放（2026-09-08 權限稽核第二批）",
+    ("website_admin", "crm_projects"):
+        "crm/showcase＋crm/works：專案頁「官網作品」區塊的**讀取**多收 crm_projects；"
+        "官網管理 tab 與所有寫入（PUT／封面／發布）仍是 website_admin（2026-09-08 權限稽核第二批）",
     # timesheets/project_options 曾在這裡（timesheets, me_finance）；2026-09-07 改走 _ts_or_bound（單 key＋綁定人員），不再是雙 key 閘門
     ("timesheets", "me_team_week"):
         "api_milestones：里程碑寫入（員工頁「團隊的一週」那顆按鈕住的地方）；不是工作追蹤 tab 的門，2026-09-08 一顆功能一把",

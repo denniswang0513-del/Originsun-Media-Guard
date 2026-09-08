@@ -181,18 +181,24 @@ def test_the_mine_guard_refuses_by_status():
 
 
 async def test_mapping_endpoints_refuse_before_touching_the_db():
-    """Lv3 沒 finance_mine 打五個對映端點 → 403，而且是在 db_factory_or_503 之前
-    （不需要 DB 就能證明）。"""
+    """Lv3 沒 finance_mine 打三個**寫**對映的端點 → 403，而且是在 db_factory_or_503 之前
+    （不需要 DB 就能證明）。讀的兩支（/projects、/summary）2026-09-08 起開給 timesheets 分頁鑰匙：
+    Lv1 沒鑰匙一樣在碰 DB 前 403。"""
     import pytest
     from fastapi import HTTPException
     from core.schemas import TimesheetBudgetRequest, TimesheetProjectMapRequest
     from routers import api_timesheets as m
     from tests.unit._req import token_request
     r = token_request(access_level=3)
-    calls = (m.timesheet_projects(r), m.burn_summary(r), m.remap_timesheets(r),
+    calls = (m.remap_timesheets(r),
              m.upsert_project_map(TimesheetProjectMapRequest(items=[]), r),
              m.set_budgets(TimesheetBudgetRequest(items=[]), r))
     for coro in calls:
+        with pytest.raises(HTTPException) as ei:
+            await coro
+        assert ei.value.status_code == 403, coro
+    r1 = token_request(modules=["me_finance"])
+    for coro in (m.timesheet_projects(r1), m.burn_summary(r1), m.recent_rows(r1)):
         with pytest.raises(HTTPException) as ei:
             await coro
         assert ei.value.status_code == 403, coro

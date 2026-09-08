@@ -8,9 +8,10 @@ import { mfetch, toast, esc, money, fmtDate, todayLocal } from '../shell.js';
 import { paidStatus, skeleton, errBox, pill, withBusy, shouldLoad, renderPaged } from '../ui.js';
 
 function cardHtml(p, paid) {
+    // 標已付／取消打 /payments/batch-*（crm_invoices）：掛 .wi，跟發票表單同一把（options.me.can_invoice）
     const btn = paid
-        ? `<button type="button" class="m-btn sm danger w" data-unpay="${esc(p.id)}">取消</button>`
-        : `<button type="button" class="m-btn sm pri w" data-pay="${esc(p.id)}">標已付</button>`;
+        ? `<button type="button" class="m-btn sm danger wi" data-unpay="${esc(p.id)}">取消</button>`
+        : `<button type="button" class="m-btn sm pri wi" data-pay="${esc(p.id)}">標已付</button>`;
     return `
       <div class="m-card">
         <div class="t"><div class="name">${esc(p.summary || p.invoice_title || '（無摘要）')}</div>${pill(p.payment_status, paid ? 'ok' : 'warn')}</div>

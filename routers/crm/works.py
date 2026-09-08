@@ -19,6 +19,7 @@ from core.crm_logic import (is_main_work, project_works_summary,
                             showcase_edit_url, work_url_slug)
 from core.schemas_website import WorkChildCreateRequest, WorkChildCreateResponse
 
+from core.auth import check_admin_or_module
 from ._shared import (router, _check_website_auth, _require_db, _get_factory,
                       _mark_dirty_safe, _now)
 from .projects import _WEBSITE_PROD_STAGES, _work_items_for_project
@@ -32,8 +33,10 @@ except ImportError:  # DB 套件不存在的 agent 環境 — 行為同其他 cr
 
 @router.get("/projects/{project_id}/works")
 async def list_project_works(project_id: str, request: Request):
-    """專案的作品清單（主作品先）+ 聚合 summary（total/live/verified/skipped/all_live）。"""
-    _check_website_auth(request)
+    """專案的作品清單（主作品先）+ 聚合 summary（total/live/verified/skipped/all_live）。
+
+    讀開給專案頁（crm_projects；2026-09-08 第二批）；建／發布／改階段／刪仍是 website_admin。"""
+    check_admin_or_module(request, 'website_admin', 'crm_projects')
     _require_db()
     factory = await _get_factory()
     async with factory() as session:

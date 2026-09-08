@@ -7,7 +7,9 @@
   · 假日表 hr_holidays：行政院行事曆 CSV 匯入（core.leave_logic.parse_gov_calendar_csv）。
   · 舊端點 /leave/quota、/staff/{id}/annual_leave 保留給舊分頁（crm_staff.annual_leave_days 那條線）。
 
-權限：check_admin_or_module(request, 'hr_leave')。員工自助端在 routers/api_me.py。
+權限：看清單／登記／改欄位／preview 走 check_admin_or_module(request, 'hr_leave')；
+  核准／退回／消假決定、補休 credits 發放／決定／刪除、假日表寫入、特休額度＝check_admin（owner 2026-09-08：
+  假勤核准留管理員，docs/RBAC_PLAN.md §5）。員工自助端在 routers/api_me.py。
 """
 import uuid
 from datetime import date, datetime, timezone
@@ -15,7 +17,7 @@ from datetime import date, datetime, timezone
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from sqlalchemy import func, select  # type: ignore
 
-from core.auth import check_admin_or_module
+from core.auth import check_admin, check_admin_or_module
 from core.db_guard import db_factory_or_503
 from core.hr_logic import ANNUAL_TYPE, active_staff_where, day_iso, leave_balance, parse_ymd, tw_day
 from core.leave_logic import (ALL_LEAVE_TYPES, CREDIT_KINDS, CREDIT_SOURCES, HOLIDAY_KINDS, HOURS_PER_DAY, check_hours_step,
@@ -178,7 +180,7 @@ async def leave_context(leave_id: str, request: Request):
 @router.post("/leave/{leave_id}/approve")
 async def approve_leave(leave_id: str, request: Request):
     """待審→已核准：走時數帳的先 FIFO 分配寫 hr_leave_allocations（不足 422）；通知申請人（leave_result）。"""
-    payload = check_admin_or_module(request, "hr_leave")
+    payload = check_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
         obj = await _get_leave(session, leave_id)
@@ -194,7 +196,7 @@ async def approve_leave(leave_id: str, request: Request):
 @router.post("/leave/{leave_id}/reject")
 async def reject_leave(leave_id: str, body: LeaveReject, request: Request):
     """待審→已退回（理由必填）；通知申請人。"""
-    payload = check_admin_or_module(request, "hr_leave")
+    payload = check_admin(request)
     note = (body.note or "").strip()
     if not note:
         raise HTTPException(status_code=422, detail="退回要填理由")
@@ -217,7 +219,7 @@ async def reject_leave(leave_id: str, body: LeaveReject, request: Request):
 @router.post("/leave/{leave_id}/cancel_decide")
 async def decide_cancel(leave_id: str, body: LeaveCancelDecide, request: Request):
     """消假待審 → approve=True：已撤回（釋放 allocations）／False：回已核准；通知申請人。"""
-    payload = check_admin_or_module(request, "hr_leave")
+    payload = check_admin(request)
     note = (body.note or "").strip()
     factory = db_factory_or_503()
     async with factory() as session:
@@ -369,7 +371,7 @@ async def list_credits(request: Request, staff_id: str = "", year: int = 0, stat
 @router.post("/credits")
 async def create_credit(body: CreditCreate, request: Request):
     """手開時數（管理員）：直接「可用」，approved_by＝操作者。"""
-    payload = check_admin_or_module(request, "hr_leave")
+    payload = check_admin(request)
     if body.kind not in CREDIT_KINDS:
         raise HTTPException(status_code=422, detail=f"kind 需為：{'/'.join(CREDIT_KINDS)}")
     try:
@@ -405,7 +407,7 @@ async def create_credit(body: CreditCreate, request: Request):
 
 
 async def _decide_credit(credit_id: str, request: Request, new_status: str, note: str) -> dict:
-    payload = check_admin_or_module(request, "hr_leave")
+    payload = check_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
         obj = await session.get(HrLeaveCredit, credit_id)
@@ -437,7 +439,7 @@ async def reject_credit(credit_id: str, body: LeaveCancel, request: Request):
 @router.delete("/credits/{credit_id}")
 async def delete_credit(credit_id: str, request: Request):
     """沒有 allocations 才准刪（被扣過的 credit 刪了餘額會憑空變動）。"""
-    check_admin_or_module(request, "hr_leave")
+    check_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
         obj = await session.get(HrLeaveCredit, credit_id)
@@ -474,7 +476,7 @@ async def list_holidays(request: Request, year: int = 0):
 @router.post("/holidays")
 async def upsert_holiday(body: HolidayCreate, request: Request):
     """新增或改一天（同日期覆蓋）：颱風假當天公告就是這裡加。"""
-    check_admin_or_module(request, "hr_leave")
+    check_admin(request)
     d = as_date(body.date)
     if d is None:
         raise HTTPException(status_code=422, detail="date 需為 YYYY-MM-DD")
@@ -498,7 +500,7 @@ async def upsert_holiday(body: HolidayCreate, request: Request):
 
 @router.delete("/holidays/{day}")
 async def delete_holiday(day: str, request: Request):
-    check_admin_or_module(request, "hr_leave")
+    check_admin(request)
     d = as_date(day)
     if d is None:
         raise HTTPException(status_code=422, detail="日期需為 YYYY-MM-DD")
@@ -516,7 +518,7 @@ async def delete_holiday(day: str, request: Request):
 async def import_holidays(body: HolidayImport, request: Request):
     """貼行政院人事總處年度行事曆 CSV（欄：西元日期／星期／是否放假／備註）→ 國定假日＋補班日 upsert；
     颱風假（手加）不動。回 {imported, skipped, years}。"""
-    check_admin_or_module(request, "hr_leave")
+    check_admin(request)
     try:
         rows = parse_gov_calendar_csv(body.csv or "")
     except ValueError as e:
@@ -553,7 +555,7 @@ async def import_holidays(body: HolidayImport, request: Request):
 @router.put("/staff/{staff_id}/annual_leave")
 async def set_annual_leave(staff_id: str, body: AnnualLeaveSet, request: Request):
     """設定年度特休額度（天）。"""
-    check_admin_or_module(request, "hr_leave")
+    check_admin(request)
     if body.annual_leave_days is not None and body.annual_leave_days < 0:
         raise HTTPException(status_code=422, detail="額度不可為負")
     factory = db_factory_or_503()

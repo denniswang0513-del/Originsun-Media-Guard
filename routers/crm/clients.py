@@ -14,6 +14,7 @@ from core.crm_logic import normalize_tax_id
 from core.schemas import ClientPayload
 
 from core.ledger import not_mine, require_entity
+from core.auth import check_admin_or_module
 from ._shared import (router, _check_auth, _require_db, _get_factory,
                       _now, _to_dict, _auto_update_client_status,
                       _CLIENT_TIER_EXCLUDE_STATUSES, map_csv_row)
@@ -105,11 +106,13 @@ async def create_client(req: ClientPayload, request: Request):
     # 客戶主檔統一後（owner 2026-08-26）：一律建 **CRM 客戶**，不再有私帳專屬
     # 客戶 —— 私帳建案順手建的客戶也直接進主檔（否則又開始分裂）。
     # 🔴 寫入守衛因此放寬一格：帳本主人（lv1＋finance_mine）可以**建**客戶，
-    # 改/刪既有客戶仍是 Lv3 —— 建客戶是低風險（名稱/統編），而 owner 不是 Lv3
+    # 刪既有客戶仍是 Lv3 —— 建客戶是低風險（名稱/統編），而 owner 不是 Lv3
     # 是刻意的（指名制），不放寬他就建不了案。
+    # 2026-09-08 第二批：建客戶主檔不是錢 —— 客戶／專案／報價三把鑰匙都能建
+    # （專案表單與報價彈窗都會順手建客戶），見 _client_write_guard。
     ent = "parent"
     try:
-        _check_auth(request)
+        _check_client_write(request)
     except HTTPException:
         require_entity(request, "mine", level="full")
     _require_db()
@@ -188,14 +191,27 @@ async def update_client(client_id: str, req: ClientPayload, request: Request):
     return {"status": "ok", "client": _to_dict(client)}
 
 
-def _client_write_guard(request, client):
-    """客戶寫入守衛：mine 列開給 mine full scope、parent 列維持 Lv3 ——
+# 建／改客戶主檔（母帳列）的鑰匙：客戶分頁本身，加上會順手建客戶的專案表單
+# 與報價彈窗（2026-09-08 權限稽核第二批，docs/RBAC_AUDIT.md §4）。
+# 刪除不在這裡 —— 刪客戶是 ADMIN_ONLY_ACTIONS（docs/RBAC_PLAN.md §5）。
+CLIENT_WRITE_MODULES = ("crm_clients", "crm_projects", "crm_quotes")
+
+
+def _check_client_write(request):
+    return check_admin_or_module(request, *CLIENT_WRITE_MODULES)
+
+
+def _client_write_guard(request, client, admin_only: bool = False):
+    """客戶寫入守衛：mine 列開給 mine full scope、parent 列看 CLIENT_WRITE_MODULES
+    （`admin_only=True` ＝ 刪除那條，母帳列維持 Lv3）——
     與 routers/crm/finance._mine_or_admin_write 同一條政策（客戶表在另一個
     領域檔，故就地一份小的；行為要一致）。"""
     if (client.entity or "parent") == "mine":
         require_entity(request, "mine", level="full")
-    else:
+    elif admin_only:
         _check_auth(request)
+    else:
+        _check_client_write(request)
 
 
 @router.delete("/clients/{client_id}")
@@ -209,7 +225,7 @@ async def delete_client(client_id: str, request: Request):
         client = await session.get(Client, client_id)
         if not client:
             raise HTTPException(status_code=404, detail="找不到此客戶")
-        _client_write_guard(request, client)
+        _client_write_guard(request, client, admin_only=True)   # 刪客戶留管理員
         await session.delete(client)
         await session.commit()
     return {"status": "ok"}
