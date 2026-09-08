@@ -63,7 +63,10 @@ window.fetch = function(url, opts = {}) {
          url.includes('/admin/') || url.includes('/auth/') || url.includes('/roles') ||
          url.includes('/job_history') && opts.method === 'DELETE' ||
          url.includes('/reports/') && opts.method === 'DELETE' ||
-         url.includes('/agents') && (opts.method === 'POST' || opts.method === 'PUT' || opts.method === 'DELETE'))) {
+         url.includes('/agents') && (opts.method === 'POST' || opts.method === 'PUT' || opts.method === 'DELETE') ||
+         // check_lan_or_logged_in 守的排程／空拍排程寫入：走 cloudflared 不算 LAN，要帶 token
+         url.includes('/schedules') && (opts.method === 'POST' || opts.method === 'PUT' || opts.method === 'DELETE') ||
+         url.includes('/drone_watcher/') && opts.method === 'POST')) {
         opts.headers = { ...opts.headers, 'Authorization': 'Bearer ' + window._authToken };
     }
     return _origFetch.call(window, url, opts);

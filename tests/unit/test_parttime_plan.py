@@ -20,7 +20,7 @@ def test_planned_by_column_is_everywhere_a_timesheet_column_must_be():
 
 def test_plan_for_guard_who_can_plan_for_whom():
     body = code_only(func_body(TS, "async def _plan_for_ident("))
-    assert 'check_admin_or_module(request, "timesheets")' in body, "管理員／工作追蹤模組整區恆過"
+    assert 'check_admin_or_module(request, "timesheets", record=False)' in body, "管理員／工作追蹤模組整區恆過（探針：不留假紀錄）"
     assert 'require_bound_staff(request, "me_plan_parttime")' in body, "其他人要綁定＋兼職排班鑰匙"
     assert "is_active_staff(getattr(me[\"staff\"], \"status\", None))" in body, "本人要在職／合夥"
     assert '(target.status or "").strip() != _PARTTIME' in body and '_PARTTIME = "兼職"' in TS, "對方要是兼職"

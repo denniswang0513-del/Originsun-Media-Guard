@@ -36,5 +36,6 @@ def test_preview_uses_the_real_tab_gate_and_current_checkbox_state():
     assert "shouldShowTab(k, authUser, mods)" in body, "頂層分頁要用 tab-config 同一個閘門算，不能自己再寫一份"
     assert "input[data-umod-user=\"${username}\"]:checked" in body, "照目前勾的（未儲存也算）"
     assert "缺「金額檢視」" in body and "沒綁人員檔案" in body and "手機版 /m/crm.html" in body
-    assert "import { groupModules, ALL_MODULES, TAB_GROUPS, shouldShowTab, tabLabel } from '../shared/tab-config.js';" in JS
+    assert "import { groupModules, ALL_MODULES, TAB_GROUPS, shouldShowTab, tabLabel, expandModules, bundleOf } from '../shared/tab-config.js';" in JS
+    assert "const mods = expandModules(" in body, "格子是捆鍵、TAB_MAP 是成員級：預覽要先展開，不然後期／前期／人事整組看不到"
     assert "Extended_Pictographic" in body, "群組標籤的圖示要剝掉（卡片裡不畫 emoji）"

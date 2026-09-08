@@ -63,7 +63,7 @@ def test_endpoints_are_thin_and_gated():
     # 2026-09-05（JOURNAL_WORKLOG_PLAN §10）：專案檔案頁開放給綁定人員唯讀 —— 守衛換成
     # 「timesheets 模組或綁定人員」那一支；那支裡面仍是同一句模組守衛先試
     assert "_ts_or_bound(request)" in func_body(src, "async def project_file(")
-    assert 'check_admin_or_module(request, "timesheets")' in func_body(src, "async def _ts_or_bound(")
+    assert 'check_admin_or_module(request, "timesheets", record=False)' in func_body(src, "async def _ts_or_bound(")
     assert "project_metrics(metrics_input(rows))" in func_body(src, "async def project_file(")
     assert "similar_projects(" in func_body(src, "async def project_file(")
     assert "project_metrics(metrics_input(" in func_body(src, "async def compare_projects(")

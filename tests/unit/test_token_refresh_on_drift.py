@@ -37,7 +37,7 @@ def test_every_auth_me_reader_adopts_the_fresh_token():
     # my.html：換掉再抓一次（allowed 是照 token 算的），而且只會多抓這一次
     z = js_code_only(repo_src("frontend/my.html"))
     body = js_func_body(z, "async function loadWorkspace()")
-    assert "localStorage.setItem(TOKEN_KEY, WS.token); return loadWorkspace();" in body
+    assert "localStorage.setItem(TOKEN_KEY, WS.token);" in body and "if (!_tokenSwapRetried) { _tokenSwapRetried = true; return loadWorkspace(); }" in body, "換 token 只補抓一次（有上限）"
     assert "WS.token !== localStorage.getItem(TOKEN_KEY)" in body, "沒這個判斷會無限重抓"
     # SPA：單點在 _fetchMe
     a = repo_src("frontend/js/auth/auth-state.js")
@@ -47,3 +47,18 @@ def test_every_auth_me_reader_adopts_the_fresh_token():
     for f in ("frontend/website-admin.html", "frontend/petty-cash.html", "frontend/media-log-workspace.html",
               "frontend/project.html", "frontend/reference.html"):
         assert "if (me.token) localStorage.setItem(TOKEN_KEY, me.token);" in repo_src(f), f
+
+
+def test_admin_and_bundle_holders_are_not_permanently_drifted():
+    """token 簽的是 expand_modules 過的清單、帳號存的可能只有捆（管理員＝ALL_MODULES 三把捆）：
+    兩邊要先展開再比，不然每打一次 /auth/me 就重簽一顆 token，my.html 一直重抓。"""
+    from core.auth import ALL_MODULES, claims_drifted, expand_modules, grant_admin_all_modules
+    admin_stored = {"modules": grant_admin_all_modules(3, []), "access_level": 3}
+    admin_token = {"modules": expand_modules(admin_stored["modules"]), "access_level": 3}
+    assert claims_drifted(admin_token, admin_stored) is False
+    assert "hr_leave" in grant_admin_all_modules(3, []), "管理員的成員鍵要展開（/me/workspace 的 hr_manager 判定）"
+    lv1_stored = {"modules": ["postprod", "me_profile"], "access_level": 1}
+    lv1_token = {"modules": expand_modules(lv1_stored["modules"]), "access_level": 1}
+    assert claims_drifted(lv1_token, lv1_stored) is False
+    assert claims_drifted(lv1_token, {"modules": ["me_profile"], "access_level": 1}) is True, "真的改了權限還是要漂"
+    assert all(m in ALL_MODULES for m in ("postprod", "preprod", "hr"))

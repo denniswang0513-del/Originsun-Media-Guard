@@ -1,4 +1,3 @@
-from fastapi import HTTPException  # type: ignore
 """
 api_report.py — 報表 API（DB 優先，JSON fallback）
 Endpoints:
@@ -9,7 +8,7 @@ Endpoints:
 import os
 import json as _json
 
-from fastapi import APIRouter, Request  # type: ignore
+from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
 from core.schemas import ReportJobRequest  # type: ignore
 from core.worker import enqueue_job  # type: ignore

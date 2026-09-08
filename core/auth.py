@@ -260,7 +260,9 @@ def grant_admin_all_modules(access_level, modules):
     if (access_level or 0) < 3:
         return modules
     held = [m for m in (modules or []) if m in EXPLICIT_ONLY_MODULES]
-    return [m for m in ALL_MODULES if m not in EXPLICIT_ONLY_MODULES] + held
+    # 展開捆鑰匙：ALL_MODULES 只有 postprod／preprod／hr 三把捆，成員鍵（hr_leave…）要在這裡補齊，
+    # 不然 `"hr_leave" in mods` 這種成員級判定對管理員全部 False，而且存的跟 token 簽的永遠對不上（claims_drifted 恆真）。
+    return expand_modules([m for m in ALL_MODULES if m not in EXPLICIT_ONLY_MODULES] + held)
 
 
 # 進得去某個 tab 的模組（任一即可）。**只有需要額外放行的 tab 才列一行**，
@@ -484,7 +486,9 @@ def claims_drifted(payload: Optional[dict], user: Optional[dict]) -> bool:
     純判定，給 /auth/me 與 /me/workspace 決定要不要順手回一顆新 token（core 不簽 token）。"""
     if not payload or not user:
         return False
-    if sorted(payload.get("modules") or []) != sorted(user.get("modules") or []):
+    # 兩邊都先展開再比：token 簽的是 expand_modules 過的清單，帳號存的可能只有捆（或只有成員），
+    # 直接比 sorted 會讓管理員／持捆帳號每次都「漂」，每打一次 /auth/me 就重簽一顆 token。
+    if set(expand_modules(payload.get("modules"))) != set(expand_modules(user.get("modules"))):
         return True
     return int(payload.get("access_level") or 0) != int(user.get("access_level") or 0)
 
@@ -558,8 +562,11 @@ def denied_detail(module_keys) -> str:
     return f"權限不足：需要{names}{'（任一）' if joiner else ''}權限，請管理員在使用者管理開通"
 
 
-def check_admin_or_module(request: Request, *module_keys: str):
+def check_admin_or_module(request: Request, *module_keys: str, record: bool = True):
     """Like check_admin, but ALSO passes if the token grants any of module_keys.
+
+    `record=False`：拿它當「探針」（try／except 403 之後走更窄的路放行）的呼叫點要帶這個，
+    不然明明 200 的請求也會在「最近授權不足」留一筆假的缺鑰匙紀錄，管理員一鍵開通就把大鑰匙發出去。
 
     For subsystem guards (e.g. 官網管理) that a non-admin should be able to use
     when their per-account `modules` includes the relevant key — WITHOUT granting
@@ -573,7 +580,8 @@ def check_admin_or_module(request: Request, *module_keys: str):
         raise HTTPException(status_code=401, detail="未登入或 token 已過期")
     if payload_grants(payload, *module_keys):
         return payload
-    record_denial(payload, request, module_keys)
+    if record:
+        record_denial(payload, request, module_keys)
     raise HTTPException(status_code=403, detail=denied_detail(module_keys))
 
 

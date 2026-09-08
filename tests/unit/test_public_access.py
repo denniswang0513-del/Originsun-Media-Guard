@@ -33,11 +33,12 @@ def test_normalize_drops_junk_and_unsupported_modes():
 def test_every_prefix_hits_a_real_route_and_maps_back():
     routes = ""
     for f in ("routers/crm/costs.py", "routers/crm/media_log.py", "routers/api_portal.py", "main.py", "routers/crm/quotes.py",
-              "routers/crm/invoice_files.py", "routers/api_proposals.py", "routers/crm/showcase.py", "routers/crm/staff.py", "routers/api_auth.py"):
+              "routers/crm/invoice_files.py", "routers/api_proposals.py", "routers/api_references.py", "routers/crm/showcase.py", "routers/crm/staff.py", "routers/api_auth.py"):
         routes += repo_src(f)
     tails = {"/api/v1/crm/public/expense/": '"/public/expense/', "/api/v1/crm/public/media-log/": '"/public/media-log/',
              "/api/v1/portal/public/": '"/public/{token}', "/q/": '"/q/{code}"', "/api/v1/crm/public/quote/": '"/public/quote/',
-             "/api/v1/crm/public/invoice-file/": '"/public/invoice-file/', "/api/v1/crm/shared/": '"/shared/{token}',
+             "/e/": '"/e/{code}"', "/api/v1/crm/public/invoice-file/": '"/public/invoice-file/',
+             "/api/v1/proposals/shared/": '"/shared/{token}', "/api/v1/references/shared/": '"/shared/{token}/',
              "/api/v1/crm/public/showcase-edit/": '"/public/showcase-edit/', "/api/v1/crm/public/staff-edit/": '"/public/staff-edit/',
              "/api/v1/crm/public/staff/": '"/public/staff/{staff_id}/resume"', "/api/v1/auth/register": '"/register"'}
     for s in PUBLIC_SURFACES:
@@ -71,8 +72,12 @@ def test_gate_is_attached_where_public_traffic_enters():
         assert "dependencies=[Depends(surface_gate)]" in block, rname
     assert "dependencies=[Depends(surface_gate)]" in repo_src("routers/api_portal.py").split("router = APIRouter(")[1].split("\n")[0]
     main = repo_src("main.py")
-    for fn in ("async def _short_quote_view(", "async def _short_quote_pdf("):
+    for fn in ("async def _short_quote_view(", "async def _short_quote_pdf(", "async def _short_invoice_file("):
         assert "surface_gate(request)" in code_only(func_body(main, fn)), fn
+    # 提案分享／片庫分享的公開 router 住在各自的檔（NAS 容器也掛它們），不是 crm/_shared
+    for f in ("routers/api_proposals.py", "routers/api_references.py"):
+        block = repo_src(f).split("public_router = APIRouter(")[1][:300]
+        assert "dependencies=[Depends(_surface_gate)]" in block, f
     auth = repo_src("routers/api_auth.py")
     for fn in ("async def register_config(", "async def register("):
         assert "surface_gate(request)" in code_only(func_body(auth, fn)), fn

@@ -1,7 +1,7 @@
 // ─── User Management (extracted from app.js) ─── //
 // RBAC v2: 權限直接綁帳號（角色層已移除）。每個帳號 = 一組可勾選模組 + 「管理員」開關。
 import { _ensureModalStyles, _createFormModal } from '../shared/modal-styles.js';
-import { groupModules, ALL_MODULES, TAB_GROUPS, shouldShowTab, tabLabel } from '../shared/tab-config.js';
+import { groupModules, ALL_MODULES, TAB_GROUPS, shouldShowTab, tabLabel, expandModules, bundleOf } from '../shared/tab-config.js';
 import { createSortable, sortableSpan, esc } from '../../tabs/crm/crm-utils.js';
 
 // key 集合必須 == core/auth.py ALL_MODULES == tab-config.js PERMISSION_GROUPS
@@ -278,7 +278,8 @@ window._previewAs = function(username) {
     const u = _usersCache.find(x => x.username === username); if (!u) return;
     const adminEl = document.querySelector(`input[data-uadmin-user="${username}"]`);
     const isAdmin = adminEl ? adminEl.checked : (u.access_level || 0) >= 3;
-    const mods = isAdmin ? ALL_MODULES.slice() : [...document.querySelectorAll(`input[data-umod-user="${username}"]:checked`)].map(cb => cb.value);
+    // 格子是捆鍵（postprod／preprod／hr），shouldShowTab 的 TAB_MAP 是成員級 —— 跟 token 一樣先展開，不然後期／前期／人事整組預覽不到
+    const mods = expandModules(isAdmin ? ALL_MODULES.slice() : [...document.querySelectorAll(`input[data-umod-user="${username}"]:checked`)].map(cb => cb.value));
     const has = (k) => isAdmin || mods.includes(k);
     const staffSel = document.querySelector(`select[data-ustaff-user="${username}"]`);
     const bound = _staffListCache.find(s => s.id === (staffSel ? staffSel.value : u.staff_id)) || null;
@@ -352,6 +353,7 @@ function _denialsHtml() {
         </div>`).join('')}</div>`;
 }
 window._grantFromDenial = function(username, key) {
+    key = bundleOf(key);   // 守衛記的是成員鍵（hr_leave／footage…），畫面只有捆的格子
     const box = document.querySelector(`input[data-umod-user="${username}"][value="${key}"]`);
     if (!box) { alert('找不到這個帳號的列（可能是已刪除的帳號）'); return; }
     box.checked = true; box.disabled = false;
@@ -605,7 +607,11 @@ window._syncUserGroupMaster = function(username, groupId) {
 window._syncPermParent = function(username, m) {
     const box = (k) => document.querySelector(`input[data-umod-user="${username}"][value="${k}"]`);
     const parent = PERM_PARENT[m];
-    if (parent && box(m)?.checked) { const p = box(parent); if (p && !p.checked) { p.checked = true; } }
+    if (parent && box(m)?.checked) {
+        const p = box(parent);
+        // 母公司報表（finance_partner）絕不可與金額檢視同給（tab-config 註記／core/ledger）：這種帳號不自動勾 money_view，交給管理員決定
+        if (p && !p.checked && !(parent === 'money_view' && box('finance_partner')?.checked)) { p.checked = true; }
+    }
     const pKey = parent || m;
     const pBox = box(pKey);
     if (!pBox) return;
@@ -624,9 +630,25 @@ window._onUserAdminToggle = function(username, checked) {
 window._saveUserSettings = async function(username) {
     const adminEl = document.querySelector(`input[data-uadmin-user="${username}"]`);
     const isAdmin = !!(adminEl && adminEl.checked);
-    const modules = isAdmin
-        ? ALL_MODULES.slice()
-        : [...document.querySelectorAll(`input[data-umod-user="${username}"]:checked`)].map(cb => cb.value);
+    let modules;
+    if (isAdmin) modules = ALL_MODULES.slice();
+    else {
+        const boxes = [...document.querySelectorAll(`input[data-umod-user="${username}"]`)];
+        modules = boxes.filter(cb => cb.checked).map(cb => cb.value);
+        // 格子只有捆鍵：只拿到部分成員的舊帳號（例如只有 hr_leave、只有 transcode）在畫面上沒有格子，
+        // 不帶回去就等於這次儲存悄悄收掉他的分頁（「放寬守衛不能收回原本的鑰匙」）。
+        const rendered = new Set(boxes.map(cb => cb.value));
+        const u = _usersCache.find(x => x.username === username);
+        const had = new Set(u?.modules || []);
+        const uncheckedBundles = new Set(boxes.filter(cb => !cb.checked).map(cb => cb.value));
+        had.forEach(k => {
+            if (rendered.has(k) || ALL_MODULES.includes(k) || modules.includes(k)) return;
+            const b = bundleOf(k);
+            // 原本整捆都有、管理員這次把捆取消 → 成員一起收；原本就只有部分成員（捆格從來沒勾過）→ 保留
+            if (b !== k && had.has(b) && uncheckedBundles.has(b)) return;
+            modules.push(k);
+        });
+    }
     const access_level = isAdmin ? 3 : 1;
     // N0: 綁定人員檔案 — "" 表示解綁（後端哨兵語意），欄位不存在則不送（不變）
     const staffSel = document.querySelector(`select[data-ustaff-user="${username}"]`);

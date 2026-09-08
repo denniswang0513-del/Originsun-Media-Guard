@@ -94,7 +94,7 @@ async def _ts_or_bound(request: Request) -> Optional[str]:
     回傳：有 timesheets 模組 → None（整份）；靠綁定人員進來的 → 該員姓名（端點要縮到「本人」時用）。
     🔴 這支不碰私帳 wall：_require_mine_admin 守的端點（/projects 私帳案清單、/summary）不走這裡。"""
     try:
-        check_admin_or_module(request, "timesheets")
+        check_admin_or_module(request, "timesheets", record=False)   # 探針：403 後走窄路，不留假紀錄
         return None
     except HTTPException as e:
         if e.status_code != 403:
@@ -243,7 +243,7 @@ async def _plan_for_ident(request: Request, session, staff_id: str) -> dict:
     who = current_username(request) or ""
     full = True
     try:
-        check_admin_or_module(request, "timesheets")
+        check_admin_or_module(request, "timesheets", record=False)   # 探針：403 後走窄路，不留假紀錄
     except HTTPException as e:
         if e.status_code != 403:
             raise
@@ -274,7 +274,7 @@ async def plan_for_targets(request: Request):
     """可以幫誰排：狀態是「兼職」的人員（管理員／工作追蹤模組看全部在職的人也行，但視窗只列兼職）。"""
     from core.identity import require_bound_staff
     try:
-        check_admin_or_module(request, "timesheets")
+        check_admin_or_module(request, "timesheets", record=False)   # 探針：403 後走窄路，不留假紀錄
     except HTTPException as e:
         if e.status_code != 403:
             raise

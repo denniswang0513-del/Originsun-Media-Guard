@@ -689,6 +689,7 @@ async function initGoogle() {
 }
 
 // ── 工作台載入 ──
+let _tokenSwapRetried = false;
 async function loadWorkspace() {
     let r;
     try { r = await mfetch("/api/v1/me/workspace"); }
@@ -704,7 +705,12 @@ async function loadWorkspace() {
     WS = await r.json();
     // 後端發現 token 裡簽死的權限跟帳號現在的不一樣（管理員改了／回填補了鑰匙），會順手回一顆新 token：
     // 換掉再抓一次（allowed 是照 token 算的）。新 token 不會再漂，所以只會多抓這一次。
-    if (WS.token && WS.token !== localStorage.getItem(TOKEN_KEY)) { localStorage.setItem(TOKEN_KEY, WS.token); return loadWorkspace(); }
+    if (WS.token && WS.token !== localStorage.getItem(TOKEN_KEY)) {
+        localStorage.setItem(TOKEN_KEY, WS.token);
+        // 最多只補抓一次：後端若還是判「漂」（例如舊機隊寫進來的清單形狀不同），不能在這裡無限重抓
+        if (!_tokenSwapRetried) { _tokenSwapRetried = true; return loadWorkspace(); }
+    }
+    _tokenSwapRetried = false;
     renderWorkspace();
 }
 

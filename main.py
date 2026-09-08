@@ -1343,7 +1343,7 @@ async def _legacy_proposal_plan(request: Request):
 
 
 @app.get("/e/{code}", include_in_schema=False)
-async def _short_invoice_file(code: str):
+async def _short_invoice_file(code: str, request: Request):
     """電子發票短網址：`/e/{12 碼}` → 檔案下載（免登入，憑證就是那串碼）。
 
     掛在根路徑是為了**短** —— 走 router 前綴會變成 /api/v1/crm/... 又長回去
@@ -1352,6 +1352,8 @@ async def _short_invoice_file(code: str):
 
     註冊在 `app.mount("/")` 之前才會贏 —— StaticFiles 掛在根，順序決定誰接。
     """
+    from core.public_access import surface_gate
+    surface_gate(request)   # 公開區「發票影像分享」關閉 → 404（寄給客戶的就是這條短網址）
     from routers.crm.invoice_files import serve_invoice_by_share_token
     return await serve_invoice_by_share_token(code)
 

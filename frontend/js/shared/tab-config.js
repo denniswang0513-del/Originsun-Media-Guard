@@ -212,6 +212,28 @@ export const PERMISSION_GROUPS = [
 // user-management permission editor.
 export const ALL_MODULES = PERMISSION_GROUPS.flatMap((g) => g.modules);
 
+// 捆鑰匙 → 成員（鏡射 core.auth.MODULE_BUNDLES；tests/unit/test_module_bundles.py 釘兩邊同步）。
+// token 裡兩種都有（後端 expand_modules），TAB_MAP 仍是成員級 —— 前端只有「照勾選預覽」與
+// 「授權不足一鍵開通」拿到的是純捆鍵，要靠這張表展開／收回。
+export const MODULE_BUNDLES = {
+    postprod: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts', 'footage'],
+    preprod: ['preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment'],
+    hr: ['hr_leave', 'hr_benefits'],
+};
+export function expandModules(modules) {
+    const out = [...(modules || [])];
+    const have = new Set(out);
+    for (const [bundle, members] of Object.entries(MODULE_BUNDLES)) {
+        if (have.has(bundle)) members.forEach((m) => { if (!have.has(m)) { out.push(m); have.add(m); } });
+        else if (members.every((m) => have.has(m))) { out.push(bundle); have.add(bundle); }
+    }
+    return out;
+}
+// 成員鍵 → 它所屬的捆（不是成員就回原鍵）：後端守衛記的是成員鍵（hr_leave／footage…），權限畫面只有捆的格子。
+export function bundleOf(key) {
+    return Object.keys(MODULE_BUNDLES).find((b) => MODULE_BUNDLES[b].includes(key)) || key;
+}
+
 // Group a module list into PERMISSION_GROUPS order, keeping only modules present
 // in the input. Any module not listed in any group (future-proofing if the
 // module set grows but PERMISSION_GROUPS isn't updated) falls into a trailing

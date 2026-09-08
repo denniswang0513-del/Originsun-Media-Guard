@@ -204,10 +204,11 @@ def test_admin_enrichment_excludes_explicit_only():
     """🔴 規則的另一半：grant_admin_all_modules 不准把「指名才有」的模組塞給
     管理員 —— 塞了的話 token 的 modules 天生就帶 finance_mine，上面那條 403
     永遠測不到真實情境。明勾了的要保留。"""
-    from core.auth import ALL_MODULES, grant_admin_all_modules
+    from core.auth import ALL_MODULES, expand_modules, grant_admin_all_modules
     enriched = grant_admin_all_modules(3, [])
     assert "finance_mine" not in enriched
-    assert set(enriched) == set(ALL_MODULES) - {"finance_mine"}
+    # 捆鑰匙展開（成員鍵一起給）：跟 token 簽的形狀一致，claims_drifted 才不會對管理員恆真
+    assert set(enriched) == set(expand_modules(ALL_MODULES)) - {"finance_mine"}
     assert "finance_mine" in grant_admin_all_modules(3, ["finance_mine"])
     # 非管理員原樣通過
     assert grant_admin_all_modules(1, ["backup"]) == ["backup"]

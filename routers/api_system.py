@@ -148,12 +148,8 @@ def _redact_settings(s: dict, *, admin: bool = False) -> dict:
 
 
 def _is_admin_request(request: Request) -> bool:
-    try:
-        from core.auth import _extract_token
-    except ImportError:
-        return False
-    p = _extract_token(request) or {}
-    return int(p.get("access_level") or 0) >= 3 or p.get("role") == "admin"
+    from core.auth import _extract_token, payload_grants
+    return payload_grants(_extract_token(request))   # 沒帶鑰匙＝純管理員判定（單一正本）
 
 
 @router.get("/api/settings/load")

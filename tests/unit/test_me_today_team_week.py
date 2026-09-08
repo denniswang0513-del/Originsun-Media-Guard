@@ -74,7 +74,7 @@ def test_today_lists_my_shoots_todos_pending_leave_and_last_week_journal():
 def test_readonly_relaxation_does_not_touch_the_mine_wall():
     src = code_only(repo_src("routers/api_timesheets.py"))
     gate = func_body(src, "async def _ts_or_bound(")
-    assert 'check_admin_or_module(request, "timesheets")' in gate
+    assert 'check_admin_or_module(request, "timesheets", record=False)' in gate   # 探針：不留假的授權不足紀錄
     assert "e.status_code != 403" in gate                       # 沒登入的 401 原樣丟出
     assert "resolve_current_staff(request)" in gate and 'ident["staff"] is None' in gate
     assert 'return ident["staff"].name' in gate                  # 靠綁定進來的回姓名（project_options 縮到本人最近填過的）

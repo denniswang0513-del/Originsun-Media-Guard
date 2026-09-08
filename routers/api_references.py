@@ -24,7 +24,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, NamedTuple, Optional
 
-from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  # type: ignore
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, UploadFile  # type: ignore
 
 from core.auth import check_admin_or_module, tab_modules
 from core.db_guard import db_factory_or_503 as _require_factory
@@ -39,7 +39,9 @@ router = APIRouter(prefix=REFERENCES_PREFIX, tags=["references"])
 #
 # ⚠️ 往這裡加端點前先問：它真的該被**匿名**打到嗎？授權只有 token 一層。
 # 守衛：tests/unit/test_public_surface.py（對整個對外 app 列舉斷言）。
-public_router = APIRouter(tags=["references 公開（token 授權）"])
+from core.public_access import surface_gate as _surface_gate
+public_router = APIRouter(tags=["references 公開（token 授權）"],
+                          dependencies=[Depends(_surface_gate)])   # 公開區「提案企劃分享（含片庫分享）」關閉 → 404
 
 # ── 分類族（Notion「類別/品牌/製作單位/典範/技巧/情感取向/關鍵字/內部專案」對映）──
 FACET_KEYS = ("category", "brand", "studio", "paragon", "technique",

@@ -1,11 +1,10 @@
-from fastapi import HTTPException  # type: ignore
 """
 api_job_history.py — 任務歷史 API（DB 優先，JSON fallback）
 """
 import os
 import json
 import threading
-from fastapi import APIRouter, Body, Request  # type: ignore
+from fastapi import APIRouter, Body, HTTPException, Request  # type: ignore
 from typing import Optional
 import core.state as state
 

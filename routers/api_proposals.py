@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  # type: ignore
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, UploadFile  # type: ignore
 
 from core import pinned_assets as pa
 from core import proposal_survey
@@ -39,7 +39,9 @@ router = APIRouter(prefix=PROPOSALS_PREFIX, tags=["proposals"])
 # 守衛：tests/unit/test_proposals_public_router.py（多一條少一條都會紅）。
 # 刻意不帶 prefix —— master 由上面 router 的 PROPOSALS_PREFIX 提供，
 # NAS 掛載時自己指定（與 routers/crm/_shared.py 的 public_router 同慣例）。
-public_router = APIRouter(tags=["proposals 公開（token 授權）"])
+from core.public_access import surface_gate as _surface_gate
+public_router = APIRouter(tags=["proposals 公開（token 授權）"],
+                          dependencies=[Depends(_surface_gate)])   # 公開區「提案企劃分享」關閉 → 404
 
 # deck 檔案落地：<repo>/uploads/proposals/{proposal_id}/（main.py 已 mount /uploads）
 _UPLOAD_BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")

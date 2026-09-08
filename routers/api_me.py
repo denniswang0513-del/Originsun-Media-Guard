@@ -117,7 +117,7 @@ async def my_workspace(request: Request):
         "allowed": allowed,
         # 具人事管理權限（hr_leave 模組或 admin）→ /my.html 頂欄顯示「人事管理」
         # 深連結（官網 STAFF 入口一路通到內部簽核頁）
-        "hr_manager": "hr_leave" in mods,
+        "hr_manager": "hr_leave" in mods or "hr" in mods,
     }
     factory = db_factory_or_503()
     async with factory() as session:

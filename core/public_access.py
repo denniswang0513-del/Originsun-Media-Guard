@@ -33,11 +33,11 @@ PUBLIC_SURFACES: List[dict] = [
      "how": "/q/<短碼>（報價單按「分享」鑄的）",
      "pages": [], "prefixes": ["/q/", "/api/v1/crm/public/quote/"], "modes": [MODE_OFF, MODE_LINK], "default": MODE_LINK},
     {"key": "invoice_file", "label": "發票影像分享", "who": "客戶、會計",
-     "how": "/api/v1/crm/public/invoice-file/<短碼>（發票列按「分享」鑄的）",
-     "pages": [], "prefixes": ["/api/v1/crm/public/invoice-file/"], "modes": [MODE_OFF, MODE_LINK], "default": MODE_LINK},
+     "how": "/e/<短碼>（發票列按「分享」鑄的）",
+     "pages": [], "prefixes": ["/e/", "/api/v1/crm/public/invoice-file/"], "modes": [MODE_OFF, MODE_LINK], "default": MODE_LINK},
     {"key": "proposal_share", "label": "提案企劃分享（含會議記錄、片庫分享）", "who": "客戶、外部顧問",
      "how": "/project.html?t=<連結>、/meeting-note.html?t=<連結>（可寫）",
-     "pages": ["project.html", "meeting-note.html", "reference.html"], "prefixes": ["/api/v1/crm/shared/"], "modes": [MODE_OFF, MODE_LINK], "default": MODE_LINK},
+     "pages": ["project.html", "meeting-note.html", "reference.html"], "prefixes": ["/api/v1/proposals/shared/", "/api/v1/references/shared/"], "modes": [MODE_OFF, MODE_LINK], "default": MODE_LINK},
     {"key": "showcase_edit", "label": "結案上架編輯", "who": "外部剪接、企劃",
      "how": "/showcase-edit.html?token=<編輯 token>（完稿結案分頁「編輯連結」）",
      "pages": ["showcase-edit.html"], "prefixes": ["/api/v1/crm/public/showcase-edit/"], "modes": [MODE_OFF, MODE_LINK], "default": MODE_LINK},
@@ -52,7 +52,6 @@ PUBLIC_SURFACES: List[dict] = [
      "pages": ["my.html"], "prefixes": ["/api/v1/auth/register"], "modes": [MODE_OFF, MODE_OPEN], "default": MODE_OPEN},
 ]
 SURFACE_KEYS = tuple(s["key"] for s in PUBLIC_SURFACES)
-_BY_KEY = {s["key"]: s for s in PUBLIC_SURFACES}
 
 
 def normalize(cfg: Optional[dict]) -> Dict[str, str]:

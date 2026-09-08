@@ -112,7 +112,7 @@ async def create_client(req: ClientPayload, request: Request):
     # （專案表單與報價彈窗都會順手建客戶），見 _client_write_guard。
     ent = "parent"
     try:
-        _check_client_write(request)
+        _check_client_write(request, record=False)   # 探針：403 後走私帳路，不留假紀錄
     except HTTPException:
         require_entity(request, "mine", level="full")
     _require_db()
@@ -197,8 +197,8 @@ async def update_client(client_id: str, req: ClientPayload, request: Request):
 CLIENT_WRITE_MODULES = ("crm_clients", "crm_projects", "crm_quotes")
 
 
-def _check_client_write(request):
-    return check_admin_or_module(request, *CLIENT_WRITE_MODULES)
+def _check_client_write(request, record: bool = True):
+    return check_admin_or_module(request, *CLIENT_WRITE_MODULES, record=record)
 
 
 def _client_write_guard(request, client, admin_only: bool = False):

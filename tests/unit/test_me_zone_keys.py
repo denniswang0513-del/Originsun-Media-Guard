@@ -73,7 +73,7 @@ def test_admin_ui_nests_zone_keys_under_the_master_switch():
     js = repo_src("frontend/js/admin/user-mgmt.js")
     assert "const PERM_PARENT = { me_worklog: 'me_today_zone', me_week_plan: 'me_today_zone', me_team_week: 'me_today_zone', me_project_lookup: 'me_today_zone'," in js
     assert "data-parent=\"${parent}\"" in js and "parentOff ? 'disabled'" in js, "總開關沒開子鑰匙要灰掉"
-    assert "window._syncPermParent = function(username, m)" in js and "if (p && !p.checked) { p.checked = true; }" in js, "勾子鑰匙父自動勾"
+    assert "window._syncPermParent = function(username, m)" in js and "box('finance_partner')?.checked)) { p.checked = true; }" in js, "勾子鑰匙父自動勾（母公司報表帳號除外：不自動配金額檢視）"
 
 
 def test_second_backfill_grants_master_and_week_plan_once():

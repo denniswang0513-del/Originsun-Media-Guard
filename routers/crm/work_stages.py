@@ -56,7 +56,7 @@ async def _stage_guard(request: Request) -> None:
     from core.auth import ME_MODULE_KEYS, check_admin_or_module
     from core.identity import require_bound_staff
     try:
-        check_admin_or_module(request, "timesheets")
+        check_admin_or_module(request, "timesheets", record=False)   # 探針：403 後走綁定人員，不留假紀錄
         return
     except HTTPException as e:
         if e.status_code != 403:
