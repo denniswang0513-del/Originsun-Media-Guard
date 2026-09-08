@@ -1357,9 +1357,9 @@ async function applyLeave() {
             return;
         }
         _todayInfo = null;   // 今天那條「請假待審 N 件」下次重抓
-        loadLeave();
+        await loadLeave();   // 🔴 要 await：不等重畫完就走到 finally，鎖會在舊表單還在畫面上時就解開，那段時間再點一次就是第二張單
     } catch (_) { show("連線失敗"); }
-    finally { if (btn && btn.isConnected) { delete btn.dataset.busy; btn.disabled = false; } }   // loadLeave 重畫過就不用還原
+    finally { if (btn && btn.isConnected) { delete btn.dataset.busy; btn.disabled = false; } }   // 重畫過就換了節點，不用還原
 }
 // mode：free＝直接撤回（待審、或已核准但還在免申請期）；apply＝已核准且逾期，要寫消假理由送「消假待審」
 async function cancelLeave(id, mode) {
@@ -1956,12 +1956,13 @@ function _planWireDnd(z) {
 async function loadTeamWeek() {
     const host = $("z1-week");
     host.innerHTML = `<div class="empty">載入中…</div>`;
-    let d;
-    try { d = await mjson("/api/v1/me/team_week?start=" + _z1Week); }
-    catch (e) { host.innerHTML = `<div class="notice">${esc(e.message)}</div>`; return; }
-    // 本週里程碑（owner 2026-09-07）：抓不到就沒有那條帶，不擋週表
-    let ms = null;
-    try { ms = await mjson("/api/v1/milestones/week?start=" + _z1Week); } catch (_) { ms = null; }
+    // 兩支互不相依：一起發（原本串著等，翻一週要吃兩趟來回）。里程碑抓不到就沒有那條帶，不擋週表
+    const [dRes, ms] = await Promise.all([
+        mjson("/api/v1/me/team_week?start=" + _z1Week).catch(e => ({ __err: e.message })),
+        mjson("/api/v1/milestones/week?start=" + _z1Week).catch(() => null),
+    ]);
+    if (dRes && dRes.__err) { host.innerHTML = `<div class="notice">${esc(dRes.__err)}</div>`; return; }
+    const d = dRes;
     _msWeek = ms;
     const msOf = (name, iso) => ms ? ms.projects.flatMap(p => p.milestones.filter(m => m.assignee_name === name && m.due_date === iso).map(m => ({ ...m, project_name: p.name }))) : [];
     const days = d.days || [];
@@ -2029,8 +2030,11 @@ async function _msToggleDone(id, done, cb) {
     catch (e) { alert("更新失敗：" + e.message); await loadTeamWeek(); }
 }
 async function _openMsModal() {
-    let ms = _msWeek;
-    try { ms = await mjson("/api/v1/milestones/week?start=" + _z1Week); } catch (e) { alert("抓不到里程碑：" + e.message); return; }
+    // 週表剛抓過同一週就用那份（原本無條件再抓一次＝每開一次彈窗多一支請求／後端多算一整週）
+    let ms = _msWeek && _msWeek.week_start === _z1Week ? _msWeek : null;
+    if (!ms) {
+        try { ms = await mjson("/api/v1/milestones/week?start=" + _z1Week); } catch (e) { alert("抓不到里程碑：" + e.message); return; }
+    }
     _msWeek = ms;
     _msDraft = { week_start: ms.week_start, default_due: ms.default_due, staff: ms.staff, projects: ms.projects.map(p => ({ ...p, milestones: p.milestones.map(m => ({ ...m })) })), removed: [] };
     const root = $("ws-view") || document.body;
@@ -2126,7 +2130,10 @@ async function _msModalAction(btn) {
     if (act === "save") {
         _msSync();
         const items = [];
-        _msDraft.projects.forEach(p => p.milestones.forEach(m => items.push({ id: m.id || null, project_id: p.project_id, title: m.title, due_date: m.due_date, assignee_staff_id: m.assignee_staff_id || null, assignee_name: m.assignee_name || "", note: m.note || "", done: !!m.done })));
+        // 🔴 負責人送空字串不是 null：後端「沒帶就不動」靠的是 null／不帶（保護被 CF 快取的舊分頁），
+        // 空字串才是「這次明講要清成不指定」。送 null 會讓「改回不指定」永遠取消不掉，
+        // 而同一列的 assignee_name（送 ""）卻會被清掉 → 留下有 id 沒名字的髒列。
+        _msDraft.projects.forEach(p => p.milestones.forEach(m => items.push({ id: m.id || null, project_id: p.project_id, title: m.title, due_date: m.due_date, assignee_staff_id: m.assignee_staff_id || "", assignee_name: m.assignee_name || "", note: m.note || "", done: !!m.done })));
         _msDraft.removed.forEach(id => items.push({ id, project_id: "", title: "", delete: true }));
         try { await mjson("/api/v1/milestones/week/save", _POST({ week_start: _msDraft.week_start, items })); bg?.remove(); _todayInfo = null; await loadTeamWeek(); }
         catch (e) { alert("儲存失敗：" + e.message); }
