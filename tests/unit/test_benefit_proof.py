@@ -129,7 +129,7 @@ def test_receipt_upload_checks_ownership_or_manager():
     assert "_can_manage(request, p)" in body, "沒有管理權那一條路"
     assert "403" in body, "不是自己的又不是管理者，沒有擋下來"
     mgr = code_only(func_body(repo_src(SRC), "def _can_manage("))
-    assert "_check_approver(request)" in mgr and "require_entity" in mgr, \
+    assert 'payload_grants(_extract_token(request) or {}, "finance_approve")' in mgr and "require_entity" in mgr, \
         "_can_manage 沒有真的檢查審核權與帳本 scope"
 
 

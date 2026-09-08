@@ -13,7 +13,7 @@ from core.auth import ALL_MODULES, ME_ZONE_MASTER, ME_ZONE1_KEYS, MODULE_BUNDLES
 
 IDENTITIES = ("合夥", "在職", "兼職")
 
-_PARTNER_EXCLUDE = {"finance_mine"}          # 私帳：指名才有，合夥也不給
+_PARTNER_EXCLUDE = {"finance_mine", "finance_partner"}   # 私帳：指名才有；母公司報表唯讀鍵與 money_view 互斥（core/ledger §2.3），合夥靠帳務＋金額檢視就是完整
 _HIDDEN = {"me_todos", "me_finance"}          # 員工頁還沒放回的卡，範本不勾
 
 _STAFF = [
@@ -50,6 +50,8 @@ def normalize(templates: Optional[dict]) -> Dict[str, List[str]]:
             keep.add(ME_ZONE_MASTER)
         if keep & {"crm_invoices", "crm_quotes"}:
             keep.add("money_view")     # 第三批一把尺：帳務與報價的讀寫都要金額檢視，範本裡一定配
+        if "money_view" in keep:
+            keep.discard("finance_partner")   # 唯讀鍵不跟金額檢視同給
         out[ident] = [m for m in ALL_MODULES if m in keep]
     return out
 

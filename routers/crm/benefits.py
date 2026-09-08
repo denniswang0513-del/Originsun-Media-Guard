@@ -37,7 +37,7 @@ from fastapi import Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, payload_grants, _extract_token
 from core.finance_logic import local_day
 from core.hr_logic import (BENEFIT_COMMITTED, BENEFIT_EDITABLE,
                            benefit_pool_balance, in_window,
@@ -96,10 +96,9 @@ def _can_manage(request: Request, pool) -> bool:
     """
     try:
         require_entity(request, pool.entity or "parent", level="full")
-        _check_approver(request)
-        return True
     except HTTPException:
         return False
+    return payload_grants(_extract_token(request) or {}, "finance_approve")   # 布林探針：不留假的授權不足紀錄
 
 
 async def _my_staff(request: Request):
@@ -1040,6 +1039,7 @@ async def accounting_package(request: Request, year: int = 0, entity: str = ""):
 
     只收「已核准／已付款」—— 待審與退回還不是帳，送過去只會讓人對不起來。
     """
+    _check_approver(request)   # 會計包＝全員福委金額，審核者才拿（收尾 review 補回）
     ent = _read_entity(request, entity)
     async with _crm_session() as session:
         return await _package(session, ent, int(year or 0))
@@ -1049,6 +1049,7 @@ async def accounting_package(request: Request, year: int = 0, entity: str = ""):
 async def accounting_package_csv(request: Request, year: int = 0,
                                  entity: str = ""):
     """同一份的 CSV。會計要的是能丟進 Excel 的東西，不是 JSON。"""
+    _check_approver(request)   # 會計包＝全員福委金額，審核者才拿（收尾 review 補回）
     ent = _read_entity(request, entity)
     async with _crm_session() as session:
         pkg = await _package(session, ent, int(year or 0))

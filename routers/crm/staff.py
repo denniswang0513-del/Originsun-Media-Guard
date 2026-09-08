@@ -6,6 +6,7 @@ staff_resume_pdf 內以 __file__ 推 templates 路徑的運算多包一層
 os.path.dirname（檔案移深一層，維持原專案根目錄基準）。
 """
 from __future__ import annotations
+from core.auth import check_admin_or_module
 
 import csv
 import io
@@ -153,8 +154,9 @@ async def get_staff(staff_id: str):
 async def staff_rate_history(staff_id: str, request: Request):
     """H1 費率歷史（新→舊）。N2 成本回寫與 B2 複盤以此按 work_date 取當時費率。
 
-    守衛只有路由層的 money_dep（2026-09-08 第二批：拿掉原本另疊的管理員限定 ——
-    員工檔案分頁配金額檢視就看得到費率欄，費率史是同一格的歷史）。"""
+    守衛＝路由層 money_dep＋員工檔案鑰匙（2026-09-08 第二批拿掉管理員限定；收尾 review：
+    只有金額檢視的記帳帳號不該看到別人的調薪史，所以要配 crm_staff）。"""
+    check_admin_or_module(request, 'crm_staff')
     _require_db()
     factory = await _get_factory()
     from db.models import StaffRateHistory

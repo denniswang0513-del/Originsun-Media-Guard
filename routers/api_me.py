@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from sqlalchemy import func, select  # type: ignore
 
-from core.auth import ME_MODULE_KEYS, check_admin_or_module, grant_admin_all_modules
+from core.auth import ME_MODULE_KEYS, check_admin_or_module, grant_admin_all_modules, payload_grants
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup,
                            month_key, month_span, months_back, parse_ymd, project_metrics, tw_day)
@@ -117,7 +117,7 @@ async def my_workspace(request: Request):
         "allowed": allowed,
         # 具人事管理權限（hr_leave 模組或 admin）→ /my.html 頂欄顯示「人事管理」
         # 深連結（官網 STAFF 入口一路通到內部簽核頁）
-        "hr_manager": "hr_leave" in mods or "hr" in mods,
+        "hr_manager": payload_grants(payload, "hr_leave"),   # 捆鑰匙由 payload_grants 展開
     }
     factory = db_factory_or_503()
     async with factory() as session:

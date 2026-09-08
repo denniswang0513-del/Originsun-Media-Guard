@@ -754,9 +754,9 @@ async def list_cost_group_receipts(group_id: str, request: Request):
 
 @router.get("/receipt-file")
 async def serve_receipt(path: str = Query(""), request: Request = None):
+    """提供收據檔案下載/檢視（限定 uploads/ 或子表 receipt_path）。"""
     # 收據影像＝金額：登入之外還要一把看得到它的鑰匙（員工頁自己的零用金／福委、專案頁、帳務、審核；2026-09-08 稽核）
     check_admin_or_module(request, 'money_view', 'crm_projects', 'crm_invoices', 'finance_approve', 'me_petty', 'me_benefits')
-    """提供收據檔案下載/檢視（限定 uploads/ 或子表 receipt_path）。"""
     if not path or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="檔案不存在")
     abs_path = os.path.abspath(path)

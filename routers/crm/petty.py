@@ -31,7 +31,7 @@ from sqlalchemy import select
 
 from core.project_link import PETTY_ITEMS as _PETTY_PROJECT_ITEMS
 from ._shared import cash_category_texts
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, payload_grants, _extract_token
 from core.money import can_see_money
 from core.identity import resolve_current_staff
 from core.cash_taxonomy import SEP as _TAX_SEP
@@ -325,11 +325,7 @@ def _may_manage_others(request: Request) -> bool:
     """
     if not can_see_money(request):
         return False
-    try:
-        _check_approver(request)
-        return True
-    except HTTPException:
-        return False
+    return payload_grants(_extract_token(request) or {}, "finance_approve")   # 布林探針：不留假的授權不足紀錄
 
 
 async def _own_editable(session, expense_id: str, request: Request):

@@ -264,8 +264,11 @@ async def _plan_row_of(session, target, row_id: str):
 async def plan_for_targets(request: Request):
     """可以幫誰排：狀態是「兼職」的人員（管理員／工作追蹤模組看全部在職的人也行，但視窗只列兼職）。"""
     from core.identity import require_bound_staff
+    from core.hr_logic import is_active_staff
     if not payload_grants(check_logged_in(request), "timesheets"):
-        await require_bound_staff(request, "me_plan_parttime")
+        me = await require_bound_staff(request, "me_plan_parttime")
+        if not is_active_staff(getattr(me["staff"], "status", None)):   # 跟 _plan_for_ident 同一道：兼職／離職不能列名單
+            raise HTTPException(status_code=403, detail="只有在職／合夥可以幫兼職排班")
     factory = db_factory_or_503()
     async with factory() as session:
         rows = (await session.execute(

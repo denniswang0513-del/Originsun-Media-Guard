@@ -532,27 +532,7 @@ async def _on_startup():
             print(f"[migrate] 今天與這週總開關：補發 {_n_bf2} 個帳號（只跑這一次）")
     except Exception as _e_bf2:
         print(f"[migrate] 今天與這週總開關回填略過: {_e_bf2}")
-    # ── 階段 4 收鑰匙回填（旗標 rbac.bundles_backfilled）：每個帳號 expand_modules（有成員補捆、有捆補成員），只跑一次 ──
-    try:
-        from config import load_settings as _ls_bf3, save_settings as _ss_bf3
-        _st_bf3 = _ls_bf3()
-        if not (_st_bf3.get("rbac") or {}).get("bundles_backfilled"):
-            from core.auth import expand_modules as _bf3_expand
-            from routers.api_auth import _get_all_users as _bf3_users, _persist_user as _bf3_persist
-            _n_bf3 = 0
-            for _u in await _bf3_users():
-                _mods = list(_u.get("modules") or [])
-                _new = _bf3_expand(_mods)
-                if set(_new) == set(_mods):
-                    continue
-                _u["modules"] = _new
-                await _bf3_persist(_u)
-                _n_bf3 += 1
-            _st_bf3.setdefault("rbac", {})["bundles_backfilled"] = True
-            _ss_bf3(_st_bf3)
-            print(f"[migrate] 收鑰匙（捆＋成員）：更新 {_n_bf3} 個帳號（只跑這一次）")
-    except Exception as _e_bf3:
-        print(f"[migrate] 收鑰匙回填略過: {_e_bf3}")
+    # 階段 4 收鑰匙（捆）不需要回填：讀帳號的咽喉 _enrich_user 與存帳號兩處都 expand_modules，存的形狀無關緊要（收尾 review 拿掉了一段永遠 0 筆的迴圈）
     # ── 公布欄欄位 migration（新欄位 create_all 不補到既有表）+ 種子 ──
     if state.db_online:
         try:

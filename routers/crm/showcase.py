@@ -19,7 +19,7 @@ from core.crm_logic import (SHOWCASE_EDIT_EXPIRES_DAYS, SHOWCASE_EDIT_SCOPE,
 from core.schemas import (SeriesQuickAddPayload, ShowcasePayload,
                           StaffQuickAddPayload)
 
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, payload_grants
 from ._shared import (router, token_router, _check_auth, _check_website_auth, _require_db,
                       _get_factory, _mark_dirty_safe, _now, _UPLOAD_BASE,
                       _ALLOWED_IMG_EXT, _save_image_as_webp,
@@ -214,7 +214,7 @@ async def get_project_showcase(project_id: str, request: Request):
 
     讀開給專案頁（crm_projects；2026-09-08 第二批 —— 專案頁的「官網作品」區塊
     要看得到）；寫入（PUT／封面／圖庫／發布）仍是 website_admin。"""
-    check_admin_or_module(request, 'website_admin', 'crm_projects')
+    payload = check_admin_or_module(request, 'website_admin', 'crm_projects')
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -229,6 +229,8 @@ async def get_project_showcase(project_id: str, request: Request):
             sc.edit_token = None
             await session.commit()
         data = _to_showcase_dict(sc)
+        if not payload_grants(payload, 'website_admin'):   # edit_token＝公開編輯頁的寫入憑證，只給能寫的人
+            data.pop('edit_token', None)
         # 對外公開連結 — 給 delivery Tab「預覽」按鈕直接連到 originsun-studio.com/works/{slug}
         public_url = ""
         if sc.published:

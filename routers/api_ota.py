@@ -478,7 +478,6 @@ async def publish_status(request: Request, job_id: str = Query("")):
 
 @router.get("/api/v1/publish/suggest_notes")
 async def suggest_release_notes(request: Request, since_version: str = Query("")):
-    _check_admin(request)   # 對匿名跑 git 子程序＋洩漏 commit 標題（2026-09-08 稽核）
     """Suggest release notes from git commit subjects since a baseline version.
 
     Baseline = ``since_version`` if given (e.g. prod's version when deploying
@@ -487,6 +486,7 @@ async def suggest_release_notes(request: Request, since_version: str = Query("")
     subjects after it, filtering version-bump / doc-bump noise. Falls back to
     the most recent commits when the base can't be located or git is absent.
     """
+    _check_admin(request)   # 對匿名跑 git 子程序＋洩漏 commit 標題（2026-09-08 稽核）
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     def _git(args, timeout=8):
@@ -810,7 +810,6 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
 
 @router.get("/api/v1/deploy_to_prod")
 async def deploy_to_prod_eligible(request: Request):
-    _check_admin(request)
     """Report whether THIS instance may deploy to the production master.
 
     Used by the publish modal to decide whether to show the deploy button —
@@ -818,6 +817,7 @@ async def deploy_to_prod_eligible(request: Request):
     a client-side window.location.port check. Eligible when this checkout is
     not the prod checkout and the prod checkout exists.
     """
+    _check_admin(request)
     src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     same = os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(_PROD_DIR))
     prod_ok = os.path.isdir(_PROD_DIR) and os.path.exists(os.path.join(_PROD_DIR, "main.py"))
@@ -1064,8 +1064,8 @@ def _trigger_master_rebuild_blocking(log: list) -> bool:
 
 @router.get("/api/v1/deploy_website")
 async def deploy_website_eligible(request: Request):
-    _check_admin(request)
     """是否可發布官網前端（dev checkout + 生產已有 website/node_modules）。"""
+    _check_admin(request)
     src_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     same = os.path.normcase(os.path.abspath(src_root)) == os.path.normcase(os.path.abspath(_PROD_DIR))
     has_src = os.path.isdir(os.path.join(src_root, "website"))

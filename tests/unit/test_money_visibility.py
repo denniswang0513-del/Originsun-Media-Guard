@@ -53,7 +53,6 @@ MONEY_ONLY_PATHS = [
     "/api/v1/crm/projects/__probe__/cost-lines",
     "/api/v1/crm/projects/__probe__/cost-groups",
     "/api/v1/crm/projects/__probe__/cost-summary",
-    "/api/v1/crm/staff/__probe__/rate-history",
     "/api/v1/finance/accounts",
     "/api/v1/cashflow/forecast",
 ]

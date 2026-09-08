@@ -18,9 +18,9 @@ def _who(request: Request, *extra: str) -> str:
     """讀取守衛：工作追蹤整區、或「今天與這週」總開關（團隊的一週／專案查詢都在它下面）；專案頁再加 crm_projects。
     2026-09-08 稽核前是登入即可——回整個在職名單＋每案本週工時，剛註冊只有 me_profile 的帳號也拉得到。"""
     from core.auth import ME_ZONE_MASTER
-    check_admin_or_module(request, "timesheets", ME_ZONE_MASTER, *extra)
+    check_admin_or_module(request, "timesheets", ME_ZONE_MASTER, "me_plan_parttime", *extra)   # 兼職排班視窗「從里程碑帶入」也讀
     # 總開關＋子鑰匙兩道（CLAUDE.md「今天與這週」規則）：只拿 me_today_zone＋me_worklog 的帳號不該拉到整個名單＋每案工時
-    p = check_admin_or_module(request, "timesheets", "me_team_week", "me_project_lookup", *extra) or {}
+    p = check_admin_or_module(request, "timesheets", "me_team_week", "me_project_lookup", "me_plan_parttime", *extra) or {}
     return p.get("username") or p.get("sub") or ""
 
 

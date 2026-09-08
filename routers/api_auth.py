@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List
 
-from core.auth import (
+from core.auth import (EXPLICIT_ONLY_MODULES,
     hash_password, verify_password, create_token, _extract_token, check_admin,
     load_users_json, sync_user_to_json, remove_user_from_json,
     LEGACY_ROLE_LEVELS, ALL_MODULES, grant_admin_all_modules,
@@ -729,7 +729,7 @@ async def create_user(req: CreateUserRequest, request: Request):
         'password_hash': hash_password(req.password),
         'role_name': 'admin' if access_level >= 3 else 'user',  # 裝飾性，僅供顯示
         'access_level': access_level,
-        'modules': expand_modules(req.modules or []),
+        'modules': [m for m in expand_modules(req.modules or []) if not (req.access_level >= 3 and m in EXPLICIT_ONLY_MODULES)],   # 新管理員不夾帶私帳
         'first_login': False,
     }
     await _persist_user(user_data)
@@ -747,10 +747,13 @@ async def update_user(username: str, req: UpdateUserRequest, request: Request):
 
     if req.password:
         user['password_hash'] = hash_password(req.password)
+    held_before = list(user.get('modules') or [])
     if req.modules is not None:
         user['modules'] = expand_modules(req.modules)   # 捆鑰匙：存帳號時展開，CF 快取的舊 js 也看得到成員鑰匙
     if req.access_level is not None:
         user['access_level'] = 3 if req.access_level >= 3 else 1
+    if int(user.get('access_level') or 0) >= 3:   # 指名制鑰匙（私帳）不跟著「勾管理員」一起進來：之前沒有就不給
+        user['modules'] = [m for m in (user.get('modules') or []) if m not in EXPLICIT_ONLY_MODULES or m in held_before]
         user['role_name'] = 'admin' if user['access_level'] >= 3 else 'user'  # 裝飾性
     if req.staff_id is not None:
         # N0 綁定人員檔案："" = 解綁（Optional[None] 只能代表「不變」，需哨兵值）

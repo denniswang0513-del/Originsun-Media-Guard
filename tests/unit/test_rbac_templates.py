@@ -12,7 +12,7 @@ from tests.unit._srcscan import code_only, func_body, repo_src
 def test_partner_default_is_everything_but_private_ledger():
     p = set(DEFAULT_TEMPLATES["合夥"])
     assert "finance_mine" not in p, "私帳指名才有，合夥也不給（owner 2026-09-08）"
-    assert p == set(ALL_MODULES) - {"finance_mine", "me_todos", "me_finance"}, "其餘全部（畫面未開的兩張卡除外）"
+    assert p == set(ALL_MODULES) - {"finance_mine", "finance_partner", "me_todos", "me_finance"}, "其餘全部（私帳、與 money_view 互斥的母公司報表唯讀鍵、畫面未開的兩張卡除外）"
     assert "website_admin" in set(DEFAULT_TEMPLATES["在職"]) and "website_admin" in set(DEFAULT_TEMPLATES["兼職"]), "官網管理三個身份都有"
     for ident in IDENTITIES:
         assert set(DEFAULT_TEMPLATES[ident]) <= set(ALL_MODULES)

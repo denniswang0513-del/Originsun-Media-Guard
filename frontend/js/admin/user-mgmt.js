@@ -503,7 +503,7 @@ function _renderPublicAccess() {
     let html = `
         <div style="color:#999;line-height:1.5;margin-bottom:10px;max-width:640px;">這些是<b>不用登入</b>就能從外面進來的功能，每一面一列。
             「連結」＝憑證是網址裡的連結（可撤銷）；「關閉」＝整面 404，連結全部失效；「公開」＝連連結都不用（只有履歷與註冊有）。
-            改完按右上「儲存公開區」，立即生效。</div>
+            改完按右上「儲存公開區」，立即生效。<br><span style="color:#f59e0b;">目前「關閉」只對主機生效：掛在 NAS 對外容器的那幾面（影像紀錄、雜支、提案分享）用的是容器自己的設定，關了主機這邊那邊還開著——已記在待辦，下一版把設定改讀共用資料庫。</span></div>
         <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead><tr style="color:#888;font-size:11px;">
             <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #333;">功能</th>

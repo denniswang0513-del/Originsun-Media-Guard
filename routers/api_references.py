@@ -957,6 +957,8 @@ async def delete_link(link_id: str, request: Request):
         link = await session.get(PreprodReferenceLink, link_id)
         if not link:
             raise HTTPException(status_code=404, detail="找不到這筆引用")
+        if getattr(link, "target_type", "") == "crm_project":   # 專案頁的引用：要專案管理那把（片庫家族只管提案側）
+            check_admin_or_module(request, "crm_projects")
         await session.delete(link)
         await session.commit()
     return {"status": "ok"}

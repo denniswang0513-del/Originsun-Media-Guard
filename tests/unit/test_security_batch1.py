@@ -56,7 +56,7 @@ def test_expense_legacy_paths_require_crm_projects_and_receipts_need_a_key():
 def test_milestones_need_a_key_not_just_login():
     src = repo_src("routers/api_milestones.py")
     who = code_only(func_body(src, "def _who("))
-    assert 'check_admin_or_module(request, "timesheets", ME_ZONE_MASTER, *extra)' in who
+    assert 'check_admin_or_module(request, "timesheets", ME_ZONE_MASTER, "me_plan_parttime", *extra)' in who
     assert "check_logged_in" not in code_only(src)
     assert '_who(request, "crm_projects")' in code_only(func_body(src, "async def milestones_of_project("))
 

@@ -230,3 +230,22 @@
 | crm/quotes（9） | 建報價、改／刪報價、分享、範本 CRUD、根目錄 —— 分頁鑰匙是 `crm_quotes` |
 | crm/showcase（6） | 封面、圖庫、製作過程、自動 credits |
 | crm/staff（11） | 員工 CRUD、匯入、履歷、照片、作品集、編輯 token —— 分頁鑰匙是 `crm_staff` |
+
+## 5. /polish 收尾 review（2026-09-09）抓到的洞——已修（commit 見 git log「fix(security): 收尾 review」）
+
+| # | 洞 | 修法 |
+|---|---|---|
+| 1 | settings/save 分流讓 crm_quotes／crm_invoices 可寫 `company.logo_path`，報價單公開頁把它渲染成 data URI＝任意檔讀取（含 settings.json 的 jwt_secret） | `_SETTINGS_SAVE_DENY_SUBKEYS`：company 的 logo_path／seal_path 非管理員不准碰；`finance` 只准 monthly_fixed_costs；形狀表 `_SETTINGS_SAVE_SHAPES`，形狀不對 400（字串會讓 save_settings 整塊覆蓋） |
+| 2 | showcase GET 開給 crm_projects 後連 `edit_token`（公開編輯頁的寫入憑證）一起回 | 非 website_admin 拿不到 edit_token |
+| 3 | rate-history 只剩 money_view（記帳帳號看得到別人的調薪史） | 再加 crm_staff |
+| 4 | 福委會會計包拿掉了審核者守衛 | 補回 `_check_approver` |
+| 5 | 解除引用改成片庫家族後，references-only 也能拆 CRM 專案的引用 | 目標是 crm_project 的連結要 crm_projects |
+| 6 | 「勾管理員」送整份 ALL_MODULES（含 finance_mine 指名制鑰匙） | update／create 時 Lv3 不夾帶 EXPLICIT_ONLY（之前沒有就不給） |
+| 7 | petty／benefits 兩個探針還在記假的「授權不足」 | 改布林 payload_grants |
+| 8 | 工作階段守衛只認「在職」，合夥被擋 | is_active_staff |
+| 9 | 兼職排班「從里程碑帶入」被里程碑守衛擋 | /milestones 讀取放 me_plan_parttime |
+| 10 | 合夥範本含 finance_partner（與 money_view 互斥） | 範本排除、normalize 有 money_view 就丟 |
+| 11 | 三支發版 GET＋收據端點的守衛插在 docstring 前 | 移到 docstring 後 |
+| 12 | 階段 4 回填迴圈永遠 0 筆（讀帳號咽喉已展開） | 拿掉 |
+
+**已知未修**：公開區「關閉」只對主機生效——掛在 NAS 對外容器的 public_router（影像紀錄、雜支、提案分享）讀的是容器自己的 settings.json（沒有 public_access）。修法＝把 public_access 改存共用 Postgres（website settings singleton 那張表），`surface_gate` 讀 DB 快取。畫面上已標註。

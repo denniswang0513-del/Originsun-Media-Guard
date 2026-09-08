@@ -132,7 +132,7 @@ def test_work_stage_router_is_registered_and_open_to_active_staff():
     src = code_only(repo_src("routers/crm/work_stages.py"))
     g = func_body(src, "async def _stage_guard(")
     assert 'payload_grants(check_logged_in(request), "timesheets")' in g   # 布林探針：不留假紀錄
-    assert "require_bound_staff(request, *ME_MODULE_KEYS)" in g and "or STAFF_ACTIVE).strip() != STAFF_ACTIVE" in g
+    assert "require_bound_staff(request, *ME_MODULE_KEYS)" in g and "is_active_staff(" in g   # 在職／合夥／空白都算在職（收尾 review）
     from core.hr_logic import STAFF_ACTIVE
     assert STAFF_ACTIVE == "在職"
     for fn in ("async def list_work_stage_nodes(", "async def create_work_stage_node(",

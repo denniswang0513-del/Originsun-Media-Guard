@@ -109,7 +109,8 @@ def test_benefit_reads_take_the_tab_key_and_manage_endpoints_keep_the_full_wall(
         body = func_body(BEN, fn)
         assert "_read_entity(request" in body, fn
         assert 'require_entity(' not in body, fn
-        assert "_check_approver(request)" not in body, fn
+        if fn not in ("async def accounting_package(", "async def accounting_package_csv("):   # 會計包：收尾 review 補回審核者（全員福委金額）
+            assert "_check_approver(request)" not in body, fn
     for fn in BEN_MANAGE:
         body = func_body(BEN, fn)
         assert 'level="full")' in body or "_can_manage(request" in body, fn

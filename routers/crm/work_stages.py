@@ -16,7 +16,7 @@ import uuid
 
 from fastapi import HTTPException, Request
 
-from core.hr_logic import STAFF_ACTIVE, STAGE_SEED, WORK_TYPES, stage_categories
+from core.hr_logic import STAGE_SEED, WORK_TYPES, stage_categories, is_active_staff
 from core.schemas import WorkStageNodePayload, WorkStageNodeUpdate
 
 from ._shared import router, _require_db, _get_factory, _now
@@ -58,7 +58,7 @@ async def _stage_guard(request: Request) -> None:
     if payload_grants(check_logged_in(request), "timesheets"):   # 管理員／工作追蹤整區恆過；匿名在這裡 401
         return
     ident = await require_bound_staff(request, *ME_MODULE_KEYS)
-    if (getattr(ident["staff"], "status", "") or STAFF_ACTIVE).strip() != STAFF_ACTIVE:
+    if not is_active_staff(getattr(ident["staff"], "status", None)):   # 在職／合夥／空白（core.hr_logic.ACTIVE_STATUSES）
         raise HTTPException(status_code=403, detail="工作階段只開放在職員工調整")
 
 

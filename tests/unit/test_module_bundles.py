@@ -32,10 +32,9 @@ def test_guards_and_tokens_see_members():
     assert not payload_grants({"access_level": 1, "modules": ["preprod"]}, "references"), "片庫另一把"
     auth = repo_src("routers/api_auth.py")
     assert "expand_modules(grant_admin_all_modules(" in code_only(func_body(auth, "def _enrich_user(")), "讀帳號的咽喉展開一次，發 token／get_me 不各自再展"
-    assert "'modules': expand_modules(req.modules or [])" in code_only(func_body(auth, "async def create_user("))
+    assert "expand_modules(req.modules or [])" in code_only(func_body(auth, "async def create_user("))
     assert "user['modules'] = expand_modules(req.modules)" in code_only(func_body(auth, "async def update_user("))
-    main = repo_src("main.py")
-    assert 'get("bundles_backfilled")' in main and "_bf3_expand(_mods)" in main, "開機一次性回填（旗標）"
+    assert "bundles_backfilled" not in repo_src("main.py"), "讀帳號咽喉已展開，回填迴圈永遠 0 筆——不要再加回來"
 
 
 def test_templates_store_bundles_and_absorb_legacy_keys():

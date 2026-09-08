@@ -55,7 +55,14 @@ _SETTINGS_SAVE_KEYS: dict[str, tuple[str, ...]] = {
 # 給 projects 模組的只有機器清單那一格。
 _SETTINGS_SAVE_SUBKEYS: dict[str, tuple[str, ...]] = {
     "nas_paths": ("agents_dir",),
+    "finance": ("monthly_fixed_costs",),            # 其餘（margin_model.mine／baseline_month／bookkeeping_fee）是財務主人的東西
 }
+# 頂層鍵底下非管理員**不准碰**的子鍵：company 的 logo_path／seal_path 會被報價單渲染成 data URI（任意檔讀取），只有管理員上傳端點可以寫
+_SETTINGS_SAVE_DENY_SUBKEYS: dict[str, tuple[str, ...]] = {
+    "company": ("logo_path", "seal_path"),
+}
+# 每個頂層鍵該長什麼樣（沒列＝dict）：staff_roles 是清單；形狀不對就 400，不讓 save_settings 拿字串蓋掉整塊
+_SETTINGS_SAVE_SHAPES: dict[str, type] = {"staff_roles": list}
 
 
 def _settings_save_guard_keys(payload_keys) -> tuple[str, ...] | None:
@@ -76,9 +83,14 @@ def _settings_save_restrict(payload: dict, grant: tuple[str, ...]) -> dict:
     for k, v in payload.items():
         if _SETTINGS_SAVE_KEYS.get(k) != grant:
             continue
-        allowed_sub = _SETTINGS_SAVE_SUBKEYS.get(k)
-        if allowed_sub is not None and isinstance(v, dict):
-            v = {sk: sv for sk, sv in v.items() if sk in allowed_sub}
+        if not isinstance(v, _SETTINGS_SAVE_SHAPES.get(k, dict)):   # 形狀不對會讓 save_settings 整塊覆蓋（nas_paths="x" 打掉 ota_dir…）
+            raise HTTPException(status_code=400, detail=f"{k} 的形狀不對")
+        if isinstance(v, dict):
+            allowed_sub = _SETTINGS_SAVE_SUBKEYS.get(k)
+            if allowed_sub is not None:
+                v = {sk: sv for sk, sv in v.items() if sk in allowed_sub}
+            deny = _SETTINGS_SAVE_DENY_SUBKEYS.get(k, ())
+            v = {sk: sv for sk, sv in v.items() if sk not in deny}
         out[k] = v
     return out
 
