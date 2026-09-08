@@ -118,6 +118,8 @@ owner 2026-09-08：「雜支與影像紀錄是公開給外部人員編輯的，�
 
 ### 階段 4：收鑰匙（可選，1 天＋一次回填）
 
+✅ 已做（2026-09-08，owner「執行」）：47 → **34** 把可勾選。做法＝「捆」（`core.auth.MODULE_BUNDLES`）：`postprod`＝後期 9 把、`preprod`＝前期 5 把（片庫另留）、`hr`＝請補修＋福委會管理。帳號與範本存捆；`expand_modules` 在發 token／`/auth/me`／存帳號／開機回填（旗標 `rbac.bundles_backfilled`）時展開成「捆＋成員」，所以成員級守衛（`check_admin_or_module(request,'footage')`）、TAB_MAP 的成員級分頁、Cloudflare 快取的舊 js 全部照舊，舊 token 只有成員鑰匙也照過。成員齊了也會補捆（舊帳號整組都有的，權限畫面那格是勾的）；只有一個成員不補捆。
+
 資料支持合併：有後期任一把的帳號（Web／Assitance／liyuliu／nashtsai／chiehyu）都是整組 9 把一起有。
 - 後期 9 把 → `postprod` 一把；前期 6 把 → `preprod` 一把（片庫另留）；`hr_leave`／`hr_benefits` 併成 `hr`。47 → 約 25。
 - 做法跟今天一樣：開機一次性回填（settings 旗標）、舊鑰匙保留一版當別名（Cloudflare 對 `.js` 有 4 小時快取）。
@@ -135,7 +137,7 @@ owner 2026-09-08：「雜支與影像紀錄是公開給外部人員編輯的，�
 3. **假勤核准留管理員**：`hr_leave` 一把管看與登記，核准／退回／補休發放／特休額度仍 Lv3，前端依 Lv3 藏。
 4. 雜支與影像紀錄對外部人員公開，走「公開區」（階段 1.5）；內部雜支寫入改 `crm_projects`。
 5. `ADMIN_ONLY_ACTIONS`（就算有分頁鑰匙也要管理員）：刪除（客戶／員工／報價／雜支／作品集）、三支 CSV 匯入、全站根目錄與設定、歸檔 folders／scan、Sheet 拉取與代填工時正本、私帳對映與預算、假勤核准、intel 設定與 run、提案分享／刪除、公布欄 ask／delete／reorder、官網發佈（website_admin）、使用者管理／設定／發版。
-6. 階段 4（收鑰匙）：未定。
+6. 階段 4（收鑰匙）：owner 2026-09-08「執行」→ 已做（捆鑰匙）。
 
 ## 6. 順序與工時
 

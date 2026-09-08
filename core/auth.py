@@ -154,16 +154,18 @@ ME_ZONE_MASTER_BACKFILL_FROM = ("me_worklog", "me_team_week", "me_project_lookup
 
 ALL_MODULES = [
     'bulletin',
-    'preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment',
-    'backup', 'verify', 'transcode', 'concat', 'report', 'transcribe', 'tts', 'footage',
-    'drone_meta', 'projects', 'crm_clients', 'crm_projects', 'crm_quotes',
+    # 2026-09-08 階段 4 收鑰匙：前期 5 把→'preprod'、後期 9 把→'postprod'、hr_leave＋hr_benefits→'hr'（成員鑰匙見 MODULE_BUNDLES；
+    # 帳號存捆鑰匙，發 token／存帳號時 expand_modules 展開成成員，守衛與前端照舊看成員鑰匙）
+    'preprod',
+    'postprod',
+    'projects', 'crm_clients', 'crm_projects', 'crm_quotes',
     'crm_staff', 'crm_invoices', 'timesheets', 'portal', 'website_admin',
     # N0 個人工作台（獨立頁 /my.html 的卡片；無 SPA tab）。
     # ⚠ 新 key 一律 append 在尾端 — admin 帳號的 modules[0] 決定 SPA 登入
     #   預設落地頁，插前面會改掉所有管理員的首頁。
     'me_projects', 'me_profile', 'me_todos', 'me_finance',
     # N-hr 人事管理：出缺勤 tab + /my.html 我的請假卡
-    'hr_leave', 'me_leave',
+    'hr', 'me_leave',
     # 每週工作日誌（全員可讀、本人可寫；2026-09-08 起新註冊**不再**預設有 —— 由管理員開通）
     'journal',
     # 影像紀錄總覽（業務管理 › 跨專案管理各專案收集牆；單專案面板仍在專案詳情內）
@@ -197,7 +199,6 @@ ALL_MODULES = [
     # 福委會（人事管理 › 福委會；docs/BENEFIT_POOL_PLAN.md）。
     # 這把只管管理端 tab 入口 —— 池與登記的金額本來就受 money_view 抹除層管，
     # 審核／匯款另外要 finance_approve（審的是別人的錢，同零用金）。
-    'hr_benefits',
     # 員工自助登記（/my.html 的福委會卡片）。own-scope 後端本來就只認登入＋
     # 綁定人員，這把鑰匙管的是 UI 入口 —— 同 me_petty 的作法。
     'me_benefits',
@@ -220,6 +221,31 @@ ALL_MODULES = [
 # 還有其他 Lv3 帳號（Finance/Web/Assitance 待降權）——隱含制之下他們的 token
 # 一律帶著 finance_mine，改 ledger 那層的規則擋不住，唯一有效的層就是這裡。
 EXPLICIT_ONLY_MODULES = ('finance_mine',)
+
+
+# ── 捆鑰匙（2026-09-08 階段 4）：一把捆＝一組成員鑰匙。帳號與範本存捆；token／帳號儲存／回填時 expand_modules 展開成
+#    「捆＋成員」，所以 check_admin_or_module(request, 'footage') 這種成員級守衛、TAB_MAP 的成員級分頁、CF 快取的舊 js 全部照舊。
+MODULE_BUNDLES = {
+    'postprod': ('backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts', 'footage'),
+    'preprod': ('preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment'),
+    'hr': ('hr_leave', 'hr_benefits'),
+}
+LEGACY_MODULE_KEYS = tuple(k for members in MODULE_BUNDLES.values() for k in members)
+
+
+def expand_modules(modules):
+    """捆→成員（有捆就補齊成員）；成員齊了也補捆（舊帳號整組都有的，權限畫面那格才會是勾的）。保序、去重。"""
+    mods = [m for m in (modules or []) if isinstance(m, str)]
+    have = set(mods)
+    out = list(mods)
+    for bundle, members in MODULE_BUNDLES.items():
+        if bundle in have:
+            for m in members:
+                if m not in have:
+                    out.append(m); have.add(m)
+        elif all(m in have for m in members):
+            out.append(bundle); have.add(bundle)
+    return out
 
 
 def grant_admin_all_modules(access_level, modules):
@@ -473,13 +499,14 @@ def payload_grants(payload: Optional[dict], *module_keys: str) -> bool:
         return False
     if payload.get('access_level', -1) >= 3 or payload.get('role') == 'admin':
         return True
-    user_modules = payload.get('modules') or []
+    user_modules = expand_modules(payload.get('modules') or [])   # 捆鑰匙展開（舊 token 只有成員也照過）
     return any(k in user_modules for k in module_keys)
 
 
 # 鑰匙的中文名（後端正本；前端 js/admin/user-mgmt.MODULE_LABELS 是鏡射，test_rbac_module_sync 釘鍵集相同）。
 # 403 的 detail 用它說「缺哪把」——同事看到的是「需要『專案管理』權限」而不是「權限不足」四個字。
 MODULE_LABELS = {
+    'postprod': '後期製作', 'preprod': '前期製作', 'hr': '人事（請補修＋福委會）',
     'bulletin': '公布欄', 'preprod_plan': '拍攝企劃', 'preprod_locations': '場景庫', 'preprod_proposals': '提案庫', 'intel': '產業情報',
     'equipment': '器材庫', 'references': '片庫', 'backup': '備份', 'verify': '比對', 'transcode': '轉檔', 'concat': '串帶', 'report': '報表',
     'transcribe': '逐字稿', 'tts': '語音', 'footage': '素材庫', 'comfyui': 'ComfyUI', 'drone_meta': '空拍寫入', 'projects': '專案總覽',

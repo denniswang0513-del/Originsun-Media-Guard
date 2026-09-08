@@ -1278,6 +1278,8 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **`/api/settings/load` 是匿名端點，機密分兩層**（2026-09-08 稽核）：`_SECRET_KEYS`／`_SECRET_SUBKEYS`（簽得出 admin 的：jwt_secret、database_url、
   google secret）連管理員也不回；`_ADMIN_ONLY_SUBKEYS`（工時同步 token、四個 webhook）只回給管理員 token（設定視窗要顯示才能編）。新增機密欄位要進其中一層。
   內部重啟端點（`/internal/restart`、`/system/restart`）的金鑰字串隨 OTA 包公開，安全靠 `core.auth.via_cloudflare` 把公網那條路擋掉——**別**把金鑰換成 `_get_secret()`，機隊各自的 jwt_secret 不共用，master 會推不動 agent。
+- **捆鑰匙（2026-09-08 階段 4）**：`postprod`／`preprod`／`hr` 三把捆＝`core.auth.MODULE_BUNDLES` 的成員；帳號與範本存捆、`expand_modules` 在發 token／存帳號／回填時展開成「捆＋成員」。
+  守衛請繼續用**成員鍵**（`check_admin_or_module(request,'footage')`），不要拿捆當守衛鍵；新增可勾選模組仍是三處同步（`ALL_MODULES`／`PERMISSION_GROUPS`／`MODULE_LABELS` 前後端），成員鍵不進 `ALL_MODULES`（`test_module_bundles` 釘住）。
 - **權限三個正本（2026-09-08 稽核後）**：`core.auth.MODULE_LABELS`（鑰匙中文名，403 detail 用它說「缺哪把」；`test_batch3_one_ruler` 釘鍵集＝ALL_MODULES）、
   `core/rbac_templates.py`（合夥／在職／兼職預設鑰匙；`normalize` 會自動配 `me_today_zone` 總開關與 `money_view`）、`core/public_access.py`（對外免登入面的登記表，`surface_gate` 只掛一處）。
   **母帳寫入一把尺**：發票／請款／收支寫入、匯入、發票影像都是 `require_entity('parent', full)`＝crm_invoices＋money_view，跟讀取相同——不要再用 `_check_finance_auth` 單獨守寫入。

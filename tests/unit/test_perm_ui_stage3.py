@@ -17,7 +17,7 @@ def _js_obj_keys(name):
 def test_hints_only_name_real_keys_and_cover_the_dependencies():
     keys = set(_js_obj_keys("MODULE_HINTS"))
     assert keys <= set(ALL_MODULES), keys - set(ALL_MODULES)
-    for k in ("money_view", "crm_invoices", "crm_quotes", "finance_mine", "finance_partner", "me_today_zone", "me_plan_parttime", "me_petty", "hr_leave"):
+    for k in ("money_view", "crm_invoices", "crm_quotes", "finance_mine", "finance_partner", "me_today_zone", "me_plan_parttime", "me_petty", "hr"):
         assert k in keys, k
     assert "hint ? ` title=\"${hint}\"`" in JS and "${hint ? `<span style=\"color:#555" in JS, "說明要同時是 title 與灰字"
 

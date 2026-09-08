@@ -186,10 +186,11 @@ export function isMediaSection(sectionId) {
 export const PERMISSION_GROUPS = [
     { id: 'bulletin',   label: '📌 公布欄', modules: ['bulletin'] },
     { id: 'projects',   label: '📊 專案總覽', modules: ['projects'] },
-    { id: 'preprod',    label: '📝 前期製作', modules: ['preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment', 'references'] },
-    { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts', 'footage', 'comfyui'] },
+    // 2026-09-08 階段 4 收鑰匙：一把捆＝一組分頁（成員在 core.auth.MODULE_BUNDLES；token 裡兩種都有，TAB_MAP 仍是成員級）
+    { id: 'preprod',    label: '📝 前期製作', modules: ['preprod', 'references'] },
+    { id: 'production', label: '🎬 後期製作', modules: ['postprod', 'comfyui'] },
     { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'portal', 'media_log'] },
-    { id: 'hr',         label: '人事管理', modules: ['crm_staff', 'timesheets', 'hr_leave', 'hr_benefits', 'journal'] },
+    { id: 'hr',         label: '人事管理', modules: ['crm_staff', 'timesheets', 'hr', 'journal'] },
     // money_view 不是 tab，是橫切的能力鍵（有它才看得到合約金額／日費／成本）。
     // 放在財務群只是為了讓勾選的人一眼知道它管什麼 —— groupKeys 會因 TAB_MAP
     // 沒有這個 key 而自動不進側欄。政策正本 core/money.py。

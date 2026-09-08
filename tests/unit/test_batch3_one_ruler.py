@@ -35,7 +35,7 @@ def test_money_view_is_the_parent_key_of_invoices_and_quotes():
 
 
 def test_module_labels_cover_every_key_and_detail_names_the_missing_key():
-    assert set(MODULE_LABELS) == set(ALL_MODULES)
+    assert set(MODULE_LABELS) >= set(ALL_MODULES), "捆鑰匙（階段 4）也要有名字；成員鍵的名字留著給 403 detail 用"
     assert denied_detail(("crm_projects",)) == "權限不足：需要「專案管理」權限，請管理員在使用者管理開通"
     assert "「帳務（發票／請款）」或" not in denied_detail(("crm_invoices", "money_view")) and "（任一）" in denied_detail(("crm_invoices", "money_view"))
     assert denied_detail(()) == "權限不足：需要管理員"

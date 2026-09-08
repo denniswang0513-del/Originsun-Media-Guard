@@ -212,9 +212,10 @@ class TestDeepLinks:
     def test_destination_keys_are_real_rbac_modules(self):
         """打錯字的話 `payload_grants` 對每個人都回 False —— 連管理員都會看到
         「你沒有這個模組權限」。"""
-        from core.auth import ALL_MODULES
+        from core.auth import ALL_MODULES, LEGACY_MODULE_KEYS
+        # 2026-09-08 階段 4：成員鑰匙（backup／preprod_plan…）不再是可勾選的模組，但仍是合法的能力鍵（token 由捆展開）
         for key in pf.DESTS:
-            assert key in ALL_MODULES, f"{key} 不是合法的模組鍵"
+            assert key in ALL_MODULES or key in LEGACY_MODULE_KEYS, f"{key} 不是合法的模組鍵"
 
     # 另一段（目的地在 TAB_MAP 裡有 tab）是跨語言比對 → 住在
     # test_rbac_module_sync，那個檔就是為這種比對存在的。

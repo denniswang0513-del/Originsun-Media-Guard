@@ -18,7 +18,7 @@ from core.auth import (
     load_users_json, sync_user_to_json, remove_user_from_json,
     LEGACY_ROLE_LEVELS, ALL_MODULES, grant_admin_all_modules,
 )
-from core.auth import claims_drifted
+from core.auth import claims_drifted, expand_modules
 try:
     from core.google_auth import verify_google_id_token, GoogleTokenError
 except ImportError:
@@ -144,7 +144,7 @@ def _issue_token(user: dict, **extra) -> dict:
     """
     role_name = _get_user_role_name(user)
     access_level = user.get('access_level', 0)
-    modules = user.get('modules', [])
+    modules = expand_modules(user.get('modules', []))   # 捆鑰匙展開進 token（成員級守衛與前端照舊）
     token = create_token({
         'sub': user['username'], 'role_name': role_name,
         'access_level': access_level, 'modules': modules,
@@ -657,7 +657,7 @@ async def get_me(request: Request):
         'username': user['username'],
         'role_name': user.get('role_name', user.get('role', '')),
         'access_level': user.get('access_level', 0),
-        'modules': user.get('modules', []),
+        'modules': expand_modules(user.get('modules', [])),
         'email': user.get('email'),
         'avatar_url': user.get('avatar_url'),
         'auth_method': auth_method,
@@ -728,7 +728,7 @@ async def create_user(req: CreateUserRequest, request: Request):
         'password_hash': hash_password(req.password),
         'role_name': 'admin' if access_level >= 3 else 'user',  # 裝飾性，僅供顯示
         'access_level': access_level,
-        'modules': req.modules,
+        'modules': expand_modules(req.modules or []),
         'first_login': False,
     }
     await _persist_user(user_data)
@@ -747,7 +747,7 @@ async def update_user(username: str, req: UpdateUserRequest, request: Request):
     if req.password:
         user['password_hash'] = hash_password(req.password)
     if req.modules is not None:
-        user['modules'] = req.modules
+        user['modules'] = expand_modules(req.modules)   # 捆鑰匙：存帳號時展開，CF 快取的舊 js 也看得到成員鑰匙
     if req.access_level is not None:
         user['access_level'] = 3 if req.access_level >= 3 else 1
         user['role_name'] = 'admin' if user['access_level'] >= 3 else 'user'  # 裝飾性

@@ -9,7 +9,7 @@
 """
 from typing import Dict, Iterable, List, Optional
 
-from core.auth import ALL_MODULES, ME_ZONE_MASTER, ME_ZONE1_KEYS
+from core.auth import ALL_MODULES, ME_ZONE_MASTER, ME_ZONE1_KEYS, MODULE_BUNDLES
 
 IDENTITIES = ("合夥", "在職", "兼職")
 
@@ -17,8 +17,7 @@ _PARTNER_EXCLUDE = {"finance_mine"}          # 私帳：指名才有，合夥也
 _HIDDEN = {"me_todos", "me_finance"}          # 員工頁還沒放回的卡，範本不勾
 
 _STAFF = [
-    "preprod_plan", "preprod_locations", "preprod_proposals", "intel", "equipment", "references",
-    "backup", "verify", "transcode", "concat", "drone_meta", "report", "transcribe", "tts", "footage", "comfyui",
+    "preprod", "references", "postprod", "comfyui",
     "projects", "crm_clients", "crm_projects", "media_log", "website_admin", "journal",
     "me_profile", "me_today_zone", "me_worklog", "me_week_plan", "me_team_week", "me_project_lookup",
     "me_plan_parttime", "me_leave", "me_petty", "me_benefits", "me_projects",
@@ -42,7 +41,11 @@ def normalize(templates: Optional[dict]) -> Dict[str, List[str]]:
         if not isinstance(raw, list):
             out[ident] = list(DEFAULT_TEMPLATES[ident])
             continue
-        keep = {k for k in raw if isinstance(k, str) and k in ALL_MODULES}
+        raw_set = {k for k in raw if isinstance(k, str)}
+        for bundle, members in MODULE_BUNDLES.items():          # 存過的範本可能還是成員鍵：有任一成員就收成那把捆
+            if raw_set & set(members):
+                raw_set.add(bundle)
+        keep = {k for k in raw_set if k in ALL_MODULES}
         if keep & set(ME_ZONE1_KEYS):
             keep.add(ME_ZONE_MASTER)
         if keep & {"crm_invoices", "crm_quotes"}:
