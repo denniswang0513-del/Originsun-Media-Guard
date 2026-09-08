@@ -13,12 +13,12 @@ import uuid
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
-from sqlalchemy import func, or_, select  # type: ignore
+from sqlalchemy import func, select  # type: ignore
 
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503
-from core.hr_logic import ANNUAL_TYPE, day_iso, leave_balance, parse_ymd, tw_day
-from core.leave_logic import (ALL_LEAVE_TYPES, CREDIT_KINDS, CREDIT_SOURCES, HOLIDAY_KINDS, HOURS_PER_DAY,
+from core.hr_logic import ANNUAL_TYPE, active_staff_where, day_iso, leave_balance, parse_ymd, tw_day
+from core.leave_logic import (ALL_LEAVE_TYPES, CREDIT_KINDS, CREDIT_SOURCES, HOLIDAY_KINDS, HOURS_PER_DAY, check_hours_step,
                               LEDGER_TYPES, NOTICE_DAYS, PARTS, annual_days_for, as_date, hours_to_days,
                               parse_gov_calendar_csv, vocab as leave_vocab, working_hours)
 from core.schemas import (AnnualLeaveSet, CreditCreate, HolidayCreate, HolidayImport, LeaveCancel,
@@ -28,9 +28,8 @@ from services import leave_service
 
 router = APIRouter(prefix="/api/v1/hr", tags=["hr"])
 
-#: 「在職」的 WHERE —— **空白視同在職**（core.hr_logic.is_active_staff 的 SQL 版；status 是後補的欄位，
-#: 舊人員列是 NULL／空字串）。嚴格比對會讓那些人在時數帳／特休總覽整個消失，但他自己送得出假單。
-_ACTIVE_STAFF = or_(CrmStaff.status == "在職", CrmStaff.status.is_(None), CrmStaff.status == "")
+#: 「在職」的 WHERE —— 規則的正本是 core.hr_logic.active_staff_where()（空白視同在職）。
+_ACTIVE_STAFF = active_staff_where()
 
 
 def _actor(payload) -> str:
@@ -289,9 +288,10 @@ async def update_leave(leave_id: str, body: LeaveUpdate, request: Request):
                                           obj.start_time, obj.end_time, holidays)
                 except ValueError as e:
                     raise HTTPException(status_code=422, detail=str(e))
-            if hours <= 0 or round(hours * 2) != hours * 2:
-                raise HTTPException(status_code=422, detail="時數需大於 0，且以 0.5 小時為最小單位")
-            obj.hours = round(hours, 2)
+            try:
+                obj.hours = check_hours_step(hours)
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
             obj.days = hours_to_days(hours)
         await session.commit()
         await session.refresh(obj)
@@ -363,8 +363,10 @@ async def create_credit(body: CreditCreate, request: Request):
     payload = check_admin_or_module(request, "hr_leave")
     if body.kind not in CREDIT_KINDS:
         raise HTTPException(status_code=422, detail=f"kind 需為：{'/'.join(CREDIT_KINDS)}")
-    if body.hours is None or body.hours <= 0 or round(body.hours * 2) != body.hours * 2:
-        raise HTTPException(status_code=422, detail="時數需大於 0，且以 0.5 小時為最小單位")
+    try:
+        hours = check_hours_step(body.hours)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     granted, expires = as_date(body.granted_on), as_date(body.expires_on)
     if granted is None:
         raise HTTPException(status_code=422, detail="granted_on 需為 YYYY-MM-DD")
@@ -382,7 +384,7 @@ async def create_credit(body: CreditCreate, request: Request):
             raise HTTPException(status_code=404, detail="人員不存在")
         obj = HrLeaveCredit(
             id=uuid.uuid4().hex[:12], staff_id=staff.id, staff_name=staff.name,
-            kind=body.kind, hours=round(float(body.hours), 2), granted_on=granted, expires_on=expires,
+            kind=body.kind, hours=hours, granted_on=granted, expires_on=expires,
             source=source, reason=(body.reason or "").strip() or None, shoot_id=(body.shoot_id or "").strip() or None,
             status="可用", approved_by=_actor(payload), approved_at=datetime.now(timezone.utc),
             note=(body.note or "").strip() or None, created_by=_actor(payload),

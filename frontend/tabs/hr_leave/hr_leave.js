@@ -4,7 +4,7 @@
 // API: /api/v1/hr/leave*、/hr/balances、/hr/credits、/hr/holidays（管理端）；員工自助在 /my.html 走 /api/v1/me/leave/*。
 // 🔴 改狀態一律走 approve／reject／cancel_decide 三支，PUT /hr/leave/{id} 不再接受 status。
 
-import { createSortable, sortableTh, enumIndex } from '../crm/crm-utils.js';
+import { createSortable, sortableTh, enumIndex, today } from '../crm/crm-utils.js';   // today()＝本地今天（別用 toISOString，台北早上八點前會差一天）
 import { esc } from '../../js/shared/dom.js';
 import { authFetch, tabLoadError } from '../../js/shared/utils.js';
 
@@ -31,11 +31,9 @@ let _credits = {};               // staff_id → credit 明細
 let _importResult = '';
 
 const el = (id) => document.getElementById(id);
-// 今天（本地時區）。🔴 不要用 toISOString().slice(0,10)：+08 的早上八點前會變成昨天。
-// （這個檔一律用雙斜線註解，不要用 JSDoc 區塊註解：檔頭第 4 行的路徑寫法帶了一個「斜線星號」，
-//   只要檔案裡再出現一個「星號斜線」，tests/unit/_srcscan.js_code_only 就會把中間整段當成區塊註解
-//   剝掉——真的程式碼會跟著消失，而測試只會說某個常數不見了。）
-const _localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+// 這個檔一律用雙斜線註解，不要用 JSDoc 區塊註解：檔頭第 4 行的路徑寫法帶了一個「斜線星號」，
+// 只要檔案裡再出現一個「星號斜線」，tests/unit/_srcscan.js_code_only 就會把中間整段當成區塊註解
+// 剝掉——真的程式碼會跟著消失，而測試只會說某個常數不見了。
 const hget = (path) => authFetch(API + path);
 const hpost = (path, body) => authFetch(API + path, { method: 'POST', body: body ?? {} });
 const hdel = (path) => authFetch(API + path, { method: 'DELETE' });
@@ -397,14 +395,14 @@ function _balanceRow(s) {
 
 function _creditsHtml(staffId, name) {
     const list = _credits[staffId];
-    const today = _localToday();
+    const granted = today();
     const rows = list === undefined ? '<div class="hl-empty">載入中…</div>'
         : !list.length ? '<div class="hl-empty">尚無 credit</div>'
         : `<table>
             <tr><th>種類</th><th class="num">時數</th><th class="num">已扣</th><th class="num">剩餘</th><th>發放日</th><th>到期日</th><th>來源</th><th>狀態</th><th>說明</th><th></th></tr>
             ${list.map(c => {
-                const used = Number(c.used_hours ?? c.allocated_hours ?? c.used ?? 0);
-                const remain = Number(c.hours || 0) - used;
+                // used／remaining 由後端 credit_dict 算好（前端再算一次會跟核准扣帳的那份漂開）
+                const used = Number(c.used || 0), remain = Number(c.remaining ?? (Number(c.hours || 0) - used));
                 return `<tr>
                     <td>${esc(c.kind)}</td>
                     <td class="num">${fmtH(c.hours)}</td>
@@ -425,7 +423,7 @@ function _creditsHtml(staffId, name) {
             <span style="color:#888;font-size:12px;">手開：</span>
             <select data-c="kind">${CREDIT_KINDS.map(k => `<option>${k}</option>`).join('')}</select>
             <input type="number" data-c="hours" min="0.5" step="0.5" value="8" title="時數">
-            <span style="color:#777;font-size:12px;">發放</span><input type="date" data-c="granted" value="${today}">
+            <span style="color:#777;font-size:12px;">發放</span><input type="date" data-c="granted" value="${granted}">
             <span style="color:#777;font-size:12px;">到期</span><input type="date" data-c="expires">
             <input type="text" data-c="reason" placeholder="事由（例：加班補休 9/1 拍攝）" style="width:220px;">
             <button class="hl-btn" data-c-add="${esc(staffId)}">建立</button>

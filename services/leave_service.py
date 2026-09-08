@@ -17,7 +17,7 @@ from sqlalchemy import func, select  # type: ignore
 from core.hr_logic import day_iso, leave_to_dict, midnight_of, parse_ymd, tw_day
 from core.leave_logic import (ACTIVE_STATUSES, ALL_LEAVE_TYPES, HOURS_PER_DAY, LEDGER_TYPES,
                               PARTS, SICK_CAP_DAYS, InsufficientHours, allocate, annual_days_for,
-                              as_date, balance, cancel_mode, hours_to_days, in_crew, notice_warning,
+                              as_date, balance, cancel_mode, check_hours_step, hours_to_days, in_crew, notice_warning,
                               overlaps, working_hours)
 from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
 from db.models import CrmProject, CrmShoot, HrHoliday, HrLeaveAllocation, HrLeaveCredit, HrLeaveRequest
@@ -176,9 +176,7 @@ def hours_from_body(body, holidays) -> tuple:
     hours = float(hours)
     if hours <= 0:
         raise ValueError("期間內沒有工作日（週末／假日不用請假）")
-    if round(hours * 2) != hours * 2:
-        raise ValueError("時數以 0.5 小時為最小單位")
-    return round(hours, 2), part
+    return check_hours_step(hours), part
 
 
 async def evaluate(session, staff_id: str, staff_name: str, body, today: date | None = None,

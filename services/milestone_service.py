@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy import and_, func, or_, select
 
-from core.hr_logic import STAFF_ACTIVE, midnight_of, tw_day
+from core.hr_logic import active_staff_where, midnight_of, tw_day
 from core.journal_logic import week_start_of
 from core.milestone_logic import (RECENT_DAYS, STATUS_DONE, STATUS_OPEN, as_date, default_due, milestone_dict,
                                   shifted_week, sort_projects)
@@ -69,7 +69,7 @@ async def _hours_by_project(session, d0: datetime, d1: datetime) -> dict:
 async def staff_options(session) -> list:
     from db.models import CrmStaff
     rows = (await session.execute(
-        select(CrmStaff.id, CrmStaff.name).where(or_(CrmStaff.status == STAFF_ACTIVE, CrmStaff.status.is_(None), CrmStaff.status == ""))
+        select(CrmStaff.id, CrmStaff.name).where(active_staff_where())    # 空白視同在職（規則正本在 core.hr_logic）
         .order_by(CrmStaff.name))).all()
     return [{"id": i, "name": n} for i, n in rows]
 
@@ -120,10 +120,12 @@ async def save_week(session, start: str, items: list, username: str) -> dict:
     today = date.today()
     week_start = _week_of(start, today)
     now = datetime.now(timezone.utc)
+    # 彈窗是整批送（一次二三十筆），一筆一個 session.get 就是 N 次查詢 —— 先一次撈成表
+    known = {m.id: m for m in await _milestones_for_week(session, week_start)}
     for it in items:
         title = (it.title or "").strip()
         if it.id:
-            m = await session.get(M, it.id)
+            m = known.get(it.id) or await session.get(M, it.id)
             if m is None:
                 continue
             if it.delete:                      # 只有明講 delete 才刪；標題空白＝那一格沒填，跳過不動
@@ -188,9 +190,23 @@ async def defer(session, mid: str, start: str, username: str) -> dict:
 
 
 async def today_summary(session, today: date) -> dict:
-    """今天那條：本週幾個、今天到期哪幾個（給 /me/today）。"""
-    p = await week_payload(session, None, today)
-    return {"total": p["open_count"] + p["done_count"], "open": p["open_count"], "late": p["late_count"], "due_today": p["due_today"]}
+    """今天那條：本週幾個、今天到期哪幾個（給 /me/today）。
+
+    只要四個數字，所以不走 week_payload（那支為了畫彈窗還會算兩次工時 GROUP BY、撈全部相關案、
+    撈人員清單 —— 開一次頁、每次請假／里程碑動作後都白跑一遍）。這裡只撈這週的里程碑，
+    案名只回查「今天到期」那幾筆。"""
+    ms = await _milestones_for_week(session, week_start_of(today))
+    items = [milestone_dict(m, week_start_of(today), today) for m in ms]
+    due = [m for m in items if not m["done"] and m["due_date"] == today.isoformat()]
+    names = await _projects_info(session, list({m["project_id"] for m in due if m["project_id"]}))
+    return {
+        "total": len(items),
+        "open": sum(1 for m in items if not m["done"]),
+        "late": sum(1 for m in items if m["late"]),
+        "due_today": [{"id": m["id"], "title": m["title"],
+                       "project_name": (names.get(m["project_id"]) or {}).get("name", ""),
+                       "assignee_name": m["assignee_name"]} for m in due],
+    }
 
 
 async def project_milestones(session, project_id: str) -> list:

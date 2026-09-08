@@ -97,6 +97,17 @@ def as_date(v) -> date | None:
         return None
 
 
+def check_hours_step(hours) -> float:
+    """時數要 > 0 且是 0.5 的倍數；不合就 raise ValueError（呼叫端轉 422）。回四捨五入到兩位的值。
+
+    這條規則原本在送單、管理端改單、手開 credit 三處各寫一次條件與訊息，訊息還已經漂成兩種說法。
+    """
+    h = float(hours or 0)
+    if h <= 0 or round(h * 2) != h * 2:
+        raise ValueError("時數需大於 0，且以 0.5 小時為最小單位")
+    return round(h, 2)
+
+
 def hours_to_days(hours) -> float:
     """8 小時＝1 天；顯示用（兩位小數、去尾零）。"""
     return round(float(hours or 0) / HOURS_PER_DAY, 2)

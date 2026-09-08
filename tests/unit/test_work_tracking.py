@@ -62,7 +62,7 @@ def test_board_and_my_day_are_gated_by_the_timesheets_module():
     assert "if with_note:" in func_body(svc, "def ts_dict(")
     # 總表刪掉的 Sheet 列留指紋、ingest 看到就跳過（總表為準；手填列不留）
     dele = func_body(svc, "async def admin_delete_row(")
-    assert "add_tombstone(session, r.row_hash" in dele and 'r.source != "manual"' in dele
+    assert "tombstone_if_sheet(session, r, who)" in dele   # 留指紋的規則四處共用一支（手填列它自己會跳過）
     ing = code_only(repo_src("services/timesheet_ingest.py"))
     assert "select(TimesheetTombstone.row_hash)" in func_body(ing, "async def ingest_context(")
     assert "if h in tombstones:" in func_body(ing, "async def ingest(")

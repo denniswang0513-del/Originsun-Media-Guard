@@ -22,8 +22,11 @@ def test_can_edit_truth_table():
     for st in ("approved", "locked", "import", "confirmed"):   # 不審核：這些狀態沒人寫得出來
         assert can_edit_timesheet(NS(**{**mine, "status": st}), "s1") == "locked", st
     # 代碼→給人看的原句只有一份（端點的 detail 從這裡拿）
-    assert "不是你的" in EDIT_BLOCK_TEXT["not_owner"] and "Sheet" in EDIT_BLOCK_TEXT["not_manual"]
+    assert "不是你的" in EDIT_BLOCK_TEXT["not_owner"]
     assert "不能再改" in EDIT_BLOCK_TEXT["locked"]
+    # 文案只留 can_edit_timesheet 真的會回的代碼（"not_manual" 已隨「Sheet 列本人可改」退場，
+    # 留著會讓人以為還有那種擋法，也讓刪死碼的人以為改壞了規格）
+    assert set(EDIT_BLOCK_TEXT) == {"not_owner", "locked"}
     assert EDITABLE_STATUSES == {"plan", "draft", "pending"}   # 不審核：計畫、實際、草稿（2026-09-07）都隨時可改
 
 

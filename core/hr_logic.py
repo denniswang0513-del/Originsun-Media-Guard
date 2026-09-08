@@ -464,10 +464,11 @@ def row_state(hours, planned_hours, plan: bool = False) -> str:
 EDITABLE_STATUSES = frozenset({"plan", "draft", PENDING_STATUS})   # 不審核：沒有 confirmed／approved
 
 
-#: can_edit_timesheet 的代碼 → 給人看的原因；HTTP 狀態由代碼決定，不靠中文比對
+#: can_edit_timesheet 的代碼 → 給人看的原因；HTTP 狀態由代碼決定，不靠中文比對。
+#: 2026-09-07 起沒有 "not_manual"：Sheet 列本人也能改（第一次改就 claim 成手填列），
+#: 那條路已經不會回這個代碼，留著文案只會讓人以為還有這種擋法。
 EDIT_BLOCK_TEXT = {
     "not_owner": "不是你的工時列",
-    "not_manual": "Sheet 同步進來的列不能在這裡改，請改試算表",
     "locked": "這一列已鎖，不能再改",
 }
 
@@ -894,13 +895,15 @@ def staff_rank(status) -> int:
     return STAFF_RANK.get((status or "").strip(), 2)
 
 
-def is_active_staff(status) -> bool:
-    """「在職」＝在職，**或狀態空白**（status 是後來才加的欄位，舊人員列是 NULL／空字串）。
+def active_staff_where():
+    """「在職」的 WHERE：**在職，或狀態空白**（status 是後補的欄位，舊人員列是 NULL／空字串）。
 
-    嚴格比對 `status == "在職"` 的地方會讓那些人整個消失 —— 假勤的時數帳與特休總覽踩過：
+    嚴格比對 `status == "在職"` 會讓那些人整個消失 —— 假勤的時數帳與特休總覽踩過：
     人自己送得出假單、也開得了 credit，管理員卻永遠看不到他的餘額。
-    （SQL 那側寫成 `or_(status == STAFF_ACTIVE, status.is_(None), status == "")`，同一條規則。）"""
-    return (status or "").strip() in ("", STAFF_ACTIVE)
+    這條 or_ 原本在假勤、里程碑、工作階段、人力庫各抄一份（假勤那份還漏了空白那半）。"""
+    from db.models import CrmStaff
+    from sqlalchemy import or_
+    return or_(CrmStaff.status == STAFF_ACTIVE, CrmStaff.status.is_(None), CrmStaff.status == "")
 
 
 # ── 合併同案（owner 2026-09-07：員工一天分好幾段記同一個案，「合併同案」把同案同分類同階段的列併成一列）──

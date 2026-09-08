@@ -37,13 +37,16 @@ console.log(JSON.stringify(out));"""
 
 def test_sheet_rows_are_editable_by_owner_and_claimed_with_tombstone():
     svc = code_only(repo_src("services/timesheet_self.py"))
+    # 「Sheet 列被吃掉之前先留指紋」四處共用 tombstone_if_sheet（手填列回 False、不留）
+    helper = func_body(svc, "async def tombstone_if_sheet(")
+    assert 'if getattr(row, "source", "") == "manual":' in helper and "add_tombstone(session, row.row_hash" in helper
+    assert "work_date=row.work_date" in helper and "hours=row.hours" in helper, "指紋欄位要齊，漏一欄那列下次拉取又長回來"
     claim = func_body(svc, "async def claim_sheet_row(")
-    assert 'if getattr(r, "source", "") == "manual":' in claim and "add_tombstone(session, r.row_hash" in claim
+    assert "tombstone_if_sheet(session, r, who)" in claim
     assert 'r.source = "manual"' in claim and 'r.status = "draft"' in claim and 'r.row_hash = "manual_" + uuid.uuid4().hex' in claim
     assert "await claim_sheet_row(session, r, ident" in func_body(svc, "async def update_row(")
-    dele = func_body(svc, "async def delete_row(")
-    assert 'if r.source != "manual":' in dele and "add_tombstone(" in dele
+    assert "tombstone_if_sheet(session, r, ident" in func_body(svc, "async def delete_row(")
     merge = func_body(svc, "async def merge_day(")
-    assert "await claim_sheet_row(session, kept, who)" in merge and "add_tombstone(session, a.row_hash" in merge
+    assert "await claim_sheet_row(session, kept, who)" in merge and "tombstone_if_sheet(session, a, who)" in merge
     rule = func_body(code_only(repo_src("core/hr_logic.py")), "def can_edit_timesheet(")
     assert '"not_manual"' not in rule

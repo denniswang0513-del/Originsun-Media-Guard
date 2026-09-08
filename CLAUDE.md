@@ -1258,11 +1258,24 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`routers/api_system.py`](routers/api_system.py) 的公司圖上傳 | Logo／印章上傳＋取回（看檔頭不看副檔名；同 kind 只留一份） | 存 `company_assets/`（gitignore、不掛靜態）；PDF 端讀 `settings.company.<kind>_path` |
 | `core.hr_logic` 的草稿列（`PENDING_STATUS`／`row_state`） | 「填了任何一格就存、有時數才進彙整」：pending 列不算工時 | 前端 `ts-sheet.js` 的 content 判定與後端 `normalize_row` 的空白列 422 **要同一組欄位**（專案／做了什麼／備註／階段） |
 | `frontend/my.html` 的「我的一週」＋ `ts-sheet.js` 的計畫列 | 個人週規劃（owner 2026-09-08）：一天一欄的板、一張卡＝一列工時（`status=plan`、沒時數，POST 帶 `plan:true`）；當天的卡就是格子裡的藍底「計畫」列；「挪到隔天」＝PUT 只帶 `work_date` | **不判有做沒做**（沒有未執行／自動對上／提醒）；只能排自己的；`row_state(plan=True)` 沒時數也是 plan，`apply_update` 不帶 plan 就沿用列上的狀態，填了時數才變 draft |
+| [`core/leave_logic.py`](core/leave_logic.py) | 假勤的**純規則**：工作日／時數換算（8h＝1 天）、credit 餘額與 FIFO 分配、消假模式（free／apply／locked）、提前通知警告、政府行事曆 CSV | 無 I/O；時數一律由起迄／時段算，員工端不收 client 給的 hours（見「不要動的地方」） |
+| [`services/leave_service.py`](services/leave_service.py) | 假勤的 I/O：evaluate（送單前的錯誤／警告／餘額）、核准時從時數帳扣、序列化 | 送單與 preview 走**同一支** `hours_from_body`／`evaluate`，兩條路不能各算一次 |
+| [`core/milestone_logic.py`](core/milestone_logic.py) ＋ [`services/milestone_service.py`](services/milestone_service.py) | 每週專案里程碑：週的推導（延自上週／過期／延到下週）、彈窗的週 payload、整批 save | `save_week` 是**整批覆寫**：沒帶的欄位不准寫（舊分頁會清掉別人剛填的）；`_hours_by_project` 只算 `hours>0`（計畫列不算） |
+| `services/timesheet_self.py` 的合併同案（`merge_day`／`undo_merge`） | 同案同分類同階段的列併成一列＋整列快照可復原 | 規則在 `core.hr_logic.merge_plan`（純函式）；沒有專案的列不併；`_SNAP_COLS` 要涵蓋 `Timesheet` 全部欄位，漏一欄復原就靜默丟資料 |
 
 ## 不要動的地方
 
 > /polish 逐次累積的地雷。動之前先讀對應那一行。
 
+- **`frontend/tabs/hr_leave/hr_leave.js` 只准用雙斜線註解**：檔頭第 4 行的 API 路徑帶了一個「斜線星號」，
+  檔案裡只要再出現一個「星號斜線」（加一段 JSDoc 就會），`tests/unit/_srcscan.js_code_only` 會把中間
+  整段當區塊註解剝掉 —— 真的程式碼跟著消失，而測試只會說某個常數不見了。同樣的陷阱在任何「檔頭寫了
+  glob 路徑」的 js 都成立。
+- **員工自助的請假送單不收 `hours`／`days`**（`MeLeaveCreate`）：收了就能送「五天特休、hours: 0.5」，
+  preview 顯示 40 小時、實際只從時數帳扣 0.5。時數一律由起迄／時段算；要手調時數走管理端 `LeaveUpdate`。
+- **`merge_plan` 不併沒有專案的列**：鍵會塌成 `("", 分類, 階段)`，不相干的兩件事被併成一列、第二列被刪。
+- **報價單無名分類只跟緊鄰的無名列同組**：`_group_items` 的「同名就是同一組」只適用於有名字的組，
+  不然舊報價單（整批沒填分類）印出來的順序會跟輸入的不一樣。
 - **報價單版面**：owner 逐項拍板過（無公司抬頭區塊、無上下色帶、灰表頭、總額無粗線、備註在結算下方、
   頁尾只留數字）。要調版面先開示範頁比對，別直接改模板。
 - **`core.quotation_pdf.PDF_MARGIN` 與模板 `@page` 必須一致**：模板還用它算「單頁時簽章貼底」的

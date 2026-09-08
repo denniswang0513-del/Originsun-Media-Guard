@@ -32,10 +32,12 @@ function leaveTypes() {
     if (v && typeof v === 'object') return Object.values(v).flat().filter(x => typeof x === 'string');
     return [];
 }
-/** 時段：後端可能給 [{value:'all',label:'整天'}, …]、['all', …] 或 {all:'整天', …}，統一成 [{value,label}]。 */
+/** 時段：後端給 parts=['all','am',…] ＋ part_labels={all:'整天',…}（core/leave_logic.vocab），統一成 [{value,label}]。
+ *  🔴 label 一定要查 part_labels：只用 value 當 label 的話，抽屜裡顯示的是 all／am／pm／range。 */
 function parts() {
-    const v = vocab().parts;
-    if (Array.isArray(v)) return v.map(x => (typeof x === 'object' ? { value: x.value, label: x.label || x.value } : { value: x, label: x }));
+    const v = vocab().parts, labels = vocab().part_labels || {};
+    if (Array.isArray(v)) return v.map(x => (typeof x === 'object' ? { value: x.value, label: x.label || labels[x.value] || x.value }
+                                                                   : { value: x, label: labels[x] || x }));
     if (v && typeof v === 'object') return Object.entries(v).map(([value, label]) => ({ value, label: String(label) }));
     return [];
 }

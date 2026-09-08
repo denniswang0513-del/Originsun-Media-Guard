@@ -1209,7 +1209,10 @@ async function saveProfile(btn) {
 // ── 卡：我的假勤（me_leave；docs/LEAVE_PLAN.md §7.4／§7.6：時數帳＋申請單）──
 // 卡片自己打 /api/v1/me/leave/summary（不吃 workspace bundle）：三個數字＋請假表單（即時 preview）＋近期清單。
 // 字彙（假別／半天／每日時數）從 summary.vocab 拿，不寫死；撤回／申請消假依後端算好的 cancel_mode。
-const LV_PART_LABEL = { all: "整天", am: "上午", pm: "下午", range: "時段" };
+// 時段的中文由後端字彙給（/me/leave/summary 的 vocab.part_labels，正本 core/leave_logic.PART_LABELS）；
+// 這裡只留還沒拿到 summary 時的預設值 —— 卡片的其他字彙也是這個規矩。
+const LV_PART_FALLBACK = { all: "整天", am: "上午", pm: "下午", range: "時段" };
+const LV_PART_LABEL = (code) => ((LV && LV.vocab && LV.vocab.part_labels) || LV_PART_FALLBACK)[code] || code || "";
 let LV = null;                 // 最近一次 summary
 let _lvPreviewTimer = null;    // preview 去抖
 let _lvPreviewSeq = 0;         // 舊回應不蓋新回應
@@ -1240,7 +1243,7 @@ function renderLeave(body) {
     const an = bal["特休"] || {}, comp = bal["補休"] || {};
     const sick = LV.sick || {};
     const types = v.leave_types || ["特休", "補休", "病假", "事假", "公假", "婚假", "喪假", "其他"];
-    const parts = v.parts || Object.keys(LV_PART_LABEL);
+    const parts = v.parts || Object.keys(LV_PART_FALLBACK);
     const today = _localToday();
     const expiring = (an.expiring || [])[0];
     let html = `<div class="stat-row">
@@ -1254,7 +1257,7 @@ function renderLeave(body) {
     <div class="pf-edit" id="lv-form" style="border-top:1px solid #f5f5f5;padding-top:12px;padding-bottom:4px;">
         <div class="inline-row" style="margin-bottom:8px;">
             <select id="lv-type">${types.map(t => `<option>${esc(t)}</option>`).join("")}</select>
-            <select id="lv-part">${parts.map(p => `<option value="${esc(p)}">${LV_PART_LABEL[p] || esc(p)}</option>`).join("")}</select>
+            <select id="lv-part">${parts.map(p => `<option value="${esc(p)}">${esc(LV_PART_LABEL(p))}</option>`).join("")}</select>
         </div>
         <div class="inline-row" style="margin-bottom:8px;">
             <input type="date" id="lv-start" value="${today}">
@@ -1284,7 +1287,7 @@ function renderLeave(body) {
 }
 function _lvRow(r) {
     const hot = r.status === "待審" || r.status === "消假待審";
-    const partLbl = LV_PART_LABEL[r.part] || "";
+    const partLbl = LV_PART_LABEL(r.part);
     const tm = r.part === "range" && r.start_time ? ` ${esc(r.start_time)}–${esc(r.end_time || "")}` : "";
     const period = r.start_date === r.end_date ? esc(r.start_date) : `${esc(r.start_date)} ~ ${esc(r.end_date)}`;
     const metas = [];
@@ -1610,6 +1613,7 @@ function buildZone1() {
     _planWireDnd(z);
     switchZ1(_z1View);
 }
+const Z1_LOADERS = { log: () => loadLog(), plan: () => loadMyWeek(), week: () => loadTeamWeek(), find: () => loadFind() };
 function switchZ1(v) {
     if (!["log", "plan", "week", "find"].includes(v)) v = "log";
     _z1View = v;
@@ -1617,8 +1621,12 @@ function switchZ1(v) {
     document.querySelectorAll("#z1-views .view-btn").forEach(b => b.classList.toggle("active", b.dataset.view === v));
     document.querySelectorAll("#ws-zone1 .view").forEach(el => el.classList.toggle("on", el.dataset.view === v));
     const el = $("z1-" + v);
-    if (el && !el.dataset.loaded) { el.dataset.loaded = "1"; el._ready = ({ log: loadLog, plan: loadMyWeek, week: loadTeamWeek, find: loadFind })[v](); }
-    else if (el && el.dataset.stale) { delete el.dataset.stale; el._ready = ({ log: loadLog, plan: loadMyWeek, week: loadTeamWeek, find: loadFind })[v](); }   // 別的視圖動過同一批列
+    // 沒載過、或別的視圖動過同一批列（stale）→ 載一次
+    if (el && (!el.dataset.loaded || el.dataset.stale)) {
+        el.dataset.loaded = "1";
+        delete el.dataset.stale;
+        el._ready = Z1_LOADERS[v]();
+    }
     return el && el._ready;   // 第一次載入的 promise（別的視圖要跳過來開東西時等它）
 }
 /** 我的一週與今天的格子是同一批列：一邊動了，另一邊下次切過去要重抓。 */

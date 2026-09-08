@@ -17,8 +17,9 @@ from core.hr_logic import (EDIT_BLOCK_TEXT, by_month, can_edit_timesheet, day_is
 from services.timesheet_lookup import load_project_lookup
 from services.timesheet_manual import insert_manual_rows, names_for, normalize_row
 
-# can_edit_timesheet 的代碼 → HTTP 狀態：不是你的＝403，其餘（Sheet 列／已鎖）＝409
-_BLOCK_STATUS = {"not_owner": 403, "not_manual": 409, "locked": 409}
+# can_edit_timesheet 的代碼 → HTTP 狀態：不是你的＝403，已鎖＝409
+# （"not_manual" 2026-09-07 起不會再回：Sheet 列本人可改，第一次改就 claim_sheet_row 轉手填）
+_BLOCK_STATUS = {"not_owner": 403, "locked": 409}
 
 
 def ts_dict(r, staff_id: str | None = None, *, with_note: bool = False) -> dict:
@@ -222,13 +223,23 @@ async def apply_update(session, r, body) -> None:
         r.bulletin_id = bid.strip() or None
 
 
+async def tombstone_if_sheet(session, row, who: str) -> bool:
+    """Sheet／匯入來的列在被吃掉之前留指紋（下次拉取不插回）；手填列不用，回 False。
+
+    「哪些欄位要進指紋」原本在 claim／刪列／合併／總表刪列四處各抄一次 —— 抄漏一欄不會出錯，
+    只會讓那一列下次拉取又長回來。"""
+    if getattr(row, "source", "") == "manual":
+        return False
+    await add_tombstone(session, row.row_hash, who, staff_name=row.staff_name, project_name=row.project_name,
+                        work_date=row.work_date, hours=row.hours)
+    return True
+
+
 async def claim_sheet_row(session, r, who: str) -> None:
     """本人改 Sheet 同步／CSV 匯入的列（2026-09-07 同事回饋「上週的紀錄改不了」）：先留指紋（下次拉取不插回），
     再轉成手填列（source=manual、status=draft、新的 manual_ 指紋）。已是手填列就什麼都不做。"""
-    if getattr(r, "source", "") == "manual":
+    if not await tombstone_if_sheet(session, r, who):
         return
-    await add_tombstone(session, r.row_hash, who, staff_name=r.staff_name, project_name=r.project_name,
-                        work_date=r.work_date, hours=r.hours)
     r.source = "manual"
     r.status = "draft"
     r.row_hash = "manual_" + uuid.uuid4().hex     # sheet_key 留著沒關係：手填列拉取不會再比它
@@ -245,9 +256,7 @@ async def update_row(session, ident: dict, row_id: str, body) -> dict:
 
 async def delete_row(session, ident: dict, row_id: str) -> dict:
     r = await own_row(session, row_id, ident)
-    if r.source != "manual":      # Sheet 列本人刪：留指紋，拉取不插回
-        await add_tombstone(session, r.row_hash, ident.get("username") or "", staff_name=r.staff_name,
-                            project_name=r.project_name, work_date=r.work_date, hours=r.hours)
+    await tombstone_if_sheet(session, r, ident.get("username") or "")     # Sheet 列本人刪：留指紋，拉取不插回
     await session.delete(r)
     await session.commit()
     return {"deleted": row_id}
@@ -294,9 +303,7 @@ async def merge_day(session, ident: dict, day: datetime, *, dry_run: bool) -> di
         who = ident.get("username") or ""
         await claim_sheet_row(session, kept, who)              # Sheet 列被併：本體轉手填、被併的留指紋
         for a in absorbed:
-            if a.source != "manual":
-                await add_tombstone(session, a.row_hash, who, staff_name=a.staff_name, project_name=a.project_name,
-                                    work_date=a.work_date, hours=a.hours)
+            await tombstone_if_sheet(session, a, who)
         kept.hours = g["hours"]
         kept.task_note = g["task_note"] or None
         kept.remark = g["remark"] or None
@@ -425,9 +432,7 @@ async def admin_delete_row(session, row_id: str, who: str = "") -> dict:
     """管理員刪任一列。Sheet 拉進來的列另留指紋（TimesheetTombstone），下次拉取不再插回來 ——
     總表為準（owner 2026-09-03）。手填列沒有 Sheet 對應，不用留。"""
     r = await get_row(session, row_id)
-    if r.source != "manual":
-        await add_tombstone(session, r.row_hash, who, staff_name=r.staff_name, project_name=r.project_name,
-                            work_date=r.work_date, hours=r.hours)
+    await tombstone_if_sheet(session, r, who)
     await session.delete(r)
     await session.commit()
     return {"deleted": row_id, "tombstoned": r.source != "manual"}

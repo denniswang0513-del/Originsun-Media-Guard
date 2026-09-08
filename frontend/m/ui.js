@@ -147,7 +147,10 @@ export async function createClientOption(name) {
     try {
         const r = await mfetch('/api/v1/crm/clients', { method: 'POST', body: { short_name: name } });
         const c = r.client || r;
-        (opt().clients || (state.options && (state.options.clients = [])) || []).push({ id: c.id, short_name: c.short_name || name, full_name: c.full_name || '', tax_id: c.tax_id || '' });
+        // 🔴 要推進 state.options 本身：opt() 在 state.options 還沒有東西時回的是一個新的空物件，
+        // 推進去就沒了（下拉不會多出剛建好的客戶，要重新整理才看得到）
+        const o = state.options || (state.options = {});
+        (o.clients || (o.clients = [])).push({ id: c.id, short_name: c.short_name || name, full_name: c.full_name || '', tax_id: c.tax_id || '' });
         toast('客戶已建立：' + (c.short_name || name));
         return { value: c.id, label: c.short_name || name };
     } catch (e) { toast(e.message, 'err'); throw e; }

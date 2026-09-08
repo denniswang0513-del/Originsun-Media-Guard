@@ -23,7 +23,7 @@ from sqlalchemy import func, select  # type: ignore
 
 from core.auth import ME_MODULE_KEYS, check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
-from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup, leave_balance, leave_to_dict,
+from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup,
                            month_key, month_span, months_back, parse_ymd, project_metrics, tw_day)
 from core.identity import require_bound_staff, resolve_current_staff
 from core.hr_logic import STAFF_ACTIVE, staff_rank
@@ -38,7 +38,6 @@ from services import leave_service
 from services.timesheet_lookup import budgets_for
 from services.timesheet_self import (add_rows, delete_row, list_rows, metrics_input, month_or_422,
                                      own_filter, rows_by_month, ts_dict, update_row)
-from routers.api_hr import approved_annual_used
 from routers.api_shoots import _crew_list
 from services.timesheet_self import board_days
 
@@ -197,20 +196,9 @@ async def my_workspace(request: Request):
                 } for p in recent],
             }
 
-        if "me_leave" in allowed and staff is not None:
-            year = datetime.now().year
-            used = await approved_annual_used(session, [ident["staff_id"]], year)
-            rows = (await session.execute(
-                select(HrLeaveRequest)
-                .where(HrLeaveRequest.staff_id == ident["staff_id"])
-                .order_by(HrLeaveRequest.start_date.desc().nulls_last())
-                .limit(10)
-            )).scalars().all()
-            out["leave"] = {
-                "quota": leave_balance(staff.annual_leave_days,
-                                       used.get(ident["staff_id"], 0.0)),
-                "recent": [leave_to_dict(r) for r in rows],
-            }
+        # 假勤那張卡自己打 /me/leave/summary（時數帳）——bundle 這邊原本還算一份舊規則的
+        # 「特休 = annual_leave_days − 當年已核准」塞進 out["leave"]，前端沒有任何人讀它。
+        # 兩份「還剩多少」的規則遲早會漂開，而且每次開頁白花兩個查詢，所以整段拿掉。
     return out
 
 
