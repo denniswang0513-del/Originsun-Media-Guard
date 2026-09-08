@@ -693,8 +693,7 @@ export async function initCrmQuotesTab() {
     });
     const companyBtn = document.getElementById('quote-btn-company');
     // 公司資訊存進 /api/settings/save 的 company 鍵：後端分流給 crm_quotes／crm_invoices，所以入口不只管理員
-    const canEditCompany = (window._accessLevel || 0) >= 3
-        || ['crm_quotes', 'crm_invoices'].some(m => (window._modules || []).includes(m));
+    const canEditCompany = hasModule('crm_quotes') || hasModule('crm_invoices');
     if (companyBtn && canEditCompany) {
         companyBtn.style.display = '';
         companyBtn.addEventListener('click', () => {

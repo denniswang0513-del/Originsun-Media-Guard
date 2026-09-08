@@ -31,8 +31,7 @@ def test_guards_and_tokens_see_members():
     assert payload_grants({"access_level": 1, "modules": ["hr"]}, "hr_leave")
     assert not payload_grants({"access_level": 1, "modules": ["preprod"]}, "references"), "片庫另一把"
     auth = repo_src("routers/api_auth.py")
-    assert "modules = expand_modules(user.get('modules', []))" in code_only(func_body(auth, "def _issue_token("))
-    assert "'modules': expand_modules(user.get('modules', []))" in code_only(func_body(auth, "async def get_me("))
+    assert "expand_modules(grant_admin_all_modules(" in code_only(func_body(auth, "def _enrich_user(")), "讀帳號的咽喉展開一次，發 token／get_me 不各自再展"
     assert "'modules': expand_modules(req.modules or [])" in code_only(func_body(auth, "async def create_user("))
     assert "user['modules'] = expand_modules(req.modules)" in code_only(func_body(auth, "async def update_user("))
     main = repo_src("main.py")

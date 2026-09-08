@@ -65,7 +65,7 @@ def normalize(cfg: Optional[dict]) -> Dict[str, str]:
 
 
 def mode_of(key: str, cfg: Optional[dict]) -> str:
-    return normalize(cfg).get(key, MODE_LINK)
+    return normalize(cfg)[key]
 
 
 def surface_for_path(path: str) -> Optional[str]:

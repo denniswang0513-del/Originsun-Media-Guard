@@ -11,7 +11,7 @@ import re
 import time
 import secrets
 import threading
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -342,7 +342,8 @@ def check_admin(request: Request):
     # Legacy fallback: check role string
     if payload.get('role') == 'admin':
         return payload
-    raise HTTPException(status_code=403, detail="權限不足")
+    record_denial(payload, request, ())
+    raise HTTPException(status_code=403, detail=denied_detail(()))   # 「需要管理員」也算一筆授權不足
 
 
 def new_share_token(sub: str, scope: str, expires_days: int) -> str:
@@ -528,15 +529,11 @@ def module_label(key: str) -> str:
 
 
 # 最近授權不足（階段 0）：每個 403 記一筆進環形緩衝（重啟就清；夠管理員看「誰、什麼時候、缺哪把」並一鍵開通）。
-_DENIALS = None   # collections.deque(maxlen=300)，lazy：避免 import 期就建
+_DENIALS: deque = deque(maxlen=300)
 
 
 def record_denial(payload: Optional[dict], request: Optional[Request], module_keys) -> None:
-    global _DENIALS
     try:
-        if _DENIALS is None:
-            from collections import deque
-            _DENIALS = deque(maxlen=300)
         _DENIALS.append({
             "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "username": (payload or {}).get("username") or (payload or {}).get("sub") or "",
@@ -550,7 +547,7 @@ def record_denial(payload: Optional[dict], request: Optional[Request], module_ke
 
 
 def recent_denials(limit: int = 100) -> list:
-    return list(_DENIALS)[-limit:][::-1] if _DENIALS else []
+    return list(_DENIALS)[-limit:][::-1]
 
 
 def denied_detail(module_keys) -> str:
@@ -558,15 +555,12 @@ def denied_detail(module_keys) -> str:
     if not keys:
         return "權限不足：需要管理員"
     names = "、".join(f"「{module_label(k)}」" for k in keys[:4])
-    joiner = "或" if len(keys) > 1 else ""
-    return f"權限不足：需要{names}{'（任一）' if joiner else ''}權限，請管理員在使用者管理開通"
+    return f"權限不足：需要{names}{'（任一）' if len(keys) > 1 else ''}權限，請管理員在使用者管理開通"
 
 
-def check_admin_or_module(request: Request, *module_keys: str, record: bool = True):
+def check_admin_or_module(request: Request, *module_keys: str):
     """Like check_admin, but ALSO passes if the token grants any of module_keys.
 
-    `record=False`：拿它當「探針」（try／except 403 之後走更窄的路放行）的呼叫點要帶這個，
-    不然明明 200 的請求也會在「最近授權不足」留一筆假的缺鑰匙紀錄，管理員一鍵開通就把大鑰匙發出去。
 
     For subsystem guards (e.g. 官網管理) that a non-admin should be able to use
     when their per-account `modules` includes the relevant key — WITHOUT granting
@@ -580,8 +574,7 @@ def check_admin_or_module(request: Request, *module_keys: str, record: bool = Tr
         raise HTTPException(status_code=401, detail="未登入或 token 已過期")
     if payload_grants(payload, *module_keys):
         return payload
-    if record:
-        record_denial(payload, request, module_keys)
+    record_denial(payload, request, module_keys)
     raise HTTPException(status_code=403, detail=denied_detail(module_keys))
 
 

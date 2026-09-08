@@ -3,6 +3,7 @@
 import { _ensureModalStyles, _createFormModal } from '../shared/modal-styles.js';
 import { groupModules, ALL_MODULES, TAB_GROUPS, shouldShowTab, tabLabel, expandModules, bundleOf } from '../shared/tab-config.js';
 import { createSortable, sortableSpan, esc } from '../../tabs/crm/crm-utils.js';
+import { authFetch } from '../shared/utils.js';
 
 // key 集合必須 == core/auth.py ALL_MODULES == tab-config.js PERMISSION_GROUPS
 // （tests/unit/test_rbac_module_sync.py 三方同步測試把關，漏 key 會 fail）
@@ -36,6 +37,8 @@ const _PERM_GROUPS = groupModules(ALL_MODULES);
 // 預設 key '' = 不排序、維持後端順序，點了才生效。
 let _usersCache = [];
 let _staffListCache = [];
+// 綁定人員與身份：空白視同在職（鏡射 core.hr_logic.ACTIVE_STATUSES）——列表、預覽、範本「現在誰有」三處同一份
+const _boundStaffOf = (staffId) => { const staff = _staffListCache.find(s => s.id === staffId) || null; return { staff, status: staff ? ((staff.status || '').trim() || '在職') : '' }; };
 const _userSorter = createSortable({
     storageKey: 'usermgmt_users_sort',
     defaultSort: { key: '', dir: 'asc' },
@@ -183,19 +186,16 @@ async function _loadUserList() {
     const container = document.getElementById('umgmt-list');
     if (!container) return;
     try {
-        const r = await fetch('/api/v1/auth/users', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') } });
+        // 四支互不相依，一起發：人員清單（綁定下拉）失敗不擋使用者列表；範本存過就不重抓（_saveRbacTemplates 會回寫）
+        const [r, rs] = await Promise.all([
+            authFetch('/api/v1/auth/users'),
+            authFetch('/api/v1/crm/staff').catch(() => null),
+            _tplCache ? null : _fetchTemplates(),
+            _fetchDenials(),
+        ]);
         if (!r.ok) { container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗（需要管理員權限）</div>'; return; }
         _usersCache = await r.json();
-
-        // N0: 人員清單（綁定下拉的資料來源）。載入失敗不擋使用者列表。
-        _staffListCache = [];
-        try {
-            const rs = await fetch('/api/v1/crm/staff', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') } });
-            if (rs.ok) _staffListCache = (await rs.json()).staff || [];
-        } catch (_) {}
-
-        await _fetchTemplates();
-        await _fetchDenials();
+        _staffListCache = (rs && rs.ok) ? ((await rs.json()).staff || []) : [];
         _renderUserList();
     } catch (_) {
         container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗</div>';
@@ -233,8 +233,7 @@ function _renderUserList() {
         const staffSelect = `<select data-ustaff-user="${u.username}" ${locked ? 'disabled' : ''} title="綁定人員檔案 — 個人工作台（/my.html）的資料來源"
             style="margin-top:6px;width:100%;max-width:150px;background:#252525;color:#ccc;border:1px solid #333;border-radius:6px;padding:2px 4px;font-size:11px;">${staffOpts}</select>`;
         // 綁定人員的在職／兼職（分配權限時一眼看得到誰是兼職；空白視同在職，同 core.hr_logic）
-        const boundStaff = _staffListCache.find(s => s.id === u.staff_id) || null;
-        const staffStatus = boundStaff ? ((boundStaff.status || '').trim() || '在職') : '';
+        const { staff: boundStaff, status: staffStatus } = _boundStaffOf(u.staff_id);
         // 「算在職」＝在職／合夥／空白（正本 core.hr_logic.ACTIVE_STATUSES）；兼職橘、合夥藍、其餘綠
         const pillColor = staffStatus === '兼職' ? ['#b4530922', '#f59e0b'] : staffStatus === '合夥' ? ['#1d4ed822', '#93c5fd'] : ['#15803d22', '#6ee7b7'];
         const statusPill = boundStaff
@@ -282,8 +281,7 @@ window._previewAs = function(username) {
     const mods = expandModules(isAdmin ? ALL_MODULES.slice() : [...document.querySelectorAll(`input[data-umod-user="${username}"]:checked`)].map(cb => cb.value));
     const has = (k) => isAdmin || mods.includes(k);
     const staffSel = document.querySelector(`select[data-ustaff-user="${username}"]`);
-    const bound = _staffListCache.find(s => s.id === (staffSel ? staffSel.value : u.staff_id)) || null;
-    const status = bound ? ((bound.status || '').trim() || '在職') : '';
+    const { staff: bound, status } = _boundStaffOf(staffSel ? staffSel.value : u.staff_id);
     const authUser = { access_level: isAdmin ? 3 : 1 };
     // 頂層分頁
     const groups = TAB_GROUPS.map(g => {
@@ -330,7 +328,7 @@ window._previewAs = function(username) {
 // ─── 最近授權不足（階段 0）：後端 403 環形緩衝；一鍵「開通」＝把那把鑰匙勾到該帳號那一列，管理員再按儲存 ─── //
 let _denialsCache = [];
 async function _fetchDenials() {
-    try { const r = await fetch('/api/v1/auth/denials', { headers: _hdr() }); if (r.ok) _denialsCache = (await r.json()).items || []; } catch (_) {}
+    try { const r = await authFetch('/api/v1/auth/denials'); if (r.ok) _denialsCache = (await r.json()).items || []; } catch (_) {}
 }
 function _denialsHtml() {
     if (!_denialsCache.length) return '';
@@ -370,11 +368,10 @@ const TPL_IDENTITIES = ['合夥', '在職', '兼職'];
 const TPL_HIDDEN = new Set(['me_todos', 'me_finance']);   // 員工頁還沒放回的卡，範本不勾
 let _tplCache = null;      // {合夥:[...], 在職:[...], 兼職:[...]}（存過的或預設）
 let _tplDefaults = null;
-const _hdr = () => ({ 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || ''), 'Content-Type': 'application/json' });
 
 async function _fetchTemplates() {
     try {
-        const r = await fetch('/api/v1/auth/rbac/templates', { headers: _hdr() });
+        const r = await authFetch('/api/v1/auth/rbac/templates');
         if (!r.ok) return;
         const d = await r.json(); _tplCache = d.templates || null; _tplDefaults = d.defaults || null;
     } catch (_) {}
@@ -392,8 +389,7 @@ function _tplHolders() {
     const by = {}; TPL_IDENTITIES.forEach(i => { by[i] = []; });
     _usersCache.forEach(u => {
         if ((u.access_level || 0) >= 3) return;
-        const st = _staffListCache.find(s => s.id === u.staff_id); if (!st) return;
-        const k = (st.status || '').trim() || '在職';
+        const { staff: st, status: k } = _boundStaffOf(u.staff_id); if (!st) return;
         if (by[k]) by[k].push(new Set(u.modules || []));
     });
     return by;
@@ -470,7 +466,7 @@ window._saveRbacTemplates = async function() {
     if (!_tplCache) return;
     const btn = document.getElementById('umgmt-action-btn');
     try {
-        const r = await fetch('/api/v1/auth/rbac/templates', { method: 'PUT', headers: _hdr(), body: JSON.stringify({ templates: _tplCache }) });
+        const r = await authFetch('/api/v1/auth/rbac/templates', { method: 'PUT', body: { templates: _tplCache } });
         if (!r.ok) { alert('儲存失敗'); return; }
         _tplCache = (await r.json()).templates; _renderTemplates();
         if (btn) { btn.textContent = '已儲存'; setTimeout(() => { btn.textContent = '儲存範本'; }, 1500); }
@@ -491,11 +487,13 @@ let _pubCache = null;   // { surfaces:[{key,label,who,how,pages,modes,default,mo
 
 async function _loadPublicAccess() {
     const host = document.getElementById('umgmt-pub'); if (!host) return;
-    try {
-        const r = await fetch('/api/v1/auth/public-access', { headers: _hdr() });
-        if (!r.ok) { host.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">公開區載入失敗</div>'; return; }
-        _pubCache = await r.json();
-    } catch (_) { host.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">連線失敗</div>'; return; }
+    if (!_pubCache) {   // 存過就不重抓（_savePublicAccess 會回寫 modes）
+        try {
+            const r = await authFetch('/api/v1/auth/public-access');
+            if (!r.ok) { host.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">公開區載入失敗</div>'; return; }
+            _pubCache = await r.json();
+        } catch (_) { host.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">連線失敗</div>'; return; }
+    }
     _renderPublicAccess();
 }
 
@@ -534,7 +532,7 @@ window._savePublicAccess = async function() {
     if (!_pubCache) return;
     const btn = document.getElementById('umgmt-action-btn');
     try {
-        const r = await fetch('/api/v1/auth/public-access', { method: 'PUT', headers: _hdr(), body: JSON.stringify({ modes: _pubCache.modes }) });
+        const r = await authFetch('/api/v1/auth/public-access', { method: 'PUT', body: { modes: _pubCache.modes } });
         if (!r.ok) { alert('儲存失敗'); return; }
         _pubCache.modes = (await r.json()).modes; _renderPublicAccess();
         if (btn) { btn.textContent = '已儲存'; setTimeout(() => { btn.textContent = '儲存公開區'; }, 1500); }

@@ -26,7 +26,7 @@ from sqlalchemy import func as safunc, or_, select, update
 
 import core.state as state
 from config import load_settings, save_settings
-from core.auth import _extract_token, check_admin, check_admin_or_module, current_username, payload_grants
+from core.auth import _extract_token, check_admin, check_admin_or_module, current_username, payload_grants, check_logged_in
 from core.db_guard import db_factory_or_503
 from core.hr_logic import _TW
 from core.journal_logic import week_start_of
@@ -93,12 +93,8 @@ async def _ts_or_bound(request: Request) -> Optional[str]:
     （員工頁的專案查詢、工作階段下拉、專案下拉）。只給讀；寫入端點（改預算等）守衛不變。
     回傳：有 timesheets 模組 → None（整份）；靠綁定人員進來的 → 該員姓名（端點要縮到「本人」時用）。
     🔴 這支不碰私帳 wall：_require_mine_admin 守的端點（/projects 私帳案清單、/summary）不走這裡。"""
-    try:
-        check_admin_or_module(request, "timesheets", record=False)   # 探針：403 後走窄路，不留假紀錄
+    if payload_grants(check_logged_in(request), "timesheets"):   # 有工作追蹤（或管理員）→ 整份；匿名在這裡 401
         return None
-    except HTTPException as e:
-        if e.status_code != 403:
-            raise
     ident = await resolve_current_staff(request)
     if ident["staff"] is None:
         raise HTTPException(status_code=403, detail="權限不足（需要工作追蹤模組，或帳號綁定人員檔案）")
@@ -240,14 +236,9 @@ async def _plan_for_ident(request: Request, session, staff_id: str) -> dict:
     管理員／工作追蹤模組 → 任何人；否則「綁定＋me_plan_parttime＋本人是在職／合夥」且「對方是兼職」。"""
     from core.hr_logic import is_active_staff
     from core.identity import require_bound_staff
-    who = current_username(request) or ""
-    full = True
-    try:
-        check_admin_or_module(request, "timesheets", record=False)   # 探針：403 後走窄路，不留假紀錄
-    except HTTPException as e:
-        if e.status_code != 403:
-            raise
-        full = False
+    payload = check_logged_in(request)
+    who = payload.get("username") or payload.get("sub") or ""
+    full = payload_grants(payload, "timesheets")
     target = await session.get(CrmStaff, staff_id)
     if target is None:
         raise HTTPException(status_code=404, detail="找不到這個人員")
@@ -273,11 +264,7 @@ async def _plan_row_of(session, target, row_id: str):
 async def plan_for_targets(request: Request):
     """可以幫誰排：狀態是「兼職」的人員（管理員／工作追蹤模組看全部在職的人也行，但視窗只列兼職）。"""
     from core.identity import require_bound_staff
-    try:
-        check_admin_or_module(request, "timesheets", record=False)   # 探針：403 後走窄路，不留假紀錄
-    except HTTPException as e:
-        if e.status_code != 403:
-            raise
+    if not payload_grants(check_logged_in(request), "timesheets"):
         await require_bound_staff(request, "me_plan_parttime")
     factory = db_factory_or_503()
     async with factory() as session:

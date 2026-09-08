@@ -53,14 +53,10 @@ async def _stage_guard(request: Request) -> None:
     """管理員與工作追蹤模組照舊（原本就是這把鑰匙，不能因為開放而收回）；其他人＝有綁人員檔案且在職
     （owner 2026-09-07「工作階段的設定開放給在職員工調整」）：任一 me_* 鑰匙、沒綁 409、不在職 403。
     status 空白視同在職（人員序列化 routers/crm/staff.py 也是這樣預設）。"""
-    from core.auth import ME_MODULE_KEYS, check_admin_or_module
+    from core.auth import ME_MODULE_KEYS, check_logged_in, payload_grants
     from core.identity import require_bound_staff
-    try:
-        check_admin_or_module(request, "timesheets", record=False)   # 探針：403 後走綁定人員，不留假紀錄
+    if payload_grants(check_logged_in(request), "timesheets"):   # 管理員／工作追蹤整區恆過；匿名在這裡 401
         return
-    except HTTPException as e:
-        if e.status_code != 403:
-            raise
     ident = await require_bound_staff(request, *ME_MODULE_KEYS)
     if (getattr(ident["staff"], "status", "") or STAFF_ACTIVE).strip() != STAFF_ACTIVE:
         raise HTTPException(status_code=403, detail="工作階段只開放在職員工調整")

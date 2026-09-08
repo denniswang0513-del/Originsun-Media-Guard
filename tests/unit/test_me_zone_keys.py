@@ -86,7 +86,7 @@ def test_second_backfill_grants_master_and_week_plan_once():
 
 def test_admin_ui_shows_staff_status_and_blocks_parttime_planning_for_parttimers():
     js = repo_src("frontend/js/admin/user-mgmt.js")
-    assert "const boundStaff = _staffListCache.find(s => s.id === u.staff_id)" in js
+    assert "const { staff: boundStaff, status: staffStatus } = _boundStaffOf(u.staff_id)" in js
     assert "staffStatus === '兼職'" in js, "帳號列旁要看得到在職／兼職"
     assert "const canPlanParttime = !!boundStaff && ['在職', '合夥'].includes(staffStatus)" in js
     assert "m === 'me_plan_parttime' && !opts.canPlanParttime" in js, "兼職（或沒綁）不能勾兼職排班"

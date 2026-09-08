@@ -24,7 +24,7 @@ def test_record_denial_shape_and_null_safety():
     n = len(recent_denials(300))
     record_denial(None, None, None)                      # 都是 None 也記一筆（空 username），不能炸
     assert len(recent_denials(300)) == n + 1 and recent_denials(1)[0]["username"] == "" and recent_denials(1)[0]["missing"] == []
-    assert recent_denials(0) == [] or isinstance(recent_denials(0), list)
+    assert isinstance(recent_denials(0), list)
 
 
 def test_plan_for_read_endpoints_pin():

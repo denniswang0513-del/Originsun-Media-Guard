@@ -14,7 +14,7 @@ from core.crm_logic import normalize_tax_id
 from core.schemas import ClientPayload
 
 from core.ledger import not_mine, require_entity
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, check_logged_in, payload_grants
 from ._shared import (router, _check_auth, _require_db, _get_factory,
                       _now, _to_dict, _auto_update_client_status,
                       _CLIENT_TIER_EXCLUDE_STATUSES, map_csv_row)
@@ -111,9 +111,7 @@ async def create_client(req: ClientPayload, request: Request):
     # 2026-09-08 第二批：建客戶主檔不是錢 —— 客戶／專案／報價三把鑰匙都能建
     # （專案表單與報價彈窗都會順手建客戶），見 _client_write_guard。
     ent = "parent"
-    try:
-        _check_client_write(request, record=False)   # 探針：403 後走私帳路，不留假紀錄
-    except HTTPException:
+    if not payload_grants(check_logged_in(request), *CLIENT_WRITE_MODULES):   # 沒母帳鑰匙 → 走私帳路（帳本主人建自己的客戶）
         require_entity(request, "mine", level="full")
     _require_db()
     factory = await _get_factory()
@@ -197,8 +195,8 @@ async def update_client(client_id: str, req: ClientPayload, request: Request):
 CLIENT_WRITE_MODULES = ("crm_clients", "crm_projects", "crm_quotes")
 
 
-def _check_client_write(request, record: bool = True):
-    return check_admin_or_module(request, *CLIENT_WRITE_MODULES, record=record)
+def _check_client_write(request):
+    return check_admin_or_module(request, *CLIENT_WRITE_MODULES)
 
 
 def _client_write_guard(request, client, admin_only: bool = False):

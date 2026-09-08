@@ -77,7 +77,7 @@ def test_client_create_and_update_take_three_keys_delete_stays_admin():
     assert "_check_client_write(request)" in guard and "_check_auth(request)" in guard, \
         "母帳列：一般寫入走三把鑰匙、admin_only 走管理員"
     create = _body("routers/crm/clients.py", "async def create_client(")
-    assert "_check_client_write(request, record=False)" in create and "_check_auth(request)" not in create   # 探針：不留假紀錄
+    assert "payload_grants(check_logged_in(request), *CLIENT_WRITE_MODULES)" in create and "_check_auth(request)" not in create   # 布林探針（不留假紀錄）
     upd = _body("routers/crm/clients.py", "async def update_client(")
     assert "_client_write_guard(request, client)" in upd and "admin_only" not in upd
     dele = _body("routers/crm/clients.py", "async def delete_client(")

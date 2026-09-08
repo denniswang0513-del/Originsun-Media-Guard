@@ -166,7 +166,7 @@ def test_settings_callers_send_one_top_level_key_and_report_403():
     assert "請檢查伺服器連線" not in sm
 
     quotes = js_code_only(repo_src("frontend/tabs/crm/crm-quotes.js"))
-    assert "['crm_quotes', 'crm_invoices'].some(m => (window._modules || []).includes(m))" in quotes, \
+    assert "hasModule('crm_quotes') || hasModule('crm_invoices')" in quotes, \
         "公司資訊入口跟後端分流一致：管理員或 crm_quotes／crm_invoices"
 
 

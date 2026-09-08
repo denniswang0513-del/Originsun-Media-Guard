@@ -719,6 +719,9 @@ export function hasModule(key) {
  *  瀏覽器快取，新的分頁 js 配舊的 crm-utils 時 named import 會在連結階段就炸掉整個分頁。 */
 export function permDeniedMsg(label, e) {
     if (e && e.status !== 403) return null;
+    // 後端 core.auth.denied_detail 的 403 detail 已是整句「權限不足：需要『X』權限…」（_doFetch 放進 e.message）——
+    // 直接用它，中文名只有後端一份；label 只服務「還沒打 API 的預檢」
+    if (e && e.message && e.message.startsWith('權限不足')) return e.message;
     return `權限不足：需要「${label}」權限，請管理員在使用者管理開通`;
 }
 

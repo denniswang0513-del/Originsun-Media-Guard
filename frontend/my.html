@@ -1996,6 +1996,7 @@ function _planWireDnd(z) {
 const _pt = { week: _mondayOf(_localToday()), sid: "", targets: null, rows: [], name: "" };
 const _ptApi = (p) => `/api/v1/timesheets/plan-for/${encodeURIComponent(_pt.sid)}${p}`;
 const _ptDays = () => [...Array(7)].map((_, k) => _shiftDays(_pt.week, k));
+const _ptNote = (cls, msg) => `<div class="ws-modal"><button type="button" class="ws-modal-x" data-z1="pt-close" title="關閉">×</button><div class="${cls}">${msg}</div></div>`;   // 視窗的錯誤／空狀態殼（三處共用）
 function _ptMsg(text) { const m = $("pt-msg"); if (m) m.textContent = text || ""; }
 async function _ptOpen() {
     const root = $("ws-view") || document.body;
@@ -2013,9 +2014,9 @@ async function _ptOpen() {
     bg.innerHTML = `<div class="ws-modal"><div class="empty">載入中…</div></div>`;
     if (_pt.targets === null) {
         try { _pt.targets = (await mjson("/api/v1/timesheets/plan-for/targets")).targets || []; }
-        catch (e) { bg.innerHTML = `<div class="ws-modal"><button type="button" class="ws-modal-x" data-z1="pt-close" title="關閉">×</button><div class="notice">${esc(e.message)}</div></div>`; return; }
+        catch (e) { bg.innerHTML = _ptNote("notice", `${esc(e.message)}`); return; }
     }
-    if (!_pt.targets.length) { bg.innerHTML = `<div class="ws-modal"><button type="button" class="ws-modal-x" data-z1="pt-close" title="關閉">×</button><div class="empty">人力庫裡沒有狀態是「兼職」的人。</div></div>`; return; }
+    if (!_pt.targets.length) { bg.innerHTML = _ptNote("empty", `人力庫裡沒有狀態是「兼職」的人。`); return; }
     if (!_pt.sid || !_pt.targets.some(t => t.id === _pt.sid)) _pt.sid = _pt.targets[0].id;
     await _ptLoad();
 }
@@ -2025,7 +2026,7 @@ async function _ptLoad() {
         const d = await mjson(_ptApi(`/rows?from=${days[0]}&to=${days[6]}`));
         _pt.rows = d.items || []; _pt.name = d.staff_name || "";
     } catch (e) {
-        const bg = $("ws-pt-modal"); if (bg) bg.innerHTML = `<div class="ws-modal"><button type="button" class="ws-modal-x" data-z1="pt-close" title="關閉">×</button><div class="notice">${esc(e.message)}</div></div>`;
+        const bg = $("ws-pt-modal"); if (bg) bg.innerHTML = _ptNote("notice", `${esc(e.message)}`);
         return;
     }
     _logProjectOptions();

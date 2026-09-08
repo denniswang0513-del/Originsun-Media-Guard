@@ -70,7 +70,7 @@ def test_denials_endpoint_and_user_mgmt_block():
     assert "_check_admin(request)" in code_only(func_body(auth, "async def get_recent_denials("))
     js = repo_src("frontend/js/admin/user-mgmt.js")
     assert "'/api/v1/auth/denials'" in js and "window._grantFromDenial = " in js and "_denialsHtml()" in js
-    assert "await _fetchDenials();" in js_func_body(js_code_only(js), "async function _loadUserList()")
+    assert "_fetchDenials()," in js_func_body(js_code_only(js), "async function _loadUserList()"), "跟 users／staff／範本一起 Promise.all"
 
 
 # ── 白名單：routers/crm/* 裡還是管理員限定的端點，只能是這些（owner 2026-09-08 拍板的 ADMIN_ONLY_ACTIONS）──

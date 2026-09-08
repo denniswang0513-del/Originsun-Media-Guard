@@ -58,7 +58,7 @@ def test_create_always_lands_in_crm_and_owner_may_create():
     create = src.split("async def create_client(")[1].split(NL + "@router")[0]
     assert 'ent = "parent"' in create
     # 2026-09-08 第二批：母帳建客戶＝客戶／專案／報價三把鑰匙（_check_client_write），不再是 Lv3
-    assert "_check_client_write(request, record=False)" in create and "_check_auth(request)" not in create
+    assert "payload_grants(check_logged_in(request), *CLIENT_WRITE_MODULES)" in create and "_check_auth(request)" not in create
     assert 'require_entity(request, "mine", level="full")' in create
     assert 'exclude={"entity"}' in create, "entity 不得跟著 model_dump 亂入"
 

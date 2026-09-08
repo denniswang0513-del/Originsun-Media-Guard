@@ -144,7 +144,7 @@ def _issue_token(user: dict, **extra) -> dict:
     """
     role_name = _get_user_role_name(user)
     access_level = user.get('access_level', 0)
-    modules = expand_modules(user.get('modules', []))   # 捆鑰匙展開進 token（成員級守衛與前端照舊）
+    modules = user.get('modules', [])   # _enrich_user 已展開捆鑰匙
     token = create_token({
         'sub': user['username'], 'role_name': role_name,
         'access_level': access_level, 'modules': modules,
@@ -176,7 +176,8 @@ def _enrich_user(u_dict: dict) -> dict:
         u_dict.setdefault('access_level', LEGACY_ROLE_LEVELS.get(u_dict.get('role', ''), 0))
         u_dict.setdefault('modules', [])
     # 管理員（Lv3）= 完整權限：見 core.auth.grant_admin_all_modules（單一來源）。
-    u_dict['modules'] = grant_admin_all_modules(u_dict.get('access_level'), u_dict.get('modules'))
+    # 捆鑰匙（階段 4）在這裡展開一次：所有讀帳號的路（_find_user_by／_get_all_users）都經過 _enrich_user，發 token／get_me 不用各自再展
+    u_dict['modules'] = expand_modules(grant_admin_all_modules(u_dict.get('access_level'), u_dict.get('modules')))
     return u_dict
 
 
@@ -657,7 +658,7 @@ async def get_me(request: Request):
         'username': user['username'],
         'role_name': user.get('role_name', user.get('role', '')),
         'access_level': user.get('access_level', 0),
-        'modules': expand_modules(user.get('modules', [])),
+        'modules': user.get('modules', []),
         'email': user.get('email'),
         'avatar_url': user.get('avatar_url'),
         'auth_method': auth_method,
@@ -1049,12 +1050,9 @@ async def _public_link_counts() -> dict:
             "staff_edit": select(func.count()).select_from(CrmStaff).where(CrmStaff.edit_token.isnot(None)),
             "resume": select(func.count()).select_from(CrmStaff).where(CrmStaff.resume_visible.is_(True)),
         }
-        async with factory() as session:
-            for k, q in specs.items():
-                try:
-                    out[k] = int((await session.execute(q)).scalar() or 0)
-                except Exception:
-                    out[k] = None
+        async with factory() as session:   # 八個 count 併成一句（同一 session 不能並發，子查詢一次往返）
+            row = (await session.execute(select(*[q.scalar_subquery().label(k) for k, q in specs.items()]))).one()
+            out = {k: int(v or 0) for k, v in row._mapping.items()}
     except Exception:
         pass
     return out
