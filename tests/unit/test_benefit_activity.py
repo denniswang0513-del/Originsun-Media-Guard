@@ -132,8 +132,9 @@ def test_bulk_skips_existing_instead_of_overwriting():
 
 
 def test_bulk_only_takes_active_staff():
+    """全員發放只給「算在職」的人：在職／合夥／空白（2026-09-08 起走 core.hr_logic 那一份，不再硬比「在職」）。"""
     body = _body("async def add_allowances_bulk(")
-    assert 'CrmStaff.status == "在職"' in body
+    assert "active_staff_where()" in body and 'CrmStaff.status == "在職"' not in body
 
 
 def test_used_allowance_cannot_be_deleted():

@@ -28,7 +28,8 @@ async function loadStaff() {
 
 // ── Rendering ────────────────────────────────────────────────
 
-const _STATUS_CLS = { '在職': 'crm-staff-badge-在職', '兼職': 'crm-staff-badge-兼職', '專案': 'crm-staff-badge-專案', '單位': 'crm-staff-badge-單位' };
+// 狀態字彙（在職／合夥／兼職／專案／單位）：後端「算不算在職」的正本在 core.hr_logic.ACTIVE_STATUSES（在職、合夥、空白）
+const _STATUS_CLS = { '在職': 'crm-staff-badge-在職', '合夥': 'crm-staff-badge-合夥', '兼職': 'crm-staff-badge-兼職', '專案': 'crm-staff-badge-專案', '單位': 'crm-staff-badge-單位' };
 
 function _sBadge(status) {
     const s = status || '在職';
@@ -36,7 +37,7 @@ function _sBadge(status) {
     return `<span class="crm-badge ${cls}">${_esc(s)}</span>`;
 }
 
-const _STATUS_ORDER = { '在職': 0, '兼職': 1, '單位': 2, '專案': 3 };
+const _STATUS_ORDER = { '在職': 0, '合夥': 0, '兼職': 1, '單位': 2, '專案': 3 };
 
 const _sorter = createSortable({
     storageKey: 'crm_staff_sort',
@@ -73,7 +74,7 @@ function renderList() {
 const _STAFF_EDIT_FIELDS = [
     {name:'name', label:'姓名', type:'text'},
     {name:'role', label:'職能', type:'select', get options() { return [{value:'',label:'—'}, ..._roles.map(r => ({value:r,label:r}))]; }},
-    {name:'status', label:'狀態', type:'select', options:[{value:'在職',label:'在職'},{value:'兼職',label:'兼職'},{value:'專案',label:'專案'},{value:'單位',label:'單位'}]},
+    {name:'status', label:'狀態', type:'select', options:[{value:'在職',label:'在職'},{value:'合夥',label:'合夥'},{value:'兼職',label:'兼職'},{value:'專案',label:'專案'},{value:'單位',label:'單位'}]},
     // H1 員工檔案完整化
     {name:'employment_type', label:'僱用型態', type:'select', options:[{value:'',label:'—'},{value:'正職',label:'正職'},{value:'兼職',label:'兼職'},{value:'約聘',label:'約聘'},{value:'freelance',label:'freelance'}]},
     {name:'daily_rate', label:'日費', type:'number'},

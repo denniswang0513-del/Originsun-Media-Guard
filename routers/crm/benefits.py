@@ -412,8 +412,9 @@ async def add_allowances_bulk(pool_id: str, request: Request,
         have = {a.staff_id for a in (await session.execute(
             select(HrBenefitAllowance).where(
                 HrBenefitAllowance.pool_id == pool_id))).scalars().all()}
+        from core.hr_logic import active_staff_where   # 在職＝在職／合夥／空白（正本一份）
         staff = (await session.execute(select(CrmStaff).where(
-            CrmStaff.status == "在職").order_by(CrmStaff.name))).scalars().all()
+            active_staff_where()).order_by(CrmStaff.name))).scalars().all()
         added = 0
         for st in staff:
             if st.id in have:

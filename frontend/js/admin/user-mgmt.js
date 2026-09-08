@@ -196,10 +196,12 @@ function _renderUserList() {
         // 綁定人員的在職／兼職（分配權限時一眼看得到誰是兼職；空白視同在職，同 core.hr_logic）
         const boundStaff = _staffListCache.find(s => s.id === u.staff_id) || null;
         const staffStatus = boundStaff ? ((boundStaff.status || '').trim() || '在職') : '';
+        // 「算在職」＝在職／合夥／空白（正本 core.hr_logic.ACTIVE_STATUSES）；兼職橘、合夥藍、其餘綠
+        const pillColor = staffStatus === '兼職' ? ['#b4530922', '#f59e0b'] : staffStatus === '合夥' ? ['#1d4ed822', '#93c5fd'] : ['#15803d22', '#6ee7b7'];
         const statusPill = boundStaff
-            ? `<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:3px;margin-top:4px;background:${staffStatus === '兼職' ? '#b4530922' : '#15803d22'};color:${staffStatus === '兼職' ? '#f59e0b' : '#6ee7b7'};">${staffStatus}</span>`
+            ? `<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:3px;margin-top:4px;background:${pillColor[0]};color:${pillColor[1]};">${staffStatus}</span>`
             : '';
-        const canPlanParttime = !!boundStaff && staffStatus === '在職';
+        const canPlanParttime = !!boundStaff && ['在職', '合夥'].includes(staffStatus);
         return `
         <div style="display:grid;grid-template-columns:170px 1fr auto;gap:12px;align-items:start;padding:12px 16px;margin-bottom:1px;background:#1e1e1e;border:1px solid #2e2e2e;border-radius:8px;transition:border-color .15s;" onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2e2e2e'">
             <div style="padding-top:4px;">

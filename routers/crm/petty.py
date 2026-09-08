@@ -379,8 +379,9 @@ async def petty_staff_options(request: Request):
         rows = (await session.execute(
             select(CrmStaff.id, CrmStaff.name, CrmStaff.status,
                    CrmStaff.petty_float))).all()
+    from core.hr_logic import is_active_staff   # 在職＝在職／合夥／空白（正本一份）
     out = [{"id": r.id, "name": r.name, "petty_float": r.petty_float or 0}
-           for r in rows if (r.status or "在職") == "在職" or r.id in used]
+           for r in rows if is_active_staff(r.status) or r.id in used]
     return {"staff": sorted(out, key=lambda s: s["name"])}
 
 
@@ -786,9 +787,10 @@ async def get_item_owners(request: Request):
     _check_approver(request)
     async with _crm_session() as session:
         items = await cash_category_texts(session)
+        from core.hr_logic import active_staff_where   # 在職＝在職／合夥／空白（正本一份）
         staff = (await session.execute(
             select(CrmStaff.id, CrmStaff.name)
-            .where(CrmStaff.status == "在職").order_by(CrmStaff.name))).all()
+            .where(active_staff_where()).order_by(CrmStaff.name))).all()
     return {"mapping": _item_owners(),
             "items": items or list(FALLBACK_ITEMS),
             "staff": [{"id": r.id, "name": r.name} for r in staff]}

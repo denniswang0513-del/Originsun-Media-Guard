@@ -887,23 +887,31 @@ def suggest_projects(name: str, lk: ProjectLookup, limit: int = 2, floor: float 
 
 # ── 團隊清單的人員排序（owner 2026-09-07「吳宇晨、陳偉建（兼職）的排序在最下面」）──
 STAFF_ACTIVE = "在職"          # crm_staff.status 的「在職」；空白視同在職（序列化與守衛都這樣預設）
-STAFF_RANK = {STAFF_ACTIVE: 0, "兼職": 1}
+STAFF_PARTNER = "合夥"         # owner 2026-09-08：員工多一個身份「合夥」——凡是問「在職嗎」的地方都算在職，排序跟在職同一層
+ACTIVE_STATUSES = ("", STAFF_ACTIVE, STAFF_PARTNER)   # 「算在職」的狀態（空白＝舊資料沒填）
+STAFF_RANK = {STAFF_ACTIVE: 0, STAFF_PARTNER: 0, "兼職": 1}
 
 
 def staff_rank(status) -> int:
-    """在職 → 兼職 → 其他／沒綁人員檔案。團隊的一週（api_me）與週記大家（api_journal）同一條。"""
+    """在職／合夥 → 兼職 → 其他／沒綁人員檔案。團隊的一週（api_me）與週記大家（api_journal）同一條。"""
     return STAFF_RANK.get((status or "").strip(), 2)
 
 
+def is_active_staff(status) -> bool:
+    """「在職」＝在職、合夥，**或狀態空白**（純函式版；Python 端過濾用，例如零用金代登下拉）。
+    SQL 那側用 `active_staff_where()`——兩支讀同一份 ACTIVE_STATUSES，改清單只改那一行。"""
+    return (status or "").strip() in ACTIVE_STATUSES
+
+
 def active_staff_where():
-    """「在職」的 WHERE：**在職，或狀態空白**（status 是後補的欄位，舊人員列是 NULL／空字串）。
+    """「在職」的 WHERE：**在職、合夥，或狀態空白**（status 是後補的欄位，舊人員列是 NULL／空字串）。
 
     嚴格比對 `status == "在職"` 會讓那些人整個消失 —— 假勤的時數帳與特休總覽踩過：
     人自己送得出假單、也開得了 credit，管理員卻永遠看不到他的餘額。
     這條 or_ 原本在假勤、里程碑、工作階段、人力庫各抄一份（假勤那份還漏了空白那半）。"""
     from db.models import CrmStaff
     from sqlalchemy import or_
-    return or_(CrmStaff.status == STAFF_ACTIVE, CrmStaff.status.is_(None), CrmStaff.status == "")
+    return or_(CrmStaff.status.in_([s for s in ACTIVE_STATUSES if s]), CrmStaff.status.is_(None), CrmStaff.status == "")
 
 
 # ── 合併同案（owner 2026-09-07：員工一天分好幾段記同一個案，「合併同案」把同案同分類同階段的列併成一列）──
