@@ -67,26 +67,27 @@ owner 2026-09-08：「雜支與影像紀錄是公開給外部人員編輯的，�
 
 | 鍵 | 面 | 誰在用 | 怎麼進 | 支援模式 | 預設 |
 |---|---|---|---|---|---|
-| `expense` | 雜支登記（expense.html／group-expense.html／advance-expense.html） | 外部製片、臨時人員 | `?t=<連結 token>`；公開模式下 `?project=<id>` 也免登入 | 關閉／連結／**公開** | 公開（owner） |
-| `media_log` | 影像紀錄上傳牆（media-log.html） | 劇組成員手機 | 專案 QR／`?token=` | 關閉／連結 | 連結（owner：公開＝每個專案的連結都開） |
+| `expense` | 雜支登記（expense.html／group-expense.html／advance-expense.html） | 外部製片、臨時人員 | `?t=<連結 token>`（每個專案／子表／預支款各自一條，可撤銷）；`?project=<id>` 是內部路，要登入＋crm_projects | 關閉／連結 | 連結 |
+| `media_log` | 影像紀錄上傳牆（media-log.html） | 劇組成員手機 | 專案 QR／`?token=`（每個專案一條） | 關閉／連結 | 連結 |
 | `portal` | 客戶看片審批（review.html） | 客戶 | 看片連結 | 關閉／連結 | 連結 |
 | `quote` | 報價單線上檢視（/q/{code}） | 客戶 | 短碼連結 | 關閉／連結 | 連結 |
 | `invoice_file` | 發票影像分享 | 客戶／會計 | 分享連結 | 關閉／連結 | 連結 |
 | `proposal_share` | 提案企劃可寫分享（project.html?t=、meeting-note.html） | 客戶、外部顧問 | 分享連結（可寫） | 關閉／連結 | 連結 |
 | `references_share` | 片庫分享（reference.html 分享模式） | 外部 | 分享連結 | 關閉／連結 | 連結 |
 | `showcase_edit` | 結案上架編輯（showcase-edit.html） | 外部剪接、企劃 | 編輯 token | 關閉／連結 | 連結 |
-| `staff_edit`、`resume` | 員工自助編輯履歷／公開履歷（staff-edit.html、resume.html） | 員工本人／對外 | 編輯 token／`?staff=<id>`（看 resume_visible） | 關閉／連結；關閉／公開 | 連結；公開 |
+| `staff_edit` | 員工自助編輯履歷（staff-edit.html） | 員工本人 | 編輯 token | 關閉／連結 | 連結 |
+| `resume` | 公開履歷（resume.html?staff=<id>） | 對外 | 員工檔勾 resume_visible 才看得到（沒有 token） | 關閉／公開 | 公開 |
 | `register` | 員工自助註冊（my.html 註冊區） | 新同事 | 公開（兩題公司知識） | 關閉／公開 | 公開 |
 
 （官網對外 API `routers/website/public.py` 是網站本體，不進這張表。）
 
-2. 模式語意（一句話）：**關閉**＝該面所有 public／token 端點回 404「此功能未開放」，頁面顯示同一句；**連結**＝現況（token 逐字比對、可撤銷）；
-   **公開**＝連 token 都不用（只有雜支／履歷／註冊三面支援）。設定存 `settings.json public_access = {鍵: 模式}`。
+2. 模式語意（一句話）：**關閉**＝該面所有 public／token 端點回 404「此功能未開放」，頁面顯示同一句；**連結**＝現況（token 逐字比對、可撤銷）——
+   owner 2026-09-08：「正常來說都是連結公開的」，所以**預設全部＝連結**；**公開**（連 token 都不用）只有履歷與註冊兩面有，因為它們本來就沒有 token。
+   設定存 `settings.json public_access = {鍵: 模式}`。
 
 3. 守衛只加一處：`public_router`／`token_router`／portal public／`/q/` 掛同一個 `Depends(surface_gate)`，用路徑前綴對回登記表的鍵
    （`/public/expense/` → expense、`/public/media-log/` → media_log …），查模式：關閉 → 404；連結／公開 → 放行到各端點原本的 token 檢查。
-   雜支那三支「登入即可」端點改成看 `expense` 模式：公開 → 免登入；連結 → 要 token（或登入＋crm_projects）；關閉 → 404。
-   稽核第一批第 3 項因此不用另外收，這一刀就處理掉。
+   雜支那三支「登入即可」端點（`?project=` 舊路）改成內部路：登入＋`crm_projects`；外部一律走 `?t=` 連結。稽核第一批第 3 項因此不用另外收。
 
 4. 畫面：使用者管理第四個分頁「**公開區**」——每一面一列：名稱、誰在用、怎麼進（可複製的網址樣式）、目前有效連結數（有 token 表的面才算）、
    模式（關閉／連結／公開三選一）、一行說明。改完按「儲存」，立即生效（守衛每次讀設定，不用重啟）。管理員限定 `GET/PUT /auth/public-access`。
