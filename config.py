@@ -19,9 +19,11 @@ _DEFAULT_SETTINGS: dict = {
         "verify_success":    "🔍 【比對完成】{project_name}\n✅ 通過：{pass_count} | ❌ 失敗：{fail_count} | 共 {total_count} 個",
         "media_log_upload":  "【影像紀錄】{project_name} 新收 {file_count} 個檔案（{uploaders}）",
         "user_registered":   "【新帳號註冊】{username}（{email}）已完成公司驗證註冊 — 權限待管理員開通（右上角選單 → 使用者管理）",
+        "plan_parttime":     "【兼職排班】{planner} 幫 {staff_name} 排了 {count} 項（{days}）\n→ 員工頁 今天與這週 › 我的一週",
     },
     "notification_channels": {
         "backup":    {"gchat": True},
+        "plan_parttime": {"gchat": True},
         "report":    {"gchat": True},
         "transcode": {"gchat": True},
         "concat":    {"gchat": True},

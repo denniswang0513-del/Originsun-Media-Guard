@@ -1275,6 +1275,9 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   權限管理的 `PERM_PARENT`（子鑰匙縮排、總開關沒開子鑰匙灰掉）都是鏡射。
   兩次一次性回填在 `main.py`（settings 旗標 `rbac.me_zone_split_backfilled`、`rbac.me_today_zone_backfilled`），跑過之後 owner 收掉的鑰匙**不會**被補回來。
   要放寬先讀「放寬守衛不能收回原本的鑰匙」那條。
+- **兼職排班不走 own-scope 的 `/timesheets/mine/*`**（那邊絕不收 client 給的 staff_id）：另一組 `/timesheets/plan-for/{staff_id}/*`，
+  守衛 `_plan_for_ident`＝管理員／工作追蹤整區恆過，否則「綁定＋`me_plan_parttime`＋本人在職／合夥＋對方狀態是兼職」；
+  只碰對方的**計畫列**（`_plan_row_of`），時數一律不收（他自己在格子填）；`timesheets.planned_by` 記排的人（在合併快照 `_SNAP_COLS` 裡）。
 - **`frontend/tabs/hr_leave/hr_leave.js` 只准用雙斜線註解**：檔頭第 4 行的 API 路徑帶了一個「斜線星號」，
   檔案裡只要再出現一個「星號斜線」（加一段 JSDoc 就會），`tests/unit/_srcscan.js_code_only` 會把中間
   整段當區塊註解剝掉 —— 真的程式碼跟著消失，而測試只會說某個常數不見了。同樣的陷阱在任何「檔頭寫了

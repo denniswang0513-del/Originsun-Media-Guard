@@ -629,6 +629,7 @@ async def _on_startup():
                         ("timesheets", "remark", "TEXT"),
                         # 工作階段＋待辦互連（docs/JOURNAL_WORKLOG_PLAN.md §12／§2-C4）；work_stage_nodes 新表由 create_all 建
                         ("timesheets", "stage_id", "VARCHAR(32)"),
+                        ("timesheets", "planned_by", "VARCHAR(64)"),      # 兼職排班：誰幫排的（2026-09-08）
                         ("timesheets", "stage_name", "VARCHAR(64)"),
                         ("timesheets", "bulletin_id", "VARCHAR(32)"),
                         # 我的一天格子的起／訖（owner 2026-09-06：重新整理不能消失）

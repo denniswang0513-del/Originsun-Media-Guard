@@ -227,6 +227,133 @@ async def timesheet_options(request: Request):
     return {"work_types": list(WORK_TYPES), "stages": stages_by_category(nodes)}
 
 
+# ── 兼職排班（owner 2026-09-08）：有「兼職排班」鑰匙的正職（在職／合夥）幫狀態是「兼職」的人排「我的一週」的卡 ──
+# 卡＝他的一列工時（status=plan、時數 0、planned_by＝排的人）。只碰計畫列、時數不收；兼職自己那邊完全不變
+# （卡出現在他的格子、他填時數／挪／刪都照舊）。刻意不走 own-scope 的 /mine/*（那邊絕不收 client 給的 staff_id），
+# 另開這一組、守衛明講「誰能幫誰」。
+
+_PARTTIME = "兼職"
+
+
+async def _plan_for_ident(request: Request, session, staff_id: str) -> dict:
+    """守衛＋解析：回 {"username": 排的人, "target": CrmStaff, "ident": 給 timesheet_self 用的 own-scope dict}。
+    管理員／工作追蹤模組 → 任何人；否則「綁定＋me_plan_parttime＋本人是在職／合夥」且「對方是兼職」。"""
+    from core.hr_logic import is_active_staff
+    from core.identity import require_bound_staff
+    who = current_username(request) or ""
+    full = True
+    try:
+        check_admin_or_module(request, "timesheets")
+    except HTTPException as e:
+        if e.status_code != 403:
+            raise
+        full = False
+    target = await session.get(CrmStaff, staff_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="找不到這個人員")
+    if not full:
+        me = await require_bound_staff(request, "me_plan_parttime")
+        if not is_active_staff(getattr(me["staff"], "status", None)):
+            raise HTTPException(status_code=403, detail="只有在職／合夥可以幫兼職排班")
+        if (target.status or "").strip() != _PARTTIME:
+            raise HTTPException(status_code=403, detail="只能幫狀態是「兼職」的人排")
+    return {"username": who, "target": target, "ident": {"staff_id": target.id, "staff": target, "username": who}}
+
+
+async def _plan_row_of(session, target, row_id: str):
+    """對方的**計畫列**（status=plan）才給改／刪；實際紀錄與別人的列一律 403。"""
+    from services.timesheet_self import get_row
+    r = await get_row(session, row_id)
+    if r.staff_id != target.id or (r.status or "") != "plan":
+        raise HTTPException(status_code=403, detail="只能改這個人的計畫列（有時數的紀錄不能動）")
+    return r
+
+
+@router.get("/plan-for/targets")
+async def plan_for_targets(request: Request):
+    """可以幫誰排：狀態是「兼職」的人員（管理員／工作追蹤模組看全部在職的人也行，但視窗只列兼職）。"""
+    from core.identity import require_bound_staff
+    try:
+        check_admin_or_module(request, "timesheets")
+    except HTTPException as e:
+        if e.status_code != 403:
+            raise
+        await require_bound_staff(request, "me_plan_parttime")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmStaff.id, CrmStaff.name).where(CrmStaff.status == _PARTTIME).order_by(CrmStaff.name))).all()
+    return {"targets": [{"id": i, "name": n} for i, n in rows]}
+
+
+@router.get("/plan-for/{staff_id}/rows")
+async def plan_for_rows(staff_id: str, request: Request, from_: str = Query("", alias="from"), to: str = ""):
+    """對方那一週的列（實際＋計畫都回，視窗只讓動計畫列）。"""
+    from services.timesheet_self import list_rows
+    d0 = _day_or_422(from_)
+    d1 = _day_or_422(to) + timedelta(days=1)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        ctx = await _plan_for_ident(request, session, staff_id)
+        items = await list_rows(session, ctx["ident"], d0, d1)
+    return {"staff_id": staff_id, "staff_name": ctx["target"].name, "items": items}
+
+
+@router.post("/plan-for/{staff_id}/rows")
+async def plan_for_add(staff_id: str, body: MeTimesheetBatch, request: Request):
+    """幫對方加卡：一律計畫列（plan=True、時數不收），planned_by＝排的人；貼一則 Chat（best-effort）。"""
+    from db.models import Timesheet
+    from services.timesheet_self import add_rows
+    factory = db_factory_or_503()
+    async with factory() as session:
+        ctx = await _plan_for_ident(request, session, staff_id)
+        for r in body.rows:
+            r.plan = True
+            r.hours = None
+            r.planned_hours = None
+        _CANDS_CACHE["val"] = None
+        result = await add_rows(session, ctx["ident"], body.rows)
+        for rid in result.get("ids") or []:
+            obj = await session.get(Timesheet, rid)
+            if obj is not None:
+                obj.planned_by = ctx["username"] or None
+        await session.commit()
+    days = sorted({r.work_date for r in body.rows})
+    try:
+        from notifier import notify_tab_async
+        await notify_tab_async("plan_parttime", planner=ctx["username"] or "?", staff_name=ctx["target"].name,
+                               count=len(body.rows), days="、".join(days))
+    except Exception:
+        pass
+    return result
+
+
+@router.put("/plan-for/{staff_id}/{row_id}")
+async def plan_for_update(staff_id: str, row_id: str, body: MeTimesheetUpdate, request: Request):
+    """改對方的計畫卡（內容／分類／階段／挪日期）。時數不收 —— 那是他自己在格子裡填的。"""
+    from services.timesheet_self import update_row
+    factory = db_factory_or_503()
+    async with factory() as session:
+        ctx = await _plan_for_ident(request, session, staff_id)
+        await _plan_row_of(session, ctx["target"], row_id)
+        body.hours = None
+        body.planned_hours = None
+        body.plan = True
+        _CANDS_CACHE["val"] = None
+        return await update_row(session, ctx["ident"], row_id, body)
+
+
+@router.delete("/plan-for/{staff_id}/{row_id}")
+async def plan_for_delete(staff_id: str, row_id: str, request: Request):
+    from services.timesheet_self import delete_row
+    factory = db_factory_or_503()
+    async with factory() as session:
+        ctx = await _plan_for_ident(request, session, staff_id)
+        await _plan_row_of(session, ctx["target"], row_id)
+        _CANDS_CACHE["val"] = None
+        return await delete_row(session, ctx["ident"], row_id)
+
+
 @router.get("/mine")
 async def my_day(request: Request, date: str = ""):
     """我的一天：本人該日的工作項（實際＋計畫）＋ 計畫／實際合計 ＋ 昨天的列（供「複製昨天」）。
@@ -514,6 +641,9 @@ async def project_file(request: Request, name: str = "", project_id: str = ""):
         proj = await session.get(CrmProject, pid) if pid else None
         quote_days = await _quote_days(session, pid)
         cands = await _project_candidates(session)
+        # 里程碑（按週）：專案檔案頁畫這個案每週的里程碑（owner 2026-09-08）；沒對到案就沒有
+        from services.milestone_service import project_milestones
+        milestone_weeks = await project_milestones(session, pid) if pid else []
     m = project_metrics(metrics_input(rows))
     budget = getattr(proj, "budget_hours", None)
     sheet_names = sorted({r.project_name for r in rows if r.project_name})
@@ -531,6 +661,7 @@ async def project_file(request: Request, name: str = "", project_id: str = ""):
         "by_month": rows_by_month(rows),
         "timeline": _day_log(rows),                 # 全部逐日，不截（前端按月分段）
         "similar": similar_projects(sim_name, split_sheet_name(sim_name)[0], m["total"], cands),
+        "milestone_weeks": milestone_weeks,         # [{week_start, items:[milestone_dict]}]
     }
 
 

@@ -34,6 +34,7 @@ class Timesheet(Base):
     end_time = Column(String(5), nullable=True)                  # 訖「HH:MM」
     edited_at = Column(DateTime(timezone=True), nullable=True)   # 總表改過（管理員）；Sheet 同格之後再變＝記衝突不自動蓋
     edited_by = Column(String(64), nullable=True)
+    planned_by = Column(String(64), nullable=True)               # 兼職排班：正職幫兼職排的卡記排的人（username）；自己排的空
     status = Column(String(16), nullable=False, default="import")  # import／draft（實際）／plan（只有計畫）
     source = Column(String(16), nullable=False, default="sheet")  # sheet/manual/schedule
     row_hash = Column(String(40), nullable=False, unique=True)   # 去重：date|staff|project|task|hours

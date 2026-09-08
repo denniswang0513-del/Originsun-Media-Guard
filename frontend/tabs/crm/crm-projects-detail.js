@@ -9,6 +9,7 @@ import { state, callbacks, STATUS_ORDER, PRESALE_STATUSES, CLOSED_STATUSES } fro
 import { _badge, _avatar, getProjectTypes } from './crm-projects-core.js';
 import { calcDashboard, remainColor, profitColor, barColor } from './crm-projects-calc.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum, pickFolderPath, searchableSelect } from './crm-utils.js';
+import { authFetch } from '../../js/shared/utils.js';   // 里程碑端點在 /api/v1/milestones，不在 CRM 前綴下
 
 // ── Edit Fields ────────────────────────────────────────────
 
@@ -400,6 +401,9 @@ function renderDetail(project) {
         <!-- Layer 3: 預算儀表板（async，製作/結案/歸檔） -->
         <div id="pi-budget-row"></div>
 
+        <!-- Layer 4: 里程碑（按週）（async；讀員工頁「團隊的一週」設的那份，唯讀，有才出現） -->
+        <div id="pi-milestones"></div>
+
         <!-- Layer 5: 補充資訊 (always rendered with placeholders) -->
         <div class="pi-section-title">補充資訊</div>
         <div class="pi-details-card">
@@ -417,6 +421,18 @@ function renderDetail(project) {
     import('./crm-projects-proposals.js')
         .then(m => m.renderProposalSource(project.id, document.getElementById('pi-proposal-src')))
         .catch(() => {});
+
+    // 里程碑（按週）（owner 2026-09-08）：GET /milestones/project/{id}；畫法跟專案檔案同一份（ts-projects.milestoneWeeksHtml）。
+    // 動態 import ＋ 檢查函式存在：ts-projects.js 被 Cloudflare 快取四小時，舊版沒這支時整塊不畫、不能讓分頁掛掉。
+    import('../../js/shared/ts-projects.js').then(async (m) => {
+        const host = document.getElementById('pi-milestones');
+        if (!host || typeof m.milestoneWeeksHtml !== 'function') return;
+        const r = await authFetch('/api/v1/milestones/project/' + encodeURIComponent(project.id));
+        if (!r.ok) return;
+        const weeks = (await r.json()).weeks || [];
+        if (!weeks.length) return;
+        host.innerHTML = `<div class="pi-section-title">里程碑（按週）</div><div class="pi-details-card">${m.milestoneWeeksHtml(weeks)}</div>`;
+    }).catch(() => {});
 
     // Bind open folder buttons
     document.querySelectorAll('#proj-detail-info ._open-folder-btn').forEach(btn => {

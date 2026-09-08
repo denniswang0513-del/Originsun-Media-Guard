@@ -202,6 +202,20 @@ export function bars(pairs, width) {
  *   modal（沒有頁首）、head（非 modal 的頁首 html）、backHtml（回清單鈕）、
  *   editable（加入比較／改預算／匯出 CSV 鈕；工作台不畫）、compareNames（比較清單）。
  */
+/** 里程碑（按週）：GET /milestones/project/{id} 的 weeks → 一週一段（唯讀；編輯在員工頁「團隊的一週」的彈窗）。
+ *  專案檔案（這裡）與 CRM 專案詳情（crm-projects-detail.js 動態 import 這支）同一份。 */
+export function milestoneWeeksHtml(weeks) {
+    if (!weeks || !weeks.length) return '<div class="tsp-dim">這個案還沒設過里程碑（在員工頁「團隊的一週」› 設定專案里程碑）</div>';
+    const md = (s) => s ? `${+s.slice(5, 7)}/${+s.slice(8, 10)}` : '';
+    return weeks.map(w => `<div style="margin:6px 0 10px;">
+        <div class="tsp-dim" style="font-size:11px;letter-spacing:.1em;margin-bottom:2px;">${md(w.week_start)} 那一週</div>
+        ${(w.items || []).map(m => `<div style="display:flex;gap:10px;align-items:baseline;font-size:12.5px;padding:2px 0;${m.done ? 'opacity:.55;text-decoration:line-through;' : ''}">
+            <span style="flex:1;">${esc(m.title)}${m.carried ? '<span class="tsp-dim" style="font-size:10px;margin-left:6px;">延自上週</span>' : ''}</span>
+            ${m.assignee_name ? `<span class="tsp-dim">${esc(m.assignee_name)}</span>` : ''}
+            <span class="tsp-dim" style="${m.late && !m.done ? 'color:#f87171;font-weight:600;' : ''}">${md(m.due_date)}${m.late && !m.done ? '（過期）' : ''}</span>
+        </div>`).join('')}</div>`).join('');
+}
+
 export function projectFileHtml(d, opts = {}) {
     ensureTsProjectsStyle();
     const pct = d.pct == null ? '—' : d.pct + '%';
@@ -243,6 +257,7 @@ export function projectFileHtml(d, opts = {}) {
                 : '<div class="tsp-dim">沒有像的案（同客戶／案名相似／時數量級接近）</div>'}
             </div>
         </div>
+        ${d.milestone_weeks !== undefined ? `<div class="ts-card" style="margin-top:14px;"><h3>里程碑（按週）</h3>${milestoneWeeksHtml(d.milestone_weeks)}</div>` : ''}
         <div class="ts-card" style="margin-top:14px;"><h3>時間軸（整個案，共 ${(d.timeline || []).length} 個有紀錄的日子）</h3>
             ${dayLogByMonth(d.timeline || [], 'staff_name')}
         </div>`;

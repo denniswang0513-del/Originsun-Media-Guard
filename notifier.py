@@ -85,6 +85,8 @@ def notify_tab(template_key: str, **variables) -> None:
         "inquiry_received":  "📬 【官網新詢問】#{id} 來自 {name}\n📧 Email：{email}\n📱 電話：{phone}\n🏢 公司：{company}\n💼 服務類型：{service_type}\n💰 預算：{budget_range}\n\n訊息：\n{message}",
         "media_log_upload":  "【影像紀錄】{project_name} 新收 {file_count} 個檔案（{uploaders}）",
         "user_registered":   "【新帳號註冊】{username}（{email}）已完成公司驗證註冊 — 權限待管理員開通（右上角選單 → 使用者管理）",
+        # 兼職排班（owner 2026-09-08）：正職幫兼職排了卡 → 貼群，讓兼職知道（無 emoji）
+        "plan_parttime":     "【兼職排班】{planner} 幫 {staff_name} 排了 {count} 項（{days}）\n→ 員工頁 今天與這週 › 我的一週",
         # 失敗告警（channel key 即 template_key 本身，預設 gchat=True → webhook 有設就會發）
         "task_failed":       "🔴 【任務失敗】{task_type}｜{project_name}\n⚠️ {error}\n🖥️ 機器：{hostname}",
         "rebuild_failed":    "🔴 【官網重建失敗】\n⚠️ {error}\n請到官網管理 Tab 查看完整 log 並手動「立即重建」",

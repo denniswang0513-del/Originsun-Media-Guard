@@ -38,6 +38,7 @@ def ts_dict(r, staff_id: str | None = None, *, with_note: bool = False) -> dict:
         "end_time": getattr(r, "end_time", None) or "",
         "hours": round(float(r.hours or 0), 2),
         "planned_hours": round(float(r.planned_hours), 2) if r.planned_hours is not None else None,
+        "planned_by": getattr(r, "planned_by", None) or "",    # 兼職排班：正職幫排的卡（卡上「由 X 排」）
         "work_type": r.work_type or "",
         "stage_id": getattr(r, "stage_id", None) or "",        # 工作階段（§12）；stage_name 是鏡射，只由 set_stage 寫
         "stage_name": getattr(r, "stage_name", None) or "",
@@ -266,7 +267,7 @@ async def delete_row(session, ident: dict, row_id: str) -> dict:
 
 _SNAP_COLS = ("id", "work_date", "staff_name", "staff_id", "project_id", "project_name", "task_note", "hours", "planned_hours",
               "work_type", "note", "remark", "stage_id", "stage_name", "bulletin_id", "sheet_key", "start_time", "end_time",
-              "edited_at", "edited_by", "status", "source", "row_hash", "created_at")
+              "edited_at", "edited_by", "planned_by", "status", "source", "row_hash", "created_at")
 _SNAP_DT = ("work_date", "edited_at", "created_at")
 
 
