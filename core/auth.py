@@ -412,6 +412,13 @@ _PRIVATE_HOST_RE = re.compile(
     r'^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)')
 
 
+def via_cloudflare(request: Request) -> bool:
+    """這個請求是不是經 cloudflared tunnel 從公網進來的（Cloudflare edge 一定注入 CF-Connecting-IP／CF-Ray，
+    客戶端自己帶的會被 edge 覆寫，所以偽造不了）。內部金鑰類端點（機隊互打的 restart）用它把公網那條路關掉：
+    金鑰字串跟著 OTA 包發到每台機器，不能當成只有機隊知道。"""
+    return bool(request.headers.get('cf-connecting-ip') or request.headers.get('cf-ray'))
+
+
 def check_lan_or_logged_in(request: Request):
     """LAN 直連免登入；對外（經 cloudflared）必須登入。
 

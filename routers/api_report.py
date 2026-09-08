@@ -1,3 +1,4 @@
+from fastapi import HTTPException  # type: ignore
 """
 api_report.py — 報表 API（DB 優先，JSON fallback）
 Endpoints:
@@ -90,7 +91,7 @@ async def delete_report_entry(request: Request, report_id: str):
         from core.auth import check_admin
         check_admin(request)
     except ImportError:
-        pass
+        raise HTTPException(status_code=503, detail="Auth module unavailable")   # fail-closed
     # DB first
     if state.db_online:
         try:

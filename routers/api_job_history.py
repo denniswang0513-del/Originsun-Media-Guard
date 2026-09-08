@@ -1,3 +1,4 @@
+from fastapi import HTTPException  # type: ignore
 """
 api_job_history.py — 任務歷史 API（DB 優先，JSON fallback）
 """
@@ -186,7 +187,7 @@ async def clear_job_history(request: Request, date: Optional[str] = None):
         from core.auth import check_admin
         check_admin(request)
     except ImportError:
-        pass
+        raise HTTPException(status_code=503, detail="Auth module unavailable")   # fail-closed
     if state.db_online:
         try:
             from db.session import get_session_factory

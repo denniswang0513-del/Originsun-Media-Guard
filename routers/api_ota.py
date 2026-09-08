@@ -10,7 +10,7 @@ import subprocess
 import sys
 import asyncio
 from datetime import datetime
-from fastapi import APIRouter, BackgroundTasks, Query, Request  # type: ignore
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request  # type: ignore
 from core.no_store import no_store_file
 from fastapi.responses import JSONResponse  # type: ignore
 
@@ -23,7 +23,7 @@ def _check_admin(request: Request):
         from core.auth import check_admin
         check_admin(request)
     except ImportError:
-        pass  # auth module not available, skip check
+        raise HTTPException(status_code=503, detail="Auth module unavailable")   # fail-closed
 
 
 # ── Module-level state ──────────────────────────────────────────────────
@@ -135,6 +135,9 @@ async def internal_restart(request: Request):
     Uses X-Internal-Key header for simple auth (no JWT needed).
     Same logic as control/update but without JWT requirement.
     """
+    from core.auth import via_cloudflare
+    if via_cloudflare(request):   # 金鑰隨 OTA 包公開，公網那條路一律關（2026-09-08 稽核）
+        return JSONResponse({"detail": "Unauthorized"}, 403)
     key = request.headers.get("X-Internal-Key", "")
     if key != "originsun-internal-restart":
         return JSONResponse({"detail": "Invalid internal key"}, 401)
@@ -465,15 +468,17 @@ async def publish_version(request: Request):
 
 
 @router.get("/api/v1/publish/status")
-async def publish_status(job_id: str = Query("")):
+async def publish_status(request: Request, job_id: str = Query("")):
     """Poll publish job status."""
+    _check_admin(request)
     if not job_id or job_id not in _publish_status:
         return {"status": "unknown", "message": "找不到此發布任務"}
     return _publish_status[job_id]
 
 
 @router.get("/api/v1/publish/suggest_notes")
-async def suggest_release_notes(since_version: str = Query("")):
+async def suggest_release_notes(request: Request, since_version: str = Query("")):
+    _check_admin(request)   # 對匿名跑 git 子程序＋洩漏 commit 標題（2026-09-08 稽核）
     """Suggest release notes from git commit subjects since a baseline version.
 
     Baseline = ``since_version`` if given (e.g. prod's version when deploying
@@ -530,8 +535,9 @@ async def suggest_release_notes(since_version: str = Query("")):
 
 
 @router.get("/api/v1/publish/history")
-async def get_publish_history():
+async def get_publish_history(request: Request):
     """Return recent publish history."""
+    _check_admin(request)
     if os.path.exists(_PUBLISH_HISTORY_FILE):
         try:
             with open(_PUBLISH_HISTORY_FILE, "r", encoding="utf-8") as f:
@@ -803,7 +809,8 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
 
 
 @router.get("/api/v1/deploy_to_prod")
-async def deploy_to_prod_eligible():
+async def deploy_to_prod_eligible(request: Request):
+    _check_admin(request)
     """Report whether THIS instance may deploy to the production master.
 
     Used by the publish modal to decide whether to show the deploy button —
@@ -1056,7 +1063,8 @@ def _trigger_master_rebuild_blocking(log: list) -> bool:
 
 
 @router.get("/api/v1/deploy_website")
-async def deploy_website_eligible():
+async def deploy_website_eligible(request: Request):
+    _check_admin(request)
     """是否可發布官網前端（dev checkout + 生產已有 website/node_modules）。"""
     src_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     same = os.path.normcase(os.path.abspath(src_root)) == os.path.normcase(os.path.abspath(_PROD_DIR))

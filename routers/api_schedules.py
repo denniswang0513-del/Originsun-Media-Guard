@@ -5,9 +5,10 @@ api_schedules.py — 排程任務 CRUD API（DB 優先，JSON fallback）
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException  # type: ignore
+from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
 from core.schemas import ScheduleCreateRequest, ScheduleUpdateRequest  # type: ignore
+from core.auth import check_lan_or_logged_in  # type: ignore
 from core.scheduler import (  # type: ignore
     load_schedules as load_schedules_json,
     save_schedules as save_schedules_json,
@@ -49,8 +50,9 @@ async def list_schedules():
 
 
 @router.post("/schedules")
-async def create_schedule(body: ScheduleCreateRequest):
+async def create_schedule(body: ScheduleCreateRequest, request: Request):
     """新增排程。"""
+    check_lan_or_logged_in(request)   # cron 排程＝持久化＋定時執行（2026-09-08 稽核）
     # 驗證 task_type
     if body.task_type not in SCHEDULABLE_TYPES:
         raise HTTPException(
@@ -147,8 +149,9 @@ async def create_schedule(body: ScheduleCreateRequest):
 
 
 @router.put("/schedules/{schedule_id}")
-async def update_schedule(schedule_id: str, body: ScheduleUpdateRequest):
+async def update_schedule(schedule_id: str, body: ScheduleUpdateRequest, request: Request):
     """更新排程（部分更新）。"""
+    check_lan_or_logged_in(request)
     # Validate fields that need validation
     if body.task_type is not None and body.task_type not in SCHEDULABLE_TYPES:
         raise HTTPException(
@@ -273,8 +276,9 @@ async def update_schedule(schedule_id: str, body: ScheduleUpdateRequest):
 
 
 @router.delete("/schedules/{schedule_id}")
-async def delete_schedule(schedule_id: str):
+async def delete_schedule(schedule_id: str, request: Request):
     """刪除排程。"""
+    check_lan_or_logged_in(request)
     if state.db_online:
         try:
             from db.session import get_session_factory

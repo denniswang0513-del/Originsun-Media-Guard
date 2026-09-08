@@ -63,7 +63,7 @@ window.fetch = function(url, opts = {}) {
          url.includes('/admin/') || url.includes('/auth/') || url.includes('/roles') ||
          url.includes('/job_history') && opts.method === 'DELETE' ||
          url.includes('/reports/') && opts.method === 'DELETE' ||
-         url.includes('/agents') && (opts.method === 'POST' || opts.method === 'DELETE'))) {
+         url.includes('/agents') && (opts.method === 'POST' || opts.method === 'PUT' || opts.method === 'DELETE'))) {
         opts.headers = { ...opts.headers, 'Authorization': 'Bearer ' + window._authToken };
     }
     return _origFetch.call(window, url, opts);

@@ -52,7 +52,7 @@ def test_each_endpoint_takes_its_own_key():
     for fn in ("async def milestones_save(", "async def milestone_done(", "async def milestone_defer("):
         assert "_writer(request)" in func_body(ms, fn), fn
     for fn in ("async def milestones_week(", "async def milestones_of_project("):
-        assert "_who(request)" in func_body(ms, fn) and "_writer(" not in func_body(ms, fn), f"{fn} 讀仍是登入即可"
+        assert "_who(request" in func_body(ms, fn) and "_writer(" not in func_body(ms, fn), f"{fn} 讀仍是登入即可"
 
 
 def test_workspace_draws_each_view_by_its_key_and_falls_back():

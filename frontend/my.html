@@ -1376,7 +1376,7 @@ async function cancelLeave(id, mode) {
     if (mode === "apply") {
         const note = (prompt("消假理由（必填，送出後由主管決定）") || "").trim();
         if (!note) return;
-        body = { cancel_note: note };
+        body = { note };   // schema LeaveCancel 收 note（之前送 cancel_note 必 422）
     } else if (!confirm("確定撤回這張請假單？")) return;
     try {
         const r = await mfetch("/api/v1/me/leave/" + id + "/cancel", { method: "POST", body: JSON.stringify(body) });

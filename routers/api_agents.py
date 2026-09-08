@@ -27,7 +27,7 @@ def _check_admin_agents(request):
         from core.auth import check_admin
         check_admin(request)
     except ImportError:
-        pass
+        raise HTTPException(status_code=503, detail="Auth module unavailable")   # fail-closed
 
 
 async def _find_agent(agent_id: str) -> dict:

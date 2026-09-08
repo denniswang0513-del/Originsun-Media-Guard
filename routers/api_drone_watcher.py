@@ -2,7 +2,8 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from fastapi import APIRouter  # type: ignore
+from fastapi import APIRouter, Request  # type: ignore
+from core.auth import check_lan_or_logged_in  # type: ignore
 from fastapi.responses import JSONResponse  # type: ignore
 
 from core.schemas import DroneWatcherConfig  # type: ignore
@@ -43,7 +44,8 @@ async def get_watcher_config():
 
 
 @router.post("/api/v1/drone_watcher/config")
-async def save_watcher_config(cfg: DroneWatcherConfig):
+async def save_watcher_config(cfg: DroneWatcherConfig, request: Request):
+    check_lan_or_logged_in(request)   # 持久化設定＋每日排程：區網同事照常，公網匿名不行（2026-09-08 稽核）
     data = cfg.model_dump()
     drone_watcher.save_config(data)
     return {
@@ -55,10 +57,11 @@ async def save_watcher_config(cfg: DroneWatcherConfig):
 
 
 @router.post("/api/v1/drone_watcher/cancel_all")
-async def cancel_all_drone_jobs():
+async def cancel_all_drone_jobs(request: Request):
     """Cancel every drone_meta job — queued ones are removed, the running one
     gets engine.request_stop(). Used by the watcher panel's 取消全部 button.
     """
+    check_lan_or_logged_in(request)
     cancelled_queued = 0
     stopped_running = 0
     for j in list(state.get_all_jobs().values()):
@@ -78,11 +81,12 @@ async def cancel_all_drone_jobs():
 
 
 @router.post("/api/v1/drone_watcher/run_now")
-async def run_watcher_now(cfg: DroneWatcherConfig):
+async def run_watcher_now(cfg: DroneWatcherConfig, request: Request):
     """立即執行一次掃描（測試用，不檢查時間、不寫入儲存設定）。
 
     使用請求 body 內的 config 值，避免「UI 有填但還沒按儲存」的使用者困惑。
     """
+    check_lan_or_logged_in(request)
     data = cfg.model_dump()
     if not data.get("source_root") or not data.get("dest_root"):
         return JSONResponse(

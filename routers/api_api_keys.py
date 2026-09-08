@@ -42,11 +42,10 @@ def _require_admin(request: Request) -> dict:
 
 
 def _key_to_safe_dict(k: dict) -> dict:
-    """Convert key record to response dict. Includes raw_key for internal tool use."""
+    """Convert key record to response dict. 不回 raw_key：建立時回一次就好，列表回明文＝任一管理員拿到所有人的 key 可冒充（2026-09-08 稽核）。"""
     return {
         'id': k.get('id'),
         'key_prefix': k.get('key_prefix', ''),
-        'raw_key': k.get('raw_key', ''),
         'name': k.get('name', ''),
         'username': k.get('username', ''),
         'created_at': k.get('created_at', ''),

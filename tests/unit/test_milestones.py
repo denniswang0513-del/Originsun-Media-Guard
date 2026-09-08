@@ -57,11 +57,11 @@ def test_service_defaults_to_recent_and_last_week_projects():
     assert {"project_id", "week_start", "title", "due_date", "assignee_staff_id", "assignee_name", "status", "done_by", "done_at"} <= {c.name for c in CrmProjectMilestone.__table__.columns}
 
 
-def test_router_is_registered_and_open_to_any_login():
+def test_router_is_registered_and_reads_need_a_key():
     src = code_only(repo_src("routers/api_milestones.py"))
     for path in ('"/week"', '"/week/save"', '"/{mid}/done"', '"/{mid}/defer"', '"/project/{project_id}"'):
         assert path in src, path
-    assert "check_logged_in(request)" in func_body(src, "def _who(")
+    assert 'check_admin_or_module(request, "timesheets", ME_ZONE_MASTER, *extra)' in func_body(src, "def _who("), "2026-09-08 稽核：讀取從登入即可改成工作追蹤或今天與這週鑰匙（回整個在職名單＋工時）"
     assert "'api_milestones'" in repo_src("main.py")
     today = code_only(func_body(repo_src("routers/api_me.py"), "async def my_today("))
     assert "today_summary(session, today)" in today and '"milestones": milestones' in today

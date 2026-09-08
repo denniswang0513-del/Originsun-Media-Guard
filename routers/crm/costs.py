@@ -15,7 +15,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 from core.no_store import no_store_file
 
-from core.auth import check_admin
+from core.auth import check_admin, check_admin_or_module
 from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
 from core.schemas import (ProjectExpensePayload, ProjectExpensePatchPayload,
                           CostLinePayload, CostLineUpdatePayload, ExpenseLinkPayload,
@@ -308,8 +308,9 @@ async def _create_expense(session, project_id: str, req, advance_id=None, payee_
 
 
 @router.post("/advance/{advance_id}/expenses")
-async def add_advance_expense(advance_id: str, req: ProjectExpensePayload):
+async def add_advance_expense(advance_id: str, req: ProjectExpensePayload, request: Request):
     """公開端點：透過預支款 ID 登記支出（不需登入）。"""
+    _check_project_write_auth(request)   # 內部路（?project=／?group=／預支款頁要登入＋crm_projects）；外部一律走 ?t= 連結（public_router）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -323,8 +324,9 @@ async def add_advance_expense(advance_id: str, req: ProjectExpensePayload):
 
 
 @router.post("/public/projects/{project_id}/expenses")
-async def add_public_project_expense(project_id: str, req: ProjectExpensePayload):
+async def add_public_project_expense(project_id: str, req: ProjectExpensePayload, request: Request):
     """公開端點：透過專案 ID 登記雜支（不需登入）。"""
+    _check_project_write_auth(request)   # 內部路（?project=／?group=／預支款頁要登入＋crm_projects）；外部一律走 ?t= 連結（public_router）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -336,8 +338,9 @@ async def add_public_project_expense(project_id: str, req: ProjectExpensePayload
 
 
 @router.get("/public/cost-groups/{group_id}/info")
-async def get_public_cost_group_info(group_id: str):
+async def get_public_cost_group_info(group_id: str, request: Request):
     """公開端點：取得子表 + 所屬專案資訊（不需登入，供 /group-expense.html 使用）。"""
+    _check_project_write_auth(request)   # 內部路（?project=／?group=／預支款頁要登入＋crm_projects）；外部一律走 ?t= 連結（public_router）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -358,8 +361,9 @@ async def get_public_cost_group_info(group_id: str):
 
 
 @router.get("/public/cost-groups/{group_id}/expenses")
-async def list_public_cost_group_expenses(group_id: str):
+async def list_public_cost_group_expenses(group_id: str, request: Request):
     """公開端點：列出該子表最近 20 筆已登記雜支（前端只渲染 10 筆，多撈一些保留彈性）。"""
+    _check_project_write_auth(request)   # 內部路（?project=／?group=／預支款頁要登入＋crm_projects）；外部一律走 ?t= 連結（public_router）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -380,8 +384,9 @@ async def list_public_cost_group_expenses(group_id: str):
 
 
 @router.post("/public/cost-groups/{group_id}/expenses")
-async def add_public_cost_group_expense(group_id: str, req: ProjectExpensePayload):
+async def add_public_cost_group_expense(group_id: str, req: ProjectExpensePayload, request: Request):
     """公開端點：登記雜支到指定子表（強制 cost_group_id = URL 參數，防呼叫端注入）。"""
+    _check_project_write_auth(request)   # 內部路（?project=／?group=／預支款頁要登入＋crm_projects）；外部一律走 ?t= 連結（public_router）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -394,8 +399,9 @@ async def add_public_cost_group_expense(group_id: str, req: ProjectExpensePayloa
 
 
 @router.post("/public/cost-groups/{group_id}/receipts/{expense_id}")
-async def upload_public_cost_group_receipt(group_id: str, expense_id: str, file: UploadFile = File(...)):
+async def upload_public_cost_group_receipt(group_id: str, expense_id: str, request: Request, file: UploadFile = File(...)):
     """公開端點：上傳收據到指定子表的 expense。"""
+    _check_project_write_auth(request)   # 內部路（?project=／?group=／預支款頁要登入＋crm_projects）；外部一律走 ?t= 連結（public_router）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -409,8 +415,9 @@ async def upload_public_cost_group_receipt(group_id: str, expense_id: str, file:
 
 
 @router.get("/public/projects/{project_id}/info")
-async def get_public_project_info(project_id: str):
+async def get_public_project_info(project_id: str, request: Request):
     """公開端點：取得專案名稱 + 子表列表（不需登入，供公開雜支頁選子表）。"""
+    _check_project_write_auth(request)   # 內部路（?project=／?group=／預支款頁要登入＋crm_projects）；外部一律走 ?t= 連結（public_router）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -432,8 +439,9 @@ async def get_public_project_info(project_id: str):
 
 
 @router.get("/public/projects/{project_id}/expenses")
-async def list_public_project_expenses(project_id: str):
+async def list_public_project_expenses(project_id: str, request: Request):
     """公開端點：列出專案雜支（不需登入）。"""
+    _check_project_write_auth(request)   # 內部路（?project=／?group=／預支款頁要登入＋crm_projects）；外部一律走 ?t= 連結（public_router）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -593,8 +601,9 @@ async def upload_project_receipt(project_id: str, expense_id: str, request: Requ
 
 
 @router.post("/public/projects/{project_id}/receipts/{expense_id}")
-async def upload_project_receipt_public(project_id: str, expense_id: str, file: UploadFile = File(...)):
+async def upload_project_receipt_public(project_id: str, expense_id: str, request: Request, file: UploadFile = File(...)):
     """公開端點：上傳收據。"""
+    _check_project_write_auth(request)   # 內部路（?project=／?group=／預支款頁要登入＋crm_projects）；外部一律走 ?t= 連結（public_router）
     return await _save_receipt(project_id, expense_id, file)
 
 
@@ -738,6 +747,8 @@ async def list_cost_group_receipts(group_id: str, request: Request):
 
 @router.get("/receipt-file")
 async def serve_receipt(path: str = Query(""), request: Request = None):
+    # 收據影像＝金額：登入之外還要一把看得到它的鑰匙（員工頁自己的零用金／福委、專案頁、帳務、審核；2026-09-08 稽核）
+    check_admin_or_module(request, 'money_view', 'crm_projects', 'crm_invoices', 'finance_approve', 'me_petty', 'me_benefits')
     """提供收據檔案下載/檢視（限定 uploads/ 或子表 receipt_path）。"""
     if not path or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="檔案不存在")

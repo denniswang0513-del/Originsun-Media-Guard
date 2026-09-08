@@ -28,7 +28,8 @@ def _check_admin(request: Request):
         from core.auth import check_admin
         check_admin(request)
     except ImportError:
-        pass  # auth module not available, skip check
+        # fail-closed：auth 模組載不進來是安全事件，不是「跳過檢查」（官網那邊 _common.py 同款回 503）
+        raise HTTPException(status_code=503, detail="Auth module unavailable")
 
 
 # ── Health & Settings ───────────────────────────────────────────────────
@@ -75,20 +76,38 @@ async def health_check():
 # 因此輸出前一律抹除。新增機密欄位時務必同步加進這裡。
 _SECRET_KEYS = ("jwt_secret", "database_url")
 _SECRET_SUBKEYS = {"google_oauth": ("client_secret",), "google_calendar": ("service_account_json",)}
+# 2026-09-08 稽核：這些不是「簽得出 admin」等級的機密，但也不該給匿名——工時同步 token 拿到就能對
+# /timesheets/ingest 塞假工時（它本身是管理員限定端點）、webhook URL 拿到就能對團隊 Chat 灌訊息。
+# 設定視窗（管理員、帶 token）要顯示它們才能編輯，所以只對**非管理員**抹。
+_ADMIN_ONLY_SUBKEYS = {"timesheet": ("ingest_token",),
+                       "notifications": ("google_chat_webhook", "alert_webhook", "custom_webhook_url", "line_notify_token")}
 
 
-def _redact_settings(s: dict) -> dict:
-    """回傳去機密的淺拷貝（不改動原 dict —— 它是 load_settings 的快取內容）。"""
+def _redact_settings(s: dict, *, admin: bool = False) -> dict:
+    """回傳去機密的淺拷貝（不改動原 dict —— 它是 load_settings 的快取內容）。admin=False 再抹 _ADMIN_ONLY_SUBKEYS。"""
     out = {k: v for k, v in s.items() if k not in _SECRET_KEYS}
-    for parent, subs in _SECRET_SUBKEYS.items():
+    rules = dict(_SECRET_SUBKEYS)
+    if not admin:
+        for parent, subs in _ADMIN_ONLY_SUBKEYS.items():
+            rules[parent] = tuple(rules.get(parent, ())) + subs
+    for parent, subs in rules.items():
         if isinstance(out.get(parent), dict):
             out[parent] = {k: v for k, v in out[parent].items() if k not in subs}
     return out
 
 
+def _is_admin_request(request: Request) -> bool:
+    try:
+        from core.auth import _extract_token
+    except ImportError:
+        return False
+    p = _extract_token(request) or {}
+    return int(p.get("access_level") or 0) >= 3 or p.get("role") == "admin"
+
+
 @router.get("/api/settings/load")
-async def load_settings_api():
-    return _redact_settings(load_settings())
+async def load_settings_api(request: Request):
+    return _redact_settings(load_settings(), admin=_is_admin_request(request))
 
 # ── 公司 Logo／印章上傳（報價單 PDF 用）──────────────────────────
 # 存 repo 根目錄 company_assets/：不掛靜態（/uploads 是公開的，章不該無登入就抓得到）、gitignore、
@@ -210,21 +229,6 @@ async def save_drive_map(req: Request):
             override[letter] = ""   # 墓碑：停用該字母
     save_settings({"drive_map": override})
     return {"status": "success", "map": clean}
-
-@router.get("/api/v1/settings")
-async def get_settings_compat():
-    s = load_settings()
-    n = s.get("notifications", {})
-    t = s.get("message_templates", {})
-    return {
-        "line_token": n.get("line_notify_token", ""),
-        "gchat_webhook": n.get("google_chat_webhook", ""),
-        "alert_webhook": n.get("alert_webhook", ""),
-        "custom_webhook": n.get("custom_webhook_url", ""),
-        "tpl_backup_success": t.get("backup_success", ""),
-        "tpl_report_success": t.get("report_success", ""),
-    }
-
 
 @router.post("/api/v1/internal/alert_email")
 async def internal_alert_email(request: Request):
@@ -528,6 +532,10 @@ async def get_nas_version():
 async def system_restart(request: Request):
     """Restart endpoint — delegates to core.process_spawn helper which
     spawns a detached restart sequence (kill port + OTA + rotate + uvicorn)."""
+    # 內部金鑰跟著 OTA 包發到每台機器，不能當成只有機隊知道：經 cloudflared 進來的一律擋（2026-09-08 稽核）
+    from core.auth import via_cloudflare
+    if via_cloudflare(request):
+        return JSONResponse({"detail": "Unauthorized"}, 403)
     key = request.headers.get("X-Internal-Key", "")
     if key != "originsun-internal-restart":
         client_ip = request.client.host if request.client else ""

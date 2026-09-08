@@ -39,7 +39,8 @@ def test_money_flow_writes_stay_admin_or_finance():
     """雜支／收據／雜支連結：真的錢流，不跟著鬆。"""
     seen = 0
     for path, fn, body in _handlers():
-        if any(k in path for k in MONEY_FLOW) and "/public/" not in path and "/petty/" not in path:
+        # /advance/ 與 /public/ 是 expense.html 的內部路（2026-09-08 稽核第一批：登入即可 → 登入＋crm_projects；owner 拍板雜支歸 crm_projects，第二批會把本尊也改過去）
+        if any(k in path for k in MONEY_FLOW) and "/public/" not in path and "/petty/" not in path and "/advance/" not in path:
             if "_check_project_write_auth(request)" in body:
                 raise AssertionError(f"{fn} {path} 是錢流端點，不能用 crm_projects 放行")
             seen += 1

@@ -41,7 +41,7 @@ async function _loadApiKeyList() {
                     <div style="font-size:10px;color:#555;margin-top:4px;">建立 ${created} ｜ 最後使用 ${lastUsed}${k.expires_at ? ' ｜ 到期 ' + new Date(k.expires_at).toLocaleDateString('zh-TW') : ''}</div>
                 </div>
                 <div style="display:flex;gap:4px;align-items:center;margin-left:12px;flex-shrink:0;">
-                    <button onclick="window._copyApiKey('${k.raw_key||prefix}',this)" style="${btnStyle}" title="複製完整 Key">複製</button>
+                    ${k.raw_key ? `<button onclick="window._copyApiKey('${k.raw_key}',this)" style="${btnStyle}" title="複製完整 Key">複製</button>` : ''}
                     ${active ? `<button onclick="window._renameApiKey(${k.id},'${escapedName}')" style="${btnStyle}" title="修改名稱">改名</button>` : ''}
                     ${active ? `<button onclick="window._revokeApiKey(${k.id})" style="${dangerStyle}" title="停用此 Key">停用</button>` : `<button onclick="window._enableApiKey(${k.id})" style="${btnStyle}" title="重新啟用">啟用</button>`}
                     <button onclick="window._deleteApiKey(${k.id})" style="${dangerStyle}" title="永久刪除">刪除</button>

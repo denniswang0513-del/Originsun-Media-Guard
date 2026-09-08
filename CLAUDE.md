@@ -1275,6 +1275,9 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   權限管理的 `PERM_PARENT`（子鑰匙縮排、總開關沒開子鑰匙灰掉）都是鏡射。
   兩次一次性回填在 `main.py`（settings 旗標 `rbac.me_zone_split_backfilled`、`rbac.me_today_zone_backfilled`），跑過之後 owner 收掉的鑰匙**不會**被補回來。
   要放寬先讀「放寬守衛不能收回原本的鑰匙」那條。
+- **`/api/settings/load` 是匿名端點，機密分兩層**（2026-09-08 稽核）：`_SECRET_KEYS`／`_SECRET_SUBKEYS`（簽得出 admin 的：jwt_secret、database_url、
+  google secret）連管理員也不回；`_ADMIN_ONLY_SUBKEYS`（工時同步 token、四個 webhook）只回給管理員 token（設定視窗要顯示才能編）。新增機密欄位要進其中一層。
+  內部重啟端點（`/internal/restart`、`/system/restart`）的金鑰字串隨 OTA 包公開，安全靠 `core.auth.via_cloudflare` 把公網那條路擋掉——**別**把金鑰換成 `_get_secret()`，機隊各自的 jwt_secret 不共用，master 會推不動 agent。
 - **兼職排班不走 own-scope 的 `/timesheets/mine/*`**（那邊絕不收 client 給的 staff_id）：另一組 `/timesheets/plan-for/{staff_id}/*`，
   守衛 `_plan_for_ident`＝管理員／工作追蹤整區恆過，否則「綁定＋`me_plan_parttime`＋本人在職／合夥＋對方狀態是兼職」；
   只碰對方的**計畫列**（`_plan_row_of`），時數一律不收（他自己在格子填）；`timesheets.planned_by` 記排的人（在合併快照 `_SNAP_COLS` 裡）。

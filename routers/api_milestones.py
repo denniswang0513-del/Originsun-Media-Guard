@@ -6,7 +6,7 @@
 """
 from fastapi import APIRouter, Request
 
-from core.auth import check_admin_or_module, check_logged_in
+from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503
 from core.schemas import MilestoneDefer, MilestoneDone, MilestoneSave
 from services import milestone_service
@@ -14,8 +14,11 @@ from services import milestone_service
 router = APIRouter(prefix="/api/v1/milestones", tags=["milestones"])
 
 
-def _who(request: Request) -> str:
-    p = check_logged_in(request) or {}
+def _who(request: Request, *extra: str) -> str:
+    """讀取守衛：工作追蹤整區、或「今天與這週」總開關（團隊的一週／專案查詢都在它下面）；專案頁再加 crm_projects。
+    2026-09-08 稽核前是登入即可——回整個在職名單＋每案本週工時，剛註冊只有 me_profile 的帳號也拉得到。"""
+    from core.auth import ME_ZONE_MASTER
+    p = check_admin_or_module(request, "timesheets", ME_ZONE_MASTER, *extra) or {}
     return p.get("username") or p.get("sub") or ""
 
 
@@ -65,7 +68,7 @@ async def milestone_defer(mid: str, body: MilestoneDefer, request: Request):
 @router.get("/project/{project_id}")
 async def milestones_of_project(project_id: str, request: Request):
     """專案頁：按週列這個案的里程碑（專案檔案頁、CRM 專案詳情同一份）。"""
-    _who(request)
+    _who(request, "crm_projects")
     factory = db_factory_or_503()
     async with factory() as session:
         return {"weeks": await milestone_service.project_milestones(session, project_id)}

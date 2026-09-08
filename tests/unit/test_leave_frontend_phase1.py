@@ -79,7 +79,9 @@ def test_cancel_follows_cancel_mode():
     assert ">申請消假</button>" in row and "颱風假當日不可消" in row and "disabled" in row
     assert "r.reject_note" in row and "r.cancel_note" in row
     cancel = js_func_body(code, "async function cancelLeave(")
-    assert 'mode === "apply"' in cancel and "cancel_note: note" in cancel, "申請消假要帶理由"
+    # schema LeaveCancel 收 note（2026-09-08 修：之前送 cancel_note 必 422）
+    assert 'mode === "apply"' in cancel and "body = { note }" in cancel, "申請消假要帶理由"
+    assert "cancel_note: note" not in cancel
 
 
 def test_my_three_stats():
