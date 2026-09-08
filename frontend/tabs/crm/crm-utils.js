@@ -695,6 +695,21 @@ export function crmToast(msg, ms = 2000) {
 // 那是兩個掛載點都成立的唯一判準（見 staff-view.js）。
 export const canSeeMoney = () => hasModule('money_view');
 
+/** 「是管理員嗎」與「能不能動錢流」—— 目前各分頁自己抄了 6 份與 4 份（見下方註解）。
+ *
+ *  🔴 **兩次發版的第一步（2026-09-09）**：這一版只加 export、**呼叫端一個都不改**。
+ *  Cloudflare 給 `.js` 4 小時瀏覽器快取（reference_cloudflare_js_cache），這一版剛發時，
+ *  舊分頁拿到的是「新 html／舊 crm-utils.js」——那時若呼叫端已經 `import { isAdmin }`，
+ *  舊 crm-utils 沒有這個 named export，整頁會直接炸。所以要等這支進了大家的快取，
+ *  下一版才把 6 份 `_isAdmin` 與 4 份 `_canInvoice` 換成 import（計畫記在 docs/RBAC_PLAN.md）。
+ *
+ *  `canInvoice` 是後端「一把尺」`require_entity('parent', 'full')` 的前端鏡射：
+ *  母帳的錢流讀寫都要「帳務」＋「金額檢視」兩把。
+ */
+export const isAdmin = () => (window._accessLevel || 0) >= 3;
+export const canInvoice = () => hasModule('crm_invoices') && canSeeMoney();
+export const INVOICE_NEED = '財務管理＋金額檢視';
+
 /** 「管理員 OR 有這個模組」—— 後端 `core.auth.payload_grants` 的前端鏡射。
  *
  *  寫一次的理由：這條規則本來就在前端被抄了兩份（這支與 crm-projects.js 的
