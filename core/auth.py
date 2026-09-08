@@ -443,6 +443,19 @@ def check_lan_or_logged_in(request: Request):
     raise HTTPException(status_code=401, detail="未登入或 token 已過期")
 
 
+def claims_drifted(payload: Optional[dict], user: Optional[dict]) -> bool:
+    """登入 token 裡簽死的授權（modules／access_level）跟帳號現在的不一樣了嗎？
+
+    modules 是登入時簽進 JWT 的快照（7 天）：管理員之後改權限、開機回填補鑰匙，已經發出去的 token
+    都不知道 —— 2026-09-08 「今天與這週」加總開關後，早上之前登入的人整區消失就是這樣。
+    純判定，給 /auth/me 與 /me/workspace 決定要不要順手回一顆新 token（core 不簽 token）。"""
+    if not payload or not user:
+        return False
+    if sorted(payload.get("modules") or []) != sorted(user.get("modules") or []):
+        return True
+    return int(payload.get("access_level") or 0) != int(user.get("access_level") or 0)
+
+
 def payload_grants(payload: Optional[dict], *module_keys: str) -> bool:
     """Verdict for an already-verified token payload: full admin (access_level>=3
     or legacy role=='admin') OR grants any of module_keys. Single source of the

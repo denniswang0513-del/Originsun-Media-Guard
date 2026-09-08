@@ -105,9 +105,14 @@ async def my_workspace(request: Request):
         allowed.append("proposal_plan")
     ident = await resolve_current_staff(request)
     staff = ident["staff"]
+    # token 裡簽死的 modules 跟帳號現在的不一樣（管理員改了／開機回填補了鑰匙）→ 順手回一顆新 token，
+    # my.html 換掉再抓一次；不然整區「今天與這週」在 7 天 token 到期前都看不到（2026-09-08 劉禮瑜）
+    from routers.api_auth import _find_user, refreshed_token_if_drifted
+    fresh = await refreshed_token_if_drifted(payload, await _find_user(payload.get("sub") or ""))
     out = {
         "username": ident["username"],
         "staff_id": ident["staff_id"],
+        **({"token": fresh} if fresh else {}),
         "bound": staff is not None,
         "allowed": allowed,
         # 具人事管理權限（hr_leave 模組或 admin）→ /my.html 頂欄顯示「人事管理」

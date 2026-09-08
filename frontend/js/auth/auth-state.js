@@ -28,7 +28,10 @@ function _clearCachedUser() {
 async function _fetchMe() {
     const r = await fetch('/api/v1/auth/me', { headers: { 'Authorization': 'Bearer ' + window._authToken } });
     if (!r.ok) { const e = new Error('auth/me failed'); e.status = r.status; throw e; }
-    return r.json();
+    const d = await r.json();
+    // 後端發現 token 裡的權限跟帳號現在的不一樣，會順手回一顆新 token —— 換掉，不用叫人重新登入
+    if (d && d.token) { localStorage.setItem(STORAGE_KEYS.TOKEN, d.token); window._authToken = d.token; }
+    return d;
 }
 
 function _adoptUser(d) {

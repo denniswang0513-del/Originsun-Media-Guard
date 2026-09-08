@@ -224,6 +224,7 @@ async function _tryStart() {
         if (e.status !== 401) _showLogin(e.status === 0 ? '連不到伺服器' : (e.message || '載入失敗'));
         return;
     }
+    if (me && me.token) localStorage.setItem(TOKEN_KEY, me.token);   // 權限改了，後端順手給的新 token
     if (_gate && !_gate(me)) { _showNoPerm(me); return; }
     _authRoot().hidden = true;
     _hideApp(false);

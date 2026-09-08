@@ -210,6 +210,7 @@ async function boot() {
         if (r.status === 401) { localStorage.removeItem(TOKEN_KEY); showLogin(""); return; }
         if (!r.ok) { showLogin("載入失敗（" + r.status + "）"); return; }
         me = await r.json();
+        if (me.token) localStorage.setItem(TOKEN_KEY, me.token);   // 權限改了，後端順手給的新 token
     } catch (_) { showLogin("連線失敗，請稍後再試"); return; }
     const mods = me.modules || [];
     const isAdmin = (me.access_level || 0) >= 3 || me.role_name === "admin";

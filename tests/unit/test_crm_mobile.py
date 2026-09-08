@@ -150,11 +150,13 @@ def test_router_is_registered_in_main():
 
 def test_refresh_endpoint_reissues_from_db_not_from_old_payload():
     src = repo_src("routers/api_auth.py")
-    body = code_only(func_body(src, "async def refresh_token("))
+    # 2026-09-08 起重簽邏輯抽成 _reissue_login_token／_renewable_login_payload（/auth/me 順手續期共用）
     assert '@router.post("/refresh")' in src
+    assert "_reissue_login_token(payload)" in code_only(func_body(src, "async def refresh_token("))
+    body = code_only(func_body(src, "async def _reissue_login_token("))
     assert "_issue_token(user" in body
     assert "_find_user_by('username'" in body, "權限要從 DB 重讀，不是把舊 payload 重簽"
-    assert "'api_key'" in body, "API key 不能換成 7 天的登入 JWT"
+    assert "'api_key'" in code_only(func_body(src, "def _renewable_login_payload(")), "API key 不能換成 7 天的登入 JWT"
 
 
 def test_login_paths_issue_tokens_through_one_helper():
@@ -163,7 +165,7 @@ def test_login_paths_issue_tokens_through_one_helper():
     那段也一樣（2026-09-03 收掉最後一份字面值）。"""
     src = repo_src("routers/api_auth.py")
     assert re.search(r"def _issue_token\(", src)
-    for header in ("async def login(", "async def google_login(", "async def refresh_token(",
+    for header in ("async def login(", "async def google_login(", "async def _reissue_login_token(",
                    "async def reset_password("):
         body = code_only(func_body(src, header))
         assert "_issue_token(" in body, f"{header} 沒走 _issue_token"

@@ -702,6 +702,9 @@ async function loadWorkspace() {
     }
     if (!r.ok) { showLogin("載入失敗（" + r.status + "），請稍後再試"); return; }
     WS = await r.json();
+    // 後端發現 token 裡簽死的權限跟帳號現在的不一樣（管理員改了／回填補了鑰匙），會順手回一顆新 token：
+    // 換掉再抓一次（allowed 是照 token 算的）。新 token 不會再漂，所以只會多抓這一次。
+    if (WS.token && WS.token !== localStorage.getItem(TOKEN_KEY)) { localStorage.setItem(TOKEN_KEY, WS.token); return loadWorkspace(); }
     renderWorkspace();
 }
 

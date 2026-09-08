@@ -18,6 +18,7 @@ from core.auth import (
     load_users_json, sync_user_to_json, remove_user_from_json,
     LEGACY_ROLE_LEVELS, ALL_MODULES, grant_admin_all_modules,
 )
+from core.auth import claims_drifted
 try:
     from core.google_auth import verify_google_id_token, GoogleTokenError
 except ImportError:
@@ -394,7 +395,15 @@ async def refresh_token(request: Request):
     帳號已不存在 → 401（本系統沒有「停用」欄，刪帳號就是停用）。
     """
     payload = _extract_token(request)
-    if not payload or payload.get('auth_method') == 'api_key':
+    if not payload:
+        raise HTTPException(status_code=401, detail="未登入或 token 已過期")
+    return await _reissue_login_token(payload)
+
+
+def _renewable_login_payload(payload: dict) -> int:
+    """這顆 payload 能不能換一顆新登入 token；能就回 login_at（第一次登入時間，90 天絕對壽命從它算）。
+    不能 → 401（API key／分享連結 token／超過 90 天）。/refresh 與 /me 的順手續期共用這一條。"""
+    if payload.get('auth_method') == 'api_key':
         raise HTTPException(status_code=401, detail="未登入或 token 已過期")
     if payload.get('scope') or payload.get('purpose'):
         raise HTTPException(status_code=401, detail="分享連結的 token 不能換登入 token")
@@ -403,10 +412,30 @@ async def refresh_token(request: Request):
     _login_at = int(payload.get('login_at') or payload.get('iat') or 0)
     if _login_at and _t.time() - _login_at > 90 * 86400:
         raise HTTPException(status_code=401, detail="登入已超過 90 天，請重新登入")
-    user = await _find_user_by('username', payload.get('sub') or '')
+    return _login_at or int(_t.time())
+
+
+async def _reissue_login_token(payload: dict, user: Optional[dict] = None) -> dict:
+    """權限從 DB 重讀、重簽一顆（login 同形狀）。第一次登入的時間跟著續下去，90 天絕對壽命才算得到。"""
+    login_at = _renewable_login_payload(payload)
+    if user is None:
+        user = await _find_user_by('username', payload.get('sub') or '')
     if not user:
         raise HTTPException(status_code=401, detail="帳號不存在或已停用")
-    return _issue_token(user, login_at=_login_at or int(_t.time()))   # 第一次登入的時間跟著續下去，90 天絕對壽命才算得到
+    return _issue_token(user, login_at=login_at)
+
+
+async def refreshed_token_if_drifted(payload: Optional[dict], user: Optional[dict]) -> Optional[str]:
+    """token 裡的授權跟帳號現在的不一樣 → 順手簽一顆新的給前端換掉（換不了就算了，回 None）。
+
+    /auth/me 與 /me/workspace 帶在回應的 `token` 欄：管理員改權限、開機回填補鑰匙之後，
+    使用者不必登出再登入。判定在 core.auth.claims_drifted（純函式）。"""
+    if not claims_drifted(payload, user):
+        return None
+    try:
+        return (await _reissue_login_token(payload, user))['token']
+    except HTTPException:
+        return None
 
 
 @router.get("/register/config")
@@ -620,7 +649,7 @@ async def get_me(request: Request):
             'modules': payload.get('modules', []),
         }
     auth_method = _compute_auth_method(user)
-    return {
+    out = {
         'username': user['username'],
         'role_name': user.get('role_name', user.get('role', '')),
         'access_level': user.get('access_level', 0),
@@ -630,6 +659,11 @@ async def get_me(request: Request):
         'auth_method': auth_method,
         'staff_id': user.get('staff_id'),
     }
+    # token 裡簽死的權限跟帳號現在的不一樣（管理員改了／回填補了）→ 順手給一顆新的，前端換掉就不用重新登入
+    fresh = await refreshed_token_if_drifted(payload, user)
+    if fresh:
+        out['token'] = fresh
+    return out
 
 
 @router.put("/me")
