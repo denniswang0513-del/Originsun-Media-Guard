@@ -366,11 +366,6 @@ async def _me_bound(request: Request) -> dict:
     return await require_bound_staff(request, *ME_MODULE_KEYS)   # 任一把 me_* 鑰匙＋綁定人員檔案
 
 
-def _in_crew(crew: list, staff_id: str, name: str) -> bool:
-    """場次 crew 含我：比 staff_id，退回比姓名（舊場次只存名字）。正本 core.leave_logic.in_crew（請假撞場次同一份）。"""
-    return in_crew(crew, staff_id, name)
-
-
 async def _shoots_between(session, d0: date, d1: date) -> list:
     """[d0, d1] 有排（未取消）的場次，帶案名與地點字：[{shoot, project_name, location, crew}]。"""
     rows = (await session.execute(
@@ -409,7 +404,7 @@ async def my_today(request: Request):
                    "location": x["location"], "start_time": x["shoot"].start_time or "",
                    "end_time": x["shoot"].end_time or "", "crew": [c["name"] for c in x["crew"] if c.get("name")]}
                   for x in await _shoots_between(session, today, today)
-                  if _in_crew(x["crew"], ident["staff_id"], ident["staff"].name)]
+                  if in_crew(x["crew"], ident["staff_id"], ident["staff"].name)]   # 比 staff_id、退回比姓名（正本 core.leave_logic）
         todos = await _todos_for(session, ident["username"] or "")
         leaves = (await session.execute(
             select(HrLeaveRequest).where(HrLeaveRequest.staff_id == ident["staff_id"])

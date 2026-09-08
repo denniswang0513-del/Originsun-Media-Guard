@@ -9,12 +9,13 @@ from tests.unit._srcscan import code_only, func_body, repo_src
 
 
 def test_in_crew_matches_staff_id_then_falls_back_to_name():
-    from routers.api_me import _in_crew
+    """正本在 core.leave_logic（請假撞場次與「今天」的場次同一份）；api_me 直接用它，不再包一層同名轉呼殼。"""
+    from core.leave_logic import in_crew
     crew = [{"staff_id": "s1", "name": "王"}, {"staff_id": "", "name": "李"}]
-    assert _in_crew(crew, "s1", "別人")                 # id 命中
-    assert not _in_crew(crew, "s9", "王")               # 有 id 就不比名字（同名別人不算）
-    assert _in_crew(crew, "s9", "李")                   # 舊場次只存名字 → 比名字
-    assert not _in_crew([], "s1", "王")
+    assert in_crew(crew, "s1", "別人")                 # id 命中
+    assert not in_crew(crew, "s9", "王")               # 有 id 就不比名字（同名別人不算）
+    assert in_crew(crew, "s9", "李")                   # 舊場次只存名字 → 比名字
+    assert not in_crew([], "s1", "王")
 
 
 def test_shoot_days_expands_multi_day_shoots():
@@ -54,7 +55,7 @@ def test_team_week_reuses_the_board_calculation():
 def test_today_lists_my_shoots_todos_pending_leave_and_last_week_journal():
     src = code_only(repo_src("routers/api_me.py"))
     body = func_body(src, "async def my_today(")
-    assert "_shoots_between(session, today, today)" in body and "_in_crew(" in body
+    assert "_shoots_between(session, today, today)" in body and "in_crew(" in body
     assert "_todos_for(session" in body                        # 與 workspace 同一份待辦查詢
     assert 'HrLeaveRequest.status == "待審"' in body
     assert "shell_status(shell)" in body and "week_start_of(today) - timedelta(days=7)" in body

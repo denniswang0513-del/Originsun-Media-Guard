@@ -295,7 +295,9 @@ async def update_leave(leave_id: str, body: LeaveUpdate, request: Request):
             obj.end_time = (data["end_time"] or "").strip() or None
         if "reason" in data:
             obj.reason = (data["reason"] or "").strip() or None
-        if obj.end_date < obj.start_date:
+        # 🔴 兩邊都先過 tw_day 再比：DB 讀回來的是 aware（timestamptz），parse_ymd 給的是 naive，
+        # 直接比會 TypeError → 整支 500。只改起日或只改迄日（另一邊還是 DB 那顆）就一定踩到。
+        if tw_day(obj.end_date) < tw_day(obj.start_date):
             raise HTTPException(status_code=422, detail="迄日不可早於起日")
         if touching:
             obj.hours = _updated_hours(data, obj, holidays)

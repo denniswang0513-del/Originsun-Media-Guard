@@ -211,13 +211,8 @@ async function _reject(id) {
 }
 
 async function _cancelDecide(id, approve) {
-    let note = '';
-    if (!approve) {
-        note = (prompt('不同意消假的理由（必填，會通知申請人）') || '').trim();
-        if (!note) return;
-    } else {
-        note = (prompt('備註（選填）') || '').trim();
-    }
+    const note = (prompt(approve ? '備註（選填）' : '不同意消假的理由（必填，會通知申請人）') || '').trim();
+    if (!approve && !note) return;      // 不同意一定要給理由（會通知申請人）
     const r = await hpost(`/leave/${id}/cancel_decide`, { approve, note });
     if (!r.ok) { alert(await _fail(r, '操作失敗')); return; }
     _loadQueue();

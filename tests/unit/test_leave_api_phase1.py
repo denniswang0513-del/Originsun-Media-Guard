@@ -76,6 +76,16 @@ def test_put_rejects_status_and_never_changes_it():
     assert writers == {"reject_leave", "decide_cancel", "_decide_credit"}, writers
 
 
+def test_update_compares_dates_through_tw_day_not_raw_columns():
+    """只改起日或只改迄日時，一邊是 parse_ymd 的 naive、另一邊是 DB 讀回的 aware ——
+    直接比會 TypeError 讓整支 PUT 變 500（2026-09-08 在 dev 上實際踩到）。兩邊都要先過 tw_day。"""
+    body = code_only(func_body(HR, "async def update_leave("))
+    assert "tw_day(obj.end_date) < tw_day(obj.start_date)" in body
+    assert "obj.end_date < obj.start_date" not in body
+    # 改完之後算時數那支也一樣（它本來就有）
+    assert "working_hours(tw_day(obj.start_date), tw_day(obj.end_date)" in code_only(func_body(HR, "def _updated_hours("))
+
+
 def test_approve_allocates_from_the_ledger_and_notifies():
     approve = code_only(flow_body(HR, "async def approve_leave("))
     assert "leave_service.approve_request(" in approve
