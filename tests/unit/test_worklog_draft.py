@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """今天的專案紀錄「儲存草稿」（owner 2026-09-07）：有內容就存、沒時數＝pending 草稿、彙整只算 hours>0、
 近 30 天的草稿日期在今天那條提醒。"""
-import pytest
 from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, my_page_src, repo_src
 
 

@@ -17,7 +17,7 @@ import re
 
 import pytest
 
-from tests.unit._srcscan import between, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import js_code_only, js_func_body, repo_src
 
 CRM = "frontend/tabs/crm/"
 PROP = "frontend/tabs/proposals/"

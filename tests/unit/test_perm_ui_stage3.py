@@ -26,7 +26,6 @@ def test_unbound_staff_warning_and_preview_button():
     assert "const unboundWarn = (!boundStaff && !isAdminUser && modules.some(k => STAFF_BOUND_KEYS.includes(k)))" in JS
     assert "未綁定人員檔案：員工工作台的區塊會是空的" in JS
     assert "onclick=\"window._previewAs('${u.username}')\"" in JS and ">以他的角度看</button>" in JS
-    keys = set(_js_obj_keys("MODULE_HINTS"))
     m = re.search(r"const STAFF_BOUND_KEYS = \[([^\]]+)\]", JS); bound = set(re.findall(r"'([a-z_]+)'", m.group(1)))
     assert bound <= set(ALL_MODULES) and "me_profile" in bound and "me_petty" in bound
 

@@ -77,5 +77,4 @@ def test_expense_link_dependencies_take_the_project_module_key():
 
 
 def test_import_carries_both_guards():
-    head = SRC.split("\n\n")[0] + SRC.split("router = ")[0] if "router = " in SRC else SRC[:3000]
     assert "_check_project_write_auth" in SRC.split("def ")[0], "costs.py 要從 _shared 匯入 _check_project_write_auth"
