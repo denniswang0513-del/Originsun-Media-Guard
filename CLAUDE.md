@@ -1267,6 +1267,9 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 
 > /polish 逐次累積的地雷。動之前先讀對應那一行。
 
+- **`me_profile` 只開基本資料卡，不是「今天與這週」的鑰匙**（owner 2026-09-08：剛註冊只能看到基本資料，
+  其餘依授權開放）。那一區與 `/me/today`、`/me/team_week`、`/timesheets/mine*` 要的是 `core.auth.ME_WORK_KEYS`
+  （＝ME_MODULE_KEYS 去掉 me_profile）；新註冊與 Google 首登預設只有 `me_profile`。要放寬先讀「放寬守衛不能收回原本的鑰匙」那條。
 - **`frontend/tabs/hr_leave/hr_leave.js` 只准用雙斜線註解**：檔頭第 4 行的 API 路徑帶了一個「斜線星號」，
   檔案裡只要再出現一個「星號斜線」（加一段 JSDoc 就會），`tests/unit/_srcscan.js_code_only` 會把中間
   整段當區塊註解剝掉 —— 真的程式碼跟著消失，而測試只會說某個常數不見了。同樣的陷阱在任何「檔頭寫了

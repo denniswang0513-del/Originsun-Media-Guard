@@ -86,11 +86,11 @@ _REGISTER_TAX_ID = "90371657"
 _REGISTER_COMPANY = "源日影像"
 # 選擇題選項（正解 + 干擾項）— 回給前端渲染，順序由前端洗牌
 _REGISTER_COMPANY_CHOICES = ["源日影像", "日源映畫", "源源製作", "日日有限公司"]
-# 新帳號預設權限：「編修個人基本資料」+「工作日誌」（owner 2026-07-22：新註冊
-# 直接看得到工作日誌；其餘功能由管理員在「使用者管理」開通）。⚠ 不能給空
-# modules：shouldShowTab 對「已登入 + 空 modules」= 顯示全部 tab
-# （tab-config.js 的向下相容行為）。
-_REGISTER_DEFAULT_MODULES = ['me_profile', 'journal']
+# 新帳號預設權限：**只有**「基本資料」（owner 2026-09-08：剛註冊只能看到基本資料，其餘依授權開放；
+# 2026-07-22 曾連工作日誌一起給，現在收回）。其餘功能一律由管理員在「使用者管理」逐項開通。
+# me_profile 只開個人資料卡，不開「今天與這週」（core.auth.ME_WORK_KEYS）。
+# Google 第一次登入自動建的帳號也用這份（settings.google_oauth.default_modules 有給才覆蓋）。
+_REGISTER_DEFAULT_MODULES = ['me_profile']
 # 防暴力：同 IP 連錯 N 次驗證題 → 鎖 M 秒（單機記憶體即可）
 _REGISTER_MAX_FAILS = 5
 _REGISTER_LOCK_SEC = 600
@@ -419,8 +419,8 @@ async def register_config():
 async def register(req: RegisterRequest, request: Request):
     """員工自助註冊（/my.html）— 兩步驟公司知識驗證通過才建帳號。
 
-    新帳號 access_level=1 + 個人工作台 me_* 五鍵（不含公司資料 tab），
-    管理員之後在使用者管理視需要加開。成功直接回 login 同形狀（自動登入）。"""
+    新帳號 access_level=1 + 只有 me_profile（基本資料卡），其餘功能管理員之後在使用者管理逐項開通。
+    成功直接回 login 同形狀（自動登入）。"""
     import time as _time
     ip = (request.client.host if request.client else "") or "?"
     rec = _register_fails.get(ip)
@@ -929,7 +929,7 @@ async def google_login(req: GoogleLoginRequest):
             await _save_user_to_db(user)
         else:
             # 3. Auto-create new user — least privilege (RBAC v2): 一般使用者、
-            #    預設模組可由 settings.google_oauth.default_modules 指定，否則空。
+            #    預設模組同自助註冊（只有基本資料）；settings.google_oauth.default_modules 有給才覆蓋。
             #    管理員之後在「使用者管理」直接授權。
             username = _generate_unique_username(email, name, load_users_json())
             user = {
@@ -937,7 +937,7 @@ async def google_login(req: GoogleLoginRequest):
                 'password_hash': None,
                 'role_name': 'user',
                 'access_level': 1,
-                'modules': g.get('default_modules', []),
+                'modules': list(g.get('default_modules') or _REGISTER_DEFAULT_MODULES),
                 'google_id': google_id,
                 'email': email,
                 'avatar_url': picture,

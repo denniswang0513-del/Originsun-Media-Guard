@@ -723,8 +723,9 @@ function renderWorkspace() {
     // 最上排功能鍵（每次重繪：allowed 不會變，但便宜）
     renderActions(ws);
 
-    // 第一區「今天與這週」：綁了人員、且有任何 me_* 鑰匙才有（後端 /me/today、/me/team_week 同一條件）
-    const zone1On = ws.bound && ws.allowed.some(k => staffSections.includes(k));
+    // 第一區「今天與這週」：綁了人員、且有任何 me_* **工作**鑰匙才有（後端 /me/today、/me/team_week 同一條件：core.auth.ME_WORK_KEYS）。
+    // me_profile 不算 —— 那把只開基本資料卡（owner 2026-09-08：剛註冊只能看到基本資料，其餘依授權開放）。
+    const zone1On = ws.bound && ws.allowed.some(k => staffSections.includes(k) && k !== "me_profile");
     $("ws-zone1-h").style.display = zone1On ? "" : "none";
     $("ws-zone1").style.display = zone1On ? "" : "none";
     if (zone1On && !$("ws-zone1").childElementCount) buildZone1();   // 只建一次：格子裡有正在打的字
@@ -734,7 +735,8 @@ function renderWorkspace() {
     // owner 2026-09-05：「我的權益與資料」這區先只留零用金，其餘卡（待辦／請款與薪酬／福委會／個人資料／影像紀錄／提案企劃）
     // 還在規劃中，先不畫；程式留著，之後照規劃逐張放回。
     // 2026-09-07 假勤放回（docs/LEAVE_PLAN.md §7.6：時數帳＋申請單，卡片自己打 /me/leave/summary）。
-    const ME_ZONE_ON = new Set(["me_petty", "me_leave"]);   // 規劃好一張放回一張
+    // 2026-09-08 個人資料放回：剛註冊的帳號只有 me_profile，這張卡是他唯一看得到的東西（沒有它整頁是空的）。
+    const ME_ZONE_ON = new Set(["me_petty", "me_leave", "me_profile"]);   // 規劃好一張放回一張
     const on = (k) => ME_ZONE_ON.has(k);
     if (on("me_todos") && ws.allowed.includes("me_todos"))    grid.appendChild(cardTodos(ws.todos || []));
     if (on("me_leave") && ws.allowed.includes("me_leave"))    grid.appendChild(cardLeave(ws.bound));

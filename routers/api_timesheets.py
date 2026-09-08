@@ -26,7 +26,7 @@ from sqlalchemy import func as safunc, or_, select, update
 
 import core.state as state
 from config import load_settings, save_settings
-from core.auth import ME_MODULE_KEYS, _extract_token, check_admin, check_admin_or_module, current_username, payload_grants
+from core.auth import ME_WORK_KEYS, _extract_token, check_admin, check_admin_or_module, current_username, payload_grants
 from core.db_guard import db_factory_or_503
 from core.hr_logic import _TW
 from core.journal_logic import week_start_of
@@ -110,10 +110,10 @@ async def _ts_or_bound(request: Request) -> Optional[str]:
 
 
 async def _mine_ident(request: Request) -> dict:
-    """timesheets 模組或任一把 me_* 鑰匙 ＋ 綁定人員檔案。
-    （2026-09-06 review：原本第二段只拿 me_finance 再驗一次，只有 me_projects 之類的員工會被 403）"""
+    """timesheets 模組或任一把 me_* **工作**鑰匙 ＋ 綁定人員檔案（me_profile 不算：那把只開基本資料卡，
+    owner 2026-09-08）。（2026-09-06 review：原本第二段只拿 me_finance 再驗一次，只有 me_projects 之類的員工會被 403）"""
     from core.identity import require_bound_staff
-    return await require_bound_staff(request, "timesheets", *ME_MODULE_KEYS)
+    return await require_bound_staff(request, "timesheets", *ME_WORK_KEYS)
 
 
 @router.get("/ingest_token")

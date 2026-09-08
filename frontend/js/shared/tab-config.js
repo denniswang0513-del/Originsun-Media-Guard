@@ -83,7 +83,11 @@ const TAB_EXTRA_ACCESS = {
 export function shouldShowTab(key, authUser, modules) {
     const loggedIn = !!authUser;
     const hasModules = loggedIn && modules && modules.length > 0;
-    if (!hasModules) return loggedIn ? true : MEDIA_TABS.includes(key);
+    // 沒有任何模組（沒登入、或登入了但管理員還沒授權）：只看得到本機免登入的後期流程那幾頁。
+    // 🔴 舊行為是「已登入＋空 modules＝顯示全部 tab」（向下相容），等於新帳號一登入就看到整個系統
+    //    的殼、每一頁都 403 —— owner 2026-09-08：剛註冊只能看到基本資料，其餘依授權開放。
+    //    管理員不受影響：Lv3 的 token 由 grant_admin_all_modules 塞滿整份 modules。
+    if (!hasModules) return MEDIA_TABS.includes(key);
     return modules.includes(key)
         || (TAB_EXTRA_ACCESS[key] || []).some(m => modules.includes(m));
 }

@@ -128,6 +128,12 @@ ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_lea
                   "me_petty",     # 零用金卡（2026-08-19 從 me_finance 拆出）
                   "me_benefits")  # 福委會卡（2026-08-21，員工自己登記快樂/進修）
 
+# 🔴 me_profile＝「基本資料」，**只**開個人資料卡（owner 2026-09-08：剛註冊只能看到基本資料，其餘由我授權）。
+# 「今天與這週」那一整區（專案紀錄／我的一週／團隊的一週／專案查詢）與它後面的端點
+# （/me/today、/me/team_week、/timesheets/mine*）要的是這裡任一把 —— me_profile 不算。
+# 新註冊預設只有 me_profile（api_auth._REGISTER_DEFAULT_MODULES），所以綁了人員檔案也還是只有那張卡。
+ME_WORK_KEYS = tuple(k for k in ME_MODULE_KEYS if k != "me_profile")
+
 ALL_MODULES = [
     'bulletin',
     'preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment',
@@ -140,7 +146,7 @@ ALL_MODULES = [
     'me_projects', 'me_profile', 'me_todos', 'me_finance',
     # N-hr 人事管理：出缺勤 tab + /my.html 我的請假卡
     'hr_leave', 'me_leave',
-    # 每週工作日誌（全員可讀、本人可寫；新註冊預設就有 — api_auth._REGISTER_DEFAULT_MODULES）
+    # 每週工作日誌（全員可讀、本人可寫；2026-09-08 起新註冊**不再**預設有 —— 由管理員開通）
     'journal',
     # 影像紀錄總覽（業務管理 › 跨專案管理各專案收集牆；單專案面板仍在專案詳情內）
     'media_log',

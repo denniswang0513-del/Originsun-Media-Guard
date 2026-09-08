@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from sqlalchemy import func, select  # type: ignore
 
-from core.auth import ME_MODULE_KEYS, check_admin_or_module, grant_admin_all_modules
+from core.auth import ME_MODULE_KEYS, ME_WORK_KEYS, check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup,
                            month_key, month_span, months_back, parse_ymd, project_metrics, tw_day)
@@ -363,7 +363,9 @@ async def cancel_my_leave_legacy(leave_id: str, request: Request):
 # 守衛＝任何 me_* 鑰匙＋綁定人員檔案（409 原句只在 core.identity.require_bound_staff）。
 
 async def _me_bound(request: Request) -> dict:
-    return await require_bound_staff(request, *ME_MODULE_KEYS)   # 任一把 me_* 鑰匙＋綁定人員檔案
+    """「今天與這週」那一區的端點（/today、/team_week）：任一把**工作**鑰匙＋綁定人員檔案。
+    me_profile 不算（owner 2026-09-08：剛註冊只看得到基本資料，綁了人員檔案也一樣）。"""
+    return await require_bound_staff(request, *ME_WORK_KEYS)
 
 
 async def _shoots_between(session, d0: date, d1: date) -> list:
