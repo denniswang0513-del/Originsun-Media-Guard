@@ -130,15 +130,27 @@ def js_func_body(src: str, header: str) -> str:
     return header + "".join(out)
 
 
+#: 區塊註解與行註解**一次掃過**，誰先出現誰贏（見 js_code_only 的說明）。
+#: 網址裡的 `//` 不算註解（前一個字元是 ':' 就跳過）。
+_JS_COMMENT = re.compile(r"/\*[\s\S]*?\*/|(?<!:)//[^\n]*")
+
+
 def js_code_only(src: str) -> str:
     """JS 版的 code_only —— 剝掉 /* */ 與 // 註解。
 
     同一個坑：`assert "financeNav" not in js` 會被「註解正好在說為什麼不用它」
     打敗。Python 版切的是 '#'，對 JS 沒用，所以這裡另備一支。
     網址裡的 `//` 會被誤切，故只在行首或前面不是 ':' 時才當註解。
+
+    🔴 兩種註解要在**同一次掃描**裡比誰先出現。原本先剝區塊、再剝行註解，於是行註解裡的
+    一個 `/*`（例如檔頭寫 API 路徑 `/api/v1/me/leave/*`）會跟檔案後面任何一個 `*/` 配成一對，
+    把中間所有**真的程式碼**吃掉 —— 2026-09-08 在 hr_leave.js 踩到：加一段 JSDoc 之後，
+    測試只說「const API 不見了」，看起來像常數被刪掉，其實是這支工具吃掉了三十行。
+
+    仍有的限制：字串字面值裡的 `/*`（不是註解裡的）還是會被當成區塊註解開頭 —— 要正確處理
+    得寫真的 tokenizer。目前 repo 裡沒有這種寫法，真的出現時症狀同上：整段程式碼憑空消失。
     """
-    src = re.sub(r"/\*[\s\S]*?\*/", "", src)
-    return "\n".join(re.sub(r"(?<!:)//.*$", "", ln) for ln in src.splitlines())
+    return _JS_COMMENT.sub("", src)
 
 
 def py_trees(*roots):

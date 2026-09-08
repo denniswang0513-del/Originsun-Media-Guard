@@ -44,6 +44,14 @@ EXEMPT = {
     # 它曾同時是 fan-in 85／2,121 行／三週改 47 次的最大爆炸半徑
     "frontend/tabs/crm/crm-cashbook.js":
         "收支明細主畫面（清單＋編輯＋匯入三合一）",
+    # 2026-09-08：掃描擴到 .html 才發現這兩頁早就越線了 —— 它們不是「新越線」，是本來就在
+    # 界外而沒有東西在看。兩頁都是「整支 SPA 寫在單一 <script> 裡」的獨立頁。
+    "frontend/my.html":
+        "員工工作台：第一區（今天的專案紀錄／我的一週／團隊的一週／專案查詢）＋假勤＋零用金＋週記全在一支"
+        " inline script。拆法：把第一區那段搬成 js/my/zone1.js（非 module，維持全域語意即可平移），"
+        "但十來支源碼掃描測試是對著 frontend/my.html 斷言字串的，要一起改 —— 下次大改這一頁時一起做。",
+    "frontend/showcase-edit.html":
+        "作品編輯器（七區編號＋檢查清單＋發布時間線）同款單頁 inline script；先記帳，等它下次要大改再拆。",
 }
 
 
@@ -60,7 +68,9 @@ def _files():
             continue
         for p in base.rglob("*"):
             s = p.as_posix()
-            if p.suffix in (".py", ".js") and not any(x in s for x in SKIP):
+            # .html 也要掃：頁面把整支 SPA 寫在 <script> 裡是這個 repo 的常態，
+            # 只掃 .py／.js 的話 my.html 就是這樣無聲越過 2,000 行的（2026-09-08 才發現）
+            if p.suffix in (".py", ".js", ".html") and not any(x in s for x in SKIP):
                 out[p.relative_to(root).as_posix()] = p
     for f in SCAN_FILES:
         p = root / f
