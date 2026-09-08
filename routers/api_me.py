@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from sqlalchemy import func, select  # type: ignore
 
-from core.auth import ME_MODULE_KEYS, ME_WORK_KEYS, check_admin_or_module, grant_admin_all_modules
+from core.auth import ME_MODULE_KEYS, check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup,
                            month_key, month_span, months_back, parse_ymd, project_metrics, tw_day)
@@ -253,8 +253,9 @@ async def update_my_todo(item_id: str, body: MeTodoUpdate, request: Request):
 @router.get("/leave/summary")
 async def my_leave_summary(request: Request):
     """{vocab, balances:{特休:{available,reserved,expiring}, 補休:{…}}, sick:{used_days,cap_days},
-    requests:[最近 20 筆（已核准帶 cancel_mode）], pending_count, hire_date, annual_days_by_law}。"""
-    ident = await require_bound_staff(request, *ME_MODULE_KEYS)
+    requests:[最近 20 筆（已核准帶 cancel_mode）], pending_count, hire_date, annual_days_by_law}。
+    2026-09-08：只認請假那把（原本任一把 me_* 都能拿到自己的餘額 —— 畫面早就藏了，API 跟著收）。"""
+    ident = await require_bound_staff(request, "me_leave")
     factory = db_factory_or_503()
     async with factory() as session:
         out = await leave_service.staff_leave_summary(session, ident["staff"])
@@ -362,10 +363,10 @@ async def cancel_my_leave_legacy(leave_id: str, request: Request):
 #
 # 守衛＝任何 me_* 鑰匙＋綁定人員檔案（409 原句只在 core.identity.require_bound_staff）。
 
-async def _me_bound(request: Request) -> dict:
-    """「今天與這週」那一區的端點（/today、/team_week）：任一把**工作**鑰匙＋綁定人員檔案。
-    me_profile 不算（owner 2026-09-08：剛註冊只看得到基本資料，綁了人員檔案也一樣）。"""
-    return await require_bound_staff(request, *ME_WORK_KEYS)
+async def _me_bound(request: Request, *keys: str) -> dict:
+    """「今天與這週」那一區的端點：**那個子視圖自己的鑰匙**＋綁定人員檔案（owner 2026-09-08：
+    一顆功能一把，在權限管理逐人開；me_profile 只開基本資料卡）。工作追蹤模組（timesheets）本來就整區能用。"""
+    return await require_bound_staff(request, "timesheets", *keys)
 
 
 async def _shoots_between(session, d0: date, d1: date) -> list:
@@ -397,7 +398,7 @@ def _shoot_days(s) -> list:
 @router.get("/today")
 async def my_today(request: Request):
     """今天那一條：我在 crew 的場次、我的待辦、待審請假、上週回顧狀態（none／draft／submitted）。"""
-    ident = await _me_bound(request)
+    ident = await _me_bound(request, "me_worklog")      # 今天那條住在「今天的專案紀錄」裡
     today = date.today()
     factory = db_factory_or_503()
     async with factory() as session:
@@ -434,7 +435,7 @@ async def my_today(request: Request):
 async def team_week(request: Request, start: str = ""):
     """團隊的一週（§11）：人×日格子＝既有看板的週模式（案名＋小時＋內容、計畫淺灰），疊場次與休假。
     people 的計算直接用 services.timesheet_self.board_days（不抄第二份）。"""
-    ident = await _me_bound(request)
+    ident = await _me_bound(request, "me_team_week")
     if (start or "").strip() and parse_ymd(start) is None:
         raise HTTPException(status_code=422, detail="start 需為 YYYY-MM-DD")
     week = week_start_of(parse_ymd(start).date() if (start or "").strip() else date.today())
@@ -613,7 +614,7 @@ async def my_projects_burn(request: Request):
     「建議預算」（那是從預期毛利算出來的，等於間接揭露錢）、沒有未對映診斷。
     /timesheets/summary 仍守私帳 wall＋管理員，這裡是唯一刻意放行的讀取面。
     """
-    await _me_bound(request)
+    await _me_bound(request, "me_project_lookup")
     from services.timesheet_lookup import burn_rows
     factory = db_factory_or_503()
     async with factory() as session:

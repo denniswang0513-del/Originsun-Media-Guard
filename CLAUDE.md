@@ -1267,9 +1267,11 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 
 > /polish 逐次累積的地雷。動之前先讀對應那一行。
 
-- **`me_profile` 只開基本資料卡，不是「今天與這週」的鑰匙**（owner 2026-09-08：剛註冊只能看到基本資料，
-  其餘依授權開放）。那一區與 `/me/today`、`/me/team_week`、`/timesheets/mine*` 要的是 `core.auth.ME_WORK_KEYS`
-  （＝ME_MODULE_KEYS 去掉 me_profile）；新註冊與 Google 首登預設只有 `me_profile`。要放寬先讀「放寬守衛不能收回原本的鑰匙」那條。
+- **員工工作台「今天與這週」一顆功能一把鑰匙**（owner 2026-09-08）：`me_worklog`（專案紀錄＋我的一週＝`/me/today`、`/timesheets/mine*`）、
+  `me_team_week`（團隊的一週＋里程碑寫入）、`me_project_lookup`（專案查詢＝`/me/projects_burn`）、`me_plan_parttime`（兼職排班）。
+  `me_profile` 只開基本資料卡；新註冊與 Google 首登預設只有它。正本 `core.auth.ME_ZONE1_KEYS`，前端 `my.html` 的 `Z1_KEYS`／`Z1_VIEW_KEY` 是鏡射。
+  上線那一刻的一次性回填在 `main.py`（settings 旗標 `rbac.me_zone_split_backfilled`），跑過一次之後 owner 收掉的鑰匙**不會**被補回來。
+  要放寬先讀「放寬守衛不能收回原本的鑰匙」那條。
 - **`frontend/tabs/hr_leave/hr_leave.js` 只准用雙斜線註解**：檔頭第 4 行的 API 路徑帶了一個「斜線星號」，
   檔案裡只要再出現一個「星號斜線」（加一段 JSDoc 就會），`tests/unit/_srcscan.js_code_only` 會把中間
   整段當區塊註解剝掉 —— 真的程式碼跟著消失，而測試只會說某個常數不見了。同樣的陷阱在任何「檔頭寫了

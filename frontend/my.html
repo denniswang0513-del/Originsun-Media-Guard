@@ -716,16 +716,17 @@ function renderWorkspace() {
     $("btn-logout").style.display = "";
     $("hdr-hr").style.display = ws.hr_manager ? "" : "none";
 
-    const staffSections = ["me_profile", "me_projects", "me_finance", "me_leave", "me_petty", "me_benefits"];
+    const staffSections = ["me_profile", "me_projects", "me_finance", "me_leave", "me_petty", "me_benefits", ...Z1_KEYS];
     $("ws-notice").innerHTML = (!ws.bound && ws.allowed.some(k => staffSections.includes(k)))
         ? `<div class="notice">此帳號尚未綁定人員檔案 — 專案／個人資料／工時卡片暫無資料，請管理員在「使用者管理」完成綁定。</div>` : "";
 
     // 最上排功能鍵（每次重繪：allowed 不會變，但便宜）
     renderActions(ws);
 
-    // 第一區「今天與這週」：綁了人員、且有任何 me_* **工作**鑰匙才有（後端 /me/today、/me/team_week 同一條件：core.auth.ME_WORK_KEYS）。
-    // me_profile 不算 —— 那把只開基本資料卡（owner 2026-09-08：剛註冊只能看到基本資料，其餘依授權開放）。
-    const zone1On = ws.bound && ws.allowed.some(k => staffSections.includes(k) && k !== "me_profile");
+    // 第一區「今天與這週」：綁了人員、且有任一把子視圖的鑰匙才有（一顆功能一把，owner 2026-09-08；
+    // 後端 /me/today＝me_worklog、/me/team_week＝me_team_week、/me/projects_burn＝me_project_lookup，正本 core.auth.ME_ZONE1_KEYS）。
+    // me_profile 只開基本資料卡。
+    const zone1On = ws.bound && ws.allowed.some(k => Z1_KEYS.includes(k));
     $("ws-zone1-h").style.display = zone1On ? "" : "none";
     $("ws-zone1").style.display = zone1On ? "" : "none";
     if (zone1On && !$("ws-zone1").childElementCount) buildZone1();   // 只建一次：格子裡有正在打的字
@@ -1596,13 +1597,15 @@ async function _logProjectOptions() {
     return _logProjects;
 }
 
+// 子視圖 → 鑰匙（一顆功能一把；正本 core.auth.ME_MODULE_KEYS 的說明）。沒那把就不畫那顆按鈕。
+const Z1_KEYS = ["me_worklog", "me_team_week", "me_project_lookup"];
+const Z1_VIEW_KEY = { log: "me_worklog", plan: "me_worklog", week: "me_team_week", find: "me_project_lookup" };
+const _z1Can = (v) => !!(WS && WS.allowed && WS.allowed.includes(Z1_VIEW_KEY[v]));
 function buildZone1() {
     const z = $("ws-zone1");
+    const btn = (v, label) => _z1Can(v) ? `<button type="button" class="view-btn" data-view="${v}">${label}</button>` : "";
     z.innerHTML = `<div class="views" id="z1-views">
-            <button type="button" class="view-btn" data-view="log">今天的專案紀錄</button>
-            <button type="button" class="view-btn" data-view="plan">我的一週</button>
-            <button type="button" class="view-btn" data-view="week">團隊的一週</button>
-            <button type="button" class="view-btn" data-view="find">專案查詢</button>
+            ${btn("log", "今天的專案紀錄")}${btn("plan", "我的一週")}${btn("week", "團隊的一週")}${btn("find", "專案查詢")}
         </div>
         <div class="view" data-view="log" id="z1-log"></div>
         <div class="view" data-view="plan" id="z1-plan"></div>
@@ -1617,7 +1620,7 @@ function buildZone1() {
 }
 const Z1_LOADERS = { log: () => loadLog(), plan: () => loadMyWeek(), week: () => loadTeamWeek(), find: () => loadFind() };
 function switchZ1(v) {
-    if (!["log", "plan", "week", "find"].includes(v)) v = "log";
+    if (!["log", "plan", "week", "find"].includes(v) || !_z1Can(v)) v = ["log", "plan", "week", "find"].find(_z1Can) || "log";   // 記住的視圖沒鑰匙 → 第一個有鑰匙的
     _z1View = v;
     try { localStorage.setItem(Z1_KEY, v); } catch (_) {}
     document.querySelectorAll("#z1-views .view-btn").forEach(b => b.classList.toggle("active", b.dataset.view === v));

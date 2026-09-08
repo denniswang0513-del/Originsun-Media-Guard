@@ -42,11 +42,11 @@ def test_board_and_my_day_are_gated_by_the_timesheets_module():
     src = code_only(repo_src("routers/api_timesheets.py"))
     assert 'check_admin_or_module(request, "timesheets")' in func_body(src, "async def day_board(")
     # 我的一天：timesheets 模組 **或** 任何 me_* **工作**鑰匙（員工頁 /my.html 也打同一支）；兩條路都要綁定人員檔案
-    # （2026-09-08：me_profile 不算 —— 那把只開基本資料卡；集合正本 core.auth.ME_WORK_KEYS）
+    # （2026-09-08：一顆功能一把 —— 「我的一天」＝專案紀錄那把 me_worklog；me_profile 只開基本資料卡）
     for fn in ("async def my_day(", "async def my_add_rows(", "async def my_update_row(", "async def my_delete_row("):
         assert "_mine_ident(request)" in func_body(src, fn), fn
     mine = func_body(src, "async def _mine_ident(")
-    assert 'require_bound_staff(request, "timesheets", *ME_WORK_KEYS)' in mine   # 2026-09-06：一支守衛收多把鑰匙（鑰匙清單正本 core.auth）
+    assert 'require_bound_staff(request, "timesheets", "me_worklog")' in mine
     # 看板不排名、不標紅：回的是每個人的工作項，沒有「漏填」欄位
     board = func_body(src, "async def day_board(")
     assert '"missing' not in board and '"rank' not in board

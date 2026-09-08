@@ -6,7 +6,7 @@ import { createSortable, sortableSpan } from '../../tabs/crm/crm-utils.js';
 
 // key 集合必須 == core/auth.py ALL_MODULES == tab-config.js PERMISSION_GROUPS
 // （tests/unit/test_rbac_module_sync.py 三方同步測試把關，漏 key 會 fail）
-const MODULE_LABELS = {bulletin:'公布欄',preprod_plan:'拍攝企劃',preprod_locations:'場景庫',preprod_proposals:'提案庫',intel:'產業情報',equipment:'器材庫',references:'片庫',backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',footage:'素材庫',comfyui:'ComfyUI',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'財務管理',money_view:'金額檢視',finance_approve:'零用金審核',finance_partner:'母公司報表',finance_mine:'我的帳',timesheets:'工時檢核',portal:'審批門戶',media_log:'影像紀錄',website_admin:'官網',me_projects:'我的專案',me_profile:'我的資料',me_todos:'我的待辦',me_finance:'我的工時請款',hr_leave:'請補修',hr_benefits:'福委會',me_benefits:'我的福委會',journal:'工作日誌',me_leave:'我的請假',me_petty:'我的請款'};
+const MODULE_LABELS = {bulletin:'公布欄',preprod_plan:'拍攝企劃',preprod_locations:'場景庫',preprod_proposals:'提案庫',intel:'產業情報',equipment:'器材庫',references:'片庫',backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',footage:'素材庫',comfyui:'ComfyUI',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'財務管理',money_view:'金額檢視',finance_approve:'零用金審核',finance_partner:'母公司報表',finance_mine:'我的帳',timesheets:'工時檢核',portal:'審批門戶',media_log:'影像紀錄',website_admin:'官網',me_projects:'我的專案',me_profile:'我的資料',me_todos:'我的待辦',me_finance:'我的工時請款',hr_leave:'請補修',hr_benefits:'福委會',me_benefits:'我的福委會',journal:'工作日誌',me_leave:'我的請假',me_petty:'我的請款',me_worklog:'專案紀錄',me_team_week:'團隊的一週',me_project_lookup:'專案查詢',me_plan_parttime:'兼職排班'};
 
 // The 4-group structure is identical for every user (it's all modules grouped),
 // so compute it once rather than per user row / per modal open.
@@ -31,9 +31,11 @@ const _userSorter = createSortable({
 // Render the editable, 4-group permission cell for one user. `locked` disables
 // everything (built-in admin: prevent self-lockout). When 管理員 is on, modules
 // are implied (full access) so the grid is dimmed.
-function _renderUserPermCell(username, userModules, isAdminUser, locked) {
+function _renderUserPermCell(username, userModules, isAdminUser, locked, opts = {}) {
     const groups = _PERM_GROUPS;
     const dis = locked ? 'disabled' : '';
+    // 兼職排班：幫「兼職」排我的一週，所以綁定人員是兼職（或沒綁）的帳號不能勾（兼職不能排兼職）
+    const boxDis = (m) => (m === 'me_plan_parttime' && !opts.canPlanParttime) ? 'disabled title="要綁定在職人員才能勾（兼職不能排兼職）"' : dis;
     const adminRow = `
         <label class="_fm-chk" style="padding:3px 6px;font-weight:600;color:${isAdminUser ? '#a78bfa' : '#999'};">
             <input type="checkbox" data-uadmin-user="${username}" ${isAdminUser ? 'checked' : ''} ${dis}
@@ -47,7 +49,7 @@ function _renderUserPermCell(username, userModules, isAdminUser, locked) {
         const boxes = g.modules.map(m => `
             <label class="_fm-chk" style="min-width:auto;padding:2px 6px;">
                 <input type="checkbox" data-umod-user="${username}" data-group="${g.id}" value="${m}"
-                       ${userModules.includes(m) ? 'checked' : ''} ${dis}
+                       ${userModules.includes(m) ? 'checked' : ''} ${boxDis(m)}
                        onchange="window._syncUserGroupMaster('${username}','${g.id}')"> ${MODULE_LABELS[m] || m}
             </label>`).join('');
         return `
@@ -191,14 +193,21 @@ function _renderUserList() {
             .join('');
         const staffSelect = `<select data-ustaff-user="${u.username}" ${locked ? 'disabled' : ''} title="綁定人員檔案 — 個人工作台（/my.html）的資料來源"
             style="margin-top:6px;width:100%;max-width:150px;background:#252525;color:#ccc;border:1px solid #333;border-radius:6px;padding:2px 4px;font-size:11px;">${staffOpts}</select>`;
+        // 綁定人員的在職／兼職（分配權限時一眼看得到誰是兼職；空白視同在職，同 core.hr_logic）
+        const boundStaff = _staffListCache.find(s => s.id === u.staff_id) || null;
+        const staffStatus = boundStaff ? ((boundStaff.status || '').trim() || '在職') : '';
+        const statusPill = boundStaff
+            ? `<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:3px;margin-top:4px;background:${staffStatus === '兼職' ? '#b4530922' : '#15803d22'};color:${staffStatus === '兼職' ? '#f59e0b' : '#6ee7b7'};">${staffStatus}</span>`
+            : '';
+        const canPlanParttime = !!boundStaff && staffStatus === '在職';
         return `
         <div style="display:grid;grid-template-columns:170px 1fr auto;gap:12px;align-items:start;padding:12px 16px;margin-bottom:1px;background:#1e1e1e;border:1px solid #2e2e2e;border-radius:8px;transition:border-color .15s;" onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2e2e2e'">
             <div style="padding-top:4px;">
                 <div>${avatarImg}<span style="color:#f0f0f0;font-weight:600;font-size:13px;">${u.username}</span>${u.username === 'admin' ? '<span style="display:inline-block;background:#7c3aed22;color:#a78bfa;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">SUPER</span>' : ''}${authBadge}</div>
                 ${emailLine}
-                ${staffSelect}
+                ${staffSelect}${statusPill}
             </div>
-            <div style="min-width:0;">${_renderUserPermCell(u.username, modules, isAdminUser, locked)}</div>
+            <div style="min-width:0;">${_renderUserPermCell(u.username, modules, isAdminUser, locked, { canPlanParttime })}</div>
             <div style="display:flex;gap:6px;align-items:center;padding-top:4px;">
                 <button onclick="window._changeUserPwd('${u.username}')" class="_fm-btn-cancel" style="padding:3px 10px;font-size:11px;">改密碼</button>
                 ${locked ? '' : `<button onclick="window._saveUserSettings('${u.username}')" class="_fm-btn-submit" style="padding:3px 12px;font-size:11px;font-weight:500;">儲存</button>`}

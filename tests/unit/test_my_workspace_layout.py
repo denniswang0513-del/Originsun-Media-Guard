@@ -21,8 +21,10 @@ def _code(html: str) -> str:
 
 def test_three_view_buttons_and_the_remembered_view():
     html = repo_src(MY)
-    for v in ("log", "week", "find"):
-        assert f'class="view-btn" data-view="{v}"' in html, v
+    # 2026-09-08 起按鈕依鑰匙動態畫（一顆功能一把；test_me_zone_keys 釘閘門）：模板長這樣
+    for v, label in (("log", "今天的專案紀錄"), ("week", "團隊的一週"), ("find", "專案查詢")):
+        assert f'btn("{v}", "{label}")' in html, v
+    assert '`<button type="button" class="view-btn" data-view="${v}">${label}</button>`' in html
     assert "今天的專案紀錄" in html and "團隊的一週" in html and "專案查詢" in html
     assert 'localStorage.getItem(Z1_KEY)' in html and 'localStorage.setItem(Z1_KEY, v)' in html
     # 三個視圖各自的資料來源（契約 BUILD_SPEC §2）

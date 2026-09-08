@@ -57,8 +57,8 @@ def test_employee_leave_endpoints_require_bound_staff_and_me_leave():
     body = code_only(ME)
     for header in ("async def preview_my_leave(", "async def apply_my_leave(", "async def _cancel_my_leave("):
         assert 'require_bound_staff(request, "me_leave")' in func_body(body, header), header
-    # summary 任一把 me_* 鑰匙即可（卡片上的三個數字）
-    assert "require_bound_staff(request, *ME_MODULE_KEYS)" in func_body(body, "async def my_leave_summary(")
+    # summary 只認請假那把（2026-09-08 起：畫面早就只在有 me_leave 時畫卡，API 跟著收）
+    assert 'require_bound_staff(request, "me_leave")' in func_body(body, "async def my_leave_summary(")
     # 撤回只能撤自己的：查詢帶 staff_id
     assert 'HrLeaveRequest.staff_id == ident["staff_id"]' in func_body(body, "async def _cancel_my_leave(")
 

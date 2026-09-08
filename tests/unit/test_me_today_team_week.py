@@ -31,12 +31,15 @@ def test_today_and_team_week_are_gated_by_any_me_key_plus_binding():
     src = code_only(repo_src("routers/api_me.py"))
     for fn in ("async def my_today(", "async def team_week("):
         body = func_body(src, fn)
-        assert "_me_bound(request)" in body, fn
+        assert "_me_bound(request, " in body, fn        # 2026-09-08：一顆功能一把，各端點帶自己的鑰匙
         assert "body.staff_id" not in body and "username=" not in body.split("select(")[0], fn
     gate = func_body(src, "async def _me_bound(")
-    # 2026-09-06：守衛收成一行（任一把 me_* 鑰匙＋綁定）；2026-09-08：改成**工作**鑰匙（me_profile 只開基本資料卡）
-    assert "require_bound_staff(request, *ME_WORK_KEYS)" in gate
-    assert "ME_MODULE_KEYS)" not in gate        # 409 原句只在 core.identity；鑰匙集合只有 ME_WORK_KEYS 這一份
+    # 2026-09-06：守衛收成一行；2026-09-08：改成各子視圖自己的鑰匙（timesheets 模組整區恆過）
+    assert 'require_bound_staff(request, "timesheets", *keys)' in gate
+    assert "ME_MODULE_KEYS" not in gate        # 409 原句只在 core.identity
+    assert '_me_bound(request, "me_worklog")' in func_body(src, "async def my_today(")
+    assert '_me_bound(request, "me_team_week")' in func_body(src, "async def team_week(")
+    assert '_me_bound(request, "me_project_lookup")' in func_body(src, "async def my_projects_burn(")
 
 
 def test_team_week_reuses_the_board_calculation():

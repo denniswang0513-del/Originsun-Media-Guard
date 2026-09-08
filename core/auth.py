@@ -126,13 +126,23 @@ LEGACY_ROLE_LEVELS = {'admin': 3, 'editor': 1, 'viewer': 0}
 # 員工頁（/my.html／手機工作紀錄）的鑰匙：任一把＋綁定人員檔案就能用「我的」那些端點（api_me、api_timesheets 共用這一份）
 ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_leave",
                   "me_petty",     # 零用金卡（2026-08-19 從 me_finance 拆出）
-                  "me_benefits")  # 福委會卡（2026-08-21，員工自己登記快樂/進修）
+                  "me_benefits",  # 福委會卡（2026-08-21，員工自己登記快樂/進修）
+                  # 2026-09-08 owner「在權限管理裡控制員工各個功能的顯示狀態（包含兼職）」：
+                  # 「今天與這週」那一區從「任一把 me_* 就整區出現」拆成一顆功能一把鑰匙
+                  "me_worklog",        # 今天的專案紀錄＋我的一週（自己的）→ /me/today、/timesheets/mine*
+                  "me_team_week",      # 團隊的一週（含設定專案里程碑）→ /me/team_week、/milestones 寫入
+                  "me_project_lookup", # 專案查詢 → /me/projects_burn
+                  "me_plan_parttime")  # 兼職排班（幫狀態是「兼職」的人排我的一週；視窗與端點另做）
 
 # 🔴 me_profile＝「基本資料」，**只**開個人資料卡（owner 2026-09-08：剛註冊只能看到基本資料，其餘由我授權）。
-# 「今天與這週」那一整區（專案紀錄／我的一週／團隊的一週／專案查詢）與它後面的端點
-# （/me/today、/me/team_week、/timesheets/mine*）要的是這裡任一把 —— me_profile 不算。
+# 「今天與這週」那一區有任一把 ME_ZONE1_KEYS 才出現，各子視圖各看各的鑰匙（前端 my.html 同一份清單）。
 # 新註冊預設只有 me_profile（api_auth._REGISTER_DEFAULT_MODULES），所以綁了人員檔案也還是只有那張卡。
-ME_WORK_KEYS = tuple(k for k in ME_MODULE_KEYS if k != "me_profile")
+ME_ZONE1_KEYS = ("me_worklog", "me_team_week", "me_project_lookup")
+
+# 拆鑰匙那一刻的一次性回填（main.py 開機）：拆之前「任一把工作鑰匙」就看得到整區，
+# 所以有這幾把之一的帳號補發 ME_ZONE1_KEYS 三把，大家看到的跟拆之前一樣，owner 再逐人收。
+# 只跑一次（settings.json 旗標 rbac.me_zone_split_backfilled），之後 owner 收掉的不會被補回來。
+ME_ZONE1_BACKFILL_FROM = ("me_projects", "me_todos", "me_finance", "me_leave", "me_petty", "me_benefits")
 
 ALL_MODULES = [
     'bulletin',
@@ -189,6 +199,9 @@ ALL_MODULES = [
     # 認的就是這個 key。刻意獨立成一把鑰匙而不是沿用 transcode/drone_meta：
     # ComfyUI 的自訂節點等於那台機器上的任意程式碼執行，不該隨後期製作權限外溢。
     'comfyui',
+    # 員工工作台「今天與這週」拆成一顆功能一把（2026-09-08；正本與說明在上面的 ME_MODULE_KEYS）。
+    # ⚠ 一律 append 在尾端 — modules[0] 決定 admin 落地頁。
+    'me_worklog', 'me_team_week', 'me_project_lookup', 'me_plan_parttime',
 ]
 
 

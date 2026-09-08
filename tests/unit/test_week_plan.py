@@ -49,7 +49,7 @@ def test_sheet_marks_plan_rows_and_offers_defer():
 
 def test_workspace_has_the_my_week_view():
     html = repo_src(MY)
-    assert '<button type="button" class="view-btn" data-view="plan">我的一週</button>' in html
+    assert 'btn("plan", "我的一週")' in html      # 2026-09-08 起按鈕依鑰匙動態畫（test_me_zone_keys）
     assert '["log", "plan", "week", "find"].includes(v)' in html
     for act in ("plan-week", "plan-add", "plan-add-ok", "plan-add-cancel", "plan-del", "plan-defer", "plan-from-ms", "plan-copy-last", "row-defer"):
         assert f'act === "{act}"' in html, act

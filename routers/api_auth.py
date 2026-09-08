@@ -88,7 +88,7 @@ _REGISTER_COMPANY = "源日影像"
 _REGISTER_COMPANY_CHOICES = ["源日影像", "日源映畫", "源源製作", "日日有限公司"]
 # 新帳號預設權限：**只有**「基本資料」（owner 2026-09-08：剛註冊只能看到基本資料，其餘依授權開放；
 # 2026-07-22 曾連工作日誌一起給，現在收回）。其餘功能一律由管理員在「使用者管理」逐項開通。
-# me_profile 只開個人資料卡，不開「今天與這週」（core.auth.ME_WORK_KEYS）。
+# me_profile 只開個人資料卡，不開「今天與這週」（那一區一顆功能一把：core.auth.ME_ZONE1_KEYS）。
 # Google 第一次登入自動建的帳號也用這份（settings.google_oauth.default_modules 有給才覆蓋）。
 _REGISTER_DEFAULT_MODULES = ['me_profile']
 # 防暴力：同 IP 連錯 N 次驗證題 → 鎖 M 秒（單機記憶體即可）

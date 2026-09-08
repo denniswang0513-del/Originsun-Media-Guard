@@ -482,6 +482,32 @@ async def _on_startup():
                             await session.rollback()
         except Exception:
             pass
+    # ── 員工工作台「今天與這週」拆鑰匙的一次性回填（2026-09-08；規則正本 core.auth.ME_ZONE1_*）──
+    # 拆之前任一把工作鑰匙就整區出現；拆了之後沒補的人一上線整區消失。只跑一次：settings.json 旗標，
+    # 之後 owner 在權限管理收掉的鑰匙不會被補回來。走 _get_all_users／_persist_user（DB＋users.json 雙寫），
+    # 不下 raw SQL —— users.json 是登入的退路，只改 DB 會讓兩邊漂開。
+    try:
+        from config import load_settings as _ls_bf, save_settings as _ss_bf
+        _st_bf = _ls_bf()
+        if not (_st_bf.get("rbac") or {}).get("me_zone_split_backfilled"):
+            from core.auth import ME_ZONE1_BACKFILL_FROM as _bf_from, ME_ZONE1_KEYS as _bf_keys
+            from routers.api_auth import _get_all_users as _bf_users, _persist_user as _bf_persist
+            _n_bf = 0
+            for _u in await _bf_users():
+                _mods = list(_u.get("modules") or [])
+                if int(_u.get("access_level") or 0) >= 3 or not any(k in _mods for k in _bf_from):
+                    continue
+                _missing = [k for k in _bf_keys if k not in _mods]
+                if not _missing:
+                    continue
+                _u["modules"] = _mods + _missing
+                await _bf_persist(_u)
+                _n_bf += 1
+            _st_bf.setdefault("rbac", {})["me_zone_split_backfilled"] = True
+            _ss_bf(_st_bf)
+            print(f"[migrate] 今天與這週拆鑰匙：補發 {_n_bf} 個帳號（只跑這一次）")
+    except Exception as _e_bf:
+        print(f"[migrate] 今天與這週拆鑰匙回填略過: {_e_bf}")
     # ── 公布欄欄位 migration（新欄位 create_all 不補到既有表）+ 種子 ──
     if state.db_online:
         try:

@@ -95,6 +95,8 @@ _NOT_TAB_GATES = {
     ("crm_projects", "preprod_proposals"):
         "crm/proposal_assets：提案資產上傳（提案庫 tab 的按鈕），不是專案管理 tab 的門",
     # timesheets/project_options 曾在這裡（timesheets, me_finance）；2026-09-07 改走 _ts_or_bound（單 key＋綁定人員），不再是雙 key 閘門
+    ("timesheets", "me_team_week"):
+        "api_milestones：里程碑寫入（員工頁「團隊的一週」那顆按鈕住的地方）；不是工作追蹤 tab 的門，2026-09-08 一顆功能一把",
 }
 
 

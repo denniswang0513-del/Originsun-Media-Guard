@@ -201,7 +201,8 @@ export const PERMISSION_GROUPS = [
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
     // N0 個人工作台 — 獨立頁 /my.html 的卡片（無 SPA tab，僅權限編輯器用；
     // groupKeys 會因 TAB_MAP 無此 key 而自動不進側欄）。
-    { id: 'me',         label: '🙋 個人工作台', modules: ['me_projects', 'me_profile', 'me_todos', 'me_finance', 'me_leave', 'me_petty', 'me_benefits'] },
+    // 順序照員工頁的版面：基本資料 → 專案紀錄 → 團隊的一週 → 專案查詢 → 請假 → 零用金 → 福委會 → 兼職排班（其餘是還沒放回的卡）
+    { id: 'me',         label: '🙋 個人工作台', modules: ['me_profile', 'me_worklog', 'me_team_week', 'me_project_lookup', 'me_leave', 'me_petty', 'me_benefits', 'me_plan_parttime', 'me_projects', 'me_todos', 'me_finance'] },
 ];
 
 // Flat list of every assignable RBAC module key — derived from PERMISSION_GROUPS
