@@ -1,12 +1,27 @@
 // ─── User Management (extracted from app.js) ─── //
 // RBAC v2: 權限直接綁帳號（角色層已移除）。每個帳號 = 一組可勾選模組 + 「管理員」開關。
 import { _ensureModalStyles, _createFormModal } from '../shared/modal-styles.js';
-import { groupModules, ALL_MODULES } from '../shared/tab-config.js';
+import { groupModules, ALL_MODULES, TAB_GROUPS, shouldShowTab, tabLabel } from '../shared/tab-config.js';
 import { createSortable, sortableSpan, esc } from '../../tabs/crm/crm-utils.js';
 
 // key 集合必須 == core/auth.py ALL_MODULES == tab-config.js PERMISSION_GROUPS
 // （tests/unit/test_rbac_module_sync.py 三方同步測試把關，漏 key 會 fail）
 const MODULE_LABELS = {bulletin:'公布欄',preprod_plan:'拍攝企劃',preprod_locations:'場景庫',preprod_proposals:'提案庫',intel:'產業情報',equipment:'器材庫',references:'片庫',backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',footage:'素材庫',comfyui:'ComfyUI',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'財務管理',money_view:'金額檢視',finance_approve:'零用金審核',finance_partner:'母公司報表',finance_mine:'我的帳',timesheets:'工時檢核',portal:'審批門戶',media_log:'影像紀錄',website_admin:'官網',me_projects:'我的專案',me_profile:'我的資料',me_todos:'我的待辦',me_finance:'我的工時請款',hr_leave:'請補修',hr_benefits:'福委會',me_benefits:'我的福委會',journal:'工作日誌',me_leave:'我的請假',me_petty:'我的請款',me_worklog:'今天的專案紀錄',me_team_week:'團隊的一週',me_project_lookup:'專案查詢',me_plan_parttime:'兼職排班',me_today_zone:'今天與這週',me_week_plan:'我的一週'};
+
+// 每把鑰匙的相依說明（階段 3，2026-09-08）：畫面上一行灰字＋滑過的 title，管理員不用記。
+// 只寫「勾了會怎樣／還要配什麼」，不寫功能介紹（那是 MODULE_LABELS 的事）。
+const MODULE_HINTS = {
+    money_view: '看得到金額；帳務、報價都要配它', crm_invoices: '要配「金額檢視」', crm_quotes: '要配「金額檢視」',
+    finance_partner: '母公司報表唯讀；不要跟「金額檢視」同給', finance_mine: '指名才有，管理員也要明勾', finance_approve: '零用金審核；要配「金額檢視」',
+    crm_projects: '含建案、推進階段、雜支、歸檔；刪除與匯入仍限管理員', crm_staff: '含編輯履歷；刪除與匯入仍限管理員',
+    crm_clients: '刪除與匯入仍限管理員', hr_leave: '看與登記；核准仍限管理員', hr_benefits: '要配「金額檢視」', timesheets: '全員工時；私帳對映仍限管理員',
+    me_profile: '需綁定人員檔案', me_today_zone: '總開關；下面四把要先有它', me_worklog: '需綁定人員檔案', me_week_plan: '需綁定人員檔案',
+    me_team_week: '需綁定人員檔案', me_project_lookup: '需綁定人員檔案', me_leave: '需綁定人員檔案', me_petty: '需綁定人員檔案', me_benefits: '需綁定人員檔案',
+    me_plan_parttime: '要綁定在職／合夥人員；幫兼職排他的一週', website_admin: '三個身份都有', portal: '也可由「專案管理」開', references: '也可由提案庫／專案管理開',
+    me_todos: '畫面未開', me_finance: '畫面未開',
+};
+// 哪些鑰匙沒綁人員檔案就等於沒作用（員工工作台整區空白）——列上紅字提醒
+const STAFF_BOUND_KEYS = ['me_profile', 'me_today_zone', 'me_worklog', 'me_week_plan', 'me_team_week', 'me_project_lookup', 'me_leave', 'me_petty', 'me_benefits', 'me_plan_parttime', 'me_projects'];
 
 // 有層級的鑰匙：子 → 父。父（總開關）沒勾時子鑰匙灰掉；勾子鑰匙時父自動一起勾（後端 require_zone_staff 兩者都要）。
 const PERM_PARENT = { me_worklog: 'me_today_zone', me_week_plan: 'me_today_zone', me_team_week: 'me_today_zone', me_project_lookup: 'me_today_zone',
@@ -53,11 +68,12 @@ function _renderUserPermCell(username, userModules, isAdminUser, locked, opts = 
         const boxes = g.modules.map(m => {
             const parent = PERM_PARENT[m];
             const parentOff = parent && !userModules.includes(parent);
+            const hint = MODULE_HINTS[m] || (parent ? `要先開「${MODULE_LABELS[parent] || parent}」` : '');
             return `
-            <label class="_fm-chk" style="min-width:auto;padding:2px 6px;${parent ? 'margin-left:18px;' : ''}"${parent ? ` title="要先開「${MODULE_LABELS[parent] || parent}」"` : ''}>
+            <label class="_fm-chk" style="min-width:auto;padding:2px 6px;${parent ? 'margin-left:18px;' : ''}"${hint ? ` title="${hint}"` : ''}>
                 <input type="checkbox" data-umod-user="${username}" data-group="${g.id}" value="${m}"${parent ? ` data-parent="${parent}"` : ''}
                        ${userModules.includes(m) ? 'checked' : ''} ${boxDis(m) || (parentOff ? 'disabled' : '')}
-                       onchange="window._syncUserGroupMaster('${username}','${g.id}'); window._syncPermParent('${username}','${m}')"> ${parent ? '└ ' : ''}${MODULE_LABELS[m] || m}
+                       onchange="window._syncUserGroupMaster('${username}','${g.id}'); window._syncPermParent('${username}','${m}')"> ${parent ? '└ ' : ''}${MODULE_LABELS[m] || m}${hint ? `<span style="color:#555;font-size:10px;margin-left:4px;font-weight:400;">${hint}</span>` : ''}
             </label>`; }).join('');
         return `
             <div style="margin-bottom:4px;">
@@ -224,12 +240,15 @@ function _renderUserList() {
             ? `<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:3px;margin-top:4px;background:${pillColor[0]};color:${pillColor[1]};">${staffStatus}</span>`
             : '';
         const canPlanParttime = !!boundStaff && ['在職', '合夥'].includes(staffStatus);
+        const unboundWarn = (!boundStaff && !isAdminUser && modules.some(k => STAFF_BOUND_KEYS.includes(k)))
+            ? '<div style="color:#f87171;font-size:10px;margin-top:4px;line-height:1.4;">未綁定人員檔案：員工工作台的區塊會是空的</div>' : '';
         return `
         <div style="display:grid;grid-template-columns:170px 1fr auto;gap:12px;align-items:start;padding:12px 16px;margin-bottom:1px;background:#1e1e1e;border:1px solid #2e2e2e;border-radius:8px;transition:border-color .15s;" onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2e2e2e'">
             <div style="padding-top:4px;">
                 <div>${avatarImg}<span style="color:#f0f0f0;font-weight:600;font-size:13px;">${u.username}</span>${u.username === 'admin' ? '<span style="display:inline-block;background:#7c3aed22;color:#a78bfa;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">SUPER</span>' : ''}${authBadge}</div>
                 ${emailLine}
-                ${staffSelect}${statusPill}
+                ${staffSelect}${statusPill}${unboundWarn}
+                <button type="button" onclick="window._previewAs('${u.username}')" class="_fm-btn-cancel" style="margin-top:6px;padding:2px 8px;font-size:10px;" title="照目前勾的（還沒儲存也算）列出他會看到哪些分頁與區塊">以他的角度看</button>
             </div>
             <div style="min-width:0;">${_renderUserPermCell(u.username, modules, isAdminUser, locked, { canPlanParttime })}</div>
             <div style="display:flex;gap:6px;align-items:center;padding-top:4px;">
@@ -252,6 +271,59 @@ function _renderUserList() {
     });
     _userSorter.attach();
 }
+
+// ─── 以他的角度看（階段 3）：照目前勾選（未儲存也算）列出這個帳號會看到的分頁／員工頁區塊／手機版／財務分頁 ─── //
+window._previewAs = function(username) {
+    const u = _usersCache.find(x => x.username === username); if (!u) return;
+    const adminEl = document.querySelector(`input[data-uadmin-user="${username}"]`);
+    const isAdmin = adminEl ? adminEl.checked : (u.access_level || 0) >= 3;
+    const mods = isAdmin ? ALL_MODULES.slice() : [...document.querySelectorAll(`input[data-umod-user="${username}"]:checked`)].map(cb => cb.value);
+    const has = (k) => isAdmin || mods.includes(k);
+    const staffSel = document.querySelector(`select[data-ustaff-user="${username}"]`);
+    const bound = _staffListCache.find(s => s.id === (staffSel ? staffSel.value : u.staff_id)) || null;
+    const status = bound ? ((bound.status || '').trim() || '在職') : '';
+    const authUser = { access_level: isAdmin ? 3 : 1 };
+    // 頂層分頁
+    const groups = TAB_GROUPS.map(g => {
+        const keys = g.single ? [g.single] : (g.items || []).map(i => i.key);
+        const vis = keys.filter(k => shouldShowTab(k, authUser, mods));
+        const glabel = String(g.label || '').replace(/^[\p{Extended_Pictographic}️‍\s]+/u, '');   // 群組標籤帶頂層 tab 的圖示，卡片裡不畫 emoji
+        return vis.length ? `<div style="margin:2px 0;"><b style="color:#ddd;">${glabel}</b>${g.single ? '' : ` <span style="color:#aaa;">${vis.map(k => tabLabel(k) || k).join('、')}</span>`}</div>` : '';   // 單頁群組（公布欄／專案總覽／財務）只印一次名字
+    }).filter(Boolean).join('') || '<div style="color:#f87171;">沒有任何分頁（只剩本機免登入的後期流程）</div>';
+    // 員工工作台
+    const z1 = has('me_today_zone') && ['me_worklog', 'me_week_plan', 'me_team_week', 'me_project_lookup'].some(has);
+    const meRows = [];
+    if (!bound && ['me_profile', 'me_today_zone', 'me_leave', 'me_petty', 'me_benefits', 'me_projects'].some(has)) meRows.push('<span style="color:#f87171;">沒綁人員檔案：下面這些區塊都會是空的</span>');
+    if (has('me_profile')) meRows.push('基本資料');
+    if (z1) meRows.push('今天與這週：' + [['me_worklog', '今天的專案紀錄'], ['me_week_plan', '我的一週'], ['me_team_week', '團隊的一週'], ['me_project_lookup', '專案查詢']].filter(([k]) => has(k)).map(([, l]) => l).join('、')
+        + (has('me_plan_parttime') && bound && ['在職', '合夥'].includes(status) ? '、兼職排班' : ''));
+    if (has('me_leave')) meRows.push('我的請假'); if (has('me_petty')) meRows.push('零用金'); if (has('me_benefits')) meRows.push('我的福委會');
+    // 財務與手機
+    const finRows = [];
+    if (has('crm_invoices')) finRows.push(has('money_view') ? '財務分頁：完整（帳務＋金額檢視）' : '<span style="color:#f87171;">財務分頁：有帳務但缺「金額檢視」，每一頁都會擋</span>');
+    else if (has('finance_partner')) finRows.push('財務分頁：母公司報表唯讀');
+    if (has('crm_quotes') && !has('money_view')) finRows.push('<span style="color:#f87171;">報價分頁：缺「金額檢視」，清單會擋</span>');
+    if (has('finance_mine')) finRows.push('我的帳（/my-ledger.html）');
+    const mobile = has('crm_projects')
+        ? '手機版 /m/crm.html：進得去；' + [has('crm_invoices') && has('money_view') ? '發票／付款可寫' : '發票／付款只能看', '雜支可登', isAdmin ? '加備註' : ''].filter(Boolean).join('、')
+        : '手機版 /m/crm.html：進不去（要「專案管理」）';
+    const adminNote = isAdmin ? '管理員：使用者管理、設定、發版、刪除、匯入、根目錄、假勤核准全部可做' : '管理員限定（他做不到）：刪除、CSV 匯入、根目錄設定、假勤核准、使用者管理、設定、發版';
+    _ensureModalStyles();
+    document.getElementById('perm-preview-modal')?.remove();
+    const ov = document.createElement('div'); ov.id = 'perm-preview-modal'; ov.className = '_fm-overlay';
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    ov.innerHTML = `<div class="_fm-modal" style="width:560px;max-width:92%;">
+        <div class="_fm-header" style="padding:14px 20px;"><div style="font-size:14px;font-weight:600;color:#f0f0f0;">以 ${esc(username)} 的角度看${bound ? `<span style="color:#888;font-weight:400;font-size:12px;margin-left:8px;">${esc(bound.name)}（${esc(status)}）</span>` : ''}</div>
+            <span class="_fm-close" onclick="document.getElementById('perm-preview-modal')?.remove()">&#x2715;</span></div>
+        <div class="_fm-body" style="padding:14px 20px;font-size:12px;line-height:1.7;">
+            <div style="color:#666;font-size:10.5px;margin-bottom:8px;">照目前勾的算（還沒儲存也算）。${isAdmin ? '管理員＝全部。' : `${mods.length} 把鑰匙。`}</div>
+            <div style="color:#888;font-size:11px;letter-spacing:.1em;margin-top:6px;">頂層分頁</div>${groups}
+            <div style="color:#888;font-size:11px;letter-spacing:.1em;margin-top:10px;">員工工作台 /my.html</div><div style="color:#aaa;">${meRows.length ? meRows.join('<br>') : '沒有任何區塊'}</div>
+            <div style="color:#888;font-size:11px;letter-spacing:.1em;margin-top:10px;">財務與手機</div><div style="color:#aaa;">${[...finRows, mobile].join('<br>')}</div>
+            <div style="color:#666;font-size:11px;margin-top:10px;">${adminNote}</div>
+        </div></div>`;
+    document.body.appendChild(ov);
+};
 
 // ─── 最近授權不足（階段 0）：後端 403 環形緩衝；一鍵「開通」＝把那把鑰匙勾到該帳號那一列，管理員再按儲存 ─── //
 let _denialsCache = [];
