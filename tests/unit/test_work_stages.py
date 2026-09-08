@@ -10,7 +10,7 @@ import pytest
 
 from core.hr_logic import (STAGE_SEED, WORK_TYPES, resolve_stage, stage_categories, stage_index,
                            stages_by_category)
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, my_page_src, repo_src
 
 
 def _nodes():
@@ -138,7 +138,7 @@ def test_work_stage_router_is_registered_and_open_to_active_staff():
     for fn in ("async def list_work_stage_nodes(", "async def create_work_stage_node(",
                "async def update_work_stage_node(", "async def delete_work_stage_node("):
         assert "await _stage_guard(request)" in func_body(src, fn), fn
-    assert "grants().has(\"timesheets\") ? '<button" not in repo_src("frontend/my.html"), "員工頁的鈕不再看模組"
+    assert "grants().has(\"timesheets\") ? '<button" not in my_page_src(), "員工頁的鈕不再看模組"
     for path in ('"/work-stages/nodes"', '"/work-stages/nodes/{node_id}"'):
         assert path in src, path
 
@@ -186,6 +186,6 @@ def test_editor_offers_delete_only_for_unused_stages():
 
 def test_workspace_page_recolors_the_shared_popups_for_its_white_theme():
     """個人工作台是白底：stage-editor／proj-pop 的深色預設變數在這頁要被蓋掉（owner 2026-09-07「調整版面配色」）。"""
-    html = repo_src("frontend/my.html")
+    html = my_page_src()
     assert "body .stage-editor { --se-bg: #fff;" in html
     assert "body .proj-pop { --pp-bg: #fff;" in html

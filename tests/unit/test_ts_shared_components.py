@@ -12,12 +12,11 @@
 import pathlib
 import re
 
-from tests.unit._srcscan import js_code_only, repo_src
+from tests.unit._srcscan import js_code_only, my_page_src, repo_src
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend"
 TAB = "frontend/tabs/timesheets/timesheets.js"
-MY = "frontend/my.html"
 SHEET = "frontend/js/shared/ts-sheet.js"
 PROJ = "frontend/js/shared/ts-projects.js"
 STAGE = "frontend/js/shared/stage-editor.js"
@@ -36,7 +35,7 @@ def _frontend_sources():
 
 def test_both_hosts_import_the_shared_sheet_and_projects_modules():
     tab = js_code_only(repo_src(TAB))
-    my = repo_src(MY)
+    my = my_page_src()
     assert "from '../../js/shared/ts-sheet.js'" in tab and "from '../../js/shared/ts-projects.js'" in tab
     assert "from '../../js/shared/stage-editor.js'" in tab
     assert "from '/js/shared/ts-sheet.js'" in my and "from '/js/shared/ts-projects.js'" in my
@@ -107,7 +106,7 @@ def test_stage_editor_is_one_module_opened_from_both_hosts():
     assert st.count("method: 'DELETE'") == 1 and "act === 'del'" in st and "s.used === 0" in st
     tab = repo_src(TAB)
     assert 'data-ts-action="stages"' in tab and "openStageEditor(" in tab and "setStages(" in tab
-    my = repo_src(MY)
+    my = my_page_src()
     assert 'data-z1="stages"' in my and "TS.openStageEditor(" in my and "TS.setStages(" in my
     # 兩邊都在 onSaved 把新清單餵回格子（新列的下拉立即更新）
     assert "onSaved: (map) =>" in tab and "onSaved: (map) =>" in my

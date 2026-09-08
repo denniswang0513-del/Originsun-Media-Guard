@@ -14,7 +14,7 @@
 """
 import re
 from pathlib import Path
-from tests.unit._srcscan import js_code_only, js_func_body
+from tests.unit._srcscan import js_code_only, js_func_body, my_page_src
 
 
 import pytest
@@ -675,7 +675,7 @@ def test_me_petty_is_the_standalone_key():
     page = (FRONTEND / "petty-cash.html").read_text(encoding="utf-8")
     assert 'mods.includes("me_petty")' in page
     assert 'mods.includes("me_finance")' not in page, "獨立頁還在收舊鑰匙"
-    my = (FRONTEND / "my.html").read_text(encoding="utf-8")
+    my = my_page_src()
     assert 'ws.allowed.includes("me_petty")' in my
     auth = (REPO / "core" / "auth.py").read_text(encoding="utf-8")
     assert '"me_petty"' in auth.split("ME_MODULE_KEYS")[1][:400], "workspace allowed 沒帶新 key，卡片永遠不出現（正本 core.auth.ME_MODULE_KEYS）"

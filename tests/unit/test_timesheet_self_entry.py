@@ -7,7 +7,7 @@
 from types import SimpleNamespace as NS
 
 from core.hr_logic import EDIT_BLOCK_TEXT, EDITABLE_STATUSES, can_edit_timesheet
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, my_page_src, repo_src
 
 
 def test_can_edit_truth_table():
@@ -61,7 +61,7 @@ def test_update_reuses_the_sheet_project_mapping():
 
 
 def test_my_page_talks_to_the_me_endpoints_only():
-    html = repo_src("frontend/my.html")
+    html = my_page_src()
     assert '"/api/v1/me/timesheets?month="' in html
     assert '"/api/v1/me/timesheets/batch"' in html
     assert 'method: "PUT"' in html and 'method: "DELETE"' in html

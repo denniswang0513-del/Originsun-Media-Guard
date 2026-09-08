@@ -7,7 +7,7 @@
 3. /my.html 真的畫得出個人資料卡（不然新帳號登入是一整頁空白）。
 4. 主 SPA 對「登入了但沒有任何模組」只給免登入的後期流程頁，不再顯示全部 tab。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, my_page_src, repo_src
 
 
 def test_new_accounts_get_only_the_profile_key():
@@ -37,7 +37,7 @@ def test_today_zone_endpoints_require_their_own_key():
 
 
 def test_workspace_draws_the_profile_card_and_hides_the_today_zone_for_profile_only():
-    html = repo_src("frontend/my.html")
+    html = my_page_src()
     zone = html[html.index("const ME_ZONE_ON = new Set("):]
     zone = zone[:zone.index(")")]
     assert '"me_profile"' in zone, "個人資料卡要在 ME_ZONE_ON，不然只有 me_profile 的新帳號整頁空白"

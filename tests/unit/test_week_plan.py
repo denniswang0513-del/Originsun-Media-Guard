@@ -3,9 +3,8 @@
 一張卡＝一列工時（status=plan、沒時數、planned_hours 不用）；不判有做沒做；執行動作只有填時數與「挪到隔天」。
 釘住：row_state 的 plan 旗標、schema 欄位、normalize_row／apply_update 傳遞、格子的「計畫」狀態列、
 員工頁的「我的一週」視圖、團隊的一週不再把沒時數的列畫成「0 h」。"""
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, my_page_src, repo_src
 
-MY = "frontend/my.html"
 SHEET = "frontend/js/shared/ts-sheet.js"
 
 
@@ -48,7 +47,7 @@ def test_sheet_marks_plan_rows_and_offers_defer():
 
 
 def test_workspace_has_the_my_week_view():
-    html = repo_src(MY)
+    html = my_page_src()
     assert 'btn("plan", "我的一週")' in html      # 2026-09-08 起按鈕依鑰匙動態畫（test_me_zone_keys）
     assert '["log", "plan", "week", "find"].includes(v)' in html
     for act in ("plan-week", "plan-add", "plan-add-ok", "plan-add-cancel", "plan-del", "plan-defer", "plan-from-ms", "plan-copy-last", "row-defer"):
@@ -65,7 +64,7 @@ def test_workspace_has_the_my_week_view():
 
 
 def test_team_week_does_not_draw_zero_hours():
-    html = repo_src(MY)
+    html = my_page_src()
     cell = html[html.index("async function loadTeamWeek()"):html.index("// ── 本週里程碑")]
     assert "計畫 ${i.planned_hours ?? \"\"} h" not in cell, "沒計畫時數的計畫列曾畫成「計畫  h」"
     assert '<span class="hrs plan">草稿</span>' in cell and "i.hours > 0 ?" in cell
@@ -78,6 +77,6 @@ def test_timesheets_tab_handles_the_same_defer_button():
 
 def test_no_new_named_import_from_shared_sheet_module():
     """Cloudflare 給 .js 4 小時快取：my.html 這輪不能從 ts-sheet.js 新增具名 import（舊 js 沒那個 export 整個 module 會掛）。"""
-    html = repo_src(MY)
+    html = my_page_src()
     line = next(l for l in html.splitlines() if "from '/js/shared/ts-sheet.js'" in l)
     assert "planStateHtml" not in line

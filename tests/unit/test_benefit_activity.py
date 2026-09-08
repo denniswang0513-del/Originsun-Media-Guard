@@ -9,12 +9,10 @@
 守衛有沒有真的裝在每一條進得了門的路上、附件會不會被整包寫回洗掉、
 既有的兩個共用池會不會被這次改動波及。
 """
-from tests.unit._srcscan import migration_sql, code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, migration_sql, my_page_src, repo_src
 
 SRC = "routers/crm/benefits.py"
 JS = "frontend/tabs/hr_benefits/hr_benefits.js"
-MY = "frontend/my.html"
-
 
 def _body(fn):
     return code_only(func_body(repo_src(SRC), fn))
@@ -101,7 +99,7 @@ def test_attachment_reuses_the_existing_storage_and_serving_path():
     body = _body("async def upload_pool_file(")
     assert "_receipts_root()" in body and "_福委會" in body
     assert "/api/v1/crm/receipt-file?path=" in repo_src(JS)
-    assert "/api/v1/crm/receipt-file?path=" in repo_src(MY)
+    assert "/api/v1/crm/receipt-file?path=" in my_page_src()
 
 
 def test_undeletable_file_is_not_silent():
@@ -190,7 +188,7 @@ def test_admin_swaps_funding_for_allowance_by_kind():
 
 
 def test_my_card_shows_my_allowance_and_the_description():
-    my = repo_src(MY)
+    my = my_page_src()
     # 分支條件要釘 —— 只釘欄位名的話，把 if 改成 false 欄位名照樣在（實測會漏）
     assert 'if ((p.quota || "shared") === "per_person") {' in my,         "每人額度那條分支不見了"
     assert 'p.mine_allowance' in my

@@ -6,7 +6,7 @@ modules 是登入時簽進 JWT 的快照：管理員改權限、開機回填補�
 /auth/refresh 規則：API key／分享 token 不換、90 天絕對壽命），前端每個讀這兩支的地方都把它換進 localStorage。
 """
 from core.auth import claims_drifted
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, my_page_src, repo_src
 
 
 def test_claims_drifted_is_order_insensitive_and_checks_level():
@@ -35,7 +35,7 @@ def test_refresh_and_me_share_one_renewal_rule():
 
 def test_every_auth_me_reader_adopts_the_fresh_token():
     # my.html：換掉再抓一次（allowed 是照 token 算的），而且只會多抓這一次
-    z = js_code_only(repo_src("frontend/my.html"))
+    z = js_code_only(my_page_src())
     body = js_func_body(z, "async function loadWorkspace()")
     assert "localStorage.setItem(TOKEN_KEY, WS.token);" in body and "if (!_tokenSwapRetried) { _tokenSwapRetried = true; return loadWorkspace(); }" in body, "換 token 只補抓一次（有上限）"
     assert "WS.token !== localStorage.getItem(TOKEN_KEY)" in body, "沒這個判斷會無限重抓"

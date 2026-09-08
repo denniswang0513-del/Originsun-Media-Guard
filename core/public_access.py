@@ -7,10 +7,24 @@
   open ＝公開：連 token 都不用；只有履歷（員工檔勾 resume_visible）與員工註冊兩面支援，因為它們本來就沒有 token
 
 守衛只有一處：`surface_gate` 用路徑前綴對回登記表的鍵，查模式；關閉才擋，其餘放行到各端點原本的 token 檢查。
-設定存 settings.json `public_access = {鍵: 模式}`（每次請求讀 load_settings 的快取，改了立即生效）。
-純規則在這裡（登記表、normalize、mode_of、surface_for_path）；讀設定與丟 HTTPException 的 `surface_gate` 也放這裡，routers 只掛。
+
+🔴 設定的單一真相＝**共用 Postgres**（`website_settings` 的 `public_access` 這一筆，值是 {鍵: 模式}）。
+   同一批 public_router **兩台機器都在跑**：master（8000）與 NAS 對外容器（main_website.py 掛
+   crm public_router／proposals／references）。對外連結（影像紀錄 QR、雜支連結、提案分享）指的是
+   NAS 那台，而它有自己的 settings.json（publish 的 NAS_SYNC_CODE 不同步 settings.json）——
+   設定各存各的＝owner 在畫面上關掉，對外那面其實還開著，而且不會報錯。
+   舊的 settings.json `public_access` 只當降級來源，第一次讀到就搬進 DB（一次性遷移）。
+
+讀取順序：DB → 讀不到（DB 不可用／沒那筆）→ settings.json → 登記表預設值。
+**DB 掛掉不擋人**：回預設（link／open），不因為資料庫離線把對外頁全部 404。
+每個公開請求都會走這條，所以模組層 TTL 快取（`_CACHE_TTL`）；master 存檔時 `invalidate()` 立即失效，
+NAS 容器收不到寫入事件，靠 TTL 自己追上（形狀對齊 routers/crm/media_log 的 `_conf_cache`）。
+
+純規則在這裡（登記表、normalize、mode_of、surface_for_path）；讀寫設定與丟 HTTPException 的
+`surface_gate`／`current_modes`／`save_modes` 也放這裡，routers 只掛。
 """
-from typing import Dict, List, Optional
+import time
+from typing import Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, Request  # type: ignore
 
@@ -77,13 +91,100 @@ def surface_for_path(path: str) -> Optional[str]:
     return None
 
 
-def surface_gate(request: Request) -> Optional[str]:
-    """掛在 public_router／token_router／portal router 的 Depends，或在 /q/、/register 手動呼叫。
+# ── 設定的讀寫（DB 正本 ＋ TTL 快取）────────────────────────────────
+SETTING_KEY = "public_access"      # website_settings 的鍵（value＝JSONB {面: 模式}）
+_CACHE_TTL = 25.0                  # 秒；NAS 容器靠它追上 master 的變更
+_cache: dict = {"at": 0.0, "val": None}
+
+
+def invalidate() -> None:
+    """寫入端（PUT /auth/public-access）呼叫 —— 本行程立刻拿到新值。
+    ⚠ 別的行程（NAS 容器、機隊）最多還會用舊值 `_CACHE_TTL` 秒。"""
+    _cache["at"] = 0.0
+    _cache["val"] = None
+
+
+async def _db_modes() -> Tuple[bool, Optional[dict]]:
+    """(DB 讀得到嗎, 那一筆的原始值)。讀不到一律 (False, None) —— 不 raise，公開頁不能因 DB 掛掉全掛。"""
+    try:
+        import core.state as state
+        if not getattr(state, "db_online", False):
+            return False, None
+        from db.session import get_session_factory
+        factory = get_session_factory()
+        if not factory:
+            return False, None
+        from services.website import settings_service
+        async with factory() as session:
+            vals = await settings_service.get_prefixed(session, SETTING_KEY)
+        raw = vals.get(SETTING_KEY)
+        return True, (raw if isinstance(raw, dict) else None)
+    except Exception:
+        return False, None
+
+
+def _file_modes() -> Optional[dict]:
+    """舊正本 settings.json 的 `public_access`（只當降級來源與一次性遷移的材料）。"""
+    try:
+        from config import load_settings
+        raw = load_settings().get(SETTING_KEY)
+        return raw if isinstance(raw, dict) else None
+    except Exception:
+        return None
+
+
+async def _migrate_file_to_db(modes: Dict[str, str]) -> None:
+    """DB 沒那筆、settings.json 有 → 搬進去（best-effort，失敗就算了，下次再試）。"""
+    try:
+        from db.session import get_session_factory
+        factory = get_session_factory()
+        if not factory:
+            return
+        from services.website import settings_service
+        async with factory() as session:
+            await settings_service.update_settings(
+                session, {SETTING_KEY: modes}, updated_by="migrate:settings.json")
+    except Exception:
+        pass
+
+
+async def current_modes() -> Dict[str, str]:
+    """目前每一面的模式（已 normalize）。DB → settings.json → 預設；TTL 快取。"""
+    now = time.monotonic()
+    if _cache["val"] is not None and now - _cache["at"] < _CACHE_TTL:
+        return dict(_cache["val"])      # 複本：呼叫端改到手上這份不該污染守衛
+    reachable, raw = await _db_modes()
+    if raw is None:
+        legacy = _file_modes()
+        if legacy is not None:
+            raw = legacy
+            if reachable:                       # DB 活著但沒那筆 → 一次性遷移
+                await _migrate_file_to_db(normalize(legacy))
+    modes = normalize(raw)
+    _cache["val"] = modes
+    _cache["at"] = now
+    return dict(modes)
+
+
+async def save_modes(modes: Optional[dict], updated_by: Optional[str] = None) -> Dict[str, str]:
+    """管理員存檔：normalize → 寫 DB（唯一正本，不再寫 settings.json）→ 本行程快取失效。
+    DB 不可用時 503 —— 寫入不能靜默成功（不然畫面說存好了，其實什麼都沒關掉）。"""
+    clean = normalize(modes)
+    from core.db_guard import db_factory_or_503
+    factory = db_factory_or_503()
+    from services.website import settings_service
+    async with factory() as session:
+        await settings_service.update_settings(session, {SETTING_KEY: clean}, updated_by=updated_by)
+    invalidate()
+    return clean
+
+
+async def surface_gate(request: Request) -> Optional[str]:
+    """掛在 public_router／token_router／portal router 的 Depends，或在 /q/、/e/、/register 手動 `await`。
     關閉 → 404「此功能未開放」（不是 403：對外面的人不該暴露「有這功能但你不能用」）。回面的鍵或 None。"""
     key = surface_for_path(request.url.path)
     if key is None:
         return None
-    from config import load_settings
-    if mode_of(key, load_settings().get("public_access")) == MODE_OFF:
+    if (await current_modes())[key] == MODE_OFF:
         raise HTTPException(status_code=404, detail="此功能未開放")
     return key

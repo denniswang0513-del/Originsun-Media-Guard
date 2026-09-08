@@ -7,7 +7,7 @@ me_plan_parttime（兼職排班）。拆之前「任一把 me_* 就整區出現�
 """
 import re
 
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, my_page_src, repo_src
 
 NEW = ("me_worklog", "me_team_week", "me_project_lookup", "me_plan_parttime", "me_today_zone", "me_week_plan")
 
@@ -56,7 +56,7 @@ def test_each_endpoint_takes_its_own_key():
 
 
 def test_workspace_draws_each_view_by_its_key_and_falls_back():
-    html = repo_src("frontend/my.html")
+    html = my_page_src()
     assert 'const Z1_MASTER = "me_today_zone";' in html
     assert 'const Z1_KEYS = ["me_worklog", "me_week_plan", "me_team_week", "me_project_lookup"];' in html
     assert 'const Z1_VIEW_KEY = { log: "me_worklog", plan: "me_week_plan", week: "me_team_week", find: "me_project_lookup" };' in html

@@ -8,16 +8,15 @@ preview 有去抖、按鈕文字無 emoji。
 """
 import re
 
-from tests.unit._srcscan import between, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import between, js_code_only, js_func_body, my_page_src, repo_src
 
-MY = "frontend/my.html"
 HL_JS = "frontend/tabs/hr_leave/hr_leave.js"
 HL_HTML = "frontend/tabs/hr_leave/hr_leave.html"
 _EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿⭐✅❌]")
 
 
 def _my_code() -> str:
-    return js_code_only(re.sub(r"<!--.*?-->", "", repo_src(MY), flags=re.S))
+    return js_code_only(re.sub(r"<!--.*?-->", "", my_page_src(), flags=re.S))
 
 
 # ── 員工頁 /my.html ─────────────────────────────────────────────

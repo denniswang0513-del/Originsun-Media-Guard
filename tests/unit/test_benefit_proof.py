@@ -13,8 +13,8 @@
 以及一個資料面的：心得**不共用 notes** —— notes 裝退回原因（append `[退回] xxx`），
 員工寫的心得跟 owner 寫的退回理由混在一欄，兩邊都讀不乾淨。
 """
-from tests.unit._srcscan import (code_only, func_body, repo_src,
-                                 js_func_body)
+from tests.unit._srcscan import (code_only, func_body, js_func_body,
+                                 my_page_src, repo_src)
 
 SRC = "routers/crm/benefits.py"
 
@@ -110,7 +110,7 @@ def test_missing_proof_is_a_quiet_affordance_not_an_error():
 
 
 def test_employee_ui_can_write_and_upload():
-    my = repo_src("frontend/my.html")
+    my = my_page_src()
     assert "mb-reflection" in my, "員工端沒有心得欄"
     assert "reflection:" in my, "心得沒有送出去"
     assert "/receipt/" in my or "/receipt`" in my, "員工端不能補傳單據"

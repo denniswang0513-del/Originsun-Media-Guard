@@ -9,9 +9,7 @@
 """
 import re
 
-from tests.unit._srcscan import js_code_only, repo_src
-
-MY = "frontend/my.html"
+from tests.unit._srcscan import js_code_only, my_page_src, repo_src
 
 
 def _code(html: str) -> str:
@@ -20,7 +18,7 @@ def _code(html: str) -> str:
 
 
 def test_three_view_buttons_and_the_remembered_view():
-    html = repo_src(MY)
+    html = my_page_src()
     # 2026-09-08 起按鈕依鑰匙動態畫（一顆功能一把；test_me_zone_keys 釘閘門）：模板長這樣
     for v, label in (("log", "今天的專案紀錄"), ("week", "團隊的一週"), ("find", "專案查詢")):
         assert f'btn("{v}", "{label}")' in html, v
@@ -38,7 +36,7 @@ def test_three_view_buttons_and_the_remembered_view():
 
 
 def test_no_personal_hours_totals_anywhere():
-    html = repo_src(MY)
+    html = my_page_src()
     for bad in ("planned_total", "actual_total", "本月工時", "累計工時", "本週合計", "超時"):
         assert bad not in html, bad
     # 舊「我的專案」派工卡退場；請款卡改名、不再畫每案小時
@@ -50,12 +48,12 @@ def test_no_personal_hours_totals_anywhere():
 
 def test_no_emoji_in_ui_code():
     emoji = re.compile("[\U0001F300-\U0001FAFF☀-➿⭐✅❌]")
-    m = emoji.search(_code(repo_src(MY)))
+    m = emoji.search(_code(my_page_src()))
     assert not m, f"my.html 的程式碼含 emoji：{m.group()!r}"
 
 
 def test_journal_iframe_and_zones_stay():
-    html = repo_src(MY)
+    html = my_page_src()
     assert 'id="ws-journal"' in html and '/journal.html?embed=1' in html
     assert 'id="ws-zone1"' in html and 'id="ws-actions"' in html and 'id="ws-grid"' in html
     assert "journal-embed-height" in html
@@ -74,7 +72,7 @@ def test_action_bar_is_just_petty_cash():
     一次擺七顆等於沒有重點。要放回來就一顆一顆放，不要整排長回去。
     連結仍指既有頁面、仍受 me_petty 閘門。
     """
-    html = repo_src(MY)
+    html = my_page_src()
     fn = html.split("function renderActions(")[1].split("\n}")[0]
     assert '{ label: "零用金", href: "/petty-cash.html" }' in fn
     assert 'has("me_petty")' in fn, "閘門不能一起拿掉"
@@ -83,7 +81,7 @@ def test_action_bar_is_just_petty_cash():
 
 def test_find_view_filters_are_one_row():
     """owner 2026-09-05：搜尋篩選整併成一列——搜尋框、狀態、案型、消耗率區間、最後填報多久內、清除；沒有進階面板。"""
-    src = repo_src("frontend/my.html")
+    src = my_page_src()
     for i in ("z1-find-q", "z1-f-status", "z1-f-type", "z1-f-pct", "z1-f-from", "z1-f-to", "z1-f-clear"):
         assert f'id="{i}"' in src, i
     assert "z1-find-adv" not in src and "data-type=" not in src

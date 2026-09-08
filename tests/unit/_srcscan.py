@@ -252,6 +252,30 @@ def models_src(header: str = "") -> str:
                             "_finance.py", "_workspace.py"), header)
 
 
+#: /my.html 的程式碼被拆到哪幾支、以及 my.html 底部 script 標籤的載入順序。
+#: 順序＝原本 inline script 由上而下的執行順序，改這裡要跟 my.html 一起改。
+MY_PAGE_FILES = ("shell.js", "cards.js", "cards-hr.js", "zone1.js",
+                 "week-plan.js", "parttime.js", "team-week.js")
+
+
+def my_page_src() -> str:
+    """原本 `frontend/my.html` 那一頁的全部程式碼＝html 殼 ＋ `frontend/js/my/*.js`。
+
+    🔴 2026-09-09 同一個理由第四次（那一頁 2,449 行、超過單次讀取上限；而且
+    `test_files_stay_readable` 原本只掃 .py／.js，它是無聲越線的）：那段
+    ~1,970 行的 inline script 原樣切成 `frontend/js/my/` 底下七支。
+
+    🔴 切出來的是**傳統 script**不是 module —— my.html 底部依序 `<script src>` 載入，
+    七支共用同一個全域詞法環境，頂層 const／let／function 跨檔直接看得見，語意零改變。
+
+    用這一支而不是 `repo_src("frontend/my.html")` —— 理由同 `finance_src`：那些斷言
+    釘的是「這一頁有沒有做某件事」，不是「那段字串住在 html 還是哪一支 js」。
+    """
+    parts = [repo_src("frontend/my.html")]
+    parts += [repo_src("frontend/js/my/" + n) for n in MY_PAGE_FILES]
+    return "\n".join(parts)
+
+
 def _split_file_src(rel_dir: str, files: tuple, header: str = "") -> str:
     """一個被拆開的檔：把幾塊串回去，或在其中一塊裡找出某支函式的本體。
 

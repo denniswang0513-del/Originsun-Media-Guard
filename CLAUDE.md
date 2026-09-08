@@ -1259,7 +1259,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | `core.hr_logic` 的草稿列（`PENDING_STATUS`／`row_state`） | 「填了任何一格就存、有時數才進彙整」：pending 列不算工時 | 前端 `ts-sheet.js` 的 content 判定與後端 `normalize_row` 的空白列 422 **要同一組欄位**（專案／做了什麼／備註／階段） |
 | `frontend/my.html` 的「我的一週」＋ `ts-sheet.js` 的計畫列 | 個人週規劃（owner 2026-09-08）：一天一欄的板、一張卡＝一列工時（`status=plan`、沒時數，POST 帶 `plan:true`）；當天的卡就是格子裡的藍底「計畫」列；「挪到隔天」＝PUT 只帶 `work_date` | **不判有做沒做**（沒有未執行／自動對上／提醒）；只能排自己的；`row_state(plan=True)` 沒時數也是 plan，`apply_update` 不帶 plan 就沿用列上的狀態，填了時數才變 draft |
 | [`core/rbac_templates.py`](core/rbac_templates.py) | 身份範本的**純規則**：合夥／在職／兼職預設鑰匙、`normalize`（丟垃圾鍵、成員鍵收成捆、子鑰匙補總開關、帳務／報價補金額檢視）、`template_for`、`diff` | 無 I/O；存在 settings `rbac.templates`，端點在 `routers/api_auth.py`（`/auth/rbac/templates`）；套用＝寫回帳號自己的 modules，**不是角色層** |
-| [`core/public_access.py`](core/public_access.py) | 對外免登入面的登記表 `PUBLIC_SURFACES`（10 面：鍵、誰用、怎麼進、路徑前綴、支援模式）、`normalize`、`surface_for_path`、`surface_gate`（關閉→404） | 守衛掛 public_router／token_router／portal／proposals／references 的 `Depends`，`/q/`、`/e/`、`/register` 手動；新公開面＝登記表加一列＋確認它的 router 有掛 |
+| [`core/public_access.py`](core/public_access.py) | 對外免登入面的登記表 `PUBLIC_SURFACES`（10 面：鍵、誰用、怎麼進、路徑前綴、支援模式）、`normalize`、`surface_for_path`、`current_modes`／`save_modes`、`surface_gate`（async，關閉→404） | **設定正本在共用 Postgres**（`website_settings` 的 `public_access` 列），master 與 NAS 對外容器同一份；模組層 TTL 快取 25 秒、寫入端 `invalidate()`；DB 讀不到 → 退 settings.json → 退預設（**DB 掛掉不擋人**）。守衛掛五個 router 的 `Depends`，`/q/`、`/e/`、`/register` 手動 `await`；新公開面＝登記表加一列＋確認它的 router 有掛 |
 | `core/auth.py` 的捆鑰匙與 403 段 | `MODULE_BUNDLES`／`expand_modules`（捆→成員，成員齊補捆）、`MODULE_LABELS`（後端正本）、`denied_detail`／`record_denial`／`recent_denials`（403 帶原因＋300 筆環形緩衝） | 展開只在 `routers/api_auth._enrich_user`（讀帳號咽喉）與存帳號兩處；守衛用成員鍵；「探針」用 `payload_grants(check_logged_in(request), …)` 布林，**不要**拿守衛函式當 if |
 | [`frontend/js/admin/user-mgmt.js`](frontend/js/admin/user-mgmt.js) | 使用者管理四個分頁：使用者（權限格＋相依說明＋最近授權不足＋以他的角度看）、API Keys、身份範本、公開區 | 前端 `MODULE_LABELS`／`MODULE_HINTS`／`PERM_PARENT` 是鏡射（鍵集由 test_rbac_module_sync 釘）；帳號的 modules 存捆，畫面只畫 `ALL_MODULES`；`_boundStaffOf` 是「綁定人員→身份」唯一算法 |
 | [`core/leave_logic.py`](core/leave_logic.py) | 假勤的**純規則**：工作日／時數換算（8h＝1 天）、credit 餘額與 FIFO 分配、消假模式（free／apply／locked）、提前通知警告、政府行事曆 CSV | 無 I/O；時數一律由起迄／時段算，員工端不收 client 給的 hours（見「不要動的地方」） |
@@ -1285,7 +1285,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **捆鑰匙（2026-09-08 階段 4）**：`postprod`／`preprod`／`hr` 三把捆＝`core.auth.MODULE_BUNDLES` 的成員；帳號與範本存捆、`expand_modules` 在發 token／存帳號／回填時展開成「捆＋成員」。
   守衛請繼續用**成員鍵**（`check_admin_or_module(request,'footage')`），不要拿捆當守衛鍵；新增可勾選模組仍是三處同步（`ALL_MODULES`／`PERMISSION_GROUPS`／`MODULE_LABELS` 前後端），成員鍵不進 `ALL_MODULES`（`test_module_bundles` 釘住）。
 - **權限三個正本（2026-09-08 稽核後）**：`core.auth.MODULE_LABELS`（鑰匙中文名，403 detail 用它說「缺哪把」；`test_batch3_one_ruler` 釘鍵集＝ALL_MODULES）、
-  `core/rbac_templates.py`（合夥／在職／兼職預設鑰匙；`normalize` 會自動配 `me_today_zone` 總開關與 `money_view`）、`core/public_access.py`（對外免登入面的登記表，`surface_gate` 只掛一處）。
+  `core/rbac_templates.py`（合夥／在職／兼職預設鑰匙；`normalize` 會自動配 `me_today_zone` 總開關與 `money_view`）、`core/public_access.py`（對外免登入面的登記表；設定存共用 DB，NAS 對外容器吃同一份）。
   **母帳寫入一把尺**：發票／請款／收支寫入、匯入、發票影像都是 `require_entity('parent', full)`＝crm_invoices＋money_view，跟讀取相同——不要再用 `_check_finance_auth` 單獨守寫入。
   **routers/crm 還能管理員限定的端點只有白名單那 27 支**（`tests/unit/test_batch3_one_ruler.ADMIN_ONLY_CRM`）：新端點請用分頁鑰匙守衛，真的要管理員就 owner 拍板進清單。
 - **兼職排班不走 own-scope 的 `/timesheets/mine/*`**（那邊絕不收 client 給的 staff_id）：另一組 `/timesheets/plan-for/{staff_id}/*`，
@@ -1300,10 +1300,12 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **`merge_plan` 不併沒有專案的列**：鍵會塌成 `("", 分類, 階段)`，不相干的兩件事被併成一列、第二列被刪。
 - **報價單無名分類只跟緊鄰的無名列同組**：`_group_items` 的「同名就是同一組」只適用於有名字的組，
   不然舊報價單（整批沒填分類）印出來的順序會跟輸入的不一樣。
-- **`frontend/my.html` 已經 2,2xx 行，超過單次讀取上限**：改它一定要 offset／limit 分段讀，
-  不要整檔讀了就動手（會被靜默截掉四分之一）。而且 `tests/unit/test_files_stay_readable.py`
-  只掃 `.py`／`.js`，**html 不在它的守備範圍**，所以它是無聲越線的 —— 下一個大改動之前先把
-  第一區（今天與這週）的 script 拆到 `frontend/js/my/` 再說。`frontend/showcase-edit.html` 同樣超標。
+- **`frontend/my.html` 的 script 已拆到 `frontend/js/my/`（2026-09-09，2,448→490 行）**：七支**傳統** `<script src>` 依序載入
+  （shell → cards → cards-hr → zone1 → week-plan → parttime → team-week），順序＝原本的執行順序，改順序就壞。
+  **刻意不是 ES module**：傳統 script 之間共用同一個全域詞法環境，頂層 `const`／`function` 跨檔可見，所以拆檔零改寫；
+  改成 module 的話每支變獨立作用域，幾百個跨檔引用都要 import／export。測試讀它們用 `tests/unit/_srcscan.my_page_src()`
+  （my.html＋七支串起來，同 `finance_src` 那套慣例），**不要**在測試裡自己 `repo_src("frontend/my.html")` 找函式。
+  `frontend/showcase-edit.html` 仍超過單次讀取上限，改它要 offset／limit 分段讀。
 - **報價單版面**：owner 逐項拍板過（無公司抬頭區塊、無上下色帶、灰表頭、總額無粗線、備註在結算下方、
   頁尾只留數字）。要調版面先開示範頁比對，別直接改模板。
 - **`core.quotation_pdf.PDF_MARGIN` 與模板 `@page` 必須一致**：模板還用它算「單頁時簽章貼底」的

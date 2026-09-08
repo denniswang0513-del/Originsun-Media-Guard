@@ -443,7 +443,7 @@ async def refreshed_token_if_drifted(payload: Optional[dict], user: Optional[dic
 async def register_config(request: Request):
     """註冊頁題目設定（公開）— 只回選項不回答案，正解比對在 /register 伺服端。"""
     from core.public_access import surface_gate
-    surface_gate(request)   # 公開區「員工自助註冊」關閉 → 404
+    await surface_gate(request)   # 公開區「員工自助註冊」關閉 → 404
     return {"company_choices": list(_REGISTER_COMPANY_CHOICES)}
 
 
@@ -454,7 +454,7 @@ async def register(req: RegisterRequest, request: Request):
     新帳號 access_level=1 + 只有 me_profile（基本資料卡），其餘功能管理員之後在使用者管理逐項開通。
     成功直接回 login 同形狀（自動登入）。"""
     from core.public_access import surface_gate
-    surface_gate(request)
+    await surface_gate(request)
     import time as _time
     ip = (request.client.host if request.client else "") or "?"
     rec = _register_fails.get(ip)
@@ -1063,10 +1063,12 @@ async def _public_link_counts() -> dict:
 
 @router.get("/public-access")
 async def get_public_access(request: Request):
-    """管理員：登記表（每一面的名稱／誰在用／怎麼進／支援模式）＋目前模式＋有效連結數。"""
+    """管理員：登記表（每一面的名稱／誰在用／怎麼進／支援模式）＋目前模式＋有效連結數。
+    模式走 `current_modes()`（＝守衛用的同一條讀取路徑：DB 正本 → settings.json → 預設），
+    畫面看到的就是對外真的在生效的那一份。"""
     _check_admin(request)
-    from core.public_access import MODE_LABELS, PUBLIC_SURFACES, normalize
-    modes = normalize(load_settings().get("public_access"))
+    from core.public_access import MODE_LABELS, PUBLIC_SURFACES, current_modes
+    modes = await current_modes()
     counts = await _public_link_counts()
     return {"surfaces": [{**{k: v for k, v in s.items() if k != "prefixes"}, "mode": modes[s["key"]], "links": counts.get(s["key"])}
                          for s in PUBLIC_SURFACES],
@@ -1075,12 +1077,13 @@ async def get_public_access(request: Request):
 
 @router.put("/public-access")
 async def put_public_access(body: PublicAccessPayload, request: Request):
-    """管理員：存模式。normalize 只留登記表的鍵與那一面支援的模式；守衛每次讀設定，改了立即生效。"""
+    """管理員：存模式。normalize 只留登記表的鍵與那一面支援的模式。
+    寫**共用 Postgres**（唯一正本）→ master 立即失效自己的快取；NAS 對外容器最多 25 秒追上。
+    不再寫 settings.json：兩份正本會讓「主機關了、對外那台還開著」重演。"""
     _check_admin(request)
-    from config import save_settings
-    from core.public_access import normalize
-    modes = normalize(body.modes)
-    save_settings({"public_access": modes})
+    from core.auth import current_username
+    from core.public_access import save_modes
+    modes = await save_modes(body.modes, updated_by=current_username(request))
     return {"modes": modes}
 
 

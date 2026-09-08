@@ -10,7 +10,7 @@ from types import SimpleNamespace as NS
 
 from core.milestone_logic import (RECENT_DAYS, default_due, is_carried, is_late, milestone_dict, project_sort_key,
                                   shifted_week, sort_projects)
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, my_page_src, repo_src
 
 
 def test_due_defaults_to_friday_and_carry_late_flags():
@@ -68,7 +68,7 @@ def test_router_is_registered_and_reads_need_a_key():
 
 
 def test_employee_page_has_button_band_cells_and_modal():
-    html = repo_src("frontend/my.html")
+    html = my_page_src()
     assert 'data-z1="ms-open">設定專案里程碑' in html
     assert "/api/v1/milestones/week?start=" in html and "_msBandHtml(ms)" in html
     assert "msOf(name, iso).forEach" in html, "負責人那格畫里程碑小卡"

@@ -248,4 +248,4 @@
 | 11 | 三支發版 GET＋收據端點的守衛插在 docstring 前 | 移到 docstring 後 |
 | 12 | 階段 4 回填迴圈永遠 0 筆（讀帳號咽喉已展開） | 拿掉 |
 
-**已知未修**：公開區「關閉」只對主機生效——掛在 NAS 對外容器的 public_router（影像紀錄、雜支、提案分享）讀的是容器自己的 settings.json（沒有 public_access）。修法＝把 public_access 改存共用 Postgres（website settings singleton 那張表），`surface_gate` 讀 DB 快取。畫面上已標註。
+**已修**（原「公開區『關閉』只對主機生效」）：public_access 改存共用 Postgres —— `website_settings` 的 `public_access` 這一筆（值＝{面: 模式}），master 與 NAS 對外容器讀同一份。`core.public_access.current_modes()` 是唯一讀取路徑（DB → 舊 settings.json → 登記表預設；第一次讀到 DB 沒那筆但 settings.json 有就搬進 DB），模組層 25 秒 TTL 快取，`PUT /auth/public-access` 寫 DB 並 `invalidate()`（本機立即、NAS 容器 25 秒內追上）。**DB 不可用時回預設不擋人**（資料庫離線不該讓對外頁全部 404）；`surface_gate` 因此改成 async，手動呼叫的 `/q/`、`/e/`、`/register` 都改 `await`。

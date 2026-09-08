@@ -12,7 +12,7 @@
 import re
 
 from routers.api_system import _ADMIN_ONLY_SUBKEYS, _SECRET_KEYS, _redact_settings
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, my_page_src, repo_src
 
 
 def test_settings_load_redacts_more_for_non_admin_and_keeps_them_for_admin():
@@ -71,7 +71,7 @@ def test_api_key_listing_never_returns_raw_key():
 
 def test_frontend_one_liners():
     assert "opts.method === 'PUT' || opts.method === 'DELETE'" in repo_src("frontend/js/auth/login-modal.js"), "機器卡 PUT /agents/{id} 要帶 token"
-    html = repo_src("frontend/my.html")
+    html = my_page_src()
     assert "body = { note };" in html and "cancel_note: note" not in html
 
 

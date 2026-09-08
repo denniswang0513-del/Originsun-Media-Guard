@@ -2,7 +2,7 @@
 """今天的專案紀錄「儲存草稿」（owner 2026-09-07）：有內容就存、沒時數＝pending 草稿、彙整只算 hours>0、
 近 30 天的草稿日期在今天那條提醒。"""
 import pytest
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, my_page_src, repo_src
 
 
 def test_pending_state_and_blank_row_guard():
@@ -37,7 +37,7 @@ def test_sheet_saves_any_content_and_marks_drafts():
 
 
 def test_workspace_strip_reminds_incomplete_days_and_import_buttons_are_gone():
-    html = repo_src("frontend/my.html")
+    html = my_page_src()
     assert "/api/v1/timesheets/mine/incomplete?days=30" in html
     assert 'data-z1="day-goto"' in html and "專案紀錄未完成" in html
     assert 'data-z1="save">儲存草稿</button>' in html

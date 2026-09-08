@@ -46,10 +46,8 @@ EXEMPT = {
         "收支明細主畫面（清單＋編輯＋匯入三合一）",
     # 2026-09-08：掃描擴到 .html 才發現這兩頁早就越線了 —— 它們不是「新越線」，是本來就在
     # 界外而沒有東西在看。兩頁都是「整支 SPA 寫在單一 <script> 裡」的獨立頁。
-    "frontend/my.html":
-        "員工工作台：第一區（今天的專案紀錄／我的一週／團隊的一週／專案查詢）＋假勤＋零用金＋週記全在一支"
-        " inline script。拆法：把第一區那段搬成 js/my/zone1.js（非 module，維持全域語意即可平移），"
-        "但十來支源碼掃描測試是對著 frontend/my.html 斷言字串的，要一起改 —— 下次大改這一頁時一起做。",
+    # frontend/my.html 2026-09-09 已拆完（~1,970 行 inline script → frontend/js/my/ 七支
+    # 傳統 script，剩 490 行）；十幾支源碼掃描測試改讀 _srcscan.my_page_src()。
     "frontend/showcase-edit.html":
         "作品編輯器（七區編號＋檢查清單＋發布時間線）同款單頁 inline script；先記帳，等它下次要大改再拆。",
 }

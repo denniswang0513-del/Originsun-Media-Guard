@@ -15,15 +15,14 @@
 """
 import re
 
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, my_page_src, repo_src
 
-MY = "frontend/my.html"
 SRC = "routers/crm/benefits.py"
 
 
 def _card():
     """卡片的整段程式碼。"""
-    s = repo_src(MY)
+    s = my_page_src()
     i = s.index("function cardBenefits(")
     j = s.index("\nfunction ", i + 10)
     return s[i:j]
@@ -134,7 +133,7 @@ def test_unbound_account_is_explained_not_shown_as_an_error():
     那不是錯誤，是「這張卡對你沒有內容」。後端 detail 早就寫得清清楚楚，
     前端卻丟掉只印狀態碼（跟 503 被印成「需要權限」同一種病）。
     """
-    my = repo_src(MY)
+    my = my_page_src()
     assert "cardBenefits(ws.bound)" in my, "卡片不知道帳號有沒有綁人"
     c = _card()
     assert "bound === false" in c, "沒有短路 —— 還是會去打那支必定 409 的端點"
@@ -149,7 +148,7 @@ def test_backend_detail_is_surfaced_not_swallowed():
 
 def test_status_fallback_covers_the_meaningful_codes():
     """沒有 detail 時才落到對照表；503 一樣不能說成權限問題。"""
-    my = repo_src(MY)
+    my = my_page_src()
     f = my[my.index("function failText("):]
     f = f[:f.index(chr(10) + "}")]
     for code in ("=== 0", "=== 401", "=== 403", "=== 503", ">= 500"):
@@ -164,7 +163,7 @@ def test_status_fallback_covers_the_meaningful_codes():
 def test_card_is_gated_by_me_benefits_and_the_key_is_registered():
     """卡片由 me_benefits 閘住 —— 這個 key 沒有在三處註冊的話，
     owner 在使用者管理裡根本勾不到它（於是誰都看不到，生產上就是這樣）。"""
-    assert 'ws.allowed.includes("me_benefits")' in repo_src(MY)
+    assert 'ws.allowed.includes("me_benefits")' in my_page_src()
     assert "'me_benefits'," in repo_src("core/auth.py")
     assert "me_benefits" in repo_src("frontend/js/shared/tab-config.js")
     assert "me_benefits:'我的福委會'" in repo_src("frontend/js/admin/user-mgmt.js")

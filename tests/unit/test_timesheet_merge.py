@@ -5,7 +5,7 @@
 端點 /timesheets/mine/merge（dry_run 預覽）、/mine/merge/undo、/mine/merge/last；桌機員工頁與手機工作紀錄都有鈕。
 """
 from core.hr_logic import merge_plan
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, my_page_src, repo_src
 
 
 def _r(i, **kw):
@@ -82,7 +82,7 @@ def test_endpoints_and_both_frontends():
     assert src.index('@router.post("/mine/merge")') < src.index('@router.put("/mine/{row_id}")')   # 不能被當 row_id
     for fn in ("async def my_merge_day(", "async def my_merge_undo(", "async def my_last_merge("):
         assert "_mine_ident(request)" in func_body(src, fn), fn
-    html = repo_src("frontend/my.html")
+    html = my_page_src()
     assert 'data-z1="merge"' in html and 'id="z1-unmerge"' in html
     assert "/api/v1/timesheets/mine/merge/last?date=" in html and 'dry_run: true' in html and "/api/v1/timesheets/mine/merge/undo" in html
     mob = js_code_only(repo_src("frontend/m/views/worklog.js"))

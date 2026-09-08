@@ -5,7 +5,7 @@
 只碰計畫列、時數不收；不走 own-scope 的 /mine/*（那邊絕不收 client 給的 staff_id），另開 /timesheets/plan-for/*。
 里程碑（按週）：專案檔案（/timesheets/project 帶 milestone_weeks）與 CRM 專案詳情（動態 import 同一支畫法）。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, my_page_src, repo_src
 
 TS = repo_src("routers/api_timesheets.py")
 
@@ -46,7 +46,7 @@ def test_plan_for_endpoints_only_touch_plan_rows_and_never_take_hours():
 
 
 def test_workspace_has_the_parttime_window():
-    html = repo_src("frontend/my.html")
+    html = my_page_src()
     assert 'WS.allowed.includes("me_plan_parttime")' in html and 'data-z1="pt-open">兼職排班</button>' in html
     for act in ("pt-open", "pt-close", "pt-week", "pt-add", "pt-add-ok", "pt-add-cancel", "pt-del", "pt-defer", "pt-from-ms", "pt-copy-last"):
         assert f'act === "{act}"' in html, act
