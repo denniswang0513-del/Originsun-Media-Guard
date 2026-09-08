@@ -175,6 +175,8 @@
 
 ### 第二批：「看得到做得到」——照分頁鑰匙放行（約 1.5 天；這批直接消掉同事的 403）
 
+✅ 已做（2026-09-08）。實作備註：雜支寫入歸 crm_projects（owner）、收據清單另要 money_view；零用金收據根目錄 GET 給 finance_approve；hr 核准類留管理員；benefits 讀取＝money_view＋三把任一；timesheets summary 抹私帳欄位（suggested_hours、candidates）；settings/save 依頂層鍵分流（非管理員只准寫那組鍵）；手機 can_invoice／can_expense 兩旗標；前端藏鈕用「明確 false 才藏」讓 CF 快取的舊元件照舊。四支新測試檔 test_batch2_*.py 釘住。
+
 | 分頁鑰匙 | 放行的端點 | 仍留管理員（前端藏鈕） |
 |---|---|---|
 | `crm_staff` | 新增／編輯／履歷／照片／作品集讀寫／編輯連結；`GET portfolio`、`rate-history`（配 money_view） | 刪除、匯入 CSV |
