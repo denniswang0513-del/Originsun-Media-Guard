@@ -818,8 +818,14 @@ async def _sync_linked_proposals(session, project, old_status: str,
 async def update_project(project_id: str, req: CrmProjectPatchPayload, request: Request):
     """Partial update — only fields the client included in the body are
     touched. The cell-by-cell auto-save sends just the dirty field, so a
-    full-payload schema would 422 on missing name/client_id."""
-    _check_auth(request)
+    full-payload schema would 422 on missing name/client_id.
+
+    守衛（2026-09-08，蘇家弘存「編輯專案」被 403）：專案本體的**改**跟建／刪同一把 `crm_projects`
+    （owner 2026-08-15 拍板「專案本體與派工的增刪 —— 模組級」，當時只改了 POST／DELETE，PUT 留在
+    管理員限定 —— 有模組的人看得到編輯視窗、按儲存就「權限不足」，又是「權限是空頭支票」那個形狀）。
+    例外兩條照舊：**推進階段**仍是 core.project_flow.ADVANCE_MODULES 的政策（目前＝管理員），
+    表單整包送上來的 status 只要跟現況不同就再過一次那道門；私帳案的金額欄仍只有帳本主人能寫。"""
+    _check_project_write_auth(request)
     _require_db()
     factory = await _get_factory()
 
@@ -830,6 +836,11 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
         project = await session.get(CrmProject, project_id)
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
+
+        # 階段變更走 PATCH /status 的同一道門（ADVANCE_MODULES）：編輯視窗整包送 status，
+        # 沒改就放行；改了才要求推進階段的權限，不然 PUT 就是繞過那條政策的後門。
+        if "status" in update_data and (update_data["status"] or "") != (project.status or ""):
+            _check_status_auth(request)
 
         # 🔴 私帳案的金額欄只有 mine scope 能寫。推送進管線（crm_pushed）後
         # 同事看得到這一列 —— 讀那側金額有抹（redact_mine），寫這側原本是零
