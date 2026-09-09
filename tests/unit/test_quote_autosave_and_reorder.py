@@ -51,8 +51,12 @@ def test_autosave_is_new_quote_only_and_survives_a_click_away():
     assert "getElementById('quote-btn-cancel').addEventListener('click', closeModal)" in init
     assert "if (e.target === e.currentTarget) closeModal();" in init
     html = repo_src(HTML)
-    assert "getElementById('quote-modal').style.display='none'" not in html, \
-        "報價彈窗不准再用 inline onclick 直接關（會跳過自動存的收尾）"
+    # 🔴 ✕／取消要**同時**有 id（新 js 綁 closeModal）與 inline onclick（給舊快取 js）。
+    #    CF 給 .js 4 小時、html 即時 —— 那一輪的舊 js 不會綁這兩個 id，只留 id 的話
+    #    兩顆鈕完全按不動（只有點外面能關）。新 js 兩個都會跑，closeModal 照樣補送。
+    #    跟 quote-f-terms 相容殼同一個到期條件：**發版滿一輪之後**兩者一起拿掉。
+    assert html.count("getElementById('quote-modal').style.display='none'") == 2, \
+        "✕ 與取消各要留一個 inline onclick 當舊快取 js 的退路（發版滿一輪後可刪）"
 
 
 def test_project_name_typing_does_not_open_a_project_per_keystroke():

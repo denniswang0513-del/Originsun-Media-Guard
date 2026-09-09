@@ -243,3 +243,59 @@ def test_persist_now_never_commits_a_status_the_user_did_not_save():
     upd = repo_src("routers/crm/quotes.py")
     upd = upd[upd.index("async def update_quotation("):]
     assert 'if "status" in sent:' in upd[:1600]
+
+
+def test_patch_is_not_applied_when_the_draft_drifted_while_waiting():
+    """🔴 等 AI 的 35–50 秒裡使用者仍能改表單 —— patch 的編號是照「有描述的項目」數的，
+    中途加／刪／換順序之後再套，「改第 3 項」就會靜默落在別人身上。
+
+    做法是送出時記一份指紋、回來前比對；對不上就整則不套（那則的問題與待定價仍然看得到）。
+    只認「有哪些項目、什麼順序」——改單價不影響編號，不用擋。
+    """
+    for path, fp, base in (("frontend/tabs/crm/crm-quotes.js", "_itemsFingerprint()", "_chatBaseline"),
+                           ("frontend/m/views/quote-chat.js", "fingerprint()", "S.baseline")):
+        js = js_code_only(repo_src(path))
+        assert "filter(it => it.description).map(it => it.description)" in js, path
+        apply_ = js_func_body(js, "function _applyNewChatPatches()" if "crm-quotes" in path
+                              else "async function applyNew()")
+        assert f"{base} && {fp} !== {base}" in apply_, f"{path}：回來前要比對指紋"
+        assert "if (drifted) { m.skipped = true; continue; }" in apply_, f"{path}：對不上就整則不套"
+        assert "m.skipped" in js, f"{path}：泡泡上要標出來，不然使用者以為套用了"
+
+
+def test_history_import_walks_oldest_first():
+    """🔴 _upsert_prices 是「同鍵後蓋前」—— 沒排序的話 Postgres 剛好最後回哪張就是誰的價，
+    2023 年的可能蓋掉 2026 年的，而且 last_used_at 全被寫成同一個 now。"""
+    src = repo_src("routers/crm/quotes.py")
+    body = src[src.index("async def import_price_items_from_history("):]
+    body = body[:body.index("# ── Quotation Template Endpoints")]
+    assert "order_by(" in body and "quote_date.asc()" in body, "由舊到新，最新那張最後寫"
+
+
+def test_image_sweep_matches_the_real_token_shape():
+    """🔴 LIKE '%paste:%' 比真正的 token 寬：對話裡只是提到 "paste:" 的草稿會永遠符合、
+    purge 每次回 0，starvation 換個樣子繼續。"""
+    src = repo_src("core/scheduler.py")
+    assert r'op("~")(r"paste:[0-9a-f]{32}\.webp")' in src
+    assert 'like("%paste:%")' not in src
+    # 跟 forget_images 換掉的形狀要一致，否則掃到了也清不掉
+    assert r'paste:([0-9a-f]{32})\.webp' in repo_src("core/quote_chat.py")
+
+
+def test_project_page_delete_fetches_the_quote_before_confirming():
+    """🔴 用 `{ id }` 當 fallback 的話 status 是 undefined，deleteConfirmSpec 會當成草稿，
+    已寄送的那道「打字確認案名」就被跳過了。"""
+    js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-quotes.js"))
+    assert "q = await _fetch('/quotations/' + quoteId);" in js
+    assert "{ id: quoteId };" not in js, "不准再用只有 id 的殼當 fallback"
+    assert "confirmQuoteDelete(q)" in js
+
+
+def test_run_stream_drains_before_reporting_and_closes_its_pipes():
+    """🔴 帶 timeout 的 join 會把還沒讀完的尾巴丟掉，而且會在別的執行緒還在 append
+    的時候去 join out_lines。行程結束＝管道一定會 EOF，join 不需要 timeout。"""
+    src = repo_src("core/subproc.py")
+    fin = src[src.index("def _finish("):src.index("    return await asyncio.to_thread(_run)", src.index("def _finish("))]
+    assert "t.join()" in fin and "t.join(timeout" not in fin
+    assert "pipe.close()" in fin, "run_capture 靠 communicate() 免費拿到，這裡要自己關"
+    assert 'err_override or b"".join(err_buf)' in fin, "stderr 要 join 之後才串（_drain_err 可能還沒讀完）"

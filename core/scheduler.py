@@ -494,7 +494,10 @@ async def _quote_chat_image_sweep() -> None:
                     # 🔴 只挑「對話裡真的還有截圖」的：清過的列 chat 仍不是 NULL，
                     #    而清理不會動 updated_at —— 光靠上面兩條，清過的草稿每天都會
                     #    再被撈一次，把 limit 的名額佔滿，新過期的那些就永遠輪不到。
-                    cast(CrmQuotation.chat, Text).like("%paste:%"),
+                    #    這裡用 POSIX regex 對**真正的 token 形狀**（forget_images 換掉的
+                    #    也是這個形狀）—— 用 LIKE '%paste:%' 的話，對話裡只是提到 "paste:"
+                    #    的草稿會永遠符合、purge 每次回 0，starvation 換個樣子繼續。
+                    cast(CrmQuotation.chat, Text).op("~")(r"paste:[0-9a-f]{32}\.webp"),
                     CrmQuotation.updated_at < cutoff,
                 ).limit(_SWEEP_BATCH)
             )).scalars().all()

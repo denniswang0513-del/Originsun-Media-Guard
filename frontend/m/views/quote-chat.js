@@ -39,6 +39,9 @@ const POLL_EVERY_MS = 1000;
 let S = null;          // 這次對話的狀態（關掉就丟）
 
 const flat = () => flattenQuoteGroups(S.groups);
+// 送出當下「AI 會看到的那份項目」的指紋：patch 的編號是照有描述的項目數的，
+// 等回覆的 35–50 秒裡草稿被改過就不能套（編號會落在別人身上，而且完全靜默）。
+const fingerprint = () => JSON.stringify(flat().filter(it => it.description).map(it => it.description));
 const termsText = () => S.terms.map(t => String(t).trim()).filter(Boolean).join('\n');
 
 
@@ -54,6 +57,8 @@ function bubble(m) {
         extras.push(`<div class="qc-np">待定價：${m.needs_price.map(esc).join('、')}</div>`);
     if (m.applied)
         extras.push(`<div class="qc-ap">已套進這張報價：新增 ${m.applied.added}、修改 ${m.applied.updated}、刪除 ${m.applied.removed}、備註 +${m.applied.terms}</div>`);
+    if (m.skipped)
+        extras.push(`<div class="qc-np">你在等回覆時改了項目，這一則沒有自動套用（編號會對不上）</div>`);
     // 截圖 token 在手機上不渲染縮圖（圖床網址要另外拿），換成看得懂的字
     const text = String(m.text || '').replace(/!?\[[^\]]*\]\(paste:[0-9a-f]{32}\.webp\)|paste:[0-9a-f]{32}\.webp/g, '（截圖）');
     return `<div class="qc-msg ${m.role === 'user' ? 'me' : 'ai'}">
@@ -144,15 +149,18 @@ async function save() {
 
 /** 把還沒套過的 AI patch 套進這張報價並存回去。同一則只套一次。 */
 async function applyNew() {
+    const drifted = S.baseline && fingerprint() !== S.baseline;
     let touched = false;
     for (let i = S.applied; i < S.chat.length; i++) {
         const m = S.chat[i];
         if (m.role !== 'ai' || !m.patch) continue;
+        if (drifted) { m.skipped = true; continue; }
         const r = applyQuotePatch(S.groups, S.terms, { ...m.patch, terms_add: m.terms_add || [] });
         S.groups = r.groups; S.terms = r.terms; m.applied = r.applied;
         touched = true;
     }
     S.applied = S.chat.length;
+    if (drifted) toast('你在等回覆時改了項目，這一則沒有自動套用', 'err');
     if (!touched) return;
     render();
     try { await save(); } catch (e) { toast('存回報價失敗：' + e.message, 'err'); }
@@ -206,6 +214,7 @@ async function send() {
     if (!S) return;                              // await 中間視窗被關掉
     ta.value = '';
     S.busy = true; S.partial = ''; S.stage = ''; S.since = Date.now();
+    S.baseline = fingerprint();      // 回來之前草稿被改過就不套 patch
     render();
     const gen = S.gen;
     try {
@@ -292,7 +301,7 @@ export async function openQuoteChat(quotationId, onClose) {
         applied: chat.length,          // 歷史的 patch 早就在資料裡了，不再套一次
         groups: groupQuoteItems(q.items || []),
         terms: String(q.terms || '').split('\n').map(t => t.trim()).filter(Boolean),
-        busy: false, partial: '', stage: '', since: 0, gen: (S ? S.gen : 0) + 1,
+        busy: false, partial: '', stage: '', since: 0, baseline: '', gen: (S ? S.gen : 0) + 1,
     };
 
     const ov = shell(`${q.project_name || '（未連專案）'} v${q.version}`);

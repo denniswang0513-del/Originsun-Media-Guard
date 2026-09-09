@@ -135,15 +135,26 @@ async def run_stream(
         reader.start()
         threads.append(reader)
 
+        def _finish(code: int, err_override: bytes = b"") -> tuple:
+            # 行程已經結束＝管道一定會 EOF，所以 join **不帶 timeout**：帶了的話尾巴那段
+            # 還沒讀完就被丟掉，而且會在別的執行緒還在 append 的時候去 join out_lines。
+            for t in threads:
+                t.join()
+            for pipe in (p.stdout, p.stderr, p.stdin):
+                try:
+                    if pipe:
+                        pipe.close()        # run_capture 靠 communicate() 免費拿到這件事
+                except OSError:
+                    pass
+            # err_buf 一定要**join 之後**才串：_drain_err 可能還沒讀完
+            return code, b"".join(out_lines), (err_override or b"".join(err_buf))
+
         try:
             rc = p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             p.kill()
             p.wait()
-            reader.join(timeout=2)          # 收完已經吐出來的，再回報
-            return -1, b"".join(out_lines), f"timeout after {timeout}s".encode()
-        for t in threads:
-            t.join(timeout=5)               # 讀完管道剩下的（行程結束了，很快）
-        return rc, b"".join(out_lines), b"".join(err_buf)
+            return _finish(-1, f"timeout after {timeout}s".encode())
+        return _finish(rc)
 
     return await asyncio.to_thread(_run)

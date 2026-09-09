@@ -77,7 +77,12 @@
   <div class="crm-modal quote-modal">
     <div class="crm-modal-header">
       <h3 id="quote-modal-title">新增報價</h3>
-      <button id="quote-modal-close" class="crm-detail-close">&#x2715;</button>
+      <!-- 🔴 inline onclick 是給**舊快取 js** 的（CF 給 .js 4 小時、html 即時）：
+           那一輪的 js 不會綁這個 id，沒有它這顆鈕就完全按不動。新 js 兩個都會跑，
+           closeModal 照樣把沒存的補送完（inline 只是先把它藏起來）。
+           跟 quote-f-terms 相容殼同一個到期條件：發版滿一輪就可以拿掉。 -->
+      <button id="quote-modal-close" class="crm-detail-close"
+              onclick="document.getElementById('quote-modal').style.display='none'">&#x2715;</button>
     </div>
     <div class="crm-modal-body">
       <!-- 兩個分頁：手填 / 和 AI 一起完成（docs/QUOTE_ASSISTANT_PLAN.md）。
@@ -216,7 +221,8 @@
     <div class="crm-modal-footer">
       <span id="quote-auto-note" class="quote-auto-note"></span>
       <button id="quote-btn-as-template" class="crm-btn crm-btn-secondary">存成範本</button>
-      <button id="quote-btn-cancel" class="crm-btn crm-btn-secondary">取消</button>
+      <button id="quote-btn-cancel" class="crm-btn crm-btn-secondary"
+              onclick="document.getElementById('quote-modal').style.display='none'">取消</button>
       <button id="quote-btn-save" class="crm-btn crm-btn-primary">儲存</button>
     </div>
   </div>

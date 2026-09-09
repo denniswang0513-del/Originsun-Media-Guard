@@ -960,8 +960,14 @@ async def import_price_items_from_history(request: Request):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
+        # 🔴 一定要由舊到新：_upsert_prices 是「同鍵後蓋前」，沒有排序的話
+        #    Postgres 剛好最後回哪一張，那張的價就是留下來的 —— 2023 年的價可能蓋掉 2026 年的。
+        #    last_used_at 也會被寫成同一個 now，AI 提示賴以排序的「最近用過」跟著失去意義。
         qids = (await session.execute(
-            select(CrmQuotation.id).where(CrmQuotation.status != QUOTE_STATUSES[0])
+            select(CrmQuotation.id)
+            .where(CrmQuotation.status != QUOTE_STATUSES[0])
+            .order_by(CrmQuotation.quote_date.asc().nullsfirst(),
+                      CrmQuotation.created_at.asc().nullsfirst())
         )).scalars().all()
         added = updated = 0
         for qid in qids:

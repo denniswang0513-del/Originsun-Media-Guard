@@ -533,6 +533,7 @@ let _chatGen = 0;          // 開窗世代：關窗／換一張報價後，舊�
 let _chatPartial = '';     // 串流到目前為止的 reply（後端 GET /chat 的 partial）
 let _chatStage = '';       // 'queued'（卡在閘門）／'running'（claude 真的在跑）
 let _chatSince = 0;        // 這一輪按下送出的時間（等待文字要顯示秒數）
+let _chatBaseline = '';    // 送出當下的項目指紋（見 _itemsFingerprint）
 // 一輪最久等多久才放棄。後端 `_CLAUDE_TIMEOUT_SEC` 是 180 秒，前面還可能卡在
 // `_QUOTE_CHAT_GATE`（只有 2 個位子）—— 跟 180 一樣長的話，一排隊就一定先在前端
 // 喊逾時，而那則回覆其實還在路上、之後也不會再被套用（重開時 _chatApplied 直接跳到底）。
@@ -554,6 +555,9 @@ function _chatBubble(m) {
     if (m.applied)     // 只在畫面上標，不寫回後端
         extras.push(`<div class="quote-chat-ap">已套進草稿：新增 ${m.applied.added}`
             + `、修改 ${m.applied.updated}、刪除 ${m.applied.removed}、備註 +${m.applied.terms}</div>`);
+    if (m.skipped)
+        extras.push(`<div class="quote-chat-np">你在等回覆時改了項目，這一則沒有自動套用`
+            + `（編號會對不上）—— 請照上面的內容自己改，或再問一次</div>`);
     // renderRich＝跳脫＋把貼圖 token 換成縮圖（paste-image.js 同一份契約）
     return `<div class="quote-chat-msg ${m.role === 'user' ? 'user' : 'ai'}">
         <div class="quote-chat-who">${who}<span class="quote-chat-at">${_esc(at)}</span></div>
@@ -616,6 +620,17 @@ function _renderChatSummary() {
     el.querySelector('#quote-fill-prices')?.addEventListener('click', _fillPricesFromBook);
 }
 
+/** 送出當下「AI 會看到的那份項目」的指紋。
+ *
+ * 🔴 patch 的編號是照**攤平後有描述的項目**數的。等 AI 的 35–50 秒裡，使用者仍然可以
+ *    切回「報價內容」加一列、刪一列或拖曳換順序 —— 那之後再套 patch，「改第 3 項」就會
+ *    落在別人身上，而且完全靜默。所以送出時記一份指紋，回來之前先比對。
+ *    只認「有哪些項目、什麼順序」：改單價不影響編號，不用擋。
+ */
+function _itemsFingerprint() {
+    return JSON.stringify(_flatItems().filter(it => it.description).map(it => it.description));
+}
+
 /** 立刻把畫面上的內容寫進 DB（AI 動過草稿、或送出前要讓 AI 讀到最新的順序）。
  *
  * 🔴 `_autoOn` 只管「打字要不要觸發 debounce」——編輯既有報價時它是關的
@@ -645,15 +660,23 @@ async function _persistNow(note) {
 
 /** 把還沒套過的 AI patch 套進草稿（純函式在 js/shared/quote-patch.js） */
 function _applyNewChatPatches() {
+    // 🔴 送出之後草稿被改過就不套：編號對不上，硬套會靜默改到別的項目。
+    //    那一則 AI 的話仍然留在對話裡（它問的問題、待定價清單還是有用的）。
+    const drifted = _chatBaseline && _itemsFingerprint() !== _chatBaseline;
     let touched = false;
     for (let i = _chatApplied; i < _chat.length; i++) {
         const m = _chat[i];
         if (m.role !== 'ai' || !m.patch) continue;
+        if (drifted) { m.skipped = true; continue; }
         const r = applyQuotePatch(_groups, _terms, { ...m.patch, terms_add: m.terms_add || [] });
         _groups = r.groups; _terms = r.terms; m.applied = r.applied;
         touched = true;
     }
     _chatApplied = _chat.length;
+    if (drifted) {
+        _autoNote('你在等回覆時改了項目，這一則的修改沒有自動套用（編號會對不上）', 'err');
+        _renderChatSummary();
+    }
     if (touched) {
         _renderItemRows(); _renderTermRows(); _recalcTotals();
         // 套完就存回去（單一寫入者是這邊）。排進 _autoChain，關窗時會被 await 到
@@ -721,6 +744,7 @@ async function _sendChat() {
     ta.value = '';
     document.getElementById('quote-chat-thumbs').innerHTML = '';
     _chatBusy = true; _chatPartial = ''; _chatStage = ''; _chatSince = Date.now();
+    _chatBaseline = _itemsFingerprint();       // 回來之前草稿被改過就不套 patch
     _renderChat();
     try {
         const model = document.getElementById('quote-chat-model')?.value || '';
@@ -953,7 +977,8 @@ async function openModal(quotation = null, projectId = null) {
     _setItems(q.items || [], { blankIfEmpty: !quotation });   // 新增：先給一個空的大項目
     _recalcTotals();
 
-    _chat = []; _chatApplied = 0; _chatBusy = false; _chatPartial = ''; _chatGen++;   // 舊的輪詢看到世代變了就收工
+    _chat = []; _chatApplied = 0; _chatBusy = false; _chatPartial = ''; _chatBaseline = '';
+    _chatGen++;                                // 舊的輪詢看到世代變了就收工
     _setPane('form');
     if (_editingId) _loadChat();
 

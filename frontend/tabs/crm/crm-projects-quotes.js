@@ -191,8 +191,13 @@ function initQuoteHandlers() {
     window._pqDelete = async (quoteId) => {
         // 確認規則跟報價分頁／手機版同一份（js/shared/quote-delete.js）：已寄送／已簽核要
         // 打字確認案名 —— 那些一刪，客戶手上的 /q/{code} 當場變 404，而且我們不會知道。
-        // 這裡的按鈕只畫在展開的那一版底下，_detailQuote 就是它。
-        const q = (_detailQuote && _detailQuote.id === quoteId) ? _detailQuote : { id: quoteId };
+        // 🔴 對不上就去抓 —— 用 `{ id }` 當 fallback 的話 status 是 undefined，
+        //    deleteConfirmSpec 會當成草稿，已寄送的那道打字確認就被跳過了（同 :183 的作法）。
+        let q = (_detailQuote && _detailQuote.id === quoteId) ? _detailQuote : null;
+        if (!q) {
+            try { q = await _fetch('/quotations/' + quoteId); }
+            catch (e) { alert('讀不到這張報價：' + e.message); return; }
+        }
         if (!confirmQuoteDelete(q)) return;
         try {
             await _fetch('/quotations/' + quoteId, { method: 'DELETE' });
