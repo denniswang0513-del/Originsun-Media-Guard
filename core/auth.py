@@ -654,17 +654,32 @@ def _remove_from_json(path: str, key: str, value):
 
 
 # ── Users JSON (public API, delegates to generic helpers) ──
+#
+# 🔴 這份 JSON 是使用者資料的**鏡射**（正本是 Postgres），用途只有一個：DB 掛掉時還能
+#    登入。所以它只該存在於「有正本的那台」。NAS 的 office-api 容器沒有這個檔，而
+#    Google 首登／註冊會走 _persist_user → 這裡；不擋的話就會在 NAS 的 code 目錄長出
+#    一份沒有人讀、也不會被同步回來的帳號檔（裡面有密碼雜湊）。
+#    → 容器用 MEDIAGUARD_NO_USERS_JSON=1 關掉寫入（compose 設的；main_office 檔頭有說明）。
+#    讀取不擋：檔案不在時 _load_json 本來就回空清單，行為一樣。
+_NO_USERS_JSON = os.environ.get('MEDIAGUARD_NO_USERS_JSON', '').strip() in ('1', 'true', 'True')
+
 
 def load_users_json() -> list:
     return _load_json_cached(_USERS_JSON)
 
 def save_users_json(users: list):
+    if _NO_USERS_JSON:
+        return
     _save_json(_USERS_JSON, users)
 
 def sync_user_to_json(user_data: dict):
+    if _NO_USERS_JSON:
+        return
     _sync_to_json(_USERS_JSON, user_data, 'username')
 
 def remove_user_from_json(username: str):
+    if _NO_USERS_JSON:
+        return
     _remove_from_json(_USERS_JSON, 'username', username)
 
 

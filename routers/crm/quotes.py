@@ -488,7 +488,14 @@ async def generate_quotation_snapshot_quietly(quotation_id: str):
 async def _quotation_pdf_response(q):
     """組資料／渲染／產 PDF 同一個出口：壞在哪一段對使用者都是「PDF 生成失敗」。"""
     from starlette.background import BackgroundTask
-    from services.html_pdf import html_to_pdf, unlink_later
+    # 🔴 產 PDF 要 Playwright ＋ Chromium，那只有 master 有（NAS 的容器刻意不裝，見
+    #    docs/OFFLINE_MASTER_PLAN.md §5 P1：那邊只負責送已經生成好的檔）。ImportError
+    #    要回 503 而不是 500 —— 「這台做不到」跟「壞掉了」對使用者是兩件事。
+    try:
+        from services.html_pdf import html_to_pdf, unlink_later
+    except ImportError as exc:
+        raise HTTPException(status_code=503,
+                            detail="產 PDF 需要主控主機在線（請用線上檢視，或等主機開機再下載）") from exc
     try:
         view, company = await _quotation_view_of(q)
         tmp_pdf = await html_to_pdf(_render_quotation_html(view, company), prefix="quotation_",
@@ -956,6 +963,13 @@ async def quote_chat_send(quotation_id: str, body: QuoteChatPayload, request: Re
     text = (body.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="請先輸入內容")
+    # 🔴 先確認這台跑得動再收下這則：NAS 的 office-api 容器上沒有 claude CLI（那是 master 的
+    #    東西）。不擋的話使用者要等背景任務跑完，才在對話泡泡裡看到「找不到 claude CLI」——
+    #    等了半天換一句他看不懂的話。快點講實話比較好。
+    from services.website.seo_runner import _resolve_claude_exe
+    if not _resolve_claude_exe():
+        raise HTTPException(status_code=503,
+                            detail="AI 報價助理需要主控主機在線（它跑在那台的 claude CLI）")
     factory = await _get_factory()
     async with factory() as session:
         q = await session.get(CrmQuotation, quotation_id)

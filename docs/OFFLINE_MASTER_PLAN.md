@@ -1,7 +1,8 @@
 # 報價單／發票／員工工作頁面 —— 不受 8000 生產機開關影響
 
 > owner 2026-09-10：「我希望報價單、發票、員工的工作頁面 不會被 8000 的生產機開關影響」
-> 狀態：**規劃，未動工**。拍板事項在 §9。
+> 狀態：**P1 ＋ P2 程式碼已完成（2026-09-10，只在 dev）**。NAS 那側還有一組人工步驟，
+> 清單在 `docker/INDEX.md`。剩下的拍板事項在 §9。
 
 ---
 
@@ -184,14 +185,38 @@ Chromium 產 PDF。所以要讓 NAS 接手就得把 Playwright 塞進容器（+7
 發票影像分享（`/e/{code}`）是**同一個形狀**但還沒做 —— 它本來就是使用者上傳的靜態檔，
 比報價單更單純，之後照這條路補。
 
-### P2 —— 三個面上線（1.5～2 天，主體）
+### P2 —— 三個面上線 ✅ **程式碼已完成（2026-09-10，dev）**，NAS 那側待人工步驟
 
-1. `main_office.py` ＋ `docker/Dockerfile.office` ＋ compose 服務 ＋ nginx server 區塊
-2. `core/office_assets.py`（仿 `core/public_assets.py`）：頁面清單 ＋ 模組目錄 ＋ import 閉包守衛
-3. `publish_update.py` 加第二組同步目標與 `docker restart office-api`
-4. settings 搬家（§7.1，**這是最大的一塊，不是收尾**）
-5. cloudflared 加 `office.` hostname
-6. 端對端驗收（§8）
+owner 2026-09-10：「我之前跟你討論的功能都想要搬上 nas」。
+
+| 東西 | 位置 |
+|------|------|
+| 容器入口（掛哪些 router、排除哪些） | `main_office.py`（8002） |
+| 前端清單（頁 ＋ 模組目錄 ＋ 逐檔白名單） | `core/office_assets.py` |
+| 送去 NAS 的設定（允許清單） | `core/office_settings.py` |
+| 容器 | `docker/Dockerfile.office`、`docker/requirements_office.txt`、compose 的 `office-api` |
+| 反代 | `docker/nginx/originsun.conf` 檔尾的 `office.originsun-studio.com` server（＋ LAN 直達 8091） |
+| 發版同步 | `publish_update.py`：`main_office.py`、office 前端、白名單設定、兩個容器都 restart |
+| 守衛 | `tests/unit/test_office_surface.py` |
+
+**實測（本機 8002 起真的容器入口 ＋ 真瀏覽器）**：員工工作台（含內嵌週記）、手機發票、
+手機報價三個面都跑起來，零 JS error、零 4xx；報價卡上看得到「已生成 09/10」。
+
+🔴 **實作時修正了規劃裡兩個錯的假設**：
+
+1. **settings 不搬 DB，改用「允許清單匯出」**（§7.1 原本建議搬 DB）。搬 DB 要動到算錢的
+   讀取路徑（`crm/finance.py`、`crm/invoice_files.py` 幾處是同步 `load_settings()`），
+   風險比這批其他部分加起來都高；而那幾個鍵幾乎不會變，「發版時同步一次」拿到的是
+   **上一次已知good的值**，比拿到 0 好太多。代價（master 改了要等下次發版）寫在
+   `core/office_settings.py` 檔頭。
+2. **前端閉包比想像深**：`js/shared/ts-projects.js` 與 `journal-core.js` 靜態 import 了
+   `tabs/crm/crm-utils.js`／`tabs/website/website-utils.js`，而 `my.html` 還用 iframe
+   內嵌整個 `journal.html`。不補的症狀正是規劃裡寫的那種 —— master 上一切正常、
+   **只有 NAS 上白畫面**。補法是逐檔白名單（`MODULE_FILES`），不是把 `tabs/crm/` 整個開出去。
+
+**NAS 那側必須人工做的步驟**在 `docker/INDEX.md`（同步 `docker/` 目錄、`.env` 補
+`OFFICE_CORS_ORIGINS`、build＋up、🔴 Website_Nginx 要重建才會多出 `-p 8091:8091`、
+`docker cp` nginx conf ＋ reload、CF Zero Trust 加 hostname、三路 healthz 驗收）。
 
 ### P3 —— 補完（依 owner 實際使用狀況再排）
 
@@ -317,19 +342,21 @@ stage 2 已經會把 `\\192.168.1.132\X` 翻成 `/share/X`，但**對應的 volu
 
 ## 9. 待 owner 拍板
 
-1. **網址**：`office.originsun-studio.com`？還是別的命名？
-   （LAN 內要不要另開一個 `192.168.1.132:8091` 的直達 port，當網路／CF 故障時的退路？）
+1. ~~**網址**~~ ✅ 已實作成 `office.originsun-studio.com`＋LAN 直達 `192.168.1.132:8091`。
+   要換名字改一處（nginx 的 `server_name` ＋ compose 的 `OFFICE_CORS_ORIGINS`）。
 2. ~~**PDF**：master 關機時要不要能下載報價單 PDF？~~
    ✅ 已解（2026-09-10）：owner 提「寄出改成生成報價單」→ 產與送拆開，NAS 不用裝 Playwright。
    剩下的是**「寄出」與「生成」怎麼擺**：目前實作是 owner 選的 B（兩顆鈕，先生成再寄出），
    但寄出時若還沒生成／已過期仍會自動補生成一次 —— 漏按不該就沒有檔。
-3. **範圍**：只搬「手機版 ＋ `my.html` ＋ 客戶連結」（本規劃），還是連桌機 CRM 也要一份唯讀降級殼（P3）？
-4. **`settings.json` 搬家**：照 `public_access` 那樣搬進共用 DB（乾淨、一次到位），
-   還是先用「`/publish` 把 settings.json 也 scp 過去」的簡便法？
-   （簡便法的問題：master 上改設定不會立刻生效在 NAS，要等下次發版 —— 而
-   `invoice_fee_rates` 錯了是靜默的金額錯誤）
-5. **時機**：這批會動 `publish_update.py` 與 nginx，屬於「上班時間不要一版一版部署」
-   （`feedback_deploy_timing`）的範圍 —— 挑一個下班後的窗口？
+3. ~~**範圍**~~ ✅ 已搬「手機殼（7 個分頁）＋ `my.html`＋週記＋客戶連結」。
+   桌機 CRM 的唯讀降級殼仍**沒做**（P3）—— 桌機跟 master 在同一間辦公室，一起在也一起不在。
+4. ~~**`settings.json` 搬家**~~ ✅ 走了第三條路：**允許清單匯出**（`core/office_settings.py`）。
+   不是整份 scp（那會把 jwt_secret／DB 密碼／webhook 一起送過去），也不是搬 DB
+   （那要動算錢的讀取路徑）。代價是 master 改了那幾個鍵要等下次發版才同步 ——
+   哪天開始常改就照 `core/public_access.py` 的形狀搬進 DB。
+5. **時機**（仍待決定）：這批動了 `publish_update.py` 與 nginx，而且 NAS 上要建新容器、
+   **重建 Website_Nginx**（多一條 port 對映）—— 重建那一下對外站會斷幾秒。
+   屬於「上班時間不要一版一版部署」（`feedback_deploy_timing`）的範圍，挑一個下班後的窗口。
 
 ---
 

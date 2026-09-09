@@ -8,6 +8,10 @@
 > • 對外服務 24/7 在 NAS（192.168.1.132），master Windows 可隨時關機/重啟對外不掉
 > • **NAS 容器**：`Website_Nginx`（port 8090→80，serve dist/ + proxy /api/website/*）
 >   + `website-api`（8001 內部，FastAPI 跑 routers/website/）— 共用既有 `postgres_default` bridge
+>   + **`office-api`（8002，2026-09-10 新增）**：內部同仁的三個面 24/7 —— 報價、發票、
+>     員工工作台（`main_office.py`；網址 `office.originsun-studio.com` ＋ LAN 直達 8091）。
+>     owner「不要被 8000 的生產機開關影響」。**產** PDF／AI 助理仍只在 master，這台只**送**。
+>     規劃與 NAS 人工步驟：[`docs/OFFLINE_MASTER_PLAN.md`](docs/OFFLINE_MASTER_PLAN.md)、[`docker/INDEX.md`](docker/INDEX.md)
 > • **既有 5 容器不動**：cloudflared / FileReport_Nginx / originsun_postgres / MCP / n8n
 > • **cloudflared**：在 CF Zero Trust 儀表板把 `test.originsun-studio.com` 路由到
 >   `192.168.1.132:8090`（不再指 master:4321）
@@ -1275,6 +1279,9 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | `core/subproc.run_stream` | 逐行交付 stdout 的 subprocess（串流用） | stdin／stderr／stdout 各一條執行緒；**逾時交給 `p.wait()`**，不能只在「收到一行之後」檢查 deadline |
 | [`frontend/m/views/quote-chat.js`](frontend/m/views/quote-chat.js) | 手機版報價助理（全螢幕對話、拍／選截圖、串流、用價目補上） | 跟桌機同一組後端與同一支 patch 純函式；**這邊就是寫入者**，PUT 要把後端無條件覆寫的四個欄位原值帶回 |
 | [`core/quote_snapshot.py`](core/quote_snapshot.py) | 「生成報價單」的純規則：快照紀錄形狀、過期判定、畫面那句話（尚未生成／內容已修改／已生成 09/10 14:30）、客戶連結網址 | 無 I/O；文案**只在這裡寫一次**（桌機手機都顯示後端給的 `label`）；檔名形狀被 `assets_host._SAFE_NAME` 綁著 |
+| [`main_office.py`](main_office.py) | NAS `office-api` 容器入口（8002）：內部同仁三個面的 24/7 版本 —— 掛認證／員工工作台／整包 CRM／手機 BFF／貼圖 | **不掛**吃硬體的（備份／轉檔／報表／TTS／機隊／OTA）、不掛 socketio、**不准長出排程**；帳號管理與身份範本留在 master（`_DROP_PREFIXES`） |
+| [`core/office_assets.py`](core/office_assets.py) | office-api 要自己 serve 的前端：`PAGES`／`MODULE_DIRS`／`MODULE_FILES` | 跟 `public_assets` 是**兩份**（那份是匿名可達的對外頁）；`tabs/crm`、`tabs/website` 只逐檔開白名單，不整個目錄 serve |
+| [`core/office_settings.py`](core/office_settings.py) | 發版時送去 NAS 的設定**允許清單**（發票根目錄／代開費率／申請人／圖床／磁碟對映） | 允許清單不是排除清單（新機密欄位預設不外送）；代價是 master 改了要等下次發版 |
 | `routers/crm/quotes.py` 的生成／對外段 | `generate_quotation_snapshot`（產 PDF ＋ HTML → 歸檔進報價單資料夾 ＋ 寫快照進共用圖床 ＋ 刪舊快照）、`public_quote_html`／`public_quote_pdf`（**送**快照） | **產**只在 master（Playwright 在那），**送**在哪都行 —— 對外那兩支掛 `public_router`，NAS 對外容器也吃得到，master 關機客戶照樣打得開 |
 
 
@@ -1352,3 +1359,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **報價單是定稿文件，不是活的頁面**（owner 2026-09-10）：`/q/{code}` 送的是生成好的檔，不即時重算。改回「即時渲染」會同時打掉兩件事 —— 客戶手上那份會隨你改東西靜默變動，而且對外那條路又綁回 master 開機。即時渲染只保留給「還沒生成過的舊連結」（`_live_quote_fallback`），而且它會順手補生成一份。
   **三個入口**（報價分頁／專案頁的報價子頁／手機卡片）都編得動報價，所以三個都要顯示 `pdf_state.label`
   ——漏掉的那個不會報錯，只會讓人改完毫無察覺、客戶繼續拿到舊版（同 `quote-delete.js` 那條「三個入口」的理由）。
+- **`main_office.py` 不准長出排程或背景 runner**：全機隊共用同一顆生產 DB，只該跑一次的東西（夜間批次、告警探測、對外寄信）在 NAS 再跑一份就是重複觸發。`core.topology.is_master_machine()` 擋得住會自己判斷的那些，但最可靠的是**不要 import 進來** —— `tests/unit/test_office_surface.py` 對這個 app 的模組圖直接斷言（`core.scheduler`／`socketio` 一出現就紅）。
+- **office-api 上「產」與「送」是分開的**：產報價單 PDF（Playwright）、AI 報價助理（`claude` CLI）只有 master 做得到。那兩支在這台要**快速講實話**（`/chat` 先檢查 `_resolve_claude_exe()` 回 503、`_quotation_pdf_response` 對 ImportError 回 503），不要讓使用者等一輪再收到一句他看不懂的錯。
+- **`MEDIAGUARD_NO_USERS_JSON=1` 只給 NAS 容器**（compose 設）：使用者資料是 Postgres 正本 ＋ users.json 鏡射雙寫，鏡射只該存在於有正本的那台。不關的話 Google 首登會在 NAS 的 code 目錄長出一份沒人讀、也不會同步回來的帳號檔（含密碼雜湊）。**別在 master 設它** —— DB 掛掉時那份 JSON 就是唯一的登入退路。
+- **office 的前端清單要跟著相依閉包走**：`js/shared/ts-projects.js` 與 `journal-core.js` 靜態 import 了 `tabs/crm/crm-utils.js`／`tabs/website/website-utils.js`，`my.html` 還 iframe 內嵌整個 `journal.html`。漏一個的症狀是 **master 上一切正常、只有走 NAS 的人白畫面**（module 載入失敗會整支停掉）。加頁／加 import 之後跑 `test_office_surface`。

@@ -1,0 +1,23 @@
+# office-api container — 在 NAS 上跑 main_office.py（內部同仁的報價／發票／工作台）
+#
+# 跟 Dockerfile.website 同一個形狀：image 只烘 python 依賴，程式碼靠 compose 的 volume
+# mount 進來。更新 code 只要 master 同步 /app 來源再 `docker restart office-api`，
+# 不必 rebuild —— 那是 /publish 每次都會做的事，rebuild 一分鐘的空窗承受不起。
+FROM python:3.11-slim
+
+# curl: docker healthcheck 用。其他系統套件不裝 —— requirements_office 裡的
+# asyncpg / Pillow / pillow-heif 在 cp311 linux 都有 prebuilt wheel，不需要 gcc。
+# 哪天加了沒 wheel 的 native dep，build 會 fail，再回頭加 gcc 即可。
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements_office.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+EXPOSE 8002
+
+# 程式碼透過 docker-compose volume mount 進來，container 啟動時就生效
+CMD ["uvicorn", "main_office:app", "--host", "0.0.0.0", "--port", "8002"]

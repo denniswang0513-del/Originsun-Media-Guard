@@ -60,7 +60,7 @@ def _ssh_bin(name: str) -> str:
 # 等模組，所以 routers/ 整個傳；core/db/services/ 同理）
 # 三類語意分開命名 —— 它們的生命週期不同（code 隨發版、manifest 綁版號握手、
 # 資產是 Astro dist 之外的例外品），未來若要分岔傳輸策略才有接縫可切。
-NAS_SYNC_CODE = ["main_website.py", "config.py",
+NAS_SYNC_CODE = ["main_website.py", "main_office.py", "config.py",
                  "routers", "services", "core", "db"]
 # 容器 /healthz 回報自己的版號，發版末段跟 master 比對 —— 官網那條路最常見的
 # 故障是「碼同步了但容器沒重啟」，靜默且難查。
@@ -68,8 +68,18 @@ NAS_SYNC_MANIFEST = ["version.json"]
 # 對外容器要自己 serve 的前端檔 —— 清單正本在 core/public_assets（main_website
 # 的 serve 與 nginx 的 location 也從那裡對齊，並有測試釘住相依閉包）。
 from core.public_assets import SYNC_PATHS as NAS_SYNC_ASSETS  # noqa: E402
+# office-api 容器（內部同仁的三個面：報價／發票／員工工作台）要自己 serve 的前端 ——
+# 清單正本 core/office_assets，跟上面那份是**兩份**：那份是匿名可達的對外頁，
+# 這份是登入後用的內部頁。理由見 core/office_assets.py 檔頭。
+from core.office_assets import SYNC_PATHS as NAS_SYNC_OFFICE  # noqa: E402
 
-NAS_SYNC_PATHS = NAS_SYNC_CODE + NAS_SYNC_MANIFEST + NAS_SYNC_ASSETS
+# dict.fromkeys 去重：兩份清單都含 frontend/js/shared（同一份共用純函式），
+# scp 兩次只是慢，但 remote mkdir 的清單會長出重複項，看 log 會以為漏了什麼
+NAS_SYNC_PATHS = list(dict.fromkeys(
+    NAS_SYNC_CODE + NAS_SYNC_MANIFEST + NAS_SYNC_ASSETS + NAS_SYNC_OFFICE))
+
+# NAS 上的容器（同步完要一台一台重啟才會吃到新 code）
+NAS_CONTAINERS = ("website-api", "office-api")
 
 
 # ────────────────────────────────────────
@@ -259,20 +269,70 @@ def sync_website_to_nas() -> bool:
             print(f"[NAS sync] FAIL: {rel} — {_err[:200] or type(e).__name__}")
             return False
 
-    # Restart website-api container 讓新 code 生效
-    print(f"[*] 重啟 NAS website-api container...")
+    if not _push_office_settings(base, ssh_cmd):
+        return False
+
+    # 重啟容器讓新 code 生效。一台失敗就回 False，但**其餘的照樣試** ——
+    # 兩個容器服務的是不同的人（對外客戶／內部同仁），沒理由因為一台沒起來就放著另一台跑舊碼。
+    ok = True
+    for name in NAS_CONTAINERS:
+        print(f"[*] 重啟 NAS {name} container...")
+        try:
+            subprocess.run(ssh_cmd + [f"{SSH_DOCKER} restart {name}"],
+                           check=True, capture_output=True, timeout=30)
+            print(f"[OK] NAS {name} 已重啟")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+            _err = getattr(e, "stderr", b"") or b""
+            _err = _err.decode(errors="replace") if isinstance(_err, (bytes, bytearray)) else str(_err)
+            print(f"[NAS sync] {name} restart 失敗/逾時: {_err[:200] or type(e).__name__}")
+            ok = False
+    return ok
+
+
+def _push_office_settings(base: str, ssh_cmd: list) -> bool:
+    """把**白名單內**的設定倒成一份 settings.json 送到 NAS。
+
+    容器裡沒有 settings.json，`load_settings()` 只會拿到預設值 —— 而發票那三個鍵不在
+    預設裡，代開費率會靜默算成 0。清單與「為什麼不送整份」見 core/office_settings.py。
+
+    這一步失敗要回 False（而不是「順便試試看」）：靜默的金額錯誤比同步失敗難查太多，
+    寧可讓發版流程講出來。
+    """
+    import json as _json
+    import tempfile as _tempfile
+    from core.office_settings import export_settings
+
     try:
-        subprocess.run(
-            ssh_cmd + [f"{SSH_DOCKER} restart website-api"],
-            check=True, capture_output=True, timeout=30,
-        )
-        print(f"[OK] NAS website-api 已重啟")
+        from config import load_settings
+        payload = export_settings(load_settings())
+    except Exception as e:                      # noqa: BLE001
+        print(f"[NAS sync] 讀不到本機設定，略過 office settings: {e}")
+        return False
+
+    missing = [k for k in ("invoices_root", "invoice_fee_rates") if k not in payload]
+    if missing:
+        # 不擋發版：這台可能本來就沒設過（dev）。但要說出來 —— NAS 上那幾個面會半殘。
+        print(f"[NAS sync] ⚠ 本機沒有這些設定，NAS 的發票面會拿不到：{missing}")
+
+    fd, tmp = _tempfile.mkstemp(prefix="office_settings_", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fp:
+            _json.dump(payload, fp, ensure_ascii=False, indent=4)
+        scp_args = ([_ssh_bin("scp"), "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + ["-q"]
+                    + [tmp, f"{NAS_HOST}:{NAS_CODE_DIR}/settings.json"])
+        subprocess.run(scp_args, check=True, capture_output=True, timeout=60)
+        print(f"[NAS sync] OK: settings.json（{len(payload)} 個鍵，白名單）")
         return True
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
         _err = getattr(e, "stderr", b"") or b""
         _err = _err.decode(errors="replace") if isinstance(_err, (bytes, bytearray)) else str(_err)
-        print(f"[NAS sync] container restart 失敗/逾時: {_err[:200] or type(e).__name__}")
+        print(f"[NAS sync] FAIL: settings.json — {_err[:200] or type(e).__name__}")
         return False
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 # ────────────────────────────────────────

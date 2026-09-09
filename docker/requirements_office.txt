@@ -1,0 +1,70 @@
+# office-api container 依賴（main_office.py — 內部同仁那三個面的 NAS 版本）
+#
+# 底是 requirements_website.txt：那組版本是 NAS 容器實裝驗過的（docker exec website-api
+# pip freeze），兩個容器跑在同一台、同一顆 Postgres、同一份 code mount —— 共用的那半邊
+# 逐字照抄，才不會出現「兩個容器對同一支 router 有不同 sqlalchemy 行為」這種只在其中
+# 一台重現的鬼故事。
+#
+# 版本一律釘死。浮動版本 = 容器 rebuild 時拉到不相容新版的地雷，而 rebuild 通常發生在
+# 「別的東西壞了正在救火」的時候 —— 那是最不該多一個變數的時刻。升級先在容器測過再改。
+#
+# ── 跟 requirements_website.txt 的差異（只有這幾行，其餘逐字相同）────────────────
+#
+# 拿掉 notion-client
+#   官網的 Notion 同步（routers/website/admin_rebuild → notion_service）在 website-api
+#   那邊跑。main_office 沒掛 website router，裝了也沒人 import。
+#
+# 加 google-auth + requests
+#   Google 登入。api_auth 對缺套件是優雅降級（try/except ImportError），所以不裝也起得來
+#   —— 代價是這個面「只能用密碼登入」。而同仁多半是 Google 登入進來的，master 關機時
+#   正好是最不想被擋在門外的時候。requests 不是順手裝的：core/google_auth.py 用的傳輸層
+#   就是 google.auth.transport.requests（拿 Google 公鑰驗簽），少了它 import 直接失敗。
+#
+# 加 pillow-heif
+#   core/image_utils 靠它註冊 HEIF opener，PIL 才開得動 iPhone 的 .HEIC。劇組手機大宗是
+#   iPhone，發票影像與影像紀錄照片都會踩到。沒裝不會炸（image_utils 自己接住），會退成
+#   檔案圖示 —— 靜默降級，所以要在這裡明確裝上。
+#
+# 加 Jinja2
+#   報價單「預覽」要它渲染 HTML（services/html_pdf 的 Jinja2 那半邊）。
+#   🔴 **Playwright 刻意不裝**：產 PDF 留在 master、容器只負責送已經生成好的靜態快照
+#   （docs/OFFLINE_MASTER_PLAN.md §5 P1）。裝 Playwright 要多背 ~700MB 的 Chromium，
+#   而「產」這件事本來就只該發生一次。routers/crm/quotes.py 對 services.html_pdf 是
+#   函式內 import，所以不裝也 import 得起來，只有真的按下產 PDF 才會拋（§7.4）。
+#
+# 加 tzdata
+#   python:3.11-slim 不保證有系統時區檔（/usr/share/zoneinfo 常被 slim 掉），而
+#   routers/crm/_shared.py 用 ZoneInfo("Asia/Taipei") 在模組層就取。缺了是 import 期
+#   ZoneInfoNotFoundError —— 整包 CRM 掛不上，而 main_office 的 router 迴圈會把它吞成
+#   一行 warning，症狀是「CRM 端點全部 404」而不是啟動失敗。用 pip 裝的 tzdata 是
+#   純資料 wheel，ZoneInfo 會自動退到它，不必動 image 的 apt。
+
+# Web framework
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+pydantic==2.13.3
+
+# DB（asyncpg 是 PG 非同步 driver）
+sqlalchemy[asyncio]==2.0.49
+asyncpg==0.31.0
+greenlet==3.5.0
+
+# 雜項
+httpx==0.28.1
+python-multipart==0.0.27
+aiofiles==25.1.0
+
+# 圖片處理（貼圖、影像紀錄縮圖、發票影像）
+# pillow-heif 要求 pillow>=11.1.0，跟下面這個釘版相容
+Pillow==12.2.0
+pillow-heif==1.7.0
+
+# Google 登入（純 Python，不重）
+google-auth==2.57.1
+requests==2.34.2
+
+# 報價單預覽的 HTML 渲染（PDF 那半邊留在 master）
+Jinja2==3.1.6
+
+# 時區資料（slim image 沒有系統 zoneinfo 時的來源）
+tzdata==2026.3

@@ -55,6 +55,71 @@ services:
       retries: 3
       start_period: 10s
 
+  # ── office-api：內部同仁那三個面（報價／發票／員工工作台）的 24/7 版本 ──
+  # owner 2026-09-10：「我希望報價單、發票、員工的工作頁面不會被 8000 的生產機開關影響」。
+  # 資料本來就都在 NAS 的 Postgres，只有「把頁面端出來、把 API 跑起來」綁在 master。
+  # 這個容器就是把純資料庫的那半邊在 NAS 上再跑一份（詳見 main_office.py 檔頭）。
+  #
+  # 跟 website-api 是兩個 service 而不是一個多 port 的容器：它們的曝露面完全不同
+  # （對外匿名 vs 內部登入後），掛掉的影響範圍也不同 —— 分開才能各自重啟、各自看 log。
+  office-api:
+    container_name: office-api
+    build:
+      context: .
+      dockerfile: Dockerfile.office
+    image: originsun/office-api:latest
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    volumes:
+      # 跟 website-api 同一份 code —— /publish 一次同步，兩個容器各自 restart。
+      # 不加 :ro，理由同上面那個 service。
+      - ../code:/app
+      # 影像紀錄原檔歸檔區（手機頁會傳現場照片）。同 website-api，NAS 本機直接掛。
+      - /share/Archive:/share/Archive
+      # 共用圖床 PasteAssets（貼圖 + 影像紀錄縮圖 + 報價單靜態快照）。設定裡存的是
+      # master 視角的 UNC，由 core.drive_map 配 NAS_LOCAL_SHARE_ROOT 翻成 /share/...。
+      - /share/Container/AI_Workspace/Originsun_Web/PasteAssets:/share/Container/AI_Workspace/Originsun_Web/PasteAssets
+      #
+      # ⚠ 刻意**沒有**掛的東西 —— 以下功能在這個容器上會降級，不是壞掉：
+      #   1. 發票影像（settings `invoices_root` → routers/crm/invoice_files.py）
+      #      上傳與下載會失敗，而且錯誤訊息長得像「管理員尚未設定資料夾」（誤導）。
+      #   2. 提案／專案資產夾（各專案自己設的 proposal_assets_root）
+      #      檔案清單空、下載 404。
+      #   3. 成本收據（routers/crm/costs.py 用 __file__ 推 `<repo>/uploads/receipts`）
+      #      會寫進 /app/uploads → 也就是 NAS 的 code 目錄，master 那邊看不到。
+      #      刻意不學 website-api 掛 `../uploads` —— 那個目錄由對外站 serve，
+      #      收據掛上去等於把它變成公開檔。
+      # ⚠ 第 1 項是**掛載**問題不是設定問題：`core/office_settings.py` 已經會在發版時
+      #   把 invoices_root 送過來，所以容器知道路徑、只是看不到那顆磁碟 —— 錯誤訊息
+      #   會更難懂（設定明明有值）。要補掛之前**先讀生產 settings 看它實際指到哪**，
+      #   不要照猜的路徑掛一堆：掛錯的症狀跟沒掛一模一樣，只是多了一個看起來已經
+      #   處理過的假象。（背景見 docs/OFFLINE_MASTER_PLAN.md §7.1 / §7.3）
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      # 🔴 必須跟 master settings.json 的 jwt_secret 是同一把（website-api 也共用同一把）：
+      # 同仁在 master 登入拿到的 token 要能在這台驗過，反之亦然。不同把的症狀是
+      # 「頁面打得開、每一支 API 都 401」。
+      JWT_SECRET: ${JWT_SECRET}
+      # 設定存的是 master 視角的 UNC（單一真相）；本容器把 \\192.168.1.132\X 翻成
+      # /share/X（core.drive_map.nas_local_path）。理由與「為何不設 NAS_UNC_HOST」
+      # 同 website-api（compose 會把 YAML 的 \\ 吃成單一 \）。
+      NAS_LOCAL_SHARE_ROOT: /share
+      OFFICE_CORS_ORIGINS: ${OFFICE_CORS_ORIGINS}
+      # 🔴 使用者資料是雙寫的（Postgres 正本 + users.json 鏡射），而鏡射只該存在於
+      # 有正本的那台。不關掉的話 Google 首登／註冊會在 NAS 的 code 目錄長出一份
+      # 沒有人讀、也不會同步回 master 的帳號檔（裡面有密碼雜湊）。
+      # 開關在 core/auth.py 的 _NO_USERS_JSON；讀取不受影響（檔案不在就是空清單）。
+      MEDIAGUARD_NO_USERS_JSON: "1"
+    networks:
+      - postgres_default
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8002/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 networks:
   # external — 由既有 originsun_postgres 容器建立，docker compose 不重建
   postgres_default:
