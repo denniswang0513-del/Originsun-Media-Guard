@@ -14,6 +14,7 @@ master 關機仍在），各開一份就會有兩份要同步搬家的網址。�
 DB 只存檔名/token 不存網域 —— 圖床搬家改 settings 一行，資料一筆都不用動。
 """
 import os
+import re
 
 import config
 from core.drive_map import to_local_path
@@ -46,3 +47,33 @@ def assets_target(namespace: str) -> tuple:
         _cache[1][ns] = ((os.path.join(to_local_path(root), ns), f"{base}/{ns}")
                          if root and base else ("", ""))
     return _cache[1][ns]
+
+
+# 檔名只准是「上傳時產生的那種形狀」：32 hex + 副檔名。這支是圖床唯一的刪除路徑，
+# 不做成通用刪檔端點 —— 呼叫端傳進來的字串一律不信（路徑穿越、砍到別的命名空間）。
+_SAFE_NAME = re.compile(r"^[0-9a-f]{32}\.[a-z0-9]{2,5}$")
+
+
+def assets_delete(namespace: str, filename: str) -> bool:
+    """刪掉某個命名空間裡的一個檔。回「這次真的刪掉了嗎」。
+
+    用途：報價助理的截圖用完就刪（owner 2026-09-09 拍板；docs/QUOTE_ASSISTANT_PLAN.md §5.4）
+    —— 客戶的 LINE 截圖會帶大頭貼與姓名，不該一直躺在圖床上。
+
+    刪不掉（設定沒設、檔名不合法、檔案已經不在、權限）→ 回 False，**不丟例外**：
+    呼叫端是「順手清理」，不該因為清不掉就讓寄出報價失敗。
+    """
+    if not _SAFE_NAME.match(str(filename or "")):
+        return False
+    root, _base = assets_target(namespace)
+    if not root:
+        return False
+    path = os.path.join(root, filename)
+    # 正規化後必須仍在該命名空間底下（雙保險，檔名已經先過一次白名單）
+    if os.path.dirname(os.path.abspath(path)) != os.path.abspath(root):
+        return False
+    try:
+        os.remove(path)
+        return True
+    except OSError:
+        return False

@@ -42,6 +42,8 @@ _RULES = """你是「源日影像」的報價助理。使用者會貼客戶的�
 - 客戶訊息裡的執行條件（誰校字幕、要不要直式版本、交期、素材誰提供）整理進 terms_add。
 - 一次最多問 %d 題，問完就停，不要一題一題來回。
 - reply 是講給人聽的：**不要提到 needs_price、patch 這種欄位名稱**（畫面會自己列出來）。
+- 下面若有「你的價目」：客戶要的項目跟裡面哪一筆意思相同，就直接帶那個單價，
+  並在 reply 說「某項照上次的價帶了」；意思對不上就留 0 進 needs_price，**不要硬套**。
 - 每一項都有價、也沒有待確認的問題時，在 reply 裡說「可以了」。
 
 只輸出 JSON，不要 code fence、不要任何解釋文字。格式：
@@ -78,6 +80,27 @@ def paste_tokens(text: str) -> list:
 def strip_paste_tokens(text: str) -> str:
     """把 token 換成人看得懂的字（token 本身對 LLM 沒有意義，圖另外用路徑餵）。"""
     return _PASTE_TOKEN.sub("（截圖）", text or "")
+
+
+def forget_images(chat: list) -> tuple:
+    """對話裡的貼圖 token → 「（截圖已刪除）」，回 `(新的對話, 要刪的檔名清單)`。
+
+    **對話本身留著** —— 那是「這張報價是怎麼談出來的」紀錄；只把圖拿掉。
+    token 留著會變成死連結（圖已經不在圖床上了），所以換成看得懂的字。
+    純函式：不刪檔、不碰 DB，刪檔的是 core.assets_host.assets_delete。
+    """
+    names, out, changed = [], [], False
+    for m in (chat or []):
+        text = m.get("text") or ""
+        found = paste_tokens(text)
+        if found:
+            for n in found:
+                if n not in names:
+                    names.append(n)
+            m = dict(m, text=_PASTE_TOKEN.sub("（截圖已刪除）", text))
+            changed = True
+        out.append(m)
+    return (out if changed else list(chat or [])), names
 
 
 def item_lines(items: list) -> str:
@@ -127,13 +150,17 @@ def history_lines(chat: list) -> str:
     return "\n".join(out)
 
 
-def build_prompt(quotation: dict, chat: list, image_paths: Optional[list] = None) -> str:
+def build_prompt(quotation: dict, chat: list, image_paths: Optional[list] = None,
+                 price_lines: str = "") -> str:
     """組出這一輪要餵給 claude 的完整提示。
 
     `chat` 的最後一則就是使用者這次說的話（端點寫入後才呼叫這裡）。
     `image_paths` 是這次貼上的截圖在本機的絕對路徑 —— claude CLI 讀得到本機圖檔。
+    `price_lines` 是價目（core.price_book.prompt_lines）；空的就整段不放。
     """
     parts = [_RULES, "\n── 目前的草稿 ──\n" + snapshot(quotation)]
+    if price_lines:
+        parts.append("\n── 你的價目（過去報過的，對得上就直接帶）──\n" + price_lines)
     hist = history_lines(chat)
     if hist:
         parts.append("\n── 對話 ──\n" + hist)
@@ -141,6 +168,49 @@ def build_prompt(quotation: dict, chat: list, image_paths: Optional[list] = None
         parts.append(f"\n請一併讀這張截圖：{p}")
     parts.append("\n請照上面的 JSON 格式回覆。")
     return "\n".join(parts)
+
+
+# ── 串流：從還沒完成的 JSON 裡把 reply 撈出來 ──────────────────
+
+_REPLY_HEAD = re.compile(r'"reply"\s*:\s*"')
+_ESC = {"n": "\n", "t": "\t", "r": "\r", "b": "", "f": "", '"': '"', "\\": "\\", "/": "/"}
+
+
+def partial_reply(raw: str) -> str:
+    """串流中的部分輸出 → 目前 reply 那串字（畫面邊產邊顯示用）。
+
+    模型是照我們給的欄位順序產的，**reply 排在最前面** —— 所以在 patch／questions
+    還沒開始產之前，畫面上就是一句一句長出來的人話，不會看到一堆大括號。
+    撈不到（還沒產到 reply、或根本不是 JSON）→ 回空字串，畫面維持「思考中…」。
+    """
+    m = _REPLY_HEAD.search(raw or "")
+    if not m:
+        return ""
+    s = raw[m.end():]
+    out, i, n = [], 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == '"':
+            break                      # reply 收尾了
+        if c != "\\":
+            out.append(c)
+            i += 1
+            continue
+        if i + 1 >= n:
+            break                      # escape 還沒串完，下一塊再說
+        nxt = s[i + 1]
+        if nxt == "u":
+            if i + 6 > n:
+                break
+            try:
+                out.append(chr(int(s[i + 2:i + 6], 16)))
+            except ValueError:
+                pass
+            i += 6
+            continue
+        out.append(_ESC.get(nxt, nxt))
+        i += 2
+    return "".join(out)
 
 
 # ── 回覆正規化 ────────────────────────────────────────────────

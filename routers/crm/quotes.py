@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -17,9 +18,10 @@ from fastapi.responses import HTMLResponse
 from core.finance_logic import QUOTE_PENDING, QUOTE_STATUSES
 from core.no_store import no_store_file
 from core.quotation_pdf import PDF_MARGIN, build_quotation_view, footer_line
-from core import quote_chat
+from core import price_book, quote_chat
 from core.bg_task import fire
-from core.schemas import QuotationPayload, QuotationTemplatePayload, QuoteChatPayload
+from core.schemas import (QuotationPayload, QuotationTemplatePayload,
+                          QuoteChatPayload, PriceItemPayload)
 
 from ._shared import (router, token_router, _check_auth, _check_quotes_auth, money_dep,
                       _require_db, _get_factory,
@@ -28,7 +30,7 @@ from ._shared import (router, token_router, _check_auth, _check_quotes_auth, mon
 try:
     from ._shared import (select, or_, delete, IntegrityError,
                           Client, CrmProject, CrmQuotation, CrmQuotationItem,
-                          CrmQuotationTemplate)
+                          CrmQuotationTemplate, CrmPriceItem)
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
     pass
 
@@ -513,6 +515,10 @@ async def update_quotation(quotation_id: str, req: QuotationPayload, request: Re
         loaded_items = await _load_items(session, q.id)
     if quotation_sent_transition(prev_status, q.status):     # 寄出＝存一份 PDF 到報價單資料夾（回應後做）
         background.add_task(archive_quotation_pdf_now, q.id)
+        # 🔴 這兩件事不掛 background.add_task：那串是**串行**的，前面那支用 Playwright 產 PDF，
+        #    慢或炸掉後面就整串不跑（清圖與收價會靜默消失）。fire() 各跑各的、各有 try/except。
+        fire(purge_quote_chat_images(q.id), label=f"quote purge {q.id}")   # 寄出＝截圖用完了
+        fire(record_quote_prices(q.id), label=f"quote prices {q.id}")      # 這張的價收進價目
 
     return {"status": "ok", "quotation": _to_quotation_dict(q, items=loaded_items)}
 
@@ -522,6 +528,7 @@ async def delete_quotation(quotation_id: str, request: Request):
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
+    await purge_quote_chat_images(quotation_id)   # 報價列都要刪了，圖留著就沒人知道它是誰的
     async with factory() as session:
         q = await session.get(CrmQuotation, quotation_id)
         if not q:
@@ -566,6 +573,70 @@ def _paste_image_paths(text: str) -> list:
     return [p for p in (os.path.join(root, n) for n in names) if os.path.isfile(p)]
 
 
+# 互動式呼叫用自己的閘（規劃正本 §7.2）：夜間 SEO 批次一筆約 25 秒 × 30 個作品，
+# 跟它共用 seo_runner 的 _CLAUDE_GATE 的話，你在對話框打一句話要等十幾分鐘。
+_QUOTE_CHAT_GATE = asyncio.Semaphore(2)
+# quotation_id → 串到目前為止的 reply。只活在記憶體（重啟就沒了，那時對話也早就寫進 DB）。
+_chat_partial: dict = {}
+
+
+async def _call_claude_stream(prompt: str, quotation_id: str, model: str) -> tuple:
+    """串流版的 claude 呼叫：邊產邊把 reply 寫進 _chat_partial，回 (完整文字, 錯誤字串)。
+
+    為什麼不改 `services.website.seo_runner._call_claude`：那支有 11 個呼叫端、
+    共用同一把閘，加串流會動到所有人。這裡只鋪報價對話這一條路。
+
+    串流看得到的是「還沒收尾的 JSON」，靠 `quote_chat.partial_reply` 把 reply 那串字
+    撈出來 —— 模型照我們給的順序產、reply 排第一個，所以畫面上是人話一句句長出來，
+    不是一堆大括號。
+    """
+    from services.website.seo_runner import _CLAUDE_TIMEOUT_SEC, _resolve_claude_exe
+    from core.subproc import run_stream
+
+    exe = _resolve_claude_exe()
+    if not exe:
+        return None, "找不到 claude CLI（請確認已安裝並 claude 登入）"
+
+    chunks: list = []
+
+    def _on_line(raw: bytes) -> None:
+        try:
+            d = json.loads(raw.decode("utf-8", "replace"))
+        except (ValueError, UnicodeDecodeError):
+            return                                    # 不是 JSON 的雜訊行，跳過
+        if d.get("type") != "stream_event":
+            return
+        ev = d.get("event") or {}
+        if ev.get("type") != "content_block_delta":
+            return
+        chunks.append(((ev.get("delta") or {}).get("text")) or "")
+        _chat_partial[quotation_id] = quote_chat.partial_reply("".join(chunks))
+
+    async with _QUOTE_CHAT_GATE:
+        rc, out, err = await run_stream(
+            [exe, "--print", "--model", model, "--permission-mode", "plan",
+             "--output-format", "stream-json", "--include-partial-messages", "--verbose"],
+            on_line=_on_line,
+            input_bytes=prompt.encode("utf-8"),
+            timeout=_CLAUDE_TIMEOUT_SEC,
+        )
+
+    if rc != 0:
+        detail = (err or b"")[:300].decode("utf-8", "replace").strip()
+        return None, f"claude 結束碼={rc}；{detail}"
+
+    # 收尾優先用 result 那一行（等同 --print 的最終文字）；沒有就把 delta 串起來
+    final = ""
+    for raw in (out or b"").splitlines():
+        try:
+            d = json.loads(raw.decode("utf-8", "replace"))
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if d.get("type") == "result" and isinstance(d.get("result"), str):
+            final = d["result"]
+    return (final or "".join(chunks)), ""
+
+
 async def _run_quote_chat(quotation_id: str) -> None:
     """背景：讀草稿＋對話 → 叫 claude → 正規化 → 把 AI 那一則寫回 chat。"""
     factory = await _get_factory()
@@ -583,14 +654,22 @@ async def _run_quote_chat(quotation_id: str) -> None:
             project_name=project.name if project else "",
             client_short_name=client.short_name if client else "")
 
+        prices = [_price_to_dict(r) for r in (await session.execute(
+            select(CrmPriceItem).order_by(CrmPriceItem.last_used_at.desc().nullslast())
+            .limit(price_book.MAX_PROMPT_ROWS)
+        )).scalars().all()]
+
     last_user = next((m for m in reversed(chat)
                       if m.get("role") == quote_chat.ROLE_USER), {})
     prompt = quote_chat.build_prompt(snap, chat,
-                                     _paste_image_paths(last_user.get("text") or ""))
+                                     _paste_image_paths(last_user.get("text") or ""),
+                                     price_lines=price_book.prompt_lines(prices))
     # 唯讀模式（同公布欄「問 Claude」）—— 它只要讀截圖，不該碰任何東西
-    from services.website.seo_runner import _call_claude
-    text, err = await _call_claude(
-        prompt, extra_args=["--model", _quote_chat_model(), "--permission-mode", "plan"])
+    _chat_partial[quotation_id] = ""
+    try:
+        text, err = await _call_claude_stream(prompt, quotation_id, _quote_chat_model())
+    finally:
+        _chat_partial.pop(quotation_id, None)   # 這一輪結束了，畫面改看寫進 chat 的那則
 
     if text is None:
         parsed = quote_chat.parse_reply("")
@@ -610,6 +689,31 @@ async def _run_quote_chat(quotation_id: str) -> None:
             needs_price=parsed["needs_price"], terms_add=parsed["terms_add"]))
         q.chat = chat
         await session.commit()
+
+
+async def purge_quote_chat_images(quotation_id: str) -> int:
+    """把這張報價對話裡的截圖從圖床刪掉，token 換成「（截圖已刪除）」。回刪掉幾張。
+
+    owner 2026-09-09「做完自動刪圖」：客戶的 LINE 截圖會帶大頭貼、姓名，甚至側邊欄
+    其他對話，不該一直躺在共用圖床上。三個觸發點：寄出、刪報價、草稿放太久的兜底掃描。
+
+    這是**順手清理**：任何失敗只記 log，不讓寄出報價跟著失敗。
+    """
+    from core.assets_host import assets_delete
+    log = logging.getLogger(__name__)
+    factory = await _get_factory()
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
+        if q is None or not q.chat:
+            return 0
+        new_chat, names = quote_chat.forget_images(list(q.chat))
+        if not names:
+            return 0
+        gone = sum(1 for n in names if assets_delete("paste", n))
+        q.chat = new_chat            # token 換掉，免得留一堆死連結
+        await session.commit()
+    log.info("[quote_chat] 報價 %s 的截圖清理：%d/%d 張已刪", quotation_id, gone, len(names))
+    return gone
 
 
 @router.post("/quotations/{quotation_id}/chat")
@@ -645,7 +749,143 @@ async def quote_chat_history(quotation_id: str):
         if q is None:
             raise HTTPException(status_code=404, detail="找不到此報價")
         chat = list(q.chat or [])
-    return {"chat": chat, "count": len(chat)}
+    # partial＝這一輪串流到目前為止的 reply（記憶體裡，見 _call_claude_stream）。
+    # 前端拿它填「思考中…」那顆泡泡 —— 34 秒的空白變成一句句長出來。
+    return {"chat": chat, "count": len(chat),
+            "partial": _chat_partial.get(quotation_id, "")}
+
+
+# ── 報價價目（docs/QUOTE_ASSISTANT_PLAN.md P3）──────────────────
+# 「答過的價順手存成價目，下一張 AI 就自己帶」。
+# 🔴 只有**寄出**的報價會進來：草稿還在談，而且自動存每 1.2 秒一發 ——
+#    拿草稿當價目會寫爆，也會把談到一半又放棄的價當成正式價。
+
+
+def _price_to_dict(r) -> dict:
+    return {
+        "id": r.id, "description": r.description, "unit": r.unit,
+        "unit_price": r.unit_price, "hits": r.hits,
+        "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
+    }
+
+
+async def _upsert_prices(session, items: list) -> tuple:
+    """報價項目 → 價目 upsert（同鍵就更新價、次數 +1）。回 (新增, 更新)。"""
+    wanted = price_book.collect(items)
+    if not wanted:
+        return 0, 0
+    existing = {r.key: r for r in (await session.execute(
+        select(CrmPriceItem).where(CrmPriceItem.key.in_(list(wanted.keys())))
+    )).scalars().all()}
+    now = _now()
+    added = updated = 0
+    for key, row in wanted.items():
+        cur = existing.get(key)
+        if cur is None:
+            session.add(CrmPriceItem(
+                id=uuid.uuid4().hex, key=key, description=row["description"],
+                unit=row["unit"], unit_price=row["unit_price"], hits=1,
+                last_used_at=now, created_at=now, updated_at=now))
+            added += 1
+        else:
+            cur.description = row["description"]      # 描述以最新那次為準
+            cur.unit_price = row["unit_price"]
+            cur.hits = (cur.hits or 0) + 1
+            cur.last_used_at = now
+            cur.updated_at = now
+            updated += 1
+    return added, updated
+
+
+async def record_quote_prices(quotation_id: str) -> tuple:
+    """把一張（已寄出的）報價的項目寫進價目。背景跑，失敗只記 log。"""
+    log = logging.getLogger(__name__)
+    factory = await _get_factory()
+    async with factory() as session:
+        # 🔴 _load_items 回的已經是 dict（它自己套過 _item_to_dict）——
+        #    再包一次會 AttributeError，而且背景任務會靜默吞掉
+        added, updated = await _upsert_prices(session, await _load_items(session, quotation_id))
+        await session.commit()
+    if added or updated:
+        log.info("[price_book] 報價 %s 進價目：新增 %d、更新 %d", quotation_id, added, updated)
+    return added, updated
+
+
+@router.get("/price-items", dependencies=[Depends(money_dep)])
+async def list_price_items():
+    """價目清單（最近用過的排前面）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmPriceItem).order_by(CrmPriceItem.last_used_at.desc().nullslast()).limit(500)
+        )).scalars().all()
+    return {"items": [_price_to_dict(r) for r in rows], "total": len(rows)}
+
+
+@router.put("/price-items/{item_id}")
+async def update_price_item(item_id: str, req: PriceItemPayload, request: Request):
+    """改一筆價目（改價／改描述／改單位）。改了描述或單位就重算去重鍵。"""
+    _check_quotes_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        row = await session.get(CrmPriceItem, item_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="找不到這筆價目")
+        sent = req.model_fields_set
+        if "description" in sent and (req.description or "").strip():
+            row.description = req.description.strip()[:512]
+        if "unit" in sent and (req.unit or "").strip():
+            row.unit = req.unit.strip()[:32]
+        if "unit_price" in sent:
+            row.unit_price = max(int(req.unit_price or 0), 0)
+        row.key = price_book.norm_key(row.description, row.unit)
+        row.updated_at = _now()
+        try:
+            await session.commit()
+        except IntegrityError:                 # 改成跟別筆同鍵了
+            await session.rollback()
+            raise HTTPException(status_code=409, detail="已經有同樣的品項＋單位了")
+        await session.refresh(row)
+        return {"status": "ok", "item": _price_to_dict(row)}
+
+
+@router.delete("/price-items/{item_id}")
+async def delete_price_item(item_id: str, request: Request):
+    _check_quotes_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        row = await session.get(CrmPriceItem, item_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="找不到這筆價目")
+        await session.delete(row)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.post("/price-items/import-history")
+async def import_price_items_from_history(request: Request):
+    """把**已經寄出過**的舊報價掃一遍補進價目（冪等，可以重跑）。
+
+    價目是靠「每寄出一張就多一批」慢慢長出來的；這支讓既有的歷史報價一次就位，
+    不用等下一張。草稿不掃（同 sent-only 的規則）。
+    """
+    _check_quotes_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        qids = (await session.execute(
+            select(CrmQuotation.id).where(CrmQuotation.status != QUOTE_STATUSES[0])
+        )).scalars().all()
+        added = updated = 0
+        for qid in qids:
+            a, u = await _upsert_prices(session, await _load_items(session, qid))
+            added += a
+            updated += u
+        await session.commit()
+    return {"status": "ok", "quotations": len(qids), "added": added, "updated": updated}
 
 
 # ── Quotation Template Endpoints ────────────────────────────

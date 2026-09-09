@@ -722,7 +722,8 @@ class ProjectExpensePatchPayload(BaseModel):
 # 報價的四個 payload 已搬到 core/schemas_quotes.py（schemas.py 觸及 2000 行上限）；
 # 這裡 re-export，`from core.schemas import QuotationPayload` 照舊可用。
 from core.schemas_quotes import (  # noqa: F401,E402
-    QuotationItemPayload, QuotationPayload, QuotationTemplatePayload, QuoteChatPayload,
+    PriceItemPayload, QuotationItemPayload, QuotationPayload, QuotationTemplatePayload,
+    QuoteChatPayload,
 )
 
 

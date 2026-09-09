@@ -684,6 +684,12 @@
 }
 .quote-chat-msg.user .quote-chat-body { background: #1e3a5f; }
 .quote-chat-body.thinking { color: #9ca3af; font-style: italic; }
+/* 串流中的打字游標 */
+.quote-chat-caret {
+  display: inline-block; width: 7px; height: 14px; margin-left: 2px;
+  background: #9ca3af; vertical-align: text-bottom; animation: quote-caret 1s steps(2) infinite;
+}
+@keyframes quote-caret { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
 .quote-chat-body .paste-img { max-width: 100%; border-radius: 6px; margin-top: 6px; display: block; }
 .quote-chat-q { margin: 4px 0 0 18px; padding: 0; color: #fbbf24; font-size: 12px; }
 .quote-chat-q li { margin: 2px 0; }
@@ -714,6 +720,19 @@
   .quote-ai-pane { flex-direction: column; }
   .quote-chat-summary { max-height: 30vh; }
 }
+
+/* ── 價目表（範本彈窗下半部）── */
+.quote-price-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0; border-bottom: 1px solid #2a2a2a; font-size: 12px;
+}
+.quote-price-desc {
+  flex: 1; min-width: 0; color: #d1d5db;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.quote-price-unit { flex: 0 0 36px; color: #9ca3af; text-align: center; }
+.quote-price-row .qp-price { flex: 0 0 90px; text-align: right; padding: 4px 6px; font-size: 12px; }
+.quote-price-hits { flex: 0 0 34px; color: #6b7280; text-align: right; }
 
 /* ── Quotation totals ── */
 .quote-totals {

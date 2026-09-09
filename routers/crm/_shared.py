@@ -42,7 +42,7 @@ try:
     from sqlalchemy import select, or_, delete, func, update as sa_update
     from sqlalchemy.exc import IntegrityError
     from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
-                           CrmQuotationTemplate, CrmStaff, CrmStaffPortfolio,
+                           CrmQuotationTemplate, CrmPriceItem, CrmStaff, CrmStaffPortfolio,
                            CrmProjectStaff,
                            CrmProjectExpense,
                            CrmInvoice, CrmPaymentRequest, CrmCashEntry,
@@ -63,7 +63,7 @@ except ImportError:
 __all__ = [
     "router", "token_router", "money_dep",
     "or_", "delete", "sa_update", "IntegrityError", "User", "CrmProjectExpense",
-    "CrmQuotation", "CrmQuotationItem", "CrmQuotationTemplate",
+    "CrmQuotation", "CrmQuotationItem", "CrmQuotationTemplate", "CrmPriceItem",
     "CrmStaff", "CrmStaffPortfolio", "CrmProjectStaff",
     "CrmInvoice", "CrmPaymentRequest", "CrmCashEntry", "CrmCashInvoiceLink",
     "CrmCashPaymentLink",

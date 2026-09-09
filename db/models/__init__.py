@@ -27,7 +27,7 @@ from ._crm import (  # noqa: F401
     CrmCashSplitAdvanceLink,
     CrmCostLineTemplate, CrmInvoice, CrmInvoiceTrash, CrmPaymentRequest, CrmProject,
     CrmProjectCostGroup, CrmProjectCostLine, CrmProjectExpense, CrmProjectShowcase,
-    CrmProjectStaff, CrmQuotation, CrmQuotationItem, CrmQuotationTemplate,
+    CrmPriceItem, CrmProjectStaff, CrmQuotation, CrmQuotationItem, CrmQuotationTemplate,
     CrmReimbursement, CrmStaff, CrmStaffPortfolio, WEBSITE_TEAM_OVERRIDE_FIELDS)
 
 # Work OS：工時/請假/里程碑/月結 ＋ 前期（場景/提案/企劃/參考）＋ 情報/門戶/器材/素材

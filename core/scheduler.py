@@ -463,6 +463,46 @@ async def _run_daily_master_task(task_key: str, hour_key: str, body) -> None:
     _daily_fired[task_key] = today
 
 
+# ── 報價助理的截圖兜底清理（docs/QUOTE_ASSISTANT_PLAN.md §5.4）──────────
+
+async def _quote_chat_image_sweep() -> None:
+    """草稿放超過 N 天還沒寄出 → 也把對話裡的截圖清掉（settings `finance.quote_chat_image_days`，預設 30）。
+
+    寄出與刪報價那兩條路已經在 routers/crm/quotes 清了；這支管的是「聊到一半就沒下文」
+    的草稿 —— 沒有它，客戶的 LINE 截圖會無限期躺在共用圖床上。
+    """
+    async def _body(factory, now):
+        from datetime import timedelta, timezone
+        from sqlalchemy import select
+        from db.models import CrmQuotation
+        from routers.crm.quotes import purge_quote_chat_images
+        from core.finance_logic import QUOTE_STATUSES
+        try:
+            from config import load_settings
+            days = int((load_settings().get("finance") or {}).get("quote_chat_image_days") or 30)
+        except Exception:
+            days = 30
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max(days, 1))
+        async with factory() as session:
+            rows = (await session.execute(
+                select(CrmQuotation.id).where(
+                    CrmQuotation.status == QUOTE_STATUSES[0],      # 只掃草稿
+                    CrmQuotation.chat.isnot(None),
+                    CrmQuotation.updated_at < cutoff,
+                ).limit(200)
+            )).scalars().all()
+        total = 0
+        for qid in rows:
+            try:
+                total += await purge_quote_chat_images(qid)
+            except Exception as e:                        # noqa: BLE001 — 一張清不掉不擋其他張
+                _log.warning("[quote_chat] 清 %s 的截圖失敗：%s", qid, e)
+        if total:
+            _log.info("[quote_chat] 兜底清理：%d 張截圖（%d 張逾期草稿）", total, len(rows))
+
+    await _run_daily_master_task("quote_chat_images", "quote_chat_image_hour", _body)
+
+
 # ── 貸款繳款提醒（財務階段四）─────────────────────────────────
 
 async def _loan_due_check() -> None:
@@ -604,6 +644,11 @@ async def run_scheduler():
             await _finance_calendar_check()
         except Exception:
             _log.exception("財務行事曆提醒檢查異常")
+        # 報價助理的截圖兜底清理（master gate 在 _run_daily_master_task 裡）
+        try:
+            await _quote_chat_image_sweep()
+        except Exception:
+            _log.exception("報價截圖兜底清理異常")
         # 參考影片封存 runner（master gate + enabled 開關都在 service 內；
         # tick 只負責「該跑就丟背景任務」，長時下載絕不阻塞這個迴圈）
         try:

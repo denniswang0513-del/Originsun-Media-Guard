@@ -212,7 +212,7 @@
 <div id="quote-template-modal" class="crm-modal-overlay" style="display:none;">
   <div class="crm-modal" style="max-width:600px;">
     <div class="crm-modal-header">
-      <h3>報價範本</h3>
+      <h3>範本與價目</h3>
       <button onclick="document.getElementById('quote-template-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
     </div>
     <div class="crm-modal-body">
@@ -220,6 +220,17 @@
         <button id="quote-tpl-btn-add" class="crm-btn crm-btn-primary crm-btn-sm">+ 新增範本</button>
       </div>
       <div id="quote-template-list"></div>
+
+      <!-- 價目表（docs/QUOTE_ASSISTANT_PLAN.md P3）：寄出報價時自動收價，AI 開草稿時對得上就帶 -->
+      <div class="crm-form-section" style="display:flex;justify-content:space-between;align-items:center;margin-top:20px;">
+        價目表
+        <button type="button" id="quote-price-import" class="crm-btn crm-btn-secondary crm-btn-sm">從歷史報價匯入</button>
+      </div>
+      <small style="color:#888;display:block;margin-bottom:8px;">
+        報價**寄出**時會把那張的品項單價收進來（草稿不收）。AI 幫你開草稿時，
+        對得上的品項就直接帶這裡的價，對不上才問你。
+      </small>
+      <div id="quote-price-list"></div>
     </div>
     <div class="crm-modal-footer">
       <button onclick="document.getElementById('quote-template-modal').style.display='none'" class="crm-btn crm-btn-secondary">關閉</button>

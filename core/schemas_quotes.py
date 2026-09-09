@@ -35,6 +35,13 @@ class QuotationPayload(BaseModel):
     items: List[QuotationItemPayload] = []
 
 
+class PriceItemPayload(BaseModel):
+    """改一筆價目（沒送的欄位不動 —— 前端只想改價的時候不該把描述洗掉）。"""
+    description: Optional[str] = None
+    unit: Optional[str] = None
+    unit_price: Optional[int] = None
+
+
 class QuoteChatPayload(BaseModel):
     """對話式完成報價：使用者這一輪說的話（可含貼圖 token）。docs/QUOTE_ASSISTANT_PLAN.md"""
     text: str = ""

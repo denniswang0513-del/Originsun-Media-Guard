@@ -34,6 +34,7 @@ let _projects = [];
 let _clients = [];
 let _users = [];
 let _templates = [];
+let _priceItems = [];
 let _selectedId = null;
 let _editingId = null;  // null=新增, string=編輯
 let _editingQuote = null;   // 正在編的那筆（openModal 帶進來的物件；不從 _quotations 查——那份清單有狀態篩選，查不到就被當成新增）
@@ -527,6 +528,7 @@ let _chat = [];
 let _chatApplied = 0;      // 已套用過 patch 的訊息數
 let _chatBusy = false;     // 等 AI 回覆中
 let _chatGen = 0;          // 開窗世代：關窗／換一張報價後，舊的輪詢自己收工
+let _chatPartial = '';     // 串流到目前為止的 reply（後端 GET /chat 的 partial）
 
 function _chatBubble(m) {
     const who = m.role === 'user' ? '你' : 'AI';
@@ -557,9 +559,12 @@ function _renderChat() {
         log.innerHTML = `<div class="crm-empty">把客戶的訊息整段貼進下面，或直接貼截圖。<br>
             AI 會整理成項目，不確定的地方會問你。</div>`;
     } else {
+        // 串流：有字就直接顯示（邊產邊看），還沒有就維持「思考中…」
+        const streaming = _chatPartial
+            ? `<div class="quote-chat-body">${_esc(_chatPartial)}<span class="quote-chat-caret"></span></div>`
+            : `<div class="quote-chat-body thinking">思考中…</div>`;
         log.innerHTML = _chat.map(_chatBubble).join('') + (_chatBusy
-            ? `<div class="quote-chat-msg ai"><div class="quote-chat-who">AI</div>
-               <div class="quote-chat-body thinking">思考中…（約 30 秒）</div></div>` : '');
+            ? `<div class="quote-chat-msg ai"><div class="quote-chat-who">AI</div>${streaming}</div>` : '');
     }
     log.scrollTop = log.scrollHeight;
     const off = !_editingId || _chatBusy;
@@ -627,20 +632,24 @@ async function _loadChat() {
 async function _pollChat(expect, gen) {
     const started = Date.now();
     while (_chatBusy && gen === _chatGen && Date.now() - started < 180000) {
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 1000));   // 串流要看得出來在動，1 秒一問
         if (gen !== _chatGen || !_editingId) return;
         let d;
         try { d = await _fetch(`/quotations/${_editingId}/chat`); } catch (_) { continue; }
         if ((d.chat || []).length >= expect) {
             _chat = d.chat || [];
-            _chatBusy = false;
+            _chatBusy = false; _chatPartial = '';
             _applyNewChatPatches();
             _renderChat();
             return;
         }
+        if (typeof d.partial === 'string' && d.partial !== _chatPartial) {
+            _chatPartial = d.partial;                  // 邊產邊長出來
+            _renderChat();
+        }
     }
     if (_chatBusy && gen === _chatGen) {
-        _chatBusy = false; _renderChat();
+        _chatBusy = false; _chatPartial = ''; _renderChat();
         _showModalError('AI 沒有在時間內回覆（可能 claude 在排隊或沒登入）');
     }
 }
@@ -656,7 +665,7 @@ async function _sendChat() {
     const gen = _chatGen;
     ta.value = '';
     document.getElementById('quote-chat-thumbs').innerHTML = '';
-    _chatBusy = true;
+    _chatBusy = true; _chatPartial = '';
     _renderChat();
     try {
         const r = await _fetch(`/quotations/${_editingId}/chat`,
@@ -667,7 +676,7 @@ async function _sendChat() {
         _renderChat();
         await _pollChat(_chat.length + 1, gen);
     } catch (e) {
-        _chatBusy = false; _renderChat();
+        _chatBusy = false; _chatPartial = ''; _renderChat();
         _showModalError('送出失敗：' + e.message);
     }
 }
@@ -806,7 +815,7 @@ async function _autoRenameShell() {
 /** 關窗（X／取消／點外面）：把還沒送出去的補送完再收工。已經自動存的草稿留著，不刪 */
 async function closeModal() {
     clearTimeout(_autoTimer); _autoTimer = null;
-    _chatGen++; _chatBusy = false;      // 還在等 AI 的輪詢看到世代變了就收工
+    _chatGen++; _chatBusy = false; _chatPartial = '';   // 還在等 AI 的輪詢看到世代變了就收工
     const pending = (_autoOn && _editingId && _autoDirty) ? _autoQueue(_autoFlush) : _autoChain;
     const hadDraft = _autoOn && !!_editingId;
     document.getElementById('quote-modal').style.display = 'none';
@@ -858,7 +867,7 @@ async function openModal(quotation = null, projectId = null) {
     _setItems(q.items || [], { blankIfEmpty: !quotation });   // 新增：先給一個空的大項目
     _recalcTotals();
 
-    _chat = []; _chatApplied = 0; _chatBusy = false; _chatGen++;   // 舊的輪詢看到世代變了就收工
+    _chat = []; _chatApplied = 0; _chatBusy = false; _chatPartial = ''; _chatGen++;   // 舊的輪詢看到世代變了就收工
     _setPane('form');
     if (_editingId) _loadChat();
 
@@ -1013,6 +1022,67 @@ async function _deleteTemplate(id) {
     } catch (e) { alert(e.message); }
 }
 
+// ── 價目表（docs/QUOTE_ASSISTANT_PLAN.md P3）────────────────
+// 「答過的價順手存成價目，下一張 AI 就自己帶」。收價的時機是**寄出**（後端做），
+// 這裡只負責看／改／刪，外加一顆把歷史報價一次補進來的鈕。
+
+async function _loadPrices() {
+    try { _priceItems = (await _fetch('/price-items')).items || []; }
+    catch (_) { _priceItems = []; }
+    _renderPriceList();
+}
+
+function _renderPriceList() {
+    const el = document.getElementById('quote-price-list');
+    if (!el) return;
+    if (!_priceItems.length) {
+        el.innerHTML = `<div class="crm-empty">還沒有價目 —— 寄出一張報價就會自動收進來，
+            或按上面「從歷史報價匯入」把舊的補進來。</div>`;
+        return;
+    }
+    el.innerHTML = _priceItems.map(p => `
+        <div class="quote-price-row" data-id="${p.id}">
+            <span class="quote-price-desc" title="${_esc(p.description)}">${_esc(p.description)}</span>
+            <span class="quote-price-unit">${_esc(p.unit || '式')}</span>
+            <input type="number" class="crm-input qp-price" value="${p.unit_price}" min="0">
+            <span class="quote-price-hits" title="報過幾次">×${p.hits || 1}</span>
+            <button type="button" class="crm-btn crm-btn-danger crm-btn-sm qp-del" title="刪掉這筆">&#x2715;</button>
+        </div>`).join('');
+
+    el.querySelectorAll('.quote-price-row').forEach(row => {
+        const id = row.dataset.id;
+        const input = row.querySelector('.qp-price');
+        input.addEventListener('change', async () => {     // 離開欄位才送（打字不送）
+            const v = Math.max(parseInt(input.value) || 0, 0);
+            try {
+                await _fetch(`/price-items/${id}`, { method: 'PUT', body: JSON.stringify({ unit_price: v }) });
+                const hit = _priceItems.find(x => x.id === id);
+                if (hit) hit.unit_price = v;
+            } catch (e) { alert('改價失敗：' + e.message); _loadPrices(); }
+        });
+        row.querySelector('.qp-del').addEventListener('click', async () => {
+            const p = _priceItems.find(x => x.id === id);
+            if (!confirm(`刪掉「${p ? p.description : ''}」這筆價目？`)) return;
+            try { await _fetch(`/price-items/${id}`, { method: 'DELETE' }); await _loadPrices(); }
+            catch (e) { alert('刪除失敗：' + e.message); }
+        });
+    });
+}
+
+async function _importPricesFromHistory() {
+    const btn = document.getElementById('quote-price-import');
+    btn.disabled = true; btn.textContent = '匯入中…';
+    try {
+        const r = await _fetch('/price-items/import-history', { method: 'POST' });
+        await _loadPrices();
+        alert(`掃了 ${r.quotations} 張寄出過的報價：新增 ${r.added} 筆、更新 ${r.updated} 筆`);
+    } catch (e) {
+        alert('匯入失敗：' + e.message);
+    } finally {
+        btn.disabled = false; btn.textContent = '從歷史報價匯入';
+    }
+}
+
 // ── Init ─────────────────────────────────────────────────────
 
 // 三個彈窗入口也給專案頁的報價子頁 import（crm-projects-quotes.js）——它們在這裡是 window.* 給
@@ -1127,8 +1197,10 @@ export async function initCrmQuotesTab() {
     }
     document.getElementById('quote-btn-templates').addEventListener('click', () => {
         _renderTemplateList();
+        _loadPrices();                 // 價目跟範本同一個彈窗
         document.getElementById('quote-template-modal').style.display = 'flex';
     });
+    document.getElementById('quote-price-import').addEventListener('click', _importPricesFromHistory);
     document.getElementById('quote-tpl-btn-add').addEventListener('click', _addTemplate);
     document.getElementById('quote-btn-as-template').addEventListener('click', _addTemplateFromForm);
 

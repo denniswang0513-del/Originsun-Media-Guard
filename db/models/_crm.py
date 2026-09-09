@@ -210,6 +210,29 @@ class CrmQuotationTemplate(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class CrmPriceItem(Base):
+    """報價價目（docs/QUOTE_ASSISTANT_PLAN.md P3）：報過的品項單價，AI 下一張自動帶。
+
+    只有**寄出**的報價會寫進來（草稿還在談，而且自動存每 1.2 秒一發）。
+    去重鍵 `key` = core.price_book.norm_key(描述, 單位)。
+    """
+    __tablename__ = "crm_price_items"
+
+    id = Column(String(32), primary_key=True)
+    key = Column(String(300), nullable=False, unique=True)      # norm_key(描述, 單位)
+    description = Column(String(512), nullable=False)
+    unit = Column(String(32), nullable=False, default="式")
+    unit_price = Column(Integer, nullable=False, default=0)
+    hits = Column(Integer, nullable=False, default=1)           # 報過幾次（排序用）
+    last_used_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_price_item_used", "last_used_at"),
+    )
+
+
 class CrmStaff(Base):
     """CRM 人員資料庫。"""
     __tablename__ = "crm_staff"
