@@ -660,7 +660,9 @@ async function _loadChat() {
 
 async function _pollChat(expect, gen) {
     const started = Date.now();
-    while (_chatBusy && gen === _chatGen && Date.now() - started < 180000) {
+    // 後端一輪最久 _CLAUDE_TIMEOUT_SEC=180 秒，前面還可能排隊（閘門只有 2）——
+    // 跟它一樣長的話一排隊就先在前端喊逾時，那一則的 patch 之後也不會再被套用
+    while (_chatBusy && gen === _chatGen && Date.now() - started < 400000) {
         await new Promise(r => setTimeout(r, 1000));   // 串流要看得出來在動，1 秒一問
         if (gen !== _chatGen || !_editingId) return;
         let d;
@@ -692,8 +694,12 @@ async function _sendChat() {
     const ta = document.getElementById('quote-chat-input');
     const text = (ta?.value || '').trim();
     if (!text || !_editingId || _chatBusy) return;
-    // 🔴 先把自動存送完：AI 讀的是 DB 那份，順序要跟畫面一致（patch 的編號才對得上）
+    // 🔴 先把畫面上的內容送進 DB：AI 讀的是 DB 那份，順序與內容要跟畫面一致
+    //    （patch 的編號才對得上）。編輯既有報價時自動存是關的（_autoOn=false）——
+    //    那條路沒有 _autoDirty 可以 flush，不補這一發的話使用者剛在彈窗裡加／刪的項目
+    //    AI 完全看不到，它說「改第 3 項」就會落在別人身上。
     if (_autoDirty) { clearTimeout(_autoTimer); _autoTimer = null; await _autoQueue(_autoFlush); }
+    else if (!_autoOn && _editingId) { await _autoQueue(() => _saveAiChange('已存下目前的內容')); }
     else { try { await _autoChain; } catch (_) {} }
 
     const gen = _chatGen;

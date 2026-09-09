@@ -293,8 +293,17 @@ def _clean_update(rows: Any) -> list:
         for k in _UPDATABLE:
             if k not in r or r[k] is None:
                 continue
-            patch[k] = (max(_int(r[k], 0), 0) if k in ("quantity", "unit_price")
-                        else str(r[k]).strip())
+            if k in ("quantity", "unit_price"):
+                patch[k] = max(_int(r[k], 0), 0)
+                continue
+            val = str(r[k]).strip()
+            # 空字串＝「沒有要改」，不是「清空」。描述／單位被洗成空的那一列，
+            # 存檔時（前端 filter(it => it.description)）會整個被丟掉 —— AI 回一個
+            # 空 description 就等於默默刪掉使用者的項目。group_name 例外：空的
+            # 就是「未分類」那一組，是合法的目的地。
+            if not val and k != "group_name":
+                continue
+            patch[k] = val
         if len(patch) > 1:
             out.append(patch)
     return out

@@ -160,12 +160,15 @@ async function applyNew() {
 
 async function poll(expect, gen) {
     const t0 = Date.now();
-    while (S && S.busy && gen === S.gen && Date.now() - t0 < 180000) {
+    // 後端一輪最久 _CLAUDE_TIMEOUT_SEC=180 秒，前面還可能排隊（閘門只有 2）——
+    // 這裡跟 180 秒一樣長的話，一排隊就一定先在前端喊逾時，而那則回覆其實還在路上
+    while (S && S.busy && gen === S.gen && Date.now() - t0 < 400000) {
         await new Promise(r => setTimeout(r, 1000));
         if (!S || gen !== S.gen) return;
         let d;
         try { d = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(S.q.id)}/chat`); }
         catch (_) { continue; }
+        if (!S || gen !== S.gen) return;         // 這一趟 await 中間使用者把視窗關了（S 變 null）
         if ((d.chat || []).length >= expect) {
             S.chat = d.chat || []; S.busy = false; S.partial = '';
             await applyNew();
@@ -200,13 +203,13 @@ async function send() {
     try {
         const r = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(S.q.id)}/chat`,
                                { method: 'POST', body: { text } });
-        if (gen !== S.gen) return;
+        if (!S || gen !== S.gen) return;         // await 中間視窗被關掉
         S.chat = r.chat || S.chat;
         S.applied = S.chat.length;           // 使用者那則沒有 patch
         render();
         await poll(S.chat.length + 1, gen);
     } catch (e) {
-        S.busy = false; render();
+        if (S && gen === S.gen) { S.busy = false; render(); }   // 關掉視窗時 S 已經是 null
         toast(e.message, 'err');
     }
 }
@@ -246,6 +249,7 @@ async function fillPrices() {
         const update = (r.matches || [])
             .filter(m => !(rows[m.n - 1] || {}).unit_price)
             .map(m => ({ n: m.n, unit_price: m.unit_price }));
+        if (!S) return;                          // await 中間視窗被關掉
         if (!update.length) { toast('價目裡沒有對得上、又還缺價的品項', 'err'); return; }
         const out = applyQuotePatch(S.groups, S.terms, { add: [], update, remove: [] });
         S.groups = out.groups; S.terms = out.terms;

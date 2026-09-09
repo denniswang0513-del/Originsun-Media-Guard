@@ -473,7 +473,7 @@ async def _quote_chat_image_sweep() -> None:
     """
     async def _body(factory, now):
         from datetime import timedelta, timezone
-        from sqlalchemy import select
+        from sqlalchemy import Text, cast, select
         from db.models import CrmQuotation
         from routers.crm.quotes import purge_quote_chat_images
         from core.finance_logic import QUOTE_STATUSES
@@ -488,6 +488,10 @@ async def _quote_chat_image_sweep() -> None:
                 select(CrmQuotation.id).where(
                     CrmQuotation.status == QUOTE_STATUSES[0],      # 只掃草稿
                     CrmQuotation.chat.isnot(None),
+                    # 🔴 只挑「對話裡真的還有截圖」的：清過的列 chat 仍不是 NULL，
+                    #    而清理不會動 updated_at —— 光靠上面兩條，清過的草稿每天都會
+                    #    再被撈一次，把 limit 的名額佔滿，新過期的那些就永遠輪不到。
+                    cast(CrmQuotation.chat, Text).like("%paste:%"),
                     CrmQuotation.updated_at < cutoff,
                 ).limit(200)
             )).scalars().all()

@@ -12,11 +12,22 @@
  *    絕不整包覆寫 —— 聊到第 8 輪把第 3 輪手改的單價默默洗掉，是這個功能最容易犯的錯。
  */
 
-/** 攤平：[{name, items[]}] → [{...item, _g: 大項目索引, _i: 組內索引}]（順序＝編號順序） */
+/** 攤平成「編號用」的清單：[{name, items[]}] → [{...item, _g: 大項目索引, _i: 組內索引}]。
+ *
+ * 🔴 **沒有描述的列不編號**：編輯器裡隨時有還沒填的空白列（新增報價預設一列、
+ *    「＋子項目」、AI 把整組刪光後補的那列），但它們**存不進 DB**（存檔前
+ *    `filter(it => it.description)`），所以後端 `core/quote_chat.item_lines()`
+ *    與 `/price-items/match` 回的 n 都是照「有描述的那些」從 1 數的。
+ *    這裡跟著濾掉，兩邊的編號才是同一套 —— 不濾的話畫面上多一列空白，
+ *    AI 說「改第 3 項」就會改到第 2 項（而且改到的是存檔時會被丟掉的空白列）。
+ */
 export function flattenForPatch(groups) {
     const out = [];
     (groups || []).forEach((g, gi) => {
-        (g.items || []).forEach((it, i) => out.push({ ...it, _g: gi, _i: i }));
+        (g.items || []).forEach((it, i) => {
+            if (!String(it.description || '').trim()) return;
+            out.push({ ...it, _g: gi, _i: i });
+        });
     });
     return out;
 }
@@ -45,6 +56,10 @@ export function applyQuotePatch(groups, terms, patch) {
     const applied = { added: 0, updated: 0, removed: 0, terms: 0 };
 
     // ── update：只寫 patch 真的帶了的欄位 ──
+    // group_name 是「把**這一項**換到別的大項目」，不是把整組改名 —— 直接改
+    // next[_g].name 會連坐同組其他項目（AI 只說要改第 3 項，第 1、2 項跟著被重新分類）。
+    // 真的搬動留到 remove／add 都做完再做，否則前面用的編號會當場位移。
+    const moves = [];                            // [{item, name}]
     (p.update || []).forEach(u => {
         const ref = flat[(u.n | 0) - 1];
         if (!ref) return;                        // 編號對不上（草稿被改過）就跳過，不亂猜
@@ -53,9 +68,22 @@ export function applyQuotePatch(groups, terms, patch) {
         let touched = false;
         _UPDATABLE.forEach(k => {
             if (u[k] === undefined || u[k] === null) return;
-            if (k === 'group_name') { next[ref._g].name = String(u[k]); touched = true; return; }
-            target[k] = (k === 'quantity' || k === 'unit_price')
-                ? Math.max(parseInt(u[k]) || 0, 0) : String(u[k]);
+            if (k === 'group_name') {
+                const name = String(u[k]).trim();
+                if (name === (next[ref._g].name || '').trim()) return;   // 本來就在這一組
+                moves.push({ item: target, name });
+                touched = true;
+                return;
+            }
+            if (k === 'quantity' || k === 'unit_price') {
+                target[k] = Math.max(parseInt(u[k]) || 0, 0);
+                touched = true;
+                return;
+            }
+            const v = String(u[k]).trim();
+            // 空字串＝「沒有要改」，不是「清空」：描述被洗掉的那一列存檔時會整個被丟掉
+            if (!v) return;
+            target[k] = v;
             touched = true;
         });
         if (touched) applied.updated++;
@@ -86,6 +114,19 @@ export function applyQuotePatch(groups, terms, patch) {
             unit_price: Math.max(parseInt(row.unit_price) || 0, 0),
         });
         applied.added++;
+    });
+
+    // ── 換大項目：所有用到編號的動作都做完了才搬（照物件比對，不靠索引） ──
+    moves.forEach(({ item, name }) => {
+        let found = false;
+        for (const g of next) {
+            const i = g.items.indexOf(item);
+            if (i >= 0) { g.items.splice(i, 1); found = true; break; }
+        }
+        if (!found) return;                      // 同一輪又被 remove 掉了
+        let g = next.find(x => (x.name || '').trim() === name);
+        if (!g) { g = { name, items: [] }; next.push(g); }
+        g.items.push(item);
     });
 
     // 空掉的大項目收掉（remove 把整組刪光時）；一個都不剩就留一列空的給人接著填
