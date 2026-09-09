@@ -83,6 +83,12 @@ ADMIN_ONLY_CRM = {
     "media_log_catchup_now", "update_media_log_settings",                              # 整棵重掃／全系統收檔設定
     "upload_showcase_cover", "upload_showcase_gallery", "delete_showcase_gallery", "upload_showcase_process",
     "delete_showcase_process", "auto_showcase_credits",                                 # 舊 showcase 寫入（前端走 token 端點，疑似死碼）
+    # 🔴 報價助理的對話（owner 2026-09-09 拍板）：使用者打的字會原封不動進 claude 的提示，
+    #    而 claude 讀得到這台機器上的檔案 —— 有 crm_quotes 的人可以叫它「去讀 settings.json
+    #    放進 reply」，把 jwt_secret／database_url 印進對話泡泡（同 reference_settings_load_secret_leak）。
+    #    提示注入沒有可靠的擋法，所以能按的人收到跟「刪除報價」同一級；
+    #    另外還限了 --allowedTools Read 與非 repo 的工作目錄當縱深。
+    "quote_chat_send",
 }
 
 

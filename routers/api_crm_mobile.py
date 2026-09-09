@@ -340,7 +340,15 @@ async def mobile_quotation_status(quotation_id: str, req: MobileQuoteStatusPaylo
                 project_out = await project_wire(session, project)
         quotation = _to_quotation_dict(q, project_name=project.name if project else "",
                                        client_short_name=client_name)
-    from routers.crm.quotes import archive_quotation_pdf_now, quotation_sent_transition
+    from core.bg_task import fire
+    from routers.crm.quotes import (archive_quotation_pdf_now, purge_quote_chat_images,
+                                    quotation_sent_transition, record_quote_prices)
     if quotation_sent_transition(prev_status, q.status):     # 寄出＝存一份 PDF 到報價單資料夾（同桌機那條）
         background.add_task(archive_quotation_pdf_now, q.id)
+        # 🔴 這三件事要跟桌機 update_quotation 一模一樣。少了後兩支的話，在手機上用
+        #    AI 助理、再從手機按寄出 —— 客戶的 LINE 截圖會永遠留在共用圖床上
+        #    （打掉「做完自動刪圖」那條），而且這張的價永遠不會進價目。
+        #    用 fire 不用 background：那串是串行的，前面產 PDF 的 Playwright 慢或炸掉就整串不跑。
+        fire(purge_quote_chat_images(q.id), label="quote purge " + q.id)
+        fire(record_quote_prices(q.id), label="quote prices " + q.id)
     return {"status": "ok", "quotation": quotation, "project": project_out}

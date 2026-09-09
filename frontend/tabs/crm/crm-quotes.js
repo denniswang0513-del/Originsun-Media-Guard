@@ -626,9 +626,15 @@ function _renderChatSummary() {
 async function _persistNow(note) {
     if (!_editingId) return;
     clearTimeout(_autoTimer); _autoTimer = null;   // debounce 排到一半的那發不用了
+    // 🔴 編輯既有報價時不准帶 status：`_buildPayload()` 一定會放狀態下拉的值，而後端
+    //    只要 payload 裡有 status 就寫回去。使用者把下拉改成「已寄送」卻還沒按儲存，
+    //    只是送一句 AI 對話或按「用價目補上」，就會默默觸發寄出 —— 存 PDF、清掉截圖、
+    //    把價收進價目，三件都不可復原。新增那條路的草稿是我們自己開的，狀態照送沒問題。
+    const payload = _buildPayload();
+    if (!_autoOn) delete payload.status;
     _autoNote('儲存中…');
     try {
-        await _fetch(`/quotations/${_editingId}`, { method: 'PUT', body: JSON.stringify(_buildPayload()) });
+        await _fetch(`/quotations/${_editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
         _autoDirty = false;
         _autoNote(note || '已儲存', 'ok');
     } catch (e) {
@@ -1236,7 +1242,11 @@ export async function initCrmQuotesTab() {
     document.getElementById('quote-btn-add-item').addEventListener('click', () => { addGroup(); _recalcTotals(); });
     document.getElementById('quote-btn-add-term').addEventListener('click', addTermRow);
 
-    // 「和 AI 一起完成」分頁
+    // 「和 AI 一起完成」分頁。🔴 管理員限定 —— 後端 POST /quotations/{id}/chat 走 _check_auth
+    // （使用者打的字會原封不動進 claude 的提示，見那支的說明）。沒權限就別畫這個分頁，
+    // 畫了按下去只會拿到 403。
+    const aiTabBtn = document.querySelector('#quote-modal-tabs .crm-tab[data-pane="ai"]');
+    if (aiTabBtn && !_isAdmin()) aiTabBtn.remove();
     ensurePasteBase();                  // 貼圖縮圖要的圖床網址（拿不到就只顯示文字）
     document.querySelectorAll('#quote-modal-tabs .crm-tab').forEach(btn =>
         btn.addEventListener('click', () => _setPane(btn.dataset.pane)));
