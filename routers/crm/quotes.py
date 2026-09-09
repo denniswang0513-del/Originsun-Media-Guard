@@ -17,7 +17,9 @@ from fastapi.responses import HTMLResponse
 from core.finance_logic import QUOTE_PENDING, QUOTE_STATUSES
 from core.no_store import no_store_file
 from core.quotation_pdf import PDF_MARGIN, build_quotation_view, footer_line
-from core.schemas import QuotationPayload, QuotationTemplatePayload
+from core import quote_chat
+from core.bg_task import fire
+from core.schemas import QuotationPayload, QuotationTemplatePayload, QuoteChatPayload
 
 from ._shared import (router, token_router, _check_auth, _check_quotes_auth, money_dep,
                       _require_db, _get_factory,
@@ -528,6 +530,122 @@ async def delete_quotation(quotation_id: str, request: Request):
         await session.delete(q)
         await session.commit()
     return {"status": "ok"}
+
+
+# ── 對話式完成報價（docs/QUOTE_ASSISTANT_PLAN.md）────────────
+# 🔴 **寫入者只有前端**：這裡只「算出 patch」寫進 chat，**不直接改項目**。
+#    前端拿到 patch 套進畫面 → 自動存 PUT 回來。兩邊都寫的話，前端下一發自動存
+#    會拿舊狀態把這裡的改動蓋掉，而且是靜默的。
+#    送出前前端會先 flush 自動存，所以這裡讀到的順序＝畫面的順序（patch 的編號才對得上）。
+
+
+def _quote_chat_model() -> str:
+    """要用哪顆模型（settings `ai.models.quote_chat`）。
+
+    預設 sonnet：實測抽結構化這種短活 sonnet 就夠，opus 留給要推理的；
+    haiku 實測反而比 sonnet 慢一倍（見規劃正本 §7）。
+    """
+    from config import load_settings
+    models = (load_settings().get("ai") or {}).get("models") or {}
+    return str(models.get("quote_chat") or "sonnet").strip() or "sonnet"
+
+
+def _paste_image_paths(text: str) -> list:
+    """貼圖 token → 本機絕對路徑（真的讀得到的才回）。
+
+    全站貼圖層（routers/api_paste.py）把圖轉成 WebP 寫進共用圖床，內容裡只留
+    `paste:<32hex>.webp`。claude CLI 讀得懂本機 WebP（實測 15.6 秒、內容全對）。
+    """
+    names = quote_chat.paste_tokens(text)
+    if not names:
+        return []
+    from core.assets_host import assets_target
+    root, _base = assets_target("paste")
+    if not root:
+        return []
+    return [p for p in (os.path.join(root, n) for n in names) if os.path.isfile(p)]
+
+
+async def _run_quote_chat(quotation_id: str) -> None:
+    """背景：讀草稿＋對話 → 叫 claude → 正規化 → 把 AI 那一則寫回 chat。"""
+    factory = await _get_factory()
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
+        if q is None:
+            return
+        chat = list(q.chat or [])
+        items = await _load_items(session, q.id)
+        project = await session.get(CrmProject, q.project_id)
+        client = (await session.get(Client, project.client_id)
+                  if project and project.client_id else None)
+        snap = _to_quotation_dict(
+            q, items=items,
+            project_name=project.name if project else "",
+            client_short_name=client.short_name if client else "")
+
+    last_user = next((m for m in reversed(chat)
+                      if m.get("role") == quote_chat.ROLE_USER), {})
+    prompt = quote_chat.build_prompt(snap, chat,
+                                     _paste_image_paths(last_user.get("text") or ""))
+    # 唯讀模式（同公布欄「問 Claude」）—— 它只要讀截圖，不該碰任何東西
+    from services.website.seo_runner import _call_claude
+    text, err = await _call_claude(
+        prompt, extra_args=["--model", _quote_chat_model(), "--permission-mode", "plan"])
+
+    if text is None:
+        parsed = quote_chat.parse_reply("")
+        parsed["reply"] = "（叫不動 claude：" + (err or "未知錯誤") + "）"
+    else:
+        parsed = quote_chat.parse_reply(text)
+
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
+        if q is None:
+            return
+        chat = list(q.chat or [])
+        chat.append(quote_chat.message(
+            quote_chat.ROLE_AI, parsed["reply"] or "（沒有回覆）",
+            _now().isoformat(timespec="seconds"),
+            patch=parsed["patch"], questions=parsed["questions"],
+            needs_price=parsed["needs_price"], terms_add=parsed["terms_add"]))
+        q.chat = chat
+        await session.commit()
+
+
+@router.post("/quotations/{quotation_id}/chat")
+async def quote_chat_send(quotation_id: str, body: QuoteChatPayload, request: Request):
+    """使用者這一輪的話寫進 chat ＋ 背景叫 claude；前端輪詢 GET .../chat 看回覆。"""
+    _check_quotes_auth(request)
+    _require_db()
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="請先輸入內容")
+    factory = await _get_factory()
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
+        if q is None:
+            raise HTTPException(status_code=404, detail="找不到此報價")
+        chat = list(q.chat or [])
+        chat.append(quote_chat.message(quote_chat.ROLE_USER, text,
+                                       _now().isoformat(timespec="seconds")))
+        q.chat = chat
+        await session.commit()
+    # 裸 create_task 只被 loop 弱參考，例外一裸奔那則提問就永遠停在「思考中…」
+    fire(_run_quote_chat(quotation_id), label="quote chat " + quotation_id)
+    return {"status": "asking", "chat": chat}
+
+
+@router.get("/quotations/{quotation_id}/chat", dependencies=[Depends(money_dep)])
+async def quote_chat_history(quotation_id: str):
+    """這張報價的對話（前端輪詢用）。清單那支刻意不帶 chat —— 幾百則不該進清單。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
+        if q is None:
+            raise HTTPException(status_code=404, detail="找不到此報價")
+        chat = list(q.chat or [])
+    return {"chat": chat, "count": len(chat)}
 
 
 # ── Quotation Template Endpoints ────────────────────────────

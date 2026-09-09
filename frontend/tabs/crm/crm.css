@@ -656,6 +656,65 @@
 .quote-auto-note.ok  { color: #4ade80; }
 .quote-auto-note.err { color: #f87171; }
 
+/* ── 報價彈窗：兩個分頁（報價內容／和 AI 一起完成）── */
+.crm-modal.quote-modal { max-width: 780px; }
+.crm-modal.quote-modal.quote-modal-wide { max-width: 1180px; }
+
+.quote-modal-tabs {
+  display: flex; gap: 4px; margin: -4px 0 14px;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+/* 對話｜摘要 兩欄 */
+.quote-ai-pane { display: flex; gap: 16px; align-items: stretch; min-height: 420px; }
+.quote-ai-chat { flex: 1.3; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.quote-ai-side { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.quote-chat-log {
+  flex: 1; min-height: 320px; max-height: 46vh; overflow-y: auto;
+  background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 8px;
+  padding: 12px; display: flex; flex-direction: column; gap: 10px;
+}
+.quote-chat-msg { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.quote-chat-who { font-size: 11px; color: #9ca3af; font-weight: 600; }
+.quote-chat-at { color: #6b7280; font-weight: 400; margin-left: 6px; }
+.quote-chat-body {
+  background: #2a2a2a; border-radius: 8px; padding: 8px 10px;
+  color: #e5e7eb; white-space: pre-wrap; word-break: break-word;
+}
+.quote-chat-msg.user .quote-chat-body { background: #1e3a5f; }
+.quote-chat-body.thinking { color: #9ca3af; font-style: italic; }
+.quote-chat-body .paste-img { max-width: 100%; border-radius: 6px; margin-top: 6px; display: block; }
+.quote-chat-q { margin: 4px 0 0 18px; padding: 0; color: #fbbf24; font-size: 12px; }
+.quote-chat-q li { margin: 2px 0; }
+.quote-chat-np { font-size: 12px; color: #f87171; }
+.quote-chat-ap { font-size: 11px; color: #4ade80; }
+
+.quote-chat-compose { display: flex; gap: 8px; align-items: flex-end; }
+.quote-chat-input { flex: 1; resize: vertical; min-height: 56px; }
+.quote-chat-hint { color: #6b7280; font-size: 11px; }
+.quote-chat-thumbs { display: flex; gap: 6px; flex-wrap: wrap; }
+.quote-chat-thumbs .paste-thumb {
+  height: 54px; border-radius: 4px; border: 1px solid #3a3a3a;
+}
+
+/* 右欄：草稿即時摘要（唯讀；要手改切回「報價內容」） */
+.quote-chat-summary {
+  flex: 1; overflow-y: auto; max-height: 52vh;
+  background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 8px; padding: 10px 12px;
+}
+.quote-sum-row {
+  display: flex; justify-content: space-between; gap: 10px;
+  font-size: 12px; color: #d1d5db; padding: 3px 0; border-bottom: 1px solid #262626;
+}
+.quote-sum-row .noprice { color: #f87171; white-space: nowrap; }
+.quote-sum-foot { margin-top: 10px; font-size: 12px; color: #9ca3af; }
+
+@media (max-width: 900px) {
+  .quote-ai-pane { flex-direction: column; }
+  .quote-chat-summary { max-height: 30vh; }
+}
+
 /* ── Quotation totals ── */
 .quote-totals {
   background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 8px;

@@ -604,6 +604,7 @@ async def _on_startup():
                         ("crm_quotation_items", "internal_cost", "INTEGER DEFAULT 0"),
                         ("crm_quotations", "spec", "TEXT"),
                         ("crm_quotations", "share_token", "VARCHAR(64)"),
+                        ("crm_quotations", "chat", "JSONB"),
                         ("crm_project_staff", "phase", "VARCHAR(32) DEFAULT ''"),
                         ("crm_project_staff", "actual_days", "INTEGER"),
                         ("crm_project_staff", "actual_cost", "INTEGER"),

@@ -87,8 +87,8 @@ AI：更新了。還缺付款階段，照慣例 3:4:3？
   "reply": "給人看的話，繁體中文，兩三句",
   "patch": {
     "add":    [{"group_name":"", "description":"", "unit":"", "quantity":0, "unit_price":0}],
-    "update": [{"id":"", "unit_price":0}],
-    "remove": ["id"]
+    "update": [{"n":3, "unit_price":6000}],
+    "remove": [5]
   },
   "needs_price": ["還沒有單價的項目描述"],
   "questions":   ["要回頭問你或問客戶的，最多 5 題"],
@@ -99,7 +99,8 @@ AI：更新了。還缺付款階段，照慣例 3:4:3？
 ### 4.3 四條鐵則
 
 1. 🔴 **patch 只能明確 add / update / remove，絕不整包覆寫。**
-   每個項目有 id。不然聊到第 8 輪，它會把你第 3 輪手動改好的單價默默洗掉 ——
+   項目照「大項目一組接一組」攝平後從 1 編號，`update.n`／`remove` 用的就是這個編號
+   （前後端同一套；送出前先 flush 自動存，順序才對得上）。不然聊到第 8 輪，它會把你第 3 輪手動改好的單價默默洗掉 ——
    跟「整包 `model_dump()` 寫回把欄位洗掉」是同一種坑（`update_quotation` 那條前例）。
 2. 🔴 **價格不由 LLM 決定。** 它可以說「上次類似的報 26000」，但要進 `needs_price` 等你確認才寫入。
    **報價單填錯價的代價遠大於少填一項。**
@@ -262,8 +263,9 @@ CLI 的 `--model` 吃別名（`fable`／`opus`／`sonnet`／`haiku`）或完整�
 
 | 期 | 內容 | 估 |
 |---|---|---|
-| **P1** | 對話骨架：`chat` 欄位、`POST /quotations/{id}/chat`、`core/quote_chat.py`（patch 套用純函式＋單元測）、彈窗對話面板、串流顯示 | 2 天 |
-| **P2** | 截圖：token → 路徑 → 餵 claude；原圖保留；**寄出／30 天自動刪圖**（含 `assets_delete`） | 1 天 |
+| ~~**P1**~~ | ~~對話骨架~~ ✅ **2026-09-09 已實作**：`crm_quotations.chat` 欄位、`POST`／`GET /quotations/{id}/chat`、`core/quote_chat.py`（組提示＋回覆正規化）、`frontend/js/shared/quote-patch.js`（patch 套用純函式）、彈窗「和 AI 一起完成」分頁（左對話右即時摘要）。**串流未做**（目前是「思考中…」＋輪詢） | — |
+| **P1.5** | 串流顯示（`--output-format stream-json --include-partial-messages`）：感知延遲 34 秒 → 2 秒就有字 | 半天 |
+| **P2** | 截圖：~~token → 路徑 → 餵 claude~~ ✅ 已做；**還沒做**：原圖保留（`_MAX_SIDE` 的坑）、**寄出／30 天自動刪圖**（含 `assets_delete`） | 1 天 |
 | **P3** | 價目：答過的價存成價目、下一輪自動帶、一個能改／刪的地方 | 1 天 |
 | **P4**（選） | 模型可調 settings `ai.models.*`、互動式獨立併發閘 | 半天 |
 
@@ -284,7 +286,8 @@ CLI 的 `--model` 吃別名（`fable`／`opus`／`sonnet`／`haiku`）或完整�
    這套省的主要是「抓漏」與「不會漏掉客戶改過的東西」，不是時間。）
 
 ### 已拍板
-- ✅ **截圖做完自動刪圖**（2026-09-09）
+- ✅ **對話面板放報價彈窗的分頁**（2026-09-09；已實作）
+- ✅ **截圖做完自動刪圖**（2026-09-09；**還沒實作**，見 P2）
 - ✅ 主力 LLM ＝ claude（截圖需求使 Ollama 不可行）
 - ✅ 寄出永遠是人按的，對話介面不提供寄出
 

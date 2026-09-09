@@ -24,6 +24,8 @@ import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊�
 // 刪除報價仍是管理員限定（RBAC 稽核第二批）—— 不是管理員就別畫那顆鈕
 const _isAdmin = () => (window._accessLevel || 0) >= 3;
 import { authDownload, copyText } from '../../js/shared/utils.js';
+import { applyQuotePatch } from '../../js/shared/quote-patch.js';
+import { ensurePasteBase, renderRich, pasteThumbs } from '../../js/shared/paste-image.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -513,6 +515,176 @@ function _populateClientFilter() {
     populateClientSelect('quote-filter-client', _clients);
 }
 
+// ── 「和 AI 一起完成」分頁 ─────────────────────────────────
+// owner 2026-09-09：「客戶請我報價，他有很多訊息，我需要整理一個報價單給他」。
+// 規劃正本 docs/QUOTE_ASSISTANT_PLAN.md。骨架同公布欄「問 Claude」：送出 → 背景跑
+// claude → 前端輪詢。差別是它回的是 **patch**，由這邊套進草稿再走自動存寫回去。
+//
+// 🔴 **寫入者只有前端**：後端只算 patch、不改項目。送出前一定要把自動存 flush 掉 ——
+//    AI 讀的是 DB 那一份，順序不一樣的話 patch 的編號會改到別人。
+// 🔴 **同一則 patch 只套一次**：_chatApplied 記已處理到第幾則，重繪不會重套。
+let _chat = [];
+let _chatApplied = 0;      // 已套用過 patch 的訊息數
+let _chatBusy = false;     // 等 AI 回覆中
+let _chatGen = 0;          // 開窗世代：關窗／換一張報價後，舊的輪詢自己收工
+
+function _chatBubble(m) {
+    const who = m.role === 'user' ? '你' : 'AI';
+    // at 是後端寫的 UTC（_now()）—— 直接切字串會差八小時，要轉本地
+    const d = new Date(m.at || '');
+    const at = isNaN(d) ? '' : d.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const extras = [];
+    if ((m.questions || []).length)
+        extras.push(`<ol class="quote-chat-q">${m.questions.map(q => `<li>${_esc(q)}</li>`).join('')}</ol>`);
+    if ((m.needs_price || []).length)
+        extras.push(`<div class="quote-chat-np">待定價：${m.needs_price.map(_esc).join('、')}</div>`);
+    if (m.applied)     // 只在畫面上標，不寫回後端
+        extras.push(`<div class="quote-chat-ap">已套進草稿：新增 ${m.applied.added}`
+            + `、修改 ${m.applied.updated}、刪除 ${m.applied.removed}、備註 +${m.applied.terms}</div>`);
+    // renderRich＝跳脫＋把貼圖 token 換成縮圖（paste-image.js 同一份契約）
+    return `<div class="quote-chat-msg ${m.role === 'user' ? 'user' : 'ai'}">
+        <div class="quote-chat-who">${who}<span class="quote-chat-at">${_esc(at)}</span></div>
+        <div class="quote-chat-body">${renderRich(m.text || '')}</div>${extras.join('')}</div>`;
+}
+
+function _renderChat() {
+    const log = document.getElementById('quote-chat-log');
+    if (!log) return;
+    if (!_editingId) {
+        log.innerHTML = `<div class="crm-empty">先在「報價內容」填好客戶與專案 ——
+            草稿建起來之後才能開始對話（AI 改的就是那張草稿）。</div>`;
+    } else if (!_chat.length && !_chatBusy) {
+        log.innerHTML = `<div class="crm-empty">把客戶的訊息整段貼進下面，或直接貼截圖。<br>
+            AI 會整理成項目，不確定的地方會問你。</div>`;
+    } else {
+        log.innerHTML = _chat.map(_chatBubble).join('') + (_chatBusy
+            ? `<div class="quote-chat-msg ai"><div class="quote-chat-who">AI</div>
+               <div class="quote-chat-body thinking">思考中…（約 30 秒）</div></div>` : '');
+    }
+    log.scrollTop = log.scrollHeight;
+    const off = !_editingId || _chatBusy;
+    const send = document.getElementById('quote-chat-send');
+    const input = document.getElementById('quote-chat-input');
+    if (send) send.disabled = off;
+    if (input) input.disabled = off;
+}
+
+/** 右欄的即時摘要。編號＝攤平後的順序，跟 patch 的 n 同一套（別自己重排） */
+function _renderChatSummary() {
+    const el = document.getElementById('quote-chat-summary');
+    if (!el) return;
+    const rows = _flatItems().filter(it => it.description);
+    let html = '', last = null, n = 0, noPrice = 0;
+    rows.forEach(it => {
+        const g = (it.group_name || '').trim() || '未分類';
+        if (g !== last) { html += `<div class="quote-group-title">${_esc(g)}</div>`; last = g; }
+        n++;
+        const p = it.unit_price || 0;
+        if (!p) noPrice++;
+        html += `<div class="quote-sum-row"><span>${n}. ${_esc(it.description)}</span>
+            <span class="${p ? '' : 'noprice'}">${it.quantity} ${_esc(it.unit)} ×
+            ${p ? '$' + _fmtNum(p) : '待定價'}</span></div>`;
+    });
+    const terms = (_terms || []).filter(t => String(t).trim());
+    if (terms.length) {
+        html += `<div class="quote-group-title">備註</div>`;
+        html += terms.map((t, i) => `<div class="quote-sum-row"><span>${i + 1}. ${_esc(t)}</span></div>`).join('');
+    }
+    el.innerHTML = (html || '<div class="crm-empty">還沒有項目</div>')
+        + `<div class="quote-sum-foot">${n} 項${noPrice ? ` · <b>${noPrice} 項待定價</b>` : (n ? ' · 都有價了' : '')}</div>`;
+}
+
+/** 把還沒套過的 AI patch 套進草稿（純函式在 js/shared/quote-patch.js） */
+function _applyNewChatPatches() {
+    let touched = false;
+    for (let i = _chatApplied; i < _chat.length; i++) {
+        const m = _chat[i];
+        if (m.role !== 'ai' || !m.patch) continue;
+        const r = applyQuotePatch(_groups, _terms, { ...m.patch, terms_add: m.terms_add || [] });
+        _groups = r.groups; _terms = r.terms; m.applied = r.applied;
+        touched = true;
+    }
+    _chatApplied = _chat.length;
+    if (touched) {
+        _renderItemRows(); _renderTermRows(); _recalcTotals();
+        _autoTouch();                     // 套完就存回去（單一寫入者是這邊）
+    }
+    _renderChatSummary();
+}
+
+async function _loadChat() {
+    const id = _editingId, gen = _chatGen;
+    if (!id) return;
+    try {
+        const d = await _fetch(`/quotations/${id}/chat`);
+        if (gen !== _chatGen) return;     // 這中間換了一張報價
+        _chat = d.chat || [];
+        _chatApplied = _chat.length;      // 歷史的 patch 早就在資料裡，不再套一次
+        _renderChat();
+    } catch (_) {}
+}
+
+async function _pollChat(expect, gen) {
+    const started = Date.now();
+    while (_chatBusy && gen === _chatGen && Date.now() - started < 180000) {
+        await new Promise(r => setTimeout(r, 2000));
+        if (gen !== _chatGen || !_editingId) return;
+        let d;
+        try { d = await _fetch(`/quotations/${_editingId}/chat`); } catch (_) { continue; }
+        if ((d.chat || []).length >= expect) {
+            _chat = d.chat || [];
+            _chatBusy = false;
+            _applyNewChatPatches();
+            _renderChat();
+            return;
+        }
+    }
+    if (_chatBusy && gen === _chatGen) {
+        _chatBusy = false; _renderChat();
+        _showModalError('AI 沒有在時間內回覆（可能 claude 在排隊或沒登入）');
+    }
+}
+
+async function _sendChat() {
+    const ta = document.getElementById('quote-chat-input');
+    const text = (ta?.value || '').trim();
+    if (!text || !_editingId || _chatBusy) return;
+    // 🔴 先把自動存送完：AI 讀的是 DB 那份，順序要跟畫面一致（patch 的編號才對得上）
+    if (_autoDirty) { clearTimeout(_autoTimer); _autoTimer = null; await _autoQueue(_autoFlush); }
+    else { try { await _autoChain; } catch (_) {} }
+
+    const gen = _chatGen;
+    ta.value = '';
+    document.getElementById('quote-chat-thumbs').innerHTML = '';
+    _chatBusy = true;
+    _renderChat();
+    try {
+        const r = await _fetch(`/quotations/${_editingId}/chat`,
+                              { method: 'POST', body: JSON.stringify({ text }) });
+        if (gen !== _chatGen) return;
+        _chat = r.chat || _chat;
+        _chatApplied = _chat.length;      // 使用者那則沒有 patch
+        _renderChat();
+        await _pollChat(_chat.length + 1, gen);
+    } catch (e) {
+        _chatBusy = false; _renderChat();
+        _showModalError('送出失敗：' + e.message);
+    }
+}
+
+/** 彈窗的兩個分頁：報價內容／和 AI 一起完成 */
+function _setPane(name) {
+    document.querySelectorAll('#quote-modal-tabs .crm-tab').forEach(b =>
+        b.classList.toggle('active', b.dataset.pane === name));
+    const form = document.getElementById('quote-pane-form');
+    const ai = document.getElementById('quote-pane-ai');
+    if (form) form.style.display = name === 'form' ? '' : 'none';
+    if (ai) ai.style.display = name === 'ai' ? 'flex' : 'none';
+    // AI 分頁要並排「對話｜摘要」，彈窗撐寬一點
+    document.querySelector('#quote-modal .crm-modal')?.classList.toggle('quote-modal-wide', name === 'ai');
+    if (name === 'ai') { _renderChat(); _renderChatSummary(); }
+}
+
 // ── 自動存草稿 ───────────────────────────────────────────────
 // owner 2026-09-09：「打了客戶與專案之後就可以自動儲存了，要不不小心點掉就消失了」。
 // 客戶＋案名（或已經固定的案）一齊，第一次動到表單就先 POST 出一張草稿；之後每次改欄位
@@ -595,6 +767,7 @@ async function _autoCreateDraft() {
         document.getElementById('quote-modal-title').textContent = '編輯報價';
         _lockProjectFields();
         _autoNote('已自動存成草稿 v' + (q.version || 1) + '（關掉也還在，在清單找得到）', 'ok');
+        _renderChat();             // 有 id 了，AI 分頁的輸入框跟著解鎖
         loadQuotations();          // 清單先冒出來，不擋著使用者繼續填
     } catch (e) {
         _autoOn = false;           // 存不進去（權限／DB）就別再一直試，讓他按儲存看到真正的錯誤
@@ -633,6 +806,7 @@ async function _autoRenameShell() {
 /** 關窗（X／取消／點外面）：把還沒送出去的補送完再收工。已經自動存的草稿留著，不刪 */
 async function closeModal() {
     clearTimeout(_autoTimer); _autoTimer = null;
+    _chatGen++; _chatBusy = false;      // 還在等 AI 的輪詢看到世代變了就收工
     const pending = (_autoOn && _editingId && _autoDirty) ? _autoQueue(_autoFlush) : _autoChain;
     const hadDraft = _autoOn && !!_editingId;
     document.getElementById('quote-modal').style.display = 'none';
@@ -683,6 +857,10 @@ async function openModal(quotation = null, projectId = null) {
 
     _setItems(q.items || [], { blankIfEmpty: !quotation });   // 新增：先給一個空的大項目
     _recalcTotals();
+
+    _chat = []; _chatApplied = 0; _chatBusy = false; _chatGen++;   // 舊的輪詢看到世代變了就收工
+    _setPane('form');
+    if (_editingId) _loadChat();
 
     document.getElementById('quote-modal').style.display = 'flex';
 }
@@ -905,6 +1083,20 @@ export async function initCrmQuotesTab() {
     document.getElementById('quote-btn-save').addEventListener('click', saveQuotation);
     document.getElementById('quote-btn-add-item').addEventListener('click', () => { addGroup(); _recalcTotals(); });
     document.getElementById('quote-btn-add-term').addEventListener('click', addTermRow);
+
+    // 「和 AI 一起完成」分頁
+    ensurePasteBase();                  // 貼圖縮圖要的圖床網址（拿不到就只顯示文字）
+    document.querySelectorAll('#quote-modal-tabs .crm-tab').forEach(btn =>
+        btn.addEventListener('click', () => _setPane(btn.dataset.pane)));
+    document.getElementById('quote-chat-send').addEventListener('click', _sendChat);
+    const chatInput = document.getElementById('quote-chat-input');
+    chatInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); _sendChat(); }
+    });
+    // 貼上的圖在 textarea 裡只是一串 token，下面補一排縮圖讓人看得到自己貼了什麼
+    chatInput.addEventListener('input', () => {
+        document.getElementById('quote-chat-thumbs').innerHTML = pasteThumbs(chatInput.value);
+    });
     document.getElementById('quote-detail-close').addEventListener('click', closeDetail);
     // 公司資訊（報價單抬頭／匯款／Logo／章）就近開：系統設定 → 公司資訊分頁
     // （owner 2026-09-07「公司資訊的按鈕要放在報價管理的範本欄」）。設定只有管理員讀得到，別人不顯示這顆。

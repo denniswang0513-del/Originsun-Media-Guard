@@ -72,12 +72,21 @@
 
 <!-- Add / Edit Quotation Modal -->
 <div id="quote-modal" class="crm-modal-overlay" style="display:none;">
-  <div class="crm-modal" style="max-width:780px;">
+  <!-- 寬度走 CSS（.quote-modal / .quote-modal-wide）—— AI 分頁要並排對話與摘要，
+       inline style 會蓋掉切寬版的 class -->
+  <div class="crm-modal quote-modal">
     <div class="crm-modal-header">
       <h3 id="quote-modal-title">新增報價</h3>
       <button id="quote-modal-close" class="crm-detail-close">&#x2715;</button>
     </div>
     <div class="crm-modal-body">
+      <!-- 兩個分頁：手填 / 和 AI 一起完成（docs/QUOTE_ASSISTANT_PLAN.md）。
+           AI 那邊只改草稿、不寄出；寄出永遠是人按的 -->
+      <div class="quote-modal-tabs" id="quote-modal-tabs">
+        <button type="button" class="crm-tab active" data-pane="form">報價內容</button>
+        <button type="button" class="crm-tab" data-pane="ai">和 AI 一起完成</button>
+      </div>
+      <div id="quote-pane-form">
       <div class="crm-form-section">報價資訊</div>
       <div class="crm-form-grid">
         <!-- 專案：跟手機版同一套（owner 2026-09-07「以手機版的為主」）——報價時案子多半還沒成立：
@@ -169,6 +178,25 @@
           <small style="color:#888;">一列一條，報價單上照這個順序印成編號清單；拖左邊的 ↕ 換順序</small>
         </div>
       </div>
+      </div><!-- /quote-pane-form -->
+
+      <div id="quote-pane-ai" class="quote-ai-pane" style="display:none;">
+        <div class="quote-ai-chat">
+          <div id="quote-chat-log" class="quote-chat-log"></div>
+          <div id="quote-chat-thumbs" class="quote-chat-thumbs"></div>
+          <div class="quote-chat-compose">
+            <textarea id="quote-chat-input" class="crm-input quote-chat-input" rows="3"
+              placeholder="貼上客戶的訊息或截圖（Ctrl+V 可以直接貼圖），或回答上面的問題…"></textarea>
+            <button type="button" id="quote-chat-send" class="crm-btn crm-btn-primary">送出</button>
+          </div>
+          <small class="quote-chat-hint">AI 只會改左邊這張草稿，不會寄出。單價它沒把握就會問你，不會自己編。</small>
+        </div>
+        <div class="quote-ai-side">
+          <div class="crm-form-section">草稿即時摘要</div>
+          <div id="quote-chat-summary" class="quote-chat-summary"></div>
+        </div>
+      </div>
+
       <div id="quote-modal-error" class="crm-error" style="display:none;"></div>
     </div>
     <div class="crm-modal-footer">

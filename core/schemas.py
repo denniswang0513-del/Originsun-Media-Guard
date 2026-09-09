@@ -719,38 +719,11 @@ class ProjectExpensePatchPayload(BaseModel):
     expense_date: Optional[str] = None   # YYYY-MM-DD；空字串＝清掉消費日
 
 
-class QuotationItemPayload(BaseModel):
-    group_name: str = ""
-    description: str
-    unit: str = "式"
-    quantity: int = 1
-    unit_price: int = 0
-    internal_cost: int = 0
-    note: str = ""
-
-
-class QuotationPayload(BaseModel):
-    status: str = "草稿"
-    quote_date: Optional[str] = None
-    valid_until: Optional[str] = None
-    discount: int = 0
-    tax_rate: int = 5
-    final_price: Optional[int] = None
-    payment_stages: List[dict] = []
-    terms: str = ""
-    # 🔴 Optional：沒送＝不動（不是清空）。CF 給 .js 4 小時快取，舊分頁 PUT 不帶 spec，
-    # 用 `str = ""` 會把別人剛填的規格洗掉（同型事故見 reference_cloudflare_js_cache）。
-    spec: Optional[str] = None         # 規格（報價單抬頭；「、」或換行分隔多項）
-    items: List[QuotationItemPayload] = []
-
-
-class QuotationTemplatePayload(BaseModel):
-    name: str
-    description: str = ""
-    tax_rate: int = 5
-    terms: str = ""
-    payment_stages: List[dict] = []
-    items: List[QuotationItemPayload] = []
+# 報價的四個 payload 已搬到 core/schemas_quotes.py（schemas.py 觸及 2000 行上限）；
+# 這裡 re-export，`from core.schemas import QuotationPayload` 照舊可用。
+from core.schemas_quotes import (  # noqa: F401,E402
+    QuotationItemPayload, QuotationPayload, QuotationTemplatePayload, QuoteChatPayload,
+)
 
 
 class StaffPayload(BaseModel):
