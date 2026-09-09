@@ -70,18 +70,17 @@ function render() {
     const log = S.chat.length
         ? S.chat.map(bubble).join('') + (S.busy
             ? `<div class="qc-msg ai"><div class="qc-who">AI</div><div class="qc-body">${
-                S.partial ? esc(S.partial) + '<span class="qc-caret"></span>'
+                S.partial
+                    ? `<span id="qc-stream">${esc(S.partial)}</span><span class="qc-caret"></span>`
                     : `<span id="qc-tick">${esc(waitingText(Date.now() - S.since, S.stage))}</span>`
               }</div></div>` : '')
         : `<div class="qc-empty">把客戶的訊息整段貼進下面，或拍／選一張對話截圖。<br>
              AI 會整理成項目，不確定的地方會問你。</div>`;
-    const rows = flat().filter(it => it.description);
-    const noPrice = rows.filter(it => !it.unit_price).length;
-
-    ov.querySelector('.qc-log').innerHTML = log;
-    ov.querySelector('.qc-log').scrollTop = ov.querySelector('.qc-log').scrollHeight;
+    const logEl = ov.querySelector('.qc-log');
+    logEl.innerHTML = log;
+    logEl.scrollTop = logEl.scrollHeight;
     ov.querySelector('.qc-sum').innerHTML = summaryLine();
-    ov.querySelector('#qc-fill').hidden = !noPrice;
+    ov.querySelector('#qc-fill').hidden = !flat().some(it => it.description && !it.unit_price);
     ov.querySelector('#qc-send').disabled = S.busy;
     ov.querySelector('#qc-text').disabled = S.busy;
     ov.querySelector('#qc-shot').disabled = S.busy;
@@ -177,8 +176,10 @@ async function poll(expect, gen) {
         }
         if (typeof d.stage === 'string') S.stage = d.stage;
         if (typeof d.partial === 'string' && d.partial !== S.partial) {
+            const grow = document.getElementById('qc-stream');
             S.partial = d.partial;           // 串流：邊產邊長出來
-            render();
+            if (grow) grow.textContent = S.partial;   // 只換那顆泡泡，不整包重繪
+            else render();
         } else {
             // 只換那一小段字，不整包重繪（重繪會把捲軸拉回底、也會閃）
             const tick = document.getElementById('qc-tick');
@@ -274,8 +275,14 @@ async function fillPrices() {
 export async function openQuoteChat(quotationId, onClose) {
     let q, chat = [];
     try {
-        q = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(quotationId)}`);
-        chat = (await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(quotationId)}/chat`)).chat || [];
+        // 兩支互不相干 —— 手機網路上串行等於白等一趟 RTT
+        const id = encodeURIComponent(quotationId);
+        const [got, hist] = await Promise.all([
+            mfetch(`/api/v1/crm/quotations/${id}`),
+            mfetch(`/api/v1/crm/quotations/${id}/chat`),
+        ]);
+        q = got;
+        chat = hist.chat || [];
     } catch (e) { toast(e.message, 'err'); return; }
 
     S = {

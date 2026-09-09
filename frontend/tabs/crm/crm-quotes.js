@@ -567,7 +567,8 @@ function _renderChat() {
         // 串流：有字就直接顯示（邊產邊看）；還沒有就給會動的等待文字 ——
         // 前 35 秒左右畫面本來什麼都不會動，靜止太久看起來像當掉
         const streaming = _chatPartial
-            ? `<div class="quote-chat-body">${_esc(_chatPartial)}<span class="quote-chat-caret"></span></div>`
+            ? `<div class="quote-chat-body"><span id="quote-chat-stream">${
+                _esc(_chatPartial)}</span><span class="quote-chat-caret"></span></div>`
             : `<div class="quote-chat-body thinking"><span id="quote-chat-tick">${
                 _esc(waitingText(Date.now() - _chatSince, _chatStage))}</span></div>`;
         log.innerHTML = _chat.map(_chatBubble).join('') + (_chatBusy
@@ -609,20 +610,23 @@ function _renderChatSummary() {
     el.querySelector('#quote-fill-prices')?.addEventListener('click', _fillPricesFromBook);
 }
 
-/** AI 改了草稿就一定要存下去。
+/** 立刻把畫面上的內容寫進 DB（AI 動過草稿、或送出前要讓 AI 讀到最新的順序）。
  *
- * 🔴 自動存刻意只在「新增」那條路開著（編輯既有報價怕靜默改到舊資料，見 _autoReset）。
- *    但 AI 的 patch 與「用價目補上」是使用者按出來的、畫面也已經變了 —— 不存反而是丟資料。
- *    所以這兩條路即使 _autoOn 是關的也要寫回去。
+ * 🔴 `_autoOn` 只管「打字要不要觸發 debounce」——編輯既有報價時它是關的
+ *    （怕靜默改到舊資料，見 _autoReset）。但 AI 的 patch、「用價目補上」、送出前的
+ *    同步都是使用者按出來的、畫面也已經變了 —— 不寫回去才是丟資料。
+ *    所有「動過草稿就要立刻落地」的地方都走這一支，別再各自判斷 _autoOn／_autoDirty。
  */
-async function _saveAiChange(note) {
+async function _persistNow(note) {
     if (!_editingId) return;
-    if (_autoOn) { _autoTouch(); return; }      // 新增那條路照原本的 debounce 走
+    clearTimeout(_autoTimer); _autoTimer = null;   // debounce 排到一半的那發不用了
     _autoNote('儲存中…');
     try {
         await _fetch(`/quotations/${_editingId}`, { method: 'PUT', body: JSON.stringify(_buildPayload()) });
+        _autoDirty = false;
         _autoNote(note || '已儲存', 'ok');
     } catch (e) {
+        _autoDirty = true;                         // 沒送成功，留給關窗前那一發補
         _autoNote('儲存失敗：' + e.message + '（請按儲存）', 'err');
     }
 }
@@ -641,7 +645,7 @@ function _applyNewChatPatches() {
     if (touched) {
         _renderItemRows(); _renderTermRows(); _recalcTotals();
         // 套完就存回去（單一寫入者是這邊）。排進 _autoChain，關窗時會被 await 到
-        _autoQueue(() => _saveAiChange('AI 的修改已存進這張報價'));
+        _autoQueue(() => _persistNow('AI 的修改已存進這張報價'));
     }
     _renderChatSummary();
 }
@@ -676,8 +680,12 @@ async function _pollChat(expect, gen) {
         }
         if (typeof d.stage === 'string') _chatStage = d.stage;
         if (typeof d.partial === 'string' && d.partial !== _chatPartial) {
+            const grow = document.getElementById('quote-chat-stream');
             _chatPartial = d.partial;                  // 邊產邊長出來
-            _renderChat();
+            // 已經在串了就只換那顆泡泡的字 —— 整包重繪會把歷史裡所有截圖的 <img>
+            // 丟掉重建（一輪十幾次），也會把捲軸拉回底
+            if (grow) grow.textContent = _chatPartial;
+            else _renderChat();
         } else {
             // 只換那一小段字，不整包重繪（重繪會把捲軸拉回底、也會閃）
             const tick = document.getElementById('quote-chat-tick');
@@ -695,12 +703,9 @@ async function _sendChat() {
     const text = (ta?.value || '').trim();
     if (!text || !_editingId || _chatBusy) return;
     // 🔴 先把畫面上的內容送進 DB：AI 讀的是 DB 那份，順序與內容要跟畫面一致
-    //    （patch 的編號才對得上）。編輯既有報價時自動存是關的（_autoOn=false）——
-    //    那條路沒有 _autoDirty 可以 flush，不補這一發的話使用者剛在彈窗裡加／刪的項目
-    //    AI 完全看不到，它說「改第 3 項」就會落在別人身上。
-    if (_autoDirty) { clearTimeout(_autoTimer); _autoTimer = null; await _autoQueue(_autoFlush); }
-    else if (!_autoOn && _editingId) { await _autoQueue(() => _saveAiChange('已存下目前的內容')); }
-    else { try { await _autoChain; } catch (_) {} }
+    //    （patch 的編號才對得上）。三種情況（有待存的／編輯既有報價／已經是最新）
+    //    都收在 _persistNow 裡，呼叫端不用再自己挑。
+    await _autoQueue(() => _persistNow('已存下目前的內容'));
 
     const gen = _chatGen;
     ta.value = '';
@@ -742,7 +747,7 @@ async function _fillPricesFromBook() {
         const out = applyQuotePatch(_groups, _terms, { add: [], update, remove: [] });
         _groups = out.groups; _terms = out.terms;
         _renderItemRows(); _recalcTotals(); _renderChatSummary();
-        await _autoQueue(() => _saveAiChange(`已用價目補上 ${out.applied.updated} 項`));
+        await _autoQueue(() => _persistNow(`已用價目補上 ${out.applied.updated} 項`));
     } catch (e) {
         _showModalError('查價目失敗：' + e.message);
     } finally {
@@ -885,10 +890,12 @@ async function _autoRenameShell() {
 async function closeModal() {
     clearTimeout(_autoTimer); _autoTimer = null;
     _chatGen++; _chatBusy = false; _chatPartial = '';   // 還在等 AI 的輪詢看到世代變了就收工
-    const pending = (_autoOn && _editingId && _autoDirty) ? _autoQueue(_autoFlush) : _autoChain;
+    // _autoFlush 開頭就有 `!_autoOn || !_editingId || !_autoDirty` 的守衛，這裡不用再判一次；
+    // _autoQueue 自己 .catch 掉，chain 永遠 resolve，所以也不需要 try/catch
+    const pending = _autoQueue(_autoFlush);
     const hadDraft = _autoOn && !!_editingId;
     document.getElementById('quote-modal').style.display = 'none';
-    try { await pending; } catch (_) {}
+    await pending;
     const savedId = _editingId;
     _autoReset(false);
     if (hadDraft) {

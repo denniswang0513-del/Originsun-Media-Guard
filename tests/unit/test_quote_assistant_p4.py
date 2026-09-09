@@ -77,9 +77,9 @@ def test_fill_prices_never_overwrites_a_typed_price():
     assert ".filter(m => !(rows[m.n - 1] || {}).unit_price)" in fn
     assert "_flatItems().filter(it => it.description)" in fn, "要用攤平後的順序，編號才對得上"
     assert "applyQuotePatch(_groups, _terms" in fn
-    # 🔴 編輯既有報價時 _autoOn 是關的 —— 補價一定要走 _saveAiChange 才存得下去，
+    # 🔴 編輯既有報價時 _autoOn 是關的 —— 補價一定要走 _persistNow 才存得下去，
     #    只呼叫 _autoTouch() 的話畫面變了、關窗就丟（2026-09-09 實測踩到）
-    assert "_saveAiChange(" in fn
+    assert "_persistNow(" in fn
     assert "'/price-items/match'" in fn
 
 
@@ -87,11 +87,17 @@ def test_ai_changes_are_saved_even_when_autosave_is_off():
     """🔴 編輯既有報價時自動存是關的（怕靜默改舊資料）；但 AI 的 patch 與補價是
     使用者按出來的、畫面也已經變了 —— 不寫回去就是丟資料。"""
     js = js_code_only(repo_src("frontend/tabs/crm/crm-quotes.js"))
-    save = js_func_body(js, "async function _saveAiChange(note)")
-    assert "if (_autoOn) { _autoTouch(); return; }" in save, "新增那條路照原本的 debounce 走"
+    save = js_func_body(js, "async function _persistNow(note)")
+    # 🔴 無條件落地：不准再看 _autoOn／_autoDirty 分支 —— 分支寫錯的那一版在
+    #    「新增」那條路上完全不存（2026-09-09 simplify 當場踩到）。多一發 PUT
+    #    比起一次 40 秒的 claude 呼叫可以忽略，換來的是「DB 一定等於畫面」。
     assert "method: 'PUT'" in save and "_buildPayload()" in save
+    assert "if (_autoOn)" not in save and "if (_autoDirty)" not in save
+    assert "_autoDirty = false;" in save, "存成功要把待存旗標清掉"
+    send = js_func_body(js, "async function _sendChat()")
+    assert "_persistNow(" in send, "送出前要讓 AI 讀到畫面上的順序（呼叫端不用自己挑分支）"
     apply_ = js_func_body(js, "function _applyNewChatPatches()")
-    assert "_saveAiChange(" in apply_ and "_autoQueue(" in apply_, "要排進 _autoChain，關窗才 await 得到"
+    assert "_persistNow(" in apply_ and "_autoQueue(" in apply_, "要排進 _autoChain，關窗才 await 得到"
 
 
 def test_fill_button_only_shows_when_something_is_missing_a_price():

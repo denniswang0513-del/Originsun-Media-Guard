@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import os
 import shutil
 import uuid
@@ -615,18 +616,32 @@ async def _call_claude_stream(prompt: str, quotation_id: str, model: str) -> tup
         return None, "找不到 claude CLI（請確認已安裝並 claude 登入）"
 
     chunks: list = []
+    final_box: list = []          # result 那一行（等同 --print 的最終文字）
+    last_push = [0.0]             # 上次更新 _chat_partial 的時間
 
     def _on_line(raw: bytes) -> None:
         try:
             d = json.loads(raw.decode("utf-8", "replace"))
         except (ValueError, UnicodeDecodeError):
             return                                    # 不是 JSON 的雜訊行，跳過
-        if d.get("type") != "stream_event":
+        kind = d.get("type")
+        if kind == "result":
+            # 讀的時候就撈起來：收尾再把整包 stdout（幾百 KB、上千行）解析一遍是白工
+            if isinstance(d.get("result"), str):
+                final_box.append(d["result"])
+            return
+        if kind != "stream_event":
             return
         ev = d.get("event") or {}
         if ev.get("type") != "content_block_delta":
             return
         chunks.append(((ev.get("delta") or {}).get("text")) or "")
+        # 一輪上千個 delta，但前端一秒才讀一次 —— 每個 delta 都 join 全文再從頭掃 reply
+        # 是 O(n²) 的白工。節流到 4 Hz，畫面看起來一樣在動。
+        now = time.monotonic()
+        if now - last_push[0] < 0.25:
+            return
+        last_push[0] = now
         _chat_partial[quotation_id] = quote_chat.partial_reply("".join(chunks))
 
     _chat_stage[quotation_id] = "queued"      # 閘門滿了就會真的卡在這行
@@ -644,16 +659,8 @@ async def _call_claude_stream(prompt: str, quotation_id: str, model: str) -> tup
         detail = (err or b"")[:300].decode("utf-8", "replace").strip()
         return None, f"claude 結束碼={rc}；{detail}"
 
-    # 收尾優先用 result 那一行（等同 --print 的最終文字）；沒有就把 delta 串起來
-    final = ""
-    for raw in (out or b"").splitlines():
-        try:
-            d = json.loads(raw.decode("utf-8", "replace"))
-        except (ValueError, UnicodeDecodeError):
-            continue
-        if d.get("type") == "result" and isinstance(d.get("result"), str):
-            final = d["result"]
-    return (final or "".join(chunks)), ""
+    # 收尾優先用 result 那一行（讀的時候就撈好了）；沒有就把 delta 串起來
+    return ((final_box[-1] if final_box else "") or "".join(chunks)), ""
 
 
 async def _run_quote_chat(quotation_id: str, model: str = "") -> None:

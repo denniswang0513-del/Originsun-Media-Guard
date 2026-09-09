@@ -117,7 +117,7 @@ def test_parse_reply_strips_code_fence():
     raw = "```json\n" + json.dumps({"reply": "好", "patch": {}}, ensure_ascii=False) + "\n```"
     p = quote_chat.parse_reply(raw)
     assert p["ok"] is True and p["reply"] == "好"
-    assert p["patch"] == quote_chat.EMPTY_PATCH
+    assert p["patch"] == quote_chat.empty_patch()
 
 
 @pytest.mark.parametrize("raw", ["", "我覺得應該這樣報", "{壞掉的 json", "[1,2,3]"])
@@ -125,7 +125,7 @@ def test_parse_reply_never_raises_and_never_half_applies(raw):
     """寧可讓使用者看到「再說一次」，也不要讓半套 patch 去改報價單。"""
     p = quote_chat.parse_reply(raw)
     assert p["ok"] is False
-    assert p["patch"] == quote_chat.EMPTY_PATCH
+    assert p["patch"] == quote_chat.empty_patch()
     assert p["questions"] == [] and p["needs_price"] == []
     assert isinstance(p["reply"], str) and p["reply"]
 
@@ -217,12 +217,14 @@ def test_single_writer_contract_is_documented_and_kept():
 
     js = js_code_only(repo_src("frontend/tabs/crm/crm-quotes.js"))
     send = js_func_body(js, "async function _sendChat()")
-    assert "_autoFlush" in send, "送出前要先把自動存 flush 掉，順序不一致編號會改到別人"
+    # 送出前一定要把畫面上的內容落地（順序不一致，patch 的編號就會改到別人）。
+    # 三種情況（有待存的／編輯既有報價／DB 已最新）都收在 _persistNow 裡。
+    assert "_persistNow(" in send
     apply_ = js_func_body(js, "function _applyNewChatPatches()")
     assert "_chatApplied" in apply_
     assert "applyQuotePatch(_groups, _terms" in apply_
     # 套完一定要寫回去 —— 編輯既有報價時 _autoOn 是關的，只 _autoTouch() 會靜默丟掉
-    assert "_saveAiChange(" in apply_
+    assert "_persistNow(" in apply_
 
 
 def test_chat_is_not_carried_in_the_list_payload():

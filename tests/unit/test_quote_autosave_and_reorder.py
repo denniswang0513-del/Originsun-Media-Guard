@@ -122,7 +122,11 @@ def test_terms_are_one_row_each_numbered_and_sortable():
     # 發版後會出現「新 html ＋ 舊 crm-quotes.js」，而舊的 openModal 直接
     # `getElementById('quote-f-terms').value` —— 元素不在＝TypeError＝報價彈窗打不開。
     # 留一個隱藏的相容殼一輪（reference_cloudflare_js_cache），新 js 不准碰它。
-    assert '<textarea id="quote-f-terms" hidden' in html, "舊快取 js 的相容殼要在，而且是隱藏的"
+    assert '<textarea id="quote-f-terms" hidden' in html, (
+        "舊快取 js 的相容殼要在，而且是隱藏的。"
+        "🔴 到期條件：報價助理那批**發版滿一輪之後**（CF 的 4 小時 js 快取全部過期、"
+        "沒有人再跑得到舊的 crm-quotes.js）就可以把它跟這條斷言一起刪掉 —— "
+        "沒寫到期條件的相容殼會變成永久資產。")
     assert "'quote-f-terms'" not in js_code_only(repo_src(JS)), "新 js 不准再讀寫那個 textarea"
 
     js = js_code_only(repo_src(JS))

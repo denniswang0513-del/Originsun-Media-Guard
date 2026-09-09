@@ -9,7 +9,6 @@
 - `frontend/js/shared/quote-delete.js`（全新的純函式，一個測試都沒有）
 """
 import json
-import os
 import shutil
 import subprocess
 import sys

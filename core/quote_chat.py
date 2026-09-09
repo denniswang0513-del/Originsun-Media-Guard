@@ -321,7 +321,14 @@ def _clean_remove(rows: Any) -> list:
     return out
 
 
-EMPTY_PATCH = {"add": [], "update": [], "remove": []}
+def empty_patch() -> dict:
+    """一個誰都可以放心改的空 patch。
+
+    刻意是**函式不是常數**：常數配 `dict(EMPTY_PATCH)` 是淺拷貝，三個 list
+    還是同一份 —— 呼叫端只要 append 一次，之後每一次「解析失敗回空 patch」
+    都會帶著那筆髒資料，而且跨請求活著。
+    """
+    return {"add": [], "update": [], "remove": []}
 
 
 def parse_reply(raw: str) -> dict:
@@ -338,7 +345,7 @@ def parse_reply(raw: str) -> dict:
         fallback = (text or "").strip()
         return {
             "reply": fallback[:500] or "（我沒有正確回覆，請再說一次）",
-            "patch": dict(EMPTY_PATCH), "needs_price": [], "questions": [],
+            "patch": empty_patch(), "needs_price": [], "questions": [],
             "terms_add": [], "ok": False,
         }
 

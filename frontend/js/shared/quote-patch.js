@@ -21,7 +21,7 @@
  *    這裡跟著濾掉，兩邊的編號才是同一套 —— 不濾的話畫面上多一列空白，
  *    AI 說「改第 3 項」就會改到第 2 項（而且改到的是存檔時會被丟掉的空白列）。
  */
-export function flattenForPatch(groups) {
+function flattenForPatch(groups) {
     const out = [];
     (groups || []).forEach((g, gi) => {
         (g.items || []).forEach((it, i) => {
