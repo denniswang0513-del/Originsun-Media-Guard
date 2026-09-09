@@ -90,6 +90,9 @@ async function _uploadOne(ta, file) {
         // multipart 不能走 utils.authFetch（它會把 body JSON.stringify）
         const fd = new FormData();
         fd.append('file', file, file.name || 'paste.png');
+        // 標了 data-paste-hires 的欄位（報價助理的對話框）另存一份高解析度副本給 AI 讀 ——
+        // 顯示用的仍是長邊 1600，長截圖縮成那樣字會小到讀不出來
+        if (ta.dataset.pasteHires !== undefined) fd.append('hires', '1');
         const tok = localStorage.getItem('auth_token') || '';
         const r = await fetch('/api/v1/paste_upload', {
             method: 'POST', headers: { Authorization: 'Bearer ' + tok }, body: fd,

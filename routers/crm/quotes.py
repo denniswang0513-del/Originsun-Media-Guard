@@ -21,7 +21,7 @@ from core.quotation_pdf import PDF_MARGIN, build_quotation_view, footer_line
 from core import price_book, quote_chat
 from core.bg_task import fire
 from core.schemas import (QuotationPayload, QuotationTemplatePayload,
-                          QuoteChatPayload, PriceItemPayload)
+                          QuoteChatPayload, PriceItemPayload, PriceMatchPayload)
 
 from ._shared import (router, token_router, _check_auth, _check_quotes_auth, money_dep,
                       _require_db, _get_factory,
@@ -546,15 +546,20 @@ async def delete_quotation(quotation_id: str, request: Request):
 #    送出前前端會先 flush 自動存，所以這裡讀到的順序＝畫面的順序（patch 的編號才對得上）。
 
 
-def _quote_chat_model() -> str:
-    """要用哪顆模型（settings `ai.models.quote_chat`）。
+# 高解析度副本的命名空間（正本在 routers/api_paste.py 的 _HI_NAMESPACE）
+PASTE_HI_NS = "paste-hi"
+
+
+def _quote_chat_model(requested: str = "") -> str:
+    """要用哪顆模型：前端選的優先，其次 settings `ai.models.quote_chat`，都不合法就預設。
 
     預設 sonnet：實測抽結構化這種短活 sonnet 就夠，opus 留給要推理的；
     haiku 實測反而比 sonnet 慢一倍（見規劃正本 §7）。
+    🔴 白名單在 quote_chat.pick_model —— 這個值會變成 claude CLI 的 --model 參數。
     """
     from config import load_settings
     models = (load_settings().get("ai") or {}).get("models") or {}
-    return str(models.get("quote_chat") or "sonnet").strip() or "sonnet"
+    return quote_chat.pick_model(requested, str(models.get("quote_chat") or ""))
 
 
 def _paste_image_paths(text: str) -> list:
@@ -567,10 +572,19 @@ def _paste_image_paths(text: str) -> list:
     if not names:
         return []
     from core.assets_host import assets_target
-    root, _base = assets_target("paste")
-    if not root:
-        return []
-    return [p for p in (os.path.join(root, n) for n in names) if os.path.isfile(p)]
+    out = []
+    for n in names:
+        # 長截圖被縮到長邊 1600 會糊（拼接的更慘）——對話框上傳時另存了一份高解析度的，
+        # 有就優先餵給 claude，沒有再退回顯示用的那份（見 routers/api_paste.py）
+        for ns in (PASTE_HI_NS, "paste"):
+            root, _base = assets_target(ns)
+            if not root:
+                continue
+            path = os.path.join(root, n)
+            if os.path.isfile(path):
+                out.append(path)
+                break
+    return out
 
 
 # 互動式呼叫用自己的閘（規劃正本 §7.2）：夜間 SEO 批次一筆約 25 秒 × 30 個作品，
@@ -637,7 +651,7 @@ async def _call_claude_stream(prompt: str, quotation_id: str, model: str) -> tup
     return (final or "".join(chunks)), ""
 
 
-async def _run_quote_chat(quotation_id: str) -> None:
+async def _run_quote_chat(quotation_id: str, model: str = "") -> None:
     """背景：讀草稿＋對話 → 叫 claude → 正規化 → 把 AI 那一則寫回 chat。"""
     factory = await _get_factory()
     async with factory() as session:
@@ -667,7 +681,7 @@ async def _run_quote_chat(quotation_id: str) -> None:
     # 唯讀模式（同公布欄「問 Claude」）—— 它只要讀截圖，不該碰任何東西
     _chat_partial[quotation_id] = ""
     try:
-        text, err = await _call_claude_stream(prompt, quotation_id, _quote_chat_model())
+        text, err = await _call_claude_stream(prompt, quotation_id, _quote_chat_model(model))
     finally:
         _chat_partial.pop(quotation_id, None)   # 這一輪結束了，畫面改看寫進 chat 的那則
 
@@ -709,7 +723,9 @@ async def purge_quote_chat_images(quotation_id: str) -> int:
         new_chat, names = quote_chat.forget_images(list(q.chat))
         if not names:
             return 0
-        gone = sum(1 for n in names if assets_delete("paste", n))
+        # 兩份都要刪：顯示用的（paste）與餵 AI 的高解析度那份（paste-hi）
+        gone = sum(1 for n in names
+                   if any([assets_delete("paste", n), assets_delete(PASTE_HI_NS, n)]))
         q.chat = new_chat            # token 換掉，免得留一堆死連結
         await session.commit()
     log.info("[quote_chat] 報價 %s 的截圖清理：%d/%d 張已刪", quotation_id, gone, len(names))
@@ -735,7 +751,7 @@ async def quote_chat_send(quotation_id: str, body: QuoteChatPayload, request: Re
         q.chat = chat
         await session.commit()
     # 裸 create_task 只被 loop 弱參考，例外一裸奔那則提問就永遠停在「思考中…」
-    fire(_run_quote_chat(quotation_id), label="quote chat " + quotation_id)
+    fire(_run_quote_chat(quotation_id, body.model or ""), label="quote chat " + quotation_id)
     return {"status": "asking", "chat": chat}
 
 
@@ -863,6 +879,41 @@ async def delete_price_item(item_id: str, request: Request):
         await session.delete(row)
         await session.commit()
     return {"status": "ok"}
+
+
+@router.post("/price-items/match", dependencies=[Depends(money_dep)])
+async def match_price_items(req: PriceMatchPayload):
+    """一批項目 → 價目裡對得上的單價。**只查不寫**（寫入者仍是前端的自動存）。
+
+    給「用價目補上待定價」那顆鈕用：比對規則跟收價時同一支 `price_book.norm_key`，
+    所以「精華影片（3分鐘）」與「精華影片 (3分鐘)」算同一筆。
+    回傳的 `n` 是送進來那個陣列的 1-based 位置 —— 跟 AI patch 的編號同一套規則
+    （攤平後的順序），前端直接當成 patch 套進草稿。
+    """
+    _require_db()
+    rows = req.items or []
+    keys = {}
+    for n, it in enumerate(rows, 1):
+        desc = str(it.description or "").strip()
+        if not desc:
+            continue
+        keys.setdefault(price_book.norm_key(desc, it.unit or "式"), []).append(n)
+    if not keys:
+        return {"matches": []}
+
+    factory = await _get_factory()
+    async with factory() as session:
+        found = (await session.execute(
+            select(CrmPriceItem).where(CrmPriceItem.key.in_(list(keys.keys())))
+        )).scalars().all()
+
+    matches = []
+    for row in found:
+        for n in keys.get(row.key, []):
+            matches.append({"n": n, "unit_price": row.unit_price,
+                            "description": row.description, "unit": row.unit})
+    matches.sort(key=lambda m: m["n"])
+    return {"matches": matches, "total": len(matches)}
 
 
 @router.post("/price-items/import-history")

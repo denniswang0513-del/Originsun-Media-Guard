@@ -219,8 +219,10 @@ def test_single_writer_contract_is_documented_and_kept():
     send = js_func_body(js, "async function _sendChat()")
     assert "_autoFlush" in send, "送出前要先把自動存 flush 掉，順序不一致編號會改到別人"
     apply_ = js_func_body(js, "function _applyNewChatPatches()")
-    assert "_chatApplied" in apply_ and "_autoTouch();" in apply_
+    assert "_chatApplied" in apply_
     assert "applyQuotePatch(_groups, _terms" in apply_
+    # 套完一定要寫回去 —— 編輯既有報價時 _autoOn 是關的，只 _autoTouch() 會靜默丟掉
+    assert "_saveAiChange(" in apply_
 
 
 def test_chat_is_not_carried_in_the_list_payload():

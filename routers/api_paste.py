@@ -13,7 +13,7 @@ import asyncio
 import os
 import uuid
 
-from fastapi import APIRouter, File, HTTPException, UploadFile  # type: ignore
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile  # type: ignore
 
 from core.assets_host import assets_target
 from core.auth import require_access_level
@@ -24,6 +24,11 @@ router = APIRouter(prefix="/api/v1", tags=["paste"])
 _NAMESPACE = "paste"            # 共用圖床的命名空間（見 core/assets_host.py）
 _MAX_BYTES = 10 * 1024 * 1024   # 貼圖上限 10MB（截圖/手機照綽綽有餘）
 _MAX_SIDE = 1600                # 長邊縮到 1600（與官網 OG 圖同規格）
+# 給 AI 讀的高解析度副本（報價助理的截圖；docs/QUOTE_ASSISTANT_PLAN.md §5.3）。
+# 顯示用的那份仍是 1600 —— 這份只有在 textarea 標了 data-paste-hires 時才多寫一份，
+# 檔名跟顯示版一模一樣，清理時兩邊一起刪。
+_HI_NAMESPACE = "paste-hi"
+_MAX_SIDE_HI = 4000
 
 
 @router.get("/paste_config")
@@ -35,6 +40,7 @@ async def paste_config():
 
 @router.post("/paste_upload")
 async def paste_upload(file: UploadFile = File(...),
+                       hires: str = Form(""),
                        _user: dict = require_access_level(1)):
     dest, base = assets_target(_NAMESPACE)
     if not dest or not base:
@@ -56,4 +62,14 @@ async def paste_upload(file: UploadFile = File(...),
         raise HTTPException(status_code=400, detail="無法辨識的圖片格式")
 
     fname = os.path.basename(saved)
+    # 要給 AI 讀的（報價助理）多存一份高解析度、同檔名的副本。失敗不影響貼圖本身
+    # —— 讀不到高解析度那份時，餵圖那邊會自動退回顯示用的這份。
+    if str(hires or "").strip() not in ("", "0", "false"):
+        hi_dest, _hi_base = assets_target(_HI_NAMESPACE)
+        if hi_dest:
+            try:
+                await asyncio.to_thread(save_webp_or_none, content, hi_dest,
+                                        os.path.splitext(fname)[0], _MAX_SIDE_HI)
+            except OSError:
+                pass
     return {"token": f"paste:{fname}", "url": f"{base}/{fname}"}

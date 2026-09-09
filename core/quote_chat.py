@@ -66,6 +66,22 @@ patch 的規則：
 """ % MAX_QUESTIONS
 
 
+# ── 模型挑選 ─────────────────────────────────────────────────
+# 🔴 `--model <值>` 是**命令列參數**：使用者送什麼就接什麼的話，等於讓前端往
+#    claude CLI 塞旗標。一律白名單，名單外一律回預設。
+ALLOWED_MODELS = ("fable", "opus", "sonnet", "haiku")
+DEFAULT_MODEL = "sonnet"     # 實測：抽結構化這種短活 sonnet 就夠，haiku 反而慢一倍
+
+
+def pick_model(requested: str = "", fallback: str = "") -> str:
+    """(前端選的, settings 的預設) → 真的要用的模型別名。兩個都不合法就用 DEFAULT_MODEL。"""
+    for candidate in (requested, fallback):
+        name = str(candidate or "").strip().lower()
+        if name in ALLOWED_MODELS:
+            return name
+    return DEFAULT_MODEL
+
+
 def paste_tokens(text: str) -> list:
     """文字裡的貼圖 token（去重、保持出現順序）。回傳檔名如 `<32hex>.webp`。"""
     seen, out = set(), []

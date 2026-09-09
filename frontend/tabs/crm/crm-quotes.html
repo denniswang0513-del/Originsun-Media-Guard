@@ -185,9 +185,17 @@
           <div id="quote-chat-log" class="quote-chat-log"></div>
           <div id="quote-chat-thumbs" class="quote-chat-thumbs"></div>
           <div class="quote-chat-compose">
-            <textarea id="quote-chat-input" class="crm-input quote-chat-input" rows="3"
+            <textarea id="quote-chat-input" class="crm-input quote-chat-input" rows="3" data-paste-hires
               placeholder="貼上客戶的訊息或截圖（Ctrl+V 可以直接貼圖），或回答上面的問題…"></textarea>
-            <button type="button" id="quote-chat-send" class="crm-btn crm-btn-primary">送出</button>
+            <div class="quote-chat-actions">
+              <button type="button" id="quote-chat-send" class="crm-btn crm-btn-primary">送出</button>
+              <select id="quote-chat-model" class="crm-input quote-chat-model" data-no-search title="要用哪顆模型">
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+                <option value="fable">Fable</option>
+                <option value="haiku">Haiku</option>
+              </select>
+            </div>
           </div>
           <small class="quote-chat-hint">AI 只會改左邊這張草稿，不會寄出。單價它沒把握就會問你，不會自己編。</small>
         </div>

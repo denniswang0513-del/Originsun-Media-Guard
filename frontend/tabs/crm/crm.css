@@ -699,6 +699,9 @@
 .quote-chat-compose { display: flex; gap: 8px; align-items: flex-end; }
 .quote-chat-input { flex: 1; resize: vertical; min-height: 56px; }
 .quote-chat-hint { color: #6b7280; font-size: 11px; }
+.quote-chat-actions { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
+.quote-chat-model { padding: 3px 6px; font-size: 11px; }
+.quote-fill-prices { margin-top: 8px; width: 100%; }
 .quote-chat-thumbs { display: flex; gap: 6px; flex-wrap: wrap; }
 .quote-chat-thumbs .paste-thumb {
   height: 54px; border-radius: 4px; border: 1px solid #3a3a3a;

@@ -42,9 +42,22 @@ class PriceItemPayload(BaseModel):
     unit_price: Optional[int] = None
 
 
+class PriceMatchItem(BaseModel):
+    description: str = ""
+    unit: str = "式"
+
+
+class PriceMatchPayload(BaseModel):
+    """要拿去跟價目對的一批項目（只查不寫）。"""
+    items: List[PriceMatchItem] = []
+
+
 class QuoteChatPayload(BaseModel):
     """對話式完成報價：使用者這一輪說的話（可含貼圖 token）。docs/QUOTE_ASSISTANT_PLAN.md"""
     text: str = ""
+    # 前端選的模型別名。🔴 會變成 claude CLI 的 --model 參數 —— 後端一律走
+    # quote_chat.pick_model() 的白名單，不合法就用預設（別讓前端往 CLI 塞旗標）。
+    model: Optional[str] = None
 
 
 class QuotationTemplatePayload(BaseModel):

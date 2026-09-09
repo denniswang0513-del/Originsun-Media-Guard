@@ -529,6 +529,7 @@ let _chatApplied = 0;      // 已套用過 patch 的訊息數
 let _chatBusy = false;     // 等 AI 回覆中
 let _chatGen = 0;          // 開窗世代：關窗／換一張報價後，舊的輪詢自己收工
 let _chatPartial = '';     // 串流到目前為止的 reply（後端 GET /chat 的 partial）
+const _CHAT_MODEL_KEY = 'crm_quote_chat_model';   // 這台瀏覽器選的模型（後端仍會過白名單）
 
 function _chatBubble(m) {
     const who = m.role === 'user' ? '你' : 'AI';
@@ -596,7 +597,28 @@ function _renderChatSummary() {
         html += terms.map((t, i) => `<div class="quote-sum-row"><span>${i + 1}. ${_esc(t)}</span></div>`).join('');
     }
     el.innerHTML = (html || '<div class="crm-empty">還沒有項目</div>')
-        + `<div class="quote-sum-foot">${n} 項${noPrice ? ` · <b>${noPrice} 項待定價</b>` : (n ? ' · 都有價了' : '')}</div>`;
+        + `<div class="quote-sum-foot">${n} 項${noPrice ? ` · <b>${noPrice} 項待定價</b>` : (n ? ' · 都有價了' : '')}</div>`
+        + (noPrice ? `<button type="button" id="quote-fill-prices"
+             class="crm-btn crm-btn-secondary crm-btn-sm quote-fill-prices">用價目補上待定價</button>` : '');
+    el.querySelector('#quote-fill-prices')?.addEventListener('click', _fillPricesFromBook);
+}
+
+/** AI 改了草稿就一定要存下去。
+ *
+ * 🔴 自動存刻意只在「新增」那條路開著（編輯既有報價怕靜默改到舊資料，見 _autoReset）。
+ *    但 AI 的 patch 與「用價目補上」是使用者按出來的、畫面也已經變了 —— 不存反而是丟資料。
+ *    所以這兩條路即使 _autoOn 是關的也要寫回去。
+ */
+async function _saveAiChange(note) {
+    if (!_editingId) return;
+    if (_autoOn) { _autoTouch(); return; }      // 新增那條路照原本的 debounce 走
+    _autoNote('儲存中…');
+    try {
+        await _fetch(`/quotations/${_editingId}`, { method: 'PUT', body: JSON.stringify(_buildPayload()) });
+        _autoNote(note || '已儲存', 'ok');
+    } catch (e) {
+        _autoNote('儲存失敗：' + e.message + '（請按儲存）', 'err');
+    }
 }
 
 /** 把還沒套過的 AI patch 套進草稿（純函式在 js/shared/quote-patch.js） */
@@ -612,7 +634,8 @@ function _applyNewChatPatches() {
     _chatApplied = _chat.length;
     if (touched) {
         _renderItemRows(); _renderTermRows(); _recalcTotals();
-        _autoTouch();                     // 套完就存回去（單一寫入者是這邊）
+        // 套完就存回去（單一寫入者是這邊）。排進 _autoChain，關窗時會被 await 到
+        _autoQueue(() => _saveAiChange('AI 的修改已存進這張報價'));
     }
     _renderChatSummary();
 }
@@ -668,8 +691,9 @@ async function _sendChat() {
     _chatBusy = true; _chatPartial = '';
     _renderChat();
     try {
+        const model = document.getElementById('quote-chat-model')?.value || '';
         const r = await _fetch(`/quotations/${_editingId}/chat`,
-                              { method: 'POST', body: JSON.stringify({ text }) });
+                              { method: 'POST', body: JSON.stringify({ text, model }) });
         if (gen !== _chatGen) return;
         _chat = r.chat || _chat;
         _chatApplied = _chat.length;      // 使用者那則沒有 patch
@@ -678,6 +702,34 @@ async function _sendChat() {
     } catch (e) {
         _chatBusy = false; _chatPartial = ''; _renderChat();
         _showModalError('送出失敗：' + e.message);
+    }
+}
+
+/** 用價目補上目前是 0 的項目。**不覆蓋你手打的價**，只填空的那些。 */
+async function _fillPricesFromBook() {
+    const rows = _flatItems().filter(it => it.description);
+    if (!rows.length) return;
+    const btn = document.getElementById('quote-fill-prices');
+    if (btn) { btn.disabled = true; btn.textContent = '查價目中…'; }
+    try {
+        // 比對規則（norm_key）住在後端，跟收價時同一支 —— 前端不再寫一份會漂掉的版本
+        const r = await _fetch('/price-items/match', {
+            method: 'POST',
+            body: JSON.stringify({ items: rows.map(it => ({ description: it.description, unit: it.unit || '式' })) }),
+        });
+        // n 是攤平後的位置，跟 AI patch 的編號同一套；只補現在是 0 的
+        const update = (r.matches || [])
+            .filter(m => !(rows[m.n - 1] || {}).unit_price)
+            .map(m => ({ n: m.n, unit_price: m.unit_price }));
+        if (!update.length) { _autoNote('價目裡沒有對得上、而且還缺價的品項', 'err'); return; }
+        const out = applyQuotePatch(_groups, _terms, { add: [], update, remove: [] });
+        _groups = out.groups; _terms = out.terms;
+        _renderItemRows(); _recalcTotals(); _renderChatSummary();
+        await _autoQueue(() => _saveAiChange(`已用價目補上 ${out.applied.updated} 項`));
+    } catch (e) {
+        _showModalError('查價目失敗：' + e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '用價目補上待定價'; }
     }
 }
 
@@ -1159,6 +1211,12 @@ export async function initCrmQuotesTab() {
     document.querySelectorAll('#quote-modal-tabs .crm-tab').forEach(btn =>
         btn.addEventListener('click', () => _setPane(btn.dataset.pane)));
     document.getElementById('quote-chat-send').addEventListener('click', _sendChat);
+    const modelSel = document.getElementById('quote-chat-model');
+    try { modelSel.value = localStorage.getItem(_CHAT_MODEL_KEY) || 'sonnet'; } catch (_) {}
+    if (!modelSel.value) modelSel.value = 'sonnet';
+    modelSel.addEventListener('change', () => {
+        try { localStorage.setItem(_CHAT_MODEL_KEY, modelSel.value); } catch (_) {}
+    });
     const chatInput = document.getElementById('quote-chat-input');
     chatInput.addEventListener('keydown', e => {
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); _sendChat(); }
