@@ -196,6 +196,11 @@ async function send() {
     const ta = document.getElementById('qc-text');
     const text = (ta.value || '').trim();
     if (!text || S.busy) return;
+    // 🔴 AI 讀的是 DB 那一份，patch 的編號＝**攤平後**的順序（js/shared/quote-patch.js）。
+    //    groupQuoteItems 會把同名大項目併在一起 —— 舊資料的列在 DB 裡不見得是連著的，
+    //    不先存回去的話「改第 3 項」會落在別人身上。桌機是靠送出前 flush 自動存做同一件事。
+    try { await save(); } catch (e) { toast('存回報價失敗：' + e.message, 'err'); return; }
+    if (!S) return;                              // await 中間視窗被關掉
     ta.value = '';
     S.busy = true; S.partial = ''; S.stage = ''; S.since = Date.now();
     render();

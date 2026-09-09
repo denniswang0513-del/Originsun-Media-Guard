@@ -58,8 +58,11 @@ def test_autosave_is_new_quote_only_and_survives_a_click_away():
 def test_project_name_typing_does_not_open_a_project_per_keystroke():
     """案名的 input 不進自動存（不然打第一個字就開一個案）——靠 change（離開欄位）才進來。"""
     init = js_func_body(js_code_only(repo_src(JS)), "export async function initCrmQuotesTab(")
-    assert "if (e.target.id !== 'quote-f-project_name') _autoTouch();" in init
+    assert "e.target.id !== 'quote-f-project_name' && _fromForm(e.target)" in init
     assert "e.target.id === 'quote-f-project_name' && _editingId" in init, "存過之後改案名＝改那個殼案"
+    # AI 分頁不算「動到表單」：對話框每打一個字都會冒泡到彈窗，跟著就是一發整張報價的
+    # PUT（後端 _save_items 砍光重插），而那些字根本不是報價內容。
+    assert "!el.closest('#quote-pane-ai')" in init
 
 
 def test_locked_fields_after_draft_and_shell_rename():
@@ -115,7 +118,12 @@ def test_groups_and_items_reorder_by_drag():
 def test_terms_are_one_row_each_numbered_and_sortable():
     html = repo_src(HTML)
     assert 'id="quote-terms-list"' in html and 'id="quote-btn-add-term"' in html
-    assert 'id="quote-f-terms"' not in html, "整塊 textarea 退場"
+    # 整塊 textarea 退場，但**不能直接從 html 拿掉**：CF 給 .js 4 小時快取、html 是即時的，
+    # 發版後會出現「新 html ＋ 舊 crm-quotes.js」，而舊的 openModal 直接
+    # `getElementById('quote-f-terms').value` —— 元素不在＝TypeError＝報價彈窗打不開。
+    # 留一個隱藏的相容殼一輪（reference_cloudflare_js_cache），新 js 不准碰它。
+    assert '<textarea id="quote-f-terms" hidden' in html, "舊快取 js 的相容殼要在，而且是隱藏的"
+    assert "'quote-f-terms'" not in js_code_only(repo_src(JS)), "新 js 不准再讀寫那個 textarea"
 
     js = js_code_only(repo_src(JS))
     rows = js_func_body(js, "function _renderTermRows()")

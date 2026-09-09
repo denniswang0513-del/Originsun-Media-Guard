@@ -1288,11 +1288,16 @@ export async function initCrmQuotesTab() {
 
     // 自動存草稿的觸發點：彈窗裡任何一格被動到就算。項目／備註列是重繪出來的，所以掛在彈窗上委派。
     // 案名的 input 不算（不然打第一個字就開一個案）—— 它靠 change（離開欄位才發）進來。
+    // 🔴 AI 分頁不算「動到表單」：對話框每打一個字都會走這裡，1.2 秒後就是一發
+    //    整張報價的 PUT（後端 _save_items 是砍光重插），而那些字根本不是報價內容。
     const quoteModal = document.getElementById('quote-modal');
-    quoteModal.addEventListener('input', e => { if (e.target.id !== 'quote-f-project_name') _autoTouch(); });
+    const _fromForm = (el) => el && !el.closest('#quote-pane-ai');
+    quoteModal.addEventListener('input', e => {
+        if (e.target.id !== 'quote-f-project_name' && _fromForm(e.target)) _autoTouch();
+    });
     quoteModal.addEventListener('change', e => {
         if (e.target.id === 'quote-f-project_name' && _editingId) { _autoQueue(_autoRenameShell); return; }
-        _autoTouch();
+        if (_fromForm(e.target)) _autoTouch();
     });
     quoteModal.addEventListener('click', e => { if (e.target.closest('#quote-items-list, #quote-terms-list')) _autoTouch(); });
 

@@ -5,6 +5,7 @@
 import { crmFetch as _fetch, esc as _esc, fmtNum, quotePdfFilename } from './crm-utils.js';
 import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 import { authDownload } from '../../js/shared/utils.js';
+import { confirmQuoteDelete } from '../../js/shared/quote-delete.js';
 
 // 刪除報價仍是管理員限定（RBAC 稽核第二批）—— 不是管理員就別畫那顆鈕
 const _isAdmin = () => (window._accessLevel || 0) >= 3;
@@ -188,7 +189,11 @@ function initQuoteHandlers() {
     };
 
     window._pqDelete = async (quoteId) => {
-        if (!confirm('確定刪除此報價？')) return;
+        // 確認規則跟報價分頁／手機版同一份（js/shared/quote-delete.js）：已寄送／已簽核要
+        // 打字確認案名 —— 那些一刪，客戶手上的 /q/{code} 當場變 404，而且我們不會知道。
+        // 這裡的按鈕只畫在展開的那一版底下，_detailQuote 就是它。
+        const q = (_detailQuote && _detailQuote.id === quoteId) ? _detailQuote : { id: quoteId };
+        if (!confirmQuoteDelete(q)) return;
         try {
             await _fetch('/quotations/' + quoteId, { method: 'DELETE' });
             if (state.selectedId) loadProjectQuotes(state.selectedId);

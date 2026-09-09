@@ -31,9 +31,15 @@ def norm_text(s: str) -> str:
 
 
 def norm_key(description: str, unit: str) -> str:
-    """(描述, 單位) → 去重用的鍵。同一個品項不同單位算兩筆（「天」跟「式」是兩種報法）。"""
+    """(描述, 單位) → 去重用的鍵。同一個品項不同單位算兩筆（「天」跟「式」是兩種報法）。
+
+    🔴 兩段都要截：`crm_price_items.key` 是 varchar(300)，而 `unit` 存進去時是 [:32]。
+    不截的話（a）長單位會讓鍵超過 300 → 寫入直接炸；（b）收價時用整串算的鍵，跟之後
+    `update_price_item` 用截短後的 unit 重算出來的鍵對不起來，同一筆會分裂成兩筆。
+    正常單位遠短於 32 字，所以這個截斷對既有資料是 no-op。
+    """
     desc = norm_text(description)[:200]
-    return f"{desc}|{norm_text(unit) or '式'}"
+    return f"{desc}|{norm_text(unit)[:32] or '式'}"
 
 
 def usable(description: str, unit_price) -> bool:

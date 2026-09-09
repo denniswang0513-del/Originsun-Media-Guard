@@ -176,6 +176,12 @@
           <div id="quote-terms-list" class="quote-terms-list"></div>
           <button type="button" id="quote-btn-add-term" class="crm-btn crm-btn-secondary crm-btn-sm" style="align-self:flex-start;margin-top:6px;">＋ 備註列</button>
           <small style="color:#888;">一列一條，報價單上照這個順序印成編號清單；拖左邊的 ↕ 換順序</small>
+          <!-- 🔴 相容殼，留一輪就可以拿掉（reference_cloudflare_js_cache）：html 是即時的、
+               .js 被 Cloudflare 快取 4 小時，所以發版後會出現「新 html ＋ 舊 crm-quotes.js」。
+               舊的 openModal／_applyTemplate／_saveCurrentAsTemplate 都直接
+               `document.getElementById('quote-f-terms').value` —— 元素不在就是 TypeError，
+               整個報價彈窗打不開。新版的 js 不碰它（正本是上面那排列）。 -->
+          <textarea id="quote-f-terms" hidden aria-hidden="true" tabindex="-1"></textarea>
         </div>
       </div>
       </div><!-- /quote-pane-form -->
