@@ -38,8 +38,11 @@ def test_desktop_form_is_group_first():
     assert "_itemRows" not in src and "_quoteRemoveItem" not in src, "扁平列模型退場"
     assert 'class="quote-group-edit"' in src and "qi-add-sub" in src and "qi-remove-group" in src
     assert "addGroup(); _recalcTotals();" in src
+    # payload 抽成 _buildPayload（按儲存與自動存草稿共用一份）
+    payload = js_func_body(src, "function _buildPayload()")
+    assert "const rows = _flatItems();" in payload and "items: rows.filter(it => it.description)" in payload
     save = js_func_body(src, "async function saveQuotation()")
-    assert "const rows = _flatItems();" in save and "items: rows.filter(it => it.description)" in save
+    assert "const payload = _buildPayload();" in save
     assert "_flatItems().filter(it => it.description)" in js_func_body(src, "function _saveCurrentAsTemplate(name)")
     assert "+ 新增大項目" in repo_src("frontend/tabs/crm/crm-quotes.html")
     assert ".quote-group-edit {" in repo_src("frontend/tabs/crm/crm.css")

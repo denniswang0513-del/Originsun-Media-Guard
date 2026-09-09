@@ -31,10 +31,11 @@ def test_promo_and_final_price_are_reciprocal_and_pre_tax_discount_is_gone():
     assert "discount: _editingQuote?.discount || 0" in rc
     mob = js_code_only(repo_src("frontend/m/views/quotes.js"))
     assert "discount: _form.discount" in js_func_body(mob, "function recalc()")
-    save = js_func_body(js, "async function saveQuotation()")
-    assert "discount: editing ? (editing.discount || 0) : 0" in save, "舊報價的折扣值要原樣帶回，不洗掉"
+    save = js_func_body(js, "function _buildPayload()")   # 按儲存與自動存草稿共用的 payload
+    assert "discount: _editingQuote ? (_editingQuote.discount || 0) : 0" in save, "舊報價的折扣值要原樣帶回，不洗掉"
     # 正在編的那筆從 openModal 帶進來（_editingQuote），不從有狀態篩選的 _quotations 查（查不到＝被當成新增、要客戶）
-    assert "const editing = _editingQuote;" in save and "_quotations.find" not in save
+    assert "_quotations.find" not in save
+    assert "const editing = _editingQuote;" in js_func_body(js, "async function saveQuotation()")
 
 
 def test_share_button_and_update_do_not_regress_on_review():
@@ -59,7 +60,7 @@ def test_internal_cost_is_out_of_the_form_for_now():
     js = js_code_only(repo_src(JS))
     assert "qi-cost" not in js
     # 既有 internal_cost 值不動：項目物件整個展開帶回
-    save = js_func_body(js, "async function saveQuotation()")
+    save = js_func_body(js, "function _buildPayload()")
     assert "internal_cost: it.internal_cost || 0" in save
 
 

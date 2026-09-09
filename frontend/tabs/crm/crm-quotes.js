@@ -18,7 +18,7 @@ const groupQuoteItems = _QA.groupQuoteItems || ((items) => {
     return groups;
 });
 const flattenQuoteGroups = _QA.flattenQuoteGroups || ((groups) => (groups || []).flatMap(g => g.items.map(it => ({ ...it, group_name: g.name }))));
-import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, quotePdfFilename, initRootFolderCard, hasModule } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, kebabMenuHtml, createSortable, enumIndex, quotePdfFilename, initRootFolderCard, hasModule } from './crm-utils.js';
 import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 
 // 刪除報價仍是管理員限定（RBAC 稽核第二批）—— 不是管理員就別畫那顆鈕
@@ -140,20 +140,6 @@ function renderList() {
     }).join('');
 }
 
-const _QUOTE_EDIT_FIELDS = [
-    {name:'status', label:'狀態', type:'select', options:[
-        {value:'草稿',label:'草稿'},{value:'已寄送',label:'已寄送'},
-        {value:'已簽核',label:'已簽核'},{value:'已拒絕',label:'已拒絕'},
-    ]},
-    {name:'quote_date', label:'報價日期', type:'date'},
-    {name:'valid_until', label:'有效期限', type:'date'},
-    {name:'spec', label:'規格', type:'textarea'},
-    {name:'discount', label:'折扣', type:'number'},
-    {name:'tax_rate', label:'稅率(%)', type:'number'},
-    {name:'final_price', label:'最終報價', type:'number'},
-    {name:'terms', label:'備註/條款', type:'textarea'},
-];
-
 function renderDetail(q) {
     document.getElementById('quote-detail-title').textContent = `Q-${q.project_name || ''}-v${q.version}`;
 
@@ -211,10 +197,14 @@ function renderDetail(q) {
         const sent = q.status !== _QUOTE_STATUSES[0];
         // 鑄連結是管理員限定（POST /share）：非管理員只有已經有連結時才給「複製」（同手機版）
         const canShare = q.share_url || hasModule('crm_quotes');   // 第二批：分享開給 crm_quotes（後端 /share 同步放行）
-        actions.innerHTML = (sent ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-pdf">下載 PDF</button>`
+        actions.innerHTML = `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-edit">編輯</button>`
+            + (sent ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-pdf">下載 PDF</button>`
             + (canShare ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-share">${q.share_url ? '複製連結' : '分享連結'}</button>` : '') : '')
             + `<button class="crm-detail-close" title="關閉">&#x2715;</button>`;
         actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
+        // 「編輯」開的就是新增／編輯報價那個彈窗（owner 2026-09-09）——就地編欄位那套已退場：
+        // 它只編得到上半部的欄位、項目明細碰不到，跟彈窗是兩套規則
+        actions.querySelector('#quote-btn-edit')?.addEventListener('click', () => quoteEdit(q.id));
         actions.querySelector('#quote-btn-pdf')?.addEventListener('click', () =>
             authDownload('/api/v1/crm/quotations/' + q.id + '/pdf', quotePdfFilename(q), '下載 PDF'));
         // 線上檢視連結（免登入、頁上可下載 PDF）：沒有就鑄一條（冪等），然後複製完整網址
@@ -232,23 +222,6 @@ function renderDetail(q) {
             } catch (e) { alert('建立連結失敗：' + e.message); }
         });
     }
-    addEditButton('quote-bar-actions', () => {
-        enableInlineEdit('quote-detail-info', 'quote-bar-actions', _QUOTE_EDIT_FIELDS, q,
-            async (payload) => {
-                // Keep existing items when editing info fields
-                payload.items = (q.items || []).map(it => ({
-                    group_name: it.group_name || '', description: it.description,
-                    unit: it.unit || '式', quantity: it.quantity || 1,
-                    unit_price: it.unit_price || 0, internal_cost: it.internal_cost || 0,
-                }));
-                await _fetch('/quotations/' + q.id, { method: 'PUT', body: JSON.stringify(payload) });
-                const updated = await _fetch('/quotations/' + q.id);
-                renderDetail(updated);
-                await loadQuotations();
-            },
-            () => renderDetail(q)
-        );
-    });
 }
 
 // ── Detail Panel ─────────────────────────────────────────────
@@ -289,6 +262,47 @@ function _setItems(items, { blankIfEmpty = false } = {}) {
     _renderItemRows();
 }
 
+// ── 拖曳排序（owner 2026-09-09：大項目、子項目、備註列都要能換順序）────────
+// 三處共用同一套：只有那根 ↕ 是 draggable（整列 draggable 會搶掉輸入框的選字），
+// 列本身當落點。_drag 記「拖的是誰」，落點依 kind 分流。
+let _drag = null;      // {kind:'group'|'item'|'term', gi, i}
+
+/** 從 from 搬到 to（to＝目標列在「原本」陣列的位置）：往下拖＝落在目標後面、往上＝落在它前面 */
+function _moveInArray(arr, from, to) {
+    if (from === to || from < 0 || to < 0) return false;
+    const [x] = arr.splice(from, 1);
+    arr.splice(to, 0, x);
+    return true;
+}
+
+const _gripHtml = (title = '拖曳換順序') =>
+    `<span class="qi-grip" draggable="true" title="${title}">↕</span>`;
+
+/** 落點列的共用綁定：dragover 只在 kind 對得上時 preventDefault（不然放不下去） */
+function _bindDropTarget(el, kind, onDrop) {
+    el.addEventListener('dragover', e => {
+        if (!_drag || _drag.kind !== kind) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    });
+    el.addEventListener('drop', e => {
+        if (!_drag || _drag.kind !== kind) return;
+        e.preventDefault(); e.stopPropagation();
+        const d = _drag; _drag = null;
+        onDrop(d);
+    });
+}
+
+function _bindGrip(el, payload) {
+    if (!el) return;
+    el.addEventListener('dragstart', e => {
+        _drag = payload;
+        e.stopPropagation();
+        if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', payload.kind); }
+    });
+    el.addEventListener('dragend', () => { _drag = null; });
+}
+
 function addGroup() {
     _groups.push({ name: '', items: [_emptyRow()] });
     _renderItemRows();
@@ -302,12 +316,14 @@ function _renderItemRows() {
     container.innerHTML = _groups.map((g, gi) => `
         <div class="quote-group-edit" data-g="${gi}">
             <div class="quote-group-edit-head">
+                ${_gripHtml('拖曳換大項目順序')}
                 <span class="quote-group-edit-label">大項目</span>
                 <input type="text" class="crm-input qi-group" value="${_esc(g.name)}" placeholder="例：拍攝／後期製作／其他" style="flex:1;">
                 <button type="button" class="crm-btn crm-btn-danger crm-btn-sm qi-remove-group" title="刪除大項目">&#x2715;</button>
             </div>
             ${g.items.map((it, i) => `
             <div class="quote-item-edit-row" data-g="${gi}" data-i="${i}">
+                ${_gripHtml('拖曳換子項目順序（可拖到別的大項目）')}
                 <input type="text" class="crm-input qi-desc" value="${_esc(it.description)}" placeholder="子項目描述" style="flex:2;">
                 <input type="text" class="crm-input qi-unit" value="${_esc(it.unit)}" placeholder="單位" style="width:50px;">
                 <input type="number" class="crm-input qi-qty" value="${it.quantity}" min="1" style="width:55px;text-align:right;">
@@ -321,6 +337,15 @@ function _renderItemRows() {
 
     container.querySelectorAll('.quote-group-edit').forEach(gEl => {
         const gi = parseInt(gEl.dataset.g), g = _groups[gi];
+        _bindGrip(gEl.querySelector('.quote-group-edit-head .qi-grip'), { kind: 'group', gi });
+        // 大項目落點＝整個框；子項目拖到框裡的空白處＝掛到這一組的最後面
+        _bindDropTarget(gEl, 'group', d => { if (_moveInArray(_groups, d.gi, gi)) { _renderItemRows(); _recalcTotals(); _autoTouch(); } });
+        _bindDropTarget(gEl, 'item', d => {
+            if (d.gi === gi) return;
+            const [it] = _groups[d.gi].items.splice(d.i, 1);
+            g.items.push(it);
+            _renderItemRows(); _recalcTotals(); _autoTouch();
+        });
         gEl.querySelector('.qi-group').addEventListener('input', e => { g.name = e.target.value; });
         gEl.querySelector('.qi-add-sub').addEventListener('click', () => { g.items.push(_emptyRow()); _renderItemRows(); });
         gEl.querySelector('.qi-remove-group').addEventListener('click', () => {
@@ -329,13 +354,72 @@ function _renderItemRows() {
         });
     });
     container.querySelectorAll('.quote-item-edit-row').forEach(row => {
-        const g = _groups[parseInt(row.dataset.g)], i = parseInt(row.dataset.i), it = g.items[i];
+        const gi = parseInt(row.dataset.g), g = _groups[gi], i = parseInt(row.dataset.i), it = g.items[i];
+        _bindGrip(row.querySelector('.qi-grip'), { kind: 'item', gi, i });
+        _bindDropTarget(row, 'item', d => {
+            if (d.gi === gi) { if (!_moveInArray(g.items, d.i, i)) return; }
+            else { const [moved] = _groups[d.gi].items.splice(d.i, 1); g.items.splice(i, 0, moved); }
+            _renderItemRows(); _recalcTotals(); _autoTouch();
+        });
         row.querySelector('.qi-desc').addEventListener('input', e => { it.description = e.target.value; });
         row.querySelector('.qi-unit').addEventListener('input', e => { it.unit = e.target.value; });
         row.querySelector('.qi-qty').addEventListener('input', e => { it.quantity = parseInt(e.target.value) || 0; _recalcTotals(); });
         row.querySelector('.qi-price').addEventListener('input', e => { it.unit_price = parseInt(e.target.value) || 0; _recalcTotals(); });
         row.querySelector('.qi-remove').addEventListener('click', () => { g.items.splice(i, 1); _renderItemRows(); _recalcTotals(); });
     });
+}
+
+// ── 備註／條款：一列一條（owner 2026-09-09「用一列一列開，每列一樣可以更改排序，前面加個編號」）──
+// 存回 DB 仍是同一個 terms 文字欄（一行一條）：報價單模板早就是照行切成 <ol>，
+// 所以編輯器的順序＝報價單上的編號順序，舊資料原樣讀得回來。
+let _terms = [];
+const _termsText = () => _terms.map(t => t.trim()).filter(Boolean).join('\n');
+
+function _setTerms(text) {
+    _terms = String(text || '').split('\n').map(t => t.trim()).filter(Boolean);
+    if (!_terms.length) _terms = [''];
+    _renderTermRows();
+}
+
+function _renderTermRows() {
+    const c = document.getElementById('quote-terms-list');
+    if (!c) return;
+    c.innerHTML = _terms.map((t, i) => `
+        <div class="quote-term-row" data-i="${i}">
+            ${_gripHtml('拖曳換備註順序')}
+            <span class="quote-term-no">${i + 1}.</span>
+            <input type="text" class="crm-input qt-text" value="${_esc(t)}" placeholder="例：本報價未含字幕翻譯" style="flex:1;min-width:0;">
+            <button type="button" class="crm-btn crm-btn-danger crm-btn-sm qt-remove" title="刪除這列">&#x2715;</button>
+        </div>`).join('');
+
+    c.querySelectorAll('.quote-term-row').forEach(row => {
+        const i = parseInt(row.dataset.i);
+        _bindGrip(row.querySelector('.qi-grip'), { kind: 'term', i });
+        _bindDropTarget(row, 'term', d => {
+            if (_moveInArray(_terms, d.i, i)) { _renderTermRows(); _autoTouch(); }
+        });
+        const input = row.querySelector('.qt-text');
+        input.addEventListener('input', e => { _terms[i] = e.target.value; });   // 不重繪，游標才不會被搶
+        input.addEventListener('keydown', e => {
+            if (e.key !== 'Enter') return;                 // Enter＝在下面開新的一列（一列一條打得順）
+            e.preventDefault();
+            _terms.splice(i + 1, 0, '');
+            _renderTermRows();
+            document.querySelector(`.quote-term-row[data-i="${i + 1}"] .qt-text`)?.focus();
+        });
+        row.querySelector('.qt-remove').addEventListener('click', () => {
+            _terms.splice(i, 1);
+            if (!_terms.length) _terms = [''];
+            _renderTermRows(); _autoTouch();
+        });
+    });
+}
+
+function addTermRow() {
+    _terms.push('');
+    _renderTermRows();
+    const rows = document.querySelectorAll('#quote-terms-list .qt-text');
+    rows[rows.length - 1]?.focus();
 }
 
 // 報價表單的狀態（跟手機版 _form 同形）：客戶、要連結的案、優惠／最終報價哪一格是人打的
@@ -429,7 +513,140 @@ function _populateClientFilter() {
     populateClientSelect('quote-filter-client', _clients);
 }
 
+// ── 自動存草稿 ───────────────────────────────────────────────
+// owner 2026-09-09：「打了客戶與專案之後就可以自動儲存了，要不不小心點掉就消失了」。
+// 客戶＋案名（或已經固定的案）一齊，第一次動到表單就先 POST 出一張草稿；之後每次改欄位
+// debounce 一發 PUT，關窗前把還沒送的補送出去。只有「新增」這條路自動存 —— 編輯既有報價
+// 維持「按儲存才寫」，不然舊資料會在使用者還沒決定前就被改掉。
+let _autoOn = false;              // 這次彈窗是不是自動存模式
+let _autoTimer = null;
+let _autoDirty = false;           // 有改過、還沒送出去
+let _autoChain = Promise.resolve();  // 建草稿／PUT 排成一條龍（關窗前 await 它）
+let _autoShellProject = null;     // {id, name}：這次自動建出來的殼案（案名還能改）
+
+function _autoNote(msg, kind = '') {
+    const el = document.getElementById('quote-auto-note');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.className = 'quote-auto-note' + (kind ? ' ' + kind : '');
+}
+
+function _autoReset(on) {
+    clearTimeout(_autoTimer); _autoTimer = null;
+    _autoOn = !!on; _autoDirty = false; _autoShellProject = null;
+    _autoNote('');
+    // 三格解鎖（上一輪自動存草稿後是鎖著的）
+    for (const id of ['quote-f-client_id', 'quote-btn-new-client', 'quote-f-link_project', 'quote-f-project_name']) {
+        const el = document.getElementById(id);
+        if (el) el.disabled = false;
+    }
+}
+
+/** 案子從哪來：從專案頁／複製開的已經固定；新增則是「連結的案」或「客戶＋案名」 */
+function _autoTarget() {
+    if (_editingProjectId) return { id: _editingProjectId };
+    if (_form.project_id)  return { id: _form.project_id };
+    const name = (document.getElementById('quote-f-project_name')?.value || '').trim();
+    if (_form.client_id && name) return { id: '', name };
+    return null;
+}
+
+const _autoQueue = (fn) => { _autoChain = _autoChain.then(fn).catch(() => {}); return _autoChain; };
+
+/** 表單被動到：草稿還沒建就先建，建好了就排一發 debounce PUT */
+function _autoTouch() {
+    if (!_autoOn) return;
+    if (!_editingId) { _autoQueue(_autoCreateDraft); return; }
+    _autoDirty = true;
+    _autoNote('有還沒存的變更…');
+    clearTimeout(_autoTimer);
+    _autoTimer = setTimeout(() => _autoQueue(_autoFlush), 1200);
+}
+
+/** 草稿建起來之後，客戶／連結案就定了（PUT 報價改不動案子）——鎖起來免得改了以為有效。
+ *  案名只有在「殼案是我們剛建的」時候還能改（改的是那個案，不是報價） */
+function _lockProjectFields() {
+    for (const id of ['quote-f-client_id', 'quote-btn-new-client', 'quote-f-link_project']) {
+        const el = document.getElementById(id);
+        if (el) el.disabled = true;
+    }
+    const nameEl = document.getElementById('quote-f-project_name');
+    if (nameEl) nameEl.disabled = !_autoShellProject;
+}
+
+async function _autoCreateDraft() {
+    if (!_autoOn || _editingId) return;
+    const t = _autoTarget();
+    if (!t) return;
+    _autoNote('自動儲存中…');
+    try {
+        let projectId = t.id;
+        if (!projectId) {          // 案子還沒成立：照案名開一個殼案（同按儲存那條路；階段＝提案）
+            const np = await _fetch('/projects', { method: 'POST', body: JSON.stringify({ name: t.name, client_id: _form.client_id, status: '提案' }) });
+            const proj = np.project || np;
+            projectId = proj.id;
+            _projects.push(proj);
+            _autoShellProject = { id: projectId, name: t.name };
+        }
+        const r = await _fetch(`/projects/${projectId}/quotations`, { method: 'POST', body: JSON.stringify(_buildPayload()) });
+        const q = r.quotation || r;
+        _editingId = q.id; _editingQuote = q; _editingProjectId = projectId; _form.project_id = projectId;
+        _autoDirty = false;
+        document.getElementById('quote-modal-title').textContent = '編輯報價';
+        _lockProjectFields();
+        _autoNote('已自動存成草稿 v' + (q.version || 1) + '（關掉也還在，在清單找得到）', 'ok');
+        loadQuotations();          // 清單先冒出來，不擋著使用者繼續填
+    } catch (e) {
+        _autoOn = false;           // 存不進去（權限／DB）就別再一直試，讓他按儲存看到真正的錯誤
+        _autoNote('自動儲存失敗：' + e.message + '（請按儲存）', 'err');
+    }
+}
+
+async function _autoFlush() {
+    if (!_autoOn || !_editingId || !_autoDirty) return;
+    _autoDirty = false;
+    _autoNote('自動儲存中…');
+    try {
+        await _fetch(`/quotations/${_editingId}`, { method: 'PUT', body: JSON.stringify(_buildPayload()) });
+        _autoNote('已自動儲存 ' + new Date().toLocaleTimeString('zh-TW', { hour12: false }), 'ok');
+    } catch (e) {
+        _autoDirty = true;
+        _autoNote('自動儲存失敗：' + e.message + '（請按儲存）', 'err');
+    }
+}
+
+/** 殼案改名：草稿存了之後案名還打錯的話，改的是那個案（報價的 PUT 碰不到案名） */
+async function _autoRenameShell() {
+    const shell = _autoShellProject;
+    const name = (document.getElementById('quote-f-project_name')?.value || '').trim();
+    if (!shell || !name || name === shell.name) return;
+    try {
+        await _fetch(`/projects/${shell.id}`, { method: 'PUT', body: JSON.stringify({ name }) });
+        shell.name = name;
+        const p = _projects.find(x => x.id === shell.id);
+        if (p) p.name = name;
+        _autoNote('案名已更新', 'ok');
+        loadQuotations();
+    } catch (e) { _autoNote('案名更新失敗：' + e.message, 'err'); }
+}
+
+/** 關窗（X／取消／點外面）：把還沒送出去的補送完再收工。已經自動存的草稿留著，不刪 */
+async function closeModal() {
+    clearTimeout(_autoTimer); _autoTimer = null;
+    const pending = (_autoOn && _editingId && _autoDirty) ? _autoQueue(_autoFlush) : _autoChain;
+    const hadDraft = _autoOn && !!_editingId;
+    document.getElementById('quote-modal').style.display = 'none';
+    try { await pending; } catch (_) {}
+    const savedId = _editingId;
+    _autoReset(false);
+    if (hadDraft) {
+        await Promise.all([loadQuotations(), loadStats()]);
+        if (_selectedId === savedId) await selectQuotation(savedId);
+    }
+}
+
 async function openModal(quotation = null, projectId = null) {
+    _autoReset(!quotation);        // 新增才自動存草稿；編輯既有報價維持「按儲存才寫」
     _editingId = quotation ? quotation.id : null;
     _editingQuote = quotation;
     _editingProjectId = projectId;
@@ -460,7 +677,7 @@ async function openModal(quotation = null, projectId = null) {
     document.getElementById('quote-f-promo').value = '';
     document.getElementById('quote-f-final_price').value = q.final_price ?? '';
     document.getElementById('quote-f-payment_stages').value = paymentStagesToText(q.payment_stages);
-    document.getElementById('quote-f-terms').value = q.terms || '';
+    _setTerms(q.terms);
     document.getElementById('quote-f-spec').value = q.spec || '';
     document.getElementById('quote-f-template').value = '';
 
@@ -468,6 +685,27 @@ async function openModal(quotation = null, projectId = null) {
     _recalcTotals();
 
     document.getElementById('quote-modal').style.display = 'flex';
+}
+
+/** 表單目前的樣子 → 送出去的 payload。按「儲存」與自動存草稿共用一份，兩條路不會各算一次 */
+function _buildPayload() {
+    const rows = _flatItems();      // 大項目一組接一組攤平，報價單上不會被拆開
+    return {
+        status: document.getElementById('quote-f-status').value,
+        quote_date: document.getElementById('quote-f-quote_date').value || null,
+        valid_until: document.getElementById('quote-f-valid_until').value || null,
+        tax_rate: parseInt(document.getElementById('quote-f-tax_rate').value) || 5,
+        discount: _editingQuote ? (_editingQuote.discount || 0) : 0,   // 稅前折扣已退場：舊值原樣帶回，不洗掉
+        final_price: document.getElementById('quote-f-final_price').value ? parseInt(document.getElementById('quote-f-final_price').value) : null,
+        payment_stages: parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
+        terms: _termsText(),
+        spec: document.getElementById('quote-f-spec').value.trim(),
+        items: rows.filter(it => it.description).map(it => ({
+            group_name: it.group_name || '', description: it.description,
+            unit: it.unit || '式', quantity: it.quantity || 1,
+            unit_price: it.unit_price || 0, internal_cost: it.internal_cost || 0, note: it.note || '',
+        })),
+    };
 }
 
 async function saveQuotation() {
@@ -478,25 +716,8 @@ async function saveQuotation() {
         if (!_form.client_id) { _showModalError('請先選客戶'); return; }
         if (!projectId && !projectName) { _showModalError('請填專案名稱，或連結一個既有專案'); return; }
     }
-    const rows = _flatItems();      // 大項目一組接一組攤平，報價單上不會被拆開
-    if (!rows.some(it => it.description)) { _showModalError('請至少新增一個子項目'); return; }
-
-    const payload = {
-        status: document.getElementById('quote-f-status').value,
-        quote_date: document.getElementById('quote-f-quote_date').value || null,
-        valid_until: document.getElementById('quote-f-valid_until').value || null,
-        tax_rate: parseInt(document.getElementById('quote-f-tax_rate').value) || 5,
-        discount: editing ? (editing.discount || 0) : 0,          // 稅前折扣已退場：舊值原樣帶回，不洗掉
-        final_price: document.getElementById('quote-f-final_price').value ? parseInt(document.getElementById('quote-f-final_price').value) : null,
-        payment_stages: parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
-        terms: document.getElementById('quote-f-terms').value,
-        spec: document.getElementById('quote-f-spec').value.trim(),
-        items: rows.filter(it => it.description).map(it => ({
-            group_name: it.group_name || '', description: it.description,
-            unit: it.unit || '式', quantity: it.quantity || 1,
-            unit_price: it.unit_price || 0, internal_cost: it.internal_cost || 0, note: it.note || '',
-        })),
-    };
+    if (!_flatItems().some(it => it.description)) { _showModalError('請至少新增一個子項目'); return; }
+    const payload = _buildPayload();
 
     const btn = document.getElementById('quote-btn-save');
     btn.disabled = true; btn.textContent = '儲存中...';
@@ -512,8 +733,10 @@ async function saveQuotation() {
             }
             await _fetch(`/projects/${projectId}/quotations`, { method: 'POST', body: JSON.stringify(payload) });
         }
+        _autoReset(false);              // 手動存完＝這一輪結束，別再補一發自動存
         document.getElementById('quote-modal').style.display = 'none';
         await Promise.all([loadQuotations(), loadStats()]);
+        if (_selectedId) await selectQuotation(_selectedId);   // 右邊詳情開著就跟著換新的
         // Refresh project detail quotation sub-tab if open
         if (window._projRefreshQuotes) window._projRefreshQuotes(projectId);
     } catch (e) {
@@ -546,7 +769,7 @@ function _applyTemplate(templateId) {
     if (!t) return;
     _setItems(t.items || []);
     document.getElementById('quote-f-tax_rate').value = t.tax_rate ?? 5;
-    document.getElementById('quote-f-terms').value = t.terms || '';
+    _setTerms(t.terms);
     document.getElementById('quote-f-payment_stages').value = paymentStagesToText(t.payment_stages);
     _recalcTotals();
 }
@@ -583,7 +806,7 @@ function _saveCurrentAsTemplate(name) {
     return _createTemplate({
         name, items: _flatItems().filter(it => it.description),
         tax_rate: parseInt(document.getElementById('quote-f-tax_rate').value) || 5,
-        terms: document.getElementById('quote-f-terms').value,
+        terms: _termsText(),
         payment_stages: parsePaymentStages(document.getElementById('quote-f-payment_stages').value),
     });
 }
@@ -627,6 +850,7 @@ export async function quoteDup(id) {
         const q = await _fetch('/quotations/' + id);
         openModal(q, q.project_id);
         _editingId = null; _editingQuote = null;   // 複製＝新增：不帶舊的稅前折扣（表單沒有那一欄，帶了看不到也拿不掉）
+        _autoReset(true);                         // openModal 帶了 quotation 會關掉自動存，複製其實是新增 —— 補開回來
         _recalcTotals();
         document.getElementById('quote-modal-title').textContent = '複製報價';
     } catch (_) {}
@@ -680,6 +904,7 @@ export async function initCrmQuotesTab() {
     document.getElementById('quote-btn-add').addEventListener('click', () => openModal());
     document.getElementById('quote-btn-save').addEventListener('click', saveQuotation);
     document.getElementById('quote-btn-add-item').addEventListener('click', () => { addGroup(); _recalcTotals(); });
+    document.getElementById('quote-btn-add-term').addEventListener('click', addTermRow);
     document.getElementById('quote-detail-close').addEventListener('click', closeDetail);
     // 公司資訊（報價單抬頭／匯款／Logo／章）就近開：系統設定 → 公司資訊分頁
     // （owner 2026-09-07「公司資訊的按鈕要放在報價管理的範本欄」）。設定只有管理員讀得到，別人不顯示這顆。
@@ -720,6 +945,16 @@ export async function initCrmQuotesTab() {
         if (e.target.value) _applyTemplate(e.target.value);
     });
 
+    // 自動存草稿的觸發點：彈窗裡任何一格被動到就算。項目／備註列是重繪出來的，所以掛在彈窗上委派。
+    // 案名的 input 不算（不然打第一個字就開一個案）—— 它靠 change（離開欄位才發）進來。
+    const quoteModal = document.getElementById('quote-modal');
+    quoteModal.addEventListener('input', e => { if (e.target.id !== 'quote-f-project_name') _autoTouch(); });
+    quoteModal.addEventListener('change', e => {
+        if (e.target.id === 'quote-f-project_name' && _editingId) { _autoQueue(_autoRenameShell); return; }
+        _autoTouch();
+    });
+    quoteModal.addEventListener('click', e => { if (e.target.closest('#quote-items-list, #quote-terms-list')) _autoTouch(); });
+
     // 客戶 → 撈他的案子給「連結既有專案」；打案名＝要建新案（剛連的就不算）；連結案＝案名帶進來
     document.getElementById('quote-f-client_id').addEventListener('change', e => { _form.client_id = e.target.value; _loadClientProjects(e.target.value); });
     document.getElementById('quote-btn-new-client').addEventListener('click', _createClientInline);
@@ -738,22 +973,14 @@ export async function initCrmQuotesTab() {
     document.getElementById('quote-f-promo').addEventListener('input', () => { _form.anchor = 'promo'; _recalcTotals(); });
     document.getElementById('quote-f-final_price').addEventListener('input', () => { _form.anchor = 'final'; _recalcTotals(); });
 
-    // Detail sub-tabs
-    document.querySelectorAll('#quote-detail-tabs .crm-tab').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('#quote-detail-tabs .crm-tab').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            const tab = btn.dataset.tab;
-            document.getElementById('quote-detail-info').classList.toggle('hidden', tab !== 'info');
-            document.getElementById('quote-detail-items').classList.toggle('hidden', tab !== 'items');
-        });
+    // Modal overlay close（報價彈窗要先把自動存的草稿收尾，別直接把 display 關掉）
+    document.getElementById('quote-modal').addEventListener('click', e => {
+        if (e.target === e.currentTarget) closeModal();
     });
-
-    // Modal overlay close
-    for (const id of ['quote-modal', 'quote-template-modal']) {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener('click', e => { if (e.target === el) el.style.display = 'none'; });
-    }
+    document.getElementById('quote-modal-close').addEventListener('click', closeModal);
+    document.getElementById('quote-btn-cancel').addEventListener('click', closeModal);
+    const tplModal = document.getElementById('quote-template-modal');
+    tplModal.addEventListener('click', e => { if (e.target === tplModal) tplModal.style.display = 'none'; });
 
     setupResizeHandle('quote-resize-handle', 'quote-detail-panel');
 

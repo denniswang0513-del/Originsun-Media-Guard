@@ -633,6 +633,29 @@
 .quote-group-edit .quote-item-edit-row { padding-left: 14px; }
 .quote-group-edit .qi-add-sub { align-self: flex-start; margin-left: 14px; }
 
+/* 拖曳把手（大項目／子項目／備註列共用）：只有這根 ↕ 是 draggable，
+   整列 draggable 會搶掉輸入框的選字 */
+.qi-grip {
+  flex-shrink: 0; cursor: grab; color: #6b7280; font-size: 13px;
+  padding: 0 2px; user-select: none;
+}
+.qi-grip:active { cursor: grabbing; }
+.quote-group-edit-head .qi-grip { color: #9ca3af; }
+
+/* ── 備註／條款：一列一條，前面有編號 ── */
+.quote-terms-list { display: flex; flex-direction: column; gap: 6px; }
+.quote-term-row { display: flex; gap: 6px; align-items: center; }
+.quote-term-row .crm-input { padding: 5px 6px; font-size: 12px; }
+.quote-term-no {
+  flex-shrink: 0; width: 20px; text-align: right;
+  color: #9ca3af; font-size: 12px;
+}
+
+/* 自動存草稿的狀態列（報價彈窗左下角） */
+.quote-auto-note { margin-right: auto; align-self: center; font-size: 12px; color: #9ca3af; }
+.quote-auto-note.ok  { color: #4ade80; }
+.quote-auto-note.err { color: #f87171; }
+
 /* ── Quotation totals ── */
 .quote-totals {
   background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 8px;

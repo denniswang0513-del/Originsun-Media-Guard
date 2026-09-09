@@ -57,17 +57,14 @@
   <div class="crm-detail-panel" id="quote-detail-panel" style="display:none;">
     <div class="crm-detail-bar">
       <div id="quote-detail-title" class="crm-detail-bar-title"></div>
-      <div class="crm-detail-bar-tabs" id="quote-detail-tabs">
-        <button class="crm-tab active" data-tab="info">報價資訊</button>
-        <button class="crm-tab" data-tab="items">項目明細</button>
-      </div>
       <div class="crm-detail-bar-actions" id="quote-bar-actions">
         <button id="quote-detail-close" class="crm-detail-close" title="關閉">&#x2715;</button>
       </div>
     </div>
     <div class="crm-detail-content">
       <div id="quote-detail-info"></div>
-      <div id="quote-detail-items" class="hidden"></div>
+      <div class="crm-form-section" style="margin-top:18px;">項目明細</div>
+      <div id="quote-detail-items"></div>
     </div>
   </div>
 </div>
@@ -78,7 +75,7 @@
   <div class="crm-modal" style="max-width:780px;">
     <div class="crm-modal-header">
       <h3 id="quote-modal-title">新增報價</h3>
-      <button onclick="document.getElementById('quote-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+      <button id="quote-modal-close" class="crm-detail-close">&#x2715;</button>
     </div>
     <div class="crm-modal-body">
       <div class="crm-form-section">報價資訊</div>
@@ -167,14 +164,17 @@
         </div>
         <div class="crm-field crm-field-full">
           <label>備註/條款</label>
-          <textarea id="quote-f-terms" class="crm-input crm-textarea" rows="3"></textarea>
+          <div id="quote-terms-list" class="quote-terms-list"></div>
+          <button type="button" id="quote-btn-add-term" class="crm-btn crm-btn-secondary crm-btn-sm" style="align-self:flex-start;margin-top:6px;">＋ 備註列</button>
+          <small style="color:#888;">一列一條，報價單上照這個順序印成編號清單；拖左邊的 ↕ 換順序</small>
         </div>
       </div>
       <div id="quote-modal-error" class="crm-error" style="display:none;"></div>
     </div>
     <div class="crm-modal-footer">
+      <span id="quote-auto-note" class="quote-auto-note"></span>
       <button id="quote-btn-as-template" class="crm-btn crm-btn-secondary">存成範本</button>
-      <button onclick="document.getElementById('quote-modal').style.display='none'" class="crm-btn crm-btn-secondary">取消</button>
+      <button id="quote-btn-cancel" class="crm-btn crm-btn-secondary">取消</button>
       <button id="quote-btn-save" class="crm-btn crm-btn-primary">儲存</button>
     </div>
   </div>

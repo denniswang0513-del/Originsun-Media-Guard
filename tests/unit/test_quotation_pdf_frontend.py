@@ -89,12 +89,10 @@ def test_spec_field_round_trips():
     html = repo_src("frontend/tabs/crm/crm-quotes.html")
     assert 'id="quote-f-spec"' in html
     src = js_code_only(repo_src(QUOTES_JS))
-    save = js_func_body(src, "async function saveQuotation(")
+    save = js_func_body(src, "function _buildPayload(")   # 按儲存與自動存草稿共用的 payload
     assert "spec:" in save and "'quote-f-spec'" in save
     open_ = js_func_body(src, "async function openModal(")
     assert "'quote-f-spec'" in open_ and "q.spec" in open_
-    fields = js_func_body(src, "const _QUOTE_EDIT_FIELDS = [")
-    assert "name:'spec'" in fields
     detail = js_func_body(src, "function renderDetail(")
     assert "q.spec" in detail
 
