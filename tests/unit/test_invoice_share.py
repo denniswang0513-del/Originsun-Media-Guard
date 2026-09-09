@@ -225,6 +225,23 @@ def test_short_link_serves_the_page_on_both_entry_points():
     assert "invoice-file.html" in w and "surface_gate(request)" in w
 
 
+def test_backfill_is_dry_run_by_default_and_idempotent():
+    """改版前鑄的連結沒有快照 → `/meta` 會 503。這支一次補齊（＝人工去每張按一次
+    「複製連結」的效果）。
+
+    契約跟 migrate-files 一樣：**預設 dry-run**，`?apply=true` 才寫。
+    冪等 —— 已經有快照的跳過，重跑不會蓋掉已經定稿的內容。
+    """
+    body = code_only(func_body(repo_src(INV), "async def backfill_share_snapshots("))
+    assert "check_admin(request)" in body, "掃全公司的發票、整批寫資料 —— 管理員限定"
+    assert "apply: bool = Query(False)" in code_only(repo_src(INV))
+    assert "if invoice_share.has_snapshot(inv.share_snapshot):" in body, "冪等"
+    assert "if apply:" in body and "if apply and done:" in body, "dry-run 不准 commit"
+    assert "inv.updated_at" not in body, \
+        "補資料不是使用者改了發票 —— 動 updated_at 會讓「最近更新」整批跳到今天"
+    assert "no_file" in body, "有連結卻沒有檔的要列出來，不要靜默寫一個指向空氣的快照"
+
+
 def test_the_money_redaction_exemption_stays_tiny_and_justified():
     """🔴 `MoneyRedactRoute` 對匿名請求會抹掉金額欄位 —— 那是它存在的理由。
 

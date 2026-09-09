@@ -80,6 +80,10 @@ ADMIN_ONLY_CRM = {
     "delete_project_expense", "delete_quotation", "delete_staff",                       # 刪除（客戶 DELETE 走 _client_write_guard(admin_only=True)）
     "set_receipts_root", "get_invoices_root", "set_invoices_root", "get_quotations_root", "set_quotations_root",
     "set_proposal_assets_root", "migrate_invoice_files", "set_invoice_fee_rates", "set_invoice_applicants",   # 全站根目錄／設定
+    # 一次性資料補齊：掃**全公司**的發票、寫每一張的分享快照。跟 migrate_invoice_files
+    # 同一級（整批改資料、要碰 NAS 上的檔），不是某個分頁的日常操作 —— 用分頁鑰匙守
+    # 等於讓任何有 crm_invoices 的人可以整批改別人帳本裡的資料。
+    "backfill_share_snapshots",
     "media_log_catchup_now", "update_media_log_settings",                              # 整棵重掃／全系統收檔設定
     "upload_showcase_cover", "upload_showcase_gallery", "delete_showcase_gallery", "upload_showcase_process",
     "delete_showcase_process", "auto_showcase_credits",                                 # 舊 showcase 寫入（前端走 token 端點，疑似死碼）

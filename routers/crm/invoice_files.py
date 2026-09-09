@@ -433,6 +433,63 @@ async def download_invoice_file_public(token: str, request: Request):
     return await serve_invoice_by_share_token(token)
 
 
+@router.post("/invoices/backfill-share-snapshots")
+async def backfill_share_snapshots(request: Request, apply: bool = Query(False)):
+    """把**改版前**鑄的分享連結補上定稿快照（owner 2026-09-10 一次性）。
+
+    2026-09-10 之前的 `/e/{短碼}` 是「點了直接下載」，DB 裡沒有 `share_snapshot`；
+    改成一頁之後那些連結會落到 `/meta` 的 503（「還沒有可顯示的內容」）。
+    這支把它們一次補齊 —— 效果等同人工去每一張按一次「複製連結」。
+
+    預設 dry-run，`?apply=true` 才真的寫 —— 比照 migrate-files 的契約。
+    **冪等**：已經有快照的直接跳過，重複跑不會蓋掉已經定稿的內容。
+
+    🔴 補的是「**現在**這一版的欄位」，不是寄出當下的。對這批舊連結沒有更好的來源
+       —— 人工按那顆鈕也是補現在這一版。差別只在定稿的時刻是「補齊的當下」而不是
+       「當初寄出時」，所以**發版後越早跑越接近當初**。
+
+    🔴 跟 migrate-files 同一個限制：一定要由 agent 自己跑。發票檔可能在 NAS 上，
+       其他 session 看不到那些對映（memory 的 Session 0 陷阱）。
+    """
+    check_admin(request)
+    _require_db()
+    factory = await _get_factory()
+    done, already, no_file = [], 0, []
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmInvoice).where(CrmInvoice.share_token.isnot(None),
+                                     CrmInvoice.share_token != ""))).scalars().all()
+        for inv in rows:
+            if invoice_share.has_snapshot(inv.share_snapshot):
+                already += 1
+                continue
+            local = _local_invoice_path(inv.file_url)
+            if not local:
+                # 有連結卻沒有（看得到的）檔 —— 補了也送不出東西。列出來讓人決定
+                # 是把檔補回去還是把連結撤掉，不要靜默寫一個指向空氣的快照。
+                no_file.append({"id": inv.id, "invoice_number": inv.invoice_number or "",
+                                "title": inv.title, "path": inv.file_url or ""})
+                continue
+            try:
+                size = os.path.getsize(local)
+            except OSError:
+                size = 0
+            if apply:
+                inv.share_snapshot = invoice_share.make_snapshot(
+                    _inv_dict(inv), file_name=os.path.basename(inv.file_url or ""),
+                    file_size=size)
+                # 🔴 不動 updated_at：這是補資料不是使用者改了發票，
+                #    動它會讓「最近更新」整批跳到今天、把真正的異動蓋掉。
+            done.append({"id": inv.id, "invoice_number": inv.invoice_number or "",
+                         "title": inv.title})
+        if apply and done:
+            await session.commit()
+    return {"status": "ok", "applied": bool(apply),
+            "scanned": len(rows), "already_had": already,
+            "backfilled": len(done), "rows": done,
+            "no_file": no_file}
+
+
 @router.post("/invoices/migrate-files")
 async def migrate_invoice_files(request: Request, apply: bool = Query(False)):
     """把已上傳的電子發票檔搬到**目前**的發票根目錄底下（改過根目錄後補搬）。
