@@ -289,6 +289,29 @@ def sync_website_to_nas() -> bool:
     return ok
 
 
+# 生產 agent 的家。`/publish` 從 e:\Dev 跑，但要送去 NAS 的設定是**那台**的
+# （deploy_to_prod 只覆蓋程式碼，settings.json 留在原地 = 生產值）。
+PROD_AGENT_DIR = r"C:\OriginsunAgent"
+
+
+def _office_settings_source() -> tuple:
+    """→ (設定 dict 或 None, 來源說明)。先找生產 agent 的 settings.json，
+    找不到才退回本行程的 `load_settings()`（＝真的跑在 master 上的情形）。"""
+    import json as _json
+    prod = os.path.join(PROD_AGENT_DIR, "settings.json")
+    if os.path.isfile(prod):
+        try:
+            with open(prod, encoding="utf-8") as fp:
+                return _json.load(fp), prod
+        except (OSError, ValueError) as e:
+            return None, f"{prod} 讀取失敗：{e}"
+    try:
+        from config import load_settings
+        return load_settings(), "本行程的 settings.json"
+    except Exception as e:                      # noqa: BLE001
+        return None, str(e)
+
+
 def _push_office_settings(base: str, ssh_cmd: list) -> bool:
     """把**白名單內**的設定倒成一份 settings.json 送到 NAS。
 
@@ -302,12 +325,21 @@ def _push_office_settings(base: str, ssh_cmd: list) -> bool:
     import tempfile as _tempfile
     from core.office_settings import export_settings
 
-    try:
-        from config import load_settings
-        payload = export_settings(load_settings())
-    except Exception as e:                      # noqa: BLE001
-        print(f"[NAS sync] 讀不到本機設定，略過 office settings: {e}")
-        return False
+    # 🔴 讀**生產 agent** 的 settings.json，不是這個 checkout 的。`/publish` 是從
+    #    `e:\Dev` 跑的，而那份 settings 的 `assets_host.dir` 指向本機資料夾
+    #    （dev 沒有 NAS 的 SMB 憑證，見 reference_paste_assets_cdn）——
+    #    推上去 NAS 會去找一個它看不到的 Windows 路徑，貼圖與客戶的報價單連結全部
+    #    靜默壞掉，而容器的 healthz 還是綠的。
+    #    `export_settings` 那邊還有第二道（丟掉任何磁碟代號路徑），兩道都要在：
+    #    這道給對來源，那道擋「來源對了但某個值仍然只有那台看得到」。
+    settings, src = _office_settings_source()
+    if settings is None:
+        print(f"[NAS sync] 讀不到設定（{src}），略過 office settings —— NAS 會用預設值")
+        return True
+    payload, dropped = export_settings(settings)
+    print(f"[NAS sync] office settings 來源：{src}")
+    for d in dropped:
+        print(f"[NAS sync] ⚠ 丟掉 {d}")
 
     missing = [k for k in ("invoices_root", "invoice_fee_rates") if k not in payload]
     if missing:

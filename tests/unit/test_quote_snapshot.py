@@ -216,6 +216,46 @@ def test_all_three_quote_surfaces_show_the_state():
             assert hardcoded not in js, f"{path}：中文正本在 core/quote_snapshot.state，前端不准自己拼"
 
 
+def test_office_settings_never_carry_a_path_only_that_windows_box_can_see():
+    """🔴 送去 NAS 的設定裡不准有磁碟代號路徑（`E:\\Dev\\…`）。
+
+    dev checkout 的 `assets_host.dir` 是本機資料夾（那台沒有 NAS 的 SMB 憑證，
+    見 reference_paste_assets_cdn）。推上去 → NAS 容器去找一個它根本看不到的 Windows
+    路徑 → 貼圖、影像紀錄縮圖、**客戶的報價單連結**全部靜默壞掉，而 healthz 還是綠的。
+
+    🔴 擋的條件是「**這個值**在 NAS 上有意義嗎」，不是「這台是不是 master」——
+    `/publish` 本來就從 dev checkout 跑，用機器身分當條件會每次都成立、
+    設定永遠送不出去（第一版就是這樣寫的，等於白做）。
+    """
+    from core.office_settings import export_settings
+    good = {"invoices_root": r"\\192.168.1.132\Originsun\發票",
+            "assets_host": {"dir": r"\\192.168.1.132\Container\PasteAssets", "base_url": "https://x"}}
+    out, dropped = export_settings(good)
+    assert sorted(out) == ["assets_host", "invoices_root"] and not dropped
+
+    bad = dict(good, assets_host={"dir": r"E:\Dev\Originsun-Media-Guard\uploads", "base_url": "/uploads"})
+    out, dropped = export_settings(bad)
+    assert "assets_host" not in out and len(dropped) == 1, (out, dropped)
+    assert "invoices_root" in out, "只丟掉有問題的那個鍵，不是整包不送"
+
+    # drive_map 的**鍵**是磁碟代號、值才是 UNC —— 不可以因為鍵長得像路徑就整個丟掉
+    out, dropped = export_settings({"drive_map": {"T": r"\\192.168.1.132\Project_Longterm"}})
+    assert "drive_map" in out and not dropped
+
+
+def test_office_settings_come_from_the_production_agent_not_this_checkout():
+    """`/publish` 從 e:\\Dev 跑，但要送去 NAS 的是**生產 agent** 那份設定
+    （deploy_to_prod 只覆蓋程式碼，settings.json 留在原地＝生產值）。"""
+    src = code_only(repo_src("publish_update.py"))
+    assert 'PROD_AGENT_DIR = r"C:\\OriginsunAgent"' in src
+    body = code_only(func_body(src, "def _office_settings_source("))
+    assert "PROD_AGENT_DIR" in body and "settings.json" in body
+    assert "load_settings()" in body, "生產 agent 不在（真的跑在 master 上）才退回本行程"
+    push = code_only(func_body(src, "def _push_office_settings("))
+    assert "_office_settings_source()" in push and "load_settings()" not in push, \
+        "推送那支不准自己讀本機設定，要走同一個來源決定點"
+
+
 def test_column_and_startup_migration_both_exist():
     """加欄位要兩處同時有：model 與 main.py startup 的 ADD COLUMN 清單。
     只加 model 的話，既有的生產資料庫永遠不會長出那一欄（而且是靜默的）。"""

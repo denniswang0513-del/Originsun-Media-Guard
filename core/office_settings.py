@@ -49,15 +49,47 @@ EXPORT_KEYS = (
 )
 
 
-def export_settings(settings: dict) -> dict:
-    """`settings` → 只含 EXPORT_KEYS 且**值不是 None** 的淺拷貝。
+def export_settings(settings: dict) -> tuple:
+    """`settings` → (要送的鍵, 被丟掉的理由清單)。
 
     值是 None／不存在的鍵不送：送過去只會把容器那側的預設值蓋成 None，
     比沒送更糟（`load_settings` 的 merge 會照收）。
+
+    🔴 **本機磁碟路徑一律丟掉**。dev checkout 的 `assets_host.dir` 是
+    `E:\\Dev\\...\\uploads`（那台沒有 NAS 的 SMB 憑證，見 reference_paste_assets_cdn）。
+    推上去的話 NAS 容器會去找一個它根本看不到的 Windows 路徑 —— 貼圖、影像紀錄縮圖、
+    **客戶的報價單連結**全部靜默壞掉，而容器的 healthz 還是綠的。
+    擋的是「這個值在 NAS 上有意義嗎」，不是「這台是不是 master」：`/publish` 本來就從
+    dev checkout 跑，用機器身分當條件會**每次都擋掉**，設定永遠送不出去（我第一版就是
+    這樣寫的，等於白做）。NAS 看得懂的只有 UNC（`\\\\host\\share`）與 POSIX 路徑。
     """
-    out = {}
+    out, dropped = {}, []
     for k in EXPORT_KEYS:
         v = (settings or {}).get(k)
-        if v is not None:
-            out[k] = v
+        if v is None:
+            continue
+        bad = _local_paths_in(v)
+        if bad:
+            dropped.append(f"{k}（本機磁碟路徑，NAS 看不到：{bad[0]}）")
+            continue
+        out[k] = v
+    return out, dropped
+
+
+def _local_paths_in(value) -> list:
+    """這個值裡面有沒有「只有那台 Windows 才看得到」的磁碟代號路徑（`X:\\…`）。
+
+    `drive_map` 的**鍵**是磁碟代號、值才是 UNC，所以只看值；巢狀 dict 逐層看。
+    """
+    out = []
+    if isinstance(value, str):
+        v = value.strip()
+        if len(v) >= 3 and v[1] == ":" and v[0].isalpha() and v[2] in "\\/":
+            out.append(v)
+    elif isinstance(value, dict):
+        for sub in value.values():
+            out += _local_paths_in(sub)
+    elif isinstance(value, (list, tuple)):
+        for sub in value:
+            out += _local_paths_in(sub)
     return out
