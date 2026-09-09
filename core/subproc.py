@@ -82,7 +82,6 @@ async def run_stream(
     """
     def _run() -> tuple[int, bytes, bytes]:
         import threading
-        import time
         try:
             p = subprocess.Popen(
                 list(args), cwd=cwd, env=env,
@@ -115,34 +114,36 @@ async def run_stream(
         for t in threads:
             t.start()
 
-        deadline = (time.monotonic() + timeout) if timeout else None
         out_lines: list = []
-        timed_out = False
-        try:
-            for raw in p.stdout:
-                out_lines.append(raw)
-                try:
-                    on_line(raw.rstrip(b"\r\n"))
-                except Exception:           # noqa: BLE001 — 壞掉的 callback 不准殺掉讀取
-                    pass
-                if deadline and time.monotonic() > deadline:
-                    timed_out = True
-                    break
-        except (OSError, ValueError):
-            pass
 
-        if timed_out:
-            p.kill()
-            p.wait()
-            return -1, b"".join(out_lines), f"timeout after {timeout}s".encode()
+        # 🔴 stdout 也在自己的執行緒讀，逾時交給 p.wait() 守。
+        #    原本是「主執行緒 for line in p.stdout，收到一行才檢查 deadline」——
+        #    子行程吐一行之後就卡住時（正是逾時要防的情況）迴圈會一直卡在 readline，
+        #    逾時永遠不會發生，整個呼叫就跟著子行程一起吊死。
+        def _pump():
+            try:
+                for raw in p.stdout:
+                    out_lines.append(raw)
+                    try:
+                        on_line(raw.rstrip(b"\r\n"))
+                    except Exception:       # noqa: BLE001 — 壞掉的 callback 不准殺掉讀取
+                        pass
+            except (OSError, ValueError):
+                pass
+
+        reader = threading.Thread(target=_pump, daemon=True)
+        reader.start()
+        threads.append(reader)
+
         try:
-            rc = p.wait(timeout=max((deadline - time.monotonic()) if deadline else 10, 1))
+            rc = p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             p.kill()
             p.wait()
+            reader.join(timeout=2)          # 收完已經吐出來的，再回報
             return -1, b"".join(out_lines), f"timeout after {timeout}s".encode()
         for t in threads:
-            t.join(timeout=2)
+            t.join(timeout=5)               # 讀完管道剩下的（行程結束了，很快）
         return rc, b"".join(out_lines), b"".join(err_buf)
 
     return await asyncio.to_thread(_run)
