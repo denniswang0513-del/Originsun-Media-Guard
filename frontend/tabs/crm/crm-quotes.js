@@ -26,6 +26,7 @@ const _isAdmin = () => (window._accessLevel || 0) >= 3;
 import { authDownload, copyText } from '../../js/shared/utils.js';
 import { applyQuotePatch } from '../../js/shared/quote-patch.js';
 import { confirmQuoteDelete } from '../../js/shared/quote-delete.js';
+import { waitingText } from '../../js/shared/quote-wait.js';
 import { ensurePasteBase, renderRich, pasteThumbs } from '../../js/shared/paste-image.js';
 
 // ── State ────────────────────────────────────────────────────
@@ -530,6 +531,8 @@ let _chatApplied = 0;      // 已套用過 patch 的訊息數
 let _chatBusy = false;     // 等 AI 回覆中
 let _chatGen = 0;          // 開窗世代：關窗／換一張報價後，舊的輪詢自己收工
 let _chatPartial = '';     // 串流到目前為止的 reply（後端 GET /chat 的 partial）
+let _chatStage = '';       // 'queued'（卡在閘門）／'running'（claude 真的在跑）
+let _chatSince = 0;        // 這一輪按下送出的時間（等待文字要顯示秒數）
 const _CHAT_MODEL_KEY = 'crm_quote_chat_model';   // 這台瀏覽器選的模型（後端仍會過白名單）
 
 function _chatBubble(m) {
@@ -561,10 +564,12 @@ function _renderChat() {
         log.innerHTML = `<div class="crm-empty">把客戶的訊息整段貼進下面，或直接貼截圖。<br>
             AI 會整理成項目，不確定的地方會問你。</div>`;
     } else {
-        // 串流：有字就直接顯示（邊產邊看），還沒有就維持「思考中…」
+        // 串流：有字就直接顯示（邊產邊看）；還沒有就給會動的等待文字 ——
+        // 前 35 秒左右畫面本來什麼都不會動，靜止太久看起來像當掉
         const streaming = _chatPartial
             ? `<div class="quote-chat-body">${_esc(_chatPartial)}<span class="quote-chat-caret"></span></div>`
-            : `<div class="quote-chat-body thinking">思考中…</div>`;
+            : `<div class="quote-chat-body thinking"><span id="quote-chat-tick">${
+                _esc(waitingText(Date.now() - _chatSince, _chatStage))}</span></div>`;
         log.innerHTML = _chat.map(_chatBubble).join('') + (_chatBusy
             ? `<div class="quote-chat-msg ai"><div class="quote-chat-who">AI</div>${streaming}</div>` : '');
     }
@@ -667,9 +672,14 @@ async function _pollChat(expect, gen) {
             _renderChat();
             return;
         }
+        if (typeof d.stage === 'string') _chatStage = d.stage;
         if (typeof d.partial === 'string' && d.partial !== _chatPartial) {
             _chatPartial = d.partial;                  // 邊產邊長出來
             _renderChat();
+        } else {
+            // 只換那一小段字，不整包重繪（重繪會把捲軸拉回底、也會閃）
+            const tick = document.getElementById('quote-chat-tick');
+            if (tick) tick.textContent = waitingText(Date.now() - _chatSince, _chatStage);
         }
     }
     if (_chatBusy && gen === _chatGen) {
@@ -689,7 +699,7 @@ async function _sendChat() {
     const gen = _chatGen;
     ta.value = '';
     document.getElementById('quote-chat-thumbs').innerHTML = '';
-    _chatBusy = true; _chatPartial = '';
+    _chatBusy = true; _chatPartial = ''; _chatStage = ''; _chatSince = Date.now();
     _renderChat();
     try {
         const model = document.getElementById('quote-chat-model')?.value || '';

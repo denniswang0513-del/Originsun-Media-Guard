@@ -592,6 +592,9 @@ def _paste_image_paths(text: str) -> list:
 _QUOTE_CHAT_GATE = asyncio.Semaphore(2)
 # quotation_id → 串到目前為止的 reply。只活在記憶體（重啟就沒了，那時對話也早就寫進 DB）。
 _chat_partial: dict = {}
+# quotation_id → 這一輪走到哪：'queued'（卡在閘門，前面還有別的 AI 工作）／'running'（claude 真的在跑）。
+# 前端拿它決定「處理中…」要怎麼講 —— **都是真實訊號**，不做假的進度條。
+_chat_stage: dict = {}
 
 
 async def _call_claude_stream(prompt: str, quotation_id: str, model: str) -> tuple:
@@ -626,7 +629,9 @@ async def _call_claude_stream(prompt: str, quotation_id: str, model: str) -> tup
         chunks.append(((ev.get("delta") or {}).get("text")) or "")
         _chat_partial[quotation_id] = quote_chat.partial_reply("".join(chunks))
 
+    _chat_stage[quotation_id] = "queued"      # 閘門滿了就會真的卡在這行
     async with _QUOTE_CHAT_GATE:
+        _chat_stage[quotation_id] = "running"
         rc, out, err = await run_stream(
             [exe, "--print", "--model", model, "--permission-mode", "plan",
              "--output-format", "stream-json", "--include-partial-messages", "--verbose"],
@@ -683,7 +688,9 @@ async def _run_quote_chat(quotation_id: str, model: str = "") -> None:
     try:
         text, err = await _call_claude_stream(prompt, quotation_id, _quote_chat_model(model))
     finally:
-        _chat_partial.pop(quotation_id, None)   # 這一輪結束了，畫面改看寫進 chat 的那則
+        # 這一輪結束了，畫面改看寫進 chat 的那則
+        _chat_partial.pop(quotation_id, None)
+        _chat_stage.pop(quotation_id, None)
 
     if text is None:
         parsed = quote_chat.parse_reply("")
@@ -768,7 +775,8 @@ async def quote_chat_history(quotation_id: str):
     # partial＝這一輪串流到目前為止的 reply（記憶體裡，見 _call_claude_stream）。
     # 前端拿它填「思考中…」那顆泡泡 —— 34 秒的空白變成一句句長出來。
     return {"chat": chat, "count": len(chat),
-            "partial": _chat_partial.get(quotation_id, "")}
+            "partial": _chat_partial.get(quotation_id, ""),
+            "stage": _chat_stage.get(quotation_id, "")}
 
 
 # ── 報價價目（docs/QUOTE_ASSISTANT_PLAN.md P3）──────────────────

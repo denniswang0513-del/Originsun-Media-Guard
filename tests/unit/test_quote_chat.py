@@ -265,3 +265,58 @@ def test_mobile_entry_is_gated_and_new_files_dodge_the_cache_trap():
     #    舊分頁的 named import 拿不到新 export 會讓整個模組載入失敗
     shell = repo_src("frontend/m/shell.js")
     assert "openQuoteChat" not in shell and "quote-chat" not in shell
+
+
+# ── 等待時的「處理中…」（js/shared/quote-wait.js）────────────
+
+_WAIT_HARNESS = """
+import { waitingText, TYPICAL_SECONDS } from '%s';
+const cases = [[0,''],[1000,''],[2000,''],[3000,''],[4000,''],[12000,''],[70000,''],[8000,'queued']];
+console.log(JSON.stringify({ out: cases.map(([ms, st]) => waitingText(ms, st)), typical: TYPICAL_SECONDS }));
+"""
+
+
+def test_waiting_text_moves_and_tells_the_truth():
+    """實測一輪 35–50 秒，前 35 秒畫面本來什麼都不會動 —— 靜止太久看起來就像當掉。
+
+    這支釘住三件**真實**的東西（不是假進度條）：點會跳、秒數會走、排隊時講排隊。
+    """
+    got = _run_node(_WAIT_HARNESS % (_REPO / "frontend/js/shared/quote-wait.js").as_uri())
+    out = got["out"]
+
+    # 點要跳（0/1/2/3 秒各不同），秒數要出現
+    assert out[0] == "處理中 0 秒"
+    assert out[1].startswith("處理中. 1 秒")
+    assert out[2].startswith("處理中.. 2 秒")
+    assert out[3].startswith("處理中... 3 秒")
+    assert out[4].startswith("處理中 4 秒"), "點要循環回去，不是一直加"
+
+    lo, hi = got["typical"]
+    assert "通常" not in out[0], "前 10 秒不吵"
+    assert f"通常 {lo}" in out[5], "等久一點才給典型時間，讓人知道還要多久"
+    assert "比平常久" in out[6] and "還在跑" in out[6], "超過典型時間要說實話，不是繼續裝沒事"
+    assert out[7].startswith("排隊中") and "其他 AI 工作" in out[7], \
+        "互動式的閘只有 2，撞到夜間批次是真的在排隊 —— 要講"
+
+
+def test_waiting_stage_is_a_real_backend_signal_not_a_fake_progress_bar():
+    src = repo_src("routers/crm/quotes.py")
+    assert "_chat_stage: dict = {}" in src
+    assert '_chat_stage[quotation_id] = "queued"' in src
+    assert '_chat_stage[quotation_id] = "running"' in src
+    # queued 一定要標在「進閘門之前」，不然它永遠不會是 queued
+    q_at = src.index('_chat_stage[quotation_id] = "queued"')
+    gate_at = src.index("async with _QUOTE_CHAT_GATE:")
+    assert q_at < gate_at
+    assert "_chat_stage.pop(quotation_id, None)" in src, "一輪結束要清掉"
+    assert '"stage": _chat_stage.get(quotation_id, "")' in src
+
+
+def test_both_frontends_tick_without_repainting_the_whole_log():
+    """整包重繪會把捲軸拉回底、也會閃 —— 每秒只換那一小段字。"""
+    for path, tick_id in (("frontend/tabs/crm/crm-quotes.js", "quote-chat-tick"),
+                          ("frontend/m/views/quote-chat.js", "qc-tick")):
+        js = js_code_only(repo_src(path))
+        assert "quote-wait.js" in js, path
+        assert f"getElementById('{tick_id}')" in js, path
+        assert "tick.textContent = waitingText(" in js, path

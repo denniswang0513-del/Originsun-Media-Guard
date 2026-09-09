@@ -15,6 +15,7 @@
 import { mfetch, toast, esc, money } from '../shell.js';
 import { applyQuotePatch } from '/js/shared/quote-patch.js';
 import * as _QA from '/js/shared/quote-amounts.js';
+import { waitingText } from '/js/shared/quote-wait.js';
 
 // 新 export 一律命名空間拿＋本地退路（同 crm-quotes.js／m/views/quotes.js 的慣例）
 const groupQuoteItems = _QA.groupQuoteItems || ((items) => {
@@ -69,7 +70,9 @@ function render() {
     const log = S.chat.length
         ? S.chat.map(bubble).join('') + (S.busy
             ? `<div class="qc-msg ai"><div class="qc-who">AI</div><div class="qc-body">${
-                S.partial ? esc(S.partial) + '<span class="qc-caret"></span>' : '思考中…'}</div></div>` : '')
+                S.partial ? esc(S.partial) + '<span class="qc-caret"></span>'
+                    : `<span id="qc-tick">${esc(waitingText(Date.now() - S.since, S.stage))}</span>`
+              }</div></div>` : '')
         : `<div class="qc-empty">把客戶的訊息整段貼進下面，或拍／選一張對話截圖。<br>
              AI 會整理成項目，不確定的地方會問你。</div>`;
     const rows = flat().filter(it => it.description);
@@ -169,9 +172,14 @@ async function poll(expect, gen) {
             render();
             return;
         }
+        if (typeof d.stage === 'string') S.stage = d.stage;
         if (typeof d.partial === 'string' && d.partial !== S.partial) {
             S.partial = d.partial;           // 串流：邊產邊長出來
             render();
+        } else {
+            // 只換那一小段字，不整包重繪（重繪會把捲軸拉回底、也會閃）
+            const tick = document.getElementById('qc-tick');
+            if (tick) tick.textContent = waitingText(Date.now() - S.since, S.stage);
         }
     }
     if (S && S.busy && gen === S.gen) {
@@ -186,7 +194,7 @@ async function send() {
     const text = (ta.value || '').trim();
     if (!text || S.busy) return;
     ta.value = '';
-    S.busy = true; S.partial = '';
+    S.busy = true; S.partial = ''; S.stage = ''; S.since = Date.now();
     render();
     const gen = S.gen;
     try {
@@ -266,7 +274,7 @@ export async function openQuoteChat(quotationId, onClose) {
         applied: chat.length,          // 歷史的 patch 早就在資料裡了，不再套一次
         groups: groupQuoteItems(q.items || []),
         terms: String(q.terms || '').split('\n').map(t => t.trim()).filter(Boolean),
-        busy: false, partial: '', gen: (S ? S.gen : 0) + 1,
+        busy: false, partial: '', stage: '', since: 0, gen: (S ? S.gen : 0) + 1,
     };
 
     const ov = shell(`${q.project_name || '（未連專案）'} v${q.version}`);
