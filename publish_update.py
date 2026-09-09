@@ -339,12 +339,12 @@ def _push_office_settings(base: str, ssh_cmd: list) -> bool:
     payload, dropped = export_settings(settings)
     print(f"[NAS sync] office settings 來源：{src}")
     for d in dropped:
-        print(f"[NAS sync] ⚠ 丟掉 {d}")
+        print(f"[NAS sync] [!] 丟掉 {d}")
 
     missing = [k for k in ("invoices_root", "invoice_fee_rates") if k not in payload]
     if missing:
         # 不擋發版：這台可能本來就沒設過（dev）。但要說出來 —— NAS 上那幾個面會半殘。
-        print(f"[NAS sync] ⚠ 本機沒有這些設定，NAS 的發票面會拿不到：{missing}")
+        print(f"[NAS sync] [!] 本機沒有這些設定，NAS 的發票面會拿不到：{missing}")
 
     fd, tmp = _tempfile.mkstemp(prefix="office_settings_", suffix=".json")
     try:
@@ -468,7 +468,7 @@ def sync_redirects_to_nas() -> bool:
                 transient = True      # 連不上／逾時：容器多半還沒開始聽
             if not transient or attempt == 5:
                 print(f"[redirects sync] 拉 redirects 失敗: {e}")
-                print("[redirects sync] ⚠ NAS 上維持**上一次**同步的硬 301（不是沒有轉址，"
+                print("[redirects sync] [!] NAS 上維持**上一次**同步的硬 301（不是沒有轉址，"
                       "是可能過期）；軟 301 fallback 仍生效")
                 return False
             print(f"[redirects sync] website-api 還沒起來（{e}），10 秒後重試 "
