@@ -295,6 +295,29 @@ async function removeInvoice(inv, btn) {
     });
 }
 
+// 客戶下載連結（同桌機發票本那顆，owner 2026-09-10）：走既有的 POST /invoices/{id}/share。
+// 冪等 —— 已經有一張就原樣回傳，寄兩次信不會讓先寄出去的連結失效；而且每按一次後端就把客戶
+// 那頁看到的發票資訊重新定稿，所以這顆本身就是「順便更新客戶看到的內容」，不需要第二顆「更新」鈕。
+async function shareInvoice(inv, btn) {
+    await withBusy(btn, async () => {
+        try {
+            const d = await mfetch(`/api/v1/crm/invoices/${encodeURIComponent(inv.id)}/share`, { method: 'POST' });
+            // 網址由後端決定：設了對外網址就是絕對網址，沒設回相對路徑 —— 那就沿用現在開著的網域
+            // （手機多半從對外網域進來，但辦公室內網直連也要拿得到一條打得開的連結）。
+            const raw = String(d.url || d.path || '');
+            const full = raw.startsWith('http') ? raw : location.origin + raw;
+            // 「檔名 換行 連結」兩行（owner 指定，同桌機）：貼進 LINE 對方一眼知道那是哪張發票，
+            // 光一條短碼網址看不出來。
+            const text = `${d.file_name || ''}\n${full}`.trim();
+            inv.has_share = true;
+            // 複製失敗（非安全內容連 execCommand 都不給）就把網址念出來讓他長按複製，不是只說一句失敗
+            toast((await copyText(text)) ? '連結已複製，貼給客戶' : '複製失敗，連結：' + full, 'ok');
+        } catch (e) { toast(e.message || '建立連結失敗', 'err'); }
+    });
+    // withBusy 的 finally 會把按鈕字寫回按下前的，所以換字要在它之後
+    if (inv.has_share) btn.textContent = '複製連結';
+}
+
 // 垃圾桶（owner 2026-09-04）：展開才抓；還原＝POST /invoices/trash/{id}/restore（原 id 建回、收支連結補回）
 async function loadTrash() {
     const box = document.getElementById('inv-trash');
@@ -327,6 +350,13 @@ const PAGE = 10;
 const recent = { offset: 0, rows: [] };   // 後端 offset 分頁（同專案分頁）：載入更多＝再抓下一頁接在後面
 
 function recentCardHtml(inv) {
+    // 客戶下載連結：鑰匙跟修改／刪除同一把（state.canInvoice ← /options.me.can_invoice），
+    // 後端那支的守衛也是帳務寫入層級。畫面比後端嚴不會噴錯，只會讓有權限的人以為手機不能做，
+    // 而那是最難查的一種（報價手機版踩過，見 views/quotes.js 檔頭）。
+    // 沒上傳電子發票檔就不畫：後端會回 422，一顆按下去必然失敗的鈕不如不給。
+    const share = inv.file_url
+        ? `<button type="button" class="m-btn wi" data-share="${esc(inv.id)}">${inv.has_share ? '複製連結' : '建立連結'}</button>`
+        : '';
     return `
       <div class="m-card">
         <div class="t"><div class="name">${esc(inv.title)}</div>${pill(inv.issue_status, inv.issue_status === unissued() ? '' : 'pri')}</div>
@@ -334,7 +364,7 @@ function recentCardHtml(inv) {
         <div class="sub">${esc(inv.payment_type || '')} · ${esc(inv.payment_status || '')}${inv.invoice_number ? ' · ' + esc(inv.invoice_number) : ''}${inv.project_name ? ' · ' + esc(inv.project_name) : ''}</div>
         <div class="row"><span class="sub">${esc(fmtDate(inv.invoice_date))}</span>
           ${'amount_total' in inv ? `<span class="amt">${money(inv.amount_total)}</span>` : ''}</div>
-        ${state.canInvoice ? `<div class="row"><button type="button" class="m-btn wi" data-edit="${esc(inv.id)}">修改</button><button type="button" class="m-btn wi" data-del="${esc(inv.id)}">刪除</button></div>` : ''}
+        ${state.canInvoice ? `<div class="row"><button type="button" class="m-btn wi" data-edit="${esc(inv.id)}">修改</button><button type="button" class="m-btn wi" data-del="${esc(inv.id)}">刪除</button>${share}</div>` : ''}
       </div>`;
 }
 
@@ -366,9 +396,10 @@ export async function render(host, { first }) {
             const b = ev.target.closest('button[data-restore]'); if (b) restoreInvoice(b.dataset.restore, b);
         });
         document.getElementById('inv-recent').addEventListener('click', (ev) => {
-            const b = ev.target.closest('button[data-edit],button[data-del]'); if (!b) return;
+            const b = ev.target.closest('button[data-edit],button[data-del],button[data-share]'); if (!b) return;
             const rows = recent.rows || [];
             if (b.dataset.edit) { const inv = rows.find(x => x.id === b.dataset.edit); if (inv) startEdit(inv); return; }
+            if (b.dataset.share) { const inv = rows.find(x => x.id === b.dataset.share); if (inv) shareInvoice(inv, b); return; }
             const inv = rows.find(x => x.id === b.dataset.del);
             if (inv) removeInvoice(inv, b);
         });

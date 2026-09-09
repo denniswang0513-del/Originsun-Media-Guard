@@ -25,8 +25,10 @@ import re
 # 不放進來的話 master 關機時客戶點那個連結會 404。
 # meeting-note.html：單篇會議記錄的唯讀分享頁（自己的 token，見
 # api_proposals /shared/meeting/{token}）。
+# invoice-file.html：發票影像分享頁（客戶／會計師手上的 /e/<短碼> 就是這一頁）；
+# 那條連結寄出去之後就不在我們掌控裡，master 關機時它必須照樣打得開。
 PAGES = ("media-log.html", "project.html", "reference.html",
-         "meeting-note.html")
+         "meeting-note.html", "invoice-file.html")
 
 # 上面那些頁 import 得到的模組目錄（相對 frontend/）。網址就是 "/" + 目錄名。
 # ⚠️ 只開這幾個子目錄，不是整個 frontend/ —— 那底下是內部 SPA 的全部原始碼。

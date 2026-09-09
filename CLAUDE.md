@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v2.4.404（2026-09-09）<!-- publish_update.py 自動維護，勿手改 -->
+> **版本**: v2.4.405（2026-09-10）<!-- publish_update.py 自動維護，勿手改 -->
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe main.py`
@@ -1282,6 +1282,9 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`main_office.py`](main_office.py) | NAS `office-api` 容器入口（8002）：內部同仁三個面的 24/7 版本 —— 掛認證／員工工作台／整包 CRM／手機 BFF／貼圖 | **不掛**吃硬體的（備份／轉檔／報表／TTS／機隊／OTA）、不掛 socketio、**不准長出排程**；帳號管理與身份範本留在 master（`_DROP_PREFIXES`） |
 | [`core/office_assets.py`](core/office_assets.py) | office-api 要自己 serve 的前端：`PAGES`／`MODULE_DIRS`／`MODULE_FILES` | 跟 `public_assets` 是**兩份**（那份是匿名可達的對外頁）；`tabs/crm`、`tabs/website` 只逐檔開白名單，不整個目錄 serve |
 | [`core/office_settings.py`](core/office_settings.py) | 發版時送去 NAS 的設定**允許清單**（發票根目錄／代開費率／申請人／圖床／磁碟對映） | 允許清單不是排除清單（新機密欄位預設不外送）；代價是 master 改了要等下次發版 |
+| [`core/invoice_share.py`](core/invoice_share.py) | 發票分享頁「能出現什麼」的純規則：白名單投影、分享時定稿的快照、作廢判定 | 無 I/O；`SNAPSHOT_FIELDS` 是白名單、`NEVER_SHARE` 給測試逐欄釘住；**作廢走即時值不進快照** |
+| [`core/share_link.py`](core/share_link.py) | 寄給外面的人的連結要用哪個網域（報價 `/q/` 與發票 `/e/` **共用一個設定**） | `share_public_base`，舊鍵 `quotes_public_base` 為 fallback 一輪；留空＝回相對路徑（前端沿用 location.origin） |
+| `routers/crm/invoice_files.py` 的對外段 | `/e/{短碼}` 那頁的三支公開端點（meta／download／舊長網址）＋ 分享時定稿 | 掛 `public_router`＝NAS 對外容器也吃得到；**永遠 attachment 不 inline**；路徑要過 `drive_map.to_local_path` 才比白名單 |
 | `routers/crm/quotes.py` 的生成／對外段 | `generate_quotation_snapshot`（產 PDF ＋ HTML → 歸檔進報價單資料夾 ＋ 寫快照進共用圖床 ＋ 刪舊快照）、`public_quote_html`／`public_quote_pdf`（**送**快照） | **產**只在 master（Playwright 在那），**送**在哪都行 —— 對外那兩支掛 `public_router`，NAS 對外容器也吃得到，master 關機客戶照樣打得開 |
 
 
@@ -1363,3 +1366,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **office-api 上「產」與「送」是分開的**：產報價單 PDF（Playwright）、AI 報價助理（`claude` CLI）只有 master 做得到。那兩支在這台要**快速講實話**（`/chat` 先檢查 `_resolve_claude_exe()` 回 503、`_quotation_pdf_response` 對 ImportError 回 503），不要讓使用者等一輪再收到一句他看不懂的錯。
 - **`MEDIAGUARD_NO_USERS_JSON=1` 只給 NAS 容器**（compose 設）：使用者資料是 Postgres 正本 ＋ users.json 鏡射雙寫，鏡射只該存在於有正本的那台。不關的話 Google 首登會在 NAS 的 code 目錄長出一份沒人讀、也不會同步回來的帳號檔（含密碼雜湊）。**別在 master 設它** —— DB 掛掉時那份 JSON 就是唯一的登入退路。
 - **office 的前端清單要跟著相依閉包走**：`js/shared/ts-projects.js` 與 `journal-core.js` 靜態 import 了 `tabs/crm/crm-utils.js`／`tabs/website/website-utils.js`，`my.html` 還 iframe 內嵌整個 `journal.html`。漏一個的症狀是 **master 上一切正常、只有走 NAS 的人白畫面**（module 載入失敗會整支停掉）。加頁／加 import 之後跑 `test_office_surface`。
+- **發票分享頁的欄位是白名單，不是「記得不要加」**（`core/invoice_share.SNAPSHOT_FIELDS`）：那頁寄給客戶與會計師。代開費、內部代開、催收狀態、母帳私帳、申請人、內部案號、內部備註、`title`（可能有人拿它記內部案名）一律不上 —— 多回一個欄位不會有任何徵兆，**而錯誤只有客戶看得到**。投影用白名單、`NEVER_SHARE` 另列一份給測試逐欄斷言，`_inv_dict` 也只取白名單那幾個（整列 `__dict__` 丟進去＝把「以後有人加了新欄位」變成潛在外洩）。
+- **`MoneyRedactRoute` 有一個窄例外**（`core/money.MONEY_EXEMPT_PREFIXES`）：發票分享頁回的金額是收件人手上那張紙上本來就印著的數字，抹掉只會讓那頁變成空格、然後有人為了修好它把整層關掉。門檻三條（憑證是逐字比對的可撤銷連結／回的是白名單投影／數字他已經拿在手上），**三個都成立才准加**；「使用者抱怨看不到金額」不是理由。
+- **`file_url` 存的是 master 視角的路徑**：NAS 容器上要先過 `core.drive_map.to_local_path` 才開得了檔，而且**白名單比對要在翻譯之後**（翻譯前比對＝拿兩個不同視角的字串比）。前綴比對要帶 `os.sep`，不然 `…/00_電子發票_舊` 會通過 `…/00_電子發票` 的檢查。
+- **客戶看得到的頁面不要在原始碼裡列出我們的內部欄位**：`invoice-file.html` 第一版把「代開費／母帳私帳／未收款…一律不上」抄進檔頭註解，用意是好的，但那頁寄給客戶、原始碼看得到，等於順手告訴對方我們內部在記些什麼。要寫清單去後端那支寫。

@@ -304,6 +304,12 @@ _PREFILTER = (b"amount", b"rate", b"cost", b"price", b"fee", b"salary",
               b"depreciation", b"maintenance")
 
 
+# 見 MoneyRedactRoute 裡的說明 —— 這份清單要保持很短，而且每一條都要過那三個門檻。
+MONEY_EXEMPT_PREFIXES = (
+    "/api/v1/crm/public/invoice-file/",   # 電子發票分享頁（owner 2026-09-10）
+)
+
+
 def redact(obj: Any) -> Any:
     """遞迴刪掉 `MONEY_FIELDS` 的鍵（list/dict 混排都吃）。"""
     if isinstance(obj, dict):
@@ -367,6 +373,18 @@ class MoneyRedactRoute(APIRoute):
             response = await original(request)
             body = getattr(response, "body", None)
             if not body or "application/json" not in response.headers.get("content-type", ""):
+                return response
+            # 🔴 例外清單：這些**匿名分享面**回的金額，是收件人手上那張紙上本來就印著的
+            # 數字（電子發票的未稅／稅額／合計）。抹掉它們不會讓誰更安全 —— 他有那張
+            # 發票 —— 只會讓那頁變成一排空格，然後有人為了「修好」它去把整層關掉。
+            #
+            # 往這裡加東西的門檻，三個**都**要成立：
+            #   1. 憑證是逐字比對、可撤銷的一次性連結（不是登入身分）
+            #   2. 回的是**白名單投影**（不是某個 ORM 列的整包序列化）
+            #   3. 那些數字收件人**已經拿在手上**
+            # 「使用者抱怨看不到金額」不是理由 —— 那正是這一層在做的事。
+            # 釘住：tests/unit/test_invoice_share.py
+            if request.url.path.startswith(MONEY_EXEMPT_PREFIXES):
                 return response
             if can_see_money(request):
                 # 兩本帳 §8：有 money_view 但沒有我的帳 scope → 只抹 mine 子樹。

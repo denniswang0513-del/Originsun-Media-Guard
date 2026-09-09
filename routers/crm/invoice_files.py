@@ -24,9 +24,12 @@ from core.no_store import no_store_file
 from core.auth import check_admin
 from core.finance_logic import PASSTHROUGH_FEE_RATES
 from core.ledger import require_entity
+from core.public_access import surface_gate
+from core import invoice_share, share_link
+from core.drive_map import to_local_path
 
-from ._shared import (router, token_router, _check_finance_auth, money_dep, _require_db,
-                      _get_factory, _fmt_day, _now)
+from ._shared import (router, public_router, _check_finance_auth, money_dep,
+                      _require_db, _get_factory, _fmt_day, _now)
 
 try:
     from ._shared import select, CrmInvoice
@@ -287,10 +290,36 @@ async def create_invoice_share_link(invoice_id: str, request: Request):
             else:
                 raise HTTPException(status_code=503, detail="短碼產生失敗，請再試一次")
             inv.updated_at = _now()
-            await session.commit()
-        token = inv.share_token
-    return {"status": "ok", "token": token, "path": f"/e/{token}",
-            "file_name": os.path.basename(inv.file_url or "")}
+        # 🔴 **每按一次都重新定稿**（不只第一次鑄碼時）。這顆鈕的語意是「我現在要把這條
+        #    寄出去」—— 那一刻客戶會看到的就該是現在這一版。不重新定稿的話，改過金額
+        #    之後再複製一次連結，客戶看到的還是舊的，而只有他看得到。
+        #    也因為這樣不需要另外做一顆「更新分享內容」。
+        local = _local_invoice_path(inv.file_url)
+        try:
+            size = os.path.getsize(local) if local else 0
+        except OSError:
+            size = 0
+        inv.share_snapshot = invoice_share.make_snapshot(
+            _inv_dict(inv), file_name=os.path.basename(inv.file_url or ""), file_size=size)
+        inv.updated_at = _now()
+        await session.commit()
+        token, fname = inv.share_token, (inv.share_snapshot.get("file") or {}).get("name", "")
+    path = f"/e/{token}"
+    return {"status": "ok", "token": token, "path": path,
+            "url": share_link.share_url(path, _share_public_base()),
+            "file_name": fname}
+
+
+def _inv_dict(inv) -> dict:
+    """ORM 列 → 給 invoice_share 用的 dict。只取白名單那幾個欄位就好，
+    整列 `__dict__` 丟過去等於把「以後有人加了新欄位」變成潛在的外洩。"""
+    return {k: getattr(inv, k, None) for k in invoice_share.SNAPSHOT_FIELDS}
+
+
+def _share_public_base() -> str:
+    """客戶連結要用的對外網址。報價與發票共用同一個設定（core/share_link.py）。"""
+    from config import load_settings
+    return share_link.public_base(load_settings())
 
 
 @router.delete("/invoices/{invoice_id}/share")
@@ -310,39 +339,97 @@ async def revoke_invoice_share_link(invoice_id: str, request: Request):
     return {"status": "ok"}
 
 
-async def serve_invoice_by_share_token(token: str):
-    """憑分享碼取電子發票檔 —— **免登入**，憑證就是網址裡那串字。
+def _local_invoice_path(db_path) -> str:
+    """DB 存的路徑 → **這台機器看得到的**絕對路徑；看不到／不在白名單內回空字串。
+
+    🔴 `file_url` 存的是 **master 視角**的路徑（UNC 或磁碟代號）。NAS 的容器上
+       `\\192.168.1.132\Archive\…` 是 `/share/Archive/…` —— 不翻譯的話那邊一律 404，
+       而且是安靜的（客戶看到「檔案不存在」，我們這邊什麼都沒發生）。
+    🔴 白名單比對要在**翻譯之後**做：翻譯前比對等於拿兩個不同視角的字串比，
+       可能誤放行、也可能把好的擋掉。
+    🔴 用 `ap != ar and not ap.startswith(ar + os.sep)` 而不是純 startswith：
+       `/share/Archive/00_電子發票_舊` 也 startswith `/share/Archive/00_電子發票`。
+    """
+    raw = str(db_path or "").strip()
+    if not raw:
+        return ""
+    ap = os.path.abspath(to_local_path(raw))
+    ar = os.path.abspath(to_local_path(_invoices_root()))
+    if ap != ar and not ap.startswith(ar + os.sep):
+        return ""      # 免登入端點更不能讓 DB 裡一個被改壞的路徑變成任意檔案讀取
+    return ap if os.path.isfile(ap) else ""
+
+
+async def _share_row(token: str):
+    """短碼 → (本機檔案路徑, 快照, 是否作廢)。**免登入**，憑證就是網址裡那串字。
 
     短碼與舊 JWT 共用這一支：查詢就是「share_token 逐字等於來訪者出示的字串」，
-    格式不影響判定。所以改成短碼之後，改版前已經寄出去的長網址照樣有效。
-
-    只回檔案本身，不回發票的其他欄位 —— 客戶要的是那張憑證，順手多給金額/統編/
-    客戶名等於把不必要的東西一起寄出去。
+    格式不影響判定 —— 所以改成短碼之後，改版前已經寄出去的長網址照樣有效。
     """
     _require_db()
+    if not token:
+        raise HTTPException(status_code=401, detail="連結已失效")
     factory = await _get_factory()
     async with factory() as session:
         row = (await session.execute(
-            select(CrmInvoice.file_url).where(CrmInvoice.share_token == token))).first()
+            select(CrmInvoice.file_url, CrmInvoice.share_snapshot, CrmInvoice.issue_status)
+            .where(CrmInvoice.share_token == token))).first()
     if not row:
         raise HTTPException(status_code=401, detail="連結已失效")
-    path = row[0] or ""
-    if not path or not os.path.isfile(path):
+    return _local_invoice_path(row[0]), row[1], invoice_share.is_voided(row[2])
+
+
+async def serve_invoice_by_share_token(token: str):
+    """把檔案本體送出去（attachment）。/e/{code} 那頁的下載鈕與舊長網址共用這一支。
+
+    🔴 **永遠是 attachment，不做 inline**（owner 2026-09-10 拍板不做內嵌預覽）。
+       inline 送出使用者上傳的檔＝在官網網域上執行別人給的內容；而上傳黑名單
+       `core.project_folders.BLOCKED_UPLOAD_EXTS` 並沒有擋 .svg／.html。
+       不 inline 就完全沒有這個面 —— 別為了「順手可以線上看」把它加回來。
+    """
+    path, _snap, _voided = await _share_row(token)
+    if not path:
         raise HTTPException(status_code=404, detail="檔案不存在")
-    # 免登入端點更不能讓 DB 裡一個被改壞的路徑變成任意檔案讀取
-    if not os.path.abspath(path).startswith(os.path.abspath(_invoices_root())):
-        raise HTTPException(status_code=403, detail="無權存取此路徑")
-    return no_store_file(os.path.abspath(path), filename=os.path.basename(path))
+    return no_store_file(path, filename=os.path.basename(path))
 
 
-@token_router.get("/public/invoice-file/{token}")
-async def download_invoice_file_public(token: str):
+@public_router.get("/public/invoice-file/{token}/meta")
+async def invoice_share_meta(token: str, request: Request):
+    """分享頁要顯示的東西。**白名單投影**，規則正本 core/invoice_share.py。
+
+    掛 public_router ＝ NAS 對外容器也吃得到（master 關機客戶照樣打得開）。
+    曝露面白名單在 test_media_log_public_router 與 test_public_surface，兩支都要同步。
+    """
+    await surface_gate(request)
+    path, snap, voided = await _share_row(token)
+    if not invoice_share.has_snapshot(snap):
+        # 舊連結（這次改版前鑄的）沒有快照。誠實回報，不要拿 DB 活值硬湊一頁 ——
+        # 那正是這次要避免的「畫面與附件對不起來」。重新按一次分享就會定稿。
+        raise HTTPException(status_code=503, detail="這個連結還沒有可顯示的內容，請與我們聯繫")
+    if not path:
+        raise HTTPException(status_code=404, detail="檔案不存在")
+    from config import load_settings
+    return invoice_share.meta(snap, voided=voided,
+                              seller=load_settings().get("company") or {})
+
+
+@public_router.get("/public/invoice-file/{token}/download")
+async def invoice_share_download(token: str, request: Request):
+    """分享頁那顆下載鈕。"""
+    await surface_gate(request)
+    return await serve_invoice_by_share_token(token)
+
+
+@public_router.get("/public/invoice-file/{token}")
+async def download_invoice_file_public(token: str, request: Request):
     """舊的長網址（v1 的 JWT 版）。改用 /e/{code} 短碼之後仍保留這條 ——
     改版前已經寄給客戶的連結不該因為我們換格式而變成死連結。
 
-    掛 token_router 不掛 public_router：後者是 NAS 對外容器也會掛的那組
-    （master 關機仍要能用），電子發票下載沒有 24/7 的必要，曝露面不必為它變大。
+    🔴 語意維持「**直接下載**」，不要跟著改成回那一頁：那些連結是很久以前寄出去的，
+    對方（多半是會計師）的習慣是點了就拿到檔。
+    2026-09-10 從 token_router 移到 public_router —— owner「master 關機也要拿得到」。
     """
+    await surface_gate(request)
     return await serve_invoice_by_share_token(token)
 
 

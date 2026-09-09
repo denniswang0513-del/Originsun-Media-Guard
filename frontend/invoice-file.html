@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>發票</title>
+<!-- 發票影像分享頁 /e/{短碼}（免登入，憑證就是網址裡那串碼）。
+     單檔自足、無外部依賴、沒有 build step —— 照 frontend/media-log.html 的骨架，
+     這頁才 serve 得起來（NAS 對外容器只 serve core.public_assets.PAGES 那幾個檔）。
+
+     版面是 frontend/demo/invoice-share.html（owner 2026-09-10 拍板）原樣接線，
+     只拿掉示範用的情境切換與假資料。要改版面先改示範頁再同步過來。
+
+     🔴 欄位是**白名單**：只放「那張發票上本來就印著的」，投影的正本在後端
+        （core/invoice_share.SNAPSHOT_FIELDS ／ NEVER_SHARE，理由見 docs/INVOICE_SHARE_PLAN.md §3.5）。
+        前端只畫後端給的欄位，這裡沒有的不是漏做。
+        🔴 **不要在這個檔裡列出那些不給的欄位叫什麼** —— 這頁是寄給客戶的，
+           原始碼看得到；把我們的內部欄位詞彙抄一份在這裡等於順手告訴對方
+           我們內部在記些什麼。要看清單去讀後端那支。
+
+     後端契約：
+       GET /api/v1/crm/public/invoice-file/{token}/meta      → 見下方 render()
+       GET /api/v1/crm/public/invoice-file/{token}/download   → 檔案（attachment）
+     owner 拍板不做內嵌預覽 —— 這條路永遠是 attachment，內嵌執行別人上傳的檔
+     （官網網域上的儲存型 XSS）那個風險因此完全歸零。 -->
+<style>
+  *, *::before, *::after { box-sizing:border-box; }
+  html, body { margin:0; padding:0; }
+  /* 🔴 class 的 display 會蓋掉瀏覽器預設的 [hidden]{display:none} —— 這頁大量用
+     grid（.void／.sum .row／.kv），不補這條的話 `el.hidden = true` 對它們完全
+     沒作用：非作廢的發票會掛著紅帶、沒填的欄位會留一格空白。 */
+  [hidden] { display:none !important; }
+  body { --k:#1a1a1a; --mute:#767676; --hair:#d9d9d9; --bg:#ececec;
+    background:var(--bg); color:var(--k);
+    font-family:"Noto Sans TC","Microsoft JhengHei","PingFang TC",sans-serif;
+    font-size:15px; line-height:1.7; font-variant-numeric:tabular-nums; }
+  .lab { font-size:12px; color:var(--mute); letter-spacing:.04em; }
+
+  /* ── 工具列：同報價線上檢視頁 ── */
+  .webbar { position:sticky; top:0; z-index:5; background:#1a1a1a; color:#fff;
+    padding:10px 16px; display:flex; justify-content:space-between; align-items:center; font-size:14px; }
+  .webbar span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:12px; }
+  .webbar a { flex:none; color:#fff; background:#3b82f6; text-decoration:none;
+    padding:8px 16px; border-radius:6px; font-weight:500; }
+
+  .page { background:#fff; max-width:210mm; margin:16px auto; padding:26px 30px 30px;
+    box-shadow:0 2px 12px rgba(0,0,0,.12); }
+
+  /* ── 載入中／錯誤：先佔住版面，不要閃一頁空表格 ── */
+  .state { padding:52px 0; text-align:center; color:var(--mute); font-size:15px; line-height:1.9; }
+  .state .big { display:block; color:var(--k); font-size:17px; margin-bottom:6px; }
+
+  /* ── 作廢提示帶：不是塞進表格的一個欄位，是一整條 ──
+       收件人最需要先知道的就是「這張不能用了」。 */
+  .void { display:flex; gap:10px; align-items:baseline; margin:-26px -30px 24px; padding:12px 30px;
+    background:#fef2f2; border-bottom:1px solid #fecaca; color:#b91c1c; font-size:14px; }
+  .void b { font-weight:700; letter-spacing:.02em; }
+
+  .hd { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+  .hd h1 { margin:0; font-size:22px; font-weight:500; letter-spacing:.18em; line-height:1.2; }
+  .hd h1 small { display:block; font-size:11px; letter-spacing:.2em; color:var(--mute);
+    font-weight:400; margin-top:5px; }
+  .hd img { height:44px; }
+
+  /* ── 發票號碼＝這張的身分，給它最大的字 ── */
+  .idno { margin-top:22px; padding-bottom:16px; border-bottom:1px solid var(--hair); }
+  .idno .no { font-size:30px; font-weight:700; letter-spacing:.14em; line-height:1.2; }
+  .idno .date { margin-top:2px; }
+
+  /* ── 資訊：兩欄，手機折成一欄 ── */
+  .kv { display:grid; grid-template-columns:76px 1fr; gap:3px 12px; align-content:start; line-height:1.85; }
+  .kv .k { color:var(--mute); font-size:13px; }
+  .kv .v { color:#222; word-break:break-word; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:18px 32px; margin-top:16px; }
+
+  /* ── 金額：右對齊、合計放大（同報價的 .sum/.grand）── */
+  .sum { margin-top:22px; padding-top:14px; border-top:1px solid var(--hair);
+    display:flex; justify-content:flex-end; }
+  .sum .box { width:min(300px, 100%); }
+  .sum .row { display:grid; grid-template-columns:1fr 120px; align-items:baseline;
+    border-bottom:1px solid var(--hair); padding:6px 0 4px; }
+  .sum .row .l { text-align:right; font-size:12px; letter-spacing:.06em; color:#333; font-weight:500; }
+  .sum .row .v { text-align:right; }
+  .sum .grand { display:grid; grid-template-columns:1fr 140px; align-items:baseline; padding:10px 0 0; }
+  .sum .grand .l { text-align:right; font-size:14px; font-weight:700; }
+  .sum .grand .v { text-align:right; font-size:24px; font-weight:700; }
+
+  /* ── 下載區塊（owner 拍板：不做內嵌預覽）──
+       沒有預覽框，所以動作要自己撐得起版面：按鈕給大一點，檔名／大小放它底下當佐證，
+       讓人按之前知道自己會拿到什麼。 */
+  .doc { margin-top:26px; padding-top:16px; border-top:1px solid var(--hair); }
+  .doc h5 { margin:0 0 12px; font-size:12px; letter-spacing:.08em; font-weight:700; }
+  .acts { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .btn { display:inline-block; text-decoration:none; font-weight:500; border-radius:6px;
+    padding:12px 26px; font-size:15px; }
+  .btn-pri { background:#3b82f6; color:#fff; }
+  .fileline { margin-top:10px; color:var(--mute); font-size:13px; word-break:break-all; }
+
+  .foot { margin-top:26px; padding-top:12px; border-top:1px solid var(--hair);
+    color:var(--mute); font-size:12px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+
+  @media (max-width:640px) {
+    .page { margin:0; padding:20px 16px 24px; box-shadow:none; }
+    .void { margin:-20px -16px 18px; padding:11px 16px; }
+    .cols { grid-template-columns:1fr; gap:14px; }
+    .idno .no { font-size:24px; }
+    .sum { justify-content:stretch; }
+    .sum .box { width:100%; }
+    .acts .btn { flex:1 1 auto; text-align:center; }
+  }
+</style>
+</head>
+<body>
+
+<div class="webbar">
+  <span>發票　<span id="bar-no"></span></span>
+  <a id="bar-dl" href="#" hidden>下載</a>
+</div>
+
+<div class="page">
+
+  <!-- 載入中／錯誤共用同一塊：兩種都不該讓人先看到一頁空表格 -->
+  <div class="state" id="state"><span class="big">載入中</span>正在取得發票資訊…</div>
+
+  <div id="body" hidden>
+    <div class="void" id="void" hidden>
+      <b>此發票已作廢</b>
+      <span>如需重新開立，請與我們聯繫。</span>
+    </div>
+
+    <div class="hd">
+      <h1>發票<small>INVOICE</small></h1>
+      <img src="/img/originsun-logo.webp" alt="源日影像" onerror="this.hidden = true">
+    </div>
+
+    <div class="idno">
+      <div class="lab">發票號碼</div>
+      <div class="no" id="f-no"></div>
+      <div class="date lab" id="row-date">開立日期　<span id="f-date"></span></div>
+    </div>
+
+    <div class="cols">
+      <div class="kv" id="col-buyer">
+        <span class="k" id="k-title">買受人</span><span class="v" id="f-title"></span>
+        <span class="k" id="k-taxid">統一編號</span><span class="v" id="f-taxid"></span>
+      </div>
+      <div class="kv" id="col-item">
+        <span class="k" id="k-item">品項</span><span class="v" id="f-item"></span>
+        <span class="k" id="k-kind">發票種類</span><span class="v" id="f-kind"></span>
+      </div>
+    </div>
+
+    <div class="sum" id="sum">
+      <div class="box">
+        <div class="row" id="row-ex"><span class="l">銷售額（未稅）</span><span class="v" id="f-ex"></span></div>
+        <div class="row" id="row-tax"><span class="l">營業稅 5%</span><span class="v" id="f-tax"></span></div>
+        <div class="grand" id="row-total"><span class="l">合計</span><span class="v" id="f-total"></span></div>
+      </div>
+    </div>
+
+    <div class="doc" id="doc">
+      <h5>發票檔案</h5>
+      <div class="acts">
+        <a class="btn btn-pri" id="dl" href="#">下載發票</a>
+      </div>
+      <div class="fileline" id="f-file"></div>
+    </div>
+
+    <div class="foot">
+      <span id="f-seller"></span>
+      <span>本連結僅供本張發票之收件方使用</span>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+// 短碼在路徑裡（/e/AbCd1234）。?code= 是給「直接開 /invoice-file.html」那條路用的 ——
+// 對外容器把這個檔 serve 在 /invoice-file.html，沒有 fallback 的話那個網址永遠是空頁，
+// 開發與驗證都碰不到它。憑證仍然是那串短碼，後端逐字比對，不因入口不同而放寬。
+function readCode() {
+    const m = /^\/e\/([^/?#]+)/.exec(location.pathname);
+    if (m) return decodeURIComponent(m[1]);
+    return new URLSearchParams(location.search).get("code") || "";
+}
+
+function fail(big, msg) {
+    $("body").hidden = true;
+    $("bar-dl").hidden = true;
+    $("state").hidden = false;
+    $("state").textContent = "";
+    const b = document.createElement("span");
+    b.className = "big";
+    b.textContent = big;
+    $("state").appendChild(b);
+    $("state").appendChild(document.createTextNode(msg));
+}
+
+/** 值有東西才畫；沒有就整列收掉（留一格「統一編號　—」比不畫還難看）。 */
+function setRow(rowEl, valueEl, value) {
+    const s = (value === null || value === undefined) ? "" : String(value).trim();
+    if (!s) { rowEl.hidden = true; return false; }
+    valueEl.textContent = s;
+    rowEl.hidden = false;
+    return true;
+}
+/** .kv 的一列＝標籤與值兩個 grid 子元素，要一起收掉才不會塌出半格。 */
+function setPair(keyEl, valueEl, value) {
+    const shown = setRow(valueEl, valueEl, value);
+    keyEl.hidden = !shown;
+    return shown;
+}
+function setAmount(rowEl, valueEl, value) {
+    const n = Number(value);
+    if (value === null || value === undefined || value === "" || !isFinite(n)) {
+        rowEl.hidden = true;
+        return false;
+    }
+    valueEl.textContent = n.toLocaleString("en-US");
+    rowEl.hidden = false;
+    return true;
+}
+function fmtSize(bytes) {
+    const n = Number(bytes);
+    if (!isFinite(n) || n <= 0) return "";
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+    return Math.max(1, Math.round(n / 1024)) + " KB";
+}
+/** 後端可能回 date 或 datetime；收件人只需要日期那段。 */
+function fmtDate(v) {
+    const s = String(v || "").trim();
+    return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : s;
+}
+
+function render(d, downloadUrl) {
+    $("void").hidden = !d.voided;
+
+    const no = String(d.invoice_number || "").trim();
+    $("f-no").textContent = no || "（未填發票號碼）";
+    $("bar-no").textContent = no;
+    if (no) document.title = "發票 " + no;
+    setRow($("row-date"), $("f-date"), fmtDate(d.invoice_date));
+
+    // 每一列都要真的跑過（不能用 || 短路），最後才決定整個區塊要不要留
+    const hasName = setPair($("k-title"), $("f-title"), d.company_name);
+    const hasTaxId = setPair($("k-taxid"), $("f-taxid"), d.tax_id);
+    $("col-buyer").hidden = !(hasName || hasTaxId);
+    const hasItem = setPair($("k-item"), $("f-item"), d.item_type);
+    const hasKind = setPair($("k-kind"), $("f-kind"), d.invoice_kind);
+    $("col-item").hidden = !(hasItem || hasKind);
+
+    const hasEx = setAmount($("row-ex"), $("f-ex"), d.amount_ex_tax);
+    const hasTax = setAmount($("row-tax"), $("f-tax"), d.tax_amount);
+    const hasTotal = setAmount($("row-total"), $("f-total"), d.amount_total);
+    $("sum").hidden = !(hasEx || hasTax || hasTotal);
+
+    const f = d.file || {};
+    const size = fmtSize(f.size);
+    $("f-file").textContent = [String(f.name || "").trim(), size].filter(Boolean).join("　");
+    // 賣方（我們）從後端來，不寫死在這頁 —— 公司抬頭或統編哪天改了，
+    // 一個寫死的字串不會跟著動，而這頁是寄給客戶的。
+    const sel = d.seller || {};
+    $("f-seller").textContent = [String(sel.name || "").trim(),
+        sel.tax_id ? "統一編號 " + sel.tax_id : ""].filter(Boolean).join("　");
+    $("dl").href = downloadUrl;
+    $("bar-dl").href = downloadUrl;
+    $("bar-dl").hidden = false;
+
+    $("state").hidden = true;
+    $("body").hidden = false;
+}
+
+async function load() {
+    const code = readCode();
+    if (!code) {
+        fail("找不到發票", "這個網址沒有帶連結代碼，請直接點開我們寄給您的連結。");
+        return;
+    }
+    const api = "/api/v1/crm/public/invoice-file/" + encodeURIComponent(code);
+    let r;
+    try {
+        r = await fetch(api + "/meta", { headers: { "Accept": "application/json" } });
+    } catch (e) {
+        // 網路錯 ≠ 連結失效 —— 說成「已失效」會讓收件人跑來要新連結
+        fail("連不上", "目前無法連線，請稍後再試（連結不需重發）。");
+        return;
+    }
+    if (r.status === 401 || r.status === 403) {
+        fail("連結已失效", "這條連結已停用，請與我們聯繫取得新的連結。");
+        return;
+    }
+    if (r.status === 404) {
+        fail("找不到檔案", "發票檔案不存在，請與我們聯繫。");
+        return;
+    }
+    if (!r.ok) {
+        // 5xx 也是暫時性的，不要把狀態碼或 traceback 給客戶看
+        fail("暫時無法顯示", "伺服器忙碌中，請稍後再試（連結不需重發）。");
+        return;
+    }
+    let d;
+    try {
+        d = await r.json();
+    } catch (e) {
+        fail("暫時無法顯示", "回應格式有誤，請稍後再試或與我們聯繫。");
+        return;
+    }
+    render(d, api + "/download");
+}
+
+load();
+</script>
+</body>
+</html>

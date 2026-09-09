@@ -190,9 +190,17 @@ def test_public_base_setting_rejects_things_that_would_break_silently():
 
 def test_settings_post_only_writes_the_fields_it_was_given():
     """🔴 舊分頁的 POST 只帶 quotes_root（CF 給 .js 四小時快取，舊分頁一定存在）。
-    整包寫回會把剛設好的客戶連結網域清成空字串 —— 同 reference_cloudflare_js_cache 那類坑。"""
+    整包寫回會把剛設好的對外網址清成空字串 —— 同 reference_cloudflare_js_cache 那類坑。
+
+    2026-09-10 對外網址改成報價與發票**共用**的 `share_public_base`（core/share_link.py）。
+    舊鍵 `quotes_public_base` 仍然收得下（舊分頁送的就是那個名字），但一律寫進新鍵
+    並把舊鍵清掉 —— 兩個鍵同時有值的話「哪個生效」就要翻程式碼才知道。
+    """
     body = code_only(func_body(repo_src(QUOTES), "async def set_quotations_root("))
-    assert 'if "quotes_root" in body:' in body and 'if "quotes_public_base" in body:' in body
+    assert 'if "quotes_root" in body:' in body, "沒送的欄位不准寫"
+    assert 'for _k in ("share_public_base", "quotes_public_base"):' in body
+    assert 's["share_public_base"] = _clean_public_base(' in body
+    assert 's.pop("quotes_public_base", None)' in body, "寫新鍵時要把舊鍵清掉，不要兩個並存"
 
 
 def test_all_three_quote_surfaces_show_the_state():

@@ -606,6 +606,7 @@ async def _on_startup():
                         ("crm_quotations", "share_token", "VARCHAR(64)"),
                         ("crm_quotations", "chat", "JSONB"),
                         ("crm_quotations", "pdf_snapshot", "JSONB"),
+                        ("crm_invoices", "share_snapshot", "JSONB"),
                         ("crm_project_staff", "phase", "VARCHAR(32) DEFAULT ''"),
                         ("crm_project_staff", "actual_days", "INTEGER"),
                         ("crm_project_staff", "actual_cost", "INTEGER"),
@@ -1336,8 +1337,10 @@ async def _short_invoice_file(code: str, request: Request):
     """
     from core.public_access import surface_gate
     await surface_gate(request)   # 公開區「發票影像分享」關閉 → 404（寄給客戶的就是這條短網址）
-    from routers.crm.invoice_files import serve_invoice_by_share_token
-    return await serve_invoice_by_share_token(code)
+    # owner 2026-09-10：這條從「點了直接下載」改成回一頁（發票資訊 ＋ 下載鈕）。
+    # 頁面自己從 location.pathname 取短碼、再打 /api/v1/crm/public/invoice-file/{token}/meta。
+    # 短碼**不由這裡驗** —— 驗證在那支 meta 上（那一支對外容器也掛得到，master 關機照樣運作）。
+    return no_store_file(os.path.join("frontend", "invoice-file.html"), media_type="text/html")
 
 
 @app.get("/q/{code}", include_in_schema=False)

@@ -313,7 +313,11 @@ async def get_quotations_root(request: Request):
             "default": _QUOTES_DEFAULT_ROOT, "effective": _quotes_root(),
             # 客戶連結要用哪個網域（見 _public_base）。跟資料夾放在同一張小卡上：
             # 兩個都是「報價單這件事的去處」，不值得為它另開一個設定面。
-            "quotes_public_base": (s.get("quotes_public_base") or "")}
+            # 🔴 回的是**生效值**（新鍵 → 舊鍵 fallback），不是原始欄位：畫面要顯示的是
+            #    「客戶實際會拿到哪個網域」，不是「這個鍵有沒有填」。
+            "share_public_base": _public_base(),
+            # 舊鍵名同時回一份：CF 給 .js 四小時快取，那一輪的舊分頁還讀這個名字
+            "quotes_public_base": _public_base()}
 
 
 @router.post("/quotations-root")
@@ -335,8 +339,13 @@ async def set_quotations_root(request: Request):
         root = (body.get("quotes_root") or "").strip()
         validate_root_dir(root)
         s["quotes_root"] = root
-    if "quotes_public_base" in body:
-        s["quotes_public_base"] = _clean_public_base(body.get("quotes_public_base"))
+    # 新舊鍵都收（舊分頁送的是 quotes_public_base），一律寫進**新鍵**並把舊鍵清掉 ——
+    # 兩個鍵同時有值的話，「到底哪個生效」就要翻 core/share_link 才知道。
+    for _k in ("share_public_base", "quotes_public_base"):
+        if _k in body:
+            s["share_public_base"] = _clean_public_base(body.get(_k))
+            s.pop("quotes_public_base", None)
+            break
     try:
         save_settings(s)
     except OSError as e:
@@ -347,19 +356,13 @@ async def set_quotations_root(request: Request):
 
 
 def _clean_public_base(raw) -> str:
-    """客戶連結網域的清洗：只收 http(s) 的來源（scheme + host），尾斜線去掉。
-
-    收垃圾的後果是安靜的：連結是**複製給客戶**的，錯了不會有人回報 error，
-    只會有人說「你給我的網址打不開」。空字串＝回到 location.origin（合法，代表不指定）。
-    """
-    v = str(raw or "").strip().rstrip("/")
-    if not v:
-        return ""
-    if not v.startswith(("http://", "https://")):
-        raise HTTPException(status_code=422, detail="客戶連結網域要以 http:// 或 https:// 開頭")
-    if len(v.split("/")) != 3:
-        raise HTTPException(status_code=422, detail="客戶連結網域只要網址開頭（例：https://www.example.com）")
-    return v
+    """設定值的清洗 —— 規則在 `core.share_link.clean_base`（純函式，報價與發票共用）。
+    這裡只負責把「不合法」翻成 HTTP 422。"""
+    from core.share_link import clean_base
+    value, err = clean_base(raw)
+    if err:
+        raise HTTPException(status_code=422, detail=err)
+    return value
 
 
 def _pdf_footer(view: dict) -> str:
@@ -543,11 +546,11 @@ async def quotation_pdf(quotation_id: str):
 
 
 def _public_base() -> str:
-    """客戶連結要用的對外網址（settings `quotes_public_base`）。留空＝回相對路徑、
-    前端沿用 `location.origin`（＝現況行為）。為什麼需要這個設定見
-    core.quote_snapshot.share_url —— 連結原本是「按複製的人當時在哪個網址」決定的。"""
+    """客戶連結要用的對外網址。**報價與發票共用同一個設定**（owner 2026-09-10）——
+    分兩個只會有一天其中一個忘了填。規則與舊鍵 fallback 在 core/share_link.py。"""
     from config import load_settings
-    return str(load_settings().get("quotes_public_base") or "").strip()
+    from core.share_link import public_base
+    return public_base(load_settings())
 
 
 @router.post("/quotations/{quotation_id}/generate")

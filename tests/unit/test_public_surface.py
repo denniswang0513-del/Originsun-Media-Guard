@@ -50,6 +50,14 @@ EXPECTED_API = {
     # 靜態快照（HTML 與 PDF 各一份），對外容器只是把檔案交出去，不重算金額也不重畫版面。
     ("/api/v1/crm/public/quote/{token}", "GET"),
     ("/api/v1/crm/public/quote/{token}/pdf", "GET"),
+    # 發票影像分享（客戶／會計師手上的 /e/<短碼>；nginx 把 /e/ 整段轉進來，這條不必
+    # rewrite —— 對外容器自己有 /e/{code} 路由）。該被匿名打到的理由同報價：憑證是網址
+    # 裡的 share_token，逐字比對 DB、可撤銷；meta 只回「那張發票上本來就印著的欄位」
+    # （docs/INVOICE_SHARE_PLAN.md §3.5 白名單），代開費／收款狀態／內部備註一律不上。
+    ("/api/v1/crm/public/invoice-file/{token}/meta", "GET"),
+    ("/api/v1/crm/public/invoice-file/{token}/download", "GET"),
+    # 舊的長網址（已寄出的連結就是它）：維持「點了直接下載」，刻意不改成頁面
+    ("/api/v1/crm/public/invoice-file/{token}", "GET"),
     # 提案公開共編頁（token 授權；客戶手上的 ?t= 連結）
     ("/api/v1/proposals/shared/{token}", "GET"),
     ("/api/v1/proposals/shared/{token}/deck", "GET"),

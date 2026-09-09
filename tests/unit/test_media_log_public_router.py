@@ -42,6 +42,13 @@ EXPECTED = {
     # 是寄出當下生成好的靜態快照（不查客戶、不重算金額），對外容器只是把檔案交出去。
     ("/api/v1/crm/public/quote/{token}", "GET"),
     ("/api/v1/crm/public/quote/{token}/pdf", "GET"),
+    # 發票影像分享（客戶／會計師手上的 /e/<短碼>）。該對匿名開放的理由同報價：憑證就是
+    # 網址裡那串 share_token，後端逐字比對 DB、可隨時撤銷；而且 meta 只回「那張發票上
+    # 本來就印著的欄位」（docs/INVOICE_SHARE_PLAN.md §3.5），收件人手上就有那張證明聯。
+    ("/api/v1/crm/public/invoice-file/{token}/meta", "GET"),
+    ("/api/v1/crm/public/invoice-file/{token}/download", "GET"),
+    # 舊的長網址（已經寄出去的連結就是它）：維持「點了直接下載」的語意，不改成頁面
+    ("/api/v1/crm/public/invoice-file/{token}", "GET"),
 }
 MOUNT_PREFIX = CRM_PREFIX   # 與 _shared / main_website 共用同一個常數
 

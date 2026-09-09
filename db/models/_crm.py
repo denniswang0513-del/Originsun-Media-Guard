@@ -530,6 +530,10 @@ class CrmInvoice(Base):
     paid_date = Column(DateTime(timezone=True), nullable=True)           # 收款日（AR 收現時間戳，財務階段二）
     file_url = Column(String(512), nullable=True)                        # 已開立的電子發票檔（PDF/圖），存磁碟絕對路徑
     share_token = Column(String(512), nullable=True, index=True)         # 給客戶下載電子發票的短碼（/e/{code}，逐字比對）
+    # 分享頁上顯示的那幾個欄位，按下分享時定稿（core/invoice_share.py）。
+    # 檔案是固定的、DB 那筆是活的 —— 不定稿的話事後改了金額，客戶那頁就跟他手上那張
+    # PDF 對不起來，而且只有他看得到。作廢狀態刻意**不**進快照（走即時值）。
+    share_snapshot = Column(JSONB, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

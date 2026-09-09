@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>示範：發票分享頁</title>
+<!--
+  視覺正本：這一頁（docs/INVOICE_SHARE_PLAN.md §3.7）。
+  發票分享頁 /e/{code} 的版面示範 —— **假資料，不接後端**，給 owner 拍板用。
+  拍板之後才做 frontend/invoice-file.html 與那三支公開端點。
+
+  刻意沿用報價線上檢視頁（templates/quotation_pdf.html 的 web 模式）的視覺語言：
+  同一個網域、同一批收件人（客戶／會計師），長得像兩家公司很奇怪。
+  共用的：--k/--mute/--hair 三色、Noto Sans TC、深色工具列＋藍色動作鈕、白紙卡片置中、
+          tabular-nums、.lab 小標。
+
+  🔴 欄位是**白名單**（docs/INVOICE_SHARE_PLAN.md §3.5）：只放「那張發票上本來就印著的」。
+     代開費、內部代開、未收款狀態、母帳私帳、申請人、內部案號、內部備註一律不上。
+     這頁沒有它們不是漏做，是刻意的。
+
+  owner 2026-09-10 拍板：
+   1. `title`（名稱／案件）不放 —— 可能有人拿它記內部案名。
+   2. 金額左邊那塊留白維持現況（同報價單的右對齊摘要）。
+   3. 標題用中性的「發票」—— 紙本拍照上傳的也走這頁，寫死「電子發票證明聯」會不準。
+   4. **不做內嵌預覽**，只留下載區塊。
+      這不只是版面選擇，它同時解掉兩件事：內嵌別人上傳的檔＝官網網域上的儲存型 XSS 面
+      （BLOCKED_UPLOAD_EXTS 沒擋 .svg／.html），以及手機瀏覽器內嵌 PDF 支援參差。
+   5. **「在新分頁開啟」也拿掉**（2026-09-10 追加）。那顆是唯一需要 inline 送檔的地方；
+      拿掉之後這條路**永遠是 attachment**，內嵌執行別人上傳的檔那個風險完全歸零 ——
+      型別白名單與 .svg 黑名單那兩條（§3.2）連做都不用做。
+-->
+<style>
+  *, *::before, *::after { box-sizing:border-box; }
+  html, body { margin:0; padding:0; }
+  body { --k:#1a1a1a; --mute:#767676; --hair:#d9d9d9; --bg:#ececec;
+    background:var(--bg); color:var(--k);
+    font-family:"Noto Sans TC","Microsoft JhengHei","PingFang TC",sans-serif;
+    font-size:15px; line-height:1.7; font-variant-numeric:tabular-nums; }
+  .lab { font-size:12px; color:var(--mute); letter-spacing:.04em; }
+
+  /* ── 示範用的情境切換（正式頁不會有這條）── */
+  .demobar { background:#3f3f46; color:#e4e4e7; padding:8px 16px; font-size:13px;
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .demobar b { color:#fff; font-weight:500; }
+  .demobar button { font:inherit; color:#e4e4e7; background:#52525b; border:1px solid #71717a;
+    border-radius:5px; padding:4px 12px; cursor:pointer; }
+  .demobar button[aria-pressed="true"] { background:#e4e4e7; color:#27272a; border-color:#e4e4e7; }
+  .demobar .note { color:#a1a1aa; margin-left:auto; }
+
+  /* ── 工具列：同報價線上檢視頁 ── */
+  .webbar { position:sticky; top:0; z-index:5; background:#1a1a1a; color:#fff;
+    padding:10px 16px; display:flex; justify-content:space-between; align-items:center; font-size:14px; }
+  .webbar span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:12px; }
+  .webbar a { flex:none; color:#fff; background:#3b82f6; text-decoration:none;
+    padding:8px 16px; border-radius:6px; font-weight:500; }
+
+  .page { background:#fff; max-width:210mm; margin:16px auto; padding:26px 30px 30px;
+    box-shadow:0 2px 12px rgba(0,0,0,.12); }
+
+  /* ── 作廢提示帶：不是塞進表格的一個欄位，是一整條 ──
+       收件人最需要先知道的就是「這張不能用了」。 */
+  .void { display:flex; gap:10px; align-items:baseline; margin:-26px -30px 24px; padding:12px 30px;
+    background:#fef2f2; border-bottom:1px solid #fecaca; color:#b91c1c; font-size:14px; }
+  .void b { font-weight:700; letter-spacing:.02em; }
+  /* 🔴 class 的 display 會蓋掉瀏覽器預設的 [hidden]{display:none} —— 不補這行的話
+     `el.hidden = true` 完全沒作用，非作廢的發票也會掛著那條紅帶。 */
+  .void[hidden] { display:none; }
+
+  .hd { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+  .hd h1 { margin:0; font-size:22px; font-weight:500; letter-spacing:.18em; line-height:1.2; }
+  .hd h1 small { display:block; font-size:11px; letter-spacing:.2em; color:var(--mute);
+    font-weight:400; margin-top:5px; }
+  .hd img { height:44px; }
+
+  /* ── 發票號碼＝這張的身分，給它最大的字 ── */
+  .idno { margin-top:22px; padding-bottom:16px; border-bottom:1px solid var(--hair); }
+  .idno .no { font-size:30px; font-weight:700; letter-spacing:.14em; line-height:1.2; }
+  .idno .date { margin-top:2px; }
+
+  /* ── 資訊：兩欄，手機折成一欄 ── */
+  .kv { display:grid; grid-template-columns:76px 1fr; gap:3px 12px; align-content:start; line-height:1.85; }
+  .kv .k { color:var(--mute); font-size:13px; }
+  .kv .v { color:#222; word-break:break-word; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:18px 32px; margin-top:16px; }
+
+  /* ── 金額：右對齊、合計放大（同報價的 .sum/.grand）── */
+  .sum { margin-top:22px; padding-top:14px; border-top:1px solid var(--hair);
+    display:flex; justify-content:flex-end; }
+  .sum .box { width:min(300px, 100%); }
+  .sum .row { display:grid; grid-template-columns:1fr 120px; align-items:baseline;
+    border-bottom:1px solid var(--hair); padding:6px 0 4px; }
+  .sum .row .l { text-align:right; font-size:12px; letter-spacing:.06em; color:#333; font-weight:500; }
+  .sum .row .v { text-align:right; }
+  .sum .grand { display:grid; grid-template-columns:1fr 140px; align-items:baseline; padding:10px 0 0; }
+  .sum .grand .l { text-align:right; font-size:14px; font-weight:700; }
+  .sum .grand .v { text-align:right; font-size:24px; font-weight:700; }
+
+  /* ── 下載區塊（owner 拍板：不做內嵌預覽）──
+       沒有預覽框，所以動作要自己撐得起版面：按鈕給大一點，檔名／大小放它底下當佐證，
+       讓人按之前知道自己會拿到什麼。 */
+  .doc { margin-top:26px; padding-top:16px; border-top:1px solid var(--hair); }
+  .doc h5 { margin:0 0 12px; font-size:12px; letter-spacing:.08em; font-weight:700; }
+  .acts { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .btn { display:inline-block; text-decoration:none; font-weight:500; border-radius:6px;
+    padding:12px 26px; font-size:15px; }
+  .btn-pri { background:#3b82f6; color:#fff; }
+  .fileline { margin-top:10px; color:var(--mute); font-size:13px; word-break:break-all; }
+
+  .foot { margin-top:26px; padding-top:12px; border-top:1px solid var(--hair);
+    color:var(--mute); font-size:12px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+
+  @media (max-width:640px) {
+    .page { margin:0; padding:20px 16px 24px; box-shadow:none; }
+    .void { margin:-20px -16px 18px; padding:11px 16px; }
+    .cols { grid-template-columns:1fr; gap:14px; }
+    .idno .no { font-size:24px; }
+    .sum { justify-content:stretch; }
+    .sum .box { width:100%; }
+    .acts .btn { flex:1 1 auto; text-align:center; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══ 示範用，正式頁不會有這條 ══ -->
+<div class="demobar">
+  <b>示範頁</b>
+  <button type="button" data-case="pdf" aria-pressed="true">電子發票（PDF）</button>
+  <button type="button" data-case="img" aria-pressed="false">影像（拍照上傳）</button>
+  <button type="button" data-case="void" aria-pressed="false">已作廢</button>
+  <span class="note">假資料。欄位白名單見 docs/INVOICE_SHARE_PLAN.md §3.5</span>
+</div>
+
+<div class="webbar">
+  <span>發票　<span id="bar-no">AB-12345678</span></span>
+  <a href="#" onclick="return false">下載</a>
+</div>
+
+<div class="page" id="page">
+
+  <div class="void" id="void" hidden>
+    <b>此發票已作廢</b>
+    <span>如需重新開立，請與我們聯繫。</span>
+  </div>
+
+  <div class="hd">
+    <h1>發票<small>INVOICE</small></h1>
+    <img src="/img/originsun-logo.webp" alt="源日影像" onerror="this.style.display='none'">
+  </div>
+
+  <div class="idno">
+    <div class="lab">發票號碼</div>
+    <div class="no" id="f-no">AB-12345678</div>
+    <div class="date lab">開立日期　<span id="f-date">2026-09-08</span></div>
+  </div>
+
+  <div class="cols">
+    <div class="kv">
+      <span class="k">買受人</span><span class="v" id="f-title">示範股份有限公司</span>
+      <span class="k">統一編號</span><span class="v" id="f-taxid">12345678</span>
+    </div>
+    <div class="kv">
+      <span class="k">品項</span><span class="v" id="f-item">影片製作</span>
+      <span class="k">發票種類</span><span class="v" id="f-kind">電子發票</span>
+    </div>
+  </div>
+
+  <div class="sum">
+    <div class="box">
+      <div class="row"><span class="l">銷售額（未稅）</span><span class="v" id="f-ex">180,000</span></div>
+      <div class="row"><span class="l">營業稅 5%</span><span class="v" id="f-tax">9,000</span></div>
+      <div class="grand"><span class="l">合計</span><span class="v" id="f-total">189,000</span></div>
+    </div>
+  </div>
+
+  <div class="doc" id="doc">
+    <h5>發票檔案</h5>
+    <div class="acts">
+      <a class="btn btn-pri" href="#" onclick="return false">下載發票</a>
+    </div>
+    <div class="fileline" id="f-file">20260908_示範股份有限公司_電子發票.pdf　214 KB</div>
+  </div>
+
+  <div class="foot">
+    <span>源日影像製作有限公司　統一編號 90371657</span>
+    <span>本連結僅供本張發票之收件方使用</span>
+  </div>
+</div>
+
+<script>
+// ── 以下全部是示範用的假資料與切換，正式頁不會有 ──
+// 沒有預覽之後，情境之間的差別只剩「作廢帶在不在」與「檔名／大小」。
+const CASES = {
+  pdf:  { void:false, kind:"電子發票", file:"20260908_示範股份有限公司_電子發票.pdf　214 KB" },
+  img:  { void:false, kind:"紙本發票", file:"20260908_示範股份有限公司_存證聯.jpg　1.2 MB" },
+  void: { void:true,  kind:"電子發票", file:"20260908_示範股份有限公司_電子發票.pdf　214 KB" },
+};
+
+function show(key) {
+  const c = CASES[key];
+  document.getElementById("void").hidden = !c.void;
+  document.getElementById("f-kind").textContent = c.kind;
+  document.getElementById("f-file").textContent = c.file;
+  for (const b of document.querySelectorAll(".demobar button"))
+    b.setAttribute("aria-pressed", String(b.dataset.case === key));
+}
+for (const b of document.querySelectorAll(".demobar button"))
+  b.addEventListener("click", () => show(b.dataset.case));
+show("pdf");
+</script>
+</body>
+</html>

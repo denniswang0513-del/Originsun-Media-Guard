@@ -19,8 +19,9 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import FileResponse, PlainTextResponse
 
 from core.version import read_local_version
 
@@ -188,7 +189,6 @@ def _serve_public_page(filename: str):
     path = os.path.join(_FRONTEND_DIR, filename)
 
     async def _page():
-        from starlette.responses import FileResponse, PlainTextResponse
         if not os.path.isfile(path):
             return PlainTextResponse(f"{filename} 未同步到本機", status_code=503)
         return FileResponse(path, media_type="text/html")
@@ -200,6 +200,21 @@ def _serve_public_page(filename: str):
 # （publish 的同步清單、nginx 的 location 都對齊那一份，並有測試釘住相依閉包）。
 for _page_file in _PUBLIC_PAGES:
     _serve_public_page(_page_file)
+
+
+# 電子發票分享的短網址（owner 2026-09-10「master 關機也拿得到」）。
+# master 的 main.py 有同一條；兩邊回的是**同一個檔**，頁面自己從 location.pathname
+# 取短碼再打 /api/v1/crm/public/invoice-file/{token}/meta（那支掛在 public_router 上）。
+# 掛根路徑是為了短 —— 走 router 前綴會讓寄給客戶的網址又長回去。
+@app.get("/e/{code}", include_in_schema=False)
+async def _short_invoice_file(code: str, request: Request):
+    from core.public_access import surface_gate
+    await surface_gate(request)          # 公開區「發票影像分享」關閉 → 404
+    path = os.path.join(_FRONTEND_DIR, "invoice-file.html")
+    if not os.path.isfile(path):
+        return PlainTextResponse("invoice-file.html 未同步到本機", status_code=503)
+    return FileResponse(path, media_type="text/html",
+                        headers={"Cache-Control": "no-store"})
 
 for _sub in _PUBLIC_MODULE_DIRS:
     _d = os.path.join(_FRONTEND_DIR, *_sub.split("/"))

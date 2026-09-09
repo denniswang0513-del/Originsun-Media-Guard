@@ -668,11 +668,18 @@ window._invShareLink = async function (btn) {
     if (!_selectedId) return;
     try {
         const d = await _fetch(`/invoices/${_selectedId}/share`, { method: 'POST' });
-        // 後端只回 path：網址要用「使用者現在是從哪個網域進來的」組（內網 IP、
-        // localhost、還是 cloudflared 的對外網域），寫死任何一個都會寄出打不開的連結。
+        // 這裡原本寫死 location.origin，理由是「後端只回 path，網址只能用使用者現在是從哪個
+        // 網域進來的組（內網 IP、localhost、還是 cloudflared 的對外網域），寫死任何一個都會
+        // 寄出打不開的連結」。那個顧慮沒有作廢，只是換人回答：後端設了對外網址就回絕對網址、
+        // 沒設才回相對路徑（＝維持上面那個行為）。所以一律用 d.url —— 從開發機 8001 按複製也
+        // 不會再寄出一條只有這台機器打得開的網址。`d.path` 是舊後端的退路（CF 給 .js 四小時
+        // 快取，新舊會同時在線一輪）。
         // 複製「檔名 換行 連結」兩行（owner 指定）—— 貼進信裡對方一眼知道那是什麼，
         // 光一條網址看不出是哪張發票。
-        const url = location.origin + d.path;
+        // 🔴 /share 是冪等的，而且每按一次就把客戶那頁看到的發票資訊重新定稿一次 ——
+        // 「複製連結」本身就是「更新客戶看到的內容」，不要再加一顆「更新」鈕。
+        const raw = String(d.url || d.path || '');
+        const url = raw.startsWith('http') ? raw : location.origin + raw;
         await copyText(`${d.file_name || ''}\n${url}`.trim(), btn);
         await loadInvoices();
         // 等 copyText 的「已複製」回饋（1.5s）走完再重畫這一區，否則按鈕會在
