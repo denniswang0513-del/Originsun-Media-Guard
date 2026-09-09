@@ -596,6 +596,11 @@ _chat_partial: dict = {}
 # quotation_id → 這一輪走到哪：'queued'（卡在閘門，前面還有別的 AI 工作）／'running'（claude 真的在跑）。
 # 前端拿它決定「處理中…」要怎麼講 —— **都是真實訊號**，不做假的進度條。
 _chat_stage: dict = {}
+# 串流回呼多久才更新一次 _chat_partial。前端一秒讀一次，所以再密也沒人看得到；
+# 不節流的話一輪上千個 delta 每個都 join 全文再從頭掃 reply，是 O(n²) 的白工。
+_PARTIAL_PUSH_EVERY_SEC = 0.25
+# claude 失敗時往回帶多少 stderr（夠看出原因，又不會把整頁 log 灌進 UI）
+_ERR_DETAIL_CHARS = 300
 
 
 async def _call_claude_stream(prompt: str, quotation_id: str, model: str) -> tuple:
@@ -639,7 +644,7 @@ async def _call_claude_stream(prompt: str, quotation_id: str, model: str) -> tup
         # 一輪上千個 delta，但前端一秒才讀一次 —— 每個 delta 都 join 全文再從頭掃 reply
         # 是 O(n²) 的白工。節流到 4 Hz，畫面看起來一樣在動。
         now = time.monotonic()
-        if now - last_push[0] < 0.25:
+        if now - last_push[0] < _PARTIAL_PUSH_EVERY_SEC:
             return
         last_push[0] = now
         _chat_partial[quotation_id] = quote_chat.partial_reply("".join(chunks))
@@ -656,7 +661,7 @@ async def _call_claude_stream(prompt: str, quotation_id: str, model: str) -> tup
         )
 
     if rc != 0:
-        detail = (err or b"")[:300].decode("utf-8", "replace").strip()
+        detail = (err or b"")[:_ERR_DETAIL_CHARS].decode("utf-8", "replace").strip()
         return None, f"claude 結束碼={rc}；{detail}"
 
     # 收尾優先用 result 那一行（讀的時候就撈好了）；沒有就把 delta 串起來

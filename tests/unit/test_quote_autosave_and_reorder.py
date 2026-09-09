@@ -39,7 +39,7 @@ def test_autosave_is_new_quote_only_and_survives_a_click_away():
     touch = js_func_body(js, "function _autoTouch()")
     assert "if (!_autoOn) return;" in touch
     assert "if (!_editingId) { _autoQueue(_autoCreateDraft); return; }" in touch
-    assert "setTimeout(() => _autoQueue(_autoFlush), 1200)" in touch, "建好之後改欄位＝debounce PUT"
+    assert "setTimeout(() => _autoQueue(_autoFlush), AUTOSAVE_DEBOUNCE_MS)" in touch
 
     close = js_func_body(js, "async function closeModal()")
     assert "_autoQueue(_autoFlush)" in close and "await pending" in close, "關窗前把沒送的補送完"

@@ -465,6 +465,9 @@ async def _run_daily_master_task(task_key: str, hour_key: str, body) -> None:
 
 # ── 報價助理的截圖兜底清理（docs/QUOTE_ASSISTANT_PLAN.md §5.4）──────────
 
+_SWEEP_BATCH = 200      # 一天掃這麼多張就夠（只挑「還真的有截圖」的逾期草稿）
+
+
 async def _quote_chat_image_sweep() -> None:
     """草稿放超過 N 天還沒寄出 → 也把對話裡的截圖清掉（settings `finance.quote_chat_image_days`，預設 30）。
 
@@ -493,7 +496,7 @@ async def _quote_chat_image_sweep() -> None:
                     #    再被撈一次，把 limit 的名額佔滿，新過期的那些就永遠輪不到。
                     cast(CrmQuotation.chat, Text).like("%paste:%"),
                     CrmQuotation.updated_at < cutoff,
-                ).limit(200)
+                ).limit(_SWEEP_BATCH)
             )).scalars().all()
         total = 0
         for qid in rows:

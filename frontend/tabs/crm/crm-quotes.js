@@ -533,6 +533,12 @@ let _chatGen = 0;          // 開窗世代：關窗／換一張報價後，舊�
 let _chatPartial = '';     // 串流到目前為止的 reply（後端 GET /chat 的 partial）
 let _chatStage = '';       // 'queued'（卡在閘門）／'running'（claude 真的在跑）
 let _chatSince = 0;        // 這一輪按下送出的時間（等待文字要顯示秒數）
+// 一輪最久等多久才放棄。後端 `_CLAUDE_TIMEOUT_SEC` 是 180 秒，前面還可能卡在
+// `_QUOTE_CHAT_GATE`（只有 2 個位子）—— 跟 180 一樣長的話，一排隊就一定先在前端
+// 喊逾時，而那則回覆其實還在路上、之後也不會再被套用（重開時 _chatApplied 直接跳到底）。
+const CHAT_POLL_GIVE_UP_MS = 400000;   // 排隊 180 ＋ 跑 180 ＋ 餘裕
+const CHAT_POLL_EVERY_MS = 1000;       // 串流要看得出來在動
+const AUTOSAVE_DEBOUNCE_MS = 1200;     // 打字停下來多久才送出那一發 PUT
 const _CHAT_MODEL_KEY = 'crm_quote_chat_model';   // 這台瀏覽器選的模型（後端仍會過白名單）
 
 function _chatBubble(m) {
@@ -664,10 +670,8 @@ async function _loadChat() {
 
 async function _pollChat(expect, gen) {
     const started = Date.now();
-    // 後端一輪最久 _CLAUDE_TIMEOUT_SEC=180 秒，前面還可能排隊（閘門只有 2）——
-    // 跟它一樣長的話一排隊就先在前端喊逾時，那一則的 patch 之後也不會再被套用
-    while (_chatBusy && gen === _chatGen && Date.now() - started < 400000) {
-        await new Promise(r => setTimeout(r, 1000));   // 串流要看得出來在動，1 秒一問
+    while (_chatBusy && gen === _chatGen && Date.now() - started < CHAT_POLL_GIVE_UP_MS) {
+        await new Promise(r => setTimeout(r, CHAT_POLL_EVERY_MS));
         if (gen !== _chatGen || !_editingId) return;
         let d;
         try { d = await _fetch(`/quotations/${_editingId}/chat`); } catch (_) { continue; }
@@ -815,7 +819,7 @@ function _autoTouch() {
     _autoDirty = true;
     _autoNote('有還沒存的變更…');
     clearTimeout(_autoTimer);
-    _autoTimer = setTimeout(() => _autoQueue(_autoFlush), 1200);
+    _autoTimer = setTimeout(() => _autoQueue(_autoFlush), AUTOSAVE_DEBOUNCE_MS);
 }
 
 /** 草稿建起來之後，客戶／連結案就定了（PUT 報價改不動案子）——鎖起來免得改了以為有效。

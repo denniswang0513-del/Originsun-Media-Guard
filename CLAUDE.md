@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v2.4.286（2026-09-02）<!-- publish_update.py 自動維護，勿手改 -->
+> **版本**: v2.4.404（2026-09-09）<!-- publish_update.py 自動維護，勿手改 -->
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe main.py`
@@ -1266,6 +1266,15 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`services/leave_service.py`](services/leave_service.py) | 假勤的 I/O：evaluate（送單前的錯誤／警告／餘額）、核准時從時數帳扣、序列化 | 送單與 preview 走**同一支** `hours_from_body`／`evaluate`，兩條路不能各算一次 |
 | [`core/milestone_logic.py`](core/milestone_logic.py) ＋ [`services/milestone_service.py`](services/milestone_service.py) | 每週專案里程碑：週的推導（延自上週／過期／延到下週）、彈窗的週 payload、整批 save | `save_week` 是**整批覆寫**：沒帶的欄位不准寫（舊分頁會清掉別人剛填的）；`_hours_by_project` 只算 `hours>0`（計畫列不算） |
 | `services/timesheet_self.py` 的合併同案（`merge_day`／`undo_merge`） | 同案同分類同階段的列併成一列＋整列快照可復原 | 規則在 `core.hr_logic.merge_plan`（純函式）；沒有專案的列不併；`_SNAP_COLS` 要涵蓋 `Timesheet` 全部欄位，漏一欄復原就靜默丟資料 |
+| [`core/quote_chat.py`](core/quote_chat.py) | 對話式完成報價的**純規則**：組提示（草稿快照／對話歷史／價目／截圖路徑）、把 claude 回的東西正規化成固定形狀、串流中從半截 JSON 撈 reply、模型別名白名單、清圖時把 token 換掉 | 無 I/O；**不決定價格、不算稅**（金額走 `_calc_quotation`）；提示裡不准出現 `internal_cost` |
+| [`core/price_book.py`](core/price_book.py) | 報價價目的**純規則**：去重鍵（吃全形／空白差異）、「0 元是待定價不是價」、進提示的那幾行 | 無 I/O；只有**寄出**的報價會收價（草稿還在談，而且自動存每 1.2 秒一發） |
+| [`frontend/js/shared/quote-patch.js`](frontend/js/shared/quote-patch.js) | 把 AI 回的 patch 套進草稿（add／update／remove／換大項目＋備註追加） | 零 import 葉節點，桌機手機共用；**編號＝攤平後的順序且跳過沒描述的空白列**，跟後端 `quote_chat.item_lines` 同一套 |
+| [`frontend/js/shared/quote-wait.js`](frontend/js/shared/quote-wait.js) | 等 AI 時那句「處理中…」（跳動的點、秒數、排隊中） | 零 import 葉節點；只講**真的**狀態，不做假進度條 |
+| [`frontend/js/shared/quote-delete.js`](frontend/js/shared/quote-delete.js) | 刪報價的確認規則（草稿按 OK；已寄送／已簽核要打字輸入案名） | 零 import 葉節點；**三個刪除入口**（報價分頁／專案頁子頁／手機卡片）都要走它 |
+| `routers/crm/quotes.py` 的對話／價目段 | `POST`／`GET /quotations/{id}/chat`（背景跑 claude、串流 partial、stage）、`/price-items*`（清單／改／刪／歷史匯入／比對）、寄出時清截圖與收價 | **只算 patch、不直接改項目**（寫入者是前端）；互動式用自己的 `_QUOTE_CHAT_GATE`，不跟夜間 SEO 批次搶 |
+| `core/subproc.run_stream` | 逐行交付 stdout 的 subprocess（串流用） | stdin／stderr／stdout 各一條執行緒；**逾時交給 `p.wait()`**，不能只在「收到一行之後」檢查 deadline |
+| [`frontend/m/views/quote-chat.js`](frontend/m/views/quote-chat.js) | 手機版報價助理（全螢幕對話、拍／選截圖、串流、用價目補上） | 跟桌機同一組後端與同一支 patch 純函式；**這邊就是寫入者**，PUT 要把後端無條件覆寫的四個欄位原值帶回 |
+
 
 ## 不要動的地方
 
@@ -1327,3 +1336,11 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **計畫列（`status=plan`）改內容一定要帶著 plan**：格子的 PUT 靠 `tr.dataset.plan → body.plan`、後端靠 `apply_update` 沿用；少一邊，員工改個字那張卡就變「草稿（沒時數）」並被「專案紀錄未完成」提醒抓到（提醒只找 pending，這是刻意的）。
 - **`<tr class="ts-mine-row">` 那個 class 字串不能改**（test_ts_shared_components 釘「列 html 只有一份」是找這個字串）：計畫列的藍底走 `data-plan` 屬性選擇器。
 - **週記心情選單掛在 body、`position:fixed`**：捲動／resize 要關掉，不然它脫離愛心浮在原地；別再塞回標題列（會被右邊界裁）。
+- **報價 patch 的編號＝「攤平後、跳過沒描述的空白列」**：後端 `quote_chat.item_lines` 只看得到 DB 裡的項目（存檔前 `filter(it => it.description)` 過濾過），編輯器裡卻隨時有空白列。`quote-patch.flattenForPatch` 跟著濾掉，兩邊才是同一套；不濾的話 AI 說「改第 3 項」會落在第 2 項、而且改到的是存檔時會被丟掉的那列。送出前一定要先把畫面落地（桌機 `_persistNow`、手機 `save()`），否則順序對不上。
+- **`update_quotation` 對 `tax_rate`／`final_price`／`payment_stages`／`terms` 是無條件覆寫**（那幾行不看 `model_fields_set`，跟 status／quote_date／valid_until／discount／spec 不同）：任何 PUT 少帶一個就是靜默清掉它。手機版 `quote-chat.js` 的 `save()` 因此要把載進來的原值原樣帶回。
+- **`_autoOn` 只管「打字要不要 debounce」**：編輯既有報價時它是關的（怕靜默改到舊資料）。所有「動過草稿就要立刻落地」的路徑（AI patch／用價目補上／送出前同步）一律走 `_persistNow`，它**無條件 PUT**、不看 `_autoOn`／`_autoDirty` —— 曾經寫過照旗標分岔的版本，在「新增」那條路上完全不存。
+- **`frontend/tabs/crm/crm-quotes.html` 的隱藏 `<textarea id="quote-f-terms">` 是相容殼**：CF 給 `.js` 4 小時快取、html 即時，發版後會出現「新 html ＋ 舊 crm-quotes.js」，而舊的 `openModal` 直接讀它 —— 元素不在＝TypeError＝報價彈窗打不開。**發版滿一輪之後**連同 `test_quote_autosave_and_reorder` 那條斷言一起刪。
+- **原始碼裡不要出現 `image` 加斜線星號**（HTML 的 `accept` 屬性）：`tests/unit/_srcscan.js_code_only` 會把它當成區塊註解開頭，到下一個「星號斜線」之間的程式碼整段消失，掃原始碼的測試就看不到那些函式（手機版的 `save()` 一度整支不見）。`accept` 改在 JS 裡設。
+- **`--model <值>` 會變成 claude CLI 的參數**：前端送什麼就接什麼等於讓瀏覽器往 CLI 塞旗標，一律過 `quote_chat.pick_model()` 的白名單。
+- **`fire()` 不是 `background.add_task`**：FastAPI 的 background 串是**串行**的，寄出報價時第一支是 Playwright 產 PDF，它慢或炸掉，後面的清截圖與收價就整串不跑而且靜默。
+- **`_load_items()` 回的已經是 dict**（它自己套過 `_item_to_dict`）：再包一次會 AttributeError，包在背景任務裡就是無聲失敗。

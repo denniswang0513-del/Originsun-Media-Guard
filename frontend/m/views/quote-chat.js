@@ -32,6 +32,10 @@ const flattenQuoteGroups = _QA.flattenQuoteGroups
     || ((groups) => (groups || []).flatMap(g => g.items.map(it => ({ ...it, group_name: g.name }))));
 
 const OV_ID = 'qt-chat';
+// 跟桌機同一組數字（crm-quotes.js 有一份一樣的說明）：後端一輪最久 180 秒，
+// 前面還可能卡在只有 2 個位子的閘門 —— 前端等太短就會先喊逾時，而那則回覆還在路上。
+const POLL_GIVE_UP_MS = 400000;
+const POLL_EVERY_MS = 1000;
 let S = null;          // 這次對話的狀態（關掉就丟）
 
 const flat = () => flattenQuoteGroups(S.groups);
@@ -159,10 +163,8 @@ async function applyNew() {
 
 async function poll(expect, gen) {
     const t0 = Date.now();
-    // 後端一輪最久 _CLAUDE_TIMEOUT_SEC=180 秒，前面還可能排隊（閘門只有 2）——
-    // 這裡跟 180 秒一樣長的話，一排隊就一定先在前端喊逾時，而那則回覆其實還在路上
-    while (S && S.busy && gen === S.gen && Date.now() - t0 < 400000) {
-        await new Promise(r => setTimeout(r, 1000));
+    while (S && S.busy && gen === S.gen && Date.now() - t0 < POLL_GIVE_UP_MS) {
+        await new Promise(r => setTimeout(r, POLL_EVERY_MS));
         if (!S || gen !== S.gen) return;
         let d;
         try { d = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(S.q.id)}/chat`); }
