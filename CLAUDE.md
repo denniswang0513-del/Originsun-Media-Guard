@@ -1350,3 +1350,5 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **`public_quote_html`／`public_quote_pdf` 在 `public_router` 上＝對外曝露面**：那個 router 是 NAS 對外容器唯一掛的東西。加／改端點要同步兩支白名單測試（`test_media_log_public_router` 的 `EXPECTED`、`test_public_surface` 的 `EXPECTED_API`），而且兩支都要自己 `await surface_gate(request)` —— master 的 `/q/{code}` 有擋一次，但 NAS 那條沒有經過 `main.py`。
 - **快照檔名必須是 32 hex ＋ 2-5 碼副檔名**：`core.assets_host._SAFE_NAME` 是圖床唯一的刪除路徑，名字不合它的規矩＝重新生成時舊快照刪不掉，一張一張永遠躺在 NAS 上而且舊網址還通（客戶可能拿到過期版本）。
 - **報價單是定稿文件，不是活的頁面**（owner 2026-09-10）：`/q/{code}` 送的是生成好的檔，不即時重算。改回「即時渲染」會同時打掉兩件事 —— 客戶手上那份會隨你改東西靜默變動，而且對外那條路又綁回 master 開機。即時渲染只保留給「還沒生成過的舊連結」（`_live_quote_fallback`），而且它會順手補生成一份。
+  **三個入口**（報價分頁／專案頁的報價子頁／手機卡片）都編得動報價，所以三個都要顯示 `pdf_state.label`
+  ——漏掉的那個不會報錯，只會讓人改完毫無察覺、客戶繼續拿到舊版（同 `quote-delete.js` 那條「三個入口」的理由）。

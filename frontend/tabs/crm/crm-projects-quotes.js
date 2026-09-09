@@ -6,9 +6,17 @@ import { crmFetch as _fetch, esc as _esc, fmtNum, quotePdfFilename } from './crm
 import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 import { authDownload } from '../../js/shared/utils.js';
 import { confirmQuoteDelete } from '../../js/shared/quote-delete.js';
+import { waitingText } from '../../js/shared/quote-wait.js';
 
 // 刪除報價仍是管理員限定（RBAC 稽核第二批）—— 不是管理員就別畫那顆鈕
 const _isAdmin = () => (window._accessLevel || 0) >= 3;
+/** 生成報價單的鑰匙：鏡射後端 `_check_quotes_auth`（管理員 ‖ crm_quotes）。
+ *  走命名空間取，理由同 permDeniedMsg —— 舊快取的 crm-utils 沒有的話 named import 會炸整頁。 */
+const _canQuote = () => _isAdmin() || !!_U.hasModule?.('crm_quotes');
+// 草稿的狀態字。這個檔本來就寫死它（_qBadge 的 known），收成一個常數至少只寫死一處。
+const _DRAFT = '草稿';
+// 生成一份要 5–15 秒（master 開一顆 Chromium 畫版面），跟 AI 助理那一輪不是同個量級
+const _GEN_SECONDS = [5, 15];
 import { state, callbacks, PRESALE_STATUSES } from './crm-projects-state.js';
 import { _badge } from './crm-projects-core.js';
 
@@ -17,7 +25,7 @@ let _detailQuote = null;   // 目前展開那版的完整報價（PDF 檔名要�
 
 function _qBadge(status) {
     const s = status || '草稿';
-    const known = ['草稿', '已寄送', '已簽核', '已拒絕'];
+    const known = [_DRAFT, '已寄送', '已簽核', '已拒絕'];
     const cls = known.includes(s) ? `crm-badge crm-quote-badge-${s}` : 'crm-badge';
     return `<span class="${cls}">${_esc(s)}</span>`;
 }
@@ -116,6 +124,16 @@ async function _renderQuoteDetail(quoteId) {
             ? stages.map(s => `${_esc(s.label)} ${s.pct}%`).join(' → ')
             : '';
 
+        // 客戶手上那份的狀態（owner 2026-09-10「生成報價單」）。這一頁**編得動報價**
+        // （上面就有「編輯」），改完客戶那份就過期了 —— 沒有這句話的話，你要切到報價分頁
+        // 才看得出來。文案是後端組好的（core/quote_snapshot.state），這裡只負責顯示。
+        const _st = q.status !== _DRAFT ? (q.pdf_state || null) : null;
+        const genRow = _st ? `
+            <div class="quote-gen-row">
+              ${_canQuote() ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="pq-gen-btn" onclick="window._pqGenerate('${q.id}')">生成報價單</button>` : ''}
+              <span id="pq-gen-note" class="quote-gen-note${_st.stale ? ' warn' : ''}">${_esc(_st.label)}</span>
+            </div>` : '';
+
         el.innerHTML = `
           <div class="pq-detail-card">
             <div class="pq-detail-header">
@@ -127,6 +145,8 @@ async function _renderQuoteDetail(quoteId) {
                 ${_isAdmin() ? `<button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._pqDelete('${q.id}')">刪除</button>` : ''}
               </div>
             </div>
+
+            ${genRow}
 
             <div class="pq-info-row">
               <span>狀態 ${_qBadge(q.status)}</span>
@@ -186,6 +206,28 @@ function initQuoteHandlers() {
         const name = quotePdfFilename(q, q.project_name || proj?.name || '',
                                       q.client_short_name || proj?.client_short_name || '');
         await authDownload('/api/v1/crm/quotations/' + id + '/pdf', name, '下載 PDF');
+    };
+
+    window._pqGenerate = async (id) => {
+        const btn = document.getElementById('pq-gen-btn');
+        const note = document.getElementById('pq-gen-note');
+        const since = Date.now();
+        // 按下去畫面靜止好幾秒會被當成當掉 —— 借報價助理那支會跳的等待字（同一份實作）
+        const paint = () => { if (note) note.textContent = waitingText(Date.now() - since, '', _GEN_SECONDS); };
+        if (note) note.classList.remove('warn');
+        paint();
+        const timer = setInterval(paint, 1000);
+        if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
+        try {
+            await _fetch('/quotations/' + id + '/generate', { method: 'POST' });
+            if (state.selectedId) loadProjectQuotes(state.selectedId);   // 整塊重畫，狀態句跟著換
+        } catch (e) {
+            alert(_U.permDeniedMsg?.('報價', e) ?? ('生成報價單失敗：' + e.message));
+            if (note) note.textContent = '';
+        } finally {
+            clearInterval(timer);
+            if (btn) { btn.disabled = false; btn.textContent = '生成報價單'; }
+        }
     };
 
     window._pqDelete = async (quoteId) => {

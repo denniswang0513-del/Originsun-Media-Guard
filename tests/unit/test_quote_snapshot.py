@@ -195,6 +195,27 @@ def test_settings_post_only_writes_the_fields_it_was_given():
     assert 'if "quotes_root" in body:' in body and 'if "quotes_public_base" in body:' in body
 
 
+def test_all_three_quote_surfaces_show_the_state():
+    """報價有三個入口（報價分頁／專案頁的報價子頁／手機卡片），三個都編得動報價。
+
+    🔴 編得動卻看不到「客戶那份已經過期了」＝改完沒有任何提示，要切到別的分頁才發現。
+    同 quote-delete 那條「三個入口都要走同一支」的理由 —— 漏掉的那個入口不會報錯，
+    只會安靜地讓客戶拿到舊版。狀態句一律用後端的 `pdf_state.label`，前端不拼中文。
+    """
+    from tests.unit._srcscan import js_code_only
+    surfaces = {
+        "frontend/tabs/crm/crm-quotes.js": "quote-gen-note",
+        "frontend/tabs/crm/crm-projects-quotes.js": "pq-gen-note",
+        "frontend/m/views/quotes.js": "q.pdf_state",
+    }
+    for path, marker in surfaces.items():
+        js = js_code_only(repo_src(path))
+        assert marker in js, path
+        assert "pdf_state" in js and "generate'" in js.replace('"', "'").replace("`", "'"), path
+        for hardcoded in (QS.LABEL_NONE, QS.LABEL_STALE):
+            assert hardcoded not in js, f"{path}：中文正本在 core/quote_snapshot.state，前端不准自己拼"
+
+
 def test_column_and_startup_migration_both_exist():
     """加欄位要兩處同時有：model 與 main.py startup 的 ADD COLUMN 清單。
     只加 model 的話，既有的生產資料庫永遠不會長出那一欄（而且是靜默的）。"""
