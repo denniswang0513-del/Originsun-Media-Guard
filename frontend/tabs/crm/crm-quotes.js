@@ -25,6 +25,7 @@ import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊�
 const _isAdmin = () => (window._accessLevel || 0) >= 3;
 import { authDownload, copyText } from '../../js/shared/utils.js';
 import { applyQuotePatch } from '../../js/shared/quote-patch.js';
+import { confirmQuoteDelete } from '../../js/shared/quote-delete.js';
 import { ensurePasteBase, renderRich, pasteThumbs } from '../../js/shared/paste-image.js';
 
 // ── State ────────────────────────────────────────────────────
@@ -986,7 +987,9 @@ async function saveQuotation() {
 }
 
 async function deleteQuotation(q) {
-    if (!confirm(`確定刪除報價 Q-${q.project_name}-v${q.version}？`)) return;
+    // 確認規則跟手機版同一份（js/shared/quote-delete.js）：草稿按 OK 就好，
+    // 已寄送／已簽核要打字確認案名 —— 那些刪掉會讓客戶手上的 /q/{code} 變 404
+    if (!confirmQuoteDelete(q)) return;
     try {
         await _fetch(`/quotations/${q.id}`, { method: 'DELETE' });
         closeDetail();

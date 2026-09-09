@@ -112,8 +112,9 @@ AI：更新了。還缺付款階段，照慣例 3:4:3？
 
 - 後端：`POST /quotations/{id}/chat`（背景跑、前端輪詢，同 bulletin），
   patch 套用寫成純函式 `core/quote_chat.py`（可單元測，不碰 I/O）。
-- 前端：報價彈窗加一個對話面板。
-- 手機版走同一支 API —— 在車上用手機把報價聊完，很符合實際場景。
+- 前端：報價彈窗加一個對話面板（桌機）；手機版 `/m/` 報價卡上一顆「AI 助理」開全螢幕對話。
+- **兩邊同一組後端**（`/quotations/{id}/chat`、`/price-items/match`）、同一支 patch 純函式
+  （`js/shared/quote-patch.js`）—— 介面兩套、規則一份。
 
 ---
 
@@ -273,6 +274,16 @@ CLI 的 `--model` 吃別名（`fable`／`opus`／`sonnet`／`haiku`）或完整�
 
 **P1／P1.5／P2／P3／P4 全部已實作（2026-09-09）。**
 
+### 手機版（2026-09-09，owner 拍板「改做手機版，跟手機版的報價頁面整合」）
+`frontend/m/views/quote-chat.js`：報價卡上一顆「AI 助理」→ 全螢幕對話。
+貼訊息或**拍／選截圖**（走 `paste_upload` 的 hires 副本）、串流顯示、摘要列與
+「用價目補上」都有；套完 patch 直接整包 PUT 回去（手機這邊就是寫入者）。
+
+為什麼先做手機而不是 Discord（owner 2026-09-09 評估後拍板）：
+殼／API／權限／貼圖全都現成 → 1 天 vs 2–3 天；資料不出系統；不用養一個 bot、
+不用讓 master 24/7 撐 gateway、不用把 discord.py 塞進 prod 的 python_embed。
+Discord 仍在附錄 A —— 它接的是同一個 `chat` 欄位，先做手機版不浪費任何工。
+
 ### 先做這件事（半天，不用寫碼）
 把常報的品項整理成報價範本。3 個範本 × 3 項撐不起自動帶價，
 前幾張報價 AI 會問很多 —— 手上先有一份，第一天就順很多。
@@ -302,6 +313,11 @@ CLI 的 `--model` 吃別名（`fable`／`opus`／`sonnet`／`haiku`）或完整�
    那兩條路改走 `_saveAiChange()`：使用者按出來的、畫面也變了，不寫回去才是丟資料。
 4. 🔴 **`--model <值>` 是命令列參數**：前端送什麼就接什麼等於讓瀏覽器往 CLI 塞旗標。
    一律過 `quote_chat.pick_model()` 的白名單。
+5. 🔴 **`update_quotation` 對 `tax_rate`／`final_price`／`payment_stages`／`terms` 是無條件覆寫**
+   （那幾行不看 `model_fields_set`）——手機那支 PUT 少帶一個欄位就是靜默清掉它。
+6. 🔴 **原始碼裡不要出現 `image` 加斜線星號**：`_srcscan.js_code_only` 會把它當成區塊註解
+   的開頭，到下一個「星號斜線」之間的程式碼整段消失，掃原始碼的測試就看不到那些函式。
+   （手機那支的 `accept` 因此改成在 JS 裡設。）
 - ✅ 主力 LLM ＝ claude（截圖需求使 Ollama 不可行）
 - ✅ 寄出永遠是人按的，對話介面不提供寄出
 

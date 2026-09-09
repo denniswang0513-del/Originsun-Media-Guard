@@ -17,6 +17,8 @@
 import { quoteTotals, parsePaymentStages, paymentStagesToText } from '/js/shared/quote-amounts.js';
 import * as _QA from '/js/shared/quote-amounts.js';
 import { mfetch, mdownload, toast, esc, money, fmtDate, todayLocal, quotePdfFilename } from '../shell.js';
+import { confirmQuoteDelete } from '/js/shared/quote-delete.js';
+import { openQuoteChat } from './quote-chat.js';
 // 🔴 Cloudflare 給 .js 4 小時瀏覽器快取：新分頁 js 配舊 quote-amounts.js 時，named import 拿不到的 export 會讓
 //    整個模組載入失敗。新 export 先用命名空間拿、缺就退回同款本地實作（reference_cloudflare_js_cache：契約要相容一輪；
 //    快取過期後這兩條退路可以拿掉）。預覽刻意不在 shell.js 加新 export：走既有 mfetch＋端點 ?as=json。
@@ -56,11 +58,17 @@ function cardHtml(q) {
     const btns = transitions(q.status).map(t =>
         `<button type="button" class="m-btn sm w ${t.danger ? 'danger' : 'pri'}" style="${BTN}" data-id="${esc(q.id)}" data-to="${esc(t.to)}"${t.ask ? ' data-ask="1"' : ''}>${esc(t.label)}</button>`).join('')
         + (isAdmin() ? `<button type="button" class="m-btn sm" style="${BTN}" data-edit="${esc(q.id)}">編輯</button>` : '')
+        // AI 助理：貼客戶訊息／截圖，讓它把項目整理出來（docs/QUOTE_ASSISTANT_PLAN.md）。
+        // 會改這張報價的項目，所以跟「編輯」同一把鑰匙
+        + (isAdmin() ? `<button type="button" class="m-btn sm pri" style="${BTN}" data-ai="${esc(q.id)}">AI 助理</button>` : '')
         // 預覽：只把版面畫給你確認，不建立、不存檔（owner 2026-09-07「預覽點的時候讓我確認內容，不用建立報價單」）
         + (sent ? '' : `<button type="button" class="m-btn sm" style="${BTN}" data-preview="${esc(q.id)}">預覽</button>`)
         + (sent ? `<button type="button" class="m-btn sm" style="${BTN}" data-pdf="${esc(q.id)}">PDF</button>` : '')
         // 線上檢視連結：已有就誰都能複製；還沒有只有管理員能建（鑄連結是寫入）
-        + (sent && (q.share_url || isAdmin()) ? `<button type="button" class="m-btn sm" style="${BTN}" data-share="${esc(q.id)}">${q.share_url ? '複製連結' : '建立連結'}</button>` : '');
+        + (sent && (q.share_url || isAdmin()) ? `<button type="button" class="m-btn sm" style="${BTN}" data-share="${esc(q.id)}">${q.share_url ? '複製連結' : '建立連結'}</button>` : '')
+        // 刪除是管理員限定（後端 DELETE /quotations/{id} 走 _check_auth）—— 跟桌機同一條規則，
+        // 沒權限就不畫（畫了按下去只會拿到 403，那是「權限是空頭支票」那個形狀）
+        + (isAdmin() ? `<button type="button" class="m-btn sm danger" style="${BTN}" data-del="${esc(q.id)}">刪除</button>` : '');
     // 金額：顯示折後價（最終報價），有優惠時原價（含稅總計）畫掉放旁邊（owner 2026-09-07）
     const hasFinal = q.final_price !== null && q.final_price !== undefined;
     const discounted = hasFinal && q.final_price < q.total;
@@ -75,6 +83,24 @@ function cardHtml(q) {
           <span class="m-actions" style="margin:0">${btns}</span></div>
       </div>`;
 }
+
+/** 刪掉一張報價。不可復原，所以把「哪一張」講清楚再問。 */
+async function removeQuote(btn, rows, host) {
+    const q = rows.find(r => r.id === btn.dataset.del);
+    if (!q) return;
+    // 確認規則跟桌機同一份：已寄送／已簽核要打字確認案名（那些刪掉客戶的連結就死了）
+    if (!confirmQuoteDelete(q)) return;
+    await withBusy(btn, async () => {
+        try {
+            await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(q.id)}`, { method: 'DELETE' });
+            toast('已刪除', 'ok');
+            await load(host);
+        } catch (e) {
+            toast(e.message, 'err');
+        }
+    });
+}
+
 
 async function change(btn, host) {
     const to = btn.dataset.to, id = btn.dataset.id;
@@ -446,7 +472,11 @@ export async function render(host, { first }) {
             const v = ev.target.closest('button[data-preview]');
             if (v) return previewQuote(v);
             const s = ev.target.closest('button[data-share]');
-            if (s) shareLink(s, _rows, host);
+            if (s) return shareLink(s, _rows, host);
+            const d = ev.target.closest('button[data-del]');
+            if (d) return removeQuote(d, _rows, host);
+            const a = ev.target.closest('button[data-ai]');
+            if (a) openQuoteChat(a.dataset.ai, () => load(host));   // 關掉就重載（金額／項目可能被改過）
         });
     }
     if (shouldLoad('quotes', { first })) await load(host);

@@ -231,3 +231,37 @@ def test_chat_is_not_carried_in_the_list_payload():
     to_dict = src[src.index("def _to_quotation_dict("):src.index("def _item_to_dict(")]
     assert "chat" not in to_dict
     assert '@router.get("/quotations/{quotation_id}/chat"' in src
+
+
+# ── 手機版報價助理（frontend/m/views/quote-chat.js）────────────
+
+def test_mobile_assistant_shares_the_backend_and_the_patch_rules():
+    """手機與桌機同一組後端、同一支 patch 純函式 —— 兩邊不會漂掉。"""
+    js = js_code_only(repo_src("frontend/m/views/quote-chat.js"))
+    assert "from '/js/shared/quote-patch.js'" in js, "patch 套用只有一份實作"
+    for path in ("/chat", "/price-items/match"):
+        assert path in js, path
+    apply_ = js_func_body(js, "async function applyNew()")
+    assert "S.applied" in apply_ and "applyQuotePatch(S.groups, S.terms" in apply_
+    assert "await save()" in apply_, "套完要存回去（手機這邊就是寫入者）"
+
+
+def test_mobile_put_carries_back_the_fields_the_backend_overwrites():
+    """🔴 update_quotation 對這四個欄位是**無條件覆寫**（不看 model_fields_set）——
+    少帶一個就是靜默清掉它。"""
+    js = js_code_only(repo_src("frontend/m/views/quote-chat.js"))
+    save = js_func_body(js, "async function save()")
+    for field in ("tax_rate: S.q.tax_rate", "final_price: S.q.final_price",
+                  "payment_stages: S.q.payment_stages", "terms: termsText()"):
+        assert field in save, f"{field}：原值沒帶回去會被洗掉"
+    assert "method: 'PUT'" in save
+
+
+def test_mobile_entry_is_gated_and_new_files_dodge_the_cache_trap():
+    m = js_code_only(repo_src("frontend/m/views/quotes.js"))
+    assert "isAdmin() ? `<button" in m and 'data-ai="${esc(q.id)}"' in m, "AI 鈕跟編輯同一把鑰匙"
+    assert "openQuoteChat(a.dataset.ai" in m
+    # 🔴 新功能走**新檔案**，不往 shell.js 加 export：CF 給 .js 4 小時快取，
+    #    舊分頁的 named import 拿不到新 export 會讓整個模組載入失敗
+    shell = repo_src("frontend/m/shell.js")
+    assert "openQuoteChat" not in shell and "quote-chat" not in shell
