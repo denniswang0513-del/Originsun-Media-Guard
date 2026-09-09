@@ -220,7 +220,7 @@ def test_mobile_send_does_the_same_three_things_as_desktop():
     共用圖床上（打掉「做完自動刪圖」），而且這張的價永遠不會進價目。"""
     src = repo_src("routers/api_crm_mobile.py")
     tail = src[src.index("quotation_sent_transition(prev_status, q.status)"):]
-    assert "background.add_task(archive_quotation_pdf_now, q.id)" in tail[:400]
+    assert "background.add_task(generate_quotation_snapshot_quietly, q.id)" in tail[:400]
     assert "fire(purge_quote_chat_images(q.id)" in tail[:900]
     assert "fire(record_quote_prices(q.id)" in tail[:900]
     # 🔴 後兩支不准掛 background.add_task：那串是串行的，前面產 PDF 的 Playwright

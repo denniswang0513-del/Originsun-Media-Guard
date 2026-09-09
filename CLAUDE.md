@@ -1274,6 +1274,8 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | `routers/crm/quotes.py` 的對話／價目段 | `POST`／`GET /quotations/{id}/chat`（背景跑 claude、串流 partial、stage）、`/price-items*`（清單／改／刪／歷史匯入／比對）、寄出時清截圖與收價 | **只算 patch、不直接改項目**（寫入者是前端）；互動式用自己的 `_QUOTE_CHAT_GATE`，不跟夜間 SEO 批次搶 |
 | `core/subproc.run_stream` | 逐行交付 stdout 的 subprocess（串流用） | stdin／stderr／stdout 各一條執行緒；**逾時交給 `p.wait()`**，不能只在「收到一行之後」檢查 deadline |
 | [`frontend/m/views/quote-chat.js`](frontend/m/views/quote-chat.js) | 手機版報價助理（全螢幕對話、拍／選截圖、串流、用價目補上） | 跟桌機同一組後端與同一支 patch 純函式；**這邊就是寫入者**，PUT 要把後端無條件覆寫的四個欄位原值帶回 |
+| [`core/quote_snapshot.py`](core/quote_snapshot.py) | 「生成報價單」的純規則：快照紀錄形狀、過期判定、畫面那句話（尚未生成／內容已修改／已生成 09/10 14:30）、客戶連結網址 | 無 I/O；文案**只在這裡寫一次**（桌機手機都顯示後端給的 `label`）；檔名形狀被 `assets_host._SAFE_NAME` 綁著 |
+| `routers/crm/quotes.py` 的生成／對外段 | `generate_quotation_snapshot`（產 PDF ＋ HTML → 歸檔進報價單資料夾 ＋ 寫快照進共用圖床 ＋ 刪舊快照）、`public_quote_html`／`public_quote_pdf`（**送**快照） | **產**只在 master（Playwright 在那），**送**在哪都行 —— 對外那兩支掛 `public_router`，NAS 對外容器也吃得到，master 關機客戶照樣打得開 |
 
 
 ## 不要動的地方
@@ -1344,3 +1346,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **`--model <值>` 會變成 claude CLI 的參數**：前端送什麼就接什麼等於讓瀏覽器往 CLI 塞旗標，一律過 `quote_chat.pick_model()` 的白名單。
 - **`fire()` 不是 `background.add_task`**：FastAPI 的 background 串是**串行**的，寄出報價時第一支是 Playwright 產 PDF，它慢或炸掉，後面的清截圖與收價就整串不跑而且靜默。
 - **`_load_items()` 回的已經是 dict**（它自己套過 `_item_to_dict`）：再包一次會 AttributeError，包在背景任務裡就是無聲失敗。
+- **報價單快照的過期判定比對「來源版本」，不是時間先後**（`quote_snapshot.is_stale`）：產 PDF 要好幾秒，中間有人存了一次的話「生成時間比較晚」永遠成立，會把舊內容判成新鮮的、而且完全靜默。所以 `src` 記的是**開始渲染時讀到的** `updated_at`，回寫時**不准動 `updated_at`**（動了就是生成完當下立刻過期）。判不出來一律當過期。
+- **`public_quote_html`／`public_quote_pdf` 在 `public_router` 上＝對外曝露面**：那個 router 是 NAS 對外容器唯一掛的東西。加／改端點要同步兩支白名單測試（`test_media_log_public_router` 的 `EXPECTED`、`test_public_surface` 的 `EXPECTED_API`），而且兩支都要自己 `await surface_gate(request)` —— master 的 `/q/{code}` 有擋一次，但 NAS 那條沒有經過 `main.py`。
+- **快照檔名必須是 32 hex ＋ 2-5 碼副檔名**：`core.assets_host._SAFE_NAME` 是圖床唯一的刪除路徑，名字不合它的規矩＝重新生成時舊快照刪不掉，一張一張永遠躺在 NAS 上而且舊網址還通（客戶可能拿到過期版本）。
+- **報價單是定稿文件，不是活的頁面**（owner 2026-09-10）：`/q/{code}` 送的是生成好的檔，不即時重算。改回「即時渲染」會同時打掉兩件事 —— 客戶手上那份會隨你改東西靜默變動，而且對外那條路又綁回 master 開機。即時渲染只保留給「還沒生成過的舊連結」（`_live_quote_fallback`），而且它會順手補生成一份。

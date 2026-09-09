@@ -5,6 +5,9 @@
  * 按鈕文字是動作（建立／成案／拒絕；owner 2026-09-07 把「簽回」改叫「成案」、「寄出」改叫「建立」），目標狀態字從 options 取，不寫死。
  * 草稿卡多一顆「預覽」：GET /quotations/{id}/preview 回 HTML 塞 iframe，讓人先確認內容再建立（不改狀態、不存檔）。
  * 建立後的卡才有「PDF」：GET /api/v1/crm/quotations/{id}/pdf（跟桌機同一份 PDF、同一個檔名規則）。
+ * 建立後的卡也有「生成報價單」：POST /quotations/{id}/generate 把現在的內容定稿成 PDF ＋ HTML 快照，
+ * 客戶的線上連結送的就是那份（owner 2026-09-10，不再是點進去當場重算重畫）。卡上那句狀態文字是後端
+ * 組好的 pdf_state.label（正本 core/quote_snapshot.state），手機不自己拼中文。
  * 項目編輯是「大項目 → 子項目」（owner 2026-09-07），模型 js/shared/quote-amounts.js 的 groupQuoteItems／flattenQuoteGroups。
  *
  * 開報價單（owner 2026-09-06，推翻 CRM_MOBILE_PLAN §「報價項目編輯不做」）：底部抽屜開表單，
@@ -18,6 +21,7 @@ import { quoteTotals, parsePaymentStages, paymentStagesToText } from '/js/shared
 import * as _QA from '/js/shared/quote-amounts.js';
 import { mfetch, mdownload, toast, esc, money, fmtDate, todayLocal, quotePdfFilename } from '../shell.js';
 import { confirmQuoteDelete } from '/js/shared/quote-delete.js';
+import { waitingText } from '/js/shared/quote-wait.js';
 import { openQuoteChat } from './quote-chat.js';
 // 🔴 Cloudflare 給 .js 4 小時瀏覽器快取：新分頁 js 配舊 quote-amounts.js 時，named import 拿不到的 export 會讓
 //    整個模組載入失敗。新 export 先用命名空間拿、缺就退回同款本地實作（reference_cloudflare_js_cache：契約要相容一輪；
@@ -34,7 +38,17 @@ const groupQuoteItems = _QA.groupQuoteItems || ((items) => {
 });
 const flattenQuoteGroups = _QA.flattenQuoteGroups || ((groups) => (groups || []).flatMap(g => g.items.map(it => ({ ...it, group_name: g.name }))));
 import { list, opt, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad, renderPaged,
-    isAdmin, openSheet, closeSheet, pickerHtml, mountPicker, createClientOption, copyText } from '../ui.js';
+    isAdmin, state as _mState, openSheet, closeSheet, pickerHtml, mountPicker, createClientOption, copyText } from '../ui.js';
+
+/** 鑄連結／生成報價單這兩顆的鑰匙 —— 鏡射後端的 `_check_quotes_auth`（管理員 ‖ crm_quotes）。
+ *
+ * 🔴 用 `isAdmin()` 的話**比後端嚴**：權限第二批（2026-09-08）把分享放給了 crm_quotes，
+ *    桌機跟著放寬了、手機沒有 —— 有 crm_quotes 的人在手機上看不到鈕，而他打 API 是會過的。
+ *    畫面比後端嚴不會噴錯，只會讓人以為「這台不能做」，最難查。
+ * `state` 是 ui.js 早就有的 export（不是這次新加的），所以沒有「新 js ＋ 舊 ui.js」那個
+ * named import 炸整頁的問題（reference_cloudflare_js_cache）。
+ */
+const canQuote = () => isAdmin() || ((_mState.me || {}).modules || []).includes('crm_quotes');
 
 function transitions(status) {
     const v = list('quote_statuses');
@@ -50,6 +64,10 @@ function transitions(status) {
 // 動作列跟金額同一列：按鈕不吃 .m-actions 的「各半」flex，照內容寬、文字不換行（「寄出」被擠成兩行過）
 const BTN = 'flex:0 0 auto;white-space:nowrap';
 
+// 生成報價單的典型秒數（master 開一顆 Chromium 把版面畫成 PDF）。跟 AI 助理那一輪（30–50 秒）
+// 不是同一個量級，所以把範圍帶進 waitingText，免得它對著 8 秒的工作說「通常 30–50 秒」。
+const GEN_SECONDS = [5, 15];
+
 function cardHtml(q) {
     // PDF 與線上連結要「寄出」之後才出現（owner 2026-09-07「送出再產生連結與 pdf 按鈕」）：草稿還在改，不該流出去
     const sent = q.status !== list('quote_statuses')[0];
@@ -64,8 +82,11 @@ function cardHtml(q) {
         // 預覽：只把版面畫給你確認，不建立、不存檔（owner 2026-09-07「預覽點的時候讓我確認內容，不用建立報價單」）
         + (sent ? '' : `<button type="button" class="m-btn sm" style="${BTN}" data-preview="${esc(q.id)}">預覽</button>`)
         + (sent ? `<button type="button" class="m-btn sm" style="${BTN}" data-pdf="${esc(q.id)}">PDF</button>` : '')
+        // 生成報價單＝把現在的內容定稿（客戶連結送的就是那份快照）。跟「建立連結」同一把鑰匙：
+        // 都是寫入，而且生成本來就會順手鑄好連結
+        + (sent && canQuote() ? `<button type="button" class="m-btn sm" style="${BTN}" data-gen="${esc(q.id)}">生成報價單</button>` : '')
         // 線上檢視連結：已有就誰都能複製；還沒有只有管理員能建（鑄連結是寫入）
-        + (sent && (q.share_url || isAdmin()) ? `<button type="button" class="m-btn sm" style="${BTN}" data-share="${esc(q.id)}">${q.share_url ? '複製連結' : '建立連結'}</button>` : '')
+        + (sent && (q.share_url || canQuote()) ? `<button type="button" class="m-btn sm" style="${BTN}" data-share="${esc(q.id)}">${q.share_url ? '複製連結' : '建立連結'}</button>` : '')
         // 刪除是管理員限定（後端 DELETE /quotations/{id} 走 _check_auth）—— 跟桌機同一條規則，
         // 沒權限就不畫（畫了按下去只會拿到 403，那是「權限是空頭支票」那個形狀）
         + (isAdmin() ? `<button type="button" class="m-btn sm danger" style="${BTN}" data-del="${esc(q.id)}">刪除</button>` : '');
@@ -75,10 +96,15 @@ function cardHtml(q) {
     const amount = 'total' in q
         ? `<span class="amt">${money(hasFinal ? q.final_price : q.total)}${discounted ? ` <s style="color:var(--sub);font-weight:400;font-size:12px">${money(q.total)}</s>` : ''}</span>`
         : '<span></span>';
+    // 生成狀態那句話：後端組好的（尚未生成／已生成 09/10 14:30／內容已修改），前端只負責顯示。
+    // 「內容已修改」要看得出來是待辦，用殼裡既有的 --warn，不另配一組顏色
+    const st = sent ? q.pdf_state : null;
+    const stateLine = st ? `<div class="sub"${st.stale ? ' style="color:var(--warn)"' : ''}>${esc(st.label)}</div>` : '';
     return `
       <div class="m-card">
         <div class="t"><div class="name">${esc(q.project_name || '（未連專案）')}</div>${pill(q.version)}</div>
         <div class="sub">${esc(q.client_short_name || '')}${q.quote_date ? ' · ' + esc(fmtDate(q.quote_date)) : ''}</div>
+        ${stateLine}
         <div class="row">${amount}
           <span class="m-actions" style="margin:0">${btns}</span></div>
       </div>`;
@@ -116,23 +142,63 @@ async function change(btn, host) {
     });
 }
 
-// 線上檢視連結：沒有就先鑄一條（冪等），然後複製完整網址；手機貼給客戶或自己開都行
+/** 生成一份定稿快照（PDF ＋ HTML），回來時 q.pdf_state／q.share_url 已經是新的。
+ *  呼叫端負責 withBusy；這裡只讓按鈕上的秒數會跳 —— 這支要 5–15 秒（master 開一顆 Chromium），
+ *  withBusy 那句靜止的「處理中…」撐不住那麼久，看起來會像當掉。 */
+async function runGenerate(q, btn) {
+    const since = Date.now();
+    const timer = setInterval(() => { btn.textContent = waitingText(Date.now() - since, '', GEN_SECONDS); }, 1000);
+    try {
+        const r = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(q.id)}/generate`, { method: 'POST' });
+        q.pdf_state = r.pdf_state;
+        if (r.share_url) q.share_url = r.share_url;   // 生成順手鑄好連結（後端冪等，不換掉舊的）
+        return r;
+    } finally { clearInterval(timer); }
+}
+
+/** 把這張卡原地重畫（狀態那句話、連結鈕的字都跟著變），不整份重抓 —— 重抓會把分頁的「載入更多」收回去。 */
+function redrawCard(btn, q) {
+    const card = btn.closest('.m-card');
+    if (card) card.outerHTML = cardHtml(q);
+}
+
+async function generateQuote(btn, rows) {
+    const q = rows.find(r => r.id === btn.dataset.gen);
+    if (!q) return;
+    const ok = await withBusy(btn, async () => {
+        try { await runGenerate(q, btn); toast('報價單已生成', 'ok'); return true; }
+        catch (e) { toast(e.message, 'err'); return false; }
+    });
+    // 要在 withBusy 之後換卡：它的 finally 還要把按鈕字還原，卡片先換掉那顆鈕就不在畫面上了
+    if (ok) redrawCard(btn, q);
+}
+
+// 線上檢視連結：鑄一條（冪等）然後複製完整網址；手機貼給客戶或自己開都行
 async function shareLink(btn, rows, host) {
     const q = rows.find(r => r.id === btn.dataset.share);
     if (!q) return;
+    let regen = false;
     await withBusy(btn, async () => {
         try {
-            let url = q.share_url;
-            if (!url) {
+            // 鑄連結是寫入（後端走 crm_quotes）：不能鑄的人這顆鈕只是要複製已經有的那條，別打 API 拿 403
+            if (canQuote()) {
+                // 還沒生成（或生成後又改過）就順手先生成一份再給連結 —— 不是叫他先去按「生成報價單」。
+                // 拿到連結的下一秒就是貼給客戶，那時客戶看到的必須是現在這一版；忘記先按的人不會收到
+                // 任何錯誤，只有客戶會看到舊的或打不開。
+                if (q.pdf_state && q.pdf_state.stale) { await runGenerate(q, btn); regen = true; }
                 const r = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(q.id)}/share`, { method: 'POST' });
-                url = r.share_url; q.share_url = url;
+                q.share_url = r.share_url;
             }
-            const full = location.origin + url;
+            // 🔴 網址用後端回的：客戶拿到哪個網域只由後端的 quotes_public_base 決定，不再是「按複製的人
+            //    當時開在哪個網址」。沒設定時它回相對路徑，那就沿用 location.origin（＝現況行為）。
+            const url = String(q.share_url || '');
+            const full = url.startsWith('http') ? url : location.origin + url;
             toast((await copyText(full)) ? '連結已複製：' + full : '複製失敗，連結：' + full, 'ok');
         } catch (e) { toast(e.message, 'err'); }
     });
     // 第一次建完把按鈕字換掉：要在 withBusy 之後改（它的 finally 會把按鈕字還原成按下前的）；列上的 q.share_url 已更新，不必整份重抓重畫
-    if (q.share_url) btn.textContent = '複製連結';
+    if (regen) redrawCard(btn, q);            // 順手生成過＝卡上那句狀態也舊了，整張換掉最省事
+    else if (q.share_url) btn.textContent = '複製連結';
 }
 
 /** 預覽：後端把同一份報價單版面渲染成 HTML（不改狀態、不存檔），塞進整頁的 iframe；關掉就回清單。 */
@@ -471,6 +537,8 @@ export async function render(host, { first }) {
             if (p) return downloadPdf(p, _rows);
             const v = ev.target.closest('button[data-preview]');
             if (v) return previewQuote(v);
+            const g = ev.target.closest('button[data-gen]');
+            if (g) return generateQuote(g, _rows);
             const s = ev.target.closest('button[data-share]');
             if (s) return shareLink(s, _rows, host);
             const d = ev.target.closest('button[data-del]');

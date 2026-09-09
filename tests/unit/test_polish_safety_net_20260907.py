@@ -50,12 +50,25 @@ def test_render_quotation_html_web_mode_adds_download_bar_and_missing_seal_degra
 
 
 def test_render_call_sites_only_public_view_passes_web_pdf_url():
-    """印出來／存檔的 PDF 不能帶「下載 PDF」列；線上檢視要帶（/q/{token}/pdf）。"""
+    """印出來／存檔的 PDF 不能帶「下載 PDF」列；線上檢視要帶（/q/{token}/pdf）。
+
+    🔴 2026-09-10 起 `generate_quotation_snapshot` **同時**產這兩種：給客戶看的 HTML 快照
+    帶那條列、印成 PDF 的那份不帶。所以這裡不能再用「整支函式裡沒有 web_pdf_url」來守 ——
+    改成釘住「餵進 html_to_pdf 的那一個呼叫」是不帶的那種。守的東西沒變：
+    **PDF 裡不准印出「下載 PDF」這一列**。
+    """
     src = code_only(repo_src("routers/crm/quotes.py"))
-    for fn in ("async def archive_quotation_pdf_now(", "async def _quotation_pdf_response("):
-        body = func_body(src, fn)
-        assert "_render_quotation_html(view, company)" in body and "web_pdf_url" not in body, fn
-    pub = func_body(src, "async def public_quote_html(")
+    body = func_body(src, "async def _quotation_pdf_response(")
+    assert "_render_quotation_html(view, company)" in body and "web_pdf_url" not in body
+
+    gen = func_body(src, "async def generate_quotation_snapshot(")
+    assert "html_to_pdf(_render_quotation_html(view, company), prefix=" in gen, \
+        "印成 PDF 的那份不准帶 web_pdf_url（帶了就會把「下載 PDF」列印進紙本）"
+    assert 'html_doc = _render_quotation_html(view, company, web_pdf_url=f"/q/{token}/pdf")' in gen, \
+        "客戶看的 HTML 快照要帶那條列（那是他下載 PDF 的唯一入口）"
+
+    # 舊連結（還沒生成過）的即時退路走同一組規則
+    pub = func_body(src, "async def _live_quote_fallback(")
     assert '_render_quotation_html(view, company, web_pdf_url=f"/q/{token}/pdf")' in pub
 
 

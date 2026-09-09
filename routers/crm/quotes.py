@@ -19,13 +19,15 @@ from fastapi.responses import HTMLResponse
 
 from core.finance_logic import QUOTE_PENDING, QUOTE_STATUSES
 from core.no_store import no_store_file
+from core.public_access import surface_gate
 from core.quotation_pdf import PDF_MARGIN, build_quotation_view, footer_line
-from core import price_book, quote_chat
+from core import price_book, quote_chat, quote_snapshot
+from core.assets_host import assets_delete, assets_target
 from core.bg_task import fire
 from core.schemas import (QuotationPayload, QuotationTemplatePayload,
                           QuoteChatPayload, PriceItemPayload, PriceMatchPayload)
 
-from ._shared import (router, token_router, _check_auth, _check_quotes_auth, money_dep,
+from ._shared import (router, public_router, _check_auth, _check_quotes_auth, money_dep,
                       _require_db, _get_factory,
                       _now, _parse_shoot_date)
 
@@ -62,6 +64,9 @@ def _to_quotation_dict(q, items=None, project_name="", client_short_name="") -> 
         "payment_stages": q.payment_stages or [], "terms": q.terms or "",
         "spec": q.spec or "",
         "share_url": f"/q/{q.share_token}" if getattr(q, "share_token", None) else None,
+        # 「生成報價單」的狀態（尚未生成／已生成 09/10 14:30／內容已修改）。文案正本在
+        # core.quote_snapshot.state —— 桌機與手機都直接顯示這個字串，不各寫一份中文。
+        "pdf_state": quote_snapshot.state(getattr(q, "pdf_snapshot", None), q.updated_at),
         "items": items or [],
         "created_at": q.created_at.isoformat() if q.created_at else None,
         "updated_at": q.updated_at.isoformat() if q.updated_at else None,
@@ -303,27 +308,58 @@ async def get_quotations_root(request: Request):
     from core.auth import check_admin
     from config import load_settings
     check_admin(request)
-    return {"quotes_root": (load_settings().get("quotes_root") or ""),
-            "default": _QUOTES_DEFAULT_ROOT, "effective": _quotes_root()}
+    s = load_settings()
+    return {"quotes_root": (s.get("quotes_root") or ""),
+            "default": _QUOTES_DEFAULT_ROOT, "effective": _quotes_root(),
+            # 客戶連結要用哪個網域（見 _public_base）。跟資料夾放在同一張小卡上：
+            # 兩個都是「報價單這件事的去處」，不值得為它另開一個設定面。
+            "quotes_public_base": (s.get("quotes_public_base") or "")}
 
 
 @router.post("/quotations-root")
 async def set_quotations_root(request: Request):
-    """設定報價單資料夾（管理員）：空字串＝回到預設；路徑先 validate_root_dir（要存在、可寫）。"""
+    """設定報價單資料夾與客戶連結網域（管理員）：空字串＝回到預設／回到 location.origin。
+    路徑先 validate_root_dir（要存在、可寫）。
+
+    🔴 兩個欄位都是「有送才寫」（`in body`）：舊分頁的 POST 只帶 quotes_root，
+    用 `body.get(...) or ""` 一律寫回會把剛設好的網域清成空字串（CF 給 .js 四小時快取，
+    舊分頁一定會有 —— 見 reference_cloudflare_js_cache）。
+    """
     from core.auth import check_admin
     from config import load_settings, save_settings
     from .invoice_files import validate_root_dir          # 與發票根目錄同一份驗證（完整路徑＋可寫）
     check_admin(request)
     body = await request.json()
-    root = (body.get("quotes_root") or "").strip()
-    validate_root_dir(root)
-    try:
-        s = load_settings()
+    s = load_settings()
+    if "quotes_root" in body:
+        root = (body.get("quotes_root") or "").strip()
+        validate_root_dir(root)
         s["quotes_root"] = root
+    if "quotes_public_base" in body:
+        s["quotes_public_base"] = _clean_public_base(body.get("quotes_public_base"))
+    try:
         save_settings(s)
     except OSError as e:
         raise HTTPException(status_code=503, detail=f"設定檔忙碌中，請再按一次儲存（{e}）")
-    return {"status": "ok", "quotes_root": root, "effective": _quotes_root()}
+    return {"status": "ok", "quotes_root": s.get("quotes_root") or "",
+            "quotes_public_base": s.get("quotes_public_base") or "",
+            "effective": _quotes_root()}
+
+
+def _clean_public_base(raw) -> str:
+    """客戶連結網域的清洗：只收 http(s) 的來源（scheme + host），尾斜線去掉。
+
+    收垃圾的後果是安靜的：連結是**複製給客戶**的，錯了不會有人回報 error，
+    只會有人說「你給我的網址打不開」。空字串＝回到 location.origin（合法，代表不指定）。
+    """
+    v = str(raw or "").strip().rstrip("/")
+    if not v:
+        return ""
+    if not v.startswith(("http://", "https://")):
+        raise HTTPException(status_code=422, detail="客戶連結網域要以 http:// 或 https:// 開頭")
+    if len(v.split("/")) != 3:
+        raise HTTPException(status_code=422, detail="客戶連結網域只要網址開頭（例：https://www.example.com）")
+    return v
 
 
 def _pdf_footer(view: dict) -> str:
@@ -342,32 +378,111 @@ def quotation_sent_transition(prev_status, new_status) -> bool:
     return new_status == QUOTE_PENDING and prev_status != QUOTE_PENDING
 
 
-async def archive_quotation_pdf_now(quotation_id: str):
-    """報價寄出時主動產一份 PDF 存進報價單資料夾（owner 2026-09-07「送出的時候就下載一個 pdf 到資料夾裡」）。
-    掛在 BackgroundTasks：寄出已經 commit 了，這裡任何失敗（資料夾不通、Playwright 掛掉）只記 log、不回滾。"""
+# ── 生成報價單（owner 2026-09-10）────────────────────────────────────────
+# 客戶的連結送的是**生成出來的那兩個檔**，不是即時重算的頁面。為什麼要這樣改，
+# 見 core/quote_snapshot.py 檔頭（一句話：報價單是定稿文件，而且對外那條路不該
+# 依賴 master 開著）。這一段只做 I/O —— 形狀與過期判定都在那支純函式模組。
+
+def _snapshot_dir() -> str:
+    """共用圖床上放報價單快照的目錄。master 走 UNC、NAS 對外容器走掛載點，
+    翻譯在 core.assets_host（設定沒設 → 空字串，呼叫端誠實回報，不要默默寫到別處）。"""
+    dest, _base = assets_target(quote_snapshot.NAMESPACE)
+    return dest
+
+
+def _write_snapshot(tmp_pdf: str, html_doc: str, names: tuple) -> None:
+    """PDF ＋ HTML 兩份寫進圖床。呼叫端丟執行緒跑（走 SMB，別卡住 event loop）。"""
+    dest = _snapshot_dir()
+    if not dest:
+        raise OSError("共用圖床未設定（settings assets_host）")
+    os.makedirs(dest, exist_ok=True)
+    shutil.copyfile(tmp_pdf, os.path.join(dest, names[0]))
+    with open(os.path.join(dest, names[1]), "w", encoding="utf-8") as fp:
+        fp.write(html_doc)
+
+
+def _snapshot_file(record, kind: str) -> str:
+    """快照檔在本機的完整路徑；沒生成過／圖床沒設／檔案被清掉 → 空字串。"""
+    name = quote_snapshot.asset_name(record, kind)
+    dest = _snapshot_dir()
+    if not name or not dest:
+        return ""
+    path = os.path.join(dest, name)
+    return path if os.path.isfile(path) else ""
+
+
+async def generate_quotation_snapshot(quotation_id: str):
+    """生成報價單：歸檔進報價單資料夾 ＋ 寫一份快照到圖床 ＋ 記進 DB。
+
+    🔴 `src` 記的是**開始渲染時讀到的** `updated_at`，不是寫回 DB 的時間。產 PDF 要
+       好幾秒，中間有人存了一次的話，用「生成時間比較晚」判斷會把舊內容當成新鮮的。
+    🔴 寫回時**不動 `updated_at`** —— 動了就等於生成完當下立刻過期。
+    只有 master 做得到這件事（Playwright 在那）；NAS 對外容器只負責把檔案送出去。
+    """
+    from core.auth import new_short_token
     from services.html_pdf import html_to_pdf
     log = logging.getLogger(__name__)
-    try:
-        factory = await _get_factory()
-        async with factory() as session:
-            q = await session.get(CrmQuotation, quotation_id)
+    factory = await _get_factory()
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
         if q is None:
             return None
-        view, company = await _quotation_view_of(q)
-        tmp_pdf = await html_to_pdf(_render_quotation_html(view, company), prefix="quotation_",
-                                    footer_html=_pdf_footer(view), margin=PDF_MARGIN)
-        try:      # 存到報價單資料夾（可能是 NAS／UNC）：丟到執行緒，別讓 SMB 卡住整個 event loop
-            dest = await asyncio.to_thread(lambda: _archive_quotation_pdf(tmp_pdf, view))
-        finally:
-            try:
-                os.remove(tmp_pdf)
-            except OSError:
-                pass
-        log.info("報價 %s 寄出，PDF 已存：%s", quotation_id, dest)
-        return dest
-    except Exception as exc:                       # noqa: BLE001 — 背景工作：記下來就好
-        log.warning("報價 %s 寄出存檔失敗（不影響寄出）：%s", quotation_id, exc)
+        if not q.share_token:     # 生成＝這張要給人看了，順手備好連結（冪等，不換掉舊的）
+            q.share_token = new_short_token()
+            await session.commit()
+            await session.refresh(q)
+        token, src, old = q.share_token, q.updated_at, q.pdf_snapshot
+
+    view, company = await _quotation_view_of(q)
+    names = quote_snapshot.new_asset_names()
+    html_doc = _render_quotation_html(view, company, web_pdf_url=f"/q/{token}/pdf")
+    tmp_pdf = await html_to_pdf(_render_quotation_html(view, company), prefix="quotation_",
+                                footer_html=_pdf_footer(view), margin=PDF_MARGIN)
+    try:
+        # 歸檔（自己人翻的資料夾）與快照（客戶連結送的檔）是兩件事：資料夾不通
+        # 不該擋掉客戶那條路，所以各自 try。
+        try:
+            await asyncio.to_thread(lambda: _archive_quotation_pdf(tmp_pdf, view))
+        except OSError as exc:
+            log.warning("報價 %s 歸檔失敗（不影響客戶連結）：%s", quotation_id, exc)
+        await asyncio.to_thread(lambda: _write_snapshot(tmp_pdf, html_doc, names))
+    finally:
+        try:
+            os.remove(tmp_pdf)
+        except OSError:
+            pass
+
+    record = quote_snapshot.make_record(names[0], names[1], view["filename"], src)
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
+        if q is None:
+            return None
+        q.pdf_snapshot = record
+        await session.commit()
+    for name in quote_snapshot.assets_of(old):    # 舊快照留著是佔空間，而且那個網址還通
+        assets_delete(quote_snapshot.NAMESPACE, name)
+    log.info("報價 %s 已生成：%s", quotation_id, view["filename"])
+    return record
+
+
+# 正在生成的報價 id。舊連結的退路會在客戶每次開頁時補送一發生成，客戶按兩下重整
+# 就是兩顆 Chromium —— 同一張同時只准跑一發（行程內夠用：只有 master 在生成）。
+_SNAPSHOT_INFLIGHT: set = set()
+
+
+async def generate_quotation_snapshot_quietly(quotation_id: str):
+    """背景版：失敗只記 log。寄出與「舊連結補生成」都用它 —— 寄出已經 commit 了，
+    產不出 PDF（資料夾不通、Playwright 掛掉）不該讓寄出跟著失敗。"""
+    if quotation_id in _SNAPSHOT_INFLIGHT:
         return None
+    _SNAPSHOT_INFLIGHT.add(quotation_id)
+    try:
+        return await generate_quotation_snapshot(quotation_id)
+    except Exception as exc:                       # noqa: BLE001 — 背景工作：記下來就好
+        logging.getLogger(__name__).warning("報價 %s 生成失敗（不影響寄出）：%s", quotation_id, exc)
+        return None
+    finally:
+        _SNAPSHOT_INFLIGHT.discard(quotation_id)
 
 
 async def _quotation_pdf_response(q):
@@ -420,6 +535,37 @@ async def quotation_pdf(quotation_id: str):
     return await _quotation_pdf_response(q)
 
 
+def _public_base() -> str:
+    """客戶連結要用的對外網址（settings `quotes_public_base`）。留空＝回相對路徑、
+    前端沿用 `location.origin`（＝現況行為）。為什麼需要這個設定見
+    core.quote_snapshot.share_url —— 連結原本是「按複製的人當時在哪個網址」決定的。"""
+    from config import load_settings
+    return str(load_settings().get("quotes_public_base") or "").strip()
+
+
+@router.post("/quotations/{quotation_id}/generate")
+async def generate_quotation(quotation_id: str, request: Request):
+    """「生成報價單」（owner 2026-09-10）：把現在的內容定稿成一份 PDF ＋ HTML 快照。
+
+    這是客戶那條路的**唯一**資料來源 —— 沒生成過就沒有文件可以送（舊連結有退路，
+    見 `_live_quote_fallback`）。之後又改了報價，畫面會顯示「內容已修改，尚未重新
+    生成」，按一次才會換掉客戶看到的版本。
+    """
+    _check_quotes_auth(request)
+    _require_db()
+    record = await generate_quotation_snapshot(quotation_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="找不到此報價")
+    factory = await _get_factory()
+    async with factory() as session:
+        q = await session.get(CrmQuotation, quotation_id)
+    if q is None:                      # 生成到一半被別人刪了（罕見，但別回 500）
+        raise HTTPException(status_code=404, detail="找不到此報價")
+    return {"status": "ok", "token": q.share_token,
+            "pdf_state": quote_snapshot.state(q.pdf_snapshot, q.updated_at),
+            "share_url": quote_snapshot.share_url(q.share_token, _public_base())}
+
+
 @router.post("/quotations/{quotation_id}/share")
 async def share_quotation(quotation_id: str, request: Request):
     """取得／鑄造線上檢視連結（冪等：已有就回同一條，寄出去的連結不會因為再按一次就失效）。
@@ -438,8 +584,12 @@ async def share_quotation(quotation_id: str, request: Request):
             q.share_token = new_short_token()
             q.updated_at = _now()
             await session.commit()
-        token = q.share_token
-    return {"status": "ok", "token": token, "share_url": f"/q/{token}"}
+        token, snap = q.share_token, q.pdf_snapshot
+        stale = quote_snapshot.is_stale(snap, q.updated_at)
+    if stale:      # 還沒生成（或生成後又改過）就把連結拿去發＝客戶看到舊的／看不到
+        fire(generate_quotation_snapshot_quietly(quotation_id), label=f"quote snapshot {quotation_id}")
+    return {"status": "ok", "token": token,
+            "share_url": quote_snapshot.share_url(token, _public_base())}
 
 
 async def _quotation_by_share_token(token: str):
@@ -456,22 +606,56 @@ async def _quotation_by_share_token(token: str):
     return q
 
 
-@token_router.get("/public/quote/{token}", response_class=HTMLResponse)
-async def public_quote_html(token: str):
-    """線上檢視（owner 2026-09-07）：同一份報價單版面直接當網頁看，頁上有「下載 PDF」。
-    掛 token_router（master 限定、不對 NAS 曝露）；回的是 HTML 不是 JSON，MoneyRedactRoute 抹不到、
-    也不該抹 —— 這頁就是要給客戶看金額的。"""
-    q = await _quotation_by_share_token(token)
-    view, company = await _quotation_view_of(q)
-    html_doc = _render_quotation_html(view, company, web_pdf_url=f"/q/{token}/pdf")
+_SNAPSHOT_NOT_READY = "這份報價單尚未生成，請與我們聯絡"
+
+
+async def _live_quote_fallback(q, token: str):
+    """還沒生成過的舊連結：master 上照舊即時畫一份給客戶看，並在背景補生成一份，
+    下一次就走快照。NAS 對外容器沒有 jinja2／Playwright，這裡會丟例外 → 誠實說
+    「尚未生成」，不要給客戶一個 500。"""
+    try:
+        view, company = await _quotation_view_of(q)
+        html_doc = _render_quotation_html(view, company, web_pdf_url=f"/q/{token}/pdf")
+    except Exception as exc:            # noqa: BLE001 — 缺套件／缺設定都算「這台產不出來」
+        raise HTTPException(status_code=503, detail=_SNAPSHOT_NOT_READY) from exc
+    fire(generate_quotation_snapshot_quietly(q.id), label=f"quote snapshot {q.id}")
     return HTMLResponse(html_doc, headers={"Cache-Control": "no-store"})
 
 
-@token_router.get("/public/quote/{token}/pdf")
-async def public_quote_pdf(token: str):
-    """線上檢視頁的「下載 PDF」：一般導覽下載（不是 blob），手機也能直接存。"""
+@public_router.get("/public/quote/{token}", response_class=HTMLResponse)
+async def public_quote_html(token: str, request: Request):
+    """客戶的線上檢視：送**生成好的那份 HTML 快照**（不重算金額、不重畫版面）。
+
+    掛 public_router ＝ NAS 對外容器也吃得到，master 關機客戶照樣打得開
+    （曝露面白名單在 test_media_log_public_router 與 test_public_surface，兩支都要同步）。
+    回 HTML 不是 JSON，MoneyRedactRoute 抹不到 —— 這頁本來就是要給客戶看金額的。
+    """
+    await surface_gate(request)
     q = await _quotation_by_share_token(token)
-    return await _quotation_pdf_response(q)
+    path = _snapshot_file(getattr(q, "pdf_snapshot", None), "html")
+    if not path:
+        return await _live_quote_fallback(q, token)
+    with open(path, encoding="utf-8") as fp:
+        return HTMLResponse(fp.read(), headers={"Cache-Control": "no-store"})
+
+
+@public_router.get("/public/quote/{token}/pdf")
+async def public_quote_pdf(token: str, request: Request):
+    """線上檢視頁的「下載 PDF」：送生成好的那份檔（一般導覽下載，手機也能直接存）。
+    檔名用**生成當下**存起來的那個 —— 之後改了案名或報價日期，客戶手上那份不該改名。"""
+    await surface_gate(request)
+    q = await _quotation_by_share_token(token)
+    snap = getattr(q, "pdf_snapshot", None)
+    path = _snapshot_file(snap, "pdf")
+    if path:
+        return no_store_file(path, media_type="application/pdf",
+                             filename=quote_snapshot.download_filename(snap) or None)
+    try:
+        return await _quotation_pdf_response(q)     # 舊連結：master 上照舊即時產一份
+    except HTTPException:
+        raise
+    except Exception as exc:                        # noqa: BLE001 — NAS 上沒有 Playwright
+        raise HTTPException(status_code=503, detail=_SNAPSHOT_NOT_READY) from exc
 
 
 @router.put("/quotations/{quotation_id}")
@@ -515,8 +699,8 @@ async def update_quotation(quotation_id: str, req: QuotationPayload, request: Re
         await session.commit()
         await session.refresh(q)
         loaded_items = await _load_items(session, q.id)
-    if quotation_sent_transition(prev_status, q.status):     # 寄出＝存一份 PDF 到報價單資料夾（回應後做）
-        background.add_task(archive_quotation_pdf_now, q.id)
+    if quotation_sent_transition(prev_status, q.status):     # 寄出＝生成一份報價單（回應後做）
+        background.add_task(generate_quotation_snapshot_quietly, q.id)
         # 🔴 這兩件事不掛 background.add_task：那串是**串行**的，前面那支用 Playwright 產 PDF，
         #    慢或炸掉後面就整串不跑（清圖與收價會靜默消失）。fire() 各跑各的、各有 try/except。
         fire(purge_quote_chat_images(q.id), label=f"quote purge {q.id}")   # 寄出＝截圖用完了

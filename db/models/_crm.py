@@ -165,6 +165,10 @@ class CrmQuotation(Base):
     terms = Column(Text, nullable=True)                         # 備註/條款
     spec = Column(Text, nullable=True)                          # 規格（印在報價單抬頭；「、」或換行分隔多項）
     share_token = Column(String(64), nullable=True)             # 線上檢視短碼（/q/{code}，逐字比對，同電子發票）
+    # 「生成報價單」產出的那份文件（core/quote_snapshot.py）：
+    # {pdf, html, filename, src, at} —— 客戶連結送的是這兩個檔，不是即時重畫的頁面。
+    # 檔案本體在共用圖床（NAS，24/7），所以 master 關機客戶照樣打得開。
+    pdf_snapshot = Column(JSONB, nullable=True)
     # 對話式完成報價（docs/QUOTE_ASSISTANT_PLAN.md）：[{role:user|ai, text, at, ...}]
     # 形狀同公布欄的 conversation。留著也是「這張報價是怎麼談出來的」的紀錄。
     chat = Column(JSONB, nullable=True)

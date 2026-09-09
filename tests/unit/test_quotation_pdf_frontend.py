@@ -156,8 +156,38 @@ def test_pdf_and_share_buttons_appear_only_after_sending():
     m = js_code_only(js_func_body(repo_src("frontend/m/views/quotes.js"), "function cardHtml(q)"))
     assert "const sent = q.status !== list('quote_statuses')[0];" in m
     assert "(sent ? `<button type=\"button\" class=\"m-btn sm\" style=\"${BTN}\" data-pdf=" in m
-    assert "(sent && (q.share_url || isAdmin())" in m
+    # 鑰匙鏡射後端 _check_quotes_auth（管理員 ‖ crm_quotes），不是 isAdmin —— 見
+    # test_crm_mobile_frontend 那條的說明（畫面比後端嚴是靜默的）
+    assert "(sent && (q.share_url || canQuote())" in m
+    assert "(sent && canQuote() ? `<button" in m, "生成報價單跟建立連結同一把鑰匙"
     d = js_code_only(repo_src("frontend/tabs/crm/crm-quotes.js"))
     assert "const sent = q.status !== _QUOTE_STATUSES[0];" in d
     assert "(sent ? `<button class=\"crm-btn crm-btn-secondary crm-btn-sm\" id=\"quote-btn-pdf\">" in d
     assert "actions.querySelector('#quote-btn-pdf')?.addEventListener" in d and "actions.querySelector('#quote-btn-share')?.addEventListener" in d
+
+
+def test_generate_button_and_share_url_contract():
+    """owner 2026-09-10：報價單從「客戶點連結時即時重算重畫」改成「按『生成報價單』產出一份定稿文件」。
+
+    前端這一側的四條契約（桌機與手機同一套）：
+    ① 有「生成報價單」的入口，打 POST /quotations/{id}/generate。
+    ② 那句狀態文字直接顯示後端的 `pdf_state.label` —— 文案正本在 core/quote_snapshot.state，
+       前端自己拼一份中文的話，改字一定漏掉一邊（所以連字面值都不准出現）。
+    ③ 分享一律用 /share 回的 `share_url`：是絕對網址就直接用，否則才補 location.origin。
+       客戶拿到哪個網域只有後端 `quotes_public_base` 一個決定點。
+    ④ 生成要 5–15 秒，等待字共用 js/shared/quote-wait.js 的 waitingText（不寫第二套跳動的點）。
+    """
+    for path in (QUOTES_JS, M_QUOTES_JS):
+        src = js_code_only(repo_src(path))
+        assert "/generate" in src, f"{path}：少了生成端點"
+        assert "st.label" in src, f"{path}：狀態文字要直接顯示後端的 pdf_state.label"
+        assert "尚未生成" not in src and "內容已修改" not in src, \
+            f"{path}：文案正本在 core/quote_snapshot.state，前端不准自己拼"
+        assert "waitingText(" in src and "GEN_SECONDS" in src, \
+            f"{path}：生成慢，要有會動的等待字（共用 quote-wait.js）"
+        assert "q.pdf_state.stale" in src, f"{path}：分享前要先確認這份是不是舊的"
+        assert "startsWith('http')" in src, f"{path}：後端回絕對網址時要直接用"
+    d = js_code_only(repo_src(QUOTES_JS))
+    assert 'id="quote-btn-generate"' in d and "'/quotations/' + q.id + '/generate'" in d
+    m = js_code_only(repo_src(M_QUOTES_JS))
+    assert "data-gen=" in m and "button[data-gen]" in m

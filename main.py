@@ -605,6 +605,7 @@ async def _on_startup():
                         ("crm_quotations", "spec", "TEXT"),
                         ("crm_quotations", "share_token", "VARCHAR(64)"),
                         ("crm_quotations", "chat", "JSONB"),
+                        ("crm_quotations", "pdf_snapshot", "JSONB"),
                         ("crm_project_staff", "phase", "VARCHAR(32) DEFAULT ''"),
                         ("crm_project_staff", "actual_days", "INTEGER"),
                         ("crm_project_staff", "actual_cost", "INTEGER"),
@@ -1346,7 +1347,7 @@ async def _short_quote_view(code: str, request: Request):
     from core.public_access import surface_gate
     await surface_gate(request)   # 公開區「報價單線上檢視」關閉 → 404
     from routers.crm.quotes import public_quote_html
-    return await public_quote_html(code)
+    return await public_quote_html(code, request)
 
 
 @app.get("/q/{code}/pdf", include_in_schema=False)
@@ -1355,7 +1356,7 @@ async def _short_quote_pdf(code: str, request: Request):
     from core.public_access import surface_gate
     await surface_gate(request)
     from routers.crm.quotes import public_quote_pdf
-    return await public_quote_pdf(code)
+    return await public_quote_pdf(code, request)
 
 
 @app.get("/")

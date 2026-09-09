@@ -651,6 +651,13 @@
   color: #9ca3af; font-size: 12px;
 }
 
+/* 報價詳情的「生成報價單」列（owner 2026-09-10：報價單改成一份生成出來的定稿文件）。
+   放在詳情內容不是上面那條動作列——那條在 320px 的窄面板已經塞滿了。
+   警示色沿用 .crm-stat-chip.warn／.crm-project-row-meta.warn 那個琥珀色，不另配一組。 */
+.quote-gen-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; flex-wrap: wrap; }
+.quote-gen-note { font-size: 12px; color: #9ca3af; }
+.quote-gen-note.warn { color: #fbbf24; }
+
 /* 自動存草稿的狀態列（報價彈窗左下角） */
 .quote-auto-note { margin-right: auto; align-self: center; font-size: 12px; color: #9ca3af; }
 .quote-auto-note.ok  { color: #4ade80; }

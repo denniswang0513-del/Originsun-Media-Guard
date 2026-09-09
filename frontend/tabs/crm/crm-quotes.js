@@ -145,6 +145,45 @@ function renderList() {
     }).join('');
 }
 
+// 生成報價單的典型秒數（master 開一顆 Chromium 把版面畫成 PDF）。跟 AI 助理那一輪（30–50 秒）
+// 不是同一個量級，所以把範圍帶進 waitingText，免得它對著 8 秒的工作說「通常 30–50 秒」。
+const GEN_SECONDS = [5, 15];
+
+/** 畫「生成狀態」那句話。文案正本是後端的 pdf_state.label（core/quote_snapshot.state）——
+ *  前端不拼中文，兩邊各寫一份的話改字一定漏掉一邊。stale 才上警示色。 */
+function _paintGenNote(el, st) {
+    if (!el) return;
+    el.textContent = st ? st.label : '';
+    el.classList.toggle('warn', !!(st && st.stale));
+}
+
+/** 跑一次「生成報價單」，回來時 q.pdf_state／q.share_url 已經是新的。
+ *
+ *  🔴 這支慢（5–15 秒）：按下去之後畫面什麼都不動就會被當成當掉，所以借 AI 助理那支
+ *     waitingText 讓那句話會跳（同一份實作，只是典型秒數不同）。
+ *  失敗時 q.pdf_state 沒動，finally 會把原本那句話畫回去。 */
+async function _generateQuote(q, btn, noteEl) {
+    const since = Date.now();
+    const paint = () => { if (noteEl) noteEl.textContent = waitingText(Date.now() - since, '', GEN_SECONDS); };
+    if (noteEl) noteEl.classList.remove('warn');
+    paint();
+    const timer = setInterval(paint, 1000);
+    const wasText = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
+    try {
+        const r = await _fetch('/quotations/' + q.id + '/generate', { method: 'POST' });
+        q.pdf_state = r.pdf_state;
+        // 生成順手也備好了連結（後端冪等鑄 token），所以連結鈕的字要跟著變。
+        // 這裡拿到的可能是絕對網址（設了對外網址時），複製那條路兩種形狀都吃。
+        if (r.share_url) q.share_url = r.share_url;
+        return r;
+    } finally {
+        clearInterval(timer);
+        if (btn) { btn.disabled = false; btn.textContent = wasText; }
+        _paintGenNote(noteEl, q.pdf_state);
+    }
+}
+
 function renderDetail(q) {
     document.getElementById('quote-detail-title').textContent = `Q-${q.project_name || ''}-v${q.version}`;
 
@@ -156,6 +195,17 @@ function renderDetail(q) {
             <div class="crm-prop-value${isEmpty ? ' empty' : ''}">${isEmpty ? empty : _esc(String(value))}</div>
         </div>`;
     };
+
+    // PDF 與分享連結要寄出之後才出現（owner 2026-09-07「送出再產生連結與 pdf 按鈕」）：草稿還在改，不該流出去
+    const sent = q.status !== _QUOTE_STATUSES[0];
+    // 生成也跟著寄出才給：報價單是「定稿文件」（owner 2026-09-10），草稿沒有定稿這回事，
+    // 而且後端 /share 對草稿是 422，生成完也沒有連結可發。
+    const st = q.pdf_state || null;
+    const genRow = sent && st && hasModule('crm_quotes') ? `
+        <div class="quote-gen-row">
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-generate">生成報價單</button>
+            <span id="quote-gen-note" class="quote-gen-note${st.stale ? ' warn' : ''}">${_esc(st.label)}</span>
+        </div>` : '';
 
     document.getElementById('quote-detail-info').innerHTML = `
         ${prop('專案', q.project_name)}
@@ -172,7 +222,20 @@ function renderDetail(q) {
         ${prop('付款階段', (q.payment_stages || []).map(s => s.label + ' ' + s.pct + '%').join(' / '))}
         ${prop('備註', q.terms)}
         ${q.status === '已簽核' ? `<div style="padding:12px 0;"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._quoteActivateProject('${q.project_id}')">啟動專案 (切為製作)</button></div>` : ''}
+        ${genRow}
     `;
+
+    // 生成放在詳情內容而不是上面那條動作列：那條列在 320px 的窄面板已經塞了三顆鈕，
+    // 再加一顆按鈕加一句話會擠出去。
+    const genBtn = document.getElementById('quote-btn-generate');
+    genBtn?.addEventListener('click', async () => {
+        try {
+            await _generateQuote(q, genBtn, document.getElementById('quote-gen-note'));
+            renderDetail(q);      // 連結鈕的字也跟著變，整塊重畫比一格一格改省事
+        } catch (e) {
+            alert(_U.permDeniedMsg?.('報價', e) ?? ('生成失敗：' + e.message));
+        }
+    });
 
     // Items tab
     const items = q.items || [];
@@ -198,8 +261,6 @@ function renderDetail(q) {
 
     const actions = document.getElementById('quote-bar-actions');
     if (actions) {
-        // PDF 與分享連結要寄出之後才出現（owner 2026-09-07「送出再產生連結與 pdf 按鈕」）：草稿還在改，不該流出去
-        const sent = q.status !== _QUOTE_STATUSES[0];
         // 鑄連結是管理員限定（POST /share）：非管理員只有已經有連結時才給「複製」（同手機版）
         const canShare = q.share_url || hasModule('crm_quotes');   // 第二批：分享開給 crm_quotes（後端 /share 同步放行）
         actions.innerHTML = `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="quote-btn-edit">編輯</button>`
@@ -212,19 +273,35 @@ function renderDetail(q) {
         actions.querySelector('#quote-btn-edit')?.addEventListener('click', () => quoteEdit(q.id));
         actions.querySelector('#quote-btn-pdf')?.addEventListener('click', () =>
             authDownload('/api/v1/crm/quotations/' + q.id + '/pdf', quotePdfFilename(q), '下載 PDF'));
-        // 線上檢視連結（免登入、頁上可下載 PDF）：沒有就鑄一條（冪等），然後複製完整網址
+        // 線上檢視連結（免登入、頁上可下載 PDF）：鑄一條（冪等），然後複製完整網址
         actions.querySelector('#quote-btn-share')?.addEventListener('click', async (ev) => {
             const btn = ev.currentTarget;      // await 之後 currentTarget 就是 null 了，先抓住
             try {
-                if (!q.share_url) {
+                // 只有鑄得動連結的人才打 API：沒有 crm_quotes 的人（例如從專案頁的報價子頁進來）
+                // 看得到這顆鈕只是為了複製已經有的那條，打 /share 會 403。
+                if (hasModule('crm_quotes')) {
+                    // 還沒生成（或生成後又改過）就順手先生成一份再給連結 —— 不是「提示他先去按生成」。
+                    // 理由：拿到連結的下一秒就是貼給客戶，那時客戶看到的必須是現在這一版；忘記先按的人
+                    // 不會收到任何錯誤，只有客戶會看到舊的或打不開。後端 /share 本來就會在 stale 時補送
+                    // 一發背景生成，前端等它做完只是把「已經在跑的事」變成看得見、而且複製到連結時檔案已經在了。
+                    if (q.pdf_state && q.pdf_state.stale) {
+                        await _generateQuote(q, btn, document.getElementById('quote-gen-note'));
+                    }
+                    // 🔴 一律打 /share（冪等）並用它回的網址：客戶拿到哪個網域只由後端的 quotes_public_base
+                    //    決定，不再是「按複製的人當時開在哪個網址」（開發機的 8001 根本不對外）。
                     const r = await _fetch('/quotations/' + q.id + '/share', { method: 'POST' });
                     q.share_url = r.share_url;
                     btn.textContent = '複製連結';
                 }
-                const full = location.origin + q.share_url;
+                // 設了對外網址就是絕對網址、沒設才是相對路徑（＝現況行為，沿用 location.origin）
+                const full = String(q.share_url || '').startsWith('http') ? q.share_url : location.origin + q.share_url;
                 // 共用的 copyText：非 https（LAN 直連）走 execCommand 退路，按鈕閃「已複製」；真的不行才 prompt
                 if (!(await copyText(full, btn))) prompt('連結（請自行複製）：', full);
-            } catch (e) { alert('建立連結失敗：' + e.message); }
+            } catch (e) {
+                // 順手生成那一段跟鑄連結是兩件事，錯誤抬頭要分開 —— 「建立連結失敗」配一個
+                // Playwright 的錯誤訊息，看的人會往完全錯的方向查。
+                alert((q.pdf_state && q.pdf_state.stale ? '生成報價單失敗：' : '建立連結失敗：') + e.message);
+            }
         });
     }
 }

@@ -37,6 +37,11 @@ EXPECTED = {
     ("/api/v1/crm/public/media-log/{token}/upload/{upload_id}/finish", "POST"),
     ("/api/v1/crm/public/media-log/{token}/file/{file_id}", "GET"),
     ("/api/v1/crm/public/media-log/{token}/file/{file_id}", "DELETE"),
+    # 報價單線上檢視（客戶手上的 /q/<短碼>）。該對匿名開放，因為憑證就是網址裡那串
+    # share_token —— 後端逐字比對 DB、可隨時撤銷，跟上面幾條同一種授權；而且送出去的
+    # 是寄出當下生成好的靜態快照（不查客戶、不重算金額），對外容器只是把檔案交出去。
+    ("/api/v1/crm/public/quote/{token}", "GET"),
+    ("/api/v1/crm/public/quote/{token}/pdf", "GET"),
 }
 MOUNT_PREFIX = CRM_PREFIX   # 與 _shared / main_website 共用同一個常數
 

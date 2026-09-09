@@ -45,6 +45,11 @@ EXPECTED_API = {
     ("/api/v1/crm/public/expense/{token}/expenses", "GET"),
     ("/api/v1/crm/public/expense/{token}/expenses", "POST"),
     ("/api/v1/crm/public/expense/{token}/receipts/{expense_id}", "POST"),
+    # 報價單線上檢視（客戶手上的 /q/<短碼>；nginx 把短碼 rewrite 成這條）。
+    # 憑證是網址裡的 share_token —— 後端逐字比對 DB、可撤銷；送的是寄出當下生成好的
+    # 靜態快照（HTML 與 PDF 各一份），對外容器只是把檔案交出去，不重算金額也不重畫版面。
+    ("/api/v1/crm/public/quote/{token}", "GET"),
+    ("/api/v1/crm/public/quote/{token}/pdf", "GET"),
     # 提案公開共編頁（token 授權；客戶手上的 ?t= 連結）
     ("/api/v1/proposals/shared/{token}", "GET"),
     ("/api/v1/proposals/shared/{token}/deck", "GET"),
@@ -137,13 +142,69 @@ def test_every_page_and_module_dir_is_synced():
         assert f"frontend/{d}" in SYNC_PATHS
 
 
+def _nginx_reachable_prefixes(conf):
+    """nginx 會轉進 website-api 的路徑前綴集合。
+
+    兩種寫法都要算 —— 只認 `location ^~` 的話，用 rewrite 接進來的短網址
+    （`/q/<短碼>` → `/api/v1/crm/public/quote/<短碼>`）在守衛眼裡等於不存在。
+    rewrite 的替換字串取到第一個 `$` 之前那段（`$1` 是變動的短碼本身）。
+    """
+    import re as _re
+
+    out = {m.group(1) for m in _re.finditer(r"location\s+\^~\s+(\S+)\s*\{", conf)}
+    for target in _re.findall(r"rewrite\s+\S+\s+(\S+)", conf):
+        head = target.split("$")[0]
+        if head.startswith("/"):
+            out.add(head)
+    return out
+
+
+# 掛在對外 app 上、但 nginx 刻意沒開路的前綴 —— 那一面在 NAS 上整個沒上線
+# （雜支登記的 expense.html 也不在 PAGES 裡，客戶／製片走的是 master 那條）。
+# 🔴 這裡不是「例外清單」而是待辦：要讓某一面 master 關機也能用，就補 location
+# 並把它從這裡刪掉，不要反過來把新端點加進來繞過檢查。
+_MASTER_ONLY_API_PREFIXES = ("/api/v1/crm/public/expense/",)
+
+
 def test_nginx_has_a_location_for_everything_served():
-    """nginx 沒開路徑的話，前面兩條都對也還是到不了容器。"""
+    """nginx 沒開路徑的話，前面幾條都對也還是到不了容器 —— 而且只有客戶會走到。"""
     conf = open(NGINX_CONF, encoding="utf-8").read()
     for page in PAGES:
         assert f"location = /{page}" in conf, f"nginx 少了 /{page}"
     for d in MODULE_DIRS:
         assert f"location ^~ /{d}/" in conf, f"nginx 少了 /{d}/"
+
+    reachable = _nginx_reachable_prefixes(conf)
+    for path, _m in sorted(EXPECTED_API):
+        if path.startswith(_MASTER_ONLY_API_PREFIXES):
+            continue
+        assert any(path.startswith(p) for p in reachable), (
+            f"對外 app 有 {path}，但 nginx 沒有任何 location／rewrite 轉得到它 —— "
+            f"master 關機時客戶那條連結會落到 location / 變成 404")
+
+
+def test_nginx_maps_the_short_quote_link():
+    """客戶手上的網址是 `/q/<短碼>`，而對外容器只有長 API —— 中間那段 rewrite
+    只住在 nginx conf 裡，沒有任何 Python 端會因為它不見而紅。
+
+    順帶釘住「不要在這裡碰快取」：報價是金錢文件，後端自己送 no-store，
+    location 內一旦有 add_header 還會把 server 層三個安全標頭整組吃掉。"""
+    import re as _re
+
+    conf = open(NGINX_CONF, encoding="utf-8").read()
+    block = _re.search(r"location\s+\^~\s+/q/\s*\{(.*?)\n\s*\}", conf, _re.S)
+    assert block, "nginx conf 裡找不到 /q/ 短網址的 location（客戶的報價連結會 404）"
+    body = block.group(1)
+    assert _re.search(r"rewrite\s+\S+\s+/api/v1/crm/public/quote/", body), \
+        "/q/ 沒有 rewrite 到報價的公開 API"
+    assert "proxy_pass http://website-api:8001;" in body, "/q/ 沒有轉給 website-api"
+
+    for name in ("/q/", "/api/v1/crm/public/quote/"):
+        blk = _re.search(r"location\s+\^~\s+%s\s*\{(.*?)\n\s*\}" % _re.escape(name),
+                         conf, _re.S)
+        assert blk, f"nginx conf 裡找不到 {name} 的 location"
+        assert "add_header" not in blk.group(1) and "expires" not in blk.group(1), \
+            f"{name} 不該自己設快取／標頭（會蓋掉後端 no-store 並吃掉安全標頭）"
 
 
 def test_nginx_media_log_body_cap_covers_backend_limit():

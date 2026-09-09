@@ -142,17 +142,24 @@ def test_spec_absent_from_payload_means_unchanged_not_cleared():
 
 def test_share_link_endpoints_are_token_scoped_and_reuse_one_view_helper():
     """線上檢視（owner 2026-09-07）：鑄連結是寫入（_check_quotes_auth，2026-09-08 第二批起＝crm_quotes）；
-    公開的 HTML／PDF 只認 share_token 逐字比對、掛 token_router（master 限定）；
-    三支端點共用 _quotation_view_of，不各抄一份。"""
+    公開的 HTML／PDF 只認 share_token 逐字比對；三支端點共用 _quotation_view_of，不各抄一份。
+
+    🔴 2026-09-10 起這兩支從 `token_router`（master 限定）移到 `public_router`（NAS 對外容器也掛）：
+    owner「報價單 PDF 客戶下載不要被 8000 生產機開關影響」。曝露面白名單因此也要跟著改，
+    見 test_media_log_public_router 與 test_public_surface —— **三處要同時對**。
+    """
     src = repo_src("routers/crm/quotes.py")
     share = code_only(func_body(src, "async def share_quotation("))
     assert "_check_quotes_auth(request)" in share and "new_short_token()" in share
     assert "if not q.share_token:" in share, "鑄連結要冪等，寄出去的連結不能因為再按一次就變"
-    assert '@token_router.get("/public/quote/{token}", response_class=HTMLResponse)' in src
-    assert '@token_router.get("/public/quote/{token}/pdf")' in src
+    assert '@public_router.get("/public/quote/{token}", response_class=HTMLResponse)' in src
+    assert '@public_router.get("/public/quote/{token}/pdf")' in src
+    # 匿名端點自己要過公開區開關（master 的 /q/{code} 有擋一次，但 NAS 那條沒有經過 main.py）
+    for fn in ("async def public_quote_html(", "async def public_quote_pdf("):
+        assert "await surface_gate(request)" in code_only(func_body(src, fn)), fn
     lookup = code_only(func_body(src, "async def _quotation_by_share_token("))
     assert "CrmQuotation.share_token == token" in lookup and "401" in lookup
-    for fn in ("async def quotation_pdf(", "async def public_quote_html(", "async def public_quote_pdf("):
+    for fn in ("async def quotation_pdf(", "async def _live_quote_fallback(", "async def public_quote_pdf("):
         body = code_only(func_body(src, fn))
         assert "_quotation_view_of(" in body or "_quotation_pdf_response(" in body, fn
     assert code_only(func_body(src, "async def _quotation_pdf_response(")).count("html_to_pdf(") == 1

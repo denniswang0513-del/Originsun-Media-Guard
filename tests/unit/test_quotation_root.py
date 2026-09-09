@@ -65,19 +65,26 @@ def test_frontend_root_card_is_one_shared_component():
 
 
 def test_sending_a_quotation_archives_a_pdf_on_both_desktop_and_mobile():
-    """owner 2026-09-07「報價單在送出的時候就下載一個 pdf 到資料夾裡」：狀態進 已寄送（之前不是）→ 背景產 PDF 存進資料夾。"""
+    """owner 2026-09-07「報價單在送出的時候就下載一個 pdf 到資料夾裡」：狀態進 已寄送（之前不是）→ 背景生成。
+
+    2026-09-10 起那支背景工作改叫 `generate_quotation_snapshot_quietly`（除了歸檔進資料夾，
+    還多寫一份快照到共用圖床給客戶的連結送）。**寄出仍然一定要產一份** —— owner 的
+    工作流是先按「生成報價單」再寄出，但漏按了不該就沒有檔，所以這條路留著。
+    """
     import routers.crm.quotes as Q
     from core.finance_logic import QUOTE_PENDING
     assert Q.quotation_sent_transition("草稿", QUOTE_PENDING) and not Q.quotation_sent_transition(QUOTE_PENDING, QUOTE_PENDING)
     assert not Q.quotation_sent_transition("草稿", "已簽核")
     q = repo_src("routers/crm/quotes.py")
     upd = code_only(func_body(q, "async def update_quotation("))
-    assert "prev_status = q.status" in upd and "background.add_task(archive_quotation_pdf_now, q.id)" in upd
+    assert "prev_status = q.status" in upd and "background.add_task(generate_quotation_snapshot_quietly, q.id)" in upd
     assert upd.index("await session.commit()") < upd.index("background.add_task("), "要 commit 之後才排背景工作"
     m = repo_src("routers/api_crm_mobile.py")
     mob = code_only(func_body(m, "async def mobile_quotation_status("))
-    assert "prev_status = q.status" in mob and "background.add_task(archive_quotation_pdf_now, q.id)" in mob
-    # 背景工作：失敗只記 log；頁尾只有一份
-    arch = code_only(func_body(q, "async def archive_quotation_pdf_now("))
-    assert "log.warning(" in arch and "_archive_quotation_pdf(tmp_pdf, view)" in arch
+    assert "prev_status = q.status" in mob and "background.add_task(generate_quotation_snapshot_quietly, q.id)" in mob
+    # 背景工作：失敗只記 log（寄出已經 commit 了，產不出 PDF 不能讓寄出跟著失敗）
+    quiet = code_only(func_body(q, "async def generate_quotation_snapshot_quietly("))
+    assert "log" in quiet and ".warning(" in quiet
+    gen = code_only(func_body(q, "async def generate_quotation_snapshot("))
+    assert "_archive_quotation_pdf(tmp_pdf, view)" in gen, "報價單資料夾那份不能因為改成快照就沒了"
     assert q.count("pageNumber") == 1, "頁尾模板只准一份（_pdf_footer）"

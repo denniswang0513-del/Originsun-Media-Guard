@@ -10,6 +10,10 @@
  *      （互動式的閘只有 2，撞到夜間 SEO 批次真的會排隊，那時該講實話）
  *
  * 桌機（crm-quotes.js）與手機（m/views/quote-chat.js）共用這一份。
+ *
+ * 2026-09-10 起「生成報價單」也借這支（那是 Playwright 開一顆 Chromium 畫一頁，5–15 秒）——
+ * 同樣是「按下去之後畫面靜止好幾秒」的形狀，只有典型秒數不一樣，所以開一個參數給呼叫端帶，
+ * 不要為了那一句提示語再寫第二套跳動的點。
  */
 
 /** 典型一輪的秒數（實測 2026-09-09：37–47 秒開始出字、44–52 秒完成） */
@@ -20,16 +24,17 @@ const DOTS = ['', '.', '..', '...'];
 /**
  * @param {number} elapsedMs 從按下送出到現在
  * @param {string} stage 後端回的 'queued' / 'running' / ''
+ * @param {number[]} typical [下限, 上限] 秒；預設是 AI 那一輪的量級
  * @returns {string} 要顯示的字（純文字，呼叫端自己跳脫）
  */
-export function waitingText(elapsedMs, stage = '') {
+export function waitingText(elapsedMs, stage = '', typical = TYPICAL_SECONDS) {
     const secs = Math.max(0, Math.floor((elapsedMs || 0) / 1000));
     const dots = DOTS[Math.floor(secs % DOTS.length)];
     if (stage === 'queued') {
         // 真的卡在閘門（前面還有別的 AI 工作）—— 講清楚，不要讓人以為是壞了
         return `排隊中${dots}（前面還有其他 AI 工作）${secs} 秒`;
     }
-    const [lo, hi] = TYPICAL_SECONDS;
+    const [lo, hi] = Array.isArray(typical) && typical.length === 2 ? typical : TYPICAL_SECONDS;
     // 前 10 秒不吵；超過典型時間才提醒「還在跑，只是比較久」
     const hint = secs < 10 ? '' : (secs > hi ? `　比平常久，還在跑` : `　通常 ${lo}–${hi} 秒`);
     return `處理中${dots} ${secs} 秒${hint}`;
