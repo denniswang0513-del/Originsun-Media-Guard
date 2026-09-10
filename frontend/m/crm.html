@@ -57,6 +57,10 @@
   .m-notice pre { white-space:pre-wrap; font:inherit; font-size:13px; line-height:1.6; margin:0 0 10px; color:var(--ink); }
   .m-seg button { flex:1; min-height:44px; background:var(--field); border:1px solid var(--line); border-radius:8px; color:var(--sub); font-size:14px; }
   .m-seg button.on { background:var(--pri); border-color:var(--pri); color:#fff; font-weight:600; }
+  /* 做好但還不能用的功能：講出來，不然同事會當成壞掉來回報（owner 2026-09-10 假勤）。
+     用殼裡既有的 --warn，不另配一組顏色。 */
+  .m-wip { border:1px solid var(--warn); border-radius:8px; padding:10px 12px; margin:0 0 12px;
+           color:var(--warn); font-size:13px; line-height:1.6; background:rgba(251,191,36,.08); }
   details.m-more { margin:4px 0 12px; } details.m-more summary { color:var(--sub); font-size:13px; padding:8px 0; cursor:pointer; list-style:none; }
   details.m-more summary::before { content:"＋ "; } details.m-more[open] summary::before { content:"－ "; }
   .m-hint { color:var(--sub); font-size:12px; margin:-6px 0 12px; }

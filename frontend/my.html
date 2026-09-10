@@ -97,6 +97,13 @@ main { max-width: 1100px; margin: 0 auto; padding: 104px 20px 80px; }
 .card { border: 1px solid var(--line); padding: 26px 26px 20px; min-width: 0; }
 .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 4px; cursor: pointer; user-select: none; }
 .card-head .count { font-size: 12px; color: var(--sub); }
+/* 開發中的功能：卡頭一顆徽章 ＋ 卡內一條說明。做好但還不能用的東西要講出來，
+   不然同事會當成壞掉來回報（owner 2026-09-10 假勤那張卡）。 */
+.card-head .count.wip, .wip-note { color: #b45309; }
+.card-head .count.wip { border: 1px solid #fcd34d; background: #fffbeb; border-radius: 3px;
+    padding: 1px 6px; font-size: 11px; letter-spacing: .05em; }
+.wip-note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 4px;
+    padding: 8px 10px; font-size: 12px; line-height: 1.6; margin-bottom: 12px; }
 /* 收合：點卡片標題列切換，狀態記在 localStorage */
 .card-head .fold { font-size: 11px; color: var(--sub); transition: transform .15s, color .15s; flex: 0 0 auto; }
 .card-head:hover .fold { color: var(--red); }

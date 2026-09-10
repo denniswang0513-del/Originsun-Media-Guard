@@ -5,7 +5,7 @@
 //   幾支共用同一個全域詞法環境，頂層的 const／let／function 跨檔直接看得見。
 //   改成 type="module" 每支會變成獨立作用域，所有跨檔引用都要改 import／export。
 //   載入順序＝原本 inline script 由上而下的執行順序，不可調換。
-// 跨檔用到：$、esc、money、mfetch、WS、makeCard（cards.js）
+// 跨檔用到：$、esc、money、mfetch、WS、makeCard、WIP_LABEL（cards.js）
 // 跨檔提供：cardLeave、loadLeave、cardFinance、_localToday（zone1.js／week-plan.js／parttime.js 都用）、loadMyTs
 // ────────────────────────────────────────────────────────────────────────────
 // ── 卡：我的假勤（me_leave；docs/LEAVE_PLAN.md §7.4／§7.6：時數帳＋申請單）──
@@ -19,7 +19,11 @@ let LV = null;                 // 最近一次 summary
 let _lvPreviewTimer = null;    // preview 去抖
 let _lvPreviewSeq = 0;         // 舊回應不蓋新回應
 function cardLeave(bound) {
-    const card = makeCard("My Leave", "我的假勤", "", "leave");
+    // 🔴 標「開發中」（owner 2026-09-10）：功能是做好的，但**沒有人的時數帳被匯入過**
+    //    （生產的 hr_leave_credits／hr_leave_allocations 都是 0 列），所以每個人看到的
+    //    特休與補休都是 0、送出去會被擋在「特休不足」。不標的話同事會以為是壞了。
+    //    時數帳匯入完成後把這個徽章與下面那條說明一起拿掉（docs/LEAVE_PLAN.md）。
+    const card = makeCard("My Leave", "我的假勤", WIP_LABEL, "leave");
     const body = card.querySelector(".card-body");
     if (!bound) { body.innerHTML = `<div class="empty">尚未綁定人員檔案</div>`; return card; }
     body.innerHTML = `<div class="empty">載入中…</div>`;
@@ -48,7 +52,8 @@ function renderLeave(body) {
     const parts = v.parts || Object.keys(LV_PART_FALLBACK);
     const today = _localToday();
     const expiring = (an.expiring || [])[0];
-    let html = `<div class="stat-row">
+    let html = `<div class="wip-note">開發中 —— 時數帳（特休／補休）還沒匯入，所以數字都是 0，送出的申請也還不算數。</div>
+    <div class="stat-row">
         <div class="stat"><div class="num">${_lvH(an.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(an.available)} 天）</span></div><div class="lbl">特休剩餘</div></div>
         <div class="stat"><div class="num">${_lvH(comp.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(comp.available)} 天）</span></div><div class="lbl">補休剩餘</div></div>
         <div class="stat"><div class="num">${_lvH(sick.used_days)}<span style="font-size:13px;color:var(--sub);"> / ${_lvH(sick.cap_days ?? v.sick_cap_days ?? 30)} 天</span></div><div class="lbl">病假已用</div></div>

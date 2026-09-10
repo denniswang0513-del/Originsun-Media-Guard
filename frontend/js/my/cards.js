@@ -337,6 +337,10 @@ function cardProposalPlan() {
 // key 用穩定代號而非顯示字串 —— 改標題文案不該把大家的收合狀態洗掉。
 const FOLD_KEY = "my_folded_cards";
 const FOLDED = new Set(JSON.parse(localStorage.getItem(FOLD_KEY) || "[]"));
+// 卡頭那顆數字的位置也拿來放「開發中」徽章 —— 傳這個字串就會上色（樣式在 my.html）。
+// 用常數而不是在兩邊各寫一次中文：改字時不會只改到一邊、徽章默默變回一般數字。
+const WIP_LABEL = "開發中";
+
 function makeCard(en, zh, countText, key) {
     const foldKey = key || en;
     const el = document.createElement("div");
@@ -344,7 +348,7 @@ function makeCard(en, zh, countText, key) {
     el.dataset.card = foldKey;                  // 供測試/除錯定位用
     el.innerHTML = `<div class="card-head"><span class="eyebrow">${en} <span class="accent">${zh}</span></span>
         <span style="display:flex;align-items:baseline;gap:10px;">
-            ${countText ? `<span class="count">${countText}</span>` : ""}
+            ${countText ? `<span class="count${countText === WIP_LABEL ? " wip" : ""}">${countText}</span>` : ""}
             <span class="fold">▾</span>
         </span></div><div class="card-body"></div>`;
     if (FOLDED.has(foldKey)) el.classList.add("folded");

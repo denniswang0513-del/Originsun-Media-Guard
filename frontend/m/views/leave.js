@@ -33,7 +33,7 @@ function leaveTypes() {
     return [];
 }
 /** 時段：後端給 parts=['all','am',…] ＋ part_labels={all:'整天',…}（core/leave_logic.vocab），統一成 [{value,label}]。
- *  🔴 label 一定要查 part_labels：只用 value 當 label 的話，抽屜裡顯示的是 all／am／pm／range。 */
+ *   label 一定要查 part_labels：只用 value 當 label 的話，抽屜裡顯示的是 all／am／pm／range。 */
 function parts() {
     const v = vocab().parts, labels = vocab().part_labels || {};
     if (Array.isArray(v)) return v.map(x => (typeof x === 'object' ? { value: x.value, label: x.label || labels[x.value] || x.value }
@@ -319,6 +319,11 @@ export async function render(host, { first }) {
     if (first) {
         host.innerHTML = `
           <div class="m-h">我的假勤</div>
+          <!-- 開發中（owner 2026-09-10）：功能是做好的，但**沒有人的時數帳被匯入過**
+               （生產的 hr_leave_credits／hr_leave_allocations 都是 0 列），所以每個人看到的
+               特休與補休都是 0、送出去會被擋在「特休不足」。不標的話同事會以為是壞了。
+               桌機 /my.html 那張卡有同一條，時數帳匯入完成後兩邊一起拿掉（docs/LEAVE_PLAN.md）。 -->
+          <div class="m-wip">開發中 —— 時數帳（特休／補休）還沒匯入，所以數字都是 0，送出的申請也還不算數。</div>
           <div id="lv-stats-box"></div>
           <div class="m-actions" style="margin:0 0 12px">
             <button type="button" class="m-btn pri" id="lv-new" disabled>請假</button>
