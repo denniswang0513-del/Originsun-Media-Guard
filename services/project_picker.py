@@ -52,11 +52,27 @@ async def list_options(session, *, extra: tuple = ()) -> list:
     rows = sorted(rows, key=lambda r: (touched[r[0]] is None,
                                        -(touched[r[0]].toordinal() if touched[r[0]] else 0), r[1] or ""))
 
-    # 已連結的母私帳只列一個（owner 2026-09-06：同名出現兩次）。工時對映只認私帳，所以留私帳那筆、
-    # 母帳那筆若它的私帳分身也在清單裡就不列；連結兩種形狀都認（母帳 mine_link_id／私帳 source_project_id）
-    listed = {r[0] for r in rows}
-    shadowed = {r[0] for r in rows if r[7] != "mine" and r[8] in listed}
-    shadowed |= {r[9] for r in rows if r[7] == "mine" and r[9] in listed}
+    # 已連結的母私帳只列一個（owner 2026-09-06：同名出現兩次）。工時對映只認私帳，所以**預設留私帳那筆**；
+    # 連結兩種形狀都認（母帳 mine_link_id／私帳 source_project_id），兩邊各掃一次算出來的是同一對、同一個決定。
+    #
+    # 🔴 例外：呼叫端點名了 `extra` 欄位（＝備份三根）而**只有母帳那筆真的有值**時留母帳。
+    # 備份三根的正本在專案上，而設定的人多半只看得到母帳那筆（私帳案對沒有 finance_mine 的人
+    # 整個不可見），所以值幾乎都落在母帳。一律留私帳的話，備份頁只選得到那個空殼分身：
+    # 畫面說「這個案還沒設定備份資料夾」、`core.worker._apply_project_roots` 用那個 id 反查也讀不到，
+    # 於是靜默退回手動填的路徑 —— 綁定對這個案等於失效，而且沒有任何徵兆。
+    by_id = {r[0]: r for r in rows}
+    n_base = len(base)
+
+    def _has_extra(row) -> bool:
+        return any(str(v or "").strip() for v in row[n_base:])
+
+    shadowed = set()
+    for r in rows:
+        parent, mine = (r[0], r[8]) if r[7] != "mine" else (r[9], r[0])
+        if parent == mine or parent not in by_id or mine not in by_id:
+            continue
+        keep_parent = bool(extra) and _has_extra(by_id[parent]) and not _has_extra(by_id[mine])
+        shadowed.add(mine if keep_parent else parent)
 
     opts = []
     for r in rows:
@@ -70,6 +86,6 @@ async def list_options(session, *, extra: tuple = ()) -> list:
         opt = {"id": r[0], "name": r[1] or "", "client": client, "year": year,
                "closed": is_closed(st),
                "label": " ".join(x for x in (year, client, r[1] or "") if x)}
-        opt.update(dict(zip(extra, r[11:])))
+        opt.update(dict(zip(extra, r[n_base:])))
         opts.append(opt)
     return opts

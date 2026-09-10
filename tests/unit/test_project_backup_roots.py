@@ -326,6 +326,34 @@ class TestSharedProjectList:
                          _p("s", "某案", entity="mine", source_project_id="m")])
         assert [o["id"] for o in opts] == ["s"]
 
+    def test_the_row_that_actually_has_the_backup_roots_wins(self):
+        """🔴 三根多半設在母帳那筆（私帳案對沒有 finance_mine 的人整個看不見，
+        設定的人打不開）。一律留私帳的話備份頁只選得到那個空殼分身：畫面說
+        「還沒設定」、`_apply_project_roots` 用那個 id 反查也讀不到，於是靜默
+        退回手動填的路徑 —— 綁定對這個案等於失效，而且沒有任何徵兆。"""
+        cols = ("backup_local_root", "backup_nas_root", "backup_proxy_root")
+        pair = [_p("m", "某案", entity="parent", mine_link_id="s",
+                   extra=(NAS + r"\x", "", "")),
+                _p("s", "某案", entity="mine", source_project_id="m",
+                   extra=("", None, ""))]
+        assert [o["id"] for o in _options(pair, extra=cols)] == ["m"]
+        # 沒點名 extra（＝工時那條路）規則原封不動：留私帳那筆
+        assert [o["id"] for o in _options(pair)] == ["s"]
+
+    def test_the_mine_row_still_wins_when_it_has_roots_of_its_own(self):
+        cols = ("backup_local_root", "backup_nas_root", "backup_proxy_root")
+        pair = [_p("m", "某案", entity="parent", mine_link_id="s",
+                   extra=(NAS + r"\x", "", "")),
+                _p("s", "某案", entity="mine", source_project_id="m",
+                   extra=(NAS + r"\y", "", ""))]
+        assert [o["id"] for o in _options(pair, extra=cols)] == ["s"]
+
+    def test_neither_side_has_roots_keeps_the_mine_row(self):
+        cols = ("backup_local_root", "backup_nas_root", "backup_proxy_root")
+        pair = [_p("m", "某案", entity="parent", mine_link_id="s", extra=("", "", "")),
+                _p("s", "某案", entity="mine", source_project_id="m", extra=("", "", ""))]
+        assert [o["id"] for o in _options(pair, extra=cols)] == ["s"]
+
     def test_recently_touched_comes_first(self):
         from datetime import date
         opts = _options([_p("old", "很久沒動", updated=date(2024, 1, 1)),

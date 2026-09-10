@@ -688,15 +688,23 @@ export function initBackupTab() {
 
     // 綁定 CRM 專案：載入可選專案 + 選了就鎖住三個根目錄並帶入
     loadBackupProjects();
-    attachProjectPop(document.getElementById('bk_project_row') || document, { options: () => _bkProjects });
+    const _projRow = document.getElementById('bk_project_row');
+    attachProjectPop(_projRow, { options: () => _bkProjects });
     const _onProjectChanged = () => {
         _bkRootFlash = {};              // 換案了：上一案的「已存回／沒寫入」小字要收掉
         bkSyncProjectRoots({ fill: true });
     };
     // 選到一個案＝浮層先派 input（帶 _fromPick）再派 change；人自己打字改掉案名時
     // 浮層會清掉 data-pid，那時只有 input 會來 —— 兩個都聽才不會停在「還鎖著」。
-    _bkProjectInput()?.addEventListener('change', _onProjectChanged);
-    _bkProjectInput()?.addEventListener('input', (ev) => { if (!ev._fromPick) _onProjectChanged(); });
+    //
+    // 🔴 掛在**外層那個 div**、而且要在 attachProjectPop 之後掛：浮層清 data-pid 的
+    // 那支監聽器是委派在這個 div 上的（冒泡階段），掛在 input 自己身上的監聽器屬於
+    // 目標階段、**會先跑** —— 那時 pid 還在，等於用上一個案又 fill 一次然後鎖回去，
+    // 而 pid 隨即被清掉、不會再有事件把它解開。症狀：把案名整串選起來刪掉（只有一個
+    // input 事件），三個根目錄就卡在唯讀、提示還指著剛剛那個案。同一個 div 上的監聽器
+    // 照註冊順序跑，所以這兩行必須排在 attachProjectPop 後面。
+    _projRow?.addEventListener('change', _onProjectChanged);
+    _projRow?.addEventListener('input', (ev) => { if (!ev._fromPick) _onProjectChanged(); });
 
     // 路徑書籤：載入清單 + 選了即套用
     loadBookmarks();

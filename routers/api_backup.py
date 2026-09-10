@@ -113,9 +113,12 @@ async def list_backup_roots(request: Request, q: str = "", limit: int = 0):
     owner 的原話（「不篩，連專案工時也不篩」）—— 備份最常發生在案子結束之後，
     篩掉結案的案等於真的要用的時候剛好選不到。
 
-    `q`／`limit` 留著給舊分頁（Cloudflare 給 `.js` 四小時快取，發版後會有一輪
-    「新 html ＋ 舊 js」）：舊的 js 送 `limit=200`，照樣拿得到前 200 筆最近的案，
-    形狀也還是它認得的（多出來的欄位它不看）。不帶 `limit`＝整份。
+    `q`／`limit` 留著不刪：送 `limit=200` 照樣拿得到前 200 筆、形狀也還是舊的
+    js 認得的（多出來的欄位它不看）。不帶 `limit`＝整份。
+    ⚠️ 但**別把它當成 Cloudflare 那一輪「新 html ＋ 舊 js」的相容殼**：新 html
+    已經沒有 `<select id="bk_project_sel">`，舊的 `loadBackupProjects()` 第一行
+    `if (!sel) return;` 就走了，根本不會打這支。那一輪（最多 4 小時）備份頁的
+    「綁定專案」整塊不出現、三根維持手動輸入 —— 不會壞，只是沒有。
     """
     check_lan_or_logged_in(request)
     factory = await _factory()
@@ -128,7 +131,7 @@ async def list_backup_roots(request: Request, q: str = "", limit: int = 0):
         # 理由：私帳的案子一樣要備份，備檔電腦選不到就只能手打路徑，等於這整個
         # 功能對私帳案失效。代價是案名對區網免登入可見（這支守 check_lan_or_logged_in）。
         # 🔴 讓這個例外可以接受的前提是**這支不帶錢**：白名單投影在 _picker_view
-        # （TestRootViewProjection.test_money_never_leaks 釘著）。要往這支加欄位之前，
+        # （TestPickerProjection.test_money_never_leaks 釘著 —— 單筆那支是 TestRootViewProjection）。要往這支加欄位之前，
         # 先回來讀這一段 —— 加了任何金額欄，這個例外就不成立了。
         async with factory() as session:
             opts = await list_options(session, extra=tuple(col for _f, col in _WRITE_MAP))
