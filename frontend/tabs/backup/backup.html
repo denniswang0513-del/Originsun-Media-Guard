@@ -40,15 +40,35 @@
             </div>
             <div class="text-[11px] text-gray-500 mt-1">書籤全機器共用；路徑照常打 <span class="text-gray-400">T:\</span> 也可以 — 送出時系統會自動翻成 UNC，不受各機磁碟代號影響（對應表在右上角選單「磁碟對應」）</div>
         </div>
+        <!-- 綁定 CRM 專案：三個根目錄的正本住在專案上。
+             已設定的那幾根在這裡唯讀（要改去專案頁）；專案上還沒填的那幾根
+             可以在這裡填好按「儲存到專案」補回去（後端只填空、不覆寫）。
+             三根各自獨立，混合狀態是正常的。 -->
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">綁定專案 (CRM Project)</label>
+            <div class="flex gap-2 items-center">
+                <select id="bk_project_sel"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-2 py-2 text-sm focus:outline-none focus:border-blue-500">
+                    <option value="">不綁專案（下方三個路徑自己填）</option>
+                </select>
+                <button onclick="bkClearProject()" title="解除綁定，三個根目錄改回可手動編輯（目前的值會保留）"
+                    class="bg-[#333] hover:bg-[#444] text-gray-300 border border-[#555] rounded px-3 py-2 text-xs transition whitespace-nowrap">解除綁定</button>
+            </div>
+            <div id="bk_project_hint" class="text-[11px] text-gray-500 mt-1 hidden"></div>
+        </div>
         <div>
             <label class="block text-sm font-medium text-gray-400 mb-1">專案素材區 (Local Root)</label>
             <div class="flex gap-2">
                 <input type="text" id="local_root"
                     class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm"
                     value="C:/A_TEST_DEST">
-                <button onclick="pickPath('local_root', 'folder')"
+                <button onclick="pickPath('local_root', 'folder')" data-pick-for="local_root"
                     class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+                <button id="bk_save_local_root" onclick="bkSaveRootToProject('local_root')" data-save-for="local_root"
+                    title="把這個路徑存回綁定的專案（只補空白，不會覆寫專案上已有的設定）"
+                    class="hidden bg-[#2a4a2a] hover:bg-[#3a6a3a] text-green-200 border border-[#3a6a3a] rounded px-3 text-xs transition whitespace-nowrap">儲存到專案</button>
             </div>
+            <div id="bk_note_local_root" class="text-[11px] text-gray-500 mt-1 hidden"></div>
         </div>
         <div>
             <label class="block text-sm font-medium text-gray-400 mb-1">異地備份區 (NAS Root)</label>
@@ -56,9 +76,13 @@
                 <input type="text" id="nas_root"
                     class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm"
                     value="C:/A_TEST_NAS">
-                <button onclick="pickPath('nas_root', 'folder')"
+                <button onclick="pickPath('nas_root', 'folder')" data-pick-for="nas_root"
                     class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+                <button id="bk_save_nas_root" onclick="bkSaveRootToProject('nas_root')" data-save-for="nas_root"
+                    title="把這個路徑存回綁定的專案（只補空白，不會覆寫專案上已有的設定）"
+                    class="hidden bg-[#2a4a2a] hover:bg-[#3a6a3a] text-green-200 border border-[#3a6a3a] rounded px-3 text-xs transition whitespace-nowrap">儲存到專案</button>
             </div>
+            <div id="bk_note_nas_root" class="text-[11px] text-gray-500 mt-1 hidden"></div>
         </div>
         <div>
             <label class="block text-sm font-medium text-gray-400 mb-1">Proxy轉檔區 (Proxy Root)</label>
@@ -66,9 +90,13 @@
                 <input type="text" id="proxy_root"
                     class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm"
                     value="C:/A_TEST_PROXY">
-                <button onclick="pickPath('proxy_root', 'folder')"
+                <button onclick="pickPath('proxy_root', 'folder')" data-pick-for="proxy_root"
                     class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+                <button id="bk_save_proxy_root" onclick="bkSaveRootToProject('proxy_root')" data-save-for="proxy_root"
+                    title="把這個路徑存回綁定的專案（只補空白，不會覆寫專案上已有的設定）"
+                    class="hidden bg-[#2a4a2a] hover:bg-[#3a6a3a] text-green-200 border border-[#3a6a3a] rounded px-3 text-xs transition whitespace-nowrap">儲存到專案</button>
             </div>
+            <div id="bk_note_proxy_root" class="text-[11px] text-gray-500 mt-1 hidden"></div>
         </div>
     </div>
 

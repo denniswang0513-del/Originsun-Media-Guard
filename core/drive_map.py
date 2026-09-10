@@ -147,6 +147,20 @@ def to_canonical_path(path: str) -> str:
     return NAS_UNC_HOST + ("\\" + rest.replace("/", "\\") if rest else "")
 
 
+def to_canonical(path: str) -> str:
+    """`to_local_path` 的完整反向：使用者打的任何形式 → 存得進 DB 的 canonical UNC。
+
+    兩段都要走（跟 to_local_path 對稱）：
+      stage 1  translate_path    磁碟代號 → UNC（master/機隊打的 `T:\\…`）
+      stage 2  to_canonical_path 本機掛載點 → UNC（NAS 容器打的 `/share/…`）
+
+    **跨機共用的路徑設定要存進 DB 之前一律走這個入口**（如 crm_projects 的備份
+    三根）：存 `T:\\` 進 DB，沒掛那顆磁碟的機器就開不到 —— 2026-07-21 煥民新村
+    備份 6 連敗的同一個病。本機碟（C:/D:/E: 讀卡槽）不在 map 內，原樣通過。
+    """
+    return to_canonical_path(translate_path(path))
+
+
 _PATH_BAD_CHARS = set('<>"|?*')
 
 

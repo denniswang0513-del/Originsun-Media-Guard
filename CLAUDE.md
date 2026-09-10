@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v2.4.406（2026-09-10）<!-- publish_update.py 自動維護，勿手改 -->
+> **版本**: v2.5.0（2026-09-10）<!-- publish_update.py 自動維護，勿手改 -->
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe main.py`
@@ -1287,6 +1287,8 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | `routers/crm/invoice_files.py` 的對外段 | `/e/{短碼}` 那頁的三支公開端點（meta／download／舊長網址）＋ 分享時定稿 | 掛 `public_router`＝NAS 對外容器也吃得到；**永遠 attachment 不 inline**；路徑要過 `drive_map.to_local_path` 才比白名單；開不到檔就 422，不要鑄一條下載會 404 的連結 |
 | `routers/crm/invoice_files.py` 的路徑段 | `_invoices_root`（設定正本）／`_invoices_write_root`（這台看得到的視角，寫檔用）／`_stored_path`（存進 DB 的 canonical UNC）／`_local_invoice_path`（讀檔＋白名單） | **讀寫兩側都要翻譯**；檔名一律 `ntpath.basename`；白名單只有 `_local_invoice_path` 一份 |
 | `routers/crm/quotes.py` 的生成／對外段 | `generate_quotation_snapshot`（產 PDF ＋ HTML → 歸檔進報價單資料夾 ＋ 寫快照進共用圖床 ＋ 刪舊快照）、`public_quote_html`／`public_quote_pdf`（**送**快照） | **產**只在 master（Playwright 在那），**送**在哪都行 —— 對外那兩支掛 `public_router`，NAS 對外容器也吃得到，master 關機客戶照樣打得開 |
+| [`routers/api_backup.py`](routers/api_backup.py) 的三根投影 | 備份三根（本機／NAS／Proxy）的**正本在 `crm_projects.backup_*_root`**，這裡是機隊的讀取口：`/api/v1/projects/backup-roots`（選擇器）＋ `/{id}`（單筆） | **不准改成重用 `/crm/projects`**：那支帶錢，這支是白名單投影（只給 id／name／三根）。守衛是 `check_lan_or_logged_in`（備檔電腦沒人登入，用模組鑰匙守＝鎖死備份頁）。**私帳案在這支照樣列出、照樣可勾選**（owner 2026-09-10 拍板，對 2026-08-28「連專案都看不到」的局部例外，已進 `test_money_visibility` 的 EXEMPT 並寫了理由）—— 例外成立的前提是**這支不帶錢**，要加欄位前先回去讀那段。回存端點 `PUT .../{id}` **只填空不覆寫**（免登入端點的能力就限縮在補空白；要改設定去專案頁）。DB 斷線回 200 + `db_offline`，**絕不擋派工**。路徑存 canonical UNC、回前端前才 `to_local_path` 翻成當台視角；寫入端唯一入口是 `routers/crm/projects.normalize_backup_roots`（過 `drive_map.to_canonical`）。綁了專案時三根由 `core.worker._apply_project_roots` 從 DB **覆寫**前端送的值 —— 唯讀只做在 UI 上，改個 DOM 就繞過去了。跟 `folder_path`（工作資料夾完整路徑）是不同形狀的東西，不要合併 |
+| [`core/nas_auth.py`](core/nas_auth.py) | SMB session 韌性：`ensure_ready`（任務開跑前戳每個 share 根目錄，不通先退避重連再 fail fast）、`reconnect_with_backoff`（**15 秒 ×5**，owner 2026-09-10 拍板）、`guard`（認證類 WinError → 退避重連 → 重跑一次）、`friendly`（WinError → 可行動中文） | 跟 `drive_map` 是兩件事：那支管「哪台有掛磁碟」（`T:\`→UNC），這支管「哪台有認證」（UNC 開得起來）。**帳密一律傳 NULL**，走 Windows 認證管理員，程式裡不存 NAS 密碼；`WNetCancelConnection2` 一律 `fForce=FALSE`（絕不把別的任務正在用的磁碟抽掉）；重試白名單不收 `5 ACCESS_DENIED`（那是真沒權限，重連幾次都一樣）。**冷卻閘不能拿掉**：`guard` 是逐檔呼叫的，整輪退避失敗後把該 share 判死 60 秒，否則 NAS 掛掉時 5000 檔 × 60 秒＝83 小時殭屍任務；等待一律吃 `should_stop`（停止鍵要能在退避中生效）。非 Windows（NAS Linux 容器）整支 no-op |
 
 
 ## 不要動的地方
@@ -1304,6 +1306,8 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **`/api/settings/load` 是匿名端點，機密分兩層**（2026-09-08 稽核）：`_SECRET_KEYS`／`_SECRET_SUBKEYS`（簽得出 admin 的：jwt_secret、database_url、
   google secret）連管理員也不回；`_ADMIN_ONLY_SUBKEYS`（工時同步 token、四個 webhook）只回給管理員 token（設定視窗要顯示才能編）。新增機密欄位要進其中一層。
   內部重啟端點（`/internal/restart`、`/system/restart`）的金鑰字串隨 OTA 包公開，安全靠 `core.auth.via_cloudflare` 把公網那條路擋掉——**別**把金鑰換成 `_get_secret()`，機隊各自的 jwt_secret 不共用，master 會推不動 agent。
+  **同一個地雷踩過第二次**（2026-09-10）：`/api/v1/internal/alert_email` 兩邊都用 `_get_secret()`，於是機隊送自己的 jwt_secret、master 比自己的 → 對**任何非 master 節點永遠 403**，`CRITICAL_ALERTS` 的 🔴 email 一封都沒寄成功過（備檔電腦三次備份失敗全被吞掉，只有盯螢幕才看得見）。
+  現在用 `notifier.INTERNAL_ALERT_KEY` ＋ `via_cloudflare`，`_get_secret()` 那條只留給 master↔NAS（那兩個確實共用同一把）。判斷準則：**跨機隊的 internal 端點一律用隨 OTA 發的固定字串，jwt_secret 只在 master↔NAS 之間有效**。`tests/unit/test_alert_email_relay.py` 兩邊都釘住了。
 - **捆鑰匙（2026-09-08 階段 4）**：`postprod`／`preprod`／`hr` 三把捆＝`core.auth.MODULE_BUNDLES` 的成員；帳號與範本存捆、`expand_modules` 在發 token／存帳號／回填時展開成「捆＋成員」。
   守衛請繼續用**成員鍵**（`check_admin_or_module(request,'footage')`），不要拿捆當守衛鍵；新增可勾選模組仍是三處同步（`ALL_MODULES`／`PERMISSION_GROUPS`／`MODULE_LABELS` 前後端），成員鍵不進 `ALL_MODULES`（`test_module_bundles` 釘住）。
 - **權限三個正本（2026-09-08 稽核後）**：`core.auth.MODULE_LABELS`（鑰匙中文名，403 detail 用它說「缺哪把」；`test_batch3_one_ruler` 釘鍵集＝ALL_MODULES）、

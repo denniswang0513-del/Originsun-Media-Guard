@@ -1,4 +1,4 @@
-import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop, renderHostCheckboxes, collectSelectedHosts, todayStamp } from '../../js/shared/utils.js';
+import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop, renderHostCheckboxes, collectSelectedHosts, todayStamp, authFetch, esc } from '../../js/shared/utils.js';
 import { loadReportHistory } from '../../js/shared/report-history.js';
 
 let sourceIndex = 0;
@@ -40,6 +40,270 @@ function getSelectedHosts() {
 }
 
 
+// ── 綁定 CRM 專案（2026-09-10 owner）────────────────────────────
+// 三個根目錄（本機／NAS／Proxy）的**正本住在 CRM 專案上**。
+// 優先序：專案設定 > 書籤 > 手打。有綁專案時後端也會以 DB 的三根為準、忽略
+// 前端送的路徑，所以這裡送什麼都不影響安全性 —— 但仍照實送。
+//
+// 🔴 **逐根**判斷，不是整組（owner 追加）：
+//   · 專案上那一根有值 → readonly + 灰底，要改去專案頁
+//   · 專案上那一根是空的 → 照常可編輯，並長出「儲存到專案」把它補回去
+//     （PUT /api/v1/projects/backup-roots/{id}，後端**只填空、不覆寫**）
+//   三根混合狀態是正常的（NAS 已設定＝唯讀、本機還沒填＝可編輯可存），UI 要撐得住。
+//
+// 端點回的三個路徑後端**已經翻成「呼叫這台機器看得到的視角」**，
+// 前端直接顯示即可，不要再做 UNC／磁碟代號加工。
+//
+// 清單不做任何過濾（私帳案 entity='mine' 照樣顯示、照樣可選 —— 後端已不過濾）。
+//
+// 讀不到專案清單（DB 離線 / 沒登入 / 舊 agent 沒這支端點）一律**不擋派工**：
+// 選擇器停用 + 標示，三個 input 維持可編輯。
+const BK_ROOT_IDS = ['local_root', 'nas_root', 'proxy_root'];
+const BK_ROOT_LABELS = {
+    local_root: '本機備份根目錄',
+    nas_root: 'NAS 備份根目錄',
+    proxy_root: 'Proxy 輸出根目錄',
+};
+
+let _bkProjects = [];
+let _bkProjectsUnavailable = false;
+// 剛存回專案 / 被 skip 的那一根要顯示的一次性小字：{ [rootId]: { msg, tone } }
+let _bkRootFlash = {};
+
+function _bkProjectSel() { return document.getElementById('bk_project_sel'); }
+
+/** 目前綁定的專案物件（沒綁 / 找不到 → null）。 */
+function bkSelectedProject() {
+    const id = _bkProjectSel()?.value || '';
+    if (!id) return null;
+    return _bkProjects.find(p => String(p.id) === String(id)) || null;
+}
+
+/** 專案上這一根有沒有設定（沒綁專案 → 一律 false）。 */
+function _bkRootIsSet(proj, rootId) {
+    return !!(proj && String(proj[rootId] || '').trim());
+}
+
+/** 鎖住 / 放開一個根目錄輸入框（含旁邊的 📁 選路徑按鈕）。 */
+function _bkSetRootLocked(elId, locked) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.readOnly = locked;
+    el.classList.toggle('bg-[#1e1e1e]', !locked);
+    el.classList.toggle('bg-[#2b2b2b]', locked);
+    el.classList.toggle('text-gray-400', locked);
+    el.classList.toggle('cursor-not-allowed', locked);
+    el.title = locked ? '由綁定的專案帶入，要改請到專案頁' : '';
+    // 用 data-pick-for 指名，別用 querySelector('button') —— 同一列現在有兩顆按鈕
+    const pick = el.parentElement?.querySelector(`button[data-pick-for="${elId}"]`);
+    if (pick) {
+        pick.disabled = locked;
+        pick.classList.toggle('opacity-40', locked);
+        pick.classList.toggle('cursor-not-allowed', locked);
+    }
+}
+
+/** 一根的小字提示（唯讀來源 / 可補存 / 剛存完的結果）。 */
+function _bkSetRootNote(rootId, html, tone = 'muted') {
+    const note = document.getElementById('bk_note_' + rootId);
+    if (!note) return;
+    const color = tone === 'warn' ? 'text-amber-400' : tone === 'ok' ? 'text-green-400' : 'text-gray-500';
+    note.className = `text-[11px] ${color} mt-1${html ? '' : ' hidden'}`;
+    note.innerHTML = html || '';
+}
+
+// 純導覽連結（`#tab_crm_projects` 交給 app.js 的 hashchange 自己走過去）。
+// 🔴 **不要**在這裡用程式把 CRM 專案分頁拉起來 —— 備檔電腦開備份頁不該為了
+// 一個連結付整頁 CRM 的請求代價。這條由
+// tests/unit/test_frontend_request_budget.py::test_tab_defaults_live_in_their_own_init 釘著。
+function _bkProjectLink(proj) {
+    return `<a href="#tab_crm_projects"
+        class="underline text-blue-400 hover:text-blue-300">到專案頁改「${esc(proj.name || proj.id)}」的備份根目錄 ↗</a>`;
+}
+
+/**
+ * 依目前選中的專案同步三個根目錄的鎖定狀態與提示（逐根）。
+ * @param {boolean} fill  true＝把專案**已設定**的那幾根填進 input；
+ *                        false＝只改鎖定狀態，值一律保留（解除綁定時用）。
+ *                        專案上沒設定的那幾根**任何情況都不清空**——使用者打的字
+ *                        正是他要按「儲存到專案」補回去的東西。
+ */
+function bkSyncProjectRoots({ fill = true } = {}) {
+    const proj = bkSelectedProject();
+
+    for (const id of BK_ROOT_IDS) {
+        const isSet = _bkRootIsSet(proj, id);
+        const locked = !!proj && isSet;
+        if (locked && fill) {
+            const el = document.getElementById(id);
+            if (el) el.value = proj[id];
+        }
+        _bkSetRootLocked(id, locked);
+
+        const saveBtn = document.getElementById('bk_save_' + id);
+        if (saveBtn) saveBtn.classList.toggle('hidden', !(proj && !isSet));
+
+        const flash = _bkRootFlash[id];
+        if (flash) {
+            _bkSetRootNote(id, flash.msg, flash.tone);
+        } else if (!proj) {
+            _bkSetRootNote(id, '');
+        } else if (isSet) {
+            _bkSetRootNote(id, '來自專案設定，要改請到專案頁。');
+        } else {
+            _bkSetRootNote(id, `這個案還沒設定這一根 —— 填好可按「儲存到專案」補回專案（不會覆蓋別人已設定的）。`, 'warn');
+        }
+    }
+
+    const hint = document.getElementById('bk_project_hint');
+    if (!hint) return;
+
+    if (!proj) {
+        if (_bkProjectsUnavailable) {
+            hint.className = 'text-[11px] text-amber-400 mt-1';
+            hint.textContent = '目前讀不到專案清單，三個根目錄請手動填寫 —— 不影響派工。';
+        } else {
+            hint.className = 'text-[11px] text-gray-500 mt-1 hidden';
+            hint.textContent = '';
+        }
+        return;
+    }
+
+    const missing = BK_ROOT_IDS.filter(id => !_bkRootIsSet(proj, id));
+    const link = _bkProjectLink(proj);
+    if (missing.length === BK_ROOT_IDS.length) {
+        hint.className = 'text-[11px] text-amber-400 mt-1';
+        hint.innerHTML = `⚠️ 這個案還沒設定備份資料夾（本機／NAS／Proxy 三個根目錄都是空的）。`
+            + `下面填好可以直接按「儲存到專案」補回去，或${link}`;
+    } else if (missing.length) {
+        hint.className = 'text-[11px] text-amber-400 mt-1';
+        hint.innerHTML = `⚠️ 這個案的備份資料夾沒設定完，缺：${missing.map(id => esc(BK_ROOT_LABELS[id])).join('、')}。`
+            + `填好可按「儲存到專案」補回去，或${link}`;
+    } else {
+        hint.className = 'text-[11px] text-gray-500 mt-1';
+        hint.innerHTML = `三個路徑來自專案設定，要改請到專案頁。${link}`;
+    }
+}
+
+/**
+ * 把某一根存回綁定的專案（PUT /api/v1/projects/backup-roots/{project_id}）。
+ * 後端**只填空、不覆寫**：專案上已經有值的會回在 `skipped`（代表別人剛好搶先設定），
+ * 這時把那幾根切成唯讀並顯示 skipped_reason。db_offline **不清掉使用者打的字**。
+ */
+async function bkSaveRootToProject(rootId) {
+    const proj = bkSelectedProject();
+    if (!proj) return;
+    const el = document.getElementById(rootId);
+    const val = String(el?.value || '').trim();
+    if (!val) { alert(`請先填「${BK_ROOT_LABELS[rootId] || rootId}」的路徑再儲存到專案`); return; }
+
+    const btn = document.getElementById('bk_save_' + rootId);
+    const origText = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = '儲存中…'; }
+    try {
+        const res = await authFetch(
+            getComputeBaseUrl() + '/api/v1/projects/backup-roots/' + encodeURIComponent(proj.id),
+            { method: 'PUT', body: { [rootId]: val } },
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || data.message || ('HTTP ' + res.status));
+
+        if (data.status === 'db_offline') {
+            _bkRootFlash[rootId] = { msg: '⚠️ 存不回專案：資料庫目前讀不到。你打的路徑保留著，這次派工照樣送得出去。', tone: 'warn' };
+            appendLog('存不回專案：資料庫目前讀不到（路徑保留，不影響派工）', 'error');
+            bkSyncProjectRoots({ fill: false });   // 🔴 fill:false — 不要動使用者打的字
+            return;
+        }
+        if (data.status === 'not_found') {
+            _bkRootFlash[rootId] = { msg: '⚠️ 找不到這個專案（可能剛被刪掉），請重新選擇。', tone: 'warn' };
+            appendLog('存不回專案：找不到該專案', 'error');
+            bkSyncProjectRoots({ fill: false });
+            return;
+        }
+
+        // ok：用回傳的最新專案物件取代快取（三根已翻成本機視角）
+        if (data.project) {
+            const i = _bkProjects.findIndex(p => String(p.id) === String(data.project.id));
+            if (i >= 0) _bkProjects[i] = data.project;
+            else _bkProjects.push(data.project);
+        }
+        const saved = Array.isArray(data.saved) ? data.saved : [];
+        const skipped = Array.isArray(data.skipped) ? data.skipped : [];
+        const label = (k) => BK_ROOT_LABELS[k] || k;
+
+        // 只覆蓋這次牽涉到的那幾根 —— 別的根先前存成功的綠字留著（換案時才整批清）
+        for (const k of saved) {
+            _bkRootFlash[k] = { msg: `✅ 已存回專案「${esc(proj.name || proj.id)}」，之後這一根就以專案設定為準。`, tone: 'ok' };
+        }
+        if (saved.length) appendLog(`已存回專案「${proj.name || proj.id}」：${saved.map(label).join('、')}`, 'system');
+        if (skipped.length) {
+            const reason = data.skipped_reason || '這幾根專案上已經有設定了，要修改請到專案頁';
+            for (const k of skipped) _bkRootFlash[k] = { msg: `⚠️ 沒有寫入：${esc(reason)}`, tone: 'warn' };
+            appendLog(`未寫入：${skipped.map(label).join('、')} —— ${reason}`, 'system');
+        }
+        if (data.warning) {
+            appendLog(`⚠️ ${data.warning}`, 'system');
+            // 警告不是錯誤，值已經存進去了 —— 綠字後面補一句，別讓它只躺在 log 裡
+            for (const k of saved) {
+                _bkRootFlash[k] = { msg: `${_bkRootFlash[k].msg} ⚠️ ${esc(data.warning)}`, tone: 'warn' };
+            }
+        }
+
+        // saved / skipped 的根在最新的 project 上都有值了 → 這次重畫會切成唯讀
+        bkSyncProjectRoots({ fill: true });
+    } catch (err) {
+        alert('儲存到專案失敗：' + err.message);
+        appendLog('儲存到專案失敗：' + err.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = origText || '儲存到專案'; }
+    }
+}
+
+async function loadBackupProjects() {
+    const sel = _bkProjectSel();
+    if (!sel) return;
+    const base = getComputeBaseUrl();
+    try {
+        // 端點預設只給 50 筆；下拉要能一次搜到全部 → 明講要上限那麼多
+        //（後端自己 clamp 到 _PROJECTION_LIMIT＝200，送更大也不會 422）。
+        const res = await authFetch(base + '/api/v1/projects/backup-roots?limit=200');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        _bkProjects = Array.isArray(data?.projects) ? data.projects : [];
+        _bkProjectsUnavailable = (data?.status === 'db_offline');
+    } catch (_) {
+        // 沒登入 / 離線 / 舊 agent 沒這支端點 —— 跟 db_offline 同樣處理，不擋派工
+        _bkProjects = [];
+        _bkProjectsUnavailable = true;
+    }
+
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">不綁專案（下方三個路徑自己填）</option>'
+        + _bkProjects.map(p => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
+    if (prev && _bkProjects.some(p => String(p.id) === String(prev))) sel.value = prev;
+
+    sel.disabled = _bkProjectsUnavailable;
+    sel.classList.toggle('opacity-50', _bkProjectsUnavailable);
+    // 全域下拉升級（js/shared/select-upgrade.js）會把原生 select 藏起來、換成一個
+    // 輸入框；停用時那個框也要一起停（清單空的時候只有 1 個 option、不會被升級，
+    // 所以這條多半是空跑 —— 留著是為了「之前已被升級」的情況）。
+    const ssInput = sel.closest('.ss-wrap')?.querySelector('.ss-input');
+    if (ssInput) ssInput.disabled = _bkProjectsUnavailable;
+
+    bkSyncProjectRoots({ fill: true });
+}
+
+/** 解除綁定：三個 input 恢復可編輯，**值保留**。 */
+function bkClearProject() {
+    const sel = _bkProjectSel();
+    if (!sel) return;
+    sel.value = '';
+    if (typeof sel._syncSsValue === 'function') sel._syncSsValue();
+    _bkRootFlash = {};
+    bkSyncProjectRoots({ fill: false });
+}
+
+
 export function collectBackupPayload() {
     const srcRows = document.getElementById('source_list').children;
     const cards = [];
@@ -60,6 +324,9 @@ export function collectBackupPayload() {
 
     const payload = {
         project_name: projectName,
+        // 綁定的 CRM 專案（沒綁就送 ""）。有值時後端以 DB 的三根為準、忽略下面
+        // 這三個路徑；仍照實送，讓 log／排程回放看得出當時畫面上是什麼。
+        project_id: document.getElementById('bk_project_sel')?.value || '',
         local_root: document.getElementById('local_root').value.trim(),
         nas_root: document.getElementById('nas_root').value.trim(),
         proxy_root: document.getElementById('proxy_root').value.trim(),
@@ -281,9 +548,19 @@ function bkApplyBookmark(id) {
     const r = bm.request;
     const setVal = (elId, v) => { const el = document.getElementById(elId); if (el && v != null) el.value = v; };
     const setChk = (elId, v) => { const el = document.getElementById(elId); if (el && v != null) el.checked = !!v; };
-    setVal('local_root', r.local_root);
-    setVal('nas_root', r.nas_root);
-    setVal('proxy_root', r.proxy_root);
+    // 優先序：專案設定 > 書籤 > 手打。跟「儲存到專案」同一條原則 —— **只填空、
+    // 不覆寫**：專案上已經設定的那一根書籤蓋不掉（那一根本來就是唯讀的），
+    // 專案上還沒設定的那幾根書籤可以填進去（填完就長出「儲存到專案」，順手存回去）。
+    const _boundProj = bkSelectedProject();
+    const _skipped = [];
+    for (const [elId, key] of [['local_root', 'local_root'], ['nas_root', 'nas_root'],
+                               ['proxy_root', 'proxy_root']]) {
+        if (_boundProj && String(_boundProj[key] || '').trim()) { _skipped.push(elId); continue; }
+        setVal(elId, r[key]);
+    }
+    if (_skipped.length) {
+        appendLog(`書籤「${bm.name}」的 ${_skipped.join('、')} 已略過 — 專案「${_boundProj.name || _boundProj.id}」已設定這幾根，路徑以專案設定為準`, 'system');
+    }
     setChk('chk_hash', r.do_hash);
     setChk('chk_transcode', r.do_transcode);
     setChk('chk_concat', r.do_concat);
@@ -390,6 +667,14 @@ export function initBackupTab() {
 
     // Bind drag and drop for source list
     setupDragAndDrop('source_list', addSourceRow);
+    // 綁了專案時三個根是唯讀的，但 setupInputDrop 不看 readOnly（丟一個資料夾
+    // 進去照樣覆寫）。先掛一道攔截 —— 同一個元素上的監聽依**註冊順序**觸發，
+    // 所以這段一定要在下面三行 setupInputDrop 之前。
+    for (const _rootId of BK_ROOT_IDS) {
+        document.getElementById(_rootId)?.addEventListener('drop', (e) => {
+            if (e.currentTarget.readOnly) { e.preventDefault(); e.stopImmediatePropagation(); }
+        });
+    }
     setupInputDrop('local_root');
     setupInputDrop('nas_root');
     setupInputDrop('proxy_root');
@@ -398,6 +683,13 @@ export function initBackupTab() {
     // Sync initial visibility of concat/report options panels
     toggleConcatOptions();
     toggleReportOptions();
+
+    // 綁定 CRM 專案：載入可選專案 + 選了就鎖住三個根目錄並帶入
+    loadBackupProjects();
+    _bkProjectSel()?.addEventListener('change', () => {
+        _bkRootFlash = {};              // 換案了：上一案的「已存回／沒寫入」小字要收掉
+        bkSyncProjectRoots({ fill: true });
+    });
 
     // 路徑書籤：載入清單 + 選了即套用
     loadBookmarks();
@@ -420,4 +712,6 @@ window.toggleConcatOptions = toggleConcatOptions;
 window.toggleReportOptions = toggleReportOptions;
 window.bkSaveBookmark = bkSaveBookmark;
 window.bkDeleteBookmark = bkDeleteBookmark;
+window.bkClearProject = bkClearProject;
+window.bkSaveRootToProject = bkSaveRootToProject;
 window.retryLastJob = retryLastJob;

@@ -9,6 +9,10 @@ class BackupRequest(BaseModel):
     task_type: str = "backup"
     job_id: str = ""
     project_name: str
+    # 綁定的 CRM 專案（選填）。有值時三根由 enqueue_job 從 DB 覆寫 ——
+    # 前端送的路徑一律不算數（owner 2026-09-10「備份頁只是顯示」）。
+    # 空＝臨時任務，三根照舊由使用者手打。
+    project_id: str = ""
     local_root: str
     nas_root: str
     proxy_root: str
@@ -607,6 +611,14 @@ class ClientPayload(BaseModel):
     entity: Optional[str] = None
 
 
+class BackupRootsPayload(BaseModel):
+    """備份頁回存專案三根（owner 2026-09-10）。只有**原本是空的**那幾根會被寫入，
+    已設定過的一律跳過 —— 見 routers/api_backup.save_backup_roots。"""
+    local_root: str = ""
+    nas_root: str = ""
+    proxy_root: str = ""
+
+
 class CrmProjectPayload(BaseModel):
     name: str
     client_id: str
@@ -618,6 +630,11 @@ class CrmProjectPayload(BaseModel):
     completion_date: Optional[str] = None
     project_type: str = ""
     folder_path: str = ""
+    # 備份三根（owner 2026-09-10）。收 UI 打的任何形式（T:\、UNC、/share/…），
+    # 寫入端過 core.drive_map.to_canonical 正規化成 UNC 再存 —— 見 CrmProject 欄位註解。
+    backup_local_root: str = ""
+    backup_nas_root: str = ""
+    backup_proxy_root: str = ""
     description: str = ""
     notes: str = ""
     # 財務

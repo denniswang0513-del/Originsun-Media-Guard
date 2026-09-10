@@ -75,6 +75,16 @@ class CrmProject(Base):
     completion_date = Column(DateTime(timezone=True), nullable=True)  # 結案日
     project_type = Column(String(64), nullable=True, default="")      # 紀實影片/活動紀實/廣告/形象/MV
     folder_path = Column(Text, nullable=True)
+    # ── 備份三根（owner 2026-09-10）：這個案的檔案該落在哪 ──────────────
+    # 🔴 跟 folder_path 是**不同形狀的東西**，不要互相推導、也不要合併：
+    #   folder_path        = 這個案的工作資料夾「完整路徑」，只在建案時複製資料夾範本用
+    #   backup_*_root      = 備份的「根」，實際目的地是 os.path.join(root, project_name)
+    # 一律存 canonical UNC（寫入端過 core.drive_map.to_canonical，讀取端過
+    # to_local_path 翻回當台視角）—— 存 `T:\` 進來的話，沒掛那顆磁碟的機器就開不到。
+    # 空＝這個案沒設定，備份頁退回手動輸入（見 routers/api_utils 的 backup-roots 投影）。
+    backup_local_root = Column(Text, nullable=True)    # 本機/工作碟
+    backup_nas_root = Column(Text, nullable=True)      # NAS 歸檔
+    backup_proxy_root = Column(Text, nullable=True)    # Proxy 轉檔輸出
     description = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     # 財務

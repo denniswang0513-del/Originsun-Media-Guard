@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Callable, Any, Dict, List, Tuple, Optional
 
 from utils.formatting import fmt_size
+from core import nas_auth
 
 # ─────────────────────────────────────────────────────────
 # Report Data Structures
@@ -290,7 +291,10 @@ class MediaGuardEngine:
 
     def copy_file_chunked(self, src: str, dst: str, progress_cb: Optional[Callable[[int, int, float], None]] = None) -> bool:
         CHUNK = 4 * 1024 * 1024
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        # makedirs 會一路往上遞迴到 share 根目錄，SMB 認證一瞬斷就是在這裡噴
+        # [WinError 1326]（見 core/nas_auth 檔頭）——認證類錯誤重連一次再試
+        nas_auth.guard(dst, os.makedirs, os.path.dirname(dst), exist_ok=True,
+                       should_stop=self._stop_event.is_set)
         file_size = os.path.getsize(src)
         copied: int = 0
         t_start = time.time()
@@ -460,7 +464,19 @@ class MediaGuardEngine:
         
         local_dir = os.path.join(local_root, project_name)
         nas_dir = os.path.join(nas_root, project_name) if nas_root else ""
-        
+
+        # ── UNC 認證前置檢查 ──
+        # 來源卡匣也一起驗：三個 root 只要有一個落在 NAS 上，SMB session 一瞬斷
+        # 整包就會在某個 makedirs 上噴原始 WinError（2026-09-10 循環杯 2 連敗）。
+        # 擋在這裡＝還沒動到任何檔案，訊息也看得懂。見 core/nas_auth 檔頭。
+        ok, why = nas_auth.ensure_ready(
+            [local_root, nas_root] + [src for _, src in sources],
+            log=self.log, should_stop=self._stop_event.is_set,
+        )
+        if not ok:
+            self.err(why)
+            raise OSError(why)
+
         all_items: List[Tuple[str, str, str]] = []
         # 收集需要在目的地建立的空資料夾（來源有但沒有任何檔案的目錄）
         empty_dirs: List[Tuple[str, str]] = []   # (card, rel_dir)
@@ -513,11 +529,15 @@ class MediaGuardEngine:
             self.log(f"[Engine] 同步 {len(empty_dirs)} 個空資料夾結構...")
             for card, rel_dir in empty_dirs:
                 l_dir = os.path.join(local_dir, card, rel_dir)
-                os.makedirs(l_dir, exist_ok=True)
+                # 「本機」根目錄不一定真的在本機（設成 T:\ 就是 NAS）——這行原本
+                # 沒有任何保護，UNC 一瞬斷就整包死在這裡
+                nas_auth.guard(l_dir, os.makedirs, l_dir, exist_ok=True,
+                               should_stop=self._stop_event.is_set)
                 if nas_dir:
                     n_dir = os.path.join(nas_dir, card, rel_dir)
                     try:
-                        os.makedirs(n_dir, exist_ok=True)
+                        nas_auth.guard(n_dir, os.makedirs, n_dir, exist_ok=True,
+                                       should_stop=self._stop_event.is_set)
                     except OSError as e:
                         self.err(f"建立 NAS 空資料夾失敗: {rel_dir} - {e}")
 
@@ -725,6 +745,20 @@ class MediaGuardEngine:
                     )
                     if not engine.copy_file_chunked(str(src_abs), n_dest, prog_cb_n):
                         break
+                except OSError as e:
+                    # 寫到一半 session 掉了（1326/64…）→ 重連後整支檔案重抄一次。
+                    # 分塊寫是 'wb'，重試會從頭覆蓋，不會留半截檔。
+                    if nas_auth.is_auth_error(e) and nas_auth.reconnect_with_backoff(
+                            nas_auth.share_root(n_dest),
+                            should_stop=self._stop_event.is_set, log=engine.log):
+                        engine.log(f"[NAS] 連線中斷已重連，重抄一次: {rel}")
+                        try:
+                            if not engine.copy_file_chunked(str(src_abs), n_dest, prog_cb_n):
+                                break
+                        except Exception as e2:
+                            engine.err(f"寫入 NAS 失敗（重試後）: {rel} - {e2}")
+                    else:
+                        engine.err(f"寫入 NAS 失敗: {rel} - {e}")
                 except Exception as e:
                     engine.err(f"寫入 NAS 失敗: {rel} - {e}")
 
@@ -761,10 +795,17 @@ class MediaGuardEngine:
         if not self._stop_event.is_set() and empty_dirs:
             for card, rel_dir in empty_dirs:
                 l_dir = os.path.join(local_dir, card, rel_dir)
-                os.makedirs(l_dir, exist_ok=True)
+                try:
+                    nas_auth.guard(l_dir, os.makedirs, l_dir, exist_ok=True,
+                                   should_stop=self._stop_event.is_set)
+                except OSError as e:
+                    # 收尾階段：檔案都抄完了，補空資料夾失敗不值得把整包判失敗
+                    self.err(f"補齊本機空資料夾失敗: {rel_dir} - {e}")
                 if nas_dir:
+                    n_dir = os.path.join(nas_dir, card, rel_dir)
                     try:
-                        os.makedirs(os.path.join(nas_dir, card, rel_dir), exist_ok=True)
+                        nas_auth.guard(n_dir, os.makedirs, n_dir, exist_ok=True,
+                                       should_stop=self._stop_event.is_set)
                     except OSError:
                         pass
 

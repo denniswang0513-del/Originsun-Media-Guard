@@ -157,12 +157,36 @@
           <input id="proj-f-completion_date" type="date" class="crm-input">
         </div>
         <div class="crm-field">
-          <label>專案資料夾</label>
-          <input id="proj-f-folder_path" type="text" class="crm-input" placeholder="D:\Projects\...">
+          <label>專案資料夾（工作資料夾完整路徑）</label>
+          <input id="proj-f-folder_path" type="text" class="crm-input" placeholder="D:\Projects\工研院形象影片">
         </div>
         <div class="crm-field crm-field-full">
           <label>說明</label>
           <input id="proj-f-description" type="text" class="crm-input">
+        </div>
+      </div>
+
+      <!-- 備份根目錄：跟上面的「專案資料夾」是**不同的東西** —— folder_path 是這個案的
+           工作資料夾完整路徑；這三個是「根」，備份任務會在根底下用專案名開子資料夾。 -->
+      <div class="crm-form-section">備份根目錄（備份任務用）</div>
+      <div class="crm-form-grid">
+        <div class="crm-field crm-field-full">
+          <div class="crm-import-hint" style="margin-bottom:0;">
+            備份任務會在這些根目錄底下用專案名開子資料夾。可以打磁碟代號（如 T:\），系統會自動轉成跨機器通用的 UNC 路徑。<br>
+            （與上面的「專案資料夾」不同：那個是這個案的工作資料夾完整路徑，這三個是「根」。）
+          </div>
+        </div>
+        <div class="crm-field">
+          <label>本機備份根目錄</label>
+          <input id="proj-f-backup_local_root" type="text" class="crm-input" placeholder="例：D:\Backup（空白＝未設定）">
+        </div>
+        <div class="crm-field">
+          <label>NAS 備份根目錄</label>
+          <input id="proj-f-backup_nas_root" type="text" class="crm-input" placeholder="例：T:\（空白＝未設定）">
+        </div>
+        <div class="crm-field">
+          <label>Proxy 輸出根目錄</label>
+          <input id="proj-f-backup_proxy_root" type="text" class="crm-input" placeholder="例：V:\Proxy（空白＝未設定）">
         </div>
       </div>
 

@@ -418,8 +418,13 @@ export function closeDetail() {
 
 // ── Add / Edit Modal ────────────────────────────────────────
 
+// 🔴 每一欄都要有對應的 #proj-f-<name> 元素（沒有的會被 openModal/saveProject
+//    跳過，等於靜默不存）。備份三根（backup_*_root）是備份頁的正本 —— 備份頁
+//    只顯示不編輯，只有這裡改得動。跟 folder_path 是不同的東西：folder_path 是
+//    這個案的工作資料夾完整路徑，backup_* 是「根」（底下再用專案名開子資料夾）。
 const _FIELDS = ['name', 'client_id', 'status', 'project_type', 'start_date', 'shoot_date',
     'completion_date', 'folder_path', 'description', 'am_username', 'notes',
+    'backup_local_root', 'backup_nas_root', 'backup_proxy_root',
     'contract_amount', 'tax_rate', 'profit_target_pct', 'misc_budget_pct',
     'payment_status', 'amount_receivable', 'amount_received', 'transfer_fee'];
 
@@ -470,7 +475,14 @@ export async function saveProject() {
     const dateFields = ['shoot_date', 'start_date', 'completion_date'];
     for (const f of _FIELDS) {
         const el = document.getElementById(`proj-f-${f}`);
-        let val = el ? el.value.trim() : '';
+        // 🔴 視窗裡沒有這個欄位 → **不要送**（跟 openModal 的 `if (!el) continue` 對稱）。
+        // 原本是 `el ? el.value.trim() : ''`，送空字串出去：後端 PUT 走
+        // model_dump(exclude_unset=True)，有送就會寫 —— `shoot_date` 在 _FIELDS 裡
+        // 但 crm-projects.html 沒有 #proj-f-shoot_date（拍攝日期已改由拍攝行事曆管），
+        // 於是**按一次儲存就把拍攝日期洗成空的**，畫面上完全看不出來。
+        // 使用者手動清空的情況不受影響：那時元素存在，照樣送 ''／null。
+        if (!el) continue;
+        let val = el.value.trim();
         if (intFields.includes(f)) val = val ? parseInt(val) : null;
         if (dateFields.includes(f)) val = val || null;
         payload[f] = val;

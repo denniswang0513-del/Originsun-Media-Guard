@@ -25,6 +25,16 @@ from utils.formatting import fmt_size
 
 _SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
+# 機隊→master 的告警轉寄金鑰。**不能用 jwt_secret**：那是每台機器各自產的
+# （CLAUDE.md「不要動的地方」已載明機隊各自的 jwt_secret 不共用），拿它當共用
+# 金鑰的結果是 agent 送自己的、master 比自己的，永遠 403 —— 2026-09-10 查
+# 備檔電腦（FILETRANSFER）備份失敗時發現：三次 task_failed 告警全被 master 擋掉，
+# 🔴 email 一封都沒寄出去，失敗只有盯著螢幕才看得見。
+#
+# 跟 `/api/v1/internal/restart` 同一套：固定字串隨 OTA 包發到每台機器，因此**不是**
+# 秘密，安全性靠接收端的 `via_cloudflare` 把公網那條路關掉。
+INTERNAL_ALERT_KEY = "originsun-internal-alert"
+
 # 🔴 級告警：除了 Chat 也寄 email。刻意**不含** `*_success` 那些日常完成通知 ——
 # 機隊 7 台同時跑任務時會把信箱淹掉，淹掉的信箱等於沒有告警。
 # `*_recovered` 有進來是為了閉環：收到 offline 的信，就該收到恢復的信。
@@ -179,9 +189,9 @@ def _relay_alert_email(template_key: str, msg: str, settings: dict) -> None:
     Best-effort：任何失敗只印一行，絕不讓告警路徑反過來炸掉呼叫端。
     """
     base = (os.environ.get("MASTER_SERVER") or settings.get("master_server") or "").rstrip("/")
-    key = os.environ.get("JWT_SECRET", "").strip() or settings.get("jwt_secret", "")
-    if not (base and key):
+    if not base:
         return
+    key = INTERNAL_ALERT_KEY
     import urllib.request
     payload = json.dumps({
         "subject": f"[Originsun 告警] {template_key} — {machine_label()}",
@@ -194,7 +204,11 @@ def _relay_alert_email(template_key: str, msg: str, settings: dict) -> None:
     try:
         urllib.request.urlopen(req, timeout=10).close()
     except Exception as e:
-        print(f"notifier: alert email relay [{template_key}] failed: {e}")
+        # 印出 master 回的狀態碼 —— 403 就是金鑰對不上（這條路徑壞了半年沒人發現，
+        # 因為訊息裡看不出是被擋掉還是連不到）
+        code = getattr(e, "code", "")
+        print(f"notifier: alert email relay [{template_key}] failed"
+              f"{f' (HTTP {code})' if code else ''}: {e} → {base}")
 
 
 def machine_label() -> str:

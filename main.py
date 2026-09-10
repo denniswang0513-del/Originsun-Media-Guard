@@ -709,6 +709,11 @@ async def _on_startup():
                         ("hr_leave_requests", "google_event_id", "VARCHAR(255)"),
                         ("hr_leave_requests", "synced_at", "TIMESTAMPTZ"),
                         ("hr_leave_requests", "sync_error", "TEXT"),
+                        # 備份三根掛在專案上（owner 2026-09-10）：canonical UNC，
+                        # 空＝這個案沒設定，備份頁退回手動輸入
+                        ("crm_projects", "backup_local_root", "TEXT"),
+                        ("crm_projects", "backup_nas_root", "TEXT"),
+                        ("crm_projects", "backup_proxy_root", "TEXT"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

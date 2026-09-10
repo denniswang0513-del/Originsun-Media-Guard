@@ -23,6 +23,59 @@ from core_engine import ReportManifest, AtomicOutput  # type: ignore
 
 # ── Public API ───────────────────────────────────────────────
 
+#: BackupRequest 的三根 ↔ crm_projects 的欄位名
+_PROJECT_ROOT_MAP = (
+    ("local_root", "backup_local_root"),
+    ("nas_root", "backup_nas_root"),
+    ("proxy_root", "backup_proxy_root"),
+)
+
+
+async def _apply_project_roots(request: Any, task_type: str) -> str:
+    """綁了 CRM 專案的備份任務 → 三根一律以 DB 為準。回一句給終端的說明（沒動就空字串）。
+
+    為什麼在後端覆寫而不是信前端送上來的值：owner 2026-09-10 拍板「三根存在
+    CRM 專案上、備份頁只是顯示」。唯讀只做在 UI 上的話，改個 DOM 就繞過去了 ——
+    那三根決定幾 TB 的素材落在哪，不能是前端說了算。
+
+    **DB 讀不到就原樣放行**（不是擋下來）：機隊 agent 本來就可能 DB 斷線，
+    那時前端會退回手動輸入，這裡再擋一次等於備份完全停擺 —— 同 core/public_access
+    的「DB 掛掉不擋人」。這種情況下用的是使用者自己填的路徑，不會靜默用到錯的。
+
+    專案的某一根是空的 → **那一根不覆寫**，沿用送上來的值。半設定的專案
+    （只設了 NAS、本機還沒填）才不會被清成空字串。
+
+    私帳可見性：這裡是**用 id 反查**、不是列舉，照 core.ledger.hide_mine_projects
+    的分界不必表態（而且 enqueue 這層拿到的是 pydantic model，沒有 HTTP request
+    可問 scope）。能到這裡的 id 都是選擇器給的，而選擇器那支
+    （routers/api_backup.list_backup_roots）已經濾掉私帳案。
+    """
+    pid = str(getattr(request, "project_id", "") or "").strip()
+    if task_type != "backup" or not pid or not state.db_online:
+        return ""
+    try:
+        from db.session import get_session_factory
+        factory = get_session_factory()
+        if not factory:
+            return ""
+        from db.models import CrmProject  # type: ignore
+        async with factory() as session:
+            project = await session.get(CrmProject, pid)
+        if not project:
+            return f"[專案] 找不到專案 {pid}，改用手動填的路徑"
+        applied = []
+        for field, col in _PROJECT_ROOT_MAP:
+            val = str(getattr(project, col, "") or "").strip()
+            if val:
+                setattr(request, field, val)
+                applied.append(field)
+        if not applied:
+            return f"[專案] 「{project.name}」尚未設定備份資料夾，改用手動填的路徑"
+        return f"[專案] 三根取自「{project.name}」的設定：{'、'.join(applied)}"
+    except Exception as e:
+        return f"[專案] 讀取專案設定失敗（{e}），改用手動填的路徑"
+
+
 async def enqueue_job(request: Any, project_name: str, task_type: str) -> tuple:
     """
     Register a new job and trigger the dispatcher.
@@ -34,6 +87,11 @@ async def enqueue_job(request: Any, project_name: str, task_type: str) -> tuple:
     dup = state.find_duplicate(project_name, task_type)
     if dup:
         warning = f"專案 '{project_name}' 已有進行中的 {task_type} 任務 (job_id={dup.job_id})，新任務已加入排隊"
+
+    # 綁了 CRM 專案就以 DB 的三根為準（owner 2026-09-10）。放在翻譯與語法快篩
+    # **之前**：DB 存的已是 canonical UNC，翻譯對它是 no-op，但覆寫完仍要一起過
+    # 快篩，才不會有一條「從 DB 進來的路徑沒被驗過」的旁門。
+    _root_note = await _apply_project_roots(request, task_type)
 
     # 磁碟代號 → UNC（core/drive_map）：中央咽喉統一翻譯 — HTTP 端點、排程、
     # 書籤重放三條進件路都經過這裡，任務在哪台機器執行都不再依賴磁碟掛載。
@@ -64,6 +122,8 @@ async def enqueue_job(request: Any, project_name: str, task_type: str) -> tuple:
         'type': 'system',
         'msg': f'任務已加入佇列: {project_name} ({task_type})'
     })
+    if _root_note:
+        _emit_sync_for_job(job_id, 'log', {'type': 'system', 'msg': _root_note})
     for _c in _path_changes:
         _emit_sync_for_job(job_id, 'log', {
             'type': 'system',
@@ -240,11 +300,16 @@ async def _execute_job(job: state.JobState):
         await sio.emit('task_status', {'status': 'cancelled', 'job_id': job_id})
 
     except Exception as e:
+        # SMB 認證類的 WinError 換成可行動的中文（見 core/nas_auth）——原本畫面上
+        # 只有一行 `[WinError 1326] ...`，操作的人無從判斷該重跑還是該去修 NAS。
+        # 不是認證問題時 friendly() 回空字串，照原樣用 str(e)。
+        from core.nas_auth import friendly as _nas_friendly  # type: ignore
+        detail = _nas_friendly(e) or str(e)
         job.status = state.JobStatus.ERROR
-        job.error_detail = str(e)
+        job.error_detail = detail
         job.finished_at = _dt.now().isoformat()
-        _emit_sync_for_job(job_id, 'log', {'type': 'error', 'msg': f'任務執行失敗: {e}'})
-        await sio.emit('task_status', {'status': 'error', 'detail': str(e), 'job_id': job_id})
+        _emit_sync_for_job(job_id, 'log', {'type': 'error', 'msg': f'任務執行失敗: {detail}'})
+        await sio.emit('task_status', {'status': 'error', 'detail': detail, 'job_id': job_id})
         # 失敗主動推播（成功通知在各 _run_* 內；失敗只有開著網頁才看得到 → 補一條主動告警）
         # fire-and-forget：不讓通知的 HTTP round-trip 拖住 finally 的 log 落檔
         try:
@@ -252,7 +317,7 @@ async def _execute_job(job: state.JobState):
             asyncio.ensure_future(notify_tab_async(
                 "task_failed",
                 task_type=task_type, project_name=job.project_name or "-",
-                error=str(e)[:300], hostname=machine_label(),
+                error=detail[:300], hostname=machine_label(),
             ))
         except Exception:
             pass

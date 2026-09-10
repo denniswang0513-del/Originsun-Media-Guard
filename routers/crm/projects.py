@@ -152,6 +152,36 @@ async def linked_receipts_map(session, project_ids) -> dict:
     return out
 
 
+#: 備份三根的欄位名 —— 正規化、投影端點、測試共用這一份，別各寫各的
+BACKUP_ROOT_FIELDS = ("backup_local_root", "backup_nas_root", "backup_proxy_root")
+
+
+def normalize_backup_roots(data: dict) -> list:
+    """把 data 裡的備份三根就地正規化成 canonical UNC，回傳警告字串清單。
+
+    **寫入端唯一入口**（POST /projects 與 PUT /projects/{id} 都走它）：使用者
+    在哪台打的就是哪台的視角（master 打 `T:\\`、NAS 容器打 `/share/…`），存進 DB
+    前一律翻成 UNC，別台才讀得到 —— 2026-07-21 煥民新村備份 6 連敗的同一個病。
+
+    語法垃圾（黏路徑那類）只**警告不擋**：設定的人可能就是在一台看不到那個
+    share 的機器上編輯，這很正常；擋下來反而逼人去別台才能填。
+    """
+    from core.drive_map import invalid_path_reason, to_canonical
+    warnings = []
+    for f in BACKUP_ROOT_FIELDS:
+        if f not in data:
+            continue
+        raw = str(data[f] or "").strip().rstrip("\\/")
+        if not raw:
+            data[f] = None
+            continue
+        why = invalid_path_reason(raw)
+        if why:
+            warnings.append(f"{f}：{why}")
+        data[f] = to_canonical(raw)
+    return warnings
+
+
 def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False, receipts=None) -> dict:
     # 母公司案有掛帳收入列 → 已收／匯費／應收／收款狀態一律推導（core.ledger_project.parent_receipt_fields），
     # 沒有掛的老案維持手填欄位
@@ -170,6 +200,12 @@ def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False, rec
         "completion_date": p.completion_date.isoformat() if p.completion_date else None,
         "project_type": p.project_type or "",
         "folder_path": p.folder_path or "",
+        # 備份三根：DB 存 canonical UNC，這裡原樣回。翻成當台視角是**呼叫端**的事
+        # （備份頁用 drive_map.to_local_path）—— 在序列化就翻掉的話，master 存的
+        # 設定經 NAS 對外容器讀出來會變成 /share/… 再存回去，來回一次就爛掉。
+        "backup_local_root": p.backup_local_root or "",
+        "backup_nas_root": p.backup_nas_root or "",
+        "backup_proxy_root": p.backup_proxy_root or "",
         "description": p.description or "", "notes": p.notes or "",
         # 兩本帳 §8：錢流歸屬。這個鍵同時是 core/money mine-aware 抹除的
         # 判定依據（entity=='mine' 的物件，金額鍵對無 mine scope 者整棵抹掉）
@@ -383,6 +419,7 @@ async def create_project(req: CrmProjectPayload, request: Request):
     date_fields = {"shoot_date", "start_date", "completion_date"}
     dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
     data = {**req.model_dump(exclude=date_fields), **dates}
+    root_warnings = normalize_backup_roots(data)
 
     async with factory() as session:
         project, client_name = await create_project_in_session(session, data)
@@ -399,6 +436,9 @@ async def create_project(req: CrmProjectPayload, request: Request):
                 await asyncio.to_thread(shutil.copytree, template, req.folder_path)
         except Exception as e:
             warning = f"資料夾範本複製失敗: {e}"
+
+    if root_warnings:
+        warning = "；".join([warning] + root_warnings) if warning else "；".join(root_warnings)
 
     result = {"status": "ok", "project": _to_project_dict(project, client_name)}
     if warning:
@@ -832,6 +872,8 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
 
     date_fields = {"shoot_date", "start_date", "completion_date"}
     update_data = req.model_dump(exclude_unset=True)
+    # 逐格 autosave 只送 dirty 欄 → normalize 只碰有送上來的那幾根（`f in data` 判斷）
+    root_warnings = normalize_backup_roots(update_data)
 
     async with factory() as session:
         project = await session.get(CrmProject, project_id)
@@ -891,8 +933,8 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
         wire = await project_wire(session, project, request)
 
     result = {"status": "ok", "project": wire}
-    if warnings:
-        result["warning"] = "；".join(warnings)
+    if warnings or root_warnings:
+        result["warning"] = "；".join(warnings + root_warnings)
     return result
 
 

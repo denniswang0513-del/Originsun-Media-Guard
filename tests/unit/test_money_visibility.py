@@ -408,6 +408,13 @@ def test_every_project_enumeration_decides_about_mine():
         "services/website/project_service.py",
         "services/website/initiative_service.py",
         "services/media_log_catchup.py", "routers/crm/media_log.py",
+        # 備份三根的專案選擇器（owner 2026-09-10 明確拍板「私帳案可以被看到與勾選」）：
+        # 這是對 2026-08-28「連專案都看不到」的**局部例外**，只在這一支成立。
+        # 理由：私帳的案子一樣要備份，選不到就只能手打路徑＝功能對私帳案失效。
+        # 🔴 例外成立的前提是**這支不帶錢** —— 白名單投影只有 id／name／備份三根
+        # （tests/unit/test_project_backup_roots.py 的 test_money_never_leaks 釘住）。
+        # 要往那支加任何金額欄之前，先回來讀這一段：加了，這個豁免就不成立了。
+        "routers/api_backup.py",
     }
     hits = []
     for rel in ("routers", "services"):

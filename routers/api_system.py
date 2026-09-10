@@ -307,14 +307,26 @@ async def save_drive_map(req: Request):
 async def internal_alert_email(request: Request):
     """把 🔴 級告警寄成 email。呼叫者＝任一節點的 `notifier._relay_alert_email`。
 
-    認證：`X-Internal-Key` = JWT secret（與 /internal/seo/run 同一套）。
     只有 master 會被打（notifier 送往 settings.master_server）——SMTP 帳密與收件人存在
     `website_settings`（NAS Postgres），機隊 7 台因此不需要持有寄信憑證。
     收件人：`notify.alert_email_to` 優先，沒設才退 `notify.email_to`（聯絡表單那個信箱）。
+
+    認證：`X-Internal-Key` = `notifier.INTERNAL_ALERT_KEY`（跟 `/internal/restart`
+    同一套：固定字串隨 OTA 包發，安全靠 `via_cloudflare` 關掉公網那條路）。
+
+    🔴 **這裡原本比對 `_get_secret()`（本機 jwt_secret），對機隊是永遠 403** ——
+    每台機器的 jwt_secret 各自產、不共用（CLAUDE.md「不要動的地方」已載明），
+    所以 agent 送的永遠對不上 master 的。2026-09-10 查備檔電腦備份失敗時發現：
+    三次 task_failed 全被擋掉，🔴 email 一封都沒寄成功過。**不要改回 `_get_secret()`。**
+    jwt_secret 那條保留只是為了 master/NAS 之間（那兩個確實共用同一把）。
     """
-    from core.auth import _get_secret
-    expected = _get_secret()
-    if not expected or request.headers.get("X-Internal-Key", "") != expected:
+    from core.auth import _get_secret, via_cloudflare
+    from notifier import INTERNAL_ALERT_KEY  # type: ignore
+    if via_cloudflare(request):   # 金鑰隨 OTA 包公開，公網那條路一律關
+        return JSONResponse(status_code=403, content={"detail": "forbidden"})
+    got = request.headers.get("X-Internal-Key", "")
+    secret = _get_secret()
+    if got != INTERNAL_ALERT_KEY and not (secret and got == secret):
         return JSONResponse(status_code=403, content={"detail": "forbidden"})
 
     try:
