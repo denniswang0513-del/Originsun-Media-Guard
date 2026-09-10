@@ -26,7 +26,14 @@ from core.finance_logic import PASSTHROUGH_FEE_RATES
 from core.ledger import require_entity
 from core.public_access import surface_gate
 from core import invoice_share, share_link
-from core.drive_map import to_local_path
+from core.drive_map import to_canonical_path, to_local_path
+
+# 🔴 這支檔裡「路徑 → 檔名」一律用 `ntpath.basename`，不用 `os.path.basename`。
+#    `file_url` 存的是 **Windows 視角**的路徑（`\\192.168.1.132\Archive\…`），而
+#    這份程式也跑在 NAS 的 Linux 容器裡 —— 那邊 `os.path` 是 posixpath，反斜線不是
+#    分隔字元，`basename` 會把**整條內部路徑原封不動**回傳。那個字串會被寫進
+#    `share_snapshot["file"]["name"]` 並印在寄給客戶的分享頁上。
+#    `ntpath.basename` 兩種分隔字元都認，所以兩台都對。
 
 from ._shared import (router, public_router, _check_finance_auth, money_dep,
                       _require_db, _get_factory, _fmt_day, _now)
@@ -52,6 +59,27 @@ def _invoices_root() -> str:
     from config import load_settings
     root = (load_settings().get("invoices_root") or "").strip()
     return root or os.path.join(os.getcwd(), "uploads", "invoices")
+
+
+def _invoices_write_root() -> str:
+    """要拿去 `makedirs`／寫檔的根目錄 ＝ **執行這支的這台**看得到的那個視角。
+
+    🔴 設定裡存的是 master 視角的路徑（UNC 或磁碟代號）。NAS 的 office-api 容器上
+       不翻譯就會 `makedirs` 出一個名字裡帶反斜線的資料夾
+       （`/app/\\192.168.1.132\Archive\…`）—— 寫檔會成功、回 200、DB 也記下
+       一個沒有任何一台讀得到的路徑，**全程沒有一行 error**。
+       讀那側（`_local_invoice_path`）早就翻了，只有寫這側漏掉。
+    """
+    return to_local_path(_invoices_root())
+
+
+def _stored_path(local_path: str) -> str:
+    """寫完檔之後要存進 DB 的那個字串 ＝ canonical UNC（見 `drive_map.to_canonical_path`）。
+
+    收檔那台若直接存自己的本機路徑，別台就讀不到 —— NAS 存 `/share/…`，master
+    是 Windows，翻不回去。存 canonical 的話哪台讀都能 `to_local_path` 翻成自己的視角。
+    """
+    return to_canonical_path(local_path)
 
 
 def _safe_part(s: str, limit: int = 0) -> str:
@@ -131,13 +159,14 @@ def _resync_invoice_file(inv) -> str:
     絕不讓「改個發票號碼」因為檔案系統的問題而整個失敗。
     """
     old = inv.file_url or ""
-    if not old or not os.path.isfile(old):
+    local_old = to_local_path(old) if old else ""
+    if not local_old or not os.path.isfile(local_old):
         return old
-    ext = os.path.splitext(old)[1]
+    ext = os.path.splitext(local_old)[1]
     day = _fmt_day(inv.invoice_date)
-    base = os.path.join(_invoices_root(), day[:4] or "nodate", day[:7] or "nodate")
+    base = os.path.join(_invoices_write_root(), day[:4] or "nodate", day[:7] or "nodate")
     target = os.path.join(base, _invoice_file_name(inv, ext))
-    if os.path.abspath(target) == os.path.abspath(old) or os.path.exists(target):
+    if os.path.abspath(target) == os.path.abspath(local_old) or os.path.exists(target):
         return old
     try:
         os.makedirs(base, exist_ok=True)
@@ -145,8 +174,8 @@ def _resync_invoice_file(inv) -> str:
         # 本機 C:\ → NAS \\192.168.1.132\... 會直接丟 WinError 17（2026-08-19 把
         # 三個電子發票搬上 NAS 時實際踩到；幸好失敗時是維持原狀而不是弄丟檔）。
         # shutil.move 在跨裝置時會退成「複製再刪來源」。
-        shutil.move(old, target)
-        return target
+        shutil.move(local_old, target)
+        return _stored_path(target)
     except (OSError, shutil.Error):
         return old
 
@@ -173,7 +202,7 @@ async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFil
         day = _fmt_day(inv.invoice_date)
         # {root}/{年}/{年-月}/ —— 按月不按「期」（營業稅兩個月一期，要交一期抓兩夾），
         # 也刻意不按專案（發票是照稅務期間歸檔的，收據才按專案）
-        base = os.path.join(_invoices_root(), day[:4] or "nodate", day[:7] or "nodate")
+        base = os.path.join(_invoices_write_root(), day[:4] or "nodate", day[:7] or "nodate")
         try:
             os.makedirs(base, exist_ok=True)
         except OSError as e:
@@ -185,7 +214,7 @@ async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFil
         if written < 0:
             raise HTTPException(status_code=413,
                                 detail=f"檔案超過 {_MAX_INVOICE_BYTES // 1024 // 1024}MB")
-        inv.file_url = filepath
+        inv.file_url = _stored_path(filepath)
         # 有了電子發票證明聯就代表這張已經開出去了（owner 2026-08-19）。
         # 作廢的不動 —— 作廢也會留存證明聯，那不是「未開立」。
         if (inv.issue_status or "") != "作廢":
@@ -205,7 +234,8 @@ async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFil
     #    那比偶爾漏警示更糟（掃描件、字型把字拆開、版面不同都會抽不到）。
     from core.invoice_pdf import compare_invoice_pdf
     warnings = compare_invoice_pdf(parsed, snapshot, text)
-    return {"status": "ok", "file_url": filepath, "file_name": os.path.basename(filepath),
+    return {"status": "ok", "file_url": _stored_path(filepath),
+            "file_name": ntpath.basename(filepath),
             "detected_invoice_number": detected,
             # 與現有值相同就不用麻煩使用者
             "detected_differs": bool(detected and detected != current_number),
@@ -236,12 +266,13 @@ async def serve_invoice_file(path: str = Query(""), request: Request = None):
     """提供電子發票檔下載/檢視。路徑白名單：只放行 invoices_root 底下的檔
     （比照 costs.serve_receipt —— 沒有這道，這支就是任意檔案讀取）。"""
     require_entity(request, "parent", level="full")   # 第三批一把尺：發票影像＝金額，跟讀取同一把
-    if not path or not os.path.isfile(path):
+    # 白名單與翻譯只有 `_local_invoice_path` 一份 —— 這裡原本自己寫了一份純
+    # startswith 的比對，兩個後果：`…/00_電子發票_舊` 會通過 `…/00_電子發票` 的檢查，
+    # 而且沒翻譯，所以在 NAS 的 office-api 上每一張都 404（UNC 在那台不是檔案）。
+    abs_path = _local_invoice_path(path)
+    if not abs_path:
         raise HTTPException(status_code=404, detail="檔案不存在")
-    abs_path = os.path.abspath(path)
-    if not abs_path.startswith(os.path.abspath(_invoices_root())):
-        raise HTTPException(status_code=403, detail="無權存取此路徑")
-    return no_store_file(abs_path, filename=os.path.basename(abs_path))
+    return no_store_file(abs_path, filename=ntpath.basename(abs_path))
 
 
 # 短碼長度：secrets.token_urlsafe(9) → 12 字元（72 bits）。這串是要寄給客戶、
@@ -300,7 +331,7 @@ async def create_invoice_share_link(invoice_id: str, request: Request):
         except OSError:
             size = 0
         inv.share_snapshot = invoice_share.make_snapshot(
-            _inv_dict(inv), file_name=os.path.basename(inv.file_url or ""), file_size=size)
+            _inv_dict(inv), file_name=ntpath.basename(inv.file_url or ""), file_size=size)
         inv.updated_at = _now()
         await session.commit()
         token, fname = inv.share_token, (inv.share_snapshot.get("file") or {}).get("name", "")
@@ -390,7 +421,7 @@ async def serve_invoice_by_share_token(token: str):
     path, _snap, _voided = await _share_row(token)
     if not path:
         raise HTTPException(status_code=404, detail="檔案不存在")
-    return no_store_file(path, filename=os.path.basename(path))
+    return no_store_file(path, filename=ntpath.basename(path))
 
 
 @public_router.get("/public/invoice-file/{token}/meta")
@@ -476,7 +507,7 @@ async def backfill_share_snapshots(request: Request, apply: bool = Query(False))
                 size = 0
             if apply:
                 inv.share_snapshot = invoice_share.make_snapshot(
-                    _inv_dict(inv), file_name=os.path.basename(inv.file_url or ""),
+                    _inv_dict(inv), file_name=ntpath.basename(inv.file_url or ""),
                     file_size=size)
                 # 🔴 不動 updated_at：這是補資料不是使用者改了發票，
                 #    動它會讓「最近更新」整批跳到今天、把真正的異動蓋掉。
@@ -514,7 +545,8 @@ async def migrate_invoice_files(request: Request, apply: bool = Query(False)):
                                      CrmInvoice.file_url != ""))).scalars().all()
         for inv in rows:
             old = inv.file_url
-            if not os.path.isfile(old):
+            local_old = to_local_path(old or "")
+            if not local_old or not os.path.isfile(local_old):
                 missing.append({"title": inv.title, "path": old})
                 continue
             if apply:
@@ -525,8 +557,9 @@ async def migrate_invoice_files(request: Request, apply: bool = Query(False)):
                 new = await asyncio.to_thread(_resync_invoice_file, inv)
             else:
                 day = _fmt_day(inv.invoice_date)
-                new = os.path.join(_invoices_root(), day[:4] or "nodate", day[:7] or "nodate",
-                                   _invoice_file_name(inv, os.path.splitext(old)[1]))
+                new = _stored_path(os.path.join(
+                    _invoices_write_root(), day[:4] or "nodate", day[:7] or "nodate",
+                    _invoice_file_name(inv, os.path.splitext(local_old)[1])))
             if os.path.abspath(new) == os.path.abspath(old):
                 skipped.append({"title": inv.title, "path": old,
                                 **({"why": "目標已存在或搬移失敗"} if apply else {})})

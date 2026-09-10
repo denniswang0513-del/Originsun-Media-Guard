@@ -1378,9 +1378,18 @@ export async function initCrmQuotesTab() {
     initRootFolderCard({
         linkId: 'quote-root-toggle', panelId: 'quote-root-panel', endpoint: '/quotations-root', key: 'quotes_root',
         intro: `報價單 PDF 的存放根目錄：每次下載／線上檢視產出的 PDF 都會存一份到這裡（同名覆蓋）。
-        要集中到 NAS 就填那個路徑；底下會自動分 <code>{年}/{年-月}/</code>，檔名跟下載的 PDF 一樣（日期_客戶_專案）。`,
+        要集中到 NAS 就填那個路徑；底下會自動分 <code>{年}/{年-月}/</code>，檔名跟下載的 PDF 一樣（日期_客戶_專案）。改這裡只影響<b>之後</b>產出的，舊檔不搬。`,
         placeholder: '例：\\\\192.168.1.132\\Archive\\Quotations 或 T:\\報價單',
-        savedMsg: '已儲存（之後產出的報價單存到新位置；舊檔不搬）',
+        savedMsg: '已儲存',
+        // 客戶連結要用哪個網域。報價 /q/ 與發票 /e/ **共用這一個設定**（core/share_link.py）——
+        // 分兩個只會有一天其中一個忘了填，而錯了不會有任何 error，只會有人說「你給我的網址打不開」。
+        extra: {
+            key: 'share_public_base',
+            intro: `<b>客戶連結網域</b>：複製給客戶的報價單／發票連結要用哪個對外網址。
+            留空＝沿用你當下開這頁的網域（在公司內網開就會複製出 <code>192.168…</code> 的網址，
+            客戶打不開）。要填的是對外那個，例如 <code>https://office.originsun-studio.com</code>。`,
+            placeholder: 'https://office.originsun-studio.com',
+        },
     });
     const companyBtn = document.getElementById('quote-btn-company');
     // 公司資訊存進 /api/settings/save 的 company 鍵：後端分流給 crm_quotes／crm_invoices，所以入口不只管理員

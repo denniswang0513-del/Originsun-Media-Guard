@@ -801,7 +801,13 @@ export function groupCostStaff(lines, payments) {
 
 /** 「檔案根目錄」設定卡（發票資料夾／報價單資料夾同一個互動形狀）：
  *  入口連結預設隱藏，GET 端點過了（管理員）才顯示；面板＝說明＋路徑框＋儲存＋目前生效。
- *  opts: { linkId, panelId, endpoint, key, intro(html), placeholder, savedMsg } */
+ *  opts: { linkId, panelId, endpoint, key, intro(html), placeholder, savedMsg,
+ *          extra?: { key, intro(html), placeholder } }
+ *
+ *  extra 是同一張卡上的第二個欄位（報價單那張的「客戶連結網域」）。刻意做成同一張卡
+ *  而不是另開一個設定面：兩個都是「這件事寄出去之後長什麼樣」，各自一張卡只會有一天
+ *  其中一張沒人填。🔴 沒有它的話那個設定**完全沒有入口** —— 後端讀得到、GET 也回，
+ *  但沒有任何畫面送得出去，於是永遠是空字串（整個共用網域的功能等於不存在）。 */
 export async function initRootFolderCard(opts) {
     const link = document.getElementById(opts.linkId);
     const panel = document.getElementById(opts.panelId);
@@ -811,6 +817,7 @@ export async function initRootFolderCard(opts) {
         cfg = await crmFetch(opts.endpoint);   // 403（非管理員）→ 進 catch，入口不顯示
     } catch (_) { return; }
 
+    const extra = opts.extra;
     link.style.display = '';
     panel.innerHTML = `${opts.intro}
         留空＝主控機預設 <span style="color:#aaa;">${esc(cfg.default || '')}</span>。
@@ -820,17 +827,28 @@ export async function initRootFolderCard(opts) {
           <button class="crm-btn crm-btn-primary crm-btn-sm" id="${opts.panelId}-save">儲存</button>
           <span id="${opts.panelId}-msg" style="align-self:center;"></span>
         </div>
-        <div style="margin-top:6px;">目前生效：<span id="${opts.panelId}-eff">${esc(cfg.effective || '')}</span></div>`;
+        <div style="margin-top:6px;">目前生效：<span id="${opts.panelId}-eff">${esc(cfg.effective || '')}</span></div>
+        ${extra ? `<div style="margin-top:14px;border-top:1px solid #333;padding-top:12px;">
+          ${extra.intro}
+          <div style="margin-top:8px;">
+            <input id="${opts.panelId}-extra" class="crm-input" style="width:100%;"
+                   value="${esc(cfg[extra.key] || '')}"
+                   placeholder="${esc(extra.placeholder || '')}">
+          </div>
+        </div>` : ''}`;
 
     link.onclick = () => { panel.style.display = panel.style.display === 'none' ? '' : 'none'; };
     panel.querySelector(`#${opts.panelId}-save`).onclick = async () => {
         const msg = panel.querySelector(`#${opts.panelId}-msg`);
         msg.textContent = '儲存中…';
         try {
-            const d = await crmFetch(opts.endpoint, {
-                method: 'POST',
-                body: JSON.stringify({ [opts.key]: panel.querySelector(`#${opts.panelId}-input`).value.trim() }),
-            });
+            // 🔴 只送**真的在 DOM 裡**的欄位（後端是「有送才寫」）：CF 給 .js 四小時
+            //    快取，發版後會有「新 html ＋ 舊 js」的一輪，那時 extra 還不存在。
+            //    一律連 key 帶空字串送出去，會把剛設好的值洗掉。
+            const body = { [opts.key]: panel.querySelector(`#${opts.panelId}-input`).value.trim() };
+            const extraEl = extra && panel.querySelector(`#${opts.panelId}-extra`);
+            if (extraEl) body[extra.key] = extraEl.value.trim();
+            const d = await crmFetch(opts.endpoint, { method: 'POST', body: JSON.stringify(body) });
             panel.querySelector(`#${opts.panelId}-eff`).textContent = d.effective || '';
             msg.textContent = opts.savedMsg || '已儲存';
         } catch (e) { msg.textContent = '失敗：' + (e && e.message || e); }

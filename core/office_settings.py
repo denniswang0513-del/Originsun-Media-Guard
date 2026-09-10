@@ -55,9 +55,20 @@ EXPORT_KEYS = (
     "drive_map",            # 磁碟代號 → UNC 的覆寫（上面那些路徑要靠它翻譯）
 )
 
+# 只送**一部分子鍵**的。整個 key 送過去會夾帶這台一支都不讀的東西，而那個目錄是
+# 兩個容器共用的 mount —— 「沒有理由放在那裡」本身就是不放的理由。
+EXPORT_SUBKEYS = {
+    # 發票分享頁（`/e/{短碼}`）頁尾的賣方＝「這張是誰開的」。沒有它那一行是空的，
+    # 而那頁是寄給客戶與會計師的。整包 `company` 還帶著匯款行庫與銀行帳號
+    # （報價單 PDF 的欄位），那兩個在這台沒有任何程式碼會讀。
+    "company": ("name", "tax_id"),
+}
+
 
 def export_settings(settings: dict) -> tuple:
     """`settings` → (要送的鍵, 被丟掉的理由清單)。
+
+    `EXPORT_SUBKEYS` 裡的鍵只送清單上的子鍵（見那份清單的說明）。
 
     值是 None／不存在的鍵不送：送過去只會把容器那側的預設值蓋成 None，
     比沒送更糟（`load_settings` 的 merge 會照收）。
@@ -71,10 +82,16 @@ def export_settings(settings: dict) -> tuple:
     這樣寫的，等於白做）。NAS 看得懂的只有 UNC（`\\\\host\\share`）與 POSIX 路徑。
     """
     out, dropped = {}, []
-    for k in EXPORT_KEYS:
+    for k in EXPORT_KEYS + tuple(EXPORT_SUBKEYS):
         v = (settings or {}).get(k)
         if v is None:
             continue
+        keep = EXPORT_SUBKEYS.get(k)
+        if keep:
+            # 子鍵投影也是白名單：`company` 之後長出新欄位，預設不會跟著出去。
+            v = {sub: v[sub] for sub in keep if isinstance(v, dict) and v.get(sub) is not None}
+            if not v:
+                continue
         bad = _local_paths_in(v)
         if bad:
             dropped.append(f"{k}（本機磁碟路徑，NAS 看不到：{bad[0]}）")

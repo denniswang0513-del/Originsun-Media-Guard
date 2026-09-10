@@ -81,20 +81,30 @@ services:
       # master 視角的 UNC，由 core.drive_map 配 NAS_LOCAL_SHARE_ROOT 翻成 /share/...。
       - /share/Container/AI_Workspace/Originsun_Web/PasteAssets:/share/Container/AI_Workspace/Originsun_Web/PasteAssets
       #
-      # ⚠ 刻意**沒有**掛的東西 —— 以下功能在這個容器上會降級，不是壞掉：
-      #   1. 發票影像（settings `invoices_root` → routers/crm/invoice_files.py）
-      #      上傳與下載會失敗，而且錯誤訊息長得像「管理員尚未設定資料夾」（誤導）。
-      #   2. 提案／專案資產夾（各專案自己設的 proposal_assets_root）
+      # ✅ 發票影像（settings `invoices_root`）**是通的**：生產那個值就落在上面
+      #    /share/Archive 這個掛載底下（Archive 分享 → 00_電子發票），由
+      #    NAS_LOCAL_SHARE_ROOT ＋ core.drive_map 翻成 /share/Archive/00_電子發票。
+      #    這裡原本寫「上傳與下載會失敗」—— 那是還沒掛 /share/Archive 之前的舊筆記。
+      #    下載 2026-09-10 端對端驗過（分享連結整條路只走 NAS 也拿得到檔）；
+      #    上傳原本會安靜地寫進 /app 的垃圾路徑，同日修掉（見 _invoices_write_root），
+      #    但**還沒**在容器上實跑過 —— 要等下一次 /publish 把碼推上去。
+      #
+      # ⚠ 刻意**沒有**掛的東西 —— 以下功能在這個容器上會降級：
+      #   1. 提案／專案資產夾（各專案自己設的 proposal_assets_root）
       #      檔案清單空、下載 404。
-      #   3. 成本收據（routers/crm/costs.py 用 __file__ 推 `<repo>/uploads/receipts`）
-      #      會寫進 /app/uploads → 也就是 NAS 的 code 目錄，master 那邊看不到。
-      #      刻意不學 website-api 掛 `../uploads` —— 那個目錄由對外站 serve，
+      #   2. 🔴 成本收據（routers/crm/costs.py）—— 這一項不是「壞掉」而是
+      #      **安靜地成功**：`_receipts_root()` 沒被 `to_local_path` 翻譯，而且
+      #      receipts_root 也不在 `core/office_settings.EXPORT_KEYS` 裡，所以在這台
+      #      會落到 `/app/uploads/receipts`（＝ NAS 的 code 目錄）。上傳回 200、
+      #      DB 記下一條 master 讀不到的路徑，沒有任何一行 error。
+      #      修法跟發票那邊同一套（`_invoices_write_root` ／ `_stored_path`）：
+      #      寫檔前翻譯、存進 DB 存 canonical UNC、把 receipts_root 加進 EXPORT_KEYS。
+      #      還沒做 —— 2026-09-10 /polish 列為 owner 待辦。
+      #      刻意不學 website-api 掛 `../uploads`：那個目錄由對外站 serve，
       #      收據掛上去等於把它變成公開檔。
-      # ⚠ 第 1 項是**掛載**問題不是設定問題：`core/office_settings.py` 已經會在發版時
-      #   把 invoices_root 送過來，所以容器知道路徑、只是看不到那顆磁碟 —— 錯誤訊息
-      #   會更難懂（設定明明有值）。要補掛之前**先讀生產 settings 看它實際指到哪**，
-      #   不要照猜的路徑掛一堆：掛錯的症狀跟沒掛一模一樣，只是多了一個看起來已經
-      #   處理過的假象。（背景見 docs/OFFLINE_MASTER_PLAN.md §7.1 / §7.3）
+      # ⚠ 要補掛新的分享之前**先讀生產 settings 看它實際指到哪**，不要照猜的路徑掛
+      #   一堆：掛錯的症狀跟沒掛一模一樣，只是多了一個看起來已經處理過的假象。
+      #   （背景見 docs/OFFLINE_MASTER_PLAN.md §7.1 / §7.3）
     environment:
       DATABASE_URL: ${DATABASE_URL}
       # 🔴 必須跟 master settings.json 的 jwt_secret 是同一把（website-api 也共用同一把）：

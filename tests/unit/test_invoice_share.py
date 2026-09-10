@@ -91,10 +91,24 @@ def test_voided_is_live_not_frozen():
 
 
 @pytest.mark.parametrize("status,expect", [
-    ("已開立", False), ("作廢", True), ("", False), (None, False), ("  ", False)])
-def test_blank_issue_status_is_not_voided(status, expect):
-    """舊資料沒填 issue_status 不該被說成作廢。"""
+    ("已開立", False), ("作廢", True), ("", False), (None, False), ("  ", False),
+    # 🔴 `issue_status` 是三值的，而「未開立」是 issue_status_for() 在每一次 PUT
+    #    重推出來的（沒填發票號碼就是它）。寫成「已開立以外都算作廢」的話，一張完好
+    #    的發票會在客戶那頁長出紅底的「已作廢」—— 而錯誤只有客戶看得到。
+    ("未開立", False),
+    ("開立中", False)])   # 前端改名前的舊用字，同理不是作廢
+def test_only_the_void_status_counts_as_voided(status, expect):
+    """舊資料沒填、或還沒拿到發票號碼，都不該被說成作廢。"""
     assert IS.is_voided(status) is expect
+
+
+def test_void_wording_matches_the_one_ruler():
+    """`is_voided` 認的字串要跟決定 `issue_status` 的那支是同一個。
+    兩邊各寫一份中文字面值，改名時只改到一邊＝作廢從此判不出來（安靜）。"""
+    from core.finance_logic import issue_status_for
+    assert IS.VOID == issue_status_for("AB-1", "作廢")
+    assert IS.ISSUED == issue_status_for("AB-1")
+    assert not IS.is_voided(issue_status_for(""))       # 未開立
 
 
 def test_has_snapshot_needs_a_file():
@@ -326,3 +340,105 @@ def test_users_json_mirror_can_be_switched_off_by_env():
         assert "if _NO_USERS_JSON:" in func_body(src, fn), fn
     assert "if _NO_USERS_JSON:" not in func_body(src, "def load_users_json("), \
         "讀取不該被擋 —— 擋了在 master 上會讓 DB 掛掉時連唯一的登入退路都沒有"
+
+
+# ── 兩台機器、兩種路徑視角 ────────────────────────────────────
+
+def test_the_customers_filename_is_never_split_with_posix_rules():
+    r"""🔴 `file_url` 存的是 Windows 視角的路徑，而這支也跑在 NAS 的 Linux 容器裡。
+
+    那邊 `os.path` 是 posixpath，反斜線不是分隔字元 —— `os.path.basename()` 會把
+    **整條內部路徑**原封不動回傳。而那個字串會被寫進 `share_snapshot["file"]["name"]`，
+    印在寄給客戶的分享頁上並凍在快照裡。`ntpath.basename` 兩種分隔字元都認。
+    """
+    import ntpath
+    import posixpath
+    unc = r"\\192.168.1.132\Archive\00_電子發票\2026\2026-09\x.pdf"
+    assert posixpath.basename(unc) == unc, "posix 切不動反斜線 —— 這就是那個 bug"
+    assert ntpath.basename(unc) == "x.pdf"
+    assert ntpath.basename("/share/Archive/00_電子發票/x.pdf") == "x.pdf", "NAS 視角也要對"
+
+    src = code_only(repo_src(INV))
+    assert "os.path.basename" not in src, \
+        "這支檔的檔名一律走 ntpath.basename —— os.path 在 Linux 容器上切不動 UNC"
+
+
+def test_writing_a_file_uses_this_machines_view_and_stores_the_shared_one():
+    """寫檔要用**這台看得到的**路徑，存進 DB 要用**大家都翻得回去的**那個。
+
+    🔴 讀那側（`_local_invoice_path`）早就翻譯了，寫這側原本沒有：在 NAS 的
+       office-api 上 makedirs 一個 UNC 會長出一個名字裡帶反斜線的資料夾在 `/app`
+       底下 —— 寫檔成功、回 200、DB 記下一個**沒有任何一台讀得到**的路徑，
+       全程沒有一行 error。
+    """
+    src = code_only(repo_src(INV))
+    assert "def _invoices_write_root(" in src and "to_local_path(_invoices_root())" in src
+    assert "def _stored_path(" in src and "to_canonical_path(" in src
+
+    up = code_only(func_body(src, "async def upload_invoice_file("))
+    assert "_invoices_write_root()" in up, "寫檔的根目錄要翻譯過"
+    assert "_invoices_root()" not in up.replace("_invoices_write_root()", ""), \
+        "upload 不該再直接用未翻譯的根目錄"
+    assert "inv.file_url = _stored_path(" in up, "存進 DB 的要是 canonical"
+
+    rs = code_only(func_body(src, "def _resync_invoice_file("))
+    assert "to_local_path(" in rs and "_invoices_write_root()" in rs
+    assert "shutil.move(local_old, target)" in rs, "搬的是翻譯過的來源"
+
+
+def test_the_internal_download_shares_the_one_whitelist():
+    """`/invoice-file?path=` 原本自己寫了一份純 startswith 的白名單比對。
+
+    兩個後果：`…/00_電子發票_舊` 通得過 `…/00_電子發票` 的檢查（少了 os.sep），
+    而且沒翻譯 —— 在 NAS 的 office-api 上每一張都 404。
+    規則只留 `_local_invoice_path` 一份。
+    """
+    body = code_only(func_body(repo_src(INV), "async def serve_invoice_file("))
+    assert "_local_invoice_path(path)" in body
+    assert "startswith" not in body, "白名單比對不要在這裡再寫一份"
+
+
+def test_the_seller_line_survives_the_trip_to_nas_without_the_bank_details():
+    """分享頁頁尾的賣方（我們是誰）在 NAS 上也要有值。
+
+    那頁由 NAS 的對外容器 serve，而容器裡沒有 settings.json —— 只有 `/publish`
+    送過去的那幾個鍵。`company` 不在清單裡的話賣方那一行是空的，而那頁是寄給
+    客戶與會計師的。
+
+    🔴 但整包 `company` 帶著匯款行庫與**銀行帳號**（報價單 PDF 的欄位），這台
+       一支程式都不讀。子鍵投影也是白名單 —— 以後 company 長出新欄位，預設不出去。
+    """
+    from core.office_settings import EXPORT_SUBKEYS, export_settings
+    out, _dropped = export_settings({"company": {
+        "name": "源日有限公司", "tax_id": "90371657",
+        "bank": "012 台北富邦", "account_no": "82120000062728",
+        "email": "x@y.z", "address": "台北市…"}})
+    assert out["company"] == {"name": "源日有限公司", "tax_id": "90371657"}
+    assert EXPORT_SUBKEYS["company"] == ("name", "tax_id")
+
+    # 快照那側只有這兩個欄位讀得到，兩邊要對得上
+    m = IS.meta(IS.make_snapshot({}, "x.pdf", 1), seller=out["company"])
+    assert m["seller"] == {"name": "源日有限公司", "tax_id": "90371657"}
+
+
+def test_the_shared_link_domain_has_a_way_in():
+    """🔴 `share_public_base` 曾經**完全沒有入口**：後端讀得到、GET 也回，
+    但沒有任何畫面送得出去 —— 於是永遠是空字串，整個「共用對外網域」等於不存在。
+
+    這種漏法沒有任何徵兆（不會 error，只會有人說「你給我的網址打不開」），
+    所以釘住「那張卡上真的有那個欄位、而且 POST 真的帶著它」。
+    """
+    from tests.unit._srcscan import js_code_only
+    card = js_code_only(repo_src("frontend/tabs/crm/crm-utils.js"))
+    assert "opts.extra" in card and "-extra" in card
+    assert "if (extraEl) body[extra.key] = extraEl.value.trim();" in card, \
+        "🔴 只在欄位真的在 DOM 裡才送 —— CF 給 .js 四小時快取，舊 js 沒有 extra，" \
+        "一律帶空字串送會把剛設好的網域洗掉"
+
+    quotes = js_code_only(repo_src("frontend/tabs/crm/crm-quotes.js"))
+    assert "share_public_base" in quotes, "報價單那張卡要送得出這個鍵"
+
+    # 後端那支不可以回「剛被 pop 掉的舊鍵」（永遠是空字串）
+    body = code_only(func_body(repo_src("routers/crm/quotes.py"), "async def set_quotations_root("))
+    assert "public_base(s)" in body
+    assert 's.get("quotes_public_base")' not in body.split("return {")[-1]

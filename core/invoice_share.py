@@ -64,8 +64,10 @@ NEVER_SHARE = (
     "id", "share_token", "file_url", "created_at", "updated_at",
 )
 
-# 已開立以外的狀態＝這張不能用了。`issue_status` 的值是「已開立」／「作廢」。
+# 🔴 `issue_status` 是**三值**的（`core.finance_logic.issue_status_for`）：
+#    未開立／已開立／作廢。這裡只認「作廢」—— 見 is_voided。
 ISSUED = "已開立"
+VOID = "作廢"
 
 
 def public_view(inv: Optional[dict]) -> dict:
@@ -114,9 +116,15 @@ def meta(snapshot: Optional[dict], *, voided: bool = False,
 
 
 def is_voided(issue_status) -> bool:
-    """「已開立」以外都算不能用了。空值當成已開立 —— 舊資料沒填不該被說成作廢。"""
-    v = str(issue_status or "").strip()
-    return bool(v) and v != ISSUED
+    """只有「作廢」算作廢。
+
+    🔴 不能寫成「已開立以外都算」：`issue_status` 是三值的，而「未開立」
+       是 `issue_status_for()` 在**每一次 PUT** 重推出來的 —— 發票號碼還沒填就是它。
+       那算作廢的話，一張完好的發票會在客戶那頁頂上長出紅底的「已作廢」，
+       而**錯誤只有客戶看得到**（我們這邊的列表寫的是「未開立」，看不出任何異狀）。
+       空值同理不算作廢（舊資料沒填）。
+    """
+    return str(issue_status or "").strip() == VOID
 
 
 def has_snapshot(snapshot: Optional[dict]) -> bool:

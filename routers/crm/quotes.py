@@ -350,8 +350,12 @@ async def set_quotations_root(request: Request):
         save_settings(s)
     except OSError as e:
         raise HTTPException(status_code=503, detail=f"設定檔忙碌中，請再按一次儲存（{e}）")
+    # 🔴 回**生效值**，不是 `s.get("quotes_public_base")` —— 上面那段才剛把舊鍵 pop 掉，
+    #    拿它回等於永遠回空字串。舊鍵名照樣回一份（CF 給 .js 四小時快取的那一輪）。
+    from core.share_link import public_base
+    base = public_base(s)
     return {"status": "ok", "quotes_root": s.get("quotes_root") or "",
-            "quotes_public_base": s.get("quotes_public_base") or "",
+            "share_public_base": base, "quotes_public_base": base,
             "effective": _quotes_root()}
 
 
