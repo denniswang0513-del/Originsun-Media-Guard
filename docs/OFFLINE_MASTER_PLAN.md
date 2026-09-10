@@ -182,8 +182,9 @@ Chromium 產 PDF。所以要讓 NAS 接手就得把 Playwright 塞進容器（+7
 | 客戶連結網域 `quotes_public_base` | `GET/POST /quotations-root`（跟報價單資料夾同一張卡） |
 | 測試 | `tests/unit/test_quote_snapshot.py`（含「檔名要過得了圖床的刪除白名單」那條） |
 
-發票影像分享（`/e/{code}`）是**同一個形狀**但還沒做 —— 它本來就是使用者上傳的靜態檔，
-比報價單更單純，之後照這條路補。
+發票影像分享（`/e/{code}`）是**同一個形狀**，同日照這條路做完了（見 docs/INVOICE_SHARE_PLAN.md）——
+它本來就是使用者上傳的靜態檔，比報價單更單純：三支端點移到 `public_router`、分享當下定稿快照
+（`core/invoice_share.py` 白名單投影），master 關機也拿得到。
 
 ### P2 —— 三個面上線 ✅ **程式碼已完成（2026-09-10，dev）**，NAS 那側待人工步驟
 
@@ -221,9 +222,11 @@ owner 2026-09-10：「我之前跟你討論的功能都想要搬上 nas」。
 ### P3 —— 補完（依 owner 實際使用狀況再排）
 
 - ~~NAS 裝 Playwright~~ —— 不需要了（P1 的「生成報價單」把「產」與「送」拆開了）
-- 發票影像分享 `/e/{code}` 照 P1 同一條路搬上 NAS
+- ~~發票影像分享 `/e/{code}` 照 P1 同一條路搬上 NAS~~ —— 2026-09-10 做完
 - 桌機 CRM 的「唯讀降級殼」（只讀報價／發票清單，不編輯）
 - 「主機離線」的統一提示元件（AI 助理、PDF、機隊燈號共用）
+- 生產的 `invoice_fee_rates` **從來沒設定過** → 代開費在兩台都算成 0（靜默）。
+  這不是程式問題，是那格沒填；填了下次 `/publish` 才會同步到 NAS（`core/office_settings.py`）。
 
 ---
 
