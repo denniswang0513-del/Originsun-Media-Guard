@@ -47,8 +47,8 @@ async def _apply_project_roots(request: Any, task_type: str) -> str:
 
     私帳可見性：這裡是**用 id 反查**、不是列舉，照 core.ledger.hide_mine_projects
     的分界不必表態（而且 enqueue 這層拿到的是 pydantic model，沒有 HTTP request
-    可問 scope）。能到這裡的 id 都是選擇器給的，而選擇器那支
-    （routers/api_backup.list_backup_roots）已經濾掉私帳案。
+    可問 scope）。選擇器那支（routers/api_backup.list_backup_roots）依 owner
+    2026-09-10 的拍板**照樣列出私帳案**，所以這裡也不必再濾一次。
     """
     pid = str(getattr(request, "project_id", "") or "").strip()
     if task_type != "backup" or not pid or not state.db_online:

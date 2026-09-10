@@ -15,8 +15,13 @@ def test_closed_flag_comes_from_one_backend_rule():
     from core.project_flow import CLOSED_STATUSES, LOST, is_closed
     assert is_closed("結案") and is_closed("歸檔") and is_closed(LOST) and not is_closed("製作") and not is_closed("")
     assert set(CLOSED_STATUSES) == {"結案", "歸檔", LOST}
+    # 清單規則 2026-09-11 起住在 services/project_picker（備份頁的「綁定專案」用的是同一支，
+    # owner：「綁定專案的列彆方式，和專案工時的專案列表相同」「不篩 連專案工時也不篩」）
+    pk = code_only(repo_src("services/project_picker.py"))
+    assert '"closed": is_closed(st)' in pk
     ts = code_only(func_body(repo_src("services/timesheet_manual.py"), "async def project_options("))
-    assert '"closed": is_closed(st)' in ts and '"closed": False' in ts
+    assert "list_options(session)" in ts, "工時這邊只是套用同一份規則，不要再抄一份"
+    assert '"closed": False' in ts       # 該員最近填過、但已經不在專案表裡的案名
     petty = code_only(func_body(repo_src("routers/crm/petty.py"), "async def petty_options("))
     assert '"closed": is_closed(p.status)' in petty
     assert "rank_items(" in petty and "CrmProjectExpense.item" in petty, "項目用量從過去雜支列算"

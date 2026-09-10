@@ -1,5 +1,6 @@
 import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop, renderHostCheckboxes, collectSelectedHosts, todayStamp, authFetch, esc } from '../../js/shared/utils.js';
 import { loadReportHistory } from '../../js/shared/report-history.js';
+import { attachProjectPop } from '../../js/shared/project-pop.js';
 
 let sourceIndex = 0;
 
@@ -70,11 +71,14 @@ let _bkProjectsUnavailable = false;
 // 剛存回專案 / 被 skip 的那一根要顯示的一次性小字：{ [rootId]: { msg, tone } }
 let _bkRootFlash = {};
 
-function _bkProjectSel() { return document.getElementById('bk_project_sel'); }
+// 專案欄＝打字浮層（js/shared/project-pop.js），跟專案工時／零用金同一支元件。
+// 選到的案 id 在 data-pid 上（浮層寫的），輸入框裡的字只是給人看的 label ——
+// 人自己改了字，浮層會把 data-pid 清掉（＝不再是選到的那個案）。
+function _bkProjectInput() { return document.getElementById('bk_project_pick'); }
 
 /** 目前綁定的專案物件（沒綁 / 找不到 → null）。 */
 function bkSelectedProject() {
-    const id = _bkProjectSel()?.value || '';
+    const id = _bkProjectInput()?.dataset.pid || '';
     if (!id) return null;
     return _bkProjects.find(p => String(p.id) === String(id)) || null;
 }
@@ -223,8 +227,10 @@ async function bkSaveRootToProject(rootId) {
 
         // ok：用回傳的最新專案物件取代快取（三根已翻成本機視角）
         if (data.project) {
+            // 🔴 合併不是取代：回存端點回的是單筆投影（id／name／三根），
+            // 直接蓋掉會把浮層分組要的 client／year／closed／label 弄不見。
             const i = _bkProjects.findIndex(p => String(p.id) === String(data.project.id));
-            if (i >= 0) _bkProjects[i] = data.project;
+            if (i >= 0) _bkProjects[i] = { ..._bkProjects[i], ...data.project };
             else _bkProjects.push(data.project);
         }
         const saved = Array.isArray(data.saved) ? data.saved : [];
@@ -260,13 +266,13 @@ async function bkSaveRootToProject(rootId) {
 }
 
 async function loadBackupProjects() {
-    const sel = _bkProjectSel();
-    if (!sel) return;
+    const inp = _bkProjectInput();
+    if (!inp) return;
     const base = getComputeBaseUrl();
     try {
-        // 端點預設只給 50 筆；下拉要能一次搜到全部 → 明講要上限那麼多
-        //（後端自己 clamp 到 _PROJECTION_LIMIT＝200，送更大也不會 422）。
-        const res = await authFetch(base + '/api/v1/projects/backup-roots?limit=200');
+        // 不帶 limit＝整份（後端不篩狀態，結案的案照樣列得出來 —— 備份最常發生在結案之後）。
+        // 篩選交給浮層自己在前端做，所以清單要是完整的。
+        const res = await authFetch(base + '/api/v1/projects/backup-roots');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         _bkProjects = Array.isArray(data?.projects) ? data.projects : [];
@@ -277,28 +283,24 @@ async function loadBackupProjects() {
         _bkProjectsUnavailable = true;
     }
 
-    const prev = sel.value;
-    sel.innerHTML = '<option value="">不綁專案（下方三個路徑自己填）</option>'
-        + _bkProjects.map(p => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
-    if (prev && _bkProjects.some(p => String(p.id) === String(prev))) sel.value = prev;
-
-    sel.disabled = _bkProjectsUnavailable;
-    sel.classList.toggle('opacity-50', _bkProjectsUnavailable);
-    // 全域下拉升級（js/shared/select-upgrade.js）會把原生 select 藏起來、換成一個
-    // 輸入框；停用時那個框也要一起停（清單空的時候只有 1 個 option、不會被升級，
-    // 所以這條多半是空跑 —— 留著是為了「之前已被升級」的情況）。
-    const ssInput = sel.closest('.ss-wrap')?.querySelector('.ss-input');
-    if (ssInput) ssInput.disabled = _bkProjectsUnavailable;
+    // 沒有下拉要重建：浮層每次打開都跟 _bkProjects 要一次（attachProjectPop 的 cfg.options）。
+    inp.disabled = _bkProjectsUnavailable;
+    inp.classList.toggle('opacity-50', _bkProjectsUnavailable);
+    inp.placeholder = _bkProjectsUnavailable
+        ? '目前讀不到專案清單 —— 三個路徑請手動填（不影響派工）'
+        : '不綁專案（下方三個路徑自己填）—— 打字搜尋案名';
 
     bkSyncProjectRoots({ fill: true });
 }
 
 /** 解除綁定：三個 input 恢復可編輯，**值保留**。 */
 function bkClearProject() {
-    const sel = _bkProjectSel();
-    if (!sel) return;
-    sel.value = '';
-    if (typeof sel._syncSsValue === 'function') sel._syncSsValue();
+    const inp = _bkProjectInput();
+    if (!inp) return;
+    inp.value = '';
+    delete inp.dataset.pid;          // 浮層認的就是這一格：沒有 pid＝沒綁
+    delete inp.dataset.pname;
+    inp.title = '';
     _bkRootFlash = {};
     bkSyncProjectRoots({ fill: false });
 }
@@ -326,7 +328,7 @@ export function collectBackupPayload() {
         project_name: projectName,
         // 綁定的 CRM 專案（沒綁就送 ""）。有值時後端以 DB 的三根為準、忽略下面
         // 這三個路徑；仍照實送，讓 log／排程回放看得出當時畫面上是什麼。
-        project_id: document.getElementById('bk_project_sel')?.value || '',
+        project_id: document.getElementById('bk_project_pick')?.dataset.pid || '',
         local_root: document.getElementById('local_root').value.trim(),
         nas_root: document.getElementById('nas_root').value.trim(),
         proxy_root: document.getElementById('proxy_root').value.trim(),
@@ -686,10 +688,15 @@ export function initBackupTab() {
 
     // 綁定 CRM 專案：載入可選專案 + 選了就鎖住三個根目錄並帶入
     loadBackupProjects();
-    _bkProjectSel()?.addEventListener('change', () => {
+    attachProjectPop(document.getElementById('bk_project_row') || document, { options: () => _bkProjects });
+    const _onProjectChanged = () => {
         _bkRootFlash = {};              // 換案了：上一案的「已存回／沒寫入」小字要收掉
         bkSyncProjectRoots({ fill: true });
-    });
+    };
+    // 選到一個案＝浮層先派 input（帶 _fromPick）再派 change；人自己打字改掉案名時
+    // 浮層會清掉 data-pid，那時只有 input 會來 —— 兩個都聽才不會停在「還鎖著」。
+    _bkProjectInput()?.addEventListener('change', _onProjectChanged);
+    _bkProjectInput()?.addEventListener('input', (ev) => { if (!ev._fromPick) _onProjectChanged(); });
 
     // 路徑書籤：載入清單 + 選了即套用
     loadBookmarks();

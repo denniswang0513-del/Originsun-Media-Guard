@@ -270,3 +270,138 @@ def test_the_two_folder_concepts_stay_documented():
     block = src[src.index("folder_path = Column"):src.index("description = Column")]
     assert "folder_path" in block and "backup_local_root" in block
     assert "canonical UNC" in block
+
+
+# ── 專案清單＝跟專案工時同一份（owner 2026-09-11）────────────────────
+
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _FakeQuerySession:
+    """`list_options` 會 execute 兩次：先專案列、再每案最後一筆工時的日期。"""
+
+    def __init__(self, projects, last_ts=()):
+        self._answers = [projects, last_ts]
+
+    async def execute(self, _stmt):
+        return _Rows(self._answers.pop(0))
+
+
+def _p(pid, name, *, status="製作", entity="parent", mine_link_id=None,
+       source_project_id=None, client="客", start=None, updated=None, extra=()):
+    from datetime import date
+    return (pid, name, client, start or date(2025, 3, 1), None, date(2025, 1, 1),
+            status, entity, mine_link_id, source_project_id, updated, *extra)
+
+
+def _options(projects, last_ts=(), **kw):
+    from services.project_picker import list_options
+    return asyncio.run(list_options(_FakeQuerySession(list(projects), list(last_ts)), **kw))
+
+
+class TestSharedProjectList:
+    """owner 2026-09-11：「綁定專案的列彆方式，和專案工時的專案列表相同」
+    ＋「不篩 連專案工時也不篩」。規則一份，住在 services/project_picker。"""
+
+    def test_closed_projects_are_listed_and_flagged(self):
+        """🔴 不篩狀態：備份最常發生在結案之後（歸檔、補檔、客戶回頭要素材）。
+        分組交給 closed 旗標，不是把案子從清單裡拿掉。"""
+        opts = _options([_p("a", "進行中案"), _p("b", "結案案", status="結案"),
+                         _p("c", "歸檔案", status="歸檔"), _p("d", "未成案", status="未成案")])
+        assert {o["name"] for o in opts} == {"進行中案", "結案案", "歸檔案", "未成案"}
+        assert {o["name"]: o["closed"] for o in opts} == {
+            "進行中案": False, "結案案": True, "歸檔案": True, "未成案": True}
+
+    def test_proposal_stage_counts_as_active(self):
+        assert _options([_p("a", "提案中", status="提案")])[0]["closed"] is False
+
+    def test_linked_ledger_pair_is_listed_once_keeping_the_mine_row(self):
+        """母私帳連結的兩筆是同一個案（工時對映只認私帳）。"""
+        opts = _options([_p("m", "某案", entity="parent", mine_link_id="s"),
+                         _p("s", "某案", entity="mine", source_project_id="m")])
+        assert [o["id"] for o in opts] == ["s"]
+
+    def test_recently_touched_comes_first(self):
+        from datetime import date
+        opts = _options([_p("old", "很久沒動", updated=date(2024, 1, 1)),
+                         _p("new", "最近有動", updated=date(2026, 9, 1))])
+        assert [o["name"] for o in opts] == ["最近有動", "很久沒動"]
+
+    def test_a_recent_timesheet_row_counts_as_touched(self):
+        """專案本身沒動、但有人上週填了工時 —— 那也是「最近有動」。"""
+        from datetime import date
+        opts = _options([_p("a", "有工時", updated=date(2024, 1, 1)),
+                         _p("b", "都沒動", updated=date(2024, 6, 1))],
+                        last_ts=[("a", date(2026, 9, 1))])
+        assert [o["name"] for o in opts] == ["有工時", "都沒動"]
+
+    def test_label_is_year_client_name(self):
+        assert _options([_p("a", "某案", client="源日")])[0]["label"] == "2025 源日 某案"
+
+    def test_extra_columns_come_through_untouched(self):
+        """備份頁要三根；`extra` 是呼叫端點名的白名單，值不加工。"""
+        opts = _options([_p("a", "某案", extra=(NAS + r"\x", None, ""))],
+                        extra=("backup_local_root", "backup_nas_root", "backup_proxy_root"))
+        assert opts[0]["backup_local_root"] == NAS + r"\x"
+        assert opts[0]["backup_nas_root"] is None
+
+    def test_timesheets_and_backup_share_the_one_rule(self):
+        """兩邊各寫一份的話，改了一邊另一邊就靜默地不一樣了。"""
+        ts = open("services/timesheet_manual.py", encoding="utf-8").read()
+        assert "from services.project_picker import list_options" in ts
+        assert "CrmProject.status.in_" not in ts, "工時那份也不篩狀態（owner 原話）"
+        bk = open("routers/api_backup.py", encoding="utf-8").read()
+        assert "from services.project_picker import list_options" in bk
+        assert "CrmProject.name.ilike" not in bk, "清單規則不要在這裡長第二份"
+
+    def test_no_status_filter_anywhere_in_the_rule(self):
+        src = open("services/project_picker.py", encoding="utf-8").read()
+        assert "status.in_" not in src and "!= \"結案\"" not in src
+        assert "不看狀態" in src, "拿掉篩選的理由要留著，否則下次會被當 bug 加回去"
+
+
+class TestPickerProjection:
+    """清單那支的白名單（比單筆多了浮層分組要的四格，仍然不帶錢）。"""
+
+    def _opt(self, **kw):
+        base = dict(id="p1", name="某案", client="源日", year="2025", closed=True,
+                    label="2025 源日 某案", backup_local_root=r"D:\work",
+                    backup_nas_root=NAS, backup_proxy_root=None)
+        base.update(kw)
+        return base
+
+    def test_exposes_exactly_the_nine_display_keys(self):
+        from routers.api_backup import _picker_view
+        assert set(_picker_view(self._opt())) == {
+            "id", "name", "client", "year", "closed", "label",
+            "local_root", "nas_root", "proxy_root"}
+
+    def test_money_never_leaks(self):
+        """這支端點免登入（備檔電腦沒人登入）—— client_id／entity／金額一律不上。"""
+        from routers.api_backup import _picker_view
+        never = {"contract_amount", "amount_received", "amount_receivable",
+                 "transfer_fee", "client_id", "entity", "notes"}
+        view = _picker_view(self._opt(**{k: 999999 for k in never}))
+        assert not (never & set(view))
+
+    def test_paths_are_translated_to_the_calling_machine(self, monkeypatch):
+        from routers.api_backup import _picker_view
+        monkeypatch.setenv("NAS_LOCAL_SHARE_ROOT", "/share")
+        v = _picker_view(self._opt())
+        assert v["nas_root"] == "/share/Project_Longterm"
+        assert v["proxy_root"] == "", "沒設定的根是空字串，不是 None"
+
+
+def test_backup_page_uses_the_shared_typing_popup():
+    """跟專案工時同一支元件（js/shared/project-pop.js）：分兩段、選了記 data-pid。"""
+    html = open("frontend/tabs/backup/backup.html", encoding="utf-8").read()
+    js = open("frontend/tabs/backup/backup.js", encoding="utf-8").read()
+    assert 'id="bk_project_pick"' in html and "data-proj-pick" in html
+    assert "<select id=\"bk_project_sel\"" not in html, "原生 select 分不了組"
+    assert "attachProjectPop(" in js
+    assert "dataset.pid" in js, "綁的是 id，不是輸入框裡那串字"

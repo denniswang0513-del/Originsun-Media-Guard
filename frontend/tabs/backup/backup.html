@@ -46,11 +46,13 @@
              三根各自獨立，混合狀態是正常的。 -->
         <div>
             <label class="block text-sm font-medium text-gray-400 mb-1">綁定專案 (CRM Project)</label>
-            <div class="flex gap-2 items-center">
-                <select id="bk_project_sel"
+            <div class="flex gap-2 items-center" id="bk_project_row">
+                <!-- 打字浮層（js/shared/project-pop.js）＝專案工時、零用金用的同一支：
+                     分「進行中／已結案（收著）」兩段，清單不篩狀態（owner 2026-09-11）。
+                     選到的案 id 記在 data-pid 上，空的＝沒綁。 -->
+                <input type="text" id="bk_project_pick" data-proj-pick autocomplete="off"
+                    placeholder="不綁專案（下方三個路徑自己填）—— 打字搜尋案名"
                     class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-2 py-2 text-sm focus:outline-none focus:border-blue-500">
-                    <option value="">不綁專案（下方三個路徑自己填）</option>
-                </select>
                 <button onclick="bkClearProject()" title="解除綁定，三個根目錄改回可手動編輯（目前的值會保留）"
                     class="bg-[#333] hover:bg-[#444] text-gray-300 border border-[#555] rounded px-3 py-2 text-xs transition whitespace-nowrap">解除綁定</button>
             </div>
