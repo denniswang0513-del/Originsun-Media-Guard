@@ -405,3 +405,106 @@ def test_backup_page_uses_the_shared_typing_popup():
     assert "<select id=\"bk_project_sel\"" not in html, "原生 select 分不了組"
     assert "attachProjectPop(" in js
     assert "dataset.pid" in js, "綁的是 id，不是輸入框裡那串字"
+
+
+class TestListEndpointFiltering:
+    """`/backup-roots` 的 `q`／`limit`（特徵測試：把現在的行為釘住）。
+
+    這兩個參數 2026-09-11 起改成在清單**之後**做（規則本身在 project_picker）——
+    留著是為了 Cloudflare 那一輪「新 html ＋ 舊 js」，舊分頁會送 `limit=200`。
+    """
+
+    def _call(self, monkeypatch, opts, *, boom=False, offline=False, **kw):
+        import routers.api_backup as ab
+        import services.project_picker as picker
+
+        monkeypatch.setattr(ab, "check_lan_or_logged_in", lambda _r: None)
+
+        async def _fake_options(session, extra=()):
+            if boom:
+                raise RuntimeError("DB 斷了")
+            return [dict(o) for o in opts]
+
+        monkeypatch.setattr(picker, "list_options", _fake_options)
+
+        async def _factory():
+            return None if offline else (lambda: _FakeSession(None))
+
+        monkeypatch.setattr(ab, "_factory", _factory)
+        return asyncio.run(ab.list_backup_roots(None, **kw))
+
+    def _opts(self, n):
+        return [{"id": f"p{i}", "name": f"案{i}", "client": "源日", "year": "2026",
+                 "closed": False, "label": f"2026 源日 案{i}",
+                 "backup_local_root": "", "backup_nas_root": "", "backup_proxy_root": ""}
+                for i in range(n)]
+
+    def test_no_limit_means_the_whole_list(self, monkeypatch):
+        """浮層自己在前端篩，所以清單要是完整的（截斷＝有些案永遠選不到）。"""
+        out = self._call(monkeypatch, self._opts(300))
+        assert out["status"] == "ok" and len(out["projects"]) == 300
+
+    def test_old_cached_page_asking_for_200_still_works(self, monkeypatch):
+        out = self._call(monkeypatch, self._opts(300), limit=200)
+        assert len(out["projects"]) == 200
+        assert set(out["projects"][0]) >= {"id", "name", "local_root"}, "舊 js 認得的欄位還在"
+
+    def test_limit_is_clamped_to_the_safety_valve(self, monkeypatch):
+        from routers.api_backup import _PROJECTION_LIMIT
+        assert _PROJECTION_LIMIT >= 646, "生產 2026-09-11 有 646 案，別再退回會截斷的數字"
+        out = self._call(monkeypatch, self._opts(_PROJECTION_LIMIT + 100), limit=999999)
+        assert len(out["projects"]) == _PROJECTION_LIMIT
+
+    def test_q_matches_name_and_label_case_insensitively(self, monkeypatch):
+        opts = self._opts(2)
+        opts[0]["name"] = "ZZ 測試"
+        opts[0]["label"] = "2026 源日 ZZ 測試"
+        assert [p["name"] for p in self._call(monkeypatch, opts, q="zz")["projects"]] == ["ZZ 測試"]
+        assert [p["name"] for p in self._call(monkeypatch, opts, q="源日")["projects"]] == ["ZZ 測試", "案1"]
+
+    def test_q_with_no_hit_is_an_empty_list_not_an_error(self, monkeypatch):
+        out = self._call(monkeypatch, self._opts(2), q="不存在的案")
+        assert out["status"] == "ok" and out["projects"] == []
+
+    def test_db_offline_returns_200_and_never_blocks_dispatch(self, monkeypatch):
+        out = self._call(monkeypatch, [], offline=True)
+        assert out == {"status": "db_offline", "projects": []}
+
+    def test_a_query_blowing_up_degrades_instead_of_500(self, monkeypatch):
+        """讀不到專案清單不是派工的阻礙 —— 前端據此退回手動輸入三根。"""
+        out = self._call(monkeypatch, [], boom=True)
+        assert out["status"] == "db_offline" and out["projects"] == []
+        assert "DB 斷了" in out["detail"]
+
+
+class TestProjectOptionsRecentNames:
+    """工時補登下拉＝共用清單 ＋ 該員最近填過的案名（特徵測試）。"""
+
+    def _call(self, projects, recent, staff_name=None):
+        from services.timesheet_manual import project_options
+        sess = _FakeQuerySession(list(projects), [])
+        sess._answers.append(list(recent))          # 第三次 execute＝最近填過的案名
+        return asyncio.run(project_options(sess, staff_name))
+
+    def test_recent_names_are_appended_without_an_id(self):
+        """Sheet 打進來、專案表裡沒有的案名也要選得到（id=None，存的時候走名稱對映）。"""
+        from datetime import date
+        out = self._call([_p("a", "有建檔的案")], [("只在工時裡的案", date(2026, 9, 1))], staff_name="王")
+        assert [(o["name"], o["id"], o["closed"]) for o in out] == [
+            ("有建檔的案", "a", False), ("只在工時裡的案", None, False)]
+
+    def test_a_name_already_in_the_list_is_not_duplicated(self):
+        from datetime import date
+        out = self._call([_p("a", "同一個案")], [("同一個案", date(2026, 9, 1))], staff_name="王")
+        assert [o["id"] for o in out] == ["a"]
+
+    def test_without_a_staff_name_it_is_just_the_shared_list(self):
+        out = self._call([_p("a", "某案")], [])
+        assert [o["id"] for o in out] == ["a"]
+
+
+def test_saving_a_root_back_merges_into_the_cached_row():
+    """🔴 回存端點回的是單筆投影（id／name／三根）—— 直接覆蓋會把浮層分組要的
+    closed／label 弄不見，那個案就會跑錯組、副標也不見了，而且完全沒有徵兆。"""
+    js = open("frontend/tabs/backup/backup.js", encoding="utf-8").read()
+    assert "_bkProjects[i] = { ..._bkProjects[i], ...data.project }" in js
