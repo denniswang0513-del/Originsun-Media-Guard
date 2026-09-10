@@ -10,6 +10,7 @@ import asyncio
 import types
 
 from core.drive_map import to_canonical
+from tests.unit._srcscan import repo_src
 from routers.api_backup import _root_view
 from routers.crm.projects import BACKUP_ROOT_FIELDS, normalize_backup_roots
 
@@ -110,7 +111,7 @@ class TestRootViewProjection:
 
 class TestProjectionVisibility:
     def _src(self):
-        return open("routers/api_backup.py", encoding="utf-8").read()
+        return repo_src("routers/api_backup.py")
 
     def test_mine_projects_are_listed_and_selectable(self):
         """owner 2026-09-10 拍板：私帳的案子一樣要備份，選不到等於功能對它失效。
@@ -135,7 +136,7 @@ class TestSaveBackupRoots:
     """
 
     def _src(self):
-        return open("routers/api_backup.py", encoding="utf-8").read()
+        return repo_src("routers/api_backup.py")
 
     def test_only_fills_blanks_never_overwrites(self):
         seg = self._src()[self._src().index("async def save_backup_roots"):]
@@ -266,7 +267,7 @@ def test_backup_request_accepts_project_id():
 def test_the_two_folder_concepts_stay_documented():
     """folder_path（工作資料夾完整路徑）跟 backup_*_root（根）是不同東西。
     註解掉了以後一定有人把它們合併。"""
-    src = open("db/models/_crm.py", encoding="utf-8").read()
+    src = repo_src("db/models/_crm.py")
     block = src[src.index("folder_path = Column"):src.index("description = Column")]
     assert "folder_path" in block and "backup_local_root" in block
     assert "canonical UNC" in block
@@ -348,11 +349,16 @@ class TestSharedProjectList:
                    extra=(NAS + r"\y", "", ""))]
         assert [o["id"] for o in _options(pair, extra=cols)] == ["s"]
 
-    def test_neither_side_has_roots_keeps_the_mine_row(self):
+    def test_neither_side_has_roots_yet_keeps_the_parent_row(self):
+        """🔴 **這是目前生產每一個案的狀態**（三根功能剛上，一個案都還沒設）。
+        留私帳的話第一次按「儲存到專案」就寫進那筆沒人看得到的，之後母帳的專案頁
+        永遠顯示「還沒設定」、有人在那邊補填的值會被靜默忽略（私帳一有值就換它勝出）。"""
         cols = ("backup_local_root", "backup_nas_root", "backup_proxy_root")
         pair = [_p("m", "某案", entity="parent", mine_link_id="s", extra=("", "", "")),
                 _p("s", "某案", entity="mine", source_project_id="m", extra=("", "", ""))]
-        assert [o["id"] for o in _options(pair, extra=cols)] == ["s"]
+        assert [o["id"] for o in _options(pair, extra=cols)] == ["m"]
+        # 工時那條路（沒點名 extra）不受影響：照樣留私帳，對映只認它
+        assert [o["id"] for o in _options(pair)] == ["s"]
 
     def test_recently_touched_comes_first(self):
         from datetime import date
@@ -380,15 +386,15 @@ class TestSharedProjectList:
 
     def test_timesheets_and_backup_share_the_one_rule(self):
         """兩邊各寫一份的話，改了一邊另一邊就靜默地不一樣了。"""
-        ts = open("services/timesheet_manual.py", encoding="utf-8").read()
+        ts = repo_src("services/timesheet_manual.py")
         assert "from services.project_picker import list_options" in ts
         assert "CrmProject.status.in_" not in ts, "工時那份也不篩狀態（owner 原話）"
-        bk = open("routers/api_backup.py", encoding="utf-8").read()
+        bk = repo_src("routers/api_backup.py")
         assert "from services.project_picker import list_options" in bk
         assert "CrmProject.name.ilike" not in bk, "清單規則不要在這裡長第二份"
 
     def test_no_status_filter_anywhere_in_the_rule(self):
-        src = open("services/project_picker.py", encoding="utf-8").read()
+        src = repo_src("services/project_picker.py")
         assert "status.in_" not in src and "!= \"結案\"" not in src
         assert "不看狀態" in src, "拿掉篩選的理由要留著，否則下次會被當 bug 加回去"
 
@@ -427,8 +433,8 @@ class TestPickerProjection:
 
 def test_backup_page_uses_the_shared_typing_popup():
     """跟專案工時同一支元件（js/shared/project-pop.js）：分兩段、選了記 data-pid。"""
-    html = open("frontend/tabs/backup/backup.html", encoding="utf-8").read()
-    js = open("frontend/tabs/backup/backup.js", encoding="utf-8").read()
+    html = repo_src("frontend/tabs/backup/backup.html")
+    js = repo_src("frontend/tabs/backup/backup.js")
     assert 'id="bk_project_pick"' in html and "data-proj-pick" in html
     assert "<select id=\"bk_project_sel\"" not in html, "原生 select 分不了組"
     assert "attachProjectPop(" in js
@@ -534,5 +540,14 @@ class TestProjectOptionsRecentNames:
 def test_saving_a_root_back_merges_into_the_cached_row():
     """🔴 回存端點回的是單筆投影（id／name／三根）—— 直接覆蓋會把浮層分組要的
     closed／label 弄不見，那個案就會跑錯組、副標也不見了，而且完全沒有徵兆。"""
-    js = open("frontend/tabs/backup/backup.js", encoding="utf-8").read()
+    js = repo_src("frontend/tabs/backup/backup.js")
     assert "_bkProjects[i] = { ..._bkProjects[i], ...data.project }" in js
+
+
+def test_the_open_popup_is_refreshed_when_the_list_lands():
+    """🔴 浮層抓的是**打開當下**那一份（`_pop.rows` 快照，而 `_bkProjects` 是整個換掉）。
+    人搶在 fetch 回來前就點進去（機隊 agent 打 NAS Postgres 慢一兩秒很正常），浮層會停在
+    「進行中（0）」，之後連打字重繪都還是那份空的 —— 看起來就是「一個案都沒有」。"""
+    from tests.unit._srcscan import js_func_body
+    fn = js_func_body(repo_src("frontend/tabs/backup/backup.js"), "async function loadBackupProjects(")
+    assert "closeProjectPop()" in fn and "'focusin'" in fn

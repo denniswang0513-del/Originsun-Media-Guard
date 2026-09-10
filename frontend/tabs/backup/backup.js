@@ -1,6 +1,6 @@
 import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop, renderHostCheckboxes, collectSelectedHosts, todayStamp, authFetch, esc } from '../../js/shared/utils.js';
 import { loadReportHistory } from '../../js/shared/report-history.js';
-import { attachProjectPop } from '../../js/shared/project-pop.js';
+import { attachProjectPop, closeProjectPop } from '../../js/shared/project-pop.js';
 
 let sourceIndex = 0;
 
@@ -68,6 +68,8 @@ const BK_ROOT_LABELS = {
 
 let _bkProjects = [];
 let _bkProjectsUnavailable = false;
+// 正常狀態那句 placeholder 的正本在 html 上（讀不到清單時才換掉，之後換得回來）
+let _bkOkPlaceholder = '';
 // 剛存回專案 / 被 skip 的那一根要顯示的一次性小字：{ [rootId]: { msg, tone } }
 let _bkRootFlash = {};
 
@@ -268,6 +270,7 @@ async function bkSaveRootToProject(rootId) {
 async function loadBackupProjects() {
     const inp = _bkProjectInput();
     if (!inp) return;
+    _bkOkPlaceholder ||= inp.placeholder;      // html 那句是正本，別在 js 再抄一份
     const base = getComputeBaseUrl();
     try {
         // 不帶 limit＝整份（後端不篩狀態，結案的案照樣列得出來 —— 備份最常發生在結案之後）。
@@ -288,7 +291,17 @@ async function loadBackupProjects() {
     inp.classList.toggle('opacity-50', _bkProjectsUnavailable);
     inp.placeholder = _bkProjectsUnavailable
         ? '目前讀不到專案清單 —— 三個路徑請手動填（不影響派工）'
-        : '不綁專案（下方三個路徑自己填）—— 打字搜尋案名';
+        : _bkOkPlaceholder;
+
+    // 🔴 浮層抓的是**打開當下**那一份（`_pop.rows` 是快照，而這裡是把 `_bkProjects`
+    // 整個換掉、不是原地改）—— 人搶在這支 fetch 回來之前就點進去的話（機隊 agent
+    // 打 NAS Postgres 慢個一兩秒很正常），浮層會停在「進行中（0）」，之後連打字重繪
+    // 也還是那份空的，看起來就是「一個案都沒有」。清單到手時把開著的那個重開一次。
+    // 判斷用 activeElement：焦點還在這格＝浮層開著（focusout 會收掉它）。
+    if (!inp.disabled && document.activeElement === inp) {
+        closeProjectPop();
+        inp.dispatchEvent(new Event('focusin', { bubbles: true }));   // 委派在 bk_project_row 上，會用新的清單重開
+    }
 
     bkSyncProjectRoots({ fill: true });
 }

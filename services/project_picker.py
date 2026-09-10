@@ -55,11 +55,17 @@ async def list_options(session, *, extra: tuple = ()) -> list:
     # 已連結的母私帳只列一個（owner 2026-09-06：同名出現兩次）。工時對映只認私帳，所以**預設留私帳那筆**；
     # 連結兩種形狀都認（母帳 mine_link_id／私帳 source_project_id），兩邊各掃一次算出來的是同一對、同一個決定。
     #
-    # 🔴 例外：呼叫端點名了 `extra` 欄位（＝備份三根）而**只有母帳那筆真的有值**時留母帳。
-    # 備份三根的正本在專案上，而設定的人多半只看得到母帳那筆（私帳案對沒有 finance_mine 的人
-    # 整個不可見），所以值幾乎都落在母帳。一律留私帳的話，備份頁只選得到那個空殼分身：
-    # 畫面說「這個案還沒設定備份資料夾」、`core.worker._apply_project_roots` 用那個 id 反查也讀不到，
-    # 於是靜默退回手動填的路徑 —— 綁定對這個案等於失效，而且沒有任何徵兆。
+    # 🔴 例外：呼叫端點名了 `extra` 欄位（＝備份三根）時**留母帳**，除非私帳那筆自己有值。
+    # 母私帳是同一個案的兩本帳，而備份三根是實體資料夾 —— 兩邊本來就該是同一組。決定留哪一筆
+    # 只看「哪一筆的值有人維護得到」：母帳那筆全公司都開得起來，私帳那筆對沒有 finance_mine
+    # 的人整個不可見（連專案頁都進不去）。
+    #   · 母帳有值、私帳沒有 → 留母帳。否則備份頁只選得到空殼分身：畫面說「這個案還沒設定
+    #     備份資料夾」、`core.worker._apply_project_roots` 用那個 id 反查也讀不到，於是靜默
+    #     退回手動填的路徑 —— 綁定對這個案等於失效，而且沒有任何徵兆。
+    #   · **兩邊都還沒設 → 也留母帳**（2026-09-11 /polish round 2：這是目前生產每一個案的狀態）。
+    #     留私帳的話，第一次按「儲存到專案」就把三根寫進那筆沒人看得到的，然後母帳的專案頁
+    #     永遠顯示「還沒設定」、有人在那邊補填的值會被這裡靜默忽略（私帳一有值就換它勝出）。
+    #   · 私帳自己有值 → 留私帳（有人真的在那邊設過，不要把它蓋掉）。
     by_id = {r[0]: r for r in rows}
     n_base = len(base)
 
@@ -71,7 +77,7 @@ async def list_options(session, *, extra: tuple = ()) -> list:
         parent, mine = (r[0], r[8]) if r[7] != "mine" else (r[9], r[0])
         if parent == mine or parent not in by_id or mine not in by_id:
             continue
-        keep_parent = bool(extra) and _has_extra(by_id[parent]) and not _has_extra(by_id[mine])
+        keep_parent = bool(extra) and not _has_extra(by_id[mine])
         shadowed.add(mine if keep_parent else parent)
 
     opts = []
