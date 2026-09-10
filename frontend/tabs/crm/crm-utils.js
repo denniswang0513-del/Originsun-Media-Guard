@@ -627,6 +627,19 @@ export function withInputsPreserved(container, rerender) {
 /** 輕量 toast — 沿用 crm.css 既有 .cg-toast 樣式（cost-groups / media-log 等子視圖共用）。 */
 export const INV_PENDING_REMIT = '待撥款';
 export const INV_REMITTED = '已撥款';
+export const INV_UNPAID = '未付款';
+/** 代開（過路錢）的方向。**要明著送** —— `InvoicePayload.payment_type` 的預設是
+ *  「收款」（非空），所以後端那段「沒送就依 payment_status 推方向」永遠進不去。
+ *  不送的話代開會被記成收款方向、跑進應收帳款。 */
+export const INV_DIR_PAYOUT = '付款';
+
+/** 發票類別。順序＝畫面上下拉的順序，第一個是預設。
+ *  後兩個是**代開**（過路錢）—— `core.finance_logic.INVOICE_PASSTHROUGH_CATEGORIES`
+ *  是同一組字，改名要兩邊一起改。
+ *  🔴 提上來共用（2026-09-10）：原本只住在 crm-invoices.js，專案頁那個開票入口
+ *     因此把 category 寫死成「專案」，開不出代開發票。 */
+export const INV_CATEGORIES = ['專案', '內部代開', '外部代開'];
+export const isPassthroughCategory = (c) => INV_CATEGORIES.slice(1).includes(c);
 
 /** 發票款項狀態 → badge。
  *

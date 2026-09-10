@@ -27,7 +27,8 @@
  */
 
 import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum, invoiceAmounts,
-         invoicePayBadge, invoiceIssueBadge, crmToast, today, hasModule, canSeeMoney } from './crm-utils.js';
+         invoicePayBadge, invoiceIssueBadge, crmToast, today, hasModule, canSeeMoney,
+         INV_CATEGORIES, INV_DIR_PAYOUT, INV_UNPAID, isPassthroughCategory } from './crm-utils.js';
 import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 
 // 開票／刪票／補標註都是錢流寫入：要 crm_invoices＋money_view（RBAC 稽核第二批）。
@@ -164,9 +165,13 @@ function _listHtml() {
     </div>`;
 }
 
-/** 開發票視窗：欄位刻意少。客戶、抬頭、統編、專案、類別全部從專案帶，
- *  PM 只要填品名和金額。那正是這個入口跟發票本的差別 —— 發票本每次都要重選一次，
- *  而且選錯了沒有人會知道。 */
+/** 開發票視窗：欄位刻意少。客戶、抬頭、統編、專案從專案帶，PM 只要補品項與金額。
+ *  那正是這個入口跟發票本的差別 —— 發票本每次都要重選一次，而且選錯了沒有人會知道。
+ *
+ *  owner 2026-09-10 兩項調整：
+ *   1. **除了發票號碼，其他都是必填**（號碼常常是事後才拿到，所以只有它可以留空）。
+ *   2. **發票類別可以改**（本來寫死「專案」）—— 從專案頁也開得出代開發票。
+ *      🔴 代開是過路錢，方向是付款不是收款，見下面 catNote 與送出時的 payment_status。 */
 _P.create = function _openCreate() {
     if (!_cur) return;
     if (!_canInvoice()) { _denyInvoice(); return; }
@@ -186,6 +191,9 @@ _P.create = function _openCreate() {
           ${_esc(_cur.name || '')}${_client?.full_name ? '　·　' + _esc(_client.full_name) : ''}
           ${left !== null ? `　·　還能開 $${fmtNum(left)}` : ''}
         </div>
+        <div style="color:#6b7280;font-size:11px;margin-bottom:10px;">
+          除了發票號碼，其他都要填。
+        </div>
         <div style="display:grid;grid-template-columns:88px 1fr;gap:9px 10px;align-items:center;">
           <label style="color:#9ca3af;font-size:12px;">開立日期</label>
           <input id="proj-inv-date" type="date" class="crm-input" value="${today()}">
@@ -194,11 +202,15 @@ _P.create = function _openCreate() {
                  value="${_esc(_cur.name || '')}">
           <label style="color:#9ca3af;font-size:12px;">申請人</label>
           <select id="proj-inv-applicant" class="crm-input">
-            <option value="">—</option>
+            <option value="">請選擇</option>
             ${_applicants.map(n => `<option value="${_esc(n)}">${_esc(n)}</option>`).join('')}
           </select>
           <label style="color:#9ca3af;font-size:12px;">品項</label>
           <input id="proj-inv-item" class="crm-input" placeholder="影片製作/展場攝影...">
+          <label style="color:#9ca3af;font-size:12px;">發票類別</label>
+          <select id="proj-inv-cat" class="crm-input">
+            ${INV_CATEGORIES.map(c => `<option value="${_esc(c)}">${_esc(c)}</option>`).join('')}
+          </select>
           <label style="color:#9ca3af;font-size:12px;">金額</label>
           <div style="display:flex;gap:8px;align-items:center;">
             <input id="proj-inv-amount" type="number" class="crm-input" style="flex:1;"
@@ -216,6 +228,7 @@ _P.create = function _openCreate() {
           <label style="color:#9ca3af;font-size:12px;">發票號碼</label>
           <input id="proj-inv-number" class="crm-input" placeholder="還沒拿到號碼可以留空">
         </div>
+        <div id="proj-inv-cat-note" style="color:#c4b5fd;font-size:11px;margin-top:9px;display:none;"></div>
         <div id="proj-inv-calc" style="color:#6b7280;font-size:11px;margin-top:9px;min-height:16px;"></div>
         <div id="proj-inv-err" style="display:none;color:#fca5a5;font-size:12px;margin-top:6px;"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
@@ -234,6 +247,19 @@ _P.create = function _openCreate() {
     };
     document.getElementById('proj-inv-amount').addEventListener('input', recalc);
     document.getElementById('proj-inv-mode').addEventListener('change', recalc);
+    // 代開＝過路錢，方向是**付款**不是收款。這裡把後果寫在畫面上而不是靜默決定 ——
+    // 方向判錯的下場是那張票跑進應收帳款（`invoice_direction` 的註解就是在講這件事）。
+    const catNote = () => {
+        const el = document.getElementById('proj-inv-cat-note');
+        const pass = isPassthroughCategory(document.getElementById('proj-inv-cat').value);
+        el.style.display = pass ? '' : 'none';
+        el.textContent = pass
+            ? `代開是過路錢：這張會記成付款方向、狀態「${INV_UNPAID}」，`
+              + '不算這個案的應收，也不佔「還能開」。'
+            : '';
+    };
+    document.getElementById('proj-inv-cat').addEventListener('change', catNote);
+    catNote();
     document.getElementById('proj-inv-title').focus();
 };
 
@@ -245,28 +271,71 @@ _P.close = () => {
 _P.save = async (btn) => {
     const err = document.getElementById('proj-inv-err');
     const show = (m) => { err.textContent = m; err.style.display = 'block'; };
-    const amounts = invoiceAmounts(document.getElementById('proj-inv-amount').value,
-                                   document.getElementById('proj-inv-mode').value);
-    if (!amounts.amount_total) { show('金額要填'); return; }
-    const title = document.getElementById('proj-inv-title').value.trim();
-    if (!title) { show('品名要填'); return; }
+    const el = (id) => document.getElementById('proj-inv-' + id);
+    const val = (id) => (el(id)?.value || '').trim();
+    /** 游標放到那一格。
+     *  🔴 `select-upgrade.js` 會把選項 ≥4 的原生 select 換成打字搜尋下拉：原生的
+     *     那個被 `display:none` 藏起來，前面插一個可見的 `.ss-input`。對藏起來的
+     *     元素 `focus()` 是**沒有作用的** —— 訊息說「申請人要填」，游標卻沒動，
+     *     使用者還是得自己找。所以升級過的要 focus 那個可見的輸入框。 */
+    const focus = (id) => {
+        const node = el(id);
+        if (!node) return;
+        // 🔴 只有**被 select-upgrade 換掉的那一顆**才改 focus 它前面那個可見輸入框，
+        //    而且只准在**它自己的** `.ss-wrap` 裡找。原本寫 `parentNode.querySelector`，
+        //    但那個 parent 是整張表單的 grid —— 於是「品項要填」擋下來時，游標會跳到
+        //    申請人那格（表單裡第一個 .ss-input）。訊息指 A、游標停 B 比不動更難用。
+        const ss = node.dataset.searchable
+            && node.closest('.ss-wrap')?.querySelector('.ss-input');
+        (ss || node).focus();
+    };
+    /** 必填檢查：報第一個沒填的，並把游標放過去 —— 只說「請填必填欄位」的話，
+     *  欄位有八個，使用者得自己一格一格找。回 true ＝ 擋下來了。 */
+    const missing = (id, label) => {
+        if (val(id)) return false;
+        show(label + '要填');
+        focus(id);
+        return true;
+    };
+    // 🔴 owner 2026-09-10：「除了發票號碼外都是必填」。順序＝畫面由上到下，
+    //    所以錯誤訊息指的一定是使用者眼睛往下看會先碰到的那一格。
+    if (missing('date', '開立日期')) return;
+    if (missing('title', '品名')) return;
+    if (missing('applicant', '申請人')) return;
+    if (missing('item', '品項')) return;
+    if (missing('cat', '發票類別')) return;
+    const amounts = invoiceAmounts(val('amount'), val('mode'));
+    if (!amounts.amount_total) { show('金額要填'); focus('amount'); return; }
+    if (missing('company', '抬頭')) return;
+    if (missing('taxid', '統一編號')) return;
+    const title = val('title');
     btn.disabled = true;
     btn.textContent = '開立中…';
     try {
-        // 🔴 payment_status / payment_type 刻意**不送** —— 後端在入口定案
-        //    （create_invoice：沒送就依方向推）。前端自己決定過一次，結果漏掉
+        // 🔴 payment_type 一律**不送**、payment_status 只有代開才送 —— 後端在入口
+        //    定案（create_invoice：沒送就依方向推）。前端自己決定過一次，結果漏掉
         //    「待撥款」那條路，代開發票被當成收款跑進應收帳款。
         await _fetch('/invoices', {
             method: 'POST',
             body: JSON.stringify({
-                invoice_date: document.getElementById('proj-inv-date').value || today(),
+                invoice_date: val('date'),
                 title,
-                applicant: document.getElementById('proj-inv-applicant').value,
-                item_type: document.getElementById('proj-inv-item').value.trim(),
-                invoice_number: document.getElementById('proj-inv-number').value.trim(),
-                company_name: document.getElementById('proj-inv-company').value.trim(),
-                tax_id: document.getElementById('proj-inv-taxid').value.trim(),
-                category: '專案',
+                applicant: val('applicant'),
+                item_type: val('item'),
+                invoice_number: val('number'),
+                company_name: val('company'),
+                tax_id: val('taxid'),
+                category: val('cat'),
+                // 🔴 代開（過路錢）要把**方向與狀態都明著送**。收款那條刻意不送，
+                //    交給後端在入口定案 —— 但那條路對代開走不到：
+                //    `InvoicePayload.payment_type` 的預設是「收款」（非空），
+                //    `create_invoice` 的 `if not payment_type` 因此永遠不成立，
+                //    後端的 `invoice_direction(payment_status)` 根本沒機會跑。
+                //    只送 payment_status 的話方向仍是收款 → 這張過路錢會跑進應收帳款
+                //    （2026-09-10 真的瀏覽器驗證抓到；生產既有資料裡已經有 45 張
+                //    代開是收款方向，那是同一個根因的歷史殘留）。
+                ...(isPassthroughCategory(val('cat'))
+                    ? { payment_type: INV_DIR_PAYOUT, payment_status: INV_UNPAID } : {}),
                 project_id: _cur.id,
                 ...amounts,
             }),

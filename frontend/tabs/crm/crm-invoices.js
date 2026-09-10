@@ -2,7 +2,8 @@
  * crm-invoices.js — 帳務管理 Tab
  */
 import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, invoiceAmounts as _amountsFrom, invoicePayBadge as _payBadge, invoiceIssueBadge,
-         INV_PENDING_REMIT, INV_REMITTED, projectOptionsHtml, crmToast,
+         INV_PENDING_REMIT, INV_REMITTED, INV_CATEGORIES as _INV_CATEGORIES,
+         projectOptionsHtml, crmToast,
          today as _today, hasModule, initRootFolderCard } from './crm-utils.js';
 // 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
 // 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
@@ -171,7 +172,6 @@ const _sorter = createSortable({
     },
 });
 
-const _INV_CATEGORIES = ['專案', '內部代開', '外部代開'];
 const _INV_KINDS = ['電子發票', '紙本發票'];
 
 /** 發票種類 badge。紙本但沒填收件資訊 → 標成待補（53 筆歷史紙本發票全都沒有收件人，
