@@ -281,3 +281,48 @@ def test_column_and_startup_migration_both_exist():
     col = CrmInvoice.__table__.columns["share_snapshot"]
     assert isinstance(col.type, JSONB) and col.nullable
     assert '("crm_invoices", "share_snapshot", "JSONB")' in repo_src("main.py")
+
+
+# ── polish 階段零：把這批動到、但還沒有測試釘住的行為記下來 ──────────
+#
+# 特徵測試：**不判斷對錯，只把現在的行為釘住**。之後任何一次改動讓行為變了，
+# 這裡會紅 —— 那時再決定「是修好了」還是「不小心改壞了」。
+
+def test_revoking_a_link_clears_the_token_but_keeps_the_snapshot():
+    """撤銷分享連結目前**只清 token、留著快照**。
+
+    不是安全問題（`_share_row` 只能用 token 查得到那一列，token 沒了就查不到），
+    也不是新鮮度問題（重新分享會整包重寫）—— 就是一坨留在列上的死資料。
+    先釘住現況；要不要順手清掉是另一個決定。
+    """
+    body = code_only(func_body(repo_src(INV), "async def revoke_invoice_share_link("))
+    assert "inv.share_token = None" in body
+    assert "share_snapshot" not in body, \
+        "行為變了：撤銷現在會動到快照 —— 確認那是刻意的，然後更新這條"
+
+
+def test_nas_sync_restarts_every_container_even_if_one_fails():
+    """NAS 上有兩個容器（對外官網、內部同仁面），服務的是不同的人。
+
+    一台重啟失敗不該讓另一台繼續跑舊碼 —— 所以是「記下失敗、繼續跑完」而不是
+    early return。回傳值仍然是「全部都成功嗎」。
+    """
+    body = code_only(func_body(repo_src("publish_update.py"), "def sync_website_to_nas("))
+    assert "for name in NAS_CONTAINERS:" in body
+    assert "ok = False" in body and "return ok" in body
+    assert "return False" not in body.split("for name in NAS_CONTAINERS:")[1], \
+        "容器迴圈裡不可以 early return —— 那會讓後面的容器跑舊碼"
+
+
+def test_users_json_mirror_can_be_switched_off_by_env():
+    """NAS 容器沒有 users.json 正本（`MEDIAGUARD_NO_USERS_JSON=1`）。
+
+    **讀不擋、只擋寫**：檔案不在時 `_load_json` 本來就回空清單，擋讀沒有意義；
+    擋寫是為了不要在 NAS 的 code 目錄長出一份沒人讀、也不會同步回來的帳號檔。
+    """
+    src = code_only(repo_src("core/auth.py"))
+    assert "_NO_USERS_JSON = os.environ.get('MEDIAGUARD_NO_USERS_JSON'" in src
+    for fn in ("def save_users_json(", "def sync_user_to_json(", "def remove_user_from_json("):
+        assert "if _NO_USERS_JSON:" in func_body(src, fn), fn
+    assert "if _NO_USERS_JSON:" not in func_body(src, "def load_users_json("), \
+        "讀取不該被擋 —— 擋了在 master 上會讓 DB 掛掉時連唯一的登入退路都沒有"
