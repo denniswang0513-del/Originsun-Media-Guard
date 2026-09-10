@@ -1,6 +1,6 @@
 import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop, renderHostCheckboxes, collectSelectedHosts, todayStamp, authFetch, esc } from '../../js/shared/utils.js';
 import { loadReportHistory } from '../../js/shared/report-history.js';
-import { attachProjectPop, closeProjectPop } from '../../js/shared/project-pop.js';
+import { attachProjectPop, closeProjectPop, isProjectPopOpen } from '../../js/shared/project-pop.js';
 
 let sourceIndex = 0;
 
@@ -297,8 +297,10 @@ async function loadBackupProjects() {
     // 整個換掉、不是原地改）—— 人搶在這支 fetch 回來之前就點進去的話（機隊 agent
     // 打 NAS Postgres 慢個一兩秒很正常），浮層會停在「進行中（0）」，之後連打字重繪
     // 也還是那份空的，看起來就是「一個案都沒有」。清單到手時把開著的那個重開一次。
-    // 判斷用 activeElement：焦點還在這格＝浮層開著（focusout 會收掉它）。
-    if (!inp.disabled && document.activeElement === inp) {
+    // 🔴 條件是「浮層真的開著」（isProjectPopOpen），不是「焦點還在這格」——
+    // 按 Esc 會收掉浮層但焦點留在原地，只看 activeElement 的話等於把使用者剛剛
+    // 親手關掉的東西彈回來蓋住下面的表單。
+    if (!inp.disabled && document.activeElement === inp && isProjectPopOpen(inp)) {
         closeProjectPop();
         inp.dispatchEvent(new Event('focusin', { bubbles: true }));   // 委派在 bk_project_row 上，會用新的清單重開
     }
