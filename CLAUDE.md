@@ -1273,7 +1273,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`core/quote_chat.py`](core/quote_chat.py) | 對話式完成報價的**純規則**：組提示（草稿快照／對話歷史／價目／截圖路徑）、把 claude 回的東西正規化成固定形狀、串流中從半截 JSON 撈 reply、模型別名白名單、清圖時把 token 換掉 | 無 I/O；**不決定價格、不算稅**（金額走 `_calc_quotation`）；提示裡不准出現 `internal_cost` |
 | [`core/price_book.py`](core/price_book.py) | 報價價目的**純規則**：去重鍵（吃全形／空白差異）、「0 元是待定價不是價」、進提示的那幾行 | 無 I/O；只有**寄出**的報價會收價（草稿還在談，而且自動存每 1.2 秒一發） |
 | [`frontend/js/shared/quote-patch.js`](frontend/js/shared/quote-patch.js) | 把 AI 回的 patch 套進草稿（add／update／remove／換大項目＋備註追加） | 零 import 葉節點，桌機手機共用；**編號＝攤平後的順序且跳過沒描述的空白列**，跟後端 `quote_chat.item_lines` 同一套 |
-| [`frontend/js/shared/quote-wait.js`](frontend/js/shared/quote-wait.js) | 等 AI 時那句「處理中…」（跳動的點、秒數、排隊中） | 零 import 葉節點；只講**真的**狀態，不做假進度條 |
+| [`frontend/js/shared/quote-wait.js`](frontend/js/shared/quote-wait.js) | 等待時那句「處理中…」（跳動的點、秒數、排隊中）＋ 兩組典型秒數（`TYPICAL_SECONDS` AI 一輪／`GEN_SECONDS` 生成報價單）＋ `paintGenNote`（生成狀態那句話怎麼畫） | 零 import 葉節點；只講**真的**狀態，不做假進度條；**三個入口共用**（報價分頁／專案頁子頁／手機卡片），秒數與畫法不准各寫一份 |
 | [`frontend/js/shared/quote-delete.js`](frontend/js/shared/quote-delete.js) | 刪報價的確認規則（草稿按 OK；已寄送／已簽核要打字輸入案名） | 零 import 葉節點；**三個刪除入口**（報價分頁／專案頁子頁／手機卡片）都要走它 |
 | `routers/crm/quotes.py` 的對話／價目段 | `POST`／`GET /quotations/{id}/chat`（背景跑 claude、串流 partial、stage）、`/price-items*`（清單／改／刪／歷史匯入／比對）、寄出時清截圖與收價 | **只算 patch、不直接改項目**（寫入者是前端）；互動式用自己的 `_QUOTE_CHAT_GATE`，不跟夜間 SEO 批次搶 |
 | `core/subproc.run_stream` | 逐行交付 stdout 的 subprocess（串流用） | stdin／stderr／stdout 各一條執行緒；**逾時交給 `p.wait()`**，不能只在「收到一行之後」檢查 deadline |
@@ -1281,10 +1281,11 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`core/quote_snapshot.py`](core/quote_snapshot.py) | 「生成報價單」的純規則：快照紀錄形狀、過期判定、畫面那句話（尚未生成／內容已修改／已生成 09/10 14:30）、客戶連結網址 | 無 I/O；文案**只在這裡寫一次**（桌機手機都顯示後端給的 `label`）；檔名形狀被 `assets_host._SAFE_NAME` 綁著 |
 | [`main_office.py`](main_office.py) | NAS `office-api` 容器入口（8002）：內部同仁三個面的 24/7 版本 —— 掛認證／員工工作台／整包 CRM／手機 BFF／貼圖 | **不掛**吃硬體的（備份／轉檔／報表／TTS／機隊／OTA）、不掛 socketio、**不准長出排程**；帳號管理與身份範本留在 master（`_DROP_PREFIXES`） |
 | [`core/office_assets.py`](core/office_assets.py) | office-api 要自己 serve 的前端：`PAGES`／`MODULE_DIRS`／`MODULE_FILES` | 跟 `public_assets` 是**兩份**（那份是匿名可達的對外頁）；`tabs/crm`、`tabs/website` 只逐檔開白名單，不整個目錄 serve |
-| [`core/office_settings.py`](core/office_settings.py) | 發版時送去 NAS 的設定**允許清單**（發票根目錄／代開費率／申請人／圖床／磁碟對映） | 允許清單不是排除清單（新機密欄位預設不外送）；代價是 master 改了要等下次發版 |
-| [`core/invoice_share.py`](core/invoice_share.py) | 發票分享頁「能出現什麼」的純規則：白名單投影、分享時定稿的快照、作廢判定 | 無 I/O；`SNAPSHOT_FIELDS` 是白名單、`NEVER_SHARE` 給測試逐欄釘住；**作廢走即時值不進快照** |
+| [`core/office_settings.py`](core/office_settings.py) | 發版時送去 NAS 的設定**允許清單**（發票根目錄／代開費率／申請人／圖床／磁碟對映）＋ `EXPORT_SUBKEYS` 子鍵投影（`company` 只送 name／tax_id） | 允許清單不是排除清單（新機密欄位預設不外送）；整個 key 會夾帶東西時改用子鍵投影，別為了一個欄位把整包送過去；代價是 master 改了要等下次發版 |
+| [`core/invoice_share.py`](core/invoice_share.py) | 發票分享頁「能出現什麼」的純規則：白名單投影、分享時定稿的快照、作廢判定 | 無 I/O；`SNAPSHOT_FIELDS` 是白名單、`NEVER_SHARE` 給測試逐欄釘住；**作廢走即時值不進快照**；`is_voided` 只認「作廢」一個字（`issue_status` 是三值的） |
 | [`core/share_link.py`](core/share_link.py) | 寄給外面的人的連結要用哪個網域（報價 `/q/` 與發票 `/e/` **共用一個設定**） | `share_public_base`，舊鍵 `quotes_public_base` 為 fallback 一輪；留空＝回相對路徑（前端沿用 location.origin） |
-| `routers/crm/invoice_files.py` 的對外段 | `/e/{短碼}` 那頁的三支公開端點（meta／download／舊長網址）＋ 分享時定稿 | 掛 `public_router`＝NAS 對外容器也吃得到；**永遠 attachment 不 inline**；路徑要過 `drive_map.to_local_path` 才比白名單 |
+| `routers/crm/invoice_files.py` 的對外段 | `/e/{短碼}` 那頁的三支公開端點（meta／download／舊長網址）＋ 分享時定稿 | 掛 `public_router`＝NAS 對外容器也吃得到；**永遠 attachment 不 inline**；路徑要過 `drive_map.to_local_path` 才比白名單；開不到檔就 422，不要鑄一條下載會 404 的連結 |
+| `routers/crm/invoice_files.py` 的路徑段 | `_invoices_root`（設定正本）／`_invoices_write_root`（這台看得到的視角，寫檔用）／`_stored_path`（存進 DB 的 canonical UNC）／`_local_invoice_path`（讀檔＋白名單） | **讀寫兩側都要翻譯**；檔名一律 `ntpath.basename`；白名單只有 `_local_invoice_path` 一份 |
 | `routers/crm/quotes.py` 的生成／對外段 | `generate_quotation_snapshot`（產 PDF ＋ HTML → 歸檔進報價單資料夾 ＋ 寫快照進共用圖床 ＋ 刪舊快照）、`public_quote_html`／`public_quote_pdf`（**送**快照） | **產**只在 master（Playwright 在那），**送**在哪都行 —— 對外那兩支掛 `public_router`，NAS 對外容器也吃得到，master 關機客戶照樣打得開 |
 
 
@@ -1369,4 +1370,28 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **發票分享頁的欄位是白名單，不是「記得不要加」**（`core/invoice_share.SNAPSHOT_FIELDS`）：那頁寄給客戶與會計師。代開費、內部代開、催收狀態、母帳私帳、申請人、內部案號、內部備註、`title`（可能有人拿它記內部案名）一律不上 —— 多回一個欄位不會有任何徵兆，**而錯誤只有客戶看得到**。投影用白名單、`NEVER_SHARE` 另列一份給測試逐欄斷言，`_inv_dict` 也只取白名單那幾個（整列 `__dict__` 丟進去＝把「以後有人加了新欄位」變成潛在外洩）。
 - **`MoneyRedactRoute` 有一個窄例外**（`core/money.MONEY_EXEMPT_PREFIXES`）：發票分享頁回的金額是收件人手上那張紙上本來就印著的數字，抹掉只會讓那頁變成空格、然後有人為了修好它把整層關掉。門檻三條（憑證是逐字比對的可撤銷連結／回的是白名單投影／數字他已經拿在手上），**三個都成立才准加**；「使用者抱怨看不到金額」不是理由。
 - **`file_url` 存的是 master 視角的路徑**：NAS 容器上要先過 `core.drive_map.to_local_path` 才開得了檔，而且**白名單比對要在翻譯之後**（翻譯前比對＝拿兩個不同視角的字串比）。前綴比對要帶 `os.sep`，不然 `…/00_電子發票_舊` 會通過 `…/00_電子發票` 的檢查。
+- **`issue_status` 是三值的，「未開立」不是作廢**（`core.invoice_share.is_voided`，2026-09-10 /polish 抓到）：
+  未開立／已開立／作廢，而「未開立」是 `finance_logic.issue_status_for()` 在**每一次 PUT** 重推出來的 ——
+  發票號碼還沒填就是它。寫成「已開立以外都算作廢」的話，一張完好的發票會在客戶那頁頂上長出紅底的
+  「已作廢」，而我們的列表寫的是「未開立」，看不出任何異狀。判定只認 `VOID` 那一個字。
+- **`routers/crm/invoice_files.py` 裡的檔名一律 `ntpath.basename`，不是 `os.path.basename`**：
+  `file_url` 存的是 Windows 視角的路徑，而這份程式也跑在 NAS 的 Linux 容器（office-api／website-api）——
+  那邊 `os.path` 是 posixpath，反斜線不是分隔字元，`basename` 會把**整條內部路徑**原封不動回傳，
+  然後凍進 `share_snapshot["file"]["name"]` 印在寄給客戶的分享頁上。`ntpath` 兩種分隔字元都認。
+- **路徑的讀與寫兩側都要翻譯**（`_invoices_write_root` ／ `_stored_path` ／ `_local_invoice_path`）：
+  讀那側早就過 `to_local_path` 了，**寫那側 2026-09-10 才補上**。在 NAS 容器上 `os.makedirs` 一個 UNC
+  會長出一個名字帶反斜線的資料夾在 `/app` 底下 —— 上傳回 200、DB 記下一條沒有任何一台讀得到的路徑，
+  全程沒有一行 error。存進 DB 的一律 `to_canonical_path`（哪台讀都翻得回自己的視角）。
+  🔴 **同型的洞還在 `routers/crm/costs.py`**（成本收據）：`_receipts_root()` 沒翻譯、`receipts_root`
+  也不在 `office_settings.EXPORT_KEYS` 裡，所以走 office-api 傳收據會安靜地寫進 `/app/uploads/receipts`。
+  修法跟發票這套一樣，還沒做（compose 與 docker/INDEX.md 有記）。
+- **`_SNAPSHOT_INFLIGHT` 守在 `generate_quotation_snapshot` 自己身上**，不是某個呼叫端的包裝
+  （2026-09-10 /polish 修）：守錯層的話「按下生成鈕」那條路（端點直接呼叫）完全沒被守到。
+  同一張跑兩發＝兩邊都讀到同一筆舊紀錄、都刪同一組舊檔、都寫一組新檔，**輸的那組從此變孤兒**，
+  永遠躺在 NAS 上而且網址還通。撞到丟 `SnapshotBusy`：背景那支安靜地不做，端點回 409 ＋ 人話。
+- **設定要有人送得出去才算做完**（`share_public_base`，2026-09-10 /polish 抓到）：後端讀得到、GET 也回，
+  但那張卡上沒有那個欄位 —— 於是永遠是空字串，整個「報價與發票共用對外網域」等於不存在，
+  而且沒有任何徵兆（不會 error，只會有人說「你給我的網址打不開」）。加後端設定鍵時同一輪把入口做完。
+- **`main_office.py` 的 `_DROP_PREFIXES` 只認路徑前綴，不認 method**：要拿掉「某個 method」得另外做。
+  目前沒有這種需求；真的需要時記得那是**擋不住**的，不要以為列一條路徑就等於擋掉了那支 POST。
 - **客戶看得到的頁面不要在原始碼裡列出我們的內部欄位**：`invoice-file.html` 第一版把「代開費／母帳私帳／未收款…一律不上」抄進檔頭註解，用意是好的，但那頁寄給客戶、原始碼看得到，等於順手告訴對方我們內部在記些什麼。要寫清單去後端那支寫。

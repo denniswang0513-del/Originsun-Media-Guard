@@ -63,6 +63,10 @@ _ROUTER_MODULES = (
 #    一份「只有 office-api 這個行程看過的 403」，跟 master 那份是兩份不同的清單而畫面上
 #    看不出差別 —— 誤導比沒有更糟。而且看它的 UI 在桌機 SPA（那整套留在 master），
 #    拿掉在這裡沒有任何畫面會壞。
+#
+# ⚠ 這是**路徑前綴**比對，認不出 method。要拿掉「同一條路徑上的某個 POST」得另外做
+#   （`_mount` 那邊多帶一份 (path, method) 清單）。目前沒有這種需求，但別以為列一條路徑
+#   就等於擋掉了那支寫入 —— 真要擋寫入請確認 GET 也一起沒了是可以接受的。
 _DROP_PREFIXES = (
     "/api/v1/auth/users",
     "/api/v1/auth/rbac/templates",
