@@ -98,8 +98,11 @@ def test_attachment_reuses_the_existing_storage_and_serving_path():
     """不另開一條儲存與取檔的路（同單據）。"""
     body = _body("async def upload_pool_file(")
     assert "_receipts_root()" in body and "_福委會" in body
-    assert "/api/v1/crm/receipt-file?path=" in repo_src(JS)
-    assert "/api/v1/crm/receipt-file?path=" in my_page_src()
+    # 2026-09-10：連結改走 utils.receiptLinkHtml —— 直接 `<a href>` 到那支端點
+    #   送不了 Authorization header ＝ 401（畫面上是「點了沒反應」）。
+    #   釘的還是同一件事：單據要有一個點得開的入口，而且共用同一支取檔端點。
+    assert "receiptLinkHtml(" in repo_src(JS)
+    assert "window.receiptLinkHtml(" in my_page_src()
 
 
 def test_undeletable_file_is_not_silent():

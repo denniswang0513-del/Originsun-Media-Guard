@@ -387,15 +387,49 @@ async function _loadHistory() {
     if (exps.length === 0) { list.innerHTML = '<div style="color:#6b7280;font-size:12px;">尚無紀錄</div>'; return; }
     const _e = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     list.innerHTML = exps.map(e => {
-      const url = (e.receipt_url || '').replace(/^javascript:/i, '');
+      // 🔴 收據**不能**直接 href：DB 存的是檔案系統路徑（UNC／磁碟代號），瀏覽器
+      //    開不了；而 /receipt-file 的守衛只認 Authorization header，`<a>` 送不了
+      //    header ＝ 401（畫面上就是「點了沒反應」）。這頁是非 module 的獨立頁，
+      //    所以下面自己寫一小段帶權限開檔（桌機那邊走 utils.receiptLinkHtml）。
+      //    走分享連結進來的人**沒有登入**，那支端點對他沒有公開版本 ——
+      //    所以只標示「有收據」，不畫一個一定打不開的連結。
+      const rpath = String(e.receipt_url || '');
+      const cell = !rpath ? '<span>—</span>'
+        : (_shareToken ? '<span class="receipt" title="請登入後查看">有收據</span>'
+                       : '<button class="receipt" data-receipt="' + _e(rpath) + '">📎</button>');
       return '<div class="history-row">' +
         '<span class="cat">' + _e(e.category) + '</span>' +
         '<span class="amt">$' + (e.actual || 0).toLocaleString() + '</span>' +
-        (url ? '<a class="receipt" href="' + _e(url) + '" target="_blank">📎</a>' : '<span>—</span>') +
+        cell +
         (e.notes ? '<span style="color:#6b7280;font-size:11px;">' + _e(e.notes) + '</span>' : '') +
       '</div>';
     }).join('');
+    if (!list.dataset.receiptBound) {
+      list.dataset.receiptBound = '1';
+      list.addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-receipt]');
+        if (b) _openReceipt(b.getAttribute('data-receipt'));
+      });
+    }
   } catch (_) {}
+}
+
+/** 帶權限開一張收據（`<a href>` 送不了 Authorization header）。 */
+async function _openReceipt(path) {
+  try {
+    const r = await fetch(BASE + '/receipt-file?path=' + encodeURIComponent(path),
+                          { headers: { 'Authorization': 'Bearer ' + _token } });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(typeof d.detail === 'string' ? d.detail : 'HTTP ' + r.status);
+    }
+    const href = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = path.split(/[\\/]/).pop() || 'receipt';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 30000);
+  } catch (e) { _showMsg('開啟收據失敗：' + (e.message || e), true); }
 }
 
 function _showMsg(msg, isError) {

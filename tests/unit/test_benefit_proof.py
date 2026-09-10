@@ -93,7 +93,10 @@ def test_admin_ui_shows_both_indicators():
     assert "has_receipt" in js and "has_reflection" in js
     # 待審佇列與明細表**都要**顯示（owner 主要在待審佇列上看）
     assert js.count("${_proof(e)}") == 2, "有一張表沒有顯示單據／心得"
-    assert "receipt-file?path=" in js, "單據沒有可以點開的連結"
+    # 2026-09-10：連結改走 utils.receiptLinkHtml —— 直接 `<a href>` 到那支端點
+    #   送不了 Authorization header ＝ 401（畫面上是「點了沒反應」）。
+    #   釘的還是同一件事：單據要有一個點得開的入口，而且共用同一支取檔端點。
+    assert "receiptLinkHtml(" in js, "單據沒有可以點開的連結"
     css = repo_src("frontend/tabs/hr_benefits/hr_benefits.html")
     assert ".hb-proof" in css, "標示沒有樣式（會變成看不見的純文字）"
 
@@ -197,4 +200,7 @@ def test_receipt_shares_the_existing_root_and_serving_endpoint():
     body = _body("async def upload_benefit_receipt(")
     assert "_receipts_root()" in body
     js = repo_src("frontend/tabs/hr_benefits/hr_benefits.js")
-    assert "/api/v1/crm/receipt-file?path=" in js
+    # 2026-09-10：連結改走 utils.receiptLinkHtml —— 直接 `<a href>` 到那支端點
+    #   送不了 Authorization header ＝ 401（畫面上是「點了沒反應」）。
+    #   釘的還是同一件事：單據要有一個點得開的入口，而且共用同一支取檔端點。
+    assert "receiptLinkHtml(" in js

@@ -1384,6 +1384,16 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   全程沒有一行 error。存進 DB 的一律 `to_canonical_path`（哪台讀都翻得回自己的視角）。
   成本收據（`routers/crm/costs.py`）同日補上同一套：`_receipt_dir()`／`_stored_receipt_path()`，
   `receipts_root` 也進了 `office_settings.EXPORT_KEYS`。
+- **收據／單據的連結不可以是普通的 `<a href>`**（2026-09-10 修，之前**八處**都是）：
+  `/api/v1/crm/receipt-file` 的守衛是 `check_admin_or_module`，而 `core.auth._extract_token`
+  **只認 header**（Authorization／X-API-Key）—— 沒有 cookie 也沒有 query token。`<a>` 送不了
+  header，直接連過去一律 401，而畫面上看起來就是**「點了沒反應」**（同 `reference_picker_auth_break`）。
+  直接 `href={receipt_url}` 更糟：那是檔案系統路徑，瀏覽器根本開不了。
+  正解一份：桌機 `js/shared/utils.receiptLinkHtml`（路徑走 `data-receipt` 屬性 —— 塞進 `onclick`
+  的字串會被反斜線的跳脫吃掉；點擊由同一支檔裝的委派監聽器接手走 `authDownload`）、
+  手機 `m/shell.mdownload`（401 會導回登入）、`expense.html` 自己那一小段（非 module 的獨立頁；
+  走分享連結進來的人沒有登入，那條沒有公開端點，所以顯示「有收據」而不是死連結）。
+  `tests/unit/test_petty_cash.test_no_receipt_link_is_a_plain_href` 掃全 frontend 釘住。
 - **收據的資料夾規則只有 `costs._receipt_dir()` 一份**（2026-09-10）：寫檔與**兩支列清單**都用它。
   原本列清單自己寫死 `os.getcwd()/uploads/receipts` —— 後台把根目錄指到 NAS 之後，檔案存進 NAS
   而清單去本機找，**收據頁永遠是空的**而且不會有任何錯誤。四個上傳入口也都走同一支 `_save_receipt`

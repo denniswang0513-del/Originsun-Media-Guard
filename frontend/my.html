@@ -490,6 +490,10 @@ table.week .c.ms.done { color: var(--sub); background: #f6f6f6; border-color: va
 import { renderSheet, appendBlankRows, appendRow, dropEmptyRows, collectRows, saveRowNow, removeRow, wireAutosave, setStages } from '/js/shared/ts-sheet.js';
 import { createBurnSorter, burnTbodyHtml, burnTableHtml, projectFileHtml } from '/js/shared/ts-projects.js';
 import { openStageEditor } from '/js/shared/stage-editor.js';
+// 收據／單據的連結（cards.js 是傳統 script，從 window 拿）。
+// 🔴 這行是**明著**要的：它其實也被別的相依鏈拖進來過，但那是巧合 ——
+//    哪天那條鏈變了，福委會的附件就會在 window.receiptLinkHtml is not a function 上炸掉。
+import '/js/shared/utils.js';
 window._tsReady({ renderSheet, appendBlankRows, appendRow, dropEmptyRows, collectRows, saveRowNow, removeRow, wireAutosave, setStages,
                   createBurnSorter, burnTbodyHtml, burnTableHtml, projectFileHtml, openStageEditor });
 </script>

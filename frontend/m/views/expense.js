@@ -8,7 +8,7 @@
  * 類別字彙從 options.expense.categories 拿。
  * 🔴 消費日期預設今天（本地日）但要自己改：成本認列看消費日不看登記日（db/models CrmProjectExpense）。
  */
-import { mfetch, toast, esc, money, fmtDate, todayLocal } from '../shell.js';
+import { mdownload, mfetch, toast, esc, money, fmtDate, todayLocal } from '../shell.js';
 import { state, opt, skeleton, errBox, pill, withBusy, pickerHtml, mountPicker, segHtml, mountSeg, markStale, renderPaged, projectLabel } from '../ui.js';
 
 const F = (id) => document.getElementById('exp-' + id);
@@ -98,13 +98,16 @@ async function loadGroups(pid) {
 }
 
 function recentCardHtml(x) {
-    const url = String(x.receipt_url || '').replace(/^javascript:/i, '');
+    // 🔴 收據不能直接 href：DB 存的是檔案系統路徑（UNC／磁碟代號），瀏覽器開不了；
+    //    而 /receipt-file 的守衛只認 Authorization header，`<a>` 送不了 header ＝ 401。
+    //    一律走 mdownload（帶權限、401 會導回登入）。桌機那邊是 utils.receiptLinkHtml。
+    const p = String(x.receipt_url || '');
     return `
       <div class="m-card">
         <div class="t"><div class="name">${esc(x.sub_item || x.category || '')}</div>${pill(x.category)}</div>
         <div class="sub">${esc(fmtDate(x.expense_date || x.created_at))}${x.payee ? ' · ' + esc(x.payee) : ''}${x.notes ? ' · ' + esc(x.notes) : ''}</div>
         <div class="row">${'actual' in x ? `<span class="amt">${money(x.actual)}</span>` : '<span></span>'}
-          ${url ? `<a class="m-btn sm" href="${esc(url)}" target="_blank" rel="noopener">看收據</a>` : ''}</div>
+          ${p ? `<button class="m-btn sm" data-receipt="${esc(p)}">看收據</button>` : ''}</div>
       </div>`;
 }
 
@@ -116,6 +119,21 @@ async function loadRecent(pid) {
         const d = await mfetch(base(pid) + '/expenses');
         const rows = (d.expenses || []).slice().reverse();     // 後端舊→新；最近的排前面
         renderPaged(box, rows, recentCardHtml, { empty: '這個專案還沒有雜支' });
+        // 委派：卡片會被「載入更多」重畫，逐張綁一定會漏
+        if (!box.dataset.receiptBound) {
+            box.dataset.receiptBound = '1';
+            box.addEventListener('click', async (ev) => {
+                const b = ev.target.closest('[data-receipt]');
+                if (!b) return;
+                const path = b.getAttribute('data-receipt');
+                await withBusy(b, async () => {
+                    try {
+                        await mdownload('/api/v1/crm/receipt-file?path=' + encodeURIComponent(path),
+                                        path.split(/[\\/]/).pop() || 'receipt');
+                    } catch (e) { toast(e.message || e, 'err'); }
+                });
+            });
+        }
     } catch (e) { box.innerHTML = errBox(e); }
 }
 

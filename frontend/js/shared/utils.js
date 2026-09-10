@@ -78,6 +78,47 @@ export async function authDownload(url, filename, label = '下載') {
 }
 
 /**
+ * 收據／單據要怎麼開（**唯一正本**）。
+ *
+ * 🔴 **不可以**寫成 `<a href="/api/v1/crm/receipt-file?path=…">`：那支的守衛是
+ * `check_admin_or_module`，而 `core.auth._extract_token` 只認 header
+ * （Authorization／X-API-Key）—— `<a>` 送不了 header，點下去一律 401，
+ * 而畫面上看起來就是**「點了沒反應」**（memory: reference_picker_auth_break）。
+ * 也**不可以**直接 `href={receipt_url}`：那是檔案系統路徑（UNC 或磁碟代號），
+ * 瀏覽器根本開不了。兩種寫法在 2026-09-10 之前同時存在於六處。
+ *
+ * 用法：`receiptLinkHtml(path, '單據')` 產標記，點擊由下面那個委派監聽器接手。
+ * 監聽器就裝在這支檔的模組層 —— 想產出標記就一定得 import 這支，兩件事綁在一起，
+ * 不會有人只做一半。
+ */
+export function openReceipt(path, filename, label = '開啟單據') {
+    return authDownload('/api/v1/crm/receipt-file?path=' + encodeURIComponent(path || ''),
+                        filename || path, label);
+}
+
+/**
+ * 一個收據連結的 html。路徑走 `data-` 屬性而不是塞進 `onclick` 的字串裡 ——
+ * 路徑含反斜線，塞進 JS 字串字面值會被當成跳脫字元吃掉。
+ */
+export function receiptLinkHtml(path, text, { cls = '', title = '開啟單據' } = {}) {
+    if (!path) return '';
+    return `<a href="javascript:void(0)"${cls ? ` class="${esc(cls)}"` : ''}`
+        + ` data-receipt="${esc(path)}" title="${esc(title)}">${esc(text || '單據')}</a>`;
+}
+
+// 委派監聽：畫面上任何 `[data-receipt]` 點下去都用帶權限的方式開。
+// 掛在 document 上是刻意的 —— 那些清單隨時重畫，逐次綁事件一定會有人漏掉。
+if (typeof document !== 'undefined' && !window.__receiptLinksBound) {
+    window.__receiptLinksBound = true;
+    document.addEventListener('click', (ev) => {
+        const el = ev.target && ev.target.closest && ev.target.closest('[data-receipt]');
+        if (!el) return;
+        ev.preventDefault();
+        openReceipt(el.getAttribute('data-receipt'), el.getAttribute('data-receipt-name'));
+    });
+}
+
+/**
  * `<input type=file>` 選到的檔 → 上傳項目 `[{file, path}]`。
  * `path` 是相對路徑：選資料夾時（input 帶 webkitdirectory）瀏覽器會給
  * `webkitRelativePath`＝「資料夾名/子層/檔名」，正好就是我們要送的形式。
@@ -1085,6 +1126,8 @@ window.collectSelectedHost = collectSelectedHost;
 // Make accessible to global scope if needed during transition
 window.resolveDropPath = resolveDropPath;
 window.authFetch = authFetch;
+window.openReceipt = openReceipt;
+window.receiptLinkHtml = receiptLinkHtml;
 window.bearerHeader = bearerHeader;   // app.js 等非 import 方要打受守衛端點用
 window.appendLog = appendLog;
 window.pickPath = pickPath;

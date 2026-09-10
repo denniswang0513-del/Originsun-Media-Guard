@@ -795,3 +795,44 @@ def test_only_one_place_writes_a_receipt():
     assert '"/uploads/receipts/' not in COSTS_SRC, "那個網址形狀已經收掉了"
     # 但副檔名白名單比共用那支的黑名單嚴，改走共用不是放寬的理由
     assert '".heic", ".pdf"' in up
+
+
+def test_no_receipt_link_is_a_plain_href():
+    """🔴 收據／單據的連結不可以是普通的 `<a href>`。
+
+    `/api/v1/crm/receipt-file` 的守衛是 `check_admin_or_module`，而
+    `core.auth._extract_token` **只認 header**（Authorization／X-API-Key）——
+    沒有 cookie 也沒有 query token。`<a>` 送不了 header，所以直接連過去一律 401，
+    而畫面上看起來就是「點了沒反應」（memory: reference_picker_auth_break）。
+    直接 `href={receipt_url}` 更糟：那是檔案系統路徑（UNC／磁碟代號），瀏覽器開不了。
+
+    2026-09-10 之前**八處**都是這兩種寫法之一。正解一份：`utils.receiptLinkHtml`
+    （桌機，點擊由它自己裝的委派監聽器接手走 authDownload）／`mdownload`（手機，
+    401 會導回登入）／`expense.html` 自己那一小段（非 module 的獨立頁）。
+    """
+    import re
+    from pathlib import Path as _P
+    bad = []
+    for f in sorted(FRONTEND.rglob("*.js")) + sorted(FRONTEND.rglob("*.html")):
+        if "node_modules" in str(f) or f.name == "utils.js":
+            continue
+        src = f.read_text(encoding="utf-8", errors="replace")
+        code = js_code_only(src)
+        # ① 直接連到那支端點
+        for m in re.finditer(r"href=[\"'][^\"']*receipt-file", code):
+            bad.append("%s: %s" % (_P(f).name, m.group(0)))
+        # ② 直接把 receipt_url 當網址
+        for m in re.finditer(r"href=[\"']?\s*\+?\s*\$?\{?\s*[\w.]*receipt_url", code):
+            bad.append("%s: %s" % (_P(f).name, m.group(0)))
+    assert not bad, "這些連結點下去是 401 或開不了：\n  " + "\n  ".join(bad)
+
+
+def test_the_receipt_link_rule_lives_in_one_place():
+    """規則與監聽器綁在同一支檔：想產出標記就一定得 import 它，不會只做一半。"""
+    utils = js_code_only((FRONTEND / "js" / "shared" / "utils.js").read_text(encoding="utf-8"))
+    assert "export function receiptLinkHtml(" in utils
+    assert "export function openReceipt(" in utils and "authDownload(" in utils
+    assert 'data-receipt="${esc(path)}"' in utils, "路徑走 data- 屬性，不是塞進 onclick 的字串"
+    assert "closest('[data-receipt]')" in utils, "委派監聽器要跟著這支檔一起裝"
+    assert "window.receiptLinkHtml = receiptLinkHtml;" in utils, \
+        "frontend/js/my/* 是傳統 script，只能從 window 拿"

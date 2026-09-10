@@ -143,8 +143,7 @@ function cardBenefits(bound) {
                     : ""}
                 ${(p.attachments || []).map(f => `
                     <div class="meta" style="margin-top:4px;">
-                        <a href="/api/v1/crm/receipt-file?path=${encodeURIComponent(f.path)}"
-                           target="_blank" rel="noopener">${esc(f.name)}</a></div>`).join("")}
+                        ${window.receiptLinkHtml(f.path, f.name, { title: "開啟附件" })}</div>`).join("")}
             </div>`).join("");
         // 單據與心得都是**選填**（owner）—— 這裡只標示有沒有，沒有也不擋。
         // 還在待審/退回的可以補傳單據。

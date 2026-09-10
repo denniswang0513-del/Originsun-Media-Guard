@@ -5,6 +5,7 @@
 
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import { calcDashboard, calcDashboardParts, remainColor, profitColor, barColor, diffLabel } from './crm-projects-calc.js';
+import { receiptLinkHtml as _receiptLink } from '../../js/shared/utils.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect, moneyGate, today, hasModule, canSeeMoney }
     from './crm-utils.js';
 
@@ -588,7 +589,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
                 ${edCell('exp-col-sub', 'sub_item', e.sub_item, subDisplay)}
                 ${edCell('exp-col-amt', 'actual', e.actual || 0, '$' + fmtNum(e.actual))}
                 ${edCell('exp-col-payee', 'payee', e.payee, (payeeName ? _esc(payeeName) : '') + pill)}
-                <span class="exp-col-receipt">${e.receipt_url ? '<a href="' + e.receipt_url + '" target="_blank" style="color:#3b82f6;">📎</a>' : ''}</span>
+                <span class="exp-col-receipt">${_receiptLink(e.receipt_url, '📎')}</span>
                 <span class="exp-col-action">${locked ? '' : `${claimCell(e)}${_isAdmin() ? `
                   <button class="exp-del" title="刪除這筆"
                           onclick="window._projDeleteExpense('${e.id}')">✕</button>` : ''}`}

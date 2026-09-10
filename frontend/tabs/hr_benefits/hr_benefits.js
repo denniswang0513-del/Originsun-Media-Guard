@@ -7,7 +7,7 @@
 // （core.hr_logic.benefit_pool_balance，有單元測試）。前端自己算一份的話，
 // 「待審算不算」這種判定就會有兩個答案，而畫面上那個一定是錯的那個。
 
-import { tabLoadError } from '../../js/shared/utils.js';
+import { receiptLinkHtml, tabLoadError } from '../../js/shared/utils.js';
 import { hasModule } from '../crm/crm-utils.js';
 
 // 權限稽核第二批（2026-09-08）：池／撥款／登記的**讀取**放給 hr_benefits 這把鑰匙（後端 benefits._read_entity），
@@ -89,13 +89,11 @@ async function _loadDetail() {
 function _proof(e) {
     if (!canApprove()) {
         return (e.has_receipt
-            ? `<a class="hb-proof ok" href="/api/v1/crm/receipt-file?path=${encodeURIComponent(e.receipt_url)}"
-                  target="_blank" rel="noopener" title="開啟單據">單據</a>` : '')
+            ? receiptLinkHtml(e.receipt_url, '單據', { cls: 'hb-proof ok' }) : '')
             + (e.has_reflection ? ` <span class="hb-proof ok" title="${esc(e.reflection)}">心得</span>` : '');
     }
     const receipt = e.has_receipt
-        ? `<a class="hb-proof ok" href="/api/v1/crm/receipt-file?path=${encodeURIComponent(e.receipt_url)}"
-              target="_blank" rel="noopener" title="開啟單據">單據</a>
+        ? `${receiptLinkHtml(e.receipt_url, '單據', { cls: 'hb-proof ok' })}
            <button class="hb-proof act" title="換一張"
                    onclick="window._hbPickReceipt('${esc(e.id)}')">換</button>`
         : `<button class="hb-proof act" title="上傳單據"
@@ -199,8 +197,7 @@ function pendingHtml() {
 function aboutHtml(p) {
     if (!canApprove()) {
         const links = (p.attachments || []).map(f => `
-            <div class="hb-file"><a href="/api/v1/crm/receipt-file?path=${encodeURIComponent(f.path)}"
-               target="_blank" rel="noopener">${esc(f.name)}</a></div>`).join('');
+            <div class="hb-file">${receiptLinkHtml(f.path, f.name, { title: '開啟附件' })}</div>`).join('');
         return `
     <div class="hb-card">
         <h3>${esc(p.name)} — 說明與附件</h3>
@@ -211,8 +208,7 @@ function aboutHtml(p) {
     }
     const files = (p.attachments || []).map(f => `
         <div class="hb-file">
-            <a href="/api/v1/crm/receipt-file?path=${encodeURIComponent(f.path)}"
-               target="_blank" rel="noopener">${esc(f.name)}</a>
+            ${receiptLinkHtml(f.path, f.name, { title: '開啟附件' })}
             <span class="m">${Math.round((f.size || 0) / 1024)} KB</span>
             <button class="hb-btn ghost" onclick="window._hbDelFile('${esc(f.id)}')">移除</button>
         </div>`).join('');
