@@ -1287,7 +1287,8 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | `routers/crm/invoice_files.py` 的對外段 | `/e/{短碼}` 那頁的三支公開端點（meta／download／舊長網址）＋ 分享時定稿 | 掛 `public_router`＝NAS 對外容器也吃得到；**永遠 attachment 不 inline**；路徑要過 `drive_map.to_local_path` 才比白名單；開不到檔就 422，不要鑄一條下載會 404 的連結 |
 | `routers/crm/invoice_files.py` 的路徑段 | `_invoices_root`（設定正本）／`_invoices_write_root`（這台看得到的視角，寫檔用）／`_stored_path`（存進 DB 的 canonical UNC）／`_local_invoice_path`（讀檔＋白名單） | **讀寫兩側都要翻譯**；檔名一律 `ntpath.basename`；白名單只有 `_local_invoice_path` 一份 |
 | `routers/crm/quotes.py` 的生成／對外段 | `generate_quotation_snapshot`（產 PDF ＋ HTML → 歸檔進報價單資料夾 ＋ 寫快照進共用圖床 ＋ 刪舊快照）、`public_quote_html`／`public_quote_pdf`（**送**快照） | **產**只在 master（Playwright 在那），**送**在哪都行 —— 對外那兩支掛 `public_router`，NAS 對外容器也吃得到，master 關機客戶照樣打得開 |
-| [`routers/api_backup.py`](routers/api_backup.py) 的三根投影 | 備份三根（本機／NAS／Proxy）的**正本在 `crm_projects.backup_*_root`**，這裡是機隊的讀取口：`/api/v1/projects/backup-roots`（選擇器）＋ `/{id}`（單筆） | **不准改成重用 `/crm/projects`**：那支帶錢，這支是白名單投影（只給 id／name／三根）。守衛是 `check_lan_or_logged_in`（備檔電腦沒人登入，用模組鑰匙守＝鎖死備份頁）。**私帳案在這支照樣列出、照樣可勾選**（owner 2026-09-10 拍板，對 2026-08-28「連專案都看不到」的局部例外，已進 `test_money_visibility` 的 EXEMPT 並寫了理由）—— 例外成立的前提是**這支不帶錢**，要加欄位前先回去讀那段。回存端點 `PUT .../{id}` **只填空不覆寫**（免登入端點的能力就限縮在補空白；要改設定去專案頁）。DB 斷線回 200 + `db_offline`，**絕不擋派工**。路徑存 canonical UNC、回前端前才 `to_local_path` 翻成當台視角；寫入端唯一入口是 `routers/crm/projects.normalize_backup_roots`（過 `drive_map.to_canonical`）。綁了專案時三根由 `core.worker._apply_project_roots` 從 DB **覆寫**前端送的值 —— 唯讀只做在 UI 上，改個 DOM 就繞過去了。跟 `folder_path`（工作資料夾完整路徑）是不同形狀的東西，不要合併 |
+| [`routers/api_backup.py`](routers/api_backup.py) 的三根投影 | 備份三根（本機／NAS／Proxy）的**正本在 `crm_projects.backup_*_root`**，這裡是機隊的讀取口：`/api/v1/projects/backup-roots`（選擇器，清單規則走 `services/project_picker`）＋ `/{id}`（單筆） | **不准改成重用 `/crm/projects`**：那支帶錢，這支是白名單投影 —— 單筆 `_root_view` 只給 id／name／三根，清單 `_picker_view` 另加浮層分組要的 client／year／closed／label（客戶**簡稱**是顯示字不是 client_id；金額欄一個都不准進來，兩支各有一份 `test_money_never_leaks` 釘著）。兩支投影的三根都要走 `_WRITE_MAP`，手抄的那一份在多一根時會靜默漏掉，而前端是合併不是取代 —— 畫面完全正常、只是那一根永遠不會更新。守衛是 `check_lan_or_logged_in`（備檔電腦沒人登入，用模組鑰匙守＝鎖死備份頁）。**私帳案在這支照樣列出、照樣可勾選**（owner 2026-09-10 拍板，對 2026-08-28「連專案都看不到」的局部例外，已進 `test_money_visibility` 的 EXEMPT 並寫了理由）—— 例外成立的前提是**這支不帶錢**，要加欄位前先回去讀那段。回存端點 `PUT .../{id}` **只填空不覆寫**（免登入端點的能力就限縮在補空白；要改設定去專案頁）。DB 斷線回 200 + `db_offline`，**絕不擋派工**。路徑存 canonical UNC、回前端前才 `to_local_path` 翻成當台視角；寫入端唯一入口是 `routers/crm/projects.normalize_backup_roots`（過 `drive_map.to_canonical`）。綁了專案時三根由 `core.worker._apply_project_roots` 從 DB **覆寫**前端送的值 —— 唯讀只做在 UI 上，改個 DOM 就繞過去了。跟 `folder_path`（工作資料夾完整路徑）是不同形狀的東西，不要合併 |
+| [`services/project_picker.py`](services/project_picker.py) | 「選一個專案」那份清單的**唯一**規則（工時補登＋備份頁綁定共用）：不篩狀態、母私帳只列一個、最近有動的排前面、`label`＝「年份 客戶 案名」、`closed`＝`is_closed` | **不篩狀態是 owner 2026-09-11 拍板的**（「不篩，連專案工時也不篩」）—— 備份與補工時多半發生在結案之後，篩掉＝真的要用時剛好選不到；分組交給 `closed` 旗標，不是把案子拿掉。`extra=` 是呼叫端點名要多帶哪幾欄（**不准帶金額**），`prefer=` 是母私帳留哪一本 —— 兩個是分開的參數，別再合成一個旗標。列舉全部專案含私帳案、刻意不對可見性表態，由兩個呼叫端各自負責（已在 `test_money_visibility` 的 EXEMPT 登記，🔴 那支掃描的 regex 看不到 `select(*[getattr(...)])` 這種寫法） |
 | [`core/nas_auth.py`](core/nas_auth.py) | SMB session 韌性：`ensure_ready`（任務開跑前戳每個 share 根目錄，不通先退避重連再 fail fast）、`reconnect_with_backoff`（**15 秒 ×5**，owner 2026-09-10 拍板）、`guard`（認證類 WinError → 退避重連 → 重跑一次）、`friendly`（WinError → 可行動中文） | 跟 `drive_map` 是兩件事：那支管「哪台有掛磁碟」（`T:\`→UNC），這支管「哪台有認證」（UNC 開得起來）。**帳密一律傳 NULL**，走 Windows 認證管理員，程式裡不存 NAS 密碼；`WNetCancelConnection2` 一律 `fForce=FALSE`（絕不把別的任務正在用的磁碟抽掉）；重試白名單不收 `5 ACCESS_DENIED`（那是真沒權限，重連幾次都一樣）。**冷卻閘不能拿掉**：`guard` 是逐檔呼叫的，整輪退避失敗後把該 share 判死 60 秒，否則 NAS 掛掉時 5000 檔 × 60 秒＝83 小時殭屍任務；等待一律吃 `should_stop`（停止鍵要能在退避中生效）。非 Windows（NAS Linux 容器）整支 no-op |
 
 
@@ -1412,4 +1413,22 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   而且沒有任何徵兆（不會 error，只會有人說「你給我的網址打不開」）。加後端設定鍵時同一輪把入口做完。
 - **`main_office.py` 的 `_DROP_PREFIXES` 只認路徑前綴，不認 method**：要拿掉「某個 method」得另外做。
   目前沒有這種需求；真的需要時記得那是**擋不住**的，不要以為列一條路徑就等於擋掉了那支 POST。
+- **打字浮層的 `options` 要交 promise，不要交當下那個陣列**（`attachProjectPop`，2026-09-11 /polish）：
+  `project-pop._open` 拿的是**打開當下**那一份（`_pop.rows` 是快照，連打字重繪也是重繪同一份）。
+  宿主如果交同步陣列而資料還在飛，人搶先點進去就會停在「進行中（0）」、看起來就是「一個案都沒有」，
+  而且只有移開再點回來才會好。元件契約本來就收 `Promise<rows>`（工時、週記、零用金三個宿主都是這樣接的），
+  備份頁一度改成「清單到手時把浮層重開一次」—— 那是症狀補丁，而且它引出了第二個洞（按 Esc 會收掉浮層
+  但**焦點留在原地**，用 `activeElement` 當「浮層開著」的代理，等於把使用者親手關掉的東西彈回來）。
+- **母私帳連結成對時留哪一筆，看的是「哪一筆的值有人維護得到」**（`project_picker.list_options` 的 `prefer=`）：
+  工時留私帳（對映只認私帳）；備份留**母帳**，除非私帳那筆自己在 `extra` 欄位上有值。備份三根是實體資料夾、
+  兩本帳本來就該同一組，而私帳那筆對沒有 `finance_mine` 的人整個不可見（連專案頁都進不去）—— 留私帳的話
+  第一次按「儲存到專案」就寫進沒人看得到的那一筆，母帳的專案頁永遠顯示「還沒設定」、有人在那邊補填的值
+  會被靜默忽略。**多對一是正常形狀**（兩個母帳案共用一筆私帳分身）：`prefer="parent"` 時兩個母帳各自留下
+  才對，所以備份那條的案數會比工時那條多幾筆，不是 bug。
+- **`crm_projects` 的「年份」有兩份定義，不要以為它們一樣**：`project_picker` 走
+  start_date → shoot_date → **created_at**；`routers/crm/petty.py` 的 `_project_year` 刻意**不退到 created_at**
+  （docstring 寫著生產庫 217 個舊案都是同一次匯入建立的，退到建立日等於幫它們全部標上假年份）。
+  兩邊的取捨不同、也都有理由，但清單的 label 會被浮層拿去搜尋 —— 要動任何一邊之前先讀對面那份，
+  並且想清楚「打年份找案」會不會濾錯。（2026-09-11 /polish 提出，owner 未拍板，先記著。）
+
 - **客戶看得到的頁面不要在原始碼裡列出我們的內部欄位**：`invoice-file.html` 第一版把「代開費／母帳私帳／未收款…一律不上」抄進檔頭註解，用意是好的，但那頁寄給客戶、原始碼看得到，等於順手告訴對方我們內部在記些什麼。要寫清單去後端那支寫。
