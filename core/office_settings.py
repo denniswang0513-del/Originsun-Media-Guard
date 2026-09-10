@@ -6,8 +6,8 @@
 發票那三個鍵不在預設裡，所以在 NAS 上：
 
     invoices_root       發票影像上傳／下載直接失敗（訊息還會誤導成「管理員尚未設定」）
-    invoice_fee_rates   代開費算成 0 —— **靜默的金額錯誤**，不會有任何 error
     invoice_applicants  申請人下拉是空的
+    invoice_fee_rates   **只有 owner 真的改過費率時才有差**（見下）
 
 ## 做法
 
@@ -50,7 +50,14 @@ from __future__ import annotations
 EXPORT_KEYS = (
     "invoices_root",        # 發票影像的落地根目錄（crm/invoice_files）
     "receipts_root",        # 成本收據的落地根目錄（crm/costs）
-    "invoice_fee_rates",    # 代開費率 —— 沒有它金額會靜默算錯（crm/finance）
+    # 代開費率（crm/finance）。🔴 **沒有它不會算錯** —— `passthrough_commission` 是
+    # `(rates or {}).get(cat, PASSTHROUGH_FEE_RATES.get(cat, 8.0))`，沒設定就吃程式
+    # 內建的 8%／10%，那正是公司現行費率（2026-09-11 實跑那支純函式驗過：面額
+    # 100,000 的內部代開，有沒有這個鍵都是應匯 92,000）。送它是為了「owner 哪天
+    # 在後台改了費率，NAS 那側要跟上」，不是為了避免算成 0。
+    # 這份檔頭原本寫「代開費算成 0 —— 靜默的金額錯誤」，那是錯的，而且害人（含我）
+    # 重複警告了好幾次「生產沒設定＝金額有問題」。
+    "invoice_fee_rates",
     "invoice_applicants",   # 申請人下拉
     "assets_host",          # 共用圖床：貼圖、影像紀錄縮圖、報價單快照都在這
     "drive_map",            # 磁碟代號 → UNC 的覆寫（上面那些路徑要靠它翻譯）

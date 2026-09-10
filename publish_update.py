@@ -341,10 +341,14 @@ def _push_office_settings(base: str, ssh_cmd: list) -> bool:
     for d in dropped:
         print(f"[NAS sync] [!] 丟掉 {d}")
 
-    missing = [k for k in ("invoices_root", "invoice_fee_rates") if k not in payload]
-    if missing:
-        # 不擋發版：這台可能本來就沒設過（dev）。但要說出來 —— NAS 上那幾個面會半殘。
-        print(f"[NAS sync] [!] 本機沒有這些設定，NAS 的發票面會拿不到：{missing}")
+    # 🔴 只警告**真的會壞**的那個。`invoices_root` 沒有＝NAS 上發票影像整個開不了；
+    #    `invoice_fee_rates` 沒有**不會怎樣** —— `passthrough_commission` 沒拿到就吃
+    #    程式內建的 8%／10%（＝公司現行費率）。原本兩個一起警告成「發票面會拿不到」，
+    #    害人以為代開費算錯了（2026-09-11 實跑純函式確認過：有沒有那個鍵，面額
+    #    100,000 的內部代開都是應匯 92,000）。
+    if "invoices_root" not in payload:
+        # 不擋發版：這台可能本來就沒設過（dev）。但要說出來 —— NAS 上發票影像會開不了。
+        print("[NAS sync] [!] 本機沒有 invoices_root，NAS 上的發票影像會開不了")
 
     fd, tmp = _tempfile.mkstemp(prefix="office_settings_", suffix=".json")
     try:
