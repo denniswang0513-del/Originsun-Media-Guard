@@ -210,7 +210,7 @@ async function _openEditModal(gid = null) {
               <div class="crm-field crm-field-full">
                 <label>收據資料夾（選填）</label>
                 <div style="display:flex;gap:6px;align-items:center;">
-                  <input id="cg-f-receipt_path" type="text" class="crm-input" placeholder="未設則存到 uploads/receipts/{專案}/{子表}/" value="${_esc(g?.receipt_path || '')}" style="flex:1;">
+                  <input id="cg-f-receipt_path" type="text" class="crm-input" placeholder="未設則存到「收據根目錄」/{專案}/{子表}/" value="${_esc(g?.receipt_path || '')}" style="flex:1;">
                   <button type="button" id="cg-f-receipt_path-pick" class="crm-btn crm-btn-secondary crm-btn-sm" title="瀏覽選擇" style="flex-shrink:0;">📁</button>
                 </div>
               </div>

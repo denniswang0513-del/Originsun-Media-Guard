@@ -14,7 +14,7 @@
 """
 import re
 from pathlib import Path
-from tests.unit._srcscan import js_code_only, js_func_body, my_page_src
+from tests.unit._srcscan import code_only, js_code_only, js_func_body, my_page_src
 
 
 import pytest
@@ -651,9 +651,23 @@ def test_receipts_root_setting():
     設定正本 _receipts_root、兩條 fallback 儲存路徑、服務端 allow-list
     （換到 NAS 後新收據不在 uploads/，漏了會 403）、admin 專用讀寫端點。"""
     assert "def _receipts_root" in COSTS_SRC
+    # 資料夾規則只有 _receipt_dir 一份（2026-09-10 收斂）：兩條 fallback 都在它裡面，
+    # 而且寫檔與列清單用同一支 —— 原本列清單自己寫死 os.getcwd()/uploads/receipts，
+    # 後台把根目錄指到 NAS 之後檔案存進 NAS、清單去本機找，**收據頁永遠是空的**。
+    rule = COSTS_SRC.split("def _receipt_dir(")[1].split("\ndef ")[0]
+    # 🔴 根目錄與 receipt_path 存的都是 master 視角，拿去開檔前一定要翻譯
+    #    （不翻的話 NAS 容器會 makedirs 出一個名字帶反斜線的資料夾在 /app 底下，
+    #    上傳回 200、DB 記下一條沒人讀得到的路徑，全程沒有一行 error）
+    assert "to_local_path(_receipts_root())" in rule
+    assert "to_local_path(custom)" in rule, "子表自己的 receipt_path 也要翻"
+    assert "_零用金" in rule, "沒有專案的那條 fallback 不見了"
     save = COSTS_SRC.split("async def _save_receipt")[1].split("\n@router")[0]
-    assert save.count("_receipts_root()") == 2, "兩條 fallback 都要吃設定值"
+    assert "_receipt_dir(" in save
     assert 'os.getcwd(), "uploads", "receipts"' not in save, "殘留硬編碼路徑"
+    for fn in ("async def list_project_receipts", "async def list_cost_group_receipts"):
+        body = COSTS_SRC.split(fn)[1].split("\n@router")[0]
+        assert "_receipt_dir(" in body, fn + " 沒走同一份資料夾規則"
+        assert 'os.getcwd(), "uploads", "receipts"' not in body, fn + " 還寫死本機路徑"
     # 檔名/資料夾日期走 _fmt_day 台北歸一（面值 strftime 差一天，08-19 踩到）
     assert "_fmt_day(exp.expense_date or exp.created_at)" in save
     assert 'strftime("%Y' not in save, "檔名日期繞過 _fmt_day"
@@ -725,3 +739,59 @@ def test_expense_dates_are_formatted_in_taipei():
             if ('strftime("%Y-%m-%d")' in ln
                     and "datetime.now()" not in ln and "_now()" not in ln):
                 raise AssertionError(f"{f.name}: {ln.strip()} — 該走 _fmt_day")
+
+
+def test_receipts_survive_the_trip_between_the_two_machines():
+    """收據跟發票影像同一套：**讀寫兩側都翻譯、存進 DB 存 canonical**。
+
+    🔴 這支程式也跑在 NAS 的 office-api 容器（Linux）。設定與 receipt_path 存的是
+       master 視角的路徑（UNC／磁碟代號）—— 寫檔那側不翻譯的話 `os.makedirs` 會長出
+       一個名字帶反斜線的資料夾在 `/app` 底下：上傳回 200、DB 記下一條**沒有任何一台
+       讀得到**的路徑，全程沒有一行 error。存 canonical 才能哪台讀都翻回自己的視角。
+       （2026-09-10 /polish；發票那側同日修的是 `_invoices_write_root`／`_stored_path`）
+    """
+    assert "from core.drive_map import to_canonical_path, to_local_path" in COSTS_SRC
+    assert "def _stored_receipt_path" in COSTS_SRC and "to_canonical_path(" in COSTS_SRC
+
+    save = COSTS_SRC.split("async def _save_receipt")[1].split("\n@router")[0]
+    assert "exp.receipt_url = stored" in save and "_stored_receipt_path(filepath)" in save, \
+        "存進 DB 的要是 canonical，不是收檔那台自己的本機路徑"
+
+    # 列清單回的 path 也要是 canonical —— 前端拿它打 /receipt-file，而那支可能在另一台跑
+    lst = COSTS_SRC.split("def _list_receipt_files")[1].split("\n@router")[0]
+    assert "_stored_receipt_path(fp)" in lst
+
+
+def test_the_receipt_whitelist_compares_after_translating():
+    """白名單比對要在**翻譯之後**，而且前綴要帶 `os.sep`。
+
+    翻譯前比對＝拿兩個不同視角的字串比（NAS 上一律擋掉好的）；
+    純 startswith 會讓「…_舊」那種相鄰同名目錄整個通過。同 invoice_files 那條。
+    """
+    serve = COSTS_SRC.split("async def serve_receipt")[1].split("\ndef _within")[0]
+    assert "to_local_path(raw)" in serve, "要開的檔先翻成這台的視角"
+    assert "_within(abs_path, a)" in serve
+    assert "_receipts_root()" in serve, "換了根目錄，新收據連結會 403"
+    assert 'raw.startswith("/uploads/")' in serve, \
+        "2026-09-10 之前存的是 /uploads/… 網址不是路徑，那批要還開得起來"
+
+    within = COSTS_SRC.split("def _within(")[1].split("\n\n")[0]
+    assert "to_local_path(root" in within and "os.sep" in within
+
+
+def test_only_one_place_writes_a_receipt():
+    """四個上傳入口（專案頁／手機／公開連結／預支款登記）走**同一支** `_save_receipt`。
+
+    預支款那支原本自己寫了一份：整檔進記憶體沒有上限、檔名只有 `{expense_id}.ext`、
+    寫死 `<repo>/uploads/receipts`（後台把根目錄指到 NAS 也沒用），而且存進 DB 的是
+    `/uploads/…` **網址**不是路徑 —— 那是第四種形狀，前端每個顯示收據的地方都要多認一種。
+    """
+    up = COSTS_SRC.split("async def upload_expense_receipt")[1].split("\n@router")[0]
+    assert "return await _save_receipt(" in up
+    # 🔴 用 code_only 剝掉註解與 docstring —— 上面那段說明裡就寫著舊寫法長什麼樣，
+    #    直接對整段做「不包含」會被自己的散文絆倒。
+    code = code_only(up)
+    assert "pathlib" not in code and "file.read()" not in code, "不要再有第二份寫檔"
+    assert '"/uploads/receipts/' not in COSTS_SRC, "那個網址形狀已經收掉了"
+    # 但副檔名白名單比共用那支的黑名單嚴，改走共用不是放寬的理由
+    assert '".heic", ".pdf"' in up

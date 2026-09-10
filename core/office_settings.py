@@ -49,6 +49,7 @@ from __future__ import annotations
 #   2. 它會不會夾帶機密？（子鍵也算 —— 例如 `timesheet` 裡有 ingest_token，所以整個不送）
 EXPORT_KEYS = (
     "invoices_root",        # 發票影像的落地根目錄（crm/invoice_files）
+    "receipts_root",        # 成本收據的落地根目錄（crm/costs）
     "invoice_fee_rates",    # 代開費率 —— 沒有它金額會靜默算錯（crm/finance）
     "invoice_applicants",   # 申請人下拉
     "assets_host",          # 共用圖床：貼圖、影像紀錄縮圖、報價單快照都在這

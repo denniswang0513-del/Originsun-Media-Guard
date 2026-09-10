@@ -16,6 +16,7 @@ from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 from core.no_store import no_store_file
 
 from core.auth import check_admin, check_admin_or_module
+from core.drive_map import to_canonical_path, to_local_path
 from core.money import check_money
 from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
 from core.schemas import (ProjectExpensePayload, ProjectExpensePatchPayload,
@@ -568,32 +569,28 @@ async def delete_project_expense(expense_id: str, request: Request):
 
 @router.post("/project-expenses/{expense_id}/receipt")
 async def upload_expense_receipt(expense_id: str, request: Request, file: UploadFile = File(...)):
+    """預支款雜支登記頁（`/advance-expense.html`）的收據上傳。
+
+    🔴 2026-09-10：改成走跟其他三個入口**同一支** `_save_receipt`。原本這支自己寫了
+       一份：`await file.read()` 整檔進記憶體（沒有上限）、檔名只有 `{expense_id}.ext`
+       （看不出是誰哪天的什麼）、寫死 `<repo>/uploads/receipts`（後台把根目錄指到 NAS
+       也沒用）、而且存進 DB 的是 `/uploads/…` **網址**不是路徑 —— 那是第四種形狀，
+       前端每個顯示收據的地方都要多認一種。生產 0 筆是這個形狀，所以直接收掉。
+    """
     _check_project_write_auth(request)
     _require_db()
-    factory = await _get_factory()
-
+    # 這支原本的副檔名**白名單**比 _save_receipt 的黑名單嚴。改走共用不是放寬的理由，
+    # 所以留在這裡（這頁只會拍照或選 PDF）。
     ext = os.path.splitext(file.filename or "img.jpg")[1].lower()
     if ext not in (".jpg", ".jpeg", ".png", ".webp", ".heic", ".pdf"):
         raise HTTPException(status_code=400, detail="不支援的檔案格式")
-
-    upload_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "uploads", "receipts")
-    os.makedirs(upload_dir, exist_ok=True)
-    filename = f"{expense_id}{ext}"
-    filepath = os.path.join(upload_dir, filename)
-
-    content = await file.read()
-    import pathlib
-    await asyncio.to_thread(pathlib.Path(filepath).write_bytes, content)
-
-    receipt_url = f"/uploads/receipts/{filename}"
+    factory = await _get_factory()
     async with factory() as session:
         e = await session.get(CrmProjectExpense, expense_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此雜支")
-        e.receipt_url = receipt_url
-        await session.commit()
-
-    return {"status": "ok", "receipt_url": receipt_url}
+        project_id = e.project_id
+    return await _save_receipt(project_id, expense_id, file)
 
 
 # ── Per-Project Receipt Storage ────────────────────────────
@@ -617,12 +614,47 @@ _MAX_RECEIPT_BYTES = 30 * 1024 * 1024
 
 
 def _receipts_root() -> str:
-    """收據儲存根目錄的單一正本：settings.receipts_root（後台可設，要集中到
-    NAS 就指 NAS 路徑）優先，留空＝老預設 uploads/receipts（主控機本機）。
-    子表自己的 receipt_path 仍最優先 —— 這裡只管兩條 fallback。"""
+    """收據儲存根目錄的**設定正本**（master 視角，就是後台那格填的字）：
+    settings.receipts_root 優先，留空＝老預設 uploads/receipts（主控機本機）。
+    子表自己的 receipt_path 仍最優先 —— 這裡只管兩條 fallback。
+
+    ⚠ 這個值**不能直接拿去開檔**，要先過 `_receipt_dir()`／`to_local_path()`。
+    """
     from config import load_settings
     root = (load_settings().get("receipts_root") or "").strip()
     return root or os.path.join(os.getcwd(), "uploads", "receipts")
+
+
+def _receipt_dir(proj_name: str, group=None, day: str = "") -> str:
+    """這筆收據該落在**這台機器看得到的**哪個資料夾。
+
+    優先序（跟以前一樣）：子表自己的 `receipt_path` → `{根}/{專案}/{子表}`
+    → 沒有專案（零用金公司支出）`{根}/_零用金/{年月}`。
+
+    🔴 這支是**唯一**算收據資料夾的地方。原本寫檔算一次（用 `_receipts_root()`）、
+       列清單又各自算一次（寫死 `os.getcwd()/uploads/receipts`）—— 後台把根目錄
+       指到 NAS 之後，檔案存進 NAS 而清單去本機的 uploads 找，**收據頁永遠是空的**
+       而且不會有任何錯誤。
+    🔴 一律 `to_local_path`：設定與 `receipt_path` 存的都是 master 視角的路徑
+       （UNC 或磁碟代號）。NAS 的容器上不翻譯就會 `makedirs` 出一個名字帶反斜線的
+       資料夾在 `/app` 底下 —— 上傳回 200、DB 記下一條沒有任何一台讀得到的路徑，
+       全程沒有一行 error。（同 `routers/crm/invoice_files._invoices_write_root`）
+    """
+    custom = getattr(group, "receipt_path", None) if group is not None else None
+    if custom:
+        return to_local_path(custom)
+    root = to_local_path(_receipts_root())
+    if proj_name:
+        sub = (getattr(group, "name", None) if group is not None else None) or "main"
+        return os.path.join(root, proj_name, sub)
+    return os.path.join(root, "_零用金", day[:7] or "nodate")
+
+
+def _stored_receipt_path(local_path: str) -> str:
+    """寫完檔要存進 DB 的字串＝canonical UNC（`drive_map.to_canonical_path`）。
+    收檔那台若存自己的本機路徑，別台就讀不到 —— NAS 存 `/share/…`，master 是
+    Windows，翻不回去。"""
+    return to_canonical_path(local_path)
 
 
 async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
@@ -639,21 +671,16 @@ async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
         if not exp:
             raise HTTPException(status_code=404, detail="找不到此支出")
 
-        # 路徑優先序：cost_group.receipt_path → uploads/receipts/{project_name}/{group_name}/
-        # 沒 cost_group 關聯時 fallback 到專案層級 uploads 子目錄；
-        # 連專案都沒有（零用金公司支出）→ uploads/receipts/_零用金/{年月}/。
         cg = await session.get(CrmProjectCostGroup, exp.cost_group_id) if exp.cost_group_id else None
         # 🔴 日期進資料夾/檔名前走 _fmt_day 台北歸一 —— aware timestamptz 面值
         # strftime 會差一天（填 08-19 檔名變 20260818，2026-08-19 實測踩到）
         day = _fmt_day(exp.expense_date or exp.created_at)   # '' ＝ 無日期
-        if cg and cg.receipt_path:
-            base = cg.receipt_path
-        elif proj:
-            sub = (cg.name if cg and cg.name else "main")
-            base = os.path.join(_receipts_root(), proj.name or project_id, sub)
-        else:
-            base = os.path.join(_receipts_root(), "_零用金", day[:7] or "nodate")
-        os.makedirs(base, exist_ok=True)
+        # 資料夾規則只有 _receipt_dir 一份（列清單那兩支也用它）
+        base = _receipt_dir((proj.name or project_id) if proj else "", cg, day)
+        try:
+            os.makedirs(base, exist_ok=True)
+        except OSError as e:
+            raise HTTPException(status_code=422, detail=f"收據資料夾無法使用：{e}")
 
         # Build filename: date_category_subitem_payee_id.ext
         date_str = day.replace("-", "") or "nodate"
@@ -685,11 +712,13 @@ async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
                 status_code=413,
                 detail=f"收據檔超過 {_MAX_RECEIPT_BYTES // (1024 * 1024)}MB 上限")
 
-        # Save receipt_url to expense
-        exp.receipt_url = filepath
+        # 存進 DB 的是 canonical（哪台讀都翻得回自己的視角），回給前端的也是它 ——
+        # 前端拿它去打 /receipt-file?path=，那支自己會翻譯。
+        stored = _stored_receipt_path(filepath)
+        exp.receipt_url = stored
         await session.commit()
 
-    return {"status": "ok", "path": filepath, "filename": filename}
+    return {"status": "ok", "path": stored, "receipt_url": stored, "filename": filename}
 
 
 @router.get("/projects/{project_id}/receipts")
@@ -711,17 +740,12 @@ async def list_project_receipts(project_id: str, request: Request):
 
     result_groups = []
     for g in groups:
-        base = g.receipt_path if g.receipt_path else os.path.join(
-            os.getcwd(), "uploads", "receipts", proj.name or project_id, g.name or "main")
-        files = []
-        if os.path.isdir(base):
-            for fn in sorted(os.listdir(base)):
-                fp = os.path.join(base, fn)
-                if os.path.isfile(fp):
-                    files.append({"filename": fn, "path": fp, "size": os.path.getsize(fp)})
+        # 🔴 跟寫檔同一份規則（原本這裡寫死 os.getcwd()/uploads/receipts —— 後台把
+        #    根目錄指到 NAS 之後，檔案存進 NAS 而這裡去本機找，清單永遠是空的）
+        base = _receipt_dir(proj.name or project_id, g)
         result_groups.append({
             "cost_group_id": g.id, "cost_group_name": g.name,
-            "path": base, "receipts": files,
+            "path": base, "receipts": _list_receipt_files(base),
         })
     return {"groups": result_groups}
 
@@ -739,42 +763,64 @@ async def list_cost_group_receipts(group_id: str, request: Request):
             raise HTTPException(status_code=404, detail="找不到此子表")
         proj = await session.get(CrmProject, g.project_id)
 
-    base = g.receipt_path if g.receipt_path else os.path.join(
-        os.getcwd(), "uploads", "receipts",
-        (proj.name if proj else g.project_id), g.name or "main")
-    if not os.path.isdir(base):
-        return {"receipts": [], "path": base}
-    files = []
+    base = _receipt_dir((proj.name if proj else g.project_id), g)
+    return {"receipts": _list_receipt_files(base), "path": base}
+
+
+def _list_receipt_files(base: str) -> list:
+    """資料夾裡的收據檔。`path` 回 canonical —— 前端拿它打 `/receipt-file?path=`，
+    而那支可能在**另一台**上跑（office-api），本機路徑過去讀不到。"""
+    if not base or not os.path.isdir(base):
+        return []
+    out = []
     for fn in sorted(os.listdir(base)):
         fp = os.path.join(base, fn)
         if os.path.isfile(fp):
-            files.append({"filename": fn, "path": fp, "size": os.path.getsize(fp)})
-    return {"receipts": files, "path": base}
+            out.append({"filename": fn, "path": _stored_receipt_path(fp),
+                        "size": os.path.getsize(fp)})
+    return out
 
 
 @router.get("/receipt-file")
 async def serve_receipt(path: str = Query(""), request: Request = None):
-    """提供收據檔案下載/檢視（限定 uploads/ 或子表 receipt_path）。"""
+    """提供收據檔案下載/檢視（限定 uploads/、receipts_root 或子表 receipt_path）。
+
+    🔴 白名單比對要在**翻譯之後**：DB 存的是 master 視角的路徑，而這支也在 NAS 的
+       office-api 上跑。翻譯前比對＝拿兩個不同視角的字串比，可能誤放行也可能把好的
+       擋掉（同 `invoice_files._local_invoice_path`）。
+    🔴 前綴比對要帶 `os.sep`：純 startswith 會讓「…_舊」那種相鄰同名目錄通過。
+    """
     # 收據影像＝金額：登入之外還要一把看得到它的鑰匙（員工頁自己的零用金／福委、專案頁、帳務、審核；2026-09-08 稽核）
     check_admin_or_module(request, 'money_view', 'crm_projects', 'crm_invoices', 'finance_approve', 'me_petty', 'me_benefits')
-    if not path or not os.path.isfile(path):
+    if not path:
         raise HTTPException(status_code=404, detail="檔案不存在")
-    abs_path = os.path.abspath(path)
-    uploads_dir = os.path.abspath(os.path.join(os.getcwd(), "uploads"))
-    # receipts_root 換過位置（例如指到 NAS）後，新收據不在 uploads/ 底下
-    if not abs_path.startswith(uploads_dir) \
-            and not abs_path.startswith(os.path.abspath(_receipts_root())):
-        # 檢查是否在某個子表的 receipt_path 內
-        _require_db()
-        factory = await _get_factory()
-        async with factory() as session:
-            rows = (await session.execute(
-                select(CrmProjectCostGroup.receipt_path)
-                .where(CrmProjectCostGroup.receipt_path.isnot(None))
-            )).scalars().all()
-        if not any(rp and abs_path.startswith(os.path.abspath(rp)) for rp in rows):
-            raise HTTPException(status_code=403, detail="無權存取此路徑")
-    return no_store_file(path)
+    # 相容：2026-09-10 之前 /advance-expense.html 存的是 `/uploads/receipts/x.jpg`
+    # 這種**網址**而不是路徑（靠靜態掛載直接開）。改走這支之後要認得它。
+    raw = path
+    if raw.startswith("/uploads/"):
+        raw = os.path.join(os.getcwd(), raw.lstrip("/").replace("/", os.sep))
+    abs_path = os.path.abspath(to_local_path(raw))
+    if not os.path.isfile(abs_path):
+        raise HTTPException(status_code=404, detail="檔案不存在")
+
+    allowed = [os.path.join(os.getcwd(), "uploads"), _receipts_root()]
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        allowed += [rp for rp in (await session.execute(
+            select(CrmProjectCostGroup.receipt_path)
+            .where(CrmProjectCostGroup.receipt_path.isnot(None))
+        )).scalars().all() if rp]
+    if not any(_within(abs_path, a) for a in allowed):
+        raise HTTPException(status_code=403, detail="無權存取此路徑")
+    return no_store_file(abs_path)
+
+
+def _within(abs_path: str, root: str) -> bool:
+    """`abs_path` 在 `root` 底下嗎（root 也要翻成這台的視角再比）。"""
+    ar = os.path.abspath(to_local_path(root or ""))
+    return bool(ar) and (abs_path == ar or abs_path.startswith(ar + os.sep))
+
 
 
 @router.get("/petty/receipts-root")

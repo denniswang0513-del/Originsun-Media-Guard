@@ -158,5 +158,5 @@ python -c "from publish_update import sync_website_to_nas; sync_website_to_nas()
 | `office.…/my.html` 回 503「未同步到本機」 | 前端檔沒推上來 → `publish_update` 的第二組同步目標（`core/office_assets.SYNC_PATHS`）沒跑 |
 | office 的 CRM 端點全 404、容器卻是 healthy | router 掛載失敗被吞成一行 warning → `docker logs office-api \| grep 未掛載`；最常見是缺依賴（例：沒 `tzdata` → `_shared.py` 的 `ZoneInfo` 在 import 期就炸） |
 | office 發票影像開不到／上傳落在奇怪的地方 | 先確認 `/share/Archive` 有掛進容器（compose 有）＋ `NAS_LOCAL_SHARE_ROOT=/share`。設定存的是 master 視角的 UNC，讀寫兩側都要過 `core.drive_map.to_local_path`；**寫**那側 2026-09-10 才補上（`_invoices_write_root`），在那之前是安靜地寫進 `/app` 底下一個名字帶反斜線的資料夾 |
-| office 成本收據上傳「成功」但 master 看不到 | 已知未修：`_receipts_root()` 沒翻譯、`receipts_root` 也不在 `core/office_settings.EXPORT_KEYS` → 落在 `/app/uploads/receipts`。修法同發票那套 |
+| office 成本收據上傳「成功」但 master 看不到 | 2026-09-10 已修（`costs._receipt_dir` 翻譯＋存 canonical、`receipts_root` 進 EXPORT_KEYS）。若又出現，先確認 `/share/Archive` 有掛且 `receipts_root` 指到它底下 |
 | `office.…` 走 CF 通、LAN `:8091` 不通 | Website_Nginx 少了 `-p 8091:8091`，要 `docker rm` 重建（上節第 4 步） |

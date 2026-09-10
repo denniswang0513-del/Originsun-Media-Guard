@@ -1382,9 +1382,13 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   讀那側早就過 `to_local_path` 了，**寫那側 2026-09-10 才補上**。在 NAS 容器上 `os.makedirs` 一個 UNC
   會長出一個名字帶反斜線的資料夾在 `/app` 底下 —— 上傳回 200、DB 記下一條沒有任何一台讀得到的路徑，
   全程沒有一行 error。存進 DB 的一律 `to_canonical_path`（哪台讀都翻得回自己的視角）。
-  🔴 **同型的洞還在 `routers/crm/costs.py`**（成本收據）：`_receipts_root()` 沒翻譯、`receipts_root`
-  也不在 `office_settings.EXPORT_KEYS` 裡，所以走 office-api 傳收據會安靜地寫進 `/app/uploads/receipts`。
-  修法跟發票這套一樣，還沒做（compose 與 docker/INDEX.md 有記）。
+  成本收據（`routers/crm/costs.py`）同日補上同一套：`_receipt_dir()`／`_stored_receipt_path()`，
+  `receipts_root` 也進了 `office_settings.EXPORT_KEYS`。
+- **收據的資料夾規則只有 `costs._receipt_dir()` 一份**（2026-09-10）：寫檔與**兩支列清單**都用它。
+  原本列清單自己寫死 `os.getcwd()/uploads/receipts` —— 後台把根目錄指到 NAS 之後，檔案存進 NAS
+  而清單去本機找，**收據頁永遠是空的**而且不會有任何錯誤。四個上傳入口也都走同一支 `_save_receipt`
+  （預支款登記頁原本自己寫了一份：整檔進記憶體沒有上限、檔名只有 `{id}.ext`、存進 DB 的是
+  `/uploads/…` **網址**不是路徑 —— 那是第四種形狀，前端每個顯示收據的地方都要多認一種）。
 - **`_SNAPSHOT_INFLIGHT` 守在 `generate_quotation_snapshot` 自己身上**，不是某個呼叫端的包裝
   （2026-09-10 /polish 修）：守錯層的話「按下生成鈕」那條路（端點直接呼叫）完全沒被守到。
   同一張跑兩發＝兩邊都讀到同一筆舊紀錄、都刪同一組舊檔、都寫一組新檔，**輸的那組從此變孤兒**，
