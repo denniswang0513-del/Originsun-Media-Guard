@@ -76,8 +76,42 @@ RECONNECT_COOLDOWN_SEC = 60
 _down_until: dict = {}          # share 根目錄(大寫) → 判死到什麼時候（monotonic）
 _down_lock = threading.Lock()
 
+# Session 0 的解法就這一行。用 raw string —— 裡面有 Windows 路徑的反斜線，
+# 一般字串靠「無效跳脫原樣保留」才會對，那是會隨 Python 版本消失的運氣。
+BOOT_TASK_CMD = (
+    r'schtasks /Create /TN OriginsunAgent_Boot '
+    r'/TR "wscript.exe C:\OriginsunAgent\start_hidden.vbs" /SC ONLOGON /IT /F'
+)
+
 
 # ── 路徑判讀（純函式，跨平台） ──────────────────────────────────────
+
+def session_id():
+    """這個行程跑在哪個 Windows session。非 Windows／問不到 → None。"""
+    if not _IS_WINDOWS:
+        return None
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        sid = ctypes.c_ulong()
+        if k32.ProcessIdToSessionId(k32.GetCurrentProcessId(), ctypes.byref(sid)):
+            return int(sid.value)
+    except Exception:
+        return None
+    return None
+
+
+def in_service_session() -> bool:
+    """在 Session 0 嗎（服務／非互動）。
+
+    🔴 為什麼這支住在 NAS 認證這個檔裡：Session 0 的**後果**就是認證。NAS 的憑證
+       存在**互動使用者**的認證管理員裡，服務 session 一輩子看不到它 —— 於是同一台
+       機器「在 cmd 裡 dir 得開、agent 卻說帳密不正確」。
+       2026-09-10 備檔電腦（192.168.1.120）就是這樣：`cmdkey /list` 明明有那筆，
+       WinError 1326 照噴，害人往「密碼改過了」的方向找了一輪。
+    """
+    return session_id() == 0
+
 
 def is_unc(path: str) -> bool:
     """是不是 `\\\\host\\share...` 形式的 UNC 路徑。"""
@@ -124,10 +158,19 @@ def friendly(exc: BaseException, path: str = "") -> str:
         return ""
     target = share_root(path) or share_root(getattr(exc, "filename", "") or "") or "NAS"
     is_cred = code in _CREDENTIAL_ERRNOS
+    # 🔴 帳密類錯誤 ＋ 真的在 Session 0 → 那才是最可能的原因，要排在第一條。
+    #    憑證在互動使用者的認證管理員裡，服務 session 看不到 —— 症狀跟「密碼錯」
+    #    一模一樣，但去改密碼是白費工（2026-09-10 備檔電腦實際發生）。
+    #    **只有偵測到才加**，不然十台裡有九台會看到一句與它無關的雜訊。
+    session0 = is_cred and in_service_session()
     checks = (
-        [f"1. 這台的 Windows「認證管理員」裡 {_host_of(target)} 的帳密還有效（密碼改過就要更新）",
-         "2. NAS 端沒有把這台的 IP 列入連線封鎖",
-         "3. NAS 開著、SMB 服務正常"]
+        ([] if not session0 else
+         ["1. 🔴 這台的 agent 跑在 Session 0（服務／非互動）—— 看不到你存在"
+          "「認證管理員」裡的憑證。密碼很可能是對的。"
+          f"改用互動式排程重啟 agent：{BOOT_TASK_CMD}"])
+        + [f"{2 if session0 else 1}. 這台的 Windows「認證管理員」裡 {_host_of(target)} 的帳密還有效（密碼改過就要更新）",
+           f"{3 if session0 else 2}. NAS 端沒有把這台的 IP 列入連線封鎖",
+           f"{4 if session0 else 3}. NAS 開著、SMB 服務正常"]
         if is_cred else
         [f"1. NAS（{_host_of(target)}）開著、SMB 服務正常",
          f"2. 分享區名稱沒有被改掉或停用（設定裡指的是 {target}）",
@@ -268,11 +311,24 @@ def reconnect_with_backoff(
 
     for i in range(1, attempts + 1):
         reconnect(root)
-        if _probe(root) is None:
+        err = _probe(root)
+        if err is None:
             if log and i > 1:
                 log(f"[NAS] {root} 第 {i} 次重連成功。")
             _mark(root, down=False)
             return True
+        # 🔴 Session 0 ＋ 帳密類錯誤 ＝ 重試一定也是同一個結果：那些憑證存在
+        #    **互動使用者**的認證管理員裡，服務 session 看不到它，等 60 秒之後
+        #    看到的還是同一片空白。這裡快速失敗，把時間留給人去修真正的問題。
+        #    🔴 只有這個組合可以跳過重試 —— 純 1326 **要**重試（檔頭那次事故
+        #    18:08／18:10 兩連敗、半小時後自己好，15 秒 ×5 就是為了接住它）。
+        if i == 1 and in_service_session() \
+                and getattr(err, "winerror", None) in _CREDENTIAL_ERRNOS:
+            if log:
+                log(f"[NAS] {root} 認證失敗，而這台的 agent 跑在 Session 0"
+                    f"（服務／非互動）—— 看不到認證管理員裡的憑證，重連不會成功。"
+                    f"不再等待，直接放棄。解法：{BOOT_TASK_CMD}")
+            break
         if i == attempts:
             break
         if log:

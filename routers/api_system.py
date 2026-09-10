@@ -120,6 +120,12 @@ async def health_check():
         for j in running
     ]
 
+    # 🔴 這台的 agent 跑在哪個 Windows session。Session 0（服務／非互動）看不到
+    #    互動使用者存在「認證管理員」裡的 NAS 憑證 —— 症狀是備份跑到一半噴
+    #    WinError 1326「帳密不正確」，而密碼其實是對的（2026-09-10 備檔電腦）。
+    #    放進 health 是為了**在它咬人之前就看得見**：機隊燈號那一排每 30 秒打這支。
+    #    非 Windows（NAS 容器）回 None，那邊沒有 session 這回事。
+    from core.nas_auth import in_service_session, session_id
     return {
         "status": "ok",
         "hostname": socket.gethostname(),
@@ -129,6 +135,8 @@ async def health_check():
         "active_job_count": len(running),
         "current_tasks": current_tasks,
         "version": ver,
+        "session_id": session_id(),
+        "service_session": in_service_session(),
     }
 
 # ⚠️ settings.json 內含機密：`jwt_secret` 能簽出 access_level=3 的 admin token（master 與

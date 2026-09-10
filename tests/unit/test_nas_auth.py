@@ -160,6 +160,13 @@ class TestReconnectWithBackoff:
         self.slept = []
         monkeypatch.setattr(nas_auth, "_wait",
                             lambda s, stop: self.slept.append(s) or True)
+        # 🔴 session 也要釘住，不能吃環境：`reconnect_with_backoff` 對
+        #    「Session 0 ＋ 帳密類錯誤」會跳過重試（那組合等再久也是同一個結果）。
+        #    這一組測的是**退避本身**，所以固定成互動 session；Session 0 那條
+        #    另外有 test_only_session_zero_skips_the_retries 在測。
+        #    （不釘的話，跑在服務／CI／Claude 工具那種 Session 0 的環境裡，
+        #    這四支會突然變成「只試 1 次」而紅，而程式其實是對的。）
+        monkeypatch.setattr(nas_auth, "session_id", lambda: 1)
         nas_auth._down_until.clear()      # 冷卻閘是模組層狀態，測試之間要清乾淨
         yield
         nas_auth._down_until.clear()
@@ -291,3 +298,71 @@ class TestEnsureReady:
         monkeypatch.setattr(nas_auth, "_probe", lambda r: probed.append(r))
         ensure_ready([NAS + r"\a", NAS + r"\b", r"\\192.168.1.130\storage 01\c"])
         assert probed == [NAS, r"\\192.168.1.130\storage 01"]
+
+
+# ── Session 0：憑證看得見嗎（2026-09-10 備檔電腦）────────────────
+
+def test_session_zero_is_named_in_the_message_only_when_it_is_true():
+    """🔴 帳密類錯誤 ＋ 真的在 Session 0 → 那才是最可能的原因，要排第一條。
+
+    NAS 憑證存在**互動使用者**的認證管理員裡，服務 session 一輩子看不到它 ——
+    症狀跟「密碼錯」一模一樣（WinError 1326），但去改密碼是白費工。
+    2026-09-10 備檔電腦（192.168.1.120）就是這樣，`cmdkey /list` 明明有那筆。
+
+    🔴 但**只有偵測到才加**：十台裡有九台是互動 session，對它們講這句只是雜訊，
+       而雜訊會讓真正相關的那一句被略過。
+    """
+    from core import nas_auth as NA
+    exc = OSError("x")
+    exc.winerror = 1326
+    exc.filename = "\\192.168.1.132\Project_Longterm"
+
+    real = NA.session_id
+    try:
+        NA.session_id = lambda: 1           # 互動 session
+        msg = NA.friendly(exc)
+        assert "Session 0" not in msg, "對互動 session 講了一句與它無關的話"
+        assert msg.count("認證管理員") == 1
+        assert msg.index("1. 這台的 Windows") < msg.index("2. NAS 端"), "編號亂了"
+
+        NA.session_id = lambda: 0           # 服務／非互動
+        msg0 = NA.friendly(exc)
+        assert "Session 0" in msg0 and "密碼很可能是對的" in msg0
+        assert msg0.index("Session 0") < msg0.index("2. 這台的 Windows"), \
+            "Session 0 那條要排在「去翻認證管理員」前面 —— 順序就是排查順序"
+        assert NA.BOOT_TASK_CMD in msg0, "要把解法那行指令一起給出來"
+    finally:
+        NA.session_id = real
+
+
+def test_the_hint_command_survives_the_backslashes():
+    """`C:\OriginsunAgent\start_hidden.vbs` 要原樣輸出。
+
+    用 raw string 是刻意的 —— 一般字串是靠「無效跳脫原樣保留」才會對，
+    那是會隨 Python 版本消失的運氣（`\O`／`\s` 現在就會發 DeprecationWarning）。
+    """
+    from core.nas_auth import BOOT_TASK_CMD
+    assert "C:\OriginsunAgent\start_hidden.vbs" in BOOT_TASK_CMD
+    assert "/IT" in BOOT_TASK_CMD and "/SC ONLOGON" in BOOT_TASK_CMD
+
+
+def test_only_session_zero_skips_the_retries():
+    """🔴 純 1326 **要**重試 —— 檔頭那次事故（18:08／18:10 兩連敗、半小時後自己好）
+    就是 1326，15 秒 ×5 正是為了接住它。
+
+    可以跳過重試的**只有**「Session 0 ＋ 帳密類錯誤」：那個組合等 60 秒之後
+    看到的還是同一片空白。這條釘住那個 and，不准有人把它放寬成「1326 就快速失敗」。
+    """
+    from tests.unit._srcscan import code_only, func_body, repo_src
+    body = code_only(func_body(repo_src("core/nas_auth.py"), "def reconnect_with_backoff("))
+    assert "in_service_session()" in body and "_CREDENTIAL_ERRNOS" in body
+    assert "i == 1 and in_service_session()" in body, \
+        "快速失敗的條件要同時包含 Session 0 —— 只看錯誤碼會把該重試的那條也砍掉"
+
+
+def test_health_reports_which_session_the_agent_runs_in():
+    """機隊燈號每 30 秒打 /health —— 讓 Session 0 在咬人之前就看得見。"""
+    from tests.unit._srcscan import code_only, func_body, repo_src
+    body = code_only(func_body(repo_src("routers/api_system.py"), "async def health_check("))
+    assert '"session_id": session_id()' in body
+    assert '"service_session": in_service_session()' in body
