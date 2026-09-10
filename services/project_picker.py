@@ -42,6 +42,10 @@ async def list_options(session, *, extra: tuple = (), prefer: str = MINE) -> lis
     備份頁會傳 extra」這個外部知識編進規則裡 —— 下一個呼叫端（例如帶 `folder_path`
     的第三個 picker）會靜默拿到備份頁那套偏好。
     """
+    if prefer not in (MINE, "parent"):
+        # 靜默降級的話症狀正是這些測試在防的那個：備份頁綁到看不見的私帳分身、
+        # 畫面說「還沒設定備份資料夾」、`_apply_project_roots` 反查不到就用手打的路徑。
+        raise ValueError(f'prefer 只收 "{MINE}" 或 "parent"，收到 {prefer!r}')
     from db.models import Client, CrmProject, Timesheet
     cols = ["id", "name", "start_date", "shoot_date", "created_at",
             "status", "entity", "mine_link_id", "source_project_id", "updated_at"]

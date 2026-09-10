@@ -418,9 +418,8 @@ def test_every_project_enumeration_decides_about_mine():
         # 上面兩支（工時下拉／備份選擇器）2026-09-11 起共用的清單規則。它**列出全部
         # 專案含私帳案**、刻意不對可見性表態，由兩個呼叫端各自負責：工時的對映只認私帳，
         # 備份是 owner 拍板的局部例外（前提是那支端點不帶錢）。
-        # 🔴 順帶記著：這支的查詢寫成 `select(*[getattr(CrmProject, c) for c in cols])`，
-        # 下面那條 `select(\s*CrmProject[.,)]` 的掃描**看不到它** —— 所以它在這裡是
-        # 明文豁免，不是「掃過了沒問題」。用同樣寫法的新檔也一樣掃不到，要自己進來登記。
+        # （這支寫成 `select(*[getattr(CrmProject, c) …])`；掃描已經認得那個形狀了，
+        #  所以它是**被掃到之後**的明文豁免，不是漏網。）
         "services/project_picker.py",
     }
     hits = []
@@ -430,7 +429,11 @@ def test_every_project_enumeration_decides_about_mine():
             if key in EXEMPT:
                 continue
             src = f.read_text(encoding="utf-8")
-            if not re.search(r"select\(\s*CrmProject[.,)]", src):
+            # 兩種寫法都要認得：`select(CrmProject.id, …)` 與
+            # `select(*[getattr(CrmProject, c) for c in cols])`（後者 2026-09-11 出現在
+            # services/project_picker.py —— 當時只靠 EXEMPT 登記，掃描本身是瞎的）。
+            if not (re.search(r"select\(\s*CrmProject[.,)]", src)
+                    or re.search(r"select\(\s*\*.*getattr\(\s*CrmProject\b", src, re.S)):
                 continue
             if ("hide_mine_projects" in src or "not_mine(CrmProject.entity)" in src
                     or "is_mine(CrmProject.entity)" in src):
