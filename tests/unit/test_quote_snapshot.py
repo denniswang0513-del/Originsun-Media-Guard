@@ -118,12 +118,29 @@ def test_generate_cleans_up_the_previous_snapshot():
         "先把新的寫進 DB 再刪舊的：反過來的話中間掛掉就兩份都沒有"
 
 
-def test_background_generate_does_not_stampede():
-    """舊連結的退路會在客戶每次開頁時補送一發生成。客戶按兩下重整＝兩顆 Chromium。"""
+def test_generate_does_not_stampede_from_any_caller():
+    """同一張同時跑兩發＝兩顆 Chromium，而且**輸的那份快照沒有人會再刪**：
+    兩邊都讀到同一筆舊紀錄、都刪同一組舊檔、都寫一組新檔，其中一組從此變孤兒 ——
+    永遠躺在 NAS 上而且網址還通（客戶可能拿到過期版本）。
+
+    🔴 閘門守在 `generate_quotation_snapshot` **自己身上**，不是某個呼叫端的包裝。
+       原本守在背景那支的包裝裡，於是「按下生成鈕」那條路（端點直接呼叫）完全沒被守到：
+       兩個分頁同時按就是上面那個情形。守在被呼叫的那支，每個呼叫端都被守到。
+    """
     src = repo_src(QUOTES)
+    gen = code_only(func_body(src, "async def generate_quotation_snapshot("))
+    assert "if quotation_id in _SNAPSHOT_INFLIGHT:" in gen and "raise SnapshotBusy(" in gen
+    assert "_SNAPSHOT_INFLIGHT.add(quotation_id)" in gen
+    assert "_SNAPSHOT_INFLIGHT.discard(quotation_id)" in gen and "finally:" in gen
+
+    # 背景那支撞到就安靜地不做（已經有人在生成了，做第二次沒有意義）
     quiet = code_only(func_body(src, "async def generate_quotation_snapshot_quietly("))
-    assert "_SNAPSHOT_INFLIGHT" in quiet and "return None" in quiet
-    assert "_SNAPSHOT_INFLIGHT.discard(quotation_id)" in quiet and "finally:" in quiet
+    assert "except SnapshotBusy:" in quiet and "return None" in quiet
+    assert quiet.index("except SnapshotBusy:") < quiet.index("except Exception"),         "SnapshotBusy 是 RuntimeError —— 排在泛用 except 後面就永遠進不去"
+
+    # 互動那支要講實話，不是排隊也不是硬跑第二顆
+    ep = code_only(func_body(src, "async def generate_quotation("))
+    assert "except SnapshotBusy" in ep and "409" in ep
 
 
 def test_public_endpoints_serve_the_snapshot_before_anything_else():
@@ -272,3 +289,22 @@ def test_column_and_startup_migration_both_exist():
     col = CrmQuotation.__table__.columns["pdf_snapshot"]
     assert isinstance(col.type, JSONB) and col.nullable
     assert '("crm_quotations", "pdf_snapshot", "JSONB")' in repo_src("main.py")
+
+
+def test_the_generate_wait_lives_in_one_place():
+    """三個入口（報價分頁／專案頁子頁／手機卡片）都要在按下生成之後讓畫面會動。
+
+    典型秒數與「狀態那句話怎麼畫」各寫一份的話，調過的那一份會靜默走鐘 ——
+    同 quote-delete.js／quote-file.js 那條「三個入口」的理由，收成零 import 的葉節點。
+    """
+    from tests.unit._srcscan import js_code_only
+    leaf = js_code_only(repo_src("frontend/js/shared/quote-wait.js"))
+    assert "export const GEN_SECONDS" in leaf and "export function paintGenNote(" in leaf
+
+    for f in ("frontend/tabs/crm/crm-quotes.js",
+              "frontend/tabs/crm/crm-projects-quotes.js",
+              "frontend/m/views/quotes.js"):
+        src = js_code_only(repo_src(f))
+        assert "GEN_SECONDS" in src and "quote-wait.js" in src, f
+        assert "[5, 15]" not in src, f + " 自己又寫了一份典型秒數"
+

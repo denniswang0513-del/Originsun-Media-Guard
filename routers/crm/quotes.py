@@ -418,6 +418,16 @@ def _snapshot_file(record, kind: str) -> str:
     return path if os.path.isfile(path) else ""
 
 
+# 正在生成的報價 id。守在**這支自己身上**（不是某個呼叫端的包裝）：兩發同時跑的話
+# 兩邊都讀到同一筆舊紀錄、都寫一份新快照，輸的那份沒有人會再刪 —— 一組孤兒檔永遠躺在
+# NAS 上而且網址還通（客戶可能拿到過期版本）。行程內的 set 就夠：只有 master 在生成。
+_SNAPSHOT_INFLIGHT: set = set()
+
+
+class SnapshotBusy(RuntimeError):
+    """這張報價已經有一發在生成中。"""
+
+
 async def generate_quotation_snapshot(quotation_id: str):
     """生成報價單：歸檔進報價單資料夾 ＋ 寫一份快照到圖床 ＋ 記進 DB。
 
@@ -425,71 +435,73 @@ async def generate_quotation_snapshot(quotation_id: str):
        好幾秒，中間有人存了一次的話，用「生成時間比較晚」判斷會把舊內容當成新鮮的。
     🔴 寫回時**不動 `updated_at`** —— 動了就等於生成完當下立刻過期。
     只有 master 做得到這件事（Playwright 在那）；NAS 對外容器只負責把檔案送出去。
+    同一張同時只准跑一發，撞到的丟 `SnapshotBusy`（見 `_SNAPSHOT_INFLIGHT`）。
     """
     from core.auth import new_short_token
     from services.html_pdf import html_to_pdf
+    if quotation_id in _SNAPSHOT_INFLIGHT:
+        raise SnapshotBusy(quotation_id)
+    _SNAPSHOT_INFLIGHT.add(quotation_id)
     log = logging.getLogger(__name__)
-    factory = await _get_factory()
-    async with factory() as session:
-        q = await session.get(CrmQuotation, quotation_id)
-        if q is None:
-            return None
-        if not q.share_token:     # 生成＝這張要給人看了，順手備好連結（冪等，不換掉舊的）
-            q.share_token = new_short_token()
-            await session.commit()
-            await session.refresh(q)
-        token, src, old = q.share_token, q.updated_at, q.pdf_snapshot
-
-    view, company = await _quotation_view_of(q)
-    names = quote_snapshot.new_asset_names()
-    html_doc = _render_quotation_html(view, company, web_pdf_url=f"/q/{token}/pdf")
-    tmp_pdf = await html_to_pdf(_render_quotation_html(view, company), prefix="quotation_",
-                                footer_html=_pdf_footer(view), margin=PDF_MARGIN)
     try:
-        # 歸檔（自己人翻的資料夾）與快照（客戶連結送的檔）是兩件事：資料夾不通
-        # 不該擋掉客戶那條路，所以各自 try。
+        factory = await _get_factory()
+        async with factory() as session:
+            q = await session.get(CrmQuotation, quotation_id)
+            if q is None:
+                return None
+            if not q.share_token:     # 生成＝這張要給人看了，順手備好連結（冪等，不換掉舊的）
+                q.share_token = new_short_token()
+                await session.commit()
+                await session.refresh(q)
+            token, src, old = q.share_token, q.updated_at, q.pdf_snapshot
+
+        view, company = await _quotation_view_of(q)
+        names = quote_snapshot.new_asset_names()
+        html_doc = _render_quotation_html(view, company, web_pdf_url=f"/q/{token}/pdf")
+        tmp_pdf = await html_to_pdf(_render_quotation_html(view, company), prefix="quotation_",
+                                    footer_html=_pdf_footer(view), margin=PDF_MARGIN)
         try:
-            await asyncio.to_thread(lambda: _archive_quotation_pdf(tmp_pdf, view))
-        except OSError as exc:
-            log.warning("報價 %s 歸檔失敗（不影響客戶連結）：%s", quotation_id, exc)
-        await asyncio.to_thread(lambda: _write_snapshot(tmp_pdf, html_doc, names))
+            # 歸檔（自己人翻的資料夾）與快照（客戶連結送的檔）是兩件事：資料夾不通
+            # 不該擋掉客戶那條路，所以各自 try。
+            try:
+                await asyncio.to_thread(lambda: _archive_quotation_pdf(tmp_pdf, view))
+            except OSError as exc:
+                log.warning("報價 %s 歸檔失敗（不影響客戶連結）：%s", quotation_id, exc)
+            await asyncio.to_thread(lambda: _write_snapshot(tmp_pdf, html_doc, names))
+        finally:
+            try:
+                os.remove(tmp_pdf)
+            except OSError:
+                pass
+
+        record = quote_snapshot.make_record(names[0], names[1], view["filename"], src)
+        async with factory() as session:
+            q = await session.get(CrmQuotation, quotation_id)
+            if q is None:
+                return None
+            q.pdf_snapshot = record
+            await session.commit()
+        for name in quote_snapshot.assets_of(old):    # 舊快照留著是佔空間，而且那個網址還通
+            assets_delete(quote_snapshot.NAMESPACE, name)
+        log.info("報價 %s 已生成：%s", quotation_id, view["filename"])
+        return record
     finally:
-        try:
-            os.remove(tmp_pdf)
-        except OSError:
-            pass
-
-    record = quote_snapshot.make_record(names[0], names[1], view["filename"], src)
-    async with factory() as session:
-        q = await session.get(CrmQuotation, quotation_id)
-        if q is None:
-            return None
-        q.pdf_snapshot = record
-        await session.commit()
-    for name in quote_snapshot.assets_of(old):    # 舊快照留著是佔空間，而且那個網址還通
-        assets_delete(quote_snapshot.NAMESPACE, name)
-    log.info("報價 %s 已生成：%s", quotation_id, view["filename"])
-    return record
-
-
-# 正在生成的報價 id。舊連結的退路會在客戶每次開頁時補送一發生成，客戶按兩下重整
-# 就是兩顆 Chromium —— 同一張同時只准跑一發（行程內夠用：只有 master 在生成）。
-_SNAPSHOT_INFLIGHT: set = set()
+        _SNAPSHOT_INFLIGHT.discard(quotation_id)
 
 
 async def generate_quotation_snapshot_quietly(quotation_id: str):
     """背景版：失敗只記 log。寄出與「舊連結補生成」都用它 —— 寄出已經 commit 了，
-    產不出 PDF（資料夾不通、Playwright 掛掉）不該讓寄出跟著失敗。"""
-    if quotation_id in _SNAPSHOT_INFLIGHT:
-        return None
-    _SNAPSHOT_INFLIGHT.add(quotation_id)
+    產不出 PDF（資料夾不通、Playwright 掛掉）不該讓寄出跟著失敗。
+
+    舊連結的退路會在客戶**每次開頁**時補送一發，客戶按兩下重整就是兩發 —— 撞到的
+    那發安靜地不做（已經有人在生成了，做第二次沒有意義）。"""
     try:
         return await generate_quotation_snapshot(quotation_id)
+    except SnapshotBusy:
+        return None
     except Exception as exc:                       # noqa: BLE001 — 背景工作：記下來就好
         logging.getLogger(__name__).warning("報價 %s 生成失敗（不影響寄出）：%s", quotation_id, exc)
         return None
-    finally:
-        _SNAPSHOT_INFLIGHT.discard(quotation_id)
 
 
 # 🔴 「這台產不出 PDF」要守在**呼叫的時候**，不是 import 的時候。
@@ -572,6 +584,10 @@ async def generate_quotation(quotation_id: str, request: Request):
     _require_db()
     try:
         record = await generate_quotation_snapshot(quotation_id)
+    except SnapshotBusy as exc:
+        # 兩個分頁／兩個人同時按同一張。不排隊也不硬跑第二顆 Chromium —— 那一發的
+        # 快照沒有人會再刪（見 _SNAPSHOT_INFLIGHT）。
+        raise HTTPException(status_code=409, detail="這張報價正在生成中，請稍候再按一次") from exc
     except (ImportError, ModuleNotFoundError) as exc:
         # 走 NAS 的 office-api 開這一頁時按下去會到這裡 —— 那台沒有 Playwright。
         # 回 503 ＋ 人話，不要讓同仁看到 `No module named 'playwright'`。

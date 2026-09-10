@@ -21,7 +21,7 @@ import { quoteTotals, parsePaymentStages, paymentStagesToText } from '/js/shared
 import * as _QA from '/js/shared/quote-amounts.js';
 import { mfetch, mdownload, toast, esc, money, fmtDate, todayLocal, quotePdfFilename } from '../shell.js';
 import { confirmQuoteDelete } from '/js/shared/quote-delete.js';
-import { waitingText } from '/js/shared/quote-wait.js';
+import { GEN_SECONDS, waitingText } from '/js/shared/quote-wait.js';
 import { openQuoteChat } from './quote-chat.js';
 // 🔴 Cloudflare 給 .js 4 小時瀏覽器快取：新分頁 js 配舊 quote-amounts.js 時，named import 拿不到的 export 會讓
 //    整個模組載入失敗。新 export 先用命名空間拿、缺就退回同款本地實作（reference_cloudflare_js_cache：契約要相容一輪；
@@ -63,10 +63,6 @@ function transitions(status) {
 
 // 動作列跟金額同一列：按鈕不吃 .m-actions 的「各半」flex，照內容寬、文字不換行（「寄出」被擠成兩行過）
 const BTN = 'flex:0 0 auto;white-space:nowrap';
-
-// 生成報價單的典型秒數（master 開一顆 Chromium 把版面畫成 PDF）。跟 AI 助理那一輪（30–50 秒）
-// 不是同一個量級，所以把範圍帶進 waitingText，免得它對著 8 秒的工作說「通常 30–50 秒」。
-const GEN_SECONDS = [5, 15];
 
 function cardHtml(q) {
     // PDF 與線上連結要「寄出」之後才出現（owner 2026-09-07「送出再產生連結與 pdf 按鈕」）：草稿還在改，不該流出去

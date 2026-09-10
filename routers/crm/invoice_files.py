@@ -309,6 +309,19 @@ async def create_invoice_share_link(invoice_id: str, request: Request):
         require_entity(request, inv.entity or "parent", level="full")
         if not inv.file_url:
             raise HTTPException(status_code=422, detail="這張發票還沒有上傳電子發票檔")
+        # 🔴 開不到檔就不要鑄連結。原本這裡是「開不到就 size=0，照樣回 ok」——
+        #    複製給客戶的連結按下載會 404，而**只有他看得到**（我們這邊回的是 ok）。
+        #    寧可在按鈕上當場講一句人話，讓人去把檔補回去。
+        local = _local_invoice_path(inv.file_url)
+        if not local:
+            raise HTTPException(
+                status_code=422,
+                detail="這張的電子發票檔在這台機器上開不到（檔案被移走或改名了），"
+                       "請重新上傳一次再建連結")
+        try:
+            size = os.path.getsize(local)
+        except OSError as exc:
+            raise HTTPException(status_code=422, detail=f"電子發票檔讀不到：{exc}")
         if not inv.share_token:
             # unique index 擋碰撞；72 bits 幾乎不會撞，但撞到就換一個而不是噴 500
             for _ in range(5):
@@ -325,11 +338,6 @@ async def create_invoice_share_link(invoice_id: str, request: Request):
         #    寄出去」—— 那一刻客戶會看到的就該是現在這一版。不重新定稿的話，改過金額
         #    之後再複製一次連結，客戶看到的還是舊的，而只有他看得到。
         #    也因為這樣不需要另外做一顆「更新分享內容」。
-        local = _local_invoice_path(inv.file_url)
-        try:
-            size = os.path.getsize(local) if local else 0
-        except OSError:
-            size = 0
         inv.share_snapshot = invoice_share.make_snapshot(
             _inv_dict(inv), file_name=ntpath.basename(inv.file_url or ""), file_size=size)
         inv.updated_at = _now()

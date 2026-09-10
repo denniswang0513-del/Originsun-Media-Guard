@@ -442,3 +442,17 @@ def test_the_shared_link_domain_has_a_way_in():
     body = code_only(func_body(repo_src("routers/crm/quotes.py"), "async def set_quotations_root("))
     assert "public_base(s)" in body
     assert 's.get("quotes_public_base")' not in body.split("return {")[-1]
+
+
+def test_a_link_is_not_minted_when_the_file_cannot_be_opened():
+    """開不到檔就不要鑄連結。
+
+    原本是「開不到就 size=0，照樣回 ok」—— 複製給客戶的連結按下載會 404，
+    而**只有他看得到**（我們這邊回的是 ok，按鈕上什麼都沒說）。
+    """
+    body = code_only(func_body(repo_src(INV), "async def create_invoice_share_link("))
+    assert "local = _local_invoice_path(inv.file_url)" in body
+    assert "if not local:" in body and "422" in body
+    assert body.index("if not local:") < body.index("_new_share_code()"), \
+        "先確認開得到檔再鑄短碼 —— 反過來的話失敗那次已經把 token 算出來了"
+    assert "size = 0" not in body, "讀不到大小要講出來，不要送一個 0 給客戶看"

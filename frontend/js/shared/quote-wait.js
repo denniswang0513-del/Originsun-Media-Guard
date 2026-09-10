@@ -19,6 +19,20 @@
 /** 典型一輪的秒數（實測 2026-09-09：37–47 秒開始出字、44–52 秒完成） */
 export const TYPICAL_SECONDS = [30, 50];
 
+/** 「生成報價單」典型秒數（master 開一顆 Chromium 把版面畫成 PDF）。
+ *  跟 AI 那一輪不是同一個量級，所以帶進 waitingText 免得它對著 8 秒的工作說「通常 30–50 秒」。
+ *  🔴 三個入口（報價分頁／專案頁子頁／手機卡片）各寫一份的話，調過的那一份會靜默走鐘。 */
+export const GEN_SECONDS = [5, 15];
+
+/** 畫「生成狀態」那句話。文案正本是**後端**的 `pdf_state.label`
+ *  （`core/quote_snapshot.state`）—— 前端不拼中文，兩邊各一份的話改字一定漏掉一邊。
+ *  `stale` 才上警示色：那是一件待辦（客戶現在拿到的是舊版），不是單純的資訊。 */
+export function paintGenNote(el, st) {
+    if (!el) return;
+    el.textContent = st ? st.label : '';
+    el.classList.toggle('warn', !!(st && st.stale));
+}
+
 const DOTS = ['', '.', '..', '...'];
 
 /**

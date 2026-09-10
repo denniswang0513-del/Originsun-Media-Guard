@@ -26,7 +26,7 @@ const _isAdmin = () => (window._accessLevel || 0) >= 3;
 import { authDownload, copyText } from '../../js/shared/utils.js';
 import { applyQuotePatch } from '../../js/shared/quote-patch.js';
 import { confirmQuoteDelete } from '../../js/shared/quote-delete.js';
-import { waitingText } from '../../js/shared/quote-wait.js';
+import { GEN_SECONDS, paintGenNote, waitingText } from '../../js/shared/quote-wait.js';
 import { ensurePasteBase, renderRich, pasteThumbs } from '../../js/shared/paste-image.js';
 
 // ── State ────────────────────────────────────────────────────
@@ -145,18 +145,6 @@ function renderList() {
     }).join('');
 }
 
-// 生成報價單的典型秒數（master 開一顆 Chromium 把版面畫成 PDF）。跟 AI 助理那一輪（30–50 秒）
-// 不是同一個量級，所以把範圍帶進 waitingText，免得它對著 8 秒的工作說「通常 30–50 秒」。
-const GEN_SECONDS = [5, 15];
-
-/** 畫「生成狀態」那句話。文案正本是後端的 pdf_state.label（core/quote_snapshot.state）——
- *  前端不拼中文，兩邊各寫一份的話改字一定漏掉一邊。stale 才上警示色。 */
-function _paintGenNote(el, st) {
-    if (!el) return;
-    el.textContent = st ? st.label : '';
-    el.classList.toggle('warn', !!(st && st.stale));
-}
-
 /** 跑一次「生成報價單」，回來時 q.pdf_state／q.share_url 已經是新的。
  *
  *  🔴 這支慢（5–15 秒）：按下去之後畫面什麼都不動就會被當成當掉，所以借 AI 助理那支
@@ -180,7 +168,7 @@ async function _generateQuote(q, btn, noteEl) {
     } finally {
         clearInterval(timer);
         if (btn) { btn.disabled = false; btn.textContent = wasText; }
-        _paintGenNote(noteEl, q.pdf_state);
+        paintGenNote(noteEl, q.pdf_state);
     }
 }
 
