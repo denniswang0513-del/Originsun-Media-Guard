@@ -284,8 +284,12 @@ function renderDetail(q) {
                     // 理由：拿到連結的下一秒就是貼給客戶，那時客戶看到的必須是現在這一版；忘記先按的人
                     // 不會收到任何錯誤，只有客戶會看到舊的或打不開。後端 /share 本來就會在 stale 時補送
                     // 一發背景生成，前端等它做完只是把「已經在跑的事」變成看得見、而且複製到連結時檔案已經在了。
+                    // 🔴 生成失敗不可以讓複製連結跟著失敗：後端的 /share 自己是優雅降級的
+                    //    （stale 時 fire 一發背景生成、照樣回 share_url），包在同一個 try 裡
+                    //    等於把它變成硬失敗。手機那支同一個修法。
                     if (q.pdf_state && q.pdf_state.stale) {
-                        await _generateQuote(q, btn, document.getElementById('quote-gen-note'));
+                        try { await _generateQuote(q, btn, document.getElementById('quote-gen-note')); }
+                        catch (e) { alert('連結可以用，但重新生成失敗：' + e.message); }
                     }
                     // 🔴 一律打 /share（冪等）並用它回的網址：客戶拿到哪個網域只由後端的 quotes_public_base
                     //    決定，不再是「按複製的人當時開在哪個網址」（開發機的 8001 根本不對外）。

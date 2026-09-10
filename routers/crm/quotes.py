@@ -488,21 +488,24 @@ async def generate_quotation_snapshot_quietly(quotation_id: str):
         _SNAPSHOT_INFLIGHT.discard(quotation_id)
 
 
+# 🔴 「這台產不出 PDF」要守在**呼叫的時候**，不是 import 的時候。
+#    `services/html_pdf.py` 的 `from playwright...` 在 `_render()` **函式內**，所以那個模組
+#    本身 import 得起來 —— 包在 import 外面的 `except ImportError` 是死碼，一次都不會進，
+#    使用者拿到的是 `PDF 生成失敗：No module named 'playwright'`（2026-09-10 polish 抓到）。
+#    NAS 的容器刻意不裝 Playwright（docs/OFFLINE_MASTER_PLAN.md §5 P1：那邊只送已經生成好的檔）。
+PDF_UNAVAILABLE = "產報價單需要主控主機在線（這台沒有產 PDF 的元件）"
+
+
 async def _quotation_pdf_response(q):
     """組資料／渲染／產 PDF 同一個出口：壞在哪一段對使用者都是「PDF 生成失敗」。"""
     from starlette.background import BackgroundTask
-    # 🔴 產 PDF 要 Playwright ＋ Chromium，那只有 master 有（NAS 的容器刻意不裝，見
-    #    docs/OFFLINE_MASTER_PLAN.md §5 P1：那邊只負責送已經生成好的檔）。ImportError
-    #    要回 503 而不是 500 —— 「這台做不到」跟「壞掉了」對使用者是兩件事。
-    try:
-        from services.html_pdf import html_to_pdf, unlink_later
-    except ImportError as exc:
-        raise HTTPException(status_code=503,
-                            detail="產 PDF 需要主控主機在線（請用線上檢視，或等主機開機再下載）") from exc
+    from services.html_pdf import html_to_pdf, unlink_later
     try:
         view, company = await _quotation_view_of(q)
         tmp_pdf = await html_to_pdf(_render_quotation_html(view, company), prefix="quotation_",
                                     footer_html=_pdf_footer(view), margin=PDF_MARGIN)
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise HTTPException(status_code=503, detail=PDF_UNAVAILABLE) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"PDF 生成失敗：{exc}")
     try:                                   # 存一份到報價單資料夾：資料夾不通只記 log，不擋下載；copy 丟執行緒（NAS 慢不卡 loop）
@@ -563,7 +566,12 @@ async def generate_quotation(quotation_id: str, request: Request):
     """
     _check_quotes_auth(request)
     _require_db()
-    record = await generate_quotation_snapshot(quotation_id)
+    try:
+        record = await generate_quotation_snapshot(quotation_id)
+    except (ImportError, ModuleNotFoundError) as exc:
+        # 走 NAS 的 office-api 開這一頁時按下去會到這裡 —— 那台沒有 Playwright。
+        # 回 503 ＋ 人話，不要讓同仁看到 `No module named 'playwright'`。
+        raise HTTPException(status_code=503, detail=PDF_UNAVAILABLE) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="找不到此報價")
     factory = await _get_factory()

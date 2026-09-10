@@ -185,7 +185,15 @@ async function shareLink(btn, rows, host) {
                 // 還沒生成（或生成後又改過）就順手先生成一份再給連結 —— 不是叫他先去按「生成報價單」。
                 // 拿到連結的下一秒就是貼給客戶，那時客戶看到的必須是現在這一版；忘記先按的人不會收到
                 // 任何錯誤，只有客戶會看到舊的或打不開。
-                if (q.pdf_state && q.pdf_state.stale) { await runGenerate(q, btn); regen = true; }
+                // 🔴 生成失敗**不可以**讓複製連結跟著失敗。這台可能產不出 PDF
+                //    （走 NAS 的 office-api 時就沒有 Playwright），而後端的 /share 自己
+                //    是優雅降級的（stale 時 fire 一發背景生成、照樣回 share_url）——
+                //    包在同一個 try 裡等於把後端已經處理好的降級變成硬失敗，
+                //    而「master 關機時報價還能用」正是那條路存在的理由。
+                if (q.pdf_state && q.pdf_state.stale) {
+                    try { await runGenerate(q, btn); regen = true; }
+                    catch (e) { toast('連結可以用，但重新生成失敗：' + e.message, 'err'); }
+                }
                 const r = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(q.id)}/share`, { method: 'POST' });
                 q.share_url = r.share_url;
             }

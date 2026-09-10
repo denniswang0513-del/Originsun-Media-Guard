@@ -427,3 +427,35 @@ def test_office_app_has_the_endpoints_website_must_not():
         assert any(p.startswith(pref) for p in paths), (
             f"office-api 上找不到 {pref} —— router 沒掛成功？"
             f"（main_office 對掛載失敗只印 warning，不會讓容器起不來）")
+
+
+def test_mounting_does_not_strip_the_money_redaction_or_the_login_guard():
+    """🔴 `_mount` 是把 route 物件搬到一個新的 APIRouter 再 include —— **不明顯的風險**是
+    `include_router` 可能不保留 `route_class`（金額抹除）與 route 上的 dependencies（登入守衛）。
+
+    掉了的話 office-api 會對沒有 money_view 的人吐出金額，而且完全靜默：端點都在、
+    回應也是 200，只是多了幾個欄位。這裡拿 master 的 app 當對照組，逐條比對。
+    """
+    import main as master_app
+    import main_office as office_app
+
+    def shape(app):
+        out = {}
+        for r in app.routes:
+            p = getattr(r, "path", "")
+            if p.startswith("/api/v1/crm/"):
+                out[(p, tuple(sorted(getattr(r, "methods", None) or [])))] = (
+                    type(r).__name__,
+                    tuple(sorted(getattr(d.dependency, "__name__", "?")
+                                 for d in getattr(r, "dependencies", []))),
+                )
+        return out
+
+    m, o = shape(master_app.app), shape(office_app.app)
+    common = set(m) & set(o)
+    assert common, "office 上一條 CRM 端點都沒有？那是掛載整個壞掉了"
+    drift = {k: (m[k], o[k]) for k in common if m[k] != o[k]}
+    assert not drift, f"office 與 master 的守衛／route_class 不一致：{drift}"
+    # 反面對照：確認我們真的在檢查有東西的欄位（不是兩邊都空、斷言永遠綠）
+    assert any(cls == "MoneyRedactRoute" for cls, _deps in o.values()), \
+        "office 上的 CRM 端點沒有一條是 MoneyRedactRoute —— 金額抹除整層不見了"

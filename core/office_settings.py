@@ -15,6 +15,13 @@
 `load_settings()` 本來就會把檔案內容跟預設值深度 merge，所以缺的鍵照常拿預設，
 容器那側一行程式都不用改。
 
+🔴 那個目錄（`../code`）是 **website-api 與 office-api 共用的 mount**，而 `config.py`
+   讀的是 `__file__` 旁邊的 `settings.json` —— 所以這份檔**兩個容器都會讀到**，不是只有
+   office-api（檔名與這支的名字容易讓人以為只有它）。清單裡的 `assets_host`／`drive_map`
+   正好是 website-api 現在就在用的東西，從此它們的值會隨每次 `/publish` 從 master 換一次。
+   目前這是我們要的行為（兩邊本來就該跟 master 一致），但**加鍵進來時要記得**：
+   加進來的東西會同時改變對外官網那個容器的行為。
+
 ## 為什麼不是「把整個 settings.json scp 過去」
 
 那裡面有 `jwt_secret`、`database_url`、Google `client_secret`、工時同步 token、

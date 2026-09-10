@@ -5,25 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>發票</title>
-<!-- 發票影像分享頁 /e/{短碼}（免登入，憑證就是網址裡那串碼）。
-     單檔自足、無外部依賴、沒有 build step —— 照 frontend/media-log.html 的骨架，
-     這頁才 serve 得起來（NAS 對外容器只 serve core.public_assets.PAGES 那幾個檔）。
+<!-- 發票影像分享頁 /e/{短碼}（免登入，憑證就是網址裡那串碼）。單檔自足、無外部依賴。
 
-     版面是 frontend/demo/invoice-share.html（owner 2026-09-10 拍板）原樣接線，
-     只拿掉示範用的情境切換與假資料。要改版面先改示範頁再同步過來。
-
-     🔴 欄位是**白名單**：只放「那張發票上本來就印著的」，投影的正本在後端
-        （core/invoice_share.SNAPSHOT_FIELDS ／ NEVER_SHARE，理由見 docs/INVOICE_SHARE_PLAN.md §3.5）。
-        前端只畫後端給的欄位，這裡沒有的不是漏做。
-        🔴 **不要在這個檔裡列出那些不給的欄位叫什麼** —— 這頁是寄給客戶的，
-           原始碼看得到；把我們的內部欄位詞彙抄一份在這裡等於順手告訴對方
-           我們內部在記些什麼。要看清單去讀後端那支。
+     🔴 **這頁是寄給客戶與會計師的，任何人都能檢視原始碼。**
+        不要在這裡寫內部模組名、檔案路徑、部署拓樸、或「哪些欄位我們不給」的清單 ——
+        那些不是漏洞，但也沒有理由當贈品送出去。要看設計決定去讀 docs/ 與後端。
+        前端只畫後端 /meta 給的欄位；這裡沒有的不是漏做。
 
      後端契約：
-       GET /api/v1/crm/public/invoice-file/{token}/meta      → 見下方 render()
-       GET /api/v1/crm/public/invoice-file/{token}/download   → 檔案（attachment）
-     owner 拍板不做內嵌預覽 —— 這條路永遠是 attachment，內嵌執行別人上傳的檔
-     （官網網域上的儲存型 XSS）那個風險因此完全歸零。 -->
+       GET  …/meta       → 發票資訊（見下方 render()）
+       GET  …/download   → 檔案（永遠是 attachment，不做內嵌預覽） -->
 <style>
   *, *::before, *::after { box-sizing:border-box; }
   html, body { margin:0; padding:0; }
@@ -177,13 +168,22 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
+/** 網址解碼，壞字元不丟例外。
+ *  🔴 `decodeURIComponent("%")` 會丟 URIError —— 短碼在信件裡被換行切到、或有人手打時
+ *     就會發生。丟出去的話 load() 第一行就死、fail() 沒機會跑，客戶看到的是**永遠**
+ *     轉不完的「載入中」（所有錯誤畫面裡最糟的一種：他會等，不會回報）。
+ *     解不開就原樣送出去 —— 後端本來就是逐字比對，最多變成「連結已失效」，那句話是對的。 */
+function _decode(v) {
+    try { return decodeURIComponent(v); } catch (_) { return v; }
+}
+
 
 // 短碼在路徑裡（/e/AbCd1234）。?code= 是給「直接開 /invoice-file.html」那條路用的 ——
 // 對外容器把這個檔 serve 在 /invoice-file.html，沒有 fallback 的話那個網址永遠是空頁，
 // 開發與驗證都碰不到它。憑證仍然是那串短碼，後端逐字比對，不因入口不同而放寬。
 function readCode() {
     const m = /^\/e\/([^/?#]+)/.exec(location.pathname);
-    if (m) return decodeURIComponent(m[1]);
+    if (m) return _decode(m[1]);
     return new URLSearchParams(location.search).get("code") || "";
 }
 
@@ -294,6 +294,14 @@ async function load() {
     }
     if (r.status === 404) {
         fail("找不到檔案", "發票檔案不存在，請與我們聯繫。");
+        return;
+    }
+    // 🔴 503 在這支端點是**永久**狀態不是暫時的：這條連結是改版前鑄的、還沒有可顯示的
+    //    內容（後端 has_snapshot 為假）。說成「伺服器忙碌中，請稍後再試」的話，客戶
+    //    （多半是會計師）會照字面一直重試，而且**不會來找我們** —— 這正是這件事一直在
+    //    避免的「錯誤只有客戶看得到」。要講出「這條需要我們重做」。
+    if (r.status === 503) {
+        fail("這條連結需要重新產生", "請與我們聯繫，我們會重新寄一條給您。");
         return;
     }
     if (!r.ok) {

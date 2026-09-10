@@ -23,7 +23,13 @@ function cardLeave(bound) {
     //    （生產的 hr_leave_credits／hr_leave_allocations 都是 0 列），所以每個人看到的
     //    特休與補休都是 0、送出去會被擋在「特休不足」。不標的話同事會以為是壞了。
     //    時數帳匯入完成後把這個徽章與下面那條說明一起拿掉（docs/LEAVE_PLAN.md）。
-    const card = makeCard("My Leave", "我的假勤", WIP_LABEL, "leave");
+    // 🔴 不直接引用 cards.js 的 WIP_LABEL：這七支是**傳統 script**、共用全域詞法環境，
+    //    而 Cloudflare 給 .js 四小時瀏覽器快取 —— 出現「舊 cards.js ＋ 新 cards-hr.js」
+    //    的組合時 `WIP_LABEL is not defined` 會從這裡拋出去，而 shell.js 那串建卡是直線
+    //    呼叫沒有 try/catch，工作台下半頁（零用金、基本資料、週記整區）會一起不見。
+    //    徽章的判定在 cards.js 只比值相等，所以退回字面值就夠。
+    const card = makeCard("My Leave", "我的假勤",
+                          typeof WIP_LABEL !== "undefined" ? WIP_LABEL : "開發中", "leave");
     const body = card.querySelector(".card-body");
     if (!bound) { body.innerHTML = `<div class="empty">尚未綁定人員檔案</div>`; return card; }
     body.innerHTML = `<div class="empty">載入中…</div>`;
