@@ -54,6 +54,8 @@ async def create_backup_job(req: BackupRequest):
 
 #: 安全閥，不是篩選：一次回幾百筆是正常的（清單刻意不篩狀態），
 #: 但也不該讓某天資料庫裡多出幾萬筆時把整包吐給每一台 agent。
+#: ⚠️ 它切的是**回應**，不是 DB 讀取 —— `list_options` 還是會把整張表撈進來排序去重。
+#: 真的長到幾萬筆時要處理的是那一支，不是在這裡加大數字。
 _PROJECTION_LIMIT = 2000
 
 
@@ -66,9 +68,10 @@ def _root_view(project) -> dict:
     return {
         "id": project.id,
         "name": project.name or "",
-        "local_root": to_local_path(project.backup_local_root or ""),
-        "nas_root": to_local_path(project.backup_nas_root or ""),
-        "proxy_root": to_local_path(project.backup_proxy_root or ""),
+        # 走 _WRITE_MAP 而不是手抄三行：多一根時兩支投影要一起長，漏掉的症狀是
+        # 「清單裡看得到那一根、選下去之後單筆查詢沒有它」，而前端是合併不是取代
+        # （bkSaveRootToProject），所以畫面完全正常、只是那一根永遠不會更新。
+        **{field: to_local_path(getattr(project, col) or "") for field, col in _WRITE_MAP},
     }
 
 
@@ -105,7 +108,7 @@ async def _factory():
 
 
 @router.get("/api/v1/projects/backup-roots")
-async def list_backup_roots(request: Request, q: str = "", limit: int = 0):
+async def list_backup_roots(request: Request):
     """備份頁的專案選擇器＝**跟專案工時同一份清單**（owner 2026-09-11）。
 
     列法與排序都在 `services/project_picker.list_options`：不篩狀態、母私帳只列一個、
@@ -113,12 +116,12 @@ async def list_backup_roots(request: Request, q: str = "", limit: int = 0):
     owner 的原話（「不篩，連專案工時也不篩」）—— 備份最常發生在案子結束之後，
     篩掉結案的案等於真的要用的時候剛好選不到。
 
-    `q`／`limit` 留著不刪：送 `limit=200` 照樣拿得到前 200 筆、形狀也還是舊的
-    js 認得的（多出來的欄位它不看）。不帶 `limit`＝整份。
-    ⚠️ 但**別把它當成 Cloudflare 那一輪「新 html ＋ 舊 js」的相容殼**：新 html
-    已經沒有 `<select id="bk_project_sel">`，舊的 `loadBackupProjects()` 第一行
-    `if (!sel) return;` 就走了，根本不會打這支。那一輪（最多 4 小時）備份頁的
-    「綁定專案」整塊不出現、三根維持手動輸入 —— 不會壞，只是沒有。
+    回整份（篩選是前端浮層的事）。曾經有 `q`／`limit` 兩個參數，2026-09-11 /polish
+    刪掉：全 repo 沒有任何呼叫端送過它們 —— Cloudflare 那一輪「新 html ＋ 舊 js」也不會，
+    因為新 html 已經沒有 `<select id="bk_project_sel">`，舊的 `loadBackupProjects()`
+    第一行 `if (!sel) return;` 就走了、根本不打這支（那一輪備份頁的「綁定專案」整塊
+    不出現、三根維持手動輸入 —— 不會壞，只是沒有）。FastAPI 對多送的 query 參數是
+    忽略，所以就算真有舊呼叫端也不會 422。
     """
     check_lan_or_logged_in(request)
     factory = await _factory()
@@ -134,12 +137,10 @@ async def list_backup_roots(request: Request, q: str = "", limit: int = 0):
         # （TestPickerProjection.test_money_never_leaks 釘著 —— 單筆那支是 TestRootViewProjection）。要往這支加欄位之前，
         # 先回來讀這一段 —— 加了任何金額欄，這個例外就不成立了。
         async with factory() as session:
-            opts = await list_options(session, extra=tuple(col for _f, col in _WRITE_MAP))
-        kw = (q or "").strip().lower()
-        if kw:
-            opts = [o for o in opts if kw in f"{o.get('label') or ''} {o.get('name') or ''}".lower()]
-        n = min(int(limit), _PROJECTION_LIMIT) if limit and int(limit) > 0 else _PROJECTION_LIMIT
-        return {"status": "ok", "projects": [_picker_view(o) for o in opts[:n]]}
+            # prefer="parent"：母私帳成對時留母帳那筆（三根設在哪一本帳上的規則，見 list_options）
+            opts = await list_options(session, prefer="parent",
+                                      extra=tuple(col for _f, col in _WRITE_MAP))
+        return {"status": "ok", "projects": [_picker_view(o) for o in opts[:_PROJECTION_LIMIT]]}
     except Exception as e:
         # 讀不到專案清單不是派工的阻礙 —— 回 db_offline 讓前端退回手動輸入
         return {"status": "db_offline", "projects": [], "detail": str(e)[:200]}

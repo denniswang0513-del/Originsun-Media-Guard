@@ -415,6 +415,13 @@ def test_every_project_enumeration_decides_about_mine():
         # （tests/unit/test_project_backup_roots.py 的 test_money_never_leaks 釘住）。
         # 要往那支加任何金額欄之前，先回來讀這一段：加了，這個豁免就不成立了。
         "routers/api_backup.py",
+        # 上面兩支（工時下拉／備份選擇器）2026-09-11 起共用的清單規則。它**列出全部
+        # 專案含私帳案**、刻意不對可見性表態，由兩個呼叫端各自負責：工時的對映只認私帳，
+        # 備份是 owner 拍板的局部例外（前提是那支端點不帶錢）。
+        # 🔴 順帶記著：這支的查詢寫成 `select(*[getattr(CrmProject, c) for c in cols])`，
+        # 下面那條 `select(\s*CrmProject[.,)]` 的掃描**看不到它** —— 所以它在這裡是
+        # 明文豁免，不是「掃過了沒問題」。用同樣寫法的新檔也一樣掃不到，要自己進來登記。
+        "services/project_picker.py",
     }
     hits = []
     for rel in ("routers", "services"):

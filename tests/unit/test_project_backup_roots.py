@@ -10,7 +10,9 @@ import asyncio
 import types
 
 from core.drive_map import to_canonical
-from tests.unit._srcscan import repo_src
+import pytest
+
+from tests.unit._srcscan import js_code_only, repo_src
 from routers.api_backup import _root_view
 from routers.crm.projects import BACKUP_ROOT_FIELDS, normalize_backup_roots
 
@@ -293,11 +295,20 @@ class _FakeQuerySession:
         return _Rows(self._answers.pop(0))
 
 
+_ROOT_COLS = ("backup_local_root", "backup_nas_root", "backup_proxy_root")
+
+
 def _p(pid, name, *, status="製作", entity="parent", mine_link_id=None,
        source_project_id=None, client="客", start=None, updated=None, extra=()):
+    """一列假的查詢結果。**用具名欄位**（真的 SQLAlchemy Row 也是這樣讀）——
+    這支曾經回 tuple、規則靠 `r[7]`／`r[8]` 讀，在 select 中間插一欄就會靜默選錯那一筆。"""
+    from collections import namedtuple
     from datetime import date
-    return (pid, name, client, start or date(2025, 3, 1), None, date(2025, 1, 1),
-            status, entity, mine_link_id, source_project_id, updated, *extra)
+    fields = ("id", "name", "start_date", "shoot_date", "created_at", "status",
+              "entity", "mine_link_id", "source_project_id", "updated_at", "client")
+    Row = namedtuple("Row", fields + _ROOT_COLS[:len(extra)])
+    return Row(pid, name, start or date(2025, 3, 1), None, date(2025, 1, 1), status,
+               entity, mine_link_id, source_project_id, updated, client, *extra)
 
 
 def _options(projects, last_ts=(), **kw):
@@ -332,31 +343,31 @@ class TestSharedProjectList:
         設定的人打不開）。一律留私帳的話備份頁只選得到那個空殼分身：畫面說
         「還沒設定」、`_apply_project_roots` 用那個 id 反查也讀不到，於是靜默
         退回手動填的路徑 —— 綁定對這個案等於失效，而且沒有任何徵兆。"""
-        cols = ("backup_local_root", "backup_nas_root", "backup_proxy_root")
+        cols = _ROOT_COLS
         pair = [_p("m", "某案", entity="parent", mine_link_id="s",
                    extra=(NAS + r"\x", "", "")),
                 _p("s", "某案", entity="mine", source_project_id="m",
                    extra=("", None, ""))]
-        assert [o["id"] for o in _options(pair, extra=cols)] == ["m"]
+        assert [o["id"] for o in _options(pair, extra=cols, prefer="parent")] == ["m"]
         # 沒點名 extra（＝工時那條路）規則原封不動：留私帳那筆
         assert [o["id"] for o in _options(pair)] == ["s"]
 
     def test_the_mine_row_still_wins_when_it_has_roots_of_its_own(self):
-        cols = ("backup_local_root", "backup_nas_root", "backup_proxy_root")
+        cols = _ROOT_COLS
         pair = [_p("m", "某案", entity="parent", mine_link_id="s",
                    extra=(NAS + r"\x", "", "")),
                 _p("s", "某案", entity="mine", source_project_id="m",
                    extra=(NAS + r"\y", "", ""))]
-        assert [o["id"] for o in _options(pair, extra=cols)] == ["s"]
+        assert [o["id"] for o in _options(pair, extra=cols, prefer="parent")] == ["s"]
 
     def test_neither_side_has_roots_yet_keeps_the_parent_row(self):
         """🔴 **這是目前生產每一個案的狀態**（三根功能剛上，一個案都還沒設）。
         留私帳的話第一次按「儲存到專案」就寫進那筆沒人看得到的，之後母帳的專案頁
         永遠顯示「還沒設定」、有人在那邊補填的值會被靜默忽略（私帳一有值就換它勝出）。"""
-        cols = ("backup_local_root", "backup_nas_root", "backup_proxy_root")
+        cols = _ROOT_COLS
         pair = [_p("m", "某案", entity="parent", mine_link_id="s", extra=("", "", "")),
                 _p("s", "某案", entity="mine", source_project_id="m", extra=("", "", ""))]
-        assert [o["id"] for o in _options(pair, extra=cols)] == ["m"]
+        assert [o["id"] for o in _options(pair, extra=cols, prefer="parent")] == ["m"]
         # 工時那條路（沒點名 extra）不受影響：照樣留私帳，對映只認它
         assert [o["id"] for o in _options(pair)] == ["s"]
 
@@ -379,8 +390,7 @@ class TestSharedProjectList:
 
     def test_extra_columns_come_through_untouched(self):
         """備份頁要三根；`extra` 是呼叫端點名的白名單，值不加工。"""
-        opts = _options([_p("a", "某案", extra=(NAS + r"\x", None, ""))],
-                        extra=("backup_local_root", "backup_nas_root", "backup_proxy_root"))
+        opts = _options([_p("a", "某案", extra=(NAS + r"\x", None, ""))], extra=_ROOT_COLS)
         assert opts[0]["backup_local_root"] == NAS + r"\x"
         assert opts[0]["backup_nas_root"] is None
 
@@ -441,31 +451,31 @@ def test_backup_page_uses_the_shared_typing_popup():
     assert "dataset.pid" in js, "綁的是 id，不是輸入框裡那串字"
 
 
-class TestListEndpointFiltering:
-    """`/backup-roots` 的 `q`／`limit`（特徵測試：把現在的行為釘住）。
+class TestListEndpoint:
+    """`/backup-roots` 的回應（特徵測試：把現在的行為釘住）。"""
 
-    這兩個參數 2026-09-11 起改成在清單**之後**做（規則本身在 project_picker）——
-    留著是為了 Cloudflare 那一輪「新 html ＋ 舊 js」，舊分頁會送 `limit=200`。
-    """
-
-    def _call(self, monkeypatch, opts, *, boom=False, offline=False, **kw):
+    def _call(self, opts, *, boom=False, offline=False):
         import routers.api_backup as ab
         import services.project_picker as picker
 
-        monkeypatch.setattr(ab, "check_lan_or_logged_in", lambda _r: None)
+        self._mp.setattr(ab, "check_lan_or_logged_in", lambda _r: None)
 
-        async def _fake_options(session, extra=()):
+        async def _fake_options(session, extra=(), prefer="mine"):
             if boom:
                 raise RuntimeError("DB 斷了")
             return [dict(o) for o in opts]
 
-        monkeypatch.setattr(picker, "list_options", _fake_options)
+        self._mp.setattr(picker, "list_options", _fake_options)
 
         async def _factory():
             return None if offline else (lambda: _FakeSession(None))
 
-        monkeypatch.setattr(ab, "_factory", _factory)
-        return asyncio.run(ab.list_backup_roots(None, **kw))
+        self._mp.setattr(ab, "_factory", _factory)
+        return asyncio.run(ab.list_backup_roots(None))
+
+    @pytest.fixture(autouse=True)
+    def _patch(self, monkeypatch):
+        self._mp = monkeypatch
 
     def _opts(self, n):
         return [{"id": f"p{i}", "name": f"案{i}", "client": "源日", "year": "2026",
@@ -473,40 +483,29 @@ class TestListEndpointFiltering:
                  "backup_local_root": "", "backup_nas_root": "", "backup_proxy_root": ""}
                 for i in range(n)]
 
-    def test_no_limit_means_the_whole_list(self, monkeypatch):
-        """浮層自己在前端篩，所以清單要是完整的（截斷＝有些案永遠選不到）。"""
-        out = self._call(monkeypatch, self._opts(300))
+    def test_it_returns_the_whole_list(self):
+        """浮層自己在前端篩，所以清單要是完整的（截斷＝有些案永遠選不到）。
+        `q`／`limit` 2026-09-11 拿掉：全 repo 沒有呼叫端送過，留著只是把沒人跑的分支釘成規格。"""
+        import inspect
+
+        from routers.api_backup import list_backup_roots
+        assert set(inspect.signature(list_backup_roots).parameters) == {"request"}
+        out = self._call(self._opts(300))
         assert out["status"] == "ok" and len(out["projects"]) == 300
 
-    def test_old_cached_page_asking_for_200_still_works(self, monkeypatch):
-        out = self._call(monkeypatch, self._opts(300), limit=200)
-        assert len(out["projects"]) == 200
-        assert set(out["projects"][0]) >= {"id", "name", "local_root"}, "舊 js 認得的欄位還在"
-
-    def test_limit_is_clamped_to_the_safety_valve(self, monkeypatch):
+    def test_the_safety_valve_still_caps_the_payload(self):
         from routers.api_backup import _PROJECTION_LIMIT
         assert _PROJECTION_LIMIT >= 646, "生產 2026-09-11 有 646 案，別再退回會截斷的數字"
-        out = self._call(monkeypatch, self._opts(_PROJECTION_LIMIT + 100), limit=999999)
+        out = self._call(self._opts(_PROJECTION_LIMIT + 100))
         assert len(out["projects"]) == _PROJECTION_LIMIT
 
-    def test_q_matches_name_and_label_case_insensitively(self, monkeypatch):
-        opts = self._opts(2)
-        opts[0]["name"] = "ZZ 測試"
-        opts[0]["label"] = "2026 源日 ZZ 測試"
-        assert [p["name"] for p in self._call(monkeypatch, opts, q="zz")["projects"]] == ["ZZ 測試"]
-        assert [p["name"] for p in self._call(monkeypatch, opts, q="源日")["projects"]] == ["ZZ 測試", "案1"]
-
-    def test_q_with_no_hit_is_an_empty_list_not_an_error(self, monkeypatch):
-        out = self._call(monkeypatch, self._opts(2), q="不存在的案")
-        assert out["status"] == "ok" and out["projects"] == []
-
     def test_db_offline_returns_200_and_never_blocks_dispatch(self, monkeypatch):
-        out = self._call(monkeypatch, [], offline=True)
+        out = self._call([], offline=True)
         assert out == {"status": "db_offline", "projects": []}
 
     def test_a_query_blowing_up_degrades_instead_of_500(self, monkeypatch):
         """讀不到專案清單不是派工的阻礙 —— 前端據此退回手動輸入三根。"""
-        out = self._call(monkeypatch, [], boom=True)
+        out = self._call([], boom=True)
         assert out["status"] == "db_offline" and out["projects"] == []
         assert "DB 斷了" in out["detail"]
 
@@ -544,10 +543,11 @@ def test_saving_a_root_back_merges_into_the_cached_row():
     assert "_bkProjects[i] = { ..._bkProjects[i], ...data.project }" in js
 
 
-def test_the_open_popup_is_refreshed_when_the_list_lands():
-    """🔴 浮層抓的是**打開當下**那一份（`_pop.rows` 快照，而 `_bkProjects` 是整個換掉）。
-    人搶在 fetch 回來前就點進去（機隊 agent 打 NAS Postgres 慢一兩秒很正常），浮層會停在
-    「進行中（0）」，之後連打字重繪都還是那份空的 —— 看起來就是「一個案都沒有」。"""
-    from tests.unit._srcscan import js_func_body
-    fn = js_func_body(repo_src("frontend/tabs/backup/backup.js"), "async function loadBackupProjects(")
-    assert "closeProjectPop()" in fn and "'focusin'" in fn
+def test_the_picker_waits_for_the_list_instead_of_snapshotting_an_empty_one():
+    """🔴 `attachProjectPop` 的 `options` 交**promise**，不是 `_bkProjects` 那個當下還空著的
+    陣列：浮層 `_open` 拿的是打開當下那一份，人搶在 fetch 回來前點進去就會停在「進行中（0）」，
+    而且那份空快照連打字重繪也換不掉（看起來就是「一個案都沒有」）。工時、週記、零用金三個
+    宿主都是交 promise —— 這是元件契約本來就備好的那一半。"""
+    js = js_code_only(repo_src("frontend/tabs/backup/backup.js"))
+    assert "await _bkProjectsReady" in js
+    assert "options: () => _bkProjects" not in js, "同步陣列＝那個 race 又回來了"

@@ -1,6 +1,6 @@
 import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop, renderHostCheckboxes, collectSelectedHosts, todayStamp, authFetch, esc } from '../../js/shared/utils.js';
 import { loadReportHistory } from '../../js/shared/report-history.js';
-import { attachProjectPop, closeProjectPop, isProjectPopOpen } from '../../js/shared/project-pop.js';
+import { attachProjectPop } from '../../js/shared/project-pop.js';
 
 let sourceIndex = 0;
 
@@ -68,8 +68,13 @@ const BK_ROOT_LABELS = {
 
 let _bkProjects = [];
 let _bkProjectsUnavailable = false;
+// 這一輪的抓取。浮層 await 它（見 initBackupTab 那段）——**不要**改成把 _bkProjects
+// 直接交給浮層：那是打開當下的快照，清單還沒到手就點進去會停在「一個案都沒有」。
+let _bkProjectsReady = null;
 // 正常狀態那句 placeholder 的正本在 html 上（讀不到清單時才換掉，之後換得回來）
 let _bkOkPlaceholder = '';
+// 讀不到清單時的說法只有一句（框裡的 placeholder 與下面的提示各印一次，別再分岔）
+const BK_NO_LIST = '目前讀不到專案清單 —— 三個根目錄請手動填寫，不影響派工。';
 // 剛存回專案 / 被 skip 的那一根要顯示的一次性小字：{ [rootId]: { msg, tone } }
 let _bkRootFlash = {};
 
@@ -167,7 +172,7 @@ function bkSyncProjectRoots({ fill = true } = {}) {
     if (!proj) {
         if (_bkProjectsUnavailable) {
             hint.className = 'text-[11px] text-amber-400 mt-1';
-            hint.textContent = '目前讀不到專案清單，三個根目錄請手動填寫 —— 不影響派工。';
+            hint.textContent = BK_NO_LIST;
         } else {
             hint.className = 'text-[11px] text-gray-500 mt-1 hidden';
             hint.textContent = '';
@@ -289,23 +294,10 @@ async function loadBackupProjects() {
     // 沒有下拉要重建：浮層每次打開都跟 _bkProjects 要一次（attachProjectPop 的 cfg.options）。
     inp.disabled = _bkProjectsUnavailable;
     inp.classList.toggle('opacity-50', _bkProjectsUnavailable);
-    inp.placeholder = _bkProjectsUnavailable
-        ? '目前讀不到專案清單 —— 三個路徑請手動填（不影響派工）'
-        : _bkOkPlaceholder;
-
-    // 🔴 浮層抓的是**打開當下**那一份（`_pop.rows` 是快照，而這裡是把 `_bkProjects`
-    // 整個換掉、不是原地改）—— 人搶在這支 fetch 回來之前就點進去的話（機隊 agent
-    // 打 NAS Postgres 慢個一兩秒很正常），浮層會停在「進行中（0）」，之後連打字重繪
-    // 也還是那份空的，看起來就是「一個案都沒有」。清單到手時把開著的那個重開一次。
-    // 🔴 條件是「浮層真的開著」（isProjectPopOpen），不是「焦點還在這格」——
-    // 按 Esc 會收掉浮層但焦點留在原地，只看 activeElement 的話等於把使用者剛剛
-    // 親手關掉的東西彈回來蓋住下面的表單。
-    if (!inp.disabled && document.activeElement === inp && isProjectPopOpen(inp)) {
-        closeProjectPop();
-        inp.dispatchEvent(new Event('focusin', { bubbles: true }));   // 委派在 bk_project_row 上，會用新的清單重開
-    }
+    inp.placeholder = _bkProjectsUnavailable ? BK_NO_LIST : _bkOkPlaceholder;
 
     bkSyncProjectRoots({ fill: true });
+    return _bkProjects;
 }
 
 /** 解除綁定：三個 input 恢復可編輯，**值保留**。 */
@@ -702,24 +694,23 @@ export function initBackupTab() {
     toggleReportOptions();
 
     // 綁定 CRM 專案：載入可選專案 + 選了就鎖住三個根目錄並帶入
-    loadBackupProjects();
+    // 🔴 浮層拿到的是**這一輪抓取的 promise**，不是 `_bkProjects` 那個當下還空著的陣列 ——
+    // `attachProjectPop` 的契約本來就收 `Promise<rows>`（工時、週記、零用金三個宿主都是
+    // 這樣接的），`_open` 會 await 它、await 完再確認焦點還在才畫。交同步陣列的話，人搶在
+    // fetch 回來之前點進去就會看到「進行中（0）」，而且那份空快照連打字重繪也換不掉。
+    _bkProjectsReady = loadBackupProjects();
     const _projRow = document.getElementById('bk_project_row');
-    attachProjectPop(_projRow, { options: () => _bkProjects });
-    const _onProjectChanged = () => {
+    attachProjectPop(_projRow, { options: async () => { await _bkProjectsReady; return _bkProjects; } });
+    // 🔴 掛在**外層那個 div**、而且要在 attachProjectPop 之後掛：浮層清 data-pid 的那支
+    // 監聽器是委派在這個 div 上的（冒泡階段），掛在 input 自己身上的屬於目標階段、**會先跑**
+    // —— 那時 pid 還在，等於用上一個案又 fill 一次然後鎖回去，而 pid 隨即被清掉、不會再有
+    // 事件把它解開（症狀：把案名整串選起來刪掉，三個根目錄就卡在唯讀）。同一個 div 上的
+    // 監聽器照註冊順序跑，所以這行必須排在 attachProjectPop 後面。
+    // 選案與手打兩條路都必定派一個 input，而且到達這裡時 pid 已經是最終狀態，一個就夠。
+    _projRow?.addEventListener('input', () => {
         _bkRootFlash = {};              // 換案了：上一案的「已存回／沒寫入」小字要收掉
         bkSyncProjectRoots({ fill: true });
-    };
-    // 選到一個案＝浮層先派 input（帶 _fromPick）再派 change；人自己打字改掉案名時
-    // 浮層會清掉 data-pid，那時只有 input 會來 —— 兩個都聽才不會停在「還鎖著」。
-    //
-    // 🔴 掛在**外層那個 div**、而且要在 attachProjectPop 之後掛：浮層清 data-pid 的
-    // 那支監聽器是委派在這個 div 上的（冒泡階段），掛在 input 自己身上的監聽器屬於
-    // 目標階段、**會先跑** —— 那時 pid 還在，等於用上一個案又 fill 一次然後鎖回去，
-    // 而 pid 隨即被清掉、不會再有事件把它解開。症狀：把案名整串選起來刪掉（只有一個
-    // input 事件），三個根目錄就卡在唯讀、提示還指著剛剛那個案。同一個 div 上的監聽器
-    // 照註冊順序跑，所以這兩行必須排在 attachProjectPop 後面。
-    _projRow?.addEventListener('change', _onProjectChanged);
-    _projRow?.addEventListener('input', (ev) => { if (!ev._fromPick) _onProjectChanged(); });
+    });
 
     // 路徑書籤：載入清單 + 選了即套用
     loadBookmarks();

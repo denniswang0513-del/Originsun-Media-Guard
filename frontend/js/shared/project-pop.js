@@ -29,11 +29,6 @@ export function closeProjectPop() {
     if (_pop) { _pop.el.remove(); _pop = null; }
 }
 
-/** 浮層現在開著嗎（給了 input 就問「開的是不是那一格」）。
- * 宿主要重開浮層之前用它判斷 —— **焦點還在格子裡不等於浮層開著**：按 Esc 會收掉浮層
- * 但焦點留在原地，那時再重開等於把使用者剛剛親手關掉的東西彈回來。 */
-export function isProjectPopOpen(input) { return !!_pop && (!input || _pop.input === input); }
-
 function _split(rows, q, showClosed) {
     const needle = (q || '').trim().toLowerCase();
     const hit = p => !needle || `${p.label || ''} ${p.name || ''}`.toLowerCase().includes(needle);
