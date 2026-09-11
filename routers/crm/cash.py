@@ -970,9 +970,13 @@ async def payables_summary(request: Request, month: str = Query(""),
     filter_all = (not month) or month == "all"
 
     async with factory() as session:
+        # 🔴 這裡曾經是 SQL 的 `outerjoin(CrmStaff, CrmStaff.name == payee_name)`。
+        # 那條 join 有兩個毛病：名字打得不一樣就撈不到（生產有 8 個字串對不到，含
+        # 「志廷」「停車費 史丹」），而人員檔剛好同名時會回兩列、讓同一筆請款重複。
+        # 現在改成：把人員撈進來，用 core.staff_alias 的三條規則對（姓名／代稱／
+        # 收款人那段字包含某個代稱），**沒有模糊比對** —— 猜錯一次就是匯錯人。
         query = (
-            select(CrmPaymentRequest, CrmStaff.id_number, CrmStaff.bank_name, CrmStaff.bank_account)
-            .outerjoin(CrmStaff, CrmStaff.name == CrmPaymentRequest.payee_name)
+            select(CrmPaymentRequest)
             .where(or_(CrmPaymentRequest.is_advance == 0, CrmPaymentRequest.is_advance.is_(None)))
             .where(CrmPaymentRequest.entity == ent)
             .order_by(CrmPaymentRequest.request_date)
@@ -1004,7 +1008,19 @@ async def payables_summary(request: Request, month: str = Query(""),
             # 預設：應付款（含舊資料的「未付款」）
             query = query.where(CrmPaymentRequest.payment_status.in_(["應付款", "未付款"]))
 
-        rows = (await session.execute(query)).all()
+        pays = (await session.execute(query)).scalars().all()
+        staff_rows = (await session.execute(
+            select(CrmStaff.id, CrmStaff.name, CrmStaff.alias,
+                   CrmStaff.id_number, CrmStaff.bank_name, CrmStaff.bank_account))).all()
+
+    # 收款人那段字 → 人員（規則在 core/staff_alias，純函式有測試）
+    from core.staff_alias import build_index, resolve as _who
+    by_id = {r[0]: r for r in staff_rows}
+    index = build_index([(r[0], r[1], r[2]) for r in staff_rows])
+    rows = []
+    for p in pays:
+        st = by_id.get(_who(p.payee_name, index))
+        rows.append((p, st[3] if st else None, st[4] if st else None, st[5] if st else None))
 
     # 分組聚合是純邏輯，抽在 core/crm_logic.py（有單元測試）
     from core.crm_logic import group_payables

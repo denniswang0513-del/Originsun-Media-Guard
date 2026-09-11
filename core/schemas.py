@@ -612,11 +612,8 @@ class ClientPayload(BaseModel):
 
 
 class PayoutCreate(BaseModel):
-    """匯款通知：把出納勾的那幾筆綁成一次匯款（owner 2026-09-11）。
-
-    `payment_ids` 是**他勾的**那幾筆，不是「這個月的全部」—— 部分匯款、補匯都是常態。
-    `paid_date` 沒帶就用今天（伺服器的台北日期）。
-    """
+    """匯款通知：出納**勾的**那幾筆綁成一次匯款（不是「這個月的全部」——
+    部分匯款、補匯都是常態）。paid_date 沒帶＝今天。owner 2026-09-11。"""
     payment_ids: List[str] = []
     paid_date: str = ""
     entity: str = ""
@@ -765,6 +762,9 @@ class StaffPayload(BaseModel):
     phone: str = ""
     email: str = ""
     id_number: str = ""
+    # 代稱（綽號／常打的寫法）。🔴 Optional 不是 str=""：舊分頁的 PUT 不帶這欄，
+    # 空字串預設會把別人剛填的洗掉（CLAUDE.md「加新欄位一律 Optional」）。
+    alias: Optional[str] = None
     address: str = ""
     bank_name: str = ""
     bank_account: str = ""

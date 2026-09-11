@@ -61,6 +61,7 @@ def _to_staff_dict(s) -> dict:
         "id": s.id, "name": s.name, "role": s.role or "",
         "daily_rate": s.daily_rate, "hourly_rate": s.hourly_rate,
         "phone": s.phone or "", "email": s.email or "",
+        "alias": s.alias or "",
         "id_number": s.id_number or "", "address": s.address or "",
         "bank_name": s.bank_name or "",
         "bank_account": s.bank_account or "", "portfolio_url": s.portfolio_url or "",

@@ -258,6 +258,11 @@ class CrmStaff(Base):
     hourly_rate = Column(Integer, nullable=False, default=0)    # 時薪
     phone = Column(String(32), nullable=True)
     email = Column(String(128), nullable=True)
+    # 代稱（owner 2026-09-11）：綽號與常打的寫法，用頓號／逗號／換行分隔。
+    # 用途只有一個 —— 帳務那邊的「收款人」是一格自由文字（有人打綽號、有人把用途和
+    # 人名寫在一起），對不到人就沒有銀行帳號，同一個人還會被拆成好幾列分好幾次匯。
+    # 🔴 這一格會決定錢匯給誰，填錯＝匯錯人，所以一律人填、系統不猜。
+    alias = Column(Text, nullable=True)
     id_number = Column(String(16), nullable=True)               # 身分證字號
     address = Column(String(255), nullable=True)                # 住址（勞報用）
     bank_name = Column(String(64), nullable=True)

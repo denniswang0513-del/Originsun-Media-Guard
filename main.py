@@ -717,6 +717,8 @@ async def _on_startup():
                         # 匯款通知（owner 2026-09-11）：這一筆屬於哪一次匯款。
                         # crm_payouts 新表由 create_all 建，這裡只補舊庫的欄位。
                         ("crm_payment_requests", "payout_id", "VARCHAR(32)"),
+                        # 人員代稱（owner 2026-09-11）：綽號 → 人，帳務那邊靠它對到帳號
+                        ("crm_staff", "alias", "TEXT"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:
