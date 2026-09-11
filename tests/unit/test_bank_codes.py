@@ -1,0 +1,82 @@
+# -*- coding: utf-8 -*-
+"""金融機構代號表（owner 2026-09-11：「可以代碼自動帶銀行，或銀行自動帶代碼」）。
+
+出納在網銀填的是兩格（三碼代號、帳號），而人員檔只有一格 bank_name，
+人各自打成四種寫法。這支表是唯一的翻譯規則——**不准再用切字串的方式拆**。
+"""
+from core.bank_codes import BANKS, by_code, normalize_name, options, resolve
+
+
+class TestResolveRealWorldSpellings:
+    """生產資料 2026-09-11 實際出現的寫法，一個都不能漏。"""
+
+    def test_every_spelling_of_the_same_bank_lands_on_one_code(self):
+        for text in ("中國信託(822)", "中國信託（822）", "中國信託 822", "中信（822)", "中信", "中國信託"):
+            assert resolve(text)[0] == "822", text
+
+    def test_the_eleven_banks_actually_in_production(self):
+        """11 家是從生產庫清點出來的；這條紅了代表表被改瘦了。"""
+        for text, code in (("合作金庫", "006"), ("第一銀行", "007"), ("華南商銀", "008"),
+                           ("華南銀行", "008"), ("上海銀行", "011"), ("台北富邦", "012"),
+                           ("富邦", "012"), ("國泰世華", "013"), ("郵局", "700"),
+                           ("玉山", "808"), ("玉山銀行", "808"), ("台新", "812"),
+                           ("連線商業銀行", "824")):
+            assert resolve(text)[0] == code, text
+
+    def test_code_wins_over_the_name(self):
+        """人打的名字可能是簡稱或舊名，三碼才是銀行認的東西。"""
+        assert resolve("玉山銀行(822)")[0] == "822"
+
+    def test_full_width_and_half_width_mixed(self):
+        """`中信（822)` —— 左全形右半形，生產資料裡真的有這一筆。"""
+        assert resolve("中信（822)") == ("822", "中國信託商業銀行")
+
+
+class TestUnknownPassesThrough:
+    """表裡沒有的東西**原樣放行** —— 不能因為沒收錄就讓畫面變空白。"""
+
+    def test_unknown_name_keeps_what_the_person_typed(self):
+        assert resolve("某某農會信用部") == (None, "某某農會信用部")
+
+    def test_unknown_code_keeps_the_string(self):
+        code, name = resolve("999 沒這家")
+        assert code is None and "沒這家" in name
+
+    def test_blank(self):
+        assert resolve("") == (None, "")
+        assert resolve(None) == (None, "")
+
+    def test_by_code_unknown_is_empty_not_none(self):
+        assert by_code("999") == "" and by_code("") == ""
+
+
+class TestNormalizeName:
+    def test_strips_code_brackets_and_spaces(self):
+        assert normalize_name("中國信託（822）") == "中國信託"
+        assert normalize_name("台北富邦 012") == "台北富邦"
+
+    def test_account_digits_are_not_mistaken_for_a_code(self):
+        """帳號是 11–16 碼，不該被 `\\d{3}` 咬出一段來當代號。"""
+        assert resolve("342168993550")[0] is None
+
+
+class TestTableHygiene:
+    def test_every_alias_points_at_a_real_code(self):
+        from core.bank_codes import ALIASES
+        bad = {a: c for a, c in ALIASES.items() if c not in BANKS}
+        assert not bad, f"別名指向表裡沒有的代號：{bad}"
+
+    def test_codes_are_three_digits(self):
+        assert all(len(c) == 3 and c.isdigit() for c in BANKS)
+
+    def test_options_are_sorted_and_shaped_for_a_dropdown(self):
+        opts = options()
+        assert [o["code"] for o in opts] == sorted(BANKS)
+        assert all(set(o) == {"code", "name"} and o["name"] for o in opts)
+
+    def test_it_stays_pure(self):
+        """無 I/O：這支要能在任何一台 agent 上直接 import（含 DB 斷線時）。"""
+        from tests.unit._srcscan import code_only, repo_src
+        src = code_only(repo_src("core/bank_codes.py"))
+        for forbidden in ("import requests", "open(", "session", "settings"):
+            assert forbidden not in src, forbidden
