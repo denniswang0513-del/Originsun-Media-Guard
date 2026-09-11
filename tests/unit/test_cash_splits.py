@@ -13,8 +13,7 @@ import pytest
 
 from core.crm_logic import advance_open_amount, split_amount_error, split_side
 from services.finance_statements import explode_cash_splits
-from tests.unit._srcscan import (code_only, flow_body, func_body, js_code_only,
-                                 js_func_body, migration_sql, repo_src)
+from tests.unit._srcscan import (code_only, flow_body, func_body, js_code_only, js_func_body, migration_sql, repo_src, schemas_src)
 
 SPLITS = "routers/crm/cash_splits.py"
 CASH = "routers/crm/cash.py"
@@ -404,7 +403,7 @@ def test_splits_are_exclusive_with_other_row_intents_at_the_schema():
     """🔴 拆項列的發票/請款/匯費/源日請款要在 **schema** 擋（422），不能讓
     寫入端靜默跳過 —— 使用者在預覽勾好的東西無聲消失，正好發生在他特地去拆
     的那種複雜列上。前端的讓位清單要跟互斥集一致。"""
-    sch = repo_src("core/schemas.py")
+    sch = schemas_src()
     assert "_splits_are_exclusive" in sch and "petty_claim" in         func_body(sch, "def _splits_are_exclusive(")
     js = js_code_only(repo_src("frontend/tabs/finance/subviews/recon.js"))
     for cleared in ("r.payments = []", "r.payment_fee = null",

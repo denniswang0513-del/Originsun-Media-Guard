@@ -12,7 +12,7 @@ build step），由這裡逐值比對。
 """
 import re
 
-from tests.unit._srcscan import repo_src
+from tests.unit._srcscan import repo_src, schemas_src
 
 from core.media_exts import (IMAGE_EXTS, MEDIA_EXTS, TRANSCRIBE_EXTS,
                              VIDEO_EXTS, sorted_video_exts,
@@ -70,7 +70,7 @@ def test_the_pydantic_defaults_come_from_the_source():
     from core.schemas import CompareSourceRequest, ListDirRequest
     assert ListDirRequest(path="x").exts == sorted_video_exts()
     assert CompareSourceRequest(source_dir="a", output_dir="b").video_exts == sorted_video_exts()
-    src = repo_src("core/schemas.py")
+    src = schemas_src()
     assert src.count("Field(default_factory=sorted_video_exts)") == 2
 
 

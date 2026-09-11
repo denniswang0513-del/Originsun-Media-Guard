@@ -19,7 +19,7 @@ import pytest
 
 from core.crm_logic import normalize_tax_id
 from core.schemas import ClientPayload, InvoicePayload
-from tests.unit._srcscan import repo_src
+from tests.unit._srcscan import repo_src, schemas_src
 from tests.unit._srcscan import finance_src
 
 
@@ -104,9 +104,8 @@ def test_invoice_csv_import_normalizes():
 def test_rule_lives_in_one_place():
     """規則只有一份正本 —— 誰再自己寫 zfill(8) 就會有第二個答案。"""
     hits = []
-    for rel in ("routers/crm/clients.py", "routers/crm/finance.py",
-                "core/schemas.py"):
-        src = repo_src(rel)
+    for rel in ("routers/crm/clients.py", "routers/crm/finance.py", "core/schemas"):
+        src = schemas_src() if rel == "core/schemas" else repo_src(rel)
         hits += [(rel, m.group(0))
                  for m in re.finditer(r"zfill\(\s*8\s*\)|rjust\(\s*8", src)]
     assert not hits, f"有人自己補 0 而不是用 normalize_tax_id：{hits}"

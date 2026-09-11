@@ -10,7 +10,7 @@ card_outstanding（期初＋刷卡−還款）出，卡片帳戶若落進 cash �
 一邊當資產一邊當負債。
 """
 from pathlib import Path
-from tests.unit._srcscan import js_func_body
+from tests.unit._srcscan import js_func_body, schemas_src
 
 
 from core.card_statement import charges_by_card
@@ -55,7 +55,7 @@ def test_charges_by_card_splits_only_the_charge_side():
 
 
 def test_import_carries_the_card():
-    sch = _read("core/schemas.py")
+    sch = schemas_src()
     assert "card_account_id" in sch.split("class CardImportApply")[1][:900]
     api = _read("routers/api_finance_card.py")
     fn = api.split("async def apply_card_statement(")[1].split(NL + "@router")[0]

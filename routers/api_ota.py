@@ -692,7 +692,7 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
 
     Returns {"ok": bool, "log": str}. Does NOT restart 8000 (caller does).
     """
-    from ota_manifest import AGENT_FILES, AGENT_DIRS, NESTED_EXCLUDE_DIRS
+    from ota_manifest import AGENT_FILES, AGENT_DIRS, NESTED_EXCLUDE_DIRS, STALE_PATHS
     src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     dst = _PROD_DIR
     log: list = []
@@ -795,6 +795,14 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
                 shutil.copy2(os.path.join(root, f), os.path.join(tgt, f))
                 copied += 1
         log.append(f"[OK] 目錄 {d}/ 已複製")
+
+    # ── 拆檔後的舊單檔（STALE_PATHS）：先備份再刪，rollback 才還得回來 ──
+    for rel in STALE_PATHS:
+        tgt = os.path.join(dst, *rel.split("/"))
+        if os.path.isfile(tgt):
+            _backup_target(os.path.join(*rel.split("/")))
+            os.remove(tgt)
+            log.append(f"[OK] 清掉舊檔 {rel}（已拆成套件）")
 
     # ── 備份 meta（rollback 讀這份決定還原版本與要刪的新增檔）──
     with open(os.path.join(_DEPLOY_BACKUP_DIR, _DEPLOY_BACKUP_META), "w", encoding="utf-8") as f:

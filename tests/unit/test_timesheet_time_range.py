@@ -6,7 +6,7 @@
 少一環，起訖就又會在重新整理後消失。
 """
 from services.timesheet_manual import hhmm_or_none
-from tests.unit._srcscan import js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import js_code_only, js_func_body, repo_src, schemas_src
 
 
 def test_hhmm_normalizes_like_the_grid():
@@ -22,7 +22,7 @@ def test_columns_migration_schema_and_serializer_are_wired():
     assert "start_time = Column(String(5), nullable=True)" in model and "end_time = Column(String(5), nullable=True)" in model
     main = repo_src("main.py")
     assert '("timesheets", "start_time", "VARCHAR(5)")' in main and '("timesheets", "end_time", "VARCHAR(5)")' in main
-    schema = repo_src("core/schemas.py")
+    schema = schemas_src()
     assert "start_time: Optional[str] = None" in schema and "end_time: Optional[str] = None" in schema
     manual = repo_src("services/timesheet_manual.py")
     # body 沒帶＝不進 fields（總表管理員改列不能把員工填的起訖洗掉）

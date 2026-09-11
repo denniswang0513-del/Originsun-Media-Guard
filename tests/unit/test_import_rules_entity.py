@@ -13,8 +13,7 @@
 既有 36 條全歸母公司（ALTER 的 DEFAULT 'parent' 就是回填），私帳從 0 開始
 自己設 —— owner 拍板。
 """
-from tests.unit._srcscan import (migration_sql, call_args, code_only, flow_body, func_body, js_code_only,
-                                 js_func_body, repo_src)
+from tests.unit._srcscan import (call_args, code_only, flow_body, func_body, js_code_only, js_func_body, migration_sql, repo_src, schemas_src)
 
 STMT = "routers/api_finance_stmt.py"
 JS = "frontend/tabs/finance/subviews/recon.js"
@@ -265,7 +264,7 @@ def test_updating_a_rule_only_touches_the_fields_that_were_sent():
     # 新增那條路仍然必填（必填由端點驗，不是靠 schema 擋在門外 ——
     # schema 擋的話，只送 {"active": false} 的部分更新會被 422 掉）
     assert "關鍵字與類別都要填" in body and "require_all and" in body
-    sch = repo_src("core/schemas.py")
+    sch = schemas_src()
     seg = sch.split("class BankImportRulePayload(")[1].split("\nclass ")[0]
     assert 'keyword: str = ""' in seg and 'category: str = ""' in seg
     # 前端那顆停用鈕只送它要改的那一欄

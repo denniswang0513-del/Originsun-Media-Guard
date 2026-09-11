@@ -6,7 +6,7 @@ Two modes:
   python bootstrap.py --update [URL]   → OTA update from server
   python bootstrap.py --update         → Uses master_server from settings.json
 """
-import os, sys, json, zipfile, tempfile, subprocess, shutil, time
+import os, re, sys, json, zipfile, tempfile, subprocess, shutil, time
 import urllib.request
 
 # ---------------------------------------------------------------------------
@@ -210,6 +210,22 @@ def run_update(server_url=""):
             # Extract inside the same ZipFile context
             print("[System] Extracting update...")
             zf.extractall(base_dir)
+            # 拆檔後的舊單檔：清單在剛解出來的 ota_manifest.STALE_PATHS（解壓是覆蓋不刪）。
+            # 用 exec 讀而不是 import：這支要維持 stdlib-only、而且不能把 base_dir 塞進 sys.path。
+            try:
+                _ns = {}
+                with open(os.path.join(base_dir, "ota_manifest.py"), "r", encoding="utf-8") as _mf:
+                    _src = _mf.read()
+                _m = re.search(r"^STALE_PATHS\s*=\s*\[(.*?)\]", _src, re.S | re.M)
+                if _m:
+                    exec("STALE_PATHS = [" + _m.group(1) + "]", _ns)
+                    for _rel in _ns.get("STALE_PATHS", []):
+                        _p = os.path.join(base_dir, *str(_rel).split("/"))
+                        if os.path.isfile(_p):
+                            os.remove(_p)
+                            print(f"  Removed stale {_rel} (split into a package)")
+            except Exception as _e:
+                print(f"  Warning: stale-file cleanup skipped: {_e}")
     except zipfile.BadZipFile as e:
         print(f"[ERROR] Bad ZIP file: {e}")
         _rollback(base_dir, backup_dir, "更新檔案損毀")

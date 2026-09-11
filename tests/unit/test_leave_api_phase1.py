@@ -8,8 +8,7 @@
 """
 import re
 
-from tests.unit._srcscan import (code_only, flow_body, func_body, migration_sql,
-                                 models_src, repo_src)
+from tests.unit._srcscan import (code_only, flow_body, func_body, migration_sql, models_src, repo_src, schemas_src)
 
 HR = repo_src("routers/api_hr.py")
 ME = repo_src("routers/api_me.py")
@@ -208,7 +207,7 @@ def _schema_body(src: str, cls: str) -> str:
 
 
 def test_schemas_keep_new_fields_optional_for_old_clients():
-    src = repo_src("core/schemas.py")
+    src = schemas_src()
     for cls in ("LeaveCreate", "LeaveUpdate"):        # 管理端：時數可以手調，欄位要 Optional（舊分頁不帶）
         body = _schema_body(src, cls)
         for f in ("part", "start_time", "end_time", "hours", "days"):

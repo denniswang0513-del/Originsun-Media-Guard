@@ -88,6 +88,15 @@ EXCLUDE_DIRS = {
 # EXCLUDE_DIRS —— 那裡「models」真的就是根目錄那顆快取。
 NESTED_EXCLUDE_DIRS = EXCLUDE_DIRS - {'models'}
 
+#: 🔴 把模組拆成套件之後，**舊的單檔要在每一層部署目標清掉**。三條部署路都是「覆蓋、不刪」
+#: （NAS scp、deploy_to_prod 逐檔 copy、機隊 OTA 解壓），所以 `core/schemas.py` 會跟
+#: `core/schemas/` 並存。Python 會先找到套件（實測過），功能不會壞 —— 但留一份殭屍檔等於
+#: 讓下一個人改到一份根本沒被載入的程式碼。同步／部署／OTA 三處都會把這裡列的刪掉。
+#: 路徑相對 repo 根、用斜線；只放**檔案**。
+STALE_PATHS = [
+    "core/schemas.py",       # 2026-09-11 拆成 core/schemas/ 套件
+]
+
 # ── Python stdlib modules (excluded from dependency checks) ──
 # 3.10+ 直接問直譯器，不再手維護清單 —— tarfile / unicodedata / zoneinfo
 # 各漏過一次，每次都是 preflight/發版現場才發現。master 與機隊都跑 3.11。

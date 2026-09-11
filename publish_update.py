@@ -15,7 +15,7 @@ import sys
 import time
 from datetime import datetime
 
-from ota_manifest import (
+from ota_manifest import (STALE_PATHS, 
     STDLIB, LOCAL_MODULES, IMPORT_TO_PIP,
     SERVER_ONLY_PKGS, IMPLICIT_DEPS, scan_imports,
 )
@@ -238,9 +238,12 @@ def sync_website_to_nas() -> bool:
     # scp 不自建遠端目錄 — 先一次 ssh mkdir 把需要的全部建好（見 remote_dirs_for）
     ssh_cmd = [_ssh_bin("ssh"), "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + [NAS_HOST]
     try:
+        # 順手把拆檔後的舊單檔清掉（STALE_PATHS）—— scp 是覆蓋不刪，殭屍檔會一直留著
+        stale = " ".join(f"{NAS_CODE_DIR}/{p}" for p in STALE_PATHS)
         subprocess.run(
             ssh_cmd + ["mkdir -p " + " ".join(
-                remote_dirs_for(base, NAS_SYNC_PATHS, NAS_CODE_DIR))],
+                remote_dirs_for(base, NAS_SYNC_PATHS, NAS_CODE_DIR))
+                + (f" && rm -f {stale}" if stale else "")],
             check=True, capture_output=True, timeout=25,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:

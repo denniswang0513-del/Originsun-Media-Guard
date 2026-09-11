@@ -11,7 +11,7 @@ from core.hr_logic import (INTERNAL_BUCKETS, ProjectLookup, explain_miss,
                            group_by_name, lookup_row, miss_bucket, remap_target,
                            resolve_project, resolve_staff, sheet_project_key,
                            split_sheet_name, suggest_projects, unique_hit)
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src, schemas_src
 
 PROJECTS = [
     ("a", "國民法官劇情短片", "三立"),
@@ -216,7 +216,7 @@ def test_ingest_only_accepts_the_two_sources_and_fills_staff_id():
     assert "resolve_staff(" in fn and 'report("staff")' in fn
     # 逐列 budget 鏡射那條死路已經拿掉：預算只從 PUT /budgets 進
     assert "budget" not in fn
-    assert "budget:" not in code_only(func_body(repo_src("core/schemas.py"), "class TimesheetRow("))
+    assert "budget:" not in code_only(func_body(schemas_src(), "class TimesheetRow("))
 
 
 def test_the_import_script_formats_dates_like_apps_script_and_never_inits_db():

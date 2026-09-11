@@ -252,6 +252,18 @@ def models_src(header: str = "") -> str:
                             "_finance.py", "_workspace.py"), header)
 
 
+def schemas_src(header: str = "") -> str:
+    """原本 `core/schemas.py` 那一整個檔的內容。
+
+    🔴 2026-09-11 拆成套件 `core/schemas/`（同一個理由第四次：剛好 2,000 行卡在單次
+    讀取上限、185 個 class、106 個 importer）。純行段切割、零 class 搬家，六段照原檔
+    的分節註解。斷言釘的是「這個 schema 長什麼樣」，不是「它住哪個檔」。
+    """
+    return _split_file_src("core/schemas",
+                           ("_jobs.py", "_hr.py", "_crm.py", "_finance.py",
+                            "_workos.py", "_mobile.py"), header)
+
+
 #: /my.html 的程式碼被拆到哪幾支、以及 my.html 底部 script 標籤的載入順序。
 #: 順序＝原本 inline script 由上而下的執行順序，改這裡要跟 my.html 一起改。
 MY_PAGE_FILES = ("shell.js", "cards.js", "cards-hr.js", "zone1.js",
