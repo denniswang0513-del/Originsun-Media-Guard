@@ -692,7 +692,7 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
 
     Returns {"ok": bool, "log": str}. Does NOT restart 8000 (caller does).
     """
-    from ota_manifest import AGENT_FILES, AGENT_DIRS, NESTED_EXCLUDE_DIRS, STALE_PATHS
+    from ota_manifest import AGENT_FILES, AGENT_DIRS, DEPLOY_ONLY_PATHS, NESTED_EXCLUDE_DIRS, STALE_PATHS
     src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     dst = _PROD_DIR
     log: list = []
@@ -795,6 +795,26 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
                 shutil.copy2(os.path.join(root, f), os.path.join(tgt, f))
                 copied += 1
         log.append(f"[OK] 目錄 {d}/ 已複製")
+
+    # ── 只給 master 的（DEPLOY_ONLY_PATHS）：對外官網 Astro 原始碼 —— rebuild 在這棵樹跑 ──
+    for rel in DEPLOY_ONLY_PATHS:
+        sp = os.path.join(src, *rel.split("/"))
+        if os.path.isdir(sp):
+            for root, dirs, files in os.walk(sp):
+                dirs[:] = [x for x in dirs if x not in ("node_modules", "dist", ".astro", "__pycache__")]
+                r2 = os.path.relpath(root, src)
+                tgt = os.path.join(dst, r2)
+                os.makedirs(tgt, exist_ok=True)
+                for f in files:
+                    _backup_target(os.path.join(r2, f))
+                    shutil.copy2(os.path.join(root, f), os.path.join(tgt, f))
+                    copied += 1
+            log.append(f"[OK] {rel}/ 已複製（官網原始碼，rebuild 用）")
+        elif os.path.isfile(sp):
+            _backup_target(os.path.join(*rel.split("/")))
+            os.makedirs(os.path.dirname(os.path.join(dst, *rel.split("/"))), exist_ok=True)
+            shutil.copy2(sp, os.path.join(dst, *rel.split("/")))
+            copied += 1
 
     # ── 拆檔後的舊單檔（STALE_PATHS）：先備份再刪，rollback 才還得回來 ──
     for rel in STALE_PATHS:

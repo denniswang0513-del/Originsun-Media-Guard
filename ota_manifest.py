@@ -93,6 +93,21 @@ NESTED_EXCLUDE_DIRS = EXCLUDE_DIRS - {'models'}
 #: `core/schemas/` 並存。Python 會先找到套件（實測過），功能不會壞 —— 但留一份殭屍檔等於
 #: 讓下一個人改到一份根本沒被載入的程式碼。同步／部署／OTA 三處都會把這裡列的刪掉。
 #: 路徑相對 repo 根、用斜線；只放**檔案**。
+#: 🔴 只給 deploy_to_prod（dev → C:\OriginsunAgent）用、**不進機隊 OTA ZIP** 的路徑。
+#: 對外官網的 Astro 原始碼：master 的 rebuild 是在 C:\OriginsunAgent\website 跑 `npm run build`，
+#: 而 website/ 不在 AGENT_DIRS（機隊不需要、而且 node_modules 幾百 MB）—— 於是改了
+#: .astro 之後發版、rebuild，對外站還是舊的（2026-09-11 精選圖那次就是這樣白等一輪；
+#: memory 裡「發版手動 robocopy website/src」記了三次）。相對 repo 根、用斜線；目錄整棵複製。
+DEPLOY_ONLY_PATHS = [
+    "website/src",
+    "website/integrations",
+    "website/astro.config.mjs",
+    "website/package.json",
+    "website/package-lock.json",
+    "website/tsconfig.json",
+    "website/tailwind.config.mjs",
+]
+
 STALE_PATHS = [
     "core/schemas.py",       # 2026-09-11 拆成 core/schemas/ 套件
 ]

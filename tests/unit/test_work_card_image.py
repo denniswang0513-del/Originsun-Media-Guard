@@ -55,3 +55,14 @@ def test_both_card_consumers_on_the_site_use_card_image():
     assert "work.card_image ||" in repo_src("website/src/components/works/WorkCard.astro")
     assert "w.card_image ?" in repo_src("website/src/components/home/FeaturedWorks.astro")
     assert "card_image?: string | null" in repo_src("website/src/types/project.ts")
+
+
+def test_deploy_to_prod_carries_the_astro_sources():
+    r"""🔴 master 的 rebuild 在 C:\OriginsunAgent\website 跑 build，而 website/ 不在機隊 OTA
+    清單裡 —— deploy_to_prod 不帶它的話，改了 .astro 發版＋rebuild 之後對外站還是舊的，
+    而且完全沒有錯誤（2026-09-11 精選圖那次白等一輪）。"""
+    from ota_manifest import AGENT_DIRS, DEPLOY_ONLY_PATHS
+    assert "website/src" in DEPLOY_ONLY_PATHS and "website/integrations" in DEPLOY_ONLY_PATHS
+    assert "website" not in AGENT_DIRS, "website/ 不准進機隊 OTA（node_modules 幾百 MB）"
+    src = repo_src("routers/api_ota.py")
+    assert "for rel in DEPLOY_ONLY_PATHS:" in src, "deploy_to_prod 沒有複製 DEPLOY_ONLY_PATHS"
