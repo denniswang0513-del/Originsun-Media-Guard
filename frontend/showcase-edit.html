@@ -449,6 +449,69 @@ function _renderSeoSection(sc) {
 }
 
 
+// ── 未存的編輯要在重畫之間活下來 ─────────────────────────────────────
+// 🔴 上傳圖／套用專案描述／AI 生成／存 credits 都會重抓整份資料並**整頁重畫**（_render 是
+//    innerHTML 換掉）。原本重畫＝把伺服器那份蓋回畫面，打到一半、還沒按「儲存所有變更」的
+//    欄位全部消失（同事 2026-09-11 回饋：只有上傳的圖不會消失）。
+//    做法：使用者動過的欄位記在 _dirtyEls（模組層，跨重畫存活）；_render 先收值、畫完放回、
+//    再標回未儲存。**只放回動過的** —— 沒動過的要拿伺服器的新值，「套用專案描述」寫進去的
+//    描述才顯示得出來；而那種「本來就是要覆蓋」的動作要先 _forgetDirty 它覆蓋的欄位。
+//    key 形狀：'f:<data-field>' | 'id:<element id>' | 'rows:extra-videos' | 'data:cats'
+const _dirtyEls = new Set();
+// 🔴 分類勾選存在 DATA 裡，而 _reload 是先把 DATA 換成伺服器那份才 _render —— 快照時已經是舊值。
+//    所以草稿另外記在這裡（toggle／小測驗套用時寫），不從 DATA 讀。
+let _catsDraft = null;
+const _DIRTY_GROUP = {   // key → setDirty 用的群組名（給狀態列顯示「有未儲存的變更：…」）
+    'id:inp-ai-ref-notes': '_ai_notes', 'id:inp-old-slugs': '_old_slugs',
+    'id:inp-seo-title': '_seo', 'id:inp-seo-desc': '_seo', 'id:inp-seo-keywords': '_seo', 'id:inp-seo-canonical': '_seo',
+    'rows:extra-videos': '_extra_videos', 'data:cats': '_cats',
+};
+function _markDirtyEl(key) { _dirtyEls.add(key); }
+function _forgetDirty(...keys) { keys.forEach(k => _dirtyEls.delete(k)); }
+function _readDirtyEl(key) {
+    if (key.startsWith('f:')) {
+        const el = document.querySelector(`[data-field="${key.slice(2)}"]`);
+        return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined;
+    }
+    if (key.startsWith('id:')) { const el = document.getElementById(key.slice(3)); return el ? el.value : undefined; }
+    if (key === 'rows:extra-videos') {
+        return [...document.querySelectorAll('#extra-videos-list .extra-video-row')].map(row => ({
+            url: row.querySelector('.extra-video-url')?.value || '',
+            caption: row.querySelector('.extra-video-caption')?.value || '' }));
+    }
+    if (key === 'data:cats') return Array.isArray(_catsDraft) ? [..._catsDraft] : undefined;
+    return undefined;
+}
+function _writeDirtyEl(key, v) {
+    if (key.startsWith('f:')) {
+        const el = document.querySelector(`[data-field="${key.slice(2)}"]`);
+        if (!el) return false;
+        if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+        return true;
+    }
+    if (key.startsWith('id:')) { const el = document.getElementById(key.slice(3)); if (!el) return false; el.value = v; return true; }
+    if (key === 'rows:extra-videos') {
+        const list = document.getElementById('extra-videos-list');
+        if (!list) return false;
+        list.innerHTML = (v || []).map(r => _extraVideoRowHtml(r)).join('');
+        return true;
+    }
+    return false;   // data:cats 是畫之前直接寫進 DATA 的，不走這裡
+}
+/** 重畫前收：{key → 值}。沒有動過任何東西就是空的（第一次載入也是）。 */
+function _snapshotDirty() {
+    const keep = new Map();
+    for (const k of _dirtyEls) { const v = _readDirtyEl(k); if (v !== undefined) keep.set(k, v); }
+    return keep;
+}
+/** 畫完放回，並把群組重新標成未儲存（_bindEvents 剛把 _dirtyKeys 建成新的空 Set）。 */
+function _restoreDirty(keep) {
+    for (const [k, v] of keep) {
+        if (k === 'data:cats') { window._scSetDirty?.('_cats'); continue; }
+        if (_writeDirtyEl(k, v)) window._scSetDirty?.(_DIRTY_GROUP[k] || (k.startsWith('f:') ? k.slice(2) : '_misc'));
+    }
+}
+
 async function _load() {
     if (!TOKEN) { _showError(); return; }
     try {
@@ -563,6 +626,7 @@ async function _aiDescApply() {
     try {
         await _save({ description: draft, seo: { seo_description: draft } });
         _toast('已套用（描述 + SEO meta 已更新）');
+        _forgetDirty('f:description', 'id:inp-seo-desc');   // 這兩格就是要被覆蓋的，重畫時拿新值
         await _reload();
     } catch (e) { _toast(e.message); }
 }
@@ -577,6 +641,9 @@ function _stageWrap(id, num, title, inner) {
 }
 
 function _render() {
+    // 未存的編輯：重畫前收起來（見 _dirtyEls 的說明）；分類勾選畫之前就要回寫進 DATA（第 5 區照 DATA 畫）
+    const _keep = _snapshotDirty();
+    if (_keep.has('data:cats') && DATA) DATA.selected_category_ids = _keep.get('data:cats');
     // 後端 GET /public/showcase-edit/{token} 回扁平 dict（_to_showcase_dict 直接展開），
     // 不是 {showcase: {...}}。把 DATA 當 sc 用，所有 sc.xxx 引用就對得上欄位。
     const sc = DATA || {};
@@ -971,6 +1038,7 @@ function _render() {
 
     if (EDITABLE) {
         _bindEvents();
+        _restoreDirty(_keep);        // 放回使用者動過的欄位（並重新標成未儲存）
         _updateChecklist();
         _startStatusPolling();
     }
@@ -1003,7 +1071,7 @@ function _bindEvents() {
     const _statusEl = document.getElementById('save-status');
     const _btnMaster = document.getElementById('btn-master-save');
     const setDirty = (key) => {
-        if (key === false) _dirtyKeys.clear();
+        if (key === false) { _dirtyKeys.clear(); _dirtyEls.clear(); _catsDraft = null; }
         else _dirtyKeys.add(typeof key === 'string' ? key : '_misc');
         if (_statusEl) {
             if (!_dirtyKeys.size) {
@@ -1021,10 +1089,10 @@ function _bindEvents() {
     window._scSetDirty = setDirty;   // 給 _bindEvents 外的功能用（分類小測驗套用）
     document.querySelectorAll('[data-field]').forEach(el => {
         const evt = (el.type === 'checkbox' || el.tagName === 'SELECT') ? 'change' : 'input';
-        el.addEventListener(evt, () => setDirty(el.dataset.field));
+        el.addEventListener(evt, () => { _markDirtyEl('f:' + el.dataset.field); setDirty(el.dataset.field); });
     });
     // 補充說明併入 master save（獨立儲存鈕已廢）
-    document.getElementById('inp-ai-ref-notes')?.addEventListener('input', () => setDirty('_ai_notes'));
+    document.getElementById('inp-ai-ref-notes')?.addEventListener('input', () => { _markDirtyEl('id:inp-ai-ref-notes'); setDirty('_ai_notes'); });
     // 公開勾選的必備警示由 setDirty('published') → _updateChecklist → _updatePublishWarn 覆蓋，毋須獨立監聽
     // 對外標題即時連動到頂部 page-title + parent iframe panel 標題 — 三處同步
     const _titleInp = document.getElementById('inp-public-title');
@@ -1126,11 +1194,11 @@ function _bindEvents() {
     });
 
     // textarea 舊 URL — 任何鍵盤動作 mark dirty（內容轉成 list 在 master save 時做）
-    document.getElementById('inp-old-slugs')?.addEventListener('input', () => setDirty('_old_slugs'));
+    document.getElementById('inp-old-slugs')?.addEventListener('input', () => { _markDirtyEl('id:inp-old-slugs'); setDirty('_old_slugs'); });
 
     // SEO 覆寫欄位 — 4 個 input/textarea 任一動就 mark dirty
     ['inp-seo-title', 'inp-seo-desc', 'inp-seo-keywords', 'inp-seo-canonical'].forEach(id => {
-        document.getElementById(id)?.addEventListener('input', () => setDirty('_seo'));
+        document.getElementById(id)?.addEventListener('input', () => { _markDirtyEl('id:' + id); setDirty('_seo'); });
     });
 
     // 「請 AI 重新生」— mark needs_ai_review=True，下次排程自動跑（不耗 LLM 額度）
@@ -1264,19 +1332,19 @@ function _bindEvents() {
     // 列可動態增刪 → input dirty 與刪除鈕都走事件委派，新插入的列免重綁
     const _evList = document.getElementById('extra-videos-list');
     if (_evList) {
-        _evList.addEventListener('input', () => setDirty('_extra_videos'));
+        _evList.addEventListener('input', () => { _markDirtyEl('rows:extra-videos'); setDirty('_extra_videos'); });
         _evList.addEventListener('click', (e) => {
             const btn = e.target.closest('[data-action="del-extra-video"]');
             if (!btn) return;
             btn.closest('.extra-video-row')?.remove();
-            setDirty('_extra_videos');
+            _markDirtyEl('rows:extra-videos'); setDirty('_extra_videos');
         });
     }
     document.getElementById('btn-add-extra-video')?.addEventListener('click', () => {
         if (!_evList) return;
         _evList.insertAdjacentHTML('beforeend', _extraVideoRowHtml({ url: '', caption: '' }));
         _evList.querySelector('.extra-video-row:last-child .extra-video-url')?.focus();
-        setDirty('_extra_videos');
+        _markDirtyEl('rows:extra-videos'); setDirty('_extra_videos');
     });
 
     // Gallery upload
@@ -1716,8 +1784,9 @@ function _bindEvents() {
             const on = !cur.has(id);
             if (on) cur.add(id); else cur.delete(id);
             DATA.selected_category_ids = [...cur];
+            _catsDraft = [...cur];
             _setChipState(el, on);
-            setDirty('_cats');
+            _markDirtyEl('data:cats'); setDirty('_cats');
         });
     });
 
@@ -1929,6 +1998,8 @@ function _quizApply(ids, seriesId = '') {
         _ensureSeriesOption(document.getElementById('inp-series-id'), seriesId);
     }
     DATA.selected_category_ids = ids;
+    _catsDraft = [...ids];
+    _markDirtyEl('data:cats');
     const idSet = new Set(ids);
     document.querySelectorAll('[data-action="toggle-cat"]').forEach(el =>
         _setChipState(el, idSet.has(parseInt(el.dataset.id))));

@@ -271,7 +271,9 @@ def _to_public_dict(
         "credits_mode": sc.credits_mode or "block",
         "credits_text": sc.credits_text,
         "thumbnail_url": _youtube_thumbnail(sc.youtube_id),
-        # OG image fallback chain：work cover > YouTube thumb > BaseLayout meta.seo_og_image
+        # 卡片取圖（首頁精選作品／作品牆／系列摺疊卡）：精選圖 → 成果展示第一張 → 自訂封面 → YT
+        "card_image": card_image(sc),
+        # OG image fallback chain：work cover > 精選圖 > YouTube thumb > BaseLayout meta.seo_og_image
         "cover_url": work_cover(sc),
         # 首頁輪播取圖：精選圖 → 成果展示第一張（→ 前端再接 YouTube 縮圖，見 HomeSlideshow）
         "carousel_image": sc.featured_image
@@ -332,8 +334,26 @@ def _published_works_base():
 
 
 def work_cover(sc) -> Optional[str]:
-    """作品封面 fallback 鏈（卡片/OG/系列封面共用）：自訂封面 → YouTube 縮圖。"""
-    return sc.cover_url or _youtube_thumbnail(sc.youtube_id)
+    """OG／系列封面的 fallback 鏈：自訂封面 → **精選圖** → YouTube 縮圖。
+
+    精選圖排進來是同事 2026-09-11 的回饋：設了精選圖，首頁精選作品與作品牆卡片還是
+    YouTube 縮圖 —— 之前它只餵首頁輪播（carousel_image）。
+    """
+    return sc.cover_url or getattr(sc, "featured_image", None) or _youtube_thumbnail(sc.youtube_id)
+
+
+def card_image(sc) -> Optional[str]:
+    """卡片取圖（首頁精選作品、作品牆、系列摺疊卡）的**唯一**規則：
+    精選圖 → 成果展示第一張 → 自訂封面 → YouTube hqdefault。
+
+    跟 `thumbnail_url` 是兩件事：那個**只會是 YouTube 縮圖**（`seo.ts` 靠這個語意判斷
+    「非 YT 的作品沒有縮圖」），不要把它改成也回上傳的圖。前端卡片改吃這個欄位。
+    DB model `public_featured_image` 的註解寫的就是這條順序。
+    """
+    return (getattr(sc, "featured_image", None)
+            or _gallery_first_url(getattr(sc, "gallery", None))
+            or sc.cover_url
+            or _youtube_thumbnail(sc.youtube_id))
 
 
 def series_member_order():

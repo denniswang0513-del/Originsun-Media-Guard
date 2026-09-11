@@ -27,7 +27,8 @@ const { works, copy = {} } = Astro.props;
 // build-time HEAD check 過濾沒 maxres 的舊片(YouTube 對非 HD 上傳不發 maxresdefault),
 // 自動降到 hq 避免 sharp 抓 404 中斷 build。
 const thumbs = await Promise.all(
-    works.map(w => resolveThumbnailAsync(w.youtube_id, w.slug, "maxres")),
+    // 精選圖優先（後端 card_image：精選圖→成果展示第一張→自訂封面→YT）；沒有才算 YT maxres
+    works.map(w => w.card_image ? Promise.resolve(w.card_image) : resolveThumbnailAsync(w.youtube_id, w.slug, "maxres")),
 );
 ---
 

@@ -22,6 +22,7 @@ export interface IPublicProject {
     categories: string[];          // 製作類型 slug（kind=category）
     tags: string[];                // 使用場景 slug（kind=tag）
     thumbnail_url?: string | null; // YouTube hqdefault（maxres 對非 HD 片 404 會炸 build）
+    card_image?: string | null;    // 卡片取圖：精選圖→成果展示第一張→自訂封面→YT（後端單一規則；卡片一律吃這個）
     cover_url?: string | null;     // OG image — sc.cover_url 鏡像，作品集卡片用
     carousel_image?: string | null;        // 首頁輪播取圖（精選圖→成果展示第一張；空則前端接 YouTube）
     featured: boolean;

@@ -13,7 +13,9 @@ interface Props {
     priority?: boolean;
 }
 const { work, priority = false } = Astro.props;
-const thumb = resolveThumbnail(work.youtube_id, work.slug, "hq");
+// 卡片圖吃後端收斂好的 card_image（精選圖→成果展示第一張→自訂封面→YT）；
+// 舊資料／假資料沒有這欄時才自己算 YT 縮圖（同事 2026-09-11：設了精選圖卡片還是 YT 縮圖）。
+const thumb = work.card_image || resolveThumbnail(work.youtube_id, work.slug, "hq");
 ---
 
 <a href={`/works/${work.slug}`} class="group block">
