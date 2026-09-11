@@ -195,7 +195,23 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
         '<div class="crm-modal-body">' +
         '<div class="crm-field" style="margin-bottom:8px;"><label>專案</label><input class="crm-input" value="' + _esc(projName) + '" disabled style="opacity:0.6;"></div>' +
         '<div class="crm-form-grid">' +
-        '<div class="crm-field crm-field-full"><label>人員 <span class="crm-required">*</span></label><input id="pay-modal-payee" class="crm-input" value="' + _esc(payeeName) + '" required></div>' +
+        // 🔴 收款人**用選的不要打字**（owner 2026-09-11）：打字的結果是同一個人被寫成
+        // 三個收款人（「停車費 史丹」「停車 史丹」「早餐 史丹」）、對不到人員檔就沒有帳號。
+        // 名字不在人員庫時仍保留原值（代開單的收款人常常是外面的人），不然一開就被清掉。
+        '<div class="crm-field crm-field-full"><label>人員 <span class="crm-required">*</span></label>' +
+        '<select id="pay-modal-payee" class="crm-input" required>' +
+        (payeeName && !(state.staffList || []).some(function(s) { return s.name === payeeName; })
+            ? '<option value="' + _esc(payeeName) + '" selected>' + _esc(payeeName) + '（不在人員庫）</option>' : '') +
+        '<option value="">— 選擇人員 —</option>' +
+        '<option value="__other__">＋ 其他（自己打）</option>' +
+        (state.staffList || []).map(function(s) {
+            return '<option value="' + _esc(s.name) + '"' + (s.name === payeeName ? ' selected' : '') + '>' +
+                   _esc(s.name) + (s.alias ? '（' + _esc(s.alias) + '）' : '') + '</option>';
+        }).join('') +
+        '</select>' +
+        // 選「其他」才露出來 —— 代開的錢是匯回外面的人，不該強迫挑員工（owner 2026-09-04）
+        '<input id="pay-modal-payee-other" class="crm-input" style="display:none;margin-top:6px;" placeholder="自己打（外面的人）">' +
+        '</div>' +
         '<div class="crm-field crm-field-full"><label>金額 <span class="crm-required">*</span></label><input id="pay-modal-amount" type="number" class="crm-input" value="' + amount + '" required></div>' +
         // 代墊：收款人換成代墊人，費用歸屬仍是原本那個人（送出時才對調 —— 見下方）
         '<div class="crm-field crm-field-full" style="display:flex;align-items:center;gap:8px;"><label style="display:flex;align-items:center;gap:4px;cursor:pointer;margin:0;flex-shrink:0;"><input type="checkbox" id="pay-modal-advance"' + (advanced ? ' checked' : '') + ' onchange="document.getElementById(\'pay-modal-advance-by\').style.display=this.checked?\'\':\'none\'"> 代墊</label><select id="pay-modal-advance-by" class="crm-input" style="' + (advanced ? '' : 'display:none;') + 'flex:1;"><option value="">— 代墊人（實際收款人）—</option>' +
@@ -212,6 +228,12 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
         '<button id="pay-modal-submit" class="crm-btn crm-btn-primary">確定</button>' +
         '</div></div>';
     document.body.appendChild(overlay);
+    // 選「其他」才露出打字框
+    document.getElementById('pay-modal-payee').addEventListener('change', function() {
+        document.getElementById('pay-modal-payee-other').style.display =
+            this.value === '__other__' ? '' : 'none';
+        if (this.value === '__other__') document.getElementById('pay-modal-payee-other').focus();
+    });
     document.getElementById('pay-modal-submit').addEventListener('click', async function() {
         var btn = this;
         btn.disabled = true; btn.textContent = '處理中...';
@@ -223,7 +245,16 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
         }
         var isAdvance = document.getElementById('pay-modal-advance').checked;
         var advanceBy = isAdvance ? document.getElementById('pay-modal-advance-by').value : '';
-        var originalPayee = document.getElementById('pay-modal-payee').value;
+        // 收款人預設用選的；選「其他」時才讀旁邊那格（代開的錢是匯回外面的人，
+        // 不該強迫挑員工 —— owner 2026-09-04）
+        var _pSel = document.getElementById('pay-modal-payee');
+        var originalPayee = _pSel.value === '__other__'
+            ? (document.getElementById('pay-modal-payee-other').value || '').trim()
+            : _pSel.value;
+        if (!originalPayee) {
+            alert('人員 為必填');
+            btn.disabled = false; btn.textContent = '確定'; return;
+        }
         // 🔴 勾了代墊卻沒選人＝靜靜變成一張付給原本那個人的單（代墊人根本拿不到
         // 錢，而畫面上看起來一切正常）。當場擋下來。
         if (isAdvance && !advanceBy) {

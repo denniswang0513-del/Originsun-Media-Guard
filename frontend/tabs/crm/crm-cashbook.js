@@ -724,18 +724,59 @@ async function _cashPayForProject(e, pid, pname, o = {}) {
     });
 }
 
+let _payeeStaff = null;   // 人員清單（一次就好；這個彈窗可能開很多次）
+
+/** 把人員填進收款人下拉；選「其他」才露出打字框。
+ *  代稱也顯示出來 —— 出納找「史丹」時才知道要選鄭雲全。
+ *  🔴 **留著打字這條路**：代開的錢是匯回外面的人，不該強迫挑員工（owner 2026-09-04）。
+ *  預設用選的只是要擋掉「停車費 史丹」那種把用途和人名寫在一起的寫法。 */
+async function _fillPayeeSelect(sel, freeInput) {
+    if (!sel) return;
+    if (!_payeeStaff) {
+        try { _payeeStaff = (await _fetch('/staff')).staff || []; } catch (_) { _payeeStaff = []; }
+    }
+    sel.innerHTML = '<option value="">— 選擇人員 —</option>'
+        + _payeeStaff.map((st) => `<option value="${_esc(st.name || '')}">${_esc(st.name || '')}`
+            + (st.alias ? `（${_esc(st.alias)}）` : '') + '</option>').join('')
+        + '<option value="__other__">＋ 其他（自己打）</option>';
+    const sync = () => {
+        const other = sel.value === '__other__';
+        if (freeInput) {
+            freeInput.style.display = other ? '' : 'none';
+            if (!other) freeInput.value = sel.value || '';
+            else if (freeInput.value === sel.value) freeInput.value = '';
+            if (other) freeInput.focus();
+        }
+    };
+    sel.addEventListener('change', sync);
+    sync();
+    // 選項一多就升級成可搜尋的框（156 位人員的原生下拉找不到人）
+    if (sel.options.length >= 4) {
+        try {
+            const { searchableSelect } = await import('./crm-utils.js');
+            searchableSelect(sel, { placeholder: '打字找人…' });
+        } catch (_) { /* 升級失敗就用原生的，不擋事 */ }
+    }
+}
+
 /** 直接開一張應付款（沒掛案、或案子沒有對應的費用配置）：摘要／金額／收款人／類別。 */
 function _cashCustomPay(e, pre = {}) {
     const ov = _payOverlay('請款單', `
         <div class="crm-form-grid">
           <div class="crm-field crm-field-full"><label>摘要</label><input id="cpay-summary" class="crm-input" value="${_esc(e.summary || '')}"></div>
           <div class="crm-field"><label>金額</label><input id="cpay-amount" type="number" class="crm-input" value="${e.deposit || 0}"></div>
-          <div class="crm-field"><label>收款人</label><input id="cpay-payee" class="crm-input" value=""></div>
+          <div class="crm-field"><label>收款人</label>
+            <select id="cpay-payee-sel" class="crm-input"><option value="">— 選擇人員 —</option></select>
+            <input id="cpay-payee" class="crm-input" style="display:none;margin-top:6px;" placeholder="自己打（外面的人）"></div>
           <div class="crm-field crm-field-full"><label>類別</label><input id="cpay-cat" class="crm-input" value="專案外包"></div>
           <div style="color:#888;font-size:12px;">開一張應付款（請款日＝今天、預計付款月＝本月）${pre.project_id ? '，掛在這個案子' : ''}。</div>
         </div>`,
         `<button class="crm-btn crm-btn-secondary" data-close>取消</button>
          <button class="crm-btn crm-btn-primary" data-act="go">開請款單</button>`);
+    // 🔴 收款人**用選的不要打字**（owner 2026-09-11）。打字的結果：同一個人被寫成
+    // 「停車費 史丹」「停車 史丹」「早餐 史丹」三個收款人，對不到人員檔就沒有銀行帳號、
+    // 還要分三次匯。選項多的時候 js/shared/select-upgrade.js 會自動升級成可搜尋的框。
+    _fillPayeeSelect(ov.querySelector('#cpay-payee-sel'), ov.querySelector('#cpay-payee'));
     ov.querySelector('[data-act="go"]').addEventListener('click', async (ev) => {
         const btn = ev.currentTarget;
         const body = _payBody({
