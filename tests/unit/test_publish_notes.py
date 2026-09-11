@@ -33,6 +33,10 @@ def test_mangled_notes_are_caught(notes):
     "fix backup path resolution",                 # 純英文
     "Bump deps",
     "",
+    # 🔴 帶單一問號的正常英文 notes 不准被誤殺（2026-09-11 /polish 第 2 輪：
+    #    第一版的判定是「有 ? 且沒有中文」，這兩句會讓發版直接被擋下來）。
+    "hotfix: why was 8000 slow?",
+    "fix: is the NAS sync ok?",
     "備份頁綁定專案改用專案工時那份清單（兩邊都不篩狀態）",
 ])
 def test_healthy_notes_are_not_touched(notes):

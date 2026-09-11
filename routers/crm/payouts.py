@@ -86,17 +86,24 @@ async def create_payout(req: PayoutCreate, request: Request):
             raise HTTPException(status_code=422, detail=f"一張通知只能有一個收款人（勾到了 {len(payees)} 位）")
         if any((r.entity or "parent") != ent for r in rows):
             raise HTTPException(status_code=422, detail="勾到的請款單不在同一本帳")
-        # 🔴 一筆請款單只屬於一次匯款。原本是無條件 `r.payout_id = 新的`：
+        # 🔴 一筆請款單只屬於**一張還活著的**通知。原本是無條件 `r.payout_id = 新的`：
         # 舊那張的短碼還活著、快照還在（定稿是刻意的），收款人手上兩條連結加起來
         # 是重複金額，而舊那張在 DB 裡變成沒有任何請款單屬於它的孤兒 —— 全程零錯誤。
-        # 要重做就先撤銷舊的那張。
-        bound = sorted({r.payout_id for r in rows if r.payout_id})
-        if bound:
-            n = sum(1 for r in rows if r.payout_id)
-            raise HTTPException(
-                status_code=422,
-                detail=f"勾到的請款單裡有 {n} 筆已經在別的匯款通知上了，"
-                       "要重做請先撤銷那一張，不然收款人會拿到兩條連結")
+        #
+        # 只擋**還有短碼**的那些：撤銷（DELETE /payouts/{id}/share）就是出路，撤掉之後
+        # 那幾筆可以重新綁。擋「所有 payout_id 非空的」會變成死路 —— 撤銷刻意不清
+        # payout_id（那是「同一次匯出去」的事實），於是撤了也還是 422，永遠卡住。
+        bound_ids = {r.payout_id for r in rows if r.payout_id}
+        if bound_ids:
+            live = (await session.execute(
+                select(CrmPayout.id).where(CrmPayout.id.in_(bound_ids),
+                                           CrmPayout.share_token.isnot(None)))).scalars().all()
+            if live:
+                n = sum(1 for r in rows if r.payout_id in set(live))
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"勾到的請款單裡有 {n} 筆已經在別的匯款通知上（連結還有效），"
+                           "要重做請先把那一張的連結撤銷，不然收款人會拿到兩條連結")
 
         # 一個值兩邊共用。原本 DB 走 `_parse_day`（看不懂就退成今天）、快照走
         # `payout_share._day`（只切前 10 碼、不驗），於是非 ISO 的日期會讓

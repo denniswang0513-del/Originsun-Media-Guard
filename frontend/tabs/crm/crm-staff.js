@@ -2,6 +2,7 @@
  * crm-staff.js — 人力資源 Tab
  */
 
+import { copyText } from '../../js/shared/utils.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, saveSettings, createSortable } from './crm-utils.js';
 import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 

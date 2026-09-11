@@ -142,11 +142,19 @@ def resolve(text: str) -> tuple[str | None, str]:
     raw = str(text or "").strip()
     if not raw:
         return None, ""
-    # 🔴 `finditer` 不是 `search`：只看**第一個**三位數的話，`帳號123-456 中國信託 822`
-    # 會停在 123（不在表裡）就放棄，而正確的 822 明明就在同一串字裡。
-    for m in _CODE.finditer(raw):
-        if m.group(1) in BANKS:
-            return m.group(1), BANKS[m.group(1)]
+    # 🔴 只看**第一個**孤立三碼，不要用 finditer 掃全串（2026-09-11 /polish 第 2 輪）：
+    # 掃全串的話，`華南銀行 帳號 1234-567-700` 裡的帳號分段 `700` 會奪權變成中華郵政、
+    # `玉山銀行 678-008-374071` 變成華南 —— 模擬「銀行名＋分段帳號」4,000 筆有 3.8%
+    # 被帳號數字搶走。而這個值是出納**直接複製進網銀第一格**的東西：解不出來（None）
+    # 他會自己去查，給他一個看起來很肯定的錯代號才是真的會匯錯。
+    #
+    # ⚠️ 殘留風險（owner 未拍板，不在這裡自己改）：第一個孤立三碼**剛好**是有效代號時
+    # 仍會壓過白紙黑字的銀行名（`台新銀行 008-123-456789` → 華南、`局號 021 郵局` → 花旗）。
+    # 「三碼優先」是既有規則、`test_code_wins_over_the_name` 釘著；而生產 25 筆銀行字串
+    # 目前沒有任何一筆的名稱與代號互相矛盾，所以這是潛在陷阱不是現行錯誤。
+    m = _CODE.search(raw)
+    if m and m.group(1) in BANKS:
+        return m.group(1), BANKS[m.group(1)]
     code = _alias_code(normalize_name(raw))
     if code:
         return code, BANKS[code]

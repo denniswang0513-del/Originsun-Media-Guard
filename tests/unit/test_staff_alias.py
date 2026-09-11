@@ -87,3 +87,48 @@ def test_the_module_stays_pure_and_has_no_fuzzy_import():
     assert "difflib" not in src, "🔴 不准模糊比對：猜錯一次就是匯錯人"
     for forbidden in ("session", "select(", "open(", "requests"):
         assert forbidden not in src, forbidden
+
+
+class TestContainsIsLongestReading:
+    """「包含」那條規則的邊界（2026-09-11 /polish 兩輪才調對，六個反例全部釘住）。
+
+    規則是：命中代稱 → 若有**更長的姓名或代稱把它包在裡面、而且也在這段字裡**，
+    改判給那個長的。姓名**不獨立製造比對**。
+    """
+
+    def _idx(self, rows):
+        return build_index(rows)
+
+    def test_a_longer_name_containing_the_matched_alias_wins(self):
+        """原始的 bug：命中的是別人的代稱，而字串裡寫的是這個人的全名。"""
+        idx = self._idx([("B", "史丹利", ""), ("C", "王大明", "史丹")])
+        assert resolve("停車費 史丹利", idx) == "B"
+        assert resolve("停車費 史丹", idx) == "C"      # 沒有更長的讀法時照舊
+
+    def test_it_works_the_other_way_round_too(self):
+        """反向：短的是姓名、長的是代稱。第一版「姓名先比」在這裡會答錯。"""
+        idx = self._idx([("A", "史丹", ""), ("B", "王小明", "史丹利")])
+        assert resolve("停車費 史丹利", idx) == "B"
+
+    def test_a_name_that_merely_appears_never_steals_the_match(self):
+        """姓名不獨立製造比對：有人叫「大方」也不能把「大方廣告…小明」搶走。"""
+        idx = self._idx([("A", "大方", ""), ("B", "陳小明", "小明")])
+        assert resolve("大方廣告 印刷費 小明", idx) == "B"
+        idx2 = self._idx([("A", "小雨", ""), ("B", "林志明", "阿明")])
+        assert resolve("小雨傘道具 阿明", idx2) == "B"
+
+    def test_single_character_aliases_still_work(self):
+        """單字代稱不准被停用 —— 「早餐 K」對不到的話，那個人又被拆成好幾列。"""
+        idx = self._idx([("A", "李冠廷", "K")])
+        assert resolve("早餐 K", idx) == "A"
+        assert resolve("K", idx) == "A"
+
+    def test_a_duplicate_name_does_not_swallow_a_good_alias_hit(self):
+        """人員檔有同名／互為子字串的重複建檔時，本來對得到的不准變成對不到。"""
+        idx = self._idx([("A", "王小明", "小明"), ("B", "小明", "")])
+        assert resolve("停車費 王小明", idx) == "A"
+
+    def test_two_different_longer_readings_give_up(self):
+        """升級那一步也撞到兩個人時照樣放棄（寧可對不到）。"""
+        idx = self._idx([("A", "陳小明", ""), ("B", "林小明", ""), ("C", "某某", "小明")])
+        assert resolve("陳小明 林小明 的款", idx) is None

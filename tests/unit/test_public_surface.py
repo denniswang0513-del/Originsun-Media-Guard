@@ -267,8 +267,11 @@ def _master_short_links():
     """main.py 上實際註冊的短網址前綴（單層 /x/{...} 形狀）。"""
     import re as _re
     master = open(os.path.join(REPO, "main.py"), encoding="utf-8").read()
+    # `[^/}"]+` 而不是 `\w+`：`{code:path}` 這種帶轉換器的參數也要算進來
+    # （`\w+` 遇到冒號就不匹配 → 那條路由靜默消失，正是這支要防的病）。
+    # 前綴收大小寫與數字（`/e2/`）—— 寧可多抓一條逼人來這裡加一列。
     return {m.group(1) + "/" for m in
-            _re.finditer(r'@app\.get\(\s*"(/[a-z]{1,4})/\{\w+\}[^"]*"', master)}
+            _re.finditer(r'@app\.get\(\s*"(/[A-Za-z0-9]{1,4})/\{[^/}"]+\}[^"]*"', master)}
 
 
 def test_the_short_link_table_lists_every_short_link_master_serves():
