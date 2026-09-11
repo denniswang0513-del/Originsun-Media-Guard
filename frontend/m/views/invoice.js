@@ -8,6 +8,9 @@
 import { invoiceAmounts } from '/js/shared/invoice-amounts.js';
 import { mfetch, toast, esc, todayLocal, money, fmtDate } from '../shell.js';
 import { state, opt, skeleton, emptyBox, errBox, pill, withBusy, shouldLoad, pickerHtml, mountPicker, segHtml, mountSeg, setSeg, copyText, projectLabel } from '../ui.js';
+import * as _UI from '../ui.js';
+// copyDeferred 走命名空間＋退路（CF 四小時 .js 快取：新 invoice.js ＋ 舊 ui.js 那一輪不能炸）
+const copyDeferred = _UI.copyDeferred || ((p) => p.then((t) => copyText(t)));
 
 const F = (id) => document.getElementById('inv-' + id);
 const VOLATILE = ['title', 'amount_ex_tax', 'amount_total', 'item_type', 'notes'];
@@ -186,7 +189,7 @@ function showNotice(text) {
     box.innerHTML = `<div class="m-notice"><pre id="inv-notice-text">${esc(text)}</pre>
       <button type="button" class="m-btn pri wide" id="inv-copy">複製通知</button></div>`;
     box.querySelector('#inv-copy').addEventListener('click', async () => {
-        toast((await copyText(text)) ? '已複製，貼到 LINE 給同事' : '複製失敗，請長按文字複製', 'ok');
+        toast((await copyText(text)) ? '已複製，貼到 LINE 給同事' : '自動複製被擋，點右邊複製', 'ok', { copy: text });
     });
 }
 
@@ -299,19 +302,26 @@ async function removeInvoice(inv, btn) {
 // 冪等 —— 已經有一張就原樣回傳，寄兩次信不會讓先寄出去的連結失效；而且每按一次後端就把客戶
 // 那頁看到的發票資訊重新定稿，所以這顆本身就是「順便更新客戶看到的內容」，不需要第二顆「更新」鈕。
 async function shareInvoice(inv, btn) {
+    // 🔴 文字還在飛就先把「複製」掛上（copyDeferred，手勢當下同步呼叫）：iPhone Safari 在 await 之後
+    //    拒絕寫剪貼簿，原本先 await /share 再複製，手機一律「複製失敗」。這一行以上不能有 await。
+    const textPromise = (async () => {
+        const d = await mfetch(`/api/v1/crm/invoices/${encodeURIComponent(inv.id)}/share`, { method: 'POST' });
+        // 網址由後端決定：設了對外網址就是絕對網址，沒設回相對路徑 —— 那就沿用現在開著的網域
+        // （手機多半從對外網域進來，但辦公室內網直連也要拿得到一條打得開的連結）。
+        const raw = String(d.url || d.path || '');
+        const full = raw.startsWith('http') ? raw : location.origin + raw;
+        // 「檔名 換行 連結」兩行（owner 指定，同桌機）：貼進 LINE 對方一眼知道那是哪張發票，
+        // 光一條短碼網址看不出來。
+        inv.has_share = true;
+        return { text: `${d.file_name || ''}\n${full}`.trim(), full };
+    })();
+    const copied = copyDeferred(textPromise.then(x => x.text));
+    copied.catch(() => {});
     await withBusy(btn, async () => {
         try {
-            const d = await mfetch(`/api/v1/crm/invoices/${encodeURIComponent(inv.id)}/share`, { method: 'POST' });
-            // 網址由後端決定：設了對外網址就是絕對網址，沒設回相對路徑 —— 那就沿用現在開著的網域
-            // （手機多半從對外網域進來，但辦公室內網直連也要拿得到一條打得開的連結）。
-            const raw = String(d.url || d.path || '');
-            const full = raw.startsWith('http') ? raw : location.origin + raw;
-            // 「檔名 換行 連結」兩行（owner 指定，同桌機）：貼進 LINE 對方一眼知道那是哪張發票，
-            // 光一條短碼網址看不出來。
-            const text = `${d.file_name || ''}\n${full}`.trim();
-            inv.has_share = true;
-            // 複製失敗（非安全內容連 execCommand 都不給）就把網址念出來讓他長按複製，不是只說一句失敗
-            toast((await copyText(text)) ? '連結已複製，貼給客戶' : '複製失敗，連結：' + full, 'ok');
+            const { full, text } = await textPromise;
+            if (await copied) toast('連結已複製，貼給客戶', 'ok');
+            else toast('自動複製被擋，點右邊複製：' + full, 'ok', { copy: text });
         } catch (e) { toast(e.message || '建立連結失敗', 'err'); }
     });
     // withBusy 的 finally 會把按鈕字寫回按下前的，所以換字要在它之後

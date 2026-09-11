@@ -41,7 +41,7 @@ export function fmtDate(iso) {
     return String(iso).slice(0, 10);
 }
 
-export function toast(msg, kind = 'ok') {
+export function toast(msg, kind = 'ok', opts = {}) {
     let el = document.getElementById('m-toast');
     if (!el) {
         el = document.createElement('div');
@@ -49,9 +49,26 @@ export function toast(msg, kind = 'ok') {
         document.body.appendChild(el);
     }
     el.textContent = msg;
+    // `opts.copy`：複製失敗時給一顆鈕 —— 那一下是**新的**使用者手勢，iPhone Safari 才肯寫剪貼簿
+    // （自動複製失敗的原因就是手勢過期）。點了之後同步呼叫 execCommand 那條路，不再有 await。
+    if (opts.copy) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'm-btn sm'; b.style.marginLeft = '10px'; b.textContent = '複製';
+        b.addEventListener('click', () => {
+            const ta = document.createElement('textarea');
+            ta.value = opts.copy; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+            document.body.appendChild(ta); ta.select();
+            let ok = false;
+            try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+            document.body.removeChild(ta);
+            if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(opts.copy).catch(() => {});
+            b.textContent = ok ? '已複製' : '請長按複製';
+        });
+        el.appendChild(b);
+    }
     el.className = 'show ' + (kind === 'err' ? 'err' : 'ok');
     clearTimeout(el._t);
-    el._t = setTimeout(() => { el.className = ''; }, kind === 'err' ? 4500 : 2200);
+    el._t = setTimeout(() => { el.className = ''; }, opts.copy ? 9000 : (kind === 'err' ? 4500 : 2200));
 }
 
 function _token() { return localStorage.getItem(TOKEN_KEY) || ''; }

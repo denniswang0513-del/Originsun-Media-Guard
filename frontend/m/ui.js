@@ -186,6 +186,28 @@ export async function copyText(text) {
     return ok;
 }
 
+/** 文字**還在飛**（要先打 API 才知道網址）時的複製：**在手勢當下同步呼叫**，不要 await 之後才叫。
+ *
+ *  🔴 iPhone Safari 只准在使用者手勢當下寫剪貼簿：先 `await fetch` 再 `copyText` 的話手勢已經過期，
+ *  writeText 被拒、execCommand 退路同樣被拒 → 畫面「複製失敗」（owner 2026-09-11 截圖）。
+ *  `ClipboardItem` 收 Promise 就是為這件事存在的：write() 在手勢裡同步發出，文字晚點才到。
+ *  不支援 ClipboardItem 的（舊 Chrome／內網 http）退回等文字到了再 copyText —— 那些環境的
+ *  手勢熬得過 await，或本來就只有 execCommand 那條路。
+ *
+ *  回傳 Promise<boolean>；`textPromise` reject 的話這裡跟著 reject（讓呼叫端的 catch 講原因）。 */
+export function copyDeferred(textPromise) {
+    if (navigator.clipboard && window.isSecureContext && typeof ClipboardItem !== 'undefined'
+        && typeof navigator.clipboard.write === 'function') {
+        try {
+            const item = new ClipboardItem({
+                'text/plain': textPromise.then(t => new Blob([String(t)], { type: 'text/plain' })),
+            });
+            return navigator.clipboard.write([item]).then(() => true, async () => copyText(await textPromise));
+        } catch (_) { /* 這個瀏覽器不收 Promise 形狀的 ClipboardItem → 退回 */ }
+    }
+    return textPromise.then(t => copyText(t));
+}
+
 export function selectOpts(values, selected = '', blank = '') {
     const head = blank !== null && blank !== undefined && blank !== false
         ? `<option value="">${esc(blank)}</option>` : '';

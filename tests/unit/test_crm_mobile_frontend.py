@@ -132,7 +132,11 @@ def test_mobile_quote_card_shows_discounted_amount_with_original():
     assert "data-share=" in src and "/share`, { method: 'POST' }" in src
     assert "(q.share_url || canQuote())" in src
     assert "isAdmin() || ((_mState.me || {}).modules || []).includes('crm_quotes')" in src
-    assert "copyText(full)" in src and "location.origin + url" in src
+    # 🔴 複製要在**手勢當下**掛上（copyDeferred 收 Promise），不是 await /share 之後才 copyText：
+    #    iPhone Safari 在任何 await 之後都拒絕寫剪貼簿（owner 2026-09-11 截圖「複製失敗」）。
+    #    網址仍是後端給的 share_url，沒設對外網域時沿用 location.origin。
+    assert "const copied = copyDeferred(urlPromise)" in src and "location.origin + url" in src
+    assert "copyText(full)" not in src, "回到 await 之後才複製的寫法，iPhone 會再壞一次"
 
 
 def test_mobile_quote_starts_from_client_not_project():

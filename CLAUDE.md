@@ -1292,6 +1292,8 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`core/nas_auth.py`](core/nas_auth.py) | SMB session 韌性：`ensure_ready`（任務開跑前戳每個 share 根目錄，不通先退避重連再 fail fast）、`reconnect_with_backoff`（**15 秒 ×5**，owner 2026-09-10 拍板）、`guard`（認證類 WinError → 退避重連 → 重跑一次）、`friendly`（WinError → 可行動中文） | 跟 `drive_map` 是兩件事：那支管「哪台有掛磁碟」（`T:\`→UNC），這支管「哪台有認證」（UNC 開得起來）。**帳密一律傳 NULL**，走 Windows 認證管理員，程式裡不存 NAS 密碼；`WNetCancelConnection2` 一律 `fForce=FALSE`（絕不把別的任務正在用的磁碟抽掉）；重試白名單不收 `5 ACCESS_DENIED`（那是真沒權限，重連幾次都一樣）。**冷卻閘不能拿掉**：`guard` 是逐檔呼叫的，整輪退避失敗後把該 share 判死 60 秒，否則 NAS 掛掉時 5000 檔 × 60 秒＝83 小時殭屍任務；等待一律吃 `should_stop`（停止鍵要能在退避中生效）。非 Windows（NAS Linux 容器）整支 no-op |
 | [`core/payout_share.py`](core/payout_share.py) | 匯款通知頁（`/p/{短碼}`）「能出現什麼」的純規則：白名單投影、分享時定稿的快照、金額與日期正規化 | 無 I/O；`SNAPSHOT_FIELDS`／`ITEM_FIELDS` 是白名單、`NEVER_SHARE` 另列一份給測試逐欄釘住（**兩張表不准有交集**，那條守的是「未來有人加欄位」）。🔴 **收款人自己的銀行帳號也不上** —— 這條連結可被轉傳，一頁上同時有姓名＋帳號＋金額就是一份現成的資料；他不需要從這頁知道自己的帳號 |
 | [`routers/crm/payouts.py`](routers/crm/payouts.py) | 匯款通知：鑄連結（`POST /payouts`）、撤銷（`DELETE /payouts/{id}/share`）、公開頁（`public_router`）、清單 | 三件事照發票那份抄（短碼逐字比對、分享時定稿、公開那支掛 `public_router`＋自己 `await surface_gate`）；**產通知不改付款狀態**（標已付款是面板上另一顆）；一張通知一個收款人；`/p/` 路由要在 `main.py` **與** `main_website.py` 各定義一次 |
+| `routers/crm/_shared.PayeeResolver` | 「收款人那段字 → 人員」的 I/O 與記憶化（人員檔載一次、每個相異字串問一次）；規則在 `core/staff_alias` | 🔴 **三個入口都要走它**（應付彙總、匯款通知、員工工作台的未付請款）—— 一處字面比對、別處代稱解析，同一個人在一邊是一組、另一邊看不到自己那幾筆，而且不會報錯。`test_payee_resolution_one_ruler` 釘住。`group_payables` 收 `(payment, staff)`、按**人**分組（群組名＝正式姓名、每列留原字串、`aliases` 列出併了哪些） |
+| [`core/schemas/`](core/schemas/__init__.py) | 所有 Pydantic 請求模型（套件，六段照原檔分節：`_jobs`／`_hr`／`_crm`／`_finance`／`_workos`／`_mobile`） | 對外仍是 `from core.schemas import X`；新 schema 放進對應那段的末端；掃原始碼的測試用 `_srcscan.schemas_src()` |
 | [`core/staff_alias.py`](core/staff_alias.py) | 「收款人那段字」→ 人員（純函式）：姓名／代稱精準命中，其次「包含某個代稱」，再由更長的姓名／代稱**升級** | 無 I/O、**沒有模糊比對**（difflib 猜錯一次就是匯錯人）；代稱撞名＝對誰都不算數，不隨便挑一個；第 4 條是升級不是另一條比對路徑（見「不要動的地方」） |
 | [`core/bank_codes.py`](core/bank_codes.py) | 金融機構代號 ↔ 銀行名（純資料＋純函式）：`resolve` 三碼優先、其次別名、認不得就原樣放行 | 表是我們自己維護的、跟著發版走（銀行併購改號要有人來改）；表不必收齊全國 —— 認不得回 `(None, 原字串)` 畫面照舊顯示人打的字。**不要改成掃全串找代號**（見「不要動的地方」） |
 | [`frontend/payout.html`](frontend/payout.html) | 收款人手上 `/p/{短碼}` 那一頁（免登入、單檔自足、零外部相依） | 只畫後端給的欄位；**不要在原始碼裡寫內部模組名、路徑、拓樸或「哪些欄位我們不給」的清單** —— 那頁寄給收款人、原始碼看得到 |
@@ -1444,25 +1446,25 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   B 代稱「史丹利」會落到 A），而且姓名會咬到用途詞（有人姓名叫「大方」，「大方廣告 印刷費 小明」
   就從正確的小明變成大方）。也**不要**加「兩個字以上才算包含」的門檻：那會讓單字代稱
   （「早餐 K」）整個失效，而那正是這支模組要解決的事。六個反例都在 `test_staff_alias.py` 釘著。
-- **`core/bank_codes.resolve` 只看第一個孤立三碼，不要改成 `finditer` 掃全串**（同日第 2 輪）：
-  掃全串的話帳號分段會奪權 —— 「華南銀行 帳號 1234-567-700」變中華郵政、「玉山銀行 678-008-374071」
-  變華南；模擬「銀行名＋分段帳號」4,000 筆有 3.8% 被搶走。而那個值是出納**直接複製進網銀第一格**的：
-  解不出來（None）他會自己去查，給他一個看起來很肯定的錯代號才是真的會匯錯。
-  ⚠️ 殘留風險（owner 未拍板）：第一個三碼**剛好**有效時仍會壓過白紙黑字的銀行名
-  （`局號 021 郵局` → 花旗）。「三碼優先」是既有規則、`test_code_wins_over_the_name` 釘著，
-  而生產 25 筆銀行字串目前沒有任何一筆名稱與代號互相矛盾。
+- **`core/bank_codes.resolve`：只看第一個孤立三碼，而且名字與三碼互相矛盾就不猜**（2026-09-11，
+  owner「都修好」拍板）：掃全串（`finditer`）的話帳號分段會奪權 —— 「華南銀行 帳號 1234-567-700」
+  變中華郵政；只看三碼不看名字的話「局號 021 郵局」變花旗、「玉山銀行 013 分行」變國泰世華。
+  那個值是出納**直接複製進網銀第一格**的：解不出來（None）他會自己去查，給一個看起來很肯定的
+  錯代號才會匯錯。名字那半用 `_name_hints`（子字串「提到了哪家」）**只做否決、不做斷定**；
+  斷定仍走 `_alias_code`（整段對上）。生產 25 筆銀行字串沒有任何一筆矛盾，這條改的是未來的輸入。
 - **`create_payout` 的「已經綁過」只擋「連結還有效」的那些**：撤銷刻意**不清** `payout_id`
   （那是「這幾筆同一次匯出去」的事實），所以擋「所有 `payout_id` 非空的」＝撤了也還是 422、
-  永遠卡死。🔴 **但撤銷目前沒有 UI**（前端只呼叫 `POST /payouts`，`GET /payouts` 與
-  `DELETE /payouts/{id}/share` 都沒有呼叫端）—— 出納在面板上看不出哪幾筆已經綁過，也撤不掉。
-  這是這批功能沒做完的一半，不是可以放著的狀態。
-- **`publish_update.py` 刻意沒有「master 起來了嗎」的閘門**（2026-09-11 /polish 第 2 輪拿掉）：
-  `/api/v1/version` **每個 request 重讀 `version.json`**，而發版流程在那之前就把新版號寫進檔了 ——
-  行程根本沒重啟、還跑著舊碼時它照樣回報新版號，閘門必定放行（`core/version.py` 檔頭就是在講這個）。
-  做一道擋不住東西的閘門比沒有更糟：給人「已經確認過」的錯覺，而且失敗那條會停在
-  「版號已 bump、文件已改、包已打好、NAS 沒同步」而且不回滾。真正的風險還在：**DB migration
-  只有 master 會跑**，發版的人要自己看 `[WARN] 無法自動重啟主控端` 那行。要做對得比對
-  「行程載入時取一次的版號常數」（`core/version.py` 現在沒有這樣的常數）。
+  永遠卡死。出路在匯款通知彈窗上方那份「已產生的通知」（複製連結／撤銷；`GET /payouts?payee=`
+  按**人**比對，歷史 payout 存原字串也對得到）；已在有效通知上的項目預設不勾並標出來。
+  dev 端對端走過：產 → 同筆再產 422 → 撤銷 → 再產 200 → 撤銷過的短碼 404。
+- **`publish_update.py` 的「master 真的重啟了嗎」閘門看 `running`，不看 `version`**（2026-09-11）：
+  `/api/v1/version` 的 `version` 每個 request 重讀磁碟，而發版在重啟前就把新版號寫進檔了 ——
+  只看它的話「根本沒重啟」也會被判成通過（第一版就是這樣的空門）。`running`＝
+  `core.version.RUNNING_VERSION`（行程載入時取一次）。`master_restarted()` 照 `api_ota._smoke_check_prod`：
+  **先等 port 斷、再等回來且 running 是新版**，不成就 rollback 版號、不同步 NAS（DB migration 只有
+  master 會跑，NAS 先拿到新碼會 500）。**dev 機（`database_url` 是 `*_dev`）跳過重啟與閘門**：8000
+  跑的是 `C:\OriginsunAgent` 的另一份碼，重啟只是讓同事斷線；那台由 deploy_to_prod 負責 ——
+  但這代表 NAS 會先拿到新碼，帶新欄位的版本要先補 DDL 或發完立刻接 deploy_to_prod。
 - **`cash.py` 的 `bank_note` 只對「真的沒對到人」的收款人掛**：原本是拿「`payee_name` 裡有沒有
   出現某個撞名代稱」事後反推失敗原因 —— 於是「姓名叫王小明、單純還沒填帳號」的人也會被說成
   「代稱『小明』有兩個人在用」，他去人員檔改代稱，改完問題還在而且看不出為什麼。真相在解析
@@ -1475,9 +1477,11 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   住在哪一支函式裡」，於是被禁止的寫入只要搬進同檔 helper 就再也抓不到（測試安靜地失效），
   而且「把長函式切開」會變成一件弄壞測試的事。`flow_body` 會把它呼叫的 `_` 開頭同檔 helper
   一起帶進來。`tests/unit/test_payouts_router.py` 用的就是它（三條都做過變異驗證）。
-- **`tests/unit/test_files_stay_readable.py` 只掃 `.py`／`.js`／`.html`，`.css` 沒有人在看**：
-  `frontend/tabs/crm/crm.css` 已經 2,286 行（超過 2,000 的單次讀取上限）而測試全綠。
-  把 `.css` 加進 `SCAN_DIRS` 的副檔名過濾會**當場讓套件變紅**，所以要先拆檔再加守衛，
-  不是反過來。同理 `core/schemas.py` 現在剛好 **2,000 行**（`> READ_LIMIT` 才紅）—— 零裕度，
-  下一個欄位就會讓整套測試紅，加欄位前先拆。
+- **拆檔之後舊單檔要進 `ota_manifest.STALE_PATHS`**（2026-09-11 拆 `core/schemas.py` 時加的）：
+  三條部署路都是「覆蓋、不刪」（NAS scp、deploy_to_prod 逐檔 copy、機隊 OTA 解壓），套件跟同名
+  單檔會並存。Python 先找到套件（實測），功能不壞，但下一個人會改到一份沒被載入的程式碼。
+  三條路都吃這份清單（deploy_to_prod 先備份、rollback 還得回來；bootstrap 用 regex 從剛解出的
+  manifest 讀，維持 stdlib-only）。同日：`test_files_stay_readable` 的掃描加了 `.css`
+  （`crm.css` 2,286 行拆成 `crm.css`＋`crm-project-views.css`，載入順序不能反）、`core/schemas.py`
+  拆成六段套件（掃原始碼用 `_srcscan.schemas_src()`）、`_crm_cols` 搬到 `db/migrations.CRM_COLUMNS`。
 - **客戶看得到的頁面不要在原始碼裡列出我們的內部欄位**：`invoice-file.html` 第一版把「代開費／母帳私帳／未收款…一律不上」抄進檔頭註解，用意是好的，但那頁寄給客戶、原始碼看得到，等於順手告訴對方我們內部在記些什麼。要寫清單去後端那支寫。

@@ -39,6 +39,10 @@ const groupQuoteItems = _QA.groupQuoteItems || ((items) => {
 const flattenQuoteGroups = _QA.flattenQuoteGroups || ((groups) => (groups || []).flatMap(g => g.items.map(it => ({ ...it, group_name: g.name }))));
 import { list, opt, skeleton, emptyBox, errBox, pill, withBusy, markStale, shouldLoad, renderPaged,
     isAdmin, state as _mState, openSheet, closeSheet, pickerHtml, mountPicker, createClientOption, copyText } from '../ui.js';
+import * as _UI from '../ui.js';
+// copyDeferred 走命名空間＋退路：CF 給 .js 四小時快取，發版後會有一輪「新 quotes.js ＋ 舊 ui.js」，
+// named import 不存在會炸整頁；退路＝舊行為（等文字到了再複製，桌機能用、iPhone 那一輪照舊失敗）。
+const copyDeferred = _UI.copyDeferred || ((p) => p.then((t) => copyText(t)));
 
 /** 鑄連結／生成報價單這兩顆的鑰匙 —— 鏡射後端的 `_check_quotes_auth`（管理員 ‖ crm_quotes）。
  *
@@ -174,30 +178,39 @@ async function shareLink(btn, rows, host) {
     const q = rows.find(r => r.id === btn.dataset.share);
     if (!q) return;
     let regen = false;
+    // 🔴 網址還在飛就先把「複製」掛上（copyDeferred 收 Promise、在手勢當下同步呼叫）：
+    //    iPhone Safari 在任何 await 之後都拒絕寫剪貼簿 —— 原本先 await /share 再複製，手機一律「複製失敗」。
+    //    這一行以上不能有 await；下面 withBusy 裡才 await。
+    const urlPromise = (async () => {
+        // 鑄連結是寫入（後端走 crm_quotes）：不能鑄的人這顆鈕只是要複製已經有的那條，別打 API 拿 403
+        if (canQuote()) {
+            // 還沒生成（或生成後又改過）就順手先生成一份再給連結 —— 不是叫他先去按「生成報價單」。
+            // 拿到連結的下一秒就是貼給客戶，那時客戶看到的必須是現在這一版；忘記先按的人不會收到
+            // 任何錯誤，只有客戶會看到舊的或打不開。
+            // 🔴 生成失敗**不可以**讓複製連結跟著失敗。這台可能產不出 PDF
+            //    （走 NAS 的 office-api 時就沒有 Playwright），而後端的 /share 自己
+            //    是優雅降級的（stale 時 fire 一發背景生成、照樣回 share_url）——
+            //    包在同一個 try 裡等於把後端已經處理好的降級變成硬失敗，
+            //    而「master 關機時報價還能用」正是那條路存在的理由。
+            if (q.pdf_state && q.pdf_state.stale) {
+                try { await runGenerate(q, btn); regen = true; }
+                catch (e) { toast('連結可以用，但重新生成失敗：' + e.message, 'err'); }
+            }
+            const r = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(q.id)}/share`, { method: 'POST' });
+            q.share_url = r.share_url;
+        }
+        // 🔴 網址用後端回的：客戶拿到哪個網域只由後端的 quotes_public_base 決定，不再是「按複製的人
+        //    當時開在哪個網址」。沒設定時它回相對路徑，那就沿用 location.origin（＝現況行為）。
+        const url = String(q.share_url || '');
+        return url.startsWith('http') ? url : location.origin + url;
+    })();
+    const copied = copyDeferred(urlPromise);
+    copied.catch(() => {});                      // 錯誤由下面那個 catch 講，這裡別變成 unhandled rejection
     await withBusy(btn, async () => {
         try {
-            // 鑄連結是寫入（後端走 crm_quotes）：不能鑄的人這顆鈕只是要複製已經有的那條，別打 API 拿 403
-            if (canQuote()) {
-                // 還沒生成（或生成後又改過）就順手先生成一份再給連結 —— 不是叫他先去按「生成報價單」。
-                // 拿到連結的下一秒就是貼給客戶，那時客戶看到的必須是現在這一版；忘記先按的人不會收到
-                // 任何錯誤，只有客戶會看到舊的或打不開。
-                // 🔴 生成失敗**不可以**讓複製連結跟著失敗。這台可能產不出 PDF
-                //    （走 NAS 的 office-api 時就沒有 Playwright），而後端的 /share 自己
-                //    是優雅降級的（stale 時 fire 一發背景生成、照樣回 share_url）——
-                //    包在同一個 try 裡等於把後端已經處理好的降級變成硬失敗，
-                //    而「master 關機時報價還能用」正是那條路存在的理由。
-                if (q.pdf_state && q.pdf_state.stale) {
-                    try { await runGenerate(q, btn); regen = true; }
-                    catch (e) { toast('連結可以用，但重新生成失敗：' + e.message, 'err'); }
-                }
-                const r = await mfetch(`/api/v1/crm/quotations/${encodeURIComponent(q.id)}/share`, { method: 'POST' });
-                q.share_url = r.share_url;
-            }
-            // 🔴 網址用後端回的：客戶拿到哪個網域只由後端的 quotes_public_base 決定，不再是「按複製的人
-            //    當時開在哪個網址」。沒設定時它回相對路徑，那就沿用 location.origin（＝現況行為）。
-            const url = String(q.share_url || '');
-            const full = url.startsWith('http') ? url : location.origin + url;
-            toast((await copyText(full)) ? '連結已複製：' + full : '複製失敗，連結：' + full, 'ok');
+            const full = await urlPromise;
+            if (await copied) toast('連結已複製：' + full, 'ok');
+            else toast('自動複製被擋，點右邊複製：' + full, 'ok', { copy: full });
         } catch (e) { toast(e.message, 'err'); }
     });
     // 第一次建完把按鈕字換掉：要在 withBusy 之後改（它的 finally 會把按鈕字還原成按下前的）；列上的 q.share_url 已更新，不必整份重抓重畫
