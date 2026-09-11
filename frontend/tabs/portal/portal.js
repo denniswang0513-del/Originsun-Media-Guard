@@ -9,6 +9,7 @@
  */
 
 import { esc } from '../website/website-utils.js';
+import { copyText } from '../../js/shared/utils.js';
 
 const API = '/api/v1/portal';
 const STATUSES = ['待審', '修改中', '已核准'];
@@ -43,23 +44,9 @@ function _reviewUrl(token) {
     return location.origin + '/review.html?token=' + token;
 }
 
-async function _copyText(text) {
-    try {
-        await navigator.clipboard.writeText(text);
-        return true;
-    } catch (_) {
-        // http 非 secure context 時 clipboard API 不可用 → textarea fallback
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.cssText = 'position:fixed;opacity:0;';
-        document.body.appendChild(ta);
-        ta.select();
-        let ok = false;
-        try { ok = document.execCommand('copy'); } catch (_e) { /* noop */ }
-        ta.remove();
-        return ok;
-    }
-}
+// 複製走共用那支（js/shared/utils.copyText，三層退路）—— 這裡原本自己寫了一份 textarea 退路，
+// 全 repo 的複製只該有一份實作。
+const _copyText = (text) => copyText(text);
 
 // ── 殼層 ─────────────────────────────────────────────────
 

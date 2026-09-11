@@ -1155,6 +1155,17 @@
          border-radius: 3px; padding: 1px 0; }
 .po-st.done { border-color: #2f5d43; color: #86efac; }
 .po-row.po-all { border-bottom: 1px solid #3a3a3a; background: #222; }
+.po-row.po-bound { opacity: .6; }
+.po-row.po-bound .po-st { color: #fbbf24; }
+.pay-raw { color: #9ca3af; font-size: 11px; margin-left: 4px; }
+.po-existing { border: 1px solid #3a3a3a; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; background: #1f1f1f; }
+.po-existing-h { font-size: 12px; color: #9ca3af; margin-bottom: 6px; }
+.po-ex-row { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 4px 0; }
+.po-ex-date { color: #d1d5db; min-width: 84px; }
+.po-ex-amt { font-variant-numeric: tabular-nums; min-width: 80px; }
+.po-ex-n { color: #9ca3af; min-width: 40px; }
+.po-ex-off { color: #6b7280; font-size: 12px; }
+.po-revoke { color: #f87171; }
 .po-done { flex: 1 1 100%; color: #86efac; font-size: 13px; }
 .po-total { margin-top: 12px; font-size: 13px; color: #d1d5db; }
 .po-total b { color: #fbbf24; font-family: ui-monospace, Consolas, monospace; }

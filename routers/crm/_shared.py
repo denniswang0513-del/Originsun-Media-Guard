@@ -758,3 +758,45 @@ async def mine_parent_names(session, mine_ids) -> dict:
     for (mid, _pid), name in pairs.items():
         out.setdefault(mid, []).append(name)
     return {k: sorted(v) for k, v in out.items()}
+
+
+# ── 收款人那段字 → 人員（三個入口共用：應付彙總／匯款通知／員工工作台）──────
+
+class PayeeResolver:
+    """人員檔載一次，之後每個收款人字串問一次（記憶化）。
+
+    規則在 `core.staff_alias`（純函式、有測試）；這裡只負責 I/O 與快取。
+    🔴 三個入口都要走這支 —— 一個地方用字面比對、別的地方用代稱解析，
+    同一個人在應付面板是一組、在員工工作台卻看不到自己被寫成「停車費 史丹」的那幾筆。
+    """
+
+    def __init__(self, staff_rows):
+        from core.staff_alias import build_index
+        # order_by 不能省：人員檔有同名重複建檔，by_name 是「先到的先贏」——
+        # 沒排序的話哪一筆先到由 Postgres 決定，銀行帳號會今天這本、明天那本。
+        self.by_id = {r.id: r for r in staff_rows}
+        self.index = build_index([(r.id, r.name, r.alias) for r in staff_rows])
+        self.dup_alias = self.index.get("dup_alias") or set()
+        self._memo: dict = {}
+
+    @classmethod
+    async def load(cls, session):
+        from db.models import CrmStaff
+        rows = (await session.execute(
+            select(CrmStaff.id, CrmStaff.name, CrmStaff.alias,
+                   CrmStaff.id_number, CrmStaff.bank_name, CrmStaff.bank_account)
+            .order_by(CrmStaff.id))).all()
+        return cls(rows)
+
+    def resolve(self, payee_name):
+        """字串 → 人員列（Row，有 id／name／id_number／bank_name／bank_account）或 None。"""
+        from core.staff_alias import resolve
+        key = (payee_name or "").strip()
+        if key not in self._memo:
+            who = resolve(key, self.index)
+            self._memo[key] = self.by_id.get(who) if who is not None else None
+        return self._memo[key]
+
+    def strings_for(self, staff_id, candidates) -> list:
+        """哪些收款人字串會對到這個人 —— 給「WHERE payee_name IN (...)」用。"""
+        return [c for c in candidates if (st := self.resolve(c)) is not None and st.id == staff_id]

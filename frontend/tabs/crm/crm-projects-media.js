@@ -19,6 +19,7 @@
 import { crmFetch as _fetch, esc as _esc, crmToast as _toast, hasModule } from './crm-utils.js';
 import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 import { uploadFile } from '../../js/shared/chunked-upload.js';
+import { copyText } from '../../js/shared/utils.js';
 
 // 讀取開給 crm_projects（RBAC 稽核第二批）；產 token／啟停公開連結／設定／刪檔這些寫入仍是 media_log 的事。
 // 上傳走公開端點（token 即授權），不在這把鑰匙底下。
@@ -312,12 +313,8 @@ function _applyEnabledUI() {
 
 async function _copyLink() {
     const url = _absShareUrl(_data.share_url);
-    try {
-        await navigator.clipboard.writeText(url);
-        _toast('已複製公開連結');
-    } catch {
-        window.prompt('手動複製此連結：', url);
-    }
+    // copyText 自帶三層退路（內網 http 上 navigator.clipboard 不存在）；失敗它會自己 prompt
+    if (await copyText(url)) _toast('已複製公開連結');
 }
 
 async function _resetToken() {

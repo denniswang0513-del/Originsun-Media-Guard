@@ -128,9 +128,14 @@ def _alias_code(key: str):
 def resolve(text: str) -> tuple[str | None, str]:
     """一段人打的字 → `(三碼代號 或 None, 顯示用的銀行名)`。
 
-    代號優先：字串裡有三碼且在表內就用它（人打的名字可能是簡稱或舊名）。
-    沒有代號就拿去掉雜訊的名字查別名表。兩條都不中 → `(None, 原字串)`，
-    **原樣放行**，畫面顯示他打的字。
+    三碼與名字**兩邊都看**：
+      * 只有其中一邊解得出來 → 用那一邊。
+      * 兩邊都解得出來而且一致 → 用它。
+      * 兩邊都解得出來卻**不一致** → `(None, 原字串)`，**不猜**（owner 2026-09-11
+        「都修好」時拍板）：「玉山銀行 013 分行」「局號 021 郵局」這種，
+        三碼是分行號／局號不是銀行代號；而那個值是出納直接複製進網銀第一格的，
+        給一個看起來很肯定的錯代號比留空糟得多 —— 留空他會自己去查。
+      * 兩邊都不中 → `(None, 原字串)`，原樣放行，畫面顯示他打的字。
 
     >>> resolve("中信（822)")
     ('822', '中國信託商業銀行')
@@ -143,22 +148,29 @@ def resolve(text: str) -> tuple[str | None, str]:
     if not raw:
         return None, ""
     # 🔴 只看**第一個**孤立三碼，不要用 finditer 掃全串（2026-09-11 /polish 第 2 輪）：
-    # 掃全串的話，`華南銀行 帳號 1234-567-700` 裡的帳號分段 `700` 會奪權變成中華郵政、
-    # `玉山銀行 678-008-374071` 變成華南 —— 模擬「銀行名＋分段帳號」4,000 筆有 3.8%
-    # 被帳號數字搶走。而這個值是出納**直接複製進網銀第一格**的東西：解不出來（None）
-    # 他會自己去查，給他一個看起來很肯定的錯代號才是真的會匯錯。
-    #
-    # ⚠️ 殘留風險（owner 未拍板，不在這裡自己改）：第一個孤立三碼**剛好**是有效代號時
-    # 仍會壓過白紙黑字的銀行名（`台新銀行 008-123-456789` → 華南、`局號 021 郵局` → 花旗）。
-    # 「三碼優先」是既有規則、`test_code_wins_over_the_name` 釘著；而生產 25 筆銀行字串
-    # 目前沒有任何一筆的名稱與代號互相矛盾，所以這是潛在陷阱不是現行錯誤。
+    # 掃全串的話，`華南銀行 帳號 1234-567-700` 裡的帳號分段 `700` 會奪權變成中華郵政。
     m = _CODE.search(raw)
-    if m and m.group(1) in BANKS:
-        return m.group(1), BANKS[m.group(1)]
-    code = _alias_code(normalize_name(raw))
-    if code:
-        return code, BANKS[code]
-    return None, raw
+    by_code = m.group(1) if m and m.group(1) in BANKS else None
+    key = normalize_name(raw)
+    by_name = _alias_code(key)
+    if by_code and (_name_hints(key) - {by_code}):
+        return None, raw          # 名字說一家、三碼說另一家 —— 不猜，見 docstring
+    code = by_code or by_name
+    return (code, BANKS[code]) if code else (None, raw)
+
+
+def _name_hints(key: str) -> set:
+    """名字那半**提到了**哪幾家（子字串比對）。
+
+    只拿來**否決**三碼，不拿來斷定代號：「玉山銀行 013 分行」去掉數字與雜訊是
+    「玉山銀行分行」，別名表查不到（多了「分行」），但它明明提到了玉山 —— 這時
+    013 就不該被採信。斷定代號仍走 `_alias_code`（要整段對上）。
+    """
+    if not key:
+        return set()
+    hits = {code for alias, code in ALIASES.items() if alias and alias in key}
+    hits |= {code for code, name in BANKS.items() if normalize_name(name) in key}
+    return hits
 
 
 def by_code(code: str) -> str:

@@ -26,9 +26,23 @@ class TestResolveRealWorldSpellings:
                            ("連線商業銀行", "824")):
             assert resolve(text)[0] == code, text
 
-    def test_code_wins_over_the_name(self):
-        """人打的名字可能是簡稱或舊名，三碼才是銀行認的東西。"""
-        assert resolve("玉山銀行(822)")[0] == "822"
+    def test_name_and_code_that_disagree_are_not_guessed(self):
+        """名字說一家、三碼說另一家 → 不猜（owner 2026-09-11「都修好」拍板）。
+
+        「玉山銀行 013 分行」的 013 是分行號、「局號 021 郵局」的 021 是局號 —— 都不是
+        銀行代號。舊規則「三碼優先」會回國泰世華／花旗，而那個值是出納直接複製進
+        網銀第一格的；留空他會自己去查，給一個看起來很肯定的錯代號才會匯錯。
+        生產 25 筆銀行字串目前沒有任何一筆矛盾，這條改的是未來的輸入。
+        """
+        for text in ("玉山銀行(822)", "玉山銀行 013 分行", "局號 021 郵局", "台新銀行 008-123-456789"):
+            assert resolve(text) == (None, text), text
+
+    def test_code_alone_or_agreeing_code_still_resolves(self):
+        """只有三碼、或三碼跟名字一致 → 照用（生產資料的形狀全在這裡）。"""
+        assert resolve("822")[0] == "822"
+        assert resolve("中信（822)")[0] == "822"
+        assert resolve("玉山銀行 808")[0] == "808"
+        assert resolve("郵局700")[0] == "700"
 
     def test_full_width_and_half_width_mixed(self):
         """`中信（822)` —— 左全形右半形，生產資料裡真的有這一筆。"""

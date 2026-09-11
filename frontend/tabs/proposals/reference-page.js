@@ -22,6 +22,7 @@
 import { tfetch } from './prop-fetch.js';
 import { renderShapes } from './annotate.js';
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
+import { copyText } from '../../js/shared/utils.js';
 import { browserKey, ensureStyle } from '../../js/shared/utils.js';
 import { ARCHIVE_LABEL, archiveLabelFor } from './ref-pills.js';
 
@@ -751,8 +752,8 @@ function _wireMarkdown(container, ctx, { say }) {
     const { ref } = ctx;
     container.querySelector('#rfc-md')?.addEventListener('click', async () => {
         const md = _toMarkdown(ref);
-        try { await navigator.clipboard.writeText(md); say('已複製 Markdown ✓'); }
-        catch { window.prompt('複製這段 Markdown：', md); }
+        // 共用 copyText（三層退路，失敗它自己會 prompt）
+        if (await copyText(md)) say('已複製 Markdown ✓');
     });
 }
 

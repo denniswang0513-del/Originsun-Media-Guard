@@ -9,6 +9,7 @@
 
 import { crmFetch as _fetch, esc as _esc, projectOptionsHtml, searchableSelect, createSortable, sortableTh } from './crm-utils.js';
 import { loadMediaTab } from './crm-projects-media.js';
+import { copyText } from '../../js/shared/utils.js';
 
 const ADMIN_API = '/api/v1/crm';   // 孤兒資料夾 thumb/file 直接當 <img>/<a> src（非 crmFetch JSON）
 
@@ -286,10 +287,10 @@ function _renderQr(folderName, d) {
     document.getElementById('cml-qr-close').onclick = _closeOverlay;
     document.getElementById('cml-qr-copy').onclick = async () => {
         const m = document.getElementById('cml-qr-msg');
-        try {
-            await navigator.clipboard.writeText(share);
+        // copyText 自帶三層退路（內網 http 上 navigator.clipboard 不存在）
+        if (await copyText(share)) {
             m.textContent = '已複製連結'; m.className = 'cml-link-msg ok';
-        } catch {
+        } else {
             const i = document.getElementById('cml-qr-url'); i.select();
             m.textContent = '請手動複製（Ctrl+C）'; m.className = 'cml-link-msg';
         }

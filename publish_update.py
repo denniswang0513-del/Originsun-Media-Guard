@@ -593,6 +593,72 @@ def _rollback_version(v_data: dict, current_version: str) -> None:
     print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
 
 
+def _is_dev_checkout() -> bool:
+    """這份 checkout 是不是開發機那份（DB 指向 `*_dev`）。
+
+    dev 機上 8000 跑的是 `C:\\OriginsunAgent` 的**另一份**碼，這支寫的 version.json
+    它讀不到；重啟它只是白白讓同事斷線，等它回報新版更是永遠等不到。那台的
+    master 是由 `/publish` skill 後半的 deploy_to_prod 負責（它自己有 smoke check）。
+    """
+    try:
+        from config import load_settings
+        return str(load_settings().get("database_url") or "").rstrip("/").endswith("_dev")
+    except Exception:
+        return False
+
+
+def master_restarted(expect_version: str, *, alive, running, sleep,
+                     drop_tries: int = 60, up_tries: int = 45) -> tuple:
+    """證明主控端**真的**重啟成 `expect_version`。回 (ok, 說明)。
+
+    照 `routers/api_ota._smoke_check_prod` 的做法：
+      1. 先等 port **斷掉**（舊行程真的退場）—— 沒斷就是重啟沒發生。
+      2. 再等它回來，而且 `/api/v1/version` 的 `running`（行程載入時的版號）等於新版。
+         🔴 看 `running` 不看 `version`：後者每 request 重讀磁碟，而發版在重啟前就已經
+         把新版號寫進檔了 —— 只看它的話「根本沒重啟」也會被判成通過（第一版就這樣，
+         2026-09-11 /polish 第 2 輪抓到後拿掉；這次補上真正能證明的那條）。
+
+    `alive()`／`running()`／`sleep()` 用參數傳進來是為了測試；正式呼叫端給 urllib 的版本。
+    """
+    dropped = False
+    for _ in range(drop_tries):
+        if not alive():
+            dropped = True
+            break
+        sleep(0.5)
+    if not dropped:
+        return False, "30 秒內 port 8000 沒有中斷 —— 重啟沒有發生（舊行程還在跑舊碼）"
+    for _ in range(up_tries):
+        sleep(2)
+        got = running()
+        if got is None:
+            continue
+        if got == expect_version:
+            return True, f"主控端已重啟成 v{got}"
+        return False, f"主控端回來了但跑的是 v{got or '?'}，不是 v{expect_version}"
+    return False, "重啟後 90 秒內服務沒有回來"
+
+
+def _master_alive() -> bool:
+    import urllib.request
+    try:
+        urllib.request.urlopen("http://127.0.0.1:8000/api/v1/health", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+def _master_running():
+    """`/api/v1/version` 的 `running`；連不上回 None、舊碼沒有這個欄位回 ""。"""
+    import json as _json
+    import urllib.request
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8000/api/v1/version", timeout=3) as r:
+            return str((_json.loads(r.read().decode("utf-8")) or {}).get("running") or "")
+    except Exception:
+        return None
+
+
 def notes_look_mangled(notes: str) -> bool:
     """這段 release notes 看起來是不是「中文被 codepage 吃成 `?` 」了？
 
@@ -612,14 +678,17 @@ def notes_look_mangled(notes: str) -> bool:
     全部溜過去。反向也沒換到保護：要誤殺得寫出「5 個以上問號、其餘不到 2 字」
     的英文 notes，那種東西本來就不該當版本說明。
 
-    ⚠️ 抓不到的殘留情形：中文活著、只有**全形標點或假名**被吃掉
-    （`修正?報價單?PDF?`）—— 那種一次只吃掉一個字、中間又隔著中文，跟作者自己
-    打的問號分不開。真的在意就一律用 `--notes-file`。
+    另外抓「中文字之後緊貼著 `?`、而 `?` 後面不是空白也不是句尾」（`修正?報價單`、
+    `匯款通知?NAS`）：那是全形標點（：、（ ）、——）被吃掉的樣子 —— 作者自己打的
+    問號會在句尾或後面接空白。
+    抓不到的殘留：只有假名被吃、或最後一個字是全形標點（`修正報價單?`）。
+    真的在意就一律用 `--notes-file`。
     """
     # 🔴 只認「連續」。曾經多一條「有兩個以上問號又沒中文就擋」——
     # 那條把上面剛說不要誤殺的東西又殺回來了，只是門檻從 1 個變 2 個：
     # `fix: A? or B?` 會讓發版直接被擋下來。
-    return "??" in str(notes or "")
+    text = str(notes or "")
+    return "??" in text or bool(re.search(r"[\u4e00-\u9fff]\?\S", text))
 
 
 def main():
@@ -884,40 +953,40 @@ def main():
     # Primary: /internal/restart (api_ota path). /system/restart is the
     # legacy duplicate kept only for in-place upgrades from older agents
     # that still call it via /publish.
-    print("\n[*] 重啟主控端以載入新版本...")
-    import urllib.request
-    try:
-        req = urllib.request.Request(
-            "http://127.0.0.1:8000/api/v1/internal/restart",
-            method="POST", data=b'{}',
-            headers={"Content-Type": "application/json",
-                     "X-Internal-Key": "originsun-internal-restart"},
-        )
-        urllib.request.urlopen(req, timeout=5)
-    except Exception:
-        try:
-            req = urllib.request.Request(
-                "http://127.0.0.1:8000/api/v1/system/restart",
-                method="POST", data=b'{}',
-                headers={"Content-Type": "application/json",
-                         "X-Internal-Key": "originsun-internal-restart"},
-            )
-            urllib.request.urlopen(req, timeout=5)
-        except Exception:
-            print("[WARN] 無法自動重啟主控端，請手動重啟:")
-            print(f"  wscript.exe start_hidden.vbs")
-
-    # ⚠️ 這裡**沒有**「master 起來了嗎」的閘門，而且那是刻意的（2026-09-11 /polish
-    # 第 2 輪）：`/api/v1/version` 每個 request 重讀 version.json，而這支在上面就已經
-    # 把新版號寫進檔了 —— 於是「行程根本沒重啟、還跑著舊碼」時它照樣回報新版號，
-    # 閘門必定放行（`core/version.py` 的檔頭就是在講這個陷阱）。做一道擋不住東西的
-    # 閘門比沒有更糟：它會給人「已經確認過了」的錯覺，而且失敗那條路會停在
-    # 「版號已 bump、文件已改、包已打好、NAS 沒同步」的半完成狀態而且不會回滾。
-    #
-    # 真正的風險還在，發版的人要自己看上面那行有沒有 [WARN]：**DB migration 只有
-    # master 會跑**，master 沒重啟成功就把新 code 送上 NAS 的話，office-api 會拿新
-    # ORM 去查舊 schema、整段 500，而 master 上看起來一切正常（v2.5.0 踩過）。
-    # 要做對得比對「行程載入時取一次的版號常數」，或打一支只有新版才有的路由。
+    if _is_dev_checkout():
+        # dev 機：8000 跑的是 C:\OriginsunAgent 那份碼，重啟它只是白白讓同事斷線。
+        # 它的更新與 smoke check 由 /publish skill 後半的 deploy_to_prod 負責。
+        # 🔴 但這代表 NAS 會**先**拿到新碼、master 才更新 —— DB migration 只有 master 會跑，
+        #    帶新欄位的版本要先把 DDL 補到生產（同 v2.5.4 那次的 predeploy_ddl），
+        #    或發完立刻接 deploy_to_prod，不要停在中間。
+        print("\n[*] dev 機：跳過重啟 8000（deploy_to_prod 會做），NAS 會先拿到新碼 —— ")
+        print("    有新欄位的版本請確認 DDL 已先補到生產，或發完立刻接 deploy_to_prod。")
+    else:
+        print("\n[*] 重啟主控端以載入新版本...")
+        import urllib.request
+        for path in ("/api/v1/internal/restart", "/api/v1/system/restart"):
+            try:
+                req = urllib.request.Request(
+                    "http://127.0.0.1:8000" + path, method="POST", data=b'{}',
+                    headers={"Content-Type": "application/json",
+                             "X-Internal-Key": "originsun-internal-restart"})
+                urllib.request.urlopen(req, timeout=5)
+                break
+            except Exception:
+                continue
+        # 🔴 送 NAS 之前要**證明** master 真的重啟成新版：DB migration 只有 master 會跑，
+        # master 沒重啟就把新 code 送上 NAS 的話，office-api 會拿新 ORM 去查舊 schema、
+        # 整段 500，而 master 上看起來一切正常（v2.5.0 踩過）。
+        # 「證明」＝先等 port 斷、再等回來且 running（行程載入時的版號）是新版 ——
+        # 不是看 /version 的 version 欄位（那個每 request 重讀磁碟，沒重啟也會是新的）。
+        ok, why = master_restarted(new_version, alive=_master_alive, running=_master_running,
+                                   sleep=time.sleep)
+        if not ok:
+            print(f"\n[ERROR] {why}")
+            print("  不同步 NAS。請手動重啟主控端（wscript.exe start_hidden.vbs）確認版號後再發一次。")
+            _rollback_version(v_data, current_version)
+            return 1
+        print(f"[OK] {why}")
 
     # ── NAS website-api code sync（讓對外網站 admin endpoint 拿到新 code）──
     nas_ok = sync_website_to_nas()

@@ -1,4 +1,4 @@
-import { appendLog, getComputeBaseUrl, getAgentBaseUrl, addStandaloneSource, setupDragAndDrop, setupInputDrop, pickPath, bearerHeader } from '../../js/shared/utils.js';
+import { appendLog, getComputeBaseUrl, getAgentBaseUrl, addStandaloneSource, setupDragAndDrop, setupInputDrop, pickPath, bearerHeader, copyText } from '../../js/shared/utils.js';
 
 window.modelCacheStatus = {};
 window.isDownloadingModel = false;
@@ -764,9 +764,9 @@ function _showAlignDepsModal(missing, hostUrl) {
             const action = e.target.closest('[data-action]')?.dataset.action;
             if (action === 'cancel') return close(false);
             if (action === 'copy') {
-                try { await navigator.clipboard.writeText(installCmd); }
-                catch { /* clipboard blocked */ }
-                e.target.closest('[data-action]').textContent = '✓ 已複製';
+                // 🔴 原本失敗也顯示「已複製」—— 內網 http 上 clipboard 不存在，同事按了以為複製好了
+                //    去貼結果是空的。copyText 有三層退路，而且回 false 時不要謊報。
+                if (await copyText(installCmd)) e.target.closest('[data-action]').textContent = '✓ 已複製';
                 return;
             }
             if (action === 'install') {

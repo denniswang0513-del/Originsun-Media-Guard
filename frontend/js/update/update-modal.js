@@ -103,7 +103,8 @@ async function updateAgent() {
         // 3) 同時複製 PowerShell 指令到剪貼簿（備用）
         const serverHost = window.location.host || '192.168.1.107:8000';
         const psCmd = `powershell -ExecutionPolicy Bypass -c "irm http://${serverHost}/bootstrap.ps1 | iex"`;
-        try { await navigator.clipboard.writeText(psCmd); } catch(e) {}
+        // 共用 copyText（三層退路）；這裡複製不到也沒關係，指令會顯示在畫面上
+        try { const { copyText } = await import('../shared/utils.js'); await copyText(psCmd); } catch(e) { /* 畫面上有指令可手動複製 */ }
 
         // 4) 開始輪詢：偵測版本升級完成後自動重整
         _pollForMigrationDone();

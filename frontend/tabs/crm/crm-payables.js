@@ -33,6 +33,8 @@ function _buildMonthGroups() {
             if (!monthMap[m][p.payee_name]) {
                 monthMap[m][p.payee_name] = {
                     payee_name: p.payee_name,
+                    person_id: p.person_id || '',
+                    aliases: p.aliases || [],      // 這一組合併了哪幾種寫法（「停車費 史丹」「早餐 史丹」）
                     payee_id: p.payee_id,
                     bank_name: p.bank_name,
                     bank_account: p.bank_account,
@@ -184,6 +186,9 @@ const _unpaidItems = (p) => p.items.filter(it => it.payment_status !== '已付�
 const _unpaidTotal = (p) => p.unpaid_amount || 0;
 /** 一筆項目寫成一行人看得懂的字（複製出去給收款人核對用）。 */
 const _itemLine = (it) => `${it.summary}${it.project_label ? `（${it.project_label}）` : ''} $${_fmtNum(it.amount)}`;
+/** 群組是按「人」併的；這一列當初打的收款人跟群組名不同時（「停車費 史丹」），標出來。 */
+const _rawPayeeTag = (it, p) => (it.payee_name && it.payee_name !== p.payee_name)
+    ? `<span class="pay-raw" title="這一筆請款單上打的收款人">${_esc(it.payee_name)}</span>` : '';
 
 /* ── 詳情面板 ── */
 function renderDetail(p, month) {
@@ -251,6 +256,8 @@ function renderDetail(p, month) {
         <div style="display:flex;flex-wrap:wrap;gap:6px 16px;color:#9ca3af;font-size:11.5px;padding-top:10px;">
             ${p.payee_id ? `<span>身分證 ${_esc(p.payee_id)}</span>` : ''}
             <span>應付總額 $${_fmtNum(p.month_amount)}</span>
+            ${(p.aliases || []).length > 1
+                ? `<span title="這幾種寫法都對到同一位人員，已併成一組">含：${p.aliases.map(_esc).join('、')}</span>` : ''}
         </div>
     `;
 }
@@ -515,18 +522,42 @@ function _runListText(rows, total) {
  *  預設勾起來的是**還沒付**的那幾筆（多數情況就是這次要匯的），但已付的也列出來
  *  可以勾 —— 補一張通知給早就匯過的人是真的會發生。
  *  產生連結**不會**改付款狀態（標已付款是面板上另一顆）。 */
-window._payoutNotify = (name, month) => {
+window._payoutNotify = async (name, month) => {
     const p = _findPayee(name, month);
     if (!p) return;
 
+    // 這位收款人已經產過的通知（按人比對，歷史上用原字串存的也對得到）
+    let existing = [];
+    try {
+        existing = (await _fetch(`/payouts?payee=${encodeURIComponent(name)}&entity=${encodeURIComponent(_pinEntity())}`)).payouts || [];
+    } catch (_) { /* 拿不到就當沒有 —— 不擋產生 */ }
+    const liveById = new Map(existing.filter(x => x.code).map(x => [x.id, x]));
+
     const rows = p.items.map(it => {
         const paid = it.payment_status === '已付款';
-        return `<label class="po-row">
-            <input type="checkbox" value="${_esc(it.id)}" ${paid ? '' : 'checked'}>
-            <span class="po-sum">${_esc(_itemLine(it))}</span>
-            <span class="po-st${paid ? ' done' : ''}">${paid ? '已付款' : '應付款'}</span>
+        const bound = it.payout_id && liveById.get(it.payout_id);
+        // 已經在一張還有效的通知上的：預設不勾、標出來。勾了會被後端 422 擋下，
+        // 所以這裡先講清楚「要重做請先撤銷那一張」。
+        return `<label class="po-row${bound ? ' po-bound' : ''}">
+            <input type="checkbox" value="${_esc(it.id)}" ${paid || bound ? '' : 'checked'}>
+            <span class="po-sum">${_esc(_itemLine(it))} ${_rawPayeeTag(it, p)}</span>
+            <span class="po-st${paid ? ' done' : ''}">${bound ? `已在 ${_esc(bound.paid_date || '')} 的通知` : (paid ? '已付款' : '應付款')}</span>
         </label>`;
     }).join('');
+
+    const existingHtml = existing.length ? `
+        <div class="po-existing">
+            <div class="po-existing-h">已產生的通知</div>
+            ${existing.map(x => `<div class="po-ex-row" data-id="${_esc(x.id)}">
+                <span class="po-ex-date">${_esc(x.paid_date || '')}</span>
+                <span class="po-ex-amt">$${_fmtNum(x.total)}</span>
+                <span class="po-ex-n">${x.item_count} 筆</span>
+                ${x.code
+                    ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" data-copy="${_esc(x.url)}">複製連結</button>
+                       <button class="crm-btn crm-btn-secondary crm-btn-sm po-revoke" data-revoke="${_esc(x.id)}">撤銷</button>`
+                    : '<span class="po-ex-off">已撤銷</span>'}
+            </div>`).join('')}
+        </div>` : '';
 
     const ov = document.createElement('div');
     ov.className = 'crm-modal-overlay';
@@ -534,6 +565,7 @@ window._payoutNotify = (name, month) => {
         <div class="crm-modal-header"><h3>匯款通知　${_esc(name)}</h3>
             <button class="crm-detail-close" type="button" data-close>關閉</button></div>
         <div class="crm-modal-body" style="max-height:62vh;overflow-y:auto;">
+            ${existingHtml}
             <div class="po-hint">勾這次<strong>實際匯出去</strong>的那幾筆。收款人打開連結會看到金額、日期與這份明細 ——
                 他的帳號與身分證不會出現在上面。</div>
             <div class="crm-field" style="max-width:220px;">
@@ -554,6 +586,27 @@ window._payoutNotify = (name, month) => {
     const close = () => ov.remove();
     ov.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', close));
     ov.onclick = (e) => { if (e.target === ov) close(); };
+
+    // 既有通知：複製 / 撤銷。撤銷之後重開彈窗（那幾筆就變成可以再勾）。
+    ov.querySelectorAll('[data-copy]').forEach(b => {
+        b.onclick = (ev) => copyText(b.dataset.copy, ev.currentTarget);
+    });
+    ov.querySelectorAll('[data-revoke]').forEach(b => {
+        b.onclick = async () => {
+            if (!confirm('撤銷之後，收款人手上那條連結會立刻打不開。確定？')) return;
+            b.disabled = true;
+            try {
+                await _fetch(`/payouts/${encodeURIComponent(b.dataset.revoke)}/share`, { method: 'DELETE' });
+                appendLog(`已撤銷匯款通知：${name}`, 'system');
+                close();
+                await loadPayables();                  // 重抓 —— items 上的 payout_id 要跟著更新
+                window._payoutNotify(name, month);
+            } catch (err) {
+                alert('撤銷失敗：' + err.message);
+                b.disabled = false;
+            }
+        };
+    });
 
     const boxes = () => [...ov.querySelectorAll('.po-rows input:checked')].map(b => b.value);
     const paintTotal = () => {
@@ -604,6 +657,7 @@ window._payoutNotify = (name, month) => {
             btn.disabled = false;
             btn.onclick = (ev) => copyText(url, ev.currentTarget);
             appendLog(`已產生匯款通知：${name}　$${_fmtNum(r.total)}　${url}`, 'system');
+            loadPayables();                            // items 上的 payout_id 要跟著更新
         } catch (err) {
             alert('產生失敗：' + err.message);
             btn.disabled = false; btn.textContent = '產生連結';

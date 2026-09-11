@@ -5,7 +5,7 @@
 
 import { copyText } from '../../js/shared/utils.js';
 import { state } from './crm-projects-state.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum, today, groupCostStaff, hasModule, canSeeMoney } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, today, groupCostStaff, hasModule, canSeeMoney, searchableSelect } from './crm-utils.js';
 import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 import { loadProjectStaff } from '../proposals/staff-view.js';
 
@@ -233,6 +233,10 @@ window._costCreatePayment = function(payeeName, amount, summary, status, advance
         '</div></div>';
     document.body.appendChild(overlay);
     // 選「其他」才露出打字框
+    // 156 位人員的原生下拉找不到人 —— 跟收支明細那份一樣升級成可搜尋的框。
+    // 不包 try：test_cost_advanced_by 釘「代墊沒選人的擋門要在這支函式第一個 try 之前」。
+    var _paySel = document.getElementById('pay-modal-payee');
+    if (_paySel && _paySel.options.length >= 4) searchableSelect(_paySel, { placeholder: '打字找人…' });
     document.getElementById('pay-modal-payee').addEventListener('change', function() {
         document.getElementById('pay-modal-payee-other').style.display =
             this.value === '__other__' ? '' : 'none';

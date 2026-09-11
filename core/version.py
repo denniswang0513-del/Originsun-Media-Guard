@@ -28,3 +28,9 @@ def read_version_json() -> dict:
 def read_local_version(default: str = "0.0.0") -> str:
     """本機版號字串。"""
     return read_version_json().get("version") or default
+
+
+#: 🔴 **這個行程載入時**的版號 —— 跟 `read_local_version()` 的差別就是檔頭那段警告：
+#: 發版流程先寫檔再重啟，重啟沒發生的話磁碟上已經是新版、行程還跑著舊碼。
+#: 要證明「真的重啟了」得看這個常數（`/api/v1/version` 的 `running` 欄位）。
+RUNNING_VERSION = read_local_version(default="")

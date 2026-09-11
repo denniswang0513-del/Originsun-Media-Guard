@@ -31,8 +31,8 @@ from core import payout_share
 from core.public_access import surface_gate
 from core.schemas import PayoutCreate
 
-from ._shared import (_fmt_day, _get_factory, _now, _require_db, money_dep,
-                      public_router, router)
+from ._shared import (PayeeResolver, _fmt_day, _get_factory, _now, _require_db,
+                      money_dep, public_router, router)
 
 
 def _payer_name() -> str:
@@ -69,10 +69,18 @@ async def create_payout(req: PayoutCreate, request: Request):
             select(CrmPaymentRequest).where(CrmPaymentRequest.id.in_(ids)))).scalars().all()
         if len(rows) != len(ids):
             raise HTTPException(status_code=404, detail="有幾筆找不到，請重新整理再試")
-        # 一張通知＝一個收款人的一次匯款。混到兩個人身上等於把別人的金額寄給他。
-        payees = {(r.payee_name or "").strip() for r in rows}
-        if len(payees) > 1:
-            raise HTTPException(status_code=422, detail=f"一張通知只能有一個收款人（勾到了 {len(payees)} 位）")
+        # 一張通知＝一個**人**的一次匯款。混到兩個人身上等於把別人的金額寄給他。
+        # 用 staff_alias 對過再比：「停車費 史丹」「早餐 史丹」是同一個人（應付面板
+        # 已經把他們併成一組），字面比對會把這種勾選擋成「勾到了 2 位」。
+        who = await PayeeResolver.load(session)
+        persons = {}
+        for r in rows:
+            st = who.resolve(r.payee_name)
+            persons[st.id if st is not None else f"raw:{(r.payee_name or '').strip()}"] = \
+                (st.name if st is not None else None) or (r.payee_name or "").strip()
+        if len(persons) > 1:
+            raise HTTPException(status_code=422, detail=f"一張通知只能有一個收款人（勾到了 {len(persons)} 位）")
+        payee_display = next(iter(persons.values()))
         if any((r.entity or "parent") != ent for r in rows):
             raise HTTPException(status_code=422, detail="勾到的請款單不在同一本帳")
         # 🔴 一筆請款單只屬於**一張還活著的**通知。原本是無條件 `r.payout_id = 新的`：
@@ -98,7 +106,7 @@ async def create_payout(req: PayoutCreate, request: Request):
         # `payout_share._day`（只切前 10 碼、不驗），於是非 ISO 的日期會讓
         # **他那頁印一個日期、我們的清單是另一個** —— 沒有 error，只有他看得到。
         paid = _paid_day(req.paid_date)
-        snap = payout_share.build_snapshot(payees.pop(), paid, _payer_name(), rows)
+        snap = payout_share.build_snapshot(payee_display, paid, _payer_name(), rows)
 
         payout = CrmPayout(id=uuid.uuid4().hex, entity=ent,
                            payee_name=snap["payee_name"], total=snap["total"],
@@ -150,6 +158,7 @@ async def revoke_payout_share(payout_id: str, request: Request):
     """
     from core.ledger import require_entity
     from db.models import CrmPayout
+    require_entity(request, "", level="full")      # 先擋沒登入／沒財務權的（401/403 在 404 前）
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -207,8 +216,18 @@ async def list_payouts(request: Request, payee: str = Query(""), limit: int = Qu
     factory = await _get_factory()
     async with factory() as session:
         stmt = select(CrmPayout).where(CrmPayout.entity == ent)
-        if payee.strip():
-            stmt = stmt.where(CrmPayout.payee_name == payee.strip())
+        want = payee.strip()
+        if want:
+            # 按**人**比對，不是字面：面板上的群組名是正式姓名，而歷史 payout 存的
+            # 可能是當時打的原字串（「停車費 史丹」）—— 字面比對會讓那幾張看起來像
+            # 「還沒產過」，出納再產一張，收款人收到兩條連結。
+            who = await PayeeResolver.load(session)
+            target = who.resolve(want)
+            names = (await session.execute(
+                select(CrmPayout.payee_name).where(CrmPayout.entity == ent).distinct())).scalars().all()
+            same = ([n for n in names if (st := who.resolve(n)) is not None and st.id == target.id]
+                    if target is not None else [want])
+            stmt = stmt.where(CrmPayout.payee_name.in_(same or [want]))
         rows = (await session.execute(
             stmt.order_by(CrmPayout.created_at.desc()).limit(max(1, min(limit, 100))))).scalars().all()
     from core.share_link import public_base, share_url
@@ -217,6 +236,7 @@ async def list_payouts(request: Request, payee: str = Query(""), limit: int = Qu
     return {"payouts": [{
         "id": p.id, "payee_name": p.payee_name or "", "total": p.total or 0,
         "paid_date": _fmt_day(p.paid_date),
+        "item_count": len((p.share_snapshot or {}).get("items") or []),
         "code": p.share_token or "",
         "url": share_url(f"/p/{p.share_token}", base) if p.share_token else "",
     } for p in rows]}

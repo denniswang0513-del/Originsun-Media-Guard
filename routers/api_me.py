@@ -175,16 +175,24 @@ async def my_workspace(request: Request):
                 } for r in ts_rows[:10]],
             }
 
+            # 🔴 不是 `payee_name == name` 字面比對：出納會把他寫成「停車費 史丹」
+            # 「志廷」「junior」，字面比對他永遠看不到那幾筆。同應付面板，走
+            # core.staff_alias 把每個相異字串對到人，再撈對到他的那些。
+            from routers.crm._shared import PayeeResolver
+            who = await PayeeResolver.load(session)
+            all_names = (await session.execute(
+                select(CrmPaymentRequest.payee_name).distinct())).scalars().all()
+            mine_names = who.strings_for(staff.id, [n for n in all_names if n]) or [name]
             _unpaid = CrmPaymentRequest.payment_status != "已付款"
             totals = (await session.execute(
                 select(func.coalesce(func.sum(CrmPaymentRequest.amount), 0),
                        func.count(CrmPaymentRequest.id).filter(_unpaid),
                        func.coalesce(func.sum(CrmPaymentRequest.amount).filter(_unpaid), 0))
-                .where(CrmPaymentRequest.payee_name == name)
+                .where(CrmPaymentRequest.payee_name.in_(mine_names))
             )).one()
             recent = (await session.execute(
                 select(CrmPaymentRequest)
-                .where(CrmPaymentRequest.payee_name == name)
+                .where(CrmPaymentRequest.payee_name.in_(mine_names))
                 .order_by(CrmPaymentRequest.request_date.desc().nulls_last())
                 .limit(5)
             )).scalars().all()

@@ -54,44 +54,62 @@ def project_margin(contract, tax_rate, expense_actual, staff_actual) -> dict:
             "margin_pct": round(margin * 100 / ex_tax, 1) if ex_tax > 0 else None}
 
 
+#: 收款人欄空白時的群組名（前端顯示用；也是 cash.py 判「對不到人」時要對得上的鍵）
+UNSPECIFIED_PAYEE = "未指定"
+
+
 def group_payables(rows) -> dict:
     """應付帳款分組（/payables/summary 的純聚合段，SQL 取數後餵進來）。
 
-    rows: iterable of (payment, staff_id_number, staff_bank_name, staff_bank_account)
-          — payment 為 CrmPaymentRequest（或測試用同形 namespace）。
-    outerjoin 可能因同名 staff 多列造成重複 → 以 payment.id 去重（保留第一列）。
+    rows: iterable of (payment, staff_or_None)
+          — payment 為 CrmPaymentRequest（或測試用同形物件）；
+            staff 是 `core.staff_alias` 對到的人員（要有 id／name／id_number／
+            bank_name／bank_account），對不到就 None。
+    以 payment.id 去重（保留第一列）。
+
+    🔴 **按「人」分組，不是按收款人那段字**（owner 2026-09-11「都修好」）：
+       「停車費 史丹」「早餐 史丹」「停車 史丹」是同一個人，原本是三列、要匯三次 ——
+       正是 staff_alias 要消滅的事，而第一版只解了「撈得到帳號」那一半。
+       群組名用人員檔的正式姓名；每一列保留原本打的字（`payee_name`），出納才看得出
+       這一列當初是怎麼寫的；`aliases` 列出這一組合併了哪幾種寫法。
+       對不到人的照原字串各自一組（不猜）。
+
     回傳 {"payees": [...按 total_amount 降冪...], "grand_total": N}。
+    「本次要匯」等月份粒度的數字**由前端算**（它是按「月 × 收款人」分組的，
+    後端這裡是按人跨全月，兩個粒度不同，這裡算了也沒有一格對得上）。
     """
     payee_groups: dict = {}
     seen_ids: set = set()
-    for p, staff_id_number, staff_bank_name, staff_bank_account in rows:
+    for p, staff in rows:
         if p.id in seen_ids:
             continue
         seen_ids.add(p.id)
-        name = p.payee_name or "未指定"
-        if name not in payee_groups:
+        raw = (p.payee_name or "").strip()
+        key = f"staff:{staff.id}" if staff is not None else f"raw:{raw or UNSPECIFIED_PAYEE}"
+        if key not in payee_groups:
             # 銀行那格人各自打成四種寫法（含全形半形混用），翻譯規則只有 core.bank_codes 一份。
             # 對不到就原樣放行 —— 畫面顯示他打的字，不會因為表裡沒收錄就變空白。
-            _code, _bname = _bank(staff_bank_name or "")
-            payee_groups[name] = {
-                "payee_name": name,
-                "payee_id": p.payee_id or staff_id_number or "",
-                "bank_name": staff_bank_name or "",
+            bank_name = (getattr(staff, "bank_name", None) or "") if staff is not None else ""
+            _code, _bname = _bank(bank_name)
+            payee_groups[key] = {
+                "payee_name": (staff.name if staff is not None else None) or raw or UNSPECIFIED_PAYEE,
+                "person_id": staff.id if staff is not None else "",
+                "aliases": [],                     # 這一組合併了哪幾種寫法（含原字串）
+                "payee_id": p.payee_id or (getattr(staff, "id_number", None) if staff is not None else None) or "",
+                "bank_name": bank_name,
                 "bank_code": _code or "",          # 出納在網銀填的第一格
                 "bank_display": _bname or "",      # 去掉代號與括號之後的正式名
-                "bank_account": staff_bank_account or "",
-                "total_amount": 0, "unpaid_amount": 0, "unpaid_count": 0,
+                "bank_account": (getattr(staff, "bank_account", None) or "") if staff is not None else "",
+                "total_amount": 0,
                 "items": [],
             }
-        payee_groups[name]["total_amount"] += p.amount or 0
-        # 🔴 「本次要匯」＝**還沒付的**合計，跟 total_amount 是兩件事：月份分組裡可能
-        # 混著已付的（已付按實際付款月份歸類），照 total 匯就是把付過的再匯一次。
-        # 算在後端是為了「畫面上讀到的數字」與「複製出去的數字」不會各算一次。
-        if (p.payment_status or "") != "已付款":
-            payee_groups[name]["unpaid_amount"] += p.amount or 0
-            payee_groups[name]["unpaid_count"] += 1
-        payee_groups[name]["items"].append({
+        pg = payee_groups[key]
+        pg["total_amount"] += p.amount or 0
+        if raw and raw not in pg["aliases"]:
+            pg["aliases"].append(raw)
+        pg["items"].append({
             "id": p.id,
+            "payee_name": raw,                     # 這一列當初打的字
             "date": p.request_date.strftime("%Y/%m/%d") if p.request_date else "",
             "amount": p.amount or 0,
             "summary": p.summary or "",
@@ -100,9 +118,7 @@ def group_payables(rows) -> dict:
             "payment_date": p.payment_date.strftime("%Y-%m-%d") if p.payment_date else "",
             "project_id": getattr(p, "project_id", None) or "", "project_label": getattr(p, "project_label", None) or "",   # 應付帳款要能跳回案子的收付款分頁
             "planned_month": p.planned_month or "",
-            # 報支項目（勞報／現金／內部人員／發票核銷）＝「這筆要附什麼單」，
-            # 跟 category（成本分類）是兩件事，不影響匯多少。
-            "payee_type": getattr(p, "payee_type", None) or "",
+            "payout_id": getattr(p, "payout_id", None) or "",   # 已經在哪一張匯款通知上
         })
 
     payees = sorted(payee_groups.values(), key=lambda x: x["total_amount"], reverse=True)

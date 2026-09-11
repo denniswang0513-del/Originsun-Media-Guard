@@ -8,6 +8,7 @@
  *   3. 新增 / 編輯 / 刪除 / 複製 4 個 Modal
  *   4. 切換子表時通知 cost.js 重載範圍
  */
+import { copyText } from '../../js/shared/utils.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum, pickFolderPath, crmToast as _toast } from './crm-utils.js';
 import { state, callbacks } from './crm-projects-state.js';
 import { barColor } from './crm-projects-calc.js';
@@ -456,8 +457,8 @@ async function _shareLink(gid, ev) {
         _toast('發連結失敗：' + (e.message || e));
         return;
     }
-    try {
-        await navigator.clipboard.writeText(url);
+    // copyText 自帶三層退路（內網 http 上 navigator.clipboard 不存在）；失敗它會自己 prompt
+    if (await copyText(url)) {
         _toast('✓ 已複製雜支登記連結');
         if (btn) {
             const orig = btn.textContent;
@@ -468,9 +469,6 @@ async function _shareLink(gid, ev) {
                 btn.classList.remove('cg-chip-edit-success');
             }, 1200);
         }
-    } catch (_) {
-        // 退回：用 prompt 顯示讓使用者手動複製
-        window.prompt('複製此連結傳給外場人員：', url);
     }
 }
 

@@ -34,7 +34,7 @@ from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES, invoi
 from core.schemas import (CashEntryPayload,
                           CashInvoiceLinksPayload, CashPaymentLinksPayload)
 
-from ._shared import (router, money_dep, _require_db,
+from ._shared import (PayeeResolver, router, money_dep, _require_db,
                       ledger_categories_and_tree, project_names_map,
                       _get_factory, _now,
                       _parse_shoot_date, _assert_month_open, _locked_month_set, _raise_locked_batch, map_csv_row)
@@ -42,7 +42,7 @@ from ._shared import (router, money_dep, _require_db,
 
 try:
     from ._shared import (select, or_, Client, CrmProject,
-                          CrmStaff, CrmInvoice, CrmPaymentRequest,
+                          CrmInvoice, CrmPaymentRequest,
                           CrmCashEntry, CrmProjectExpense,
                           CrmCashInvoiceLink)
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
@@ -1009,51 +1009,24 @@ async def payables_summary(request: Request, month: str = Query(""),
             query = query.where(CrmPaymentRequest.payment_status.in_(["應付款", "未付款"]))
 
         pays = (await session.execute(query)).scalars().all()
-        # order_by 不能省：人員檔有同名重複建檔（目前兩組），而 staff_alias 的
-        # by_name 是「先到的先贏」—— 沒有排序的話哪一筆先到由 Postgres 決定，
-        # 任一筆被 UPDATE 過就可能換位，於是同一個收款人的銀行帳號今天顯示這本、
-        # 明天顯示另一本（其中一本可能是空的），而畫面上看不出任何異狀。
-        staff_rows = (await session.execute(
-            select(CrmStaff.id, CrmStaff.name, CrmStaff.alias,
-                   CrmStaff.id_number, CrmStaff.bank_name, CrmStaff.bank_account)
-            .order_by(CrmStaff.id))).all()
+        who = await PayeeResolver.load(session)
 
-    # 收款人那段字 → 人員（規則在 core/staff_alias，純函式有測試）
-    from core.staff_alias import build_index, resolve as _who
-    by_id = {r[0]: r for r in staff_rows}
-    index = build_index([(r[0], r[1], r[2]) for r in staff_rows])
-    # 逐**相異字串**解析一次，不是逐列：同一個收款人平均出現 10 次（status=all 時更多），
-    # 而 resolve 對「對不到的」那些要掃過整張索引。純函式、同輸入同輸出，記憶化安全。
-    seen: dict = {}
-    unresolved: set = set()
-    rows = []
-    for p in pays:
-        name = p.payee_name or ""
-        if name not in seen:
-            who = _who(name, index)
-            if who is None:
-                unresolved.add(name)
-            seen[name] = by_id.get(who)
-        st = seen[name]
-        rows.append((p, st.id_number if st else None,
-                     st.bank_name if st else None,
-                     st.bank_account if st else None))
+    # 收款人那段字 → 人員（規則在 core/staff_alias；I/O 與記憶化在 PayeeResolver）
+    rows = [(p, who.resolve(p.payee_name)) for p in pays]
 
-    # 分組聚合是純邏輯，抽在 core/crm_logic.py（有單元測試）
+    # 分組聚合是純邏輯，抽在 core/crm_logic.py（有單元測試）。按「人」分組 ——
+    # 「停車費 史丹」「早餐 史丹」是同一組，不再各匯一次。
     from core.crm_logic import group_payables
     out = group_payables(rows)
     # 🔴 代稱撞名時 staff_alias 會讓那個代稱**對誰都不算數**（不隨便挑一個）。
-    # 那是對的，但如果不說出來，畫面就只是「沒有帳號」而看不出原因 —— 人員檔
-    # 目前就有兩組重複建檔，很容易兩邊填到同一個代稱然後永遠對不上。
-    # 🔴 只對**真的沒對到人**的那些掛這句。原本是拿「payee_name 裡有沒有出現某個
-    # 撞名代稱」事後反推，於是「姓名叫王小明、單純還沒填帳號」的人也會被說成
-    # 「代稱『小明』有兩個人在用」—— 他去人員檔改代稱，改完問題還在而且看不出為什麼。
-    dup = index.get("dup_alias") or set()
+    # 那是對的，但如果不說出來，畫面就只是「沒有帳號」而看不出原因。
+    # 只對**真的沒對到人**的那些掛（`person_id` 空＝沒對到）：原本是拿「payee_name
+    # 裡有沒有出現某個撞名代稱」事後反推，於是單純還沒填帳號的人也會被說成撞名。
     for pg in out.get("payees", []):
-        name = pg.get("payee_name") or ""
-        if pg.get("bank_account") or name not in unresolved:
+        if pg.get("person_id") or pg.get("bank_account"):
             continue
-        hit = next((a for a in dup if a and a in name), None)
+        name = pg.get("payee_name") or ""
+        hit = next((a for a in who.dup_alias if a and a in name), None)
         if hit:
             pg["bank_note"] = f"代稱「{hit}」有兩個人在用，所以不算數 —— 去人員檔改掉其中一個"
     return {"month": month or "all", **out}

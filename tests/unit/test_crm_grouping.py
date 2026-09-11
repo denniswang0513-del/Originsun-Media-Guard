@@ -22,72 +22,97 @@ def _invoice(id, company="甲公司", total=50000, tax_id="", status="未收款"
               invoice_number=f"AB-{id}", category="製作費")
 
 
+def _staff(id="st-1", name="王士源", id_number="A123", bank_name="台新", bank_account="111"):
+    """`core.staff_alias` 對到的人員列（同形物件）。"""
+    return NS(id=id, name=name, id_number=id_number, bank_name=bank_name, bank_account=bank_account)
+
+
 class TestGroupPayables:
-    def test_groups_by_payee_and_sums(self):
+    """rows 的形狀是 `(payment, staff_or_None)` —— 對到人就給人員列，對不到給 None。"""
+
+    def test_groups_by_person_and_sums(self):
+        wang, lee = _staff(), _staff("st-2", "李小美", "B456", "國泰", "222")
         rows = [
-            (_payment(1, "王士源", 10000), "A123", "台新", "111"),
-            (_payment(2, "王士源", 5000), "A123", "台新", "111"),
-            (_payment(3, "李小美", 8000), "B456", "國泰", "222"),
+            (_payment(1, "王士源", 10000), wang),
+            (_payment(2, "王士源", 5000), wang),
+            (_payment(3, "李小美", 8000), lee),
         ]
         r = group_payables(rows)
         assert r["grand_total"] == 23000
         assert [p["payee_name"] for p in r["payees"]] == ["王士源", "李小美"]  # 金額降冪
-        wang = r["payees"][0]
-        assert wang["total_amount"] == 15000 and len(wang["items"]) == 2
-        assert wang["bank_name"] == "台新" and wang["bank_account"] == "111"
+        w = r["payees"][0]
+        assert w["total_amount"] == 15000 and len(w["items"]) == 2
+        assert w["bank_name"] == "台新" and w["bank_account"] == "111"
+        assert w["person_id"] == "st-1"
 
-    def test_unpaid_total_is_separate_from_the_month_total(self):
-        """🔴 「本次要匯」＝還沒付的合計。月份分組裡可能混著已付的（已付按實際付款
-        月份歸類），照 total_amount 匯就是把付過的錢再匯一次。"""
-        rows = [(_payment(1, "王士源", 10000, status="應付款"), "", "", ""),
-                (_payment(2, "王士源", 6000, status="已付款"), "", "", ""),
-                (_payment(3, "王士源", 4000, status="未付款"), "", "", "")]   # 舊資料的寫法
-        w = group_payables(rows)["payees"][0]
-        assert w["total_amount"] == 20000
-        assert w["unpaid_amount"] == 14000 and w["unpaid_count"] == 2
+    def test_different_spellings_of_one_person_merge_into_one_group(self):
+        """🔴 這支功能存在的理由：「停車費 史丹」「早餐 史丹」「停車 史丹」是同一個人，
+        原本是三列、要匯三次。群組名用正式姓名，每一列留著當初打的字。"""
+        stan = _staff("st-9", "鄭雲全", "K1", "王道(048)", "01000046215888")
+        rows = [(_payment(1, "停車費 史丹", 300), stan),
+                (_payment(2, "早餐 史丹", 120), stan),
+                (_payment(3, "停車 史丹", 200), stan)]
+        r = group_payables(rows)
+        assert len(r["payees"]) == 1
+        pg = r["payees"][0]
+        assert pg["payee_name"] == "鄭雲全" and pg["total_amount"] == 620
+        assert pg["aliases"] == ["停車費 史丹", "早餐 史丹", "停車 史丹"]
+        assert [it["payee_name"] for it in pg["items"]] == ["停車費 史丹", "早餐 史丹", "停車 史丹"]
+        assert pg["bank_code"] == "048" and pg["bank_account"] == "01000046215888"
+
+    def test_unresolved_strings_stay_separate_and_verbatim(self):
+        """對不到人的不猜：照原字串各自一組、沒有銀行資料。"""
+        rows = [(_payment(1, "某外部廠商", 1000), None),
+                (_payment(2, "另一個外部", 2000), None)]
+        r = group_payables(rows)
+        assert [p["payee_name"] for p in r["payees"]] == ["另一個外部", "某外部廠商"]
+        assert all(p["person_id"] == "" and p["bank_account"] == "" for p in r["payees"])
 
     def test_bank_code_and_display_come_from_the_one_table(self):
         """人打什麼寫法都行，翻譯只有 core.bank_codes 一份（不准在這裡切字串）。"""
-        rows = [(_payment(1), "", "中信（822)", "342168993550")]
+        rows = [(_payment(1), _staff(bank_name="中信（822)", bank_account="342168993550"))]
         pg = group_payables(rows)["payees"][0]
         assert pg["bank_code"] == "822" and pg["bank_display"] == "中國信託商業銀行"
         assert pg["bank_name"] == "中信（822)", "人打的原字串要留著"
 
     def test_unknown_bank_passes_through_instead_of_going_blank(self):
-        rows = [(_payment(1), "", "某某農會信用部", "123")]
+        rows = [(_payment(1), _staff(bank_name="某某農會信用部", bank_account="123"))]
         pg = group_payables(rows)["payees"][0]
         assert pg["bank_code"] == "" and pg["bank_display"] == "某某農會信用部"
 
-    def test_payee_type_rides_along_without_touching_the_amount(self):
-        """報支項目＝這筆要附什麼單（勞報要扣繳、現金雜支要收據），**不影響匯多少**。
-        他代墊的現金雜支照樣要還他 —— 2026-09-11 查證過，同事就是一起匯出去的。"""
-        pay = _payment(1, amount=2250, status="應付款")
-        pay.payee_type = "現金"
-        w = group_payables([(pay, "", "", "")])["payees"][0]
-        assert w["items"][0]["payee_type"] == "現金"
-        assert w["unpaid_amount"] == 2250, "現金雜支不是「不用匯」"
+    def test_items_carry_their_payout_binding(self):
+        """面板要標出「這一筆已經在哪張匯款通知上」，才不會再產一張。"""
+        p = _payment(1)
+        p.payout_id = "po-abc"
+        w = group_payables([(p, None)])["payees"][0]
+        assert w["items"][0]["payout_id"] == "po-abc"
+
+    def test_no_month_level_totals_here(self):
+        """「本次要匯」是**月 × 收款人**粒度，前端算；後端這裡是按人跨全月。
+        曾經算過一份沒人讀的 unpaid_amount／unpaid_count（而且註解說反了），不要再長回來。"""
+        w = group_payables([(_payment(1), None)])["payees"][0]
+        assert "unpaid_amount" not in w and "unpaid_count" not in w
 
     def test_dedup_by_payment_id(self):
-        """outerjoin 同名 staff 多列 → 同一筆請款重複出現，只能算一次。"""
         p = _payment(1, amount=10000)
-        rows = [(p, "A1", "台新", "111"), (p, "A2", "玉山", "999")]
+        rows = [(p, _staff("a")), (p, _staff("b", "別人", "A2", "玉山", "999"))]
         r = group_payables(rows)
         assert r["grand_total"] == 10000
         assert len(r["payees"][0]["items"]) == 1
 
     def test_payee_id_prefers_payment_over_staff(self):
-        rows = [(_payment(1, payee_id="FROM_PAYMENT"), "FROM_STAFF", "", "")]
+        rows = [(_payment(1, payee_id="FROM_PAYMENT"), _staff(id_number="FROM_STAFF"))]
         assert group_payables(rows)["payees"][0]["payee_id"] == "FROM_PAYMENT"
-        rows2 = [(_payment(2, payee_id=""), "FROM_STAFF", "", "")]
+        rows2 = [(_payment(2, payee_id=""), _staff(id_number="FROM_STAFF"))]
         assert group_payables(rows2)["payees"][0]["payee_id"] == "FROM_STAFF"
 
     def test_empty_payee_name_becomes_unspecified(self):
-        rows = [(_payment(1, payee=""), None, None, None)]
+        rows = [(_payment(1, payee=""), None)]
         assert group_payables(rows)["payees"][0]["payee_name"] == "未指定"
 
     def test_date_formats(self):
         d = datetime(2026, 7, 6, tzinfo=timezone.utc)
-        rows = [(_payment(1, req_date=d, pay_date=d, planned="2026-08"), "", "", "")]
+        rows = [(_payment(1, req_date=d, pay_date=d, planned="2026-08"), None)]
         item = group_payables(rows)["payees"][0]["items"][0]
         assert item["date"] == "2026/07/06"          # request_date 用斜線
         assert item["payment_date"] == "2026-07-06"  # payment_date 用連字號（前端月份調整靠這格式）
@@ -98,7 +123,7 @@ class TestGroupPayables:
         assert r == {"payees": [], "grand_total": 0}
 
     def test_none_amount_counts_as_zero(self):
-        rows = [(_payment(1, amount=None), "", "", "")]
+        rows = [(_payment(1, amount=None), None)]
         r = group_payables(rows)
         assert r["grand_total"] == 0 and r["payees"][0]["items"][0]["amount"] == 0
 

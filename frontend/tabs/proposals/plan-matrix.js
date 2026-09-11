@@ -20,7 +20,7 @@ import { tfetch } from './prop-fetch.js';          // 共用 fetcher（帶 err.s
 // esc 走 js/shared/utils.js 而不是 crm-utils —— 公開共編頁要在 NAS 對外容器
 // serve（master 關機也開得了），那台只 serve tabs/proposals 與 js/shared 兩個
 // 子目錄；從 ../crm/ 拉東西會讓客戶那頁在 NAS 上直接載入失敗。
-import { ensureStyle, esc } from '../../js/shared/utils.js';
+import { copyText, ensureStyle, esc } from '../../js/shared/utils.js';
 
 const API = '/api/v1/proposals';
 
@@ -394,8 +394,8 @@ function _wireSharePanel(container, opts) {
             </div>`;
         if (tok) panel.querySelector('.sh-link').value = shareUrl(tok);   // DOM property — 不進模板字串
         panel.querySelector('[data-act="copy"]')?.addEventListener('click', async (e) => {
-            try { await navigator.clipboard.writeText(shareUrl(opts.plan.share_token)); e.target.textContent = '已複製 ✓'; }
-            catch { panel.querySelector('.sh-link').select(); document.execCommand('copy'); e.target.textContent = '已複製 ✓'; }
+            // 共用 copyText（三層退路；內網 http 上 navigator.clipboard 不存在）
+            if (await copyText(shareUrl(opts.plan.share_token))) e.target.textContent = '已複製 ✓';
         });
         panel.querySelector('[data-act="on"]')?.addEventListener('click', async () => {
             try {

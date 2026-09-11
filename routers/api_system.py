@@ -597,9 +597,12 @@ async def get_job_logs(job_id: str, offset: int = 0):
 
 @router.get("/api/v1/version")
 async def get_version():
-    from core.version import read_version_json
-    return read_version_json() or {"version": "0.0.0", "build_date": "Unknown",
+    from core.version import RUNNING_VERSION, read_version_json
+    data = read_version_json() or {"version": "0.0.0", "build_date": "Unknown",
                                    "error": "version.json not found"}
+    # `version` 是磁碟上的（OTA 更新後不重啟也要看到新版號 —— 機隊比對靠它）；
+    # `running` 是這個行程載入時的 —— 發版閘門靠它證明「真的重啟了」。
+    return {**data, "running": RUNNING_VERSION}
 
 @router.get("/api/v1/nas_version")
 async def get_nas_version():

@@ -754,8 +754,10 @@ async function _fillPayeeSelect(sel, freeInput) {
     sel.addEventListener('change', sync);
     sync();
     // 選項一多就升級成可搜尋的框（156 位人員的原生下拉找不到人）。
-    // searchableSelect 檔頭就靜態 import 了，不需要再動態 import 一次。
-    if (sel.options.length >= 4) searchableSelect(sel, { placeholder: '打字找人…' });
+    // searchableSelect 檔頭就靜態 import 了；try/catch 是刻意的 —— 升級失敗就用原生的，不擋開單。
+    if (sel.options.length >= 4) {
+        try { searchableSelect(sel, { placeholder: '打字找人…' }); } catch (_) { /* 原生下拉照用 */ }
+    }
 }
 
 /** 直接開一張應付款（沒掛案、或案子沒有對應的費用配置）：摘要／金額／收款人／類別。 */
