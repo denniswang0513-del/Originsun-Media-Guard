@@ -44,11 +44,12 @@ def test_normalize_drops_junk_and_unsupported_modes():
 def test_every_prefix_hits_a_real_route_and_maps_back():
     routes = ""
     for f in ("routers/crm/costs.py", "routers/crm/media_log.py", "routers/api_portal.py", "main.py", "routers/crm/quotes.py",
-              "routers/crm/invoice_files.py", "routers/api_proposals.py", "routers/api_references.py", "routers/crm/showcase.py", "routers/crm/staff.py", "routers/api_auth.py"):
+              "routers/crm/invoice_files.py", "routers/crm/payouts.py", "routers/api_proposals.py", "routers/api_references.py", "routers/crm/showcase.py", "routers/crm/staff.py", "routers/api_auth.py"):
         routes += repo_src(f)
     tails = {"/api/v1/crm/public/expense/": '"/public/expense/', "/api/v1/crm/public/media-log/": '"/public/media-log/',
              "/api/v1/portal/public/": '"/public/{token}', "/q/": '"/q/{code}"', "/api/v1/crm/public/quote/": '"/public/quote/',
              "/e/": '"/e/{code}"', "/api/v1/crm/public/invoice-file/": '"/public/invoice-file/',
+             "/p/": '"/p/{code}"', "/api/v1/crm/public/payout/": '"/public/payout/',
              "/api/v1/proposals/shared/": '"/shared/{token}', "/api/v1/references/shared/": '"/shared/{token}/',
              "/api/v1/crm/public/showcase-edit/": '"/public/showcase-edit/', "/api/v1/crm/public/staff-edit/": '"/public/staff-edit/',
              "/api/v1/crm/public/staff/": '"/public/staff/{staff_id}/resume"', "/api/v1/auth/register": '"/register"'}

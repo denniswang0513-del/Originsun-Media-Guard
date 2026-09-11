@@ -45,6 +45,10 @@ EXPECTED = {
     # 發票影像分享（客戶／會計師手上的 /e/<短碼>）。該對匿名開放的理由同報價：憑證就是
     # 網址裡那串 share_token，後端逐字比對 DB、可隨時撤銷；而且 meta 只回「那張發票上
     # 本來就印著的欄位」（docs/INVOICE_SHARE_PLAN.md §3.5），收件人手上就有那張證明聯。
+    # 匯款通知（收款人手上的 /p/<短碼>）。授權同報價與發票：憑證就是網址裡那串短碼，
+    # 後端逐字比對 DB、可隨時撤銷；回的是 core.payout_share 的白名單投影（金額、日期、
+    # 哪幾筆、誰匯的），連他自己的帳號與身分證都不上 —— 那條連結是可以被轉傳的。
+    ("/api/v1/crm/public/payout/{token}", "GET"),
     ("/api/v1/crm/public/invoice-file/{token}/meta", "GET"),
     ("/api/v1/crm/public/invoice-file/{token}/download", "GET"),
     # 舊的長網址（已經寄出去的連結就是它）：維持「點了直接下載」的語意，不改成頁面

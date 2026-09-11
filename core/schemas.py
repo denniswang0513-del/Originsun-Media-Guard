@@ -611,6 +611,17 @@ class ClientPayload(BaseModel):
     entity: Optional[str] = None
 
 
+class PayoutCreate(BaseModel):
+    """匯款通知：把出納勾的那幾筆綁成一次匯款（owner 2026-09-11）。
+
+    `payment_ids` 是**他勾的**那幾筆，不是「這個月的全部」—— 部分匯款、補匯都是常態。
+    `paid_date` 沒帶就用今天（伺服器的台北日期）。
+    """
+    payment_ids: List[str] = []
+    paid_date: str = ""
+    entity: str = ""
+
+
 class BackupRootsPayload(BaseModel):
     """備份頁回存專案三根（owner 2026-09-10）。只有**原本是空的**那幾根會被寫入，
     已設定過的一律跳過 —— 見 routers/api_backup.save_backup_roots。"""

@@ -54,6 +54,10 @@ EXPECTED_API = {
     # rewrite —— 對外容器自己有 /e/{code} 路由）。該被匿名打到的理由同報價：憑證是網址
     # 裡的 share_token，逐字比對 DB、可撤銷；meta 只回「那張發票上本來就印著的欄位」
     # （docs/INVOICE_SHARE_PLAN.md §3.5 白名單），代開費／收款狀態／內部備註一律不上。
+    # 匯款通知（收款人手上的 /p/<短碼>）。授權同報價與發票：憑證就是網址裡那串短碼，
+    # 後端逐字比對 DB、可隨時撤銷；回的是 core.payout_share 的白名單投影（金額、日期、
+    # 哪幾筆、誰匯的），連他自己的帳號與身分證都不上 —— 那條連結是可以被轉傳的。
+    ("/api/v1/crm/public/payout/{token}", "GET"),
     ("/api/v1/crm/public/invoice-file/{token}/meta", "GET"),
     ("/api/v1/crm/public/invoice-file/{token}/download", "GET"),
     # 舊的長網址（已寄出的連結就是它）：維持「點了直接下載」，刻意不改成頁面

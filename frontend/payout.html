@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>匯款通知</title>
+<!--
+  匯款通知頁 —— 收款人手上的 /p/<短碼> 就是這一頁（免登入，憑證就是網址裡那串碼）。
+  單檔自足、無外部相依。
+
+  這頁是寄給收款人的，任何人都能檢視原始碼。不要在這裡寫內部模組名、檔案路徑、
+  部署拓樸、或「哪些欄位我們不給」的清單 —— 那些不是漏洞，但也沒有理由當贈品送出去。
+  要看設計決定去讀後端那支與它的規則模組。
+
+  前端只畫後端給的欄位；這裡沒有的不是漏做。
+-->
+<style>
+  :root { --bg:#f2f5f7; --ink:#17202a; --muted:#5d6b78; --line:#e4e9ee; --bar:#1a1a1a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); padding:0 0 40px;
+         font-family:"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif; line-height:1.7; }
+  .webbar { position:sticky; top:0; z-index:5; background:var(--bar); color:#fff;
+            padding:10px 16px; display:flex; justify-content:space-between; gap:10px;
+            flex-wrap:wrap; font-size:13px; }
+  .page { background:#fff; max-width:210mm; margin:16px auto; padding:26px 24px 28px;
+          box-shadow:0 1px 3px rgba(0,0,0,.12); }
+  @media (max-width:560px){ .page { margin:0; box-shadow:none; padding:20px 16px 24px; } }
+  .state { color:var(--muted); padding:30px 0; text-align:center; }
+  .state .big { display:block; font-size:18px; color:var(--ink); margin-bottom:6px; }
+  .hd { display:flex; justify-content:space-between; align-items:flex-end; gap:14px;
+        flex-wrap:wrap; border-bottom:2px solid var(--ink); padding-bottom:12px; }
+  .t { font-size:22px; font-weight:700; }
+  .payer { font-size:13px; color:var(--muted); margin-top:2px; }
+  .amt-lab { font-size:11px; color:var(--muted); letter-spacing:.08em; }
+  .amt { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums;
+         font-family:ui-monospace,Consolas,monospace; }
+  .kv { display:grid; grid-template-columns:80px 1fr; gap:4px 14px; font-size:14px; margin:18px 0; }
+  .kv .k { color:var(--muted); }
+  .tbwrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th { background:#eef2f5; color:var(--muted); font-weight:400; font-size:11px;
+       letter-spacing:.06em; text-align:left; padding:7px 10px; white-space:nowrap; }
+  td { padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;
+               font-family:ui-monospace,Consolas,monospace; }
+  tr.sum td { border-bottom:none; border-top:2px solid var(--ink); font-weight:700; }
+  .foot { margin-top:16px; padding-top:12px; border-top:1px solid var(--line);
+          font-size:12.5px; color:var(--muted); }
+  @media print { .webbar { display:none; } .page { box-shadow:none; margin:0; } body { background:#fff; } }
+</style>
+</head>
+<body>
+
+<div class="webbar"><span id="bar-payer">匯款通知</span><span id="bar-date"></span></div>
+
+<div class="page">
+  <div class="state" id="state"><span class="big">載入中</span>正在取得匯款資訊…</div>
+
+  <div id="doc" hidden>
+    <div class="hd">
+      <div>
+        <div class="t">匯款通知</div>
+        <div class="payer" id="f-payer"></div>
+      </div>
+      <div style="text-align:right">
+        <div class="amt-lab">本次匯款金額</div>
+        <div class="amt" id="f-total"></div>
+      </div>
+    </div>
+
+    <div class="kv">
+      <span class="k">收款人</span><span id="f-payee"></span>
+      <span class="k">匯款日期</span><span id="f-date"></span>
+    </div>
+
+    <div class="tbwrap">
+      <table>
+        <thead><tr><th>項目</th><th>案名</th><th class="n">金額</th></tr></thead>
+        <tbody id="f-items"></tbody>
+      </table>
+    </div>
+
+    <div class="foot" id="f-foot"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  };
+  var money = function (n) { return 'NT$ ' + (Number(n) || 0).toLocaleString('zh-TW'); };
+
+  // 短碼就在網址裡：/p/<碼>
+  var code = (location.pathname.split('/').filter(Boolean).pop() || '').trim();
+  var state = document.getElementById('state');
+
+  var fail = function (msg) {
+    state.innerHTML = '<span class="big">' + esc(msg) + '</span>如果你認為這是錯的，請聯絡通知你的人。';
+  };
+
+  if (!code) { fail('連結無效'); return; }
+
+  fetch('/api/v1/crm/public/payout/' + encodeURIComponent(code), { cache: 'no-store' })
+    .then(function (r) {
+      if (r.status === 404) throw new Error('連結無效或已失效');
+      if (!r.ok) throw new Error('暫時無法顯示，請稍後再試');
+      return r.json();
+    })
+    .then(function (d) {
+      document.getElementById('f-payer').textContent = d.payer || '';
+      document.getElementById('bar-payer').textContent = (d.payer || '') + '　匯款通知';
+      document.getElementById('bar-date').textContent = d.paid_date || '';
+      document.getElementById('f-total').textContent = money(d.total);
+      document.getElementById('f-payee').textContent = d.payee_name || '';
+      document.getElementById('f-date').textContent = d.paid_date || '';
+
+      var rows = (d.items || []).map(function (it) {
+        return '<tr><td>' + esc(it.summary) + '</td><td>' + esc(it.project) +
+               '</td><td class="n">' + (Number(it.amount) || 0).toLocaleString('zh-TW') + '</td></tr>';
+      }).join('');
+      rows += '<tr class="sum"><td>合計</td><td></td><td class="n">' + money(d.total) + '</td></tr>';
+      document.getElementById('f-items').innerHTML = rows;
+
+      var foot = '';
+      if (d.payer) foot += '存摺上的轉入備註會顯示「' + esc(d.payer) + '」。<br>';
+      foot += '金額或項目有出入，請回覆通知你的那則訊息告訴我們。';
+      document.getElementById('f-foot').innerHTML = foot;
+
+      state.hidden = true;
+      document.getElementById('doc').hidden = false;
+      document.title = '匯款通知　' + (d.paid_date || '');
+    })
+    .catch(function (e) { fail(e.message || '暫時無法顯示'); });
+})();
+</script>
+</body>
+</html>

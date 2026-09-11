@@ -307,6 +307,11 @@ _PREFILTER = (b"amount", b"rate", b"cost", b"price", b"fee", b"salary",
 # 見 MoneyRedactRoute 裡的說明 —— 這份清單要保持很短，而且每一條都要過那三個門檻。
 MONEY_EXEMPT_PREFIXES = (
     "/api/v1/crm/public/invoice-file/",   # 電子發票分享頁（owner 2026-09-10）
+    # 匯款通知頁（owner 2026-09-11）。三條門檻逐一對過：
+    #   憑證＝逐字比對的可撤銷短碼；回的是 core.payout_share 的白名單投影
+    #   （連他自己的帳號與身分證都不上）；數字是他**存摺上本來就會有**的那一筆。
+    # 抹掉的話那頁只剩空格，然後有人為了修好它把整層關掉 —— 那才是真的風險。
+    "/api/v1/crm/public/payout/",
 )
 
 

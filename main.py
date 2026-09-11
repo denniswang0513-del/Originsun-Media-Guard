@@ -1351,6 +1351,21 @@ async def _short_invoice_file(code: str, request: Request):
     return no_store_file(os.path.join("frontend", "invoice-file.html"), media_type="text/html")
 
 
+@app.get("/p/{code}", include_in_schema=False)
+async def _short_payout_note(code: str, request: Request):
+    """匯款通知短網址：`/p/{12 碼}` → 一頁（免登入，憑證就是那串碼）。
+
+    掛在根路徑是為了短 —— 這條是貼進 LINE 給收款人的。
+    短碼**不由這裡驗**：驗證在 `/api/v1/crm/public/payout/{token}` 那支
+    （它掛 public_router，NAS 對外容器也吃得到，master 關機他照樣打得開）。
+
+    註冊在 `app.mount("/")` 之前才會贏 —— StaticFiles 掛在根，順序決定誰接。
+    """
+    from core.public_access import surface_gate
+    await surface_gate(request)   # 公開區「匯款通知」關閉 → 404
+    return no_store_file(os.path.join("frontend", "payout.html"), media_type="text/html")
+
+
 @app.get("/q/{code}", include_in_schema=False)
 async def _short_quote_view(code: str, request: Request):
     """報價單線上檢視短網址：`/q/{12 碼}` → HTML（免登入，憑證就是那串碼；頁上有「下載 PDF」）。
