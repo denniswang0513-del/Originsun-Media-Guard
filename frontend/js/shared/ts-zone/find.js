@@ -8,9 +8,11 @@ async function _loadFindRows() {
     if (z.s.findRows) return z.s.findRows;
     // 員工端唯讀版（只有全案工時數字，沒金額、沒建議預算）；守衛跟這一區一樣是「有綁員工」，
     // 失敗就讓 loadFind 的 catch 顯示原因（以前的 /timesheets/projects → /summary 三段備援已拿掉）
-    const rows = (await z.mjson(z.api.projectsBurn())).projects || [];
-    z.s.findRows = rows;
-    return rows;
+    // 管理視角打 /timesheets/summary（同一張表的完整版：多 suggested_hours 與未對映；錢欄位是 P3）
+    const d = await z.mjson(z.api.projectsBurn());
+    z.s.findRows = d.projects || [];
+    z.s.findUnmatched = d.unmatched || [];
+    return z.s.findRows;
 }
 export async function loadFind() {
     const { $, esc, s } = z;

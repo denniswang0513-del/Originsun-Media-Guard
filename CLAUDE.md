@@ -1296,6 +1296,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`core/schemas/`](core/schemas/__init__.py) | 所有 Pydantic 請求模型（套件，六段照原檔分節：`_jobs`／`_hr`／`_crm`／`_finance`／`_workos`／`_mobile`） | 對外仍是 `from core.schemas import X`；新 schema 放進對應那段的末端；掃原始碼的測試用 `_srcscan.schemas_src()` |
 | [`core/staff_alias.py`](core/staff_alias.py) | 「收款人那段字」→ 人員（純函式）：姓名／代稱精準命中，其次「包含某個代稱」，再由更長的姓名／代稱**升級** | 無 I/O、**沒有模糊比對**（difflib 猜錯一次就是匯錯人）；代稱撞名＝對誰都不算數，不隨便挑一個；第 4 條是升級不是另一條比對路徑（見「不要動的地方」） |
 | [`core/bank_codes.py`](core/bank_codes.py) | 金融機構代號 ↔ 銀行名（純資料＋純函式）：`resolve` 三碼優先、其次別名、認不得就原樣放行 | 表是我們自己維護的、跟著發版走（銀行併購改號要有人來改）；表不必收齊全國 —— 認不得回 `(None, 原字串)` 畫面照舊顯示人打的字。**不要改成掃全串找代號**（見「不要動的地方」） |
+| [`frontend/js/shared/ts-zone/`](frontend/js/shared/ts-zone/index.js) | 「今天與這週」四個視圖（今天的專案紀錄／我的一週／團隊的一週／專案查詢＋里程碑）的**唯一正本**（ES module）：`ctx`（狀態、端點表 `defaultApi`／`manageApi`、`switchZ1`／`setWho`）、`log`／`plan`／`team-week`／`find`、`index`（`mountZone`＋`_z1Action` 分派） | 員工頁 `/my.html`（`js/my/zone1.js` 殼，白底皮在 my.html）與 CRM 工作追蹤分頁（`tabs/timesheets/`，深色皮 `ts-zone.css`）都掛它；**管理層只在 `manage: true` 長出來**（看誰的、替他填、還沒填、週合計），員工頁的殼永遠不傳 manage（`test_work_tracking_v2`／`test_timesheet_self_entry` 釘）。看誰的＝自己 → 每一支端點退回 own-scope，跟員工頁一模一樣；別人 → `/timesheets/rows`（讀）＋ `/manual`／`/rows/{id}`（寫，管理員）。模組層單例 `z`（一個 document 一份），兼職排班視窗刻意留在員工頁 |
 | [`frontend/payout.html`](frontend/payout.html) | 收款人手上 `/p/{短碼}` 那一頁（免登入、單檔自足、零外部相依） | 只畫後端給的欄位；**不要在原始碼裡寫內部模組名、路徑、拓樸或「哪些欄位我們不給」的清單** —— 那頁寄給收款人、原始碼看得到 |
 | `frontend/tabs/crm/crm-payables.js` 的出納段 | 應付面板的複製（每列左側一顆「複製」、純數字不帶標點）、本月匯款清單（可列印）、匯款通知彈窗（全選＋複製連結） | 複製一律走 `js/shared/utils.copyText`（內網是 http＝非安全來源，`navigator.clipboard` **不存在**）；`_buildMonthGroups` 是「月 × 收款人」粒度，跟後端 `group_payables` 的「收款人」粒度**不同**，別以為可以直接用後端那份 |
 
@@ -1484,4 +1485,15 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   manifest 讀，維持 stdlib-only）。同日：`test_files_stay_readable` 的掃描加了 `.css`
   （`crm.css` 2,286 行拆成 `crm.css`＋`crm-project-views.css`，載入順序不能反）、`core/schemas.py`
   拆成六段套件（掃原始碼用 `_srcscan.schemas_src()`）、`_crm_cols` 搬到 `db/migrations.CRM_COLUMNS`。
+- **ts-zone 的 `_POST`／`_PUT` body 是物件，不預先 stringify**（2026-09-12）：兩個宿主的 fetch 包裝對字串 body 的處理相反 ——
+  員工頁的 `mfetch` 原樣交給 fetch（要字串），CRM 的 `tsFetch`→`authFetch` 對任何 body 都 `JSON.stringify`（給字串＝雙重編碼 → 422）。
+  所以視圖只給物件，員工頁的殼（`zone1.js` 的 `zjson`）自己 stringify。同一個原因：`js/my/zone1.js` 裡的 `_POST`／`_PUT`（給 parttime.js 用）
+  仍是字串版，跟 ts-zone 那兩支**不是**同一份、也不能換成同一份。
+- **ts-zone 掛在 CRM 分頁時要 `e.stopPropagation()`**：那個 tab 在外層 `_content` 也掛了一個 `[data-ts-action]` 委派，
+  `row-remove`／`proj-pop` 兩邊都收＝刪兩次、開兩個彈窗。鈕列右邊那幾顆（總表／儀表板／設定、從別的分頁按回來的四顆）
+  是 tab 自己的，用 `hooks.passthrough` 放行；同一顆鈕不能同時帶 `data-view`（給 ts-zone）和 `data-ts-action="zone"`（給 tab）。
+  格子的專案浮層也一樣：tab 整個掛了一份，`hooks.projectPicker: null` 叫 ts-zone 別再掛（同一個 input 兩個 root ↓↑ 走兩格）。
+- **員工頁的截圖對照法**：改 ts-zone 之後，`git stash` 前後各用同一個綁定帳號截四個視圖、逐像素比（P1 就是這樣驗零變化的；
+  腳本在 session scratchpad `shot_my.py`）。Playwright 進 SPA 要同時塞 `auth_token` 與 `auth_user`（`/auth/me` 的 JSON），
+  而且塞完要換 URL（不是換 hash）重載；SPA 會把 `<select>` 升級成 searchable 小工具，測試改值要對原 select 派 `change`。
 - **客戶看得到的頁面不要在原始碼裡列出我們的內部欄位**：`invoice-file.html` 第一版把「代開費／母帳私帳／未收款…一律不上」抄進檔頭註解，用意是好的，但那頁寄給客戶、原始碼看得到，等於順手告訴對方我們內部在記些什麼。要寫清單去後端那支寫。

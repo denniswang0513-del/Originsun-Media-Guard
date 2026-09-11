@@ -375,14 +375,25 @@ function _wire(host) {
 // ── 逐列自動存（我的一天／今天的專案紀錄同一條）──
 const _timers = new WeakMap();
 
+/** 預設端點＝own-scope（/timesheets/mine*）。管理視角替別人填時宿主換成 /timesheets/manual（帶 staff_id）與 /rows/{id}。 */
+export const MINE_ENDPOINTS = {
+    update: (id) => '/api/v1/timesheets/mine/' + id,
+    create: () => '/api/v1/timesheets/mine/rows',
+    createBody: (rows) => ({ rows }),
+    remove: (id) => '/api/v1/timesheets/mine/' + id,
+};
+const _endpoints = (host, cfg) => ({ ...MINE_ENDPOINTS, ...(cfg.endpoints || host._tsEndpoints || {}) });
+
 /**
  * 掛逐列自動存：有內容（專案／做了什麼／階段／備註任一）就 POST，回來把 id 掛上；有 id＝PUT；同列上一筆還在飛就排在後面。
  * 沒時數的列存成草稿（後端 status=pending，彙整不算）—— owner 2026-09-07「不管表單任何狀態每個格子的資訊都存下來」。
  * cfg：tfetch（預設 tsFetch）、day（() => YYYY-MM-DD）、projects（() => 專案清單，對 label 回 id）、
- *      onSaved(tr, body)、onUnmatched(names)。
+ *      onSaved(tr, body)、onUnmatched(names)、endpoints（部分覆蓋 MINE_ENDPOINTS；removeRow 也吃同一份）。
  */
 export function wireAutosave(host, cfg = {}) {
     const f = cfg.tfetch || tsFetch;
+    host._tsEndpoints = _endpoints(host, cfg);
+    const ep = host._tsEndpoints;
     const save = async (tr) => {
         if (!tr || !tr.isConnected || tr.dataset.readonly) return;
         if (tr._saving) { tr._again = true; return; }
@@ -399,9 +410,9 @@ export function wireAutosave(host, cfg = {}) {
         st.textContent = '儲存中…'; st.style.color = 'var(--sh-busy)';
         try {
             if (tr.dataset.id) {
-                await f('/api/v1/timesheets/mine/' + tr.dataset.id, { method: 'PUT', body });
+                await f(ep.update(tr.dataset.id), { method: 'PUT', body });
             } else {
-                const r = await f('/api/v1/timesheets/mine/rows', { method: 'POST', body: { rows: [body] } });
+                const r = await f(ep.create(), { method: 'POST', body: ep.createBody([body]) });
                 tr.dataset.id = (r.ids || [])[0] || '';
                 if ((r.unmatched_projects || []).length) cfg.onUnmatched?.(r.unmatched_projects);
             }
@@ -427,11 +438,12 @@ export const saveRowNow = (host, tr) => host._tsSaveNow?.(tr);
 /** 刪一列：有 id 先問再 DELETE；表空了補一列。 */
 export async function removeRow(host, tr, cfg = {}) {
     const f = cfg.tfetch || tsFetch;
+    const ep = _endpoints(host, cfg);
     // 第一次自動存（POST）還在飛：等它回來拿到 id 再刪，不然 DOM 拿掉了、伺服器卻多一列孤兒
     for (let i = 0; tr._saving && i < 50; i++) await new Promise((r) => setTimeout(r, 100));
     if (tr.dataset.id) {
         if (!confirm('刪掉這一列？')) return false;
-        try { await f('/api/v1/timesheets/mine/' + tr.dataset.id, { method: 'DELETE' }); }
+        try { await f(ep.remove(tr.dataset.id), { method: 'DELETE' }); }
         catch (e) { alert('刪除失敗：' + (e.message || e)); return false; }
     }
     const tb = tr.parentElement;

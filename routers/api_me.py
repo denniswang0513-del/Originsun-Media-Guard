@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from sqlalchemy import func, select  # type: ignore
 
-from core.auth import ME_MODULE_KEYS, check_admin_or_module, grant_admin_all_modules, payload_grants
+from core.auth import ME_MODULE_KEYS, ME_ZONE_MASTER, check_admin_or_module, grant_admin_all_modules, payload_grants
 from core.db_guard import db_factory_or_503
 from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup,
                            month_key, month_span, months_back, parse_ymd, project_metrics, tw_day)
@@ -449,7 +449,11 @@ async def my_today(request: Request):
 async def team_week(request: Request, start: str = ""):
     """團隊的一週（§11）：人×日格子＝既有看板的週模式（案名＋小時＋內容、計畫淺灰），疊場次與休假。
     people 的計算直接用 services.timesheet_self.board_days（不抄第二份）。"""
-    ident = await _me_bound(request, "me_team_week")
+    # 管理視角（CRM 工作追蹤分頁，docs/WORK_TRACKING_V2_PLAN.md §4-5）：有 timesheets 鑰匙的人**不必綁定人員檔案**
+    # ——owner 的管理員帳號未必綁人，綁定那道只擋員工鑰匙。管理視角多回 project_id（開專案檔案用整個案撈）；
+    # 員工那份照舊不吐（私帳案 id 對任何 me_* 員工都不該外洩，同 _team_row）。
+    manage = payload_grants(check_admin_or_module(request, "timesheets", ME_ZONE_MASTER), "timesheets")
+    ident = None if manage else await _me_bound(request, "me_team_week")
     if (start or "").strip() and parse_ymd(start) is None:
         raise HTTPException(status_code=422, detail="start 需為 YYYY-MM-DD")
     week = week_start_of(parse_ymd(start).date() if (start or "").strip() else date.today())
@@ -474,7 +478,8 @@ async def team_week(request: Request, start: str = ""):
             # 不吐 project_id：私帳案 id 對任何 me_* 員工都不該外洩（同 _team_row）；彈窗用案名查
             cells[day["date"]] = [{"project": it["project_name"], "note": it["task_note"], "hours": it["hours"],
                                    "planned_hours": it["planned_hours"], "status": it["status"],
-                                   "stage_name": it["stage_name"], "work_type": it["work_type"]} for it in p["items"]]
+                                   "stage_name": it["stage_name"], "work_type": it["work_type"],
+                                   **({"project_id": it.get("project_id") or ""} if manage else {})} for it in p["items"]]
     shoots: dict = {d: [] for d in days}
     for x in shoot_rows:
         s = x["shoot"]
@@ -492,7 +497,7 @@ async def team_week(request: Request, start: str = ""):
         for d in days:
             if a.isoformat() <= d <= b.isoformat() and l.staff_name not in leave[d]:
                 leave[d].append(l.staff_name)
-    return {"week_start": week.isoformat(), "days": days, "me": ident["staff"].name,
+    return {"week_start": week.isoformat(), "days": days, "me": ident["staff"].name if ident else "",
             "people": [{"name": n, "cells": c} for n, c in sorted(people.items(), key=lambda kv: (staff_rank(staff_st.get(kv[0])), kv[0]))],
             "shoots": shoots, "leave": leave}
 

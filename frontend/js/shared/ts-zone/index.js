@@ -7,13 +7,13 @@
 // ────────────────────────────────────────────────────────────────────────────
 import { appendBlankRows, removeRow, collectRows, saveRowNow, setStages } from "/js/shared/ts-sheet.js";
 import { openStageEditor } from "/js/shared/stage-editor.js";
-import { z, configure, switchZ1, _z1MarkStale, _shiftDays, _mondayOf, _mdLabel, _PUT } from "./ctx.js";
+import { z, configure, switchZ1, setWho, _z1MarkStale, _shiftDays, _mondayOf, _mdLabel, _PUT } from "./ctx.js";
 import { loadLog, mergeSameProject, undoMerge, resetToday, _logProjectOptions } from "./log.js";
 import { loadMyWeek, _renderMyWeek, _planOpenAdd, _planSubmitAdd, _planDelete, _planMove, _planFromMilestones, _planCopyLast, _planWireDnd, _planCardHtml } from "./plan.js";
 import { loadTeamWeek, _msToggleDone, _openMsModal } from "./team-week.js";
 import { loadFind, _renderFindTable, _openFindProject, _openProjectModal } from "./find.js";
 
-export { z, switchZ1, _z1MarkStale, resetToday, _logProjectOptions, _planCardHtml, loadLog, loadMyWeek, loadTeamWeek, loadFind };
+export { z, switchZ1, setWho, _z1MarkStale, resetToday, _logProjectOptions, _planCardHtml, loadLog, loadMyWeek, loadTeamWeek, loadFind };
 export { _shiftDays, _dow, _mondayOf, _mdLabel, _prevWorkday, _isPlan, _POST, _PUT } from "./ctx.js";
 
 /** 掛載。`opts` 見 ctx.configure；`opts.first`＝一開始切到哪個視圖（沒鑰匙會退到第一個有鑰匙的）。 */
@@ -22,7 +22,14 @@ export function mountZone(opts) {
     const host = z.host;
     z.loaders = { log: () => loadLog(), plan: () => loadMyWeek(), week: () => loadTeamWeek(), find: () => loadFind() };
     host.querySelector(".views").addEventListener("click", (e) => { const b = e.target.closest(".view-btn[data-view]"); if (b) switchZ1(b.dataset.view); });
-    host.addEventListener("click", (e) => { const b = e.target.closest("[data-z1], [data-ts-action]"); if (b) _z1Action(b, e); });
+    // 宿主自己的按鈕（CRM 分頁鈕列上的 總表／儀表板／設定）交回去；其餘在這裡處理完就不再冒泡
+    //（CRM 分頁在外層也掛了一個 [data-ts-action] 的委派：row-remove／proj-pop 兩邊都收＝刪兩次、開兩個彈窗）
+    host.addEventListener("click", (e) => {
+        const b = e.target.closest("[data-z1], [data-ts-action]");
+        if (!b || (z.hooks.passthrough && z.hooks.passthrough(b))) return;
+        e.stopPropagation();
+        _z1Action(b, e);
+    });
     host.addEventListener("change", (e) => { const cb = e.target.closest("input[data-ms-done]"); if (cb) _msToggleDone(cb.dataset.msDone, cb.checked, cb); });   // 週表那條帶上直接勾完成
     host.addEventListener("keydown", (e) => { const f = e.target.closest("#z1-plan .addform"); if (f && e.key === "Enter") { e.preventDefault(); _planSubmitAdd(f.dataset.day); } });
     _planWireDnd(host);
@@ -36,6 +43,7 @@ export async function _z1Action(btn, ev) {
     const act = btn.dataset.z1 || btn.dataset.tsAction;
     const sheet = $("z1-sheet");
     if (z.hooks.onAction && z.hooks.onAction(act, btn, ev)) return;   // 宿主先挑（員工頁：pt-* 兼職排班視窗）
+    if (act === "who") return setWho(btn.dataset.id ? { id: btn.dataset.id, name: btn.dataset.name || "" } : null);   // 管理視角：點名字／替他填
     if (act === "day") {
         const delta = Number(btn.dataset.delta);
         s.logDay = delta === 0 ? z.today() : _shiftDays(s.logDay, delta);

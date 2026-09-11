@@ -64,16 +64,18 @@
    - `manage=true`＝CRM 分頁（`api` 指管理端點，多畫 §4 那些）。
    - `my.html` 仍是傳統 script 殼：頁尾 `<script type="module">` import 這四支後掛到 `window.TS`（跟 ts-sheet 今天的做法一樣，`TS_READY` 等它）。
 2. CRM `tabs/timesheets/timesheets.js` 的 today／mine／projects／staff 四個 view 換成 import 這四支；ledger／dash／settings 原樣。
-3. 後端**不新開端點**：管理欄位都在既有管理端點裡（`/summary` 完整版、`/rows`、`/board`、`/conflicts`、`/compare`）。
-   唯一要補的：`/timesheets/rows` 收 `staff_id`＋`date` 過濾（總表已有月份過濾，加兩個 query 而已）。
+3. 後端只補小的：`/timesheets/rows` 收 `date`／`from`＋`to_day`／`staff_id`；`/timesheets/people`（切換器）；`/board` 每天多 `absent`；
+   `/manual` 改走 `add_rows`（階段／待辦處理跟員工自填一致）；`/me/team_week` 有 timesheets 鑰匙不必綁定人員、管理視角多 `project_id`。
 4. 錢的欄位走 `MoneyRedactRoute`＋`money_view`，不另做抹除。
 5. 測試：`test_ts_shared_components`（列 html 只有一份）擴成「四個視圖各只有一份」；`test_money_visibility` 釘 `manage=false` 的 api 表不含任何管理端點。
 
 ## 6. 分期
 
-- **P0（demo）**：本文件＋示範頁，owner 逐項拍板 §4。
-- **P1**：抽四支視圖模組、`my.html` 改吃它（員工端零視覺變化，Playwright 對照截圖）。
-- **P2**：CRM 分頁換上四視圖＋人員切換＋管理視角開關（§4 的 1、3、4、5、7）。
+- **P0（demo）**：本文件＋示範頁，owner 逐項拍板 §4。✅ 2026-09-11
+- **P1**：抽四支視圖模組、`my.html` 改吃它（員工端零視覺變化，Playwright 對照截圖）。✅ 2026-09-12（`js/shared/ts-zone/`，四視圖逐像素相同）
+- **P2**：CRM 分頁換上四視圖＋人員切換＋管理視角開關（§4 的 1、3、4、5）。✅ 2026-09-12
+  （看誰的＝全部：每人一段唯讀格子＋「還沒填」；某人：替他填走 `/manual`／`/rows/{id}`、替他排一週；團隊的一週多週合計＋「未填」；
+  專案查詢已改打 `/summary`，錢四欄與未對映區塊留 P3）
 - **P3**：衝突待決、未對映、類似專案、建議預算套用（§4 的 2、6、8、9）。
 - **P4**：拿掉舊的 today（今日看板）／mine／projects／staff 四個 view；兼職排班獨立視窗保留。
 

@@ -282,6 +282,15 @@ MY_PAGE_FILES = ("shell.js", "cards.js", "cards-hr.js", "zone1.js", "parttime.js
 TS_ZONE_FILES = ("ctx.js", "log.js", "plan.js", "team-week.js", "find.js", "index.js")
 
 
+def my_shell_src() -> str:
+    """只有員工頁自己的那幾支（html 殼＋ js/my/），**不含**共用的 ts-zone。
+
+    給「員工頁不准做 X」那種規則用：ts-zone 同時服務 CRM 管理視角，裡面有管理端點與週合計，
+    但那些只在宿主傳 `manage: true` 時才會走到 —— 員工頁的殼永遠不傳（test_timesheet_self_entry 釘著）。
+    """
+    return "\n".join([repo_src("frontend/my.html")] + [repo_src("frontend/js/my/" + n) for n in MY_PAGE_FILES])
+
+
 def my_page_src() -> str:
     """原本 `frontend/my.html` 那一頁的全部程式碼＝html 殼 ＋ `frontend/js/my/*.js`。
 

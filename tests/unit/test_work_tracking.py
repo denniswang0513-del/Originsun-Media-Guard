@@ -83,9 +83,15 @@ def test_board_and_my_day_are_gated_by_the_timesheets_module():
 
 
 def test_tab_has_the_seven_views_and_the_daily_board_shows_what_not_how_much():
+    """2026-09-12 起（docs/WORK_TRACKING_V2_PLAN.md）：鈕列左邊四顆＝員工的四個視圖（共用 ts-zone），
+    右邊三顆＝管理次級。舊 today／mine／projects／staff 的碼還在（P4 拿掉），不再是入口。"""
     js = repo_src("frontend/tabs/timesheets/timesheets.js")
-    for key in ("today", "mine", "projects", "staff", "ledger", "dash", "settings"):
-        assert f"b('{key}'," in js, key
+    for key, label in (("log", "今天的專案紀錄"), ("plan", "我的一週"), ("week", "團隊的一週"), ("find", "專案查詢")):
+        assert f"v('{key}', '{label}')" in js, key
+    for key in ("ledger", "dash", "settings"):
+        assert f"m('{key}'," in js, key
+    assert "import * as TSZ from '../../js/shared/ts-zone/index.js';" in js and "TSZ.mountZone({" in js
+    assert "let _view = 'zone';" in js, "落地就是員工四視圖"
     code = js_code_only(js)
     assert "/api/v1/timesheets/board?date=" in code
     assert "/api/v1/timesheets/mine?date=" in code

@@ -26,6 +26,15 @@ export async function loadTeamWeek() {
     const names = [...new Set([...people.map(p => p.name), ...days.flatMap(iso => [...shootsOf(iso).flatMap(s => s.crew || []), ...leaveOf(iso)]), ...msNames])];
     const hasAny = (iso) => people.some(p => (p.cells && p.cells[iso] || []).length) || shootsOf(iso).length || leaveOf(iso).length;
     const cols = days.filter(iso => { const w = _dow(iso); return (w !== 0 && w !== 6) || hasAny(iso); });   // 週末只有有東西才畫
+    // 管理視角（docs/WORK_TRACKING_V2_PLAN.md §4-5）：每人週合計、今天以前的工作日空白標「未填」（在職／合夥才點名；兼職不）
+    const status = new Map(z.people.map(p => [p.name, p.status]));
+    const nagged = (name) => z.manage && status.has(name) && status.get(name) !== "兼職";
+    const weekHours = (name) => { const p = people.find(x => x.name === name); return Math.round(cols.reduce((a, iso) => a + ((p && p.cells && p.cells[iso]) || []).reduce((b, i) => b + (i.hours || 0), 0), 0) * 10) / 10; };
+    const blank = (name, iso) => {
+        if (!nagged(name) || iso > today || _dow(iso) === 0 || _dow(iso) === 6 || leaveOf(iso).includes(name)) return false;
+        const p = people.find(x => x.name === name);
+        return !((p && p.cells && p.cells[iso]) || []).some(i => i.status !== "plan");
+    };
     const cell = (name, iso) => {
         const p = people.find(x => x.name === name);
         const items = (p && p.cells && p.cells[iso]) || [];
@@ -46,8 +55,11 @@ export async function loadTeamWeek() {
                 : (i.hours > 0 ? `<span class="hrs">${i.hours} h</span>` : '<span class="hrs plan">草稿</span>');
             parts.push(`<div class="c${plan ? " plan" : ""}"><div class="ch">${proj}${hrs}</div>${i.note ? `<div class="cn">${esc(i.note)}</div>` : ""}${stage ? `<div class="ct">${esc(stage)}</div>` : ""}</div>`);
         });
+        if (!parts.length && blank(name, iso)) return '<span class="blank-day">未填</span>';
         return parts.join("") || '<span class="none">—</span>';
     };
+    const sumTh = z.manage ? '<th class="num sum">週合計</th>' : "";
+    const sumTd = (n) => { if (!z.manage) return ""; const h = weekHours(n); return `<td class="num sum${nagged(n) && h < 20 ? " low" : ""}">${h}</td>`; };
 
     const range = cols.length ? `${_mdLabel(cols[0]).slice(0, -3)} – ${_mdLabel(cols[cols.length - 1]).slice(0, -3)}` : "";
     host.innerHTML = `
@@ -59,8 +71,8 @@ export async function loadTeamWeek() {
                 <button type="button" class="btn pri" data-z1="ms-open">設定專案里程碑</button></span></div>
         ${ms ? _msBandHtml(ms) : ""}
         ${names.length ? `<div style="overflow-x:auto;"><table class="week">
-            <thead><tr><th style="width:84px;">人員</th>${cols.map(iso => `<th class="${iso === today ? "today" : ""}">${esc(_mdLabel(iso))}</th>`).join("")}</tr></thead>
-            <tbody>${names.map(n => `<tr><td class="who">${esc(n)}</td>${cols.map(iso => `<td>${cell(n, iso)}</td>`).join("")}</tr>`).join("")}</tbody>
+            <thead><tr><th style="width:84px;">人員</th>${cols.map(iso => `<th class="${iso === today ? "today" : ""}">${esc(_mdLabel(iso))}</th>`).join("")}${sumTh}</tr></thead>
+            <tbody>${names.map(n => `<tr><td class="who">${esc(n)}</td>${cols.map(iso => `<td>${cell(n, iso)}</td>`).join("")}${sumTd(n)}</tr>`).join("")}</tbody>
         </table></div>` : `<div class="empty">這一週還沒有人填。</div>`}`;
 }
 

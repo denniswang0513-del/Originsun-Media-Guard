@@ -230,7 +230,7 @@ def test_timesheets_js_draws_mine_write_buttons_only_for_lv3():
     assert "|| !_isAdmin() ? '' : `" in js_func_body(TS_JS, "function _unmatchedTbodyHtml() {")
     rp = js_func_body(TS_JS, "function _renderProjects(s) {")
     assert "const n = _isAdmin() ? s.projects.filter(" in rp, "套用建議預算 沒依 Lv3 藏"
-    assert "${_isAdmin() ? b('settings', '設定') : ''}" in js_func_body(TS_JS, "function _viewBtns() {")
+    assert "${_isAdmin() ? m('settings', '設定') : ''}" in js_func_body(TS_JS, "function _viewBtns(extra = '') {")
     assert "_isAdmin() ? `<button class=\"ts-btn ghost\" data-ts-action=\"token\"" in js_func_body(TS_JS, "function _renderSettings(s) {")
     # 專案檔案：改預算單獨看 budgetEditable；比較／匯出照 editable
     pf = js_func_body(TSP_JS, "export function projectFileHtml(d, opts = {}) {")

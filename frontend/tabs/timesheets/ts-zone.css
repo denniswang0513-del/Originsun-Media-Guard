@@ -1,0 +1,159 @@
+/* ts-zone.css —— 「今天與這週」四個視圖（js/shared/ts-zone/）在 CRM 工作追蹤分頁的深色皮。
+   標記（class）跟員工頁 /my.html 完全一樣，那邊的白底皮住在 my.html 的 <style>；這裡只換顏色，不動版面。
+   owner 2026-09-11 拍板：搬進 CRM 跟 CRM 深色。管理視角專屬的東西（看誰的、還沒填、週合計、替他填）也在這裡。 */
+#ts-root .ts-zone { --ink: #e0e0e0; --sub: #9ca3af; --line: #3a3a3a; --red: #f87171; --acc: #60a5fa; --card: #232323; --field: #1a1a1a; --mg: #a78bfa; }
+#ts-root .ts-zone .views { display: flex; gap: 4px; border-bottom: 1px solid var(--line); flex-wrap: wrap; align-items: flex-end; }
+#ts-root .ts-zone .view-btn { background: #262626; border: 1px solid var(--line); border-bottom: 0; color: var(--sub); font-size: 13px; font-weight: 600; padding: 8px 20px; cursor: pointer; border-radius: 6px 6px 0 0; font-family: inherit; }
+#ts-root .ts-zone .view-btn:hover { color: var(--ink); }
+#ts-root .ts-zone .view-btn.active { background: #2f2f2f; color: var(--ink); position: relative; top: 1px; }
+#ts-root .ts-zone .view-btn.sub { font-weight: 400; }
+#ts-root .ts-zone .view { display: none; border: 1px solid var(--line); border-top: 0; padding: 16px 18px 14px; min-width: 0; background: #2f2f2f; }
+#ts-root .ts-zone .view.on { display: block; }
+#ts-root .ts-zone .vhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 10px; }
+#ts-root .ts-zone .vhead .ey { font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--sub); }
+#ts-root .ts-zone .vhead .ey b { color: var(--ink); font-weight: 600; letter-spacing: 0; margin-left: 6px; font-size: 14px; }
+#ts-root .ts-zone .vhead .ey .meta { margin-left: 8px; letter-spacing: 0; text-transform: none; }
+#ts-root .ts-zone .vrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#ts-root .ts-zone .meta { font-size: 12px; color: var(--sub); }
+#ts-root .ts-zone .btn { min-height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: var(--ink); padding: 0 12px; font-size: 13px; cursor: pointer; font-family: inherit; }
+#ts-root .ts-zone .btn:hover { border-color: #666; }
+#ts-root .ts-zone .btn.pri { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+#ts-root .ts-zone .btn.pri:hover { background: #2563eb; }
+#ts-root .ts-zone .btn:disabled { opacity: .45; cursor: default; }
+#ts-root .ts-zone .btn.sm { min-height: 26px; font-size: 12px; padding: 0 8px; border-radius: 6px; }
+#ts-root .ts-zone .btn.xs { min-height: 0; padding: 1px 7px; font-size: 11px; border-radius: 6px; }
+#ts-root .ts-zone .in, #ts-root .ts-zone .find-bar .sel { min-height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: var(--ink); padding: 0 8px; font-size: 13px; font-family: inherit; }
+#ts-root .ts-zone .empty { padding: 22px 0; font-size: 13px; color: var(--sub); text-align: center; }
+#ts-root .ts-zone .notice { border: 1px solid var(--line); border-left: 2px solid var(--red); padding: 12px 16px; font-size: 13px; color: var(--sub); margin-bottom: 14px; line-height: 1.7; }
+#ts-root .ts-zone .linkish { border: 0; background: none; padding: 0; font: inherit; color: var(--acc); cursor: pointer; text-decoration: underline dotted; }
+/* 今天那條 ＋ 管理視角的「還沒填」「替他填」 */
+#ts-root .ts-zone .today-strip { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 13px; padding: 8px 12px; margin-bottom: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 6px; }
+#ts-root .ts-zone .today-strip .k { color: var(--sub); font-size: 12px; margin-right: 4px; }
+#ts-root .ts-zone .today-strip .warn { color: #fbbf24; }
+#ts-root .ts-zone .today-strip.absent { border-left: 3px solid #fbbf24; }
+#ts-root .ts-zone .today-strip a { color: var(--acc); }
+#ts-root .ts-zone .sheet-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+#ts-root .ts-zone .sheet-note { font-size: 12px; color: var(--sub); line-height: 1.6; margin-top: 6px; }
+/* 管理視角「全部」：每人一段唯讀格子 */
+#ts-root .ts-zone .team-day { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 10px; margin-bottom: 10px; background: var(--card); }
+#ts-root .ts-zone .team-day .td-h { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+#ts-root .ts-zone .team-day .td-h b { font-size: 14px; }
+#ts-root .ts-zone .team-day .td-h .btn { margin-left: auto; }
+/* 我的一週：一天一欄的板 */
+#ts-root .ts-zone .wk-sum { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; margin-bottom: 10px; align-items: center; }
+#ts-root .ts-zone .wk-sum .k { color: var(--sub); margin-right: 4px; }
+#ts-root .ts-zone .pboard { display: grid; gap: 8px; align-items: start; }
+#ts-root .ts-zone .pcol { border: 1px solid var(--line); border-radius: 8px; min-height: 220px; background: var(--card); display: flex; flex-direction: column; }
+#ts-root .ts-zone .pcol.today { border-color: var(--acc); }
+#ts-root .ts-zone .pcol.past { background: #1f1f1f; }
+#ts-root .ts-zone .pcol.over { background: #1e3a5f; border-color: #2563eb; }
+#ts-root .ts-zone .pcol .dh { padding: 6px 10px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: 12.5px; color: var(--sub); display: flex; justify-content: space-between; align-items: baseline; }
+#ts-root .ts-zone .pcol.today .dh { color: var(--acc); }
+#ts-root .ts-zone .pcol .dh small { font-weight: 400; font-size: 11px; }
+#ts-root .ts-zone .pcol .cards { padding: 6px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+#ts-root .ts-zone .pcol .none { color: #666; font-size: 12px; text-align: center; padding: 14px 0; }
+#ts-root .ts-zone .pcard { border: 1px solid var(--line); border-radius: 7px; background: #2a2a2a; padding: 6px 20px 6px 8px; font-size: 12px; position: relative; color: var(--ink); }
+#ts-root .ts-zone .pcard.plan { border-left: 3px solid #3b82f6; cursor: grab; }
+#ts-root .ts-zone .pcard.done { border-left: 3px solid #22c55e; }
+#ts-root .ts-zone .pcard.dragging { opacity: .4; }
+#ts-root .ts-zone .pcard .p { font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+#ts-root .ts-zone .pcard .t { font-size: 11.5px; margin-top: 1px; overflow-wrap: anywhere; }
+#ts-root .ts-zone .pcard .ct { color: var(--sub); font-size: 11px; margin-top: 1px; }
+#ts-root .ts-zone .pcard .f { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--sub); flex-wrap: wrap; }
+#ts-root .ts-zone .pcard .f .s.plan { color: var(--acc); }
+#ts-root .ts-zone .pcard .f .s.done { color: #86efac; font-weight: 600; }
+#ts-root .ts-zone .pcard .x { position: absolute; top: 3px; right: 5px; border: 0; background: none; color: #777; cursor: pointer; font-size: 13px; padding: 0 2px; line-height: 1; font-family: inherit; }
+#ts-root .ts-zone .pcard .x:hover { color: var(--red); }
+#ts-root .ts-zone .pcol .add { margin: 0 6px 6px; }
+#ts-root .ts-zone .pcol .addbtn { width: 100%; border: 1px dashed var(--line); background: none; color: var(--sub); border-radius: 7px; padding: 5px; cursor: pointer; font-size: 12px; font-family: inherit; }
+#ts-root .ts-zone .pcol .addbtn:hover { color: var(--ink); border-color: #666; }
+#ts-root .ts-zone .pcol .addform { display: flex; flex-direction: column; gap: 4px; border: 1px solid #3b82f6; border-radius: 7px; padding: 6px; background: var(--field); }
+#ts-root .ts-zone .pcol .addform input { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; font: inherit; font-size: 12px; background: #262626; color: var(--ink); }
+#ts-root .ts-zone .pcol .addform .fr { display: flex; gap: 4px; justify-content: flex-end; }
+/* 團隊的一週：人×日 */
+#ts-root .ts-zone table.week { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+#ts-root .ts-zone table.week th { text-align: left; font-size: 12px; color: var(--sub); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+#ts-root .ts-zone table.week th.today { color: var(--acc); }
+#ts-root .ts-zone table.week td { padding: 8px; border-bottom: 1px solid #333; vertical-align: top; color: var(--ink); }
+#ts-root .ts-zone table.week td.who { font-weight: 600; white-space: nowrap; }
+#ts-root .ts-zone table.week .c { margin: 0 0 8px; line-height: 1.35; padding-bottom: 6px; border-bottom: 1px dashed #3a3a3a; }
+#ts-root .ts-zone table.week .c:last-child { border-bottom: 0; padding-bottom: 0; }
+#ts-root .ts-zone table.week .c i { display: block; font-style: normal; color: var(--sub); font-size: 12px; }
+#ts-root .ts-zone table.week .ch { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+#ts-root .ts-zone table.week .ch .cp { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+#ts-root .ts-zone table.week .ch .cp.ts-link { color: var(--ink); cursor: pointer; text-decoration: none; }
+#ts-root .ts-zone table.week .ch .cp.ts-link:hover { color: var(--acc); text-decoration: underline; }
+#ts-root .ts-zone table.week .ch .cp.blank { color: #777; font-weight: 500; }
+#ts-root .ts-zone table.week .ch .hrs { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; font-size: 12px; background: #3a3a3a; border-radius: 999px; padding: 0 7px; line-height: 18px; }
+#ts-root .ts-zone table.week .ch .hrs.plan { background: transparent; color: var(--sub); font-weight: 500; }
+#ts-root .ts-zone table.week .cn { color: var(--ink); font-size: 12.5px; margin-top: 2px; overflow-wrap: anywhere; }
+#ts-root .ts-zone table.week .ct { color: var(--sub); font-size: 11px; margin-top: 2px; letter-spacing: 0.02em; }
+#ts-root .ts-zone table.week .c.plan { color: var(--sub); }
+#ts-root .ts-zone table.week .c.shoot { color: #93c5fd; background: #1e3a5f; border-radius: 4px; padding: 3px 6px; }
+#ts-root .ts-zone table.week .c.off { color: var(--sub); background: #333; border-radius: 4px; padding: 3px 6px; }
+#ts-root .ts-zone table.week .c.ms { display: block; background: #3b2a00; border: 1px solid #7a5a10; font-size: 11px; color: #fde68a; }
+#ts-root .ts-zone table.week .c.ms.done { color: var(--sub); background: #2a2a2a; border-color: var(--line); }
+#ts-root .ts-zone table.week .none { color: #555; }
+#ts-root .ts-zone table.week .blank-day { color: var(--red); font-size: 11px; }
+#ts-root .ts-zone table.week th.sum, #ts-root .ts-zone table.week td.sum { text-align: right; font-variant-numeric: tabular-nums; width: 72px; border-left: 1px dashed var(--mg); }
+#ts-root .ts-zone table.week td.sum.low { color: #fbbf24; }
+/* 本週里程碑：帶＋彈窗 */
+#ts-root .ts-zone .ms-band { border: 1px solid var(--line); border-left: 3px solid #fbbf24; border-radius: 8px; padding: 10px 14px 6px; margin-bottom: 12px; background: var(--card); }
+#ts-root .ts-zone .ms-band .ey { font-size: 11px; letter-spacing: .3em; text-transform: uppercase; color: var(--sub); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#ts-root .ts-zone .ms-band .empty { color: var(--sub); font-size: 13px; padding: 4px 0 6px; text-align: left; }
+#ts-root .ts-zone .ms-proj { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; border-top: 1px dashed var(--line); }
+#ts-root .ts-zone .ms-proj:first-of-type { border-top: 0; }
+#ts-root .ts-zone .ms-proj .pn { width: 210px; flex: none; font-weight: 600; font-size: 13px; padding-top: 3px; }
+#ts-root .ts-zone .ms-proj .pn small { display: block; color: var(--sub); font-weight: 400; font-size: 11px; }
+#ts-root .ts-zone .ms-list { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+#ts-root .ts-zone .ms { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 6px; font-size: 12px; background: #2a2a2a; user-select: none; }
+#ts-root .ts-zone .ms input { margin: 0; cursor: pointer; }
+#ts-root .ts-zone .ms .due, #ts-root .ts-zone .ms .who { color: var(--sub); }
+#ts-root .ts-zone .ms.done { color: var(--sub); text-decoration: line-through; background: #1f1f1f; }
+#ts-root .ts-zone .ms.late { border-color: var(--red); color: var(--red); }
+#ts-root .ts-zone .ms.late .due { color: var(--red); font-weight: 600; }
+#ts-root .ts-zone .ms.carried::before { content: "延自上週"; font-size: 10px; color: #fbbf24; border: 1px solid #fbbf24; border-radius: 3px; padding: 0 4px; margin-right: 2px; }
+/* 里程碑彈窗與專案檔案彈窗（掛在 tab 根，不在 .ts-zone 裡 → 用 #ts-root 前綴） */
+#ts-root .ws-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.62); z-index: 300; display: flex; align-items: flex-start; justify-content: center; padding: 36px 16px; overflow: auto; }
+#ts-root .ws-modal { position: relative; background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 10px; width: 100%; max-width: 1180px; padding: 22px 24px 16px; box-shadow: 0 20px 60px rgba(0,0,0,.6); color: #e0e0e0; }
+#ts-root .ws-modal-x { position: absolute; top: 8px; right: 12px; background: none; border: none; color: #888; font-size: 24px; cursor: pointer; line-height: 1; font-family: inherit; }
+#ts-root .ws-modal-x:hover { color: #eee; }
+#ts-root .ws-modal .btn { min-height: 34px; border: 1px solid #3a3a3a; border-radius: 8px; background: #1a1a1a; color: #e0e0e0; padding: 0 12px; font-size: 13px; cursor: pointer; font-family: inherit; }
+#ts-root .ws-modal .btn.pri { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+#ts-root .ws-modal .btn.sm { min-height: 26px; font-size: 12px; padding: 0 8px; border-radius: 6px; }
+#ts-root .ws-modal .meta { font-size: 12px; color: #9ca3af; }
+#ts-root .ws-modal .vrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#ts-root .ws-modal .empty { padding: 22px 0; font-size: 13px; color: #9ca3af; text-align: center; }
+#ts-root .ws-modal .notice { border: 1px solid #3a3a3a; border-left: 2px solid #f87171; padding: 12px 16px; font-size: 13px; color: #9ca3af; }
+#ts-root .msm-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid #3a3a3a; margin-bottom: 10px; }
+#ts-root .msm-hd h3 { margin: 0; font-size: 15px; color: #fff; }
+#ts-root .msm-cols { display: grid; grid-template-columns: 20px 1fr 118px 112px 1fr 96px; gap: 8px; font-size: 11px; color: #9ca3af; letter-spacing: .1em; padding: 0 0 4px; }
+#ts-root .msm-row { border: 1px solid #3a3a3a; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+#ts-root .msm-row .rh { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
+#ts-root .msm-row .rh b { font-size: 14px; }
+#ts-root .msm-item { display: grid; grid-template-columns: 20px 1fr 118px 112px 1fr 96px; gap: 8px; align-items: center; font-size: 13px; padding: 5px 0; border-top: 1px dashed #3a3a3a; }
+#ts-root .msm-item:first-child { border-top: 0; }
+#ts-root .msm-item input[type=text], #ts-root .msm-item select, #ts-root .msm-item input[type=date],
+#ts-root .msm-add input, #ts-root .msm-addproj input { border: 1px solid #3a3a3a; border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12.5px; background: #1a1a1a; color: #e0e0e0; }
+#ts-root .msm-item input[type=text], #ts-root .msm-item select, #ts-root .msm-item input[type=date] { width: 100%; }
+#ts-root .msm-item.done input[type=text] { color: #9ca3af; text-decoration: line-through; }
+#ts-root .msm-item .st { font-size: 11px; color: #9ca3af; }
+#ts-root .msm-item .st.late { color: #f87171; font-weight: 600; }
+#ts-root .msm-add { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+#ts-root .msm-add input { flex: 1; padding: 5px 10px; font-size: 13px; }
+#ts-root .msm-addproj { display: flex; gap: 8px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
+#ts-root .msm-addproj input { padding: 5px 10px; font-size: 13px; min-width: 300px; }
+#ts-root .msm-ft { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-top: 12px; border-top: 1px solid #3a3a3a; margin-top: 10px; }
+/* 專案查詢：篩選一列 */
+#ts-root .ts-zone .find-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+#ts-root .ts-zone .find-bar .in { flex: 1; min-width: 180px; }
+/* CRM 分頁殼：看誰的 ＋ 管理視角開關（在 .views 那一列右邊） */
+#ts-root .ts-zone .views .who { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sub); margin-left: auto; padding-bottom: 6px; }
+#ts-root .ts-zone .views .who select { background: var(--field); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; }
+#ts-root .ts-zone .views .sw { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sub); cursor: pointer; padding-bottom: 6px; margin-left: 10px; }
+#ts-root .ts-zone .views .sw i { width: 34px; height: 18px; border-radius: 9px; background: var(--mg); position: relative; display: inline-block; }
+#ts-root .ts-zone .views .sw i::after { content: ""; position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+#ts-root .ts-zone.emp .views .sw i { background: #666; }
+#ts-root .ts-zone.emp .views .sw i::after { right: auto; left: 2px; }
+#ts-root .ts-zone .views .gap { flex: 1; }
+#ts-root .ts-zone.bar { margin-bottom: 12px; }

@@ -4,7 +4,7 @@
 // 一張卡＝一列工時（status=plan、沒時數；POST /timesheets/mine/rows 帶 plan:true）。當天的卡自動就在「今天的專案紀錄」的格子裡，
 // 時數在那裡填、填了就是一般紀錄。不判有做沒做；執行動作只有填時數與「挪到隔天」（PUT work_date）。只能排自己的。
 // ────────────────────────────────────────────────────────────────────────────
-import { z, _z1MarkStale, _shiftDays, _dow, _mondayOf, _mdLabel, _isPlan, _POST, _PUT } from "./ctx.js";
+import { z, _z1MarkStale, _shiftDays, _dow, _mondayOf, _mdLabel, _isPlan, _POST, _PUT, whoIsMe } from "./ctx.js";
 import { _logProjectOptions } from "./log.js";
 
 function _planDays() { return [...Array(7)].map((_, k) => _shiftDays(z.s.planWeek, k)); }
@@ -13,6 +13,11 @@ export async function loadMyWeek() {
     const host = $("z1-plan");
     host.innerHTML = `<div class="empty">載入中…</div>`;
     const days = _planDays();
+    if (!z.api.mineRows(days[0], days[6])) {      // 管理視角「全部」：一週的板是個人的，先選一個人
+        host.innerHTML = `<div class="vhead"><span class="ey">My Week<b>我的一週</b></span></div>
+            <div class="notice">「我的一週」是一個人的板 —— 上面「看誰的」先選一個人（選自己＝跟員工頁一樣；選別人＝替他排）。</div>`;
+        return;
+    }
     try {
         s.planRows = (await mjson(z.api.mineRows(days[0], days[6]))).items || [];
     } catch (e) {
@@ -41,8 +46,9 @@ export function _renderMyWeek() {
     const byDay = (d) => s.planRows.filter(i => i.date === d);
     const cols = days.filter(d => { const w = _dow(d); return (w !== 0 && w !== 6) || byDay(d).length; });   // 週末有排才畫
     const filled = s.planRows.filter(i => i.hours > 0).length;
+    const who = z.manage && z.who ? `<span class="meta">${esc(z.who.name)}${whoIsMe() ? "（我）" : "（替他排）"}</span>` : "";
     host.innerHTML = `
-        <div class="vhead"><span class="ey">My Week<b>我的一週 ${esc(_mdLabel(days[0]).slice(0, -3))} – ${esc(_mdLabel(days[6]).slice(0, -3))}</b></span>
+        <div class="vhead"><span class="ey">My Week<b>我的一週 ${esc(_mdLabel(days[0]).slice(0, -3))} – ${esc(_mdLabel(days[6]).slice(0, -3))}</b>${who}</span>
             <span class="vrow"><button type="button" class="btn" data-z1="plan-week" data-start="${_shiftDays(s.planWeek, -7)}">‹</button>
                 <span class="meta">${esc(s.planWeek)} 起</span>
                 <button type="button" class="btn" data-z1="plan-week" data-start="${_shiftDays(s.planWeek, 7)}">›</button>
@@ -85,7 +91,7 @@ async function _planCreate(rows) {
     const { $, mjson } = z;
     if (!rows.length) return 0;
     try {
-        const r = await mjson(z.api.mineCreate(), _POST({ rows }));
+        const r = await mjson(z.api.mineCreate(), _POST(z.api.createBody(rows)));
         await loadMyWeek();
         _z1MarkStale("z1-log", "z1-week");
         if ((r.unmatched_projects || []).length) { const m = $("z1-plan-msg"); if (m) m.textContent = `「${r.unmatched_projects.join("、")}」對不到案（已存下來，管理員會指定）`; }
@@ -111,6 +117,7 @@ export async function _planDelete(id) {
     await loadMyWeek();
 }
 async function _myName() {
+    if (z.manage && z.who) return z.who.name;          // 管理視角：板是誰的，里程碑就對誰的名字
     if (z.s.myStaffName) return z.s.myStaffName;
     try { z.s.myStaffName = (await z.mjson(z.api.mineDay(z.today()))).staff_name || ""; } catch (_) {}
     return z.s.myStaffName;

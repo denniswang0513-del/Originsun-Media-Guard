@@ -32,7 +32,11 @@ def test_three_view_buttons_and_the_remembered_view():
     assert '"/api/v1/timesheets/mine?date="' in code and '"/api/v1/timesheets/options"' in code
     # 專案查詢：員工端唯讀版 /me/projects_burn（2026-09-06 拿掉往 /timesheets/projects、/summary 的三段備援）
     assert '"/api/v1/me/projects_burn"' in code and '"/api/v1/timesheets/project?name="' in code
-    assert '"/api/v1/timesheets/summary"' not in code
+    # /summary 只在 ts-zone 的管理端點表（manageApi）；員工端點表 defaultApi 與殼都沒有
+    from tests.unit._srcscan import js_func_body, my_shell_src
+    ctx = repo_src("frontend/js/shared/ts-zone/ctx.js")
+    assert '"/api/v1/timesheets/summary"' not in js_func_body(ctx, "export function defaultApi() {")
+    assert '"/api/v1/timesheets/summary"' not in _code(my_shell_src())
 
 
 def test_no_personal_hours_totals_anywhere():
@@ -42,8 +46,14 @@ def test_no_personal_hours_totals_anywhere():
     # 舊「我的專案」派工卡退場；請款卡改名、不再畫每案小時
     assert "cardProjects(" not in html
     assert "請款與薪酬" in html and "工時與請款" not in html
-    code = _code(html)
+    from tests.unit._srcscan import my_shell_src
+    code = _code(my_shell_src())
     assert "合計" not in code.replace("未付請款", ""), "員工頁不出現「合計」（金額文案也改用「共」）"
+    # 共用的 ts-zone 只有管理視角才畫「週合計」：出現「合計」的每一行都要有 z.manage 守著
+    zone = js_code_only(repo_src("frontend/js/shared/ts-zone/team-week.js"))
+    for line in zone.splitlines():
+        if "合計" in line:
+            assert "z.manage" in line, line.strip()[:120]
 
 
 def test_no_emoji_in_ui_code():

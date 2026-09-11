@@ -65,6 +65,13 @@ def test_my_page_talks_to_the_me_endpoints_only():
     assert '"/api/v1/me/timesheets?month="' in html
     assert '"/api/v1/me/timesheets/batch"' in html
     assert 'method: "PUT"' in html and 'method: "DELETE"' in html
-    assert "/api/v1/timesheets/manual" not in html, "員工頁不該打管理端代填端點"
+    # 員工頁不該打管理端代填端點：殼裡沒有；共用 ts-zone 的員工端點表（defaultApi）沒有；殼永遠不開 manage
+    from tests.unit._srcscan import my_shell_src, js_func_body
+    assert "/api/v1/timesheets/manual" not in my_shell_src()
+    ctx = repo_src("frontend/js/shared/ts-zone/ctx.js")
+    assert "/api/v1/timesheets/manual" not in js_func_body(ctx, "export function defaultApi() {")
+    assert "/api/v1/timesheets/manual" in js_func_body(ctx, "export function manageApi() {")
+    zone1 = repo_src("frontend/js/my/zone1.js")
+    assert "manage" not in js_func_body(zone1, "async function buildZone1() {"), "員工頁的殼不准開管理視角"
     # 只有 editable 的列長「改／刪」；規則在後端
     assert "it.editable ?" in html

@@ -45,7 +45,7 @@ from services import timesheet_digest, timesheet_puller
 from services.timesheet_conflicts import list_conflicts, resolve_conflict
 from services.timesheet_ingest import ingest, parse_date as _parse_date
 from services.timesheet_lookup import burn_rows, load_project_lookup, project_names
-from services.timesheet_manual import insert_manual_rows, project_options
+from services.timesheet_manual import project_options
 from services.timesheet_self import (add_rows, board_days, admin_batch_update, admin_delete_row, admin_update_row, delete_row,
                                      list_rows, metrics_input, month_or_422, rows_by_month, search_rows, ts_dict, update_row)
 
@@ -209,6 +209,14 @@ async def day_board(request: Request, date: str = "", days: int = 1):
     factory = db_factory_or_503()
     async with factory() as session:
         out_days = await board_days(session, d0, days)
+        # 管理視角「今天還沒填」（docs/WORK_TRACKING_V2_PLAN.md §4-3）：在職／合夥而且那天沒有任何實際或草稿列的人
+        # （只有計畫卡不算填了）。週末不點名。兼職不進來（他們不是每天要填）。
+        from core.hr_logic import active_staff_where
+        active = [n for (n,) in (await session.execute(select(CrmStaff.name).where(active_staff_where()))).all() if n]
+    for day in out_days:
+        weekend = datetime.fromisoformat(day["date"]).weekday() >= 5
+        filled = {p["name"] for p in day["people"] if any(it.get("status") != "plan" for it in p["items"])}
+        day["absent"] = [] if weekend else sorted(n for n in active if n not in filled)
     return {"from": d0.date().isoformat(), "days": days, "items": out_days}
 
 
@@ -470,25 +478,57 @@ async def my_delete_row(row_id: str, request: Request):
 # ── 總表（像發票總表那樣一列一列看；管理員逐列調細節與備註）──────────────────
 
 @router.get("/rows")
-async def ledger_rows(request: Request, month: str = "", to: str = ""):
+async def ledger_rows(request: Request, month: str = "", to: str = "", date: str = "", from_: str = Query("", alias="from"),
+                      to_day: str = Query("", alias="to_day"), staff_id: str = ""):
     """month（起）～ to（迄，含；最多 12 個月）的所有列（每人每案每項）。篩選（人／案／關鍵字／來源）
-    在前端做。editable 只給管理員（一般成員看得到、改不了）。"""
+    在前端做。editable 只給管理員（一般成員看得到、改不了）。
+
+    管理視角的「看誰的」（docs/WORK_TRACKING_V2_PLAN.md §4-1／4-4，2026-09-12）多三種切法：`date`（一天）、
+    `from`＋`to_day`（一段日期，最多 62 天；`to` 已被月份佔走）、`staff_id`（只看一個人）。給了 date 或 from 就不看 month。
+    列的 `editable` 跟整包一樣只給管理員（PUT／DELETE /rows 是 check_admin）—— 格子照這個欄位決定畫成可改還是唯讀。"""
     is_admin = payload_grants(check_admin_or_module(request, "timesheets"))
-    m0, m1 = month_or_422(month)
-    if to:
-        t0, t1 = month_or_422(to)
-        if t0 < m0:
-            raise HTTPException(status_code=422, detail="迄月不能早於起月")
-        if (t0.year - m0.year) * 12 + (t0.month - m0.month) >= 12:
-            raise HTTPException(status_code=422, detail="區間最多 12 個月")
-        m1 = t1
+    if (date or "").strip() or (from_ or "").strip():
+        d0 = _day_or_422(date or from_)
+        d1 = d0 + timedelta(days=1) if (date or "").strip() else _day_or_422(to_day or from_) + timedelta(days=1)
+        if d1 <= d0:
+            raise HTTPException(status_code=422, detail="迄日不能早於起日")
+        if (d1 - d0).days > 62:
+            raise HTTPException(status_code=422, detail="區間最多 62 天")
+        m0, m1, label = d0, d1, {"date": d0.date().isoformat(), "to_day": (d1 - timedelta(days=1)).date().isoformat()}
+    else:
+        m0, m1 = month_or_422(month)
+        t0 = None
+        if to:
+            t0, t1 = month_or_422(to)
+            if t0 < m0:
+                raise HTTPException(status_code=422, detail="迄月不能早於起月")
+            if (t0.year - m0.year) * 12 + (t0.month - m0.month) >= 12:
+                raise HTTPException(status_code=422, detail="區間最多 12 個月")
+            m1 = t1
+        label = {"month": month_key(m0), "to": month_key(t0) if to else ""}
     factory = db_factory_or_503()
     async with factory() as session:
-        rows = (await session.execute(
-            select(Timesheet).where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
-            .order_by(Timesheet.work_date.desc(), Timesheet.staff_name, Timesheet.created_at))).scalars().all()
-    return {"month": month_key(m0), "to": month_key(t0) if to else "", "editable": is_admin,
-            "items": [ts_dict(r, with_note=is_admin) for r in rows], "work_types": list(WORK_TYPES)}
+        q = select(Timesheet).where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
+        if (staff_id or "").strip():
+            q = q.where(Timesheet.staff_id == staff_id.strip())
+        rows = (await session.execute(q.order_by(Timesheet.work_date.desc(), Timesheet.staff_name, Timesheet.created_at))).scalars().all()
+    return {**label, "editable": is_admin,
+            "items": [{**ts_dict(r, with_note=is_admin), "editable": is_admin} for r in rows], "work_types": list(WORK_TYPES)}
+
+
+@router.get("/people")
+async def timesheet_people(request: Request):
+    """管理視角「看誰的」切換器：在職／合夥／兼職人員（id、name、status），照團隊的一週的順序。
+    刻意不重用 /crm/staff（那支要 crm_staff 鑰匙、而且帶薪資欄位）。"""
+    check_admin_or_module(request, "timesheets")
+    from core.hr_logic import staff_rank, is_active_staff
+    factory = db_factory_or_503()
+    async with factory() as session:
+        staff = (await session.execute(select(CrmStaff.id, CrmStaff.name, CrmStaff.status))).all()
+    people = [{"id": sid, "name": name, "status": (st or "").strip()} for sid, name, st in staff
+              if name and (is_active_staff(st) or (st or "").strip() == "兼職")]
+    people.sort(key=lambda p: (staff_rank(p["status"]), p["name"]))
+    return {"people": people}
 
 
 @router.post("/rows/batch")
@@ -941,10 +981,10 @@ async def add_manual_rows(body: TimesheetManualRequest, request: Request):
         if staff is None:
             raise HTTPException(status_code=404, detail="人員不存在")
         _CANDS_CACHE["val"] = None
-        result = await insert_manual_rows(session, staff_id=staff.id,
-                                          staff_name=staff.name, rows=body.rows)
-        await session.commit()
-    return result
+        # 跟員工自填同一支 add_rows（階段先驗 422、鏡射 stage_name、待辦 done）—— 管理視角替人填的列
+        # 之前少了階段，格子存了、階段欄卻是空的（2026-09-12）。add_rows 自己 commit。
+        ident = {"staff_id": staff.id, "staff": staff, "username": current_username(request)}
+        return await add_rows(session, ident, body.rows)
 
 
 @router.get("/by_staff")

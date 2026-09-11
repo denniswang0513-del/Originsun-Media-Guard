@@ -26,10 +26,19 @@ import { dayLabel as _dayLabel, shiftDays, isPlan as _isPlan, hoursLabel as _hou
          srcTag as _srcTag, dayLog as _dayLog, pctStyle as _pctStyle, createBurnSorter, burnTbodyHtml, burnTableHtml, burnTypeCellHtml,
          bars as _bars, projectFileHtml } from '../../js/shared/ts-projects.js';
 import { openStageEditor } from '../../js/shared/stage-editor.js';
+// 「今天與這週」四個視圖（今天的專案紀錄／我的一週／團隊的一週／專案查詢）＝員工頁 /my.html 的同一份，
+// 這裡以管理視角掛（看誰的、替人填、還沒填、週合計；docs/WORK_TRACKING_V2_PLAN.md）
+import * as TSZ from '../../js/shared/ts-zone/index.js';
 
 
 let _content = null;
-let _view = 'today';   // today | mine | projects | staff | ledger | dash | settings | compare | project:<案名> | person:<人名>
+let _view = 'zone';    // zone（員工四視圖＋管理層）| ledger | dash | settings | compare | project:<案名> | person:<人名>
+                       // （today／mine／projects／staff 四個舊 view 的碼還在，2026-09-12 起不再是入口；P4 拿掉）
+let _zoneFirst = 'log';        // zone 裡一開始切到哪個視圖（log／plan／week／find；從別的分頁按四顆鈕回來時帶）
+let _zoneWho = null;           // 管理視角「看誰的」：null＝全部；{id, name}
+let _zoneManage = true;        // 管理視角開關（關掉＝以員工的角度看，紫色的東西全消失）
+let _zoneMe = undefined;       // 登入者綁的人員 {id, name}｜null（沒綁）；undefined＝還沒問過
+let _zonePeople = null;        // /timesheets/people
 let _workTypes = [];   // 後端的 WORK_TYPES（/mine 與 /rows 都帶）
 let _month = _today().slice(0, 7);   // YYYY-MM（本地時區；toISOString 是 UTC，1 號早上會停在上個月）
 let _day = _today();                 // 今日看板／我的一天的日期
@@ -193,6 +202,10 @@ export async function initTimesheetsTab() {
 
 async function refresh() {
     try {
+        if (_view === 'zone') {
+            await _mountZone();
+            return;
+        }
         if (_view === 'today') {
             const d = await tfetch(`/api/v1/timesheets/board?date=${_day}&days=${_boardDays}`);
             _content.innerHTML = _renderToday(d);
@@ -253,17 +266,74 @@ async function refresh() {
     }
 }
 
-// 七個分頁（新元素純文字，無 emoji）
-function _viewBtns() {
-    const b = (key, label) => `<button class="ts-btn ${_view === key ? '' : 'ghost'}"
-        data-ts-action="view" data-view="${key}">${label}</button>`;
-    return `<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        ${b('today', '今日')}${b('mine', '我的一天')}${b('projects', '專案')}${b('staff', '人員')}${b('ledger', '總表')}${b('dash', '儀表板')}${_isAdmin() ? b('settings', '設定') : ''}
+// 分頁鈕列：左邊四顆＝員工的四個視圖（zone），右邊＝管理次級（總表／儀表板／設定）。新元素純文字，無 emoji。
+// zone 掛著時這一列就是 ts-zone 的 .views（四顆用 data-view 給 ts-zone 切）；在總表那些分頁時四顆改帶 data-ts-action="zone"
+// （按了回 zone 並切到那個視圖）—— 同一顆鈕不能兩個都帶，不然 ts-zone 切完、外層又把整塊重畫一次。
+function _viewBtns(extra = '') {
+    const inZone = _view === 'zone';
+    const v = (key, label) => inZone
+        ? `<button type="button" class="view-btn" data-view="${key}">${label}</button>`
+        : `<button type="button" class="view-btn" data-ts-action="zone" data-view="${key}">${label}</button>`;
+    const m = (key, label) => `<button type="button" class="view-btn sub ${_view === key ? 'active' : ''}" data-ts-action="view" data-view="${key}">${label}</button>`;
+    return `<div class="views" id="ts-views">
+        ${v('log', '今天的專案紀錄')}${v('plan', '我的一週')}${v('week', '團隊的一週')}${v('find', '專案查詢')}
+        <span class="gap"></span>${extra}${m('ledger', '總表')}${m('dash', '儀表板')}${_isAdmin() ? m('settings', '設定') : ''}
     </div>`;
 }
 
+// ── zone：員工四視圖＋管理層（js/shared/ts-zone；docs/WORK_TRACKING_V2_PLAN.md §3–4）──
+async function _zoneIdentity() {
+    // 登入者綁的人員（看誰的＝自己時走 own-scope，跟員工頁一模一樣）＋ 人員清單（切換器、未填點名）
+    if (!_zonePeople) {
+        try { _zonePeople = (await tfetch('/api/v1/timesheets/people')).people || []; } catch (_) { _zonePeople = []; }
+    }
+    if (_zoneMe === undefined) {
+        // 綁定人員從登入時的 /auth/me 拿（window._authUser.staff_id），不另打 /timesheets/mine（沒綁的管理員會收一顆 409）
+        const sid = (window._authUser || {}).staff_id || '';
+        const hit = sid ? _zonePeople.find(p => p.id === sid) : null;
+        _zoneMe = hit ? { id: hit.id, name: hit.name } : null;
+    }
+}
+function _whoSelectHtml() {
+    const opt = (val, label) => `<option value="${esc(val)}" ${(_zoneWho ? _zoneWho.id : '') === val ? 'selected' : ''}>${esc(label)}</option>`;
+    const people = _zonePeople || [];
+    return `<label class="who">看誰的<select id="ts-zone-who">${opt('', '全部（團隊）')}${people.map(p => opt(p.id, p.name + (_zoneMe && p.id === _zoneMe.id ? '（我）' : (p.status === '兼職' ? '（兼職）' : '')))).join('')}</select></label>
+        <label class="sw" id="ts-zone-sw" title="關掉＝以員工的角度看（管理的東西全部消失）"><span>管理視角</span><i></i></label>`;
+}
+async function _mountZone() {
+    await _zoneIdentity();
+    _content.innerHTML = `<h2>工作追蹤</h2><div class="ts-sub">員工的四個視圖，加上管理看得到的：看誰的、替他填、還沒填、週合計。切「看誰的」到自己＝跟員工頁一模一樣。</div>
+        <div class="ts-zone${_zoneManage ? '' : ' emp'}" id="ts-zone">${_viewBtns(_whoSelectHtml())}
+            <div class="view" data-view="log" id="z1-log"></div>
+            <div class="view" data-view="plan" id="z1-plan"></div>
+            <div class="view" data-view="week" id="z1-week"></div>
+            <div class="view" data-view="find" id="z1-find"></div></div>`;
+    const host = document.getElementById('ts-zone');
+    TSZ.mountZone({
+        host, esc, mjson: tfetch, today: _today,          // ts-zone 的 body 是物件，tsFetch 正好收物件
+        can: () => true,                        // timesheets 鑰匙／管理員整區都開（後端各端點自己守）
+        first: _zoneFirst,
+        manage: _zoneManage, who: _zoneManage ? _zoneWho : (_zoneMe || null), me: _zoneMe, people: _zonePeople,
+        hooks: {
+            modalRoot: () => document.getElementById('ts-root') || document.body,
+            journalHref: '',                    // CRM 分頁沒有週記卡
+            passthrough: (b) => b.dataset.tsAction === 'view' || b.dataset.tsAction === 'zone',   // 鈕列右邊那幾顆是這個 tab 的
+            projectPicker: null,                // 整個 tab 已掛一份專案浮層（initTimesheetsTab），不再掛
+            onView: (v) => { _zoneFirst = v; },
+            onWho: (who) => { _zoneWho = who; const sel = document.getElementById('ts-zone-who'); if (sel) sel.value = who ? who.id : ''; },
+        },
+    });
+    document.getElementById('ts-zone-who')?.addEventListener('change', (e) => {
+        const p = (_zonePeople || []).find(x => x.id === e.target.value);
+        TSZ.setWho(p ? { id: p.id, name: p.name } : null);
+    });
+    document.getElementById('ts-zone-sw')?.addEventListener('click', () => { _zoneManage = !_zoneManage; refresh(); });
+}
+
+
 function _head(sub) {
-    return `<h2>工作追蹤</h2><div class="ts-sub">${sub}</div>${_viewBtns()}`;
+    // 鈕列的樣式住在 ts-zone.css（#ts-root .ts-zone .views）：不在 zone 裡的分頁也套同一個殼，四顆鈕才長一樣
+    return `<h2>工作追蹤</h2><div class="ts-sub">${sub}</div><div class="ts-zone bar">${_viewBtns()}</div>`;
 }
 
 function _dayNav(extra = '') {
@@ -919,6 +989,7 @@ async function _onAction(btn) {
             if (act === 'pull-settings') return _pullSettings();
             if (act === 'map') return _mapProject(btn.dataset.name);
             if (act === 'view') { _view = btn.dataset.view; return refresh(); }
+            if (act === 'zone') { _view = 'zone'; _zoneFirst = btn.dataset.view || 'log'; return refresh(); }
             if (act === 'day') {
                 const delta = Number(btn.dataset.delta);
                 _day = delta === 0 ? _today() : shiftDays(_day, delta);

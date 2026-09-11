@@ -55,8 +55,11 @@ async function buildZone1() {
         <div class="view" data-view="plan" id="z1-plan"></div>
         <div class="view" data-view="week" id="z1-week"></div>
         <div class="view" data-view="find" id="z1-find"></div>`;
+    // ts-zone 的 body 是物件；這一頁的 mfetch 直接交給 fetch → 這裡 stringify
+    const zjson = (path, opts) => mjson(path, opts && opts.body !== undefined
+        ? { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) }, body: JSON.stringify(opts.body) } : opts);
     TS.mountZone({
-        host: z, $, esc, mjson, today: _localToday, can: _z1Can,
+        host: z, $, esc, mjson: zjson, today: _localToday, can: _z1Can,
         first: localStorage.getItem(Z1_KEY) || "log",
         hooks: {
             modalRoot: () => $("ws-view") || document.body,
