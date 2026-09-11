@@ -673,7 +673,7 @@ def main():
         return 1
 
     # Get notes (from file, args, or interactive)
-    if getattr(args, "notes_file", ""):
+    if args.notes_file:
         # utf-8-sig 不是 utf-8：這個參數存在的理由就是「Windows 上中文會被吃掉」，
         # 而使用者做那個檔最自然的方式是 PowerShell 的 `>` / Out-File —— 那是
         # **UTF-8 with BOM**。用 utf-8 讀進來不會報錯，但 \ufeff 會變成 notes 的

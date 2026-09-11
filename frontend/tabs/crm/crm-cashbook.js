@@ -724,19 +724,19 @@ async function _cashPayForProject(e, pid, pname, o = {}) {
     });
 }
 
-let _payeeStaff = null;   // 人員清單（一次就好；這個彈窗可能開很多次）
-
 /** 把人員填進收款人下拉；選「其他」才露出打字框。
  *  代稱也顯示出來 —— 出納找「史丹」時才知道要選鄭雲全。
  *  🔴 **留著打字這條路**：代開的錢是匯回外面的人，不該強迫挑員工（owner 2026-09-04）。
  *  預設用選的只是要擋掉「停車費 史丹」那種把用途和人名寫在一起的寫法。 */
 async function _fillPayeeSelect(sel, freeInput) {
     if (!sel) return;
-    if (!_payeeStaff) {
-        try { _payeeStaff = (await _fetch('/staff')).staff || []; } catch (_) { _payeeStaff = []; }
-    }
+    // 走既有的 crmCacheFetch（同一個 'staff' key，crm.js 與 crm-projects-core 也在用）：
+    // 自己寫一份 null-memo 會少掉 TTL 與 crmCacheInvalidate —— 新增人員之後那個下拉
+    // 到重整分頁為止都是舊的。
+    let staff = [];
+    try { staff = (await crmCacheFetch('staff', '/staff')).staff || []; } catch (_) { staff = []; }
     sel.innerHTML = '<option value="">— 選擇人員 —</option>'
-        + _payeeStaff.map((st) => `<option value="${_esc(st.name || '')}">${_esc(st.name || '')}`
+        + staff.map((st) => `<option value="${_esc(st.name || '')}">${_esc(st.name || '')}`
             + (st.alias ? `（${_esc(st.alias)}）` : '') + '</option>').join('')
         + '<option value="__other__">＋ 其他（自己打）</option>';
     const sync = () => {
@@ -753,13 +753,9 @@ async function _fillPayeeSelect(sel, freeInput) {
     };
     sel.addEventListener('change', sync);
     sync();
-    // 選項一多就升級成可搜尋的框（156 位人員的原生下拉找不到人）
-    if (sel.options.length >= 4) {
-        try {
-            const { searchableSelect } = await import('./crm-utils.js');
-            searchableSelect(sel, { placeholder: '打字找人…' });
-        } catch (_) { /* 升級失敗就用原生的，不擋事 */ }
-    }
+    // 選項一多就升級成可搜尋的框（156 位人員的原生下拉找不到人）。
+    // searchableSelect 檔頭就靜態 import 了，不需要再動態 import 一次。
+    if (sel.options.length >= 4) searchableSelect(sel, { placeholder: '打字找人…' });
 }
 
 /** 直接開一張應付款（沒掛案、或案子沒有對應的費用配置）：摘要／金額／收款人／類別。 */

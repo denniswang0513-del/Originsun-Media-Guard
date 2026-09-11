@@ -1022,10 +1022,22 @@ async def payables_summary(request: Request, month: str = Query(""),
     from core.staff_alias import build_index, resolve as _who
     by_id = {r[0]: r for r in staff_rows}
     index = build_index([(r[0], r[1], r[2]) for r in staff_rows])
+    # 逐**相異字串**解析一次，不是逐列：同一個收款人平均出現 10 次（status=all 時更多），
+    # 而 resolve 對「對不到的」那些要掃過整張索引。純函式、同輸入同輸出，記憶化安全。
+    seen: dict = {}
+    unresolved: set = set()
     rows = []
     for p in pays:
-        st = by_id.get(_who(p.payee_name, index))
-        rows.append((p, st[3] if st else None, st[4] if st else None, st[5] if st else None))
+        name = p.payee_name or ""
+        if name not in seen:
+            who = _who(name, index)
+            if who is None:
+                unresolved.add(name)
+            seen[name] = by_id.get(who)
+        st = seen[name]
+        rows.append((p, st.id_number if st else None,
+                     st.bank_name if st else None,
+                     st.bank_account if st else None))
 
     # 分組聚合是純邏輯，抽在 core/crm_logic.py（有單元測試）
     from core.crm_logic import group_payables
@@ -1033,14 +1045,17 @@ async def payables_summary(request: Request, month: str = Query(""),
     # 🔴 代稱撞名時 staff_alias 會讓那個代稱**對誰都不算數**（不隨便挑一個）。
     # 那是對的，但如果不說出來，畫面就只是「沒有帳號」而看不出原因 —— 人員檔
     # 目前就有兩組重複建檔，很容易兩邊填到同一個代稱然後永遠對不上。
+    # 🔴 只對**真的沒對到人**的那些掛這句。原本是拿「payee_name 裡有沒有出現某個
+    # 撞名代稱」事後反推，於是「姓名叫王小明、單純還沒填帳號」的人也會被說成
+    # 「代稱『小明』有兩個人在用」—— 他去人員檔改代稱，改完問題還在而且看不出為什麼。
     dup = index.get("dup_alias") or set()
-    if dup:
-        for pg in out.get("payees", []):
-            if pg.get("bank_account"):
-                continue
-            hit = [a for a in dup if a and a in (pg.get("payee_name") or "")]
-            if hit:
-                pg["bank_note"] = f"代稱「{hit[0]}」有兩個人在用，所以不算數 —— 去人員檔改掉其中一個"
+    for pg in out.get("payees", []):
+        name = pg.get("payee_name") or ""
+        if pg.get("bank_account") or name not in unresolved:
+            continue
+        hit = next((a for a in dup if a and a in name), None)
+        if hit:
+            pg["bank_note"] = f"代稱「{hit}」有兩個人在用，所以不算數 —— 去人員檔改掉其中一個"
     return {"month": month or "all", **out}
 
 

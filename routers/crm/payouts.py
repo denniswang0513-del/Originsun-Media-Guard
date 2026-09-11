@@ -21,7 +21,6 @@ owner 2026-09-11：出納匯完款要通知收款人「這次匯了什麼」，�
 """
 from __future__ import annotations
 
-import secrets
 import uuid
 from datetime import datetime, timezone
 
@@ -32,19 +31,8 @@ from core import payout_share
 from core.public_access import surface_gate
 from core.schemas import PayoutCreate
 
-from ._shared import (_fmt_day, _get_factory, _require_db, money_dep,
+from ._shared import (_fmt_day, _get_factory, _now, _require_db, money_dep,
                       public_router, router)
-
-#: 短碼長度：同發票（72 bits，撞到的機率可以忽略，撞到就換一個而不是噴 500）。
-_CODE_BYTES = 9
-
-
-def _new_code() -> str:
-    return secrets.token_urlsafe(_CODE_BYTES)
-
-
-def _now():
-    return datetime.now(timezone.utc)
 
 
 def _payer_name() -> str:
@@ -62,6 +50,7 @@ async def create_payout(req: PayoutCreate, request: Request):
     **不改付款狀態**：標已付款是另一個動作（面板上那顆），出納可能先匯再標、也可能
     先標再產通知。把兩件事綁在一起的話，「只想補一張通知」就得先把狀態退回去。
     """
+    from core.auth import new_short_token
     from core.ledger import require_entity
     from db.models import CrmPaymentRequest, CrmPayout
 
@@ -109,7 +98,7 @@ async def create_payout(req: PayoutCreate, request: Request):
         # `payout_share._day`（只切前 10 碼、不驗），於是非 ISO 的日期會讓
         # **他那頁印一個日期、我們的清單是另一個** —— 沒有 error，只有他看得到。
         paid = _paid_day(req.paid_date)
-        snap = payout_share.build_snapshot(payees.pop() if payees else "", paid, _payer_name(), rows)
+        snap = payout_share.build_snapshot(payees.pop(), paid, _payer_name(), rows)
 
         payout = CrmPayout(id=uuid.uuid4().hex, entity=ent,
                            payee_name=snap["payee_name"], total=snap["total"],
@@ -117,7 +106,7 @@ async def create_payout(req: PayoutCreate, request: Request):
                            share_snapshot=snap, created_at=_now())
         # unique index 擋碰撞；撞到就換一個而不是噴 500（同發票）
         for _ in range(5):
-            candidate = _new_code()
+            candidate = new_short_token()      # 預設 9 bytes，同發票那支
             dup = (await session.execute(
                 select(CrmPayout.id).where(CrmPayout.share_token == candidate))).first()
             if not dup:
@@ -131,11 +120,10 @@ async def create_payout(req: PayoutCreate, request: Request):
         await session.commit()
         token = payout.share_token
 
-    from core.share_link import public_base
+    from core.share_link import public_base, share_url
     from config import load_settings
-    base = public_base(load_settings())
     return {"id": payout.id, "code": token, "total": snap["total"],
-            "url": f"{base}/p/{token}" if base else f"/p/{token}"}
+            "url": share_url(f"/p/{token}", public_base(load_settings()))}
 
 
 def _paid_day(v) -> str:
@@ -223,12 +211,12 @@ async def list_payouts(request: Request, payee: str = Query(""), limit: int = Qu
             stmt = stmt.where(CrmPayout.payee_name == payee.strip())
         rows = (await session.execute(
             stmt.order_by(CrmPayout.created_at.desc()).limit(max(1, min(limit, 100))))).scalars().all()
-    from core.share_link import public_base
+    from core.share_link import public_base, share_url
     from config import load_settings
     base = public_base(load_settings())
     return {"payouts": [{
         "id": p.id, "payee_name": p.payee_name or "", "total": p.total or 0,
         "paid_date": _fmt_day(p.paid_date),
         "code": p.share_token or "",
-        "url": (f"{base}/p/{p.share_token}" if base else f"/p/{p.share_token}") if p.share_token else "",
+        "url": share_url(f"/p/{p.share_token}", base) if p.share_token else "",
     } for p in rows]}

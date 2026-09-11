@@ -8,12 +8,13 @@ import { appendLog, copyText } from '../../js/shared/utils.js';
 // 兩本帳：Sheet 退役（owner 2026-08-25「我不會用 sheet 工作了」）→ 匯款清單
 // 也要在私帳可用。pin 模式同 crm-cashbook。
 import { finEntity as _pinEntity } from '../finance/fin-utils.js';
-// 🔴 複製一律走共用那支：同事多半從 http://192.168.1.x 連進來＝**非安全內容**，
-// `navigator.clipboard` 根本不存在，裸用它就是一顆按了沒反應的按鈕。
 
 let _payees = [];       // raw API data (grouped by payee)
 let _monthGroups = [];  // restructured: grouped by month, then payee
 let _selectedKey = null; // "payeeName|month"
+/** `_selectedKey` 那兩半 → 月份分組裡的那一位收款人（找不到回 undefined）。 */
+const _findPayee = (name, month) =>
+    _monthGroups.find(g => g.month === month)?.payees.find(x => x.payee_name === name);
 
 /* ── 資料重組：payee-first → month-first ── */
 function _buildMonthGroups() {
@@ -125,7 +126,9 @@ function _bankLine(p) {
     return _esc(bank ? `${bank} · ${p.bank_account}` : p.bank_account);
 }
 
-const _allPaid = (p) => p.items.every(it => it.payment_status === '已付款');
+// _buildMonthGroups 已經按「月 × 收款人」累加好了，不要再掃一次 items ——
+// 清單與面板走兩條不同的碼算同一個數字的話，哪天多一個付款狀態就會靜默對不上。
+const _allPaid = (p) => !p.unpaid_count;
 const _sorter = createSortable({
     storageKey: 'crm_payables_sort',
     defaultSort: { key: 'amount', dir: 'desc' },
@@ -178,7 +181,7 @@ function renderList() {
 /** 本次要匯的那幾筆＝**還沒付的**。月份分組裡可能混著已付的（已付按實際付款月份歸類），
  *  所以「應付總額」和「這次要匯多少」不是同一個數字 —— 匯款時要用的是這個。 */
 const _unpaidItems = (p) => p.items.filter(it => it.payment_status !== '已付款');
-const _unpaidTotal = (p) => _unpaidItems(p).reduce((s, it) => s + (it.amount || 0), 0);
+const _unpaidTotal = (p) => p.unpaid_amount || 0;
 /** 一筆項目寫成一行人看得懂的字（複製出去給收款人核對用）。 */
 const _itemLine = (it) => `${it.summary}${it.project_label ? `（${it.project_label}）` : ''} $${_fmtNum(it.amount)}`;
 
@@ -189,8 +192,7 @@ function renderDetail(p, month) {
 
     const actionsArea = document.getElementById('payable-bar-actions');
     if (actionsArea) {
-        const hasUnpaid = p.items.some(it => it.payment_status !== '已付款');
-        const key = p.payee_name + '|' + month;
+        const hasUnpaid = _unpaidItems(p).length > 0;
         actionsArea.innerHTML = `
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payableCopyInfo('${_esc(p.payee_name)}','${_esc(month)}',this)">複製匯款資訊</button>
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payoutNotify('${_esc(p.payee_name)}','${_esc(month)}')"
@@ -200,9 +202,6 @@ function renderDetail(p, month) {
         `;
     }
 
-    const bankHtml = p.bank_name
-        ? `<div class="crm-detail-prop"><div class="crm-prop-label">銀行</div><div class="crm-prop-value">${_esc(p.bank_name)} ${_esc(p.bank_account)}</div></div>`
-        : '';
 
     let itemsHtml = '';
     for (const it of p.items) {
@@ -271,24 +270,33 @@ function _cpRow(key, label, valueHtml, canCopy) {
 
 /** 轉入帳號備註＝我們的公司名稱（後台設定裡已經有；出納現在每次手打）。 */
 function _bkCompany() {
-    return (window.__settingsCache?.company?.name) || _companyName || '';
+    return _companyName;
 }
 let _companyName = '';
-(async () => {
+/** 公司名只抓一次。**不在模組載入期發** —— 這支分頁是 lazy import 的，在那裡發
+ *  等於使用者沒開任何收款人面板也多打一支 `/api/settings/load`（回整份設定、no-store）。
+ *  🔴 而且它跟開面板是競態：落地之前點開的話「轉入帳號備註」那一列會是「—」、
+ *  沒有複製鈕，而且**不會自己補上**（renderDetail 不會重跑）。所以落地後補畫一次。 */
+async function _loadCompanyName() {
+    if (_companyName) return;
     try {
         const r = await fetch(location.origin + '/api/settings/load');
         if (r.ok) _companyName = (await r.json())?.company?.name || '';
     } catch (_) { /* 沒有就空著，那一列會顯示「—」不給複製 */ }
-})();
+    if (_companyName && _selectedKey) {
+        const [name, month] = _selectedKey.split('|');
+        const p = _findPayee(name, month);
+        if (p) renderDetail(p, month);
+    }
+}
 
-/* ── 選取 / 關閉 ── *//* ── 選取 / 關閉 ── */
+/* ── 選取 / 關閉 ── */
 function selectPayee(name, month) {
     _selectedKey = name + '|' + month;
     renderList();
     document.getElementById('payable-detail-panel').style.display = 'flex';
     document.getElementById('payable-resize-handle').style.display = '';
-    const grp = _monthGroups.find(g => g.month === month);
-    const p = grp?.payees.find(x => x.payee_name === name);
+    const p = _findPayee(name, month);
     if (p) renderDetail(p, month);
 }
 
@@ -386,8 +394,7 @@ window._payableSaveDate = async (paymentId) => {
 };
 
 window._payableCopyInfo = (name, month, btn) => {
-    const grp = _monthGroups.find(g => g.month === month);
-    const p = grp?.payees.find(x => x.payee_name === name);
+    const p = _findPayee(name, month);
     if (!p) return;
     const unpaid = _unpaidItems(p);
     // 金額**不帶錢字號與逗號**：網銀的金額欄只收數字，帶符號就得手動改，改就會錯
@@ -414,8 +421,7 @@ const _plainAmount = (n) => String(Math.round(Number(n) || 0));
  *  $1,495 帶著錢字號與逗號，網銀的金額欄只吃數字）。 */
 window._payableCopyField = (key, btn) => {
     const [name, month] = (_selectedKey || '').split('|');
-    const grp = _monthGroups.find(g => g.month === month);
-    const p = grp?.payees.find(x => x.payee_name === name);
+    const p = _findPayee(name, month);
     if (!p) return;
     const text = {
         bankcode: () => p.bank_code || '',
@@ -423,7 +429,7 @@ window._payableCopyField = (key, btn) => {
         amount: () => _plainAmount(_unpaidTotal(p)),
         memo: () => _bkCompany(),
         payee: () => p.payee_name || '',
-        items: () => _unpaidItems(p).map(_itemLine).join(String.fromCharCode(10)),
+        items: () => _unpaidItems(p).map(_itemLine).join('\n'),
     }[key]?.() || '';
     if (text) copyText(text, btn);
 };
@@ -486,7 +492,6 @@ window._payableRunList = () => {
 
 /** 整份複製出去的字。金額**不帶錢字號與逗號** —— 貼進網銀的金額欄只吃數字。 */
 function _runListText(rows, total) {
-    const NL = String.fromCharCode(10);
     // 跨月時同一個人會出現兩列（八月一筆、九月一筆），那時要標月份才分得出來
     const multiMonth = new Set(rows.map(r => r.month)).size > 1;
     const lines = rows.map(r => [
@@ -501,7 +506,7 @@ function _runListText(rows, total) {
         '本月匯款清單　轉入備註：' + _bkCompany(),
         ...lines,
         '合計 ' + _plainAmount(total) + '　' + rows.length + ' 列 / ' + people + ' 位收款人',
-    ].join(NL);
+    ].join('\n');
 }
 
 /** 匯款通知：勾「**這次匯了哪幾筆**」→ 產生一條連結給收款人（owner 2026-09-11）。
@@ -511,12 +516,9 @@ function _runListText(rows, total) {
  *  可以勾 —— 補一張通知給早就匯過的人是真的會發生。
  *  產生連結**不會**改付款狀態（標已付款是面板上另一顆）。 */
 window._payoutNotify = (name, month) => {
-    const grp = _monthGroups.find(g => g.month === month);
-    const p = grp?.payees.find(x => x.payee_name === name);
+    const p = _findPayee(name, month);
     if (!p) return;
 
-    const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
-        .toISOString().slice(0, 10);
     const rows = p.items.map(it => {
         const paid = it.payment_status === '已付款';
         return `<label class="po-row">
@@ -610,8 +612,7 @@ window._payoutNotify = (name, month) => {
 };
 
 window._payablePayAll = async (name, month) => {
-    const grp = _monthGroups.find(g => g.month === month);
-    const p = grp?.payees.find(x => x.payee_name === name);
+    const p = _findPayee(name, month);
     if (!p) return;
     const unpaidIds = p.items.filter(it => it.payment_status !== '已付款').map(it => it.id);
     if (!unpaidIds.length) return;
@@ -632,6 +633,7 @@ export function initCrmPayablesTab() {
     monthInput.addEventListener('change', loadPayables);
     document.getElementById('payable-filter-status').addEventListener('change', loadPayables);
     setupResizeHandle('payable-resize-handle', 'payable-detail-panel');
+    _loadCompanyName();
     loadPayables();
 }
 

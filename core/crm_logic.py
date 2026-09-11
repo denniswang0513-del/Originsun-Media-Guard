@@ -3,6 +3,7 @@
 錢流判定規則是公司帳務的 source of truth，抽成純函式讓「規則」與
 「SQL 聚合」分離：endpoint 只負責把 DB 加總餵進來。
 """
+from core.bank_codes import resolve as _bank
 from core.finance_logic import (INVOICE_COLLECTED_STATUSES,
                                 recognize_receipt_fee)
 
@@ -71,7 +72,6 @@ def group_payables(rows) -> dict:
         if name not in payee_groups:
             # 銀行那格人各自打成四種寫法（含全形半形混用），翻譯規則只有 core.bank_codes 一份。
             # 對不到就原樣放行 —— 畫面顯示他打的字，不會因為表裡沒收錄就變空白。
-            from core.bank_codes import resolve as _bank
             _code, _bname = _bank(staff_bank_name or "")
             payee_groups[name] = {
                 "payee_name": name,

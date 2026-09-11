@@ -149,8 +149,10 @@ window._projShareExpenseLink = function() {
         // 非安全來源上 `navigator.clipboard` **不存在**，`.writeText` 會同步丟
         // TypeError → 被外層那個 .catch 接走 → 使用者看到「發連結失敗」，
         // 而 token 其實已經建好了，他只是永遠拿不到連結（會再按一次、再建一個）。
-        copyText(url).then(function() {
-            alert('雜支登記連結已複製（免登入，可直接給現場人員）：\n' + url);
+        // 看 copyText 的回傳值：它**從不 reject**，退到 prompt 那條時已經讓使用者
+        // 自己複製過了 —— 再 alert 一次「已複製」等於連吃兩個對話框。
+        copyText(url).then(function(ok) {
+            if (ok) alert('雜支登記連結已複製（免登入，可直接給現場人員）：\n' + url);
         });
     }).catch(function(e) {
         alert('發連結失敗：' + (e.message || e));
@@ -160,8 +162,8 @@ window._projShareExpenseLink = function() {
 window._advShareLink = function(advanceId) {
     var url = location.origin + '/advance-expense.html?id=' + advanceId;
     // 同上：內網非安全來源裸用 clipboard ＝ 這顆點了完全沒反應（連 alert 都沒有）。
-    copyText(url).then(function() {
-        alert('連結已複製：\n' + url);
+    copyText(url).then(function(ok) {
+        if (ok) alert('連結已複製：\n' + url);
     });
 };
 
