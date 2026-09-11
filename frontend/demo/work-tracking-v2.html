@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>示範｜工作追蹤 v2（員工介面 ＋ 管理層）</title>
+<style>
+  /* 兩套皮：dark＝CRM 分頁、light＝員工頁原貌。切換只換 token，版面完全一樣 */
+  :root { --bg:#1a1a1a; --card:#232323; --line:#3a3a3a; --ink:#e0e0e0; --sub:#9ca3af; --field:#1e1e1e; --tab:#262626; --tab-on:#2f2f2f;
+          --pri:#3b82f6; --ok:#86efac; --warn:#fbbf24; --bad:#fca5a5; --num:#f59e0b; --mg:#7c3aed; --mg-bg:rgba(124,58,237,.10);
+          --plan:#1e3a5f; --shoot:#0f3d3d; --off:#333; --ms:#3b2a00; }
+  :root[data-theme="light"] { --bg:#fff; --card:#fafafa; --line:#e5e5e5; --ink:#262626; --sub:#8a8a8a; --field:#fff; --tab:#f3f3f3; --tab-on:#fff;
+          --ok:#15803d; --warn:#b45309; --bad:#b91c1c; --mg:#6d28d9; --mg-bg:rgba(109,40,217,.07);
+          --plan:#eef2ff; --shoot:#ecfeff; --off:#f5f5f5; --ms:#fff7e6; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system,"Segoe UI","Noto Sans TC",sans-serif; }
+  button { font-family:inherit; cursor:pointer; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:var(--tab); color:var(--sub); font-weight:600; font-size:12px; white-space:nowrap; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  /* ── 示範頁外殼 ── */
+  .top { position:sticky; top:0; z-index:10; background:var(--bg); border-bottom:1px solid var(--line); padding:10px 18px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .top h1 { font-size:16px; margin:0; }
+  .top .note { color:var(--sub); font-size:12px; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button { background:none; border:0; color:var(--sub); padding:6px 14px; font-size:13px; }
+  .seg button.on { background:var(--pri); color:#fff; }
+  .stage { display:flex; gap:24px; padding:20px 18px 60px; align-items:flex-start; }
+  .legend { width:300px; flex:none; position:sticky; top:58px; }
+  .legend h2 { font-size:13px; color:var(--sub); margin:0 0 8px; font-weight:600; }
+  .legend ol { margin:0 0 18px; padding:0; list-style:none; }
+  .legend li { display:flex; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .legend li b { display:block; font-weight:600; }
+  .legend li span { color:var(--sub); font-size:12px; }
+  .n { flex:none; width:22px; height:22px; border-radius:50%; background:var(--num); color:#111; font-weight:700; font-size:12px; display:inline-flex; align-items:center; justify-content:center; }
+  .n.m { background:var(--mg); color:#fff; }
+  .desk { flex:1; min-width:0; }
+  @media (max-width:960px) { .stage { flex-direction:column; } .legend { width:auto; position:static; } }
+  /* ── CRM 分頁殼（人事管理 › 工作追蹤）── */
+  .crm-bar { display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+  .crm-bar h2 { font-size:17px; margin:0 12px 0 0; }
+  .who { display:flex; align-items:center; gap:6px; font-size:13px; }
+  .who select { background:var(--field); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font:inherit; }
+  .sw { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--sub); margin-left:auto; }
+  .sw i { width:34px; height:18px; border-radius:9px; background:var(--mg); position:relative; display:inline-block; }
+  .sw i::after { content:""; position:absolute; top:2px; right:2px; width:14px; height:14px; border-radius:50%; background:#fff; }
+  body.emp .sw i { background:#666; } body.emp .sw i::after { right:auto; left:2px; }
+  /* 員工那組分頁鈕（照 my.html .views／.view-btn） */
+  .views { display:flex; gap:4px; border-bottom:1px solid var(--line); flex-wrap:wrap; align-items:flex-end; }
+  .view-btn { background:var(--tab); border:1px solid var(--line); border-bottom:0; color:var(--sub); font-size:13px; font-weight:600; padding:8px 20px; border-radius:6px 6px 0 0; }
+  .view-btn.active { background:var(--tab-on); color:var(--ink); position:relative; top:1px; }
+  .view-btn.sub { margin-left:auto; font-weight:400; }
+  .view { display:none; border:1px solid var(--line); border-top:0; padding:16px 18px 14px; background:var(--tab-on); }
+  .view.on { display:block; }
+  /* ── 管理層標記：紫框＋「管理」角標；員工視角時整個消失 ── */
+  .mg { position:relative; outline:1px dashed var(--mg); outline-offset:2px; background:var(--mg-bg); }
+  .mg::before { content:"管理"; position:absolute; top:-9px; right:-4px; background:var(--mg); color:#fff; font-size:10px; padding:0 6px; border-radius:8px; line-height:16px; z-index:1; }
+  td.mg::before, th.mg::before, .chip.mg::before { display:none; }
+  .chip.mg { outline:0; border-color:var(--mg); }
+  td.mg, th.mg { outline:0; }
+  body.emp .mg { display:none !important; }
+  body.emp .view.on .empty-emp { display:block; }
+  .empty-emp { display:none; color:var(--sub); font-size:12px; margin:0 0 10px; }
+  /* ── 共用小元件 ── */
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; border:1px solid var(--line); color:var(--sub); font-size:11px; white-space:nowrap; }
+  .pill.ok { border-color:var(--ok); color:var(--ok); } .pill.warn { border-color:var(--warn); color:var(--warn); } .pill.bad { border-color:var(--bad); color:var(--bad); }
+  .pill.pri { border-color:var(--pri); color:var(--pri); }
+  .chip { display:inline-block; font-size:11px; color:var(--sub); border:1px solid var(--line); border-radius:4px; padding:0 5px; margin-left:6px; white-space:nowrap; }
+  .chip.over { color:var(--bad); border-color:var(--bad); }
+  .bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; min-width:70px; }
+  .bar i { display:block; height:100%; background:var(--pri); } .bar i.over { background:#c9372c; } .bar i.ok { background:#3a9d5d; }
+  .sub { color:var(--sub); font-size:12px; }
+  .btn { border:1px solid var(--line); border-radius:6px; background:var(--field); color:var(--ink); padding:5px 12px; font-size:13px; }
+  .btn.pri { background:var(--pri); border-color:var(--pri); color:#fff; }
+  .btn.sm { font-size:12px; padding:3px 9px; }
+  .notice { border:1px solid var(--line); border-left:3px solid var(--warn); padding:8px 12px; font-size:13px; margin-bottom:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .notice a { color:var(--pri); cursor:pointer; text-decoration:underline; }
+  .row-tools { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  .row-tools .sp { flex:1; }
+  input.cell, select.cell { width:100%; background:transparent; border:0; color:var(--ink); font:inherit; padding:0; outline:0; }
+  tr.plan td { background:var(--plan); }
+  tr.by td:nth-child(2)::after { content:"代填：Dennis"; display:block; font-size:11px; color:var(--mg); }
+  /* 我的一週 */
+  .week { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:8px; }
+  .day { border:1px solid var(--line); border-radius:8px; background:var(--card); min-height:220px; padding:8px; }
+  .day h4 { margin:0 0 8px; font-size:12px; color:var(--sub); display:flex; justify-content:space-between; }
+  .day h4.today { color:var(--pri); }
+  .card { border:1px solid var(--line); border-radius:6px; padding:6px 8px; margin-bottom:6px; background:var(--plan); font-size:12px; }
+  .card b { display:block; font-size:12px; }
+  .card.done { background:var(--card); opacity:.7; text-decoration:line-through; }
+  .card.pt { border-style:dashed; }
+  .add { color:var(--sub); font-size:12px; border:1px dashed var(--line); border-radius:6px; padding:5px 8px; }
+  /* 團隊的一週 */
+  .tw td { min-width:120px; height:64px; font-size:12px; }
+  .tw td .c { border-radius:4px; padding:2px 5px; margin-bottom:3px; background:var(--plan); }
+  .tw td .c.shoot { background:var(--shoot); } .tw td .c.off { background:var(--off); color:var(--sub); } .tw td .c.ms { background:var(--ms); }
+  .tw td .c i { display:block; font-style:normal; color:var(--sub); font-size:11px; }
+  .tw td.today { box-shadow:inset 0 0 0 2px var(--pri); }
+  .tw td.blank { color:var(--bad); font-size:11px; }
+  .tw .cf { position:absolute; top:2px; right:2px; font-size:10px; color:#fff; background:var(--warn); border-radius:3px; padding:0 4px; }
+  .tw td { position:relative; }
+  /* 專案查詢 */
+  .filters { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .filters input, .filters select { background:var(--field); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font:inherit; font-size:13px; }
+  td.pct { min-width:120px; }
+  td.pct .bar { margin-top:3px; }
+  .link { color:var(--pri); cursor:pointer; text-decoration:underline; }
+  /* 專案檔案彈窗（縮小版示意） */
+  .modal { border:1px solid var(--line); border-radius:10px; background:var(--card); padding:14px 16px; margin-top:14px; }
+  .modal h3 { font-size:14px; margin:0 0 8px; }
+  .modal .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .modal .grid > div { border:1px solid var(--line); border-radius:8px; padding:10px; }
+  .modal h4 { margin:0 0 6px; font-size:12px; color:var(--sub); }
+  .kv { display:flex; justify-content:space-between; font-size:12px; padding:2px 0; }
+  .kv b { font-variant-numeric:tabular-nums; }
+  @media (max-width:760px) { .week { grid-template-columns:1fr 1fr; } .modal .grid { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>工作追蹤 v2</h1>
+  <span class="note">CRM › 人事管理 › 工作追蹤：員工的四個視圖原貌，紫色虛線＝只有管理員／timesheets 看得到的東西。owner 2026-09-11 拍板：深色、看誰的預設全部、兼職排班獨立、錢四欄全開、今日看板不留</span>
+  <span style="margin-left:auto" class="note">皮膚</span>
+  <div class="seg"><button class="on" data-theme="dark">CRM 深色</button><button data-theme="light">員工頁淺色</button></div>
+</div>
+
+<div class="stage">
+  <aside class="legend">
+    <h2>視圖（照員工頁，順序不變）</h2>
+    <ol>
+      <li><span class="n">1</span><div><b>今天的專案紀錄</b><span>ts-sheet 格子，跟 /my.html 同一份元件</span></div></li>
+      <li><span class="n">2</span><div><b>我的一週</b><span>一天一欄的計畫板，卡＝計畫列</span></div></li>
+      <li><span class="n">3</span><div><b>團隊的一週</b><span>人×日：案名＋小時＋內容、場次、休假、里程碑</span></div></li>
+      <li><span class="n">4</span><div><b>專案查詢</b><span>burn 表：已投入／預算／剩餘／消耗率</span></div></li>
+    </ol>
+    <h2>管理層（紫色；「管理視角」關掉全部消失）</h2>
+    <ol>
+      <li><span class="n m">A</span><div><b>看誰的</b><span>今天／一週兩個視圖可切人；替別人填走總表那把，列上標「代填」</span></div></li>
+      <li><span class="n m">B</span><div><b>今天還沒填的人</b><span>頂端一條點名，點名字切過去</span></div></li>
+      <li><span class="n m">C</span><div><b>案子燒率 chip</b><span>格子案名旁：已投入／預算，超 100% 紅</span></div></li>
+      <li><span class="n m">D</span><div><b>兼職排班維持獨立視窗</b><span>owner 拍板：不併進一週；鈕還在一週右上</span></div></li>
+      <li><span class="n m">E</span><div><b>週合計＋未填標紅＋衝突待決</b><span>團隊的一週右側合計欄、空格標「未填」、角標「衝突」</span></div></li>
+      <li><span class="n m">F</span><div><b>錢與預算四欄</b><span>合約未稅／預期毛利／建議預算／人力成本（要 money_view）</span></div></li>
+      <li><span class="n m">G</span><div><b>未對映 Sheet 案名</b><span>candidates＋一鍵指定</span></div></li>
+      <li><span class="n m">H</span><div><b>專案檔案多「類似專案並排」與預算調整</b><span>員工版五個區塊照舊</span></div></li>
+    </ol>
+    <h2>管理 ▾</h2>
+    <ol><li><span class="n">—</span><div><b>總表／儀表板／設定</b><span>現行原樣，收進右邊的次級鈕</span></div></li></ol>
+  </aside>
+
+  <main class="desk">
+    <div class="crm-bar">
+      <h2>工作追蹤</h2>
+      <div class="who mg"><span class="n m" style="width:18px;height:18px;font-size:10px">A</span> 看誰的
+        <select id="who"><option selected>全部（團隊）</option><option>Dennis（我）</option><option>王小美</option><option>陳阿宏</option><option>林冠宇</option></select>
+      </div>
+      <label class="sw" id="sw"><span>管理視角</span><i></i></label>
+    </div>
+
+    <div class="views" id="views">
+      <button class="view-btn active" data-v="log">今天的專案紀錄</button>
+      <button class="view-btn" data-v="plan">我的一週</button>
+      <button class="view-btn" data-v="week">團隊的一週</button>
+      <button class="view-btn" data-v="find">專案查詢</button>
+      <button class="view-btn sub mg" data-v="ledger">總表</button>
+      <button class="view-btn sub mg" data-v="dash" style="margin-left:0">儀表板</button>
+      <button class="view-btn sub mg" data-v="settings" style="margin-left:0">設定</button>
+    </div>
+
+    <!-- ① 今天的專案紀錄 -->
+    <section class="view on" data-v="log">
+      <div class="notice mg"><span class="n m" style="width:18px;height:18px;font-size:10px">B</span> 今天還沒填：<a>陳阿宏</a>、<a>林冠宇</a> <span class="sub">（09/11 週五，18:40）</span></div>
+      <div class="row-tools">
+        <button class="btn sm">‹ 前一天</button><b>09/11（五）</b><button class="btn sm">後一天 ›</button>
+        <span class="sub">王小美 · 在職</span><span class="sub mg" style="padding:0 6px">「全部」時每個人一段格子（唯讀），點名字進去改；下面示意王小美那段</span>
+        <span class="sp"></span>
+        <button class="btn sm">複製昨天</button><button class="btn sm">合併同案</button>
+      </div>
+      <table>
+        <thead><tr><th style="width:26px"></th><th style="width:220px">專案</th><th style="width:90px">分類</th><th style="width:110px">工作階段</th><th>做了什麼</th><th style="width:140px">備註</th><th class="num" style="width:70px">時數 h</th><th style="width:60px">起</th><th style="width:60px">訖</th><th style="width:26px"></th></tr></thead>
+        <tbody>
+          <tr class="by"><td>1</td><td>2026 晨光科技 品牌形象片<span class="chip mg" title="已投入／預算">C 86 / 120h</span></td><td>後製</td><td>粗剪</td><td>第二版粗剪，把訪談段落順序調整</td><td></td><td class="num">4</td><td>09:30</td><td>13:30</td><td></td></tr>
+          <tr><td>2</td><td>2026 台灣好米 產品短片<span class="chip mg over">C 64 / 40h</span></td><td>前製</td><td>分鏡</td><td>分鏡第 3 稿，配合客戶改的 10 秒版</td><td>等客戶回覆</td><td class="num">2.5</td><td>14:00</td><td>16:30</td><td></td></tr>
+          <tr class="plan"><td>3</td><td>2026 晨光科技 品牌形象片</td><td>後製</td><td>調光</td><td>計畫：明天一早先過 LUT</td><td></td><td class="num"></td><td></td><td></td><td></td></tr>
+          <tr><td>4</td><td><input class="cell" placeholder="打字找案…"></td><td></td><td></td><td></td><td></td><td class="num"></td><td></td><td></td><td></td></tr>
+          <tr><td>5</td><td></td><td></td><td></td><td></td><td></td><td class="num"></td><td></td><td></td><td></td></tr>
+        </tbody>
+      </table>
+      <p class="sub" style="margin:8px 0 0">填了任一格就存；有時數才進彙整。藍底＝計畫列（我的一週那張卡）。<span class="mg" style="padding:0 6px">「看誰的」不是自己時，這裡寫的列會標「代填：Dennis」</span></p>
+    </section>
+
+    <!-- ② 我的一週 -->
+    <section class="view" data-v="plan">
+      <div class="row-tools">
+        <button class="btn sm">‹ 上週</button><b>09/08 – 09/12</b><button class="btn sm">本週</button><button class="btn sm">下週 ›</button>
+        <span class="sp"></span><button class="btn sm mg"><span class="n m" style="width:16px;height:16px;font-size:10px">D</span> 兼職排班（獨立視窗）</button>
+      </div>
+      <div class="week">
+        <div class="day"><h4>週一 09/08<span>8h</span></h4><div class="card done"><b>晨光科技 品牌形象片</b>粗剪 v1</div><div class="card done"><b>台灣好米 產品短片</b>分鏡 v2</div><div class="add">＋ 新增計畫</div></div>
+        <div class="day"><h4>週二 09/09<span>7.5h</span></h4><div class="card done"><b>晨光科技 品牌形象片</b>粗剪 v1 修</div><div class="add">＋ 新增計畫</div></div>
+        <div class="day"><h4>週三 09/10<span>8h</span></h4><div class="card done"><b>台灣好米 產品短片</b>客戶會議＋分鏡 v3</div><div class="add">＋ 新增計畫</div></div>
+        <div class="day"><h4>週四 09/11<span>6.5h</span></h4><div class="card"><b>晨光科技 品牌形象片</b>粗剪 v2</div><div class="card"><b>台灣好米 產品短片</b>分鏡第 3 稿</div><div class="add">＋ 新增計畫</div></div>
+        <div class="day"><h4 class="today">週五 09/12<span>—</span></h4><div class="card"><b>晨光科技 品牌形象片</b>調光：先過 LUT</div><div class="add">＋ 新增計畫</div></div>
+      </div>
+      <p class="sub" style="margin:8px 0 0">卡＝一列工時（status=plan、沒時數）；拖到別天＝只改 work_date；不判有做沒做。</p>
+    </section>
+
+    <!-- ③ 團隊的一週 -->
+    <section class="view" data-v="week">
+      <div class="row-tools">
+        <button class="btn sm">‹ 上週</button><b>09/08 – 09/12</b><button class="btn sm">下週 ›</button>
+        <span class="sp"></span>
+        <button class="btn sm">設定本週里程碑</button>
+        <button class="btn sm mg">衝突待決 2</button>
+      </div>
+      <table class="tw">
+        <thead><tr><th style="width:84px">人員</th><th>一 09/08</th><th>二 09/09</th><th>三 09/10</th><th>四 09/11</th><th>五 09/12</th><th class="num mg" style="width:80px">週合計</th></tr></thead>
+        <tbody>
+          <tr><td>王小美</td>
+            <td><div class="c">晨光科技 4h<i>粗剪 v1</i></div><div class="c">台灣好米 4h<i>分鏡 v2</i></div></td>
+            <td><div class="c">晨光科技 7.5h<i>粗剪 v1 修</i></div></td>
+            <td><div class="c">台灣好米 8h<i>客戶會議＋分鏡 v3</i></div></td>
+            <td class="today"><div class="c">晨光科技 4h<i>粗剪 v2</i></div><div class="c">台灣好米 2.5h<i>分鏡第 3 稿</i></div></td>
+            <td><div class="c ms">里程碑：粗剪定稿<i>晨光科技</i></div></td>
+            <td class="num mg">30.0</td></tr>
+          <tr><td>陳阿宏</td>
+            <td><div class="c shoot">台灣好米 外景<i>苗栗 · 07:00 · 阿宏、冠宇</i></div></td>
+            <td><div class="c">台灣好米 8h<i>素材整理、備份</i></div><span class="cf mg">衝突</span></td>
+            <td><div class="c">台灣好米 6h<i>粗剪</i></div></td>
+            <td class="today blank">未填</td>
+            <td><div class="c off">休假</div></td>
+            <td class="num mg" style="color:var(--warn)">14.0</td></tr>
+          <tr><td>林冠宇</td>
+            <td><div class="c shoot">台灣好米 外景<i>苗栗 · 07:00</i></div></td>
+            <td><div class="c">星野建設 5h<i>空拍素材寫入</i></div></td>
+            <td><div class="c">星野建設 8h<i>串帶、reel</i></div></td>
+            <td class="today blank">未填</td>
+            <td><div class="c">星野建設<i>計畫：調光</i></div></td>
+            <td class="num mg" style="color:var(--warn)">13.0</td></tr>
+          <tr><td>Ken（兼職）</td>
+            <td></td><td><div class="c">晨光科技 3h<i>字幕</i></div></td><td></td><td class="today"></td><td><div class="c">晨光科技<i>計畫：字幕上稿</i></div></td>
+            <td class="num mg">3.0</td></tr>
+        </tbody>
+      </table>
+      <p class="sub mg" style="margin:8px 0 0;padding:4px 6px"><span class="n m" style="width:18px;height:18px;font-size:10px">E</span> 週合計低於 20h 標黃、今天空白標「未填」；「衝突」＝改過的列撞到 Sheet 新版，點開三選一（留系統／吃 Sheet／兩邊都留）。員工看到的是沒有這三樣的同一張表。</p>
+    </section>
+
+    <!-- ④ 專案查詢 -->
+    <section class="view" data-v="find">
+      <div class="filters">
+        <input placeholder="案名／客戶" style="width:180px"><select><option>狀態：全部</option></select><select><option>案型：全部</option></select><select><option>消耗率：全部</option><option>未設預算</option><option>超過 100%</option></select>
+        <span class="sp"></span>
+        <button class="btn sm mg">套用建議預算（只填沒設的）</button>
+      </div>
+      <table>
+        <thead><tr><th>客戶</th><th>專案</th><th>狀態</th><th>案型</th><th class="num">已投入(h)</th><th class="num">預算(h)</th><th class="num">剩餘(h)</th><th>消耗率</th><th class="num">列數</th><th>最後填報</th>
+          <th class="num mg">合約未稅</th><th class="num mg">預期毛利</th><th class="num mg">建議預算(h)</th><th class="num mg">人力成本</th></tr></thead>
+        <tbody>
+          <tr><td>晨光科技</td><td><span class="link" id="open-file">2026 晨光科技 品牌形象片</span></td><td><span class="pill pri">製作中</span></td><td>形象片</td><td class="num">86</td><td class="num">120</td><td class="num">34</td><td class="pct">72%<div class="bar"><i style="width:72%"></i></div></td><td class="num">31</td><td>09/11</td>
+            <td class="num mg">480,000</td><td class="num mg">35%</td><td class="num mg">124</td><td class="num mg">137,600</td></tr>
+          <tr><td>台灣好米</td><td><span class="link">2026 台灣好米 產品短片</span></td><td><span class="pill pri">製作中</span></td><td>產品片</td><td class="num">64</td><td class="num">40</td><td class="num" style="color:var(--bad)">−24</td><td class="pct" style="color:var(--bad)">160%<div class="bar"><i class="over" style="width:100%"></i></div></td><td class="num">22</td><td>09/11</td>
+            <td class="num mg">180,000</td><td class="num mg">30%</td><td class="num mg">50</td><td class="num mg" style="color:var(--bad)">102,400</td></tr>
+          <tr><td>星野建設</td><td><span class="link">2026 星野建設 建案空拍</span></td><td><span class="pill pri">製作中</span></td><td>空拍</td><td class="num">13</td><td class="num">—</td><td class="num">—</td><td class="pct"><span class="pill warn">未設預算</span></td><td class="num">3</td><td>09/10</td>
+            <td class="num mg">96,000</td><td class="num mg">40%</td><td class="num mg">23</td><td class="num mg">20,800</td></tr>
+          <tr><td>青田文教</td><td><span class="link">2025 青田文教 年度紀錄</span></td><td><span class="pill">已結案</span></td><td>紀錄片</td><td class="num">212</td><td class="num">200</td><td class="num" style="color:var(--bad)">−12</td><td class="pct">106%<div class="bar"><i class="over" style="width:100%"></i></div></td><td class="num">88</td><td>07/30</td>
+            <td class="num mg">520,000</td><td class="num mg">28%</td><td class="num mg">208</td><td class="num mg">339,200</td></tr>
+        </tbody>
+      </table>
+      <p class="sub" style="margin:8px 0 0"><span class="mg" style="padding:0 6px"><span class="n m" style="width:18px;height:18px;font-size:10px">F</span> 右邊四欄要 money_view；只有 timesheets 的人看得到「建議預算」但看不到它怎麼算</span></p>
+
+      <div class="modal mg" style="margin-top:14px">
+        <h3><span class="n m" style="width:18px;height:18px;font-size:10px">G</span> 未對映的 Sheet 案名（3）</h3>
+        <table>
+          <thead><tr><th>Sheet 案名</th><th class="num">時數</th><th>原因</th><th>可能是</th><th></th></tr></thead>
+          <tbody>
+            <tr><td>晨光形象片</td><td class="num">6</td><td>找不到同名案</td><td>2026 晨光科技 品牌形象片（92%）</td><td><button class="btn sm">指定</button></td></tr>
+            <tr><td>好米</td><td class="num">2.5</td><td>找不到同名案</td><td>2026 台灣好米 產品短片（80%）</td><td><button class="btn sm">指定</button></td></tr>
+            <tr><td>內部 - 器材整理</td><td class="num">4</td><td>內部桶</td><td>—</td><td><button class="btn sm">歸內部</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="modal" id="file">
+        <h3>專案檔案：2026 晨光科技 品牌形象片 <span class="sub">（點案名打開；員工版有前五格，管理多右下兩格）</span></h3>
+        <div class="grid">
+          <div><h4>分類組成</h4><div class="kv"><span>前製</span><b>18h</b></div><div class="kv"><span>拍攝</span><b>24h</b></div><div class="kv"><span>後製</span><b>44h</b></div></div>
+          <div><h4>各人</h4><div class="kv"><span>王小美</span><b>52h</b></div><div class="kv"><span>陳阿宏</span><b>24h</b></div><div class="kv"><span>Ken</span><b>10h</b></div></div>
+          <div><h4>各月</h4><div class="kv"><span>2026-07</span><b>20h</b></div><div class="kv"><span>2026-08</span><b>38h</b></div><div class="kv"><span>2026-09</span><b>28h</b></div></div>
+          <div><h4>里程碑（按週）</h4><div class="kv"><span>09/08 週 粗剪定稿</span><b>進行中</b></div><div class="kv"><span>09/15 週 客戶初審</span><b>—</b></div></div>
+          <div class="mg"><h4><span class="n m" style="width:16px;height:16px;font-size:10px">H</span> 類似專案並排（自動推薦、人再挑）</h4><div class="kv"><span>2025 青田文教 年度紀錄</span><b>212h／200h</b></div><div class="kv"><span>2025 星野建設 形象片</span><b>96h／110h</b></div><div class="kv"><span>中位數</span><b>154h</b></div></div>
+          <div class="mg"><h4>預算與錢</h4><div class="kv"><span>預算(h)</span><b><input class="cell" value="120" style="width:60px;text-align:right;border-bottom:1px solid var(--line)"> <button class="btn sm">存</button></b></div><div class="kv"><span>合約未稅 × (1−毛利 35%) ÷ 日成本 × 8h</span><b>建議 124h</b></div><div class="kv"><span>人力成本至今</span><b>137,600</b></div><div class="kv"><span>在 CRM 開此案</span><b class="link">專案頁 ›</b></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" data-v="ledger"><p class="sub">總表：現行原樣（一個月每一列、逐列改細節與備註、區間／空白篩選、批次調整）。</p></section>
+    <section class="view" data-v="dash"><p class="sub">儀表板：現行原樣（大家四格＋主管兩格）。</p></section>
+    <section class="view" data-v="settings"><p class="sub">設定：現行原樣（Sheet 拉取、digest、未對映指定、token）。「代填」搬到「看誰的」，這裡不再有。</p></section>
+  </main>
+</div>
+
+<script>
+  document.querySelectorAll('.seg button').forEach(b => b.onclick = () => {
+    document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
+    document.documentElement.dataset.theme = b.dataset.theme;
+  });
+  document.getElementById('views').addEventListener('click', e => {
+    const b = e.target.closest('.view-btn'); if (!b) return;
+    document.querySelectorAll('.view-btn').forEach(x => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.dataset.v === b.dataset.v));
+  });
+  document.getElementById('sw').onclick = () => document.body.classList.toggle('emp');
+</script>
+</body>
+</html>
