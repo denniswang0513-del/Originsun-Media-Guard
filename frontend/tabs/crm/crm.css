@@ -1154,6 +1154,8 @@
 .po-st { font-size: 10px; text-align: center; border: 1px solid #7f2a2a; color: #fecaca;
          border-radius: 3px; padding: 1px 0; }
 .po-st.done { border-color: #2f5d43; color: #86efac; }
+.po-row.po-all { border-bottom: 1px solid #3a3a3a; background: #222; }
+.po-done { flex: 1 1 100%; color: #86efac; font-size: 13px; }
 .po-total { margin-top: 12px; font-size: 13px; color: #d1d5db; }
 .po-total b { color: #fbbf24; font-family: ui-monospace, Consolas, monospace; }
 .po-out { margin-top: 14px; padding-top: 12px; border-top: 1px solid #2e2e2e;

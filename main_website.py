@@ -216,6 +216,21 @@ async def _short_invoice_file(code: str, request: Request):
     return FileResponse(path, media_type="text/html",
                         headers={"Cache-Control": "no-store"})
 
+# 匯款通知的短網址（owner 2026-09-11）。🔴 跟 /e/ 一樣**兩邊都要有**：
+# master 的 main.py 有一條，這裡也要有，不然從對外網域打開就是 404 ——
+# 而「master 關機他照樣打得開」正是做成連結的理由。
+# （2026-09-11 發版當下就是漏了這一條才發現：nginx 轉得到 NAS，NAS 卻沒有這條路由。）
+@app.get("/p/{code}", include_in_schema=False)
+async def _short_payout_note(code: str, request: Request):
+    from core.public_access import surface_gate
+    await surface_gate(request)          # 公開區「匯款通知」關閉 → 404
+    path = os.path.join(_FRONTEND_DIR, "payout.html")
+    if not os.path.isfile(path):
+        return PlainTextResponse("payout.html 未同步到本機", status_code=503)
+    return FileResponse(path, media_type="text/html",
+                        headers={"Cache-Control": "no-store"})
+
+
 for _sub in _PUBLIC_MODULE_DIRS:
     _d = os.path.join(_FRONTEND_DIR, *_sub.split("/"))
     if os.path.isdir(_d):

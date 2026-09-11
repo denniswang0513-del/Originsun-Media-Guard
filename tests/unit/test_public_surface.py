@@ -247,3 +247,27 @@ def test_synced_pages_actually_exist():
         assert os.path.isfile(os.path.join(FRONTEND, page)), page
     for d in MODULE_DIRS:
         assert os.path.isdir(os.path.join(FRONTEND, *d.split("/"))), d
+
+
+def test_short_links_exist_on_the_nas_app_too():
+    """🔴 `/e/`、`/p/` 這種短網址是**兩支入口各定義一次**（master 的 main.py ＋
+    NAS 的 main_website.py）。只加在 master 的話：nginx 轉得到 NAS、NAS 卻沒有那條
+    路由 → 從對外網域打開就是 404，而「master 關機他照樣打得開」正是做成連結的理由。
+
+    2026-09-11 匯款通知 `/p/` 就是這樣漏的 —— 那時 nginx 有 location、曝露面白名單
+    也過了，唯獨 NAS 那支 app 沒有路由，發版當下才在 8090 上測出來。
+    """
+    import re as _re
+    master = open(os.path.join(REPO, "main.py"), encoding="utf-8").read()
+    nas = open(os.path.join(REPO, "main_website.py"), encoding="utf-8").read()
+
+    # master 上「回一個對外頁面」的短網址（走 rewrite 的 /q/ 不算 —— nginx 直接改寫到 API）
+    pat = _re.compile(r'@app\.get\("(/[a-z]/\{code\})", include_in_schema=False\)')
+    for route in pat.findall(master):
+        page = _re.search(r'"(\w[\w-]*\.html)"',
+                          master[master.index(f'"{route}"'):][:1200])
+        if not page or page.group(1) not in PAGES:
+            continue          # 不是回對外頁面的（例如 /q/ 回 PDF／HTML 快照）
+        assert f'"{route}"' in nas, (
+            f"{route} 只在 master 的 main.py 有 —— NAS 的 main_website.py 也要定義一條，"
+            f"不然從對外網域打開會 404（master 關機時那條連結就是死的）")

@@ -530,6 +530,8 @@ window._payoutNotify = (name, month) => {
                 <label>匯款日期</label>
                 <input type="date" id="po-date" class="crm-input" value="${today}">
             </div>
+            <label class="po-row po-all"><input type="checkbox" id="po-all">
+                <span class="po-sum"><b>全選</b></span><span></span></label>
             <div class="po-rows">${rows}</div>
             <div class="po-total" id="po-total"></div>
             <div class="po-out" id="po-out" hidden></div>
@@ -550,7 +552,21 @@ window._payoutNotify = (name, month) => {
         ov.querySelector('#po-total').innerHTML =
             `本次通知金額 <b>$${_fmtNum(sum)}</b>　·　${picked.size} 筆`;
     };
-    ov.querySelectorAll('.po-rows input').forEach(b => b.addEventListener('change', paintTotal));
+    const all = ov.querySelector('#po-all');
+    const boxesAll = [...ov.querySelectorAll('.po-rows input')];
+    // 全選那格要跟著逐筆的勾選走（全勾＝打勾、全不勾＝空、其他＝半選）
+    const syncAll = () => {
+        const n = boxesAll.filter(b => b.checked).length;
+        all.checked = n === boxesAll.length && n > 0;
+        all.indeterminate = n > 0 && n < boxesAll.length;
+    };
+    all.addEventListener('change', () => {
+        boxesAll.forEach(b => { b.checked = all.checked; });
+        all.indeterminate = false;
+        paintTotal();
+    });
+    boxesAll.forEach(b => b.addEventListener('change', () => { syncAll(); paintTotal(); }));
+    syncAll();
     paintTotal();
 
     ov.querySelector('[data-act="make"]').onclick = async (e) => {
@@ -566,11 +582,17 @@ window._payoutNotify = (name, month) => {
             const url = r.url && r.url.startsWith('http') ? r.url : location.origin + r.url;
             const out = ov.querySelector('#po-out');
             out.hidden = false;
-            out.innerHTML = `<div class="po-link">${_esc(url)}</div>
-                <button class="crm-btn crm-btn-primary crm-btn-sm" data-act="copy">複製連結</button>
-                <a class="crm-btn crm-btn-secondary crm-btn-sm" href="${_esc(url)}" target="_blank" rel="noopener">開來看看</a>`;
+            out.innerHTML = `<div class="po-done">連結好了 —— 貼給收款人就行</div>
+                <div class="po-link">${_esc(url)}</div>
+                <button class="crm-btn crm-btn-primary" data-act="copy">複製連結</button>
+                <a class="crm-btn crm-btn-secondary" href="${_esc(url)}" target="_blank" rel="noopener">開來看看</a>`;
             out.querySelector('[data-act="copy"]').onclick = (ev) => copyText(url, ev.currentTarget);
-            btn.textContent = '已產生';
+            // 彈窗內容是捲動的，不捲過去的話「複製連結」就在摺線底下看不到
+            out.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            // 產生完就把底下那顆換成「複製連結」—— 那才是他下一步要按的
+            btn.textContent = '複製連結';
+            btn.disabled = false;
+            btn.onclick = (ev) => copyText(url, ev.currentTarget);
             appendLog(`已產生匯款通知：${name}　$${_fmtNum(r.total)}　${url}`, 'system');
         } catch (err) {
             alert('產生失敗：' + err.message);
