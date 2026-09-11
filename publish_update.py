@@ -613,6 +613,12 @@ def main():
     parser = argparse.ArgumentParser(description="Originsun Version Publisher")
     parser.add_argument("--version", type=str, default="", help="New version (e.g. 1.11.0)")
     parser.add_argument("--notes", type=str, default="", help="Release notes")
+    # 🔴 中文一律用這個，不要用 --notes：這台 Windows 上中文經 CLI argv 會被 ANSI
+    # codepage 換成一個字一個 `?`（不是可還原的亂碼，是真的丟失），而且會跟著
+    # version.json 一路帶到 C:\OriginsunAgent、NAS 與機隊每一台。PowerShell 與
+    # Bash 都一樣（v1.10.x 與 v2.5.2 各踩過一次）。檔案是 byte copy，安全。
+    parser.add_argument("--notes-file", type=str, default="",
+                        help="Release notes from a UTF-8 file (use this for Chinese)")
     args, _ = parser.parse_known_args()
 
     # Get version (from args or interactive)
@@ -635,9 +641,20 @@ def main():
         print(f"錯誤: 新版本 {new_version} 不大於目前版本 {current_version}")
         return 1
 
-    # Get notes (from args or interactive)
-    if args.notes:
+    # Get notes (from file, args, or interactive)
+    if getattr(args, "notes_file", ""):
+        with open(args.notes_file, "r", encoding="utf-8") as f:
+            notes = f.read().strip()
+        if not notes:
+            print(f"錯誤: --notes-file 是空的：{args.notes_file}")
+            return 1
+    elif args.notes:
         notes = args.notes.strip()
+        if any("一" <= c <= "鿿" for c in notes):
+            pass          # 直接跑 CLI 的人自己確認過編碼；經 shell 轉手的會變 `?`，見 --notes-file
+        elif notes.count("?") >= 5 and len(notes.replace("?", "").strip()) <= 2:
+            print("錯誤: --notes 收到的是一串 `?` —— 中文被 codepage 吃掉了，改用 --notes-file")
+            return 1
     else:
         if not sys.stdin.isatty():
             notes = v_data.get("notes", "微幅更新")
