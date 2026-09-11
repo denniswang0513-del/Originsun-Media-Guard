@@ -25,7 +25,7 @@ from ._system import (  # noqa: F401
 from ._crm import (  # noqa: F401
     ApiKey, CrmCashEntry, CrmCashInvoiceLink, CrmCashPaymentLink, CrmCashSplit,
     CrmCashSplitAdvanceLink,
-    CrmCostLineTemplate, CrmInvoice, CrmInvoiceTrash, CrmPaymentRequest, CrmProject,
+    CrmCostLineTemplate, CrmInvoice, CrmInvoiceTrash, CrmPaymentRequest, CrmPayout, CrmProject,
     CrmProjectCostGroup, CrmProjectCostLine, CrmProjectExpense, CrmProjectShowcase,
     CrmPriceItem, CrmProjectStaff, CrmQuotation, CrmQuotationItem, CrmQuotationTemplate,
     CrmReimbursement, CrmStaff, CrmStaffPortfolio, WEBSITE_TEAM_OVERRIDE_FIELDS)

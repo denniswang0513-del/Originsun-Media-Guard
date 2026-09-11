@@ -578,6 +578,31 @@ class CrmInvoiceTrash(Base):
     payload = Column(Text, nullable=False)                                # JSON：{"row": 整列欄位, "links": [被清掉的分配], "primary_of": [直接指著它的收支 id]}
 
 
+class CrmPayout(Base):
+    """帳務 — 一次匯款（出納匯完款通知收款人用的那張）。
+
+    owner 2026-09-11：「一次匯款，但不用按全部付款，反而是把有匯的列出」——
+    所以一張 payout 綁的是**出納勾選的那幾筆**請款單（`CrmPaymentRequest.payout_id`），
+    不是某個月的全部。部分匯款、補匯都撐得住。
+
+    🔴 `share_snapshot` 是**定稿**：DB 那幾筆是活的（金額會改、案名會改、可能被退回
+    應付款），但他存摺上的數字不會變。不定稿的話那頁會跟著飄，而矛盾**只有他看得到**。
+    欄位規則在 core/payout_share.py（白名單），這裡只負責存。
+    """
+    __tablename__ = "crm_payouts"
+
+    id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="parent")   # 兩本帳
+    payee_name = Column(String(64), nullable=True)
+    paid_date = Column(DateTime(timezone=True), nullable=True)   # 匯款日
+    total = Column(Integer, nullable=False, default=0)           # 本次匯款金額（＝快照裡的合計）
+    # 短碼：憑證就是「網址裡那串字與這裡存的完全相同」，不驗簽章（同發票 /e/ 與報價 /q/）。
+    # 撤銷＝清成 NULL，舊連結當場失效。
+    share_token = Column(String(64), nullable=True, unique=True, index=True)
+    share_snapshot = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class CrmPaymentRequest(Base):
     """帳務 — 請款單。"""
     __tablename__ = "crm_payment_requests"
@@ -622,6 +647,9 @@ class CrmPaymentRequest(Base):
     # 雜支與人員費用來自兩張不同的表，所以兩條硬連結各自一欄。
     # 兩者的語意一樣：**這張請款單是 CRM 某一行的鏡射**，不是新的一筆錢。
     expense_id = Column(String(32), nullable=True, index=True)
+    # 這一筆屬於哪一次匯款（crm_payouts.id）。出納勾了「這次匯了哪幾筆」才會寫上，
+    # 所以它是**事後**的分組，不是排程 —— 跟 planned_month（我們打算哪個月付）無關。
+    payout_id = Column(String(32), nullable=True, index=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

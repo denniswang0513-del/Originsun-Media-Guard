@@ -714,6 +714,9 @@ async def _on_startup():
                         ("crm_projects", "backup_local_root", "TEXT"),
                         ("crm_projects", "backup_nas_root", "TEXT"),
                         ("crm_projects", "backup_proxy_root", "TEXT"),
+                        # 匯款通知（owner 2026-09-11）：這一筆屬於哪一次匯款。
+                        # crm_payouts 新表由 create_all 建，這裡只補舊庫的欄位。
+                        ("crm_payment_requests", "payout_id", "VARCHAR(32)"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:
