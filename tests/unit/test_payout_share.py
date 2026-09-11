@@ -56,7 +56,7 @@ class TestNothingLeaks:
         for field in NEVER_SHARE:
             assert field not in snap, field
             assert field not in (snap["items"][0] if snap["items"] else {}), field
-        for value in ("342168993250", "G122017033", "內部備註：先欠著", "proj-1"):
+        for value in ("342168993550", "G122017033", "內部備註：先欠著", "proj-1"):
             assert value not in blob, value
 
     def test_the_public_view_filters_again_even_if_the_snapshot_is_dirty(self):
@@ -72,6 +72,20 @@ class TestNothingLeaks:
         assert set(view) == set(SNAPSHOT_FIELDS)
         assert set(view["items"][0]) == set(ITEM_FIELDS)
         assert "342168993550" not in repr(view) and "G122017033" not in repr(view)
+
+    def test_the_two_lists_can_never_overlap(self):
+        """白名單與 NEVER_SHARE 不准有交集 —— 這條守的是「未來」那一側。
+
+        build_snapshot 與 share_view 現在都是硬編碼欄位，所以此刻沒有洩漏路徑。
+        但日後要在通知頁多加一欄時，改的是 ITEM_FIELDS ＋ build_snapshot，而
+        share_view 的 item 層是照著 ITEM_FIELDS 跑迴圈的 —— 加了 notes 就會照送，
+        而上面那條 set(view 的 item) == set(ITEM_FIELDS) 是套套邏輯，一樣是綠的。
+        這條讓它在改 ITEM_FIELDS 的當下就紅。
+        """
+        overlap = (set(SNAPSHOT_FIELDS) | set(ITEM_FIELDS)) & set(NEVER_SHARE)
+        assert not overlap, (
+            f"這幾個欄位同時在白名單與 NEVER_SHARE 裡：{sorted(overlap)} —— "
+            "要嘛它可以給收款人看（從 NEVER_SHARE 拿掉），要嘛不行（從白名單拿掉）")
 
     def test_bank_account_is_deliberately_out_even_though_it_is_his_own(self):
         """他自己的帳號也不上 —— 連結可被轉傳，一頁上同時有姓名＋帳號＋金額

@@ -743,8 +743,11 @@ async function _fillPayeeSelect(sel, freeInput) {
         const other = sel.value === '__other__';
         if (freeInput) {
             freeInput.style.display = other ? '' : 'none';
+            // 切到「其他」就清空。原本寫的是 `freeInput.value === sel.value`，
+            // 而那一刻 sel.value 恆為 '__other__'，條件永遠不成立 —— 打字框會
+            // 預填著剛剛選的那個人，沒注意就開出一張收款人是別人的單。
             if (!other) freeInput.value = sel.value || '';
-            else if (freeInput.value === sel.value) freeInput.value = '';
+            else freeInput.value = '';
             if (other) freeInput.focus();
         }
     };

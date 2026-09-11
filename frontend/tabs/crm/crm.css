@@ -1173,14 +1173,24 @@
 .run-r { text-align: right; }
 .run-warn { color: #fbbf24; }
 .run-note { margin-top: 12px; font-size: 12px; color: #9ca3af; display: flex; flex-wrap: wrap; gap: 8px; }
+/* 只接管**標記過的**彈窗（目前是本月匯款清單）。原本寫成 .crm-modal-overlay，
+   於是報價、發票…任何 CRM 彈窗開著時按 Ctrl+P 都只會印出那個彈窗而不是頁面 —— 
+   那不是這段想做的事，而且不會有人發現是這裡造成的。 */
 @media print {
-  body * { visibility: hidden; }
-  .crm-modal-overlay, .crm-modal-overlay * { visibility: visible; }
-  .crm-modal-overlay { position: absolute; inset: 0; background: #fff; }
-  .crm-modal { max-width: none !important; box-shadow: none; }
-  .crm-modal-footer, .crm-detail-close { display: none !important; }
+  body:has(.crm-modal-overlay[data-print]) * { visibility: hidden; }
+  .crm-modal-overlay[data-print],
+  .crm-modal-overlay[data-print] * { visibility: visible; }
+  .crm-modal-overlay[data-print] { position: absolute; inset: 0; background: #fff; }
+  .crm-modal-overlay[data-print] .crm-modal { max-width: none !important; box-shadow: none; }
+  .crm-modal-overlay[data-print] .crm-modal-footer,
+  .crm-modal-overlay[data-print] .crm-detail-close { display: none !important; }
   .run-tb th { background: #eee; color: #333; }
   .crm-modal, .crm-modal-body, .run-tb td { color: #111; }
+}
+
+/* :has() 不支援時的退路：整段不生效＝印出整頁（醜，但不是壞的）。 */
+@supports not selector(body:has(*)) {
+  @media print { body * { visibility: visible; } }
 }
 
 /* ── 應付帳款面板的列（2026-09-11）：複製鈕在**最左邊**、每一列同一顆「複製」。

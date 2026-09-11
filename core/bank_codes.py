@@ -61,7 +61,7 @@ ALIASES: dict[str, str] = {
     "合作金庫": "006", "合庫": "006",
     "第一銀行": "007", "一銀": "007",
     "華南銀行": "008", "華南商銀": "008", "華銀": "008",
-    "上海銀行": "011", "上海商銀": "011",
+    "上海銀行": "011", "上海商銀": "011", "上海商業銀行": "011",
     "台北富邦": "012", "臺北富邦": "012", "富邦": "012", "北富銀": "012",
     "國泰世華": "013", "國泰": "013",
     "郵局": "700", "中華郵政": "700", "郵政": "700",
@@ -87,13 +87,42 @@ ALIASES: dict[str, str] = {
 
 #: 「三個連續數字」＝代號的候選。全形括號、半形括號、空白分隔都吃。
 _CODE = re.compile(r"(?<!\d)(\d{3})(?!\d)")
+#: 任何數字 —— 比對別名前清掉（見 normalize_name 的說明）。
+_DIGITS = re.compile(r"\d+")
 #: 括號與空白（含全形）——比對別名前先清掉。
 _NOISE = re.compile(r"[（）()\[\]【】\s　·・,，、_/-]+")
 
 
+#: 比對別名前可以剝掉的尾綴（由長到短）。`中國信託銀行` 這種最自然的寫法
+#: 兩邊都不中：正式名是「中國信託商業銀行」、別名收的是「中國信託」。
+_SUFFIX = ("商業銀行", "商業儲蓄銀行", "銀行", "商銀")
+
+
 def normalize_name(text: str) -> str:
-    """`中國信託（822）` → `中國信託`；`台北富邦 012` → `台北富邦`。只去雜訊與數字，不翻譯。"""
-    return _NOISE.sub("", _CODE.sub("", str(text or ""))).strip()
+    """`中國信託（822）` → `中國信託`；`台北富邦 012` → `台北富邦`。只去雜訊與數字，不翻譯。
+
+    🔴 數字**全部**清掉，不是只清三碼：`華南銀行(8)` 這種殘留的縮寫代號會留在
+    鍵裡變成 `華南銀行8`，別名表就查不到（而生產資料有一半根本沒帶代號，
+    比對失敗就等於沒有代碼可填）。別名鍵裡沒有任何數字，清乾淨是安全的。
+    """
+    return _NOISE.sub("", _DIGITS.sub("", str(text or ""))).strip()
+
+
+def _alias_code(key: str):
+    """去雜訊後的名字 → 代號。直接查不中就剝一層尾綴再查一次。"""
+    code = ALIASES.get(key) or ALIASES.get(key.upper())
+    if code:
+        return code
+    for c, name in BANKS.items():      # 有人整串貼正式名稱
+        if key and key == normalize_name(name):
+            return c
+    for suf in _SUFFIX:
+        if len(key) > len(suf) and key.endswith(suf):
+            trimmed = key[: -len(suf)]
+            code = ALIASES.get(trimmed) or ALIASES.get(trimmed.upper())
+            if code:
+                return code
+    return None
 
 
 def resolve(text: str) -> tuple[str | None, str]:
@@ -113,18 +142,14 @@ def resolve(text: str) -> tuple[str | None, str]:
     raw = str(text or "").strip()
     if not raw:
         return None, ""
-    m = _CODE.search(raw)
-    if m and m.group(1) in BANKS:
-        code = m.group(1)
-        return code, BANKS[code]
-    key = normalize_name(raw)
-    code = ALIASES.get(key) or ALIASES.get(key.upper())
+    # 🔴 `finditer` 不是 `search`：只看**第一個**三位數的話，`帳號123-456 中國信託 822`
+    # 會停在 123（不在表裡）就放棄，而正確的 822 明明就在同一串字裡。
+    for m in _CODE.finditer(raw):
+        if m.group(1) in BANKS:
+            return m.group(1), BANKS[m.group(1)]
+    code = _alias_code(normalize_name(raw))
     if code:
         return code, BANKS[code]
-    # 名字本身就是表裡的正式名稱（有人整串貼進來）
-    for c, name in BANKS.items():
-        if key and key == normalize_name(name):
-            return c, name
     return None, raw
 
 

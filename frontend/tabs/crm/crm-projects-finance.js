@@ -3,6 +3,7 @@
  * 功能：payments, expenses, receipt browsing, share links（執行人員／預支款畫面在 crm-projects-pay.js）
  */
 
+import { copyText } from '../../js/shared/utils.js';
 import { state } from './crm-projects-state.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum, today, groupCostStaff, hasModule, canSeeMoney } from './crm-utils.js';
 import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
@@ -144,10 +145,12 @@ window._projShareExpenseLink = function() {
         body: JSON.stringify({ kind: 'project', target_id: state.selectedId }),
     }).then(function(d) {
         var url = location.origin + '/expense.html?t=' + encodeURIComponent(d.token);
-        navigator.clipboard.writeText(url).then(function() {
+        // 🔴 走 copyText 不要裸用 navigator.clipboard：內網是 http://192.168.1.x，
+        // 非安全來源上 `navigator.clipboard` **不存在**，`.writeText` 會同步丟
+        // TypeError → 被外層那個 .catch 接走 → 使用者看到「發連結失敗」，
+        // 而 token 其實已經建好了，他只是永遠拿不到連結（會再按一次、再建一個）。
+        copyText(url).then(function() {
             alert('雜支登記連結已複製（免登入，可直接給現場人員）：\n' + url);
-        }).catch(function() {
-            prompt('請複製連結：', url);
         });
     }).catch(function(e) {
         alert('發連結失敗：' + (e.message || e));
@@ -156,10 +159,9 @@ window._projShareExpenseLink = function() {
 
 window._advShareLink = function(advanceId) {
     var url = location.origin + '/advance-expense.html?id=' + advanceId;
-    navigator.clipboard.writeText(url).then(function() {
+    // 同上：內網非安全來源裸用 clipboard ＝ 這顆點了完全沒反應（連 alert 都沒有）。
+    copyText(url).then(function() {
         alert('連結已複製：\n' + url);
-    }).catch(function() {
-        prompt('請複製連結：', url);
     });
 };
 

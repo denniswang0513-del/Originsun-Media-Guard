@@ -249,25 +249,69 @@ def test_synced_pages_actually_exist():
         assert os.path.isdir(os.path.join(FRONTEND, *d.split("/"))), d
 
 
-def test_short_links_exist_on_the_nas_app_too():
-    """🔴 `/e/`、`/p/` 這種短網址是**兩支入口各定義一次**（master 的 main.py ＋
-    NAS 的 main_website.py）。只加在 master 的話：nginx 轉得到 NAS、NAS 卻沒有那條
-    路由 → 從對外網域打開就是 404，而「master 關機他照樣打得開」正是做成連結的理由。
+#: 寄出去的短網址**正本清單**：(前綴 -> NAS 上回哪個對外頁；None＝不回頁面)。
+#:
+#: 🔴 這份表是手寫的，而下面第一支測試會強制它跟 main.py 實際註冊的短網址完全
+#:    對齊 —— 新增一條就一定要回來加一列。前一版是用 regex 去猜的，形狀稍有不同
+#:    （/pay/{code}、/p/{token}、多帶一個 kwarg）就靜默跳過，一行都不紅。
+SHORT_LINKS = {
+    "/e/": "invoice-file.html",   # 發票影像（客戶／會計師）
+    "/p/": "payout.html",         # 匯款通知（收款人）
+    # /q/ 報價單：nginx 直接 rewrite 到公開 API 拿快照，NAS 那支 app **刻意沒有**
+    # 這條路由。內容由 test_nginx_maps_the_short_quote_link 守。
+    "/q/": None,
+}
 
-    2026-09-11 匯款通知 `/p/` 就是這樣漏的 —— 那時 nginx 有 location、曝露面白名單
-    也過了，唯獨 NAS 那支 app 沒有路由，發版當下才在 8090 上測出來。
-    """
+
+def _master_short_links():
+    """main.py 上實際註冊的短網址前綴（單層 /x/{...} 形狀）。"""
     import re as _re
     master = open(os.path.join(REPO, "main.py"), encoding="utf-8").read()
-    nas = open(os.path.join(REPO, "main_website.py"), encoding="utf-8").read()
+    return {m.group(1) + "/" for m in
+            _re.finditer(r'@app\.get\(\s*"(/[a-z]{1,4})/\{\w+\}[^"]*"', master)}
 
-    # master 上「回一個對外頁面」的短網址（走 rewrite 的 /q/ 不算 —— nginx 直接改寫到 API）
-    pat = _re.compile(r'@app\.get\("(/[a-z]/\{code\})", include_in_schema=False\)')
-    for route in pat.findall(master):
-        page = _re.search(r'"(\w[\w-]*\.html)"',
-                          master[master.index(f'"{route}"'):][:1200])
-        if not page or page.group(1) not in PAGES:
-            continue          # 不是回對外頁面的（例如 /q/ 回 PDF／HTML 快照）
+
+def test_the_short_link_table_lists_every_short_link_master_serves():
+    """新增一條短網址 → 這份表也要加一列。
+
+    表漏了誰，下面那兩支就完全看不到他 —— 而漏掉的症狀是「master 上正常、
+    只有拿著連結的客戶 404」，我們這邊不會有任何徵兆。
+    """
+    assert _master_short_links() == set(SHORT_LINKS), (
+        f"main.py 上的短網址是 {sorted(_master_short_links())}，"
+        f"這支測試的 SHORT_LINKS 表寫的是 {sorted(SHORT_LINKS)} —— 對齊它們")
+
+
+def test_short_links_exist_on_the_nas_app_too():
+    """🔴 短網址是**兩支入口各定義一次**（master 的 main.py ＋ NAS 的
+    main_website.py）。只加在 master 的話：nginx 轉得到 NAS、NAS 卻沒有那條路由
+    → 從對外網域打開就是 404，而「master 關機他照樣打得開」正是做成連結的理由。
+
+    2026-09-11 匯款通知 /p/ 就是這樣漏的 —— 那時 nginx 有 location、曝露面白名單
+    也過了，唯獨 NAS 那支 app 沒有路由，發版當下才在 8090 上測出來。
+    """
+    nas = open(os.path.join(REPO, "main_website.py"), encoding="utf-8").read()
+    for prefix, page in SHORT_LINKS.items():
+        if page is None:
+            continue
+        assert page in PAGES, f"{prefix} 回的 {page} 不在對外頁清單裡（NAS serve 不到）"
+        route = prefix.rstrip("/") + "/{code}"
         assert f'"{route}"' in nas, (
             f"{route} 只在 master 的 main.py 有 —— NAS 的 main_website.py 也要定義一條，"
-            f"不然從對外網域打開會 404（master 關機時那條連結就是死的）")
+            "不然從對外網域打開會 404（master 關機時那條連結就是死的）")
+
+
+def test_nginx_has_a_location_for_every_short_link():
+    """🔴 三邊的最後一邊。兩支 app 都有路由、白名單也過，nginx 少一條 location
+    的話那條網址會落到 location /（對外站的 Astro dist）→ 客戶手上是 404，
+    而全套測試綠、master 上也一切正常。
+
+    2026-09-11 /polish 抓到：/e/ 與 /p/ 兩條當時都沒有任何測試守著（/q/ 有自己
+    那支）—— 把整段 location 從 conf 拿掉，測試零失敗。
+    """
+    import re as _re
+    conf = open(NGINX_CONF, encoding="utf-8").read()
+    for prefix in SHORT_LINKS:
+        assert _re.search(r"location\s+\^~\s+%s\s*\{" % _re.escape(prefix), conf), (
+            f"nginx conf 裡找不到 {prefix} 的 location —— "
+            "客戶手上那條連結會落到對外站的 dist/ 變成 404")

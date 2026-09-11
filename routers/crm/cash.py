@@ -1009,9 +1009,14 @@ async def payables_summary(request: Request, month: str = Query(""),
             query = query.where(CrmPaymentRequest.payment_status.in_(["應付款", "未付款"]))
 
         pays = (await session.execute(query)).scalars().all()
+        # order_by 不能省：人員檔有同名重複建檔（目前兩組），而 staff_alias 的
+        # by_name 是「先到的先贏」—— 沒有排序的話哪一筆先到由 Postgres 決定，
+        # 任一筆被 UPDATE 過就可能換位，於是同一個收款人的銀行帳號今天顯示這本、
+        # 明天顯示另一本（其中一本可能是空的），而畫面上看不出任何異狀。
         staff_rows = (await session.execute(
             select(CrmStaff.id, CrmStaff.name, CrmStaff.alias,
-                   CrmStaff.id_number, CrmStaff.bank_name, CrmStaff.bank_account))).all()
+                   CrmStaff.id_number, CrmStaff.bank_name, CrmStaff.bank_account)
+            .order_by(CrmStaff.id))).all()
 
     # 收款人那段字 → 人員（規則在 core/staff_alias，純函式有測試）
     from core.staff_alias import build_index, resolve as _who

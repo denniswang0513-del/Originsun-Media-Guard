@@ -65,7 +65,10 @@ async def create_payout(req: PayoutCreate, request: Request):
     from core.ledger import require_entity
     from db.models import CrmPaymentRequest, CrmPayout
 
-    ids = [str(i).strip() for i in (req.payment_ids or []) if str(i).strip()]
+    # 去重：重複勾同一筆時 rows 會比 ids 少，原本會回一句「有幾筆找不到」——
+    # 那句話是錯的，它們都在。
+    ids = list(dict.fromkeys(
+        str(i).strip() for i in (req.payment_ids or []) if str(i).strip()))
     if not ids:
         raise HTTPException(status_code=422, detail="至少要勾一筆")
     ent = require_entity(request, req.entity or "", level="full")
@@ -83,14 +86,28 @@ async def create_payout(req: PayoutCreate, request: Request):
             raise HTTPException(status_code=422, detail=f"一張通知只能有一個收款人（勾到了 {len(payees)} 位）")
         if any((r.entity or "parent") != ent for r in rows):
             raise HTTPException(status_code=422, detail="勾到的請款單不在同一本帳")
+        # 🔴 一筆請款單只屬於一次匯款。原本是無條件 `r.payout_id = 新的`：
+        # 舊那張的短碼還活著、快照還在（定稿是刻意的），收款人手上兩條連結加起來
+        # 是重複金額，而舊那張在 DB 裡變成沒有任何請款單屬於它的孤兒 —— 全程零錯誤。
+        # 要重做就先撤銷舊的那張。
+        bound = sorted({r.payout_id for r in rows if r.payout_id})
+        if bound:
+            n = sum(1 for r in rows if r.payout_id)
+            raise HTTPException(
+                status_code=422,
+                detail=f"勾到的請款單裡有 {n} 筆已經在別的匯款通知上了，"
+                       "要重做請先撤銷那一張，不然收款人會拿到兩條連結")
 
-        paid = req.paid_date or _now().date().isoformat()
+        # 一個值兩邊共用。原本 DB 走 `_parse_day`（看不懂就退成今天）、快照走
+        # `payout_share._day`（只切前 10 碼、不驗），於是非 ISO 的日期會讓
+        # **他那頁印一個日期、我們的清單是另一個** —— 沒有 error，只有他看得到。
+        paid = _paid_day(req.paid_date)
         snap = payout_share.build_snapshot(payees.pop() if payees else "", paid, _payer_name(), rows)
 
         payout = CrmPayout(id=uuid.uuid4().hex, entity=ent,
                            payee_name=snap["payee_name"], total=snap["total"],
-                           paid_date=_parse_day(paid), share_snapshot=snap,
-                           created_at=_now())
+                           paid_date=datetime.fromisoformat(paid).replace(tzinfo=timezone.utc),
+                           share_snapshot=snap, created_at=_now())
         # unique index 擋碰撞；撞到就換一個而不是噴 500（同發票）
         for _ in range(5):
             candidate = _new_code()
@@ -114,11 +131,19 @@ async def create_payout(req: PayoutCreate, request: Request):
             "url": f"{base}/p/{token}" if base else f"/p/{token}"}
 
 
-def _parse_day(v):
+def _paid_day(v) -> str:
+    """匯款日 → `YYYY-MM-DD`；空的當今天，看不懂就 422。
+
+    **不要**加「看不懂就退成今天」的寬容：那是寫進收款人手上那頁的日期，
+    悄悄換成別的數字比直接擋下來糟得多（同 `_shared._parse_day` 的取捨）。
+    """
+    s = str(v or "").strip()
+    if not s:
+        return _now().date().isoformat()
     try:
-        return datetime.fromisoformat(str(v)[:10]).replace(tzinfo=timezone.utc)
+        return datetime.fromisoformat(s[:10]).date().isoformat()
     except (TypeError, ValueError):
-        return _now()
+        raise HTTPException(status_code=422, detail=f"匯款日期看不懂：{s}") from None
 
 
 @router.delete("/payouts/{payout_id}/share", dependencies=[Depends(money_dep)])
@@ -130,13 +155,16 @@ async def revoke_payout_share(payout_id: str, request: Request):
     """
     from core.ledger import require_entity
     from db.models import CrmPayout
-    require_entity(request, "", level="full")
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         po = await session.get(CrmPayout, payout_id)
         if not po:
             raise HTTPException(status_code=404, detail="找不到這次匯款")
+        # 拿**那一列的**帳本再問一次（同 invoice_files 的 revoke）。原本問的是
+        # `require_entity(request, "")`＝呼叫者的預設那本，於是只有母帳權的人
+        # 也撤得掉私帳那張 —— 收款人那條當場死掉，而他本來連那本帳都不該碰。
+        require_entity(request, po.entity or "parent", level="full")
         po.share_token = None
         await session.commit()
     return {"status": "revoked"}
@@ -169,11 +197,17 @@ async def payout_share_page(token: str, request: Request):
 
 
 @router.get("/payouts", dependencies=[Depends(money_dep)])
-async def list_payouts(request: Request, payee: str = Query(""), limit: int = Query(20)):
-    """某個收款人最近的匯款通知（面板上要顯示「這次已經產過連結了」）。"""
+async def list_payouts(request: Request, payee: str = Query(""), limit: int = Query(20),
+                       entity: str = Query("")):
+    """某個收款人最近的匯款通知（面板上要顯示「這次已經產過連結了」）。
+
+    `entity` 要收：應付面板可以 pin 到私帳（`payables_summary` 就收），不收的話
+    對同時有兩本帳的人一律解析成母帳，私帳產過的通知**永遠列不出來** ——
+    畫面看起來像「還沒產過」，於是再產一張，收款人收到兩條連結。
+    """
     from core.ledger import require_entity
     from db.models import CrmPayout
-    ent = require_entity(request, "", level="full")
+    ent = require_entity(request, entity or "", level="full")
     _require_db()
     factory = await _get_factory()
     async with factory() as session:

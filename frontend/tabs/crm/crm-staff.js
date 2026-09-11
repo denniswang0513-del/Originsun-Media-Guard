@@ -862,7 +862,10 @@ async function _renderResumeTab(staffId) {
         try {
             const r = await _fetch('/staff/' + staffId + '/generate-edit-token', { method: 'POST', body: '{}' });
             const fullUrl = location.origin + r.url;
-            await navigator.clipboard.writeText(fullUrl).catch(() => {});
+            // 🔴 copyText 才有 fallback：內網（http://192.168.1.x）非安全來源上
+            // `navigator.clipboard` 不存在，取屬性當場丟 TypeError → 被外層 catch
+            // 接走 → 畫面說「產生連結失敗」，而 token 已經產生、連結也印不出來。
+            await copyText(fullUrl);
             alert('已複製分享連結：\n' + fullUrl);
         } catch (e) { alert('產生連結失敗: ' + e.message); }
     });

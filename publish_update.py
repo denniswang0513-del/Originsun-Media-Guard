@@ -593,6 +593,54 @@ def _rollback_version(v_data: dict, current_version: str) -> None:
     print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
 
 
+def _master_is_serving(version: str, tries: int = 30, gap: float = 2.0) -> bool:
+    """等主控端 8000 回報 `version`（最多 tries×gap 秒）。
+
+    重啟要幾秒，所以是輪詢不是一次就判死。逾時回 False —— 呼叫端據此
+    **停在同步 NAS 之前**（見那裡的說明）。
+    """
+    import json as _json
+    import time as _time
+    import urllib.request
+    for i in range(tries):
+        try:
+            with urllib.request.urlopen(
+                    "http://127.0.0.1:8000/api/v1/version", timeout=3) as r:
+                got = (_json.loads(r.read().decode("utf-8")) or {}).get("version")
+            if got == version:
+                print(f"[OK] 主控端 8000 已在跑 v{version}")
+                return True
+        except Exception:
+            pass
+        if i == 0:
+            print(f"[*] 等主控端 8000 起來（最多 {int(tries * gap)} 秒）...")
+        _time.sleep(gap)
+    return False
+
+
+def notes_look_mangled(notes: str) -> bool:
+    """這段 release notes 看起來是不是「中文被 codepage 吃成 `?` 」了？
+
+    在這台 Windows 上，中文經 CLI argv 會被 ANSI codepage 一個字換成一個 `?`
+    （不是可還原的亂碼，是真的丟失），而且會跟著 version.json 一路帶到
+    C:\OriginsunAgent、NAS 與機隊每一台。所以寧可擋下來叫人改用 --notes-file。
+
+    判定：**出現了 `?`，而整段裡一個中文字都沒有**。
+
+    原本的判定是「`?` 至少 5 個，且去掉 `?` 之後剩不到 2 個字」——
+    那擋得到的只有「純中文、5 字以上」一種，而這個 repo 的 notes 幾乎都帶
+    版號或 `fix:` 之類的英文前綴：`v2.5.3 ?????`、`fix: ????`、`???`（三字）
+    全部溜過去。反向也沒換到保護：要誤殺得寫出「5 個以上問號、其餘不到 2 字」
+    的英文 notes，那種東西本來就不該當版本說明。
+
+    英文 notes 真的需要問號時：改用 `--notes-file`（那條路是 byte copy，安全）。
+    """
+    text = str(notes or "")
+    if "?" not in text:
+        return False
+    return not any("\u4e00" <= c <= "\u9fff" for c in text)
+
+
 def main():
     print("=" * 60)
     print("[*] Originsun SaaS - Auto Publisher (v2)")
@@ -643,17 +691,20 @@ def main():
 
     # Get notes (from file, args, or interactive)
     if getattr(args, "notes_file", ""):
-        with open(args.notes_file, "r", encoding="utf-8") as f:
+        # utf-8-sig 不是 utf-8：這個參數存在的理由就是「Windows 上中文會被吃掉」，
+        # 而使用者做那個檔最自然的方式是 PowerShell 的 `>` / Out-File —— 那是
+        # **UTF-8 with BOM**。用 utf-8 讀進來不會報錯，但 \ufeff 會變成 notes 的
+        # 第一個字元，一路寫進 version.json、機隊每一台與前端的更新提示。
+        with open(args.notes_file, "r", encoding="utf-8-sig") as f:
             notes = f.read().strip()
         if not notes:
             print(f"錯誤: --notes-file 是空的：{args.notes_file}")
             return 1
     elif args.notes:
         notes = args.notes.strip()
-        if any("一" <= c <= "鿿" for c in notes):
-            pass          # 直接跑 CLI 的人自己確認過編碼；經 shell 轉手的會變 `?`，見 --notes-file
-        elif notes.count("?") >= 5 and len(notes.replace("?", "").strip()) <= 2:
-            print("錯誤: --notes 收到的是一串 `?` —— 中文被 codepage 吃掉了，改用 --notes-file")
+        if notes_look_mangled(notes):
+            print("錯誤: --notes 裡的中文被 codepage 吃成 `?` 了 —— 改用 --notes-file")
+            print(f"  收到的是：{notes!r}")
             return 1
     else:
         if not sys.stdin.isatty():
@@ -874,6 +925,19 @@ def main():
         except Exception:
             print("[WARN] 無法自動重啟主控端，請手動重啟:")
             print(f"  wscript.exe start_hidden.vbs")
+
+    # 🔴 送 NAS 之前先確認 master 真的起來了、而且跑的是新版。
+    # **DB migration 只有 master 會跑**（NAS 兩個容器都刻意不跑）。上面那個
+    # restart 失敗時只印一行 WARN 就繼續往下 —— 於是帶新欄位的版本會在
+    # 「master 還是舊的／根本沒起來」的狀態下把新 code 送上 NAS，office-api
+    # 拿新 ORM 去查舊 schema，整段 500，而 master 上看起來一切正常。
+    # v2.5.0 的 crm_projects.backup_*_root 就是這樣讓 office-api 專案清單全掛。
+    if not _master_is_serving(new_version):
+        print(f"\n[ERROR] 主控端 8000 沒有回報 v{new_version} —— **不同步 NAS**。")
+        print("  NAS 的容器不跑 DB migration，先讓 master 起來把欄位建好，")
+        print("  再重跑一次這支（version.json 已經是新版，重跑只是再打包一次，")
+        print("  不會壞事），或在 Python 裡直接呼叫 sync_website_to_nas()。")
+        return 1
 
     # ── NAS website-api code sync（讓對外網站 admin endpoint 拿到新 code）──
     nas_ok = sync_website_to_nas()

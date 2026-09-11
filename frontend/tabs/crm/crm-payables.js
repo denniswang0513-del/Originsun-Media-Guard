@@ -37,6 +37,10 @@ function _buildMonthGroups() {
                     bank_account: p.bank_account,
                     bank_code: p.bank_code,
                     bank_display: p.bank_display,
+                    // 🔴 後端在 payee 那層寫的「代稱撞名，所以不算數」那句解釋。
+                    // 漏抄的話畫面只會說「沒有帳號」，出納去人員檔一看帳號明明有填，
+                    // 完全不知道發生什麼事（同 _root_view 那條「手抄的會靜默漏掉」）。
+                    bank_note: p.bank_note,
                     month_amount: 0,
                     // 本次要匯＝這個月**還沒付**的那幾筆（後端 group_payables 也算同一套）。
                     // 跟 month_amount 是兩件事：照總額匯會把已付的再匯一次。
@@ -129,7 +133,9 @@ const _sorter = createSortable({
     onChange: () => renderList(),
     getters: {
         payee:  p => (p.payee_name || '').toLowerCase(),
-        amount: p => p.month_amount || 0,
+        // 排序要跟畫面顯示的同一個數字（那一欄是「本次要匯」）。
+        // 照 month_amount 排的話，顯示 $2,000 的列會排在顯示 $50,000 的上面。
+        amount: p => (_allPaid(p) ? (p.month_amount || 0) : (p.unpaid_amount || 0)),
         bank:   p => (p.bank_name || '') + ' ' + (p.bank_account || ''),
         // 應付款 < 已付款:asc 把待處理排前
         status: p => _allPaid(p) ? 1 : 0,
@@ -460,6 +466,8 @@ window._payableRunList = () => {
 
     const ov = document.createElement('div');
     ov.className = 'crm-modal-overlay';
+    // 這一個彈窗是要印出來照著填網銀的 —— @media print 只接管有這個標記的。
+    ov.setAttribute('data-print', '');
     ov.innerHTML = `<div class="crm-modal" style="max-width:760px;">
         <div class="crm-modal-header"><h3>本月匯款清單${month ? '　' + _esc(month) : ''}</h3>
             <button class="crm-detail-close" type="button" data-close>關閉</button></div>
