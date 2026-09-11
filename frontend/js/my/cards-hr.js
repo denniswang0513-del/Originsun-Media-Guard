@@ -172,7 +172,7 @@ async function applyLeave() {
             show(errs.length ? errs.map(x => esc(x.msg || x.code || x)).join("<br>") : esc((typeof d.detail === "string" && d.detail) || "送出失敗"));
             return;
         }
-        _todayInfo = null;   // 今天那條「請假待審 N 件」下次重抓
+        _resetTodayStrip();   // 今天那條「請假待審 N 件」下次重抓
         await loadLeave();   // 🔴 要 await：不等重畫完就走到 finally，鎖會在舊表單還在畫面上時就解開，那段時間再點一次就是第二張單
     } catch (_) { show("連線失敗"); }
     finally { if (btn && btn.isConnected) { delete btn.dataset.busy; btn.disabled = false; } }   // 重畫過就換了節點，不用還原
@@ -187,7 +187,7 @@ async function cancelLeave(id, mode) {
     } else if (!confirm("確定撤回這張請假單？")) return;
     try {
         const r = await mfetch("/api/v1/me/leave/" + id + "/cancel", { method: "POST", body: JSON.stringify(body) });
-        if (r.ok) { _todayInfo = null; loadLeave(); }
+        if (r.ok) { _resetTodayStrip(); loadLeave(); }
         else { const d = await r.json().catch(() => ({})); alert((typeof d.detail === "string" && d.detail) || "撤回失敗"); }
     } catch (_) {}
 }

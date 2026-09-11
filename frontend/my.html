@@ -472,30 +472,29 @@ table.week .c.ms.done { color: var(--sub); background: #f6f6f6; border-color: va
 
 <footer><div class="eyebrow">© Originsun Studio · Internal</div></footer>
 
-<!-- 這一頁的程式碼（原本 468–2437 行的 inline script，約 1,970 行）2026-09-09 原樣拆到 js/my/ 底下。
-     刻意維持「傳統 script 標籤」，不要改成 type="module"：這幾支共用同一個全域詞法環境，
+<!-- 這一頁的程式碼（原本 468–2437 行的 inline script，約 1,970 行）2026-09-09 原樣拆到 js/my/ 底下；
+     2026-09-12「今天與這週」四個視圖再抽到 js/shared/ts-zone/（ES module，跟 CRM 工作追蹤分頁同一份），
+     zone1.js 只剩殼與轉接。
+     其餘刻意維持「傳統 script 標籤」，不要改成 type="module"：這幾支共用同一個全域詞法環境，
      頂層的 const／let／function 跨檔直接看得見（mfetch、WS、_z1Action、_planCardHtml …）；
-     改成 module 每支就變成獨立作用域，所有跨檔引用都得改 import／export，那是另一件事。
-     載入順序＝原本由上而下的執行順序，不可調換；開頁就跑的 boot 在最後一支的檔尾。 -->
+     載入順序＝原本由上而下的執行順序，不可調換；開頁就跑的 boot 在最後一支。 -->
 <script src="./js/my/shell.js"></script>
 <script src="./js/my/cards.js"></script>
 <script src="./js/my/cards-hr.js"></script>
 <script src="./js/my/zone1.js"></script>
-<script src="./js/my/week-plan.js"></script>
 <script src="./js/my/parttime.js"></script>
-<script src="./js/my/team-week.js"></script>
+<script src="./js/my/boot.js"></script>
 <!-- 共用元件（唯一正本在 js/shared/；工作追蹤分頁 import 同一份）：這一頁是非 module 腳本，
-     由這段 module 把需要的函式掛到 window.TS，上面的第一區程式碼 await TS_READY 再用。 -->
+     由這段 module 把「今天與這週」整組（ts-zone）掛到 window.TSZ、mountZone 掛到 window.TS，
+     zone1.js 的 buildZone1 await TS_READY 再掛載；parttime.js／cards-hr.js 透過 zone1.js 的轉接用它。 -->
 <script type="module">
-import { renderSheet, appendBlankRows, appendRow, dropEmptyRows, collectRows, saveRowNow, removeRow, wireAutosave, setStages } from '/js/shared/ts-sheet.js';
-import { createBurnSorter, burnTbodyHtml, burnTableHtml, projectFileHtml } from '/js/shared/ts-projects.js';
-import { openStageEditor } from '/js/shared/stage-editor.js';
+import * as TSZ from '/js/shared/ts-zone/index.js';
 // 收據／單據的連結（cards.js 是傳統 script，從 window 拿）。
 // 🔴 這行是**明著**要的：它其實也被別的相依鏈拖進來過，但那是巧合 ——
 //    哪天那條鏈變了，福委會的附件就會在 window.receiptLinkHtml is not a function 上炸掉。
 import '/js/shared/utils.js';
-window._tsReady({ renderSheet, appendBlankRows, appendRow, dropEmptyRows, collectRows, saveRowNow, removeRow, wireAutosave, setStages,
-                  createBurnSorter, burnTbodyHtml, burnTableHtml, projectFileHtml, openStageEditor });
+window.TSZ = TSZ;
+window._tsReady({ mountZone: TSZ.mountZone });
 </script>
 </body>
 </html>

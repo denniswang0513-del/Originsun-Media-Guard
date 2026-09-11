@@ -38,11 +38,12 @@ def test_both_hosts_import_the_shared_sheet_and_projects_modules():
     my = my_page_src()
     assert "from '../../js/shared/ts-sheet.js'" in tab and "from '../../js/shared/ts-projects.js'" in tab
     assert "from '../../js/shared/stage-editor.js'" in tab
-    assert "from '/js/shared/ts-sheet.js'" in my and "from '/js/shared/ts-projects.js'" in my
-    assert "from '/js/shared/stage-editor.js'" in my
+    # 員工頁那邊 2026-09-12 起視圖本身就是 ES module（js/shared/ts-zone/），直接 import 共用元件
+    assert 'from "/js/shared/ts-sheet.js"' in my and 'from "/js/shared/ts-projects.js"' in my
+    assert 'from "/js/shared/stage-editor.js"' in my
     # 兩邊都是真的拿來畫，不是 import 了放著
     assert "renderSheet(" in tab and "wireAutosave(" in tab and "projectFileHtml(" in tab and "burnTbodyHtml(" in tab
-    assert "TS.renderSheet(" in my and "TS.wireAutosave(" in my and "TS.projectFileHtml(" in my and "TS.burnTbodyHtml(" in my
+    assert "renderSheet(sheet," in my and "wireAutosave(sheet," in my and "projectFileHtml(d," in my and "burnTbodyHtml(" in my
 
 
 def test_the_sheet_row_html_lives_in_exactly_one_file():
@@ -107,7 +108,7 @@ def test_stage_editor_is_one_module_opened_from_both_hosts():
     tab = repo_src(TAB)
     assert 'data-ts-action="stages"' in tab and "openStageEditor(" in tab and "setStages(" in tab
     my = my_page_src()
-    assert 'data-z1="stages"' in my and "TS.openStageEditor(" in my and "TS.setStages(" in my
+    assert 'data-z1="stages"' in my and "openStageEditor(" in my and "setStages(sheet, map)" in my
     # 兩邊都在 onSaved 把新清單餵回格子（新列的下拉立即更新）
     assert "onSaved: (map) =>" in tab and "onSaved: (map) =>" in my
 

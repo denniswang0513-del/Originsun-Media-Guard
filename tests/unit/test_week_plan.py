@@ -78,5 +78,6 @@ def test_timesheets_tab_handles_the_same_defer_button():
 def test_no_new_named_import_from_shared_sheet_module():
     """Cloudflare 給 .js 4 小時快取：my.html 這輪不能從 ts-sheet.js 新增具名 import（舊 js 沒那個 export 整個 module 會掛）。"""
     html = my_page_src()
-    line = next(l for l in html.splitlines() if "from '/js/shared/ts-sheet.js'" in l)
-    assert "planStateHtml" not in line
+    lines = [l for l in html.splitlines() if 'from "/js/shared/ts-sheet.js"' in l]
+    assert lines, "ts-zone 要從 ts-sheet import"
+    assert all("planStateHtml" not in l for l in lines)

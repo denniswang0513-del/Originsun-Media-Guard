@@ -275,8 +275,11 @@ def crm_css_src() -> str:
 
 #: /my.html 的程式碼被拆到哪幾支、以及 my.html 底部 script 標籤的載入順序。
 #: 順序＝原本 inline script 由上而下的執行順序，改這裡要跟 my.html 一起改。
-MY_PAGE_FILES = ("shell.js", "cards.js", "cards-hr.js", "zone1.js",
-                 "week-plan.js", "parttime.js", "team-week.js")
+MY_PAGE_FILES = ("shell.js", "cards.js", "cards-hr.js", "zone1.js", "parttime.js", "boot.js")
+#: 「今天與這週」四個視圖 2026-09-12 抽到 js/shared/ts-zone/（ES module，員工頁與 CRM 工作追蹤分頁共用）。
+#: my_page_src() 仍把它們串在後面 —— 那些斷言釘的是「員工那一頁做不做某件事」，視圖搬家不該讓它們變紅。
+#: 順序：ctx（狀態／切換）→ log（視圖 1）→ plan（視圖 1.5）→ team-week（視圖 2）→ find（視圖 3）→ index（分派）。
+TS_ZONE_FILES = ("ctx.js", "log.js", "plan.js", "team-week.js", "find.js", "index.js")
 
 
 def my_page_src() -> str:
@@ -294,6 +297,7 @@ def my_page_src() -> str:
     """
     parts = [repo_src("frontend/my.html")]
     parts += [repo_src("frontend/js/my/" + n) for n in MY_PAGE_FILES]
+    parts += [repo_src("frontend/js/shared/ts-zone/" + n) for n in TS_ZONE_FILES]
     return "\n".join(parts)
 
 

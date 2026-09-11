@@ -57,7 +57,10 @@ def test_workspace_has_the_parttime_window():
     # 兼職自己那邊看得到是誰排的
     assert "由 ${esc(i.planned_by)} 排" in js_func_body(z, "function _planCardHtml(i)")
     # 關視窗要讓團隊的一週重抓（卡出現在他那一列）
-    assert '_z1MarkStale("z1-week")' in js_func_body(z, "async function _z1Action(btn, ev)")
+    # pt-* 是員工頁自己的（owner 2026-09-11：兼職排班保留獨立視窗，不併進共用的 ts-zone），
+    # zone1.js 的 _ptAction 先攔，ts-zone 的 _z1Action 才分派其餘
+    assert '_z1MarkStale("z1-week")' in js_func_body(z, "function _ptAction(act, btn)")
+    assert "z.hooks.onAction(act, btn, ev)" in js_func_body(z, "export async function _z1Action(btn, ev)")
 
 
 def test_project_file_and_crm_detail_show_milestones_by_week():

@@ -5,7 +5,7 @@
 //   幾支共用同一個全域詞法環境，頂層的 const／let／function 跨檔直接看得見。
 //   改成 type="module" 每支會變成獨立作用域，所有跨檔引用都要改 import／export。
 //   載入順序＝原本 inline script 由上而下的執行順序，不可調換。
-// 跨檔用到：$、esc、mfetch、mjson、_shiftDays、_mondayOf、_mdLabel、_localToday、_POST、_PUT、_logProjectOptions、_planCardHtml、_isPlan
+// 跨檔用到：$、esc、mfetch、mjson、_shiftDays、_mondayOf、_mdLabel、_localToday、_POST、_PUT、_logProjectOptions、_planCardHtml、_isPlan（zone1.js 轉接到 js/shared/ts-zone）
 // 跨檔提供：_pt（狀態物件）、_ptApi、_ptDays、_ptNote、_ptMsg、_ptOpen、_pt* 家族（zone1.js 的 _z1Action 會叫）
 // ────────────────────────────────────────────────────────────────────────────
 // ── 兼職排班視窗（owner 2026-09-08）：有 me_plan_parttime 的正職幫「兼職」排他的一週 ──
@@ -103,7 +103,7 @@ async function _ptSubmitAdd(day) {
     const text = form.querySelector('[data-f="project"]').value.trim(), note = form.querySelector('[data-f="note"]').value.trim();
     if (!text && !note) { form.querySelector('[data-f="project"]').focus(); return; }
     form.dataset.busy = "1";
-    const hit = (_logProjects || []).find(p => p.id && (p.label === text || p.name === text));
+    const hit = (await _logProjectOptions()).find(p => p.id && (p.label === text || p.name === text));
     await _ptCreate([{ work_date: day, project_id: hit ? hit.id : null, project_name: hit ? hit.name : text, task_note: note, plan: true }]);
     if (form.isConnected) delete form.dataset.busy;
 }
