@@ -195,9 +195,10 @@ def test_new_request_columns_are_in_the_boot_migration_with_backfill():
     for col in ("hours", "part", "start_time", "end_time", "reject_note", "cancel_note", "google_event_id", "synced_at", "sync_error"):
         assert re.search(rf'\("hr_leave_requests", "{col}", "', sql), f"_crm_cols 缺 hr_leave_requests.{col}"
     assert "UPDATE hr_leave_requests SET hours = days * 8 WHERE hours IS NULL" in sql
-    # 回填要跑在加欄之後：_crm_cols 住 main.py（先跑），UPDATE 住 db/migrations.py 的 FINANCE_AND_CRM_COLUMNS（後跑）
+    # 回填要跑在加欄之後：main.py 先跑 CRM_COLUMNS 那個迴圈（ADD COLUMN），
+    # 再跑 FINANCE_AND_CRM_COLUMNS（含那句 UPDATE）—— 釘的是**執行順序**，不是清單住哪個檔
     main = repo_src("main.py")
-    assert main.index("_crm_cols = [") < main.index("_MIG.FINANCE_AND_CRM_COLUMNS")
+    assert main.index("_MIG.CRM_COLUMNS") < main.index("_MIG.FINANCE_AND_CRM_COLUMNS")
     assert "UPDATE hr_leave_requests SET hours" in repo_src("db/migrations.py")
 
 

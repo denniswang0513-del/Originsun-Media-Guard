@@ -9,7 +9,7 @@ import re
 
 from core.project_flow import CLOSED_STATUSES, PIPELINE, QUOTE_PHASE
 from core.quotation_pdf import build_quotation_view
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, migration_sql, repo_src
 from tests.unit.test_quotation_pdf import COMPANY, _q
 
 
@@ -80,7 +80,7 @@ def test_quotation_share_token_column_migration_and_index_all_exist():
     from db.models import CrmQuotation
     col = CrmQuotation.__table__.columns["share_token"]
     assert isinstance(col.type, String) and col.type.length == 64 and col.nullable
-    assert '("crm_quotations", "share_token", "VARCHAR(64)")' in repo_src("main.py")
+    assert '("crm_quotations", "share_token", "VARCHAR(64)")' in migration_sql()
     flat = " ".join(CRM_INDEXES) if isinstance(CRM_INDEXES, (list, tuple)) else str(CRM_INDEXES)
     assert "idx_quote_share_token ON crm_quotations(share_token)" in flat
 

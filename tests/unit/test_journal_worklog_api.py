@@ -10,7 +10,7 @@ import pytest
 
 from core.journal_logic import (ENTRY_FLAGS, FLAG_SECTIONS, MAX_ENTRIES_PER_SECTION, clean_rich_entries,
                                 flag_counts, group_worklog, shell_status, status_after_put, unanswered_flagged)
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, migration_sql, repo_src
 
 
 # ── 條目清洗（字串或 dict）────────────────────────────────────────
@@ -166,7 +166,7 @@ def test_mine_response_has_worklog_entries_replies_and_legacy_arrays():
 
 
 def test_migration_models_and_schema():
-    main = repo_src("main.py")
+    main = migration_sql()
     for tup in ('("work_journals", "status", "VARCHAR(16)")', '("work_journals", "submitted_at", "TIMESTAMPTZ")',
                 '("journal_wins", "project_id", "VARCHAR(32)")', '("journal_others", "flag", "VARCHAR(16)")'):
         assert tup in main, tup

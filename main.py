@@ -402,7 +402,7 @@ _self_heal_scheduled_task()
 
 @app.on_event("startup")
 async def _on_startup():
-    # 開機 migration 的 SQL：索引／CREATE TABLE 類住 db/migrations.py（只有資料）；ADD COLUMN 清單 _crm_cols 仍在本檔下面
+    # 開機 migration 的 SQL 全部住 db/migrations.py（只有資料）：索引、CREATE TABLE、ADD COLUMN 清單
     # （兩處都要看；加欄位就在對應清單末端補一行）
     from db import migrations as _MIG
     _loop = asyncio.get_running_loop()
@@ -589,138 +589,8 @@ async def _on_startup():
             if _f:
                 from sqlalchemy import text as _t
                 async with _f() as _s:
-                    _crm_cols = [
-                        ("crm_projects", "start_date", "TIMESTAMPTZ"),
-                        ("crm_projects", "completion_date", "TIMESTAMPTZ"),
-                        ("crm_projects", "project_type", "VARCHAR(64) DEFAULT ''"),
-                        ("crm_projects", "contract_amount", "INTEGER"),
-                        ("crm_projects", "tax_rate", "INTEGER DEFAULT 5"),
-                        ("crm_projects", "profit_target_pct", "INTEGER DEFAULT 20"),
-                        ("crm_projects", "misc_budget_pct", "INTEGER DEFAULT 5"),
-                        ("crm_projects", "payment_status", "VARCHAR(32) DEFAULT '未到帳'"),
-                        ("crm_projects", "amount_receivable", "INTEGER"),
-                        ("crm_projects", "amount_received", "INTEGER"),
-                        ("crm_projects", "transfer_fee", "INTEGER"),
-                        ("crm_quotation_items", "internal_cost", "INTEGER DEFAULT 0"),
-                        ("crm_quotations", "spec", "TEXT"),
-                        ("crm_quotations", "share_token", "VARCHAR(64)"),
-                        ("crm_quotations", "chat", "JSONB"),
-                        ("crm_quotations", "pdf_snapshot", "JSONB"),
-                        ("crm_invoices", "share_snapshot", "JSONB"),
-                        ("crm_project_staff", "phase", "VARCHAR(32) DEFAULT ''"),
-                        ("crm_project_staff", "actual_days", "INTEGER"),
-                        ("crm_project_staff", "actual_cost", "INTEGER"),
-                        ("crm_project_staff", "payment_status", "VARCHAR(32)"),
-                        ("crm_project_staff", "payment_date", "TIMESTAMPTZ"),
-                        ("crm_staff", "address", "VARCHAR(255)"),
-                        ("crm_payment_requests", "planned_month", "VARCHAR(7)"),
-                        ("crm_invoices", "recipient", "VARCHAR(128)"),
-                        ("crm_invoices", "recipient_phone", "VARCHAR(32)"),
-                        ("crm_invoices", "recipient_address", "VARCHAR(255)"),
-                        ("crm_invoices", "project_ids", "TEXT"),
-                        ("crm_cash_entries", "updated_at", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"),
-                        ("crm_cash_entries", "invoice_id", "VARCHAR(32)"),
-                        ("crm_cash_entries", "bank_fee", "INTEGER"),
-                        # N-hr H2 出缺勤 + 工時 staff_id 對映（hr_leave_requests 新表由 create_all 建）
-                        ("crm_staff", "annual_leave_days", "INTEGER"),
-                        ("timesheets", "staff_id", "VARCHAR(32)"),
-                        # 工作追蹤 P1（docs/WORK_TRACKING_UI_PLAN.md §2）：計畫小時＋工作分類
-                        ("timesheets", "planned_hours", "DOUBLE PRECISION"),
-                        ("timesheets", "work_type", "VARCHAR(32)"),
-                        ("timesheets", "note", "TEXT"),
-                        ("timesheets", "edited_at", "TIMESTAMPTZ"),
-                        ("timesheets", "edited_by", "VARCHAR(64)"),
-                        ("timesheets", "remark", "TEXT"),
-                        # 工作階段＋待辦互連（docs/JOURNAL_WORKLOG_PLAN.md §12／§2-C4）；work_stage_nodes 新表由 create_all 建
-                        ("timesheets", "stage_id", "VARCHAR(32)"),
-                        ("timesheets", "planned_by", "VARCHAR(64)"),      # 兼職排班：誰幫排的（2026-09-08）
-                        ("timesheets", "stage_name", "VARCHAR(64)"),
-                        ("timesheets", "bulletin_id", "VARCHAR(32)"),
-                        # 我的一天格子的起／訖（owner 2026-09-06：重新整理不能消失）
-                        ("timesheets", "sheet_key", "VARCHAR(255)"),
-                        ("timesheets", "start_time", "VARCHAR(5)"),
-                        ("timesheets", "end_time", "VARCHAR(5)"),
-                        # 週記草稿→送出（§13）＋ 條目掛案子／求助標記（§2-B3／B4）；journal_replies 新表由 create_all 建
-                        ("work_journals", "status", "VARCHAR(16)"),
-                        ("work_journals", "submitted_at", "TIMESTAMPTZ"),
-                        ("journal_wins", "project_id", "VARCHAR(32)"),
-                        ("journal_wins", "flag", "VARCHAR(16)"),
-                        ("journal_challenges", "project_id", "VARCHAR(32)"),
-                        ("journal_challenges", "flag", "VARCHAR(16)"),
-                        ("journal_learnings", "project_id", "VARCHAR(32)"),
-                        ("journal_learnings", "flag", "VARCHAR(16)"),
-                        ("journal_others", "project_id", "VARCHAR(32)"),
-                        ("journal_others", "flag", "VARCHAR(16)"),
-                        # 影像紀錄：子資料夾名（首次生成後固定，見 media_log._ensure_folder_name）
-                        ("project_media_log", "folder_name", "VARCHAR(255)"),
-                        # 提案庫資產夾名（core.project_folders，2026-08-06）
-                        ("crm_projects", "proposal_folder_name", "VARCHAR(255)"),
-                        # 結案歸檔清單 + 專案回顧 KPTA（core/project_archive.py）
-                        ("crm_projects", "archive_checklist", "JSONB"),
-                        ("crm_projects", "review_kpta", "JSONB"),
-                        # 提案企劃矩陣（docs/PROPOSAL_PLANNER.md）
-                        ("preprod_proposals", "plan", "JSONB"),
-                        ("preprod_proposals", "notes", "TEXT"),   # 基本資料備註（§9.7）
-                        # 現況盤點表（core/proposal_survey.py — 對齊 owner 的 Notion 專案啟動面版）
-                        ("preprod_proposals", "survey", "JSONB"),
-                        # 重點提案勾選（core/pinned_assets.py — 取代舊的「對外分享」子夾）
-                        ("preprod_proposals", "pinned_assets", "JSONB"),
-                        ("preprod_proposals", "pins_public", "BOOLEAN DEFAULT FALSE"),
-                        # 提案在專案資產夾底下的子夾（一專案多提案時各自分開）
-                        ("preprod_proposals", "folder_subpath", "VARCHAR(255)"),
-                        # 參考影片庫 v2（docs/REFERENCE_LIBRARY.md）
-                        ("preprod_references", "description", "TEXT"),
-                        ("preprod_references", "facets", "JSONB"),
-                        ("preprod_references", "research", "JSONB"),
-                        ("preprod_references", "curated", "BOOLEAN"),
-                        ("preprod_references", "provider", "VARCHAR(16)"),
-                        ("preprod_references", "video_id", "VARCHAR(64)"),
-                        ("preprod_references", "updated_at", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"),
-                        ("preprod_reference_shots", "created_key", "VARCHAR(64)"),
-                        # 會議記錄：錄音 → 逐字稿 → AI 整理（services/meeting_transcriber）
-                        ("preprod_meeting_notes", "audio_rel", "VARCHAR(512)"),
-                        ("preprod_meeting_notes", "transcript", "TEXT"),
-                        ("preprod_meeting_notes", "ai_summary", "TEXT"),
-                        ("preprod_meeting_notes", "status", "VARCHAR(16)"),
-                        ("preprod_meeting_notes", "error", "TEXT"),
-                        ("preprod_meeting_notes", "phase", "VARCHAR(64)"),
-                        # 單篇會議記錄唯讀分享（owner 2026-08-15）
-                        ("preprod_meeting_notes", "share_token", "VARCHAR(512)"),
-                        # 影片封存（docs/REFERENCE_LIBRARY.md §12）
-                        ("preprod_references", "archive_status", "VARCHAR(16)"),
-                        ("preprod_references", "archive_path", "VARCHAR(512)"),
-                        ("preprod_references", "archive_error", "TEXT"),
-                        ("preprod_references", "archived_at", "TIMESTAMPTZ"),
-                        ("preprod_references", "archive_tries", "INTEGER"),
-                        # 收款↔發票分配的逐張匯費（owner 2026-08-24）。沒有這欄的話
-                        # 關聯面板每次載入那格都是空的 → 按一下儲存就送 fee=0，
-                        # deposit 退回去、bank_fee 被清掉（靜默回退，畫面看不出來）。
-                        ("crm_cash_invoice_links", "fee", "INTEGER NOT NULL DEFAULT 0"),
-                        # 行事曆：器材預約列掛在哪一場拍攝（docs/SHOOT_CALENDAR_PLAN.md）
-                        ("equipment_checkouts", "shoot_id", "VARCHAR(32)"),
-                        # 假勤重整（docs/LEAVE_PLAN.md §7.2）：小時正本／半天時段／退回與消假說明／日曆三欄；
-                        # hr_leave_credits／allocations／holidays 新表由 create_all 建，舊列 hours 回填在 db/migrations.py
-                        ("hr_leave_requests", "hours", "DOUBLE PRECISION"),
-                        ("hr_leave_requests", "part", "VARCHAR(8) NOT NULL DEFAULT 'all'"),
-                        ("hr_leave_requests", "start_time", "VARCHAR(5)"),
-                        ("hr_leave_requests", "end_time", "VARCHAR(5)"),
-                        ("hr_leave_requests", "reject_note", "TEXT"),
-                        ("hr_leave_requests", "cancel_note", "TEXT"),
-                        ("hr_leave_requests", "google_event_id", "VARCHAR(255)"),
-                        ("hr_leave_requests", "synced_at", "TIMESTAMPTZ"),
-                        ("hr_leave_requests", "sync_error", "TEXT"),
-                        # 備份三根掛在專案上（owner 2026-09-10）：canonical UNC，
-                        # 空＝這個案沒設定，備份頁退回手動輸入
-                        ("crm_projects", "backup_local_root", "TEXT"),
-                        ("crm_projects", "backup_nas_root", "TEXT"),
-                        ("crm_projects", "backup_proxy_root", "TEXT"),
-                        # 匯款通知（owner 2026-09-11）：這一筆屬於哪一次匯款。
-                        # crm_payouts 新表由 create_all 建，這裡只補舊庫的欄位。
-                        ("crm_payment_requests", "payout_id", "VARCHAR(32)"),
-                        # 人員代稱（owner 2026-09-11）：綽號 → 人，帳務那邊靠它對到帳號
-                        ("crm_staff", "alias", "TEXT"),
-                    ]
-                    for tbl, col, coltype in _crm_cols:
+                    # ADD COLUMN 清單住 db/migrations.CRM_COLUMNS（只有資料）—— 加欄位去那裡加
+                    for tbl, col, coltype in _MIG.CRM_COLUMNS:
                         try:
                             await _s.execute(_t(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS {col} {coltype}"))
                             await _s.commit()

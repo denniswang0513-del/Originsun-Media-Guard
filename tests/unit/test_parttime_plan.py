@@ -5,14 +5,14 @@
 只碰計畫列、時數不收；不走 own-scope 的 /mine/*（那邊絕不收 client 給的 staff_id），另開 /timesheets/plan-for/*。
 里程碑（按週）：專案檔案（/timesheets/project 帶 milestone_weeks）與 CRM 專案詳情（動態 import 同一支畫法）。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, my_page_src, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, migration_sql, my_page_src, repo_src
 
 TS = repo_src("routers/api_timesheets.py")
 
 
 def test_planned_by_column_is_everywhere_a_timesheet_column_must_be():
     assert "planned_by = Column(String(64), nullable=True)" in repo_src("db/models/_workos.py")
-    assert '("timesheets", "planned_by", "VARCHAR(64)")' in repo_src("main.py"), "ADD COLUMN IF NOT EXISTS 清單"
+    assert '("timesheets", "planned_by", "VARCHAR(64)")' in migration_sql(), "ADD COLUMN IF NOT EXISTS 清單"
     svc = repo_src("services/timesheet_self.py")
     assert '"planned_by"' in svc.split("_SNAP_COLS = (")[1].split(")")[0], "合併快照要含它（test_merge_snapshot 也會抓）"
     assert '"planned_by": getattr(r, "planned_by", None) or ""' in svc, "ts_dict 要回它，卡上才畫得出「由 X 排」"

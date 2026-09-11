@@ -14,7 +14,7 @@
 import pytest
 
 from core import quote_snapshot as QS
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, migration_sql, repo_src
 
 QUOTES = "routers/crm/quotes.py"
 
@@ -288,7 +288,7 @@ def test_column_and_startup_migration_both_exist():
     from db.models import CrmQuotation
     col = CrmQuotation.__table__.columns["pdf_snapshot"]
     assert isinstance(col.type, JSONB) and col.nullable
-    assert '("crm_quotations", "pdf_snapshot", "JSONB")' in repo_src("main.py")
+    assert '("crm_quotations", "pdf_snapshot", "JSONB")' in migration_sql()
 
 
 def test_the_generate_wait_lives_in_one_place():

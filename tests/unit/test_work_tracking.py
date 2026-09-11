@@ -5,7 +5,7 @@
 import pytest
 
 from core.hr_logic import (WORK_TYPES, norm_work_type, row_state)
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, migration_sql, repo_src
 
 
 def test_row_state_and_work_type_rules():
@@ -33,7 +33,7 @@ def test_manual_rows_accept_plan_only_and_store_the_two_columns():
     model = repo_src("db/models/_workos.py")
     assert "planned_hours = Column(Float, nullable=True)" in model
     assert "work_type = Column(String(32), nullable=True)" in model
-    main = repo_src("main.py")
+    main = migration_sql()
     assert '("timesheets", "planned_hours", "DOUBLE PRECISION")' in main
     assert '("timesheets", "work_type", "VARCHAR(32)")' in main
 
@@ -79,7 +79,7 @@ def test_board_and_my_day_are_gated_by_the_timesheets_module():
     assert "add_tombstone(" in rc and "r.row_hash = c.incoming_hash" in rc and '"sheet", ctx)' in rc
     for fn in ("async def ledger_conflicts(", "async def ledger_resolve_conflict("):
         assert "check_admin(request)" in func_body(src, fn), fn
-    assert '("timesheets", "edited_at", "TIMESTAMPTZ")' in repo_src("main.py")
+    assert '("timesheets", "edited_at", "TIMESTAMPTZ")' in migration_sql()
 
 
 def test_tab_has_the_seven_views_and_the_daily_board_shows_what_not_how_much():

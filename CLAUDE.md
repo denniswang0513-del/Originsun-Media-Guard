@@ -561,8 +561,8 @@ def _emit_sync(event: str, data: dict) -> None:
 - **Google OAuth 使用 GIS Credential 模式**：不需 client_secret，不需 redirect URI。
   前端載入 `accounts.google.com/gsi/client`，Google 返回 ID Token JWT，後端用 `google-auth` 庫驗證。
 - **DB Migration**：`main.py` startup 用 `ALTER TABLE users ADD COLUMN IF NOT EXISTS` 加欄位，
-  🔴 2026-09 起分兩處：`db/migrations.py` 的清單（CRM_INDEXES 等，只有資料）＋ `main.py` startup 的 `_crm_cols`
-  （ADD COLUMN IF NOT EXISTS 清單，本週新欄位都加在這裡）。加欄位時在對應清單末端補一行，兩邊都要看。
+  🔴 2026-09-11 起**全部**住 `db/migrations.py`（只有資料）：`CRM_INDEXES`、各 `*_COLUMNS`、以及
+  `CRM_COLUMNS`（`(table, column, type)` 的 ADD COLUMN IF NOT EXISTS 清單，本週新欄位加在它末端）。`main.py` 只剩控制流程。
 - **`_find_user_by(column, value)`**：統一的使用者查找函式，支援 DB 和 JSON fallback。
   不要再新增 `_find_user_by_xxx` 單獨函式。
 - **前端登入成功統一用 `_onLoginSuccess(d)`**，不要在密碼和 Google 兩條路徑各寫一次。
@@ -818,7 +818,7 @@ CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 **RBAC 模組**：`crm_clients`, `crm_projects`, `crm_quotes`, `crm_staff`, `crm_invoices`
 
 **新增 CRM 功能 checklist**：
-1. DB Model → `db/models/`（`_crm.py`／`_workos.py`／`_system.py`；新欄位需在 `main.py` startup 的 `_crm_cols` 加 `ALTER TABLE ADD COLUMN IF NOT EXISTS`）
+1. DB Model → `db/models/`（`_crm.py`／`_workos.py`／`_system.py`；新欄位在 `db/migrations.CRM_COLUMNS` 末端加一行 `(table, column, type)`）
 2. Schema → `core/schemas.py`
 3. API → `routers/crm/<領域>.py`（共用 helper 進 `_shared.py`；純錢流判定進 `core/crm_logic.py` 並加單元測試）
 4. 前端 → `frontend/tabs/crm/` 對應 `.html` + `.js`

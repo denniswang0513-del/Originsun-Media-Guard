@@ -10,7 +10,7 @@ import pytest
 
 from core.hr_logic import (STAGE_SEED, WORK_TYPES, resolve_stage, stage_categories, stage_index,
                            stages_by_category)
-from tests.unit._srcscan import code_only, func_body, my_page_src, repo_src
+from tests.unit._srcscan import code_only, func_body, migration_sql, my_page_src, repo_src
 
 
 def _nodes():
@@ -161,7 +161,7 @@ def test_options_endpoint_returns_active_stages_per_category():
 
 
 def test_migration_and_model_exports():
-    main = repo_src("main.py")
+    main = migration_sql()
     for tup in ('("timesheets", "stage_id", "VARCHAR(32)")', '("timesheets", "stage_name", "VARCHAR(64)")',
                 '("timesheets", "bulletin_id", "VARCHAR(32)")'):
         assert tup in main, tup

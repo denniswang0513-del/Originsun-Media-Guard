@@ -6,7 +6,7 @@
 少一環，起訖就又會在重新整理後消失。
 """
 from services.timesheet_manual import hhmm_or_none
-from tests.unit._srcscan import js_code_only, js_func_body, repo_src, schemas_src
+from tests.unit._srcscan import js_code_only, js_func_body, migration_sql, repo_src, schemas_src
 
 
 def test_hhmm_normalizes_like_the_grid():
@@ -20,7 +20,7 @@ def test_hhmm_normalizes_like_the_grid():
 def test_columns_migration_schema_and_serializer_are_wired():
     model = repo_src("db/models/_workos.py")
     assert "start_time = Column(String(5), nullable=True)" in model and "end_time = Column(String(5), nullable=True)" in model
-    main = repo_src("main.py")
+    main = migration_sql()
     assert '("timesheets", "start_time", "VARCHAR(5)")' in main and '("timesheets", "end_time", "VARCHAR(5)")' in main
     schema = schemas_src()
     assert "start_time: Optional[str] = None" in schema and "end_time: Optional[str] = None" in schema

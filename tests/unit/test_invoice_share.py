@@ -12,7 +12,7 @@ import pytest
 
 from core import invoice_share as IS
 from core import share_link as SL
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, migration_sql, repo_src
 
 INV = "routers/crm/invoice_files.py"
 
@@ -294,7 +294,7 @@ def test_column_and_startup_migration_both_exist():
     from db.models import CrmInvoice
     col = CrmInvoice.__table__.columns["share_snapshot"]
     assert isinstance(col.type, JSONB) and col.nullable
-    assert '("crm_invoices", "share_snapshot", "JSONB")' in repo_src("main.py")
+    assert '("crm_invoices", "share_snapshot", "JSONB")' in migration_sql()
 
 
 # ── polish 階段零：把這批動到、但還沒有測試釘住的行為記下來 ──────────

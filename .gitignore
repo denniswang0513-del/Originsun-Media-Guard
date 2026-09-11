@@ -120,3 +120,7 @@ scripts/_placeholder_backup_*.json
 docs/timesheet_import_report.md
 # 公司 Logo／印章（設定頁上傳；主控端本機，不進 git、不掛靜態）
 company_assets/
+
+# dev 8001 手動啟動時的開機 log（/dev restart 用 -RedirectStandardOutput 寫的）
+dev_boot.log
+dev_boot.err
