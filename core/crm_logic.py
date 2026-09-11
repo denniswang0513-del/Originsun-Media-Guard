@@ -69,14 +69,27 @@ def group_payables(rows) -> dict:
         seen_ids.add(p.id)
         name = p.payee_name or "未指定"
         if name not in payee_groups:
+            # 銀行那格人各自打成四種寫法（含全形半形混用），翻譯規則只有 core.bank_codes 一份。
+            # 對不到就原樣放行 —— 畫面顯示他打的字，不會因為表裡沒收錄就變空白。
+            from core.bank_codes import resolve as _bank
+            _code, _bname = _bank(staff_bank_name or "")
             payee_groups[name] = {
                 "payee_name": name,
                 "payee_id": p.payee_id or staff_id_number or "",
                 "bank_name": staff_bank_name or "",
+                "bank_code": _code or "",          # 出納在網銀填的第一格
+                "bank_display": _bname or "",      # 去掉代號與括號之後的正式名
                 "bank_account": staff_bank_account or "",
-                "total_amount": 0, "items": [],
+                "total_amount": 0, "unpaid_amount": 0, "unpaid_count": 0,
+                "items": [],
             }
         payee_groups[name]["total_amount"] += p.amount or 0
+        # 🔴 「本次要匯」＝**還沒付的**合計，跟 total_amount 是兩件事：月份分組裡可能
+        # 混著已付的（已付按實際付款月份歸類），照 total 匯就是把付過的再匯一次。
+        # 算在後端是為了「畫面上讀到的數字」與「複製出去的數字」不會各算一次。
+        if (p.payment_status or "") != "已付款":
+            payee_groups[name]["unpaid_amount"] += p.amount or 0
+            payee_groups[name]["unpaid_count"] += 1
         payee_groups[name]["items"].append({
             "id": p.id,
             "date": p.request_date.strftime("%Y/%m/%d") if p.request_date else "",
@@ -87,6 +100,9 @@ def group_payables(rows) -> dict:
             "payment_date": p.payment_date.strftime("%Y-%m-%d") if p.payment_date else "",
             "project_id": getattr(p, "project_id", None) or "", "project_label": getattr(p, "project_label", None) or "",   # 應付帳款要能跳回案子的收付款分頁
             "planned_month": p.planned_month or "",
+            # 報支項目（勞報／現金／內部人員／發票核銷）＝「這筆要附什麼單」，
+            # 跟 category（成本分類）是兩件事，不影響匯多少。
+            "payee_type": getattr(p, "payee_type", None) or "",
         })
 
     payees = sorted(payee_groups.values(), key=lambda x: x["total_amount"], reverse=True)

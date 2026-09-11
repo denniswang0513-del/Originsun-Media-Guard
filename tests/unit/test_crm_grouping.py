@@ -36,6 +36,37 @@ class TestGroupPayables:
         assert wang["total_amount"] == 15000 and len(wang["items"]) == 2
         assert wang["bank_name"] == "台新" and wang["bank_account"] == "111"
 
+    def test_unpaid_total_is_separate_from_the_month_total(self):
+        """🔴 「本次要匯」＝還沒付的合計。月份分組裡可能混著已付的（已付按實際付款
+        月份歸類），照 total_amount 匯就是把付過的錢再匯一次。"""
+        rows = [(_payment(1, "王士源", 10000, status="應付款"), "", "", ""),
+                (_payment(2, "王士源", 6000, status="已付款"), "", "", ""),
+                (_payment(3, "王士源", 4000, status="未付款"), "", "", "")]   # 舊資料的寫法
+        w = group_payables(rows)["payees"][0]
+        assert w["total_amount"] == 20000
+        assert w["unpaid_amount"] == 14000 and w["unpaid_count"] == 2
+
+    def test_bank_code_and_display_come_from_the_one_table(self):
+        """人打什麼寫法都行，翻譯只有 core.bank_codes 一份（不准在這裡切字串）。"""
+        rows = [(_payment(1), "", "中信（822)", "342168993550")]
+        pg = group_payables(rows)["payees"][0]
+        assert pg["bank_code"] == "822" and pg["bank_display"] == "中國信託商業銀行"
+        assert pg["bank_name"] == "中信（822)", "人打的原字串要留著"
+
+    def test_unknown_bank_passes_through_instead_of_going_blank(self):
+        rows = [(_payment(1), "", "某某農會信用部", "123")]
+        pg = group_payables(rows)["payees"][0]
+        assert pg["bank_code"] == "" and pg["bank_display"] == "某某農會信用部"
+
+    def test_payee_type_rides_along_without_touching_the_amount(self):
+        """報支項目＝這筆要附什麼單（勞報要扣繳、現金雜支要收據），**不影響匯多少**。
+        他代墊的現金雜支照樣要還他 —— 2026-09-11 查證過，同事就是一起匯出去的。"""
+        pay = _payment(1, amount=2250, status="應付款")
+        pay.payee_type = "現金"
+        w = group_payables([(pay, "", "", "")])["payees"][0]
+        assert w["items"][0]["payee_type"] == "現金"
+        assert w["unpaid_amount"] == 2250, "現金雜支不是「不用匯」"
+
     def test_dedup_by_payment_id(self):
         """outerjoin 同名 staff 多列 → 同一筆請款重複出現，只能算一次。"""
         p = _payment(1, amount=10000)

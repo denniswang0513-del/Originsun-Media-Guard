@@ -33,11 +33,21 @@ function _buildMonthGroups() {
                     payee_id: p.payee_id,
                     bank_name: p.bank_name,
                     bank_account: p.bank_account,
+                    bank_code: p.bank_code,
+                    bank_display: p.bank_display,
                     month_amount: 0,
+                    // 本次要匯＝這個月**還沒付**的那幾筆（後端 group_payables 也算同一套）。
+                    // 跟 month_amount 是兩件事：照總額匯會把已付的再匯一次。
+                    unpaid_amount: 0,
+                    unpaid_count: 0,
                     items: [],
                 };
             }
             monthMap[m][p.payee_name].month_amount += it.amount || 0;
+            if (!isPaid) {
+                monthMap[m][p.payee_name].unpaid_amount += it.amount || 0;
+                monthMap[m][p.payee_name].unpaid_count += 1;
+            }
             monthMap[m][p.payee_name].items.push(it);
         }
     }
@@ -55,6 +65,8 @@ function _buildMonthGroups() {
             label: m === '未指定月份' ? '未指定月份' : m.replace(/^(\d{4})-(\d{2})$/, '$1年$2月'),
             payees,
             month_total: payees.reduce((s, p) => s + p.month_amount, 0),
+            month_unpaid: payees.reduce((s, p) => s + p.unpaid_amount, 0),
+            month_unpaid_count: payees.reduce((s, p) => s + p.unpaid_count, 0),
         };
     });
 }
@@ -94,6 +106,15 @@ async function loadPayables() {
 }
 
 // 排序在 month group 內,group 自己保持月份序列(資料已 buildMonthGroups 排好)
+/** 清單上的銀行那一行。🔴 沒有帳號要**直接說出來**，不是留白 ——
+ *  空白看起來像「還沒載入」，出納會以為再等一下就有；寫出來他才知道要去人員檔補。 */
+function _bankLine(p) {
+    // 欄位窄，寫短一點；完整那句掛 title（截斷的字反而看不出是什麼）
+    if (!p.bank_account) return '<span style="color:#fbbf24;" title="這位收款人在人員檔裡沒有銀行帳號 —— 補在人員檔，這裡就會帶出來">沒有帳號</span>';
+    const bank = [p.bank_display || p.bank_name, p.bank_code].filter(Boolean).join(' ');
+    return _esc(bank ? `${bank} · ${p.bank_account}` : p.bank_account);
+}
+
 const _allPaid = (p) => p.items.every(it => it.payment_status === '已付款');
 const _sorter = createSortable({
     storageKey: 'crm_payables_sort',
@@ -122,7 +143,8 @@ function renderList() {
     for (const g of _monthGroups) {
         html += `<div class="payable-month-header">
             <span>${_esc(g.label)}</span>
-            <span>小計 $${_fmtNum(g.month_total)}</span>
+            <span>要匯 $${_fmtNum(g.month_unpaid)}　·　${g.month_unpaid_count} 筆${
+                g.month_unpaid !== g.month_total ? `（總額 $${_fmtNum(g.month_total)}）` : ''}</span>
         </div>`;
         for (const p of _sorter.sorted(g.payees)) {
             const key = p.payee_name + '|' + g.month;
@@ -132,8 +154,8 @@ function renderList() {
             html += `
             <div class="crm-row${key === _selectedKey ? ' selected' : ''}" onclick="window._payableSelect('${_esc(p.payee_name)}','${_esc(g.month)}')">
                 <div class="crm-row-name">${_esc(p.payee_name)}</div>
-                <div class="crm-row-amount">$${_fmtNum(p.month_amount)}</div>
-                <div class="crm-row-client" style="font-size:11px;">${_esc(p.bank_name ? p.bank_name + ' ' + p.bank_account : '')}</div>
+                <div class="crm-row-amount">$${_fmtNum(allPaid ? p.month_amount : p.unpaid_amount)}</div>
+                <div class="crm-row-client" style="font-size:11px;">${_bankLine(p)}</div>
                 <div class="crm-row-status"><span class="${statusCls}">${statusText}</span></div>
             </div>`;
         }
@@ -195,27 +217,57 @@ function renderDetail(p, month) {
     const unpaidLines = _unpaidItems(p).map(_itemLine);
 
     document.getElementById('payable-detail-content').innerHTML = `
-        <div class="crm-detail-prop"><div class="crm-prop-label">收款人</div><div class="crm-prop-value" style="font-weight:700;">${_esc(p.payee_name)}</div></div>
-        <div class="crm-detail-prop"><div class="crm-prop-label">身分證</div><div class="crm-prop-value">${_esc(p.payee_id)}</div></div>
-        ${bankHtml}
-        <div class="crm-detail-prop"><div class="crm-prop-label">應付總額</div>
-            <div class="crm-prop-value" style="font-weight:700;color:#fbbf24;display:flex;align-items:center;gap:8px;">
-                <span>$${_fmtNum(p.month_amount)}</span>
-                <button class="crm-btn crm-btn-sm" style="font-size:10px;padding:1px 8px;color:#9ca3af;border:1px solid #3a3a3a;background:transparent;font-weight:400;"
-                    title="複製成純數字（沒有錢字號與逗號，直接貼進網銀）"
-                    onclick="window._payableCopyAmount('${_esc(p.payee_name)}','${_esc(month)}',this)">複製金額</button>
-                ${unpaidTotal !== p.month_amount
-                    ? `<span style="font-size:11px;color:#9ca3af;font-weight:400;">本次要匯 $${_fmtNum(unpaidTotal)}（其餘已付）</span>`
-                    : ''}
-            </div></div>
-        ${unpaidLines.length ? `<div class="crm-detail-prop"><div class="crm-prop-label">本次匯款項目</div>
-            <div class="crm-prop-value" style="font-size:12px;line-height:1.7;">${unpaidLines.map(_esc).join('<br>')}</div></div>` : ''}
+        ${_cpRow('bankcode', '銀行代碼', p.bank_code
+            ? `<span class="pay-mono">${_esc(p.bank_code)}</span><span class="pay-sub">${_esc(p.bank_display || p.bank_name)}</span>`
+            : '<span class="pay-warn">沒有代碼，去人員檔補</span>', !!p.bank_code)}
+        ${_cpRow('account', '帳號', p.bank_account
+            ? `<span class="pay-mono">${_esc(p.bank_account)}</span>`
+            : '<span class="pay-warn">沒有帳號，去人員檔補</span>', !!p.bank_account)}
+        ${_cpRow('amount', '本次要匯',
+            `<span class="pay-amt">$${_fmtNum(unpaidTotal)}</span>`
+            + `<span class="pay-sub">${unpaidLines.length} 筆${
+                unpaidTotal !== p.month_amount ? `　·　應付總額 $${_fmtNum(p.month_amount)}` : ''}</span>`,
+            unpaidTotal > 0)}
+        ${_cpRow('memo', '轉入備註', _esc(_bkCompany()), !!_bkCompany())}
+        ${_cpRow('payee', '收款人', `<span style="font-weight:700;">${_esc(p.payee_name)}</span>`, true)}
+        ${unpaidLines.length ? _cpRow('items', '本次項目',
+            `<div style="display:flex;flex-direction:column;gap:2px;font-size:12px;">${
+                unpaidLines.map(l => `<span>${_esc(l)}</span>`).join('')}</div>`, true) : ''}
         <div style="border-top:1px solid #2e2e2e;margin:10px 0;"></div>
         ${itemsHtml}
+        <div style="display:flex;flex-wrap:wrap;gap:6px 16px;color:#9ca3af;font-size:11.5px;padding-top:10px;">
+            ${p.payee_id ? `<span>身分證 ${_esc(p.payee_id)}</span>` : ''}
+            <span>應付總額 $${_fmtNum(p.month_amount)}</span>
+        </div>
     `;
 }
 
-/* ── 選取 / 關閉 ── */
+/** 面板的一列：**複製鈕在最左邊**，每一列都是同一顆「複製」（owner 2026-09-11）。
+ *  統一寫「複製」而不是「複製金額」「複製 012」—— 出納照著列往下走，
+ *  按鈕在同一個 X 座標，眼睛不用找。列的順序＝網銀的填表順序。 */
+function _cpRow(key, label, valueHtml, canCopy) {
+    return `<div class="pay-row">
+        ${canCopy
+            ? `<button class="pay-cp" onclick="window._payableCopyField('${key}',this)">複製</button>`
+            : '<span class="pay-cp-off">—</span>'}
+        <span class="pay-k">${_esc(label)}</span>
+        <span class="pay-v">${valueHtml}</span>
+    </div>`;
+}
+
+/** 轉入帳號備註＝我們的公司名稱（後台設定裡已經有；出納現在每次手打）。 */
+function _bkCompany() {
+    return (window.__settingsCache?.company?.name) || _companyName || '';
+}
+let _companyName = '';
+(async () => {
+    try {
+        const r = await fetch(location.origin + '/api/settings/load');
+        if (r.ok) _companyName = (await r.json())?.company?.name || '';
+    } catch (_) { /* 沒有就空著，那一列會顯示「—」不給複製 */ }
+})();
+
+/* ── 選取 / 關閉 ── *//* ── 選取 / 關閉 ── */
 function selectPayee(name, month) {
     _selectedKey = name + '|' + month;
     renderList();
@@ -344,11 +396,22 @@ window._payableCopyInfo = (name, month, btn) => {
 /** 貼進網銀的金額：純數字，沒有錢字號也沒有逗號。 */
 const _plainAmount = (n) => String(Math.round(Number(n) || 0));
 
-window._payableCopyAmount = (name, month, btn) => {
+/** 面板逐格複製。值一律取「現在選著的那個收款人」，不從 DOM 讀字（畫面上的
+ *  $1,495 帶著錢字號與逗號，網銀的金額欄只吃數字）。 */
+window._payableCopyField = (key, btn) => {
+    const [name, month] = (_selectedKey || '').split('|');
     const grp = _monthGroups.find(g => g.month === month);
     const p = grp?.payees.find(x => x.payee_name === name);
     if (!p) return;
-    copyText(_plainAmount(_unpaidTotal(p)), btn);
+    const text = {
+        bankcode: () => p.bank_code || '',
+        account: () => p.bank_account || '',
+        amount: () => _plainAmount(_unpaidTotal(p)),
+        memo: () => _bkCompany(),
+        payee: () => p.payee_name || '',
+        items: () => _unpaidItems(p).map(_itemLine).join(String.fromCharCode(10)),
+    }[key]?.() || '';
+    if (text) copyText(text, btn);
 };
 
 window._payablePayAll = async (name, month) => {
