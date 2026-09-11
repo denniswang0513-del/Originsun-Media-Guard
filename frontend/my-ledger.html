@@ -122,7 +122,7 @@ async function mountLedger(me) {
 
     try {
         // 財務模組依賴的全域樣式表登入通過後才注入（登入卡自帶樣式、保持乾淨）。
-        for (const href of ['/style.css', '/tabs/crm/crm.css']) {
+        for (const href of ['/style.css', '/tabs/crm/crm.css', '/tabs/crm/crm-project-views.css']) {
             const l = document.createElement('link');
             l.rel = 'stylesheet'; l.href = href;
             document.head.appendChild(l);

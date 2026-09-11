@@ -10,7 +10,7 @@
 import re
 from pathlib import Path
 
-from tests.unit._srcscan import js_func_body
+from tests.unit._srcscan import crm_css_src, js_func_body
 from tests.unit._srcscan import finance_src
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -81,7 +81,7 @@ def test_cashbook_card_column_hidden_when_book_has_no_cards():
     🔴 用 display:none 而不是不渲染：nth-child 數 DOM 位置，抽掉節點會讓
     後面每一欄的欄寬規則整排錯位。
     """
-    css = _read("frontend/tabs/crm/crm.css")
+    css = crm_css_src()
     assert "#cash-list-panel:not(.has-card) .cash-col-card { display: none; }" in css
     js = _read("frontend/tabs/crm/crm-cashbook.js")
     assert "classList.toggle('has-card'" in js

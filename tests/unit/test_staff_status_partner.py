@@ -4,7 +4,7 @@
 規則只有一句：合夥＝在職那一層——凡是問「在職嗎」的地方都算在職（假勤時數帳、里程碑負責人、福委會、零用金代登、
 兼職排班能不能勾），團隊清單排序跟在職同層。字彙要在人力庫的兩個下拉、徽章、排序、後端正本五處同步。
 """
-from tests.unit._srcscan import repo_src
+from tests.unit._srcscan import crm_css_src, repo_src
 
 
 def test_partner_counts_as_active_everywhere_the_rule_lives():
@@ -21,7 +21,7 @@ def test_partner_is_in_the_staff_vocabulary_everywhere():
     assert html.count('<option value="合夥">合夥</option>') == 2, "篩選下拉＋表單下拉"
     js = repo_src("frontend/tabs/crm/crm-staff.js")
     assert "'合夥': 'crm-staff-badge-合夥'" in js and "'合夥': 0" in js and "{value:'合夥',label:'合夥'}" in js
-    assert ".crm-staff-badge-合夥" in repo_src("frontend/tabs/crm/crm.css")
+    assert ".crm-staff-badge-合夥" in crm_css_src()
 
 
 def test_strict_active_filters_were_moved_onto_the_shared_predicate():

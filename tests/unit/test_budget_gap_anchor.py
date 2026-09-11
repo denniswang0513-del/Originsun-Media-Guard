@@ -1,5 +1,5 @@
 """預算結算的分配提示（owner 2026-09-05）。「距目標」那行做過又拿掉（owner：這一行可以移除了）。"""
-from tests.unit._srcscan import js_code_only, repo_src
+from tests.unit._srcscan import crm_css_src, js_code_only, repo_src
 
 
 def test_allocation_alert_flags_budget_above_plan():
@@ -19,7 +19,7 @@ def test_dashboard_columns_are_staff_misc_cost_remaining_profit():
     assert "const budgetProfit = p.exTax - execBudget;" in calc
     js = js_code_only(src)
     assert "set('cd-cost-est', '$' + fmtNum(d.totalEstimated));" in js and "fmtNum(d.budgetProfit)" in js
-    assert "repeat(5, 1fr)" in repo_src("frontend/tabs/crm/crm.css")
+    assert "repeat(5, 1fr)" in crm_css_src()
 
 
 def test_actual_profit_absorbs_the_remaining_budget():

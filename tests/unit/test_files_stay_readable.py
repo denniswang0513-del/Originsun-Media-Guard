@@ -68,7 +68,9 @@ def _files():
             s = p.as_posix()
             # .html 也要掃：頁面把整支 SPA 寫在 <script> 裡是這個 repo 的常態，
             # 只掃 .py／.js 的話 my.html 就是這樣無聲越過 2,000 行的（2026-09-08 才發現）
-            if p.suffix in (".py", ".js", ".html") and not any(x in s for x in SKIP):
+            # .css 也要掃（2026-09-11 加）：crm.css 曾經長到 2,286 行而這裡全綠 ——
+            # 樣式表一樣是 AI 要整支讀完才敢改的東西
+            if p.suffix in (".py", ".js", ".html", ".css") and not any(x in s for x in SKIP):
                 out[p.relative_to(root).as_posix()] = p
     for f in SCAN_FILES:
         p = root / f

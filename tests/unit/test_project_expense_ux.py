@@ -5,10 +5,9 @@
 3. 就地改收款人時要掛員工 datalist。
 另釘設計：零用金列（staff_id）不給「請款」鈕 —— 那些錢走零用金批次，兩條路都走＝同一筆錢請兩次。
 """
-from tests.unit._srcscan import js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import crm_css_src, js_code_only, js_func_body, repo_src
 
 COST_JS = "frontend/tabs/crm/crm-projects-cost.js"
-CSS = "frontend/tabs/crm/crm.css"
 
 
 def test_quick_add_payee_select_is_searchable():
@@ -22,7 +21,7 @@ def test_quick_add_payee_select_is_searchable():
 
 
 def test_empty_editable_cell_has_click_area():
-    css = repo_src(CSS)
+    css = crm_css_src()
     assert ".cost-row-expense .cost-editable:empty { min-height" in css
     assert ".cost-row-expense:hover .cost-editable:empty::after" in css
 

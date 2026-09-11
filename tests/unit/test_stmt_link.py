@@ -6,7 +6,7 @@
 （這一輪已經在收支明細那邊修過同一個洞，不可以在匯入這條路上重犯）。
 """
 from core.project_link import CASH_CATEGORIES  # noqa: E402
-from tests.unit._srcscan import finance_src, code_only, func_body, repo_src  # noqa: E402
+from tests.unit._srcscan import code_only, crm_css_src, finance_src, func_body, repo_src  # noqa: E402
 
 
 # 內容本身（不是路徑）：finance.py 2026-08-30 拆成四個檔，
@@ -159,7 +159,7 @@ def test_mine_replaces_invoice_links_with_project_links():
     # 包一層的話 recon.js 用正向、這裡用反向，兩支檔案搜不到彼此
     assert 'const _noInvoice' not in cb, '又包了一個只有本檔看得到的名字'
     assert cb.count('ledgerHasInvoices()') >= 3, '還有消費點沒走那個述詞'
-    css = repo_src('frontend/tabs/crm/crm.css')
+    css = crm_css_src()
     assert '.mine-book .cash-col-inv { display: none' not in css,         '那一欄不能整欄藏 —— 私帳要用它放請款單'
     assert 'cash-col-inv' in repo_src('frontend/tabs/crm/crm-cashbook.html')
     assert '_cashPayPick' in cb and '/payments`' in cb,         '請款單就地連結要走分配表的正本路徑'

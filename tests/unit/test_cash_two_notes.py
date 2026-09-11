@@ -6,7 +6,7 @@
 行內編輯走 PUT 部分更新（只送那一欄）且不觸發整列點擊。
 """
 from pathlib import Path
-from tests.unit._srcscan import js_func_body
+from tests.unit._srcscan import crm_css_src, js_func_body
 
 
 from scripts.split_cash_notes import split_note
@@ -164,7 +164,7 @@ def test_cashbook_marks_weekends_and_holidays():
     # 六日／假日的**篩選鈕**已拿掉（owner 2026-09-04），日期格的假日標記還在
     html = _read("frontend/tabs/crm/crm-cashbook.html")
     assert 'id="cash-filter-off"' not in html and "_offOnly" not in js
-    css = _read("frontend/tabs/crm/crm.css")
+    css = crm_css_src()
     assert ".cash-wd" in css and "is-holiday" in css and "is-weekend" in css
 
 

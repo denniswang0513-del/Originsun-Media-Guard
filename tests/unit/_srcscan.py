@@ -264,6 +264,15 @@ def schemas_src(header: str = "") -> str:
                             "_workos.py", "_mobile.py"), header)
 
 
+def crm_css_src() -> str:
+    """原本 `frontend/tabs/crm/crm.css` 那一整支的內容（現在是兩支，載入順序＝這裡的順序）。
+
+    🔴 2026-09-11 拆：單檔 2,286 行超過單次讀取上限，而且 test_files_stay_readable
+    當時只掃 .py/.js/.html —— **沒有任何東西在看 CSS**。拆完同一輪把 .css 加進掃描。
+    """
+    return _split_file_src("frontend/tabs/crm", ("crm.css", "crm-project-views.css"))
+
+
 #: /my.html 的程式碼被拆到哪幾支、以及 my.html 底部 script 標籤的載入順序。
 #: 順序＝原本 inline script 由上而下的執行順序，改這裡要跟 my.html 一起改。
 MY_PAGE_FILES = ("shell.js", "cards.js", "cards-hr.js", "zone1.js",

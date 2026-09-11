@@ -5,7 +5,7 @@
 發票代開＝category 在 passthrough_categories（後端 finance_category_map treatment=passthrough，不在前端寫死字）、
 沒填類別＝none。底色與快篩都吃它。
 """
-from tests.unit._srcscan import between, code_only, func_body, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import between, code_only, crm_css_src, func_body, js_code_only, js_func_body, repo_src
 
 
 def test_backend_options_expose_passthrough_categories_from_category_map():
@@ -32,7 +32,7 @@ def test_frontend_kind_is_one_rule_for_color_and_filter():
     # 快篩鈕已改成一個打字的類別框（owner 2026-09-04）；種類判定只剩底色在用
     html = repo_src("frontend/tabs/crm/crm-cashbook.html")
     assert 'id="cash-filter-kind"' not in html and 'id="cash-filter-off"' not in html
-    css = repo_src("frontend/tabs/crm/crm.css")
+    css = crm_css_src()
     for k in ("project", "passthrough"):
         assert f".crm-row.cash-kind-{k} {{" in css, k
     assert ".crm-row.cash-kind-none {" not in css, "只有專案與發票代開上色（owner 2026-09-04）"

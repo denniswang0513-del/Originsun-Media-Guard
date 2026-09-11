@@ -7,7 +7,7 @@
   存檔時攤平；不再各自維護扁平列＋每列一格「分組」。
 - 手機草稿卡：「寄出」改叫「建立」，多一顆「預覽」→ GET /quotations/{id}/preview 回 HTML（不改狀態、不存檔）。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import code_only, crm_css_src, func_body, js_code_only, js_func_body, repo_src
 
 SHARED = "frontend/js/shared/quote-amounts.js"
 MOBILE = "frontend/m/views/quotes.js"
@@ -45,7 +45,7 @@ def test_desktop_form_is_group_first():
     assert "const payload = _buildPayload();" in save
     assert "_flatItems().filter(it => it.description)" in js_func_body(src, "function _saveCurrentAsTemplate(name)")
     assert "+ 新增大項目" in repo_src("frontend/tabs/crm/crm-quotes.html")
-    assert ".quote-group-edit {" in repo_src("frontend/tabs/crm/crm.css")
+    assert ".quote-group-edit {" in crm_css_src()
 
 
 def test_mobile_draft_card_has_create_and_preview():

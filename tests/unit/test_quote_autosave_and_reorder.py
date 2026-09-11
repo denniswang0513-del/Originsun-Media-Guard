@@ -8,11 +8,10 @@
 4. **備註用一列一列開**，每列可拖曳排序、前面有編號。
 5. 詳情面板「報價資訊／項目明細」合成一頁，「編輯」開的是編輯報價彈窗（就地編欄位那套退場）。
 """
-from tests.unit._srcscan import js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import crm_css_src, js_code_only, js_func_body, repo_src
 
 JS = "frontend/tabs/crm/crm-quotes.js"
 HTML = "frontend/tabs/crm/crm-quotes.html"
-CSS = "frontend/tabs/crm/crm.css"
 
 
 # ── 1. 自動存草稿 ─────────────────────────────────────────────
@@ -97,7 +96,7 @@ def test_grip_is_the_only_draggable_thing():
     # 整列 draggable 會搶掉輸入框的選字 —— 只有把手可以拖
     assert 'class="quote-item-edit-row" draggable' not in js
     assert 'class="quote-term-row" draggable' not in js
-    assert ".qi-grip {" in repo_src(CSS)
+    assert ".qi-grip {" in crm_css_src()
 
 
 def test_groups_and_items_reorder_by_drag():

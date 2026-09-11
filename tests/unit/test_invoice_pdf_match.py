@@ -196,13 +196,13 @@ def test_frontend_shows_the_match_result():
     owner 2026-08-21 指定位置：結果掛在「電子發票」標題旁邊的徽章。
     🔴 **相符也要顯示** —— 只在不符時出聲的話，「檢查過沒問題」與「根本沒檢查」
     在畫面上長得一樣，使用者無從知道這個防呆有沒有在運作。"""
-    from tests.unit._srcscan import repo_src
+    from tests.unit._srcscan import crm_css_src, repo_src
     js = repo_src("frontend/tabs/crm/crm-invoices.js")
     assert "up.warnings" in js, "前端沒接比對結果"
     assert "up.checked" in js, "沒接 checked —— 分不出「相符」與「讀不到」"
     assert "_matchBadge()" in js and "電子發票${_matchBadge()}" in js,         "徽章沒掛在標題旁（owner 指定的位置）"
     assert "inv-match ok" in js and "inv-match bad" in js and "inv-match none" in js,         "三態沒有分別呈現"
-    css = repo_src("frontend/tabs/crm/crm.css")
+    css = crm_css_src()
     for cls in (".inv-match.ok", ".inv-match.bad", ".inv-match.none",
                 ".inv-file-warn"):
         assert cls in css, f"{cls} 沒有樣式（會變成看不見的純文字）"

@@ -1,0 +1,967 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   crm-project-views.css —— CRM 的後半：人員／專案分頁（成本表、專案資訊三層卡、
+   財務儀表板、報價分頁、履歷、作品交付、成本子表）與收支明細 12 欄寬度。
+   🔴 拆自 crm.css（2026-09-11，單檔 2,286 行超過單次讀取上限而且沒有守衛）。
+   一定要在 crm.css **之後**載；掃 CSS 的測試用 tests/unit/_srcscan.crm_css_src()。
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* ── Staff badge colors ── */
+.crm-staff-badge-在職 { background: #14532d; color: #86efac; }
+.crm-staff-badge-合夥 { background: #1e3a8a; color: #bfdbfe; }
+.crm-staff-badge-兼職 { background: #3b2f1f; color: #fbbf24; }
+.crm-staff-badge-專案 { background: #1e3a5f; color: #93c5fd; }
+.crm-staff-badge-單位 { background: #3b1f3b; color: #d8b4fe; }
+
+/* ── Staff list columns ── */
+.crm-col-role  { flex: 1; }
+.crm-col-rate  { flex: 0.7; text-align: right; }
+.crm-col-phone { flex: 1; }
+.crm-row-role  { flex: 1; color: #9ca3af; font-size: 12px; }
+.crm-row-rate  { flex: 0.7; text-align: right; color: #e0e0e0; font-size: 13px; font-weight: 600; }
+.crm-row-phone { flex: 1; color: #6b7280; font-size: 12px; }
+
+/* ── Expense section ── */
+.expense-section { margin: 8px 0; padding: 10px; background: #1a1a1a; border-radius: 8px; border: 1px solid #2e2e2e; }
+.expense-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 12px; color: #9ca3af; }
+.expense-row { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px solid #2e2e2e; font-size: 12px; }
+.expense-row:last-child { border-bottom: none; }
+.expense-row-header { color: #6b7280; font-weight: 600; }
+.expense-cat { flex: 1; color: #d1d5db; }
+.expense-num { width: 80px; text-align: right; color: #e0e0e0; }
+.expense-receipt { width: 30px; text-align: center; }
+.expense-actions { width: 80px; display: flex; gap: 2px; justify-content: flex-end; }
+
+/* ── Cost Lines Table (成本估算) ── */
+.cost-table { font-size: 12px; margin: 4px 0; }
+.cost-row {
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px 0; border-bottom: 1px solid #2e2e2e;
+}
+.cost-row:last-child { border-bottom: none; }
+.cost-row-header { color: #6b7280; font-weight: 600; font-size: 11px; }
+.cost-phase-header {
+    padding: 6px 0 2px; color: #9ca3af; font-weight: 700;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+    border-top: 1px solid #3a3a3a; margin-top: 4px;
+}
+.cost-phase-header:first-child { border-top: none; margin-top: 0; }
+.cost-row-subtotal { background: #1a1a1a; border-radius: 4px; padding: 4px 6px; }
+.cost-row-total {
+    font-weight: 700; border-top: 2px solid #3a3a3a;
+    padding-top: 6px; color: #e0e0e0;
+}
+.cost-col-item  { flex: 1; min-width: 60px; color: #d1d5db; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cost-col-price { flex: 1; min-width: 40px; text-align: right; color: #e0e0e0; }
+.cost-col-qty   { flex: 0.5; min-width: 24px; text-align: center; color: #e0e0e0; overflow: hidden; }
+.cost-col-qty input { width: 100%; max-width: 100%; box-sizing: border-box; -moz-appearance: textfield; }
+.cost-col-qty input::-webkit-inner-spin-button,
+.cost-col-qty input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.cost-col-unit  { flex: 0.5; min-width: 30px; }
+.cost-unit-sel  { width: 100%; font-size: 10px; padding: 1px 2px; }
+.cost-col-amt   { flex: 1; min-width: 40px; text-align: right; color: #9ca3af; overflow: hidden; }
+.cost-col-amt input, .cost-col-price input { width: 100%; max-width: 100%; box-sizing: border-box; -moz-appearance: textfield; }
+.cost-col-amt input::-webkit-inner-spin-button,
+.cost-col-amt input::-webkit-outer-spin-button,
+.cost-col-price input::-webkit-inner-spin-button,
+.cost-col-price input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.cost-col-staff { width: 110px; flex-shrink: 0; text-align: center; padding-left: 8px; }
+.cost-col-diff  { flex: 1; min-width: 50px; text-align: right; }
+.cost-col-actions { width: 24px; flex-shrink: 0; text-align: center; }
+.cost-editable  { cursor: pointer; }
+.cost-editable:hover { color: #93c5fd; }
+.cost-editable:hover .crm-muted { color: #93c5fd; }
+/* 空的可編輯格（例：收款人沒填）：flex 列 align-items:center 下空 <span> 沒有高度，根本點不到
+   （soca 2026-09-07「輸入完不能直接編修收款人」）。給最小面積；列 hover 時露一個淡加號當提示，
+   平常維持「空值留白」。 */
+.cost-row-expense .cost-editable:empty { min-height: 16px; min-width: 24px; }
+.cost-row-expense:hover .cost-editable:empty::after { content: '＋'; color: #4b5563; }
+
+.cost-toolbar-btn {
+    padding: 0 6px;
+    font-size: 11px;
+    line-height: 18px;
+}
+
+/* 行政雜支列：獨立欄位布局（不走成本估算的 14 欄 grid）。
+   剩餘寬度由細項與收款人按 3:1 分享 —— 細項獨吞的話，右邊三欄會全部
+   貼在一起（owner 2026-08-18：「太多資訊擠在一起」）。 */
+.cost-row-expense {
+    display: flex; align-items: center; gap: 16px;
+    padding: 5px 0; border-bottom: 1px solid #2e2e2e;
+}
+/* 全欄齊左（owner 2026-08-18 定案）—— 表頭與資料格同一套對齊，掃視不跳行 */
+.cost-row-expense .exp-col-date {
+    flex: 0 0 118px;   /* 跟就地新增列的原生 date picker 同寬，欄位才對得齊 */
+    color: #6b7280; font-size: 10px; text-align: left;
+    font-variant-numeric: tabular-nums;
+}
+.cost-row-expense .exp-col-cat {
+    flex: 0 0 76px; text-align: left;
+    color: #d1d5db;
+}
+.cost-row-expense .exp-col-sub {
+    flex: 3 1 160px; min-width: 0; text-align: left;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: #d1d5db;
+}
+.cost-row-expense .exp-col-amt {
+    flex: 0 1 110px;
+    text-align: left; color: #e0e0e0;
+    font-variant-numeric: tabular-nums;
+}
+.cost-row-expense .exp-col-payee {
+    flex: 1 1 130px; min-width: 0; text-align: left;
+    font-size: 11px; color: #9ca3af;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cost-row-expense .exp-col-receipt {
+    flex: 0 0 56px;
+    text-align: left; color: #9ca3af;
+}
+.cost-row-expense .exp-col-action {
+    /* 「請款」＋✕ 併排不折行（「新增」那列只有一顆鈕，照樣塞得下） */
+    flex: 0 0 88px;
+    text-align: center;
+    white-space: nowrap;
+}
+/* 送請款：**一直看得到**。
+   🔴 不要學旁邊 .exp-del 的「滑到才現身」—— 那樣做是因為刪除是破壞性、少用，
+   藏起來剛好；請款是使用者會主動去找的動作，藏起來就等於沒做（owner
+   2026-09-02 第一版回報「沒看到請款按鈕」）。 */
+.exp-claim {
+    background: none; border: 1px solid #374151; cursor: pointer;
+    color: #9ca3af; font-size: 10px; padding: 1px 5px; border-radius: 4px;
+}
+.exp-claim:hover { color: #93c5fd; border-color: #3b82f6; background: rgba(59, 130, 246, .12); }
+.exp-claimed { font-size: 10px; cursor: pointer; padding: 1px 3px; }
+.exp-claimed:hover { text-decoration: underline; }
+/* 雜支迷你追蹤條：預算（可點編）｜已用｜剩餘 */
+.exp-mini { font-weight: 400; font-size: 11px; color: #6b7280; }
+.exp-mini .cost-editable { color: #d1d5db; }
+/* 表頭列：這段版型跟成本項目完全不同，欄位名只在這裡出現一次 */
+.exp-head {
+    color: #6b7280; font-size: 10px; font-weight: 600;
+    border-bottom: 1px solid #333; padding: 2px 0;
+}
+.exp-head .exp-col-cat, .exp-head .exp-col-sub, .exp-head .exp-col-payee { color: #6b7280; }
+/* 類別小標籤（灰色，跟零用金 pill 同語彙不同身分） */
+.exp-cat-pill {
+    display: inline-block; padding: 0 5px;
+    border: 1px solid #374151; border-radius: 3px;
+    font-size: 10px; color: #9ca3af;
+}
+/* 同一天第二筆起淡化 —— 視覺上自然按天分組 */
+.exp-date-rep { opacity: .3; }
+/* 刪除鈕安靜版：平常近乎隱形，滑到列上才現身，滑到鈕上才轉紅 */
+.exp-del {
+    background: none; border: none; cursor: pointer;
+    color: #3a3a3a; font-size: 11px; padding: 1px 6px; border-radius: 4px;
+}
+.cost-row-expense:hover .exp-del { color: #9ca3af; }
+.exp-del:hover { color: #f87171; background: rgba(127, 29, 29, .25); }
+.exp-pill {
+    display: inline-block; margin-left: 6px; padding: 0 4px;
+    border: 1px solid #4b5563; border-radius: 3px;
+    font-size: 9px; color: #9ca3af; vertical-align: 1px; cursor: help;
+}
+/* 就地新增列：格子裝 input/select，日期格要塞得下原生 date picker */
+.exp-qa { border-bottom: none; }
+.exp-qa .exp-col-date { flex: 0 0 118px; }
+.exp-qa .crm-btn { white-space: nowrap; }
+.exp-qa input, .exp-qa select {
+    width: 100%; box-sizing: border-box; text-align: left;
+    background: #222; border: 1px solid #333; color: #d1d5db;
+    font-size: 11px; padding: 2px 4px; border-radius: 4px;
+}
+.cost-divider { margin-right: 0; border-right: 1px solid #3a3a3a; padding-right: 8px; }
+.cost-col-copy { width: 20px; flex-shrink: 0; text-align: center; color: #555; cursor: pointer; font-size: 12px; }
+.cost-col-copy:hover { color: #3b82f6; }
+.cost-row-header .cost-col-copy, .cost-row-subtotal .cost-col-copy, .cost-row-total .cost-col-copy { cursor: default; color: transparent; }
+.cost-staff-sel { width: 100%; font-size: 11px; padding: 2px 4px; }
+/* ── Project Info — 3-layer card layout ── */
+.pi-wrap { display: flex; flex-direction: column; gap: 12px; }
+.pi-empty { color: #4b5563; font-style: italic; }
+
+/* Cell-by-cell click-to-edit hover affordance */
+.pi-edit-cell { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color 0.15s; }
+.pi-edit-cell:hover { border-bottom-color: #4b5563; }
+.pi-pm-popover label:hover { background: #2a2a2a; }
+
+/* Layer 1: Summary bar */
+.pi-summary {
+    display: flex; gap: 1px; background: #2e2e2e; border-radius: 8px; overflow: hidden;
+}
+.pi-summary-cell {
+    flex: 1; background: #1e1e1e; padding: 10px 12px; text-align: center;
+}
+.pi-summary-cell:first-child { border-radius: 8px 0 0 8px; }
+.pi-summary-cell:last-child  { border-radius: 0 8px 8px 0; }
+.pi-summary-val {
+    font-size: 13px; font-weight: 600; color: #e0e0e0; margin-bottom: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+}
+.pi-summary-label { font-size: 10px; color: #6b7280; }
+
+/* Layer 2: People row */
+.pi-people {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    padding: 6px 12px; background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
+}
+.pi-person {
+    display: flex; align-items: center; gap: 5px; font-size: 12px; color: #d1d5db;
+}
+.pi-person-role {
+    font-size: 10px; font-weight: 700; color: #6b7280; min-width: 20px;
+}
+
+/* Layer 3: Budget cards (async, primary visual) */
+.pi-finance { display: flex; gap: 8px; }
+.pi-fin-card {
+    flex: 1; background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
+    padding: 10px 12px; text-align: center;
+}
+.pi-fin-label { font-size: 11px; color: #6b7280; margin-bottom: 4px; }
+.pi-fin-value { font-size: 18px; font-weight: 700; }
+.pi-fin-sub   { font-size: 10px; color: #555; margin-top: 2px; }
+
+/* Layer 4: Contract inline */
+.pi-contract-line {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 12px; color: #9ca3af; padding: 8px 12px;
+    background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
+}
+.pi-contract-line b { font-weight: 600; }
+.pi-dot { width: 3px; height: 3px; border-radius: 50%; background: #4b5563; flex-shrink: 0; }
+
+/* Budget meta (progress label + ratios) */
+.pi-budget-meta {
+    font-size: 11px; color: #6b7280; text-align: right; margin-top: -4px;
+}
+
+/* Activate project option */
+.pi-activate-option {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 6px;
+    padding: 10px 14px; cursor: pointer; color: #d1d5db; font-size: 13px;
+    transition: border-color 0.15s;
+}
+.pi-activate-option:hover { border-color: #3b82f6; background: #252525; }
+
+/* Section title with divider */
+.pi-section-title {
+    font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase;
+    letter-spacing: 0.5px; padding-bottom: 6px; margin-bottom: 4px;
+    border-bottom: 1px solid #3a3a3a;
+}
+
+/* Layer 5: Details card */
+.pi-details-card {
+    background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px; padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+}
+.pi-det-text { font-size: 13px; color: #d1d5db; line-height: 1.5; }
+.pi-det-paths { display: flex; flex-direction: column; gap: 4px; }
+.pi-det-path {
+    font-size: 12px; color: #9ca3af; display: flex; align-items: center; gap: 4px;
+    word-break: break-all;
+}
+.pi-det-note {
+    font-size: 12px; color: #6b7280; font-style: italic; line-height: 1.4;
+}
+
+/* ── Cost Dashboard (財務卡片 + 進度條) ── */
+/* 儀表板 2026-08 版：錨點列 + 預估/實際/差額 × 成本/雜支/剩餘/毛利 對照格 */
+.cost-dash-anchors {
+    display: flex; gap: 20px; flex-wrap: wrap; align-items: baseline;
+    font-size: 12px; color: #9ca3af; margin-bottom: 10px;
+}
+.cost-dash-anchors b { font-size: 15px; color: #e0e0e0; font-weight: 700; }
+/* 預估雜支旁的「編輯」：低調文字鈕，貼著數值走，不搶版面 */
+.cost-dash-anchors .cda-edit {
+    background: none; border: none; cursor: pointer;
+    color: #6b7280; font-size: 11px; padding: 0 2px; margin-left: 2px;
+}
+.cost-dash-anchors .cda-edit:hover { color: #d1d5db; text-decoration: underline; }
+.cost-dash-grid {
+    display: grid; grid-template-columns: 44px repeat(5, 1fr);   /* 人員｜雜支｜成本｜剩餘預算｜毛利（owner 2026-09-05）*/
+    gap: 4px 14px; align-items: baseline;
+    background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 10px;
+    font-variant-numeric: tabular-nums;
+}
+.cost-dash-grid > span { text-align: right; font-size: 13px; color: #e0e0e0; }
+.cost-dash-grid .cdg-h {
+    font-size: 11px; color: #6b7280; font-weight: 600;
+    border-bottom: 1px solid #2e2e2e; padding-bottom: 3px;
+}
+.cost-dash-grid .cdg-r { font-size: 11px; color: #6b7280; text-align: left; }
+.cost-progress-wrap {
+    position: relative;
+    height: 6px; background: #2e2e2e; border-radius: 3px; margin-bottom: 4px;
+}
+.cost-progress-bar { height: 100%; border-radius: 3px; transition: width 0.3s; }
+/* 預估排定位置的刻度線 —— 實際（藍條）追過它＝超出原計畫 */
+.cost-progress-tick {
+    position: absolute; top: -2px; bottom: -2px; width: 2px;
+    background: #9ca3af; border-radius: 1px;
+}
+.cost-progress-label { font-size: 11px; color: #6b7280; text-align: right; margin-bottom: 8px; }
+
+.cost-tpl-item {
+    padding: 6px 12px; cursor: pointer; font-size: 12px;
+    border-bottom: 1px solid #333; display: flex; justify-content: space-between;
+}
+.cost-tpl-item:last-child { border-bottom: none; }
+.cost-tpl-item:hover { background: #333; }
+
+/* ── Project Quote Tab ── */
+.pq-row {
+    display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+    border-bottom: 1px solid #2e2e2e; cursor: pointer; font-size: 13px;
+    transition: background 0.1s;
+}
+.pq-row:hover { background: #2a2a2a; }
+.pq-row.selected { background: #1e3a5f; }
+.pq-version { font-weight: 600; color: #e0e0e0; min-width: 30px; }
+.pq-price { margin-left: auto; font-weight: 600; color: #60a5fa; }
+.pq-date { color: #6b7280; font-size: 12px; min-width: 80px; text-align: right; }
+.pq-detail-card {
+    background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
+    padding: 16px; margin-top: 12px;
+}
+.pq-detail-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding-bottom: 10px; border-bottom: 1px solid #2e2e2e; margin-bottom: 12px;
+}
+.pq-info-row {
+    display: flex; gap: 16px; font-size: 12px; color: #9ca3af;
+    padding-bottom: 10px; border-bottom: 1px solid #2e2e2e; margin-bottom: 12px;
+}
+.pq-group-header {
+    font-size: 11px; font-weight: 700; color: #6b7280; padding: 6px 0 4px;
+    border-bottom: 1px solid #2e2e2e;
+}
+.pq-item-row {
+    display: flex; align-items: center; gap: 8px; padding: 4px 0;
+    font-size: 12px; color: #d1d5db; border-bottom: 1px solid #1a1a1a;
+}
+.pq-item-desc { flex: 1; }
+.pq-item-qty { width: 60px; color: #9ca3af; text-align: center; }
+.pq-item-price { width: 80px; text-align: right; color: #9ca3af; }
+.pq-item-amount { width: 80px; text-align: right; font-weight: 600; }
+.pq-totals { margin-top: 12px; }
+.pq-total-row {
+    display: flex; justify-content: space-between; padding: 3px 0;
+    font-size: 12px; color: #9ca3af;
+}
+.pq-total-main { font-weight: 700; color: #e0e0e0; font-size: 13px; padding: 6px 0; }
+.pq-stages { font-size: 12px; color: #d1d5db; margin-top: 10px; padding-top: 8px; border-top: 1px solid #2e2e2e; }
+.pq-terms { font-size: 12px; color: #6b7280; font-style: italic; margin-top: 6px; }
+
+/* ── Staff Resume Tab ── */
+.staff-resume-wrap {
+    padding: 16px;
+}
+.staff-resume-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+.staff-photo-circle {
+    width: 80px; height: 80px; border-radius: 50%;
+    background: #2a2a2a; border: 2px solid #3a3a3a;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; cursor: pointer; flex-shrink: 0;
+    transition: border-color 0.15s;
+}
+.staff-photo-circle:hover { border-color: #3b82f6; }
+.staff-photo-circle img { width: 100%; height: 100%; object-fit: cover; }
+.staff-photo-placeholder { font-size: 28px; opacity: 0.4; }
+.staff-resume-name-block { display: flex; flex-direction: column; gap: 2px; }
+.staff-resume-name { font-size: 18px; font-weight: 700; color: #e0e0e0; }
+.staff-resume-role { font-size: 13px; color: #9ca3af; }
+
+.staff-section-title {
+    font-size: 12px; font-weight: 700; color: #6b7280;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 12px 0 6px; margin-top: 8px;
+    border-bottom: 1px solid #2a2a2a;
+}
+.staff-resume-textarea {
+    width: 100%; background: #1e1e1e; border: 1px solid #3a3a3a;
+    border-radius: 6px; color: #d1d5db; padding: 8px 10px;
+    font-size: 13px; resize: vertical; outline: none; margin-top: 6px;
+    font-family: inherit;
+}
+.staff-resume-textarea:focus { border-color: #3b82f6; }
+.staff-resume-save-bio { margin-top: 6px; }
+
+/* Skills tags */
+.staff-skills-wrap {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 8px 0; align-items: center;
+}
+.staff-skill-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #1e3a5f; color: #93c5fd; font-size: 12px;
+    padding: 3px 10px; border-radius: 12px; font-weight: 500;
+}
+.staff-skill-remove {
+    background: none; border: none; color: #93c5fd; cursor: pointer;
+    font-size: 14px; padding: 0 0 0 2px; line-height: 1; opacity: 0.6;
+}
+.staff-skill-remove:hover { opacity: 1; }
+.staff-skill-add-wrap { flex: 0 0 auto; }
+.staff-skill-input {
+    background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 12px;
+    color: #d1d5db; padding: 3px 10px; font-size: 12px; outline: none;
+    width: 120px;
+}
+.staff-skill-input:focus { border-color: #3b82f6; }
+
+/* Portfolio cards */
+.staff-portfolio-list { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+.staff-portfolio-card {
+    display: flex; align-items: center; gap: 10px;
+    background: #252525; border: 1px solid #2a2a2a; border-radius: 6px;
+    padding: 8px 10px;
+}
+.staff-portfolio-thumb {
+    width: 60px; height: 40px; border-radius: 4px; object-fit: cover;
+    flex-shrink: 0; background: #1e1e1e;
+}
+.staff-portfolio-thumb-empty { border: 1px dashed #3a3a3a; }
+.staff-portfolio-info { flex: 1; min-width: 0; }
+.staff-portfolio-title { font-size: 13px; color: #e0e0e0; font-weight: 600; }
+.staff-portfolio-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* Resume list rows (experience, education, awards) */
+.staff-resume-list-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid #2a2a2a; font-size: 13px;
+}
+.staff-resume-list-main { flex: 1; color: #e0e0e0; font-weight: 500; }
+
+/* Company projects in resume */
+.staff-resume-projects { padding: 8px 0; }
+.staff-resume-project-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 0; border-bottom: 1px solid #1a1a1a; font-size: 13px;
+    color: #d1d5db;
+}
+.staff-resume-project-name { font-weight: 500; }
+
+/* Footer actions */
+.staff-resume-actions {
+    display: flex; gap: 8px; padding: 16px 0 8px;
+    margin-top: 12px; border-top: 1px solid #2a2a2a;
+}
+
+/* ══ Showcase / Delivery Tab ══ */
+
+.showcase-wrap { padding: 16px; display: flex; flex-direction: column; gap: 20px; }
+
+.showcase-section { background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px 16px; }
+.showcase-section-title {
+    font-size: 13px; font-weight: 700; color: #9ca3af; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 10px; padding-bottom: 6px;
+    border-bottom: 1px solid #2a2a2a;
+}
+.showcase-section-body { }
+
+/* Cover upload zone */
+.showcase-cover-zone {
+    position: relative; width: 100%; aspect-ratio: 16/9; max-height: 280px;
+    background: #141414; border: 2px dashed #3a3a3a; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; overflow: hidden; transition: border-color 0.15s;
+}
+.showcase-cover-zone:hover, .showcase-cover-zone.drag-over { border-color: #3b82f6; }
+.showcase-cover-preview { width: 100%; height: 100%; object-fit: cover; }
+.showcase-cover-placeholder { text-align: center; }
+.showcase-cover-placeholder.hidden { display: none; }
+
+/* Info grid */
+.showcase-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.showcase-info-grid .crm-field-full { grid-column: 1 / -1; }
+
+/* Gallery grid */
+.showcase-gallery-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 8px;
+}
+.showcase-gallery-item {
+    position: relative; aspect-ratio: 16/10; border-radius: 6px;
+    overflow: hidden; background: #141414; border: 1px solid #2a2a2a;
+}
+.showcase-gallery-item img { width: 100%; height: 100%; object-fit: cover; }
+.showcase-gallery-del, .showcase-process-del {
+    position: absolute; top: 4px; right: 4px;
+    background: rgba(0,0,0,0.7); color: #f87171; border: none;
+    border-radius: 50%; width: 22px; height: 22px;
+    cursor: pointer; font-size: 14px; line-height: 22px; text-align: center;
+    opacity: 0; transition: opacity 0.15s;
+}
+.showcase-gallery-item:hover .showcase-gallery-del,
+.showcase-gallery-item:hover .showcase-process-del,
+.showcase-media-item:hover .showcase-process-del,
+.showcase-timeline-item:hover .showcase-process-del { opacity: 1; }
+.showcase-gallery-add {
+    aspect-ratio: 16/10; border: 2px dashed #3a3a3a; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: border-color 0.15s;
+}
+.showcase-gallery-add:hover { border-color: #3b82f6; }
+
+/* Process mode buttons */
+.showcase-process-modes { display: flex; gap: 4px; margin-bottom: 10px; }
+.showcase-process-mode-btn {
+    background: #252525; border: 1px solid #3a3a3a; border-radius: 6px;
+    color: #9ca3af; padding: 6px 14px; font-size: 12px; cursor: pointer;
+    transition: all 0.15s;
+}
+.showcase-process-mode-btn:hover { color: #e0e0e0; border-color: #555; }
+.showcase-process-mode-btn.active { background: #2563eb22; color: #60a5fa; border-color: #2563eb66; }
+
+/* Media list (media mode) */
+.showcase-media-list { display: flex; flex-direction: column; gap: 8px; }
+.showcase-media-item {
+    position: relative; display: flex; align-items: center; gap: 10px;
+    background: #252525; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px;
+}
+.showcase-media-thumb { width: 80px; height: 54px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.showcase-media-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.showcase-media-caption, .showcase-media-url { font-size: 12px; }
+
+/* Timeline (timeline mode) */
+.showcase-timeline-phase { margin-bottom: 14px; }
+.showcase-timeline-phase-title {
+    font-size: 13px; font-weight: 600; color: #d48a04; margin-bottom: 8px;
+    padding-left: 10px; border-left: 3px solid #d48a04;
+}
+.showcase-timeline-phase-body { display: flex; flex-direction: column; gap: 6px; }
+.showcase-timeline-item {
+    position: relative; display: flex; align-items: center; gap: 8px;
+    background: #252525; border: 1px solid #2a2a2a; border-radius: 6px; padding: 6px 8px;
+}
+
+/* Credits */
+.showcase-credits-list { display: flex; flex-direction: column; gap: 4px; }
+.showcase-credit-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    background: #252525; border-radius: 6px; font-size: 13px;
+}
+.showcase-credit-role { color: #9ca3af; min-width: 60px; font-weight: 500; }
+.showcase-credit-name { color: #e0e0e0; flex: 1; }
+.showcase-credit-del {
+    background: none; border: none; color: #6b7280; cursor: pointer;
+    font-size: 16px; padding: 0 4px; opacity: 0.5;
+}
+.showcase-credit-del:hover { opacity: 1; color: #f87171; }
+
+/* Publish bar */
+.showcase-publish-bar {
+    display: flex; align-items: center; justify-content: space-between;
+}
+.showcase-publish-status { font-size: 13px; font-weight: 600; }
+.showcase-status-published { color: #22c55e; }
+.showcase-status-draft { color: #6b7280; }
+
+/* ───────── Cost Groups (成本子表切換器) ───────── */
+.cg-switcher-title {
+    font-size: 12px; font-weight: 700; color: #6b7280;
+    margin: 16px 0 8px; padding-top: 10px;
+    border-top: 1px solid #2e2e2e;
+}
+.cg-switcher {
+    display: flex; gap: 8px;
+    overflow-x: auto;
+    padding: 4px 2px 10px;
+    scrollbar-width: thin;
+}
+.cg-switcher::-webkit-scrollbar { height: 6px; }
+.cg-switcher::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+.cg-chip {
+    position: relative;
+    flex: 0 0 auto;
+    width: 160px;
+    padding: 10px 10px 8px;
+    border-radius: 8px;
+    background: #1f2937;
+    border: 1px solid #374151;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    display: flex; flex-direction: column; gap: 3px;
+}
+.cg-chip:hover { border-color: #4b5563; background: #263244; }
+.cg-chip.active { border: 2px solid #3b82f6; background: #1e3a5f; padding: 9px 9px 7px; }
+.cg-chip-menu {
+    position: absolute; top: 4px; right: 4px;
+    background: transparent; border: none; color: #6b7280;
+    cursor: pointer; font-size: 14px; line-height: 1;
+    padding: 2px 6px; border-radius: 3px;
+}
+.cg-chip-menu:hover { background: rgba(255,255,255,0.08); color: #e5e7eb; }
+.cg-chip-name {
+    font-size: 13px; font-weight: 700; color: #e5e7eb;
+    padding-right: 18px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cg-chip-date { font-size: 11px; color: #9ca3af; margin-bottom: 3px; }
+.cg-chip-budget, .cg-chip-actual, .cg-chip-misc { font-size: 11px; color: #d1d5db; }
+.cg-chip .cg-muted { color: #6b7280; }
+.cg-chip-bar {
+    height: 3px; background: #374151; border-radius: 2px;
+    margin-top: 4px; overflow: hidden;
+}
+.cg-chip-bar-fill { height: 100%; border-radius: 2px; transition: width 0.2s; }
+.cg-chip-status { font-size: 10px; margin-top: 4px; }
+.cg-chip-add {
+    width: 120px;
+    justify-content: center; align-items: center;
+    border: 1px dashed #4b5563; background: transparent;
+    color: #9ca3af;
+}
+.cg-chip-add:hover { border-color: #60a5fa; color: #60a5fa; background: rgba(59,130,246,0.08); }
+.cg-chip-add-icon { font-size: 20px; line-height: 1; }
+
+/* Chip state variants — 用底色表達預算狀態（取代 badge） */
+.cg-chip-warn { background: #3f2d0b; border-color: #78350f; }
+.cg-chip-warn:hover { background: #4a350e; }
+.cg-chip-warn.active { background: #4a350e; border-color: #f59e0b; }
+
+.cg-chip-danger { background: #3b1212; border-color: #7f1d1d; }
+.cg-chip-danger:hover { background: #4a1717; }
+.cg-chip-danger.active { background: #4a1717; border-color: #ef4444; }
+
+/* Chip rows — 剩餘 / 進度條 + % / 未設預算提示 / 編輯按鈕 */
+.cg-chip-remain { font-size: 11px; color: #d1d5db; }
+.cg-chip-remain-over { color: #fca5a5; font-weight: 700; }
+/* 工項預估在規劃階段就超出核給預算（owner 2026-09-05）—— 只有超出才會畫出來，
+   所以刻意做得看得見；跟 cg-chip-remain-over（實際超支）同一組紅。 */
+.cg-chip-overplan { font-size: 10px; color: #fbbf24; line-height: 1.3; }
+.cg-chip .cg-muted.cg-chip-remain,
+.cg-chip-remain.cg-muted { color: #6b7280; }
+
+.cg-chip-bar-row {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 4px;
+}
+.cg-chip-bar-row .cg-chip-bar { flex: 1; }
+.cg-chip-pct {
+    font-size: 10px; color: #9ca3af;
+    min-width: 34px; text-align: right; font-variant-numeric: tabular-nums;
+}
+.cg-chip-danger .cg-chip-pct { color: #fca5a5; font-weight: 700; }
+
+.cg-chip-hint {
+    font-size: 11px; color: #60a5fa;
+    padding: 4px 0 2px;
+}
+
+.cg-chip-edit {
+    margin-top: 8px;
+    padding: 4px 8px;
+    background: #374151; color: #e5e7eb;
+    border: 1px solid #4b5563; border-radius: 4px;
+    font-size: 11px; font-weight: 600;
+    cursor: pointer; width: 100%;
+    transition: background 0.15s;
+}
+.cg-chip-edit:hover { background: #4b5563; }
+.cg-chip-edit-primary {
+    background: #3b82f6; border-color: #2563eb; color: #fff;
+}
+.cg-chip-edit-primary:hover { background: #2563eb; }
+.cg-chip-edit-success {
+    background: #14532d !important; border-color: #22c55e !important; color: #86efac !important;
+}
+
+/* Toast (分享連結複製回饋) */
+.cg-toast {
+    position: fixed; top: 20px; left: 50%;
+    background: #1f2937; color: #e5e7eb;
+    padding: 10px 18px; border-radius: 8px;
+    border: 1px solid #3b82f6;
+    font-size: 13px; font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    transform: translate(-50%, -20px);
+    opacity: 0;
+    transition: transform 0.25s, opacity 0.25s;
+    z-index: 10000;
+    pointer-events: none;
+    white-space: nowrap;
+}
+.cg-toast.show { transform: translate(-50%, 0); opacity: 1; }
+
+/* Menu popover */
+.cg-menu-pop {
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    padding: 4px;
+    min-width: 120px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    display: flex; flex-direction: column;
+}
+.cg-menu-item {
+    background: transparent; border: none;
+    color: #e5e7eb; text-align: left;
+    padding: 6px 10px; border-radius: 4px;
+    cursor: pointer; font-size: 12px;
+}
+.cg-menu-item:hover { background: #374151; }
+.cg-menu-danger { color: #fca5a5; }
+.cg-menu-danger:hover { background: #7f1d1d; color: #fecaca; }
+
+/* Allocation hints */
+.cg-alert {
+    padding: 8px 12px; border-radius: 6px;
+    font-size: 12px; margin: 8px 0 4px;
+}
+.cg-alert-danger { background: #7f1d1d; color: #fca5a5; }
+.cg-alert-ok { background: #064e3b; color: #86efac; font-size: 11px; padding: 4px 10px; }
+.cg-alert-hint { background: #1e3a5f; color: #60a5fa; font-size: 11px; padding: 4px 10px; }
+/* 提示列裡的補充說明（.cg-muted 原本只在 .cg-chip 底下生效，放進提示列會沒顏色） */
+.cg-alert .cg-muted { color: #7f9fc4; margin-left: 6px; }
+
+/* Modal allocation hint */
+.cg-alloc-hint { margin: 12px 0 0; }
+.cg-alloc-ok, .cg-alloc-danger {
+    padding: 10px 12px; border-radius: 6px; font-size: 12px; line-height: 1.6;
+}
+.cg-alloc-ok { background: #1e3a5f; color: #93c5fd; }
+.cg-alloc-danger { background: #7f1d1d; color: #fca5a5; }
+
+/* Staff detail panel — 專案紀錄 tab 統計 chip + project row + quick_add hint */
+.crm-stat-chips { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.crm-stat-chip {
+    background: #1f2937; border-radius: 6px; padding: 8px 14px;
+}
+.crm-stat-chip-label { color: #9ca3af; font-size: 11px; }
+.crm-stat-chip-value { color: #e0e0e0; font-size: 18px; font-weight: 700; }
+.crm-stat-chip.warn { background: #7c2d12; }
+.crm-stat-chip.warn .crm-stat-chip-label { color: #fbbf24; }
+.crm-stat-chip.warn .crm-stat-chip-value { color: #fef3c7; }
+.crm-stat-chip.info { background: #1e3a8a; }
+.crm-stat-chip.info .crm-stat-chip-label { color: #93c5fd; }
+.crm-stat-chip.info .crm-stat-chip-value { color: #dbeafe; }
+
+.crm-project-row { padding: 10px 0; border-bottom: 1px solid #2a2a2a; }
+.crm-project-row-title { color: #e0e0e0; font-weight: 500; margin-bottom: 4px; }
+.crm-project-row-meta { font-size: 12px; padding: 2px 0; }
+.crm-project-row-meta.assigned { color: #9ca3af; }
+.crm-project-row-meta.credit { color: #86efac; }
+.crm-project-row-meta.warn { color: #fbbf24; }
+
+.crm-info-box {
+    margin-top: 14px; padding: 10px 12px;
+    background: #1e3a5f; border-left: 3px solid #3b82f6; border-radius: 4px;
+    color: #dbeafe; font-size: 12px; line-height: 1.5;
+}
+.crm-info-box-sub { color: #93c5fd; margin-top: 4px; font-size: 11px; }
+
+
+
+/* ── 收支明細：12 欄的寬度分配 ────────────────────────────────
+   帳戶/子項目/雙備註（銀行資訊＋附註）加齊後欄位變多，全部 flex:1 均分會讓
+   日期換行、金額被截斷。這裡把固定寬度的欄（日期/金額/類別/子項目/帳戶）釘死，
+   剩下的空間給會長的文字欄按比例分。
+   ⚠️ 選擇器要壓過上面那條 `#cash-list-body .crm-row > div:not(.crm-kebab-wrap)`
+   （特異度 (1,2,1)），所以資料列這邊也帶 :not() 保持同級並排在後面。 */
+/* 2026-09-03 起欄寬綁 **class**（cash-c-<key>，表頭與列同一套），不再綁 nth-child：
+   表頭與列的格子數／順序不必再一模一樣（欄位選擇器藏欄、拆項列、舊 JS 撞新 CSS 都不會整排錯位）。
+   🔴 資料列的選擇器仍要帶 :not(.crm-kebab-wrap)：(1,3,0) 才壓得過上面那條
+   `#cash-list-body .crm-row > div:not(.crm-kebab-wrap)` (1,2,1)。 */
+#cash-list-panel .acct-header > span.cash-c-date,
+#cash-list-body .crm-row > .cash-c-date:not(.crm-kebab-wrap) { flex: 0 0 122px; }                     /* 日期＋星期小標 */
+#cash-list-panel .acct-header > span.cash-c-summary,
+#cash-list-body .crm-row > .cash-c-summary:not(.crm-kebab-wrap) { flex: 3.4 1 0; min-width: 0; text-align: left; }  /* 內容（折行，給寬一點：卡單摘要長） */
+/* 六日／國定假日（owner 2026-08-27「假日的功能也做在收支」）：日期後面掛一個
+   星期小標，六日藍、假日紅褐 —— 判斷這筆屬公屬私時，那天是不是假日是關鍵線索。
+   ⚠️ 日期欄是 flex 0 0 92px 的固定寬，小標要能擠進去 → 字級壓到 10px、
+   左右各 3px，量過 92px 放得下「2026-04-05 清明節」以外的所有組合；
+   放不下的（節日名 3 字以上）交給 white-space:nowrap 讓它自然溢出到內容欄前緣。 */
+#cash-list-body .crm-row > .crm-row-date { display: flex; align-items: baseline; gap: 4px;
+  justify-content: flex-start; white-space: nowrap; }
+#cash-list-body .cash-wd {
+  font-size: 10px; padding: 0 3px; border-radius: 2px;
+  background: #2e2e2e; color: #8b8b8b; line-height: 1.5;
+}
+#cash-list-body .crm-row-date.is-weekend { color: #cfd8e6; }
+#cash-list-body .crm-row-date.is-weekend .cash-wd { background: #24344d; color: #93b4e6; font-weight: 600; }
+#cash-list-body .crm-row-date.is-holiday { color: #e8d5cd; }
+#cash-list-body .crm-row-date.is-holiday .cash-wd { background: #3b2620; color: #e0a48c; font-weight: 600; }
+
+/* 已推去零用金的列 —— 摘要後面掛一個狀態標。不標的話這一列跟沒推過長得一樣，
+   而「推過沒有」正是重推與漏推的唯一防線。 */
+#cash-list-body .cash-petty {
+  margin-left: 6px; font-size: 10px; padding: 1px 5px; border-radius: 3px;
+  background: #2a3a2c; color: #9ccfa4; white-space: nowrap;
+}
+
+/* 內容欄不截斷 —— 卡單摘要（「連加＊連加＊潮味決－台…」）截掉尾巴就分不出是哪一筆，
+   owner 2026-08-27 要求超過就折行。覆寫的是上面資料列那條共用 ellipsis 規則，
+   所以 white-space / overflow / text-overflow 三個都要寫回來（只改 white-space 的話，
+   overflow:hidden 仍會把第二行切掉）。break-word 讓沒有空白的長英數字串也能斷。 */
+#cash-list-body .crm-row > .cash-c-summary:not(.crm-kebab-wrap) {
+  white-space: normal; overflow: visible; text-overflow: clip;
+  overflow-wrap: break-word; line-height: 1.4;
+}
+#cash-list-panel .acct-header > span.cash-c-deposit,
+#cash-list-body .crm-row > .cash-c-deposit:not(.crm-kebab-wrap) { flex: 0 0 84px; text-align: right; }   /* 收入（金額欄收窄，寬度讓給內容） */
+#cash-list-panel .acct-header > span.cash-c-card,
+#cash-list-body .crm-row > .cash-c-card:not(.crm-kebab-wrap) { flex: 0 0 82px; text-align: right; }   /* 信用卡 */
+#cash-list-panel .acct-header > span.cash-c-expense,
+#cash-list-body .crm-row > .cash-c-expense:not(.crm-kebab-wrap) { flex: 0 0 84px; text-align: right; }   /* 支出 */
+
+/* 信用卡欄只在「這本帳真的有刷卡列」時出現（母公司帳 0 筆，永遠空的欄＝雜訊）。
+   （欄寬 2026-09-03 起綁 class，抽不抽節點都不會錯位；留 display:none 是最省事的做法。） */
+#cash-list-panel:not(.has-card) .cash-col-card { display: none; }
+/* 私帳不開發票（owner 2026-09-01）：那一欄讓給「請款單」——支出列可直接勾記
+   （同日「支出的請款單勾記我希望也可以在這裡直接勾，比照專案」）。所以這一欄
+   在兩本帳都留著、只有標題與內容不同，不需要 display:none。 */
+#cash-list-panel .acct-header > span.cash-c-book,
+#cash-list-body .crm-row > .cash-c-book:not(.crm-kebab-wrap) { flex: 0 0 78px; }                      /* 類別（公司/個人/家用…） */
+#cash-list-panel .acct-header > span.cash-c-item,
+#cash-list-body .crm-row > .cash-c-item:not(.crm-kebab-wrap) { flex: 0 0 92px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* 項目 */
+#cash-list-panel .acct-header > span.cash-c-sub_item,
+#cash-list-body .crm-row > .cash-c-sub_item:not(.crm-kebab-wrap) { flex: 0 0 92px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* 子項目 */
+#cash-list-panel .acct-header > span.cash-c-bank_memo,
+#cash-list-body .crm-row > .cash-c-bank_memo:not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; color: #7a7a7a; }  /* 銀行資訊（機器來源） */
+#cash-list-panel .acct-header > span.cash-c-note,
+#cash-list-body .crm-row > .cash-c-note:not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; color: #b9b9b9; }  /* 附註（手寫） */
+#cash-list-panel .acct-header > span.cash-c-project,
+#cash-list-body .crm-row > .cash-c-project:not(.crm-kebab-wrap) { flex: 1 1 0; min-width: 0; text-align: left; }    /* 專案 */
+#cash-list-panel .acct-header > span.cash-c-invoice,
+#cash-list-body .crm-row > .cash-c-invoice:not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 發票 */
+#cash-list-panel .acct-header > span.cash-c-payment,
+#cash-list-body .crm-row > .cash-c-payment:not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 請款單（owner 2026-09-03：獨立一欄，可連結） */
+#cash-list-panel .acct-header > span.cash-c-account,
+#cash-list-body .crm-row > .cash-c-account:not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
+#cash-list-panel .acct-header > span:last-child,
+#cash-list-body .crm-row > .crm-kebab-wrap { flex: 0 0 36px; }
+/* 「欄位」鈕藏掉的欄：JS 在 #cash-col-style 裡生 `#cash-list-panel .cash-c-<key>{display:none}`
+   —— 用 display:none，表頭與列一起藏（欄寬綁 class，藏了也不會錯位）。 */
+
+/* 行內可編輯格（類別/項目/子項目/銀行資訊/附註）：**單擊就編輯**
+   （owner 2026-08-27：「這裡是要點擊就可以調整」）。整列不再開右側詳情 ——
+   詳情走最右邊 ⋮ 的「編輯」，兩個動作才不會互相打架。 */
+#cash-list-body .cash-ed { cursor: text; min-height: 16px; border-radius: 3px; }
+#cash-list-body .cash-ed:hover { outline: 1px dashed #4b5563; outline-offset: 1px; }
+
+/* ── 帳戶切換列（總表／各銀行，附餘額）────────────────────── */
+.cash-acct-tabs { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 12px;
+  border-bottom: 1px solid #2a2a2a; }
+.cash-acct-tab { background: #1b1b1b; border: 1px solid #333; border-radius: 6px;
+  padding: 5px 12px; cursor: pointer; color: #bbb; font-size: 12px; line-height: 1.35;
+  text-align: left; }
+.cash-acct-tab:hover { border-color: #4a4a4a; color: #ddd; }
+.cash-acct-tab.active { border-color: #3b82f6; background: #16233a; color: #fff; }
+.cash-acct-tab b { display: block; font-size: 14px; font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.cash-acct-tab .neg { color: #fca5a5; }
+.cash-acct-tab .pos { color: #fbbf24; }
+
+/* 逐案損益：由 CRM 專案帳目撐著的費用欄（行政雜支／人員費用）。
+   值是即時算的，那一格鎖住 —— 這個標記是在說「要改去 CRM 改」。 */
+.fpl-src {
+    margin-left: 6px; padding: 0 5px; border-radius: 2px;
+    font-size: 10px; letter-spacing: .04em;
+    color: #7fb0dd; border: 1px solid #2f4d68; background: #1b2a38;
+    vertical-align: 1px;
+}
+
+
+/* ── 專案詳情「收付款」分頁（crm-projects-pay.js）── */
+.ppay-strip { padding: 4px 0 6px; }
+.ppay-kpis { display: grid; grid-template-columns: repeat(8, 1fr); border: 1px solid #2e2e2e; border-radius: 8px; overflow: hidden; }
+.ppay-kpi { padding: 10px 12px; border-right: 1px solid #2e2e2e; background: #1e1e1e; min-width: 0; }
+.ppay-kpi:last-child { border-right: 0; }
+.ppay-l { color: #8b8f96; font-size: 11px; }
+.ppay-v { font-size: 17px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ppay-s { color: #6b7280; font-size: 11px; margin-top: 2px; }
+.ppay-kpi.hl .ppay-v { color: #3b82f6; }
+.ppay-kpi.good .ppay-v { color: #86efac; }
+.ppay-kpi.warn .ppay-v { color: #fbbf24; }
+.ppay-kpi.bad .ppay-v { color: #fca5a5; }
+.ppay-next { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; }
+.ppay-next-t { color: #8b8f96; font-size: 12px; }
+.ppay-hint { display: inline-flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; border-radius: 6px; background: #1e1e1e; border: 1px solid #3a3a3a; font-size: 12px; }
+.ppay-hint.warn { border-color: rgba(251,191,36,.45); }
+.ppay-hint.bad { border-color: rgba(252,165,165,.45); }
+.ppay-hint.good { border-color: rgba(134,239,172,.35); color: #8b8f96; }
+.ppay-sec { margin-top: 16px; border-top: 1px solid #2e2e2e; padding-top: 12px; }
+.ppay-sh { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.ppay-h { font-size: 12px; font-weight: 700; color: #6b7280; }
+.ppay-sub { color: #5f6470; font-size: 11px; }
+.ppay-checks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ppay-ck { padding: 8px 10px; border: 1px solid #2e2e2e; border-radius: 8px; background: #1e1e1e; display: flex; gap: 10px; align-items: flex-start; font-size: 12px; }
+.ppay-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; background: #3a3a3a; }
+.ppay-ck.ok .ppay-dot { background: #86efac; }
+.ppay-ck.no .ppay-dot { background: #fca5a5; }
+.ppay-ck-l { font-weight: 500; }
+.ppay-ck-s { color: #8b8f96; font-size: 11px; }
+@media (max-width: 1100px) { .ppay-kpis { grid-template-columns: repeat(4, 1fr); } .ppay-kpi:nth-child(4) { border-right: 0; } .ppay-kpi:nth-child(-n+4) { border-bottom: 1px solid #2e2e2e; } .ppay-checks { grid-template-columns: 1fr 1fr; } }
+.ppay-closing { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #2e2e2e; }
+.ppay-closing .ppay-sh { align-items: center; }
+.payable-item-proj { color: #3b82f6; font-size: 11px; cursor: pointer; white-space: nowrap; margin-left: 6px; }
+.payable-item-proj:hover { text-decoration: underline; }
+
+/* 收付款分頁——照示範頁的表格與狀態鏈 */
+.ppay-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 4px 0 10px; color: #8b8f96; font-size: 12px; align-items: center; }
+.ppay-meta b { color: #e0e0e0; font-weight: 500; }
+.ppay-meta .crm-am-row { display: inline-flex; align-items: center; gap: 4px; }
+.ppay-sh-act { margin-left: auto; display: flex; gap: 6px; }
+.ppay-tbl { border: 1px solid #2e2e2e; border-radius: 8px; overflow: auto; background: #1e1e1e; }
+.ppay-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ppay-table th { text-align: left; color: #8b8f96; font-weight: 500; font-size: 11px; padding: 6px 8px; border-bottom: 1px solid #3a3a3a; white-space: nowrap; }
+.ppay-table td { padding: 8px; border-bottom: 1px solid #2e2e2e; vertical-align: middle; }
+.ppay-table tr:last-child td { border-bottom: 0; }
+.ppay-table .r { text-align: right; }
+.ppay-table .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ppay-table .who { font-weight: 600; color: #d1d5db; white-space: nowrap; }
+.ppay-table .role { color: #8b8f96; }
+.ppay-table .dim { color: #5f6470; }
+.ppay-table tr.tot td { border-top: 2px solid #3a3a3a; font-weight: 700; background: #242424; }
+.ppay-acts { display: flex; gap: 4px; justify-content: flex-end; align-items: center; white-space: nowrap; }
+.ppay-link { color: #3b82f6; cursor: pointer; font-size: 11px; margin-right: 4px; }
+.ppay-link:hover { text-decoration: underline; }
+.ppay-note { color: #8b8f96; font-size: 12px; border-left: 2px solid #3a3a3a; padding: 2px 0 2px 10px; margin: 6px 0 0; }
+.ppay-chain { display: inline-flex; align-items: center; white-space: nowrap; }
+.ppay-chain .st { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #5f6470; }
+.ppay-chain .st::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #3a3a3a; }
+.ppay-chain .st.on { color: #e0e0e0; }
+.ppay-chain .st.on::before { background: #fbbf24; }
+.ppay-chain .st.wait { color: #fbbf24; }
+.ppay-chain .st.wait::before { background: #fbbf24; }
+.ppay-chain .st.done { color: #86efac; }
+.ppay-chain .st.done::before { background: #86efac; }
+.ppay-chain .sep { width: 16px; height: 1px; background: #3a3a3a; margin: 0 6px; }
+.ppay-chain .sep.done { background: #86efac; }
+.ppay-chain .d { color: #8b8f96; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+
+/* 掛在本案但方向是付款的發票（代開撥款）——列出來但不計入已開發票合計。
+   底色與一般收款列分開，免得看成客戶要匯進來的錢。 */
+.ppay-payside td { background: #211a12; }
+
+/* ── 預算結算工項表：緊湊版（owner 2026-09-06「我覺得有點大，我的版面不大」）──
+   .crm-input 預設 padding 7px 10px / 13px，一格 36px 高；25 列就是 900px 起跳。
+   這裡只縮**工項表裡**的格子，其他表單不受影響。 */
+.cost-row .crm-input { padding: 2px 5px; font-size: 11px; border-radius: 4px; line-height: 1.35; }
+.cost-row .ss-input { padding: 2px 5px; font-size: 11px; }
+.cost-row .ss-panel { font-size: 12px; }
+.cost-row { padding: 2px 0; }
+.cost-row .crm-btn-sm { padding: 0 5px; font-size: 11px; line-height: 18px; }
+.cost-col-staff { width: 96px; }
+/* 收起的範本項目：摺疊列一行字＋展開 */
+.cost-row-fold { padding: 3px 0; font-size: 11px; color: #6b7280; }
+.cost-fold-toggle { color: #60a5fa; cursor: pointer; margin-left: 8px; }
+.cost-fold-toggle:hover { text-decoration: underline; }
+.cost-toggle-on { background: #1e3a5f; border-color: #2563eb; color: #bfdbfe; }
+/* 子表卡片也縮一號 */
+.cg-chip { padding: 8px 9px 6px; gap: 2px; }
+.cg-chip.active { padding: 7px 8px 5px; }
+.cg-chip-name { font-size: 12px; }
+.cg-chip-budget, .cg-chip-actual, .cg-chip-misc, .cg-chip-remain { font-size: 10.5px; line-height: 1.4; }
