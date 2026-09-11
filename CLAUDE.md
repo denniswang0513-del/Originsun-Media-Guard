@@ -1290,6 +1290,12 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`routers/api_backup.py`](routers/api_backup.py) 的三根投影 | 備份三根（本機／NAS／Proxy）的**正本在 `crm_projects.backup_*_root`**，這裡是機隊的讀取口：`/api/v1/projects/backup-roots`（選擇器，清單規則走 `services/project_picker`）＋ `/{id}`（單筆） | **不准改成重用 `/crm/projects`**：那支帶錢，這支是白名單投影 —— 單筆 `_root_view` 只給 id／name／三根，清單 `_picker_view` 另加浮層分組要的 client／year／closed／label（客戶**簡稱**是顯示字不是 client_id；金額欄一個都不准進來，兩支各有一份 `test_money_never_leaks` 釘著）。兩支投影的三根都要走 `_WRITE_MAP`，手抄的那一份在多一根時會靜默漏掉，而前端是合併不是取代 —— 畫面完全正常、只是那一根永遠不會更新。守衛是 `check_lan_or_logged_in`（備檔電腦沒人登入，用模組鑰匙守＝鎖死備份頁）。**私帳案在這支照樣列出、照樣可勾選**（owner 2026-09-10 拍板，對 2026-08-28「連專案都看不到」的局部例外，已進 `test_money_visibility` 的 EXEMPT 並寫了理由）—— 例外成立的前提是**這支不帶錢**，要加欄位前先回去讀那段。回存端點 `PUT .../{id}` **只填空不覆寫**（免登入端點的能力就限縮在補空白；要改設定去專案頁）。DB 斷線回 200 + `db_offline`，**絕不擋派工**。路徑存 canonical UNC、回前端前才 `to_local_path` 翻成當台視角；寫入端唯一入口是 `routers/crm/projects.normalize_backup_roots`（過 `drive_map.to_canonical`）。綁了專案時三根由 `core.worker._apply_project_roots` 從 DB **覆寫**前端送的值 —— 唯讀只做在 UI 上，改個 DOM 就繞過去了。跟 `folder_path`（工作資料夾完整路徑）是不同形狀的東西，不要合併 |
 | [`services/project_picker.py`](services/project_picker.py) | 「選一個專案」那份清單的**唯一**規則（工時補登＋備份頁綁定共用）：不篩狀態、母私帳只列一個、最近有動的排前面、`label`＝「年份 客戶 案名」、`closed`＝`is_closed` | **不篩狀態是 owner 2026-09-11 拍板的**（「不篩，連專案工時也不篩」）—— 備份與補工時多半發生在結案之後，篩掉＝真的要用時剛好選不到；分組交給 `closed` 旗標，不是把案子拿掉。`extra=` 是呼叫端點名要多帶哪幾欄（**不准帶金額**），`prefer=` 是母私帳留哪一本 —— 兩個是分開的參數，別再合成一個旗標。列舉全部專案含私帳案、刻意不對可見性表態，由兩個呼叫端各自負責（已在 `test_money_visibility` 的 EXEMPT 登記，🔴 那支掃描的 regex 看不到 `select(*[getattr(...)])` 這種寫法） |
 | [`core/nas_auth.py`](core/nas_auth.py) | SMB session 韌性：`ensure_ready`（任務開跑前戳每個 share 根目錄，不通先退避重連再 fail fast）、`reconnect_with_backoff`（**15 秒 ×5**，owner 2026-09-10 拍板）、`guard`（認證類 WinError → 退避重連 → 重跑一次）、`friendly`（WinError → 可行動中文） | 跟 `drive_map` 是兩件事：那支管「哪台有掛磁碟」（`T:\`→UNC），這支管「哪台有認證」（UNC 開得起來）。**帳密一律傳 NULL**，走 Windows 認證管理員，程式裡不存 NAS 密碼；`WNetCancelConnection2` 一律 `fForce=FALSE`（絕不把別的任務正在用的磁碟抽掉）；重試白名單不收 `5 ACCESS_DENIED`（那是真沒權限，重連幾次都一樣）。**冷卻閘不能拿掉**：`guard` 是逐檔呼叫的，整輪退避失敗後把該 share 判死 60 秒，否則 NAS 掛掉時 5000 檔 × 60 秒＝83 小時殭屍任務；等待一律吃 `should_stop`（停止鍵要能在退避中生效）。非 Windows（NAS Linux 容器）整支 no-op |
+| [`core/payout_share.py`](core/payout_share.py) | 匯款通知頁（`/p/{短碼}`）「能出現什麼」的純規則：白名單投影、分享時定稿的快照、金額與日期正規化 | 無 I/O；`SNAPSHOT_FIELDS`／`ITEM_FIELDS` 是白名單、`NEVER_SHARE` 另列一份給測試逐欄釘住（**兩張表不准有交集**，那條守的是「未來有人加欄位」）。🔴 **收款人自己的銀行帳號也不上** —— 這條連結可被轉傳，一頁上同時有姓名＋帳號＋金額就是一份現成的資料；他不需要從這頁知道自己的帳號 |
+| [`routers/crm/payouts.py`](routers/crm/payouts.py) | 匯款通知：鑄連結（`POST /payouts`）、撤銷（`DELETE /payouts/{id}/share`）、公開頁（`public_router`）、清單 | 三件事照發票那份抄（短碼逐字比對、分享時定稿、公開那支掛 `public_router`＋自己 `await surface_gate`）；**產通知不改付款狀態**（標已付款是面板上另一顆）；一張通知一個收款人；`/p/` 路由要在 `main.py` **與** `main_website.py` 各定義一次 |
+| [`core/staff_alias.py`](core/staff_alias.py) | 「收款人那段字」→ 人員（純函式）：姓名／代稱精準命中，其次「包含某個代稱」，再由更長的姓名／代稱**升級** | 無 I/O、**沒有模糊比對**（difflib 猜錯一次就是匯錯人）；代稱撞名＝對誰都不算數，不隨便挑一個；第 4 條是升級不是另一條比對路徑（見「不要動的地方」） |
+| [`core/bank_codes.py`](core/bank_codes.py) | 金融機構代號 ↔ 銀行名（純資料＋純函式）：`resolve` 三碼優先、其次別名、認不得就原樣放行 | 表是我們自己維護的、跟著發版走（銀行併購改號要有人來改）；表不必收齊全國 —— 認不得回 `(None, 原字串)` 畫面照舊顯示人打的字。**不要改成掃全串找代號**（見「不要動的地方」） |
+| [`frontend/payout.html`](frontend/payout.html) | 收款人手上 `/p/{短碼}` 那一頁（免登入、單檔自足、零外部相依） | 只畫後端給的欄位；**不要在原始碼裡寫內部模組名、路徑、拓樸或「哪些欄位我們不給」的清單** —— 那頁寄給收款人、原始碼看得到 |
+| `frontend/tabs/crm/crm-payables.js` 的出納段 | 應付面板的複製（每列左側一顆「複製」、純數字不帶標點）、本月匯款清單（可列印）、匯款通知彈窗（全選＋複製連結） | 複製一律走 `js/shared/utils.copyText`（內網是 http＝非安全來源，`navigator.clipboard` **不存在**）；`_buildMonthGroups` 是「月 × 收款人」粒度，跟後端 `group_payables` 的「收款人」粒度**不同**，別以為可以直接用後端那份 |
 
 
 ## 不要動的地方
@@ -1431,4 +1437,47 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   兩邊的取捨不同、也都有理由，但清單的 label 會被浮層拿去搜尋 —— 要動任何一邊之前先讀對面那份，
   並且想清楚「打年份找案」會不會濾錯。（2026-09-11 /polish 提出，owner 未拍板，先記著。）
 
+- **`core/staff_alias.py` 的第 4 條是「升級」，不是另一條比對路徑**（2026-09-11 /polish 兩輪才調對）：
+  命中代稱之後，只有「**把那個代稱包在裡面、而且也出現在這段字裡**」的更長姓名／代稱才接手
+  （「停車費 史丹利」命中的是別人的代稱「史丹」，而字串裡寫的是姓名「史丹利」）。
+  **姓名不准獨立製造比對** —— 寫成「姓名整張表先比一次」的話：反向照樣錯（A 姓名「史丹」、
+  B 代稱「史丹利」會落到 A），而且姓名會咬到用途詞（有人姓名叫「大方」，「大方廣告 印刷費 小明」
+  就從正確的小明變成大方）。也**不要**加「兩個字以上才算包含」的門檻：那會讓單字代稱
+  （「早餐 K」）整個失效，而那正是這支模組要解決的事。六個反例都在 `test_staff_alias.py` 釘著。
+- **`core/bank_codes.resolve` 只看第一個孤立三碼，不要改成 `finditer` 掃全串**（同日第 2 輪）：
+  掃全串的話帳號分段會奪權 —— 「華南銀行 帳號 1234-567-700」變中華郵政、「玉山銀行 678-008-374071」
+  變華南；模擬「銀行名＋分段帳號」4,000 筆有 3.8% 被搶走。而那個值是出納**直接複製進網銀第一格**的：
+  解不出來（None）他會自己去查，給他一個看起來很肯定的錯代號才是真的會匯錯。
+  ⚠️ 殘留風險（owner 未拍板）：第一個三碼**剛好**有效時仍會壓過白紙黑字的銀行名
+  （`局號 021 郵局` → 花旗）。「三碼優先」是既有規則、`test_code_wins_over_the_name` 釘著，
+  而生產 25 筆銀行字串目前沒有任何一筆名稱與代號互相矛盾。
+- **`create_payout` 的「已經綁過」只擋「連結還有效」的那些**：撤銷刻意**不清** `payout_id`
+  （那是「這幾筆同一次匯出去」的事實），所以擋「所有 `payout_id` 非空的」＝撤了也還是 422、
+  永遠卡死。🔴 **但撤銷目前沒有 UI**（前端只呼叫 `POST /payouts`，`GET /payouts` 與
+  `DELETE /payouts/{id}/share` 都沒有呼叫端）—— 出納在面板上看不出哪幾筆已經綁過，也撤不掉。
+  這是這批功能沒做完的一半，不是可以放著的狀態。
+- **`publish_update.py` 刻意沒有「master 起來了嗎」的閘門**（2026-09-11 /polish 第 2 輪拿掉）：
+  `/api/v1/version` **每個 request 重讀 `version.json`**，而發版流程在那之前就把新版號寫進檔了 ——
+  行程根本沒重啟、還跑著舊碼時它照樣回報新版號，閘門必定放行（`core/version.py` 檔頭就是在講這個）。
+  做一道擋不住東西的閘門比沒有更糟：給人「已經確認過」的錯覺，而且失敗那條會停在
+  「版號已 bump、文件已改、包已打好、NAS 沒同步」而且不回滾。真正的風險還在：**DB migration
+  只有 master 會跑**，發版的人要自己看 `[WARN] 無法自動重啟主控端` 那行。要做對得比對
+  「行程載入時取一次的版號常數」（`core/version.py` 現在沒有這樣的常數）。
+- **`cash.py` 的 `bank_note` 只對「真的沒對到人」的收款人掛**：原本是拿「`payee_name` 裡有沒有
+  出現某個撞名代稱」事後反推失敗原因 —— 於是「姓名叫王小明、單純還沒填帳號」的人也會被說成
+  「代稱『小明』有兩個人在用」，他去人員檔改代稱，改完問題還在而且看不出為什麼。真相在解析
+  那個迴圈裡（`_who()` 回不回 None 是確定的），不要在顯示層反推。
+- **🔴 eslint 刻意關掉 `no-undef`**（`eslint.config.mjs` 檔頭寫明），`test_js_parses` 也只驗 parse ——
+  **前端漏一個 import 是零告警的**，`npx eslint` 回 exit=0，只有使用者按下去才 ReferenceError。
+  2026-09-11 /polish 就這樣把 `crm-staff.js` 一顆本來在 https 下正常的按鈕改成所有瀏覽器都壞
+  （用了 `copyText` 沒 import）。動前端時**自己 grep 一次「新用到的名字有沒有在 import 清單裡」**。
+- **掃原始碼的規則測試用 `_srcscan.flow_body`，不要用 `func_body`**：`func_body` 釘的是「這段程式
+  住在哪一支函式裡」，於是被禁止的寫入只要搬進同檔 helper 就再也抓不到（測試安靜地失效），
+  而且「把長函式切開」會變成一件弄壞測試的事。`flow_body` 會把它呼叫的 `_` 開頭同檔 helper
+  一起帶進來。`tests/unit/test_payouts_router.py` 用的就是它（三條都做過變異驗證）。
+- **`tests/unit/test_files_stay_readable.py` 只掃 `.py`／`.js`／`.html`，`.css` 沒有人在看**：
+  `frontend/tabs/crm/crm.css` 已經 2,286 行（超過 2,000 的單次讀取上限）而測試全綠。
+  把 `.css` 加進 `SCAN_DIRS` 的副檔名過濾會**當場讓套件變紅**，所以要先拆檔再加守衛，
+  不是反過來。同理 `core/schemas.py` 現在剛好 **2,000 行**（`> READ_LIMIT` 才紅）—— 零裕度，
+  下一個欄位就會讓整套測試紅，加欄位前先拆。
 - **客戶看得到的頁面不要在原始碼裡列出我們的內部欄位**：`invoice-file.html` 第一版把「代開費／母帳私帳／未收款…一律不上」抄進檔頭註解，用意是好的，但那頁寄給客戶、原始碼看得到，等於順手告訴對方我們內部在記些什麼。要寫清單去後端那支寫。
