@@ -2,7 +2,11 @@
 // ts-zone 視圖 3：專案查詢（工作追蹤「專案」表＋專案檔案，開放給員工，唯讀）＋ 專案檔案彈窗（團隊的一週點案名）
 // ────────────────────────────────────────────────────────────────────────────
 import { createBurnSorter, burnTbodyHtml, burnTableHtml, projectFileHtml } from "/js/shared/ts-projects.js";
-import { z } from "./ctx.js";
+import { openProjectPicker } from "/js/shared/project-picker.js";
+import { z, _POST, _PUT } from "./ctx.js";
+
+/** 管理視角而且 /summary 給了錢欄位（私帳 scope）才多畫四欄。 */
+const _money = () => z.manage && (z.s.findRows || []).some(p => "contract_net" in p);
 
 async function _loadFindRows() {
     if (z.s.findRows) return z.s.findRows;
@@ -46,8 +50,64 @@ function _findFiltered() {
 function _findActive() { const st = z.s.findState; return !!(st.q || st.status || st.type || st.pct || st.from || st.to); }
 function _redrawFindBody() {
     const tb = document.querySelector("#my-burn-table tbody");
-    if (tb) { tb.innerHTML = burnTbodyHtml(z.s.findSorter.sorted(_findFiltered()), { editable: false, emptyText: "沒有符合的" }); z.s.findSorter.attach(); }
+    if (tb) { tb.innerHTML = burnTbodyHtml(z.s.findSorter.sorted(_findFiltered()), { editable: false, money: _money(), emptyText: "沒有符合的" }); z.s.findSorter.attach(); }
     const c = z.$("z1-find-count"); if (c) c.textContent = `${_findFiltered().length} 案`;
+}
+/** 管理視角：專案查詢下方的「未對映 Sheet 案名」（/summary.unmatched；私帳 scope 才有 candidates／suggestions）。 */
+function _unmatchedHtml() {
+    const { esc, s } = z;
+    if (!z.manage || !s.findUnmatched.length) return "";
+    const admin = z.hooks.isAdmin();
+    const REASON = { ambiguous: "撞案", none: "找不到", bucket: "內部桶" };   // 同 CRM 分頁舊「專案」視圖的 _REASON
+    const rows = s.findUnmatched.map(u => {
+        // 撞案：candidates＝[{id,name,client}]；找不到：suggestions＝案名清單（只是給人看，不是對映）
+        const cands = (u.candidates || []).map(c => `${esc(c.name)}（${esc(c.client || "無客戶")}）`).join("　/　");
+        const sugg = (u.suggestions || []).length ? "像：" + u.suggestions.map(esc).join("、") : "";
+        return `<tr><td>${esc(u.project_name)}</td><td class="num">${u.hours_used}</td><td class="num">${u.rows}</td><td class="meta">${esc(REASON[u.reason] || u.reason || "")}</td>
+            <td class="meta">${cands || sugg || "—"}</td>
+            <td>${admin && u.reason !== "bucket" ? `<button type="button" class="btn sm" data-z1="map" data-name="${esc(u.project_name)}">指定</button>` : ""}</td></tr>`;
+    }).join("");
+    return `<div class="unmatched"><div class="vhead"><span class="ey">Unmatched<b>未對映的 Sheet 案名（${s.findUnmatched.length}）</b></span><span class="meta">Sheet 拉進來、對不到案的原字；指定之後整批重對映</span></div>
+        <div style="overflow-x:auto;"><table class="unm"><thead><tr><th>Sheet 案名</th><th class="num">時數</th><th class="num">列數</th><th>原因</th><th>可能是</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+/** 指定：Sheet 案名 → 私帳案（PUT project_map ＋ POST remap），跟 CRM 分頁舊「專案」視圖同一條路。 */
+export async function mapSheetName(sheetName) {
+    const { mjson, s } = z;
+    if (!sheetName) return;
+    if (!s.mineProjects) {
+        try { s.mineProjects = (await mjson(z.api.mineProjects())).projects || []; }
+        catch (e) { alert("無法列出私帳案：" + e.message); return; }   // 沒 finance_mine 的管理員拿 403：把理由給他看，不開空視窗
+    }
+    openProjectPicker({
+        projects: s.mineProjects, currentId: "", title: "指定專案 — " + sheetName,
+        onPick: async (pid) => {
+            if (!pid) return;
+            try {
+                await mjson(z.api.projectMap(), _PUT({ items: [{ sheet_name: sheetName, project_id: pid }] }));
+                await mjson(z.api.remap(), _POST({}));
+                s.findRows = null;
+                await loadFind();
+            } catch (e) { alert("指定失敗：" + e.message); }
+        },
+    });
+}
+/** 套用建議預算（只填沒設的）→ 重抓。 */
+export async function applySuggestedBudgets() {
+    const n = (z.s.findRows || []).filter(p => p.suggested_hours != null && p.budget_hours == null).length;
+    if (!n) { alert("沒有「有建議、還沒設預算」的案。"); return; }
+    if (!window.confirm(`把建議預算填進 ${n} 個還沒設預算的案？（已設的不動）`)) return;
+    try { await z.mjson(z.api.suggestBudgets(), _POST({})); z.s.findRows = null; await loadFind(); }
+    catch (e) { alert("套用失敗：" + e.message); }
+}
+/** 專案檔案的「改預算」（prompt → PUT project_budget）。 */
+export async function setProjectBudget(pid, cur) {
+    const v = window.prompt("這個案的預算小時（清空＝拿掉預算）", cur || "");
+    if (v === null) return;
+    try {
+        await z.mjson(z.api.projectBudget(), _PUT({ project_id: pid, budget_hours: v.trim() ? parseFloat(v) : null }));
+        z.s.findRows = null;
+        await loadFind();
+    } catch (e) { alert("改預算失敗：" + e.message); }
 }
 export function _renderFindTable() {
     const { $, esc, s } = z;
@@ -63,8 +123,10 @@ export function _renderFindTable() {
             <select class="sel" id="z1-f-pct">${PCT_BANDS.map(([v, l]) => `<option value="${v}" ${s.findState.pct === v ? "selected" : ""}>${l}</option>`).join("")}</select>
             <span class="meta">最後填報</span><input type="date" class="sel" id="z1-f-from" value="${esc(s.findState.from)}"><span class="meta">～</span><input type="date" class="sel" id="z1-f-to" value="${esc(s.findState.to)}">
             <button type="button" class="btn" id="z1-f-clear" ${_findActive() ? "" : "hidden"}>清除</button>
-            <span class="meta" id="z1-find-count"></span></div>
-        <div class="tsp" id="z1-find-body" style="overflow-x:auto;">${burnTableHtml("", "my-burn-table")}</div>`;
+            <span class="meta" id="z1-find-count"></span>
+            ${z.manage && z.hooks.isAdmin() && (s.findRows || []).some(p => p.suggested_hours != null) ? '<span class="sp" style="flex:1"></span><button type="button" class="btn" data-z1="suggest" title="合約未稅 ×（1−預期毛利）÷ 日成本 × 每日工時；只填沒設的案，已設的不動">套用建議預算（只填沒設的）</button>' : ""}</div>
+        <div class="tsp" id="z1-find-body" style="overflow-x:auto;">${burnTableHtml("", "my-burn-table", { money: _money() })}</div>
+        ${_unmatchedHtml()}`;
     _redrawFindBody();          // 表身、排序、計數只有它一份（殼先畫空的 tbody）
     const clear = $("z1-f-clear");
     const sync = () => { clear.hidden = !_findActive(); _redrawFindBody(); };
@@ -84,7 +146,9 @@ export async function _openFindProject(name, pid) {
     body.innerHTML = `<div class="empty">載入中…</div>`;
     try {
         const d = await z.mjson(z.api.projectFile(name, pid));
-        body.innerHTML = projectFileHtml(d, { editable: false, chartWidth: 340, backHtml: '<button type="button" class="btn" data-z1="find-back">‹ 專案清單</button>' });
+        // 管理視角：加入比較／改預算（管理員）／匯出 CSV 三顆（跟 CRM 分頁舊「專案檔案」同一組 data-ts-action）
+        body.innerHTML = projectFileHtml(d, { editable: z.manage, budgetEditable: z.manage && z.hooks.isAdmin(), compareNames: z.s.compareNames,
+            chartWidth: 340, backHtml: '<button type="button" class="btn" data-z1="find-back">‹ 專案清單</button>' });
         body.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
         body.innerHTML = `<div class="notice">${esc(e.message)}</div><button type="button" class="btn" data-z1="find-back">‹ 專案清單</button>`;

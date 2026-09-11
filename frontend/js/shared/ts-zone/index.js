@@ -11,7 +11,7 @@ import { z, configure, switchZ1, setWho, _z1MarkStale, _shiftDays, _mondayOf, _m
 import { loadLog, mergeSameProject, undoMerge, resetToday, _logProjectOptions } from "./log.js";
 import { loadMyWeek, _renderMyWeek, _planOpenAdd, _planSubmitAdd, _planDelete, _planMove, _planFromMilestones, _planCopyLast, _planWireDnd, _planCardHtml } from "./plan.js";
 import { loadTeamWeek, _msToggleDone, _openMsModal } from "./team-week.js";
-import { loadFind, _renderFindTable, _openFindProject, _openProjectModal } from "./find.js";
+import { loadFind, _renderFindTable, _openFindProject, _openProjectModal, mapSheetName, applySuggestedBudgets, setProjectBudget } from "./find.js";
 
 export { z, switchZ1, setWho, _z1MarkStale, resetToday, _logProjectOptions, _planCardHtml, loadLog, loadMyWeek, loadTeamWeek, loadFind };
 export { _shiftDays, _dow, _mondayOf, _mdLabel, _prevWorkday, _isPlan, _POST, _PUT } from "./ctx.js";
@@ -88,4 +88,15 @@ export async function _z1Action(btn, ev) {
     if (act === "find-back") return _renderFindTable();
     if (act === "proj-pop") return _openProjectModal(btn.dataset.name || "", btn.dataset.pid || "");   // 團隊的一週點案名：彈窗
     if (act === "open-project") return _openFindProject(btn.dataset.name || "", btn.dataset.pid || "");
+    // ── 管理視角（P3）：指定未對映、套用建議預算、改預算、加入比較 ──
+    if (act === "map") return mapSheetName(btn.dataset.name || "");
+    if (act === "suggest") return applySuggestedBudgets();
+    if (act === "budget") return setProjectBudget(btn.dataset.pid || "", btn.dataset.cur || "");
+    if (act === "compare-add" || act === "compare-remove") {
+        const name = btn.dataset.name || "";
+        s.compareNames = act === "compare-add" ? [...new Set([...s.compareNames, name])] : s.compareNames.filter(x => x !== name);
+        if (z.hooks.onCompare) z.hooks.onCompare(s.compareNames);
+        btn.textContent = act === "compare-add" ? "已在比較清單" : "加入比較";   // 不整頁重畫：專案檔案裡打到一半的東西留著
+        return;
+    }
 }

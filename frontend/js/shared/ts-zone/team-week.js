@@ -9,10 +9,13 @@ export async function loadTeamWeek() {
     const host = $("z1-week");
     host.innerHTML = `<div class="empty">載入中…</div>`;
     // 兩支互不相依：一起發（原本串著等，翻一週要吃兩趟來回）。里程碑抓不到就沒有那條帶，不擋週表
-    const [dRes, ms] = await Promise.all([
+    const [dRes, ms, conflicts] = await Promise.all([
         mjson(z.api.teamWeek(s.week)).catch(e => ({ __err: e.message })),
         mjson(z.api.milestonesWeek(s.week)).catch(() => null),
+        // 管理視角：Sheet 與總表改過的同一列撞到、等 owner 決定的（管理員才拉得到；決定在總表）
+        z.manage && z.api.conflicts && z.hooks.isAdmin() ? mjson(z.api.conflicts()).catch(() => null) : Promise.resolve(null),
     ]);
+    const nConf = conflicts && conflicts.items ? conflicts.items.length : 0;
     if (dRes && dRes.__err) { host.innerHTML = `<div class="notice">${esc(dRes.__err)}</div>`; return; }
     const d = dRes;
     s.msWeek = ms;
@@ -68,7 +71,8 @@ export async function loadTeamWeek() {
                 <span class="meta">${esc(s.week)} 起</span>
                 <button type="button" class="btn" data-z1="week" data-start="${_shiftDays(s.week, 7)}">›</button>
                 ${s.week === _mondayOf(today) ? "" : '<button type="button" class="btn" data-z1="week">本週</button>'}
-                <button type="button" class="btn pri" data-z1="ms-open">設定專案里程碑</button></span></div>
+                <button type="button" class="btn pri" data-z1="ms-open">設定專案里程碑</button>
+                ${nConf ? `<button type="button" class="btn sm warn" data-ts-action="view" data-view="ledger" title="Sheet 與總表改過的同一列內容不同，到總表選要留哪邊">衝突待決 ${nConf}</button>` : ""}</span></div>
         ${ms ? _msBandHtml(ms) : ""}
         ${names.length ? `<div style="overflow-x:auto;"><table class="week">
             <thead><tr><th style="width:84px;">人員</th>${cols.map(iso => `<th class="${iso === today ? "today" : ""}">${esc(_mdLabel(iso))}</th>`).join("")}${sumTh}</tr></thead>

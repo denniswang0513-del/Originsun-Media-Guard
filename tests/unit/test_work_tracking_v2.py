@@ -63,7 +63,7 @@ def test_zone_stops_propagation_except_for_host_buttons():
     assert "if (!b || (z.hooks.passthrough && z.hooks.passthrough(b))) return;" in mount
     assert "e.stopPropagation();" in mount
     tab = repo_src(TAB)
-    assert "passthrough: (b) => b.dataset.tsAction === 'view' || b.dataset.tsAction === 'zone'" in tab
+    assert "passthrough: (b) => ['view', 'zone', 'export-project', 'export-month'].includes(b.dataset.tsAction)" in tab
     assert "projectPicker: null" in tab, "整個 tab 已掛一份專案浮層，格子不能再掛（同一個 input 兩個 root ↓↑ 走兩格）"
 
 
@@ -108,3 +108,34 @@ def test_team_week_manage_view_needs_no_binding_and_only_it_gets_project_id():
     assert 'manage = payload_grants(check_admin_or_module(request, "timesheets", ME_ZONE_MASTER), "timesheets")' in body
     assert 'ident = None if manage else await _me_bound(request, "me_team_week")' in body
     assert '**({"project_id": it.get("project_id") or ""} if manage else {})' in body, "員工那份照舊不吐私帳案 id"
+
+
+def test_money_columns_only_reach_private_scope_and_only_in_manage():
+    """錢四欄：後端只給私帳 scope（/summary 尾端 _redact_summary 只留 SUMMARY_PUBLIC_KEYS）；前端只在管理視角、而且列上真的有欄位才畫。"""
+    lk = code_only(func_body(repo_src("services/timesheet_lookup.py"), "async def burn_rows("))
+    for k in ('"contract_net": contract_net', '"margin_pct": margin_pct', '"staff_cost": staff_cost'):
+        assert k in lk, k
+    pub = repo_src(API).split("SUMMARY_PUBLIC_KEYS = (")[1].split(")")[0]
+    for k in ("contract_net", "margin_pct", "staff_cost", "suggested_hours"):
+        assert k not in pub, f"{k} 不准進員工那份"
+    find = js_code_only(repo_src("frontend/js/shared/ts-zone/find.js"))
+    assert 'const _money = () => z.manage && (z.s.findRows || []).some(p => "contract_net" in p);' in find
+    tp = js_code_only(repo_src("frontend/js/shared/ts-projects.js"))
+    assert "export const BURN_MONEY_THEAD" in tp and "${opts.money ? _moneyCells(p) : ''}" in tp
+    assert "colspan=\"${opts.money ? 14 : 10}\"" in tp
+
+
+def test_manage_write_buttons_need_admin_and_go_through_the_same_endpoints_as_the_old_view():
+    find = js_code_only(repo_src("frontend/js/shared/ts-zone/find.js"))
+    assert "z.hooks.isAdmin()" in js_func_body(find, "function _unmatchedHtml() {")
+    assert 'z.manage && z.hooks.isAdmin() && (s.findRows || []).some(p => p.suggested_hours != null)' in find, "套用建議預算只給管理員"
+    m = js_func_body(find, "export async function mapSheetName(sheetName) {")
+    assert "z.api.projectMap()" in m and "z.api.remap()" in m and "openProjectPicker({" in m
+    assert 'budgetEditable: z.manage && z.hooks.isAdmin()' in find
+    ctx = js_func_body(js_code_only(repo_src(CTX)), "export function manageApi() {")
+    for k in ("conflicts", "suggestBudgets", "projectBudget", "projectMap", "remap", "mineProjects"):
+        assert f"{k}: () =>" in ctx, k
+    tw = js_code_only(repo_src(TW))
+    assert "z.manage && z.api.conflicts && z.hooks.isAdmin() ? mjson(z.api.conflicts())" in tw
+    tab = repo_src(TAB)
+    assert "isAdmin: _isAdmin," in tab and "onCompare: (names) => { _compareNames = names; }" in tab

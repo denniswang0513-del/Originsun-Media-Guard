@@ -317,8 +317,11 @@ async function _mountZone() {
         hooks: {
             modalRoot: () => document.getElementById('ts-root') || document.body,
             journalHref: '',                    // CRM 分頁沒有週記卡
-            passthrough: (b) => b.dataset.tsAction === 'view' || b.dataset.tsAction === 'zone',   // 鈕列右邊那幾顆是這個 tab 的
+            // 這個 tab 自己收的鈕：鈕列右邊那幾顆、從別的分頁按回來的四顆、專案檔案的匯出 CSV（用 tab 既有的 authDownload 那條）
+            passthrough: (b) => ['view', 'zone', 'export-project', 'export-month'].includes(b.dataset.tsAction),
             projectPicker: null,                // 整個 tab 已掛一份專案浮層（initTimesheetsTab），不再掛
+            isAdmin: _isAdmin,                  // 改預算／指定／套用建議是寫私帳：只給 Lv3（後端 _require_mine_admin）
+            onCompare: (names) => { _compareNames = names; },   // 「加入比較」→ 並排比較頁（_view='compare'）吃同一份清單
             onView: (v) => { _zoneFirst = v; },
             onWho: (who) => { _zoneWho = who; const sel = document.getElementById('ts-zone-who'); if (sel) sel.value = who ? who.id : ''; },
         },

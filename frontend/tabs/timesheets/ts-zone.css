@@ -157,3 +157,11 @@
 #ts-root .ts-zone.emp .views .sw i::after { right: auto; left: 2px; }
 #ts-root .ts-zone .views .gap { flex: 1; }
 #ts-root .ts-zone.bar { margin-bottom: 12px; }
+/* 管理視角（P3）：未對映區塊、衝突待決鈕 */
+#ts-root .ts-zone .unmatched { margin-top: 18px; }
+#ts-root .ts-zone table.unm { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+#ts-root .ts-zone table.unm th { text-align: left; color: var(--sub); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+#ts-root .ts-zone table.unm td { padding: 6px 8px; border-bottom: 1px solid #2c2c2c; color: var(--ink); vertical-align: top; }
+#ts-root .ts-zone table.unm th.num, #ts-root .ts-zone table.unm td.num { text-align: right; font-variant-numeric: tabular-nums; }
+#ts-root .ts-zone .btn.warn { border-color: #fbbf24; color: #fbbf24; }
+#ts-root .ts-zone .find-bar .sp { flex: 1; }

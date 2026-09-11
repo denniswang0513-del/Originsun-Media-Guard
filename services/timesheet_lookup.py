@@ -89,10 +89,19 @@ async def burn_rows(session) -> list:
         last_day = tw_day(last_date)
         # 建議預算：合約未稅 ×（1−該案型預期毛利）÷ 日成本 × 每日工時（core.finance_logic）
         suggested = suggested_hours(model, contract, tax_rate, ptype)
+        # 管理視角的錢三欄（docs/WORK_TRACKING_V2_PLAN.md §4-7）：合約未稅、該案型預期毛利、已投入的人力成本
+        # （已投入 h ÷ 每日工時 × 日成本）。跟 suggested_hours 同一組輸入；沒合約／沒日成本＝None，不填 0 假裝有。
+        # 🔴 這三個只給私帳 scope（/summary 尾端的 _redact_summary 只留 SUMMARY_PUBLIC_KEYS）。
+        contract_net = round(float(contract) / (1 + float(tax_rate or 5) / 100)) if contract else None
+        margin_pct = margin_for_type(model, ptype)
+        hpd = float(model.get("hours_per_day") or 8)
+        daily = float(model.get("daily_cost") or 0)
+        staff_cost = round(float(total or 0) / hpd * daily) if daily and total else None
         items.append({
             "project_id": pid, "project_name": name or "", "status": status or "", "client": cname or "",
             "hours_used": round(total or 0, 1), "budget_hours": budget, **budget_burn(total, budget),
             "suggested_hours": suggested, "project_type": ptype or "",
+            "contract_net": contract_net, "margin_pct": margin_pct, "staff_cost": staff_cost,
             "rows": cnt, "last_entry": last_day.isoformat() if last_day else None,
             "stale": is_stale(status or "", last_day, today),
         })

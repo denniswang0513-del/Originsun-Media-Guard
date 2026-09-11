@@ -136,8 +136,21 @@ export function createBurnSorter({ storageKey, panelId, onChange, defaultSort })
             pct: p => p.pct ?? '',
             rows: p => p.rows ?? '',
             last: p => p.last_entry || '',
+            // 管理視角的錢四欄（/summary 給私帳 scope 的列才有；沒有的排在後面）
+            contract: p => p.contract_net ?? '',
+            margin: p => p.margin_pct ?? '',
+            suggested: p => p.suggested_hours ?? '',
+            cost: p => p.staff_cost ?? '',
         },
     });
+}
+/** 管理視角多的四欄（owner 2026-09-11「錢四欄全開」）：合約未稅／預期毛利／建議預算／人力成本。 */
+export const BURN_MONEY_THEAD = `${sortableTh('contract', '合約未稅', 'class="num"')}${sortableTh('margin', '預期毛利', 'class="num"')}${sortableTh('suggested', '建議預算(h)', 'class="num"')}${sortableTh('cost', '人力成本', 'class="num"')}`;
+const _money = (v) => (v == null ? '<span class="tsp-dim">—</span>' : Number(v).toLocaleString('zh-TW'));
+function _moneyCells(p) {
+    return `<td class="num">${_money(p.contract_net)}</td><td class="num">${p.margin_pct == null ? '<span class="tsp-dim">—</span>' : p.margin_pct + '%'}</td>
+            <td class="num">${p.suggested_hours == null ? '<span class="tsp-dim">—</span>' : p.suggested_hours}</td>
+            <td class="num${p.contract_net != null && p.staff_cost != null && p.staff_cost > p.contract_net ? ' neg' : ''}">${_money(p.staff_cost)}</td>`;
 }
 
 export const BURN_THEAD = `<tr>
@@ -178,14 +191,16 @@ export function burnTbodyHtml(projects, opts = {}) {
             <td class="num${p.remaining != null && p.remaining < 0 ? ' neg' : ''}">${p.remaining ?? '—'}</td>
             <td class="num"><span class="ts-pct ${pctClass(p.pct)}" style="${pctStyle(p.pct)}">${p.pct != null ? p.pct + '%' : '—'}</span></td>
             <td class="num tsp-sub">${p.rows}</td>
-            <td class="tsp-sub">${esc(p.last_entry || '')}</td>
+            <td class="tsp-sub">${esc(p.last_entry || '')}</td>${opts.money ? _moneyCells(p) : ''}
         </tr>`).join('');
-    return rows || `<tr><td colspan="10" class="tsp-dim" style="text-align:center;">${esc(opts.emptyText || '尚無已對映專案')}</td></tr>`;
+    return rows || `<tr><td colspan="${opts.money ? 14 : 10}" class="tsp-dim" style="text-align:center;">${esc(opts.emptyText || '尚無已對映專案')}</td></tr>`;
 }
 
-export function burnTableHtml(tbodyHtml, id = 'ts-burn-table') {
+/** opts.money＝多畫管理視角的四欄（表身也要 burnTbodyHtml(..., { money: true })，欄數才對得上）。 */
+export function burnTableHtml(tbodyHtml, id = 'ts-burn-table', opts = {}) {
     ensureTsProjectsStyle();
-    return `<table id="${id}"><thead>${BURN_THEAD}</thead><tbody>${tbodyHtml}</tbody></table>`;
+    const head = opts.money ? BURN_THEAD.replace('</tr>', BURN_MONEY_THEAD + '</tr>') : BURN_THEAD;
+    return `<table id="${id}"><thead>${head}</thead><tbody>${tbodyHtml}</tbody></table>`;
 }
 
 // ── 專案檔案 ──

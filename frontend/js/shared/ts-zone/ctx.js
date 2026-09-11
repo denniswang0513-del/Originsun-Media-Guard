@@ -45,6 +45,8 @@ export const z = {
         onAction: null,                   // (act, btn, ev) → 收了回 true（員工頁的兼職排班 pt-* 走這裡）
         onView: null,                     // (view) → 切了視圖（員工頁拿來記 localStorage）
         onWho: null,                      // (who) → 管理視角換了「看誰的」（宿主同步它的切換器）
+        isAdmin: () => false,             // 管理視角裡「寫私帳」的那幾顆（改預算、指定、套用建議）只給管理員（後端 _require_mine_admin）
+        onCompare: null,                  // (names) → 管理視角的「加入比較」清單變了（CRM 分頁的並排比較頁吃它）
         passthrough: null,                // (btn) → true＝這顆是宿主自己的，ts-zone 不碰、讓它冒泡
         projectPicker: undefined,         // 格子專案格的浮層資料（undefined＝用 _logProjectOptions；null＝宿主自己掛，別再掛一份）
     },
@@ -103,6 +105,12 @@ export function manageApi() {
         projectsBurn: () => "/api/v1/timesheets/summary",
         board: (day) => "/api/v1/timesheets/board?date=" + day + "&days=1",
         people: () => "/api/v1/timesheets/people",
+        conflicts: () => "/api/v1/timesheets/conflicts",
+        suggestBudgets: () => "/api/v1/timesheets/budgets/suggest",
+        projectBudget: () => "/api/v1/timesheets/project_budget",
+        projectMap: () => "/api/v1/timesheets/project_map",
+        remap: () => "/api/v1/timesheets/remap",
+        mineProjects: () => "/api/v1/timesheets/projects",
         /** ts-sheet 的自動存要打哪裡（替別人填才換；自己＝預設 own-scope）。 */
         sheetEndpoints: () => (whoIsOther() ? {
             update: (id) => "/api/v1/timesheets/rows/" + encodeURIComponent(id),
@@ -142,7 +150,9 @@ export function configure(opts) {
         planRows: [],           // 這週本人的列（GET /timesheets/mine/rows?from&to）
         myStaffName: "",        // 里程碑帶入要對負責人名字
         findRows: null,         // 專案查詢的表資料
-        findUnmatched: [],      // 管理視角：/summary 的未對映 Sheet 案名（P3 畫）
+        findUnmatched: [],      // 管理視角：/summary 的未對映 Sheet 案名
+        compareNames: [],       // 管理視角：專案檔案「加入比較」的清單（並排比較頁在 CRM 分頁）
+        mineProjects: null,     // 管理視角：/timesheets/projects（指定專案的挑選視窗用；私帳 scope 才拿得到）
         findSorter: null,
         findState: { q: "", status: "", type: "", pct: "", from: "", to: "" },   // 一列篩選：狀態、案型、消耗率區間、最後填報日期區間
         msWeek: null,           // GET /milestones/week 的結果（畫帶、開彈窗用）
