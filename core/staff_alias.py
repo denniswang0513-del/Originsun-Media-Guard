@@ -92,9 +92,16 @@ def resolve(payee: str, index: dict):
         return by_name[s]
     if s in by_alias:
         return by_alias[s]
-    # 第 3 條：包含某個代稱。撞到兩個不同的人就放棄（寧可對不到）。
+    # 第 3 條：包含某個代稱。**先在代稱之間分勝負：長的贏** —— 代稱 A「史丹」與
+    # 代稱 B「史丹利」同時命中時，這段字裡寫的是後者。原本是「命中兩個人就直接
+    # 放棄」，於是那個形狀永遠回 None（畫面說沒有帳號，而 dup_alias 是空的 ——
+    # 連 bank_note 那句解釋都不會出現，出納去人員檔一看帳號明明有填）。
+    # 同長度卻是兩個不同的人才放棄（寧可對不到）。
     matched = [a for a in by_alias if a and a in s]
-    owners = {by_alias[a] for a in matched}
+    if not matched:
+        return None
+    top_alias = max(len(a) for a in matched)
+    owners = {by_alias[a] for a in matched if len(a) == top_alias}
     if len(owners) != 1:
         return None
     key = owners.pop()

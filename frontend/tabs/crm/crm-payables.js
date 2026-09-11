@@ -538,7 +538,7 @@ window._payoutNotify = (name, month) => {
                 他的帳號與身分證不會出現在上面。</div>
             <div class="crm-field" style="max-width:220px;">
                 <label>匯款日期</label>
-                <input type="date" id="po-date" class="crm-input" value="${today}">
+                <input type="date" id="po-date" class="crm-input" value="${today()}">
             </div>
             <label class="po-row po-all"><input type="checkbox" id="po-all">
                 <span class="po-sum"><b>全選</b></span><span></span></label>

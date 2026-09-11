@@ -866,8 +866,9 @@ async function _renderResumeTab(staffId) {
             // 🔴 copyText 才有 fallback：內網（http://192.168.1.x）非安全來源上
             // `navigator.clipboard` 不存在，取屬性當場丟 TypeError → 被外層 catch
             // 接走 → 畫面說「產生連結失敗」，而 token 已經產生、連結也印不出來。
-            await copyText(fullUrl);
-            alert('已複製分享連結：\n' + fullUrl);
+            // 看回傳值：copyText 退到 prompt 那條時使用者已經自己複製過了，
+            // 再 alert 一次「已複製」等於連吃兩個對話框、而且第二個在說謊。
+            if (await copyText(fullUrl)) alert('已複製分享連結：\n' + fullUrl);
         } catch (e) { alert('產生連結失敗: ' + e.message); }
     });
 

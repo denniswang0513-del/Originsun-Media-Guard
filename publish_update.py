@@ -600,7 +600,7 @@ def notes_look_mangled(notes: str) -> bool:
     （不是可還原的亂碼，是真的丟失），而且會跟著 version.json 一路帶到
     C:\OriginsunAgent、NAS 與機隊每一台。所以寧可擋下來叫人改用 --notes-file。
 
-    判定：**連續兩個以上的 `?`**，或是**有兩個以上的 `?` 而整段沒有中文**。
+    判定：**連續兩個以上的 `?`**。
 
     為什麼要「連續兩個以上」而不是「有問號就擋」：`hotfix: why was 8000 slow?`
     這種正常的英文 notes 會被誤殺，而發版被擋下來是很煩的事。中文被吃掉時幾乎
@@ -616,12 +616,10 @@ def notes_look_mangled(notes: str) -> bool:
     （`修正?報價單?PDF?`）—— 那種一次只吃掉一個字、中間又隔著中文，跟作者自己
     打的問號分不開。真的在意就一律用 `--notes-file`。
     """
-    text = str(notes or "")
-    if "??" in text:
-        return True
-    if text.count("?") < 2:
-        return False       # 單獨一個問號：正常英文句子就會有
-    return not any("\u4e00" <= c <= "\u9fff" for c in text)
+    # 🔴 只認「連續」。曾經多一條「有兩個以上問號又沒中文就擋」——
+    # 那條把上面剛說不要誤殺的東西又殺回來了，只是門檻從 1 個變 2 個：
+    # `fix: A? or B?` 會讓發版直接被擋下來。
+    return "??" in str(notes or "")
 
 
 def main():

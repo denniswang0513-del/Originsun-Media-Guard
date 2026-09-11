@@ -1176,16 +1176,31 @@
 /* 只接管**標記過的**彈窗（目前是本月匯款清單）。原本寫成 .crm-modal-overlay，
    於是報價、發票…任何 CRM 彈窗開著時按 Ctrl+P 都只會印出那個彈窗而不是頁面 —— 
    那不是這段想做的事，而且不會有人發現是這裡造成的。 */
+/* 🔴 每一條都要帶著 `body:has(...)` 前綴，不能只有 hidden 那條帶。
+   `:has()` 的 specificity **＝它參數的 specificity** ——
+     body:has(.crm-modal-overlay[data-print]) *   → (0,2,1)
+     .crm-modal-overlay[data-print] *             → (0,2,0)
+   於是 hidden 贏、整張紙印出來是**空白的**（2026-09-11 /polish 收尾 review 用
+   Playwright emulate_media('print') 實測到）。舊版沒事是因為 body *(0,0,1) 輸給
+   .crm-modal-overlay *(0,1,0) —— 範圍化把勝負關係整個倒過來了。
+   下面用完整前綴讓 visible 是 (0,4,1)，穩穩贏過 (0,2,1)。 */
 @media print {
   body:has(.crm-modal-overlay[data-print]) * { visibility: hidden; }
-  .crm-modal-overlay[data-print],
-  .crm-modal-overlay[data-print] * { visibility: visible; }
-  .crm-modal-overlay[data-print] { position: absolute; inset: 0; background: #fff; }
-  .crm-modal-overlay[data-print] .crm-modal { max-width: none !important; box-shadow: none; }
-  .crm-modal-overlay[data-print] .crm-modal-footer,
-  .crm-modal-overlay[data-print] .crm-detail-close { display: none !important; }
-  .run-tb th { background: #eee; color: #333; }
-  .crm-modal, .crm-modal-body, .run-tb td { color: #111; }
+  body:has(.crm-modal-overlay[data-print]) .crm-modal-overlay[data-print],
+  body:has(.crm-modal-overlay[data-print]) .crm-modal-overlay[data-print] * {
+    visibility: visible; }
+  body:has(.crm-modal-overlay[data-print]) .crm-modal-overlay[data-print] {
+    position: absolute; inset: 0; background: #fff; }
+  body:has(.crm-modal-overlay[data-print]) .crm-modal-overlay[data-print] .crm-modal {
+    max-width: none !important; box-shadow: none; }
+  body:has(.crm-modal-overlay[data-print]) .crm-modal-overlay[data-print] .crm-modal-footer,
+  body:has(.crm-modal-overlay[data-print]) .crm-modal-overlay[data-print] .crm-detail-close {
+    display: none !important; }
+  /* 這兩條也要限定：不然報價／發票彈窗按 Ctrl+P 時文字會被強制上 #111（深色底上看不見）。 */
+  body:has(.crm-modal-overlay[data-print]) .run-tb th { background: #eee; color: #333; }
+  body:has(.crm-modal-overlay[data-print]) .crm-modal,
+  body:has(.crm-modal-overlay[data-print]) .crm-modal-body,
+  body:has(.crm-modal-overlay[data-print]) .run-tb td { color: #111; }
 }
 
 /* :has() 不支援時的退路：整段不生效＝印出整頁（醜，但不是壞的）。 */

@@ -128,6 +128,26 @@ class TestContainsIsLongestReading:
         idx = self._idx([("A", "王小明", "小明"), ("B", "小明", "")])
         assert resolve("停車費 王小明", idx) == "A"
 
+    def test_a_longer_alias_beats_a_shorter_one(self):
+        """代稱之間也要長的贏 —— 「史丹」與「史丹利」同時命中時，字串裡寫的是後者。
+
+        原本是「命中兩個人就直接放棄」，於是這個形狀永遠回 None：畫面說「沒有帳號」，
+        而 dup_alias 是空的（那兩個代稱各自只有一個人用）—— 連 bank_note 那句解釋
+        都不會出現，出納去人員檔一看帳號明明有填。
+        """
+        idx = self._idx([("A", "鄭雲全", "史丹"), ("B", "陳某某", "史丹利")])
+        assert resolve("停車費 史丹利", idx) == "B"
+        assert resolve("停車費 史丹", idx) == "A"
+        # 單字代稱同型：K 與 Kevin
+        idx2 = self._idx([("A", "李冠廷", "K"), ("B", "王凱文", "Kevin")])
+        assert resolve("早餐 Kevin", idx2) == "B"
+        assert resolve("早餐 K", idx2) == "A"
+
+    def test_two_same_length_aliases_still_give_up(self):
+        """同長度卻是兩個不同的人 → 還是放棄（寧可對不到）。"""
+        idx = self._idx([("A", "甲", "小明"), ("B", "乙", "阿華")])
+        assert resolve("聚餐 小明 阿華", idx) is None
+
     def test_two_different_longer_readings_give_up(self):
         """升級那一步也撞到兩個人時照樣放棄（寧可對不到）。"""
         idx = self._idx([("A", "陳小明", ""), ("B", "林小明", ""), ("C", "某某", "小明")])
