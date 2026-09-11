@@ -88,6 +88,7 @@ const _STAFF_EDIT_FIELDS = [
     {name:'emergency_contact', label:'緊急聯絡人', type:'text'},
     {name:'phone', label:'電話', type:'text'},
     {name:'email', label:'Email', type:'text'},
+    {name:'alias', label:'代稱', type:'text'},
     {name:'id_number', label:'身分證 / 統編', type:'text'},
     {name:'address', label:'住址', type:'text'},
     {name:'bank_name', label:'銀行', type:'text'},
@@ -125,6 +126,7 @@ function renderDetail(s) {
         ${prop('Email', s.email)}
         ${prop('身分證 / 統編', s.id_number)}
         ${prop('住址', s.address)}
+        ${prop('代稱', s.alias || '')}
         ${prop('銀行', s.bank_name ? s.bank_name + ' ' + (s.bank_account || '') : '')}
         ${s.portfolio_url ? `<div class="crm-detail-prop"><div class="crm-prop-label">作品集</div><div class="crm-prop-value"><a href="${_esc(s.portfolio_url)}" target="_blank" style="color:#3b82f6;">${_esc(s.portfolio_url)}</a></div></div>` : ''}
         ${prop('備註', s.notes)}
@@ -406,7 +408,7 @@ function closeDetail() {
 // ── Modal ────────────────────────────────────────────────────
 
 const _FIELDS = ['name', 'role', 'phone', 'email',
-    'status', 'portfolio_url', 'id_number', 'address', 'bank_name', 'bank_account', 'notes'];
+    'status', 'portfolio_url', 'alias', 'id_number', 'address', 'bank_name', 'bank_account', 'notes'];
 
 function openModal(staff = null) {
     _editingId = staff ? staff.id : null;

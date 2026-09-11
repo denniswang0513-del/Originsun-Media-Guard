@@ -112,7 +112,11 @@ async function loadPayables() {
  *  空白看起來像「還沒載入」，出納會以為再等一下就有；寫出來他才知道要去人員檔補。 */
 function _bankLine(p) {
     // 欄位窄，寫短一點；完整那句掛 title（截斷的字反而看不出是什麼）
-    if (!p.bank_account) return '<span style="color:#fbbf24;" title="這位收款人在人員檔裡沒有銀行帳號 —— 補在人員檔，這裡就會帶出來">沒有帳號</span>';
+    if (!p.bank_account) {
+        // 代稱撞名時後端會給 bank_note 說出原因 —— 不然畫面只是「沒有帳號」，看不出為什麼
+        const why = p.bank_note || '這位收款人在人員檔裡沒有銀行帳號 —— 補在人員檔，這裡就會帶出來';
+        return `<span style="color:#fbbf24;" title="${_esc(why)}">${p.bank_note ? '代稱撞名' : '沒有帳號'}</span>`;
+    }
     const bank = [p.bank_display || p.bank_name, p.bank_code].filter(Boolean).join(' ');
     return _esc(bank ? `${bank} · ${p.bank_account}` : p.bank_account);
 }

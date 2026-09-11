@@ -1024,7 +1024,19 @@ async def payables_summary(request: Request, month: str = Query(""),
 
     # 分組聚合是純邏輯，抽在 core/crm_logic.py（有單元測試）
     from core.crm_logic import group_payables
-    return {"month": month or "all", **group_payables(rows)}
+    out = group_payables(rows)
+    # 🔴 代稱撞名時 staff_alias 會讓那個代稱**對誰都不算數**（不隨便挑一個）。
+    # 那是對的，但如果不說出來，畫面就只是「沒有帳號」而看不出原因 —— 人員檔
+    # 目前就有兩組重複建檔，很容易兩邊填到同一個代稱然後永遠對不上。
+    dup = index.get("dup_alias") or set()
+    if dup:
+        for pg in out.get("payees", []):
+            if pg.get("bank_account"):
+                continue
+            hit = [a for a in dup if a and a in (pg.get("payee_name") or "")]
+            if hit:
+                pg["bank_note"] = f"代稱「{hit[0]}」有兩個人在用，所以不算數 —— 去人員檔改掉其中一個"
+    return {"month": month or "all", **out}
 
 
 @router.get("/receivables/summary", dependencies=[Depends(money_dep)])
