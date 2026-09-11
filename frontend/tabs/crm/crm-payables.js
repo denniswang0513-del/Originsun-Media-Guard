@@ -414,6 +414,80 @@ window._payableCopyField = (key, btn) => {
     if (text) copyText(text, btn);
 };
 
+/** 本月匯款清單：出納不是「有空就匯一個」，是坐下來把整個月做完。
+ *  一頁列出這個月要匯的每一筆，可整份複製、也可以印出來當對帳底稿。
+ *  🔴 只列**還沒付**的（要匯的）；沒有帳號的照樣列出來並標出來 ——
+ *  漏掉他才是真的出事，畫面上看得見才知道要先去人員檔補。 */
+window._payableRunList = () => {
+    const month = document.getElementById('payable-month')?.value || '';
+    const groups = month ? _monthGroups.filter(g => g.month === month) : _monthGroups;
+    const rows = [];
+    for (const g of groups) {
+        for (const p of g.payees) {
+            if (!p.unpaid_count) continue;
+            rows.push({ month: g.label, ...p });
+        }
+    }
+    const total = rows.reduce((s, r) => s + r.unpaid_amount, 0);
+    const noBank = rows.filter(r => !r.bank_account).length;
+
+    const body = rows.length ? `
+        <table class="run-tb">
+            <thead><tr><th>收款人</th><th>代碼</th><th>帳號</th><th>金額</th><th>筆數</th><th>月份</th></tr></thead>
+            <tbody>${rows.map(r => `<tr>
+                <td>${_esc(r.payee_name)}</td>
+                <td class="run-mono">${_esc(r.bank_code || '')}</td>
+                <td class="run-mono">${r.bank_account ? _esc(r.bank_account) : '<span class="run-warn">沒有帳號</span>'}</td>
+                <td class="run-mono run-r">${_fmtNum(r.unpaid_amount)}</td>
+                <td class="run-r">${r.unpaid_count}</td>
+                <td>${_esc(r.month)}</td></tr>`).join('')}
+                <tr class="run-sum"><td>合計</td><td></td><td></td>
+                    <td class="run-mono run-r">${_fmtNum(total)}</td>
+                    <td class="run-r">${rows.reduce((s, r) => s + r.unpaid_count, 0)}</td><td></td></tr>
+            </tbody>
+        </table>
+        <div class="run-note">轉入備註一律填「${_esc(_bkCompany())}」。${
+            noBank ? `<span class="run-warn">有 ${noBank} 位還沒有帳號，要先去人員檔補才匯得出去。</span>` : ''}</div>`
+        : '<div style="color:#9ca3af;">這個月沒有要匯的款項。</div>';
+
+    const ov = document.createElement('div');
+    ov.className = 'crm-modal-overlay';
+    ov.innerHTML = `<div class="crm-modal" style="max-width:760px;">
+        <div class="crm-modal-header"><h3>本月匯款清單${month ? '　' + _esc(month) : ''}</h3>
+            <button class="crm-detail-close" type="button" data-close>關閉</button></div>
+        <div class="crm-modal-body" style="max-height:66vh;overflow-y:auto;">${body}</div>
+        <div class="crm-modal-footer">
+            <button class="crm-btn crm-btn-secondary" data-act="print">列印</button>
+            <button class="crm-btn crm-btn-primary" data-act="copy">複製整份</button>
+        </div></div>`;
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', close));
+    ov.onclick = (e) => { if (e.target === ov) close(); };
+    ov.querySelector('[data-act="print"]').onclick = () => window.print();
+    ov.querySelector('[data-act="copy"]').onclick = (e) => copyText(_runListText(rows, total), e.currentTarget);
+};
+
+/** 整份複製出去的字。金額**不帶錢字號與逗號** —— 貼進網銀的金額欄只吃數字。 */
+function _runListText(rows, total) {
+    const NL = String.fromCharCode(10);
+    // 跨月時同一個人會出現兩列（八月一筆、九月一筆），那時要標月份才分得出來
+    const multiMonth = new Set(rows.map(r => r.month)).size > 1;
+    const lines = rows.map(r => [
+        r.payee_name,
+        r.bank_code || '(無代碼)',
+        r.bank_account || '(無帳號)',
+        _plainAmount(r.unpaid_amount),
+        multiMonth ? r.month : '',
+    ].filter(Boolean).join('  '));
+    const people = new Set(rows.map(r => r.payee_name)).size;
+    return [
+        '本月匯款清單　轉入備註：' + _bkCompany(),
+        ...lines,
+        '合計 ' + _plainAmount(total) + '　' + rows.length + ' 列 / ' + people + ' 位收款人',
+    ].join(NL);
+}
+
 window._payablePayAll = async (name, month) => {
     const grp = _monthGroups.find(g => g.month === month);
     const p = grp?.payees.find(x => x.payee_name === name);

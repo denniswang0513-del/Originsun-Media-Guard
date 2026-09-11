@@ -1144,6 +1144,26 @@
 .payable-toggle { color: #6b7280; font-size: 12px; transition: transform 0.2s; }
 .payable-card.open .payable-toggle { transform: rotate(180deg); }
 .payable-bank { padding: 0 14px 8px; font-size: 12px; color: #9ca3af; }
+/* 本月匯款清單（2026-09-11）：一輪做完用的那張表，也要印得出來當對帳底稿 */
+.run-tb { width: 100%; border-collapse: collapse; font-size: 13px; }
+.run-tb th { text-align: left; padding: 7px 10px; background: #202020; color: #9ca3af;
+             font-weight: 400; font-size: 11px; letter-spacing: .06em; }
+.run-tb td { padding: 7px 10px; border-bottom: 1px solid #2a2a2a; }
+.run-tb tr.run-sum td { border-bottom: none; border-top: 2px solid #3a3a3a; font-weight: 700; }
+.run-mono { font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+.run-r { text-align: right; }
+.run-warn { color: #fbbf24; }
+.run-note { margin-top: 12px; font-size: 12px; color: #9ca3af; display: flex; flex-wrap: wrap; gap: 8px; }
+@media print {
+  body * { visibility: hidden; }
+  .crm-modal-overlay, .crm-modal-overlay * { visibility: visible; }
+  .crm-modal-overlay { position: absolute; inset: 0; background: #fff; }
+  .crm-modal { max-width: none !important; box-shadow: none; }
+  .crm-modal-footer, .crm-detail-close { display: none !important; }
+  .run-tb th { background: #eee; color: #333; }
+  .crm-modal, .crm-modal-body, .run-tb td { color: #111; }
+}
+
 /* ── 應付帳款面板的列（2026-09-11）：複製鈕在**最左邊**、每一列同一顆「複製」。
    出納是照著列往下走填網銀，按鈕對齊在同一個 X 座標，眼睛不用找；列的順序＝填表順序。 */
 .pay-row { display: grid; grid-template-columns: 54px 76px 1fr; gap: 12px;
