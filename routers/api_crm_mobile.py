@@ -6,7 +6,8 @@
 
 守衛：讀 `check_logged_in`（router 層，跟 CRM 主 router 同一條底線）＋端點層 `_check_read`
 （`MOBILE_READ_MODULES`＝crm_projects；`/options` 例外——登入即可，殼要靠它判斷自己能做什麼）；
-寫 `_check_write`（`MOBILE_WRITE_MODULES`，一期空＝只給 Lv3）。路徑落在 CRM_PREFIX 底下，所以
+寫 `_check_write`（`MOBILE_WRITE_MODULES`，一期空＝只給 Lv3；改報價狀態例外＝`_check_quotes_auth`，
+跟桌機同一把）。路徑落在 CRM_PREFIX 底下，所以
 tests/unit/test_crm_read_guard（每支 GET 匿名要 401）與
 tests/unit/test_money_visibility（每條路由要掛 MoneyRedactRoute）都會管到這裡。
 
@@ -30,7 +31,7 @@ from core.money import MoneyRedactRoute, can_see_money, viewer_has_mine_scope
 from core.project_flow import LOST, PIPELINE, QUOTE_PHASE
 from core.schemas import MobileNotePayload, MobileQuoteStatusPayload
 
-from routers.crm._shared import (CRM_PREFIX, _check_status_auth, _crm_session,
+from routers.crm._shared import (CRM_PREFIX, _check_quotes_auth, _check_status_auth, _crm_session,
                                  _fmt_minute, _module_guard, _now,
                                  _project_or_404, _username)
 from routers.crm.costs import project_financial_summary
@@ -177,7 +178,7 @@ async def mobile_options(request: Request):
         "me": {
             "username": _username(request),
             "access_level": payload.get("access_level", 0),
-            # 跟 _check_write 問同一份清單：零 key＝只有管理員（同 check_admin_or_module）——加備註／改報價狀態
+            # 跟 _check_write 問同一份清單：零 key＝只有管理員（同 check_admin_or_module）——加備註（改報價狀態走 crm_quotes 那把，不看這個）
             "can_write": payload_grants(payload, *MOBILE_WRITE_MODULES),
             # 發票／付款表單：端點收 crm_invoices，但列表讀取還要 money_view（兩把都要；Lv3 恆 true）
             "can_invoice": payload_grants(payload, "crm_invoices") and payload_grants(payload, "money_view"),
@@ -311,8 +312,12 @@ async def mobile_add_note(project_id: str, req: MobileNotePayload, request: Requ
 async def mobile_quotation_status(quotation_id: str, req: MobileQuoteStatusPayload,
                                   request: Request, background: BackgroundTasks):
     """只改報價 status；`activate` 且專案還在售前 → 專案進「製作」
-    （走 routers/crm/projects.apply_project_status，跟桌機推階段同一支）。"""
-    _check_write(request)
+    （走 routers/crm/projects.apply_project_status，跟桌機推階段同一支）。
+
+    守衛是 `_check_quotes_auth`（管理員 ‖ crm_quotes），**不是** `_check_write`：桌機改報價狀態走
+    PUT /quotations/{id}（同一把鑰匙），手機這支曾經用 Lv3 那把 —— 合夥在桌機成得了案、
+    手機上連鈕都沒有（2026-09-11 蘇家弘）。推案子進製作仍另過 `_check_status_auth`。"""
+    _check_quotes_auth(request)
     if req.status not in QUOTE_STATUSES:
         raise HTTPException(status_code=422, detail=f"無效的報價狀態: {req.status}")
     async with _crm_session() as session:

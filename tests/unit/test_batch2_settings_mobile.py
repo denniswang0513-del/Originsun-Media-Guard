@@ -308,5 +308,8 @@ def test_mobile_forms_use_per_key_write_classes():
     assert "state.canExpense" in exp
 
     q = js_code_only(repo_src("frontend/m/views/quotes.js"))
-    assert 'class="m-btn sm w ${t.danger' in q, "建立／成案／拒絕（_check_write）要掛 .w"
+    # 建立／成案／拒絕的後端守衛是 _check_quotes_auth（管理員 ‖ crm_quotes），畫面用 canQuote() 判、
+    # 不掛 .w（.w＝can_write＝Lv3，比後端嚴：合夥在手機上曾看不到成案鈕，2026-09-11）
+    assert 'class="m-btn sm ${t.danger' in q and '(canQuote() ? transitions(q.status) : [])' in q
+    assert 'class="m-btn sm w ' not in q, "報價狀態鈕不准再掛 .w"
     assert 'class="m-actions w"' not in q, "整列不藏：預覽／PDF／複製連結是讀，只能看的人也要看得到"

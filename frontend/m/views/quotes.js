@@ -14,7 +14,9 @@
  * 新增打 POST /crm/projects/{id}/quotations、編輯打 PUT /crm/quotations/{id}——跟桌機同兩支端點。
  * 🔴 報價時案子通常還沒成立（owner 2026-09-07），所以入口是**客戶**不是專案：客戶必選（可現場建），
  *    專案自己打字；沒連結既有專案就在儲存時先建一個殼專案（階段＝options.quote_phase）再掛報價。
- * 🔴 這兩支的守衛是 `_check_auth`＝**管理員限定**，所以入口只給管理員（不是 canWrite）。
+ * 🔴 這兩支的守衛是 `_check_quotes_auth`＝管理員 ‖ crm_quotes，所以入口是 `canQuote()`（不是 canWrite、
+ *    也不是 isAdmin：2026-09-11 合夥蘇家弘有 crm_quotes、桌機開得了報價單，手機卻只看到 PDF／複製連結）。
+ *    只有「AI 助理」與「刪除」還是管理員限定（後端 `_check_auth`）。
  * 🔴 金額試算用 js/shared/quote-amounts.js（跟後端 _calc_quotation 同一份規則），手機不自己算稅。
  */
 import { quoteTotals, parsePaymentStages, paymentStagesToText } from '/js/shared/quote-amounts.js';
@@ -71,13 +73,14 @@ const BTN = 'flex:0 0 auto;white-space:nowrap';
 function cardHtml(q) {
     // PDF 與線上連結要「寄出」之後才出現（owner 2026-09-07「送出再產生連結與 pdf 按鈕」）：草稿還在改，不該流出去
     const sent = q.status !== list('quote_statuses')[0];
-    // 建立／成案／拒絕打 /m/quotations/{id}/status（_check_write＝can_write）：掛 .w 在按鈕上，
-    // 不掛在整列 span 上——預覽／PDF／複製連結是讀，只能看的人也要看得到
-    const btns = transitions(q.status).map(t =>
-        `<button type="button" class="m-btn sm w ${t.danger ? 'danger' : 'pri'}" style="${BTN}" data-id="${esc(q.id)}" data-to="${esc(t.to)}"${t.ask ? ' data-ask="1"' : ''}>${esc(t.label)}</button>`).join('')
-        + (isAdmin() ? `<button type="button" class="m-btn sm" style="${BTN}" data-edit="${esc(q.id)}">編輯</button>` : '')
+    // 建立／成案／拒絕打 /m/quotations/{id}/status（守衛＝_check_quotes_auth，跟桌機改狀態同一把）：
+    // 用 canQuote() 判、**不掛 .w**（.w 是 can_write＝Lv3 那把，比後端嚴）。
+    // 不藏整列 —— 預覽／PDF／複製連結是讀，只能看的人也要看得到
+    const btns = (canQuote() ? transitions(q.status) : []).map(t =>
+        `<button type="button" class="m-btn sm ${t.danger ? 'danger' : 'pri'}" style="${BTN}" data-id="${esc(q.id)}" data-to="${esc(t.to)}"${t.ask ? ' data-ask="1"' : ''}>${esc(t.label)}</button>`).join('')
+        + (canQuote() ? `<button type="button" class="m-btn sm" style="${BTN}" data-edit="${esc(q.id)}">編輯</button>` : '')
         // AI 助理：貼客戶訊息／截圖，讓它把項目整理出來（docs/QUOTE_ASSISTANT_PLAN.md）。
-        // 會改這張報價的項目，所以跟「編輯」同一把鑰匙
+        // 後端 /chat 是 _check_auth（管理員限定；跑 claude CLI），入口跟著只給管理員
         + (isAdmin() ? `<button type="button" class="m-btn sm pri" style="${BTN}" data-ai="${esc(q.id)}">AI 助理</button>` : '')
         // 預覽：只把版面畫給你確認，不建立、不存檔（owner 2026-09-07「預覽點的時候讓我確認內容，不用建立報價單」）
         + (sent ? '' : `<button type="button" class="m-btn sm" style="${BTN}" data-preview="${esc(q.id)}">預覽</button>`)
@@ -543,8 +546,9 @@ async function load(host) {
 
 export async function render(host, { first }) {
     if (first) {
-        host.innerHTML = `${isAdmin() ? '<button type="button" class="m-btn-primary" id="qt-new">開報價單</button>' : ''}<div id="qt-list"></div>`;
-        if (isAdmin()) document.getElementById('qt-new').onclick = () => openForm(host, null);
+        // 開報價單：POST /projects/{id}/quotations 是 _check_quotes_auth —— 合夥（crm_quotes）也開得了
+        host.innerHTML = `${canQuote() ? '<button type="button" class="m-btn-primary" id="qt-new">開報價單</button>' : ''}<div id="qt-list"></div>`;
+        if (canQuote()) document.getElementById('qt-new').onclick = () => openForm(host, null);
         host.addEventListener('click', (ev) => {
             const b = ev.target.closest('button[data-to]');
             if (b) return change(b, host);

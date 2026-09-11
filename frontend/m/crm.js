@@ -95,7 +95,7 @@ async function main() {
         return;
     }
     // 三把寫入旗標都由 /options.me 給（跟後端守衛問同一份清單）：
-    //   can_write   → body.no-write   藏 .w （加備註、改報價狀態、推階段：一期只有 Lv3）
+    //   can_write   → body.no-write   藏 .w （加備註、推階段：一期只有 Lv3；報價狀態鈕不掛 .w，看 quotes.js 的 canQuote）
     //   can_invoice → body.no-invoice 藏 .wi（發票、付款：crm_invoices＋money_view）
     //   can_expense → body.no-expense 藏 .we（記雜支：crm_projects）
     const meOpt = state.options.me || {};

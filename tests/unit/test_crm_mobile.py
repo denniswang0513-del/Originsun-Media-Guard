@@ -60,9 +60,13 @@ def test_write_endpoints_call_the_single_write_guard():
     code = code_only(src)
     assert re.search(r"MOBILE_WRITE_MODULES\s*(:[^=]*)?=\s*\(\)", code), "一期只給 Lv3；要開給助理改這一行"
     assert "_check_write = _module_guard(*MOBILE_WRITE_MODULES)" in code
-    for header in ("async def mobile_add_note(", "async def mobile_quotation_status("):
-        body = code_only(func_body(src, header))
-        assert "_check_write(request)" in body, f"{header} 沒過寫入守衛"
+    body = code_only(func_body(src, "async def mobile_add_note("))
+    assert "_check_write(request)" in body, "mobile_add_note 沒過寫入守衛"
+    # 改報價狀態跟桌機 PUT /quotations/{id} 同一把（管理員 ‖ crm_quotes），不是 Lv3 那把；
+    # 推案子進製作另外過 _check_status_auth（2026-09-11 合夥在手機上沒有成案鈕）
+    status = code_only(func_body(src, "async def mobile_quotation_status("))
+    assert "_check_quotes_auth(request)" in status and "_check_write(request)" not in status
+    assert "_check_status_auth(request)" in status
     options = code_only(func_body(src, "async def mobile_options("))
     assert "payload_grants(payload, *MOBILE_WRITE_MODULES)" in options, \
         "can_write 要跟守衛問同一份清單（payload_grants 零 key＝只有管理員）"
