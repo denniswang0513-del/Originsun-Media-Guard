@@ -5,6 +5,9 @@ import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, 
 // 兩本帳：Sheet 退役（owner 2026-08-25「我不會用 sheet 工作了」）→ 匯款清單
 // 也要在私帳可用。pin 模式同 crm-cashbook。
 import { finEntity as _pinEntity } from '../finance/fin-utils.js';
+// 🔴 複製一律走共用那支：同事多半從 http://192.168.1.x 連進來＝**非安全內容**，
+// `navigator.clipboard` 根本不存在，裸用它就是一顆按了沒反應的按鈕。
+import { copyText } from '../../js/shared/utils.js';
 
 let _payees = [];       // raw API data (grouped by payee)
 let _monthGroups = [];  // restructured: grouped by month, then payee
@@ -138,6 +141,13 @@ function renderList() {
     body.innerHTML = html;
 }
 
+/** 本次要匯的那幾筆＝**還沒付的**。月份分組裡可能混著已付的（已付按實際付款月份歸類），
+ *  所以「應付總額」和「這次要匯多少」不是同一個數字 —— 匯款時要用的是這個。 */
+const _unpaidItems = (p) => p.items.filter(it => it.payment_status !== '已付款');
+const _unpaidTotal = (p) => _unpaidItems(p).reduce((s, it) => s + (it.amount || 0), 0);
+/** 一筆項目寫成一行人看得懂的字（複製出去給收款人核對用）。 */
+const _itemLine = (it) => `${it.summary}${it.project_label ? `（${it.project_label}）` : ''} $${_fmtNum(it.amount)}`;
+
 /* ── 詳情面板 ── */
 function renderDetail(p, month) {
     const monthLabel = month === '未指定月份' ? '未指定月份' : month.replace(/^(\d{4})-(\d{2})$/, '$1年$2月');
@@ -148,7 +158,7 @@ function renderDetail(p, month) {
         const hasUnpaid = p.items.some(it => it.payment_status !== '已付款');
         const key = p.payee_name + '|' + month;
         actionsArea.innerHTML = `
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payableCopyInfo('${_esc(p.payee_name)}','${_esc(month)}')">複製匯款資訊</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payableCopyInfo('${_esc(p.payee_name)}','${_esc(month)}',this)">複製匯款資訊</button>
             ${hasUnpaid ? `<button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._payablePayAll('${_esc(p.payee_name)}','${_esc(month)}')">全部付款</button>` : ''}
             <button id="payable-detail-close" class="crm-detail-close" title="關閉" onclick="window._payableClose()">&#x2715;</button>
         `;
@@ -180,11 +190,26 @@ function renderDetail(p, month) {
         </div>`;
     }
 
+    // 匯款要用的是「還沒付的那幾筆」，不是這個月的總額（見 _unpaidTotal）
+    const unpaidTotal = _unpaidTotal(p);
+    const unpaidLines = _unpaidItems(p).map(_itemLine);
+
     document.getElementById('payable-detail-content').innerHTML = `
         <div class="crm-detail-prop"><div class="crm-prop-label">收款人</div><div class="crm-prop-value" style="font-weight:700;">${_esc(p.payee_name)}</div></div>
         <div class="crm-detail-prop"><div class="crm-prop-label">身分證</div><div class="crm-prop-value">${_esc(p.payee_id)}</div></div>
         ${bankHtml}
-        <div class="crm-detail-prop"><div class="crm-prop-label">應付總額</div><div class="crm-prop-value" style="font-weight:700;color:#fbbf24;">$${_fmtNum(p.month_amount)}</div></div>
+        <div class="crm-detail-prop"><div class="crm-prop-label">應付總額</div>
+            <div class="crm-prop-value" style="font-weight:700;color:#fbbf24;display:flex;align-items:center;gap:8px;">
+                <span>$${_fmtNum(p.month_amount)}</span>
+                <button class="crm-btn crm-btn-sm" style="font-size:10px;padding:1px 8px;color:#9ca3af;border:1px solid #3a3a3a;background:transparent;font-weight:400;"
+                    title="複製成純數字（沒有錢字號與逗號，直接貼進網銀）"
+                    onclick="window._payableCopyAmount('${_esc(p.payee_name)}','${_esc(month)}',this)">複製金額</button>
+                ${unpaidTotal !== p.month_amount
+                    ? `<span style="font-size:11px;color:#9ca3af;font-weight:400;">本次要匯 $${_fmtNum(unpaidTotal)}（其餘已付）</span>`
+                    : ''}
+            </div></div>
+        ${unpaidLines.length ? `<div class="crm-detail-prop"><div class="crm-prop-label">本次匯款項目</div>
+            <div class="crm-prop-value" style="font-size:12px;line-height:1.7;">${unpaidLines.map(_esc).join('<br>')}</div></div>` : ''}
         <div style="border-top:1px solid #2e2e2e;margin:10px 0;"></div>
         ${itemsHtml}
     `;
@@ -294,22 +319,36 @@ window._payableSaveDate = async (paymentId) => {
     } catch (e) { alert(e.message); }
 };
 
-window._payableCopyInfo = (name, month) => {
+window._payableCopyInfo = (name, month, btn) => {
     const grp = _monthGroups.find(g => g.month === month);
     const p = grp?.payees.find(x => x.payee_name === name);
     if (!p) return;
-    const unpaid = p.items.filter(it => it.payment_status !== '已付款');
-    const amount = unpaid.reduce((s, it) => s + it.amount, 0);
-    const text = [
+    const unpaid = _unpaidItems(p);
+    // 金額**不帶錢字號與逗號**：網銀的金額欄只收數字，帶符號就得手動改，改就會錯
+    // （owner 2026-09-11 轉述同事：「不要有標點符號，比較不會手動修改錯誤」）
+    // 🔴 沒填的欄位要整行丟掉（filter(Boolean)），但分隔用的空行要留 —— 所以先濾完
+    // 抬頭那幾行、再接項目清單。混在同一個陣列裡濾，不是多一行空白就是少一個分隔。
+    const head = [
         '收款人: ' + p.payee_name,
         p.payee_id ? '身分證: ' + p.payee_id : '',
         p.bank_name ? '銀行: ' + p.bank_name : '',
         p.bank_account ? '帳號: ' + p.bank_account : '',
-        '金額: $' + amount.toLocaleString('zh-TW'),
-    ].filter(Boolean).join('\n');
-    navigator.clipboard.writeText(text).then(() => alert('已複製匯款資訊')).catch(() => {
-        prompt('請手動複製:', text);
-    });
+        '金額: ' + _plainAmount(_unpaidTotal(p)),
+    ].filter(Boolean);
+    // 通知收款人時對得起來：這次匯的是哪幾筆（同事要的「本次匯款項目包含哪一些」）
+    const tail = unpaid.length ? ['', '本次匯款項目：', ...unpaid.map(it => '・' + _itemLine(it))] : [];
+    const text = [...head, ...tail].join('\n');
+    copyText(text, btn);
+};
+
+/** 貼進網銀的金額：純數字，沒有錢字號也沒有逗號。 */
+const _plainAmount = (n) => String(Math.round(Number(n) || 0));
+
+window._payableCopyAmount = (name, month, btn) => {
+    const grp = _monthGroups.find(g => g.month === month);
+    const p = grp?.payees.find(x => x.payee_name === name);
+    if (!p) return;
+    copyText(_plainAmount(_unpaidTotal(p)), btn);
 };
 
 window._payablePayAll = async (name, month) => {
