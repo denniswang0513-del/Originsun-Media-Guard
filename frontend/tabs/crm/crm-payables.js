@@ -2,12 +2,14 @@
  * crm-payables.js — 應付帳款子視圖（按月份分組）
  */
 import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, createSortable, today } from './crm-utils.js';
+// 🔴 複製一律走共用那支：同事多半從 http://192.168.1.x 連進來＝**非安全內容**，
+// `navigator.clipboard` 根本不存在，裸用它就是一顆按了沒反應的按鈕。
+import { appendLog, copyText } from '../../js/shared/utils.js';
 // 兩本帳：Sheet 退役（owner 2026-08-25「我不會用 sheet 工作了」）→ 匯款清單
 // 也要在私帳可用。pin 模式同 crm-cashbook。
 import { finEntity as _pinEntity } from '../finance/fin-utils.js';
 // 🔴 複製一律走共用那支：同事多半從 http://192.168.1.x 連進來＝**非安全內容**，
 // `navigator.clipboard` 根本不存在，裸用它就是一顆按了沒反應的按鈕。
-import { copyText } from '../../js/shared/utils.js';
 
 let _payees = [];       // raw API data (grouped by payee)
 let _monthGroups = [];  // restructured: grouped by month, then payee
@@ -181,6 +183,8 @@ function renderDetail(p, month) {
         const key = p.payee_name + '|' + month;
         actionsArea.innerHTML = `
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payableCopyInfo('${_esc(p.payee_name)}','${_esc(month)}',this)">複製匯款資訊</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payoutNotify('${_esc(p.payee_name)}','${_esc(month)}')"
+                title="勾這次匯了哪幾筆，產生一條給收款人的通知連結">匯款通知</button>
             ${hasUnpaid ? `<button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._payablePayAll('${_esc(p.payee_name)}','${_esc(month)}')">全部付款</button>` : ''}
             <button id="payable-detail-close" class="crm-detail-close" title="關閉" onclick="window._payableClose()">&#x2715;</button>
         `;
@@ -487,6 +491,89 @@ function _runListText(rows, total) {
         '合計 ' + _plainAmount(total) + '　' + rows.length + ' 列 / ' + people + ' 位收款人',
     ].join(NL);
 }
+
+/** 匯款通知：勾「**這次匯了哪幾筆**」→ 產生一條連結給收款人（owner 2026-09-11）。
+ *
+ *  🔴 不是「按全部付款時順便產生」：部分匯款、補匯都是常態，所以由出納勾。
+ *  預設勾起來的是**還沒付**的那幾筆（多數情況就是這次要匯的），但已付的也列出來
+ *  可以勾 —— 補一張通知給早就匯過的人是真的會發生。
+ *  產生連結**不會**改付款狀態（標已付款是面板上另一顆）。 */
+window._payoutNotify = (name, month) => {
+    const grp = _monthGroups.find(g => g.month === month);
+    const p = grp?.payees.find(x => x.payee_name === name);
+    if (!p) return;
+
+    const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+        .toISOString().slice(0, 10);
+    const rows = p.items.map(it => {
+        const paid = it.payment_status === '已付款';
+        return `<label class="po-row">
+            <input type="checkbox" value="${_esc(it.id)}" ${paid ? '' : 'checked'}>
+            <span class="po-sum">${_esc(_itemLine(it))}</span>
+            <span class="po-st${paid ? ' done' : ''}">${paid ? '已付款' : '應付款'}</span>
+        </label>`;
+    }).join('');
+
+    const ov = document.createElement('div');
+    ov.className = 'crm-modal-overlay';
+    ov.innerHTML = `<div class="crm-modal" style="max-width:620px;">
+        <div class="crm-modal-header"><h3>匯款通知　${_esc(name)}</h3>
+            <button class="crm-detail-close" type="button" data-close>關閉</button></div>
+        <div class="crm-modal-body" style="max-height:62vh;overflow-y:auto;">
+            <div class="po-hint">勾這次<strong>實際匯出去</strong>的那幾筆。收款人打開連結會看到金額、日期與這份明細 ——
+                他的帳號與身分證不會出現在上面。</div>
+            <div class="crm-field" style="max-width:220px;">
+                <label>匯款日期</label>
+                <input type="date" id="po-date" class="crm-input" value="${today}">
+            </div>
+            <div class="po-rows">${rows}</div>
+            <div class="po-total" id="po-total"></div>
+            <div class="po-out" id="po-out" hidden></div>
+        </div>
+        <div class="crm-modal-footer">
+            <button class="crm-btn crm-btn-secondary" data-close>取消</button>
+            <button class="crm-btn crm-btn-primary" data-act="make">產生連結</button>
+        </div></div>`;
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', close));
+    ov.onclick = (e) => { if (e.target === ov) close(); };
+
+    const boxes = () => [...ov.querySelectorAll('.po-rows input:checked')].map(b => b.value);
+    const paintTotal = () => {
+        const picked = new Set(boxes());
+        const sum = p.items.filter(it => picked.has(it.id)).reduce((s, it) => s + (it.amount || 0), 0);
+        ov.querySelector('#po-total').innerHTML =
+            `本次通知金額 <b>$${_fmtNum(sum)}</b>　·　${picked.size} 筆`;
+    };
+    ov.querySelectorAll('.po-rows input').forEach(b => b.addEventListener('change', paintTotal));
+    paintTotal();
+
+    ov.querySelector('[data-act="make"]').onclick = async (e) => {
+        const ids = boxes();
+        if (!ids.length) { alert('至少要勾一筆'); return; }
+        const btn = e.currentTarget;
+        btn.disabled = true; btn.textContent = '產生中…';
+        try {
+            const r = await _fetch('/payouts', {
+                method: 'POST',
+                body: JSON.stringify({ payment_ids: ids, paid_date: ov.querySelector('#po-date').value, entity: _pinEntity() }),
+            });
+            const url = r.url && r.url.startsWith('http') ? r.url : location.origin + r.url;
+            const out = ov.querySelector('#po-out');
+            out.hidden = false;
+            out.innerHTML = `<div class="po-link">${_esc(url)}</div>
+                <button class="crm-btn crm-btn-primary crm-btn-sm" data-act="copy">複製連結</button>
+                <a class="crm-btn crm-btn-secondary crm-btn-sm" href="${_esc(url)}" target="_blank" rel="noopener">開來看看</a>`;
+            out.querySelector('[data-act="copy"]').onclick = (ev) => copyText(url, ev.currentTarget);
+            btn.textContent = '已產生';
+            appendLog(`已產生匯款通知：${name}　$${_fmtNum(r.total)}　${url}`, 'system');
+        } catch (err) {
+            alert('產生失敗：' + err.message);
+            btn.disabled = false; btn.textContent = '產生連結';
+        }
+    };
+};
 
 window._payablePayAll = async (name, month) => {
     const grp = _monthGroups.find(g => g.month === month);
