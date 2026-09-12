@@ -11,7 +11,7 @@ import { z, configure, switchZ1, setWho, _z1MarkStale, _shiftDays, _mondayOf, _m
 import { loadLog, mergeSameProject, undoMerge, resetToday, _logProjectOptions } from "./log.js";
 import { loadMyWeek, _renderMyWeek, _planOpenAdd, _planSubmitAdd, _planDelete, _planMove, _planFromMilestones, _planCopyLast, _planWireDnd, _planCardHtml } from "./plan.js";
 import { loadTeamWeek, _msToggleDone, _openMsModal } from "./team-week.js";
-import { loadFind, _renderFindTable, _openFindProject, _openProjectModal, mapSheetName, applySuggestedBudgets, setProjectBudget } from "./find.js";
+import { loadFind, _renderFindTable, _openFindProject, _openProjectModal, mapSheetName, applySuggestedBudgets, setProjectBudget, reopenFindProject } from "./find.js";
 
 export { z, switchZ1, setWho, _z1MarkStale, resetToday, _logProjectOptions, _planCardHtml, loadLog, loadMyWeek, loadTeamWeek, loadFind };
 export { _shiftDays, _dow, _mondayOf, _mdLabel, _prevWorkday, _isPlan, _POST, _PUT } from "./ctx.js";
@@ -98,7 +98,6 @@ export async function _z1Action(btn, ev) {
         const name = btn.dataset.name || "";
         s.compareNames = act === "compare-add" ? [...new Set([...s.compareNames, name])] : s.compareNames.filter(x => x !== name);
         if (z.hooks.onCompare) z.hooks.onCompare(s.compareNames);
-        btn.textContent = act === "compare-add" ? "已在比較清單" : "加入比較";   // 不整頁重畫：專案檔案裡打到一半的東西留著
-        return;
+        return reopenFindProject();   // 重畫同一個案：「並排比較（N）」那顆鈕才出現
     }
 }

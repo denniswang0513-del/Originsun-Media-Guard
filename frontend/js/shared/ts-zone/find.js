@@ -99,19 +99,27 @@ export async function applySuggestedBudgets() {
     try { await z.mjson(z.api.suggestBudgets(), _POST({})); z.s.findRows = null; await loadFind(); }
     catch (e) { alert("套用失敗：" + e.message); }
 }
-/** 專案檔案的「改預算」（prompt → PUT project_budget）。 */
+/** 專案檔案的「改預算」（prompt → PUT project_budget）；存完回到同一個案的檔案，不是退回清單。 */
 export async function setProjectBudget(pid, cur) {
     const v = window.prompt("這個案的預算小時（清空＝拿掉預算）", cur || "");
     if (v === null) return;
+    const open = z.s.findOpen;
     try {
         await z.mjson(z.api.projectBudget(), _PUT({ project_id: pid, budget_hours: v.trim() ? parseFloat(v) : null }));
         z.s.findRows = null;
         await loadFind();
+        if (open) await _openFindProject(open.name, open.pid);
     } catch (e) { alert("改預算失敗：" + e.message); }
+}
+/** 「加入比較」之後重畫同一個案的檔案：「並排比較（N）」那顆鈕才會長出來（檔案是唯讀的，重畫不掉東西）。 */
+export async function reopenFindProject() {
+    const open = z.s.findOpen;
+    if (open) await _openFindProject(open.name, open.pid);
 }
 export function _renderFindTable() {
     const { $, esc, s } = z;
     const host = $("z1-find");
+    s.findOpen = null;
     const statuses = [...new Set((s.findRows || []).map(p => p.status).filter(Boolean))];
     const types = [...new Set((s.findRows || []).map(p => p.project_type).filter(Boolean))].sort();
     host.innerHTML = `
@@ -143,6 +151,7 @@ export async function _openFindProject(name, pid) {
     const { $, esc } = z;
     const body = $("z1-find-body");
     if (!body) return;
+    z.s.findOpen = { name, pid };
     body.innerHTML = `<div class="empty">載入中…</div>`;
     try {
         const d = await z.mjson(z.api.projectFile(name, pid));

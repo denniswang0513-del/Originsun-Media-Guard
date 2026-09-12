@@ -152,6 +152,7 @@ export function configure(opts) {
         findRows: null,         // 專案查詢的表資料
         findUnmatched: [],      // 管理視角：/summary 的未對映 Sheet 案名
         compareNames: [],       // 管理視角：專案檔案「加入比較」的清單（並排比較頁在 CRM 分頁）
+        findOpen: null,         // 專案查詢目前打開的專案檔案 {name, pid}（改預算／加入比較之後要回到同一個案，不是退回清單）
         mineProjects: null,     // 管理視角：/timesheets/projects（指定專案的挑選視窗用；私帳 scope 才拿得到）
         findSorter: null,
         findState: { q: "", status: "", type: "", pct: "", from: "", to: "" },   // 一列篩選：狀態、案型、消耗率區間、最後填報日期區間
