@@ -945,7 +945,9 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
                 and any(k in update_data for k in LINK_SYNC_FIELDS)):
             linked_mine = await resolve_mine_link(session, project)
             if linked_mine is not None:
-                await _sync_pair(session, project, linked_mine)
+                # 這次親手送上來的欄位不做「母帳空白就拿私帳的補」：清結案日＝重開案，
+                # 被私帳補回去等於存不進去而且回應還說改好了
+                await _sync_pair(session, project, linked_mine, no_fill=set(update_data))
         project.updated_at = _now()
         # 專案狀態或歸屬客戶變動 → 重算客戶分級（含轉移前的舊客戶）
         await _auto_update_client_status(session, project.client_id)
@@ -1279,6 +1281,15 @@ async def move_project_ledger(project_id: str, req: ProjectLedgerMovePayload,
             raise HTTPException(status_code=409,
                                 detail="這一案已經在私帳有分身了（「推送」連的那一案）—— "
                                        "整案搬過去會變成兩個案。先解除連結，或直接用那個分身")
+        if target == "parent":
+            # 反方向同一道牆：連著母帳案的私帳分身搬回公司帳，母帳那側的 mine_link_id 會指著
+            # 一個已經在母帳的案，「重新同步」接著把鏡射的工項寫進它的合約額（兩種形狀都認）
+            from ._shared import mine_parent_links
+            _pl = (await mine_parent_links(session, [project_id])).get(project_id) or []
+            if _pl:
+                raise HTTPException(status_code=409,
+                                    detail="這一案連著母帳的「%s」（是它的分身）—— 整案搬回公司帳會變成"
+                                           "兩個母帳案互相連結。先到專案對應表解除連結" % "、".join(n for _i, n in _pl))
         p.entity = target
         # 搬到私帳的案子預設仍要在專案管理看得到（標「後期專案」）
         pushed = 1 if target == "mine" else 0
@@ -1691,12 +1702,15 @@ async def _write_link(session, parent, mine):
     await _sync_pair(session, parent, mine)
 
 
-async def _sync_pair(session, parent, mine) -> bool:
+async def _sync_pair(session, parent, mine, *, no_fill=()) -> bool:
     """對一對已連結的案套「以母帳為準」。回有沒有真的改到東西。
 
     純規則在 `sync_from_parent`；這裡只補它做不到的 I/O：N:1 判定（兩種連結形狀都認，
-    走 mine_parent_names）、以及**私帳客戶→母帳客戶**那個方向（私帳客戶是 entity=mine
-    的 Client，不能直接寫進母帳案，要先對到／建出母帳客戶）。
+    走 mine_parent_names）、以及**客戶**那一欄的兩個方向 —— 私帳客戶是 entity=mine 的
+    Client，跟母帳客戶是兩筆：私帳那筆已經連到（`crm_link_id`）母帳這筆的話兩邊
+    **就是同一個客戶**，不改（否則推送到母帳的當下私帳案的客戶就被換成母帳那筆，
+    私帳自己的客戶檔／匯款資訊從此對不上這一案）；母帳空白才反向對到／建出母帳客戶。
+    `no_fill`：母帳 PUT 親手送上來的欄位，不做「空白就拿私帳的補」。
     """
     from core.ledger_project import sync_from_parent
 
@@ -1706,8 +1720,13 @@ async def _sync_pair(session, parent, mine) -> bool:
         .where(CrmProject.mine_link_id == mine.id, CrmProject.id != parent.id))).scalar() or 0
     if other or (mine.source_project_id and mine.source_project_id != parent.id):
         return False                                   # N:1：不猜
-    changed, filled = sync_from_parent(parent, mine)
-    if not parent.client_id and mine.client_id:
+    skip = set()
+    if parent.client_id and mine.client_id and parent.client_id != mine.client_id:
+        mc = await session.get(Client, mine.client_id)
+        if mc is not None and (mc.entity or "parent") == "mine" and mc.crm_link_id == parent.client_id:
+            skip.add("client_id")                      # 同一個客戶的兩本帳，不是不一致
+    changed, filled = sync_from_parent(parent, mine, no_fill=no_fill, skip=skip)
+    if not parent.client_id and mine.client_id and "client_id" not in no_fill:
         cid = await _crm_client_for(session, mine.client_id)
         if cid:
             parent.client_id = cid

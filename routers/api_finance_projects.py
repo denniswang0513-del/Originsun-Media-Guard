@@ -561,11 +561,14 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         # 結案日：owner 的流程是「先整理專案再記帳」，日期在這張表就要能改。
         # 空字串＝清空（未結案）。日期慣例走 _parse_shoot_date（UTC 午夜）。
         if "close_date" in data:
-            # 以母帳為準：1:1 連著母帳案的私帳案，結案日在母帳改（同一交易會同步過來）
-            if ent == "mine" and len((await mine_parent_links(session, [project_id])).get(project_id, ())) == 1:
+            raw = (data.pop("close_date") or "").strip()
+            # 以母帳為準：1:1 連著母帳案的私帳案，結案日在母帳改（同一交易會同步過來）。
+            # 🔴 只在**真的要改**時擋：舊分頁的 js（CF 給 4 小時快取）整包送 close_date，
+            # 沒動也送 —— 看到鍵就 409 等於連著母帳的案四小時內一格都存不了
+            if (ent == "mine" and raw != _fmt_day(p.completion_date)
+                    and len((await mine_parent_links(session, [project_id])).get(project_id, ())) == 1):
                 raise HTTPException(status_code=409,
                                     detail="這一案連著母帳，結案日以母帳為準 —— 請到母帳那一案改，會自動同步過來")
-            raw = (data.pop("close_date") or "").strip()
             if raw:
                 d = _parse_shoot_date(raw)
                 if not d:

@@ -69,6 +69,38 @@ def test_mine_client_is_not_pushed_into_parent_by_the_pure_rule():
     assert "_crm_client_for(session, mine.client_id)" in body
 
 
+def test_no_fill_respects_a_deliberate_blank_on_the_parent():
+    """母帳 PUT 親手清空的欄位（重開案）不能在同一交易被私帳的值補回去。"""
+    d = datetime(2025, 3, 3)
+    p = _row(completion_date=None, description="")
+    m = _row(completion_date=d, description="私帳備註")
+    changed, filled = sync_from_parent(p, m, no_fill={"completion_date"})
+    assert changed == [] and filled == ["description"]
+    assert p.completion_date is None, "使用者清掉的結案日被私帳補回去了"
+    assert m.completion_date == d, "私帳不清"
+
+
+def test_skip_leaves_a_field_alone_in_both_directions():
+    p = _row(client_id="c-crm", project_type="紀實影片")
+    m = _row(client_id="c-mine-linked", project_type=None)
+    changed, filled = sync_from_parent(p, m, skip={"client_id"})
+    assert changed == ["project_type"] and filled == []
+    assert m.client_id == "c-mine-linked"
+
+
+def test_move_back_to_parent_refuses_a_linked_mirror():
+    """分身搬回公司帳＝母帳那側的 mine_link_id 指著一個母帳案，「重新同步」會寫進它的合約額。"""
+    fn = code_only(func_body(_PROJ, "async def move_project_ledger("))
+    assert 'if target == "parent":' in fn and "mine_parent_links(session, [project_id])" in fn
+
+
+def test_close_date_wall_only_fires_when_the_value_changes():
+    """舊分頁 js（CF 4 小時快取）整包送 close_date，沒動也送 —— 看到鍵就 409 等於存不了。"""
+    fin = repo_src("routers/api_finance_projects.py")
+    put = code_only(func_body(fin, "async def update_project_ledger("))
+    assert "raw != _fmt_day(p.completion_date)" in put
+
+
 def test_nothing_changes_when_both_sides_agree():
     d = datetime(2026, 1, 1)
     p = _row(client_id="c", completion_date=d, project_type="MV")
@@ -119,7 +151,9 @@ def test_write_link_is_the_only_place_that_syncs_a_pair_on_link():
     writer = code_only(func_body(_PROJ, "async def _write_link("))
     assert "await _sync_pair(session, parent, mine)" in writer
     pair = code_only(func_body(_PROJ, "async def _sync_pair("))
-    assert "sync_from_parent(parent, mine)" in pair
+    assert "sync_from_parent(parent, mine, no_fill=no_fill, skip=skip)" in pair
+    # 私帳客戶已連結到母帳這筆客戶＝同一個客戶的兩本帳，規則 1 不准把私帳案的客戶換掉
+    assert 'mc.crm_link_id == parent.client_id' in pair and 'skip.add("client_id")' in pair
     assert "CrmProject.mine_link_id == mine.id, CrmProject.id != parent.id" in pair
     assert "mine.source_project_id != parent.id" in pair, "舊形狀的第二個來源沒認"
     assert "return False" in pair
@@ -129,7 +163,8 @@ def test_parent_edits_flow_to_the_linked_mine_case():
     """母帳 PUT 改了識別欄 → 同一交易寫進連著的私帳案（不是等下次連結）。"""
     fn = code_only(func_body(_PROJ, "async def update_project("))
     assert "any(k in update_data for k in LINK_SYNC_FIELDS)" in fn
-    assert "await _sync_pair(session, project, linked_mine)" in fn
+    # 親手送上來的欄位不做規則 2：清結案日＝重開案，不能被私帳的值補回去
+    assert "await _sync_pair(session, project, linked_mine, no_fill=set(update_data))" in fn
     assert fn.index("await _sync_pair(") < fn.index("await session.commit()")
 
 

@@ -320,7 +320,7 @@ def _blank(v) -> bool:
     return v is None or (isinstance(v, str) and not v.strip())
 
 
-def sync_from_parent(parent, mine) -> tuple:
+def sync_from_parent(parent, mine, *, no_fill=(), skip=()) -> tuple:
     """連結的一對案：識別欄以母帳為準，就地改兩個物件 → `(私帳改了的欄, 母帳補了的欄)`。
 
     兩條規則（§8.2）：
@@ -331,15 +331,22 @@ def sync_from_parent(parent, mine) -> tuple:
     要先對到／建出母帳客戶 —— 那是 I/O，由呼叫端（routers/crm/projects._write_link）
     用 `_crm_client_for` 補。這支是純函式，不碰 session。
     N:1（一個私帳案承接多個母帳案）由呼叫端擋：母帳互相矛盾時不猜。
+
+    `no_fill`：這幾欄**不做規則 2** —— 母帳 PUT 裡使用者親手清空的欄位（清結案日＝
+    重開案）不能在同一交易被私帳的值補回去，那是他的決定不是「母帳沒填」。
+    `skip`：這幾欄兩個方向都不碰（呼叫端判定「兩邊其實是同一個東西」，例如私帳
+    客戶已連結到母帳那筆客戶）。
     """
     changed, filled = [], []
     for f in LINK_SYNC_FIELDS:
+        if f in skip:
+            continue
         pv, mv = getattr(parent, f, None), getattr(mine, f, None)
         if not _blank(pv):
             if pv != mv:
                 setattr(mine, f, pv)
                 changed.append(f)
-        elif not _blank(mv) and f != "client_id":
+        elif not _blank(mv) and f != "client_id" and f not in no_fill:
             setattr(parent, f, mv)
             filled.append(f)
     if "completion_date" in changed:
