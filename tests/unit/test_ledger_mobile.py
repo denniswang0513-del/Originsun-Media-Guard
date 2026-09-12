@@ -115,3 +115,30 @@ def test_mobile_ledger_has_six_tabs_with_assets_separate():
     html = repo_src("frontend/m/ledger.html")
     tabs = re.findall(r'data-tab="([a-z]+)"', html)
     assert tabs == ["cash", "projects", "receivable", "household", "overview", "assets"], tabs
+
+
+# ── L2（2026-09-13）：推送到母帳／家用按月／資產成長線 ──────────────────
+
+def test_l2_project_sheet_pushes_to_parent_through_the_existing_link_endpoints():
+    """三選一沿用 project_links 那三條路；換帳本前一定 confirm（不讓人按了才吃 409）。"""
+    js = js_code_only(repo_src("frontend/m/views/ledger-projects.js"))
+    for ep in ("/parent-create", "/parent-link", "/move-ledger", "/ledger-move-check"):
+        assert ep in js, ep
+    assert js.index("ledger-move-check") < js.index("confirm(") < js.index("/move-ledger")
+    assert "projects-mine-links" in js, "母帳候選與同名建議來自對應表那支端點"
+    assert "parent_links" in js, "已連結時不再出現推送鈕"
+
+
+def test_l2_household_is_viewed_by_month():
+    js = js_code_only(repo_src("frontend/m/views/ledger-household.js"))
+    assert "date_from" in js and "date_to" in js
+    assert "toISOString" not in js, "日期一律本地 YYYY-MM-DD"
+    assert "shiftMonth" in js and "monthRange" in js
+
+
+def test_l2_assets_growth_line_is_plain_inline_svg():
+    js = js_code_only(repo_src("frontend/m/views/ledger-assets.js"))
+    assert "<svg" in js
+    for lib in ("chart", "echarts", "d3"):
+        assert lib not in js.lower().replace("lg-chart", "").replace("growthcharthtml", "").replace("mountchart", "").replace("chart_max", "").replace("as-chart", "").replace("_chartrows", ""), lib
+    assert "快照不足兩筆" in js

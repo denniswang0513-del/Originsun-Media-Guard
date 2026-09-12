@@ -42,6 +42,21 @@
   .lg-fee input { width:110px; min-height:40px; margin:0; text-align:right; background:var(--field); border:1px solid var(--line); border-radius:8px; color:var(--ink); padding:0 10px; font-size:16px; }
   .lg-fee .m-btn.sm { min-height:40px; }
   details.m-fold .lg-fee:last-child { border-bottom:0; }
+  /* ── 士源帳本 L2：三選一 radio 列（推送到母帳）、家用月份切換、資產成長線 ── */
+  .m-form .lg-radio, .lg-radio { display:flex; gap:10px; align-items:flex-start; padding:10px 0; margin:0; border-bottom:1px solid var(--line); font-size:14px; color:var(--ink); font-weight:400; text-transform:none; letter-spacing:0; line-height:1.4; }   /* .m-form label 是 display:block，特異度要壓過它 */
+  .lg-radio > span { flex:1; min-width:0; }
+  .lg-radio:last-of-type { border-bottom:0; }
+  .lg-radio input[type=radio] { margin-top:3px; width:18px; height:18px; flex:0 0 18px; accent-color:var(--ok); }
+  .lg-radio b { color:#fff; }
+  .lg-radio .lg-sub { margin-top:2px; line-height:1.45; }
+  .lg-month { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:2px 0 8px; }
+  .lg-month button { min-width:44px; min-height:40px; background:var(--card); border:1px solid var(--line); color:var(--ink); border-radius:10px; font-size:18px; }
+  .lg-month .ym { font-size:16px; font-weight:700; color:#fff; font-variant-numeric:tabular-nums; }
+  .lg-chart { width:100%; height:auto; display:block; margin:6px 0 2px; touch-action:manipulation; }
+  .lg-chart .pt { fill:transparent; pointer-events:none; }   /* 觸控在整張 svg 上接、找最近的點；圓只是記號 */
+  .lg-chart .pt.on { fill:var(--ok); }
+  .lg-chart-tip { min-height:18px; font-size:12px; color:var(--sub); font-variant-numeric:tabular-nums; }
+  .lg-chart-axis { display:flex; justify-content:space-between; font-size:11px; color:var(--sub); font-variant-numeric:tabular-nums; }
 </style>
 </head>
 <body>

@@ -1,6 +1,6 @@
 # 士源帳本 —— 私帳手機版（`/m/ledger.html`）規劃
 
-> 狀態：**L1 已實作（2026-09-13，dev 8001 真瀏覽器驗過；未發版）**。後端 `routers/api_ledger_mobile.py`、前端 `frontend/m/ledger.html`＋六支 views；契約釘在 `tests/unit/test_ledger_mobile.py`。L2／L3 待做。
+> 狀態：**L1 已實作（2026-09-13，dev 8001 真瀏覽器驗過；未發版）**。後端 `routers/api_ledger_mobile.py`、前端 `frontend/m/ledger.html`＋六支 views；契約釘在 `tests/unit/test_ledger_mobile.py`。**L2 已實作（2026-09-13）**：專案抽屜「推送到母帳」三選一、家用按月切換、資產淨值成長線（純 SVG）。L3：icon 已定稿（無限環，`scripts/make_ledger_icon.py`）；證券／器材唯讀在 L1 資產頁已有。
 > 前置：[`docs/CRM_MOBILE_PLAN.md`](CRM_MOBILE_PLAN.md)（手機殼與規矩）、[`docs/LEDGER_ENTITY_PLAN.md`](LEDGER_ENTITY_PLAN.md)（兩本帳）、
 > [`docs/LEDGER_UNIFY_PLAN.md`](LEDGER_UNIFY_PLAN.md) §8（母私帳推送）。
 > 桌機正本：`/my-ledger.html`（`window._finEntity='mine'` → `tabs/finance/`）。

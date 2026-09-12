@@ -7,9 +7,10 @@
  * 連著母帳的案（locked_fields）結案日鎖住，到母帳改。
  */
 import { mfetch, toast, esc, money } from '../shell.js';
-import { openSheet, closeSheet, selectOpts, skeleton, emptyBox, errBox, withBusy } from '../ui.js';
+import { openSheet, closeSheet, selectOpts, skeleton, emptyBox, errBox, withBusy, mountPicker, pickerHtml } from '../ui.js';
 
 const API = '/api/v1/finance/project-ledger';
+const CRM = '/api/v1/crm';                    // 推送到母帳的三條路都在 CRM 那支 router（project_links.py）
 const MAIN_FEES = ['outsource', 'misc'];      // 委外費用／行政雜支：顯眼；其餘收進「更多」
 
 let _rows = [];
@@ -92,6 +93,7 @@ export async function openProjectSheet(id, onDone) {
             <div class="k"><div class="n">${money(p.received)}</div><div class="l">實收</div></div>
             <div class="k"><div class="n">${money(p.receivable)}</div><div class="l">未收</div></div>
         </div>
+        ${parents.length ? '' : `<button type="button" class="m-btn" id="pj-push" style="width:100%;margin-bottom:8px">推送到母帳</button><div id="pj-push-box" hidden></div>`}
         <div class="m-form">
             <label>結案日${locked ? '<span class="lg-lock" title="以母帳為準：到母帳那一案改，會自動同步過來">母帳</span>' : ''}</label>
             <input type="date" id="pj-close" value="${esc(p.close_date || '')}" ${locked ? 'disabled' : ''}>
@@ -115,6 +117,13 @@ export async function openProjectSheet(id, onDone) {
             <span class="v ${e.deposit ? 'amt in' : 'amt out'}">${e.deposit ? '+' + money(e.deposit) : '−' + money(e.expense)}</span></div>`).join('')
             : '<div class="m-empty" style="padding:8px 0">還沒有收支掛在這案</div>'}</div>
         ${p.notes ? `<div class="m-h">備註</div><div class="notes">${esc(p.notes)}</div>` : ''}`;
+
+    // 推送到母帳（owner 2026-09-12 L2）：同一個 sheet 內展開三選一，流程照桌機 projects.js 的 _fp.pushParent
+    const pushBtn = body.querySelector('#pj-push');
+    if (pushBtn) pushBtn.addEventListener('click', () => mountPushBox(body, p, {
+        onLinked: async () => { closeSheet(); if (onDone) await onDone(); openProjectSheet(id, onDone); },   // 重開：parent_links 會出現、按鈕收掉
+        onMoved: async () => { closeSheet(); if (onDone) await onDone(); },                                   // 這案已不在私帳：只重抓清單
+    }));
 
     // 「＋加一筆」：手填值加上去（純前端加總，存的時候一起送）
     body.querySelectorAll('button[data-add]').forEach(b => b.addEventListener('click', () => {
@@ -142,6 +151,77 @@ export async function openProjectSheet(id, onDone) {
         try {
             await mfetch(`${API}/${encodeURIComponent(id)}?entity=mine`, { method: 'PUT', body: payload });
             toast('已儲存'); closeSheet(); if (onDone) await onDone();
+        } catch (e) { toast(e.message, 'err'); }
+    }));
+}
+
+
+// ── 推送到母帳（L2）──────────────────────────────────────────────
+// 「推送」＝在母帳建對應的案並連結，兩案並存、錢不搬（docs/LEDGER_UNIFY_PLAN.md §8）。三選一：
+//   create → POST /projects/{id}/parent-create（母帳合約額先用私帳的、標待確認；客戶沒對應會一併建）
+//   link   → PUT  /projects/{id}/parent-link {parent_id}
+//   move   → 整案換帳本：GET ledger-move-check → confirm → POST move-ledger {entity:'parent'}
+// 母帳候選與同名建議來自 GET /projects-mine-links（對應表那支端點，parents[]／mine[].suggest_id／client_state）。
+async function mountPushBox(body, p, { onLinked, onMoved }) {
+    const box = body.querySelector('#pj-push-box');
+    const btn = body.querySelector('#pj-push');
+    if (!box) return;
+    if (!box.hidden) { box.hidden = true; return; }        // 再按一次收起來
+    box.hidden = false;
+    box.innerHTML = skeleton(2);
+    btn.disabled = true;
+    let links;
+    try { links = await mfetch(`${CRM}/projects-mine-links`); }
+    catch (e) { box.innerHTML = errBox(e); btn.disabled = false; return; }
+    btn.disabled = false;
+    const me = (links.mine || []).find(m => m.id === p.id) || {};
+    // 已對應到別的私帳案的母帳案不能再連（母帳側 1 對 1），直接不列；同名建議排最前並預選
+    const cands = (links.parents || []).filter(x => !x.linked_mine_id)
+        .sort((a, b) => (b.id === me.suggest_id) - (a.id === me.suggest_id))
+        .map(x => ({ value: x.id, label: `${x.name}${x.client ? `（${x.client}）` : ''}${x.id === me.suggest_id ? ' — 同名建議' : ''}` }));
+    const taken = (links.parents || []).length - cands.length;
+    box.innerHTML = `<div class="m-card">
+        <div class="m-form">
+            <label class="lg-radio"><input type="radio" name="pj-push-mode" value="create" checked>
+                <span><b>公司的案，我做其中一部分</b> —— 在母帳建立對應的專案並連結
+                <div class="lg-sub">案名／客戶／結案日照帶，母帳的合約金額先用私帳的並標為待確認（那是你拿到的那段，不是公司跟客戶的合約額）。${
+                    me.client_state === 'none' ? `<div style="color:var(--warn)">客戶「${esc(p.client || '')}」在母帳還沒有對應的一筆，會一併建立並連結。</div>` : ''}</div></span></label>
+            <label class="lg-radio"><input type="radio" name="pj-push-mode" value="link">
+                <span><b>連結到既有的母帳專案</b>${taken ? `<div class="lg-sub">已對應到別案的 ${taken} 案不列</div>` : ''}</span></label>
+            <div id="pj-push-pick" hidden><label>母帳專案</label>${pickerHtml('pj-push-parent')}</div>
+            <label class="lg-radio"><input type="radio" name="pj-push-mode" value="move">
+                <span><b>整個是公司的案，記錯帳本了</b> —— 搬回公司帳
+                <div class="lg-sub">一案只在一本：錢流歸屬改回母公司，之後掛在它身上的錢都算公司的；私帳這邊不再有這一案。身上已有收支的案搬不動。</div></span></label>
+        </div>
+        <button type="button" class="m-btn-primary" id="pj-push-go">執行</button>
+    </div>`;
+    mountPicker('pj-push-parent', { items: cands, placeholder: '打字找母帳專案…',
+                                     value: cands.length && me.suggest_id && cands[0].value === me.suggest_id ? me.suggest_id : '' });
+    const mode = () => (box.querySelector('input[name="pj-push-mode"]:checked') || {}).value || 'create';
+    const sync = () => { box.querySelector('#pj-push-pick').hidden = mode() !== 'link'; };
+    box.addEventListener('change', sync);
+    sync();
+    box.querySelector('#pj-push-go').addEventListener('click', (ev) => withBusy(ev.currentTarget, async () => {
+        const m = mode();
+        try {
+            if (m === 'link') {
+                const target = body.querySelector('#pj-push-parent').value || '';
+                if (!target) { toast('請先選一個母帳專案', 'err'); return; }
+                await mfetch(`${CRM}/projects/${encodeURIComponent(p.id)}/parent-link`, { method: 'PUT', body: { parent_id: target } });
+                toast('已連結到母帳專案');
+            } else if (m === 'move') {
+                const chk = await mfetch(`${CRM}/projects/${encodeURIComponent(p.id)}/ledger-move-check`);
+                if (!chk.can_move) { toast(chk.reason || '這個專案不能換帳本', 'err'); return; }   // 這句話的正本在後端
+                if (!window.confirm(`把「${chk.name}」搬回母公司帳？\n\n錢流歸屬改回母公司，之後掛在它身上的錢都算公司的；私帳這邊不再有這一案。`)) return;
+                await mfetch(`${CRM}/projects/${encodeURIComponent(p.id)}/move-ledger`, { method: 'POST', body: { entity: 'parent' } });
+                toast('已搬回公司帳');
+                await onMoved();
+                return;
+            } else {
+                const r = await mfetch(`${CRM}/projects/${encodeURIComponent(p.id)}/parent-create`, { method: 'POST' });
+                toast(`已在母帳建立「${r.name || p.name}」並連結`);
+            }
+            await onLinked();
         } catch (e) { toast(e.message, 'err'); }
     }));
 }
