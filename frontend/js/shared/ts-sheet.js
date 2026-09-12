@@ -24,6 +24,28 @@ export const SHEET_COLS = [
 ];
 export const BLANK_ROWS = 5;
 
+/**
+ * 數字欄的 `inputmode`：**只有觸控裝置才加**（同事回饋 2026-09-11）。
+ *
+ * 症狀：在「起／訖」打完時間，游標回到「做了什麼」「備註」就變成英文輸入法，
+ * 每一列都要手動切回中文。
+ *
+ * 原因：Windows 上的 Chrome 會把 `inputmode` 轉成輸入法的 InputScope，
+ * numeric／decimal ＝「這一格只收數字」→ 微軟輸入法切成英數。而輸入法的
+ * 中/英模式是**視窗層級的狀態**，離開那一格不會自己切回來 —— 於是下一個
+ * 中文欄位就是英數。
+ *
+ * `inputmode` 的用途本來就只是「在手機上叫出數字鍵盤」，桌機有實體鍵盤，
+ * 加了零好處、卻要付這個代價。所以依指標裝置決定要不要輸出。
+ *
+ * 🔴 不要改回無條件輸出。`type="text"` 那半是另一回事（時數格要能打
+ * 「2.5+1.1」算式，`type="number"` 會擋掉「+」）—— 那條由
+ * tests/unit/test_hours_expr_and_sheet_claim.py 釘著，兩者不要混為一談。
+ */
+const NUM_IM = (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches)
+    ? { num: ' inputmode="numeric"', dec: ' inputmode="decimal"' }
+    : { num: '', dec: '' };
+
 const CSS = `
 table.ts-sheet { --sh-bg:#1b1b1b; --sh-line:#3a3a3a; --sh-head:#262626; --sh-head-ink:#bbb; --sh-ink:#eee; --sh-sub:#777;
     --sh-ro:#1f1f1f; --sh-ro-ink:#888; --sh-hover:#202020; --sh-focus:#1f2937; --sh-accent:#3b82f6; --sh-del:#666; --sh-del-hover:#f87171;
@@ -103,7 +125,7 @@ export function rowHtml(v = {}, o = {}, ctx = {}) {
     // Sheet 列：input 用 readonly（文字還能選取、複製貼到下一列）；select 沒有 readonly 只能 disabled
     const ro = o.readonly ? ' readonly' : '';
     const rosel = o.readonly ? ' disabled' : '';
-    const t = 'type="text" inputmode="numeric" maxlength="5" placeholder="09:00" autocomplete="off"';
+    const t = `type="text"${NUM_IM.num} maxlength="5" placeholder="09:00" autocomplete="off"`;
     const pid = v.project_id ? ` data-pid="${esc(v.project_id)}" data-pname="${esc(v.project || '')}"` : '';
     const state = o.readonly ? 'Sheet' : (o.id ? (o.plan ? planStateHtml() : (o.pending ? '草稿（沒時數）' : '已存')) : '');
     return `<tr class="ts-mine-row"${o.id ? ` data-id="${esc(o.id)}"` : ''}${o.readonly ? ' data-readonly="1"' : ''}${o.plan ? ' data-plan="1"' : ''}${v.bulletin_id ? ` data-bulletin="${esc(v.bulletin_id)}"` : ''}>
@@ -113,7 +135,7 @@ export function rowHtml(v = {}, o = {}, ctx = {}) {
         <td>${stageSelectHtml({ id: v.stage_id || '', name: v.stage_name || '' }, `data-f="stage"${rosel}`, stagesFor(ctx.stages, v.work_type))}</td>
         <td><input type="text" data-f="note" value="${esc(v.note || '')}"${ro}></td>
         <td><input type="text" data-f="remark" value="${esc(v.remark || '')}"${ro}></td>
-        <td><input type="text" inputmode="decimal" data-f="hours" value="${v.hours ?? ''}" title="可以打算式：2.5+1.1、或在原數字後面接 +1.1"${ro}></td>
+        <td><input type="text"${NUM_IM.dec} data-f="hours" value="${v.hours ?? ''}" title="可以打算式：2.5+1.1、或在原數字後面接 +1.1"${ro}></td>
         <td><input ${t} data-f="t0" value="${esc(v.t0 || '')}"${ro}></td>
         <td><input ${t} data-f="t1" value="${esc(v.t1 || '')}"${ro}></td>
         <td class="ts-sheet-state" data-f="state"${o.pending && !o.plan ? ' style="color:var(--sh-warn)"' : ''}>${state}</td>

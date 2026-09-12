@@ -13,7 +13,10 @@ from tests.unit._srcscan import _REPO, code_only, func_body, js_code_only, repo_
 
 def test_hours_cell_is_text_with_expression_parser_shared_by_mobile():
     sheet = repo_src("frontend/js/shared/ts-sheet.js")
-    assert 'type="text" inputmode="decimal" data-f="hours"' in sheet and 'type="number" data-f="hours"' not in sheet
+    # inputmode 2026-09-11 改成依裝置輸出（見下面那條測試），這裡釘的是 **type**：
+    # type="number" 會擋掉「+」，算式就打不出來
+    assert 'type="text"${NUM_IM.dec} data-f="hours"' in sheet
+    assert 'type="number" data-f="hours"' not in sheet
     js = js_code_only(sheet)
     assert "export function parseHours(raw)" in js
     assert js.count("hours: parseHours(v('hours'))") == 2, "rowValues 與 rowBody 都要走算式"
@@ -21,6 +24,31 @@ def test_hours_cell_is_text_with_expression_parser_shared_by_mobile():
     mob = js_code_only(repo_src("frontend/m/views/worklog.js"))
     assert "parseHours(F('hours').value)" in mob and 'id="wl-hours" type="text" inputmode="decimal"' in mob
     assert "parseHours, projectFromInput } from '../../js/shared/ts-sheet.js'" in mob
+
+
+def test_numeric_inputmode_is_touch_only_so_the_ime_survives():
+    """同事回饋 2026-09-11：打完「起／訖」回到「做了什麼」「備註」變成英文輸入法。
+
+    Windows 的 Chrome 把 `inputmode` 轉成輸入法 InputScope，numeric/decimal ＝
+    「只收數字」→ 微軟輸入法切英數；而中/英模式是**視窗層級**的狀態，離開那一格
+    不會自己切回來。`inputmode` 的用途只是手機叫數字鍵盤，桌機加了零好處。
+
+    所以：桌機不輸出、觸控才輸出。改回無條件輸出就會再犯一次，故釘住。
+    """
+    sheet = repo_src("frontend/js/shared/ts-sheet.js")
+    js = js_code_only(sheet)
+    # 列模板裡一個寫死的 inputmode 都不准有 —— 三個數字欄都要走同一個開關
+    row = func_body(js, "export function rowHtml(")
+    assert "inputmode=" not in row, "列模板不可寫死 inputmode，要走 NUM_IM"
+    assert "NUM_IM.num" in row and "NUM_IM.dec" in row
+    assert js.count("matchMedia('(pointer: coarse)')") == 1, "裝置判斷只有一份"
+    # 中文欄位（做了什麼／備註／專案）本來就不該有 inputmode —— 有的話同樣會踢掉輸入法
+    for f in ('data-f="note"', 'data-f="remark"'):
+        cell = sheet[sheet.index(f) - 120:sheet.index(f) + 40]
+        assert "inputmode" not in cell, f"{f} 不可以有 inputmode"
+    # 手機版的時數欄維持 inputmode（那裡要的就是數字鍵盤，而且沒有實體鍵盤可切）
+    mob = js_code_only(repo_src("frontend/m/views/worklog.js"))
+    assert 'id="wl-hours" type="text" inputmode="decimal"' in mob
 
 
 def test_parse_hours_truth_table_in_node():
