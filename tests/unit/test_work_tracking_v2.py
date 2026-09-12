@@ -84,7 +84,9 @@ def test_rows_endpoint_takes_day_range_and_staff_and_marks_editable():
     body = code_only(func_body(api, "async def ledger_rows("))
     assert 'staff_id: str = ""' in api.split("async def ledger_rows(")[1].split("):")[0]
     assert 'alias="from"' in api.split("async def ledger_rows(")[1].split("):")[0]
-    assert "(d1 - d0).days > 62" in body, "日期區間要有上限"
+    win = code_only(func_body(api, "def _rows_window("))
+    assert "(d1 - d0).days > ROWS_DAY_SPAN_MAX" in win and "ROWS_DAY_SPAN_MAX = 62" in api, "日期區間要有上限"
+    assert "_rows_window(month, to, date, from_, to_day)" in body
     assert "q = q.where(Timesheet.staff_id == staff_id.strip())" in body
     assert '{**ts_dict(r, with_note=is_admin), "editable": is_admin}' in body, "格子照 editable 畫可改／唯讀"
 

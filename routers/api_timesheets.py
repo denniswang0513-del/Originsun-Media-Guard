@@ -487,25 +487,7 @@ async def ledger_rows(request: Request, month: str = "", to: str = "", date: str
     `from`＋`to_day`（一段日期，最多 62 天；`to` 已被月份佔走）、`staff_id`（只看一個人）。給了 date 或 from 就不看 month。
     列的 `editable` 跟整包一樣只給管理員（PUT／DELETE /rows 是 check_admin）—— 格子照這個欄位決定畫成可改還是唯讀。"""
     is_admin = payload_grants(check_admin_or_module(request, "timesheets"))
-    if (date or "").strip() or (from_ or "").strip():
-        d0 = _day_or_422(date or from_)
-        d1 = d0 + timedelta(days=1) if (date or "").strip() else _day_or_422(to_day or from_) + timedelta(days=1)
-        if d1 <= d0:
-            raise HTTPException(status_code=422, detail="迄日不能早於起日")
-        if (d1 - d0).days > 62:
-            raise HTTPException(status_code=422, detail="區間最多 62 天")
-        m0, m1, label = d0, d1, {"date": d0.date().isoformat(), "to_day": (d1 - timedelta(days=1)).date().isoformat()}
-    else:
-        m0, m1 = month_or_422(month)
-        t0 = None
-        if to:
-            t0, t1 = month_or_422(to)
-            if t0 < m0:
-                raise HTTPException(status_code=422, detail="迄月不能早於起月")
-            if (t0.year - m0.year) * 12 + (t0.month - m0.month) >= 12:
-                raise HTTPException(status_code=422, detail="區間最多 12 個月")
-            m1 = t1
-        label = {"month": month_key(m0), "to": month_key(t0) if to else ""}
+    m0, m1, label = _rows_window(month, to, date, from_, to_day)
     factory = db_factory_or_503()
     async with factory() as session:
         q = select(Timesheet).where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
@@ -514,6 +496,32 @@ async def ledger_rows(request: Request, month: str = "", to: str = "", date: str
         rows = (await session.execute(q.order_by(Timesheet.work_date.desc(), Timesheet.staff_name, Timesheet.created_at))).scalars().all()
     return {**label, "editable": is_admin,
             "items": [{**ts_dict(r, with_note=is_admin), "editable": is_admin} for r in rows], "work_types": list(WORK_TYPES)}
+
+
+#: 日期切法的區間上限（管理視角一次看一個人幾週的列；月份那條另有 12 個月的上限）
+ROWS_DAY_SPAN_MAX = 62
+
+
+def _rows_window(month: str, to: str, date: str, from_: str, to_day: str):
+    """/rows 的時間窗：給了 date 或 from 走日期（一天／一段），否則走月份（起～迄）。回 (起, 迄+1, 回應裡的標籤欄)。"""
+    if (date or "").strip() or (from_ or "").strip():
+        d0 = _day_or_422(date or from_)
+        d1 = d0 + timedelta(days=1) if (date or "").strip() else _day_or_422(to_day or from_) + timedelta(days=1)
+        if d1 <= d0:
+            raise HTTPException(status_code=422, detail="迄日不能早於起日")
+        if (d1 - d0).days > ROWS_DAY_SPAN_MAX:
+            raise HTTPException(status_code=422, detail=f"區間最多 {ROWS_DAY_SPAN_MAX} 天")
+        return d0, d1, {"date": d0.date().isoformat(), "to_day": (d1 - timedelta(days=1)).date().isoformat()}
+    m0, m1 = month_or_422(month)
+    t0 = None
+    if to:
+        t0, t1 = month_or_422(to)
+        if t0 < m0:
+            raise HTTPException(status_code=422, detail="迄月不能早於起月")
+        if (t0.year - m0.year) * 12 + (t0.month - m0.month) >= 12:
+            raise HTTPException(status_code=422, detail="區間最多 12 個月")
+        m1 = t1
+    return m0, m1, {"month": month_key(m0), "to": month_key(t0) if to else ""}
 
 
 @router.get("/people")

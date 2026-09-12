@@ -1485,6 +1485,9 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   manifest 讀，維持 stdlib-only）。同日：`test_files_stay_readable` 的掃描加了 `.css`
   （`crm.css` 2,286 行拆成 `crm.css`＋`crm-project-views.css`，載入順序不能反）、`core/schemas.py`
   拆成六段套件（掃原始碼用 `_srcscan.schemas_src()`）、`_crm_cols` 搬到 `db/migrations.CRM_COLUMNS`。
+- **`burn_rows` 的每一個消費者都要自己抹錢**（2026-09-12 /polish 抓到）：它 2026-09-12 起帶合約未稅／預期毛利／人力成本
+  （建議預算本來就是從毛利算出來的）。`/summary` 尾端有 `_redact_summary`、`/me/projects_burn` 只取 `SUMMARY_PUBLIC_KEYS`，
+  但 `/dashboard` 的 `burn_top` 原本整列直接回給任何有 timesheets 鑰匙的人。給 burn 列加欄位＝要 grep `burn_rows(` 的每個呼叫端。
 - **ts-zone 的 `_POST`／`_PUT` body 是物件，不預先 stringify**（2026-09-12）：兩個宿主的 fetch 包裝對字串 body 的處理相反 ——
   員工頁的 `mfetch` 原樣交給 fetch（要字串），CRM 的 `tsFetch`→`authFetch` 對任何 body 都 `JSON.stringify`（給字串＝雙重編碼 → 422）。
   所以視圖只給物件，員工頁的殼（`zone1.js` 的 `zjson`）自己 stringify。同一個原因：`js/my/zone1.js` 裡的 `_POST`／`_PUT`（給 parttime.js 用）
