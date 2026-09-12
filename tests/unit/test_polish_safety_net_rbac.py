@@ -5,7 +5,7 @@ record_denial（core.auth）：403 記錄的形狀；payload／request 給 None 
 plan_for_targets／plan_for_rows（routers/api_timesheets）：兼職排班的兩支讀取端點——守衛、查誰、日期半開區間。
 """
 from core.auth import record_denial, recent_denials
-from tests.unit._srcscan import code_only, func_body, repo_src, timesheets_src
+from tests.unit._srcscan import code_only, func_body, timesheets_src
 
 
 class _Req:

@@ -127,7 +127,7 @@ def test_one_allocation_per_pair():
 
 # ── 接線 ──────────────────────────────────────────────────────────
 
-from tests.unit._srcscan import code_only, func_body, repo_src   # noqa: E402
+from tests.unit._srcscan import code_only, func_body   # noqa: E402
 
 # 內容本身（不是路徑）—— finance.py 2026-08-30 拆成四個檔，
 # finance_src() 把它們串起來，斷言釘的是「這支函式做了什麼」不是它在哪。
