@@ -362,3 +362,26 @@ def test_blocker_filter_shape():
     assert inv is not None and "內部代開" in str(inv.compile(compile_kwargs={"literal_binds": True}))
     pr = _blocker_filter(CrmPaymentRequest)
     assert pr is not None and "source_invoice_id IS NULL" in str(pr)
+
+
+# ── code review round 2：0 不准洗掉既有私帳案；沒綁人員檔案不判落後 ───────────
+
+def test_zero_total_never_overwrites_an_existing_mine_case():
+    """🔴 「不擋 0」只該放行**新建**（開 0 由他填）。連到既有私帳案時 CRM 算出 0
+    （沒綁人員檔案、或成本行一筆都沒掛給我）→ overwrite 會把他親手填的合約額與工項
+    洗成 0、add 會把 mirror_total 清掉；以前這條路被 409 擋著。退成 keep（只連結）。"""
+    post = code_only(func_body(_PROJ, "async def mirror_project_to_mine("))
+    seg = post.split("if target_id:")[1]
+    assert 'mode in ("overwrite", "add") and not mir["total"]' in seg
+    assert 'mode = "keep"' in seg
+    assert seg.index('mode = "keep"') < seg.index('if mode == "import":')
+    # 代開發票的分身收入是母帳合約額，0 成本行是常態 —— 不退
+    assert '!= "代開發票"' in seg.split('mode = "keep"')[0]
+
+
+def test_stale_is_unknown_when_the_account_has_no_staff_binding():
+    """沒綁人員檔案時 mir["total"] 是「認不出來」不是 0 —— 拿去比會把每一個已同步的案
+    都標成「私帳落後 −全部」。判不出來就回 None（畫面維持原字）。"""
+    chk = code_only(func_body(_PROJ, "async def check_project_mirror("))
+    assert "elif sid:" in chk
+    assert chk.index("elif sid:") < chk.index("mirror_stale(linked.ledger_detail")

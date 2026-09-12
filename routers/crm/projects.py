@@ -1459,9 +1459,11 @@ async def check_project_mirror(project_id: str, request: Request):
                 select(CrmProject.mine_link_id, _sa_func.count())
                 .where(CrmProject.mine_link_id.isnot(None))
                 .group_by(CrmProject.mine_link_id))).all())
-        else:
+        elif sid:
             # 私帳落後了沒：比「上次同步的合計」（core.ledger_project.mirror_stale）。
-            # 一個私帳案承接多個母帳案時那個合計不屬於任何一案 → 判不出來（None）
+            # 一個私帳案承接多個母帳案時那個合計不屬於任何一案 → 判不出來（None）。
+            # 沒綁人員檔案時 mir["total"] 是「認不出來」不是 0 —— 拿去比會把每一個
+            # 已同步的案都標成「私帳落後 −全部」，所以一樣判不出來（None）
             from ._shared import mine_parent_names
             shared = len((await mine_parent_names(session, [linked.id])).get(linked.id) or []) > 1
             if not shared:
@@ -1598,6 +1600,14 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
             if (t.entity or "parent") != "mine":
                 raise HTTPException(status_code=409, detail="要連結的專案不在私帳")
             keep = norm_detail(t.ledger_detail)
+            # 🔴 連到**既有**私帳案而 CRM 這邊算出來是 0（沒綁人員檔案認不出哪幾行是我的、
+            # 或成本行一筆都沒掛給我）：overwrite 會把他親手填的合約額與工項洗成 0、add 會
+            # 把 mirror_total 清掉。以前這條路被 409 擋著，「不擋 0」只該放行**新建**（開 0
+            # 由他填），既有的案退成 keep（只連結、金額不動）。代開發票例外：那案的收入是
+            # 母帳合約額不是成本行，0 本來就是常態。
+            if (mode in ("overwrite", "add") and not mir["total"]
+                    and (source or keep.get("source") or MIRROR_SOURCE) != "代開發票"):
+                mode = "keep"
             if mode == "import":
                 # 反過來：私帳是正本，把它的工項寫成母公司的成本行。
                 # 私帳那一列除了連結之外一個數字都不動。
@@ -1652,7 +1662,10 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
         # 否則這一分鐘內它會被當成母公司的（同 move-ledger 的理由）
         from core.ledger import invalidate_mine_projects
         invalidate_mine_projects()
-    return {"status": "ok", "id": new_id, "amount": mir["total"],
+    # amount＝畫面 toast 要講的數字：add 是加了多少（delta＝mir["total"]），其他是私帳那案
+    # 現在的收入（代開發票的分身是母帳合約額，不是成本行合計 —— 回 mir["total"] 會說「同步收入 0」）
+    return {"status": "ok", "id": new_id,
+            "amount": mir["total"] if mode == "add" else int(t.contract_amount or 0),
             "mode": mode, "imported": imported, "staff_bound": bool(sid)}
 
 
