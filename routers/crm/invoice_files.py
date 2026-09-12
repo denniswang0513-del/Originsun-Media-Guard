@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import glob
 import ntpath
 import os
 import re
@@ -448,9 +449,8 @@ async def invoice_share_meta(token: str, request: Request):
     if not path:
         raise HTTPException(status_code=404, detail="檔案不存在")
     from config import load_settings
-    company = load_settings().get("company") or {}
-    return invoice_share.meta(snap, voided=voided, seller=company,
-                              bankbook=bool(_bankbook_local_path(company)))
+    return invoice_share.meta(snap, voided=voided, seller=load_settings().get("company") or {},
+                              bankbook=(not voided) and bool(_bankbook_local_path()))
 
 
 @public_router.get("/public/invoice-file/{token}/bankbook")
@@ -464,8 +464,7 @@ async def invoice_share_bankbook(token: str, request: Request):
     """
     await surface_gate(request)
     _path, _snap, voided = await _share_row(token)
-    from config import load_settings
-    path = "" if voided else _bankbook_local_path(load_settings().get("company") or {})
+    path = "" if voided else _bankbook_local_path()
     if not path:
         raise HTTPException(status_code=404, detail="檔案不存在")
     return no_store_file(path, filename=ntpath.basename(path))
@@ -476,8 +475,9 @@ async def invoice_share_bankbook(token: str, request: Request):
 # 全公司一份、放在**發票根目錄**底下而不是 master 的 company_assets/：那頁由 NAS 對外
 # 容器 serve，company_assets/ 是 master 本機資料夾、NAS 看不到 —— 放那裡的話 master
 # 關機時「下載發票」好的、「存摺影本」404，同一頁兩顆鈕一顆好一顆壞。
-# 檔名固定（`存摺影本.<ext>`），換檔就覆蓋：路徑字串靠 /publish 才到 NAS，檔名不變
-# 的話之後換檔 NAS 立刻吃到新檔，不用再發版。
+# 位置固定（`_公司/存摺影本.<ext>`）而且**不進設定**：兩台都直接到那裡找，所以上傳完
+# 兩邊立刻生效，不必等 /publish 把路徑字串送去 NAS（第一版存了 `company.bankbook_path`，
+# 換副檔名後 NAS 那台會指著已刪的舊檔 —— 設定沒有承擔任何事，拿掉）。
 _BANKBOOK_DIR = "_公司"
 _BANKBOOK_STEM = "存摺影本"
 _BANKBOOK_MAX_BYTES = 10 * 1024 * 1024
@@ -495,35 +495,24 @@ def _bankbook_ext(head: bytes) -> str:
 _BANKBOOK_EXTS = tuple(ext for _magic, ext in _BANKBOOK_MAGIC)
 
 
-def _bankbook_local_path(company: dict) -> str:
-    """`settings.company.bankbook_path` → 這台開得到的絕對路徑；開不到／不在白名單回空字串。
-
-    設定裡那條路徑靠 /publish 才到 NAS：第一次上傳之後、或換了副檔名（舊 .pdf 已刪、
-    NAS 的設定還指著它）之後，到下一次發版之前 NAS 那台照設定找是找不到的 ——
-    master 上分享頁有「存摺影本」那列、走 NAS 的客戶沒有。檔名是固定的，所以設定
-    找不到就直接到固定位置（`_公司/存摺影本.<ext>`）找；仍走同一份白名單。
-    """
-    path = _local_invoice_path((company or {}).get("bankbook_path") or "")
-    if path:
-        return path
+def _bankbook_candidates() -> list:
+    """固定位置底下叫 `存摺影本.*` 的檔（排序過；資料夾不存在＝空清單，不炸）。"""
     base = os.path.join(_invoices_write_root(), _BANKBOOK_DIR)
-    try:
-        names = sorted(os.listdir(base))
-    except OSError:
-        return ""
-    for name in names:
-        stem, dot, ext = name.rpartition(".")
-        if dot and stem == _BANKBOOK_STEM and ("." + ext.lower()) in _BANKBOOK_EXTS:
-            return _local_invoice_path(os.path.join(base, name))
+    return sorted(glob.glob(os.path.join(glob.escape(base), _BANKBOOK_STEM + ".*")))
+
+
+def _bankbook_local_path() -> str:
+    """存摺影本 → 這台開得到的絕對路徑；沒有／副檔名不認得／不在白名單回空字串。"""
+    for p in _bankbook_candidates():
+        if os.path.splitext(p)[1].lower() in _BANKBOOK_EXTS:     # `.part` 半成品不算
+            return _local_invoice_path(p)
     return ""
 
 
 @router.post("/invoices/bankbook")
 async def upload_bankbook(request: Request, file: UploadFile = File(...)):
-    """上傳／換掉存摺影本（管理員）：存進發票根目錄 `_公司/存摺影本.<ext>`，路徑直接寫進
-    `settings.company.bankbook_path`（canonical UNC，跟 `file_url` 同一套翻譯）。同名只留一份。"""
+    """上傳／換掉存摺影本（管理員）：存進發票根目錄 `_公司/存摺影本.<ext>`，同名只留一份。"""
     check_admin(request)
-    from config import load_settings, save_settings
     head = await file.read(8)
     ext = _bankbook_ext(head)
     await file.seek(0)
@@ -546,26 +535,21 @@ async def upload_bankbook(request: Request, file: UploadFile = File(...)):
         except OSError:
             pass
         raise HTTPException(status_code=422, detail=f"檔案無法寫入（可能正被下載中，請稍後再試）：{e}")
-    for old in os.listdir(base):          # 換副檔名也不殘留（.pdf → .jpg 舊的那份要走）
-        if old.rsplit(".", 1)[0] == _BANKBOOK_STEM and old != _BANKBOOK_STEM + ext:
+    for old in _bankbook_candidates():    # 換副檔名也不殘留（.pdf → .jpg 舊的那份要走）
+        if old != filepath:
             try:
-                os.remove(os.path.join(base, old))
+                os.remove(old)
             except OSError:
                 pass
-    settings = load_settings()
-    company = dict(settings.get("company") or {})
-    company["bankbook_path"] = _stored_path(filepath)
-    save_settings({**settings, "company": company})
-    return {"status": "ok", "path": company["bankbook_path"],
+    return {"status": "ok", "path": _stored_path(filepath),
             "file_name": ntpath.basename(filepath), "size": os.path.getsize(filepath)}
 
 
 @router.get("/invoices/bankbook")
 async def get_bankbook(request: Request, download: bool = Query(False)):
-    """設定頁那格「目前檔案」（管理員）：`?download=1` 給檔，否則只回檔名與大小；沒設回 404。"""
+    """設定頁那格「目前檔案」（管理員）：`?download=1` 給檔，否則只回檔名與大小；沒有回 404。"""
     check_admin(request)
-    from config import load_settings
-    path = _bankbook_local_path(load_settings().get("company") or {})
+    path = _bankbook_local_path()
     if not path:
         raise HTTPException(status_code=404, detail="尚未上傳")
     if download:

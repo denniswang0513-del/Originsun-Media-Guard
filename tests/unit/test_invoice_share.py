@@ -405,7 +405,7 @@ def test_the_seller_and_remit_lines_survive_the_trip_to_nas_and_nothing_else_doe
     送過去的那幾個鍵。`company` 不在清單裡的話那兩塊是空的，而那頁是寄給
     客戶與會計師的。
 
-    2026-09-12 起匯款三欄＋存摺影本路徑也送（owner 要分享頁有匯款資訊）；
+    2026-09-12 起匯款三欄也送（owner 要分享頁有匯款資訊；存摺影本是固定位置的檔、不走設定）；
     `company` 其餘的（地址、電話、章、交檔條款…）這台沒程式讀，子鍵投影仍是白名單 ——
     以後 company 長出新欄位，預設不出去。
     """
@@ -413,14 +413,12 @@ def test_the_seller_and_remit_lines_survive_the_trip_to_nas_and_nothing_else_doe
     out, _dropped = export_settings({"company": {
         "name": "源日有限公司", "tax_id": "90371657",
         "bank": "(012)台北富邦中山分行", "account_name": "源日有限公司", "account_no": "82120000062728",
-        "bankbook_path": "\\\\192.168.1.132\\Archive\\00_電子發票\\_公司\\存摺影本.pdf",
         "email": "x@y.z", "address": "台北市…", "seal_path": "company_assets/seal.png",
         "delivery_terms": "…"}})
     assert out["company"] == {
         "name": "源日有限公司", "tax_id": "90371657",
-        "bank": "(012)台北富邦中山分行", "account_name": "源日有限公司", "account_no": "82120000062728",
-        "bankbook_path": "\\\\192.168.1.132\\Archive\\00_電子發票\\_公司\\存摺影本.pdf"}
-    assert EXPORT_SUBKEYS["company"] == ("name", "tax_id", "bank", "account_name", "account_no", "bankbook_path")
+        "bank": "(012)台北富邦中山分行", "account_name": "源日有限公司", "account_no": "82120000062728"}
+    assert EXPORT_SUBKEYS["company"] == ("name", "tax_id", "bank", "account_name", "account_no")
 
     # 快照那側讀同一包
     m = IS.meta(IS.make_snapshot({}, "x.pdf", 1), seller=out["company"], bankbook=True)
@@ -436,12 +434,10 @@ def test_remit_is_live_from_settings_and_never_the_bankbook_path():
     存摺影本只出一個布林（路徑是內部檔案系統的東西）。"""
     snap = IS.make_snapshot({"invoice_number": "AB-1"}, "x.pdf", 1)
     assert "remit" not in snap and "bank" not in snap
-    company = {"bank": " (012)台北富邦中山分行 ", "account_name": "源日有限公司", "account_no": "82120000062728",
-               "bankbook_path": "\\\\nas\\Archive\\00_電子發票\\_公司\\存摺影本.pdf"}
+    company = {"bank": " (012)台北富邦中山分行 ", "account_name": "源日有限公司", "account_no": "82120000062728"}
     m = IS.meta(snap, seller=company, bankbook=False)
     assert m["remit"] == {"account_name": "源日有限公司", "bank": "(012)台北富邦中山分行",
                           "account_no": "82120000062728", "bankbook": False}
-    assert "bankbook_path" not in str(m)
     # 三欄全空＝整塊不畫
     assert IS.meta(snap, seller={"name": "源日"})["remit"] is None
     assert IS.remit_view({"bank": "", "account_no": None}) is None
@@ -456,28 +452,28 @@ def test_a_voided_invoice_gets_no_remit_block():
     assert IS.meta(IS.make_snapshot({}, "x.pdf", 1), voided=True, seller=company, bankbook=True)["remit"] is None
     body = code_only(func_body(repo_src(INV), "async def invoice_share_bankbook("))
     assert "surface_gate(request)" in body
-    assert 'path = "" if voided else _bankbook_local_path(' in body
+    assert 'path = "" if voided else _bankbook_local_path()' in body
     assert "no_store_file(path, filename=ntpath.basename(path))" in body, "永遠 attachment，檔名走 ntpath"
 
 
 def test_bankbook_lives_under_the_invoices_root_and_goes_through_the_same_whitelist():
     """存摺影本放**發票根目錄**底下、不放 master 的 company_assets/：那頁由 NAS 對外容器
     serve，company_assets 它看不到 —— master 關機時「下載發票」好的、「存摺影本」404，
-    同一頁兩顆鈕一顆好一顆壞。讀取走 `_local_invoice_path`（同一份白名單），寫入存
-    canonical UNC（`_stored_path`），檔名固定（換檔 NAS 立刻吃到新檔，不用再發版）。"""
+    同一頁兩顆鈕一顆好一顆壞。位置固定且**不進設定**（兩台都直接到那裡找，上傳完立刻生效、
+    不必等 /publish 送路徑字串）；讀取走 `_local_invoice_path`（同一份白名單）。"""
     src = repo_src(INV)
     read = code_only(func_body(src, "def _bankbook_local_path("))
     assert "_local_invoice_path(" in read
     up = code_only(func_body(src, "async def upload_bankbook("))
     assert "check_admin(request)" in up
     assert "os.path.join(_invoices_write_root(), _BANKBOOK_DIR)" in up
-    assert 'company["bankbook_path"] = _stored_path(filepath)' in up
+    assert "save_settings(" not in up and "bankbook_path" not in code_only(src), "存摺影本不走設定鍵"
     assert "_bankbook_ext(head)" in up, "看檔頭不看副檔名"
     assert "company_assets" not in up
     assert '_BANKBOOK_STEM = "存摺影本"' in src
-    # meta 只在檔真的開得到時才給 bankbook=True（不要鑄一顆按了 404 的下載鈕）
+    # meta 只在檔真的開得到時才給 bankbook=True（不要鑄一顆按了 404 的下載鈕）；作廢連 stat 都不做
     meta_body = code_only(func_body(src, "async def invoice_share_meta("))
-    assert "bankbook=bool(_bankbook_local_path(company))" in meta_body
+    assert "bankbook=(not voided) and bool(_bankbook_local_path())" in meta_body
 
 
 def test_the_share_page_only_paints_remit_from_the_response():
@@ -496,13 +492,14 @@ def test_the_share_page_only_paints_remit_from_the_response():
 
 def test_settings_page_has_the_upload_next_to_the_seal():
     """設定 › 公司資訊：存摺影本上傳在發票章正下方（owner：「發票章那頁可以讓我更新檔案」）。
-    路徑鍵進 COMPANY_KEYS（不然存設定時 merge 會把它留住沒錯，但欄位不回填）。"""
+    沒有路徑欄、也不進 COMPANY_KEYS —— 它不是設定，是固定位置的檔。"""
     html = repo_src("frontend/index.html")
     seal = html.index('id="company_seal_upload"')
     bank = html.index('id="company_bankbook_upload"')
     assert seal < bank < html.index('id="tab_user_mgmt"')
+    assert "company_bankbook_path" not in html
     js = repo_src("frontend/js/settings/settings-modal.js")
-    assert "'bankbook_path'" in js.split("const COMPANY_KEYS = [")[1].split("];")[0]
+    assert "bankbook_path" not in js
     assert "fetch(_BANKBOOK_API, { method: 'POST', body: fd, headers: _bh() })" in js, "要自己帶 token（login-modal 的 fetch 白名單不認 /crm/）"
     assert "_bindBankbookUpload();" in js
 

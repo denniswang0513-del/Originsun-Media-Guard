@@ -2,7 +2,7 @@
 
 // settings.json 的 company 區塊（config.py 預設值是正本）；index.html 的欄位 id = company_<key>
 const COMPANY_KEYS = ['name', 'name_en', 'tax_id', 'address', 'phone', 'email', 'bank',
-    'account_name', 'account_no', 'bankbook_path', 'quote_valid_days', 'delivery_terms', 'logo_path', 'seal_path'];
+    'account_name', 'account_no', 'quote_valid_days', 'delivery_terms', 'logo_path', 'seal_path'];
 const _companyEl = (k) => document.getElementById('company_' + k);
 
 function fillCompany(company) {
@@ -13,7 +13,7 @@ function fillCompany(company) {
 }
 
 // 存摺影本：不是圖、不預覽，只顯示「目前是哪個檔、多大」＋ 一個帶權限的下載連結。
-// 存在發票根目錄（不是 company_assets/）—— 那頁由 NAS 對外容器 serve，company_assets 它看不到。
+// 存在發票根目錄的固定位置（不是 company_assets/、也不是設定鍵）—— 那頁由 NAS 對外容器 serve。
 // 🔴 端點在 /api/v1/crm/ 底下：login-modal 補 token 的那份 fetch 白名單只認 /settings/ 等幾個路徑，
 //    這裡要自己帶 Authorization（utils 掛在 window 的 bearerHeader）。
 const _BANKBOOK_API = '/api/v1/crm/invoices/bankbook';
@@ -25,9 +25,10 @@ async function _loadBankbookStatus() {
         const r = await fetch(_BANKBOOK_API, { headers: _bh() });
         if (!r.ok) {
             // 這格對非管理員也看得到（報價頁開的 company-only 視窗給 crm_quotes 的人用）：403 是「不歸你管」，不是壞掉
-            const msg = r.status === 404 ? '尚未上傳。發票分享頁「匯款資訊」給客戶下載；存在發票資料夾底下，換檔即生效'
-                : (r.status === 401 || r.status === 403) ? '存摺影本只有管理員可以查看與更換'
-                : '無法讀取目前的存摺影本（HTTP ' + r.status + '）';
+            let msg;
+            if (r.status === 404) msg = '尚未上傳。發票分享頁「匯款資訊」給客戶下載；存在發票資料夾底下，換檔即生效';
+            else if (r.status === 401 || r.status === 403) msg = '存摺影本只有管理員可以查看與更換';
+            else msg = '無法讀取目前的存摺影本（HTTP ' + r.status + '）';
             throw new Error(msg);
         }
         const d = await r.json();
@@ -65,7 +66,6 @@ function _bindBankbookUpload() {
             const r = await fetch(_BANKBOOK_API, { method: 'POST', body: fd, headers: _bh() });
             const d = await r.json().catch(() => ({}));
             if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-            const el = _companyEl('bankbook_path'); if (el) el.value = d.path || '';
             await _loadBankbookStatus();
         } catch (e) { if (st) st.textContent = '上傳失敗：' + (e.message || e); }
         file.value = '';

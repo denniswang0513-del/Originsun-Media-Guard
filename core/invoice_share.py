@@ -29,7 +29,7 @@ owner 2026-09-10：`/e/{短碼}` 從「點了直接下載」改成一頁 —— 
 
 那頁下半多一塊「匯款資訊」（戶名／銀行／帳號／存摺影本下載）。它**不是發票上印著的東西**，
 是我們主動給收件人的 —— 所以它不走發票列、不進快照，跟頁尾賣方一樣從設定即時讀
-（`settings.company` 的 bank／account_name／account_no／bankbook_path）：帳戶哪天換了，
+（`settings.company` 的 bank／account_name／account_no；存摺影本是發票根目錄下固定位置的檔）：帳戶哪天換了，
 還沒付款的舊發票要顯示新帳戶。**作廢的發票不給匯款資訊**（已作廢還把帳號擺在旁邊等於請人匯錯錢）。
 """
 from __future__ import annotations

@@ -67,9 +67,9 @@ EXPORT_KEYS = (
 # 兩個容器共用的 mount —— 「沒有理由放在那裡」本身就是不放的理由。
 EXPORT_SUBKEYS = {
     # 發票分享頁（`/e/{短碼}`）：頁尾的賣方（name／tax_id）＋「匯款資訊」那塊
-    # （bank／account_name／account_no；bankbook_path 是存摺影本在發票根目錄下的 UNC，
-    # 2026-09-12 起）。整包 `company` 其餘欄位（地址、電話、章、交檔條款…）這台沒程式讀，不送。
-    "company": ("name", "tax_id", "bank", "account_name", "account_no", "bankbook_path"),
+    # （bank／account_name／account_no，2026-09-12 起；存摺影本是固定位置的檔，不走設定）。
+    # 整包 `company` 其餘欄位（地址、電話、章、交檔條款…）這台沒程式讀，不送。
+    "company": ("name", "tax_id", "bank", "account_name", "account_no"),
 }
 
 

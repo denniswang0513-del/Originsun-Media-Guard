@@ -26,8 +26,8 @@ SETTINGS_JS = "frontend/js/settings/settings-modal.js"
 
 # 與 config.py DEFAULT_SETTINGS["company"] 同一份 key 清單
 COMPANY_KEYS = ["name", "name_en", "tax_id", "address", "phone", "email", "bank",
-                "account_name", "account_no", "bankbook_path", "quote_valid_days", "delivery_terms",
-                "logo_path", "seal_path"]   # bankbook_path：存摺影本（發票分享頁匯款資訊，2026-09-12）
+                "account_name", "account_no", "quote_valid_days", "delivery_terms",
+                "logo_path", "seal_path"]
 
 
 # ── PDF 下載 ─────────────────────────────────────────────────

@@ -17,10 +17,8 @@ from tests.unit._srcscan import code_only, func_body, repo_src, timesheets_src
 
 
 def test_settings_restrict_blocks_path_keys_and_non_dict():
-    # bankbook_path（2026-09-12）：免登入分享頁的下載來源，非管理員指到別張發票＝把它公開送出去
-    assert _SETTINGS_SAVE_DENY_SUBKEYS["company"] == ("logo_path", "seal_path", "bankbook_path")
-    out = _settings_save_restrict({"company": {"name": "O", "logo_path": "settings.json", "seal_path": "x",
-                                               "bankbook_path": "2026/2026-08/別人的發票.pdf"}}, ("crm_quotes", "crm_invoices"))
+    assert _SETTINGS_SAVE_DENY_SUBKEYS["company"] == ("logo_path", "seal_path")
+    out = _settings_save_restrict({"company": {"name": "O", "logo_path": "settings.json", "seal_path": "x"}}, ("crm_quotes", "crm_invoices"))
     assert out == {"company": {"name": "O"}}
     assert _settings_save_restrict({"finance": {"monthly_fixed_costs": 1, "margin_model": {}, "baseline_month": "2020-01"}}, ("crm_invoices",)) == {"finance": {"monthly_fixed_costs": 1}}
     with pytest.raises(HTTPException) as e:
