@@ -71,6 +71,8 @@ def test_options_and_home_return_the_pinned_keys():
     assert 'await project_ledger(request, entity="mine")' in home
     # 專案 picker 不帶金額
     assert "contract_amount" not in opt and "amount_received" not in opt
+    # 帳戶帶 active／is_default：停用的歷史帳戶編輯時要認得（不然存個摘要就洗成不指定）、新增預選預設帳戶
+    assert '"active":' in opt and '"is_default":' in opt
 
 
 def test_mounted_on_master_and_office():
@@ -109,6 +111,23 @@ def test_mobile_ledger_writes_go_through_existing_endpoints_only():
     assert "/api/v1/finance/m/options" in js_code_only(repo_src("frontend/m/ledger.js"))
     # 沒有發票、沒有請款
     assert "/invoices" not in src and "/payments" not in src
+
+
+def test_cash_form_edit_never_clears_what_this_page_cannot_draw():
+    """改一筆只送有動的鍵，而「這台畫不出來」不算動：分類節點停用、專案不在清單、帳戶不在選單
+    三個都要守 —— 漏一個就是存個摘要順手把那欄洗掉，而且沒有任何錯誤。新增那條路分類必填。"""
+    from tests.unit._srcscan import js_func_body
+    js = js_code_only(repo_src("frontend/m/views/ledger-cash.js"))
+    sheet = js_func_body(js, "export function openEntrySheet(e, { mode = 'cash', onDone } = {}) {")
+    for k in ("taxonomy_node_id", "project_id", "bank_account_id"):
+        assert f"{k}:" in sheet, k
+    assert "delete diff[k]" in sheet
+    form = js_func_body(js, "export function entryFormHtml(pfx, { mode = 'cash', entry = null } = {}) {")
+    assert "a.active !== false" in form and "a.is_default" in form, "帳戶選單同桌機：只列 active＋目前那個，新增預選預設"
+    assert "if (!body.taxonomy_node_id)" in js
+    # 字彙先到手再接 hashchange：字彙還在飛時 render 出來的表單是空選單，而且不會再重建
+    main = js_code_only(repo_src("frontend/m/ledger.js"))
+    assert main.index("/api/v1/finance/m/options") < main.index("addEventListener('hashchange'")
 
 
 def test_mobile_ledger_has_six_tabs_with_assets_separate():

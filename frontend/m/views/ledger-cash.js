@@ -35,6 +35,11 @@ export function entryFormHtml(pfx, { mode = 'cash', entry = null } = {}) {
     const kind = e.deposit ? 'deposit' : 'expense';
     const amount = e.deposit || e.expense || '';
     const day = e.entry_date ? fmtDate(e.entry_date) : todayLocal();
+    // 帳戶選單同桌機 crm-cashbook-fields：只列 active ＋ 這一筆目前掛的那個（停用的歷史帳戶要認得，
+    // 不然選單選不到它、存個摘要就把帳戶洗成「不指定」）；新增時預選預設帳戶
+    const cur = String(e.bank_account_id || '');
+    const accounts = (opt().accounts || []).filter(a => a.active !== false || String(a.id) === cur);
+    const acct = entry ? cur : String((accounts.find(a => a.is_default) || {}).id || '');
     return `<div class="m-form">
         ${mode === 'household' ? `<input type="hidden" id="${pfx}-kind" value="expense">`
             : `<label>收入或支出</label>${segHtml(pfx + '-kind', Object.values(KIND), KIND[kind])}`}
@@ -43,7 +48,7 @@ export function entryFormHtml(pfx, { mode = 'cash', entry = null } = {}) {
         <label class="req">分類</label>${pickerHtml(pfx + '-node')}
         ${mode === 'household' ? '' : `<label>專案</label>${pickerHtml(pfx + '-project')}`}
         <label>銀行帳戶</label>
-        <select id="${pfx}-account">${selectOpts((opt().accounts || []).map(a => ({ value: a.id, label: a.name })), e.bank_account_id || '', '（不指定）')}</select>
+        <select id="${pfx}-account">${selectOpts(accounts.map(a => ({ value: a.id, label: a.name })), acct, '（不指定）')}</select>
         <label>日期</label><input id="${pfx}-date" type="date" value="${esc(day)}">
         <label class="req">摘要</label><input id="${pfx}-summary" value="${esc(e.summary || '')}" placeholder="這筆是什麼">
         <label>備註</label><input id="${pfx}-note" value="${esc(e.note || '')}">
@@ -122,13 +127,17 @@ export function openEntrySheet(e, { mode = 'cash', onDone } = {}) {
                       bank_account_id: e.bank_account_id || null };
         const diff = { entity: 'mine' };
         for (const k of Object.keys(was)) if (String(next[k] ?? '') !== String(was[k] ?? '')) diff[k] = next[k];
-        // 🔴 picker 找不到原值（分類節點停用／掛在頂層、專案不在私帳清單）時 mountPicker 會把它 set 成空 ——
-        // 那不是使用者「清掉」，只是這台畫不出來。送空字串等於清掉分類三欄／把專案解掉（私帳已收還會跟著減）。
-        for (const k of ['taxonomy_node_id', 'project_id']) {
-            const hidden = document.getElementById('es-' + (k === 'project_id' ? 'project' : 'node'));
-            const known = hidden && (hidden._items || []).some(i => String(i.value) === String(was[k] || ''));
-            if (k in diff && !next[k] && was[k] && !known) delete diff[k];
-        }
+        // 🔴 picker 找不到原值（分類節點停用／掛在頂層、專案不在私帳清單）時 mountPicker 會把它 set 成空；
+        // 帳戶 <select> 沒有那個 option 時瀏覽器落到第一個（不指定）—— 那不是使用者「清掉」，只是這台
+        // 畫不出來。送空等於清掉分類三欄／把專案解掉（私帳已收還會跟著減）／把帳戶洗成不指定。
+        const pickerKnows = (id, v) => { const h = document.getElementById(id); return !!h && (h._items || []).some(i => String(i.value) === v); };
+        const knows = {
+            taxonomy_node_id: (v) => pickerKnows('es-node', v),
+            project_id: (v) => pickerKnows('es-project', v),
+            bank_account_id: (v) => { const s = document.getElementById('es-account'); return !!s && [...s.options].some(o => o.value === v); },
+        };
+        for (const [k, has] of Object.entries(knows))
+            if (k in diff && !next[k] && was[k] && !has(String(was[k]))) delete diff[k];
         if (Object.keys(diff).length === 1) { toast('沒有改動'); closeSheet(); return; }
         try {
             await mfetch(`${API}/${encodeURIComponent(e.id)}`, { method: 'PUT', body: diff });
@@ -168,6 +177,10 @@ export async function render(host, { first }) {
         host.querySelector('#nc-go').addEventListener('click', (ev) => withBusy(ev.currentTarget, async () => {
             let body;
             try { body = readEntryForm('nc'); } catch (err) { toast(err.message, 'err'); return; }
+            // 分類是必填（標籤就是紅星），只在新增這條路擋：改一筆時 readEntryForm 不能擋 —— 節點停用的舊列
+            // picker 畫成空、擋了就連摘要都改不了（上面的 known 守衛靠的正是「空著也能存」）。
+            // 不擋的話掛了專案的收入會吃到後端 409「未分類不能掛專案」、沒掛的就靜默存成一筆沒分類的
+            if (!body.taxonomy_node_id) { toast('請選一個分類', 'err'); return; }
             try {
                 const r = await createEntry(body);
                 if (!r) return;

@@ -59,9 +59,11 @@ async function render() {
     closeSheet();
     window.scrollTo(0, 0);
     const first = !host.dataset.ready;
-    host.dataset.ready = '1';
     try {
         await VIEWS[tab].render(host, { first });
+        // 第一次畫成功才算「長好了」：畫到一半炸掉就標 ready，下次切回來走 first=false 的 load
+        // 會去找一個不存在的 #xx-list（host 已被換成錯誤框），只剩一句看不懂的 TypeError、重新整理才會好
+        host.dataset.ready = '1';
     } catch (e) {
         host.innerHTML = errBox(e);
     }
@@ -74,6 +76,18 @@ async function main() {
     const me = await boot({ gate });
     state.me = me;
     initSheet();
+    // 🔴 字彙先到手，再接任何會 render 的事件：boot 一過殼就亮、tabbar 就能按，字彙還在飛時
+    // 就 render 的話，表單會用空的分類／專案／帳戶清單長出來，而那一頁之後只走 first=false
+    // 不再重建 —— 「分類選單是空的」要重新整理才會好。這段等待期間按 tabbar 只改 hash，
+    // 最後那個 render() 會照 currentTab() 落到他按的那一頁。
+    try {
+        state.options = await mfetch('/api/v1/finance/m/options');
+    } catch (e) {
+        document.getElementById('m-view').innerHTML =
+            `<div class="m-err">字彙載入失敗（${esc(e.message)}）—— 這頁的表單需要它，請重新整理再試。</div>`;
+        return;
+    }
+    if (!(state.options.me || {}).can_write) toast('此帳號只能檢視', 'err');
     // 頂欄：上一頁＝先關抽屜、再退一個分頁、退到底回首頁；首頁＝收支（落地分頁）
     document.getElementById('m-back').addEventListener('click', () => {
         const s = document.getElementById('m-sheet');
@@ -87,14 +101,6 @@ async function main() {
         if (b) location.hash = b.dataset.tab;
     });
     window.addEventListener('hashchange', () => { _depth += 1; render(); });
-    try {
-        state.options = await mfetch('/api/v1/finance/m/options');
-    } catch (e) {
-        document.getElementById('m-view').innerHTML =
-            `<div class="m-err">字彙載入失敗（${esc(e.message)}）—— 這頁的表單需要它，請重新整理再試。</div>`;
-        return;
-    }
-    if (!(state.options.me || {}).can_write) toast('此帳號只能檢視', 'err');
     await render();
 }
 

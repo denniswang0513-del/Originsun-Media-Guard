@@ -99,8 +99,10 @@ async def ledger_mobile_options(request: Request):
             .outerjoin(Client, Client.id == CrmProject.client_id)
             .where(CrmProject.entity == "mine")
             .order_by(CrmProject.updated_at.desc()))).all()
+        # 停用的也回（帶 active 旗標）：歷史列還掛在上面，編輯時選單要認得它，不然存個摘要
+        # 就把帳戶洗成「不指定」；新增時的選單由前端只列 active（同桌機 crm-cashbook-fields）
         accounts = (await session.execute(
-            select(BankAccount.id, BankAccount.name)
+            select(BankAccount.id, BankAccount.name, BankAccount.active, BankAccount.is_default)
             .where(BankAccount.entity == "mine")
             .order_by(BankAccount.sort_order, BankAccount.created_at))).all()
     projects = []
@@ -120,7 +122,8 @@ async def ledger_mobile_options(request: Request):
         "cost_fields": [{"key": k, "label": lb} for k, lb in COST_FIELDS],
         "income_items": income_items(load_settings()),
         "projects": projects,
-        "accounts": [{"id": i, "name": n} for i, n in accounts],
+        "accounts": [{"id": i, "name": n, "active": bool(a), "is_default": bool(d)}
+                     for i, n, a, d in accounts],
     }
 
 
