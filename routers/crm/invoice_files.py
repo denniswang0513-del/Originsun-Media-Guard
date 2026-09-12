@@ -496,16 +496,22 @@ _BANKBOOK_EXTS = tuple(ext for _magic, ext in _BANKBOOK_MAGIC)
 
 
 def _bankbook_candidates() -> list:
-    """固定位置底下叫 `存摺影本.*` 的檔（排序過；資料夾不存在＝空清單，不炸）。"""
+    """固定位置底下叫 `存摺影本.<認得的副檔名>` 的檔，**最新的排前面**；資料夾不存在＝空清單，不炸。
+
+    `.part` 半成品不在裡面（副檔名白名單濾掉）—— 它同時是「別再刪到同時進行中的另一個上傳」的保證。
+    最新優先而不是字母序：Windows 上舊檔正被人下載時刪不掉（見 upload_bankbook），兩個副檔名並存
+    的那一小段時間，要給剛上傳的那份，不然客戶與設定頁會一直拿到舊的、而上傳明明回了 200。
+    """
     base = os.path.join(_invoices_write_root(), _BANKBOOK_DIR)
-    return sorted(glob.glob(os.path.join(glob.escape(base), _BANKBOOK_STEM + ".*")))
+    found = [p for p in glob.glob(os.path.join(glob.escape(base), _BANKBOOK_STEM + ".*"))
+             if os.path.splitext(p)[1].lower() in _BANKBOOK_EXTS]
+    return sorted(found, key=os.path.getmtime, reverse=True)
 
 
 def _bankbook_local_path() -> str:
-    """存摺影本 → 這台開得到的絕對路徑；沒有／副檔名不認得／不在白名單回空字串。"""
+    """存摺影本 → 這台開得到的絕對路徑；沒有／不在白名單回空字串。"""
     for p in _bankbook_candidates():
-        if os.path.splitext(p)[1].lower() in _BANKBOOK_EXTS:     # `.part` 半成品不算
-            return _local_invoice_path(p)
+        return _local_invoice_path(p)
     return ""
 
 
@@ -535,14 +541,16 @@ async def upload_bankbook(request: Request, file: UploadFile = File(...)):
         except OSError:
             pass
         raise HTTPException(status_code=422, detail=f"檔案無法寫入（可能正被下載中，請稍後再試）：{e}")
+    leftover = []
     for old in _bankbook_candidates():    # 換副檔名也不殘留（.pdf → .jpg 舊的那份要走）
         if old != filepath:
             try:
                 os.remove(old)
-            except OSError:
-                pass
+            except OSError:               # 正被人下載中刪不掉：新檔靠 mtime 已經排前面，但要講出來
+                leftover.append(ntpath.basename(old))
     return {"status": "ok", "path": _stored_path(filepath),
-            "file_name": ntpath.basename(filepath), "size": os.path.getsize(filepath)}
+            "file_name": ntpath.basename(filepath), "size": os.path.getsize(filepath),
+            "leftover": leftover}
 
 
 @router.get("/invoices/bankbook")

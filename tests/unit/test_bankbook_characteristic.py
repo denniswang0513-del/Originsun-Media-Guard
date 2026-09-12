@@ -43,6 +43,15 @@ def test_bankbook_local_path_is_the_fixed_spot_only(tmp_path, monkeypatch):
     (root / "_公司" / "別的.pdf").write_bytes(b"%PDF")               # 別的檔不算
     assert IF._bankbook_local_path() == os.path.abspath(str(jpg))
 
+    # 兩個副檔名並存（舊檔正被下載刪不掉）→ 給最新的那份，不是字母序第一個
+    import time
+    pdf = root / "_公司" / "存摺影本.pdf"
+    pdf.write_bytes(b"%PDF")
+    os.utime(pdf, (time.time() + 5, time.time() + 5))
+    assert IF._bankbook_local_path() == os.path.abspath(str(pdf))
+    assert [os.path.basename(c) for c in IF._bankbook_candidates()] == ["存摺影本.pdf", "存摺影本.jpg"]
+    pdf.unlink()
+
     jpg.unlink()
     assert IF._bankbook_local_path() == ""
     monkeypatch.setattr(IF, "_invoices_root", lambda: str(tmp_path / "nowhere"))

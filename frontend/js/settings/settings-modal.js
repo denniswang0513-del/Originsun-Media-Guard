@@ -67,6 +67,7 @@ function _bindBankbookUpload() {
             const d = await r.json().catch(() => ({}));
             if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
             await _loadBankbookStatus();
+            if (d.leftover && d.leftover.length && st) st.textContent += `；舊檔 ${d.leftover.join('、')} 正被下載中刪不掉，稍後再傳一次即可清掉`;
         } catch (e) { if (st) st.textContent = '上傳失敗：' + (e.message || e); }
         file.value = '';
     });
