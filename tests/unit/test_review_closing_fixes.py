@@ -13,7 +13,7 @@ from fastapi import HTTPException
 
 from core.rbac_templates import DEFAULT_TEMPLATES, normalize
 from routers.api_system import _SETTINGS_SAVE_DENY_SUBKEYS, _settings_save_restrict
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, repo_src, timesheets_src
 
 
 def test_settings_restrict_blocks_path_keys_and_non_dict():
@@ -55,7 +55,7 @@ def test_probes_do_not_record_and_staff_gates_accept_partners():
     assert "is_active_staff(" in ws and "!= STAFF_ACTIVE" not in ws
     ms = code_only(func_body(repo_src("routers/api_milestones.py"), "def _who("))
     assert ms.count('"me_plan_parttime"') == 2
-    tg = code_only(func_body(repo_src("routers/api_timesheets.py"), "async def plan_for_targets("))
+    tg = code_only(func_body(timesheets_src(), "async def plan_for_targets("))
     assert "is_active_staff(" in tg and "只有在職／合夥可以幫兼職排班" in tg
 
 

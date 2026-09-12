@@ -8,8 +8,10 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-import routers.api_timesheets as api
+import routers.timesheets.ledger as ledger      # /rows、/people
+import routers.timesheets.mine as mine          # /board
 import services.timesheet_lookup as lookup
+from routers import api_timesheets as api       # 端點從薄殼拿；monkeypatch 要打子模組（薄殼的屬性 patch 了沒用）
 
 
 class _Result:
@@ -54,18 +56,19 @@ def _ts(**kw):
     return NS(**base)
 
 
-def _admin(monkeypatch):
-    monkeypatch.setattr(api, "check_admin_or_module", lambda request, *keys: {"access_level": 3, "modules": []})
-    monkeypatch.setattr(api, "payload_grants", lambda payload, *keys: True)
+def _admin(monkeypatch, mod):
+    monkeypatch.setattr(mod, "check_admin_or_module", lambda request, *keys: {"access_level": 3, "modules": []})
+    if hasattr(mod, "payload_grants"):
+        monkeypatch.setattr(mod, "payload_grants", lambda payload, *keys: True)
 
 
 # ── /timesheets/rows：date／from＋to_day／staff_id ──
 
 @pytest.mark.asyncio
 async def test_rows_with_date_returns_day_label_and_marks_every_row_editable_for_admin(monkeypatch):
-    _admin(monkeypatch)
+    _admin(monkeypatch, ledger)
     sess = _Session([[_ts(), _ts(id="r2", staff_name="陳阿宏", staff_id="s2")]])
-    monkeypatch.setattr(api, "db_factory_or_503", lambda: _factory(sess))
+    monkeypatch.setattr(ledger, "db_factory_or_503", lambda: _factory(sess))
     out = await api.ledger_rows(request=None, date="2026-09-10", from_="", to_day="", staff_id="s1")
     assert out["date"] == "2026-09-10" and out["to_day"] == "2026-09-10" and "month" not in out
     assert out["editable"] is True and [r["editable"] for r in out["items"]] == [True, True]
@@ -75,8 +78,8 @@ async def test_rows_with_date_returns_day_label_and_marks_every_row_editable_for
 
 @pytest.mark.asyncio
 async def test_rows_day_range_rejects_reversed_or_too_long(monkeypatch):
-    _admin(monkeypatch)
-    monkeypatch.setattr(api, "db_factory_or_503", lambda: _factory(_Session([[]])))
+    _admin(monkeypatch, ledger)
+    monkeypatch.setattr(ledger, "db_factory_or_503", lambda: _factory(_Session([[]])))
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as e:
         await api.ledger_rows(request=None, date="", from_="2026-09-10", to_day="2026-09-01")
@@ -88,8 +91,8 @@ async def test_rows_day_range_rejects_reversed_or_too_long(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_rows_without_date_keeps_the_month_shape(monkeypatch):
-    _admin(monkeypatch)
-    monkeypatch.setattr(api, "db_factory_or_503", lambda: _factory(_Session([[]])))
+    _admin(monkeypatch, ledger)
+    monkeypatch.setattr(ledger, "db_factory_or_503", lambda: _factory(_Session([[]])))
     out = await api.ledger_rows(request=None, month="2026-09", date="", from_="", to_day="")   # 直接呼叫要把 Query 預設值換成空字串
     assert out["month"] == "2026-09" and out["to"] == "" and "date" not in out
 
@@ -98,17 +101,17 @@ async def test_rows_without_date_keeps_the_month_shape(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_board_absent_lists_active_staff_without_a_real_row_and_skips_weekends(monkeypatch):
-    _admin(monkeypatch)
+    _admin(monkeypatch, mine)
     # 週四 9/10：小美有實際列、阿宏只有計畫卡、冠宇沒填；在職名單三人＋一個兼職不在名單
     rows = [_ts(), _ts(id="r2", staff_name="陳阿宏", staff_id="s2", status="plan", hours=0)]
     sess = _Session([rows, [("王小美",), ("陳阿宏",), ("林冠宇",)]])
-    monkeypatch.setattr(api, "db_factory_or_503", lambda: _factory(sess))
+    monkeypatch.setattr(mine, "db_factory_or_503", lambda: _factory(sess))
     out = await api.day_board(request=None, date="2026-09-10", days=1)
     day = out["items"][0]
     assert day["absent"] == ["林冠宇", "陳阿宏"], "只有計畫卡不算填了；有實際列的不點名"
     # 週六：不點名
     sess = _Session([[], [("王小美",)]])
-    monkeypatch.setattr(api, "db_factory_or_503", lambda: _factory(sess))
+    monkeypatch.setattr(mine, "db_factory_or_503", lambda: _factory(sess))
     out = await api.day_board(request=None, date="2026-09-12", days=1)
     assert out["items"][0]["absent"] == []
 
@@ -117,12 +120,12 @@ async def test_board_absent_lists_active_staff_without_a_real_row_and_skips_week
 
 @pytest.mark.asyncio
 async def test_people_keeps_active_and_parttime_sorted_by_rank_then_name(monkeypatch):
-    _admin(monkeypatch)
+    _admin(monkeypatch, ledger)
     staff = [("s3", "王小美", "兼職", None), ("s1", "陳阿宏", "在職", datetime(2026, 9, 1)), ("s4", "離職者", "離職", None),
              ("s2", "林冠宇", "", None), ("s5", "", "在職", None), ("s6", "合夥人", "合夥", None)]
     first = [("s1", datetime(2026, 8, 20)), ("s3", datetime(2026, 9, 5))]     # 第一筆工時
     sess = _Session([staff, first])
-    monkeypatch.setattr(api, "db_factory_or_503", lambda: _factory(sess))
+    monkeypatch.setattr(ledger, "db_factory_or_503", lambda: _factory(sess))
     out = await api.timesheet_people(request=None)
     since = {p["name"]: p["since"] for p in out["people"]}
     assert since == {"合夥人": None, "林冠宇": None, "陳阿宏": "2026-09-01", "王小美": "2026-09-05"}, "到職日與第一筆工時取較晚的；都沒有＝None"

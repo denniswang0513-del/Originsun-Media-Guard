@@ -7,7 +7,7 @@
 from types import SimpleNamespace as NS
 
 from core.hr_logic import EDIT_BLOCK_TEXT, EDITABLE_STATUSES, can_edit_timesheet
-from tests.unit._srcscan import code_only, func_body, my_page_src, repo_src
+from tests.unit._srcscan import code_only, func_body, my_page_src, repo_src, timesheets_src
 
 
 def test_can_edit_truth_table():
@@ -51,7 +51,7 @@ def test_own_scope_comes_from_the_token_never_the_body():
     assert "can_edit_timesheet(r, staff_id)" in func_body(svc, "def ts_dict(")
     # 員工頁與 CRM tab 的「我的一天」吃同一份服務（守衛／序列化／改列規則不各寫一份）
     assert "from services.timesheet_self import" in src
-    assert "from services.timesheet_self import" in code_only(repo_src("routers/api_timesheets.py"))
+    assert "from services.timesheet_self import" in code_only(timesheets_src())
 
 
 def test_update_reuses_the_sheet_project_mapping():

@@ -16,8 +16,10 @@ def test_backend_endpoints_share_project_type_vocab():
     edit = code_only(func_body(proj, "async def edit_project_types("))
     assert "_check_project_write_auth(request)" in edit, "改案型＝crm_projects（2026-09-08 權限稽核第二批）"
     assert 'load_margin_model("mine")' in edit and 'save_margin_model("mine", model)' in edit, "改的是毛利表那份（正本），不是 settings"
-    for f in ("routers/api_finance.py", "routers/api_timesheets.py", "routers/api_crm_mobile.py"):
+    from tests.unit._srcscan import timesheets_src
+    for f in ("routers/api_finance.py", "routers/api_crm_mobile.py"):
         assert "project_type_vocab(" in repo_src(f), f
+    assert "project_type_vocab(" in timesheets_src(), "api_timesheets（2026-09-12 起是套件 routers/timesheets/）"
 
 
 def test_desktop_dropdown_and_editor_use_the_one_list():

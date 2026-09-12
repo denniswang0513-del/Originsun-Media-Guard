@@ -5,9 +5,9 @@
 只碰計畫列、時數不收；不走 own-scope 的 /mine/*（那邊絕不收 client 給的 staff_id），另開 /timesheets/plan-for/*。
 里程碑（按週）：專案檔案（/timesheets/project 帶 milestone_weeks）與 CRM 專案詳情（動態 import 同一支畫法）。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, migration_sql, my_page_src, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, migration_sql, my_page_src, repo_src, timesheets_src
 
-TS = repo_src("routers/api_timesheets.py")
+TS = timesheets_src()
 
 
 def test_planned_by_column_is_everywhere_a_timesheet_column_must_be():

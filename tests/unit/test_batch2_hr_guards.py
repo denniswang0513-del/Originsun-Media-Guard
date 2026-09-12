@@ -16,11 +16,11 @@ import re
 from fastapi import HTTPException
 
 from tests.unit._req import token_request
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src, timesheets_src
 
 HR = code_only(repo_src("routers/api_hr.py"))
 BEN = code_only(repo_src("routers/crm/benefits.py"))
-TS = code_only(repo_src("routers/api_timesheets.py"))
+TS = code_only(timesheets_src())
 ME = code_only(repo_src("routers/api_me.py"))
 HR_JS = js_code_only(repo_src("frontend/tabs/hr_leave/hr_leave.js"))
 BEN_JS = js_code_only(repo_src("frontend/tabs/hr_benefits/hr_benefits.js"))

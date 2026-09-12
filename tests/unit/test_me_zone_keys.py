@@ -7,7 +7,7 @@ me_plan_parttime（兼職排班）。拆之前「任一把 me_* 就整區出現�
 """
 import re
 
-from tests.unit._srcscan import code_only, func_body, js_code_only, my_page_src, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, my_page_src, repo_src, timesheets_src
 
 NEW = ("me_worklog", "me_team_week", "me_project_lookup", "me_plan_parttime", "me_today_zone", "me_week_plan")
 
@@ -44,7 +44,7 @@ def test_each_endpoint_takes_its_own_key():
     zone = func_body(ident, "async def require_zone_staff(")
     assert 'check_admin_or_module(request, "timesheets", ME_ZONE_MASTER)' in zone
     assert 'require_bound_staff(request, "timesheets", *sub_keys)' in zone
-    ts = code_only(repo_src("routers/api_timesheets.py"))
+    ts = code_only(timesheets_src())
     assert 'require_zone_staff(request, "me_worklog", "me_week_plan")' in func_body(ts, "async def _mine_ident(")
     ms = code_only(repo_src("routers/api_milestones.py"))
     w = func_body(ms, "def _writer(")

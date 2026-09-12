@@ -282,6 +282,17 @@ MY_PAGE_FILES = ("shell.js", "cards.js", "cards-hr.js", "zone1.js", "parttime.js
 TS_ZONE_FILES = ("ctx.js", "log.js", "plan.js", "team-week.js", "find.js", "index.js")
 
 
+#: 工作追蹤 API routers/api_timesheets.py 2026-09-12 拆成套件 routers/timesheets/（薄殼留著掛 router）
+TIMESHEETS_FILES = ("_shared.py", "sync.py", "mine.py", "ledger.py", "projects.py", "reports.py", "mapping.py", "summary.py")
+
+
+def timesheets_src(header: str = "") -> str:
+    """原本 `routers/api_timesheets.py` 那一整個檔的內容（薄殼＋套件八支串起來）；給 header 就回那支函式的本體。
+    同 finance_src 的理由：斷言釘的是「這支端點做了什麼」，不是它住在哪個檔。"""
+    files = ("api_timesheets.py",) + tuple("timesheets/" + n for n in TIMESHEETS_FILES)
+    return _split_file_src("routers", files, header)
+
+
 #: 收支明細 crm-cashbook.js 2026-09-12 拆成主檔＋五段（ES module；主檔 export 狀態、五段 export 函式）
 CASHBOOK_FILES = ("crm-cashbook.js", "crm-cashbook-batch.js", "crm-cashbook-fields.js", "crm-cashbook-import.js",
                   "crm-cashbook-alloc.js", "crm-cashbook-petty.js")

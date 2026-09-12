@@ -10,7 +10,7 @@ import pytest
 
 from core.hr_logic import (STAGE_SEED, WORK_TYPES, resolve_stage, stage_categories, stage_index,
                            stages_by_category)
-from tests.unit._srcscan import code_only, func_body, migration_sql, my_page_src, repo_src
+from tests.unit._srcscan import code_only, func_body, migration_sql, my_page_src, repo_src, timesheets_src
 
 
 def _nodes():
@@ -154,7 +154,7 @@ def test_delete_deactivates_when_rows_reference_it_and_stages_need_a_parent():
 
 
 def test_options_endpoint_returns_active_stages_per_category():
-    src = code_only(repo_src("routers/api_timesheets.py"))
+    src = code_only(timesheets_src())
     body = func_body(src, "async def timesheet_options(")
     assert '"/options"' in src
     assert "stages_by_category(nodes)" in body and "_ts_or_bound(request)" in body

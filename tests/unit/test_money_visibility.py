@@ -388,6 +388,8 @@ def test_every_project_enumeration_decides_about_mine():
         # 工時：查表在 services/timesheet_lookup（is_mine 表態）；router 裡剩的
         # select(CrmProject) 是 burn 摘要與預算回寫，端點整支守 _require_mine_admin
         "routers/api_timesheets.py",
+        # 2026-09-12 拆成套件：那段 select(CrmProject)（burn 摘要／預算回寫／類似專案候選）落到 projects.py，理由沒變
+        "routers/timesheets/projects.py",
         # 預期毛利表的 GET／統一案型：只 group by 案型算幾個案（不回名字不回錢），且只算請求者
         # 看得到的帳本（_ledger_scope＝core.ledger.allowed_entities）
         "routers/api_finance.py",

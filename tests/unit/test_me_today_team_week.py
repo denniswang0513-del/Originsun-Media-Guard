@@ -5,7 +5,7 @@
 釘的規則：team_week 的人×日直接用看板那一份計算（不抄第二份）；場次 crew 比 staff_id 退回姓名；
 放寬只碰非私帳 wall 的端點（/projects、/summary 2026-09-08 起開給 timesheets 鑰匙、寫入仍是 _require_mine_admin）。
 """
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, repo_src, timesheets_src
 
 
 def test_in_crew_matches_staff_id_then_falls_back_to_name():
@@ -52,7 +52,7 @@ def test_team_week_reuses_the_board_calculation():
     for k in ('"project"', '"note"', '"hours"', '"planned_hours"', '"status"', '"stage_name"', '"work_type"'):
         assert k in body, k
     assert "from services.timesheet_self import board_days" in src   # 看板計算住 service，不跨 router import 底線函式
-    ts = code_only(repo_src("routers/api_timesheets.py"))
+    ts = code_only(timesheets_src())
     assert "board_days(session, d0, days)" in func_body(ts, "async def day_board(")
 
 
@@ -72,7 +72,7 @@ def test_today_lists_my_shoots_todos_pending_leave_and_last_week_journal():
 
 
 def test_readonly_relaxation_does_not_touch_the_mine_wall():
-    src = code_only(repo_src("routers/api_timesheets.py"))
+    src = code_only(timesheets_src())
     gate = func_body(src, "async def _ts_or_bound(")
     assert 'payload_grants(check_logged_in(request), "timesheets")' in gate   # 布林探針：不留假的授權不足紀錄
     assert "check_logged_in(request)" in gate                   # 沒登入的 401 由 check_logged_in 丟（布林探針前先驗登入）
@@ -95,7 +95,7 @@ def test_readonly_relaxation_does_not_touch_the_mine_wall():
 
 
 def test_my_rows_search_is_own_scope_and_list_only():
-    src = code_only(repo_src("routers/api_timesheets.py"))
+    src = code_only(timesheets_src())
     body = func_body(src, "async def my_rows(")
     assert "_mine_ident(request)" in body and "search_rows(session, ident" in body   # timesheets 模組或 me_* 鑰匙（員工頁也打）
     assert '"/mine/rows"' in src

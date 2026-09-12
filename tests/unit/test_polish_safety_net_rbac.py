@@ -5,7 +5,7 @@ record_denial（core.auth）：403 記錄的形狀；payload／request 給 None 
 plan_for_targets／plan_for_rows（routers/api_timesheets）：兼職排班的兩支讀取端點——守衛、查誰、日期半開區間。
 """
 from core.auth import record_denial, recent_denials
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, repo_src, timesheets_src
 
 
 class _Req:
@@ -28,7 +28,7 @@ def test_record_denial_shape_and_null_safety():
 
 
 def test_plan_for_read_endpoints_pin():
-    src = repo_src("routers/api_timesheets.py")
+    src = timesheets_src()
     targets = code_only(func_body(src, "async def plan_for_targets("))
     assert "CrmStaff.status == _PARTTIME" in targets and 'order_by(CrmStaff.name)' in targets
     assert 'check_admin_or_module(request, "timesheets")' in targets or "require_bound_staff" in targets, "工作追蹤整區恆過，其餘要綁定＋鑰匙"

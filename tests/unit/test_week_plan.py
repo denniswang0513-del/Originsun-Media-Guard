@@ -3,7 +3,7 @@
 一張卡＝一列工時（status=plan、沒時數、planned_hours 不用）；不判有做沒做；執行動作只有填時數與「挪到隔天」。
 釘住：row_state 的 plan 旗標、schema 欄位、normalize_row／apply_update 傳遞、格子的「計畫」狀態列、
 員工頁的「我的一週」視圖、團隊的一週不再把沒時數的列畫成「0 h」。"""
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, my_page_src, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, my_page_src, repo_src, timesheets_src
 
 SHEET = "frontend/js/shared/ts-sheet.js"
 
@@ -32,7 +32,7 @@ def test_update_keeps_plan_until_hours_are_filled():
 
 def test_incomplete_reminder_ignores_plan_rows():
     """「專案紀錄未完成」只找 pending；未來排的計畫列不能被當成未完成。"""
-    body = code_only(func_body(repo_src("routers/api_timesheets.py"), "async def my_incomplete_days("))
+    body = code_only(func_body(timesheets_src(), "async def my_incomplete_days("))
     assert "Timesheet.status == PENDING_STATUS" in body and '"plan"' not in body
 
 

@@ -7,7 +7,7 @@
 3. /my.html 真的畫得出個人資料卡（不然新帳號登入是一整頁空白）。
 4. 主 SPA 對「登入了但沒有任何模組」只給免登入的後期流程頁，不再顯示全部 tab。
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, my_page_src, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, my_page_src, repo_src, timesheets_src
 
 
 def test_new_accounts_get_only_the_profile_key():
@@ -31,7 +31,7 @@ def test_today_zone_endpoints_require_their_own_key():
     （2026-09-08 起一顆功能一把，細節在 test_me_zone_keys.py）。"""
     me = code_only(repo_src("routers/api_me.py"))
     assert "require_zone_staff(request, *keys)" in func_body(me, "async def _me_bound(")
-    ts = code_only(repo_src("routers/api_timesheets.py"))
+    ts = code_only(timesheets_src())
     assert 'require_zone_staff(request, "me_worklog", "me_week_plan")' in func_body(ts, "async def _mine_ident(")
     assert "ME_MODULE_KEYS" not in ts.split("from core.auth import")[1].split("\n")[0]
 

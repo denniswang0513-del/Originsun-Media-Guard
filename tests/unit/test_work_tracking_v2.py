@@ -7,7 +7,7 @@
 - 後端：/rows 收 date／from／to_day／staff_id；/people；/board 的 absent；/manual 走 add_rows；/me/team_week 管理視角不必綁定
 - ts-sheet 的自動存／刪列端點可換（替別人填走 /manual、/rows/{id}），預設仍是 own-scope
 """
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src, timesheets_src
 
 CTX = "frontend/js/shared/ts-zone/ctx.js"
 IDX = "frontend/js/shared/ts-zone/index.js"
@@ -80,7 +80,7 @@ def test_sheet_endpoints_default_to_own_scope_and_can_be_overridden():
 
 
 def test_rows_endpoint_takes_day_range_and_staff_and_marks_editable():
-    api = repo_src(API)
+    api = timesheets_src()   # 2026-09-12 起是套件 routers/timesheets/
     body = code_only(func_body(api, "async def ledger_rows("))
     assert 'staff_id: str = ""' in api.split("async def ledger_rows(")[1].split("):")[0]
     assert 'alias="from"' in api.split("async def ledger_rows(")[1].split("):")[0]
@@ -92,7 +92,7 @@ def test_rows_endpoint_takes_day_range_and_staff_and_marks_editable():
 
 
 def test_people_board_absent_and_manual_reuse_add_rows():
-    api = repo_src(API)
+    api = timesheets_src()   # 2026-09-12 起是套件 routers/timesheets/
     people = code_only(func_body(api, "async def timesheet_people("))
     assert 'check_admin_or_module(request, "timesheets")' in people
     assert "is_active_staff(st)" in people and '"兼職"' in people
@@ -117,7 +117,7 @@ def test_money_columns_only_reach_private_scope_and_only_in_manage():
     lk = code_only(func_body(repo_src("services/timesheet_lookup.py"), "async def burn_rows("))
     for k in ('"contract_net": contract_net', '"margin_pct": margin_pct', '"staff_cost": staff_cost'):
         assert k in lk, k
-    pub = repo_src(API).split("SUMMARY_PUBLIC_KEYS = (")[1].split(")")[0]
+    pub = timesheets_src().split("SUMMARY_PUBLIC_KEYS = (")[1].split(")")[0]
     for k in ("contract_net", "margin_pct", "staff_cost", "suggested_hours"):
         assert k not in pub, f"{k} 不准進員工那份"
     find = js_code_only(repo_src("frontend/js/shared/ts-zone/find.js"))
@@ -146,7 +146,7 @@ def test_manage_write_buttons_need_admin_and_go_through_the_same_endpoints_as_th
 def test_dashboard_burn_top_is_redacted_like_summary_and_view_row_ignores_host_buttons():
     """review round 1（2026-09-12）：/dashboard 的 burn 前五整列直接回，burn_rows 帶了錢欄位之後就是個洞；
     ts-zone 的 .views 只認四個視圖的鈕（總表／儀表板／設定在同一列，是宿主的）。"""
-    dash = code_only(func_body(repo_src(API), "async def dashboard("))
+    dash = code_only(func_body(timesheets_src(), "async def dashboard("))
     assert "if not viewer_has_mine_scope(request):" in dash and "{k: it.get(k) for k in SUMMARY_PUBLIC_KEYS} for it in burn" in dash
     mount = js_func_body(js_code_only(repo_src(IDX)), "export function mountZone(opts) {")
     assert "if (b && VIEWS.includes(b.dataset.view)) switchZ1(b.dataset.view);" in mount

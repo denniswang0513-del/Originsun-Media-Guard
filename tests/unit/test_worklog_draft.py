@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """今天的專案紀錄「儲存草稿」（owner 2026-09-07）：有內容就存、沒時數＝pending 草稿、彙整只算 hours>0、
 近 30 天的草稿日期在今天那條提醒。"""
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, my_page_src, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, my_page_src, repo_src, timesheets_src
 
 
 def test_pending_state_and_blank_row_guard():
@@ -20,7 +20,7 @@ def test_aggregation_ignores_pending_rows_by_hours_filter():
 
 
 def test_incomplete_endpoint_lists_pending_days_and_precedes_row_id_route():
-    src = repo_src("routers/api_timesheets.py")
+    src = timesheets_src()
     assert src.index('@router.get("/mine/incomplete")') < src.index('@router.put("/mine/{row_id}")')
     body = code_only(func_body(src, "async def my_incomplete_days("))
     assert "Timesheet.status == PENDING_STATUS" in body and "own_filter(ident)" in body and "group_by(Timesheet.work_date)" in body

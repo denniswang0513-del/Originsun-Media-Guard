@@ -5,7 +5,7 @@
 import pytest
 
 from core.hr_logic import (WORK_TYPES, norm_work_type, row_state)
-from tests.unit._srcscan import code_only, func_body, js_code_only, migration_sql, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, migration_sql, repo_src, timesheets_src
 
 
 def test_row_state_and_work_type_rules():
@@ -39,7 +39,7 @@ def test_manual_rows_accept_plan_only_and_store_the_two_columns():
 
 
 def test_board_and_my_day_are_gated_by_the_timesheets_module():
-    src = code_only(repo_src("routers/api_timesheets.py"))
+    src = code_only(timesheets_src())
     assert 'check_admin_or_module(request, "timesheets")' in func_body(src, "async def day_board(")
     # 我的一天：timesheets 模組 **或** 任何 me_* **工作**鑰匙（員工頁 /my.html 也打同一支）；兩條路都要綁定人員檔案
     # （2026-09-08：一顆功能一把 —— 「我的一天」＝專案紀錄那把 me_worklog；me_profile 只開基本資料卡）

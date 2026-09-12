@@ -9,7 +9,7 @@ import datetime as dt
 import io
 
 import pytest
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, repo_src, timesheets_src
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ def test_read_rows_keeps_apps_script_date_format_and_reports_bad_rows():
 def test_one_read_one_write_path():
     """讀表：腳本與 runner 都 import services.timesheet_sheet；寫入：router 的 ingest 端點
     與 runner 都呼叫 services.timesheet_ingest.ingest（router 不再自己 add(Timesheet)）。"""
-    router = code_only(repo_src("routers/api_timesheets.py"))
+    router = code_only(timesheets_src())
     body = func_body(router, "async def ingest_rows(")
     assert "await ingest(session, req.rows, req.source)" in body
     assert "Timesheet(" not in body and "row_hash" not in body.replace("X-Timesheet-Token", "")
@@ -91,7 +91,7 @@ def test_settings_validation_and_defaults(pull_store):
     with pytest.raises(ValueError):
         tp.update_pull_settings({"cron": "not a cron"})
     # 端點把 ValueError 變 422，不是 500
-    ep = func_body(code_only(repo_src("routers/api_timesheets.py")), "async def put_pull(")
+    ep = func_body(code_only(timesheets_src()), "async def put_pull(")
     assert "except ValueError" in ep and "422" in ep
 
 

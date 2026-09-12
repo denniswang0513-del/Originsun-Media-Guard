@@ -11,7 +11,7 @@ from core.hr_logic import (INTERNAL_BUCKETS, ProjectLookup, explain_miss,
                            group_by_name, lookup_row, miss_bucket, remap_target,
                            resolve_project, resolve_staff, sheet_project_key,
                            split_sheet_name, suggest_projects, unique_hit)
-from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src, schemas_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src, schemas_src, timesheets_src
 
 PROJECTS = [
     ("a", "國民法官劇情短片", "三立"),
@@ -101,7 +101,7 @@ def test_staff_resolution_and_miss_buckets_share_the_project_contract():
     assert miss_bucket("none") == "unmatched"
     for why in ("map", "exact", "key", "key+client", "bucket", "empty"):
         assert miss_bucket(why) is None, why
-    src = code_only(repo_src("routers/api_timesheets.py"))
+    src = code_only(timesheets_src())
     svc = code_only(repo_src("services/timesheet_ingest.py"))
     man = code_only(repo_src("services/timesheet_manual.py"))
     for s, fn in ((svc, "async def ingest("), (src, "async def set_budgets("), (man, "async def insert_manual_rows(")):
@@ -131,7 +131,7 @@ def test_suggestions_are_report_only_never_a_write_path():
     assert suggest_projects("華南銀行_華南永昌E指通", lk)[0][0] == "華南永昌E指沖"
     assert suggest_projects("大漁映畫_沆涸", lk)[0][0] == "沆涸 剪輯"
     assert suggest_projects("完全無關", lk) == []
-    src = repo_src("routers/api_timesheets.py")
+    src = timesheets_src()
     for fn in ("async def remap_timesheets(", "async def set_budgets(", "async def upsert_project_map("):
         assert "suggest_projects" not in code_only(func_body(src, fn)), f"建議函式跑進寫入路徑了：{fn}"
     for svc in ("services/timesheet_ingest.py", "services/timesheet_manual.py"):     # 真正落庫的兩支
@@ -143,7 +143,7 @@ def test_suggestions_are_report_only_never_a_write_path():
 def test_every_entry_point_shares_one_lookup_and_one_resolver():
     """ingest／remap／budgets／手填／summary／projects 都吃 services 那一份查表；
     名稱→專案的判定只有 resolve_project 一支（手填原本自己維護第二份全名精確對映）。"""
-    src = code_only(repo_src("routers/api_timesheets.py"))
+    src = code_only(timesheets_src())
     for fn in ("async def remap_timesheets(", "async def set_budgets(",
                "async def burn_summary(", "async def timesheet_projects("):
         assert "load_project_lookup(session)" in func_body(src, fn), fn
@@ -244,7 +244,7 @@ def test_the_burn_board_tells_the_owner_why_a_name_is_unmatched():
     assert {c["id"] for c in explain_miss("典藏_年度影片", lk)["candidates"]} == {"g", "h"}
     assert explain_miss("源日後期_作品集更新", lk) == {"reason": "none", "suggestions": []}
     assert explain_miss("行政庶務", lk) == {"reason": "bucket"}
-    src = repo_src("routers/api_timesheets.py")
+    src = timesheets_src()
     fn = code_only(func_body(src, "async def burn_summary("))
     assert "explain_miss(" in fn and "resolve_project(" not in fn, "burn 摘要自己判了一次"
     assert "explain_miss(" in code_only(repo_src("scripts/import_timesheets.py")), "dry-run 自己判了一次"

@@ -5,7 +5,7 @@ import datetime as dt
 
 from core.hr_logic import (STALE_DAYS, digest_text, hours_rollup, is_stale, missing_fillers,
                            project_metrics, similar_projects, type_composition)
-from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src, timesheets_src
 
 D = dt.date
 
@@ -56,7 +56,7 @@ def test_missing_and_digest_text():
 
 
 def test_endpoints_are_thin_and_gated():
-    src = code_only(repo_src("routers/api_timesheets.py"))
+    src = code_only(timesheets_src())
     for fn in ("async def compare_projects(", "async def person_file(",
                "async def dashboard(", "async def export_csv("):
         assert 'check_admin_or_module(request, "timesheets")' in func_body(src, fn), fn

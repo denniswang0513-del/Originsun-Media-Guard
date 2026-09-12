@@ -3,7 +3,7 @@
 基礎算出來的，這一塊在我的私帳設定」）。規則只有 core.finance_logic 一份；burn 表、專案檔案頁、
 財務摘要、設定頁都吃它。"""
 from core.finance_logic import DEFAULT_MARGIN_MODEL, canonical_type, margin_for_type, suggested_budget_hours
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, repo_src, timesheets_src
 
 
 def test_default_model_is_owners_table():
@@ -36,7 +36,7 @@ def test_every_surface_uses_the_one_rule():
     lk = code_only(repo_src("services/timesheet_lookup.py"))
     assert "suggested_hours(model, contract, tax_rate, ptype)" in func_body(lk, "async def burn_rows(")
     assert "suggested_budget_hours(contract, tax_rate, margin_for_type(model, ptype)" in func_body(lk, "def suggested_hours(")
-    ts = code_only(repo_src("routers/api_timesheets.py"))
+    ts = code_only(timesheets_src())
     assert "suggested_hours(load_margin_model(\"mine\")" in func_body(ts, "def _suggested_for(")   # 走 timesheet_lookup.suggested_hours 那一份
     assert '"suggested_hours": _suggested_for(proj)' in func_body(ts, "async def project_file(")
     # 套用建議：私帳 full；預設只填沒設的（Sheet 灌的預算是 owner 的決定）
