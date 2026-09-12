@@ -299,3 +299,31 @@ def test_passthrough_copy_keeps_the_parent_case_and_uses_its_contract():
     js = repo_src("frontend/tabs/crm/crm-projects-core.js")
     fn = js_code_only(js_func_body(js, "window._projPushMine = async function (id, linked) {"))
     assert 'name="ppm-pt"' in fn and "window._projMirrorMine(id, { source: '代開發票' })" in fn
+
+
+# ── 特徵測試（/polish 安全網）：把現在的行為釘住 ─────────────────────────
+
+def test_project_dict_carries_the_linked_mine_case_only_when_mirrored():
+    """`_to_project_dict(mine_link=(id, name))`：mirrored 才露 id／name；沒連或看不到私帳兩欄都空。"""
+    from routers.crm.projects import _to_project_dict
+    from db.models import CrmProject
+    p = CrmProject(id="p1", name="案", entity="parent", mine_link_id="m1", crm_pushed=0)
+    out = _to_project_dict(p, "客", mirrored=True, mine_link=("m1", "私帳案"))
+    assert (out["mirrored"], out["mine_link_id"], out["mine_link_name"]) == (True, "m1", "私帳案")
+    out = _to_project_dict(p, "客", mirrored=False, mine_link=("m1", "私帳案"))
+    assert (out["mirrored"], out["mine_link_id"], out["mine_link_name"]) == (False, "", "")
+    # 舊形狀（母帳列沒有 mine_link_id）由呼叫端解出 id 餵進來，序列化照露
+    p.mine_link_id = None
+    out = _to_project_dict(p, "客", mirrored=True, mine_link=("m9", "舊分身"))
+    assert (out["mine_link_id"], out["mine_link_name"]) == ("m9", "舊分身")
+
+
+def test_blocker_filter_shape():
+    """收支：無額外條件（全擋）；發票／請款：帶放寬條件（SQL 表達式）。"""
+    from routers.crm.projects import _blocker_filter
+    from db.models import CrmCashEntry, CrmInvoice, CrmPaymentRequest
+    assert _blocker_filter(CrmCashEntry) is None
+    inv = _blocker_filter(CrmInvoice)
+    assert inv is not None and "內部代開" in str(inv.compile(compile_kwargs={"literal_binds": True}))
+    pr = _blocker_filter(CrmPaymentRequest)
+    assert pr is not None and "source_invoice_id IS NULL" in str(pr)
