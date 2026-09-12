@@ -80,7 +80,8 @@ def project_summary(items, lo, hi) -> tuple:
     proj = {"count": len(picked)}
     for k in ("contract", "received", "net"):
         proj[k] = sum(int(p.get(k) or 0) for p in picked)
-    proj["receivable"] = sum(int(p.get("to_collect") or 0) for p in picked)
+    # 溢收（to_collect < 0）不抵掉別案的未收 —— 應收分頁只列 > 0 的案，總覽這個數要跟它對得起來
+    proj["receivable"] = sum(max(0, int(p.get("to_collect") or 0)) for p in picked)
     to_collect = sorted((p for p in items if int(p.get("to_collect") or 0) > 0),
                         key=lambda p: -int(p.get("to_collect") or 0))[:HOME_TOP_TO_COLLECT]
     return proj, to_collect
@@ -115,7 +116,8 @@ async def ledger_mobile_options(request: Request):
         tree = await load_tree(session, "mine")
         rows = (await session.execute(
             select(CrmProject.id, CrmProject.name, CrmProject.display_name,
-                   CrmProject.completion_date, CrmProject.created_at, Client.short_name)
+                   CrmProject.completion_date, CrmProject.start_date, CrmProject.shoot_date,
+                   Client.short_name)
             .outerjoin(Client, Client.id == CrmProject.client_id)
             .where(CrmProject.entity == "mine")
             .order_by(CrmProject.updated_at.desc()))).all()
@@ -126,9 +128,10 @@ async def ledger_mobile_options(request: Request):
             .where(BankAccount.entity == "mine")
             .order_by(BankAccount.sort_order, BankAccount.created_at))).all()
     projects = []
-    for pid, name, disp, close, created, client in rows:
-        year = (close or created)
-        year = year.year if year else None
+    for pid, name, disp, close, start, shoot, client in rows:
+        # 年份：起始→拍攝→結案；🔴 **不退到 created_at**（同 petty._project_year 的理由：生產庫 217 個
+        # 舊案是同一次匯入建的，退到建立日等於幫它們全標上假年份，打年份找案會濾錯）
+        year = next((d.year for d in (start, shoot, close) if d), None)
         shown = disp or name or ""
         projects.append({"id": pid, "name": shown, "client": client or "",
                          "year": year, "closed": bool(close),

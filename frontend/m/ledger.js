@@ -58,7 +58,10 @@ async function render() {
     host.hidden = false;
     closeSheet();
     window.scrollTo(0, 0);
+    // 第一次畫還在飛（字彙／清單還沒回來）就被切走再切回：不重進 first 路（會把表單與監聯重建、同一支 fetch 再發一次）
+    if (host.dataset.loading) return;
     const first = !host.dataset.ready;
+    host.dataset.loading = '1';
     try {
         await VIEWS[tab].render(host, { first });
         // 第一次畫成功才算「長好了」：畫到一半炸掉就標 ready，下次切回來走 first=false 的 load
@@ -66,6 +69,8 @@ async function render() {
         host.dataset.ready = '1';
     } catch (e) {
         host.innerHTML = errBox(e);
+    } finally {
+        delete host.dataset.loading;
     }
 }
 

@@ -73,13 +73,15 @@ export function mountEntryForm(pfx, { mode = 'cash', entry = null, preset = null
     }
 }
 
-/** 表單 → body（只放有值的鍵；改一筆時呼叫端再跟原值比、只送有動的）。 */
-export function readEntryForm(pfx, { mode = 'cash' } = {}) {
+/** 表單 → body（只放有值的鍵；改一筆時呼叫端再跟原值比、只送有動的）。
+ *  `editing`＝改既有那筆：金額准 0（純手續費／備忘列本來就沒金額，不然那些列在手機上永遠改不了摘要）；
+ *  新增仍要 > 0。 */
+export function readEntryForm(pfx, { mode = 'cash', editing = false } = {}) {
     const v = (id) => { const el = document.getElementById(pfx + '-' + id); return el ? el.value : ''; };
     const kindLabel = v('kind');
     const kind = mode === 'household' ? 'expense' : (kindLabel === KIND.deposit ? 'deposit' : 'expense');
-    const amount = parseInt(v('amount'), 10);
-    if (!Number.isFinite(amount) || amount <= 0) throw new Error('金額要大於 0');
+    const amount = parseInt(v('amount') || '0', 10);
+    if (!Number.isFinite(amount) || amount < 0 || (!editing && amount <= 0)) throw new Error('金額要大於 0');
     if (!v('summary').trim()) throw new Error('摘要必填');
     if (!v('date')) throw new Error('日期必填');
     const body = { entity: 'mine', entry_date: v('date'), summary: v('summary').trim(), note: v('note') };
@@ -118,7 +120,7 @@ export function openEntrySheet(e, { mode = 'cash', onDone } = {}) {
     mountEntryForm('es', { mode, entry: e });
     body.querySelector('#es-save').addEventListener('click', (ev) => withBusy(ev.currentTarget, async () => {
         let next;
-        try { next = readEntryForm('es', { mode }); } catch (err) { toast(err.message, 'err'); return; }
+        try { next = readEntryForm('es', { mode, editing: true }); } catch (err) { toast(err.message, 'err'); return; }
         // 只送有動的鍵（後端 PUT 是 exclude_unset：整包送會把沒動的欄洗掉）
         const was = { entry_date: fmtDate(e.entry_date), summary: e.summary || '', note: e.note || '',
                       deposit: e.deposit || null, expense: e.expense || null,

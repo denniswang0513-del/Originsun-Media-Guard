@@ -58,12 +58,14 @@ def test_project_summary_sums_only_closed_in_period_and_ranks_to_collect():
         {"id": "a", "close_date": "2026-03-03", "contract": 100, "received": 60, "net": 90, "receivable": 40, "to_collect": 32},
         {"id": "b", "close_date": "2025-12-31", "contract": 50, "received": 50, "net": 45, "receivable": 0, "to_collect": 0},
         {"id": "c", "close_date": "", "contract": 70, "received": 0, "net": 70, "receivable": 70, "to_collect": 70},
+        {"id": "d", "close_date": "2026-05-05", "contract": 10, "received": 15, "net": 10, "receivable": -5, "to_collect": -5},
     ]
     proj, top = project_summary(items, date(2026, 1, 1), date(2026, 12, 31))
-    assert proj == {"count": 1, "contract": 100, "received": 60, "net": 90, "receivable": 32}
-    assert [p["id"] for p in top] == ["c", "a"], "未收前 N 案不看區間、按 to_collect 降序、0 不列"
+    # d 溢收 5 不抵掉 a 的未收（應收頁只列 > 0，總覽要跟它對得起來）
+    assert proj == {"count": 2, "contract": 110, "received": 75, "net": 100, "receivable": 32}
+    assert [p["id"] for p in top] == ["c", "a"], "未收前 N 案不看區間、按 to_collect 降序、0／負不列"
     proj_all, _ = project_summary(items, None, None)
-    assert proj_all["count"] == 3 and proj_all["receivable"] == 102
+    assert proj_all["count"] == 4 and proj_all["receivable"] == 102
     assert len(project_summary([{"to_collect": 1}] * 9, None, None)[1]) == HOME_TOP_TO_COLLECT
 
 
@@ -219,3 +221,17 @@ console.log(JSON.stringify([shiftMonth('2026-01', -1), shiftMonth('2026-12', 1),
                    '{"from":"2026-09-01","to":"2026-09-30"},'
                    '{"from":"2026-12-01","to":"2026-12-31"}]'), out
     assert "toISOString" not in js
+
+
+def test_closing_review_fixes_are_in_place():
+    """收尾 review 四條：零金額列可編（新增仍要 > 0）；年份不退到 created_at；A→B→A 不重進 first。"""
+    from tests.unit._srcscan import js_code_only, js_func_body
+    cash = js_code_only(repo_src("frontend/m/views/ledger-cash.js"))
+    fn = js_func_body(cash, "export function readEntryForm(pfx, { mode = 'cash', editing = false } = {}) {")
+    assert "(!editing && amount <= 0)" in fn
+    assert "readEntryForm('es', { mode, editing: true })" in cash
+    opt = code_only(func_body(_SRC, "async def ledger_mobile_options("))
+    assert "CrmProject.created_at" not in opt, "年份退到 created_at 會幫匯入案全標上假年份"
+    assert "for d in (start, shoot, close) if d" in opt
+    led = js_code_only(repo_src("frontend/m/ledger.js"))
+    assert "if (host.dataset.loading) return;" in led and "delete host.dataset.loading;" in led
