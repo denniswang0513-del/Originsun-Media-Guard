@@ -517,13 +517,13 @@ async def upload_bankbook(request: Request, file: UploadFile = File(...)):
     written = await asyncio.to_thread(stream_to_disk, file.file, tmp, _BANKBOOK_MAX_BYTES)
     if written < 0:                        # stream_to_disk 自己刪半成品
         raise HTTPException(status_code=413, detail=f"檔案超過 {_BANKBOOK_MAX_BYTES // 1024 // 1024}MB")
+    os.replace(tmp, filepath)             # 先換上新檔再清舊的：replace 失敗時舊檔還在、連結不會 404
     for old in os.listdir(base):          # 換副檔名也不殘留（.pdf → .jpg 舊的那份要走）
-        if old.rsplit(".", 1)[0] == _BANKBOOK_STEM:
+        if old.rsplit(".", 1)[0] == _BANKBOOK_STEM and old != _BANKBOOK_STEM + ext:
             try:
                 os.remove(os.path.join(base, old))
             except OSError:
                 pass
-    os.replace(tmp, filepath)
     settings = load_settings()
     company = dict(settings.get("company") or {})
     company["bankbook_path"] = _stored_path(filepath)

@@ -23,7 +23,7 @@ async function _loadBankbookStatus() {
     if (!st || !a) return;
     try {
         const r = await fetch(_BANKBOOK_API, { headers: _bh() });
-        if (!r.ok) throw new Error();
+        if (!r.ok) throw new Error(r.status === 404 ? '尚未上傳。發票分享頁「匯款資訊」給客戶下載；存在發票資料夾底下，換檔即生效' : '無法讀取目前的存摺影本（HTTP ' + r.status + '）');
         const d = await r.json();
         const kb = Math.max(1, Math.round((d.size || 0) / 1024));
         a.textContent = `${d.file_name}（${kb} KB）`;
@@ -37,8 +37,9 @@ async function _loadBankbookStatus() {
             setTimeout(() => URL.revokeObjectURL(u), 10000);
         };
         st.textContent = '已上傳。換檔直接再按上傳';
-    } catch (_) {
+    } catch (e) {
         a.style.display = 'none';
+        st.textContent = e.message || '無法讀取目前的存摺影本';   // 別留著上一次的「已上傳」
     }
 }
 

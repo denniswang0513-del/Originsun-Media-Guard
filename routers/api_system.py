@@ -57,9 +57,11 @@ _SETTINGS_SAVE_SUBKEYS: dict[str, tuple[str, ...]] = {
     "nas_paths": ("agents_dir",),
     "finance": ("monthly_fixed_costs",),            # 其餘（margin_model.mine／baseline_month／bookkeeping_fee）是財務主人的東西
 }
-# 頂層鍵底下非管理員**不准碰**的子鍵：company 的 logo_path／seal_path 會被報價單渲染成 data URI（任意檔讀取），只有管理員上傳端點可以寫
+# 頂層鍵底下非管理員**不准碰**的子鍵：company 的 logo_path／seal_path 會被報價單渲染成 data URI（任意檔讀取），只有管理員上傳端點可以寫；
+# bankbook_path 是發票分享頁（免登入）「存摺影本」下載的來源路徑 —— 白名單只擋到「發票根目錄以外」，指到別張發票就把它公開送出去了，
+# 同樣只有管理員上傳端點（routers/crm/invoice_files.upload_bankbook）可以寫
 _SETTINGS_SAVE_DENY_SUBKEYS: dict[str, tuple[str, ...]] = {
-    "company": ("logo_path", "seal_path"),
+    "company": ("logo_path", "seal_path", "bankbook_path"),
 }
 # 每個頂層鍵該長什麼樣（沒列＝dict）：staff_roles 是清單；形狀不對就 400，不讓 save_settings 拿字串蓋掉整塊
 _SETTINGS_SAVE_SHAPES: dict[str, type] = {"staff_roles": list}
