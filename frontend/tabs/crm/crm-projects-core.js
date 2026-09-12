@@ -880,7 +880,9 @@ async function _projMirrorSubmit(btn, id, mode, source) {
                     : `已在私帳同步收入 ${fmtNum(r.amount)}`);
         crmCacheInvalidate('/projects');
         await loadProjects();
-        // 詳情面板要重畫（動作列從「推送到私帳」變成「已連結私帳 → 案名」）
+        // 詳情面板要重畫（動作列從「推送到私帳」變成「已連結私帳 → 案名」）；
+        // 同步過了，落後提示要重問（detail.js 用 staleFor 擋重複查詢）
+        delete document.getElementById('proj-bar-actions')?.dataset.staleFor;
         const p = state.projects.find(x => x.id === id);
         if (p) { callbacks.renderDetail?.(p); }
     } catch (e) {

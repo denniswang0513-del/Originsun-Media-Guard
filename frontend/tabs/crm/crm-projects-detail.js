@@ -523,8 +523,11 @@ function renderDetail(project) {
             () => window._projPushMine(project.id, project.mirrored));
         actions.querySelector('#proj-mine-goto')?.addEventListener('click',
             () => _openLedgerProject(project.mine_link_id));
-        // 已連結：問一次後端「私帳落後了沒」，把「重新同步」那顆改成講實話的字
-        if (_mine && _toMine && project.mirrored) {
+        // 已連結：問一次後端「私帳落後了沒」，把「重新同步」那顆改成講實話的字。
+        // 只在**換到這一案**時問（renderDetail 每改一格都會整個重畫；落後與否只跟成本行有關，
+        // 改狀態／日期不會變）；重新同步後由 core.js 清掉 staleFor 再重畫，才會再問一次
+        if (_mine && _toMine && project.mirrored && actions.dataset.staleFor !== project.id) {
+            actions.dataset.staleFor = project.id;
             window._projMirrorStaleHint?.(project.id, actions.querySelector('#proj-push-mine'));
         }
         actions.querySelector('.crm-detail-close').addEventListener('click', () => callbacks.closeDetail?.());

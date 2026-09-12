@@ -218,15 +218,15 @@ def merge_split(current: dict, incoming: dict, *, add: bool) -> tuple:
     return merged, delta
 
 
-def mirror_detail(split: dict, total: int | None = None) -> dict:
-    """鏡射案的 ledger_detail：只有收入分項、案源與「這次同步的合計」，成本欄全 0。
+def mirror_detail(split: dict) -> dict:
+    """鏡射案的 ledger_detail：只有收入分項、案源與「這次同步的合計」（＝Σsplit，
+    跟 mirror_lines 的 total 相等），成本欄全 0。
 
     委外／代開發票／稅金那些是**我自己的**成本，公司管不著 —— 建立時留空，
     之後他在私帳自己填。再同步時也只覆蓋 split（見 routers/crm/projects.py）。
-    `total` 不給就用 Σsplit（兩者在 mirror_lines 的輸出裡本來就相等）。
     """
-    t = int(total) if total is not None else sum(int(v or 0) for v in (split or {}).values())
-    return norm_detail({"split": split, "source": MIRROR_SOURCE, MIRROR_TOTAL_KEY: t})
+    total = sum(int(v or 0) for v in (split or {}).values())
+    return norm_detail({"split": split, "source": MIRROR_SOURCE, MIRROR_TOTAL_KEY: total})
 
 
 #: 可以被人「接手」、不再自動覆寫的欄位。加第二欄只要往這裡加一個字串。

@@ -1108,14 +1108,13 @@ _fp.pushClose = () => {
     if (o) { o.style.display = 'none'; o.querySelector('#fpl-push-body').innerHTML = ''; }
 };
 
-/** 推送完的收尾：詳情與清單重抓（連結狀態、鎖住的格子、顯示名都變了）。 */
+/** 推送完的收尾：詳情與清單重抓（連結狀態、鎖住的格子、顯示名都變了）——
+ *  refresh 自己會重抓開著的詳情（_sel && _detail），不必先抓一次。 */
 async function _afterPush(msg) {
     _fp.pushClose();
     finToast(msg);
     _dirty = false;                       // refresh 看到 dirty 會整段跳過
     try {
-        _detail = await finFetch(`/project-ledger/${_sel}`);
-        _renderDetail();
         await _fp.refresh();
     } catch (e) {
         finToast('重新載入失敗：' + e.message, 'error');

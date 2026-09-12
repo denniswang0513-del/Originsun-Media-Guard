@@ -120,7 +120,6 @@ def test_norm_detail_keeps_the_synced_total():
 
 def test_mirror_detail_records_the_total():
     assert mirror_detail({"剪輯": 100, "調光": 50})[MIRROR_TOTAL_KEY] == 150
-    assert mirror_detail({"剪輯": 100}, 999)[MIRROR_TOTAL_KEY] == 999
 
 
 def test_stale_compares_last_synced_total_not_current_split():
