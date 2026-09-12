@@ -565,7 +565,7 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
             # 以母帳為準：1:1 連著母帳案的私帳案，結案日在母帳改（同一交易會同步過來）。
             # 🔴 只在**真的要改**時擋：舊分頁的 js（CF 給 4 小時快取）整包送 close_date，
             # 沒動也送 —— 看到鍵就 409 等於連著母帳的案四小時內一格都存不了
-            if (ent == "mine" and raw != _fmt_day(p.completion_date)
+            if ("close_date" in LOCKED_WHEN_LINKED and ent == "mine" and raw != _fmt_day(p.completion_date)
                     and len((await mine_parent_links(session, [project_id])).get(project_id, ())) == 1):
                 raise HTTPException(status_code=409,
                                     detail="這一案連著母帳，結案日以母帳為準 —— 請到母帳那一案改，會自動同步過來")

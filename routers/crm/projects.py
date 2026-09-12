@@ -16,6 +16,7 @@ from sqlalchemy import func as _sa_func
 
 from config import load_settings as _load_settings
 
+from core.finance_logic import MINE_LINK_INVOICE_CATEGORY
 from core.ledger import hide_mine_projects, not_mine
 from core.ledger_project import LINK_SYNC_FIELDS, parent_receipt_fields
 from core.project_link import invoice_project_ids as _inv_pids
@@ -1163,7 +1164,6 @@ def _blocker_filter(M):
     開給客戶的）、手動請款、以及所有收支（那是公司帳戶的錢，兩本帳的帳戶與分類樹
     都不同，不能自動搬）。
     """
-    from core.finance_logic import MINE_LINK_INVOICE_CATEGORY
     if M is CrmInvoice:
         return or_(CrmInvoice.category.is_(None),
                    CrmInvoice.category != MINE_LINK_INVOICE_CATEGORY)
@@ -1189,7 +1189,6 @@ async def _ledger_blockers(session, project_id: str) -> list:
 
 async def _has_passthrough_invoice(session, project_id: str) -> bool:
     """本案身上有沒有「內部代開」發票 —— 有的話搬到私帳時案源預設＝代開發票。"""
-    from core.finance_logic import MINE_LINK_INVOICE_CATEGORY
     return bool((await session.execute(
         select(CrmInvoice.id)
         .where(CrmInvoice.project_id == project_id,
