@@ -23,7 +23,13 @@ async function _loadBankbookStatus() {
     if (!st || !a) return;
     try {
         const r = await fetch(_BANKBOOK_API, { headers: _bh() });
-        if (!r.ok) throw new Error(r.status === 404 ? '尚未上傳。發票分享頁「匯款資訊」給客戶下載；存在發票資料夾底下，換檔即生效' : '無法讀取目前的存摺影本（HTTP ' + r.status + '）');
+        if (!r.ok) {
+            // 這格對非管理員也看得到（報價頁開的 company-only 視窗給 crm_quotes 的人用）：403 是「不歸你管」，不是壞掉
+            const msg = r.status === 404 ? '尚未上傳。發票分享頁「匯款資訊」給客戶下載；存在發票資料夾底下，換檔即生效'
+                : (r.status === 401 || r.status === 403) ? '存摺影本只有管理員可以查看與更換'
+                : '無法讀取目前的存摺影本（HTTP ' + r.status + '）';
+            throw new Error(msg);
+        }
         const d = await r.json();
         const kb = Math.max(1, Math.round((d.size || 0) / 1024));
         a.textContent = `${d.file_name}（${kb} KB）`;

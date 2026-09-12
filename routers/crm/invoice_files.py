@@ -492,9 +492,30 @@ def _bankbook_ext(head: bytes) -> str:
     raise HTTPException(status_code=400, detail="只收 PDF／PNG／JPG")
 
 
+_BANKBOOK_EXTS = tuple(ext for _magic, ext in _BANKBOOK_MAGIC)
+
+
 def _bankbook_local_path(company: dict) -> str:
-    """`settings.company.bankbook_path` → 這台開得到的絕對路徑；沒設／開不到／不在白名單回空字串。"""
-    return _local_invoice_path((company or {}).get("bankbook_path") or "")
+    """`settings.company.bankbook_path` → 這台開得到的絕對路徑；開不到／不在白名單回空字串。
+
+    設定裡那條路徑靠 /publish 才到 NAS：第一次上傳之後、或換了副檔名（舊 .pdf 已刪、
+    NAS 的設定還指著它）之後，到下一次發版之前 NAS 那台照設定找是找不到的 ——
+    master 上分享頁有「存摺影本」那列、走 NAS 的客戶沒有。檔名是固定的，所以設定
+    找不到就直接到固定位置（`_公司/存摺影本.<ext>`）找；仍走同一份白名單。
+    """
+    path = _local_invoice_path((company or {}).get("bankbook_path") or "")
+    if path:
+        return path
+    base = os.path.join(_invoices_write_root(), _BANKBOOK_DIR)
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return ""
+    for name in names:
+        stem, dot, ext = name.rpartition(".")
+        if dot and stem == _BANKBOOK_STEM and ("." + ext.lower()) in _BANKBOOK_EXTS:
+            return _local_invoice_path(os.path.join(base, name))
+    return ""
 
 
 @router.post("/invoices/bankbook")
@@ -517,7 +538,14 @@ async def upload_bankbook(request: Request, file: UploadFile = File(...)):
     written = await asyncio.to_thread(stream_to_disk, file.file, tmp, _BANKBOOK_MAX_BYTES)
     if written < 0:                        # stream_to_disk 自己刪半成品
         raise HTTPException(status_code=413, detail=f"檔案超過 {_BANKBOOK_MAX_BYTES // 1024 // 1024}MB")
-    os.replace(tmp, filepath)             # 先換上新檔再清舊的：replace 失敗時舊檔還在、連結不會 404
+    try:
+        os.replace(tmp, filepath)         # 先換上新檔再清舊的：replace 失敗時舊檔還在、連結不會 404
+    except OSError as e:                  # Windows 上舊檔正被人下載中會拒絕覆蓋；半成品要清掉、錯誤要講人話
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise HTTPException(status_code=422, detail=f"檔案無法寫入（可能正被下載中，請稍後再試）：{e}")
     for old in os.listdir(base):          # 換副檔名也不殘留（.pdf → .jpg 舊的那份要走）
         if old.rsplit(".", 1)[0] == _BANKBOOK_STEM and old != _BANKBOOK_STEM + ext:
             try:
