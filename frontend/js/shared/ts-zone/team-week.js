@@ -32,15 +32,12 @@ export async function loadTeamWeek() {
     // 管理視角（docs/WORK_TRACKING_V2_PLAN.md §4-5）：每人週合計、今天以前的工作日空白標「未填」（在職／合夥才點名；兼職不）
     const status = new Map(z.people.map(p => [p.name, p.status]));
     const nagged = (name) => z.manage && status.has(name) && status.get(name) !== "兼職";
-    const weekHours = (name) => { const p = people.find(x => x.name === name); return Math.round(cols.reduce((a, iso) => a + ((p && p.cells && p.cells[iso]) || []).reduce((b, i) => b + (i.hours || 0), 0), 0) * 10) / 10; };
-    const blank = (name, iso) => {
-        if (!nagged(name) || iso > today || _dow(iso) === 0 || _dow(iso) === 6 || leaveOf(iso).includes(name)) return false;
-        const p = people.find(x => x.name === name);
-        return !((p && p.cells && p.cells[iso]) || []).some(i => i.status !== "plan");
-    };
+    const cellsOf = (name, iso) => { const p = people.find(x => x.name === name); return (p && p.cells && p.cells[iso]) || []; };
+    const weekHours = (name) => Math.round(cols.reduce((a, iso) => a + cellsOf(name, iso).reduce((b, i) => b + (i.hours || 0), 0), 0) * 10) / 10;
+    const blank = (name, iso) => nagged(name) && iso <= today && _dow(iso) !== 0 && _dow(iso) !== 6 && !leaveOf(iso).includes(name)
+        && !cellsOf(name, iso).some(i => i.status !== "plan");
     const cell = (name, iso) => {
-        const p = people.find(x => x.name === name);
-        const items = (p && p.cells && p.cells[iso]) || [];
+        const items = cellsOf(name, iso);
         const parts = [];
         if (leaveOf(iso).includes(name)) parts.push('<div class="c off">休假</div>');
         shootsOf(iso).filter(s => (s.crew || []).includes(name)).forEach(s => parts.push(`<div class="c shoot">${esc(s.title || s.project_name || "場次")}<i>${[s.project_name && s.project_name !== s.title ? s.project_name : "", s.location, s.start_time, (s.crew || []).join("、")].filter(Boolean).map(esc).join(" · ")}</i></div>`));

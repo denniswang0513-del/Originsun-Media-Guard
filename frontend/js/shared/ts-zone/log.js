@@ -79,7 +79,7 @@ async function _loadTeamDay() {
     const byName = new Map();
     (rowsRes.items || []).forEach(i => { const k = i.staff_name || "(空白)"; if (!byName.has(k)) byName.set(k, []); byName.get(k).push(i); });
     const people = new Map(z.people.map(p => [p.name, p]));
-    const rank = (n) => z.people.findIndex(p => p.name === n) + 1 || 999;   // 照 /people 的順序（在職 → 兼職 → 不在清單的）
+    const rank = (n) => (people.has(n) ? z.people.indexOf(people.get(n)) : 999);   // 照 /people 的順序（在職 → 兼職 → 不在清單的）
     const order = [...byName.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b, "zh-Hant"));
     host.innerHTML = _logHeadHtml(isToday) + (isToday ? _absentStripHtml(board) : "") + (order.length ? order.map((n, k) => {
         const p = people.get(n), items = byName.get(n);
