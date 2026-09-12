@@ -36,6 +36,9 @@ router = APIRouter(prefix="/api/v1/finance/m", tags=["士源帳本"])
 #: 收支明細的 `category` 是「頂層_第二層」的鏡射，所以「是不是家用」看前綴就好。
 HOUSEHOLD_TOP = "家用"
 PERIODS = ("month", "year", "all")
+#: 總覽的「最近幾筆」與「未收前幾案」各拿幾筆（手機一頁能掃完的量）
+HOME_RECENT = 5
+HOME_TOP_TO_COLLECT = 5
 _TW = ZoneInfo("Asia/Taipei")
 
 
@@ -64,6 +67,23 @@ def _in_period(day, lo, hi) -> bool:
         return False
     d = day.date() if isinstance(day, datetime) else day
     return lo <= d <= hi
+
+
+def project_summary(items, lo, hi) -> tuple:
+    """`/project-ledger` 的逐案列 → 總覽的四個數字 ＋ 未收前 N 案 → `(proj, to_collect)`。
+
+    只加總**結案日落在區間**的案（`_in_period`）；「未收」一律走 `to_collect`（同桌機執行
+    專案那欄）—— `receivable` 是營收−已收，代開／執行業務所得的源頭代扣永遠不會進帳，
+    收齊的案用它會剩一個代辦費當「未收」。未收前 N 案不看區間（欠錢就是欠錢）。
+    """
+    picked = [p for p in items if _in_period(_parse_day(p.get("close_date")), lo, hi)]
+    proj = {"count": len(picked)}
+    for k in ("contract", "received", "net"):
+        proj[k] = sum(int(p.get(k) or 0) for p in picked)
+    proj["receivable"] = sum(int(p.get("to_collect") or 0) for p in picked)
+    to_collect = sorted((p for p in items if int(p.get("to_collect") or 0) > 0),
+                        key=lambda p: -int(p.get("to_collect") or 0))[:HOME_TOP_TO_COLLECT]
+    return proj, to_collect
 
 
 def taxonomy_options(flat_nodes) -> list:
@@ -141,15 +161,7 @@ async def ledger_mobile_home(request: Request, period: str = Query("month")):
     lo, hi = _period_range(period)
     ledger = await project_ledger(request, entity="mine")
     items = ledger.get("projects") or []
-    picked = [p for p in items if _in_period(_parse_day(p.get("close_date")), lo, hi)]
-    proj = {"count": len(picked)}
-    for k in ("contract", "received", "net"):
-        proj[k] = sum(int(p.get(k) or 0) for p in picked)
-    # 「未收」一律走 to_collect（同桌機執行專案那欄）：amount_receivable 是營收−已收，
-    # 代開／執行業務所得的源頭代扣永遠不會進帳，收齊的案會剩一個代辦費當「未收」
-    proj["receivable"] = sum(int(p.get("to_collect") or 0) for p in picked)
-    to_collect = sorted((p for p in items if int(p.get("to_collect") or 0) > 0),
-                        key=lambda p: -int(p.get("to_collect") or 0))[:5]
+    proj, to_collect = project_summary(items, lo, hi)
 
     factory = _factory_or_503()
     async with factory() as session:
@@ -169,7 +181,7 @@ async def ledger_mobile_home(request: Request, period: str = Query("month")):
                    CrmCashEntry.item, CrmCashEntry.project_id)
             .where(CrmCashEntry.entity == "mine")
             .order_by(CrmCashEntry.entry_date.desc(), CrmCashEntry.created_at.desc())
-            .limit(5))).all()
+            .limit(HOME_RECENT))).all()
     names = {p["id"]: p["name"] for p in items}
     return {
         "period": period,

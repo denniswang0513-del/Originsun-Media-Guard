@@ -10,8 +10,8 @@ from datetime import date, datetime, timezone
 
 from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
 
-from routers.api_ledger_mobile import (HOUSEHOLD_TOP, PERIODS, _in_period,
-                                       _period_range, taxonomy_options)
+from routers.api_ledger_mobile import (HOME_TOP_TO_COLLECT, HOUSEHOLD_TOP, PERIODS, _in_period,
+                                       _period_range, project_summary, taxonomy_options)
 
 _SRC = repo_src("routers/api_ledger_mobile.py")
 
@@ -50,6 +50,21 @@ def test_taxonomy_options_drop_top_level_and_join_the_path():
     assert out[1] == {"id": "c", "label": "家用／變動支出／外食", "top": "家用", "depth": 3}
     assert out[2]["top"] == "公司"
     assert HOUSEHOLD_TOP == "家用"
+
+
+def test_project_summary_sums_only_closed_in_period_and_ranks_to_collect():
+    """總覽四數字只算結案日落在區間的案；「未收」走 to_collect 不走 receivable；未收前 N 案不看區間。"""
+    items = [
+        {"id": "a", "close_date": "2026-03-03", "contract": 100, "received": 60, "net": 90, "receivable": 40, "to_collect": 32},
+        {"id": "b", "close_date": "2025-12-31", "contract": 50, "received": 50, "net": 45, "receivable": 0, "to_collect": 0},
+        {"id": "c", "close_date": "", "contract": 70, "received": 0, "net": 70, "receivable": 70, "to_collect": 70},
+    ]
+    proj, top = project_summary(items, date(2026, 1, 1), date(2026, 12, 31))
+    assert proj == {"count": 1, "contract": 100, "received": 60, "net": 90, "receivable": 32}
+    assert [p["id"] for p in top] == ["c", "a"], "未收前 N 案不看區間、按 to_collect 降序、0 不列"
+    proj_all, _ = project_summary(items, None, None)
+    assert proj_all["count"] == 3 and proj_all["receivable"] == 102
+    assert len(project_summary([{"to_collect": 1}] * 9, None, None)[1]) == HOME_TOP_TO_COLLECT
 
 
 # ── 契約與規矩（掃原始碼）────────────────────────────────────────────
