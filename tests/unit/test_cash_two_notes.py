@@ -6,7 +6,7 @@
 行內編輯走 PUT 部分更新（只送那一欄）且不觸發整列點擊。
 """
 from pathlib import Path
-from tests.unit._srcscan import crm_css_src, js_func_body
+from tests.unit._srcscan import crm_css_src, js_func_body, projects_src
 
 
 from scripts.split_cash_notes import split_note
@@ -201,7 +201,7 @@ def test_inline_edits_patch_one_row_not_the_whole_table():
 
 
 # ── 搬帳本（專案管理 ↔ 私帳，owner 2026-08-28）─────────────────────
-_PROJ = open("routers/crm/projects.py", encoding="utf-8").read()
+_PROJ = projects_src()
 
 
 def test_ledger_move_is_a_dedicated_endpoint_not_a_field():
@@ -231,7 +231,7 @@ def test_ledger_move_blocks_only_the_entity_bearing_tables():
     而私帳逐案損益已經有「行政雜支／人員費用」兩欄收納它們。早一版把雜支也擋
     進來，結果是「有帳目的案子永遠推不動」，正好擋掉他要推的那些。
     """
-    from routers.crm.projects import _LEDGER_BLOCKERS
+    from routers.crm.project_links import _LEDGER_BLOCKERS
 
     names = {M.__tablename__ for M, _label in _LEDGER_BLOCKERS}
     assert names == {"crm_cash_entries", "crm_invoices", "crm_payment_requests"}

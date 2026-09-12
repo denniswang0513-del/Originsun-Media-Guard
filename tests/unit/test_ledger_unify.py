@@ -7,7 +7,7 @@
   · 母帳沒金額時先填私帳的，**標成佔位**，母公司毛利／現金流要排除它
 """
 from core.ledger_project import linked_display_name
-from tests.unit._srcscan import repo_src
+from tests.unit._srcscan import repo_src, projects_src
 
 
 def test_display_name_chain():
@@ -39,7 +39,7 @@ def test_name_column_is_never_rewritten():
     api = repo_src("routers/api_finance_projects.py")
     assert "p.display_name = " in api, "顯示名要寫進 display_name"
     assert "p.name = " not in api, "顯示名不能改寫 name（工時對映靠它查）"
-    proj = repo_src("routers/crm/projects.py")
+    proj = projects_src()
     # 補建母帳案是建**新的一列**（name=m.name），不是改私帳那列的名字
     assert "m.name = " not in proj
 
@@ -76,7 +76,7 @@ def test_placeholder_contract_is_excluded_from_reports():
     cf = repo_src("routers/api_cashflow.py")
     assert 'contract_amount_source", None) == "mine"' in cf, \
         "付款節點模板要擋佔位金額（照它排出來的節點會進現金流預測）"
-    proj = repo_src("routers/crm/projects.py")
+    proj = projects_src()
     assert 'contract_amount_source="mine" if amt else None' in proj, \
         "補建母帳案時要標記金額來源"
 
@@ -87,7 +87,7 @@ def test_link_endpoints_guard_mine_scope():
     五支＝清單 ＋ 兩個方向各自的 連結／建立
     （parent-create／parent-link／mine-create／mine-link）。
     """
-    proj = repo_src("routers/crm/projects.py")
+    proj = projects_src()
     assert proj.count("await _mine_link_guard(request)") == 5
     assert 'require_entity(request, "mine", level="full")' in proj
 
@@ -105,14 +105,14 @@ def test_client_backfill_reuses_existing_crm_row():
     cli = repo_src("routers/crm/clients.py")
     assert "async def create_crm_client_from_mine" in cli
     assert "Client.short_name == c.short_name" in cli
-    proj = repo_src("routers/crm/projects.py")
+    proj = projects_src()
     assert "async def _crm_client_for" in proj, "補建專案時客戶也要一起對齊"
 
 
 def test_link_has_one_writer():
     """🔴 連結寫入只有 `_write_link` 一份 —— 兩個方向各寫一遍就會長出
     「一邊清了、另一邊沒清」的半連結（母帳側清了、私帳側 source_project_id 還指著）。"""
-    proj = repo_src("routers/crm/projects.py")
+    proj = projects_src()
     assert proj.count("def _write_link(") == 1
     # 直接指派 mine_link_id 的地方**只有 _write_link 自己**（解除一次、連結一次）。
     # 多出來的就是有人繞過了唯一寫入者 —— mirror-to-mine 兩條路一開始就是
@@ -122,7 +122,7 @@ def test_link_has_one_writer():
 
 def test_both_directions_exist():
     """對應表兩個方向都要有（owner 2026-09-05「增加一個切換鈕」）。"""
-    proj = repo_src("routers/crm/projects.py")
+    proj = projects_src()
     for path in ("/projects/{mine_id}/parent-create", "/projects/{mine_id}/parent-link",
                  "/projects/{parent_id}/mine-create", "/projects/{parent_id}/mine-link"):
         assert path in proj, path

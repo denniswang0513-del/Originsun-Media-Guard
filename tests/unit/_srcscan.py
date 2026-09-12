@@ -286,6 +286,16 @@ TS_ZONE_FILES = ("ctx.js", "log.js", "plan.js", "team-week.js", "find.js", "inde
 TIMESHEETS_FILES = ("_shared.py", "sync.py", "mine.py", "ledger.py", "projects.py", "reports.py", "mapping.py", "summary.py")
 
 
+#: 專案管理 2026-09-12 拆出「換帳本／推送／對應表」一段（那檔 1,979 行離 2,000 上限 21 行）
+PROJECTS_FILES = ("projects.py", "project_links.py")
+
+
+def projects_src(header: str = "") -> str:
+    """原本 `routers/crm/projects.py` 那一整個檔（專案管理 ＋ project_links 串起來）；給 header 就回那支函式的本體。
+    同 timesheets_src 的理由：斷言釘的是「這支端點做了什麼」，不是它住在哪個檔。"""
+    return _split_file_src("routers/crm", PROJECTS_FILES, header)
+
+
 def timesheets_src(header: str = "") -> str:
     """原本 `routers/api_timesheets.py` 那一整個檔的內容（薄殼＋套件八支串起來）；給 header 就回那支函式的本體。
     同 finance_src 的理由：斷言釘的是「這支端點做了什麼」，不是它住在哪個檔。"""

@@ -651,7 +651,9 @@ window._projMirrorStaleHint = async function (id, btn) {
     let chk;
     try { chk = await _fetch(`/projects/${encodeURIComponent(id)}/mirror-check`); }
     catch (e) { return; }                      // 只是提示，拿不到就維持原字
-    if (!btn.isConnected) { return; }          // 使用者已經切到別案
+    if (!btn.isConnected) { return; }          // 使用者已經切到別案（或這一案剛被重畫）→ 下次重畫再問
+    const bar = btn.closest('#proj-bar-actions');
+    if (bar) { bar.dataset.staleFor = id; }    // 畫上去了才記，之後同一案的重畫不再問
     if (chk.stale === true) {
         const d = chk.delta || 0;
         btn.textContent = `私帳落後 ${d > 0 ? '+' : ''}${fmtNum(d)} · 重新同步`;

@@ -526,8 +526,9 @@ function renderDetail(project) {
         // 已連結：問一次後端「私帳落後了沒」，把「重新同步」那顆改成講實話的字。
         // 只在**換到這一案**時問（renderDetail 每改一格都會整個重畫；落後與否只跟成本行有關，
         // 改狀態／日期不會變）；重新同步後由 core.js 清掉 staleFor 再重畫，才會再問一次
+        // （staleFor 由 hint 在真的畫上去之後才記：這裡先記的話，查詢還在飛就被重畫一次，
+        //   hint 看到按鈕已不在 DOM 就放棄，而 staleFor 已經等於 id → 永遠不再問）
         if (_mine && _toMine && project.mirrored && actions.dataset.staleFor !== project.id) {
-            actions.dataset.staleFor = project.id;
             window._projMirrorStaleHint?.(project.id, actions.querySelector('#proj-push-mine'));
         }
         actions.querySelector('.crm-detail-close').addEventListener('click', () => callbacks.closeDetail?.());

@@ -11,9 +11,9 @@ from types import SimpleNamespace as NS
 from core.ledger_project import (LINK_SYNC_FIELDS, MIRROR_TOTAL_KEY,
                                  mirror_detail, mirror_stale, norm_detail,
                                  sync_from_parent)
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, repo_src, projects_src
 
-_PROJ = repo_src("routers/crm/projects.py")
+_PROJ = projects_src()
 
 
 def _row(**kw):
@@ -69,15 +69,19 @@ def test_mine_client_is_not_pushed_into_parent_by_the_pure_rule():
     assert "_crm_client_for(session, mine.client_id)" in body
 
 
-def test_no_fill_respects_a_deliberate_blank_on_the_parent():
-    """母帳 PUT 親手清空的欄位（重開案）不能在同一交易被私帳的值補回去。"""
+def test_explicit_blank_on_the_parent_clears_the_mine_case():
+    """母帳 PUT 親手清空的欄位（清結案日＝重開案）：不能被私帳補回去，**而且私帳跟著清**
+    （收尾 review 抓到：只擋補回、不跟著清的話，連結中的私帳案永遠重開不了 —— 私帳側被 409 擋、
+    母帳側清了又不流過去）。沒送的欄位照舊走規則 2。"""
     d = datetime(2025, 3, 3)
-    p = _row(completion_date=None, description="")
-    m = _row(completion_date=d, description="私帳備註")
-    changed, filled = sync_from_parent(p, m, no_fill={"completion_date"})
-    assert changed == [] and filled == ["description"]
+    p = _row(completion_date=None, description="", status="製作")
+    m = _row(completion_date=d, description="私帳備註", status="結案")
+    changed, filled = sync_from_parent(p, m, explicit={"completion_date"})
+    assert changed == ["completion_date"] and filled == ["description"]
     assert p.completion_date is None, "使用者清掉的結案日被私帳補回去了"
-    assert m.completion_date == d, "私帳不清"
+    assert m.completion_date is None and m.status == "製作", "私帳沒跟著重開"
+    # 兩邊都空的 explicit 欄不算改到
+    assert sync_from_parent(_row(), _row(), explicit={"completion_date"}) == ([], [])
 
 
 def test_skip_leaves_a_field_alone_in_both_directions():
@@ -150,11 +154,14 @@ def test_write_link_is_the_only_place_that_syncs_a_pair_on_link():
     writer = code_only(func_body(_PROJ, "async def _write_link("))
     assert "await _sync_pair(session, parent, mine)" in writer
     pair = code_only(func_body(_PROJ, "async def _sync_pair("))
-    assert "sync_from_parent(parent, mine, no_fill=no_fill, skip=skip)" in pair
+    assert "sync_from_parent(parent, mine, explicit=explicit, skip=skip)" in pair
     # 私帳客戶已連結到母帳這筆客戶＝同一個客戶的兩本帳，規則 1 不准把私帳案的客戶換掉
     assert 'mc.crm_link_id == parent.client_id' in pair and 'skip.add("client_id")' in pair
-    assert "CrmProject.mine_link_id == mine.id, CrmProject.id != parent.id" in pair
-    assert "mine.source_project_id != parent.id" in pair, "舊形狀的第二個來源沒認"
+    # N:1 判定跟私帳詳情鎖欄位的判定同一份（mine_parent_links：兩種形狀、母帳案已刪的舊指標不算）
+    assert "mine_parent_links(session, [mine.id])" in pair
+    assert "any(pid != parent.id for pid, _n in links)" in pair
+    # 反向補到結案日 → 母帳狀態進結案並走副作用（不然有結案日卻不是結案）
+    assert '"completion_date" in filled' in pair and "_apply_status_side_effects(parent, old_status)" in pair
     assert "return False" in pair
 
 
@@ -163,7 +170,7 @@ def test_parent_edits_flow_to_the_linked_mine_case():
     fn = code_only(func_body(_PROJ, "async def update_project("))
     assert "any(k in update_data for k in LINK_SYNC_FIELDS)" in fn
     # 親手送上來的欄位不做規則 2：清結案日＝重開案，不能被私帳的值補回去
-    assert "await _sync_pair(session, project, linked_mine, no_fill=set(update_data))" in fn
+    assert "await _sync_pair(session, project, linked_mine, explicit=set(update_data))" in fn
     assert fn.index("await _sync_pair(") < fn.index("await session.commit()")
 
 
@@ -226,7 +233,7 @@ def test_move_check_tells_the_frontend_which_source_to_default():
 
 
 def test_blocked_reason_points_to_push_or_the_invoice_category():
-    from routers.crm.projects import _blocked_reason
+    from routers.crm.project_links import _blocked_reason
     msg = _blocked_reason("X", [("發票", 1)])
     assert "推送" in msg and "內部代開" in msg
     assert _blocked_reason("X", []) == ""
@@ -317,7 +324,7 @@ def test_passthrough_copy_keeps_the_parent_case_and_uses_its_contract():
     """owner 2026-09-12「雖然是代開發票，但是專案公司也留一份帳」：代開那一項底下多一個
     「留一份」—— 分身、案源＝代開發票、收入＝母帳合約額（那張發票的面額就是他的錢，
     掛給他的成本行通常是 0）、代辦費自動算。重新同步不能把案源翻回源日、也不動金額。"""
-    from routers.crm.projects import _mirror_contract
+    from routers.crm.project_links import _mirror_contract
     p = NS(contract_amount=82000)
     assert _mirror_contract(p, {"total": 0}, "代開發票") == 82000
     assert _mirror_contract(p, {"total": 3000}, "") == 3000
@@ -354,7 +361,7 @@ def test_project_dict_carries_the_linked_mine_case_only_when_mirrored():
 
 def test_blocker_filter_shape():
     """收支：無額外條件（全擋）；發票／請款：帶放寬條件（SQL 表達式）。"""
-    from routers.crm.projects import _blocker_filter
+    from routers.crm.project_links import _blocker_filter
     from db.models import CrmCashEntry, CrmInvoice, CrmPaymentRequest
     assert _blocker_filter(CrmCashEntry) is None
     inv = _blocker_filter(CrmInvoice)
@@ -376,6 +383,9 @@ def test_zero_total_never_overwrites_an_existing_mine_case():
     assert seg.index('mode = "keep"') < seg.index('if mode == "import":')
     # 代開發票的分身收入是母帳合約額，0 成本行是常態 —— 不退
     assert '!= "代開發票"' in seg.split('mode = "keep"')[0]
+    # 只保護「手填的」（沒同步過、沒有 mirror_total）或「認不出是誰的」（沒綁人員檔案）：
+    # 同步過的案成本行歸零就是歸零，那正是「私帳落後 −N」要讓他按「用 CRM 更新」清掉的狀態
+    assert '(not sid or MIRROR_TOTAL_KEY not in keep)' in seg.split('mode = "keep"')[0]
 
 
 def test_stale_is_unknown_when_the_account_has_no_staff_binding():

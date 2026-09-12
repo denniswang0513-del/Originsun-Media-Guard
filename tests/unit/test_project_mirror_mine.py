@@ -13,7 +13,7 @@ from types import SimpleNamespace as NS
 from core.ledger_project import (MIRROR_SOURCE, mirror_amount, mirror_detail,
                                  mirror_lines)
 from tests.unit._srcscan import (code_only, func_body, js_code_only,
-                                 js_func_body, repo_src)
+                                 js_func_body, repo_src, projects_src)
 
 ME = "me-staff-id"
 OTHER = "someone-else"
@@ -79,7 +79,7 @@ def test_source_is_cash_receipt():
 # 🔴 一律經過 `code_only`：不剝註解的話，「這個函式**不可以**碰 p.contract_amount」
 # 這種說明文字自己就會讓 not-in 斷言變綠（_srcscan 檔頭記的那個坑）。
 def _src():
-    return repo_src("routers/crm/projects.py")
+    return projects_src()
 
 
 def _fn(src: str, name: str) -> str:
@@ -203,7 +203,7 @@ def test_the_mirrored_badge_is_hidden_from_people_without_the_private_ledger():
     # 🔴 新的連結記在來源側（mine_link_id），那半邊**也要**被同一條線罩住 ——
     # 只把 mirrored_ids 清空是不夠的，`is_mirrored` 光看 mine_link_id 就會回 True。
     assert "show_mine and is_mirrored(p, mirrored_ids)" in fn
-    row = code_only(repo_src("routers/crm/projects.py")).split(
+    row = code_only(projects_src()).split(
         "def _to_project_dict(")[1].split("\ndef ")[0]
     assert '"mirrored": bool(mirrored),' in row
 
@@ -253,7 +253,7 @@ def test_three_modes_are_offered_and_validated():
     """「跳出幾個選擇讓我決定要怎麼做」—— 四種（add 是多對一那次加的），
     而且後端要驗值域
     （前端傳錯字不能靜靜當成 overwrite 把人家的工項洗掉）。"""
-    from routers.crm.projects import MIRROR_MODES
+    from routers.crm.project_links import MIRROR_MODES
     assert MIRROR_MODES == ("overwrite", "add", "keep", "import")
     fn = _fn(_src(), "mirror_project_to_mine")
     assert "mode not in MIRROR_MODES" in fn and "422" in fn
@@ -268,7 +268,7 @@ def test_keep_mode_touches_no_money():
     assert "t.contract_amount = " in seg and "resync_receivable" in seg
     # 私帳那側的第一個來源由 _write_link 記（2026-09-05 收成單一寫入者，
     # 原本 mirror 這支自己寫一份、對應表那兩支各寫一份）
-    body = code_only(func_body(repo_src("routers/crm/projects.py"),
+    body = code_only(func_body(projects_src(),
                                "def _write_link("))
     assert "if not mine.source_project_id:" in body
     assert "mine.source_project_id = parent.id" in body
@@ -287,7 +287,7 @@ def test_import_mode_writes_into_crm_and_leaves_the_private_ledger_alone():
 def test_import_only_touches_lines_assigned_to_me():
     """🔴 只碰 `actual_staff_id` 是我的那幾行。掛給別人的同名行一律不動 ——
     「導演」那種工項本來就可能同時有兩個人，覆蓋掉就是改到別人的錢。"""
-    body = code_only(func_body(repo_src("routers/crm/projects.py"),
+    body = code_only(func_body(projects_src(),
                                "async def _import_split_to_cost_lines("))
     assert '(r.actual_staff_id or "") == staff_id' in body
     assert "actual_staff_id=staff_id" in body, "新增的行也要掛給我"
@@ -313,7 +313,7 @@ def test_many_crm_projects_can_share_one_mine_project():
     上（source_project_id 指回來源），一個欄位只裝得下一個來源 —— 第二個 CRM 案
     連上去就被 409「已經是別案的分身了」擋掉，而候選清單也把它濾掉了。
     """
-    src = repo_src("routers/crm/projects.py")
+    src = projects_src()
     body = code_only(func_body(src, "async def mirror_project_to_mine("))
     # 連結寫入 2026-09-05 收成單一 `_write_link(母帳列, 私帳列)` —— 它做的正是
     # 「記在來源側」：`parent.mine_link_id = mine.id`
@@ -332,7 +332,7 @@ def test_many_crm_projects_can_share_one_mine_project():
 def test_sharing_one_mine_project_adds_instead_of_overwriting():
     """多筆共用一個私帳案時，錢要**相加**不是覆蓋 —— 覆蓋會把前一個 CRM 案
     鏡射進來的收入洗掉，而那筆也是他該拿的。"""
-    from routers.crm.projects import MIRROR_MODES
+    from routers.crm.project_links import MIRROR_MODES
     assert "add" in MIRROR_MODES
     # 併法本身是**錢的推導**，正本在 core（router 只做模式分派）
     from core.ledger_project import merge_split
@@ -346,7 +346,7 @@ def test_sharing_one_mine_project_adds_instead_of_overwriting():
     # 順手改成 sum(merged.values()) 會靜默改掉已連結案的金額
     assert merge_split({"導演": 10000}, {"剪輯": 5000}, add=True)[1] == 5000
 
-    body = code_only(func_body(repo_src("routers/crm/projects.py"),
+    body = code_only(func_body(projects_src(),
                                "async def mirror_project_to_mine("))
     assert 'mode in ("overwrite", "add")' in body
     assert "merge_split(" in body, "併法又在 router 裡自己寫了一次"
@@ -363,11 +363,11 @@ def test_already_linked_is_not_a_reason_to_block():
     原本是擋人的第一條理由，於是連**手動**再同步一次的路都沒有：按鈕只會
     toast 一句「已經連結到 X 了」，私帳永遠停在舊數字。
     """
-    from routers.crm.projects import _mirror_blocked_reason
+    from routers.crm.project_links import _mirror_blocked_reason
     assert _mirror_blocked_reason(60000) == ""       # 已連結不再是理由
     assert "成本行沒有一筆掛給你" in _mirror_blocked_reason(0)
     # 呼叫端也不再餵 linked 進去（餵了會 TypeError，等於漏改一處就紅）
-    src = repo_src("routers/crm/projects.py")
+    src = projects_src()
     assert "_mirror_blocked_reason(mir[\"total\"], linked)" not in src
 
 
@@ -377,7 +377,7 @@ def test_resyncing_a_linked_case_never_creates_a_second_mirror():
     落到建立分支就是在私帳多開第二個分身：同一筆錢算兩次，而且兩案同名同
     客戶，畫面上分不出來。前端預設不送 target（它只在「連結既有」時才送）。
     """
-    body = code_only(func_body(repo_src("routers/crm/projects.py"),
+    body = code_only(func_body(projects_src(),
                                "async def mirror_project_to_mine("))
     assert "target_id = target_id or linked.id" in body
     assert "if target_id != linked.id:" in body, "改連別案要擋下來，不能靜靜改指"
