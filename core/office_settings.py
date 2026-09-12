@@ -70,6 +70,10 @@ EXPORT_SUBKEYS = {
     # （bank／account_name／account_no，2026-09-12 起；存摺影本是固定位置的檔，不走設定）。
     # 整包 `company` 其餘欄位（地址、電話、章、交檔條款…）這台沒程式讀，不送。
     "company": ("name", "tax_id", "bank", "account_name", "account_no"),
+    # 士源帳本（私帳手機版）在 NAS 上算資產：USD 持股換台幣要匯率（`usd_twd` 由 master
+    # 按「更新報價」時存，NAS 只讀）、工項清單覆寫、報價 kill switch。不送的話 USD 持股
+    # 在手機上現值是 0，而且不會有任何錯誤。
+    "my_ledger": ("usd_twd", "usd_twd_at", "income_items", "quotes_enabled"),
 }
 
 

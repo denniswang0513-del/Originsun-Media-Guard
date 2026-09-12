@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0f1f17">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="士源帳本">
+<link rel="manifest" href="/m/manifest-ledger.webmanifest">
+<link rel="apple-touch-icon" href="/m/icon-ledger-180.png">
+<link rel="icon" href="/m/icon-ledger-192.png">
+<title>士源帳本</title>
+<!-- 士源帳本（docs/MY_LEDGER_MOBILE_PLAN.md）：owner 私帳的手機版 —— 現場輸入＋快看，跟桌機 /my-ledger.html 分開。
+     六個分頁（收支／專案／應收／家用／總覽／資產），hash 路由；殼只有 ./shell.js 一份、樣式跟 /m/crm.html 共用 /m/m.css。
+     閘門：帳號要有 finance_mine（指名制，Lv3 不 bypass —— 跟 /my-ledger.html 同口徑）。
+     字彙（分類樹／案源／專案／帳戶）來自 GET /api/v1/finance/m/options；寫入一律走既有端點（收支必走 /cash-entries）。
+     跟 master 與 NAS office-api 都掛（主機關機照用）。 -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<link rel="stylesheet" href="/m/m.css">
+<style>
+  /* 士源帳本自己的幾筆：深綠主色跟「源日 CRM」分得開；金額進出的顏色 */
+  :root { --pri:#22c55e; --bg:#111a15; --card:#1b2620; --line:#2c3a32; --field:#141d18; }
+  .m-tabbar { background:#15201a; }
+  .m-tabbar button.on .ico { background:rgba(34,197,94,.18); }
+  .m-hdr { background:rgba(17,26,21,.94); }
+  .m-btn-primary, .m-seg button.on, .m-btn.pri { background:var(--pri); border-color:var(--pri); color:#06210f; }
+  .m-btn-primary:active { background:#16a34a; }
+  .m-tabbar button.on, a { color:var(--pri); }
+  .m-chips button.on { background:rgba(34,197,94,.18); border-color:var(--pri); color:var(--pri); }
+  .amt.in { color:var(--ok); } .amt.out { color:var(--bad); }
+  .lg-big { font-size:30px; font-weight:800; color:#fff; font-variant-numeric:tabular-nums; line-height:1.1; }
+  .lg-sub { color:var(--sub); font-size:12px; margin-top:4px; }
+  .lg-row { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .lg-row:last-child { border-bottom:0; }
+  .lg-row .k { color:var(--ink); min-width:0; } .lg-row .v { flex:none; font-variant-numeric:tabular-nums; }
+  .lg-lock { font-size:10px; color:var(--sub); border:1px solid var(--line); border-radius:4px; padding:0 4px; margin-left:6px; vertical-align:1px; }
+  .lg-fee { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .lg-fee .crm { color:var(--sub); font-size:11px; }
+  .lg-fee input { width:110px; min-height:40px; margin:0; text-align:right; background:var(--field); border:1px solid var(--line); border-radius:8px; color:var(--ink); padding:0 10px; font-size:16px; }
+  .lg-fee .m-btn.sm { min-height:40px; }
+  details.m-fold .lg-fee:last-child { border-bottom:0; }
+</style>
+</head>
+<body>
+<div id="m-auth" hidden></div>
+
+<div id="m-app" hidden>
+  <header class="m-hdr">
+    <button type="button" class="nav" id="m-back" aria-label="上一頁">‹ 上一頁</button>
+    <div class="ttl"><div class="brand"><img class="logo" src="/img/originsun-logo.webp" alt="源日"><span>士源帳本</span></div><div class="page" id="m-page"></div></div>
+    <button type="button" class="nav" id="m-home" aria-label="首頁">首頁</button>
+  </header>
+  <main id="m-view"></main>
+  <nav class="m-tabbar" id="m-tabbar">
+    <button type="button" data-tab="cash"><i class="ico"></i>收支</button>
+    <button type="button" data-tab="projects"><i class="ico"></i>專案</button>
+    <button type="button" data-tab="receivable"><i class="ico"></i>應收</button>
+    <button type="button" data-tab="household"><i class="ico"></i>家用</button>
+    <button type="button" data-tab="overview"><i class="ico"></i>總覽</button>
+    <button type="button" data-tab="assets"><i class="ico"></i>資產</button>
+  </nav>
+</div>
+
+<div id="m-sheet" hidden>
+  <div class="bd"></div>
+  <div class="pn"><button type="button" class="x" id="m-sheet-x" aria-label="關閉">&times;</button><div class="grip"></div><div id="m-sheet-body"></div></div>
+</div>
+
+<script type="module" src="./ledger.js"></script>
+</body>
+</html>

@@ -406,6 +406,9 @@ def test_every_project_enumeration_decides_about_mine():
         # 拆項的未收案選單：require_entity(mine, level="full") 守在端點上 ——
         # 進得來的人本來就有私帳 full scope，比 hide_mine_projects 更嚴
         "routers/crm/cash_splits.py",
+        # 士源帳本（私帳手機版 BFF，2026-09-13）：兩支端點都是 require_entity(mine, full)，
+        # 列的就是私帳案本身（專案 picker，不帶錢）—— 同 cash_splits 的理由
+        "routers/api_ledger_mobile.py",
         # 官網／公開頁（另一套可見性：作品要上架才出得去）
         "services/website/project_service.py",
         "services/website/initiative_service.py",

@@ -16,6 +16,7 @@ M = pathlib.Path(_REPO) / "frontend" / "m"
 SHELL = repo_src("frontend/m/shell.js")
 CRM_JS = repo_src("frontend/m/crm.js")
 CRM_HTML = repo_src("frontend/m/crm.html")
+M_CSS = repo_src("frontend/m/m.css")      # 手機頁共用樣式（2026-09-13 從 crm.html 抽出）
 
 
 def _page_modules():
@@ -258,7 +259,8 @@ def test_petty_tab_mounts_the_existing_module():
     for p in _page_modules():
         assert "/api/v1/crm/petty/" not in p.read_text(encoding="utf-8"), \
             f"{p.name} 自己打零用金端點 —— 那是 petty-view.js 的事"
-    assert "#petty {" in CRM_HTML and "--ink:" in CRM_HTML, "petty-view 的 CSS 變數要給深色值"
+    # 手機頁樣式 2026-09-13 抽到 /m/m.css（源日 CRM 與士源帳本共用）；crm.html 只留三條鑰匙 class
+    assert "#petty {" in M_CSS and "--ink:" in M_CSS, "petty-view 的 CSS 變數要給深色值"
 
 
 def test_m_is_not_on_the_public_surface():
@@ -369,5 +371,5 @@ def test_invoice_segments_can_be_blank_and_cards_can_be_deleted():
 def test_sheet_has_a_close_button():
     """owner 2026-09-04：底部抽屜要有打叉，不只點暗處才能關。"""
     html = repo_src("frontend/m/crm.html")
-    assert 'id="m-sheet-x"' in html and "#m-sheet .x" in html
+    assert 'id="m-sheet-x"' in html and "#m-sheet .x" in M_CSS   # 樣式在共用的 /m/m.css
     assert "querySelector('.x').addEventListener('click', closeSheet)" in js_code_only(repo_src("frontend/m/ui.js"))

@@ -18,7 +18,7 @@ def test_mobile_picker_offers_create_row_only_when_no_exact_match():
     co = js_func_body(ui, "export async function createClientOption(name)")
     assert "mfetch('/api/v1/crm/clients', { method: 'POST', body: { short_name: name } })" in co
     assert "return { value: c.id, label: c.short_name || name }" in co
-    assert ".m-pick-create" in repo_src("frontend/m/crm.html")
+    assert ".m-pick-create" in repo_src("frontend/m/m.css")     # 手機頁樣式 2026-09-13 抽到共用的 /m/m.css
 
 
 def test_mobile_project_and_quote_client_pickers_use_it():

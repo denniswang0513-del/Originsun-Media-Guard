@@ -18,6 +18,13 @@ export { quotePdfFilename } from '/js/shared/quote-file.js';
 const TOKEN_KEY = 'auth_token';     // 與內部 App 同 key（js/auth/auth-state.js）
 const REFRESH_BEFORE_SEC = 2 * 86400;
 
+/** 登入卡上的名字：跟著頁面的主畫面名稱走（CRM＝「源日 CRM」、士源帳本＝「士源帳本」），殼只有這一份。 */
+const _brand = () => {
+    const m = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    return (m && m.content) || '源日 CRM';
+};
+const _brandHtml = () => `<img src="/img/originsun-logo.webp" alt="源日">${esc(_brand())}`;
+
 let _gate = null;
 let _started = false;
 let _resolveBoot = null;
@@ -167,7 +174,7 @@ function _showLogin(msg = '') {
     root.hidden = false;
     root.innerHTML = `
       <div class="m-login">
-        <div class="m-login-brand"><img src="/img/originsun-logo.webp" alt="源日"><span>源日</span> CRM</div>
+        <div class="m-login-brand">${_brandHtml()}</div>
         <div id="m-gsi" style="display:none"></div>
         <div id="m-gsi-div" class="m-login-div" style="display:none">或</div>
         <form id="m-login-form" autocomplete="on">
@@ -187,9 +194,8 @@ function _showNoPerm(me) {
     root.hidden = false;
     root.innerHTML = `
       <div class="m-login">
-        <div class="m-login-brand"><img src="/img/originsun-logo.webp" alt="源日"><span>源日</span> CRM</div>
-        <div class="m-login-err">「${esc(me.username || '')}」沒有 CRM 手機版的權限
-          （需要管理員或「專案管理」模組），請找管理員開通。</div>
+        <div class="m-login-brand">${_brandHtml()}</div>
+        <div class="m-login-err">「${esc(me.username || '')}」沒有「${esc(_brand())}」的權限，請找管理員開通。</div>
         <button type="button" class="m-btn-primary" id="m-logout">改用其他帳號登入</button>
       </div>`;
     root.querySelector('#m-logout').addEventListener('click', () => {

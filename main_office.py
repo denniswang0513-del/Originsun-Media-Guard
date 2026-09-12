@@ -49,6 +49,9 @@ _ROUTER_MODULES = (
     "api_me", "api_timesheets", "api_hr", "api_journal", "api_milestones",
     "api_crm",          # 薄殼，re-export routers/crm 的 composition root
     "api_crm_mobile",
+    # 士源帳本（私帳手機版，owner 2026-09-12「主機關機手機也要能用」）：執行專案／資產／
+    # 儀表板那幾支 + 手機 BFF。這四支都沒有排程（test_office_surface 的模組圖釘著）。
+    "api_finance", "api_finance_projects", "api_finance_assets", "api_ledger_mobile",
     "api_paste",
 )
 

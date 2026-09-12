@@ -1,0 +1,13 @@
+{
+  "name": "士源帳本",
+  "short_name": "士源帳本",
+  "start_url": "/m/ledger.html",
+  "scope": "/m/",
+  "display": "standalone",
+  "background_color": "#111a15",
+  "theme_color": "#0f1f17",
+  "icons": [
+    { "src": "/m/icon-ledger-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/m/icon-ledger-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
