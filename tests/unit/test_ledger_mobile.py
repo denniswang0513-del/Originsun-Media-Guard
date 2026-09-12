@@ -142,3 +142,46 @@ def test_l2_assets_growth_line_is_plain_inline_svg():
     for lib in ("chart", "echarts", "d3"):
         assert lib not in js.lower().replace("lg-chart", "").replace("growthcharthtml", "").replace("mountchart", "").replace("chart_max", "").replace("as-chart", "").replace("_chartrows", ""), lib
     assert "快照不足兩筆" in js
+
+
+# ── 特徵測試（/polish 安全網）：前端純函式真的用 node 跑一次 ─────────────────
+
+def _node(script: str) -> str:
+    """跑一段 JS。🔴 輸出只准 ASCII：Windows 上 node 對 pipe 吐的是主控台碼頁，中文會變亂碼。"""
+    import subprocess
+    from tests.unit._srcscan import _REPO
+    r = subprocess.run(["node", "-e", script], capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", cwd=_REPO)
+    assert r.returncode == 0, r.stderr
+    return (r.stdout or "").strip()
+
+
+def test_asset_buckets_leaf_in_node():
+    """資產「現在估計」＝自動桶＋上次快照裡沒被系統桶取代的手填桶；桌機與手機共用同一份。"""
+    js = js_code_only(repo_src("frontend/js/shared/asset-buckets.js")).replace("export ", "")
+    out = _node(js + """
+const [gone1, , , , , gone2] = [...SUPERSEDED];          // 被系統桶取代的兩個桶名（不在輸出裡印中文）
+const auto = {bank: 100, stocks: 50};
+const last = {buckets: {[gone1]: 999, bank: 1, prepaid: 7, [gone2]: 5}};
+console.log(JSON.stringify([manualBuckets(auto, last), estimatedTotal(auto, last), estimatedTotal(auto, null), estimatedTotal({}, null), SUPERSEDED.size]));""")
+    # 被取代的不帶；bank 已是自動桶不帶；prepaid 留手填
+    assert out == '[{"prepaid":7},157,150,0,7]', out
+    # 桌機 assets.js 也走這份，不再有自己的 SUPERSEDED 名單
+    desk = js_code_only(repo_src("frontend/tabs/finance/subviews/assets.js"))
+    assert "asset-buckets.js" in desk and "const SUPERSEDED" not in desk
+
+
+def test_household_month_helpers_in_node():
+    """月份切換與月頭月尾：跨年、閏年、月底不用 toISOString（台北早上 8 點前會變昨天）。"""
+    js = js_code_only(repo_src("frontend/m/views/ledger-household.js"))
+    from tests.unit._srcscan import js_func_body
+    fns = (js_func_body(js, "export function shiftMonth(ym, n) {")
+           + js_func_body(js, "export function monthRange(ym) {")).replace("export ", "")
+    out = _node(fns + """
+console.log(JSON.stringify([shiftMonth('2026-01', -1), shiftMonth('2026-12', 1), shiftMonth('2026-09', -13),
+  monthRange('2024-02'), monthRange('2026-09'), monthRange('2026-12')]));""")
+    assert out == ('["2025-12","2027-01","2025-08",'
+                   '{"from":"2024-02-01","to":"2024-02-29"},'
+                   '{"from":"2026-09-01","to":"2026-09-30"},'
+                   '{"from":"2026-12-01","to":"2026-12-31"}]'), out
+    assert "toISOString" not in js
