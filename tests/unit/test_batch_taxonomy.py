@@ -10,7 +10,8 @@ from tests.unit._srcscan import finance_src
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = finance_src()
-JS = (ROOT / "frontend/tabs/crm/crm-cashbook.js").read_text(encoding="utf-8")
+from tests.unit._srcscan import cashbook_src
+JS = cashbook_src()      # 2026-09-12 拆成主檔＋五段
 FN = SRC.split("async def batch_set_taxonomy(")[1].split("\n@router")[0]
 
 

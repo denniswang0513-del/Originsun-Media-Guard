@@ -282,6 +282,16 @@ MY_PAGE_FILES = ("shell.js", "cards.js", "cards-hr.js", "zone1.js", "parttime.js
 TS_ZONE_FILES = ("ctx.js", "log.js", "plan.js", "team-week.js", "find.js", "index.js")
 
 
+#: 收支明細 crm-cashbook.js 2026-09-12 拆成主檔＋五段（ES module；主檔 export 狀態、五段 export 函式）
+CASHBOOK_FILES = ("crm-cashbook.js", "crm-cashbook-batch.js", "crm-cashbook-fields.js", "crm-cashbook-import.js",
+                  "crm-cashbook-alloc.js", "crm-cashbook-petty.js")
+
+
+def cashbook_src() -> str:
+    """收支明細的全部前端程式碼（主檔＋五段）。掃「收支明細有沒有做某件事」的測試用這一支，不要指單一檔。"""
+    return "\n".join(repo_src("frontend/tabs/crm/" + n) for n in CASHBOOK_FILES)
+
+
 #: /showcase-edit.html 的程式碼拆到哪幾支（載入順序＝原本 inline script 由上而下）；2026-09-12 拆
 SHOWCASE_EDIT_FILES = ("shell.js", "render.js", "events.js", "quiz.js", "checklist.js", "media-pick.js")
 

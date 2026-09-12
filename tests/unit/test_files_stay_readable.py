@@ -42,8 +42,7 @@ EXEMPT = {
     # frontend/tabs/finance/subviews/recon.js 2026-09-03 移掉對帳工作台後回到上限之內
     # db/models.py 2026-08-31 已拆成套件（db/models/，最大段 701 行）——
     # 它曾同時是 fan-in 85／2,121 行／三週改 47 次的最大爆炸半徑
-    "frontend/tabs/crm/crm-cashbook.js":
-        "收支明細主畫面（清單＋編輯＋匯入三合一）",
+    # frontend/tabs/crm/crm-cashbook.js 2026-09-12 拆成主檔（~1,890）＋五段（_srcscan.cashbook_src()）
     # 2026-09-08：掃描擴到 .html 才發現兩頁早就越線了（「整支 SPA 寫在單一 <script> 裡」的獨立頁）。
     # frontend/my.html 2026-09-09 拆到 frontend/js/my/（掃描測試改讀 _srcscan.my_page_src()）；
     # frontend/showcase-edit.html 2026-09-12 拆到 frontend/js/showcase-edit/ 六支（_srcscan.showcase_edit_src()）。

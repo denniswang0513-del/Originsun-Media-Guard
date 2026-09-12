@@ -11,6 +11,7 @@ from pathlib import Path
 
 from core.cash_taxonomy import PETTY_ITEM_OVERRIDES, petty_item_for
 from db.seed_finance import SEED_CATEGORY_MAP
+from tests.unit._srcscan import cashbook_src   # 2026-09-12 拆成主檔＋五段
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -62,7 +63,7 @@ def test_金額式子兩邊一致():
     兩邊各寫一份就會出現「畫面 1,050、請款 1,000」這種只差匯費的鬼影。"""
     be = _read("routers/crm/petty.py")
     assert "int(e.expense or 0) + int(e.claim or 0) + int(e.bank_fee or 0)" in be
-    fe = _read("frontend/tabs/crm/crm-cashbook.js")
+    fe = cashbook_src()
     assert "_grossOut(e) + (e.claim || 0)" in fe
 
 
@@ -92,5 +93,5 @@ def test_回鏈與重推防線():
     be = _read("routers/crm/petty.py")
     assert "entry.expense_id = exp.id" in be      # 兩邊釘死
     assert "已經推送過" in be                      # 重推被擋
-    fe = _read("frontend/tabs/crm/crm-cashbook.js")
+    fe = cashbook_src()
     assert "petty_status" in fe                   # 列上看得出推過沒有

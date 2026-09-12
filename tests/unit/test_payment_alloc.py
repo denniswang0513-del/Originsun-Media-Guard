@@ -133,6 +133,7 @@ from tests.unit._srcscan import code_only, func_body, repo_src   # noqa: E402
 # finance_src() 把它們串起來，斷言釘的是「這支函式做了什麼」不是它在哪。
 SRC = finance_src()
 JS = "frontend/tabs/crm/crm-cashbook.js"
+from tests.unit._srcscan import cashbook_src   # 2026-09-12 拆成主檔＋五段（關聯發票在 crm-cashbook-alloc.js）
 
 
 def _body(fn):
@@ -245,7 +246,7 @@ def test_the_four_alloc_endpoints_share_one_prologue():
 
 
 def test_ui_has_the_payment_box_on_expense_rows_only():
-    js = repo_src(JS)
+    js = cashbook_src()
     assert "loadCashPaymentAllocs" in js and "cash-pay-box" in js
     seg = func_body(js, "function renderDetail(")
     assert "e.expense" in seg, "收入列也載入了付款分配（那是發票那區的事）"
@@ -263,7 +264,7 @@ def test_ui_does_not_fetch_allocs_for_rows_that_have_none():
     用光過一次）。payment_request_id 的不變量由 replace_payment_allocs
     維持（有連結才非空），所以它就是「這列有沒有分配」。
     """
-    js = repo_src(JS)
+    js = cashbook_src()
     seg = func_body(js, "function renderDetail(")
     assert "e.payment_request_id" in seg, "沒有閘門，每列都會去要一次分配"
     assert "_renderEmptyPayBox" in seg, "沒掛過的列要就地畫空狀態，不是留著載入中"
@@ -277,7 +278,7 @@ def test_ui_has_one_alloc_panel_not_two():
     狀態列的 msg vs message、預帶面額 vs 尚欠、候選有沒有濾掉結清的。
     代價不是多打一次字，是同一個詳情面板裡的兩塊長得不一樣。
     """
-    js = repo_src(JS)
+    js = cashbook_src()
     for gone in ("_renderCashPayAllocs", "_renderCashAllocs",
                  "function _paySearch(", "async function _paySave("):
         assert gone not in js, f"付款側又長回自己的 {gone}"
@@ -293,14 +294,14 @@ def test_ui_has_one_alloc_panel_not_two():
 def test_ui_only_the_payment_side_books_a_fee():
     """收款側的 PUT payload 沒有 fee 欄 —— 兩側都畫按鈕的話，收款側會出現
     一顆按了什麼都不會發生的按鈕。"""
-    js = repo_src(JS)
+    js = cashbook_src()
     seg = js[js.index("const _ALLOC_SIDES = {"):js.index("const _CASH_PAY =")]
     assert seg.count("canBookFee") == 1, "匯費按鈕的開關不是只有一側"
     assert "canBookFee" in js[js.index("payment: {"):js.index("const _CASH_PAY =")]
 
 
 def test_ui_offers_to_book_the_fee():
-    js = repo_src(JS)
+    js = cashbook_src()
     assert "認列成匯費" in js
     assert "check.state === 'fee'" in js, "沒有只在判為手續費時才出現"
 
@@ -312,7 +313,7 @@ def test_ui_shares_one_status_line():
     `check.msg` vs `check.message` —— 那個差別本身就是後端兩支 verdict 回傳
     形狀漂開造成的。形狀對齊之後，複本沒有存在的理由。
     """
-    js = repo_src(JS)
+    js = cashbook_src()
     assert "_payStatusLine" not in js, "付款側又長出一份自己的狀態列"
     assert js.count("function _allocStatusLine(") == 1
     seg = js[js.index("function _allocStatusLine("):]

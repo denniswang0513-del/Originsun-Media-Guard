@@ -12,6 +12,7 @@ from pathlib import Path
 
 from tests.unit._srcscan import crm_css_src, js_func_body
 from tests.unit._srcscan import finance_src
+from tests.unit._srcscan import cashbook_src   # 2026-09-12 拆成主檔＋五段
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -65,7 +66,7 @@ def test_cashbook_card_column_separates_card_from_bank_expense():
     刷卡當下不動銀行（月底繳款才是銀行支出）—— 兩者混在「支出」欄裡，
     看不出「這個月刷了多少、實際從帳戶出去多少」。
     """
-    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    js = cashbook_src()
     for fn_name in ("_cardAmt", "_bankOut"):
         assert f"function {fn_name}(e)" in js
     card = js_func_body(js, "function _cardAmt(e)")
@@ -83,7 +84,7 @@ def test_cashbook_card_column_hidden_when_book_has_no_cards():
     """
     css = crm_css_src()
     assert "#cash-list-panel:not(.has-card) .cash-col-card { display: none; }" in css
-    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    js = cashbook_src()
     assert "classList.toggle('has-card'" in js
 
 
@@ -99,7 +100,7 @@ def test_card_repay_account_dropdown_uses_bank_only():
     """「哪些算真銀行帳戶」的正本在 fin-utils.bankOnly（含 active 判斷、排除
     股東往來）—— 自己 filter 會漏掉 active，停用帳戶就出現在還款下拉裡，
     還款會落到死帳戶上（/simplify 第 2 輪抓到）。"""
-    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    js = cashbook_src()
     assert "bankOnly as _bankOnly" in js
     panel = js.split("window._cashCardPanel = function ()")[1].split("\n};")[0]
     assert "_bankOnly(_bankAccounts" in panel
@@ -110,7 +111,7 @@ def test_cashbook_card_summary_skipped_on_pure_filters():
     """卡片餘額只跟 entity 有關 —— 換帳戶頁籤/搜尋/兩個篩選下拉都不該重算。
     🔴 cards 預設 true：漏標異動點＝數字過期（看不出來），漏標篩選點只是多打
     一次請求（看得出來、不傷帳）。"""
-    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    js = cashbook_src()
     assert "async function loadEntries({ render = true, cards = true } = {})" in js
     assert js.count("cards: false") >= 4
 
@@ -127,7 +128,7 @@ def test_chart_dots_have_instant_hover_labels():
 def test_cashbook_surfaces_sub_item():
     """子項目（外出用餐/交通/書籍…3,180 筆）有匯進 DB 但 UI 原本不顯示 ——
     owner 以為漏匯了。釘：列上顯示＋可編輯＋搜尋涵蓋。"""
-    js = _read("frontend/tabs/crm/crm-cashbook.js")
+    js = cashbook_src()
     assert "e.sub_item" in js, "清單沒顯示子項目"
     assert "{name:'sub_item', label:'子項目'" in js, "編輯欄位沒有子項目"
     py = finance_src()

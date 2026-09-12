@@ -20,6 +20,7 @@ owner 的原話：「這兩個按鈕我希望整合在一起，對帳系統按�
 from tests.unit._srcscan import js_code_only, repo_src
 
 CASHBOOK_JS = "frontend/tabs/crm/crm-cashbook.js"
+from tests.unit._srcscan import cashbook_src   # 2026-09-12 拆成主檔＋五段（對帳面板在 crm-cashbook-import.js）
 CASHBOOK_HTML = "frontend/tabs/crm/crm-cashbook.html"
 RECON = "frontend/tabs/finance/subviews/recon.js"
 BANKING = "frontend/tabs/finance/subviews/banking.js"
@@ -46,7 +47,7 @@ def test_recon_implementation_lives_in_exactly_one_file():
 
 def test_cashbook_mounts_the_shared_module_instead_of_navigating_away():
     """按鈕就地展開面板，不再跳到別的子視圖。"""
-    js = js_code_only(repo_src(CASHBOOK_JS))
+    js = js_code_only(cashbook_src())
     assert "import('../finance/subviews/recon.js')" in js, "沒有掛共用的對帳模組"
     assert "cash-recon-mount" in js
     # 舊行為：點側欄那顆 banking。整個機制連同 finance.js 的導覽入口一起收掉了。
@@ -60,7 +61,7 @@ def test_the_panel_is_lazy_loaded():
 
     靜態 import 會讓每個開收支明細的人都付這個成本，而多數人不對帳。
     """
-    js = js_code_only(repo_src(CASHBOOK_JS))
+    js = js_code_only(cashbook_src())
     assert "from '../finance/subviews/recon.js'" not in js, "變成靜態 import 了"
 
 

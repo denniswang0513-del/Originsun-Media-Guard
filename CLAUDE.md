@@ -1297,6 +1297,8 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`core/staff_alias.py`](core/staff_alias.py) | 「收款人那段字」→ 人員（純函式）：姓名／代稱精準命中，其次「包含某個代稱」，再由更長的姓名／代稱**升級** | 無 I/O、**沒有模糊比對**（difflib 猜錯一次就是匯錯人）；代稱撞名＝對誰都不算數，不隨便挑一個；第 4 條是升級不是另一條比對路徑（見「不要動的地方」） |
 | [`core/bank_codes.py`](core/bank_codes.py) | 金融機構代號 ↔ 銀行名（純資料＋純函式）：`resolve` 三碼優先、其次別名、認不得就原樣放行 | 表是我們自己維護的、跟著發版走（銀行併購改號要有人來改）；表不必收齊全國 —— 認不得回 `(None, 原字串)` 畫面照舊顯示人打的字。**不要改成掃全串找代號**（見「不要動的地方」） |
 | [`frontend/js/shared/ts-zone/`](frontend/js/shared/ts-zone/index.js) | 「今天與這週」四個視圖（今天的專案紀錄／我的一週／團隊的一週／專案查詢＋里程碑）的**唯一正本**（ES module）：`ctx`（狀態、端點表 `defaultApi`／`manageApi`、`switchZ1`／`setWho`）、`log`／`plan`／`team-week`／`find`、`index`（`mountZone`＋`_z1Action` 分派） | 員工頁 `/my.html`（`js/my/zone1.js` 殼，白底皮在 my.html）與 CRM 工作追蹤分頁（`tabs/timesheets/`，深色皮 `ts-zone.css`）都掛它；**管理層只在 `manage: true` 長出來**（看誰的、替他填、還沒填、週合計），員工頁的殼永遠不傳 manage（`test_work_tracking_v2`／`test_timesheet_self_entry` 釘）。看誰的＝自己 → 每一支端點退回 own-scope，跟員工頁一模一樣；別人 → `/timesheets/rows`（讀）＋ `/manual`／`/rows/{id}`（寫，管理員）。模組層單例 `z`（一個 document 一份），兼職排班視窗刻意留在員工頁 |
+| [`frontend/tabs/crm/crm-cashbook.js`](frontend/tabs/crm/crm-cashbook.js) ＋ `crm-cashbook-{batch,fields,import,alloc,petty}.js` | 收支明細（2026-09-12 從 2,844 行拆成主檔 ~1,890 ＋ 五段）：主檔＝狀態、清單、inline 編輯、詳情、彈窗、init；批次分類／編輯欄位／CSV 對帳／關聯發票／源日請款各一支 | ES module：主檔 `export let` 狀態（live binding），五段**只讀不賦值**；主檔 import 五段的函式，循環只在函式內用、模組頂層不碰對方。掃原始碼的測試用 `_srcscan.cashbook_src()` |
+| [`frontend/js/showcase-edit/`](frontend/js/showcase-edit/shell.js) | 作品編輯器的程式碼（2026-09-12 從 showcase-edit.html 的 2,080 行 inline script 原樣切成 shell／render／events／quiz／checklist／media-pick 六支傳統 script） | 同 `js/my/` 的規矩：不是 module、同一個全域環境、順序不可調；掃原始碼用 `_srcscan.showcase_edit_src()`；`accept` 在 events.js 用 `'image/' + '*'` 設 |
 | [`frontend/payout.html`](frontend/payout.html) | 收款人手上 `/p/{短碼}` 那一頁（免登入、單檔自足、零外部相依） | 只畫後端給的欄位；**不要在原始碼裡寫內部模組名、路徑、拓樸或「哪些欄位我們不給」的清單** —— 那頁寄給收款人、原始碼看得到 |
 | `frontend/tabs/crm/crm-payables.js` 的出納段 | 應付面板的複製（每列左側一顆「複製」、純數字不帶標點）、本月匯款清單（可列印）、匯款通知彈窗（全選＋複製連結） | 複製一律走 `js/shared/utils.copyText`（內網是 http＝非安全來源，`navigator.clipboard` **不存在**）；`_buildMonthGroups` 是「月 × 收款人」粒度，跟後端 `group_payables` 的「收款人」粒度**不同**，別以為可以直接用後端那份 |
 
@@ -1488,6 +1490,10 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **`burn_rows` 的每一個消費者都要自己抹錢**（2026-09-12 /polish 抓到）：它 2026-09-12 起帶合約未稅／預期毛利／人力成本
   （建議預算本來就是從毛利算出來的）。`/summary` 尾端有 `_redact_summary`、`/me/projects_burn` 只取 `SUMMARY_PUBLIC_KEYS`，
   但 `/dashboard` 的 `burn_top` 原本整列直接回給任何有 timesheets 鑰匙的人。給 burn 列加欄位＝要 grep `burn_rows(` 的每個呼叫端。
+- **`crm-cashbook-*.js` 五段不准對主檔的狀態賦值、也不准在模組頂層用主檔的東西**（2026-09-12 拆檔）：ES module 的 import 是
+  唯讀的 live binding —— 子模組寫 `_entries = …` 是 SyntaxError／TypeError；而主檔 import 五段、五段又 import 主檔，模組頂層
+  若用到對方就是 TDZ（`Cannot access before initialization`），只有在函式內呼叫時才安全。要搬會賦值的狀態就連宣告一起搬過去
+  （`_csvFile` 就是這樣進了 import 段）。
 - **ts-zone 的 `_POST`／`_PUT` body 是物件，不預先 stringify**（2026-09-12）：兩個宿主的 fetch 包裝對字串 body 的處理相反 ——
   員工頁的 `mfetch` 原樣交給 fetch（要字串），CRM 的 `tsFetch`→`authFetch` 對任何 body 都 `JSON.stringify`（給字串＝雙重編碼 → 422）。
   所以視圖只給物件，員工頁的殼（`zone1.js` 的 `zjson`）自己 stringify。同一個原因：`js/my/zone1.js` 裡的 `_POST`／`_PUT`（給 parttime.js 用）
