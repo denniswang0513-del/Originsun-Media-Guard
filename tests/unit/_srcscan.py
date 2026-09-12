@@ -282,6 +282,15 @@ MY_PAGE_FILES = ("shell.js", "cards.js", "cards-hr.js", "zone1.js", "parttime.js
 TS_ZONE_FILES = ("ctx.js", "log.js", "plan.js", "team-week.js", "find.js", "index.js")
 
 
+#: /showcase-edit.html 的程式碼拆到哪幾支（載入順序＝原本 inline script 由上而下）；2026-09-12 拆
+SHOWCASE_EDIT_FILES = ("shell.js", "render.js", "events.js", "quiz.js", "checklist.js", "media-pick.js")
+
+
+def showcase_edit_src() -> str:
+    """作品編輯器那一頁的全部程式碼＝html 殼 ＋ `frontend/js/showcase-edit/*.js`（同 my_page_src 的理由）。"""
+    return "\n".join([repo_src("frontend/showcase-edit.html")] + [repo_src("frontend/js/showcase-edit/" + n) for n in SHOWCASE_EDIT_FILES])
+
+
 def my_shell_src() -> str:
     """只有員工頁自己的那幾支（html 殼＋ js/my/），**不含**共用的 ts-zone。
 

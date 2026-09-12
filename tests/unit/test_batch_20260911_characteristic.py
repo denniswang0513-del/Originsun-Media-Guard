@@ -9,7 +9,7 @@ import re
 
 import ota_manifest
 from core import version as ver
-from tests.unit._srcscan import repo_src
+from tests.unit._srcscan import repo_src, showcase_edit_src
 
 
 def test_version_json_and_running_version_are_distinct_but_start_equal():
@@ -35,8 +35,8 @@ def test_bootstrap_reads_stale_paths_the_same_way_import_does():
 
 
 def test_showcase_editor_keeps_unsaved_fields_across_rerender():
-    # 🔴 不用 js_code_only：那頁的 HTML 有 `image/*`（accept 屬性），區塊註解剝除器會把 _render 整段吃掉（CLAUDE.md 地雷）
-    code = repo_src("frontend/showcase-edit.html")
+    code = showcase_edit_src()
+    assert "image/*" not in code, "accept 要在 JS 裡用 'image/' + '*' 設：原始碼裡的 image 加斜線星號會讓 js_code_only 整段吃掉"
     assert "const _dirtyEls = new Set();" in code and "function _snapshotDirty()" in code and "function _restoreDirty(keep)" in code
     render = code[code.index("const _keep = _snapshotDirty();"):code.index("_restoreDirty(_keep);")]
     assert "_keep" in render and "innerHTML" in render, "_render 先收再放回"
