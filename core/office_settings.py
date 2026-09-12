@@ -66,10 +66,10 @@ EXPORT_KEYS = (
 # 只送**一部分子鍵**的。整個 key 送過去會夾帶這台一支都不讀的東西，而那個目錄是
 # 兩個容器共用的 mount —— 「沒有理由放在那裡」本身就是不放的理由。
 EXPORT_SUBKEYS = {
-    # 發票分享頁（`/e/{短碼}`）頁尾的賣方＝「這張是誰開的」。沒有它那一行是空的，
-    # 而那頁是寄給客戶與會計師的。整包 `company` 還帶著匯款行庫與銀行帳號
-    # （報價單 PDF 的欄位），那兩個在這台沒有任何程式碼會讀。
-    "company": ("name", "tax_id"),
+    # 發票分享頁（`/e/{短碼}`）：頁尾的賣方（name／tax_id）＋「匯款資訊」那塊
+    # （bank／account_name／account_no；bankbook_path 是存摺影本在發票根目錄下的 UNC，
+    # 2026-09-12 起）。整包 `company` 其餘欄位（地址、電話、章、交檔條款…）這台沒程式讀，不送。
+    "company": ("name", "tax_id", "bank", "account_name", "account_no", "bankbook_path"),
 }
 
 

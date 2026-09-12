@@ -24,6 +24,13 @@ owner 2026-09-10：`/e/{短碼}` 從「點了直接下載」改成一頁 —— 
 存在的理由就是這兩邊會不一致。所以**按分享的那一刻把要顯示的欄位定稿**，那頁只讀快照。
 
 🔴 唯一的例外是**作廢**：那是收件人事後必須知道的事，所以 `voided` 走即時值、不進快照。
+
+## 匯款資訊（owner 2026-09-12）
+
+那頁下半多一塊「匯款資訊」（戶名／銀行／帳號／存摺影本下載）。它**不是發票上印著的東西**，
+是我們主動給收件人的 —— 所以它不走發票列、不進快照，跟頁尾賣方一樣從設定即時讀
+（`settings.company` 的 bank／account_name／account_no／bankbook_path）：帳戶哪天換了，
+還沒付款的舊發票要顯示新帳戶。**作廢的發票不給匯款資訊**（已作廢還把帳號擺在旁邊等於請人匯錯錢）。
 """
 from __future__ import annotations
 
@@ -97,11 +104,13 @@ def make_snapshot(inv: Optional[dict], file_name: str = "", file_size: int = 0,
 
 
 def meta(snapshot: Optional[dict], *, voided: bool = False,
-         seller: Optional[dict] = None) -> dict:
+         seller: Optional[dict] = None, bankbook: bool = False) -> dict:
     """分享頁那支 `/meta` 回什麼。
 
     🔴 `voided` 是**即時**傳進來的，不從快照拿：作廢是收件人事後必須知道的事，
        凍在快照裡等於客戶永遠看不到那張已經作廢了。
+    `bankbook`＝存摺影本檔**這台現在開得到**（端點自己去確認），開不到就不畫那一列 ——
+    不要鑄一顆按了 404 的下載鈕。
     """
     out = public_view(snapshot)
     f = (snapshot or {}).get("file") or {}
@@ -112,6 +121,23 @@ def meta(snapshot: Optional[dict], *, voided: bool = False,
     sell = seller or {}
     out["seller"] = {"name": str(sell.get("name") or ""),
                      "tax_id": str(sell.get("tax_id") or "")}
+    # 匯款資訊：作廢不給（見檔頭）；三欄都空也不給（頁面整塊不畫）。
+    out["remit"] = None if voided else remit_view(sell, bankbook=bankbook)
+    return out
+
+
+def remit_view(company: Optional[dict], *, bankbook: bool = False) -> Optional[dict]:
+    """`settings.company` → 分享頁「匯款資訊」那一塊；戶名／銀行／帳號全空 → None。
+
+    `bankbook` 只是「有沒有存摺影本可下載」的布林，路徑本身不出去（那是內部檔案系統的路徑）。
+    """
+    c = company or {}
+    out = {"account_name": _clean(c.get("account_name")),
+           "bank": _clean(c.get("bank")),
+           "account_no": _clean(c.get("account_no"))}
+    if not any(out.values()):
+        return None
+    out["bankbook"] = bool(bankbook)
     return out
 
 

@@ -549,6 +549,16 @@
                     </div>
                     <input type="text" id="company_seal_path" placeholder="上傳後自動填入；也可手動指到主控端本機路徑" style="margin-top:6px;">
                 </div>
+                <div class="form-group">
+                    <label>存摺影本</label>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                        <button type="button" class="btn-save" style="padding:6px 14px;" id="company_bankbook_upload">上傳存摺影本</button>
+                        <input type="file" id="company_bankbook_file" style="display:none;">
+                        <a id="company_bankbook_link" href="#" style="color:#3b82f6;font-size:12px;display:none;"></a>
+                        <span id="company_bankbook_status" style="color:#888;font-size:12px;">尚未上傳。發票分享頁「匯款資訊」給客戶下載；存在發票資料夾底下，換檔即生效</span>
+                    </div>
+                    <input type="text" id="company_bankbook_path" placeholder="上傳後自動填入（發票資料夾底下的路徑）" style="margin-top:6px;">
+                </div>
             </div>
 
             <div id="tab_user_mgmt" class="tab-content" style="display: none;">

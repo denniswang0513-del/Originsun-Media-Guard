@@ -15,7 +15,8 @@
 
      後端契約：
        GET  …/meta       → 發票資訊（見下方 render()）
-       GET  …/download   → 檔案（永遠是 attachment，不做內嵌預覽） -->
+       GET  …/download   → 檔案（永遠是 attachment，不做內嵌預覽）
+       GET  …/bankbook   → 存摺影本（同上） -->
 <style>
   *, *::before, *::after { box-sizing:border-box; }
   html, body { margin:0; padding:0; }
@@ -89,6 +90,17 @@
   .btn-pri { background:#3b82f6; color:#fff; }
   .fileline { margin-top:10px; color:var(--mute); font-size:13px; word-break:break-all; }
 
+  /* ── 匯款資訊：看完合計就看到要匯去哪。帳號旁一顆「複製」（純數字，出納直接貼進網銀）── */
+  .remit { margin-top:26px; padding-top:16px; border-top:1px solid var(--hair); }
+  .remit h5 { margin:0 0 10px; font-size:12px; letter-spacing:.08em; font-weight:700; }
+  .remit .kv { grid-template-columns:76px 1fr; }
+  .remit .v { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .remit .no { font-variant-numeric:tabular-nums; letter-spacing:.06em; font-weight:500; }
+  .remit .cp { border:1px solid var(--hair); background:#fff; color:#333; border-radius:5px;
+    padding:2px 10px; font-size:12px; cursor:pointer; font-family:inherit; line-height:1.6; }
+  .remit .cp:hover { border-color:#999; }
+  .remit a { color:#3b82f6; }
+
   .foot { margin-top:26px; padding-top:12px; border-top:1px solid var(--hair);
     color:var(--mute); font-size:12px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 
@@ -148,6 +160,16 @@
         <div class="row" id="row-ex"><span class="l">銷售額（未稅）</span><span class="v" id="f-ex"></span></div>
         <div class="row" id="row-tax"><span class="l">營業稅 5%</span><span class="v" id="f-tax"></span></div>
         <div class="grand" id="row-total"><span class="l">合計</span><span class="v" id="f-total"></span></div>
+      </div>
+    </div>
+
+    <div class="remit" id="remit" hidden>
+      <h5>匯款資訊</h5>
+      <div class="kv">
+        <span class="k" id="k-acct-name">戶名</span><span class="v" id="f-acct-name"></span>
+        <span class="k" id="k-bank">銀行</span><span class="v" id="f-bank"></span>
+        <span class="k" id="k-acct-no">帳號</span><span class="v" id="f-acct-no"><span class="no" id="f-acct-no-text"></span><button type="button" class="cp" id="cp-acct-no">複製</button></span>
+        <span class="k" id="k-bankbook">存摺影本</span><span class="v" id="f-bankbook"><a id="dl-bankbook" href="#">下載</a></span>
       </div>
     </div>
 
@@ -236,7 +258,36 @@ function fmtDate(v) {
     return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : s;
 }
 
-function render(d, downloadUrl) {
+/** 複製到剪貼簿。內網是 http（非安全來源）沒有 navigator.clipboard，所以留 textarea 退路。 */
+async function copyText(text, btn) {
+    const flash = () => { const t = btn.textContent; btn.textContent = "已複製"; setTimeout(() => { btn.textContent = t; }, 1500); };
+    if (navigator.clipboard && window.isSecureContext) {
+        try { await navigator.clipboard.writeText(text); flash(); return; } catch (_) { /* 往下退 */ }
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:-1000px;opacity:0;";
+    document.body.appendChild(ta);
+    try { ta.select(); ta.setSelectionRange(0, text.length); if (document.execCommand("copy")) flash(); } catch (_) { /* 沒辦法就算了 */ }
+    document.body.removeChild(ta);
+}
+
+/** 匯款資訊：後端給什麼畫什麼；沒給（作廢、或還沒設定）整塊不畫。 */
+function renderRemit(remit, bankbookUrl) {
+    const r = remit || null;
+    if (!r) { $("remit").hidden = true; return; }
+    const hasName = setPair($("k-acct-name"), $("f-acct-name"), r.account_name);
+    const hasBank = setPair($("k-bank"), $("f-bank"), r.bank);
+    const no = String(r.account_no || "").trim();
+    $("f-acct-no-text").textContent = no;
+    $("k-acct-no").hidden = $("f-acct-no").hidden = !no;
+    $("cp-acct-no").onclick = () => copyText(no.replace(/[^0-9]/g, ""), $("cp-acct-no"));
+    $("dl-bankbook").href = bankbookUrl;
+    $("k-bankbook").hidden = $("f-bankbook").hidden = !r.bankbook;
+    $("remit").hidden = !(hasName || hasBank || no);
+}
+
+function render(d, downloadUrl, bankbookUrl) {
     $("void").hidden = !d.voided;
 
     const no = String(d.invoice_number || "").trim();
@@ -269,6 +320,7 @@ function render(d, downloadUrl) {
     $("dl").href = downloadUrl;
     $("bar-dl").href = downloadUrl;
     $("bar-dl").hidden = false;
+    renderRemit(d.remit, bankbookUrl);
 
     $("state").hidden = true;
     $("body").hidden = false;
@@ -317,7 +369,7 @@ async function load() {
         fail("暫時無法顯示", "回應格式有誤，請稍後再試或與我們聯繫。");
         return;
     }
-    render(d, api + "/download");
+    render(d, api + "/download", api + "/bankbook");
 }
 
 load();

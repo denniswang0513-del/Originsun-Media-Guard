@@ -448,8 +448,101 @@ async def invoice_share_meta(token: str, request: Request):
     if not path:
         raise HTTPException(status_code=404, detail="檔案不存在")
     from config import load_settings
-    return invoice_share.meta(snap, voided=voided,
-                              seller=load_settings().get("company") or {})
+    company = load_settings().get("company") or {}
+    return invoice_share.meta(snap, voided=voided, seller=company,
+                              bankbook=bool(_bankbook_local_path(company)))
+
+
+@public_router.get("/public/invoice-file/{token}/bankbook")
+async def invoice_share_bankbook(token: str, request: Request):
+    """分享頁「匯款資訊」那列的「存摺影本」下載（owner 2026-09-12）。
+
+    憑證跟其他三支一樣是那張發票的短碼（沒有短碼就拿不到存摺）；作廢的發票不給
+    （`meta()` 那頭已經不畫那一列，這裡再擋一次是為了直接打網址的人）。
+    檔案在發票根目錄底下（`_BANKBOOK_DIR`），走同一份 `_local_invoice_path` 白名單，
+    所以 NAS 對外容器也送得出去 —— master 關機客戶照樣拿得到。**永遠 attachment**。
+    """
+    await surface_gate(request)
+    _path, _snap, voided = await _share_row(token)
+    from config import load_settings
+    path = "" if voided else _bankbook_local_path(load_settings().get("company") or {})
+    if not path:
+        raise HTTPException(status_code=404, detail="檔案不存在")
+    return no_store_file(path, filename=ntpath.basename(path))
+
+
+# ── 存摺影本（匯款資訊的附件）────────────────────────────────
+#
+# 全公司一份、放在**發票根目錄**底下而不是 master 的 company_assets/：那頁由 NAS 對外
+# 容器 serve，company_assets/ 是 master 本機資料夾、NAS 看不到 —— 放那裡的話 master
+# 關機時「下載發票」好的、「存摺影本」404，同一頁兩顆鈕一顆好一顆壞。
+# 檔名固定（`存摺影本.<ext>`），換檔就覆蓋：路徑字串靠 /publish 才到 NAS，檔名不變
+# 的話之後換檔 NAS 立刻吃到新檔，不用再發版。
+_BANKBOOK_DIR = "_公司"
+_BANKBOOK_STEM = "存摺影本"
+_BANKBOOK_MAX_BYTES = 10 * 1024 * 1024
+# 看檔頭不看副檔名（同 api_system 的公司圖）：存摺影本是 PDF 或掃描圖
+_BANKBOOK_MAGIC = ((b"%PDF", ".pdf"), (b"\x89PNG\r\n\x1a\n", ".png"), (b"\xff\xd8\xff", ".jpg"))
+
+
+def _bankbook_ext(head: bytes) -> str:
+    for magic, ext in _BANKBOOK_MAGIC:
+        if head.startswith(magic):
+            return ext
+    raise HTTPException(status_code=400, detail="只收 PDF／PNG／JPG")
+
+
+def _bankbook_local_path(company: dict) -> str:
+    """`settings.company.bankbook_path` → 這台開得到的絕對路徑；沒設／開不到／不在白名單回空字串。"""
+    return _local_invoice_path((company or {}).get("bankbook_path") or "")
+
+
+@router.post("/invoices/bankbook")
+async def upload_bankbook(request: Request, file: UploadFile = File(...)):
+    """上傳／換掉存摺影本（管理員）：存進發票根目錄 `_公司/存摺影本.<ext>`，路徑直接寫進
+    `settings.company.bankbook_path`（canonical UNC，跟 `file_url` 同一套翻譯）。同名只留一份。"""
+    check_admin(request)
+    from config import load_settings, save_settings
+    head = await file.read(8)
+    ext = _bankbook_ext(head)
+    await file.seek(0)
+    base = os.path.join(_invoices_write_root(), _BANKBOOK_DIR)
+    try:
+        os.makedirs(base, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(status_code=422, detail=f"資料夾無法使用：{e}")
+    from core.project_folders import stream_to_disk
+    filepath = os.path.join(base, _BANKBOOK_STEM + ext)
+    tmp = filepath + ".part"
+    written = await asyncio.to_thread(stream_to_disk, file.file, tmp, _BANKBOOK_MAX_BYTES)
+    if written < 0:                        # stream_to_disk 自己刪半成品
+        raise HTTPException(status_code=413, detail=f"檔案超過 {_BANKBOOK_MAX_BYTES // 1024 // 1024}MB")
+    for old in os.listdir(base):          # 換副檔名也不殘留（.pdf → .jpg 舊的那份要走）
+        if old.rsplit(".", 1)[0] == _BANKBOOK_STEM:
+            try:
+                os.remove(os.path.join(base, old))
+            except OSError:
+                pass
+    os.replace(tmp, filepath)
+    settings = load_settings()
+    company = dict(settings.get("company") or {})
+    company["bankbook_path"] = _stored_path(filepath)
+    save_settings({**settings, "company": company})
+    return {"status": "ok", "path": company["bankbook_path"],
+            "file_name": ntpath.basename(filepath), "size": os.path.getsize(filepath)}
+
+
+@router.get("/invoices/bankbook")
+async def get_bankbook(request: Request, download: bool = Query(False)):
+    """設定頁那格「目前檔案」（管理員）：`?download=1` 給檔，否則只回檔名與大小；沒設回 404。"""
+    check_admin(request)
+    from config import load_settings
+    path = _bankbook_local_path(load_settings().get("company") or {})
+    if not path:
+        raise HTTPException(status_code=404, detail="尚未上傳")
+    if download:
+        return no_store_file(path, filename=ntpath.basename(path))
+    return {"file_name": ntpath.basename(path), "size": os.path.getsize(path)}
 
 
 @public_router.get("/public/invoice-file/{token}/download")

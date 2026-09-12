@@ -60,6 +60,7 @@ EXPECTED_API = {
     ("/api/v1/crm/public/payout/{token}", "GET"),
     ("/api/v1/crm/public/invoice-file/{token}/meta", "GET"),
     ("/api/v1/crm/public/invoice-file/{token}/download", "GET"),
+    ("/api/v1/crm/public/invoice-file/{token}/bankbook", "GET"),   # 匯款資訊的存摺影本（2026-09-12）
     # 舊的長網址（已寄出的連結就是它）：維持「點了直接下載」，刻意不改成頁面
     ("/api/v1/crm/public/invoice-file/{token}", "GET"),
     # 提案公開共編頁（token 授權；客戶手上的 ?t= 連結）

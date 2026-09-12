@@ -51,6 +51,7 @@ _DEFAULT_SETTINGS: dict = {
         "bank": "012 台北富邦 中山分行",
         "account_name": "源日有限公司",
         "account_no": "82120000062728",
+        "bankbook_path": "",     # 存摺影本（發票分享頁「匯款資訊」的附件）；設定頁上傳，存發票根目錄下的 UNC
         "quote_valid_days": 14,
         "delivery_terms": "完成檔以雲端儲存連結交檔。若須 DVD、USB、硬碟，與任何實體儲存裝置交檔，實報實銷。",
         "logo_path": "",

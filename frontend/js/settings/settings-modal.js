@@ -2,13 +2,67 @@
 
 // settings.json 的 company 區塊（config.py 預設值是正本）；index.html 的欄位 id = company_<key>
 const COMPANY_KEYS = ['name', 'name_en', 'tax_id', 'address', 'phone', 'email', 'bank',
-    'account_name', 'account_no', 'quote_valid_days', 'delivery_terms', 'logo_path', 'seal_path'];
+    'account_name', 'account_no', 'bankbook_path', 'quote_valid_days', 'delivery_terms', 'logo_path', 'seal_path'];
 const _companyEl = (k) => document.getElementById('company_' + k);
 
 function fillCompany(company) {
     const c = company || {};
     COMPANY_KEYS.forEach(k => { const el = _companyEl(k); if (el) el.value = c[k] ?? ''; });
     ['logo', 'seal'].forEach(_loadCompanyPreview);
+    _loadBankbookStatus();
+}
+
+// 存摺影本：不是圖、不預覽，只顯示「目前是哪個檔、多大」＋ 一個帶權限的下載連結。
+// 存在發票根目錄（不是 company_assets/）—— 那頁由 NAS 對外容器 serve，company_assets 它看不到。
+// 🔴 端點在 /api/v1/crm/ 底下：login-modal 補 token 的那份 fetch 白名單只認 /settings/ 等幾個路徑，
+//    這裡要自己帶 Authorization（utils 掛在 window 的 bearerHeader）。
+const _BANKBOOK_API = '/api/v1/crm/invoices/bankbook';
+const _bh = () => (window.bearerHeader ? window.bearerHeader() : {});
+async function _loadBankbookStatus() {
+    const st = document.getElementById('company_bankbook_status'), a = document.getElementById('company_bankbook_link');
+    if (!st || !a) return;
+    try {
+        const r = await fetch(_BANKBOOK_API, { headers: _bh() });
+        if (!r.ok) throw new Error();
+        const d = await r.json();
+        const kb = Math.max(1, Math.round((d.size || 0) / 1024));
+        a.textContent = `${d.file_name}（${kb} KB）`;
+        a.style.display = '';
+        a.onclick = async (e) => {   // 帶 token 的下載（<a href> 送不了 Authorization）
+            e.preventDefault();
+            const rr = await fetch(_BANKBOOK_API + '?download=1', { headers: _bh() });
+            if (!rr.ok) return;
+            const u = URL.createObjectURL(await rr.blob());
+            const t = document.createElement('a'); t.href = u; t.download = d.file_name; document.body.appendChild(t); t.click(); t.remove();
+            setTimeout(() => URL.revokeObjectURL(u), 10000);
+        };
+        st.textContent = '已上傳。換檔直接再按上傳';
+    } catch (_) {
+        a.style.display = 'none';
+    }
+}
+
+function _bindBankbookUpload() {
+    const btn = document.getElementById('company_bankbook_upload'), file = document.getElementById('company_bankbook_file');
+    if (!btn || !file || btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    file.accept = 'application/pdf,image/png,image/jpeg';   // 🔴 accept 在 JS 設（html 裡 image 加斜線星號會被掃碼測試當註解）
+    btn.addEventListener('click', () => file.click());
+    file.addEventListener('change', async () => {
+        const f = file.files && file.files[0];
+        if (!f) return;
+        const st = document.getElementById('company_bankbook_status');
+        if (st) st.textContent = '上傳中…';
+        try {
+            const fd = new FormData(); fd.append('file', f);
+            const r = await fetch(_BANKBOOK_API, { method: 'POST', body: fd, headers: _bh() });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+            const el = _companyEl('bankbook_path'); if (el) el.value = d.path || '';
+            await _loadBankbookStatus();
+        } catch (e) { if (st) st.textContent = '上傳失敗：' + (e.message || e); }
+        file.value = '';
+    });
 }
 
 // Logo／印章：上傳 → 後端存 company_assets/ 並直接寫進 settings；這裡只回填路徑欄與預覽。
@@ -78,6 +132,7 @@ function switchSettingsTab(tabId, event) {
 document.addEventListener('DOMContentLoaded', () => {
     const modal = document.getElementById('settingsModal');
     _bindCompanyUploads();
+    _bindBankbookUpload();
 
     // ── Load settings when modal opens ───────────────────────
     document.getElementById('btnOpenSettings').addEventListener('click', async () => {

@@ -26,8 +26,8 @@ SETTINGS_JS = "frontend/js/settings/settings-modal.js"
 
 # 與 config.py DEFAULT_SETTINGS["company"] 同一份 key 清單
 COMPANY_KEYS = ["name", "name_en", "tax_id", "address", "phone", "email", "bank",
-                "account_name", "account_no", "quote_valid_days", "delivery_terms",
-                "logo_path", "seal_path"]
+                "account_name", "account_no", "bankbook_path", "quote_valid_days", "delivery_terms",
+                "logo_path", "seal_path"]   # bankbook_path：存摺影本（發票分享頁匯款資訊，2026-09-12）
 
 
 # ── PDF 下載 ─────────────────────────────────────────────────
@@ -127,7 +127,7 @@ def test_settings_modal_reads_and_writes_all_company_keys():
     keys = js_func_body(src, "const COMPANY_KEYS = [")
     for k in COMPANY_KEYS:
         assert f"'{k}'" in keys, k
-    assert keys.count("'") == 2 * len(COMPANY_KEYS), "COMPANY_KEYS 與 config.py 的 13 個 key 要一樣多"
+    assert keys.count("'") == 2 * len(COMPANY_KEYS), "COMPANY_KEYS 與 config.py 的 company 鍵要一樣多"
     assert "fillCompany(data.company)" in src                         # 載入回填
     # 儲存：從報價頁開的 company-only 只送 company（後端 /api/settings/save 依頂層鍵分流給 crm_quotes／crm_invoices）；
     # 從頭像開的完整設定把 company 併進整包（2026-09-08 權限稽核第二批）
