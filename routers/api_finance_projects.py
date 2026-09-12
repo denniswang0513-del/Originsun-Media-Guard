@@ -490,6 +490,9 @@ async def project_ledger_detail(project_id: str, request: Request,
             "contract": int(p.contract_amount or 0),
             "received": int(p.amount_received or 0),
             "receivable": int(p.amount_receivable or 0),
+            # ④ 還沒收到多少 —— 同清單那欄走 to_collect（代開／執行業務所得的源頭代扣
+            # 永遠不會進帳，amount_receivable 收齊了還會剩一個代辦費）；手機抽屜的「未收」讀它
+            "to_collect": to_collect(int(p.contract_amount or 0), int(p.amount_received or 0), _d),
             "payment_status": p.payment_status or "",
             "crm_pushed": int(p.crm_pushed or 0),
             "detail": _d, "net": _net, "check": _check,

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query, Request
 
@@ -35,11 +36,18 @@ router = APIRouter(prefix="/api/v1/finance/m", tags=["士源帳本"])
 #: 收支明細的 `category` 是「頂層_第二層」的鏡射，所以「是不是家用」看前綴就好。
 HOUSEHOLD_TOP = "家用"
 PERIODS = ("month", "year", "all")
+_TW = ZoneInfo("Asia/Taipei")
+
+
+def _today_tw() -> date:
+    """「今天」以台北為準 —— 這支也跑在 NAS 容器（UTC）：`date.today()` 在台北每月 1 日
+    00:00–08:00 還是上個月，「本月」會整段變成上個月。"""
+    return datetime.now(_TW).date()
 
 
 def _period_range(period: str, today: date | None = None) -> tuple:
     """`month`／`year`／`all` → `(from_date|None, to_date|None)`（含頭含尾，本地日）。"""
-    t = today or date.today()
+    t = today or _today_tw()
     if period == "month":
         nxt = (t.replace(day=1) + timedelta(days=32)).replace(day=1)
         return t.replace(day=1), nxt - timedelta(days=1)
@@ -132,10 +140,13 @@ async def ledger_mobile_home(request: Request, period: str = Query("month")):
     items = ledger.get("projects") or []
     picked = [p for p in items if _in_period(_parse_day(p.get("close_date")), lo, hi)]
     proj = {"count": len(picked)}
-    for k in ("contract", "received", "receivable", "net"):
+    for k in ("contract", "received", "net"):
         proj[k] = sum(int(p.get(k) or 0) for p in picked)
-    to_collect = sorted((p for p in items if int(p.get("receivable") or 0) > 0),
-                        key=lambda p: -int(p.get("receivable") or 0))[:5]
+    # 「未收」一律走 to_collect（同桌機執行專案那欄）：amount_receivable 是營收−已收，
+    # 代開／執行業務所得的源頭代扣永遠不會進帳，收齊的案會剩一個代辦費當「未收」
+    proj["receivable"] = sum(int(p.get("to_collect") or 0) for p in picked)
+    to_collect = sorted((p for p in items if int(p.get("to_collect") or 0) > 0),
+                        key=lambda p: -int(p.get("to_collect") or 0))[:5]
 
     factory = _factory_or_503()
     async with factory() as session:
@@ -169,7 +180,7 @@ async def ledger_mobile_home(request: Request, period: str = Query("month")):
                     "project_name": names.get(pid, "") if pid else ""}
                    for i, d, s, dp, ex, cat, it, pid in recent],
         "to_collect": [{"id": p["id"], "name": p["name"], "client": p.get("client", ""),
-                        "receivable": int(p.get("receivable") or 0)} for p in to_collect],
+                        "receivable": int(p.get("to_collect") or 0)} for p in to_collect],
     }
 
 

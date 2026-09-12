@@ -22,8 +22,12 @@ export async function fetchLedger() {
     return _rows;
 }
 
+// 「未收」一律讀 to_collect（同桌機執行專案那欄）：receivable 是營收−已收，代開／執行業務所得的
+// 源頭代扣永遠不會進帳 —— 收齊的案用它會剩一個代辦費當「未收」，應收分頁也會把它列成沒收齊。
+export const toCollect = (p) => Number((p || {}).to_collect ?? 0);
+
 export function projectCard(p, { extra = '' } = {}) {
-    const recv = Number(p.receivable || 0);
+    const recv = toCollect(p);
     const src = (p.detail || {}).source || '';
     const parents = p.parent_names || [];
     return `<div class="m-card tap" data-id="${esc(p.id)}">
@@ -91,7 +95,7 @@ export async function openProjectSheet(id, onDone) {
         <div class="lg-sub">${esc(p.client || '')}${parents.length ? '・母帳：' + esc(parents.map(x => x.name).join('、')) : ''}</div>
         <div class="m-strip" style="margin-top:10px">
             <div class="k"><div class="n">${money(p.received)}</div><div class="l">實收</div></div>
-            <div class="k"><div class="n">${money(p.receivable)}</div><div class="l">未收</div></div>
+            <div class="k"><div class="n">${money(toCollect(p))}</div><div class="l">未收</div></div>
         </div>
         ${parents.length ? '' : `<button type="button" class="m-btn" id="pj-push" style="width:100%;margin-bottom:8px">推送到母帳</button><div id="pj-push-box" hidden></div>`}
         <div class="m-form">

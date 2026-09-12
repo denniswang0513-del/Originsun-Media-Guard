@@ -15,7 +15,9 @@ const KIND = { deposit: '收入', expense: '支出' };
 
 const opt = () => state.options || {};
 const household = () => opt().household_top || '家用';
-export const isHousehold = (e) => ((e.taxonomy_path || [])[0] || '') === household();
+// 頂層先看樹的路徑，沒掛節點的舊列（匯入／節點停用）退到 category 鏡射出來的 book ——
+// 後端 /home 的「其中家用」是按 category 前綴算的，兩頁要認同一批列
+export const isHousehold = (e) => (((e.taxonomy_path || [])[0] || e.book || '') === household());
 
 /** 分類 picker 的 items：`mode`＝'cash'（家用以外）／'household'（只家用子樹）。 */
 export function taxonomyItems(mode) {
@@ -120,6 +122,13 @@ export function openEntrySheet(e, { mode = 'cash', onDone } = {}) {
                       bank_account_id: e.bank_account_id || null };
         const diff = { entity: 'mine' };
         for (const k of Object.keys(was)) if (String(next[k] ?? '') !== String(was[k] ?? '')) diff[k] = next[k];
+        // 🔴 picker 找不到原值（分類節點停用／掛在頂層、專案不在私帳清單）時 mountPicker 會把它 set 成空 ——
+        // 那不是使用者「清掉」，只是這台畫不出來。送空字串等於清掉分類三欄／把專案解掉（私帳已收還會跟著減）。
+        for (const k of ['taxonomy_node_id', 'project_id']) {
+            const hidden = document.getElementById('es-' + (k === 'project_id' ? 'project' : 'node'));
+            const known = hidden && (hidden._items || []).some(i => String(i.value) === String(was[k] || ''));
+            if (k in diff && !next[k] && was[k] && !known) delete diff[k];
+        }
         if (Object.keys(diff).length === 1) { toast('沒有改動'); closeSheet(); return; }
         try {
             await mfetch(`${API}/${encodeURIComponent(e.id)}`, { method: 'PUT', body: diff });

@@ -47,7 +47,9 @@ function _host(tab) {
 
 async function render() {
     const tab = currentTab();
-    if (location.hash.replace(/^#/, '').split('?')[0] !== tab) location.hash = tab;
+    // 沒有／不認得的 hash → 補成落地分頁。用 replaceState：改 location.hash 會觸發 hashchange 再 render 一次
+    // （每個視圖 load 兩趟），而且 _depth 會從 1 起跳，第一下「上一頁」退到沒 hash 的網址又立刻補回來
+    if (location.hash.replace(/^#/, '').split('?')[0] !== tab) history.replaceState(null, '', '#' + tab);
     document.getElementById('m-page').textContent = tabLabel(tab) + (state.me && state.me.username ? '｜' + state.me.username : '');
     for (const b of document.querySelectorAll('#m-tabbar button'))
         b.classList.toggle('on', b.dataset.tab === tab);
