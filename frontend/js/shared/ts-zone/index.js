@@ -7,7 +7,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 import { appendBlankRows, removeRow, collectRows, saveRowNow, setStages } from "/js/shared/ts-sheet.js";
 import { openStageEditor } from "/js/shared/stage-editor.js";
-import { z, configure, switchZ1, setWho, _z1MarkStale, _shiftDays, _mondayOf, _mdLabel, _PUT } from "./ctx.js";
+import { z, configure, switchZ1, setWho, _z1MarkStale, _shiftDays, _mondayOf, _mdLabel, _PUT, VIEWS } from "./ctx.js";
 import { loadLog, mergeSameProject, undoMerge, resetToday, _logProjectOptions } from "./log.js";
 import { loadMyWeek, _renderMyWeek, _planOpenAdd, _planSubmitAdd, _planDelete, _planMove, _planFromMilestones, _planCopyLast, _planWireDnd, _planCardHtml } from "./plan.js";
 import { loadTeamWeek, _msToggleDone, _openMsModal } from "./team-week.js";
@@ -21,7 +21,9 @@ export function mountZone(opts) {
     configure(opts);
     const host = z.host;
     z.loaders = { log: () => loadLog(), plan: () => loadMyWeek(), week: () => loadTeamWeek(), find: () => loadFind() };
-    host.querySelector(".views").addEventListener("click", (e) => { const b = e.target.closest(".view-btn[data-view]"); if (b) switchZ1(b.dataset.view); });
+    // 只認四個視圖的鈕：CRM 分頁把 總表／儀表板／設定 也放在同一列（.view-btn[data-view="ledger"]…），那幾顆是宿主的 ——
+    // 收進來會先 switchZ1 退到第一個視圖、順手把 onView 記成 log，然後宿主才切走（review 2026-09-12）
+    host.querySelector(".views").addEventListener("click", (e) => { const b = e.target.closest(".view-btn[data-view]"); if (b && VIEWS.includes(b.dataset.view)) switchZ1(b.dataset.view); });
     // 宿主自己的按鈕（CRM 分頁鈕列上的 總表／儀表板／設定）交回去；其餘在這裡處理完就不再冒泡
     //（CRM 分頁在外層也掛了一個 [data-ts-action] 的委派：row-remove／proj-pop 兩邊都收＝刪兩次、開兩個彈窗）
     host.addEventListener("click", (e) => {

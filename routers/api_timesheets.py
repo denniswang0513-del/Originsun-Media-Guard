@@ -794,6 +794,11 @@ async def dashboard(request: Request):
                    Timesheet.work_type, Timesheet.hours, Timesheet.status)
             .where(Timesheet.work_date >= since))).all()
         burn = (await burn_rows(session))[:5]
+    # burn 前五跟 /summary 同一份列：沒有私帳 scope 的人只拿 SUMMARY_PUBLIC_KEYS（burn_rows 2026-09-12 起帶
+    # 合約未稅／預期毛利／人力成本；建議預算也是從毛利算出來的）—— 這裡原本整列直接回，是個洞
+    from core.money import viewer_has_mine_scope
+    if not viewer_has_mine_scope(request):
+        burn = [{k: it.get(k) for k in SUMMARY_PUBLIC_KEYS} for it in burn]
     data = [(n, tw_day(d), p, wt, float(h or 0), st) for n, d, p, wt, h, st in rows]
     today_rows = [x for x in data if x[1] == today]
     week = hours_rollup([(n, d, p, h) for n, d, p, _wt, h, _st in data if d and d >= week_mon.date()],

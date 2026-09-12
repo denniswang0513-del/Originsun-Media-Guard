@@ -297,7 +297,9 @@ async function _zoneIdentity() {
 function _whoSelectHtml() {
     const opt = (val, label) => `<option value="${esc(val)}" ${(_zoneWho ? _zoneWho.id : '') === val ? 'selected' : ''}>${esc(label)}</option>`;
     const people = _zonePeople || [];
-    return `<label class="who">看誰的<select id="ts-zone-who">${opt('', '全部（團隊）')}${people.map(p => opt(p.id, p.name + (_zoneMe && p.id === _zoneMe.id ? '（我）' : (p.status === '兼職' ? '（兼職）' : '')))).join('')}</select></label>
+    // data-no-search：SPA 會把 select 升級成 searchable 小工具，但那個小工具不會跟著程式改值（點「替他填」／「還沒填」
+    // 之後顯示的還是上一個名字）；人員只有十來個，原生 select 就好
+    return `<label class="who">看誰的<select id="ts-zone-who" data-no-search>${opt('', '全部（團隊）')}${people.map(p => opt(p.id, p.name + (_zoneMe && p.id === _zoneMe.id ? '（我）' : (p.status === '兼職' ? '（兼職）' : '')))).join('')}</select></label>
         <label class="sw" id="ts-zone-sw" title="關掉＝以員工的角度看（管理的東西全部消失）"><span>管理視角</span><i></i></label>`;
 }
 async function _mountZone() {

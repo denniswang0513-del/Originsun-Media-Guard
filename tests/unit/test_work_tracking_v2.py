@@ -139,3 +139,13 @@ def test_manage_write_buttons_need_admin_and_go_through_the_same_endpoints_as_th
     assert "z.manage && z.api.conflicts && z.hooks.isAdmin() ? mjson(z.api.conflicts())" in tw
     tab = repo_src(TAB)
     assert "isAdmin: _isAdmin," in tab and "onCompare: (names) => { _compareNames = names; }" in tab
+
+
+def test_dashboard_burn_top_is_redacted_like_summary_and_view_row_ignores_host_buttons():
+    """review round 1（2026-09-12）：/dashboard 的 burn 前五整列直接回，burn_rows 帶了錢欄位之後就是個洞；
+    ts-zone 的 .views 只認四個視圖的鈕（總表／儀表板／設定在同一列，是宿主的）。"""
+    dash = code_only(func_body(repo_src(API), "async def dashboard("))
+    assert "if not viewer_has_mine_scope(request):" in dash and "{k: it.get(k) for k in SUMMARY_PUBLIC_KEYS} for it in burn" in dash
+    mount = js_func_body(js_code_only(repo_src(IDX)), "export function mountZone(opts) {")
+    assert "if (b && VIEWS.includes(b.dataset.view)) switchZ1(b.dataset.view);" in mount
+    assert 'id="ts-zone-who" data-no-search' in repo_src(TAB), "看誰的用原生 select（searchable 小工具不跟程式改值）"
