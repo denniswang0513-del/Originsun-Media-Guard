@@ -38,7 +38,8 @@ let _zoneFirst = 'log';        // zone 裡一開始切到哪個視圖（log／pl
 let _zoneWho = null;           // 管理視角「看誰的」：null＝全部；{id, name}
 let _zoneManage = true;        // 管理視角開關（關掉＝以員工的角度看，紫色的東西全消失）
 let _zoneMe = undefined;       // 登入者綁的人員 {id, name}｜null（沒綁）；undefined＝還沒問過
-let _zonePeople = null;        // /timesheets/people
+let _zonePeople = null;        // /timesheets/people（5 分鐘快取，同 _projectOptions：新建的人不用重整就出現）
+let _zonePeopleAt = 0;
 let _workTypes = [];   // 後端的 WORK_TYPES（/mine 與 /rows 都帶）
 let _month = _today().slice(0, 7);   // YYYY-MM（本地時區；toISOString 是 UTC，1 號早上會停在上個月）
 let _day = _today();                 // 今日看板／我的一天的日期
@@ -284,8 +285,8 @@ function _viewBtns(extra = '') {
 // ── zone：員工四視圖＋管理層（js/shared/ts-zone；docs/WORK_TRACKING_V2_PLAN.md §3–4）──
 async function _zoneIdentity() {
     // 登入者綁的人員（看誰的＝自己時走 own-scope，跟員工頁一模一樣）＋ 人員清單（切換器、未填點名）
-    if (!_zonePeople) {
-        try { _zonePeople = (await tfetch('/api/v1/timesheets/people')).people || []; } catch (_) { _zonePeople = []; }
+    if (!_zonePeople || Date.now() - _zonePeopleAt > 5 * 60 * 1000) {
+        try { _zonePeople = (await tfetch('/api/v1/timesheets/people')).people || []; _zonePeopleAt = Date.now(); } catch (_) { _zonePeople = _zonePeople || []; }
     }
     if (_zoneMe === undefined) {
         // 綁定人員從登入時的 /auth/me 拿（window._authUser.staff_id），不另打 /timesheets/mine（沒綁的管理員會收一顆 409）

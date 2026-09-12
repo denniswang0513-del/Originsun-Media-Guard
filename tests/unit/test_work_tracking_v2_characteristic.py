@@ -118,9 +118,14 @@ async def test_board_absent_lists_active_staff_without_a_real_row_and_skips_week
 @pytest.mark.asyncio
 async def test_people_keeps_active_and_parttime_sorted_by_rank_then_name(monkeypatch):
     _admin(monkeypatch)
-    sess = _Session([[("s3", "王小美", "兼職"), ("s1", "陳阿宏", "在職"), ("s4", "離職者", "離職"), ("s2", "林冠宇", ""), ("s5", "", "在職"), ("s6", "合夥人", "合夥")]])
+    staff = [("s3", "王小美", "兼職", None), ("s1", "陳阿宏", "在職", datetime(2026, 9, 1)), ("s4", "離職者", "離職", None),
+             ("s2", "林冠宇", "", None), ("s5", "", "在職", None), ("s6", "合夥人", "合夥", None)]
+    first = [("s1", datetime(2026, 8, 20)), ("s3", datetime(2026, 9, 5))]     # 第一筆工時
+    sess = _Session([staff, first])
     monkeypatch.setattr(api, "db_factory_or_503", lambda: _factory(sess))
     out = await api.timesheet_people(request=None)
+    since = {p["name"]: p["since"] for p in out["people"]}
+    assert since == {"合夥人": None, "林冠宇": None, "陳阿宏": "2026-09-01", "王小美": "2026-09-05"}, "到職日與第一筆工時取較晚的；都沒有＝None"
     # 狀態空白（林冠宇）跟在職同一層（core.hr_logic.staff_rank 2026-09-12 起跟 ACTIVE_STATUSES 一致）；兼職最後
     assert [p["name"] for p in out["people"]] == ["合夥人", "林冠宇", "陳阿宏", "王小美"]
     assert out["people"][-1]["status"] == "兼職" and all(p["id"] for p in out["people"])

@@ -31,10 +31,11 @@ export async function loadTeamWeek() {
     const cols = days.filter(iso => { const w = _dow(iso); return (w !== 0 && w !== 6) || hasAny(iso); });   // 週末只有有東西才畫
     // 管理視角（docs/WORK_TRACKING_V2_PLAN.md §4-5）：每人週合計、今天以前的工作日空白標「未填」（在職／合夥才點名；兼職不）
     const status = new Map(z.people.map(p => [p.name, p.status]));
+    const since = new Map(z.people.map(p => [p.name, p.since || ""]));   // 到職日或第一筆工時（/people）；那天之前不點名
     const nagged = (name) => z.manage && status.has(name) && status.get(name) !== "兼職";
     const cellsOf = (name, iso) => { const p = people.find(x => x.name === name); return (p && p.cells && p.cells[iso]) || []; };
     const weekHours = (name) => Math.round(cols.reduce((a, iso) => a + cellsOf(name, iso).reduce((b, i) => b + (i.hours || 0), 0), 0) * 10) / 10;
-    const blank = (name, iso) => nagged(name) && iso <= today && _dow(iso) !== 0 && _dow(iso) !== 6 && !leaveOf(iso).includes(name)
+    const blank = (name, iso) => nagged(name) && iso <= today && iso >= since.get(name) && _dow(iso) !== 0 && _dow(iso) !== 6 && !leaveOf(iso).includes(name)
         && !cellsOf(name, iso).some(i => i.status !== "plan");
     const cell = (name, iso) => {
         const items = cellsOf(name, iso);

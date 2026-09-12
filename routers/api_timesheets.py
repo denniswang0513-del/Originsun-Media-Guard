@@ -532,9 +532,18 @@ async def timesheet_people(request: Request):
     from core.hr_logic import staff_rank, is_active_staff
     factory = db_factory_or_503()
     async with factory() as session:
-        staff = (await session.execute(select(CrmStaff.id, CrmStaff.name, CrmStaff.status))).all()
-    people = [{"id": sid, "name": name, "status": (st or "").strip()} for sid, name, st in staff
-              if name and (is_active_staff(st) or (st or "").strip() == "兼職")]
+        staff = (await session.execute(select(CrmStaff.id, CrmStaff.name, CrmStaff.status, CrmStaff.hire_date))).all()
+        # 「未填」點名的起點：到職日，沒填就用他第一筆工時的日期（生產 11 個在職沒有一個填 hire_date，
+        # 2026-09-12 查過）—— 新人到職前、或還沒開始填的人，不該被標紅。
+        first = {sid: d for sid, d in (await session.execute(
+            select(Timesheet.staff_id, safunc.min(Timesheet.work_date)).where(Timesheet.staff_id.isnot(None))
+            .group_by(Timesheet.staff_id))).all()}
+    people = []
+    for sid, name, st, hire in staff:
+        if not name or not (is_active_staff(st) or (st or "").strip() == "兼職"):
+            continue
+        since = max(d for d in (tw_day(hire), tw_day(first.get(sid))) if d) if (hire or first.get(sid)) else None
+        people.append({"id": sid, "name": name, "status": (st or "").strip(), "since": since.isoformat() if since else None})
     people.sort(key=lambda p: (staff_rank(p["status"]), p["name"]))
     return {"people": people}
 
