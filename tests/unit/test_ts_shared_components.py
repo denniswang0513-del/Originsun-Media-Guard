@@ -37,12 +37,16 @@ def test_both_hosts_import_the_shared_sheet_and_projects_modules():
     tab = js_code_only(repo_src(TAB))
     my = my_page_src()
     assert "from '../../js/shared/ts-sheet.js'" in tab and "from '../../js/shared/ts-projects.js'" in tab
-    assert "from '../../js/shared/stage-editor.js'" in tab
+    # 工作階段設定 2026-09-12 起由共用的 ts-zone 開（兩個宿主都掛它），tab 不再自己 import
+    assert 'from "/js/shared/stage-editor.js"' in js_code_only(repo_src("frontend/js/shared/ts-zone/index.js"))
     # 員工頁那邊 2026-09-12 起視圖本身就是 ES module（js/shared/ts-zone/），直接 import 共用元件
     assert 'from "/js/shared/ts-sheet.js"' in my and 'from "/js/shared/ts-projects.js"' in my
     assert 'from "/js/shared/stage-editor.js"' in my
-    # 兩邊都是真的拿來畫，不是 import 了放著
-    assert "renderSheet(" in tab and "wireAutosave(" in tab and "projectFileHtml(" in tab and "burnTbodyHtml(" in tab
+    # 兩邊都是真的拿來畫，不是 import 了放著（tab 剩設定頁的快速補登 grid 與專案檔案頁；burn 表在 ts-zone）
+    assert "rowBody(" in tab and "projectFileHtml(" in tab
+    zl = js_code_only(repo_src("frontend/js/shared/ts-zone/log.js"))
+    assert "renderSheet(" in zl and "wireAutosave(" in zl
+    assert "burnTbodyHtml(" in js_code_only(repo_src("frontend/js/shared/ts-zone/find.js"))
     assert "renderSheet(sheet," in my and "wireAutosave(sheet," in my and "projectFileHtml(d," in my and "burnTbodyHtml(" in my
 
 
@@ -105,12 +109,11 @@ def test_stage_editor_is_one_module_opened_from_both_hosts():
     assert "const on = hit.s.active === false; await put(hit.s.id, { active: on })" in st, "停用：切 active"
     # 2026-09-07 起 DELETE 只給「還沒有人用過」的階段（按鈕以 used===0 為閘；後端對有人用的仍改成停用）
     assert st.count("method: 'DELETE'") == 1 and "act === 'del'" in st and "s.used === 0" in st
-    tab = repo_src(TAB)
-    assert 'data-ts-action="stages"' in tab and "openStageEditor(" in tab and "setStages(" in tab
-    my = my_page_src()
-    assert 'data-z1="stages"' in my and "openStageEditor(" in my and "setStages(sheet, map)" in my
-    # 兩邊都在 onSaved 把新清單餵回格子（新列的下拉立即更新）
-    assert "onSaved: (map) =>" in tab and "onSaved: (map) =>" in my
+    # 兩個宿主都掛共用的 ts-zone，工作階段設定那顆在 ts-zone/index.js 開、onSaved 把新清單餵回格子
+    zone = js_code_only(repo_src("frontend/js/shared/ts-zone/index.js"))
+    assert 'act === "stages"' in zone and "openStageEditor(" in zone and "setStages(sheet, map)" in zone and "onSaved: (map) =>" in zone
+    assert 'data-z1="stages"' in my_page_src()
+    assert "TSZ.mountZone({" in repo_src(TAB)
 
 
 def test_shared_modules_do_not_import_tab_page_logic():

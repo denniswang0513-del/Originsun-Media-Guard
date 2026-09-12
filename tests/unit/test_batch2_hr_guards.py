@@ -222,14 +222,11 @@ async def test_me_team_guard_refuses_without_either_key_before_binding():
 
 def test_timesheets_js_draws_mine_write_buttons_only_for_lv3():
     assert "const _isAdmin = () => (window._accessLevel || 0) >= 3;" in TS_JS
-    assert "{ editable: _isAdmin(), emptyText:" in js_func_body(TS_JS, "function _burnTbodyHtml() {")
-    # 專案檔案頁保留 editable:true（加入比較／匯出 CSV 是唯讀動作），改預算單獨走 budgetEditable
+    # 2026-09-12 P4：舊「專案」view（burn 表、未對映列、套用建議預算）拿掉了，那些鈕住在 ts-zone 的 find.js，
+    # 依 hooks.isAdmin 藏（test_work_tracking_v2 釘）；這裡只剩專案檔案頁（儀表板點進來）與設定頁
     assert TS_JS.count("editable: true") == 1
     assert "editable: true, budgetEditable: _isAdmin()" in js_func_body(TS_JS, "function _renderProject(d, modal = false) {")
-    assert "_isAdmin() ? `<button class=\"ts-btn ghost\" data-ts-action=\"map\"" in js_func_body(TS_JS, "function _unmatchedProjRowsHtml() {")
     assert "|| !_isAdmin() ? '' : `" in js_func_body(TS_JS, "function _unmatchedTbodyHtml() {")
-    rp = js_func_body(TS_JS, "function _renderProjects(s) {")
-    assert "const n = _isAdmin() ? s.projects.filter(" in rp, "套用建議預算 沒依 Lv3 藏"
     assert "${_isAdmin() ? m('settings', '設定') : ''}" in js_func_body(TS_JS, "function _viewBtns(extra = '') {")
     assert "_isAdmin() ? `<button class=\"ts-btn ghost\" data-ts-action=\"token\"" in js_func_body(TS_JS, "function _renderSettings(s) {")
     # 專案檔案：改預算單獨看 budgetEditable；比較／匯出照 editable

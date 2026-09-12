@@ -95,14 +95,15 @@ def test_digest_has_its_own_master_gated_loop_and_is_off_by_default():
 def test_tab_wires_the_new_views():
     js = repo_src("frontend/tabs/timesheets/timesheets.js")
     code = js_code_only(js)
+    # 2026-09-12 P4：人員 view（/person）拿掉了——人×日在 ts-zone 團隊的一週
     for path in ("/api/v1/timesheets/project?name=", "/api/v1/timesheets/compare?names=",
-                 "/api/v1/timesheets/person?name=", "/api/v1/timesheets/dashboard",
+                 "/api/v1/timesheets/dashboard",
                  "/api/v1/timesheets/project_budget", "/api/v1/timesheets/export.csv?",
                  "/api/v1/timesheets/digest"):
         assert path in code, path
     # 2026-09-05：專案檔案的鈕（加入比較／改預算／匯出）畫在 js/shared/ts-projects.js，動作仍由 tab 的 _onAction 接
     shared = repo_src("frontend/js/shared/ts-projects.js")
-    for act in ("open-project", "open-person", "compare-add", "budget", "export-month", "digest-send"):
+    for act in ("open-project", "compare-add", "budget", "export-month", "digest-send"):
         assert f"data-ts-action=\"{act}\"" in js + shared, act
         assert f"act === '{act}'" in code, f"tab 沒接 {act}"
     # 停滯／未對映徽章與可點案名

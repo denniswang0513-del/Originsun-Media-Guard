@@ -53,5 +53,6 @@ def test_every_surface_uses_the_one_rule():
     assert '_guard(request, entity, level="full")' in func_body(fin, "async def put_margin_model(")
     js = repo_src("frontend/tabs/finance/subviews/settings.js")
     assert "finFetch('/margin-model'" in js and "finset-margin-card" in js
-    tabjs = repo_src("frontend/tabs/timesheets/timesheets.js")
-    assert "budget-suggest" in tabjs and "suggested_hours" in tabjs
+    # 2026-09-12 起「套用建議預算」住在共用的 ts-zone 專案查詢（CRM 分頁的管理視角），不在 tab 本身
+    zone = repo_src("frontend/js/shared/ts-zone/find.js")
+    assert 'data-z1="suggest"' in zone and "suggested_hours" in zone and "z.api.suggestBudgets()" in zone

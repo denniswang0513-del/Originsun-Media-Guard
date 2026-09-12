@@ -71,8 +71,9 @@ def test_team_week_does_not_draw_zero_hours():
 
 
 def test_timesheets_tab_handles_the_same_defer_button():
-    js = repo_src("frontend/tabs/timesheets/timesheets.js")
-    assert "act === 'row-defer'" in js and "work_date: shiftDays(_day, 1)" in js
+    # 2026-09-12 起兩個宿主都走 ts-zone 的同一支分派（tab 舊「我的一天」拿掉了）
+    js = repo_src("frontend/js/shared/ts-zone/index.js")
+    assert 'act === "row-defer"' in js and "_PUT({ work_date: day })" in js
 
 
 def test_no_new_named_import_from_shared_sheet_module():

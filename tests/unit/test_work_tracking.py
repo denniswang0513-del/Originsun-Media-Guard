@@ -92,12 +92,12 @@ def test_tab_has_the_seven_views_and_the_daily_board_shows_what_not_how_much():
         assert f"m('{key}'," in js, key
     assert "import * as TSZ from '../../js/shared/ts-zone/index.js';" in js and "TSZ.mountZone({" in js
     assert "let _view = 'zone';" in js, "落地就是員工四視圖"
+    # 看板／我的一天的端點 2026-09-12 起在 ts-zone 的端點表（tab 舊 view 拿掉）
+    ctx = js_code_only(repo_src("frontend/js/shared/ts-zone/ctx.js"))
+    assert "/api/v1/timesheets/board?date=" in ctx and "/api/v1/timesheets/mine?date=" in ctx
     code = js_code_only(js)
-    assert "/api/v1/timesheets/board?date=" in code
-    assert "/api/v1/timesheets/mine?date=" in code
-    # 「複製昨天」＋ Sheet 式格子（起訖自動算、Enter／↑↓ 走列、走到底自動長列）—— 員工角度的減負擔。
-    # 2026-09-05 起格子本體抽到 js/shared/ts-sheet.js（/my.html 同一份），tab 只剩「複製昨天」動作與掛載
-    assert "data-ts-action=\"copy-yesterday\"" in js and "renderSheet(" in code
+    # Sheet 式格子（起訖自動算、Enter／↑↓ 走列、走到底自動長列）本體在 js/shared/ts-sheet.js；tab 剩設定頁的快速補登 grid（rowBody）
+    assert "rowBody(" in code and "renderSheet(" in js_code_only(repo_src("frontend/js/shared/ts-zone/log.js"))
     sheet = js_code_only(repo_src("frontend/js/shared/ts-sheet.js"))
     assert 'data-f="t0"' in sheet and "/api/v1/timesheets/mine/rows" in sheet
     assert "function _keydown(" in sheet and "function _grow(" in sheet and "applyTimeRange(" in sheet
