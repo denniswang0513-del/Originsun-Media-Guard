@@ -93,11 +93,18 @@ function _bindTabHook() {
     _tabHookBound = true;
     document.addEventListener('tab-changed', async (e) => {
         if (e.detail?.tab !== 'tab_crm_projects') return;
-        const jump = sessionStorage.getItem('omgJumpCrmProject');
+        // 兩條交棒路：同一個 SPA 內走 sessionStorage；從獨立頁（/my-ledger.html 的
+        // 「母帳：案名 ↗」）開新分頁過來走 ?project=（sessionStorage 跨分頁帶不過去）
+        const qs = new URLSearchParams(location.search);
+        const jump = sessionStorage.getItem('omgJumpCrmProject') || qs.get('project');
         if (!jump && (window._allDirtyCount?.() > 0)) return;
         if (!e.detail.fresh) await loadProjects();   // 自帶 renderList；剛載入的分頁 init 抓過了
         if (jump) {
             sessionStorage.removeItem('omgJumpCrmProject');
+            if (qs.has('project')) {
+                qs.delete('project');
+                history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs : '') + location.hash);
+            }
             selectProject(jump);                 // 自帶未存編修 confirm
             document.querySelector(`#proj-list-body .crm-row[data-id="${jump}"]`)
                 ?.scrollIntoView({ block: 'center' });

@@ -288,6 +288,9 @@ class ProjectLedgerMovePayload(BaseModel):
     身上掛了錢就擋）與自己的痕跡，混進一般更新裡遲早被當成普通欄位寫過去。
     """
     entity: str = ""
+    # 搬到私帳時的案源（源日／代開發票／執行業務所得）；空＝後端推（身上有內部代開
+    # 發票→代開發票，否則源日）。搬回母帳時忽略。
+    source: Optional[str] = None
 
 
 class ProjectMirrorPayload(BaseModel):
@@ -305,6 +308,10 @@ class ProjectMirrorPayload(BaseModel):
     """
     target_id: str = ""
     mode: str = "overwrite"
+    # owner 2026-09-12「雖然是代開發票，但是專案公司也留一份帳」：分身的案源
+    # （空＝源日）。代開發票→私帳那案的收入用**母帳合約額**（那張發票的面額就是
+    # 他的錢，不是掛給他的成本行），代辦費由 apply_source_fee 自動算。
+    source: Optional[str] = None
 
 
 class CashTaxonomyNodePayload(BaseModel):

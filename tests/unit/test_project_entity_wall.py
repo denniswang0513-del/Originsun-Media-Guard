@@ -335,8 +335,10 @@ def test_ledger_view_follows_the_current_book_and_hides_private_only_fields():
     # 一個永遠 0 又存得下去的欄位。**點名功能**、不去數 `!_isMine() ? ''`
     # 出現幾次：那個數字擋不住「多寫了一個守衛、卻漏掉某一塊」，而且把
     # 三元運算子的寫法釘成了規格（換成 && 就紅，可是行為一樣）。
+    # 最後一個 marker 是「推送到母帳」那顆鈕的 title（2026-09-12 取代了「推專案管理」
+    # —— 有了母帳分身，crm_pushed 旗標那顆是多餘的）；推送是私帳專屬動作，母公司模式不畫
     for marker in ("案源", "服務費率 %", "工項拆分", "檢查（實收−Σ工項）",
-                   "匯入保留的原始備註", "這一案已出現在專案管理的母公司管線"):
+                   "匯入保留的原始備註", "在母帳建一個對應的案並連結"):
         i = js.index(marker)
         assert "_isMine()" in js[max(0, i - 1500):i], marker
     ml = (ROOT / "frontend/my-ledger.html").read_text(encoding="utf-8")
@@ -415,8 +417,12 @@ def test_jump_handoff_keys_match_between_writer_and_reader():
     # 逐案損益 → 專案管理
     assert "sessionStorage.setItem('omgJumpCrmProject'" in ledger
     assert "sessionStorage.getItem('omgJumpCrmProject')" in crm_js
-    # 專案管理 → 逐案損益（finance.js 只負責切子視圖、projects.js 收尾開案）
-    assert "sessionStorage.setItem('omgJumpLedgerProject'" in crm_detail
+    # 專案管理 → 逐案損益：2026-09-12 起私帳案一律開獨立頁 /my-ledger.html?project=
+    # （SPA 的財務分頁釘死母帳，私帳案在那邊開不起來），由那頁把 id 寫進 sessionStorage，
+    # projects.js 收尾開案；finance.js 那條（切子視圖）仍給 SPA 內其他來源（應收帳款）用。
+    ml = (ROOT / "frontend/my-ledger.html").read_text(encoding="utf-8")
+    assert "'/my-ledger.html?project=' + encodeURIComponent(id)" in crm_detail
+    assert "sessionStorage.setItem('omgJumpLedgerProject'" in ml
     assert "sessionStorage.getItem('omgJumpLedgerProject')" in fin
     assert "sessionStorage.getItem('omgJumpLedgerProject')" in ledger
 

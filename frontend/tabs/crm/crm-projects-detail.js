@@ -239,6 +239,15 @@ window._projEdit = function(cell) {
     }
 };
 
+/** 開「我的帳」（/my-ledger.html）的執行專案那一案。
+ *  🔴 不能走 SPA 的財務分頁：那一頁釘死母帳（fin-utils.finEntity 預設 'parent'、
+ *  v2 沒有帳本切換器），私帳案在那邊只會得到「這個專案不屬於目前的帳本」。
+ *  私帳只住在獨立頁，該頁每次都要重新登入（刻意），所以用 ?project= 交棒。 */
+function _openLedgerProject(id) {
+    if (!id) return;
+    window.open('/my-ledger.html?project=' + encodeURIComponent(id), '_blank', 'noopener');
+}
+
 // Format a project field value for the inline cell display (mirrors what
 // renderDetail would produce for that cell). Used after non-rendering edits.
 function _projDisplayValue(field, val, fieldDef) {
@@ -304,17 +313,13 @@ function renderDetail(project) {
     // 私帳案（owner 才看得到這顆）：跳到財務管理的逐案損益 —— 工項/費用/
     // 實收檢查在那邊編。交棒走 sessionStorage，finance.js 的 tab-changed
     // handler 接住後切子視圖並開同一案。
-    if (_isMineProject(project) && (window._modules || []).includes('finance_mine')
-            && typeof window.switchTab === 'function') {
+    if (_isMineProject(project) && (window._modules || []).includes('finance_mine')) {
         const _led = document.createElement('a');
         _led.className = 'crm-btn crm-btn-secondary crm-btn-sm';
         _led.style.cssText = 'margin-left:6px;font-size:10px;padding:2px 8px;cursor:pointer;';
         _led.textContent = '執行專案 ↗';
-        _led.title = '在財務管理的「執行專案」開啟這一案（私帳的工項與費用在那邊編）';
-        _led.onclick = () => {
-            sessionStorage.setItem('omgJumpLedgerProject', project.id);
-            window.switchTab('tab_crm_invoices');
-        };
+        _led.title = '在「我的帳」的執行專案開啟這一案（私帳的工項與費用在那邊編）';
+        _led.onclick = () => _openLedgerProject(project.id);
         _title.appendChild(_led);
     }
 
@@ -488,21 +493,40 @@ function renderDetail(project) {
         // （後端 require_entity 才是真正的牆，這裡只是不給看到按不到的東西）。
         const _mine = (window._modules || []).includes('finance_mine');
         const _toMine = (project.entity || 'parent') !== 'mine';
-        actions.innerHTML = (_mine
-            ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="proj-move-ledger"
-                       title="${_toMine ? '把這個專案的錢流歸屬改成私帳' : '把這個專案搬回母公司帳'}"
-                       >${_toMine ? '推送至私帳' : '搬回公司帳'}</button>` : '')
-            // 連結私帳＝在私帳開一案，收入＝公司要付給我的成本行（母公司這案不動）。
-            // 只對還在母公司的案子顯示 —— 已經搬過去的案子沒有「公司付給我」這回事。
-            + (_mine && _toMine
-                ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="proj-mirror-mine"
-                           title="公司發給你做的部分，在私帳開一案、收入同步過去（這案留在母公司）"
-                           >連結私帳</button>` : '')
+        // 母帳案一顆「推送到私帳」三態（owner 2026-09-12，docs/LEDGER_UNIFY_PLAN.md §8.3）：
+        //   未連結 → 「推送到私帳」：彈窗先問是哪一種（公司的案我做一部分／我的案走代開／
+        //            我的案沒經過公司），分身或換帳本由它分流
+        //   已連結 → 「已連結私帳 → 案名 ↗」跳過去 ＋ 「重新同步」（母帳成本行變了會標落後）
+        // 已經在私帳的案（crm_pushed 進管線的）只剩「搬回公司帳」（換帳本）。
+        // 舊的獨立「推送至私帳」（換帳本）併進彈窗裡 —— 跟「推送」撞名正是混淆的根源。
+        const _linkedName = project.mine_link_name || '';
+        actions.innerHTML = (_mine && _toMine
+            ? (project.mirrored
+                ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="proj-mine-goto"
+                           title="到財務管理的「執行專案」開啟這一案的私帳分身"
+                           >已連結私帳 → ${_esc(_linkedName || '私帳案')} ↗</button>
+                   <button class="crm-btn crm-btn-secondary crm-btn-sm" id="proj-push-mine"
+                           title="母帳成本行改了之後，把掛給你的金額重新同步到私帳那一案"
+                           >重新同步</button>`
+                : `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="proj-push-mine"
+                           title="在私帳開一個對應的案並連結（公司付你的部分／記錯帳本都從這裡）"
+                           >推送到私帳</button>`)
+            : '')
+            + (_mine && !_toMine
+                ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" id="proj-move-ledger"
+                           title="把這個專案搬回母公司帳（整案換帳本）"
+                           >搬回公司帳</button>` : '')
             + `<button class="crm-detail-close" title="關閉">✕</button>`;
         actions.querySelector('#proj-move-ledger')?.addEventListener('click',
             () => window._projMoveLedger(project.id));
-        actions.querySelector('#proj-mirror-mine')?.addEventListener('click',
-            () => window._projMirrorMine(project.id));
+        actions.querySelector('#proj-push-mine')?.addEventListener('click',
+            () => window._projPushMine(project.id, project.mirrored));
+        actions.querySelector('#proj-mine-goto')?.addEventListener('click',
+            () => _openLedgerProject(project.mine_link_id));
+        // 已連結：問一次後端「私帳落後了沒」，把「重新同步」那顆改成講實話的字
+        if (_mine && _toMine && project.mirrored) {
+            window._projMirrorStaleHint?.(project.id, actions.querySelector('#proj-push-mine'));
+        }
         actions.querySelector('.crm-detail-close').addEventListener('click', () => callbacks.closeDetail?.());
     }
     // Re-attach the [🟢 已自動儲存] indicator that _loadFinancialSummary injects —

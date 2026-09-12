@@ -725,8 +725,9 @@ async def project_names_map(session, rows) -> dict:
             for pid, name, disp, ent in rows2}
 
 
-async def mine_parent_names(session, mine_ids) -> dict:
-    """`{私帳案 id: [母帳案名, …]}` —— 一次撈齊，給顯示名鏈用。
+async def mine_parent_links(session, mine_ids) -> dict:
+    """`{私帳案 id: [(母帳案 id, 案名), …]}` —— 一次撈齊；顯示名鏈用名字、
+    私帳詳情的「母帳：案名 ↗」要 id 才跳得過去。
 
     🔴 連結有**兩種形狀**（見 routers/crm/projects.resolve_mine_link）：新的記在
     來源那一側（`crm_projects.mine_link_id`），舊的記在私帳案上
@@ -755,9 +756,15 @@ async def mine_parent_names(session, mine_ids) -> dict:
             if src in names:
                 pairs[(mid, src)] = names[src] or ""
     out: dict = {}
-    for (mid, _pid), name in pairs.items():
-        out.setdefault(mid, []).append(name)
-    return {k: sorted(v) for k, v in out.items()}
+    for (mid, pid), name in pairs.items():
+        out.setdefault(mid, []).append((pid, name))
+    return {k: sorted(v, key=lambda t: t[1]) for k, v in out.items()}
+
+
+async def mine_parent_names(session, mine_ids) -> dict:
+    """`{私帳案 id: [母帳案名, …]}` —— `mine_parent_links` 的名字版（顯示名鏈用）。"""
+    return {k: [n for _pid, n in v]
+            for k, v in (await mine_parent_links(session, mine_ids)).items()}
 
 
 # ── 收款人那段字 → 人員（三個入口共用：應付彙總／匯款通知／員工工作台）──────

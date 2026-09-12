@@ -249,9 +249,12 @@ def test_move_button_only_for_accounts_with_finance_mine():
     """按鈕只給帳號上真的有 finance_mine 的人 —— 直接看 _modules、不走 Lv3
     bypass（同 finance.js 私帳子視圖的口徑）。後端 require_entity 才是牆。"""
     js = _read("frontend/tabs/crm/crm-projects-detail.js")
-    seg = js.split("const actions = document.getElementById('proj-bar-actions')")[1][:1200]
+    seg = js.split("const actions = document.getElementById('proj-bar-actions')")[1]
+    seg = seg.split("crm-detail-close")[0]
     assert "(window._modules || []).includes('finance_mine')" in seg
-    assert "proj-move-ledger" in seg
+    # 2026-09-12 起：母帳案的換帳本從「推送到私帳」彈窗分流（proj-push-mine），
+    # 動作列上獨立的「搬回公司帳」只給已經在私帳的案
+    assert "proj-move-ledger" in seg and "proj-push-mine" in seg
 
 
 def test_move_asks_before_it_moves():

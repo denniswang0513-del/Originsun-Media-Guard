@@ -152,6 +152,8 @@ def code_of(notes) -> str:
 #: 鏡射案的案源。源日＝現金收款（不抽代辦費、不算源頭代扣），正是公司內部
 #: 轉單該有的形狀 —— 手動建的 109 個歷史案也都是這個值。
 MIRROR_SOURCE = "源日"
+#: ledger_detail 裡記「上次同步時母帳掛給我的成本行合計」的鍵（norm_detail 保留它）。
+MIRROR_TOTAL_KEY = "mirror_total"
 
 
 def mirror_amount(line) -> int:
@@ -216,13 +218,15 @@ def merge_split(current: dict, incoming: dict, *, add: bool) -> tuple:
     return merged, delta
 
 
-def mirror_detail(split: dict) -> dict:
-    """鏡射案的 ledger_detail：只有收入分項與案源，成本欄全 0。
+def mirror_detail(split: dict, total: int | None = None) -> dict:
+    """鏡射案的 ledger_detail：只有收入分項、案源與「這次同步的合計」，成本欄全 0。
 
     委外／代開發票／稅金那些是**我自己的**成本，公司管不著 —— 建立時留空，
     之後他在私帳自己填。再同步時也只覆蓋 split（見 routers/crm/projects.py）。
+    `total` 不給就用 Σsplit（兩者在 mirror_lines 的輸出裡本來就相等）。
     """
-    return norm_detail({"split": split, "source": MIRROR_SOURCE})
+    t = int(total) if total is not None else sum(int(v or 0) for v in (split or {}).values())
+    return norm_detail({"split": split, "source": MIRROR_SOURCE, MIRROR_TOTAL_KEY: t})
 
 
 #: 可以被人「接手」、不再自動覆寫的欄位。加第二欄只要往這裡加一個字串。
@@ -272,7 +276,76 @@ def norm_detail(raw) -> dict:
             out["fee_pct"] = pct
     except (TypeError, ValueError):
         pass
+    # 上次從母帳鏡射過來時的成本行合計（見 mirror_stale）—— 不保留的話每一次
+    # PUT 都把它洗掉，「私帳落後多少」就永遠判不出來。
+    try:
+        mt = int(d.get(MIRROR_TOTAL_KEY))
+        if mt > 0:
+            out[MIRROR_TOTAL_KEY] = mt
+    except (TypeError, ValueError):
+        pass
     return out
+
+
+def mirror_stale(detail, current_total: int):
+    """私帳有沒有落後母帳 → `(stale, delta)`。
+
+    `stale` 三值：True＝母帳成本行改了（`delta`＝現在 − 上次同步）、False＝一致、
+    None＝判不出來（舊連結沒記過 `mirror_total`；重新同步一次就會記）。
+    🔴 比的是**上次同步的合計**，不是私帳現在的 Σsplit —— 私帳那份他可能自己
+    改過（照實際請款填），那不是「落後」，是他的決定。
+    """
+    d = detail if isinstance(detail, dict) else {}
+    try:
+        last = int(d.get(MIRROR_TOTAL_KEY))
+    except (TypeError, ValueError):
+        return None, 0
+    if last <= 0:
+        return None, 0
+    return int(current_total or 0) != last, int(current_total or 0) - last
+
+
+# ── 連結後以母帳為準（owner 2026-09-12「兩邊的專案表一樣都可以，以母帳為準」）──
+#: 連結的兩案之間「這是哪一個案」的識別欄。金額欄**永遠不在這裡**：母帳的
+#: contract_amount 是公司跟客戶的合約額、私帳的是「我拿到的那段」，同一個欄位
+#: 兩種意思（差 3～17 倍，見 docs/LEDGER_UNIFY_PLAN.md §2.2）。錢的橋只有一座：
+#: 母帳成本行 → 私帳收入（mirror_lines）。`name` 也不在：它是 Sheet 工時對映的
+#: 查表鍵，顯示走 linked_display_name。`status` 不在：私帳只有結案／製作，由
+#: 結案日推導（母帳的「歸檔」「提案」在私帳沒有意義）。
+LINK_SYNC_FIELDS = ("client_id", "project_type", "shoot_date", "start_date",
+                    "completion_date", "description")
+
+
+def _blank(v) -> bool:
+    return v is None or (isinstance(v, str) and not v.strip())
+
+
+def sync_from_parent(parent, mine) -> tuple:
+    """連結的一對案：識別欄以母帳為準，就地改兩個物件 → `(私帳改了的欄, 母帳補了的欄)`。
+
+    兩條規則（§8.2）：
+      1. 母帳有值 → 私帳跟著（連結當下一次、母帳之後每次改都跟）。
+      2. 母帳空白 → **不清私帳**，反而拿私帳的補進母帳（母帳 216 案沒結案日、
+         私帳全部有 —— 是私帳補母帳，不是母帳洗私帳）。
+    🔴 `client_id` 只做規則 1：私帳客戶（entity=mine 的 Client）不能直接寫進母帳案，
+    要先對到／建出母帳客戶 —— 那是 I/O，由呼叫端（routers/crm/projects._write_link）
+    用 `_crm_client_for` 補。這支是純函式，不碰 session。
+    N:1（一個私帳案承接多個母帳案）由呼叫端擋：母帳互相矛盾時不猜。
+    """
+    changed, filled = [], []
+    for f in LINK_SYNC_FIELDS:
+        pv, mv = getattr(parent, f, None), getattr(mine, f, None)
+        if not _blank(pv):
+            if pv != mv:
+                setattr(mine, f, pv)
+                changed.append(f)
+        elif not _blank(mv) and f != "client_id":
+            setattr(parent, f, mv)
+            filled.append(f)
+    if "completion_date" in changed:
+        # 私帳的狀態只有結案／製作，由結案日推導（同 new_ledger_project）
+        mine.status = "結案" if mine.completion_date else "製作"
+    return changed, filled
 
 
 def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:

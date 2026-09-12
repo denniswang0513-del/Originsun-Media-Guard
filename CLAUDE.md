@@ -1301,6 +1301,9 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`frontend/tabs/crm/crm-cashbook.js`](frontend/tabs/crm/crm-cashbook.js) ＋ `crm-cashbook-{batch,fields,import,alloc,petty}.js` | 收支明細（2026-09-12 從 2,844 行拆成主檔 ~1,890 ＋ 五段）：主檔＝狀態、清單、inline 編輯、詳情、彈窗、init；批次分類／編輯欄位／CSV 對帳／關聯發票／源日請款各一支 | ES module：主檔 `export let` 狀態（live binding），五段**只讀不賦值**；主檔 import 五段的函式，循環只在函式內用、模組頂層不碰對方。掃原始碼的測試用 `_srcscan.cashbook_src()` |
 | [`frontend/js/showcase-edit/`](frontend/js/showcase-edit/shell.js) | 作品編輯器的程式碼（2026-09-12 從 showcase-edit.html 的 2,080 行 inline script 原樣切成 shell／render／events／quiz／checklist／media-pick 六支傳統 script） | 同 `js/my/` 的規矩：不是 module、同一個全域環境、順序不可調；掃原始碼用 `_srcscan.showcase_edit_src()`；`accept` 在 events.js 用 `'image/' + '*'` 設 |
 | [`frontend/payout.html`](frontend/payout.html) | 收款人手上 `/p/{短碼}` 那一頁（免登入、單檔自足、零外部相依） | 只畫後端給的欄位；**不要在原始碼裡寫內部模組名、路徑、拓樸或「哪些欄位我們不給」的清單** —— 那頁寄給收款人、原始碼看得到 |
+| `core/ledger_project.py` 的推送／同步段（`LINK_SYNC_FIELDS`／`sync_from_parent`／`mirror_stale`／`MIRROR_TOTAL_KEY`） | 母私帳連結的**純規則**：連上之後識別欄（客戶／案型／三個日期／說明）以母帳為準（母帳有值→私帳跟；母帳空→拿私帳的補母帳、不清私帳）；「私帳落後了沒」比的是上次同步時記下的 `mirror_total` | 無 I/O；**錢欄永遠不在 `LINK_SYNC_FIELDS`**（母帳合約額是公司跟客戶的、私帳的是「我拿到的那段」）；`name` 不在（Sheet 工時查表鍵）、`status` 不在（私帳只有結案／製作，由結案日推導）；N:1 由呼叫端擋 |
+| `routers/crm/projects.py` 的推送／換帳本段（`_write_link`→`_sync_pair`、`mirror-check`／`mirror-to-mine`／`mine-create`、`ledger-move-check`／`move-ledger`） | 「推送」＝在對面建分身並連結（錢不搬），四條連結路都經過 `_write_link` 所以同步只掛那一處；母帳 `update_project` 改識別欄同一交易寫進私帳案；換帳本＝記錯帳本那條路（放寬給內部代開發票與它自動生的請款單；搬到私帳要補案源＋`resync_receivable`） | 沒有掛給我的成本行**不擋**（warning 不是 reason，`can_mirror` 永遠 True）；`_new_mirror_row` 是建分身那一列的唯一寫法；已有分身的案整案換帳本 409 |
+| `frontend/tabs/crm/crm-projects-{detail,core}.js` 的「推送到私帳」三態 ＋ `frontend/tabs/finance/subviews/projects.js` 的「推送到母帳」 | 母帳側一顆入口：未連結→彈窗三選一（公司付我一部分＝分身／走代開＝「公司也留一份」分身案源代開收入＝母帳合約額 或 整案換帳本／記錯帳本＝換帳本問案源）；已連結→「已連結私帳 → 案名 ↗」＋「重新同步」（`_projMirrorStaleHint` 問後端標落後）。私帳側：未連結→「推送到母帳」三選一（建立／連既有／搬回公司帳）；已連結→「母帳：案名 ↗」＋結案日鎖住標「母帳」 | 落後判定只信後端 `stale`（前端不比 Σsplit）；跳私帳一律開 `/my-ledger.html?project=`（SPA 財務分頁釘死母帳）、跳母帳開 `/?project=…#tab_crm_projects`（獨立頁沒有 switchTab、sessionStorage 跨分頁帶不過去） |
 | `frontend/tabs/crm/crm-payables.js` 的出納段 | 應付面板的複製（每列左側一顆「複製」、純數字不帶標點）、本月匯款清單（可列印）、匯款通知彈窗（全選＋複製連結） | 複製一律走 `js/shared/utils.copyText`（內網是 http＝非安全來源，`navigator.clipboard` **不存在**）；`_buildMonthGroups` 是「月 × 收款人」粒度，跟後端 `group_payables` 的「收款人」粒度**不同**，別以為可以直接用後端那份 |
 
 
@@ -1437,6 +1440,12 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   第一次按「儲存到專案」就寫進沒人看得到的那一筆，母帳的專案頁永遠顯示「還沒設定」、有人在那邊補填的值
   會被靜默忽略。**多對一是正常形狀**（兩個母帳案共用一筆私帳分身）：`prefer="parent"` 時兩個母帳各自留下
   才對，所以備份那條的案數會比工時那條多幾筆，不是 bug。
+- **母私帳「推送」與「換帳本」是兩種病，入口卻只有一顆**（owner 2026-09-12，`docs/LEDGER_UNIFY_PLAN.md` §8.7–8.8）：「推送到私帳」彈窗先問是哪一種——公司的案我做一部分→**分身**（母帳留著）；我的案走公司代開／沒經過公司→**換帳本**（整案搬）。別把兩者併成一件事，也別把換帳本鈕拿掉：分身會讓公司多一個不存在的案（毛利、管線、現金流全被帶歪）。
+  換帳本到私帳**只**放寬「內部代開」發票與它自動生的請款單（`_blocker_filter`）；收支永遠擋（兩本帳的帳戶與分類樹不同、私帳已收是增量制，搬了就是重算一次的地雷）；「專案」類發票不代改類別（改類別會觸發代開自動化生請款單，那是錢的副作用要人按）。
+  搬過去要補案源＋`norm_detail`＋**`resync_receivable`**——只改 `entity` 那一案會安靜地不進私帳應收帳款（2026-08-26 那 349 案 NULL 的病，2026-09-12 前的換帳本正是漏了這步）。
+- **連結後識別欄以母帳為準，但錢永遠不同步**（`LINK_SYNC_FIELDS`，`test_money_is_never_a_sync_field` 釘）：母帳的 `contract_amount` 是公司跟客戶的合約額、私帳的是「我拿到的那段」，差 3～17 倍；錢的橋只有一座＝母帳成本行→私帳收入（`mirror_lines`）。母帳空白**不清私帳**、反向補母帳（母帳 216 案沒結案日、私帳全部有）。同步只做 1:1（`_sync_pair` 查「除了這一案還有誰連著」，兩種形狀都認）。私帳側結案日 1:1 時鎖住（`LOCKED_WHEN_LINKED`，PUT 409），到母帳改。既有 26 組連結**沒有回填**（owner 依建議：只對新連結與母帳之後的編輯生效）。
+- **「私帳落後了沒」比的是上次同步時記的 `mirror_total`，不是私帳現在的 Σsplit**（`mirror_stale`）：私帳那份他可能自己改過（照實際請款填），那不是落後。`norm_detail` 要保留這個鍵（每次 PUT 都會 norm 一遍，不保留就永遠判不出來）；舊連結沒記過→`None`（判不出來），不是 `False`（False 會讓畫面說「一致」）。N:1 的合計不屬於任何一案→不判。
+- **私帳案只住在獨立頁 `/my-ledger.html`**：SPA 的財務分頁釘死母帳（`fin-utils.finEntity` 預設 `'parent'`、v2 沒有帳本切換器），私帳案在那邊只會得到「這個專案不屬於目前的帳本」（真瀏覽器實測）。那頁每次都要重新登入（刻意），所以跳過去用 `?project=` 交棒；反向從獨立頁跳母帳開 SPA 新分頁帶 `?project=…#tab_crm_projects`（crm-projects.js 的 tab-changed hook 吃它）。**不要**再寫 `sessionStorage.setItem('omgJumpLedgerProject') + switchTab('tab_crm_invoices')` 去開私帳案。
 - **`crm_projects` 的「年份」有兩份定義，不要以為它們一樣**：`project_picker` 走
   start_date → shoot_date → **created_at**；`routers/crm/petty.py` 的 `_project_year` 刻意**不退到 created_at**
   （docstring 寫著生產庫 217 個舊案都是同一次匯入建立的，退到建立日等於幫它們全部標上假年份）。

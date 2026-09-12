@@ -41,7 +41,11 @@ from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, NHI_MIN_PAYMENT,
                                  income_items, linked_display_name,
                                  norm_detail, receivable_fields)
 from core.schemas import LedgerDetailPayload, LedgerProjectCreate
-from routers.crm._shared import _fmt_day, mine_parent_names
+from routers.crm._shared import _fmt_day, mine_parent_links, mine_parent_names
+
+#: 私帳案 1:1 連著母帳時，私帳詳情鎖住的欄位（值由母帳決定）。前端只畫鎖，
+#: 真正的牆在 update_project_ledger（409）。
+LOCKED_WHEN_LINKED = ("close_date",)
 
 from .api_finance import _guard
 
@@ -468,13 +472,18 @@ async def project_ledger_detail(project_id: str, request: Request,
             .order_by(CrmPaymentRequest.created_at))).scalars().all()
         _crm = (await _crm_costs(session, ent, project_id)).get(project_id)
         _lines = await _crm_lines(session, project_id)
-        _pn = (await mine_parent_names(session, [project_id])).get(project_id, ()) \
+        _pl = (await mine_parent_links(session, [project_id])).get(project_id, ()) \
             if ent == "mine" else ()
+        _pn = [n for _pid, n in _pl]
     _d, _cost_src = apply_crm_costs(norm_detail(p.ledger_detail), _crm)
     _net, _check = compute(int(p.contract_amount or 0), _d)
     return {
         "project": {
             "id": p.id, **_display_fields(p, _pn),
+            # 連到的母帳案（帶 id 才跳得過去）。以母帳為準（owner 2026-09-12）：
+            # 1:1 連結時識別欄由母帳決定，私帳這邊鎖住（LOCKED_WHEN_LINKED）
+            "parent_links": [{"id": pid, "name": n} for pid, n in _pl],
+            "locked_fields": list(LOCKED_WHEN_LINKED) if len(_pl) == 1 else [],
             "client": client.short_name if client else "",
             "status": p.status or "", "type": p.project_type or "",
             "close_date": _fmt_day(p.completion_date),
@@ -552,6 +561,10 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
         # 結案日：owner 的流程是「先整理專案再記帳」，日期在這張表就要能改。
         # 空字串＝清空（未結案）。日期慣例走 _parse_shoot_date（UTC 午夜）。
         if "close_date" in data:
+            # 以母帳為準：1:1 連著母帳案的私帳案，結案日在母帳改（同一交易會同步過來）
+            if ent == "mine" and len((await mine_parent_links(session, [project_id])).get(project_id, ())) == 1:
+                raise HTTPException(status_code=409,
+                                    detail="這一案連著母帳，結案日以母帳為準 —— 請到母帳那一案改，會自動同步過來")
             raw = (data.pop("close_date") or "").strip()
             if raw:
                 d = _parse_shoot_date(raw)

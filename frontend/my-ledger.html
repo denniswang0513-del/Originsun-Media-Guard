@@ -137,6 +137,14 @@ async function mountLedger(me) {
         ]);
         $('app-view').innerHTML = html;
         await mod.initFinanceTab();
+        // 從專案管理的「已連結私帳 → 案名 ↗」開過來：?project=<私帳案 id> → 切到執行專案並開那一案
+        // （projects.js 的 render 收尾會吃 sessionStorage 的 omgJumpLedgerProject）
+        const jump = new URLSearchParams(location.search).get('project');
+        if (jump) {
+            sessionStorage.setItem('omgJumpLedgerProject', jump);
+            history.replaceState(null, '', location.pathname);
+            document.querySelector("#finance-nav [data-subview='projects']")?.click();
+        }
         // 下拉自動升級成可搜尋（owner 2026-08-26「所有下拉選單都要可以搜尋」）。
         // 主 SPA 由 app.js 開；本頁是獨立 HTML 沒載 app.js —— 之前整頁下拉都是
         // 原生的就是漏了這行。MutationObserver 會涵蓋之後動態渲染的表單。

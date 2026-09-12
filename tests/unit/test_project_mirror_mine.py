@@ -114,7 +114,12 @@ def test_linking_twice_is_blocked():
     # 「查得到既有分身」的規則在 resolve_mine_link（兩種形狀都認）
     assert "CrmProject.source_project_id == p.id" in src
     fn = _fn(src, "mirror_project_to_mine")
-    assert "_mirror_blocked_reason" in fn and "409" in fn
+    assert "target_id = target_id or linked.id" in fn and "409" in fn
+    # 2026-09-12 起「沒有掛給我的成本行」**不擋**（推送＝補一列，金額先開 0）：
+    # 那句話改成 warning 由預覽帶給畫面，POST 不再拿它 409
+    assert "_mirror_blocked_reason" not in fn, "沒有成本行又被擋回去了"
+    chk = _fn(src, "check_project_mirror")
+    assert '"warning": warning' in chk and '"can_mirror": True' in chk
 
 
 def test_linking_existing_keeps_my_own_costs():
@@ -125,8 +130,12 @@ def test_linking_existing_keeps_my_own_costs():
     seg = fn.split("if target_id:")[1]
     assert "keep = norm_detail(t.ledger_detail)" in seg
     # 只換掉收入那半邊（split/source）；keep 這個 dict 的其他鍵原封帶著走
-    assert 'keep["split"], keep["source"] = merged, MIRROR_SOURCE' in seg
+    assert 'keep["split"] = merged' in seg
+    # 案源：這次指定的 > 私帳案本來的 > 源日（代開發票的分身重新同步不能被翻成源日）
+    assert 'keep["source"] = source or keep.get("source") or MIRROR_SOURCE' in seg
     assert "t.ledger_detail = keep" in seg
+    # 「私帳落後了沒」比的是上次同步的合計 —— 同步時要記下來
+    assert 'keep[MIRROR_TOTAL_KEY] = mir["total"]' in seg
 
 
 def test_mine_cache_is_invalidated():
@@ -139,7 +148,9 @@ def test_the_parent_project_is_not_touched():
     """母公司那一列的**錢與歸屬**一個欄位都不動 —— 它跟客戶的合約與成本
     都還在原地。唯一准寫的是連結欄 `mine_link_id`（2026-09-01 owner
     「可以多筆專案連結到一筆私帳」後移到來源側的，見下方多對一那兩條）。
-    只要有人往 `p.` 寫別的東西，這條就會亮。"""
+    只要有人往 `p.` 寫別的東西，這條就會亮。
+    （識別欄的「母帳空白就拿私帳的補」住在 _write_link → _sync_pair，
+    那是 sync_from_parent 的規則 2，錢一律不在 LINK_SYNC_FIELDS 裡。）"""
     fn = _fn(_src(), "mirror_project_to_mine")
     body = fn.split("async with factory() as session:")[1]
     for bad in ("p.entity =", "p.contract_amount =", "p.crm_pushed =",
@@ -154,8 +165,13 @@ def test_new_mirror_row_goes_through_the_single_create_path():
     """建立走 `new_ledger_project`（帳本新增專案的單一正本）——
     自己 insert 一份 CrmProject 就會漏掉 amount_receivable 初始化，
     那案永遠不進應收帳款（owner 2026-08-26 實測過的坑）。"""
-    fn = _fn(_src(), "mirror_project_to_mine")
-    assert "new_ledger_project(" in fn
+    src = _src()
+    fn = _fn(src, "mirror_project_to_mine")
+    # 建分身那一列只有 `_new_mirror_row` 一份（推送鈕與對應表的「建立」共用），
+    # 它走 new_ledger_project
+    assert "_new_mirror_row(p, mir" in fn
+    assert "new_ledger_project(" in code_only(func_body(src, "def _new_mirror_row("))
+    assert "_new_mirror_row(p, mir" in _fn(src, "create_mine_from_parent")
     # 連結既有那條路換掉了營收 → 應收要一起重算（同一支 resync_receivable）
     assert "resync_receivable(t, keep)" in fn
     # `new_ledger_project` 自己有沒有初始化應收，由 test_project_entity_wall
@@ -164,10 +180,14 @@ def test_new_mirror_row_goes_through_the_single_create_path():
 
 
 def test_button_only_shows_for_parent_projects():
-    """已經搬到私帳的案子沒有「公司付給我」這回事 —— 按鈕不畫。"""
+    """已經搬到私帳的案子沒有「公司付給我」這回事 —— 「推送到私帳」不畫，
+    它們只剩「搬回公司帳」（2026-09-12 起一顆三態入口 proj-push-mine 取代原本的兩顆）。"""
     js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-detail.js"))
     seg = js.split("actions.innerHTML")[1].split("crm-detail-close")[0]
-    assert "_mine && _toMine" in seg and "proj-mirror-mine" in seg
+    assert "_mine && _toMine" in seg and "proj-push-mine" in seg
+    # 已連結 → 跳過去 ＋ 重新同步；未連結 → 推送到私帳；三態都在同一段
+    assert "project.mirrored" in seg and "proj-mine-goto" in seg
+    assert "_mine && !_toMine" in seg and "proj-move-ledger" in seg
 
 
 def test_the_mirrored_badge_is_hidden_from_people_without_the_private_ledger():
@@ -297,9 +317,9 @@ def test_many_crm_projects_can_share_one_mine_project():
     body = code_only(func_body(src, "async def mirror_project_to_mine("))
     # 連結寫入 2026-09-05 收成單一 `_write_link(母帳列, 私帳列)` —— 它做的正是
     # 「記在來源側」：`parent.mine_link_id = mine.id`
-    assert "_write_link(p, t)" in body, "連結沒走唯一寫入者"
+    assert "_write_link(session, p, t)" in body, "連結沒走唯一寫入者"
     assert "已經是別案的分身了" not in body, "還擋著第二個來源"
-    writer = code_only(func_body(src, "def _write_link("))
+    writer = code_only(func_body(src, "async def _write_link("))
     assert "parent.mine_link_id = mine.id" in writer, "連結沒記在來源側 —— 多對一表達不出來"
     # 私帳案那側只記第一個來源（清單的「這是分身」判定沿用它）
     assert "if not mine.source_project_id:" in writer
@@ -367,7 +387,7 @@ def test_the_relink_dialog_hides_the_create_option_and_defaults_to_overwrite():
     """重新同步的視窗不給「建立新專案」（那會多一個分身），而且「加進去」
     要退到後面 —— 同一案重新同步時加會讓同一筆錢算兩次。"""
     js = repo_src("frontend/tabs/crm/crm-projects-core.js")
-    fn = js_code_only(js_func_body(js, "window._projMirrorMine = async function (id) {"))
+    fn = js_code_only(js_func_body(js, "window._projMirrorMine = async function (id, mirrorOpts = {}) {"))
     assert "const relink = !!chk.linked;" in fn
     assert "relink ?" in fn and 'id="pmm-target"' in fn
     draw = js_code_only(js_func_body(js, "function _pmmDrawConflict("))
