@@ -889,12 +889,18 @@ def suggest_projects(name: str, lk: ProjectLookup, limit: int = 2, floor: float 
 STAFF_ACTIVE = "在職"          # crm_staff.status 的「在職」；空白視同在職（序列化與守衛都這樣預設）
 STAFF_PARTNER = "合夥"         # owner 2026-09-08：員工多一個身份「合夥」——凡是問「在職嗎」的地方都算在職，排序跟在職同一層
 ACTIVE_STATUSES = ("", STAFF_ACTIVE, STAFF_PARTNER)   # 「算在職」的狀態（空白＝舊資料沒填）
-STAFF_RANK = {STAFF_ACTIVE: 0, STAFF_PARTNER: 0, "兼職": 1}
+STAFF_RANK = {STAFF_ACTIVE: 0, STAFF_PARTNER: 0, "": 0, "兼職": 1}
 
 
 def staff_rank(status) -> int:
-    """在職／合夥 → 兼職 → 其他／沒綁人員檔案。團隊的一週（api_me）與週記大家（api_journal）同一條。"""
-    return STAFF_RANK.get((status or "").strip(), 2)
+    """在職／合夥／狀態空白 → 兼職 → 其他／沒綁人員檔案（None）。團隊的一週（api_me）、週記大家（api_journal）、
+    工作追蹤「看誰的」（api_timesheets）同一條。
+
+    空白＝舊資料沒填，`is_active_staff` 算在職；2026-09-12 /polish 抓到這裡卻把空白排到兼職後面（跟同一份
+    ACTIVE_STATUSES 打架）。`None`（沒綁人員檔案）仍排最後。"""
+    if status is None:
+        return 2
+    return STAFF_RANK.get(status.strip(), 2)
 
 
 def is_active_staff(status) -> bool:

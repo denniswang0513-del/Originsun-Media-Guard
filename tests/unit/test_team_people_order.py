@@ -6,7 +6,8 @@ from tests.unit._srcscan import code_only, func_body, repo_src
 
 
 def test_rank_order():
-    assert staff_rank("在職") < staff_rank("兼職") < staff_rank("專案") == staff_rank(None) == staff_rank("")
+    # 空白狀態＝舊資料沒填，跟 is_active_staff 一樣算在職（同一份 ACTIVE_STATUSES）；None＝沒綁人員檔案才排最後
+    assert staff_rank("在職") == staff_rank("") < staff_rank("兼職") < staff_rank("專案") == staff_rank(None)
     names = ["陳偉健", "王士源", "吳宇晨", "蘇家弘"]
     st = {"陳偉健": "兼職", "吳宇晨": "兼職", "王士源": "在職", "蘇家弘": "在職"}
     assert sorted(names, key=lambda n: (staff_rank(st.get(n)), n)) == ["王士源", "蘇家弘", "吳宇晨", "陳偉健"]

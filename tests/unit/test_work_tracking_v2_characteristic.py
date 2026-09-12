@@ -121,9 +121,9 @@ async def test_people_keeps_active_and_parttime_sorted_by_rank_then_name(monkeyp
     sess = _Session([[("s3", "王小美", "兼職"), ("s1", "陳阿宏", "在職"), ("s4", "離職者", "離職"), ("s2", "林冠宇", ""), ("s5", "", "在職"), ("s6", "合夥人", "合夥")]])
     monkeypatch.setattr(api, "db_factory_or_503", lambda: _factory(sess))
     out = await api.timesheet_people(request=None)
-    # 現況：狀態空白的人 is_active_staff 算在職、但 core.hr_logic.staff_rank 給 2（排在兼職後面）—— 這裡只釘現況，不判對錯
-    assert [p["name"] for p in out["people"]] == ["合夥人", "陳阿宏", "王小美", "林冠宇"]
-    assert out["people"][2]["status"] == "兼職" and all(p["id"] for p in out["people"])
+    # 狀態空白（林冠宇）跟在職同一層（core.hr_logic.staff_rank 2026-09-12 起跟 ACTIVE_STATUSES 一致）；兼職最後
+    assert [p["name"] for p in out["people"]] == ["合夥人", "林冠宇", "陳阿宏", "王小美"]
+    assert out["people"][-1]["status"] == "兼職" and all(p["id"] for p in out["people"])
 
 
 # ── burn_rows 的錢三欄 ──
