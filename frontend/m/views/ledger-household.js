@@ -7,7 +7,7 @@
  * 日期字串一律本地 YYYY-MM-DD（不用 toISOString：那是 UTC，台北早上 8 點前會變昨天）。
  */
 import { mfetch, money, todayLocal, toast, esc } from '../shell.js';
-import { skeleton, emptyBox, errBox, withBusy } from '../ui.js';
+import { skeleton, emptyBox, errBox, withBusy, shouldLoad, markStale } from '../ui.js';
 import { entryFormHtml, mountEntryForm, readEntryForm, createEntry, entryCard, openEntrySheet,
          isHousehold } from './ledger-cash.js';
 
@@ -50,6 +50,7 @@ export async function render(host, { first }) {
             try {
                 await createEntry(body);
                 toast('已記下');
+                markStale('cash', 'overview', 'assets');
                 for (const id of ['hh-amount', 'hh-summary', 'hh-note']) document.getElementById(id).value = '';
                 // 記的那筆若不在看的月份（例如看上個月、記的是今天），切回它所在的月份讓人看到它
                 const ym = String(body.entry_date || todayLocal()).slice(0, 7);
@@ -65,7 +66,8 @@ export async function render(host, { first }) {
         host.querySelector('#hh-prev').addEventListener('click', async () => { _ym = shiftMonth(_ym, -1); await load(host); });
         host.querySelector('#hh-next').addEventListener('click', async () => { _ym = shiftMonth(_ym, 1); await load(host); });
     }
-    await load(host);
+    // 60 秒內切回來不重抓、寫過的分頁由 markStale 標髒（同 CRM 手機版七個 view 的做法）
+    if (shouldLoad('household', { first })) await load(host);
 }
 
 async function load(host) {

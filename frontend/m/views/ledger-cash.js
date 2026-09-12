@@ -6,8 +6,7 @@
  * 家用分頁（ledger-household.js）跟這裡共用表單／卡片／抽屜 —— 差別只在分類子樹與固定支出。
  */
 import { mfetch, toast, esc, money, todayLocal, fmtDate } from '../shell.js';
-import { state, openSheet, closeSheet, segHtml, mountSeg, pickerHtml, mountPicker, selectOpts,
-         skeleton, emptyBox, errBox, withBusy } from '../ui.js';
+import { state, openSheet, closeSheet, segHtml, mountSeg, pickerHtml, mountPicker, selectOpts, skeleton, emptyBox, errBox, withBusy, shouldLoad, markStale } from '../ui.js';
 
 const API = '/api/v1/crm/cash-entries';
 const DAYS = 90;            // 清單一次抓近 90 天，「載入更早」再往前推 90 天
@@ -29,7 +28,7 @@ export const projectItems = () => (opt().projects || []).map(p => ({ value: p.id
 
 // ── 表單 ─────────────────────────────────────────────────────────
 /** 記一筆／改一筆的表單 html。`pfx` 讓同一頁可以同時有「記一筆」卡與抽屜表單（id 不撞）。
- *  `fixed`＝household：沒有收入／支出分段（固定支出）、沒有專案。 */
+ *  `mode`＝'household'：沒有收入／支出分段（固定支出）、沒有專案。 */
 export function entryFormHtml(pfx, { mode = 'cash', entry = null } = {}) {
     const e = entry || {};
     const kind = e.deposit ? 'deposit' : 'expense';
@@ -141,6 +140,7 @@ export function openEntrySheet(e, { mode = 'cash', onDone } = {}) {
         if (Object.keys(diff).length === 1) { toast('沒有改動'); closeSheet(); return; }
         try {
             await mfetch(`${API}/${encodeURIComponent(e.id)}`, { method: 'PUT', body: diff });
+            markStale('cash', 'household', 'projects', 'receivable', 'overview', 'assets');
             toast('已更新'); closeSheet(); if (onDone) await onDone();
         } catch (err) { toast(err.message, 'err'); }
     }));
@@ -148,6 +148,7 @@ export function openEntrySheet(e, { mode = 'cash', onDone } = {}) {
         if (!window.confirm(`刪除「${e.summary || '這一筆'}」？`)) return;
         try {
             await mfetch(`${API}/${encodeURIComponent(e.id)}?entity=mine`, { method: 'DELETE' });
+            markStale('cash', 'household', 'projects', 'receivable', 'overview', 'assets');
             toast('已刪除'); closeSheet(); if (onDone) await onDone();
         } catch (err) { toast(err.message, 'err'); }
     }));
@@ -185,6 +186,7 @@ export async function render(host, { first }) {
                 const r = await createEntry(body);
                 if (!r) return;
                 toast('已記下');
+                markStale('household', 'projects', 'receivable', 'overview', 'assets');
                 for (const id of ['nc-amount', 'nc-summary', 'nc-note']) document.getElementById(id).value = '';
                 await load(host);
             } catch (err) { toast(err.message, 'err'); }
@@ -202,7 +204,8 @@ export async function render(host, { first }) {
         state.cashPreset = null;
         window.scrollTo(0, 0);
     }
-    await load(host);
+    // 60 秒內切回來不重抓、寫過的分頁由 markStale 標髒（同 CRM 手機版七個 view 的做法）
+    if (shouldLoad('cash', { first })) await load(host);
 }
 
 async function load(host) {

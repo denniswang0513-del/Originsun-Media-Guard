@@ -3,7 +3,7 @@
  * 案子四卡（結案日落在區間的案）＋現金流卡（收支明細）＋最近 5 筆＋未收前 5 案。唯讀。
  */
 import { mfetch, esc, money } from '../shell.js';
-import { segHtml, mountSeg, skeleton, errBox } from '../ui.js';
+import { segHtml, mountSeg, skeleton, errBox, shouldLoad, markStale } from '../ui.js';
 import { openProjectSheet } from './ledger-projects.js';
 
 const PERIODS = [['month', '本月'], ['year', '本年'], ['all', '全部']];
@@ -18,7 +18,8 @@ export async function render(host, { first }) {
             if (r) openProjectSheet(r.dataset.project, () => load(host));
         });
     }
-    await load(host);
+    // 60 秒內切回來不重抓、寫過的分頁由 markStale 標髒（同 CRM 手機版七個 view 的做法）
+    if (shouldLoad('overview', { first })) await load(host);
 }
 
 async function load(host) {

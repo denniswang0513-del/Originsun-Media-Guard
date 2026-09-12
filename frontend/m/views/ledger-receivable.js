@@ -5,7 +5,7 @@
  * 收入＋這案＋未收金額 —— 已收是從收支推的（增量制），手機上**沒有**直接標已收的動作。
  */
 import { esc, money } from '../shell.js';
-import { state, skeleton, emptyBox, errBox } from '../ui.js';
+import { state, skeleton, emptyBox, errBox, shouldLoad, markStale } from '../ui.js';
 import { fetchLedger, projectCard, openProjectSheet, toCollect } from './ledger-projects.js';
 
 let _rows = [];
@@ -25,7 +25,8 @@ export async function render(host, { first }) {
             if (c) openProjectSheet(c.dataset.id, () => load(host));
         });
     }
-    await load(host);
+    // 60 秒內切回來不重抓、寫過的分頁由 markStale 標髒（同 CRM 手機版七個 view 的做法）
+    if (shouldLoad('receivable', { first })) await load(host);
 }
 
 async function load(host) {

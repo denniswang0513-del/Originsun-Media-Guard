@@ -7,7 +7,7 @@
  * 連著母帳的案（locked_fields）結案日鎖住，到母帳改。
  */
 import { mfetch, toast, esc, money } from '../shell.js';
-import { openSheet, closeSheet, selectOpts, skeleton, emptyBox, errBox, withBusy, mountPicker, pickerHtml } from '../ui.js';
+import { openSheet, closeSheet, selectOpts, skeleton, emptyBox, errBox, withBusy, mountPicker, pickerHtml, shouldLoad, markStale } from '../ui.js';
 
 const API = '/api/v1/finance/project-ledger';
 const CRM = '/api/v1/crm';                    // 推送到母帳的三條路都在 CRM 那支 router（project_links.py）
@@ -50,7 +50,8 @@ export async function render(host, { first }) {
             openProjectSheet(c.dataset.id, () => load(host));
         });
     }
-    await load(host);
+    // 60 秒內切回來不重抓、寫過的分頁由 markStale 標髒（同 CRM 手機版七個 view 的做法）
+    if (shouldLoad('projects', { first })) await load(host);
 }
 
 async function load(host) {
@@ -154,6 +155,7 @@ export async function openProjectSheet(id, onDone) {
         if (!Object.keys(payload).length) { toast('沒有改動'); return; }
         try {
             await mfetch(`${API}/${encodeURIComponent(id)}?entity=mine`, { method: 'PUT', body: payload });
+            markStale('receivable', 'overview', 'assets');
             toast('已儲存'); closeSheet(); if (onDone) await onDone();
         } catch (e) { toast(e.message, 'err'); }
     }));
@@ -212,18 +214,18 @@ async function mountPushBox(body, p, { onLinked, onMoved }) {
                 const target = body.querySelector('#pj-push-parent').value || '';
                 if (!target) { toast('請先選一個母帳專案', 'err'); return; }
                 await mfetch(`${CRM}/projects/${encodeURIComponent(p.id)}/parent-link`, { method: 'PUT', body: { parent_id: target } });
-                toast('已連結到母帳專案');
+                toast('已連結到母帳專案'); markStale('receivable', 'overview');
             } else if (m === 'move') {
                 const chk = await mfetch(`${CRM}/projects/${encodeURIComponent(p.id)}/ledger-move-check`);
                 if (!chk.can_move) { toast(chk.reason || '這個專案不能換帳本', 'err'); return; }   // 這句話的正本在後端
                 if (!window.confirm(`把「${chk.name}」搬回母公司帳？\n\n錢流歸屬改回母公司，之後掛在它身上的錢都算公司的；私帳這邊不再有這一案。`)) return;
                 await mfetch(`${CRM}/projects/${encodeURIComponent(p.id)}/move-ledger`, { method: 'POST', body: { entity: 'parent' } });
-                toast('已搬回公司帳');
+                toast('已搬回公司帳'); markStale('receivable', 'overview', 'assets');
                 await onMoved();
                 return;
             } else {
                 const r = await mfetch(`${CRM}/projects/${encodeURIComponent(p.id)}/parent-create`, { method: 'POST' });
-                toast(`已在母帳建立「${r.name || p.name}」並連結`);
+                toast(`已在母帳建立「${r.name || p.name}」並連結`); markStale('receivable', 'overview');
             }
             await onLinked();
         } catch (e) { toast(e.message, 'err'); }

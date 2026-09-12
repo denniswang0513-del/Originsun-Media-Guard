@@ -9,7 +9,7 @@
  * 的 mine 模式。合夥人（finance_partner）看不到本子視圖（fin-nav-mine-ok）。
  */
 import { finFetch, esc, fmtNum, finToast, todayStr } from '../fin-utils.js';
-import { manualBuckets } from '../../../js/shared/asset-buckets.js';
+import { manualBuckets, estimatedTotal } from '../../../js/shared/asset-buckets.js';
 
 let _c = null;
 let _isCurrent = () => true;
@@ -19,7 +19,6 @@ let _snaps = [];
 
 // 「哪些手填桶帶入這次估計」的規則（SUPERSEDED／manualBuckets）2026-09-13 抽到 js/shared/asset-buckets.js
 // —— 士源帳本手機版要算同一個「現在估計」。這裡只留一個同名包裝，呼叫點不動。
-const _manualBuckets = (auto, last) => manualBuckets(auto, last);
 
 // 🔴 這行必須在**任何** `_fa.xxx = ...` 之前 —— ES module 的 const 有 TDZ，
 // 而那些賦值是模組求值時就跑的頂層敘述。2026-08-25 之前它待在檔案下半部，
@@ -111,10 +110,9 @@ function _render() {
     const d = _data;
     const auto = d.buckets || {};
     const last = d.last_snapshot;
-    // 「現在估計」= 系統自動桶 + 上次快照的手填桶（未被取代者）
-    const manual = _manualBuckets(auto, last);
-    const estTotal = Object.values(auto).reduce((a, b) => a + b, 0)
-        + Object.values(manual).reduce((a, b) => a + b, 0);
+    // 「現在估計」= 系統自動桶 + 上次快照的手填桶（未被取代者）—— 算法與手機版同一份（asset-buckets.js）
+    const manual = manualBuckets(auto, last);
+    const estTotal = estimatedTotal(auto, last);
 
     const compositionHtml = _compositionHtml(auto, manual, estTotal, d.bank_lines || []);
 
@@ -354,7 +352,7 @@ _fa.addHolding = async (btn) => {
 // ── 拍快照 ─────────────────────────────────────────────────
 _fa.snapOpen = () => {
     const auto = _data.buckets || {};
-    const manual = _manualBuckets(auto, _data.last_snapshot);
+    const manual = manualBuckets(auto, _data.last_snapshot);
     const autoRows = Object.entries(auto).map(([k, v]) => `
         <tr><td>${esc(k)}</td><td style="text-align:right;color:#86efac;">$${fmtNum(v)}</td>
             <td style="color:#666;font-size:11px;">自動</td></tr>`).join('');

@@ -8,14 +8,15 @@
  * 拍快照、改持股、更新報價留桌機，這頁沒有任何寫入鈕。
  */
 import { mfetch, esc, money } from '../shell.js';
-import { skeleton, errBox } from '../ui.js';
+import { skeleton, errBox, shouldLoad, markStale } from '../ui.js';
 import { manualBuckets, estimatedTotal } from '/js/shared/asset-buckets.js';
 
 const API = '/api/v1/finance/assets';
 
 export async function render(host, { first }) {
     if (first) host.innerHTML = skeleton(4);
-    await load(host);
+    // 60 秒內切回來不重抓、寫過的分頁由 markStale 標髒（同 CRM 手機版七個 view 的做法）
+    if (shouldLoad('assets', { first })) await load(host);
 }
 
 async function load(host) {
