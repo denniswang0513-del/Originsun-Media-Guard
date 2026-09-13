@@ -232,22 +232,35 @@ export function milestoneWeeksHtml(weeks) {
         </div>`).join('')}</div>`).join('');
 }
 
-/** 「消耗率」那一顆（owner 2026-09-13「讓同事知道這個專案是否已經超支」）：已用 ÷ 預算（沒設預算就照建議預算）。
- *  超過 100% 直接寫「超支 +N h」；算不出（沒預算、也拿不到建議預算）就寫清楚要主管設預算。基準與算法在後端 burn_rate。 */
+/** 預算那一顆（owner 2026-09-13「直接使用公式算的預期製作時數就好了，如果我設定的話可以給我一個編輯按鈕可以覆蓋」）：
+ *  一顆就好 —— 手動設了顯示「預算 h（手動）」、沒設顯示公式的「預期製作時數」；能改預算的人旁邊有 ✎（同 data-ts-action="budget"）。
+ *  基準是後端 burn_rate 挑的（手動 > 公式 > 算不出），前端只畫。 */
+export function budgetChip(d, editable) {
+    const b = d.burn || {};
+    const label = b.base === 'budget' ? '預算 h（手動）' : (b.base === 'suggested' ? '預期製作時數（公式）' : '預算 h');
+    const title = b.base === 'budget'
+        ? `手動設的預算${d.suggested_hours != null ? `；公式算的預期製作時數是 ${d.suggested_hours} h` : ''}`
+        : (b.base === 'suggested' ? `公式：合約未稅 ×（1−${d.project_type || ''}預期毛利）÷ 日成本 × 每日工時；設了預算就以設的為準` : '還沒設預算，也沒有合約可以算預期製作時數');
+    const edit = editable && d.mapped
+        ? `<button class="ts-btn ghost" data-ts-action="budget" data-pid="${esc(d.project_id)}" data-cur="${d.budget_hours ?? d.suggested_hours ?? ''}" title="${b.base === 'budget' ? '改手動預算（清空＝回到公式）' : '手動設預算（覆蓋公式）'}" style="padding:1px 7px;margin-left:6px;">✎</button>`
+        : '';
+    return `<span class="ts-chip" title="${esc(title)}"><b>${b.base_hours ?? '—'}</b>${label}${edit}</span>`;
+}
+
+/** 「消耗率」那一顆（owner 2026-09-13「讓同事知道這個專案是否已經超支」）：已用 ÷ 預算（手動或公式，看 budgetChip）。
+ *  超過 100% 直接寫「超支 +N h」；算不出就寫清楚要設預算。基準與算法在後端 burn_rate。 */
 export function burnChip(d) {
     const b = d.burn || {};
     if (b.pct == null) {
-        return `<span class="ts-chip" title="還沒設預算（管理視角按「改預算」），算不出消耗率"><b>—</b>消耗率　<span class="tsp-dim">還沒設預算</span></span>`;
+        return `<span class="ts-chip" title="還沒設預算、也算不出預期製作時數，算不出消耗率"><b>—</b>消耗率　<span class="tsp-dim">還沒設預算</span></span>`;
     }
     const over = b.remaining < 0;
-    const base = b.base === 'suggested' ? '建議預算' : '預算';
     const tail = over ? `超支 +${Math.abs(b.remaining)} h` : `還剩 ${b.remaining} h`;
-    return `<span class="ts-chip" title="已用 ${d.total} h ÷ ${base} ${b.base_hours} h"><span class="ts-pct ${pctClass(b.pct)}" style="${pctStyle(b.pct)}">${b.pct}%</span> 消耗率　<span class="tsp-dim">已用 ${d.total} / ${b.base_hours} h（照${base}）· </span><span style="${over ? 'color:#f87171;font-weight:600;' : ''}">${tail}</span></span>`;
+    return `<span class="ts-chip" title="已用 ${d.total} h ÷ ${b.base_hours} h"><span class="ts-pct ${pctClass(b.pct)}" style="${pctStyle(b.pct)}">${b.pct}%</span> 消耗率　<span class="tsp-dim">已用 ${d.total} / ${b.base_hours} h · </span><span style="${over ? 'color:#f87171;font-weight:600;' : ''}">${tail}</span></span>`;
 }
 
 export function projectFileHtml(d, opts = {}) {
     ensureTsProjectsStyle();
-    const pct = d.pct == null ? '—' : d.pct + '%';
     const key = d.project_id ? 'id:' + d.project_id : d.project_name;    // 比較清單的鍵：整個案用 id
     const compare = opts.compareNames || [];
     const inCompare = compare.includes(key);
@@ -257,7 +270,6 @@ export function projectFileHtml(d, opts = {}) {
     const actions = opts.editable ? `
             <button class="ts-btn ghost" data-ts-action="compare-add" data-name="${esc(key)}">${inCompare ? '已在比較清單' : '加入比較'}</button>
             ${compare.length ? `<button class="ts-btn" data-ts-action="view" data-view="compare">並排比較（${compare.length}）</button>` : ''}
-            ${d.mapped && (opts.budgetEditable ?? true) ? `<button class="ts-btn ghost" data-ts-action="budget" data-pid="${esc(d.project_id)}" data-cur="${d.budget_hours ?? d.suggested_hours ?? ''}">改預算</button>` : ''}
             <button class="ts-btn ghost" data-ts-action="export-project" data-name="${esc(d.project_name)}" data-pid="${esc(d.project_id || '')}">匯出 CSV</button>` : '';
     return `${opts.modal ? '' : (opts.head || '')}
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
@@ -270,10 +282,9 @@ export function projectFileHtml(d, opts = {}) {
             <span class="ts-chip"><b>${d.total}</b>總時數</span>
             <span class="ts-chip"><b>${d.people}</b>人</span>
             <span class="ts-chip"><b>${d.span_days}</b>天（${esc(d.first || '—')} → ${esc(d.last || '—')}）</span>
-            <span class="ts-chip"><b>${d.budget_hours ?? '—'}</b>預算 h　<span class="ts-pct ${pctClass(d.pct)}" style="${pctStyle(d.pct)}">${pct}</span></span>
-            ${d.quote_days != null ? `<span class="ts-chip"><b>${d.quote_days}</b>報價人日（≈ ${d.quote_hours} h）</span>` : ''}
-            ${d.suggested_hours != null ? `<span class="ts-chip" title="依私帳設定：合約未稅 ×（1−${esc(d.project_type || '')}預期毛利）÷ 日成本 × 每日工時"><b>${d.suggested_hours}</b>建議預算 h</span>` : ''}
+            ${budgetChip(d, d.mapped && (opts.budgetEditable ?? true) ? opts.editable : false)}
             ${burnChip(d)}
+            ${d.quote_days != null ? `<span class="ts-chip"><b>${d.quote_days}</b>報價人日（≈ ${d.quote_hours} h）</span>` : ''}
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;">
             <div class="ts-card" style="margin:0;"><h3>分類組成</h3>${bars(d.composition, opts.chartWidth)}</div>

@@ -135,8 +135,11 @@ def test_project_file_has_a_burn_rate_chip_that_falls_back_to_the_suggested_budg
     js = repo_src("frontend/js/shared/ts-projects.js")
     chip = js_code_only(js_func_body(js, "export function burnChip(d) {"))
     assert "超支 +${Math.abs(b.remaining)} h" in chip and "還沒設預算" in chip
-    assert "b.base === 'suggested' ? '建議預算' : '預算'" in chip
+    assert 'title="已用 ${d.total} h ÷ ${b.base_hours} h"' in chip     # 基準是後端挑的，前端不再分「照預算／照建議」
     assert "${burnChip(d)}" in js_func_body(js, "export function projectFileHtml(d, opts = {}) {")
     api = repo_src("routers/timesheets/projects.py")
     assert '"burn": burn_rate(m["total"], budget, suggested),' in api
-    assert 'suggested = _suggested_for(proj) if _has_ts_module(request) else None' in api   # 可見性線不變
+    assert '    suggested = _suggested_for(proj)' + chr(10) in api   # 公式預期製作時數人人拿得到（owner：直接用公式算的）
+    chip = js_code_only(js_func_body(js, "export function budgetChip(d, editable) {"))
+    assert "'預算 h（手動）' : (b.base === 'suggested' ? '預期製作時數（公式）'" in chip
+    assert 'data-ts-action="budget"' in chip and 'data-ts-action="budget"' not in js_func_body(js, "export function projectFileHtml(d, opts = {}) {")

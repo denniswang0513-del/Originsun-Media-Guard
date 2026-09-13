@@ -14,7 +14,7 @@ from core.schemas import TimesheetBudgetSet
 from db.models import CrmProject, CrmQuotation, CrmQuotationItem, Timesheet
 from services.timesheet_lookup import burn_rows, project_names
 from services.timesheet_self import metrics_input, month_or_422, rows_by_month, ts_dict
-from ._shared import _CANDS_CACHE, _has_ts_module, _require_mine_admin, _ts_or_bound, router
+from ._shared import _CANDS_CACHE, _require_mine_admin, _ts_or_bound, router
 
 
 # ── 專案檔案頁／類似專案並排／人員檔案頁／改預算（P2）──────────────────────────
@@ -114,8 +114,10 @@ async def project_file(request: Request, name: str = "", project_id: str = ""):
         milestone_weeks = await project_milestones(session, pid) if pid else []
     m = project_metrics(metrics_input(rows))
     budget = getattr(proj, "budget_hours", None)
-    # 建議預算是從私帳合約×預期毛利算的：只綁人員檔案的員工拿得到就等於能反推私帳合約 → 只給 timesheets 模組
-    suggested = _suggested_for(proj) if _has_ts_module(request) else None
+    # 預期製作時數（公式：合約未稅 ×（1−預期毛利）÷ 日成本 × 每日工時）：owner 2026-09-13「直接使用公式算的預期製作時數
+    # 就好了，如果我設定的話可以給我一個編輯按鈕可以覆蓋」—— 沒手動設預算就拿它當預算算消耗率，**同事也看得到**
+    # （只是時數，不帶金額；/summary 那張表對沒私帳 scope 的人照舊抹掉）。
+    suggested = _suggested_for(proj)
     sheet_names = sorted({r.project_name for r in rows if r.project_name})
     title = (getattr(proj, "name", "") or name or (sheet_names[0] if sheet_names else ""))
     sim_name = name or (sheet_names[0] if sheet_names else title)     # 類似案用 Sheet 案名的規則（客戶前綴）
@@ -123,7 +125,7 @@ async def project_file(request: Request, name: str = "", project_id: str = ""):
         "project_name": title, "project_id": pid or "", "status": getattr(proj, "status", ""),
         "mapped": bool(pid), "sheet_names": sheet_names, **m,
         "budget_hours": budget, **budget_burn(m["total"], budget),
-        # 消耗率（owner 2026-09-13）：預算沒設就退到建議預算（同一條可見性線：員工拿不到建議預算就算不出）
+        # 消耗率（owner 2026-09-13）：手動預算 > 公式預期製作時數 > 算不出
         "burn": burn_rate(m["total"], budget, suggested),
         "quote_days": quote_days,
         "quote_hours": quote_days * HOURS_PER_WORKDAY if quote_days else None,

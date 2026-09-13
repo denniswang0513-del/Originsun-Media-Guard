@@ -112,7 +112,7 @@ def budget_burn(total, budget) -> dict:
 
 def burn_rate(total, budget, suggested) -> dict:
     """專案檔案那顆「消耗率」（owner 2026-09-13「讓同事知道這個專案是否已經超支」）：
-    設了預算就照預算；沒設但算得出建議預算（有私帳權限的人才拿得到）就照建議預算；都沒有＝算不出。
+    手動設了預算就照預算；沒設就照公式算的預期製作時數（owner「直接使用公式算的…設定的話可以覆蓋」）；都沒有＝算不出。
     回 `{base: budget|suggested|"", base_hours, pct, remaining}`（pct／remaining 同 budget_burn）。"""
     base = "budget" if budget else ("suggested" if suggested else "")
     hours = budget if base == "budget" else (suggested if base == "suggested" else None)
