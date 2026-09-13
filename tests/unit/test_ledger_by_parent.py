@@ -340,3 +340,32 @@ class TestPolishFinalReview:
         from tests.unit._srcscan import code_only, func_body, projects_src
         fn = code_only(func_body(projects_src(), "async def apply_billing_mode("))
         assert "t.ledger_detail = keep" not in fn          # 只透過 _store_mirror_detail 落庫
+
+
+class TestPolishRound4:
+    """驗證 review（第 4 輪）的 5 項（BUG-29～33）。"""
+
+    def test_first_share_freezes_hand_filled_fees_as_manual(self):
+        # BUG-31：源日 X 上 owner 手填的個人稅款從沒被標手動（舊碼對源日早退）；第一次進分案世界要把它凍住，
+        # 之後推送／解除（不帶 keep 的 apply_source_fee）才不會把它洗成 0
+        d = norm_detail({"source": "源日", "personal_tax": 3000, "invoice_fee": 500})
+        d2, _ = set_parent_share(d, 50000, "A", 0, {}, claim=True)
+        assert {"personal_tax", "invoice_fee"} <= set(d2["manual"])
+        out = apply_source_fee(50000, d2)
+        assert out["personal_tax"] == 3000 and out["invoice_fee"] == 500
+        # 案源本來就抽那種費的不凍（那是試算值，照舊自動）
+        e = norm_detail({"source": "代開發票", "invoice_fee": 4000})
+        e2, _ = set_parent_share(e, 50000, "A", 0, {}, claim=True)
+        assert "invoice_fee" not in (e2.get("manual") or [])
+
+    def test_push_paths_use_the_shares_source_everywhere(self):
+        from tests.unit._srcscan import code_only, flow_body, func_body, projects_src
+        push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
+        # BUG-32：降成 keep 的保護看份額的案源，不看 X 的
+        assert '(source or keep.get("source") or MIRROR_SOURCE) != "代開發票"' not in push
+        assert '_push_share_source(source, parent_shares(keep).get(p.id) or {}) != "代開發票"' in push
+        # BUG-30：待認領期間已認領過的案再推 → 不再 claim（差額要進 X）
+        assert "claim = _claim_on_push(pending, linked_before, p.id) and p.id not in parent_shares(keep)" in push
+        # BUG-33：換回時判「別案還走代開」用 share_source
+        bm = code_only(flow_body(projects_src(), "async def apply_billing_mode("))
+        assert 'others_agency = any(share_source(keep, sh) == "代開發票"' in bm

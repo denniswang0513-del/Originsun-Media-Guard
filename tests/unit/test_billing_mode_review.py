@@ -302,3 +302,19 @@ async def test_linking_records_a_zero_share_so_later_claims_do_not_grab_owner_mo
     mine.ledger_detail["by_parent"]["A"]["amount"] = 20000
     await pl._write_link(None, SimpleNamespace(id="A", mine_link_id=None, updated_at=None), mine)
     assert parent_shares(mine.ledger_detail)["A"]["amount"] == 20000
+
+
+async def test_link_zero_share_takes_the_parents_billing_mode_not_x_source(monkeypatch):
+    """BUG-29：連結時的 0 份額案源要看**母帳的收款方式**，不能抄 X 的 —— X 已是代開時 company 母帳連上來
+    份額不能被標成代開（之後推送會把整張客戶合約額加進 X、算進代辦費）。"""
+    from core.ledger_project import parent_shares
+
+    async def _sync(session, parent, mine, *, explicit=()):
+        return False
+    monkeypatch.setattr(pl, "_sync_pair", _sync)
+    mine = SimpleNamespace(id="X", contract_amount=100000, ledger_detail={"source": "代開發票", "split": {}},
+                           source_project_id=None, updated_at=None)
+    await pl._write_link(None, SimpleNamespace(id="A", mine_link_id=None, billing_mode="company", updated_at=None), mine)
+    assert parent_shares(mine.ledger_detail)["A"]["source"] == "源日"
+    await pl._write_link(None, SimpleNamespace(id="B", mine_link_id=None, billing_mode="passthrough", updated_at=None), mine)
+    assert parent_shares(mine.ledger_detail)["B"]["source"] == "代開發票"

@@ -472,6 +472,8 @@ def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=
     """
     d = norm_detail(detail)
     shares = parent_shares(d)
+    if not shares:
+        _freeze_hand_filled_fees(d)
     old = shares.get(pid) or {"amount": 0, "split": {}, "synced_total": 0, "at": ""}
     new_split = {str(k): _int(v) for k, v in (split or {}).items() if _int(v)}
     contract = _int(contract)
@@ -550,6 +552,20 @@ def legacy_claim(detail, contract, pid: str) -> dict:
                              synced_total=mt, at=str(d.get(MIRROR_AT_KEY) or ""),
                              source=d.get("source") or MIRROR_SOURCE, claim=True)
     return d
+
+
+def _freeze_hand_filled_fees(d: dict) -> None:
+    """X 第一次有分案記錄時：案源不抽那種費、欄位卻有數字 → 那是 owner 手填的（舊碼對源日早退，
+    從沒把它標進 manual）。標手動，分案後「沒有份額再抽費 → 歸零」的重算才不會把它洗掉。
+    案源本來就抽那種費的不動 —— 那些是試算值，照舊自動。"""
+    src = d.get("source")
+    manual = manual_fields(d)
+    if src != "代開發票" and _int(d.get("invoice_fee")):
+        manual.add("invoice_fee")
+    if src != "執行業務所得" and _int(d.get("personal_tax")):
+        manual.add("personal_tax")
+    if manual:
+        d["manual"] = sorted(manual)
 
 
 def drop_parent_share(detail, contract, pid: str) -> tuple:
