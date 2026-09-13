@@ -5,7 +5,7 @@
 I/O 在 routers/crm/project_links.apply_billing_mode／link_note_for。"""
 from core.ledger_project import (BILLING_LABELS, BILLING_MIRROR_SOURCE, BILLING_MODES, FEE_DEDUCTED_KEY,
                                  LINK_SYNC_FIELDS, MIRROR_AT_KEY, billing_mode_of, link_note, norm_detail)
-from tests.unit._srcscan import code_only, flow_body, func_body, js_code_only, projects_src, repo_src
+from tests.unit._srcscan import code_only, flow_body, func_body, js_code_only, js_func_body, projects_src, repo_src
 
 _LINKS = repo_src("routers/crm/project_links.py")
 _PROJ = repo_src("routers/crm/projects.py")
@@ -164,3 +164,38 @@ def test_mirror_check_does_not_nag_passthrough_cases_about_cost_lines():
     fn = code_only(func_body(_LINKS, "async def check_project_mirror("))
     assert 'billing_mode_of(p.billing_mode) == "passthrough"' in fn and 'get("source") == "代開發票"' in fn
     assert 'warning = ""' in fn
+
+
+def test_link_note_html_and_billing_tag_in_node():
+    """特徵測試（polish 階段零）：linkNoteHtml 只畫後端的 text、把 mine_name 換成 /my-ledger.html 連結、
+    stale===true 才掛「私帳落後」；billingTagHtml 對 company 回空字串。用 node 跑，輸出只印 ASCII。"""
+    import subprocess
+    from tests.unit._srcscan import _REPO as REPO
+    src = js_code_only(repo_src("frontend/tabs/crm/crm-projects-core.js"))
+    body = "\n".join(js_func_body(src, f"export function {fn}(").replace("export ", "", 1)
+                     for fn in ("billingTagHtml", "linkNoteHtml"))
+    consts = src[src.index("export const BILLING_LABELS"):src.index("export function billingTagHtml(")].replace("export ", "")
+    script = "const _esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\"/g,'&quot;');\n" + consts + body + """
+const linked = {linked:true, mine_id:'m 1', mine_name:'A<b', stale:true, text:'link -> A<b . src . 82,000'};
+const h = linkNoteHtml(linked);
+const out = [
+  billingTagHtml({billing_mode:'company'}) === '',
+  billingTagHtml({billing_mode:'passthrough'}).includes(BILLING_LABELS.passthrough),
+  billingTagHtml(null) === '',
+  h.includes('href="/my-ledger.html?project=m%201"'),
+  h.includes('>A&lt;b') && !h.includes('A<b'),
+  h.includes('title=') && h.endsWith('</span>'),
+  !linkNoteHtml({linked:true, mine_id:'m', mine_name:'x', stale:false, text:'x'}).includes('</span>'),
+  !linkNoteHtml({linked:false, text:'no link'}).includes('href'),
+  linkNoteHtml(null).includes('&#8212;') || linkNoteHtml(null).length > 0,
+];
+console.log(JSON.stringify(out));"""
+    import tempfile, os
+    with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8", delete=False) as tf:
+        tf.write(script); path = tf.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True, cwd=str(REPO))
+    finally:
+        os.unlink(path)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "[true,true,true,true,true,true,true,true,true]", r.stdout
