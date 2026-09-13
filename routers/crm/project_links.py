@@ -618,6 +618,12 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         # 表單整包送回同一個值而分身早就在 —— 什麼都不用做，也**不要**對沒私帳權限的同事回 skipped
         # （那句 warning 會在他每一次存檔時跳出來）
         return {"action": "none", "created": False}
+    # 這次轉換到底要不要動分身？源日↔現金、或後期代開換回但分身上沒有代開那套 —— 都不用。
+    # 不用就不問私帳權限：問了會對沒權限的同事回 skipped，update_project 每次存檔都跳那句 warning。
+    reverting = (t is not None and BILLING_MIRROR_SOURCE.get(old)
+                 and norm_detail(t.ledger_detail).get("source") == BILLING_MIRROR_SOURCE[old])
+    if not want_source and not reverting:
+        return {"action": "none", "created": False}
     try:
         require_entity(request, "mine", level="full")
     except HTTPException:
@@ -639,9 +645,8 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
             t.contract_amount = int(p.contract_amount or 0)
         _store_mirror_detail(t, apply_source_fee(int(t.contract_amount or 0), keep))
         return {"action": "switched", "created": False}
-    # 換回源日專案／現金收款：分身留著，只把代開那套拿掉
-    if t is not None and BILLING_MIRROR_SOURCE.get(old) and \
-            norm_detail(t.ledger_detail).get("source") == BILLING_MIRROR_SOURCE[old]:
+    # 換回源日專案／現金收款：分身留著，只把代開那套拿掉（走到這裡＝reverting 已成立）
+    if reverting:
         keep = norm_detail(t.ledger_detail)
         keep["source"] = MIRROR_SOURCE
         for k in ("invoice_fee", "tax_fee", "buy_invoice"):
