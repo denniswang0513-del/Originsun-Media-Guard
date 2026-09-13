@@ -663,7 +663,7 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
     from core.ledger import require_entity
     from core.ledger_project import (BY_PARENT_PENDING_KEY, FEE_DEDUCTED_KEY, BILLING_MIRROR_SOURCE, MIRROR_SOURCE,
                                      apply_source_fee, billing_mode_of, manual_fields, norm_detail, parent_shares,
-                                     set_parent_share)
+                                     set_parent_share, share_source)
 
     new = billing_mode_of(p.billing_mode)
     old = billing_mode_of(old_mode)
@@ -681,8 +681,7 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
     keep = norm_detail(t.ledger_detail) if t is not None else None
     reverting = False
     if keep is not None and BILLING_MIRROR_SOURCE.get(old):
-        _sh0 = parent_shares(keep).get(p.id) or {}
-        reverting = (_sh0.get("source") or keep.get("source")) == BILLING_MIRROR_SOURCE[old]
+        reverting = share_source(keep, parent_shares(keep).get(p.id)) == BILLING_MIRROR_SOURCE[old]
     if not want_source and not reverting:
         return {"action": "none", "created": False}
     try:
@@ -749,7 +748,8 @@ async def link_note_for(session, p, request) -> dict:
     """「後期連結」那一行（core.ledger_project.link_note 的 I/O 半邊）。
     看不到私帳的請求：只講收款方式，不露私帳案（同 `mirrored` 那條可見性線）。"""
     from core.ledger import hide_mine_projects
-    from core.ledger_project import BY_PARENT_PENDING_KEY, link_note, mirror_stale, norm_detail, parent_shares
+    from core.ledger_project import (BY_PARENT_PENDING_KEY, link_note, mirror_stale, norm_detail, parent_shares,
+                                     share_source)
     from ._shared import mine_parent_links
 
     mode = p.billing_mode
@@ -769,7 +769,7 @@ async def link_note_for(session, p, request) -> dict:
             _p, mir, _l = await _mirror_preview(session, p.id, sid)
             crm_total = mir["total"]
             stale, delta = mirror_stale(detail, crm_total, p.id)
-    share_rows = ([(name, shares[pid]["amount"], shares[pid].get("source") or detail.get("source") or "")
+    share_rows = ([(name, shares[pid]["amount"], share_source(detail, shares[pid]))
                    for pid, name in parents if pid in shares] if len(parents) > 1 else [])
     return link_note(mode, (t.id, t.name or "", t.contract_amount), detail, stale=stale, delta=delta,
                      crm_total=crm_total, passthrough_invoices=await _passthrough_invoice_count(session, p.id),

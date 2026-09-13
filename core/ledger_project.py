@@ -491,6 +491,11 @@ def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=
     return d, contract
 
 
+def share_source(detail, share) -> str:
+    """一個份額的**有效**案源：份額自己標的，沒標就跟 X 的 `source` 走。這條規則只寫這一次。"""
+    return str((share or {}).get("source") or (detail or {}).get("source") or "")
+
+
 def fee_bases(contract, detail) -> tuple:
     """代辦費／個人稅款的**計算基數** `(代開發票基數, 執行業務所得基數)`。
 
@@ -506,7 +511,7 @@ def fee_bases(contract, detail) -> tuple:
         return (c if src == "代開發票" else 0, c if src == "執行業務所得" else 0)
     agency = pro = total = 0
     for sh in shares.values():
-        eff = sh.get("source") or src
+        eff = share_source(d, sh)
         total += sh["amount"]
         if eff == "代開發票":
             agency += sh["amount"]
@@ -523,8 +528,7 @@ def fee_bases(contract, detail) -> tuple:
 def source_mixed(detail) -> bool:
     """各案份額的案源不一致（畫面上案源那格要寫「混合」）。沒分案記錄＝False。"""
     d = detail if isinstance(detail, dict) else {}
-    src = str(d.get("source") or "")
-    kinds = {sh.get("source") or src for sh in parent_shares(d).values()}
+    kinds = {share_source(d, sh) for sh in parent_shares(d).values()}
     return len(kinds) > 1
 
 
