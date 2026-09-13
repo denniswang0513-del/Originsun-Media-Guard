@@ -506,12 +506,11 @@ def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=
         shares[pid]["prev_source"] = old["source"]           # 切換：記住換之前的
     elif old.get("prev_source"):
         shares[pid]["prev_source"] = old["prev_source"]      # 其他改動：帶著走
-    # 這案離開抽費的案源（代開→其他、執行業務所得→其他）：那筆費用是為它調的，手動旗標一起放掉，
-    # 之後 apply_source_fee 才會照剩下的基數重算（否則手改的代辦費／個人稅款留在應收裡）
-    _release_fee_flags(d, old.get("source"), src)
     if src in SOURCES:
         shares[pid]["source"] = src
     d[BY_PARENT_KEY] = shares
+    # 份額動過：哪種費用的基數歸零了就放掉那種手動旗標（凍住的不放），apply_source_fee 才會歸零
+    _release_fee_flags(d, contract)
     return d, contract
 
 
@@ -613,14 +612,16 @@ def _freeze_hand_filled_fees(d: dict) -> None:
         d[FROZEN_KEY] = sorted(frozen)
 
 
-def _release_fee_flags(d: dict, old_src, new_src) -> None:
-    """份額從抽費的案源換走（或被解除）：那種費用的手動旗標放掉 —— 但 owner 自己手填、第一次分案時凍住的
-    （FROZEN_KEY）不放，那不是為這案調的。"""
+def _release_fee_flags(d: dict, contract) -> None:
+    """份額動過之後：哪種費用的**基數歸零了**，那種費用的手動旗標就放掉（之後 apply_source_fee 會歸零）。
+    基數還在（別案或 owner 自己那部分還走那種案源）就不放 —— 那個手改值可能是 owner 為自己那部分調的。
+    第一次分案時凍住的（FROZEN_KEY，owner 手填在不抽費的 X 上）永遠不放。規則只有這一條，換案源／換回／解除都走它。"""
     manual = manual_fields(d)
     frozen = set(d.get(FROZEN_KEY) or ()) & MANUAL_FIELDS
-    if old_src == "代開發票" and new_src != "代開發票" and "invoice_fee" not in frozen:
+    agency, pro = fee_bases(contract, d)
+    if not agency and "invoice_fee" not in frozen:
         manual.discard("invoice_fee")
-    if old_src == "執行業務所得" and new_src != "執行業務所得" and "personal_tax" not in frozen:
+    if not pro and "personal_tax" not in frozen:
         manual.discard("personal_tax")
     if manual:
         d["manual"] = sorted(manual)
@@ -634,9 +635,7 @@ def drop_parent_share(detail, contract, pid: str) -> tuple:
     d = detail if isinstance(detail, dict) else {}
     if pid not in parent_shares(d):
         return detail, contract
-    dropped_src = share_source(d, parent_shares(d).get(pid))
-    d, contract = set_parent_share(d, contract, pid, 0, {})
-    _release_fee_flags(d, dropped_src, "")      # 解除：這案的費用旗標一起放掉（同「換回」那條，無條件）
+    d, contract = set_parent_share(d, contract, pid, 0, {})       # 基數歸零的話旗標在裡面放掉
     # 費用趁記錄還在的時候重算：這案份額已是 0，fee_bases 只剩別案 ＋ owner 自己的 —— 最後一個代開
     # 份額被拿掉時三欄在這裡歸零（手改的不動）。記錄拿掉之後 apply_source_fee 就看不出費用曾是分案算的。
     d = apply_source_fee(contract, d)
@@ -769,14 +768,12 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
     if src == "代開發票" or agency:
         _settle("invoice_fee", _half_up(agency * float(d.get("fee_pct") or DEFAULT_FEE_PCT) / 100))
         # 稅金與買發票是代辦費的**組成**（買發票＝代辦費 − 稅金），代辦費手改時跟著重算
-        if "invoice_fee" in (set(d.get(FROZEN_KEY) or ()) & manual):
-            pass                          # owner 手填的整組（代辦費／稅金／買發票）凍住，一個都不動
-        else:
-            d["tax_fee"] = _half_up(agency / VAT_DIVISOR * (VAT_PCT / 100))
-            if "invoice_fee" in manual:
-                # 手改的代辦費比試算小：稅金是代辦費的組成，不能超過它（買發票不能是負的）
-                d["tax_fee"] = min(d["tax_fee"], int(d["invoice_fee"] or 0))
-            d["buy_invoice"] = max(0, int(d["invoice_fee"] or 0) - d["tax_fee"])
+        d["tax_fee"] = _half_up(agency / VAT_DIVISOR * (VAT_PCT / 100))
+        if "invoice_fee" in manual:
+            # 手改（含凍住的手填）的代辦費：稅金是它的組成、不能超過它，買發票不能是負的 ——
+            # 前端在有代開份額時把稅金／買發票鎖住並照基數送回，凍住的稅金／買發票在這個狀態下留不住，只能由代辦費推
+            d["tax_fee"] = min(d["tax_fee"], int(d["invoice_fee"] or 0))
+        d["buy_invoice"] = max(0, int(d["invoice_fee"] or 0) - d["tax_fee"])
     elif shared:
         # 分案的世界：沒有任何一案走代開（A 換回源日、或最後一個代開份額被解除）→ 試算值是 0：
         # 走 _settle，這次送來的非零值一樣算「人決定的」（標手動、留住），沒送／沒標的才歸零。

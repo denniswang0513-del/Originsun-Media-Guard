@@ -64,6 +64,10 @@ def world(monkeypatch):
         # BUG-13：只有 30,000 是鏡射來的，70,000 是 owner 自己加的（非工項的合約金額）→ 只認 30,000
         "X4": SimpleNamespace(id="X4", entity="mine", contract_amount=100000,
                               ledger_detail={"source": "源日", "split": {"剪接": 100000}, "mirror_total": 30000}),
+        "X5": SimpleNamespace(id="X5", entity="mine", contract_amount=100000, amount_received=0,
+                              ledger_detail={"source": "代開發票", "split": {}, "invoice_fee": 8000, "tax_fee": 4762, "buy_invoice": 3238}),
+        "G": SimpleNamespace(id="G", entity="parent", contract_amount=0, billing_mode="company"),
+        "H": SimpleNamespace(id="H", entity="parent", contract_amount=0, billing_mode="company"),
         "A": SimpleNamespace(id="A", entity="parent", contract_amount=0, billing_mode="company"),
         "B": SimpleNamespace(id="B", entity="parent", contract_amount=0, billing_mode="company"),
         "C": SimpleNamespace(id="C", entity="parent", contract_amount=80000, billing_mode="passthrough"),
@@ -76,10 +80,11 @@ def world(monkeypatch):
 
     async def _links(sess, ids):
         return {"X1": [("A", "母帳案 A")], "X2": [("B", "B"), ("C", "C")], "X3": [("D", "D"), ("E", "E")],
-                "X4": [("F", "F")]}
+                "X4": [("F", "F")], "X5": [("G", "G"), ("H", "H")]}
 
     totals = {"B": ({"剪接": 40000}, 40000), "C": ({"剪接": 80000}, 80000),
-              "D": ({"剪接": 9000}, 9000), "E": ({"剪接": 9000}, 9000)}     # D+E = 18,000 > X3 的 10,000 → 待認領
+              "D": ({"剪接": 9000}, 9000), "E": ({"剪接": 9000}, 9000),     # D+E = 18,000 > X3 的 10,000 → 待認領
+              "G": ({"剪接": 30000}, 30000), "H": ({"剪接": 20000}, 20000)}
 
     async def _preview(sess, pid, sid):
         assert sid == "S1"
@@ -108,6 +113,10 @@ async def test_backfill_claims_one_to_one_and_resolvable_n_to_one_and_flags_the_
     assert parent_shares(x2.ledger_detail)["C"]["source"] == "代開發票"
     assert x2.ledger_detail["invoice_fee"] == 6400                 # 第 10 輪 #5：回填後代辦費照新規則落庫（80,000 × 8%）
     assert x2.amount_receivable == 120000 - 6400                  # 應收也重算
+    # 第 11 輪 #4：舊 X 本身是代開（一張發票涵蓋兩案）→ 份額跟 X 走，開機時錢不變
+    x5 = world.projects["X5"]
+    assert {sh["source"] for sh in parent_shares(x5.ledger_detail).values()} == {"代開發票"}
+    assert x5.ledger_detail["invoice_fee"] == 8000 and x5.amount_receivable == 92000
     assert x2.contract_amount == 120000 and x2.ledger_detail["split"] == {"剪接": 120000}
     assert x3.ledger_detail.get(BY_PARENT_PENDING_KEY) is True and not parent_shares(x3.ledger_detail)
     x4 = world.projects["X4"]
@@ -115,7 +124,7 @@ async def test_backfill_claims_one_to_one_and_resolvable_n_to_one_and_flags_the_
     assert parent_shares(x4.ledger_detail)["F"] == {"amount": 30000, "split": {"剪接": 100000}, "synced_total": 30000, "at": "", "source": "源日"}
     assert x4.contract_amount == 100000 and x4.ledger_detail["split"] == {"剪接": 100000}
     assert world.committed == 1
-    assert "1:1 2 案、N:1 認出 1 案、待認領 1 案" in capsys.readouterr().out
+    assert "1:1 2 案、N:1 認出 2 案、待認領 1 案" in capsys.readouterr().out
 
 
 async def test_backfill_is_idempotent(world):

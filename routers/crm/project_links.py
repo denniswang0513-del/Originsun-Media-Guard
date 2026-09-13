@@ -635,7 +635,7 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 if mode == "add" and share_src == "代開發票":
                     mode = "overwrite"        # 代開的金額是發票面額、不累加；工項也不能跟著翻倍
                 amount = _push_share_amount(mode, claim, share_src, old_share, mir["total"],
-                                            _mirror_contract(p, mir, "代開發票"))
+                                            int(p.contract_amount or 0) or (0 if old_share.get("amount") else mir["total"]))
                 adding = mode == "add" and not claim
                 new_split, _delta = merge_split(old_share["split"] if adding else {},
                                                 mir["split"] or {}, add=adding)
@@ -685,7 +685,7 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
     回 `{"action": created|switched|reverted|none|skipped, "created": bool}`。"""
     from core.ledger import require_entity
     from core.ledger_project import (BY_PARENT_PENDING_KEY, FEE_DEDUCTED_KEY, BILLING_MIRROR_SOURCE,
-                                     apply_source_fee, billing_mode_of, manual_fields, norm_detail, parent_shares,
+                                     apply_source_fee, billing_mode_of, norm_detail, parent_shares,
                                      set_parent_share, share_source)
 
     new = billing_mode_of(p.billing_mode)
@@ -747,9 +747,11 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         # 代辦費由 apply_source_fee 照剩下的代開份額重算（一案都沒有就三欄歸零）。
         keep, _c = set_parent_share(keep, int(t.contract_amount or 0), p.id, share["amount"], share["split"],
                                     restore_source=True, claim=True)          # 回切換前的案源（沒記過退源日）
-        # X 自己的案源不動（那是 owner 那部分的；分不出「被翻的」跟「他自己的」，所以一開始就不翻）
-        keep["manual"] = sorted(manual_fields(keep) - {"invoice_fee"})
-        keep.pop(FEE_DEDUCTED_KEY, None)
+        # X 自己的案源不動（那是 owner 那部分的）。代辦費的手動旗標由 set_parent_share 依「基數歸零才放」處理；
+        # 「已扣除」只在沒有任何代開基數時才重設（別案還走代開的話 owner 取消的勾要留著）
+        from core.ledger_project import fee_bases
+        if not fee_bases(int(t.contract_amount or 0), keep)[0]:
+            keep.pop(FEE_DEDUCTED_KEY, None)
         _store_mirror_detail(t, apply_source_fee(int(t.contract_amount or 0), keep))
         return {"action": "reverted", "created": False}
     return {"action": "none", "created": False}

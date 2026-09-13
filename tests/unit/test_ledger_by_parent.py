@@ -439,6 +439,10 @@ class TestPolishRound7:
         # 第 10 輪：代開份額重新同步跟著母帳合約額走（改成 100,000 就是 100,000）；母帳沒填才沿用
         assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 100000) == 100000
         assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 0) == 120000
+        # 第 11 輪 #6：推送端傳進來的「發票面額」＝母帳合約額本身（空就 0 → 沿用舊份額；沒舊份額才退成本行合計）
+        from tests.unit._srcscan import code_only, func_body, projects_src
+        push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
+        assert 'int(p.contract_amount or 0) or (0 if old_share.get("amount") else mir["total"])' in push
 
     def test_drop_of_an_agency_share_releases_the_manual_fee(self):
         # 第 7 輪 #5：純代開分身、owner 手調代辦費 9,000 → 解除 P 後不能留 9,000 在合約 0 的 X 上
@@ -488,15 +492,18 @@ class TestPolishRound8:
         d5, _ = set_parent_share(d4, 1, "B", 1, {}, restore_source=True)
         assert parent_shares(d5)["B"]["source"] == "源日"
 
-    def test_dropping_an_agency_share_always_releases_the_manual_fee_like_revert(self):
-        # #4：換回無條件放掉代辦費手動旗標，解除代開份額也要一樣（不只最後一個）
+    def test_dropping_an_agency_share_keeps_the_manual_fee_while_a_base_remains(self):
+        # 第 11 輪定案：旗標只在那種費用的基數歸零時放。A、B 都代開、手改 15,000 → 解除 B → A 的基數還在 → 留住；
+        # 再解除 A → 基數歸零 → 放掉、歸零
         from core.ledger_project import drop_parent_share
         d, c = set_parent_share({"source": "源日"}, 0, "A", 100000, {}, source="代開發票")
         d, c = set_parent_share(d, c, "B", 100000, {}, source="代開發票")
         d["invoice_fee"] = 15000
         d = apply_source_fee(c, d, keep={"invoice_fee"})
         d2, c2 = drop_parent_share(d, c, "B")
-        assert "invoice_fee" not in (d2.get("manual") or []) and d2["invoice_fee"] == 8000
+        assert "invoice_fee" in d2["manual"] and d2["invoice_fee"] == 15000 and d2["buy_invoice"] >= 0
+        d3, c3 = drop_parent_share(d2, c2, "A")
+        assert "invoice_fee" not in (d3.get("manual") or []) and d3["invoice_fee"] == 0
 
     def test_hand_filled_tax_fee_is_frozen_with_the_fee_group(self):
         # #9：源日 X 手填了稅金（代辦費 0）→ 第一次分案時整組凍住，不被歸零
@@ -532,6 +539,12 @@ class TestPolishRound9:
         assert d2["personal_tax"] == 0 and expected_cash_in(c2, d2) == 20000
         d3, _ = set_parent_share(d, c, "A", 40000, {}, source="源日")
         assert "personal_tax" not in (d3.get("manual") or []) and apply_source_fee(c, d3)["personal_tax"] == 0
+        # 基數還在（別案還是執行業務所得）→ 旗標不放（owner 可能是為自己那部分調的）
+        e, ce = set_parent_share({"source": "執行業務所得"}, 100000, "A", 40000, {}, source="執行業務所得")
+        e["personal_tax"] = 0
+        e = apply_source_fee(ce, e, keep={"personal_tax"})
+        e2, ce2 = drop_parent_share(e, ce, "A")
+        assert "personal_tax" in e2["manual"] and e2["personal_tax"] == 0
 
     def test_keep_downgrade_looks_at_this_shares_synced_total(self):
         # #2：N:1「用 CRM 更新」清「私帳落後」要看這案的 synced_total，不看 X 層級被別案覆寫的 mirror_total
@@ -551,7 +564,8 @@ class TestPolishRound10:
         d = apply_source_fee(c, d)
         d2, c2 = drop_parent_share(d, c, "B")
         d2 = apply_source_fee(c2, d2)
-        assert (d2["invoice_fee"], d2["tax_fee"], d2["buy_invoice"], d2["personal_tax"]) == (5000, 2000, 3000, 3000)
+        # 代辦費與個人稅款留住；稅金／買發票在有代開份額期間只能由代辦費推（前端鎖住那兩格、照基數送回）
+        assert (d2["invoice_fee"], d2["personal_tax"]) == (5000, 3000) and d2["tax_fee"] <= 5000 and d2["buy_invoice"] >= 0
         # 為那案調的（不是凍住的）照舊放掉
         e, ce = set_parent_share({"source": "源日"}, 0, "A", 100000, {}, source="代開發票")
         e["invoice_fee"] = 9000
@@ -566,3 +580,26 @@ class TestPolishRound10:
         d["invoice_fee"] = 5000
         d = apply_source_fee(c, d, keep={"invoice_fee"})
         assert d["invoice_fee"] == 5000 and d["tax_fee"] == 5000 and d["buy_invoice"] == 0
+
+
+class TestPolishRound11:
+    def test_manual_fee_survives_while_a_base_remains_and_goes_when_it_is_gone(self):
+        # #3：owner 自己的代開 X 手調 7,000 → 推 B 代開 → 解除 B → 基數還在（X 自己 100k）→ 7,000 留住
+        from core.ledger_project import drop_parent_share
+        d = norm_detail({"source": "代開發票", "invoice_fee": 7000, "manual": ["invoice_fee"]})
+        d, c = set_parent_share(d, 100000, "B", 50000, {}, source="代開發票")
+        d2, c2 = drop_parent_share(d, c, "B")
+        assert "invoice_fee" in d2["manual"] and apply_source_fee(c2, d2)["invoice_fee"] == 7000
+        # 基數歸零（X 源日、唯一代開份額解除）→ 放掉、歸零
+        e, ce = set_parent_share({"source": "源日"}, 0, "B", 50000, {}, source="代開發票")
+        e["invoice_fee"] = 3000
+        e = apply_source_fee(ce, e, keep={"invoice_fee"})
+        e2, _ = drop_parent_share(e, ce, "B")
+        assert "invoice_fee" not in (e2.get("manual") or []) and e2["invoice_fee"] == 0
+
+    def test_revert_path_no_longer_releases_flags_itself(self):
+        # #1：換回路不再自己放旗標（凍住的會被洗掉）、已扣除只在沒代開基數時重設
+        from tests.unit._srcscan import code_only, flow_body, projects_src
+        bm = code_only(flow_body(projects_src(), "async def apply_billing_mode("))
+        assert 'sorted(manual_fields(keep) - {"invoice_fee"})' not in bm
+        assert "if not fee_bases(int(t.contract_amount or 0), keep)[0]:" in bm
