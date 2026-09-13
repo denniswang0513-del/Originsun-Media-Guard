@@ -76,9 +76,13 @@ function _journalGoto(weekStart) {
     const card = $("ws-journal")?.querySelector(".card");
     if (card && card.classList.contains("folded")) card.querySelector(".card-head, .card-h")?.click();
     const f = $("jr-frame");
-    const tell = () => f?.contentWindow?.postMessage({ type: "journal-goto-week", week_start: weekStart }, "*");
+    if (!f) return;
+    // 要跳的週記在 iframe 身上，load 那顆 listener 讀它 —— 不把週次關進閉包（連點兩個不同的週、iframe 還在載，
+    // 閉包會把第一個週送過去）
+    f.dataset.gotoWeek = weekStart;
+    const tell = () => f.contentWindow?.postMessage({ type: "journal-goto-week", week_start: f.dataset.gotoWeek }, "*");
     tell();
-    if (f && !f.dataset.gotoWired) { f.dataset.gotoWired = "1"; f.addEventListener("load", tell); }
+    if (!f.dataset.gotoWired) { f.dataset.gotoWired = "1"; f.addEventListener("load", tell); }
     $("ws-journal-h")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 window.addEventListener("message", (e) => {

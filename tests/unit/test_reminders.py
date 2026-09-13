@@ -53,7 +53,8 @@ def test_zone_draws_the_strip_above_the_tabs_with_goto_buttons():
     assert 'data-z1="day-goto"' in rm and 'data-z1="journal-goto"' in rm
     # 員工頁：週記那顆跳到第二區那一週（postMessage 給內嵌的 journal.html）；送出後重抓
     z1 = repo_src("frontend/js/my/zone1.js")
-    assert 'type: "journal-goto-week", week_start: weekStart' in z1 and 'e.data.type === "journal-submitted"' in z1
+    assert 'week_start: f.dataset.gotoWeek' in z1 and 'f.dataset.gotoWeek = weekStart;' in z1     # 週次記在 iframe 上、不關進閉包
+    assert 'e.data.type === "journal-submitted"' in z1
     jr = repo_src("frontend/journal.html")
     assert "d.type !== 'journal-goto-week'" in jr and "type: 'journal-submitted'" in jr
     # 管理視角看別人／全部：沒有「我的」提醒
