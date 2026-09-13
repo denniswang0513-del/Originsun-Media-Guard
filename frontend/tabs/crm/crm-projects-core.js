@@ -444,8 +444,10 @@ export function linkNoteHtml(note) {
     if (!note || !note.text) return '<span style="color:#666;">—</span>';
     let html = _esc(note.text);
     if (note.linked && note.mine_id && note.mine_name) {
+        // 鎖定「→ 案名」那一段換成連結：案名本身可能也出現在句子前段（案名就叫「後期」的話，
+        // 裸 replace 會換到「已連結後期」裡的那兩個字）
         const name = _esc(note.mine_name);
-        html = html.replace(name, `<a href="/my-ledger.html?project=${encodeURIComponent(note.mine_id)}" target="_blank" rel="noopener" style="color:#8ab4f8;">${name} ↗</a>`);
+        html = html.replace('→ ' + name, `→ <a href="/my-ledger.html?project=${encodeURIComponent(note.mine_id)}" target="_blank" rel="noopener" style="color:#8ab4f8;">${name} ↗</a>`);
     }
     if (note.linked && note.stale === true) {
         html += ' <span style="font-size:10px;color:#fca5a5;border:1px solid #7a2d2d;border-radius:3px;padding:0 4px;" title="母帳成本行改了之後還沒重新同步到私帳">私帳落後</span>';

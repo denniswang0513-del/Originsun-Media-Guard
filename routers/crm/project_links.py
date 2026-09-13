@@ -613,14 +613,16 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
     # 值沒變：只有「後期代開但分身還沒建」（同事先存了欄位、帳本主人再存一次）要補建，其他不動
     if (p.entity or "parent") == "mine" or (new == old and not want_source):
         return {"action": "none", "created": False}
+    t = await resolve_mine_link(session, p)
+    if want_source and new == old and t is not None:
+        # 表單整包送回同一個值而分身早就在 —— 什麼都不用做，也**不要**對沒私帳權限的同事回 skipped
+        # （那句 warning 會在他每一次存檔時跳出來）
+        return {"action": "none", "created": False}
     try:
         require_entity(request, "mine", level="full")
     except HTTPException:
         return {"action": "skipped", "created": False}
-    t = await resolve_mine_link(session, p)
     if want_source:
-        if new == old and t is not None:
-            return {"action": "none", "created": False}
         if t is None:
             sid = await _me_staff_id_or_blank(request)
             _p, mir, _linked = await _mirror_preview(session, p.id, sid)

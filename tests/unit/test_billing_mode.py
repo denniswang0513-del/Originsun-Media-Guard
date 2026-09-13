@@ -95,7 +95,9 @@ def test_apply_billing_mode_rules():
     # 只有看得到私帳的請求動私帳；不然回 skipped（不 raise —— 欄位本身誰都能存）
     assert 'require_entity(request, "mine", level="full")' in fn and '"skipped"' in fn
     # 值沒變：只補「後期代開但分身還沒建」，其他 none
-    assert "new == old and not want_source" in fn and "if new == old and t is not None:" in fn
+    assert "new == old and not want_source" in fn and "if want_source and new == old and t is not None:" in fn
+    # 同事整包表單送回同一個值而分身早就在 → none（不能每次存檔都對他 skipped＋warning）：查連結要在守衛之前
+    assert fn.index("t = await resolve_mine_link(session, p)") < fn.index('require_entity(request, "mine", level="full")')
     # 私帳案自己沒有收款方式
     assert '(p.entity or "parent") == "mine"' in fn
     # 後期代開：沒分身就用 _new_mirror_row（建分身那一列的唯一寫法）＋ _write_link（連結的唯一寫入者）
@@ -176,14 +178,14 @@ def test_link_note_html_and_billing_tag_in_node():
                      for fn in ("billingTagHtml", "linkNoteHtml"))
     consts = src[src.index("export const BILLING_LABELS"):src.index("export function billingTagHtml(")].replace("export ", "")
     script = "const _esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\"/g,'&quot;');\n" + consts + body + """
-const linked = {linked:true, mine_id:'m 1', mine_name:'A<b', stale:true, text:'link -> A<b . src . 82,000'};
+const linked = {linked:true, mine_id:'m 1', mine_name:'A<b', stale:true, text:'A<b link → A<b . src . 82,000'};
 const h = linkNoteHtml(linked);
 const out = [
   billingTagHtml({billing_mode:'company'}) === '',
   billingTagHtml({billing_mode:'passthrough'}).includes(BILLING_LABELS.passthrough),
   billingTagHtml(null) === '',
   h.includes('href="/my-ledger.html?project=m%201"'),
-  h.includes('>A&lt;b') && !h.includes('A<b'),
+  h.includes('>A&lt;b') && !h.includes('A<b') && h.startsWith('A&lt;b link ') && (h.match(/<a /g) || []).length === 1,
   h.includes('title=') && h.endsWith('</span>'),
   !linkNoteHtml({linked:true, mine_id:'m', mine_name:'x', stale:false, text:'x'}).includes('</span>'),
   !linkNoteHtml({linked:false, text:'no link'}).includes('href'),
