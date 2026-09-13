@@ -10,6 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 import core.ledger as ledger
+from core.ledger_project import apply_source_fee, norm_detail
 from routers.crm import project_links as pl
 
 
@@ -90,4 +91,14 @@ async def test_switch_refuses_when_mirror_is_shared(monkeypatch):
     assert e2.value.status_code == 409
     assert t2.ledger_detail["invoice_fee"] == 4000
 
+
+def test_half_up_rounding_matches_the_frontend():
+    """BUG-6：前端 Math.round 是半進位，後端 round() 是銀行家 —— .5 時差 1 元，代辦費會被誤標成「手動」。"""
+    d = norm_detail({"source": "代開發票", "fee_pct": 10, "invoice_fee": 1235})
+    out = apply_source_fee(12345, d, keep={"invoice_fee"})      # 12345 × 10% = 1234.5 → 前端送 1235
+    assert out["invoice_fee"] == 1235
+    assert "invoice_fee" not in (out.get("manual") or []), "跟試算值一樣的送值不是手動"
+    # 真的手改還是要被標
+    d2 = norm_detail({"source": "代開發票", "fee_pct": 10, "invoice_fee": 1300})
+    assert "invoice_fee" in apply_source_fee(12345, d2, keep={"invoice_fee"})["manual"]
 

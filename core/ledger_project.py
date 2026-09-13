@@ -17,6 +17,7 @@ docstring 自稱正本的算式在第一天就有兩份（/simplify 2026-08-25 �
 """
 from __future__ import annotations
 
+import math
 import re
 
 # 營業稅率 —— 正本在 core.finance_logic（發票未稅／稅額吃的是同一個）。
@@ -122,13 +123,20 @@ NHI_PCT = 2.11                   # 二代健保補充保費；單次 < 20,000 �
 NHI_MIN_PAYMENT = 20000
 
 
+def _half_up(x: float) -> int:
+    """金額四捨五入 —— **半進位**，跟前端 `Math.round` 一樣。Python 內建 `round()` 是銀行家
+    捨入（1234.5 → 1234），前端 1234.5 → 1235；兩邊算出的「試算值」差 1 元，apply_source_fee
+    就會把前端送回的試算值當成「人改過」釘成手動（2026-09-13 review 抓到）。錢的 round 都走這支。"""
+    return int(math.floor(float(x) + 0.5))
+
+
 def withholding(contract: int) -> int:
     """執行業務所得單次給付的源頭代扣合計（所得扣繳＋二代健保）。"""
     c = int(contract or 0)
-    tax = round(c * WITHHOLD_TAX_PCT / 100)
+    tax = _half_up(c * WITHHOLD_TAX_PCT / 100)
     if tax <= WITHHOLD_TAX_EXEMPT:
         tax = 0
-    nhi = round(c * NHI_PCT / 100) if c >= NHI_MIN_PAYMENT else 0
+    nhi = _half_up(c * NHI_PCT / 100) if c >= NHI_MIN_PAYMENT else 0
     return tax + nhi
 
 # 案碼協定：匯入/新增都把 `案碼:XXX` 寫進 notes（前綴不同：[私帳匯入]/[私帳新增]），
@@ -487,7 +495,7 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
     # 不會送這一欄，下一秒就把人調好的數字洗回試算值。
     field = "invoice_fee" if src == "代開發票" else "personal_tax"
     c = int(contract or 0)
-    auto = (round(c * float(d.get("fee_pct") or DEFAULT_FEE_PCT) / 100) if src == "代開發票"
+    auto = (_half_up(c * float(d.get("fee_pct") or DEFAULT_FEE_PCT) / 100) if src == "代開發票"
             else withholding(contract))
     manual = manual_fields(d)
     if field in keep:
@@ -498,7 +506,7 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
         d[field] = auto
     if src == "代開發票":
         # 稅金與買發票是代辦費的**組成**（買發票＝代辦費 − 稅金），代辦費手改時跟著重算
-        d["tax_fee"] = round(c / VAT_DIVISOR * (VAT_PCT / 100))
+        d["tax_fee"] = _half_up(c / VAT_DIVISOR * (VAT_PCT / 100))
         d["buy_invoice"] = int(d["invoice_fee"] or 0) - d["tax_fee"]
     d.pop("tax_manual", None)      # 一律換成清單形狀，別留兩種真相
     if manual:
