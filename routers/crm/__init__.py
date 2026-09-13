@@ -7,6 +7,7 @@
 from . import clients    # noqa: F401  客戶管理 + CSV + users
 from . import projects   # noqa: F401  專案管理 + 結案看板 + CSV
 from . import project_links  # noqa: F401  母帳↔私帳：換帳本／推送／對應表（依賴 projects，須在其後）
+from . import project_map    # noqa: F401  母私帳對應表（2026-09-13 從 project_links 拆出；要在它之後）
 from . import quotes     # noqa: F401  報價 + 報價範本
 from . import staff      # noqa: F401  人力 + 履歷 + 派工
 from . import costs      # noqa: F401  雜支 + 收據 + 財務摘要（＋子表／估算共用 helper）

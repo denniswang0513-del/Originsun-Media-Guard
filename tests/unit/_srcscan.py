@@ -287,7 +287,7 @@ TIMESHEETS_FILES = ("_shared.py", "sync.py", "mine.py", "ledger.py", "projects.p
 
 
 #: 專案管理 2026-09-12 拆出「換帳本／推送／對應表」一段（那檔 1,979 行離 2,000 上限 21 行）
-PROJECTS_FILES = ("projects.py", "project_links.py")
+PROJECTS_FILES = ("projects.py", "project_links.py", "project_map.py")
 COSTS_FILES = ("costs.py", "cost_groups.py", "cost_lines.py")
 
 
