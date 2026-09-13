@@ -323,6 +323,13 @@ MANUAL_FIELDS = frozenset({"personal_tax", "invoice_fee"})
 FEE_DEDUCTED_KEY = "fee_deducted"
 #: 上次從母帳同步的日期（YYYY-MM-DD；給「後期連結」那行備註講「上次同步」）
 MIRROR_AT_KEY = "mirror_at"
+#: 收入**分案**記帳（owner 2026-09-13「為何不加起來？」）：一個私帳案承接多個母帳案時，
+#: 每個母帳案各記一份 `{amount, split, synced_total, at}`。X 的 contract_amount／split
+#: 只吃差額（set_parent_share），owner 自己填的那部分（合約額 − Σ份額、手改的工項）系統永遠不動。
+BY_PARENT_KEY = "by_parent"
+#: True＝N:1 的舊資料，各案份額還沒認領（回填時分不出來）；認領走 set_parent_share(claim=True)，
+#: 全部母帳案都認領完由呼叫端清掉。缺鍵＝不是待認領。
+BY_PARENT_PENDING_KEY = "by_parent_pending"
 
 
 def fee_deducted(d) -> bool:
@@ -396,18 +403,104 @@ def norm_detail(raw) -> dict:
     ma = str(d.get(MIRROR_AT_KEY) or "").strip()
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", ma):
         out[MIRROR_AT_KEY] = ma
+    # 分案份額：只留形狀對的（每案 amount／split／synced_total／at 四鍵補齊），不保留的話
+    # 每一次 PUT 都把它洗掉，之後換一案的份額就又回到「只能整個換」。
+    shares = _clean_shares(d.get(BY_PARENT_KEY))
+    if shares:
+        out[BY_PARENT_KEY] = shares
+    if d.get(BY_PARENT_PENDING_KEY) is True:
+        out[BY_PARENT_PENDING_KEY] = True
     return out
 
 
-def mirror_stale(detail, current_total: int):
+def _clean_shares(raw) -> dict:
+    out: dict = {}
+    for pid, v in (raw if isinstance(raw, dict) else {}).items():
+        if not pid or not isinstance(v, dict):
+            continue
+        split = v.get("split") if isinstance(v.get("split"), dict) else {}
+        at = str(v.get("at") or "").strip()
+        out[str(pid)] = {
+            "amount": _int(v.get("amount")),
+            "split": {str(k): _int(x) for k, x in split.items() if _int(x)},
+            "synced_total": _int(v.get("synced_total")),
+            "at": at if re.fullmatch(r"\d{4}-\d{2}-\d{2}", at) else "",
+        }
+    return out
+
+
+def _int(v) -> int:
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def parent_shares(detail) -> dict:
+    """`{母帳案 id: {amount, split, synced_total, at}}`；沒有分案記錄＝空 dict。"""
+    d = detail if isinstance(detail, dict) else {}
+    return _clean_shares(d.get(BY_PARENT_KEY))
+
+
+def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=None, at: str = "",
+                     claim: bool = False) -> tuple:
+    """把母帳案 `pid` 給私帳案的份額換成 `(amount, split)` → `(新 detail, 新 contract)`。
+
+    X 的金額與工項只吃**差額**（新 − 這案舊份額），所以別案的份額、owner 自己填的錢與
+    手改的工項都不會被動到；工項扣到負數就停在 0（owner 手改得比份額低，那是他的決定）。
+    `synced_total`／`at` 沒給就沿用這案上一次的（換收款方式只動金額、不是重新同步）。
+    `claim=True`：待認領的舊資料（BY_PARENT_PENDING_KEY）—— 只記份額、X 的錢一毛不動，
+    因為那些錢早就在合約額裡了。
+    """
+    d = norm_detail(detail)
+    shares = parent_shares(d)
+    old = shares.get(pid) or {"amount": 0, "split": {}, "synced_total": 0, "at": ""}
+    new_split = {str(k): _int(v) for k, v in (split or {}).items() if _int(v)}
+    contract = _int(contract)
+    if not claim:
+        contract = contract + _int(amount) - old["amount"]
+        xs = dict(d.get("split") or {})
+        for k in set(xs) | set(new_split) | set(old["split"]):
+            xs[k] = max(0, _int(xs.get(k)) + new_split.get(k, 0) - old["split"].get(k, 0))
+        d["split"] = {k: v for k, v in xs.items() if v}
+    shares[pid] = {"amount": _int(amount), "split": new_split,
+                   "synced_total": _int(synced_total) if synced_total is not None else old["synced_total"],
+                   "at": at or old["at"]}
+    d[BY_PARENT_KEY] = shares
+    return d, contract
+
+
+def drop_parent_share(detail, contract, pid: str) -> tuple:
+    """解除連結：把 `pid` 那案的份額從 X 扣掉（金額、工項都扣，工項扣到 0 為止）→ `(detail, contract)`。
+    沒這案的記錄＝原樣回去（舊連結沒分案記錄時解除連結不動錢，跟以前一樣）。"""
+    d = detail if isinstance(detail, dict) else {}
+    if pid not in parent_shares(d):
+        return detail, contract
+    d, contract = set_parent_share(d, contract, pid, 0, {})
+    shares = parent_shares(d)
+    shares.pop(pid, None)
+    if shares:
+        d[BY_PARENT_KEY] = shares
+    else:
+        d.pop(BY_PARENT_KEY, None)
+    return d, contract
+
+
+def mirror_stale(detail, current_total: int, pid: str = ""):
     """私帳有沒有落後母帳 → `(stale, delta)`。
 
     `stale` 三值：True＝母帳成本行改了（`delta`＝現在 − 上次同步）、False＝一致、
     None＝判不出來（舊連結沒記過 `mirror_total`；重新同步一次就會記）。
     🔴 比的是**上次同步的合計**，不是私帳現在的 Σsplit —— 私帳那份他可能自己
     改過（照實際請款填），那不是「落後」，是他的決定。
+    給 `pid` 就看**那一案**上次同步的合計（by_parent[pid].synced_total）—— 一個私帳案承接
+    多個母帳案時也判得出來；沒分案記錄才退回單一的 `mirror_total`。
     """
     d = detail if isinstance(detail, dict) else {}
+    share = parent_shares(d).get(pid) if pid else None
+    if share is not None and share["synced_total"] > 0:
+        last = share["synced_total"]
+        return int(current_total or 0) != last, int(current_total or 0) - last
     try:
         last = int(d.get(MIRROR_TOTAL_KEY))
     except (TypeError, ValueError):
