@@ -31,6 +31,7 @@ EXPECTED = [
     "_m19_finance_phase2_tables",
     "_m20_seed_mine_cash_taxonomy",
     "_m21_seed_work_stages",
+    "_m22_ledger_by_parent_backfill",
 ]
 
 

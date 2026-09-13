@@ -666,6 +666,72 @@ async def _m21_seed_work_stages() -> None:
             print(f"[startup] work stage seed failed: {_e_ws}")
 
 
+async def _m22_ledger_by_parent_backfill() -> None:
+    """私帳案收入分案記帳（ledger_detail.by_parent）的舊資料回填（owner 2026-09-13「為何不加起來？」）"""
+    # 冪等：有 by_parent 或 by_parent_pending 的列不再碰。1:1 的整筆認成那一案的份額；
+    # N:1 的用「掛給 owner 的成本行合計」逐案認（owner＝唯一一個有 finance_mine 且綁了人員檔的帳號），
+    # 加總對得上合約額才認，對不上或找不到 owner → 標 by_parent_pending，由 owner 逐案「推送→取代」認領。
+    if state.db_online:
+        try:
+            n1 = nn = pend = 0
+            factory = get_session_factory()
+            if factory:
+                from sqlalchemy import select
+                from db.models import CrmProject, User
+                from core.ledger import MINE_MODULE
+                from core.auth import expand_modules
+                from core.ledger_project import (BY_PARENT_PENDING_KEY, MIRROR_AT_KEY, MIRROR_TOTAL_KEY,
+                                                 billing_mode_of, norm_detail, parent_shares, set_parent_share)
+                from routers.crm._shared import mine_parent_links
+                async with factory() as session:
+                    mine_ids = [i for (i,) in (await session.execute(
+                        select(CrmProject.id).where(CrmProject.entity == "mine"))).all()]
+                    links = await mine_parent_links(session, mine_ids)
+                    owners = [u.staff_id for u in (await session.execute(
+                        select(User).where(User.staff_id.isnot(None)))).scalars().all()
+                              if MINE_MODULE in expand_modules(u.modules or [])]
+                    owner_sid = owners[0] if len(owners) == 1 else ""
+                    for mid, parents in links.items():
+                        if not parents:
+                            continue
+                        t = await session.get(CrmProject, mid)
+                        if t is None:
+                            continue
+                        keep = norm_detail(t.ledger_detail)
+                        if parent_shares(keep) or keep.get(BY_PARENT_PENDING_KEY) is True:
+                            continue
+                        contract = int(t.contract_amount or 0)
+                        if len(parents) == 1:
+                            pid = parents[0][0]
+                            keep, _c = set_parent_share(keep, contract, pid, contract, keep.get("split") or {},
+                                                        synced_total=int(keep.get(MIRROR_TOTAL_KEY) or 0),
+                                                        at=str(keep.get(MIRROR_AT_KEY) or ""), claim=True)
+                            n1 += 1
+                        else:
+                            claimed = []
+                            if owner_sid:
+                                from routers.crm.project_links import _mirror_preview
+                                for pid, _name in parents:
+                                    p, mir, _l = await _mirror_preview(session, pid, owner_sid)
+                                    amount = (int(p.contract_amount or 0) if billing_mode_of(p.billing_mode) == "passthrough"
+                                              and int(p.contract_amount or 0) else int(mir["total"] or 0))
+                                    claimed.append((pid, amount, mir["split"], int(mir["total"] or 0)))
+                            if claimed and all(a > 0 for _p, a, _s, _t in claimed) and                                     sum(a for _p, a, _s, _t in claimed) <= contract:
+                                for pid, amount, split, total in claimed:
+                                    keep, _c = set_parent_share(keep, contract, pid, amount, split,
+                                                                synced_total=total, claim=True)
+                                nn += 1
+                            else:
+                                keep[BY_PARENT_PENDING_KEY] = True
+                                pend += 1
+                        t.ledger_detail = keep
+                    await session.commit()
+            if n1 or nn or pend:
+                print(f"[migrate] 私帳分案記帳回填：1:1 {n1} 案、N:1 認出 {nn} 案、待認領 {pend} 案")
+        except Exception as _e_bp:
+            print(f"[migrate] 私帳分案記帳回填略過: {_e_bp}")
+
+
 _POST_DB = [
     _m01_google_oauth_columns,
     _m02_me_zone_split_backfill,
@@ -688,6 +754,7 @@ _POST_DB = [
     _m19_finance_phase2_tables,
     _m20_seed_mine_cash_taxonomy,
     _m21_seed_work_stages,
+    _m22_ledger_by_parent_backfill,
 ]
 
 
