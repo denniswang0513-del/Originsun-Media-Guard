@@ -991,7 +991,6 @@ async function mergeHostOutputs() {
 
                     if (allMissing.length === 0) {
                         appendLog('✅ 所有 Proxy 檔案皆已正常產出！', 'system');
-                        if (ms) ms.textContent = '驗證完成';
                         if (window.executePostMergeJobs) window.executePostMergeJobs(flags);
                         return;
                     }
