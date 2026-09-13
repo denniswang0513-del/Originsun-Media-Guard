@@ -66,8 +66,9 @@ def world(monkeypatch):
                               ledger_detail={"source": "源日", "split": {"剪接": 100000}, "mirror_total": 30000}),
         "X5": SimpleNamespace(id="X5", entity="mine", contract_amount=100000, amount_received=0,
                               ledger_detail={"source": "代開發票", "split": {}, "invoice_fee": 8000, "tax_fee": 4762, "buy_invoice": 3238}),
-        "G": SimpleNamespace(id="G", entity="parent", contract_amount=0, billing_mode="company"),
-        "H": SimpleNamespace(id="H", entity="parent", contract_amount=0, billing_mode="company"),
+        # 第 12 輪 #1：母帳有填客戶合約額（300,000／250,000）也不能拿來當份額 —— 金額看母帳收款方式（company → 成本行）
+        "G": SimpleNamespace(id="G", entity="parent", contract_amount=300000, billing_mode="company"),
+        "H": SimpleNamespace(id="H", entity="parent", contract_amount=250000, billing_mode="company"),
         "A": SimpleNamespace(id="A", entity="parent", contract_amount=0, billing_mode="company"),
         "B": SimpleNamespace(id="B", entity="parent", contract_amount=0, billing_mode="company"),
         "C": SimpleNamespace(id="C", entity="parent", contract_amount=80000, billing_mode="passthrough"),
@@ -116,6 +117,7 @@ async def test_backfill_claims_one_to_one_and_resolvable_n_to_one_and_flags_the_
     # 第 11 輪 #4：舊 X 本身是代開（一張發票涵蓋兩案）→ 份額跟 X 走，開機時錢不變
     x5 = world.projects["X5"]
     assert {sh["source"] for sh in parent_shares(x5.ledger_detail).values()} == {"代開發票"}
+    assert {sh["amount"] for sh in parent_shares(x5.ledger_detail).values()} == {30000, 20000}
     assert x5.ledger_detail["invoice_fee"] == 8000 and x5.amount_receivable == 92000
     assert x2.contract_amount == 120000 and x2.ledger_detail["split"] == {"剪接": 120000}
     assert x3.ledger_detail.get(BY_PARENT_PENDING_KEY) is True and not parent_shares(x3.ledger_detail)

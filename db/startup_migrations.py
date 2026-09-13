@@ -711,12 +711,12 @@ async def _backfill_by_parent(session) -> tuple:
                 try:
                     for pid, _name in parents:
                         p, mir, _l = await _mirror_preview(session, pid, owner_sid)
-                        src = BILLING_MIRROR_SOURCE.get(billing_mode_of(p.billing_mode), "")
-                        # 舊 X 本身就是代開／執行業務所得（一張發票涵蓋所有母帳案）：份額跟 X 走，開機時錢才不會變
-                        # （同 1:1 legacy_claim）；X 是源日／空才看母帳的收款方式
-                        if keep.get("source") in ("代開發票", "執行業務所得"):
-                            src = keep["source"]
-                        claimed.append((pid, _mirror_contract(p, mir, src), mir["split"], int(mir["total"] or 0), src))
+                        psrc = BILLING_MIRROR_SOURCE.get(billing_mode_of(p.billing_mode), "")
+                        # 金額看母帳的收款方式（後期代開＝發票面額、其他＝掛給我的成本行）；
+                        # 份額的**案源**：舊 X 本身就是代開／執行業務所得（一張發票涵蓋所有母帳案）→ 跟 X 走，
+                        # 開機時費用才不會變（同 1:1 legacy_claim）；X 是源日／空才看母帳的收款方式
+                        src = keep["source"] if keep.get("source") in ("代開發票", "執行業務所得") else psrc
+                        claimed.append((pid, _mirror_contract(p, mir, psrc), mir["split"], int(mir["total"] or 0), src))
                 except Exception as _e_row:       # 一筆壞掉（成本行表缺、母帳案被刪）不能擋住其他列的認領
                     print(f"[migrate] 私帳分案回填：{t.id} 認不出來（{_e_row}），標待認領")
                     claimed = []

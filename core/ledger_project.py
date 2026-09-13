@@ -621,6 +621,8 @@ def _release_fee_flags(d: dict, contract) -> None:
     agency, pro = fee_bases(contract, d)
     if not agency and "invoice_fee" not in frozen:
         manual.discard("invoice_fee")
+    if not agency:
+        d.pop(FEE_DEDUCTED_KEY, None)      # 「已扣除」是代開的旗標：沒有代開基數就重設回預設（同換回）
     if not pro and "personal_tax" not in frozen:
         manual.discard("personal_tax")
     if manual:

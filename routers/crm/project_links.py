@@ -490,11 +490,15 @@ def _claim_on_push(pending: bool, linked_before, pid: str) -> bool:
     return bool(pending) and pid in set(linked_before or ())
 
 
-def _push_share_source(explicit: str, old_share: dict) -> str:
-    """推送時這一案份額的案源：這次明確指定的（req.source 或母帳的收款方式）> 這案舊份額的 > 源日。
-    🔴 不看 X 的 source —— 那可能已被**別案**改收款方式翻成代開，抄過來會把不走代開的案也算進代辦費基數。"""
+def _push_share_source(explicit: str, old_share: dict, claim_x_source: str = "") -> str:
+    """推送時這一案份額的案源：這次明確指定的（req.source 或母帳的收款方式）> 這案舊份額的 >
+    （認領舊資料時）X 自己的案源 > 源日。
+    🔴 平常不看 X 的 source —— 那可能已被**別案**改收款方式翻成代開，抄過來會把不走代開的案也算進代辦費基數。
+    只有**認領**（claim：錢早就在 X 上、照 X 當時的規則抽過費）才退到 X 的案源（同 legacy_claim／回填），
+    不然舊的代開 N:1 逐案認領完會被翻成源日、代辦費歸零。"""
     from core.ledger_project import MIRROR_SOURCE
-    return explicit or old_share.get("source") or MIRROR_SOURCE
+    x_src = claim_x_source if claim_x_source in ("代開發票", "執行業務所得") else ""
+    return explicit or old_share.get("source") or x_src or MIRROR_SOURCE
 
 
 async def _clear_pending_if_all_claimed(session, t, keep: dict) -> dict:
@@ -520,13 +524,14 @@ def _new_mirror_row(p, mir: dict, note: str, source: str = ""):
     contract = _mirror_contract(p, mir, source)
     d = mirror_detail(mir["split"])
     d[MIRROR_AT_KEY] = _today_tw()
-    if source:
-        d["source"] = source
-    d = norm_detail(apply_source_fee(contract, d))
+    # X 自己的案源（owner 那部分）一律源日；這一案走代開的話寫在**份額**上（下面 set_parent_share source=）——
+    # X.source 系統不翻（第 7 輪），建的時候也不寫代開，之後換回才不會留下「owner 那部分是代開」的殘影
+    d = norm_detail(d)
     # 分案記帳：這一案給的份額＝整筆（新分身只有它一個來源）；claim＝錢已經在上面的 contract／split 裡
     d, _c = set_parent_share(d, contract, p.id, contract, mir["split"],
-                             synced_total=mir["total"], at=_today_tw(), source=d.get("source") or MIRROR_SOURCE,
+                             synced_total=mir["total"], at=_today_tw(), source=source or MIRROR_SOURCE,
                              claim=True)
+    d = norm_detail(apply_source_fee(contract, d))      # 代辦費照份額算（份額寫好之後才算得出來）
     return new_ledger_project(
         project_id=uuid.uuid4().hex, name=p.name, client_id=p.client_id,
         entity="mine", contract=contract, detail=d,
@@ -631,11 +636,16 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 keep[MIRROR_TOTAL_KEY] = mir["total"]     # 舊的單一合計仍記（沒分案記錄的讀法退到它）
                 keep[MIRROR_AT_KEY] = _today_tw()         # X 層級的「上次同步」（詳情那一行顯示用）
                 # 這一案份額的案源與金額：看**份額**的案源，不看 X 的（X 可能已被別案翻成代開）
-                share_src = _push_share_source(source, old_share)
+                share_src = _push_share_source(source, old_share, keep.get("source") if claim else "")
                 if mode == "add" and share_src == "代開發票":
                     mode = "overwrite"        # 代開的金額是發票面額、不累加；工項也不能跟著翻倍
                 amount = _push_share_amount(mode, claim, share_src, old_share, mir["total"],
                                             int(p.contract_amount or 0) or (0 if old_share.get("amount") else mir["total"]))
+                if claim:
+                    # 認領不動錢：份額只能認「合約額扣掉別案已認的」那麼多，Σ份額才不會超過合約額
+                    # （超過的話之後解除會把別案的錢扣走）
+                    others_total = sum(sh["amount"] for pid, sh in parent_shares(keep).items() if pid != p.id)
+                    amount = max(0, min(amount, int(t.contract_amount or 0) - others_total))
                 adding = mode == "add" and not claim
                 new_split, _delta = merge_split(old_share["split"] if adding else {},
                                                 mir["split"] or {}, add=adding)
@@ -684,7 +694,7 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
     """母帳案 `billing_mode` 從 `old_mode` 變成現在的值 → 私帳分身的對應動作。不 commit。
     回 `{"action": created|switched|reverted|none|skipped, "created": bool}`。"""
     from core.ledger import require_entity
-    from core.ledger_project import (BY_PARENT_PENDING_KEY, FEE_DEDUCTED_KEY, BILLING_MIRROR_SOURCE,
+    from core.ledger_project import (BY_PARENT_PENDING_KEY, BILLING_MIRROR_SOURCE,
                                      apply_source_fee, billing_mode_of, norm_detail, parent_shares,
                                      set_parent_share, share_source)
 
@@ -747,11 +757,8 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         # 代辦費由 apply_source_fee 照剩下的代開份額重算（一案都沒有就三欄歸零）。
         keep, _c = set_parent_share(keep, int(t.contract_amount or 0), p.id, share["amount"], share["split"],
                                     restore_source=True, claim=True)          # 回切換前的案源（沒記過退源日）
-        # X 自己的案源不動（那是 owner 那部分的）。代辦費的手動旗標由 set_parent_share 依「基數歸零才放」處理；
-        # 「已扣除」只在沒有任何代開基數時才重設（別案還走代開的話 owner 取消的勾要留著）
-        from core.ledger_project import fee_bases
-        if not fee_bases(int(t.contract_amount or 0), keep)[0]:
-            keep.pop(FEE_DEDUCTED_KEY, None)
+        # X 自己的案源不動（那是 owner 那部分的）。代辦費的手動旗標與「已扣除」由 set_parent_share 依
+        # 「代開基數歸零才放／重設」處理（_release_fee_flags）—— 換回、解除同一條
         _store_mirror_detail(t, apply_source_fee(int(t.contract_amount or 0), keep))
         return {"action": "reverted", "created": False}
     return {"action": "none", "created": False}

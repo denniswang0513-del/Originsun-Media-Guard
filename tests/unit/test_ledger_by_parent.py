@@ -229,7 +229,7 @@ class TestPolishRound1:
         assert _push_share_source("", {}) == "源日"
         from tests.unit._srcscan import code_only, flow_body, projects_src
         body = code_only(flow_body(projects_src(), "async def mirror_project_to_mine("))
-        assert "share_src = _push_share_source(source, old_share)" in body and "source=share_src" in body
+        assert 'share_src = _push_share_source(source, old_share, keep.get("source") if claim else "")' in body and "source=share_src" in body
         assert 'source=keep["source"]' not in body
 
     def test_pending_add_records_this_push_not_a_running_sum(self):
@@ -253,7 +253,7 @@ class TestPolishRound2:
         assert _push_share_amount("add", True, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 30000   # 待認領：add 視同取代
         from tests.unit._srcscan import code_only, flow_body, projects_src
         body = code_only(flow_body(projects_src(), "async def mirror_project_to_mine("))
-        assert "share_src = _push_share_source(source, old_share)" in body
+        assert 'share_src = _push_share_source(source, old_share, keep.get("source") if claim else "")' in body
         assert "amount = _push_share_amount(mode, claim, share_src, old_share, mir[\"total\"]," in body
         assert 'if keep["source"] == "代開發票":' not in body
 
@@ -602,4 +602,33 @@ class TestPolishRound11:
         from tests.unit._srcscan import code_only, flow_body, projects_src
         bm = code_only(flow_body(projects_src(), "async def apply_billing_mode("))
         assert 'sorted(manual_fields(keep) - {"invoice_fee"})' not in bm
-        assert "if not fee_bases(int(t.contract_amount or 0), keep)[0]:" in bm
+        assert "keep.pop(FEE_DEDUCTED_KEY, None)" not in bm
+
+
+class TestPolishRound12:
+    def test_claim_of_a_pending_x_keeps_x_fee_bearing_source(self):
+        # #2（高）：舊的代開 N:1 逐案認領 → 份額案源要跟 X（代開），不能看母帳收款方式翻成源日（代辦費會歸零）
+        from routers.crm.project_links import _push_share_source
+        assert _push_share_source("", {}, "代開發票") == "代開發票"
+        assert _push_share_source("", {}, "源日") == "源日"
+        assert _push_share_source("", {"source": "執行業務所得"}, "代開發票") == "執行業務所得"
+        assert _push_share_source("代開發票", {}, "") == "代開發票"
+        from tests.unit._srcscan import code_only, func_body, projects_src
+        push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
+        assert '_push_share_source(source, old_share, keep.get("source") if claim else "")' in push
+        # #3：認領不能超過「合約額 − 別案已認」
+        assert "amount = max(0, min(amount, int(t.contract_amount or 0) - others_total))" in push
+
+    def test_unlink_resets_fee_deducted_when_no_agency_base_remains(self):
+        # #4：owner 取消「已扣除」、之後唯一的代開份額被解除 → 旗標重設（同換回）
+        from core.ledger_project import FEE_DEDUCTED_KEY, drop_parent_share
+        d, c = set_parent_share({"source": "源日", FEE_DEDUCTED_KEY: False}, 20000, "A", 100000, {}, source="代開發票")
+        assert d.get(FEE_DEDUCTED_KEY) is False
+        d2, _ = drop_parent_share(d, c, "A")
+        assert FEE_DEDUCTED_KEY not in d2
+
+    def test_new_mirror_row_keeps_x_source_as_owner_part(self):
+        # #5：從後期代開母帳建的分身：X.source 源日（owner 那部分）、代開寫在份額上、代辦費照份額算
+        from tests.unit._srcscan import code_only, func_body, projects_src
+        fn = code_only(func_body(projects_src(), "def _new_mirror_row("))
+        assert 'd["source"] = source' not in fn and "source=source or MIRROR_SOURCE" in fn

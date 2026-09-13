@@ -119,10 +119,10 @@ def test_apply_billing_mode_rules():
     # 換回：只把這一案標回源日（source=MIRROR_SOURCE, claim）、代開三欄由 apply_source_fee 照剩下的代開份額重算
     # （一案都沒有就歸零）；已扣除旗標與代辦費的手動旗標拿掉
     # 換回：份額案源還原成切換前的（prev_source；沒記過退源日），claim 不動錢
-    assert "restore_source=True, claim=True" in fn and "keep.pop(FEE_DEDUCTED_KEY, None)" in fn
+    assert "restore_source=True, claim=True" in fn
     # 第 11 輪起旗標由 set_parent_share 依「基數歸零才放」處理，換回路不自己放；已扣除只在沒代開基數時重設
     assert 'keep["manual"] = sorted(manual_fields(keep) - {"invoice_fee"})' not in fn
-    assert "if not fee_bases(int(t.contract_amount or 0), keep)[0]:" in fn
+    assert "keep.pop(FEE_DEDUCTED_KEY, None)" not in fn          # 已扣除的重設也進了 _release_fee_flags（同解除）
     assert "session.delete" not in fn, "分身不刪（要拿掉走解除連結）"
     # 沒指定案源時 mirror-to-mine 看收款方式；「走不走代開」一份判定
     mm = code_only(func_body(_LINKS, "async def mirror_project_to_mine("))
