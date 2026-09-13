@@ -378,7 +378,7 @@ async def check_project_mirror(project_id: str, request: Request):
             # 2026-09-13 起逐案判（同 link_note_for）：只有「沒分案記錄的舊 N:1」才判不出來
             from ._shared import mine_parent_links
             n_parents = len((await mine_parent_links(session, [linked.id])).get(linked.id) or [])
-            shared = not parent_shares(linked.ledger_detail) and n_parents > 1
+            shared = n_parents > 1 and share is None
             if not shared:
                 stale, delta = mirror_stale(linked.ledger_detail, mir["total"], p.id)
     return {
@@ -740,7 +740,8 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
                                     source=MIRROR_SOURCE, claim=True)
         others_agency = any(share_source(keep, sh) == "代開發票"
                             for pid, sh in parent_shares(keep).items() if pid != p.id)
-        if not others_agency:
+        if not others_agency and keep.get("source") == "代開發票":
+            # X 是被收款方式翻成代開的才翻回來；owner 自己的案源（執行業務所得／源日）不動
             keep["source"] = MIRROR_SOURCE
         keep["manual"] = sorted(manual_fields(keep) - {"invoice_fee"})
         keep.pop(FEE_DEDUCTED_KEY, None)
@@ -825,10 +826,16 @@ async def _write_link(session, parent, mine):
         # 沒分案記錄的舊連結不動錢（跟以前一樣）。分身列已刪就只清指標。
         t = await resolve_mine_link(session, parent)      # 兩種連結形狀都認（舊形狀只在私帳側有指標）
         if t is not None:
-            from core.ledger_project import drop_parent_share, norm_detail, parent_shares
+            from core.ledger_project import drop_parent_share, norm_detail, parent_shares, share_source
             before = norm_detail(t.ledger_detail)
             if parent.id in parent_shares(before):
                 keep, new_contract = drop_parent_share(before, int(t.contract_amount or 0), parent.id)   # 費用在裡面重算
+                if keep.get("source") == "代開發票" and not any(
+                        share_source(keep, sh) == "代開發票" for sh in parent_shares(keep).values()):
+                    # 最後一個代開份額解除了：X 的案源跟「換回」同一條規則退回源日，owner 自己的錢不再被抽代辦費
+                    from core.ledger_project import MIRROR_SOURCE, apply_source_fee
+                    keep["source"] = MIRROR_SOURCE
+                    keep = apply_source_fee(new_contract, keep)
                 t.contract_amount = new_contract
                 _store_mirror_detail(t, keep)
         parent.mine_link_id = None
@@ -845,12 +852,21 @@ async def _write_link(session, parent, mine):
     # 推送／建分身是先寫份額再連結，那時記錄已在、這裡不動。
     # 🔴 份額的案源看**母帳的收款方式**，不抄 X 的 —— X 可能已被別案翻成代開，抄過來這案就被標成代開，
     # 之後推送會把整張客戶合約額當份額加進 X、還算進代辦費（BUG-16 那顆雷）。
-    from core.ledger_project import (BILLING_MIRROR_SOURCE, MIRROR_SOURCE, billing_mode_of, norm_detail,
-                                     parent_shares, set_parent_share)
+    from core.ledger_project import (BILLING_MIRROR_SOURCE, BY_PARENT_PENDING_KEY, MIRROR_SOURCE, billing_mode_of,
+                                     norm_detail, parent_shares, set_parent_share)
     keep = norm_detail(mine.ledger_detail)
     if parent.id not in parent_shares(keep):
+        if not parent_shares(keep) and keep.get(BY_PARENT_PENDING_KEY) is not True:
+            # X 沒任何記錄卻已經連著別案（舊資料，回填沒跑到）：X 上的錢是那些案的，先標待認領，
+            # 之後推它們才是 claim（同 _ensure_share 的退路）；否則寫了這筆 0 份額就再也認不出舊資料
+            from ._shared import mine_parent_links
+            others = [pid for pid, _n in (await mine_parent_links(session, [mine.id])).get(mine.id) or []
+                      if pid != parent.id]
+            if others:
+                keep[BY_PARENT_PENDING_KEY] = True
         src = BILLING_MIRROR_SOURCE.get(billing_mode_of(getattr(parent, "billing_mode", None)), "") or MIRROR_SOURCE
         keep, _c = set_parent_share(keep, int(mine.contract_amount or 0), parent.id, 0, {}, source=src, claim=True)
+        keep = await _clear_pending_if_all_claimed(session, mine, keep)   # 走 keep 路推送的最後一案也能把旗標清掉
         mine.ledger_detail = keep
     mine.updated_at = _now()
     await _sync_pair(session, parent, mine)

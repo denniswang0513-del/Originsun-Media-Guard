@@ -524,6 +524,9 @@ def fee_bases(contract, detail) -> tuple:
         agency += own
     elif src == "執行業務所得":
         pro += own
+    # owner 把合約額改得比 Σ份額低（實際發票的面額）：基數不能超過營收 —— 代辦費／代扣算在沒收到的錢上
+    agency = min(agency, c)
+    pro = min(pro, max(0, c - agency))
     return agency, pro
 
 

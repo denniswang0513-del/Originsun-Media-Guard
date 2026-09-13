@@ -283,7 +283,7 @@ async def test_old_shape_unlink_does_not_touch_a_parent_relinked_elsewhere():
     assert "p0.mine_link_id in (None, m.id)" in body
 
 
-async def test_linking_records_a_zero_share_so_later_claims_do_not_grab_owner_money(monkeypatch):
+async def test_linking_records_a_zero_share_so_later_claims_do_not_grab_owner_money(monkeypatch, parents_of):
     """BUG-25：對應表連結時就記一筆 0 份額 —— 之後「沒記錄」只剩真正的舊資料，legacy_claim 不會把 owner 的
     整筆合約認給那案；推送時舊份額 0 → 錢正常加進去。"""
     from core.ledger_project import parent_shares
@@ -291,6 +291,7 @@ async def test_linking_records_a_zero_share_so_later_claims_do_not_grab_owner_mo
     async def _sync(session, parent, mine, *, explicit=()):
         return False
     monkeypatch.setattr(pl, "_sync_pair", _sync)
+    parents_of["X"] = []                                  # 從沒連過的 X
     mine = SimpleNamespace(id="X", contract_amount=50000, ledger_detail={"source": "源日", "split": {"剪接": 50000}},
                            source_project_id=None, updated_at=None)
     parent = SimpleNamespace(id="A", mine_link_id=None, updated_at=None)
@@ -304,7 +305,7 @@ async def test_linking_records_a_zero_share_so_later_claims_do_not_grab_owner_mo
     assert parent_shares(mine.ledger_detail)["A"]["amount"] == 20000
 
 
-async def test_link_zero_share_takes_the_parents_billing_mode_not_x_source(monkeypatch):
+async def test_link_zero_share_takes_the_parents_billing_mode_not_x_source(monkeypatch, parents_of):
     """BUG-29：連結時的 0 份額案源要看**母帳的收款方式**，不能抄 X 的 —— X 已是代開時 company 母帳連上來
     份額不能被標成代開（之後推送會把整張客戶合約額加進 X、算進代辦費）。"""
     from core.ledger_project import parent_shares
@@ -312,9 +313,54 @@ async def test_link_zero_share_takes_the_parents_billing_mode_not_x_source(monke
     async def _sync(session, parent, mine, *, explicit=()):
         return False
     monkeypatch.setattr(pl, "_sync_pair", _sync)
+    parents_of["X"] = []
     mine = SimpleNamespace(id="X", contract_amount=100000, ledger_detail={"source": "代開發票", "split": {}},
                            source_project_id=None, updated_at=None)
     await pl._write_link(None, SimpleNamespace(id="A", mine_link_id=None, billing_mode="company", updated_at=None), mine)
     assert parent_shares(mine.ledger_detail)["A"]["source"] == "源日"
     await pl._write_link(None, SimpleNamespace(id="B", mine_link_id=None, billing_mode="passthrough", updated_at=None), mine)
     assert parent_shares(mine.ledger_detail)["B"]["source"] == "代開發票"
+
+
+async def test_revert_only_resets_x_source_when_x_was_agency(monkeypatch, parents_of):
+    """BUG-34：X 本身是執行業務所得（owner 自己的案），對應表連了代開的 P 再換回 → X 的案源不能被洗成源日、
+    個人稅款不能歸零。"""
+    from core.ledger_project import parent_shares, set_parent_share, withholding
+
+    from core.ledger_project import apply_source_fee
+    d, c = set_parent_share({"source": "執行業務所得"}, 100000, "A", 0, {}, source="代開發票", claim=True)
+    d = apply_source_fee(c, d)
+    assert d["personal_tax"] == withholding(100000)
+    t = SimpleNamespace(id="X", name="X", entity="mine", contract_amount=c, ledger_detail=d, updated_at=None)
+
+    async def _link(session, p):
+        return t
+    monkeypatch.setattr(pl, "resolve_mine_link", _link)
+    monkeypatch.setattr(ledger, "require_entity", lambda request, ent, level="": None)
+    monkeypatch.setattr(pl, "_store_mirror_detail", lambda t, detail: setattr(t, "ledger_detail", detail))
+    out = await pl.apply_billing_mode(None, _parent("company", contract=50000), request=None, old_mode="passthrough")
+    assert out["action"] == "reverted"
+    assert t.ledger_detail["source"] == "執行業務所得"
+    assert t.ledger_detail["personal_tax"] == withholding(100000)
+    assert parent_shares(t.ledger_detail)["A"]["source"] == "源日"
+
+
+async def test_unlinking_the_last_agency_share_resets_x_source(monkeypatch):
+    """BUG-35：X 被 B 翻成代開；解除 B 後沒有代開份額了 → X 的案源要跟換回一樣退回源日，owner 自己的錢不再被抽代辦費。"""
+    from core.ledger_project import apply_source_fee, set_parent_share
+
+    d, c = set_parent_share({"source": "代開發票"}, 20000, "A", 30000, {}, source="源日")
+    d, c = set_parent_share(d, c, "B", 100000, {}, source="代開發票")
+    d = apply_source_fee(c, d)
+    assert d["invoice_fee"] == 9600                                  # (100,000 ＋ owner 20,000) × 8%
+    t = SimpleNamespace(id="X", name="X", entity="mine", contract_amount=c, ledger_detail=d, updated_at=None)
+    parent = SimpleNamespace(id="B", mine_link_id="X", updated_at=None)
+
+    async def _resolve(session, p):
+        return t
+    monkeypatch.setattr(pl, "resolve_mine_link", _resolve)
+    monkeypatch.setattr(pl, "_store_mirror_detail", lambda t, detail: setattr(t, "ledger_detail", detail))
+    await pl._write_link(None, parent, None)
+    assert t.contract_amount == 50000
+    assert t.ledger_detail["source"] == "源日"
+    assert (t.ledger_detail["invoice_fee"], t.ledger_detail["tax_fee"]) == (0, 0)

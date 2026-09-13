@@ -143,7 +143,7 @@ def test_check_reports_stale_and_the_sync_writes_the_total():
     assert "mirror_stale(linked.ledger_detail, mir[\"total\"], p.id)" in chk
     assert '"stale": stale, "delta": delta' in chk
     # 只有「沒分案記錄的舊 N:1」合計不屬於任何一案 → 不判
-    assert "shared = not parent_shares(linked.ledger_detail) and n_parents > 1" in chk and "if not shared:" in chk
+    assert "shared = n_parents > 1 and share is None" in chk and "if not shared:" in chk
     post = code_only(func_body(_PROJ, "async def mirror_project_to_mine("))
     assert 'keep[MIRROR_TOTAL_KEY] = mir["total"]' in post
 

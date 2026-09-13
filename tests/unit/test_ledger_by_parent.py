@@ -369,3 +369,35 @@ class TestPolishRound4:
         # BUG-33：換回時判「別案還走代開」用 share_source
         bm = code_only(flow_body(projects_src(), "async def apply_billing_mode("))
         assert 'others_agency = any(share_source(keep, sh) == "代開發票"' in bm
+
+
+class TestPolishRound5:
+    """第 5 輪驗證 review（BUG-34～40）：金額守恆已確認，這輪是 X 層級案源／費用的副作用。"""
+
+    def test_fee_bases_never_exceed_the_contract(self):
+        # BUG-40：owner 把合約額改得比 Σ份額低（實際發票 90,000）→ 代辦費基數不能超過營收
+        from core.ledger_project import fee_bases
+        d, _ = set_parent_share({"source": "源日"}, 0, "B", 100000, {}, source="代開發票")
+        assert fee_bases(90000, d) == (90000, 0)
+        d2, _ = set_parent_share(d, 0, "C", 42000, {}, source="執行業務所得")
+        assert fee_bases(120000, d2) == (100000, 20000)          # 兩種基數合計也不超過營收
+
+    def test_map_link_on_a_recordless_x_with_other_parents_marks_pending(self):
+        # BUG-38：X 是 Q 的舊分身（沒記錄、_m22 沒跑到），對應表再連 P → 不能只寫 P 的 0 份額就當沒事，
+        # 要標待認領，之後推 Q 才是 claim 不會重複加
+        from tests.unit._srcscan import code_only, func_body, projects_src
+        fn = code_only(func_body(projects_src(), "async def _write_link("))
+        assert "keep[BY_PARENT_PENDING_KEY] = True" in fn
+        assert "_clear_pending_if_all_claimed(session, mine, keep)" in fn        # BUG-36：keep 路徑也能清旗標
+
+    def test_mirror_check_guards_partially_claimed_pending_like_link_note(self):
+        # BUG-37：部分認領的待認領 X，對沒記錄的那案不能退回 X 層級 mirror_total（那是別案剛寫的）
+        from tests.unit._srcscan import code_only, func_body, projects_src
+        chk = code_only(func_body(projects_src(), "async def check_project_mirror("))
+        assert "shared = n_parents > 1 and share is None" in chk
+
+    def test_delete_master_project_unlinks_first(self):
+        # BUG-39：刪母帳案不解除連結 → X 留著孤兒份額，後端算它、詳情 API 不回它 → 前後端基數分叉 → 代辦費被凍住
+        from tests.unit._srcscan import code_only, func_body, projects_src
+        fn = code_only(func_body(projects_src(), "async def delete_project("))
+        assert "await _write_link(session, project, None)" in fn
