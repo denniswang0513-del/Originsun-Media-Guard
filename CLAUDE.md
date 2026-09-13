@@ -1243,6 +1243,20 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 > 不是純函式測試，所以 /polish 的「全套測試」以單元套件為準（publish gate 也是跑 `tests/unit`）。
 > 這條分支相對於 master 的 diff 極大（整條 feature/website-m），跑 /polish 時請用 `focus on <範圍>` 縮小。
 
+### health（全 repo 體檢，`.claude/skills/health/SKILL.md`）
+
+跟 /polish 的分工：**polish 管這次的 diff 並修到可合併；/health 管整個 repo、以盤點為主**，
+只自動修白名單（ruff F401/F841、前端唯一來源的漏 import、特徵測試、CLAUDE.md 地雷一行）。
+共用 `polish.base`／`polish.test`。報告落地 `docs/health/<日期>.md`，下次跑會跟上一份比數字。
+結構債那段直接呼叫 `/polish --debt`。缺 pyright／pytest-cov／pip-audit 會先問要不要裝進 .venv。
+
+### assess（修 bug 前的評估閘門，`.claude/skills/assess/SKILL.md`）
+
+**任何 bug 修之前先過 `/assess`**：一張 7 欄評估卡（現象／根因／影響範圍／重現／修法選項／驗證與回退／判定），
+閘門：根因或重現「不確定」→ 只回報；影響對外面／OTA／schema、跨檔搬碼、改公開介面、diff > 40 行、
+撞「不要動的地方」、要改測試才綠 → 需人工。**紅→綠硬規定**：沒看到測試先失敗不准改碼。一張卡一個 commit。
+/polish 階段一與 /health 階段一都經過它；使用者手動說「修這個」也先出卡，說「直接修」才跳過卡片（但不跳過紅→綠）。
+
 ---
 
 ## 模組職責
