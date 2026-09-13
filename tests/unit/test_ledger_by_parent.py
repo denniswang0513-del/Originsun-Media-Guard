@@ -8,7 +8,7 @@
 
 不變式：contract_amount = Σ by_parent[*].amount + 自己的；split[k] = Σ by_parent[*].split[k] + 自己的。
 """
-from core.ledger_project import (BY_PARENT_KEY, BY_PARENT_PENDING_KEY, MIRROR_TOTAL_KEY,
+from core.ledger_project import (BY_PARENT_KEY, BY_PARENT_PENDING_KEY, MIRROR_TOTAL_KEY, apply_source_fee,
                                  drop_parent_share, mirror_stale, norm_detail, parent_shares,
                                  set_parent_share)
 
@@ -132,3 +132,64 @@ class TestWritersGoThroughShares:
     def test_norm_detail_keeps_by_parent_so_puts_do_not_wipe_it(self):
         d = norm_detail({"split": {}, BY_PARENT_KEY: {"A": {"amount": 5}}, "garbage": 1})
         assert BY_PARENT_KEY in d and "garbage" not in d
+
+
+class TestPerParentSource:
+    """代辦費分案（owner 2026-09-13）：每案份額帶 source，代辦費／個人稅款只算標那種案源的份額。"""
+
+    def _mixed(self):
+        # A 代開 100,000、B 源日 80,000、owner 自己填 20,000（跟 X 的案源走）
+        d, c = set_parent_share({"source": "源日"}, 0, "A", 100000, {"導演": 100000}, source="代開發票")
+        d, c = set_parent_share(d, c, "B", 80000, {"剪接": 80000}, source="源日")
+        return d, c + 20000
+
+    def test_share_keeps_source_and_norm_detail_validates_it(self):
+        d, _ = self._mixed()
+        assert parent_shares(d)["A"]["source"] == "代開發票" and parent_shares(d)["B"]["source"] == "源日"
+        junk = norm_detail({BY_PARENT_KEY: {"A": {"amount": 1, "source": "亂填"}}})
+        assert "source" not in parent_shares(junk)["A"]
+        d2, _ = set_parent_share(d, 0, "A", 100000, {})          # source 沒給＝沿用
+        assert parent_shares(d2)["A"]["source"] == "代開發票"
+
+    def test_fee_bases_follow_each_parents_source_and_owner_part_follows_x(self):
+        from core.ledger_project import fee_bases
+        d, c = self._mixed()
+        assert fee_bases(c, d) == (100000, 0)                       # X 是源日 → 自己那 20,000 不抽
+        d["source"] = "代開發票"
+        assert fee_bases(c, d) == (120000, 0)                       # X 改代開 → 自己那 20,000 也抽，B 仍不抽
+        d["source"] = "執行業務所得"
+        assert fee_bases(c, d) == (100000, 20000)
+        assert fee_bases(50000, norm_detail({"source": "代開發票"})) == (50000, 0)     # 沒分案記錄＝整案
+        assert fee_bases(50000, norm_detail({"source": "源日"})) == (0, 0)
+
+    def test_apply_source_fee_charges_only_the_agency_shares(self):
+        d, c = self._mixed()                                        # X 源日、A 代開 100,000
+        out = apply_source_fee(c, d)
+        assert out["invoice_fee"] == 8000                           # 100,000 × 8%，不是 200,000
+        assert out["tax_fee"] == 4762 and out["buy_invoice"] == 3238
+        # A 換回源日 → 沒有代開份額了 → 三欄歸零（不是留著舊數字）
+        d2, _ = set_parent_share(out, c, "A", 100000, {"導演": 100000}, source="源日")
+        out2 = apply_source_fee(c, d2)
+        assert (out2["invoice_fee"], out2["tax_fee"], out2["buy_invoice"]) == (0, 0, 0)
+
+    def test_mixed_agency_and_professional_income_compute_both(self):
+        from core.ledger_project import withholding
+        d, c = set_parent_share({"source": "源日"}, 0, "A", 100000, {}, source="代開發票")
+        d, c = set_parent_share(d, c, "B", 42000, {}, source="執行業務所得")
+        out = apply_source_fee(c, d)
+        assert out["invoice_fee"] == 8000 and out["personal_tax"] == withholding(42000)
+
+    def test_manual_fee_still_respected_with_shares(self):
+        d, c = self._mixed()
+        d["invoice_fee"] = 5000
+        out = apply_source_fee(c, d, keep={"invoice_fee"})
+        assert out["invoice_fee"] == 5000 and "invoice_fee" in out["manual"]
+        assert out["buy_invoice"] == 5000 - out["tax_fee"]
+
+    def test_source_mixed_flag(self):
+        from core.ledger_project import source_mixed
+        d, _ = self._mixed()
+        assert source_mixed(d) is True
+        one, _ = set_parent_share({"source": "源日"}, 0, "A", 1, {}, source="源日")
+        assert source_mixed(one) is False
+        assert source_mixed(norm_detail({"source": "代開發票"})) is False

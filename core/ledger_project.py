@@ -434,6 +434,10 @@ def _clean_shares(raw) -> dict:
             "synced_total": _int(v.get("synced_total")),
             "at": at if re.fullmatch(r"\d{4}-\d{2}-\d{2}", at) else "",
         }
+        # 這一案的案源（代辦費分案）：只留合法值；缺鍵＝跟 X 的 source 走（fee_bases）
+        src = str(v.get("source") or "").strip()
+        if src in SOURCES:
+            out[str(pid)]["source"] = src
     return out
 
 
@@ -451,12 +455,14 @@ def parent_shares(detail) -> dict:
 
 
 def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=None, at: str = "",
-                     claim: bool = False) -> tuple:
+                     source=None, claim: bool = False) -> tuple:
     """把母帳案 `pid` 給私帳案的份額換成 `(amount, split)` → `(新 detail, 新 contract)`。
 
     X 的金額與工項只吃**差額**（新 − 這案舊份額），所以別案的份額、owner 自己填的錢與
     手改的工項都不會被動到；工項扣到負數就停在 0（owner 手改得比份額低，那是他的決定）。
     `synced_total`／`at` 沒給就沿用這案上一次的（換收款方式只動金額、不是重新同步）。
+    `source`＝這一案的案源（代辦費分案：代辦費只算標「代開發票」的份額）；None＝沿用、
+    不在 SOURCES 的值＝清掉（之後跟 X 的 source 走）。
     `claim=True`：待認領的舊資料（BY_PARENT_PENDING_KEY）—— 只記份額、X 的錢一毛不動，
     因為那些錢早就在合約額裡了。
     """
@@ -474,8 +480,48 @@ def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=
     shares[pid] = {"amount": _int(amount), "split": new_split,
                    "synced_total": _int(synced_total) if synced_total is not None else old["synced_total"],
                    "at": at or old["at"]}
+    src = old.get("source") if source is None else str(source or "").strip()
+    if src in SOURCES:
+        shares[pid]["source"] = src
     d[BY_PARENT_KEY] = shares
     return d, contract
+
+
+def fee_bases(contract, detail) -> tuple:
+    """代辦費／個人稅款的**計算基數** `(代開發票基數, 執行業務所得基數)`。
+
+    代辦費分案（owner 2026-09-13）：一個私帳案承接的母帳案有的走代開、有的不走，代辦費只能算
+    走代開那幾案的份額。每案份額的 `source` 決定它算進哪個基數；沒標的跟 X 的 `source` 走；
+    owner 自己填的那部分（合約額 − Σ份額）也跟 X 的 `source` 走。沒有分案記錄＝整案照 X 的 `source`（舊算法）。
+    """
+    d = detail if isinstance(detail, dict) else {}
+    src = str(d.get("source") or "")
+    c = _int(contract)
+    shares = parent_shares(d)
+    if not shares:
+        return (c if src == "代開發票" else 0, c if src == "執行業務所得" else 0)
+    agency = pro = total = 0
+    for sh in shares.values():
+        eff = sh.get("source") or src
+        total += sh["amount"]
+        if eff == "代開發票":
+            agency += sh["amount"]
+        elif eff == "執行業務所得":
+            pro += sh["amount"]
+    own = max(0, c - total)
+    if src == "代開發票":
+        agency += own
+    elif src == "執行業務所得":
+        pro += own
+    return agency, pro
+
+
+def source_mixed(detail) -> bool:
+    """各案份額的案源不一致（畫面上案源那格要寫「混合」）。沒分案記錄＝False。"""
+    d = detail if isinstance(detail, dict) else {}
+    src = str(d.get("source") or "")
+    kinds = {sh.get("source") or src for sh in parent_shares(d).values()}
+    return len(kinds) > 1
 
 
 def drop_parent_share(detail, contract, pid: str) -> tuple:
@@ -589,26 +635,34 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
     建立新案時沒有這一欄可送 → keep 是空的 → 照樣自動試算。
     """
     src = d.get("source")
-    if src not in ("代開發票", "執行業務所得"):
-        return d
+    # 代辦費分案：基數是「走那種案源的份額加總」，不是整案（fee_bases）。沒分案記錄時兩者相等。
+    agency, pro = fee_bases(contract, d)
+    has_shares = bool(parent_shares(d))
+    if not has_shares and src not in ("代開發票", "執行業務所得"):
+        return d          # 沒分案記錄、也不是抽費的案源：使用者填的數字不動（舊行為）
     # 自動值是**試算不是規定**：送來的值 ≠ 試算 → 這格從此由人決定；改回試算值 → 交還自動。
     # 🔴 旗標要**落庫**，不能只看「這次有沒有送」：只改別欄的那種存檔（例如單改行政雜支）
     # 不會送這一欄，下一秒就把人調好的數字洗回試算值。
-    field = "invoice_fee" if src == "代開發票" else "personal_tax"
-    c = int(contract or 0)
-    auto = (_half_up(c * float(d.get("fee_pct") or DEFAULT_FEE_PCT) / 100) if src == "代開發票"
-            else withholding(contract))
     manual = manual_fields(d)
-    if field in keep:
-        manual.discard(field)
-        if int(d.get(field) or 0) != auto:
-            manual.add(field)
-    if field not in manual:
-        d[field] = auto
-    if src == "代開發票":
+
+    def _settle(field: str, auto: int) -> None:
+        if field in keep:
+            manual.discard(field)
+            if int(d.get(field) or 0) != auto:
+                manual.add(field)
+        if field not in manual:
+            d[field] = auto
+
+    if src == "代開發票" or (has_shares and agency):
+        _settle("invoice_fee", _half_up(agency * float(d.get("fee_pct") or DEFAULT_FEE_PCT) / 100))
         # 稅金與買發票是代辦費的**組成**（買發票＝代辦費 − 稅金），代辦費手改時跟著重算
-        d["tax_fee"] = _half_up(c / VAT_DIVISOR * (VAT_PCT / 100))
+        d["tax_fee"] = _half_up(agency / VAT_DIVISOR * (VAT_PCT / 100))
         d["buy_invoice"] = int(d["invoice_fee"] or 0) - d["tax_fee"]
+    elif has_shares and manual_fields(d) & {"invoice_fee"} == set():
+        # 有分案記錄、但沒有任何一案走代開（例如 A 換回源日）→ 代開三欄歸零，不留舊數字
+        d["invoice_fee"] = d["tax_fee"] = d["buy_invoice"] = 0
+    if src == "執行業務所得" or (has_shares and pro):
+        _settle("personal_tax", withholding(pro))
     d.pop("tax_manual", None)      # 一律換成清單形狀，別留兩種真相
     if manual:
         d["manual"] = sorted(manual)
