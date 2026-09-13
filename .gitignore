@@ -124,3 +124,7 @@ company_assets/
 # dev 8001 手動啟動時的開機 log（/dev restart 用 -RedirectStandardOutput 寫的）
 dev_boot.log
 dev_boot.err
+
+# /health 的 pytest-cov 暫存檔（覆蓋率算完就沒用）
+.coverage
+htmlcov/
