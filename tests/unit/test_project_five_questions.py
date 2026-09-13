@@ -29,10 +29,15 @@ def test_client_wire_always_deducts_the_agency_fee():
 
 
 def test_payout_excludes_what_never_reached_us():
-    """③ 要自己匯出去的 ＝ 委外＋雜支＋稅金＋買發票。
-    🔴 不含代辦費與個人稅款 —— 那筆錢沒進來過，再算一次「要付出去」就是重複計。"""
+    """③ 要自己匯出去的 ＝ 委外＋雜支（＋代辦費沒先扣時的稅金＋買發票）。
+    🔴 不含代辦費與個人稅款 —— 那筆錢沒進來過，再算一次「要付出去」就是重複計。
+    2026-09-13 起稅金＋買發票也看 `fee_deducted`（owner「不用再匯，因為已經有這個支出付掉了」）：
+    代辦費在源頭扣走時它的組成不再列成要匯出去的；取消已扣除才算。"""
+    from core.ledger_project import FEE_DEDUCTED_KEY, FEE_PARTS
     assert set(PAYOUT_FIELDS) == {"outsource", "misc", "tax_fee", "buy_invoice"}
-    assert payout_total(D) == 60000 + 3000 + 1200 + 800
+    assert set(FEE_PARTS) == {"tax_fee", "buy_invoice"}
+    assert payout_total(D) == 60000 + 3000                       # 預設＝已扣：稅金／買發票不再匯
+    assert payout_total(dict(D, **{FEE_DEDUCTED_KEY: False})) == 60000 + 3000 + 1200 + 800
     assert "invoice_fee" not in PAYOUT_FIELDS and "personal_tax" not in PAYOUT_FIELDS
     assert payout_total({}) == 0
 

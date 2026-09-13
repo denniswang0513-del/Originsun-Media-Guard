@@ -102,8 +102,9 @@ def test_apply_billing_mode_rules():
     assert '(p.entity or "parent") == "mine"' in fn
     # 後期代開：沒分身就用 _new_mirror_row（建分身那一列的唯一寫法）＋ _write_link（連結的唯一寫入者）
     assert "_new_mirror_row(p, mir," in fn and "await _write_link(session, p, t)" in fn
-    # 有分身：只改案源＋重跑費用，金額與工項不動；收入沒填過才用母帳合約額補
-    assert 'keep["source"] = want_source' in fn and "if not int(t.contract_amount or 0):" in fn
+    # 有分身：案源改代開、收入一律＝母帳合約額（owner「一律改成合約」；母帳沒填才留原值）、工項不動
+    assert 'keep["source"] = want_source' in fn and "if int(p.contract_amount or 0):" in fn
+    assert "t.contract_amount = int(p.contract_amount or 0)" in fn
     assert "resync_receivable(t, keep)" in fn
     # 換回源日專案／現金收款：分身留著、案源改回源日、代辦費三欄歸零、已扣旗標拿掉
     assert 'keep["source"] = MIRROR_SOURCE' in fn
@@ -158,6 +159,8 @@ def test_frontend_wiring():
         js = js_code_only(repo_src(path))
         assert "det.fee_deducted !== false" in js, path
         assert "fee_deducted" in js and "fee_deducted ===" not in js, path
+    # 桌機只在案源＝代開發票時送旗標（非代開案存 False 沒意義）
+    assert "if (dEl2 && body.source === '代開發票') body.fee_deducted" in js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))
 
 
 def test_mirror_check_does_not_nag_passthrough_cases_about_cost_lines():

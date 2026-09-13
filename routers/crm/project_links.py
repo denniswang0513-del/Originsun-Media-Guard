@@ -630,10 +630,11 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
             session.add(t)
             await _write_link(session, p, t)
             return {"action": "created", "created": True}
-        # 有分身：只改案源＋重跑費用，金額與工項不動（收入沒填過才用母帳合約額補）
+        # 有分身：案源改成代開發票、收入**一律**＝母帳合約額（owner 2026-09-13「一律改成合約」——
+        # 代開的錢就是那張發票的面額，之前分身記的成本行合計不是）；工項不動。母帳沒填合約額才留原值。
         keep = norm_detail(t.ledger_detail)
         keep["source"] = want_source
-        if not int(t.contract_amount or 0):
+        if int(p.contract_amount or 0):
             t.contract_amount = int(p.contract_amount or 0)
         _store_mirror_detail(t, apply_source_fee(int(t.contract_amount or 0), keep))
         return {"action": "switched", "created": False}

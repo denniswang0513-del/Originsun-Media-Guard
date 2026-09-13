@@ -526,9 +526,19 @@ def client_wire(contract: int, d: dict) -> int:
     return int(contract or 0) - withheld_total(d)
 
 
+#: 代辦費的**組成**（稅金＋買發票）：代辦費已在源頭扣走時，這兩欄跟著不用再匯
+FEE_PARTS = ("tax_fee", "buy_invoice")
+
+
 def payout_total(d: dict) -> int:
-    """③ 這一案總共要自己匯出去多少（委外＋雜支＋稅金＋買發票）。"""
-    return sum(int((d or {}).get(k) or 0) for k in PAYOUT_FIELDS)
+    """③ 這一案總共要自己匯出去多少（委外＋雜支；代辦費沒先扣時再加稅金＋買發票）。
+
+    owner 2026-09-13：「不用再匯，因為已經有這個支出付掉了」—— 稅金與買發票是代辦費的組成，
+    代辦費已扣除（`fee_deducted`，預設）＝代開業者匯款前就拿走了，再列成「要匯出去的」就是同一筆錢算兩次。
+    取消已扣除（全額匯進來）時它們才真的要自己匯。
+    """
+    keys = PAYOUT_FIELDS if not fee_deducted(d) else tuple(k for k in PAYOUT_FIELDS if k not in FEE_PARTS)
+    return sum(int((d or {}).get(k) or 0) for k in keys)
 
 
 def settle_state(to_collect_amt: int, ap_open: int, payout: int) -> dict:

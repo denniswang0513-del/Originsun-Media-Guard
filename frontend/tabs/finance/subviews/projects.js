@@ -1284,7 +1284,7 @@ _fp.save = async (btn) => {
         body.fee_pct = Number(fEl.value) || _defaultFeePct() || undefined;
         // 代辦費已扣除（後端只在 false 時落庫；沒鍵＝true）
         const dEl2 = document.getElementById('fpl-fee-deducted');
-        if (dEl2) body.fee_deducted = !!dEl2.checked;
+        if (dEl2 && body.source === '代開發票') body.fee_deducted = !!dEl2.checked;
     }
     btn.disabled = true;
     btn.textContent = '儲存中…';
