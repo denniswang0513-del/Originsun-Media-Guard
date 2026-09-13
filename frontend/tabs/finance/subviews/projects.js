@@ -58,6 +58,10 @@ const _wh = () => (_detail && _detail.withhold) || {};
 /** 代開發票的服務費率預設 —— 正本是後端的 `DEFAULT_FEE_PCT`。 */
 const _defaultFeePct = () => (_detail && _detail.default_fee_pct) || 0;
 
+/** 案源下拉的字面與順序（owner 2026-09-13）—— 正本是後端 `core.ledger_project.SOURCE_LABELS`（詳情隨 source_labels 送來；
+ *  新增表單畫在拿到資料之前，所以這裡留一份鏡射；測試釘住兩邊一致）。值不變，舊案不用改。 */
+const SOURCE_LABELS = { '源日': '源日（現金收款）', '代開發票': '自接（代開發票）', '自接': '自接（現金收款）', '執行業務所得': '自接（執行業務所得）' };
+
 /** 執行業務所得的源頭代扣試算 —— 演算法同後端 `core.ledger_project.withholding`。
  *  🔴 **費率吃後端回的 `withhold`**（`/project-ledger/{id}` 帶回來），這裡不寫死
  *  10／2,000／2.11％／20,000：二代健保費率是法定的、動過不只一次，寫死的那份
@@ -327,9 +331,7 @@ function _renderShell() {
                 ${!_isMine() ? '' : `
                 <label style="color:#888;font-size:11px;">案源<select class="crm-input" id="fpc-source">
                     <option value="">—</option>
-                    <option value="源日">源日（現金收款）</option>
-                    <option value="代開發票">代開發票（扣服務費）</option>
-                    <option value="執行業務所得">執行業務所得（自動代扣）</option></select></label>
+                    ${Object.entries(SOURCE_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
                 <label style="color:#888;font-size:11px;" id="fpc-fee-wrap" hidden>服務費率 %<input class="crm-input" type="number" id="fpc-feepct" value="8" step="0.1"></label>`}
             </div>
             <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
@@ -599,13 +601,11 @@ function _renderDetail() {
                             <td><select class="crm-input fpl-num" id="fpl-source" style="width:100%;">
                                 <option value="">—</option>
                                 ${(() => {
-                                    // 自接＝歷史值不再可選 —— 但舊案選著它時要就地補一個
+                                    // 字面與順序照後端（SOURCE_LABELS）；不在可選清單的歷史值要就地補一個
                                     // 選項，否則畫面顯示成空、存檔會把值洗掉
-                                    const label = (s) => s === '源日' ? '源日（現金收款）'
-                                        : s === '代開發票' ? '代開發票（自動代辦費）'
-                                        : s === '執行業務所得' ? '執行業務所得（自動代扣）'
-                                        : s === '自接' ? '自接（歷史）' : s;
-                                    const list = [...(d.sources || [])];
+                                    const labels = d.source_labels || SOURCE_LABELS;
+                                    const label = (s) => labels[s] || s;
+                                    const list = [...(d.sources || Object.keys(SOURCE_LABELS))];
                                     if (det.source && !list.includes(det.source)) list.unshift(det.source);
                                     return list.map((s) => `<option value="${esc(s)}"${det.source === s ? ' selected' : ''}>${label(s)}</option>`).join('');
                                 })()}

@@ -109,11 +109,16 @@ def income_items(settings: dict | None = None) -> list:
 # 案源（owner 2026-08-25/26）：源日＝現金收款；代開發票＝營收 × 服務費率的
 # 代辦費（預設 8%，191 個歷史案實證全部 8.00%；逐案可調）；執行業務所得＝
 # 源頭代扣自動算（見 apply_source_fee）。
-# 🔴 自接＝歷史值（361 案），**不再可選**（owner 2026-08-26「下拉把自接移除」）
-# —— 留在 SOURCES 白名單讓舊案的 meta 不被 norm_detail 洗掉，UI 下拉用
-# SELECTABLE_SOURCES。
+# 自接（361 個歷史案）2026-08-26 曾從下拉拿掉；owner 2026-09-13 又要回來，意思定為「自接（現金收款）」——
+# 我的案、客戶匯現金、沒開發票（對應母帳推送彈窗的「我的案，走現金匯款」）：不抽代辦費、不算源頭代扣，
+# 費用規則跟源日一樣（apply_source_fee 只認代開發票與執行業務所得）。
+# 下拉順序與字面（owner 指定）在 SOURCE_LABELS；值不變，舊案不用改。
 SOURCES = ("自接", "源日", "代開發票", "執行業務所得")
-SELECTABLE_SOURCES = ("源日", "代開發票", "執行業務所得")
+SELECTABLE_SOURCES = ("源日", "代開發票", "自接", "執行業務所得")
+SOURCE_LABELS = {"源日": "源日（現金收款）", "代開發票": "自接（代開發票）",
+                 "自接": "自接（現金收款）", "執行業務所得": "自接（執行業務所得）"}
+#: 「我的案，走現金匯款（客戶不用開發票）」推送／換帳本時分身的案源
+CASH_MINE_SOURCE = "自接"
 DEFAULT_FEE_PCT = 8.0
 
 # 執行業務所得的源頭代扣（典藏媒體顧問實帳驗證：42,000 → 4,200＋886＝5,086）
@@ -237,7 +242,7 @@ def link_note(mode: str, mine, detail, *, stale=None, delta: int = 0, crm_total:
         parts.append(f"代辦費 {pct_s} ＝ {_fmt_n(out['invoice_fee'])}"
                      f"（稅金 {_fmt_n(out['tax_fee'])} ＋ 買發票 {_fmt_n(out['buy_invoice'])}）"
                      + ("・已扣" if out["fee_deducted"] else "・未扣（全額匯入，代辦費另付）"))
-    elif shown == "源日":
+    elif shown in ("源日", CASH_MINE_SOURCE):
         parts.append("不抽代辦費")
     if stale is True:
         parts.append("私帳落後（母帳成本行改了）")

@@ -15,8 +15,9 @@ import { loadProjects } from './crm-projects-core.js';
 // 三種情況是兩種病（docs/LEDGER_UNIFY_PLAN.md §8.7–8.8）：
 //   1) 公司的案、公司付我一部分   → 分身（母帳留著，私帳多開一案，收入＝掛給我的成本行）
 //   2) 我的案、客戶走公司代開發票 → 換帳本（案源＝代開發票；內部代開發票留在母帳掛過來）
-//   2b) 我的案、走現金匯款（不開發票）→ 同 2 但案源＝源日、沒代辦費（owner 2026-09-13
-//       「是我的案，但是走現金匯款（客戶不用開發票）」）；收入一樣＝母帳合約額（whole）
+//   2b) 我的案、走現金匯款（不開發票）→ 同 2 但案源＝自接（現金收款）、沒代辦費（owner 2026-09-13
+//       「是我的案，但是走現金匯款（客戶不用開發票）」「自接(現金收款)---可以對應 crm 那邊的我的案 現金收款」）；
+//       收入一樣＝母帳合約額（whole）
 //   3) 我的案、沒經過公司         → 換帳本（問案源）
 // 使用者不必知道要按哪一顆：先問是哪一種，再分流到 _projMirrorMine／_projMoveLedger。
 // 已連結的案直接進「重新同步」（同 _projMirrorMine 的 relink 分支）。
@@ -39,7 +40,7 @@ window._projPushMine = async function (id, linked) {
             ${opt('passthrough', '我的案，客戶走公司代開發票',
                   '案源＝代開發票，代辦費自動算；公司開的「內部代開」發票掛在這一案上')}
             ${opt('cash', '我的案，走現金匯款（客戶不用開發票）',
-                  '錢經過公司帳戶但沒開發票：案源＝源日、不抽代辦費；私帳這案的收入＝母帳合約額')}
+                  '錢經過公司帳戶但沒開發票：案源＝自接（現金收款）、不抽代辦費；私帳這案的收入＝母帳合約額')}
             <div id="ppm-pt-sub" style="margin-left:26px;display:none;flex-direction:column;gap:4px;font-size:12px;color:#bbb;">
                 <label style="display:flex;gap:6px;align-items:center;cursor:pointer;">
                     <input type="radio" name="ppm-pt" value="copy" checked>
@@ -72,8 +73,8 @@ window._projPushMine = async function (id, linked) {
         window._projMirrorClose();
         if (kind === 'share') { return window._projMirrorMine(id); }
         if (kind === 'passthrough' && ptCopy) { return window._projMirrorMine(id, { source: '代開發票' }); }
-        if (kind === 'cash' && ptCopy) { return window._projMirrorMine(id, { source: '源日', whole: true }); }
-        return window._projMoveLedger(id, { source: kind === 'passthrough' ? '代開發票' : kind === 'cash' ? '源日' : '' });
+        if (kind === 'cash' && ptCopy) { return window._projMirrorMine(id, { source: '自接', whole: true }); }
+        return window._projMoveLedger(id, { source: kind === 'passthrough' ? '代開發票' : kind === 'cash' ? '自接' : '' });
     });
 };
 
@@ -151,8 +152,9 @@ window._projMoveLedger = async function (id, opts = {}) {
     }
     // 搬到私帳：問案源（confirm() 塞不下一個下拉）
     const src = opts.source || chk.source_default || '源日';
-    const sources = (chk.source_options || ['源日', '代開發票', '執行業務所得']).map(o =>
-        `<option value="${_esc(o)}"${o === src ? ' selected' : ''}>${_esc(o)}</option>`).join('');
+    const labels = chk.source_labels || {};
+    const sources = (chk.source_options || ['源日', '代開發票', '自接', '執行業務所得']).map(o =>
+        `<option value="${_esc(o)}"${o === src ? ' selected' : ''}>${_esc(labels[o] || o)}</option>`).join('');
     _mirrorModal(`搬到私帳 — ${chk.name}`, `
         <div style="color:#bbb;font-size:12.5px;line-height:1.6;">
             這個專案的錢流歸屬會改成私帳：之後掛在它身上的收支／發票／請款都算私帳的，
@@ -164,7 +166,7 @@ window._projMoveLedger = async function (id, opts = {}) {
         <div style="margin-top:12px;display:flex;align-items:center;gap:8px;font-size:13px;">
             <span style="color:#ddd;">案源</span>
             <select class="crm-input" id="pml-source" style="width:180px;">${sources}</select>
-            <span style="color:#777;font-size:11px;">代開發票＝代辦費自動算；源日＝現金收款</span>
+            <span style="color:#777;font-size:11px;">代開發票＝代辦費自動算；現金收款＝不抽代辦費</span>
         </div>
         <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px;">
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projMirrorClose()">取消</button>
@@ -237,7 +239,7 @@ window._projMirrorMine = async function (id, mirrorOpts = {}) {
         ? `<div style="color:#c4b5fd;font-size:12px;margin-bottom:8px;line-height:1.5;">${
             whole ? '整案是你的（走現金匯款、不開發票）' : '案源＝代開發票'}：私帳這案的收入＝母帳合約額 ${
             fmtNum(ptProj.contract_amount || 0)}${ptProj.contract_amount ? '' : '（母帳還沒填合約額，先用下面的成本行合計）'}${
-            whole ? '，案源＝源日、不抽代辦費。' : '，代辦費照費率自動算。'}</div>`
+            whole ? '，案源＝自接（現金收款）、不抽代辦費。' : '，代辦費照費率自動算。'}</div>`
         : '';
     const warn = chk.warning && !ptProj
         ? `<div style="color:#fbbf24;font-size:12px;margin-bottom:8px;line-height:1.5;">${_esc(chk.warning)}${

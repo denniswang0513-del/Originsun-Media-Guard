@@ -120,7 +120,7 @@ async def check_project_ledger_move(project_id: str, request: Request):
     把「會擋住的東西」講出來，而不是讓使用者按了才吃一個 409。
     """
     from core.ledger import require_entity
-    from core.ledger_project import SELECTABLE_SOURCES, norm_detail
+    from core.ledger_project import SELECTABLE_SOURCES, SOURCE_LABELS, norm_detail
 
     require_entity(request, "mine", level="full")
     _require_db()
@@ -142,7 +142,7 @@ async def check_project_ledger_move(project_id: str, request: Request):
             "name": name,
             # 搬到私帳要問案源：身上有內部代開發票就預設「代開發票」
             "has_passthrough_invoice": passthrough,
-            "source_options": list(SELECTABLE_SOURCES),
+            "source_options": list(SELECTABLE_SOURCES), "source_labels": dict(SOURCE_LABELS),
             "source_default": cur_source or ("代開發票" if passthrough else "源日")}
 
 

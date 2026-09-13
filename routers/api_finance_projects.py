@@ -37,7 +37,7 @@ from core.ledger_project import (BY_PARENT_PENDING_KEY, COST_FIELDS, DEFAULT_FEE
                                  WITHHOLD_TAX_PCT, apply_crm_costs,
                                  client_wire, payout_total, settle_state,
                                  to_collect,
-                                 SELECTABLE_SOURCES, SUM_KEYS, apply_source_fee,
+                                 SELECTABLE_SOURCES, SOURCE_LABELS, SUM_KEYS, apply_source_fee,
                                  code_of, compute,
                                  income_items, linked_display_name,
                                  norm_detail, receivable_fields)
@@ -547,8 +547,8 @@ async def project_ledger_detail(project_id: str, request: Request,
         # CRM 專案帳目的明細（合計在 detail 的 misc/outsource，這是它的組成）
         "crm_lines": _lines,
         "income_items": income_items(load_settings()),
-        # 下拉只給可選的（自接＝歷史值不再可選；舊案的值由前端就地補一個選項）
-        "sources": list(SELECTABLE_SOURCES), "default_fee_pct": DEFAULT_FEE_PCT,
+        # 下拉只給可選的（順序＝owner 指定；不在清單裡的歷史值由前端就地補一個選項）；字面在 source_labels
+        "sources": list(SELECTABLE_SOURCES), "source_labels": dict(SOURCE_LABELS), "default_fee_pct": DEFAULT_FEE_PCT,
         # 源頭代扣的費率與門檻 —— 前端的試算吃這裡，不自己寫一份 10/2000/2.11/20000。
         # 二代健保費率是法定的、動過不只一次；寫死在 JS 的話，改法的那天畫面上的
         # 預覽會跟存進去的值不一致，而那個值一旦被使用者「確認」就被 `manual` 清單凍住。

@@ -68,10 +68,11 @@ function draw(host) {
         || emptyBox(_q ? '沒有符合的案' : '私帳還沒有案');
 }
 
-/** 案源下拉：可選的那幾個 ＋ 舊案正在用的歷史值（「自接」不再可選，但舊案選著它時要就地補一個選項，
+/** 案源下拉：可選的那幾個（字面照後端 source_labels）＋ 舊案正在用的歷史值（不在清單裡的要就地補一個選項，
  *  否則畫面顯示成空、存檔會把值洗掉 —— 同桌機 projects.js 那條規則）。 */
-function sourceOpts(selectable, current) {
-    return current && !selectable.includes(current) ? [{ value: current, label: current + '（歷史值）' }, ...selectable] : selectable;
+function sourceOpts(selectable, current, labels = {}) {
+    const opts = selectable.map(v => ({ value: v, label: labels[v] || v }));
+    return current && !selectable.includes(current) ? [{ value: current, label: current + '（歷史值）' }, ...opts] : opts;
 }
 
 /** 抽屜：讀單筆（含 locked_fields／cost_sources／entries）。 */
@@ -105,7 +106,7 @@ export async function openProjectSheet(id, onDone) {
             <label>營收（含稅）</label>
             <input type="number" inputmode="numeric" min="0" step="1" id="pj-contract" value="${esc(p.contract || 0)}">
             <label>案源</label>
-            <select id="pj-source">${selectOpts(sourceOpts(d.sources || [], det.source || ''), det.source || '', '—')}</select>
+            <select id="pj-source">${selectOpts(sourceOpts(d.sources || [], det.source || '', d.source_labels || {}), det.source || '', '—')}</select>
             <label class="lg-check" id="pj-feeded-wrap" ${det.source === '代開發票' ? '' : 'hidden'}
                    title="勾＝代開業者匯款前先扣走代辦費（應收＝營收−代辦費）；不勾＝代辦費之後自己匯出去，應收＝營收。營收永遠是合約額。">
                 <input type="checkbox" id="pj-feeded" ${det.fee_deducted !== false ? 'checked' : ''}>代辦費已扣除（應收先扣掉代辦費）</label>

@@ -691,11 +691,13 @@ class TestCashMine:
         assert _mirror_contract(p, mir, "", whole=True) == 120000
         assert _mirror_contract(p, mir, "") == 0                       # 沒說整案是我的：照成本行
         assert _mirror_contract(self._parent(0), mir, "", whole=True) == 0   # 母帳沒填合約額才退成本行
-        t = _new_mirror_row(p, mir, "n", "", whole=True)
+        t = _new_mirror_row(p, mir, "n", "自接", whole=True)
         d = norm_detail(t.ledger_detail)
-        assert t.contract_amount == 120000 and d["source"] == "源日"
+        assert t.contract_amount == 120000 and d["source"] == "源日"          # X 自己（owner 那部分）的案源系統不翻
         sh = parent_shares(d)["P"]
-        assert sh["amount"] == 120000 and sh["face"] is True and sh["source"] == "源日"
+        assert sh["amount"] == 120000 and sh["face"] is True and sh["source"] == "自接"
+        from core.ledger_project import display_source
+        assert display_source(120000, d) == "自接"
         assert fee_bases(120000, d) == (0, 0)                        # 沒開發票：代辦費、執行業務所得基數都是 0
         assert int(d.get("invoice_fee") or 0) == 0
 
@@ -732,8 +734,8 @@ class TestCashMine:
         fn = js_code_only(js_func_body(js, "window._projPushMine = async function (id, linked) {"))
         assert "opt('cash', '我的案，走現金匯款（客戶不用開發票）'" in fn
         assert "const wholeKinds = ['passthrough', 'cash'];" in fn                 # 子選項（留一份／整案搬）兩種都有
-        assert "window._projMirrorMine(id, { source: '源日', whole: true })" in fn
-        assert "kind === 'cash' ? '源日' : ''" in fn
+        assert "window._projMirrorMine(id, { source: '自接', whole: true })" in fn
+        assert "kind === 'cash' ? '自接' : ''" in fn
         mm = js_code_only(js_func_body(js, "window._projMirrorMine = async function (id, mirrorOpts = {}) {"))
         assert "const whole = !!mirrorOpts.whole && src !== '代開發票';" in mm
         assert "box.dataset.whole = whole ? '1' : '';" in mm

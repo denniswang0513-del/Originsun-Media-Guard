@@ -95,7 +95,7 @@ def test_professional_income_withholding_auto():
     """執行業務所得（owner 2026-08-26「新增一個執行業務所得的項目自動算」）：
     源頭代扣＝所得扣繳 10%（單次稅額 ≤2,000 免扣）＋二代健保 2.11%
     （單次 <20,000 免扣）。42,000 → 4,200＋886＝5,086（典藏媒體顧問實帳）。
-    「自接」自可選清單移除（歷史值仍有效，白名單保留）。"""
+    「自接」2026-08-26 曾自可選清單移除；owner 2026-09-13 要回來當「自接（現金收款）」（值不變、費用規則同源日）。"""
     from core.ledger_project import (SELECTABLE_SOURCES, SOURCES,
                                      apply_source_fee, withholding)
     assert withholding(42000) == 5086
@@ -104,8 +104,19 @@ def test_professional_income_withholding_auto():
     assert withholding(100000) == 10000 + 2110
     d = apply_source_fee(42000, norm_detail({"source": "執行業務所得"}))
     assert d["personal_tax"] == 5086
-    assert "自接" not in SELECTABLE_SOURCES and "自接" in SOURCES
-    assert "執行業務所得" in SELECTABLE_SOURCES
+    assert SELECTABLE_SOURCES == ("源日", "代開發票", "自接", "執行業務所得") and set(SELECTABLE_SOURCES) <= set(SOURCES)
+    from core.ledger_project import SOURCE_LABELS, fee_bases
+    assert [SOURCE_LABELS[s] for s in SELECTABLE_SOURCES] == ["源日（現金收款）", "自接（代開發票）", "自接（現金收款）", "自接（執行業務所得）"]
+    assert fee_bases(100000, norm_detail({"source": "自接"})) == (0, 0)          # 現金收款：不抽代辦費、不代扣
+    # 桌機新增表單那份鏡射要跟後端一模一樣（順序也是）
+    import json
+    from tests.unit._srcscan import repo_src
+    js = repo_src("frontend/tabs/finance/subviews/projects.js")
+    line = next(l for l in js.splitlines() if l.startswith("const SOURCE_LABELS = {"))
+    body = line[len("const SOURCE_LABELS = "):].rstrip(";").replace("'", '"')
+    assert json.loads(body) == SOURCE_LABELS and list(json.loads(body)) == list(SELECTABLE_SOURCES)
+    assert '"source_labels": dict(SOURCE_LABELS)' in repo_src("routers/api_finance_projects.py")
+    assert "sourceOpts(d.sources || [], det.source || '', d.source_labels || {})" in repo_src("frontend/m/views/ledger-projects.js")
 
 
 def test_the_withholding_is_an_estimate_the_owner_can_override():
