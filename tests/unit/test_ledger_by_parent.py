@@ -741,3 +741,22 @@ class TestCashMine:
         assert "box.dataset.whole = whole ? '1' : '';" in mm
         sub = js_code_only(js_func_body(js, "async function _projMirrorSubmit(btn, id, mode, source) {"))
         assert "source: source || null, whole }" in sub
+
+
+class TestPolishRound17:
+    def test_revert_restores_the_face_marker_of_a_cash_mine_share(self):
+        """第 17 輪（模擬審查抓到）：走現金匯款的案（面額 150,000）切成後期代開再換回 → 面額標記要還原，
+        不然下一次重新同步把收入退成成本行合計（70,000）。切換前不是面額的份額換回後照舊沒有 face。"""
+        d, c = set_parent_share({"source": "源日"}, 0, "A", 150000, {"導演": 70000}, source="自接", face=True, synced_total=70000)
+        d2, c2 = set_parent_share(d, c, "A", 150000, {"導演": 70000}, source="代開發票", prev_source=True, face=True)
+        assert parent_shares(d2)["A"]["prev_face"] is True
+        d3, c3 = set_parent_share(d2, c2, "A", 150000, {"導演": 70000}, restore_source=True, claim=True)
+        sh = parent_shares(d3)["A"]
+        assert sh["source"] == "自接" and sh["face"] is True and "prev_face" not in sh
+        from routers.crm.project_links import _push_share_amount
+        assert _push_share_amount("overwrite", False, "自接", sh, 70000, 0) == 150000
+        # 切換前不是面額（N:1 成本行份額）：換回後沒有 face（同第 16 輪）
+        e, ce = set_parent_share({"source": "代開發票"}, 0, "B", 80000, {}, source="代開發票", synced_total=80000)
+        e2, ce2 = set_parent_share(e, ce, "B", 370000, {}, source="代開發票", prev_source=True, face=True)
+        e3, _ = set_parent_share(e2, ce2, "B", 370000, {}, restore_source=True, claim=True)
+        assert "face" not in parent_shares(e3)["B"] and "prev_face" not in parent_shares(e3)["B"]

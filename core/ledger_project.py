@@ -462,6 +462,9 @@ def _clean_shares(raw) -> dict:
         # 重新同步只更新工項、金額不跟成本行走。缺鍵＝成本行來的
         if v.get("face") is True:
             out[str(pid)]["face"] = True
+        # 切成後期代開之前這筆是不是面額（換回時還原用；第 17 輪：走現金匯款的案切過去再換回，金額不能退回成本行）
+        if v.get("prev_face") is True:
+            out[str(pid)]["prev_face"] = True
     return out
 
 
@@ -513,11 +516,16 @@ def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=
         src = old.get("prev_source") or MIRROR_SOURCE          # 換回：還原切換前的案源（沒記過退源日）
     elif prev_source and old.get("source"):
         shares[pid]["prev_source"] = old["source"]           # 切換：記住換之前的（相同也記，換回才是恆等）
+        if old.get("face"):
+            shares[pid]["prev_face"] = True                  # 換之前就是面額（走現金匯款的案）→ 換回要還原
     elif old.get("prev_source"):
         shares[pid]["prev_source"] = old["prev_source"]      # 其他改動：帶著走
+        if old.get("prev_face"):
+            shares[pid]["prev_face"] = True
     if src in SOURCES:
         shares[pid]["source"] = src
-    is_face = False if restore_source else (old.get("face", False) if face is None else bool(face))
+    # 換回：面額標記還原成切換前的（切換前不是面額的 N:1 成本行份額 → 照舊清掉、之後重同步回成本行）
+    is_face = bool(old.get("prev_face")) if restore_source else (old.get("face", False) if face is None else bool(face))
     if is_face:
         shares[pid]["face"] = True
     d[BY_PARENT_KEY] = shares
