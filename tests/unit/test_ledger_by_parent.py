@@ -220,3 +220,20 @@ class TestPolishRound1:
         d[MIRROR_TOTAL_KEY] = 30000
         assert mirror_stale(d, 0, "A") == (None, 0)
         assert mirror_stale(d, 30000) == (False, 0)                 # 沒指定案的舊讀法照舊
+
+    def test_push_share_source_comes_from_the_parent_not_from_x(self):
+        # BUG-11：這次明確指定的 > 這案舊份額的 > 源日；**不看 X 的 source**（可能已被別案翻成代開）
+        from routers.crm.project_links import _push_share_source
+        assert _push_share_source("代開發票", {"source": "源日"}) == "代開發票"
+        assert _push_share_source("", {"source": "源日"}) == "源日"
+        assert _push_share_source("", {}) == "源日"
+        from tests.unit._srcscan import code_only, flow_body, projects_src
+        body = code_only(flow_body(projects_src(), "async def mirror_project_to_mine("))
+        assert "source=_push_share_source(source, old_share)" in body
+        assert 'source=keep["source"]' not in body
+
+    def test_pending_add_records_this_push_not_a_running_sum(self):
+        # BUG-14：待認領時 add 不能累加（錢沒動、記錄卻長大）→ 視同 overwrite
+        from tests.unit._srcscan import code_only, flow_body, projects_src
+        body = code_only(flow_body(projects_src(), "async def mirror_project_to_mine("))
+        assert 'elif mode == "add" and not pending:' in body

@@ -461,6 +461,13 @@ async def _ensure_share(session, t, keep: dict, pid: str) -> dict:
     return legacy_claim(keep, int(t.contract_amount or 0), pid)
 
 
+def _push_share_source(explicit: str, old_share: dict) -> str:
+    """推送時這一案份額的案源：這次明確指定的（req.source 或母帳的收款方式）> 這案舊份額的 > 源日。
+    🔴 不看 X 的 source —— 那可能已被**別案**改收款方式翻成代開，抄過來會把不走代開的案也算進代辦費基數。"""
+    from core.ledger_project import MIRROR_SOURCE
+    return explicit or (old_share or {}).get("source") or MIRROR_SOURCE
+
+
 async def _clear_pending_if_all_claimed(session, t, keep: dict) -> dict:
     """待認領的 N:1：每個母帳案都有份額了就把旗標拿掉。"""
     from core.ledger_project import BY_PARENT_PENDING_KEY, parent_shares
@@ -591,15 +598,17 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                     # 代開的收入是那張發票的面額（母帳合約額），不是成本行；
                     # 重新同步只更新工項，金額不動（沒填過才用母帳合約額補）
                     amount = old_share["amount"] or _mirror_contract(p, mir, "代開發票")
-                elif mode == "add":
+                elif mode == "add" and not pending:
                     amount = old_share["amount"] + mir["total"]
                 else:
+                    # overwrite；待認領時 add 也視同 overwrite —— claim 不動錢，累加只會讓記錄漂離現實
                     amount = mir["total"]
-                new_split, _delta = merge_split(old_share["split"] if mode == "add" else {},
-                                                mir["split"] or {}, add=(mode == "add"))
+                adding = mode == "add" and not pending
+                new_split, _delta = merge_split(old_share["split"] if adding else {},
+                                                mir["split"] or {}, add=adding)
                 keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id, amount, new_split,
                                                       synced_total=mir["total"], at=_today_tw(),
-                                                      source=keep["source"], claim=pending)
+                                                      source=_push_share_source(source, old_share), claim=pending)
                 t.contract_amount = new_contract
                 keep = await _clear_pending_if_all_claimed(session, t, keep)
                 keep = norm_detail(apply_source_fee(int(t.contract_amount or 0), keep))
