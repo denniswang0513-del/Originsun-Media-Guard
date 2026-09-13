@@ -482,7 +482,13 @@ def _push_share_amount(mode: str, pending: bool, share_src: str, old_share: dict
         # （沒舊份額才退成本行合計）。母帳改了合約額，重新同步會跟上。
         if parent_agency:
             return int(agency_contract or 0) or int(old_share.get("amount") or 0)   # 母帳沒填面額才沿用舊份額
-        return int(mir_total or 0) or int(old_share.get("amount") or 0)           # 繼承的：跟成本行走（回填時就是它）
+        # 繼承自 X 的代開份額：份額原本就是成本行（金額＝上次同步的成本行合計，N:1 回填就是這樣）→ 跟成本行走；
+        # 金額≠成本行合計＝它是發票面額（舊 1:1 代開分身整筆認）→ 沿用，重新同步只更新工項
+        old_amt = int(old_share.get("amount") or 0)
+        from_lines = old_amt == int(old_share.get("synced_total") or 0)
+        if old_amt and not from_lines:
+            return old_amt
+        return int(mir_total or 0) or old_amt
     if mode == "add" and not pending:
         return int(old_share.get("amount") or 0) + int(mir_total or 0)
     return int(mir_total or 0)

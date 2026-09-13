@@ -250,8 +250,10 @@ class TestPolishRound2:
         assert _push_share_amount("overwrite", False, "代開發票", old, 30000, 500000, parent_agency=True) == 500000
         assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 500000, parent_agency=True) == 500000
         # 第 13／14 輪：繼承自 X 的代開份額（母帳是 company 案）→ 跟成本行走（回填時就是它），沒成本行才沿用舊份額
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 60000, "split": {}, "source": "代開發票"}, 80000, 370000) == 80000
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 60000, "split": {}, "source": "代開發票"}, 0, 370000) == 60000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 60000, "split": {}, "source": "代開發票", "synced_total": 60000}, 80000, 370000) == 80000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 60000, "split": {}, "source": "代開發票", "synced_total": 60000}, 0, 370000) == 60000
+        # 第 15 輪：舊 1:1 代開分身整筆認的是發票面額（金額≠成本行合計）→ 重同步只更新工項、面額沿用
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 100000, "split": {}, "source": "代開發票", "synced_total": 45000}, 45000, 0) == 100000
         assert _push_share_amount("add", False, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 40000
         assert _push_share_amount("add", True, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 30000   # 待認領：add 視同取代
         from tests.unit._srcscan import code_only, flow_body, projects_src
