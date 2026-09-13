@@ -502,8 +502,8 @@ def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=
     src = old.get("source") if source is None else str(source or "").strip()
     if restore_source:
         src = old.get("prev_source") or MIRROR_SOURCE          # 換回：還原切換前的案源（沒記過退源日）
-    elif prev_source and old.get("source") and old.get("source") != src:
-        shares[pid]["prev_source"] = old["source"]           # 切換：記住換之前的
+    elif prev_source and old.get("source"):
+        shares[pid]["prev_source"] = old["source"]           # 切換：記住換之前的（相同也記，換回才是恆等）
     elif old.get("prev_source"):
         shares[pid]["prev_source"] = old["prev_source"]      # 其他改動：帶著走
     if src in SOURCES:

@@ -249,6 +249,9 @@ class TestPolishRound2:
         assert _push_share_amount("overwrite", False, "源日", old, 30000, 500000) == 30000
         assert _push_share_amount("overwrite", False, "代開發票", old, 30000, 500000) == 500000
         assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 500000) == 500000
+        # 第 13 輪 #1：繼承自 X 的代開份額（母帳是 company 案、呼叫端不給發票面額）→ 沿用舊份額，沒有才退成本行
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 30000, "split": {}, "source": "代開發票"}, 30000, 0) == 30000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 0, "split": {}}, 30000, 0) == 30000
         assert _push_share_amount("add", False, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 40000
         assert _push_share_amount("add", True, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 30000   # 待認領：add 視同取代
         from tests.unit._srcscan import code_only, flow_body, projects_src
@@ -442,7 +445,7 @@ class TestPolishRound7:
         # 第 11 輪 #6：推送端傳進來的「發票面額」＝母帳合約額本身（空就 0 → 沿用舊份額；沒舊份額才退成本行合計）
         from tests.unit._srcscan import code_only, func_body, projects_src
         push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
-        assert 'int(p.contract_amount or 0) or (0 if old_share.get("amount") else mir["total"])' in push
+        assert 'int(p.contract_amount or 0) if source == "代開發票" else 0' in push
 
     def test_drop_of_an_agency_share_releases_the_manual_fee(self):
         # 第 7 輪 #5：純代開分身、owner 手調代辦費 9,000 → 解除 P 後不能留 9,000 在合約 0 的 X 上
@@ -616,8 +619,9 @@ class TestPolishRound12:
         from tests.unit._srcscan import code_only, func_body, projects_src
         push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
         assert '_push_share_source(source, old_share, keep.get("source") if claim else "")' in push
-        # #3：認領不能超過「合約額 − 別案已認」
-        assert "amount = max(0, min(amount, int(t.contract_amount or 0) - others_total))" in push
+        # #3：認領不能超過「合約額 − 別案已認」；第 13 輪 #2：工項同比例夾
+        assert "capped = max(0, min(amount, int(t.contract_amount or 0) - others_total))" in push
+        assert "new_split = {k: int(v * ratio + 0.5) for k, v in new_split.items() if int(v * ratio + 0.5)}" in push
 
     def test_unlink_resets_fee_deducted_when_no_agency_base_remains(self):
         # #4：owner 取消「已扣除」、之後唯一的代開份額被解除 → 旗標重設（同換回）
@@ -632,3 +636,13 @@ class TestPolishRound12:
         from tests.unit._srcscan import code_only, func_body, projects_src
         fn = code_only(func_body(projects_src(), "def _new_mirror_row("))
         assert 'd["source"] = source' not in fn and "source=source or MIRROR_SOURCE" in fn
+
+
+class TestPolishRound13:
+    def test_switch_then_revert_is_the_identity_even_when_the_share_was_already_agency(self):
+        # #3：繼承自 X 的代開份額切後期代開再換回 → 回代開，不是退成源日
+        d, c = set_parent_share({"source": "代開發票"}, 0, "G", 30000, {}, source="代開發票")
+        d2, _ = set_parent_share(d, c, "G", 30000, {}, source="代開發票", prev_source=True)
+        assert parent_shares(d2)["G"]["prev_source"] == "代開發票"
+        d3, _ = set_parent_share(d2, c, "G", 30000, {}, restore_source=True)
+        assert parent_shares(d3)["G"]["source"] == "代開發票"
