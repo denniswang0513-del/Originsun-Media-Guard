@@ -1551,6 +1551,11 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   發版要確認那個容器也重啟了。
   同日第二輪**代辦費分案**：份額帶 `source`，代辦費只算走代開那幾案的份額（`fee_bases`）；前端試算 `_feeBases()`
   要跟後端同一條規則，**不准用整案算**（後端 8,000、前端送 14,400 → 被當成人改過而凍住；規則測試釘著）。
+  同日 /polish 抓到的三顆（都有測試釘著）：`_ensure_share` 在 `_write_link` **之前**跑，`mine_parent_links` 回的是
+  「X 現在連著誰」、不含這次推進來的案 —— 判 1:1／N:1 要把 pid 算進去，不然從沒連過的 X 推一個案會把 owner 的錢
+  整筆認給它；推送時份額的案源與金額看**份額**的（`_push_share_source`／`_push_share_amount`），不看 X 的 `source`
+  （X 可能已被別案翻成代開）；`drop_parent_share` 要趁記錄還在時就重算費用（`apply_source_fee` 對「沒分案記錄、
+  不抽費的案源」會早退不動數字，記錄拿掉後就看不出費用曾是分案算的）。
 - **掃原始碼的規則測試用 `_srcscan.flow_body`，不要用 `func_body`**：`func_body` 釘的是「這段程式
   住在哪一支函式裡」，於是被禁止的寫入只要搬進同檔 helper 就再也抓不到（測試安靜地失效），
   而且「把長函式切開」會變成一件弄壞測試的事。`flow_body` 會把它呼叫的 `_` 開頭同檔 helper

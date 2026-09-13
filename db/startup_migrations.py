@@ -666,71 +666,77 @@ async def _m21_seed_work_stages() -> None:
             print(f"[startup] work stage seed failed: {_e_ws}")
 
 
+async def _backfill_by_parent(session) -> tuple:
+    """私帳案收入分案記帳的舊資料回填本體 → (1:1 認了幾案, N:1 認出幾案, 待認領幾案)。
+    冪等：有 by_parent 或 by_parent_pending 的列不再碰。1:1 只認「上次鏡射過來的量」；N:1 用掛給 owner
+    的成本行逐案認（owner＝唯一一個有 finance_mine 且綁了人員檔的帳號），加總對得上合約額才認，
+    否則標 by_parent_pending 由 owner 逐案「推送→取代」認領。"""
+    n1 = nn = pend = 0
+    from sqlalchemy import select
+    from db.models import CrmProject, User
+    from core.ledger import MINE_MODULE
+    from core.auth import expand_modules
+    from core.ledger_project import (BILLING_MIRROR_SOURCE, BY_PARENT_PENDING_KEY, MIRROR_SOURCE,
+                                     billing_mode_of, legacy_claim, norm_detail, parent_shares,
+                                     set_parent_share)
+    from routers.crm._shared import mine_parent_links
+    from routers.crm.project_links import _mirror_contract, _mirror_preview
+    mine_ids = [i for (i,) in (await session.execute(
+        select(CrmProject.id).where(CrmProject.entity == "mine"))).all()]
+    links = {k: v for k, v in (await mine_parent_links(session, mine_ids)).items() if v}
+    rows = (await session.execute(
+        select(CrmProject).where(CrmProject.id.in_(list(links) or [""])))).scalars().all()
+    owner_sid = None        # 只在真的碰到沒認領的 N:1 時才去查 users（第一次開機之後都不會）
+    for t in rows:
+        parents = links.get(t.id)
+        if not parents:
+            continue
+        keep = norm_detail(t.ledger_detail)
+        if parent_shares(keep) or keep.get(BY_PARENT_PENDING_KEY) is True:
+            continue
+        contract = int(t.contract_amount or 0)
+        if len(parents) == 1:
+            # 只認「上次鏡射過來的量」（mirror_total）；合約額比它大的是 owner 自己加的
+            keep = legacy_claim(keep, contract, parents[0][0])
+            n1 += 1
+        else:
+            if owner_sid is None:
+                owners = [u.staff_id for u in (await session.execute(
+                    select(User).where(User.staff_id.isnot(None)))).scalars().all()
+                          if MINE_MODULE in expand_modules(u.modules or [])]
+                owner_sid = owners[0] if len(owners) == 1 else ""
+            claimed = []
+            if owner_sid:
+                for pid, _name in parents:
+                    p, mir, _l = await _mirror_preview(session, pid, owner_sid)
+                    src = BILLING_MIRROR_SOURCE.get(billing_mode_of(p.billing_mode), "")
+                    claimed.append((pid, _mirror_contract(p, mir, src), mir["split"], int(mir["total"] or 0)))
+            amounts = [a for _p, a, _s, _t in claimed]
+            if amounts and min(amounts) > 0 and sum(amounts) <= contract:
+                for pid, amount, split, total in claimed:
+                    keep, _c = set_parent_share(keep, contract, pid, amount, split,
+                                                synced_total=total,
+                                                source=keep.get("source") or MIRROR_SOURCE, claim=True)
+                nn += 1
+            else:
+                keep[BY_PARENT_PENDING_KEY] = True
+                pend += 1
+        t.ledger_detail = keep
+    return n1, nn, pend
+
+
 async def _m22_ledger_by_parent_backfill() -> None:
     """私帳案收入分案記帳（ledger_detail.by_parent）的舊資料回填（owner 2026-09-13「為何不加起來？」）"""
-    # 冪等：有 by_parent 或 by_parent_pending 的列不再碰。1:1 的整筆認成那一案的份額；
-    # N:1 的用「掛給 owner 的成本行合計」逐案認（owner＝唯一一個有 finance_mine 且綁了人員檔的帳號），
-    # 加總對得上合約額才認，對不上或找不到 owner → 標 by_parent_pending，由 owner 逐案「推送→取代」認領。
     if state.db_online:
         try:
-            n1 = nn = pend = 0
             factory = get_session_factory()
             if factory:
-                from sqlalchemy import select
-                from db.models import CrmProject, User
-                from core.ledger import MINE_MODULE
-                from core.auth import expand_modules
-                from core.ledger_project import (BILLING_MIRROR_SOURCE, BY_PARENT_PENDING_KEY, MIRROR_SOURCE,
-                                                 billing_mode_of, legacy_claim, norm_detail, parent_shares,
-                                                 set_parent_share)
-                from routers.crm._shared import mine_parent_links
-                from routers.crm.project_links import _mirror_contract, _mirror_preview
                 async with factory() as session:
-                    mine_ids = [i for (i,) in (await session.execute(
-                        select(CrmProject.id).where(CrmProject.entity == "mine"))).all()]
-                    links = {k: v for k, v in (await mine_parent_links(session, mine_ids)).items() if v}
-                    rows = (await session.execute(
-                        select(CrmProject).where(CrmProject.id.in_(list(links) or [""])))).scalars().all()
-                    owner_sid = None        # 只在真的碰到沒認領的 N:1 時才去查 users（第一次開機之後都不會）
-                    for t in rows:
-                        parents = links.get(t.id)
-                        if not parents:
-                            continue
-                        keep = norm_detail(t.ledger_detail)
-                        if parent_shares(keep) or keep.get(BY_PARENT_PENDING_KEY) is True:
-                            continue
-                        contract = int(t.contract_amount or 0)
-                        if len(parents) == 1:
-                            # 只認「上次鏡射過來的量」（mirror_total）；合約額比它大的是 owner 自己加的
-                            keep = legacy_claim(keep, contract, parents[0][0])
-                            n1 += 1
-                        else:
-                            if owner_sid is None:
-                                owners = [u.staff_id for u in (await session.execute(
-                                    select(User).where(User.staff_id.isnot(None)))).scalars().all()
-                                          if MINE_MODULE in expand_modules(u.modules or [])]
-                                owner_sid = owners[0] if len(owners) == 1 else ""
-                            claimed = []
-                            if owner_sid:
-                                for pid, _name in parents:
-                                    p, mir, _l = await _mirror_preview(session, pid, owner_sid)
-                                    src = BILLING_MIRROR_SOURCE.get(billing_mode_of(p.billing_mode), "")
-                                    claimed.append((pid, _mirror_contract(p, mir, src), mir["split"], int(mir["total"] or 0)))
-                            amounts = [a for _p, a, _s, _t in claimed]
-                            if amounts and min(amounts) > 0 and sum(amounts) <= contract:
-                                for pid, amount, split, total in claimed:
-                                    keep, _c = set_parent_share(keep, contract, pid, amount, split,
-                                                                synced_total=total,
-                                                                source=keep.get("source") or MIRROR_SOURCE, claim=True)
-                                nn += 1
-                            else:
-                                keep[BY_PARENT_PENDING_KEY] = True
-                                pend += 1
-                        t.ledger_detail = keep
+                    n1, nn, pend = await _backfill_by_parent(session)
                     if n1 or nn or pend:
                         await session.commit()
-            if n1 or nn or pend:
-                print(f"[migrate] 私帳分案記帳回填：1:1 {n1} 案、N:1 認出 {nn} 案、待認領 {pend} 案")
+                if n1 or nn or pend:
+                    print(f"[migrate] 私帳分案記帳回填：1:1 {n1} 案、N:1 認出 {nn} 案、待認領 {pend} 案")
         except Exception as _e_bp:
             print(f"[migrate] 私帳分案記帳回填略過: {_e_bp}")
 
