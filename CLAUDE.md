@@ -1327,6 +1327,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`frontend/tabs/finance/subviews/projects-push.js`](frontend/tabs/finance/subviews/projects-push.js) ＋ [`frontend/tabs/crm/crm-projects-ledger.js`](frontend/tabs/crm/crm-projects-ledger.js) | 2026-09-13 各自從 1,359／1,040 行的主檔切出的「母帳 ↔ 私帳」段：私帳側（連結鈕／跳母帳／推送到母帳彈窗）、母帳側（推送到私帳／換帳本／分身／落後提示／彈窗，全掛 `window._proj*`） | 同 `crm-cashbook-*.js` 的規矩：主檔 `export let`（`_detail`／`_sel`；子模組只讀）＋ setter（`setDirty`／`resetDetail`）；`_fp` 用 `window._finProjLedger` idiom 自己取；`crm-projects-ledger.js` 由 `crm-projects.js` 副作用 import。掃原始碼用 `_srcscan.crm_projects_core_src()`；私帳那支的推送段指 `projects-push.js` |
 | `frontend/tabs/crm/crm-payables.js` 的出納段 | 應付面板的複製（每列左側一顆「複製」、純數字不帶標點）、本月匯款清單（可列印）、匯款通知彈窗（全選＋複製連結） | 複製一律走 `js/shared/utils.copyText`（內網是 http＝非安全來源，`navigator.clipboard` **不存在**）；`_buildMonthGroups` 是「月 × 收款人」粒度，跟後端 `group_payables` 的「收款人」粒度**不同**，別以為可以直接用後端那份 |
 | [`db/startup_migrations.py`](db/startup_migrations.py) | 開機 migration／種子 22 段（2026-09-13 從 `main._on_startup` 逐字搬出）：`run_pre_db`（init_db 前的 settings.json 修補）、`_m01…_m21`、`_POST_DB` 順序清單、`run_post_db` | SQL 正本仍在 `db/migrations.py`；加一段＝寫 `_mNN_*` 掛進 `_POST_DB`，`test_startup_migrations_order` 會逼你放對位置；模組層不可 import sqlalchemy（agent 沒裝；順序測試有一條守） |
+| `core/ledger_project.py` 的分案記帳段 | 私帳案收入**分案**：`BY_PARENT_KEY`／`BY_PARENT_PENDING_KEY`、`parent_shares`、`set_parent_share`（只動差額；`claim` 不動錢）、`drop_parent_share`、`mirror_stale(…, pid)` 逐案判；設計正本 [`docs/LEDGER_BY_PARENT_PLAN.md`](docs/LEDGER_BY_PARENT_PLAN.md) | 不變式 `contract = Σ份額 + owner 自己的`（自己的不存、用差額推）；分身 `contract_amount` 只准接 `set／drop_parent_share` 回的 `new_contract`（`test_ledger_by_parent` 掃 project_links 釘著）；開機 `_m22` 回填舊資料，分不出的 N:1 標待認領、改收款方式會 409 要求逐案「推送→取代」 |
 
 
 ## 不要動的地方
@@ -1542,6 +1543,12 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   自 v1.9.8 起就是這樣）。正確寫法是 `asyncio.run_coroutine_threadsafe(enqueue_job(...), state.get_main_loop()).result(timeout=30)`
   （scheduler 的 `_enqueue_from_thread`）；主 loop 沒起要當失敗、不能計數。pyright 的 `reportUnusedCoroutine`
   與 pytest 的 `RuntimeWarning: coroutine ... was never awaited` 都是這件事的訊號，別當噪音。
+- **私帳分身的收入不准整筆賦值**（2026-09-13 owner「為何不加起來？」）：一個私帳案可以承接多個母帳案，X 的
+  `contract_amount`／`split` 是 Σ各案份額 ＋ owner 自己填的。任何「把 X 的收入改成某案的數字」都要走
+  `core.ledger_project.set_parent_share`（只動那一案的差額），解除連結走 `drop_parent_share`；直接
+  `t.contract_amount = …` 會把別案鏡射進來的錢與 owner 手填的一起洗掉（規則測試會紅）。`norm_detail` 要保留
+  `by_parent`／`by_parent_pending` —— NAS office-api 拿到**舊** `norm_detail` 時手機端一次 PUT 就把份額洗光，
+  發版要確認那個容器也重啟了。
 - **掃原始碼的規則測試用 `_srcscan.flow_body`，不要用 `func_body`**：`func_body` 釘的是「這段程式
   住在哪一支函式裡」，於是被禁止的寫入只要搬進同檔 helper 就再也抓不到（測試安靜地失效），
   而且「把長函式切開」會變成一件弄壞測試的事。`flow_body` 會把它呼叫的 `_` 開頭同檔 helper

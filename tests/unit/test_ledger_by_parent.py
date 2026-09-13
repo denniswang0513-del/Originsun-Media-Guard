@@ -115,3 +115,20 @@ class TestLinkNoteShares:
         assert p["shares_pending"] is True and "待認領" in p["text"]
         one = link_note("company", ("m", "X", 1), d)
         assert one["shares"] == [] and "份額" not in one["text"]
+
+
+class TestWritersGoThroughShares:
+    """分身收入的寫入點只准經過 set_parent_share／drop_parent_share —— 直接 `t.contract_amount = 某數`
+    就是回到「整個換掉、別案的錢不見」的老路（owner 2026-09-13）。"""
+
+    def test_project_links_never_assigns_contract_directly(self):
+        import re
+        from tests.unit._srcscan import repo_src
+        src = repo_src("routers/crm/project_links.py")
+        bad = [m.group(0) for m in re.finditer(r"\b\w+\.contract_amount\s*=(?!\s*new_contract\b)(?!=)[^\n]*", src)]
+        assert not bad, "分身的 contract_amount 只能接 set_parent_share／drop_parent_share 回的 new_contract：\n" + "\n".join(bad)
+        assert src.count("t.contract_amount = new_contract") >= 3        # 推送、收款方式、解除連結三處
+
+    def test_norm_detail_keeps_by_parent_so_puts_do_not_wipe_it(self):
+        d = norm_detail({"split": {}, BY_PARENT_KEY: {"A": {"amount": 5}}, "garbage": 1})
+        assert BY_PARENT_KEY in d and "garbage" not in d
