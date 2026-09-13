@@ -711,16 +711,16 @@ async def _backfill_by_parent(session) -> tuple:
                     for pid, _name in parents:
                         p, mir, _l = await _mirror_preview(session, pid, owner_sid)
                         src = BILLING_MIRROR_SOURCE.get(billing_mode_of(p.billing_mode), "")
-                        claimed.append((pid, _mirror_contract(p, mir, src), mir["split"], int(mir["total"] or 0)))
+                        claimed.append((pid, _mirror_contract(p, mir, src), mir["split"], int(mir["total"] or 0), src))
                 except Exception as _e_row:       # 一筆壞掉（成本行表缺、母帳案被刪）不能擋住其他列的認領
                     print(f"[migrate] 私帳分案回填：{t.id} 認不出來（{_e_row}），標待認領")
                     claimed = []
-            amounts = [a for _p, a, _s, _t in claimed]
+            amounts = [a for _p, a, _s, _t, _src in claimed]
             if amounts and min(amounts) > 0 and sum(amounts) <= contract:
-                for pid, amount, split, total in claimed:
+                for pid, amount, split, total, psrc in claimed:
                     keep, _c = set_parent_share(keep, contract, pid, amount, split,
                                                 synced_total=total,
-                                                source=keep.get("source") or MIRROR_SOURCE, claim=True)
+                                                source=psrc or MIRROR_SOURCE, claim=True)   # 看母帳的收款方式，不抄 X
                 nn += 1
             else:
                 keep[BY_PARENT_PENDING_KEY] = True

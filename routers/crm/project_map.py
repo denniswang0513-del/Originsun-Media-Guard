@@ -270,7 +270,10 @@ async def create_mine_from_parent(parent_id: str, request: Request):
         p, mir, linked = await _mirror_preview(session, parent_id, sid)
         if linked is not None:      # 兩種連結形狀都認（舊形狀只看 mine_link_id 會再建一個分身）
             raise HTTPException(status_code=409, detail="這一案已經連到私帳了")
-        m = _new_mirror_row(p, mir, "[母帳對應] 由母帳案「%s」在私帳補建" % p.name)
+        from core.ledger_project import BILLING_MIRROR_SOURCE, billing_mode_of
+        # 帶母帳的收款方式（後期代開 → 分身案源＝代開、收入＝發票面額）—— 跟推送那條同一個入口規則
+        m = _new_mirror_row(p, mir, "[母帳對應] 由母帳案「%s」在私帳補建" % p.name,
+                            BILLING_MIRROR_SOURCE.get(billing_mode_of(p.billing_mode), ""))
         session.add(m)
         await _write_link(session, p, m)
         await session.commit()

@@ -222,8 +222,9 @@ def link_note(mode: str, mine, detail, *, stale=None, delta: int = 0, crm_total:
                 "tax_fee": int(d.get("tax_fee") or 0), "buy_invoice": int(d.get("buy_invoice") or 0),
                 "fee_deducted": fee_deducted(d), "stale": stale, "delta": int(delta or 0),
                 "crm_total": int(crm_total or 0), "mirror_at": str(d.get(MIRROR_AT_KEY) or "")})
-    mixed = source_mixed(d)
-    parts = [f"已連結後期 → {mname}", "案源 混合" if mixed else f"案源 {src}", f"收入 {_fmt_n(contract)}"]
+    shown = display_source(contract, d) or src
+    mixed = shown == "混合"
+    parts = [f"已連結後期 → {mname}", f"案源 {shown}", f"收入 {_fmt_n(contract)}"]
     if out["shares"]:
         parts.append("份額 " + "、".join(
             f"{s['name']} {_fmt_n(s['amount'])}" + (f"（{s['source']}）" if mixed and s['source'] else "")
@@ -530,6 +531,23 @@ def fee_bases(contract, detail) -> tuple:
     return agency, pro
 
 
+def display_source(contract, detail) -> str:
+    """畫面上「案源」那格該寫什麼：X 的 `source` 只是 owner 自己那部分的案源，**系統不翻它**；
+    各母帳案的案源在份額上。全部同一種（含 owner 那部分，0 元的不算）→ 那一種；不一樣 → 「混合」；
+    沒分案記錄 → X 的。"""
+    d = detail if isinstance(detail, dict) else {}
+    src = str(d.get("source") or "")
+    shares = parent_shares(d)
+    if not shares:
+        return src
+    kinds = {share_source(d, sh) for sh in shares.values() if sh["amount"] > 0}
+    own = _int(contract) - sum(sh["amount"] for sh in shares.values())
+    if own > 0 or not kinds:
+        kinds.add(src)
+    kinds.discard("")
+    return kinds.pop() if len(kinds) == 1 else ("混合" if kinds else src)
+
+
 def source_mixed(detail) -> bool:
     """各案份額的案源不一致（畫面上案源那格要寫「混合」）。沒分案記錄＝False。"""
     d = detail if isinstance(detail, dict) else {}
@@ -577,7 +595,14 @@ def drop_parent_share(detail, contract, pid: str) -> tuple:
     d = detail if isinstance(detail, dict) else {}
     if pid not in parent_shares(d):
         return detail, contract
+    dropped_src = share_source(d, parent_shares(d).get(pid))
     d, contract = set_parent_share(d, contract, pid, 0, {})
+    if dropped_src == "代開發票" and not fee_bases(contract, d)[0]:
+        # 解除的是最後一個代開份額：代辦費是為它調的（同「換回」那條），手動旗標一起放掉，才會歸零
+        manual = manual_fields(d) - {"invoice_fee"}
+        d["manual"] = sorted(manual)
+        if not manual:
+            d.pop("manual", None)
     # 費用趁記錄還在的時候重算：這案份額已是 0，fee_bases 只剩別案 ＋ owner 自己的 —— 最後一個代開
     # 份額被拿掉時三欄在這裡歸零（手改的不動）。記錄拿掉之後 apply_source_fee 就看不出費用曾是分案算的。
     d = apply_source_fee(contract, d)

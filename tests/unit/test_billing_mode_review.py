@@ -84,7 +84,10 @@ async def test_switch_moves_only_that_parents_share(monkeypatch):
     assert shares["A"]["amount"] == 100000 and shares["A"]["split"] == {"剪接": 40000}   # 工項沿用
     assert shares["B"] == {"amount": 80000, "split": {"剪接": 80000}, "synced_total": 80000, "at": ""}
     assert t.ledger_detail["split"]["剪接"] == 120000       # 工項沒動
-    assert t.ledger_detail["source"] == "代開發票"
+    # X 自己的案源（owner 那 20,000）不被翻：留源日；畫面上的案源由份額算 → 混合
+    from core.ledger_project import display_source
+    assert t.ledger_detail["source"] == "源日"
+    assert display_source(t.contract_amount, t.ledger_detail) == "混合"
 
 
 async def test_switch_on_legacy_one_to_one_claims_whole_row_first(monkeypatch, parents_of):
@@ -346,13 +349,13 @@ async def test_revert_only_resets_x_source_when_x_was_agency(monkeypatch, parent
 
 
 async def test_unlinking_the_last_agency_share_resets_x_source(monkeypatch):
-    """BUG-35：X 被 B 翻成代開；解除 B 後沒有代開份額了 → X 的案源要跟換回一樣退回源日，owner 自己的錢不再被抽代辦費。"""
+    """BUG-35：X（owner 那部分源日）連著 B（代開）；解除 B 後沒有代開份額了 → 費用歸零、X 的案源本來就沒被動過。"""
     from core.ledger_project import apply_source_fee, set_parent_share
 
-    d, c = set_parent_share({"source": "代開發票"}, 20000, "A", 30000, {}, source="源日")
+    d, c = set_parent_share({"source": "源日"}, 20000, "A", 30000, {}, source="源日")
     d, c = set_parent_share(d, c, "B", 100000, {}, source="代開發票")
     d = apply_source_fee(c, d)
-    assert d["invoice_fee"] == 9600                                  # (100,000 ＋ owner 20,000) × 8%
+    assert d["invoice_fee"] == 8000                                  # 只算 B 的 100,000
     t = SimpleNamespace(id="X", name="X", entity="mine", contract_amount=c, ledger_detail=d, updated_at=None)
     parent = SimpleNamespace(id="B", mine_link_id="X", updated_at=None)
 
@@ -367,12 +370,12 @@ async def test_unlinking_the_last_agency_share_resets_x_source(monkeypatch):
 
 
 async def test_unlinking_the_only_agency_share_of_a_one_to_one_x_zeroes_the_fees(monkeypatch):
-    """BUG-42：1:1 代開分身解除唯一的份額 → 記錄沒了、X 退回源日，三欄費用要歸零（不能留在 owner 自己的 20,000 上）。"""
+    """BUG-42：1:1 代開分身（owner 另加 20,000 源日）解除唯一的份額 → 記錄沒了，三欄費用要歸零（不能留在 owner 的 20,000 上）。"""
     from core.ledger_project import apply_source_fee, set_parent_share
 
-    d, c = set_parent_share({"source": "代開發票"}, 20000, "P", 100000, {}, source="代開發票")
+    d, c = set_parent_share({"source": "源日"}, 20000, "P", 100000, {}, source="代開發票")
     d = apply_source_fee(c, d)
-    assert d["invoice_fee"] == 9600
+    assert d["invoice_fee"] == 8000
     t = SimpleNamespace(id="X", name="X", entity="mine", contract_amount=c, ledger_detail=d, updated_at=None)
 
     async def _resolve(session, p):
@@ -423,3 +426,20 @@ async def test_switch_does_not_overwrite_an_owner_fee_bearing_x_source(monkeypat
     assert parent_shares(t.ledger_detail)["A"]["source"] == "代開發票"
     assert fee_bases(t.contract_amount, t.ledger_detail) == (50000, 100000)
     assert t.ledger_detail["personal_tax"] == withholding(100000) and t.ledger_detail["invoice_fee"] == 4000
+
+
+async def test_unlink_clears_pending_when_the_rest_are_claimed(monkeypatch, parents_of):
+    """第 7 輪 #6：待認領 X（A 沒份額、B 已認領），刪／解除 A → 只剩 B 且有份額 → 旗標要清掉，不然 B 改收款方式一直 409。"""
+    from core.ledger_project import BY_PARENT_PENDING_KEY, set_parent_share
+
+    d, c = set_parent_share({"source": "源日", BY_PARENT_PENDING_KEY: True}, 80000, "B", 80000, {}, claim=True)
+    t = SimpleNamespace(id="X", name="X", entity="mine", contract_amount=c, ledger_detail=d, updated_at=None)
+    parents_of["X"] = [("B", "B")]                       # A 解除後 mine_parent_links 只剩 B
+
+    async def _resolve(session, p):
+        return t
+    monkeypatch.setattr(pl, "resolve_mine_link", _resolve)
+    monkeypatch.setattr(pl, "_store_mirror_detail", lambda t, detail: setattr(t, "ledger_detail", detail))
+    await pl._write_link(None, SimpleNamespace(id="A", mine_link_id="X", updated_at=None), None)
+    assert t.ledger_detail.get(BY_PARENT_PENDING_KEY) is not True
+    assert t.contract_amount == 80000

@@ -609,8 +609,8 @@ function _renderDetail() {
                                     if (det.source && !list.includes(det.source)) list.unshift(det.source);
                                     return list.map((s) => `<option value="${esc(s)}"${det.source === s ? ' selected' : ''}>${label(s)}</option>`).join('');
                                 })()}
-                            </select>${p.source_mixed
-                                ? `<div style="font-size:11px;color:#9ca3af;margin-top:2px;" title="各母帳案的案源不同：代辦費只算走代開那幾案的份額；這格是 owner 自己填那部分的案源">混合：${esc((p.parent_shares || []).map((sh) => `${sh.name} ${sh.source || det.source || '—'} ${fmtNum(sh.amount)}`).join('、'))}</div>`
+                            </select>${(p.parent_shares || []).length && p.source_display && p.source_display !== det.source
+                                ? `<div style="font-size:11px;color:#9ca3af;margin-top:2px;" title="這格是你自己那部分的案源；各母帳案的案源由母帳的收款方式決定、記在份額上。代辦費只算走代開那幾案的份額">顯示案源 ${esc(p.source_display)}：${esc((p.parent_shares || []).map((sh) => `${sh.name} ${sh.source || det.source || '—'} ${fmtNum(sh.amount)}`).join('、'))}</div>`
                                 : ''}</td></tr>
                         <tr id="fpl-fee-row">
                             <td style="color:#bbb;">服務費率 %</td>

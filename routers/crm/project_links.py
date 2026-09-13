@@ -347,8 +347,10 @@ async def check_project_mirror(project_id: str, request: Request):
         # 代開的收入是母帳合約額不是成本行，0 本來就是常態 —— 這句「沒有掛給你的成本行」對它是噪音
         # （crmFetch 會把任何 warning 直接 toast，連結後每次重畫詳情都會跳一次）
         from core.ledger_project import billing_mode_of
+        from core.ledger_project import share_source
         if billing_mode_of(p.billing_mode) == "passthrough" or (
-                linked is not None and norm_detail(linked.ledger_detail).get("source") == "代開發票"):
+                linked is not None and share_source(norm_detail(linked.ledger_detail),
+                                                    parent_shares(linked.ledger_detail).get(p.id)) == "代開發票"):
             warning = ""
         client = await session.get(Client, p.client_id) if p.client_id else None
         share = parent_shares(linked.ledger_detail).get(p.id) if linked is not None else None
@@ -474,7 +476,10 @@ def _push_share_amount(mode: str, pending: bool, share_src: str, old_share: dict
     其他＝掛給我的成本行合計；add＝這案份額再加一筆（待認領時 add 視同取代，claim 不動錢、累加會漂）。
     🔴 看的是**這一案份額**的案源（_push_share_source），不是 X 的 —— X 可能已被別案翻成代開。"""
     if share_src == "代開發票":
-        return int(old_share.get("amount") or 0) or int(agency_contract or 0)
+        # 已經走代開的份額重新同步：金額不動（沒填過才補）；從源日改走代開：換成發票面額，不能沿用成本行合計
+        if old_share.get("source") == "代開發票" and int(old_share.get("amount") or 0):
+            return int(old_share.get("amount") or 0)
+        return int(agency_contract or 0)
     if mode == "add" and not pending:
         return int(old_share.get("amount") or 0) + int(mir_total or 0)
     return int(mir_total or 0)
@@ -620,7 +625,8 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 old_share = parent_shares(keep).get(p.id) or {"amount": 0, "split": {}}
                 # 案源：這次指定的 > 私帳案本來的 > 源日。🔴 不要無條件寫回源日 ——
                 # 代開發票的分身重新同步一次就會被翻成源日、代辦費歸零
-                keep["source"] = source or keep.get("source") or MIRROR_SOURCE
+                # X 自己的案源＝owner 那部分的，**不覆寫**（只補空）；這次推送的案源寫在份額上（下面 share_src）
+                keep["source"] = keep.get("source") or MIRROR_SOURCE
                 keep[MIRROR_TOTAL_KEY] = mir["total"]     # 舊的單一合計仍記（沒分案記錄的讀法退到它）
                 keep[MIRROR_AT_KEY] = _today_tw()         # X 層級的「上次同步」（詳情那一行顯示用）
                 # 這一案份額的案源與金額：看**份額**的案源，不看 X 的（X 可能已被別案翻成代開）
@@ -725,9 +731,7 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         # 代開的錢就是那張發票的面額，之前分身記的成本行合計不是）；工項不動。母帳沒填合約額才留原值。
         # 只換**這一案**的份額（工項沿用）、標它走代開，X 吃差額 —— 別案鏡射進來的錢與案源不動（by_parent）。
         # X 的 source 也標代開：owner 自己填的那部分跟 X 走（fee_bases）。母帳沒填合約額就只換案源。
-        if keep.get("source") in (None, "", MIRROR_SOURCE):
-            # X 自己的案源只在「源日／空」時跟著翻成代開；owner 自己的執行業務所得案不動（他那部分仍走代扣）
-            keep["source"] = want_source
+        # X 自己的案源（owner 那部分）不動；畫面上的案源由份額算（display_source）
         keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id,
                                               int(p.contract_amount or 0) or share["amount"], share["split"],
                                               source=want_source)
@@ -740,11 +744,7 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         # 代辦費由 apply_source_fee 照剩下的代開份額重算（一案都沒有就三欄歸零）。
         keep, _c = set_parent_share(keep, int(t.contract_amount or 0), p.id, share["amount"], share["split"],
                                     source=MIRROR_SOURCE, claim=True)
-        others_agency = any(share_source(keep, sh) == "代開發票"
-                            for pid, sh in parent_shares(keep).items() if pid != p.id)
-        if not others_agency and keep.get("source") == "代開發票":
-            # X 是被收款方式翻成代開的才翻回來；owner 自己的案源（執行業務所得／源日）不動
-            keep["source"] = MIRROR_SOURCE
+        # X 自己的案源不動（那是 owner 那部分的；分不出「被翻的」跟「他自己的」，所以一開始就不翻）
         keep["manual"] = sorted(manual_fields(keep) - {"invoice_fee"})
         keep.pop(FEE_DEDUCTED_KEY, None)
         _store_mirror_detail(t, apply_source_fee(int(t.contract_amount or 0), keep))
@@ -827,25 +827,20 @@ async def _write_link(session, parent, mine):
         # 解除：連結加進私帳的那份（金額＋工項）一起拿掉（owner 2026-09-13 決策 ①）；
         # 沒分案記錄的舊連結不動錢（跟以前一樣）。分身列已刪就只清指標。
         t = await resolve_mine_link(session, parent)      # 兩種連結形狀都認（舊形狀只在私帳側有指標）
+        parent.mine_link_id = None                        # 先清指標，下面數「還連著誰」才不會把它算進去
+        parent.updated_at = _now()
         if t is not None:
-            from core.ledger_project import drop_parent_share, norm_detail, parent_shares, share_source
+            from core.ledger_project import BY_PARENT_PENDING_KEY, drop_parent_share, norm_detail, parent_shares
             before = norm_detail(t.ledger_detail)
-            shares0 = parent_shares(before)
-            if parent.id in shares0:
-                # 被解除的是代開份額、而且它是最後一個 → X 的案源跟「換回」同一條規則退回源日。
-                # 🔴 要在 drop **之前**決定：drop 會趁記錄還在時重算費用，記錄拿掉之後 apply_source_fee 對
-                # 「源日、沒份額」會早退，三欄費用就留在 owner 自己的錢上。被解除的是源日份額則什麼都不動
-                # （X 本身可能是 owner 自己的代開案）。
-                if (before.get("source") == "代開發票" and share_source(before, shares0[parent.id]) == "代開發票"
-                        and not any(share_source(before, sh) == "代開發票"
-                                    for pid, sh in shares0.items() if pid != parent.id)):
-                    from core.ledger_project import MIRROR_SOURCE
-                    before["source"] = MIRROR_SOURCE
+            keep, changed = before, False
+            if parent.id in parent_shares(before):
                 keep, new_contract = drop_parent_share(before, int(t.contract_amount or 0), parent.id)   # 費用在裡面重算
                 t.contract_amount = new_contract
+                changed = True
+            was_pending = keep.get(BY_PARENT_PENDING_KEY) is True
+            keep = await _clear_pending_if_all_claimed(session, t, keep)   # 待認領的 X 少了一案，剩下的都有記錄就清
+            if changed or (was_pending and keep.get(BY_PARENT_PENDING_KEY) is not True):
                 _store_mirror_detail(t, keep)
-        parent.mine_link_id = None
-        parent.updated_at = _now()
         return
     if parent.mine_link_id and parent.mine_link_id != mine.id:
         raise HTTPException(status_code=409, detail="這個母帳案已經連到別的私帳案")

@@ -32,7 +32,7 @@ from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
 from core.crm_logic import split_gross
 from core.ledger_project import (BY_PARENT_PENDING_KEY, COST_FIELDS, DEFAULT_FEE_PCT, NHI_MIN_PAYMENT,
-                                 fee_bases, parent_shares, source_mixed,
+                                 display_source, fee_bases, parent_shares, source_mixed,
                                  NHI_PCT, VAT_PCT, WITHHOLD_TAX_EXEMPT,
                                  WITHHOLD_TAX_PCT, apply_crm_costs,
                                  client_wire, payout_total, settle_state,
@@ -492,6 +492,8 @@ async def project_ledger_detail(project_id: str, request: Request,
             "shares_pending": _d.get(BY_PARENT_PENDING_KEY) is True,
             "fee_bases": dict(zip(("agency", "pro"), fee_bases(int(p.contract_amount or 0), _d))),
             "source_mixed": source_mixed(_d),
+            # 畫面上「案源」該寫什麼：X 的 source 只是 owner 自己那部分的，系統不翻它；由份額算（單一種／混合）
+            "source_display": display_source(int(p.contract_amount or 0), _d),
             "client": client.short_name if client else "",
             "status": p.status or "", "type": p.project_type or "",
             "close_date": _fmt_day(p.completion_date),

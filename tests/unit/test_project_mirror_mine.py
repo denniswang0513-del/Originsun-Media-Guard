@@ -134,7 +134,7 @@ def test_linking_existing_keeps_my_own_costs():
     # 2026-09-13 起工項也分案：split 由 set_parent_share 從 keep 出發只吃這一案的差額（其他鍵原封帶著走）
     assert "set_parent_share(keep, int(t.contract_amount or 0), p.id, amount, new_split," in seg
     # 案源：這次指定的 > 私帳案本來的 > 源日（代開發票的分身重新同步不能被翻成源日）
-    assert 'keep["source"] = source or keep.get("source") or MIRROR_SOURCE' in seg
+    assert 'keep["source"] = keep.get("source") or MIRROR_SOURCE' in seg        # 只補空，不覆寫（X 的案源是 owner 那部分的）
     assert "t.ledger_detail = keep" in seg
     # 「私帳落後了沒」比的是上次同步的合計 —— 同步時要記下來
     assert 'keep[MIRROR_TOTAL_KEY] = mir["total"]' in seg

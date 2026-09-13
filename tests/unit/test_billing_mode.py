@@ -106,8 +106,8 @@ def test_apply_billing_mode_rules():
     assert '(p.entity or "parent") == "mine"' in fn
     # 後期代開：沒分身就用 _new_mirror_row（建分身那一列的唯一寫法）＋ _write_link（連結的唯一寫入者）
     assert "_new_mirror_row(p, mir," in fn and "await _write_link(session, p, t)" in fn
-    # 有分身：案源改代開、收入一律＝母帳合約額（owner「一律改成合約」；母帳沒填才留原值）、工項不動
-    assert 'keep["source"] = want_source' in fn
+    # 有分身：**這一案的份額**標代開（X 自己的案源不動 —— 那是 owner 自己那部分的）、收入一律＝母帳合約額、工項不動
+    assert 'keep["source"] = want_source' not in fn and "source=want_source" in fn
     # 收入＝母帳合約額 —— 2026-09-13 起走分案記帳：只換這一案的份額（並標它走代開），X 吃差額（set_parent_share）；
     # 母帳沒填合約額就只換案源（份額金額沿用）
     assert "set_parent_share(keep, int(t.contract_amount or 0), p.id," in fn
@@ -115,7 +115,7 @@ def test_apply_billing_mode_rules():
     assert "t.contract_amount = new_contract" in fn
     assert "resync_receivable(t, keep)" in fn
     # 換回源日專案／現金收款：分身留著、案源改回源日、代辦費三欄歸零、已扣旗標拿掉
-    assert 'keep["source"] = MIRROR_SOURCE' in fn
+    assert 'keep["source"] = MIRROR_SOURCE' not in fn      # X 自己的案源不翻（2026-09-13 第 7 輪）
     # 換回：只把這一案標回源日（source=MIRROR_SOURCE, claim）、代開三欄由 apply_source_fee 照剩下的代開份額重算
     # （一案都沒有就歸零）；已扣除旗標與代辦費的手動旗標拿掉
     assert "source=MIRROR_SOURCE, claim=True" in fn and "keep.pop(FEE_DEDUCTED_KEY, None)" in fn
@@ -180,7 +180,7 @@ def test_mirror_check_does_not_nag_passthrough_cases_about_cost_lines():
     """代開的收入是母帳合約額不是成本行，「沒有掛給你的成本行」對它是噪音 —— crmFetch 會把任何
     warning 直接 toast，連結後每次重畫詳情都跳一次。"""
     fn = code_only(func_body(_LINKS, "async def check_project_mirror("))
-    assert 'billing_mode_of(p.billing_mode) == "passthrough"' in fn and 'get("source") == "代開發票"' in fn
+    assert 'billing_mode_of(p.billing_mode) == "passthrough"' in fn and 'parent_shares(linked.ledger_detail).get(p.id)) == "代開發票"' in fn
     assert 'warning = ""' in fn
 
 

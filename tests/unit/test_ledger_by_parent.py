@@ -248,7 +248,7 @@ class TestPolishRound2:
         old = {"amount": 0, "split": {}}
         assert _push_share_amount("overwrite", False, "源日", old, 30000, 500000) == 30000
         assert _push_share_amount("overwrite", False, "代開發票", old, 30000, 500000) == 500000
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}}, 30000, 500000) == 120000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 500000) == 120000
         assert _push_share_amount("add", False, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 40000
         assert _push_share_amount("add", True, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 30000   # 待認領：add 視同取代
         from tests.unit._srcscan import code_only, flow_body, projects_src
@@ -366,9 +366,9 @@ class TestPolishRound4:
         assert '_push_share_source(source, parent_shares(keep).get(p.id) or {}) != "代開發票"' in push
         # BUG-30：待認領期間已認領過的案再推 → 不再 claim（差額要進 X）
         assert "claim = _claim_on_push(pending, linked_before, p.id) and p.id not in parent_shares(keep)" in push
-        # BUG-33：換回時判「別案還走代開」用 share_source
+        # 第 7 輪起換回不再翻 X 的案源，「別案還走代開」的判斷跟著拿掉
         bm = code_only(flow_body(projects_src(), "async def apply_billing_mode("))
-        assert 'others_agency = any(share_source(keep, sh) == "代開發票"' in bm
+        assert "others_agency" not in bm
 
 
 class TestPolishRound5:
@@ -408,3 +408,42 @@ def test_frontend_fee_bases_clamp_like_the_backend():
     from tests.unit._srcscan import js_func_body, repo_src
     body = js_func_body(repo_src("frontend/tabs/finance/subviews/projects.js"), "function _feeBases(")
     assert "agency = Math.min(agency, c)" in body and "pro = Math.min(pro, Math.max(0, c - agency))" in body
+
+
+class TestPolishRound7:
+    """第 7 輪：X 的案源不再被系統翻（永遠是 owner 自己那部分的）；畫面案源由份額算（display_source）。"""
+
+    def test_display_source_is_derived_from_shares_and_owner_part(self):
+        from core.ledger_project import display_source
+        assert display_source(50000, norm_detail({"source": "源日"})) == "源日"          # 沒份額＝X 的
+        d, c = set_parent_share({"source": "源日"}, 0, "A", 100000, {}, source="代開發票")
+        assert display_source(c, d) == "代開發票"                                          # 全是 A、owner 0 → 代開
+        assert display_source(c + 20000, d) == "混合"                                      # owner 多 20,000（源日）
+        d2, c2 = set_parent_share(d, c, "B", 80000, {}, source="源日")
+        assert display_source(c2, d2) == "混合"
+        e, ce = set_parent_share({"source": "執行業務所得"}, 100000, "A", 0, {}, source="源日", claim=True)
+        assert display_source(ce, e) == "執行業務所得"                                    # A 0 份額不算
+
+    def test_x_source_is_never_flipped_by_the_system(self):
+        from tests.unit._srcscan import code_only, func_body, projects_src, repo_src
+        pl_src = repo_src("routers/crm/project_links.py")
+        assert 'keep["source"] = want_source' not in pl_src
+        assert 'keep["source"] = MIRROR_SOURCE' not in pl_src and 'before["source"] = MIRROR_SOURCE' not in pl_src
+        push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
+        assert 'keep["source"] = keep.get("source") or MIRROR_SOURCE' in push       # 只補空，不覆寫
+
+    def test_agency_amount_switches_to_the_invoice_face_when_the_share_was_not_agency(self):
+        # 第 7 輪 #3：源日份額 30,000 的案改走代開 → 金額換成母帳合約額，不是沿用 30,000
+        from routers.crm.project_links import _push_share_amount
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 30000, "split": {}, "source": "源日"}, 30000, 100000) == 100000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 100000) == 120000
+
+    def test_drop_of_an_agency_share_releases_the_manual_fee(self):
+        # 第 7 輪 #5：純代開分身、owner 手調代辦費 9,000 → 解除 P 後不能留 9,000 在合約 0 的 X 上
+        from core.ledger_project import drop_parent_share
+        d, c = set_parent_share({"source": "源日"}, 0, "P", 100000, {}, source="代開發票")
+        d["invoice_fee"] = 9000
+        d = apply_source_fee(c, d, keep={"invoice_fee"})
+        assert "invoice_fee" in d["manual"]
+        d2, c2 = drop_parent_share(d, c, "P")
+        assert c2 == 0 and d2["invoice_fee"] == 0 and "invoice_fee" not in (d2.get("manual") or [])

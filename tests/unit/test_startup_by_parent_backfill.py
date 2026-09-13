@@ -66,7 +66,7 @@ def world(monkeypatch):
                               ledger_detail={"source": "源日", "split": {"剪接": 100000}, "mirror_total": 30000}),
         "A": SimpleNamespace(id="A", entity="parent", contract_amount=0, billing_mode="company"),
         "B": SimpleNamespace(id="B", entity="parent", contract_amount=0, billing_mode="company"),
-        "C": SimpleNamespace(id="C", entity="parent", contract_amount=0, billing_mode="company"),
+        "C": SimpleNamespace(id="C", entity="parent", contract_amount=80000, billing_mode="passthrough"),
         "D": SimpleNamespace(id="D", entity="parent", contract_amount=0, billing_mode="company"),
         "E": SimpleNamespace(id="E", entity="parent", contract_amount=0, billing_mode="company"),
     }
@@ -103,6 +103,9 @@ async def test_backfill_claims_one_to_one_and_resolvable_n_to_one_and_flags_the_
     assert x1.contract_amount == 50000                              # claim 不動錢
     assert parent_shares(x2.ledger_detail)["B"]["amount"] == 40000
     assert parent_shares(x2.ledger_detail)["C"]["amount"] == 80000
+    # 第 7 輪 #2：N:1 每案的案源看母帳的收款方式（C 是後期代開），不抄 X 的
+    assert parent_shares(x2.ledger_detail)["B"]["source"] == "源日"
+    assert parent_shares(x2.ledger_detail)["C"]["source"] == "代開發票"
     assert x2.contract_amount == 120000 and x2.ledger_detail["split"] == {"剪接": 120000}
     assert x3.ledger_detail.get(BY_PARENT_PENDING_KEY) is True and not parent_shares(x3.ledger_detail)
     x4 = world.projects["X4"]
