@@ -59,7 +59,7 @@ def world(monkeypatch):
                               ledger_detail={"source": "源日", "split": {"剪接": 120000}}),
         "X3": SimpleNamespace(id="X3", entity="mine", contract_amount=10000,
                               ledger_detail={"source": "源日", "split": {"剪接": 10000}}),
-        # BUG-13：只有 30,000 是鏡射來的，70,000 是 owner 自己加的 → 只認 30,000、工項不認
+        # BUG-13：只有 30,000 是鏡射來的，70,000 是 owner 自己加的（非工項的合約金額）→ 只認 30,000
         "X4": SimpleNamespace(id="X4", entity="mine", contract_amount=100000,
                               ledger_detail={"source": "源日", "split": {"剪接": 100000}, "mirror_total": 30000}),
         "A": SimpleNamespace(id="A", entity="parent", contract_amount=0, billing_mode="company"),
@@ -104,7 +104,8 @@ async def test_backfill_claims_one_to_one_and_resolvable_n_to_one_and_flags_the_
     assert x2.contract_amount == 120000 and x2.ledger_detail["split"] == {"剪接": 120000}
     assert x3.ledger_detail.get(BY_PARENT_PENDING_KEY) is True and not parent_shares(x3.ledger_detail)
     x4 = world.projects["X4"]
-    assert parent_shares(x4.ledger_detail)["F"] == {"amount": 30000, "split": {}, "synced_total": 30000, "at": "", "source": "源日"}
+    # 只認鏡射來的 30,000，但工項一律認（分身的工項就是鏡射來的；不認會在下次同步時加倍）
+    assert parent_shares(x4.ledger_detail)["F"] == {"amount": 30000, "split": {"剪接": 100000}, "synced_total": 30000, "at": "", "source": "源日"}
     assert x4.contract_amount == 100000 and x4.ledger_detail["split"] == {"剪接": 100000}
     assert world.committed == 1
     assert "1:1 2 案、N:1 認出 1 案、待認領 1 案" in capsys.readouterr().out
