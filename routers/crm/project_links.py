@@ -605,7 +605,6 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
     from core.ledger import require_entity
     from core.ledger_project import (FEE_DEDUCTED_KEY, BILLING_MIRROR_SOURCE, MIRROR_SOURCE,
                                      apply_source_fee, billing_mode_of, manual_fields, norm_detail)
-    from routers.api_finance_projects import resync_receivable
 
     new = billing_mode_of(p.billing_mode)
     old = billing_mode_of(old_mode)
@@ -631,14 +630,12 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
             session.add(t)
             await _write_link(session, p, t)
             return {"action": "created", "created": True}
+        # 有分身：只改案源＋重跑費用，金額與工項不動（收入沒填過才用母帳合約額補）
         keep = norm_detail(t.ledger_detail)
         keep["source"] = want_source
         if not int(t.contract_amount or 0):
             t.contract_amount = int(p.contract_amount or 0)
-        keep = norm_detail(apply_source_fee(int(t.contract_amount or 0), keep))
-        t.ledger_detail = keep
-        resync_receivable(t, keep)
-        t.updated_at = _now()
+        _store_mirror_detail(t, apply_source_fee(int(t.contract_amount or 0), keep))
         return {"action": "switched", "created": False}
     # 換回源日專案／現金收款：分身留著，只把代開那套拿掉
     if t is not None and BILLING_MIRROR_SOURCE.get(old) and \
@@ -647,15 +644,21 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         keep["source"] = MIRROR_SOURCE
         for k in ("invoice_fee", "tax_fee", "buy_invoice"):
             keep[k] = 0
-        manual = manual_fields(keep) - {"invoice_fee"}
-        keep["manual"] = sorted(manual)
+        keep["manual"] = sorted(manual_fields(keep) - {"invoice_fee"})
         keep.pop(FEE_DEDUCTED_KEY, None)
-        keep = norm_detail(keep)
-        t.ledger_detail = keep
-        resync_receivable(t, keep)
-        t.updated_at = _now()
+        _store_mirror_detail(t, keep)
         return {"action": "reverted", "created": False}
     return {"action": "none", "created": False}
+
+
+def _store_mirror_detail(t, detail: dict) -> None:
+    """分身的 ledger_detail 落庫三步（正規化、應收重算、時間戳）—— 換案源與換回兩條路共用。"""
+    from core.ledger_project import norm_detail
+    from routers.api_finance_projects import resync_receivable
+    keep = norm_detail(detail)
+    t.ledger_detail = keep
+    resync_receivable(t, keep)      # 營收／代扣成本動了 → 應收與收款狀態一律重算
+    t.updated_at = _now()
 
 
 async def link_note_for(session, p, request) -> dict:
