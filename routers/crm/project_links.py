@@ -799,15 +799,14 @@ async def _write_link(session, parent, mine):
     if mine is None:
         # 解除：連結加進私帳的那份（金額＋工項）一起拿掉（owner 2026-09-13 決策 ①）；
         # 沒分案記錄的舊連結不動錢（跟以前一樣）。分身列已刪就只清指標。
-        if parent.mine_link_id:
-            t = await session.get(CrmProject, parent.mine_link_id)
-            if t is not None:
-                from core.ledger_project import apply_source_fee, drop_parent_share, norm_detail
-                before = norm_detail(t.ledger_detail)
-                keep, new_contract = drop_parent_share(before, int(t.contract_amount or 0), parent.id)
-                if new_contract != int(t.contract_amount or 0) or keep != before:
-                    t.contract_amount = new_contract
-                    _store_mirror_detail(t, apply_source_fee(new_contract, keep))
+        t = await resolve_mine_link(session, parent)      # 兩種連結形狀都認（舊形狀只在私帳側有指標）
+        if t is not None:
+            from core.ledger_project import apply_source_fee, drop_parent_share, norm_detail
+            before = norm_detail(t.ledger_detail)
+            keep, new_contract = drop_parent_share(before, int(t.contract_amount or 0), parent.id)
+            if new_contract != int(t.contract_amount or 0) or keep != before:
+                t.contract_amount = new_contract
+                _store_mirror_detail(t, apply_source_fee(new_contract, keep))
         parent.mine_link_id = None
         parent.updated_at = _now()
         return

@@ -239,3 +239,23 @@ async def test_legacy_claim_is_capped_to_what_was_mirrored(monkeypatch, parents_
     assert parent_shares(t.ledger_detail)["A"]["amount"] == 120000
     assert t.ledger_detail["split"] == {"剪接": 100000}            # 工項沒被認走、也沒被動
 
+
+async def test_unlink_of_a_legacy_shape_link_drops_the_share_too(monkeypatch):
+    """BUG-15：舊形狀（只有 source_project_id）的解除也要扣份額，不然後端基數算它、前端不算。"""
+    from core.ledger_project import parent_shares, set_parent_share
+
+    d, c = set_parent_share({"source": "源日"}, 0, "A", 40000, {"剪接": 40000}, source="源日")
+    t = SimpleNamespace(id="X", name="X", entity="mine", contract_amount=c, ledger_detail=d, updated_at=None,
+                        source_project_id="A")
+    parent = SimpleNamespace(id="A", mine_link_id=None, updated_at=None)     # 舊形狀：母帳側沒指標
+
+    async def _resolve(session, p):
+        return t if p.id == "A" else None
+    monkeypatch.setattr(pl, "resolve_mine_link", _resolve)
+    monkeypatch.setattr(pl, "_store_mirror_detail", lambda t, detail: setattr(t, "ledger_detail", detail))
+
+    class _S:
+        async def get(self, model, pk):
+            return None
+    await pl._write_link(_S(), parent, None)
+    assert t.contract_amount == 0 and parent_shares(t.ledger_detail) == {}

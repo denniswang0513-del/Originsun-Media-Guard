@@ -206,10 +206,17 @@ async def set_parent_link(mine_id: str, request: Request):
                 raise HTTPException(status_code=422, detail="要連結的目標必須是母帳專案")
             await _write_link(session, p, m)
         else:
+            unlinked = set()
             for p in (await session.execute(
                     select(CrmProject)
                     .where(CrmProject.mine_link_id == mine_id))).scalars().all():
                 await _write_link(session, p, None)
+                unlinked.add(p.id)
+            if m.source_project_id and m.source_project_id not in unlinked:
+                # 舊形狀（只有私帳側的指標）的那個母帳案也要走 _write_link —— 份額才會一起扣掉
+                p0 = await session.get(CrmProject, m.source_project_id)
+                if p0 is not None:
+                    await _write_link(session, p0, None)
             m.source_project_id = None
         m.updated_at = _now()
         await session.commit()
