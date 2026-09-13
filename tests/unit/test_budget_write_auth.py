@@ -9,7 +9,7 @@
 import re
 
 from tests.unit._srcscan import costs_src
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body
 
 SRC = costs_src()
 
