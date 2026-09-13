@@ -1,5 +1,5 @@
 {
-  "version": "2.5.10",
-  "build_date": "2026-09-12",
-  "notes": "母私帳雙向推送：CRM「推送到私帳」三態（分身／代開留一份／換帳本）、我的帳「推送到母帳」；連結後識別欄以母帳為準；換帳本放寬給內部代開並補應收；私帳落後偵測；projects.py 拆出 project_links.py"
+  "version": "2.5.11",
+  "build_date": "2026-09-13",
+  "notes": "士源帳本：私帳手機版 /m/ledger.html（收支／專案／應收／家用／總覽／資產六分頁、推送到母帳、家用按月、淨值成長線、無限環 icon）；office-api 掛 finance 端點（主機關機手機照用）；桌機資產儀表板改用共用 asset-buckets"
 }
