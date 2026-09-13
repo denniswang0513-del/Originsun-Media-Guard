@@ -556,8 +556,12 @@ def mirror_stale(detail, current_total: int, pid: str = ""):
     """
     d = detail if isinstance(detail, dict) else {}
     share = parent_shares(d).get(pid) if pid else None
-    if share is not None and share["synced_total"] > 0:
+    if share is not None:
+        # 有這一案的記錄就只看它：synced_total 0（代開分身、成本行本來就 0）＝判不出來，
+        # **不能**退回 X 層級的 mirror_total —— 那可能是別案加上去時寫的，會把 A 說成落後 −N
         last = share["synced_total"]
+        if last <= 0:
+            return None, 0
         return int(current_total or 0) != last, int(current_total or 0) - last
     try:
         last = int(d.get(MIRROR_TOTAL_KEY))

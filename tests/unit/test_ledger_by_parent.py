@@ -209,3 +209,14 @@ def test_frontend_fee_preview_uses_the_same_bases_as_the_backend():
     assert "_feeBases(c, src)" in body and "Math.round(base * pct / 100)" in body
     assert "_proTax(bases.pro)" in body
     assert "Math.round(c * pct" not in body, "代辦費試算又用整案算了"
+
+
+class TestPolishRound1:
+    """/polish 2026-09-13 階段一的發現（BUG-10、11、14）。"""
+
+    def test_stale_with_a_share_record_never_falls_back_to_the_shared_key(self):
+        # BUG-10：A 是代開分身（synced_total 0），B 加上去後 X 的 mirror_total=30000 → A 不能被說成落後 −30000
+        d, _ = set_parent_share({}, 0, "A", 100000, {}, synced_total=0)
+        d[MIRROR_TOTAL_KEY] = 30000
+        assert mirror_stale(d, 0, "A") == (None, 0)
+        assert mirror_stale(d, 30000) == (False, 0)                 # 沒指定案的舊讀法照舊
