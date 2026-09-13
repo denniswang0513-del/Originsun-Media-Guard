@@ -1530,6 +1530,16 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   **前端漏一個 import 是零告警的**，`npx eslint` 回 exit=0，只有使用者按下去才 ReferenceError。
   2026-09-11 /polish 就這樣把 `crm-staff.js` 一顆本來在 https 下正常的按鈕改成所有瀏覽器都壞
   （用了 `copyText` 沒 import）。動前端時**自己 grep 一次「新用到的名字有沒有在 import 清單裡」**。
+  2026-09-13 起 `test_js_parses::test_no_undefined_names_in_es_modules` 對**有 import/export 的檔**跑 no-undef
+  （`window.X =` 過的名字與頁面級函式庫當全域，噪音為零；同日抓到 remote-dispatch.js 死碼清理漏的 `ms`）——
+  但 `js/my/`、`js/showcase-edit/` 那些**傳統 script** 不在守衛內（跨檔共用全域詞法環境，靠載入順序），還是要自己 grep。
+- **`core.worker.enqueue_job` 是 async，從執行緒呼叫一定要橋回主 loop**：排程 tick（`_check_and_dispatch`、
+  `dispatch_distributed_transcode`）、對帳改派（`dispatch_reconcile.post_transcode`）、drone_watcher 都跑在
+  `asyncio.to_thread` 的執行緒上。裸呼叫 `enqueue_job(...)` 不會報錯 —— 只會做出一個沒人 await 的 coroutine，
+  任務靜默消失、但 `dispatched += 1`、排程被標已跑、one-shot 被 disable、改派回 True（2026-09-13 /health 抓到三處，
+  自 v1.9.8 起就是這樣）。正確寫法是 `asyncio.run_coroutine_threadsafe(enqueue_job(...), state.get_main_loop()).result(timeout=30)`
+  （scheduler 的 `_enqueue_from_thread`）；主 loop 沒起要當失敗、不能計數。pyright 的 `reportUnusedCoroutine`
+  與 pytest 的 `RuntimeWarning: coroutine ... was never awaited` 都是這件事的訊號，別當噪音。
 - **掃原始碼的規則測試用 `_srcscan.flow_body`，不要用 `func_body`**：`func_body` 釘的是「這段程式
   住在哪一支函式裡」，於是被禁止的寫入只要搬進同檔 helper 就再也抓不到（測試安靜地失效），
   而且「把長函式切開」會變成一件弄壞測試的事。`flow_body` 會把它呼叫的 `_` 開頭同檔 helper
