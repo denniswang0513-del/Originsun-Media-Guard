@@ -1549,6 +1549,8 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   `t.contract_amount = …` 會把別案鏡射進來的錢與 owner 手填的一起洗掉（規則測試會紅）。`norm_detail` 要保留
   `by_parent`／`by_parent_pending` —— NAS office-api 拿到**舊** `norm_detail` 時手機端一次 PUT 就把份額洗光，
   發版要確認那個容器也重啟了。
+  同日第二輪**代辦費分案**：份額帶 `source`，代辦費只算走代開那幾案的份額（`fee_bases`）；前端試算 `_feeBases()`
+  要跟後端同一條規則，**不准用整案算**（後端 8,000、前端送 14,400 → 被當成人改過而凍住；規則測試釘著）。
 - **掃原始碼的規則測試用 `_srcscan.flow_body`，不要用 `func_body`**：`func_body` 釘的是「這段程式
   住在哪一支函式裡」，於是被禁止的寫入只要搬進同檔 helper 就再也抓不到（測試安靜地失效），
   而且「把長函式切開」會變成一件弄壞測試的事。`flow_body` 會把它呼叫的 `_` 開頭同檔 helper

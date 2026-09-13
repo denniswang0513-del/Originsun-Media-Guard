@@ -20,8 +20,8 @@ X 承接 A、B 兩個母帳案時（2026-09-01 起允許），沒有任何地方
 
 ```json
 "by_parent": {
-  "<母帳案 id>": {"amount": 100000, "split": {"導演": 60000, "剪接": 40000}, "synced_total": 100000, "at": "2026-09-01"},
-  "<母帳案 id>": {"amount":  80000, "split": {"剪接": 80000},               "synced_total":  80000, "at": "2026-09-05"}
+  "<母帳案 id>": {"amount": 100000, "split": {"導演": 60000, "剪接": 40000}, "synced_total": 100000, "at": "2026-09-01", "source": "代開發票"},
+  "<母帳案 id>": {"amount":  80000, "split": {"剪接": 80000},               "synced_total":  80000, "at": "2026-09-05", "source": "源日"}
 },
 "by_parent_pending": true        // 只有回填分不出份額的舊 N:1 才有；全部認領完自動拿掉
 ```
@@ -37,7 +37,7 @@ X 承接 A、B 兩個母帳案時（2026-09-01 起允許），沒有任何地方
 | 函式 | 做什麼 |
 |---|---|
 | `parent_shares(detail)` | `{pid: {amount, split, synced_total, at}}`，沒記錄＝`{}` |
-| `set_parent_share(detail, contract, pid, amount, split, *, synced_total=None, at="", claim=False)` | 把 pid 的份額換成 (amount, split)；X 的金額與工項只吃 **新 − 舊**；工項扣到 0 為止；`synced_total`／`at` 沒給就沿用。`claim=True`＝只記份額不動錢（錢已在 X 上） |
+| `set_parent_share(detail, contract, pid, amount, split, *, synced_total=None, at="", source=None, claim=False)` | 把 pid 的份額換成 (amount, split)；X 的金額與工項只吃 **新 − 舊**；工項扣到 0 為止；`synced_total`／`at` 沒給就沿用。`claim=True`＝只記份額不動錢（錢已在 X 上） |
 | `drop_parent_share(detail, contract, pid)` | 解除連結：那案的金額＋工項扣掉；沒記錄＝原樣 |
 | `mirror_stale(detail, current_total, pid="")` | 逐案判；沒分案記錄退回 `mirror_total` |
 
@@ -67,9 +67,25 @@ X 承接 A、B 兩個母帳案時（2026-09-01 起允許），沒有任何地方
 - 「後期連結」那一行（`link_note_for` → `link_note`）：逐案判落後；N:1 句子多「份額 A 100,000、B 80,000」；待認領有字。
 - 對應表 `/projects-mine-links`：母帳列 `share`、私帳列 `shares`／`shares_pending`；前端 `projlinks.js` 在「連 N 案」旁畫份額與待認領標記。
 
-## 已知限制（不在這輪）
+## 代辦費分案（同日第二輪，`65644ef8`…）
 
-- **案源／代辦費是 X 一整案的**，不分母帳案：A 代開、B 不代開時，代辦費照 X 全額算。要分要再開一輪（`by_parent[pid].source`）。
+每案份額多 `source`（代開發票／源日／執行業務所得）。**代辦費只算走代開那幾案的份額**：
+
+- `fee_bases(contract, d) → (代開基數, 執行業務所得基數)`：每案份額照自己的 `source` 算進哪個基數；沒標的跟 X 的 `source` 走；
+  owner 自己填的那部分（合約額 − Σ份額）也跟 X 走；沒分案記錄＝整案（舊算法）。
+- `apply_source_fee` 吃基數：代辦費／稅金／買發票只算代開基數，個人稅款只算執行業務所得基數，兩種混著各算各的；
+  有分案記錄但沒任何一案走代開 → 三欄歸零（手改的不動）。
+- 寫入點：建分身／推送／`_ensure_share`／回填都寫**明確**的 `source`（＝當時 X 的案源），之後 A 翻成代開 B 不跟著走。
+  收款方式 → 後期代開：只標 A；換回：只把 A 標回源日，別案還走代開就留 X 的案源。
+- 讀取端：詳情 API 回 `parent_shares`（含 source）／`fee_bases`／`source_mixed`；**前端試算改用 `_feeBases()`**（同一條規則），
+  不能再用整案算 —— 否則後端 8,000、前端送 14,400 會被當成人改過而凍住（規則測試釘著）。
+  「後期連結」那行：各案案源不同 → 「案源 混合」、份額後面帶案源；私帳詳情案源格下方標「混合：…」。
+- 手改代辦費仍是 X 一個總數（`manual`），不逼 owner 分案填。
+
+## 已知限制
+
+- 工項扣到 0 就停（見上）。
+- 案源格（`fpl-source`）改的是 X 的案源＝owner 自己那部分；各母帳案的案源由母帳的收款方式決定，私帳這邊不能逐案改。
 - 工項扣到 0 就停：owner 把某工項手改得比份額還低、之後那案撤掉，X 那項會是 0 而不是負數（他的手改被吞掉一部分）。這是刻意的 —— 負數工項沒有意義。
 
 ## 部署注意
