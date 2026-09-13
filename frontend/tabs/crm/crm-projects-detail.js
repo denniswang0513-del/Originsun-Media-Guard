@@ -261,6 +261,11 @@ window._projRefreshLinkNote = async function (projectId) {
         if (!note || !note.text) { el.hidden = true; return; }
         el.innerHTML = `<span class="k">後期連結</span>${linkNoteHtml(note)}`;
         el.hidden = false;
+        // 同一趟順手把「重新同步」那顆鈕改成講實話的字（只在換到這一案時；staleFor 由 hint 畫上去後才記）
+        const actionsBar = document.getElementById('proj-bar-actions');
+        if (note.linked && actionsBar && actionsBar.dataset.staleFor !== projectId) {
+            window._projMirrorStaleHint?.(p.id, actionsBar.querySelector('#proj-push-mine'), note);
+        }
         // 單筆回的連結狀態比清單新（PUT 改收款方式後分身可能剛建好）：同步回清單物件，動作列才會變成「已連結私帳」
         if (typeof r.mirrored === 'boolean' && (r.mirrored !== p.mirrored || r.mine_link_name !== p.mine_link_name || r.billing_mode !== p.billing_mode)) {
             Object.assign(p, { mirrored: r.mirrored, mine_link_id: r.mine_link_id, mine_link_name: r.mine_link_name, billing_mode: r.billing_mode });
@@ -564,14 +569,10 @@ function renderDetail(project) {
             () => window._projPushMine(project.id, project.mirrored));
         actions.querySelector('#proj-mine-goto')?.addEventListener('click',
             () => _openLedgerProject(project.mine_link_id));
-        // 已連結：問一次後端「私帳落後了沒」，把「重新同步」那顆改成講實話的字。
-        // 只在**換到這一案**時問（renderDetail 每改一格都會整個重畫；落後與否只跟成本行有關，
-        // 改狀態／日期不會變）；重新同步後由 core.js 清掉 staleFor 再重畫，才會再問一次
-        // （staleFor 由 hint 在真的畫上去之後才記：這裡先記的話，查詢還在飛就被重畫一次，
-        //   hint 看到按鈕已不在 DOM 就放棄，而 staleFor 已經等於 id → 永遠不再問）
-        if (_mine && _toMine && project.mirrored && actions.dataset.staleFor !== project.id) {
-            window._projMirrorStaleHint?.(project.id, actions.querySelector('#proj-push-mine'));
-        }
+        // 已連結：「私帳落後了沒」那顆鈕的字由 _projRefreshLinkNote 順手畫 —— 它打的那一支單筆
+        // （link_note）同一趟就帶了三值＋差額，不再另外問 mirror-check（owner 2026-09-13「併成一支」）。
+        // 只在**換到這一案**時問（staleFor 由 hint 真的畫上去之後才記，理由見 _projMirrorStaleHint）；
+        // 重新同步後由 core.js 清掉 staleFor 再重畫，才會再問一次。
         actions.querySelector('.crm-detail-close').addEventListener('click', () => callbacks.closeDetail?.());
     }
     // Re-attach the [🟢 已自動儲存] indicator that _loadFinancialSummary injects —

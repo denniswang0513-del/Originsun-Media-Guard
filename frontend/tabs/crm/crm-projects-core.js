@@ -686,11 +686,17 @@ window._projPushMine = async function (id, linked) {
 /** 已連結的案：問後端「私帳落後了沒」，把「重新同步」那顆改成講實話的字。
  *  判定正本在後端（core.ledger_project.mirror_stale）：True＝母帳成本行改了、
  *  False＝一致、null＝舊連結沒記過（同步一次就會記）—— 前端不自己比 Σsplit。 */
-window._projMirrorStaleHint = async function (id, btn) {
+window._projMirrorStaleHint = async function (id, btn, note) {
     if (!btn) { return; }
     let chk;
-    try { chk = await _fetch(`/projects/${encodeURIComponent(id)}/mirror-check`); }
-    catch (e) { return; }                      // 只是提示，拿不到就維持原字
+    if (note && typeof note === 'object') {
+        // 詳情那一行「後期連結」同一趟就帶了三值＋差額（link_note.stale／delta／crm_total）——
+        // 不再多打一支 mirror-check（owner 2026-09-13「併成一支」）
+        chk = { stale: note.stale, delta: note.delta, total: note.crm_total };
+    } else {
+        try { chk = await _fetch(`/projects/${encodeURIComponent(id)}/mirror-check`); }
+        catch (e) { return; }                  // 只是提示，拿不到就維持原字
+    }
     if (!btn.isConnected) { return; }          // 使用者已經切到別案（或這一案剛被重畫）→ 下次重畫再問
     const bar = btn.closest('#proj-bar-actions');
     if (bar) { bar.dataset.staleFor = id; }    // 畫上去了才記，之後同一案的重畫不再問

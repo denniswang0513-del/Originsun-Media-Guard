@@ -178,18 +178,20 @@ def _fmt_n(n) -> str:
     return f"{int(n or 0):,}"
 
 
-def link_note(mode: str, mine, detail, *, stale=None, passthrough_invoices: int = 0) -> dict:
+def link_note(mode: str, mine, detail, *, stale=None, delta: int = 0, crm_total: int = 0,
+              passthrough_invoices: int = 0) -> dict:
     """「後期連結」那一行系統備註（母帳專案表單／詳情用；前端只畫，不拼句子）。
 
     `mine`＝連到的私帳案 `(id, name, contract)`，沒連＝None；`detail`＝私帳案的 ledger_detail
-    （已 norm）；`stale`＝mirror_stale 的三值。回的 `text` 是一整句。
+    （已 norm）；`stale`／`delta`＝mirror_stale 的結果、`crm_total`＝母帳現在掛給我的成本行合計
+    （詳情那顆「重新同步」鈕要講的數字 —— 跟這一行同一趟拿，不再另外打 mirror-check）。回的 `text` 是一整句。
     """
     mode = billing_mode_of(mode)
     out = {"mode": mode, "mode_label": BILLING_LABELS[mode], "linked": mine is not None,
            "mine_id": "", "mine_name": "", "source": "", "contract": 0, "invoice_fee": 0,
            "fee_pct": DEFAULT_FEE_PCT, "tax_fee": 0, "buy_invoice": 0, "fee_deducted": True,
-           "stale": None, "mirror_at": "", "passthrough_invoices": int(passthrough_invoices or 0),
-           "text": ""}
+           "stale": None, "delta": 0, "crm_total": 0, "mirror_at": "",
+           "passthrough_invoices": int(passthrough_invoices or 0), "text": ""}
     if mine is None:
         if mode == "passthrough":
             out["text"] = "儲存後會自動在私帳建對應的案（案源＝代開發票、代辦費自動算）。"
@@ -205,8 +207,8 @@ def link_note(mode: str, mine, detail, *, stale=None, passthrough_invoices: int 
                 "invoice_fee": int(d.get("invoice_fee") or 0),
                 "fee_pct": float(d.get("fee_pct") or DEFAULT_FEE_PCT),
                 "tax_fee": int(d.get("tax_fee") or 0), "buy_invoice": int(d.get("buy_invoice") or 0),
-                "fee_deducted": fee_deducted(d), "stale": stale,
-                "mirror_at": str(d.get(MIRROR_AT_KEY) or "")})
+                "fee_deducted": fee_deducted(d), "stale": stale, "delta": int(delta or 0),
+                "crm_total": int(crm_total or 0), "mirror_at": str(d.get(MIRROR_AT_KEY) or "")})
     parts = [f"已連結後期 → {mname}", f"案源 {src}", f"收入 {_fmt_n(contract)}"]
     if src == "代開發票":
         pct = out["fee_pct"]

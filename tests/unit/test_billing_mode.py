@@ -37,6 +37,8 @@ def test_link_note_linked_passthrough_spells_out_the_fee():
     assert n["linked"] and n["mine_id"] == "m1" and n["source"] == "代開發票"
     assert (n["invoice_fee"], n["tax_fee"], n["buy_invoice"], n["fee_pct"]) == (6560, 3905, 2655, 8.0)
     assert n["fee_deducted"] is True and n["stale"] is False and n["mirror_at"] == "2026-09-12"
+    assert (n["delta"], n["crm_total"]) == (0, 0)
+    assert link_note("company", ("m", "y", 1), d, stale=True, delta=3000, crm_total=27000)["crm_total"] == 27000
     t = n["text"]
     for piece in ("快樂學游泳動態製作", "代開發票", "82,000", "8% ＝ 6,560", "3,905", "2,655", "已扣", "一致",
                   "上次同步 2026-09-12", "內部代開發票 1 張"):
@@ -125,7 +127,7 @@ def test_link_note_for_respects_the_mine_visibility_line():
     fn = code_only(flow_body(_LINKS, "async def link_note_for("))
     assert "hide_mine_projects(request)" in fn and "return link_note(mode, None, None)" in fn
     # 落後判定同 mirror-check：沒綁人員檔案 None；N:1 不判
-    assert "mine_parent_names(session, [t.id])" in fn and "mirror_stale(detail, mir[\"total\"])" in fn
+    assert "mine_parent_names(session, [t.id])" in fn and "stale, delta = mirror_stale(detail, crm_total)" in fn
 
 
 def test_private_put_takes_fee_deducted_as_meta_not_money():

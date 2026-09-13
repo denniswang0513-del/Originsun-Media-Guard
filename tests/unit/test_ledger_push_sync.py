@@ -259,11 +259,17 @@ def test_crm_stale_hint_trusts_the_backend_verdict():
     """「私帳落後了沒」的判定正本在後端（mirror_stale）—— 前端只畫三值，不自己比 Σsplit。"""
     from tests.unit._srcscan import js_code_only, js_func_body
     js = repo_src("frontend/tabs/crm/crm-projects-core.js")
-    fn = js_code_only(js_func_body(js, "window._projMirrorStaleHint = async function (id, btn) {"))
+    fn = js_code_only(js_func_body(js, "window._projMirrorStaleHint = async function (id, btn, note) {"))
     assert "chk.stale === true" in fn and "chk.stale === false" in fn
     assert "split" not in fn, "前端又自己算了一份"
+    # 2026-09-13「併成一支」：詳情那一行 link_note 同一趟帶 stale／delta／crm_total，鈕的字從它畫；
+    # 沒給 note（外部呼叫）才退回打 mirror-check
+    assert "chk = { stale: note.stale, delta: note.delta, total: note.crm_total }" in fn
     det = js_code_only(repo_src("frontend/tabs/crm/crm-projects-detail.js"))
-    assert "window._projMirrorStaleHint?.(project.id" in det
+    refresh = js_func_body(det, "window._projRefreshLinkNote = async function (projectId) {")
+    assert "window._projMirrorStaleHint?.(p.id, actionsBar.querySelector('#proj-push-mine'), note)" in refresh
+    render = js_func_body(det, "function renderDetail(project) {")
+    assert "_projMirrorStaleHint" not in render.replace("_projMirrorStaleHint）", ""), "renderDetail 又自己打一次 mirror-check"
 
 
 def test_crm_move_to_mine_asks_the_source_and_lists_blockers():

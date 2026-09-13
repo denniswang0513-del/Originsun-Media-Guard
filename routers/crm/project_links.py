@@ -676,16 +676,17 @@ async def link_note_for(session, p, request) -> dict:
     if t is None:
         return link_note(mode, None, None, passthrough_invoices=await _passthrough_invoice_count(session, p.id))
     detail = norm_detail(t.ledger_detail)
-    stale = None
+    stale, delta, crm_total = None, 0, 0
     sid = await _me_staff_id_or_blank(request)
     if sid:
         # 同 mirror-check：一個私帳案承接多個母帳案時合計不屬於任何一案 → 判不出來
         shared = len((await mine_parent_names(session, [t.id])).get(t.id) or []) > 1
         if not shared:
             _p, mir, _l = await _mirror_preview(session, p.id, sid)
-            stale, _delta = mirror_stale(detail, mir["total"])
-    return link_note(mode, (t.id, t.name or "", t.contract_amount), detail, stale=stale,
-                     passthrough_invoices=await _passthrough_invoice_count(session, p.id))
+            crm_total = mir["total"]
+            stale, delta = mirror_stale(detail, crm_total)
+    return link_note(mode, (t.id, t.name or "", t.contract_amount), detail, stale=stale, delta=delta,
+                     crm_total=crm_total, passthrough_invoices=await _passthrough_invoice_count(session, p.id))
 
 
 # ── 母私帳專案對應表（owner 2026-09-05）──────────────────────────────────
