@@ -231,13 +231,13 @@ def link_note(mode: str, mine, detail, *, stale=None, delta: int = 0, crm_total:
             for s in out["shares"]))
     if shares_pending:
         parts.append("各案份額待認領（逐案「推送到私帳 → 取代」）")
-    if src == "代開發票":
+    if shown == "代開發票" or fee_bases(contract, d)[0] > 0:
         pct = out["fee_pct"]
         pct_s = f"{pct:g}%"
         parts.append(f"代辦費 {pct_s} ＝ {_fmt_n(out['invoice_fee'])}"
                      f"（稅金 {_fmt_n(out['tax_fee'])} ＋ 買發票 {_fmt_n(out['buy_invoice'])}）"
                      + ("・已扣" if out["fee_deducted"] else "・未扣（全額匯入，代辦費另付）"))
-    elif src == "源日":
+    elif shown == "源日":
         parts.append("不抽代辦費")
     if stale is True:
         parts.append("私帳落後（母帳成本行改了）")
@@ -443,6 +443,10 @@ def _clean_shares(raw) -> dict:
         src = str(v.get("source") or "").strip()
         if src in SOURCES:
             out[str(pid)]["source"] = src
+        # 收款方式切成代開之前這案的案源（換回時還原用）
+        prev = str(v.get("prev_source") or "").strip()
+        if prev in SOURCES:
+            out[str(pid)]["prev_source"] = prev
     return out
 
 
@@ -460,14 +464,16 @@ def parent_shares(detail) -> dict:
 
 
 def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=None, at: str = "",
-                     source=None, claim: bool = False) -> tuple:
+                     source=None, prev_source: bool = False, restore_source: bool = False,
+                     claim: bool = False) -> tuple:
     """把母帳案 `pid` 給私帳案的份額換成 `(amount, split)` → `(新 detail, 新 contract)`。
 
     X 的金額與工項只吃**差額**（新 − 這案舊份額），所以別案的份額、owner 自己填的錢與
     手改的工項都不會被動到；工項扣到負數就停在 0（owner 手改得比份額低，那是他的決定）。
     `synced_total`／`at` 沒給就沿用這案上一次的（換收款方式只動金額、不是重新同步）。
     `source`＝這一案的案源（代辦費分案：代辦費只算標「代開發票」的份額）；None＝沿用、
-    不在 SOURCES 的值＝清掉（之後跟 X 的 source 走）。
+    不在 SOURCES 的值＝清掉（之後跟 X 的 source 走）。`prev_source=True`＝把換之前的案源記在
+    `prev_source`（收款方式切成代開）；`restore_source=True`＝換回：案源還原成 prev_source（沒記過退源日）。
     `claim=True`：待認領的舊資料（BY_PARENT_PENDING_KEY）—— 只記份額、X 的錢一毛不動，
     因為那些錢早就在合約額裡了。
     """
@@ -488,6 +494,12 @@ def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=
                    "synced_total": _int(synced_total) if synced_total is not None else old["synced_total"],
                    "at": at or old["at"]}
     src = old.get("source") if source is None else str(source or "").strip()
+    if restore_source:
+        src = old.get("prev_source") or MIRROR_SOURCE
+    elif prev_source and old.get("source") and old.get("source") != src:
+        shares[pid]["prev_source"] = old["source"]
+    elif old.get("prev_source") and not restore_source:
+        shares[pid]["prev_source"] = old["prev_source"]
     if src in SOURCES:
         shares[pid]["source"] = src
     d[BY_PARENT_KEY] = shares
@@ -581,8 +593,8 @@ def _freeze_hand_filled_fees(d: dict) -> None:
     案源本來就抽那種費的不動 —— 那些是試算值，照舊自動。"""
     src = d.get("source")
     manual = manual_fields(d)
-    if src != "代開發票" and _int(d.get("invoice_fee")):
-        manual.add("invoice_fee")
+    if src != "代開發票" and (_int(d.get("invoice_fee")) or _int(d.get("tax_fee")) or _int(d.get("buy_invoice"))):
+        manual.add("invoice_fee")          # 稅金／買發票跟代辦費是一組，凍住旗標就整組不歸零
     if src != "執行業務所得" and _int(d.get("personal_tax")):
         manual.add("personal_tax")
     if manual:
@@ -597,8 +609,8 @@ def drop_parent_share(detail, contract, pid: str) -> tuple:
         return detail, contract
     dropped_src = share_source(d, parent_shares(d).get(pid))
     d, contract = set_parent_share(d, contract, pid, 0, {})
-    if dropped_src == "代開發票" and not fee_bases(contract, d)[0]:
-        # 解除的是最後一個代開份額：代辦費是為它調的（同「換回」那條），手動旗標一起放掉，才會歸零
+    if dropped_src == "代開發票":
+        # 解除的是代開份額：代辦費的手動旗標一起放掉、照剩下的代開基數重算（同「換回」那條，無條件）
         manual = manual_fields(d) - {"invoice_fee"}
         d["manual"] = sorted(manual)
         if not manual:
@@ -739,10 +751,12 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
         d["buy_invoice"] = int(d["invoice_fee"] or 0) - d["tax_fee"]
     elif shared:
         # 分案的世界：沒有任何一案走代開（A 換回源日、或最後一個代開份額被解除）→ 試算值是 0：
-        # 走 _settle，這次送來的非零值一樣算「人決定的」（標手動、留住），沒送／沒標的才歸零
+        # 走 _settle，這次送來的非零值一樣算「人決定的」（標手動、留住），沒送／沒標的才歸零。
+        # 手動的整組（稅金／買發票）都不動 —— 那是人填的
         _settle("invoice_fee", 0)
-        d["tax_fee"] = 0
-        d["buy_invoice"] = int(d["invoice_fee"] or 0)
+        if "invoice_fee" not in manual:
+            d["tax_fee"] = 0
+            d["buy_invoice"] = 0
     if src == "執行業務所得" or pro:
         _settle("personal_tax", withholding(pro))
     elif shared:
@@ -867,7 +881,8 @@ def expected_cash_in(contract: int, d: dict) -> int:
     - 代開發票的代辦費（invoice_fee）＝代開業者匯款前先扣走。
     """
     base = int(contract or 0) - int(d.get("personal_tax") or 0)
-    if d.get("source") == "代開發票" and fee_deducted(d):
+    # 分案記帳後 X 的 source 只是 owner 那部分的：有任何一案走代開就有代辦費被先扣（fee_bases）
+    if (d.get("source") == "代開發票" or fee_bases(contract, d)[0] > 0) and fee_deducted(d):
         base -= int(d.get("invoice_fee") or 0)
     return base
 

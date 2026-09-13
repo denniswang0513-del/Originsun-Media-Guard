@@ -447,3 +447,72 @@ class TestPolishRound7:
         assert "invoice_fee" in d["manual"]
         d2, c2 = drop_parent_share(d, c, "P")
         assert c2 == 0 and d2["invoice_fee"] == 0 and "invoice_fee" not in (d2.get("manual") or [])
+
+
+class TestPolishRound8:
+    """第 8 輪：X 案源不翻之後，所有「看 X.source 決定費用」的讀法都要改看份額（基數）。"""
+
+    def test_expected_cash_in_deducts_the_fee_when_any_share_is_agency(self):
+        # #1（高）：推送建的 X（源日）→ A 改代開：代辦費 8,000 已扣，應收要 92,000 不是 100,000
+        from core.ledger_project import expected_cash_in, receivable_fields, client_wire
+        d, c = set_parent_share({"source": "源日"}, 0, "A", 100000, {}, source="代開發票")
+        d = apply_source_fee(c, d)
+        assert d["invoice_fee"] == 8000
+        assert expected_cash_in(c, d) == 92000 == client_wire(c, d)
+        assert receivable_fields(c, 92000, d)[1] == "全額到帳"
+        # 源日 X、owner 手填（凍住）的代辦費、沒有代開份額 → 跟以前一樣不扣
+        e = norm_detail({"source": "源日", "invoice_fee": 500, "manual": ["invoice_fee"]})
+        assert expected_cash_in(1000, e) == 1000
+
+    def test_link_note_fee_sentence_follows_the_bases_not_x_source(self):
+        # #2：X 源日、A 代開 → 句子要寫代辦費明細，不能寫「不抽代辦費」
+        from core.ledger_project import link_note
+        d, c = set_parent_share({"source": "源日"}, 0, "A", 100000, {}, source="代開發票")
+        d = apply_source_fee(c, d)
+        n = link_note("passthrough", ("m", "X", c), d)
+        assert "代辦費 8% ＝ 8,000" in n["text"] and "不抽代辦費" not in n["text"]
+        plain = link_note("company", ("m", "X", 1000), norm_detail({"source": "源日"}))
+        assert "不抽代辦費" in plain["text"]
+
+    def test_revert_restores_the_shares_previous_source(self):
+        # #6：以執行業務所得推送的份額，切代開再換回 → 回執行業務所得，不是一律源日
+        d, c = set_parent_share({"source": "源日"}, 0, "A", 40000, {}, source="執行業務所得")
+        d2, c2 = set_parent_share(d, c, "A", 100000, {}, source="代開發票", prev_source=True)
+        assert parent_shares(d2)["A"]["prev_source"] == "執行業務所得"
+        d3, c3 = set_parent_share(d2, c2, "A", 100000, {}, source=None, restore_source=True)
+        assert parent_shares(d3)["A"]["source"] == "執行業務所得" and "prev_source" not in parent_shares(d3)["A"]
+        # 沒記 prev 的（舊資料）退回源日
+        d4, _ = set_parent_share({"source": "源日"}, 0, "B", 1, {}, source="代開發票")
+        d5, _ = set_parent_share(d4, 1, "B", 1, {}, restore_source=True)
+        assert parent_shares(d5)["B"]["source"] == "源日"
+
+    def test_dropping_an_agency_share_always_releases_the_manual_fee_like_revert(self):
+        # #4：換回無條件放掉代辦費手動旗標，解除代開份額也要一樣（不只最後一個）
+        from core.ledger_project import drop_parent_share
+        d, c = set_parent_share({"source": "源日"}, 0, "A", 100000, {}, source="代開發票")
+        d, c = set_parent_share(d, c, "B", 100000, {}, source="代開發票")
+        d["invoice_fee"] = 15000
+        d = apply_source_fee(c, d, keep={"invoice_fee"})
+        d2, c2 = drop_parent_share(d, c, "B")
+        assert "invoice_fee" not in (d2.get("manual") or []) and d2["invoice_fee"] == 8000
+
+    def test_hand_filled_tax_fee_is_frozen_with_the_fee_group(self):
+        # #9：源日 X 手填了稅金（代辦費 0）→ 第一次分案時整組凍住，不被歸零
+        d = norm_detail({"source": "源日", "tax_fee": 500})
+        d2, _ = set_parent_share(d, 10000, "A", 0, {}, claim=True)
+        assert "invoice_fee" in d2["manual"]
+        assert apply_source_fee(10000, d2)["tax_fee"] == 500
+
+    def test_push_rules_round8(self):
+        from tests.unit._srcscan import code_only, func_body, projects_src, repo_src
+        push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
+        # #5：代開份額按「加上去」＝取代（金額不加、工項不能翻倍）
+        assert 'if mode == "add" and share_src == "代開發票":' in push and 'mode = "overwrite"' in push
+        link = code_only(func_body(projects_src(), "async def _write_link("))
+        # #8：對應表連結時 X 沒記錄、而且就是這案的舊形狀連結 → legacy_claim，不是 0 份額
+        assert "legacy_claim(keep, int(mine.contract_amount or 0), parent.id)" in link
+        # #3：解除時私帳側的舊指標一起清，pending 才數得對
+        assert "t.source_project_id = None" in link
+        # #7：前端混合案源時費率／已扣除也要送
+        js = repo_src("frontend/tabs/finance/subviews/projects.js")
+        assert "_feeBases(Number(g2('fpl-contract')) || 0, sEl.value).agency > 0" in js

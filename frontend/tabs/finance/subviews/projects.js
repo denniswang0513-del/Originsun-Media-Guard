@@ -1124,12 +1124,15 @@ _fp.save = async (btn) => {
     const nEl = document.getElementById('fpl-dispname');
     if (nEl) body.display_name = nEl.value.trim();   // 空＝清掉，退回自動規則
     const fEl = document.getElementById('fpl-feepct');
-    // 空白＝用後端的預設費率（正本 DEFAULT_FEE_PCT），不在這裡寫死一個 8
-    if (fEl && sEl && sEl.value === '代開發票') {
+    // 空白＝用後端的預設費率（正本 DEFAULT_FEE_PCT），不在這裡寫死一個 8。
+    // 分案後：表單案源不是代開、但有母帳案走代開時，費率／已扣除那兩列也在畫面上（_syncFee 用基數判），存檔也要送
+    const g2 = (id) => document.getElementById(id)?.value;
+    const agencyAny = sEl && (sEl.value === '代開發票' || _feeBases(Number(g2('fpl-contract')) || 0, sEl.value).agency > 0);
+    if (fEl && agencyAny) {
         body.fee_pct = Number(fEl.value) || _defaultFeePct() || undefined;
         // 代辦費已扣除（後端只在 false 時落庫；沒鍵＝true）
         const dEl2 = document.getElementById('fpl-fee-deducted');
-        if (dEl2 && body.source === '代開發票') body.fee_deducted = !!dEl2.checked;
+        if (dEl2) body.fee_deducted = !!dEl2.checked;
     }
     btn.disabled = true;
     btn.textContent = '儲存中…';

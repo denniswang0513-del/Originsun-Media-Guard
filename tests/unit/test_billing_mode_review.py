@@ -443,3 +443,24 @@ async def test_unlink_clears_pending_when_the_rest_are_claimed(monkeypatch, pare
     await pl._write_link(None, SimpleNamespace(id="A", mine_link_id="X", updated_at=None), None)
     assert t.ledger_detail.get(BY_PARENT_PENDING_KEY) is not True
     assert t.contract_amount == 80000
+
+
+async def test_switch_then_revert_restores_a_professional_income_share(monkeypatch, parents_of):
+    """第 8 輪 #6：A 以執行業務所得推送（40,000）→ 切代開（100,000）→ 換回：份額回執行業務所得、金額不動（100,000），代扣重算。"""
+    from core.ledger_project import apply_source_fee, parent_shares, set_parent_share, withholding
+
+    d, c = set_parent_share({"source": "源日"}, 0, "A", 40000, {}, source="執行業務所得")
+    d = apply_source_fee(c, d)
+    t = SimpleNamespace(id="X", name="X", entity="mine", contract_amount=c, ledger_detail=d, updated_at=None)
+
+    async def _link(session, p):
+        return t
+    monkeypatch.setattr(pl, "resolve_mine_link", _link)
+    monkeypatch.setattr(ledger, "require_entity", lambda request, ent, level="": None)
+    monkeypatch.setattr(pl, "_store_mirror_detail", lambda t, detail: setattr(t, "ledger_detail", detail))
+    await pl.apply_billing_mode(None, _parent("passthrough", contract=100000), request=None, old_mode="company")
+    assert parent_shares(t.ledger_detail)["A"]["source"] == "代開發票" and t.ledger_detail["invoice_fee"] == 8000
+    await pl.apply_billing_mode(None, _parent("company", contract=100000), request=None, old_mode="passthrough")
+    sh = parent_shares(t.ledger_detail)["A"]
+    assert sh["source"] == "執行業務所得" and sh["amount"] == 100000
+    assert t.ledger_detail["invoice_fee"] == 0 and t.ledger_detail["personal_tax"] == withholding(100000)

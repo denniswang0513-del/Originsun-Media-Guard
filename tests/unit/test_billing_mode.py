@@ -118,7 +118,8 @@ def test_apply_billing_mode_rules():
     assert 'keep["source"] = MIRROR_SOURCE' not in fn      # X 自己的案源不翻（2026-09-13 第 7 輪）
     # 換回：只把這一案標回源日（source=MIRROR_SOURCE, claim）、代開三欄由 apply_source_fee 照剩下的代開份額重算
     # （一案都沒有就歸零）；已扣除旗標與代辦費的手動旗標拿掉
-    assert "source=MIRROR_SOURCE, claim=True" in fn and "keep.pop(FEE_DEDUCTED_KEY, None)" in fn
+    # 換回：份額案源還原成切換前的（prev_source；沒記過退源日），claim 不動錢
+    assert "restore_source=True, claim=True" in fn and "keep.pop(FEE_DEDUCTED_KEY, None)" in fn
     assert 'keep["manual"] = sorted(manual_fields(keep) - {"invoice_fee"})' in fn
     assert "session.delete" not in fn, "分身不刪（要拿掉走解除連結）"
     # 沒指定案源時 mirror-to-mine 看收款方式；「走不走代開」一份判定
@@ -173,7 +174,8 @@ def test_frontend_wiring():
         assert "det.fee_deducted !== false" in js, path
         assert "fee_deducted" in js and "fee_deducted ===" not in js, path
     # 桌機只在案源＝代開發票時送旗標（非代開案存 False 沒意義）
-    assert "if (dEl2 && body.source === '代開發票') body.fee_deducted" in js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))
+    # 分案後：有任何母帳案走代開（基數 > 0）就送 fee_pct／fee_deducted，不只表單案源＝代開時
+    assert "if (dEl2) body.fee_deducted = !!dEl2.checked;" in js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))
 
 
 def test_mirror_check_does_not_nag_passthrough_cases_about_cost_lines():
