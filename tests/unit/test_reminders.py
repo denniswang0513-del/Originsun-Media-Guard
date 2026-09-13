@@ -58,3 +58,82 @@ def test_zone_draws_the_strip_above_the_tabs_with_goto_buttons():
     assert "d.type !== 'journal-goto-week'" in jr and "type: 'journal-submitted'" in jr
     # 管理視角看別人／全部：沒有「我的」提醒
     assert "reminders: () => (whoIsMe() ? own.reminders() : null)," in repo_src("frontend/js/shared/ts-zone/ctx.js")
+
+
+# ── 特徵測試（/polish 安全網）：端點整條走一遍（假 session 依 SQL 文字回不同結果）──
+
+class _Res:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _Session:
+    """9/9 有實際列、9/10 只有草稿、9/11 是計畫卡（不算填）；9/7 核准的假；9/8 假日；週記 8/31 草稿、9/7 送出。"""
+
+    def __init__(self):
+        from datetime import datetime, timezone
+        tz = timezone.utc
+        self.ts = [(datetime(2026, 9, 9, 1, tzinfo=tz), "draft"), (datetime(2026, 9, 10, 1, tzinfo=tz), "pending"),
+                   (datetime(2026, 9, 10, 2, tzinfo=tz), "pending")]
+        self.leaves = [(datetime(2026, 9, 7, 0, tzinfo=tz), datetime(2026, 9, 7, 23, tzinfo=tz))]
+        self.holidays = [(date(2026, 9, 8), "國定假日")]
+        self.journals = [(date(2026, 8, 31), "draft"), (date(2026, 9, 7), "submitted")]
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def execute(self, stmt):
+        t = str(stmt)
+        if "timesheets" in t:
+            assert "status != " in t                                    # 計畫卡不算
+            return _Res(self.ts)
+        if "hr_leave_requests" in t:
+            return _Res(self.leaves)
+        if "hr_holidays" in t:
+            return _Res(self.holidays)
+        if "work_journals" in t:
+            return _Res(self.journals)
+        raise AssertionError("unexpected statement: " + t[:80])
+
+
+async def _run(monkeypatch, status="在職", grants_journal=True, today=TODAY):
+    from types import SimpleNamespace
+    from routers import api_me
+    staff = SimpleNamespace(id="S1", name="小明", status=status, hire_date=date(2026, 9, 1))
+    sess = _Session()
+
+    async def _bound(request, *keys):
+        return {"username": "ming", "staff_id": "S1", "staff": staff}
+    monkeypatch.setattr(api_me, "_me_bound", _bound)
+    monkeypatch.setattr(api_me, "db_factory_or_503", lambda: (lambda: sess))
+    monkeypatch.setattr(api_me, "check_admin_or_module", lambda request, *k: {"sub": "ming"})
+    monkeypatch.setattr(api_me, "payload_grants", lambda payload, *k: grants_journal)
+
+    class _D(date):
+        @classmethod
+        def today(cls):
+            return today
+    monkeypatch.setattr(api_me, "date", _D)
+    return await api_me.my_reminders(request=None)
+
+
+async def test_endpoint_end_to_end(monkeypatch):
+    out = await _run(monkeypatch)
+    # 到職 9/1 起：9/1–9/4 沒填、9/7 請假、9/8 假日、9/9 填了、9/10 只有草稿、9/11 沒填（計畫卡不算）、9/12–13 週末／今天
+    assert out["active"] is True and out["date"] == "2026-09-13"
+    assert out["log_missing"] == ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-11"]
+    assert out["log_pending"] == ["2026-09-10"]
+    assert out["journals"] == [{"week_start": "2026-08-31", "status": "draft"}]   # 到職那週起；9/7 送出了；本週不算
+
+
+async def test_endpoint_is_silent_for_people_who_left_and_skips_journals_without_the_key(monkeypatch):
+    out = await _run(monkeypatch, status="離職")
+    assert out["active"] is False and out["log_missing"] == [] and out["journals"] == []
+    out2 = await _run(monkeypatch, grants_journal=False)
+    assert out2["journals"] == [] and out2["log_pending"] == ["2026-09-10"]
