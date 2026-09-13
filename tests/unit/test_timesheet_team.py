@@ -78,3 +78,24 @@ def test_returned_dicts_never_repeat_a_key():
             if isinstance(node, ast.Dict):
                 keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
                 assert len(keys) == len(set(keys)), (path, keys)
+
+
+def test_team_burn_merges_the_same_project_across_sheet_name_strings():
+    """🔴 同一個案的列會帶不同的 project_name（Sheet 匯入「客戶_案名」vs app 手填「案名」；生產 2026-09-13
+    實查 7 案、最大一案 852 h 被切成兩列，各自對同一份預算算消耗率）—— 對到案的按 project_id 合、名字用
+    CRM 顯示名；明細用名字反查案 id 把所有列收齊。"""
+    src = code_only(repo_src("routers/api_me.py"))
+    body = func_body(src, "async def team_projects(")
+    assert 'key = pid or ("name:" + (pname or ""))' in body
+    assert "names.get(pid) or pname" in body
+    hours = func_body(src, "async def team_hours(")
+    assert "names.get(pid) or p" in hours, "團隊月表各案小計也要合"
+    det = func_body(src, "async def team_project_detail(")
+    assert "project_ids_named(session, name)" in det and "Timesheet.project_id.in_(pids)" in det
+    helper = func_body(src, "async def _team_project_names(")
+    assert "project_names_map" in helper, "顯示名鏈只有那一份（自訂 → 母帳案名 → 私帳原名）"
+    look = code_only(repo_src("services/timesheet_lookup.py"))
+    assert "CrmProject.display_name == name" in func_body(look, "async def project_ids_named(")
+    # 顯示名撞名（兩個客戶各一個「剪輯協助 202601」）→ 退回 crm_projects.name，團隊表分得開、明細只找到自己
+    assert "Counter(names.values())" in helper and "await client_prefixed_names(session," in helper
+    assert 'Client.short_name + "_" + CrmProject.name == name' in func_body(look, "async def project_ids_named(")

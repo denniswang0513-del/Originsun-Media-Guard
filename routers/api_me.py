@@ -35,7 +35,7 @@ from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
                        CrmProjectStaff, CrmShoot, CrmStaff, HrLeaveRequest, PreprodLocation, Timesheet, WorkJournal)
 from services import leave_service
-from services.timesheet_lookup import budgets_for
+from services.timesheet_lookup import budgets_for, client_prefixed_names, project_ids_named
 from services.timesheet_self import (add_rows, delete_row, list_rows, metrics_input, month_or_422,
                                      own_filter, rows_by_month, ts_dict, update_row)
 from routers.api_shoots import _crew_list
@@ -567,6 +567,29 @@ async def delete_my_timesheet(row_id: str, request: Request):
 # 守 _team_ident（timesheets／me_finance 任一 ＋ 綁定）。回的是 Sheet 原字案名與時數，沒有金額、沒有
 # CRM 專案 id 的連結 —— 私帳「專案列」可見性那條線守的是錢，這裡是團隊自己的工時表。
 
+async def _team_project_names(session, project_ids) -> dict:
+    """`{project_id: 顯示名}` —— 團隊工時把「同一個案」的列合成一列時用的名字。
+
+    🔴 同一個案的列會帶**不同的 `project_name` 字串**：Sheet 匯入的是「客戶_案名」（優視傳播_快樂學游泳動態製作），
+    app 裡手填的是 CRM 案名（快樂學游泳動態製作）；生產 2026-09-13 實查有 7 案這樣（最大一案 852 h 被切成兩列）。
+    照字串分組＝同一個案在團隊表上兩列、各自對同一份預算算消耗率，兩個都錯。
+    對到案的列一律用 CRM 的顯示名（`project_names_map`＝顯示名鏈：自訂 → 母帳案名 → 私帳原名），
+    沒對到的才留 Sheet 原字。
+
+    顯示名**撞名**的案（兩個客戶各有一個「媒體顧問 202601」，`crm_projects.name` 也一樣；dev 實查 11 組）
+    改用「客戶簡稱_案名」（Sheet 的慣例）：團隊表上才分得開，明細按名字找（`project_ids_named` 也認這種字）
+    也只會找到自己那一案。
+    """
+    from collections import Counter
+    from routers.crm._shared import project_names_map
+    names = await project_names_map(session, [pid for pid in set(project_ids or ()) if pid])
+    dup = {n for n, k in Counter(names.values()).items() if k > 1}
+    if dup:
+        pref = await client_prefixed_names(session, [pid for pid, n in names.items() if n in dup])
+        names.update({pid: n for pid, n in pref.items() if n})
+    return names
+
+
 @router.get("/team/hours")
 async def team_hours(request: Request, month: str = ""):
     """團隊月表：每人合計／填了幾天／每週小計／各案小計，全體各案合計；參考工時＝工作日×8。"""
@@ -575,16 +598,22 @@ async def team_hours(request: Request, month: str = ""):
     factory = db_factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
-            select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name, Timesheet.hours)
+            select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name, Timesheet.hours,
+                   Timesheet.project_id)
             .where(Timesheet.work_date >= m0).where(Timesheet.work_date < m1)
         )).all()
-    data = [(n, tw_day(d), p, h) for n, d, p, h in rows]     # rollup 只算實際（計畫列不算）
+        names = await _team_project_names(session, [pid for *_r, pid in rows])
+    # rollup 只算實際（計畫列不算）；對到案的列用 CRM 顯示名，同一個案的兩種字串才會合在一起
+    data = [(n, tw_day(d), names.get(pid) or p, h) for n, d, p, h, pid in rows]
     return {"month": month_key(m0), **hours_rollup(data, m0.year, m0.month)}
 
 
 @router.get("/team/projects")
 async def team_projects(request: Request, months: int = 12):
-    """專案工時匯總：近 N 個月每個 Sheet 案名的總時數、人數、預算（對到案才有）、最後填報。"""
+    """專案工時匯總：近 N 個月每個案的總時數、人數、預算（對到案才有）、最後填報。
+
+    對到案的列按 **project_id** 合（不是按 Sheet 字串 —— 見 _team_project_names），沒對到的才按字串。
+    """
     await _team_ident(request)
     months = max(1, min(int(months or 12), 36))
     m0, _ = month_span("")
@@ -599,13 +628,26 @@ async def team_projects(request: Request, months: int = 12):
             .group_by(Timesheet.project_name, Timesheet.project_id)
         )).all()
         budgets = await budgets_for(session, [pid for _, pid, *_ in rows])
-    items = []
+        names = await _team_project_names(session, [pid for _, pid, *_ in rows])
+    # 同一個案的幾種字串合成一列：人數是「相異人名」，跨字串合併時取上限（同一個人在兩種字串都填過會少算一點
+    # 是可接受的；要精準得回 DB 再 group 一次，這頁的人數只是參考）
+    merged: dict = {}
     for pname, pid, total, people, last in rows:
-        b = budgets.get(pid)
-        total = round(float(total or 0), 1)
-        items.append({"project_name": pname or "(空白)", "hours": total, "people": people,
+        key = pid or ("name:" + (pname or ""))
+        m = merged.setdefault(key, {"pname": names.get(pid) or pname or "(空白)", "pid": pid,
+                                    "total": 0.0, "people": 0, "last": None})
+        m["total"] += float(total or 0)
+        m["people"] = max(m["people"], int(people or 0))
+        if last and (m["last"] is None or last > m["last"]):
+            m["last"] = last
+    items = []
+    for m in merged.values():
+        b = budgets.get(m["pid"])
+        total = round(m["total"], 1)
+        pname = m["pname"]
+        items.append({"project_name": pname, "hours": total, "people": m["people"],
                       "budget_hours": b, **budget_burn(total, b),
-                      "last_entry": day_iso(last)})
+                      "last_entry": day_iso(m["last"])})
     items.sort(key=lambda x: -x["hours"])
     return {"since": month_key(since), "months": months, "items": items,
             "total": round(sum(i["hours"] for i in items), 1)}
@@ -613,15 +655,23 @@ async def team_projects(request: Request, months: int = 12):
 
 @router.get("/team/project")
 async def team_project_detail(request: Request, name: str = ""):
-    """單一案（Sheet 原字）的工時明細：各人合計、各月走勢、最近 60 列。"""
+    """單一案的工時明細：各人合計、各月走勢、最近 60 列。
+
+    `name` 是團隊表上顯示的那個名字：對到案的用 CRM 案名／顯示名找出案 id、收所有掛在它上面的列
+    （不管那列的 Sheet 字串是什麼）；沒對到案的才照 Sheet 原字比。
+    """
     await _team_ident(request)
     name = (name or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail="name 必填")
     factory = db_factory_or_503()
     async with factory() as session:
+        pids = await project_ids_named(session, name)
+        cond = Timesheet.project_name == name
+        if pids:
+            cond = cond | Timesheet.project_id.in_(pids)
         rows = (await session.execute(
-            select(Timesheet).where(Timesheet.project_name == name).where(Timesheet.hours > 0)
+            select(Timesheet).where(cond).where(Timesheet.hours > 0)
             .order_by(Timesheet.work_date.desc()))).scalars().all()
     m = project_metrics(metrics_input(rows))
     return {

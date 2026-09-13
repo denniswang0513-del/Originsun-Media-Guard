@@ -47,6 +47,38 @@ async def budgets_for(session, project_ids) -> dict:
     return {pid: b for pid, b in rows if b}
 
 
+async def client_prefixed_names(session, project_ids) -> dict:
+    """`{project_id: "客戶簡稱_案名"}`（Sheet 的案名慣例）—— 給顯示名撞名的案分開用（兩個客戶各一個
+    「媒體顧問 202601」，crm_projects.name 也一樣）；沒有客戶簡稱的回原案名。"""
+    from db.models import Client, CrmProject
+    ids = [p for p in set(project_ids or []) if p]
+    if not ids:
+        return {}
+    rows = (await session.execute(
+        select(CrmProject.id, CrmProject.name, Client.short_name)
+        .outerjoin(Client, Client.id == CrmProject.client_id)
+        .where(CrmProject.id.in_(ids)))).all()
+    return {pid: (f"{c}_{n}" if c else (n or "")) for pid, n, c in rows}
+
+
+async def project_ids_named(session, name: str) -> list:
+    """團隊工時表上的那個顯示名 → 它是哪幾個案的 id（母帳案名與 1:1 私帳分身的顯示名相同，兩筆都算；
+    「客戶簡稱_案名」那種撞名時才用的字也認）。
+
+    刻意**不看帳本**：這裡回的只有 id，給 /me/team/project 把「同一個案、不同 Sheet 字串」的列收在一起，
+    沒有金額、沒有案名以外的欄位；名字本身是使用者從團隊表點進來的（他已經看得到）。
+    """
+    from db.models import Client, CrmProject
+    name = (name or "").strip()
+    if not name:
+        return []
+    return list((await session.execute(
+        select(CrmProject.id)
+        .outerjoin(Client, Client.id == CrmProject.client_id)
+        .where((CrmProject.name == name) | (CrmProject.display_name == name)
+               | (Client.short_name + "_" + CrmProject.name == name)))).scalars())
+
+
 async def load_staff_index(session) -> dict:
     """`{姓名: [lookup_row, …]}` —— 同名不合併，「不猜」由 `core.hr_logic.resolve_staff` 判。
     列的形狀跟專案那份一樣（id／name），resolve_* 兩支才能同一個契約。"""
