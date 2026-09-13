@@ -48,6 +48,13 @@ export default async function render(container, ctx = {}) {
 
 // 兩個方向的「有沒有對應」判定：私帳側看連上來的母帳案、母帳側看 linked_mine_id
 function _linked(m) { return (m.parent_names || []).length > 0; }
+
+// N:1：每個母帳案後面帶它給這案的份額（分案記帳 by_parent）；沒記錄的只印案名
+function _sharesHtml(m) {
+    const by = {};
+    (m.shares || []).forEach((s) => { by[s.parent_name] = s.amount; });
+    return (m.parent_names || []).map((n) => esc(n) + (n in by ? ` <span style="color:#9ca3af;">${fmtNum(by[n])}</span>` : '')).join('、');
+}
 function _linkedP(p) { return !!p.linked_mine_id; }
 
 function _visible() {
@@ -121,7 +128,10 @@ function _rowMine(m) {
             <td style="color:${_linked(m) ? '#86efac' : '#777'};">${
                 _linked(m)
                     ? (m.parent_names.length > 1
-                        ? `→ ${esc(m.parent_names.join('、'))} <span style="font-size:10px;color:#6b7280;">連 ${m.parent_names.length} 案</span>`
+                        ? `→ ${_sharesHtml(m)} <span style="font-size:10px;color:#6b7280;">連 ${m.parent_names.length} 案</span>`
+                          + (m.shares_pending
+                              ? ' <span style="font-size:10px;color:#fbbf24;border:1px solid #7a5d1a;border-radius:3px;padding:0 4px;" title="舊資料分不出各案份額：對每個母帳案按「推送到私帳 → 取代」認領一次">份額待認領</span>'
+                              : '')
                         : '→ ' + esc(m.parent_names[0]))
                     : m.suggest_id
                         ? `建議：${esc(m.suggest_name)}
