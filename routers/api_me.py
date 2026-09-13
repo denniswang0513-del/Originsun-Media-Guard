@@ -450,7 +450,7 @@ async def my_reminders(request: Request):
     """補填提醒（owner 2026-09-13）：近 30 天哪些工作日專案紀錄一列都沒填／只有草稿、近 6 週哪幾週的週記還沒送出。
     只提醒在職的人（owner「只有在職需要」）；規則在 core.reminder_logic，這裡只撈資料。
     週記那半邊要有 journal 鑰匙才算（沒鑰匙的人本來就寫不了）。前端「去填」鈕：專案紀錄跳到那一天、週記跳到那一週。"""
-    from core.hr_logic import PENDING_STATUS, is_active_staff
+    from core.hr_logic import is_active_staff
     from core.leave_logic import as_date
     from core.reminder_logic import LOG_LOOKBACK_DAYS, missing_journal_weeks, missing_log_days
     from services.leave_service import holidays_map
@@ -496,8 +496,7 @@ async def my_reminders(request: Request):
     return {"active": True, "date": today.isoformat(),
             "log_missing": [d.isoformat() for d in days["missing"]],
             "log_pending": [d.isoformat() for d in days["pending"]],
-            "journals": [{"week_start": ws.isoformat(), "status": st} for ws, st in journals],
-            "pending_status": PENDING_STATUS}
+            "journals": [{"week_start": ws.isoformat(), "status": st} for ws, st in journals]}
 
 
 @router.get("/team_week")

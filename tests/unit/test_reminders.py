@@ -131,6 +131,7 @@ async def test_endpoint_end_to_end(monkeypatch):
     assert out["log_missing"] == ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-11"]
     assert out["log_pending"] == ["2026-09-10"]
     assert out["journals"] == [{"week_start": "2026-08-31", "status": "draft"}]   # 到職那週起；9/7 送出了；本週不算
+    assert set(out) == {"active", "date", "log_missing", "log_pending", "journals"}
 
 
 async def test_endpoint_is_silent_for_people_who_left_and_skips_journals_without_the_key(monkeypatch):
