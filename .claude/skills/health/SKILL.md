@@ -23,7 +23,7 @@ description: 全 repo 健康檢查：靜態閘門（ruff／eslint／pyright／�
 2. 測試指令：讀 CLAUDE.md 的 `polish.test`（目前 `.venv\Scripts\python.exe -m pytest tests/unit -q`）。主分支：`polish.base`。
 3. 有未 commit 變更 → 先 commit `health: baseline`（跟 /polish 同慣例；`--dry` 模式不 commit，改為把未 commit 清單寫進報告）。
 4. 跑一次全套測試建立基準。基準失敗 → 回報並停止，health 不修既有失敗。
-5. 工具盤點：`ruff`（venv 已有）、`pyright`、`pytest-cov`、`pip-audit`。**缺的先問使用者一次**「要不要 `pip install` 進 .venv」，拒絕就跳過該子項並在報告註明「未執行：缺 X」。不要默默裝、也不要默默跳。
+5. 工具盤點：`ruff`（venv 已有）、`pyright`、`pytest-cov`、`pip-audit`。缺的直接 `pip install` 進 `.venv`（純開發工具，`publish_update.py` 是掃原始碼 import 產 `requirements_agent.txt`，裝進 venv 不會外洩到機隊），報告註明裝了什麼。`--no-install` 則跳過並註明「未執行：缺 X」。
 6. 找上一份報告：`ls docs/health/*.md | sort | tail -1`，沒有就是第一次（報告上「上次」欄留空）。
 
 ## 階段一：靜態閘門
@@ -40,7 +40,7 @@ description: 全 repo 健康檢查：靜態閘門（ruff／eslint／pyright／�
 - `preflight.py` — `.venv\Scripts\python.exe preflight.py`，exit 非 0 就回報（代表 `requirements_agent.txt` 的契約破了，OTA 會整包回滾）。
 
 有白名單修法 → 對候選清單執行 `/assess --fix --short`：每項一張短卡（現象／影響範圍／重現＝lint 那一行／判定），
-過閘門的才修，**一張卡一個 commit** `health: BUG-N <一句話>`；沒過的進報告「需要人工決定」。
+過閘門的才修，**一張卡一個 commit** `health: BUG-N <一句話>`；沒過的進報告「沒動的東西」一行一條，不問。
 漏 import 這類有行為後果的（不是純 lint）用完整卡，第 4 欄要真的寫一支會失敗的測試。
 
 ## 階段二：依賴與安全
@@ -50,7 +50,7 @@ description: 全 repo 健康檢查：靜態閘門（ruff／eslint／pyright／�
 - `pip list --outdated --format=json` 對照 `requirements_server.txt` 與 `requirements_agent.txt`：列出「有釘版本且落後主版本」的套件。
 - `pip-audit`（若有）— 列有 CVE 的套件、對應版本、是否在 `requirements_agent.txt`（在 = 機隊也中）。
 - `website/`：`npm audit --omit=dev --json`，只列 high/critical。網路不通就註明跳過。
-- requirements 檔漂移：`requirements.txt`／`requirements_server.txt`／`requirements_agent.txt`／`requirements_lock_20260614.txt`／`0225_requirements.txt` 五份，列出「同一套件不同版本」與「只出現在一份裡」的；`0225_requirements.txt` 與 `requirements_lock_*` 這種帶日期的，問使用者還要不要（寫進「需要人工決定」）。
+- requirements 檔漂移：`requirements.txt`／`requirements_server.txt`／`requirements_agent.txt`／`requirements_lock_20260614.txt`／`0225_requirements.txt` 五份，列出「同一套件不同版本」與「只出現在一份裡」的；`0225_requirements.txt` 與 `requirements_lock_*` 這種帶日期的，列進「沒動的東西」附一句判斷（像是「60 天沒人引用，可刪」），不問。
 
 ## 階段三：倉庫衛生
 
@@ -86,9 +86,9 @@ description: 全 repo 健康檢查：靜態閘門（ruff／eslint／pyright／�
 **只回報**，除了最後一條。
 
 - `CLAUDE.md` 的 `## 模組職責` 表 vs 實際 `routers/`／`services/`／`core/` 下的 `.py`：列「程式碼有、表裡沒有」的模組（新模組沒登記）與「表裡有、程式碼沒了」的（拆檔／改名後沒更新；順便對照 `ota_manifest.STALE_PATHS` 有沒有登記）。
-- `ROADMAP.md` 未勾選項目 vs 最近 30 天 commit 訊息：關鍵字對得上的列出來，問使用者要不要勾。
+- `ROADMAP.md` 未勾選項目 vs 最近 30 天 commit 訊息：關鍵字對得上的列出來，附對應 commit，不勾、不問。
 - `CHANGELOG.md` 最後一條版本 vs `version.json`：落後就回報。
-- `docs/*_PLAN.md` 超過 90 天沒動的：列出，問使用者是「已完成該歸檔」還是「還在等」。
+- `docs/*_PLAN.md` 超過 90 天沒動的：列出，附一句判斷（對照 commit log 看像是做完了還是停了），不動、不問。
 - **唯一寫入**：把這次 health 發現的、確定是地雷的事（例如漏 import 的實際案例、xpass 的過期標記）以一行寫進 `CLAUDE.md` 的 `## 不要動的地方`。沒有新地雷就不動。有動 → commit `health: docs`。
 
 ## 收尾
@@ -110,14 +110,17 @@ health 報告 <日期>                         上次：<日期或「無」>
 commits：<hash 與訊息>
 停止原因：正常結束 ／ 撞上限 ／ 測試失敗於階段 N ／ 缺工具跳過 <哪些>
 
-需要人工決定（依影響排序）：
-1. ...
+沒動的東西（依影響排序，一行一條；想追再看附錄）：
+1. BUG-N <一句話> — 擋在 <哪條閘門>
+2. <檔／套件> — <一句判斷>
 
 未執行：
 - ...
 ```
 
 每個「X」在報告正文都要有對應的明細段落（檔案:行號或套件:版本），數字沒有明細等於沒查。
+正文（到「沒動的東西」為止）控制在一頁；完整評估卡、lint 原始輸出、覆蓋率明細一律放**附錄**。
+整份流程**不問使用者任何問題**，所有判斷自己下、寫在報告裡；使用者不回應就是同意。
 
 ## 可自動修（白名單，其他一律回報）
 
@@ -134,7 +137,7 @@ commits：<hash 與訊息>
 - `/health --only <1-6,逗號分隔>` — 只跑指定階段（前置檢查與收尾照跑）
 - `/health --skip <階段>` — 跳過指定階段
 - `/health --deep` — 階段四補 5 個模組、每模組最多 8 支；階段一 pyright 明細放寬到 50 筆
-- `/health --no-install` — 缺工具直接跳過，不問
+- `/health --no-install` — 缺工具直接跳過，不裝
 
 ## 不要做的事
 
