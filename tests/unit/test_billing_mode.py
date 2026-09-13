@@ -107,14 +107,19 @@ def test_apply_billing_mode_rules():
     # 後期代開：沒分身就用 _new_mirror_row（建分身那一列的唯一寫法）＋ _write_link（連結的唯一寫入者）
     assert "_new_mirror_row(p, mir," in fn and "await _write_link(session, p, t)" in fn
     # 有分身：案源改代開、收入一律＝母帳合約額（owner「一律改成合約」；母帳沒填才留原值）、工項不動
-    assert 'keep["source"] = want_source' in fn and "if int(p.contract_amount or 0):" in fn
-    # 收入＝母帳合約額 —— 2026-09-13 起走分案記帳：只換這一案的份額，X 吃差額（set_parent_share）
-    assert "set_parent_share(keep, int(t.contract_amount or 0), p.id," in fn and "int(p.contract_amount or 0), share[\"split\"])" in fn
+    assert 'keep["source"] = want_source' in fn
+    # 收入＝母帳合約額 —— 2026-09-13 起走分案記帳：只換這一案的份額（並標它走代開），X 吃差額（set_parent_share）；
+    # 母帳沒填合約額就只換案源（份額金額沿用）
+    assert "set_parent_share(keep, int(t.contract_amount or 0), p.id," in fn
+    assert 'int(p.contract_amount or 0) or share["amount"], share["split"]' in fn and "source=want_source" in fn
     assert "t.contract_amount = new_contract" in fn
     assert "resync_receivable(t, keep)" in fn
     # 換回源日專案／現金收款：分身留著、案源改回源日、代辦費三欄歸零、已扣旗標拿掉
     assert 'keep["source"] = MIRROR_SOURCE' in fn
-    assert 'for k in ("invoice_fee", "tax_fee", "buy_invoice"):' in fn and "keep.pop(FEE_DEDUCTED_KEY, None)" in fn
+    # 換回：只把這一案標回源日（source=MIRROR_SOURCE, claim）、代開三欄由 apply_source_fee 照剩下的代開份額重算
+    # （一案都沒有就歸零）；已扣除旗標與代辦費的手動旗標拿掉
+    assert "source=MIRROR_SOURCE, claim=True" in fn and "keep.pop(FEE_DEDUCTED_KEY, None)" in fn
+    assert 'keep["manual"] = sorted(manual_fields(keep) - {"invoice_fee"})' in fn
     assert "session.delete" not in fn, "分身不刪（要拿掉走解除連結）"
     # 沒指定案源時 mirror-to-mine 看收款方式；「走不走代開」一份判定
     mm = code_only(func_body(_LINKS, "async def mirror_project_to_mine("))

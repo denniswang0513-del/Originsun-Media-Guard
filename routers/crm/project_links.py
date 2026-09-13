@@ -447,13 +447,14 @@ def _ensure_share(keep: dict, contract: int, pid: str) -> dict:
     """分案記帳的退路：沒有任何 by_parent 的舊 1:1 分身，先把現況整筆認成 `pid` 的份額
     （claim＝不動錢），之後 set_parent_share 才算得出差額。待認領的 N:1（BY_PARENT_PENDING_KEY）
     不猜 —— 那是回填分不出來的，由呼叫端決定要 claim 還是 409。"""
-    from core.ledger_project import (BY_PARENT_PENDING_KEY, MIRROR_AT_KEY, MIRROR_TOTAL_KEY,
+    from core.ledger_project import (BY_PARENT_PENDING_KEY, MIRROR_AT_KEY, MIRROR_SOURCE, MIRROR_TOTAL_KEY,
                                      parent_shares, set_parent_share)
     if parent_shares(keep) or keep.get(BY_PARENT_PENDING_KEY) is True:
         return keep
     keep, _c = set_parent_share(keep, contract, pid, int(contract or 0), keep.get("split") or {},
                                 synced_total=int(keep.get(MIRROR_TOTAL_KEY) or 0),
-                                at=str(keep.get(MIRROR_AT_KEY) or ""), claim=True)
+                                at=str(keep.get(MIRROR_AT_KEY) or ""),
+                                source=keep.get("source") or MIRROR_SOURCE, claim=True)
     return keep
 
 
@@ -473,7 +474,7 @@ def _new_mirror_row(p, mir: dict, note: str, source: str = ""):
     """母帳案 → 私帳分身那一列（未加入 session）。推送鈕與對應表的「建立」共用 ——
     兩條路各建一份，遲早只有一邊記得補新的必填欄。
     `source` 空＝源日（公司內部轉單）；代開發票→代辦費自動算（apply_source_fee）。"""
-    from core.ledger_project import (MIRROR_AT_KEY, apply_source_fee, mirror_detail, norm_detail,
+    from core.ledger_project import (MIRROR_AT_KEY, MIRROR_SOURCE, apply_source_fee, mirror_detail, norm_detail,
                                      set_parent_share)
     from routers.api_finance_projects import new_ledger_project
 
@@ -485,7 +486,8 @@ def _new_mirror_row(p, mir: dict, note: str, source: str = ""):
     d = norm_detail(apply_source_fee(contract, d))
     # 分案記帳：這一案給的份額＝整筆（新分身只有它一個來源）；claim＝錢已經在上面的 contract／split 裡
     d, _c = set_parent_share(d, contract, p.id, contract, mir["split"],
-                             synced_total=mir["total"], at=_today_tw(), claim=True)
+                             synced_total=mir["total"], at=_today_tw(), source=d.get("source") or MIRROR_SOURCE,
+                             claim=True)
     return new_ledger_project(
         project_id=uuid.uuid4().hex, name=p.name, client_id=p.client_id,
         entity="mine", contract=contract, detail=d,
@@ -593,7 +595,8 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 new_split, _delta = merge_split(old_share["split"] if mode == "add" else {},
                                                 mir["split"] or {}, add=(mode == "add"))
                 keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id, amount, new_split,
-                                                      synced_total=mir["total"], at=_today_tw(), claim=pending)
+                                                      synced_total=mir["total"], at=_today_tw(),
+                                                      source=keep["source"], claim=pending)
                 t.contract_amount = new_contract
                 keep = await _clear_pending_if_all_claimed(session, t, keep)
                 keep = norm_detail(apply_source_fee(int(t.contract_amount or 0), keep))
@@ -653,8 +656,11 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         return {"action": "none", "created": False}
     # 這次轉換到底要不要動分身？源日↔現金、或後期代開換回但分身上沒有代開那套 —— 都不用。
     # 不用就不問私帳權限：問了會對沒權限的同事回 skipped，update_project 每次存檔都跳那句 warning。
-    reverting = (t is not None and BILLING_MIRROR_SOURCE.get(old)
-                 and norm_detail(t.ledger_detail).get("source") == BILLING_MIRROR_SOURCE[old])
+    reverting = False
+    if t is not None and BILLING_MIRROR_SOURCE.get(old):
+        _keep0 = norm_detail(t.ledger_detail)
+        _sh0 = parent_shares(_keep0).get(p.id) or {}
+        reverting = (_sh0.get("source") or _keep0.get("source")) == BILLING_MIRROR_SOURCE[old]
     if not want_source and not reverting:
         return {"action": "none", "created": False}
     try:
@@ -678,25 +684,31 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         # 有分身：案源改成代開發票、收入**一律**＝母帳合約額（owner 2026-09-13「一律改成合約」——
         # 代開的錢就是那張發票的面額，之前分身記的成本行合計不是）；工項不動。母帳沒填合約額才留原值。
         keep = norm_detail(t.ledger_detail)
+        # 只換**這一案**的份額（工項沿用）、標它走代開，X 吃差額 —— 別案鏡射進來的錢與案源不動（by_parent）。
+        # X 的 source 也標代開：owner 自己填的那部分跟 X 走（fee_bases）。母帳沒填合約額就只換案源。
+        keep = _ensure_share(keep, int(t.contract_amount or 0), p.id)
+        share = parent_shares(keep).get(p.id) or {"amount": 0, "split": {}}
         keep["source"] = want_source
-        if int(p.contract_amount or 0):
-            # 只換**這一案**的份額（工項沿用），X 吃差額 —— 別案鏡射進來的錢不動（by_parent）
-            keep = _ensure_share(keep, int(t.contract_amount or 0), p.id)
-            share = parent_shares(keep).get(p.id) or {"split": {}}
-            keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id,
-                                                  int(p.contract_amount or 0), share["split"])
-            t.contract_amount = new_contract
+        keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id,
+                                              int(p.contract_amount or 0) or share["amount"], share["split"],
+                                              source=want_source)
+        t.contract_amount = new_contract
         _store_mirror_detail(t, apply_source_fee(int(t.contract_amount or 0), keep))
         return {"action": "switched", "created": False}
     # 換回源日專案／現金收款：分身留著，只把代開那套拿掉（走到這裡＝reverting 已成立）
     if reverting:
-        keep = norm_detail(t.ledger_detail)
-        keep["source"] = MIRROR_SOURCE
-        for k in ("invoice_fee", "tax_fee", "buy_invoice"):
-            keep[k] = 0
+        keep = _ensure_share(norm_detail(t.ledger_detail), int(t.contract_amount or 0), p.id)
+        share = parent_shares(keep).get(p.id) or {"amount": 0, "split": {}}
+        # 只把**這一案**標回源日；別案還走代開的話 X 的案源留著（owner 自己那部分照舊），
+        # 代辦費由 apply_source_fee 照剩下的代開份額重算（一案都沒有就三欄歸零）。
+        keep, _c = set_parent_share(keep, int(t.contract_amount or 0), p.id, share["amount"], share["split"],
+                                    source=MIRROR_SOURCE, claim=True)
+        others_agency = any(sh.get("source") == "代開發票" for pid, sh in parent_shares(keep).items() if pid != p.id)
+        if not others_agency:
+            keep["source"] = MIRROR_SOURCE
         keep["manual"] = sorted(manual_fields(keep) - {"invoice_fee"})
         keep.pop(FEE_DEDUCTED_KEY, None)
-        _store_mirror_detail(t, keep)
+        _store_mirror_detail(t, apply_source_fee(int(t.contract_amount or 0), keep))
         return {"action": "reverted", "created": False}
     return {"action": "none", "created": False}
 

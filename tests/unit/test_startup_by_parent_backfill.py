@@ -92,7 +92,8 @@ def world(monkeypatch):
 async def test_backfill_claims_one_to_one_and_resolvable_n_to_one_and_flags_the_rest(world, capsys):
     await sm._m22_ledger_by_parent_backfill()
     x1, x2, x3 = world.projects["X1"], world.projects["X2"], world.projects["X3"]
-    assert parent_shares(x1.ledger_detail) == {"A": {"amount": 50000, "split": {"剪接": 50000}, "synced_total": 50000, "at": "2026-09-01"}}
+    assert parent_shares(x1.ledger_detail) == {"A": {"amount": 50000, "split": {"剪接": 50000}, "synced_total": 50000,
+                                                     "at": "2026-09-01", "source": "源日"}}   # 案源跟 X 走（代辦費分案）
     assert x1.contract_amount == 50000                              # claim 不動錢
     assert parent_shares(x2.ledger_detail)["B"]["amount"] == 40000
     assert parent_shares(x2.ledger_detail)["C"]["amount"] == 80000

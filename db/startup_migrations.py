@@ -705,7 +705,8 @@ async def _m22_ledger_by_parent_backfill() -> None:
                             pid = parents[0][0]
                             keep, _c = set_parent_share(keep, contract, pid, contract, keep.get("split") or {},
                                                         synced_total=int(keep.get(MIRROR_TOTAL_KEY) or 0),
-                                                        at=str(keep.get(MIRROR_AT_KEY) or ""), claim=True)
+                                                        at=str(keep.get(MIRROR_AT_KEY) or ""),
+                                                        source=keep.get("source") or "源日", claim=True)
                             n1 += 1
                         else:
                             claimed = []
@@ -719,7 +720,8 @@ async def _m22_ledger_by_parent_backfill() -> None:
                             if claimed and all(a > 0 for _p, a, _s, _t in claimed) and                                     sum(a for _p, a, _s, _t in claimed) <= contract:
                                 for pid, amount, split, total in claimed:
                                     keep, _c = set_parent_share(keep, contract, pid, amount, split,
-                                                                synced_total=total, claim=True)
+                                                                synced_total=total,
+                                                                source=keep.get("source") or "源日", claim=True)
                                 nn += 1
                             else:
                                 keep[BY_PARENT_PENDING_KEY] = True

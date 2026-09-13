@@ -161,3 +161,31 @@ def test_create_project_surfaces_skipped():
     msg = "收款方式已存，但你看不到私帳"
     assert msg in update
     assert msg in create and '"skipped"' in create
+
+
+async def test_switch_marks_only_that_parent_as_agency_and_fee_counts_only_it(monkeypatch):
+    """代辦費分案：A 改後期代開 → 只有 A 的份額標代開，代辦費只算 A；B 留源日。換回也只動 A。"""
+    from core.ledger_project import fee_bases, parent_shares, set_parent_share
+
+    d, c = set_parent_share({"source": "源日"}, 0, "A", 100000, {"導演": 100000}, source="源日")
+    d, c = set_parent_share(d, c, "B", 80000, {"剪接": 80000}, source="源日")
+    t = SimpleNamespace(id="X", name="X", entity="mine", contract_amount=c, ledger_detail=d, updated_at=None)
+
+    async def _link(session, p):
+        return t
+    monkeypatch.setattr(pl, "resolve_mine_link", _link)
+    monkeypatch.setattr(ledger, "require_entity", lambda request, ent, level="": None)
+    monkeypatch.setattr(pl, "_store_mirror_detail", lambda t, detail: setattr(t, "ledger_detail", detail))
+
+    await pl.apply_billing_mode(None, _parent("passthrough", contract=100000), request=None, old_mode="company")
+    sh = parent_shares(t.ledger_detail)
+    assert sh["A"]["source"] == "代開發票" and sh["B"]["source"] == "源日"
+    assert fee_bases(t.contract_amount, t.ledger_detail) == (100000, 0)
+    assert t.ledger_detail["invoice_fee"] == 8000                     # 不是 180,000 × 8%
+
+    out = await pl.apply_billing_mode(None, _parent("company", contract=100000), request=None, old_mode="passthrough")
+    assert out["action"] == "reverted"
+    sh = parent_shares(t.ledger_detail)
+    assert sh["A"]["source"] == "源日" and t.ledger_detail["source"] == "源日"
+    assert (t.ledger_detail["invoice_fee"], t.ledger_detail["tax_fee"], t.ledger_detail["buy_invoice"]) == (0, 0, 0)
+    assert t.contract_amount == 180000                                # 換回不動錢
