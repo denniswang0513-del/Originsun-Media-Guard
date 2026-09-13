@@ -254,7 +254,7 @@ class TestPolishRound2:
         from tests.unit._srcscan import code_only, flow_body, projects_src
         body = code_only(flow_body(projects_src(), "async def mirror_project_to_mine("))
         assert "share_src = _push_share_source(source, old_share)" in body
-        assert "amount = _push_share_amount(mode, pending, share_src, old_share, mir[\"total\"]," in body
+        assert "amount = _push_share_amount(mode, claim, share_src, old_share, mir[\"total\"]," in body
         assert 'if keep["source"] == "代開發票":' not in body
 
     def test_legacy_claim_takes_the_items_even_when_only_part_of_the_money_was_mirrored(self):
@@ -284,3 +284,59 @@ class TestPolishRound2:
         # 沒分案記錄、案源源日、使用者自己填的數字：跟以前一樣不動
         plain = apply_source_fee(1000, norm_detail({"source": "源日", "invoice_fee": 77}))
         assert plain["invoice_fee"] == 77
+
+
+class TestPolishFinalReview:
+    """/polish 收尾 review 的 7 項（BUG-22～28）。"""
+
+    def test_legacy_claim_takes_the_whole_contract_for_agency_mirrors(self):
+        # BUG-23：舊的代開分身 contract＝母帳合約額、mirror_total＝成本行（本來就 mt < c）→ 要整筆認，
+        # 不然收款方式來回一次 X 從 100,000 變 197,000
+        from core.ledger_project import legacy_claim
+        d = legacy_claim({"source": "代開發票", "split": {"導演": 3000}, MIRROR_TOTAL_KEY: 3000}, 100000, "A")
+        assert parent_shares(d)["A"]["amount"] == 100000
+        d2 = legacy_claim({"source": "源日", "split": {"導演": 3000}, MIRROR_TOTAL_KEY: 3000}, 100000, "A")
+        assert parent_shares(d2)["A"]["amount"] == 3000                # 源日照舊只認鏡射量
+
+    def test_zeroing_respects_keep_and_marks_manual(self):
+        # BUG-24：有份額但沒代開／執行業務所得基數 → 歸零前要看 keep：owner 在源日分身手填的個人稅款要留住、標手動
+        d, c = set_parent_share({"source": "源日"}, 0, "A", 50000, {}, source="源日")
+        d["personal_tax"] = 3000
+        out = apply_source_fee(c, d, keep={"personal_tax"})
+        assert out["personal_tax"] == 3000 and "personal_tax" in out["manual"]
+        d["invoice_fee"] = 700
+        out2 = apply_source_fee(c, d, keep={"invoice_fee"})
+        assert out2["invoice_fee"] == 700 and "invoice_fee" in out2["manual"]
+        # 沒送（不在 keep）、也沒標手動 → 照樣歸零
+        out3 = apply_source_fee(c, norm_detail({**out, "manual": []}))
+        assert out3["personal_tax"] == 0
+
+    def test_contract_never_goes_negative(self):
+        # BUG-26：owner 手動把合約改得比份額低再解除 → 不能存負數
+        from core.ledger_project import drop_parent_share
+        d, c = set_parent_share({}, 0, "A", 50000, {})
+        d2, c2 = drop_parent_share(d, 20000, "A")
+        assert c2 == 0
+
+    def test_push_claims_only_parents_that_were_already_linked(self):
+        # BUG-22：X 連著 A（沒份額 → 待認領）時推**新的** B：B 的錢要真的加進 X，不是 claim
+        from routers.crm.project_links import _claim_on_push
+        assert _claim_on_push(True, ["A"], "A") is True
+        assert _claim_on_push(True, ["A"], "B") is False
+        assert _claim_on_push(False, ["A"], "A") is False
+        from tests.unit._srcscan import code_only, flow_body, projects_src
+        body = code_only(flow_body(projects_src(), "async def mirror_project_to_mine("))
+        assert "claim = _claim_on_push(pending, linked_before, p.id)" in body and "claim=claim)" in body
+
+    def test_mirror_check_judges_stale_per_parent_and_shows_this_parents_share(self):
+        # BUG-27：推送對話框那支要跟詳情那行同一套規則（逐案判落後、比這案的份額不是整案）
+        from tests.unit._srcscan import code_only, func_body, projects_src
+        chk = code_only(func_body(projects_src(), "async def check_project_mirror("))
+        assert 'mirror_stale(linked.ledger_detail, mir["total"], p.id)' in chk
+        assert "share = parent_shares(" in chk and '"amount": share["amount"] if share else' in chk
+
+    def test_no_false_persist_comment_before_the_409(self):
+        # BUG-28：409 前 t.ledger_detail = keep 不會落庫（PUT 整個 rollback），註解與賦值都拿掉
+        from tests.unit._srcscan import code_only, func_body, projects_src
+        fn = code_only(func_body(projects_src(), "async def apply_billing_mode("))
+        assert "t.ledger_detail = keep" not in fn          # 只透過 _store_mirror_detail 落庫

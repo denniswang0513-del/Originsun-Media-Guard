@@ -335,7 +335,7 @@ async def _me_staff_id_or_blank(request) -> str:
 async def check_project_mirror(project_id: str, request: Request):
     """按鈕按下去之前的預覽：哪幾行、多少錢、連結了沒、私帳落後了沒、可選的既有私帳案。"""
     from core.ledger import require_entity
-    from core.ledger_project import mirror_stale, norm_detail
+    from core.ledger_project import mirror_stale, norm_detail, parent_shares
 
     require_entity(request, "mine", level="full")
     sid = await _me_staff_id_or_blank(request)
@@ -351,6 +351,7 @@ async def check_project_mirror(project_id: str, request: Request):
                 linked is not None and norm_detail(linked.ledger_detail).get("source") == "代開發票"):
             warning = ""
         client = await session.get(Client, p.client_id) if p.client_id else None
+        share = parent_shares(linked.ledger_detail).get(p.id) if linked is not None else None
         # 可連結的既有私帳案。🔴 **已經被連結過的照樣列出來**（owner 2026-09-01
         # 「可以多筆專案連結到一筆私帳」）—— 原本排除它們，於是第二個 CRM 案
         # 永遠選不到同一個私帳案。改成把「已承接幾案」帶給前端去標示。
@@ -374,10 +375,12 @@ async def check_project_mirror(project_id: str, request: Request):
             # 一個私帳案承接多個母帳案時那個合計不屬於任何一案 → 判不出來（None）。
             # 沒綁人員檔案時 mir["total"] 是「認不出來」不是 0 —— 拿去比會把每一個
             # 已同步的案都標成「私帳落後 −全部」，所以一樣判不出來（None）
-            from ._shared import mine_parent_names
-            shared = len((await mine_parent_names(session, [linked.id])).get(linked.id) or []) > 1
+            # 2026-09-13 起逐案判（同 link_note_for）：只有「沒分案記錄的舊 N:1」才判不出來
+            from ._shared import mine_parent_links
+            n_parents = len((await mine_parent_links(session, [linked.id])).get(linked.id) or [])
+            shared = not parent_shares(linked.ledger_detail) and n_parents > 1
             if not shared:
-                stale, delta = mirror_stale(linked.ledger_detail, mir["total"])
+                stale, delta = mirror_stale(linked.ledger_detail, mir["total"], p.id)
     return {
         "name": p.name,
         "client": client.short_name if client else "",
@@ -386,10 +389,11 @@ async def check_project_mirror(project_id: str, request: Request):
         # 已經連結到哪一案（None＝還沒連）。有值時前端走「重新同步」：鎖定這一案、
         # 不給「建立新專案」—— 那會多出第二個分身，同一筆錢在私帳算兩次。
         # 帶著它現有的工項，才畫得出「私帳現有 vs CRM 現在算出來的」對照。
+        # 「私帳現有」＝**這一案**的份額（取代只換這一案）；沒分案記錄的舊資料才是整案
         "linked": None if linked is None else {
             "id": linked.id, "name": linked.name,
-            "amount": int(linked.contract_amount or 0),
-            "split": (norm_detail(linked.ledger_detail).get("split") or {})},
+            "amount": share["amount"] if share else int(linked.contract_amount or 0),
+            "split": share["split"] if share else (norm_detail(linked.ledger_detail).get("split") or {})},
         # True＝母帳成本行改了（delta＝現在 − 上次同步）、False＝一致、None＝判不出來
         "stale": stale, "delta": delta,
         # 工項合計＝`lines` 依工項名彙總（同名相加、空名落其他都在 mirror_lines
@@ -474,6 +478,12 @@ def _push_share_amount(mode: str, pending: bool, share_src: str, old_share: dict
     if mode == "add" and not pending:
         return int(old_share.get("amount") or 0) + int(mir_total or 0)
     return int(mir_total or 0)
+
+
+def _claim_on_push(pending: bool, linked_before, pid: str) -> bool:
+    """待認領的 X 上推送：只有**原本就連著**的案是在「認領」既有的錢（claim，不動錢）；
+    這次新推進來的案的錢還不在 X 上，要照常加進去。"""
+    return bool(pending) and pid in set(linked_before or ())
 
 
 def _push_share_source(explicit: str, old_share: dict) -> str:
@@ -601,8 +611,11 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 # X 的金額與工項吃差額 —— 別案鏡射進來的錢與 owner 自己填的都不動，所以 N:1 的
                 # 「取代」不再需要 409。overwrite＝這案份額換成這次算的；add＝這案份額再加一筆
                 # （同名工項相加）。待認領的舊 N:1（回填分不出來）：只記份額不動錢（claim）。
+                from ._shared import mine_parent_links
+                linked_before = [pid for pid, _n in (await mine_parent_links(session, [t.id])).get(t.id) or []]
                 keep = await _ensure_share(session, t, keep, p.id)
                 pending = keep.get(BY_PARENT_PENDING_KEY) is True
+                claim = _claim_on_push(pending, linked_before, p.id)
                 old_share = parent_shares(keep).get(p.id) or {"amount": 0, "split": {}}
                 # 案源：這次指定的 > 私帳案本來的 > 源日。🔴 不要無條件寫回源日 ——
                 # 代開發票的分身重新同步一次就會被翻成源日、代辦費歸零
@@ -611,14 +624,14 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 keep[MIRROR_AT_KEY] = _today_tw()         # X 層級的「上次同步」（詳情那一行顯示用）
                 # 這一案份額的案源與金額：看**份額**的案源，不看 X 的（X 可能已被別案翻成代開）
                 share_src = _push_share_source(source, old_share)
-                amount = _push_share_amount(mode, pending, share_src, old_share, mir["total"],
+                amount = _push_share_amount(mode, claim, share_src, old_share, mir["total"],
                                             _mirror_contract(p, mir, "代開發票"))
-                adding = mode == "add" and not pending
+                adding = mode == "add" and not claim
                 new_split, _delta = merge_split(old_share["split"] if adding else {},
                                                 mir["split"] or {}, add=adding)
                 keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id, amount, new_split,
                                                       synced_total=mir["total"], at=_today_tw(),
-                                                      source=share_src, claim=pending)
+                                                      source=share_src, claim=claim)
                 t.contract_amount = new_contract
                 keep = await _clear_pending_if_all_claimed(session, t, keep)
                 keep = norm_detail(apply_source_fee(int(t.contract_amount or 0), keep))
@@ -695,7 +708,7 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         if keep.get(BY_PARENT_PENDING_KEY) is True:
             # 分不出各案份額的 N:1（回填分不出來、或對應表連了多案沒推送過）：不猜。先對每個母帳案按
             # 「推送到私帳 → 取代」認領份額，旗標自己會清掉，之後這裡就只動 A 那一份的差額。
-            t.ledger_detail = keep          # 標記要落庫，下次才不用再判一次
+            # （這裡不落庫：raise 之後 PUT 整個 rollback；旗標下次再算一次很便宜。）
             raise HTTPException(status_code=409, detail="這個私帳案承接了多個母帳案，各案份額還沒認領 —— "
                                 "先對每個母帳案按「推送到私帳 → 取代」認領一次，再改收款方式")
     if want_source:
@@ -825,6 +838,15 @@ async def _write_link(session, parent, mine):
     parent.updated_at = _now()
     if not mine.source_project_id:
         mine.source_project_id = parent.id
+    # 連結當下就記一筆 0 份額（claim，不動錢）：之後「這案沒記錄」只剩真正的舊資料，legacy_claim 才不會把
+    # owner 自己的整筆合約認給一個對應表連上、從沒推送過的案；推送時舊份額 0 → 錢照常加進去。
+    # 推送／建分身是先寫份額再連結，那時記錄已在、這裡不動。
+    from core.ledger_project import MIRROR_SOURCE, norm_detail, parent_shares, set_parent_share
+    keep = norm_detail(mine.ledger_detail)
+    if parent.id not in parent_shares(keep):
+        keep, _c = set_parent_share(keep, int(mine.contract_amount or 0), parent.id, 0, {},
+                                    source=keep.get("source") or MIRROR_SOURCE, claim=True)
+        mine.ledger_detail = keep
     mine.updated_at = _now()
     await _sync_pair(session, parent, mine)
 

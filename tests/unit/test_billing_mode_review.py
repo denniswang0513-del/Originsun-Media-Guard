@@ -205,7 +205,6 @@ def parents_of(monkeypatch):
 
 async def test_legacy_n_to_one_without_shares_is_marked_pending_not_claimed(monkeypatch, parents_of):
     """BUG-12：沒分案記錄、但 X 連著兩個母帳案（對應表連的）→ 不能整筆認給第一個，要標待認領（409）。"""
-    from core.ledger_project import BY_PARENT_PENDING_KEY
     parents_of["X"] = [("A", "母帳案 A"), ("B", "母帳案 B")]
     t = SimpleNamespace(id="X", name="X", entity="mine", contract_amount=100000,
                         ledger_detail={"source": "源日", "split": {"剪接": 100000}}, updated_at=None)
@@ -218,8 +217,7 @@ async def test_legacy_n_to_one_without_shares_is_marked_pending_not_claimed(monk
     with pytest.raises(HTTPException) as e:
         await pl.apply_billing_mode(None, _parent("passthrough", contract=120000), request=None, old_mode="company")
     assert e.value.status_code == 409 and "認領" in e.value.detail
-    assert t.contract_amount == 100000
-    assert t.ledger_detail.get(BY_PARENT_PENDING_KEY) is True
+    assert t.contract_amount == 100000                       # 409 → PUT rollback，什麼都不落庫（旗標下次再算）
 
 
 async def test_legacy_claim_is_capped_to_what_was_mirrored(monkeypatch, parents_of):
@@ -283,3 +281,24 @@ async def test_old_shape_unlink_does_not_touch_a_parent_relinked_elsewhere():
     from tests.unit._srcscan import code_only, func_body, repo_src
     body = code_only(func_body(repo_src("routers/crm/project_map.py"), "async def set_parent_link("))
     assert "p0.mine_link_id in (None, m.id)" in body
+
+
+async def test_linking_records_a_zero_share_so_later_claims_do_not_grab_owner_money(monkeypatch):
+    """BUG-25：對應表連結時就記一筆 0 份額 —— 之後「沒記錄」只剩真正的舊資料，legacy_claim 不會把 owner 的
+    整筆合約認給那案；推送時舊份額 0 → 錢正常加進去。"""
+    from core.ledger_project import parent_shares
+
+    async def _sync(session, parent, mine, *, explicit=()):
+        return False
+    monkeypatch.setattr(pl, "_sync_pair", _sync)
+    mine = SimpleNamespace(id="X", contract_amount=50000, ledger_detail={"source": "源日", "split": {"剪接": 50000}},
+                           source_project_id=None, updated_at=None)
+    parent = SimpleNamespace(id="A", mine_link_id=None, updated_at=None)
+    await pl._write_link(None, parent, mine)
+    assert parent.mine_link_id == "X"
+    assert parent_shares(mine.ledger_detail)["A"] == {"amount": 0, "split": {}, "synced_total": 0, "at": "", "source": "源日"}
+    assert mine.contract_amount == 50000
+    # 已有記錄（推送先寫了份額再連結）就不動
+    mine.ledger_detail["by_parent"]["A"]["amount"] = 20000
+    await pl._write_link(None, SimpleNamespace(id="A", mine_link_id=None, updated_at=None), mine)
+    assert parent_shares(mine.ledger_detail)["A"]["amount"] == 20000

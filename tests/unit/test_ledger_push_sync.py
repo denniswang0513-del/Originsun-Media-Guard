@@ -139,10 +139,11 @@ def test_stale_compares_last_synced_total_not_current_split():
 
 def test_check_reports_stale_and_the_sync_writes_the_total():
     chk = code_only(func_body(_PROJ, "async def check_project_mirror("))
-    assert "mirror_stale(linked.ledger_detail, mir[\"total\"])" in chk
+    # 2026-09-13 起逐案判（同 link_note_for）
+    assert "mirror_stale(linked.ledger_detail, mir[\"total\"], p.id)" in chk
     assert '"stale": stale, "delta": delta' in chk
-    # N:1 的合計不屬於任何一案 → 不判
-    assert "shared = len(" in chk and "if not shared:" in chk
+    # 只有「沒分案記錄的舊 N:1」合計不屬於任何一案 → 不判
+    assert "shared = not parent_shares(linked.ledger_detail) and n_parents > 1" in chk and "if not shared:" in chk
     post = code_only(func_body(_PROJ, "async def mirror_project_to_mine("))
     assert 'keep[MIRROR_TOTAL_KEY] = mir["total"]' in post
 
@@ -342,7 +343,7 @@ def test_passthrough_copy_keeps_the_parent_case_and_uses_its_contract():
     post = code_only(func_body(_PROJ, "async def mirror_project_to_mine("))
     assert 'keep["source"] = source or keep.get("source") or MIRROR_SOURCE' in post
     # 2026-09-13 起代開的金額規則住在 _push_share_amount（看**份額**的案源，不看 X 的）
-    assert "_push_share_amount(mode, pending, share_src, old_share" in post
+    assert "_push_share_amount(mode, claim, share_src, old_share" in post
     assert 'if share_src == "代開發票":' in repo_src("routers/crm/project_links.py")
     from core.schemas import ProjectMirrorPayload
     assert "source" in ProjectMirrorPayload.model_fields

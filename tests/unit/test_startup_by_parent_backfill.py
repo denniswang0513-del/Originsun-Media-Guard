@@ -125,3 +125,19 @@ async def test_without_a_single_mine_owner_n_to_one_is_left_pending(world, monke
     await sm._m22_ledger_by_parent_backfill()
     assert world.projects["X2"].ledger_detail.get(BY_PARENT_PENDING_KEY) is True
     assert parent_shares(world.projects["X1"].ledger_detail)                    # 1:1 照認
+
+
+async def test_one_broken_n_to_one_row_does_not_block_the_rest(world, monkeypatch):
+    """收尾 review：任一筆 N:1 的 _mirror_preview 丟例外 → 那一筆標待認領，其他照認、照 commit。"""
+    import routers.crm.project_links as pl
+    real = pl._mirror_preview
+
+    async def _boom(sess, pid, sid):
+        if pid == "B":
+            raise RuntimeError("cost lines table missing")
+        return await real(sess, pid, sid)
+    monkeypatch.setattr(pl, "_mirror_preview", _boom)
+    await sm._m22_ledger_by_parent_backfill()
+    assert parent_shares(world.projects["X1"].ledger_detail)                          # 1:1 照認
+    assert world.projects["X2"].ledger_detail.get(BY_PARENT_PENDING_KEY) is True      # 壞的那筆待認領
+    assert world.committed == 1

@@ -707,10 +707,14 @@ async def _backfill_by_parent(session) -> tuple:
                 owner_sid = owners[0] if len(owners) == 1 else ""
             claimed = []
             if owner_sid:
-                for pid, _name in parents:
-                    p, mir, _l = await _mirror_preview(session, pid, owner_sid)
-                    src = BILLING_MIRROR_SOURCE.get(billing_mode_of(p.billing_mode), "")
-                    claimed.append((pid, _mirror_contract(p, mir, src), mir["split"], int(mir["total"] or 0)))
+                try:
+                    for pid, _name in parents:
+                        p, mir, _l = await _mirror_preview(session, pid, owner_sid)
+                        src = BILLING_MIRROR_SOURCE.get(billing_mode_of(p.billing_mode), "")
+                        claimed.append((pid, _mirror_contract(p, mir, src), mir["split"], int(mir["total"] or 0)))
+                except Exception as _e_row:       # 一筆壞掉（成本行表缺、母帳案被刪）不能擋住其他列的認領
+                    print(f"[migrate] 私帳分案回填：{t.id} 認不出來（{_e_row}），標待認領")
+                    claimed = []
             amounts = [a for _p, a, _s, _t in claimed]
             if amounts and min(amounts) > 0 and sum(amounts) <= contract:
                 for pid, amount, split, total in claimed:

@@ -476,7 +476,7 @@ def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=
     new_split = {str(k): _int(v) for k, v in (split or {}).items() if _int(v)}
     contract = _int(contract)
     if not claim:
-        contract = contract + _int(amount) - old["amount"]
+        contract = max(0, contract + _int(amount) - old["amount"])   # owner 手動把合約改得比份額低再解除 → 停在 0
         xs = dict(d.get("split") or {})
         for k in set(xs) | set(new_split) | set(old["split"]):
             xs[k] = max(0, _int(xs.get(k)) + new_split.get(k, 0) - old["split"].get(k, 0))
@@ -543,7 +543,9 @@ def legacy_claim(detail, contract, pid: str) -> dict:
     d = norm_detail(detail)
     c = _int(contract)
     mt = _int(d.get(MIRROR_TOTAL_KEY))
-    amount = mt if 0 < mt < c else c
+    # 代開分身：收入本來就是母帳合約額（那張發票的面額），mirror_total 是成本行合計、天生比它小 —— 整筆認；
+    # 不然收款方式來回一次（換回 claim、再改代開算差額）X 會從 100,000 變 197,000
+    amount = mt if (0 < mt < c and d.get("source") != "代開發票") else c
     d, _c = set_parent_share(d, c, pid, amount, d.get("split") or {},
                              synced_total=mt, at=str(d.get(MIRROR_AT_KEY) or ""),
                              source=d.get("source") or MIRROR_SOURCE, claim=True)
@@ -691,13 +693,16 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
         # 稅金與買發票是代辦費的**組成**（買發票＝代辦費 − 稅金），代辦費手改時跟著重算
         d["tax_fee"] = _half_up(agency / VAT_DIVISOR * (VAT_PCT / 100))
         d["buy_invoice"] = int(d["invoice_fee"] or 0) - d["tax_fee"]
-    elif shared and "invoice_fee" not in manual:
-        # 分案的世界：沒有任何一案走代開（A 換回源日、或最後一個代開份額被解除）→ 代開三欄歸零，不留舊數字
-        d["invoice_fee"] = d["tax_fee"] = d["buy_invoice"] = 0
+    elif shared:
+        # 分案的世界：沒有任何一案走代開（A 換回源日、或最後一個代開份額被解除）→ 試算值是 0：
+        # 走 _settle，這次送來的非零值一樣算「人決定的」（標手動、留住），沒送／沒標的才歸零
+        _settle("invoice_fee", 0)
+        d["tax_fee"] = 0
+        d["buy_invoice"] = int(d["invoice_fee"] or 0)
     if src == "執行業務所得" or pro:
         _settle("personal_tax", withholding(pro))
-    elif shared and "personal_tax" not in manual:
-        d["personal_tax"] = 0
+    elif shared:
+        _settle("personal_tax", 0)
     d.pop("tax_manual", None)      # 一律換成清單形狀，別留兩種真相
     if manual:
         d["manual"] = sorted(manual)
