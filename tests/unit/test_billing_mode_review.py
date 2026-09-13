@@ -59,4 +59,35 @@ async def test_passthrough_switch_still_asks_for_mine_scope(monkeypatch, no_mine
     assert no_mine_scope == ["mine"]
 
 
+async def test_switch_refuses_when_mirror_is_shared(monkeypatch):
+    """BUG-5：私帳案 X 同時承接 A、B → A 改後期代開不能把 X 的收入改成 A 的合約（B 的錢會不見）；同 mirror 那支的 409。"""
+    t = _mirror()
+
+    async def _link(session, p):
+        return t
+
+    async def _shared(session, ids):
+        return {"X": ["母帳案 A", "母帳案 B"]}
+    monkeypatch.setattr(pl, "resolve_mine_link", _link)
+    monkeypatch.setattr(ledger, "require_entity", lambda request, ent, level="": None)
+    import routers.crm._shared as shared
+    monkeypatch.setattr(shared, "mine_parent_names", _shared)
+
+    with pytest.raises(HTTPException) as e:
+        await pl.apply_billing_mode(None, _parent("passthrough"), request=None, old_mode="company")
+    assert e.value.status_code == 409
+    assert "承接了 2 個母帳案" in e.value.detail
+    assert t.contract_amount == 50000 and t.ledger_detail["source"] == "源日", "409 之前不能先動到分身"
+
+    # 換回也一樣：代開那套不能連別案的一起歸零
+    t2 = _mirror("代開發票")
+
+    async def _link2(session, p):
+        return t2
+    monkeypatch.setattr(pl, "resolve_mine_link", _link2)
+    with pytest.raises(HTTPException) as e2:
+        await pl.apply_billing_mode(None, _parent("company"), request=None, old_mode="passthrough")
+    assert e2.value.status_code == 409
+    assert t2.ledger_detail["invoice_fee"] == 4000
+
 

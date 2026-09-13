@@ -628,6 +628,14 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         require_entity(request, "mine", level="full")
     except HTTPException:
         return {"action": "skipped", "created": False}
+    if t is not None:
+        # 要動既有分身的錢（換案源改合約、換回歸零代開三欄）之前：這個私帳案是不是同時承接別的母帳案？
+        # 是的話這裡的自動改帳會把別案鏡射進來的錢一起洗掉 —— 同 mirror_project_to_mine 的 409，規則只有一條。
+        from ._shared import mine_parent_names
+        _others = (await mine_parent_names(session, [t.id])).get(t.id) or []
+        if len(_others) > 1:
+            raise HTTPException(status_code=409, detail="這個私帳案承接了 %d 個母帳案（%s），收款方式的自動改帳會洗掉別案鏡射進來的錢；請到私帳手動調整"
+                                % (len(_others), "、".join(_others)))
     if want_source:
         if t is None:
             sid = await _me_staff_id_or_blank(request)
