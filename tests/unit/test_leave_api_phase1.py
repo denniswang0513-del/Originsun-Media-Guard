@@ -8,7 +8,7 @@
 """
 import re
 
-from tests.unit._srcscan import (code_only, flow_body, func_body, migration_sql, models_src, repo_src, schemas_src)
+from tests.unit._srcscan import (code_only, flow_body, func_body, migration_sql, models_src, repo_src, schemas_src, startup_src)
 
 HR = repo_src("routers/api_hr.py")
 ME = repo_src("routers/api_me.py")
@@ -197,7 +197,7 @@ def test_new_request_columns_are_in_the_boot_migration_with_backfill():
     assert "UPDATE hr_leave_requests SET hours = days * 8 WHERE hours IS NULL" in sql
     # 回填要跑在加欄之後：main.py 先跑 CRM_COLUMNS 那個迴圈（ADD COLUMN），
     # 再跑 FINANCE_AND_CRM_COLUMNS（含那句 UPDATE）—— 釘的是**執行順序**，不是清單住哪個檔
-    main = repo_src("main.py")
+    main = startup_src()
     assert main.index("_MIG.CRM_COLUMNS") < main.index("_MIG.FINANCE_AND_CRM_COLUMNS")
     assert "UPDATE hr_leave_requests SET hours" in repo_src("db/migrations.py")
 

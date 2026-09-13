@@ -13,7 +13,7 @@
 🔴 只有 `source='cash'` 分家。`payment`／`invoice` 是公司流程的詞彙，兩本帳講的
 是同一件事（私帳的 34 張請款用的就是母公司那批類別），分了會把私帳的請款打斷。
 """
-from tests.unit._srcscan import migration_sql, code_only, func_body, repo_src
+from tests.unit._srcscan import migration_sql, code_only, func_body, repo_src, startup_src
 from tests.unit._srcscan import finance_src
 
 
@@ -48,7 +48,7 @@ def test_the_backfill_asks_the_taxonomy_tree_not_the_underscore():
     assert "category_map_entity_backfilled" in body and "return 0" in body   # 2026-09-06：sentinel 改 settings 旗標（手動先加一列不會讓 backfill 永遠不跑）
     # 分類樹還沒種好時不要亂判（回填排在 seed_cash_taxonomy 之後）
     assert "if not mine:" in body
-    boot = repo_src("main.py")
+    boot = startup_src()
     assert boot.index("seed_cash_taxonomy(_ftax)") < boot.index(
         "backfill_category_map_entity(_ftax)"), "回填要排在分類樹種好之後"
 

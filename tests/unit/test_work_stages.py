@@ -10,7 +10,7 @@ import pytest
 
 from core.hr_logic import (STAGE_SEED, WORK_TYPES, resolve_stage, stage_categories, stage_index,
                            stages_by_category)
-from tests.unit._srcscan import code_only, func_body, migration_sql, my_page_src, repo_src, timesheets_src
+from tests.unit._srcscan import code_only, func_body, migration_sql, my_page_src, repo_src, startup_src, timesheets_src
 
 
 def _nodes():
@@ -42,7 +42,7 @@ def test_seed_only_writes_when_table_is_empty():
     assert "func.count()" in body
     assert body.index("return 0") < body.index("session.add(")      # 先數、有東西就走人
     assert "STAGE_SEED" in body and "WORK_TYPES" in body
-    main = repo_src("main.py")
+    main = startup_src()
     assert "seed_if_empty as _seed_stages" in main
 
 

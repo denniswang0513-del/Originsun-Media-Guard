@@ -204,7 +204,16 @@ def migration_sql() -> str:
     的測試當場全紅 —— 它們釘的是**位置**不是規則。這一支兩個檔案都收，所以
     下次再搬也不會紅。
     """
-    return repo_src("db/migrations.py") + "\n" + repo_src("main.py")
+    return repo_src("db/migrations.py") + "\n" + startup_src()
+
+
+def startup_src() -> str:
+    """開機流程的原始碼：`main.py`（骨架：loop／DB 連線／背景工）＋ `db/startup_migrations.py`
+    （2026-09-13 從 `_on_startup` 純搬出去的 22 段 migration／種子）。
+
+    斷言「這段回填在開機路徑上」「A 段排在 B 段之前」的測試用這一支，不要直接讀 `main.py`
+    —— 同 migration_sql 的理由：釘的是規則與順序，不是它住在哪個檔。"""
+    return repo_src("main.py") + "\n" + repo_src("db/startup_migrations.py")
 
 
 def finance_src(header: str = "") -> str:

@@ -7,7 +7,7 @@ me_plan_parttime（兼職排班）。拆之前「任一把 me_* 就整區出現�
 """
 import re
 
-from tests.unit._srcscan import code_only, func_body, js_code_only, my_page_src, repo_src, timesheets_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, my_page_src, repo_src, startup_src, timesheets_src
 
 NEW = ("me_worklog", "me_team_week", "me_project_lookup", "me_plan_parttime", "me_today_zone", "me_week_plan")
 
@@ -77,7 +77,7 @@ def test_admin_ui_nests_zone_keys_under_the_master_switch():
 
 
 def test_second_backfill_grants_master_and_week_plan_once():
-    src = repo_src("main.py")
+    src = startup_src()
     blk = src[src.index("總開關＋「我的一週」拆出來（旗標"):src.index("公布欄欄位 migration")]
     assert 'get("me_today_zone_backfilled")' in blk and '["me_today_zone_backfilled"] = True' in blk
     assert "ME_ZONE_MASTER_BACKFILL_FROM" in blk and '"me_week_plan"] if "me_worklog" in _mods' in blk
@@ -94,7 +94,7 @@ def test_admin_ui_shows_staff_status_and_blocks_parttime_planning_for_parttimers
 
 
 def test_one_time_backfill_runs_at_startup_through_the_dual_write_path():
-    src = repo_src("main.py")
+    src = startup_src()
     blk = src[src.index("拆鑰匙的一次性回填"):src.index("公布欄欄位 migration")]
     assert 'get("me_zone_split_backfilled")' in blk and '["me_zone_split_backfilled"] = True' in blk, "要有旗標，只跑一次"
     assert "_get_all_users" in blk and "_persist_user" in blk, "走雙寫，不下 raw SQL（users.json 會漂開）"
