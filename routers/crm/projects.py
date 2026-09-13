@@ -19,7 +19,7 @@ from fastapi import HTTPException, Request, UploadFile, File, Query
 from config import load_settings as _load_settings
 
 from core.ledger import hide_mine_projects, not_mine
-from core.ledger_project import LINK_SYNC_FIELDS, parent_receipt_fields
+from core.ledger_project import BILLING_MODES, LINK_SYNC_FIELDS, billing_mode_of, parent_receipt_fields
 from core.project_link import invoice_project_ids as _inv_pids
 from db.models import CrmCashSplit    # 拆項列（母帳收款歸案要看它；_shared 沒 re-export）
 from core.schemas import CrmProjectPayload, CrmProjectPatchPayload, ProjectTypeOpPayload
@@ -157,6 +157,16 @@ async def linked_receipts_map(session, project_ids) -> dict:
 BACKUP_ROOT_FIELDS = ("backup_local_root", "backup_nas_root", "backup_proxy_root")
 
 
+def _check_billing_mode(data: dict) -> None:
+    """`billing_mode` 有送就要是三值之一（None／沒送＝不動；空字串＝company）。"""
+    if "billing_mode" not in data or data["billing_mode"] is None:
+        return
+    v = (data["billing_mode"] or "").strip() or "company"
+    if v not in BILLING_MODES:
+        raise HTTPException(status_code=422, detail=f"未知的收款方式：{data['billing_mode']}")
+    data["billing_mode"] = v
+
+
 def normalize_backup_roots(data: dict) -> list:
     """把 data 裡的備份三根就地正規化成 canonical UNC，回傳警告字串清單。
 
@@ -224,6 +234,8 @@ def _to_project_dict(p, client_short_name: str = "", mirrored: bool = False, min
         # 空字串）—— 露出來前端才畫得出「連到哪」，而不是只有開視窗才知道。
         "mine_link_id": (mid or p.mine_link_id or "") if mirrored else "",
         "mine_link_name": mname or "",
+        # 收款方式（owner 2026-09-13）：源日專案／後期代開／現金收款；NULL 回 company
+        "billing_mode": billing_mode_of(p.billing_mode),
         "contract_amount": p.contract_amount,
         "tax_rate": p.tax_rate, "profit_target_pct": p.profit_target_pct,
         "misc_budget_pct": p.misc_budget_pct,
@@ -437,12 +449,19 @@ async def create_project(req: CrmProjectPayload, request: Request):
     date_fields = {"shoot_date", "start_date", "completion_date"}
     dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
     data = {**req.model_dump(exclude=date_fields), **dates}
+    _check_billing_mode(data)
     root_warnings = normalize_backup_roots(data)
 
     async with factory() as session:
         project, client_name = await create_project_in_session(session, data)
+        # 收款方式＝後期代開 → 儲存即在私帳建對應的案（owner 2026-09-13）
+        from .project_links import apply_billing_mode    # 那支頂層 import 本檔 → 只能在這裡 import
+        billing = await apply_billing_mode(session, project, request, "company")
         await session.commit()
         await session.refresh(project)
+    if billing.get("created"):
+        from core.ledger import invalidate_mine_projects
+        invalidate_mine_projects()
 
     # Folder template copy (best-effort)
     warning = ""
@@ -458,7 +477,7 @@ async def create_project(req: CrmProjectPayload, request: Request):
     if root_warnings:
         warning = "；".join([warning] + root_warnings) if warning else "；".join(root_warnings)
 
-    result = {"status": "ok", "project": _to_project_dict(project, client_name)}
+    result = {"status": "ok", "project": _to_project_dict(project, client_name), "billing": billing}
     if warning:
         result["warning"] = warning
     return result
@@ -781,9 +800,13 @@ async def project_wire(session, project, request=None) -> dict:
     if request is not None and (project.entity or "parent") != "mine" and not _hide_mine(request):
         t = await resolve_mine_link(session, project)
         mirrored, mine_link = t is not None, ((t.id, t.name or "") if t is not None else None)
+    from .project_links import link_note_for
     return {**_to_project_dict(project, client.short_name if client else "", mirrored=mirrored, receipts=receipts,
                                mine_link=mine_link),
-            "proposal_status": await _latest_proposal_status(session, project.id)}
+            "proposal_status": await _latest_proposal_status(session, project.id),
+            # 「後期連結」那一行系統備註（owner 2026-09-13）；看不到私帳的人只拿到收款方式那句
+            "link_note": (await link_note_for(session, project, request)) if request is not None
+                         else None}
 
 
 @router.get("/projects/{project_id}")
@@ -892,6 +915,9 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
 
     date_fields = {"shoot_date", "start_date", "completion_date"}
     update_data = req.model_dump(exclude_unset=True)
+    _check_billing_mode(update_data)
+    if update_data.get("billing_mode") is None:
+        update_data.pop("billing_mode", None)      # None＝沒送（舊分頁）→ 不動
     # 逐格 autosave 只送 dirty 欄 → normalize 只碰有送上來的那幾根（`f in data` 判斷）
     root_warnings = normalize_backup_roots(update_data)
 
@@ -929,6 +955,7 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
         old_status = project.status or ""
         old_client_id = project.client_id
         old_name = project.name or ""
+        old_billing = project.billing_mode
         # outcome_reason 不是專案欄位 — 是轉「未成案/成案」時給提案衛星列的
         outcome_reason = update_data.pop("outcome_reason", None)
         for k, v in update_data.items():
@@ -950,6 +977,12 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
                 # 這次親手送上來的欄位不做「母帳空白就拿私帳的補」：清結案日＝重開案，
                 # 被私帳補回去等於存不進去而且回應還說改好了
                 await _sync_pair(session, project, linked_mine, explicit=set(update_data))
+        # 收款方式變了 → 私帳分身跟著（建／改案源／改回源日；規則在 project_links.apply_billing_mode）
+        billing = {"action": "none", "created": False}
+        # （值沒變也呼叫：同事先存了「後期代開」、帳本主人再存一次要把分身補建起來；沒事做它回 none）
+        if "billing_mode" in update_data:
+            from .project_links import apply_billing_mode
+            billing = await apply_billing_mode(session, project, request, old_billing)
         project.updated_at = _now()
         # 專案狀態或歸屬客戶變動 → 重算客戶分級（含轉移前的舊客戶）
         await _auto_update_client_status(session, project.client_id)
@@ -961,8 +994,13 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
         await session.commit()
         await session.refresh(project)
         wire = await project_wire(session, project, request)
+    if billing.get("created"):
+        from core.ledger import invalidate_mine_projects
+        invalidate_mine_projects()
+    if billing.get("action") == "skipped":
+        warnings.append("收款方式已存，但你看不到私帳 —— 私帳那邊的對應案要由帳本主人再存一次才會建／改")
 
-    result = {"status": "ok", "project": wire}
+    result = {"status": "ok", "project": wire, "billing": billing}
     if warnings or root_warnings:
         result["warning"] = "；".join(warnings + root_warnings)
     return result

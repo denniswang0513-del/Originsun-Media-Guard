@@ -317,6 +317,7 @@ class LedgerDetailPayload(BaseModel):
     crm_pushed: Optional[int] = None
     source: Optional[str] = None     # 案源（meta，經 norm_detail 白名單）
     fee_pct: Optional[float] = None  # 服務費率 %（代開發票；預設 8）
+    fee_deducted: Optional[bool] = None  # 代辦費已扣除（meta，缺＝True；只在 False 落庫）
     # 顯示名覆寫（owner 2026-09-05）。空字串＝清掉退回自動規則。同樣要在
     # PUT 端點先 pop 掉，不能落進 ledger_detail JSON。
     display_name: Optional[str] = None

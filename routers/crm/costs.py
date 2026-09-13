@@ -936,8 +936,21 @@ async def project_financial_summary(project_id: str):
     total_cost = m["cost"]
     actual_profit = m["margin"]
     profit_rate = round(actual_profit / ex_tax * 100) if ex_tax > 0 else 0
+    # 收款方式（owner 2026-09-13 第 4 點）：後期代開的案，母帳合約額不是公司的營收，公司只拿代辦費。
+    # 這次**不動**毛利／管線的算法，只多給一個數字讓摘要講一句「公司實際收入＝代辦費 N」。
+    from core.finance_logic import PASSTHROUGH_FEE_RATES, MINE_LINK_INVOICE_CATEGORY
+    from core.ledger_project import BILLING_LABELS, billing_mode_of
+    from config import load_settings
+    _bm = billing_mode_of(project.billing_mode)
+    _company_income = None
+    if _bm == "passthrough" and contract:
+        _rates = load_settings().get("invoice_fee_rates") or {}
+        _pct = float(_rates.get(MINE_LINK_INVOICE_CATEGORY, PASSTHROUGH_FEE_RATES[MINE_LINK_INVOICE_CATEGORY]))
+        _company_income = round(contract * _pct / 100)
 
     return {
+        "billing_mode": _bm, "billing_mode_label": BILLING_LABELS[_bm],
+        "company_income": _company_income,
         "contract_amount": contract, "ex_tax": ex_tax,
         "profit_target": profit_target, "profit_target_pct": project.profit_target_pct or 20,
         "misc_budget": misc_budget, "misc_budget_pct": _mpct,

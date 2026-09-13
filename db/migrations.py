@@ -61,6 +61,12 @@ CRM_INDEXES = [
         # 提案=專案合體：前期草稿提案還沒定客戶也要能是專案
         # （ALTER 冪等 — 已 DROP 過再跑一次不會錯）
         "ALTER TABLE crm_projects ALTER COLUMN client_id DROP NOT NULL",
+        # 收款方式回填（owner 2026-09-13 第 3 點）：身上有「內部代開」發票的母帳案標「後期代開」，
+        # 其餘留 NULL（＝源日專案）。只標欄位、不重建分身；只碰 NULL 列，重跑冪等。
+        # 🔴 CRM_COLUMNS 那個迴圈先跑（欄位要先存在），所以這條住在 CRM_INDEXES 這批「冪等 DDL／DML」裡。
+        "UPDATE crm_projects SET billing_mode='passthrough' WHERE billing_mode IS NULL"
+        " AND COALESCE(entity, 'parent') <> 'mine'"
+        " AND id IN (SELECT project_id FROM crm_invoices WHERE category='內部代開' AND project_id IS NOT NULL)",
     ]
 
 # ── 財務 + CRM 的欄位增修（貸款、專案、工時、兩本帳…）—— 最大的一批 ─────────────────────────
@@ -498,4 +504,6 @@ CRM_COLUMNS = [
     ("crm_payment_requests", "payout_id", "VARCHAR(32)"),
     # 人員代稱（owner 2026-09-11）：綽號 → 人，帳務那邊靠它對到帳號
     ("crm_staff", "alias", "TEXT"),
+    # 收款方式（owner 2026-09-13）：源日專案／後期代開／現金收款；NULL＝源日專案
+    ("crm_projects", "billing_mode", "VARCHAR(16)"),
 ]

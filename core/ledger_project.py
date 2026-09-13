@@ -155,6 +155,78 @@ MIRROR_SOURCE = "源日"
 #: ledger_detail 裡記「上次同步時母帳掛給我的成本行合計」的鍵（norm_detail 保留它）。
 MIRROR_TOTAL_KEY = "mirror_total"
 
+# ── 收款方式（owner 2026-09-13，母帳 `crm_projects.billing_mode`）────────────
+# 表單上一個下拉取代「推送到私帳」先問是哪一種的彈窗：
+#   company     源日專案 —— 公司的案（預設；NULL 視同它）。跟後期沒有自動連結，
+#               公司付我一部分再按「推送到私帳」建分身。
+#   passthrough 後期代開 —— 我的後期案、客戶走源日代開發票。儲存即在私帳建對應的案
+#               （案源＝代開發票、收入＝母帳合約額、代辦費自動）；發票預設「內部代開」。
+#   cash        現金收款 —— 源日收現金（owner：「這裡是源日的收款狀態」），**不**碰後期。
+BILLING_MODES = ("company", "passthrough", "cash")
+BILLING_LABELS = {"company": "源日專案", "passthrough": "後期代開", "cash": "現金收款"}
+#: 哪種收款方式會自動要一個私帳分身、分身的案源是什麼（不在表裡＝不自動建）
+BILLING_MIRROR_SOURCE = {"passthrough": "代開發票"}
+
+
+def billing_mode_of(raw) -> str:
+    """欄位值 → 三值之一（NULL／垃圾＝company）。"""
+    v = str(raw or "").strip()
+    return v if v in BILLING_MODES else "company"
+
+
+def _fmt_n(n) -> str:
+    return f"{int(n or 0):,}"
+
+
+def link_note(mode: str, mine, detail, *, stale=None, passthrough_invoices: int = 0) -> dict:
+    """「後期連結」那一行系統備註（母帳專案表單／詳情用；前端只畫，不拼句子）。
+
+    `mine`＝連到的私帳案 `(id, name, contract)`，沒連＝None；`detail`＝私帳案的 ledger_detail
+    （已 norm）；`stale`＝mirror_stale 的三值。回的 `text` 是一整句。
+    """
+    mode = billing_mode_of(mode)
+    out = {"mode": mode, "mode_label": BILLING_LABELS[mode], "linked": mine is not None,
+           "mine_id": "", "mine_name": "", "source": "", "contract": 0, "invoice_fee": 0,
+           "fee_pct": DEFAULT_FEE_PCT, "tax_fee": 0, "buy_invoice": 0, "fee_deducted": True,
+           "stale": None, "mirror_at": "", "passthrough_invoices": int(passthrough_invoices or 0),
+           "text": ""}
+    if mine is None:
+        if mode == "passthrough":
+            out["text"] = "儲存後會自動在私帳建對應的案（案源＝代開發票、代辦費自動算）。"
+        elif mode == "cash":
+            out["text"] = "源日收現金，沒有發票；跟後期沒有自動連結。"
+        else:
+            out["text"] = "公司的案，沒有後期連結。公司付你一部分再按「推送到私帳」。"
+        return out
+    d = detail if isinstance(detail, dict) else {}
+    mid, mname, contract = mine[0], mine[1] or "", int(mine[2] or 0)
+    src = str(d.get("source") or MIRROR_SOURCE)
+    out.update({"mine_id": mid, "mine_name": mname, "source": src, "contract": contract,
+                "invoice_fee": int(d.get("invoice_fee") or 0),
+                "fee_pct": float(d.get("fee_pct") or DEFAULT_FEE_PCT),
+                "tax_fee": int(d.get("tax_fee") or 0), "buy_invoice": int(d.get("buy_invoice") or 0),
+                "fee_deducted": fee_deducted(d), "stale": stale,
+                "mirror_at": str(d.get(MIRROR_AT_KEY) or "")})
+    parts = [f"已連結後期 → {mname}", f"案源 {src}", f"收入 {_fmt_n(contract)}"]
+    if src == "代開發票":
+        pct = out["fee_pct"]
+        pct_s = f"{pct:g}%"
+        parts.append(f"代辦費 {pct_s} ＝ {_fmt_n(out['invoice_fee'])}"
+                     f"（稅金 {_fmt_n(out['tax_fee'])} ＋ 買發票 {_fmt_n(out['buy_invoice'])}）"
+                     + ("・已扣" if out["fee_deducted"] else "・未扣（全額匯入，代辦費另付）"))
+    elif src == "源日":
+        parts.append("不抽代辦費")
+    if stale is True:
+        parts.append("私帳落後（母帳成本行改了）")
+    elif stale is False:
+        parts.append("一致")
+    if out["mirror_at"]:
+        parts.append(f"上次同步 {out['mirror_at']}")
+    if out["passthrough_invoices"]:
+        parts.append(f"內部代開發票 {out['passthrough_invoices']} 張")
+    out["text"] = " ・ ".join(parts)
+    return out
+
 
 def mirror_amount(line) -> int:
     """一行成本要記多少進私帳收入：實際優先、沒填才用預估。
@@ -230,7 +302,31 @@ def mirror_detail(split: dict) -> dict:
 
 
 #: 可以被人「接手」、不再自動覆寫的欄位。加第二欄只要往這裡加一個字串。
-MANUAL_FIELDS = frozenset({"personal_tax"})
+#: `invoice_fee`（owner 2026-09-13「代開費用……但我要改還是可以改」）：代辦費仍照費率
+#: 試算，改過就凍住；稅金／買發票永遠是它的組成（買發票＝代辦費 − 稅金）。
+MANUAL_FIELDS = frozenset({"personal_tax", "invoice_fee"})
+
+#: 「代辦費已扣除」（owner 2026-09-13）：代開的代辦費是**源頭代扣**（代開業者匯款前先扣走）
+#: —— 營收仍是合約額，應收＝營收 − 代辦費。這是預設；取消勾選＝那筆費用沒有先扣、
+#: 客戶（或源日）會把全額匯進來，應收＝營收，代辦費之後自己付。
+#: 🔴 只在 **False** 時落庫（缺鍵＝True），前端一律用 `fee_deducted !== false` 讀。
+FEE_DEDUCTED_KEY = "fee_deducted"
+#: 上次從母帳同步的日期（YYYY-MM-DD；給「後期連結」那行備註講「上次同步」）
+MIRROR_AT_KEY = "mirror_at"
+
+
+def fee_deducted(d) -> bool:
+    """代辦費有沒有在源頭先扣掉（缺鍵＝有）。"""
+    return (d if isinstance(d, dict) else {}).get(FEE_DEDUCTED_KEY) is not False
+
+
+def withheld_total(d: dict) -> int:
+    """源頭代扣合計：個人稅款一律；代辦費只在「已扣除」時算（`fee_deducted`）。"""
+    d = d if isinstance(d, dict) else {}
+    total = int(d.get("personal_tax") or 0)
+    if fee_deducted(d):
+        total += int(d.get("invoice_fee") or 0)
+    return total
 
 
 def manual_fields(d) -> set:
@@ -284,6 +380,12 @@ def norm_detail(raw) -> dict:
             out[MIRROR_TOTAL_KEY] = mt
     except (TypeError, ValueError):
         pass
+    # 「代辦費已扣除」只在取消時落庫（缺鍵＝已扣，見 FEE_DEDUCTED_KEY）
+    if d.get(FEE_DEDUCTED_KEY) is False:
+        out[FEE_DEDUCTED_KEY] = False
+    ma = str(d.get(MIRROR_AT_KEY) or "").strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", ma):
+        out[MIRROR_AT_KEY] = ma
     return out
 
 
@@ -375,31 +477,32 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
     存檔都無條件覆寫，使用者改了也存不進去（改完按儲存，數字自己跳回來）。
     建立新案時沒有這一欄可送 → keep 是空的 → 照樣自動試算。
     """
-    if d.get("source") == "代開發票":
-        c = int(contract or 0)
-        pct = float(d.get("fee_pct") or DEFAULT_FEE_PCT)
-        d["invoice_fee"] = round(c * pct / 100)
+    src = d.get("source")
+    if src not in ("代開發票", "執行業務所得"):
+        return d
+    # 自動值是**試算不是規定**：送來的值 ≠ 試算 → 這格從此由人決定；改回試算值 → 交還自動。
+    # 🔴 旗標要**落庫**，不能只看「這次有沒有送」：只改別欄的那種存檔（例如單改行政雜支）
+    # 不會送這一欄，下一秒就把人調好的數字洗回試算值。
+    field = "invoice_fee" if src == "代開發票" else "personal_tax"
+    c = int(contract or 0)
+    auto = (round(c * float(d.get("fee_pct") or DEFAULT_FEE_PCT) / 100) if src == "代開發票"
+            else withholding(contract))
+    manual = manual_fields(d)
+    if field in keep:
+        manual.discard(field)
+        if int(d.get(field) or 0) != auto:
+            manual.add(field)
+    if field not in manual:
+        d[field] = auto
+    if src == "代開發票":
+        # 稅金與買發票是代辦費的**組成**（買發票＝代辦費 − 稅金），代辦費手改時跟著重算
         d["tax_fee"] = round(c / VAT_DIVISOR * (VAT_PCT / 100))
-        d["buy_invoice"] = d["invoice_fee"] - d["tax_fee"]
-    elif d.get("source") == "執行業務所得":
-        # 個人稅款＝源頭代扣試算（owner 2026-08-26「新增一個執行業務所得的
-        # 項目自動算」）；應收基準同步吃到（expected_cash_in 減 personal_tax）
-        auto = withholding(contract)
-        manual = manual_fields(d)
-        if "personal_tax" in keep:
-            # 送來的值 ≠ 試算 → 這格從此由人決定；改回試算值 → 交還自動。
-            # 🔴 旗標要**落庫**，不能只看「這次有沒有送」：只改別欄的那種存檔
-            # （例如單改行政雜支）不會送稅款，下一秒就把人調好的數字洗回試算值。
-            manual.discard("personal_tax")
-            if int(d.get("personal_tax") or 0) != auto:
-                manual.add("personal_tax")
-        if "personal_tax" not in manual:
-            d["personal_tax"] = auto
-        d.pop("tax_manual", None)      # 一律換成清單形狀，別留兩種真相
-        if manual:
-            d["manual"] = sorted(manual)
-        else:
-            d.pop("manual", None)
+        d["buy_invoice"] = int(d["invoice_fee"] or 0) - d["tax_fee"]
+    d.pop("tax_manual", None)      # 一律換成清單形狀，別留兩種真相
+    if manual:
+        d["manual"] = sorted(manual)
+    else:
+        d.pop("manual", None)
     return d
 
 
@@ -420,7 +523,7 @@ def client_wire(contract: int, d: dict) -> int:
     「我收到的就已經是扣除後的了」—— 帳上記全額收入＋代辦費支出兩列，是為了
     讓帳面看得見全額，實際匯進來的一直是淨額。
     """
-    return int(contract or 0) - sum(int((d or {}).get(k) or 0) for k in WITHHELD_FIELDS)
+    return int(contract or 0) - withheld_total(d)
 
 
 def payout_total(d: dict) -> int:
@@ -505,7 +608,7 @@ def expected_cash_in(contract: int, d: dict) -> int:
     - 代開發票的代辦費（invoice_fee）＝代開業者匯款前先扣走。
     """
     base = int(contract or 0) - int(d.get("personal_tax") or 0)
-    if d.get("source") == "代開發票":
+    if d.get("source") == "代開發票" and fee_deducted(d):
         base -= int(d.get("invoice_fee") or 0)
     return base
 

@@ -581,7 +581,13 @@ function _renderDetail() {
                         <tr id="fpl-fee-row">
                             <td style="color:#bbb;">服務費率 %</td>
                             <td>${money('fpl-feepct', det.fee_pct || _defaultFeePct())}</td></tr>
-                        ${costRows}`}
+                        ${costRows}
+                        <tr id="fpl-feeded-row">
+                            <td colspan="2" style="padding-top:4px;">
+                                <label style="display:flex;gap:6px;align-items:center;color:#bbb;cursor:pointer;font-size:12px;"
+                                       title="勾＝代開業者匯款前先扣走代辦費（應收＝營收−代辦費）；不勾＝代辦費之後自己匯出去，應收＝營收。營收永遠是合約額。">
+                                    <input type="checkbox" id="fpl-fee-deducted"${det.fee_deducted !== false ? ' checked' : ''}>
+                                    代辦費已扣除（應收先扣掉代辦費）</label></td></tr>`}
                     </table>
                     <table class="crm-table" style="width:100%;font-size:12px;margin-top:8px;">
                         ${!_isMine() ? '' : `
@@ -678,6 +684,9 @@ function _renderDetail() {
     // 輸出，那一層已經把舊形狀轉成清單了。在這裡再認一次＝把過期的 schema 知識
     // 帶過語言邊界，而且永遠測不到（走不到那條路）。
     let taxManual = (det.manual || []).includes('personal_tax');
+    // 代辦費同一套（owner 2026-09-13「預設帶出內容，但我可以細調」）：自動值是試算，
+    // 人改過就由後端 `manual` 清單凍住；稅金／買發票仍是代辦費的組成、照算
+    let feeManual = (det.manual || []).includes('invoice_fee');
     const _syncFee = (sourceChanged = false) => {
         const src = document.getElementById('fpl-source')?.value;
         const feeEl = document.getElementById('fpl-c-invoice_fee');
@@ -686,8 +695,10 @@ function _renderDetail() {
         const isAgency = src === '代開發票';
         const isPro = src === '執行業務所得';
         row.style.display = isAgency ? '' : 'none';
-        feeEl.disabled = isAgency;
-        feeEl.title = isAgency ? '案源＝代開發票：代辦費＝營收×費率，自動計算' : '';
+        const dedRow = document.getElementById('fpl-feeded-row');
+        if (dedRow) dedRow.style.display = isAgency ? '' : 'none';
+        feeEl.disabled = false;
+        feeEl.title = isAgency ? '案源＝代開發票：代辦費預設＝營收×費率；改過就以你填的為準（營收變動不再自動覆寫）' : '';
         const taxEl = document.getElementById('fpl-c-tax_fee');
         const buyEl = document.getElementById('fpl-c-buy_invoice');
         [taxEl, buyEl].forEach((el) => { if (el) el.disabled = isAgency; });
@@ -698,9 +709,11 @@ function _renderDetail() {
             // 寫死 8 與 5 的話，費率一改預覽就跟存進去的值不一致。
             const vat = Number((_detail && _detail.agency || {}).vat_pct) || 0;
             const pct = Number(document.getElementById('fpl-feepct')?.value) || _defaultFeePct();
-            const fee = Math.round(c * pct / 100);
+            const auto = Math.round(c * pct / 100);
+            // 剛換案源、或這格還沒被人決定過 → 填試算值；人調過的留住
+            if (sourceChanged || !feeManual) feeEl.value = auto || '';
+            const fee = Number(feeEl.value) || 0;
             const tax = vat ? Math.round(c / (1 + vat / 100) * (vat / 100)) : 0;
-            feeEl.value = fee || '';
             if (taxEl) taxEl.value = tax || '';
             if (buyEl) buyEl.value = (fee - tax) || '';
             _liveSum();
@@ -729,6 +742,10 @@ function _renderDetail() {
     // 使用者一動這格就是「由人決定」（存檔後由後端回的 `manual` 清單接手）
     document.getElementById('fpl-c-personal_tax')
         ?.addEventListener('input', () => { taxManual = true; });
+    document.getElementById('fpl-c-invoice_fee')
+        ?.addEventListener('input', () => { feeManual = true; _syncFee(); });
+    document.getElementById('fpl-fee-deducted')
+        ?.addEventListener('change', () => { _dirty = true; });
     // 🔴 fpl-source 只掛**一個** listener：它同時在那個 forEach 裡的話，換一次
     // 案源會跑兩三次 _syncFee，而 input 先於 change 觸發（sourceChanged=false）
     // —— 旗標的意義就變成看 listener 的註冊順序。
@@ -1265,6 +1282,9 @@ _fp.save = async (btn) => {
     // 空白＝用後端的預設費率（正本 DEFAULT_FEE_PCT），不在這裡寫死一個 8
     if (fEl && sEl && sEl.value === '代開發票') {
         body.fee_pct = Number(fEl.value) || _defaultFeePct() || undefined;
+        // 代辦費已扣除（後端只在 false 時落庫；沒鍵＝true）
+        const dEl2 = document.getElementById('fpl-fee-deducted');
+        if (dEl2) body.fee_deducted = !!dEl2.checked;
     }
     btn.disabled = true;
     btn.textContent = '儲存中…';

@@ -93,6 +93,25 @@ async def _has_passthrough_invoice(session, project_id: str) -> bool:
         .limit(1))).first())
 
 
+async def _is_passthrough(session, p) -> bool:
+    """這一案走不走代開：收款方式＝後期代開（owner 2026-09-13 的欄位），或身上已有內部代開發票。"""
+    from core.ledger_project import billing_mode_of
+    return billing_mode_of(p.billing_mode) == "passthrough" or await _has_passthrough_invoice(session, p.id)
+
+
+async def _passthrough_invoice_count(session, project_id: str) -> int:
+    return int((await session.execute(
+        select(_sa_func.count()).select_from(CrmInvoice)
+        .where(CrmInvoice.project_id == project_id,
+               CrmInvoice.category == MINE_LINK_INVOICE_CATEGORY))).scalar() or 0)
+
+
+def _today_tw() -> str:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Asia/Taipei")).date().isoformat()
+
+
 @router.get("/projects/{project_id}/ledger-move-check")
 async def check_project_ledger_move(project_id: str, request: Request):
     """能不能搬、搬過去會變怎樣 —— 按鈕按下去之前先問這支。
@@ -112,7 +131,7 @@ async def check_project_ledger_move(project_id: str, request: Request):
         blockers = await _ledger_blockers(session, project_id)
         cur, name = p.entity or "parent", p.name
         # 案源只在「搬到私帳」那個方向有意義；搬回公司帳不必多查一次發票
-        passthrough = cur != "mine" and await _has_passthrough_invoice(session, project_id)
+        passthrough = cur != "mine" and await _is_passthrough(session, p)
         cur_source = norm_detail(p.ledger_detail).get("source") or ""
     return {"entity": cur, "target": "parent" if cur == "mine" else "mine",
             "can_move": not blockers,
@@ -193,8 +212,7 @@ async def move_project_ledger(project_id: str, req: ProjectLedgerMovePayload,
         p.crm_pushed = pushed
         if target == "mine":
             d = norm_detail(p.ledger_detail)
-            d["source"] = source or ("代開發票" if await _has_passthrough_invoice(session, project_id)
-                                    else "源日")
+            d["source"] = source or ("代開發票" if await _is_passthrough(session, p) else "源日")
             d = norm_detail(apply_source_fee(int(p.contract_amount or 0), d))
             p.ledger_detail = d
             resync_receivable(p, d)
@@ -325,6 +343,12 @@ async def check_project_mirror(project_id: str, request: Request):
     async with factory() as session:
         p, mir, linked = await _mirror_preview(session, project_id, sid)
         warning = _mirror_blocked_reason(mir["total"])
+        # 代開的收入是母帳合約額不是成本行，0 本來就是常態 —— 這句「沒有掛給你的成本行」對它是噪音
+        # （crmFetch 會把任何 warning 直接 toast，連結後每次重畫詳情都會跳一次）
+        from core.ledger_project import billing_mode_of
+        if billing_mode_of(p.billing_mode) == "passthrough" or (
+                linked is not None and norm_detail(linked.ledger_detail).get("source") == "代開發票"):
+            warning = ""
         client = await session.get(Client, p.client_id) if p.client_id else None
         # 可連結的既有私帳案。🔴 **已經被連結過的照樣列出來**（owner 2026-09-01
         # 「可以多筆專案連結到一筆私帳」）—— 原本排除它們，於是第二個 CRM 案
@@ -425,11 +449,14 @@ def _new_mirror_row(p, mir: dict, note: str, source: str = ""):
     from core.ledger_project import apply_source_fee, mirror_detail, norm_detail
     from routers.api_finance_projects import new_ledger_project
 
+    from core.ledger_project import MIRROR_AT_KEY
+
     contract = _mirror_contract(p, mir, source)
     d = mirror_detail(mir["split"])
+    d[MIRROR_AT_KEY] = _today_tw()
     if source:
         d["source"] = source
-        d = norm_detail(apply_source_fee(contract, d))
+    d = norm_detail(apply_source_fee(contract, d))
     return new_ledger_project(
         project_id=uuid.uuid4().hex, name=p.name, client_id=p.client_id,
         entity="mine", contract=contract, detail=d,
@@ -447,8 +474,9 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
     """
 
     from core.ledger import require_entity
-    from core.ledger_project import (MIRROR_SOURCE, MIRROR_TOTAL_KEY, SELECTABLE_SOURCES,
-                                     apply_source_fee, merge_split, norm_detail)
+    from core.ledger_project import (BILLING_MIRROR_SOURCE, MIRROR_AT_KEY, MIRROR_SOURCE, MIRROR_TOTAL_KEY,
+                                     SELECTABLE_SOURCES, apply_source_fee, billing_mode_of, merge_split,
+                                     norm_detail)
     from routers.api_finance_projects import resync_receivable
 
     require_entity(request, "mine", level="full")
@@ -464,6 +492,8 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
     factory = await _get_factory()
     async with factory() as session:
         p, mir, linked = await _mirror_preview(session, project_id, sid)
+        # 沒指定案源時看母帳的收款方式（後期代開 → 代開發票；其他不表態，交給下面的鏈）
+        source = source or BILLING_MIRROR_SOURCE.get(billing_mode_of(p.billing_mode), "")
         target_id = (req.target_id or "").strip()
         if linked is not None:
             # 🔴 已經連結過的案子，空的 target 要解成**原本那一案**，不是落到
@@ -524,6 +554,7 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 keep["split"] = merged
                 keep["source"] = source or keep.get("source") or MIRROR_SOURCE
                 keep[MIRROR_TOTAL_KEY] = mir["total"]     # 「私帳落後了沒」比的就是它
+                keep[MIRROR_AT_KEY] = _today_tw()
                 if keep["source"] == "代開發票":
                     # 代開的收入是那張發票的面額（母帳合約額），不是成本行；
                     # 重新同步只更新工項，金額不動（沒填過才用母帳合約額補）
@@ -555,6 +586,100 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
     return {"status": "ok", "id": new_id,
             "amount": mir["total"] if mode == "add" else int(t.contract_amount or 0),
             "mode": mode, "imported": imported, "staff_bound": bool(sid)}
+
+
+# ── 收款方式（owner 2026-09-13）：欄位變了，私帳分身跟著變 ─────────────────────
+#
+# 表單上的下拉取代了「推送到私帳」先問是哪一種的彈窗（core.ledger_project.BILLING_MODES）。
+#   → passthrough：沒分身就建（案源＝代開發票、收入＝母帳合約額、代辦費自動）；有分身就把
+#                  案源改成代開發票＋重跑費用（金額與工項不動）。
+#   → company／cash（從 passthrough 換回）：分身**留著**，案源改回源日、代辦費三欄歸零。
+#                  cash 是「源日收現金」（owner：這裡是源日的收款狀態），不碰後期。
+# 🔴 只有看得到私帳（mine full）的請求會動私帳那一列 —— 別人存這個欄位只存欄位，
+#    分身等帳本主人下次存一次（回 `skipped`，回應把它講出來）。
+
+
+async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
+    """母帳案 `billing_mode` 從 `old_mode` 變成現在的值 → 私帳分身的對應動作。不 commit。
+    回 `{"action": created|switched|reverted|none|skipped, "created": bool}`。"""
+    from core.ledger import require_entity
+    from core.ledger_project import (FEE_DEDUCTED_KEY, BILLING_MIRROR_SOURCE, MIRROR_SOURCE,
+                                     apply_source_fee, billing_mode_of, manual_fields, norm_detail)
+    from routers.api_finance_projects import resync_receivable
+
+    new = billing_mode_of(p.billing_mode)
+    old = billing_mode_of(old_mode)
+    want_source = BILLING_MIRROR_SOURCE.get(new, "")
+    # 值沒變：只有「後期代開但分身還沒建」（同事先存了欄位、帳本主人再存一次）要補建，其他不動
+    if (p.entity or "parent") == "mine" or (new == old and not want_source):
+        return {"action": "none", "created": False}
+    try:
+        require_entity(request, "mine", level="full")
+    except HTTPException:
+        return {"action": "skipped", "created": False}
+    t = await resolve_mine_link(session, p)
+    if want_source:
+        if new == old and t is not None:
+            return {"action": "none", "created": False}
+        if t is None:
+            sid = await _me_staff_id_or_blank(request)
+            _p, mir, _linked = await _mirror_preview(session, p.id, sid)
+            t = _new_mirror_row(p, mir, f"[私帳連結] 來自母公司專案：{p.name}（收款方式：後期代開）",
+                                want_source)
+            session.add(t)
+            await _write_link(session, p, t)
+            return {"action": "created", "created": True}
+        keep = norm_detail(t.ledger_detail)
+        keep["source"] = want_source
+        if not int(t.contract_amount or 0):
+            t.contract_amount = int(p.contract_amount or 0)
+        keep = norm_detail(apply_source_fee(int(t.contract_amount or 0), keep))
+        t.ledger_detail = keep
+        resync_receivable(t, keep)
+        t.updated_at = _now()
+        return {"action": "switched", "created": False}
+    # 換回源日專案／現金收款：分身留著，只把代開那套拿掉
+    if t is not None and BILLING_MIRROR_SOURCE.get(old) and \
+            norm_detail(t.ledger_detail).get("source") == BILLING_MIRROR_SOURCE[old]:
+        keep = norm_detail(t.ledger_detail)
+        keep["source"] = MIRROR_SOURCE
+        for k in ("invoice_fee", "tax_fee", "buy_invoice"):
+            keep[k] = 0
+        manual = manual_fields(keep) - {"invoice_fee"}
+        keep["manual"] = sorted(manual)
+        keep.pop(FEE_DEDUCTED_KEY, None)
+        keep = norm_detail(keep)
+        t.ledger_detail = keep
+        resync_receivable(t, keep)
+        t.updated_at = _now()
+        return {"action": "reverted", "created": False}
+    return {"action": "none", "created": False}
+
+
+async def link_note_for(session, p, request) -> dict:
+    """「後期連結」那一行（core.ledger_project.link_note 的 I/O 半邊）。
+    看不到私帳的請求：只講收款方式，不露私帳案（同 `mirrored` 那條可見性線）。"""
+    from core.ledger import hide_mine_projects
+    from core.ledger_project import link_note, mirror_stale, norm_detail
+    from ._shared import mine_parent_names
+
+    mode = p.billing_mode
+    if (p.entity or "parent") == "mine" or hide_mine_projects(request):
+        return link_note(mode, None, None)
+    t = await resolve_mine_link(session, p)
+    if t is None:
+        return link_note(mode, None, None, passthrough_invoices=await _passthrough_invoice_count(session, p.id))
+    detail = norm_detail(t.ledger_detail)
+    stale = None
+    sid = await _me_staff_id_or_blank(request)
+    if sid:
+        # 同 mirror-check：一個私帳案承接多個母帳案時合計不屬於任何一案 → 判不出來
+        shared = len((await mine_parent_names(session, [t.id])).get(t.id) or []) > 1
+        if not shared:
+            _p, mir, _l = await _mirror_preview(session, p.id, sid)
+            stale, _delta = mirror_stale(detail, mir["total"])
+    return link_note(mode, (t.id, t.name or "", t.contract_amount), detail, stale=stale,
+                     passthrough_invoices=await _passthrough_invoice_count(session, p.id))
 
 
 # ── 母私帳專案對應表（owner 2026-09-05）──────────────────────────────────

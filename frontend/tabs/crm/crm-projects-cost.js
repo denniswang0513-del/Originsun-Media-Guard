@@ -39,7 +39,7 @@ const AUTOSAVE_DEBOUNCE_MS = 1000;
 const STATUS_REFRESH_MS = 10000;
 // Fields that appear on the project-list cards (left panel). Edits to other
 // fields don't need a full list refetch.
-const _PROJ_LIST_FIELDS = ['name', 'client_id', 'status', 'am_username', 'start_date'];
+const _PROJ_LIST_FIELDS = ['name', 'client_id', 'status', 'am_username', 'start_date', 'billing_mode'];
 let _autosaveTimer = null;
 let _autosaveState = 'idle';   // 'idle' | 'pending' | 'saving' | 'saved' | 'error'
 let _autosaveLastTs = 0;
@@ -972,6 +972,10 @@ async function _autoSaveCostExpenses() {
         // projects on every keystroke burst.
         if (projHasDirty && _PROJ_LIST_FIELDS.some(f => f in savingProj)) {
             callbacks.loadProjects?.();
+        }
+        // 收款方式改了：分身是後端在這個 PUT 裡建／改的，「後期連結」那一行要重問才講得出實話
+        if (projHasDirty && 'billing_mode' in savingProj && projectId === state.selectedId) {
+            window._projRefreshLinkNote?.(projectId);
         }
     } catch (e) {
         // Restore so user can retry. New edits added during the failed PUT

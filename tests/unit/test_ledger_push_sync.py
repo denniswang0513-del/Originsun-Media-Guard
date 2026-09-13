@@ -216,7 +216,8 @@ def test_move_to_mine_fills_in_what_a_private_case_needs():
     mv = code_only(func_body(_PROJ, "async def move_project_ledger("))
     seg = mv.split('if target == "mine":')[1].split("else:")[0]
     assert "apply_source_fee(" in seg and "resync_receivable(p, d)" in seg
-    assert '"代開發票" if await _has_passthrough_invoice(' in seg
+    # 2026-09-13 起「走不走代開」＝收款方式＝後期代開 或 身上有內部代開發票（_is_passthrough 一份）
+    assert '"代開發票" if await _is_passthrough(' in seg
     # 已經有分身的案整案搬過去會變成兩個案 —— 先擋
     assert "await resolve_mine_link(session, p) is not None" in mv
     # 搬回母帳：佔位金額旗標清掉

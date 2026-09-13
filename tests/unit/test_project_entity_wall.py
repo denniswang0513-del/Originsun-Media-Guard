@@ -219,8 +219,9 @@ def test_editable_cost_fields_match_the_payload_schema():
     from core.schemas import LedgerDetailPayload
     # display_name＝顯示名覆寫（owner 2026-09-05），跟 crm_pushed 一樣是
     # 「PUT 收下但不進 ledger_detail」的那一類，不是費用欄
+    # fee_deducted＝「代辦費已扣除」（owner 2026-09-13）：布林 meta，缺＝True、只在 False 落庫
     non_cost = {"split", "contract_amount", "close_date", "crm_pushed", "source",
-                "fee_pct", "display_name"}
+                "fee_pct", "display_name", "fee_deducted"}
     assert set(LedgerDetailPayload.model_fields) - non_cost == set(COST_KEYS)
 
 

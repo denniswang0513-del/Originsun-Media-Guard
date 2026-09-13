@@ -318,7 +318,7 @@ export function renderList() {
         <div class="crm-row${p.id === state.selectedId ? ' selected' : ''}" data-id="${p.id}" onclick="window._projSelect('${p.id}')">
             <div class="crm-row-name">${_esc(p.name)}${p.mirrored
                 ? ` <span style="font-size:10px;color:#86efac;border:1px solid #2f5d43;border-radius:3px;padding:0 4px;vertical-align:1px;" title="這一案在私帳有對應的案（「推送到私帳」）${p.mine_link_name ? '：' + _esc(p.mine_link_name) : ''}">已連結私帳${p.mine_link_name && p.mine_link_name !== p.name ? ' → ' + _esc(p.mine_link_name) : ''}</span>`
-                : ''}${p.entity !== 'mine' ? ''
+                : ''}${p.entity !== 'mine' ? billingTagHtml(p)
                 : p.crm_pushed
                     ? ' <span style="font-size:10px;color:#7dd3fc;border:1px solid #2d5a78;border-radius:3px;padding:0 4px;vertical-align:1px;" title="從 owner 私帳推送進管線的後期案；錢流仍在私帳">後期專案</span>'
                     : ' <span style="font-size:10px;color:#c4b5fd;border:1px solid #4c3d78;border-radius:3px;padding:0 4px;vertical-align:1px;" title="錢流記在 owner 私帳（我的帳）；專案本身共用">私帳</span>'}</div>
@@ -425,8 +425,33 @@ export function closeDetail() {
 const _FIELDS = ['name', 'client_id', 'status', 'project_type', 'start_date', 'shoot_date',
     'completion_date', 'folder_path', 'description', 'am_username', 'notes',
     'backup_local_root', 'backup_nas_root', 'backup_proxy_root',
-    'contract_amount', 'tax_rate', 'profit_target_pct', 'misc_budget_pct',
+    'contract_amount', 'tax_rate', 'profit_target_pct', 'misc_budget_pct', 'billing_mode',
     'payment_status', 'amount_receivable', 'amount_received', 'transfer_fee'];
+
+// 收款方式（crm_projects.billing_mode；後端永不回 null）：源日自己怎麼收這一案的錢
+export const BILLING_LABELS = { company: '源日專案', passthrough: '後期代開', cash: '現金收款' };
+export const billingLabel = (p) => BILLING_LABELS[(p && p.billing_mode) || 'company'] || '源日專案';
+/** 列表／詳情的收款方式小標：只畫後期代開／現金收款（源日專案是預設，每列都畫等於沒畫）。 */
+export function billingTagHtml(p) {
+    const m = (p && p.billing_mode) || 'company';
+    if (m === 'company') return '';
+    const color = m === 'passthrough' ? 'color:#f2c064;border-color:#8a5d10;' : 'color:#7dd3fc;border-color:#2d5a78;';
+    const title = m === 'passthrough' ? '後期代開：你的後期案、客戶走源日開發票（私帳分身案源＝代開發票）' : '現金收款：源日收現金，沒有發票';
+    return ` <span style="font-size:10px;border:1px solid;border-radius:3px;padding:0 4px;vertical-align:1px;${color}" title="${title}">${BILLING_LABELS[m]}</span>`;
+}
+/** 「後期連結」那一行（表單與詳情共用）：只畫後端 link_note 的 text ＋ 連結 ＋ 落後標籤，不自己拼句子。 */
+export function linkNoteHtml(note) {
+    if (!note || !note.text) return '<span style="color:#666;">—</span>';
+    let html = _esc(note.text);
+    if (note.linked && note.mine_id && note.mine_name) {
+        const name = _esc(note.mine_name);
+        html = html.replace(name, `<a href="/my-ledger.html?project=${encodeURIComponent(note.mine_id)}" target="_blank" rel="noopener" style="color:#8ab4f8;">${name} ↗</a>`);
+    }
+    if (note.linked && note.stale === true) {
+        html += ' <span style="font-size:10px;color:#fca5a5;border:1px solid #7a2d2d;border-radius:3px;padding:0 4px;" title="母帳成本行改了之後還沒重新同步到私帳">私帳落後</span>';
+    }
+    return html;
+}
 
 export async function openModal(project = null) {
     state.editingId = project ? project.id : null;
@@ -455,12 +480,23 @@ export async function openModal(project = null) {
         } else if (['contract_amount', 'amount_receivable', 'amount_received', 'transfer_fee'].includes(f)) {
             el.value = project?.[f] ?? '';
         } else {
-            const defaults = { tax_rate: '5', profit_target_pct: '20', misc_budget_pct: '5', payment_status: '未到帳' };
+            const defaults = { tax_rate: '5', profit_target_pct: '20', misc_budget_pct: '5', payment_status: '未到帳', billing_mode: 'company' };
             el.value = project ? (project[f] ?? '') : (defaults[f] ?? '');
         }
     }
 
     document.getElementById('proj-f-name').focus();
+
+    // 後期連結（唯讀系統備註）：清單物件沒有 link_note，編既有案時打一次單筆補上（先開視窗再補）
+    const noteEl = document.getElementById('proj-f-link-note');
+    if (noteEl) {
+        noteEl.innerHTML = project ? '<span style="color:#666;">載入中…</span>' : '儲存後依收款方式決定';
+        if (project) {
+            _fetch(`/projects/${encodeURIComponent(project.id)}`)
+                .then((r) => { if (state.editingId === project.id) noteEl.innerHTML = linkNoteHtml(r && r.link_note); })
+                .catch(() => { noteEl.innerHTML = '<span style="color:#666;">—</span>'; });
+        }
+    }
 }
 
 export async function saveProject() {
@@ -596,6 +632,8 @@ window._projPushMine = async function (id, linked) {
     if (linked) { return window._projMirrorMine(id); }
     const p = state.projects.find(x => x.id === id);
     const name = p ? p.name : '';
+    // 收款方式已經回答了「是哪一種」：後期代開 → 直接建分身（案源＝代開發票），不再問
+    if (p && p.billing_mode === 'passthrough') { return window._projMirrorMine(id, { source: '代開發票' }); }
     const opt = (v, title, desc, checked) => `
         <label style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1px solid #333;border-radius:6px;cursor:pointer;">
             <input type="radio" name="ppm-kind" value="${v}" ${checked ? 'checked' : ''} style="margin-top:3px;">

@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v2.5.10（2026-09-12）<!-- publish_update.py 自動維護，勿手改 -->
+> **版本**: v2.5.11（2026-09-13）<!-- publish_update.py 自動維護，勿手改 -->
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe main.py`
@@ -1305,6 +1305,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | `routers/crm/projects.py` 的推送／換帳本段（`_write_link`→`_sync_pair`、`mirror-check`／`mirror-to-mine`／`mine-create`、`ledger-move-check`／`move-ledger`） | 「推送」＝在對面建分身並連結（錢不搬），四條連結路都經過 `_write_link` 所以同步只掛那一處；母帳 `update_project` 改識別欄同一交易寫進私帳案；換帳本＝記錯帳本那條路（放寬給內部代開發票與它自動生的請款單；搬到私帳要補案源＋`resync_receivable`） | 沒有掛給我的成本行**不擋**（warning 不是 reason，`can_mirror` 永遠 True）；`_new_mirror_row` 是建分身那一列的唯一寫法；已有分身的案整案換帳本 409 |
 | `frontend/tabs/crm/crm-projects-{detail,core}.js` 的「推送到私帳」三態 ＋ `frontend/tabs/finance/subviews/projects.js` 的「推送到母帳」 | 母帳側一顆入口：未連結→彈窗三選一（公司付我一部分＝分身／走代開＝「公司也留一份」分身案源代開收入＝母帳合約額 或 整案換帳本／記錯帳本＝換帳本問案源）；已連結→「已連結私帳 → 案名 ↗」＋「重新同步」（`_projMirrorStaleHint` 問後端標落後）。私帳側：未連結→「推送到母帳」三選一（建立／連既有／搬回公司帳）；已連結→「母帳：案名 ↗」＋結案日鎖住標「母帳」 | 落後判定只信後端 `stale`（前端不比 Σsplit）；跳私帳一律開 `/my-ledger.html?project=`（SPA 財務分頁釘死母帳）、跳母帳開 `/?project=…#tab_crm_projects`（獨立頁沒有 switchTab、sessionStorage 跨分頁帶不過去） |
 | [`routers/api_ledger_mobile.py`](routers/api_ledger_mobile.py) ＋ `frontend/m/ledger.html`（士源帳本＝私帳手機版，2026-09-13） | 手機 BFF 兩支（`/api/v1/finance/m/options` 字彙包、`/home?period=` 總覽一趟）＋六分頁（收支／專案／應收／家用／總覽／資產）；規劃 `docs/MY_LEDGER_MOBILE_PLAN.md` | 守衛一律 `require_entity(mine, full)`（finance_mine 指名制、Lv3 不 bypass）；**收支寫入只走 `/cash-entries`**（私帳已收是增量制）、手機上沒有「標已收」；專案費用欄送的是**手填值**（CRM 撐的那半後端會加回去）；office-api 也掛（`main_office._ROUTER_MODULES` 多了 api_finance／api_finance_projects／api_finance_assets）—— 加東西前跑 `test_office_surface`；`core/office_settings.EXPORT_SUBKEYS["my_ledger"]` 送匯率給 NAS 算 USD 持股；手機殼共用 `m/m.css`（crm.html 的 inline CSS 抽出來的） |
+| `crm_projects.billing_mode`＝收款方式（`core.ledger_project.BILLING_*`／`link_note`／`fee_deducted`；`routers/crm/project_links.apply_billing_mode`／`link_note_for`） | 母帳表單一個下拉（源日專案／後期代開／現金收款）取代「推送到私帳」先問是哪一種的彈窗：後期代開＝儲存即建代開分身、換值只改分身案源＋代辦費、換回不刪分身；「後期連結」是後端 `link_note` 產的一整句唯讀備註（前端只畫 `text`）；私帳分身的代辦費可手改（`invoice_fee` 進 `MANUAL_FIELDS`）並可標「已扣除」（缺鍵＝True、只在 False 落庫，前端一律 `!== false` 讀） | 現金收款＝**源日**收現金（owner 2026-09-13「這裡是源日的收款狀態」），不碰後期；`billing_mode` 不在 `LINK_SYNC_FIELDS`；只有 mine full 的請求動私帳那一列，別人存了回 `skipped`＋warning，帳本主人再存**同一個值**會補建（`apply_billing_mode` 值沒變也要呼叫）；回填只標欄位不建分身（`CRM_INDEXES` 那條 UPDATE）；規劃 `docs/LEDGER_UNIFY_PLAN.md` §8.9 |
 | `frontend/tabs/crm/crm-payables.js` 的出納段 | 應付面板的複製（每列左側一顆「複製」、純數字不帶標點）、本月匯款清單（可列印）、匯款通知彈窗（全選＋複製連結） | 複製一律走 `js/shared/utils.copyText`（內網是 http＝非安全來源，`navigator.clipboard` **不存在**）；`_buildMonthGroups` 是「月 × 收款人」粒度，跟後端 `group_payables` 的「收款人」粒度**不同**，別以為可以直接用後端那份 |
 
 
@@ -1456,6 +1457,12 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **士源帳本（`/m/ledger.html`）的三條線**（2026-09-13 /polish）：① 「未收」一律讀 `to_collect`，不是 `receivable`——後者是營收−已收，代開／執行業務所得的源頭代扣永遠不會進帳，收齊的案會剩一個代辦費當「未收」（應收分頁會把它列成沒收齊、「收到錢」預填錯金額）。② 編輯抽屜的 picker／select 畫不出原值（節點停用、掛頂層、專案不在私帳清單、帳戶停用）時**不送那個鍵**——送空字串＝清掉分類三欄／解掉專案（私帳已收跟著減）／帳戶洗成不指定；`mountPicker.set()` 找不到就回空，看起來像使用者清的。③ BFF 的「今天」以台北算（`_today_tw`）：這支跑在 NAS 容器（UTC），`date.today()` 在每月 1 日 00:00–08:00 會把「本月」整段變成上個月。
 - **手機頁的字彙（`/options`）到手才掛路由**（`ledger.js`）：`boot()` 一結束殼就可以點，字彙還在飛時搶點分頁會建出空下拉，而宿主已標 `ready` 永不重建。`ready` 也要 render 成功才標（失敗的宿主被換成 errBox，下次走 `first=false` 會去找不存在的 `#nc-list`）。
 - **Windows 上 node 對 pipe 吐的是主控台碼頁**：用 node 跑 JS 純函式的測試，輸出只准 ASCII（中文會變亂碼、`stdout` 甚至是 None）；要比中文就在 JS 那側比完只印布林。
+- **「代辦費已扣除」是應收的旗標，不是營收的**（owner 2026-09-13 第 1 點「應收不再減一次，但是營收是合約金額，只是應收先扣掉了」）：
+  `fee_deducted` 只影響 `withheld_total` → `client_wire`／`expected_cash_in`／`to_collect`；`compute` 的實收永遠扣代辦費（那是成本）。
+  第一版模擬圖把它寫成「營收填的是淨額」，owner 當場糾正 —— 別再把它做成「營收要不要減」。缺鍵＝True（只在 False 落庫），前端一律 `det.fee_deducted !== false` 讀；
+  `payout_total` 仍把稅金＋買發票算成「要匯出去的」（先扣的代辦費其實不用再匯），這條**沒動**，記著。
+- **`mirror-check` 的 warning 會被 `crmFetch` 直接 toast**（`crm-utils.js:79`）：任何回 `warning` 的 GET 每打一次就跳一次。連結後的詳情每次重畫都問 mirror-check（`_projMirrorStaleHint`），
+  所以「沒有掛給你的成本行」那句對代開的案（收入＝母帳合約額，成本行 0 是常態）要在後端清成空字串，不是在前端擋。
 - **`crm_projects` 的「年份」有兩份定義，不要以為它們一樣**：`project_picker` 走
   start_date → shoot_date → **created_at**；`routers/crm/petty.py` 的 `_project_year` 刻意**不退到 created_at**
   （docstring 寫著生產庫 217 個舊案都是同一次匯入建立的，退到建立日等於幫它們全部標上假年份）。

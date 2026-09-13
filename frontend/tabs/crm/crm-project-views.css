@@ -233,6 +233,17 @@
 .pi-contract-line b { font-weight: 600; }
 .pi-dot { width: 3px; height: 3px; border-radius: 50%; background: #4b5563; flex-shrink: 0; }
 
+/* 收款方式底下的「後期連結」唯讀系統備註（表單）＋ 詳情頁那一行 */
+.crm-link-note {
+    min-height: 34px; height: auto; border-style: dashed; color: #cfcfcf; cursor: default;
+    font-size: 12px; line-height: 1.6; white-space: normal;
+}
+.pi-link-note {
+    font-size: 12px; color: #9ca3af; padding: 6px 12px; line-height: 1.6;
+    background: #1b1b1b; border: 1px dashed #2e2e2e; border-radius: 8px;
+}
+.pi-link-note .k { color: #6b7280; margin-right: 4px; }
+
 /* Budget meta (progress label + ratios) */
 .pi-budget-meta {
     font-size: 11px; color: #6b7280; text-align: right; margin-top: -4px;

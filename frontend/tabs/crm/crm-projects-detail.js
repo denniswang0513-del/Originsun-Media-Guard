@@ -6,7 +6,7 @@
  */
 
 import { state, callbacks, STATUS_ORDER, PRESALE_STATUSES, CLOSED_STATUSES } from './crm-projects-state.js';
-import { _badge, _avatar, getProjectTypes } from './crm-projects-core.js';
+import { _badge, _avatar, getProjectTypes, billingLabel, linkNoteHtml } from './crm-projects-core.js';
 import { calcDashboard, remainColor, profitColor, barColor } from './crm-projects-calc.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum, pickFolderPath, searchableSelect } from './crm-utils.js';
 import { authFetch } from '../../js/shared/utils.js';   // 里程碑端點在 /api/v1/milestones，不在 CRM 前綴下
@@ -52,6 +52,10 @@ function _buildEditFields() {
         {name:'tax_rate', label:'稅率(%)', type:'number'},
         {name:'profit_target_pct', label:'目標毛利率(%)', type:'number'},
         {name:'misc_budget_pct', label:'雜支比例(%)', type:'number'},
+        // 收款方式（owner 2026-09-13）：改它＝切換代開／專案（後端在 PUT 裡建／改私帳分身）
+        {name:'billing_mode', label:'收款方式', type:'select', options:[
+            {value:'company',label:'源日專案'},{value:'passthrough',label:'後期代開'},{value:'cash',label:'現金收款'},
+        ]},
         {name:'payment_status', label:'帳務狀況', type:'select', options:[
             {value:'未到帳',label:'未到帳'},{value:'部分到帳',label:'部分到帳'},{value:'全額到帳',label:'全額到帳'},
         ]},
@@ -81,6 +85,7 @@ const FIELDS_REQUIRING_FULL_RENDER = new Set([
     'profit_target_pct',
     'misc_budget_pct',
     'tax_rate',
+    'billing_mode',     // 收款方式標籤 + 後期連結那一行
 ]);
 
 // Defer renderDetail() after a commit so clicks on sibling buttons fire first.
@@ -239,6 +244,34 @@ window._projEdit = function(cell) {
     }
 };
 
+/** 「後期連結」那一行：清單物件沒有 link_note，打一次單筆（GET /projects/{id}）補上。
+ *  只給看得到私帳的人（finance_mine）；母帳案才有；換到別案或抓失敗就整行收起。
+ *  存檔（inline autosave／表單）之後也會被叫一次 —— 改了收款方式，分身是後端在 PUT 裡建的，
+ *  畫面上那一行要等 PUT 回來才講得出實話。 */
+window._projRefreshLinkNote = async function (projectId) {
+    const el = document.getElementById('pi-link-note');
+    if (!el) return;
+    const p = state.projects.find(x => x.id === projectId);
+    const canSee = (window._modules || []).includes('finance_mine');
+    if (!p || !canSee || _isMineProject(p)) { el.hidden = true; return; }
+    try {
+        const r = await _fetch('/projects/' + encodeURIComponent(projectId));
+        if (state.selectedId !== projectId) return;       // 已經換到別案
+        const note = r && r.link_note;
+        if (!note || !note.text) { el.hidden = true; return; }
+        el.innerHTML = `<span class="k">後期連結</span>${linkNoteHtml(note)}`;
+        el.hidden = false;
+        // 單筆回的連結狀態比清單新（PUT 改收款方式後分身可能剛建好）：同步回清單物件，動作列才會變成「已連結私帳」
+        if (typeof r.mirrored === 'boolean' && (r.mirrored !== p.mirrored || r.mine_link_name !== p.mine_link_name || r.billing_mode !== p.billing_mode)) {
+            Object.assign(p, { mirrored: r.mirrored, mine_link_id: r.mine_link_id, mine_link_name: r.mine_link_name, billing_mode: r.billing_mode });
+            // （變數不叫 actions：test_cash_two_notes 拿「const actions = …proj-bar-actions」當動作列的切點）
+            const bar = document.getElementById('proj-bar-actions');
+            if (bar) delete bar.dataset.staleFor;
+            _scheduleRender(p);
+        }
+    } catch (_) { el.hidden = true; }
+};
+
 /** 開「我的帳」（/my-ledger.html）的執行專案那一案。
  *  🔴 不能走 SPA 的財務分頁：那一頁釘死母帳（fin-utils.finEntity 預設 'parent'、
  *  v2 沒有帳本切換器），私帳案在那邊只會得到「這個專案不屬於目前的帳本」。
@@ -392,10 +425,15 @@ function renderDetail(project) {
           <span class="pi-dot"></span>
           <span>匯費 ${_editCell('transfer_fee', project.transfer_fee ? '$' + fmtNum(project.transfer_fee) : _placeholder('—'))}</span>
           <span class="pi-dot"></span>
-          ${_editCell('payment_status', _pBadge(project.payment_status))}`}
+          ${_editCell('payment_status', _pBadge(project.payment_status))}
+          <span class="pi-dot"></span>
+          <span>收款方式 ${_editCell('billing_mode', _esc(billingLabel(project)))}</span>`}
           <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:auto;padding:2px 10px;font-size:11px;"
                   onclick="window._projOpenForm('${project.id}')" title="編輯所有專案資訊">✎ 編輯</button>
         </div>
+
+        <!-- Layer 1c: 後期連結（系統備註，async 單筆的 link_note；只給看得到私帳的人） -->
+        <div id="pi-link-note" class="pi-link-note" hidden></div>
 
         <!-- Layer 2: Stage card (conditional) -->
         <div id="pi-stage-card"></div>
@@ -421,6 +459,9 @@ function renderDetail(project) {
 
       </div>
     `;
+
+    // 後期連結那一行（owner 2026-09-13「專案與後期連結的方式增加一欄備註呈現」）
+    window._projRefreshLinkNote?.(project.id);
 
     // 提案來源（async best-effort；沒有就整塊不出現）
     import('./crm-projects-proposals.js')
@@ -627,6 +668,14 @@ async function _loadBudgetOverview(projectId, isClosed) {
                 雜支 $${fmtNum(d.miscActual)} / $${fmtNum(d.miscEstimated)}${d.miscAuto ? '（子表未設預算）' : ''}
               </div>
             `;
+        }
+        // 收款方式（owner 2026-09-13 拍板「財務摘要只加一行」）：後期代開的合約額是客戶付源日的毛額，
+        // 公司實際收入只有代辦費；現金收款＝源日收現金（源日自己的收款狀態）。算法不動，只講一句實話。
+        if (f.billing_mode === 'passthrough') {
+            const inc = f.company_income != null ? `，公司實際收入＝代辦費 $${fmtNum(f.company_income)}` : '';
+            el.insertAdjacentHTML('beforeend', `<div class="pi-budget-meta" style="text-align:left;margin-top:6px;">此案為後期案（後期代開）${inc}。合約額是客戶付源日的毛額，不是公司營收。</div>`);
+        } else if (f.billing_mode === 'cash') {
+            el.insertAdjacentHTML('beforeend', `<div class="pi-budget-meta" style="text-align:left;margin-top:6px;">收款方式：現金收款（源日收現金，沒有發票）。</div>`);
         }
     } catch (_) {}
 }

@@ -57,6 +57,10 @@ class CrmProject(Base):
     # 私帳案那側仍保留 source_project_id＝**第一個**來源（清單顯示、
     # 「這是分身」的判定沿用它，不必全樹改讀）。
     mine_link_id = Column(String(32), nullable=True)
+    # 收款方式（owner 2026-09-13，母帳用）：company 源日專案／passthrough 後期代開／cash 現金收款。
+    # NULL＝company。規則正本 core.ledger_project.BILLING_MODES；passthrough 儲存即在私帳建分身
+    # （routers/crm/project_links.apply_billing_mode）。**不在 LINK_SYNC_FIELDS**（私帳沒這欄）。
+    billing_mode = Column(String(16), nullable=True)
     # 顯示名覆寫（owner 2026-09-05）。空＝走自動規則（連到 1 個母帳案就顯示
     # 母帳案名，否則顯示 `name`）。鏈的正本＝core.ledger_project.linked_display_name。
     # 🔴 為什麼不直接改 `name`：那一欄是 Sheet 工時案名對映的查表鍵

@@ -133,11 +133,40 @@ def test_the_withholding_is_an_estimate_the_owner_can_override():
                             keep={"personal_tax"})
     assert "personal_tax" not in (back.get("manual") or [])
     assert apply_source_fee(50000, norm_detail(back))["personal_tax"] == withholding(50000)
-    # 代開發票那三欄不在這次放寬的範圍（owner 只講了個人稅款）
+    # 代辦費 2026-09-13 起也放寬（owner「代開費用……但我要改還是可以改」）：
+    # 改過就凍住，稅金照算、買發票＝代辦費 − 稅金；改回試算值交還自動。
     agency = apply_source_fee(82000, norm_detail({"source": "代開發票",
-                                                  "invoice_fee": 1}),
+                                                  "invoice_fee": 5000}),
                               keep={"invoice_fee"})
-    assert agency["invoice_fee"] == 6560
+    assert agency["invoice_fee"] == 5000 and agency.get("manual") == ["invoice_fee"]
+    assert (agency["tax_fee"], agency["buy_invoice"]) == (3905, 5000 - 3905)
+    later = apply_source_fee(90000, norm_detail(agency), keep={"misc"})
+    assert later["invoice_fee"] == 5000, "只改別欄時，人調好的代辦費被重算了"
+    back = apply_source_fee(82000, dict(norm_detail(agency)) | {"invoice_fee": 6560}, keep={"invoice_fee"})
+    assert "invoice_fee" not in (back.get("manual") or []) and back["buy_invoice"] == 2655
+    # 沒送（新建案）照樣試算
+    assert apply_source_fee(82000, norm_detail({"source": "代開發票"}))["invoice_fee"] == 6560
+
+
+def test_fee_deducted_flag_moves_the_fee_between_withheld_and_full_wire():
+    """「代辦費已扣除」（owner 2026-09-13）：預設（缺鍵）＝源頭代扣，應收＝營收 − 代辦費；
+    取消＝全額會匯進來，應收＝營收。營收永遠是合約額（實收 net 照扣代辦費 —— 那是成本）。
+    只在 False 時落庫、前端用 `!== false` 讀。"""
+    from core.ledger_project import (FEE_DEDUCTED_KEY, client_wire, compute, expected_cash_in,
+                                     fee_deducted, to_collect, withheld_total)
+    d = apply_source_fee(82000, norm_detail({"source": "代開發票"}))
+    assert fee_deducted(d) and FEE_DEDUCTED_KEY not in d
+    assert expected_cash_in(82000, d) == client_wire(82000, d) == 82000 - 6560
+    assert to_collect(82000, 82000 - 6560, d) == 0
+    off = norm_detail(dict(d) | {FEE_DEDUCTED_KEY: False})
+    assert off[FEE_DEDUCTED_KEY] is False and not fee_deducted(off)
+    assert expected_cash_in(82000, off) == client_wire(82000, off) == 82000
+    assert withheld_total(off) == 0 and withheld_total(d) == 6560
+    assert to_collect(82000, 82000 - 6560, off) == 6560, "沒先扣的代辦費不能當成收齊"
+    assert compute(82000, off)[0] == compute(82000, d)[0] == 82000 - 6560, "實收不受旗標影響"
+    # True 不落庫（缺鍵＝True）；垃圾值不當 False
+    assert FEE_DEDUCTED_KEY not in norm_detail(dict(d) | {FEE_DEDUCTED_KEY: True})
+    assert FEE_DEDUCTED_KEY not in norm_detail(dict(d) | {FEE_DEDUCTED_KEY: 0})
 
 
 def test_the_manual_flag_is_a_list_so_a_second_field_costs_one_string():

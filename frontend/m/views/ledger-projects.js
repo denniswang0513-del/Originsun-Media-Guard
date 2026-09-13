@@ -106,6 +106,9 @@ export async function openProjectSheet(id, onDone) {
             <input type="number" inputmode="numeric" min="0" step="1" id="pj-contract" value="${esc(p.contract || 0)}">
             <label>案源</label>
             <select id="pj-source">${selectOpts(sourceOpts(d.sources || [], det.source || ''), det.source || '', '—')}</select>
+            <label class="lg-check" id="pj-feeded-wrap" ${det.source === '代開發票' ? '' : 'hidden'}
+                   title="勾＝代開業者匯款前先扣走代辦費（應收＝營收−代辦費）；不勾＝代辦費之後自己匯出去，應收＝營收。營收永遠是合約額。">
+                <input type="checkbox" id="pj-feeded" ${det.fee_deducted !== false ? 'checked' : ''}>代辦費已扣除（應收先扣掉代辦費）</label>
         </div>
         <div class="m-h">費用（手填；CRM 掛過來的另計）</div>
         <div class="m-card">${main.map(feeRow).join('')}
@@ -130,6 +133,11 @@ export async function openProjectSheet(id, onDone) {
         onMoved: async () => { closeSheet(); if (onDone) await onDone(); },                                   // 這案已不在私帳：只重抓清單
     }));
 
+    // 代辦費已扣除只對案源＝代開發票有意義：換案源就跟著顯示／收起
+    body.querySelector('#pj-source').addEventListener('change', (ev) => {
+        body.querySelector('#pj-feeded-wrap').hidden = ev.target.value !== '代開發票';
+    });
+
     // 「＋加一筆」：手填值加上去（純前端加總，存的時候一起送）
     body.querySelectorAll('button[data-add]').forEach(b => b.addEventListener('click', () => {
         const key = b.dataset.add;
@@ -148,6 +156,9 @@ export async function openProjectSheet(id, onDone) {
         if (contract !== Number(p.contract || 0)) payload.contract_amount = contract;
         const source = body.querySelector('#pj-source').value;
         if (source !== (det.source || '')) payload.source = source;
+        // 代辦費已扣除（後端只在 false 時落庫；detail 沒鍵＝true）
+        const feeded = body.querySelector('#pj-feeded').checked;
+        if (source === '代開發票' && feeded !== (det.fee_deducted !== false)) payload.fee_deducted = feeded;
         for (const f of fees) {
             const v = parseInt(body.querySelector(`#pf-${CSS.escape(f.key)}`).value || '0', 10) || 0;
             if (v !== manual(f.key)) payload[f.key] = v;      // 手填值，不是合計

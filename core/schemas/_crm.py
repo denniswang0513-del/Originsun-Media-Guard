@@ -75,6 +75,9 @@ class CrmProjectPayload(BaseModel):
     amount_receivable: Optional[int] = None
     amount_received: Optional[int] = None
     transfer_fee: Optional[int] = None
+    # 收款方式（owner 2026-09-13）：company／passthrough／cash；None＝沒送、不動
+    # （🔴 Optional 不是預設字串：舊分頁的 PUT 不帶它，給預設會把人選好的洗掉）
+    billing_mode: Optional[str] = None
 
 
 class CrmProjectPatchPayload(CrmProjectPayload):

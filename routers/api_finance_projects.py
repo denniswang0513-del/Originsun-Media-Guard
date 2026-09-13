@@ -590,6 +590,11 @@ async def update_project_ledger(project_id: str, payload: LedgerDetailPayload,
             d["source"] = data.pop("source") or ""
         if "fee_pct" in data:
             d["fee_pct"] = data.pop("fee_pct")
+        if "fee_deducted" in data:
+            # 布林 meta：None＝沒送；True 不落庫（缺鍵＝True，見 core.ledger_project.FEE_DEDUCTED_KEY）
+            fd = data.pop("fee_deducted")
+            if fd is not None:
+                d["fee_deducted"] = bool(fd)
         for k, v in data.items():
             if v is None:
                 continue

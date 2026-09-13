@@ -200,6 +200,20 @@
           <label>稅率 (%)</label>
           <input id="proj-f-tax_rate" type="number" class="crm-input" value="5" min="0" max="100">
         </div>
+        <!-- 收款方式（owner 2026-09-13）：源日自己怎麼收這一案的錢。後期代開＝儲存時自動在私帳建／改對應的案
+             （案源＝代開發票）；現金收款＝源日收現金（源日自己的收款狀態，不動後期）。 -->
+        <div class="crm-field">
+          <label>收款方式</label>
+          <select id="proj-f-billing_mode" class="crm-input">
+            <option value="company" selected>源日專案</option>
+            <option value="passthrough">後期代開</option>
+            <option value="cash">現金收款</option>
+          </select>
+        </div>
+        <div class="crm-field crm-field-full">
+          <label>後期連結（系統備註）</label>
+          <div id="proj-f-link-note" class="crm-input crm-link-note">儲存後依收款方式決定</div>
+        </div>
         <div class="crm-field">
           <label>目標毛利率 (%)</label>
           <input id="proj-f-profit_target_pct" type="number" class="crm-input" value="20" min="0" max="100">
