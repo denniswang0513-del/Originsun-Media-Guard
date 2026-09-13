@@ -475,6 +475,9 @@ async def create_project(req: CrmProjectPayload, request: Request):
         except Exception as e:
             warning = f"資料夾範本複製失敗: {e}"
 
+    if billing.get("action") == "skipped":
+        # 同 update_project：同事沒私帳權限，分身沒建 —— 表單的「儲存後會自動在私帳建對應的案」不能靜靜落空
+        root_warnings = root_warnings + ["收款方式已存，但你看不到私帳 —— 私帳那邊的對應案要由帳本主人再存一次才會建／改"]
     if root_warnings:
         warning = "；".join([warning] + root_warnings) if warning else "；".join(root_warnings)
 

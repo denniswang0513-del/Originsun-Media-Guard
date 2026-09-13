@@ -12,6 +12,7 @@ from fastapi import HTTPException
 import core.ledger as ledger
 from core.ledger_project import apply_source_fee, norm_detail
 from routers.crm import project_links as pl
+from tests.unit._srcscan import code_only, flow_body, projects_src
 
 
 def _parent(mode, contract=100000):
@@ -102,3 +103,11 @@ def test_half_up_rounding_matches_the_frontend():
     d2 = norm_detail({"source": "代開發票", "fee_pct": 10, "invoice_fee": 1300})
     assert "invoice_fee" in apply_source_fee(12345, d2, keep={"invoice_fee"})["manual"]
 
+
+def test_create_project_surfaces_skipped():
+    """BUG-8：建案時分身沒建（同事沒私帳權限）要跟 update 一樣出聲，不能靜靜回 ok。"""
+    create = code_only(flow_body(projects_src(), "async def create_project("))
+    update = code_only(flow_body(projects_src(), "async def update_project("))
+    msg = "收款方式已存，但你看不到私帳"
+    assert msg in update
+    assert msg in create and '"skipped"' in create
