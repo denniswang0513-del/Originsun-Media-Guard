@@ -342,9 +342,6 @@ BY_PARENT_KEY = "by_parent"
 #: True＝N:1 的舊資料，各案份額還沒認領（回填時分不出來）；認領走 set_parent_share(claim=True)，
 #: 全部母帳案都認領完由呼叫端清掉。缺鍵＝不是待認領。
 BY_PARENT_PENDING_KEY = "by_parent_pending"
-#: 暫時鍵（不落庫、norm_detail 不保留）：drop_parent_share 拿掉最後一個份額時放上去，
-#: 讓緊接著的 apply_source_fee 知道費用是分案算出來的、要重算，不能走「不是抽費案源就不動」的早退。
-_FEES_WERE_SHARED_KEY = "_fees_were_shared"
 
 
 def fee_deducted(d) -> bool:
@@ -531,7 +528,7 @@ def source_mixed(detail) -> bool:
     return len(kinds) > 1
 
 
-def legacy_claim(detail, contract, pid: str, *, source: str = "") -> dict:
+def legacy_claim(detail, contract, pid: str) -> dict:
     """沒分案記錄的舊 1:1 分身：把「上次鏡射過來的量」認成 `pid` 的份額（claim，不動錢）。
 
     認多少：有 `mirror_total` 而且它比合約額小（0 < mt < 合約額）就只認 mt —— 多出來的是 owner 自己加的
@@ -545,7 +542,7 @@ def legacy_claim(detail, contract, pid: str, *, source: str = "") -> dict:
     amount = mt if 0 < mt < c else c
     d, _c = set_parent_share(d, c, pid, amount, d.get("split") or {},
                              synced_total=mt, at=str(d.get(MIRROR_AT_KEY) or ""),
-                             source=source or d.get("source") or MIRROR_SOURCE, claim=True)
+                             source=d.get("source") or MIRROR_SOURCE, claim=True)
     return d
 
 
@@ -556,13 +553,15 @@ def drop_parent_share(detail, contract, pid: str) -> tuple:
     if pid not in parent_shares(d):
         return detail, contract
     d, contract = set_parent_share(d, contract, pid, 0, {})
+    # 費用趁記錄還在的時候重算：這案份額已是 0，fee_bases 只剩別案 ＋ owner 自己的 —— 最後一個代開
+    # 份額被拿掉時三欄在這裡歸零（手改的不動）。記錄拿掉之後 apply_source_fee 就看不出費用曾是分案算的。
+    d = apply_source_fee(contract, d)
     shares = parent_shares(d)
     shares.pop(pid, None)
     if shares:
         d[BY_PARENT_KEY] = shares
     else:
         d.pop(BY_PARENT_KEY, None)
-        d[_FEES_WERE_SHARED_KEY] = True     # 最後一個份額沒了：下一次 apply_source_fee 要把費用重算（歸零），不能早退
     return d, contract
 
 
@@ -667,11 +666,9 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
     src = d.get("source")
     # 代辦費分案：基數是「走那種案源的份額加總」，不是整案（fee_bases）。沒分案記錄時兩者相等。
     agency, pro = fee_bases(contract, d)
-    has_shares = bool(parent_shares(d))
-    was_shared = bool(d.pop(_FEES_WERE_SHARED_KEY, None))
-    if not has_shares and not was_shared and src not in ("代開發票", "執行業務所得"):
+    shared = bool(parent_shares(d))
+    if not shared and src not in ("代開發票", "執行業務所得"):
         return d          # 沒分案記錄、也不是抽費的案源：使用者填的數字不動（舊行為）
-    shared = has_shares or was_shared
     # 自動值是**試算不是規定**：送來的值 ≠ 試算 → 這格從此由人決定；改回試算值 → 交還自動。
     # 🔴 旗標要**落庫**，不能只看「這次有沒有送」：只改別欄的那種存檔（例如單改行政雜支）
     # 不會送這一欄，下一秒就把人調好的數字洗回試算值。
@@ -685,7 +682,7 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
         if field not in manual:
             d[field] = auto
 
-    if src == "代開發票" or (has_shares and agency):
+    if src == "代開發票" or agency:
         _settle("invoice_fee", _half_up(agency * float(d.get("fee_pct") or DEFAULT_FEE_PCT) / 100))
         # 稅金與買發票是代辦費的**組成**（買發票＝代辦費 − 稅金），代辦費手改時跟著重算
         d["tax_fee"] = _half_up(agency / VAT_DIVISOR * (VAT_PCT / 100))

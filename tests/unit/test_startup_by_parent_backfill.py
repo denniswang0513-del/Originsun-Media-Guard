@@ -41,6 +41,8 @@ class _Session:
         text = str(stmt)
         if "users" in text:
             return _Result(self.users)
+        if "ledger_detail" in text:          # 整列的 select（回填改成一次撈有連結的私帳案）
+            return _Result([p for p in self.projects.values() if p.entity == "mine"])
         return _Result([(pid,) for pid, p in self.projects.items() if p.entity == "mine"])
 
     async def get(self, model, pk):

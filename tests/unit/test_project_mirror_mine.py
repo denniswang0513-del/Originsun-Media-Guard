@@ -354,7 +354,7 @@ def test_sharing_one_mine_project_adds_instead_of_overwriting():
     assert "merge_split(" in body, "併法又在 router 裡自己寫了一次"
     # add＝這一案的份額再加一筆（分案記帳後由 set_parent_share 把差額加到合約額）
     assert "_push_share_amount(mode, pending, share_src, old_share" in body, "add 沒有走份額金額規則"
-    assert "int(old.get(\"amount\") or 0) + int(mir_total or 0)" in projects_src(), "add 沒有累加這一案的份額"
+    assert "int(old_share.get(\"amount\") or 0) + int(mir_total or 0)" in projects_src(), "add 沒有累加這一案的份額"
     js = crm_projects_core_src()
     assert "'add', '加進去'" in js, "UI 沒有給「加進去」這個選項"
 
