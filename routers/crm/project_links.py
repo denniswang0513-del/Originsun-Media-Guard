@@ -443,14 +443,39 @@ def _mirror_contract(p, mir: dict, source: str) -> int:
     return int(mir["total"] or 0)
 
 
+def _ensure_share(keep: dict, contract: int, pid: str) -> dict:
+    """分案記帳的退路：沒有任何 by_parent 的舊 1:1 分身，先把現況整筆認成 `pid` 的份額
+    （claim＝不動錢），之後 set_parent_share 才算得出差額。待認領的 N:1（BY_PARENT_PENDING_KEY）
+    不猜 —— 那是回填分不出來的，由呼叫端決定要 claim 還是 409。"""
+    from core.ledger_project import (BY_PARENT_PENDING_KEY, MIRROR_AT_KEY, MIRROR_TOTAL_KEY,
+                                     parent_shares, set_parent_share)
+    if parent_shares(keep) or keep.get(BY_PARENT_PENDING_KEY) is True:
+        return keep
+    keep, _c = set_parent_share(keep, contract, pid, int(contract or 0), keep.get("split") or {},
+                                synced_total=int(keep.get(MIRROR_TOTAL_KEY) or 0),
+                                at=str(keep.get(MIRROR_AT_KEY) or ""), claim=True)
+    return keep
+
+
+async def _clear_pending_if_all_claimed(session, t, keep: dict) -> dict:
+    """待認領的 N:1：每個母帳案都有份額了就把旗標拿掉。"""
+    from core.ledger_project import BY_PARENT_PENDING_KEY, parent_shares
+    from ._shared import mine_parent_links
+    if keep.get(BY_PARENT_PENDING_KEY) is not True:
+        return keep
+    parents = {pid for pid, _n in (await mine_parent_links(session, [t.id])).get(t.id) or []}
+    if parents and parents <= set(parent_shares(keep)):
+        keep.pop(BY_PARENT_PENDING_KEY, None)
+    return keep
+
+
 def _new_mirror_row(p, mir: dict, note: str, source: str = ""):
     """母帳案 → 私帳分身那一列（未加入 session）。推送鈕與對應表的「建立」共用 ——
     兩條路各建一份，遲早只有一邊記得補新的必填欄。
     `source` 空＝源日（公司內部轉單）；代開發票→代辦費自動算（apply_source_fee）。"""
-    from core.ledger_project import apply_source_fee, mirror_detail, norm_detail
+    from core.ledger_project import (MIRROR_AT_KEY, apply_source_fee, mirror_detail, norm_detail,
+                                     set_parent_share)
     from routers.api_finance_projects import new_ledger_project
-
-    from core.ledger_project import MIRROR_AT_KEY
 
     contract = _mirror_contract(p, mir, source)
     d = mirror_detail(mir["split"])
@@ -458,6 +483,9 @@ def _new_mirror_row(p, mir: dict, note: str, source: str = ""):
     if source:
         d["source"] = source
     d = norm_detail(apply_source_fee(contract, d))
+    # 分案記帳：這一案給的份額＝整筆（新分身只有它一個來源）；claim＝錢已經在上面的 contract／split 裡
+    d, _c = set_parent_share(d, contract, p.id, contract, mir["split"],
+                             synced_total=mir["total"], at=_today_tw(), claim=True)
     return new_ledger_project(
         project_id=uuid.uuid4().hex, name=p.name, client_id=p.client_id,
         entity="mine", contract=contract, detail=d,
@@ -475,8 +503,9 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
     """
 
     from core.ledger import require_entity
-    from core.ledger_project import (BILLING_MIRROR_SOURCE, MIRROR_AT_KEY, MIRROR_SOURCE, MIRROR_TOTAL_KEY,
-                                     SELECTABLE_SOURCES, apply_source_fee, billing_mode_of, merge_split,
+    from core.ledger_project import (BILLING_MIRROR_SOURCE, BY_PARENT_PENDING_KEY, MIRROR_AT_KEY, MIRROR_SOURCE, MIRROR_TOTAL_KEY,
+                                     SELECTABLE_SOURCES, apply_source_fee, billing_mode_of, merge_split, parent_shares,
+                                     set_parent_share,
                                      norm_detail)
     from routers.api_finance_projects import resync_receivable
 
@@ -541,29 +570,32 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 # 會把前一個 CRM 案鏡射進來的錢洗掉，而那筆錢也是他該拿的。
                 # 併法（同名工項相加／取代）的正本在 core.ledger_project，
                 # 它回 delta 而不是 total —— 私帳案的合約金額未必等於 Σ(split)
-                if mode == "overwrite":
-                    from routers.crm._shared import mine_parent_names
-                    _others = (await mine_parent_names(session, [t.id])).get(t.id) or ()
-                    if len(_others) > 1:
-                        raise HTTPException(status_code=409, detail="這個私帳案承接了 %d 個母帳案（%s），用「取代」會洗掉別案鏡射進來的錢；請改用「加上去」"
-                                            % (len(_others), "、".join(_others)))
-                merged, delta = merge_split(keep.get("split") or {},
-                                            mir["split"] or {},
-                                            add=(mode == "add"))
+                # 分案記帳（owner 2026-09-13「為何不加起來？」）：只換**這一個母帳案**的份額，
+                # X 的金額與工項吃差額 —— 別案鏡射進來的錢與 owner 自己填的都不動，所以 N:1 的
+                # 「取代」不再需要 409。overwrite＝這案份額換成這次算的；add＝這案份額再加一筆
+                # （同名工項相加）。待認領的舊 N:1（回填分不出來）：只記份額不動錢（claim）。
+                keep = _ensure_share(keep, int(t.contract_amount or 0), p.id)
+                pending = keep.get(BY_PARENT_PENDING_KEY) is True
+                old_share = parent_shares(keep).get(p.id) or {"amount": 0, "split": {}}
                 # 案源：這次指定的 > 私帳案本來的 > 源日。🔴 不要無條件寫回源日 ——
                 # 代開發票的分身重新同步一次就會被翻成源日、代辦費歸零
-                keep["split"] = merged
                 keep["source"] = source or keep.get("source") or MIRROR_SOURCE
-                keep[MIRROR_TOTAL_KEY] = mir["total"]     # 「私帳落後了沒」比的就是它
-                keep[MIRROR_AT_KEY] = _today_tw()
+                keep[MIRROR_TOTAL_KEY] = mir["total"]     # 舊的單一合計仍記（沒分案記錄的讀法退到它）
+                keep[MIRROR_AT_KEY] = _today_tw()         # X 層級的「上次同步」（詳情那一行顯示用）
                 if keep["source"] == "代開發票":
                     # 代開的收入是那張發票的面額（母帳合約額），不是成本行；
                     # 重新同步只更新工項，金額不動（沒填過才用母帳合約額補）
-                    if not int(t.contract_amount or 0):
-                        t.contract_amount = _mirror_contract(p, mir, "代開發票")
+                    amount = old_share["amount"] or _mirror_contract(p, mir, "代開發票")
+                elif mode == "add":
+                    amount = old_share["amount"] + mir["total"]
                 else:
-                    t.contract_amount = (int(t.contract_amount or 0) + delta
-                                         if mode == "add" else mir["total"])
+                    amount = mir["total"]
+                new_split, _delta = merge_split(old_share["split"] if mode == "add" else {},
+                                                mir["split"] or {}, add=(mode == "add"))
+                keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id, amount, new_split,
+                                                      synced_total=mir["total"], at=_today_tw(), claim=pending)
+                t.contract_amount = new_contract
+                keep = await _clear_pending_if_all_claimed(session, t, keep)
                 keep = norm_detail(apply_source_fee(int(t.contract_amount or 0), keep))
                 t.ledger_detail = keep
                 # 營收換了 → 應收跟著重算，否則這一案的應收停在舊數字
@@ -604,8 +636,9 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
     """母帳案 `billing_mode` 從 `old_mode` 變成現在的值 → 私帳分身的對應動作。不 commit。
     回 `{"action": created|switched|reverted|none|skipped, "created": bool}`。"""
     from core.ledger import require_entity
-    from core.ledger_project import (FEE_DEDUCTED_KEY, BILLING_MIRROR_SOURCE, MIRROR_SOURCE,
-                                     apply_source_fee, billing_mode_of, manual_fields, norm_detail)
+    from core.ledger_project import (BY_PARENT_PENDING_KEY, FEE_DEDUCTED_KEY, BILLING_MIRROR_SOURCE, MIRROR_SOURCE,
+                                     apply_source_fee, billing_mode_of, manual_fields, norm_detail, parent_shares,
+                                     set_parent_share)
 
     new = billing_mode_of(p.billing_mode)
     old = billing_mode_of(old_mode)
@@ -628,14 +661,11 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         require_entity(request, "mine", level="full")
     except HTTPException:
         return {"action": "skipped", "created": False}
-    if t is not None:
-        # 要動既有分身的錢（換案源改合約、換回歸零代開三欄）之前：這個私帳案是不是同時承接別的母帳案？
-        # 是的話這裡的自動改帳會把別案鏡射進來的錢一起洗掉 —— 同 mirror_project_to_mine 的 409，規則只有一條。
-        from ._shared import mine_parent_names
-        _others = (await mine_parent_names(session, [t.id])).get(t.id) or []
-        if len(_others) > 1:
-            raise HTTPException(status_code=409, detail="這個私帳案承接了 %d 個母帳案（%s），收款方式的自動改帳會洗掉別案鏡射進來的錢；請到私帳手動調整"
-                                % (len(_others), "、".join(_others)))
+    if t is not None and norm_detail(t.ledger_detail).get(BY_PARENT_PENDING_KEY) is True:
+        # 回填分不出各案份額的舊 N:1：不猜。先對每個母帳案按「推送到私帳 → 取代」認領份額，
+        # 旗標自己會清掉，之後這裡就只動 A 那一份的差額。
+        raise HTTPException(status_code=409, detail="這個私帳案承接了多個母帳案，各案份額還沒認領 —— "
+                            "先對每個母帳案按「推送到私帳 → 取代」認領一次，再改收款方式")
     if want_source:
         if t is None:
             sid = await _me_staff_id_or_blank(request)
@@ -650,7 +680,12 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         keep = norm_detail(t.ledger_detail)
         keep["source"] = want_source
         if int(p.contract_amount or 0):
-            t.contract_amount = int(p.contract_amount or 0)
+            # 只換**這一案**的份額（工項沿用），X 吃差額 —— 別案鏡射進來的錢不動（by_parent）
+            keep = _ensure_share(keep, int(t.contract_amount or 0), p.id)
+            share = parent_shares(keep).get(p.id) or {"split": {}}
+            keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id,
+                                                  int(p.contract_amount or 0), share["split"])
+            t.contract_amount = new_contract
         _store_mirror_detail(t, apply_source_fee(int(t.contract_amount or 0), keep))
         return {"action": "switched", "created": False}
     # 換回源日專案／現金收款：分身留著，只把代開那套拿掉（走到這裡＝reverting 已成立）
@@ -733,6 +768,17 @@ async def _write_link(session, parent, mine):
     一個私帳案承接多個母帳案時母帳彼此可能矛盾，不猜（同顯示名規則）。
     """
     if mine is None:
+        # 解除：連結加進私帳的那份（金額＋工項）一起拿掉（owner 2026-09-13 決策 ①）；
+        # 沒分案記錄的舊連結不動錢（跟以前一樣）。分身列已刪就只清指標。
+        if parent.mine_link_id:
+            t = await session.get(CrmProject, parent.mine_link_id)
+            if t is not None:
+                from core.ledger_project import apply_source_fee, drop_parent_share, norm_detail
+                before = norm_detail(t.ledger_detail)
+                keep, new_contract = drop_parent_share(before, int(t.contract_amount or 0), parent.id)
+                if new_contract != int(t.contract_amount or 0) or keep != before:
+                    t.contract_amount = new_contract
+                    _store_mirror_detail(t, apply_source_fee(new_contract, keep))
         parent.mine_link_id = None
         parent.updated_at = _now()
         return

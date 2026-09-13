@@ -61,36 +61,86 @@ async def test_passthrough_switch_still_asks_for_mine_scope(monkeypatch, no_mine
     assert no_mine_scope == ["mine"]
 
 
-async def test_switch_refuses_when_mirror_is_shared(monkeypatch):
-    """BUG-5：私帳案 X 同時承接 A、B → A 改後期代開不能把 X 的收入改成 A 的合約（B 的錢會不見）；同 mirror 那支的 409。"""
-    t = _mirror()
+async def test_switch_moves_only_that_parents_share(monkeypatch):
+    """BUG-5（owner 2026-09-13 改為「加起來」）：私帳案 X 承接 A、B → A 改後期代開只換 A 的份額，
+    X 吃差額，B 的錢與 owner 自己填的都不動；換回也只動 A。"""
+    from core.ledger_project import parent_shares, set_parent_share
+
+    d, c = set_parent_share({"source": "源日"}, 0, "A", 40000, {"剪接": 40000}, synced_total=40000)
+    d, c = set_parent_share(d, c, "B", 80000, {"剪接": 80000}, synced_total=80000)
+    t = SimpleNamespace(id="X", name="私帳案 X", entity="mine", contract_amount=c + 20000,   # owner 自己多填 20,000
+                        ledger_detail=d, updated_at=None)
 
     async def _link(session, p):
         return t
-
-    async def _shared(session, ids):
-        return {"X": ["母帳案 A", "母帳案 B"]}
     monkeypatch.setattr(pl, "resolve_mine_link", _link)
     monkeypatch.setattr(ledger, "require_entity", lambda request, ent, level="": None)
-    import routers.crm._shared as shared
-    monkeypatch.setattr(shared, "mine_parent_names", _shared)
+    monkeypatch.setattr(pl, "_store_mirror_detail", lambda t, detail: setattr(t, "ledger_detail", detail))
 
+    out = await pl.apply_billing_mode(None, _parent("passthrough", contract=100000), request=None, old_mode="company")
+    assert out["action"] == "switched"
+    assert t.contract_amount == 140000 + 60000            # A 40,000 → 100,000：只加 60,000
+    shares = parent_shares(t.ledger_detail)
+    assert shares["A"]["amount"] == 100000 and shares["A"]["split"] == {"剪接": 40000}   # 工項沿用
+    assert shares["B"] == {"amount": 80000, "split": {"剪接": 80000}, "synced_total": 80000, "at": ""}
+    assert t.ledger_detail["split"]["剪接"] == 120000       # 工項沒動
+    assert t.ledger_detail["source"] == "代開發票"
+
+
+async def test_switch_on_legacy_one_to_one_claims_whole_row_first(monkeypatch):
+    """沒分案記錄的舊 1:1 分身：先把整筆認成 A 的份額，再換 —— 結果跟以前一樣（收入＝母帳合約額）。"""
+    from core.ledger_project import parent_shares
+
+    t = SimpleNamespace(id="X", name="私帳案 X", entity="mine", contract_amount=50000,
+                        ledger_detail={"source": "源日", "split": {"剪接": 50000}}, updated_at=None)
+
+    async def _link(session, p):
+        return t
+    monkeypatch.setattr(pl, "resolve_mine_link", _link)
+    monkeypatch.setattr(ledger, "require_entity", lambda request, ent, level="": None)
+    monkeypatch.setattr(pl, "_store_mirror_detail", lambda t, detail: setattr(t, "ledger_detail", detail))
+    await pl.apply_billing_mode(None, _parent("passthrough", contract=100000), request=None, old_mode="company")
+    assert t.contract_amount == 100000
+    assert parent_shares(t.ledger_detail)["A"]["amount"] == 100000
+
+
+async def test_switch_refuses_pending_legacy_n_to_one(monkeypatch):
+    """回填分不出各案份額的舊 N:1（by_parent_pending）：不猜，409 要求先逐案認領。"""
+    from core.ledger_project import BY_PARENT_PENDING_KEY
+
+    t = SimpleNamespace(id="X", name="私帳案 X", entity="mine", contract_amount=120000,
+                        ledger_detail={"source": "源日", "split": {"剪接": 120000}, BY_PARENT_PENDING_KEY: True},
+                        updated_at=None)
+
+    async def _link(session, p):
+        return t
+    monkeypatch.setattr(pl, "resolve_mine_link", _link)
+    monkeypatch.setattr(ledger, "require_entity", lambda request, ent, level="": None)
     with pytest.raises(HTTPException) as e:
         await pl.apply_billing_mode(None, _parent("passthrough"), request=None, old_mode="company")
-    assert e.value.status_code == 409
-    assert "承接了 2 個母帳案" in e.value.detail
-    assert t.contract_amount == 50000 and t.ledger_detail["source"] == "源日", "409 之前不能先動到分身"
+    assert e.value.status_code == 409 and "認領" in e.value.detail
+    assert t.contract_amount == 120000
 
-    # 換回也一樣：代開那套不能連別案的一起歸零
-    t2 = _mirror("代開發票")
 
-    async def _link2(session, p):
-        return t2
-    monkeypatch.setattr(pl, "resolve_mine_link", _link2)
-    with pytest.raises(HTTPException) as e2:
-        await pl.apply_billing_mode(None, _parent("company"), request=None, old_mode="passthrough")
-    assert e2.value.status_code == 409
-    assert t2.ledger_detail["invoice_fee"] == 4000
+async def test_unlink_drops_that_parents_share(monkeypatch):
+    """決策 ①：解除連結把那案加進私帳的錢與工項拿掉；別案不動。"""
+    from core.ledger_project import parent_shares, set_parent_share
+
+    d, c = set_parent_share({"source": "源日"}, 0, "A", 40000, {"剪接": 40000})
+    d, c = set_parent_share(d, c, "B", 80000, {"剪接": 80000})
+    t = SimpleNamespace(id="X", name="私帳案 X", entity="mine", contract_amount=c, ledger_detail=d, updated_at=None)
+    parent = SimpleNamespace(id="A", mine_link_id="X", updated_at=None)
+
+    class _S:
+        async def get(self, model, pk):
+            return t if pk == "X" else None
+    monkeypatch.setattr(pl, "_store_mirror_detail", lambda t, detail: setattr(t, "ledger_detail", detail))
+    await pl._write_link(_S(), parent, None)
+    assert parent.mine_link_id is None
+    assert t.contract_amount == 80000
+    assert t.ledger_detail["split"] == {"剪接": 80000}
+    assert list(parent_shares(t.ledger_detail)) == ["B"]
+
 
 
 def test_half_up_rounding_matches_the_frontend():

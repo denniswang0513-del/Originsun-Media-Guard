@@ -131,7 +131,8 @@ def test_linking_existing_keeps_my_own_costs():
     seg = fn.split("if target_id:")[1]
     assert "keep = norm_detail(t.ledger_detail)" in seg
     # 只換掉收入那半邊（split/source）；keep 這個 dict 的其他鍵原封帶著走
-    assert 'keep["split"] = merged' in seg
+    # 2026-09-13 起工項也分案：split 由 set_parent_share 從 keep 出發只吃這一案的差額（其他鍵原封帶著走）
+    assert "set_parent_share(keep, int(t.contract_amount or 0), p.id, amount, new_split," in seg
     # 案源：這次指定的 > 私帳案本來的 > 源日（代開發票的分身重新同步不能被翻成源日）
     assert 'keep["source"] = source or keep.get("source") or MIRROR_SOURCE' in seg
     assert "t.ledger_detail = keep" in seg
@@ -351,7 +352,8 @@ def test_sharing_one_mine_project_adds_instead_of_overwriting():
                                "async def mirror_project_to_mine("))
     assert 'mode in ("overwrite", "add")' in body
     assert "merge_split(" in body, "併法又在 router 裡自己寫了一次"
-    assert "int(t.contract_amount or 0) + delta" in body, "add 沒有累加合約金額"
+    # add＝這一案的份額再加一筆（分案記帳後由 set_parent_share 把差額加到合約額）
+    assert 'amount = old_share["amount"] + mir["total"]' in body, "add 沒有累加這一案的份額"
     js = crm_projects_core_src()
     assert "'add', '加進去'" in js, "UI 沒有給「加進去」這個選項"
 

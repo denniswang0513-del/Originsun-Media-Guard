@@ -108,7 +108,9 @@ def test_apply_billing_mode_rules():
     assert "_new_mirror_row(p, mir," in fn and "await _write_link(session, p, t)" in fn
     # 有分身：案源改代開、收入一律＝母帳合約額（owner「一律改成合約」；母帳沒填才留原值）、工項不動
     assert 'keep["source"] = want_source' in fn and "if int(p.contract_amount or 0):" in fn
-    assert "t.contract_amount = int(p.contract_amount or 0)" in fn
+    # 收入＝母帳合約額 —— 2026-09-13 起走分案記帳：只換這一案的份額，X 吃差額（set_parent_share）
+    assert "set_parent_share(keep, int(t.contract_amount or 0), p.id," in fn and "int(p.contract_amount or 0), share[\"split\"])" in fn
+    assert "t.contract_amount = new_contract" in fn
     assert "resync_receivable(t, keep)" in fn
     # 換回源日專案／現金收款：分身留著、案源改回源日、代辦費三欄歸零、已扣旗標拿掉
     assert 'keep["source"] = MIRROR_SOURCE' in fn
