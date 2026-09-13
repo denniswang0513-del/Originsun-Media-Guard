@@ -193,7 +193,7 @@ def link_note(mode: str, mine, detail, *, stale=None, delta: int = 0, crm_total:
     `mine`＝連到的私帳案 `(id, name, contract)`，沒連＝None；`detail`＝私帳案的 ledger_detail
     （已 norm）；`stale`／`delta`＝mirror_stale 的結果、`crm_total`＝母帳現在掛給我的成本行合計
     （詳情那顆「重新同步」鈕要講的數字 —— 跟這一行同一趟拿，不再另外打 mirror-check）。回的 `text` 是一整句。
-    `shares`＝私帳案承接多個母帳案時各案的份額 `[(母帳案名, 金額), …]`（1:1 給空）；`shares_pending`＝
+    `shares`＝私帳案承接多個母帳案時各案的份額 `[(母帳案名, 金額[, 案源]), …]`（1:1 給空）；`shares_pending`＝
     舊 N:1 回填分不出份額、還沒逐案認領（by_parent_pending）。
     """
     mode = billing_mode_of(mode)
@@ -202,7 +202,8 @@ def link_note(mode: str, mine, detail, *, stale=None, delta: int = 0, crm_total:
            "fee_pct": DEFAULT_FEE_PCT, "tax_fee": 0, "buy_invoice": 0, "fee_deducted": True,
            "stale": None, "delta": 0, "crm_total": 0, "mirror_at": "",
            "passthrough_invoices": int(passthrough_invoices or 0),
-           "shares": [{"name": n, "amount": int(a or 0)} for n, a in (shares or ())],
+           "shares": [{"name": r[0], "amount": int(r[1] or 0), "source": (r[2] if len(r) > 2 else "") or ""}
+                      for r in (shares or ())],
            "shares_pending": bool(shares_pending), "text": ""}
     if mine is None:
         if mode == "passthrough":
@@ -221,9 +222,12 @@ def link_note(mode: str, mine, detail, *, stale=None, delta: int = 0, crm_total:
                 "tax_fee": int(d.get("tax_fee") or 0), "buy_invoice": int(d.get("buy_invoice") or 0),
                 "fee_deducted": fee_deducted(d), "stale": stale, "delta": int(delta or 0),
                 "crm_total": int(crm_total or 0), "mirror_at": str(d.get(MIRROR_AT_KEY) or "")})
-    parts = [f"已連結後期 → {mname}", f"案源 {src}", f"收入 {_fmt_n(contract)}"]
+    mixed = source_mixed(d)
+    parts = [f"已連結後期 → {mname}", "案源 混合" if mixed else f"案源 {src}", f"收入 {_fmt_n(contract)}"]
     if out["shares"]:
-        parts.append("份額 " + "、".join(f"{s['name']} {_fmt_n(s['amount'])}" for s in out["shares"]))
+        parts.append("份額 " + "、".join(
+            f"{s['name']} {_fmt_n(s['amount'])}" + (f"（{s['source']}）" if mixed and s['source'] else "")
+            for s in out["shares"]))
     if shares_pending:
         parts.append("各案份額待認領（逐案「推送到私帳 → 取代」）")
     if src == "代開發票":

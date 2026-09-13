@@ -108,8 +108,13 @@ class TestLinkNoteShares:
         from core.ledger_project import link_note
         d = norm_detail({"source": "源日"})
         n = link_note("company", ("m", "私帳案 X", 200000), d, shares=[("母帳案 A", 100000), ("母帳案 B", 80000)])
-        assert n["shares"] == [{"name": "母帳案 A", "amount": 100000}, {"name": "母帳案 B", "amount": 80000}]
-        assert "份額 母帳案 A 100,000、母帳案 B 80,000" in n["text"]
+        assert n["shares"] == [{"name": "母帳案 A", "amount": 100000, "source": ""}, {"name": "母帳案 B", "amount": 80000, "source": ""}]
+        assert "份額 母帳案 A 100,000、母帳案 B 80,000" in n["text"] and "案源 源日" in n["text"]
+        # 各案案源不同 → 案源寫「混合」、份額後面帶案源
+        dm, _ = set_parent_share(d, 0, "A", 100000, {}, source="代開發票")
+        dm, _ = set_parent_share(dm, 0, "B", 80000, {}, source="源日")
+        m = link_note("company", ("m", "X", 180000), dm, shares=[("A", 100000, "代開發票"), ("B", 80000, "源日")])
+        assert "案源 混合" in m["text"] and "A 100,000（代開發票）、B 80,000（源日）" in m["text"]
         assert n["shares_pending"] is False
         p = link_note("company", ("m", "X", 1), d, shares_pending=True)
         assert p["shares_pending"] is True and "待認領" in p["text"]
@@ -193,3 +198,14 @@ class TestPerParentSource:
         one, _ = set_parent_share({"source": "源日"}, 0, "A", 1, {}, source="源日")
         assert source_mixed(one) is False
         assert source_mixed(norm_detail({"source": "代開發票"})) is False
+
+
+def test_frontend_fee_preview_uses_the_same_bases_as_the_backend():
+    """前端試算不能用整案算：後端算 8,000、前端送 14,400 → 被當成人改過而凍住（代辦費分案）。"""
+    from tests.unit._srcscan import js_func_body, repo_src
+    src = repo_src("frontend/tabs/finance/subviews/projects.js")
+    assert "function _feeBases(" in src and "parent_shares" in src
+    body = js_func_body(src, "const _syncFee = ")
+    assert "_feeBases(c, src)" in body and "Math.round(base * pct / 100)" in body
+    assert "_proTax(bases.pro)" in body
+    assert "Math.round(c * pct" not in body, "代辦費試算又用整案算了"

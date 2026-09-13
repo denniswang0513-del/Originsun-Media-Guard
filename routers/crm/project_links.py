@@ -747,7 +747,8 @@ async def link_note_for(session, p, request) -> dict:
             _p, mir, _l = await _mirror_preview(session, p.id, sid)
             crm_total = mir["total"]
             stale, delta = mirror_stale(detail, crm_total, p.id)
-    share_rows = [(name, shares[pid]["amount"]) for pid, name in parents if pid in shares] if len(parents) > 1 else []
+    share_rows = ([(name, shares[pid]["amount"], shares[pid].get("source") or detail.get("source") or "")
+                   for pid, name in parents if pid in shares] if len(parents) > 1 else [])
     return link_note(mode, (t.id, t.name or "", t.contract_amount), detail, stale=stale, delta=delta,
                      crm_total=crm_total, passthrough_invoices=await _passthrough_invoice_count(session, p.id),
                      shares=share_rows, shares_pending=detail.get(BY_PARENT_PENDING_KEY) is True)

@@ -73,6 +73,27 @@ function _proTax(contract) {
     return tax + nhi;
 }
 
+/** 代辦費／代扣的**計算基數** —— 演算法同後端 `core.ledger_project.fee_bases`（代辦費分案）。
+ *  私帳案承接多個母帳案時，每案份額帶自己的案源（`_detail.project.parent_shares`）：代辦費只算
+ *  走代開那幾案的份額；沒標的跟表單上的案源走；owner 自己填的那部分（合約額 − Σ份額）也跟表單走。
+ *  沒分案記錄＝整案（舊算法）。🔴 用整案算的話，後端算 8,000、這裡送 14,400 → 被當成人改過而凍住。 */
+function _feeBases(contract, src) {
+    const c = Number(contract) || 0;
+    const shares = (_detail && _detail.project && _detail.project.parent_shares) || [];
+    if (!shares.length) return { agency: src === '代開發票' ? c : 0, pro: src === '執行業務所得' ? c : 0 };
+    let agency = 0, pro = 0, total = 0;
+    shares.forEach((sh) => {
+        const amt = Number(sh.amount) || 0, eff = sh.source || src;
+        total += amt;
+        if (eff === '代開發票') agency += amt;
+        else if (eff === '執行業務所得') pro += amt;
+    });
+    const own = Math.max(0, c - total);
+    if (src === '代開發票') agency += own;
+    else if (src === '執行業務所得') pro += own;
+    return { agency, pro };
+}
+
 /** 那段試算的說明文字 —— 費率同樣從後端來，不在文案裡再抄一份數字。 */
 function _proTaxTitle() {
     const r = _wh();
@@ -585,7 +606,9 @@ function _renderDetail() {
                                     if (det.source && !list.includes(det.source)) list.unshift(det.source);
                                     return list.map((s) => `<option value="${esc(s)}"${det.source === s ? ' selected' : ''}>${label(s)}</option>`).join('');
                                 })()}
-                            </select></td></tr>
+                            </select>${p.source_mixed
+                                ? `<div style="font-size:11px;color:#9ca3af;margin-top:2px;" title="各母帳案的案源不同：代辦費只算走代開那幾案的份額；這格是 owner 自己填那部分的案源">混合：${esc((p.parent_shares || []).map((sh) => `${sh.name} ${sh.source || det.source || '—'} ${fmtNum(sh.amount)}`).join('、'))}</div>`
+                                : ''}</td></tr>
                         <tr id="fpl-fee-row">
                             <td style="color:#bbb;">服務費率 %</td>
                             <td>${money('fpl-feepct', det.fee_pct || _defaultFeePct())}</td></tr>
@@ -700,8 +723,11 @@ function _renderDetail() {
         const feeEl = document.getElementById('fpl-c-invoice_fee');
         const row = document.getElementById('fpl-fee-row');
         if (!feeEl || !row) return;
-        const isAgency = src === '代開發票';
-        const isPro = src === '執行業務所得';
+        const c = Number(document.getElementById('fpl-contract')?.value) || 0;
+        const bases = _feeBases(c, src);
+        // 分案：表單案源不是代開、但有母帳案走代開 → 代辦費那幾格照樣要算、要顯示
+        const isAgency = src === '代開發票' || bases.agency > 0;
+        const isPro = src === '執行業務所得' || bases.pro > 0;
         row.style.display = isAgency ? '' : 'none';
         const dedRow = document.getElementById('fpl-feeded-row');
         if (dedRow) dedRow.style.display = isAgency ? '' : 'none';
@@ -710,18 +736,18 @@ function _renderDetail() {
         const taxEl = document.getElementById('fpl-c-tax_fee');
         const buyEl = document.getElementById('fpl-c-buy_invoice');
         [taxEl, buyEl].forEach((el) => { if (el) el.disabled = isAgency; });
-        const c = Number(document.getElementById('fpl-contract')?.value) || 0;
         if (isAgency) {
-            // 同後端 apply_source_fee：代辦費=營收×費率；稅金=未稅×營業稅率；
-            // 買發票=差額。🔴 兩個費率都吃後端回的（同 _wh() 那條）——
-            // 寫死 8 與 5 的話，費率一改預覽就跟存進去的值不一致。
+            // 同後端 apply_source_fee：代辦費=基數×費率；稅金=基數未稅×營業稅率；
+            // 買發票=差額。基數＝走代開的份額（_feeBases），不是整案。🔴 兩個費率都吃後端回的
+            // （同 _wh() 那條）—— 寫死 8 與 5 的話，費率一改預覽就跟存進去的值不一致。
             const vat = Number((_detail && _detail.agency || {}).vat_pct) || 0;
             const pct = Number(document.getElementById('fpl-feepct')?.value) || _defaultFeePct();
-            const auto = Math.round(c * pct / 100);
+            const base = bases.agency;
+            const auto = Math.round(base * pct / 100);
             // 剛換案源、或這格還沒被人決定過 → 填試算值；人調過的留住
             if (sourceChanged || !feeManual) feeEl.value = auto || '';
             const fee = Number(feeEl.value) || 0;
-            const tax = vat ? Math.round(c / (1 + vat / 100) * (vat / 100)) : 0;
+            const tax = vat ? Math.round(base / (1 + vat / 100) * (vat / 100)) : 0;
             if (taxEl) taxEl.value = tax || '';
             if (buyEl) buyEl.value = (fee - tax) || '';
             _liveSum();
@@ -742,7 +768,7 @@ function _renderDetail() {
             // 模組級「上次試算值」做值比對，那個基準活不過面板重畫，還得在
             // 每次 render 手動重新校準。
             if (isPro && (sourceChanged || !taxManual)) {
-                ptEl.value = _proTax(c) || '';
+                ptEl.value = _proTax(bases.pro) || '';
                 _liveSum();
             }
         }

@@ -31,7 +31,8 @@ from config import load_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
 # 欄位定義與算式的正本在 core（腳本與測試也 import 同一份 —— 見該檔頭）
 from core.crm_logic import split_gross
-from core.ledger_project import (COST_FIELDS, DEFAULT_FEE_PCT, NHI_MIN_PAYMENT,
+from core.ledger_project import (BY_PARENT_PENDING_KEY, COST_FIELDS, DEFAULT_FEE_PCT, NHI_MIN_PAYMENT,
+                                 fee_bases, parent_shares, source_mixed,
                                  NHI_PCT, VAT_PCT, WITHHOLD_TAX_EXEMPT,
                                  WITHHOLD_TAX_PCT, apply_crm_costs,
                                  client_wire, payout_total, settle_state,
@@ -477,6 +478,7 @@ async def project_ledger_detail(project_id: str, request: Request,
         _pn = [n for _pid, n in _pl]
     _d, _cost_src = apply_crm_costs(norm_detail(p.ledger_detail), _crm)
     _net, _check = compute(int(p.contract_amount or 0), _d)
+    _sh = parent_shares(_d)
     return {
         "project": {
             "id": p.id, **_display_fields(p, _pn),
@@ -484,6 +486,12 @@ async def project_ledger_detail(project_id: str, request: Request,
             # 1:1 連結時識別欄由母帳決定，私帳這邊鎖住（LOCKED_WHEN_LINKED）
             "parent_links": [{"id": pid, "name": n} for pid, n in _pl],
             "locked_fields": list(LOCKED_WHEN_LINKED) if len(_pl) == 1 else [],
+            # 分案記帳（core.ledger_project.by_parent）：各母帳案的份額與案源；前端的代辦費試算要照
+            # fee_bases 的規則算基數（只算走代開的份額 ＋ owner 自己那部分跟 X 的案源走），不能用整案
+            "parent_shares": [{"parent_id": pid, "name": n, **_sh[pid]} for pid, n in _pl if pid in _sh],
+            "shares_pending": _d.get(BY_PARENT_PENDING_KEY) is True,
+            "fee_bases": dict(zip(("agency", "pro"), fee_bases(int(p.contract_amount or 0), _d))),
+            "source_mixed": source_mixed(_d),
             "client": client.short_name if client else "",
             "status": p.status or "", "type": p.project_type or "",
             "close_date": _fmt_day(p.completion_date),
