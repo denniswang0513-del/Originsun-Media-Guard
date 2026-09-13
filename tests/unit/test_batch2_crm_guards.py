@@ -126,7 +126,7 @@ def test_duplicate_and_project_types_take_crm_projects_import_stays_admin():
         body = _body("routers/crm/projects.py", f"async def {fn}(")
         assert "_check_project_write_auth(request)" in body, fn
         assert "_check_auth(request)" not in body, fn
-    imp = _body("routers/crm/projects.py", "async def import_projects_csv(")
+    imp = _body("routers/crm/project_import.py", "async def import_projects_csv(")   # 2026-09-13 從 projects.py 拆出
     assert "_check_auth(request)" in imp
 
 

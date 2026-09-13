@@ -129,7 +129,7 @@ def test_all_six_importers_use_the_shared_mapper():
 
     from tests.unit._srcscan import repo_src
     for path in ('routers/crm/finance.py', 'routers/crm/clients.py',
-                 'routers/crm/projects.py', 'routers/crm/staff.py'):
+                 'routers/crm/project_import.py', 'routers/crm/staff.py'):   # 2026-09-13 專案 CSV 匯入拆出
         src = repo_src(path)
         assert 'map_csv_row(' in src, f'{path} 沒用共用的別名對映'
         # 不准再出現自己寫的那個迴圈

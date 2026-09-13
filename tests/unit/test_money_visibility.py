@@ -382,6 +382,9 @@ def test_every_project_enumeration_decides_about_mine():
         "routers/api_proposals.py", "routers/api_references.py",
         "routers/crm/staff.py", "routers/crm/clients.py",
         # 伺服器端名稱比對／匯入去重，不回給前端當清單
+        # 2026-09-13 projects.py 拆檔：專案 CSV 匯入的去重（select(CrmProject) 建 name→列的 map）落到 project_import.py，
+        # 理由沒變（管理員限定、不回清單）
+        "routers/crm/project_import.py",
         # 🔴 2026-08-30 finance.py 拆成四個檔，做「CSV 匯入時用專案名比對」的那段
         # 落到 payments.py —— 豁免的理由沒變（不回給前端當清單），只是換了檔案。
         "routers/crm/payments.py",

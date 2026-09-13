@@ -22,7 +22,7 @@ from core.schemas_website import WorkChildCreateRequest, WorkChildCreateResponse
 from core.auth import check_admin_or_module
 from ._shared import (router, _check_website_auth, _require_db, _get_factory,
                       _mark_dirty_safe, _now)
-from .projects import _WEBSITE_PROD_STAGES, _work_items_for_project
+from .project_closing import _WEBSITE_PROD_STAGES, _work_items_for_project
 from .showcase import _mint_showcase_edit_token, _toggle_publish
 
 try:
