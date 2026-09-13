@@ -128,11 +128,21 @@ def post_transcode(ip: str, sources: List[str], dest_dir: str,
     """把一批檔案派給某台。成功回 True。"""
     if ip == "local":
         try:
+            import asyncio
+            from core import state  # type: ignore
             from core.worker import enqueue_job  # type: ignore
             from core.schemas import TranscodeRequest  # type: ignore
             req = TranscodeRequest(sources=sources, dest_dir=dest_dir,
                                    project_name=project_name)
-            enqueue_job(req, project_name or "takeover", "transcode")
+            # reconcile_tick 跑在 to_thread 的執行緒上、enqueue_job 是 async：
+            # 橋回主 loop 才真的進佇列（裸呼叫＝沒人 await 的 coroutine，任務消失
+            # 但這裡回 True → 這批檔沒人做也沒人再改派）。同 drone_watcher。
+            loop = state.get_main_loop()
+            if not (loop and loop.is_running()):
+                raise RuntimeError("主 loop 未啟動")
+            asyncio.run_coroutine_threadsafe(
+                enqueue_job(req, project_name or "takeover", "transcode"), loop
+            ).result(timeout=30)
             return True
         except Exception as e:
             _log.warning("改派本機 enqueue 失敗: %s", e)

@@ -235,3 +235,50 @@ def test_poison_file_stops_after_max_attempts(tmp_path, monkeypatch):
     assert len(bad_sends) == dr.MAX_ATTEMPTS, f"壞檔被改派 {len(bad_sends)} 次"
     assert dr.active_records() == [], "對帳不能永遠不結案"
     assert fleet.alerts[-1][1] is False, "放棄的檔案要出聲，不能默默丟掉"
+
+
+# ── local 這一台：走行程內佇列，不走 HTTP ─────────────────────────
+# _Fleet 把 _host_status／post_transcode 整個換掉，所以下面兩個 local 分支
+# 在上面的測試裡從來沒被執行過 —— 這裡直接打。
+
+class TestLocalHost:
+    @pytest.fixture
+    def main_loop(self):
+        import asyncio
+        import threading
+        from core import state
+
+        loop = asyncio.new_event_loop()
+        t = threading.Thread(target=loop.run_forever, daemon=True)
+        t.start()
+        prev = state.get_main_loop()
+        state.set_main_loop(loop)
+        try:
+            yield loop
+        finally:
+            state.set_main_loop(prev)
+            loop.call_soon_threadsafe(loop.stop)
+            t.join(timeout=5)
+            loop.close()
+
+    def test_post_transcode_local_awaits_enqueue(self, main_loop):
+        """改派給本機要真的進佇列：enqueue_job 是 async，reconcile_tick 跑在
+        to_thread 的執行緒上，得橋回主 loop；裸呼叫只會做出沒人 await 的 coroutine。"""
+        from unittest.mock import patch
+
+        with patch("core.worker.enqueue_job") as mock_enqueue:   # async def → AsyncMock
+            mock_enqueue.return_value = ("jobid", None)
+            ok = dr.post_transcode("local", ["//nas/src/A001.MP4"], "//nas/proxy/T", "PROJ")
+        assert ok is True
+        assert mock_enqueue.await_count == 1
+
+    def test_post_transcode_local_without_loop_reports_failure(self, monkeypatch):
+        """主 loop 沒起就不能回 True —— 回 True 的話這批檔就沒人做也沒人改派。"""
+        from unittest.mock import patch
+        from core import state
+
+        monkeypatch.setattr(state, "_main_loop", None)
+        with patch("core.worker.enqueue_job") as mock_enqueue:
+            ok = dr.post_transcode("local", ["//nas/src/A001.MP4"], "//nas/proxy/T", "PROJ")
+        assert ok is False
+        assert mock_enqueue.await_count == 0

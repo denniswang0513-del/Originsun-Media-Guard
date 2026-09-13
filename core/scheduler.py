@@ -171,6 +171,21 @@ def _ping_host(ip: str, timeout: float = 3.0) -> bool:
         return False
 
 
+def _enqueue_from_thread(req, project_name: str, task_type: str) -> tuple:
+    """排程 tick 跑在 `asyncio.to_thread` 的執行緒上，而 `enqueue_job` 是 async：
+    要橋回主 loop 才真的進佇列。裸呼叫 `enqueue_job(...)` 只會做出一個沒人 await
+    的 coroutine —— 任務靜默消失，但呼叫端照樣 dispatched += 1、排程照樣被標成
+    已跑（one-shot 還會被 disable）。主 loop 沒起就 raise，讓呼叫端走既有的
+    except → warning、不計數。同 drone_watcher.check_and_fire 的做法。"""
+    from core.worker import enqueue_job  # type: ignore
+    loop = state.get_main_loop()
+    if not (loop and loop.is_running()):
+        raise RuntimeError("主 loop 未啟動，無法 enqueue")
+    fut = asyncio.run_coroutine_threadsafe(
+        enqueue_job(req, project_name, task_type), loop)
+    return fut.result(timeout=30)
+
+
 def dispatch_distributed_transcode(
     source_dirs: list,
     dest_dir: str,
@@ -230,10 +245,9 @@ def dispatch_distributed_transcode(
         if ip == "local":
             # 本機直接 enqueue
             try:
-                from core.worker import enqueue_job  # type: ignore
                 host_dest = os.path.join(dest_dir, f"HostDispatch_{host_name}") if len(reachable) > 1 else dest_dir
                 req = TranscodeRequest(sources=sources, dest_dir=host_dest, project_name=project_name)
-                enqueue_job(req, project_name or "scheduled", "transcode")
+                _enqueue_from_thread(req, project_name or "scheduled", "transcode")
                 dispatched += 1
                 assignments.append({"name": host_name, "ip": ip,
                                     "dest_dir": host_dest, "sources": sources})
@@ -293,8 +307,6 @@ def _check_and_dispatch() -> int:
     回傳本次觸發的排程數量。
     DB 優先，JSON fallback。
     """
-    from core.worker import enqueue_job  # type: ignore
-
     due_tasks = []  # list of (schedule_id, task_type, req_data, name)
     used_db = False
 
@@ -408,7 +420,7 @@ def _check_and_dispatch() -> int:
             try:
                 req = build_request(task_type, req_data)
                 project_name = getattr(req, "project_name", name)
-                enqueue_job(req, project_name, task_type)
+                _enqueue_from_thread(req, project_name, task_type)
                 dispatched += 1
             except Exception as e:
                 _log.warning("排程 %s dispatch 失敗: %s", schedule_id, e)

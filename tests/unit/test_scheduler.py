@@ -19,6 +19,29 @@ def tmp_schedule_file(tmp_path, monkeypatch):
     return path
 
 
+@pytest.fixture
+def main_loop():
+    """背景執行緒上跑一個主 loop 並註冊給 core.state —— 排程 tick 是 sync、跑在
+    to_thread 的執行緒上，enqueue_job 是 async，真正的進佇列要靠這個 loop。
+    沒有它，`_check_and_dispatch` 只會做出一個沒人 await 的 coroutine。"""
+    import asyncio
+    import threading
+    from core import state
+
+    loop = asyncio.new_event_loop()
+    t = threading.Thread(target=loop.run_forever, daemon=True)
+    t.start()
+    prev = state.get_main_loop()
+    state.set_main_loop(loop)
+    try:
+        yield loop
+    finally:
+        state.set_main_loop(prev)
+        loop.call_soon_threadsafe(loop.stop)
+        t.join(timeout=5)
+        loop.close()
+
+
 # ── Tests ────────────────────────────────────────────────────
 
 
@@ -176,6 +199,67 @@ class TestBuildRequest:
 
 
 class TestCheckAndDispatch:
+    @pytest.fixture(autouse=True)
+    def _loop(self, main_loop):
+        pass
+
+    def test_dispatch_awaits_enqueue(self, tmp_schedule_file):
+        """enqueue_job 是 async；排程 tick 必須把它橋回主 loop 真的執行，
+        不是只「呼叫」它（裸呼叫 = 建一個沒人 await 的 coroutine，任務靜默消失、
+        但 dispatched 照樣 +1、排程照樣被標成已跑）。"""
+        from core.scheduler import save_schedules, _check_and_dispatch
+
+        past = (datetime.now() - timedelta(minutes=5)).isoformat(timespec="seconds")
+        save_schedules([{
+            "schedule_id": "test-await",
+            "name": "Await Task",
+            "cron": "0 2 * * *",
+            "task_type": "backup",
+            "enabled": True,
+            "next_run": past,
+            "request": {
+                "project_name": "P",
+                "local_root": "D:/B",
+                "nas_root": "Z:/B",
+                "proxy_root": "D:/P",
+                "cards": [["C", "U:/S"]],
+            },
+        }])
+
+        with patch("core.worker.enqueue_job") as mock_enqueue:   # async def → AsyncMock
+            mock_enqueue.return_value = ("jobid", None)
+            count = _check_and_dispatch()
+            assert count == 1
+            assert mock_enqueue.await_count == 1
+
+    def test_dispatch_without_main_loop_is_not_counted(self, tmp_schedule_file, monkeypatch):
+        """主 loop 沒起（服務啟動前 30 秒、或測試環境）：不能假裝派出去了。"""
+        from core import state
+        from core.scheduler import save_schedules, _check_and_dispatch
+
+        monkeypatch.setattr(state, "_main_loop", None)
+        past = (datetime.now() - timedelta(minutes=5)).isoformat(timespec="seconds")
+        save_schedules([{
+            "schedule_id": "test-noloop",
+            "name": "No Loop",
+            "cron": "0 2 * * *",
+            "task_type": "backup",
+            "enabled": True,
+            "next_run": past,
+            "request": {
+                "project_name": "P",
+                "local_root": "D:/B",
+                "nas_root": "Z:/B",
+                "proxy_root": "D:/P",
+                "cards": [["C", "U:/S"]],
+            },
+        }])
+
+        with patch("core.worker.enqueue_job") as mock_enqueue:
+            count = _check_and_dispatch()
+            assert count == 0
+            assert mock_enqueue.await_count == 0
+
     def test_dispatch_due_schedule(self, tmp_schedule_file):
         from core.scheduler import save_schedules, _check_and_dispatch
 
