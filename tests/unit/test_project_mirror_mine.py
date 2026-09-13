@@ -12,6 +12,7 @@ from types import SimpleNamespace as NS
 
 from core.ledger_project import (MIRROR_SOURCE, mirror_amount, mirror_detail,
                                  mirror_lines)
+from tests.unit._srcscan import crm_projects_core_src
 from tests.unit._srcscan import (code_only, func_body, js_code_only,
                                  js_func_body, repo_src, projects_src)
 
@@ -298,7 +299,7 @@ def test_the_conflict_dialog_shows_both_sides_before_asking():
     """🔴 只給三顆按鈕不給數字，等於要他憑印象賭一把 —— 視窗要把兩邊的工項
     並排列出來。私帳那份可能是照實際請款填的，也可能是舊估算，沒有哪一邊
     先天是對的。"""
-    js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-core.js"))
+    js = js_code_only(crm_projects_core_src())
     fn = js_func_body(js, "function _pmmDrawConflict(")
     assert "私帳現有" in fn and "CRM 成本行" in fn
     for mode in ("overwrite", "keep", "import"):
@@ -351,7 +352,7 @@ def test_sharing_one_mine_project_adds_instead_of_overwriting():
     assert 'mode in ("overwrite", "add")' in body
     assert "merge_split(" in body, "併法又在 router 裡自己寫了一次"
     assert "int(t.contract_amount or 0) + delta" in body, "add 沒有累加合約金額"
-    js = repo_src("frontend/tabs/crm/crm-projects-core.js")
+    js = crm_projects_core_src()
     assert "'add', '加進去'" in js, "UI 沒有給「加進去」這個選項"
 
 
@@ -386,7 +387,7 @@ def test_resyncing_a_linked_case_never_creates_a_second_mirror():
 def test_the_relink_dialog_hides_the_create_option_and_defaults_to_overwrite():
     """重新同步的視窗不給「建立新專案」（那會多一個分身），而且「加進去」
     要退到後面 —— 同一案重新同步時加會讓同一筆錢算兩次。"""
-    js = repo_src("frontend/tabs/crm/crm-projects-core.js")
+    js = crm_projects_core_src()
     fn = js_code_only(js_func_body(js, "window._projMirrorMine = async function (id, mirrorOpts = {}) {"))
     assert "const relink = !!chk.linked;" in fn
     assert "relink ?" in fn and 'id="pmm-target"' in fn

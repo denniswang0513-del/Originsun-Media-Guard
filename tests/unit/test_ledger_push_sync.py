@@ -11,6 +11,7 @@ from types import SimpleNamespace as NS
 from core.ledger_project import (LINK_SYNC_FIELDS, MIRROR_TOTAL_KEY,
                                  mirror_detail, mirror_stale, norm_detail,
                                  sync_from_parent)
+from tests.unit._srcscan import crm_projects_core_src
 from tests.unit._srcscan import code_only, func_body, repo_src, projects_src
 
 _PROJ = projects_src()
@@ -246,7 +247,7 @@ def test_crm_push_button_asks_which_kind_first():
     """「推送到私帳」先問是哪一種（公司付我一部分／走代開／記錯帳本），再分流到分身或換帳本。
     使用者不必知道要按哪一顆。"""
     from tests.unit._srcscan import js_code_only, js_func_body
-    js = repo_src("frontend/tabs/crm/crm-projects-core.js")
+    js = crm_projects_core_src()
     fn = js_code_only(js_func_body(js, "window._projPushMine = async function (id, linked) {"))
     for kind in ("'share'", "'passthrough'", "'own'"):
         assert kind in fn, kind
@@ -258,7 +259,7 @@ def test_crm_push_button_asks_which_kind_first():
 def test_crm_stale_hint_trusts_the_backend_verdict():
     """「私帳落後了沒」的判定正本在後端（mirror_stale）—— 前端只畫三值，不自己比 Σsplit。"""
     from tests.unit._srcscan import js_code_only, js_func_body
-    js = repo_src("frontend/tabs/crm/crm-projects-core.js")
+    js = crm_projects_core_src()
     fn = js_code_only(js_func_body(js, "window._projMirrorStaleHint = async function (id, btn, note) {"))
     assert "chk.stale === true" in fn and "chk.stale === false" in fn
     assert "split" not in fn, "前端又自己算了一份"
@@ -274,7 +275,7 @@ def test_crm_stale_hint_trusts_the_backend_verdict():
 
 def test_crm_move_to_mine_asks_the_source_and_lists_blockers():
     from tests.unit._srcscan import js_code_only, js_func_body
-    js = repo_src("frontend/tabs/crm/crm-projects-core.js")
+    js = crm_projects_core_src()
     fn = js_code_only(js_func_body(js, "window._projMoveLedger = async function (id, opts = {}) {"))
     assert 'id="pml-source"' in fn and "chk.source_default" in fn
     assert "chk.has_passthrough_invoice" in fn
@@ -287,7 +288,7 @@ def test_crm_move_to_mine_asks_the_source_and_lists_blockers():
 def test_crm_mirror_dialog_uses_a_searchable_select():
     """400 筆私帳案塞原生 select 找不到東西（專案對應那頁早就是可搜尋的）。"""
     from tests.unit._srcscan import js_code_only, js_func_body
-    js = repo_src("frontend/tabs/crm/crm-projects-core.js")
+    js = crm_projects_core_src()
     fn = js_code_only(js_func_body(js, "window._projMirrorMine = async function (id, mirrorOpts = {}) {"))
     assert "searchableSelect(sel, { placeholder: '搜尋私帳案…' })" in fn
     assert "chk.warning" in fn, "沒有成本行的警告要畫出來"
@@ -344,7 +345,7 @@ def test_passthrough_copy_keeps_the_parent_case_and_uses_its_contract():
     from core.schemas import ProjectMirrorPayload
     assert "source" in ProjectMirrorPayload.model_fields
     from tests.unit._srcscan import js_code_only, js_func_body
-    js = repo_src("frontend/tabs/crm/crm-projects-core.js")
+    js = crm_projects_core_src()
     fn = js_code_only(js_func_body(js, "window._projPushMine = async function (id, linked) {"))
     assert 'name="ppm-pt"' in fn and "window._projMirrorMine(id, { source: '代開發票' })" in fn
 

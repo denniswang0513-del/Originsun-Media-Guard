@@ -5,6 +5,7 @@
 I/O 在 routers/crm/project_links.apply_billing_mode／link_note_for。"""
 from core.ledger_project import (BILLING_LABELS, BILLING_MIRROR_SOURCE, BILLING_MODES, FEE_DEDUCTED_KEY,
                                  LINK_SYNC_FIELDS, MIRROR_AT_KEY, billing_mode_of, link_note, norm_detail)
+from tests.unit._srcscan import crm_projects_core_src
 from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import code_only, flow_body, func_body, js_code_only, js_func_body, projects_src, repo_src
 
@@ -150,7 +151,7 @@ def test_frontend_wiring():
     assert 'id="proj-f-billing_mode"' in html and 'id="proj-f-link-note"' in html
     for v in ("company", "passthrough", "cash"):
         assert f'value="{v}"' in html
-    core = js_code_only(repo_src("frontend/tabs/crm/crm-projects-core.js"))
+    core = js_code_only(crm_projects_core_src())
     assert "'billing_mode'" in js_code_only(core), "_FIELDS 沒有它 → 表單存不進去"
     # 後期代開且未連結 → 不問、直接建代開分身；其他照舊彈窗
     push = code_only(core[core.index("window._projPushMine = "):])
@@ -179,7 +180,7 @@ def test_link_note_html_and_billing_tag_in_node():
     stale===true 才掛「私帳落後」；billingTagHtml 對 company 回空字串。用 node 跑，輸出只印 ASCII。"""
     import subprocess
     from tests.unit._srcscan import _REPO as REPO
-    src = js_code_only(repo_src("frontend/tabs/crm/crm-projects-core.js"))
+    src = js_code_only(crm_projects_core_src())
     body = "\n".join(js_func_body(src, f"export function {fn}(").replace("export ", "", 1)
                      for fn in ("billingTagHtml", "linkNoteHtml"))
     consts = src[src.index("export const BILLING_LABELS"):src.index("export function billingTagHtml(")].replace("export ", "")

@@ -44,6 +44,7 @@ const _openDelivery = (pid) => {
     return r;
 };
 import { loadProjectTypes } from './crm-projects-core.js';
+import './crm-projects-ledger.js';   // 母帳 ↔ 私帳（推送／換帳本／分身）：window._proj*，2026-09-13 從 core 拆出
 import { loadPayTab, loadClosingBanner } from './crm-projects-pay.js';
 import { loadCostGroups, renderGroupSwitcher, initCostGroupsHandlers } from './crm-projects-cost-groups.js';
 

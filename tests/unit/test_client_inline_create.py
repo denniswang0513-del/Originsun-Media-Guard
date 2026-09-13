@@ -5,6 +5,7 @@
 推進 options.clients、選起來；專案的新案子與報價的客戶欄都掛 createClientOption（ui.js 一份，不各寫各的）。
 桌機：專案表單客戶下拉旁「沒有符合的？新增客戶」→ crm-projects-core.createClientInline（同報價彈窗那條）。
 """
+from tests.unit._srcscan import crm_projects_core_src
 from tests.unit._srcscan import js_code_only, js_func_body, repo_src
 
 
@@ -31,7 +32,7 @@ def test_mobile_project_and_quote_client_pickers_use_it():
 def test_desktop_project_form_has_new_client_button():
     html = repo_src("frontend/tabs/crm/crm-projects.html")
     assert 'id="proj-btn-new-client"' in html and "新增客戶" in html
-    core = js_code_only(repo_src("frontend/tabs/crm/crm-projects-core.js"))
+    core = js_code_only(crm_projects_core_src())
     body = js_func_body(core, "export async function createClientInline()")
     assert "_fetch('/clients', { method: 'POST'" in body and "crmCacheInvalidate('clients')" in body
     assert "_populateClientDropdown('proj-f-client_id', c.id)" in body, "建完要選起來"

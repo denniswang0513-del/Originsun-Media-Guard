@@ -6,6 +6,7 @@ CRM 專案表（GET /api/v1/crm/project-types）、私帳設定頁（api_finance
 手機版（api_crm_mobile options）。桌機下拉不准再自己讀 /api/settings/load 湊一份。
 """
 
+from tests.unit._srcscan import crm_projects_core_src
 from tests.unit._srcscan import code_only, func_body, js_code_only, repo_src
 
 
@@ -23,7 +24,7 @@ def test_backend_endpoints_share_project_type_vocab():
 
 
 def test_desktop_dropdown_and_editor_use_the_one_list():
-    js = js_code_only(repo_src("frontend/tabs/crm/crm-projects-core.js"))
+    js = js_code_only(crm_projects_core_src())
     assert "_fetch('/project-types')" in js
     assert "/api/settings/load" not in js, "案型不准再從 settings 自己湊一份"
     assert "_fetch('/project-types', { method: 'POST'" in js and "saveSettings({ project_types" not in js

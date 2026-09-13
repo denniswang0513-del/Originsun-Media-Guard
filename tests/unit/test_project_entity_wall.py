@@ -10,6 +10,7 @@ owner 2026-08-24 拍板：mine 專案（owner 私帳）與客戶全面共用 —
 import re
 from pathlib import Path
 
+from tests.unit._srcscan import crm_projects_core_src
 from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import (js_code_only, repo_src,
                                  js_func_body)
@@ -304,7 +305,7 @@ def test_pushed_projects_need_the_explicit_param():
     fn = src.split("async def list_projects(")[1].split("\n@router")[0]
     assert 'include_pushed: int = Query(0)' in fn
     assert 'entity == "parent" and include_pushed' in fn, "納入條件必須被參數守著"
-    js = (ROOT / "frontend/tabs/crm/crm-projects-core.js").read_text(encoding="utf-8")
+    js = crm_projects_core_src()
     assert "params.set('include_pushed', '1')" in js
 
 

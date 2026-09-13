@@ -6,6 +6,7 @@
 行內編輯走 PUT 部分更新（只送那一欄）且不觸發整列點擊。
 """
 from pathlib import Path
+from tests.unit._srcscan import crm_projects_core_src
 from tests.unit._srcscan import crm_css_src, js_func_body, projects_src
 
 
@@ -259,7 +260,7 @@ def test_move_button_only_for_accounts_with_finance_mine():
 
 def test_move_asks_before_it_moves():
     """換帳本前一定 confirm，而且先問後端能不能搬（不要讓人按了才吃 409）。"""
-    js = _read("frontend/tabs/crm/crm-projects-core.js")
+    js = crm_projects_core_src()
     fn = js.split("window._projMoveLedger = async function")[1]
     assert "ledger-move-check" in fn and "window.confirm(" in fn
     assert fn.index("ledger-move-check") < fn.index("window.confirm(")

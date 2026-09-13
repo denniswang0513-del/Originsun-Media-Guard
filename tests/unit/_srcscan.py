@@ -289,6 +289,13 @@ TIMESHEETS_FILES = ("_shared.py", "sync.py", "mine.py", "ledger.py", "projects.p
 #: 專案管理 2026-09-12 拆出「換帳本／推送／對應表」一段（那檔 1,979 行離 2,000 上限 21 行）
 PROJECTS_FILES = ("projects.py", "project_links.py", "project_map.py")
 COSTS_FILES = ("costs.py", "cost_groups.py", "cost_lines.py")
+CRM_PROJECTS_CORE_FILES = ("crm-projects-core.js", "crm-projects-ledger.js")
+
+
+def crm_projects_core_src() -> str:
+    """原本 `frontend/tabs/crm/crm-projects-core.js` 那一整個檔（列表／Modal ＋ 母帳↔私帳段串起來）。
+    2026-09-13 拆出 crm-projects-ledger.js；斷言釘的是「那顆鈕做了什麼」，不是它住在哪個檔。"""
+    return _split_file_src("frontend/tabs/crm", CRM_PROJECTS_CORE_FILES)
 
 
 def costs_src(header: str = "") -> str:
