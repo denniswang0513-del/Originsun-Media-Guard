@@ -495,11 +495,14 @@ def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=
                    "at": at or old["at"]}
     src = old.get("source") if source is None else str(source or "").strip()
     if restore_source:
-        src = old.get("prev_source") or MIRROR_SOURCE
+        src = old.get("prev_source") or MIRROR_SOURCE          # 換回：還原切換前的案源（沒記過退源日）
     elif prev_source and old.get("source") and old.get("source") != src:
-        shares[pid]["prev_source"] = old["source"]
-    elif old.get("prev_source") and not restore_source:
-        shares[pid]["prev_source"] = old["prev_source"]
+        shares[pid]["prev_source"] = old["source"]           # 切換：記住換之前的
+    elif old.get("prev_source"):
+        shares[pid]["prev_source"] = old["prev_source"]      # 其他改動：帶著走
+    # 這案離開抽費的案源（代開→其他、執行業務所得→其他）：那筆費用是為它調的，手動旗標一起放掉，
+    # 之後 apply_source_fee 才會照剩下的基數重算（否則手改的代辦費／個人稅款留在應收裡）
+    _release_fee_flags(d, old.get("source"), src)
     if src in SOURCES:
         shares[pid]["source"] = src
     d[BY_PARENT_KEY] = shares
@@ -601,6 +604,19 @@ def _freeze_hand_filled_fees(d: dict) -> None:
         d["manual"] = sorted(manual)
 
 
+def _release_fee_flags(d: dict, old_src, new_src) -> None:
+    """份額從抽費的案源換走（或被解除）：那種費用的手動旗標放掉。"""
+    manual = manual_fields(d)
+    if old_src == "代開發票" and new_src != "代開發票":
+        manual.discard("invoice_fee")
+    if old_src == "執行業務所得" and new_src != "執行業務所得":
+        manual.discard("personal_tax")
+    if manual:
+        d["manual"] = sorted(manual)
+    else:
+        d.pop("manual", None)
+
+
 def drop_parent_share(detail, contract, pid: str) -> tuple:
     """解除連結：把 `pid` 那案的份額從 X 扣掉（金額、工項都扣，工項扣到 0 為止）→ `(detail, contract)`。
     沒這案的記錄＝原樣回去（舊連結沒分案記錄時解除連結不動錢，跟以前一樣）。"""
@@ -609,12 +625,7 @@ def drop_parent_share(detail, contract, pid: str) -> tuple:
         return detail, contract
     dropped_src = share_source(d, parent_shares(d).get(pid))
     d, contract = set_parent_share(d, contract, pid, 0, {})
-    if dropped_src == "代開發票":
-        # 解除的是代開份額：代辦費的手動旗標一起放掉、照剩下的代開基數重算（同「換回」那條，無條件）
-        manual = manual_fields(d) - {"invoice_fee"}
-        d["manual"] = sorted(manual)
-        if not manual:
-            d.pop("manual", None)
+    _release_fee_flags(d, dropped_src, "")      # 解除：這案的費用旗標一起放掉（同「換回」那條，無條件）
     # 費用趁記錄還在的時候重算：這案份額已是 0，fee_bases 只剩別案 ＋ owner 自己的 —— 最後一個代開
     # 份額被拿掉時三欄在這裡歸零（手改的不動）。記錄拿掉之後 apply_source_fee 就看不出費用曾是分案算的。
     d = apply_source_fee(contract, d)

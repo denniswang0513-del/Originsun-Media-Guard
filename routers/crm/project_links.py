@@ -594,9 +594,11 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
             # 母帳合約額不是成本行，0 本來就是常態。
             # 同步過的案（有 mirror_total）成本行歸零就是歸零：那正是「私帳落後 −N」要
             # 讓他按「用 CRM 更新」清掉的狀態，降成 keep 的話那顆提示永遠清不掉。
+            _sh_now = parent_shares(keep).get(p.id) or {}
             if (mode in ("overwrite", "add") and not mir["total"]
-                    and (not sid or MIRROR_TOTAL_KEY not in keep)
-                    and _push_share_source(source, parent_shares(keep).get(p.id) or {}) != "代開發票"):
+                    and (not sid or not (_sh_now.get("synced_total") or (MIRROR_TOTAL_KEY in keep and not _sh_now)))
+                    and _push_share_source(source, _sh_now) != "代開發票"):
+                # 「同步過」看**這一案**份額的 synced_total（X 層級的 mirror_total 每次推送被最後一案覆寫，N:1 不準）
                 mode = "keep"
             if mode == "import":
                 # 反過來：私帳是正本，把它的工項寫成母公司的成本行。
@@ -848,6 +850,14 @@ async def _write_link(session, parent, mine):
         return
     if parent.mine_link_id and parent.mine_link_id != mine.id:
         raise HTTPException(status_code=409, detail="這個母帳案已經連到別的私帳案")
+    # 🔴 「連結之前 X 連著誰」要在寫指標**之前**查：寫了之後 autoflush 會把剛寫的指標查回來，
+    # 「連著的就是這案」永遠成立，對應表連結會把 owner 整筆合約認成那案的（第 9 輪 review）。
+    from core.ledger_project import parent_shares as _ps0, norm_detail as _nd0, BY_PARENT_PENDING_KEY as _PK0
+    _keep0 = _nd0(mine.ledger_detail)
+    linked_before = []
+    if parent.id not in _ps0(_keep0) and not _ps0(_keep0) and _keep0.get(_PK0) is not True:
+        from ._shared import mine_parent_links
+        linked_before = [pid for pid, _n in (await mine_parent_links(session, [mine.id])).get(mine.id) or []]
     parent.mine_link_id = mine.id
     parent.updated_at = _now()
     if not mine.source_project_id:
@@ -863,14 +873,12 @@ async def _write_link(session, parent, mine):
     if parent.id not in parent_shares(keep):
         legacy_self = False
         if not parent_shares(keep) and keep.get(BY_PARENT_PENDING_KEY) is not True:
-            # X 沒任何記錄卻已經連著案（舊資料，回填沒跑到）：連著別案 → X 上的錢是那些案的，先標待認領，
-            # 之後推它們才是 claim；連著的就是這案（舊形狀）→ 直接舊認領（同 _ensure_share 的退路）。
-            # 否則寫了這筆 0 份額就再也認不出舊資料，之後推送會把已在 X 上的錢再加一次
-            from ._shared import mine_parent_links
-            linked = [pid for pid, _n in (await mine_parent_links(session, [mine.id])).get(mine.id) or []]
-            if any(pid != parent.id for pid in linked):
+            # X 沒任何記錄卻**在連結之前**就連著案（舊資料，回填沒跑到）：連著別案 → X 上的錢是那些案的，
+            # 先標待認領，之後推它們才是 claim；連著的就是這案（舊形狀）→ 直接舊認領（同 _ensure_share 的退路）。
+            # 從沒連過 → 0 份額（X 上的錢全是 owner 自己的）
+            if any(pid != parent.id for pid in linked_before):
                 keep[BY_PARENT_PENDING_KEY] = True
-            elif parent.id in linked:
+            elif parent.id in linked_before:
                 legacy_self = True
         if legacy_self:
             from core.ledger_project import legacy_claim

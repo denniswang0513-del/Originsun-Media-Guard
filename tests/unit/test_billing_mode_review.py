@@ -464,3 +464,25 @@ async def test_switch_then_revert_restores_a_professional_income_share(monkeypat
     sh = parent_shares(t.ledger_detail)["A"]
     assert sh["source"] == "執行業務所得" and sh["amount"] == 100000
     assert t.ledger_detail["invoice_fee"] == 0 and t.ledger_detail["personal_tax"] == withholding(100000)
+
+
+async def test_link_reads_previous_links_before_writing_the_pointer(monkeypatch):
+    """第 9 輪 #1（高）：_write_link 要在寫指標**之前**查 X 連著誰 —— 寫了之後 autoflush 會查回自己，
+    「舊形狀同案」永遠成立，從沒連過的 X 會被整筆認給那案（解除就歸 0）。"""
+    from core.ledger_project import parent_shares
+    import routers.crm._shared as shared
+
+    parent = SimpleNamespace(id="A", mine_link_id=None, billing_mode="company", updated_at=None)
+    mine = SimpleNamespace(id="X", contract_amount=100000, ledger_detail={"source": "源日", "split": {"導演": 100000}},
+                           source_project_id=None, updated_at=None)
+
+    async def _links_like_autoflush(session, ids):        # 指標已寫就查得到自己（真 DB 的行為）
+        return {"X": [("A", "A")] if parent.mine_link_id == "X" or mine.source_project_id == "A" else []}
+    monkeypatch.setattr(shared, "mine_parent_links", _links_like_autoflush)
+
+    async def _sync(session, parent, mine, *, explicit=()):
+        return False
+    monkeypatch.setattr(pl, "_sync_pair", _sync)
+    await pl._write_link(None, parent, mine)
+    assert parent_shares(mine.ledger_detail)["A"]["amount"] == 0          # 從沒連過 → 0 份額，不是 100,000
+    assert mine.contract_amount == 100000

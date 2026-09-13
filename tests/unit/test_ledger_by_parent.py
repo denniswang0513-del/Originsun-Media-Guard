@@ -363,7 +363,7 @@ class TestPolishRound4:
         push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
         # BUG-32：降成 keep 的保護看份額的案源，不看 X 的
         assert '(source or keep.get("source") or MIRROR_SOURCE) != "代開發票"' not in push
-        assert '_push_share_source(source, parent_shares(keep).get(p.id) or {}) != "代開發票"' in push
+        assert '_push_share_source(source, _sh_now) != "代開發票"' in push
         # BUG-30：待認領期間已認領過的案再推 → 不再 claim（差額要進 X）
         assert "claim = _claim_on_push(pending, linked_before, p.id) and p.id not in parent_shares(keep)" in push
         # 第 7 輪起換回不再翻 X 的案源，「別案還走代開」的判斷跟著拿掉
@@ -516,3 +516,24 @@ class TestPolishRound8:
         # #7：前端混合案源時費率／已扣除也要送
         js = repo_src("frontend/tabs/finance/subviews/projects.js")
         assert "_feeBases(Number(g2('fpl-contract')) || 0, sEl.value).agency > 0" in js
+
+
+class TestPolishRound9:
+    def test_leaving_a_fee_bearing_source_releases_the_matching_manual_flag(self):
+        # #3：執行業務所得份額被解除／改案源 → 手改的個人稅款旗標放掉，不留在應收裡
+        from core.ledger_project import drop_parent_share, expected_cash_in
+        d, c = set_parent_share({"source": "源日"}, 20000, "A", 40000, {}, source="執行業務所得")
+        d["personal_tax"] = 5000
+        d = apply_source_fee(c, d, keep={"personal_tax"})
+        assert "personal_tax" in d["manual"]
+        d2, c2 = drop_parent_share(d, c, "A")
+        assert d2["personal_tax"] == 0 and expected_cash_in(c2, d2) == 20000
+        d3, _ = set_parent_share(d, c, "A", 40000, {}, source="源日")
+        assert "personal_tax" not in (d3.get("manual") or []) and apply_source_fee(c, d3)["personal_tax"] == 0
+
+    def test_keep_downgrade_looks_at_this_shares_synced_total(self):
+        # #2：N:1「用 CRM 更新」清「私帳落後」要看這案的 synced_total，不看 X 層級被別案覆寫的 mirror_total
+        from tests.unit._srcscan import code_only, func_body, projects_src
+        push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
+        assert '_sh_now.get("synced_total")' in push
+        assert 'and (not sid or MIRROR_TOTAL_KEY not in keep)' not in push

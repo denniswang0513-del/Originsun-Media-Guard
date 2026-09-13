@@ -396,7 +396,8 @@ def test_zero_total_never_overwrites_an_existing_mine_case():
     assert '!= "代開發票"' in seg.split('mode = "keep"')[0]
     # 只保護「手填的」（沒同步過、沒有 mirror_total）或「認不出是誰的」（沒綁人員檔案）：
     # 同步過的案成本行歸零就是歸零，那正是「私帳落後 −N」要讓他按「用 CRM 更新」清掉的狀態
-    assert '(not sid or MIRROR_TOTAL_KEY not in keep)' in seg.split('mode = "keep"')[0]
+    # 「同步過」看這一案份額的 synced_total（第 9 輪）；沒分案記錄的舊資料才看 X 層級的 mirror_total
+    assert '_sh_now.get("synced_total")' in seg.split('mode = "keep"')[0]
 
 
 def test_stale_is_unknown_when_the_account_has_no_staff_binding():
