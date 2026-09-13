@@ -4,6 +4,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 import { renderSheet, wireAutosave } from "/js/shared/ts-sheet.js";
 import { z, _z1MarkStale, _shiftDays, _dow, _mdLabel, _isPlan, _POST, whoIsMe } from "./ctx.js";
+import { loadReminders } from "./remind.js";
 
 /** 專案清單：工時的 project_options（timesheets 模組拿整份；綁定人員檔案的員工也給，多帶本人最近填過的）。 */
 export async function _logProjectOptions() {
@@ -20,7 +21,7 @@ async function _loadToday() {
     try { z.s.todayInfo = await z.mjson(z.api.today()); } catch (e) { z.s.todayInfo = { error: e.message, shoots: [], todos: [] }; }
     return z.s.todayInfo;
 }
-function _todayStripHtml(t, incomplete = [], planned = 0) {
+function _todayStripHtml(t, planned = 0) {
     const esc = z.esc;
     if (!t || t.error) return `<div class="today-strip"><span class="meta">${esc((t && t.error) || "")}</span></div>`;
     const shoots = (t.shoots || []).map(s => `<span>${esc(s.title || s.project_name || "")}${s.location ? " · " + esc(s.location) : ""}${s.start_time ? " · " + esc(s.start_time) : ""}</span>`).join("　");
@@ -38,7 +39,6 @@ function _todayStripHtml(t, incomplete = [], planned = 0) {
         ${journal}
         ${(t.leave_pending || []).length ? `<span><span class="k">請假待審</span>${t.leave_pending.length} 件</span>` : ""}
         ${t.milestones && t.milestones.total ? `<span><span class="k">本週里程碑</span>${t.milestones.total} 個、今天到期 <span class="${t.milestones.due_today.length ? "warn" : ""}">${t.milestones.due_today.length} 個</span>${t.milestones.due_today.length ? "（" + t.milestones.due_today.map(m => esc((m.assignee_name ? m.assignee_name + "：" : "") + m.title)).join("、") + "）" : ""}</span>` : ""}
-        ${incomplete.length ? `<span><span class="k">未完成</span>${incomplete.map(d => `<button type="button" class="linkish warn" data-z1="day-goto" data-day="${esc(d.date)}">${esc(_mdLabel(d.date))} 專案紀錄未完成</button>`).join("、")}</span>` : ""}
     </div>`;
 }
 /** 標題列（日期翻頁）—— 員工版與管理版共用。 */
@@ -99,24 +99,23 @@ export async function loadLog() {
     host.innerHTML = `<div class="empty">載入中…</div>`;
     if (z.manage && !z.who) return _loadTeamDay();        // 管理視角「全部」＝團隊當天，唯讀
     const isToday = s.logDay === z.today();
-    const other = z.manage && !whoIsMe();                 // 替別人填：沒有「我的今天」那條、沒有未完成提醒、沒有合併同案
-    let mine = null, err = "", incomplete = [];
-    // 四支互不相依，一起發（原本串著等，翻一天要吃四趟來回）；未完成提醒只畫在今天那條，翻到別天不抓
-    const [today, mineRes, incRes, opts] = await Promise.all([
+    const other = z.manage && !whoIsMe();                 // 替別人填：沒有「我的今天」那條、沒有合併同案
+    let mine = null, err = "";
+    // 三支互不相依，一起發（原本串著等，翻一天要吃幾趟來回）。「要補填」那條（沒填／草稿沒時數的日子、週記沒送出）
+    // 住在分頁鈕列上面（remind.js），每次重畫這一天順便重抓 —— 填完就消失
+    loadReminders();
+    const [today, mineRes, opts] = await Promise.all([
         _loadToday(),
         mjson(z.api.mineDay(s.logDay)).catch(e => ({ __err: e.message })),
-        // 近 30 天存了草稿卻沒填時數的日期 → 今天那條提醒「9/5 專案紀錄未完成」（owner 2026-09-07）
-        isToday && z.api.mineIncomplete() ? mjson(z.api.mineIncomplete()).catch(() => ({ days: [] })) : Promise.resolve({ days: [] }),
         s.logStages === null ? mjson(z.api.options()).catch(() => ({ stages: {} })) : Promise.resolve(null),
     ]);
     if (mineRes && mineRes.__err) err = mineRes.__err; else mine = mineRes;
-    incomplete = (incRes.days || []).filter(d => d.date !== z.today());
     if (opts) s.logStages = opts.stages || {};
     if (mine) s.logWorkTypes = mine.work_types || s.logWorkTypes;
     const canEdit = !mine || mine.editable !== false;     // own-scope 沒有 editable 欄；管理端點只給管理員 true
     host.innerHTML = `
         ${_logHeadHtml(isToday)}
-        ${isToday && today ? _todayStripHtml(today, incomplete, mine ? (mine.items || []).filter(_isPlan).length : 0) : ""}
+        ${isToday && today ? _todayStripHtml(today, mine ? (mine.items || []).filter(_isPlan).length : 0) : ""}
         ${other && mine ? `<div class="today-strip"><span><span class="k">替他填</span>${esc(z.who.name)}${canEdit ? "" : "（你不是管理員：只能看）"}</span><span class="meta">存進去的列跟他自己填的一樣（來源手填），他在員工頁看得到、也改得動。</span></div>` : ""}
         ${mine ? `
         <div id="z1-sheet"></div>

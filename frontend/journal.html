@@ -362,6 +362,13 @@ function postHeight() {
 
 if (EMBED) {
     document.documentElement.classList.add('embed-mode');
+    // 工作台「要補填」那條點「週記沒送出」→ 切到那一週（只認 YYYY-MM-DD 的週一；app 還沒 boot 完就先記著）
+    window.addEventListener('message', (e) => {
+        const d = e.data;
+        if (!d || d.type !== 'journal-goto-week' || !/^\d{4}-\d{2}-\d{2}$/.test(d.week_start || '')) return;
+        weekStart = d.week_start;
+        if (document.getElementById('app-view')?.style.display !== 'none') showView('week');
+    });
     // 在偵測當下就掛（不是等 boot 成功）— 載入中/未登入/連線錯誤三種畫面也要能回報高度
     const _m = document.querySelector('main');
     if (window.ResizeObserver && _m) new ResizeObserver(postHeight).observe(_m);
@@ -602,6 +609,7 @@ async function submitMine() {
         mine.status = 'submitted'; mine.submitted_at = d.submitted_at || new Date().toISOString();
         dirty = false;
         refreshState();
+        if (EMBED) window.parent?.postMessage({ type: 'journal-submitted', week_start: weekStart }, '*');   // 工作台「要補填」那條重抓
         flash('已送出');
         await refreshTeam();
     } finally { btn.disabled = false; }
@@ -805,6 +813,7 @@ async function refreshPerson() {
 // ── boot：mine+week 並行首載（mine 兼權限判定：401/403 → 登入提示卡；
 //    status 0 = 網路錯 → 連線錯誤卡）──
 (async function boot() {
+    const ws0 = weekStart;
     const [mr, wr] = await Promise.all(
         [api.mine(weekStart), api.week(weekStart), ensurePasteBase()]);   // 圖床基底一併預取
     if (mr.status === 401 || mr.status === 403) { showTop('auth-view'); return; }
@@ -813,6 +822,7 @@ async function refreshPerson() {
     const m = await mr.json(), week = await wr.json();
     showTop('app-view');
     renderWeek(m, week);
+    if (weekStart !== ws0) loadWeek();      // boot 途中工作台叫我們跳週（journal-goto-week）→ 補載那一週
 })();
 </script>
 </body>

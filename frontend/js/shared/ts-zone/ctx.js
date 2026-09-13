@@ -42,6 +42,7 @@ export const z = {
     hooks: {
         modalRoot: () => document.body,   // 專案檔案／里程碑彈窗掛哪
         journalHref: "",                  // 今天那條「上週回顧」要連去哪（空＝不畫那一格）
+        journalGoto: null,                // 要補填那條的「週記沒送出」點下去：跳到那一週（宿主決定怎麼跳；空＝只畫不跳）
         onAction: null,                   // (act, btn, ev) → 收了回 true（員工頁的兼職排班 pt-* 走這裡）
         onView: null,                     // (view) → 切了視圖（員工頁拿來記 localStorage）
         onWho: null,                      // (who) → 管理視角換了「看誰的」（宿主同步它的切換器）
@@ -67,8 +68,8 @@ export const whoIsOther = () => !!(z.manage && z.who && !whoIsMe());
 export function defaultApi() {
     return {
         today: () => "/api/v1/me/today",
+        reminders: () => "/api/v1/me/reminders",          // 要補填那條（remind.js）
         mineDay: (day) => "/api/v1/timesheets/mine?date=" + day,
-        mineIncomplete: () => "/api/v1/timesheets/mine/incomplete?days=30",
         options: () => "/api/v1/timesheets/options",
         projectOptions: () => "/api/v1/timesheets/project_options",
         mineRows: (from, to) => `/api/v1/timesheets/mine/rows?from=${from}&to=${to}`,
@@ -93,8 +94,8 @@ export function manageApi() {
     return {
         ...own,
         today: () => (whoIsMe() ? own.today() : null),
+        reminders: () => (whoIsMe() ? own.reminders() : null),
         mineDay: (day) => (whoIsMe() ? own.mineDay(day) : "/api/v1/timesheets/rows?date=" + day + (z.who ? "&staff_id=" + sid() : "")),
-        mineIncomplete: () => (whoIsMe() ? own.mineIncomplete() : null),
         mineRows: (from, to) => (whoIsMe() ? own.mineRows(from, to) : (z.who ? `/api/v1/timesheets/rows?from=${from}&to_day=${to}&staff_id=${sid()}` : null)),
         mineRow: (id) => (whoIsMe() ? own.mineRow(id) : "/api/v1/timesheets/rows/" + encodeURIComponent(id)),
         mineCreate: () => (whoIsMe() ? own.mineCreate() : "/api/v1/timesheets/manual"),

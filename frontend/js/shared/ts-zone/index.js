@@ -12,8 +12,10 @@ import { loadLog, mergeSameProject, undoMerge, resetToday, _logProjectOptions } 
 import { loadMyWeek, _renderMyWeek, _planOpenAdd, _planSubmitAdd, _planDelete, _planMove, _planFromMilestones, _planCopyLast, _planWireDnd, _planCardHtml } from "./plan.js";
 import { loadTeamWeek, _msToggleDone, _openMsModal } from "./team-week.js";
 import { loadFind, _renderFindTable, _openFindProject, _openProjectModal, mapSheetName, applySuggestedBudgets, setProjectBudget, reopenFindProject } from "./find.js";
+import { loadReminders } from "./remind.js";
 
 export { z, switchZ1, setWho, _z1MarkStale, resetToday, _logProjectOptions, _planCardHtml, loadLog, loadMyWeek, loadTeamWeek, loadFind };
+export { loadReminders as refreshReminders };
 export { _shiftDays, _dow, _mondayOf, _mdLabel, _prevWorkday, _isPlan, _POST, _PUT } from "./ctx.js";
 
 /** 掛載。`opts` 見 ctx.configure；`opts.first`＝一開始切到哪個視圖（沒鑰匙會退到第一個有鑰匙的）。 */
@@ -35,6 +37,9 @@ export function mountZone(opts) {
     host.addEventListener("change", (e) => { const cb = e.target.closest("input[data-ms-done]"); if (cb) _msToggleDone(cb.dataset.msDone, cb.checked, cb); });   // 週表那條帶上直接勾完成
     host.addEventListener("keydown", (e) => { const f = e.target.closest("#z1-plan .addform"); if (f && e.key === "Enter") { e.preventDefault(); _planSubmitAdd(f.dataset.day); } });
     _planWireDnd(host);
+    // 要補填那條（remind.js）：插在分頁鈕列上面，哪個視圖都看得到
+    if (!host.querySelector("#z1-remind")) host.querySelector(".views").insertAdjacentHTML("beforebegin", '<div id="z1-remind"></div>');
+    loadReminders();
     switchZ1(opts.first || "log");
     return z;
 }
@@ -79,7 +84,14 @@ export async function _z1Action(btn, ev) {
         if (el) el.textContent = rows.length ? `已存 ${rows.length} 列` + (noHours ? `，其中 ${noHours} 列還沒填時數（草稿，不進彙整）` : "") : "還沒有填任何一列";
         return;
     }
-    if (act === "day-goto") { s.logDay = btn.dataset.day || z.today(); return loadLog(); }
+    if (act === "day-goto") {
+        // 要補填那條點日期：切到「今天的專案紀錄」那一天（從別的視圖點也要到）；格子在下面，捲過去
+        s.logDay = btn.dataset.day || z.today();
+        if (z.s.view !== "log") { $("z1-log").dataset.stale = "1"; switchZ1("log"); } else await loadLog();
+        $("z1-log")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+    }
+    if (act === "journal-goto") { if (z.hooks.journalGoto) z.hooks.journalGoto(btn.dataset.week || ""); return; }
     if (act === "merge") return mergeSameProject();
     if (act === "unmerge") return undoMerge(btn.dataset.logId);
     if (act === "stages") {

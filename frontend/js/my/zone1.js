@@ -64,11 +64,27 @@ async function buildZone1() {
         hooks: {
             modalRoot: () => $("ws-view") || document.body,
             journalHref: "#ws-journal",
+            journalGoto: _journalGoto,  // 要補填那條「週記沒送出」：跳到第二區那一週
             onView: (v) => { try { localStorage.setItem(Z1_KEY, v); } catch (_) {} },
             onAction: _ptAction,      // 兼職排班視窗（pt-*）住在這一頁（owner 2026-09-11：保留獨立視窗，不併進共用視圖）
         },
     });
 }
+/** 要補填那條點「週記沒送出」：展開第二區的卡、叫內嵌的 /journal.html 切到那一週（postMessage）、捲過去。
+ *  iframe 收合時還沒載（cards.js 首次展開才給 src）：先展開，週次等它 boot 完再送一次。 */
+function _journalGoto(weekStart) {
+    const card = $("ws-journal")?.querySelector(".card");
+    if (card && card.classList.contains("folded")) card.querySelector(".card-head, .card-h")?.click();
+    const f = $("jr-frame");
+    const tell = () => f?.contentWindow?.postMessage({ type: "journal-goto-week", week_start: weekStart }, "*");
+    tell();
+    if (f && !f.dataset.gotoWired) { f.dataset.gotoWired = "1"; f.addEventListener("load", tell); }
+    $("ws-journal-h")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+window.addEventListener("message", (e) => {
+    // 內嵌週記送出了 → 要補填那條重抓（那一週從清單消失）
+    if (e.data && e.data.type === "journal-submitted" && window.TSZ) window.TSZ.refreshReminders();
+});
 /** 兼職排班視窗的按鈕（pt-*）：這一頁自己的，ts-zone 分派前先經過這裡；收了回 true。 */
 function _ptAction(act, btn) {
     if (!act || !act.startsWith("pt-")) return false;

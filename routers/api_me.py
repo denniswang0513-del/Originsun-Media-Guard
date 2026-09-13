@@ -445,6 +445,61 @@ async def my_today(request: Request):
     }
 
 
+@router.get("/reminders")
+async def my_reminders(request: Request):
+    """補填提醒（owner 2026-09-13）：近 30 天哪些工作日專案紀錄一列都沒填／只有草稿、近 6 週哪幾週的週記還沒送出。
+    只提醒在職的人（owner「只有在職需要」）；規則在 core.reminder_logic，這裡只撈資料。
+    週記那半邊要有 journal 鑰匙才算（沒鑰匙的人本來就寫不了）。前端「去填」鈕：專案紀錄跳到那一天、週記跳到那一週。"""
+    from core.hr_logic import PENDING_STATUS, is_active_staff
+    from core.leave_logic import as_date
+    from core.reminder_logic import LOG_LOOKBACK_DAYS, missing_journal_weeks, missing_log_days
+    from services.leave_service import holidays_map
+    from services.timesheet_self import own_filter
+    ident = await _me_bound(request, "me_worklog")
+    staff = ident["staff"]
+    today = date.today()
+    empty = {"active": False, "log_missing": [], "log_pending": [], "journals": [], "date": today.isoformat()}
+    if not is_active_staff(getattr(staff, "status", None)):
+        return empty
+    hire = as_date(getattr(staff, "hire_date", None))
+    d0 = midnight_of(today - timedelta(days=LOG_LOOKBACK_DAYS))
+    factory = db_factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet.work_date, Timesheet.status).where(own_filter(ident))
+            .where(Timesheet.work_date >= d0).where(Timesheet.status != "plan"))).all()
+        filled: dict = {}
+        for wd, st in rows:
+            filled.setdefault(tw_day(wd), set()).add(st or "")
+        leaves = (await session.execute(
+            select(HrLeaveRequest.start_date, HrLeaveRequest.end_date)
+            .where(HrLeaveRequest.staff_id == ident["staff_id"]).where(HrLeaveRequest.status == "已核准")
+            .where(HrLeaveRequest.end_date >= d0))).all()
+        leave_days = set()
+        for a, b in leaves:
+            a, b = as_date(a), as_date(b)
+            while a and b and a <= b:
+                leave_days.add(a)
+                a += timedelta(days=1)
+        holidays = await holidays_map(session)
+        statuses: dict = {}
+        if payload_grants(check_admin_or_module(request, "timesheets", ME_ZONE_MASTER), "journal"):   # 同守衛、只讀 payload
+            since = week_start_of(today) - timedelta(days=7 * 6)
+            shells = (await session.execute(
+                select(WorkJournal.week_start, WorkJournal.status).where(WorkJournal.username == (ident["username"] or ""))
+                .where(WorkJournal.week_start >= since))).all()
+            statuses = {ws: (st or "submitted") for ws, st in shells}    # 同 shell_status：status 空（migration 前建的）視為 submitted
+            journals = missing_journal_weeks(today, hire, statuses)
+        else:
+            journals = []
+    days = missing_log_days(today, hire, filled, holidays, leave_days)
+    return {"active": True, "date": today.isoformat(),
+            "log_missing": [d.isoformat() for d in days["missing"]],
+            "log_pending": [d.isoformat() for d in days["pending"]],
+            "journals": [{"week_start": ws.isoformat(), "status": st} for ws, st in journals],
+            "pending_status": PENDING_STATUS}
+
+
 @router.get("/team_week")
 async def team_week(request: Request, start: str = ""):
     """團隊的一週（§11）：人×日格子＝既有看板的週模式（案名＋小時＋內容、計畫淺灰），疊場次與休假。

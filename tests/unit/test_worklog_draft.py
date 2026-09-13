@@ -37,7 +37,9 @@ def test_sheet_saves_any_content_and_marks_drafts():
 
 def test_workspace_strip_reminds_incomplete_days_and_import_buttons_are_gone():
     html = my_page_src()
-    assert "/api/v1/timesheets/mine/incomplete?days=30" in html
-    assert 'data-z1="day-goto"' in html and "專案紀錄未完成" in html
+    # 2026-09-13 起「未完成」併進分頁鈕列上面的「要補填」那條（ts-zone/remind.js，/me/reminders 的 log_pending）
+    remind = repo_src("frontend/js/shared/ts-zone/remind.js")
+    assert '"/api/v1/me/reminders"' in repo_src("frontend/js/shared/ts-zone/ctx.js")
+    assert 'data-z1="day-goto"' in remind and "草稿還沒填時數" in remind
     assert 'data-z1="save">儲存草稿</button>' in html
     assert "import-shoots" not in html and "import-todos" not in html and "從場次帶入" not in html

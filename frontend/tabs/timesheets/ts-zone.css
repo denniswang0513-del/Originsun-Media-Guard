@@ -31,6 +31,7 @@
 #ts-root .ts-zone .today-strip .k { color: var(--sub); font-size: 12px; margin-right: 4px; }
 #ts-root .ts-zone .today-strip .warn { color: #fbbf24; }
 #ts-root .ts-zone .today-strip.absent { border-left: 3px solid #fbbf24; }
+#ts-root .ts-zone .today-strip.remind { border-left: 3px solid #f87171; }   /* 要補填（ts-zone/remind.js） */
 #ts-root .ts-zone .today-strip a { color: var(--acc); }
 #ts-root .ts-zone .sheet-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 #ts-root .ts-zone .sheet-note { font-size: 12px; color: var(--sub); line-height: 1.6; margin-top: 6px; }

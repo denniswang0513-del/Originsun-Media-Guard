@@ -36,7 +36,7 @@ def test_manage_api_is_separate_and_self_falls_back_to_own_scope():
         assert url not in own, url
         assert url in man, url
     # 看誰的＝自己：每一支都退回 own（跟員工頁一模一樣）；別人：替他填帶 staff_id
-    for k in ("today", "mineDay", "mineIncomplete", "mineRows", "mineRow", "mineCreate", "merge", "mergeUndo", "mergeLast"):
+    for k in ("today", "reminders", "mineDay", "mineRows", "mineRow", "mineCreate", "merge", "mergeUndo", "mergeLast"):
         assert f"{k}: (" in man and "whoIsMe() ?" in man, k
     assert "createBody: (rows) => (whoIsMe() ? { rows } : { staff_id: z.who.id, rows })" in man
     assert "sheetEndpoints: () => (whoIsOther() ?" in man
