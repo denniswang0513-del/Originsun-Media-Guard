@@ -1532,7 +1532,8 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   （用了 `copyText` 沒 import）。動前端時**自己 grep 一次「新用到的名字有沒有在 import 清單裡」**。
   2026-09-13 起 `test_js_parses::test_no_undefined_names_in_es_modules` 對**有 import/export 的檔**跑 no-undef
   （`window.X =` 過的名字與頁面級函式庫當全域，噪音為零；同日抓到 remote-dispatch.js 死碼清理漏的 `ms`）——
-  但 `js/my/`、`js/showcase-edit/` 那些**傳統 script** 不在守衛內（跨檔共用全域詞法環境，靠載入順序），還是要自己 grep。
+  `js/my/`、`js/showcase-edit/` 那些**傳統 script** 由同檔的 `test_no_undefined_names_in_classic_page_scripts` 守
+  （同頁所有傳統 script 的頂層宣告當全域；做過變異驗證）—— 但它不管載入順序，頂層立即執行引用後載檔的名字只有真瀏覽器抓得到。
 - **`core.worker.enqueue_job` 是 async，從執行緒呼叫一定要橋回主 loop**：排程 tick（`_check_and_dispatch`、
   `dispatch_distributed_transcode`）、對帳改派（`dispatch_reconcile.post_transcode`）、drone_watcher 都跑在
   `asyncio.to_thread` 的執行緒上。裸呼叫 `enqueue_job(...)` 不會報錯 —— 只會做出一個沒人 await 的 coroutine，

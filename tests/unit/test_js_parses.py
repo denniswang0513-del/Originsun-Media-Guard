@@ -119,3 +119,73 @@ def pathlib_rel(p):
         return str(pathlib.Path(p).relative_to(_REPO))
     except ValueError:
         return p
+
+
+# ── 傳統 script（my.html／showcase-edit.html）：同頁共用全域詞法環境 ──────────
+# 上面那支只掃 ES module。js/my/、js/showcase-edit/ 是 <script src> 依序載入的
+# 傳統 script，頂層 const／let／function 跨檔直接看得見（boot.js 檔頭有寫），
+# 所以這裡的「全域」多一層：同一頁所有傳統 script 的頂層宣告。不分先後 ——
+# 函式體內引用後載檔的名字，執行時已經存在；只有頂層立即執行才吃載入順序，
+# 那個這裡不管（regex 分不出來，交給真瀏覽器）。
+
+_TOPLEVEL_DECL = __import__("re").compile(
+    r"^(?:async\s+)?(?:function\s*\*?\s*|const\s+|let\s+|var\s+|class\s+)([A-Za-z_$][\w$]*)", __import__("re").M)
+
+
+def _classic_pages():
+    """{html 路徑: [同頁傳統 script 的 .js 路徑（依載入順序）]}，只收有的頁。"""
+    import pathlib
+    import re
+    repo = pathlib.Path(_REPO)
+    out = {}
+    for html in sorted((repo / "frontend").rglob("*.html")):
+        text = html.read_text("utf-8", "replace")
+        files = []
+        for m in re.finditer(r'<script([^>]*)src="([^"]+)"', text):
+            attrs, src = m.group(1), m.group(2).split("?")[0]
+            if 'type="module"' in attrs or src.startswith("http"):
+                continue
+            p = (html.parent / src).resolve()
+            if p.exists():
+                files.append(p)
+        if files:
+            out[html] = files
+    return out
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="這台沒有 node")
+@pytest.mark.skipif(not os.path.exists(os.path.join(_REPO, "node_modules", "eslint")),
+                    reason="沒裝 eslint（npm install）")
+def test_no_undefined_names_in_classic_page_scripts(tmp_path):
+    """每一頁的傳統 script 裡用到的名字都要有來源：自己宣告、同頁別支頂層宣告、或 window.* 過。"""
+    import json
+    import pathlib
+    repo = pathlib.Path(_REPO)
+    pages = _classic_pages()
+    assert pages, "掃不到任何傳統 script 頁？my.html／showcase-edit.html 改成 module 了就把這支拿掉"
+    globals_js = (repo / "node_modules" / "globals" / "index.js").as_uri()
+    shared = {n: "readonly" for n in list(_PAGE_LIBS) + _window_globals()}
+    bad = []
+    for html, files in pages.items():
+        page_names = set()
+        for f in files:
+            page_names |= set(_TOPLEVEL_DECL.findall(f.read_text("utf-8", "replace")))
+        extra = dict(shared, **{n: "writable" for n in page_names})
+        cfg = tmp_path / f"eslint.{html.stem}.mjs"
+        cfg.write_text(
+            f'import globals from "{globals_js}";\n'
+            "export default [{ files: ['**/*.js'],\n"
+            "  languageOptions: { ecmaVersion: 2022, sourceType: 'script',\n"
+            f"    globals: {{ ...globals.browser, ...globals.es2021, ...{json.dumps(extra)} }} }},\n"
+            "  rules: { 'no-undef': 'error' } }];\n", "utf-8")
+        r = subprocess.run(
+            ["node", str(repo / "node_modules" / "eslint" / "bin" / "eslint.js"),
+             "--no-config-lookup", "-c", str(cfg), "--format", "json", *[str(f) for f in files]],
+            capture_output=True, cwd=str(_REPO))
+        try:
+            report = json.loads(r.stdout.decode("utf-8", "replace"))
+        except ValueError:
+            pytest.fail(f"eslint 沒有回 JSON（{html.name}）：" + r.stderr.decode("utf-8", "replace")[:500])
+        bad += [f"{html.name} → {pathlib_rel(item['filePath'])}:{m['line']} {m['message']}"
+                for item in report for m in item["messages"]]
+    assert not bad, "傳統 script 裡裸用了同頁沒有來源的名字：\n" + "\n".join(bad)
