@@ -401,3 +401,10 @@ class TestPolishRound5:
         from tests.unit._srcscan import code_only, func_body, projects_src
         fn = code_only(func_body(projects_src(), "async def delete_project("))
         assert "await _write_link(session, project, None)" in fn
+
+
+def test_frontend_fee_bases_clamp_like_the_backend():
+    # BUG-41：後端 fee_bases 夾在營收內，前端 _feeBases 也要夾，不然合約改低時前端送 8,000 後端算 7,200 → 凍住
+    from tests.unit._srcscan import js_func_body, repo_src
+    body = js_func_body(repo_src("frontend/tabs/finance/subviews/projects.js"), "function _feeBases(")
+    assert "agency = Math.min(agency, c)" in body and "pro = Math.min(pro, Math.max(0, c - agency))" in body

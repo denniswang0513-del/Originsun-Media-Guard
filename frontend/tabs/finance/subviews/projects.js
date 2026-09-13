@@ -91,6 +91,9 @@ function _feeBases(contract, src) {
     const own = Math.max(0, c - total);
     if (src === '代開發票') agency += own;
     else if (src === '執行業務所得') pro += own;
+    // 同後端：基數不超過營收（owner 把合約額改成實際發票面額時）
+    agency = Math.min(agency, c);
+    pro = Math.min(pro, Math.max(0, c - agency));
     return { agency, pro };
 }
 

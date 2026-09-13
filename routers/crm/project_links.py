@@ -725,7 +725,9 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         # 代開的錢就是那張發票的面額，之前分身記的成本行合計不是）；工項不動。母帳沒填合約額才留原值。
         # 只換**這一案**的份額（工項沿用）、標它走代開，X 吃差額 —— 別案鏡射進來的錢與案源不動（by_parent）。
         # X 的 source 也標代開：owner 自己填的那部分跟 X 走（fee_bases）。母帳沒填合約額就只換案源。
-        keep["source"] = want_source
+        if keep.get("source") in (None, "", MIRROR_SOURCE):
+            # X 自己的案源只在「源日／空」時跟著翻成代開；owner 自己的執行業務所得案不動（他那部分仍走代扣）
+            keep["source"] = want_source
         keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id,
                                               int(p.contract_amount or 0) or share["amount"], share["split"],
                                               source=want_source)
@@ -828,14 +830,18 @@ async def _write_link(session, parent, mine):
         if t is not None:
             from core.ledger_project import drop_parent_share, norm_detail, parent_shares, share_source
             before = norm_detail(t.ledger_detail)
-            if parent.id in parent_shares(before):
+            shares0 = parent_shares(before)
+            if parent.id in shares0:
+                # 被解除的是代開份額、而且它是最後一個 → X 的案源跟「換回」同一條規則退回源日。
+                # 🔴 要在 drop **之前**決定：drop 會趁記錄還在時重算費用，記錄拿掉之後 apply_source_fee 對
+                # 「源日、沒份額」會早退，三欄費用就留在 owner 自己的錢上。被解除的是源日份額則什麼都不動
+                # （X 本身可能是 owner 自己的代開案）。
+                if (before.get("source") == "代開發票" and share_source(before, shares0[parent.id]) == "代開發票"
+                        and not any(share_source(before, sh) == "代開發票"
+                                    for pid, sh in shares0.items() if pid != parent.id)):
+                    from core.ledger_project import MIRROR_SOURCE
+                    before["source"] = MIRROR_SOURCE
                 keep, new_contract = drop_parent_share(before, int(t.contract_amount or 0), parent.id)   # 費用在裡面重算
-                if keep.get("source") == "代開發票" and not any(
-                        share_source(keep, sh) == "代開發票" for sh in parent_shares(keep).values()):
-                    # 最後一個代開份額解除了：X 的案源跟「換回」同一條規則退回源日，owner 自己的錢不再被抽代辦費
-                    from core.ledger_project import MIRROR_SOURCE, apply_source_fee
-                    keep["source"] = MIRROR_SOURCE
-                    keep = apply_source_fee(new_contract, keep)
                 t.contract_amount = new_contract
                 _store_mirror_detail(t, keep)
         parent.mine_link_id = None
