@@ -448,7 +448,7 @@ class TestPolishRound7:
         # 第 11 輪 #6：推送端傳進來的「發票面額」＝母帳合約額本身（空就 0 → 沿用舊份額；沒舊份額才退成本行合計）
         from tests.unit._srcscan import code_only, func_body, projects_src
         push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
-        assert 'int(p.contract_amount or 0), parent_agency=(source == "代開發票")' in push
+        assert 'int(p.contract_amount or 0), parent_agency=(source == "代開發票"),' in push
 
     def test_drop_of_an_agency_share_releases_the_manual_fee(self):
         # 第 7 輪 #5：純代開分身、owner 手調代辦費 9,000 → 解除 P 後不能留 9,000 在合約 0 的 X 上
@@ -522,7 +522,7 @@ class TestPolishRound8:
         from tests.unit._srcscan import code_only, func_body, projects_src, repo_src
         push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
         # #5：代開份額按「加上去」＝取代（金額不加、工項不能翻倍）
-        assert 'if mode == "add" and share_src == "代開發票":' in push and 'mode = "overwrite"' in push
+        assert 'if mode == "add" and (share_src == "代開發票" or is_face):' in push and 'mode = "overwrite"' in push
         link = code_only(func_body(projects_src(), "async def _write_link("))
         # #8：對應表連結時 X 沒記錄、而且就是這案的舊形狀連結 → legacy_claim，不是 0 份額
         assert "legacy_claim(keep, int(mine.contract_amount or 0), parent.id)" in link
@@ -625,7 +625,7 @@ class TestPolishRound12:
         # #3：認領不能超過「合約額 − 別案已認」；第 13 輪 #2：工項同比例夾
         assert "capped = max(0, min(amount, int(t.contract_amount or 0) - others_total))" in push
         assert "new_split = {k: int(v * ratio + 0.5) for k, v in new_split.items() if int(v * ratio + 0.5)}" in push
-        assert 'if share_src != "代開發票":' in push          # 第 14 輪：代開份額不夾工項（面額與成本行沒比例關係）
+        assert 'if share_src != "代開發票" and not is_face:' in push   # 第 14 輪：代開／面額份額不夾工項（面額與成本行沒比例關係）
 
     def test_unlink_resets_fee_deducted_when_no_agency_base_remains(self):
         # #4：owner 取消「已扣除」、之後唯一的代開份額被解除 → 旗標重設（同換回）
@@ -672,3 +672,70 @@ class TestPolishRound16:
         # face 份額其他改動（重同步）沿用 face
         g, _ = set_parent_share(f2, c2, "A", 370000, {"導演": 1}, synced_total=1)
         assert parent_shares(g)["A"]["face"] is True
+
+
+class TestCashMine:
+    """owner 2026-09-13「是我的案，但是走現金匯款（客戶不用開發票）」：推送彈窗第四個選項。
+    整案是他的、錢經過公司帳戶但沒開發票 → 私帳收入＝母帳合約額（同代開）、案源源日（不抽代辦費）、份額標 face。"""
+
+    def _parent(self, contract=120000):
+        from types import SimpleNamespace
+        return SimpleNamespace(id="P", name="查理回家紀錄", client_id="C1", contract_amount=contract,
+                               completion_date=None, billing_mode="company")
+
+    def test_new_mirror_takes_the_master_contract_with_no_agency_fee(self):
+        from core.ledger_project import fee_bases
+        from routers.crm.project_links import _mirror_contract, _new_mirror_row
+        p = self._parent()
+        mir = {"total": 0, "split": {}, "lines": []}
+        assert _mirror_contract(p, mir, "", whole=True) == 120000
+        assert _mirror_contract(p, mir, "") == 0                       # 沒說整案是我的：照成本行
+        assert _mirror_contract(self._parent(0), mir, "", whole=True) == 0   # 母帳沒填合約額才退成本行
+        t = _new_mirror_row(p, mir, "n", "", whole=True)
+        d = norm_detail(t.ledger_detail)
+        assert t.contract_amount == 120000 and d["source"] == "源日"
+        sh = parent_shares(d)["P"]
+        assert sh["amount"] == 120000 and sh["face"] is True and sh["source"] == "源日"
+        assert fee_bases(120000, d) == (0, 0)                        # 沒開發票：代辦費、執行業務所得基數都是 0
+        assert int(d.get("invoice_fee") or 0) == 0
+
+    def test_resync_keeps_the_face_amount_and_only_refreshes_items(self):
+        from routers.crm.project_links import _push_share_amount
+        old = {"amount": 120000, "split": {}, "source": "源日", "face": True}
+        # 整案是我的（whole）：母帳合約額；母帳改了合約額重同步會跟上；沒填才沿用
+        assert _push_share_amount("overwrite", False, "源日", {"amount": 0, "split": {}}, 30000, 120000, whole=True) == 120000
+        assert _push_share_amount("overwrite", False, "源日", old, 30000, 150000, whole=True) == 150000
+        assert _push_share_amount("overwrite", False, "源日", old, 30000, 0, whole=True) == 120000
+        # 沒再說 whole（一般重新同步）：面額份額沿用，不退成成本行
+        assert _push_share_amount("overwrite", False, "源日", old, 30000, 0) == 120000
+        assert _push_share_amount("add", False, "源日", old, 30000, 0) == 120000
+        # 沒 face 的源日份額照舊：成本行合計、add 累加
+        assert _push_share_amount("overwrite", False, "源日", {"amount": 50000, "split": {}}, 30000, 120000) == 30000
+        assert _push_share_amount("add", False, "源日", {"amount": 50000, "split": {}}, 30000, 120000) == 80000
+
+    def test_push_endpoint_treats_whole_like_an_invoice_face(self):
+        from tests.unit._srcscan import code_only, func_body, projects_src
+        push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
+        assert 'whole = bool(req.whole) and source != "代開發票"' in push
+        assert "and not (whole or _sh_now.get(\"face\"))" in push                 # 成本行 0 不降成 keep
+        assert 'if mode == "add" and (share_src == "代開發票" or is_face):' in push  # 面額不累加
+        assert 'if share_src != "代開發票" and not is_face:' in push               # 認領夾工項不夾面額份額
+        assert 'or whole else None)' in push                                      # 份額標 face
+        chk = code_only(func_body(projects_src(), "async def check_project_mirror("))
+        assert '(share is not None and share.get("face"))' in chk                 # 不 toast「沒有掛給你的成本行」
+        from core.schemas import ProjectMirrorPayload
+        assert ProjectMirrorPayload.model_fields["whole"].default is False
+
+    def test_dialog_has_the_cash_option_with_copy_or_move(self):
+        from tests.unit._srcscan import js_code_only, js_func_body, repo_src
+        js = repo_src("frontend/tabs/crm/crm-projects-ledger.js")
+        fn = js_code_only(js_func_body(js, "window._projPushMine = async function (id, linked) {"))
+        assert "opt('cash', '我的案，走現金匯款（客戶不用開發票）'" in fn
+        assert "const wholeKinds = ['passthrough', 'cash'];" in fn                 # 子選項（留一份／整案搬）兩種都有
+        assert "window._projMirrorMine(id, { source: '源日', whole: true })" in fn
+        assert "kind === 'cash' ? '源日' : ''" in fn
+        mm = js_code_only(js_func_body(js, "window._projMirrorMine = async function (id, mirrorOpts = {}) {"))
+        assert "const whole = !!mirrorOpts.whole && src !== '代開發票';" in mm
+        assert "box.dataset.whole = whole ? '1' : '';" in mm
+        sub = js_code_only(js_func_body(js, "async function _projMirrorSubmit(btn, id, mode, source) {"))
+        assert "source: source || null, whole }" in sub

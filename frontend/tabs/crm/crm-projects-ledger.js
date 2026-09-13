@@ -15,6 +15,8 @@ import { loadProjects } from './crm-projects-core.js';
 // 三種情況是兩種病（docs/LEDGER_UNIFY_PLAN.md §8.7–8.8）：
 //   1) 公司的案、公司付我一部分   → 分身（母帳留著，私帳多開一案，收入＝掛給我的成本行）
 //   2) 我的案、客戶走公司代開發票 → 換帳本（案源＝代開發票；內部代開發票留在母帳掛過來）
+//   2b) 我的案、走現金匯款（不開發票）→ 同 2 但案源＝源日、沒代辦費（owner 2026-09-13
+//       「是我的案，但是走現金匯款（客戶不用開發票）」）；收入一樣＝母帳合約額（whole）
 //   3) 我的案、沒經過公司         → 換帳本（問案源）
 // 使用者不必知道要按哪一顆：先問是哪一種，再分流到 _projMirrorMine／_projMoveLedger。
 // 已連結的案直接進「重新同步」（同 _projMirrorMine 的 relink 分支）。
@@ -36,6 +38,8 @@ window._projPushMine = async function (id, linked) {
                   '母帳留著跟客戶的合約；在私帳開一個對應的案，收入＝人員配置裡掛給你的成本行（沒有就先開 0）', true)}
             ${opt('passthrough', '我的案，客戶走公司代開發票',
                   '案源＝代開發票，代辦費自動算；公司開的「內部代開」發票掛在這一案上')}
+            ${opt('cash', '我的案，走現金匯款（客戶不用開發票）',
+                  '錢經過公司帳戶但沒開發票：案源＝源日、不抽代辦費；私帳這案的收入＝母帳合約額')}
             <div id="ppm-pt-sub" style="margin-left:26px;display:none;flex-direction:column;gap:4px;font-size:12px;color:#bbb;">
                 <label style="display:flex;gap:6px;align-items:center;cursor:pointer;">
                     <input type="radio" name="ppm-pt" value="copy" checked>
@@ -53,11 +57,12 @@ window._projPushMine = async function (id, linked) {
             <button class="crm-btn crm-btn-primary crm-btn-sm" id="ppm-next">下一步</button>
         </div>`);
     // owner 2026-09-12「雖然是代開發票，但是專案公司也留一份帳」：代開那一項底下再分
-    // 「留一份（分身，案源＝代開發票）」／「整案搬」。子選項只在選到代開時展開。
+    // 「留一份（分身，案源＝代開發票）」／「整案搬」。子選項只在選到代開／現金匯款時展開（兩種都是「整案是我的」）。
     const kindOf = () => (document.querySelector('input[name="ppm-kind"]:checked') || {}).value || 'share';
+    const wholeKinds = ['passthrough', 'cash'];
     const syncSub = () => {
         const sub = document.getElementById('ppm-pt-sub');
-        if (sub) { sub.style.display = kindOf() === 'passthrough' ? 'flex' : 'none'; }
+        if (sub) { sub.style.display = wholeKinds.includes(kindOf()) ? 'flex' : 'none'; }
     };
     document.getElementById('proj-mirror-body').addEventListener('change', syncSub);
     syncSub();
@@ -67,7 +72,8 @@ window._projPushMine = async function (id, linked) {
         window._projMirrorClose();
         if (kind === 'share') { return window._projMirrorMine(id); }
         if (kind === 'passthrough' && ptCopy) { return window._projMirrorMine(id, { source: '代開發票' }); }
-        return window._projMoveLedger(id, { source: kind === 'passthrough' ? '代開發票' : '' });
+        if (kind === 'cash' && ptCopy) { return window._projMirrorMine(id, { source: '源日', whole: true }); }
+        return window._projMoveLedger(id, { source: kind === 'passthrough' ? '代開發票' : kind === 'cash' ? '源日' : '' });
     });
 };
 
@@ -223,12 +229,15 @@ window._projMirrorMine = async function (id, mirrorOpts = {}) {
     // 成本行不會自己流過去。這時不給「建立新專案」—— 那會多一個分身，同一筆
     // 錢在私帳算兩次；目標鎖定原本那一案，怎麼合併由下面的模式鈕決定。
     const relink = !!chk.linked;
-    // 案源＝代開發票的分身：收入是那張發票的面額（母帳合約額），不是掛給你的成本行
+    // 案源＝代開發票的分身、或整案是你的（走現金匯款，whole）：收入是母帳合約額，不是掛給你的成本行
     const src = mirrorOpts.source || '';
-    const ptProj = src === '代開發票' ? state.projects.find(x => x.id === id) : null;
+    const whole = !!mirrorOpts.whole && src !== '代開發票';
+    const ptProj = (src === '代開發票' || whole) ? state.projects.find(x => x.id === id) : null;
     const ptNote = ptProj
-        ? `<div style="color:#c4b5fd;font-size:12px;margin-bottom:8px;line-height:1.5;">案源＝代開發票：私帳這案的收入＝母帳合約額 ${
-            fmtNum(ptProj.contract_amount || 0)}${ptProj.contract_amount ? '' : '（母帳還沒填合約額，先用下面的成本行合計）'}，代辦費照費率自動算。</div>`
+        ? `<div style="color:#c4b5fd;font-size:12px;margin-bottom:8px;line-height:1.5;">${
+            whole ? '整案是你的（走現金匯款、不開發票）' : '案源＝代開發票'}：私帳這案的收入＝母帳合約額 ${
+            fmtNum(ptProj.contract_amount || 0)}${ptProj.contract_amount ? '' : '（母帳還沒填合約額，先用下面的成本行合計）'}${
+            whole ? '，案源＝源日、不抽代辦費。' : '，代辦費照費率自動算。'}</div>`
         : '';
     const warn = chk.warning && !ptProj
         ? `<div style="color:#fbbf24;font-size:12px;margin-bottom:8px;line-height:1.5;">${_esc(chk.warning)}${
@@ -268,6 +277,7 @@ window._projMirrorMine = async function (id, mirrorOpts = {}) {
     const sel = document.getElementById('pmm-target');
     const box = document.getElementById('proj-mirror-body');
     box.dataset.source = src;          // 衝突區那幾顆模式鈕送出時也要帶同一個案源
+    box.dataset.whole = whole ? '1' : '';   // 同上：整案是你的（收入＝母帳合約額）
     if (sel.tagName === 'SELECT') {
         // 400 筆私帳案塞原生 select 找不到東西 —— 升級成可搜尋（同專案對應那頁）
         searchableSelect(sel, { placeholder: '搜尋私帳案…' });
@@ -300,14 +310,16 @@ const _pmmLink = () => {
 };
 
 async function _projMirrorSubmit(btn, id, mode, source) {
-    source = source || document.getElementById('proj-mirror-body')?.dataset.source || '';
+    const body = document.getElementById('proj-mirror-body');
+    source = source || body?.dataset.source || '';
+    const whole = body?.dataset.whole === '1';
     const target = _pmmLink() ? (document.getElementById('pmm-target').value || '') : '';
     if (_pmmLink() && !target) { crmToast('請先選一個要連結的私帳專案'); return; }
     btn.disabled = true;
     try {
         const r = await _fetch(`/projects/${encodeURIComponent(id)}/mirror-to-mine`, {
             method: 'POST',
-            body: JSON.stringify({ target_id: target, mode: mode || 'overwrite', source: source || null }),
+            body: JSON.stringify({ target_id: target, mode: mode || 'overwrite', source: source || null, whole }),
         });
         window._projMirrorClose();
         crmToast(r.mode === 'keep' ? '已連結（私帳金額未變動）'

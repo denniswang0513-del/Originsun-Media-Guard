@@ -346,14 +346,14 @@ async def check_project_mirror(project_id: str, request: Request):
         warning = _mirror_blocked_reason(mir["total"])
         # 代開的收入是母帳合約額不是成本行，0 本來就是常態 —— 這句「沒有掛給你的成本行」對它是噪音
         # （crmFetch 會把任何 warning 直接 toast，連結後每次重畫詳情都會跳一次）
+        # 整案是我的（份額標 face、案源源日）同理：收入是母帳合約額
         from core.ledger_project import billing_mode_of
         from core.ledger_project import share_source
-        if billing_mode_of(p.billing_mode) == "passthrough" or (
-                linked is not None and share_source(norm_detail(linked.ledger_detail),
-                                                    parent_shares(linked.ledger_detail).get(p.id)) == "代開發票"):
+        share = parent_shares(linked.ledger_detail).get(p.id) if linked is not None else None
+        if billing_mode_of(p.billing_mode) == "passthrough" or (share is not None and share.get("face")) or (
+                linked is not None and share_source(norm_detail(linked.ledger_detail), share) == "代開發票"):
             warning = ""
         client = await session.get(Client, p.client_id) if p.client_id else None
-        share = parent_shares(linked.ledger_detail).get(p.id) if linked is not None else None
         # 可連結的既有私帳案。🔴 **已經被連結過的照樣列出來**（owner 2026-09-01
         # 「可以多筆專案連結到一筆私帳」）—— 原本排除它們，於是第二個 CRM 案
         # 永遠選不到同一個私帳案。改成把「已承接幾案」帶給前端去標示。
@@ -439,12 +439,13 @@ def _mirror_blocked_reason(total: int) -> str:
     return ""
 
 
-def _mirror_contract(p, mir: dict, source: str) -> int:
+def _mirror_contract(p, mir: dict, source: str, whole: bool = False) -> int:
     """分身的收入：一般＝掛給我的成本行合計；案源＝代開發票時＝**母帳合約額**
     （owner 2026-09-12「雖然是代開發票，但是專案公司也留一份帳」—— 那張內部代開
     發票的面額就是他的錢，公司這邊只是過路；掛給他的成本行通常是 0）。
+    `whole`＝整案是他的但沒開發票（owner 2026-09-13「走現金匯款」）：一樣拿母帳合約額，案源留源日。
     母帳沒填合約額就退回成本行合計。"""
-    if source == "代開發票" and int(p.contract_amount or 0):
+    if (source == "代開發票" or whole) and int(p.contract_amount or 0):
         return int(p.contract_amount or 0)
     return int(mir["total"] or 0)
 
@@ -471,25 +472,25 @@ async def _ensure_share(session, t, keep: dict, pid: str) -> dict:
 
 
 def _push_share_amount(mode: str, pending: bool, share_src: str, old_share: dict, mir_total: int,
-                       agency_contract: int, parent_agency: bool = False) -> int:
+                       contract: int, parent_agency: bool = False, whole: bool = False) -> int:
     """推送後這一案份額的金額。代開＝那張發票的面額（母帳合約額；已有就沿用、重新同步只更新工項）；
+    整案是我的但沒開發票（`whole`，owner 2026-09-13「走現金匯款」）＝一樣是母帳合約額、案源留源日；
     其他＝掛給我的成本行合計；add＝這案份額再加一筆（待認領時 add 視同取代，claim 不動錢、累加會漂）。
     🔴 看的是**這一案份額**的案源（_push_share_source），不是 X 的 —— X 可能已被別案翻成代開。"""
+    old_amt = int(old_share.get("amount") or 0)
+    # 面額＝母帳合約額 —— 但只有**母帳自己走後期代開／整案是我的**（contract 由呼叫端在母帳收款方式＝後期代開／
+    # 明確送 source=代開／whole 時才給）才拿母帳合約額；繼承自 X 的代開份額（舊代開 N:1 回填、認領退到 X 案源）
+    # 母帳是 company 案，它的 contract_amount 是**客戶合約額**不是發票面額，沿用舊份額（沒舊份額才退成本行合計）。
+    # 母帳改了合約額，重新同步會跟上。
+    if parent_agency or whole:
+        return int(contract or 0) or old_amt          # 母帳沒填面額才沿用舊份額
+    # 份額標 face（舊 1:1 代開整筆認、切過後期代開、整案是我的）：金額是面額 → 沿用、重同步只更新工項
+    if old_share.get("face") and old_amt:
+        return old_amt
     if share_src == "代開發票":
-        # 代開的金額＝那張發票的面額（母帳合約額）—— 但只有**母帳自己走後期代開**（agency_contract 由呼叫端在
-        # 母帳收款方式＝後期代開／明確送 source=代開 時才給）才拿母帳合約額；繼承自 X 的代開份額（舊代開 N:1 回填、
-        # 認領退到 X 案源）母帳是 company 案，它的 contract_amount 是**客戶合約額**不是發票面額，沿用舊份額
-        # （沒舊份額才退成本行合計）。母帳改了合約額，重新同步會跟上。
-        if parent_agency:
-            return int(agency_contract or 0) or int(old_share.get("amount") or 0)   # 母帳沒填面額才沿用舊份額
-        # 繼承自 X 的代開份額：金額是發票面額（份額標 face：舊 1:1 代開整筆認、切過後期代開）→ 沿用、重同步只更新工項；
-        # 不是（N:1 回填的成本行）→ 跟成本行走，沒成本行才沿用
-        old_amt = int(old_share.get("amount") or 0)
-        if old_share.get("face") and old_amt:
-            return old_amt
-        return int(mir_total or 0) or old_amt
+        return int(mir_total or 0) or old_amt         # N:1 回填的成本行 → 跟成本行走，沒成本行才沿用
     if mode == "add" and not pending:
-        return int(old_share.get("amount") or 0) + int(mir_total or 0)
+        return old_amt + int(mir_total or 0)
     return int(mir_total or 0)
 
 
@@ -522,15 +523,16 @@ async def _clear_pending_if_all_claimed(session, t, keep: dict) -> dict:
     return keep
 
 
-def _new_mirror_row(p, mir: dict, note: str, source: str = ""):
+def _new_mirror_row(p, mir: dict, note: str, source: str = "", whole: bool = False):
     """母帳案 → 私帳分身那一列（未加入 session）。推送鈕與對應表的「建立」共用 ——
     兩條路各建一份，遲早只有一邊記得補新的必填欄。
-    `source` 空＝源日（公司內部轉單）；代開發票→代辦費自動算（apply_source_fee）。"""
+    `source` 空＝源日（公司內部轉單）；代開發票→代辦費自動算（apply_source_fee）。
+    `whole`＝整案是他的但沒開發票：收入＝母帳合約額、案源源日、份額標 face。"""
     from core.ledger_project import (MIRROR_AT_KEY, MIRROR_SOURCE, apply_source_fee, mirror_detail, norm_detail,
                                      set_parent_share)
     from routers.api_finance_projects import new_ledger_project
 
-    contract = _mirror_contract(p, mir, source)
+    contract = _mirror_contract(p, mir, source, whole)
     d = mirror_detail(mir["split"])
     d[MIRROR_AT_KEY] = _today_tw()
     # X 自己的案源（owner 那部分）一律源日；這一案走代開的話寫在**份額**上（下面 set_parent_share source=）——
@@ -539,7 +541,7 @@ def _new_mirror_row(p, mir: dict, note: str, source: str = ""):
     # 分案記帳：這一案給的份額＝整筆（新分身只有它一個來源）；claim＝錢已經在上面的 contract／split 裡
     d, _c = set_parent_share(d, contract, p.id, contract, mir["split"],
                              synced_total=mir["total"], at=_today_tw(), source=source or MIRROR_SOURCE,
-                             face=(source == "代開發票") or None, claim=True)
+                             face=(source == "代開發票" or whole) or None, claim=True)
     d = norm_detail(apply_source_fee(contract, d))      # 代辦費照份額算（份額寫好之後才算得出來）
     return new_ledger_project(
         project_id=uuid.uuid4().hex, name=p.name, client_id=p.client_id,
@@ -572,6 +574,8 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
     source = (req.source or "").strip()
     if source and source not in SELECTABLE_SOURCES:
         raise HTTPException(status_code=422, detail=f"未知的案源：{source}")
+    # 整案是他的但沒開發票（owner 2026-09-13「走現金匯款」）：收入＝母帳合約額、案源留源日、份額標 face
+    whole = bool(req.whole) and source != "代開發票"
     sid = await _me_staff_id_or_blank(request)
     _require_db()
     factory = await _get_factory()
@@ -610,7 +614,8 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
             _sh_now = parent_shares(keep).get(p.id) or {}
             if (mode in ("overwrite", "add") and not mir["total"]
                     and (not sid or not (_sh_now.get("synced_total") or (MIRROR_TOTAL_KEY in keep and not _sh_now)))
-                    and _push_share_source(source, _sh_now) != "代開發票"):
+                    and _push_share_source(source, _sh_now) != "代開發票"
+                    and not (whole or _sh_now.get("face"))):     # 面額份額（整案是我的）的收入也不是成本行
                 # 「同步過」看**這一案**份額的 synced_total（X 層級的 mirror_total 每次推送被最後一案覆寫，N:1 不準）
                 mode = "keep"
             if mode == "import":
@@ -646,10 +651,12 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 keep[MIRROR_AT_KEY] = _today_tw()         # X 層級的「上次同步」（詳情那一行顯示用）
                 # 這一案份額的案源與金額：看**份額**的案源，不看 X 的（X 可能已被別案翻成代開）
                 share_src = _push_share_source(source, old_share, keep.get("source") if claim else "")
-                if mode == "add" and share_src == "代開發票":
-                    mode = "overwrite"        # 代開的金額是發票面額、不累加；工項也不能跟著翻倍
+                is_face = whole or bool(old_share.get("face"))     # 這案份額的金額是面額（整案是我的／代開）
+                if mode == "add" and (share_src == "代開發票" or is_face):
+                    mode = "overwrite"        # 面額不累加；工項也不能跟著翻倍
                 amount = _push_share_amount(mode, claim, share_src, old_share, mir["total"],
-                                            int(p.contract_amount or 0), parent_agency=(source == "代開發票"))
+                                            int(p.contract_amount or 0), parent_agency=(source == "代開發票"),
+                                            whole=whole)
                 adding = mode == "add" and not claim
                 new_split, _delta = merge_split(old_share["split"] if adding else {},
                                                 mir["split"] or {}, add=adding)
@@ -659,15 +666,15 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                     others_total = sum(sh["amount"] for pid, sh in parent_shares(keep).items() if pid != p.id)
                     capped = max(0, min(amount, int(t.contract_amount or 0) - others_total))
                     if capped != amount:
-                        # 工項只對非代開份額同比例夾（代開的金額是發票面額、工項是成本行，兩者沒有比例關係）
-                        if share_src != "代開發票":
+                        # 工項只對非面額份額同比例夾（面額＝母帳合約額、工項是成本行，兩者沒有比例關係）
+                        if share_src != "代開發票" and not is_face:
                             ratio = (capped / amount) if amount else 0
                             new_split = {k: int(v * ratio + 0.5) for k, v in new_split.items() if int(v * ratio + 0.5)}
                         amount = capped
                 keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id, amount, new_split,
                                                       synced_total=mir["total"], at=_today_tw(),
                                                       source=share_src, claim=claim,
-                                                      face=True if (share_src == "代開發票" and source == "代開發票") else None)
+                                                      face=True if (share_src == "代開發票" and source == "代開發票") or whole else None)
                 t.contract_amount = new_contract
                 keep = await _clear_pending_if_all_claimed(session, t, keep)
                 keep = norm_detail(apply_source_fee(int(t.contract_amount or 0), keep))
@@ -678,7 +685,8 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
             await _write_link(session, p, t)            # 連結的唯一寫入者（兩側欄位一起顧）
             new_id = t.id
         else:
-            t = _new_mirror_row(p, mir, f"[私帳連結] 來自母公司專案：{p.name}", source)
+            t = _new_mirror_row(p, mir, f"[私帳連結] 來自母公司專案：{p.name}"
+                                + ("（整案是我的，走現金匯款）" if whole else ""), source, whole)
             new_id = t.id
             session.add(t)
             await _write_link(session, p, t)

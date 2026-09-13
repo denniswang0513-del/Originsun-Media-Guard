@@ -253,7 +253,7 @@ def test_crm_push_button_asks_which_kind_first():
     for kind in ("'share'", "'passthrough'", "'own'"):
         assert kind in fn, kind
     assert "window._projMirrorMine(id)" in fn                       # 分身
-    assert "source: kind === 'passthrough' ? '代開發票' : ''" in fn   # 換帳本＋案源
+    assert "source: kind === 'passthrough' ? '代開發票' : kind === 'cash' ? '源日' : ''" in fn   # 換帳本＋案源
     assert "if (linked) { return window._projMirrorMine(id); }" in fn   # 已連結直接重新同步
 
 

@@ -315,6 +315,10 @@ class ProjectMirrorPayload(BaseModel):
     # （空＝源日）。代開發票→私帳那案的收入用**母帳合約額**（那張發票的面額就是
     # 他的錢，不是掛給他的成本行），代辦費由 apply_source_fee 自動算。
     source: Optional[str] = None
+    # owner 2026-09-13「是我的案，但是走現金匯款（客戶不用開發票）」：整案是他的，只是錢經過公司帳戶
+    # 沒開發票 —— 私帳那案的收入＝**母帳合約額**（同代開），案源留源日（不抽代辦費）。份額標 face：
+    # 重新同步只更新工項、金額不跟成本行走。
+    whole: bool = False
 
 
 class CashTaxonomyNodePayload(BaseModel):

@@ -184,7 +184,7 @@ def test_mirror_check_does_not_nag_passthrough_cases_about_cost_lines():
     """代開的收入是母帳合約額不是成本行，「沒有掛給你的成本行」對它是噪音 —— crmFetch 會把任何
     warning 直接 toast，連結後每次重畫詳情都跳一次。"""
     fn = code_only(func_body(_LINKS, "async def check_project_mirror("))
-    assert 'billing_mode_of(p.billing_mode) == "passthrough"' in fn and 'parent_shares(linked.ledger_detail).get(p.id)) == "代開發票"' in fn
+    assert 'billing_mode_of(p.billing_mode) == "passthrough"' in fn and 'share_source(norm_detail(linked.ledger_detail), share) == "代開發票"' in fn
     assert 'warning = ""' in fn
 
 
