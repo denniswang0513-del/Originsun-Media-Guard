@@ -250,10 +250,11 @@ class TestPolishRound2:
         assert _push_share_amount("overwrite", False, "代開發票", old, 30000, 500000, parent_agency=True) == 500000
         assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 500000, parent_agency=True) == 500000
         # 第 13／14 輪：繼承自 X 的代開份額（母帳是 company 案）→ 跟成本行走（回填時就是它），沒成本行才沿用舊份額
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 60000, "split": {}, "source": "代開發票", "synced_total": 60000}, 80000, 370000) == 80000
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 60000, "split": {}, "source": "代開發票", "synced_total": 60000}, 0, 370000) == 60000
-        # 第 15 輪：舊 1:1 代開分身整筆認的是發票面額（金額≠成本行合計）→ 重同步只更新工項、面額沿用
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 100000, "split": {}, "source": "代開發票", "synced_total": 45000}, 45000, 0) == 100000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 60000, "split": {}, "source": "代開發票"}, 80000, 370000) == 80000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 60000, "split": {}, "source": "代開發票"}, 0, 370000) == 60000
+        # 第 16 輪：面額用明確的 face 標記，不用「金額≠成本行合計」推測（成本行暫時 0 時重同步會把 synced_total 寫 0）
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 100000, "split": {}, "source": "代開發票", "face": True}, 45000, 0) == 100000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 60000, "split": {}, "source": "代開發票", "synced_total": 0}, 80000, 0) == 80000
         assert _push_share_amount("add", False, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 40000
         assert _push_share_amount("add", True, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 30000   # 待認領：add 視同取代
         from tests.unit._srcscan import code_only, flow_body, projects_src
@@ -331,7 +332,7 @@ class TestPolishFinalReview:
         assert _claim_on_push(False, ["A"], "A") is False
         from tests.unit._srcscan import code_only, flow_body, projects_src
         body = code_only(flow_body(projects_src(), "async def mirror_project_to_mine("))
-        assert "claim = _claim_on_push(pending, linked_before, p.id)" in body and "claim=claim)" in body
+        assert "claim = _claim_on_push(pending, linked_before, p.id)" in body and "claim=claim," in body
 
     def test_mirror_check_judges_stale_per_parent_and_shows_this_parents_share(self):
         # BUG-27：推送對話框那支要跟詳情那行同一套規則（逐案判落後、比這案的份額不是整案）
@@ -649,3 +650,25 @@ class TestPolishRound13:
         assert parent_shares(d2)["G"]["prev_source"] == "代開發票"
         d3, _ = set_parent_share(d2, c, "G", 30000, {}, restore_source=True)
         assert parent_shares(d3)["G"]["source"] == "代開發票"
+
+
+class TestPolishRound16:
+    def test_face_flag_is_set_by_legacy_agency_claim_and_switch_and_cleared_by_revert(self):
+        from core.ledger_project import legacy_claim
+        # 舊 1:1 代開整筆認 → face
+        d = legacy_claim({"source": "代開發票", "split": {"導演": 45000}, MIRROR_TOTAL_KEY: 45000}, 100000, "A")
+        assert parent_shares(d)["A"]["face"] is True
+        # 源日 1:1 → 沒 face
+        e = legacy_claim({"source": "源日", "split": {}, MIRROR_TOTAL_KEY: 45000}, 100000, "A")
+        assert "face" not in parent_shares(e)["A"]
+        # N:1 繼承份額（成本行）切後期代開 → face；換回 → 清掉，之後重同步回成本行
+        f, c = set_parent_share({"source": "代開發票"}, 0, "A", 80000, {}, source="代開發票", synced_total=80000)
+        f2, c2 = set_parent_share(f, c, "A", 370000, {}, source="代開發票", prev_source=True, face=True)
+        assert parent_shares(f2)["A"]["face"] is True
+        f3, c3 = set_parent_share(f2, c2, "A", 370000, {}, restore_source=True, claim=True)
+        assert "face" not in parent_shares(f3)["A"] and parent_shares(f3)["A"]["source"] == "代開發票"
+        from routers.crm.project_links import _push_share_amount
+        assert _push_share_amount("overwrite", False, "代開發票", parent_shares(f3)["A"], 80000, 370000) == 80000
+        # face 份額其他改動（重同步）沿用 face
+        g, _ = set_parent_share(f2, c2, "A", 370000, {"導演": 1}, synced_total=1)
+        assert parent_shares(g)["A"]["face"] is True

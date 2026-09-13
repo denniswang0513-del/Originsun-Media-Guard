@@ -453,6 +453,10 @@ def _clean_shares(raw) -> dict:
         prev = str(v.get("prev_source") or "").strip()
         if prev in SOURCES:
             out[str(pid)]["prev_source"] = prev
+        # 這筆金額是**發票面額**（母帳合約額；owner 切成後期代開／母帳自己走代開／舊 1:1 代開整筆認）：
+        # 重新同步只更新工項、金額不跟成本行走。缺鍵＝成本行來的
+        if v.get("face") is True:
+            out[str(pid)]["face"] = True
     return out
 
 
@@ -471,7 +475,7 @@ def parent_shares(detail) -> dict:
 
 def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=None, at: str = "",
                      source=None, prev_source: bool = False, restore_source: bool = False,
-                     claim: bool = False) -> tuple:
+                     face=None, claim: bool = False) -> tuple:
     """把母帳案 `pid` 給私帳案的份額換成 `(amount, split)` → `(新 detail, 新 contract)`。
 
     X 的金額與工項只吃**差額**（新 − 這案舊份額），所以別案的份額、owner 自己填的錢與
@@ -508,6 +512,9 @@ def set_parent_share(detail, contract, pid: str, amount, split, *, synced_total=
         shares[pid]["prev_source"] = old["prev_source"]      # 其他改動：帶著走
     if src in SOURCES:
         shares[pid]["source"] = src
+    is_face = False if restore_source else (old.get("face", False) if face is None else bool(face))
+    if is_face:
+        shares[pid]["face"] = True
     d[BY_PARENT_KEY] = shares
     # 份額動過：哪種費用的基數歸零了就放掉那種手動旗標（凍住的不放），apply_source_fee 才會歸零
     _release_fee_flags(d, contract)
@@ -588,8 +595,9 @@ def legacy_claim(detail, contract, pid: str) -> dict:
     mt = _int(d.get(MIRROR_TOTAL_KEY))
     # 代開分身：收入本來就是母帳合約額（那張發票的面額），mirror_total 是成本行合計、天生比它小 —— 整筆認；
     # 不然收款方式來回一次（換回 claim、再改代開算差額）X 會從 100,000 變 197,000
-    amount = mt if (0 < mt < c and d.get("source") != "代開發票") else c
-    d, _c = set_parent_share(d, c, pid, amount, d.get("split") or {},
+    agency = d.get("source") == "代開發票"
+    amount = mt if (0 < mt < c and not agency) else c
+    d, _c = set_parent_share(d, c, pid, amount, d.get("split") or {}, face=agency or None,
                              synced_total=mt, at=str(d.get(MIRROR_AT_KEY) or ""),
                              source=d.get("source") or MIRROR_SOURCE, claim=True)
     return d

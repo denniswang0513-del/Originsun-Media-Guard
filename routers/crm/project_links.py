@@ -482,11 +482,10 @@ def _push_share_amount(mode: str, pending: bool, share_src: str, old_share: dict
         # （沒舊份額才退成本行合計）。母帳改了合約額，重新同步會跟上。
         if parent_agency:
             return int(agency_contract or 0) or int(old_share.get("amount") or 0)   # 母帳沒填面額才沿用舊份額
-        # 繼承自 X 的代開份額：份額原本就是成本行（金額＝上次同步的成本行合計，N:1 回填就是這樣）→ 跟成本行走；
-        # 金額≠成本行合計＝它是發票面額（舊 1:1 代開分身整筆認）→ 沿用，重新同步只更新工項
+        # 繼承自 X 的代開份額：金額是發票面額（份額標 face：舊 1:1 代開整筆認、切過後期代開）→ 沿用、重同步只更新工項；
+        # 不是（N:1 回填的成本行）→ 跟成本行走，沒成本行才沿用
         old_amt = int(old_share.get("amount") or 0)
-        from_lines = old_amt == int(old_share.get("synced_total") or 0)
-        if old_amt and not from_lines:
+        if old_share.get("face") and old_amt:
             return old_amt
         return int(mir_total or 0) or old_amt
     if mode == "add" and not pending:
@@ -540,7 +539,7 @@ def _new_mirror_row(p, mir: dict, note: str, source: str = ""):
     # 分案記帳：這一案給的份額＝整筆（新分身只有它一個來源）；claim＝錢已經在上面的 contract／split 裡
     d, _c = set_parent_share(d, contract, p.id, contract, mir["split"],
                              synced_total=mir["total"], at=_today_tw(), source=source or MIRROR_SOURCE,
-                             claim=True)
+                             face=(source == "代開發票") or None, claim=True)
     d = norm_detail(apply_source_fee(contract, d))      # 代辦費照份額算（份額寫好之後才算得出來）
     return new_ledger_project(
         project_id=uuid.uuid4().hex, name=p.name, client_id=p.client_id,
@@ -667,7 +666,8 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                         amount = capped
                 keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id, amount, new_split,
                                                       synced_total=mir["total"], at=_today_tw(),
-                                                      source=share_src, claim=claim)
+                                                      source=share_src, claim=claim,
+                                                      face=True if (share_src == "代開發票" and source == "代開發票") else None)
                 t.contract_amount = new_contract
                 keep = await _clear_pending_if_all_claimed(session, t, keep)
                 keep = norm_detail(apply_source_fee(int(t.contract_amount or 0), keep))
@@ -763,7 +763,7 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         # X 自己的案源（owner 那部分）不動；畫面上的案源由份額算（display_source）
         keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id,
                                               int(p.contract_amount or 0) or share["amount"], share["split"],
-                                              source=want_source, prev_source=True)
+                                              source=want_source, prev_source=True, face=True)
         t.contract_amount = new_contract
         _store_mirror_detail(t, apply_source_fee(int(t.contract_amount or 0), keep))
         return {"action": "switched", "created": False}
