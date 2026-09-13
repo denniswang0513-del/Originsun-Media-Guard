@@ -680,8 +680,8 @@ async def _m22_ledger_by_parent_backfill() -> None:
                 from db.models import CrmProject, User
                 from core.ledger import MINE_MODULE
                 from core.auth import expand_modules
-                from core.ledger_project import (BY_PARENT_PENDING_KEY, MIRROR_AT_KEY, MIRROR_TOTAL_KEY,
-                                                 billing_mode_of, norm_detail, parent_shares, set_parent_share)
+                from core.ledger_project import (BY_PARENT_PENDING_KEY, billing_mode_of, legacy_claim, norm_detail,
+                                                 parent_shares, set_parent_share)
                 from routers.crm._shared import mine_parent_links
                 async with factory() as session:
                     mine_ids = [i for (i,) in (await session.execute(
@@ -702,11 +702,8 @@ async def _m22_ledger_by_parent_backfill() -> None:
                             continue
                         contract = int(t.contract_amount or 0)
                         if len(parents) == 1:
-                            pid = parents[0][0]
-                            keep, _c = set_parent_share(keep, contract, pid, contract, keep.get("split") or {},
-                                                        synced_total=int(keep.get(MIRROR_TOTAL_KEY) or 0),
-                                                        at=str(keep.get(MIRROR_AT_KEY) or ""),
-                                                        source=keep.get("source") or "源日", claim=True)
+                            # 只認「上次鏡射過來的量」（mirror_total）；合約額比它大的是 owner 自己加的
+                            keep = legacy_claim(keep, contract, parents[0][0])
                             n1 += 1
                         else:
                             claimed = []

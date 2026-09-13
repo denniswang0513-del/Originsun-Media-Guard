@@ -443,19 +443,22 @@ def _mirror_contract(p, mir: dict, source: str) -> int:
     return int(mir["total"] or 0)
 
 
-def _ensure_share(keep: dict, contract: int, pid: str) -> dict:
-    """分案記帳的退路：沒有任何 by_parent 的舊 1:1 分身，先把現況整筆認成 `pid` 的份額
-    （claim＝不動錢），之後 set_parent_share 才算得出差額。待認領的 N:1（BY_PARENT_PENDING_KEY）
-    不猜 —— 那是回填分不出來的，由呼叫端決定要 claim 還是 409。"""
-    from core.ledger_project import (BY_PARENT_PENDING_KEY, MIRROR_AT_KEY, MIRROR_SOURCE, MIRROR_TOTAL_KEY,
-                                     parent_shares, set_parent_share)
+async def _ensure_share(session, t, keep: dict, pid: str) -> dict:
+    """分案記帳的退路：沒有任何 by_parent 的舊分身。
+
+    X 只連著這一個母帳案 → 把「上次鏡射過來的量」認成它的份額（`legacy_claim`，不動錢），之後
+    set_parent_share 才算得出差額。X 連著**多個**母帳案（對應表連的、沒推送過）→ 不猜誰佔多少，
+    標待認領（BY_PARENT_PENDING_KEY）：改收款方式會 409、推送「取代」變成逐案認領。
+    已經有記錄或已標待認領的原樣回去。"""
+    from core.ledger_project import BY_PARENT_PENDING_KEY, legacy_claim, parent_shares
+    from ._shared import mine_parent_links
     if parent_shares(keep) or keep.get(BY_PARENT_PENDING_KEY) is True:
         return keep
-    keep, _c = set_parent_share(keep, contract, pid, int(contract or 0), keep.get("split") or {},
-                                synced_total=int(keep.get(MIRROR_TOTAL_KEY) or 0),
-                                at=str(keep.get(MIRROR_AT_KEY) or ""),
-                                source=keep.get("source") or MIRROR_SOURCE, claim=True)
-    return keep
+    parents = (await mine_parent_links(session, [t.id])).get(t.id) or []
+    if len(parents) > 1:
+        keep[BY_PARENT_PENDING_KEY] = True
+        return keep
+    return legacy_claim(keep, int(t.contract_amount or 0), pid)
 
 
 async def _clear_pending_if_all_claimed(session, t, keep: dict) -> dict:
@@ -576,7 +579,7 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 # X 的金額與工項吃差額 —— 別案鏡射進來的錢與 owner 自己填的都不動，所以 N:1 的
                 # 「取代」不再需要 409。overwrite＝這案份額換成這次算的；add＝這案份額再加一筆
                 # （同名工項相加）。待認領的舊 N:1（回填分不出來）：只記份額不動錢（claim）。
-                keep = _ensure_share(keep, int(t.contract_amount or 0), p.id)
+                keep = await _ensure_share(session, t, keep, p.id)
                 pending = keep.get(BY_PARENT_PENDING_KEY) is True
                 old_share = parent_shares(keep).get(p.id) or {"amount": 0, "split": {}}
                 # 案源：這次指定的 > 私帳案本來的 > 源日。🔴 不要無條件寫回源日 ——
@@ -667,11 +670,15 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         require_entity(request, "mine", level="full")
     except HTTPException:
         return {"action": "skipped", "created": False}
-    if t is not None and norm_detail(t.ledger_detail).get(BY_PARENT_PENDING_KEY) is True:
-        # 回填分不出各案份額的舊 N:1：不猜。先對每個母帳案按「推送到私帳 → 取代」認領份額，
-        # 旗標自己會清掉，之後這裡就只動 A 那一份的差額。
-        raise HTTPException(status_code=409, detail="這個私帳案承接了多個母帳案，各案份額還沒認領 —— "
-                            "先對每個母帳案按「推送到私帳 → 取代」認領一次，再改收款方式")
+    keep = None
+    if t is not None:
+        keep = await _ensure_share(session, t, norm_detail(t.ledger_detail), p.id)
+        if keep.get(BY_PARENT_PENDING_KEY) is True:
+            # 分不出各案份額的 N:1（回填分不出來、或對應表連了多案沒推送過）：不猜。先對每個母帳案按
+            # 「推送到私帳 → 取代」認領份額，旗標自己會清掉，之後這裡就只動 A 那一份的差額。
+            t.ledger_detail = keep          # 標記要落庫，下次才不用再判一次
+            raise HTTPException(status_code=409, detail="這個私帳案承接了多個母帳案，各案份額還沒認領 —— "
+                                "先對每個母帳案按「推送到私帳 → 取代」認領一次，再改收款方式")
     if want_source:
         if t is None:
             sid = await _me_staff_id_or_blank(request)
@@ -683,10 +690,8 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
             return {"action": "created", "created": True}
         # 有分身：案源改成代開發票、收入**一律**＝母帳合約額（owner 2026-09-13「一律改成合約」——
         # 代開的錢就是那張發票的面額，之前分身記的成本行合計不是）；工項不動。母帳沒填合約額才留原值。
-        keep = norm_detail(t.ledger_detail)
         # 只換**這一案**的份額（工項沿用）、標它走代開，X 吃差額 —— 別案鏡射進來的錢與案源不動（by_parent）。
         # X 的 source 也標代開：owner 自己填的那部分跟 X 走（fee_bases）。母帳沒填合約額就只換案源。
-        keep = _ensure_share(keep, int(t.contract_amount or 0), p.id)
         share = parent_shares(keep).get(p.id) or {"amount": 0, "split": {}}
         keep["source"] = want_source
         keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id,
@@ -697,7 +702,6 @@ async def apply_billing_mode(session, p, request, old_mode: str) -> dict:
         return {"action": "switched", "created": False}
     # 換回源日專案／現金收款：分身留著，只把代開那套拿掉（走到這裡＝reverting 已成立）
     if reverting:
-        keep = _ensure_share(norm_detail(t.ledger_detail), int(t.contract_amount or 0), p.id)
         share = parent_shares(keep).get(p.id) or {"amount": 0, "split": {}}
         # 只把**這一案**標回源日；別案還走代開的話 X 的案源留著（owner 自己那部分照舊），
         # 代辦費由 apply_source_fee 照剩下的代開份額重算（一案都沒有就三欄歸零）。

@@ -87,7 +87,7 @@ async def test_switch_moves_only_that_parents_share(monkeypatch):
     assert t.ledger_detail["source"] == "代開發票"
 
 
-async def test_switch_on_legacy_one_to_one_claims_whole_row_first(monkeypatch):
+async def test_switch_on_legacy_one_to_one_claims_whole_row_first(monkeypatch, parents_of):
     """沒分案記錄的舊 1:1 分身：先把整筆認成 A 的份額，再換 —— 結果跟以前一樣（收入＝母帳合約額）。"""
     from core.ledger_project import parent_shares
 
@@ -163,7 +163,7 @@ def test_create_project_surfaces_skipped():
     assert msg in create and '"skipped"' in create
 
 
-async def test_switch_marks_only_that_parent_as_agency_and_fee_counts_only_it(monkeypatch):
+async def test_switch_marks_only_that_parent_as_agency_and_fee_counts_only_it(monkeypatch, parents_of):
     """代辦費分案：A 改後期代開 → 只有 A 的份額標代開，代辦費只算 A；B 留源日。換回也只動 A。"""
     from core.ledger_project import fee_bases, parent_shares, set_parent_share
 
@@ -189,3 +189,53 @@ async def test_switch_marks_only_that_parent_as_agency_and_fee_counts_only_it(mo
     assert sh["A"]["source"] == "源日" and t.ledger_detail["source"] == "源日"
     assert (t.ledger_detail["invoice_fee"], t.ledger_detail["tax_fee"], t.ledger_detail["buy_invoice"]) == (0, 0, 0)
     assert t.contract_amount == 180000                                # 換回不動錢
+
+
+@pytest.fixture
+def parents_of(monkeypatch):
+    """_ensure_share 要看 X 有幾個母帳案（BUG-12）：給測試指定。"""
+    import routers.crm._shared as shared
+    box = {"X": [("A", "母帳案 A")]}
+
+    async def _links(session, ids):
+        return {i: box.get(i, []) for i in ids}
+    monkeypatch.setattr(shared, "mine_parent_links", _links)
+    return box
+
+
+async def test_legacy_n_to_one_without_shares_is_marked_pending_not_claimed(monkeypatch, parents_of):
+    """BUG-12：沒分案記錄、但 X 連著兩個母帳案（對應表連的）→ 不能整筆認給第一個，要標待認領（409）。"""
+    from core.ledger_project import BY_PARENT_PENDING_KEY
+    parents_of["X"] = [("A", "母帳案 A"), ("B", "母帳案 B")]
+    t = SimpleNamespace(id="X", name="X", entity="mine", contract_amount=100000,
+                        ledger_detail={"source": "源日", "split": {"剪接": 100000}}, updated_at=None)
+
+    async def _link(session, p):
+        return t
+    monkeypatch.setattr(pl, "resolve_mine_link", _link)
+    monkeypatch.setattr(ledger, "require_entity", lambda request, ent, level="": None)
+    monkeypatch.setattr(pl, "_store_mirror_detail", lambda t, detail: setattr(t, "ledger_detail", detail))
+    with pytest.raises(HTTPException) as e:
+        await pl.apply_billing_mode(None, _parent("passthrough", contract=120000), request=None, old_mode="company")
+    assert e.value.status_code == 409 and "認領" in e.value.detail
+    assert t.contract_amount == 100000
+    assert t.ledger_detail.get(BY_PARENT_PENDING_KEY) is True
+
+
+async def test_legacy_claim_is_capped_to_what_was_mirrored(monkeypatch, parents_of):
+    """BUG-13：X 100,000 裡只有 30,000 是 A 鏡射來的（mirror_total）→ 認 A=30,000、工項不認；
+    A 改後期代開 120,000 → X = 70,000（owner 自己的）＋ 120,000。"""
+    from core.ledger_project import MIRROR_TOTAL_KEY, parent_shares
+    t = SimpleNamespace(id="X", name="X", entity="mine", contract_amount=100000,
+                        ledger_detail={"source": "源日", "split": {"剪接": 100000}, MIRROR_TOTAL_KEY: 30000}, updated_at=None)
+
+    async def _link(session, p):
+        return t
+    monkeypatch.setattr(pl, "resolve_mine_link", _link)
+    monkeypatch.setattr(ledger, "require_entity", lambda request, ent, level="": None)
+    monkeypatch.setattr(pl, "_store_mirror_detail", lambda t, detail: setattr(t, "ledger_detail", detail))
+    await pl.apply_billing_mode(None, _parent("passthrough", contract=120000), request=None, old_mode="company")
+    assert t.contract_amount == 190000
+    assert parent_shares(t.ledger_detail)["A"]["amount"] == 120000
+    assert t.ledger_detail["split"] == {"剪接": 100000}            # 工項沒被認走、也沒被動
+

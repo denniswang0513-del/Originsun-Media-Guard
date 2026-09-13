@@ -59,6 +59,9 @@ def world(monkeypatch):
                               ledger_detail={"source": "源日", "split": {"剪接": 120000}}),
         "X3": SimpleNamespace(id="X3", entity="mine", contract_amount=10000,
                               ledger_detail={"source": "源日", "split": {"剪接": 10000}}),
+        # BUG-13：只有 30,000 是鏡射來的，70,000 是 owner 自己加的 → 只認 30,000、工項不認
+        "X4": SimpleNamespace(id="X4", entity="mine", contract_amount=100000,
+                              ledger_detail={"source": "源日", "split": {"剪接": 100000}, "mirror_total": 30000}),
         "A": SimpleNamespace(id="A", entity="parent", contract_amount=0, billing_mode="company"),
         "B": SimpleNamespace(id="B", entity="parent", contract_amount=0, billing_mode="company"),
         "C": SimpleNamespace(id="C", entity="parent", contract_amount=0, billing_mode="company"),
@@ -70,7 +73,8 @@ def world(monkeypatch):
     session = _Session(projects, users)
 
     async def _links(sess, ids):
-        return {"X1": [("A", "母帳案 A")], "X2": [("B", "B"), ("C", "C")], "X3": [("D", "D"), ("E", "E")]}
+        return {"X1": [("A", "母帳案 A")], "X2": [("B", "B"), ("C", "C")], "X3": [("D", "D"), ("E", "E")],
+                "X4": [("F", "F")]}
 
     totals = {"B": ({"剪接": 40000}, 40000), "C": ({"剪接": 80000}, 80000),
               "D": ({"剪接": 9000}, 9000), "E": ({"剪接": 9000}, 9000)}     # D+E = 18,000 > X3 的 10,000 → 待認領
@@ -99,8 +103,11 @@ async def test_backfill_claims_one_to_one_and_resolvable_n_to_one_and_flags_the_
     assert parent_shares(x2.ledger_detail)["C"]["amount"] == 80000
     assert x2.contract_amount == 120000 and x2.ledger_detail["split"] == {"剪接": 120000}
     assert x3.ledger_detail.get(BY_PARENT_PENDING_KEY) is True and not parent_shares(x3.ledger_detail)
+    x4 = world.projects["X4"]
+    assert parent_shares(x4.ledger_detail)["F"] == {"amount": 30000, "split": {}, "synced_total": 30000, "at": "", "source": "源日"}
+    assert x4.contract_amount == 100000 and x4.ledger_detail["split"] == {"剪接": 100000}
     assert world.committed == 1
-    assert "1:1 1 案、N:1 認出 1 案、待認領 1 案" in capsys.readouterr().out
+    assert "1:1 2 案、N:1 認出 1 案、待認領 1 案" in capsys.readouterr().out
 
 
 async def test_backfill_is_idempotent(world):

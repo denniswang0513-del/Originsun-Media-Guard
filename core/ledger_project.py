@@ -528,6 +528,24 @@ def source_mixed(detail) -> bool:
     return len(kinds) > 1
 
 
+def legacy_claim(detail, contract, pid: str, *, source: str = "") -> dict:
+    """沒分案記錄的舊 1:1 分身：把「上次鏡射過來的量」認成 `pid` 的份額（claim，不動錢）。
+
+    認多少：有 `mirror_total` 而且它比合約額小（0 < mt < 合約額）就只認 mt —— 多出來的是 owner 自己加的，
+    不能算成這一案的（之後解除連結會把 owner 的錢一起扣掉）；沒有 mirror_total、或它 ≥ 合約額（整筆都是
+    鏡射來的），才整筆認。工項只有在整筆認的時候才認（不知道哪幾項是鏡射來的就一項都不認）。
+    """
+    d = norm_detail(detail)
+    c = _int(contract)
+    mt = _int(d.get(MIRROR_TOTAL_KEY))
+    whole = not (0 < mt < c)
+    amount = c if whole else mt
+    d, _c = set_parent_share(d, c, pid, amount, (d.get("split") or {}) if whole else {},
+                             synced_total=mt, at=str(d.get(MIRROR_AT_KEY) or ""),
+                             source=source or d.get("source") or MIRROR_SOURCE, claim=True)
+    return d
+
+
 def drop_parent_share(detail, contract, pid: str) -> tuple:
     """解除連結：把 `pid` 那案的份額從 X 扣掉（金額、工項都扣，工項扣到 0 為止）→ `(detail, contract)`。
     沒這案的記錄＝原樣回去（舊連結沒分案記錄時解除連結不動錢，跟以前一樣）。"""
