@@ -49,11 +49,13 @@ export default async function render(container, ctx = {}) {
 // 兩個方向的「有沒有對應」判定：私帳側看連上來的母帳案、母帳側看 linked_mine_id
 function _linked(m) { return (m.parent_names || []).length > 0; }
 
-// N:1：每個母帳案後面帶它給這案的份額（分案記帳 by_parent）；沒記錄的只印案名
+// N:1：每個母帳案後面帶它給這案的份額（分案記帳 by_parent）；沒記錄的只印案名。
+// 🔴 用 parent_id 對，不用案名 —— 同名母帳案（對應表本來就有 _norm_name 的重名處理）會撞在一起
 function _sharesHtml(m) {
     const by = {};
-    (m.shares || []).forEach((s) => { by[s.parent_name] = s.amount; });
-    return (m.parent_names || []).map((n) => esc(n) + (n in by ? ` <span style="color:#9ca3af;">${fmtNum(by[n])}</span>` : '')).join('、');
+    (m.shares || []).forEach((s) => { by[s.parent_id] = s.amount; });
+    const parents = (m.parents && m.parents.length) ? m.parents : (m.parent_names || []).map((n) => ({ id: '', name: n }));
+    return parents.map((p) => esc(p.name) + (p.id in by ? ` <span style="color:#9ca3af;">${fmtNum(by[p.id])}</span>` : '')).join('、');
 }
 function _linkedP(p) { return !!p.linked_mine_id; }
 

@@ -123,6 +123,8 @@ async def projects_mine_links(request: Request):
             "contract": int(p.contract_amount or 0),
             "close_date": _fmt_day(p.completion_date),
             "parent_names": names,
+            # 同一份清單帶 id（同名母帳案才分得開）；shares 用 parent_id 對
+            "parents": [{"id": pid, "name": nm} for pid, nm in link_ids.get(p.id, [])],
             # 各母帳案的份額（分案記帳）；待認領＝舊 N:1 回填分不出來，逐案「推送→取代」認領
             "shares": [{"parent_id": pid, "parent_name": nm, "amount": sh[pid]["amount"]}
                        for pid, nm in link_ids.get(p.id, []) if pid in sh],
@@ -215,7 +217,8 @@ async def set_parent_link(mine_id: str, request: Request):
             if m.source_project_id and m.source_project_id not in unlinked:
                 # 舊形狀（只有私帳側的指標）的那個母帳案也要走 _write_link —— 份額才會一起扣掉
                 p0 = await session.get(CrmProject, m.source_project_id)
-                if p0 is not None:
+                # 🔴 p0 可能早就改連到別的私帳案 Y（舊指標殘留在 M 上）—— 那就只清 M 的指標，別動 Y 的錢
+                if p0 is not None and p0.mine_link_id in (None, m.id):
                     await _write_link(session, p0, None)
             m.source_project_id = None
         m.updated_at = _now()
