@@ -877,11 +877,16 @@ async def delete_project(project_id: str, request: Request):
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
         client_id = project.client_id
+        from .project_links import _write_link
         if (project.entity or "parent") != "mine":
             # 先解除私帳連結（份額一起扣掉、X 的案源跟著退）—— 不然 X 留著孤兒份額：後端 fee_bases 算它、
             # 詳情 API 只回現在連著的案 → 前端試算跟後端不同 → 代辦費被凍成手動
-            from .project_links import _write_link
             await _write_link(session, project, None)
+        else:
+            # 刪的是私帳分身：母帳案的指標要跟著清，不然 is_mirrored 仍為真、之後推送／連別案一律 409
+            for parent in (await session.execute(
+                    select(CrmProject).where(CrmProject.mine_link_id == project_id))).scalars().all():
+                await _write_link(session, parent, None)
         await session.delete(project)
         await _auto_update_client_status(session, client_id)
         await session.commit()

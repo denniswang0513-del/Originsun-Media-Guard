@@ -343,6 +343,9 @@ BY_PARENT_KEY = "by_parent"
 #: True＝N:1 的舊資料，各案份額還沒認領（回填時分不出來）；認領走 set_parent_share(claim=True)，
 #: 全部母帳案都認領完由呼叫端清掉。缺鍵＝不是待認領。
 BY_PARENT_PENDING_KEY = "by_parent_pending"
+#: 第一次進分案世界時被「凍住」的手填費用欄（MANUAL_FIELDS 的子集）：這些 manual 旗標是 owner 自己填的，
+#: 份額換案源／解除時 _release_fee_flags 不放它們（放的只有「為那案調的」）。norm_detail 保留。
+FROZEN_KEY = "frozen"
 
 
 def fee_deducted(d) -> bool:
@@ -423,6 +426,9 @@ def norm_detail(raw) -> dict:
         out[BY_PARENT_KEY] = shares
     if d.get(BY_PARENT_PENDING_KEY) is True:
         out[BY_PARENT_PENDING_KEY] = True
+    frozen = sorted(set(d.get(FROZEN_KEY) or ()) & MANUAL_FIELDS & manual_fields(d))
+    if frozen:
+        out[FROZEN_KEY] = frozen          # 只在還是手動時有意義；旗標被人放掉（改回試算值）就一起消
     return out
 
 
@@ -600,16 +606,21 @@ def _freeze_hand_filled_fees(d: dict) -> None:
         manual.add("invoice_fee")          # 稅金／買發票跟代辦費是一組，凍住旗標就整組不歸零
     if src != "執行業務所得" and _int(d.get("personal_tax")):
         manual.add("personal_tax")
+    frozen = manual - manual_fields({"manual": d.get("manual")})      # 這次新凍住的（原本就手動的不算）
     if manual:
         d["manual"] = sorted(manual)
+    if frozen:
+        d[FROZEN_KEY] = sorted(frozen)
 
 
 def _release_fee_flags(d: dict, old_src, new_src) -> None:
-    """份額從抽費的案源換走（或被解除）：那種費用的手動旗標放掉。"""
+    """份額從抽費的案源換走（或被解除）：那種費用的手動旗標放掉 —— 但 owner 自己手填、第一次分案時凍住的
+    （FROZEN_KEY）不放，那不是為這案調的。"""
     manual = manual_fields(d)
-    if old_src == "代開發票" and new_src != "代開發票":
+    frozen = set(d.get(FROZEN_KEY) or ()) & MANUAL_FIELDS
+    if old_src == "代開發票" and new_src != "代開發票" and "invoice_fee" not in frozen:
         manual.discard("invoice_fee")
-    if old_src == "執行業務所得" and new_src != "執行業務所得":
+    if old_src == "執行業務所得" and new_src != "執行業務所得" and "personal_tax" not in frozen:
         manual.discard("personal_tax")
     if manual:
         d["manual"] = sorted(manual)
@@ -758,8 +769,14 @@ def apply_source_fee(contract: int, d: dict, *, keep=()) -> dict:
     if src == "代開發票" or agency:
         _settle("invoice_fee", _half_up(agency * float(d.get("fee_pct") or DEFAULT_FEE_PCT) / 100))
         # 稅金與買發票是代辦費的**組成**（買發票＝代辦費 − 稅金），代辦費手改時跟著重算
-        d["tax_fee"] = _half_up(agency / VAT_DIVISOR * (VAT_PCT / 100))
-        d["buy_invoice"] = int(d["invoice_fee"] or 0) - d["tax_fee"]
+        if "invoice_fee" in (set(d.get(FROZEN_KEY) or ()) & manual):
+            pass                          # owner 手填的整組（代辦費／稅金／買發票）凍住，一個都不動
+        else:
+            d["tax_fee"] = _half_up(agency / VAT_DIVISOR * (VAT_PCT / 100))
+            if "invoice_fee" in manual:
+                # 手改的代辦費比試算小：稅金是代辦費的組成，不能超過它（買發票不能是負的）
+                d["tax_fee"] = min(d["tax_fee"], int(d["invoice_fee"] or 0))
+            d["buy_invoice"] = max(0, int(d["invoice_fee"] or 0) - d["tax_fee"])
     elif shared:
         # 分案的世界：沒有任何一案走代開（A 換回源日、或最後一個代開份額被解除）→ 試算值是 0：
         # 走 _settle，這次送來的非零值一樣算「人決定的」（標手動、留住），沒送／沒標的才歸零。

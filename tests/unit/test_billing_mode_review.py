@@ -486,3 +486,10 @@ async def test_link_reads_previous_links_before_writing_the_pointer(monkeypatch)
     await pl._write_link(None, parent, mine)
     assert parent_shares(mine.ledger_detail)["A"]["amount"] == 0          # 從沒連過 → 0 份額，不是 100,000
     assert mine.contract_amount == 100000
+
+
+def test_deleting_a_private_mirror_clears_the_parents_pointer():
+    """第 10 輪 #4：刪私帳分身時母帳案的 mine_link_id 要清，不然之後推送／連別案一律 409。"""
+    from tests.unit._srcscan import code_only, flow_body, projects_src
+    fn = code_only(flow_body(projects_src(), "async def delete_project("))
+    assert "CrmProject.mine_link_id == project_id" in fn and "await _write_link(session, parent, None)" in fn

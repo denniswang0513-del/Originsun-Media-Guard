@@ -476,10 +476,9 @@ def _push_share_amount(mode: str, pending: bool, share_src: str, old_share: dict
     其他＝掛給我的成本行合計；add＝這案份額再加一筆（待認領時 add 視同取代，claim 不動錢、累加會漂）。
     🔴 看的是**這一案份額**的案源（_push_share_source），不是 X 的 —— X 可能已被別案翻成代開。"""
     if share_src == "代開發票":
-        # 已經走代開的份額重新同步：金額不動（沒填過才補）；從源日改走代開：換成發票面額，不能沿用成本行合計
-        if old_share.get("source") == "代開發票" and int(old_share.get("amount") or 0):
-            return int(old_share.get("amount") or 0)
-        return int(agency_contract or 0)
+        # 代開的金額＝那張發票的面額（母帳合約額）：母帳改了合約額，重新同步要跟上（分案後 owner 自己調的錢
+        # 都在「自己的」那部分，份額是系統的）；母帳沒填合約額才沿用舊份額
+        return int(agency_contract or 0) or int(old_share.get("amount") or 0)
     if mode == "add" and not pending:
         return int(old_share.get("amount") or 0) + int(mir_total or 0)
     return int(mir_total or 0)

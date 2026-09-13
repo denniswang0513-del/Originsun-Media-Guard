@@ -248,7 +248,7 @@ class TestPolishRound2:
         old = {"amount": 0, "split": {}}
         assert _push_share_amount("overwrite", False, "源日", old, 30000, 500000) == 30000
         assert _push_share_amount("overwrite", False, "代開發票", old, 30000, 500000) == 500000
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 500000) == 120000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 500000) == 500000
         assert _push_share_amount("add", False, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 40000
         assert _push_share_amount("add", True, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 30000   # 待認領：add 視同取代
         from tests.unit._srcscan import code_only, flow_body, projects_src
@@ -436,7 +436,9 @@ class TestPolishRound7:
         # 第 7 輪 #3：源日份額 30,000 的案改走代開 → 金額換成母帳合約額，不是沿用 30,000
         from routers.crm.project_links import _push_share_amount
         assert _push_share_amount("overwrite", False, "代開發票", {"amount": 30000, "split": {}, "source": "源日"}, 30000, 100000) == 100000
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 100000) == 120000
+        # 第 10 輪：代開份額重新同步跟著母帳合約額走（改成 100,000 就是 100,000）；母帳沒填才沿用
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 100000) == 100000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 0) == 120000
 
     def test_drop_of_an_agency_share_releases_the_manual_fee(self):
         # 第 7 輪 #5：純代開分身、owner 手調代辦費 9,000 → 解除 P 後不能留 9,000 在合約 0 的 X 上
@@ -537,3 +539,30 @@ class TestPolishRound9:
         push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
         assert '_sh_now.get("synced_total")' in push
         assert 'and (not sid or MIRROR_TOTAL_KEY not in keep)' not in push
+
+
+class TestPolishRound10:
+    def test_frozen_hand_filled_fees_survive_share_moves(self):
+        # #1（中）：源日 X 手填 5,000／2,000／3,000 與個人稅款 3,000 → 連代開 B 再解除 → 手填的都要還在
+        from core.ledger_project import FROZEN_KEY, drop_parent_share
+        d = norm_detail({"source": "源日", "invoice_fee": 5000, "tax_fee": 2000, "buy_invoice": 3000, "personal_tax": 3000})
+        d, c = set_parent_share(d, 100000, "B", 200000, {}, source="代開發票")
+        assert set(d[FROZEN_KEY]) == {"invoice_fee", "personal_tax"}
+        d = apply_source_fee(c, d)
+        d2, c2 = drop_parent_share(d, c, "B")
+        d2 = apply_source_fee(c2, d2)
+        assert (d2["invoice_fee"], d2["tax_fee"], d2["buy_invoice"], d2["personal_tax"]) == (5000, 2000, 3000, 3000)
+        # 為那案調的（不是凍住的）照舊放掉
+        e, ce = set_parent_share({"source": "源日"}, 0, "A", 100000, {}, source="代開發票")
+        e["invoice_fee"] = 9000
+        e = apply_source_fee(ce, e, keep={"invoice_fee"})
+        assert FROZEN_KEY not in e
+        e2, _ = drop_parent_share(e, ce, "A")
+        assert e2["invoice_fee"] == 0
+
+    def test_manual_fee_never_yields_a_negative_buy_invoice(self):
+        # #2：手改代辦費 5,000 撞上 200,000 的基數：稅金不能超過代辦費、買發票不能是負的
+        d, c = set_parent_share({"source": "源日"}, 0, "B", 200000, {}, source="代開發票")
+        d["invoice_fee"] = 5000
+        d = apply_source_fee(c, d, keep={"invoice_fee"})
+        assert d["invoice_fee"] == 5000 and d["tax_fee"] == 5000 and d["buy_invoice"] == 0

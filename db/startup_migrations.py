@@ -676,11 +676,12 @@ async def _backfill_by_parent(session) -> tuple:
     from db.models import CrmProject, User
     from core.ledger import MINE_MODULE
     from core.auth import expand_modules
-    from core.ledger_project import (BILLING_MIRROR_SOURCE, BY_PARENT_PENDING_KEY, MIRROR_SOURCE,
+    from core.ledger_project import (BILLING_MIRROR_SOURCE, BY_PARENT_PENDING_KEY, MIRROR_SOURCE, apply_source_fee,
                                      billing_mode_of, legacy_claim, norm_detail, parent_shares,
                                      set_parent_share)
     from routers.crm._shared import mine_parent_links
     from routers.crm.project_links import _mirror_contract, _mirror_preview
+    from routers.api_finance_projects import resync_receivable
     mine_ids = [i for (i,) in (await session.execute(
         select(CrmProject.id).where(CrmProject.entity == "mine"))).all()]
     links = {k: v for k, v in (await mine_parent_links(session, mine_ids)).items() if v}
@@ -721,6 +722,9 @@ async def _backfill_by_parent(session) -> tuple:
                     keep, _c = set_parent_share(keep, contract, pid, amount, split,
                                                 synced_total=total,
                                                 source=psrc or MIRROR_SOURCE, claim=True)   # 看母帳的收款方式，不抄 X
+                # 案源分了案 → 代辦費／應收要照新規則重算落庫（應收帳款清單讀的是存起來的值）
+                keep = apply_source_fee(contract, keep)
+                resync_receivable(t, keep)
                 nn += 1
             else:
                 keep[BY_PARENT_PENDING_KEY] = True

@@ -106,6 +106,8 @@ async def test_backfill_claims_one_to_one_and_resolvable_n_to_one_and_flags_the_
     # 第 7 輪 #2：N:1 每案的案源看母帳的收款方式（C 是後期代開），不抄 X 的
     assert parent_shares(x2.ledger_detail)["B"]["source"] == "源日"
     assert parent_shares(x2.ledger_detail)["C"]["source"] == "代開發票"
+    assert x2.ledger_detail["invoice_fee"] == 6400                 # 第 10 輪 #5：回填後代辦費照新規則落庫（80,000 × 8%）
+    assert x2.amount_receivable == 120000 - 6400                  # 應收也重算
     assert x2.contract_amount == 120000 and x2.ledger_detail["split"] == {"剪接": 120000}
     assert x3.ledger_detail.get(BY_PARENT_PENDING_KEY) is True and not parent_shares(x3.ledger_detail)
     x4 = world.projects["X4"]
