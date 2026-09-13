@@ -737,31 +737,22 @@ async def mine_owner_staff_id(session) -> str:
     return owners[0] if len(owners) == 1 else ""
 
 
-async def passthrough_parents(session, mine_id: str = "") -> dict:
-    """`{母帳案 id: 私帳案 id}` —— 收款方式＝後期代開、而且連著私帳案的母帳案（兩種連結形狀都認）。
-    公司案改成後期代開＝整案其實是私帳主人的：它在 CRM 帳目裡別人的人員費用是他的委外、行政雜支是他的雜支
-    （owner 2026-09-13），逐案損益讀取時要把這些算進連到的私帳案。`mine_id` 給了就只找連到那一案的。"""
-    from core.ledger import not_mine
-    q = (select(CrmProject.id, CrmProject.mine_link_id)
-         .where(not_mine(CrmProject.entity), CrmProject.billing_mode == "passthrough",
-                CrmProject.mine_link_id.isnot(None)))
-    if mine_id:
-        q = q.where(CrmProject.mine_link_id == mine_id)
-    out = {pid: mid for pid, mid in (await session.execute(q)).all()}
-    # 舊形狀：指標在私帳側
-    lq = (select(CrmProject.id, CrmProject.source_project_id)
-          .where(CrmProject.entity == "mine", CrmProject.source_project_id.isnot(None)))
-    if mine_id:
-        lq = lq.where(CrmProject.id == mine_id)
-    legacy = [(mid, src) for mid, src in (await session.execute(lq)).all() if src not in out]
-    if legacy:
-        ok = {pid for (pid,) in (await session.execute(
-            select(CrmProject.id).where(CrmProject.id.in_([s for _m, s in legacy]),
-                                        CrmProject.billing_mode == "passthrough"))).all()}
-        for mid, src in legacy:
-            if src in ok:
-                out[src] = mid
-    return out
+async def mine_whole_parents(session, mine_id: str) -> dict:
+    """`{母帳案 id: 私帳案 id}` —— 連到這個私帳案、而且**整案其實是私帳主人的**母帳案：收款方式＝後期代開，或推送時說了
+    整案是他的（份額標 `face`：代開分身、「我的案，走現金匯款」；owner 2026-09-13「要」—— 現金匯款的案也一樣）。
+    這種案在 CRM 帳目裡別人的人員費用是他的委外、行政雜支是他的雜支，逐案損益讀取時要算進私帳案。兩種連結形狀都認。"""
+    from core.ledger_project import billing_mode_of, norm_detail, parent_shares
+    if not mine_id:
+        return {}
+    pids = [pid for pid, _n in (await mine_parent_links(session, [mine_id])).get(mine_id) or []]
+    if not pids:
+        return {}
+    modes = dict((await session.execute(
+        select(CrmProject.id, CrmProject.billing_mode).where(CrmProject.id.in_(pids)))).all())
+    mine = await session.get(CrmProject, mine_id)
+    shares = parent_shares(norm_detail(mine.ledger_detail)) if mine is not None else {}
+    return {pid: mine_id for pid in pids
+            if billing_mode_of(modes.get(pid)) == "passthrough" or (shares.get(pid) or {}).get("face") is True}
 
 
 async def mine_parent_links(session, mine_ids) -> dict:

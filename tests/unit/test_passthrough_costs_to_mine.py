@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""公司案改成後期代開後：它 CRM 帳目裡**別人**的人員費用＝私帳的委外、行政雜支＝私帳的雜支（owner 2026-09-13）。
+"""整案是私帳主人的母帳案（後期代開、或推送時說了整案是我的：代開分身／走現金匯款）：它 CRM 帳目裡**別人**的人員費用
+＝私帳的委外、行政雜支＝私帳的雜支（owner 2026-09-13，現金匯款那種「要」一樣套）。
 
 私帳主人自己那幾行是收入（mirror_lines 鏡射成工項），不算成本。假 session 依 SQL 文字回不同結果。
 """
@@ -26,17 +27,24 @@ class _Session:
     """P（後期代開、連到 X）掛了：小明 30,000、王士源 50,000、沒指定 5,000 的人員費用；雜支 1,200（已請款 800 不算）。
     X 自己在 CRM 沒東西。"""
 
-    def __init__(self):
+    def __init__(self, mode="passthrough", face=False):
         self.owner = SimpleNamespace(staff_id="WANG", modules=["finance_mine"])
+        self.mode = mode
+        self.mine = SimpleNamespace(id="X", ledger_detail={"by_parent": {"P": {"amount": 120000, "split": {}, "face": True}}} if face else {})
+
+    async def get(self, model, pk):
+        return self.mine if pk == "X" else None
 
     async def execute(self, stmt):
         t = str(stmt)
         if "users" in t:
             return _Res([self.owner])
-        if "billing_mode" in t and "mine_link_id" in t:          # passthrough_parents 新形狀
-            return _Res([("P", "X")])
+        if "mine_link_id IN" in t:                                 # mine_parent_links 新形狀：P → X
+            return _Res([("X", "P", "查理回家紀錄")])
         if "source_project_id" in t:                               # 舊形狀
             return _Res([])
+        if "billing_mode" in t:                                    # mine_whole_parents：P 的收款方式
+            return _Res([("P", self.mode)])
         if "crm_project_expenses" in t:
             if "JOIN crm_projects" in t:                            # X 自己的
                 return _Res([])
@@ -54,24 +62,30 @@ async def test_passthrough_parent_costs_land_in_the_mine_project():
     assert out["X"] == {"misc": 1200, "outsource": 35000}
 
 
-async def test_company_parent_costs_do_not(monkeypatch):
-    """收款方式不是後期代開的母帳案：什麼都不算（跟以前一樣）。"""
-    async def _none(session, mine_id=""):
-        return {}
-    monkeypatch.setattr(fp, "passthrough_parents", _none)
-    out = await fp._crm_costs(_Session(), "mine", "X")
+async def test_company_parent_costs_do_not():
+    """公司的案、公司只付他一部分（收款方式源日專案、份額沒標 face）：什麼都不算（跟以前一樣）。"""
+    out = await fp._crm_costs(_Session(mode="company"), "mine", "X")
     assert out.get("X") is None
+
+
+async def test_cash_mine_parent_costs_land_too():
+    """「我的案，走現金匯款」推過來的（收款方式仍是源日專案、但份額標 face）：一樣算（owner 2026-09-13「要」）。"""
+    out = await fp._crm_costs(_Session(mode="company", face=True), "mine", "X")
+    assert out["X"] == {"misc": 1200, "outsource": 35000}
+    assert await shared.mine_whole_parents(_Session(mode="company", face=True), "X") == {"P": "X"}
+    assert await shared.mine_whole_parents(_Session(mode="company"), "X") == {}
+    assert await shared.mine_whole_parents(_Session(), "") == {}
 
 
 def test_itemised_list_tags_rows_from_the_passthrough_parent_and_skips_the_owners_lines():
     from tests.unit._srcscan import code_only, func_body, repo_src
     fn = code_only(func_body(repo_src("routers/api_finance_projects.py"), "async def _crm_lines("))
-    assert "pmap = await passthrough_parents(session, project_id)" in fn
+    assert "pmap = await mine_whole_parents(session, project_id)" in fn
     assert "ids = [project_id] + list(pmap)" in fn
     assert "(l.actual_staff_id or l.estimated_staff_id) == owner" in fn        # 自己那幾行不列
     assert '"from": from_name.get(l.project_id, "")' in fn and '"from": from_name.get(e.project_id, "")' in fn
     js = repo_src("frontend/tabs/finance/subviews/projects.js")
-    assert "來自 ' + esc(x.from) + '（後期代開）" in js
+    assert "來自母帳 ' + esc(x.from) + '" in js
 
 
 async def test_owner_lookup_is_the_single_finance_mine_user():

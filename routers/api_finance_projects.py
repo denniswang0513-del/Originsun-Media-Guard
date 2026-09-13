@@ -43,7 +43,7 @@ from core.ledger_project import (BY_PARENT_PENDING_KEY, COST_FIELDS, DEFAULT_FEE
                                  norm_detail, receivable_fields)
 from core.schemas import LedgerDetailPayload, LedgerProjectCreate
 from routers.crm._shared import (_fmt_day, mine_owner_staff_id, mine_parent_links, mine_parent_names,
-                                 passthrough_parents)
+                                 mine_whole_parents)
 
 #: 私帳案 1:1 連著母帳時，私帳詳情鎖住的欄位（值由母帳決定）。前端只畫鎖，
 #: 真正的牆在 update_project_ledger（409）。
@@ -115,9 +115,9 @@ async def _crm_costs(session, ent: str, project_id: str = "") -> dict:
     for pid, v in (await session.execute(line_q)).all():
         out.setdefault(pid, {})["outsource"] = int(v or 0)
     if ent == "mine":
-        # 後期代開的母帳案：整案是私帳主人的 —— 它 CRM 帳目裡**別人**的人員費用是他的委外、行政雜支是他的雜支
-        # （owner 2026-09-13）。自己那幾行是收入（mirror_lines 鏡射成工項），不算成本。
-        pmap = await passthrough_parents(session, project_id)
+        # 整案是私帳主人的母帳案（後期代開、或推送時說了整案是我的：代開分身／走現金匯款）—— 它 CRM 帳目裡**別人**的
+        # 人員費用是他的委外、行政雜支是他的雜支（owner 2026-09-13）。自己那幾行是收入（mirror_lines 鏡射成工項），不算成本。
+        pmap = await mine_whole_parents(session, project_id)
         if pmap:
             owner = await mine_owner_staff_id(session)
             pids = list(pmap)
@@ -149,8 +149,8 @@ async def _crm_lines(session, project_id: str) -> dict:
 
     from db.models import (CrmPaymentRequest, CrmProject, CrmProjectCostLine,
                            CrmProjectExpense, CrmStaff)
-    # 本案自己的 ＋ 後期代開母帳案的（別人的人員費用＝委外、行政雜支＝雜支；同 _crm_costs）
-    pmap = await passthrough_parents(session, project_id)
+    # 本案自己的 ＋ 整案是我的母帳案的（別人的人員費用＝委外、行政雜支＝雜支；同 _crm_costs）
+    pmap = await mine_whole_parents(session, project_id)
     ids = [project_id] + list(pmap)
     owner = await mine_owner_staff_id(session) if pmap else ""
     from_name = dict((await session.execute(

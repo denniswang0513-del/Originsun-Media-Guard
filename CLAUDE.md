@@ -1573,6 +1573,8 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   值不變（`SOURCES` 白名單四個都在），字面與順序正本 `core.ledger_project.SOURCE_LABELS`（詳情／換帳本檢查隨 `source_labels` 送；
   桌機新增表單留一份鏡射，`test_ledger_source_rules` 釘兩邊一致）。費用規則沒有它的份（`apply_source_fee` 只認代開與執行業務所得）。
   母帳推送彈窗「我的案，走現金匯款」＝`ProjectMirrorPayload.whole`＋案源自接：收入＝母帳合約額、份額標 `face`（重同步只更新工項）。
+  **份額標 `face` 的母帳案跟後期代開一樣「整案是私帳主人的」**：它 CRM 帳目裡別人的人員費用＝私帳委外、行政雜支＝私帳雜支
+  （`routers/crm/_shared.mine_whole_parents`，owner 2026-09-13「要」）—— 判「整案是他的」只認這兩個信號，別再加第三種。
 - **`burn_rows` 的每一個消費者都要自己抹錢**（2026-09-12 /polish 抓到）：它 2026-09-12 起帶合約未稅／預期毛利／人力成本
   （建議預算本來就是從毛利算出來的）。`/summary` 尾端有 `_redact_summary`、`/me/projects_burn` 只取 `SUMMARY_PUBLIC_KEYS`，
   但 `/dashboard` 的 `burn_top` 原本整列直接回給任何有 timesheets 鑰匙的人。給 burn 列加欄位＝要 grep `burn_rows(` 的每個呼叫端。

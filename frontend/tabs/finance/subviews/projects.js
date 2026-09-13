@@ -918,7 +918,7 @@ function _crmLinesHtml(cl) {
     const peopleRows = people.map((x) => `
         <tr><td>${esc(x.who || '（未指定人員）')}
                 <div style="color:#666;font-size:10px;">${esc(x.phase)}｜${esc(x.item)}${
-                    x.from ? '｜<span style="color:#8ab4f8;">來自 ' + esc(x.from) + '（後期代開）</span>' : ''}</div></td>
+                    x.from ? '｜<span style="color:#8ab4f8;">來自母帳 ' + esc(x.from) + '</span>' : ''}</div></td>
             <td style="text-align:right;">${fmtNum(x.amount)}</td>
             <td style="width:82px;text-align:right;">${x.claimed
                 ? '<span style="color:#86efac;font-size:11px;">已請款</span>'
@@ -931,7 +931,7 @@ function _crmLinesHtml(cl) {
         <tr><td>${esc(x.item || x.category)}
                 <div style="color:#666;font-size:10px;">${esc(x.date)}｜${esc(x.category)}${
                     x.payee ? '｜' + esc(x.payee) : ''}${
-                    x.from ? '｜<span style="color:#8ab4f8;">來自 ' + esc(x.from) + '（後期代開）</span>' : ''}${
+                    x.from ? '｜<span style="color:#8ab4f8;">來自母帳 ' + esc(x.from) + '</span>' : ''}${
                     x.billed_to_company ? '｜<span style="color:#fbbf24;">已跟公司請款（不計私帳成本）</span>' : ''}</div></td>
             <td style="text-align:right;color:${x.billed_to_company ? '#666' : '#ddd'};">${fmtNum(x.amount)}</td>
             <td style="width:82px;text-align:right;">${x.billed_to_company
