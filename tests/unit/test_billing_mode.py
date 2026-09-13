@@ -130,8 +130,10 @@ def test_apply_billing_mode_rules():
 def test_link_note_for_respects_the_mine_visibility_line():
     fn = code_only(flow_body(_LINKS, "async def link_note_for("))
     assert "hide_mine_projects(request)" in fn and "return link_note(mode, None, None)" in fn
-    # 落後判定同 mirror-check：沒綁人員檔案 None；N:1 不判
-    assert "mine_parent_names(session, [t.id])" in fn and "stale, delta = mirror_stale(detail, crm_total)" in fn
+    # 落後判定同 mirror-check：沒綁人員檔案 None；2026-09-13 起逐案判（by_parent[p].synced_total），
+    # 只有沒分案記錄的舊 N:1 才不判
+    assert "mine_parent_links(session, [t.id])" in fn and "stale, delta = mirror_stale(detail, crm_total, p.id)" in fn
+    assert "if len(parents) <= 1 or p.id in shares:" in fn
 
 
 def test_private_put_takes_fee_deducted_as_meta_not_money():

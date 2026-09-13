@@ -715,8 +715,8 @@ async def link_note_for(session, p, request) -> dict:
     """「後期連結」那一行（core.ledger_project.link_note 的 I/O 半邊）。
     看不到私帳的請求：只講收款方式，不露私帳案（同 `mirrored` 那條可見性線）。"""
     from core.ledger import hide_mine_projects
-    from core.ledger_project import link_note, mirror_stale, norm_detail
-    from ._shared import mine_parent_names
+    from core.ledger_project import BY_PARENT_PENDING_KEY, link_note, mirror_stale, norm_detail, parent_shares
+    from ._shared import mine_parent_links
 
     mode = p.billing_mode
     if (p.entity or "parent") == "mine" or hide_mine_projects(request):
@@ -726,16 +726,19 @@ async def link_note_for(session, p, request) -> dict:
         return link_note(mode, None, None, passthrough_invoices=await _passthrough_invoice_count(session, p.id))
     detail = norm_detail(t.ledger_detail)
     stale, delta, crm_total = None, 0, 0
+    parents = (await mine_parent_links(session, [t.id])).get(t.id) or []
+    shares = parent_shares(detail)
     sid = await _me_staff_id_or_blank(request)
     if sid:
-        # 同 mirror-check：一個私帳案承接多個母帳案時合計不屬於任何一案 → 判不出來
-        shared = len((await mine_parent_names(session, [t.id])).get(t.id) or []) > 1
-        if not shared:
+        # 「私帳落後了沒」逐案判（by_parent[p].synced_total）；沒分案記錄的舊 N:1 合計不屬於任何一案 → 判不出來
+        if len(parents) <= 1 or p.id in shares:
             _p, mir, _l = await _mirror_preview(session, p.id, sid)
             crm_total = mir["total"]
-            stale, delta = mirror_stale(detail, crm_total)
+            stale, delta = mirror_stale(detail, crm_total, p.id)
+    share_rows = [(name, shares[pid]["amount"]) for pid, name in parents if pid in shares] if len(parents) > 1 else []
     return link_note(mode, (t.id, t.name or "", t.contract_amount), detail, stale=stale, delta=delta,
-                     crm_total=crm_total, passthrough_invoices=await _passthrough_invoice_count(session, p.id))
+                     crm_total=crm_total, passthrough_invoices=await _passthrough_invoice_count(session, p.id),
+                     shares=share_rows, shares_pending=detail.get(BY_PARENT_PENDING_KEY) is True)
 
 
 # ── 連結的唯一寫入者（推送、收款方式、對應表五支端點都經過這裡）────────────────

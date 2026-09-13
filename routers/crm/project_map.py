@@ -60,7 +60,8 @@ async def projects_mine_links(request: Request):
     `parent_names` 兩種連結形狀都收（見 mine_parent_names）；`suggest_id`
     只在**唯一**候選時給 —— 多個就不猜（同 clients 那張對照表的規矩）。
     """
-    from ._shared import mine_parent_names
+    from ._shared import mine_parent_links, mine_parent_names
+    from core.ledger_project import BY_PARENT_PENDING_KEY, norm_detail, parent_shares
     factory = await _mine_link_guard(request)
     async with factory() as session:
         mine_rows = (await session.execute(
@@ -75,6 +76,7 @@ async def projects_mine_links(request: Request):
             .where(not_mine(CrmProject.entity))
             .order_by(CrmProject.name))).all()
         links = await mine_parent_names(session, [p.id for p, _c in mine_rows])
+        link_ids = await mine_parent_links(session, [p.id for p, _c in mine_rows])
         mine_map = await mine_link_map(session, [p.id for p, _c in parent_rows])
         # 私帳案客戶在母帳的狀態只要 entity／crm_link_id 兩欄，不整表 hydrate
         cli = {cid: (ent, link) for cid, ent, link in (await session.execute(
@@ -103,12 +105,16 @@ async def projects_mine_links(request: Request):
             "placeholder": (p.contract_amount_source or "") == "mine",
             "linked_mine_id": mid,
             "linked_mine_name": (mine_by_id[mid].name if mid in mine_by_id else ""),
+            # 這一案給私帳那案的份額（分案記帳）；沒記錄＝None（舊 1:1 開機回填後就有）
+            "share": (parent_shares(norm_detail(mine_by_id[mid].ledger_detail)).get(p.id) or {}).get("amount")
+                     if mid in mine_by_id else None,
             "suggest_id": sug[0].id if len(sug) == 1 else "",
             "suggest_name": sug[0].name if len(sug) == 1 else "",
         })
     mine = []
     for p, cname in mine_rows:
         names = links.get(p.id, [])
+        sh = parent_shares(norm_detail(p.ledger_detail))
         sug = [] if names else by_name.get(_norm_name(p.name), [])
         c = cli.get(p.client_id) if p.client_id else None
         mine.append({
@@ -117,6 +123,10 @@ async def projects_mine_links(request: Request):
             "contract": int(p.contract_amount or 0),
             "close_date": _fmt_day(p.completion_date),
             "parent_names": names,
+            # 各母帳案的份額（分案記帳）；待認領＝舊 N:1 回填分不出來，逐案「推送→取代」認領
+            "shares": [{"parent_id": pid, "parent_name": nm, "amount": sh[pid]["amount"]}
+                       for pid, nm in link_ids.get(p.id, []) if pid in sh],
+            "shares_pending": norm_detail(p.ledger_detail).get(BY_PARENT_PENDING_KEY) is True,
             # 客戶在母帳的狀態：ok＝本來就是 CRM 客戶或已連結；none＝連不到
             # （「在母帳建立」會順手把客戶也建起來 —— owner「私帳的客戶母帳
             # 都有包含」，不然補建的專案會掛在一個母帳看不到的客戶上）

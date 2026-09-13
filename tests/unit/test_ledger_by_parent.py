@@ -101,3 +101,17 @@ class TestMirrorStalePerParent:
         assert mirror_stale(d, 50000, "A") == (False, 0)
         assert mirror_stale(d, 50000) == (False, 0)
         assert mirror_stale(norm_detail({}), 50000, "A") == (None, 0)
+
+
+class TestLinkNoteShares:
+    def test_sentence_lists_each_parents_share_and_pending(self):
+        from core.ledger_project import link_note
+        d = norm_detail({"source": "源日"})
+        n = link_note("company", ("m", "私帳案 X", 200000), d, shares=[("母帳案 A", 100000), ("母帳案 B", 80000)])
+        assert n["shares"] == [{"name": "母帳案 A", "amount": 100000}, {"name": "母帳案 B", "amount": 80000}]
+        assert "份額 母帳案 A 100,000、母帳案 B 80,000" in n["text"]
+        assert n["shares_pending"] is False
+        p = link_note("company", ("m", "X", 1), d, shares_pending=True)
+        assert p["shares_pending"] is True and "待認領" in p["text"]
+        one = link_note("company", ("m", "X", 1), d)
+        assert one["shares"] == [] and "份額" not in one["text"]
