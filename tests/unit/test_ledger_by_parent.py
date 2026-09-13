@@ -229,11 +229,58 @@ class TestPolishRound1:
         assert _push_share_source("", {}) == "源日"
         from tests.unit._srcscan import code_only, flow_body, projects_src
         body = code_only(flow_body(projects_src(), "async def mirror_project_to_mine("))
-        assert "source=_push_share_source(source, old_share)" in body
+        assert "share_src = _push_share_source(source, old_share)" in body and "source=share_src" in body
         assert 'source=keep["source"]' not in body
 
     def test_pending_add_records_this_push_not_a_running_sum(self):
         # BUG-14：待認領時 add 不能累加（錢沒動、記錄卻長大）→ 視同 overwrite
+        from tests.unit._srcscan import code_only, func_body, projects_src
+        body = code_only(func_body(projects_src(), "def _push_share_amount("))
+        assert 'if mode == "add" and not pending:' in body
+
+
+class TestPolishRound2:
+    """/polish 2026-09-13 階段一第 2 輪（BUG-16～19）。"""
+
+    def test_push_amount_keys_off_the_shares_source_not_x(self):
+        # BUG-16：X 已被 A 翻成代開；推 B（company、沒指定案源）→ B 是源日 → 金額＝掛給我的成本行，不是 B 的合約額
+        from routers.crm.project_links import _push_share_amount
+        old = {"amount": 0, "split": {}}
+        assert _push_share_amount("overwrite", False, "源日", old, 30000, 500000) == 30000
+        assert _push_share_amount("overwrite", False, "代開發票", old, 30000, 500000) == 500000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}}, 30000, 500000) == 120000
+        assert _push_share_amount("add", False, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 40000
+        assert _push_share_amount("add", True, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 30000   # 待認領：add 視同取代
         from tests.unit._srcscan import code_only, flow_body, projects_src
         body = code_only(flow_body(projects_src(), "async def mirror_project_to_mine("))
-        assert 'elif mode == "add" and not pending:' in body
+        assert "share_src = _push_share_source(source, old_share)" in body
+        assert "amount = _push_share_amount(mode, pending, share_src, old_share, mir[\"total\"]," in body
+        assert 'if keep["source"] == "代開發票":' not in body
+
+    def test_legacy_claim_takes_the_items_even_when_only_part_of_the_money_was_mirrored(self):
+        # BUG-18：只認金額不認工項 → 下一次重新同步把鏡射來的工項再加一次（{A:30000} → {A:60000}）
+        from core.ledger_project import legacy_claim
+        d = legacy_claim({"split": {"導演": 30000}, MIRROR_TOTAL_KEY: 30000}, 50000, "A")
+        assert parent_shares(d)["A"] == {"amount": 30000, "split": {"導演": 30000}, "synced_total": 30000, "at": "", "source": "源日"}
+        d2, c2 = set_parent_share(d, 50000, "A", 30000, {"導演": 30000}, synced_total=30000)   # CRM 沒變、重新同步
+        assert d2["split"] == {"導演": 30000} and c2 == 50000
+
+    def test_fees_are_zeroed_when_no_share_bears_them_anymore(self):
+        # BUG-19：X 源日、A 代開 100,000 → 費用 8000；A 解除 → 沒有代開份額了 → 三欄要歸零，不能留舊數字
+        from core.ledger_project import drop_parent_share, withholding
+        d, c = set_parent_share({"source": "源日"}, 0, "A", 100000, {}, source="代開發票")
+        d = apply_source_fee(c, d)
+        assert d["invoice_fee"] == 8000
+        d, c = drop_parent_share(d, c, "A")
+        d = apply_source_fee(c, d)
+        assert (d["invoice_fee"], d["tax_fee"], d["buy_invoice"]) == (0, 0, 0)
+        # personal_tax 同理：執行業務所得的份額沒了就歸零（手改的不動）
+        d, c = set_parent_share({"source": "源日"}, 0, "B", 42000, {}, source="執行業務所得")
+        d = apply_source_fee(c, d)
+        assert d["personal_tax"] == withholding(42000)
+        d, c = set_parent_share(d, c, "B", 42000, {}, source="源日")
+        d = apply_source_fee(c, d)
+        assert d["personal_tax"] == 0
+        # 沒分案記錄、案源源日、使用者自己填的數字：跟以前一樣不動
+        plain = apply_source_fee(1000, norm_detail({"source": "源日", "invoice_fee": 77}))
+        assert plain["invoice_fee"] == 77

@@ -341,7 +341,9 @@ def test_passthrough_copy_keeps_the_parent_case_and_uses_its_contract():
     assert "apply_source_fee(contract, d)" in row
     post = code_only(func_body(_PROJ, "async def mirror_project_to_mine("))
     assert 'keep["source"] = source or keep.get("source") or MIRROR_SOURCE' in post
-    assert 'if keep["source"] == "代開發票":' in post
+    # 2026-09-13 起代開的金額規則住在 _push_share_amount（看**份額**的案源，不看 X 的）
+    assert "_push_share_amount(mode, pending, share_src, old_share" in post
+    assert 'if share_src == "代開發票":' in repo_src("routers/crm/project_links.py")
     from core.schemas import ProjectMirrorPayload
     assert "source" in ProjectMirrorPayload.model_fields
     from tests.unit._srcscan import js_code_only, js_func_body

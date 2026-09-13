@@ -454,11 +454,28 @@ async def _ensure_share(session, t, keep: dict, pid: str) -> dict:
     from ._shared import mine_parent_links
     if parent_shares(keep) or keep.get(BY_PARENT_PENDING_KEY) is True:
         return keep
-    parents = (await mine_parent_links(session, [t.id])).get(t.id) or []
-    if len(parents) > 1:
-        keep[BY_PARENT_PENDING_KEY] = True
+    # 🔴 這支在 _write_link 之前跑：parents 是「X 現在連著誰」，不含這次推進來的 pid。
+    linked = [p for p, _n in (await mine_parent_links(session, [t.id])).get(t.id) or []]
+    others = [p for p in linked if p != pid]
+    if others:
+        keep[BY_PARENT_PENDING_KEY] = True      # X 上的錢是別案（可能混著 owner 自己的）給的，不能認成 pid 的
         return keep
+    if pid not in linked:
+        return keep                             # 從沒連過的 X：上面的錢全是 owner 自己的，pid 從 0 開始加
     return legacy_claim(keep, int(t.contract_amount or 0), pid)
+
+
+def _push_share_amount(mode: str, pending: bool, share_src: str, old_share: dict, mir_total: int,
+                       agency_contract: int) -> int:
+    """推送後這一案份額的金額。代開＝那張發票的面額（母帳合約額；已有就沿用、重新同步只更新工項）；
+    其他＝掛給我的成本行合計；add＝這案份額再加一筆（待認領時 add 視同取代，claim 不動錢、累加會漂）。
+    🔴 看的是**這一案份額**的案源（_push_share_source），不是 X 的 —— X 可能已被別案翻成代開。"""
+    old = old_share or {"amount": 0}
+    if share_src == "代開發票":
+        return int(old.get("amount") or 0) or int(agency_contract or 0)
+    if mode == "add" and not pending:
+        return int(old.get("amount") or 0) + int(mir_total or 0)
+    return int(mir_total or 0)
 
 
 def _push_share_source(explicit: str, old_share: dict) -> str:
@@ -594,21 +611,16 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 keep["source"] = source or keep.get("source") or MIRROR_SOURCE
                 keep[MIRROR_TOTAL_KEY] = mir["total"]     # 舊的單一合計仍記（沒分案記錄的讀法退到它）
                 keep[MIRROR_AT_KEY] = _today_tw()         # X 層級的「上次同步」（詳情那一行顯示用）
-                if keep["source"] == "代開發票":
-                    # 代開的收入是那張發票的面額（母帳合約額），不是成本行；
-                    # 重新同步只更新工項，金額不動（沒填過才用母帳合約額補）
-                    amount = old_share["amount"] or _mirror_contract(p, mir, "代開發票")
-                elif mode == "add" and not pending:
-                    amount = old_share["amount"] + mir["total"]
-                else:
-                    # overwrite；待認領時 add 也視同 overwrite —— claim 不動錢，累加只會讓記錄漂離現實
-                    amount = mir["total"]
+                # 這一案份額的案源與金額：看**份額**的案源，不看 X 的（X 可能已被別案翻成代開）
+                share_src = _push_share_source(source, old_share)
+                amount = _push_share_amount(mode, pending, share_src, old_share, mir["total"],
+                                            _mirror_contract(p, mir, "代開發票"))
                 adding = mode == "add" and not pending
                 new_split, _delta = merge_split(old_share["split"] if adding else {},
                                                 mir["split"] or {}, add=adding)
                 keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id, amount, new_split,
                                                       synced_total=mir["total"], at=_today_tw(),
-                                                      source=_push_share_source(source, old_share), claim=pending)
+                                                      source=share_src, claim=pending)
                 t.contract_amount = new_contract
                 keep = await _clear_pending_if_all_claimed(session, t, keep)
                 keep = norm_detail(apply_source_fee(int(t.contract_amount or 0), keep))

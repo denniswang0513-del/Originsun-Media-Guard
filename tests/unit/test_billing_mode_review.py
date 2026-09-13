@@ -259,3 +259,27 @@ async def test_unlink_of_a_legacy_shape_link_drops_the_share_too(monkeypatch):
             return None
     await pl._write_link(_S(), parent, None)
     assert t.contract_amount == 0 and parent_shares(t.ledger_detail) == {}
+
+
+async def test_ensure_share_counts_the_incoming_parent_and_never_claims_owner_money_for_it(parents_of):
+    """BUG-17：_ensure_share 在連結寫入前跑，parents 不含這次推進來的案。
+    (a) 從沒連過的 X（owner 自己的 50,000）推 B → 不能把 50,000 認成 B 的；
+    (b) X 對應表連著 A（沒份額）、推 B → A 的錢不能認成 B 的 → 待認領；
+    (c) X 連著 A、A 自己重推 → 舊 1:1 認領照舊。"""
+    from core.ledger_project import BY_PARENT_PENDING_KEY, parent_shares
+    t = SimpleNamespace(id="X", contract_amount=50000, ledger_detail={"source": "源日", "split": {"剪接": 50000}})
+    parents_of["X"] = []
+    keep = await pl._ensure_share(None, t, dict(t.ledger_detail), "B")
+    assert parent_shares(keep) == {} and keep.get(BY_PARENT_PENDING_KEY) is not True
+    parents_of["X"] = [("A", "A")]
+    keep = await pl._ensure_share(None, t, dict(t.ledger_detail), "B")
+    assert parent_shares(keep) == {} and keep.get(BY_PARENT_PENDING_KEY) is True
+    keep = await pl._ensure_share(None, t, dict(t.ledger_detail), "A")
+    assert parent_shares(keep)["A"]["amount"] == 50000
+
+
+async def test_old_shape_unlink_does_not_touch_a_parent_relinked_elsewhere():
+    """BUG-20：M 上殘留舊指標 source_project_id=p0，但 p0 已經連到別的私帳案 Y → 解除 M 不能動到 Y。"""
+    from tests.unit._srcscan import code_only, func_body, repo_src
+    body = code_only(func_body(repo_src("routers/crm/project_map.py"), "async def set_parent_link("))
+    assert "p0.mine_link_id in (None, m.id)" in body
