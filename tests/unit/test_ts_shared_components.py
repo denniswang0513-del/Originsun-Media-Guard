@@ -122,3 +122,21 @@ def test_shared_modules_do_not_import_tab_page_logic():
         for m in re.finditer(r"from\s+'([^']+)'", repo_src(rel)):
             target = m.group(1)
             assert "tabs/" not in target or target.endswith("crm/crm-utils.js"), (rel, target)
+
+
+def test_project_file_has_a_burn_rate_chip_that_falls_back_to_the_suggested_budget():
+    """owner 2026-09-13「新增消耗率，讓同事知道這個專案是否已經超支」：預算沒設就照建議預算（拿得到的人），
+    超過 100% 寫「超支 +N h」；都沒有就寫「還沒設預算」，不假裝算得出。"""
+    from core.hr_logic import burn_rate
+    assert burn_rate(22.8, None, 32) == {"base": "suggested", "base_hours": 32, "remaining": 9.2, "pct": 71.2}
+    assert burn_rate(40, 32, 50) == {"base": "budget", "base_hours": 32, "remaining": -8, "pct": 125.0}
+    assert burn_rate(40, None, None) == {"base": "", "base_hours": None, "remaining": None, "pct": None}
+    from tests.unit._srcscan import js_code_only, js_func_body, repo_src
+    js = repo_src("frontend/js/shared/ts-projects.js")
+    chip = js_code_only(js_func_body(js, "export function burnChip(d) {"))
+    assert "超支 +${Math.abs(b.remaining)} h" in chip and "還沒設預算" in chip
+    assert "b.base === 'suggested' ? '建議預算' : '預算'" in chip
+    assert "${burnChip(d)}" in js_func_body(js, "export function projectFileHtml(d, opts = {}) {")
+    api = repo_src("routers/timesheets/projects.py")
+    assert '"burn": burn_rate(m["total"], budget, suggested),' in api
+    assert 'suggested = _suggested_for(proj) if _has_ts_module(request) else None' in api   # 可見性線不變

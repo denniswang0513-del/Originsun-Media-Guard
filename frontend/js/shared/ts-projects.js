@@ -232,6 +232,19 @@ export function milestoneWeeksHtml(weeks) {
         </div>`).join('')}</div>`).join('');
 }
 
+/** 「消耗率」那一顆（owner 2026-09-13「讓同事知道這個專案是否已經超支」）：已用 ÷ 預算（沒設預算就照建議預算）。
+ *  超過 100% 直接寫「超支 +N h」；算不出（沒預算、也拿不到建議預算）就寫清楚要主管設預算。基準與算法在後端 burn_rate。 */
+export function burnChip(d) {
+    const b = d.burn || {};
+    if (b.pct == null) {
+        return `<span class="ts-chip" title="還沒設預算（管理視角按「改預算」），算不出消耗率"><b>—</b>消耗率　<span class="tsp-dim">還沒設預算</span></span>`;
+    }
+    const over = b.remaining < 0;
+    const base = b.base === 'suggested' ? '建議預算' : '預算';
+    const tail = over ? `超支 +${Math.abs(b.remaining)} h` : `還剩 ${b.remaining} h`;
+    return `<span class="ts-chip" title="已用 ${d.total} h ÷ ${base} ${b.base_hours} h"><span class="ts-pct ${pctClass(b.pct)}" style="${pctStyle(b.pct)}">${b.pct}%</span> 消耗率　<span class="tsp-dim">已用 ${d.total} / ${b.base_hours} h（照${base}）· </span><span style="${over ? 'color:#f87171;font-weight:600;' : ''}">${tail}</span></span>`;
+}
+
 export function projectFileHtml(d, opts = {}) {
     ensureTsProjectsStyle();
     const pct = d.pct == null ? '—' : d.pct + '%';
@@ -260,6 +273,7 @@ export function projectFileHtml(d, opts = {}) {
             <span class="ts-chip"><b>${d.budget_hours ?? '—'}</b>預算 h　<span class="ts-pct ${pctClass(d.pct)}" style="${pctStyle(d.pct)}">${pct}</span></span>
             ${d.quote_days != null ? `<span class="ts-chip"><b>${d.quote_days}</b>報價人日（≈ ${d.quote_hours} h）</span>` : ''}
             ${d.suggested_hours != null ? `<span class="ts-chip" title="依私帳設定：合約未稅 ×（1−${esc(d.project_type || '')}預期毛利）÷ 日成本 × 每日工時"><b>${d.suggested_hours}</b>建議預算 h</span>` : ''}
+            ${burnChip(d)}
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;">
             <div class="ts-card" style="margin:0;"><h3>分類組成</h3>${bars(d.composition, opts.chartWidth)}</div>

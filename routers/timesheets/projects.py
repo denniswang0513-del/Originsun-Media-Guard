@@ -9,7 +9,7 @@ from sqlalchemy import or_, func as safunc, select
 from typing import Optional
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503
-from core.hr_logic import HOURS_PER_WORKDAY, bucket_hours, budget_burn, day_iso, month_key, months_back, project_metrics, similar_projects, split_sheet_name, tw_day, type_composition
+from core.hr_logic import HOURS_PER_WORKDAY, bucket_hours, budget_burn, burn_rate, day_iso, month_key, months_back, project_metrics, similar_projects, split_sheet_name, tw_day, type_composition
 from core.schemas import TimesheetBudgetSet
 from db.models import CrmProject, CrmQuotation, CrmQuotationItem, Timesheet
 from services.timesheet_lookup import burn_rows, project_names
@@ -114,6 +114,8 @@ async def project_file(request: Request, name: str = "", project_id: str = ""):
         milestone_weeks = await project_milestones(session, pid) if pid else []
     m = project_metrics(metrics_input(rows))
     budget = getattr(proj, "budget_hours", None)
+    # 建議預算是從私帳合約×預期毛利算的：只綁人員檔案的員工拿得到就等於能反推私帳合約 → 只給 timesheets 模組
+    suggested = _suggested_for(proj) if _has_ts_module(request) else None
     sheet_names = sorted({r.project_name for r in rows if r.project_name})
     title = (getattr(proj, "name", "") or name or (sheet_names[0] if sheet_names else ""))
     sim_name = name or (sheet_names[0] if sheet_names else title)     # 類似案用 Sheet 案名的規則（客戶前綴）
@@ -121,10 +123,11 @@ async def project_file(request: Request, name: str = "", project_id: str = ""):
         "project_name": title, "project_id": pid or "", "status": getattr(proj, "status", ""),
         "mapped": bool(pid), "sheet_names": sheet_names, **m,
         "budget_hours": budget, **budget_burn(m["total"], budget),
+        # 消耗率（owner 2026-09-13）：預算沒設就退到建議預算（同一條可見性線：員工拿不到建議預算就算不出）
+        "burn": burn_rate(m["total"], budget, suggested),
         "quote_days": quote_days,
         "quote_hours": quote_days * HOURS_PER_WORKDAY if quote_days else None,
-        # 建議預算是從私帳合約×預期毛利算的：只綁人員檔案的員工拿得到就等於能反推私帳合約 → 只給 timesheets 模組
-        "suggested_hours": _suggested_for(proj) if _has_ts_module(request) else None,
+        "suggested_hours": suggested,
         "project_type": getattr(proj, "project_type", "") or "",
         "by_month": rows_by_month(rows),
         "timeline": _day_log(rows),                 # 全部逐日，不截（前端按月分段）
