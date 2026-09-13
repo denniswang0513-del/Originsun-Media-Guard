@@ -98,12 +98,22 @@ def outstanding(assigned: List[str], dest_dirs: List[str]) -> List[str]:
 def _host_status(ip: str) -> Optional[dict]:
     """{'busy':.., 'queue_length':.., 'active_jobs':{..}}；連不上回 None。"""
     if ip == "local":
+        # 跟 routers/api_system.py 的 /api/v1/status 同一套算法 —— _is_working
+        # 對兩種來源要看到同樣的形狀。（舊碼讀 state.worker_busy／task_queue，
+        # 那兩個屬性不存在 → AttributeError 被吞成 None → 本機在對帳裡永遠
+        # 「連不上」，DEAD_STRIKES 次後被標 lost、份額改派到別台。）
         try:
             from core import state  # type: ignore
+            jobs = state.get_all_jobs()
+            active = {jid: {"task_type": j.task_type, "status": j.status.value}
+                      for jid, j in jobs.items()
+                      if j.status in (state.JobStatus.QUEUED, state.JobStatus.WAITING,
+                                      state.JobStatus.RUNNING, state.JobStatus.PAUSED)}
             return {
-                "busy": bool(state.worker_busy),
-                "queue_length": state.task_queue.qsize(),
-                "active_jobs": {},
+                "busy": any(j.status == state.JobStatus.RUNNING for j in jobs.values()),
+                "queue_length": sum(1 for j in jobs.values()
+                                    if j.status in (state.JobStatus.QUEUED, state.JobStatus.WAITING)),
+                "active_jobs": active,
             }
         except Exception:
             return None

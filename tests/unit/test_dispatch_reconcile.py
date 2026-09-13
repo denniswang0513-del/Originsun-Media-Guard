@@ -282,3 +282,22 @@ class TestLocalHost:
             ok = dr.post_transcode("local", ["//nas/src/A001.MP4"], "//nas/proxy/T", "PROJ")
         assert ok is False
         assert mock_enqueue.await_count == 0
+
+    def test_host_status_local_reads_real_state(self, monkeypatch):
+        """本機狀態要跟 /api/v1/status 給遠端看的是同一套算法（busy＝有 RUNNING、
+        queue_length＝QUEUED/WAITING 數），不然本機在對帳裡永遠「連不上」→ 被標
+        lost、份額改派到別台（本機若真的在做就是重工）。"""
+        from core import state
+
+        monkeypatch.setattr(state, "_jobs", {})
+        assert dr._host_status("local") is not None, "沒任務也要答得出狀態"
+
+        state.register_job(state.JobState(job_id="r1", task_type="transcode",
+                                          project_name="PROJ", status=state.JobStatus.RUNNING))
+        state.register_job(state.JobState(job_id="q1", task_type="transcode",
+                                          project_name="PROJ", status=state.JobStatus.QUEUED))
+        st = dr._host_status("local")
+        assert st["busy"] is True
+        assert st["queue_length"] == 1
+        assert set(st["active_jobs"]) == {"r1", "q1"}
+        assert dr._is_working(st)
