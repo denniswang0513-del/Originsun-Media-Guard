@@ -247,11 +247,11 @@ class TestPolishRound2:
         from routers.crm.project_links import _push_share_amount
         old = {"amount": 0, "split": {}}
         assert _push_share_amount("overwrite", False, "源日", old, 30000, 500000) == 30000
-        assert _push_share_amount("overwrite", False, "代開發票", old, 30000, 500000) == 500000
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 500000) == 500000
-        # 第 13 輪 #1：繼承自 X 的代開份額（母帳是 company 案、呼叫端不給發票面額）→ 沿用舊份額，沒有才退成本行
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 30000, "split": {}, "source": "代開發票"}, 30000, 0) == 30000
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 0, "split": {}}, 30000, 0) == 30000
+        assert _push_share_amount("overwrite", False, "代開發票", old, 30000, 500000, parent_agency=True) == 500000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 500000, parent_agency=True) == 500000
+        # 第 13／14 輪：繼承自 X 的代開份額（母帳是 company 案）→ 跟成本行走（回填時就是它），沒成本行才沿用舊份額
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 60000, "split": {}, "source": "代開發票"}, 80000, 370000) == 80000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 60000, "split": {}, "source": "代開發票"}, 0, 370000) == 60000
         assert _push_share_amount("add", False, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 40000
         assert _push_share_amount("add", True, "源日", {"amount": 10000, "split": {}}, 30000, 500000) == 30000   # 待認領：add 視同取代
         from tests.unit._srcscan import code_only, flow_body, projects_src
@@ -438,14 +438,14 @@ class TestPolishRound7:
     def test_agency_amount_switches_to_the_invoice_face_when_the_share_was_not_agency(self):
         # 第 7 輪 #3：源日份額 30,000 的案改走代開 → 金額換成母帳合約額，不是沿用 30,000
         from routers.crm.project_links import _push_share_amount
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 30000, "split": {}, "source": "源日"}, 30000, 100000) == 100000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 30000, "split": {}, "source": "源日"}, 30000, 100000, parent_agency=True) == 100000
         # 第 10 輪：代開份額重新同步跟著母帳合約額走（改成 100,000 就是 100,000）；母帳沒填才沿用
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 100000) == 100000
-        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 0) == 120000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 100000, parent_agency=True) == 100000
+        assert _push_share_amount("overwrite", False, "代開發票", {"amount": 120000, "split": {}, "source": "代開發票"}, 30000, 0, parent_agency=True) == 120000
         # 第 11 輪 #6：推送端傳進來的「發票面額」＝母帳合約額本身（空就 0 → 沿用舊份額；沒舊份額才退成本行合計）
         from tests.unit._srcscan import code_only, func_body, projects_src
         push = code_only(func_body(projects_src(), "async def mirror_project_to_mine("))
-        assert 'int(p.contract_amount or 0) if source == "代開發票" else 0' in push
+        assert 'int(p.contract_amount or 0), parent_agency=(source == "代開發票")' in push
 
     def test_drop_of_an_agency_share_releases_the_manual_fee(self):
         # 第 7 輪 #5：純代開分身、owner 手調代辦費 9,000 → 解除 P 後不能留 9,000 在合約 0 的 X 上
@@ -622,6 +622,7 @@ class TestPolishRound12:
         # #3：認領不能超過「合約額 − 別案已認」；第 13 輪 #2：工項同比例夾
         assert "capped = max(0, min(amount, int(t.contract_amount or 0) - others_total))" in push
         assert "new_split = {k: int(v * ratio + 0.5) for k, v in new_split.items() if int(v * ratio + 0.5)}" in push
+        assert 'if share_src != "代開發票":' in push          # 第 14 輪：代開份額不夾工項（面額與成本行沒比例關係）
 
     def test_unlink_resets_fee_deducted_when_no_agency_base_remains(self):
         # #4：owner 取消「已扣除」、之後唯一的代開份額被解除 → 旗標重設（同換回）

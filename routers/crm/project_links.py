@@ -471,7 +471,7 @@ async def _ensure_share(session, t, keep: dict, pid: str) -> dict:
 
 
 def _push_share_amount(mode: str, pending: bool, share_src: str, old_share: dict, mir_total: int,
-                       agency_contract: int) -> int:
+                       agency_contract: int, parent_agency: bool = False) -> int:
     """推送後這一案份額的金額。代開＝那張發票的面額（母帳合約額；已有就沿用、重新同步只更新工項）；
     其他＝掛給我的成本行合計；add＝這案份額再加一筆（待認領時 add 視同取代，claim 不動錢、累加會漂）。
     🔴 看的是**這一案份額**的案源（_push_share_source），不是 X 的 —— X 可能已被別案翻成代開。"""
@@ -480,7 +480,9 @@ def _push_share_amount(mode: str, pending: bool, share_src: str, old_share: dict
         # 母帳收款方式＝後期代開／明確送 source=代開 時才給）才拿母帳合約額；繼承自 X 的代開份額（舊代開 N:1 回填、
         # 認領退到 X 案源）母帳是 company 案，它的 contract_amount 是**客戶合約額**不是發票面額，沿用舊份額
         # （沒舊份額才退成本行合計）。母帳改了合約額，重新同步會跟上。
-        return int(agency_contract or 0) or int(old_share.get("amount") or 0) or int(mir_total or 0)
+        if parent_agency:
+            return int(agency_contract or 0) or int(old_share.get("amount") or 0)   # 母帳沒填面額才沿用舊份額
+        return int(mir_total or 0) or int(old_share.get("amount") or 0)           # 繼承的：跟成本行走（回填時就是它）
     if mode == "add" and not pending:
         return int(old_share.get("amount") or 0) + int(mir_total or 0)
     return int(mir_total or 0)
@@ -642,7 +644,7 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                 if mode == "add" and share_src == "代開發票":
                     mode = "overwrite"        # 代開的金額是發票面額、不累加；工項也不能跟著翻倍
                 amount = _push_share_amount(mode, claim, share_src, old_share, mir["total"],
-                                            int(p.contract_amount or 0) if source == "代開發票" else 0)
+                                            int(p.contract_amount or 0), parent_agency=(source == "代開發票"))
                 adding = mode == "add" and not claim
                 new_split, _delta = merge_split(old_share["split"] if adding else {},
                                                 mir["split"] or {}, add=adding)
@@ -652,8 +654,10 @@ async def mirror_project_to_mine(project_id: str, req: ProjectMirrorPayload,
                     others_total = sum(sh["amount"] for pid, sh in parent_shares(keep).items() if pid != p.id)
                     capped = max(0, min(amount, int(t.contract_amount or 0) - others_total))
                     if capped != amount:
-                        ratio = (capped / amount) if amount else 0
-                        new_split = {k: int(v * ratio + 0.5) for k, v in new_split.items() if int(v * ratio + 0.5)}
+                        # 工項只對非代開份額同比例夾（代開的金額是發票面額、工項是成本行，兩者沒有比例關係）
+                        if share_src != "代開發票":
+                            ratio = (capped / amount) if amount else 0
+                            new_split = {k: int(v * ratio + 0.5) for k, v in new_split.items() if int(v * ratio + 0.5)}
                         amount = capped
                 keep, new_contract = set_parent_share(keep, int(t.contract_amount or 0), p.id, amount, new_split,
                                                       synced_total=mir["total"], at=_today_tw(),
