@@ -725,6 +725,45 @@ async def project_names_map(session, rows) -> dict:
             for pid, name, disp, ent in rows2}
 
 
+async def mine_owner_staff_id(session) -> str:
+    """私帳主人（王士源）的人員檔 id：唯一一個有 finance_mine 模組且綁了人員檔的帳號；找不到唯一的回空字串。
+    回填（db/startup_migrations）與「代開案的別人費用歸私帳委外」都靠它認「哪幾行是他自己的」。"""
+    from core.auth import expand_modules
+    from core.ledger import MINE_MODULE
+    from db.models import User
+    owners = [u.staff_id for u in (await session.execute(
+        select(User).where(User.staff_id.isnot(None)))).scalars().all()
+              if MINE_MODULE in expand_modules(u.modules or [])]
+    return owners[0] if len(owners) == 1 else ""
+
+
+async def passthrough_parents(session, mine_id: str = "") -> dict:
+    """`{母帳案 id: 私帳案 id}` —— 收款方式＝後期代開、而且連著私帳案的母帳案（兩種連結形狀都認）。
+    公司案改成後期代開＝整案其實是私帳主人的：它在 CRM 帳目裡別人的人員費用是他的委外、行政雜支是他的雜支
+    （owner 2026-09-13），逐案損益讀取時要把這些算進連到的私帳案。`mine_id` 給了就只找連到那一案的。"""
+    from core.ledger import not_mine
+    q = (select(CrmProject.id, CrmProject.mine_link_id)
+         .where(not_mine(CrmProject.entity), CrmProject.billing_mode == "passthrough",
+                CrmProject.mine_link_id.isnot(None)))
+    if mine_id:
+        q = q.where(CrmProject.mine_link_id == mine_id)
+    out = {pid: mid for pid, mid in (await session.execute(q)).all()}
+    # 舊形狀：指標在私帳側
+    lq = (select(CrmProject.id, CrmProject.source_project_id)
+          .where(CrmProject.entity == "mine", CrmProject.source_project_id.isnot(None)))
+    if mine_id:
+        lq = lq.where(CrmProject.id == mine_id)
+    legacy = [(mid, src) for mid, src in (await session.execute(lq)).all() if src not in out]
+    if legacy:
+        ok = {pid for (pid,) in (await session.execute(
+            select(CrmProject.id).where(CrmProject.id.in_([s for _m, s in legacy]),
+                                        CrmProject.billing_mode == "passthrough"))).all()}
+        for mid, src in legacy:
+            if src in ok:
+                out[src] = mid
+    return out
+
+
 async def mine_parent_links(session, mine_ids) -> dict:
     """`{私帳案 id: [(母帳案 id, 案名), …]}` —— 一次撈齊；顯示名鏈用名字、
     私帳詳情的「母帳：案名 ↗」要 id 才跳得過去。

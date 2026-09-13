@@ -673,13 +673,11 @@ async def _backfill_by_parent(session) -> tuple:
     否則標 by_parent_pending 由 owner 逐案「推送→取代」認領。"""
     n1 = nn = pend = 0
     from sqlalchemy import select
-    from db.models import CrmProject, User
-    from core.ledger import MINE_MODULE
-    from core.auth import expand_modules
+    from db.models import CrmProject
     from core.ledger_project import (BILLING_MIRROR_SOURCE, BY_PARENT_PENDING_KEY, MIRROR_SOURCE, apply_source_fee,
                                      billing_mode_of, legacy_claim, norm_detail, parent_shares,
                                      set_parent_share)
-    from routers.crm._shared import mine_parent_links
+    from routers.crm._shared import mine_owner_staff_id, mine_parent_links
     from routers.crm.project_links import _mirror_contract, _mirror_preview
     from routers.api_finance_projects import resync_receivable
     mine_ids = [i for (i,) in (await session.execute(
@@ -702,10 +700,7 @@ async def _backfill_by_parent(session) -> tuple:
             n1 += 1
         else:
             if owner_sid is None:
-                owners = [u.staff_id for u in (await session.execute(
-                    select(User).where(User.staff_id.isnot(None)))).scalars().all()
-                          if MINE_MODULE in expand_modules(u.modules or [])]
-                owner_sid = owners[0] if len(owners) == 1 else ""
+                owner_sid = await mine_owner_staff_id(session)
             claimed = []
             if owner_sid:
                 try:

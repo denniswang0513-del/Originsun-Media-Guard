@@ -42,7 +42,8 @@ from core.ledger_project import (BY_PARENT_PENDING_KEY, COST_FIELDS, DEFAULT_FEE
                                  income_items, linked_display_name,
                                  norm_detail, receivable_fields)
 from core.schemas import LedgerDetailPayload, LedgerProjectCreate
-from routers.crm._shared import _fmt_day, mine_parent_links, mine_parent_names
+from routers.crm._shared import (_fmt_day, mine_owner_staff_id, mine_parent_links, mine_parent_names,
+                                 passthrough_parents)
 
 #: 私帳案 1:1 連著母帳時，私帳詳情鎖住的欄位（值由母帳決定）。前端只畫鎖，
 #: 真正的牆在 update_project_ledger（409）。
@@ -113,6 +114,27 @@ async def _crm_costs(session, ent: str, project_id: str = "") -> dict:
         out.setdefault(pid, {})["misc"] = int(v or 0)
     for pid, v in (await session.execute(line_q)).all():
         out.setdefault(pid, {})["outsource"] = int(v or 0)
+    if ent == "mine":
+        # 後期代開的母帳案：整案是私帳主人的 —— 它 CRM 帳目裡**別人**的人員費用是他的委外、行政雜支是他的雜支
+        # （owner 2026-09-13）。自己那幾行是收入（mirror_lines 鏡射成工項），不算成本。
+        pmap = await passthrough_parents(session, project_id)
+        if pmap:
+            owner = await mine_owner_staff_id(session)
+            pids = list(pmap)
+            for ppid, v in (await session.execute(
+                    select(CrmProjectExpense.project_id, fn.coalesce(fn.sum(CrmProjectExpense.actual), 0))
+                    .where(CrmProjectExpense.project_id.in_(pids), CrmProjectExpense.claim_id.is_(None))
+                    .group_by(CrmProjectExpense.project_id))).all():
+                m = out.setdefault(pmap[ppid], {})
+                m["misc"] = int(m.get("misc") or 0) + int(v or 0)
+            who = fn.coalesce(CrmProjectCostLine.actual_staff_id, CrmProjectCostLine.estimated_staff_id)
+            for ppid, v in (await session.execute(
+                    select(CrmProjectCostLine.project_id, fn.coalesce(fn.sum(CrmProjectCostLine.actual_amount), 0))
+                    .where(CrmProjectCostLine.project_id.in_(pids), CrmProjectCostLine.phase != "行政雜支",
+                           *([fn.coalesce(who, "") != owner] if owner else []))
+                    .group_by(CrmProjectCostLine.project_id))).all():
+                m = out.setdefault(pmap[ppid], {})
+                m["outsource"] = int(m.get("outsource") or 0) + int(v or 0)
     return out
 
 
@@ -125,19 +147,27 @@ async def _crm_lines(session, project_id: str) -> dict:
     """
     from sqlalchemy import select
 
-    from db.models import (CrmPaymentRequest, CrmProjectCostLine,
+    from db.models import (CrmPaymentRequest, CrmProject, CrmProjectCostLine,
                            CrmProjectExpense, CrmStaff)
+    # 本案自己的 ＋ 後期代開母帳案的（別人的人員費用＝委外、行政雜支＝雜支；同 _crm_costs）
+    pmap = await passthrough_parents(session, project_id)
+    ids = [project_id] + list(pmap)
+    owner = await mine_owner_staff_id(session) if pmap else ""
+    from_name = dict((await session.execute(
+        select(CrmProject.id, CrmProject.name).where(CrmProject.id.in_(list(pmap))))).all()) if pmap else {}
     exp = (await session.execute(
         select(CrmProjectExpense)
-        .where(CrmProjectExpense.project_id == project_id)
+        .where(CrmProjectExpense.project_id.in_(ids))
         .order_by(CrmProjectExpense.expense_date))).scalars().all()
-    lines = (await session.execute(
+    lines = [l for l in (await session.execute(
         select(CrmProjectCostLine)
-        .where(CrmProjectCostLine.project_id == project_id,
+        .where(CrmProjectCostLine.project_id.in_(ids),
                CrmProjectCostLine.phase != "行政雜支",
                CrmProjectCostLine.actual_amount.isnot(None),
                CrmProjectCostLine.actual_amount != 0)
         .order_by(CrmProjectCostLine.sort_order))).scalars().all()
+        # 母帳案上私帳主人自己那幾行是收入（鏡射成工項），不列進委外
+        if not (l.project_id != project_id and owner and (l.actual_staff_id or l.estimated_staff_id) == owner)]
     sids = {x for l in lines for x in (l.actual_staff_id, l.estimated_staff_id) if x}
     names = dict((await session.execute(
         select(CrmStaff.id, CrmStaff.name).where(CrmStaff.id.in_(sids)))).all()) if sids else {}
@@ -145,11 +175,11 @@ async def _crm_lines(session, project_id: str) -> dict:
     # 行政雜支走 expense_id），id 不會撞所以同一個集合就夠
     claimed = set((await session.execute(
         select(CrmPaymentRequest.cost_line_id)
-        .where(CrmPaymentRequest.project_id == project_id,
+        .where(CrmPaymentRequest.project_id.in_(ids),
                CrmPaymentRequest.cost_line_id.isnot(None)))).scalars())
     claimed |= set((await session.execute(
         select(CrmPaymentRequest.expense_id)
-        .where(CrmPaymentRequest.project_id == project_id,
+        .where(CrmPaymentRequest.project_id.in_(ids),
                CrmPaymentRequest.expense_id.isnot(None)))).scalars())
     return {
         "misc": [{"id": e.id,
@@ -158,10 +188,13 @@ async def _crm_lines(session, project_id: str) -> dict:
                   "payee": e.payee or names.get(e.staff_id, ""),
                   # 跟公司請過款的不算私帳成本（見 _crm_costs），列出來但標示
                   "billed_to_company": bool(e.claim_id),
+                  # 來自後期代開的母帳案（空＝本案自己的）
+                  "from": from_name.get(e.project_id, "") if e.project_id != project_id else "",
                   "claimed": e.id in claimed} for e in exp],
         "people": [{"id": l.id, "phase": l.phase or "", "item": l.item_name or "",
                     "who": names.get(l.actual_staff_id or l.estimated_staff_id, ""),
                     "amount": int(l.actual_amount or 0),
+                    "from": from_name.get(l.project_id, "") if l.project_id != project_id else "",
                     "claimed": l.id in claimed} for l in lines],
     }
 
