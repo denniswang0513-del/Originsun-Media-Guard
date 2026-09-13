@@ -8,9 +8,10 @@
 """
 import re
 
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import code_only, func_body, repo_src
 
-SRC = repo_src("routers/crm/costs.py")
+SRC = costs_src()
 
 
 def _handlers(methods=("get", "post", "put", "patch", "delete")):

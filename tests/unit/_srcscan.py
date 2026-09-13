@@ -288,6 +288,13 @@ TIMESHEETS_FILES = ("_shared.py", "sync.py", "mine.py", "ledger.py", "projects.p
 
 #: 專案管理 2026-09-12 拆出「換帳本／推送／對應表」一段（那檔 1,979 行離 2,000 上限 21 行）
 PROJECTS_FILES = ("projects.py", "project_links.py")
+COSTS_FILES = ("costs.py", "cost_groups.py", "cost_lines.py")
+
+
+def costs_src(header: str = "") -> str:
+    """原本 `routers/crm/costs.py` 那一整個檔（雜支／收據／摘要 ＋ 子表 ＋ 成本估算串起來）；給 header 就回那支函式的本體。
+    同 projects_src 的理由：斷言釘的是「這支端點做了什麼」，不是它住在哪個檔。"""
+    return _split_file_src("routers/crm", COSTS_FILES, header)
 
 
 def projects_src(header: str = "") -> str:

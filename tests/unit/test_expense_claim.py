@@ -8,6 +8,7 @@
 `cost_line_id`（人員費用）與 `expense_id`（行政雜支）是同一條規則的兩半 ——
 兩張不同的表，所以兩條硬連結各自一欄。
 """
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import (code_only, func_body, js_code_only,
                                  js_func_body, repo_src)
 
@@ -28,7 +29,7 @@ def test_the_backend_already_guards_double_claiming():
 def test_the_list_endpoint_reports_the_hard_link_not_a_guess():
     """畫面要知道「這一列請過款沒」—— 走 `expense_id` 反查，不是比人名＋金額。
     而且只撈這批列的（同 project_names_map 的理由，不要跟著整個專案長）。"""
-    fn = code_only(func_body(repo_src("routers/crm/costs.py"),
+    fn = code_only(func_body(costs_src(),
                              "async def list_project_expenses("))
     assert "CrmPaymentRequest.expense_id.in_(eids)" in fn
     assert "claims.get(e.id" in fn

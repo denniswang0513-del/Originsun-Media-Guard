@@ -1,4 +1,5 @@
 """預算結算的分配提示（owner 2026-09-05）。「距目標」那行做過又拿掉（owner：這一行可以移除了）。"""
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import crm_css_src, js_code_only, repo_src
 
 
@@ -41,7 +42,7 @@ def test_actual_profit_absorbs_the_remaining_budget():
 
 def test_sub_table_budget_includes_misc_and_defaults_to_five_percent():
     """子表預算含委外與雜支；雜支預算沒設＝預算 × 5%（後端給 misc_budget_default／effective，卡片顯示預計雜支）。"""
-    api = repo_src("routers/crm/costs.py")
+    api = costs_src()
     assert "total_budget = g.budget_amount or 0" in api and '"misc_budget_effective"' in api and '"misc_budget_default"' in api
     assert "+ sa_func.coalesce(CrmProjectCostGroup.misc_budget_amount, 0)" not in api, "雜支不再外加在子表預算上"
     fe = repo_src("frontend/tabs/crm/crm-projects-cost-groups.js")
@@ -66,7 +67,7 @@ def test_project_misc_estimate_is_sum_of_sub_table_misc():
     assert misc_budget_total_of([(None, 0), (None, None)], 5) == 0      # 明填 0 算「有設」
     assert misc_budget_total_of([(None, None), (0, None)], 5) is None   # 什麼都沒填 → 退回未稅比例
     assert misc_budget_total_of([], None) is None
-    api = repo_src("routers/crm/costs.py")
+    api = costs_src()
     assert api.count("misc_budget_total_of(") == 2, "financial-summary 與 list_project_expenses 都要走同一條"
     assert "misc_default = group_misc_default(total_budget, misc_pct)" in api
     assert "_cost_group_to_dict(g, summary)" not in api, "子表 dict 要帶專案雜支比，不能用預設 5"

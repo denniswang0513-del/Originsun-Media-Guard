@@ -9,7 +9,9 @@ from . import projects   # noqa: F401  專案管理 + 結案看板 + CSV
 from . import project_links  # noqa: F401  母帳↔私帳：換帳本／推送／對應表（依賴 projects，須在其後）
 from . import quotes     # noqa: F401  報價 + 報價範本
 from . import staff      # noqa: F401  人力 + 履歷 + 派工
-from . import costs      # noqa: F401  雜支 + 收據 + 成本估算 + 子表
+from . import costs      # noqa: F401  雜支 + 收據 + 財務摘要（＋子表／估算共用 helper）
+from . import cost_groups  # noqa: F401  成本子表（2026-09-13 從 costs 拆出）
+from . import cost_lines   # noqa: F401  成本估算 + 範本（2026-09-13 從 costs 拆出）
 from . import finance    # noqa: F401  共用 helper + 發票（cash/payments/taxonomy 都 import 它）
 from . import cash       # noqa: F401  收支明細 + 應付/應收 + 收款↔發票分配
 from . import cash_splits  # noqa: F401  收支拆項（帳目一筆、內容拆裂；依賴 cash/finance）

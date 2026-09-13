@@ -3,6 +3,7 @@
 
 不新增資料：狀態列／提示／結案檢查是純算式（payStatus／nextSteps／closingChecks），吃的是專案 dict（已收／匯費／帳款狀況
 由後端推導）、發票、請款單、費用配置。三個決定（owner 未拍板前的保守做法）：派工不刪、收在可展開區；沒金額權限只看狀態字；結案檢查只提醒不硬擋。"""
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import between, func_body, js_code_only, repo_src
 
 PAY = "frontend/tabs/crm/crm-projects-pay.js"
@@ -88,7 +89,7 @@ def test_pay_tab_margin_comes_from_financial_summary():
 def test_financial_summary_staff_cost_comes_from_cost_lines():
     """owner 2026-09-05：東仁社宅 API 毛利 95%、預算結算畫面 20%——/financial-summary 的人力只算退場的派工表。
     子表有數字就以子表為準。"""
-    body = func_body(repo_src("routers/crm/costs.py"), "async def get_financial_summary(") if "async def get_financial_summary(" in repo_src("routers/crm/costs.py") else repo_src("routers/crm/costs.py")
+    body = func_body(costs_src(), "async def get_financial_summary(") if "async def get_financial_summary(" in costs_src() else costs_src()
     assert "staff_actual = costline_actual" in body and "staff_estimated = costline_estimated" in body
 
 

@@ -12,6 +12,7 @@
 import re
 
 from routers.api_system import _ADMIN_ONLY_SUBKEYS, _SECRET_KEYS, _redact_settings
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import code_only, func_body, my_page_src, repo_src
 
 
@@ -43,7 +44,7 @@ def test_internal_restart_refuses_cloudflare_traffic():
 
 
 def test_expense_legacy_paths_require_crm_projects_and_receipts_need_a_key():
-    src = repo_src("routers/crm/costs.py")
+    src = costs_src()
     for fn in ("async def add_advance_expense(", "async def add_public_project_expense(", "async def get_public_cost_group_info(",
                "async def list_public_cost_group_expenses(", "async def add_public_cost_group_expense(", "async def upload_public_cost_group_receipt(",
                "async def get_public_project_info(", "async def list_public_project_expenses(", "async def upload_project_receipt_public("):

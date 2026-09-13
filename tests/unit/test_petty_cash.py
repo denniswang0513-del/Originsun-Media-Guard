@@ -14,6 +14,7 @@
 """
 import re
 from pathlib import Path
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import code_only, js_code_only, js_func_body, my_page_src
 
 
@@ -587,7 +588,7 @@ def test_every_project_picker_shares_one_label_builder():
 
 
 # ── 專案頁雜支區 × 零用金（2026-08-18 整頓）────────────────────────
-COSTS_SRC = (REPO / "routers" / "crm" / "costs.py").read_text(encoding="utf-8")
+COSTS_SRC = costs_src()
 COST_VIEW = (FRONTEND / "tabs" / "crm" / "crm-projects-cost.js").read_text(encoding="utf-8")
 SHARED_SRC = (REPO / "routers" / "crm" / "_shared.py").read_text(encoding="utf-8")
 PROJECTS_SRC = (REPO / "routers" / "crm" / "projects.py").read_text(encoding="utf-8")

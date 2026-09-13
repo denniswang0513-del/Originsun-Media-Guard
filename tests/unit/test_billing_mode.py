@@ -5,6 +5,7 @@
 I/O 在 routers/crm/project_links.apply_billing_mode／link_note_for。"""
 from core.ledger_project import (BILLING_LABELS, BILLING_MIRROR_SOURCE, BILLING_MODES, FEE_DEDUCTED_KEY,
                                  LINK_SYNC_FIELDS, MIRROR_AT_KEY, billing_mode_of, link_note, norm_detail)
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import code_only, flow_body, func_body, js_code_only, js_func_body, projects_src, repo_src
 
 _LINKS = repo_src("routers/crm/project_links.py")
@@ -137,7 +138,7 @@ def test_private_put_takes_fee_deducted_as_meta_not_money():
 
 
 def test_financial_summary_only_adds_a_sentence():
-    fn = code_only(func_body(repo_src("routers/crm/costs.py"), "async def project_financial_summary("))
+    fn = code_only(func_body(costs_src(), "async def project_financial_summary("))
     assert '"company_income": _company_income' in fn and '"billing_mode_label"' in fn
     assert 'if _bm == "passthrough" and contract:' in fn
     # 毛利算式不動（owner 第 4 點）

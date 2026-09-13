@@ -4,6 +4,7 @@
 生產 25 個有成本資料的案逐條驗過，這裡把當時查的那幾條釘住，
 不要靠下次再手動跑一遍稽核腳本才發現漂掉。
 """
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import js_code_only, repo_src
 
 
@@ -64,7 +65,7 @@ def test_admin_phase_cost_lines_never_double_count():
     整案（financial-summary）與子表（cost-groups）**兩處都要濾**，
     只濾一邊會讓 Σ子表 ≠ 整案。
     """
-    src = repo_src("routers/crm/costs.py")
+    src = costs_src()
     assert 'ADMIN_PHASE = "行政雜支"' in src, "述詞要有單一來源"
     # 整案／子表清單／單一子表（_compute_group_summary，2026-09-06 review 補）：三處聚合都要排除行政雜支
     assert src.count("CrmProjectCostLine.phase != ADMIN_PHASE") == 3, \
@@ -76,7 +77,7 @@ def test_admin_phase_cost_lines_never_double_count():
 
 def test_group_summary_and_project_totals_share_one_basis():
     """子表 summary 與整案的加總要吃同一批列，否則 Σ子表 ≠ 整案。"""
-    src = repo_src("routers/crm/costs.py")
+    src = costs_src()
     # 子表的雜支比只查一次，而且在 session 還開著的時候
     assert "_pct = await _project_misc_pct(session, project_id)" in src
     assert "_cost_group_to_dict(g, summary, _pct)" in src

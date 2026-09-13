@@ -10,11 +10,17 @@
 """
 import pytest
 
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import code_only, func_body, repo_src
 
 
 def _body(rel: str, header: str) -> str:
     return code_only(func_body(repo_src(rel), header))
+
+
+def _costs_body(header: str) -> str:
+    """costs.py 2026-09-13 拆成三支 —— 找端點要在串起來的那份找（_srcscan.costs_src）。"""
+    return code_only(func_body(costs_src(), header))
 
 
 # ── 政策常數 ────────────────────────────────────────────────────
@@ -127,8 +133,8 @@ def test_duplicate_and_project_types_take_crm_projects_import_stays_admin():
 # ── 雜支（owner：內部寫入歸 crm_projects）——本體在 test_budget_write_auth；這裡釘留管理員的那幾支 ──
 
 def test_expense_delete_and_receipts_root_stay_admin():
-    assert "_check_auth(request)" in _body("routers/crm/costs.py", "async def delete_project_expense(")
-    src = repo_src("routers/crm/costs.py")
+    assert "_check_auth(request)" in _costs_body("async def delete_project_expense(")
+    src = costs_src()
     assert "check_admin(request)" in code_only(func_body(src, "async def set_receipts_root("))
     assert "check_admin_or_module(request, 'finance_approve')" in code_only(func_body(src, "async def get_receipts_root(")), "GET 給審核者（零用金子視圖第一支）"
 

@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from core.rbac_templates import DEFAULT_TEMPLATES, normalize
 from routers.api_system import _SETTINGS_SAVE_DENY_SUBKEYS, _settings_save_restrict
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import code_only, func_body, repo_src, timesheets_src
 
 
@@ -66,6 +67,6 @@ def test_partner_template_and_docstring_order_and_dead_backfill():
     for fn in ("async def suggest_release_notes(", "async def deploy_to_prod_eligible(", "async def deploy_website_eligible("):
         body = func_body(ota, fn)
         assert body.index('"""') < body.index("_check_admin(request)"), f"{fn} 守衛要在 docstring 之後"
-    cs = func_body(repo_src("routers/crm/costs.py"), "async def serve_receipt(")
+    cs = func_body(costs_src(), "async def serve_receipt(")
     assert cs.index('"""') < cs.index("check_admin_or_module(")
     assert "bundles_backfilled" not in repo_src("main.py")

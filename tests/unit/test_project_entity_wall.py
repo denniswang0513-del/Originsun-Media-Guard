@@ -10,6 +10,7 @@ owner 2026-08-24 拍板：mine 專案（owner 私帳）與客戶全面共用 —
 import re
 from pathlib import Path
 
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import (js_code_only, repo_src,
                                  js_func_body)
 
@@ -265,7 +266,7 @@ def test_cost_group_summary_has_a_row_level_ledger_guard():
     """🔴 money_dep 的私帳那道只認路徑參數 `project_id`；這支的路徑參數是
     `group_id`，整道跳過 —— 有 money_view 但沒有 finance_mine 的人拿到
     group_id 就讀得到 mine 專案的成本合計。"""
-    src = (ROOT / "routers/crm/costs.py").read_text(encoding="utf-8")
+    src = costs_src()
     fn = src.split("async def get_cost_group_summary(")[1].split("\n@router")[0]
     assert "request: Request" in src.split("async def get_cost_group_summary(")[1][:80]
     assert 'require_entity(request, proj.entity or "parent", level="full")' in fn

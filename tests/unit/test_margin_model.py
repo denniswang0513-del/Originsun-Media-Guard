@@ -3,6 +3,7 @@
 基礎算出來的，這一塊在我的私帳設定」）。規則只有 core.finance_logic 一份；burn 表、專案檔案頁、
 財務摘要、設定頁都吃它。"""
 from core.finance_logic import DEFAULT_MARGIN_MODEL, canonical_type, margin_for_type, suggested_budget_hours
+from tests.unit._srcscan import costs_src
 from tests.unit._srcscan import code_only, func_body, repo_src, timesheets_src
 
 
@@ -42,7 +43,7 @@ def test_every_surface_uses_the_one_rule():
     # 套用建議：私帳 full；預設只填沒設的（Sheet 灌的預算是 owner 的決定）
     ap = func_body(ts, "async def apply_suggested_budgets(")
     assert '_require_mine_admin(request, level="full")' in ap and 'overwrite or not i["budget_hours"]' in ap
-    costs = code_only(repo_src("routers/crm/costs.py"))
+    costs = code_only(costs_src())
     assert '"suggested_budget_hours": _suggested_hours' in func_body(costs, "async def project_financial_summary(")
     fin = code_only(repo_src("routers/api_finance.py"))
     # 統一：full 守衛、對應目標必須在表裡、兩本帳的專案一起改、對應記回模型
