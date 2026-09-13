@@ -330,7 +330,9 @@ def test_ledger_view_follows_the_current_book_and_hides_private_only_fields():
     """
     # 🔴 一定要剝註解：檔頭那段說明自己就寫著「案源／工項拆分…要收起來」，
     # 不剝的話下面的 marker 全部命中註解（_srcscan 檔頭記的那個坑）。
-    js = js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js"))
+    # 2026-09-13 推送段拆到 projects-push.js（「推送到母帳」那顆鈕在那裡）—— 兩支串起來掃，規則不變
+    js = js_code_only(repo_src("frontend/tabs/finance/subviews/projects.js") + chr(10)
+                      + repo_src("frontend/tabs/finance/subviews/projects-push.js"))
     assert "finFetchMine(" not in js, "不再釘死私帳"
     assert "finIsMine" in js, "帳本判斷走 fin-utils 那一支"
     # 🔴 私帳專屬的每一塊都要掛在 _isMine() 後面 —— 漏一塊就是母公司模式畫出

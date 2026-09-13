@@ -307,7 +307,7 @@ def test_jumps_between_the_two_ledgers_go_through_the_right_doors():
     assert "sessionStorage.setItem('omgJumpLedgerProject', jump)" in ml
     crm = js_code_only(repo_src("frontend/tabs/crm/crm-projects.js"))
     assert "sessionStorage.getItem('omgJumpCrmProject') || qs.get('project')" in crm
-    fin = repo_src("frontend/tabs/finance/subviews/projects.js")
+    fin = repo_src("frontend/tabs/finance/subviews/projects-push.js")   # 2026-09-13 推送段拆出
     fn = js_code_only(js_func_body(fin, "_fp.gotoParent = () => {"))
     assert "window.open('/?project='" in fn and "#tab_crm_projects" in fn
 
@@ -316,12 +316,12 @@ def test_mine_side_push_button_replaces_the_pipeline_flag_button():
     """「⬆ 推專案管理」（crm_pushed）拿掉：有了母帳分身它是多餘的（旗標保留、既有 6 案不動）。
     未連結→「推送到母帳」；已連結→「母帳：案名 ↗」；1:1 時結案日鎖住並標「母帳」。"""
     from tests.unit._srcscan import js_code_only, js_func_body
-    fin = repo_src("frontend/tabs/finance/subviews/projects.js")
+    fin = repo_src("frontend/tabs/finance/subviews/projects-push.js")   # 2026-09-13 推送段拆出
     code = js_code_only(fin)
     assert "_fp.push = " not in code and "推專案管理" not in code
-    btn = js_code_only(js_func_body(fin, "function _linkBtnHtml(p) {"))
+    btn = js_code_only(js_func_body(fin, "export function _linkBtnHtml(p) {"))
     assert "p.parent_links" in btn and "推送到母帳" in btn and "母帳：" in btn
-    assert "const _closeLocked = (p) => ((p && p.locked_fields) || []).includes('close_date');" in fin
+    assert "export const _closeLocked = (p) => ((p && p.locked_fields) || []).includes('close_date');" in fin
     sub = js_code_only(js_func_body(fin, "async function _pushSubmit(btn, mode) {"))
     for ep in ("/parent-link", "/ledger-move-check", "/move-ledger", "/parent-create"):
         assert ep in sub, ep
