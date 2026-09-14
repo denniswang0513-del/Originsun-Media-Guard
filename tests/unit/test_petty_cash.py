@@ -837,3 +837,18 @@ def test_the_receipt_link_rule_lives_in_one_place():
     assert "closest('[data-receipt]')" in utils, "委派監聽器要跟著這支檔一起裝"
     assert "window.receiptLinkHtml = receiptLinkHtml;" in utils, \
         "frontend/js/my/* 是傳統 script，只能從 window 拿"
+
+
+def test_pending_rows_can_be_edited_in_place_via_the_form():
+    """owner 2026-09-14「這個希望可以編輯明細」：每筆未送出的單據多一顆「編輯」，填回上面同一個表單，
+    「登記這一筆」變「儲存修改」→ PUT /petty/expenses/{id}（後端 _own_editable：只有還沒送出的能改）。"""
+    from tests.unit._srcscan import js_code_only, js_func_body, repo_src
+    src = repo_src("frontend/tabs/petty/petty-view.js")
+    mine = js_code_only(js_func_body(src, "export async function renderMine(host) {"))
+    assert 'data-edit="${esc(e.id)}">編輯</button>' in mine
+    assert 'await send("PUT", "/api/v1/crm/petty/expenses/" + editId, body)' in mine
+    assert 'await send("POST", _base() + "/expenses", body)' in mine
+    assert "host._editingId = null;" in mine                                  # 重畫回到登記狀態
+    ed = js_code_only(js_func_body(src, "function _startEdit(host, e, labelOf) {"))
+    assert 'textContent = "儲存修改"' in ed and 'host.querySelector("#f-file").value = "";' in ed   # 收據只在重選檔才換
+    assert 'dispatchEvent(new Event("change"))' in ed                          # 專案欄的鎖要重算

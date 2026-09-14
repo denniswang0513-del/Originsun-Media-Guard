@@ -214,6 +214,7 @@ export async function renderMine(host) {
         ${_asStaff ? '<span class="pc-pill">代為登記中</span>' : ""}
       </div>` : "";
 
+    host._editingId = null;                    // 重畫＝回到「登記」狀態（編輯中按取消／存完都走這裡）
     host.innerHTML = CSS + asSel + `
     <div class="pc-sum">
       <div><div class="lbl">本期應請款${_asStaff ? "（" + esc(data.staff.name) + "）" : ""}</div>
@@ -240,6 +241,7 @@ export async function renderMine(host) {
         <div><label>收據照片</label><input type="file" id="f-file" accept="image/*" capture="environment"></div>
       </div>
       <div style="margin-top:12px;"><button class="pc-btn" id="pc-add">登記這一筆</button>
+        <button class="pc-btn ghost" id="pc-cancel-edit" style="display:none;margin-left:6px;">取消修改</button>
         <span id="pc-msg" style="margin-left:10px;font-size:13px;color:var(--sub);"></span></div>
     </div>
 
@@ -264,12 +266,19 @@ export async function renderMine(host) {
             <span class="sub">${esc(e.item || "")}</span>
             <span class="amt">${money(e.actual)}</span>
             <span class="pc-actions">
+              <button class="pc-btn ghost" data-edit="${esc(e.id)}">編輯</button>
               <button class="pc-btn ghost" data-del="${esc(e.id)}">刪除</button></span>
           </div>`).join("");
         list.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
             if (!confirm("確定刪除這筆？")) return;
             await send("DELETE", "/api/v1/crm/petty/expenses/" + b.dataset.del);
             renderMine(host);
+        });
+        // 編輯明細（owner 2026-09-14）：把那一筆填回上面的表單，「登記這一筆」變「儲存修改」；送出走 PUT（同 own-scope 規則：
+        // 只有還沒送出請款的能改）。不另做一個表單 —— 手機上一個表單就夠、欄位也一模一樣。
+        list.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => {
+            const e = data.pending.find(x => x.id === b.dataset.edit);
+            if (e) _startEdit(host, e, formLabelOf);
         });
     }
 
@@ -293,8 +302,10 @@ export async function renderMine(host) {
                     host.querySelector("#f-proj"), linkableSet(opts));
 
     const msg = host.querySelector("#pc-msg");
+    host.querySelector("#pc-cancel-edit").onclick = () => renderMine(host);      // 重畫＝表單回到空白的「登記」狀態
     host.querySelector("#pc-add").onclick = async (ev) => {
         const btn = ev.currentTarget;
+        const editId = host._editingId || "";
         const amt = parseInt(host.querySelector("#f-amt").value, 10);
         if (!amt) { msg.textContent = "金額不可為 0"; return; }
         // 專案欄是自由文字：非空就必須反查得到 id，打錯字不能靜默變公司支出
@@ -305,14 +316,18 @@ export async function renderMine(host) {
         if (typedItem && !(host._itemRows || []).some((r) => r.name === typedItem)) { msg.textContent = "項目「" + typedItem + "」不在清單裡，請從清單挑選"; return; }
         btn.disabled = true; msg.textContent = "送出中…";
         try {
-            const r = await send("POST", _base() + "/expenses", {
+            const body = {
                 expense_date: host.querySelector("#f-date").value,
                 actual: amt,
                 summary: host.querySelector("#f-sum").value.trim(),
                 project_id: projId,
                 item: host.querySelector("#f-item").value,
                 invoice_no: host.querySelector("#f-inv").value.trim(),
-            });
+            };
+            // 編輯：PUT 同一筆（/petty/expenses/{id}，審核者代管也走這條）；新增：POST
+            const r = editId
+                ? await send("PUT", "/api/v1/crm/petty/expenses/" + editId, body)
+                : await send("POST", _base() + "/expenses", body);
             const file = host.querySelector("#f-file").files[0];
             if (file) {
                 const fd = new FormData(); fd.append("file", file);
@@ -338,6 +353,23 @@ export async function renderMine(host) {
         try { await send("POST", _base() + "/submit", { notes: "" }); renderMine(host); }
         catch (e) { alert(String(e.message || e)); sub.disabled = false; }
     };
+}
+
+/** 「編輯」：把那一筆的值填回表單、記住 id、按鈕改字、捲到表單。收據照片只在「重新選了檔案」時才換。 */
+function _startEdit(host, e, labelOf) {
+    host._editingId = e.id;
+    host.querySelector("#f-date").value = e.expense_date || today();
+    host.querySelector("#f-amt").value = e.actual ?? "";
+    host.querySelector("#f-sum").value = e.summary || "";
+    host.querySelector("#f-item").value = e.item || "";
+    host.querySelector("#f-proj").value = e.project_id ? (labelOf[e.project_id] || "") : "";
+    host.querySelector("#f-inv").value = e.invoice_no || "";
+    host.querySelector("#f-file").value = "";
+    host.querySelector("#pc-add").textContent = "儲存修改";
+    host.querySelector("#pc-cancel-edit").style.display = "";
+    host.querySelector("#pc-msg").textContent = `正在修改 ${e.expense_date || ""} ${e.summary || "（無摘要）"}${e.receipt_url ? "（已有收據；重新選檔才會換）" : ""}`;
+    host.querySelector("#f-item").dispatchEvent(new Event("change"));     // 專案欄的鎖（項目不是專案雜支就不能掛專案）重算
+    host.querySelector(".pc-form").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ── 分頁：審核 —— 送出即成立，這裡是覆核（整批/逐行退回、核准歷史待審批）──
