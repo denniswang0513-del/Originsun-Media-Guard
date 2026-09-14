@@ -204,3 +204,21 @@ async def test_writer_lets_a_bound_employee_register_only_themselves(monkeypatch
     # 有 crm_projects 的管理員帳號沒綁人員檔：可以排別人（attendees 給誰就是誰）
     me, att = await _writer_with(monkeypatch, grants=True, staff_id="", attendees=[{"staff_id": "S2", "name": "小華", "role": "", "external": False, "contact": ""}])
     assert att[0]["staff_id"] == "S2"
+
+
+# ── 每種事件各自一本日曆（owner 2026-09-15「這個是人員休假的」）──
+
+def test_each_kind_can_have_its_own_calendar(monkeypatch):
+    from services import google_calendar as gc
+    monkeypatch.setattr(gc, "calendars", lambda: {"leave": "leave-cal", "shoot": ""})
+    assert gc.calendar_for("leave", "shared") == "leave-cal"
+    assert gc.calendar_for("schedule", "shared") == "shared"            # 沒填退回共用
+    assert gc.CALENDAR_KINDS == ("shoot", "schedule", "milestone", "leave")
+    sync = code_only(func_body(repo_src("services/calendar_sync.py"), "async def sync("))
+    assert 'cal_id = gc.calendar_for(kind, shared_id)' in sync
+    assert 'cal_id = gc.calendar_for("shoot", shared_id)' in code_only(func_body(repo_src("routers/api_shoots.py"), "async def _sync_calendar("))
+    assert 'await calendar_sync.delete_events(list(gone_event_ids), "milestone")' in repo_src("services/milestone_service.py")
+    cfg = code_only(func_body(repo_src("routers/api_shoots.py"), "async def calendar_config("))
+    assert "if req.calendars is not None:" in cfg and "k in gc.CALENDAR_KINDS" in cfg
+    m = repo_src("frontend/m/views/calendar.js")
+    assert "cal-cfg-k-${k}" in m and "calendars }" in m

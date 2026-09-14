@@ -245,7 +245,8 @@ async def _recompute_project_shoot_date(session, project_id: str) -> None:
 async def _sync_calendar(sid: str) -> dict:
     """best-effort 同步 Google 日曆，回**最新的 ShootRow**（寫入端點的唯一收尾，見 _finish）。
     憑證／日曆沒設就不動同步欄位（保持中性）；失敗只寫 sync_error。"""
-    sa, cal_id, _err = await gc.load_config()
+    sa, shared_id, _err = await gc.load_config()
+    cal_id = gc.calendar_for("shoot", shared_id)      # 拍攝可以有自己那本（沒填退回共用）
     factory = _require_factory()
     async with factory() as session:
         s = await _shoot_or_404(session, sid)
@@ -428,8 +429,10 @@ async def _calendar_status() -> dict:
             select(CrmShoot).where(CrmShoot.sync_error.isnot(None))
             .order_by(CrmShoot.updated_at.desc()).limit(1))).scalars().first()
     return {
-        "configured": bool(sa and cal_id),
+        "configured": bool(sa and (cal_id or gc.calendars())),
         "calendar_id": cal_id,
+        "calendars": gc.calendars(),                   # 每種事件各自那本（沒填的種類用 calendar_id）
+        "calendar_kinds": list(gc.CALENDAR_KINDS),
         "service_account_email": (sa or {}).get("client_email", ""),
         "last_sync_at": _ts(last.synced_at) if last else None,
         "last_error": (bad.sync_error if bad else "") or err or "",
@@ -442,7 +445,11 @@ async def calendar_config(req: CalendarConfigPayload, request: Request):
     from config import load_settings, save_settings
     s = load_settings()
     g = dict(s.get("google_calendar") or {})
-    g["calendar_id"] = (req.calendar_id or "").strip()
+    if req.calendar_id is not None:
+        g["calendar_id"] = (req.calendar_id or "").strip()
+    if req.calendars is not None:
+        # 每種事件各自那本：只收四種 key；空字串＝清掉（退回共用）
+        g["calendars"] = {k: str(v or "").strip() for k, v in req.calendars.items() if k in gc.CALENDAR_KINDS and str(v or "").strip()}
     s["google_calendar"] = g
     save_settings(s)
     gc.invalidate_config()          # 快取的舊設定作廢，下面的狀態才是剛存的那份
@@ -455,8 +462,21 @@ async def calendar_test(request: Request):
     sa, cal_id, err = await gc.load_config()
     if sa is None:
         return {"ok": False, "message": err}
-    ok, msg, summary = await asyncio.to_thread(gc.test_connection, sa, cal_id)
-    return {"ok": ok, "message": msg, "calendar_summary": summary}
+    # 共用那本＋每種事件各自那本都測一次（同一本只測一次）
+    targets = {"shared": cal_id, **gc.calendars()}
+    results, seen = {}, {}
+    for name, cid in targets.items():
+        if not cid:
+            continue
+        if cid not in seen:
+            seen[cid] = await asyncio.to_thread(gc.test_connection, sa, cid)
+        ok, msg, summary = seen[cid]
+        results[name] = {"calendar_id": cid, "ok": ok, "message": msg, "calendar_summary": summary}
+    if not results:
+        return {"ok": False, "message": "還沒填日曆 ID", "calendar_summary": "", "results": {}}
+    first = results.get("shared") or next(iter(results.values()))
+    return {"ok": all(r["ok"] for r in results.values()), "message": first["message"], "calendar_summary": first["calendar_summary"],
+            "results": results}
 
 
 @router.get("/{sid}")

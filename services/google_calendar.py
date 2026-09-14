@@ -37,6 +37,23 @@ def calendar_id() -> str:
     return str((load_settings().get("google_calendar") or {}).get("calendar_id") or "").strip()
 
 
+#: 每種事件可以各自一本日曆（owner 2026-09-15「這個是人員休假的」）：settings `google_calendar.calendars = {shoot|schedule|milestone|leave: id}`；
+#: 沒填的種類退回共用的 `calendar_id`。事件寫在哪本、就從哪本刪（calendar_for 同一支決定，別各自算）。
+CALENDAR_KINDS = ("shoot", "schedule", "milestone", "leave")
+
+
+def calendars() -> dict:
+    """{kind: 日曆 id}（只含有填的）。"""
+    from config import load_settings
+    raw = (load_settings().get("google_calendar") or {}).get("calendars") or {}
+    return {k: str(v or "").strip() for k, v in raw.items() if k in CALENDAR_KINDS and str(v or "").strip()}
+
+
+def calendar_for(kind: str, shared: str = "") -> str:
+    """這種事件該寫進哪本：專屬的 > 共用的（load_config 回的那個）。"""
+    return calendars().get(kind) or shared or calendar_id()
+
+
 _CFG_CACHE: dict = {"at": 0.0, "val": None}
 _CFG_TTL = 60.0
 

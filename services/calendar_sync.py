@@ -108,7 +108,8 @@ async def sync(kind: str, ident: str) -> dict:
         row = await _sync_calendar(ident)
         return {"google_event_id": row.get("google_event_id", ""), "synced_at": row.get("synced_at"),
                 "sync_error": row.get("sync_error", ""), "skipped": False}
-    sa, cal_id, _err = await gc.load_config()
+    sa, shared_id, _err = await gc.load_config()
+    cal_id = gc.calendar_for(kind, shared_id)          # 每種事件可以各自一本（休假一本、拍攝一本…）
     factory = db_factory_or_503()
     async with factory() as session:
         obj = await session.get(_model(kind), ident)
@@ -146,12 +147,13 @@ async def sync_many(kind: str, ids) -> list:
     return out
 
 
-async def delete_events(event_ids) -> None:
-    """已經從資料庫刪掉的東西（里程碑、工作登記硬刪）：只剩事件 id 可刪。best-effort。"""
+async def delete_events(event_ids, kind: str = "schedule") -> None:
+    """已經從資料庫刪掉的東西（里程碑、工作登記硬刪）：只剩事件 id 可刪。best-effort。`kind` 決定去哪本日曆刪。"""
     ids = [e for e in (event_ids or []) if e]
     if not ids:
         return
-    sa, cal_id, _err = await gc.load_config()
+    sa, shared_id, _err = await gc.load_config()
+    cal_id = gc.calendar_for(kind, shared_id)
     if sa is None or not cal_id:
         return
     for eid in ids:

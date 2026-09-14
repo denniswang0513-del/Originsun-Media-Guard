@@ -468,7 +468,9 @@ function cfgHtml(d) {
       <div class="m-card m-form" id="cal-cfg-card">
         <div class="kv"><span class="k">服務帳號</span><span class="v" id="cal-cfg-email" style="word-break:break-all">${esc(d.service_account_email || '（還沒設定服務帳號金鑰）')}</span></div>
         <div class="m-hint" style="margin:8px 0 12px">把公司 Google 日曆分享給這個信箱，權限選「變更活動」</div>
-        <label>日曆 ID</label><input id="cal-cfg-id" value="${esc(d.calendar_id || '')}" placeholder="xxx@group.calendar.google.com" autocapitalize="none" autocorrect="off">
+        <label>共用日曆 ID</label><input id="cal-cfg-id" value="${esc(d.calendar_id || '')}" placeholder="xxx@group.calendar.google.com" autocapitalize="none" autocorrect="off">
+        <div class="m-hint" style="margin:6px 0 4px">每種事件可以各自一本（沒填就寫進共用那本）：</div>
+        ${['shoot', 'schedule', 'milestone', 'leave'].map(k => `<label>${({ shoot: '拍攝', schedule: '工作登記', milestone: '里程碑', leave: '休假' })[k]}的日曆 ID</label><input id="cal-cfg-k-${k}" value="${esc((d.calendars || {})[k] || '')}" placeholder="留空＝共用" autocapitalize="none" autocorrect="off">`).join('')}
         <div class="m-actions" style="margin-top:0"><button type="button" class="m-btn pri" id="cal-cfg-save">儲存</button><button type="button" class="m-btn" id="cal-cfg-test">測試連線</button></div>
         <div class="sub" style="color:var(--sub);font-size:12px;margin-top:10px">${d.configured ? '已設定' : '未設定（存了日曆 ID 才會同步）'}${d.last_sync_at ? ' · 最近同步 ' + esc(String(d.last_sync_at).replace('T', ' ').slice(0, 16)) : ''}</div>
         <div class="m-err" id="cal-cfg-err" style="margin:10px 0 0"${d.last_error ? '' : ' hidden'}>${esc(d.last_error || '')}</div>
@@ -477,15 +479,17 @@ function cfgHtml(d) {
 function wireCfg() {
     F('cfg-save').addEventListener('click', (ev) => withBusy(ev.currentTarget, async () => {
         try {
-            const d = await mfetch(API + '/calendar/config', { method: 'PUT', body: { calendar_id: F('cfg-id').value.trim() } });
-            toast('已儲存日曆 ID');
+            const calendars = {}; for (const k of ['shoot', 'schedule', 'milestone', 'leave']) calendars[k] = (F('cfg-k-' + k) || {}).value?.trim() || '';
+            const d = await mfetch(API + '/calendar/config', { method: 'PUT', body: { calendar_id: F('cfg-id').value.trim(), calendars } });
+            toast('已儲存日曆設定');
             F('cfg').innerHTML = cfgHtml(d); wireCfg();
         } catch (e) { toast(e.message, 'err'); }
     }));
     F('cfg-test').addEventListener('click', (ev) => withBusy(ev.currentTarget, async () => {
         try {
             const r = await mfetch(API + '/calendar/test', { method: 'POST', body: {} });
-            toast(r.ok ? '連得上：' + (r.calendar_summary || r.message || '') : (r.message || '連線失敗'), r.ok ? 'ok' : 'err');
+            const parts = Object.entries(r.results || {}).map(([k, v]) => `${({ shared: '共用', shoot: '拍攝', schedule: '工作', milestone: '里程碑', leave: '休假' })[k] || k}：${v.ok ? '通（' + (v.calendar_summary || '') + '）' : '失敗 ' + (v.message || '')}`);
+            toast(parts.length ? parts.join('；') : (r.message || '連線失敗'), r.ok ? 'ok' : 'err');
         } catch (e) { toast(e.message, 'err'); }
     }));
 }

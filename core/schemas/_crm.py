@@ -772,7 +772,9 @@ class ShootEquipmentPayload(BaseModel):
 
 
 class CalendarConfigPayload(BaseModel):
+    """共用日曆 ID ＋ 每種事件各自那本（owner 2026-09-15：休假一本）。沒帶的欄位不動。"""
     calendar_id: Optional[str] = None
+    calendars: Optional[dict] = None       # {shoot|schedule|milestone|leave: 日曆 id}；空字串＝退回共用
 
 
 class FootageScanRequest(BaseModel):

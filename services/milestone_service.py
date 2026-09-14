@@ -171,7 +171,7 @@ async def _calendar_sync(ids, gone_event_ids=()) -> None:
     try:
         from services import calendar_sync
         await calendar_sync.sync_many("milestone", ids)
-        await calendar_sync.delete_events(list(gone_event_ids))
+        await calendar_sync.delete_events(list(gone_event_ids), "milestone")
     except Exception:      # noqa: BLE001 — 同步失敗不影響里程碑本身
         pass
 
