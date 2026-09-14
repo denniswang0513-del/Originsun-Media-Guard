@@ -41,8 +41,12 @@ function _ensureModal() {
             </div>
             <div id="dm_rows" class="flex flex-col gap-2 max-h-[46vh] overflow-y-auto pr-1"></div>
             <div class="flex justify-between items-center mt-4">
-                <button id="dm_add"
-                    class="bg-[#333] hover:bg-[#444] text-gray-300 border border-[#555] rounded px-3 py-1.5 text-xs transition">+ 新增對應</button>
+                <div class="flex gap-2">
+                    <button id="dm_add"
+                        class="bg-[#333] hover:bg-[#444] text-gray-300 border border-[#555] rounded px-3 py-1.5 text-xs transition">+ 新增對應</button>
+                    <a href="/api/v1/drive_map/map_drives.bat" download="map_drives.bat" title="下載一支 .bat，在同事電腦上點兩下就把這張表的磁碟全部掛好（/persistent，重開機還在）"
+                        class="bg-[#333] hover:bg-[#444] text-gray-300 border border-[#555] rounded px-3 py-1.5 text-xs transition">下載 map_drives.bat</a>
+                </div>
                 <div class="flex gap-2">
                     <button id="dm_cancel"
                         class="bg-transparent text-gray-400 border border-[#555] rounded px-4 py-1.5 text-xs transition hover:text-gray-200">取消</button>

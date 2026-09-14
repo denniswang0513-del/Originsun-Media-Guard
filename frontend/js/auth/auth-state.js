@@ -149,6 +149,8 @@ window._authToggle = function() {
         // 工具
         html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
         html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
+        // 網路磁碟一鍵掛好（owner 2026-09-14）：下載 .bat 點兩下，N:～V: 照「磁碟對應」那張表掛好（/persistent，重開機還在）
+        html += _item('🗂️', '下載網路磁碟設定檔 (.bat)', "window._downloadMapDrivesBat();document.getElementById('auth-dropdown')?.remove()");
 
         if (window._accessLevel >= 3) {
             // 系統設定（整份 settings/save）與重啟都是管理員限定的端點：非管理員畫了也只會 403（2026-09-08 權限稽核）
@@ -240,3 +242,13 @@ export function _applyModuleTabs() {
     window._refreshGroupNav();   // app.js 模組本體就掛上了；這支只在登入／登出（使用者動作）時跑
 }
 window._applyAuthState = _applyAuthState;
+
+/** 右上角選單「下載網路磁碟設定檔」：拿後端依磁碟對應表產的 map_drives.bat（core/drive_map.map_drives_bat）。 */
+window._downloadMapDrivesBat = function () {
+    const a = document.createElement('a');
+    a.href = '/api/v1/drive_map/map_drives.bat';
+    a.download = 'map_drives.bat';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+};

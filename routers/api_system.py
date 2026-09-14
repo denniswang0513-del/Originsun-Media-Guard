@@ -277,6 +277,16 @@ async def get_drive_map():
     return {"map": effective_map(), "defaults": DEFAULT_DRIVE_MAP}
 
 
+@router.get("/api/v1/drive_map/map_drives.bat")
+async def download_map_drives_bat():
+    """下載「把公司網路磁碟掛好」的批次檔（owner 2026-09-14）：內容＝有效對應表（程式預設＋本機覆寫）。
+    跟 GET /api/v1/drive_map 一樣不設守衛（LAN 內的公司慣例，不是機密），所以工作台一個 <a download> 就能給同事抓。"""
+    from fastapi.responses import Response
+    from core.drive_map import effective_map, map_drives_bat
+    return Response(content=map_drives_bat(effective_map()), media_type="application/x-bat",
+                    headers={"Content-Disposition": 'attachment; filename="map_drives.bat"'})
+
+
 @router.post("/api/v1/drive_map")
 async def save_drive_map(req: Request):
     """存完整期望表 {字母: UNC}（admin — 全軟體層級設定，入口在右上角選單）。
