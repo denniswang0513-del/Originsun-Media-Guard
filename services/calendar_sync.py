@@ -12,7 +12,7 @@ import json
 from datetime import date, datetime, timedelta, timezone
 
 from core.db_guard import db_factory_or_503
-from core.hr_logic import day_iso, leave_to_dict, tw_day
+from core.hr_logic import day_iso, leave_to_dict
 from core.schedule_logic import (CANCELLED as SCH_CANCELLED, attendee_norm, color_map, event_body_leave,
                                  event_body_milestone, event_body_schedule)
 from services import google_calendar as gc
@@ -184,7 +184,3 @@ async def resync_all(days: int = 180) -> dict:
         out[kind] = {"total": len(res), "failed": sum(1 for r in res if r.get("sync_error") and not r.get("skipped")),
                      "skipped": sum(1 for r in res if r.get("skipped"))}
     return out
-
-
-def tw(d) -> date | None:
-    return tw_day(d)
