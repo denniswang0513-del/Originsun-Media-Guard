@@ -82,3 +82,13 @@ def test_no_new_named_import_from_shared_sheet_module():
     lines = [l for l in html.splitlines() if 'from "/js/shared/ts-sheet.js"' in l]
     assert lines, "ts-zone 要從 ts-sheet import"
     assert all("planStateHtml" not in l for l in lines)
+
+
+def test_enter_in_the_add_form_neither_submits_nor_inserts_a_line():
+    """owner 2026-09-14「按 enter 不用跳行或新增，按加入再新增」：Enter 只 preventDefault，建卡只走「加入」那顆鈕。"""
+    from tests.unit._srcscan import repo_src
+    idx = repo_src("frontend/js/shared/ts-zone/index.js")
+    assert 'if (f && e.key === "Enter") e.preventDefault(); });' in idx
+    assert '_planSubmitAdd(f.dataset.day)' not in idx.split('host.addEventListener("keydown"')[1].split("\n")[0]
+    assert 'if (act === "plan-add-ok") return _planSubmitAdd(btn.dataset.day);' in idx
+    assert "Enter 加入" not in repo_src("frontend/js/shared/ts-zone/plan.js")

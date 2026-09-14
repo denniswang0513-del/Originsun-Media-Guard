@@ -72,13 +72,13 @@ export async function _planOpenAdd(day) {
     host.innerHTML = `<form class="addform" data-day="${esc(day)}" onsubmit="return false">
         <input list="z1-plan-projects" data-f="project" placeholder="專案（打字找）" autocomplete="off">
         <datalist id="z1-plan-projects">${projects.map(p => `<option value="${esc(p.label || p.name)}"></option>`).join("")}</datalist>
-        <input data-f="note" placeholder="要做什麼（Enter 加入）">
+        <input data-f="note" placeholder="要做什麼（按「加入」才會建卡）">
         <div class="fr"><button type="button" class="btn xs" data-z1="plan-add-cancel">取消</button><button type="button" class="btn xs pri" data-z1="plan-add-ok" data-day="${esc(day)}">加入</button></div></form>`;
     host.querySelector('[data-f="project"]').focus();
 }
 export async function _planSubmitAdd(day) {
     const form = z.host.querySelector(`#z1-plan .addform[data-day="${day}"]`);
-    if (!form || form.dataset.busy) return;      // 建立中：Enter 連按兩下會建出兩張一樣的卡
+    if (!form || form.dataset.busy) return;      // 建立中：「加入」連按兩下會建出兩張一樣的卡
     const text = form.querySelector('[data-f="project"]').value.trim(), note = form.querySelector('[data-f="note"]').value.trim();
     if (!text && !note) { form.querySelector('[data-f="project"]').focus(); return; }
     form.dataset.busy = "1";
