@@ -36,8 +36,8 @@ export function mountZone(opts) {
     });
     host.addEventListener("change", (e) => { const cb = e.target.closest("input[data-ms-done]"); if (cb) _msToggleDone(cb.dataset.msDone, cb.checked, cb); });   // 週表那條帶上直接勾完成
     // 我的一週「加一項」：Enter **不**加入也不跳行（owner 2026-09-14「按 enter 不用跳行或新增，按加入再新增」——
-    // 手機上選完專案順手按 Enter 就把半張卡送出去了）；只有「加入」那顆鈕會建卡。Enter 只吞掉，游標留在原格。
-    host.addEventListener("keydown", (e) => { const f = e.target.closest("#z1-plan .addform"); if (f && e.key === "Enter") e.preventDefault(); });
+    // 手機上選完專案順手按 Enter 就把半張卡送出去了）；只有「加入」那顆鈕會建卡。表單本身 onsubmit="return false"，
+    // Enter 的預設動作（送出）已經被它擋掉；這裡**不**再 preventDefault —— 那會把專案格 datalist「Enter 選中建議」也吃掉。
     _planWireDnd(host);
     // 要補填那條（remind.js）：插在分頁鈕列上面，哪個視圖都看得到
     if (!host.querySelector("#z1-remind")) host.querySelector(".views").insertAdjacentHTML("beforebegin", '<div id="z1-remind"></div>');

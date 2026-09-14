@@ -88,7 +88,8 @@ def test_enter_in_the_add_form_neither_submits_nor_inserts_a_line():
     """owner 2026-09-14「按 enter 不用跳行或新增，按加入再新增」：Enter 只 preventDefault，建卡只走「加入」那顆鈕。"""
     from tests.unit._srcscan import repo_src
     idx = repo_src("frontend/js/shared/ts-zone/index.js")
-    assert 'if (f && e.key === "Enter") e.preventDefault(); });' in idx
-    assert '_planSubmitAdd(f.dataset.day)' not in idx.split('host.addEventListener("keydown"')[1].split("\n")[0]
+    # /polish 2026-09-14 BUG-1：不掛 Enter 的 keydown（preventDefault 會把專案格 datalist 的「Enter 選中建議」吃掉）；送出由表單 onsubmit=false 擋
+    assert '#z1-plan .addform' not in idx and '_planSubmitAdd(f.dataset.day)' not in idx
     assert 'if (act === "plan-add-ok") return _planSubmitAdd(btn.dataset.day);' in idx
+    assert 'onsubmit="return false"' in repo_src("frontend/js/shared/ts-zone/plan.js")
     assert "Enter 加入" not in repo_src("frontend/js/shared/ts-zone/plan.js")
