@@ -456,8 +456,12 @@ function _detailBackdrop(show) {
     }
 }
 function _detailEsc(e) {
-    // 彈窗上面還有別的 overlay（推送到私帳、編輯表單…）時 Esc 是它們的，不關詳情
-    if (e.key === 'Escape' && !document.querySelector('.crm-modal-overlay:not([style*="display: none"]), #proj-mirror-modal')) closeDetail();
+    // 彈窗上面還有別的 overlay（推送到私帳、編輯表單…）**開著**時 Esc 是它們的，不關詳情。
+    // 看 computed display，不看 style 屬性的字：#proj-modal 起初是 style="display:none;"（沒空格）、
+    // #proj-mirror-modal 關了還留在 DOM，比字串的話 Esc 永遠關不掉（/polish 2026-09-14 BUG-2）
+    if (e.key !== 'Escape') return;
+    const open = [...document.querySelectorAll('.crm-modal-overlay')].some(o => getComputedStyle(o).display !== 'none');
+    if (!open) closeDetail();
 }
 
 // ── Add / Edit Modal ────────────────────────────────────────

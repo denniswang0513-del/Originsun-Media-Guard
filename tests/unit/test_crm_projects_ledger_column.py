@@ -31,5 +31,7 @@ def test_detail_opens_as_a_modal_with_backdrop_and_esc():
     assert "panel.classList.remove('as-modal')" in close and "_detailBackdrop(false);" in close
     bd = js_code_only(js_func_body(CORE, "function _detailBackdrop(show) {"))
     assert "b.addEventListener('click', () => closeDetail());" in bd and "_detailEsc" in bd
+    esc = js_code_only(js_func_body(CORE, "function _detailEsc(e) {"))
+    assert "getComputedStyle(o).display !== 'none'" in esc and '[style*=' not in esc     # BUG-2：看 computed，不比 style 字串
     css = repo_src("frontend/tabs/crm/crm.css")
     assert ".crm-detail-panel.as-modal {" in css and "z-index: 900;" in css and ".crm-detail-backdrop" in css
