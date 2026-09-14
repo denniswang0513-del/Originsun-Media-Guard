@@ -27,6 +27,7 @@ const _sorter = createSortable({
         status: p => enumIndex(STATUS_ORDER, p.status, '投標'),
         name:   p => (p.name || '').toLowerCase(),
         client: p => (p.client_short_name || '').toLowerCase(),
+        ledger: p => _ledgerSortKey(p),
         am:     p => (p.am_username || '').toLowerCase(),
         type:   p => (p.project_type || ''),
         date:   p => p.start_date || '',
@@ -303,6 +304,29 @@ function _propSubBadge(p) {
     return `<span class="crm-badge" style="margin-left:4px;opacity:.7;">${p.proposal_status}</span>`;
 }
 
+// ── 「帳本」欄（owner 2026-09-14「紅框處的狀態可以新增一欄來呈現」）──
+// 母帳列：已連結私帳（→ 私帳案名）＋收款方式（後期代開／現金收款；源日專案不畫）；
+// 私帳列：後期專案（從私帳推進管線的）／私帳。原本擠在案名後面，現在自己一欄、可排序。
+function _ledgerCellHtml(p) {
+    if (p.entity === 'mine') {
+        return p.crm_pushed
+            ? '<span class="crm-ledger-tag" style="color:#7dd3fc;border-color:#2d5a78;" title="從 owner 私帳推送進管線的後期案；錢流仍在私帳">後期專案</span>'
+            : '<span class="crm-ledger-tag" style="color:#c4b5fd;border-color:#4c3d78;" title="錢流記在 owner 私帳（我的帳）；專案本身共用">私帳</span>';
+    }
+    const linked = p.mirrored
+        ? `<span class="crm-ledger-tag" style="color:#86efac;border-color:#2f5d43;" title="這一案在私帳有對應的案（「推送到私帳」）${p.mine_link_name ? '：' + _esc(p.mine_link_name) : ''}">已連結私帳${p.mine_link_name && p.mine_link_name !== p.name ? ' → ' + _esc(p.mine_link_name) : ''}</span>`
+        : '';
+    const html = linked + billingTagHtml(p);
+    return html || '<span class="crm-muted">—</span>';
+}
+/** 排序鍵：已連結＋代開 > 已連結 > 代開／現金 > 私帳列 > 什麼都沒有。 */
+function _ledgerSortKey(p) {
+    if (p.entity === 'mine') return p.crm_pushed ? '3-後期專案' : '3-私帳';
+    const mode = p.billing_mode && p.billing_mode !== 'company' ? p.billing_mode : '';
+    if (p.mirrored) return mode ? '0-' + mode : '1-linked';
+    return mode ? '2-' + mode : '';
+}
+
 export function renderList() {
     const body = document.getElementById('proj-list-body');
     if (!body) return;
@@ -320,16 +344,12 @@ export function renderList() {
 
     body.innerHTML = _sorter.sorted(state.projects).map(p => `
         <div class="crm-row${p.id === state.selectedId ? ' selected' : ''}" data-id="${p.id}" onclick="window._projSelect('${p.id}')">
-            <div class="crm-row-name">${_esc(p.name)}${p.mirrored
-                ? ` <span style="font-size:10px;color:#86efac;border:1px solid #2f5d43;border-radius:3px;padding:0 4px;vertical-align:1px;" title="這一案在私帳有對應的案（「推送到私帳」）${p.mine_link_name ? '：' + _esc(p.mine_link_name) : ''}">已連結私帳${p.mine_link_name && p.mine_link_name !== p.name ? ' → ' + _esc(p.mine_link_name) : ''}</span>`
-                : ''}${p.entity !== 'mine' ? billingTagHtml(p)
-                : p.crm_pushed
-                    ? ' <span style="font-size:10px;color:#7dd3fc;border:1px solid #2d5a78;border-radius:3px;padding:0 4px;vertical-align:1px;" title="從 owner 私帳推送進管線的後期案；錢流仍在私帳">後期專案</span>'
-                    : ' <span style="font-size:10px;color:#c4b5fd;border:1px solid #4c3d78;border-radius:3px;padding:0 4px;vertical-align:1px;" title="錢流記在 owner 私帳（我的帳）；專案本身共用">私帳</span>'}</div>
+            <div class="crm-row-name" title="${_esc(p.name)}">${_esc(p.name)}</div>
             <div class="crm-row-client">${p.client_short_name
                 ? _esc(p.client_short_name)
                 : '<span class="crm-muted">待補客戶</span>'}</div>
             <div class="crm-row-status">${_badge(p.status)}${_propSubBadge(p)}</div>
+            <div class="crm-row-ledger">${_ledgerCellHtml(p)}</div>
             <div class="crm-row-type" onclick="event.stopPropagation()">${_typeSelectHtml(p)}</div>
             <div class="crm-row-am">
                 ${p.am_username ? _avatar(p.am_username) + _esc(p.am_username) : '<span class="crm-muted">—</span>'}
@@ -393,10 +413,11 @@ export function selectProject(id) {
     state.selectedId = id;
     renderList();
 
+    // 詳情用彈窗（owner 2026-09-14「畫面寬一點，這樣比較好編輯」）：同一個 #proj-detail-panel 節點加 as-modal
+    // 蓋在清單上（裡面八個分頁的 DOM／id 一個都不動），底下一層 backdrop 點了就關；側邊拖拉把手用不到
     const panel = document.getElementById('proj-detail-panel');
-    if (panel) panel.style.display = 'flex';
-    const handle = document.getElementById('proj-resize-handle');
-    if (handle) handle.style.display = '';
+    if (panel) { panel.classList.add('as-modal'); panel.style.display = 'flex'; }
+    _detailBackdrop(true);
 
     const project = state.projects.find(p => p.id === id);
     if (!project) return;
@@ -414,10 +435,29 @@ export function closeDetail() {
     }
     state.selectedId = null;
     const panel = document.getElementById('proj-detail-panel');
-    if (panel) panel.style.display = 'none';
-    const handle = document.getElementById('proj-resize-handle');
-    if (handle) handle.style.display = 'none';
+    if (panel) { panel.style.display = 'none'; panel.classList.remove('as-modal'); }
+    _detailBackdrop(false);
     renderList();
+}
+
+/** 詳情彈窗底下那層：點它＝關閉（走 closeDetail，有沒存的成本表會先問）；Esc 同。 */
+function _detailBackdrop(show) {
+    let b = document.getElementById('proj-detail-backdrop');
+    if (show && !b) {
+        b = document.createElement('div');
+        b.id = 'proj-detail-backdrop';
+        b.className = 'crm-detail-backdrop';
+        b.addEventListener('click', () => closeDetail());
+        document.body.appendChild(b);
+        document.addEventListener('keydown', _detailEsc);
+    } else if (!show && b) {
+        b.remove();
+        document.removeEventListener('keydown', _detailEsc);
+    }
+}
+function _detailEsc(e) {
+    // 彈窗上面還有別的 overlay（推送到私帳、編輯表單…）時 Esc 是它們的，不關詳情
+    if (e.key === 'Escape' && !document.querySelector('.crm-modal-overlay:not([style*="display: none"]), #proj-mirror-modal')) closeDetail();
 }
 
 // ── Add / Edit Modal ────────────────────────────────────────

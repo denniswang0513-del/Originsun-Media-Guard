@@ -160,6 +160,7 @@
 
 .crm-col-name    { flex: 1.5; min-width: 60px; }
 .crm-col-status  { flex: 0.6; min-width: 50px; }
+.crm-col-ledger  { flex: 0.9; min-width: 90px; }
 .crm-col-type    { flex: 0.8; min-width: 90px; }
 .crm-col-am      { flex: 0.8; min-width: 40px; }
 .crm-col-proj    { flex: 0.3; text-align: center; min-width: 30px; }
@@ -202,6 +203,8 @@
 
 .crm-row-name { flex: 1.5; min-width: 60px; font-weight: 600; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .crm-row-status { flex: 0.6; min-width: 50px; }
+.crm-row-ledger { flex: 0.9; min-width: 90px; display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.crm-ledger-tag { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 0 4px; white-space: nowrap; }
 .crm-row-type { flex: 0.8; min-width: 90px; }
 .crm-row-type select { width: 100%; max-width: 150px; background: #1a1a1a; border: 1px solid #333; color: #ccc; border-radius: 4px; padding: 2px 4px; font-size: 12px; }
 .crm-row-type select.is-empty { color: #f59e0b; border-color: #78350f; }
@@ -268,6 +271,16 @@
   min-height: 0;
   background: #252525;
 }
+
+/* 專案詳情彈窗（owner 2026-09-14「用彈窗、畫面寬一點比較好編輯」）：同一個 panel 節點加 .as-modal 蓋在清單上。
+   z-index 900 < 各種 crm-modal-overlay（1000／1100）——推送到私帳、編輯表單仍疊得上來 */
+.crm-detail-panel.as-modal {
+  position: fixed; inset: 3vh 3vw; width: auto; max-width: none; min-width: 0;
+  z-index: 900; border: 1px solid #3a3a3a; border-radius: 10px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.65);
+}
+.crm-detail-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 899; }
+@media (max-width: 900px) { .crm-detail-panel.as-modal { inset: 0; border-radius: 0; } }
 
 /* ── Detail bar (title + tabs + actions in one row) ── */
 .crm-detail-bar {
