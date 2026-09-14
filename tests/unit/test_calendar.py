@@ -138,6 +138,7 @@ def test_router_registered_guards_and_endpoints():
     done = func_body(src, "async def schedule_done(")
     assert "timesheet_row_for_done(row, req.hours)" in done and "add_rows(session, ident, [TimesheetManualRow(**fields)])" in done
     assert 'card.status == "plan"' in done                                                          # 計畫卡直接變實際，不多插一列
+    assert done.count("await _finish(sid)") == 2 and '{"schedule": row' not in done                 # /polish BUG-2：回同步後的最新列，不是動手前那份
     assert "await calendar_sync.delete_events([eid])" in func_body(src, "async def delete_schedule(")
     assert 'await calendar_sync.sync("schedule", sid)' in func_body(src, "async def _finish(")
 

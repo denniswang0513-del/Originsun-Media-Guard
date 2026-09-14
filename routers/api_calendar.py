@@ -512,16 +512,14 @@ async def schedule_done(sid: str, req: ScheduleDonePayload, request: Request):
                     s.status = DONE
                 await session.commit()
                 tid = card.id
-                await calendar_sync.sync("schedule", sid)
-                return {"schedule": row, "timesheet_id": tid, "created": True}
+                return {**(await _finish(sid)), "timesheet_id": tid, "created": True}     # 回同步後的最新列（status／timesheet_ids）
         res = await add_rows(session, ident, [TimesheetManualRow(**fields)])
         new_ids = list(res.get("ids") or [])
         s.timesheet_ids = json.dumps(done_ids + new_ids)
         if all(a["staff_id"] == ident["staff_id"] or a["external"] for a in att):
             s.status = DONE
         await session.commit()
-    await calendar_sync.sync("schedule", sid)
-    return {"schedule": row, "timesheet_id": new_ids[0] if new_ids else "", "created": True}
+    return {**(await _finish(sid)), "timesheet_id": new_ids[0] if new_ids else "", "created": True}
 
 
 @router.post("/schedule/{sid}/resync")
