@@ -163,14 +163,14 @@ async def delete_events(event_ids, kind: str = "schedule") -> None:
             pass
 
 
-async def resync_all(days: int = 180) -> dict:
-    """管理員的「全部重新同步」：從 7 天前到未來 `days` 天的工作登記／里程碑／已核准的假／場次逐筆 sync
-    （沒同步過、同步失敗、或顏色剛改都會補上）；退回／撤回但還掛著事件的假也一併刪。"""
+async def resync_all(days: int = 180, past: int = 7) -> dict:
+    """管理員的「全部重新同步」：從 `past` 天前到未來 `days` 天的工作登記／里程碑／已核准的假／場次逐筆 sync
+    （沒同步過、同步失敗、或顏色剛改都會補上）；退回／撤回但還掛著事件的假也一併刪。歷史匯入要補上日曆時把 past 拉大。"""
     from sqlalchemy import or_, select
     from db.models import CrmProjectMilestone, CrmSchedule, CrmShoot, HrLeaveRequest
     from core.hr_logic import midnight_of
     today = date.today()
-    d0, d1 = today - timedelta(days=7), today + timedelta(days=int(days))
+    d0, d1 = today - timedelta(days=int(past)), today + timedelta(days=int(days))
     factory = db_factory_or_503()
     async with factory() as session:
         sch = (await session.execute(select(CrmSchedule.id).where(CrmSchedule.date >= d0, CrmSchedule.date <= d1))).scalars().all()

@@ -132,6 +132,7 @@ def test_router_registered_guards_and_endpoints():
     w = func_body(src, "async def _writer(")
     assert 'payload_grants(payload, WRITE_OTHERS_KEY)' in w and "403" in w and "409" in w          # 排別人＝crm_projects；登記自己＝綁定
     assert "check_admin(request)" in func_body(src, "async def put_colors(") and "check_admin(request)" in func_body(src, "async def resync_all(")
+    assert "await calendar_sync.resync_all(days, past)" in func_body(src, "async def resync_all(")     # 歷史匯入補日曆：past 可拉大
     ev = func_body(src, "async def calendar_events(")
     assert 'if scope == "me":' in ev and "_plan_events(" in ev and "_holiday_events(" in ev and "_leave_events(" in ev
     assert "_pid_for(" in src and "hide_mine_projects" in src                                      # 私帳案只給名不給 id

@@ -529,9 +529,10 @@ async def schedule_resync(sid: str, request: Request):
 
 
 @router.post("/resync-all")
-async def resync_all(request: Request, days: int = Query(180, ge=1, le=400)):
+async def resync_all(request: Request, days: int = Query(180, ge=1, le=400), past: int = Query(7, ge=0, le=3660)):
+    """全部重新同步：預設 7 天前～未來 180 天；歷史匯入要補上日曆時帶 past（最多 10 年）。"""
     check_admin(request)
-    return await calendar_sync.resync_all(days)
+    return await calendar_sync.resync_all(days, past)
 
 
 # ── 顏色 ──
