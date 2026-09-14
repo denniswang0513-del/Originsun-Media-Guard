@@ -195,6 +195,22 @@ async def leave_quota(request: Request, year: int = 0):
         } for s in staff_rows]}
 
 
+@router.get("/leave/{leave_id}/proof")
+async def leave_proof(leave_id: str, request: Request):
+    """病假證明檔（管理員／人事／合夥人可看；員工看自己的走 /me/leave/{id}/proof）。"""
+    import os
+    from core.drive_map import to_local_path
+    from core.no_store import no_store_file
+    check_admin_or_module(request, *LEAVE_VIEWERS)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        obj = await _get_leave(session, leave_id)
+        path = to_local_path(obj.proof_path or "")
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="這張單沒有證明檔")
+    return no_store_file(path)
+
+
 @router.get("/leave/{leave_id}/context")
 async def leave_context(leave_id: str, request: Request):
     """待核卡片要的：{request, balance:{available,reserved,expiring,enough,short}, same_period:[…],

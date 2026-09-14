@@ -18,7 +18,9 @@ core.identity.resolve_current_staff（token → users.staff_id → crm_staff）�
 """
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Request  # type: ignore
+import os
+
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile  # type: ignore
 from sqlalchemy import func, select  # type: ignore
 
 from core.auth import ME_MODULE_KEYS, ME_ZONE_MASTER, check_admin_or_module, grant_admin_all_modules, payload_grants
@@ -286,7 +288,7 @@ async def preview_my_leave(body: MeLeavePreview, request: Request):
     ident = await require_bound_staff(request, "me_leave")
     factory = db_factory_or_503()
     async with factory() as session:
-        return await leave_service.evaluate(session, ident["staff_id"], ident["staff"].name, body)
+        return await leave_service.evaluate(session, ident["staff_id"], ident["staff"].name, body, self_service=True)
 
 
 @router.post("/leave")
@@ -299,7 +301,7 @@ async def apply_my_leave(body: MeLeaveCreate, request: Request):
     factory = db_factory_or_503()
     async with factory() as session:
         holidays = await leave_service.holidays_map(session)
-        ev = await leave_service.evaluate(session, ident["staff_id"], ident["staff"].name, body, holidays=holidays)
+        ev = await leave_service.evaluate(session, ident["staff_id"], ident["staff"].name, body, holidays=holidays, self_service=True)
         if ev["errors"]:
             raise HTTPException(status_code=422, detail="；".join(e["msg"] for e in ev["errors"]))
         hours, part = leave_service.hours_from_body(body, holidays)
@@ -367,6 +369,76 @@ async def _cancel_my_leave(leave_id: str, request: Request, note: str) -> dict:
 @router.post("/leave/{leave_id}/cancel")
 async def cancel_my_leave(leave_id: str, body: LeaveCancel, request: Request):
     return await _cancel_my_leave(leave_id, request, (body.note or "").strip())
+
+
+#: 證明可以（補）傳的狀態：待審中、或已核准後要換檔；退回／撤回的單不用再附
+PROOF_UPLOAD_STATUSES = ("待審", "消假待審", "已核准")
+
+
+async def _my_leave_or_404(session, leave_id: str, staff_id: str):
+    obj = (await session.execute(
+        select(HrLeaveRequest).where(HrLeaveRequest.id == leave_id).where(HrLeaveRequest.staff_id == staff_id))).scalar_one_or_none()
+    if obj is None:
+        raise HTTPException(status_code=404, detail="找不到這張請假單（或不是你的）")
+    return obj
+
+
+def leave_proof_dir(day: str) -> str:
+    """病假證明放哪（owner 2026-09-15）：收據根目錄底下 `_假勤證明/{年月}/`（與零用金收據、福委會單據同一個 root，
+    生產＝NAS Archive/00_零用金收據）。回本機視角的路徑；DB 存 canonical UNC。"""
+    from core.drive_map import to_local_path
+    from routers.crm.costs import _receipts_root
+    return os.path.join(to_local_path(_receipts_root()), "_假勤證明", (day or "")[:7] or "nodate")
+
+
+@router.post("/leave/{leave_id}/proof")
+async def upload_my_leave_proof(leave_id: str, request: Request, file: UploadFile = File(...)):
+    """病假證明（規章：病假須提出相關證明；沒附的病假管理員按核准會被擋）。本人、限 PROOF_UPLOAD_STATUSES。
+    副檔名黑名單＋串流上限與零用金收據同一套；檔名 `{日期}_{姓名}_{假別}_{id8}.ext`。"""
+    import asyncio
+    import re as _re
+    from core.drive_map import to_canonical_path
+    from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
+    from routers.crm.costs import _MAX_RECEIPT_BYTES
+    ident = await require_bound_staff(request, "me_leave")
+    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+    if ext.lower() in BLOCKED_UPLOAD_EXTS:
+        raise HTTPException(status_code=400, detail=f"不接受的檔案格式：{ext}")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        obj = await _my_leave_or_404(session, leave_id, ident["staff_id"])
+        if obj.status not in PROOF_UPLOAD_STATUSES:
+            raise HTTPException(status_code=409, detail=f"「{obj.status}」的單不用再附證明")
+        day = day_iso(obj.start_date) or ""
+        base = leave_proof_dir(day)
+        try:
+            os.makedirs(base, exist_ok=True)
+        except OSError as err:
+            raise HTTPException(status_code=422, detail=f"資料夾無法使用：{err}")
+        safe = _re.sub(r'[\\/:*?"<>|]', "", f"{obj.staff_name}_{obj.leave_type}")[:40]
+        filepath = os.path.join(base, f"{day.replace('-', '')}_{safe}_{obj.id[:8]}{ext}")
+        written = await asyncio.to_thread(stream_to_disk, file.file, filepath, _MAX_RECEIPT_BYTES)
+        if written < 0:
+            raise HTTPException(status_code=413, detail=f"檔案超過 {_MAX_RECEIPT_BYTES // (1024 * 1024)}MB")
+        obj.proof_path = to_canonical_path(filepath)
+        await session.commit()
+        await session.refresh(obj)
+        return leave_service.request_dict(obj, await leave_service.holidays_map(session))
+
+
+@router.get("/leave/{leave_id}/proof")
+async def my_leave_proof(leave_id: str, request: Request):
+    """看自己那張單的證明檔（管理端走 /hr/leave/{id}/proof）。"""
+    from core.drive_map import to_local_path
+    from core.no_store import no_store_file
+    ident = await require_bound_staff(request, "me_leave")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        obj = await _my_leave_or_404(session, leave_id, ident["staff_id"])
+        path = to_local_path(obj.proof_path or "")
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="這張單沒有證明檔")
+    return no_store_file(path)
 
 
 @router.delete("/leave/{leave_id}")

@@ -6,7 +6,7 @@
 
 import { createSortable, sortableTh, enumIndex, today } from '../crm/crm-utils.js';   // today()＝本地今天（別用 toISOString，台北早上八點前會差一天）
 import { esc } from '../../js/shared/dom.js';
-import { authFetch, tabLoadError } from '../../js/shared/utils.js';
+import { authDownload, authFetch, tabLoadError } from '../../js/shared/utils.js';
 
 // 字彙 fallback（正本 core/leave_logic.py；執行期以後端回的 vocab 為準，這裡只是還沒拿到時的預設）
 const LEAVE_TYPES = ['特休', '補休', '病假', '事假', '公假', '婚假', '喪假', '其他'];
@@ -142,6 +142,7 @@ function _queueCard(it) {
         <div class="hl-qline"><span class="k">期間</span>${_periodText(it)}</div>
         <div class="hl-qline"><span class="k">時數</span>${hoursText(it.hours)}</div>
         <div class="hl-qline"><span class="k">事由</span>${esc(it.reason) || '—'}</div>
+        ${_needsProof(it.leave_type) ? `<div class="hl-qline"><span class="k">證明</span>${_proofHtml(it)}</div>` : ''}
         ${isCancel ? `<div class="hl-qline"><span class="k">消假理由</span>${esc(it.cancel_note) || '—'}</div>` : ''}
         <div class="hl-qline"><span class="k">送出</span>${esc((it.created_at || '').slice(0, 16).replace('T', ' ')) || '—'}</div>
         <div class="hl-ctx" data-ctx="${esc(it.id)}"><span class="dim">查餘額與同期中…</span></div>
@@ -222,10 +223,20 @@ async function _cancelDecide(id, approve) {
     _loadQueue();
 }
 
+// 病假要附證明才能核准（後端 leave_service.approve_request 擋；這裡先讓管理者看得到）
+const _needsProof = (t) => (_vocab.proof_required_types || []).includes(t);
+function _proofHtml(it) {
+    return it.proof_path
+        ? `<button class="hl-btn" data-proof="${esc(it.id)}">看證明</button>`
+        : '<span style="color:var(--warn, #f59e0b)">缺證明（不能核准）</span>';
+}
+const _openProof = (id) => authDownload(API + `/leave/${id}/proof`, `證明_${id}`, '開啟證明');
+
 function _bindQueue() {
     el('hl-content').onclick = (ev) => {
         const t = ev.target.closest('button');
         if (!t) return;
+        if (t.dataset.proof) return _openProof(t.dataset.proof);
         if (t.dataset.approveReq) return _approve(t.dataset.approveReq);
         if (t.dataset.rejectReq) return _reject(t.dataset.rejectReq);
         if (t.dataset.cancelDecide) return _cancelDecide(t.dataset.cancelDecide, t.dataset.approve === '1');
@@ -271,6 +282,7 @@ function _leaveRow(it) {
     if (it.approved_by) notes.push(`核可：${esc(it.approved_by)}`);
     if (it.reject_note) notes.push(`退回理由：${esc(it.reject_note)}`);
     if (it.cancel_note) notes.push(`消假理由：${esc(it.cancel_note)}`);
+    if (_needsProof(it.leave_type)) notes.push(it.proof_path ? `<button class="hl-btn" data-proof="${esc(it.id)}">看證明</button>` : '缺證明');
     return `<tr>
         <td>${esc(it.staff_name)}</td>
         <td>${esc(it.leave_type)}</td>
@@ -350,6 +362,7 @@ function _bindRecords() {
     root.onclick = async (ev) => {
         const t = ev.target.closest('button');
         if (!t) return;
+        if (t.dataset.proof) return _openProof(t.dataset.proof);
         if (t.dataset.del) {
             if (!confirm('確定刪除此請假單？已核准的會一併釋放扣掉的時數。')) return;
             const r = await hdel('/leave/' + t.dataset.del);

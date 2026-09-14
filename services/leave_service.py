@@ -17,6 +17,7 @@ from sqlalchemy import func, select  # type: ignore
 from core.hr_logic import day_iso, leave_to_dict, midnight_of, parse_ymd, tw_day
 from core.leave_logic import (ACTIVE_STATUSES, ALL_LEAVE_TYPES, HOURS_PER_DAY, LEDGER_TYPES,
                               PARTS, SICK_CAP_DAYS, InsufficientHours, allocate, annual_days_for,
+                              PROOF_REQUIRED_TYPES, SELF_SERVICE_TYPES,
                               as_date, balance, cancel_mode, check_hours_step, hours_to_days, in_crew, notice_warning,
                               overlaps, working_hours)
 from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
@@ -180,12 +181,16 @@ def hours_from_body(body, holidays) -> tuple:
 
 
 async def evaluate(session, staff_id: str, staff_name: str, body, today: date | None = None,
-                   exclude_id: str = "", holidays=None) -> dict:
+                   exclude_id: str = "", holidays=None, self_service: bool = False) -> dict:
     """{hours, days, errors:[{code,msg}], warnings:[{code,msg}], balance}。
-    errors：bad_type／bad_range／overlap／insufficient；warnings：notice_short／shoot_conflict／sick_cap。"""
+    errors：bad_type／bad_range／overlap／insufficient；warnings：notice_short／shoot_conflict／sick_cap。
+    `self_service=True`（員工自己送／預覽）：假別只認 SELF_SERVICE_TYPES，其餘回 bad_type。"""
     today = today or date.today()
     holidays = holidays if holidays is not None else await holidays_map(session)
     errors, warnings = [], []
+    if self_service and getattr(body, "leave_type", None) not in SELF_SERVICE_TYPES:
+        errors.append(_err("bad_type", f"自助只能請：{'／'.join(SELF_SERVICE_TYPES)}；其他假別請找管理員登記"))
+        return {"hours": 0, "days": 0, "errors": errors, "warnings": warnings, "balance": None}
     leave_type = (body.leave_type or "").strip()
     if leave_type not in ALL_LEAVE_TYPES:
         errors.append(_err("bad_type", f"假別需為：{'/'.join(ALL_LEAVE_TYPES)}"))
@@ -248,6 +253,8 @@ async def approve_request(session, obj: HrLeaveRequest, actor: str, today: date 
     today = today or date.today()
     if obj.status != "待審":
         raise HTTPException(status_code=409, detail=f"此單狀態是「{obj.status}」，只有待審可核准")
+    if obj.leave_type in PROOF_REQUIRED_TYPES and not (getattr(obj, "proof_path", None) or "").strip():
+        raise HTTPException(status_code=422, detail=f"{obj.leave_type}要先附上證明（員工在假勤頁上傳）才能核准")
     hours = float(obj.hours if obj.hours is not None else (obj.days or 0) * HOURS_PER_DAY)
     parts = []
     if obj.leave_type in LEDGER_TYPES:

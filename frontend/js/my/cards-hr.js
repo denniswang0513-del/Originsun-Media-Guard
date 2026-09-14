@@ -70,7 +70,8 @@ function renderLeave(body) {
     const bal = LV.balances || {};
     const an = bal["特休"] || {}, comp = bal["補休"] || {};
     const sick = LV.sick || {};
-    const types = v.leave_types || ["特休", "補休", "病假", "事假", "公假", "婚假", "喪假", "其他"];
+    // 自助只開特休／補休／病假（owner 2026-09-15）；vocab 沒給 self_service_types 的舊後端退回整份清單
+    const types = v.self_service_types || v.leave_types || ["特休", "補休", "病假"];
     const parts = v.parts || Object.keys(LV_PART_FALLBACK);
     const today = _localToday();
     const expiring = (an.expiring || [])[0];
@@ -101,6 +102,10 @@ function renderLeave(body) {
         </div>
         <div id="lv-preview" style="font-size:12px;color:var(--sub);margin-bottom:8px;line-height:1.7;"></div>
         <div class="field"><textarea id="lv-reason" rows="2" placeholder="事由（必填）"></textarea></div>
+        <div class="field" id="lv-proof-wrap" style="display:${_lvNeedsProof(types[0]) ? "" : "none"};">
+            <label style="display:block;font-size:11px;color:var(--sub);margin-bottom:4px;">病假證明（必附：診斷證明或掛號單照片／PDF）</label>
+            <input type="file" id="lv-proof" accept=".jpg,.jpeg,.png,.heic,.webp,.pdf">
+        </div>
         <div style="display:flex;gap:8px;align-items:center;">
             <button class="mini-btn" id="lv-submit" onclick="applyLeave()">送出請假</button>
             <span class="err" id="lv-err" style="margin-top:0;"></span>
@@ -112,10 +117,47 @@ function renderLeave(body) {
     form.addEventListener("input", (e) => { if (e.target.id !== "lv-reason") lvPreviewSoon(); });
     form.addEventListener("change", (e) => {
         if (e.target.id === "lv-part") $("lv-range").style.display = e.target.value === "range" ? "" : "none";
+        if (e.target.id === "lv-type") $("lv-proof-wrap").style.display = _lvNeedsProof(e.target.value) ? "" : "none";
         if (e.target.id === "lv-start" && $("lv-end").value < e.target.value) $("lv-end").value = e.target.value;
         if (e.target.id !== "lv-reason") lvPreviewSoon();
     });
     lvPreviewSoon();
+}
+// 病假要附證明（vocab.proof_required_types；正本 core/leave_logic.PROOF_REQUIRED_TYPES）
+const _lvNeedsProof = (t) => ((LV && LV.vocab && LV.vocab.proof_required_types) || ["病假"]).includes(t);
+function _lvAuthHeaders() {
+    const h = {}; const tok = localStorage.getItem(TOKEN_KEY);
+    if (tok) h["Authorization"] = "Bearer " + tok;
+    return h;
+}
+// 上傳走 multipart：不能用 mfetch（它會補 JSON 的 Content-Type）
+function _lvUploadProof(id, file) {
+    const fd = new FormData(); fd.append("file", file);
+    return fetch("/api/v1/me/leave/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd });
+}
+async function viewLeaveProof(id) {
+    // <a href> 帶不了 Authorization，抓成 blob 再開（同 js/shared/utils.authDownload 的理由）
+    try {
+        const r = await fetch("/api/v1/me/leave/" + id + "/proof", { headers: _lvAuthHeaders() });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); alert((typeof d.detail === "string" && d.detail) || "開不了證明"); return; }
+        const href = URL.createObjectURL(await r.blob());
+        window.open(href, "_blank");
+        setTimeout(() => URL.revokeObjectURL(href), 60000);
+    } catch (_) { alert("連線失敗"); }
+}
+async function lvProofPick(id, input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const r = await _lvUploadProof(id, file).catch(() => null);
+    if (!r || !r.ok) { const d = r ? await r.json().catch(() => ({})) : {}; alert((typeof d.detail === "string" && d.detail) || "上傳失敗"); return; }
+    loadLeave();
+}
+function _lvProofCell(r) {
+    if (!_lvNeedsProof(r.leave_type)) return "";
+    if (r.proof_path) return `<button class="mini-btn" onclick="viewLeaveProof('${esc(r.id)}')">看證明</button>`;
+    if (r.status === "待審" || r.status === "消假待審" || r.status === "已核准")
+        return `<label class="mini-btn" style="color:#b45309;border-color:#fcd34d;">缺證明，補傳<input type="file" accept=".jpg,.jpeg,.png,.heic,.webp,.pdf" hidden onchange="lvProofPick('${esc(r.id)}', this)"></label>`;
+    return "";
 }
 function _lvRow(r) {
     const hot = r.status === "待審" || r.status === "消假待審";
@@ -141,7 +183,7 @@ function _lvRow(r) {
             ${metas.length ? `<div class="meta">${metas.join("　")}</div>` : ""}
         </div>
         <span class="pill${hot ? " hot" : ""}">${esc(r.status)}</span>
-        ${act}
+        ${_lvProofCell(r)}${act}
     </div>`;
 }
 function _lvPayload() {
@@ -180,6 +222,8 @@ async function applyLeave() {
     errEl.style.display = "none";
     const reason = ($("lv-reason").value || "").trim();
     if (!reason) { show("請填事由"); $("lv-reason").focus(); return; }
+    const proofFile = _lvNeedsProof($("lv-type").value) ? ($("lv-proof").files || [])[0] : null;
+    if (_lvNeedsProof($("lv-type").value) && !proofFile) { show("病假要附證明（照片或 PDF）"); return; }
     // 送出中鎖住：連點兩下會建出兩張一模一樣的待審單（手機版的 withBusy 早就有，桌機這條原本沒有）
     const btn = $("lv-submit");
     if (btn) { if (btn.dataset.busy) return; btn.dataset.busy = "1"; btn.disabled = true; }
@@ -190,6 +234,12 @@ async function applyLeave() {
             const errs = Array.isArray(d.errors) ? d.errors : (Array.isArray(d.detail) ? d.detail : (d.detail && d.detail.errors) || []);
             show(errs.length ? errs.map(x => esc(x.msg || x.code || x)).join("<br>") : esc((typeof d.detail === "string" && d.detail) || "送出失敗"));
             return;
+        }
+        if (proofFile) {
+            // 單建好了才傳證明；傳失敗要說出來（清單上那筆會掛「缺證明，補傳」）
+            const created = await r.json().catch(() => ({}));
+            const up = created.id ? await _lvUploadProof(created.id, proofFile).catch(() => null) : null;
+            if (!up || !up.ok) alert("請假單已送出，但證明上傳失敗，請在清單裡補傳。");
         }
         _resetTodayStrip();   // 今天那條「請假待審 N 件」下次重抓
         await loadLeave();   // 🔴 要 await：不等重畫完就走到 finally，鎖會在舊表單還在畫面上時就解開，那段時間再點一次就是第二張單

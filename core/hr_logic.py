@@ -152,6 +152,7 @@ def leave_to_dict(o) -> dict:
         "end_time": getattr(o, "end_time", None) or "",
         "reject_note": getattr(o, "reject_note", None) or "",
         "cancel_note": getattr(o, "cancel_note", None) or "",
+        "proof_path": getattr(o, "proof_path", None) or "",
         "google_event_id": getattr(o, "google_event_id", None) or "",
         "synced_at": iso_ts(getattr(o, "synced_at", None)),
         "sync_error": getattr(o, "sync_error", None) or "",

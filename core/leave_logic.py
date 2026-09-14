@@ -23,6 +23,11 @@ from core.hr_logic import LEAVE_STATUSES as _LEGACY_STATUSES, LEAVE_TYPES as _LE
 LEDGER_TYPES = ("特休", "補休")                                  # 走時數帳（核准時 FIFO 扣 credit）
 RECORD_TYPES = ("病假", "事假", "公假", "婚假", "喪假", "其他")     # 只記事實（年度上限提醒，不扣帳）
 ALL_LEAVE_TYPES = ("特休", "補休", "病假", "事假", "公假", "婚假", "喪假", "其他")
+# 員工自助（/me/leave、工作台假勤卡、手機假勤）只開這三種（owner 2026-09-15「這裡改特休、補修就好；病假需要上傳文件」）；
+# 其他假別（事假／公假／婚假／喪假／其他）由管理員在人事管理代登。管理端仍認 ALL_LEAVE_TYPES。
+SELF_SERVICE_TYPES = ("特休", "補休", "病假")
+# 要附證明才准核准（規章：病假須提出相關證明）：員工送單時上傳，檔案放收據根目錄底下 `_假勤證明/{年月}/`。
+PROOF_REQUIRED_TYPES = ("病假",)
 REQUEST_STATUSES = ("待審", "已核准", "已退回", "已撤回", "消假待審")
 CREDIT_STATUSES = ("待審", "可用", "展延", "結算", "拒絕")
 CREDIT_KINDS = ("特休", "補休", "其他")
@@ -64,6 +69,8 @@ def vocab() -> dict:
     """前端讀的字彙（summary.vocab）；鍵名是契約，加不刪。"""
     return {
         "leave_types": list(ALL_LEAVE_TYPES),
+        "self_service_types": list(SELF_SERVICE_TYPES),
+        "proof_required_types": list(PROOF_REQUIRED_TYPES),
         "ledger_types": list(LEDGER_TYPES),
         "record_types": list(RECORD_TYPES),
         "request_statuses": list(REQUEST_STATUSES),
@@ -237,6 +244,9 @@ def usable_credits(credits, kind=None, on=None) -> list:
             continue
         exp = as_date(_g(c, "expires_on"))
         if exp is not None and exp < on:
+            continue
+        granted = as_date(_g(c, "granted_on"))
+        if granted is not None and granted > on:          # 生效日還沒到（例如滿半年才給的那 3 天）
             continue
         if credit_remaining(c) <= 0:
             continue

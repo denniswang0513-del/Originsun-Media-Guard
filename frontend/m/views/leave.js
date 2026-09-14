@@ -25,9 +25,10 @@ let _blocked = true;      // preview 回了 errors → 送出鈕鎖住
 // ── 字彙（全部從 summary.vocab 來；形狀容忍清單／物件兩種）──
 const vocab = () => (_sum && _sum.vocab) || {};
 const hoursPerDay = () => Number(vocab().hours_per_day) || 8;
+const needsProof = (t) => (vocab().proof_required_types || []).includes(t);   // 病假要附證明
 /** 假別：後端可能給 ['特休', …] 或 {ledger:[…], record:[…]}，攤成一條清單。 */
 function leaveTypes() {
-    const v = vocab().leave_types;
+    const v = vocab().self_service_types || vocab().leave_types;   // 自助只開特休／補休／病假（owner 2026-09-15）
     if (Array.isArray(v)) return v.map(x => (typeof x === 'object' ? x.value : x)).filter(Boolean);
     if (v && typeof v === 'object') return Object.values(v).flat().filter(x => typeof x === 'string');
     return [];
@@ -112,6 +113,7 @@ function cardHtml(r) {
         <div class="t"><div class="name">${esc(r.leave_type || '')} · ${fmtH(r.hours)} 小時</div>${pill(r.status, statusPillCls(r.status))}</div>
         <div class="sub">${esc(periodText(r))} · ${daysOf(r.hours)} 天</div>
         ${r.reason ? `<div class="sub" style="color:var(--ink)">${esc(r.reason)}</div>` : ''}
+        ${needsProof(r.leave_type) ? `<div class="sub" style="color:${r.proof_path ? 'var(--ok)' : 'var(--warn)'}">${r.proof_path ? '已附證明' : '缺證明（請到電腦版假勤頁補傳）'}</div>` : ''}
         ${r.reject_note ? `<div class="sub" style="color:var(--bad)">退回理由：${esc(r.reject_note)}</div>` : ''}
         ${r.cancel_note ? `<div class="sub" style="color:var(--warn)">消假說明：${esc(r.cancel_note)}</div>` : ''}
         ${acts ? `<div class="m-actions" style="justify-content:flex-end">${acts}</div>` : ''}
@@ -195,6 +197,9 @@ function formHtml() {
         <div class="m-card" id="lv-preview" style="padding:10px 12px"><span class="sub">填好日期就會算時數</span></div>
         <div id="lv-warn" class="m-notice" style="background:#2a2410;border-color:#92400e;color:var(--warn);font-size:13px;line-height:1.6" hidden></div>
         <div id="lv-errs" class="m-err" hidden></div>
+        <div id="lv-proof-wrap" hidden>
+          <label class="req">病假證明（診斷證明或掛號單照片／PDF）</label><input type="file" id="lv-proof" accept=".jpg,.jpeg,.png,.heic,.webp,.pdf">
+        </div>
         <label class="req">事由</label><textarea id="lv-reason" rows="2" placeholder="例：家中有事、回診"></textarea>
         <button type="submit" class="m-btn-primary" id="lv-submit" disabled>送出申請</button>
       </form>`;
@@ -275,9 +280,10 @@ function openForm(host) {
         const isRange = partCode(F('part_label').value) === rangePart();
         F('range').hidden = !isRange;
     };
-    mountSeg('lv-leave_type', schedulePreview);
+    const syncProof = () => { F('proof-wrap').hidden = !needsProof(F('leave_type').value); };
+    mountSeg('lv-leave_type', () => { syncProof(); schedulePreview(); });
     mountSeg('lv-part_label', () => { syncRange(); schedulePreview(); });
-    syncRange();
+    syncRange(); syncProof();
     // 迄日跟著起日走：迄日還沒動過（或早於起日）就同步成起日
     F('start_date').addEventListener('change', () => {
         const s = F('start_date').value, e = F('end_date');
@@ -297,9 +303,17 @@ function openForm(host) {
         if (!reason) { toast('請填事由', 'err'); F('reason').focus(); return; }
         if (_blocked) { toast('還有錯誤沒解決，不能送出', 'err'); return; }
         const payload = { ...formBody(), reason };
+        const proofFile = needsProof(payload.leave_type) ? (F('proof').files || [])[0] : null;
+        if (needsProof(payload.leave_type) && !proofFile) { toast('病假要附證明（照片或 PDF）', 'err'); return; }
         await withBusy(F('submit'), async () => {
             try {
-                await mfetch('/api/v1/me/leave', { method: 'POST', body: payload });
+                const created = await mfetch('/api/v1/me/leave', { method: 'POST', body: payload });
+                if (proofFile) {
+                    // 單建好了才傳證明（multipart：mfetch 看到 FormData 不會補 JSON header）
+                    const fd = new FormData(); fd.append('file', proofFile);
+                    try { await mfetch('/api/v1/me/leave/' + created.id + '/proof', { method: 'POST', body: fd }); }
+                    catch (e) { toast('單已送出，但證明上傳失敗：' + (e.message || '') + '。請到電腦版假勤頁補傳', 'err'); }
+                }
                 toast('已送出，等主管審核');
                 markStale('leave');
                 closeSheet();

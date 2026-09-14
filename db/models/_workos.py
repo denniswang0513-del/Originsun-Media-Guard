@@ -150,6 +150,7 @@ class HrLeaveRequest(Base):
     end_time = Column(String(5), nullable=True)
     reject_note = Column(Text, nullable=True)                     # 已退回的理由（必填）
     cancel_note = Column(Text, nullable=True)                     # 消假申請的說明（<2 天撤回時必填）
+    proof_path = Column(Text, nullable=True)                      # 病假證明（canonical UNC；收據根目錄 _假勤證明/{年月}/）
     google_event_id = Column(String(255), nullable=True)          # 同 crm_shoots 三欄（二期接日曆）
     synced_at = Column(DateTime(timezone=True), nullable=True)
     sync_error = Column(Text, nullable=True)

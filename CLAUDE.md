@@ -1381,6 +1381,9 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   （`test_js_parses` 的 no-undef 逐頁掃）。請假表單／送單／撤回只有 cards-hr.js 一份，別在 leave 頁再抄。鑰匙都是 `me_leave`。
   同頁「大家的休假」（唯讀）給管理員／`hr_leave`／合夥人 `finance_partner`：後端只多放行 `api_hr.LEAVE_VIEWERS` 那兩支
   GET（清單、全員餘額），核准類不動（`test_batch2_hr_guards` 釘）。合夥人的識別鑰匙就是 `finance_partner`，不另發新 key。
+  員工自助假別只有 `core/leave_logic.SELF_SERVICE_TYPES`（特休／補休／病假）；病假要附證明（`PROOF_REQUIRED_TYPES`，
+  `POST /me/leave/{id}/proof` → 收據根目錄 `_假勤證明/{年月}/`），沒證明核准會 422（`test_leave_proof` 釘）。
+  前端 `accept` 屬性**不能寫 `image/*`**：`_srcscan.js_code_only` 會把 `/*` 當註解起點，整支檔後半被吃掉、函式體測試找不到函式。
 - **報價單版面**：owner 逐項拍板過（無公司抬頭區塊、無上下色帶、灰表頭、總額無粗線、備註在結算下方、
   頁尾只留數字）。要調版面先開示範頁比對，別直接改模板。
 - **`core.quotation_pdf.PDF_MARGIN` 與模板 `@page` 必須一致**：模板還用它算「單頁時簽章貼底」的
