@@ -377,15 +377,20 @@ async def _plan_card_sync(session, s, me: dict, delete: bool = False) -> None:
             await session.delete(row)
         s.plan_row_id = None
     if solo:
+        # 建卡走 add_rows（同 /timesheets/mine/rows）：row_hash／專案對映／階段鏡射都在那裡，不自己 new Timesheet
+        from types import SimpleNamespace
+        from core.schemas import TimesheetManualRow
+        from services.timesheet_self import add_rows
         pname = ""
         if s.project_id:
             p = await session.get(CrmProject, s.project_id)
             pname = (p.name if p is not None else "") or ""
-        row = Timesheet(id=uuid.uuid4().hex, staff_id=me["staff_id"], staff_name=me["name"], work_date=midnight_of(s.date),
-                        project_id=s.project_id, project_name=pname, task_note=(s.title or "")[:255], hours=0, planned_hours=0,
-                        status="plan", source="manual", start_time=s.start_time, end_time=s.end_time)
-        session.add(row)
-        s.plan_row_id = row.id
+        ident = {"staff_id": me["staff_id"], "staff": SimpleNamespace(name=me["name"]), "username": me["username"]}
+        res = await add_rows(session, ident, [TimesheetManualRow(work_date=s.date.isoformat(), project_id=s.project_id or None,
+                                                                  project_name=pname, task_note=(s.title or "")[:255],
+                                                                  start_time=s.start_time, end_time=s.end_time, plan=True)])
+        ids = list(res.get("ids") or [])
+        s.plan_row_id = ids[0] if ids else None
 
 
 async def _row_or_404(session, sid: str):

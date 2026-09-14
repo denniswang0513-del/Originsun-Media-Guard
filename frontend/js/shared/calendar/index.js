@@ -4,7 +4,7 @@
 //   hooks：toast(msg, kind)、openShoot(preset)（沒給＝開手機行事曆分頁）、openProject(id, name)、modalRoot()
 // 一份元件、三個宿主：公布欄子視圖、專案詳情分頁（scope 鎖 project:<id>）、手機（自己的清單畫法，只共用 ctx）。
 // ────────────────────────────────────────────────────────────────────────────
-import { z, api, addDays, loadEvents, loadOptions, mondayOf, today } from './ctx.js';
+import { z, api, addDays, iso, loadEvents, loadOptions, mondayOf, today } from './ctx.js';
 import { dayHtml, monthHtml, toolbarHtml, weekHtml } from './views.js';
 import { close as closeModal, openColors, openForm, pickProject } from './form.js';
 
@@ -69,7 +69,7 @@ async function onAction(btn) {
     const act = btn.dataset.cal, s = z.s;
     if (act === 'view') { s.view = btn.dataset.view; return refresh(); }
     if (act === 'weekmode') { s.weekMode = btn.dataset.mode; return render(); }
-    if (act === 'nav') { const n = +btn.dataset.n; if (s.view === 'month') { const d = new Date(s.anchor.slice(0, 7) + '-01T00:00:00'); d.setMonth(d.getMonth() + n); s.anchor = d.toISOString().slice(0, 10); } else s.anchor = addDays(s.anchor, n * (s.view === 'week' ? 7 : 1)); return refresh(); }
+    if (act === 'nav') { const n = +btn.dataset.n; if (s.view === 'month') { const d = new Date(s.anchor.slice(0, 7) + '-01T00:00:00'); d.setMonth(d.getMonth() + n); s.anchor = iso(d); /* 不用 toISOString：UTC+8 會退成前一天 */ } else s.anchor = addDays(s.anchor, n * (s.view === 'week' ? 7 : 1)); return refresh(); }
     if (act === 'today') { s.anchor = today(); return refresh(); }
     if (act === 'day') { s.anchor = btn.dataset.day; s.view = 'day'; return refresh(); }
     if (act === 'add') return openForm(null, { date: s.view === 'day' ? s.anchor : (s.anchor >= today() ? s.anchor : today()) });
