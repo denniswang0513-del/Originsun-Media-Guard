@@ -325,19 +325,22 @@ async def apply_my_leave(body: MeLeaveCreate, request: Request):
     return result
 
 
+async def _my_leave_or_404(session, leave_id: str, staff_id: str):
+    """本人的那張單（撤回、證明上傳／檢視共用）；不是你的一律 404，不洩漏別人的單存不存在。"""
+    obj = (await session.execute(
+        select(HrLeaveRequest).where(HrLeaveRequest.id == leave_id).where(HrLeaveRequest.staff_id == staff_id))).scalar_one_or_none()
+    if obj is None:
+        raise HTTPException(status_code=404, detail="找不到這張請假單（或不是你的）")
+    return obj
+
+
 async def _cancel_my_leave(leave_id: str, request: Request, note: str) -> dict:
     """待審→已撤回；已核准依 core.leave_logic.cancel_mode：free→已撤回（釋放 allocations）／
     apply→消假待審（cancel_note 必填）／locked→409。其餘狀態 409。"""
     ident = await require_bound_staff(request, "me_leave")
     factory = db_factory_or_503()
     async with factory() as session:
-        obj = (await session.execute(
-            select(HrLeaveRequest)
-            .where(HrLeaveRequest.id == leave_id)
-            .where(HrLeaveRequest.staff_id == ident["staff_id"])
-        )).scalar_one_or_none()
-        if obj is None:
-            raise HTTPException(status_code=404, detail="找不到這張請假單（或不是你的）")
+        obj = await _my_leave_or_404(session, leave_id, ident["staff_id"])
         holidays = await leave_service.holidays_map(session)
         mode = None
         if obj.status == "待審":
@@ -373,14 +376,6 @@ async def cancel_my_leave(leave_id: str, body: LeaveCancel, request: Request):
 
 #: 證明可以（補）傳的狀態：待審中、或已核准後要換檔；退回／撤回的單不用再附
 PROOF_UPLOAD_STATUSES = ("待審", "消假待審", "已核准")
-
-
-async def _my_leave_or_404(session, leave_id: str, staff_id: str):
-    obj = (await session.execute(
-        select(HrLeaveRequest).where(HrLeaveRequest.id == leave_id).where(HrLeaveRequest.staff_id == staff_id))).scalar_one_or_none()
-    if obj is None:
-        raise HTTPException(status_code=404, detail="找不到這張請假單（或不是你的）")
-    return obj
 
 
 def leave_proof_dir(day: str) -> str:

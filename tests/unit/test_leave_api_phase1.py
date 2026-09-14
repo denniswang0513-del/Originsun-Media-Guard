@@ -62,8 +62,10 @@ def test_employee_leave_endpoints_require_bound_staff_and_me_leave():
         assert 'require_bound_staff(request, "me_leave")' in func_body(body, header), header
     # summary 只認請假那把（2026-09-08 起：畫面早就只在有 me_leave 時畫卡，API 跟著收）
     assert 'require_bound_staff(request, "me_leave")' in func_body(body, "async def my_leave_summary(")
-    # 撤回只能撤自己的：查詢帶 staff_id
-    assert 'HrLeaveRequest.staff_id == ident["staff_id"]' in func_body(body, "async def _cancel_my_leave(")
+    # 撤回／證明只能動自己的：查詢帶 staff_id（正本 _my_leave_or_404，撤回與證明上傳／檢視共用）
+    assert "HrLeaveRequest.staff_id == staff_id" in func_body(body, "async def _my_leave_or_404(")
+    for header in ("async def _cancel_my_leave(", "async def upload_my_leave_proof(", "async def my_leave_proof("):
+        assert '_my_leave_or_404(session, leave_id, ident["staff_id"])' in func_body(body, header), header
 
 
 # ── 狀態轉換只走專屬端點 ──────────────────────────────────────────────────
