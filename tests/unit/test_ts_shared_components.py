@@ -143,3 +143,14 @@ def test_project_file_has_a_burn_rate_chip_that_falls_back_to_the_suggested_budg
     chip = js_code_only(js_func_body(js, "export function budgetChip(d, editable) {"))
     assert "'預算 h（手動）' : (b.base === 'suggested' ? '預期製作時數（公式）'" in chip
     assert 'data-ts-action="budget"' in chip and 'data-ts-action="budget"' not in js_func_body(js, "export function projectFileHtml(d, opts = {}) {")
+
+
+def test_burn_list_uses_the_same_budget_base_as_the_project_file():
+    """owner 2026-09-14「有一些數字沒有更新」：清單的預算／剩餘／消耗率跟專案檔案同一把尺（手動 > 公式 > 未設），
+    公式那格標「公式」；base／base_hours 是時數、進 SUMMARY_PUBLIC_KEYS（同事也看得到），suggested_hours 仍抹。"""
+    from tests.unit._srcscan import js_code_only, js_func_body, repo_src
+    from routers.timesheets._shared import SUMMARY_PUBLIC_KEYS
+    assert "base" in SUMMARY_PUBLIC_KEYS and "base_hours" in SUMMARY_PUBLIC_KEYS and "suggested_hours" not in SUMMARY_PUBLIC_KEYS
+    assert '**burn_rate(total, budget, suggested),' in repo_src("services/timesheet_lookup.py")
+    cell = js_code_only(js_func_body(repo_src("frontend/js/shared/ts-projects.js"), "function _budgetCell(p, editable) {"))
+    assert "const formula = p.base_hours ?? p.suggested_hours;" in cell and "公式" in cell and "未設" in cell

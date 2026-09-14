@@ -82,10 +82,11 @@ async def _mine_ident(request: Request) -> dict:
 _CANDS_CACHE: dict = {"at": 0.0, "val": None}
 
 
-#: /summary 對沒有私帳 scope 的人只回這些鍵（＝ /me/projects_burn 的唯讀面）：沒有 suggested_hours
-#: （從私帳預期毛利倒算的，等於間接揭露錢）。
+#: /summary 對沒有私帳 scope 的人只回這些鍵（＝ /me/projects_burn 的唯讀面）：沒有 suggested_hours／錢三欄
+#: （合約未稅、預期毛利、人力成本＝錢）。base／base_hours 是「消耗率照哪個時數算」（手動或公式），只是時數，
+#: 同專案檔案 2026-09-13 起人人拿得到（owner：直接用公式算的）。
 SUMMARY_PUBLIC_KEYS = ("project_id", "project_name", "client", "status", "project_type", "hours_used",
-                       "budget_hours", "remaining", "pct", "rows", "last_entry", "stale")
+                       "budget_hours", "base", "base_hours", "remaining", "pct", "rows", "last_entry", "stale")
 #: 未對映列留給非私帳讀者的鍵：Sheet 案名與時數（團隊頁本來就看得到），不帶 candidates／suggestions。
 UNMATCHED_PUBLIC_KEYS = ("project_name", "hours_used", "rows", "reason")
 

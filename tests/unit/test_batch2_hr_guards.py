@@ -180,7 +180,7 @@ def test_redact_summary_strips_suggested_hours_and_unmatched_diagnostics():
     assert "suggested_hours" not in SUMMARY_PUBLIC_KEYS
     assert "candidates" not in UNMATCHED_PUBLIC_KEYS and "suggestions" not in UNMATCHED_PUBLIC_KEYS
     out = {"projects": [{"project_id": "p1", "project_name": "A", "client": "C", "status": "進行中", "project_type": "廣告",
-                         "hours_used": 12.0, "budget_hours": 40, "remaining": 28.0, "pct": 30, "rows": 3,
+                         "hours_used": 12.0, "budget_hours": 40, "base": "budget", "base_hours": 40, "remaining": 28.0, "pct": 30, "rows": 3,
                          "last_entry": "2026-09-01", "stale": False, "suggested_hours": 55}],
            "unmatched": [{"project_name": "X", "hours_used": 2.0, "rows": 1, "reason": "ambiguous",
                           "candidates": [{"id": "g", "name": "私帳案", "client": "客"}], "suggestions": ["像這個"]}],

@@ -131,7 +131,7 @@ export function createBurnSorter({ storageKey, panelId, onChange, defaultSort })
             status: p => p.status || '',
             type: p => p.project_type || '',
             used: p => p.hours_used ?? '',
-            budget: p => p.budget_hours ?? '',
+            budget: p => p.base_hours ?? p.budget_hours ?? '',      // 排序照實際拿來算的那個（手動或公式）
             remaining: p => p.remaining ?? '',
             pct: p => p.pct ?? '',
             rows: p => p.rows ?? '',
@@ -166,12 +166,15 @@ export function burnTypeCellHtml(p, editable) {
     return `<span class="ts-link ${cur ? 'tsp-tag' : 'tsp-warn'}" data-ts-action="type-edit" data-pid="${esc(p.project_id)}" data-cur="${esc(cur)}"
                 title="點一下改案型（預期毛利／建議預算照這個算）">${cur ? esc(cur) : '— 案型 —'} ▾</span>`;
 }
+/** 預算格（同專案檔案的 budgetChip 那把尺，owner 2026-09-13）：手動設了就是那個數；沒設就用公式的預期製作時數
+ *  （標「公式」；能改預算的人點一下就把它寫成手動）；都沒有才寫「未設」。基準是後端 burn_rate 挑的（base／base_hours）。 */
 function _budgetCell(p, editable) {
     if (p.budget_hours != null) return p.budget_hours;
-    if (p.suggested_hours == null) return '<span class="tsp-dim">未設</span>';
+    const formula = p.base_hours ?? p.suggested_hours;
+    if (formula == null) return `<span class="tsp-dim" title="${p.project_type ? '沒有合約金額，公式算不出預期製作時數' : '沒填案型（不知道預期毛利），公式算不出預期製作時數'}">未設</span>`;
     return editable
-        ? `<span class="ts-link" data-ts-action="budget" data-pid="${esc(p.project_id)}" data-cur="${p.suggested_hours}" title="依私帳設定的預期毛利（${esc(p.project_type || '')}）與日成本算的建議，點一下就套用">建議 ${p.suggested_hours}</span>`
-        : `<span class="tsp-dim" title="建議預算">建議 ${p.suggested_hours}</span>`;
+        ? `<span class="ts-link" data-ts-action="budget" data-pid="${esc(p.project_id)}" data-cur="${formula}" title="公式算的預期製作時數（合約未稅 ×（1−${esc(p.project_type || '')}預期毛利）÷ 日成本 × 每日工時）；點一下改成手動預算">${formula} <span class="tsp-dim">公式</span></span>`
+        : `<span title="公式算的預期製作時數；主管設了手動預算會以設的為準">${formula} <span class="tsp-dim">公式</span></span>`;
 }
 
 /**

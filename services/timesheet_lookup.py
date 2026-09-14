@@ -9,7 +9,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from core.finance_logic import load_margin_model, margin_for_type, suggested_budget_hours
-from core.hr_logic import ProjectLookup, budget_burn, group_by_name, is_stale, lookup_row, tw_day
+from core.hr_logic import ProjectLookup, burn_rate, group_by_name, is_stale, lookup_row, tw_day
 from core.ledger import is_mine
 
 
@@ -131,7 +131,9 @@ async def burn_rows(session) -> list:
         staff_cost = round(float(total or 0) / hpd * daily) if daily and total else None
         items.append({
             "project_id": pid, "project_name": name or "", "status": status or "", "client": cname or "",
-            "hours_used": round(total or 0, 1), "budget_hours": budget, **budget_burn(total, budget),
+            # 預算／剩餘／消耗率的基準跟專案檔案同一把尺（core.hr_logic.burn_rate，owner 2026-09-13）：手動預算 > 公式
+            # 預期製作時數 > 算不出。budget_hours 仍是手動那格（空＝沒設）；base／base_hours 是實際拿來算的
+            "hours_used": round(total or 0, 1), "budget_hours": budget, **burn_rate(total, budget, suggested),
             "suggested_hours": suggested, "project_type": ptype or "",
             "contract_net": contract_net, "margin_pct": margin_pct, "staff_cost": staff_cost,
             "rows": cnt, "last_entry": last_day.isoformat() if last_day else None,
