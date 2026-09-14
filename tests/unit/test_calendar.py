@@ -172,3 +172,34 @@ def test_views_do_not_hardcode_colours_or_status_words():
     fsrc = repo_src("frontend/js/shared/calendar/form.js")
     assert "＋ 外部人員" in fsrc and "external: true" in fsrc              # 外部人員可排
     assert "'/colors'" in repo_src("frontend/js/shared/calendar/form.js") and "apply=1" in repo_src("frontend/js/shared/calendar/form.js")
+
+
+# ── /polish 2026-09-14 安全網＋BUG-1：守衛 _writer 的三條路 ──
+
+async def _writer_with(monkeypatch, *, grants: bool, staff_id: str, attendees: list):
+    from routers import api_calendar as C
+    monkeypatch.setattr(C, "_reader", lambda request: {"sub": "u"})
+    monkeypatch.setattr(C, "payload_grants", lambda payload, *keys: grants)
+
+    async def _me(request):
+        return {"username": "u", "staff_id": staff_id, "name": "小明" if staff_id else ""}
+    monkeypatch.setattr(C, "_me", _me)
+    return await C._writer(None, attendees)
+
+
+async def test_writer_lets_a_bound_employee_register_only_themselves(monkeypatch):
+    from fastapi import HTTPException
+    me, att = await _writer_with(monkeypatch, grants=False, staff_id="S1", attendees=[{"staff_id": "S1", "name": "小明", "role": "", "external": False, "contact": ""}])
+    assert me["staff_id"] == "S1" and att[0]["staff_id"] == "S1"
+    # BUG-1：手機「登記工作」送 attendees: []＝登記自己 —— 以前這裡 403，現在＝本人
+    me, att = await _writer_with(monkeypatch, grants=False, staff_id="S1", attendees=[])
+    assert att == [{"staff_id": "S1", "name": "小明", "role": "", "external": False, "contact": ""}]
+    with pytest.raises(HTTPException) as e:        # 排別人／外部人員要 crm_projects
+        await _writer_with(monkeypatch, grants=False, staff_id="S1", attendees=[{"staff_id": "", "name": "外部", "role": "", "external": True, "contact": ""}])
+    assert e.value.status_code == 403
+    with pytest.raises(HTTPException) as e:        # 沒綁人員檔案的一般帳號：登記自己也不行
+        await _writer_with(monkeypatch, grants=False, staff_id="", attendees=[])
+    assert e.value.status_code == 409
+    # 有 crm_projects 的管理員帳號沒綁人員檔：可以排別人（attendees 給誰就是誰）
+    me, att = await _writer_with(monkeypatch, grants=True, staff_id="", attendees=[{"staff_id": "S2", "name": "小華", "role": "", "external": False, "contact": ""}])
+    assert att[0]["staff_id"] == "S2"

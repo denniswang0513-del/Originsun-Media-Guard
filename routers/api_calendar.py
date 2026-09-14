@@ -316,17 +316,20 @@ async def _conflicts_for(att: list, d0, d1, exclude: str = "") -> list:
 
 # ── 工作登記：寫 ─────────────────────────────────────
 
-async def _writer(request: Request, attendees: list) -> dict:
-    """登記自己＝綁定人員檔案；含別人或外部人員＝crm_projects。回本人 ident（username／staff_id／name）。"""
+async def _writer(request: Request, attendees: list) -> tuple:
+    """登記自己＝綁定人員檔案；含別人或外部人員＝crm_projects。回 (本人 ident, 清洗後的 attendees)。
+    attendees 空＝登記自己（手機「登記工作」就是送空的；/polish 2026-09-14 BUG-1：以前空的被當成「排別人」→ 一般員工 403）。"""
     payload = _reader(request)
     me = await _me(request)
-    others = [a for a in attendees if not (a["staff_id"] and a["staff_id"] == me["staff_id"])]
-    if others or not attendees:
-        if not payload_grants(payload, WRITE_OTHERS_KEY):
-            raise HTTPException(status_code=403, detail="排別人或外部人員需要「專案管理」權限；登記自己請把人員留自己")
-    elif not me["staff_id"]:
-        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案，請聯絡管理員")
-    return me
+    att = [dict(a) for a in attendees or []]
+    if not att:
+        if not me["staff_id"]:
+            raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案，請聯絡管理員")
+        att = [{"staff_id": me["staff_id"], "name": me["name"], "role": "", "external": False, "contact": ""}]
+    others = [a for a in att if not (a["staff_id"] and a["staff_id"] == me["staff_id"])]
+    if others and not payload_grants(payload, WRITE_OTHERS_KEY):
+        raise HTTPException(status_code=403, detail="排別人或外部人員需要「專案管理」權限；登記自己請把人員留自己")
+    return me, att
 
 
 def _apply(s, req: SchedulePayload, partial: bool) -> None:
@@ -415,11 +418,8 @@ async def _finish(sid: str) -> dict:
 
 @router.post("/schedule")
 async def create_schedule(req: SchedulePayload, request: Request):
-    att = attendee_norm(req.attendees or [])
-    me = await _writer(request, att)
-    if not att:
-        att = [{"staff_id": me["staff_id"], "name": me["name"], "role": "", "external": False, "contact": ""}]
-        req = req.model_copy(update={"attendees": att})
+    me, att = await _writer(request, attendee_norm(req.attendees or []))
+    req = req.model_copy(update={"attendees": att})
     factory = db_factory_or_503()
     now = datetime.now(timezone.utc)
     async with factory() as session:
@@ -439,7 +439,9 @@ async def update_schedule(sid: str, req: SchedulePayload, request: Request):
     async with factory() as session:
         s = await _row_or_404(session, sid)
         att = attendee_norm(req.attendees) if "attendees" in req.model_fields_set and req.attendees is not None else attendees_of(s)
-        me = await _writer(request, att)
+        me, att = await _writer(request, att)
+        if "attendees" in req.model_fields_set and req.attendees is not None:
+            req = req.model_copy(update={"attendees": att})       # 清空人員＝改成只有自己
         _apply(s, req, partial=True)
         s.updated_at = datetime.now(timezone.utc)
         await _plan_card_sync(session, s, me)
@@ -455,7 +457,7 @@ async def set_schedule_status(sid: str, req: ScheduleStatusPayload, request: Req
     factory = db_factory_or_503()
     async with factory() as session:
         s = await _row_or_404(session, sid)
-        me = await _writer(request, attendees_of(s))
+        me, _att = await _writer(request, attendees_of(s))
         s.status = status
         s.updated_at = datetime.now(timezone.utc)
         await _plan_card_sync(session, s, me, delete=(status == CANCELLED))
@@ -468,7 +470,7 @@ async def delete_schedule(sid: str, request: Request):
     factory = db_factory_or_503()
     async with factory() as session:
         s = await _row_or_404(session, sid)
-        me = await _writer(request, attendees_of(s))
+        me, _att = await _writer(request, attendees_of(s))
         eid = s.google_event_id
         await _plan_card_sync(session, s, me, delete=True)
         await session.delete(s)
