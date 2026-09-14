@@ -70,9 +70,18 @@
 - 憑證／日曆 ID 沿用 settings `google_calendar.*`（手機行事曆分頁的「行事曆設定」卡）；沒設就整條線中性不動。
 - **通知**：owner 說排別人不用通知 → 不做 Chat 推播、不做前一晚 digest。Google 日曆本身就是通知（同事訂閱公司共用日曆即可）。
 
-### 3.2 顏色與時區
+### 3.2 時區
 - 全天：`start.date`／`end.date`＝訖日＋1（Google 開區間）；有時間：`dateTime`＋`Asia/Taipei`；跨午夜訖日隔天（沿用 `event_body` 那條）。
-- 顏色只在 Google 端（colorId）；系統內的顏色由前端 token 決定（§5）。
+
+### 3.3 顏色：依類別、管理員可調（owner 2026-09-14「可以有個按鈕，我依照類別調整顏色」）
+- 六個類別各一個顏色：拍攝／工作／會議／外出／里程碑／休假。預設：拍攝橘、工作藍、會議藍（淺）、外出綠、里程碑紫、休假灰。
+- 存 settings.json `google_calendar.colors = {shoot: "6", work: "9", meeting: "7", out: "10", milestone: "3", leave: "8"}`
+  —— 值是 **Google 的 colorId（1–11）**；系統內畫面的色票用同一張對照表（`core/schedule_logic.GOOGLE_COLORS`：colorId → 名稱＋hex），
+  所以系統上看到的顏色跟 Google 日曆上一致，一處改兩邊同步。
+- 入口：行事曆工具列的「**顏色設定**」按鈕（admin 才畫）→ 彈窗：六列類別，每列 11 個 Google 色票點選、旁邊即時預覽；
+  「儲存」＝`PUT /api/v1/calendar/colors`；「儲存並套用到既有事件」＝儲存後跑 `resync-all`（未來 180 天的事件 PATCH 一次 colorId）。
+- 規則：顏色由系統管——同事在 Google 上手動改色，下次同步會蓋回；`event_body_*` 一律帶 `colorId`。
+- 限制：Google 事件只有 11 色，不能自訂色碼；系統端也照這 11 色，不另開色盤（兩邊才對得起來）。
 
 ## 4. 後端
 
@@ -93,6 +102,7 @@
 | `DELETE /schedule/{id}` | 刪（連動計畫卡與 Google 事件） | 同上 |
 | `POST /schedule/{id}/done {hours?}` | 「做了 ✓」：對呼叫者本人產一列 timesheets（`add_rows`，同 /timesheets/mine/rows），記進 `timesheet_ids`；已有就回同一列；本人不在 attendees → 409 | 綁定人員檔案 |
 | `POST /schedule/{id}/resync`、`POST /resync-all` | 重新同步（單筆／全部，後者 admin） | admin |
+| `GET /colors`、`PUT /colors {kind: colorId}` | 六類別的顏色（§3.3）；PUT 存 settings 並清 `effective` 快取；`?apply=1` 順便跑 resync-all | 讀＝同 events；寫＝admin |
 | `GET /day?date=`（手機通告） | 本人那天：拍攝（含器材／地點／crew）＋被排的工作＋本週到期、我負責的里程碑 | 綁定人員檔案 |
 
 規則：
@@ -118,7 +128,8 @@
 - `week.js`：兩種排法——「時間軸」（7 欄×時段，全天事件置頂）／「人員列」（人×日，跟團隊的一週同骨架；每人小計「N 天有排・請假 M 天」，連續 4 天以上標「負載高」）。外部人員不進人員列。
 - `day.js`：那天所有事依時間排；拍攝展開器材／地點／crew；工作旁「改」；本人的工作旁「做了 ✓」（手機與桌機日檢視都有）。
 - `form.js`：登記工作彈窗——做什麼／案子（打字找，可空）／日期＋結束日／全天・上午・下午・自訂／人員（預設自己；有 `crm_projects` 才能加別人；「＋外部人員」名字＋聯絡；每人一格職務）／地點／備註。存之前打 `/conflicts`，有衝突在表單裡列出來再按一次「照排」。
-- `index.js`：`mountCalendar({host, scope, hooks})`；顏色 token：拍攝橘、工作藍、里程碑紫、假灰、假日淡紅、跟我有關深藍底（demo 那套）。
+- `index.js`：`mountCalendar({host, scope, hooks})`；顏色從 `/options` 帶的 `colors`（§3.3 那張表）套成 CSS 變數，不寫死；假日淡紅、跟我有關深藍底是固定的。
+- `colors.js`：「顏色設定」彈窗（admin）：六類別 × 11 色票、即時預覽、儲存／儲存並套用到既有事件。
 - 沒有拖拉改期（一期）；改期＝點事件→表單改日期。
 
 ### 5.2 宿主
@@ -145,7 +156,7 @@
 
 | 期 | 內容 | 檔案 |
 |---|---|---|
-| **一期** | 新表＋`core/schedule_logic.py`＋`routers/api_calendar.py`（events／options／conflicts／schedule CRUD／status／resync）＋`services/calendar_sync.py`（抽共用、四種 event_body、工作登記同步）＋外部人員＋共用元件月／週／日／表單＋公布欄子視圖＋專案詳情分頁＋手機三段 | `db/models/_workos.py`、`db/migrations.py`、`core/schedule_logic.py`、`services/calendar_sync.py`、`routers/api_calendar.py`、`routers/api_shoots.py`（改用共用同步）、`frontend/js/shared/calendar/*`、`frontend/tabs/bulletin/*`、`frontend/tabs/crm/crm-projects-calendar.js`＋`crm-projects.html`、`frontend/m/views/calendar.js` |
+| **一期** | 新表＋`core/schedule_logic.py`＋`routers/api_calendar.py`（events／options／conflicts／schedule CRUD／status／resync／colors）＋顏色設定彈窗＋`services/calendar_sync.py`（抽共用、四種 event_body、工作登記同步）＋外部人員＋共用元件月／週／日／表單＋公布欄子視圖＋專案詳情分頁＋手機三段 | `db/models/_workos.py`、`db/migrations.py`、`core/schedule_logic.py`、`services/calendar_sync.py`、`routers/api_calendar.py`、`routers/api_shoots.py`（改用共用同步）、`frontend/js/shared/calendar/*`、`frontend/tabs/bulletin/*`、`frontend/tabs/crm/crm-projects-calendar.js`＋`crm-projects.html`、`frontend/m/views/calendar.js` |
 | **二期** | 里程碑／請假上 Google（各自寫入端點掛同步＋三欄）＋「全部重新同步」回填＋「做了 ✓」→ 工時列＋人員列負載 | `services/milestone_service.py`、`routers/api_hr.py`、`db/migrations.py` |
 | **三期（＝N2）** | 通告單分享連結給外部人員（token 制）、排班→預填→主管週結核可、排班 vs 實際工時對照 | 另開規劃 |
 
