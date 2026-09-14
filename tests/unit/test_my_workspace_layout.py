@@ -75,18 +75,19 @@ def test_journal_iframe_and_zones_stay():
     assert "function _prevWorkday(" in html and "_dow(d) === 0 || _dow(d) === 6" in html
 
 
-def test_action_bar_is_just_petty_cash():
-    """owner 2026-09-05：「先只留下零用金」。
+def test_action_bar_is_petty_cash_and_leave():
+    """owner 2026-09-05：「先只留下零用金」；owner 2026-09-15：放回第二顆「假勤」（開 /leave.html 寬頁）。
 
     原本七顆（零用金／請款／請開發票／登記拍攝／領用器材／請假／福委會），
-    一次擺七顆等於沒有重點。要放回來就一顆一顆放，不要整排長回去。
-    連結仍指既有頁面、仍受 me_petty 閘門。
+    一次擺七顆等於沒有重點。要放回來就一顆一顆放，不要整排長回去 —— 目前兩顆。
+    連結各指獨立頁、各受自己那把鑰匙（me_petty／me_leave）閘門。
     """
     html = my_page_src()
     fn = html.split("function renderActions(")[1].split("\n}")[0]
     assert '{ label: "零用金", href: "/petty-cash.html" }' in fn
-    assert 'has("me_petty")' in fn, "閘門不能一起拿掉"
-    assert fn.count("label:") == 1, "最上排先只留零用金"
+    assert '{ label: "假勤", href: "/leave.html" }' in fn
+    assert 'has("me_petty")' in fn and 'has("me_leave")' in fn, "閘門不能一起拿掉"
+    assert fn.count("label:") == 2, "最上排只有零用金與假勤（要放第三顆要有 owner 的話）"
 
 
 def test_find_view_filters_are_one_row():

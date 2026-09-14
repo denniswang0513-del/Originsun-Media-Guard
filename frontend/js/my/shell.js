@@ -326,10 +326,13 @@ function grants() {
 // （更早的版本還有請款／請假／福委會）—— 一次擺七顆等於沒有重點，先收到只剩
 // 真的每天在用的那一顆，其餘等要用了再一顆一顆放回來。
 // 卡片區同一天也做了同樣的收斂（見 renderWorkspace 裡「先只留零用金」那段）。
+// owner 2026-09-15：放回第二顆「假勤」—— 開 /leave.html 寬頁（同零用金那種獨立頁）：
+// 自己的休假總表＋送請假單；核准後自動上 Google 日曆（api_hr._calendar_sync_leave）。
 function renderActions(ws) {
     const has = k => ws.allowed.includes(k);
     const items = [
         has("me_petty") && { label: "零用金", href: "/petty-cash.html" },
+        has("me_leave") && { label: "假勤", href: "/leave.html" },
     ].filter(Boolean);
     $("ws-actions").innerHTML = items.map(it => `<a class="act" href="${it.href}">${it.label}</a>`).join("");
 }

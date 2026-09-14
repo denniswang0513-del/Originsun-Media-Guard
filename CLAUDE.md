@@ -1375,6 +1375,10 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   改成 module 的話每支變獨立作用域，幾百個跨檔引用都要 import／export。測試讀它們用 `tests/unit/_srcscan.my_page_src()`
   （my.html＋七支串起來，同 `finance_src` 那套慣例），**不要**在測試裡自己 `repo_src("frontend/my.html")` 找函式。
   `frontend/showcase-edit.html` 仍超過單次讀取上限，改它要 offset／limit 分段讀。
+  **`cards-hr.js` 有第二個宿主 `/leave.html`（2026-09-15，工作台最上排「假勤」鈕開的寬頁，同零用金那種獨立頁）**：
+  `js/my/leave-host.js`（傳統 script，先載）備好它要的全域（`$`／`esc`／`mfetch`／`mjson`／`makeCard`／`_resetTodayStrip`）
+  並畫右邊的「休假總表」；兩個可選掛鉤放 `window`（`LV_LIMIT`、`onLeaveRendered(lv, err)`），my.html 沒這兩個名字也照常
+  （`test_js_parses` 的 no-undef 逐頁掃）。請假表單／送單／撤回只有 cards-hr.js 一份，別在 leave 頁再抄。鑰匙都是 `me_leave`。
 - **報價單版面**：owner 逐項拍板過（無公司抬頭區塊、無上下色帶、灰表頭、總額無粗線、備註在結算下方、
   頁尾只留數字）。要調版面先開示範頁比對，別直接改模板。
 - **`core.quotation_pdf.PDF_MARGIN` 與模板 `@page` 必須一致**：模板還用它算「單頁時簽章貼底」的

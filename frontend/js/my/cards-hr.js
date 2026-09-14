@@ -7,6 +7,10 @@
 //   載入順序＝原本 inline script 由上而下的執行順序，不可調換。
 // 跨檔用到：$、esc、money、mfetch、WS、makeCard、WIP_LABEL（cards.js）
 // 跨檔提供：cardLeave、loadLeave、cardFinance、_localToday（zone1.js／week-plan.js／parttime.js 都用）、loadMyTs
+// 第二個宿主：/leave.html（owner 2026-09-15「在這裡新增假勤」—— 最上排一顆鈕開寬頁，同零用金）。
+// 那一頁載同一支檔（前面先載 js/my/leave-host.js 備好 $／esc／mfetch／mjson／makeCard／_resetTodayStrip），
+// 另外兩個可選掛鉤放 window：window.LV_LIMIT（summary 拿幾筆）、window.onLeaveRendered(LV, err)（畫完
+// 通知宿主畫休假總表）。表單／送單／撤回都不抄第二份。
 // ────────────────────────────────────────────────────────────────────────────
 // ── 卡：我的假勤（me_leave；docs/LEAVE_PLAN.md §7.4／§7.6：時數帳＋申請單）──
 // 卡片自己打 /api/v1/me/leave/summary（不吃 workspace bundle）：三個數字＋請假表單（即時 preview）＋近期清單。
@@ -43,9 +47,21 @@ function _lvBody() {
 async function loadLeave() {
     const body = _lvBody();
     if (!body) return;
-    try { LV = await mjson("/api/v1/me/leave/summary"); }
-    catch (e) { body.innerHTML = `<div class="empty">${esc(e.message || "載入失敗")}</div>`; return; }
+    const hook = typeof window.onLeaveRendered === "function" ? window.onLeaveRendered : null;   // 掛鉤在 window 上：my.html 沒這名字
+    try { LV = await mjson("/api/v1/me/leave/summary" + (typeof window.LV_LIMIT === "number" ? "?limit=" + window.LV_LIMIT : "")); }
+    catch (e) {
+        body.innerHTML = `<div class="empty">${esc(e.message || "載入失敗")}</div>`;
+        if (hook) hook(null, e);   // 宿主的總表也要知道（例如沒綁人員檔案的 409）
+        return;
+    }
     renderLeave(body);
+    if (hook) hook(LV);
+}
+const LV_RECENT_MAX = 20;   // 卡片裡只列最近這些筆；整本在 /leave.html 的休假總表
+// 時數帳還沒建的人：特休／補休可用、待審保留、將到期全是 0 —— 這時才掛「開發中」那條說明與徽章
+// （2026-09-15 起有人的時數帳會陸續建好，不能再對每個人都說「還沒匯入」）。
+function _lvLedgerEmpty(bal) {
+    return ["特休", "補休"].every(k => { const b = (bal || {})[k] || {}; return !Number(b.available) && !Number(b.reserved) && !(b.expiring || []).length; });
 }
 const _lvH = (h) => { const n = Number(h || 0); return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, ""); };
 function _lvDays(h) { return _lvH(Number(h || 0) / ((LV && LV.vocab && LV.vocab.hours_per_day) || 8)); }
@@ -58,7 +74,10 @@ function renderLeave(body) {
     const parts = v.parts || Object.keys(LV_PART_FALLBACK);
     const today = _localToday();
     const expiring = (an.expiring || [])[0];
-    let html = `<div class="wip-note">開發中 —— 時數帳（特休／補休）還沒匯入，所以數字都是 0，送出的申請也還不算數。</div>
+    const ledgerEmpty = _lvLedgerEmpty(bal);
+    const badge = document.querySelector('.card[data-card="leave"] .count.wip');
+    if (badge) badge.style.display = ledgerEmpty ? "" : "none";
+    let html = `${ledgerEmpty ? `<div class="wip-note">你的特休／補休時數帳還沒建，所以這兩個數字是 0、這兩種假送出會被擋（其他假別照常）。要用請找管理員在人事管理的時數帳補額度。</div>` : ""}
     <div class="stat-row">
         <div class="stat"><div class="num">${_lvH(an.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(an.available)} 天）</span></div><div class="lbl">特休剩餘</div></div>
         <div class="stat"><div class="num">${_lvH(comp.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(comp.available)} 天）</span></div><div class="lbl">補休剩餘</div></div>
@@ -87,7 +106,7 @@ function renderLeave(body) {
             <span class="err" id="lv-err" style="margin-top:0;"></span>
         </div>
     </div>`;
-    html += (LV.requests || []).map(_lvRow).join("");
+    html += (LV.requests || []).slice(0, LV_RECENT_MAX).map(_lvRow).join("");
     body.innerHTML = html;
     const form = $("lv-form");
     form.addEventListener("input", (e) => { if (e.target.id !== "lv-reason") lvPreviewSoon(); });

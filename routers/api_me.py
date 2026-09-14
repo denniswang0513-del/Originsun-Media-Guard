@@ -263,15 +263,19 @@ async def update_my_todo(item_id: str, body: MeTodoUpdate, request: Request):
 # 規則在 core.leave_logic、查詢在 services.leave_service；這裡只有守衛與 HTTP 形狀。
 # summary 任一把 me_* 鑰匙可讀（卡片上的三個數字）；送單／撤回要 me_leave。
 
+LEAVE_SUMMARY_LIMIT_MAX = 500     # /leave.html 的休假總表一次拿整本（歷史匯入一人幾十筆，500 夠用很久）
+
+
 @router.get("/leave/summary")
-async def my_leave_summary(request: Request):
+async def my_leave_summary(request: Request, limit: int = 20):
     """{vocab, balances:{特休:{available,reserved,expiring}, 補休:{…}}, sick:{used_days,cap_days},
-    requests:[最近 20 筆（已核准帶 cancel_mode）], pending_count, hire_date, annual_days_by_law}。
-    2026-09-08：只認請假那把（原本任一把 me_* 都能拿到自己的餘額 —— 畫面早就藏了，API 跟著收）。"""
+    requests:[最近 `limit` 筆（預設 20；已核准帶 cancel_mode）], pending_count, hire_date, annual_days_by_law}。
+    2026-09-08：只認請假那把（原本任一把 me_* 都能拿到自己的餘額 —— 畫面早就藏了，API 跟著收）。
+    2026-09-15：`limit` 給 /leave.html 的休假總表（owner：「看到自己的休假總表」），上限 LEAVE_SUMMARY_LIMIT_MAX。"""
     ident = await require_bound_staff(request, "me_leave")
     factory = db_factory_or_503()
     async with factory() as session:
-        out = await leave_service.staff_leave_summary(session, ident["staff"])
+        out = await leave_service.staff_leave_summary(session, ident["staff"], limit=max(1, min(int(limit), LEAVE_SUMMARY_LIMIT_MAX)))
     out["vocab"] = leave_vocab()
     return out
 

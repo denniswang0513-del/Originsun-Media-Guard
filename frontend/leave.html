@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>假勤｜ORIGINSUN</title>
+<!-- 我的假勤「獨立網址」（owner 2026-09-15：工作台最上排「假勤」一顆鈕開寬頁，同零用金那種）：
+     帳號登入 → 左邊是工作台那張假勤卡（餘額三個數字＋請假表單＋最近的單，**同一支
+     js/my/cards-hr.js**，不另抄表單），右邊是「休假總表」（整本，按年分組、每年小計）。
+     核准後自動上 Google 日曆是後端的事（routers/api_hr._calendar_sync_leave），這頁只把
+     「已上日曆／未同步」標出來。鑰匙＝me_leave（與工作台那張卡同一把；後端 /me/leave* 也認它）。
+     比照 petty-cash.html 的獨立網址家族，只掛 master / foundry（NAS 對外容器沒有 CRM 後端）。 -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root { --red: #c9372c; --ink: #262626; --sub: #737373; --line: #e5e5e5;
+          --bg-soft: #fafafa; --ok: #15803d; --warn: #b45309; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #fff; color: var(--ink);
+    font-family: "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  .eyebrow { font-size: 11px; letter-spacing: 0.35em; text-transform: uppercase; color: var(--sub); }
+  .accent { color: var(--red); }
+
+  header { position: sticky; top: 0; z-index: 50; display: flex; align-items: center;
+    justify-content: space-between; padding: 14px 20px; background: rgba(255,255,255,0.96);
+    backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+  header .brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300; }
+  header .hdr-right { display: flex; align-items: center; gap: 12px; }
+  header .hdr-user { font-size: 12px; color: var(--sub); }
+  .btn-ghost { background: none; border: 1px solid var(--line); border-radius: 2px;
+    padding: 6px 14px; font-size: 12px; color: var(--sub); cursor: pointer; }
+  .btn-ghost:hover { color: var(--red); border-color: var(--red); }
+
+  main { max-width: 1240px; margin: 0 auto; padding: 20px 16px 60px; }
+
+  .center-wrap { max-width: 380px; margin: 8vh auto 0; }
+  .login-card { border: 1px solid var(--line); padding: 36px 32px; }
+  .login-card h1 { font-size: 16px; letter-spacing: .1em; font-weight: 400; margin: 0 0 22px; }
+  .login-card input { width: 100%; padding: 11px 12px; border: 1px solid var(--line);
+    border-radius: 2px; font-size: 14px; margin-bottom: 10px; font-family: inherit; }
+  .login-card button[type=submit] { width: 100%; padding: 11px; background: var(--ink);
+    color: #fff; border: 0; border-radius: 2px; font-size: 14px; cursor: pointer; }
+  .divider { display: none; align-items: center; gap: 10px; color: var(--sub);
+    font-size: 11px; margin: 16px 0; }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .err { display: none; color: var(--red); font-size: 12px; margin-top: 14px; line-height: 1.6; }
+  .state-msg { color: var(--sub); font-size: 13px; padding: 24px 0; text-align: center; }
+
+  /* 兩欄：左 假勤卡（同工作台）、右 休假總表；窄螢幕疊成一欄 */
+  .lv-layout { display: grid; grid-template-columns: minmax(340px, 460px) minmax(0, 1fr); gap: 28px; align-items: start; }
+  @media (max-width: 900px) { .lv-layout { grid-template-columns: 1fr; } }
+
+  /* 以下與 my.html 的卡片樣式同一份（cards-hr.js 畫出來的東西靠這些 class） */
+  .card { border: 1px solid var(--line); padding: 26px 26px 20px; min-width: 0; }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 4px; }
+  .card-head .count { font-size: 12px; color: var(--sub); }
+  .card-head .count.wip, .wip-note { color: #b45309; }
+  .card-head .count.wip { border: 1px solid #fcd34d; background: #fffbeb; border-radius: 3px;
+    padding: 1px 6px; font-size: 11px; letter-spacing: .05em; }
+  .wip-note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 4px;
+    padding: 8px 10px; font-size: 12px; line-height: 1.6; margin-bottom: 12px; }
+  .card-head .fold { display: none; }
+  .row { display: flex; gap: 12px; align-items: flex-start; padding: 13px 0; border-bottom: 1px solid #f5f5f5; font-size: 13px; }
+  .row:last-child { border-bottom: none; }
+  .row .grow { flex: 1; min-width: 0; }
+  .row .title { color: var(--ink); line-height: 1.5; }
+  .row .meta { font-size: 11px; color: var(--sub); margin-top: 3px; letter-spacing: 0.05em; }
+  .pill { display: inline-block; font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase;
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; color: var(--sub); white-space: nowrap; }
+  .pill.hot { border-color: var(--red); color: var(--red); }
+  .mini-btn { background: none; border: 1px solid var(--line); border-radius: 2px; padding: 3px 10px;
+    font-size: 11px; color: var(--sub); cursor: pointer; font-family: inherit; transition: all .15s; white-space: nowrap; }
+  .mini-btn:hover { color: var(--red); border-color: var(--red); }
+  .mini-btn:disabled { opacity: .5; cursor: default; }
+  .empty { padding: 22px 0; font-size: 13px; color: #a3a3a3; text-align: center; }
+  .stat-row { display: flex; gap: 28px; padding: 16px 0 10px; flex-wrap: wrap; }
+  .stat .num { font-size: 26px; font-weight: 300; }
+  .stat .lbl { font-size: 10px; letter-spacing: 0.25em; text-transform: uppercase; color: var(--sub); margin-top: 2px; }
+  .pf-edit input, .pf-edit textarea, .pf-edit select {
+    width: 100%; border: 1px solid var(--line); border-radius: 2px; padding: 7px 10px;
+    font-size: 13px; font-family: inherit; color: var(--ink); background: #fff; outline: none; }
+  .pf-edit input:focus, .pf-edit textarea:focus, .pf-edit select:focus { border-color: var(--red); }
+  .pf-edit .inline-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pf-edit .inline-row > * { width: auto; flex: 1; min-width: 90px; }
+  .pf-edit .field { margin-bottom: 10px; }
+
+  /* 休假總表 */
+  .hist-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 8px; }
+  .hist-sum { font-size: 12px; color: var(--sub); line-height: 1.8; }
+  .hist-year { margin-top: 18px; }
+  .hist-year h3 { font-size: 13px; font-weight: 600; letter-spacing: .1em; margin: 0 0 6px; display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+  .hist-year h3 .tot { font-size: 11px; font-weight: 400; color: var(--sub); letter-spacing: .05em; }
+  .tbl-wrap { overflow-x: auto; }
+  table.hist { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  table.hist th, table.hist td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #f0f0f0; vertical-align: top; white-space: nowrap; }
+  table.hist th { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--sub); font-weight: 400; }
+  table.hist td.why { white-space: normal; min-width: 180px; color: var(--sub); }
+  table.hist td.num { text-align: right; }
+  table.hist tr.dim td { color: #a3a3a3; }
+  .cal-tag { font-size: 10px; letter-spacing: .1em; color: var(--ok); }
+  .cal-tag.off { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="brand-name">ORIGINSUN <span class="accent">假勤</span></span>
+  <div class="hdr-right">
+    <a class="btn-ghost" href="/my.html">個人工作台</a>
+    <span class="hdr-user" id="hdr-user" style="display:none;"></span>
+    <button class="btn-ghost" id="btn-logout" style="display:none;" onclick="doLogout()">登出</button>
+  </div>
+</header>
+
+<main>
+  <!-- 登入 -->
+  <div id="login-view" style="display:none;">
+    <div class="center-wrap">
+      <div class="login-card">
+        <h1>登入</h1>
+        <div class="err" id="login-err"></div>
+        <form onsubmit="doPwdLogin(event)">
+          <input id="in-user" placeholder="帳號" autocomplete="username">
+          <input id="in-pwd" type="password" placeholder="密碼" autocomplete="current-password">
+          <button type="submit">登入</button>
+        </form>
+        <div class="divider" id="login-divider" style="display:none">或</div>
+        <div id="g_id_signin_container" style="display:none;justify-content:center;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="noperm-view" style="display:none;">
+    <div class="state-msg" id="noperm-msg">這個帳號沒有假勤的權限。請聯絡管理員開啟「我的假勤」。</div>
+  </div>
+
+  <!-- 主畫面 -->
+  <div id="app-view" style="display:none;">
+    <div class="lv-layout">
+      <div id="lv-card-host"></div>
+      <section id="lv-history">
+        <div class="hist-head">
+          <span class="eyebrow">Leave History <span class="accent">休假總表</span></span>
+          <span class="hist-sum" id="hist-sum"></span>
+        </div>
+        <div id="hist-body"><div class="state-msg">載入中…</div></div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<!-- 傳統 script 兩支（同一個全域詞法環境）：leave-host.js 備好 cards-hr.js 要的全域＋畫休假總表，
+     cards-hr.js 是工作台那張假勤卡（表單／送單／撤回只有它一份）。⚠ 順序不可調換。 -->
+<script src="./js/my/leave-host.js"></script>
+<script src="./js/my/cards-hr.js"></script>
+
+<script type="module">
+import { authFetch } from "/js/shared/utils.js";
+import { initGoogleSignIn } from "/js/shared/google-signin.js";
+
+function _show(view) {
+    for (const v of ["login-view", "noperm-view", "app-view"])
+        $(v).style.display = (v === view ? "block" : "none");
+    $("btn-logout").style.display = (view === "login-view") ? "none" : "";
+}
+function showLogin(msg) {
+    _show("login-view"); $("hdr-user").style.display = "none";
+    if (msg) { const e = $("login-err"); e.textContent = msg; e.style.display = "block"; }
+    initGoogle();
+}
+window.doLogout = () => {
+    localStorage.removeItem(TOKEN_KEY); localStorage.removeItem("auth_user");
+    location.href = location.pathname;
+};
+function onLoginOk(d) {
+    localStorage.setItem(TOKEN_KEY, d.token); $("login-err").style.display = "none"; boot();
+}
+window.doPwdLogin = async (ev) => {
+    ev.preventDefault();
+    try {
+        const r = await fetch("/api/v1/auth/login", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: $("in-user").value.trim(),
+                                   password: $("in-pwd").value }) });
+        const d = await r.json();
+        if (!r.ok) { showLogin(d.detail || "登入失敗"); return; }
+        onLoginOk(d);
+    } catch (_) { showLogin("連線失敗，請稍後再試"); }
+};
+
+let _gisInited = false;
+async function initGoogle() {
+    if (_gisInited) return;
+    _gisInited = await initGoogleSignIn({
+        container: $("g_id_signin_container"), divider: $("login-divider"),
+        theme: "outline", width: 320, onSuccess: onLoginOk, onError: showLogin,
+    });
+}
+
+async function boot() {
+    if (!localStorage.getItem(TOKEN_KEY)) { showLogin(""); return; }
+    let me;
+    try {
+        const r = await authFetch("/api/v1/auth/me");
+        if (r.status === 401) { localStorage.removeItem(TOKEN_KEY); showLogin(""); return; }
+        if (!r.ok) { showLogin("載入失敗（" + r.status + "）"); return; }
+        me = await r.json();
+        if (me.token) localStorage.setItem(TOKEN_KEY, me.token);   // 權限改了，後端順手給的新 token
+    } catch (_) { showLogin("連線失敗，請稍後再試"); return; }
+
+    const mods = me.modules || [];
+    const isAdmin = (me.access_level || 0) >= 3;
+    $("hdr-user").textContent = me.username || "";
+    $("hdr-user").style.display = "";
+    // 閘門＝me_leave —— 與 /my.html 的假勤卡、後端 /api/v1/me/leave* 同一把
+    if (!isAdmin && !mods.includes("me_leave")) { _show("noperm-view"); return; }
+    _show("app-view");
+    // 沒綁人員檔案的帳號（例如 admin）：summary 會 409，卡片自己會把那句話畫出來
+    const host = $("lv-card-host");
+    host.innerHTML = "";
+    host.appendChild(cardLeave(true));
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -44,7 +44,7 @@ def test_every_auth_me_reader_adopts_the_fresh_token():
     assert "localStorage.setItem(STORAGE_KEYS.TOKEN, d.token); window._authToken = d.token;" in js_func_body(js_code_only(a), "async function _fetchMe()")
     # 手機殼與每個獨立頁
     assert "if (me && me.token) localStorage.setItem(TOKEN_KEY, me.token);" in repo_src("frontend/m/shell.js")
-    for f in ("frontend/website-admin.html", "frontend/petty-cash.html", "frontend/media-log-workspace.html",
+    for f in ("frontend/website-admin.html", "frontend/petty-cash.html", "frontend/leave.html", "frontend/media-log-workspace.html",
               "frontend/project.html", "frontend/reference.html"):
         assert "if (me.token) localStorage.setItem(TOKEN_KEY, me.token);" in repo_src(f), f
 
