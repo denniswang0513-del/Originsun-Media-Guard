@@ -190,7 +190,17 @@ async def approve_leave(leave_id: str, request: Request):
         out = leave_service.request_dict(obj, await leave_service.holidays_map(session))
     out["allocations"] = [{"credit_id": cid, "hours": h} for cid, h in parts]
     await _notify_result("核准", out)
+    await _calendar_sync_leave(leave_id)      # 已核准的假上公司 Google 日曆（docs/CALENDAR_PLAN.md §3.1）
     return out
+
+
+async def _calendar_sync_leave(leave_id: str) -> None:
+    """best-effort：狀態是已核准就建／更新事件，不是就刪。開自己的 session，永遠在 commit 之後。"""
+    try:
+        from services import calendar_sync
+        await calendar_sync.sync("leave", leave_id)
+    except Exception:      # noqa: BLE001
+        pass
 
 
 @router.post("/leave/{leave_id}/reject")
@@ -239,6 +249,7 @@ async def decide_cancel(leave_id: str, body: LeaveCancelDecide, request: Request
         await session.refresh(obj)
         out = leave_service.request_dict(obj, await leave_service.holidays_map(session))
     await _notify_result("消假核准" if body.approve else "消假退回", out, note)
+    await _calendar_sync_leave(leave_id)      # 已撤回＝從日曆拿掉；退回消假＝回已核准、事件照舊
     return out
 
 

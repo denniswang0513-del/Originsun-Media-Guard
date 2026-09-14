@@ -506,4 +506,8 @@ CRM_COLUMNS = [
     ("crm_staff", "alias", "TEXT"),
     # 收款方式（owner 2026-09-13）：源日專案／後期代開／現金收款；NULL＝源日專案
     ("crm_projects", "billing_mode", "VARCHAR(16)"),
+    # 行事曆（owner 2026-09-14，docs/CALENDAR_PLAN.md §2.2）：里程碑也同步 Google 日曆；crm_schedule 新表由 create_all 建
+    ("crm_project_milestones", "google_event_id", "VARCHAR(255)"),
+    ("crm_project_milestones", "synced_at", "TIMESTAMPTZ"),
+    ("crm_project_milestones", "sync_error", "TEXT"),
 ]

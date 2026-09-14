@@ -11,6 +11,7 @@
  *   finance.js — 預支 + 請款 + 雜支
  */
 
+import { loadCalendarTab } from './crm-projects-calendar.js';
 import { crmFetch as _fetch, esc as _esc, setupResizeHandle, hasModule, today } from './crm-utils.js';
 import * as _U from './crm-utils.js';   // permDeniedMsg 走命名空間（舊快取的 crm-utils 沒有它，named import 會炸整頁）
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
@@ -61,6 +62,7 @@ function _reloadActiveDetailTab(projectId) {
     else if (tab === 'refs') _loadRefsTab(projectId);
     else if (tab === 'delivery') _openDelivery(projectId);
     else if (tab === 'team') loadPayTab(projectId);        // 收付款（人員配置＋發票併在一頁）
+    else if (tab === 'calendar') loadCalendarTab(projectId);   // 行事曆（只看這一案）
     // info/finance 由 renderDetail 涵蓋、quotes 由 selectProject 的 loadQuotations 涵蓋
 }
 
@@ -376,6 +378,8 @@ export async function initCrmProjectsTab() {
             if (tab === 'media' && state.selectedId) { _loadMediaTab(state.selectedId); }
             document.getElementById('proj-detail-refs').classList.toggle('hidden', tab !== 'refs');
             if (tab === 'refs' && state.selectedId) { _loadRefsTab(state.selectedId); }
+            document.getElementById('proj-detail-calendar').classList.toggle('hidden', tab !== 'calendar');
+            if (tab === 'calendar' && state.selectedId) { loadCalendarTab(state.selectedId); }
         });
     });
 

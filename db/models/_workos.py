@@ -802,3 +802,29 @@ class FootageIndex(Base):
     __table_args__ = (Index("idx_footage_project", "project_id"),)
 
 
+class CrmSchedule(Base):
+    """行事曆「工作登記」（排班；docs/CALENDAR_PLAN.md §2.1）：專案 × 日期 × 人員 × 職務。
+    拍攝不在這張表（那是 crm_shoots）。attendees JSON 可含外部人員（沒 staff_id、只有名字）。
+    plan_row_id＝登記自己的單日工作時同時建的「我的一週」計畫卡；timesheet_ids＝「做了 ✓」產的工時列。"""
+    __tablename__ = "crm_schedule"
+
+    id = Column(String(32), primary_key=True)
+    kind = Column(String(16), nullable=False, default="work")          # core.schedule_logic.KINDS
+    project_id = Column(String(32), nullable=True, index=True)          # soft FK → crm_projects.id，可空
+    title = Column(String(255), nullable=False, default="")
+    date = Column(Date, nullable=False, index=True)
+    end_date = Column(Date, nullable=True)
+    start_time = Column(String(5), nullable=True)                       # 'HH:MM'，空＝全天
+    end_time = Column(String(5), nullable=True)
+    attendees = Column(Text, nullable=True)                             # JSON [{staff_id, name, role, external, contact}]
+    location_text = Column(String(255), nullable=True)
+    notes = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="planned")      # core.schedule_logic.STATUSES
+    timesheet_ids = Column(Text, nullable=True)                         # JSON [timesheet id]
+    plan_row_id = Column(String(32), nullable=True)
+    google_event_id = Column(String(255), nullable=True)
+    synced_at = Column(DateTime(timezone=True), nullable=True)
+    sync_error = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -122,6 +122,7 @@ async def save_week(session, start: str, items: list, username: str) -> dict:
     now = datetime.now(timezone.utc)
     # 彈窗是整批送（一次二三十筆），一筆一個 session.get 就是 N 次查詢 —— 先一次撈成表
     known = {m.id: m for m in await _milestones_for_week(session, week_start)}
+    touched, gone = [], []                     # 行事曆同步：動過的 id、刪掉的 Google 事件 id（commit 後才處理）
     for it in items:
         title = (it.title or "").strip()
         if it.id:
@@ -129,8 +130,10 @@ async def save_week(session, start: str, items: list, username: str) -> dict:
             if m is None:
                 continue
             if it.delete:                      # 只有明講 delete 才刪；標題空白＝那一格沒填，跳過不動
+                gone.append(getattr(m, "google_event_id", None))
                 await session.delete(m)
                 continue
+            touched.append(m.id)
             if not title:
                 continue
             m.title = title
@@ -151,14 +154,26 @@ async def save_week(session, start: str, items: list, username: str) -> dict:
         else:
             if it.delete or not title or not (it.project_id or "").strip():
                 continue
-            session.add(M(id=uuid.uuid4().hex, project_id=it.project_id.strip(), week_start=week_start, title=title,
+            touched.append(uuid.uuid4().hex)
+            session.add(M(id=touched[-1], project_id=it.project_id.strip(), week_start=week_start, title=title,
                           due_date=as_date(it.due_date) or default_due(week_start),
                           assignee_staff_id=(it.assignee_staff_id or "").strip() or None,
                           assignee_name=(it.assignee_name or "").strip(), note=(it.note or "").strip() or None,
                           status=STATUS_DONE if it.done else STATUS_OPEN, done_by=username if it.done else None,
                           done_at=now if it.done else None, created_by=username))
     await session.commit()
+    await _calendar_sync(touched, gone)
     return await week_payload(session, week_start.isoformat(), today)
+
+
+async def _calendar_sync(ids, gone_event_ids=()) -> None:
+    """里程碑上 Google 日曆（docs/CALENDAR_PLAN.md §3.1）：best-effort、開自己的 session，永遠在 commit 之後。"""
+    try:
+        from services import calendar_sync
+        await calendar_sync.sync_many("milestone", ids)
+        await calendar_sync.delete_events(list(gone_event_ids))
+    except Exception:      # noqa: BLE001 — 同步失敗不影響里程碑本身
+        pass
 
 
 async def set_done(session, mid: str, done: bool, username: str) -> dict:
@@ -171,6 +186,7 @@ async def set_done(session, mid: str, done: bool, username: str) -> dict:
     m.done_at = datetime.now(timezone.utc) if done else None
     m.updated_at = datetime.now(timezone.utc)
     await session.commit()
+    await _calendar_sync([mid])
     today = date.today()
     return milestone_dict(m, week_start_of(today), today)
 
@@ -186,6 +202,7 @@ async def defer(session, mid: str, start: str, username: str) -> dict:
     m.week_start, m.due_date = shifted_week(m.week_start, m.due_date, week_start)
     m.updated_at = datetime.now(timezone.utc)
     await session.commit()
+    await _calendar_sync([mid])
     return milestone_dict(m, week_start, today)
 
 

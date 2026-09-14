@@ -49,6 +49,7 @@ _ROUTER_MODULES = [
     'api_me',
     'api_hr',
     'api_milestones',
+    'api_calendar',
     'api_journal',
     'api_paste',
 ]

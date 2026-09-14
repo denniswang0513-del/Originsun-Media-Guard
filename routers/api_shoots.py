@@ -24,6 +24,7 @@ from core.ledger import not_mine   # 手機版只看母公司案（同 api_crm_m
 from core.hr_logic import day_iso, iso_ts, tw_day
 from routers.crm._shared import _check_project_write_auth, _parse_shoot_date
 from services import google_calendar as gc
+from services.calendar_sync import colors_from_settings as calendar_colors
 from core.schemas import (CalendarConfigPayload, ShootCreate, ShootEquipmentPayload,
                           ShootStatusPayload, ShootUpdate)
 from core.shoot_logic import (CANCELLED, EQUIPMENT_STATES, SCHEDULED, SHOOT_STATUSES, checkout_state,
@@ -259,7 +260,9 @@ async def _sync_calendar(sid: str) -> dict:
             else:
                 s.sync_error = e[:500]
         else:
-            eid, e = await asyncio.to_thread(gc.upsert_event, sa, cal_id, s.google_event_id, event_body(row))
+            body = event_body(row)
+            body["colorId"] = calendar_colors()["shoot"]      # 顏色依類別、管理員可調（core.schedule_logic）
+            eid, e = await asyncio.to_thread(gc.upsert_event, sa, cal_id, s.google_event_id, body)
             if eid:
                 s.google_event_id, s.synced_at, s.sync_error = eid, now, None
             else:

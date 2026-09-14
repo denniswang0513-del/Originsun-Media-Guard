@@ -15,6 +15,7 @@
 
 import { esc, toastOk, toastErr, openModal, closeModal } from '../website/website-utils.js';
 import { _LOADING_HTML } from '../../js/shared/subview-loader.js';
+import { mountCalendar } from '../../js/shared/calendar/index.js';
 
 // ── 同源 fetch helper（帶 JWT，master /api/v1/bulletin）──
 async function bfetch(path, opts = {}) {
@@ -81,7 +82,20 @@ async function _switchSubview(name) {
     const nav = document.getElementById('bulletin-nav');
     if (nav) nav.querySelectorAll('.website-nav-btn').forEach(b =>
         b.classList.toggle('active', b.dataset.subview === name));
-    if (!_content || !VIEWS[name]) return;
+    if (!_content) return;
+    if (name === 'calendar') {
+        // 行事曆（owner 2026-09-14，docs/CALENDAR_PLAN.md）：共用元件，scope 預設全公司
+        _view = name;
+        _content.innerHTML = '<h2 style="margin:0 0 4px;">📅 行事曆 <span style="color:#888;font-size:12px;font-weight:400;">· 拍攝／工作／里程碑／休假都在這裡；登記的工作會同步到公司 Google 日曆</span></h2><div id="bl-calendar"></div>';
+        await mountCalendar({
+            host: document.getElementById('bl-calendar'), fetch: bfetch, esc,
+            hooks: { toast: (m, k) => (k === 'err' ? toastErr(m) : toastOk(m)),
+                     // 開專案：同 projects-push.js 那條——帶 ?project= 開新分頁，crm-projects.js 的 tab-changed hook 會接
+                     openProject: (id) => { if (id) window.open('/?project=' + encodeURIComponent(id) + '#tab_crm_projects', '_blank', 'noopener'); } },
+        });
+        return;
+    }
+    if (!VIEWS[name]) return;
     _view = name;
     _content.innerHTML = _LOADING_HTML;
     try {

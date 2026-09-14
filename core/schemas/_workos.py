@@ -459,3 +459,33 @@ class TransferFeeRecognize(BaseModel):
     entry_ids: List[str] = []
 
 
+# ── 行事曆（docs/CALENDAR_PLAN.md）──
+
+class SchedulePayload(BaseModel):
+    """工作登記（crm_schedule）。`slot`＝all／am／pm／custom（上午 09:00–13:00、下午 13:00–18:00 只是把時間填進去）；
+    `attendees`＝[{staff_id, name, role, external, contact}]，外部人員沒 staff_id、只有名字；空＝登記自己。"""
+    kind: str = "work"
+    title: str = ""
+    project_id: Optional[str] = None
+    date: str = ""
+    end_date: Optional[str] = None
+    slot: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    attendees: Optional[list] = None
+    location_text: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ScheduleStatusPayload(BaseModel):
+    status: str
+
+
+class ScheduleDonePayload(BaseModel):
+    """「做了 ✓」：時數不給＝全天 8 或照起訖算。"""
+    hours: Optional[float] = None
+
+
+class CalendarColorsPayload(BaseModel):
+    """六類別各一個 Google colorId（1–11）：{shoot, work, meeting, out, milestone, leave}。"""
+    colors: dict = {}

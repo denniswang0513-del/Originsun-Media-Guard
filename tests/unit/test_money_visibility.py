@@ -429,6 +429,9 @@ def test_every_project_enumeration_decides_about_mine():
         # （這支寫成 `select(*[getattr(CrmProject, c) …])`；掃描已經認得那個形狀了，
         #  所以它是**被掃到之後**的明文豁免，不是漏網。）
         "services/project_picker.py",
+        # 行事曆同步（2026-09-14）：_project_names 是「用事件身上的 project_id 反查案名」組 Google 事件標題，
+        # 不回給前端當清單；列舉端點在 routers/api_calendar.py（hide_mine_projects 表態）
+        "services/calendar_sync.py",
     }
     hits = []
     for rel in ("routers", "services"):

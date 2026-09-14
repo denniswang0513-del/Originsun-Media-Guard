@@ -107,7 +107,8 @@ def upsert_event(sa: dict, cal_id: str, event_id: str | None, body: dict) -> tup
                     raise
         # 事件 id 用我們的 shoot id（uuid hex 是合法的 base32hex）→ insert 冪等：上次 insert 成功但本地 commit 失敗，
         # 再來一次 Google 回 409，就改 PATCH 同一個 id，不會長第二個事件
-        key = str(((body.get("extendedProperties") or {}).get("private") or {}).get("originsun_shoot_id") or "")
+        priv = (body.get("extendedProperties") or {}).get("private") or {}
+        key = str(priv.get("originsun_id") or next((v for k, v in priv.items() if k.startswith("originsun_") and k.endswith("_id")), "") or "")
         if key and re.fullmatch(r"[a-v0-9]{5,1024}", key):
             body = {**body, "id": key}
             try:

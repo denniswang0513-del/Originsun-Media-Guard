@@ -1,5 +1,8 @@
 /**
- * 行事曆分頁：拍攝排程＋器材登記（docs/SHOOT_CALENDAR_PLAN.md §3；owner 2026-09-03 拍板取代「付款」分頁）。
+ * 行事曆分頁：四段——今天（通告）／本週（我的）／拍攝（排程＋器材登記）／登記工作（docs/CALENDAR_PLAN.md §5.2）。
+ * 今天／本週／登記工作走 /api/v1/calendar（工作登記、里程碑、休假、拍攝一起）；拍攝那段是原本的（下面全部不動）。
+ *
+ * 拍攝排程＋器材登記（docs/SHOOT_CALENDAR_PLAN.md §3；owner 2026-09-03 拍板取代「付款」分頁）。
  * 一場拍攝＝哪一天、哪個案子、去哪裡、誰去、帶什麼器材；勾器材＝在器材庫開預約，
  * 那天被別場拿走的標紅（送出前 confirm），「器材已領」「已歸還」直接動同一列。
  *
@@ -46,6 +49,25 @@ const shootName = (r) => [r.project_name, r.client_short_name ? '（' + r.client
 
 function layout() {
     return `
+      <div class="m-chips" id="cal-seg" style="margin-bottom:12px">
+        <button type="button" class="chip on" data-seg="today">今天</button><button type="button" class="chip" data-seg="week">本週</button>
+        <button type="button" class="chip" data-seg="shoot">拍攝</button><button type="button" class="chip" data-seg="work">登記工作</button></div>
+      <div id="cal-today">${skeleton(3)}</div>
+      <div id="cal-week" hidden>${skeleton(3)}</div>
+      <div id="cal-work" hidden>
+        <form class="m-form m-card" id="cal-wform" autocomplete="off">
+          <label class="req">做什麼</label><input id="cal-w-title" placeholder="例：iWIN 年會 A-copy 粗剪">
+          <label>案子（可空＝行政庶務）</label>${pickerHtml('cal-w-project')}
+          <label class="req">日期</label><input id="cal-w-date" type="date">
+          <label>時段</label><div class="m-chips" id="cal-w-slots"><button type="button" class="chip on" data-slot="all">全天</button><button type="button" class="chip" data-slot="am">上午</button><button type="button" class="chip" data-slot="pm">下午</button><button type="button" class="chip" data-slot="custom">自訂</button></div>
+          <div class="row2" id="cal-w-custom" hidden><div><label>開始</label><input id="cal-w-st" type="time"></div><div><label>結束</label><input id="cal-w-et" type="time"></div></div>
+          <label>地點（選填）</label><input id="cal-w-loc">
+          <label>備註</label><textarea id="cal-w-notes"></textarea>
+          <div class="m-hint">登記的是自己的工作；要排別人請用桌機公布欄的行事曆。存了會同步到公司 Google 日曆。</div>
+          <button type="submit" class="m-btn-primary" id="cal-w-submit">登記</button>
+        </form>
+      </div>
+      <div id="cal-shoot" hidden>
       <button type="button" class="m-btn wide w" id="cal-toggle" style="margin-bottom:12px">登記拍攝</button>
       <form class="m-form m-card w" id="cal-form" autocomplete="off" hidden>
         <label class="req">專案</label>${pickerHtml('cal-project_id')}
@@ -73,7 +95,80 @@ function layout() {
       </form>
       ${state.canWrite ? '' : '<div class="m-empty" id="cal-ro-note">此帳號只能檢視拍攝排程</div>'}
       <div id="cal-list">${skeleton(3)}</div>
-      <div id="cal-cfg"></div>`;
+      <div id="cal-cfg"></div>
+      </div>`;
+}
+
+// ── 今天（通告）／本週／登記工作：/api/v1/calendar ──
+const CAL = '/api/v1/calendar';
+let _seg = 'today';
+function showSeg(seg) {
+    _seg = seg;
+    _host.querySelectorAll('#cal-seg .chip').forEach(b => b.classList.toggle('on', b.dataset.seg === seg));
+    for (const k of ['today', 'week', 'shoot', 'work']) { const el = F(k); if (el) el.hidden = k !== seg; }
+    if (seg === 'today') loadToday();
+    if (seg === 'week') loadWeek();
+}
+const _who = (ev) => (ev.people || []).map(p => esc(p.name) + (p.role ? '（' + esc(p.role) + '）' : '')).join('、');
+function evCard(ev, { doneBtn = false } = {}) {
+    const t = ev.start_time ? ev.start_time + (ev.end_time ? '–' + ev.end_time : '') : (ev.kind === 'milestone' ? '到期' : '全天');
+    const kind = { shoot: '拍攝', schedule: ({ work: '工作', meeting: '會議', out: '外出', other: '其他' })[ev.sub_kind] || '工作', milestone: '里程碑', leave: '休假', plan: '計畫' }[ev.kind] || ev.kind;
+    const done = ev.status === 'done' || ev.status === doneStatus();      // 場次的「完成」字從 options 拿，不寫字面
+    const meta = [ev.project_name, ev.location, _who(ev)].filter(Boolean).join(' · ');
+    const gear = ev.equipment && ev.equipment.length ? `<div class="sub">器材：${ev.equipment.map(esc).join('、')}</div>` : '';
+    const btn = doneBtn && ev.kind === 'schedule' && !done && ev.status !== 'cancelled'
+        ? `<div class="m-actions"><button type="button" class="m-btn pri" data-wact="done" data-id="${esc(ev.id)}">做了</button></div>` : '';
+    return `<div class="m-card${ev.mine ? ' mine' : ''}"><div class="t"><div class="name">${esc(t)} · ${kind}</div>${done ? pill('已完成', 'ok') : ''}</div>
+      <div class="sub" style="color:var(--ink);font-size:14px">${esc(ev.title)}</div>${meta ? `<div class="sub">${meta}</div>` : ''}${gear}${ev.notes ? `<div class="sub">${esc(ev.notes)}</div>` : ''}${btn}</div>`;
+}
+async function loadToday() {
+    const box = F('today'); if (!box) return;
+    try {
+        const d = await mfetch(`${CAL}/day?date=${todayLocal()}`);
+        const sec = (title, rows, opts) => rows.length ? `<div class="m-h">${title}（${rows.length}）</div>${rows.map(r => evCard(r, opts)).join('')}` : '';
+        box.innerHTML = `<div class="m-h">${esc(fmtDate(d.date))}${weekday(d.date)} · ${esc(d.me.name || '')}</div>`
+            + (d.leave.length ? `<div class="m-hint">今天你有假：${d.leave.map(l => esc(l.title)).join('、')}</div>` : '')
+            + sec('拍攝', d.shoots) + sec('被排的工作', d.work, { doneBtn: true }) + sec('這週到期・我負責', d.milestones)
+            + (d.shoots.length + d.work.length + d.milestones.length ? '' : emptyBox('今天沒有排到你的事'));
+    } catch (e) { box.innerHTML = e.status === 409 ? emptyBox('帳號還沒綁定人員檔案，看不到「今天」') : errBox(e); }
+}
+async function loadWeek() {
+    const box = F('week'); if (!box) return;
+    const t = todayLocal(), mon = addDays(t, -((new Date(t + 'T00:00:00').getDay() + 6) % 7));
+    try {
+        const d = await mfetch(`${CAL}/events?from=${mon}&to=${addDays(mon, 6)}&scope=me`);
+        const days = Array.from({ length: 7 }, (_, i) => addDays(mon, i));
+        const per = (day) => (d.events || []).filter(ev => ev.kind !== 'holiday' && ev.date <= day && (ev.end_date || ev.date) >= day);
+        box.innerHTML = days.map(day => { const rows = per(day); const hol = (d.events || []).find(ev => ev.kind === 'holiday' && ev.date === day);
+            return `<div class="m-h">${esc(fmtDate(day))}${weekday(day)}${day === t ? ' · 今天' : ''}${hol ? ' · ' + esc(hol.title) : ''}</div>${rows.length ? rows.map(r => evCard(r, { doneBtn: day <= t })).join('') : '<div class="m-hint" style="margin:0 0 10px">—</div>'}`; }).join('');
+    } catch (e) { box.innerHTML = errBox(e); }
+}
+async function workAct(btn) {
+    if (btn.dataset.wact !== 'done') return;
+    const h = window.prompt('做了幾小時？（空＝整天 8 小時或照起訖算）', '');
+    if (h === null) return;
+    await withBusy(btn, async () => {
+        try { const r = await mfetch(`${CAL}/schedule/${encodeURIComponent(btn.dataset.id)}/done`, { method: 'POST', body: { hours: h.trim() ? +h : null } });
+              toast(r.created ? '已寫進今天的專案紀錄' : '這件已經記過工時了'); markStale('worklog'); loadToday(); if (_seg === 'week') loadWeek(); }
+        catch (e) { toast(e.message, 'err'); }
+    });
+}
+async function submitWork(ev) {
+    ev.preventDefault();
+    const title = F('w-title').value.trim(); if (!title) { toast('請填做什麼', 'err'); F('w-title').focus(); return; }
+    const date = F('w-date').value; if (!date) { toast('請選日期', 'err'); return; }
+    const slot = (_host.querySelector('#cal-w-slots .chip.on') || {}).dataset?.slot || 'all';
+    const body = { kind: 'work', title, project_id: F('w-project').value || null, date, slot,
+        start_time: F('w-st').value || null, end_time: F('w-et').value || null, attendees: [], location_text: F('w-loc').value.trim(), notes: F('w-notes').value.trim() };
+    await withBusy(F('w-submit'), async () => {
+        try {
+            const r = await mfetch(`${CAL}/schedule`, { method: 'POST', body });
+            const s = r && r.schedule;
+            toast('已登記' + (s && s.sync_error ? '，但日曆同步失敗' : ''), s && s.sync_error ? 'err' : 'ok');
+            F('w-title').value = ''; F('w-notes').value = ''; F('w-loc').value = '';
+            markStale('worklog'); showSeg(date === todayLocal() ? 'today' : 'week');
+        } catch (e) { toast(e.message || '儲存失敗', 'err'); }
+    });
 }
 
 // ── 選擇器（全部打字就過濾；人員／器材選一個就變 chip、再選下一個）──
@@ -426,8 +521,18 @@ export async function render(host, { first }) {
         F('crew-chips').addEventListener('click', onChipRm);
         F('equip-chips').addEventListener('click', onChipRm);
         F('list').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-act]'); if (b) act(b); });
+        // 四段切換＋今天／本週的「做了」＋登記工作表單
+        F('seg').addEventListener('click', (ev) => { const b = ev.target.closest('[data-seg]'); if (b) showSeg(b.dataset.seg); });
+        F('today').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-wact]'); if (b) workAct(b); });
+        F('week').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-wact]'); if (b) workAct(b); });
+        F('w-date').value = todayLocal();
+        F('w-slots').addEventListener('click', (ev) => { const b = ev.target.closest('[data-slot]'); if (!b) return; F('w-slots').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); F('w-custom').hidden = b.dataset.slot !== 'custom'; });
+        F('wform').addEventListener('submit', submitWork);
     }
+    const fromDrawer = !!state.shootPreset;
     // 字彙／器材／專案跟清單一起抓：專案分頁新建案子會 markStale('calendar')，切過來才看得到它
     if (shouldLoad('calendar', { first })) await Promise.all([loadOptions(), loadList(), first ? loadCfg() : Promise.resolve()]);
+    mountPicker('cal-w-project', { items: projectItems(), placeholder: '打字找案名或客戶（可不填）', value: F('w-project').value });
     applyPreset();
+    showSeg(fromDrawer ? 'shoot' : _seg);
 }
