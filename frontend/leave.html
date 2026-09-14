@@ -51,6 +51,14 @@
 
   /* 兩欄：左 假勤卡（同工作台）、右 休假總表；窄螢幕疊成一欄 */
   .lv-layout { display: grid; grid-template-columns: minmax(340px, 460px) minmax(0, 1fr); gap: 28px; align-items: start; }
+  .lv-left { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+  /* 請補休規章 */
+  .rules { font-size: 13px; line-height: 1.7; color: var(--ink); padding-top: 8px; }
+  .rules .rule { padding: 10px 0; border-bottom: 1px solid #f5f5f5; }
+  .rules .rule:last-child { border-bottom: none; }
+  .rules .rule b { display: block; font-size: 12px; letter-spacing: .15em; color: var(--red); margin-bottom: 4px; }
+  .rules .rule p { margin: 4px 0 0; color: var(--sub); }
+  .rules .rule ul { margin: 2px 0 0; padding-left: 18px; color: var(--sub); }
   @media (max-width: 900px) { .lv-layout { grid-template-columns: 1fr; } }
 
   /* 以下與 my.html 的卡片樣式同一份（cards-hr.js 畫出來的東西靠這些 class） */
@@ -141,7 +149,47 @@
   <!-- 主畫面 -->
   <div id="app-view" style="display:none;">
     <div class="lv-layout">
+      <div class="lv-left">
       <div id="lv-card-host"></div>
+      <!-- 請補休規章（owner 2026-09-15「這裡多一個請補修規章」；內容抄自 Notion「請補修規章」資料庫，
+           https://app.notion.com/p/95bcbee3622a40b98b6d3d70af5e9763 —— 規章改了要來這裡同步改，
+           程式裡對應的數字：core/leave_logic.NOTICE_DAYS（一週前）、SICK_CAP_DAYS（30 天）、cancel_mode（兩天前消假）） -->
+      <section class="card" id="lv-rules">
+        <div class="card-head"><span class="eyebrow">Rules <span class="accent">請補休規章</span></span></div>
+        <div class="card-body rules">
+          <div class="rule"><b>請假時間點</b><p>理想的話於 1 個月前、最晚 1 週前提出申請，並簡要說明理由。如有例外狀況，另外與主管討論。</p></div>
+          <div class="rule"><b>特休</b>
+            <ul>
+              <li>6 個月以上 1 年未滿：3 日</li>
+              <li>1 年以上 2 年未滿：7 日</li>
+              <li>2 年以上 3 年未滿：10 日</li>
+              <li>3 年以上 5 年未滿：每年 14 日</li>
+              <li>5 年以上 10 年未滿：每年 15 日</li>
+              <li>10 年以上：每年加給 1 日，加至 30 日為止</li>
+            </ul>
+            <p>當年特休若未使用完，可協議延後一年或折算薪資。</p></div>
+          <div class="rule"><b>補休（加班換休）</b><p>當年加班若未使用完，可協議延後一年或折算薪資，於每年 1 月結算。</p></div>
+          <div class="rule"><b>病假</b>
+            <ul>
+              <li>沒有住院：1 年內合計最多 30 天</li>
+              <li>有住院：2 年內合計最多 1 年</li>
+              <li>同時有「沒住院」與「有住院」的病假：2 年內合計最多 1 年</li>
+            </ul>
+            <p>請假 1 天給薪，1 至 30 天半薪，30 天後不給薪（留職停薪）。病假須提出相關證明。</p></div>
+          <div class="rule"><b>事假</b><p>不給薪。</p></div>
+          <div class="rule"><b>婚假</b><p>8 日，結婚登記後生效；應在登記前 10 天起 3 個月內請完，雇主同意可延長到 1 年。請假期間給薪，須提出相關證明。</p></div>
+          <div class="rule"><b>喪假</b>
+            <ul>
+              <li>8 日：父母、養父母、繼父母、配偶</li>
+              <li>6 日：祖父母、外祖父母、配偶的父母</li>
+              <li>3 日：曾祖父母、兄弟姊妹、配偶的祖父母</li>
+            </ul>
+            <p>請假期間給薪，須提出相關證明。</p></div>
+          <div class="rule"><b>颱風假</b><p>颱風假如果有工作：比照假日加班。</p></div>
+          <div class="rule"><b>消假</b><p>休假前兩天可消假，臨時消假要跟主管討論。遇上颱風假，可在颱風假前兩天評估是否消假；颱風假公告當日無法消假。</p></div>
+        </div>
+      </section>
+      </div>
       <section id="lv-history">
         <div class="hist-head">
           <span class="eyebrow">Leave History <span class="accent">休假總表</span></span>

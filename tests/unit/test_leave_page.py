@@ -97,3 +97,17 @@ def test_wip_note_only_when_the_ledger_is_empty():
 def test_no_emoji_in_page_text():
     for src in (_page(), _host()):
         assert not _EMOJI.search(src), "UI 文字不放 emoji"
+
+
+def test_rules_card_mirrors_notion_rulebook():
+    """owner 2026-09-15「這裡多一個請補修規章」：卡片下方一張靜態規章卡（抄自 Notion「請補修規章」）。
+    數字要跟程式裡的規則一致：最晚一週前（NOTICE_DAYS=7）、病假一年 30 天（SICK_CAP_DAYS）、休假前兩天消假。"""
+    from core.leave_logic import NOTICE_DAYS, SICK_CAP_DAYS
+    raw = repo_src("frontend/leave.html")
+    assert 'id="lv-rules"' in raw and "請補休規章" in raw
+    assert NOTICE_DAYS == 7 and "最晚 1 週前提出申請" in raw
+    assert SICK_CAP_DAYS == 30 and "1 年內合計最多 30 天" in raw
+    assert "休假前兩天可消假" in raw and "颱風假公告當日無法消假" in raw
+    for t in ("特休", "補休", "病假", "事假", "婚假", "喪假", "颱風假", "消假", "請假時間點"):
+        assert f"<b>{t}" in raw, t
+    assert raw.index('id="lv-card-host"') < raw.index('id="lv-rules"') < raw.index('id="lv-history"'), "規章在自己那張卡下面、總表之前"
