@@ -151,3 +151,19 @@ async def test_burn_rows_money_fields_follow_the_margin_model(monkeypatch):
     b = next(i for i in items if i["project_id"] == "p2")
     assert b["contract_net"] is None and b["margin_pct"] is None and b["suggested_hours"] is None
     assert b["staff_cost"] == 4000, "沒合約也算得出人力成本（8h ÷ 8 × 4000）"
+
+
+@pytest.mark.asyncio
+async def test_burn_rows_budget_base_is_manual_then_formula(monkeypatch):
+    """/polish 2026-09-14 安全網：預算基準跟專案檔案同一把尺（core.hr_logic.burn_rate）——手動 > 公式 > 算不出。"""
+    monkeypatch.setattr(lookup, "load_margin_model", lambda entity="mine": {
+        "daily_cost": 4000, "hours_per_day": 8, "rows": [{"type": "形象片", "margin_pct": 40}], "aliases": {}})
+    matched = [("p1", 80.0, 10, datetime(2026, 9, 10)), ("p2", 60.0, 5, datetime(2026, 9, 10)), ("p3", 8.0, 1, datetime(2026, 9, 1))]
+    projs = [("p1", "手動", "製作", 100, 105000, 5, "形象片", ""),      # 手動 100 > 公式 120
+             ("p2", "公式", "製作", None, 105000, 5, "形象片", ""),     # 沒手動 → 公式 120
+             ("p3", "都沒", "製作", None, 0, None, "", "")]
+    by = {i["project_id"]: i for i in await lookup.burn_rows(_Session([matched, projs]))}
+    assert (by["p1"]["base"], by["p1"]["base_hours"], by["p1"]["remaining"], by["p1"]["pct"]) == ("budget", 100, 20.0, 80.0)
+    assert (by["p2"]["base"], by["p2"]["base_hours"], by["p2"]["remaining"], by["p2"]["pct"]) == ("suggested", 120, 60.0, 50.0)
+    assert by["p2"]["budget_hours"] is None                                       # 手動那格仍是空（前端標「公式」）
+    assert (by["p3"]["base"], by["p3"]["base_hours"], by["p3"]["pct"]) == ("", None, None)
