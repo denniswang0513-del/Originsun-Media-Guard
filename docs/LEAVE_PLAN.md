@@ -240,6 +240,7 @@
 - 桌機員工頁 `frontend/my.html`：`ME_ZONE_ON` 加回 `me_leave`；「我的假勤」卡：三個數字（特休剩餘 h／天、補休剩餘、病假已用/30）＋請假表單（假別、起迄、整天/上午/下午/時段、即時 preview 顯示「共 X 小時、警告」、事由）＋近期清單（待審撤回／已核准依 cancel_mode 顯示「撤回」或「申請消假」）。
 - 管理 tab `frontend/tabs/hr_leave/`：待核佇列卡（期間／時數／餘額夠不夠／同期誰休／撞場次；核准／退回(理由)／消假決定）、請假紀錄（篩選＋代登）、時數帳（全員一列一人：特休／補休 可用／保留／到期；展開 credit 明細＋手開）、假日表（清單＋貼 CSV 匯入）。
 - 獨立寬頁 `frontend/leave.html`（2026-09-15，owner「在這裡新增假勤：看到自己的休假總表、提交休假、核准過自己上行事曆」）：工作台最上排「假勤」鈕（`shell.js renderActions`，鑰匙 `me_leave`）開它；左邊＝工作台那張假勤卡（**同一支 `js/my/cards-hr.js`**，`js/my/leave-host.js` 先備好全域），右邊＝休假總表（`/me/leave/summary?limit=500`，按年分組、每年只算已核准的小計、標「已上日曆／日曆未同步」）。「開發中」徽章與說明改成**只對特休／補休全 0 的人**顯示（時數帳會逐人建）。核准→Google 日曆是 `api_hr._calendar_sync_leave` 既有的線。
+  同日 owner「合夥人是管理層級可以看到大家的休假狀態」：管理員／`hr_leave`／合夥人 `finance_partner` 在這頁多一區「大家的休假」（唯讀：全員特休／補休剩餘、病假已用、待審數、下一次休假；待審中清單；接下來 60 天已核准的假）。後端 `api_hr.LEAVE_VIEWERS = ("hr_leave", "finance_partner")` 只放行 `GET /hr/leave` 與 `GET /hr/balances` 這兩支唯讀端點；核准／登記仍是 hr_leave 或管理員。
 - 手機 `frontend/m/`：新分頁「假勤」（`views/leave.js`）：同三個數字＋請假表單（同 preview）＋清單；走 `/api/v1/me/leave/*`，只 import `./shell.js`／`../ui.js`。
 
 ---

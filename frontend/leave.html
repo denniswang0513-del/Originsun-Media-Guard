@@ -10,6 +10,8 @@
      js/my/cards-hr.js**，不另抄表單），右邊是「休假總表」（整本，按年分組、每年小計）。
      核准後自動上 Google 日曆是後端的事（routers/api_hr._calendar_sync_leave），這頁只把
      「已上日曆／未同步」標出來。鑰匙＝me_leave（與工作台那張卡同一把；後端 /me/leave* 也認它）。
+     管理層（管理員／hr_leave／合夥人 finance_partner）另外多一區「大家的休假」（唯讀：全員餘額＋接下來的假＋待審），
+     資料來自 /api/v1/hr/balances 與 /api/v1/hr/leave（後端 LEAVE_VIEWERS 同一組鑰匙）。核准仍在 CRM 人事管理。
      比照 petty-cash.html 的獨立網址家族，只掛 master / foundry（NAS 對外容器沒有 CRM 後端）。 -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
@@ -148,6 +150,14 @@
         <div id="hist-body"><div class="state-msg">載入中…</div></div>
       </section>
     </div>
+    <!-- 管理層才有：全員（唯讀）。只看不動 —— 核准在 CRM 人事管理 -->
+    <section id="lv-team" style="display:none;margin-top:40px;">
+      <div class="hist-head">
+        <span class="eyebrow">Everyone <span class="accent">大家的休假</span></span>
+        <span class="hist-sum" id="team-sum"></span>
+      </div>
+      <div id="team-body"><div class="state-msg">載入中…</div></div>
+    </section>
   </div>
 </main>
 
@@ -214,13 +224,20 @@ async function boot() {
     const isAdmin = (me.access_level || 0) >= 3;
     $("hdr-user").textContent = me.username || "";
     $("hdr-user").style.display = "";
-    // 閘門＝me_leave —— 與 /my.html 的假勤卡、後端 /api/v1/me/leave* 同一把
-    if (!isAdmin && !mods.includes("me_leave")) { _show("noperm-view"); return; }
+    // 自己的假勤＝me_leave（與 /my.html 的假勤卡、後端 /api/v1/me/leave* 同一把）；
+    // 大家的休假＝管理員／hr_leave／合夥人 finance_partner（後端 api_hr.LEAVE_VIEWERS 同一組）
+    const canMine = isAdmin || mods.includes("me_leave");
+    const canTeam = isAdmin || mods.includes("hr_leave") || mods.includes("finance_partner");
+    if (!canMine && !canTeam) { _show("noperm-view"); return; }
     _show("app-view");
-    // 沒綁人員檔案的帳號（例如 admin）：summary 會 409，卡片自己會把那句話畫出來
-    const host = $("lv-card-host");
-    host.innerHTML = "";
-    host.appendChild(cardLeave(true));
+    document.querySelector(".lv-layout").style.display = canMine ? "" : "none";
+    if (canMine) {
+        // 沒綁人員檔案的帳號（例如 admin）：summary 會 409，卡片自己會把那句話畫出來
+        const host = $("lv-card-host");
+        host.innerHTML = "";
+        host.appendChild(cardLeave(true));
+    }
+    if (canTeam) { $("lv-team").style.display = ""; loadTeamLeave(); }
 }
 
 boot();

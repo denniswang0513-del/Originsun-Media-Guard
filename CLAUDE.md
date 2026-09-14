@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v2.5.20（2026-09-15）<!-- publish_update.py 自動維護，勿手改 -->
+> **版本**: v2.5.21（2026-09-15）<!-- publish_update.py 自動維護，勿手改 -->
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe main.py`
@@ -1379,6 +1379,8 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   `js/my/leave-host.js`（傳統 script，先載）備好它要的全域（`$`／`esc`／`mfetch`／`mjson`／`makeCard`／`_resetTodayStrip`）
   並畫右邊的「休假總表」；兩個可選掛鉤放 `window`（`LV_LIMIT`、`onLeaveRendered(lv, err)`），my.html 沒這兩個名字也照常
   （`test_js_parses` 的 no-undef 逐頁掃）。請假表單／送單／撤回只有 cards-hr.js 一份，別在 leave 頁再抄。鑰匙都是 `me_leave`。
+  同頁「大家的休假」（唯讀）給管理員／`hr_leave`／合夥人 `finance_partner`：後端只多放行 `api_hr.LEAVE_VIEWERS` 那兩支
+  GET（清單、全員餘額），核准類不動（`test_batch2_hr_guards` 釘）。合夥人的識別鑰匙就是 `finance_partner`，不另發新 key。
 - **報價單版面**：owner 逐項拍板過（無公司抬頭區塊、無上下色帶、灰表頭、總額無粗線、備註在結算下方、
   頁尾只留數字）。要調版面先開示範頁比對，別直接改模板。
 - **`core.quotation_pdf.PDF_MARGIN` 與模板 `@page` 必須一致**：模板還用它算「單頁時簽章貼底」的

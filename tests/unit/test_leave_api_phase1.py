@@ -52,6 +52,7 @@ def test_every_admin_endpoint_is_guarded_by_hr_leave():
         name = re.search(r"async def (\w+)\(", h).group(1)
         # 直接守（hr_leave 或管理員），或委派給同檔的 _decide_credit（它自己守）
         assert ('check_admin_or_module(request, "hr_leave")' in h or "check_admin(request)" in h
+                or "check_admin_or_module(request, *LEAVE_VIEWERS)" in h      # 唯讀兩支：合夥人也可看
                 or "_decide_credit(" in h), f"{name} 沒守"
 
 

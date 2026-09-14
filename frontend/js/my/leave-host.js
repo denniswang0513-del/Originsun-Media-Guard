@@ -7,7 +7,10 @@
 //      makeCard、WIP_LABEL、_resetTodayStrip）—— 最小版本，makeCard 不做收合。
 //   2. 畫右邊的「休假總表」：cards-hr.js 每次畫完卡（載入／送單／撤回後）叫 window.onLeaveRendered(LV, err)。
 // 核准後上 Google 日曆是後端的事（api_hr._calendar_sync_leave），這裡只標「已上日曆／日曆未同步」。
+//   3. 管理層的「大家的休假」（唯讀）：/api/v1/hr/balances（全員餘額）＋ /api/v1/hr/leave（清單）——
+//      只畫，不放核准／退回鈕（那是 CRM 人事管理的事）。leave.html 的 boot 依鑰匙決定要不要叫 loadTeamLeave。
 // 跨檔用到：cardLeave（cards-hr.js；leave.html 的 module 段呼叫）
+// 跨檔提供：onLeaveRendered、loadTeamLeave
 // ────────────────────────────────────────────────────────────────────────────
 const TOKEN_KEY = "auth_token";
 const $ = (id) => document.getElementById(id);
@@ -94,3 +97,47 @@ function onLeaveRendered(lv, err) {
         </table></div></div>`).join("");
 }
 window.onLeaveRendered = onLeaveRendered;
+
+// ── 大家的休假（管理層唯讀）────────────────────────────────────────────────
+const TEAM_AHEAD_DAYS = 60;   // 「接下來」看多遠
+function _isoShift(days) { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); }
+function _teamLeaveLine(r, withName) {
+    const period = r.start_date === r.end_date ? esc(r.start_date) : `${esc(r.start_date)} ~ ${esc(r.end_date)}`;
+    const part = ((_lvNow && _lvNow.vocab && _lvNow.vocab.part_labels) || {})[r.part] || (r.part === "all" ? "" : r.part || "");
+    return `<div class="row"><div class="grow"><div class="title">${withName ? esc(r.staff_name) + "　" : ""}${period}　${esc(r.leave_type)}${part ? `（${esc(part)}）` : ""}　${fmtH(r.hours)} h</div>${r.reason ? `<div class="meta">${esc(r.reason)}</div>` : ""}</div><span class="pill${r.status === "待審" || r.status === "消假待審" ? " hot" : ""}">${esc(r.status)}</span></div>`;
+}
+async function loadTeamLeave() {
+    const body = $("team-body");
+    let bal, approved, pending, cancelling;
+    try {
+        [bal, approved, pending, cancelling] = await Promise.all([
+            mjson("/api/v1/hr/balances"),
+            mjson("/api/v1/hr/leave?status=" + encodeURIComponent("已核准")),
+            mjson("/api/v1/hr/leave?status=" + encodeURIComponent("待審")),
+            mjson("/api/v1/hr/leave?status=" + encodeURIComponent("消假待審")),
+        ]);
+    } catch (e) { body.innerHTML = `<div class="empty">${esc(e.message || "載入失敗")}</div>`; return; }
+    if (!_lvNow) _lvNow = { vocab: bal.vocab || {} };   // 自己那張卡沒畫（純管理層）時，時段字彙從這裡拿
+    const today = bal.today || new Date().toISOString().slice(0, 10);
+    const horizon = _isoShift(TEAM_AHEAD_DAYS);
+    const upcoming = (approved.items || []).filter(r => r.end_date >= today && r.start_date <= horizon)
+        .sort((a, b) => a.start_date.localeCompare(b.start_date));
+    const hot = [...(pending.items || []), ...(cancelling.items || [])].sort((a, b) => a.start_date.localeCompare(b.start_date));
+    const nextOf = {};
+    for (const r of upcoming) if (!nextOf[r.staff_id]) nextOf[r.staff_id] = r;
+    const staff = bal.staff || [];
+    $("team-sum").textContent = `${staff.length} 人　·　接下來 ${TEAM_AHEAD_DAYS} 天 ${upcoming.length} 筆假　·　待審 ${hot.length} 筆`;
+    const rows = staff.map(s => {
+        const an = (s.balances || {})["特休"] || {}, comp = (s.balances || {})["補休"] || {};
+        const nx = nextOf[s.staff_id];
+        return `<tr><td>${esc(s.name)}</td><td class="num">${hd(an.available)}</td><td class="num">${hd(comp.available)}</td>
+            <td class="num">${fmtH(s.sick_used_days)} 天</td><td class="num">${s.pending_count ? `<span class="pill hot">${s.pending_count}</span>` : ""}</td>
+            <td>${nx ? `${esc(nx.start_date)}${nx.end_date !== nx.start_date ? " ~ " + esc(nx.end_date) : ""}　${esc(nx.leave_type)}` : `<span style="color:#a3a3a3">—</span>`}</td></tr>`;
+    }).join("");
+    body.innerHTML = `<div class="tbl-wrap"><table class="hist">
+        <thead><tr><th>人員</th><th class="num">特休剩餘</th><th class="num">補休剩餘</th><th class="num">病假已用</th><th class="num">待審</th><th>下一次休假</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">沒有在職人員</td></tr>`}</tbody></table></div>
+      <div class="hist-year"><h3>待審中 <span class="tot">${hot.length} 筆（核准在 CRM 人事管理）</span></h3>${hot.map(r => _teamLeaveLine(r, true)).join("") || `<div class="empty">沒有待審的單</div>`}</div>
+      <div class="hist-year"><h3>接下來 ${TEAM_AHEAD_DAYS} 天 <span class="tot">已核准 ${upcoming.length} 筆</span></h3>${upcoming.map(r => _teamLeaveLine(r, true)).join("") || `<div class="empty">接下來沒有人排假</div>`}</div>`;
+}
+window.loadTeamLeave = loadTeamLeave;

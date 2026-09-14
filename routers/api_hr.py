@@ -78,9 +78,15 @@ async def approved_annual_used(session, staff_ids: list, year: int) -> dict:
 
 # ── 請假單 ──────────────────────────────────────────────────────────────────
 
+#: 誰能「看」大家的假勤（唯讀的兩支：清單、全員餘額）：人事那把，加合夥人那把
+#: （owner 2026-09-15「合夥人是管理層級可以看到大家的休假狀態」；finance_partner 是合夥人帳號的識別鑰匙，
+#: 見 core/auth.py）。核准／登記／改欄位仍只認 hr_leave 或管理員 —— 合夥人只看不動。
+LEAVE_VIEWERS = ("hr_leave", "finance_partner")
+
+
 @router.get("/leave")
 async def list_leave(request: Request, status: str = "", staff_id: str = "", year: int = 0):
-    check_admin_or_module(request, "hr_leave")
+    check_admin_or_module(request, *LEAVE_VIEWERS)
     factory = db_factory_or_503()
     async with factory() as session:
         stmt = select(HrLeaveRequest)
@@ -388,7 +394,7 @@ async def delete_leave(leave_id: str, request: Request):
 @router.get("/balances")
 async def all_balances(request: Request, year: int = 0):
     """全員（在職）：特休／補休 available／reserved／expiring、病假已用、法定特休天數。"""
-    check_admin_or_module(request, "hr_leave")
+    check_admin_or_module(request, *LEAVE_VIEWERS)
     today = date.today()
     year = year or today.year
     factory = db_factory_or_503()

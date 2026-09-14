@@ -191,6 +191,10 @@ ALL_MODULES = [
     #   （儀表板/三表/drilldown/稅務包）。橫切「帳本」key，不是 tab。
     #   合夥人帳號唯一該有的 key —— **絕不可與 money_view 同給**（money_view
     #   是橫切金額鑰匙，會破報表唯讀邊界，見 plan §2.3），也絕不給 Lv3。
+    #   owner 2026-09-15「合夥人是管理層級可以看到大家的休假狀態」：這把同時是合夥人的識別 ——
+    #   假勤的兩支唯讀端點（routers/api_hr.LEAVE_VIEWERS）也認它，/leave.html 對持有者多畫「大家的休假」。
+    #   owner 2026-09-15「合夥人是管理層級可以看到大家的休假狀態」：這把同時是合夥人的識別 ——
+    #   假勤的兩支唯讀端點（routers/api_hr.LEAVE_VIEWERS）也認它，/leave.html 對持有者多畫「大家的休假」。
     # finance_mine（label：我的帳）：owner 私帳（entity='mine'）全功能
     #   ＋獨立頂層 tab 的入口 key。Lv3 經 grant_admin_all_modules 自動持有。
     # ⚠ 一律 append 在尾端 — modules[0] 決定 admin 落地頁。

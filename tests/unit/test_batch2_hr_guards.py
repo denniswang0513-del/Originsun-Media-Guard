@@ -52,9 +52,11 @@ HR_ADMIN_ONLY = ("async def approve_leave(", "async def reject_leave(", "async d
                  "async def create_credit(", "async def _decide_credit(", "async def delete_credit(",
                  "async def upsert_holiday(", "async def delete_holiday(", "async def import_holidays(",
                  "async def set_annual_leave(")
-HR_MODULE = ("async def list_leave(", "async def create_leave(", "async def leave_quota(", "async def leave_context(",
-             "async def update_leave(", "async def delete_leave(", "async def all_balances(", "async def list_credits(",
+HR_MODULE = ("async def create_leave(", "async def leave_quota(", "async def leave_context(",
+             "async def update_leave(", "async def delete_leave(", "async def list_credits(",
              "async def list_holidays(")
+# 唯讀的兩支：人事那把之外合夥人也能看（owner 2026-09-15「合夥人是管理層級可以看到大家的休假狀態」）
+HR_VIEWERS = ("async def list_leave(", "async def all_balances(")
 
 
 def test_hr_approval_family_is_admin_only_and_the_rest_stays_hr_leave():
@@ -66,6 +68,16 @@ def test_hr_approval_family_is_admin_only_and_the_rest_stays_hr_leave():
         body = func_body(HR, fn)
         assert 'check_admin_or_module(request, "hr_leave")' in body, fn
         assert "check_admin(request)" not in body, fn
+    for fn in HR_VIEWERS:
+        body = func_body(HR, fn)
+        assert "check_admin_or_module(request, *LEAVE_VIEWERS)" in body, fn
+        assert "check_admin(request)" not in body, fn
+    assert 'LEAVE_VIEWERS = ("hr_leave", "finance_partner")' in HR, "合夥人只多這兩支唯讀；其他仍是 hr_leave"
+    for fn in HR_VIEWERS:
+        body = func_body(HR, fn)
+        assert "check_admin_or_module(request, *LEAVE_VIEWERS)" in body, fn
+        assert "check_admin(request)" not in body, fn
+    assert 'LEAVE_VIEWERS = ("hr_leave", "finance_partner")' in HR, "合夥人只多這兩支唯讀；其他仍是 hr_leave"
     # credits 的 approve／reject 走 _decide_credit（它自己 check_admin）
     assert "_decide_credit(" in func_body(HR, "async def approve_credit(")
     assert "_decide_credit(" in func_body(HR, "async def reject_credit(")

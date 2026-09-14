@@ -45,12 +45,27 @@ def test_card_hooks_are_optional_so_the_workspace_is_unaffected():
 
 def test_gate_is_me_leave_everywhere():
     p = _page()
-    assert 'mods.includes("me_leave")' in p
+    assert 'const canMine = isAdmin || mods.includes("me_leave");' in p
     assert "me_petty" not in p and "me_finance" not in p
     api = repo_src("routers/api_me.py")
     assert 'require_bound_staff(request, "me_leave")' in func_body(api, "async def my_leave_summary(")
     my = repo_src("frontend/js/my/shell.js")
     assert 'has("me_leave") && { label: "假勤", href: "/leave.html" }' in my
+
+
+def test_partners_see_everyone_read_only():
+    """owner 2026-09-15「合夥人是管理層級可以看到大家的休假狀態」：管理員／hr_leave／合夥人（finance_partner）
+    在 /leave.html 多一區「大家的休假」—— 只讀 /hr/balances 與 /hr/leave，不放核准鈕；後端兩支唯讀端點同一組鑰匙。"""
+    p, h = _page(), _host()
+    assert 'const canTeam = isAdmin || mods.includes("hr_leave") || mods.includes("finance_partner");' in p
+    assert 'if (canTeam) { $("lv-team").style.display = ""; loadTeamLeave(); }' in p
+    assert 'if (!canMine && !canTeam) { _show("noperm-view"); return; }' in p, "只有管理層鑰匙、沒有 me_leave 的合夥人也進得來"
+    assert '"/api/v1/hr/balances"' in h and '"/api/v1/hr/leave?status="' in h
+    assert "/approve" not in h and "/reject" not in h and "/hr/leave/" not in h and 'method: "POST"' not in h, "合夥人頁只看不動"
+    api = repo_src("routers/api_hr.py")
+    assert 'LEAVE_VIEWERS = ("hr_leave", "finance_partner")' in api
+    for fn in ("async def list_leave(", "async def all_balances("):
+        assert "check_admin_or_module(request, *LEAVE_VIEWERS)" in func_body(api, fn), fn
 
 
 def test_summary_limit_is_clamped():
