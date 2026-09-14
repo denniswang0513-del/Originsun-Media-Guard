@@ -36,7 +36,7 @@ def test_missing_journal_weeks_are_the_past_six_weeks_not_submitted_since_hire()
 def test_endpoint_only_nags_active_staff_and_excludes_approved_leave():
     fn = code_only(func_body(repo_src("routers/api_me.py"), "async def my_reminders("))
     assert 'ident = await _me_bound(request, "me_worklog")' in fn
-    assert 'if not is_active_staff(getattr(staff, "status", None)):' in fn and "return empty" in fn     # 只有在職需要
+    assert '(getattr(staff, "status", None) or "").strip() != STAFF_ACTIVE:' in fn and "return empty" in fn   # 只認「在職」
     assert 'HrLeaveRequest.status == "已核准"' in fn and "holidays = await holidays_map(session)" in fn
     assert '.where(Timesheet.status != "plan")' in fn                                                    # 計畫卡不算填了
     assert '"journal"' in fn and "missing_journal_weeks(today, hire, statuses)" in fn                     # 沒週記鑰匙的人不催週記
@@ -135,7 +135,9 @@ async def test_endpoint_end_to_end(monkeypatch):
 
 
 async def test_endpoint_is_silent_for_people_who_left_and_skips_journals_without_the_key(monkeypatch):
-    out = await _run(monkeypatch, status="離職")
-    assert out["active"] is False and out["log_missing"] == [] and out["journals"] == []
+    """owner 2026-09-14「只提醒在職，其他不用」：合夥（owner 自己）、兼職、空白、離職都不催。"""
+    for st in ("離職", "合夥", "兼職", "", None):
+        out = await _run(monkeypatch, status=st)
+        assert out["active"] is False and out["log_missing"] == [] and out["journals"] == [], st
     out2 = await _run(monkeypatch, grants_journal=False)
     assert out2["journals"] == [] and out2["log_pending"] == ["2026-09-10"]

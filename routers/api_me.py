@@ -448,9 +448,10 @@ async def my_today(request: Request):
 @router.get("/reminders")
 async def my_reminders(request: Request):
     """補填提醒（owner 2026-09-13）：近 30 天哪些工作日專案紀錄一列都沒填／只有草稿、近 6 週哪幾週的週記還沒送出。
-    只提醒在職的人（owner「只有在職需要」）；規則在 core.reminder_logic，這裡只撈資料。
+    只提醒狀態正好是「在職」的人（owner「只有在職需要」「只提醒在職，其他不用」：合夥／兼職／空白都不催）；
+    規則在 core.reminder_logic，這裡只撈資料。
     週記那半邊要有 journal 鑰匙才算（沒鑰匙的人本來就寫不了）。前端「去填」鈕：專案紀錄跳到那一天、週記跳到那一週。"""
-    from core.hr_logic import is_active_staff
+    from core.hr_logic import STAFF_ACTIVE
     from core.leave_logic import as_date
     from core.reminder_logic import LOG_LOOKBACK_DAYS, missing_journal_weeks, missing_log_days
     from services.leave_service import holidays_map
@@ -459,7 +460,9 @@ async def my_reminders(request: Request):
     staff = ident["staff"]
     today = date.today()
     empty = {"active": False, "log_missing": [], "log_pending": [], "journals": [], "date": today.isoformat()}
-    if not is_active_staff(getattr(staff, "status", None)):
+    # 🔴 只認狀態**正好是「在職」**的人（owner 2026-09-14「這個只提醒在職，其他不用」）—— 合夥（owner 自己）、空白、
+    # 兼職、離職都不催；不用 is_active_staff（那把尺把合夥與空白也算在職，是守衛用的）
+    if (getattr(staff, "status", None) or "").strip() != STAFF_ACTIVE:
         return empty
     hire = as_date(getattr(staff, "hire_date", None))
     d0 = midnight_of(today - timedelta(days=LOG_LOOKBACK_DAYS))
