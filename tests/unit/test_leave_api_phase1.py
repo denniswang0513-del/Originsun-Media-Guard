@@ -240,3 +240,17 @@ def test_rules_live_in_leave_logic_not_in_routers():
         assert "def working_hours(" not in body, f"{name} 抄了第二份 working_hours"
         assert "hr_logic import" not in body or "is_workday" not in re.search(r"from core\.hr_logic import \(?([^)]*)\)?", body).group(1), \
             f"{name} 拿 hr_logic.is_workday（那是工時用的）"
+
+
+def test_history_import_lands_approved_without_touching_the_ledger_and_syncs_each_row():
+    """owner 2026-09-15：Notion 的休假紀錄匯進來。admin 限定；每列直接「已核准」、不走 credit／allocation；
+    同人同起訖同假別去重；匯完逐筆同步 Google（歷史的也上，不受 resync-all 的 180 天窗）。"""
+    fn = code_only(flow_body(HR, "async def import_leave("))
+    assert "check_admin(request)" in fn
+    assert "HrLeaveRequest.leave_type == lt" in fn and "HrLeaveRequest.start_date == d0, HrLeaveRequest.end_date == d1" in fn   # 去重
+    assert 'status="已核准"' in fn and 'created_by="import:" + actor' in fn
+    assert "allocate(" not in fn and "HrLeaveAllocation(" not in fn                                                # 不碰時數帳
+    assert "await _calendar_sync_leave(lid)" in fn and "if body.sync_calendar:" in fn
+    from core.schemas import LeaveImport, LeaveImportRow
+    row = LeaveImportRow(staff_id="S1", leave_type="特休", start_date="2026-09-18", end_date="2026-09-18", hours=8)
+    assert LeaveImport(rows=[row]).sync_calendar is True and row.approved_at is None

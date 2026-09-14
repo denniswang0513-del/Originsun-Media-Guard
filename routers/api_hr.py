@@ -24,7 +24,7 @@ from core.leave_logic import (ALL_LEAVE_TYPES, CREDIT_KINDS, CREDIT_SOURCES, HOL
                               LEDGER_TYPES, NOTICE_DAYS, PARTS, annual_days_for, as_date, hours_to_days,
                               parse_gov_calendar_csv, vocab as leave_vocab, working_hours)
 from core.schemas import (AnnualLeaveSet, CreditCreate, HolidayCreate, HolidayImport, LeaveCancel,
-                          LeaveCancelDecide, LeaveCreate, LeaveReject, LeaveUpdate)
+                          LeaveCancelDecide, LeaveCreate, LeaveImport, LeaveReject, LeaveUpdate)
 from db.models import CrmStaff, HrHoliday, HrLeaveAllocation, HrLeaveCredit, HrLeaveRequest
 from services import leave_service
 
@@ -120,6 +120,56 @@ async def create_leave(body: LeaveCreate, request: Request):
         out = leave_service.request_dict(obj, holidays)
     out["warnings"] = ev["warnings"]
     return out
+
+
+@router.post("/leave/import")
+async def import_leave(body: LeaveImport, request: Request):
+    """歷史請假匯入（admin；owner 2026-09-15 把 Notion 的休假紀錄匯進來）：每列直接落成「已核准」、不碰時數帳。
+    去重：同人＋同起訖＋同假別已經有一筆（任何狀態）就跳過。匯完逐筆同步 Google 日曆（歷史的也上，不受 180 天窗）。
+    回 {imported, skipped, errors:[…], ids:[…]}。"""
+    from core.leave_logic import hours_to_days
+    payload = check_admin(request)
+    actor = _actor(payload)
+    factory = db_factory_or_503()
+    imported, skipped, errors, ids = 0, 0, [], []
+    async with factory() as session:
+        staff_cache: dict = {}
+        for i, r in enumerate(body.rows):
+            lt = (r.leave_type or "").strip()
+            if lt not in ALL_LEAVE_TYPES:
+                errors.append({"row": i, "msg": f"假別需為：{'/'.join(ALL_LEAVE_TYPES)}"}); continue
+            d0, d1 = parse_ymd(r.start_date), parse_ymd(r.end_date or r.start_date)
+            if d0 is None or d1 is None or d1 < d0:
+                errors.append({"row": i, "msg": "日期格式錯或結束早於開始"}); continue
+            if r.staff_id not in staff_cache:
+                staff_cache[r.staff_id] = await session.get(CrmStaff, r.staff_id)
+            staff = staff_cache[r.staff_id]
+            if staff is None:
+                errors.append({"row": i, "msg": "人員不存在"}); continue
+            dup = (await session.execute(
+                select(HrLeaveRequest.id).where(HrLeaveRequest.staff_id == staff.id, HrLeaveRequest.leave_type == lt,
+                                                HrLeaveRequest.start_date == d0, HrLeaveRequest.end_date == d1).limit(1))).scalar()
+            if dup:
+                skipped += 1; continue
+            hours = float(r.hours or 0)
+            if hours <= 0:
+                errors.append({"row": i, "msg": "時數要 > 0"}); continue
+            approved = parse_ymd(r.approved_at) if r.approved_at else None
+            reason = (r.reason or "").strip()
+            if r.source_ref:
+                reason = (reason + "\n" if reason else "") + "來源：" + r.source_ref.strip()
+            obj = HrLeaveRequest(
+                id=uuid.uuid4().hex[:12], staff_id=staff.id, staff_name=staff.name, leave_type=lt,
+                start_date=d0, end_date=d1, hours=hours, days=hours_to_days(hours), part="all",
+                reason=reason or None, status="已核准", created_by="import:" + actor, approved_by=actor,
+                approved_at=(approved.replace(tzinfo=timezone.utc) if approved else datetime.now(timezone.utc)))
+            session.add(obj)
+            ids.append(obj.id); imported += 1
+        await session.commit()
+    if body.sync_calendar:
+        for lid in ids:
+            await _calendar_sync_leave(lid)
+    return {"imported": imported, "skipped": skipped, "errors": errors, "ids": ids}
 
 
 @router.get("/leave/quota")

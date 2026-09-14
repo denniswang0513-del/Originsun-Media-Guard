@@ -10,6 +10,24 @@ from core.media_exts import sorted_video_exts
 
 # ── N-hr H2 出缺勤（請假）──
 
+class LeaveImportRow(BaseModel):
+    """歷史請假匯入的一列（owner 2026-09-15：把 Notion 的休假紀錄匯進來）。直接落成「已核准」，**不碰時數帳**
+    （沒有 credit／allocation）；hours 明給，days 鏡射。"""
+    staff_id: str
+    leave_type: str                      # core.leave_logic.ALL_LEAVE_TYPES
+    start_date: str
+    end_date: str
+    hours: float
+    reason: Optional[str] = None
+    approved_at: Optional[str] = None    # YYYY-MM-DD；空＝今天
+    source_ref: Optional[str] = None     # 來源（Notion 頁面網址）；去重與追溯用，寫在 cancel_note 之外的 reason 尾
+
+
+class LeaveImport(BaseModel):
+    rows: List[LeaveImportRow]
+    sync_calendar: bool = True           # 匯完逐筆同步 Google 日曆（不受 resync-all 的 180 天窗限制）
+
+
 class LeaveCreate(BaseModel):
     """管理端建立/代登請假單。日期格式 YYYY-MM-DD。
     2026-09-07 假勤重整（docs/LEAVE_PLAN.md §7）：小時為正本 —— part／start_time／end_time 有給就由
