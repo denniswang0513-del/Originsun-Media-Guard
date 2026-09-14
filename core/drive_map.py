@@ -32,6 +32,7 @@ NAS_UNC_HOST = r"\\192.168.1.132"
 # 公司網路磁碟慣例（2026-07-21 自 master `net use` 盤點）
 DEFAULT_DRIVE_MAP = {
     "N": NAS_UNC_HOST + r"\Originsun",
+    "O": NAS_UNC_HOST + r"\01_FileTransfer",   # owner 2026-09-14 補（map_drives.bat 要掛齊 N~V）
     "P": NAS_UNC_HOST + r"\00_Inbox",
     "Q": NAS_UNC_HOST + r"\PreProduction",
     "R": NAS_UNC_HOST + r"\Project_ShortTerm",

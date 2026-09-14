@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """下載「把公司網路磁碟掛好」的 .bat（owner 2026-09-14「有個地方可以下載一個 bat 檔案，幫我把這些路徑設好」）。"""
-from core.drive_map import DEFAULT_DRIVE_MAP, map_drives_bat
+from core.drive_map import DEFAULT_DRIVE_MAP, NAS_UNC_HOST, map_drives_bat
 from tests.unit._srcscan import code_only, func_body, repo_src
 
 
@@ -21,3 +21,9 @@ def test_download_entry_points():
     auth = repo_src("frontend/js/auth/auth-state.js")
     assert "'下載網路磁碟設定檔 (.bat)'" in auth and "a.href = '/api/v1/drive_map/map_drives.bat';" in auth
     assert auth.index("下載網路磁碟設定檔") < auth.index("if (window._accessLevel >= 3) {")      # 登入的人都有，不只管理員
+
+
+def test_default_map_covers_the_nine_company_letters():
+    """owner 2026-09-14：N Originsun／O 01_FileTransfer／P 00_Inbox／Q PreProduction／R~T Project_*／U ProjectYuan／V storage。"""
+    assert set(DEFAULT_DRIVE_MAP) == set("NOPQRSTUV")
+    assert DEFAULT_DRIVE_MAP["O"].endswith("01_FileTransfer") and DEFAULT_DRIVE_MAP["O"].startswith(NAS_UNC_HOST + chr(92))
