@@ -198,31 +198,88 @@ def workdays_between(start: date, end: date, holidays=None) -> list:
 MAX_BATCH_DATES = 31        # 一次最多挑幾天（owner 2026-09-15「一次挑好幾個不連續的日期」）
 
 
-def fit_days_to_balance(days: list, free_hours: float) -> list:
-    """挑幾天對餘額（owner 2026-09-15「挑了 3 天 8 小時、實際只要休 20 個小時，那需要有一天假剩下 4 小時」）：
-    `days`＝[(date, hours, part)] 依日期順序把餘額用完；塞得下的照原樣，卡在中間那天只休剩下的小時（改成上午／時段），
-    後面完全塞不下的 hours=0（呼叫端標錯要員工拿掉）。回 [{date, hours, part, start_time, end_time, trimmed_from}]。
-    剩下的小時照 0.5 步進；4 小時就用「上午」（下午選的用下午），其他用時段 09:00 起（下午 13:00 起）。"""
-    out, left = [], float(free_hours or 0)
-    for d, h, part in days:
-        h = float(h or 0)
-        if h <= left + 1e-9:
-            out.append({"date": d, "hours": h, "part": part, "start_time": None, "end_time": None, "trimmed_from": None})
-            left -= h
+# ── 申請單（owner 2026-09-15 三步：日期算小時 → 自己挑要扣的假 → 一整張單送出、一次核准、核准前可編輯）────────
+# 第 2 步的清單除了特休／補休的每一筆 credit，還有這幾種不走時數帳的假別；meta：要不要附證明、給不給薪、年上限（天）。
+PICKABLE_RECORD_TYPES = ("病假", "事假", "公假", "婚假", "喪假")
+RECORD_META = {
+    "病假": {"proof": True, "paid": "1 天給薪、之後半薪", "cap_days": SICK_CAP_DAYS},
+    "事假": {"proof": False, "paid": "不給薪"},
+    "公假": {"proof": True, "paid": "給薪"},
+    "婚假": {"proof": True, "paid": "給薪", "cap_days": 8},
+    "喪假": {"proof": True, "paid": "給薪"},
+}
+
+
+def record_item_id(kind: str) -> str:
+    """清單裡不走時數帳的假別用這個當 id（credit 用自己的 id）。"""
+    return "type:" + kind
+
+
+def fit_items(picks: list, needed_hours: float) -> tuple:
+    """員工挑的假依順序把「需要的小時」填滿：picks＝[{id, kind, credit_id, available（None＝不限）, …}]。
+    回 (takes, remain)：takes＝每筆多帶 take（真的扣幾小時），挑超過的最後那一筆只扣還需要的部分、後面的不扣（take 0）；
+    remain＞0＝挑不夠。（owner：「挑了 3 天 8 小時、實際只要休 20 個小時，那需要有一天假剩下 4 小時」）"""
+    remain = round(float(needed_hours or 0), 2)
+    takes = []
+    for p in picks:
+        avail = p.get("available")
+        cap = remain if avail is None else min(float(avail), remain)
+        take = round(max(cap, 0.0), 2)
+        takes.append(dict(p, take=take))
+        remain = round(remain - take, 2)
+    return takes, max(remain, 0.0)
+
+
+def _hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def plan_children(day_slots: list, takes: list) -> list:
+    """把挑好的假依日期順序鋪到每一天：day_slots＝[{date, hours, part, start_time, end_time}]（試算過、沒錯的天）。
+    同一天同一種假（就算跨兩筆 credit）＝一張子單、allocations 帶兩筆；換了一種假才拆成第二張：整天剛好 4／4 拆上午／下午，
+    其他照時段接續（上午／整天從 09:00 起、下午從 13:00 起）。回 [{date, kind, hours, part, start_time, end_time, allocations:[[credit_id, h]…]}]。"""
+    pool = [dict(t, left=float(t.get("take") or 0)) for t in takes if float(t.get("take") or 0) > 0]
+    out = []
+    for slot in day_slots:
+        need = float(slot["hours"] or 0)
+        segs = []                                   # [(kind, credit_id|None, h)]
+        for t in pool:
+            if need <= 1e-9:
+                break
+            h = round(min(t["left"], need), 2)
+            if h <= 0:
+                continue
+            segs.append((t["kind"], t.get("credit_id"), h))
+            t["left"] = round(t["left"] - h, 2)
+            need = round(need - h, 2)
+        # 同種假合併成一張
+        merged = []
+        for kind, cid, h in segs:
+            if merged and merged[-1]["kind"] == kind:
+                merged[-1]["hours"] = round(merged[-1]["hours"] + h, 2)
+                if cid:
+                    merged[-1]["allocations"].append([cid, h])
+            else:
+                merged.append({"kind": kind, "hours": h, "allocations": [[cid, h]] if cid else []})
+        part = slot.get("part") or "all"
+        if len(merged) == 1:
+            m = merged[0]
+            out.append({"date": slot["date"], "kind": m["kind"], "hours": m["hours"], "part": part,
+                        "start_time": slot.get("start_time") if part == "range" else None,
+                        "end_time": slot.get("end_time") if part == "range" else None, "allocations": m["allocations"]})
             continue
-        keep = int(left * 2) / 2                      # 0.5 步進，往下取
-        if keep <= 0:
-            out.append({"date": d, "hours": 0.0, "part": part, "start_time": None, "end_time": None, "trimmed_from": h})
+        if part == "all" and len(merged) == 2 and merged[0]["hours"] == 4 and merged[1]["hours"] == 4:
+            for m, p in zip(merged, ("am", "pm")):
+                out.append({"date": slot["date"], "kind": m["kind"], "hours": 4.0, "part": p, "start_time": None, "end_time": None,
+                            "allocations": m["allocations"]})
             continue
-        base = 13 * 60 if part == "pm" else 9 * 60
-        if keep == 4 and part != "range":
-            row = {"date": d, "hours": 4.0, "part": "pm" if part == "pm" else "am", "start_time": None, "end_time": None, "trimmed_from": h}
-        else:
-            end = base + int(keep * 60)
-            row = {"date": d, "hours": keep, "part": "range", "start_time": f"{base // 60:02d}:{base % 60:02d}",
-                   "end_time": f"{end // 60:02d}:{end % 60:02d}", "trimmed_from": h}
-        out.append(row)
-        left = 0.0
+        base = {"pm": 13 * 60, "range": parse_hhmm(slot.get("start_time")) or 9 * 60}.get(part, 9 * 60)
+        cur = base
+        for m in merged:
+            end = cur + int(round(m["hours"] * 60))
+            out.append({"date": slot["date"], "kind": m["kind"], "hours": m["hours"], "part": "range",
+                        "start_time": _hhmm(cur), "end_time": _hhmm(end), "allocations": m["allocations"]})
+            cur = end
     return out
 
 

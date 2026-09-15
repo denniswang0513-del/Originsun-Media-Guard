@@ -492,6 +492,8 @@ CRM_COLUMNS = [
     ("hr_leave_requests", "reject_note", "TEXT"),
     ("hr_leave_requests", "cancel_note", "TEXT"),
     ("hr_leave_requests", "proof_path", "TEXT"),          # 病假證明檔（2026-09-15）
+    ("hr_leave_requests", "application_id", "VARCHAR(32)"),   # 申請單（hr_leave_applications 由 create_all 建）
+    ("hr_leave_requests", "alloc_plan", "TEXT"),
     ("hr_leave_requests", "google_event_id", "VARCHAR(255)"),
     ("hr_leave_requests", "synced_at", "TIMESTAMPTZ"),
     ("hr_leave_requests", "sync_error", "TEXT"),

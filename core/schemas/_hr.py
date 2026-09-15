@@ -84,14 +84,21 @@ class MeLeaveCreate(BaseModel):
     reason: Optional[str] = None
 
 
-class MeLeaveBatch(BaseModel):
-    """POST /me/leave/batch（與 /batch/preview）：一次挑好幾個不連續的日期，一天一張單（同假別／時段／事由）。
-    不收 hours（同 MeLeaveCreate 的理由）；part 只認 all／am／pm／range，時段套用到每一天。"""
-    leave_type: str
-    dates: List[str]
+class LeaveItemPick(BaseModel):
+    """第 2 步挑的一筆：id＝credit id 或 type:假別（清單 /me/leave/inventory 給的）。順序＝扣的順序；扣幾小時由後端算。"""
+    id: str
+
+
+class MeLeaveApplication(BaseModel):
+    """POST /me/leave/applications（與 preview、PUT）：挑的日期（可不連續）＋每天同一組時段＋挑要扣的假＋事由。不收 hours。
+    dates 空而 start_date／end_date 有給＝起迄模式，後端展開成工作日（週末／假日自動跳過）。"""
+    dates: List[str] = []
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     part: Optional[str] = None
     start_time: Optional[str] = None
     end_time: Optional[str] = None
+    items: List[LeaveItemPick] = []
     reason: Optional[str] = None
 
 

@@ -7,6 +7,9 @@
 //   載入順序＝原本 inline script 由上而下的執行順序，不可調換。
 // 跨檔用到：$、esc、money、mfetch、WS、makeCard、WIP_LABEL（cards.js）
 // 跨檔提供：cardLeave、loadLeave、cardFinance、_localToday（zone1.js／week-plan.js／parttime.js 都用）、loadMyTs
+// 假勤卡＝三步送單（owner 2026-09-15）：1 日期算需要幾小時 → 2 從自己的假裡挑要扣的（/me/leave/inventory，順序＝扣的順序，
+// 挑超過最後一筆只扣還需要的） → 3 一整張申請單送出（/me/leave/applications；管理員一次核准；核准前可編輯／撤回）。
+// 舊的單張單（/me/leave）只剩手機版與匯入的歷史單在用，清單上沒有申請單的那些照舊一列一筆。
 // 第二個宿主：/leave.html（owner 2026-09-15「在這裡新增假勤」—— 最上排一顆鈕開寬頁，同零用金）。
 // 那一頁載同一支檔（前面先載 js/my/leave-host.js 備好 $／esc／mfetch／mjson／makeCard／_resetTodayStrip），
 // 另外兩個可選掛鉤放 window：window.LV_LIMIT（summary 拿幾筆）、window.onLeaveRendered(LV, err)（畫完
@@ -20,10 +23,14 @@
 const LV_PART_FALLBACK = { all: "整天", am: "上午", pm: "下午", range: "時段" };
 const LV_PART_LABEL = (code) => ((LV && LV.vocab && LV.vocab.part_labels) || LV_PART_FALLBACK)[code] || code || "";
 let LV = null;                 // 最近一次 summary
-let _lvDates = [];             // 「挑幾天」模式選好的日期（空＝用起迄那組）
-let _lvTrim = {};              // 其中被削成剩下小時的那天 {date: hours}（試算回的）
 let _lvPreviewTimer = null;    // preview 去抖
 let _lvPreviewSeq = 0;         // 舊回應不蓋新回應
+// 三步送單的狀態（owner 2026-09-15：日期算小時 → 自己挑要扣的假 → 一整張申請單送出、一次核准、核准前可編輯）
+let _lvDates = [];             // 「挑幾天」模式選好的日期
+let _lvPicks = [];             // 第 2 步挑的假（清單 id，順序＝扣的順序）
+let _lvInv = [];               // 第 2 步清單（/me/leave/inventory）
+let _lvEditing = "";           // 正在編輯的申請單 id（空＝新單）
+let _lvProofNeeded = false;    // 挑到要附證明的假別（試算回的）
 function cardLeave(bound) {
     // 🔴 標「開發中」（owner 2026-09-10）：功能是做好的，但**沒有人的時數帳被匯入過**
     //    （生產的 hr_leave_credits／hr_leave_allocations 都是 0 列），所以每個人看到的
@@ -50,8 +57,10 @@ async function loadLeave() {
     const body = _lvBody();
     if (!body) return;
     const hook = typeof window.onLeaveRendered === "function" ? window.onLeaveRendered : null;   // 掛鉤在 window 上：my.html 沒這名字
-    try { LV = await mjson("/api/v1/me/leave/summary" + (typeof window.LV_LIMIT === "number" ? "?limit=" + window.LV_LIMIT : "")); }
-    catch (e) {
+    try {
+        LV = await mjson("/api/v1/me/leave/summary" + (typeof window.LV_LIMIT === "number" ? "?limit=" + window.LV_LIMIT : ""));
+        _lvInv = (await mjson("/api/v1/me/leave/inventory" + (_lvEditing ? "?exclude=" + encodeURIComponent(_lvEditing) : ""))).items || [];
+    } catch (e) {
         body.innerHTML = `<div class="empty">${esc(e.message || "載入失敗")}</div>`;
         if (hook) hook(null, e);   // 宿主的總表也要知道（例如沒綁人員檔案的 409）
         return;
@@ -72,15 +81,13 @@ function renderLeave(body) {
     const bal = LV.balances || {};
     const an = bal["特休"] || {}, comp = bal["補休"] || {};
     const sick = LV.sick || {};
-    // 自助只開特休／補休／病假（owner 2026-09-15）；vocab 沒給 self_service_types 的舊後端退回整份清單
-    const types = v.self_service_types || v.leave_types || ["特休", "補休", "病假"];
     const parts = v.parts || Object.keys(LV_PART_FALLBACK);
     const today = _localToday();
     const expiring = (an.expiring || [])[0];
     const ledgerEmpty = _lvLedgerEmpty(bal);
     const badge = document.querySelector('.card[data-card="leave"] .count.wip');
     if (badge) badge.style.display = ledgerEmpty ? "" : "none";
-    let html = `${ledgerEmpty ? `<div class="wip-note">你的特休／補休時數帳還沒建，所以這兩個數字是 0、這兩種假送出會被擋（其他假別照常）。要用請找管理員在人事管理的時數帳補額度。</div>` : ""}
+    let html = `${ledgerEmpty ? `<div class="wip-note">你的特休／補休時數帳還沒建，所以這兩個數字是 0、這兩種假挑不到。要用請找管理員在人事管理的時數帳補額度。</div>` : ""}
     <div class="stat-row">
         <div class="stat"><div class="num">${_lvH(an.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(an.available)} 天）</span></div><div class="lbl">特休剩餘</div></div>
         <div class="stat"><div class="num">${_lvH(comp.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(comp.available)} 天）</span></div><div class="lbl">補休剩餘</div></div>
@@ -90,16 +97,14 @@ function renderLeave(body) {
         ${an.reserved ? `特休待審保留 ${_lvH(an.reserved)} h　` : ""}${comp.reserved ? `補休待審保留 ${_lvH(comp.reserved)} h　` : ""}${expiring ? `特休最近到期：${_lvH(expiring.hours)} h（${esc(expiring.expires_on)}）` : ""}
     </div>` : ""}
     <div class="pf-edit" id="lv-form" style="border-top:1px solid #f5f5f5;padding-top:12px;padding-bottom:4px;">
+        <div class="lv-step"><span class="lv-n">1</span>日期<span class="lv-need" id="lv-need"></span></div>
         <div class="inline-row" style="margin-bottom:8px;">
-            <select id="lv-type">${types.map(t => `<option>${esc(t)}</option>`).join("")}</select>
+            <select id="lv-mode"><option value="range">起迄日期</option><option value="pick">挑幾天（不連續）</option></select>
             <select id="lv-part">${parts.map(p => `<option value="${esc(p)}">${esc(LV_PART_LABEL(p))}</option>`).join("")}</select>
         </div>
-        <div class="inline-row" style="margin-bottom:8px;">
+        <div class="inline-row" id="lv-range-row" style="margin-bottom:8px;">
             <input type="date" id="lv-start" value="${today}">
             <input type="date" id="lv-end" value="${today}">
-        </div>
-        <div style="margin:-2px 0 8px;">
-            <button class="mini-btn" type="button" id="lv-multi-toggle" onclick="lvToggleMulti()">挑幾天（不連續）</button>
         </div>
         <div id="lv-multi" style="display:none;margin-bottom:8px;">
             <div class="inline-row" style="margin-bottom:6px;">
@@ -112,65 +117,75 @@ function renderLeave(body) {
             <input type="time" id="lv-start-time" step="1800" value="09:00">
             <input type="time" id="lv-end-time" step="1800" value="13:00">
         </div>
-        <div id="lv-preview" style="font-size:12px;color:var(--sub);margin-bottom:8px;line-height:1.7;"></div>
+        <div class="lv-step"><span class="lv-n">2</span>從自己的假裡挑要扣的<span class="lv-need" id="lv-fit"></span></div>
+        <div id="lv-inv" class="lv-inv"></div>
+        <div id="lv-preview" style="font-size:12px;color:var(--sub);margin:8px 0;line-height:1.7;"></div>
+        <div class="lv-step"><span class="lv-n">3</span>送出</div>
         <div class="field"><textarea id="lv-reason" rows="2" placeholder="事由（必填）"></textarea></div>
-        <div class="field" id="lv-proof-wrap" style="display:${_lvNeedsProof(types[0]) ? "" : "none"};">
-            <label style="display:block;font-size:11px;color:var(--sub);margin-bottom:4px;">病假證明（必附：診斷證明或掛號單照片／PDF）</label>
+        <div class="field" id="lv-proof-wrap" style="display:none;">
+            <label style="display:block;font-size:11px;color:var(--sub);margin-bottom:4px;">證明（必附：診斷證明／掛號單／相關文件的照片或 PDF）</label>
             <input type="file" id="lv-proof" accept=".jpg,.jpeg,.png,.heic,.webp,.pdf">
         </div>
-        <div style="display:flex;gap:8px;align-items:center;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <button class="mini-btn" id="lv-submit" onclick="applyLeave()">送出請假</button>
+            <button class="mini-btn" id="lv-cancel-edit" type="button" onclick="lvCancelEdit()" style="display:none;">取消編輯</button>
             <span class="err" id="lv-err" style="margin-top:0;"></span>
         </div>
     </div>`;
-    html += (LV.requests || []).slice(0, LV_RECENT_MAX).map(_lvRow).join("");
+    html += _lvListHtml();
     body.innerHTML = html;
-    _lvDates = []; _lvTrim = {};   // 重畫（送單後）就回到起迄模式
+    _lvDates = []; _lvPicks = _lvPicks.filter(id => _lvInv.some(i => i.id === id));   // 重畫（送單後）就回到起迄模式；編輯中的挑法保留
     const form = $("lv-form");
     form.addEventListener("input", (e) => { if (e.target.id !== "lv-reason") lvPreviewSoon(); });
     form.addEventListener("change", (e) => {
         if (e.target.id === "lv-part") $("lv-range").style.display = e.target.value === "range" ? "" : "none";
-        if (e.target.id === "lv-type") $("lv-proof-wrap").style.display = _lvNeedsProof(e.target.value) ? "" : "none";
+        if (e.target.id === "lv-mode") lvSetMode(e.target.value);
         if (e.target.id === "lv-start" && $("lv-end").value < e.target.value) $("lv-end").value = e.target.value;
         if (e.target.id !== "lv-reason") lvPreviewSoon();
     });
+    _lvDrawInv(); _lvDrawChips();
+    if (_lvEditing) _lvFillEditing();
     lvPreviewSoon();
 }
-// 病假要附證明（vocab.proof_required_types；正本 core/leave_logic.PROOF_REQUIRED_TYPES）
-const _lvNeedsProof = (t) => ((LV && LV.vocab && LV.vocab.proof_required_types) || ["病假"]).includes(t);
-function _lvAuthHeaders() {
-    const h = {}; const tok = localStorage.getItem(TOKEN_KEY);
-    if (tok) h["Authorization"] = "Bearer " + tok;
-    return h;
+// ── 清單（申請單為主；沒有申請單的舊單／手機單照舊一列一筆）──
+function _lvListHtml() {
+    const apps = (LV.applications || []).slice(0, LV_RECENT_MAX).map(_lvAppRow).join("");
+    const legacy = (LV.requests || []).filter(r => !r.application_id).slice(0, LV_RECENT_MAX).map(_lvRow).join("");
+    return apps + legacy;
 }
-// 上傳走 multipart：不能用 mfetch（它會補 JSON 的 Content-Type）
-function _lvUploadProof(id, file) {
-    const fd = new FormData(); fd.append("file", file);
-    return fetch("/api/v1/me/leave/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd });
+function _lvDatesLabel(dates) {
+    const md = d => esc(String(d).slice(5).replace("-", "/"));
+    if (!dates || !dates.length) return "";
+    if (dates.length === 1) return md(dates[0]);
+    // 連續的寫成起～迄，不連續的逐個列（最多列 6 個）
+    const consecutive = dates.every((d, i) => i === 0 || (new Date(d) - new Date(dates[i - 1])) / 86400000 <= 3);
+    return consecutive && dates.length > 2 ? `${md(dates[0])}～${md(dates[dates.length - 1])}（${dates.length} 天）`
+        : dates.slice(0, 6).map(md).join("、") + (dates.length > 6 ? `…共 ${dates.length} 天` : "");
 }
-async function viewLeaveProof(id) {
-    // <a href> 帶不了 Authorization，抓成 blob 再開（同 js/shared/utils.authDownload 的理由）
-    try {
-        const r = await fetch("/api/v1/me/leave/" + id + "/proof", { headers: _lvAuthHeaders() });
-        if (!r.ok) { const d = await r.json().catch(() => ({})); alert((typeof d.detail === "string" && d.detail) || "開不了證明"); return; }
-        const href = URL.createObjectURL(await r.blob());
-        window.open(href, "_blank");
-        setTimeout(() => URL.revokeObjectURL(href), 60000);
-    } catch (_) { alert("連線失敗"); }
-}
-async function lvProofPick(id, input) {
-    const file = input.files && input.files[0];
-    if (!file) return;
-    const r = await _lvUploadProof(id, file).catch(() => null);
-    if (!r || !r.ok) { const d = r ? await r.json().catch(() => ({})) : {}; alert((typeof d.detail === "string" && d.detail) || "上傳失敗"); return; }
-    loadLeave();
-}
-function _lvProofCell(r) {
-    if (!_lvNeedsProof(r.leave_type)) return "";
-    if (r.proof_path) return `<button class="mini-btn" onclick="viewLeaveProof('${esc(r.id)}')">看證明</button>`;
-    if (r.status === "待審" || r.status === "消假待審" || r.status === "已核准")
-        return `<label class="mini-btn" style="color:#b45309;border-color:#fcd34d;">缺證明，補傳<input type="file" accept=".jpg,.jpeg,.png,.heic,.webp,.pdf" hidden onchange="lvProofPick('${esc(r.id)}', this)"></label>`;
-    return "";
+function _lvAppRow(a) {
+    const hot = a.status === "待審" || a.status === "消假待審";
+    const items = (a.items || []).map(i => `${esc(i.label || i.kind)} ${_lvH(i.hours)}h`).join("、");
+    const metas = [`扣：${items || "—"}`];
+    if (a.reason) metas.push(esc(a.reason));
+    if (a.status === "已退回" && a.reject_note) metas.push(`退回理由：${esc(a.reject_note)}`);
+    if (a.status === "消假待審" && a.cancel_note) metas.push(`消假理由：${esc(a.cancel_note)}`);
+    if (a.status === "已核准" && a.approved_by) metas.push(`核可：${esc(a.approved_by)}`);
+    let act = "";
+    if (a.status === "待審") {
+        act = `<button class="mini-btn" onclick="lvEditApp('${esc(a.id)}')">編輯</button><button class="mini-btn" onclick="cancelLeaveApp('${esc(a.id)}', 'free')">撤回</button>`;
+    } else if (a.status === "已核准") {
+        if (a.cancel_mode === "free") act = `<button class="mini-btn" onclick="cancelLeaveApp('${esc(a.id)}', 'free')">撤回</button>`;
+        else if (a.cancel_mode === "apply") act = `<button class="mini-btn" onclick="cancelLeaveApp('${esc(a.id)}', 'apply')">申請消假</button>`;
+        else if (a.cancel_mode === "locked") act = `<button class="mini-btn" disabled title="颱風假當日不可消">颱風假當日不可消</button>`;
+    }
+    return `<div class="row">
+        <div class="grow">
+            <div class="title">請假單　${_lvDatesLabel(a.dates)}${a.part && a.part !== "all" ? `（${esc(LV_PART_LABEL(a.part))}）` : ""}　${_lvH(a.hours)} 小時／${_lvDays(a.hours)} 天</div>
+            <div class="meta">${metas.join("　")}</div>
+        </div>
+        <span class="pill${hot ? " hot" : ""}">${esc(a.status)}</span>
+        ${_lvAppProofCell(a)}${act}
+    </div>`;
 }
 function _lvRow(r) {
     const hot = r.status === "待審" || r.status === "消假待審";
@@ -199,62 +214,66 @@ function _lvRow(r) {
         ${_lvProofCell(r)}${act}
     </div>`;
 }
-function _lvPayload() {
-    const part = $("lv-part").value;
-    return {
-        leave_type: $("lv-type").value, start_date: $("lv-start").value, end_date: $("lv-end").value || $("lv-start").value,
-        part, start_time: part === "range" ? $("lv-start-time").value : null, end_time: part === "range" ? $("lv-end-time").value : null,
-    };
+// ── 第 1 步：日期 ──
+function lvSetMode(mode) {
+    const pick = mode === "pick";
+    $("lv-multi").style.display = pick ? "" : "none";
+    $("lv-range-row").style.display = pick ? "none" : "";
+    if (!pick) _lvDates = [];
+    _lvDrawChips();
 }
-// ── 挑幾天（不連續）：owner 2026-09-15。選了日期就走 /me/leave/batch（一天一張單）；清空就回到起迄那組 ──
-// 🔴 「挑幾天」開著就算挑幾天模式，不看有沒有挑到日期：原本用 _lvDates.length 判定，開了模式、還沒挑、直接按送出
-//    會把被藏起來的起迄日期送出去（/polish 2026-09-15 BUG-1）。沒挑日期時試算與送出都要說「先挑日期」。
-const _lvMultiOn = () => { const b = $("lv-multi"); return !!b && b.style.display !== "none"; };
-const _lvMulti = () => _lvMultiOn();
-function lvToggleMulti() {
-    const box = $("lv-multi"), on = box.style.display === "none";
-    box.style.display = on ? "" : "none";
-    $("lv-start").parentElement.style.display = on ? "none" : "";
-    $("lv-multi-toggle").textContent = on ? "改回起迄日期" : "挑幾天（不連續）";
-    if (!on) { _lvDates = []; _lvTrim = {}; }
-    _lvDrawChips(); lvPreviewSoon();
-}
+const _lvPickMode = () => { const m = $("lv-mode"); return !!m && m.value === "pick"; };
 function lvAddDate() {
     const d = $("lv-multi-date").value;
     if (!d || _lvDates.includes(d)) return;
     _lvDates.push(d); _lvDates.sort();
     _lvDrawChips(); lvPreviewSoon();
 }
-function lvRemoveDate(d) { _lvDates = _lvDates.filter(x => x !== d); delete _lvTrim[d]; _lvDrawChips(); lvPreviewSoon(); }
+function lvRemoveDate(d) { _lvDates = _lvDates.filter(x => x !== d); _lvDrawChips(); lvPreviewSoon(); }
 function _lvDrawChips() {
     const host = $("lv-multi-chips");
     if (!host) return;
-    host.innerHTML = _lvDates.map(d => `<span class="pill" style="text-transform:none;letter-spacing:0;font-size:12px;${d in _lvTrim ? "border-color:#fcd34d;color:#b45309;" : ""}">${esc(d.slice(5).replace("-", "/"))}${d in _lvTrim ? ` ${_lvH(_lvTrim[d])}h` : ""}
+    host.innerHTML = _lvDates.map(d => `<span class="pill" style="text-transform:none;letter-spacing:0;font-size:12px;">${esc(d.slice(5).replace("-", "/"))}
         <button type="button" onclick="lvRemoveDate('${esc(d)}')" style="border:0;background:none;cursor:pointer;color:var(--sub);padding:0 0 0 4px;font-size:12px;" title="拿掉">×</button></span>`).join("")
         || `<span style="font-size:12px;color:var(--sub);">還沒挑日期</span>`;
 }
-function _lvBatchPayload() {
-    const p = _lvPayload();
-    return { leave_type: p.leave_type, dates: _lvDates.slice(), part: p.part, start_time: p.start_time, end_time: p.end_time };
+// ── 第 2 步：從自己的假裡挑（順序＝扣的順序）──
+function _lvDrawInv() {
+    const host = $("lv-inv");
+    if (!host) return;
+    if (!_lvInv.length) { host.innerHTML = `<div class="empty" style="padding:8px 0;">沒有可以挑的假</div>`; return; }
+    host.innerHTML = _lvInv.map(i => {
+        const n = _lvPicks.indexOf(i.id);
+        const off = i.available !== null && i.available !== undefined && Number(i.available) <= 0;
+        const amount = i.available === null || i.available === undefined ? "不限" : `${_lvH(i.available)} h（${_lvDays(i.available)} 天）`;
+        const sub = n >= 0 ? `第 ${n + 1} 個挑的` : [i.expires_on ? `${esc(i.expires_on)} 到期` : "", i.proof_required ? "要附證明" : "", i.paid && i.paid !== "給薪" ? esc(i.paid) : ""].filter(Boolean).join("・");
+        return `<label class="lv-inv-row${off ? " off" : ""}${n >= 0 ? " on" : ""}">
+            <input type="checkbox" ${n >= 0 ? "checked" : ""} ${off ? "disabled" : ""} onchange="lvTogglePick('${esc(i.id)}', this.checked)">
+            <span><span class="lv-kind">${esc(i.kind)}</span>${esc(i.label)}</span>
+            <span class="lv-amt">${off ? "沒有庫存" : amount}<small>${sub}</small></span>
+        </label>`;
+    }).join("");
 }
-// 任何欄位一動就重算，但等 300ms 沒再動才真的打（打字改日期不會每個鍵一發）
+function lvTogglePick(id, on) {
+    _lvPicks = _lvPicks.filter(x => x !== id);
+    if (on) _lvPicks.push(id);
+    _lvDrawInv(); lvPreviewSoon();
+}
+// ── 試算（後端 /me/leave/applications/preview 算：需要幾小時、每筆扣幾小時、還差幾小時、展開成哪幾張）──
+function _lvAppPayload(withReason) {
+    const part = $("lv-part").value;
+    const p = {
+        part, start_time: part === "range" ? $("lv-start-time").value : null, end_time: part === "range" ? $("lv-end-time").value : null,
+        items: _lvPicks.map(id => ({ id })),
+    };
+    if (_lvPickMode()) p.dates = _lvDates.slice();
+    else { p.dates = []; p.start_date = $("lv-start").value; p.end_date = $("lv-end").value || $("lv-start").value; }
+    if (withReason) p.reason = ($("lv-reason").value || "").trim();
+    return p;
+}
 function lvPreviewSoon() {
     clearTimeout(_lvPreviewTimer);
     _lvPreviewTimer = setTimeout(lvPreview, 300);
-}
-// 走時數帳的假別（特休／補休）：挑的過程直接看到「可用多少 → 這次用多少 → 還剩多少」（owner 2026-09-15）
-function _lvBalanceLine(type, d) {
-    const b = d.balance;
-    if (!b || typeof b.available !== "number") return "";
-    const free = Math.round((b.available - (b.reserved || 0)) * 100) / 100;
-    const left = Math.round((free - Number(d.hours || 0)) * 100) / 100;
-    const tr = d.trimmed || [];
-    const tail = left < 0
-        ? `<b style="color:var(--red);">超過 ${_lvH(-left)} 小時</b>`
-        : (tr.length
-            ? `<b style="color:#b45309;">剛好用完；${tr.map(t => `${esc(t.date.slice(5).replace("-", "/"))} 只休 ${_lvH(t.hours)} 小時`).join("、")}</b>`
-            : `還剩 <b>${_lvH(left)} 小時（${_lvDays(left)} 天）</b>`);
-    return `<div>${esc(type)}可用 ${_lvH(free)} 小時${b.reserved ? `（已扣掉待審保留 ${_lvH(b.reserved)}）` : ""} → 這次 ${_lvH(d.hours)} 小時 → ${tail}</div>`;
 }
 function _lvMsgs(list, color) {
     return (list || []).map(x => `<div style="color:${color};">${esc(x.msg || x.code || x)}</div>`).join("");
@@ -263,38 +282,55 @@ async function lvPreview() {
     const host = $("lv-preview");
     if (!host) return;
     const seq = ++_lvPreviewSeq;
-    const multi = _lvMulti();
-    const p = multi ? _lvBatchPayload() : _lvPayload();
-    if (!multi && !p.start_date) { host.innerHTML = ""; return; }
-    if (multi && !_lvDates.length) { host.innerHTML = `<div style="color:var(--sub);">先挑日期（按「加入這天」）</div>`; const b = $("lv-submit"); if (b) b.disabled = true; return; }
+    const p = _lvAppPayload(false);
+    const need = $("lv-need"), fit = $("lv-fit"), btn = $("lv-submit");
+    if (_lvPickMode() ? !p.dates.length : !p.start_date) {
+        need.textContent = _lvPickMode() ? "先挑日期" : ""; fit.textContent = ""; host.innerHTML = ""; if (btn) btn.disabled = true; return;
+    }
     let d;
-    try { d = await mjson(multi ? "/api/v1/me/leave/batch/preview" : "/api/v1/me/leave/preview", { method: "POST", body: JSON.stringify(p) }); }
+    try { d = await mjson("/api/v1/me/leave/applications/preview" + (_lvEditing ? "?exclude=" + encodeURIComponent(_lvEditing) : ""), { method: "POST", body: JSON.stringify(p) }); }
     catch (e) { if (seq === _lvPreviewSeq) host.innerHTML = `<div style="color:var(--red);">${esc(e.message)}</div>`; return; }
     if (seq !== _lvPreviewSeq) return;
-    _lvTrim = Object.fromEntries((d.trimmed || []).map(t => [t.date, t.hours])); _lvDrawChips();   // 削過的那天在標籤上也標
-    // 挑幾天：每一天自己的錯誤（撞單、假日、餘額用完）標上日期，整批的照常
-    const perDay = multi ? (d.dates || []).flatMap(x => x.errors.map(e => ({ msg: `${x.date.slice(5).replace("-", "/")}：${e.msg}` }))) : [];
-    const errs = [...perDay, ...(d.errors || [])], warns = d.warnings || [];
-    host.innerHTML = `<div>${multi ? `挑了 ${_lvDates.length} 天，` : ""}共 ${_lvH(d.hours)} 小時（${_lvDays(d.hours)} 天）</div>${_lvBalanceLine(p.leave_type, d)}${_lvMsgs(warns, "#b45309")}${_lvMsgs(errs, "var(--red)")}`;
-    const btn = $("lv-submit");
+    const errs = d.errors || [], warns = d.warnings || [];
+    need.textContent = `需要 ${_lvH(d.needed_hours)} 小時（${_lvDays(d.needed_hours)} 天）`;
+    const picked = (d.takes || []).reduce((a, t) => a + Number(t.take || 0), 0);
+    if (!(d.takes || []).length) fit.innerHTML = `<span style="color:#b45309;">還沒挑要扣的假</span>`;
+    else if (Number(d.remain) > 0) fit.innerHTML = `<span style="color:#b45309;">已挑 ${_lvH(picked)} 小時 → 還差 ${_lvH(d.remain)} 小時，再挑一筆</span>`;
+    else fit.innerHTML = `<span style="color:var(--ok, #15803d);">已挑 ${_lvH(picked)} 小時 → 剛好</span>`;
+    // 每一筆扣多少、剩多少；沒扣到的說出來
+    const takeLines = (d.takes || []).map(t => {
+        const left = t.available === null || t.available === undefined ? "" : `，剩 ${_lvH(Number(t.available) - Number(t.take))} h`;
+        return `<div>${esc(t.kind)}｜${esc(t.label || "")}：${Number(t.take) > 0 ? `扣 ${_lvH(t.take)} h${left}` : "<span style='color:var(--sub);'>已經夠了，這筆沒扣到</span>"}${t.proof_required && Number(t.take) > 0 ? " <b style='color:#b45309;'>要附證明</b>" : ""}</div>`;
+    }).join("");
+    const dayLines = (d.children || []).length && !errs.length
+        ? `<div style="margin-top:4px;">這張單每一天扣的是：</div>` + (d.children || []).map(c => `<div>${esc(c.date.slice(5).replace("-", "/"))}　${esc(c.kind)} ${_lvH(c.hours)} h${c.part && c.part !== "all" ? `（${esc(LV_PART_LABEL(c.part))}${c.part === "range" ? " " + esc(c.start_time) + "–" + esc(c.end_time) : ""}）` : ""}</div>`).join("")
+        : "";
+    host.innerHTML = takeLines + dayLines + _lvMsgs(warns, "#b45309") + _lvMsgs(errs, "var(--red)");
+    _lvProofNeeded = !!d.proof_required;
+    const pw = $("lv-proof-wrap");
+    if (pw) pw.style.display = _lvProofNeeded ? "" : "none";
     if (btn) btn.disabled = errs.length > 0;
 }
+// ── 第 3 步：送出（新單 POST；編輯中的單 PUT）──
 async function applyLeave() {
     const errEl = $("lv-err");
     const show = (msg) => { errEl.innerHTML = msg; errEl.style.display = "inline"; };
     errEl.style.display = "none";
     const reason = ($("lv-reason").value || "").trim();
     if (!reason) { show("請填事由"); $("lv-reason").focus(); return; }
-    if (_lvMulti() && !_lvDates.length) { show("還沒挑日期"); return; }
-    const proofFile = _lvNeedsProof($("lv-type").value) ? ($("lv-proof").files || [])[0] : null;
-    if (_lvNeedsProof($("lv-type").value) && !proofFile) { show("病假要附證明（照片或 PDF）"); return; }
-    // 送出中鎖住：連點兩下會建出兩張一模一樣的待審單（手機版的 withBusy 早就有，桌機這條原本沒有）
+    if (_lvPickMode() && !_lvDates.length) { show("還沒挑日期"); return; }
+    if (!_lvPicks.length) { show("還沒挑要扣的假"); return; }
+    const proofFile = ($("lv-proof").files || [])[0];
+    const editing = _lvEditing;
+    const hasProof = editing && (LV.applications || []).some(a => a.id === editing && a.proof_path);
+    if (_lvProofNeeded && !proofFile && !hasProof) { show("這種假要附證明（照片或 PDF）"); return; }
+    // 送出中鎖住：連點兩下會建出兩張一模一樣的待審單
     const btn = $("lv-submit");
     if (btn) { if (btn.dataset.busy) return; btn.dataset.busy = "1"; btn.disabled = true; }
     try {
-        const r = _lvMulti()
-            ? await mfetch("/api/v1/me/leave/batch", { method: "POST", body: JSON.stringify(Object.assign(_lvBatchPayload(), { reason })) })
-            : await mfetch("/api/v1/me/leave", { method: "POST", body: JSON.stringify(Object.assign(_lvPayload(), { reason })) });
+        const r = editing
+            ? await mfetch("/api/v1/me/leave/applications/" + editing, { method: "PUT", body: JSON.stringify(_lvAppPayload(true)) })
+            : await mfetch("/api/v1/me/leave/applications", { method: "POST", body: JSON.stringify(_lvAppPayload(true)) });
         if (!r.ok) {
             const d = await r.json().catch(() => ({}));
             const errs = Array.isArray(d.errors) ? d.errors : (Array.isArray(d.detail) ? d.detail : (d.detail && d.detail.errors) || []);
@@ -302,19 +338,114 @@ async function applyLeave() {
             return;
         }
         if (proofFile) {
-            // 單建好了才傳證明；傳失敗要說出來（清單上那筆會掛「缺證明，補傳」）。挑幾天＝每一張都要附同一份。
+            // 單建好了才傳證明；傳失敗要說出來（清單上那張會掛「缺證明，補傳」）
             const created = await r.json().catch(() => ({}));
-            const ids = created.requests ? created.requests.map(x => x.id) : (created.id ? [created.id] : []);
-            let failed = 0;
-            for (const id of ids) { const up = await _lvUploadProof(id, proofFile).catch(() => null); if (!up || !up.ok) failed++; }
-            if (failed) alert(`請假單已送出，但有 ${failed} 張證明上傳失敗，請在清單裡補傳。`);
+            const up = created.id ? await _lvUploadAppProof(created.id, proofFile).catch(() => null) : null;
+            if (!up || !up.ok) alert("申請單已送出，但證明上傳失敗，請在清單裡補傳。");
         }
+        _lvEditing = ""; _lvPicks = [];
         _resetTodayStrip();   // 今天那條「請假待審 N 件」下次重抓
         await loadLeave();   // 🔴 要 await：不等重畫完就走到 finally，鎖會在舊表單還在畫面上時就解開，那段時間再點一次就是第二張單
     } catch (_) { show("連線失敗"); }
     finally { if (btn && btn.isConnected) { delete btn.dataset.busy; btn.disabled = false; } }   // 重畫過就換了節點，不用還原
 }
-// mode：free＝直接撤回（待審、或已核准但還在免申請期）；apply＝已核准且逾期，要寫消假理由送「消假待審」
+// ── 編輯待審的申請單：把那張單灌回表單，送出走 PUT ──
+async function lvEditApp(id) {
+    const a = (LV.applications || []).find(x => x.id === id);
+    if (!a) return;
+    _lvEditing = id;
+    _lvPicks = (a.items || []).map(i => i.id);
+    await loadLeave();   // 重抓清單（排除自己那張的保留）再灌表單
+    const f = $("lv-form");
+    if (f) f.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function _lvFillEditing() {
+    const a = (LV.applications || []).find(x => x.id === _lvEditing);
+    if (!a) { _lvEditing = ""; return; }
+    const dates = a.dates || [];
+    const consecutive = dates.length > 1 && dates.every((d, i) => i === 0 || (new Date(d) - new Date(dates[i - 1])) / 86400000 <= 3);
+    $("lv-part").value = a.part || "all";
+    $("lv-range").style.display = a.part === "range" ? "" : "none";
+    if (a.part === "range") { $("lv-start-time").value = a.start_time || "09:00"; $("lv-end-time").value = a.end_time || "13:00"; }
+    if (dates.length <= 1 || consecutive) {
+        $("lv-mode").value = "range"; lvSetMode("range");
+        $("lv-start").value = dates[0] || _localToday(); $("lv-end").value = dates[dates.length - 1] || $("lv-start").value;
+    } else {
+        $("lv-mode").value = "pick"; lvSetMode("pick");
+        _lvDates = dates.slice(); _lvDrawChips();
+    }
+    $("lv-reason").value = a.reason || "";
+    $("lv-submit").textContent = "儲存修改";
+    $("lv-cancel-edit").style.display = "";
+    _lvDrawInv();
+}
+function lvCancelEdit() { _lvEditing = ""; _lvPicks = []; loadLeave(); }
+// ── 撤回整張申請單（mode：free＝直接撤回；apply＝已核准且逾期，要寫消假理由送「消假待審」）──
+async function cancelLeaveApp(id, mode) {
+    let body = {};
+    if (mode === "apply") {
+        const note = (prompt("消假理由（必填，送出後由主管決定）") || "").trim();
+        if (!note) return;
+        body = { note };
+    } else if (!confirm("確定撤回這張請假單？")) return;
+    try {
+        const r = await mfetch("/api/v1/me/leave/applications/" + id + "/cancel", { method: "POST", body: JSON.stringify(body) });
+        if (r.ok) { if (_lvEditing === id) { _lvEditing = ""; _lvPicks = []; } _resetTodayStrip(); loadLeave(); }
+        else { const d = await r.json().catch(() => ({})); alert((typeof d.detail === "string" && d.detail) || "撤回失敗"); }
+    } catch (_) {}
+}
+// ── 證明：申請單一份（病假／公假／婚假／喪假）；舊單照舊走 /me/leave/{id}/proof ──
+function _lvAuthHeaders() {
+    const h = {}; const tok = localStorage.getItem(TOKEN_KEY);
+    if (tok) h["Authorization"] = "Bearer " + tok;
+    return h;
+}
+// 上傳走 multipart：不能用 mfetch（它會補 JSON 的 Content-Type）
+function _lvUploadAppProof(id, file) {
+    const fd = new FormData(); fd.append("file", file);
+    return fetch("/api/v1/me/leave/applications/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd });
+}
+function _lvUploadProof(id, file) {
+    const fd = new FormData(); fd.append("file", file);
+    return fetch("/api/v1/me/leave/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd });
+}
+async function _lvOpenBlob(url) {
+    // <a href> 帶不了 Authorization，抓成 blob 再開（同 js/shared/utils.authDownload 的理由）
+    try {
+        const r = await fetch(url, { headers: _lvAuthHeaders() });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); alert((typeof d.detail === "string" && d.detail) || "開不了證明"); return; }
+        const href = URL.createObjectURL(await r.blob());
+        window.open(href, "_blank");
+        setTimeout(() => URL.revokeObjectURL(href), 60000);
+    } catch (_) { alert("連線失敗"); }
+}
+const viewLeaveProof = (id) => _lvOpenBlob("/api/v1/me/leave/" + id + "/proof");
+const viewLeaveAppProof = (id) => _lvOpenBlob("/api/v1/me/leave/applications/" + id + "/proof");
+async function _lvPickAndUpload(uploader, id, input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const r = await uploader(id, file).catch(() => null);
+    if (!r || !r.ok) { const d = r ? await r.json().catch(() => ({})) : {}; alert((typeof d.detail === "string" && d.detail) || "上傳失敗"); return; }
+    loadLeave();
+}
+const lvProofPick = (id, input) => _lvPickAndUpload(_lvUploadProof, id, input);
+const lvAppProofPick = (id, input) => _lvPickAndUpload(_lvUploadAppProof, id, input);
+const _lvNeedsProof = (t) => ((LV && LV.vocab && LV.vocab.proof_required_types) || ["病假"]).includes(t);
+function _lvProofCell(r) {
+    if (!_lvNeedsProof(r.leave_type)) return "";
+    if (r.proof_path) return `<button class="mini-btn" onclick="viewLeaveProof('${esc(r.id)}')">看證明</button>`;
+    if (r.status === "待審" || r.status === "消假待審" || r.status === "已核准")
+        return `<label class="mini-btn" style="color:#b45309;border-color:#fcd34d;">缺證明，補傳<input type="file" accept=".jpg,.jpeg,.png,.heic,.webp,.pdf" hidden onchange="lvProofPick('${esc(r.id)}', this)"></label>`;
+    return "";
+}
+function _lvAppProofCell(a) {
+    if (!a.proof_required) return "";
+    if (a.proof_path) return `<button class="mini-btn" onclick="viewLeaveAppProof('${esc(a.id)}')">看證明</button>`;
+    if (a.status === "待審" || a.status === "消假待審" || a.status === "已核准")
+        return `<label class="mini-btn" style="color:#b45309;border-color:#fcd34d;">缺證明，補傳<input type="file" accept=".jpg,.jpeg,.png,.heic,.webp,.pdf" hidden onchange="lvAppProofPick('${esc(a.id)}', this)"></label>`;
+    return "";
+}
+// 舊單（沒有申請單的：手機送的、匯入的）的撤回照舊
 async function cancelLeave(id, mode) {
     let body = {};
     if (mode === "apply") {

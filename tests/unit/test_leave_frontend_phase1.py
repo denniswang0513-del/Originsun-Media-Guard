@@ -29,11 +29,15 @@ def test_me_leave_card_is_back_in_the_zone():
 
 
 def test_my_card_talks_to_the_three_employee_endpoints():
+    """2026-09-15 起卡片是三步申請單：summary＋inventory → applications/preview → applications（新單 POST／編輯 PUT）。
+    舊的單張單端點只剩沒有申請單的舊單在撤回時用（cancelLeave）。"""
     code = _my_code()
-    assert '"/api/v1/me/leave/summary"' in js_func_body(code, "async function loadLeave(")
-    assert '"/api/v1/me/leave/preview"' in js_func_body(code, "async function lvPreview(")
+    load = js_func_body(code, "async function loadLeave(")
+    assert '"/api/v1/me/leave/summary"' in load and '"/api/v1/me/leave/inventory"' in load
+    assert '"/api/v1/me/leave/applications/preview"' in js_func_body(code, "async function lvPreview(")
     apply = js_func_body(code, "async function applyLeave(")
-    assert '"/api/v1/me/leave"' in apply and 'method: "POST"' in apply
+    assert '"/api/v1/me/leave/applications"' in apply and 'method: "POST"' in apply
+    assert '"/api/v1/me/leave/applications/" + editing' in apply and 'method: "PUT"' in apply, "核准前可以編輯＝同一張 PUT"
     cancel = js_func_body(code, "async function cancelLeave(")
     assert '"/api/v1/me/leave/" + id + "/cancel"' in cancel and 'method: "POST"' in cancel
     # 舊路（DELETE /me/leave/{id}、workspace bundle 的 ws.leave.quota）退場
@@ -47,7 +51,7 @@ def test_preview_is_debounced_and_ignores_stale_responses():
     assert "clearTimeout(_lvPreviewTimer)" in soon and "setTimeout(lvPreview" in soon
     pv = js_func_body(code, "async function lvPreview(")
     assert "++_lvPreviewSeq" in pv and "seq !== _lvPreviewSeq" in pv, "舊回應不可蓋掉新回應"
-    assert "共 ${_lvH(d.hours)} 小時" in pv
+    assert "需要 ${_lvH(d.needed_hours)} 小時" in pv
     assert "d.warnings" in pv and "d.errors" in pv
     # 有 error 就鎖送出鈕；warning 只提醒
     assert "btn.disabled = errs.length > 0" in pv
@@ -56,15 +60,17 @@ def test_preview_is_debounced_and_ignores_stale_responses():
 def test_form_fields_follow_the_contract():
     code = _my_code()
     fn = js_func_body(code, "function renderLeave(")
-    for fid in ("lv-type", "lv-part", "lv-start", "lv-end", "lv-range", "lv-start-time", "lv-end-time",
-                "lv-preview", "lv-reason", "lv-submit", "lv-err"):
+    # 三步：1 日期（起迄或挑幾天）→ 2 從自己的假裡挑（清單 lv-inv）→ 3 送出。假別不再是下拉，由挑的假決定。
+    for fid in ("lv-mode", "lv-part", "lv-start", "lv-end", "lv-multi", "lv-multi-date", "lv-multi-chips", "lv-range", "lv-start-time",
+                "lv-end-time", "lv-need", "lv-fit", "lv-inv", "lv-preview", "lv-reason", "lv-submit", "lv-cancel-edit", "lv-err"):
         assert f'id="{fid}"' in fn, fid
-    # 假別與半天選項來自 vocab，不寫死
-    assert "v.leave_types" in fn and "v.parts" in fn
-    payload = js_func_body(code, "function _lvPayload(")
-    for k in ("leave_type", "start_date", "end_date", "start_time", "end_time"):
-        assert f"{k}:" in payload, k
+    assert 'id="lv-type"' not in fn, "假別下拉拿掉了（owner 2026-09-15 三步）"
+    assert "v.parts" in fn, "半天選項來自 vocab，不寫死"
+    payload = js_func_body(code, "function _lvAppPayload(")
+    for k in ("start_time", "end_time", "items", "dates", "start_date", "end_date"):
+        assert f"{k}" in payload, k
     assert "part," in payload, "part（整天／上午／下午／時段）也要送"
+    assert "_lvPicks.map(id => ({ id }))" in payload, "挑的假照順序送，扣幾小時由後端算"
     # 事由必填；422 的 errors 逐條顯示
     apply = js_func_body(code, "async function applyLeave(")
     assert '"請填事由"' in apply and "d.errors" in apply

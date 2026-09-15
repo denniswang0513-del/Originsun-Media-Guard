@@ -195,6 +195,107 @@ async def leave_quota(request: Request, year: int = 0):
         } for s in staff_rows]}
 
 
+# ── 申請單（整張核准／退回／消假決定；owner 2026-09-15）──────────────────────
+
+@router.get("/leave/applications")
+async def list_applications(request: Request, status: str = "", staff_id: str = ""):
+    """申請單清單（含子單）；待核佇列用 status=待審／消假待審。人事那把或合夥人可看。"""
+    from services import leave_application
+    check_admin_or_module(request, *LEAVE_VIEWERS)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        holidays = await leave_service.holidays_map(session)
+        rows = await leave_application.list_all(session, status=status, holidays=holidays)
+        if staff_id:
+            rows = [r for r in rows if r["staff_id"] == staff_id]
+        return {"items": rows, "total": len(rows)}
+
+
+@router.post("/leave/applications/{app_id}/approve")
+async def approve_application(app_id: str, request: Request):
+    """整張一次核准：每張子單照員工指定的那幾筆扣（不夠 422 一筆都不扣）；子單逐張上 Google 日曆。"""
+    from services import leave_application
+    payload = check_admin(request)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        app = await leave_application.get_or_404(session, app_id)
+        ids = await leave_application.approve(session, app, _actor(payload))
+        await session.commit()
+        await session.refresh(app)
+        holidays = await leave_service.holidays_map(session)
+        out = leave_application.application_dict(app, await leave_application.children_of(session, app.id), holidays=holidays)
+    await _notify_result("核准", {"staff_name": out["staff_name"], "leave_type": "／".join(out["kinds"]) or "-",
+                                "start_date": out["start_date"], "end_date": out["end_date"], "days": out["days"]})
+    for cid in ids:
+        await _calendar_sync_leave(cid)
+    return out
+
+
+@router.post("/leave/applications/{app_id}/reject")
+async def reject_application(app_id: str, body: LeaveReject, request: Request):
+    """整張退回（理由必填）。"""
+    from services import leave_application
+    payload = check_admin(request)
+    note = (body.note or "").strip()
+    if not note:
+        raise HTTPException(status_code=422, detail="退回要填理由")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        app = await leave_application.get_or_404(session, app_id)
+        if app.status != "待審":
+            raise HTTPException(status_code=409, detail=f"此單狀態是「{app.status}」，只有待審可退回（消假走 cancel_decide）")
+        await leave_application.set_status(session, app, "已退回", _actor(payload), note)
+        await session.commit()
+        await session.refresh(app)
+        out = leave_application.application_dict(app)
+    await _notify_result("退回", {"staff_name": out["staff_name"], "leave_type": "／".join(out["kinds"]) or "-",
+                                "start_date": out["start_date"], "end_date": out["end_date"], "days": out["days"]}, note)
+    return out
+
+
+@router.post("/leave/applications/{app_id}/cancel_decide")
+async def decide_application_cancel(app_id: str, body: LeaveCancelDecide, request: Request):
+    """消假待審 → approve=True：整張已撤回（放回時數、日曆拿掉）／False：回已核准。"""
+    from services import leave_application
+    payload = check_admin(request)
+    note = (body.note or "").strip()
+    factory = db_factory_or_503()
+    async with factory() as session:
+        app = await leave_application.get_or_404(session, app_id)
+        if app.status != "消假待審":
+            raise HTTPException(status_code=409, detail=f"此單狀態是「{app.status}」，不是消假待審")
+        if body.approve:
+            ids = await leave_application.set_status(session, app, "已撤回", _actor(payload), release=True)
+        else:
+            ids = await leave_application.set_status(session, app, "已核准")
+        if note:
+            app.reject_note = note
+        await session.commit()
+        await session.refresh(app)
+        out = leave_application.application_dict(app)
+    await _notify_result("消假核准" if body.approve else "消假退回", {"staff_name": out["staff_name"], "leave_type": "／".join(out["kinds"]) or "-",
+                                                                   "start_date": out["start_date"], "end_date": out["end_date"], "days": out["days"]}, note)
+    for cid in ids:
+        await _calendar_sync_leave(cid)
+    return out
+
+
+@router.get("/leave/applications/{app_id}/proof")
+async def application_proof(app_id: str, request: Request):
+    import os
+    from core.drive_map import to_local_path
+    from core.no_store import no_store_file
+    from services import leave_application
+    check_admin_or_module(request, *LEAVE_VIEWERS)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        app = await leave_application.get_or_404(session, app_id)
+        path = to_local_path(app.proof_path or "")
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="這張單沒有證明檔")
+    return no_store_file(path)
+
+
 @router.get("/leave/{leave_id}/proof")
 async def leave_proof(leave_id: str, request: Request):
     """病假證明檔（管理員／人事／合夥人可看；員工看自己的走 /me/leave/{id}/proof）。"""

@@ -151,6 +151,8 @@ class HrLeaveRequest(Base):
     reject_note = Column(Text, nullable=True)                     # 已退回的理由（必填）
     cancel_note = Column(Text, nullable=True)                     # 消假申請的說明（<2 天撤回時必填）
     proof_path = Column(Text, nullable=True)                      # 病假證明（canonical UNC；收據根目錄 _假勤證明/{年月}/）
+    application_id = Column(String(32), nullable=True, index=True)  # 屬於哪張申請單（hr_leave_applications；舊單／手機單為空）
+    alloc_plan = Column(Text, nullable=True)                      # 申請單指定的扣法 JSON [[credit_id, hours]…]，核准時照這個扣
     google_event_id = Column(String(255), nullable=True)          # 同 crm_shoots 三欄（二期接日曆）
     synced_at = Column(DateTime(timezone=True), nullable=True)
     sync_error = Column(Text, nullable=True)
@@ -159,6 +161,32 @@ class HrLeaveRequest(Base):
         Index("idx_leave_status", "status"),
         Index("idx_leave_staff_start", "staff_id", "start_date"),
     )
+
+
+class HrLeaveApplication(Base):
+    """請假申請單（owner 2026-09-15：一整張送出、一次核准、核准前可編輯）：挑的日期＋扣法＋事由＋證明。
+    送出時展開成 hr_leave_requests 子單（一天一種假一張，application_id 指回來）；狀態整張連子單一起走。"""
+    __tablename__ = "hr_leave_applications"
+
+    id = Column(String(32), primary_key=True)
+    staff_id = Column(String(32), nullable=False, index=True)
+    staff_name = Column(String(64), nullable=False, default="")
+    dates = Column(Text, nullable=False, default="[]")            # JSON [ISO 日期…]（已排序、去重）
+    part = Column(String(8), nullable=False, default="all")       # 每一天同一組時段：all／am／pm／range
+    start_time = Column(String(5), nullable=True)
+    end_time = Column(String(5), nullable=True)
+    items = Column(Text, nullable=False, default="[]")            # JSON [{id, kind, credit_id, label, hours}]（員工挑的、各扣幾小時）
+    hours = Column(Float, nullable=False, default=0.0)            # 總時數（＝子單合計）
+    reason = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="待審")    # core.leave_logic.REQUEST_STATUSES
+    proof_path = Column(Text, nullable=True)                      # 病假等要附的證明（同子單的規矩，整張一份）
+    reject_note = Column(Text, nullable=True)
+    cancel_note = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    approved_by = Column(String(64), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class HrLeaveCredit(Base):

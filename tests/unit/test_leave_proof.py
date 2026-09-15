@@ -68,11 +68,12 @@ def test_proof_path_column_serialized_and_migrated():
 def test_workspace_card_and_mobile_form_take_the_proof_file():
     js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
     render = js_func_body(js, "function renderLeave(")
-    assert "v.self_service_types || v.leave_types" in render, "自助假別從 vocab 來"
     assert 'id="lv-proof"' in render and 'id="lv-proof-wrap"' in render
     apply = js_func_body(js, "async function applyLeave(")
-    assert "\"病假要附證明（照片或 PDF）\"" in apply and "_lvUploadProof(id, proofFile)" in apply and "created.requests" in apply, "挑幾天＝每張都附同一份證明"
-    assert 'fetch("/api/v1/me/leave/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd })' in js, "multipart 不走 mfetch"
+    assert '"這種假要附證明（照片或 PDF）"' in apply and "_lvUploadAppProof(created.id, proofFile)" in apply, "申請單一份證明"
+    assert "_lvProofNeeded = !!d.proof_required;" in js_func_body(js, "async function lvPreview("), "要不要附證明由試算（挑到的假別）決定"
+    assert 'fetch("/api/v1/me/leave/applications/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd })' in js, "multipart 不走 mfetch"
+    assert 'fetch("/api/v1/me/leave/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd })' in js, "舊單的補傳照舊"
     assert "image/*" not in js, "accept 不能寫 image/*（掃描器會把 /* 當註解）"
     m = js_code_only(repo_src("frontend/m/views/leave.js"))
     assert "vocab().self_service_types || vocab().leave_types" in m

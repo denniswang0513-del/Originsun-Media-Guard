@@ -121,12 +121,43 @@ async function _show(view) {
 
 // ══════════════════════════ 1. 待核佇列 ══════════════════════════
 async function _loadQueue() {
-    const [a, b] = await Promise.all([hget('/leave?status=待審'), hget('/leave?status=消假待審')]);
+    // 申請單（owner 2026-09-15：一整張一次核准）排前面；沒有申請單的單張單（手機送的）照舊一張一卡
+    const [a, b, pa, pb] = await Promise.all([hget('/leave?status=待審'), hget('/leave?status=消假待審'),
+                                              hget('/leave/applications?status=待審'), hget('/leave/applications?status=消假待審')]);
     if (!a.ok) { el('hl-content').innerHTML = `<div class="hl-empty">${tabLoadError(a.status, '請補修')}</div>`; return; }
-    const pend = (await a.json()).items || [];
-    const canc = b.ok ? ((await b.json()).items || []) : [];
-    _queue = pend.concat(canc.filter(x => !pend.some(p => p.id === x.id)));
+    const pend = ((await a.json()).items || []).filter(x => !x.application_id);
+    const canc = (b.ok ? ((await b.json()).items || []) : []).filter(x => !x.application_id);
+    const apps = (pa.ok ? ((await pa.json()).items || []) : []).concat(pb.ok ? ((await pb.json()).items || []) : []);
+    _queue = apps.map(x => ({ ...x, _app: true })).concat(pend, canc.filter(x => !pend.some(p => p.id === x.id)));
     _renderQueue();
+}
+
+function _appCard(a) {
+    const isCancel = a.status === '消假待審';
+    const acts = !isAdmin() ? ''
+        : isCancel
+        ? `<button class="hl-btn ok" data-cancel-decide-app="${esc(a.id)}" data-approve="1">同意消假</button>
+           <button class="hl-btn warn" data-cancel-decide-app="${esc(a.id)}" data-approve="0">不同意</button>`
+        : `<button class="hl-btn ok" data-approve-app="${esc(a.id)}">核准（整張）</button>
+           <button class="hl-btn warn" data-reject-app="${esc(a.id)}">退回</button>`;
+    const md = d => esc(String(d).slice(5).replace('-', '/'));
+    const days = (a.children || []).map(c => `${md(c.start_date)} ${esc(c.leave_type)} ${fmtH(c.hours)}h${c.part && c.part !== 'all' ? `（${esc((_vocab.part_labels || {})[c.part] || c.part)}）` : ''}`).join('　·　');
+    const items = (a.items || []).map(i => `${esc(i.label || i.kind)} ${fmtH(i.hours)}h`).join('、');
+    const proof = a.proof_required
+        ? (a.proof_path ? `<button class="hl-btn" data-proof-app="${esc(a.id)}">看證明</button>` : '<span style="color:var(--warn, #f59e0b)">缺證明（不能核准）</span>')
+        : '';
+    return `<div class="hl-qcard" data-app="${esc(a.id)}">
+        <div class="hl-qhead"><b>${esc(a.staff_name)}</b><span>請假單 ${(a.kinds || []).map(esc).join('／')}</span>${_pill(a.status)}</div>
+        <div class="hl-qline"><span class="k">日期</span>${(a.dates || []).length > 1 ? `${md(a.start_date)}～${md(a.end_date)}（${a.dates.length} 天）` : md(a.start_date)}</div>
+        <div class="hl-qline"><span class="k">時數</span>${hoursText(a.hours)}</div>
+        <div class="hl-qline"><span class="k">扣</span>${items || '—'}</div>
+        <div class="hl-qline"><span class="k">每天</span>${days || '—'}</div>
+        <div class="hl-qline"><span class="k">事由</span>${esc(a.reason) || '—'}</div>
+        ${proof ? `<div class="hl-qline"><span class="k">證明</span>${proof}</div>` : ''}
+        ${isCancel ? `<div class="hl-qline"><span class="k">消假理由</span>${esc(a.cancel_note) || '—'}</div>` : ''}
+        <div class="hl-qline"><span class="k">送出</span>${esc((a.created_at || '').slice(0, 16).replace('T', ' ')) || '—'}</div>
+        <div class="hl-qacts">${acts}</div>
+    </div>`;
 }
 
 function _queueCard(it) {
@@ -155,11 +186,11 @@ function _renderQueue() {
     if (cnt) cnt.textContent = _queue.length ? String(_queue.length) : '';
     el('hl-content').innerHTML = `<div class="hl-card">
         <h3>待核佇列（${_queue.length}）</h3>
-        ${_queue.length ? `<div class="hl-grid">${_queue.map(_queueCard).join('')}</div>` : '<div class="hl-empty">沒有待核的請假單</div>'}
-        <div class="hl-note">核准走時數帳的假別會先扣 credit（先到期先扣），不足會擋下；退回與不同意消假都要寫理由，會通知申請人。</div>
+        ${_queue.length ? `<div class="hl-grid">${_queue.map(it => it._app ? _appCard(it) : _queueCard(it)).join('')}</div>` : '<div class="hl-empty">沒有待核的請假單</div>'}
+        <div class="hl-note">申請單整張一次核准，照員工自己挑的那幾筆扣（不夠會擋下）；單張單核准先到期先扣。退回與不同意消假都要寫理由，會通知申請人。</div>
     </div>`;
     _bindQueue();
-    _queue.forEach(it => _loadCtx(it));
+    _queue.filter(it => !it._app).forEach(it => _loadCtx(it));
 }
 
 // 每張卡各自 lazy 抓 context：餘額夠不夠／同期誰休／撞場次／提前幾天
@@ -201,6 +232,26 @@ async function _loadCtx(it) {
     host.innerHTML = lines.join('');
 }
 
+async function _approveApp(id) {
+    const r = await hpost(`/leave/applications/${id}/approve`);
+    if (!r.ok) { alert(await _fail(r, '核准失敗')); return; }
+    _loadQueue();
+}
+async function _rejectApp(id) {
+    const note = (prompt('退回理由（必填，會通知申請人）') || '').trim();
+    if (!note) return;
+    const r = await hpost(`/leave/applications/${id}/reject`, { note });
+    if (!r.ok) { alert(await _fail(r, '退回失敗')); return; }
+    _loadQueue();
+}
+async function _cancelDecideApp(id, approve) {
+    const note = (prompt(approve ? '備註（選填）' : '不同意消假的理由（必填，會通知申請人）') || '').trim();
+    if (!approve && !note) return;
+    const r = await hpost(`/leave/applications/${id}/cancel_decide`, { approve, note });
+    if (!r.ok) { alert(await _fail(r, '處理失敗')); return; }
+    _loadQueue();
+}
+
 async function _approve(id) {
     const r = await hpost(`/leave/${id}/approve`);
     if (!r.ok) { alert(await _fail(r, '核准失敗')); return; }
@@ -237,6 +288,10 @@ function _bindQueue() {
         const t = ev.target.closest('button');
         if (!t) return;
         if (t.dataset.proof) return _openProof(t.dataset.proof);
+        if (t.dataset.proofApp) return authDownload(API + `/leave/applications/${t.dataset.proofApp}/proof`, `證明_${t.dataset.proofApp}`, '開啟證明');
+        if (t.dataset.approveApp) return _approveApp(t.dataset.approveApp);
+        if (t.dataset.rejectApp) return _rejectApp(t.dataset.rejectApp);
+        if (t.dataset.cancelDecideApp) return _cancelDecideApp(t.dataset.cancelDecideApp, t.dataset.approve === '1');
         if (t.dataset.approveReq) return _approve(t.dataset.approveReq);
         if (t.dataset.rejectReq) return _reject(t.dataset.rejectReq);
         if (t.dataset.cancelDecide) return _cancelDecide(t.dataset.cancelDecide, t.dataset.approve === '1');

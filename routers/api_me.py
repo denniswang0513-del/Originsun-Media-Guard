@@ -31,7 +31,7 @@ from core.identity import require_bound_staff, require_zone_staff, resolve_curre
 from core.hr_logic import STAFF_ACTIVE, staff_rank
 from core.journal_logic import shell_status, week_start_of
 from core.leave_logic import cancel_mode, in_crew, vocab as leave_vocab
-from core.schemas import (LeaveCancel, MeLeaveBatch, MeLeaveCreate, MeLeavePreview, MeProfileUpdate, MeTimesheetBatch,
+from core.schemas import (LeaveCancel, MeLeaveApplication, MeLeaveCreate, MeLeavePreview, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetUpdate, MeTodoUpdate)
 from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
@@ -278,6 +278,10 @@ async def my_leave_summary(request: Request, limit: int = 20):
     factory = db_factory_or_503()
     async with factory() as session:
         out = await leave_service.staff_leave_summary(session, ident["staff"], limit=max(1, min(int(limit), LEAVE_SUMMARY_LIMIT_MAX)))
+        # 申請單（三步送的那種）：卡片列申請單；requests 裡屬於申請單的子單（application_id 非空）畫面不重複列
+        from services import leave_application
+        holidays = await leave_service.holidays_map(session)
+        out["applications"] = await leave_application.list_for_staff(session, ident["staff_id"], limit=max(1, min(int(limit), LEAVE_SUMMARY_LIMIT_MAX)), holidays=holidays)
     out["vocab"] = leave_vocab()
     return out
 
@@ -334,55 +338,161 @@ async def _my_leave_or_404(session, leave_id: str, staff_id: str):
     return obj
 
 
-@router.post("/leave/batch/preview")
-async def preview_my_leave_batch(body: MeLeaveBatch, request: Request):
-    """挑幾天的試算（owner 2026-09-15「一次挑好幾個不連續的日期」）：逐日算＋總時數對餘額，不寫入。"""
+# ── 申請單（owner 2026-09-15 三步：日期算小時 → 自己挑要扣的假 → 一整張單送出、一次核准、核准前可編輯）──
+# 規則在 core.leave_logic（fit_items／plan_children）、I/O 在 services.leave_application；這裡只有守衛與 HTTP 形狀。
+
+@router.get("/leave/inventory")
+async def my_leave_inventory(request: Request, exclude: str = ""):
+    """第 2 步的清單：自己的每一筆假（credit 各批＋病假／事假／公假／婚假／喪假）與還能挑幾小時。編輯時帶 exclude=自己那張。"""
+    from services import leave_application
     ident = await require_bound_staff(request, "me_leave")
     factory = db_factory_or_503()
     async with factory() as session:
-        return await leave_service.evaluate_batch(session, ident["staff_id"], ident["staff"].name, body)
+        return {"items": await leave_application.inventory(session, ident["staff_id"], exclude_app_id=exclude)}
 
 
-@router.post("/leave/batch")
-async def apply_my_leave_batch(body: MeLeaveBatch, request: Request):
-    """挑幾天送單：一天一張待審單（管理端逐張核准；每張各自扣時數帳），同一個 transaction 全建或全不建。
-    任何一天有 errors（撞單／假日／餘額用完後還多挑）→ 422，一張都不建；餘額只剩一部分的那天照試算削成剩下的小時。
-    回 {requests:[…], hours, days, warnings, trimmed}。"""
+@router.post("/leave/applications/preview")
+async def preview_my_application(body: MeLeaveApplication, request: Request, exclude: str = ""):
+    """三步的試算：需要幾小時、每筆扣幾小時、還差幾小時、會展開成哪幾張子單；不寫入。"""
+    from services import leave_application
+    ident = await require_bound_staff(request, "me_leave")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        return await leave_application.evaluate(session, ident["staff"], body, exclude_app_id=exclude)
+
+
+async def _submit_application(request: Request, body: MeLeaveApplication, app_id: str = "") -> dict:
+    from services import leave_application
     ident = await require_bound_staff(request, "me_leave")
     if not (body.reason or "").strip():
         raise HTTPException(status_code=422, detail="事由必填（規章：提出時簡述理由）")
     factory = db_factory_or_503()
     async with factory() as session:
+        app = None
+        if app_id:
+            app = await leave_application.get_or_404(session, app_id, ident["staff_id"])
+            if app.status != "待審":
+                raise HTTPException(status_code=409, detail=f"「{app.status}」的單不能改（核准後只能申請消假）")
         holidays = await leave_service.holidays_map(session)
-        ev = await leave_service.evaluate_batch(session, ident["staff_id"], ident["staff"].name, body, holidays=holidays)
-        bad = ev["errors"] + [e for p in ev["dates"] for e in p["errors"]]
-        if bad:
-            raise HTTPException(status_code=422, detail="；".join(dict.fromkeys(e["msg"] for e in bad)))
-        objs = []
-        for p in ev["dates"]:
-            # 餘額只剩一部分的那天：用試算削過的時段（上午／時段），事由前面標明，員工與管理端都看得出來
-            day_body = leave_service._DayBody(body, p["date"], p)
-            if p.get("trimmed_from"):
-                day_body.reason = f"{body.leave_type}只剩 {p['hours']:g} 小時（原本 {p['trimmed_from']:g}）／{(body.reason or '').strip()}"
-            hours, part = leave_service.hours_from_body(day_body, holidays)
-            obj = leave_service.build_request(ident["staff_id"], ident["staff"].name, day_body, hours, part, ident["username"])
-            session.add(obj)
-            objs.append(obj)
+        ev = await leave_application.evaluate(session, ident["staff"], body, holidays=holidays, exclude_app_id=app_id)
+        if ev["errors"]:
+            raise HTTPException(status_code=422, detail="；".join(dict.fromkeys(e["msg"] for e in ev["errors"])))
+        app = await leave_application.save(session, ident["staff"], ident["username"], body, ev, app)
         await session.commit()
-        for obj in objs:
-            await session.refresh(obj)
-        out = [leave_service.request_dict(o, holidays) for o in objs]
-    try:
-        from notifier import notify_tab_async
-        await notify_tab_async(
-            "leave_request",
-            staff_name=out[0]["staff_name"], leave_type=out[0]["leave_type"],
-            start=out[0]["start_date"], end=f"{out[-1]['end_date']}（挑 {len(out)} 天）",
-            days=f"{ev['days']:g}", reason=out[0]["reason"] or "-",
-        )
-    except Exception:
-        pass
-    return {"requests": out, "hours": ev["hours"], "days": ev["days"], "warnings": ev["warnings"], "trimmed": ev["trimmed"]}
+        await session.refresh(app)
+        out = leave_application.application_dict(app, await leave_application.children_of(session, app.id), holidays=holidays)
+    out["warnings"] = ev["warnings"]
+    if not app_id:
+        try:
+            from notifier import notify_tab_async
+            await notify_tab_async(
+                "leave_request",
+                staff_name=out["staff_name"], leave_type="／".join(out["kinds"]) or "-",
+                start=out["start_date"], end=f"{out['end_date']}（{len(out['dates'])} 天）",
+                days=f"{out['days']:g}", reason=out["reason"] or "-",
+            )
+        except Exception:
+            pass
+    return out
+
+
+@router.post("/leave/applications")
+async def apply_my_application(body: MeLeaveApplication, request: Request):
+    """送出一整張申請單（待審）：同時展開子單。試算有錯 → 422 不建。"""
+    return await _submit_application(request, body)
+
+
+@router.put("/leave/applications/{app_id}")
+async def edit_my_application(app_id: str, body: MeLeaveApplication, request: Request):
+    """核准前可以改：整張重算、子單全部重建（同一個 transaction）。"""
+    return await _submit_application(request, body, app_id)
+
+
+@router.post("/leave/applications/{app_id}/cancel")
+async def cancel_my_application(app_id: str, body: LeaveCancel, request: Request):
+    """撤回整張：待審→已撤回；已核准依 cancel_mode（free→已撤回並放回時數／apply→消假待審要寫說明／locked→409）。"""
+    from services import leave_application
+    ident = await require_bound_staff(request, "me_leave")
+    note = (body.note or "").strip()
+    factory = db_factory_or_503()
+    async with factory() as session:
+        app = await leave_application.get_or_404(session, app_id, ident["staff_id"])
+        holidays = await leave_service.holidays_map(session)
+        d = leave_application.application_dict(app, holidays=holidays)
+        if app.status == "待審":
+            ids = await leave_application.set_status(session, app, "已撤回")
+        elif app.status == "已核准":
+            mode = d["cancel_mode"]
+            if mode == "locked":
+                raise HTTPException(status_code=409, detail="颱風假公告當日不可消假（規章）")
+            if mode == "free":
+                ids = await leave_application.set_status(session, app, "已撤回", release=True)
+            else:
+                if not note:
+                    raise HTTPException(status_code=422, detail="距開始不到兩天，撤回要填說明由主管決定（規章：臨時消假要與主管討論）")
+                ids = await leave_application.set_status(session, app, "消假待審", note=note)
+        else:
+            raise HTTPException(status_code=409, detail=f"此單狀態是「{app.status}」，不能撤回")
+        await session.commit()
+        await session.refresh(app)
+        out = leave_application.application_dict(app, await leave_application.children_of(session, app.id), holidays=holidays)
+    for cid in ids:
+        from routers.api_hr import _calendar_sync_leave
+        await _calendar_sync_leave(cid)      # 撤回＝日曆事件拿掉（沒同步過的會 skip）
+    return out
+
+
+@router.post("/leave/applications/{app_id}/proof")
+async def upload_my_application_proof(app_id: str, request: Request, file: UploadFile = File(...)):
+    """整張申請單一份證明（病假／公假／婚假／喪假）；同 /leave/{id}/proof 的黑名單、上限、放的位置。"""
+    import asyncio
+    import re as _re
+    from core.drive_map import to_canonical_path
+    from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
+    from routers.crm.costs import _MAX_RECEIPT_BYTES
+    from services import leave_application
+    ident = await require_bound_staff(request, "me_leave")
+    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+    if ext.lower() in BLOCKED_UPLOAD_EXTS:
+        raise HTTPException(status_code=400, detail=f"不接受的檔案格式：{ext}")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        app = await leave_application.get_or_404(session, app_id, ident["staff_id"])
+        if app.status not in PROOF_UPLOAD_STATUSES:
+            raise HTTPException(status_code=409, detail=f"「{app.status}」的單不用再附證明")
+        d = leave_application.application_dict(app)
+        day = d["start_date"] or ""
+        base = leave_proof_dir(day)
+        try:
+            os.makedirs(base, exist_ok=True)
+        except OSError as err:
+            raise HTTPException(status_code=422, detail=f"資料夾無法使用：{err}")
+        safe = _re.sub(r'[\\/:*?"<>|]', "", f"{app.staff_name}_{'+'.join(d['kinds'])}")[:40]
+        filepath = os.path.join(base, f"{day.replace('-', '')}_{safe}_{app.id[:8]}{ext}")
+        written = await asyncio.to_thread(stream_to_disk, file.file, filepath, _MAX_RECEIPT_BYTES)
+        if written < 0:
+            raise HTTPException(status_code=413, detail=f"檔案超過 {_MAX_RECEIPT_BYTES // (1024 * 1024)}MB")
+        app.proof_path = to_canonical_path(filepath)
+        for ch in await leave_application.children_of(session, app.id):
+            ch.proof_path = app.proof_path          # 子單也帶著，人事分頁的「看證明」與核准擋門照舊
+        await session.commit()
+        await session.refresh(app)
+        return leave_application.application_dict(app)
+
+
+@router.get("/leave/applications/{app_id}/proof")
+async def my_application_proof(app_id: str, request: Request):
+    from core.drive_map import to_local_path
+    from core.no_store import no_store_file
+    from services import leave_application
+    ident = await require_bound_staff(request, "me_leave")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        app = await leave_application.get_or_404(session, app_id, ident["staff_id"])
+        path = to_local_path(app.proof_path or "")
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="這張單沒有證明檔")
+    return no_store_file(path)
 
 
 async def _cancel_my_leave(leave_id: str, request: Request, note: str) -> dict:
