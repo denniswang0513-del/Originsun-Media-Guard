@@ -253,3 +253,24 @@ def test_full_leave_column_rejects_drag_and_drop_too():
     plan = js_code_only(repo_src("frontend/js/shared/ts-zone/plan.js"))
     dnd = js_func_body(plan, "export function _planWireDnd(")
     assert dnd.count('"#z1-plan .pcol:not(.off)"') == 2, "dragover 與 drop 兩處都要擋"
+
+
+def test_petty_card_is_single_column_in_the_narrow_host():
+    """owner 2026-09-16「這裡有排版bug 我希望介面簡潔」：330px 的卡硬排兩欄 → 專案選單被切成「不填 = 公」、
+    「選擇檔案」那顆原生鈕凸出欄位（owner 截圖）。窄版一律一欄；「摘要」那格的 inline grid-column:span 2
+    會逼出一條隱含的第二欄，要 !important 壓掉（真機量到 159px + 77.67px）。"""
+    css = repo_src("frontend/tabs/petty/petty-view.js")
+    assert ".pc-narrow .pc-grid { grid-template-columns:1fr; }" in css
+    assert ".pc-narrow .pc-grid > * { grid-column:auto !important; }" in css
+    assert ".pc-narrow input[type=file] { max-width:100%;" in css
+    # 這段 CSS 住在 JS 的樣板字串裡：註解用反引號會把字串提早收掉，整支模組 parse 失敗（踩過一次）
+    block = css.split("const CSS = ")[1].split("</style>")[0]
+    assert "`" not in block.replace("const CSS = `", "", 1).lstrip("`"), "樣板字串裡不能再出現反引號"
+
+
+def test_leave_card_does_not_repeat_the_same_warning():
+    """「還沒挑要扣的假」第 2 步的標題已經寫了，試算區不再重複一次。"""
+    js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
+    prev = js_func_body(js, "async function lvPreview(")
+    assert 'errs.filter(e => (e && e.code) !== "no_items")' in prev
+    assert "_lvMsgs(shownErrs" in prev

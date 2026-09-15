@@ -102,8 +102,8 @@ function foCheck() {
     else if (isNaN(m)) { msg = "填開始與結束時間"; bad = true; }
     else if (m <= 0) { msg = "結束要晚於開始"; bad = true; }
     else if (m > FO_MAX) { msg = "一次最多 2 小時，超過的請另外請假（特休／補休／事假）"; bad = true; }
-    else if (used + m > FO_MAX) { msg = used >= FO_MAX ? `這天已登記 ${_foH(used)}，額度用完了（每天最多 2 小時）` : `這天已登記 ${_foH(used)}，只剩 ${_foH(FO_MAX - used)} 可外出（每天最多 2 小時）`; bad = true; }
-    else msg = `${_foH(m)}${m === FO_MAX ? "，剛好" : ""}。登記後直接算數、不用等核准。`;
+    else if (used + m > FO_MAX) { msg = used >= FO_MAX ? `這天的 2 小時已經用完了` : `這天已登記 ${_foH(used)}，只剩 ${_foH(FO_MAX - used)}`; bad = true; }
+    else msg = `${_foH(m)}${m === FO_MAX ? "，剛好" : ""}。不用等核准。`;
     h.textContent = msg; h.className = "fo-hint" + (bad ? " bad" : " ok"); btn.disabled = bad;
 }
 async function foSubmit() {
@@ -390,7 +390,9 @@ async function lvPreview() {
         ? `<div style="margin-top:4px;">這張單每一天扣的是：</div>` + (d.children || []).map(c => `<div>${esc(c.date.slice(5).replace("-", "/"))}　${esc(c.kind)} ${_lvH(c.hours)} h${c.part && c.part !== "all" ? `（${esc(LV_PART_LABEL(c.part))}${c.part === "range" ? " " + esc(c.start_time) + "–" + esc(c.end_time) : ""}）` : ""}</div>`).join("")
         : "";
     const sickNote = d.sick_offset ? `<div style="color:#b45309;">病假 1 天給薪不扣假；超過的算半薪，用特休／補休折抵一半（全薪）—— 系統照規章自動分。</div>` : "";
-    host.innerHTML = takeLines + sickNote + dayLines + _lvMsgs(warns, "#b45309") + _lvMsgs(errs, "var(--red)");
+    // 「還沒挑要扣的假」第 2 步的標題（lv-fit）已經寫了，這裡不再重複一次（owner 2026-09-16「希望介面簡潔」）
+    const shownErrs = errs.filter(e => (e && e.code) !== "no_items");
+    host.innerHTML = takeLines + sickNote + dayLines + _lvMsgs(warns, "#b45309") + _lvMsgs(shownErrs, "var(--red)");
     _lvProofNeeded = !!d.proof_required;
     const pw = $("lv-proof-wrap");
     if (pw) pw.style.display = _lvProofNeeded ? "" : "none";

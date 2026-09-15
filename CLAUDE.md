@@ -1362,6 +1362,11 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   `leave_days_total`，釘在 `test_leave_days_count_workdays_and_add_up_within_a_day`。
 - **彈性外出的事由不進行事曆**（2026-09-15 /polish BUG-1）：`/api/v1/calendar` 是全公司看的（任一把 `READ_KEYS`），
   而登記框的提示字就寫著「去銀行、接小孩」。`_flex_out_events` 的 `notes` 一律空，同 `_leave_events`；事由只在本人假勤卡的清單裡。
+- **`petty-view.js` 的 CSS 住在 JS 的樣板字串裡**：註解裡**不能出現反引號**（會把字串提早收掉、整支模組 parse 失敗，
+  卡上只剩「零用金載入失敗：Unexpected identifier」）。2026-09-16 踩過一次。
+- **窄宿主（工作台那張 330px 的卡，`.pc-narrow`）要單欄**：兩欄時每格只剩 ~150px —— 專案選單被切成「不填 = 公」、
+  「選擇檔案」那顆原生鈕不會縮、直接凸出欄位（owner 截圖）。而且「摘要」那格帶 inline `grid-column:span 2`，
+  span 2 會**逼出一條隱含的第二欄**（量到 159px + 77.67px），單欄設定形同虛設 —— 要 `grid-column:auto !important` 壓掉。
 - **`.fo-box` 的輸入框樣式要自己寫**：它是 `.pf-edit` 的**兄弟**不是子孫，而 `.pf-edit input`／`.pf-edit .inline-row` 的樣式 scope 在 `.pf-edit` 底下 ——
   漏了就變成瀏覽器原生控制項（真機量到 Arial／monospace、2px inset、padding 0）。兩個宿主（`my.html`／`leave.html`）各一份。
 - **`/api/settings/load` 是匿名端點，機密分兩層**（2026-09-08 稽核）：`_SECRET_KEYS`／`_SECRET_SUBKEYS`（簽得出 admin 的：jwt_secret、database_url、

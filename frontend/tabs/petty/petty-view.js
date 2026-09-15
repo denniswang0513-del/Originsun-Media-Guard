@@ -138,6 +138,15 @@ const CSS = `
 .pc-narrow .pc-row .amt { text-align:right; }
 .pc-narrow .pc-row .pc-actions { grid-column:1/-1; justify-content:flex-start; }
 .pc-narrow .pc-head { display:none; }
+/* 🔴 卡才 330px：auto-fit minmax(160px) 會排成兩欄、每欄剩 ~150px —— 專案選單被切成「不填 = 公」、
+   「選擇檔案」那顆原生鈕不會縮、直接凸出欄位。窄版一律一欄，每格拿滿寬度。 */
+.pc-narrow .pc-grid { grid-template-columns:1fr; }
+/* 🔴 「摘要」那格帶 inline 的 grid-column:span 2 —— span 2 會**逼出一條隱含的第二欄**（量到 159px + 77.67px），
+   單欄的設定就等於白設。inline 樣式只有 !important 蓋得過。
+   （這整段 CSS 住在 JS 的樣板字串裡：註解**不能用反引號**，會把字串提早收掉，整支模組就 parse 失敗。） */
+.pc-narrow .pc-grid > * { grid-column:auto !important; }
+.pc-narrow .pc-grid input, .pc-narrow .pc-grid select { min-width:0; max-width:100%; }
+.pc-narrow input[type=file] { max-width:100%; font-size:12px; }
 .pc-narrow .pc-sum { gap:14px; }
 .pc-narrow .pc-sum .big { font-size:22px; }
 </style>`;

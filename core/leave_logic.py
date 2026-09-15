@@ -539,8 +539,8 @@ def notice_warning(start, today=None) -> str | None:
     if gap >= NOTICE_DAYS:
         return None
     if gap < 0:
-        return "假期已經開始或過去（規章：最晚一週前提出，請與主管說明）"
-    return f"距開始只剩 {gap} 天（規章：最晚一週前提出，請在事由簡述原因）"
+        return "假期已經開始或過去，請與主管說明"
+    return f"距開始只剩 {gap} 天，請在事由簡述原因"
 
 
 def cancel_mode(start, today=None, holidays=None) -> str:
