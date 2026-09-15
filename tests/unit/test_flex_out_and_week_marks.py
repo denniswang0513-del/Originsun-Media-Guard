@@ -95,3 +95,32 @@ def test_calendar_page_is_the_shared_component_in_a_light_host():
     assert 'document.documentElement.classList.add("embed");' in page
     ctx = js_code_only(repo_src("frontend/js/shared/calendar/ctx.js"))
     assert "flex_out: '外出'" in ctx and "if (ev.kind === 'flex_out') return hex.out" in ctx
+
+
+# ── 安全網（/polish 階段零）：把兩個序列化 helper 現在的輸出釘住，之後改格子畫法時才知道有沒有動到資料形狀 ──
+
+def test_leave_mark_shape_is_pinned():
+    """週表格子要的四件事：誰、假別、整天還是半天、時段假的起訖。"""
+    from types import SimpleNamespace
+    from routers.api_me import _leave_mark
+    full = SimpleNamespace(staff_name="測試員工", leave_type="特休", part="all", start_time=None, end_time=None)
+    assert _leave_mark(full) == {"name": "測試員工", "kind": "特休", "part": "all", "start_time": "", "end_time": ""}
+    pm = SimpleNamespace(staff_name="婕妤", leave_type="補休", part="pm", start_time="13:00", end_time="17:00")
+    # 半天不吐時間（格子只寫「下午休假」，時間由 SLOTS 決定，不是這張單說了算）
+    assert _leave_mark(pm) == {"name": "婕妤", "kind": "補休", "part": "pm", "start_time": "", "end_time": ""}
+    rng = SimpleNamespace(staff_name="禮瑜", leave_type="事假", part="range", start_time="09:00", end_time="11:00")
+    assert _leave_mark(rng)["start_time"] == "09:00" and _leave_mark(rng)["end_time"] == "11:00"
+    # 舊列：假別空、part 空 → 不炸，退成「請假／整天」
+    bare = SimpleNamespace(staff_name="", leave_type=None, part=None, start_time=None, end_time=None)
+    assert _leave_mark(bare) == {"name": "", "kind": "請假", "part": "all", "start_time": "", "end_time": ""}
+
+
+def test_flex_dict_shape_is_pinned():
+    from datetime import date
+    from types import SimpleNamespace
+    from routers.api_me import _flex_dict
+    row = SimpleNamespace(id="abc", date=date(2026, 9, 16), start_time="10:00", end_time="12:00", minutes=120, reason="去銀行")
+    assert _flex_dict(row) == {"id": "abc", "date": "2026-09-16", "start_time": "10:00", "end_time": "12:00",
+                               "minutes": 120, "reason": "去銀行"}
+    bare = SimpleNamespace(id="x", date=date(2026, 9, 16), start_time="09:00", end_time="09:30", minutes=None, reason=None)
+    assert _flex_dict(bare)["minutes"] == 0 and _flex_dict(bare)["reason"] == ""
