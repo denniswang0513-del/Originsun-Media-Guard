@@ -111,3 +111,11 @@ def test_rules_card_mirrors_notion_rulebook():
     for t in ("特休", "補休", "病假", "事假", "婚假", "喪假", "颱風假", "消假", "請假時間點"):
         assert f"<b>{t}" in raw, t
     assert raw.index('id="lv-card-host"') < raw.index('id="lv-rules"') < raw.index('id="lv-history"'), "規章在自己那張卡下面、總表之前"
+
+
+def test_grid_children_do_not_force_page_width_on_phones():
+    """2026-09-15 真機（Playwright 400px）截圖：休假總表那張 nowrap 表把 grid 的 1fr 欄撐成 730px、整頁橫向捲動。
+    grid 子項預設 min-width:auto，overflow-x 的包裝擋不住；要 `.lv-layout > * { min-width: 0; }`。"""
+    raw = repo_src("frontend/leave.html")
+    assert ".lv-layout > * { min-width: 0; }" in raw
+    assert ".tbl-wrap { overflow-x: auto; }" in raw

@@ -52,6 +52,9 @@
   /* 兩欄：左 假勤卡（同工作台）、右 休假總表；窄螢幕疊成一欄 */
   .lv-layout { display: grid; grid-template-columns: minmax(340px, 460px) minmax(0, 1fr); gap: 28px; align-items: start; }
   .lv-left { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+  /* 🔴 grid 的子項預設 min-width:auto —— 總表那張 nowrap 的表會把 1fr 那欄撐到內容寬（手機寬 400px 時整頁變 730px、
+     橫向捲動），.tbl-wrap 的 overflow-x 擋不住。兩個子項都要 min-width:0，表才會在自己的框裡捲。2026-09-15 真機截圖抓到。 */
+  .lv-layout > * { min-width: 0; }
   /* 請補休規章 */
   .rules { font-size: 13px; line-height: 1.7; color: var(--ink); padding-top: 8px; }
   .rules .rule { padding: 10px 0; border-bottom: 1px solid #f5f5f5; }
