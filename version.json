@@ -1,5 +1,5 @@
 {
-  "version": "2.5.31",
+  "version": "2.5.32",
   "build_date": "2026-09-15",
-  "notes": "過渡收尾：Pillow 12.3.0 釘回、更新程式自動修好半套的 Pillow"
+  "notes": "過渡收尾：Pillow 12.3.0 釘回；更新程式自動修好半套的 Pillow、備份對子路徑先建目錄"
 }
