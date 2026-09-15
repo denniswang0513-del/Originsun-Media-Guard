@@ -47,7 +47,7 @@ def test_team_week_and_week_marks_carry_kind_and_half_day():
     assert '"kind": l.leave_type or "請假", "part": part' in mark
     wm = func_body(src, "async def week_marks(")
     assert "HrLeaveRequest.staff_id == sid" in wm and "HrFlexOuting.staff_id == sid" in wm, "只有自己的"
-    assert 'off_days += 0.5' in wm and '"leave_days": off_days' in wm
+    assert 'day_off_fraction(marks) for d, marks in leave.items()' in wm and 'leave_days_total(leave, holidays)' in wm
     # 行事曆事件流多一種 flex_out（不進 Google 日曆）
     cal = repo_src("routers/api_calendar.py")
     assert "events += await _flex_out_events(session, d0, d1, me)" in cal
@@ -148,3 +148,32 @@ def test_flex_out_events_do_not_publish_the_reason():
     assert len(out) == 1 and out[0]["kind"] == "flex_out"
     assert out[0]["notes"] == "", "事由不能進全公司的行事曆"
     assert out[0]["mine"] is False and out[0]["title"] == "測試員工 外出"
+
+
+def test_leave_days_count_workdays_and_add_up_within_a_day():
+    """BUG-2：「休假 X 天」原本每個 part=="all" 的**日曆日**算 1 天 —— 跨週末的喪假 9/14–9/20 會寫成 7 天
+    （板上只畫 5 欄）；同一天「上午特休＋下午補休」沒有 all 只算 0.5 天、前端還讓人加項；range 一小時也算 0.5 天。"""
+    from datetime import date
+    from core.leave_logic import day_off_fraction, leave_days_total
+
+    assert day_off_fraction([{"part": "all"}]) == 1.0
+    assert day_off_fraction([{"part": "pm"}]) == 0.5
+    # 同一天兩張半天單＝整天（前端要照這個鎖整欄）
+    assert day_off_fraction([{"part": "am"}, {"part": "pm"}]) == 1.0
+    # 時段假照時數換算，不是一律半天
+    assert day_off_fraction([{"part": "range", "start_time": "10:00", "end_time": "11:00"}]) == 0.125
+    assert day_off_fraction([{"part": "range", "start_time": "", "end_time": ""}]) == 0.0
+    assert day_off_fraction([]) == 0.0
+    # 加總封頂 1（重複送的單不會讓一天變成 1.5 天）
+    assert day_off_fraction([{"part": "all"}, {"part": "am"}]) == 1.0
+
+    # 喪假 2026-09-14（一）～09-20（日）：工作日 5 天
+    span = {f"2026-09-{d:02d}": [{"part": "all"}] for d in range(14, 21)}
+    assert leave_days_total(span) == 5.0
+    # 國定假日不算：2026-09-25 當成國定假日 → 那週的五天剩四天
+    week = {f"2026-09-{d:02d}": [{"part": "all"}] for d in range(21, 26)}
+    assert leave_days_total(week) == 5.0
+    assert leave_days_total(week, {date(2026, 9, 25): "國定假日"}) == 4.0
+    # 補班的週六算工作日
+    sat = {"2026-09-26": [{"part": "all"}]}
+    assert leave_days_total(sat) == 0.0 and leave_days_total(sat, {date(2026, 9, 26): "補班日"}) == 1.0

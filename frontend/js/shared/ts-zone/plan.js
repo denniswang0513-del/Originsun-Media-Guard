@@ -53,12 +53,13 @@ export function _renderMyWeek() {
     const byDay = (d) => s.planRows.filter(i => i.date === d);
     const cols = days.filter(d => { const w = _dow(d); return (w !== 0 && w !== 6) || byDay(d).length; });   // 週末有排才畫
     const filled = s.planRows.filter(i => i.hours > 0).length;
-    const marks = s.planMarks || { leave: {}, flex_out: {}, leave_days: 0 };
+    const marks = s.planMarks || { leave: {}, flex_out: {}, off: {}, leave_days: 0 };
     const lvOf = (d) => (marks.leave && marks.leave[d]) || [];
     const foOf = (d) => (marks.flex_out && marks.flex_out[d]) || [];
-    const offKind = (d) => { const l = lvOf(d); return l.some(m => m.part === "all") ? "full" : (l.length ? "half" : ""); };
+    // 整天／半天由後端的 off 決定（core.leave_logic.day_off_fraction：上午＋下午也算整天、時段假照時數）
+    const offKind = (d) => { const f = (marks.off && marks.off[d]) || 0; return f >= 1 ? "full" : (f > 0 ? "half" : ""); };
     const offTag = (d) => lvOf(d).map(m => `<small class="offtag">${_partWord(m)}休假</small>`).join("") + foOf(d).map(f => `<small class="fotag">外出 ${esc(f.start_time)}–${esc(f.end_time)}</small>`).join("");
-    const offBody = (d) => offKind(d) === "full" ? `<div class="offbody">${lvOf(d).map(m => esc(m.kind)).join("、")}<small>已核准・整天</small></div>` : "";
+    const offBody = (d) => offKind(d) === "full" ? `<div class="offbody">${[...new Set(lvOf(d).map(m => m.kind))].map(esc).join("、")}<small>已核准・整天</small></div>` : "";
     const otherHalf = (d) => { const l = lvOf(d); return l.some(m => m.part === "am") ? "下午" : (l.some(m => m.part === "pm") ? "上午" : ""); };
     const who = z.manage && z.who ? `<span class="meta">${esc(z.who.name)}${whoIsMe() ? "（我）" : "（替他排）"}</span>` : "";
     host.innerHTML = `

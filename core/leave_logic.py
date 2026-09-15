@@ -227,6 +227,36 @@ def workdays_between(start: date, end: date, holidays=None) -> list:
     return out
 
 
+def day_off_fraction(marks) -> float:
+    """一天休了多少（1＝整天、0.5＝半天）。marks＝那天的假 [{part, start_time, end_time}…]（routers.api_me._leave_mark 的形狀）。
+    同一天多張單要**加總**（上午特休＋下午補休＝整天，週表要照這個鎖整欄），時段假照時數換算（10:00–11:00＝1h＝0.125 天），
+    上限 1（重複送的單不會讓一天變成 1.5 天）。"""
+    total = 0.0
+    for m in marks or []:
+        part = (m.get("part") or "all").strip() or "all"
+        if part == "all":
+            total += 1.0
+        elif part in ("am", "pm"):
+            total += 0.5
+        elif part == "range":
+            a, b = hm_minutes(m.get("start_time")), hm_minutes(m.get("end_time"))
+            if a is not None and b is not None and b > a:
+                total += (b - a) / 60 / HOURS_PER_DAY
+    return min(round(total, 3), 1.0)
+
+
+def leave_days_total(by_day: dict, holidays=None) -> float:
+    """一段期間休了幾天：**只算工作日**（週末／國定假日不算、補班的週六算）。by_day＝{ISO 日期: marks}。
+    🔴 不要改回「一個 part=='all' 算一天」：跨週末的喪假 9/14–9/20 會寫成 7 天，而板上只畫 5 欄。"""
+    total = 0.0
+    for iso, marks in (by_day or {}).items():
+        d = as_date(iso)
+        if not marks or (d and not is_workday(d, holidays)):
+            continue
+        total += day_off_fraction(marks)
+    return round(total, 2)
+
+
 MAX_BATCH_DATES = 31        # 一次最多挑幾天（owner 2026-09-15「一次挑好幾個不連續的日期」）
 
 

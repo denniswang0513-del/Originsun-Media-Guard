@@ -31,7 +31,8 @@ from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup,
 from core.identity import require_bound_staff, require_zone_staff, resolve_current_staff
 from core.hr_logic import STAFF_ACTIVE, staff_rank
 from core.journal_logic import shell_status, week_start_of
-from core.leave_logic import FLEX_OUT_MAX_MINUTES, FLEX_OUT_RULE, cancel_mode, flex_out_check, in_crew, vocab as leave_vocab
+from core.leave_logic import (FLEX_OUT_MAX_MINUTES, FLEX_OUT_RULE, cancel_mode, day_off_fraction, flex_out_check, in_crew,
+                              leave_days_total, vocab as leave_vocab)
 from core.schemas import (LeaveCancel, MeFlexOutCreate, MeLeaveApplication, MeLeaveCreate, MeLeavePreview, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetUpdate, MeTodoUpdate)
 from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
@@ -838,6 +839,7 @@ async def week_marks(request: Request, start: str = ""):
             select(HrFlexOuting).where(HrFlexOuting.staff_id == sid)
             .where(HrFlexOuting.date >= week).where(HrFlexOuting.date <= week + timedelta(days=6))
             .order_by(HrFlexOuting.date, HrFlexOuting.start_time))).scalars().all()
+        holidays = await leave_service.holidays_map(session)   # 天數只算工作日
     leave: dict = {d: [] for d in days}
     for l in leaves:
         a, b = tw_day(l.start_date), tw_day(l.end_date)
@@ -849,13 +851,10 @@ async def week_marks(request: Request, start: str = ""):
     flex: dict = {d: [] for d in days}
     for f in flex_rows:
         flex[f.date.isoformat()].append(_flex_dict(f))
-    off_days = 0.0
-    for d, marks in leave.items():
-        if any(m["part"] == "all" for m in marks):
-            off_days += 1
-        elif marks:
-            off_days += 0.5
-    return {"week_start": week.isoformat(), "days": days, "leave": leave, "flex_out": flex, "leave_days": off_days}
+    # off[日期]＝那天休了多少（1＝整天，前端照這個決定要不要鎖整欄）；leave_days＝這週的合計（只算工作日）
+    off = {d: day_off_fraction(marks) for d, marks in leave.items()}
+    return {"week_start": week.isoformat(), "days": days, "leave": leave, "flex_out": flex,
+            "off": off, "leave_days": leave_days_total(leave, holidays)}
 
 
 # ── 彈性外出（owner 2026-09-15）：自己登記、不用核准；每天 2 小時、一筆最多 2 小時、同一天合計也最多 2 小時、不累積 ──
