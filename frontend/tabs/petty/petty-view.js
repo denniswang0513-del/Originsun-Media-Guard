@@ -133,6 +133,13 @@ const CSS = `
   .pc-row .pc-actions { grid-column:1/-1; justify-content:flex-start; }
   .pc-head { display:none; }
 }
+/* 掛在工作台卡裡（宿主給 .pc-narrow）：卡才 330px 寬、視窗卻很寬，上面那條 media query 不會生效 → 同一套窄版排法 */
+.pc-narrow .pc-row { grid-template-columns:1fr auto; grid-auto-rows:min-content; row-gap:4px; }
+.pc-narrow .pc-row .amt { text-align:right; }
+.pc-narrow .pc-row .pc-actions { grid-column:1/-1; justify-content:flex-start; }
+.pc-narrow .pc-head { display:none; }
+.pc-narrow .pc-sum { gap:14px; }
+.pc-narrow .pc-sum .big { font-size:22px; }
 </style>`;
 
 // 近靜態清單的頁面級快取。兩個都是「開頁後幾乎不變」的資料：

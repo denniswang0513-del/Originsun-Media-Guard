@@ -110,14 +110,17 @@ def test_find_view_filters_are_one_row():
     assert "export function pctClass(" in shared and "ts-pct ${pctClass(p.pct)}" in shared
 
 
-def test_leave_and_petty_cards_are_input_panels_opening_the_modal():
-    """owner 2026-09-15「這兩塊規劃成輸入面板」：工作台的假勤卡只放數字＋待審件數＋一顆鈕、零用金卡一顆鈕，
-    都開最上排那種寬的浮動視窗（/leave.html、/petty-cash.html 嵌在裡面）；完整三步表單只在 /leave.html 畫。"""
+def test_leave_and_petty_cards_are_the_input_windows():
+    """owner 2026-09-15「我希望這裡是輸入的窗口，頁面頂部才是跳出的詳情視窗」：工作台的假勤卡就是三步表單（清單最近 5 張，
+    多的一顆鈕開浮動視窗）、零用金卡掛 petty-view 的 renderMine（登記表單＋自己的清單）；最上排的鈕開整頁詳情。"""
     html = my_page_src()
-    assert "const _lvFullHost = () => typeof window.onLeaveRendered === \"function\";" in html
     render = html.split("function renderLeave(body)")[1].split("\n}")[0]
-    assert "if (!_lvFullHost()) { body.innerHTML = _lvPanelHtml(v, an, comp, sick, ledgerEmpty); return; }" in render
-    panel = html.split("function _lvPanelHtml(")[1].split("\n}")[0]
-    assert "openActionModal('/leave.html', '假勤')" in panel and 'id="lv-inv"' not in panel, "面板不畫表單"
+    assert 'id="lv-inv"' in render and 'id="lv-need"' in render, "表單在卡裡"
+    assert "_lvPanelHtml" not in html, "純面板版拿掉了"
+    lst = html.split("function _lvListHtml()")[1].split("\n}")[0]
+    assert "const LV_CARD_RECENT = 5;" in html and "openActionModal('/leave.html', '假勤')" in lst
     petty = html.split("function cardPettyCash()")[1].split("\n}")[0]
-    assert "openActionModal('/petty-cash.html', '零用金'); return false;" in petty
+    assert 'import("/tabs/petty/petty-view.js")' in petty and "m.renderMine(body)" in petty
+    # 開發中徽章拿掉（owner 2026-09-15「把開發中移除」）
+    assert 'makeCard("My Leave", "我的假勤", "", "leave")' in html
+    assert "m-wip" not in repo_src("frontend/m/views/leave.js")

@@ -32,17 +32,8 @@ let _lvInv = [];               // 第 2 步清單（/me/leave/inventory）
 let _lvEditing = "";           // 正在編輯的申請單 id（空＝新單）
 let _lvProofNeeded = false;    // 挑到要附證明的假別（試算回的）
 function cardLeave(bound) {
-    // 🔴 標「開發中」（owner 2026-09-10）：功能是做好的，但**沒有人的時數帳被匯入過**
-    //    （生產的 hr_leave_credits／hr_leave_allocations 都是 0 列），所以每個人看到的
-    //    特休與補休都是 0、送出去會被擋在「特休不足」。不標的話同事會以為是壞了。
-    //    時數帳匯入完成後把這個徽章與下面那條說明一起拿掉（docs/LEAVE_PLAN.md）。
-    // 🔴 不直接引用 cards.js 的 WIP_LABEL：這七支是**傳統 script**、共用全域詞法環境，
-    //    而 Cloudflare 給 .js 四小時瀏覽器快取 —— 出現「舊 cards.js ＋ 新 cards-hr.js」
-    //    的組合時 `WIP_LABEL is not defined` 會從這裡拋出去，而 shell.js 那串建卡是直線
-    //    呼叫沒有 try/catch，工作台下半頁（零用金、基本資料、週記整區）會一起不見。
-    //    徽章的判定在 cards.js 只比值相等，所以退回字面值就夠。
-    const card = makeCard("My Leave", "我的假勤",
-                          typeof WIP_LABEL !== "undefined" ? WIP_LABEL : "開發中", "leave");
+    // 「開發中」徽章 2026-09-15 拿掉（owner「把開發中移除」）：時數帳已逐人建好，沒額度的人卡裡另有一條黃字說明。
+    const card = makeCard("My Leave", "我的假勤", "", "leave");
     const body = card.querySelector(".card-body");
     if (!bound) { body.innerHTML = `<div class="empty">尚未綁定人員檔案</div>`; return card; }
     body.innerHTML = `<div class="empty">載入中…</div>`;
@@ -76,23 +67,10 @@ function _lvLedgerEmpty(bal) {
 }
 const _lvH = (h) => { const n = Number(h || 0); return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, ""); };
 function _lvDays(h) { return _lvH(Number(h || 0) / ((LV && LV.vocab && LV.vocab.hours_per_day) || 8)); }
-// 工作台的假勤卡＝「輸入面板」（owner 2026-09-15）：只放三個數字＋待審件數＋一顆「請假／看總表」，按了開寬的浮動視窗
-// （/leave.html 嵌在裡面，三步表單與休假總表都在那）。完整表單只在 /leave.html 這個宿主（有 window.onLeaveRendered）畫。
+// 工作台的假勤卡＝**輸入的窗口**（owner 2026-09-15「我希望這裡是輸入的窗口，頁面頂部才是跳出的詳情視窗」）：
+// 三步表單就在卡裡，清單只列最近幾張；最上排「假勤」開的浮動視窗（/leave.html）才是整本總表與大家的休假。
 const _lvFullHost = () => typeof window.onLeaveRendered === "function";
-function _lvPanelHtml(v, an, comp, sick, ledgerEmpty) {
-    const apps = (LV.applications || []).filter(a => a.status === "待審" || a.status === "消假待審");
-    const nextApp = (LV.applications || []).filter(a => a.status === "已核准" && (a.end_date || "") >= _localToday()).sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
-    return `${ledgerEmpty ? `<div class="wip-note">你的特休／補休時數帳還沒建，所以這兩個數字是 0。要用請找管理員在人事管理的時數帳補額度。</div>` : ""}
-    <div class="stat-row">
-        <div class="stat"><div class="num">${_lvH(an.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(an.available)} 天）</span></div><div class="lbl">特休剩餘</div></div>
-        <div class="stat"><div class="num">${_lvH(comp.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(comp.available)} 天）</span></div><div class="lbl">補休剩餘</div></div>
-        <div class="stat"><div class="num">${_lvH(sick.used_days)}<span style="font-size:13px;color:var(--sub);"> / ${_lvH(sick.cap_days ?? v.sick_cap_days ?? 30)} 天</span></div><div class="lbl">病假已用</div></div>
-    </div>
-    <div class="meta" style="font-size:12px;color:var(--sub);margin:-2px 0 12px;line-height:1.7;">
-        ${apps.length ? `待審 <b style="color:var(--red);">${apps.length}</b> 張` : "沒有待審的單"}${nextApp ? `　·　下一次休假 ${esc(_lvDatesLabel(nextApp.dates))}` : ""}
-    </div>
-    <button class="mini-btn" type="button" onclick="openActionModal('/leave.html', '假勤')" style="padding:7px 14px;font-size:12px;">請假／看休假總表</button>`;
-}
+const LV_CARD_RECENT = 5;      // 工作台卡裡最近幾張；整本在 /leave.html
 function renderLeave(body) {
     const v = LV.vocab || {};
     const bal = LV.balances || {};
@@ -102,9 +80,6 @@ function renderLeave(body) {
     const today = _localToday();
     const expiring = (an.expiring || [])[0];
     const ledgerEmpty = _lvLedgerEmpty(bal);
-    const badge = document.querySelector('.card[data-card="leave"] .count.wip');
-    if (badge) badge.style.display = ledgerEmpty ? "" : "none";
-    if (!_lvFullHost()) { body.innerHTML = _lvPanelHtml(v, an, comp, sick, ledgerEmpty); return; }
     let html = `${ledgerEmpty ? `<div class="wip-note">你的特休／補休時數帳還沒建，所以這兩個數字是 0、這兩種假挑不到。要用請找管理員在人事管理的時數帳補額度。</div>` : ""}
     <div class="stat-row">
         <div class="stat"><div class="num">${_lvH(an.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(an.available)} 天）</span></div><div class="lbl">特休剩餘</div></div>
@@ -167,9 +142,12 @@ function renderLeave(body) {
 }
 // ── 清單（申請單為主；沒有申請單的舊單／手機單照舊一列一筆）──
 function _lvListHtml() {
-    const apps = (LV.applications || []).slice(0, LV_RECENT_MAX).map(_lvAppRow).join("");
-    const legacy = (LV.requests || []).filter(r => !r.application_id).slice(0, LV_RECENT_MAX).map(_lvRow).join("");
-    return apps + legacy;
+    const n = _lvFullHost() ? LV_RECENT_MAX : LV_CARD_RECENT;
+    const apps = (LV.applications || []).slice(0, n).map(_lvAppRow).join("");
+    const legacy = (LV.requests || []).filter(r => !r.application_id).slice(0, n).map(_lvRow).join("");
+    const more = !_lvFullHost() && ((LV.applications || []).length > n || (LV.requests || []).filter(r => !r.application_id).length > n)
+        ? `<div style="padding:10px 0 2px;"><button class="mini-btn" type="button" onclick="openActionModal('/leave.html', '假勤')">看全部／休假總表</button></div>` : "";
+    return apps + legacy + more;
 }
 function _lvDatesLabel(dates) {
     const md = d => esc(String(d).slice(5).replace("-", "/"));

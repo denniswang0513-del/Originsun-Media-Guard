@@ -40,7 +40,7 @@ def test_card_hooks_are_optional_so_the_workspace_is_unaffected():
     assert '(typeof window.LV_LIMIT === "number" ? "?limit=" + window.LV_LIMIT : "")' in load
     assert 'typeof window.onLeaveRendered === "function"' in load, "掛鉤在 window 上（my.html 沒這名字，no-undef 才過）"
     assert "if (hook) hook(null, e);" in load and "if (hook) hook(LV);" in load, "成功與失敗（409 沒綁人員檔案）都要通知宿主"
-    assert "const LV_RECENT_MAX = 20;" in js and ".slice(0, LV_RECENT_MAX).map(_lvRow)" in js, "卡片只列最近的，整本在總表"
+    assert "const LV_RECENT_MAX = 20;" in js and ".slice(0, n).map(_lvRow)" in js and "const LV_CARD_RECENT = 5;" in js, "工作台卡只列最近 5 張、/leave.html 列 20"
 
 
 def test_gate_is_me_leave_everywhere():
@@ -91,7 +91,7 @@ def test_wip_note_only_when_the_ledger_is_empty():
     render = func_body(js, "function renderLeave(")
     assert "const ledgerEmpty = _lvLedgerEmpty(bal);" in render
     assert '${ledgerEmpty ? `<div class="wip-note">' in render
-    assert 'badge.style.display = ledgerEmpty ? "" : "none"' in render
+    assert "badge" not in render, "開發中徽章 2026-09-15 拿掉了，只剩那條黃字說明"
 
 
 def test_no_emoji_in_page_text():

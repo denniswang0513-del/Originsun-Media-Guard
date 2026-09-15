@@ -52,11 +52,15 @@ function cardMediaLog() {
 // finance_approve，這張卡不管那些。
 function cardPettyCash() {
     const card = makeCard("Petty Cash", "零用金", "", "petty_cash");
-    // 輸入面板（owner 2026-09-15）：按了開寬的浮動視窗（同最上排那顆），不跳頁；href 留著給中鍵／另開
-    card.querySelector(".card-body").innerHTML = `
-        <div class="meta" style="margin-bottom:12px;">自己墊的錢：現場登記金額與收據、掛專案與會計項目、送出請款，並查看公司要匯給你多少。</div>
-        <a class="mini-btn" href="/petty-cash.html" onclick="openActionModal('/petty-cash.html', '零用金'); return false;"
-           style="display:inline-block;text-decoration:none;line-height:1.5;padding:7px 14px;font-size:12px;">登記零用金／看請款</a>`;
+    // 輸入的窗口（owner 2026-09-15「這裡是輸入的窗口，頁面頂部才是跳出的詳情視窗」）：把 tabs/petty/petty-view.js 的
+    // renderMine（登記表單＋自己的清單，三個宿主同一份）掛進卡裡；審核／匯款清冊在最上排「零用金」開的浮動視窗。
+    // 這支是傳統 script，用動態 import 拿 ES module（petty-view 的 fetch 出口預設就是 authFetch，token 同一把）。
+    const body = card.querySelector(".card-body");
+    body.classList.add("pc-narrow");   // petty-view 的 RWD 看的是視窗不是卡：卡才 330px 寬，叫它用窄版排法（樣式在 petty-view 的 CSS）
+    body.innerHTML = `<div class="empty">載入中…</div>`;
+    import("/tabs/petty/petty-view.js")
+        .then(m => m.renderMine(body))
+        .catch(e => { body.innerHTML = `<div class="empty">零用金載入失敗：${esc(e.message || e)}</div>`; });
     return card;
 }
 
