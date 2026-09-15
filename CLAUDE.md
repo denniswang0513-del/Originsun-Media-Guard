@@ -1333,6 +1333,10 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | `frontend/tabs/crm/crm-payables.js` 的出納段 | 應付面板的複製（每列左側一顆「複製」、純數字不帶標點）、本月匯款清單（可列印）、匯款通知彈窗（全選＋複製連結） | 複製一律走 `js/shared/utils.copyText`（內網是 http＝非安全來源，`navigator.clipboard` **不存在**）；`_buildMonthGroups` 是「月 × 收款人」粒度，跟後端 `group_payables` 的「收款人」粒度**不同**，別以為可以直接用後端那份 |
 | [`db/startup_migrations.py`](db/startup_migrations.py) | 開機 migration／種子 22 段（2026-09-13 從 `main._on_startup` 逐字搬出）：`run_pre_db`（init_db 前的 settings.json 修補）、`_m01…_m21`、`_POST_DB` 順序清單、`run_post_db` | SQL 正本仍在 `db/migrations.py`；加一段＝寫 `_mNN_*` 掛進 `_POST_DB`，`test_startup_migrations_order` 會逼你放對位置；模組層不可 import sqlalchemy（agent 沒裝；順序測試有一條守） |
 | `core/ledger_project.py` 的分案記帳段 | 私帳案收入**分案**：`BY_PARENT_KEY`／`BY_PARENT_PENDING_KEY`、`parent_shares`、`set_parent_share`（只動差額；`claim` 不動錢）、`drop_parent_share`、`mirror_stale(…, pid)` 逐案判；設計正本 [`docs/LEDGER_BY_PARENT_PLAN.md`](docs/LEDGER_BY_PARENT_PLAN.md) | 不變式 `contract = Σ份額 + owner 自己的`（自己的不存、用差額推）；分身 `contract_amount` 只准接 `set／drop_parent_share` 回的 `new_contract`（`test_ledger_by_parent` 掃 project_links 釘著）；開機 `_m22` 回填舊資料，分不出的 N:1 標待認領、改收款方式會 409 要求逐案「推送→取代」 |
+| 彈性外出（owner 2026-09-15）：[`core/leave_logic.py`](core/leave_logic.py) 的 `FLEX_OUT_*`／`flex_out_check`、`hr_flex_outings`（[`db/models/_workos.py`](db/models/_workos.py)）、[`routers/api_me.py`](routers/api_me.py) 的 `/me/flex_out` | 每人每天 2 小時、**自己登記不用核准**、一筆 ≤2h、同一天合計 ≤2h、不累積。畫面固定寫「每日可彈性外出兩小時」（owner 改的字，不顯示剩多少） | **不走請假單**：不進時數帳、不進休假總表、不上 Google 日曆。事由只給本人看（行事曆事件的 `notes` 一律空，同 `_leave_events`）。超過 2 小時要另外請假 —— 規章那段在 `frontend/leave.html` 的規章卡，排在事假前面 |
+| [`core/leave_logic.py`](core/leave_logic.py) 的 `day_off_fraction`／`leave_days_total` | 一天休了多少（同一天多張單**加總**、上限 1；`range` 照時數換算）／一段期間休幾天（**只算工作日**） | `/me/week_marks` 的 `off[日期]` 與 `leave_days` 都出自這裡；前端不准自己再判一次 `part`（兩份規則會分岔） |
+| [`routers/api_me.py`](routers/api_me.py) 的 `/me/week_marks` ＋ `/me/team_week` 的 `leave_detail`／`flex_out` | 「有人休假要標示」（owner 2026-09-15）：團隊的一週寫假別、半天只塗半格；我的一週整天鎖整欄、半天鎖半天、統計列「休假 X 天」 | `week_marks` 只回**自己的**（`staff_id == sid` 兩道查詢）；`team_week` 的 `leave` 舊欄位保留給舊前端退化用 |
+| [`frontend/calendar.html`](frontend/calendar.html) | 行事曆的獨立網址＝工作台最上排第三顆鈕的浮動視窗內容（owner 2026-09-15「行事曆用彈出的 跟零用金一樣」） | 只是 [`js/shared/calendar/`](frontend/js/shared/calendar/index.js) 的**第四個宿主**（`light: true` 白底、手機寬預設 `day`）；規則與資料全在 `/api/v1/calendar`，這頁不自己算東西。登入殼抄 `leave.html`（第三份了，要動先看「收尾」那條） |
 
 
 ## 不要動的地方
@@ -1347,6 +1351,19 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   權限管理的 `PERM_PARENT`（子鑰匙縮排、總開關沒開子鑰匙灰掉）都是鏡射。
   兩次一次性回填在 `main.py`（settings 旗標 `rbac.me_zone_split_backfilled`、`rbac.me_today_zone_backfilled`），跑過之後 owner 收掉的鑰匙**不會**被補回來。
   要放寬先讀「放寬守衛不能收回原本的鑰匙」那條。
+- **`ts-zone`／`my` 那幾支不要跨檔 import 新名字**（2026-09-15 /polish 抓到）：每支 `.js` 各自被 Cloudflare 快取 4 小時，
+  新 `plan.js` 配舊 `team-week.js` ＝**具名匯入失敗**（不是 `undefined`，是整張模組圖掛掉）→ `index.js` 不執行、`_tsReady` 不來，
+  「今天與這週」四個視圖一起停在載入中、畫面上**沒有任何錯誤字**。所以 `_partWord` 在 `plan.js` 與 `team-week.js` 各留一份（五行的純字串函式，
+  抄一份比耦合便宜）—— 跟 `cards-hr.js` 不引用 `cards.js` 的 `WIP_LABEL` 是同一顆地雷。要共用先想清楚兩支舊版配新版會怎樣。
+- **休假／外出插進 HTML 的字都要 `esc`**：時間字串（`start_time`／`end_time`）來自 `hr_leave_requests`，管理端 `PUT /hr/leave/{id}` 是**原樣存**的
+  （`_updated_hours` 帶了 `hours` 就不會走 `working_hours` 的 HH:MM 檢查），所以 `_partWord` 兩份都對時間 `z.esc`。
+- **「休假幾天」不要改回「一個 `part=="all"` 算一天」**（2026-09-15 /polish BUG-2）：跨週末的喪假 9/14–9/20 會寫成 7 天，
+  而「我的一週」只畫 5 欄；同一天「上午＋下午」兩張半天單也要算成整天（不然那天還能加項）。正本 `core.leave_logic.day_off_fraction`／
+  `leave_days_total`，釘在 `test_leave_days_count_workdays_and_add_up_within_a_day`。
+- **彈性外出的事由不進行事曆**（2026-09-15 /polish BUG-1）：`/api/v1/calendar` 是全公司看的（任一把 `READ_KEYS`），
+  而登記框的提示字就寫著「去銀行、接小孩」。`_flex_out_events` 的 `notes` 一律空，同 `_leave_events`；事由只在本人假勤卡的清單裡。
+- **`.fo-box` 的輸入框樣式要自己寫**：它是 `.pf-edit` 的**兄弟**不是子孫，而 `.pf-edit input`／`.pf-edit .inline-row` 的樣式 scope 在 `.pf-edit` 底下 ——
+  漏了就變成瀏覽器原生控制項（真機量到 Arial／monospace、2px inset、padding 0）。兩個宿主（`my.html`／`leave.html`）各一份。
 - **`/api/settings/load` 是匿名端點，機密分兩層**（2026-09-08 稽核）：`_SECRET_KEYS`／`_SECRET_SUBKEYS`（簽得出 admin 的：jwt_secret、database_url、
   google secret）連管理員也不回；`_ADMIN_ONLY_SUBKEYS`（工時同步 token、四個 webhook）只回給管理員 token（設定視窗要顯示才能編）。新增機密欄位要進其中一層。
   內部重啟端點（`/internal/restart`、`/system/restart`）的金鑰字串隨 OTA 包公開，安全靠 `core.auth.via_cloudflare` 把公網那條路擋掉——**別**把金鑰換成 `_get_secret()`，機隊各自的 jwt_secret 不共用，master 會推不動 agent。
