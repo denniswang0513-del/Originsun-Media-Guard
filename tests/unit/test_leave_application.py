@@ -75,6 +75,9 @@ def test_service_saves_only_taken_items_and_rebuilds_children():
     assert 'for t in ev["takes"] if float(t.get("take") or 0) > 0]' in save, "挑了但沒扣到的不存"
     assert "await session.delete(c)" in save and "application_id=app.id" in save, "編輯＝子單全刪重建，子單指回申請單"
     assert 'alloc_plan=json.dumps(ch.get("allocations") or []' in save, "核准時照這個扣"
+    inv = func_body(svc, "async def inventory(")
+    assert "legacy = await _legacy_pending(session, staff_id)" in inv
+    assert "HrLeaveRequest.application_id.is_(None)" in func_body(svc, "async def _legacy_pending("), "申請單的子單不能再算一次（編輯時會扣兩遍）"
     ev = func_body(svc, "async def evaluate(")
     assert "workdays_between(d0, d1, holidays)" in ev, "起迄模式由後端展開工作日"
     assert '_err("no_items", "還沒挑要扣的假")' in ev and '_err("insufficient"' in ev

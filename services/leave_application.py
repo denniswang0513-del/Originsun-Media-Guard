@@ -79,6 +79,17 @@ async def _reserved_by_pending(session, staff_id: str, exclude_app_id: str = "")
     return out
 
 
+async def _legacy_pending(session, staff_id: str) -> dict:
+    """{假別: 待審小時}，只算沒有申請單的單（手機送的舊路）；走時數帳的假別才算。"""
+    from sqlalchemy import func  # type: ignore
+    rows = (await session.execute(
+        select(HrLeaveRequest.leave_type, func.coalesce(func.sum(leave_service._HOURS), 0.0))
+        .where(HrLeaveRequest.staff_id == staff_id).where(HrLeaveRequest.status == "待審")
+        .where(HrLeaveRequest.application_id.is_(None)).where(HrLeaveRequest.leave_type.in_(LEDGER_TYPES))
+        .group_by(HrLeaveRequest.leave_type))).all()
+    return {lt: round(float(h or 0), 2) for lt, h in rows}
+
+
 async def inventory(session, staff_id: str, today: date | None = None, exclude_app_id: str = "") -> list:
     """員工自己的假（第 2 步清單）：走時數帳的每一筆 credit（特休／補休各批，available＝剩餘−待審申請單挑走的）＋
     不走時數帳的假別（病假有年上限、事假不給薪、公假／婚假／喪假要附證明）。順序：credit 先到期先排，再記錄型假別。"""
@@ -86,10 +97,10 @@ async def inventory(session, staff_id: str, today: date | None = None, exclude_a
     reserved = await _reserved_by_pending(session, staff_id, exclude_app_id)
     credits = (await leave_service.credits_for(session, [staff_id])).get(staff_id, [])
     live = usable_credits(credits, on=today)
-    # 沒有申請單的待審舊單（手機送的）也保留時數，但只知道假別不知道扣哪筆：照先到期先扣的順序暫時壓在前面的 credit 上
-    legacy = dict((await leave_service.pending_hours_for(session, [staff_id])).get(staff_id, {}))
-    for kind in LEDGER_TYPES:
-        legacy[kind] = max(round(legacy.get(kind, 0.0) - sum(h for iid, h in reserved.items() for c in live if c["id"] == iid and c["kind"] == kind), 2), 0.0)
+    # 沒有申請單的待審舊單（手機送的）也保留時數，但只知道假別不知道扣哪筆：照先到期先扣的順序暫時壓在前面的 credit 上。
+    # 🔴 只算 application_id 空的：申請單的子單也是待審，但它們已經在 reserved（或正在編輯、要排除）裡 —— 再算一次就會把
+    #    自己那張的時數扣兩遍，編輯時看到「補休已經夠了、這筆沒扣到」（2026-09-15 真機抓到）。
+    legacy = await _legacy_pending(session, staff_id)
     out = []
     for c in live:
         take_legacy = min(legacy.get(c["kind"], 0.0), max(float(c["remaining"]) - reserved.get(c["id"], 0.0), 0.0))
