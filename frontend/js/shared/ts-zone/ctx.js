@@ -80,6 +80,7 @@ export function defaultApi() {
         mergeUndo: () => "/api/v1/timesheets/mine/merge/undo",
         mergeLast: (day) => "/api/v1/timesheets/mine/merge/last?date=" + day,
         teamWeek: (start) => "/api/v1/me/team_week?start=" + start,
+        weekMarks: (start) => "/api/v1/me/week_marks?start=" + start,   // 我的一週要標的：自己的休假（假別／半天）＋彈性外出
         milestonesWeek: (start) => "/api/v1/milestones/week?start=" + start,
         projectsBurn: () => "/api/v1/me/projects_burn",
         projectFile: (name, pid) => "/api/v1/timesheets/project?name=" + encodeURIComponent(name) + (pid ? "&project_id=" + encodeURIComponent(pid) : ""),
@@ -94,6 +95,7 @@ export function manageApi() {
     return {
         ...own,
         today: () => (whoIsMe() ? own.today() : null),
+        weekMarks: (start) => (whoIsMe() ? own.weekMarks(start) : null),
         reminders: () => (whoIsMe() ? own.reminders() : null),
         mineDay: (day) => (whoIsMe() ? own.mineDay(day) : "/api/v1/timesheets/rows?date=" + day + (z.who ? "&staff_id=" + sid() : "")),
         mineRows: (from, to) => (whoIsMe() ? own.mineRows(from, to) : (z.who ? `/api/v1/timesheets/rows?from=${from}&to_day=${to}&staff_id=${sid()}` : null)),

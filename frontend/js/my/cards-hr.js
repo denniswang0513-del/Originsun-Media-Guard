@@ -57,6 +57,7 @@ async function loadLeave() {
         return;
     }
     renderLeave(body);
+    _foLoad();   // 彈性外出的清單另一支端點，卡畫完再抓
     if (hook) hook(LV);
 }
 const LV_RECENT_MAX = 20;   // 卡片裡只列最近這些筆；整本在 /leave.html 的休假總表
@@ -71,6 +72,59 @@ function _lvDays(h) { return _lvH(Number(h || 0) / ((LV && LV.vocab && LV.vocab.
 // 三步表單就在卡裡，清單只列最近幾張；最上排「假勤」開的浮動視窗（/leave.html）才是整本總表與大家的休假。
 const _lvFullHost = () => typeof window.onLeaveRendered === "function";
 const LV_CARD_RECENT = 5;      // 工作台卡裡最近幾張；整本在 /leave.html
+// ── 彈性外出（owner 2026-09-15）：每天 2 小時、自己登記不用核准、一次最多 2 小時、同一天合計也最多 2 小時、不累積。
+//    規則正本 core/leave_logic.FLEX_OUT_*；這裡只是即時提示，送出後端會再算一次（/me/flex_out 422）。
+const FO_MAX = 120;
+let _foItems = [];
+const _foMin = (v) => { const m = /^(\d{1,2}):(\d{2})/.exec(v || ""); return m ? (+m[1]) * 60 + (+m[2]) : NaN; };
+const _foH = (m) => (m % 60 === 0 ? `${m / 60} 小時` : (m > 60 ? `${(m / 60).toFixed(1)} 小時` : `${m} 分鐘`));
+async function _foLoad() {
+    if (!$("fo-list")) return;
+    try { _foItems = (await mjson("/api/v1/me/flex_out")).items || []; } catch (_) { _foItems = []; }
+    _foDrawList(); foCheck();
+}
+function _foDrawList() {
+    const host = $("fo-list");
+    if (!host) return;
+    const items = _foItems.slice(0, 5);
+    host.innerHTML = items.map(i => `<div class="fo-row"><span>${esc(i.date.slice(5).replace("-", "/"))}　${esc(i.start_time)}–${esc(i.end_time)}</span>
+        <span class="fo-meta">${_foH(i.minutes)}${i.reason ? "・" + esc(i.reason) : ""}</span>
+        <button class="mini-btn" type="button" onclick="foDelete('${esc(i.id)}')">刪</button></div>`).join("");
+}
+function foCheck() {
+    const a = $("fo-a"), b = $("fo-b"), d = $("fo-date"), h = $("fo-hint"), btn = $("fo-submit");
+    if (!a || !b || !d || !h || !btn) return;
+    const m = _foMin(b.value) - _foMin(a.value);
+    const used = _foItems.filter(i => i.date === d.value).reduce((s, i) => s + (i.minutes || 0), 0);
+    let msg = "", bad = false;
+    if (!d.value) { msg = "選日期"; bad = true; }
+    else if (isNaN(m)) { msg = "填開始與結束時間"; bad = true; }
+    else if (m <= 0) { msg = "結束要晚於開始"; bad = true; }
+    else if (m > FO_MAX) { msg = "一次最多 2 小時，超過的請另外請假（特休／補休／事假）"; bad = true; }
+    else if (used + m > FO_MAX) { msg = used >= FO_MAX ? `這天已登記 ${_foH(used)}，額度用完了（每天最多 2 小時）` : `這天已登記 ${_foH(used)}，只剩 ${_foH(FO_MAX - used)} 可外出（每天最多 2 小時）`; bad = true; }
+    else msg = `${_foH(m)}${m === FO_MAX ? "，剛好" : ""}。登記後直接算數、不用等核准。`;
+    h.textContent = msg; h.className = "fo-hint" + (bad ? " bad" : " ok"); btn.disabled = bad;
+}
+async function foSubmit() {
+    const btn = $("fo-submit"), h = $("fo-hint");
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    try {
+        const r = await mfetch("/api/v1/me/flex_out", { method: "POST", body: JSON.stringify({
+            date: $("fo-date").value, start_time: $("fo-a").value, end_time: $("fo-b").value, reason: $("fo-reason").value.trim() }) });
+        const dd = await r.json().catch(() => ({}));
+        if (!r.ok) { h.textContent = dd.detail || "登記失敗"; h.className = "fo-hint bad"; btn.disabled = false; return; }
+        $("fo-reason").value = "";
+        await _foLoad();
+        h.textContent = "已登記。"; h.className = "fo-hint ok";
+    } catch (_) { h.textContent = "連線失敗"; h.className = "fo-hint bad"; btn.disabled = false; }
+}
+async function foDelete(id) {
+    if (!confirm("刪掉這筆外出？")) return;
+    try { await mfetch("/api/v1/me/flex_out/" + encodeURIComponent(id), { method: "DELETE" }); } catch (_) { /* 下面重抓就知道 */ }
+    _foLoad();
+}
+
 function renderLeave(body) {
     const v = LV.vocab || {};
     const bal = LV.balances || {};
@@ -87,6 +141,19 @@ function renderLeave(body) {
     ${(an.reserved || comp.reserved || expiring) ? `<div class="meta" style="font-size:11px;color:var(--sub);margin:-4px 0 8px;">
         ${an.reserved ? `特休待審保留 ${_lvH(an.reserved)} h　` : ""}${comp.reserved ? `補休待審保留 ${_lvH(comp.reserved)} h　` : ""}${expiring ? `特休最近到期：${_lvH(expiring.hours)} h（${esc(expiring.expires_on)}）` : ""}
     </div>` : ""}
+    <div class="fo-box" id="fo-box">
+        <div class="fo-head"><span class="fo-title">彈性外出</span><span class="fo-rule" id="fo-rule">每日可彈性外出兩小時</span></div>
+        <div class="inline-row" style="margin-bottom:6px;"><input type="date" id="fo-date" value="${today}" oninput="foCheck()"></div>
+        <div class="inline-row fo-times" style="margin-bottom:6px;">
+            <input type="time" id="fo-a" value="10:00" step="300" oninput="foCheck()"><span class="fo-dash">－</span><input type="time" id="fo-b" value="12:00" step="300" oninput="foCheck()">
+        </div>
+        <div class="inline-row" style="margin-bottom:4px;">
+            <input id="fo-reason" placeholder="事由（選填）：去銀行、接小孩" maxlength="80">
+            <button class="mini-btn" id="fo-submit" type="button" onclick="foSubmit()">登記外出</button>
+        </div>
+        <div class="fo-hint" id="fo-hint"></div>
+        <div id="fo-list" class="fo-list"></div>
+    </div>
     <div class="pf-edit" id="lv-form" style="border-top:1px solid #f5f5f5;padding-top:12px;padding-bottom:4px;">
         <div class="lv-step"><span class="lv-n">1</span>日期<span class="lv-need" id="lv-need"></span></div>
         <div class="inline-row" style="margin-bottom:8px;">

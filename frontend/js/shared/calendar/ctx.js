@@ -49,9 +49,10 @@ export function colorOf(ev) {
     if (ev.kind === 'plan') return hex.work || '#3f51b5';
     if (ev.kind === 'milestone') return hex.milestone || '#8e24aa';
     if (ev.kind === 'leave') return hex.leave || '#616161';
+    if (ev.kind === 'flex_out') return hex.out || '#d99a1e';   // 彈性外出：借「外出」那一格的顏色
     return '#9aa0a8';
 }
-export const KIND_LABEL = { shoot: '拍攝', schedule: '工作', plan: '計畫', milestone: '里程碑', leave: '休假', holiday: '假日' };
+export const KIND_LABEL = { shoot: '拍攝', schedule: '工作', plan: '計畫', milestone: '里程碑', leave: '休假', holiday: '假日', flex_out: '外出' };
 export function kindLabel(ev) {
     if (ev.kind === 'schedule') return ({ work: '工作', meeting: '會議', out: '外出', other: '其他' })[ev.sub_kind] || '工作';
     return KIND_LABEL[ev.kind] || ev.kind;

@@ -256,3 +256,23 @@
 - 日曆同步只在**核准後**發生，且失敗只寫 `sync_error` 不擋核准（同場次的規則）。
 - 時數帳餘額**不存快照**，一律由 credits − allocations 重算（同預支款、私帳已收的教訓：存快照會被加兩次）。
 - 週末／假日算法只住 `core/leave_logic.working_hours`；`hr_logic.is_workday` 那條是給工時用的，不要混用。
+
+
+## 彈性外出（2026-09-15）
+
+owner：「我還有每天兩小時的彈性外出 幫我規劃進去，也放進休假規章」；拍板：**自己登記不用核准、一筆最多 2 小時、同一天合計也最多 2 小時、不累積**。
+畫面那一行固定寫「每日可彈性外出兩小時」（owner 改的，不顯示剩多少）。
+
+- 表 `hr_flex_outings`（db/models/_workos.HrFlexOuting）：不走請假單——不進時數帳、不進休假總表、不上 Google 日曆。
+- 規則正本 core/leave_logic：`FLEX_OUT_MAX_MINUTES=120`、`flex_out_check(start, end, used_today)`。
+- 端點（routers/api_me，鑰匙 me_leave、要綁人員檔案）：`GET/POST /me/flex_out`、`DELETE /me/flex_out/{id}`（只能刪自己的）。
+- 哪裡看得到：假勤卡的「彈性外出」小方塊（登記＋最近 5 筆）；行事曆事件流 kind=`flex_out`（顏色借「外出」）；
+  團隊的一週（`/me/team_week` 的 `flex_out`）與我的一週（`/me/week_marks`）用黃色小標籤「外出 10:00–12:00」。
+- 規章卡（leave.html）多一段「彈性外出」，排在事假前面。
+
+## 有人休假時的標示（2026-09-15）
+
+owner：「如果有人休假 團隊的一週與他的一週要標示」。
+- `/me/team_week` 除了原本的 `leave`（名字）多 `leave_detail[date]=[{name, kind, part, start_time, end_time}]`：格子寫「下午休假・補休」、半天只塗半格（`.c.off.half`）。
+- 新端點 `/me/week_marks?start=`（me_week_plan／me_leave／me_today_zone 任一把＋綁人員）：自己這週的已核准假＋外出＋`leave_days`。
+  我的一週：整天休假那欄變綠、鎖住「加一項」；半天只鎖那半天（按鈕寫「只能排上午」）；統計列多「休假 X 天」。

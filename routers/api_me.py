@@ -19,6 +19,7 @@ core.identity.resolve_current_staff（token → users.staff_id → crm_staff）�
 from datetime import date, datetime, timedelta, timezone
 
 import os
+import uuid
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile  # type: ignore
 from sqlalchemy import func, select  # type: ignore
@@ -30,11 +31,11 @@ from core.hr_logic import (midnight_of, budget_burn, day_iso, hours_rollup,
 from core.identity import require_bound_staff, require_zone_staff, resolve_current_staff
 from core.hr_logic import STAFF_ACTIVE, staff_rank
 from core.journal_logic import shell_status, week_start_of
-from core.leave_logic import cancel_mode, in_crew, vocab as leave_vocab
-from core.schemas import (LeaveCancel, MeLeaveApplication, MeLeaveCreate, MeLeavePreview, MeProfileUpdate, MeTimesheetBatch,
+from core.leave_logic import FLEX_OUT_MAX_MINUTES, FLEX_OUT_RULE, cancel_mode, flex_out_check, in_crew, vocab as leave_vocab
+from core.schemas import (LeaveCancel, MeFlexOutCreate, MeLeaveApplication, MeLeaveCreate, MeLeavePreview, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetUpdate, MeTodoUpdate)
 from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
-from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
+from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject, HrFlexOuting,
                        CrmProjectStaff, CrmShoot, CrmStaff, HrLeaveRequest, PreprodLocation, Timesheet, WorkJournal)
 from services import leave_service
 from services.timesheet_lookup import budgets_for, client_prefixed_names, project_ids_named
@@ -756,6 +757,9 @@ async def team_week(request: Request, start: str = ""):
             select(HrLeaveRequest).where(HrLeaveRequest.status == "已核准")
             .where(HrLeaveRequest.start_date < d0 + timedelta(days=7))
             .where(HrLeaveRequest.end_date >= d0))).scalars().all()
+        flex_rows = (await session.execute(
+            select(HrFlexOuting).where(HrFlexOuting.date >= week).where(HrFlexOuting.date <= week + timedelta(days=6))
+            .order_by(HrFlexOuting.date, HrFlexOuting.start_time))).scalars().all()
         # 人員的在職狀態：清單排序用（在職 → 兼職 → 其他；core.hr_logic.staff_rank）
         board_names = {p["name"] for day in board for p in day["people"]}
         staff_st = {n: st for n, st in (await session.execute(
@@ -779,17 +783,138 @@ async def team_week(request: Request, start: str = ""):
                                   "location": x["location"], "start_time": s.start_time or "",
                                   "crew": [c["name"] for c in x["crew"] if c.get("name")]})
     leave: dict = {d: [] for d in days}
+    # owner 2026-09-15「有人休假 團隊的一週與他的一週要標示」：名字之外還要假別與半天（am／pm／range 帶時間），格子才寫得出「下午休假・補休」
+    leave_detail: dict = {d: [] for d in days}
     for l in leaves:
         a, b = tw_day(l.start_date), tw_day(l.end_date)
         if not a or not b:
             continue
         for d in days:
-            if a.isoformat() <= d <= b.isoformat() and l.staff_name not in leave[d]:
-                leave[d].append(l.staff_name)
+            if a.isoformat() <= d <= b.isoformat():
+                if l.staff_name not in leave[d]:
+                    leave[d].append(l.staff_name)
+                leave_detail[d].append(_leave_mark(l))
+    flex: dict = {d: [] for d in days}
+    for f in flex_rows:
+        k = f.date.isoformat()
+        if k in flex:
+            flex[k].append({"name": f.staff_name, "start_time": f.start_time, "end_time": f.end_time, "minutes": f.minutes})
     return {"week_start": week.isoformat(), "days": days, "me": ident["staff"].name if ident else "",
             "people": [{"name": n, "cells": c} for n, c in sorted(people.items(), key=lambda kv: (staff_rank(staff_st.get(kv[0])), kv[0]))],
-            "shoots": shoots, "leave": leave}
+            "shoots": shoots, "leave": leave, "leave_detail": leave_detail, "flex_out": flex}
 
+
+
+def _leave_mark(l) -> dict:
+    """一張已核准的假在週表格子裡要寫的東西：誰、假別、整天／上午／下午／時段（帶時間）。"""
+    part = l.part or "all"
+    return {"name": l.staff_name or "", "kind": l.leave_type or "請假", "part": part,
+            "start_time": l.start_time or "" if part == "range" else "", "end_time": l.end_time or "" if part == "range" else ""}
+
+
+def _flex_dict(f) -> dict:
+    return {"id": f.id, "date": f.date.isoformat(), "start_time": f.start_time, "end_time": f.end_time,
+            "minutes": int(f.minutes or 0), "reason": f.reason or ""}
+
+
+@router.get("/week_marks")
+async def week_marks(request: Request, start: str = ""):
+    """「我的一週」要標的東西（owner 2026-09-15）：自己這週已核准的假（假別／半天）＋自己的彈性外出。
+    鑰匙＝我的一週或假勤任一把（都在自己的範圍）；要綁人員檔案。"""
+    check_admin_or_module(request, "me_week_plan", "me_leave", ME_ZONE_MASTER)
+    ident = await require_bound_staff(request, "me_week_plan", "me_leave", ME_ZONE_MASTER)
+    if (start or "").strip() and parse_ymd(start) is None:
+        raise HTTPException(status_code=422, detail="start 需為 YYYY-MM-DD")
+    week = week_start_of(parse_ymd(start).date() if (start or "").strip() else date.today())
+    days = [(week + timedelta(days=i)).isoformat() for i in range(7)]
+    d0 = midnight_of(week)
+    sid = ident["staff_id"]
+    factory = db_factory_or_503()
+    async with factory() as session:
+        leaves = (await session.execute(
+            select(HrLeaveRequest).where(HrLeaveRequest.status == "已核准").where(HrLeaveRequest.staff_id == sid)
+            .where(HrLeaveRequest.start_date < d0 + timedelta(days=7)).where(HrLeaveRequest.end_date >= d0))).scalars().all()
+        flex_rows = (await session.execute(
+            select(HrFlexOuting).where(HrFlexOuting.staff_id == sid)
+            .where(HrFlexOuting.date >= week).where(HrFlexOuting.date <= week + timedelta(days=6))
+            .order_by(HrFlexOuting.date, HrFlexOuting.start_time))).scalars().all()
+    leave: dict = {d: [] for d in days}
+    for l in leaves:
+        a, b = tw_day(l.start_date), tw_day(l.end_date)
+        if not a or not b:
+            continue
+        for d in days:
+            if a.isoformat() <= d <= b.isoformat():
+                leave[d].append(_leave_mark(l))
+    flex: dict = {d: [] for d in days}
+    for f in flex_rows:
+        flex[f.date.isoformat()].append(_flex_dict(f))
+    off_days = 0.0
+    for d, marks in leave.items():
+        if any(m["part"] == "all" for m in marks):
+            off_days += 1
+        elif marks:
+            off_days += 0.5
+    return {"week_start": week.isoformat(), "days": days, "leave": leave, "flex_out": flex, "leave_days": off_days}
+
+
+# ── 彈性外出（owner 2026-09-15）：自己登記、不用核准；每天 2 小時、一筆最多 2 小時、同一天合計也最多 2 小時、不累積 ──
+
+@router.get("/flex_out")
+async def my_flex_out(request: Request, from_: str = "", to: str = ""):
+    """自己的彈性外出清單（預設前後 30 天）＋規則字（畫面那一行）。"""
+    ident = await require_bound_staff(request, "me_leave")
+    d0 = parse_ymd(from_) if from_ else None
+    d1 = parse_ymd(to) if to else None
+    today = date.today()
+    a = d0.date() if d0 else today - timedelta(days=30)
+    b = d1.date() if d1 else today + timedelta(days=30)
+    factory = db_factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(HrFlexOuting).where(HrFlexOuting.staff_id == ident["staff_id"])
+            .where(HrFlexOuting.date >= a).where(HrFlexOuting.date <= b)
+            .order_by(HrFlexOuting.date.desc(), HrFlexOuting.start_time.desc()))).scalars().all()
+    return {"rule": FLEX_OUT_RULE, "max_minutes": FLEX_OUT_MAX_MINUTES, "items": [_flex_dict(f) for f in rows]}
+
+
+@router.post("/flex_out")
+async def create_flex_out(body: MeFlexOutCreate, request: Request):
+    ident = await require_bound_staff(request, "me_leave")
+    d = parse_ymd(body.date)
+    if d is None:
+        raise HTTPException(status_code=422, detail="日期需為 YYYY-MM-DD")
+    day = d.date()
+    factory = db_factory_or_503()
+    async with factory() as session:
+        used = int((await session.execute(
+            select(func.coalesce(func.sum(HrFlexOuting.minutes), 0))
+            .where(HrFlexOuting.staff_id == ident["staff_id"]).where(HrFlexOuting.date == day))).scalar() or 0)
+        mins, err = flex_out_check(body.start_time, body.end_time, used)
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+        obj = HrFlexOuting(id=uuid.uuid4().hex, staff_id=ident["staff_id"], staff_name=ident["staff"].name or "",
+                           date=day, start_time=body.start_time[:5], end_time=body.end_time[:5], minutes=mins,
+                           reason=(body.reason or "").strip() or None, created_by=ident.get("username") or "")
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+        return {"status": "ok", "item": _flex_dict(obj)}
+
+
+@router.delete("/flex_out/{item_id}")
+async def delete_flex_out(item_id: str, request: Request):
+    """刪自己的（登記錯了）；別人的看不到也刪不到。"""
+    ident = await require_bound_staff(request, "me_leave")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        obj = (await session.execute(
+            select(HrFlexOuting).where(HrFlexOuting.id == item_id).where(HrFlexOuting.staff_id == ident["staff_id"]))).scalar_one_or_none()
+        if obj is None:
+            raise HTTPException(status_code=404, detail="找不到這筆外出")
+        await session.delete(obj)
+        await session.commit()
+    return {"status": "ok"}
 
 
 # ── 我的工時：自己填、看自己的、改／刪自己填的（docs/TIMESHEET_SELF_ENTRY_PLAN.md 階段 1）──

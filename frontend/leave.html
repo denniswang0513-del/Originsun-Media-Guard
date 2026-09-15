@@ -117,6 +117,19 @@
   .lv-inv-more:hover { color: var(--red); }
   .lv-inv-more .lv-fold { display: inline-block; transition: transform .15s; transform: rotate(-90deg); }
   .lv-inv-more.open .lv-fold { transform: none; }
+  .fo-box { border: 1px solid var(--line); background: var(--soft, #fafafa); padding: 10px 12px 8px; margin: 4px 0 14px; }
+  .fo-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .fo-title { font-size: 12px; letter-spacing: .15em; color: var(--red); }
+  .fo-rule { font-size: 12px; color: var(--sub); }
+  .fo-times { flex-wrap: nowrap; align-items: center; }
+  .fo-box input[type=time] { width: 118px; flex: 0 0 auto; }
+  .fo-dash { color: var(--sub); font-size: 12px; align-self: center; }
+  .fo-hint { font-size: 12px; color: var(--sub); min-height: 16px; }
+  .fo-hint.ok { color: var(--ok, #15803d); }
+  .fo-hint.bad { color: var(--red); }
+  .fo-list { margin-top: 6px; }
+  .fo-row { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 4px 0; border-top: 1px solid var(--line); }
+  .fo-row .fo-meta { color: var(--sub); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #lv-inv-more .lv-inv-row:first-child { border-top: 1px solid var(--line); }
   .lv-inv-row.on { background: #fff7f6; }
   .lv-inv-row input[type=checkbox] { width: 14px; height: 14px; margin: 0; }
@@ -209,6 +222,13 @@
               <li>同時有「沒住院」與「有住院」的病假：2 年內合計最多 1 年</li>
             </ul>
             <p>請假 1 天給薪，1 至 30 天半薪，30 天後不給薪（留職停薪）。病假須提出相關證明。</p></div>
+          <div class="rule"><b>彈性外出</b>
+            <ul>
+              <li>每日可彈性外出兩小時，不扣假、不扣薪，不用核准。</li>
+              <li>外出前在假勤的「彈性外出」登記日期與時段，一次最多 2 小時；當天沒用完不累積到隔天。</li>
+              <li>需要離開超過 2 小時，超過的部分請另外請假（特休／補休／事假）。</li>
+              <li>登記後主管在行事曆、團隊的一週看得到；有拍攝或會議的時段請先跟主管講。</li>
+            </ul></div>
           <div class="rule"><b>事假</b><p>不給薪。</p></div>
           <div class="rule"><b>婚假</b><p>8 日，結婚登記後生效；應在登記前 10 天起 3 個月內請完，雇主同意可延長到 1 年。請假期間給薪，須提出相關證明。</p></div>
           <div class="rule"><b>喪假</b>

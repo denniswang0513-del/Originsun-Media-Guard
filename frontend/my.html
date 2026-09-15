@@ -154,6 +154,19 @@ main { max-width: 1100px; margin: 0 auto; padding: 104px 20px 80px; }
 .lv-inv-more:hover { color: var(--red); }
 .lv-inv-more .lv-fold { display: inline-block; transition: transform .15s; transform: rotate(-90deg); }
 .lv-inv-more.open .lv-fold { transform: none; }
+.fo-box { border: 1px solid var(--line); background: var(--soft, #fafafa); padding: 10px 12px 8px; margin: 4px 0 14px; }
+.fo-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.fo-title { font-size: 12px; letter-spacing: .15em; color: var(--red); }
+.fo-rule { font-size: 12px; color: var(--sub); }
+.fo-times { flex-wrap: nowrap; align-items: center; }
+.fo-box input[type=time] { width: 118px; flex: 0 0 auto; }
+.fo-dash { color: var(--sub); font-size: 12px; align-self: center; }
+.fo-hint { font-size: 12px; color: var(--sub); min-height: 16px; }
+.fo-hint.ok { color: var(--ok, #15803d); }
+.fo-hint.bad { color: var(--red); }
+.fo-list { margin-top: 6px; }
+.fo-row { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 4px 0; border-top: 1px solid var(--line); }
+.fo-row .fo-meta { color: var(--sub); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #lv-inv-more .lv-inv-row:first-child { border-top: 1px solid var(--line); }
 .lv-inv-row.on { background: #fff7f6; }
 .lv-inv-row input[type=checkbox] { width: 14px; height: 14px; margin: 0; }
@@ -258,7 +271,18 @@ body .proj-pop { --pp-bg: #fff; --pp-line: #e5e5e5; --pp-shadow: 0 8px 24px rgba
 #ws-view table.week .ct { color: var(--sub); font-size: 11px; margin-top: 2px; letter-spacing: 0.02em; }
 #ws-view table.week .c.plan { color: var(--sub); }
 #ws-view table.week .c.shoot { color: #1d4ed8; background: #eff6ff; border-radius: 4px; padding: 3px 6px; }
-#ws-view table.week .c.off { color: var(--sub); background: #f5f5f5; border-radius: 4px; padding: 3px 6px; }
+#ws-view table.week .c.off { color: #25623f; background: #eef7f1; border-left: 3px solid #3a9c6c; border-radius: 4px; padding: 3px 6px; }
+#ws-view table.week .c.off.half { background: linear-gradient(90deg, #eef7f1 0 50%, #fafafa 50%); }
+#ws-view table.week .c.off i { color: var(--sub); font-style: normal; margin-left: 4px; font-size: 11px; }
+#ws-view table.week .c.fo { color: #7a5200; background: #fdf5e4; border-left: 3px solid #d99a1e; border-radius: 4px; padding: 3px 6px; font-size: 11px; }
+#ws-view .pcol.off { border-color: #3a9c6c; }
+#ws-view .pcol.off .dh, #ws-view .pcol.half .dh { color: #25623f; }
+#ws-view .pcol.off .dh { background: #eef7f1; }
+#ws-view .pcol .dh .offtag { color: #25623f; font-weight: 500; margin-left: auto; }
+#ws-view .pcol .dh .fotag { color: #7a5200; background: #fdf5e4; border-left: 2px solid #d99a1e; padding: 0 5px; margin-left: 6px; font-weight: 400; }
+#ws-view .pcol .offbody { color: #25623f; text-align: center; padding: 14px 0 6px; font-size: 13px; }
+#ws-view .pcol .offbody small { display: block; color: var(--sub); font-size: 11px; margin-top: 2px; }
+#ws-view .pcol .addbtn.off { display: block; text-align: center; border: 1px dashed #cfe5d7; color: #3a9c6c; border-radius: 7px; padding: 5px; font-size: 12px; opacity: .8; }
 /* 我的一週（owner 2026-09-08；示範 /demo/week-plan.html 定稿）：一天一欄的規劃板，一張卡＝一列工時 */
 #ws-view .wk-sum { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; margin-bottom: 10px; align-items: center; }
 #ws-view .wk-sum .k { color: var(--sub); margin-right: 4px; }

@@ -91,7 +91,17 @@
 #ts-root .ts-zone table.week .ct { color: var(--sub); font-size: 11px; margin-top: 2px; letter-spacing: 0.02em; }
 #ts-root .ts-zone table.week .c.plan { color: var(--sub); }
 #ts-root .ts-zone table.week .c.shoot { color: #93c5fd; background: #1e3a5f; border-radius: 4px; padding: 3px 6px; }
-#ts-root .ts-zone table.week .c.off { color: var(--sub); background: #333; border-radius: 4px; padding: 3px 6px; }
+#ts-root .ts-zone table.week .c.off { color: #8fd6ad; background: #1e3328; border-left: 3px solid #3a9c6c; border-radius: 4px; padding: 3px 6px; }
+#ts-root .ts-zone table.week .c.off.half { background: linear-gradient(90deg, #1e3328 0 50%, #2a2a2a 50%); }
+#ts-root .ts-zone table.week .c.off i { color: var(--sub); font-style: normal; margin-left: 4px; font-size: 11px; }
+#ts-root .ts-zone table.week .c.fo { color: #f1c46b; background: #3a2f14; border-left: 3px solid #d99a1e; border-radius: 4px; padding: 3px 6px; font-size: 11px; }
+#ts-root .ts-zone .pcol.off { border-color: #3a9c6c; }
+#ts-root .ts-zone .pcol.off .dh, #ts-root .ts-zone .pcol.half .dh { color: #8fd6ad; }
+#ts-root .ts-zone .pcol .dh .offtag { color: #8fd6ad; font-weight: 500; margin-left: auto; }
+#ts-root .ts-zone .pcol .dh .fotag { color: #f1c46b; background: #3a2f14; border-left: 2px solid #d99a1e; padding: 0 5px; margin-left: 6px; font-weight: 400; }
+#ts-root .ts-zone .pcol .offbody { color: #8fd6ad; text-align: center; padding: 14px 0 6px; font-size: 13px; }
+#ts-root .ts-zone .pcol .offbody small { display: block; color: var(--sub); font-size: 11px; margin-top: 2px; }
+#ts-root .ts-zone .pcol .addbtn.off { display: block; text-align: center; border: 1px dashed #2f5d43; color: #3a9c6c; border-radius: 7px; padding: 5px; font-size: 12px; opacity: .8; }
 #ts-root .ts-zone table.week .c.ms { display: block; background: #3b2a00; border: 1px solid #7a5a10; font-size: 11px; color: #fde68a; }
 #ts-root .ts-zone table.week .c.ms.done { color: var(--sub); background: #2a2a2a; border-color: var(--line); }
 #ts-root .ts-zone table.week .none { color: #555; }

@@ -6,6 +6,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 import { z, _z1MarkStale, _shiftDays, _dow, _mondayOf, _mdLabel, _isPlan, _POST, _PUT, whoIsMe } from "./ctx.js";
 import { _logProjectOptions } from "./log.js";
+import { _partWord } from "./team-week.js";
 
 function _planDays() { return [...Array(7)].map((_, k) => _shiftDays(z.s.planWeek, k)); }
 export async function loadMyWeek() {
@@ -19,7 +20,13 @@ export async function loadMyWeek() {
         return;
     }
     try {
-        s.planRows = (await mjson(z.api.mineRows(days[0], days[6]))).items || [];
+        // 自己的休假／外出標示另一支（owner 2026-09-15）；抓不到不擋板子
+        const [rows, marks] = await Promise.all([
+            mjson(z.api.mineRows(days[0], days[6])),
+            z.api.weekMarks && z.api.weekMarks(days[0]) ? mjson(z.api.weekMarks(days[0])).catch(() => null) : Promise.resolve(null),
+        ]);
+        s.planRows = rows.items || [];
+        s.planMarks = marks;
     } catch (e) {
         host.innerHTML = `<div class="notice">${esc(e.message)}<br><span class="meta">要排我的一週，帳號要在「使用者管理」綁定人員檔案並開通工作紀錄。</span></div>`;
         return;
@@ -46,6 +53,13 @@ export function _renderMyWeek() {
     const byDay = (d) => s.planRows.filter(i => i.date === d);
     const cols = days.filter(d => { const w = _dow(d); return (w !== 0 && w !== 6) || byDay(d).length; });   // 週末有排才畫
     const filled = s.planRows.filter(i => i.hours > 0).length;
+    const marks = s.planMarks || { leave: {}, flex_out: {}, leave_days: 0 };
+    const lvOf = (d) => (marks.leave && marks.leave[d]) || [];
+    const foOf = (d) => (marks.flex_out && marks.flex_out[d]) || [];
+    const offKind = (d) => { const l = lvOf(d); return l.some(m => m.part === "all") ? "full" : (l.length ? "half" : ""); };
+    const offTag = (d) => lvOf(d).map(m => `<small class="offtag">${_partWord(m)}休假</small>`).join("") + foOf(d).map(f => `<small class="fotag">外出 ${esc(f.start_time)}–${esc(f.end_time)}</small>`).join("");
+    const offBody = (d) => offKind(d) === "full" ? `<div class="offbody">${lvOf(d).map(m => esc(m.kind)).join("、")}<small>已核准・整天</small></div>` : "";
+    const otherHalf = (d) => { const l = lvOf(d); return l.some(m => m.part === "am") ? "下午" : (l.some(m => m.part === "pm") ? "上午" : ""); };
     const who = z.manage && z.who ? `<span class="meta">${esc(z.who.name)}${whoIsMe() ? "（我）" : "（替他排）"}</span>` : "";
     host.innerHTML = `
         <div class="vhead"><span class="ey">My Week<b>我的一週 ${esc(_mdLabel(days[0]).slice(0, -3))} – ${esc(_mdLabel(days[6]).slice(0, -3))}</b>${who}</span>
@@ -55,12 +69,12 @@ export function _renderMyWeek() {
                 ${s.planWeek === _mondayOf(today) ? "" : '<button type="button" class="btn" data-z1="plan-week">本週</button>'}
                 <button type="button" class="btn" data-z1="plan-from-ms" title="這週指定給我的里程碑，落在到期那天">從里程碑帶入</button>
                 <button type="button" class="btn" data-z1="plan-copy-last" title="上週的列照星期幾貼到這週（不帶時數）">複製上週</button></span></div>
-        <div class="wk-sum"><span><span class="k">這週排了</span>${s.planRows.length} 項</span><span><span class="k">填了時數</span>${filled} 項</span><span class="meta" id="z1-plan-msg">只看排了什麼、填到哪；不判有做沒做。</span></div>
+        <div class="wk-sum"><span><span class="k">這週排了</span>${s.planRows.length} 項</span><span><span class="k">填了時數</span>${filled} 項</span>${marks.leave_days ? `<span><span class="k">休假</span>${marks.leave_days} 天</span>` : ""}<span class="meta" id="z1-plan-msg">只看排了什麼、填到哪；不判有做沒做。</span></div>
         <div class="pboard" style="grid-template-columns:repeat(${cols.length}, minmax(0, 1fr));">${cols.map(d => `
-            <div class="pcol${d === today ? " today" : (d < today ? " past" : "")}" data-day="${d}">
-                <div class="dh"><span>${esc(_mdLabel(d))}</span>${d === today ? "<small>今天</small>" : ""}</div>
-                <div class="cards">${byDay(d).map(_planCardHtml).join("") || '<div class="none">沒排</div>'}</div>
-                <div class="add" data-add="${d}"><button type="button" class="addbtn" data-z1="plan-add" data-day="${d}">加一項</button></div>
+            <div class="pcol${d === today ? " today" : (d < today ? " past" : "")}${offKind(d) === "full" ? " off" : (offKind(d) === "half" ? " half" : "")}" data-day="${d}">
+                <div class="dh"><span>${esc(_mdLabel(d))}</span>${d === today ? "<small>今天</small>" : ""}${offTag(d)}</div>
+                <div class="cards">${offBody(d)}${byDay(d).map(_planCardHtml).join("") || (offKind(d) === "full" ? "" : '<div class="none">沒排</div>')}</div>
+                <div class="add" data-add="${d}">${offKind(d) === "full" ? '<span class="addbtn off">休假日不排</span>' : `<button type="button" class="addbtn" data-z1="plan-add" data-day="${d}">加一項${otherHalf(d) ? `（只能排${otherHalf(d)}）` : ""}</button>`}</div>
             </div>`).join("")}</div>
         <div class="sheet-note">拖卡片到別的日子；卡片右上的 × 刪；還沒填時數的卡可以「挪到隔天」。當天的卡會自動出現在「今天的專案紀錄」的格子裡（藍底、狀態「計畫」），時數在那裡填。</div>`;
 }

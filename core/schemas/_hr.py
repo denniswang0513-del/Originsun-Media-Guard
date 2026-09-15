@@ -69,6 +69,14 @@ class MeLeavePreview(BaseModel):
     end_time: Optional[str] = None
 
 
+class MeFlexOutCreate(BaseModel):
+    """彈性外出登記（owner 2026-09-15）：日期＋時段＋事由（選填）；規則 core.leave_logic.flex_out_check。"""
+    date: str
+    start_time: str
+    end_time: str
+    reason: Optional[str] = None
+
+
 class MeLeaveCreate(BaseModel):
     """員工自助送單（staff_id 由 token 解析，不收）。欄位同 MeLeavePreview ＋ reason（必填）。
 

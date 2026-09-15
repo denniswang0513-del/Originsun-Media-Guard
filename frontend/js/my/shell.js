@@ -335,6 +335,8 @@ function renderActions(ws) {
     const items = [
         has("me_petty") && { label: "零用金", href: "/petty-cash.html" },
         has("me_leave") && { label: "假勤", href: "/leave.html" },
+        // 行事曆（owner 2026-09-15）：看的鑰匙同後端 api_calendar.READ_KEYS 裡員工那兩把（今天與這週總開關／團隊的一週）
+        (has("me_today_zone") || has("me_team_week")) && { label: "行事曆", href: "/calendar.html" },
     ].filter(Boolean);
     $("ws-actions").innerHTML = items.map(it =>
         `<a class="act" href="${it.href}" onclick="openActionModal('${it.href}', '${it.label}'); return false;">${it.label}</a>`).join("");

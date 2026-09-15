@@ -37,6 +37,38 @@ PARTS = ("all", "am", "pm", "range")
 PART_LABELS = {"all": "整天", "am": "上午", "pm": "下午", "range": "時段"}
 
 HOURS_PER_DAY = 8
+
+# 彈性外出（owner 2026-09-15 拍板）：每人每天 2 小時、自己登記不用核准、一筆最多 2 小時、同一天合計也最多 2 小時、不累積。
+FLEX_OUT_MAX_MINUTES = 120
+FLEX_OUT_RULE = "每日可彈性外出兩小時"
+
+
+def hm_minutes(hhmm: str) -> int | None:
+    """'10:30' → 630；壞格式回 None。"""
+    try:
+        h, m = str(hhmm or "").strip()[:5].split(":")
+        h, m = int(h), int(m)
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= h < 24 and 0 <= m < 60):
+        return None
+    return h * 60 + m
+
+
+def flex_out_check(start_time: str, end_time: str, used_today: int = 0) -> tuple[int, str]:
+    """回 (這筆的分鐘, 錯誤字串)；錯誤字串空＝可以登記。used_today＝同一天已登記的分鐘（一天合計也不能超過 2 小時）。"""
+    a, b = hm_minutes(start_time), hm_minutes(end_time)
+    if a is None or b is None:
+        return 0, "時間格式要是 HH:MM"
+    mins = b - a
+    if mins <= 0:
+        return 0, "結束要晚於開始"
+    if mins > FLEX_OUT_MAX_MINUTES:
+        return mins, "一次最多 2 小時，超過的請另外請假（特休／補休／事假）"
+    if used_today + mins > FLEX_OUT_MAX_MINUTES:
+        left = max(FLEX_OUT_MAX_MINUTES - used_today, 0)
+        return mins, f"今天已登記 {used_today} 分鐘，剩 {left} 分鐘可外出（每天最多 2 小時）"
+    return mins, ""
 HOLIDAY_OT_MULTIPLIER = 2       # 假日（週末／國定假日／颱風假）加班 1:2（owner 2026-09-07）
 NOTICE_DAYS = 7                 # 規章：最晚一週前提出；不足黃字提醒不擋
 CANCEL_FREE_DAYS = 2            # 規章：開始前 ≥2 天可自己撤回，<2 天只能申請消假

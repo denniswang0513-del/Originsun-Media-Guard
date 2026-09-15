@@ -4,6 +4,13 @@
 import { z, _shiftDays, _dow, _mondayOf, _mdLabel, _POST } from "./ctx.js";
 import { _logProjectOptions, resetToday } from "./log.js";
 
+/** 半天／時段的字：上午休假、下午休假、10:00–12:00 休假；整天空字。 */
+export function _partWord(m) {
+    if (m.part === "am") return "上午";
+    if (m.part === "pm") return "下午";
+    if (m.part === "range") return `${m.start_time || ""}–${m.end_time || ""} `;
+    return "";
+}
 export async function loadTeamWeek() {
     const { $, esc, mjson, s } = z;
     const host = $("z1-week");
@@ -24,10 +31,13 @@ export async function loadTeamWeek() {
     const today = z.today();
     const shootsOf = (iso) => (d.shoots && d.shoots[iso]) || [];
     const leaveOf = (iso) => (d.leave && d.leave[iso]) || [];
+    // owner 2026-09-15「有人休假 團隊的一週與他的一週要標示」：格子寫假別、半天只塗半格；彈性外出黃色小標籤
+    const leaveMarks = (iso, name) => ((d.leave_detail && d.leave_detail[iso]) || []).filter(m => m.name === name);
+    const flexOf = (iso) => (d.flex_out && d.flex_out[iso]) || [];
     const people = d.people || [];
     const msNames = ms ? ms.projects.flatMap(p => p.milestones.map(m => m.assignee_name).filter(Boolean)) : [];   // 有里程碑的負責人也要有一列
-    const names = [...new Set([...people.map(p => p.name), ...days.flatMap(iso => [...shootsOf(iso).flatMap(s => s.crew || []), ...leaveOf(iso)]), ...msNames])];
-    const hasAny = (iso) => people.some(p => (p.cells && p.cells[iso] || []).length) || shootsOf(iso).length || leaveOf(iso).length;
+    const names = [...new Set([...people.map(p => p.name), ...days.flatMap(iso => [...shootsOf(iso).flatMap(s => s.crew || []), ...leaveOf(iso), ...flexOf(iso).map(f => f.name)]), ...msNames])];
+    const hasAny = (iso) => people.some(p => (p.cells && p.cells[iso] || []).length) || shootsOf(iso).length || leaveOf(iso).length || flexOf(iso).length;
     const cols = days.filter(iso => { const w = _dow(iso); return (w !== 0 && w !== 6) || hasAny(iso); });   // 週末只有有東西才畫
     // 管理視角（docs/WORK_TRACKING_V2_PLAN.md §4-5）：每人週合計、今天以前的工作日空白標「未填」（在職／合夥才點名；兼職不）
     const status = new Map(z.people.map(p => [p.name, p.status]));
@@ -40,7 +50,10 @@ export async function loadTeamWeek() {
     const cell = (name, iso) => {
         const items = cellsOf(name, iso);
         const parts = [];
-        if (leaveOf(iso).includes(name)) parts.push('<div class="c off">休假</div>');
+        const marks = leaveMarks(iso, name);
+        if (marks.length) marks.forEach(m => parts.push(`<div class="c off${m.part !== "all" ? " half" : ""}">${_partWord(m)}休假<i>${esc(m.kind)}</i></div>`));
+        else if (leaveOf(iso).includes(name)) parts.push('<div class="c off">休假</div>');   // 舊後端只給名字
+        flexOf(iso).filter(f => f.name === name).forEach(f => parts.push(`<div class="c fo">外出 ${esc(f.start_time)}–${esc(f.end_time)}</div>`));
         shootsOf(iso).filter(s => (s.crew || []).includes(name)).forEach(s => parts.push(`<div class="c shoot">${esc(s.title || s.project_name || "場次")}<i>${[s.project_name && s.project_name !== s.title ? s.project_name : "", s.location, s.start_time, (s.crew || []).join("、")].filter(Boolean).map(esc).join(" · ")}</i></div>`));
         // 指定了負責人的里程碑：到期那天出現在他的格子（沒指定的只在上方的帶）
         msOf(name, iso).forEach(m => parts.push(`<div class="c ms${m.done ? " done" : ""}">${m.done ? "已完成：" : "里程碑："}${esc(m.title)}<div class="cn">${esc(m.project_name)}</div></div>`));

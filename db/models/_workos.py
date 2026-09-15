@@ -189,6 +189,23 @@ class HrLeaveApplication(Base):
     approved_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class HrFlexOuting(Base):
+    """彈性外出（owner 2026-09-15）：每人每天 2 小時、不扣假不扣薪、自己登記不用核准、當天沒用完不累積。
+    規則正本 core.leave_logic.FLEX_OUT_*；不走請假單（不進時數帳、不進休假總表），只在行事曆／團隊的一週／我的一週標出來。"""
+    __tablename__ = "hr_flex_outings"
+
+    id = Column(String(32), primary_key=True)
+    staff_id = Column(String(32), nullable=False, index=True)
+    staff_name = Column(String(64), nullable=False, default="")
+    date = Column(Date, nullable=False, index=True)
+    start_time = Column(String(5), nullable=False)               # 'HH:MM'
+    end_time = Column(String(5), nullable=False)
+    minutes = Column(Integer, nullable=False, default=0)          # end − start（≤ FLEX_OUT_MAX_MINUTES，同一天合計也是）
+    reason = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class HrLeaveCredit(Base):
     """時數帳的貸方（docs/LEAVE_PLAN.md §2.1）：進來的時數 —— 特休（週年發／手開）、補休（加班）、其他。
 

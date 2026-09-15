@@ -26,7 +26,7 @@ from services.calendar_sync import attendees_of, schedule_dict, timesheet_ids_of
 
 try:
     from sqlalchemy import or_, select
-    from db.models import (Client, CrmProject, CrmProjectMilestone, CrmSchedule, CrmShoot, CrmStaff, HrHoliday,
+    from db.models import (Client, CrmProject, CrmProjectMilestone, CrmSchedule, CrmShoot, CrmStaff, HrFlexOuting, HrHoliday,
                            HrLeaveRequest, Timesheet)
 except ImportError:  # 機隊 agent 沒裝 DB 套件
     pass
@@ -133,6 +133,18 @@ async def _leave_events(session, d0, d1, me) -> list:
     return out
 
 
+async def _flex_out_events(session, d0, d1, me) -> list:
+    """彈性外出（owner 2026-09-15）：黃色小標籤「外出 10:00–12:00」；不進 Google 日曆、沒有專案。"""
+    rows = (await session.execute(
+        select(HrFlexOuting).where(HrFlexOuting.date >= d0, HrFlexOuting.date <= d1)
+        .order_by(HrFlexOuting.date, HrFlexOuting.start_time))).scalars().all()
+    return [{"kind": "flex_out", "id": f.id, "date": f.date.isoformat(), "end_date": "", "start_time": f.start_time, "end_time": f.end_time,
+             "title": f"{f.staff_name or ''} 外出", "project_id": "", "project_name": "", "client": "",
+             "people": [{"name": f.staff_name or "", "staff_id": f.staff_id or "", "role": "", "external": False}],
+             "location": "", "notes": f.reason or "", "status": "", "mine": f.staff_id == me["staff_id"],
+             "sync": {"ok": True, "error": ""}} for f in rows]
+
+
 async def _holiday_events(session, d0, d1) -> list:
     rows = (await session.execute(select(HrHoliday).where(HrHoliday.date >= d0, HrHoliday.date <= d1))).scalars().all()
     return [{"kind": "holiday", "id": h.date.isoformat(), "date": h.date.isoformat(), "end_date": "", "start_time": "", "end_time": "",
@@ -217,6 +229,7 @@ async def calendar_events(request: Request, from_: str = Query("", alias="from")
         events += await _milestone_events(session, d0, d1, me, hide, project_id)
         if not project_id:
             events += await _leave_events(session, d0, d1, me)
+            events += await _flex_out_events(session, d0, d1, me)
             events += await _holiday_events(session, d0, d1)
         if scope == "me":
             events += await _plan_events(session, d0, d1, me, hide, {s.plan_row_id for s in sch if s.plan_row_id})

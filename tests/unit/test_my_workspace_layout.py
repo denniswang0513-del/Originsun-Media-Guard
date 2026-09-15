@@ -87,7 +87,9 @@ def test_action_bar_is_petty_cash_and_leave():
     assert '{ label: "零用金", href: "/petty-cash.html" }' in fn
     assert '{ label: "假勤", href: "/leave.html" }' in fn
     assert 'has("me_petty")' in fn and 'has("me_leave")' in fn, "閘門不能一起拿掉"
-    assert fn.count("label:") == 2, "最上排只有零用金與假勤（要放第三顆要有 owner 的話）"
+    # owner 2026-09-15「零用金旁有個按鈕，可以展開行事曆」→「行事曆用彈出的 跟零用金一樣」：第三顆，鑰匙同 api_calendar.READ_KEYS 員工那兩把
+    assert '{ label: "行事曆", href: "/calendar.html" }' in fn and '(has("me_today_zone") || has("me_team_week"))' in fn
+    assert fn.count("label:") == 3, "最上排三顆：零用金、假勤、行事曆（再放要有 owner 的話）"
     # owner 2026-09-15：點了開寬的浮動視窗（iframe＋叉叉／Esc／背景），不跳頁；href 留著給「另開」與中鍵
     assert "openActionModal('${it.href}', '${it.label}'); return false;" in fn
     modal = html.split("function openActionModal(")[1].split("\n}")[0]
