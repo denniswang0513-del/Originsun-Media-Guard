@@ -90,10 +90,12 @@ def test_cancel_follows_cancel_mode():
 
 
 def test_my_three_stats():
+    """2026-09-15 owner「病假移除」：卡上只剩特休／補休兩個數字；病假還挑得到（清單那列寫今年還可幾天）。"""
     fn = js_func_body(_my_code(), "function renderLeave(")
-    for lbl in ("特休剩餘", "補休剩餘", "病假已用"):
+    for lbl in ("特休剩餘", "補休剩餘"):
         assert lbl in fn, lbl
-    assert 'bal["特休"]' in fn and 'bal["補休"]' in fn and "LV.sick" in fn
+    assert "病假已用" not in fn and "LV.sick" not in fn
+    assert 'bal["特休"]' in fn and 'bal["補休"]' in fn
 
 
 # ── 管理 tab frontend/tabs/hr_leave ─────────────────────────────

@@ -1,7 +1,7 @@
 /**
  * 假勤（分頁 #leave；docs/LEAVE_PLAN.md §7.6 手機那一段）。
  *
- * 員工自己的假：三個數字（特休剩餘／補休剩餘／病假已用）＋請假表單（底部抽屜、打字就試算）＋近期申請清單。
+ * 員工自己的假：兩個數字（特休剩餘／補休剩餘；病假已用 2026-09-15 拿掉）＋請假表單（底部抽屜、打字就試算）＋近期申請清單。
  *   GET  /api/v1/me/leave/summary        {vocab, balances:{特休:{available,reserved,expiring[]}, 補休:{…}}, sick:{used_days,cap_days}, requests[], pending_count}
  *   POST /api/v1/me/leave/preview        {leave_type,start_date,end_date,part,start_time,end_time} → {hours, days, errors[{code,msg}], warnings[{code,msg}]}
  *   POST /api/v1/me/leave                同 body ＋ reason → 422 {detail:{errors:[…]}}（也可能是字串或清單，兩種都畫）
@@ -81,8 +81,6 @@ function statsHtml() {
     const cap = sick.cap_days != null ? sick.cap_days : (vocab().sick_cap_days != null ? vocab().sick_cap_days : 30);
     return `<div class="m-strip" id="lv-stats" style="grid-template-columns:1fr 1fr">
       ${ledger('特休')}${ledger('補休')}
-      <div class="k" data-stat="sick"><div class="l">病假已用</div>
-        <div class="n">${fmtH(sick.used_days)}<span style="font-size:13px;font-weight:500;color:var(--sub)"> / ${esc(String(cap))} 天</span></div></div>
       <div class="k" data-stat="pending"><div class="l">等主管審</div><div class="n">${Number((_sum || {}).pending_count) || 0}<span style="font-size:13px;font-weight:500;color:var(--sub)"> 件</span></div></div>
     </div>`;
 }

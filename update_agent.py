@@ -7,6 +7,7 @@ Called by update_agent.bat. Exit codes:
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -139,6 +140,41 @@ def _kill_port(port: int):
             time.sleep(2)
     except Exception as e:
         log(f"Warning: kill_port failed: {e}")
+
+
+# ────────────────────────────────────────
+# pip
+# ────────────────────────────────────────
+
+PIP_TIMEOUT = 600   # 原本 300：慢的機器抓 Pillow 那 7MB 就超過，被殺在一半反而留下半套（見 Phase 5 的自救）
+
+
+def _pip_install(req_file: str):
+    return subprocess.run(
+        [PYTHON, "-m", "pip", "install", "-q", "-r", req_file, "--no-warn-script-location"],
+        capture_output=True, text=True, timeout=PIP_TIMEOUT,
+    )
+
+
+def _no_record_pkg(result) -> str:
+    """pip 抱怨「Cannot uninstall X None … no RECORD file」→ 回 X；不是這種錯回空字串。"""
+    text = (result.stderr or "") + "\n" + (result.stdout or "")
+    if "no RECORD file" not in text and "uninstall-no-record-file" not in text:
+        return ""
+    m = re.search(r"Cannot uninstall ([A-Za-z0-9_.\-]+)", text)
+    return m.group(1) if m else ""
+
+
+def _pinned(req_file: str, pkg: str) -> str:
+    """requirements 裡那個套件釘的那行（`Pillow==12.3.0`），大小寫不分；沒釘回空字串。"""
+    try:
+        for line in open(req_file, encoding="utf-8"):
+            line = line.strip()
+            if line and not line.startswith("#") and re.split(r"[>=<\[ ]", line)[0].lower() == pkg.lower():
+                return line
+    except OSError:
+        pass
+    return ""
 
 
 # ────────────────────────────────────────
@@ -295,10 +331,21 @@ def run_update(master_url: str) -> int:
         log("Phase 5: Installing requirements...")
         write_status(5, 60, "正在安裝套件...")
         try:
-            result = subprocess.run(
-                [PYTHON, "-m", "pip", "install", "-q", "-r", req_file, "--no-warn-script-location"],
-                capture_output=True, text=True, timeout=300,
-            )
+            result = _pip_install(req_file)
+            if result.returncode != 0 and _no_record_pkg(result):
+                # 🔴 上一次更新 pip 裝到一半被殺（例如 2026-09-15 那批：Pillow 12.3.0 下載超過 300 秒逾時），套件剩半套、
+                #    沒有 RECORD → 之後每一次 `pip install -r` 都在「Cannot uninstall X None」這裡死掉，機器永遠停在舊版。
+                #    自救：對那個套件 --force-reinstall --no-deps 裝回清單上釘的版本，再把整份清單跑一次。
+                pkg = _no_record_pkg(result)
+                pin = _pinned(req_file, pkg) or pkg
+                log(f"pip: {pkg} has no RECORD (half-installed) -> force-reinstall {pin}")
+                write_status(5, 62, f"修復半套的套件 {pkg}...")
+                fix = subprocess.run(
+                    [PYTHON, "-m", "pip", "install", "-q", "--force-reinstall", "--no-deps", pin, "--no-warn-script-location"],
+                    capture_output=True, text=True, timeout=PIP_TIMEOUT,
+                )
+                log(f"force-reinstall exit {fix.returncode}:\n{fix.stdout}\n{fix.stderr}")
+                result = _pip_install(req_file)
             if result.returncode != 0:
                 # 🔴 取**尾段**、stderr 沒東西就看 stdout：pip 的 ERROR 在最後、前面常只有「pip 有新版」那條 notice，
                 #    取頭 300 字只會看到 notice（2026-09-15 五台機器回滾時原因全被吃掉）。完整輸出在 update_agent.log。
@@ -310,7 +357,7 @@ def run_update(master_url: str) -> int:
                 return 1
             log("pip install OK.")
         except subprocess.TimeoutExpired:
-            log("pip install timed out (300s)")
+            log(f"pip install timed out ({PIP_TIMEOUT}s)")
             rollback("pip 安裝逾時")
             return 1
         except Exception as e:

@@ -14,3 +14,27 @@ def test_ota_failure_reason_is_recoverable():
     ag = repo_src("routers/api_agents.py")
     assert "_check_admin_agents(request)" in func_body(ag, "async def get_agent_update_log(")
     assert "update_agent.log" in repo_src(".gitignore")
+
+
+def test_pip_self_heals_half_installed_packages():
+    """2026-09-15 五台機器停在 2.5.24 的真因：前一次 pip 裝 Pillow 逾時被殺、剩半套沒 RECORD，之後每次
+    `pip install -r` 都死在「Cannot uninstall pillow None」。update_agent 要自己 --force-reinstall --no-deps 那個套件再重跑；
+    pip 逾時拉到 600 秒。"""
+    import importlib.util, subprocess, types
+    spec = importlib.util.spec_from_file_location("update_agent_mod", "update_agent.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    r = types.SimpleNamespace(returncode=1, stdout="", stderr="error: uninstall-no-record-file\n\n× Cannot uninstall pillow None\n╰─> no RECORD file was found for pillow.")
+    assert mod._no_record_pkg(r) == "pillow"
+    assert mod._no_record_pkg(types.SimpleNamespace(returncode=1, stdout="", stderr="ERROR: something else")) == ""
+    assert mod.PIP_TIMEOUT == 600
+    import tempfile, os
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        f.write("fastapi==0.134.0\nPillow==12.3.0\npillow-heif==1.4.0\n"); path = f.name
+    try:
+        assert mod._pinned(path, "pillow") == "Pillow==12.3.0" and mod._pinned(path, "pillow-heif") == "pillow-heif==1.4.0" and mod._pinned(path, "torch") == ""
+    finally:
+        os.unlink(path)
+    from tests.unit._srcscan import repo_src
+    src = repo_src("update_agent.py")
+    assert '"--force-reinstall", "--no-deps", pin' in src and "result = _pip_install(req_file)" in src

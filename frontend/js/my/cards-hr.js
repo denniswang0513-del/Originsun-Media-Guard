@@ -75,7 +75,6 @@ function renderLeave(body) {
     const v = LV.vocab || {};
     const bal = LV.balances || {};
     const an = bal["特休"] || {}, comp = bal["補休"] || {};
-    const sick = LV.sick || {};
     const parts = v.parts || Object.keys(LV_PART_FALLBACK);
     const today = _localToday();
     const expiring = (an.expiring || [])[0];
@@ -84,7 +83,6 @@ function renderLeave(body) {
     <div class="stat-row">
         <div class="stat"><div class="num">${_lvH(an.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(an.available)} 天）</span></div><div class="lbl">特休剩餘</div></div>
         <div class="stat"><div class="num">${_lvH(comp.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(comp.available)} 天）</span></div><div class="lbl">補休剩餘</div></div>
-        <div class="stat"><div class="num">${_lvH(sick.used_days)}<span style="font-size:13px;color:var(--sub);"> / ${_lvH(sick.cap_days ?? v.sick_cap_days ?? 30)} 天</span></div><div class="lbl">病假已用</div></div>
     </div>
     ${(an.reserved || comp.reserved || expiring) ? `<div class="meta" style="font-size:11px;color:var(--sub);margin:-4px 0 8px;">
         ${an.reserved ? `特休待審保留 ${_lvH(an.reserved)} h　` : ""}${comp.reserved ? `補休待審保留 ${_lvH(comp.reserved)} h　` : ""}${expiring ? `特休最近到期：${_lvH(expiring.hours)} h（${esc(expiring.expires_on)}）` : ""}
