@@ -31,7 +31,7 @@ from core.identity import require_bound_staff, require_zone_staff, resolve_curre
 from core.hr_logic import STAFF_ACTIVE, staff_rank
 from core.journal_logic import shell_status, week_start_of
 from core.leave_logic import cancel_mode, in_crew, vocab as leave_vocab
-from core.schemas import (LeaveCancel, MeLeaveCreate, MeLeavePreview, MeProfileUpdate, MeTimesheetBatch,
+from core.schemas import (LeaveCancel, MeLeaveBatch, MeLeaveCreate, MeLeavePreview, MeProfileUpdate, MeTimesheetBatch,
                           MeTimesheetUpdate, MeTodoUpdate)
 from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
@@ -332,6 +332,53 @@ async def _my_leave_or_404(session, leave_id: str, staff_id: str):
     if obj is None:
         raise HTTPException(status_code=404, detail="找不到這張請假單（或不是你的）")
     return obj
+
+
+@router.post("/leave/batch/preview")
+async def preview_my_leave_batch(body: MeLeaveBatch, request: Request):
+    """挑幾天的試算（owner 2026-09-15「一次挑好幾個不連續的日期」）：逐日算＋總時數對餘額，不寫入。"""
+    ident = await require_bound_staff(request, "me_leave")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        return await leave_service.evaluate_batch(session, ident["staff_id"], ident["staff"].name, body)
+
+
+@router.post("/leave/batch")
+async def apply_my_leave_batch(body: MeLeaveBatch, request: Request):
+    """挑幾天送單：一天一張待審單（管理端逐張核准；每張各自扣時數帳），同一個 transaction 全建或全不建。
+    任何一天有 errors、或總時數超過餘額 → 422，一張都不建。回 {requests:[…], hours, days, warnings}。"""
+    ident = await require_bound_staff(request, "me_leave")
+    if not (body.reason or "").strip():
+        raise HTTPException(status_code=422, detail="事由必填（規章：提出時簡述理由）")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        holidays = await leave_service.holidays_map(session)
+        ev = await leave_service.evaluate_batch(session, ident["staff_id"], ident["staff"].name, body, holidays=holidays)
+        bad = ev["errors"] + [e for p in ev["dates"] for e in p["errors"]]
+        if bad:
+            raise HTTPException(status_code=422, detail="；".join(dict.fromkeys(e["msg"] for e in bad)))
+        objs = []
+        for p in ev["dates"]:
+            day_body = leave_service._DayBody(body, p["date"])
+            hours, part = leave_service.hours_from_body(day_body, holidays)
+            obj = leave_service.build_request(ident["staff_id"], ident["staff"].name, day_body, hours, part, ident["username"])
+            session.add(obj)
+            objs.append(obj)
+        await session.commit()
+        for obj in objs:
+            await session.refresh(obj)
+        out = [leave_service.request_dict(o, holidays) for o in objs]
+    try:
+        from notifier import notify_tab_async
+        await notify_tab_async(
+            "leave_request",
+            staff_name=out[0]["staff_name"], leave_type=out[0]["leave_type"],
+            start=out[0]["start_date"], end=f"{out[-1]['end_date']}（挑 {len(out)} 天）",
+            days=f"{ev['days']:g}", reason=out[0]["reason"] or "-",
+        )
+    except Exception:
+        pass
+    return {"requests": out, "hours": ev["hours"], "days": ev["days"], "warnings": ev["warnings"]}
 
 
 async def _cancel_my_leave(leave_id: str, request: Request, note: str) -> dict:

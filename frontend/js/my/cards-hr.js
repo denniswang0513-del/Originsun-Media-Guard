@@ -20,6 +20,7 @@
 const LV_PART_FALLBACK = { all: "整天", am: "上午", pm: "下午", range: "時段" };
 const LV_PART_LABEL = (code) => ((LV && LV.vocab && LV.vocab.part_labels) || LV_PART_FALLBACK)[code] || code || "";
 let LV = null;                 // 最近一次 summary
+let _lvDates = [];             // 「挑幾天」模式選好的日期（空＝用起迄那組）
 let _lvPreviewTimer = null;    // preview 去抖
 let _lvPreviewSeq = 0;         // 舊回應不蓋新回應
 function cardLeave(bound) {
@@ -96,6 +97,16 @@ function renderLeave(body) {
             <input type="date" id="lv-start" value="${today}">
             <input type="date" id="lv-end" value="${today}">
         </div>
+        <div style="margin:-2px 0 8px;">
+            <button class="mini-btn" type="button" id="lv-multi-toggle" onclick="lvToggleMulti()">挑幾天（不連續）</button>
+        </div>
+        <div id="lv-multi" style="display:none;margin-bottom:8px;">
+            <div class="inline-row" style="margin-bottom:6px;">
+                <input type="date" id="lv-multi-date" value="${today}">
+                <button class="mini-btn" type="button" onclick="lvAddDate()">加入這天</button>
+            </div>
+            <div id="lv-multi-chips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        </div>
         <div class="inline-row" id="lv-range" style="margin-bottom:8px;display:none;">
             <input type="time" id="lv-start-time" step="1800" value="09:00">
             <input type="time" id="lv-end-time" step="1800" value="13:00">
@@ -113,6 +124,7 @@ function renderLeave(body) {
     </div>`;
     html += (LV.requests || []).slice(0, LV_RECENT_MAX).map(_lvRow).join("");
     body.innerHTML = html;
+    _lvDates = [];   // 重畫（送單後）就回到起迄模式
     const form = $("lv-form");
     form.addEventListener("input", (e) => { if (e.target.id !== "lv-reason") lvPreviewSoon(); });
     form.addEventListener("change", (e) => {
@@ -193,6 +205,34 @@ function _lvPayload() {
         part, start_time: part === "range" ? $("lv-start-time").value : null, end_time: part === "range" ? $("lv-end-time").value : null,
     };
 }
+// ── 挑幾天（不連續）：owner 2026-09-15。選了日期就走 /me/leave/batch（一天一張單）；清空就回到起迄那組 ──
+const _lvMulti = () => _lvDates.length > 0;
+function lvToggleMulti() {
+    const box = $("lv-multi"), on = box.style.display === "none";
+    box.style.display = on ? "" : "none";
+    $("lv-start").parentElement.style.display = on ? "none" : "";
+    $("lv-multi-toggle").textContent = on ? "改回起迄日期" : "挑幾天（不連續）";
+    if (!on) _lvDates = [];
+    _lvDrawChips(); lvPreviewSoon();
+}
+function lvAddDate() {
+    const d = $("lv-multi-date").value;
+    if (!d || _lvDates.includes(d)) return;
+    _lvDates.push(d); _lvDates.sort();
+    _lvDrawChips(); lvPreviewSoon();
+}
+function lvRemoveDate(d) { _lvDates = _lvDates.filter(x => x !== d); _lvDrawChips(); lvPreviewSoon(); }
+function _lvDrawChips() {
+    const host = $("lv-multi-chips");
+    if (!host) return;
+    host.innerHTML = _lvDates.map(d => `<span class="pill" style="text-transform:none;letter-spacing:0;font-size:12px;">${esc(d.slice(5).replace("-", "/"))}
+        <button type="button" onclick="lvRemoveDate('${esc(d)}')" style="border:0;background:none;cursor:pointer;color:var(--sub);padding:0 0 0 4px;font-size:12px;" title="拿掉">×</button></span>`).join("")
+        || `<span style="font-size:12px;color:var(--sub);">還沒挑日期</span>`;
+}
+function _lvBatchPayload() {
+    const p = _lvPayload();
+    return { leave_type: p.leave_type, dates: _lvDates.slice(), part: p.part, start_time: p.start_time, end_time: p.end_time };
+}
 // 任何欄位一動就重算，但等 300ms 沒再動才真的打（打字改日期不會每個鍵一發）
 function lvPreviewSoon() {
     clearTimeout(_lvPreviewTimer);
@@ -205,14 +245,17 @@ async function lvPreview() {
     const host = $("lv-preview");
     if (!host) return;
     const seq = ++_lvPreviewSeq;
-    const p = _lvPayload();
-    if (!p.start_date) { host.innerHTML = ""; return; }
+    const multi = _lvMulti();
+    const p = multi ? _lvBatchPayload() : _lvPayload();
+    if (!multi && !p.start_date) { host.innerHTML = ""; return; }
     let d;
-    try { d = await mjson("/api/v1/me/leave/preview", { method: "POST", body: JSON.stringify(p) }); }
+    try { d = await mjson(multi ? "/api/v1/me/leave/batch/preview" : "/api/v1/me/leave/preview", { method: "POST", body: JSON.stringify(p) }); }
     catch (e) { if (seq === _lvPreviewSeq) host.innerHTML = `<div style="color:var(--red);">${esc(e.message)}</div>`; return; }
     if (seq !== _lvPreviewSeq) return;
-    const errs = d.errors || [], warns = d.warnings || [];
-    host.innerHTML = `<div>共 ${_lvH(d.hours)} 小時（${_lvDays(d.hours)} 天）</div>${_lvMsgs(warns, "#b45309")}${_lvMsgs(errs, "var(--red)")}`;
+    // 挑幾天：每一天自己的錯誤（撞單、假日）標上日期，整批的（時數不夠）照常
+    const perDay = multi ? (d.dates || []).flatMap(x => x.errors.map(e => ({ msg: `${x.date.slice(5).replace("-", "/")}：${e.msg}` }))) : [];
+    const errs = [...perDay, ...(d.errors || [])], warns = d.warnings || [];
+    host.innerHTML = `<div>${multi ? `挑了 ${_lvDates.length} 天，` : ""}共 ${_lvH(d.hours)} 小時（${_lvDays(d.hours)} 天）</div>${_lvMsgs(warns, "#b45309")}${_lvMsgs(errs, "var(--red)")}`;
     const btn = $("lv-submit");
     if (btn) btn.disabled = errs.length > 0;
 }
@@ -228,7 +271,9 @@ async function applyLeave() {
     const btn = $("lv-submit");
     if (btn) { if (btn.dataset.busy) return; btn.dataset.busy = "1"; btn.disabled = true; }
     try {
-        const r = await mfetch("/api/v1/me/leave", { method: "POST", body: JSON.stringify(Object.assign(_lvPayload(), { reason })) });
+        const r = _lvMulti()
+            ? await mfetch("/api/v1/me/leave/batch", { method: "POST", body: JSON.stringify(Object.assign(_lvBatchPayload(), { reason })) })
+            : await mfetch("/api/v1/me/leave", { method: "POST", body: JSON.stringify(Object.assign(_lvPayload(), { reason })) });
         if (!r.ok) {
             const d = await r.json().catch(() => ({}));
             const errs = Array.isArray(d.errors) ? d.errors : (Array.isArray(d.detail) ? d.detail : (d.detail && d.detail.errors) || []);
@@ -236,10 +281,12 @@ async function applyLeave() {
             return;
         }
         if (proofFile) {
-            // 單建好了才傳證明；傳失敗要說出來（清單上那筆會掛「缺證明，補傳」）
+            // 單建好了才傳證明；傳失敗要說出來（清單上那筆會掛「缺證明，補傳」）。挑幾天＝每一張都要附同一份。
             const created = await r.json().catch(() => ({}));
-            const up = created.id ? await _lvUploadProof(created.id, proofFile).catch(() => null) : null;
-            if (!up || !up.ok) alert("請假單已送出，但證明上傳失敗，請在清單裡補傳。");
+            const ids = created.requests ? created.requests.map(x => x.id) : (created.id ? [created.id] : []);
+            let failed = 0;
+            for (const id of ids) { const up = await _lvUploadProof(id, proofFile).catch(() => null); if (!up || !up.ok) failed++; }
+            if (failed) alert(`請假單已送出，但有 ${failed} 張證明上傳失敗，請在清單裡補傳。`);
         }
         _resetTodayStrip();   // 今天那條「請假待審 N 件」下次重抓
         await loadLeave();   // 🔴 要 await：不等重畫完就走到 finally，鎖會在舊表單還在畫面上時就解開，那段時間再點一次就是第二張單

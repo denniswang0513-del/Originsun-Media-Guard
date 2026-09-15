@@ -84,6 +84,17 @@ class MeLeaveCreate(BaseModel):
     reason: Optional[str] = None
 
 
+class MeLeaveBatch(BaseModel):
+    """POST /me/leave/batch（與 /batch/preview）：一次挑好幾個不連續的日期，一天一張單（同假別／時段／事由）。
+    不收 hours（同 MeLeaveCreate 的理由）；part 只認 all／am／pm／range，時段套用到每一天。"""
+    leave_type: str
+    dates: List[str]
+    part: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class LeaveCancel(BaseModel):
     """POST /me/leave/{id}/cancel：已核准且 <2 天的撤回要說明（cancel_note）。"""
     note: Optional[str] = None

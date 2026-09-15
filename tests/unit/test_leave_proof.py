@@ -71,7 +71,7 @@ def test_workspace_card_and_mobile_form_take_the_proof_file():
     assert "v.self_service_types || v.leave_types" in render, "自助假別從 vocab 來"
     assert 'id="lv-proof"' in render and 'id="lv-proof-wrap"' in render
     apply = js_func_body(js, "async function applyLeave(")
-    assert '"病假要附證明（照片或 PDF）"' in apply and "_lvUploadProof(created.id, proofFile)" in apply
+    assert "\"病假要附證明（照片或 PDF）\"" in apply and "_lvUploadProof(id, proofFile)" in apply and "created.requests" in apply, "挑幾天＝每張都附同一份證明"
     assert 'fetch("/api/v1/me/leave/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd })' in js, "multipart 不走 mfetch"
     assert "image/*" not in js, "accept 不能寫 image/*（掃描器會把 /* 當註解）"
     m = js_code_only(repo_src("frontend/m/views/leave.js"))

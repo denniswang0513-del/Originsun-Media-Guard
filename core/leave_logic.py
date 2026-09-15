@@ -195,6 +195,24 @@ def workdays_between(start: date, end: date, holidays=None) -> list:
     return out
 
 
+MAX_BATCH_DATES = 31        # 一次最多挑幾天（owner 2026-09-15「一次挑好幾個不連續的日期」）
+
+
+def normalize_dates(dates) -> list:
+    """挑日期送單：去重、排序、都要是 YYYY-MM-DD；空或超過 MAX_BATCH_DATES raise ValueError。回 ISO 字串清單。"""
+    out = set()
+    for d in dates or []:
+        v = as_date(d)
+        if v is None:
+            raise ValueError(f"日期格式錯：{d}")
+        out.add(v.isoformat())
+    if not out:
+        raise ValueError("至少挑一天")
+    if len(out) > MAX_BATCH_DATES:
+        raise ValueError(f"一次最多 {MAX_BATCH_DATES} 天")
+    return sorted(out)
+
+
 def working_hours(start, end, part="all", start_time=None, end_time=None, holidays=None) -> float:
     """一張單的時數。all：工作日數 × 8；am／pm：4（限單日，且那天要是工作日）；
     range：迄−起四捨五入到 0.5 小時、上限 8（限單日）。規則錯 raise ValueError（給 422／bad_range）。"""
