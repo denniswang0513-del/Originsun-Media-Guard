@@ -4,11 +4,14 @@
 import { z, _shiftDays, _dow, _mondayOf, _mdLabel, _POST } from "./ctx.js";
 import { _logProjectOptions, resetToday } from "./log.js";
 
-/** 半天／時段的字：上午休假、下午休假、10:00–12:00 休假；整天空字。 */
-export function _partWord(m) {
+/** 半天／時段的字：上午休假、下午休假、10:00–12:00 休假；整天空字。
+ *  🔴 **不要 export 給別支用**：每支 .js 各自被 Cloudflare 快取 4 小時，新 plan.js 配舊 team-week.js ＝ 具名匯入失敗，
+ *     整個 ts-zone（四個視圖）一起不動、畫面卡在「載入中」也沒有錯誤字。plan.js 自己留一份一樣的（同 cards-hr.js 不引用 WIP_LABEL 那條）。
+ *  🔴 時間字串來自 DB（管理端 PUT /hr/leave/{id} 原樣存），要 esc 再插進 HTML。 */
+function _partWord(m) {
     if (m.part === "am") return "上午";
     if (m.part === "pm") return "下午";
-    if (m.part === "range") return `${m.start_time || ""}–${m.end_time || ""} `;
+    if (m.part === "range") return `${z.esc(m.start_time || "")}–${z.esc(m.end_time || "")} `;
     return "";
 }
 export async function loadTeamWeek() {

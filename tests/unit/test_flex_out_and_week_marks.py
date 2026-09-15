@@ -56,7 +56,7 @@ def test_team_week_and_week_marks_carry_kind_and_half_day():
 
 def test_week_views_mark_leave_and_flex_out():
     tw = js_code_only(repo_src("frontend/js/shared/ts-zone/team-week.js"))
-    assert "export function _partWord(m)" in tw
+    assert "function _partWord(m)" in tw
     cell = js_func_body(tw, "const cell = (name, iso) =>") if "const cell = (name, iso) =>" in tw else tw
     assert '<div class="c off${m.part !== "all" ? " half" : ""}">${_partWord(m)}休假<i>${esc(m.kind)}</i></div>' in cell
     assert '<div class="c fo">外出 ${esc(f.start_time)}–${esc(f.end_time)}</div>' in cell
@@ -177,3 +177,29 @@ def test_leave_days_count_workdays_and_add_up_within_a_day():
     # 補班的週六算工作日
     sat = {"2026-09-26": [{"part": "all"}]}
     assert leave_days_total(sat) == 0.0 and leave_days_total(sat, {date(2026, 9, 26): "補班日"}) == 1.0
+
+
+def test_part_word_is_not_shared_across_files_and_is_escaped():
+    """BUG-3：plan.js 不跨檔 import team-week.js 的 _partWord —— 每支 .js 各自被 Cloudflare 快取 4 小時，
+    新 plan.js 配舊 team-week.js ＝ 具名匯入失敗，整個 ts-zone 四個視圖一起不動、畫面卡在「載入中」也沒有錯誤字
+    （同 cards-hr.js 不引用 cards.js 的 WIP_LABEL 那條）。時間字串來自 DB（管理端 PUT /hr/leave/{id} 原樣存），要 esc。"""
+    plan = js_code_only(repo_src("frontend/js/shared/ts-zone/plan.js"))
+    assert 'from "./team-week.js"' not in plan, "不要跨檔 import；同資料夾各自留一份五行的小函式"
+    for f in ("frontend/js/shared/ts-zone/plan.js", "frontend/js/shared/ts-zone/team-week.js"):
+        body = js_func_body(js_code_only(repo_src(f)), "function _partWord(")
+        assert "z.esc(m.start_time" in body and "z.esc(m.end_time" in body, f
+
+
+def test_flex_out_hour_text_does_not_overstate():
+    """BUG-5：_foH 用 toFixed(1)，75 分鐘印成「1.3 小時」（＝78 分）—— 訊息說「只剩 1.3 小時」但按鈕在 1 小時 20 分就鎖住。"""
+    js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
+    line = [ln for ln in js.splitlines() if "const _foH" in ln][0]
+    assert "toFixed" not in line and "分" in line
+
+
+def test_flex_out_box_inputs_get_the_card_input_styling():
+    """BUG-4：.fo-box 是 .pf-edit 的兄弟，而輸入框樣式與 .inline-row 的 flex 都 scope 在 .pf-edit 底下 ——
+    真機量到外出那塊是瀏覽器原生控制項（Arial／monospace、2px inset、padding 0），旁邊的三步表單卻是 1px solid＋10px padding。"""
+    for page in ("frontend/my.html", "frontend/leave.html"):
+        c = repo_src(page)
+        assert ".fo-box input {" in c and ".fo-box .inline-row {" in c, page

@@ -77,7 +77,8 @@ const LV_CARD_RECENT = 5;      // 工作台卡裡最近幾張；整本在 /leave
 const FO_MAX = 120;
 let _foItems = [];
 const _foMin = (v) => { const m = /^(\d{1,2}):(\d{2})/.exec(v || ""); return m ? (+m[1]) * 60 + (+m[2]) : NaN; };
-const _foH = (m) => (m % 60 === 0 ? `${m / 60} 小時` : (m > 60 ? `${(m / 60).toFixed(1)} 小時` : `${m} 分鐘`));
+// 🔴 不要用 toFixed：75 分鐘會印成「1.3 小時」（＝78 分），比實際多，訊息會跟「超過就鎖」的門檻對不起來
+const _foH = (m) => (m % 60 === 0 ? `${m / 60} 小時` : (m > 60 ? `${Math.floor(m / 60)} 小時 ${m % 60} 分` : `${m} 分鐘`));
 async function _foLoad() {
     if (!$("fo-list")) return;
     try { _foItems = (await mjson("/api/v1/me/flex_out")).items || []; } catch (_) { _foItems = []; }

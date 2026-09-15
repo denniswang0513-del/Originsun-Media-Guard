@@ -6,7 +6,16 @@
 // ────────────────────────────────────────────────────────────────────────────
 import { z, _z1MarkStale, _shiftDays, _dow, _mondayOf, _mdLabel, _isPlan, _POST, _PUT, whoIsMe } from "./ctx.js";
 import { _logProjectOptions } from "./log.js";
-import { _partWord } from "./team-week.js";
+
+/** 半天／時段的字（team-week.js 有一份一樣的）。
+ *  🔴 故意重複、不跨檔 import：每支 .js 各自被 Cloudflare 快取 4 小時，新這支配舊那支 ＝ 具名匯入失敗，
+ *     整個 ts-zone 四個視圖一起不動。五行的純字串函式，抄一份比耦合便宜。時間字串來自 DB，要 esc。 */
+function _partWord(m) {
+    if (m.part === "am") return "上午";
+    if (m.part === "pm") return "下午";
+    if (m.part === "range") return `${z.esc(m.start_time || "")}–${z.esc(m.end_time || "")} `;
+    return "";
+}
 
 function _planDays() { return [...Array(7)].map((_, k) => _shiftDays(z.s.planWeek, k)); }
 export async function loadMyWeek() {
