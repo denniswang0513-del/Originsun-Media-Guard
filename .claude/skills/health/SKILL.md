@@ -50,7 +50,7 @@ description: 全 repo 健康檢查：靜態閘門（ruff／eslint／pyright／�
 - `pip list --outdated --format=json` 對照 `requirements_server.txt` 與 `requirements_agent.txt`：列出「有釘版本且落後主版本」的套件。
 - `pip-audit`（若有）— 列有 CVE 的套件、對應版本、是否在 `requirements_agent.txt`（在 = 機隊也中）。
 - `website/`：`npm audit --omit=dev --json`，只列 high/critical。網路不通就註明跳過。
-- requirements 檔漂移：`requirements.txt`／`requirements_server.txt`／`requirements_agent.txt`／`requirements_lock_20260614.txt`／`0225_requirements.txt` 五份，列出「同一套件不同版本」與「只出現在一份裡」的；`0225_requirements.txt` 與 `requirements_lock_*` 這種帶日期的，列進「沒動的東西」附一句判斷（像是「60 天沒人引用，可刪」），不問。
+- requirements 檔漂移：`requirements.txt`／`requirements_server.txt`／`requirements_agent.txt`／`0225_requirements.txt` 四份（lock 檔 2026-09-15 已刪），列出「同一套件不同版本」與「只出現在一份裡」的；`0225_requirements.txt` **不是**死檔（Install_Originsun_Agent.bat／ota_manifest／publish_update 都吃它，09-15 那份報告判「可刪」是錯的）；帶日期的 lock 檔才是候選刪除。
 
 ## 階段三：倉庫衛生
 

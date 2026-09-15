@@ -465,7 +465,7 @@ routers/
 ### J-4：進階功能（⬜ 未來）
 
 - [ ] **報價 PDF 輸出**：Jinja2 模板 + playwright 轉 PDF
-- [ ] **排班日曆**：人力資源視覺化排程
+- [x] **排班日曆**：人力資源視覺化排程（2026-09-14 行事曆一期＋二期 `fd3cf0df`…：工作登記／月週日視圖／Google 同步）
 - [ ] **Notion 雙向同步**
 
 ### 做完後你看到的改變
@@ -735,12 +735,12 @@ AI 每日規劃社群任務、產多平台文稿 → 人審核 → **核准後�
       冪等去重 + 專案名對映 + 預算鏡射，dev 端到端實測過）；
       **剩 owner 一步**：照 `docs/appsscript/timesheet_sync.gs` 頭部說明裝進
       Sheet（貼腳本 → 填欄位位置與 token → 每小時觸發）
-- [ ] **Google Sheet 歷史匯入**：幾千列 → `timesheets`（source=import，專案名對映
-      crm_projects、「行政庶務」進內部桶）— B2 複盤第一天就有回溯資料
+- [x] **Google Sheet 歷史匯入**：幾千列 → `timesheets`（source=import，專案名對映
+      crm_projects、「行政庶務」進內部桶）— B2 複盤第一天就有回溯資料（2026-09-03 `scripts/import_timesheets.py`，生產 9,8xx 列已進）
 - [ ] 遷移四階段（藍圖 §3.6 playbook）：雙軌去重（同人+日+專案，手填優先）→
       週一工時 digest → 對帳一致宣布切換 → Sheet 唯讀+每晚匯出備份
 - [ ] 內勤列式快速登錄 grid（日期/專案/內容/時數 — 對標 Sheet 的輸入速度）
-- [ ] 排班日曆：專案 × 日期 × 人員 × 職務（J-4 的排班項在此實現）
+- [x] 排班日曆：專案 × 日期 × 人員 × 職務（J-4 的排班項在此實現）— 2026-09-14 `crm_schedule` 工作登記（docs/CALENDAR_PLAN.md）
 - [ ] 通告單：排班自動生成、手機頁 + token 分享給外部人員（沿用 /expense.html 模式）
 - [ ] `timesheets` 表 + 預填鏈：排班 → 當日預填 → 本人手機一鍵確認（現場給
       整天/半天快捷鈕，落庫仍小時）

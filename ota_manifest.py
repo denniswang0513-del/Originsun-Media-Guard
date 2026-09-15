@@ -110,6 +110,11 @@ DEPLOY_ONLY_PATHS = [
 
 STALE_PATHS = [
     "core/schemas.py",       # 2026-09-11 拆成 core/schemas/ 套件
+    # 下面兩個早於這條規則就拆了；master 與 C:\OriginsunAgent 早已沒有，但機隊 OTA 是「覆蓋不刪」，
+    # 2.4.2xx 之前裝的機器上兩份並存（Python 先找到套件，功能不壞，只會讓去那台看碼的人改到死檔）。
+    # health 2026-09-15 盤出來、owner 同日拍板加入。
+    "db/models.py",          # 6c568eb7 拆成 db/models/ 套件
+    "core/finance_logic.py", # 38044921 拆成 core/finance_logic/ 套件
 ]
 
 # ── Python stdlib modules (excluded from dependency checks) ──

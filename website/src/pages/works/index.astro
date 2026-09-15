@@ -282,7 +282,9 @@ const seo = buildBasicPageSeo(Astro, {
 <!-- Pagefind UI 動態載入 — pagefind-ui.js 會在 build 時 npm 包進 dist/pagefind/ -->
 <script type="module">
     // @ts-expect-error - Pagefind 由 build 時 cli 自動 emit 到 /pagefind/
-    const { PagefindUI } = await import("/pagefind/pagefind-ui.js");
+    // @vite-ignore：Astro 7（vite 7）會在 build 時嘗試解析這個絕對路徑而失敗（UNRESOLVED_IMPORT）；
+    // 檔案是 astro build 之後 pagefind cli 才產生的，只能留給瀏覽器在執行期載。
+    const { PagefindUI } = await import(/* @vite-ignore */ "/pagefind/pagefind-ui.js");
     new PagefindUI({
         element: "#works-search",
         showImages: false,           // 作品 thumbnail 已經在卡片，不重複顯示
