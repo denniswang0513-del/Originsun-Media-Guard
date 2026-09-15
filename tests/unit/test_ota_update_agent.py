@@ -20,7 +20,7 @@ def test_pip_self_heals_half_installed_packages():
     """2026-09-15 五台機器停在 2.5.24 的真因：前一次 pip 裝 Pillow 逾時被殺、剩半套沒 RECORD，之後每次
     `pip install -r` 都死在「Cannot uninstall pillow None」。update_agent 要自己 --force-reinstall --no-deps 那個套件再重跑；
     pip 逾時拉到 600 秒。"""
-    import importlib.util, subprocess, types
+    import importlib.util, types
     spec = importlib.util.spec_from_file_location("update_agent_mod", "update_agent.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
