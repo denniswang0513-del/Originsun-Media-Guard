@@ -88,6 +88,14 @@ def test_action_bar_is_petty_cash_and_leave():
     assert '{ label: "假勤", href: "/leave.html" }' in fn
     assert 'has("me_petty")' in fn and 'has("me_leave")' in fn, "閘門不能一起拿掉"
     assert fn.count("label:") == 2, "最上排只有零用金與假勤（要放第三顆要有 owner 的話）"
+    # owner 2026-09-15：點了開寬的浮動視窗（iframe＋叉叉／Esc／背景），不跳頁；href 留著給「另開」與中鍵
+    assert "openActionModal('${it.href}', '${it.label}'); return false;" in fn
+    modal = html.split("function openActionModal(")[1].split("\n}")[0]
+    assert 'embed=1' in modal and 'class="wam-close"' in modal and 'wam-backdrop").onclick = closeActionModal' in modal
+    assert 'if (e.key === "Escape") closeActionModal();' in html
+    for page in ("frontend/leave.html", "frontend/petty-cash.html"):
+        src = repo_src(page)
+        assert 'new URLSearchParams(location.search).get("embed")' in src and "html.embed header { display: none; }" in src, page
 
 
 def test_find_view_filters_are_one_row():
@@ -100,3 +108,16 @@ def test_find_view_filters_are_one_row():
     assert 'defaultSort: { key: "last", dir: "desc" }' in src, "預設最新填報在最上面"
     shared = repo_src("frontend/js/shared/ts-projects.js")
     assert "export function pctClass(" in shared and "ts-pct ${pctClass(p.pct)}" in shared
+
+
+def test_leave_and_petty_cards_are_input_panels_opening_the_modal():
+    """owner 2026-09-15「這兩塊規劃成輸入面板」：工作台的假勤卡只放數字＋待審件數＋一顆鈕、零用金卡一顆鈕，
+    都開最上排那種寬的浮動視窗（/leave.html、/petty-cash.html 嵌在裡面）；完整三步表單只在 /leave.html 畫。"""
+    html = my_page_src()
+    assert "const _lvFullHost = () => typeof window.onLeaveRendered === \"function\";" in html
+    render = html.split("function renderLeave(body)")[1].split("\n}")[0]
+    assert "if (!_lvFullHost()) { body.innerHTML = _lvPanelHtml(v, an, comp, sick, ledgerEmpty); return; }" in render
+    panel = html.split("function _lvPanelHtml(")[1].split("\n}")[0]
+    assert "openActionModal('/leave.html', '假勤')" in panel and 'id="lv-inv"' not in panel, "面板不畫表單"
+    petty = html.split("function cardPettyCash()")[1].split("\n}")[0]
+    assert "openActionModal('/petty-cash.html', '零用金'); return false;" in petty

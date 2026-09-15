@@ -76,6 +76,23 @@ function _lvLedgerEmpty(bal) {
 }
 const _lvH = (h) => { const n = Number(h || 0); return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, ""); };
 function _lvDays(h) { return _lvH(Number(h || 0) / ((LV && LV.vocab && LV.vocab.hours_per_day) || 8)); }
+// 工作台的假勤卡＝「輸入面板」（owner 2026-09-15）：只放三個數字＋待審件數＋一顆「請假／看總表」，按了開寬的浮動視窗
+// （/leave.html 嵌在裡面，三步表單與休假總表都在那）。完整表單只在 /leave.html 這個宿主（有 window.onLeaveRendered）畫。
+const _lvFullHost = () => typeof window.onLeaveRendered === "function";
+function _lvPanelHtml(v, an, comp, sick, ledgerEmpty) {
+    const apps = (LV.applications || []).filter(a => a.status === "待審" || a.status === "消假待審");
+    const nextApp = (LV.applications || []).filter(a => a.status === "已核准" && (a.end_date || "") >= _localToday()).sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
+    return `${ledgerEmpty ? `<div class="wip-note">你的特休／補休時數帳還沒建，所以這兩個數字是 0。要用請找管理員在人事管理的時數帳補額度。</div>` : ""}
+    <div class="stat-row">
+        <div class="stat"><div class="num">${_lvH(an.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(an.available)} 天）</span></div><div class="lbl">特休剩餘</div></div>
+        <div class="stat"><div class="num">${_lvH(comp.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(comp.available)} 天）</span></div><div class="lbl">補休剩餘</div></div>
+        <div class="stat"><div class="num">${_lvH(sick.used_days)}<span style="font-size:13px;color:var(--sub);"> / ${_lvH(sick.cap_days ?? v.sick_cap_days ?? 30)} 天</span></div><div class="lbl">病假已用</div></div>
+    </div>
+    <div class="meta" style="font-size:12px;color:var(--sub);margin:-2px 0 12px;line-height:1.7;">
+        ${apps.length ? `待審 <b style="color:var(--red);">${apps.length}</b> 張` : "沒有待審的單"}${nextApp ? `　·　下一次休假 ${esc(_lvDatesLabel(nextApp.dates))}` : ""}
+    </div>
+    <button class="mini-btn" type="button" onclick="openActionModal('/leave.html', '假勤')" style="padding:7px 14px;font-size:12px;">請假／看休假總表</button>`;
+}
 function renderLeave(body) {
     const v = LV.vocab || {};
     const bal = LV.balances || {};
@@ -87,6 +104,7 @@ function renderLeave(body) {
     const ledgerEmpty = _lvLedgerEmpty(bal);
     const badge = document.querySelector('.card[data-card="leave"] .count.wip');
     if (badge) badge.style.display = ledgerEmpty ? "" : "none";
+    if (!_lvFullHost()) { body.innerHTML = _lvPanelHtml(v, an, comp, sick, ledgerEmpty); return; }
     let html = `${ledgerEmpty ? `<div class="wip-note">你的特休／補休時數帳還沒建，所以這兩個數字是 0、這兩種假挑不到。要用請找管理員在人事管理的時數帳補額度。</div>` : ""}
     <div class="stat-row">
         <div class="stat"><div class="num">${_lvH(an.available)}<span style="font-size:13px;color:var(--sub);"> h（${_lvDays(an.available)} 天）</span></div><div class="lbl">特休剩餘</div></div>

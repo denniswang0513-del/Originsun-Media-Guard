@@ -48,6 +48,8 @@
   .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   .err { display: none; color: var(--red); font-size: 12px; margin-top: 14px; line-height: 1.6; }
   .state-msg { color: var(--sub); font-size: 13px; padding: 24px 0; text-align: center; }
+  html.embed header { display: none; }
+  html.embed main { padding-top: 14px; }
 
   /* 兩欄：左 假勤卡（同工作台）、右 休假總表；窄螢幕疊成一欄 */
   .lv-layout { display: grid; grid-template-columns: minmax(340px, 460px) minmax(0, 1fr); gap: 28px; align-items: start; }
@@ -227,6 +229,12 @@
 
 <!-- 傳統 script 兩支（同一個全域詞法環境）：leave-host.js 備好 cards-hr.js 要的全域＋畫休假總表，
      cards-hr.js 是工作台那張假勤卡（表單／送單／撤回只有它一份）。⚠ 順序不可調換。 -->
+<script>
+// 被工作台的浮動視窗嵌進來（?embed=1）：藏自己的頁首、少留白 —— 叉叉在外面那層
+if (new URLSearchParams(location.search).get("embed")) {
+    document.documentElement.classList.add("embed");
+}
+</script>
 <script src="./js/my/leave-host.js"></script>
 <script src="./js/my/cards-hr.js"></script>
 

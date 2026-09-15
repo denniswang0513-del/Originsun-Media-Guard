@@ -328,11 +328,39 @@ function grants() {
 // 卡片區同一天也做了同樣的收斂（見 renderWorkspace 裡「先只留零用金」那段）。
 // owner 2026-09-15：放回第二顆「假勤」—— 開 /leave.html 寬頁（同零用金那種獨立頁）：
 // 自己的休假總表＋送請假單；核准後自動上 Google 日曆（api_hr._calendar_sync_leave）。
+// owner 2026-09-15：點了開**寬的浮動視窗**（iframe 載同一頁、右上叉叉／Esc／點背景關），不跳頁；
+// 頁面帶 ?embed=1 會把自己的頁首藏起來。關掉時把假勤卡重抓（在視窗裡送了單，卡片要跟上）。
 function renderActions(ws) {
     const has = k => ws.allowed.includes(k);
     const items = [
         has("me_petty") && { label: "零用金", href: "/petty-cash.html" },
         has("me_leave") && { label: "假勤", href: "/leave.html" },
     ].filter(Boolean);
-    $("ws-actions").innerHTML = items.map(it => `<a class="act" href="${it.href}">${it.label}</a>`).join("");
+    $("ws-actions").innerHTML = items.map(it =>
+        `<a class="act" href="${it.href}" onclick="openActionModal('${it.href}', '${it.label}'); return false;">${it.label}</a>`).join("");
+}
+function openActionModal(href, label) {
+    closeActionModal();
+    const wrap = document.createElement("div");
+    wrap.id = "ws-action-modal";
+    wrap.innerHTML = `<div class="wam-backdrop"></div>
+        <div class="wam-panel" role="dialog" aria-label="${esc(label)}">
+            <div class="wam-head"><span class="eyebrow">${esc(label)}</span>
+                <a class="wam-open" href="${esc(href)}" target="_blank" title="另開新分頁">另開</a>
+                <button type="button" class="wam-close" title="關閉（Esc）" onclick="closeActionModal()">×</button></div>
+            <iframe class="wam-frame" src="${esc(href)}${href.includes("?") ? "&" : "?"}embed=1" title="${esc(label)}"></iframe>
+        </div>`;
+    wrap.querySelector(".wam-backdrop").onclick = closeActionModal;
+    document.body.appendChild(wrap);
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", _wamEsc);
+}
+function _wamEsc(e) { if (e.key === "Escape") closeActionModal(); }
+function closeActionModal() {
+    const m = $("ws-action-modal");
+    if (!m) return;
+    m.remove();
+    document.body.style.overflow = "";
+    document.removeEventListener("keydown", _wamEsc);
+    if (typeof loadLeave === "function" && document.querySelector('.card[data-card="leave"]')) loadLeave();
 }

@@ -163,6 +163,18 @@ footer .eyebrow { font-size: 10px; }
 .actions:empty { display: none; }
 .actions .act { min-height: 38px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); padding: 0 16px; font-size: 13px; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; transition: all .15s; }
 .actions .act:hover { color: var(--red); border-color: var(--red); }
+/* 最上排功能鍵開的浮動視窗（owner 2026-09-15「浮動的視窗(寬) 可以打叉叉 不要跳頁」） */
+#ws-action-modal .wam-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 200; }
+#ws-action-modal .wam-panel { position: fixed; z-index: 201; top: 3vh; left: 50%; transform: translateX(-50%); width: min(1320px, 96vw); height: 94vh;
+    background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 18px 60px rgba(0,0,0,.25); display: flex; flex-direction: column; overflow: hidden; }
+#ws-action-modal .wam-head { display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 20px; border-bottom: 1px solid var(--line); }
+#ws-action-modal .wam-head .eyebrow { color: var(--red); font-size: 12px; }
+#ws-action-modal .wam-open { margin-left: auto; font-size: 11px; color: var(--sub); text-decoration: none; border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; }
+#ws-action-modal .wam-open:hover { color: var(--red); border-color: var(--red); }
+#ws-action-modal .wam-close { border: 0; background: none; font-size: 22px; line-height: 1; color: var(--sub); cursor: pointer; padding: 2px 6px; }
+#ws-action-modal .wam-close:hover { color: var(--red); }
+#ws-action-modal .wam-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+@media (max-width: 700px) { #ws-action-modal .wam-panel { top: 0; width: 100vw; height: 100vh; border-radius: 0; } }
 /* ── 區標題（Today／Weekly／Me）── */
 .zone-h { font-size: 11px; letter-spacing: 0.35em; text-transform: uppercase; color: var(--sub); border-bottom: 1px solid var(--line); padding-bottom: 8px; margin: 34px 0 14px; display: flex; justify-content: space-between; align-items: baseline; }
 .zone-h b { color: var(--red); font-weight: 400; }

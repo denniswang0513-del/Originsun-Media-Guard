@@ -53,6 +53,8 @@
   .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   .err { color: var(--red); font-size: 12px; margin-bottom: 10px; display: none; }
   .state-msg { color: var(--sub); font-size: 13px; padding: 24px 0; text-align: center; }
+  html.embed header { display: none; }
+  html.embed main { padding-top: 14px; }
 </style>
 </head>
 <body>
@@ -95,6 +97,12 @@
   </div>
 </main>
 
+<script>
+// 被工作台的浮動視窗嵌進來（?embed=1）：藏自己的頁首、少留白 —— 叉叉在外面那層
+if (new URLSearchParams(location.search).get("embed")) {
+    document.documentElement.classList.add("embed");
+}
+</script>
 <script type="module">
 import { renderMine, renderAccounts, renderClaims, renderLabels, renderOverview }
     from "/tabs/petty/petty-view.js";

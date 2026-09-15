@@ -52,10 +52,11 @@ function cardMediaLog() {
 // finance_approve，這張卡不管那些。
 function cardPettyCash() {
     const card = makeCard("Petty Cash", "零用金", "", "petty_cash");
+    // 輸入面板（owner 2026-09-15）：按了開寬的浮動視窗（同最上排那顆），不跳頁；href 留著給中鍵／另開
     card.querySelector(".card-body").innerHTML = `
         <div class="meta" style="margin-bottom:12px;">自己墊的錢：現場登記金額與收據、掛專案與會計項目、送出請款，並查看公司要匯給你多少。</div>
-        <a class="mini-btn" href="/petty-cash.html"
-           style="display:inline-block;text-decoration:none;line-height:1.5;">開啟零用金 ↗</a>`;
+        <a class="mini-btn" href="/petty-cash.html" onclick="openActionModal('/petty-cash.html', '零用金'); return false;"
+           style="display:inline-block;text-decoration:none;line-height:1.5;padding:7px 14px;font-size:12px;">登記零用金／看請款</a>`;
     return card;
 }
 
