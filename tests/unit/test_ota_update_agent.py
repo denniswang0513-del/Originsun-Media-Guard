@@ -40,15 +40,10 @@ def test_pip_self_heals_half_installed_packages():
     assert '"--force-reinstall", "--no-deps", pin' in src and "result = _pip_install(req_file)" in src
 
 
-def test_transitional_pip_ini_bridge():
-    """2.5.28 過渡：ota_manifest 帶 python_embed/pip.ini（no-deps）、Pillow 暫時不在清單、新 update_agent 裝套件前刪掉它。
-    下一版要把這三樣還原（Pillow 放回、manifest 拿掉那行、主控的 pip.ini 刪檔）。"""
+def test_transitional_pip_ini_bridge_is_gone():
+    """2.5.30 過渡（OTA 帶 python_embed/pip.ini no-deps、Pillow 不釘）已在 2.5.31 還原：Pillow 釘回、manifest 不帶 pip.ini；
+    新 update_agent 仍會刪機器上殘留的過渡檔。"""
     from tests.unit._srcscan import repo_src
-    ua = repo_src("update_agent.py")
-    assert "_drop_transitional_pip_ini()" in ua.split("# ── Phase 5: PIP ──")[1][:120]
-    assert '"originsun-ota-transitional" in open(path' in ua
-    m = repo_src("ota_manifest.py"); assert m.index("\"python_embed/pip.ini\",") < m.index("INSTALL_EXTRA_FILES = ["), "要在 AGENT_FILES（OTA 帶的），不是 INSTALL_EXTRA_FILES"
-    req = repo_src("requirements_agent.txt")
-    assert "\nPillow==" not in req and "# Pillow==12.3.0" in req, "過渡版暫時不釘 Pillow"
-    ini = open(r"C:\OriginsunAgent\python_embed\pip.ini", encoding="utf-8").read() if __import__("os").path.isfile(r"C:\OriginsunAgent\python_embed\pip.ini") else ""
-    assert (not ini) or ("no-deps = true" in ini and "originsun-ota-transitional" in ini)
+    assert "Pillow==12.3.0" in repo_src("requirements_agent.txt").splitlines()
+    assert '"python_embed/pip.ini",' not in repo_src("ota_manifest.py")
+    assert '"originsun-ota-transitional" in open(path' in repo_src("update_agent.py")

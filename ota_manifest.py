@@ -10,10 +10,8 @@ import sys
 
 # ── Individual files synced to Agent ──
 AGENT_FILES = [
-    # 🔴 2.5.29 過渡（2026-09-15，用推送修五台半套 pillow 的機器）：pip 讀 sys.prefix 底下的 pip.ini，放 `[install] no-deps`
-    #    讓**舊** update_agent 的 `pip install -r` 不去碰 pillow。下一版（Pillow 放回清單）要把這行拿掉，並從主控
-    #    C:\OriginsunAgent\python_embed\pip.ini 刪檔；機器上那份由新 update_agent 自己刪。（2.5.29 誤放在 INSTALL_EXTRA_FILES，OTA 沒帶到）
-    "python_embed/pip.ini",
+    # （2.5.30 過渡時這裡帶過 "python_embed/pip.ini"（pip no-deps）讓舊 update_agent 不碰半套的 pillow；2.5.31 拿掉，
+    #   機器上那份由新 update_agent._drop_transitional_pip_ini 刪。）
     "main.py",
     "config.py",
     "core_engine.py",
