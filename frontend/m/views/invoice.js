@@ -24,22 +24,22 @@ function formHtml() {
       <div class="m-h">請開發票</div>
       <div id="inv-notice" hidden></div>
       <form class="m-form m-card wi" id="inv-form" autocomplete="off">
-        <label>標題</label><input id="inv-title" placeholder="空白＝用案名或品項（CRM 發票的「名稱」）">
-        <label>申請人</label>${segHtml('inv-applicant', inv.applicants || [], '', { blank: true })}
-        <label>類別</label>${segHtml('inv-category', inv.categories || [], '', { blank: true })}
+        <label class="req">標題</label><input id="inv-title" placeholder="空白＝用案名或品項（CRM 發票的「名稱」）">
+        <label class="req">申請人</label>${segHtml('inv-applicant', inv.applicants || [], '', { blank: true })}
+        <label class="req">類別</label>${segHtml('inv-category', inv.categories || [], '', { blank: true })}
         <label id="inv-project-label">專案</label>${pickerHtml('inv-project_id')}
         <div class="m-hint" id="inv-client-hint">選了專案會自動帶客戶、抬頭、統編</div>
         <div class="row2">
-          <div><label>未稅</label><input id="inv-amount_ex_tax" type="number" inputmode="numeric" min="0"></div>
-          <div><label>含稅</label><input id="inv-amount_total" type="number" inputmode="numeric" min="0"></div>
+          <div><label class="req">未稅</label><input id="inv-amount_ex_tax" type="number" inputmode="numeric" min="0"></div>
+          <div><label class="req">含稅</label><input id="inv-amount_total" type="number" inputmode="numeric" min="0"></div>
         </div>
-        <label>品項</label>${pickerHtml('inv-item_type')}
-        <label>客戶（抬頭）</label>${pickerHtml('inv-company_name')}
-        <label>統編</label><input id="inv-tax_id" maxlength="8" inputmode="numeric" pattern="[0-9]*">
-        <label>電子或紙本</label>${segHtml('inv-invoice_kind', inv.kinds || [], '', { blank: true })}
+        <label class="req">品項</label>${pickerHtml('inv-item_type')}
+        <label class="req">客戶（抬頭）</label>${pickerHtml('inv-company_name')}
+        <label class="req">統編</label><input id="inv-tax_id" maxlength="8" inputmode="numeric" pattern="[0-9]*">
+        <label class="req">電子或紙本</label>${segHtml('inv-invoice_kind', inv.kinds || [], '', { blank: true })}
         <div id="inv-paper" hidden>
           <label class="req">收件人</label><input id="inv-recipient">
-          <label>收件電話</label><input id="inv-recipient_phone" type="tel" inputmode="tel">
+          <label class="req">收件電話</label><input id="inv-recipient_phone" type="tel" inputmode="tel">
           <label class="req">收件地址</label><input id="inv-recipient_address">
         </div>
         <div id="inv-issue-row" hidden>
@@ -237,6 +237,27 @@ function stopEdit() {
     F('submit').textContent = '送出並產生通知'; F('cancel-edit').hidden = true;
 }
 
+// 必填清單（順序＝表單順序，缺哪一欄就跳到哪一欄）。標題允許空白讓後端用案名／品項補，所以檢查的是補完後的 body.title。
+function _missingField(body) {
+    const rules = [
+        ['title', '標題', () => body.title],
+        ['applicant', '申請人', () => body.applicant],
+        ['category', '類別', () => body.category],
+        ['project_id', '專案', () => !needsProject() || body.project_id],
+        ['amount_ex_tax', '未稅', () => body.amount_ex_tax !== null],
+        ['amount_total', '含稅', () => body.amount_total !== null],
+        ['item_type', '品項', () => body.item_type],
+        ['company_name', '客戶（抬頭）', () => body.company_name],
+        ['tax_id', '統編', () => body.tax_id],
+        ['invoice_kind', '電子或紙本', () => body.invoice_kind],
+        ['recipient', '收件人', () => !isPaper() || body.recipient],
+        ['recipient_phone', '收件電話', () => !isPaper() || body.recipient_phone],
+        ['recipient_address', '收件地址', () => !isPaper() || body.recipient_address],
+    ];
+    const hit = rules.find(([, , ok]) => !ok());
+    return hit ? { key: hit[0], label: hit[1] } : null;
+}
+
 async function submit(ev) {
     ev.preventDefault();
     const body = payload();
@@ -256,10 +277,10 @@ async function submit(ev) {
             payment_status: issue === voided() ? voided() : (wasVoid ? body.payment_status : (_editing.payment_status || body.payment_status)),
         });
     }
-    if (needsProject() && !body.project_id) { toast('類別是專案就要選專案', 'err'); F('project_id-q').focus(); return; }
-    if (!body.title) { toast('請填標題，或填品項／抬頭讓它自動補', 'err'); F('title').focus(); return; }
-    if (body.tax_id && !/^\d{8}$/.test(body.tax_id)) { toast('統編要 8 位數字', 'err'); F('tax_id').focus(); return; }
-    if (isPaper() && !(body.recipient && body.recipient_address)) { toast('紙本發票要填收件人與地址', 'err'); F(body.recipient ? 'recipient_address' : 'recipient').focus(); return; }
+    // 每一欄都必填（owner 2026-09-15）：專案只在類別是「專案」時要（代開沒案）；紙本三欄只在紙本時要；備註不算
+    const missing = _missingField(body);
+    if (missing) { toast(`請填「${missing.label}」`, 'err'); (F(missing.key + '-q') || F(missing.key)).focus(); return; }
+    if (!/^\d{8}$/.test(body.tax_id)) { toast('統編要 8 位數字', 'err'); F('tax_id').focus(); return; }
     const editing = _editing;
     let saved = false;
     await withBusy(F('submit'), async () => {

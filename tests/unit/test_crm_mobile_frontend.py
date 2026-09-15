@@ -158,7 +158,7 @@ def test_invoice_is_a_request_to_issue():
     assert "payment_type: receivableType()" in src and "payment_status: unpaidStatus()" in src
     assert "invoice_number: ''" in src and "applicant: F('applicant').value" in src
     assert "showNotice(noticeText(body))" in src and "copyText(" in src
-    assert "if (needsProject() && !body.project_id) { toast(" in src     # 只有類別＝專案才必填
+    assert "['project_id', '專案', () => !needsProject() || body.project_id]" in src     # 只有類別＝專案才必填（2026-09-15 起在 _missingField 裡）
     assert "project_category" in src
     # 紙本發票要收件人／電話／地址（同桌機發票本）；哪一種是紙本由 options.invoice.paper_kind 說
     assert "paper_kind" in src and "recipient_address" in src and "'inv-paper'" in src
@@ -373,3 +373,18 @@ def test_sheet_has_a_close_button():
     html = repo_src("frontend/m/crm.html")
     assert 'id="m-sheet-x"' in html and "#m-sheet .x" in M_CSS   # 樣式在共用的 /m/m.css
     assert "querySelector('.x').addEventListener('click', closeSheet)" in js_code_only(repo_src("frontend/m/ui.js"))
+
+
+def test_mobile_invoice_every_field_is_required():
+    """owner 2026-09-15「手機版發票的每一欄都要是必填」：標題／申請人／類別／專案（類別是專案時）／未稅／含稅／品項／
+    抬頭／統編／電子或紙本／紙本三欄（紙本時）都擋；備註不算。缺哪一欄就跳到哪一欄。"""
+    src = repo_src("frontend/m/views/invoice.js")
+    for lab in ("標題", "申請人", "類別", "未稅", "含稅", "品項", "客戶（抬頭）", "統編", "電子或紙本", "收件人", "收件電話", "收件地址"):
+        assert f'<label class="req">{lab}</label>' in src, lab
+    assert "function _missingField(body)" in src
+    for key in ("'title'", "'applicant'", "'category'", "'project_id'", "'amount_ex_tax'", "'amount_total'", "'item_type'",
+                "'company_name'", "'tax_id'", "'invoice_kind'", "'recipient'", "'recipient_phone'", "'recipient_address'"):
+        assert f"[{key}," in src, key
+    assert "'notes'" not in src.split("function _missingField")[1].split("\n}")[0], "備註不必填"
+    assert "toast(`請填「${missing.label}」`, 'err')" in src
+    assert "(F(missing.key + '-q') || F(missing.key)).focus()" in src
