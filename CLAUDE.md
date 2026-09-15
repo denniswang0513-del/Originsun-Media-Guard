@@ -1384,6 +1384,10 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   員工自助假別只有 `core/leave_logic.SELF_SERVICE_TYPES`（特休／補休／病假）；病假要附證明（`PROOF_REQUIRED_TYPES`，
   `POST /me/leave/{id}/proof` → 收據根目錄 `_假勤證明/{年月}/`），沒證明核准會 422（`test_leave_proof` 釘）。
   前端 `accept` 屬性**不能寫 `image/*`**：`_srcscan.js_code_only` 會把 `/*` 當註解起點，整支檔後半被吃掉、函式體測試找不到函式。
+  「挑幾天（不連續）」（2026-09-15）：資料模型不變、**一天一張單**；`/me/leave/batch` 同一 commit 全建或全不建。
+  對餘額的削法只住 `core/leave_logic.fit_days_to_balance`（依日期順序用完、卡在中間那天改上午／時段、後面的 0 小時），
+  `evaluate(check_balance=False)` 給 batch 用，別在單日 evaluate 裡再擋一次。前端「挑幾天」模式由 `#lv-multi` 是否展開決定，
+  不看有沒有挑到日期（沒挑就送會送到藏起來的起迄日 — /polish BUG-1）。
 - **報價單版面**：owner 逐項拍板過（無公司抬頭區塊、無上下色帶、灰表頭、總額無粗線、備註在結算下方、
   頁尾只留數字）。要調版面先開示範頁比對，別直接改模板。
 - **`core.quotation_pdf.PDF_MARGIN` 與模板 `@page` 必須一致**：模板還用它算「單頁時簽章貼底」的
