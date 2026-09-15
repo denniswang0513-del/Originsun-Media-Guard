@@ -175,3 +175,16 @@ def test_polish_pending_count_counts_applications_once():
     svc = repo_src("services/leave_service.py")
     body = func_body(svc, "async def staff_leave_summary(")
     assert "HrLeaveRequest.application_id.is_(None)" in body and "func.count(HrLeaveApplication.id)" in body
+
+
+def test_rare_kinds_fold_under_other_leave():
+    """owner 2026-09-15「這三項我希望有個下拉箭頭，可以收攏起來」：事假／婚假／喪假收在「其他假別」底下（預設收合、記 localStorage、
+    裡面有挑到的就強制展開）；特休／補休／病假永遠展開。"""
+    js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
+    assert 'const LV_FOLDED_KINDS = ["事假", "婚假", "喪假"];' in js
+    draw = js_func_body(js, "function _lvDrawInv(")
+    assert "if (more.some(i => _lvPicks.includes(i.id))) open = true;" in draw
+    assert 'onclick="lvToggleInvMore()"' in draw and 'id="lv-inv-more"' in draw
+    assert "localStorage.setItem(LV_FOLD_KEY" in js_func_body(js, "function lvToggleInvMore(")
+    for page in ("frontend/my.html", "frontend/leave.html"):
+        assert ".lv-inv-more.open .lv-fold { transform: none; }" in repo_src(page), page

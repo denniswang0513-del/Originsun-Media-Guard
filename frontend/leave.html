@@ -76,6 +76,12 @@
   .wip-note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 4px;
     padding: 8px 10px; font-size: 12px; line-height: 1.6; margin-bottom: 12px; }
   .card-head .fold { display: none; }
+  /* 規章卡的收合：點標題列切換 */
+  .rules-fold { font-size: 12px; color: var(--sub); transition: transform .15s; }
+  #lv-rules.folded .rules-fold { transform: rotate(-90deg); }
+  #lv-rules.folded .card-head { border-bottom-color: transparent; padding-bottom: 4px; margin-bottom: 0; }
+  #lv-rules.folded .card-body { display: none; }
+  #lv-rules .card-head:hover .rules-fold { color: var(--red); }
   .row { display: flex; gap: 12px; align-items: flex-start; padding: 13px 0; border-bottom: 1px solid #f5f5f5; font-size: 13px; }
   .row:last-child { border-bottom: none; }
   .row .grow { flex: 1; min-width: 0; }
@@ -107,6 +113,11 @@
   .lv-inv-row { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: center; padding: 7px 10px; border-top: 1px solid var(--line); font-size: 12px; cursor: pointer; }
   .lv-inv-row:first-child { border-top: 0; }
   .lv-inv-row.off { color: var(--sub); cursor: default; }
+  .lv-inv-more { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; border-top: 1px solid var(--line); background: var(--soft, #fafafa); color: var(--sub); font: inherit; font-size: 12px; padding: 7px 10px; cursor: pointer; text-align: left; }
+  .lv-inv-more:hover { color: var(--red); }
+  .lv-inv-more .lv-fold { display: inline-block; transition: transform .15s; transform: rotate(-90deg); }
+  .lv-inv-more.open .lv-fold { transform: none; }
+  #lv-inv-more .lv-inv-row:first-child { border-top: 1px solid var(--line); }
   .lv-inv-row.on { background: #fff7f6; }
   .lv-inv-row input[type=checkbox] { width: 14px; height: 14px; margin: 0; }
   .lv-kind { display: block; font-size: 10px; letter-spacing: .15em; color: var(--sub); }
@@ -172,8 +183,12 @@
       <!-- 請補休規章（owner 2026-09-15「這裡多一個請補修規章」；內容抄自 Notion「請補修規章」資料庫，
            https://app.notion.com/p/95bcbee3622a40b98b6d3d70af5e9763 —— 規章改了要來這裡同步改，
            程式裡對應的數字：core/leave_logic.NOTICE_DAYS（一週前）、SICK_CAP_DAYS（30 天）、cancel_mode（兩天前消假）） -->
-      <section class="card" id="lv-rules">
-        <div class="card-head"><span class="eyebrow">Rules <span class="accent">請補休規章</span></span></div>
+      <!-- 規章預設收起來（owner 2026-09-15「也希望有一個向下的箭頭可以收攏起來」）；狀態記 localStorage -->
+      <section class="card folded" id="lv-rules">
+        <div class="card-head" onclick="lvToggleRules()" style="cursor:pointer;user-select:none;">
+          <span class="eyebrow">Rules <span class="accent">請補休規章</span></span>
+          <span class="rules-fold">▾</span>
+        </div>
         <div class="card-body rules">
           <div class="rule"><b>請假時間點</b><p>理想的話於 1 個月前、最晚 1 週前提出申請，並簡要說明理由。如有例外狀況，另外與主管討論。</p></div>
           <div class="rule"><b>特休</b>
@@ -234,6 +249,15 @@
 if (new URLSearchParams(location.search).get("embed")) {
     document.documentElement.classList.add("embed");
 }
+</script>
+<script>
+// 規章卡的收合（預設收；記在 localStorage）
+function lvToggleRules() {
+    const card = document.getElementById("lv-rules");
+    const folded = card.classList.toggle("folded");
+    try { localStorage.setItem("lv_rules_open", folded ? "0" : "1"); } catch (_) { /* 私密視窗 */ }
+}
+try { if (localStorage.getItem("lv_rules_open") === "1") document.getElementById("lv-rules").classList.remove("folded"); } catch (_) { /* 私密視窗 */ }
 </script>
 <script src="./js/my/leave-host.js"></script>
 <script src="./js/my/cards-hr.js"></script>

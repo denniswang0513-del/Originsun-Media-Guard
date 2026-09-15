@@ -256,21 +256,43 @@ function _lvDrawChips() {
         || `<span style="font-size:12px;color:var(--sub);">還沒挑日期</span>`;
 }
 // ── 第 2 步：從自己的假裡挑（順序＝扣的順序）──
+// 事假／婚假／喪假平常用不到，收在「其他假別」底下（owner 2026-09-15「這三項我希望有個下拉箭頭，可以收攏起來」）；
+// 特休／補休／病假常用，永遠展開。收合狀態記在 localStorage；裡面有挑到的就強制展開（不然看不到自己挑了什麼）。
+const LV_FOLDED_KINDS = ["事假", "婚假", "喪假"];
+const LV_FOLD_KEY = "lv_inv_more_open";
+function _lvInvRow(i) {
+    const n = _lvPicks.indexOf(i.id);
+    const off = i.available !== null && i.available !== undefined && Number(i.available) <= 0;
+    const amount = i.available === null || i.available === undefined ? "不限" : `${_lvH(i.available)} h（${_lvDays(i.available)} 天）`;
+    const sub = n >= 0 ? `第 ${n + 1} 個挑的` : [i.expires_on ? `${esc(i.expires_on)} 到期` : "", i.proof_required ? "要附證明" : "", i.paid && i.paid !== "給薪" ? esc(i.paid) : ""].filter(Boolean).join("・");
+    return `<label class="lv-inv-row${off ? " off" : ""}${n >= 0 ? " on" : ""}">
+        <input type="checkbox" ${n >= 0 ? "checked" : ""} ${off ? "disabled" : ""} onchange="lvTogglePick('${esc(i.id)}', this.checked)">
+        <span><span class="lv-kind">${esc(i.kind)}</span>${esc(i.label)}</span>
+        <span class="lv-amt">${off ? "沒有庫存" : amount}<small>${sub}</small></span>
+    </label>`;
+}
 function _lvDrawInv() {
     const host = $("lv-inv");
     if (!host) return;
     if (!_lvInv.length) { host.innerHTML = `<div class="empty" style="padding:8px 0;">沒有可以挑的假</div>`; return; }
-    host.innerHTML = _lvInv.map(i => {
-        const n = _lvPicks.indexOf(i.id);
-        const off = i.available !== null && i.available !== undefined && Number(i.available) <= 0;
-        const amount = i.available === null || i.available === undefined ? "不限" : `${_lvH(i.available)} h（${_lvDays(i.available)} 天）`;
-        const sub = n >= 0 ? `第 ${n + 1} 個挑的` : [i.expires_on ? `${esc(i.expires_on)} 到期` : "", i.proof_required ? "要附證明" : "", i.paid && i.paid !== "給薪" ? esc(i.paid) : ""].filter(Boolean).join("・");
-        return `<label class="lv-inv-row${off ? " off" : ""}${n >= 0 ? " on" : ""}">
-            <input type="checkbox" ${n >= 0 ? "checked" : ""} ${off ? "disabled" : ""} onchange="lvTogglePick('${esc(i.id)}', this.checked)">
-            <span><span class="lv-kind">${esc(i.kind)}</span>${esc(i.label)}</span>
-            <span class="lv-amt">${off ? "沒有庫存" : amount}<small>${sub}</small></span>
-        </label>`;
-    }).join("");
+    const main = _lvInv.filter(i => !LV_FOLDED_KINDS.includes(i.kind));
+    const more = _lvInv.filter(i => LV_FOLDED_KINDS.includes(i.kind));
+    let open = false;
+    try { open = localStorage.getItem(LV_FOLD_KEY) === "1"; } catch (_) { /* 私密視窗 */ }
+    if (more.some(i => _lvPicks.includes(i.id))) open = true;
+    host.innerHTML = main.map(_lvInvRow).join("") + (more.length ? `
+        <button type="button" class="lv-inv-more${open ? " open" : ""}" onclick="lvToggleInvMore()">
+            <span class="lv-fold">▾</span>其他假別（${more.map(i => esc(i.kind)).join("／")}）
+        </button>
+        <div id="lv-inv-more" style="${open ? "" : "display:none;"}">${more.map(_lvInvRow).join("")}</div>` : "");
+}
+function lvToggleInvMore() {
+    const box = $("lv-inv-more"), btn = document.querySelector(".lv-inv-more");
+    if (!box) return;
+    const open = box.style.display === "none";
+    box.style.display = open ? "" : "none";
+    if (btn) btn.classList.toggle("open", open);
+    try { localStorage.setItem(LV_FOLD_KEY, open ? "1" : "0"); } catch (_) { /* 私密視窗 */ }
 }
 function lvTogglePick(id, on) {
     _lvPicks = _lvPicks.filter(x => x !== id);

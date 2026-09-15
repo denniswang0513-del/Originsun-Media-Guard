@@ -150,6 +150,11 @@ main { max-width: 1100px; margin: 0 auto; padding: 104px 20px 80px; }
 .lv-inv-row { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: center; padding: 7px 10px; border-top: 1px solid var(--line); font-size: 12px; cursor: pointer; }
 .lv-inv-row:first-child { border-top: 0; }
 .lv-inv-row.off { color: var(--sub); cursor: default; }
+.lv-inv-more { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; border-top: 1px solid var(--line); background: var(--soft, #fafafa); color: var(--sub); font: inherit; font-size: 12px; padding: 7px 10px; cursor: pointer; text-align: left; }
+.lv-inv-more:hover { color: var(--red); }
+.lv-inv-more .lv-fold { display: inline-block; transition: transform .15s; transform: rotate(-90deg); }
+.lv-inv-more.open .lv-fold { transform: none; }
+#lv-inv-more .lv-inv-row:first-child { border-top: 1px solid var(--line); }
 .lv-inv-row.on { background: #fff7f6; }
 .lv-inv-row input[type=checkbox] { width: 14px; height: 14px; margin: 0; }
 .lv-kind { display: block; font-size: 10px; letter-spacing: .15em; color: var(--sub); }

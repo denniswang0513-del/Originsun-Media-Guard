@@ -119,3 +119,12 @@ def test_grid_children_do_not_force_page_width_on_phones():
     raw = repo_src("frontend/leave.html")
     assert ".lv-layout > * { min-width: 0; }" in raw
     assert ".tbl-wrap { overflow-x: auto; }" in raw
+
+
+def test_rules_card_folds():
+    """owner 2026-09-15「請補修規章也希望有一個向下的箭頭可以收攏起來」：預設收合、點標題列切換、記 localStorage。"""
+    raw = repo_src("frontend/leave.html")
+    assert '<section class="card folded" id="lv-rules">' in raw
+    assert 'onclick="lvToggleRules()"' in raw and 'class="rules-fold"' in raw
+    assert "#lv-rules.folded .card-body { display: none; }" in raw
+    assert 'localStorage.setItem("lv_rules_open"' in raw and 'localStorage.getItem("lv_rules_open") === "1"' in raw
