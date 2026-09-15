@@ -202,6 +202,8 @@ MAX_BATCH_DATES = 31        # 一次最多挑幾天（owner 2026-09-15「一次�
 # 第 2 步的清單除了特休／補休的每一筆 credit，還有這幾種不走時數帳的假別；meta：要不要附證明、給不給薪、年上限（天）。
 # 公假整個拿掉（owner 2026-09-15「我沒有公假 所以可以把公假都先拿掉」）；要用再加回 ALL_LEAVE_TYPES／RECORD_META。
 PICKABLE_RECORD_TYPES = ("病假", "事假", "婚假", "喪假")
+SICK_TYPE = "病假"
+SICK_FREE_HOURS = SICK_CAP_DAYS and HOURS_PER_DAY   # 規章「請假 1 天給薪」：病假折抵時，第 1 天（8h）留給病假、給薪
 RECORD_META = {
     "病假": {"proof": True, "paid": "1 天給薪、之後半薪", "cap_days": SICK_CAP_DAYS},
     "事假": {"proof": False, "paid": "不給薪"},
@@ -220,13 +222,31 @@ def fit_items(picks: list, needed_hours: float) -> tuple:
     回 (takes, remain)：takes＝每筆多帶 take（真的扣幾小時），挑超過的最後那一筆只扣還需要的部分、後面的不扣（take 0）；
     remain＞0＝挑不夠。（owner：「挑了 3 天 8 小時、實際只要休 20 個小時，那需要有一天假剩下 4 小時」）"""
     remain = round(float(needed_hours or 0), 2)
-    takes = []
-    for p in picks:
-        avail = p.get("available")
-        cap = remain if avail is None else min(float(avail), remain)
-        take = round(max(cap, 0.0), 2)
-        takes.append(dict(p, take=take))
-        remain = round(remain - take, 2)
+    takes = [dict(p, take=0.0) for p in picks]
+
+    def _cap(p):
+        a = p.get("available")
+        return float("inf") if a is None else float(a)
+
+    # 病假折抵（owner 2026-09-15「如果休的是病假 要可以選其他假折抵時數 只是照規則扣」）：
+    # 挑了病假又挑了會扣帳的假（特休／補休）→ 系統照規章自動分：病假先留 1 天（給薪），其餘先用折抵的假吃（照挑的順序＝全薪），
+    # 吃不完的再回病假（半薪）。沒挑病假、或只挑病假沒挑折抵的假 → 照一般順序填（下面 order 就是原順序）。
+    sick_i = next((i for i, p in enumerate(picks) if p.get("kind") == SICK_TYPE and not p.get("credit_id")), None)
+    has_credit = any(p.get("credit_id") for p in picks)
+    order = list(range(len(picks)))
+    if sick_i is not None and has_credit:
+        free = round(min(remain, _cap(takes[sick_i]), float(SICK_FREE_HOURS)), 2)
+        takes[sick_i]["take"] = free
+        remain = round(remain - free, 2)
+        order = [i for i in order if i != sick_i] + [sick_i]   # 病假沉到最後，讓折抵的假先吃
+
+    for i in order:
+        p = takes[i]
+        room = round(_cap(p) - p["take"], 2)
+        take = round(min(room, remain), 2)
+        if take > 0:
+            p["take"] = round(p["take"] + take, 2)
+            remain = round(remain - take, 2)
     return takes, max(remain, 0.0)
 
 

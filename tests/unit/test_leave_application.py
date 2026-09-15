@@ -188,3 +188,37 @@ def test_rare_kinds_fold_under_other_leave():
     assert "localStorage.setItem(LV_FOLD_KEY" in js_func_body(js, "function lvToggleInvMore(")
     for page in ("frontend/my.html", "frontend/leave.html"):
         assert ".lv-inv-more.open .lv-fold { transform: none; }" in repo_src(page), page
+
+
+def test_sick_leave_can_be_offset_by_credits_per_rule():
+    """owner 2026-09-15「如果休的是病假 要可以選其他假折抵時數 只是照規則扣」→ 系統照規章自動分：
+    挑病假＋特休／補休時，病假先留 1 天（給薪 SICK_FREE_HOURS），其餘先用折抵的假吃（全薪），吃不完的再回病假（半薪）。"""
+    from core.leave_logic import fit_items, SICK_FREE_HOURS, HOURS_PER_DAY
+    assert SICK_FREE_HOURS == HOURS_PER_DAY
+    te = {"id": "c1", "kind": "特休", "credit_id": "c1", "available": 40.0}
+    comp = {"id": "c2", "kind": "補休", "credit_id": "c2", "available": 16.0}
+    sick = {"id": "type:病假", "kind": "病假", "credit_id": None, "available": 240.0}
+    # 3 天(24h)：病假留 1 天 8h，其餘 16h 特休折抵
+    t, r = fit_items([sick, te], 24)
+    assert [(x["kind"], x["take"]) for x in t] == [("病假", 8.0), ("特休", 16.0)] and r == 0
+    # 折抵的假不夠（補休只有 16）：病假 8 + 補休 16，剩下的還是回病假？need24-8-16=0，剛好
+    t, r = fit_items([sick, comp], 24)
+    assert [(x["kind"], x["take"]) for x in t] == [("病假", 8.0), ("補休", 16.0)] and r == 0
+    # 折抵不夠、要回病假：40h，補休只有 16 → 病假 8＋補休 16＋病假回收 16 = 病假 24、補休 16
+    t, r = fit_items([sick, comp], 40)
+    assert dict((x["kind"], x["take"]) for x in t) == {"病假": 24.0, "補休": 16.0} and r == 0
+    # 不足一天：病假 4h、特休不扣
+    t, r = fit_items([sick, te], 4)
+    assert [(x["kind"], x["take"]) for x in t] == [("病假", 4.0), ("特休", 0.0)]
+    # 只挑病假（沒折抵）：全病假、不套折抵規則
+    t, r = fit_items([sick], 24)
+    assert t[0]["take"] == 24.0
+    # 非病假的記錄型（事假）沒有第一天規則：照原順序 greedy
+    shi = {"id": "type:事假", "kind": "事假", "credit_id": None, "available": None}
+    t, r = fit_items([shi, te], 16)
+    assert [(x["kind"], x["take"]) for x in t] == [("事假", 16.0), ("特休", 0.0)]
+    # evaluate 的旗標
+    svc = repo_src("services/leave_application.py")
+    assert 'sick_offset = (any(t.get("kind") == "病假" and t.get("take")' in svc
+    js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
+    assert "d.sick_offset" in js and "病假第 1 天給薪" in js

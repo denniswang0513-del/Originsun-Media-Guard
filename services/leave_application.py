@@ -222,8 +222,11 @@ async def evaluate(session, staff, body, today: date | None = None, holidays=Non
     for s in slots:
         for e in s["errors"]:
             errors.append(_err(e["code"], f"{s['date'][5:].replace('-', '/')}：{e['msg']}"))
+    # 病假折抵：有病假扣到、又有會扣帳的假扣到 → 前端提示「病假第 1 天給薪，其餘用特休／補休折抵」
+    sick_offset = (any(t.get("kind") == "病假" and t.get("take") for t in takes)
+                   and any(t.get("credit_id") and t.get("take") for t in takes))
     return {"needed_hours": needed, "days": hours_to_days(needed), "dates": slots, "inventory": inv, "takes": takes, "remain": remain,
-            "children": children, "errors": errors, "warnings": warnings,
+            "children": children, "errors": errors, "warnings": warnings, "sick_offset": sick_offset,
             "proof_required": any(t.get("proof_required") for t in takes)}
 
 
