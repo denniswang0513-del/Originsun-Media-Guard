@@ -47,7 +47,7 @@ def test_transitional_pip_ini_bridge():
     ua = repo_src("update_agent.py")
     assert "_drop_transitional_pip_ini()" in ua.split("# ── Phase 5: PIP ──")[1][:120]
     assert '"originsun-ota-transitional" in open(path' in ua
-    m = repo_src("ota_manifest.py"); assert "\"python_embed/pip.ini\"," in m.split("AGENT_FILES = [")[1].split("]")[0], "要在 AGENT_FILES（OTA 帶的），不是 INSTALL_EXTRA_FILES"
+    m = repo_src("ota_manifest.py"); assert m.index("\"python_embed/pip.ini\",") < m.index("INSTALL_EXTRA_FILES = ["), "要在 AGENT_FILES（OTA 帶的），不是 INSTALL_EXTRA_FILES"
     req = repo_src("requirements_agent.txt")
     assert "\nPillow==" not in req and "# Pillow==12.3.0" in req, "過渡版暫時不釘 Pillow"
     ini = open(r"C:\OriginsunAgent\python_embed\pip.ini", encoding="utf-8").read() if __import__("os").path.isfile(r"C:\OriginsunAgent\python_embed\pip.ini") else ""
