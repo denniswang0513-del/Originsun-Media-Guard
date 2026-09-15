@@ -9,7 +9,7 @@ import { esc } from '../../js/shared/dom.js';
 import { authDownload, authFetch, tabLoadError } from '../../js/shared/utils.js';
 
 // 字彙 fallback（正本 core/leave_logic.py；執行期以後端回的 vocab 為準，這裡只是還沒拿到時的預設）
-const LEAVE_TYPES = ['特休', '補休', '病假', '事假', '公假', '婚假', '喪假', '其他'];
+const LEAVE_TYPES = ['特休', '補休', '病假', '事假', '婚假', '喪假', '其他'];   // 公假 2026-09-15 拿掉（owner：沒有公假）
 const STATUS_PILL = { '待審': 'pending', '已核准': 'approved', '已退回': 'rejected', '已撤回': 'cancelled', '消假待審': 'pending' };
 const PART_LABEL = { all: '整天', am: '上午', pm: '下午', range: '時段' };
 const HOLIDAY_KINDS = ['國定假日', '補班日', '颱風假'];

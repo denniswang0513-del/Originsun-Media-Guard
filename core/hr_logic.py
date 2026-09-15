@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 from typing import NamedTuple, Optional
 from zoneinfo import ZoneInfo
 
-LEAVE_TYPES = ("特休", "病假", "事假", "公假", "婚假", "喪假", "其他")
+LEAVE_TYPES = ("特休", "病假", "事假", "婚假", "喪假", "其他")   # 公假 2026-09-15 拿掉（owner：沒有公假）
 LEAVE_STATUSES = ("待審", "已核准", "已退回")
 ANNUAL_TYPE = "特休"
 

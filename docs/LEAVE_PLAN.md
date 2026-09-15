@@ -85,7 +85,7 @@
 |---|---|
 | hours | 取代 days 當正本（days 保留為 hours/8 的鏡射，舊資料 days×8 回填） |
 | start_time / end_time | 可選；半天（上午／下午）或時段（14:00 後外出看診）；沒填＝整天 |
-| leave_type | 加 `補休`；`特休`／`補休` 走時數帳，`病假`／`事假`／`公假`／`婚假`／`喪假` 走年度上限（規章的天數）不扣帳 |
+| leave_type | 加 `補休`；`特休`／`補休` 走時數帳，`病假`／`事假`／`婚假`／`喪假` 走年度上限（規章的天數）不扣帳（公假 2026-09-15 整個拿掉：owner「我沒有公假」） |
 | status | 加 `已撤回`（不再硬刪）；`已退回` 帶 `reject_note` |
 | google_event_id / synced_at / sync_error | 同 `crm_shoots` 三欄 |
 | paid | 給薪比例（病假 30 日內半薪等）— 三期再算，一期先存事實 |
@@ -184,7 +184,7 @@
 
 ### 7.1 字彙（`core/leave_logic.py`，前端從 `/api/v1/me/leave/summary.vocab` 拿，不寫死）
 
-- `LEDGER_TYPES = ("特休", "補休")`：走時數帳。`RECORD_TYPES = ("病假", "事假", "公假", "婚假", "喪假", "其他")`：只記事實。
+- `LEDGER_TYPES = ("特休", "補休")`：走時數帳。`RECORD_TYPES = ("病假", "事假", "婚假", "喪假", "其他")`：只記事實。
 - `REQUEST_STATUSES = ("待審", "已核准", "已退回", "已撤回", "消假待審")`。`CREDIT_STATUSES = ("待審", "可用", "展延", "結算", "拒絕")`。
 - `PARTS = ("all", "am", "pm", "range")`：整天 8h／上午 4h／下午 4h／時段（迄−起，四捨五入到 0.5h，上限 8h）。
 - `HOURS_PER_DAY = 8`、`HOLIDAY_OT_MULTIPLIER = 2`、`NOTICE_DAYS = 7`（不足黃字）、`CANCEL_FREE_DAYS = 2`、`SICK_CAP_DAYS = 30`。

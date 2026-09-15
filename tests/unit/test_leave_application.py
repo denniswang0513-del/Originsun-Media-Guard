@@ -63,7 +63,7 @@ def test_plan_children_merges_same_kind_and_splits_kind_changes():
 def test_record_types_and_meta():
     from core.leave_logic import ALL_LEAVE_TYPES, PICKABLE_RECORD_TYPES, RECORD_META, record_item_id
     assert PICKABLE_RECORD_TYPES == ("病假", "事假", "婚假", "喪假"), "公假還沒規劃（owner 2026-09-15），員工挑不到"
-    assert "公假" not in RECORD_META
+    assert "公假" not in RECORD_META and "公假" not in ALL_LEAVE_TYPES, "公假整個拿掉（owner 2026-09-15「我沒有公假」）"
     assert set(PICKABLE_RECORD_TYPES) <= set(ALL_LEAVE_TYPES) and "其他" not in PICKABLE_RECORD_TYPES
     assert RECORD_META["病假"]["proof"] and RECORD_META["病假"]["cap_days"] == 30
     assert RECORD_META["事假"]["proof"] is False and "不給薪" in RECORD_META["事假"]["paid"]
