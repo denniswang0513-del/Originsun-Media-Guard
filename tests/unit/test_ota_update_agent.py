@@ -47,3 +47,11 @@ def test_transitional_pip_ini_bridge_is_gone():
     assert "Pillow==12.3.0" in repo_src("requirements_agent.txt").splitlines()
     assert '"python_embed/pip.ini",' not in repo_src("ota_manifest.py")
     assert '"originsun-ota-transitional" in open(path' in repo_src("update_agent.py")
+
+
+def test_backup_and_rollback_create_parent_dirs():
+    """2.5.31 推到 2.5.30 的機器時 backup 在 `_rollback/python_embed/pip.ini` 炸掉（沒那層目錄）→ 整個更新 abort。子路徑要先 makedirs。"""
+    from tests.unit._srcscan import func_body, repo_src
+    ua = repo_src("update_agent.py")
+    assert "os.makedirs(os.path.dirname(dst), exist_ok=True)" in func_body(ua, "def backup_current(")
+    assert "os.makedirs(os.path.dirname(dst), exist_ok=True)" in func_body(ua, "def rollback(")

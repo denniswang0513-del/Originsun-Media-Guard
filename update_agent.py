@@ -209,7 +209,9 @@ def backup_current():
     for fname in AGENT_FILES:
         src = os.path.join(INSTALL_DIR, fname)
         if os.path.isfile(src):
-            shutil.copy2(src, os.path.join(ROLLBACK_DIR, fname))
+            dst = os.path.join(ROLLBACK_DIR, fname)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)   # AGENT_FILES 有子路徑（2.5.30 的 python_embed/pip.ini）時 _rollback 底下沒那層目錄
+            shutil.copy2(src, dst)
 
     for dname in AGENT_DIRS:
         src = os.path.join(INSTALL_DIR, dname)
@@ -239,7 +241,9 @@ def rollback(reason: str):
     for fname in AGENT_FILES:
         bak = os.path.join(ROLLBACK_DIR, fname)
         if os.path.isfile(bak):
-            shutil.copy2(bak, os.path.join(INSTALL_DIR, fname))
+            dst = os.path.join(INSTALL_DIR, fname)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(bak, dst)
 
     # Restore directories
     for dname in AGENT_DIRS:
@@ -301,6 +305,7 @@ def run_update(master_url: str) -> int:
     log(f"Update available: {local_ver} → {remote_ver}")
 
     # ── Phase 3: BACKUP ──
+    _drop_transitional_pip_ini()   # 要在 backup 之前：2.5.30 的 manifest 帶著它，backup 複製到 _rollback/python_embed/ 會因為沒那層目錄而炸
     log("Phase 3: Backing up current version...")
     write_status(3, 15, "正在備份現有版本...")
     try:
@@ -338,7 +343,6 @@ def run_update(master_url: str) -> int:
         return 1
 
     # ── Phase 5: PIP ──
-    _drop_transitional_pip_ini()
     req_file = os.path.join(INSTALL_DIR, "requirements_agent.txt")
     if os.path.isfile(req_file):
         log("Phase 5: Installing requirements...")
