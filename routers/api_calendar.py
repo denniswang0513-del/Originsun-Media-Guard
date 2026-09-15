@@ -141,7 +141,9 @@ async def _flex_out_events(session, d0, d1, me) -> list:
     return [{"kind": "flex_out", "id": f.id, "date": f.date.isoformat(), "end_date": "", "start_time": f.start_time, "end_time": f.end_time,
              "title": f"{f.staff_name or ''} 外出", "project_id": "", "project_name": "", "client": "",
              "people": [{"name": f.staff_name or "", "staff_id": f.staff_id or "", "role": "", "external": False}],
-             "location": "", "notes": f.reason or "", "status": "", "mine": f.staff_id == me["staff_id"],
+             # 🔴 事由不吐（同 _leave_events 的 notes 一律空）：這支事件流是全公司看的（任一把 READ_KEYS），
+             #    而登記框的提示字就寫著「去銀行、接小孩」——寫進去的是私事，只給本人在假勤卡的清單裡看。
+             "location": "", "notes": "", "status": "", "mine": f.staff_id == me["staff_id"],
              "sync": {"ok": True, "error": ""}} for f in rows]
 
 

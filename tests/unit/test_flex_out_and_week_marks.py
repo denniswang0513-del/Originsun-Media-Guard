@@ -124,3 +124,27 @@ def test_flex_dict_shape_is_pinned():
                                "minutes": 120, "reason": "去銀行"}
     bare = SimpleNamespace(id="x", date=date(2026, 9, 16), start_time="09:00", end_time="09:30", minutes=None, reason=None)
     assert _flex_dict(bare)["minutes"] == 0 and _flex_dict(bare)["reason"] == ""
+
+
+def test_flex_out_events_do_not_publish_the_reason():
+    """BUG-1：外出的事由是自己記的（同 _leave_events：notes 一律空）——/api/v1/calendar 是全公司看的，
+    任何一把 READ_KEYS 都讀得到，把「回診」這種字吐出去等於公開私事。"""
+    import asyncio
+    from datetime import date
+    from types import SimpleNamespace
+    from routers.api_calendar import _flex_out_events
+
+    row = SimpleNamespace(id="f1", staff_id="s1", staff_name="測試員工", date=date(2026, 9, 16),
+                          start_time="10:00", end_time="12:00", minutes=120, reason="回診")
+
+    class _Res:
+        def scalars(self): return self
+        def all(self): return [row]
+
+    class _Sess:
+        async def execute(self, *a, **k): return _Res()
+
+    out = asyncio.run(_flex_out_events(_Sess(), date(2026, 9, 1), date(2026, 9, 30), {"staff_id": "s2"}))
+    assert len(out) == 1 and out[0]["kind"] == "flex_out"
+    assert out[0]["notes"] == "", "事由不能進全公司的行事曆"
+    assert out[0]["mine"] is False and out[0]["title"] == "測試員工 外出"
