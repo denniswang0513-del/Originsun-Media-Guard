@@ -383,6 +383,23 @@ async def trigger_agent_update(agent_id: str, request: Request, force: bool = Fa
     return await asyncio.to_thread(_trigger)
 
 
+@router.get("/agents/{agent_id}/update_log")
+async def get_agent_update_log(agent_id: str, request: Request, lines: int = 80):
+    """代理端 update_agent.log 的尾段（OTA 回滾時看原因）。管理員。"""
+    _check_admin_agents(request)
+    agent = await _find_agent(agent_id)
+    base_url = agent.get("url", "").rstrip("/")
+
+    def _fetch():
+        req = urllib.request.Request(f"{base_url}/api/v1/update_log?lines={int(lines)}", method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    try:
+        return await asyncio.to_thread(_fetch)
+    except Exception as e:      # noqa: BLE001
+        return {"lines": [], "exists": False, "error": f"連不到代理端：{str(e)[:120]}"}
+
+
 @router.get("/agents/{agent_id}/update_status")
 async def get_agent_update_status(agent_id: str, since: float = 0):
     """Poll remote Agent's update status (simplified — no port 8001 monitor).

@@ -129,6 +129,21 @@ async def get_update_status():
     return {"step": 0, "pct": 0, "msg": "no update history"}
 
 
+@router.get("/api/v1/update_log")
+async def get_update_log(lines: int = 80):
+    """update_agent.log 的尾段（OTA 為什麼失敗）。給主控代理用（/agents/{id}/update_log）；沒檔就空。"""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(base_dir, "update_agent.log")
+    if not os.path.isfile(path):
+        return {"lines": [], "exists": False}
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            tail = f.readlines()[-max(1, min(int(lines), 500)):]
+        return {"lines": [ln.rstrip("\n") for ln in tail], "exists": True}
+    except Exception as e:      # noqa: BLE001
+        return {"lines": [], "exists": True, "error": str(e)[:200]}
+
+
 @router.post("/api/v1/internal/restart")
 async def internal_restart(request: Request):
     """Internal restart endpoint -- called by master server to trigger OTA update + restart.

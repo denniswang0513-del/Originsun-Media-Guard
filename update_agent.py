@@ -32,9 +32,19 @@ DEFAULT_MASTER = "http://192.168.1.107:8000"
 # Logging & Status
 # ────────────────────────────────────────
 
+LOG_FILE = os.path.join(INSTALL_DIR, "update_agent.log")
+
+
 def log(msg: str):
-    ts = time.strftime("%H:%M:%S")
-    print(f"[{ts}] {msg}")
+    """印到 stdout 之外也寫進 update_agent.log（helper 把 stdout 丟 DEVNULL，不落檔就查不到 OTA 為什麼失敗）。"""
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as fp:
+            fp.write(line + "\n")
+    except OSError:
+        pass
 
 
 def write_status(step: int, pct: int, msg: str):
@@ -290,9 +300,13 @@ def run_update(master_url: str) -> int:
                 capture_output=True, text=True, timeout=300,
             )
             if result.returncode != 0:
-                err = result.stderr[:300] if result.stderr else "unknown error"
-                log(f"pip install failed (exit {result.returncode}): {err}")
-                rollback(f"pip 安裝失敗: {err[:100]}")
+                # 🔴 取**尾段**、stderr 沒東西就看 stdout：pip 的 ERROR 在最後、前面常只有「pip 有新版」那條 notice，
+                #    取頭 300 字只會看到 notice（2026-09-15 五台機器回滾時原因全被吃掉）。完整輸出在 update_agent.log。
+                raw = (result.stderr or "").strip() or (result.stdout or "").strip() or "unknown error"
+                lines = [ln for ln in raw.splitlines() if ln.strip() and not ln.startswith("[notice]")]
+                err = "\n".join(lines)[-600:] if lines else raw[-600:]
+                log(f"pip install failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}")
+                rollback(f"pip 安裝失敗: {err[-200:]}")
                 return 1
             log("pip install OK.")
         except subprocess.TimeoutExpired:

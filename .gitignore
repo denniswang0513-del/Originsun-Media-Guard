@@ -41,6 +41,7 @@ job_history.json
 watcher_config.json
 watcher_history.json
 update_status.json
+update_agent.log
 
 # OS
 .DS_Store
