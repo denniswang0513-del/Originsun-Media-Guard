@@ -203,3 +203,8 @@ def test_flex_out_box_inputs_get_the_card_input_styling():
     for page in ("frontend/my.html", "frontend/leave.html"):
         c = repo_src(page)
         assert ".fo-box input {" in c and ".fo-box .inline-row {" in c, page
+        # time 輸入框窄到 ~80px 數字就被切掉（只剩「上午 🕐」）；硬撐一行又會把畫面推寬到 398px（兩種都真機量過）。
+        # 所以給讀得到的下限、寬度不夠就換行。夾在中間的「－」也拿掉了：窄卡換行時它會孤零零留在第一行尾巴。
+        assert ".fo-box input[type=time] { flex: 1 1 118px; min-width: 118px; }" in c, page
+        assert "fo-dash" not in c, page
+    assert "fo-dash" not in js_code_only(repo_src("frontend/js/my/cards-hr.js"))

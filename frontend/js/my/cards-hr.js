@@ -146,7 +146,7 @@ function renderLeave(body) {
         <div class="fo-head"><span class="fo-title">彈性外出</span><span class="fo-rule" id="fo-rule">每日可彈性外出兩小時</span></div>
         <div class="inline-row" style="margin-bottom:6px;"><input type="date" id="fo-date" value="${today}" oninput="foCheck()"></div>
         <div class="inline-row fo-times" style="margin-bottom:6px;">
-            <input type="time" id="fo-a" value="10:00" step="300" oninput="foCheck()"><span class="fo-dash">－</span><input type="time" id="fo-b" value="12:00" step="300" oninput="foCheck()">
+            <input type="time" id="fo-a" value="10:00" step="300" oninput="foCheck()" aria-label="從幾點"><input type="time" id="fo-b" value="12:00" step="300" oninput="foCheck()" aria-label="到幾點">
         </div>
         <div class="inline-row" style="margin-bottom:4px;">
             <input id="fo-reason" placeholder="事由（選填）：去銀行、接小孩" maxlength="80">

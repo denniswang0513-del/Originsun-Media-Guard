@@ -126,9 +126,11 @@
   .fo-box input { width: 100%; border: 1px solid var(--line); border-radius: 2px; padding: 7px 10px;
       font-size: 13px; font-family: inherit; color: var(--ink); background: #fff; outline: none; }
   .fo-box input:focus { border-color: var(--red); }
-  .fo-times { flex-wrap: nowrap; align-items: center; }
-  .fo-box input[type=time] { width: 118px; flex: 0 0 auto; }
-  .fo-dash { color: var(--sub); font-size: 12px; align-self: center; }
+  /* 🔴 時段這列踩過三次（都是真機量到的）：固定寬不准縮 → 結束時間被推到畫面外（380px 時 right=398）；
+     讓它縮 → 縮到 ~80px 時 time 輸入框只剩「上午 🕐」、數字被切掉；夾在中間的「－」吃到 .inline-row > * 的
+     flex:1／min-width:90px → 自己佔掉 90～128px。結論：給輸入框讀得到的下限、不夠就換行。夾在中間的「－」也拿掉了（窄卡換行時它會孤零零留在第一行尾巴）。 */
+  .fo-box .inline-row.fo-times { align-items: center; }
+  .fo-box input[type=time] { flex: 1 1 118px; min-width: 118px; }
   .fo-hint { font-size: 12px; color: var(--sub); min-height: 16px; }
   .fo-hint.ok { color: var(--ok, #15803d); }
   .fo-hint.bad { color: var(--red); }
