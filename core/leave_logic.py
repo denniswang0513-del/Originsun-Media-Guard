@@ -55,6 +55,28 @@ def hm_minutes(hhmm: str) -> int | None:
     return h * 60 + m
 
 
+def hm_text(v) -> str:
+    """'9:00'／' 9:00 '／'09:00:00' → '09:00'；壞格式回空字串。存進 DB 前一律過這支：
+    🔴 存原字串的話 `ORDER BY start_time` 會把 '9:00' 排到 '10:00' 後面（字串比大小），清單與日曆的順序就亂了。"""
+    m = hm_minutes(v)
+    return "" if m is None else f"{m // 60:02d}:{m % 60:02d}"
+
+
+def flex_out_overlaps(existing, start_time: str, end_time: str) -> bool:
+    """existing＝同一天已登記的 [(起, 迄)…]；新的這段跟任何一段重疊就 True。
+    同一段時間登記兩次不會超過每天 2 小時的上限，但等於把額度白燒掉一份，而且日曆上會疊兩條。"""
+    a, b = hm_minutes(start_time), hm_minutes(end_time)
+    if a is None or b is None:
+        return False
+    for s0, e0 in existing or []:
+        c, d = hm_minutes(s0), hm_minutes(e0)
+        if c is None or d is None:
+            continue
+        if a < d and c < b:      # 半開區間：10:00–11:00 與 11:00–12:00 不算重疊
+            return True
+    return False
+
+
 def flex_out_check(start_time: str, end_time: str, used_today: int = 0) -> tuple[int, str]:
     """回 (這筆的分鐘, 錯誤字串)；錯誤字串空＝可以登記。used_today＝同一天已登記的分鐘（一天合計也不能超過 2 小時）。"""
     a, b = hm_minutes(start_time), hm_minutes(end_time)

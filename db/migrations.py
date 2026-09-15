@@ -37,6 +37,9 @@ def rbac_v2_backfill(all_modules_json: str) -> list:
 
 # ── CRM 查詢索引（報價/發票/請款/專案） ─────────────────────────
 CRM_INDEXES = [
+        # 彈性外出（2026-09-16）：同一個人、同一天、同一個起點只能有一列 —— 連點兩次的最後一道（前面還有 advisory lock）。
+        # 新庫由 create_all 照 model 的 UniqueConstraint 建；這條是給**已經有這張表**的庫補的。
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_flex_out_slot ON hr_flex_outings(staff_id, date, start_time)",
         "CREATE INDEX IF NOT EXISTS idx_quote_created ON crm_quotations(created_at)",
         "CREATE INDEX IF NOT EXISTS idx_invoice_issue_status ON crm_invoices(issue_status)",
         "CREATE INDEX IF NOT EXISTS idx_invoice_pay_status ON crm_invoices(payment_status)",

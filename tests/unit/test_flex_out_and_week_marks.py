@@ -28,7 +28,7 @@ def test_flex_out_endpoints_are_own_scope_and_check_the_rule():
         assert ep in src, ep
     create = func_body(src, "async def create_flex_out(")
     assert 'require_bound_staff(request, "me_leave")' in create
-    assert "flex_out_check(body.start_time, body.end_time, used)" in create and "HTTPException(status_code=422, detail=err)" in create
+    assert "flex_out_check(st, et, used)" in create and "HTTPException(status_code=422, detail=err)" in create
     assert "HrFlexOuting.date == day" in create, "同一天已登記的分鐘要加進去算"
     delete = func_body(src, "async def delete_flex_out(")
     assert 'HrFlexOuting.staff_id == ident["staff_id"]' in delete, "只能刪自己的"
@@ -42,9 +42,9 @@ def test_team_week_and_week_marks_carry_kind_and_half_day():
     src = repo_src("routers/api_me.py")
     tw = func_body(src, "async def team_week(")
     assert '"leave_detail": leave_detail' in tw and '"flex_out": flex' in tw
-    assert "leave_detail[d].append(_leave_mark(l))" in tw
+    assert "leave_detail[d].append(_leave_mark(l))" in tw   # 團隊的一週給的是管理視角／同事，照舊帶假別
     mark = func_body(src, "def _leave_mark(")
-    assert '"kind": l.leave_type or "請假", "part": part' in mark
+    assert '"kind": (l.leave_type or "請假") if show_kind else "休假", "part": part' in mark
     wm = func_body(src, "async def week_marks(")
     assert "HrLeaveRequest.staff_id == sid" in wm and "HrFlexOuting.staff_id == sid" in wm, "只有自己的"
     assert 'day_off_fraction(marks) for d, marks in leave.items()' in wm and 'leave_days_total(leave, holidays)' in wm
@@ -208,3 +208,48 @@ def test_flex_out_box_inputs_get_the_card_input_styling():
         assert ".fo-box input[type=time] { flex: 1 1 118px; min-width: 118px; }" in c, page
         assert "fo-dash" not in c, page
     assert "fo-dash" not in js_code_only(repo_src("frontend/js/my/cards-hr.js"))
+
+
+def test_flex_out_time_is_normalised_and_overlaps_are_rejected():
+    """owner 2026-09-16「都修正」：
+    - 存原字串 → ORDER BY start_time 會把 '9:00' 排到 '10:00' 後面（字串比大小），清單與日曆的順序亂掉。
+    - 同一段時間登記兩次不會超過每天 2 小時，但等於白燒一份額度、日曆上疊兩條。"""
+    from core.leave_logic import flex_out_overlaps, hm_text
+    assert hm_text("9:00") == "09:00" and hm_text(" 9:05 ") == "09:05" and hm_text("09:00:00") == "09:00"
+    assert hm_text("10:30") == "10:30" and hm_text("") == "" and hm_text("25:00") == "" and hm_text(None) == ""
+    now = [("10:00", "11:00")]
+    assert flex_out_overlaps(now, "10:30", "11:30") is True
+    assert flex_out_overlaps(now, "09:30", "10:30") is True
+    assert flex_out_overlaps(now, "10:00", "11:00") is True
+    assert flex_out_overlaps(now, "11:00", "12:00") is False      # 半開區間：接著排不算重疊
+    assert flex_out_overlaps(now, "09:00", "10:00") is False
+    assert flex_out_overlaps([], "10:00", "11:00") is False
+
+
+def test_flex_out_create_locks_the_day_and_stores_normalised_times():
+    src = repo_src("routers/api_me.py")
+    create = func_body(src, "async def create_flex_out(")
+    assert "pg_advisory_xact_lock" in create, "先讀再寫要鎖，不然連點兩次各自過關"
+    assert "st, et = hm_text(body.start_time), hm_text(body.end_time)" in src
+    assert "start_time=st, end_time=et" in create and "body.start_time[:5]" not in create
+    assert "flex_out_overlaps(" in create and "這個時段已經登記過了" in create
+    # 資料庫那道
+    assert 'UniqueConstraint("staff_id", "date", "start_time", name="uq_flex_out_slot")' in repo_src("db/models/_workos.py")
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_flex_out_slot" in repo_src("db/migrations.py")
+
+
+def test_week_marks_hides_the_leave_kind_without_the_leave_key():
+    """只有「我的一週」、沒有「假勤」那把的人：格子照樣鎖得住，但不說是哪一種假（假別跟餘額一樣只給假勤那把）。"""
+    src = repo_src("routers/api_me.py")
+    mark = func_body(src, "def _leave_mark(")
+    assert "def _leave_mark(l, show_kind: bool = True)" in src
+    assert '(l.leave_type or "請假") if show_kind else "休假"' in mark
+    wm = func_body(src, "async def week_marks(")
+    assert 'show_kind = payload_grants(payload, "me_leave")' in wm and "_leave_mark(l, show_kind)" in wm
+
+
+def test_full_leave_column_rejects_drag_and_drop_too():
+    """整天休假那一欄的「加一項」換成了「休假日不排」，拖放也要一起擋。"""
+    plan = js_code_only(repo_src("frontend/js/shared/ts-zone/plan.js"))
+    dnd = js_func_body(plan, "export function _planWireDnd(")
+    assert dnd.count('"#z1-plan .pcol:not(.off)"') == 2, "dragover 與 drop 兩處都要擋"

@@ -187,6 +187,7 @@ export function _planWireDnd(host) {
     let dragId = null;
     host.addEventListener("dragstart", (e) => { const c = e.target.closest && e.target.closest("#z1-plan .pcard[draggable='true']"); if (!c) return; dragId = c.dataset.card; c.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
     host.addEventListener("dragend", () => { dragId = null; host.querySelectorAll(".pcol.over, .pcard.dragging").forEach(x => x.classList.remove("over", "dragging")); });
-    host.addEventListener("dragover", (e) => { const col = e.target.closest && e.target.closest("#z1-plan .pcol"); if (!col || !dragId) return; e.preventDefault(); host.querySelectorAll(".pcol.over").forEach(x => x.classList.remove("over")); col.classList.add("over"); });
-    host.addEventListener("drop", (e) => { const col = e.target.closest && e.target.closest("#z1-plan .pcol"); if (!col || !dragId) return; e.preventDefault(); const id = dragId; dragId = null; _planMove(id, col.dataset.day); });
+    // `:not(.off)`＝整天休假的那一欄：按鈕已經換成「休假日不排」，拖放也要一起擋（不然繞過去了）
+    host.addEventListener("dragover", (e) => { const col = e.target.closest && e.target.closest("#z1-plan .pcol:not(.off)"); if (!col || !dragId) return; e.preventDefault(); host.querySelectorAll(".pcol.over").forEach(x => x.classList.remove("over")); col.classList.add("over"); });
+    host.addEventListener("drop", (e) => { const col = e.target.closest && e.target.closest("#z1-plan .pcol:not(.off)"); if (!col || !dragId) return; e.preventDefault(); const id = dragId; dragId = null; _planMove(id, col.dataset.day); });
 }

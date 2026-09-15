@@ -194,11 +194,13 @@ class HrFlexOuting(Base):
     規則正本 core.leave_logic.FLEX_OUT_*；不走請假單（不進時數帳、不進休假總表），只在行事曆／團隊的一週／我的一週標出來。"""
     __tablename__ = "hr_flex_outings"
 
+    __table_args__ = (UniqueConstraint("staff_id", "date", "start_time", name="uq_flex_out_slot"),)
+
     id = Column(String(32), primary_key=True)
     staff_id = Column(String(32), nullable=False, index=True)
     staff_name = Column(String(64), nullable=False, default="")
     date = Column(Date, nullable=False, index=True)
-    start_time = Column(String(5), nullable=False)               # 'HH:MM'
+    start_time = Column(String(5), nullable=False)               # 'HH:MM'（一律 core.leave_logic.hm_text 正規化過）
     end_time = Column(String(5), nullable=False)
     minutes = Column(Integer, nullable=False, default=0)          # end − start（≤ FLEX_OUT_MAX_MINUTES，同一天合計也是）
     reason = Column(Text, nullable=True)
