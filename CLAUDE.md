@@ -1284,6 +1284,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`frontend/js/admin/user-mgmt.js`](frontend/js/admin/user-mgmt.js) | 使用者管理四個分頁：使用者（權限格＋相依說明＋最近授權不足＋以他的角度看）、API Keys、身份範本、公開區 | 前端 `MODULE_LABELS`／`MODULE_HINTS`／`PERM_PARENT` 是鏡射（鍵集由 test_rbac_module_sync 釘）；帳號的 modules 存捆，畫面只畫 `ALL_MODULES`；`_boundStaffOf` 是「綁定人員→身份」唯一算法 |
 | [`core/leave_logic.py`](core/leave_logic.py) | 假勤的**純規則**：工作日／時數換算（8h＝1 天）、credit 餘額與 FIFO 分配、消假模式（free／apply／locked）、提前通知警告、政府行事曆 CSV | 無 I/O；時數一律由起迄／時段算，員工端不收 client 給的 hours（見「不要動的地方」） |
 | [`services/leave_service.py`](services/leave_service.py) | 假勤的 I/O：evaluate（送單前的錯誤／警告／餘額）、核准時從時數帳扣、序列化 | 送單與 preview 走**同一支** `hours_from_body`／`evaluate`，兩條路不能各算一次 |
+| [`services/leave_application.py`](services/leave_application.py) | 請假**申請單**（2026-09-15 三步：日期算小時 → 員工自己挑要扣的假 → 一整張送出、一次核准、核准前可編輯）：inventory（每筆 credit＋病假／事假／公假／婚假／喪假）、evaluate、save（子單重建）、approve（照 `alloc_plan` 扣）、set_status（整張連子單） | 純規則 `fit_items`／`plan_children` 在 core.leave_logic；申請單送出就展開成子單（`hr_leave_requests.application_id`），撞單／保留／日曆都靠子單機制；單張端點對子單一律 409 |
 | [`core/milestone_logic.py`](core/milestone_logic.py) ＋ [`services/milestone_service.py`](services/milestone_service.py) | 每週專案里程碑：週的推導（延自上週／過期／延到下週）、彈窗的週 payload、整批 save | `save_week` 是**整批覆寫**：沒帶的欄位不准寫（舊分頁會清掉別人剛填的）；`_hours_by_project` 只算 `hours>0`（計畫列不算） |
 | `services/timesheet_self.py` 的合併同案（`merge_day`／`undo_merge`） | 同案同分類同階段的列併成一列＋整列快照可復原 | 規則在 `core.hr_logic.merge_plan`（純函式）；沒有專案的列不併；`_SNAP_COLS` 要涵蓋 `Timesheet` 全部欄位，漏一欄復原就靜默丟資料 |
 | [`core/quote_chat.py`](core/quote_chat.py) | 對話式完成報價的**純規則**：組提示（草稿快照／對話歷史／價目／截圖路徑）、把 claude 回的東西正規化成固定形狀、串流中從半截 JSON 撈 reply、模型別名白名單、清圖時把 token 換掉 | 無 I/O；**不決定價格、不算稅**（金額走 `_calc_quotation`）；提示裡不准出現 `internal_cost` |
@@ -1384,10 +1385,12 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   員工自助假別只有 `core/leave_logic.SELF_SERVICE_TYPES`（特休／補休／病假）；病假要附證明（`PROOF_REQUIRED_TYPES`，
   `POST /me/leave/{id}/proof` → 收據根目錄 `_假勤證明/{年月}/`），沒證明核准會 422（`test_leave_proof` 釘）。
   前端 `accept` 屬性**不能寫 `image/*`**：`_srcscan.js_code_only` 會把 `/*` 當註解起點，整支檔後半被吃掉、函式體測試找不到函式。
-  「挑幾天（不連續）」（2026-09-15）：資料模型不變、**一天一張單**；`/me/leave/batch` 同一 commit 全建或全不建。
-  對餘額的削法只住 `core/leave_logic.fit_days_to_balance`（依日期順序用完、卡在中間那天改上午／時段、後面的 0 小時），
-  `evaluate(check_balance=False)` 給 batch 用，別在單日 evaluate 裡再擋一次。前端「挑幾天」模式由 `#lv-multi` 是否展開決定，
-  不看有沒有挑到日期（沒挑就送會送到藏起來的起迄日 — /polish BUG-1）。
+  **申請單（2026-09-15 定案，取代同日稍早的批次送多天／削成剩下小時）**：員工端只有 `/me/leave/applications*`＋
+  `/me/leave/inventory`；假別不是下拉，由挑的假決定；挑的順序＝扣的順序、最後一筆只扣還需要的（`fit_items`）；
+  展開成子單時同種假一張、換種拆上午／下午或時段（`plan_children`）。核准照子單 `alloc_plan` 扣、要附證明沒附 422。
+  單張端點（`/hr/leave/{id}/approve|reject|cancel_decide`、PUT、DELETE）碰到 `application_id` 非空的子單一律 409（`_get_leave(standalone=True)`）。
+  庫存的 `_legacy_pending` 只算 `application_id IS NULL` 的待審單 —— 子單已在 reserved／exclude 裡，再算會扣兩遍（真機抓到）。
+  手機版 `m/views/leave.js` 仍是舊的單張單（`/me/leave`）。
 - **報價單版面**：owner 逐項拍板過（無公司抬頭區塊、無上下色帶、灰表頭、總額無粗線、備註在結算下方、
   頁尾只留數字）。要調版面先開示範頁比對，別直接改模板。
 - **`core.quotation_pdf.PDF_MARGIN` 與模板 `@page` 必須一致**：模板還用它算「單頁時簽章貼底」的
