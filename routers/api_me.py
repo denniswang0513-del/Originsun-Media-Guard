@@ -822,8 +822,7 @@ def _flex_dict(f) -> dict:
 async def week_marks(request: Request, start: str = ""):
     """「我的一週」要標的東西（owner 2026-09-15）：自己這週已核准的假（假別／半天）＋自己的彈性外出。
     鑰匙＝我的一週或假勤任一把（都在自己的範圍）；要綁人員檔案。"""
-    check_admin_or_module(request, "me_week_plan", "me_leave", ME_ZONE_MASTER)
-    ident = await require_bound_staff(request, "me_week_plan", "me_leave", ME_ZONE_MASTER)
+    ident = await require_bound_staff(request, "me_week_plan", "me_leave", ME_ZONE_MASTER)   # 這支自己會先 check_admin_or_module
     if (start or "").strip() and parse_ymd(start) is None:
         raise HTTPException(status_code=422, detail="start 需為 YYYY-MM-DD")
     week = week_start_of(parse_ymd(start).date() if (start or "").strip() else date.today())
