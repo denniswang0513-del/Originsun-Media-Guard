@@ -504,9 +504,17 @@ async def delete_leave(leave_id: str, request: Request):
     factory = db_factory_or_503()
     async with factory() as session:
         obj = await _get_leave(session, leave_id, standalone=True)
+        event_id = obj.google_event_id
         await leave_service.release_allocations(session, obj.id)
         await session.delete(obj)
         await session.commit()
+    if event_id:
+        # 硬刪後日曆上那顆事件會變孤兒（2026-09-15 重匯蔡念栩的假時發現）；best-effort 一起拿掉
+        try:
+            from services import calendar_sync
+            await calendar_sync.delete_events([event_id], "leave")
+        except Exception:      # noqa: BLE001
+            pass
     return {"deleted": leave_id}
 
 

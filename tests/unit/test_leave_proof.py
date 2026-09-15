@@ -97,3 +97,10 @@ def test_credit_not_usable_before_granted_on():
     assert [x["id"] for x in usable_credits(c, kind="特休", on=date(2026, 12, 1))] == ["c1"]
     assert balance(c, kind="特休", on=date(2026, 9, 15))["available"] == 0
     assert balance(c, kind="特休", on=date(2026, 12, 15))["available"] == 24
+
+
+def test_admin_hard_delete_also_removes_the_calendar_event():
+    """2026-09-15 重匯歷史假時發現：DELETE /hr/leave/{id} 硬刪後 Google 日曆那顆事件變孤兒。"""
+    body = func_body(repo_src("routers/api_hr.py"), "async def delete_leave(")
+    assert "event_id = obj.google_event_id" in body and 'calendar_sync.delete_events([event_id], "leave")' in body
+    assert body.index("await session.commit()") < body.index("delete_events("), "先 commit 再刪日曆（同 _calendar_sync_leave 的規矩）"
