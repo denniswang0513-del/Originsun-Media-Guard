@@ -35,7 +35,8 @@ def test_batch_endpoints_are_self_service_and_all_or_nothing():
     ev = func_body(svc, "async def evaluate_batch(")
     assert "normalize_dates(batch.dates)" in ev
     assert "_DayBody(batch, d), today=today, holidays=holidays, self_service=self_service" in ev, "每天各走一次 evaluate（自助假別限制也套）"
-    assert 'if free < total:' in ev and '_err("insufficient"' in ev, "總時數對餘額"
+    assert 'if free < total and not any(p["errors"] for p in per):' in ev and '_err("insufficient"' in ev, "總時數對餘額"
+    assert ev.index("if batch.leave_type in LEDGER_TYPES:") < ev.index("bal = (await balances_for("), "走時數帳的假別一律回 balance（挑的過程要看得到還剩多少）"
     assert "if w[\"code\"] not in seen_w" in ev, "同一種警告整批只講一次"
 
 
@@ -54,3 +55,12 @@ def test_card_switches_between_range_and_picked_dates():
     toggle = js_func_body(js, "function lvToggleMulti(")
     assert 'if (!on) _lvDates = [];' in toggle, "關掉挑幾天就清空，不會殘留到起迄模式"
     assert "×" in js and "✕" not in js and "❌" not in js, "拿掉鈕用 ×，不用 emoji"
+
+
+def test_preview_shows_remaining_hours_while_picking():
+    """owner 2026-09-15「挑的過程可以直接知道還剩下多少小時」：試算那行下面「可用 → 這次 → 還剩／超過」，特休補休都有、單日與挑幾天都有。"""
+    js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
+    fn = js_func_body(js, "function _lvBalanceLine(")
+    assert "b.available - (b.reserved || 0)" in fn and "free - Number(d.hours || 0)" in fn
+    assert "超過" in fn and "還剩" in fn
+    assert "_lvBalanceLine(p.leave_type, d)" in js_func_body(js, "async function lvPreview(")

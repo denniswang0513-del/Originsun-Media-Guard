@@ -238,6 +238,17 @@ function lvPreviewSoon() {
     clearTimeout(_lvPreviewTimer);
     _lvPreviewTimer = setTimeout(lvPreview, 300);
 }
+// 走時數帳的假別（特休／補休）：挑的過程直接看到「可用多少 → 這次用多少 → 還剩多少」（owner 2026-09-15）
+function _lvBalanceLine(type, d) {
+    const b = d.balance;
+    if (!b || typeof b.available !== "number") return "";
+    const free = Math.round((b.available - (b.reserved || 0)) * 100) / 100;
+    const left = Math.round((free - Number(d.hours || 0)) * 100) / 100;
+    const tail = left < 0
+        ? `<b style="color:var(--red);">超過 ${_lvH(-left)} 小時</b>`
+        : `還剩 <b>${_lvH(left)} 小時（${_lvDays(left)} 天）</b>`;
+    return `<div>${esc(type)}可用 ${_lvH(free)} 小時${b.reserved ? `（已扣掉待審保留 ${_lvH(b.reserved)}）` : ""} → 這次 ${_lvH(d.hours)} 小時 → ${tail}</div>`;
+}
 function _lvMsgs(list, color) {
     return (list || []).map(x => `<div style="color:${color};">${esc(x.msg || x.code || x)}</div>`).join("");
 }
@@ -255,7 +266,7 @@ async function lvPreview() {
     // 挑幾天：每一天自己的錯誤（撞單、假日）標上日期，整批的（時數不夠）照常
     const perDay = multi ? (d.dates || []).flatMap(x => x.errors.map(e => ({ msg: `${x.date.slice(5).replace("-", "/")}：${e.msg}` }))) : [];
     const errs = [...perDay, ...(d.errors || [])], warns = d.warnings || [];
-    host.innerHTML = `<div>${multi ? `挑了 ${_lvDates.length} 天，` : ""}共 ${_lvH(d.hours)} 小時（${_lvDays(d.hours)} 天）</div>${_lvMsgs(warns, "#b45309")}${_lvMsgs(errs, "var(--red)")}`;
+    host.innerHTML = `<div>${multi ? `挑了 ${_lvDates.length} 天，` : ""}共 ${_lvH(d.hours)} 小時（${_lvDays(d.hours)} 天）</div>${_lvBalanceLine(p.leave_type, d)}${_lvMsgs(warns, "#b45309")}${_lvMsgs(errs, "var(--red)")}`;
     const btn = $("lv-submit");
     if (btn) btn.disabled = errs.length > 0;
 }

@@ -265,10 +265,11 @@ async def evaluate_batch(session, staff_id: str, staff_name: str, batch, today: 
                 seen_w.add(w["code"]); warnings.append(w)
     errors = []
     bal = None
-    if batch.leave_type in LEDGER_TYPES and not any(p["errors"] for p in per):
+    if batch.leave_type in LEDGER_TYPES:
+        # 餘額一律回（owner 2026-09-15「挑的過程可以直接知道還剩下多少小時」）；不足的錯誤只在每一天都沒錯時才講，免得跟單日錯誤疊在一起
         bal = (await balances_for(session, [staff_id], today))[staff_id][batch.leave_type]
         free = round(bal["available"] - bal["reserved"], 2)
-        if free < total:
+        if free < total and not any(p["errors"] for p in per):
             errors.append(_err("insufficient", f"{batch.leave_type}不足：這 {len(days)} 天共 {total:g} 小時，可用 {free:g} 小時（含待審保留 {bal['reserved']:g}）"))
     return {"hours": total, "days": hours_to_days(total), "dates": per, "errors": errors, "warnings": warnings, "balance": bal}
 
