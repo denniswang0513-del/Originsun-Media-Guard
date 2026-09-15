@@ -149,6 +149,18 @@ def _kill_port(port: int):
 PIP_TIMEOUT = 600   # 原本 300：慢的機器抓 Pillow 那 7MB 就超過，被殺在一半反而留下半套（見 Phase 5 的自救）
 
 
+def _drop_transitional_pip_ini():
+    """2.5.28 過渡用的 python_embed\pip.ini（no-deps，讓舊 update_agent 不碰半套的 pillow）：這支新的 update_agent 會自救，
+    不需要它了，裝套件前先拿掉（只刪帶我們標記的那份，別動人家自己放的 pip.ini）。"""
+    path = os.path.join(INSTALL_DIR, "python_embed", "pip.ini")
+    try:
+        if os.path.isfile(path) and "originsun-ota-transitional" in open(path, encoding="utf-8", errors="replace").read():
+            os.remove(path)
+            log("Removed transitional python_embed/pip.ini")
+    except OSError as e:
+        log(f"Warning: could not remove transitional pip.ini: {e}")
+
+
 def _pip_install(req_file: str):
     return subprocess.run(
         [PYTHON, "-m", "pip", "install", "-q", "-r", req_file, "--no-warn-script-location"],
@@ -326,6 +338,7 @@ def run_update(master_url: str) -> int:
         return 1
 
     # ── Phase 5: PIP ──
+    _drop_transitional_pip_ini()
     req_file = os.path.join(INSTALL_DIR, "requirements_agent.txt")
     if os.path.isfile(req_file):
         log("Phase 5: Installing requirements...")

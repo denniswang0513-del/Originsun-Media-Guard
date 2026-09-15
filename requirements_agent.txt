@@ -19,7 +19,8 @@ xxhash==3.6.0
 requests==2.32.5
 psutil==7.2.2
 Jinja2==3.1.6
-Pillow==12.3.0
+# Pillow==12.3.0  ← 2.5.28 過渡暫時拿掉（五台機器 pillow 半套、pip 一碰就死；pip.ini no-deps 也不會經由 pillow-heif 去碰它）。
+#                    下一版放回去，新 update_agent 會自救 force-reinstall。
 croniter==6.2.2
 
 # ── Google Auth (for login) ──

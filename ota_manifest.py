@@ -59,6 +59,10 @@ INSTALL_EXTRA_FILES = [
     "ffmpeg.exe",
     "ffprobe.exe",
     "0225_requirements.txt",
+    # 🔴 2.5.28 過渡（2026-09-15，用推送修五台半套 pillow 的機器）：pip 讀 sys.prefix 底下的 pip.ini，放 `[install] no-deps`
+    #    讓**舊** update_agent 的 `pip install -r` 不去碰 pillow。下一版（Pillow 放回清單）要把這行拿掉，並從主控
+    #    C:\OriginsunAgent\python_embed\pip.ini 刪檔；機器上那份由新 update_agent 自己刪。
+    "python_embed/pip.ini",
 ]
 
 # ── Extra dirs only in full install ZIP ──
