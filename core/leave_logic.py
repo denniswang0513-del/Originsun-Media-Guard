@@ -203,7 +203,8 @@ MAX_BATCH_DATES = 31        # 一次最多挑幾天（owner 2026-09-15「一次�
 # 公假整個拿掉（owner 2026-09-15「我沒有公假 所以可以把公假都先拿掉」）；要用再加回 ALL_LEAVE_TYPES／RECORD_META。
 PICKABLE_RECORD_TYPES = ("病假", "事假", "婚假", "喪假")
 SICK_TYPE = "病假"
-SICK_FREE_HOURS = SICK_CAP_DAYS and HOURS_PER_DAY   # 規章「請假 1 天給薪」：病假折抵時，第 1 天（8h）留給病假、給薪
+# 規章（owner 2026-09-15）：病假 1 天給薪、不扣假；2 天以上半薪 → 折抵＝總天數 ÷ 2（2 天扣 1、3 天扣 1.5、30 天扣 15）。
+SICK_FREE_HOURS = HOURS_PER_DAY   # 1 天（含）以內：全薪、折抵 0
 RECORD_META = {
     "病假": {"proof": True, "paid": "1 天給薪、之後半薪", "cap_days": SICK_CAP_DAYS},
     "事假": {"proof": False, "paid": "不給薪"},
@@ -233,14 +234,23 @@ def fit_items(picks: list, needed_hours: float) -> tuple:
     # 吃不完的再回病假（半薪）。沒挑病假、或只挑病假沒挑折抵的假 → 照一般順序填（下面 order 就是原順序）。
     sick_i = next((i for i, p in enumerate(picks) if p.get("kind") == SICK_TYPE and not p.get("credit_id")), None)
     has_credit = any(p.get("credit_id") for p in picks)
-    order = list(range(len(picks)))
     if sick_i is not None and has_credit:
-        free = round(min(remain, _cap(takes[sick_i]), float(SICK_FREE_HOURS)), 2)
-        takes[sick_i]["take"] = free
-        remain = round(remain - free, 2)
-        order = [i for i in order if i != sick_i] + [sick_i]   # 病假沉到最後，讓折抵的假先吃
+        # 病假折抵：1 天以內全薪＝折抵 0；超過 1 天半薪＝折抵一半（總時數 ÷ 2）。折抵的假先吃、上限就是這一半，
+        # 其餘（含另一半病假、與折抵的假吃不完的）都回病假。
+        offset_cap = 0.0 if remain <= float(SICK_FREE_HOURS) else round(remain / 2.0, 2)
+        budget = offset_cap
+        for i in [j for j in range(len(picks)) if j != sick_i]:
+            p = takes[i]
+            take = round(min(_cap(p) - p["take"], budget, remain), 2)
+            if take > 0:
+                p["take"] = round(p["take"] + take, 2)
+                remain = round(remain - take, 2)
+                budget = round(budget - take, 2)
+        takes[sick_i]["take"] = round(min(_cap(takes[sick_i]), remain), 2)
+        remain = round(remain - takes[sick_i]["take"], 2)
+        return takes, max(remain, 0.0)
 
-    for i in order:
+    for i in range(len(picks)):
         p = takes[i]
         room = round(_cap(p) - p["take"], 2)
         take = round(min(room, remain), 2)

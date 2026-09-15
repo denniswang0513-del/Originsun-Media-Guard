@@ -321,7 +321,7 @@ async function lvPreview() {
     const dayLines = (d.children || []).length && !errs.length
         ? `<div style="margin-top:4px;">這張單每一天扣的是：</div>` + (d.children || []).map(c => `<div>${esc(c.date.slice(5).replace("-", "/"))}　${esc(c.kind)} ${_lvH(c.hours)} h${c.part && c.part !== "all" ? `（${esc(LV_PART_LABEL(c.part))}${c.part === "range" ? " " + esc(c.start_time) + "–" + esc(c.end_time) : ""}）` : ""}</div>`).join("")
         : "";
-    const sickNote = d.sick_offset ? `<div style="color:#b45309;">病假第 1 天給薪；其餘用特休／補休折抵（全薪）—— 系統照規章自動分。</div>` : "";
+    const sickNote = d.sick_offset ? `<div style="color:#b45309;">病假 1 天給薪不扣假；超過的算半薪，用特休／補休折抵一半（全薪）—— 系統照規章自動分。</div>` : "";
     host.innerHTML = takeLines + sickNote + dayLines + _lvMsgs(warns, "#b45309") + _lvMsgs(errs, "var(--red)");
     _lvProofNeeded = !!d.proof_required;
     const pw = $("lv-proof-wrap");
