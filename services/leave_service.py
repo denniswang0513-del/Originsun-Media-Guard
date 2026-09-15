@@ -289,9 +289,14 @@ async def staff_leave_summary(session, staff, today: date | None = None, limit: 
     rows = (await session.execute(
         select(HrLeaveRequest).where(HrLeaveRequest.staff_id == staff.id)
         .order_by(HrLeaveRequest.start_date.desc().nulls_last(), HrLeaveRequest.created_at.desc()).limit(limit))).scalars().all()
+    # 待審件數：申請單一張算一件（子單不各算），沒有申請單的單張單各算一件
     pending = (await session.execute(
         select(func.count(HrLeaveRequest.id)).where(HrLeaveRequest.staff_id == staff.id)
-        .where(HrLeaveRequest.status.in_(("待審", "消假待審"))))).scalar() or 0
+        .where(HrLeaveRequest.status.in_(("待審", "消假待審"))).where(HrLeaveRequest.application_id.is_(None)))).scalar() or 0
+    from db.models import HrLeaveApplication
+    pending += (await session.execute(
+        select(func.count(HrLeaveApplication.id)).where(HrLeaveApplication.staff_id == staff.id)
+        .where(HrLeaveApplication.status.in_(("待審", "消假待審"))))).scalar() or 0
     return {
         "staff_id": staff.id, "staff_name": staff.name, "today": today.isoformat(),
         "balances": bal,

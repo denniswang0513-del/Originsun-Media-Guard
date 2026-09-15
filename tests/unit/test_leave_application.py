@@ -151,3 +151,26 @@ def test_no_emoji_in_new_ui_text():
     import re
     for f in ("frontend/js/my/cards-hr.js", "frontend/tabs/hr_leave/hr_leave.js"):
         assert not re.search("[\\U0001F300-\\U0001FAFF☀-➿]", js_code_only(repo_src(f))), f
+
+
+def test_polish_single_row_endpoints_refuse_application_children():
+    """/polish 2026-09-15 BUG-1：單張端點動到申請單的子單會讓申請單與子單狀態對不上 → 409，整張走 applications。"""
+    hr = repo_src("routers/api_hr.py")
+    assert 'if standalone and getattr(obj, "application_id", None):' in func_body(hr, "async def _get_leave(")
+    for fn in ("async def approve_leave(", "async def reject_leave(", "async def decide_cancel(", "async def update_leave(", "async def delete_leave("):
+        assert "_get_leave(session, leave_id, standalone=True)" in func_body(hr, fn), fn
+
+
+def test_polish_approve_only_live_credits_and_rebuild_keeps_proof():
+    """BUG-2：核准只能扣現在可用的 credit（到期／未生效同 allocate 的判準）；BUG-3：編輯重建子單要帶著證明。"""
+    svc = repo_src("services/leave_application.py")
+    ap = func_body(svc, "async def approve(")
+    assert "usable_credits(all_credits, on=today or date.today())" in ap and "cid not in live" in ap
+    assert "proof_path=app.proof_path" in func_body(svc, "async def save(")
+
+
+def test_polish_pending_count_counts_applications_once():
+    """BUG-4：一張 3 天的申請單在工作台「請假待審 N 件」原本算 3 件。"""
+    svc = repo_src("services/leave_service.py")
+    body = func_body(svc, "async def staff_leave_summary(")
+    assert "HrLeaveRequest.application_id.is_(None)" in body and "func.count(HrLeaveApplication.id)" in body

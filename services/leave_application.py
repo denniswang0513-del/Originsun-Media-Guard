@@ -257,7 +257,7 @@ async def save(session, staff, username: str, body, ev: dict, app: HrLeaveApplic
             leave_type=ch["kind"], start_date=midnight_of(as_date(ch["date"])), end_date=midnight_of(as_date(ch["date"])),
             hours=ch["hours"], days=hours_to_days(ch["hours"]), part=ch["part"],
             start_time=ch["start_time"] if ch["part"] == "range" else None, end_time=ch["end_time"] if ch["part"] == "range" else None,
-            reason=app.reason, status="待審", created_by=username,
+            reason=app.reason, status="待審", created_by=username, proof_path=app.proof_path,   # 編輯重建也帶著證明
             alloc_plan=json.dumps(ch.get("allocations") or [], ensure_ascii=False),
         ))
     return app
@@ -272,15 +272,19 @@ async def approve(session, app: HrLeaveApplication, actor: str, today: date | No
         kinds = "／".join(sorted({i["kind"] for i in items if RECORD_META.get(i.get("kind"), {}).get("proof")}))
         raise HTTPException(status_code=422, detail=f"{kinds}要先附上證明（員工在假勤頁上傳）才能核准")
     children = await children_of(session, app.id)
-    credits = {c["id"]: c for c in (await leave_service.credits_for(session, [app.staff_id])).get(app.staff_id, [])}
+    all_credits = (await leave_service.credits_for(session, [app.staff_id])).get(app.staff_id, [])
+    credits = {c["id"]: c for c in all_credits}
+    live = {c["id"] for c in usable_credits(all_credits, on=today or date.today())}    # 可用、已生效、未到期（同 allocate 的判準）
     need: dict = {}
     for ch in children:
         for cid, h in _loads(ch.alloc_plan, []):
             need[cid] = need.get(cid, 0.0) + float(h)
     for cid, h in need.items():
         c = credits.get(cid)
-        if c is None or c["status"] != "可用" or round(c["remaining"], 2) + 1e-9 < h:
-            raise HTTPException(status_code=422, detail=f"「{(c or {}).get('reason') or cid}」剩 {(c or {}).get('remaining', 0):g} 小時、要扣 {h:g}，先到時數帳看一下")
+        if c is None or cid not in live:
+            raise HTTPException(status_code=422, detail=f"「{(c or {}).get('reason') or cid}」現在不能扣（到期、還沒生效或不是可用），請員工改挑別筆")
+        if round(c["remaining"], 2) + 1e-9 < h:
+            raise HTTPException(status_code=422, detail=f"「{c.get('reason') or cid}」剩 {c.get('remaining', 0):g} 小時、要扣 {h:g}，先到時數帳看一下")
     now = _now()
     for ch in children:
         for cid, h in _loads(ch.alloc_plan, []):

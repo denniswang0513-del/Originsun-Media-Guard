@@ -52,10 +52,14 @@ async def _notify_result(result: str, d: dict, note: str = "") -> None:
         pass
 
 
-async def _get_leave(session, leave_id: str) -> HrLeaveRequest:
+async def _get_leave(session, leave_id: str, standalone: bool = False) -> HrLeaveRequest:
+    """`standalone=True`：這支端點只能動沒有申請單的單張單 —— 申請單的子單（application_id 非空）要整張走
+    /leave/applications/{id}/…，單獨核准／退回／改／刪一天會讓申請單和子單狀態對不上（/polish 2026-09-15 BUG-1）。"""
     obj = await session.get(HrLeaveRequest, leave_id)
     if obj is None:
         raise HTTPException(status_code=404, detail="找不到請假單")
+    if standalone and getattr(obj, "application_id", None):
+        raise HTTPException(status_code=409, detail="這是申請單裡的一天，請到待核佇列對整張申請單操作")
     return obj
 
 
@@ -356,7 +360,7 @@ async def approve_leave(leave_id: str, request: Request):
     payload = check_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
-        obj = await _get_leave(session, leave_id)
+        obj = await _get_leave(session, leave_id, standalone=True)
         parts = await leave_service.approve_request(session, obj, _actor(payload))
         await session.commit()
         await session.refresh(obj)
@@ -385,7 +389,7 @@ async def reject_leave(leave_id: str, body: LeaveReject, request: Request):
         raise HTTPException(status_code=422, detail="退回要填理由")
     factory = db_factory_or_503()
     async with factory() as session:
-        obj = await _get_leave(session, leave_id)
+        obj = await _get_leave(session, leave_id, standalone=True)
         if obj.status != "待審":
             raise HTTPException(status_code=409, detail=f"此單狀態是「{obj.status}」，只有待審可退回（消假走 cancel_decide）")
         obj.status = "已退回"
@@ -406,7 +410,7 @@ async def decide_cancel(leave_id: str, body: LeaveCancelDecide, request: Request
     note = (body.note or "").strip()
     factory = db_factory_or_503()
     async with factory() as session:
-        obj = await _get_leave(session, leave_id)
+        obj = await _get_leave(session, leave_id, standalone=True)
         if obj.status != "消假待審":
             raise HTTPException(status_code=409, detail=f"此單狀態是「{obj.status}」，不是消假待審")
         if body.approve:
@@ -457,7 +461,7 @@ async def update_leave(leave_id: str, body: LeaveUpdate, request: Request):
         raise HTTPException(status_code=422, detail="PUT 不改狀態：核准／退回／消假請走 approve、reject、cancel_decide")
     factory = db_factory_or_503()
     async with factory() as session:
-        obj = await _get_leave(session, leave_id)
+        obj = await _get_leave(session, leave_id, standalone=True)
         holidays = await leave_service.holidays_map(session)
         field_keys = ("leave_type", "start_date", "end_date", "days", "part", "start_time", "end_time", "hours")
         touching = [k for k in field_keys if k in data and data[k] is not None]
@@ -499,7 +503,7 @@ async def delete_leave(leave_id: str, request: Request):
     check_admin_or_module(request, "hr_leave")
     factory = db_factory_or_503()
     async with factory() as session:
-        obj = await _get_leave(session, leave_id)
+        obj = await _get_leave(session, leave_id, standalone=True)
         await leave_service.release_allocations(session, obj.id)
         await session.delete(obj)
         await session.commit()
