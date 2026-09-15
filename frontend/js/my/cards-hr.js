@@ -125,7 +125,7 @@ function renderLeave(body) {
     </div>`;
     html += (LV.requests || []).slice(0, LV_RECENT_MAX).map(_lvRow).join("");
     body.innerHTML = html;
-    _lvDates = [];   // 重畫（送單後）就回到起迄模式
+    _lvDates = []; _lvTrim = {};   // 重畫（送單後）就回到起迄模式
     const form = $("lv-form");
     form.addEventListener("input", (e) => { if (e.target.id !== "lv-reason") lvPreviewSoon(); });
     form.addEventListener("change", (e) => {
@@ -207,13 +207,16 @@ function _lvPayload() {
     };
 }
 // ── 挑幾天（不連續）：owner 2026-09-15。選了日期就走 /me/leave/batch（一天一張單）；清空就回到起迄那組 ──
-const _lvMulti = () => _lvDates.length > 0;
+// 🔴 「挑幾天」開著就算挑幾天模式，不看有沒有挑到日期：原本用 _lvDates.length 判定，開了模式、還沒挑、直接按送出
+//    會把被藏起來的起迄日期送出去（/polish 2026-09-15 BUG-1）。沒挑日期時試算與送出都要說「先挑日期」。
+const _lvMultiOn = () => { const b = $("lv-multi"); return !!b && b.style.display !== "none"; };
+const _lvMulti = () => _lvMultiOn();
 function lvToggleMulti() {
     const box = $("lv-multi"), on = box.style.display === "none";
     box.style.display = on ? "" : "none";
     $("lv-start").parentElement.style.display = on ? "none" : "";
     $("lv-multi-toggle").textContent = on ? "改回起迄日期" : "挑幾天（不連續）";
-    if (!on) _lvDates = [];
+    if (!on) { _lvDates = []; _lvTrim = {}; }
     _lvDrawChips(); lvPreviewSoon();
 }
 function lvAddDate() {
@@ -263,6 +266,7 @@ async function lvPreview() {
     const multi = _lvMulti();
     const p = multi ? _lvBatchPayload() : _lvPayload();
     if (!multi && !p.start_date) { host.innerHTML = ""; return; }
+    if (multi && !_lvDates.length) { host.innerHTML = `<div style="color:var(--sub);">先挑日期（按「加入這天」）</div>`; const b = $("lv-submit"); if (b) b.disabled = true; return; }
     let d;
     try { d = await mjson(multi ? "/api/v1/me/leave/batch/preview" : "/api/v1/me/leave/preview", { method: "POST", body: JSON.stringify(p) }); }
     catch (e) { if (seq === _lvPreviewSeq) host.innerHTML = `<div style="color:var(--red);">${esc(e.message)}</div>`; return; }
@@ -281,6 +285,7 @@ async function applyLeave() {
     errEl.style.display = "none";
     const reason = ($("lv-reason").value || "").trim();
     if (!reason) { show("請填事由"); $("lv-reason").focus(); return; }
+    if (_lvMulti() && !_lvDates.length) { show("還沒挑日期"); return; }
     const proofFile = _lvNeedsProof($("lv-type").value) ? ($("lv-proof").files || [])[0] : null;
     if (_lvNeedsProof($("lv-type").value) && !proofFile) { show("病假要附證明（照片或 PDF）"); return; }
     // 送出中鎖住：連點兩下會建出兩張一模一樣的待審單（手機版的 withBusy 早就有，桌機這條原本沒有）

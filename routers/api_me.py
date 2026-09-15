@@ -346,7 +346,8 @@ async def preview_my_leave_batch(body: MeLeaveBatch, request: Request):
 @router.post("/leave/batch")
 async def apply_my_leave_batch(body: MeLeaveBatch, request: Request):
     """挑幾天送單：一天一張待審單（管理端逐張核准；每張各自扣時數帳），同一個 transaction 全建或全不建。
-    任何一天有 errors、或總時數超過餘額 → 422，一張都不建。回 {requests:[…], hours, days, warnings}。"""
+    任何一天有 errors（撞單／假日／餘額用完後還多挑）→ 422，一張都不建；餘額只剩一部分的那天照試算削成剩下的小時。
+    回 {requests:[…], hours, days, warnings, trimmed}。"""
     ident = await require_bound_staff(request, "me_leave")
     if not (body.reason or "").strip():
         raise HTTPException(status_code=422, detail="事由必填（規章：提出時簡述理由）")

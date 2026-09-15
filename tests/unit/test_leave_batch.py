@@ -55,7 +55,7 @@ def test_card_switches_between_range_and_picked_dates():
     assert '"/api/v1/me/leave/batch"' in apply and '"/api/v1/me/leave"' in apply
     assert "_lvDates = [];" in render, "重畫（送單後）就回到起迄模式"
     toggle = js_func_body(js, "function lvToggleMulti(")
-    assert 'if (!on) _lvDates = [];' in toggle, "關掉挑幾天就清空，不會殘留到起迄模式"
+    assert 'if (!on) { _lvDates = []; _lvTrim = {}; }' in toggle, "關掉挑幾天就清空（連削過的標記），不會殘留到起迄模式"
     assert "×" in js and "✕" not in js and "❌" not in js, "拿掉鈕用 ×，不用 emoji"
 
 
@@ -88,3 +88,13 @@ def test_last_day_is_trimmed_to_the_remaining_hours():
     js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
     assert "只休 ${_lvH(t.hours)} 小時" in js_func_body(js, "function _lvBalanceLine(")
     assert "_lvTrim = Object.fromEntries((d.trimmed || []).map(t => [t.date, t.hours])); _lvDrawChips();" in js_func_body(js, "async function lvPreview(")
+
+
+def test_multi_mode_without_dates_never_submits_the_hidden_range():
+    """/polish 2026-09-15 BUG-1：開了「挑幾天」還沒挑日期就按送出，原本會把藏起來的起迄日期送出去。
+    模式由那塊有沒有打開決定，不看有沒有挑到日期；沒挑時試算與送出都擋。"""
+    js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
+    assert 'const _lvMulti = () => _lvMultiOn();' in js and 'b.style.display !== "none"' in js
+    assert 'if (multi && !_lvDates.length) {' in js_func_body(js, "async function lvPreview(")
+    assert 'if (_lvMulti() && !_lvDates.length) { show("還沒挑日期"); return; }' in js_func_body(js, "async function applyLeave(")
+    assert "_lvDates = []; _lvTrim = {};" in js_func_body(js, "function renderLeave("), "送單後重畫連削過的標記一起清"
