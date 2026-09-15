@@ -93,6 +93,9 @@ Invoke-RestMethod "http://127.0.0.1:8001/api/v1/publish/status?job_id=$job" -Hea
 ```
 
 - `status:done` → 生產主控已跑新版 + smoke 通過，繼續 Step 3。
+- ⚠ deploy_to_prod **只複製碼、不跑 pip**（2026-09-15 Pillow 升版時發現：8000 跑的還是舊套件）。這版有動 `requirements_agent.txt`／
+  `requirements_server.txt` 的話，接著手動 `C:\OriginsunAgent\python_embed\python.exe -m pip install -r requirements_agent.txt`，
+  再 `POST 127.0.0.1:8000/api/v1/internal/restart`（header `X-Internal-Key: originsun-internal-restart`）讓 8000 重新載入。機隊那邊 update_agent 會自己跑 pip。
 - `status:error` → 讀 `message`/`log`。deploy_to_prod 有內建 smoke + **自動回滾**（重啟後不健康/版本不符會自動還原舊碼），生產通常已回舊版；**停止**回報，不推機隊。手動還原：`POST http://127.0.0.1:8001/api/v1/deploy_to_prod/rollback`。
 
 > ⚠️ 這步會重啟同事正在用的生產主控 8000，並對**生產 DB** 跑 startup migration（create_all / `ALTER … IF NOT EXISTS` / 種子）。純新增/冪等，但確實動生產 —— dev 機發版務必先確認可短暫中斷。有內建備份+回滾，比手動 robocopy 安全，**不需**另外手動備份。

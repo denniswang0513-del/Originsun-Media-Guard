@@ -1,5 +1,5 @@
 {
-  "version": "2.5.23",
+  "version": "2.5.24",
   "build_date": "2026-09-15",
-  "notes": "假勤：請補休規章卡；員工自助只開特休／補休／病假、病假要附證明（放 NAS 收據根目錄 _假勤證明）；額度生效日"
+  "notes": "維護：Pillow 升 12.3.0（CVE）；OTA 清掉 db/models.py、core/finance_logic.py 拆檔殘骸；官網 astro 7"
 }
