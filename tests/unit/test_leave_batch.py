@@ -35,7 +35,9 @@ def test_batch_endpoints_are_self_service_and_all_or_nothing():
     ev = func_body(svc, "async def evaluate_batch(")
     assert "normalize_dates(batch.dates)" in ev
     assert "_DayBody(batch, d), today=today, holidays=holidays, self_service=self_service" in ev, "每天各走一次 evaluate（自助假別限制也套）"
-    assert 'if free < total and not any(p["errors"] for p in per):' in ev and '_err("insufficient"' in ev, "總時數對餘額"
+    assert "check_balance=False" in ev, "單日不各自擋餘額，整批依日期順序把餘額用完"
+    assert "fit_days_to_balance([(p[\"date\"], p[\"hours\"], p[\"part\"]) for p in ok], free)" in ev
+    assert "餘額到這天已經用完，這天塞不下（請拿掉）" in ev and '_err("trimmed"' in ev
     assert ev.index("if batch.leave_type in LEDGER_TYPES:") < ev.index("bal = (await balances_for("), "走時數帳的假別一律回 balance（挑的過程要看得到還剩多少）"
     assert "if w[\"code\"] not in seen_w" in ev, "同一種警告整批只講一次"
 
@@ -64,3 +66,25 @@ def test_preview_shows_remaining_hours_while_picking():
     assert "b.available - (b.reserved || 0)" in fn and "free - Number(d.hours || 0)" in fn
     assert "超過" in fn and "還剩" in fn
     assert "_lvBalanceLine(p.leave_type, d)" in js_func_body(js, "async function lvPreview(")
+
+
+def test_last_day_is_trimmed_to_the_remaining_hours():
+    """owner 2026-09-15「挑了 3 天 8 小時、實際只要休 20 個小時，那需要有一天假剩下 4 小時」：
+    依日期順序把餘額用完，卡在中間那天只休剩下的小時（4h→上午；其他→09:00 起的時段），後面塞不下的 hours=0。"""
+    from core.leave_logic import fit_days_to_balance
+    days = [("2026-12-01", 8, "all"), ("2026-12-02", 8, "all"), ("2026-12-03", 8, "all")]
+    out = fit_days_to_balance(days, 20)
+    assert [(o["date"], o["hours"], o["part"]) for o in out] == [("2026-12-01", 8, "all"), ("2026-12-02", 8, "all"), ("2026-12-03", 4.0, "am")]
+    assert out[2]["trimmed_from"] == 8 and out[0]["trimmed_from"] is None
+    out = fit_days_to_balance(days, 18.5)
+    assert (out[2]["hours"], out[2]["part"], out[2]["start_time"], out[2]["end_time"]) == (2.5, "range", "09:00", "11:30")
+    out = fit_days_to_balance(days, 8)
+    assert [o["hours"] for o in out] == [8, 0.0, 0.0], "餘額用完後面的天 0 小時（呼叫端標錯要拿掉）"
+    assert fit_days_to_balance([("2026-12-01", 4, "pm")], 2)[0]["start_time"] == "13:00", "下午選的時段從 13:00 起"
+    assert fit_days_to_balance([("2026-12-01", 8, "all")], 4.4)[0]["hours"] == 4.0, "0.5 步進往下取"
+    me = repo_src("routers/api_me.py")
+    apply = func_body(me, "async def apply_my_leave_batch(")
+    assert 'leave_service._DayBody(body, p["date"], p)' in apply and "只剩 {p['hours']:g} 小時（原本 {p['trimmed_from']:g}）／" in apply
+    js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
+    assert "只休 ${_lvH(t.hours)} 小時" in js_func_body(js, "function _lvBalanceLine(")
+    assert "_lvTrim = Object.fromEntries((d.trimmed || []).map(t => [t.date, t.hours])); _lvDrawChips();" in js_func_body(js, "async function lvPreview(")

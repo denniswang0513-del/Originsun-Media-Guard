@@ -21,6 +21,7 @@ const LV_PART_FALLBACK = { all: "整天", am: "上午", pm: "下午", range: "�
 const LV_PART_LABEL = (code) => ((LV && LV.vocab && LV.vocab.part_labels) || LV_PART_FALLBACK)[code] || code || "";
 let LV = null;                 // 最近一次 summary
 let _lvDates = [];             // 「挑幾天」模式選好的日期（空＝用起迄那組）
+let _lvTrim = {};              // 其中被削成剩下小時的那天 {date: hours}（試算回的）
 let _lvPreviewTimer = null;    // preview 去抖
 let _lvPreviewSeq = 0;         // 舊回應不蓋新回應
 function cardLeave(bound) {
@@ -221,11 +222,11 @@ function lvAddDate() {
     _lvDates.push(d); _lvDates.sort();
     _lvDrawChips(); lvPreviewSoon();
 }
-function lvRemoveDate(d) { _lvDates = _lvDates.filter(x => x !== d); _lvDrawChips(); lvPreviewSoon(); }
+function lvRemoveDate(d) { _lvDates = _lvDates.filter(x => x !== d); delete _lvTrim[d]; _lvDrawChips(); lvPreviewSoon(); }
 function _lvDrawChips() {
     const host = $("lv-multi-chips");
     if (!host) return;
-    host.innerHTML = _lvDates.map(d => `<span class="pill" style="text-transform:none;letter-spacing:0;font-size:12px;">${esc(d.slice(5).replace("-", "/"))}
+    host.innerHTML = _lvDates.map(d => `<span class="pill" style="text-transform:none;letter-spacing:0;font-size:12px;${d in _lvTrim ? "border-color:#fcd34d;color:#b45309;" : ""}">${esc(d.slice(5).replace("-", "/"))}${d in _lvTrim ? ` ${_lvH(_lvTrim[d])}h` : ""}
         <button type="button" onclick="lvRemoveDate('${esc(d)}')" style="border:0;background:none;cursor:pointer;color:var(--sub);padding:0 0 0 4px;font-size:12px;" title="拿掉">×</button></span>`).join("")
         || `<span style="font-size:12px;color:var(--sub);">還沒挑日期</span>`;
 }
@@ -244,9 +245,12 @@ function _lvBalanceLine(type, d) {
     if (!b || typeof b.available !== "number") return "";
     const free = Math.round((b.available - (b.reserved || 0)) * 100) / 100;
     const left = Math.round((free - Number(d.hours || 0)) * 100) / 100;
+    const tr = d.trimmed || [];
     const tail = left < 0
         ? `<b style="color:var(--red);">超過 ${_lvH(-left)} 小時</b>`
-        : `還剩 <b>${_lvH(left)} 小時（${_lvDays(left)} 天）</b>`;
+        : (tr.length
+            ? `<b style="color:#b45309;">剛好用完；${tr.map(t => `${esc(t.date.slice(5).replace("-", "/"))} 只休 ${_lvH(t.hours)} 小時`).join("、")}</b>`
+            : `還剩 <b>${_lvH(left)} 小時（${_lvDays(left)} 天）</b>`);
     return `<div>${esc(type)}可用 ${_lvH(free)} 小時${b.reserved ? `（已扣掉待審保留 ${_lvH(b.reserved)}）` : ""} → 這次 ${_lvH(d.hours)} 小時 → ${tail}</div>`;
 }
 function _lvMsgs(list, color) {
@@ -263,7 +267,8 @@ async function lvPreview() {
     try { d = await mjson(multi ? "/api/v1/me/leave/batch/preview" : "/api/v1/me/leave/preview", { method: "POST", body: JSON.stringify(p) }); }
     catch (e) { if (seq === _lvPreviewSeq) host.innerHTML = `<div style="color:var(--red);">${esc(e.message)}</div>`; return; }
     if (seq !== _lvPreviewSeq) return;
-    // 挑幾天：每一天自己的錯誤（撞單、假日）標上日期，整批的（時數不夠）照常
+    _lvTrim = Object.fromEntries((d.trimmed || []).map(t => [t.date, t.hours])); _lvDrawChips();   // 削過的那天在標籤上也標
+    // 挑幾天：每一天自己的錯誤（撞單、假日、餘額用完）標上日期，整批的照常
     const perDay = multi ? (d.dates || []).flatMap(x => x.errors.map(e => ({ msg: `${x.date.slice(5).replace("-", "/")}：${e.msg}` }))) : [];
     const errs = [...perDay, ...(d.errors || [])], warns = d.warnings || [];
     host.innerHTML = `<div>${multi ? `挑了 ${_lvDates.length} 天，` : ""}共 ${_lvH(d.hours)} 小時（${_lvDays(d.hours)} 天）</div>${_lvBalanceLine(p.leave_type, d)}${_lvMsgs(warns, "#b45309")}${_lvMsgs(errs, "var(--red)")}`;

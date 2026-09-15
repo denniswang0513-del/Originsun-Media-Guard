@@ -17,7 +17,7 @@ from sqlalchemy import func, select  # type: ignore
 from core.hr_logic import day_iso, leave_to_dict, midnight_of, parse_ymd, tw_day
 from core.leave_logic import (ACTIVE_STATUSES, ALL_LEAVE_TYPES, HOURS_PER_DAY, LEDGER_TYPES,
                               PARTS, SICK_CAP_DAYS, InsufficientHours, allocate, annual_days_for,
-                              PROOF_REQUIRED_TYPES, SELF_SERVICE_TYPES, normalize_dates,
+                              PROOF_REQUIRED_TYPES, SELF_SERVICE_TYPES, fit_days_to_balance, normalize_dates,
                               as_date, balance, cancel_mode, check_hours_step, hours_to_days, in_crew, notice_warning,
                               overlaps, working_hours)
 from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
@@ -181,7 +181,7 @@ def hours_from_body(body, holidays) -> tuple:
 
 
 async def evaluate(session, staff_id: str, staff_name: str, body, today: date | None = None,
-                   exclude_id: str = "", holidays=None, self_service: bool = False) -> dict:
+                   exclude_id: str = "", holidays=None, self_service: bool = False, check_balance: bool = True) -> dict:
     """{hours, days, errors:[{code,msg}], warnings:[{code,msg}], balance}。
     errors：bad_type／bad_range／overlap／insufficient；warnings：notice_short／shoot_conflict／sick_cap。
     `self_service=True`（員工自己送／預覽）：假別只認 SELF_SERVICE_TYPES，其餘回 bad_type。"""
@@ -215,7 +215,7 @@ async def evaluate(session, staff_id: str, staff_name: str, body, today: date | 
         errors.append(_err("overlap", f"與你 {day_iso(c.start_date)}～{day_iso(c.end_date)} 的{c.leave_type}（{c.status}）重疊"))
 
     bal = None
-    if leave_type in LEDGER_TYPES:
+    if leave_type in LEDGER_TYPES and check_balance:      # 挑幾天（evaluate_batch）自己依日期順序把餘額用完，單日不各自擋
         bal = (await balances_for(session, [staff_id], today, exclude_id))[staff_id][leave_type]
         free = round(bal["available"] - bal["reserved"], 2)
         if free < hours:
@@ -236,9 +236,13 @@ async def evaluate(session, staff_id: str, staff_name: str, body, today: date | 
 class _DayBody:
     """batch 的一天：把 MeLeaveBatch 攤成 evaluate／hours_from_body／build_request 吃的單日 body。"""
 
-    def __init__(self, batch, day: str):
+    def __init__(self, batch, day: str, fit: dict | None = None):
+        """`fit`＝fit_days_to_balance 那一列：被削成剩下小時的那天，時段／起訖用它的。"""
         self.leave_type, self.start_date, self.end_date = batch.leave_type, day, day
-        self.part, self.start_time, self.end_time = batch.part, batch.start_time, batch.end_time
+        if fit and fit.get("trimmed_from"):
+            self.part, self.start_time, self.end_time = fit["part"], fit["start_time"], fit["end_time"]
+        else:
+            self.part, self.start_time, self.end_time = batch.part, batch.start_time, batch.end_time
         self.reason = getattr(batch, "reason", None)
         self.hours = None
         self.days = None
@@ -246,8 +250,9 @@ class _DayBody:
 
 async def evaluate_batch(session, staff_id: str, staff_name: str, batch, today: date | None = None, holidays=None,
                          self_service: bool = True) -> dict:
-    """挑幾天送單的試算：{hours, days, dates:[{date, hours, errors, warnings}], errors:[整批的], warnings, balance}。
-    每一天各走一次 evaluate（撞單、假日、時段規則都在那裡）；再把**總時數**對一次餘額 —— 單日各自夠、加起來不夠的情況只有這裡看得到。"""
+    """挑幾天送單的試算：{hours, days, dates:[{date, hours, part, start_time, end_time, trimmed_from, errors, warnings}],
+    errors:[整批的], warnings, balance, trimmed:[…]}。每一天各走一次 evaluate（撞單、假日、時段規則都在那裡，餘額不在那裡擋）；
+    再依日期順序把餘額用完（core.leave_logic.fit_days_to_balance）：卡在中間那天只休剩下的小時，完全塞不下的標錯要拿掉。"""
     today = today or date.today()
     holidays = holidays if holidays is not None else await holidays_map(session)
     try:
@@ -257,21 +262,40 @@ async def evaluate_batch(session, staff_id: str, staff_name: str, batch, today: 
     per, total, seen_w = [], 0.0, set()
     warnings = []
     for d in days:
-        ev = await evaluate(session, staff_id, staff_name, _DayBody(batch, d), today=today, holidays=holidays, self_service=self_service)
-        per.append({"date": d, "hours": ev["hours"], "errors": ev["errors"], "warnings": ev["warnings"]})
+        ev = await evaluate(session, staff_id, staff_name, _DayBody(batch, d), today=today, holidays=holidays, self_service=self_service,
+                            check_balance=False)
+        per.append({"date": d, "hours": ev["hours"], "part": (batch.part or "all"), "start_time": batch.start_time, "end_time": batch.end_time,
+                    "trimmed_from": None, "errors": ev["errors"], "warnings": ev["warnings"]})
         total += float(ev["hours"] or 0)
         for w in ev["warnings"]:
             if w["code"] not in seen_w:          # 「不到一週」這種每天都會講一次，整批只講一次
                 seen_w.add(w["code"]); warnings.append(w)
     errors = []
     bal = None
+    trimmed = []
     if batch.leave_type in LEDGER_TYPES:
-        # 餘額一律回（owner 2026-09-15「挑的過程可以直接知道還剩下多少小時」）；不足的錯誤只在每一天都沒錯時才講，免得跟單日錯誤疊在一起
+        # 餘額一律回（owner 2026-09-15「挑的過程可以直接知道還剩下多少小時」）。超過不擋整批：依日期順序把餘額用完，
+        # 卡在中間那天只休剩下的小時（owner 同日「挑了 3 天 8 小時、實際只要休 20 個小時，那需要有一天假剩下 4 小時」）
         bal = (await balances_for(session, [staff_id], today))[staff_id][batch.leave_type]
         free = round(bal["available"] - bal["reserved"], 2)
-        if free < total and not any(p["errors"] for p in per):
-            errors.append(_err("insufficient", f"{batch.leave_type}不足：這 {len(days)} 天共 {total:g} 小時，可用 {free:g} 小時（含待審保留 {bal['reserved']:g}）"))
-    return {"hours": total, "days": hours_to_days(total), "dates": per, "errors": errors, "warnings": warnings, "balance": bal}
+        ok = [p for p in per if not p["errors"]]
+        fitted = {f["date"]: f for f in fit_days_to_balance([(p["date"], p["hours"], p["part"]) for p in ok], free)}
+        for p in ok:
+            f = fitted[p["date"]]
+            if f["trimmed_from"] is None:
+                continue
+            if f["hours"] <= 0:
+                p["errors"].append(_err("insufficient", f"{batch.leave_type}餘額到這天已經用完，這天塞不下（請拿掉）"))
+                p["hours"] = 0.0
+            else:
+                p.update({"hours": f["hours"], "part": f["part"], "start_time": f["start_time"], "end_time": f["end_time"], "trimmed_from": f["trimmed_from"]})
+                trimmed.append({"date": p["date"], "hours": f["hours"], "from": f["trimmed_from"], "part": f["part"]})
+        total = sum(float(p["hours"] or 0) for p in per)
+        for t in trimmed:
+            lab = {"am": "上午", "pm": "下午"}.get(t["part"], "時段")
+            warnings.append(_err("trimmed", f"{batch.leave_type}只剩 {t['hours']:g} 小時：{t['date'][5:].replace('-', '/')} 這天只休 {t['hours']:g} 小時（{lab}），不是整天"))
+    return {"hours": total, "days": hours_to_days(total), "dates": per, "errors": errors, "warnings": warnings, "balance": bal,
+            "trimmed": trimmed}
 
 
 def build_request(staff_id: str, staff_name: str, body, hours: float, part: str, created_by: str) -> HrLeaveRequest:

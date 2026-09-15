@@ -198,6 +198,34 @@ def workdays_between(start: date, end: date, holidays=None) -> list:
 MAX_BATCH_DATES = 31        # 一次最多挑幾天（owner 2026-09-15「一次挑好幾個不連續的日期」）
 
 
+def fit_days_to_balance(days: list, free_hours: float) -> list:
+    """挑幾天對餘額（owner 2026-09-15「挑了 3 天 8 小時、實際只要休 20 個小時，那需要有一天假剩下 4 小時」）：
+    `days`＝[(date, hours, part)] 依日期順序把餘額用完；塞得下的照原樣，卡在中間那天只休剩下的小時（改成上午／時段），
+    後面完全塞不下的 hours=0（呼叫端標錯要員工拿掉）。回 [{date, hours, part, start_time, end_time, trimmed_from}]。
+    剩下的小時照 0.5 步進；4 小時就用「上午」（下午選的用下午），其他用時段 09:00 起（下午 13:00 起）。"""
+    out, left = [], float(free_hours or 0)
+    for d, h, part in days:
+        h = float(h or 0)
+        if h <= left + 1e-9:
+            out.append({"date": d, "hours": h, "part": part, "start_time": None, "end_time": None, "trimmed_from": None})
+            left -= h
+            continue
+        keep = int(left * 2) / 2                      # 0.5 步進，往下取
+        if keep <= 0:
+            out.append({"date": d, "hours": 0.0, "part": part, "start_time": None, "end_time": None, "trimmed_from": h})
+            continue
+        base = 13 * 60 if part == "pm" else 9 * 60
+        if keep == 4 and part != "range":
+            row = {"date": d, "hours": 4.0, "part": "pm" if part == "pm" else "am", "start_time": None, "end_time": None, "trimmed_from": h}
+        else:
+            end = base + int(keep * 60)
+            row = {"date": d, "hours": keep, "part": "range", "start_time": f"{base // 60:02d}:{base % 60:02d}",
+                   "end_time": f"{end // 60:02d}:{end % 60:02d}", "trimmed_from": h}
+        out.append(row)
+        left = 0.0
+    return out
+
+
 def normalize_dates(dates) -> list:
     """挑日期送單：去重、排序、都要是 YYYY-MM-DD；空或超過 MAX_BATCH_DATES raise ValueError。回 ISO 字串清單。"""
     out = set()

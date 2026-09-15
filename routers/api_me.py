@@ -359,7 +359,10 @@ async def apply_my_leave_batch(body: MeLeaveBatch, request: Request):
             raise HTTPException(status_code=422, detail="；".join(dict.fromkeys(e["msg"] for e in bad)))
         objs = []
         for p in ev["dates"]:
-            day_body = leave_service._DayBody(body, p["date"])
+            # 餘額只剩一部分的那天：用試算削過的時段（上午／時段），事由前面標明，員工與管理端都看得出來
+            day_body = leave_service._DayBody(body, p["date"], p)
+            if p.get("trimmed_from"):
+                day_body.reason = f"{body.leave_type}只剩 {p['hours']:g} 小時（原本 {p['trimmed_from']:g}）／{(body.reason or '').strip()}"
             hours, part = leave_service.hours_from_body(day_body, holidays)
             obj = leave_service.build_request(ident["staff_id"], ident["staff"].name, day_body, hours, part, ident["username"])
             session.add(obj)
@@ -378,7 +381,7 @@ async def apply_my_leave_batch(body: MeLeaveBatch, request: Request):
         )
     except Exception:
         pass
-    return {"requests": out, "hours": ev["hours"], "days": ev["days"], "warnings": ev["warnings"]}
+    return {"requests": out, "hours": ev["hours"], "days": ev["days"], "warnings": ev["warnings"], "trimmed": ev["trimmed"]}
 
 
 async def _cancel_my_leave(leave_id: str, request: Request, note: str) -> dict:
