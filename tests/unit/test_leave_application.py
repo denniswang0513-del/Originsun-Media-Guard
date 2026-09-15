@@ -3,7 +3,7 @@
 
 - 純規則 core.leave_logic：fit_items（挑的假依順序填滿需要的小時、最後一筆只扣還需要的、挑不夠回 remain）、
   plan_children（鋪到每一天：同種假一張、換種拆上午／下午或時段）。
-- I/O services.leave_application：inventory（每筆 credit＋病假／事假／公假／婚假／喪假）、evaluate、save（子單重建）、
+- I/O services.leave_application：inventory（每筆 credit＋病假／事假／婚假／喪假；公假還沒規劃，owner 2026-09-15 拿掉）、evaluate、save（子單重建）、
   approve（照 alloc_plan 扣、要附證明沒附 422）、set_status（整張連子單）。
 - 端點：/me/leave/inventory、/me/leave/applications[/preview|/{id}|/{id}/cancel|/{id}/proof]（本人）；
   /hr/leave/applications（LEAVE_VIEWERS 看）、/{id}/approve|reject|cancel_decide（管理員）。
@@ -62,7 +62,8 @@ def test_plan_children_merges_same_kind_and_splits_kind_changes():
 
 def test_record_types_and_meta():
     from core.leave_logic import ALL_LEAVE_TYPES, PICKABLE_RECORD_TYPES, RECORD_META, record_item_id
-    assert PICKABLE_RECORD_TYPES == ("病假", "事假", "公假", "婚假", "喪假")
+    assert PICKABLE_RECORD_TYPES == ("病假", "事假", "婚假", "喪假"), "公假還沒規劃（owner 2026-09-15），員工挑不到"
+    assert "公假" not in RECORD_META
     assert set(PICKABLE_RECORD_TYPES) <= set(ALL_LEAVE_TYPES) and "其他" not in PICKABLE_RECORD_TYPES
     assert RECORD_META["病假"]["proof"] and RECORD_META["病假"]["cap_days"] == 30
     assert RECORD_META["事假"]["proof"] is False and "不給薪" in RECORD_META["事假"]["paid"]

@@ -343,7 +343,7 @@ async def _my_leave_or_404(session, leave_id: str, staff_id: str):
 
 @router.get("/leave/inventory")
 async def my_leave_inventory(request: Request, exclude: str = ""):
-    """第 2 步的清單：自己的每一筆假（credit 各批＋病假／事假／公假／婚假／喪假）與還能挑幾小時。編輯時帶 exclude=自己那張。"""
+    """第 2 步的清單：自己的每一筆假（credit 各批＋病假／事假／婚假／喪假）與還能挑幾小時。編輯時帶 exclude=自己那張。"""
     from services import leave_application
     ident = await require_bound_staff(request, "me_leave")
     factory = db_factory_or_503()
@@ -444,7 +444,7 @@ async def cancel_my_application(app_id: str, body: LeaveCancel, request: Request
 
 @router.post("/leave/applications/{app_id}/proof")
 async def upload_my_application_proof(app_id: str, request: Request, file: UploadFile = File(...)):
-    """整張申請單一份證明（病假／公假／婚假／喪假）；同 /leave/{id}/proof 的黑名單、上限、放的位置。"""
+    """整張申請單一份證明（病假／婚假／喪假）；同 /leave/{id}/proof 的黑名單、上限、放的位置。"""
     import asyncio
     import re as _re
     from core.drive_map import to_canonical_path

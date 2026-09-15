@@ -244,7 +244,7 @@
 - 2026-09-15 owner「這裡改特休、補修就好；病假需要上傳文件」：員工自助（工作台卡／假勤頁／手機）假別只開 `SELF_SERVICE_TYPES = 特休／補休／病假`（vocab `self_service_types`；管理端代登仍是整份）。病假（`PROOF_REQUIRED_TYPES`）送單時要附證明：單建好後 `POST /me/leave/{id}/proof`（multipart），檔案放收據根目錄 `_假勤證明/{年月}/{日期}_{姓名}_{假別}_{id8}.ext`（生產＝NAS Archive/00_零用金收據，同零用金收據／福委會單據），DB 存 canonical UNC 在 `hr_leave_requests.proof_path`；看檔 `/me/leave/{id}/proof`（本人）／`/hr/leave/{id}/proof`（管理層）。沒證明的病假管理員按核准會 422（`leave_service.approve_request`）；清單上掛「缺證明，補傳」。額度 `granted_on` 還沒到的 credit 不可扣（`usable_credits`）。
 - 2026-09-15 owner 定案的**三步申請單**（取代同日稍早的「批次送多天」與「最後一天削成剩下小時」——那兩個是看錯方向，已拿掉）：
   1. **日期**：起迄（後端展開工作日）或挑幾天（不連續）→ 算出「需要幾小時」（每一天同一組時段）。
-  2. **從自己的假裡挑要扣的**（`GET /me/leave/inventory`）：特休／補休每一筆 credit 各一列（available＝剩餘−待審申請單挑走的−舊待審單保留）＋病假（年上限、要附證明）／事假（不給薪）／公假／婚假／喪假（要附證明）。勾的順序＝扣的順序；`core.leave_logic.fit_items` 依序填滿需要的小時，**挑超過最後一筆只扣還需要的部分**、挑不夠回「還差 X 小時」。
+  2. **從自己的假裡挑要扣的**（`GET /me/leave/inventory`）：特休／補休每一筆 credit 各一列（available＝剩餘−待審申請單挑走的−舊待審單保留）＋病假（年上限、要附證明）／事假（不給薪）／婚假／喪假（要附證明）。公假還沒規劃，不在清單（owner 2026-09-15）。勾的順序＝扣的順序；`core.leave_logic.fit_items` 依序填滿需要的小時，**挑超過最後一筆只扣還需要的部分**、挑不夠回「還差 X 小時」。
   3. **一整張申請單送出**（`POST /me/leave/applications`；`hr_leave_applications`）：同時展開成子單（`hr_leave_requests`，一天一種假一張、`application_id` 指回來、`alloc_plan` 記指定扣哪幾筆；`core.leave_logic.plan_children`：同種假一張、換種拆上午／下午或時段），撞單／保留時數／病假上限／日曆都照子單機制走。**核准前員工可編輯**（`PUT`，子單全刪重建）／撤回；管理員在人事分頁**一次核准整張**（`POST /hr/leave/applications/{id}/approve`：照 alloc_plan 扣、要附證明沒附 422、子單逐張上 Google 日曆）、退回、消假決定都整張。清單上申請單一列一張，沒有申請單的舊單（匯入的、手機送的）照舊一列一筆。手機版仍是舊的單張單。
 - 手機 `frontend/m/`：新分頁「假勤」（`views/leave.js`）：同三個數字＋請假表單（同 preview）＋清單；走 `/api/v1/me/leave/*`，只 import `./shell.js`／`../ui.js`。
 

@@ -92,7 +92,7 @@ async def _legacy_pending(session, staff_id: str) -> dict:
 
 async def inventory(session, staff_id: str, today: date | None = None, exclude_app_id: str = "") -> list:
     """員工自己的假（第 2 步清單）：走時數帳的每一筆 credit（特休／補休各批，available＝剩餘−待審申請單挑走的）＋
-    不走時數帳的假別（病假有年上限、事假不給薪、公假／婚假／喪假要附證明）。順序：credit 先到期先排，再記錄型假別。"""
+    不走時數帳的假別（病假有年上限、事假不給薪、婚假／喪假要附證明；公假還沒規劃，不在清單）。順序：credit 先到期先排，再記錄型假別。"""
     today = today or date.today()
     reserved = await _reserved_by_pending(session, staff_id, exclude_app_id)
     credits = (await leave_service.credits_for(session, [staff_id])).get(staff_id, [])

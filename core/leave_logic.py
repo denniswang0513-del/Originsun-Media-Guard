@@ -200,11 +200,11 @@ MAX_BATCH_DATES = 31        # 一次最多挑幾天（owner 2026-09-15「一次�
 
 # ── 申請單（owner 2026-09-15 三步：日期算小時 → 自己挑要扣的假 → 一整張單送出、一次核准、核准前可編輯）────────
 # 第 2 步的清單除了特休／補休的每一筆 credit，還有這幾種不走時數帳的假別；meta：要不要附證明、給不給薪、年上限（天）。
-PICKABLE_RECORD_TYPES = ("病假", "事假", "公假", "婚假", "喪假")
+# 公假不在清單裡（owner 2026-09-15「我們還沒有公假的規劃，可以把公假移除」）；管理端代登仍認 ALL_LEAVE_TYPES。
+PICKABLE_RECORD_TYPES = ("病假", "事假", "婚假", "喪假")
 RECORD_META = {
     "病假": {"proof": True, "paid": "1 天給薪、之後半薪", "cap_days": SICK_CAP_DAYS},
     "事假": {"proof": False, "paid": "不給薪"},
-    "公假": {"proof": True, "paid": "給薪"},
     "婚假": {"proof": True, "paid": "給薪", "cap_days": 8},
     "喪假": {"proof": True, "paid": "給薪"},
 }

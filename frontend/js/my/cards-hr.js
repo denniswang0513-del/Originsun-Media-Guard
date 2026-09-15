@@ -412,7 +412,7 @@ async function cancelLeaveApp(id, mode) {
         else { const d = await r.json().catch(() => ({})); alert((typeof d.detail === "string" && d.detail) || "撤回失敗"); }
     } catch (_) {}
 }
-// ── 證明：申請單一份（病假／公假／婚假／喪假）；舊單照舊走 /me/leave/{id}/proof ──
+// ── 證明：申請單一份（病假／婚假／喪假）；舊單照舊走 /me/leave/{id}/proof ──
 function _lvAuthHeaders() {
     const h = {}; const tok = localStorage.getItem(TOKEN_KEY);
     if (tok) h["Authorization"] = "Bearer " + tok;
