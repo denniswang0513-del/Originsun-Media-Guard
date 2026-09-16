@@ -35,6 +35,12 @@ function fmtWan(n) {
     // 四捨五入到 0 的負數不要寫成「−0 萬」
     return (n < 0 && v > 0 ? '−' : '') + v.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) + unit;
 }
+/** 小數 → 百分比字串：保留兩位、去尾零。🔴 只留一位的話 3.25% 會顯示 3.3，
+ *  而輸入框的值就是下一次送出的值 —— 存第二次就真的變成 3.3%（設定被自己的顯示吃掉）。 */
+function fmtPctInput(v) {
+    const n = (Number(v) || 0) * 100;
+    return n.toFixed(2).replace(/\.?0+$/, '');
+}
 /** 月數 → 「9.1 個月」；null → — */
 function fmtMonths(m) {
     if (m == null || isNaN(m)) return '—';
@@ -528,10 +534,12 @@ function _fire(d) {
     if (!f || !f.by_rate) return '';
     const st = STATE_PILL[f.state] ? f.state : 'na';
     const cfg = _cfg().fire || {};
-    const pct = (v) => (Math.round((Number(v) || 0) * 1000) / 10).toFixed(1);
-    const rates = Object.entries(f.by_rate).map(([r, v]) => `
+    // 選了 3.25% 這種不在清單上的數字時補一張卡；不然三張卡都不亮、跟上面的大數字對不起來
+    const shown = { ...f.by_rate };
+    if (!Object.keys(shown).some((r) => Number(r) === Number(f.withdrawal_rate))) shown[String(f.withdrawal_rate)] = f.allowed;
+    const rates = Object.entries(shown).sort((a, b) => Number(a[0]) - Number(b[0])).map(([r, v]) => `
         <div class="fire-k${Number(r) === Number(f.withdrawal_rate) ? ' on' : ''}">
-            <div class="t">提領率 ${pct(r)}%${Number(r) === Number(f.withdrawal_rate) ? '（判定用）' : ''}</div>
+            <div class="t">提領率 ${fmtPctInput(r)}%${Number(r) === Number(f.withdrawal_rate) ? '（判定用）' : ''}</div>
             <div class="v ft-num">$${fmtNum(v)}</div>
             <div class="s">${Number(r) <= 0.03 ? '撐 50 年以上、股票比重高' : (Number(r) < 0.04 ? '提早退休常用' : '經典 4% 法則，30 年')}</div>
         </div>`).join('');
@@ -541,14 +549,14 @@ function _fire(d) {
     <div class="ft-strip fire ${st}">
         <div class="fire-head">
             <div><div class="ft-eyebrow">每月可以花</div>
-                <div class="ft-big"><span class="n tone-${st === 'ok' ? 'g' : st === 'warn' ? 'a' : st === 'bad' ? 'r' : 'na'}">${fmtWan(f.allowed).replace(' 萬', '')}</span><span class="u">萬</span></div>
+                <div class="ft-big"><span class="n tone-${st === 'ok' ? 'g' : st === 'warn' ? 'a' : st === 'bad' ? 'r' : 'na'}">${fmtWan(f.allowed)}</span></div>
                 <div class="ft-formula">你現在每月花 <span class="ft-num">$${fmtNum(f.spend)}</span>（含不工作後自付的健保、國保 $${fmtNum(f.self_pay)}）</div></div>
             <div class="fire-rates">${rates}</div>
         </div>
         <div class="fire-lines">${(f.lines || []).map((l) => `<div class="line"><span>${esc(l[0])}</span><span>${fmtLine(l, f)}</span></div>`).join('')}</div>
         <div class="verdict"><span class="pill ${st}">${STATE_PILL[st]}</span> ${esc(f.verdict || '')}</div>
         <div class="ft-war" style="margin-top:12px;">
-            <label>提領率 %<input class="crm-input" id="ft-f-rate" type="number" min="1" max="10" step="0.25" value="${pct(cfg.withdrawal_rate ?? 0.035)}"></label>
+            <label>提領率 %<input class="crm-input" id="ft-f-rate" type="number" min="1" max="10" step="0.25" value="${fmtPctInput(cfg.withdrawal_rate ?? 0.035)}"></label>
             <label>出生年<input class="crm-input" id="ft-f-birth" type="number" min="1900" max="2100" step="1" value="${fmtNum(cfg.birth_year || 0).replace(/,/g, '')}"></label>
             <label>撐到幾歲<input class="crm-input" id="ft-f-until" type="number" min="40" max="120" step="1" value="${fmtNum(cfg.until_age || 90)}"></label>
             <label>退休後每月其他收入（勞保年金、租金）<input class="crm-input" id="ft-f-extra" type="number" min="0" step="1000" value="${fmtNum(cfg.extra_monthly || 0).replace(/,/g, '')}"></label>
@@ -566,7 +574,6 @@ function _growth(d) {
     const g = d.projection || {};
     const rows = g.rows || [];
     if (!rows.length) return '';
-    const pct = (v) => Math.round((Number(v) || 0) * 1000) / 10;
     const max = Math.max(...rows.map((r) => Number(r.nominal) || 0), 1);
     const bars = rows.map((r) => {
         const hN = Math.max(2, (Number(r.nominal) || 0) / max * 100);
@@ -582,8 +589,8 @@ function _growth(d) {
         <div class="ft-glegend"><span><i class="n"></i>名目金額</span><span><i class="r"></i>今天的購買力（扣通膨）</span></div>
     </div>
     <div class="ft-war" style="margin-top:10px;max-width:520px;">
-        <label>年報酬 %<input class="crm-input" id="ft-g-rate" type="number" step="0.5" value="${pct(g.rate)}"></label>
-        <label>通膨 %<input class="crm-input" id="ft-g-infl" type="number" min="0" step="0.5" value="${pct(g.inflation)}"></label>
+        <label>年報酬 %<input class="crm-input" id="ft-g-rate" type="number" step="0.5" value="${fmtPctInput(g.rate)}"></label>
+        <label>通膨 %<input class="crm-input" id="ft-g-infl" type="number" min="0" step="0.5" value="${fmtPctInput(g.inflation)}"></label>
         <label>每年再投入<input class="crm-input" id="ft-g-add" type="number" min="0" step="10000" value="${fmtNum(g.annual_add || 0).replace(/,/g, '')}"></label>
         <div class="full"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finFortress.saveGrowth(this)">重算</button>
             <span class="ft-src" style="align-self:center;">起點是現在的第 5 層 ${fmtWan(g.base)}；報酬與通膨都是假設，不是保證。</span></div>

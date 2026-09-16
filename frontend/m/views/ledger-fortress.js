@@ -152,7 +152,7 @@ function draw(d) {
 export function fireHtml(d) {
     const f = d.fire;
     if (!f || !f.by_rate) return '';
-    const rates = Object.entries(f.by_rate).map(([r, v]) => `<div class="lg-row"><span class="k">提領率 ${esc(String(Math.round(Number(r) * 1000) / 10))}%${Number(r) === Number(f.withdrawal_rate) ? '（判定用）' : ''}</span><span class="v num">${esc(money(v))}</span></div>`).join('');
+    const rates = Object.entries(f.by_rate).map(([r, v]) => `<div class="lg-row"><span class="k">提領率 ${esc((Number(r) * 100).toFixed(2).replace(/\.?0+$/, ''))}%${Number(r) === Number(f.withdrawal_rate) ? '（判定用）' : ''}</span><span class="v num">${esc(money(v))}</span></div>`).join('');
     const lines = (f.lines || []).map(l => `<div class="lg-row"><span class="k">${esc(l[0])}</span><span class="v num">${esc(lineVal(l[1], l[2], f))}</span></div>`).join('');
     const who = f.age != null ? `你 ${esc(String(f.age))} 歲，撐到 ${esc(String(f.until_age))} 歲` : `模擬 ${esc(String(f.horizon_years))} 年`;
     return `<div class="m-h">財富自由</div>
@@ -200,7 +200,7 @@ function growthHtml(d) {
     const g = d.projection || {};
     const rows = g.rows || [];
     if (!rows.length) return '';
-    const pc = (v) => Math.round((Number(v) || 0) * 1000) / 10;
+    const pc = (v) => (Number(v) * 100).toFixed(2).replace(/\.?0+$/, '');   // 兩位小數、去尾零（同桌機）
     const list = rows.map(r => `<div class="lg-row"><span class="k">${esc(String(r.year))} 年後<div class="lg-sub">今天的購買力 ${esc(wan(r.real))}</div></span>
         <span class="v num">${esc(wan(r.nominal))}</span></div>`).join('');
     return `<div class="m-h">資產預期成長</div>
@@ -237,7 +237,7 @@ function earmarkHtml(e) {
 }
 
 const lineVal = (v, unit, ctx) => {
-    if (unit === 'months') return `${months(v)} 個月`;
+    if (unit === 'months') return v == null ? '—' : `${months(v)} 個月`;
     if (unit === 'years') return v == null ? '—' : `${months(v)} 年`;          // 一位小數同 months()
     if (unit === 'pct') return v == null ? '—' : `${Number(v).toFixed(2)}%`;
     if (unit === 'year_or_never') return v == null ? '用不完' : `第 ${v} 年${ctx && ctx.age != null ? `（${ctx.age + Number(v)} 歲）` : ''}`;
