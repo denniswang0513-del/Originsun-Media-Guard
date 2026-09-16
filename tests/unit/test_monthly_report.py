@@ -158,3 +158,10 @@ def test_desktop_and_mobile_pages():
     regm = repo_src("frontend/m/views/ledger-register.js")
     assert "_data.report_month" in regm and 'data-go="report"' in regm
     assert ".mr-big" in repo_src("frontend/m/m.css")
+
+
+def test_desktop_chart_guards_against_zero_or_negative_max():
+    """BUG-2（polish 2026-09-17）：全新帳本前兩次快照都是 0 → max=0 → y 座標全 NaN，SVG 整塊壞掉。"""
+    from tests.unit._srcscan import js_func_body
+    chart = js_func_body(js_code_only(repo_src("frontend/tabs/finance/subviews/report.js")), "function _chart(trend) {")
+    assert "if (!(max > 0)) return" in chart

@@ -194,6 +194,8 @@ function _chart(trend) {
     if (pts.length < 2) return '<div class="sub">要有兩個以上的快照才畫得出走勢</div>';
     const W = 860, H = 200, L = 60, R = 20, T = 20, B = 30;
     const max = Math.max(...pts.map((p) => Number(p.total))) * 1.08;
+    // 全 0 或全負：除以 max 每個座標都是 NaN，SVG 會畫出一坨壞掉的線；這種走勢沒東西好看，直接說明
+    if (!(max > 0)) return '<div class="sub">快照都是 0，還畫不出走勢</div>';
     const x = (i) => L + (W - L - R) * (i / (pts.length - 1));
     const y = (v) => T + (H - T - B) * (1 - Number(v) / max);
     const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.total).toFixed(1)}`).join(' ');
