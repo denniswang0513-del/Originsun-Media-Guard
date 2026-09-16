@@ -371,3 +371,18 @@ class FinanceLoanPayment(Base):
                                        name="uq_loanpay_loan_period"),)
 
 
+class FinanceFortressEarmark(Base):
+    """私帳「堡壘」的預留清單（docs/FORTRESS_PLAN.md §2.2）：已經知道要付、還沒付的錢，手動那部分。
+    貸款下一期與信用卡欠款是**算的時候自動帶入**，不落這張表。paid_at 非空＝已付：不進合計、留紀錄。
+    為什麼是表不是 settings：手機在 NAS 上也要能記（settings 在 NAS 是唯讀副本）。"""
+    __tablename__ = "finance_fortress_earmarks"
+
+    id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="mine", index=True)
+    label = Column(String(128), nullable=False)
+    amount = Column(Integer, nullable=False, default=0)
+    due_date = Column(DateTime(timezone=True), nullable=True)
+    note = Column(Text, nullable=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -4,6 +4,8 @@
  * 閘門：帳號要有 finance_mine（指名制；Lv3 不 bypass，跟 /my-ledger.html 同口徑）。殼由 ./shell.js 提供。
  * 開頁：boot → GET /api/v1/finance/m/options 一次（分類樹／案源／專案／帳戶）→ 依 hash 畫分頁。
  * 分頁：#cash（預設）／#projects／#receivable／#household／#overview／#assets，畫面在 views/ledger-*.js。
+ * 隱藏路由：#fortress（堡壘，docs/FORTRESS_PLAN.md §4）—— 有頁、沒 tabbar 鈕（六顆已滿），從總覽頂卡點進來，
+ * tabbar 仍亮「總覽」。同 CRM 手機版 ui.js 的 HIDDEN_ROUTES 做法，TABS 不動。
  * ui.js 的 TABS／DEFAULT_TAB／currentTab 是 CRM 那份，這裡自己維護一份（不改 ui.js 的常數）。
  */
 import { boot, mfetch, toast, esc } from './shell.js';
@@ -14,11 +16,16 @@ import * as receivableView from './views/ledger-receivable.js';
 import * as householdView from './views/ledger-household.js';
 import * as overviewView from './views/ledger-overview.js';
 import * as assetsView from './views/ledger-assets.js';
+import * as fortressView from './views/ledger-fortress.js';
 
 export const TABS = ['cash', 'projects', 'receivable', 'household', 'overview', 'assets'];
 export const DEFAULT_TAB = 'cash';
+/** 有畫面但不在分頁列的路由 → 頂欄名稱；HIDDEN_PARENT＝在那一頁時 tabbar 亮哪一顆。 */
+export const HIDDEN_ROUTES = { fortress: '堡壘' };
+const HIDDEN_PARENT = { fortress: 'overview' };
+export const ROUTES = [...TABS, ...Object.keys(HIDDEN_ROUTES)];
 const VIEWS = { cash: cashView, projects: projectsView, receivable: receivableView,
-                household: householdView, overview: overviewView, assets: assetsView };
+                household: householdView, overview: overviewView, assets: assetsView, fortress: fortressView };
 
 // 指名制：直接看 modules，不走 isAdmin（後端 grant_admin_all_modules 把 finance_mine 列為「指名才有」）
 const gate = (me) => ((me || {}).modules || []).includes('finance_mine');
@@ -28,11 +35,11 @@ let _depth = 0;      // 這次開頁後往前走了幾步（上一頁按到底�
 
 function currentTab() {
     const h = (location.hash || '').replace(/^#/, '').split('?')[0];
-    return TABS.includes(h) ? h : DEFAULT_TAB;
+    return ROUTES.includes(h) ? h : DEFAULT_TAB;
 }
 
-// 分頁名從底部 tabbar 的按鈕文字拿，不另外抄一份
-const tabLabel = (tab) => (document.querySelector(`#m-tabbar button[data-tab="${tab}"]`) || {}).textContent || '';
+// 分頁名從底部 tabbar 的按鈕文字拿，不另外抄一份；隱藏路由沒有鈕，名字在 HIDDEN_ROUTES
+const tabLabel = (tab) => (document.querySelector(`#m-tabbar button[data-tab="${tab}"]`) || {}).textContent || HIDDEN_ROUTES[tab] || '';
 
 function _host(tab) {
     if (!hosts[tab]) {
@@ -52,7 +59,7 @@ async function render() {
     if (location.hash.replace(/^#/, '').split('?')[0] !== tab) history.replaceState(null, '', '#' + tab);
     document.getElementById('m-page').textContent = tabLabel(tab) + (state.me && state.me.username ? '｜' + state.me.username : '');
     for (const b of document.querySelectorAll('#m-tabbar button'))
-        b.classList.toggle('on', b.dataset.tab === tab);
+        b.classList.toggle('on', b.dataset.tab === (HIDDEN_PARENT[tab] || tab));
     for (const t in hosts) hosts[t].hidden = t !== tab;
     const host = _host(tab);
     host.hidden = false;

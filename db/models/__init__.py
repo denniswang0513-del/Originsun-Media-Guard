@@ -46,7 +46,7 @@ from ._workos import (  # noqa: F401
 from ._finance import (  # noqa: F401
     BankAccount, BankImportDraft, BankImportRule, BankReconciliation,
     BankStatementLine, FinanceAccount, FinanceAdjustment, FinanceCategoryMap,
-    FinanceHolding, FinanceLoan, FinanceLoanPayment, FinanceNetSnapshot)
+    FinanceFortressEarmark, FinanceHolding, FinanceLoan, FinanceLoanPayment, FinanceNetSnapshot)
 
 # 媒體紀錄 ＋ 週誌 ＋ 福委會 ＋ 收支分類樹
 from ._workspace import (  # noqa: F401

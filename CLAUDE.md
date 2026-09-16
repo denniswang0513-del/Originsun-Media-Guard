@@ -1380,6 +1380,10 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   span 2 會**逼出一條隱含的第二欄**（量到 159px + 77.67px），單欄設定形同虛設 —— 要 `grid-column:auto !important` 壓掉。
 - **`.fo-box` 的輸入框樣式要自己寫**：它是 `.pf-edit` 的**兄弟**不是子孫，而 `.pf-edit input`／`.pf-edit .inline-row` 的樣式 scope 在 `.pf-edit` 底下 ——
   漏了就變成瀏覽器原生控制項（真機量到 Arial／monospace、2px inset、padding 0）。兩個宿主（`my.html`／`leave.html`）各一份。
+- **私帳堡壘（docs/FORTRESS_PLAN.md，2026-09-16）**：規則只在 `core/fortress_logic.py`，`routers/api_fortress.py` 只撈數字（沿用 `_holding_value`／`_card_numbers`／期初＋流水那條式子）。
+  **信用卡欠款走「預留」不走負餘額**（兩邊都算＝扣兩次）；股東帳戶不進任何一層。**預留清單是表**（`finance_fortress_earmarks`，手機在 NAS 上要能寫），
+  分層／旗標／目標／戰爭假設是 settings `finance.fortress[entity]`，🔴 `core/office_settings.EXPORT_SUBKEYS` 有送 `finance: (fortress,)`，拿掉＝手機上每個帳戶都掉回第 1 層、沒有任何錯誤。
+  手機 `#fortress` 是隱藏路由（`ledger.js` 的 `HIDDEN_ROUTES`／`ROUTES`，tabbar 六格不動、亮「總覽」）；PUT settings 各段（account_layers／account_flags／targets／war）**整份取代**，`monthly_need_override` 送 0＝回到自動。
 - **`/api/settings/load` 是匿名端點，機密分兩層**（2026-09-08 稽核）：`_SECRET_KEYS`／`_SECRET_SUBKEYS`（簽得出 admin 的：jwt_secret、database_url、
   google secret）連管理員也不回；`_ADMIN_ONLY_SUBKEYS`（工時同步 token、四個 webhook）只回給管理員 token（設定視窗要顯示才能編）。新增機密欄位要進其中一層。
   內部重啟端點（`/internal/restart`、`/system/restart`）的金鑰字串隨 OTA 包公開，安全靠 `core.auth.via_cloudflare` 把公網那條路擋掉——**別**把金鑰換成 `_get_secret()`，機隊各自的 jwt_secret 不共用，master 會推不動 agent。

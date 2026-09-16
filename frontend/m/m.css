@@ -211,3 +211,60 @@
   #qt-chat .qc-actions .m-btn { flex:0 0 auto; }
   #qt-chat .qc-actions .m-btn-primary { flex:1; min-height:44px; }
   #qt-chat .qc-hint { font-size:11px; color:var(--sub); }
+
+  /* ── 堡壘（士源帳本）── views/ledger-fortress.js 的頁與 views/ledger-overview.js 的頂卡（docs/FORTRESS_PLAN.md §4）。
+     只用殼裡既有的變數：--ok 綠／--warn 黃／--bad 紅／--pri 主色（第 5 層）。 */
+  .ft-big { display:flex; align-items:baseline; gap:8px; }
+  .ft-big .n { font-size:40px; font-weight:700; line-height:1.05; color:#fff; font-variant-numeric:tabular-nums; }
+  .ft-big .u { font-size:15px; color:var(--sub); }
+  .ft-big .n.g, .ft-layer .g { color:var(--ok); }
+  .ft-big .n.a, .ft-layer .a { color:var(--warn); }
+  .ft-big .n.r, .ft-layer .r { color:var(--bad); }
+  .ft-card .num, .lg-sub .num { font-variant-numeric:tabular-nums; color:var(--ink); }
+  .ft-mini { display:grid; grid-template-columns:repeat(5, 1fr); gap:5px; margin-top:12px; }
+  .ft-mini .c { height:34px; background:var(--field); border:1px solid var(--line); border-radius:6px; position:relative; overflow:hidden; }
+  .ft-mini .c i { position:absolute; left:0; right:0; bottom:0; background:var(--ok); opacity:.85; }
+  .ft-mini .c i.cap { background:var(--pri); }
+  .ft-mini .c i.low { background:var(--warn); }
+  .ft-mini .c b { position:absolute; left:6px; top:3px; font-size:10px; color:#fff; font-weight:500; opacity:.85; }
+  .ft-mini-l { display:grid; grid-template-columns:repeat(5, 1fr); gap:5px; font-size:10px; color:var(--sub); text-align:center; margin-top:4px; }
+  .ft-tap { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--pri); font-size:13px; margin-top:12px; }
+  .ft-tap span:first-child { color:var(--sub); min-width:0; }
+  .ft-tap span:last-child { flex:none; }
+  /* 五層：一層一列 */
+  .ft-layer { padding:9px 0; border-bottom:1px solid var(--line); }
+  .ft-layer:last-child { border-bottom:0; }
+  .ft-layer .t { display:flex; justify-content:space-between; align-items:baseline; gap:8px; font-size:14px; }
+  .ft-layer .t .nm { font-weight:500; min-width:0; }
+  .ft-layer .t .nm span { color:var(--sub); font-weight:400; font-size:12px; margin-left:6px; }
+  .ft-layer .t .v { flex:none; font-variant-numeric:tabular-nums; font-size:13px; color:var(--sub); text-align:right; }
+  .ft-layer .t .v b { color:#fff; font-weight:600; font-size:15px; }
+  .ft-layer .bar { height:7px; background:var(--field); border:1px solid var(--line); border-radius:999px; overflow:hidden; margin-top:7px; }
+  .ft-layer .bar i { display:block; height:100%; background:var(--ok); }
+  .ft-layer .bar i.cap { background:var(--pri); }
+  .ft-layer .bar i.low { background:var(--warn); }
+  .ft-layer .acc { font-size:11.5px; color:var(--sub); margin-top:4px; line-height:1.5; overflow-wrap:anywhere; }
+  /* 預留清單：手填的可點；已付的金額變淡 */
+  .ft-tap-row { cursor:pointer; }
+  .ft-tap-row:active { background:var(--field); }
+  .ft-paid { color:var(--sub); text-decoration:line-through; font-weight:400; }
+  /* 壓力測試收合列 */
+  .ft-tests { padding-top:2px; padding-bottom:2px; }
+  .ft-test { border-bottom:1px solid var(--line); }
+  .ft-test:last-child { border-bottom:0; }
+  .ft-test summary { list-style:none; display:flex; align-items:center; gap:10px; padding:10px 0; font-size:14px; cursor:pointer; min-height:44px; }
+  .ft-test summary::-webkit-details-marker { display:none; }
+  .ft-test .dot { width:10px; height:10px; border-radius:50%; background:var(--ok); flex:0 0 auto; }
+  .ft-test .dot.a { background:var(--warn); }
+  .ft-test .dot.r { background:var(--bad); }
+  .ft-test .dot.na { background:var(--line); }
+  .ft-test .st { flex:1; min-width:0; }
+  .ft-test .st small { display:block; color:var(--sub); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ft-test .chev { color:var(--sub); font-size:12px; flex:none; transition:transform .15s; }
+  .ft-test[open] .chev { transform:rotate(90deg); }
+  .ft-test .det { padding:0 0 12px 20px; font-size:13px; }
+  .ft-test .assume { color:var(--sub); font-size:12px; margin-bottom:6px; line-height:1.5; }
+  .ft-test .line { display:flex; justify-content:space-between; gap:8px; padding:3px 0; color:var(--sub); }
+  .ft-test .line span:first-child { min-width:0; }
+  .ft-test .line span:last-child { flex:none; color:var(--ink); font-variant-numeric:tabular-nums; }
+  .ft-test .vd { margin-top:6px; padding-top:6px; border-top:1px dashed var(--line); color:var(--ink); line-height:1.5; }

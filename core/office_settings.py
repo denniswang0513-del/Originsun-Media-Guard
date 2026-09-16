@@ -74,6 +74,9 @@ EXPORT_SUBKEYS = {
     # 按「更新報價」時存，NAS 只讀）、工項清單覆寫、報價 kill switch。不送的話 USD 持股
     # 在手機上現值是 0，而且不會有任何錯誤。
     "my_ledger": ("usd_twd", "usd_twd_at", "income_items", "quotes_enabled"),
+    # 私帳堡壘（docs/FORTRESS_PLAN.md）：帳戶分層／旗標、目標倍數、戰爭假設在桌機改、NAS 只讀。
+    # 不送的話手機上每個帳戶都掉回第 1 層、五題全用預設假設，而且不會有任何錯誤。
+    "finance": ("fortress",),
 }
 
 
