@@ -165,6 +165,7 @@ async def _auto_earmarks(session, ent: str, today: date) -> list:
 
 
 async def _manual_earmarks(session, ent: str) -> list:
+    """手填的那幾筆（finance_fortress_earmarks）。已付的照樣回，前端會排到最後、合計不算。"""
     rows = (await session.execute(
         select(FinanceFortressEarmark).where(FinanceFortressEarmark.entity == ent)
         .order_by(FinanceFortressEarmark.due_date, FinanceFortressEarmark.created_at))).scalars().all()
@@ -190,6 +191,7 @@ async def _monthly_need_auto(session, ent: str, today: date) -> tuple:
 
 
 async def _payload(ent: str) -> dict:
+    """撈齊資料 → core.fortress_logic.build()。五支端點的回應都是它。"""
     today = _today_tw()
     factory = _factory_or_503()
     async with factory() as session:
@@ -205,6 +207,7 @@ async def _payload(ent: str) -> dict:
 # ── 端點 ──────────────────────────────────────────────────────────
 @router.get("")
 async def get_fortress(request: Request, entity: str = ""):
+    """整頁一趟：可撐月數、五層、預留清單、必要支出、壓力測試五題（桌機分頁與手機頁同一份）。"""
     ent = _guard(request, entity)
     return await _payload(ent)
 
@@ -219,6 +222,7 @@ async def put_settings(payload: FortressSettingsPatch, request: Request, entity:
 
 @router.post("/earmarks")
 async def add_earmark(payload: EarmarkPayload, request: Request, entity: str = ""):
+    """手填一筆預留（稅、保費…）。回整頁，前端直接拿去重畫。"""
     ent = _guard(request, entity)
     factory = _factory_or_503()
     async with factory() as session:
@@ -234,6 +238,7 @@ async def add_earmark(payload: EarmarkPayload, request: Request, entity: str = "
 
 @router.put("/earmarks/{earmark_id}")
 async def edit_earmark(earmark_id: str, payload: EarmarkPatch, request: Request, entity: str = ""):
+    """改一筆手填的預留（金額／到期日／備註／已付）。自動帶入的貸款與卡債不在這張表裡，回 404。"""
     ent = _guard(request, entity)
     factory = _factory_or_503()
     data = payload.model_dump(exclude_unset=True)
@@ -258,6 +263,7 @@ async def edit_earmark(earmark_id: str, payload: EarmarkPatch, request: Request,
 
 @router.delete("/earmarks/{earmark_id}")
 async def delete_earmark(earmark_id: str, request: Request, entity: str = ""):
+    """刪一筆手填的預留（付掉了想留紀錄的話用「已付」，不要刪）。"""
     ent = _guard(request, entity)
     factory = _factory_or_503()
     async with factory() as session:

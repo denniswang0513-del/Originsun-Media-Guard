@@ -166,6 +166,7 @@ def assign_layers(accounts: list, settings: dict) -> list:
 
 
 def layer_sums(accounts: list) -> dict:
+    """每一層的餘額合計（含證券；「現金」要用 cash_in_layers）。"""
     have = {n: 0 for n in LAYER_NAMES}
     for a in accounts:
         have[a["layer"]] += int(a.get("balance") or 0)
@@ -173,6 +174,7 @@ def layer_sums(accounts: list) -> dict:
 
 
 def is_holding(a) -> bool:
+    """這一筆是不是證券（股票／ETF／外幣持股）。"""
     return (a or {}).get("kind") == "holding"
 
 
@@ -192,6 +194,7 @@ def runway_months(cash: float, earmark_total: float, monthly_need: float):
 
 
 def tone(months) -> str:
+    """可撐月數 → 顏色（同儀表板：≥6 綠、3–6 黃、<3 紅；算不出來 na）。"""
     if months is None:
         return "na"
     return "g" if months >= RUNWAY_GREEN else ("a" if months >= RUNWAY_AMBER else "r")
