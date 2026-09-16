@@ -1,2 +1,0 @@
-Line1_is_long_and_boring
-Line2_is_short

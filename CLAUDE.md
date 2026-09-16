@@ -1101,7 +1101,7 @@ Get-ChildItem -Recurse -Include *.py,*.js -Exclude node_modules |
   Where-Object Lines -gt 1000 | Sort-Object Lines -Descending
 ```
 
-財務目錄與那 5 個超標檔由 `tests/unit/test_finance_files_stay_readable.py` 守著
+財務目錄與那 5 個超標檔由 `tests/unit/test_files_stay_readable.py` 守著
 （它用 Python 的 `splitlines()`，量得是對的），超過上限會直接紅。
 
 **超過 500 行的檔案，強制使用 `offset` + `limit` 分段讀取。禁止一次讀完後假裝看到了全部內容。**
@@ -1332,6 +1332,10 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`frontend/tabs/finance/subviews/projects-push.js`](frontend/tabs/finance/subviews/projects-push.js) ＋ [`frontend/tabs/crm/crm-projects-ledger.js`](frontend/tabs/crm/crm-projects-ledger.js) | 2026-09-13 各自從 1,359／1,040 行的主檔切出的「母帳 ↔ 私帳」段：私帳側（連結鈕／跳母帳／推送到母帳彈窗）、母帳側（推送到私帳／換帳本／分身／落後提示／彈窗，全掛 `window._proj*`） | 同 `crm-cashbook-*.js` 的規矩：主檔 `export let`（`_detail`／`_sel`；子模組只讀）＋ setter（`setDirty`／`resetDetail`）；`_fp` 用 `window._finProjLedger` idiom 自己取；`crm-projects-ledger.js` 由 `crm-projects.js` 副作用 import。掃原始碼用 `_srcscan.crm_projects_core_src()`；私帳那支的推送段指 `projects-push.js` |
 | `frontend/tabs/crm/crm-payables.js` 的出納段 | 應付面板的複製（每列左側一顆「複製」、純數字不帶標點）、本月匯款清單（可列印）、匯款通知彈窗（全選＋複製連結） | 複製一律走 `js/shared/utils.copyText`（內網是 http＝非安全來源，`navigator.clipboard` **不存在**）；`_buildMonthGroups` 是「月 × 收款人」粒度，跟後端 `group_payables` 的「收款人」粒度**不同**，別以為可以直接用後端那份 |
 | [`db/startup_migrations.py`](db/startup_migrations.py) | 開機 migration／種子 22 段（2026-09-13 從 `main._on_startup` 逐字搬出）：`run_pre_db`（init_db 前的 settings.json 修補）、`_m01…_m21`、`_POST_DB` 順序清單、`run_post_db` | SQL 正本仍在 `db/migrations.py`；加一段＝寫 `_mNN_*` 掛進 `_POST_DB`，`test_startup_migrations_order` 會逼你放對位置；模組層不可 import sqlalchemy（agent 沒裝；順序測試有一條守） |
+| [`services/finance_statements.py`](services/finance_statements.py)＋[`routers/api_finance_stmt.py`](routers/api_finance_stmt.py) | 對帳單（銀行／信用卡）匯入與比對：檔案解析 → 交易列 → 對到記帳分錄；分頁在財務管理 | 30 天內動 32／31 次，是目前最常改的一組。解析器吃各家格式，**改欄位對映前先看既有測試釘了哪幾家**；金額一律整數分位，不要用 float 中轉 |
+| [`routers/api_crm_mobile.py`](routers/api_crm_mobile.py) | 手機殼（`frontend/m/`）專用端點：只回手機畫面要的欄位形狀，不是桌機那組的別名 | 桌機改欄位時這支不會自動跟著；兩邊的欄位名對不上就是這裡沒補。權限走同一組鑰匙 |
+| [`services/timesheet_manual.py`](services/timesheet_manual.py) | 手填工時的寫入路徑（CRM 工作追蹤「替人填」與管理端補登） | 與 `timesheet_self`（員工自己填）是**兩條路**：守衛不同、可寫欄位不同。改其中一邊要想另一邊 |
+| [`services/timesheet_lookup.py`](services/timesheet_lookup.py) | 工時／專案的查詢面：預算對照、案名↔id、私帳 scope 過濾 | 私帳案 id 不外洩的規則在這裡把關（`test_money_visibility` 釘住），加新查詢要跟著過濾 |
 | `core/ledger_project.py` 的分案記帳段 | 私帳案收入**分案**：`BY_PARENT_KEY`／`BY_PARENT_PENDING_KEY`、`parent_shares`、`set_parent_share`（只動差額；`claim` 不動錢）、`drop_parent_share`、`mirror_stale(…, pid)` 逐案判；設計正本 [`docs/LEDGER_BY_PARENT_PLAN.md`](docs/LEDGER_BY_PARENT_PLAN.md) | 不變式 `contract = Σ份額 + owner 自己的`（自己的不存、用差額推）；分身 `contract_amount` 只准接 `set／drop_parent_share` 回的 `new_contract`（`test_ledger_by_parent` 掃 project_links 釘著）；開機 `_m22` 回填舊資料，分不出的 N:1 標待認領、改收款方式會 409 要求逐案「推送→取代」 |
 | 彈性外出（owner 2026-09-15）：[`core/leave_logic.py`](core/leave_logic.py) 的 `FLEX_OUT_*`／`flex_out_check`、`hr_flex_outings`（[`db/models/_workos.py`](db/models/_workos.py)）、[`routers/api_me.py`](routers/api_me.py) 的 `/me/flex_out` | 每人每天 2 小時、**自己登記不用核准**、一筆 ≤2h、同一天合計 ≤2h、不累積。畫面固定寫「每日可彈性外出兩小時」（owner 改的字，不顯示剩多少） | **不走請假單**：不進時數帳、不進休假總表、不上 Google 日曆。事由只給本人看（行事曆事件的 `notes` 一律空，同 `_leave_events`）。超過 2 小時要另外請假 —— 規章那段在 `frontend/leave.html` 的規章卡，排在事假前面 |
 | [`core/leave_logic.py`](core/leave_logic.py) 的 `day_off_fraction`／`leave_days_total` | 一天休了多少（同一天多張單**加總**、上限 1；`range` 照時數換算）／一段期間休幾天（**只算工作日**） | `/me/week_marks` 的 `off[日期]` 與 `leave_days` 都出自這裡；前端不准自己再判一次 `part`（兩份規則會分岔） |
