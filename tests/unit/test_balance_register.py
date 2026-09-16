@@ -187,3 +187,21 @@ def test_mobile_views_pass_objects_to_mfetch_not_strings():
     for rel in ("frontend/m/views/ledger-register.js", "frontend/m/views/ledger-report.js", "frontend/m/views/ledger-fortress.js"):
         code = js_code_only(repo_src(rel))
         assert "body: JSON.stringify(" not in code, f"{rel}：手機 mfetch 的 body 要傳物件"
+
+
+def test_day_key_uses_local_day_for_aware_datetimes():
+    """BUG-5（polish 2026-09-17）：台北 10/1 00:00 存進 timestamptz 讀回是 9/30 16:00Z → day_key 要回 10/01，
+    不然登記日等於對帳月底那天時 derive_balance 會誤判成「那時已登記」（規則說 until 不晚於登記日要走老公式）。"""
+    from datetime import datetime, timezone
+    from core.finance_logic import derive_balance
+    anchor = datetime(2026, 9, 30, 16, 0, tzinfo=timezone.utc)      # ＝ 台北 2026-10-01 00:00
+    assert day_key(anchor) == "2026-10-01"
+    r = derive_balance(100, 500, anchor, flow_all=40, flow_after=0, until=datetime(2026, 10, 1))
+    assert r["balance"] == 140, "對帳 2026-09 的月底：登記日（10/1）不早於 until（10/1）→ 老公式"
+
+
+def test_report_month_window_is_naive_like_the_cash_entries():
+    """BUG-5：月報本月視窗不能用 UTC-aware 邊界（明細存的是 naive 本地 00:00，1 日的會掉到上個月）。"""
+    from tests.unit._srcscan import func_body
+    w = func_body(repo_src("routers/api_monthly_report.py"), "def _month_window(month: str) -> tuple:")
+    assert "timezone" not in w and 'strptime(month + "-01", "%Y-%m-%d")' in w

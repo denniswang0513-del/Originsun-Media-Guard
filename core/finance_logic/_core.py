@@ -81,7 +81,11 @@ def bank_running_balance(opening_balance: int, entries: list) -> int:
 
 def day_key(v) -> str:
     """日期 → 'YYYY-MM-DD' 字串鍵（datetime／date／'YYYY-MM-DD' 字串都吃；空 → ''）。
-    比先後用字串就夠 —— DB 回來的 datetime 帶時區、_parse_day 出來的不帶，直接互比會丟 TypeError。"""
+    比先後用字串就夠 —— DB 回來的 datetime 帶時區、_parse_day 出來的不帶，直接互比會丟 TypeError。
+    🔴 帶時區的先過 local_day：timestamptz 回讀是 UTC 表示，台北 10/1 00:00 存進去讀回來是 9/30 16:00Z，
+    直接切前 10 個字會拿到 9/30 —— 登記日剛好等於對帳月底那天時，derive_balance 會誤判成「那時已登記」。"""
+    if isinstance(v, datetime) and v.tzinfo is not None:
+        v = local_day(v)
     return str(v)[:10] if v else ""
 
 

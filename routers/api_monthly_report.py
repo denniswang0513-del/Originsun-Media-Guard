@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
@@ -36,7 +36,9 @@ class GeneratePayload(BaseModel):
 
 
 def _month_window(month: str) -> tuple:
-    lo = datetime.strptime(month + "-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    """'YYYY-MM' → (月初, 次月初) **naive** datetime —— 收支寫入端（_parse_day）存的就是 naive 本地 00:00，
+    邊界也要 naive 才對得齊；用 UTC-aware 的話每月 1 日的明細會掉到上個月（同 api_finance._month_window）。"""
+    lo = datetime.strptime(month + "-01", "%Y-%m-%d")
     hi = (lo + timedelta(days=32)).replace(day=1)
     return lo, hi
 
