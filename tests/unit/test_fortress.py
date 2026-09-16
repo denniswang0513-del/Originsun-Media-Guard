@@ -502,3 +502,27 @@ def test_fire_without_a_birth_year_or_date():
         f = build(accts, [], 50_000, cfg, today, need_months=6)["fire"]
         assert f["age"] is None and f["horizon_years"] == FIRE_DEFAULT_HORIZON, (today, cfg)
         assert f["runs_out_age"] is None and "歲" not in f["verdict"]
+
+
+# ── /polish 階段一 ────────────────────────────────────────────────────────
+def test_fire_needs_real_spending_data_before_declaring_freedom():
+    """🔴 帳本還沒有生活支出資料時，不能拿「不工作後自付的健保、國保」那 2,000 元當生活費去宣告財富自由。
+    原本的守衛是 `spend <= 0`，而 spend＝必要支出＋自付，自付預設 2,000 → 永遠 > 0 →
+    新帳本會看到「已達財富自由。照現在的花法（0.2 萬／月）只用到資產的 0.05%」。
+    可撐月數那邊在同樣情況會回 None（算不出來），兩邊要一致。"""
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 2_883_940},
+             {"id": "e", "name": "證券", "kind": "holding", "balance": 47_063_708}]
+    d = build(accts, [], 0, {"account_layers": {"e": 5}}, "2026-09-16", need_months=0)
+    f = d["fire"]
+    assert f["state"] == "na" and f["lines"] == [] and "先設定每月必要支出" in f["verdict"]
+    assert d["runway"]["months"] is None, "同一頁的可撐月數也是算不出來"
+    # 「你可以花多少」不依賴現在花多少，所以照樣給；但不能拿來跟現況比較
+    assert f["allowed"] > 0 and f["by_rate"], "提領率能算的部分照給"
+    assert "current_rate" not in f and "ratio25" not in f and "cash_years" not in f, "比較用的數字不要給"
+
+
+def test_mobile_overview_line_is_hidden_when_data_is_missing():
+    """總覽頂卡那行只看 by_rate 的話，資料不足時照樣印出金額 —— 那是最常看的畫面。"""
+    js = js_code_only(repo_src("frontend/m/views/ledger-fortress.js"))
+    card = js_func_body(js, "export function fortressCardHtml(d) {")
+    assert "d.fire.state !== 'na'" in card, "資料不足就不要印那一行"

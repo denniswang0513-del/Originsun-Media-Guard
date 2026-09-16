@@ -81,7 +81,7 @@ export function fortressCardHtml(d) {
         ${bigHtml(d)}
         <div class="lg-sub">第 1 到 3 層 <span class="num">${esc(wan(cash.l1_3))}</span> − 預留 <span class="num">${esc(wan(d.earmark_total))}</span> ÷ 必要支出 <span class="num">${esc(wan(need))}</span></div>
         ${miniHtml(d)}
-        ${d.fire && d.fire.by_rate ? `<div class="lg-sub" style="margin-top:6px">不工作每月可花 <span class="num">${esc(wan(d.fire.allowed))}</span>，你現在花 <span class="num">${esc(wan(d.fire.spend))}</span></div>` : ''}
+        ${d.fire && d.fire.by_rate && d.fire.state !== 'na' ? `<div class="lg-sub" style="margin-top:6px">不工作每月可花 <span class="num">${esc(wan(d.fire.allowed))}</span>，你現在花 <span class="num">${esc(wan(d.fire.spend))}</span></div>` : ''}
         <div class="ft-tap"><span>${esc(summaryLine(d))}</span><span>看堡壘 ›</span></div>
     </div>`;
 }

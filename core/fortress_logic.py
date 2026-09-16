@@ -561,6 +561,9 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     """財富自由：此刻不工作、沒收入，每月可以花多少；照現在的花法錢什麼時候用完。
     資產＝金融資產（五層合計）；支出＝必要支出＋不工作後要自付的固定支出（健保、國保）。
     提領率的研究都是美國市場資料、30 年退休期、50–75% 股票；要撐 50 年以上又股票比重高的人用 3.25–3.5%。"""
+    # 🔴 na 看的是 monthly_used（帳本真的有沒有生活支出資料），不是 spend ——
+    #    spend 還加了「不工作後自付的健保、國保」（預設 2,000），永遠 > 0，
+    #    於是新帳本會拿那 2,000 當生活費宣告「已達財富自由」。可撐月數那邊同樣情況回 None，兩邊要一致。
     spend = float(monthly_used or 0) + float(fire["self_pay_monthly"])
     by_rate = {f"{r:g}": _m(float(financial) * r / 12) for r in FIRE_RATES}
     chosen = float(fire["withdrawal_rate"])
@@ -570,7 +573,7 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     extra_from = max(1, int(fire["extra_from_age"]) - age) if age is not None else 10 ** 6
     base = {"spend": _m(spend), "self_pay": _m(fire["self_pay_monthly"]), "allowed": allowed, "by_rate": by_rate,
             "withdrawal_rate": chosen, "age": age, "until_age": int(fire["until_age"]), "horizon_years": horizon}
-    if spend <= 0 or financial <= 0:
+    if float(monthly_used or 0) <= 0 or financial <= 0 or spend <= 0:
         return {**base, "state": "na", "verdict": "先設定每月必要支出才算得出來。", "lines": []}
     current_rate = spend * 12 / float(financial)
     fi25, fi33 = spend * 12 * 25, spend * 12 * 100 / 3
