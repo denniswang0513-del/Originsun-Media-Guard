@@ -202,7 +202,7 @@ def test_month_income_and_expense_exclude_cross_account_flows():
     from tests.unit._srcscan import func_body
     body = func_body(repo_src("routers/api_monthly_report.py"), "async def generate_report(")
     assert 'cat.like("轉匯與定存%")' in body and 'cat.like("信用卡%")' in body and 'cat.like("%投資%")' in body
-    assert ".filter(~cross)" in body and "CrmCashEntry.bank_fee" in body and '"bank_net": int(bank_net or 0)' in body
+    assert ".filter(~cross)" in body and "CrmCashEntry.bank_fee" in body and '"bank_net": bank_net' in body
     desk = js_code_only(repo_src("frontend/tabs/finance/subviews/report.js"))
     assert "register_gap" in desk and "unexplained" not in desk and "證券增減" in desk
     mob = js_code_only(repo_src("frontend/m/views/ledger-report.js"))
@@ -250,3 +250,24 @@ def test_rule_thresholds_and_wording_after_domain_review():
     not_fi = _fortress(fire={"allowed": 50_000, "spend": 103_267, "ratio33": 0.45, "ratio25": 0.6, "current_rate": 0.07, "state": "bad", "pretax": True})
     k2 = {a["key"]: a for a in build_report("2026-09", "2026-09-17", not_fi, REGISTER, BUCKETS, {}, SNAPS)["advice"]}
     assert k2["fire_gap"]["level"] == "warn" and "差 5.3 萬／月" in k2["fire_gap"]["text"] and "fire_tax" not in k2
+
+
+def test_closing_review_fixes():
+    """收尾 review：集中度建議的門檻看穿透後的比重（體檢已經是）；財富自由 warn 但支出 ≤ 可花時不寫負的差額；
+    bank_net 的時間窗＝上一份月報基準日之後（跟 Δ現金一樣），不是月初。"""
+    from tests.unit._srcscan import func_body
+    # 台積電直接 20%、0050 30% → 穿透後約 36% → 體檢 bad，建議也要出現（以前直接持有 < 25% 就不出）
+    ft = _fortress(accounts=[{"name": "Vanguard FTSE All-World", "kind": "holding", "balance": 50_000_000, "currency": "USD", "flags": {}},
+                             {"name": "台積電", "kind": "holding", "balance": 20_000_000, "currency": "TWD", "flags": {}},
+                             {"name": "元大台灣50", "kind": "holding", "balance": 30_000_000, "currency": "TWD", "flags": {}}])
+    r = build_report("2026-09", "2026-09-17", ft, REGISTER, BUCKETS, {}, SNAPS)
+    h = next(x for x in r["health"] if x["key"] == "concentration")
+    adv = next((a for a in r["advice"] if a["key"] == "concentration"), None)
+    assert h["state"] == "bad" and adv is not None and adv["level"] == "bad"
+    # 堡壘 warn（範圍內但會用完）：不能寫「差 −2 萬」
+    warn = _fortress(fire={"allowed": 80_000, "spend": 60_000, "ratio33": 0.9, "ratio25": 1.2, "current_rate": 0.03, "state": "warn", "pretax": False})
+    k = {a["key"]: a for a in build_report("2026-09", "2026-09-17", warn, REGISTER, BUCKETS, {}, SNAPS)["advice"]}
+    assert k["fire_gap"]["title"].startswith("財富自由還不穩") and "−" not in k["fire_gap"]["text"] and "差 " not in k["fire_gap"]["text"]
+    body = func_body(repo_src("routers/api_monthly_report.py"), "async def generate_report(")
+    assert "prev_row.basis_date" in body and "CrmCashEntry.entry_date > datetime.strptime(prev_row.basis_date" in body
+    assert '"bank_net": bank_net' in body

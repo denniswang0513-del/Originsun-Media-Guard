@@ -294,10 +294,10 @@ def _rule_layers(ft: dict):
 
 def _rule_concentration(conc: dict):
     tp = conc.get("top_pct")
-    if tp is None or tp < CONCENTRATION_WARN:
-        return None
     lt = conc.get("lookthrough")
-    eff = float(lt["pct"]) if lt else tp                     # 穿透後的比重（有的話）決定等級
+    eff = float(lt["pct"]) if (lt and tp is not None) else tp   # 穿透後的比重（有的話）決定要不要出現、什麼等級（跟體檢那格同一個數）
+    if eff is None or eff < CONCENTRATION_WARN:
+        return None
     lvl = "bad" if eff >= CONCENTRATION_BAD else "warn"
     via = f"；加上台灣50 類基金裡的那一半，實際約 {float(lt['pct']) * 100:.0f}%（{_wan(lt['value'])}）" if lt else ""
     how = (f"已經超過 {int(CONCENTRATION_BAD * 100)}%：考慮分批賣到 30% 以下（賣出會有稅與二代健保，分年賣），新資金一律進別的標的。"
@@ -354,9 +354,15 @@ def _rule_fire(lf: dict):
         return None
     if lf.get("fire_state") != "ok":
         gap = lf["fire_spend"] - lf["fire_allowed"]
-        return {"level": "warn", "key": "fire_gap", "title": f"還沒到財富自由：不工作每月可花 {_wan(lf['fire_allowed'])}，現在每月花 {_wan(lf['fire_spend'])}。",
-                "text": f"差 {_wan(gap)}／月；達成率 {float(lf.get('fire_ratio33') or 0) * 100:.0f}%（33 倍法則）。",
-                "how": "兩條路：支出降到可花的數字以下，或金融資產再長；每月月報會盯這個比例。"}
+        ratio = f"達成率 {float(lf.get('fire_ratio33') or 0) * 100:.0f}%（33 倍法則）"
+        if gap > 0:
+            return {"level": "warn", "key": "fire_gap", "title": f"還沒到財富自由：不工作每月可花 {_wan(lf['fire_allowed'])}，現在每月花 {_wan(lf['fire_spend'])}。",
+                    "text": f"差 {_wan(gap)}／月；{ratio}。",
+                    "how": "兩條路：支出降到可花的數字以下，或金融資產再長；每月月報會盯這個比例。"}
+        # 堡壘的 warn：提領率在範圍內、但模擬到 90 歲會用完（不是花太多，是撐不到那麼久）
+        return {"level": "warn", "key": "fire_gap", "title": f"財富自由還不穩：每月可花 {_wan(lf['fire_allowed'])}、現在花 {_wan(lf['fire_spend'])}，在範圍內，但模擬到 90 歲會用完。",
+                "text": f"{ratio}。",
+                "how": "看堡壘的財富自由段（報酬順序那條）：前十年報酬不好就會用完，提領率再降一點或資產再長一點才算穩。"}
     if lf.get("fire_pretax"):
         return {"level": "info", "key": "fire_tax", "title": "財富自由那格是稅前數字。",
                 "text": f"每月可花 {_wan(lf['fire_allowed'])} 沒扣股利所得稅與二代健保補充保費。",

@@ -77,16 +77,13 @@ async def generate_report(ent: str, username: str, month: Optional[str] = None) 
         buckets = (await _auto_buckets(session, ent, register["usd_twd"])).get("buckets") or {}
         lo, hi = _month_window(month)
         # 收支明細不是損益表：轉帳（轉匯與定存）兩邊各一筆、刷卡與還款各一筆、買賣股票記成支出／收入 ——
-        # 「本月收入／支出」要把這些跨帳流動排掉（core.cash_taxonomy 的兩本＋「投資」項目）；
-        # bank_net 是帳戶**真正**的淨流（含匯費、請款），給「登記餘額與帳上的差」用。
+        # 「本月收入／支出」要把這些跨帳流動排掉（core.cash_taxonomy 的兩本＋「投資」項目）
         cat = fn.coalesce(CrmCashEntry.category, "")
         cross = or_(cat.like("轉匯與定存%"), cat.like("信用卡%"), cat.like("%投資%"))
-        dep, exp, house, bank_net = (await session.execute(
+        dep, exp, house = (await session.execute(
             select(fn.coalesce(fn.sum(CrmCashEntry.deposit).filter(~cross), 0),
                    fn.coalesce(fn.sum(CrmCashEntry.expense).filter(~cross), 0),
-                   fn.coalesce(fn.sum(CrmCashEntry.expense).filter(cat.like(HOUSEHOLD_TOP + "%")), 0),
-                   fn.coalesce(fn.sum(fn.coalesce(CrmCashEntry.deposit, 0) - fn.coalesce(CrmCashEntry.expense, 0)
-                                      - fn.coalesce(CrmCashEntry.bank_fee, 0) - fn.coalesce(CrmCashEntry.claim, 0)), 0))
+                   fn.coalesce(fn.sum(CrmCashEntry.expense).filter(cat.like(HOUSEHOLD_TOP + "%")), 0))
             .where(CrmCashEntry.entity == ent, CrmCashEntry.entry_date >= lo, CrmCashEntry.entry_date < hi))).one()
         # 快照的 total 含手填桶（預付款…），月報的總資產只有四顆自動桶：比較與走勢要用快照存的 auto 四桶合計，
         # 不然「比上次快照 +X」會被手填桶壓低。舊快照沒有 auto 才退回 total。
@@ -98,10 +95,19 @@ async def generate_report(ent: str, username: str, month: Optional[str] = None) 
         prev_row = (await session.execute(
             select(FinanceMonthlyReport).where(FinanceMonthlyReport.entity == ent, FinanceMonthlyReport.month < month)
             .order_by(FinanceMonthlyReport.month.desc()).limit(1))).scalars().first()
+        # bank_net 是帳戶**真正**的淨流（含匯費、請款），給「登記餘額與帳上的差」用 —— 時間窗要跟 Δ現金一樣：
+        # 上一份月報的基準日（不含）到今天，不是月初到今天；沒有上一份就不算（register_gap 本來就要 Δ現金）
+        bank_net = None
+        if prev_row and prev_row.basis_date:
+            bank_net = int((await session.execute(
+                select(fn.coalesce(fn.sum(fn.coalesce(CrmCashEntry.deposit, 0) - fn.coalesce(CrmCashEntry.expense, 0)
+                                          - fn.coalesce(CrmCashEntry.bank_fee, 0) - fn.coalesce(CrmCashEntry.claim, 0)), 0))
+                .where(CrmCashEntry.entity == ent,
+                       CrmCashEntry.entry_date > datetime.strptime(prev_row.basis_date, "%Y-%m-%d")))).scalar_one() or 0)
         now = datetime.now()
         payload = build_report(
             month, basis, fortress, register, buckets,
-            {"deposit": int(dep or 0), "expense": int(exp or 0), "household_expense": int(house or 0), "bank_net": int(bank_net or 0)},
+            {"deposit": int(dep or 0), "expense": int(exp or 0), "household_expense": int(house or 0), "bank_net": bank_net},
             [{"date": d.strftime("%Y-%m-%d") if d else "", "total": _auto_total(a, t)} for d, t, a in snaps],
             prev=(prev_row.payload if prev_row else None), generated_at=now.strftime("%Y-%m-%d %H:%M"))
         row = (await session.execute(
@@ -160,7 +166,7 @@ async def get_report(month: str, request: Request, entity: str = ""):
 
 @router.post("/monthly-reports/generate")
 async def generate(payload: GeneratePayload, request: Request, entity: str = ""):
-    """手動（重新）產生：本月或指定月份。同月覆蓋。"""
+    """手動（重新）產生本月（同月覆蓋）。帶了不是本月的 month → 422：過去月份以當時登記時產生的那份為準。"""
     ent = _guard(request, entity, level="full")
     report = await generate_report(ent, _username(request), payload.month)
     return {"month": report["month"], "report": report}
