@@ -435,7 +435,7 @@ def test_fire_states_and_extra_income():
     accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 2_883_940},
              {"id": "e", "name": "證券", "kind": "holding", "balance": 47_063_708}]
     bad = build(accts, [], 250_000, {"account_layers": {"e": 5}}, "2026-09-16", need_months=6)["fire"]
-    assert bad["state"] == STATE_BAD and bad["runs_out_year"] == 29 and bad["runs_out_age"] == 66 and "還沒到" in bad["verdict"]
+    assert bad["state"] == STATE_BAD and bad["runs_out_year"] == 29 and bad["runs_out_age"] == 65 and "還沒到" in bad["verdict"]
     # 年金從 65 歲起只比「用完那年」（66 歲）早一年，推不動；從 50 歲起就看得出差別
     with_pension = build(accts, [], 250_000, {"account_layers": {"e": 5}, "fire": {"extra_monthly": 60_000, "extra_from_age": 50}},
                          "2026-09-16", need_months=6)["fire"]
@@ -526,3 +526,33 @@ def test_mobile_overview_line_is_hidden_when_data_is_missing():
     js = js_code_only(repo_src("frontend/m/views/ledger-fortress.js"))
     card = js_func_body(js, "export function fortressCardHtml(d) {")
     assert "d.fire.state !== 'na'" in card, "資料不足就不要印那一行"
+
+
+def test_fire_cash_years_matches_the_runway_above_it():
+    """🔴 同一頁上面說「可撐 10.6 個月」，下面的財富自由說「現金只撐 2.6 年」——
+    因為 cash_years 沒有扣掉預留（已經知道要付、還沒付的錢），可撐月數有扣。兩個數字要同一個口徑。"""
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 3_000_000},
+             {"id": "e", "name": "證券", "kind": "holding", "balance": 47_063_708}]
+    ear = [{"id": "x", "label": "綜所稅", "amount": 2_000_000, "due_date": "2027-05-31", "source": "manual", "paid": False}]
+    d = build(accts, ear, 94206, {"account_layers": {"e": 5}}, "2026-09-16", need_months=6)
+    runway_years = d["runway"]["months"] / 12
+    assert abs(d["fire"]["cash_years"] - round(runway_years, 1)) <= 0.15, (d["runway"]["months"], d["fire"]["cash_years"])
+
+
+def test_pension_starts_in_the_right_year():
+    """🔴 通膨指數是 y-1，所以第 y 年是「age+y-1 歲」那一年 —— 年金從 65 歲開始的話是第 (65-age+1) 年，
+    原本寫 (65-age) 會早一年開始領，方向是樂觀的。用完那年回報的歲數同理要減一。"""
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 50_000_000}]
+    cfg = {"fire": {"extra_monthly": 60_000, "extra_from_age": 65}}
+    d = build(accts, [], 250_000, cfg, "2026-09-16", need_months=6)
+    f = d["fire"]
+    assert f["age"] == 37
+    # 用完那年的歲數：第 y 年跨的是 age+y-1 歲（37 歲的人第 29 年是 65 歲，不是 66）
+    assert f["runs_out_year"] == 29 and f["runs_out_age"] == 65
+    # 年金的起始年：60 歲開始＝第 24 年（60-37+1），早一年會多領一年、把用完那年往後推
+    from core.fortress_logic import fire_simulate
+    right = fire_simulate(50_000_000, 252_000, 0.06, 0.02, 53, 150_000, 24)[0]
+    early = fire_simulate(50_000_000, 252_000, 0.06, 0.02, 53, 150_000, 23)[0]
+    assert (early, right) == (42, 39), "差一年差三年壽命（所以 off-by-one 會影響結論）"
+    g = build(accts, [], 250_000, {"fire": {"extra_monthly": 150_000, "extra_from_age": 60}}, "2026-09-16", need_months=6)["fire"]
+    assert g["runs_out_year"] == right, "用的是 60-37+1＝第 24 年，不是第 23 年"

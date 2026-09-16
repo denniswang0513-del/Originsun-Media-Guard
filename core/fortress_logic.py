@@ -557,7 +557,8 @@ def fire_simulate(assets: float, monthly: float, rate: float, inflation: float, 
     return None, _m(a)
 
 
-def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict, fire: dict, this_year: int) -> dict:
+def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict, fire: dict, this_year: int,
+               earmark_total: float = 0) -> dict:
     """財富自由：此刻不工作、沒收入，每月可以花多少；照現在的花法錢什麼時候用完。
     資產＝金融資產（五層合計）；支出＝必要支出＋不工作後要自付的固定支出（健保、國保）。
     提領率的研究都是美國市場資料、30 年退休期、50–75% 股票；要撐 50 年以上又股票比重高的人用 3.25–3.5%。"""
@@ -570,7 +571,8 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     allowed = _m(float(financial) * chosen / 12)
     age = (this_year - int(fire["birth_year"])) if fire["birth_year"] and this_year else None
     horizon = max(1, int(fire["until_age"]) - age) if age is not None else FIRE_DEFAULT_HORIZON
-    extra_from = max(1, int(fire["extra_from_age"]) - age) if age is not None else 10 ** 6
+    # 通膨指數是 y-1 → 第 y 年跨的是 age+y-1 歲；年金從 E 歲開始＝第 (E-age+1) 年
+    extra_from = max(1, int(fire["extra_from_age"]) - age + 1) if age is not None else 10 ** 6
     base = {"spend": _m(spend), "self_pay": _m(fire["self_pay_monthly"]), "allowed": allowed, "by_rate": by_rate,
             "withdrawal_rate": chosen, "age": age, "until_age": int(fire["until_age"]), "horizon_years": horizon}
     if float(monthly_used or 0) <= 0 or financial <= 0 or spend <= 0:
@@ -580,9 +582,10 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     r, infl = float(growth["rate"]), float(growth["inflation"])
     runs_out, left = fire_simulate(financial, spend, r, infl, horizon, fire["extra_monthly"], extra_from)
     runs_out0, _ = fire_simulate(financial, spend, 0.0, infl, horizon, fire["extra_monthly"], extra_from)
-    cash_years = round(float(cash3) / spend / 12, 1)
+    # 🔴 扣掉預留，跟同一頁上面的可撐月數同口徑 —— 不扣的話兩個數字會互相矛盾
+    cash_years = round(max(0.0, float(cash3) - float(earmark_total or 0)) / spend / 12, 1)
     end_txt = f"{int(fire['until_age'])} 歲" if age is not None else f"第 {horizon} 年"
-    when = lambda y: f"第 {y} 年" + (f"（{age + y} 歲）" if age is not None and y else "")  # noqa: E731
+    when = lambda y: f"第 {y} 年" + (f"（{age + y - 1} 歲）" if age is not None and y else "")  # noqa: E731
     within = current_rate <= chosen
     if within and runs_out is None:
         st = STATE_OK
@@ -603,7 +606,7 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     return {
         **base, "current_rate": round(current_rate, 4),
         "fi25": _m(fi25), "fi33": _m(fi33), "ratio25": round(float(financial) / fi25, 2), "ratio33": round(float(financial) / fi33, 2),
-        "runs_out_year": runs_out, "runs_out_age": (age + runs_out) if (age is not None and runs_out) else None,
+        "runs_out_year": runs_out, "runs_out_age": (age + runs_out - 1) if (age is not None and runs_out) else None,
         "left_at_end": left, "runs_out_year_zero": runs_out0, "cash_years": cash_years, "state": st, "verdict": vd,
         "lines": [["每月支出（含不工作後自付的健保、國保）", _m(spend), "twd"],
                   ["你現在的花法對應提領率", round(current_rate * 100, 2), "pct"],
@@ -723,7 +726,7 @@ def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: di
                        "rows": project_growth(have[5], settings["growth"])},
         "ladder": _ladder_block(have, settings, liabilities or {}),
         "fire": fire_block(sum(have.values()), cash3, used, settings["growth"], settings["fire"],
-                           int(str(today)[:4]) if str(today)[:4].isdigit() else 0),
+                           int(str(today)[:4]) if str(today)[:4].isdigit() else 0, ear_total),
         "accounts": [{"id": a.get("id"), "name": a.get("name"), "kind": a.get("kind"), "balance": int(a.get("balance") or 0),
                       "currency": a.get("currency") or "TWD", "layer": a["layer"], "flags": a["flags"]} for a in accts],
         "settings": settings,
