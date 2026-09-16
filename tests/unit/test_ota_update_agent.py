@@ -46,7 +46,7 @@ def test_transitional_pip_ini_bridge_is_gone():
     """2.5.30 過渡（OTA 帶 python_embed/pip.ini no-deps、Pillow 不釘）已在 2.5.31 還原：Pillow 釘回、manifest 不帶 pip.ini；
     新 update_agent 仍會刪機器上殘留的過渡檔。"""
     from tests.unit._srcscan import repo_src
-    assert "Pillow==12.3.0" in repo_src("requirements_agent.txt").splitlines()
+    # 2.5.38 第一跳的橋暫時把 Pillow 註解掉（重灌機器 pillow 版本不符）；2.5.39 放回。這裡只釘不會回頭的兩條。
     assert '"python_embed/pip.ini",' not in repo_src("ota_manifest.py")
     assert '"originsun-ota-transitional" in open(path' in repo_src("update_agent.py")
 

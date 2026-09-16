@@ -19,7 +19,7 @@ xxhash==3.6.0
 requests==2.32.5
 psutil==7.2.2
 Jinja2==3.1.6
-Pillow==12.3.0
+# Pillow==12.3.0  ← 2.5.38 第一跳的橋暫時不釘（重灌的機器 pillow 版本不符、pip 一換就撞 no-RECORD）；2.5.39 放回、由新 update_agent 的 --ignore-installed 自救
 croniter==6.2.2
 
 # ── Google Auth (for login) ──
