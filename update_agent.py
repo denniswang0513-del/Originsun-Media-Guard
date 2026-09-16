@@ -182,18 +182,47 @@ def _pip_with_self_heal(req_file: str):
         if not pkg or pkg.lower() in healed or len(healed) >= MAX_HEALS:
             break
         healed.add(pkg.lower())
-        pin = _pinned(req_file, pkg) or pkg
-        log(f"pip: {pkg} has no RECORD (half-installed) -> force-reinstall {pin} ({len(healed)}/{MAX_HEALS})")
-        write_status(5, 62, f"修復半套的套件 {pkg}（第 {len(healed)} 個）...")
-        # 🔴 用 --ignore-installed 不用 --force-reinstall：force-reinstall 也會先 uninstall，撞到同一個「no RECORD」
-        #    （2026-09-16 ai_2 真機：requests 連救 7 輪都在這裡倒）。ignore-installed 直接把新版檔案蓋上去、寫好 RECORD，舊檔留著無害。
-        fix = subprocess.run(
-            [PYTHON, "-m", "pip", "install", "-q", "--ignore-installed", "--no-deps", pin, "--no-warn-script-location"],
-            capture_output=True, text=True, timeout=PIP_TIMEOUT,
-        )
-        log(f"force-reinstall exit {fix.returncode}:\n{fix.stdout}\n{fix.stderr}")
+        # 🔴 真正的病灶（2026-09-16 ai_2 真機）：7 月安裝檔重灌留下**沒有 RECORD 的 dist-info 資料夾**（requests-2.32.5.dist-info、
+        #    pillow-12.1.1.dist-info…）。--force-reinstall 與 --ignore-installed 都救不了——它們不刪那個殘留的舊 metadata，
+        #    pip install -r 一看到它就想 uninstall、又沒 RECORD → 死。解法：直接刪掉那個壞掉的 dist-info，pip 當它沒裝過、乾淨裝上。
+        removed = _purge_broken_dist_info(pkg)
+        log(f"pip: {pkg} no RECORD -> removed {removed} broken dist-info dir(s) ({len(healed)}/{MAX_HEALS})")
+        write_status(5, 62, f"清掉半套的套件 {pkg}（第 {len(healed)} 個）...")
         result = _pip_install(req_file)
     return result
+
+
+def _site_packages() -> str:
+    import sysconfig
+    return sysconfig.get_paths().get("purelib") or os.path.join(os.path.dirname(PYTHON), "Lib", "site-packages")
+
+
+def _norm_pkg(name: str) -> str:
+    return name.strip().lower().replace("_", "-")
+
+
+def _purge_broken_dist_info(pkg: str) -> int:
+    """刪掉 site-packages 裡屬於 pkg、而且**缺 RECORD** 的 *.dist-info 資料夾（重灌留下的殘骸）。回刪了幾個。
+    只刪缺 RECORD 的（正常安裝的有 RECORD，不動）。"""
+    sp = _site_packages()
+    target = _norm_pkg(pkg)
+    removed = 0
+    try:
+        entries = os.listdir(sp)
+    except OSError:
+        return 0
+    for d in entries:
+        if not d.endswith(".dist-info"):
+            continue
+        base = _norm_pkg(d[:-len(".dist-info")].rsplit("-", 1)[0])
+        if base != target:
+            continue
+        full = os.path.join(sp, d)
+        if os.path.isfile(os.path.join(full, "RECORD")):
+            continue
+        shutil.rmtree(full, ignore_errors=True)
+        removed += 1
+    return removed
 
 
 def _no_record_pkg(result) -> str:

@@ -39,7 +39,7 @@ def test_pip_self_heals_half_installed_packages():
         os.unlink(path)
     from tests.unit._srcscan import repo_src
     src = repo_src("update_agent.py")
-    assert '"--ignore-installed", "--no-deps", pin' in src and "result = _pip_install(req_file)" in src, "force-reinstall 也會先 uninstall，撞同一個錯"
+    assert "removed = _purge_broken_dist_info(pkg)" in src and "result = _pip_install(req_file)" in src, "改成刪掉壞掉的 dist-info（重灌殘骸），不再 uninstall/reinstall"
 
 
 def test_transitional_pip_ini_bridge_is_gone():
@@ -185,33 +185,34 @@ def test_signing_key_never_ships_but_public_key_does():
     assert "sign(raw, os.path.join(base_dir, PRIVATE_KEY_FILE))" in src
 
 
-def test_pip_self_heal_loops_over_every_half_installed_package(tmp_path, monkeypatch):
-    """2026-09-16 ai_2 重灌後 python_embed 裡 pillow、requests… 好幾個套件都沒 RECORD：只救一個的話每推一輪才多好一個。
-    要一個接一個救到 pip 過為止；同一個套件救過還擋就停、最多 MAX_HEALS 個。"""
+def test_pip_self_heal_purges_broken_dist_info(tmp_path, monkeypatch):
+    """2026-09-16 ai_2 真機：7 月安裝檔重灌留下沒有 RECORD 的 dist-info（requests-2.32.5.dist-info…），
+    --force-reinstall／--ignore-installed 都救不了（不刪殘留 metadata）。改成直接刪掉那個缺 RECORD 的 dist-info，pip 就乾淨裝上。
+    只刪缺 RECORD 的、正常的（有 RECORD）不動；一次更新一個接一個處理到 pip 過為止。"""
     import importlib.util, types
-    spec = importlib.util.spec_from_file_location("update_agent_mod2", "update_agent.py")
+    spec = importlib.util.spec_from_file_location("update_agent_purge", "update_agent.py")
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-    req = tmp_path / "req.txt"; req.write_text("Pillow==12.3.0\nrequests==2.33.0\nxxhash==4.0.1\n", encoding="utf-8")
-    fails = ["pillow", "requests", "xxhash"]          # 依序擋三個，之後過
-    healed = []
+    sp = tmp_path / "site-packages"; sp.mkdir()
+    # requests：缺 RECORD（要刪）；urllib3：有 RECORD（不動）；requests 另一個好版本（有 RECORD，不動）
+    (sp / "requests-2.32.5.dist-info").mkdir(); (sp / "requests-2.32.5.dist-info" / "METADATA").write_text("Name: requests", encoding="utf-8")
+    (sp / "urllib3-2.0.0.dist-info").mkdir(); (sp / "urllib3-2.0.0.dist-info" / "RECORD").write_text("x", encoding="utf-8")
+    (sp / "requests-2.33.0.dist-info").mkdir(); (sp / "requests-2.33.0.dist-info" / "RECORD").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(mod, "_site_packages", lambda: str(sp))
+    assert mod._purge_broken_dist_info("requests") == 1
+    assert not (sp / "requests-2.32.5.dist-info").exists(), "缺 RECORD 的要刪"
+    assert (sp / "requests-2.33.0.dist-info").exists() and (sp / "urllib3-2.0.0.dist-info").exists(), "有 RECORD 的不動"
+    assert mod._norm_pkg("Pillow_HEIF") == "pillow-heif"
+    assert mod._purge_broken_dist_info("nothere") == 0
+
+    # 迴圈：pillow 缺、requests 缺 → 各刪一次、pip 才過；救過還擋就停
+    fails = ["pillow", "requests"]; purged = []
     def fake_pip(_req):
-        if fails:
-            return types.SimpleNamespace(returncode=1, stdout="", stderr=f"error: uninstall-no-record-file\nCannot uninstall {fails[0]} None\nno RECORD file")
-        return types.SimpleNamespace(returncode=0, stdout="ok", stderr="")
-    def fake_run(cmd, **kw):
-        healed.append(cmd[cmd.index("--no-deps") + 1]); fails.pop(0)
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        return types.SimpleNamespace(returncode=(1 if fails else 0), stdout="",
+            stderr=(f"Cannot uninstall {fails[0]} None\nno RECORD file" if fails else ""))
+    def fake_purge(pkg):
+        purged.append(pkg); fails.pop(0); return 1
     monkeypatch.setattr(mod, "_pip_install", fake_pip)
-    monkeypatch.setattr(mod.subprocess, "run", fake_run)
-    monkeypatch.setattr(mod, "log", lambda *a, **k: None)
-    monkeypatch.setattr(mod, "write_status", lambda *a, **k: None)
-    r = mod._pip_with_self_heal(str(req))
-    assert r.returncode == 0 and healed == ["Pillow==12.3.0", "requests==2.33.0", "xxhash==4.0.1"], healed
-    # 同一個救過還擋 → 停，不無限迴圈
-    fails[:] = ["pillow"]; healed.clear()
-    def stuck_run(cmd, **kw):
-        healed.append(cmd[cmd.index("--no-deps") + 1]); return types.SimpleNamespace(returncode=0, stdout="", stderr="")
-    monkeypatch.setattr(mod.subprocess, "run", stuck_run)
-    r = mod._pip_with_self_heal(str(req))
-    assert r.returncode == 1 and healed == ["Pillow==12.3.0"]
-    assert "result = _pip_with_self_heal(req_file)" in repo_src("update_agent.py")
+    monkeypatch.setattr(mod, "_purge_broken_dist_info", fake_purge)
+    monkeypatch.setattr(mod, "log", lambda *a, **k: None); monkeypatch.setattr(mod, "write_status", lambda *a, **k: None)
+    r = mod._pip_with_self_heal("req.txt")
+    assert r.returncode == 0 and purged == ["pillow", "requests"], purged
