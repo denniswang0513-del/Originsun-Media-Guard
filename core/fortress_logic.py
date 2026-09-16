@@ -31,6 +31,31 @@ DEFAULT_CARE = {"monthly": 40000, "years": 7, "insurance_monthly": 0}
 DEFAULT_GROWTH = {"rate": 0.06, "inflation": 0.02, "annual_add": 0}
 #: 預期成長要看哪幾年
 GROWTH_YEARS = (5, 10, 15, 20, 30)
+
+# ── 財富階梯（owner 2026-09-16 拍板：用台灣物價回推，不要用匯率換）──────────────
+#: 階梯的門檻（台幣，5 個門檻＝6 階）。**不是匯率換算**：
+#: 匯率換出來的門檻會寬一階（同樣一個人，免思考金額只夠一頓好餐，卻被標成「旅遊自由」）。
+#: 這組是從台灣的實際價格反推：超商咖啡 60–150、一頓好餐 1,000、一趟旅行 3–10 萬、換房 2,000–3,000 萬，
+#: 除以「免思考比例」得到門檻 → 一百萬起跳、十倍一階。owner 可以改。
+DEFAULT_LADDER = {
+    "thresholds": [1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000],
+    "free_rate": 0.0001,          # 不用想就能花的單筆＝淨值的萬分之一
+    # 主計總處「家庭財富分配統計」2021 年底（2024 年 4 月發布）。這是**另一個問題**的答案
+    # （你贏過多少家庭），跟上面的階梯並排顯示、不互相取代。資料會過時，所以做成可改。
+    "median": 8_940_000, "top20": 21_340_000, "top10": 33_910_000,
+    "stat_note": "主計總處家庭財富分配統計，2021 年底",
+}
+#: 各階的名字與「這一階的人不用想就能買什麼」
+LADDER_RUNGS = (
+    ("生存", "咖啡都要想一下"),
+    ("咖啡自由", "咖啡、便當、小東西不用看價錢"),
+    ("餐廳自由", "菜單上想點什麼點什麼"),
+    ("旅遊自由", "要去哪、住哪，不用先算"),
+    ("房子自由", "換房不動搖生活"),
+    ("完全自由", "錢不再是選項的限制"),
+)
+#: 規劃欄位的預設：想爬到第幾階（4＝1 億）、幾年內到
+DEFAULT_PLAN = {"target_rung": 4, "target_years": 12}
 #: 第 3 題「突發支出」的金額
 SHOCK_AMOUNT = 400_000
 #: 第 2 題股票跌幅
@@ -157,6 +182,31 @@ def normalize_settings(raw) -> dict:
             continue
         lo, hi = growth_bounds[k]
         growth[k] = max(lo, min(hi, n))
+    ladder = dict(DEFAULT_LADDER)
+    raw_l = raw.get("ladder") or {}
+    th = raw_l.get("thresholds")
+    if isinstance(th, (list, tuple)) and len(th) == len(DEFAULT_LADDER["thresholds"]):
+        try:
+            cleaned = sorted(max(1, min(10 ** 13, int(float(x)))) for x in th)
+        except (TypeError, ValueError):
+            cleaned = None
+        if cleaned and len(set(cleaned)) == len(cleaned):      # 要嚴格遞增，不然「在第幾階」會算不出來
+            ladder["thresholds"] = cleaned
+    for k, lo, hi in (("free_rate", 1e-6, 0.01), ("median", 0, 10 ** 13), ("top20", 0, 10 ** 13), ("top10", 0, 10 ** 13)):
+        if k in raw_l:
+            try:
+                ladder[k] = max(lo, min(hi, float(raw_l[k]) if k == "free_rate" else int(float(raw_l[k]))))
+            except (TypeError, ValueError):
+                pass
+    if isinstance(raw_l.get("stat_note"), str):
+        ladder["stat_note"] = raw_l["stat_note"][:80]
+    plan = dict(DEFAULT_PLAN)
+    for k, lo, hi in (("target_rung", 2, len(LADDER_RUNGS)), ("target_years", 1, 60)):
+        if k in (raw.get("plan") or {}):
+            try:
+                plan[k] = max(lo, min(hi, int(float((raw["plan"])[k]))))
+            except (TypeError, ValueError):
+                pass
     override = raw.get("monthly_need_override")
     try:
         override = int(override) if override not in (None, "", 0, "0") else None
@@ -170,14 +220,15 @@ def normalize_settings(raw) -> dict:
     except (TypeError, ValueError):
         hl = 5
     return {"account_layers": layers, "account_flags": flags, "holdings_layer": hl if 1 <= hl <= 5 else 5,
-            "targets": targets, "monthly_need_override": override, "war": war, "care": care, "growth": growth}
+            "targets": targets, "monthly_need_override": override, "war": war, "care": care, "growth": growth,
+            "ladder": ladder, "plan": plan}
 
 
 def merge_settings(current: dict, patch: dict) -> dict:
     """PUT 設定：淺層合併（account_layers／account_flags／targets／war 各自整份取代；其餘逐鍵）。"""
     out = normalize_settings(current)
     patch = patch if isinstance(patch, dict) else {}
-    for k in ("account_layers", "account_flags", "targets", "war", "care", "growth"):
+    for k in ("account_layers", "account_flags", "targets", "war", "care", "growth", "ladder", "plan"):
         if k in patch and isinstance(patch[k], dict):
             out[k] = patch[k]
     for k in ("holdings_layer", "monthly_need_override"):
@@ -371,6 +422,111 @@ def _care_test(cash4: float, holdings_total: float, m: float, ear: float, care: 
                            "沒有算「照顧者離職少一份收入」—— 那一段看第 1 題。"))
 
 
+def ladder_position(net_worth: float, ladder: dict) -> dict:
+    """淨值 → 在第幾階、不用想就能花多少、距離下一階還差多少。
+    門檻是 5 個數字＝6 階；第 6 階沒有上限。"""
+    th = list(ladder["thresholds"])
+    n = float(net_worth or 0)
+    rung = 1
+    for i, t in enumerate(th):
+        if n >= t:
+            rung = i + 2
+    top = th[rung - 2] if rung >= 2 else 0          # 這一階的下緣
+    nxt = th[rung - 1] if rung - 1 < len(th) else None   # 下一階的門檻（第 6 階沒有）
+    name, desc = LADDER_RUNGS[min(rung, len(LADDER_RUNGS)) - 1]
+    span = (nxt - top) if nxt else 0
+    return {
+        "rung": rung, "name": name, "desc": desc,
+        "net_worth": _m(n), "free_amount": _m(n * float(ladder["free_rate"])),
+        "floor": _m(top), "next": _m(nxt) if nxt else None,
+        "to_next": _m(nxt - n) if nxt else None,
+        "pct_in_rung": max(0, min(100, int(round((n - top) / span * 100)))) if span > 0 else 100,
+        "rungs": [{"no": i + 1, "name": LADDER_RUNGS[i][0], "desc": LADDER_RUNGS[i][1],
+                   "floor": _m(th[i - 1]) if i >= 1 else 0, "ceiling": _m(th[i]) if i < len(th) else None,
+                   "free_from": _m((th[i - 1] if i >= 1 else 0) * float(ladder["free_rate"])),
+                   "free_to": _m(th[i] * float(ladder["free_rate"])) if i < len(th) else None,
+                   "you": i + 1 == rung} for i in range(len(LADDER_RUNGS))],
+    }
+
+
+def percentile_note(net_worth: float, ladder: dict) -> str:
+    """「你在台灣家庭的哪個位置」—— 跟階梯並排的另一個答案，不取代它。"""
+    n = float(net_worth or 0)
+    note = ladder.get("stat_note") or ""
+    for key, label in (("top10", "前 10%"), ("top20", "前 20%")):
+        t = float(ladder.get(key) or 0)
+        if t and n >= t:
+            return f"超過台灣家庭{label} 的門檻（{_wan(t)}，{note}）"
+    med = float(ladder.get("median") or 0)
+    if med and n >= med:
+        return f"高於台灣家庭淨值中位數（{_wan(med)}，{note}）"
+    return f"低於台灣家庭淨值中位數（{_wan(med)}，{note}）" if med else ""
+
+
+def years_to_reach(base: float, target: float, rate: float, annual_add: float, cap: int = 100):
+    """照目前的報酬與每年再投入，幾年後到得了 target。到不了（cap 年內）回 None。"""
+    v, r, add = float(base), float(rate), float(annual_add)
+    if v >= target:
+        return 0
+    for y in range(1, cap + 1):
+        v = v * (1 + r) + add
+        if v >= target:
+            return y
+    return None
+
+
+def plan_result(base: float, target: float, years: int, growth: dict) -> dict:
+    """三個規劃欄位接起來：照現在的速度幾年到、要在指定年限內到的話每年要再投入多少、
+    或（不再投入的話）年報酬要多少。做不到就說做不到。"""
+    r = float(growth["rate"])
+    add = float(growth["annual_add"])
+    base, target, years = float(base), float(target), max(1, int(years))
+    at_current = years_to_reach(base, target, r, add)
+    grown = base * (1 + r) ** years
+    # 年金公式反算：要補的缺口 ÷ 年金終值因子
+    need_add = None if grown >= target else (target - grown) * r / ((1 + r) ** years - 1) if r else (target - grown) / years
+    need_rate = None
+    if base > 0 and target > base:
+        lo, hi = 0.0, 1.0
+        for _ in range(60):                       # 二分：不再投入的話年報酬要多少
+            mid = (lo + hi) / 2
+            if base * (1 + mid) ** years < target:
+                lo = mid
+            else:
+                hi = mid
+        need_rate = round(hi, 4)
+    return {"target": _m(target), "years": years, "years_at_current": at_current,
+            "need_annual_add": _m(need_add) if need_add else 0,
+            "need_rate": need_rate, "on_track": at_current is not None and at_current <= years}
+
+
+def effort_focus(base: float, growth: dict) -> dict:
+    """這一階該把力氣放哪：資產自己長的錢 vs 你今年存進去的錢，哪個大。
+    越過那條線之後，報酬率與資產配置比多接一個案子更能決定結果。"""
+    gain = float(base) * float(growth["rate"])
+    add = float(growth["annual_add"])
+    return {"passive": _m(gain), "added": _m(add), "passive_wins": gain > add}
+
+
+def _ladder_block(have: dict, settings: dict, liabilities: dict) -> dict:
+    """財富階梯那一段：你在第幾階、贏過台灣多少家庭、規劃欄位的答案、這一階該把力氣放哪。
+    淨值＝五層合計 − 負債（卡債＋貸款剩餘本金）—— 純金融資產，不含應收帳款與器材
+    （階梯問的是「不用想就能花多少」，那些不是能隨手花的錢）。"""
+    ladder, plan, growth = settings["ladder"], settings["plan"], settings["growth"]
+    debt = sum(int(v or 0) for v in liabilities.values())
+    net = sum(have.values()) - debt
+    pos = ladder_position(net, ladder)
+    target = ladder["thresholds"][plan["target_rung"] - 2]
+    return {
+        **pos,
+        "liabilities": {"total": _m(debt), **{k: _m(v) for k, v in liabilities.items()}},
+        "percentile": percentile_note(net, ladder),
+        "plan": {**plan, **plan_result(have[5], target, plan["target_years"], growth)},
+        "focus": effort_focus(have[5], growth),
+        "settings": ladder,
+    }
+
+
 def project_growth(base: float, growth: dict, years=GROWTH_YEARS) -> list:
     """第 5 層複利資本往後推。回 [{year, nominal, real, added}]。
     名目＝複利＋每年再投入（年底投入）；real＝換算成今天的購買力（除以通膨）。
@@ -404,14 +560,16 @@ def pick_loan_dues(rows, today: str) -> list:
 
 
 def _wan(x: float) -> str:
-    """金額 → 「12.5 萬」（結論句用；數字欄位另外回原始整數）。"""
-    v = round(float(x) / 10000, 1)
-    return f"{v:g} 萬"
+    """金額 → 「12.5 萬」／一億以上「1.2 億」（結論句用；數字欄位另外回原始整數）。"""
+    a = abs(float(x))
+    if a >= 1e8:
+        return f"{round(float(x) / 1e8, 2):,g} 億"
+    return f"{round(float(x) / 10000, 1):,g} 萬"
 
 
 # ── 組整份 ────────────────────────────────────────────────────────
 def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: dict, today: str = "",
-          need_months: int = 0, warnings: list = None) -> dict:
+          need_months: int = 0, warnings: list = None, liabilities: dict = None) -> dict:
     """整頁要的東西一趟算完。
     accounts：見 assign_layers；earmarks：[{id, label, amount, due_date, source, source_ref, paid, note}]（paid 的不算進合計）；
     monthly_need_auto：近幾個月平均（router 算）；settings：normalize_settings 過的。"""
@@ -454,6 +612,7 @@ def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: di
         "tests": stress_tests(have, accts, used, ear_total, settings["war"], settings["care"]),
         "projection": {"base": _m(have[5]), **settings["growth"],
                        "rows": project_growth(have[5], settings["growth"])},
+        "ladder": _ladder_block(have, settings, liabilities or {}),
         "accounts": [{"id": a.get("id"), "name": a.get("name"), "kind": a.get("kind"), "balance": int(a.get("balance") or 0),
                       "currency": a.get("currency") or "TWD", "layer": a["layer"], "flags": a["flags"]} for a in accts],
         "settings": settings,

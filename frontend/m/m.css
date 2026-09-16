@@ -223,6 +223,16 @@
   /* 🔴 scope 住：`.lg-sub .num` 沒前綴的話，其他六頁任何 .lg-sub 裡的 .num 都會被染色 */
   .ft-card .num, #tab-fortress .num { font-variant-numeric:tabular-nums; color:var(--ink); }
   .ft-warn { margin-bottom:10px; }
+  /* 財富階梯（唯讀；規劃欄位在桌機） */
+  .ft-lad { padding:7px 0; border-bottom:1px solid var(--line); }
+  .ft-lad:last-child { border-bottom:none; }
+  .ft-lad .t { display:flex; justify-content:space-between; gap:8px; font-size:13.5px; }
+  .ft-lad .t .nm { color:var(--sub); min-width:0; }
+  .ft-lad .t .v { color:var(--sub); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .ft-lad.you .t .nm, .ft-lad.you .t .v { color:var(--ink); font-weight:500; }
+  .ft-lad .bar { height:6px; background:var(--field); border:1px solid var(--line); border-radius:999px; overflow:hidden; margin-top:6px; }
+  .ft-lad .bar i { display:block; height:100%; background:var(--ok); }
+  .ft-lad .acc { font-size:11.5px; color:var(--sub); margin-top:4px; }
   .ft-mini { display:grid; grid-template-columns:repeat(5, 1fr); gap:5px; margin-top:12px; }
   .ft-mini .c { height:34px; background:var(--field); border:1px solid var(--line); border-radius:6px; position:relative; overflow:hidden; }
   .ft-mini .c i { position:absolute; left:0; right:0; bottom:0; background:var(--ok); opacity:.85; }

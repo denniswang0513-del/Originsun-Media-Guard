@@ -21,8 +21,10 @@ let _data = null;
 /** 元 → 「X 萬」（一位小數，.0 去掉）：大數字與說明句用；表格列仍用 money() 全位數。 */
 export function wan(n) {
     if (n === null || n === undefined || !Number.isFinite(Number(n))) return '—';
-    const v = Number(n) / 10000;
-    return v.toFixed(1).replace(/\.0$/, '') + ' 萬';
+    const a = Math.abs(Number(n));
+    // 一億以上用「億」：階梯的門檻寫成「10,000 萬」沒人看得懂
+    if (a >= 1e8) return (Number(n) / 1e8).toFixed(2).replace(/\.?0+$/, '') + ' 億';
+    return (Number(n) / 10000).toFixed(1).replace(/\.0$/, '') + ' 萬';
 }
 /** 月數：null → '—'，否則一位小數（.0 去掉）。 */
 export function months(n) {
@@ -138,10 +140,37 @@ function draw(d) {
                 <span class="v amt">${money(need.used)}</span></div>
             <div class="lg-sub" style="margin-top:6px">要改請到桌機的堡壘分頁</div>
         </div>
+        ${ladderHtml(d)}
         ${growthHtml(d)}
         <div class="m-h">壓力測試</div>
         <div class="m-card ft-tests">${(d.tests || []).map(testHtml).join('') || emptyBox('還沒有壓力測試')}</div>`;
 }
+
+/** 財富階梯：你在第幾階、不用想能花多少、距離下一階、贏過台灣多少家庭。唯讀，規劃欄位在桌機。 */
+function ladderHtml(d) {
+    const L = d.ladder;
+    if (!L || !L.rungs) return '';
+    const p = L.plan || {}, f = L.focus || {};
+    const bars = [...L.rungs].map(r => {
+        const w = r.you ? Math.max(6, Math.min(100, Number(L.pct_in_rung) || 0)) : 0;
+        return `<div class="ft-lad${r.you ? ' you' : ''}">
+            <div class="t"><span class="nm">${esc(String(r.no))} ${esc(r.name)}</span><span class="v">${esc(wan(r.floor))}${r.ceiling == null ? ' 以上' : ' – ' + wan(r.ceiling)}</span></div>
+            ${r.you ? `<div class="bar"><i style="width:${w}%"></i></div><div class="acc">你 ${esc(wan(L.net_worth))}・這階走了 ${esc(String(L.pct_in_rung))}%・不用想就能花 ${esc(money(L.free_amount))}</div>` : ''}
+        </div>`;
+    }).join('');
+    const plan = p.years_at_current == null
+        ? `照現在的速度，${esc(String(p.years))} 年內到不了 ${esc(wan(p.target))}`
+        : `照現在的速度 ${esc(String(p.years_at_current))} 年到 ${esc(wan(p.target))}（你設 ${esc(String(p.years))} 年）`;
+    return `<div class="m-h">財富階梯</div>
+        <div class="m-card">
+            ${bars}
+            <div class="lg-sub" style="margin-top:8px">${esc(L.percentile || '')}</div>
+            <div class="lg-row"><span class="k">距離第 ${esc(String(L.rung + 1))} 階</span><span class="v num">${esc(L.to_next == null ? '—' : wan(L.to_next))}</span></div>
+            <div class="lg-row"><span class="k">資產一年自己長<div class="lg-sub">你一年存 ${esc(wan(f.added))}</div></span><span class="v num">${esc(wan(f.passive))}</span></div>
+            <div class="lg-sub" style="margin-top:6px">${plan}・目標與門檻到桌機改</div>
+        </div>`;
+}
+
 
 /** 資產預期成長：第 5 層複利資本往後推（名目／今天的購買力）。假設要改到桌機。 */
 function growthHtml(d) {

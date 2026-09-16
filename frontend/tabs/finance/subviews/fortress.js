@@ -29,9 +29,11 @@ const FLAG_KEYS = ['physical', 'offshore', 'usd'];
 /** 元 → 「12.5 萬」（負數前面加 −） */
 function fmtWan(n) {
     if (n == null || isNaN(n)) return '—';
-    const v = Math.round(Math.abs(n) / 1000) / 10;
+    const a = Math.abs(n);
+    // 一億以上用「億」：財富階梯的門檻寫成「10,000 萬」沒人看得懂
+    const [v, unit] = a >= 1e8 ? [Math.round(a / 1e6) / 100, ' 億'] : [Math.round(a / 1000) / 10, ' 萬'];
     // 四捨五入到 0 的負數不要寫成「−0 萬」
-    return (n < 0 && v > 0 ? '−' : '') + v.toLocaleString('zh-TW', { maximumFractionDigits: 1 }) + ' 萬';
+    return (n < 0 && v > 0 ? '−' : '') + v.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) + unit;
 }
 /** 月數 → 「9.1 個月」；null → — */
 function fmtMonths(m) {
@@ -156,6 +158,23 @@ function _injectCss() {
 .ft .ft-test .line span:last-child { color: #e0e0e0; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ft .ft-test .assume { font-size: 11.5px; color: #6b7280; line-height: 1.5; }
 .ft .ft-test .verdict { margin-top: auto; padding-top: 9px; border-top: 1px dashed #3a3a3a; font-size: 12.5px; color: #e0e0e0; }
+.ft .lad { display: flex; flex-direction: column-reverse; gap: 3px; }
+.ft .lad-rung { display: grid; grid-template-columns: 34px 1fr auto; gap: 14px; align-items: center; background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 4px; padding: 10px 14px; }
+.ft .lad-rung .no { font-size: 17px; font-weight: 700; color: #6b7280; text-align: center; }
+.ft .lad-rung .nm { font-weight: 700; color: #eee; }
+.ft .lad-rung .nm span { font-weight: 400; color: #9ca3af; font-size: 12.5px; margin-left: 8px; }
+.ft .lad-rung .nm .here { display: inline-block; font-size: 11.5px; background: #86efac; color: #0f172a; border-radius: 999px; padding: 1px 9px; margin-left: 8px; vertical-align: 1px; }
+.ft .lad-rung .rg { font-size: 12.5px; color: #9ca3af; margin-top: 2px; }
+.ft .lad-rung .free { text-align: right; white-space: nowrap; font-size: 12px; color: #9ca3af; }
+.ft .lad-rung .free b { display: block; color: #e0e0e0; font-size: 13.5px; }
+.ft .lad-rung.you { border-color: #86efac; border-width: 2px; background: #1f3a30; }
+.ft .lad-rung.you .no { color: #86efac; }
+.ft .lad-h { font-weight: 700; color: #eee; margin-bottom: 8px; }
+.ft .ft-strip .line { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: #9ca3af; padding: 3px 0; }
+.ft .ft-strip .line span:last-child { color: #e0e0e0; }
+.ft .lad-note { font-size: 12.5px; color: #9ca3af; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #3a3a3a; line-height: 1.7; }
+.ft .lad-note b { color: #e0e0e0; }
+@media (max-width: 760px) { .ft .lad-rung { width: 100% !important; grid-template-columns: 28px 1fr; } .ft .lad-rung .free { grid-column: 2; text-align: left; } }
 .ft .ft-growth { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; align-items: end; height: 150px; }
 .ft .ft-growth .g-col { display: flex; flex-direction: column; justify-content: flex-end; height: 100%; gap: 4px; min-width: 0; }
 .ft .ft-growth .g-amt { font-size: 11.5px; color: #e0e0e0; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -237,6 +256,7 @@ function _render() {
         <div class="ft-sec"><h3>壓力測試</h3><span class="why">每季看一次，六題都用上面的數字自動回答；台海戰爭與長期照護的假設可以自己調</span></div>
         <div class="ft-tests">${(d.tests || []).map((t, i) => _tower(t, i, d)).join('')}</div>
         ${_growth(d)}
+        ${_ladder(d)}
         <div class="ft-sec"><h3>帳戶分層</h3><span class="why">一次設好就不用再動；證券預設第 5 層。改了會自動儲存</span></div>
         ${_accounts(d)}
         <div class="ft-foot">
@@ -413,6 +433,64 @@ function _targets(d) {
 }
 
 // ── 壓力測試：五座塔同一個框 ──────────────────────────────────
+/** 財富階梯：你在第幾階、贏過台灣多少家庭、規劃欄位、這一階該把力氣放哪。 */
+function _ladder(d) {
+    const L = d.ladder;
+    if (!L || !L.rungs) return '';
+    const lb = L.settings || {};
+    const money = (v) => (v == null ? '沒有上限' : fmtWan(v));
+    const rows = [...L.rungs].reverse().map((r) => `
+        <div class="lad-rung${r.you ? ' you' : ''}" style="width:${58 + r.no * 7}%">
+            <div class="no">${fmtNum(r.no)}</div>
+            <div class="mid"><div class="nm">${esc(r.name)}<span>${esc(r.desc)}</span>${r.you ? '<b class="here">你在這裡</b>' : ''}</div>
+                <div class="rg">${money(r.floor)} – ${money(r.ceiling)}${r.you ? `　·　你 <span class="ft-num">${fmtWan(L.net_worth)}</span>，這階走了 ${fmtNum(L.pct_in_rung)}%` : ''}</div></div>
+            <div class="free">不用想就能花<b class="ft-num">${r.free_to == null ? fmtNum(r.free_from) + ' 元以上' : fmtNum(r.free_from) + '–' + fmtNum(r.free_to) + ' 元'}</b></div>
+        </div>`).join('');
+    const p = L.plan || {}, f = L.focus || {};
+    const lia = L.liabilities || {};
+    const planLine = p.years_at_current == null
+        ? `照現在的報酬與投入，${fmtNum(p.years)} 年內到不了 ${fmtWan(p.target)}。`
+        : (p.on_track
+            ? `照現在的報酬與投入，<b>${fmtNum(p.years_at_current)} 年</b>就會到 ${fmtWan(p.target)}，在你設的 ${fmtNum(p.years)} 年之內。`
+            : `照現在的報酬與投入要 <b>${fmtNum(p.years_at_current)} 年</b>，比你設的 ${fmtNum(p.years)} 年慢。`);
+    const fixLine = p.on_track ? '' :
+        `要在 ${fmtNum(p.years)} 年內到，二選一：<b>每年再投入 ${fmtWan(p.need_annual_add)}</b>，或年報酬要有 <b>${((p.need_rate || 0) * 100).toFixed(1)}%</b>（現在假設 ${(((d.projection || {}).rate || 0) * 100).toFixed(1)}%）。`;
+    return `
+    <div class="ft-sec"><h3>財富階梯</h3><span class="why">階梯看「你有多少」，上面的堡壘看「出事時撐不撐得住」——爬階梯之前先把第 1 到 4 層填滿</span></div>
+    <div class="lad">${rows}</div>
+    <div class="ft-grid2" style="margin-top:14px;">
+        <div class="ft-strip">
+            <div class="lad-h">你現在的位置</div>
+            <div class="line"><span>淨值（五層合計 − 負債）</span><span class="ft-num">$${fmtNum(L.net_worth)}</span></div>
+            <div class="line"><span>其中負債（卡債＋貸款剩餘本金）</span><span class="ft-num">$${fmtNum(lia.total)}</span></div>
+            <div class="line"><span>不用想就能花（單筆）</span><span class="ft-num">$${fmtNum(L.free_amount)}</span></div>
+            <div class="line"><span>距離第 ${fmtNum(L.rung + 1)} 階</span><span class="ft-num">${L.to_next == null ? '—' : '$' + fmtNum(L.to_next)}</span></div>
+            <div class="lad-note">${esc(L.percentile || '')}</div>
+        </div>
+        <div class="ft-strip">
+            <div class="lad-h">規劃</div>
+            <div class="ft-war" style="margin:0 0 8px;">
+                <label>想爬到第幾階<select class="crm-input" id="ft-p-rung">${L.rungs.filter((r) => r.no >= 2).map((r) => `<option value="${r.no}"${Number(p.target_rung) === r.no ? ' selected' : ''}>${fmtNum(r.no)} ${esc(r.name)}（${fmtWan(r.floor)}）</option>`).join('')}</select></label>
+                <label>幾年內到<input class="crm-input" id="ft-p-years" type="number" min="1" max="60" step="1" value="${fmtNum(p.target_years)}"></label>
+                <div class="full"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finFortress.savePlan(this)">重算</button>
+                    <span class="ft-src" style="align-self:center;">每年再投入在上面那段「資產預期成長」改</span></div>
+            </div>
+            <div class="lad-note">${planLine} ${fixLine}</div>
+            <div class="lad-h" style="margin-top:12px;">這一階該把力氣放哪</div>
+            <div class="line"><span>資產一年自己長的錢</span><span class="ft-num">$${fmtNum(f.passive)}</span></div>
+            <div class="line"><span>你一年存進去的錢</span><span class="ft-num">$${fmtNum(f.added)}</span></div>
+            <div class="lad-note">${f.passive_wins
+                ? '資產自己長的比你存的多 —— <b>報酬率與資產配置，比多接一個案子更能決定結果</b>。這也是堡壘那五層要填滿的理由：現金不夠的人會在低點被迫賣股票，等於親手把報酬率砍掉。'
+                : '你存的比資產自己長的多 —— 現階段<b>把收入做大、把存下來的比例拉高</b>，比研究報酬率有效。'}</div>
+        </div>
+    </div>
+    <div class="ft-foot" style="margin-top:10px;">
+        階梯門檻用台灣的實際價格回推（咖啡 60–150、一頓好餐 1,000、一趟旅行 3–10 萬），不是用匯率換算 —— 匯率換出來會寬一階。
+        分位數是${esc(lb.stat_note || '官方統計')}，資料會過時。兩組數字都能改（改門檻請找我）。
+    </div>`;
+}
+
+
 /** 資產預期成長：第 5 層複利資本往後推，名目與「今天的購買力」各一條。 */
 function _growth(d) {
     const g = d.projection || {};
@@ -574,7 +652,7 @@ async function _put(path, body, okMsg, btn) {
 }
 
 /** 目前存著的設定（後端正規化過的那份）。空白的輸入格以它為底，才不會被整份取代洗成預設。 */
-const _cfg = () => (_d && _d.settings) || { targets: {}, war: {}, care: {}, growth: {}, account_layers: {}, account_flags: {} };
+const _cfg = () => (_d && _d.settings) || { targets: {}, war: {}, care: {}, growth: {}, plan: {}, ladder: {}, account_layers: {}, account_flags: {} };
 /** 輸入格的數字；空白或非數字 → fallback（不要當成 0） */
 function _num(id, fallback) {
     const el = document.getElementById(id);
@@ -627,6 +705,15 @@ _ff.saveAssume = (key, btn) => {
         } }, '已改長照假設', btn);
     }
     _openAssume = '';
+};
+
+_ff.savePlan = (btn) => {
+    const p = _cfg().plan || {};
+    const sel = document.getElementById('ft-p-rung');
+    _put('/fortress/settings', { plan: {
+        target_rung: Math.max(2, Math.round(Number(sel && sel.value) || p.target_rung || 4)),
+        target_years: Math.max(1, Math.round(_num('ft-p-years', p.target_years ?? 12))),
+    } }, '已重算', btn);
 };
 
 _ff.saveGrowth = (btn) => {

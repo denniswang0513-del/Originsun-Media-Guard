@@ -65,6 +65,8 @@ class FortressSettingsPatch(BaseModel):
     war: Optional[dict] = None
     care: Optional[dict] = None       # 長照假設：每月照護費／年數／保險每月給付
     growth: Optional[dict] = None     # 資產預期成長：年報酬／通膨／每年再投入
+    ladder: Optional[dict] = None     # 財富階梯：門檻五個、免思考比例、台灣分位數與註記
+    plan: Optional[dict] = None       # 規劃欄位：目標階梯、目標年份
 
 
 def _guard(request: Request, entity: str = "") -> str:
@@ -166,6 +168,19 @@ async def _auto_earmarks(session, ent: str, today: date) -> list:
     return out
 
 
+async def _liabilities(session, ent: str) -> dict:
+    """負債：信用卡未繳＋貸款剩餘本金（未繳期別的本金合計）。財富階梯的淨值要扣掉它們。"""
+    from routers.api_finance_card import _card_cfg, _card_numbers, _card_view
+    cfg = _card_cfg(ent)
+    card = max(0, int(_card_view(cfg, await _card_numbers(ent, cfg)).get("outstanding") or 0))
+    loan = int((await session.execute(
+        select(fn.coalesce(fn.sum(FinanceLoanPayment.principal_due), 0))
+        .select_from(FinanceLoanPayment)
+        .join(FinanceLoan, FinanceLoan.id == FinanceLoanPayment.loan_id)
+        .where(FinanceLoan.entity == ent, FinanceLoanPayment.status != "paid"))).scalar_one() or 0)
+    return {"card": card, "loan": loan}
+
+
 async def _manual_earmarks(session, ent: str) -> list:
     """手填的那幾筆（finance_fortress_earmarks）。已付的照樣回，前端會排到最後、合計不算。"""
     rows = (await session.execute(
@@ -200,8 +215,9 @@ async def _payload(ent: str) -> dict:
         accounts, warnings = await _accounts(session, ent)
         earmarks = await _auto_earmarks(session, ent, today) + await _manual_earmarks(session, ent)
         need, need_months = await _monthly_need_auto(session, ent, today)
+        liabilities = await _liabilities(session, ent)
     out = build(accounts, earmarks, need, _load_cfg(ent), today.isoformat(),
-                need_months=need_months, warnings=warnings)
+                need_months=need_months, warnings=warnings, liabilities=liabilities)
     out["entity"] = ent
     return out
 

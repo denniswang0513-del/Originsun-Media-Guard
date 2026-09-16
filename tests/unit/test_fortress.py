@@ -329,3 +329,64 @@ def test_growth_projection_gives_nominal_and_todays_purchasing_power():
     assert [r for r in flat if r["year"] == 10][0]["nominal"] == 1_000_000
     d = build([], [], 50000, {}, "", need_months=6)
     assert [r["year"] for r in d["projection"]["rows"]] == list(GROWTH_YEARS) and d["projection"]["base"] == 0
+
+
+# ── 財富階梯（owner 2026-09-16 拍板：台灣物價回推，不用匯率換；門檻可調）──────────
+def test_ladder_thresholds_are_taiwan_prices_not_exchange_rate():
+    """🔴 匯率換出來的門檻會**寬一階**：同一個人免思考金額只夠一頓好餐，卻被標成「旅遊自由」。
+    這組是從台灣的實際價格反推（咖啡 60–150、一頓好餐 1,000、一趟旅行 3–10 萬）→ 一百萬起跳、十倍一階。"""
+    from core.fortress_logic import DEFAULT_LADDER, ladder_position
+    assert DEFAULT_LADDER["thresholds"] == [1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000]
+    p = ladder_position(49_945_220, DEFAULT_LADDER)
+    assert (p["rung"], p["name"]) == (3, "餐廳自由"), "4,995 萬是第 3 階 —— 匯率換算會誤判成第 4 階"
+    assert p["free_amount"] == 4995 and p["to_next"] == 100_000_000 - 49_945_220 and p["pct_in_rung"] == 44
+    assert [r["you"] for r in p["rungs"]] == [False, False, True, False, False, False]
+    assert p["rungs"][-1]["ceiling"] is None and ladder_position(50_000_000_000, DEFAULT_LADDER)["next"] is None
+    assert ladder_position(0, DEFAULT_LADDER)["rung"] == 1
+
+
+def test_ladder_thresholds_are_adjustable_but_must_stay_increasing():
+    """owner 要能改門檻；亂序或個數不對就退回預設（不然「在第幾階」會算不出來）。"""
+    from core.fortress_logic import DEFAULT_LADDER
+    ok = normalize_settings({"ladder": {"thresholds": [2_000_000, 20_000_000, 200_000_000, 2_000_000_000, 20_000_000_000],
+                                        "free_rate": 0.0002, "median": 9_000_000}})["ladder"]
+    assert ok["thresholds"][0] == 2_000_000 and ok["free_rate"] == 0.0002 and ok["median"] == 9_000_000
+    assert normalize_settings({"ladder": {"thresholds": [1, 2, 3]}})["ladder"]["thresholds"] == DEFAULT_LADDER["thresholds"], "個數不對"
+    assert normalize_settings({"ladder": {"thresholds": [5, 5, 5, 5, 5]}})["ladder"]["thresholds"] == DEFAULT_LADDER["thresholds"], "要嚴格遞增"
+    assert normalize_settings({"ladder": {"thresholds": [50, 40, 30, 20, 10]}})["ladder"]["thresholds"] == [10, 20, 30, 40, 50], "會自己排好"
+    assert normalize_settings({"ladder": {"free_rate": 99}})["ladder"]["free_rate"] <= 0.01
+
+
+def test_percentile_line_answers_a_different_question():
+    """階梯問「不用想能花多少」，分位數問「贏過多少家庭」—— 並排，不互相取代。"""
+    from core.fortress_logic import DEFAULT_LADDER, percentile_note
+    assert "前 10%" in percentile_note(49_945_220, DEFAULT_LADDER)
+    assert "前 20%" in percentile_note(25_000_000, DEFAULT_LADDER)
+    assert "高於" in percentile_note(10_000_000, DEFAULT_LADDER)
+    assert "低於" in percentile_note(1_000_000, DEFAULT_LADDER)
+    assert "2021" in percentile_note(49_945_220, DEFAULT_LADDER), "要寫出資料年份（會過時）"
+
+
+def test_plan_fields_say_what_it_would_take():
+    """三個規劃欄位接起來：照現在幾年到、要準時到的話每年要投多少／報酬要多少。做不到就說做不到。"""
+    from core.fortress_logic import plan_result, years_to_reach
+    r = plan_result(47_063_708, 100_000_000, 12, {"rate": 0.06, "inflation": 0.02, "annual_add": 0})
+    assert r["years_at_current"] == 13 and r["on_track"] is False
+    assert 0 < r["need_annual_add"] < 500_000 and 0.06 < r["need_rate"] < 0.07
+    ok = plan_result(47_063_708, 100_000_000, 20, {"rate": 0.06, "inflation": 0.02, "annual_add": 0})
+    assert ok["on_track"] is True and ok["need_annual_add"] == 0, "已經來得及就不用再投入"
+    assert years_to_reach(100, 1_000_000, 0.0, 0) is None, "不長也不投入 → 到不了（不是無限迴圈）"
+    assert years_to_reach(100, 50, 0.06, 0) == 0
+
+
+def test_effort_focus_and_net_worth_in_payload():
+    """淨值＝五層合計 − 負債；「該把力氣放哪」＝資產自己長的 vs 你存的。"""
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 2_883_940},
+             {"id": "e", "name": "證券", "kind": "holding", "balance": 47_063_708}]
+    d = build(accts, [], 94206, {"account_layers": {"e": 5}}, "2026-09-16", need_months=6,
+              liabilities={"card": 2428, "loan": 0})
+    L = d["ladder"]
+    assert L["net_worth"] == 2_883_940 + 47_063_708 - 2428 and L["liabilities"]["total"] == 2428
+    assert L["rung"] == 3 and L["focus"]["passive"] == round(47_063_708 * 0.06) and L["focus"]["passive_wins"] is True
+    d2 = build(accts, [], 94206, {"account_layers": {"e": 5}, "growth": {"annual_add": 5_000_000}}, "", need_months=6)
+    assert d2["ladder"]["focus"]["passive_wins"] is False, "存得比長得多 → 力氣放在收入"
