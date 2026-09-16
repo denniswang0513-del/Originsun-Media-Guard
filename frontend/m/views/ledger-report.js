@@ -58,7 +58,9 @@ async function pick(host, month) {
     if (!month) return;
     try {
         _month = month;
-        _r = (await mfetch(`${REPORT_API}/${month}${Q}`)).report;
+        const r = (await mfetch(`${REPORT_API}/${month}${Q}`)).report;
+        if (_month !== month) return;          // 等的時候又切了別月：慢的那次不能蓋掉快的
+        _r = r;
         host.innerHTML = draw();
     } catch (e) { toast(e.message, 'err'); }
 }

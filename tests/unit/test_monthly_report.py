@@ -173,3 +173,15 @@ def test_desktop_register_keeps_report_banner_when_card_is_saved_too():
     body = js_func_body(js_code_only(repo_src("frontend/tabs/finance/subviews/register.js")), "_rg.saveAll = async (btn) => {")
     assert "const reportMonth = d && d.report_month;" in body and "if (reportMonth) _reportBanner(reportMonth);" in body
     assert body.index("const reportMonth") < body.index("if (card !== null)"), "要在卡那段之前留下來"
+
+
+def test_month_picker_ignores_stale_responses_on_both_pages():
+    """BUG-4（polish 2026-09-17）：快速切月份，慢的那次回應最後到 → 下拉顯示 B、數字是 A。兩邊都要守。"""
+    from tests.unit._srcscan import js_func_body
+    desk = js_func_body(js_code_only(repo_src("frontend/tabs/finance/subviews/report.js")), "_fr.pick = async (month) => {")
+    assert "if (_month !== month) return;" in desk
+    mob = js_func_body(js_code_only(repo_src("frontend/m/views/ledger-report.js")), "async function pick(host, month) {")
+    assert "if (_month !== month) return;" in mob
+    # 順手：桌機那一份抓失敗要說「載入失敗」，不是「還沒有月報」（那句是叫他去登記）
+    desk_all = js_code_only(repo_src("frontend/tabs/finance/subviews/report.js"))
+    assert "的月報載入失敗：" in desk_all

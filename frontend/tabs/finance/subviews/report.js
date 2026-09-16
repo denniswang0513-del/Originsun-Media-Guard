@@ -93,14 +93,15 @@ export default async function render(container, ctx = {}) {
     _months = r[0].items || [];
     _month = _months.length ? _months[0].month : '';
     _r = null;
+    let loadErr = '';
     if (_month) {
-        try { _r = (await finFetchMine(`/monthly-reports/${_month}`)).report; } catch (e) { finToast(e.message, true); }
+        try { _r = (await finFetchMine(`/monthly-reports/${_month}`)).report; } catch (e) { loadErr = e.message; }
     }
     if (!_isCurrent()) return;
-    _render();
+    _render(loadErr);
 }
 
-function _render() {
+function _render(loadErr = '') {
     const r = _r;
     _c.innerHTML = `<div class="mr">
         <div class="mr-top">
@@ -110,7 +111,7 @@ function _render() {
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finReport.regen(this)">用現在的數字重新產生本月</button>
             <span class="meta">${r ? `數字是 ${esc(r.basis_date)} 的；產生於 ${esc(r.generated_at || '')}${r.first ? '・第一份（下個月開始有上月可比）' : ''}` : '登記餘額按儲存時會自動產生當月月報'}</span>
         </div>
-        ${r ? _report(r) : '<div class="mr-card"><div class="empty">還沒有月報。到「登記餘額」填今天的數字按儲存，或按上面「重新產生」。</div></div>'}
+        ${r ? _report(r) : `<div class="mr-card"><div class="empty">${loadErr ? `${esc(_month)} 的月報載入失敗：${esc(loadErr)}` : '還沒有月報。到「登記餘額」填今天的數字按儲存，或按上面「重新產生」。'}</div></div>`}
     </div>`;
 }
 
@@ -213,7 +214,9 @@ _fr.pick = async (month) => {
     if (!month) return;
     _month = month;
     try {
-        _r = (await finFetchMine(`/monthly-reports/${month}`)).report;
+        const r = (await finFetchMine(`/monthly-reports/${month}`)).report;
+        if (_month !== month) return;          // 等的時候又切了別月：慢的那次不能蓋掉快的（下拉是 B、數字是 A）
+        _r = r;
         if (_isCurrent()) _render();
     } catch (e) { finToast(e.message, true); }
 };
