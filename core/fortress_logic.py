@@ -568,6 +568,10 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     chosen = float(fire["withdrawal_rate"])
     allowed = _m(float(financial) * chosen / 12)
     age = (this_year - int(fire["birth_year"])) if fire["birth_year"] and this_year else None
+    if age is not None and not 0 <= age <= 120:
+        age = None                      # 出生年填錯（未來、或久遠到不合理）＝當成沒填，不要印出負數歲數
+    # 已經超過「撐到幾歲」：不要只模擬 1 年卻宣稱「模擬到 90 歲用不完」
+    past_end = age is not None and age >= int(fire["until_age"])
     horizon = max(1, int(fire["until_age"]) - age) if age is not None else FIRE_DEFAULT_HORIZON
     # 通膨指數是 y-1 → 第 y 年跨的是 age+y-1 歲；年金從 E 歲開始＝第 (E-age+1) 年
     extra_from = max(1, int(fire["extra_from_age"]) - age + 1) if age is not None else 10 ** 6
@@ -583,6 +587,8 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     # 🔴 扣掉預留，跟同一頁上面的可撐月數同口徑 —— 不扣的話兩個數字會互相矛盾
     cash_years = round(max(0.0, float(cash3) - float(earmark_total or 0)) / spend / 12, 1)
     end_txt = f"{int(fire['until_age'])} 歲" if age is not None else f"第 {horizon} 年"
+    if past_end:
+        end_txt = f"{age} 歲（已超過你設的 {int(fire['until_age'])} 歲，只往後看 1 年）"
     when = lambda y: f"第 {y} 年" + (f"（{age + y - 1} 歲）" if age is not None and y else "")  # noqa: E731
     within = current_rate <= chosen
     if within and runs_out is None:

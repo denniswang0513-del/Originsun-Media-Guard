@@ -580,3 +580,14 @@ def test_no_settings_value_can_500_the_endpoint():
             for k, v in DEFAULT_FIRE.items():
                 assert s["fire"][k] == v, (bad, k)
         build([], [], 50_000, s, "2026-09-16", need_months=6)      # 算得出來，不會炸
+
+
+def test_age_sanity():
+    """出生年填未來 → 不要印出負數歲數；年齡已超過「撐到幾歲」→ 不要只模擬 1 年卻說「模擬到 90 歲用不完」。"""
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 50_000_000}]
+    future = build(accts, [], 94_206, {"fire": {"birth_year": 2100}}, "2026-09-16", need_months=6)["fire"]
+    assert future["age"] is None and "歲" not in future["verdict"], "當成沒填，不是 -74 歲"
+    assert future["horizon_years"] == 50
+    old = build(accts, [], 94_206, {"fire": {"birth_year": 1920}}, "2026-09-16", need_months=6)["fire"]
+    assert old["age"] == 106 and old["horizon_years"] == 1
+    assert "已超過你設的 90 歲" in old["verdict"], "要說出來，不能假裝模擬到 90 歲"
