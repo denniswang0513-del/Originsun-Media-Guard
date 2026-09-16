@@ -270,7 +270,6 @@
   .rg-hold { margin-top:8px; padding:6px 0 0 10px; border-left:2px solid var(--line); }
   .rg-hold .t { font-size:13px; }
   .rg-hold .t .nm span { color:var(--sub); font-size:11px; margin-left:4px; }
-  .rg-two { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
   .rg-go { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--pri); font-size:13px; }
   .rg-go span:first-child { color:var(--sub); min-width:0; }
   /* 預留清單：手填的可點；已付的金額變淡 */

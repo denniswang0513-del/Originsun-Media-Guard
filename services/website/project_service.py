@@ -17,7 +17,7 @@ from collections import defaultdict
 from types import SimpleNamespace
 from typing import Optional
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # is_main_work / work_url_slug / WORK_WIRE_FIELD_MAP 正本在 core.crm_logic（純函式、
@@ -329,7 +329,7 @@ def _published_works_base():
     return (
         select(CrmProjectShowcase, CrmProject)
         .join(CrmProject, CrmProject.id == CrmProjectShowcase.project_id)
-        .where(CrmProjectShowcase.published.is_(True))
+        .where(CrmProjectShowcase.published.is_(True), _not_a_linked_mine_project())
     )
 
 
@@ -566,6 +566,21 @@ def work_completeness_dict(sc) -> dict:
     )
 
 
+def _not_a_linked_mine_project():
+    """「連到 CRM 案的私帳案」不在作品清單另成一列（owner 2026-09-17「官網私帳與 crm 如果有連結時，出現 crm 的資料就可以了」）。
+
+    同一件案子在母帳（CRM）與私帳各有一列時，作品清單會看到兩列一模一樣的「文心藝術基金會 / 2026 Anicka Yi 展覽影片」。
+    連結有兩種形狀（routers/crm/projects.py::is_mirrored 的正本）：新的記在母帳那側（`mine_link_id` 指向私帳案），
+    舊的記在私帳案上（`source_project_id` 指回母帳案）。兩種都認：私帳案只要是任一種的目標，就不列。
+    沒連結的私帳案（純私帳接的案）照列。
+    """
+    linked_targets = select(CrmProject.mine_link_id).where(CrmProject.mine_link_id.isnot(None))
+    return or_(
+        CrmProject.entity != "mine",
+        and_(CrmProject.id.notin_(linked_targets), CrmProject.source_project_id.is_(None)),
+    )
+
+
 async def list_admin_projects(
     session: AsyncSession, include_non_public: bool = True
 ) -> list[dict]:
@@ -573,6 +588,7 @@ async def list_admin_projects(
 
     以專案為骨架 outer join 作品：沒有 showcase row 的專案以虛擬主作品呈現
     （admin 列表向來列出全部專案）；1:N 後同專案的子作品各自成列（主作品先）。
+    連到 CRM 案的私帳案不列（_not_a_linked_mine_project）。
     """
     if include_non_public:
         stmt = select(CrmProject, CrmProjectShowcase).outerjoin(
@@ -582,6 +598,7 @@ async def list_admin_projects(
         stmt = select(CrmProject, CrmProjectShowcase).join(
             CrmProjectShowcase, CrmProjectShowcase.project_id == CrmProject.id
         ).where(CrmProjectShowcase.published.is_(True))
+    stmt = stmt.where(_not_a_linked_mine_project())
     stmt = stmt.order_by(
         CrmProject.updated_at.desc().nullslast(),
         # 同專案內：主作品（id == project_id）先、再依 sort_order

@@ -88,7 +88,7 @@ function _render() {
         </div>
         <div class="rg-sec"><h3>銀行／現金帳戶</h3><span class="why">「還沒補的明細」＝登記的數字 − 帳上算到基準日的數字；補齊會歸 0</span></div>
         ${_accountsTable(d)}
-        <div class="rg-sec"><h3>證券戶</h3><span class="why">每檔可以填今天的股數、現價、成本（市值＝股數 × 現價）；一家券商也可以只填一個總市值，比已拆明細多出來的部分先記成那家的「未拆明細」，之後拆明細它自然縮小</span></div>
+        <div class="rg-sec"><h3>證券戶</h3><span class="why">每檔填今天的股數（單位數）就好，現價由「更新報價」帶；一家券商也可以只填一個總市值，比已拆明細多出來的部分先記成那家的「未拆明細」</span></div>
         ${_brokersTable(d)}
         <div class="rg-sec"><h3>信用卡</h3><span class="why">全部卡合計的目前未繳；跟信用卡頁是同一個數字</span></div>
         ${_cardTable(d)}
@@ -126,8 +126,9 @@ function _accountsTable(d) {
         <tbody id="rg-acct-body">${rows}</tbody></table></div>`;
 }
 
-/** 一家券商一列（總市值輸入格）＋ 底下每檔持股一列（股數／現價／成本輸入格）。
- *  市值＝股數 × 現價（外幣再乘匯率）；手填市值的那檔會標「手填」，登記股數與現價後就改用算的。 */
+/** 一家券商一列（總市值輸入格）＋ 底下每檔持股一列（只有「股數」一格 —— owner「證券我只需要更改單位數」；
+ *  現價由資產儀表板的「更新報價」來、成本在證券投資頁填）。市值＝股數 × 現價（外幣再乘匯率）；
+ *  手填市值的那檔會標「手填」，那種登記股數不會改市值（後端只在算得出股數 × 現價時才清手填市值）。 */
 function _brokersTable(d) {
     const num = (v, dp = 2) => (v === null || v === undefined ? '' : String(Math.round(Number(v) * 10 ** dp) / 10 ** dp));
     const rows = (d.brokers || []).map((b) => `<tr data-broker="${esc(b.broker)}" class="rg-broker">
@@ -135,17 +136,15 @@ function _brokersTable(d) {
             <td class="n sub">已拆 ${money(b.detail)}</td>
             <td class="n">${b.plug ? `<span class="rg-diff">未拆 ${money(b.plug)}</span>` : '<span class="sub">未拆 0</span>'}</td>
             <td class="n">合計 ${money(b.total)}</td>
-            <td class="n" colspan="2"><input class="crm-input rg-in" type="number" step="1" inputmode="numeric" placeholder="今天總市值 ${esc(String(b.total || 0))}"></td>
+            <td class="n"><input class="crm-input rg-in" type="number" step="1" inputmode="numeric" placeholder="今天總市值 ${esc(String(b.total || 0))}"></td>
         </tr>` + (b.holdings || []).map((h) => `<tr data-holding="${esc(h.id)}" class="rg-holding">
             <td class="sub">　${esc(h.name)}${h.symbol ? ` <span class="sub">${esc(h.symbol)}</span>` : ''}${h.currency !== 'TWD' ? ` <span class="sub">${esc(h.currency)}</span>` : ''}</td>
             <td class="n sub">${h.manual_value !== null && h.manual_value !== undefined ? '手填市值' : `${num(h.shares, 4) || '—'} 股 × ${num(h.last_price) || '—'}`}</td>
             <td class="n">${money(h.value_twd)}</td>
             <td class="n"><input class="crm-input rg-in rg-h" data-k="shares" type="number" step="any" inputmode="decimal" placeholder="股數 ${esc(num(h.shares, 4) || '0')}"></td>
-            <td class="n"><input class="crm-input rg-in rg-h" data-k="last_price" type="number" step="any" inputmode="decimal" placeholder="現價 ${esc(num(h.last_price) || '0')}"></td>
-            <td class="n"><input class="crm-input rg-in rg-h" data-k="cost_total" type="number" step="any" inputmode="decimal" placeholder="成本 ${esc(num(h.cost_total) || '0')}"></td>
-        </tr>`).join('')).join('') || '<tr><td colspan="6" class="rg-empty">私帳還沒有持股；先到資產儀表板加券商與持股</td></tr>';
+        </tr>`).join('')).join('') || '<tr><td colspan="5" class="rg-empty">私帳還沒有持股；先到資產儀表板加券商與持股</td></tr>';
     return `<div class="rg-tblwrap"><table>
-        <thead><tr><th>券商／持股</th><th class="n">現在怎麼算</th><th class="n">現在市值</th><th class="n">今天股數</th><th class="n">今天現價</th><th class="n">成本合計</th></tr></thead>
+        <thead><tr><th>券商／持股</th><th class="n">現在怎麼算</th><th class="n">現在市值</th><th class="n">今天股數（單位數）</th></tr></thead>
         <tbody id="rg-broker-body">${rows}</tbody></table></div>`;
 }
 

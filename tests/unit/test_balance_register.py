@@ -155,8 +155,25 @@ def test_holdings_can_be_registered_share_by_share():
     sch = repo_src("core/schemas/_finance.py")
     assert "class BalanceRegisterHolding(BaseModel):" in sch and "holdings: List[BalanceRegisterHolding] = []" in sch
     desk = js_code_only(repo_src("frontend/tabs/finance/subviews/register.js"))
-    assert 'data-holding="${esc(h.id)}"' in desk and "data-k=\"cost_total\"" in desk
+    # owner「證券我只需要更改單位數」：畫面每檔只有股數一格（後端仍收 last_price／cost_total，給別的入口用）
+    assert 'data-holding="${esc(h.id)}"' in desk and 'data-k="shares"' in desk
+    assert 'data-k="last_price"' not in desk and 'data-k="cost_total"' not in desk
     assert "JSON.stringify({ date, accounts, holdings, brokers })" in desk
     mob = js_code_only(repo_src("frontend/m/views/ledger-register.js"))
     assert 'data-holding="${esc(h.id)}"' in mob and "JSON.stringify({ date, accounts, holdings, brokers })" in mob
+    assert 'data-k="last_price"' not in mob
     assert ":scope > .m-form > input.rg-in" in mob, "券商總市值那格不能把持股的格子一起讀走"
+
+
+
+def test_works_list_hides_private_ledger_projects_that_are_linked_to_a_crm_project():
+    """owner 2026-09-17「官網私帳與 crm 如果有連結時，出現 crm 的資料就可以了」：
+    同一件案子在母帳與私帳各一列時，作品清單只留母帳那列。兩種連結形狀都要認（mine_link_id／source_project_id），
+    沒連結的私帳案照列；公開清單的共用基底也套同一個條件。"""
+    from tests.unit._srcscan import func_body
+    src = repo_src("services/website/project_service.py")
+    cond = func_body(src, "def _not_a_linked_mine_project():")
+    assert "CrmProject.mine_link_id.isnot(None)" in cond and "CrmProject.source_project_id.is_(None)" in cond
+    assert 'CrmProject.entity != "mine"' in cond, "母帳案一律列；只有私帳案才看連結"
+    assert "_not_a_linked_mine_project()" in func_body(src, "async def list_admin_projects(")
+    assert "_not_a_linked_mine_project()" in func_body(src, "def _published_works_base():")
