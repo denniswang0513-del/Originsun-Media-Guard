@@ -150,7 +150,7 @@ def test_holdings_can_be_registered_share_by_share():
     src = repo_src("routers/api_balance_register.py")
     assert 'g["holdings"].append(' in src and '"value_twd": _holding_value(h, fx)' in src
     assert "for hl in payload.holdings:" in src
-    assert src.index("for hl in payload.holdings:") < src.index("for br in payload.brokers:"), "先套持股再算未拆明細"
+    assert src.index("for hl in payload.holdings:") < src.index("for br in brokers:"), "先套持股再算未拆明細（brokers 是去重後的清單）"
     assert "h.manual_value = None" in src and "h.price_at = datetime.now()" in src
     sch = repo_src("core/schemas/_finance.py")
     assert "class BalanceRegisterHolding(BaseModel):" in sch and "holdings: List[BalanceRegisterHolding] = []" in sch
@@ -205,3 +205,14 @@ def test_report_month_window_is_naive_like_the_cash_entries():
     from tests.unit._srcscan import func_body
     w = func_body(repo_src("routers/api_monthly_report.py"), "def _month_window(month: str) -> tuple:")
     assert "timezone" not in w and 'strptime(month + "-01", "%Y-%m-%d")' in w
+
+
+def test_register_and_generate_reject_the_edge_inputs():
+    """BUG-6（polish 2026-09-17）：對帳月份用 strftime；同券商去重；未拆明細不能是負的；月報只能產生本月。"""
+    from tests.unit._srcscan import func_body
+    put = func_body(repo_src("routers/api_balance_register.py"), "async def put_balance_register(")
+    assert 'month = day.strftime("%Y-%m")' in put and "payload.date[:7]" not in put
+    assert "brokers = list({(b.broker or \"\").strip(): b for b in payload.brokers}.values())" in put
+    assert "if gap < 0:" in put and "還少，先改那家的持股股數或更新報價" in put
+    gen = func_body(repo_src("routers/api_monthly_report.py"), "async def generate_report(")
+    assert "if month != this_month:" in gen and "月報只能用現在的數字產生本月" in gen

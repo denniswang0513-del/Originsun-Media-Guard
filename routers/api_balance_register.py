@@ -128,7 +128,7 @@ async def put_balance_register(payload: BalanceRegisterPayload, request: Request
             await session.flush()
             # 歷史：每次登記留一筆對帳紀錄（system_balance＝帳上算到基準日的數字、diff＝還沒補的明細）
             bal = await _balances_by_account(session, entity=ent)
-            month = payload.date[:7]
+            month = day.strftime("%Y-%m")        # 不用 date[:7]：'2026-9-7' 會切成 '2026-9-'，對帳月份永遠對不上
             for ln in payload.accounts:
                 if ln.balance is None:
                     continue
@@ -154,6 +154,8 @@ async def put_balance_register(payload: BalanceRegisterPayload, request: Request
                 select(FinanceHolding).where(FinanceHolding.entity == ent,
                                              FinanceHolding.active.is_(True)))).scalars().all()
             by_id = {h.id: h for h in holdings}
+            # 同一家券商送兩次只算最後一次（不然第二次找不到剛建的未拆明細列，會再建一列）
+            brokers = list({(b.broker or "").strip(): b for b in payload.brokers}.values())
             # 先套逐檔的股數／現價／成本，券商總市值的「未拆明細」要用更新後的已拆明細算
             for hl in payload.holdings:
                 h = by_id.get(hl.id)
@@ -178,12 +180,15 @@ async def put_balance_register(payload: BalanceRegisterPayload, request: Request
                     h.manual_value = None
                 h.updated_at = datetime.now()
             await session.flush()
-            for br in payload.brokers:
+            for br in brokers:
                 name = (br.broker or "").strip()
                 plug = _plug_of(holdings, name)
                 detail = sum(_holding_value(h, fx) for h in holdings
                              if (h.broker or "") == name and h is not plug)
                 gap = int(br.total) - detail
+                if gap < 0:
+                    # 未拆明細不能是負的（證券現值會無聲變少）：總市值比已拆明細還少＝明細裡有一檔的股數或現價過時
+                    raise HTTPException(status_code=422, detail=f"{name or '（未指定券商）'} 的總市值 {int(br.total):,} 比已拆明細 {detail:,} 還少，先改那家的持股股數或更新報價")
                 if plug is None:
                     if gap == 0:
                         continue

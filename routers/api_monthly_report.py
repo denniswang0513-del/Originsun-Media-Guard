@@ -59,8 +59,13 @@ async def generate_report(ent: str, username: str, month: Optional[str] = None) 
     from routers.api_ledger_mobile import HOUSEHOLD_TOP
 
     today = _today_tw()
-    month = _validate_month(month) if month else today.strftime("%Y-%m")
-    basis = today.isoformat() if month == today.strftime("%Y-%m") else (_month_window(month)[1] - timedelta(days=1)).strftime("%Y-%m-%d")
+    this_month = today.strftime("%Y-%m")
+    month = _validate_month(month) if month else this_month
+    # 🔴 只能產生本月：堡壘／登記餘額／資產桶都是「現在」的數字，掛在過去月份的 basis_date 底下就是假歷史，
+    #    下個月的月報還會拿它當上月（差額全變 0）。過去月份以當時登記時產生的那份為準。
+    if month != this_month:
+        raise HTTPException(status_code=422, detail=f"月報只能用現在的數字產生本月（{this_month}）；{month} 以當時登記時產生的那份為準")
+    basis = today.isoformat()
     fortress = await fortress_payload(ent)
     fx = float((load_settings().get("my_ledger") or {}).get("usd_twd") or 0)
     factory = _factory_or_503()
