@@ -10,8 +10,6 @@
 """
 from __future__ import annotations
 
-import copy
-
 LAYER_NAMES = {1: "營運現金", 2: "預留現金", 3: "緊急預備", 4: "機會資金", 5: "複利資本"}
 LAYER_DESC = {1: "日常花的", 2: "已預留用途：稅、保費、房貸", 3: "收入中斷時活命用",
               4: "等好機會才動", 5: "長期投資，十年不動"}
@@ -31,19 +29,17 @@ NEED_SAMPLE_MONTHS = 6
 #: 算進「每月生活支出」的分類（收支明細 `category`＝分類樹「頂層_第二層」的鏡射，但**舊列只有兩層的舊名字**）。
 #: 🔴 2026-09 實查私帳：分類樹只搬了一半，生活費大多掛在 `個人_旅遊`／`個人_生活`／`家用` 這種舊名字上。
 #: 只收 `家用%`＋`個人_固定支出%` 的話會漏掉整個「個人」枝（實查 6 個月漏 33 萬），分母太小 → 可撐月數被高估。
-NEED_INCLUDE_PREFIXES = ("家用", "個人", "貸款繳款")
-#: 從上面那兩枝裡再扣掉的：收入列、買股票、還款（卡債與貸款走「預留」，這裡再算一次就是重複）、帳務對齊
-NEED_EXCLUDE_PREFIXES = ("家用_主動收入", "家用_被動收入", "個人_主動收入", "個人_被動收入",
-                         "家用_投資支出", "個人_投資支出", "家用_借款支出", "個人_借款支出",
-                         "家用_其他支出", "個人_其他支出")
+NEED_BOOKS = ("家用", "個人", "貸款繳款")
+#: 那幾枝裡再扣掉的項目：收入列、買股票、還款（卡債與貸款走「預留」，這裡再算一次就是重複）、帳務對齊
+NEED_SKIP_ITEMS = ("主動收入", "被動收入", "投資支出", "借款支出", "其他支出")
 
 
 def need_category_ok(category) -> bool:
-    """這一列的分類算不算「每月生活支出」。"""
-    c = (category or "").strip()
-    if not c or c.startswith(NEED_EXCLUDE_PREFIXES):
-        return False
-    return c.startswith(NEED_INCLUDE_PREFIXES)
+    """這一列的分類算不算「每月生活支出」。分類切帳本／項目用 core.cash_taxonomy 那份正本
+    （`公司_專案` → ('公司','專案')；只切第一個底線）。"""
+    from core.cash_taxonomy import split_category
+    book, item = split_category(category)
+    return book in NEED_BOOKS and not item.startswith(NEED_SKIP_ITEMS)
 
 
 def monthly_need_from_rows(rows) -> tuple:
@@ -59,8 +55,28 @@ def monthly_need_from_rows(rows) -> tuple:
         return 0.0, 0
     return sum(by_month.values()) / len(by_month), len(by_month)
 
+
 STATE_OK, STATE_WARN, STATE_BAD = "ok", "warn", "bad"
-STATE_LABEL = {STATE_OK: "撐得住", STATE_WARN: "撐得住，但很緊", STATE_BAD: "會被迫"}
+#: 五題的 key／題名／小標。na 路（沒有必要支出、算不出來）與正常路共用這一份，
+#: 不然改了 MARKET_DROP／SHOCK_AMOUNT，只有其中一條路的題名會跟著變。
+TEST_TITLES = (
+    ("income", "收入中斷 6 個月", "現金夠嗎？要賣股票嗎？"),
+    ("market", f"股票下跌 {int(MARKET_DROP * 100)}%", "生活會受影響嗎？會被迫停損嗎？"),
+    ("shock", f"突然多 {SHOCK_AMOUNT // 10000} 萬支出", "錢從哪裡來？會打亂投資計畫嗎？"),
+    ("combined", "三件同時發生", "失業、市場下跌、突發支出一起來，還有選擇權嗎？"),
+    ("war", "台海戰爭", "銀行停擺、台幣貶值、收入斷一年，撐得過去嗎？"),
+)
+_TITLE = {k: (t, q) for k, t, q in TEST_TITLES}
+
+
+def _state(ok: bool, warn: bool) -> str:
+    return STATE_OK if ok else (STATE_WARN if warn else STATE_BAD)
+
+
+def _card(key: str, state: str, lines: list, verdict: str, assume: str = "") -> dict:
+    title, question = _TITLE[key]
+    return {"key": key, "title": title, "question": question, "state": state,
+            "assume": assume, "lines": lines, "verdict": verdict}
 
 
 # ── 設定 ──────────────────────────────────────────────────────────
@@ -119,7 +135,7 @@ def normalize_settings(raw) -> dict:
 
 def merge_settings(current: dict, patch: dict) -> dict:
     """PUT 設定：淺層合併（account_layers／account_flags／targets／war 各自整份取代；其餘逐鍵）。"""
-    out = copy.deepcopy(normalize_settings(current))
+    out = normalize_settings(current)
     patch = patch if isinstance(patch, dict) else {}
     for k in ("account_layers", "account_flags", "targets", "war"):
         if k in patch and isinstance(patch[k], dict):
@@ -201,10 +217,7 @@ def stress_tests(have: dict, accounts: list, monthly_need: float, earmark_total:
     cash4 = cash_in_layers(accounts, 4)
     holdings_total = sum(int(a.get("balance") or 0) for a in accounts if is_holding(a))
     if m <= 0:
-        return [{"key": k, "title": t, "question": "", "state": "na", "assume": "",
-                 "lines": [], "verdict": "先設定每月必要支出才算得出來。"}
-                for k, t in (("income", "收入中斷 6 個月"), ("market", "股票下跌 40%"),
-                             ("shock", "突然多 40 萬支出"), ("combined", "三件同時發生"), ("war", "台海戰爭"))]
+        return [_card(k, "na", [], "先設定每月必要支出才算得出來。") for k, _t, _q in TEST_TITLES]
     out = []
     # 1. 收入斷 6 個月
     need = m * 6 + ear
@@ -215,33 +228,34 @@ def stress_tests(have: dict, accounts: list, monthly_need: float, earmark_total:
         st, vd = STATE_WARN, f"第 1 到 3 層差 {_wan(-left)}，要動到機會資金，股票不用賣。"
     else:
         st, vd = STATE_BAD, f"差 {_wan(-left)}，機會資金也不夠，會被迫賣股票。"
-    out.append({"key": "income", "title": "收入中斷 6 個月", "question": "現金夠嗎？要賣股票嗎？", "state": st, "assume": "",
-                "lines": [["6 個月必要支出＋預留", _m(need), "twd"], ["第 1 到 3 層現金", _m(cash3), "twd"], ["撐完還剩", _m(left), "twd"]],
-                "verdict": vd})
+    out.append(_card("income", st,
+                     [["6 個月必要支出＋預留", _m(need), "twd"], ["第 1 到 3 層現金", _m(cash3), "twd"], ["撐完還剩", _m(left), "twd"]], vd))
     # 2. 股票跌 40%
     rw = runway_months(cash3, ear, m)
-    st = STATE_OK if rw >= RUNWAY_GREEN else (STATE_WARN if rw >= RUNWAY_AMBER else STATE_BAD)
-    out.append({"key": "market", "title": f"股票下跌 {int(MARKET_DROP * 100)}%", "question": "生活會受影響嗎？會被迫停損嗎？", "state": st, "assume": "",
-                "lines": [["證券現值", _m(holdings_total), "twd"], ["跌完剩", _m(holdings_total * (1 - MARKET_DROP)), "twd"], ["可撐月數（不動股票）", rw, "months"]],
-                "verdict": "生活資金在第 1 到 3 層，跌了不用賣，等得起。" if st == STATE_OK
-                else "生活資金不到 6 個月，跌的時候可能被迫在低點賣。先補第 3 層。"})
+    st = _state(rw >= RUNWAY_GREEN, rw >= RUNWAY_AMBER)
+    out.append(_card("market", st,
+                     [["證券現值", _m(holdings_total), "twd"], ["跌完剩", _m(holdings_total * (1 - MARKET_DROP)), "twd"],
+                      ["可撐月數（不動股票）", rw, "months"]],
+                     "生活資金在第 1 到 3 層，跌了不用賣，等得起。" if st == STATE_OK
+                     else "生活資金不到 6 個月，跌的時候可能被迫在低點賣。先補第 3 層。"))
     # 3. 突發 40 萬
     from4 = min(SHOCK_AMOUNT, max(0, cash4 - cash3))
     from3 = SHOCK_AMOUNT - from4
     rw3 = runway_months(cash3 - from3, ear, m)
-    st = STATE_OK if rw3 >= RUNWAY_GREEN else (STATE_WARN if rw3 >= RUNWAY_AMBER else STATE_BAD)
-    out.append({"key": "shock", "title": f"突然多 {SHOCK_AMOUNT // 10000} 萬支出", "question": "錢從哪裡來？會打亂投資計畫嗎？", "state": st, "assume": "",
-                "lines": [["先從第 4 層機會資金扣", _m(from4), "twd"], ["再從第 3 層緊急預備扣", _m(from3), "twd"], ["扣完可撐月數", rw3, "months"]],
-                "verdict": "撐得住，投資計畫不用動。" if st == STATE_OK
-                else (f"撐得住，但緊急預備降到 {rw3:g} 個月，之後幾個月先回補第 3 層。" if st == STATE_WARN else "會被迫動到投資。先補第 3、4 層。")})
+    st = _state(rw3 >= RUNWAY_GREEN, rw3 >= RUNWAY_AMBER)
+    out.append(_card("shock", st,
+                     [["先從第 4 層機會資金扣", _m(from4), "twd"], ["再從第 3 層緊急預備扣", _m(from3), "twd"], ["扣完可撐月數", rw3, "months"]],
+                     "撐得住，投資計畫不用動。" if st == STATE_OK
+                     else (f"撐得住，但緊急預備降到 {rw3:g} 個月，之後幾個月先回補第 3 層。" if st == STATE_WARN
+                           else "會被迫動到投資。先補第 3、4 層。")))
     # 4. 三件同時
     need4 = m * 6 + SHOCK_AMOUNT + ear
     left4 = cash4 - need4
-    st = STATE_OK if left4 >= m * 3 else (STATE_WARN if left4 >= 0 else STATE_BAD)
-    out.append({"key": "combined", "title": "三件同時發生", "question": "失業、市場下跌、突發支出一起來，還有選擇權嗎？", "state": st, "assume": "",
-                "lines": [["6 個月支出＋40 萬＋預留", _m(need4), "twd"], ["第 1 到 4 層現金", _m(cash4), "twd"], ["撐完還剩", _m(left4), "twd"]],
-                "verdict": (f"撐得住，不用在低點賣股票，但撐完只剩 {round(left4 / m, 1):g} 個月緩衝，之後要重建第 3、4 層。" if left4 >= 0
-                            else f"第 1 到 4 層差 {_wan(-left4)}，會被迫在低點賣股票。")})
+    st = _state(left4 >= m * 3, left4 >= 0)
+    out.append(_card("combined", st,
+                     [["6 個月支出＋40 萬＋預留", _m(need4), "twd"], ["第 1 到 4 層現金", _m(cash4), "twd"], ["撐完還剩", _m(left4), "twd"]],
+                     f"撐得住，不用在低點賣股票，但撐完只剩 {round(left4 / m, 1):g} 個月緩衝，之後要重建第 3、4 層。" if left4 >= 0
+                     else f"第 1 到 4 層差 {_wan(-left4)}，會被迫在低點賣股票。"))
     # 5. 台海戰爭
     fx = float(war["fx"])
     months = int(war["months"])
@@ -267,15 +281,15 @@ def stress_tests(have: dict, accounts: list, monthly_need: float, earmark_total:
         st, vd = STATE_WARN, f"現金差 {_wan(-left5)}，要賣美股補。台股跌六成先不要動。"
     else:
         st, vd = STATE_BAD, f"現金加美股都不夠，差 {_wan(-(left5 + us))}。海外和美元的比重要拉高。"
-    out.append({"key": "war", "title": "台海戰爭", "question": "銀行停擺、台幣貶值、收入斷一年，撐得過去嗎？", "state": st,
-                "assume": (f"假設：收入斷 {int(war['months'])} 個月、台股跌 {int(round(float(war['tw_drop']) * 100))}%、"
-                           f"美股跌 {int(round(float(war['us_drop']) * 100))}%、台幣貶 {int(round((fx - 1) * 100))}%、"
-                           f"銀行前 {int(war['bank_freeze_weeks'])} 週領不到錢"),
-                "lines": [[f"前 {int(war['bank_freeze_weeks'])} 週拿得到的錢（實體＋海外）", _m(first), "twd"],
-                          [f"{int(war['months'])} 個月支出＋預留", _m(need5), "twd"],
-                          ["第 1 到 4 層現金（美元已升值）", _m(war_cash), "twd"], ["撐完還剩", _m(left5), "twd"],
-                          ["台股跌完剩", _m(tw), "twd"], ["美股跌完換台幣", _m(us), "twd"]],
-                "verdict": vd})
+    freeze = int(war["bank_freeze_weeks"])
+    out.append(_card("war", st,
+                     [[f"前 {freeze} 週拿得到的錢（實體＋海外）", _m(first), "twd"],
+                      [f"{months} 個月支出＋預留", _m(need5), "twd"],
+                      ["第 1 到 4 層現金（美元已升值）", _m(war_cash), "twd"], ["撐完還剩", _m(left5), "twd"],
+                      ["台股跌完剩", _m(tw), "twd"], ["美股跌完換台幣", _m(us), "twd"]], vd,
+                     assume=(f"假設：收入斷 {months} 個月、台股跌 {int(round(float(war['tw_drop']) * 100))}%、"
+                             f"美股跌 {int(round(float(war['us_drop']) * 100))}%、台幣貶 {int(round((fx - 1) * 100))}%、"
+                             f"銀行前 {freeze} 週領不到錢")))
     return out
 
 

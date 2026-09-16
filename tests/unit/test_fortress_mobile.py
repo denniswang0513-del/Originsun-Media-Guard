@@ -75,7 +75,10 @@ def test_fortress_writes_only_earmarks_and_mark_overview_stale():
     for header in ("function openAddSheet(", "function openEditSheet("):
         body = js_func_body(_FORT_CODE, header)
         assert "await done(host, r" in body, f"{header} 寫完要走 done()"
-        assert "withBusy(" in body, f"{header} 的按鈕要 withBusy"
+        assert "sheetWrite(" in body, f"{header} 的按鈕要走 sheetWrite（忙碌狀態＋一層 try/catch）"
+    # sheetWrite 自己要真的做那兩件事（/polish 2026-09-16：四個鈕原本各寫一份一樣的 try/catch）
+    sw = js_func_body(_FORT_CODE, "const sheetWrite = (btn, fn) => withBusy(btn, async () => {")
+    assert "toast(err.message, 'err')" in sw and "withBusy(btn" in _FORT_CODE
     edit = js_func_body(_FORT_CODE, "function openEditSheet(")
     i = edit.index("method: 'DELETE'")
     assert "confirm(" in edit[max(0, i - 400):i], "刪除前要 confirm"

@@ -35,7 +35,7 @@ async function load(host) {
         ]);
         const pj = h.projects || {}, cash = h.cash || {};
         const rng = h.range && h.range.from ? `${h.range.from} ～ ${h.range.to}` : '所有年份';
-        const card = (n, l, cls = '') => `<div class="k"><div class="n ${cls}">${money(n)}</div><div class="l">${esc(l)}</div></div>`;
+        const card = (n, l) => `<div class="k"><div class="n">${money(n)}</div><div class="l">${esc(l)}</div></div>`;
         body.innerHTML = `
             ${fortressCard(ft)}
             <div class="lg-sub" style="margin:-4px 0 8px">${esc(rng)}・${pj.count || 0} 案（結案日在區間內）</div>

@@ -1384,6 +1384,14 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   **信用卡欠款走「預留」不走負餘額**（兩邊都算＝扣兩次）；股東帳戶不進任何一層。**預留清單是表**（`finance_fortress_earmarks`，手機在 NAS 上要能寫），
   分層／旗標／目標／戰爭假設是 settings `finance.fortress[entity]`，🔴 `core/office_settings.EXPORT_SUBKEYS` 有送 `finance: (fortress,)`，拿掉＝手機上每個帳戶都掉回第 1 層、沒有任何錯誤。
   手機 `#fortress` 是隱藏路由（`ledger.js` 的 `HIDDEN_ROUTES`／`ROUTES`，tabbar 六格不動、亮「總覽」）；PUT settings 各段（account_layers／account_flags／targets／war）**整份取代**，`monthly_need_override` 送 0＝回到自動。
+  /polish 2026-09-16 六張卡學到的，動這功能前先看：
+  ① **整份取代的代價**：前端任何一次 PUT 都要以「目前存著的那份」為底。桌機的分層自動存原本在計時器裡才讀表格，
+     0.4 秒內切走就讀到 0 列、把所有分層清空 —— 現在是 change 當下拍快照（`_pendingLayers`），表格不在畫面上就不送。
+  ② **`/api/settings/load` 是匿名端點**：任何存進 settings 的私帳數字都要進 `api_system._SECRET_SUBKEYS`（`finance: (fortress,)` 已加）。
+  ③ **`require_entity(request, entity)` 的 entity 空字串會落到 parent** —— 私帳專屬的端點要像 `api_fortress._guard` 那樣寫死 mine。
+  ④ **現金 vs 證券看 kind 不看層別**（`cash_in_layers`）：證券被標到第 4 層不該變成股災裡不會跌的現金。
+  ⑤ **生活支出的分母是「有資料的月份數」**，口徑 `need_category_ok`；分類樹只搬了一半，別用 `家用%` 這種前綴當全部。
+  ⑥ NAS 的 settings.json 是唯讀副本（publish 會覆蓋）：會寫 settings 的路徑要進 `main_office._DROP_PREFIXES`。
 - **`/api/settings/load` 是匿名端點，機密分兩層**（2026-09-08 稽核）：`_SECRET_KEYS`／`_SECRET_SUBKEYS`（簽得出 admin 的：jwt_secret、database_url、
   google secret）連管理員也不回；`_ADMIN_ONLY_SUBKEYS`（工時同步 token、四個 webhook）只回給管理員 token（設定視窗要顯示才能編）。新增機密欄位要進其中一層。
   內部重啟端點（`/internal/restart`、`/system/restart`）的金鑰字串隨 OTA 包公開，安全靠 `core.auth.via_cloudflare` 把公網那條路擋掉——**別**把金鑰換成 `_get_secret()`，機隊各自的 jwt_secret 不共用，master 會推不動 agent。

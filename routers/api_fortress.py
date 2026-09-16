@@ -34,7 +34,7 @@ router = APIRouter(prefix="/api/v1/finance/fortress", tags=["私帳堡壘"])
 #: 這功能整個是私帳的（docs/FORTRESS_PLAN.md §0.3）—— entity 一律鎖 mine
 MINE = "mine"
 _TW = ZoneInfo("Asia/Taipei")
-#: 貸款下一期往前看多遠（只取每筆貸款最近的一期）
+#: 貸款期別往前看多遠（逾期的全留、未來取最近一期，見 core.fortress_logic.pick_loan_dues）
 LOAN_HORIZON_DAYS = 400
 SETTINGS_KEY = "fortress"
 #: 金額上限：欄位是 32 位元整數，超過會變成資料庫的 500 而不是好好的 422

@@ -10,7 +10,7 @@
  * 日期一律 todayLocal()（不用 toISOString：那是 UTC，台北早上 8 點前會變昨天）。
  */
 import { mfetch, money, todayLocal, toast, esc } from '../shell.js';
-import { skeleton, errBox, pill, openSheet, closeSheet, withBusy, markStale } from '../ui.js';
+import { skeleton, errBox, emptyBox, pill, openSheet, closeSheet, withBusy, markStale } from '../ui.js';
 
 export const FORTRESS_API = '/api/v1/finance/fortress?entity=mine';
 const EARMARK_API = '/api/v1/finance/fortress/earmarks';
@@ -37,15 +37,19 @@ const stateCls = (s) => ({ ok: 'g', warn: 'a', bad: 'r' })[s] || 'na';
 const shortDate = (d) => (d ? String(d).slice(5, 10).replace('-', '/') : '');
 
 /** 五層的一句摘要：第一個還差錢的層（由 1 往上找）＋ 五題壓力測試幾綠幾黃幾紅。總覽頂卡與這頁共用。 */
+/** 五層由小到大（dir=-1 由大到小）；三個地方都要排，排法只留這一份。 */
+const byNo = (d, dir = 1) => [...(d.layers || [])].sort((a, b) => (a.no - b.no) * dir);
+
 export function summaryLine(d) {
-    const layers = [...(d.layers || [])].sort((a, b) => a.no - b.no);
+    const layers = byNo(d);
+    const tests = d.tests || [];
     const short = layers.find(l => Number(l.gap) > 0);
     const first = short ? `第 ${short.no} 層還差 ${wan(short.gap)}` : '五層都到位';
     const cnt = { ok: 0, warn: 0, bad: 0 };
-    for (const t of d.tests || []) if (t.state in cnt) cnt[t.state] += 1;
+    for (const t of tests) if (t.state in cnt) cnt[t.state] += 1;
     const parts = [[cnt.ok, '綠'], [cnt.warn, '黃'], [cnt.bad, '紅']].filter(x => x[0] > 0).map(x => `${x[0]} ${x[1]}`);
-    const tests = (d.tests || []).length ? `${(d.tests || []).length === 5 ? '五題' : (d.tests || []).length + ' 題'}壓力測試 ${parts.join(' ')}` : '';
-    return [first, tests].filter(Boolean).join(' · ');
+    const line = tests.length ? `${tests.length === 5 ? '五題' : tests.length + ' 題'}壓力測試 ${parts.join(' ')}` : '';
+    return [first, line].filter(Boolean).join(' · ');
 }
 
 /** 大數字（可撐月數）那一行：總覽頂卡與這頁同一個長相。 */
@@ -56,7 +60,7 @@ export function bigHtml(d) {
 
 /** 五格迷你水位（層 1..5 由左到右；第 5 層主色、不到一半的黃）。 */
 export function miniHtml(d) {
-    const layers = [...(d.layers || [])].sort((a, b) => a.no - b.no);
+    const layers = byNo(d);
     const cells = layers.map(l => {
         const pct = Math.max(0, Math.min(100, Number(l.pct) || 0));
         const cls = l.no === 5 ? 'cap' : (pct < 50 ? 'low' : '');
@@ -121,7 +125,7 @@ function draw(d) {
             <div class="lg-sub">加上第 4 層機會資金可撐 <span class="num">${esc(months(r.with_l4))} 個月</span>・可動用現金 <span class="num">${esc(wan(cash.l1_4))}</span></div>
         </div>
         <div class="m-h">五層資金</div>
-        <div class="m-card">${[...(d.layers || [])].sort((a, b) => b.no - a.no).map(layerHtml).join('') || '<div class="m-empty">還沒有分層</div>'}</div>
+        <div class="m-card">${byNo(d, -1).map(layerHtml).join('') || emptyBox('還沒有分層')}</div>
         <div class="m-h">預留清單 · ${esc(wan(d.earmark_total))}</div>
         <div class="m-card">
             ${(d.earmarks || []).map(earmarkHtml).join('') || '<div class="m-empty" style="padding:10px 0">還沒有預留</div>'}
@@ -134,7 +138,7 @@ function draw(d) {
             <div class="lg-sub" style="margin-top:6px">要改請到桌機的堡壘分頁</div>
         </div>
         <div class="m-h">壓力測試</div>
-        <div class="m-card ft-tests">${(d.tests || []).map(testHtml).join('') || '<div class="m-empty">還沒有壓力測試</div>'}</div>`;
+        <div class="m-card ft-tests">${(d.tests || []).map(testHtml).join('') || emptyBox('還沒有壓力測試')}</div>`;
 }
 
 function layerHtml(l) {
@@ -197,16 +201,18 @@ async function done(host, r, msg = '已記下') {
     closeSheet();
 }
 
+/** 抽屜裡的寫入：按鈕忙碌狀態＋一層 try/catch（四個鈕本來各寫一份一模一樣的）。
+ *  readForm 的丟出也一起接住，不必再包第二層。 */
+const sheetWrite = (btn, fn) => withBusy(btn, async () => {
+    try { await fn(); } catch (err) { toast(err.message, 'err'); }
+});
+
 function openAddSheet(host) {
     const body = openSheet(`<div class="ttl">記一筆預留</div>${formHtml('fa', { due_date: todayLocal() })}
         <button type="button" class="m-btn-primary" id="fa-save">記下</button>`);
-    body.querySelector('#fa-save').addEventListener('click', (ev) => withBusy(ev.currentTarget, async () => {
-        let b;
-        try { b = readForm('fa'); } catch (err) { toast(err.message, 'err'); return; }
-        try {
-            const r = await mfetch(`${EARMARK_API}?entity=mine`, { method: 'POST', body: b });
-            await done(host, r);
-        } catch (err) { toast(err.message, 'err'); }
+    body.querySelector('#fa-save').addEventListener('click', (ev) => sheetWrite(ev.currentTarget, async () => {
+        const r = await mfetch(`${EARMARK_API}?entity=mine`, { method: 'POST', body: readForm('fa') });
+        await done(host, r);
     }));
 }
 
@@ -218,30 +224,23 @@ function openEditSheet(host, e) {
             <button type="button" class="m-btn danger" id="fe-del">刪除</button>
         </div>
         <button type="button" class="m-btn-primary" id="fe-save" style="margin-top:8px">儲存</button>`);
-    body.querySelector('#fe-save').addEventListener('click', (ev) => withBusy(ev.currentTarget, async () => {
-        let next;
-        try { next = readForm('fe'); } catch (err) { toast(err.message, 'err'); return; }
+    body.querySelector('#fe-save').addEventListener('click', (ev) => sheetWrite(ev.currentTarget, async () => {
+        const next = readForm('fe');
         // 只送有動的鍵（後端 PUT 只改有給的欄位）
         const was = { label: e.label || '', amount: Number(e.amount), due_date: e.due_date || '', note: e.note || '' };
         const diff = {};
         for (const k of Object.keys(was)) if (String(next[k]) !== String(was[k])) diff[k] = next[k];
         if (!Object.keys(diff).length) { toast('沒有改動'); closeSheet(); return; }
-        try {
-            const r = await mfetch(url, { method: 'PUT', body: diff });
-            await done(host, r, '已更新');
-        } catch (err) { toast(err.message, 'err'); }
+        const r = await mfetch(url, { method: 'PUT', body: diff });
+        await done(host, r, '已更新');
     }));
-    body.querySelector('#fe-paid').addEventListener('click', (ev) => withBusy(ev.currentTarget, async () => {
-        try {
-            const r = await mfetch(url, { method: 'PUT', body: { paid: !e.paid } });
-            await done(host, r, e.paid ? '已改回未付' : '已標為已付');
-        } catch (err) { toast(err.message, 'err'); }
+    body.querySelector('#fe-paid').addEventListener('click', (ev) => sheetWrite(ev.currentTarget, async () => {
+        const r = await mfetch(url, { method: 'PUT', body: { paid: !e.paid } });
+        await done(host, r, e.paid ? '已改回未付' : '已標為已付');
     }));
-    body.querySelector('#fe-del').addEventListener('click', (ev) => withBusy(ev.currentTarget, async () => {
+    body.querySelector('#fe-del').addEventListener('click', (ev) => sheetWrite(ev.currentTarget, async () => {
         if (!window.confirm(`刪除預留「${e.label || '這一筆'}」？`)) return;
-        try {
-            const r = await mfetch(url, { method: 'DELETE' });
-            await done(host, r, '已刪除');
-        } catch (err) { toast(err.message, 'err'); }
+        const r = await mfetch(url, { method: 'DELETE' });
+        await done(host, r, '已刪除');
     }));
 }

@@ -233,9 +233,12 @@ function _render() {
             新增的只有「帳戶分層」「預留清單」「目標倍數」三份設定，不動任何金額規則。
         </div>
     </div>`;
-    _c.querySelector('#ft-acct-body')?.addEventListener('change', _onLayerChange);
+    // 一律委派：每次重畫綁 N 個監聯的話，改一次分層就多綁一輪
+    _c.firstElementChild.addEventListener('change', (ev) => {
+        if (ev.target.matches('.ft-target-mult')) _ff.saveTargets();
+        else _onLayerChange(ev);
+    });
     _c.querySelector('#ft-em-body')?.addEventListener('click', _onEarmarkClick);
-    _c.querySelectorAll('.ft-target-mult').forEach((el) => el.addEventListener('change', () => _ff.saveTargets()));
     _applyPending();
     restore();
 }
@@ -487,7 +490,7 @@ function _layerStatus(msg) {
 }
 
 function _onLayerChange(ev) {
-    if (!ev.target.matches('.ft-layer, .ft-flag')) return;
+    if (!ev.target.matches('.ft-layer, .ft-flag')) return;   // 委派進來的，先確認是不是分層那張表
     _pendingLayers = _readLayers();       // 🔴 現在就讀，不要等計時器（見 _pendingLayers 的註解）
     _layerStatus('儲存中…');
     clearTimeout(_layerTimer);

@@ -1,6 +1,6 @@
 # 私帳「堡壘」—— 個人版 Fortress Balance Sheet（桌機分頁＋手機版）規劃
 
-> 狀態：**實作中（2026-09-16 owner「做」）**：F1 純規則＋F2 後端已上 dev 8001（`core/fortress_logic.py`、`routers/api_fortress.py`、表 `finance_fortress_earmarks`）；F3 桌機、F4 手機進行中。未發版。
+> 狀態：**F1–F4 做完、跑過 /polish（2026-09-16）**：純規則＋後端＋桌機分頁＋手機頁都在 dev 8001 驗過，六張 bug 卡已修（見 `git log --grep="polish: BUG"`）。**未發版**（F5 待 owner 說「推」）。
 > 來源：owner 2026-09-16 貼的〈把 JPMorgan「堡壘資產負債表」搬進家庭財務〉：五層資金、Liquidity Runway、家庭版壓力測試。
 > 前置：[`docs/MY_LEDGER_MOBILE_PLAN.md`](MY_LEDGER_MOBILE_PLAN.md)（士源帳本手機殼與規矩）、[`docs/LEDGER_ENTITY_PLAN.md`](LEDGER_ENTITY_PLAN.md)（兩本帳）。
 > 視覺 demo：桌機 https://claude.ai/code/artifact/d9748841-3ef4-487e-a82e-780ed006260c（範例數字）。
@@ -20,12 +20,12 @@
 | 名詞 | 定義 |
 |---|---|
 | 五層 | 1 營運現金／2 預留現金／3 緊急預備／4 機會資金／5 複利資本。每個帳戶（銀行、現金、證券、信用卡）標一層。 |
-| 現金 | 第 1–4 層的餘額合計（銀行＋現金帳戶＋證券各一列；信用卡與股東帳戶**不列**，卡欠款走預留那邊，不然會扣兩次）。第 5 層不算現金。 |
+| 現金 | 第 1–4 層裡**不是證券**的餘額合計（`cash_in_layers`）。🔴 看的是 kind 不是層別：把 ETF 標成第 4 層不會讓它變成股災裡不會跌的現金。信用卡與股東帳戶不列（卡欠款走預留，不然扣兩次）。 |
 | 預留 | 預留清單未付項目的合計（含自動帶入：貸款表下一期 `FinanceLoanPayment.status='scheduled'` 最近一筆、信用卡本期欠款）。 |
-| 必要支出 | 預設＝`crm_cash_entries(entity='mine')` 近 6 個月「固定支出」子樹＋「家用」子樹的月平均；owner 可覆寫一個數字（設定）。 |
+| 必要支出 | 預設＝近 6 個**完整**月的生活支出月平均，**分母是真的有資料的月份數**（`monthly_need_from_rows`）。口徑 `need_category_ok`：收 `家用`／`個人`／`貸款繳款` 三枝，扣掉收入列、投資支出、借款支出（卡費與房貸走預留，再算一次是重複）、其他支出。owner 可覆寫（設定）。<br>🔴 分類樹只搬了一半，生活費大多掛在 `個人_旅遊` 這種舊的兩層名字上 —— 只收 `家用%` 會漏掉整個個人枝。 |
 | 可撐月數 | （第 1–3 層現金 − 預留）÷ 必要支出。另顯示「含第 4 層」版本。 |
 | 各層目標 | 1：1 個月必要支出；2：預留合計；3：6 個月；4：3 個月；5：無上限。倍數可改（設定）。 |
-| 壓力測試 | 五題，全部由上面的數字算：① 收入斷 6 個月 ② 股票跌 40% ③ 突發 40 萬 ④ 三件同時 ⑤ 台海戰爭。每題回「撐得住／撐得住但很緊／會被迫」＋一句結論＋算式各行。 |
+| 壓力測試 | 五題，全部由上面的數字算：① 收入斷 6 個月 ② 股票跌 40% ③ 突發 40 萬 ④ 三件同時 ⑤ 台海戰爭。每題回「撐得住／撐得住但很緊／會被迫」＋一句結論＋算式各行。跌幅一律套在**證券**（kind＝holding）上，不論它被放在第幾層。 |
 | 台海戰爭假設（預設，可改） | 收入斷 12 個月；台股 −60%；美股 −20%；台幣貶 30%（美元資產台幣價值 ×1.3）；台灣的銀行前 4 週領不到錢 → 「頭一個月拿得到的錢」只算標了**實體**或**海外**的帳戶。 |
 
 顏色門檻同儀表板既有的 `runway` 規則：≥6 綠、3–6 黃、<3 紅（`dashboard.js:181`）。
@@ -51,6 +51,9 @@
     桌機與手機同一支；撈數字在 `routers/api_fortress.py`（同 api_ledger_mobile 的做法，lazy import 既有 router 的算法），規則在 `core/fortress_logic.py`。
   - `PUT /api/v1/finance/fortress/settings`（桌機）；`POST/PUT/DELETE /api/v1/finance/fortress/earmarks`（桌機＋手機）。
   - 掛進 `main_office._ROUTER_MODULES`（同 `api_ledger_mobile`）：主控關機手機照看、照記預留。
+    🔴 但 `/fortress/settings` 在 `_DROP_PREFIXES` 裡 —— NAS 的 settings.json 是唯讀副本，在那邊存會靜默消失。
+  - 🔴 守衛是 `_guard()` 不是直接 `require_entity(request, entity)`：entity 空字串會落到 parent，沒有 finance_mine 的管理員會拿到一個「母公司版堡壘」。
+  - 🔴 `finance.fortress` 在 `routers/api_system._SECRET_SUBKEYS` 裡 —— `/api/settings/load` 是匿名端點，不抹的話每月必要支出與銀行帳戶 id 會整包外流。
 
 ## 3. 桌機：財務分頁多一個「堡壘」（只在私帳出現）
 
@@ -81,5 +84,6 @@
 | F3 | 桌機分頁 `fortress.js`（照 demo v3，深色配色） | Playwright 桌機截圖給 owner |
 | F4 | 手機：總覽頂卡＋`#fortress` 頁＋預留抽屜 | Playwright iPhone viewport（8001 與 NAS 各一次）截圖給 owner |
 | F5 | 發版（`/publish` 流程；只有主控＋NAS，機隊不需要這功能但 OTA 一起帶） | 8000 真機 |
+| /polish | 六張 bug 卡：分層自動存會清空設定、設定從匿名端點外流＋端點沒鎖私帳、必要支出口徑與分母、壓力測試把證券當現金、匯率沒設無聲算 0＋逾期貸款只留一期、手機顯示過期數字 | 4147 通過 |
 
 owner 待拍板（沒說就照預設）：證券算第 5 層；必要支出用自動平均、可覆寫；戰爭假設照 §1 預設。
