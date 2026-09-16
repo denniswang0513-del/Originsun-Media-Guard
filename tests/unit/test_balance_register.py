@@ -174,11 +174,14 @@ def test_works_list_hides_private_ledger_projects_that_are_linked_to_a_crm_proje
     沒連結的私帳案照列；公開清單的共用基底也套同一個條件。"""
     from tests.unit._srcscan import func_body
     src = repo_src("services/website/project_service.py")
-    cond = func_body(src, "def _not_a_linked_mine_project():")
-    assert "CrmProject.mine_link_id.isnot(None)" in cond and "CrmProject.source_project_id.is_(None)" in cond
+    cond = func_body(src, "def _not_a_linked_mine_project(published_only: bool = False):")
+    assert "P.mine_link_id.isnot(None)" in cond and "CrmProject.source_project_id.is_(None)" in cond
     assert 'CrmProject.entity != "mine"' in cond, "母帳案一律列；只有私帳案才看連結"
+    # 2026-09-17 調整：母帳那邊要真的有東西才不列（母帳案存在；公開清單還要母帳作品已公開）；子查詢用 aliased 免被 correlate
+    assert "P.id.in_(parent)" in cond and "CrmProject.source_project_id.notin_(parent)" in cond and "aliased(CrmProject)" in cond
+    assert "S.published.is_(True)" in cond and ".correlate(None)" in cond
     assert "_not_a_linked_mine_project()" in func_body(src, "async def list_admin_projects(")
-    assert "_not_a_linked_mine_project()" in func_body(src, "def _published_works_base():")
+    assert "_not_a_linked_mine_project(published_only=True)" in func_body(src, "def _published_works_base():")
 
 
 def test_mobile_views_pass_objects_to_mfetch_not_strings():
@@ -204,7 +207,8 @@ def test_day_key_uses_local_day_for_aware_datetimes():
 def test_report_month_window_is_naive_like_the_cash_entries():
     """BUG-5：月報本月視窗不能用 UTC-aware 邊界（明細存的是 naive 本地 00:00，1 日的會掉到上個月）。"""
     from tests.unit._srcscan import func_body
-    assert "from routers.api_finance import _guard, _month_window" in repo_src("routers/api_monthly_report.py"), "共用 api_finance 那支（naive）"
+    rpt = repo_src("routers/api_monthly_report.py")
+    assert "def _month_window" not in rpt and "timezone.utc" not in rpt, "月報不自己切月份視窗，也不用 UTC-aware 邊界"
     w = func_body(repo_src("routers/api_finance.py"), "def _month_window(month: str) -> tuple:")
     assert "timezone" not in w and 'strptime(month + "-01", "%Y-%m-%d")' in w
 

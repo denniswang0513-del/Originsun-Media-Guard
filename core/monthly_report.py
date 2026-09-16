@@ -163,10 +163,13 @@ def concentration(fortress: dict) -> dict:
     stocks = [(n, v) for n, v in hs if not is_broad_fund(n)]
     top = stocks[0] if stocks else ("", 0)
     funds_pct = _pct(sum(v for n, v in hs if is_broad_fund(n)), total)
-    # 穿透：台積電直接持有＋台灣50 類基金裡的那一半（約數；一檔名字對到兩個關鍵字也只算一次）
+    # 穿透：台積電直接持有＋台灣50 類基金裡的那一半（比例在堡壘設定 concentration.tsmc_share，預設 0.55；
+    # 一檔名字對到兩個關鍵字也只算一次）
     lookthrough = None
     if "台積電" in top[0]:
-        via = sum(v for n, v in hs if any(k in n.lower() for k in TSMC_LOOKTHROUGH_NAMES)) * TSMC_LOOKTHROUGH_SHARE
+        share = ((fortress.get("settings") or {}).get("concentration") or {}).get("tsmc_share")
+        share = float(share) if share is not None else TSMC_LOOKTHROUGH_SHARE
+        via = sum(v for n, v in hs if any(k in n.lower() for k in TSMC_LOOKTHROUGH_NAMES)) * share
         if via > 0:
             lookthrough = {"value": int(round(top[1] + via)), "pct": _pct(top[1] + via, total)}
     return {"total": total, "top_name": top[0], "top_value": top[1], "top_pct": _pct(top[1], total) if stocks else None,

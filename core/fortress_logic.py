@@ -87,6 +87,8 @@ FIRE_SHOCK_YEARS = 10
 #: 房產（owner 2026-09-16「可以新增房產的選項 但我現在沒有」）：手填估值，只算進**財富階梯的淨值**，
 #: 不進五層、不進可撐月數、不進長照題 —— 房子不是能拿來付帳的錢。有房貸的話貸款那邊本來就會扣。
 DEFAULT_PROPERTY = {"value": 0, "note": ""}
+#: 月報集中度的穿透：台灣50 類基金（0050／006208…）裡台積電佔多少（2024 起約 55%，會漂，所以是設定不是常數）
+DEFAULT_CONCENTRATION = {"tsmc_share": 0.55}
 #: 第 3 題「突發支出」的金額
 SHOCK_AMOUNT = 400_000
 #: 第 2 題股票跌幅
@@ -249,6 +251,7 @@ def normalize_settings(raw) -> dict:
         prop["value"] = max(0, min(10 ** 12, n))
     if isinstance(raw_p.get("note"), str):
         prop["note"] = raw_p["note"].strip()[:80]
+    conc = _clamped(raw.get("concentration"), DEFAULT_CONCENTRATION, {"tsmc_share": (0.0, 1.0)})
     override = raw.get("monthly_need_override")
     override = _num(override, as_int=True) if override not in (None, "", 0, "0") else None
     if override is not None and override <= 0:
@@ -258,14 +261,15 @@ def normalize_settings(raw) -> dict:
         hl = 5
     return {"account_layers": layers, "account_flags": flags, "holdings_layer": hl if 1 <= hl <= 5 else 5,
             "targets": targets, "monthly_need_override": override, "war": war, "care": care, "growth": growth,
-            "ladder": ladder, "plan": plan, "property": prop, "fire": fire}
+            "ladder": ladder, "plan": plan, "property": prop, "fire": fire, "concentration": conc}
 
 
 def merge_settings(current: dict, patch: dict) -> dict:
     """PUT 設定：淺層合併（account_layers／account_flags／targets／war 各自整份取代；其餘逐鍵）。"""
     out = normalize_settings(current)
     patch = patch if isinstance(patch, dict) else {}
-    for k in ("account_layers", "account_flags", "targets", "war", "care", "growth", "ladder", "plan", "property", "fire"):
+    for k in ("account_layers", "account_flags", "targets", "war", "care", "growth", "ladder", "plan", "property", "fire",
+              "concentration"):
         if k in patch and isinstance(patch[k], dict):
             out[k] = patch[k]
     for k in ("holdings_layer", "monthly_need_override"):

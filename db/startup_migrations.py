@@ -605,6 +605,20 @@ async def _m18_cost_groups_table_and_backfill() -> None:
             print(f"[startup] cost_groups migration failed: {_e_cg}")
 
 
+async def apply_finance_ledger_columns(factory) -> None:
+    """既有表補財務欄位（`ADD COLUMN IF NOT EXISTS`，冪等、每條各自 commit／rollback）。
+    master 開機（_m19）與 office-api 開機都跑：登記餘額／月報的新欄位不能等 master 先開過一次才有
+    （2026-09-17 /polish 回報：office-api 只 create_all，bank_accounts.anchor_* 缺欄會讓帳戶清單、堡壘、登記整批 500）。"""
+    from sqlalchemy import text as _tfin
+    async with factory() as _sfin:
+        for col_sql in _MIG.FINANCE_LEDGER_COLUMNS:
+            try:
+                await _sfin.execute(_tfin(col_sql))
+                await _sfin.commit()
+            except Exception:
+                await _sfin.rollback()
+
+
 async def _m19_finance_phase2_tables() -> None:
     """財務管理階段二：科目/對映/銀行帳戶/對帳/調整表"""
     # ── 財務管理階段二：科目/對映/銀行帳戶/對帳/調整表 ──
@@ -617,14 +631,7 @@ async def _m19_finance_phase2_tables() -> None:
             from db.session import get_session_factory
             _ffin = get_session_factory()
             if _ffin:
-                from sqlalchemy import text as _tfin
-                async with _ffin() as _sfin:
-                    for col_sql in _MIG.FINANCE_LEDGER_COLUMNS:
-                        try:
-                            await _sfin.execute(_tfin(col_sql))
-                            await _sfin.commit()
-                        except Exception:
-                            await _sfin.rollback()
+                await apply_finance_ledger_columns(_ffin)
                 # 種子：科目表 + category 對映（冪等 — 查無才 insert，不覆蓋後台調整）
                 from db.seed_finance import seed_finance_stage2
                 await seed_finance_stage2(_ffin)

@@ -68,7 +68,8 @@ class FortressSettingsPatch(BaseModel):
     ladder: Optional[dict] = None     # 財富階梯：門檻五個、免思考比例、台灣分位數與註記
     plan: Optional[dict] = None       # 規劃欄位：目標階梯、目標年份
     property: Optional[dict] = None   # 房產估值（只算進階梯的淨值）：{value, note}
-    fire: Optional[dict] = None       # 財富自由：提領率、出生年、撐到幾歲、退休後其他收入與從幾歲、不工作自付的固定支出
+    fire: Optional[dict] = None       # 財富自由：提領率、出生年、撐到幾歲、退休後其他收入
+    concentration: Optional[dict] = None   # 月報集中度穿透：{tsmc_share}（台灣50 類基金裡台積電的比例）與從幾歲、不工作自付的固定支出
 
 
 def _guard(request: Request, entity: str = "") -> str:

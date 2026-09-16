@@ -653,3 +653,12 @@ def test_age_label_matches_between_backend_and_both_frontends():
     assert "ctx.age + Number(v) - 1" in desk
     mob = js_code_only(repo_src("frontend/m/views/ledger-fortress.js"))
     assert "ctx.age + Number(v) - 1" in mob
+
+
+def test_concentration_setting_is_normalized_and_mergeable():
+    """2026-09-17：月報集中度穿透的比例是設定不是常數（會漂）。夾在 0–1；PUT 一段整份取代；亂值回預設。"""
+    from core.fortress_logic import DEFAULT_CONCENTRATION, merge_settings, normalize_settings
+    assert normalize_settings({})["concentration"] == DEFAULT_CONCENTRATION == {"tsmc_share": 0.55}
+    assert normalize_settings({"concentration": {"tsmc_share": 1.7}})["concentration"]["tsmc_share"] == 1.0
+    assert normalize_settings({"concentration": {"tsmc_share": "x"}})["concentration"]["tsmc_share"] == 0.55
+    assert merge_settings({}, {"concentration": {"tsmc_share": 0.4}})["concentration"]["tsmc_share"] == 0.4

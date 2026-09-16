@@ -9,6 +9,7 @@
  * 版面照桌機 demo v3（淺色只是提案），配色換成 CRM 深色殼那組。
  */
 import { finFetchMine, finSubviewBoot, esc, fmtNum, finToast } from '../fin-utils.js';
+import { fmtWan } from '../../../js/shared/fmt.js';
 
 let _c = null;
 let _isCurrent = () => true;
@@ -26,15 +27,7 @@ const STATE_PILL = { ok: '撐得住', warn: '撐得住，但很緊', bad: '會�
 const FLAG_KEYS = ['physical', 'offshore', 'usd'];
 
 // ── 格式 ────────────────────────────────────────────────────
-/** 元 → 「12.5 萬」（負數前面加 −） */
-function fmtWan(n) {
-    if (n == null || isNaN(n)) return '—';
-    const a = Math.abs(n);
-    // 一億以上用「億」：財富階梯的門檻寫成「10,000 萬」沒人看得懂
-    const [v, unit] = a >= 1e8 ? [Math.round(a / 1e6) / 100, ' 億'] : [Math.round(a / 1000) / 10, ' 萬'];
-    // 四捨五入到 0 的負數不要寫成「−0 萬」
-    return (n < 0 && v > 0 ? '−' : '') + v.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) + unit;
-}
+// 元 → 「12.5 萬」：共用 js/shared/fmt.js（堡壘、月報、士源帳本同一份）
 /** 小數 → 百分比字串：保留兩位、去尾零。🔴 只留一位的話 3.25% 會顯示 3.3，
  *  而輸入框的值就是下一次送出的值 —— 存第二次就真的變成 3.3%（設定被自己的顯示吃掉）。 */
 function fmtPctInput(v) {
@@ -661,7 +654,14 @@ function _accounts(d) {
         <tbody id="ft-acct-body">${rows}</tbody>
     </table>
     </div>
-    <div class="ft-src" id="ft-layer-status" style="margin-top:6px;">改層別或勾標記後半秒內自動儲存。</div>`;
+    <div class="ft-src" id="ft-layer-status" style="margin-top:6px;">改層別或勾標記後半秒內自動儲存。</div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;color:#9ca3af;">
+        <label>月報算集中度時，台灣50 類基金裡台積電的比例
+            <input class="crm-input" id="ft-conc-share" type="number" min="0" max="100" step="1" style="width:80px;margin-left:6px;"
+                   value="${fmtPctInput((_cfg().concentration || {}).tsmc_share ?? 0.55)}"> %</label>
+        <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finFortress.saveConcentration(this)">儲存</button>
+        <span>0050、006208 這類指數裡台積電佔一半左右，會漂；改這格月報的「穿透後」數字就跟著變。</span>
+    </div>`;
 }
 
 /** 目前這張表的分層與標記；表格不在畫面上（已切到別的子視圖）就回 null。 */
@@ -789,6 +789,9 @@ _ff.saveAssume = (key, btn) => {
     }
     _openAssume = '';
 };
+
+_ff.saveConcentration = (btn) => _put('/fortress/settings',
+    { concentration: { tsmc_share: Math.max(0, Math.min(100, _num('ft-conc-share', 55))) / 100 } }, '已存比例', btn);
 
 _ff.saveProperty = (btn) => {
     const note = (document.getElementById('ft-prop-note') || {}).value || '';

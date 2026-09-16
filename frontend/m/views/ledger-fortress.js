@@ -11,6 +11,7 @@
  */
 import { mfetch, money, todayLocal, toast, esc } from '../shell.js';
 import { skeleton, errBox, emptyBox, pill, openSheet, closeSheet, withBusy, markStale } from '../ui.js';
+import { fmtWan } from '/js/shared/fmt.js';
 
 export const FORTRESS_API = '/api/v1/finance/fortress?entity=mine';
 const EARMARK_API = '/api/v1/finance/fortress/earmarks';
@@ -18,14 +19,8 @@ const EARMARK_API = '/api/v1/finance/fortress/earmarks';
 let _data = null;
 
 // ── 數字寫法 ──
-/** 元 → 「X 萬」（一位小數，.0 去掉）：大數字與說明句用；表格列仍用 money() 全位數。 */
-export function wan(n) {
-    if (n === null || n === undefined || !Number.isFinite(Number(n))) return '—';
-    const a = Math.abs(Number(n));
-    // 一億以上用「億」：階梯的門檻寫成「10,000 萬」沒人看得懂
-    if (a >= 1e8) return (Number(n) / 1e8).toFixed(2).replace(/\.?0+$/, '') + ' 億';
-    return (Number(n) / 10000).toFixed(1).replace(/\.0$/, '') + ' 萬';
-}
+/** 元 → 「X 萬」：共用 /js/shared/fmt.js（跟桌機堡壘、月報同一份）；表格列仍用 money() 全位數。 */
+export const wan = fmtWan;
 /** 月數：null → '—'，否則一位小數（.0 去掉）。 */
 export function months(n) {
     if (n === null || n === undefined || !Number.isFinite(Number(n))) return '—';

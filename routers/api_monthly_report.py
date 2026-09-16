@@ -7,7 +7,7 @@
 - 堡壘 payload（routers.api_fortress._payload）：五層、六題、階梯、財富自由、持股（已換台幣）、負債
 - 登記餘額 payload（routers.api_balance_register._register_payload）：各帳戶登記數／未補明細、各券商未拆明細、卡費
 - 資產儀表板的桶（routers.api_finance_assets._auto_buckets）：銀行現金／應收／器材淨值／證券現值
-- 本月收支（crm_cash_entries 本月加總；家用同 api_ledger_mobile 的口徑）
+- 本月收支（財務三表同一套分類 core.finance_logic.cashflow_lines：營業活動的流入／流出；家用同 api_ledger_mobile 的口徑）
 - 淨值快照（finance_net_snapshots）：走勢與第一份月報的比較基準
 - 上一份月報（finance_monthly_reports）：各分項的上月數字
 """
@@ -23,8 +23,9 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from pydantic import BaseModel
 
 from core.db_guard import db_factory_or_503 as _factory_or_503
+from core.finance_logic import cashflow_lines
 from core.monthly_report import TREND_POINTS, build_report
-from routers.api_finance import _guard, _month_window
+from routers.api_finance import _guard
 from routers.crm._shared import _username, _validate_month
 
 log = logging.getLogger(__name__)
@@ -52,12 +53,13 @@ def _row_dict(r) -> dict:
 async def generate_report(ent: str, username: str, month: Optional[str] = None) -> dict:
     """撈齊資料 → core.monthly_report.build_report → 存進 finance_monthly_reports（同帳本同月覆蓋）→ 回 payload。"""
     from sqlalchemy import func as fn
-    from sqlalchemy import or_, select
+    from sqlalchemy import select
     from db.models import CrmCashEntry, FinanceMonthlyReport, FinanceNetSnapshot
     from routers.api_balance_register import _register_payload
     from routers.api_finance_assets import _auto_buckets
     from routers.api_fortress import _payload as fortress_payload, _today_tw
     from routers.api_ledger_mobile import HOUSEHOLD_TOP
+    from services.finance_statements import _load_inputs
 
     today = _today_tw()
     this_month = today.strftime("%Y-%m")
@@ -75,16 +77,16 @@ async def generate_report(ent: str, username: str, month: Optional[str] = None) 
         card = ((fortress.get("ladder") or {}).get("liabilities") or {}).get("card")
         register = await _register_payload(session, ent, card=card)
         buckets = (await _auto_buckets(session, ent, register["usd_twd"])).get("buckets") or {}
-        lo, hi = _month_window(month)
-        # 收支明細不是損益表：轉帳（轉匯與定存）兩邊各一筆、刷卡與還款各一筆、買賣股票記成支出／收入 ——
-        # 「本月收入／支出」要把這些跨帳流動排掉（core.cash_taxonomy 的兩本＋「投資」項目）
-        cat = fn.coalesce(CrmCashEntry.category, "")
-        cross = or_(cat.like("轉匯與定存%"), cat.like("信用卡%"), cat.like("%投資%"))
-        dep, exp, house = (await session.execute(
-            select(fn.coalesce(fn.sum(CrmCashEntry.deposit).filter(~cross), 0),
-                   fn.coalesce(fn.sum(CrmCashEntry.expense).filter(~cross), 0),
-                   fn.coalesce(fn.sum(CrmCashEntry.expense).filter(cat.like(HOUSEHOLD_TOP + "%")), 0))
-            .where(CrmCashEntry.entity == ent, CrmCashEntry.entry_date >= lo, CrmCashEntry.entry_date < hi))).one()
+        # 本月收入／支出跟財務三表**同一套分類**（core.finance_logic.cashflow_lines）：配對的轉存、預支、投資／籌資活動
+        # 都由它判，月報不再自己用分類名猜「哪些是跨帳流動」。營業活動的流入＝收入、流出＝支出；家用另從分類挑。
+        inputs = await _load_inputs(session, ent)
+        rows, _stats = cashflow_lines(inputs["cash_entries"], [month], cat_map=inputs["cat_map"],
+                                      accounts=inputs["accounts"], bank_accounts=inputs["bank_accounts"])
+        op = [r for r in rows if r["activity"] == "operating"]
+        dep = sum(r["amount"] for r in op if r["amount"] > 0)
+        exp = -sum(r["amount"] for r in op if r["amount"] < 0)
+        house = -sum(r["amount"] for r in op
+                     if r["amount"] < 0 and str(r["entry"].get("category") or "").startswith(HOUSEHOLD_TOP))
         # 快照的 total 含手填桶（預付款…），月報的總資產只有四顆自動桶：比較與走勢要用快照存的 auto 四桶合計，
         # 不然「比上次快照 +X」會被手填桶壓低。舊快照沒有 auto 才退回 total。
         # 只撈走勢要的最後 N 筆（build_report 只用最後 TREND_POINTS 筆＋基準日前最近一筆）

@@ -54,7 +54,7 @@ def test_fortress_view_contract():
     assert "markStale('fortress')" in js_func_body(_FORT_CODE, "async function load(host) {"), "載入失敗不要被當成剛載過，退出去再進來要能重試"
     assert "from '../shell.js'" in _FORT_CODE and "from '../ui.js'" in _FORT_CODE
     imports = re.findall(r"from '([^']+)'", _FORT_CODE)
-    assert all(i in ("../shell.js", "../ui.js") or i.startswith("./ledger-") for i in imports), imports
+    assert all(i in ("../shell.js", "../ui.js", "/js/shared/fmt.js") or i.startswith("./ledger-") for i in imports), imports
 
 
 def test_fortress_dates_are_local_and_no_emoji():
@@ -95,8 +95,10 @@ def test_fortress_page_sections_and_money_style():
     t = js_func_body(_FORT_CODE, "function testHtml(")
     assert "<details" in t and "<details open" not in t, "壓力測試預設全收合"
     assert "個月" in js_func_body(_FORT_CODE, "const lineVal =")
-    w = js_func_body(_FORT_CODE, "export function wan(")
-    assert "/ 10000" in w and "toFixed(1)" in w and "萬" in w
+    # 2026-09-17：「萬」只留一份 js/shared/fmt.js（堡壘桌機、月報桌機、士源帳本共用）
+    assert "export const wan = fmtWan;" in _FORT_CODE and "from '/js/shared/fmt.js'" in _FORT_CODE
+    w = js_func_body(js_code_only(repo_src("frontend/js/shared/fmt.js")), "export function fmtWan(n) {")
+    assert "/ 10000" in w and "toFixed(1)" in w and "萬" in w and "億" in w
 
 
 # ── 總覽頂卡 ──────────────────────────────────────────────────────

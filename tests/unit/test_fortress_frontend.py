@@ -28,7 +28,7 @@ def test_subview_entry_and_endpoints():
 def test_imports_only_from_shared_utils():
     js = js_code_only(repo_src(JS))
     for m in re.finditer(r"^\s*import\s.*?from\s+'([^']+)'", js, re.M):
-        assert m.group(1) in ("../fin-utils.js", "../../crm/crm-utils.js"), f"不得 import 其他子視圖：{m.group(1)}"
+        assert m.group(1) in ("../fin-utils.js", "../../crm/crm-utils.js", "../../../js/shared/fmt.js"), f"不得 import 其他子視圖：{m.group(1)}"
 
 
 def test_delete_asks_confirm():

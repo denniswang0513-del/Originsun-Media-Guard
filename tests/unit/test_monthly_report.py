@@ -91,6 +91,9 @@ def test_concentration_ignores_broad_index_funds():
     assert "分批賣" in conc_adv["how"] and "實際約 44%" in conc_adv["text"]
     h = next(x for x in r["health"] if x["key"] == "concentration")
     assert h["state"] == "bad" and "約 44%" in h["text"]
+    # 2026-09-17 調整：穿透比例來自堡壘設定 concentration.tsmc_share（預設 0.55）
+    c2 = concentration({**_fortress(), "settings": {"concentration": {"tsmc_share": 0.4}}})
+    assert abs(c2["lookthrough"]["value"] - (14_400_000 + 0.4 * 7_450_297)) < 1
     # 外幣現金列、台50 不是一檔股票；市場先生、全球晶片不是基金（人壽本來就算非股票）
     assert is_broad_fund("美元現金") and is_broad_fund("日圓現金") and is_broad_fund("富邦台50")
     assert not is_broad_fund("市場先生") and not is_broad_fund("全球晶片")
@@ -201,8 +204,10 @@ def test_month_income_and_expense_exclude_cross_account_flows():
     """BUG-7：收支明細不是損益表 —— 轉帳、信用卡還款、買賣股票要從本月收入／支出排掉；bank_net 另算（含匯費、請款）。"""
     from tests.unit._srcscan import func_body
     body = func_body(repo_src("routers/api_monthly_report.py"), "async def generate_report(")
-    assert 'cat.like("轉匯與定存%")' in body and 'cat.like("信用卡%")' in body and 'cat.like("%投資%")' in body
-    assert ".filter(~cross)" in body and "CrmCashEntry.bank_fee" in body and '"bank_net": bank_net' in body
+    # 2026-09-17 調整：不再自己用分類名猜，改吃財務三表同一套分類（cashflow_lines 的營業活動）
+    assert "cashflow_lines(inputs[\"cash_entries\"], [month]" in body and "_load_inputs(session, ent)" in body
+    assert 'r["activity"] == "operating"' in body and "cat.like(" not in body
+    assert "CrmCashEntry.bank_fee" in body and '"bank_net": bank_net' in body
     desk = js_code_only(repo_src("frontend/tabs/finance/subviews/report.js"))
     assert "register_gap" in desk and "unexplained" not in desk and "證券增減" in desk
     mob = js_code_only(repo_src("frontend/m/views/ledger-report.js"))

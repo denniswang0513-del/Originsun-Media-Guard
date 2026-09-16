@@ -134,8 +134,18 @@ async def _lifespan(app: FastAPI):
         # init_db 回傳連線是否成功；必須顯式寫回 state.db_online（守衛靠這個 flag）
         ok = await init_db()
         state.db_online = bool(ok)
-        # 🔴 **不跑 migration**：加欄位／建表是 master startup 的事（main.py 的 _crm_cols）。
-        #    兩台同時對同一顆 DB 跑 DDL 只會互相卡，而且這台的碼可能比 master 舊一版。
+        # 🔴 **只補財務欄位、不跑其他 migration**：建表／回填是 master startup 的事（main.py 的 _crm_cols）。
+        #    但 `ADD COLUMN IF NOT EXISTS` 是冪等的，兩台同時跑也只是其中一台 no-op —— 登記餘額／月報的新欄位
+        #    不能等 master 先開過一次才有（2026-09-17）。
+        if ok:
+            try:
+                from db.session import get_session_factory
+                from db.startup_migrations import apply_finance_ledger_columns
+                _f = get_session_factory()
+                if _f:
+                    await apply_finance_ledger_columns(_f)
+            except Exception as _e:
+                print(f"[office-api] finance columns migration skipped: {_e}")
         print(f"[office-api] startup {'OK (DB online)' if ok else 'WITHOUT DB — 60s 後自動重試'}")
     except Exception as e:
         print(f"[office-api] startup failed: {e}")

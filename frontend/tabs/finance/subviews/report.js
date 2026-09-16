@@ -6,6 +6,7 @@
  * 只在私帳出現（finance.html 的 .fin-nav-mine-only），所以固定走 finFetchMine。
  */
 import { finFetchMine, finSubviewBoot, esc, fmtNum, finToast } from '../fin-utils.js';
+import { fmtWan as wan } from '../../../js/shared/fmt.js';
 
 let _c = null;
 let _isCurrent = () => true;
@@ -66,12 +67,6 @@ function _injectCss() {
     document.head.appendChild(st);
 }
 
-const wan = (n) => {
-    if (n === null || n === undefined || isNaN(n)) return '—';
-    const a = Math.abs(Number(n));
-    const s = a >= 1e8 ? `${(a / 1e8).toFixed(2).replace(/\.?0+$/, '')} 億` : `${(a / 1e4).toFixed(1).replace(/\.0$/, '')} 萬`;
-    return (Number(n) < 0 ? '−' : '') + s;
-};
 const money = (n) => (n === null || n === undefined ? '—' : (Number(n) < 0 ? '−' : '') + '$' + fmtNum(Math.abs(Number(n))));
 const delta = (n, { pct = null } = {}) => {
     if (n === null || n === undefined) return '<span class="sub">—</span>';

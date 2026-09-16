@@ -19,6 +19,7 @@ from typing import Optional
 
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 # is_main_work / work_url_slug / WORK_WIRE_FIELD_MAP 正本在 core.crm_logic（純函式、
 # OTA 安全，routers/crm 也用同一份）— 這裡 re-export 供既有 caller 沿用
@@ -329,7 +330,7 @@ def _published_works_base():
     return (
         select(CrmProjectShowcase, CrmProject)
         .join(CrmProject, CrmProject.id == CrmProjectShowcase.project_id)
-        .where(CrmProjectShowcase.published.is_(True), _not_a_linked_mine_project())
+        .where(CrmProjectShowcase.published.is_(True), _not_a_linked_mine_project(published_only=True))
     )
 
 
@@ -566,18 +567,29 @@ def work_completeness_dict(sc) -> dict:
     )
 
 
-def _not_a_linked_mine_project():
+def _not_a_linked_mine_project(published_only: bool = False):
     """「連到 CRM 案的私帳案」不在作品清單另成一列（owner 2026-09-17「官網私帳與 crm 如果有連結時，出現 crm 的資料就可以了」）。
 
     同一件案子在母帳（CRM）與私帳各有一列時，作品清單會看到兩列一模一樣的「文心藝術基金會 / 2026 Anicka Yi 展覽影片」。
     連結有兩種形狀（routers/crm/projects.py::is_mirrored 的正本）：新的記在母帳那側（`mine_link_id` 指向私帳案），
     舊的記在私帳案上（`source_project_id` 指回母帳案）。兩種都認：私帳案只要是任一種的目標，就不列。
     沒連結的私帳案（純私帳接的案）照列。
+    只有母帳那邊**真的有東西**時才不列：母帳案不存在（被刪、soft FK 殘留）或（公開清單）母帳作品沒公開，
+    私帳那筆照列 —— 不然那件作品會兩邊都看不到、管理清單也沒地方編它（/polish 2026-09-17 收尾 review）。
+    published_only：公開清單用 True（母帳作品要 published 才算「母帳那邊有」）；管理清單 False（母帳案存在就算）。
+    🔴 子查詢用 aliased：outer 也是 CrmProject，直接用同一個 mapper 會被 SQLAlchemy 自動 correlate 成錯的形狀。
     """
-    linked_targets = select(CrmProject.mine_link_id).where(CrmProject.mine_link_id.isnot(None))
+    P = aliased(CrmProject)
+    parent = select(P.id)
+    if published_only:
+        S = aliased(CrmProjectShowcase)
+        parent = parent.join(S, and_(S.project_id == P.id, S.published.is_(True)))
+    parent = parent.correlate(None)
+    linked_targets = select(P.mine_link_id).where(P.mine_link_id.isnot(None), P.id.in_(parent)).correlate(None)
     return or_(
         CrmProject.entity != "mine",
-        and_(CrmProject.id.notin_(linked_targets), CrmProject.source_project_id.is_(None)),
+        and_(CrmProject.id.notin_(linked_targets),
+             or_(CrmProject.source_project_id.is_(None), CrmProject.source_project_id.notin_(parent))),
     )
 
 
