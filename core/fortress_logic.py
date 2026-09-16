@@ -15,6 +15,8 @@ LAYER_DESC = {1: "日常花的", 2: "已預留用途：稅、保費、房貸", 3
               4: "等好機會才動", 5: "長期投資，十年不動"}
 #: 各層目標＝必要支出的幾倍（第 2 層＝預留清單合計、第 5 層沒有上限，不在這裡）
 DEFAULT_TARGET_MONTHS = {1: 1, 3: 6, 4: 3}
+#: 目標倍數的上限（10 年）—— 見 normalize_settings 裡的紅字
+MAX_TARGET_MONTHS = 120
 #: 台海戰爭題的預設假設（owner 可在桌機改）
 DEFAULT_WAR = {"months": 12, "tw_drop": 0.6, "us_drop": 0.2, "fx": 1.3, "bank_freeze_weeks": 4}
 #: 第 3 題「突發支出」的金額
@@ -103,8 +105,10 @@ def normalize_settings(raw) -> dict:
             n, m = int(k), float(v)
         except (TypeError, ValueError):
             continue
+        # 🔴 上限不能省：`float('inf') >= 0` 是真的，倍數 Infinity 會被寫進設定檔，
+        #    之後每次開頁都在 _m(inf) 炸 OverflowError → 500，而且要手改 settings.json 才救得回來。
         if n in DEFAULT_TARGET_MONTHS and m >= 0:
-            targets[n] = m
+            targets[n] = min(m, MAX_TARGET_MONTHS)      # 夾住（同 war 的做法），不是丟掉使用者填的
     # 假設要有上下限：months=0 會讓「撐得過」變成必然、fx=0 會讓美元資產整批歸零 —— 兩個都是無聲的假答案
     war = dict(DEFAULT_WAR)
     bounds = {"months": (1, 120), "bank_freeze_weeks": (0, 520), "tw_drop": (0.0, 1.0), "us_drop": (0.0, 1.0), "fx": (0.1, 10.0)}

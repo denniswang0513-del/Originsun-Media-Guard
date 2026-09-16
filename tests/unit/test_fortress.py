@@ -1,5 +1,5 @@
 """私帳「堡壘」（docs/FORTRESS_PLAN.md）：純規則用 demo 的範例數字釘；端點契約與掛載掃原始碼。"""
-from core.fortress_logic import (DEFAULT_WAR, STATE_BAD, STATE_OK, STATE_WARN, assign_layers, build, layer_sums,
+from core.fortress_logic import (DEFAULT_TARGET_MONTHS, DEFAULT_WAR, STATE_BAD, STATE_OK, STATE_WARN, assign_layers, build, layer_sums,
                                  merge_settings, normalize_settings, runway_months, stress_tests, tone)
 from tests.unit._srcscan import code_only, func_body, repo_src
 
@@ -279,3 +279,13 @@ def test_nas_really_receives_the_fortress_settings():
                                      "jwt_secret": "nope"})
     assert out["finance"] == {"fortress": {"mine": {"holdings_layer": 4}}}, "只送 fortress、其他子鍵不送"
     assert "jwt_secret" not in out
+
+
+def test_targets_have_an_upper_bound():
+    """🔴 收尾 review 抓到：`float('inf') >= 0` 是真的，倍數 Infinity 會通過正規化、被寫進設定檔，
+    之後每次開堡壘頁都在 `_m(inf)` 炸 OverflowError → 500，而且**修不回來**（設定已經存下去了，
+    要手改 settings.json）。BUG-5 那輪把 war／金額／標題都加了上下限，漏了 targets。"""
+    s = normalize_settings({"targets": {"1": float("inf"), "3": -5, "4": 999}})
+    assert s["targets"][1] == 120 and s["targets"][4] == 120, "上限 120 個月（10 年）"
+    assert s["targets"][3] == DEFAULT_TARGET_MONTHS[3], "負數不收，用預設"
+    assert build([], [], 50000, s, "")["layers"], "算得出來，不會 OverflowError"
