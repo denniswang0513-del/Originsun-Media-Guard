@@ -78,19 +78,22 @@ def compare(now: dict, prev: Optional[dict]) -> dict:
     return {k: (now[k] - _i(prev[k]) if prev.get(k) is not None else None) for k in now}
 
 
-def flow_block(month_cash: dict, delta: dict) -> dict:
-    """多出來的錢從哪來：本月收入／支出／家用（收支明細）＋證券漲跌＋應收增減＋剩下解釋不了的。
-    only 有上一份月報的分項時才算得出「證券漲跌」與「解釋不了的」；沒有就 None。"""
+def flow_block(month_cash: dict, delta: dict, through: str = "") -> dict:
+    """多出來的錢從哪來：本月收入／支出／家用（收支明細，**不含**轉帳、信用卡還款、投資買賣 —— 呼叫端已排掉）
+    ＋證券增減（含買賣、匯率）＋應收增減＋「登記餘額與帳上的差」。
+
+    register_gap ＝ Δ銀行現金 − 帳戶真正的淨流（bank_net：deposit−expense−bank_fee−claim）。帳戶餘額是「登記數＋登記後的流水」，
+    所以這個差就是登記後還沒記進帳的明細（補齊會歸 0）—— 不是「解釋不了」，別的東西不可能落在這裡。
+    要有上一份月報的分項（Δ現金／Δ證券）才算得出來；沒有就 None。through：數字算到哪一天（月中產生的月報要標）。"""
     dep, exp, house = _i(month_cash.get("deposit")), _i(month_cash.get("expense")), _i(month_cash.get("household_expense"))
     net = dep - exp
-    sec = delta.get("securities")
-    recv = delta.get("receivable")
-    assets = delta.get("assets")
-    unexplained = None
-    if assets is not None and sec is not None and recv is not None:
-        unexplained = assets - net - sec - recv - _i(delta.get("equipment"))
+    bank_net = month_cash.get("bank_net")
+    cash_delta = delta.get("cash")
+    gap = (cash_delta - _i(bank_net)) if (cash_delta is not None and bank_net is not None) else None
     return {"deposit": dep, "expense": exp, "household": house, "net": net, "has_entries": bool(dep or exp),
-            "securities_change": sec, "receivable_change": recv, "unexplained": unexplained,
+            "bank_net": _i(bank_net) if bank_net is not None else None,
+            "securities_change": delta.get("securities"), "receivable_change": delta.get("receivable"),
+            "register_gap": gap, "through": through,
             "savings_rate": _pct(net, dep) if dep > 0 else None}
 
 
@@ -396,7 +399,7 @@ def build_report(month: str, basis_date: str, fortress: dict, register: dict, bu
             prev_totals = {"assets": _i(last[-1].get("total"))}
             prev_label = f"快照 {str(last[-1].get('date'))[:10]}"
     delta = compare(totals, prev_totals)
-    flow = flow_block(month_cash, delta)
+    flow = flow_block(month_cash, delta, through=basis_date)
     accounts = accounts_block(register, prev, month)
     brokers = brokers_block(register, prev)
     conc = concentration(fortress)

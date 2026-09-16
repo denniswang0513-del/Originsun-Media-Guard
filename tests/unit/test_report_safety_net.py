@@ -19,13 +19,15 @@ def test_totals_and_compare():
     assert d["assets"] == 35 and d["cash"] is None and d["securities"] is None
 
 
-def test_flow_block_only_explains_when_every_delta_is_known():
-    d = {"assets": 1000, "securities": 600, "receivable": 100, "equipment": 0}
-    f = flow_block({"deposit": 500, "expense": 200, "household_expense": 80}, d)
-    assert f["net"] == 300 and f["has_entries"] is True and f["savings_rate"] == 0.6
-    assert f["unexplained"] == 1000 - 300 - 600 - 100
-    g = flow_block({"deposit": 0, "expense": 0}, {"assets": 1000, "securities": None, "receivable": None})
-    assert g["has_entries"] is False and g["savings_rate"] is None and g["unexplained"] is None
+def test_flow_block_register_gap_is_cash_delta_minus_booked_flow():
+    """BUG-7（polish 2026-09-17）：「解釋不了的差額」改成 register_gap ＝ Δ現金 − 帳上真正的淨流（含匯費、請款）。"""
+    d = {"assets": 1000, "cash": 250, "securities": 600, "receivable": 100, "equipment": 0}
+    f = flow_block({"deposit": 500, "expense": 200, "household_expense": 80, "bank_net": 290}, d, through="2026-10-05")
+    assert f["net"] == 300 and f["has_entries"] is True and f["savings_rate"] == 0.6 and f["through"] == "2026-10-05"
+    assert f["register_gap"] == 250 - 290 and f["bank_net"] == 290
+    g = flow_block({"deposit": 0, "expense": 0}, {"assets": 1000, "cash": None, "securities": None, "receivable": None})
+    assert g["has_entries"] is False and g["savings_rate"] is None and g["register_gap"] is None
+    assert flow_block({"deposit": 500, "expense": 200}, {"cash": 5})["register_gap"] is None, "沒有 bank_net 就不算"
     assert flow_block({"deposit": 0, "expense": 50}, {})["savings_rate"] is None, "沒收入不算存款率（不除以 0）"
 
 

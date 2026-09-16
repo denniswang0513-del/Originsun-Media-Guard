@@ -65,12 +65,13 @@ def test_second_report_uses_previous_report_for_every_line():
     reg2 = {**REGISTER, "accounts": [{**REGISTER["accounts"][0], "balance": 1_500_000, "anchor_date": "2026-10-05", "unfilled": 0},
                                      REGISTER["accounts"][1]]}
     b2 = {**BUCKETS, "銀行現金": 2_100_000, "證券現值": 48_500_000}
-    r = build_report("2026-10", "2026-10-05", _fortress(), reg2, b2, {"deposit": 300_000, "expense": 120_000, "household_expense": 60_000},
+    r = build_report("2026-10", "2026-10-05", _fortress(), reg2, b2,
+                     {"deposit": 300_000, "expense": 120_000, "household_expense": 60_000, "bank_net": 17_987},
                      SNAPS, prev=first)
     assert r["first"] is False and r["prev"]["label"] == "2026-09"
     assert r["delta"]["cash"] == 56_187 and r["delta"]["securities"] == 575_834
     assert r["flow"]["net"] == 180_000 and r["flow"]["savings_rate"] == 0.6 and r["flow"]["securities_change"] == 575_834
-    assert r["flow"]["unexplained"] == r["delta"]["assets"] - 180_000 - 575_834 - 0 - 0
+    assert r["flow"]["register_gap"] == 56_187 - 17_987 and r["flow"]["through"] == "2026-10-05"
     acc = next(a for a in r["accounts"] if a["name"] == "富邦-收入戶")
     assert acc["prev"] == 1_482_235 and acc["delta"] == 17_765 and acc["registered_this_month"] is True
     assert next(a for a in r["accounts"] if a["name"] == "台新（個人）")["registered_this_month"] is False
@@ -185,3 +186,15 @@ def test_month_picker_ignores_stale_responses_on_both_pages():
     # 順手：桌機那一份抓失敗要說「載入失敗」，不是「還沒有月報」（那句是叫他去登記）
     desk_all = js_code_only(repo_src("frontend/tabs/finance/subviews/report.js"))
     assert "的月報載入失敗：" in desk_all
+
+
+def test_month_income_and_expense_exclude_cross_account_flows():
+    """BUG-7：收支明細不是損益表 —— 轉帳、信用卡還款、買賣股票要從本月收入／支出排掉；bank_net 另算（含匯費、請款）。"""
+    from tests.unit._srcscan import func_body
+    body = func_body(repo_src("routers/api_monthly_report.py"), "async def generate_report(")
+    assert 'cat.like("轉匯與定存%")' in body and 'cat.like("信用卡%")' in body and 'cat.like("%投資%")' in body
+    assert ".filter(~cross)" in body and "CrmCashEntry.bank_fee" in body and '"bank_net": int(bank_net or 0)' in body
+    desk = js_code_only(repo_src("frontend/tabs/finance/subviews/report.js"))
+    assert "register_gap" in desk and "unexplained" not in desk and "證券增減" in desk
+    mob = js_code_only(repo_src("frontend/m/views/ledger-report.js"))
+    assert "register_gap" in mob and "證券增減" in mob

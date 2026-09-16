@@ -101,13 +101,14 @@ function draw() {
         ${row('負債', money(t.liabilities), t.loan ? `卡費 ${money(t.card)}、貸款 ${money(t.loan)}` : '只有卡費，沒有貸款')}
         ${row('總資產', `<b>${money(t.assets)}</b>`, r.prev ? `${prevLabel} ${money(r.prev.totals.assets)}` : '')}
     </div>
-    <div class="m-h">多出來的錢從哪來</div>
+    <div class="m-h">多出來的錢從哪來（收支到 ${esc(f.through || r.basis_date)} 為止）</div>
     <div class="m-card">
-        ${row('本月收入', money(f.deposit), f.has_entries ? '' : '本月明細還沒記')}
+        ${row('本月收入', money(f.deposit), f.has_entries ? '不含轉帳、還卡費、買賣股票' : '本月明細還沒記')}
         ${row('本月支出', money(f.expense), f.has_entries ? `其中家用 ${money(f.household)}` : '')}
         ${row('存下來的', f.has_entries ? delta(f.net) : '<span style="color:var(--sub)">—</span>', f.savings_rate !== null && f.savings_rate !== undefined ? `存款率 ${(f.savings_rate * 100).toFixed(0)}%` : '')}
-        ${row('證券漲跌', delta(f.securities_change), f.securities_change === null ? '要有上一份月報才算得出來' : '')}
+        ${row('證券增減', delta(f.securities_change), f.securities_change === null ? '要有上一份月報才算得出來' : '含買賣與匯率')}
         ${row('應收增減', delta(f.receivable_change))}
+        ${f.register_gap !== null && f.register_gap !== undefined ? row('登記餘額與帳上的差', delta(f.register_gap), '登記後還沒記進帳的明細') : ''}
     </div>
     <div class="m-h">各帳戶</div>
     <div class="m-card">

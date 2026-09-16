@@ -135,14 +135,14 @@ function _report(r) {
                     <td class="n">${delta(d[k])}</td></tr>`).join('')}
             </tbody></table></div>
     </div>
-    <div class="mr-card"><h3>多出來的錢從哪來 <span class="why">存出來的、還是漲出來的</span></h3>
+    <div class="mr-card"><h3>多出來的錢從哪來 <span class="why">存出來的、還是漲出來的（收支到 ${esc(f.through || r.basis_date)} 為止）</span></h3>
         <div class="tblwrap"><table><tbody>
-            <tr><td>本月收入（收支明細）</td><td class="n">${esc(money(f.deposit))}</td><td class="sub">${f.has_entries ? '' : '本月明細還沒記，這兩格是空的'}</td></tr>
-            <tr><td>本月支出</td><td class="n">${esc(money(f.expense))}</td><td class="sub">${f.has_entries ? `其中家用 ${esc(money(f.household))}` : ''}</td></tr>
+            <tr><td>本月收入</td><td class="n">${esc(money(f.deposit))}</td><td class="sub">${f.has_entries ? '不含轉帳、信用卡還款、投資買賣' : '本月明細還沒記，這兩格是空的'}</td></tr>
+            <tr><td>本月支出</td><td class="n">${esc(money(f.expense))}</td><td class="sub">${f.has_entries ? `其中家用 ${esc(money(f.household))}；不含轉帳、還卡費、買股票` : ''}</td></tr>
             <tr><td>存下來的</td><td class="n">${f.has_entries ? delta(f.net) : '<span class="sub">—</span>'}</td><td class="sub">${f.savings_rate !== null && f.savings_rate !== undefined ? `存款率 ${(f.savings_rate * 100).toFixed(0)}%` : ''}</td></tr>
-            <tr><td>證券漲跌</td><td class="n">${delta(f.securities_change)}</td><td class="sub">${f.securities_change === null ? '要有上一份月報的分項才算得出來' : ''}</td></tr>
+            <tr><td>證券增減</td><td class="n">${delta(f.securities_change)}</td><td class="sub">${f.securities_change === null ? '要有上一份月報的分項才算得出來' : '含買賣與匯率，不只是漲跌'}</td></tr>
             <tr><td>應收增減</td><td class="n">${delta(f.receivable_change)}</td><td class="sub">帳面，收回來才算數</td></tr>
-            ${f.unexplained !== null && f.unexplained !== undefined ? `<tr><td>解釋不了的差額</td><td class="n">${delta(f.unexplained)}</td><td class="sub">通常是還沒記的明細或未拆的證券</td></tr>` : ''}
+            ${f.register_gap !== null && f.register_gap !== undefined ? `<tr><td>登記餘額與帳上的差</td><td class="n">${delta(f.register_gap)}</td><td class="sub">現金的變化減掉帳上記的流水；就是登記後還沒記進帳的明細，補齊會歸 0</td></tr>` : ''}
         </tbody></table></div>
     </div>
     <div class="mr-card"><h3>總資產走勢 <span class="why">淨值快照＋這個月</span></h3>${_chart(r.trend || [])}</div>
