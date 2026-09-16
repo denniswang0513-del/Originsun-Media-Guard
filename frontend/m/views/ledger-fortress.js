@@ -123,7 +123,7 @@ function draw(d) {
         </div>
         <div class="m-h">每月必要支出</div>
         <div class="m-card">
-            <div class="lg-row"><span class="k">${need.override !== null && need.override !== undefined ? '你認定的數字' : '自動算的'}<div class="lg-sub">自動算是 ${money(need.auto)}（近 6 個月固定支出＋家用的月平均）</div></span>
+            <div class="lg-row"><span class="k">${need.override !== null && need.override !== undefined ? '你認定的數字' : '自動算的'}<div class="lg-sub">自動算是 ${money(need.auto)}（${need.sample_months ? `近 ${need.sample_months} 個月` : '近半年'}生活支出的月平均）</div></span>
                 <span class="v amt">${money(need.used)}</span></div>
             <div class="lg-sub" style="margin-top:6px">要改請到桌機的堡壘分頁</div>
         </div>

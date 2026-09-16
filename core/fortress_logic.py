@@ -26,10 +26,38 @@ MARKET_DROP = 0.4
 #: 可撐月數的顏色門檻（同儀表板 runway：≥6 綠、3–6 黃、<3 紅）
 RUNWAY_GREEN = 6
 RUNWAY_AMBER = 3
-#: 必要支出自動算：取最近幾個完整月的平均
+#: 必要支出自動算：最多往回看幾個完整月（真的有資料的月份才進分母，見 monthly_need_from_rows）
 NEED_SAMPLE_MONTHS = 6
-#: 必要支出算哪些分類（收支明細 `category`＝「頂層_第二層」鏡射）：家用整枝＋個人的固定支出
-NEED_CATEGORY_PREFIXES = ("家用", "個人_固定支出")
+#: 算進「每月生活支出」的分類（收支明細 `category`＝分類樹「頂層_第二層」的鏡射，但**舊列只有兩層的舊名字**）。
+#: 🔴 2026-09 實查私帳：分類樹只搬了一半，生活費大多掛在 `個人_旅遊`／`個人_生活`／`家用` 這種舊名字上。
+#: 只收 `家用%`＋`個人_固定支出%` 的話會漏掉整個「個人」枝（實查 6 個月漏 33 萬），分母太小 → 可撐月數被高估。
+NEED_INCLUDE_PREFIXES = ("家用", "個人", "貸款繳款")
+#: 從上面那兩枝裡再扣掉的：收入列、買股票、還款（卡債與貸款走「預留」，這裡再算一次就是重複）、帳務對齊
+NEED_EXCLUDE_PREFIXES = ("家用_主動收入", "家用_被動收入", "個人_主動收入", "個人_被動收入",
+                         "家用_投資支出", "個人_投資支出", "家用_借款支出", "個人_借款支出",
+                         "家用_其他支出", "個人_其他支出")
+
+
+def need_category_ok(category) -> bool:
+    """這一列的分類算不算「每月生活支出」。"""
+    c = (category or "").strip()
+    if not c or c.startswith(NEED_EXCLUDE_PREFIXES):
+        return False
+    return c.startswith(NEED_INCLUDE_PREFIXES)
+
+
+def monthly_need_from_rows(rows) -> tuple:
+    """[(category, 'YYYY-MM', expense)…] → (月平均, 真的有資料的月份數)。
+    🔴 分母是**有資料的月份數**不是固定 6：帳本才記 3 個月就除以 6，生活支出會被腰斬、可撐月數翻倍
+    —— 而且錯在危險的方向。一個月都沒有 → (0, 0)，畫面會說「算不出來」而不是「撐很久」。"""
+    by_month: dict = {}
+    for category, month, expense in rows:
+        if not need_category_ok(category):
+            continue
+        by_month[month] = by_month.get(month, 0) + int(expense or 0)
+    if not by_month:
+        return 0.0, 0
+    return sum(by_month.values()) / len(by_month), len(by_month)
 
 STATE_OK, STATE_WARN, STATE_BAD = "ok", "warn", "bad"
 STATE_LABEL = {STATE_OK: "撐得住", STATE_WARN: "撐得住，但很緊", STATE_BAD: "會被迫"}
@@ -236,7 +264,7 @@ def _wan(x: float) -> str:
 
 
 # ── 組整份 ────────────────────────────────────────────────────────
-def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: dict, today: str = "") -> dict:
+def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: dict, today: str = "", need_months: int = 0) -> dict:
     """整頁要的東西一趟算完。
     accounts：見 assign_layers；earmarks：[{id, label, amount, due_date, source, source_ref, paid, note}]（paid 的不算進合計）；
     monthly_need_auto：近幾個月平均（router 算）；settings：normalize_settings 過的。"""
@@ -267,7 +295,8 @@ def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: di
                                     for a in accts if a["layer"] == n]})
     return {
         "today": today,
-        "monthly_need": {"auto": int(round(monthly_need_auto or 0)), "override": settings["monthly_need_override"], "used": used},
+        "monthly_need": {"auto": int(round(monthly_need_auto or 0)), "override": settings["monthly_need_override"],
+                         "used": used, "sample_months": int(need_months or 0)},
         "cash": {"l1_3": _m(cash3), "l1_4": _m(cash4)},
         "earmark_total": _m(ear_total),
         "runway": {"months": rw, "with_l4": rw4, "tone": tone(rw)},

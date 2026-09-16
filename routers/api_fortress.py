@@ -3,7 +3,7 @@
 一支 GET 回整頁（桌機分頁與手機頁同一份），三支預留清單的寫入，一支設定。
 規則全在 core/fortress_logic.py；這裡只負責把私帳現有的數字撈出來：
   帳戶餘額＝期初＋掛帳流水（同 /bank-accounts 與 /assets/overview 那條式子）、證券現值（同 _holding_value）、
-  信用卡欠款（同 /card-summary）、貸款下一期（同 /loans/upcoming 的查詢）、必要支出＝近 6 個月家用＋個人固定支出的月平均。
+  信用卡欠款（同 /card-summary）、貸款下一期（同 /loans/upcoming 的查詢）、生活支出＝近 6 個完整月的月平均（口徑見 core.fortress_logic.need_category_ok）。
 守衛：每支 `_guard`＝`require_entity(request, "mine", level="full")`（私帳＝finance_mine 指名制；entity 一律鎖 mine，空字串會落到 parent）。
 跟 NAS office-api 一起掛（main_office._ROUTER_MODULES）：主控關機手機照看、照記預留。沒有排程、不 import notifier。
 """
@@ -19,12 +19,12 @@ from pydantic import BaseModel, Field
 
 from config import load_settings, save_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
-from core.fortress_logic import NEED_CATEGORY_PREFIXES, NEED_SAMPLE_MONTHS, build, merge_settings, normalize_settings
+from core.fortress_logic import NEED_SAMPLE_MONTHS, build, merge_settings, monthly_need_from_rows, normalize_settings
 from core.ledger import require_entity
 
 try:
     from sqlalchemy import func as fn
-    from sqlalchemy import or_, select
+    from sqlalchemy import select
     from db.models import BankAccount, CrmCashEntry, FinanceFortressEarmark, FinanceHolding, FinanceLoan, FinanceLoanPayment
 except ImportError:  # DB 套件不存在的 agent 環境 — 同其他 router 的 try/except
     pass
@@ -163,18 +163,21 @@ async def _manual_earmarks(session, ent: str) -> list:
              "source": "manual", "source_ref": "", "paid": bool(r.paid_at), "note": r.note or ""} for r in rows]
 
 
-async def _monthly_need_auto(session, ent: str, today: date) -> float:
-    """近 NEED_SAMPLE_MONTHS 個**完整**月（不含本月）的家用＋個人固定支出，除以月數。"""
+async def _monthly_need_auto(session, ent: str, today: date) -> tuple:
+    """近 NEED_SAMPLE_MONTHS 個**完整**月（不含本月）的生活支出月平均 → (平均, 有資料的月份數)。
+    哪些分類算、分母怎麼取都在 core.fortress_logic（純規則，可測）；這裡只負責把（分類, 月份, 支出）撈出來。"""
     first_this = datetime(today.year, today.month, 1, tzinfo=timezone.utc)
     y, m = today.year, today.month - NEED_SAMPLE_MONTHS
     while m <= 0:
         y, m = y - 1, m + 12
     lo = datetime(y, m, 1, tzinfo=timezone.utc)
-    total = (await session.execute(
-        select(fn.coalesce(fn.sum(CrmCashEntry.expense), 0))
+    month = fn.to_char(CrmCashEntry.entry_date, "YYYY-MM")
+    rows = (await session.execute(
+        select(CrmCashEntry.category, month, fn.coalesce(fn.sum(CrmCashEntry.expense), 0))
         .where(CrmCashEntry.entity == ent, CrmCashEntry.entry_date >= lo, CrmCashEntry.entry_date < first_this,
-               or_(*[CrmCashEntry.category.like(p + "%") for p in NEED_CATEGORY_PREFIXES])))).scalar_one()
-    return float(total or 0) / NEED_SAMPLE_MONTHS
+               fn.coalesce(CrmCashEntry.expense, 0) > 0)
+        .group_by(CrmCashEntry.category, month))).all()
+    return monthly_need_from_rows(rows)
 
 
 async def _payload(ent: str) -> dict:
@@ -183,8 +186,8 @@ async def _payload(ent: str) -> dict:
     async with factory() as session:
         accounts = await _accounts(session, ent)
         earmarks = await _auto_earmarks(session, ent, today) + await _manual_earmarks(session, ent)
-        need = await _monthly_need_auto(session, ent, today)
-    out = build(accounts, earmarks, need, _load_cfg(ent), today.isoformat())
+        need, need_months = await _monthly_need_auto(session, ent, today)
+    out = build(accounts, earmarks, need, _load_cfg(ent), today.isoformat(), need_months=need_months)
     out["entity"] = ent
     return out
 

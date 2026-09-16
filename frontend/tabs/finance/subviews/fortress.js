@@ -227,7 +227,8 @@ function _render() {
         ${_accounts(d)}
         <div class="ft-foot">
             <b>資料從哪來：</b>帳戶餘額是私帳銀行頁現有的數字；證券現值是資產頁現有的數字；信用卡欠款、房貸下一期來自現有的卡帳與貸款表；
-            必要支出是收支明細裡「固定支出」與「家用」近 6 個月的平均。新增的只有「帳戶分層」「預留清單」「目標倍數」三份設定，不動任何金額規則。
+            每月必要支出是收支明細裡家用與個人那兩枝的月平均（不含投資、還款、轉帳、公司的列），分母是**真的有記帳的月份數**。
+            新增的只有「帳戶分層」「預留清單」「目標倍數」三份設定，不動任何金額規則。
         </div>
     </div>`;
     _c.querySelector('#ft-acct-body')?.addEventListener('change', _onLayerChange);
@@ -357,7 +358,8 @@ function _monthly(d) {
     <div class="ft-sec"><h3>每月必要支出</h3><span class="why">可撐月數的分母</span></div>
     <div class="ft-field">
         <div><div class="t">你認定的數字</div>
-            <div class="s">自動算出來的是近 6 個月固定支出加家用的平均 <span class="ft-num">$${fmtNum(mn.auto)}</span>${isAuto ? '，現在就用這個' : '，現在用的是你填的'}</div></div>
+            <div class="s">自動算出來的是${mn.sample_months ? `近 ${fmtNum(mn.sample_months)} 個月` : '近半年'}生活支出（家用與個人，不含投資、還款、轉帳）的月平均
+                <span class="ft-num">$${fmtNum(mn.auto)}</span>${isAuto ? '，現在就用這個' : '，現在用的是你填的'}</div></div>
         <div class="ctl">
             <input class="crm-input ft-num" id="ft-monthly" type="number" min="0" step="1000" value="${Number(mn.used) || 0}">
             <span class="ft-sub" style="font-size:12px;">元／月</span>

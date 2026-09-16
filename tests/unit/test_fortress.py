@@ -50,7 +50,7 @@ def test_layers_and_runway_match_the_demo():
 
 def test_build_returns_the_whole_page():
     d = build(ACCOUNTS, EARMARKS, 82300, SETTINGS, "2026-09-16")
-    assert d["monthly_need"] == {"auto": 82300, "override": 80000, "used": 80000}
+    assert d["monthly_need"] == {"auto": 82300, "override": 80000, "used": 80000, "sample_months": 0}
     assert d["earmark_total"] == 257000, "已付的不算"
     assert d["cash"] == {"l1_3": 1030000, "l1_4": 1480000}
     assert d["runway"]["months"] == 9.7 and d["runway"]["with_l4"] == 15.3 and d["runway"]["tone"] == "g"
@@ -105,7 +105,7 @@ def test_every_endpoint_requires_the_ledger_in_full():
 def test_router_reuses_existing_money_rules_and_mounts_everywhere():
     code = code_only(_SRC)
     assert "_holding_value" in code and "_card_numbers" in code and "CARD_KIND" in code, "餘額／持股／卡欠款沿用既有算法，不另寫一套"
-    assert "NEED_CATEGORY_PREFIXES" in code, "必要支出＝家用＋個人固定支出（core 定義）"
+    assert "monthly_need_from_rows" in code, "生活支出的口徑與分母都在 core（純規則，可測）"
     assert "'api_fortress'" in repo_src("main.py") and '"api_fortress"' in repo_src("main_office.py"), "主控與 NAS 都掛"
     assert '"finance": ("fortress",)' in repo_src("core/office_settings.py"), "分層設定要送到 NAS"
     for bad in ("core.scheduler", "import notifier", "from notifier", "socket_mgr"):
@@ -177,3 +177,35 @@ def test_settings_write_is_not_mounted_on_the_nas():
     在那邊存分層會靜默消失，所以那支路徑不掛上去；預留清單（寫 DB）照掛。"""
     office = repo_src("main_office.py")
     assert '"/api/v1/finance/fortress/settings"' in office
+
+
+# ── /polish 階段一：必要支出的口徑 ──────────────────────────────────────
+def test_need_category_rule():
+    """哪些收支列算進「每月生活支出」。真實私帳（2026-09 實查）分類樹只搬了一半：
+    大部分列還掛在 `個人_旅遊`／`個人_生活`／`家用` 這種舊的兩層名字上，
+    原本的 `家用%` ＋ `個人_固定支出%` 只撈到家用那 6.2 萬，把個人生活費 33 萬整個漏掉 ——
+    可撐月數因此被高估好幾倍（分母太小），而且是往危險的方向錯。"""
+    from core.fortress_logic import need_category_ok as ok
+    for yes in ("家用", "家用_固定支出", "家用_變動支出", "個人_生活", "個人_旅遊", "個人_固定支出", "貸款繳款"):
+        assert ok(yes), yes
+    for no in ("公司_薪水", "公司_專案", "轉匯與定存", "轉匯與定存_公司信用卡", "信用卡", "", None,
+               "家用_被動收入", "個人_主動收入",          # 收入列
+               "家用_投資支出", "個人_投資支出",          # 買股票不是生活支出
+               "家用_借款支出", "個人_借款支出",          # 卡費還款／房貸本息：卡債與貸款走「預留」，這裡再算一次就是重複
+               "家用_其他支出", "個人_其他支出"):         # 帳務對齊、信用卡款
+        assert not ok(no), no
+
+
+def test_monthly_need_divides_by_the_months_that_have_data():
+    """只有 3 個月有資料卻除以 6 → 每月生活支出被低估一半、可撐月數被高估一倍。"""
+    from core.fortress_logic import monthly_need_from_rows
+    rows = [("家用_固定支出", "2026-07", 30000), ("個人_生活", "2026-07", 10000), ("家用", "2026-08", 20000),
+            ("公司_薪水", "2026-08", 900000), ("家用_投資支出", "2026-08", 500000)]
+    avg, months = monthly_need_from_rows(rows)
+    assert (avg, months) == (30000, 2), "只算生活支出、除以真的有資料的月份數"
+    assert monthly_need_from_rows([]) == (0.0, 0), "沒資料不要除以 0"
+
+
+def test_payload_says_how_many_months_the_average_came_from():
+    d = build([], [], 82300, {}, "2026-09-16", need_months=3)
+    assert d["monthly_need"]["sample_months"] == 3, "畫面要能誠實寫出「近 3 個月」"
