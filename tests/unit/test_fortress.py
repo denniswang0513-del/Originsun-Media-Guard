@@ -110,3 +110,34 @@ def test_router_reuses_existing_money_rules_and_mounts_everywhere():
     for bad in ("core.scheduler", "import notifier", "from notifier", "socket_mgr"):
         assert bad not in code, bad
     assert "class FinanceFortressEarmark(Base)" in repo_src("db/models/_finance.py") and "FinanceFortressEarmark" in repo_src("db/models/__init__.py")
+
+
+# ── 特徵測試（/polish 階段零）：把這次動到、原本沒被直接釘住的行為釘下來 ──────
+def test_layer_targets_and_wan_text():
+    from core.fortress_logic import DEFAULT_TARGET_MONTHS, _wan, layer_targets
+    t = layer_targets(80000, 257000, DEFAULT_TARGET_MONTHS)
+    assert t == {1: 80000, 2: 257000, 3: 480000, 4: 240000, 5: None}, "2＝預留合計、5 沒上限，其餘＝必要支出×倍數"
+    assert layer_targets(0, 0, DEFAULT_TARGET_MONTHS) == {1: 0, 2: 0, 3: 0, 4: 0, 5: None}
+    # 結論句的金額寫法：一位小數、整數不留 .0
+    assert (_wan(37000), _wan(1230000), _wan(0), _wan(-5000)) == ("3.7 萬", "123 萬", "0 萬", "-0.5 萬")
+
+
+def test_router_date_helpers():
+    """到期日字串 ↔ DB 欄位。壞字串要 422（不是 500），空字串是「沒有到期日」不是錯。"""
+    from datetime import datetime, timezone
+
+    from fastapi import HTTPException
+
+    from routers.api_fortress import _fmt_day, _parse_day, _today_tw
+    assert _parse_day("2027-01-20") == datetime(2027, 1, 20, tzinfo=timezone.utc)
+    assert _parse_day("2027-01-20T13:00:00") == datetime(2027, 1, 20, tzinfo=timezone.utc), "只看前 10 碼"
+    assert _parse_day("") is None and _parse_day(None) is None
+    for bad in ("nope", "2027-13", "2027/01/20"):
+        try:
+            _parse_day(bad)
+        except HTTPException as e:
+            assert e.status_code == 422, bad
+        else:
+            raise AssertionError(f"{bad} 應該 422")
+    assert _fmt_day(None) == "" and _fmt_day(datetime(2026, 9, 16, tzinfo=timezone.utc)) == "2026-09-16"
+    assert _today_tw().isoformat() >= "2026-01-01", "以台北為準（NAS 容器跑 UTC）"
