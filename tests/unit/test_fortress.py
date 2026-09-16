@@ -419,7 +419,7 @@ def test_fire_block_with_the_owners_numbers():
              {"id": "e", "name": "證券", "kind": "holding", "balance": 47_063_708}]
     d = build(accts, [], 94206, {"account_layers": {"e": 5}}, "2026-09-16", need_months=6)
     f = d["fire"]
-    assert f["age"] == 37 and f["until_age"] == 90 and f["horizon_years"] == 53, "1989 年生，2026 年 37 歲"
+    assert f["age"] == 37 and f["until_age"] == 90 and f["horizon_years"] == 54, "1989 年生，2026 年 37 歲；要看到 90 歲＝54 年"
     assert f["spend"] == 94206 + 2155 and f["self_pay"] == 2155, "2026：健保第六類 826＋國保自付 1,329"
     assert f["by_rate"] == {"0.03": 124869, "0.035": 145681, "0.04": 166492}
     assert f["allowed"] == 145681 and f["withdrawal_rate"] == 0.035
@@ -627,3 +627,29 @@ def test_fire_is_marked_pretax_and_rates_carry_their_source():
     # 長跑看 33 倍，不是 25 倍
     bad = build(accts, [], 300_000, {}, "2026-09-16", need_months=6)["fire"]
     assert "33 倍門檻" in bad["verdict"] and [x[0] for x in bad["lines"]][2].startswith("33 倍")
+
+
+def test_polish_round_regressions():
+    """收尾 review 抓到的三個「這一輪自己帶進來的」回歸。"""
+    from core.fortress_logic import _num
+    # ① _num 包了 int() 卻沒包 float()：超大 int 字面值一樣 500
+    assert _num(10 ** 400) is None and _num(-10 ** 400) is None and _num("1" + "0" * 400) is None
+    assert _num(10 ** 18, as_int=True) == 10 ** 18, "正常的大數字照收"
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 50_000_000}]
+    assert build(accts, [], 50_000, {"monthly_need_override": 10 ** 400}, "2026-09-16", need_months=6)["fire"]["state"]
+    # ③ 模擬年數要含 until_age 那一歲：37 歲要看到 90 歲＝54 年（不是 53，那樣只看到 89 歲）
+    f = build(accts, [], 94_206, {}, "2026-09-16", need_months=6)["fire"]
+    assert (f["age"], f["horizon_years"]) == (37, 54)
+    old = build(accts, [], 94_206, {"fire": {"birth_year": 1920}}, "2026-09-16", need_months=6)["fire"]
+    assert old["age"] == 106 and "已超過你設的 90 歲" in old["verdict"]
+    exact = build(accts, [], 94_206, {"fire": {"birth_year": 1936}}, "2026-09-16", need_months=6)["fire"]
+    assert exact["age"] == 90 and "已超過" not in exact["verdict"], "剛好 90 歲不算超過"
+
+
+def test_age_label_matches_between_backend_and_both_frontends():
+    """🔴 同一張卡上「第 14 年（50 歲）」與「第 14 年（51 歲）」打架：
+    後端改成 age+y-1 之後，兩個前端還停在 age+y。"""
+    desk = js_func_body(js_code_only(repo_src("frontend/tabs/finance/subviews/fortress.js")), "function fmtLine(l, ctx) {")
+    assert "ctx.age + Number(v) - 1" in desk
+    mob = js_code_only(repo_src("frontend/m/views/ledger-fortress.js"))
+    assert "ctx.age + Number(v) - 1" in mob

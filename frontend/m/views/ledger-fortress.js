@@ -201,7 +201,7 @@ function growthHtml(d) {
     const g = d.projection || {};
     const rows = g.rows || [];
     if (!rows.length) return '';
-    const pc = (v) => (Number(v) * 100).toFixed(2).replace(/\.?0+$/, '');   // 兩位小數、去尾零（同桌機）
+    const pc = (v) => ((Number(v) || 0) * 100).toFixed(2).replace(/\.?0+$/, '');   // 兩位小數、去尾零（同桌機）
     const list = rows.map(r => `<div class="lg-row"><span class="k">${esc(String(r.year))} 年後<div class="lg-sub">今天的購買力 ${esc(wan(r.real))}</div></span>
         <span class="v num">${esc(wan(r.nominal))}</span></div>`).join('');
     return `<div class="m-h">資產預期成長</div>
@@ -224,6 +224,7 @@ function layerHtml(l) {
     const acc = (l.accounts || []).map(a => a.name).filter(Boolean);
     return `<div class="ft-layer">
         <div class="t"><span class="nm">${l.no} ${esc(l.name || '')}<span>${esc(rule)}</span></span><span class="v"><b>${esc(wan(l.have))}</b>${diff}</span></div>
+        <div class="def">${esc(l.desc || '')}</div>
         <div class="bar"><i class="${cls}" style="width:${pct}%"></i></div>
         <div class="acc">${acc.length ? esc(acc.join('、')) : '沒有帳戶歸在這層'}</div>
     </div>`;
@@ -241,7 +242,8 @@ const lineVal = (v, unit, ctx) => {
     if (unit === 'months') return v == null ? '—' : `${months(v)} 個月`;
     if (unit === 'years') return v == null ? '—' : `${months(v)} 年`;          // 一位小數同 months()
     if (unit === 'pct') return v == null ? '—' : `${Number(v).toFixed(2)}%`;
-    if (unit === 'year_or_never') return v == null ? '用不完' : `第 ${v} 年${ctx && ctx.age != null ? `（${ctx.age + Number(v)} 歲）` : ''}`;
+    // 第 y 年跨的是 age+y-1 歲（同後端）
+    if (unit === 'year_or_never') return v == null ? '用不完' : `第 ${v} 年${ctx && ctx.age != null ? `（${ctx.age + Number(v) - 1} 歲）` : ''}`;
     return money(v);
 };
 

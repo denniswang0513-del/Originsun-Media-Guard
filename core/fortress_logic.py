@@ -12,8 +12,14 @@
 from __future__ import annotations
 
 LAYER_NAMES = {1: "營運現金", 2: "預留現金", 3: "緊急預備", 4: "機會資金", 5: "複利資本"}
-LAYER_DESC = {1: "日常花的", 2: "已預留用途：稅、保費、房貸", 3: "收入中斷時活命用",
-              4: "等好機會才動", 5: "長期投資，十年不動"}
+#: 每一層是幹嘛的（畫面上會直接印在層名旁邊）。錢的性質不同，能動的時機也不同 —— 這是整個堡壘的重點。
+LAYER_DESC = {
+    1: "這個月要花的：生活費、帳單、卡費",
+    2: "已經知道要付、還沒付的：稅、保費、房貸下一期",
+    3: "收入中斷時活命用的，六個月不動也不會怎樣",
+    4: "等機會才動：市場大跌時加碼、突然的好投資",
+    5: "十年不動的長期投資，複利在這裡長",
+}
 #: 各層目標＝必要支出的幾倍（第 2 層＝預留清單合計、第 5 層沒有上限，不在這裡）
 DEFAULT_TARGET_MONTHS = {1: 1, 3: 6, 4: 3}
 #: 目標倍數的上限（10 年）—— 見 normalize_settings 裡的紅字
@@ -118,8 +124,8 @@ def _num(v, as_int: bool = False):
     🔴 `int(float("Infinity"))` 丟的是 **OverflowError**，不是 ValueError ——
     漏接的話一個 PUT 就讓整支端點 500（2026-09-16 /polish 第二輪抓到，第一輪只修了值域）。"""
     try:
-        f = float(v)
-    except (TypeError, ValueError):
+        f = float(v)                       # 🔴 超大 int 字面值：float(10**400) 丟的也是 OverflowError
+    except (TypeError, ValueError, OverflowError):
         return None
     if f != f or f in (float("inf"), float("-inf")):      # NaN／±Infinity
         return None
@@ -576,8 +582,9 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     if age is not None and not 0 <= age <= 120:
         age = None                      # 出生年填錯（未來、或久遠到不合理）＝當成沒填，不要印出負數歲數
     # 已經超過「撐到幾歲」：不要只模擬 1 年卻宣稱「模擬到 90 歲用不完」
-    past_end = age is not None and age >= int(fire["until_age"])
-    horizon = max(1, int(fire["until_age"]) - age) if age is not None else FIRE_DEFAULT_HORIZON
+    past_end = age is not None and age > int(fire["until_age"])
+    # 第 y 年跨的是 age+y-1 歲（同 when()／runs_out_age）→ 要看到 until_age 歲，要模擬 until_age-age+1 年
+    horizon = max(1, int(fire["until_age"]) - age + 1) if age is not None else FIRE_DEFAULT_HORIZON
     # 通膨指數是 y-1 → 第 y 年跨的是 age+y-1 歲；年金從 E 歲開始＝第 (E-age+1) 年
     extra_from = max(1, int(fire["extra_from_age"]) - age + 1) if age is not None else 10 ** 6
     base = {"spend": _m(spend), "self_pay": _m(fire["self_pay_monthly"]), "tax": _m(fire["tax_monthly"]),

@@ -256,6 +256,7 @@
   .ft-layer .bar i { display:block; height:100%; background:var(--ok); }
   .ft-layer .bar i.cap { background:var(--pri); }
   .ft-layer .bar i.low { background:var(--warn); }
+  .ft-layer .def { font-size:12px; color:var(--sub); margin-top:3px; line-height:1.5; }
   .ft-layer .acc { font-size:11.5px; color:var(--sub); margin-top:4px; line-height:1.5; overflow-wrap:anywhere; }
   /* 預留清單：手填的可點；已付的金額變淡 */
   .ft-tap-row { cursor:pointer; }

@@ -58,7 +58,8 @@ function fmtLine(l, ctx) {
     if (unit === 'pct') return v == null || isNaN(v) ? '—' : Number(v).toFixed(2) + '%';
     if (unit === 'year_or_never') {
         if (v == null) return '用不完';
-        const age = ctx && ctx.age != null ? `（${fmtNum(ctx.age + Number(v))} 歲）` : '';
+        // 第 y 年跨的是 age+y-1 歲（同後端 when()／runs_out_age）—— 差一歲的話同一張卡上兩個數字會打架
+        const age = ctx && ctx.age != null ? `（${fmtNum(ctx.age + Number(v) - 1)} 歲）` : '';
         return `第 ${fmtNum(v)} 年${age}`;
     }
     return fmtWan(v);
@@ -105,7 +106,9 @@ function _injectCss() {
 .ft .course .lab .l { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .ft .course .lab .no { font-size: 20px; font-weight: 500; opacity: .55; }
 .ft .course .lab .nm { font-weight: 700; font-size: 15px; white-space: nowrap; }
-.ft .course .lab .acc { font-size: 11.5px; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ft .course .lab .def { font-size: 12px; opacity: .9; white-space: nowrap; }
+.ft .course .lab .acc { font-size: 11.5px; opacity: .6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1280px) { .ft .course .lab .acc { display: none; } }
 .ft .course .lab .r { text-align: right; white-space: nowrap; }
 .ft .course .lab .r .have { font-size: 15px; font-weight: 500; }
 .ft .course .lab .r .tg { font-size: 11px; opacity: .8; }
@@ -316,6 +319,7 @@ function _hero(d) {
         return `<div class="course w${L.no}${on ? ' on' : ''}${cap ? ' cap' : ''}">
             <div class="fill ${cls}" style="width:${pct}%"></div>
             <div class="lab"><div class="l"><span class="no">${L.no}</span><span class="nm">${esc(L.name)}</span>
+                <span class="def">${esc(L.desc || '')}</span>
                 <span class="acc" title="${esc(accs)}">${accs ? esc(accs) : '還沒有帳戶標到這層'}</span></div>
             <div class="r"><div class="have ft-num">${fmtWan(L.have)}</div><div class="tg">${cap ? '沒有上限' : '目標 ' + fmtWan(L.target)}</div></div></div>
         </div>`;
@@ -446,6 +450,7 @@ function _targets(d) {
             else gapHtml = `<span class="pill ok">多 ${fmtWan(-L.gap)}</span>`;
         }
         return `<tr><td style="white-space:nowrap;">${L.no} ${esc(L.name)}</td>
+            <td class="ft-sub">${esc(L.desc || '')}</td>
             <td class="ft-sub" style="white-space:nowrap;">${rule} <span class="ft-num" style="color:#e0e0e0;">${fmtWan(L.target)}</span></td>
             <td class="n ft-num">${fmtWan(L.have)}</td><td class="n">${gapHtml}</td></tr>`;
     }).join('');
@@ -453,7 +458,7 @@ function _targets(d) {
     <div class="ft-sec"><h3>各層目標</h3><span class="why">用必要支出的倍數算，改了倍數會直接存</span></div>
     <div class="ft-tblwrap">
     <table class="ft-tbl">
-        <thead><tr><th>層</th><th>目標</th><th class="n">現在</th><th class="n">差距</th></tr></thead>
+        <thead><tr><th>層</th><th>這一層是什麼</th><th>目標</th><th class="n">現在</th><th class="n">差距</th></tr></thead>
         <tbody>${rows}</tbody>
     </table>
     </div>`;
