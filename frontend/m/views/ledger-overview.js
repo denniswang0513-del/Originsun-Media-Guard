@@ -17,7 +17,8 @@ export async function render(host, { first }) {
         host.innerHTML = `${segHtml('ov-period', PERIODS.map(p => p[1]), '本月')}<div id="ov-body">${skeleton(4)}</div>`;
         mountSeg('ov-period', (label) => { _period = (PERIODS.find(p => p[1] === label) || PERIODS[0])[0]; load(host); });
         host.querySelector('#ov-body').addEventListener('click', (ev) => {
-            if (ev.target.closest('[data-go="fortress"]')) { location.hash = 'fortress'; return; }
+            const go = ev.target.closest('[data-go]');
+            if (go) { location.hash = go.dataset.go; return; }     // fortress／register（隱藏路由）
             const r = ev.target.closest('[data-project]');
             if (r) openProjectSheet(r.dataset.project, () => load(host));
         });
@@ -38,6 +39,7 @@ async function load(host) {
         const card = (n, l) => `<div class="k"><div class="n">${money(n)}</div><div class="l">${esc(l)}</div></div>`;
         body.innerHTML = `
             ${fortressCard(ft)}
+            <div class="m-card tap rg-go" data-go="register" role="button"><span>登記餘額：今天看到多少就先記多少，明細以後補</span><span>›</span></div>
             <div class="lg-sub" style="margin:-4px 0 8px">${esc(rng)}・${pj.count || 0} 案（結案日在區間內）</div>
             <div class="m-strip">${card(pj.contract, '營收')}${card(pj.received, '實收')}${card(pj.receivable, '應收')}${card(pj.net, '淨收')}</div>
             <div class="m-h">現金流（收支明細）</div>

@@ -258,7 +258,7 @@ async def _load_inputs(session, entity: str = "parent") -> dict:
                                                BankAccount.created_at),
                                      where=BankAccount.entity == entity),
                           "id", "name", "opening_balance", "opening_date",
-                          "acct_kind", "active")
+                          "anchor_balance", "anchor_date", "acct_kind", "active")
     for b in bank_accounts:
         b["active"] = bool(b["active"])
     loans = _dump(await _all(FinanceLoan, where=FinanceLoan.entity == entity),

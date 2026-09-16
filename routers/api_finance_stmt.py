@@ -583,26 +583,13 @@ async def _balance_before(session, acct, first_date: str):
        （錯的期初會讓解析失敗、退回原行為，所以不危險，但也沒人會發現它沒作用）。
        「哪一行算交易列」的定義只有解析器那一份，不要在這裡長出第二份。
     """
-    from sqlalchemy import and_, func, select
-
-    from core.finance_logic import bank_running_balance
-    from db.models import CrmCashEntry
+    from routers.api_finance import _balances_by_account
     try:
         first_day = _parse_day(first_date)
     except Exception:
         return None
-    row = (await session.execute(
-        select(func.coalesce(func.sum(CrmCashEntry.deposit), 0),
-               func.coalesce(func.sum(CrmCashEntry.expense), 0),
-               func.coalesce(func.sum(CrmCashEntry.bank_fee), 0),
-               func.coalesce(func.sum(CrmCashEntry.claim), 0))
-        .where(and_(CrmCashEntry.bank_account_id == acct.id,
-                    CrmCashEntry.entry_date < first_day)))).one()
-    dep, exp, fee, claim = (int(x or 0) for x in row)
-    # 聚合值包成一筆餵進共用公式 —— 餘額的定義只有那一份
-    return bank_running_balance(int(acct.opening_balance or 0),
-                                [{"deposit": dep, "expense": exp,
-                                  "bank_fee": fee, "claim": claim}])
+    # 餘額的定義只有 _balances_by_account 那一份（期初＋流水；登記過餘額且登記日在期初前就從登記起算）
+    return (await _balances_by_account(session, until=first_day, account_id=acct.id))[acct.id]["balance"]
 
 
 async def _build_statement_preview(session, acct, ent, text):

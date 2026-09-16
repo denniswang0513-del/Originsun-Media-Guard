@@ -70,6 +70,25 @@ class BankAccountPayload(BaseModel):
     entity: Optional[str] = None
 
 
+class BalanceRegisterLine(BaseModel):
+    """登記餘額：一個帳戶「今天看到的餘額」；null ＝ 取消登記（回到期初＋全部流水）。"""
+    id: str
+    balance: Optional[int] = None
+
+
+class BalanceRegisterBroker(BaseModel):
+    """登記餘額：一個證券戶「今天的總市值」（明細之外的差額落到那家的「未拆明細」列）。"""
+    broker: str
+    total: int
+
+
+class BalanceRegisterPayload(BaseModel):
+    """PUT /finance/balance-register：基準日＋各帳戶餘額＋各證券戶總市值。沒送的帳戶不動。"""
+    date: str                                   # 'YYYY-MM-DD' 基準日（通常＝今天）
+    accounts: List[BalanceRegisterLine] = []
+    brokers: List[BalanceRegisterBroker] = []
+
+
 class ReconciliationPayload(BaseModel):
     """銀行對帳：送對帳單月底餘額，system_balance 由後端算。"""
     bank_account_id: str

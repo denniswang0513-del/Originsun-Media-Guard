@@ -79,6 +79,32 @@ def bank_running_balance(opening_balance: int, entries: list) -> int:
     return (opening_balance or 0) + sum(cash_entry_flow(e) for e in entries)
 
 
+def day_key(v) -> str:
+    """日期 → 'YYYY-MM-DD' 字串鍵（datetime／date／'YYYY-MM-DD' 字串都吃；空 → ''）。
+    比先後用字串就夠 —— DB 回來的 datetime 帶時區、_parse_day 出來的不帶，直接互比會丟 TypeError。"""
+    return str(v)[:10] if v else ""
+
+
+def derive_balance(opening, anchor_balance, anchor_date, flow_all, flow_after, until=None) -> dict:
+    """帳戶餘額的**唯一**規則（含「登記餘額」的基準點；owner 2026-09-17「先登記帳戶資產，明細後面補」）。
+
+    - 沒登記過（anchor_date 空）：餘額 = 期初 + Σ全部流水（老公式）。
+    - 登記過：餘額 = 登記餘額 + Σ基準日**之後**的流水。基準日當天與之前的明細只當歷史 ——
+      之後補多少舊明細都不會動今天的數字（這就是可以「先登記、明細後補」的原因）。
+      沒填日期的收支視為基準日之後（跟老公式一樣照算；呼叫端的 flow_after 要照這個口徑聚合）。
+    - until（對帳的月底、對帳單的期初）早於或等於基準日：那個時點還沒登記 → 老公式。
+    回 {"balance", "unfilled"}：unfilled ＝ 登記餘額 −（期初 + Σ基準日當天與之前的流水），
+    就是「登記之後還沒補進帳的明細」合計，補齊會歸 0；沒登記 ＝ None。
+    """
+    anchored = (anchor_date is not None and anchor_balance is not None
+                and (until is None or day_key(anchor_date) < day_key(until)))
+    if not anchored:
+        return {"balance": int(opening or 0) + int(flow_all or 0), "unfilled": None}
+    booked_upto = int(opening or 0) + int(flow_all or 0) - int(flow_after or 0)
+    return {"balance": int(anchor_balance) + int(flow_after or 0),
+            "unfilled": int(anchor_balance) - booked_upto}
+
+
 def reconciliation_diff(system_balance: int, statement_balance: int) -> dict:
     """對帳差額：diff = 對帳單餘額 − 系統餘額；歸零才算平（balanced）。"""
     diff = (statement_balance or 0) - (system_balance or 0)
@@ -1330,7 +1356,8 @@ def bank_balances_asof(bank_accounts, cash_entries, as_of_month: str) -> list:
     帳戶 opening_balance 一律視為期間前既有（opening_date 早於 as_of 的
     校驗不在此做 — 設定精靈統一開在基準月 1 日）。
     """
-    flows = {}
+    by_id = {b.get("id"): b for b in bank_accounts}
+    flows, after = {}, {}
     for e in cash_entries:
         aid = e.get("bank_account_id")
         if not aid:
@@ -1338,10 +1365,21 @@ def bank_balances_asof(bank_accounts, cash_entries, as_of_month: str) -> list:
         m = month_of(e.get("entry_date"))
         if not m or (as_of_month and m > as_of_month):
             continue
-        flows[aid] = flows.get(aid, 0) + cash_entry_flow(e)
-    return [{"id": b.get("id"), "name": b.get("name") or "?",
-             "amount": int(b.get("opening_balance") or 0) + flows.get(b.get("id"), 0)}
-            for b in bank_accounts]
+        f = cash_entry_flow(e)
+        flows[aid] = flows.get(aid, 0) + f
+        anc = (by_id.get(aid) or {}).get("anchor_date")
+        if anc is not None and day_key(e.get("entry_date")) > day_key(anc):
+            after[aid] = after.get(aid, 0) + f
+    out = []
+    for b in bank_accounts:
+        # 登記餘額（derive_balance）：登記月起的月底餘額從登記餘額起算；登記月之前的月份還是老公式
+        anc = b.get("anchor_date")
+        if anc is not None and as_of_month and (month_of(anc) or "") > as_of_month:
+            anc = None
+        r = derive_balance(b.get("opening_balance"), b.get("anchor_balance"), anc,
+                           flows.get(b.get("id"), 0), after.get(b.get("id"), 0))
+        out.append({"id": b.get("id"), "name": b.get("name") or "?", "amount": r["balance"]})
+    return out
 
 
 # ── 預期毛利 × 人力日成本 → 工時預算（owner 2026-09-03，私帳設定）─────────────

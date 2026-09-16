@@ -64,24 +64,16 @@ async def _auto_buckets(session, ent: str, usd_twd: float) -> dict:
     from sqlalchemy import select
 
     from core.finance_logic import equipment_net_rows
-    from db.models import (BankAccount, CrmCashEntry, CrmProject, Equipment,
+    from db.models import (BankAccount, CrmProject, Equipment,
                            FinanceHolding)
 
-    # 銀行現金 = Σ(期初 + 淨流)
-    flows = dict((await session.execute(
-        select(CrmCashEntry.bank_account_id,
-               fn.sum(fn.coalesce(CrmCashEntry.deposit, 0)
-                      - fn.coalesce(CrmCashEntry.expense, 0)
-                      - fn.coalesce(CrmCashEntry.bank_fee, 0)
-                      - fn.coalesce(CrmCashEntry.claim, 0)))
-        .where(CrmCashEntry.entity == ent,
-               CrmCashEntry.bank_account_id.isnot(None))
-        .group_by(CrmCashEntry.bank_account_id))).all())
+    # 銀行現金 = Σ各帳戶餘額（規則只有 api_finance._balances_by_account 那一份：期初＋流水，登記過餘額就從登記起算）
+    from routers.api_finance import _balances_by_account
+    bal = await _balances_by_account(session, entity=ent)
     accts = (await session.execute(
         select(BankAccount).where(BankAccount.entity == ent,
                                   BankAccount.active.is_(True)))).scalars().all()
-    bank_cash = sum(int(a.opening_balance or 0) + int(flows.get(a.id, 0) or 0)
-                    for a in accts if (a.acct_kind or "bank") == "bank")
+    bank_cash = sum(bal[a.id]["balance"] for a in accts if (a.acct_kind or "bank") == "bank")
 
     receivable = int((await session.execute(
         select(fn.coalesce(fn.sum(CrmProject.amount_receivable), 0))
@@ -122,8 +114,7 @@ async def _auto_buckets(session, ent: str, usd_twd: float) -> dict:
                     "證券現值": sum(r["value_twd"] for r in h_rows)},
         # 各帳戶分列（owner 2026-08-25「這些帳戶與資料要呈現」）—— 銀行現金那
         # 顆桶的逐帳戶明細，口徑同上（期初＋流水），不是第二份算法
-        "bank_lines": [{"name": a.name,
-                        "amount": int(a.opening_balance or 0) + int(flows.get(a.id, 0) or 0)}
+        "bank_lines": [{"name": a.name, "amount": bal[a.id]["balance"]}
                        for a in accts if (a.acct_kind or "bank") == "bank"],
         "holdings": h_rows, "usd_twd": usd_twd,
     }

@@ -1,0 +1,144 @@
+# -*- coding: utf-8 -*-
+"""登記餘額（owner 2026-09-17「先讓我登記我的帳戶資產，明細我後面補」）。
+
+釘的是規矩：
+- 餘額的規則只有 core.finance_logic.derive_balance 一份；六個算餘額的地方都經 api_finance._balances_by_account。
+- 登記過：餘額 = 登記餘額 + 基準日之後的流水；基準日當天與之前的明細只當歷史（補了不動今天的數字）。
+- 沒登記：老公式（期初＋全部流水），一個數字都不變。
+- 桌機 nav 私帳限定、手機 #register 隱藏路由、按鈕純文字沒有 emoji。
+"""
+import re
+
+from core.finance_logic import bank_balances_asof, day_key, derive_balance
+from tests.unit._srcscan import js_code_only, migration_sql, models_src, repo_src
+
+_EMOJI = re.compile("[\U0001F300-\U0001FAFF]|[✓✔✗]")
+
+
+# ── 純規則 ──────────────────────────────────────────────────────────
+def test_no_anchor_is_the_old_formula():
+    """沒登記過的帳戶：期初＋全部流水，unfilled 是 None（不是 0 —— 畫面要分得出「沒登記」與「補齊了」）。"""
+    r = derive_balance(700_069, None, None, flow_all=-38_200, flow_after=-38_200)
+    assert r == {"balance": 661_869, "unfilled": None}
+    # 只有其中一欄有值也當沒登記（兩欄一起有或一起空）
+    assert derive_balance(100, 999, None, 5, 5)["balance"] == 105
+    assert derive_balance(100, None, "2026-09-17", 5, 5)["balance"] == 105
+
+
+def test_anchor_starts_from_registered_balance_and_old_entries_become_history():
+    """登記 1,482,235（帳上算到基準日是 1,520,435）：餘額＝登記數；unfilled＝−38,200＝還沒補的明細。
+    之後補一筆基準日**之前**的支出 −38,200：flow_all 變了、flow_after 沒變 → 餘額不動、unfilled 歸 0。
+    再記一筆基準日**之後**的 +10,000 → 餘額才動。"""
+    r = derive_balance(700_069, 1_482_235, "2026-09-17", flow_all=820_366, flow_after=0)
+    assert r == {"balance": 1_482_235, "unfilled": -38_200}
+    filled = derive_balance(700_069, 1_482_235, "2026-09-17", flow_all=820_366 - 38_200, flow_after=0)
+    assert filled == {"balance": 1_482_235, "unfilled": 0}, "補舊明細：今天的餘額一毛都不動"
+    later = derive_balance(700_069, 1_482_235, "2026-09-17", flow_all=820_366 - 38_200 + 10_000, flow_after=10_000)
+    assert later["balance"] == 1_492_235 and later["unfilled"] == 0
+
+
+def test_until_before_or_on_anchor_day_falls_back_to_old_formula():
+    """對帳單期初／月底餘額：那個時點還沒登記 → 老公式；基準日之後的時點才用登記數。"""
+    kw = dict(opening=100, anchor_balance=500, anchor_date="2026-09-17", flow_all=40, flow_after=10)
+    assert derive_balance(**kw, until="2026-09-01")["balance"] == 140, "登記日之前：期初＋流水"
+    assert derive_balance(**kw, until="2026-09-17")["balance"] == 140, "登記日當天（until 是開區間）還是老公式"
+    assert derive_balance(**kw, until="2026-10-01")["balance"] == 510, "登記日之後：登記數＋之後的流水"
+
+
+def test_day_key_compares_naive_aware_and_strings_alike():
+    from datetime import datetime, timezone
+    assert day_key(datetime(2026, 9, 17, 8, tzinfo=timezone.utc)) == "2026-09-17"
+    assert day_key(datetime(2026, 9, 17)) == "2026-09-17" == day_key("2026-09-17T00:00:00")
+    assert day_key(None) == "" and day_key("") == ""
+
+
+def test_statement_month_end_balance_honours_the_anchor():
+    """三表的月底餘額：登記月之前的月份老公式；登記月起從登記數起算、只加基準日之後的流水。"""
+    banks = [{"id": "a", "name": "富邦", "opening_balance": 1000, "anchor_balance": 5000, "anchor_date": "2026-09-17"}]
+    ents = [
+        {"bank_account_id": "a", "entry_date": "2026-08-10", "deposit": 300},   # 基準日前
+        {"bank_account_id": "a", "entry_date": "2026-09-17", "expense": 50},    # 基準日當天：算歷史
+        {"bank_account_id": "a", "entry_date": "2026-09-20", "deposit": 200},   # 基準日後
+        {"bank_account_id": "a", "entry_date": "2026-10-03", "expense": 20},
+    ]
+    amt = lambda m: bank_balances_asof(banks, ents, m)[0]["amount"]  # noqa: E731
+    assert amt("2026-08") == 1300, "登記月之前：期初＋流水"
+    assert amt("2026-09") == 5200, "登記月：登記數＋基準日之後（不含當天）的流水"
+    assert amt("2026-10") == 5180
+    plain = [{"id": "a", "name": "富邦", "opening_balance": 1000}]
+    assert bank_balances_asof(plain, ents, "2026-10")[0]["amount"] == 1430, "沒登記：一個數字都不變"
+
+
+# ── 欄位與唯一規則 ───────────────────────────────────────────────────
+def test_columns_exist_in_model_and_startup_migration():
+    m = models_src("class BankAccount(Base):")
+    assert "anchor_balance = Column(Integer, nullable=True)" in m
+    assert "anchor_date = Column(DateTime(timezone=True), nullable=True)" in m
+    sql = migration_sql()
+    assert "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS anchor_balance INTEGER" in sql
+    assert "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS anchor_date TIMESTAMP WITH TIME ZONE" in sql
+
+
+def test_every_balance_site_goes_through_the_single_helper():
+    """六個算餘額的地方都經 _balances_by_account；誰自己寫「期初＋流水」就會漏掉基準點。"""
+    for rel in ("routers/api_finance_assets.py", "routers/api_fortress.py", "routers/api_finance_stmt.py",
+                "routers/api_balance_register.py"):
+        src = repo_src(rel)
+        assert "_balances_by_account(" in src, rel
+        assert "opening_balance or 0) +" not in src, f"{rel} 自己算了一次餘額"
+    fin = repo_src("routers/api_finance.py")
+    assert fin.count("_balances_by_account(") >= 3, "帳戶清單、對帳月底餘額都要經它"
+    assert "_flow_sums_by_account" not in fin, "舊的聚合器留著就是第二份規則"
+    assert "derive_balance(" in fin
+    stm = repo_src("services/finance_statements.py")
+    assert '"anchor_balance", "anchor_date"' in stm, "三表的帳戶投影要帶基準點，不然 bank_balances_asof 看不到"
+
+
+def test_register_router_is_mounted_on_master_and_office_and_only_writes_db():
+    assert "'api_balance_register'" in repo_src("main.py")
+    assert '"api_balance_register"' in repo_src("main_office.py"), "手機在 NAS 上也要能登記"
+    src = repo_src("routers/api_balance_register.py")
+    assert "save_settings" not in src, "NAS 的 settings.json 是唯讀副本：這支只能寫 DB（信用卡走 /card-summary）"
+    assert '@router.get("/balance-register")' in src and '@router.put("/balance-register")' in src
+    assert "REGISTER_KINDS = (\"bank\", \"cash\")" in src, "信用卡與股東往來不能登記餘額"
+    assert "BankReconciliation(" in src, "每次登記留一筆對帳紀錄當歷史"
+    sch = repo_src("core/schemas/_finance.py")
+    assert "balance: Optional[int] = None" in sch, "balance=null ＝ 取消登記"
+
+
+def test_bank_dict_exposes_anchor_and_list_exposes_unfilled():
+    fin = repo_src("routers/api_finance.py")
+    assert '"anchor_balance": b.anchor_balance,' in fin
+    assert 'd["unfilled"] = r["unfilled"]' in fin
+
+
+# ── 畫面 ─────────────────────────────────────────────────────────────
+def test_desktop_nav_is_mine_only_and_subview_uses_the_endpoint():
+    html = repo_src("frontend/tabs/finance/finance.html")
+    m = re.search(r'<button class="([^"]*)" data-subview="register">', html)
+    assert m, "finance.html 要有 data-subview=register 的 nav 鈕"
+    assert {"fin-nav-mine-ok", "fin-nav-mine-only"} <= set(m.group(1).split()), "只在私帳出現"
+    js = js_code_only(repo_src("frontend/tabs/finance/subviews/register.js"))
+    assert "export default async function render(" in js
+    assert "finFetchMine('/balance-register')" in js and "method: 'PUT'" in js
+    assert "balance: null" in js, "取消登記送 null"
+    assert "'/card-summary'" in js and "derive_opening_from" in js, "信用卡走既有那支"
+    bank = js_code_only(repo_src("frontend/tabs/finance/subviews/banking.js"))
+    assert "_anchorLine(a)" in bank and "a.anchor_balance" in bank, "銀行卡片要看得到登記過的數字"
+
+
+def test_mobile_register_is_a_hidden_route_reached_from_overview():
+    ledger = repo_src("frontend/m/ledger.js")
+    assert "register: '登記餘額'" in ledger and "register: 'overview'" in ledger
+    assert "register: registerView" in ledger
+    ov = js_code_only(repo_src("frontend/m/views/ledger-overview.js"))
+    assert 'data-go="register"' in ov and 'data-go="fortress"' in ov
+    assert "go.dataset.go" in ov, "隱藏路由的入口用同一個 data-go 委派"
+    view = repo_src("frontend/m/views/ledger-register.js")
+    code = js_code_only(view)
+    assert "'/api/v1/finance/balance-register?entity=mine'" in code
+    assert "todayLocal()" in code and "toISOString" not in code
+    assert "markStale('overview', 'assets')" in code, "登記後總覽的堡壘卡與資產頁要重抓"
+    assert not _EMOJI.search(view), "按鈕純文字，沒有 emoji"
+    css = repo_src("frontend/m/m.css")
+    assert ".rg-row" in css and ".rg-go" in css

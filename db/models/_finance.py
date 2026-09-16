@@ -236,6 +236,10 @@ class BankAccount(Base):
     staff_id = Column(String(32), nullable=True, index=True)
     opening_balance = Column(Integer, nullable=False, default=0)  # 期初餘額（基準日）
     opening_date = Column(DateTime(timezone=True), nullable=True)  # 期初基準日
+    # 登記餘額（最近一次「我今天看到的餘額」）：有它就從它起算，基準日當天與之前的明細只當歷史
+    # —— 規則見 core.finance_logic.derive_balance；兩欄一起有或一起空。
+    anchor_balance = Column(Integer, nullable=True)
+    anchor_date = Column(DateTime(timezone=True), nullable=True)
     is_default = Column(Boolean, default=False)                  # 預設帳戶（新收支預設掛這）
     active = Column(Boolean, default=True)                       # 停用後不出現在選單（不刪保歷史）
     sort_order = Column(Integer, default=0)

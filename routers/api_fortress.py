@@ -112,13 +112,10 @@ def _save_cfg(ent: str, cfg: dict) -> None:
 async def _accounts(session, ent: str) -> tuple:
     """銀行／現金帳戶（期初＋流水；信用卡與股東帳戶不算，卡欠款走預留）＋證券（一列一檔）→ (帳戶, 警告)。"""
     from core.finance_logic import CARD_KIND, is_shareholder_kind
+    from routers.api_finance import _balances_by_account
     from routers.api_finance_assets import _holding_value
-    flows = dict((await session.execute(
-        select(CrmCashEntry.bank_account_id,
-               fn.sum(fn.coalesce(CrmCashEntry.deposit, 0) - fn.coalesce(CrmCashEntry.expense, 0)
-                      - fn.coalesce(CrmCashEntry.bank_fee, 0) - fn.coalesce(CrmCashEntry.claim, 0)))
-        .where(CrmCashEntry.entity == ent, CrmCashEntry.bank_account_id.isnot(None))
-        .group_by(CrmCashEntry.bank_account_id))).all())
+    # 帳戶餘額的規則只有 _balances_by_account 那一份（期初＋流水；登記過餘額就從登記起算）
+    bal = await _balances_by_account(session, entity=ent)
     accts = (await session.execute(
         select(BankAccount).where(BankAccount.entity == ent, BankAccount.active.is_(True))
         .order_by(BankAccount.sort_order, BankAccount.created_at))).scalars().all()
@@ -128,7 +125,7 @@ async def _accounts(session, ent: str) -> tuple:
         if kind == CARD_KIND or is_shareholder_kind(kind):
             continue
         out.append({"id": a.id, "name": a.name, "kind": "cash" if kind == "cash" else "bank",
-                    "balance": int(a.opening_balance or 0) + int(flows.get(a.id, 0) or 0), "currency": "TWD"})
+                    "balance": bal[a.id]["balance"], "currency": "TWD"})
     fx = float((load_settings().get("my_ledger") or {}).get("usd_twd") or 0)
     holdings = (await session.execute(
         select(FinanceHolding).where(FinanceHolding.entity == ent, FinanceHolding.active.is_(True))

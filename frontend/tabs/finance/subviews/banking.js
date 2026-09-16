@@ -137,12 +137,23 @@ function _card(a) {
         <div style="color:#888;font-size:12px;margin-top:3px;">${esc(a.bank_name || '')} ${esc(_maskNo(a.account_no))}</div>
         <div style="font-size:22px;font-weight:700;color:${balColor};margin-top:8px;">$${fmtNum(bal)}</div>
         <div style="color:#666;font-size:11px;margin-top:2px;">期初 $${fmtNum(a.opening_balance)}${a.opening_date ? '（' + esc(String(a.opening_date).substring(0, 10)) + '）' : ''}</div>
+        ${_anchorLine(a)}
         ${a.note ? `<div style="color:#777;font-size:11px;margin-top:4px;">${esc(a.note)}</div>` : ''}
         <div style="display:flex;gap:6px;margin-top:10px;">
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finBank.edit('${esc(a.id)}')">編輯</button>
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finBank.toggleActive('${esc(a.id)}')">${inactive ? '啟用' : '停用'}</button>
         </div>
     </div>`;
+}
+
+/** 登記餘額（subviews/register.js）那一行：登記過就顯示「登記 $X（日期）」，登記之後還沒補的明細不是 0 就標黃。
+ *  餘額本身已經是登記後的數字（後端 current_balance 同一份規則），這裡只是說明它從哪來。 */
+function _anchorLine(a) {
+    if (a.anchor_balance === null || a.anchor_balance === undefined) return '';
+    const uf = Number(a.unfilled || 0);
+    const tail = uf === 0 ? '<span style="color:#86efac;">明細已補齊</span>'
+        : `<span style="color:#fbbf24;">登記後還沒補的明細 ${uf > 0 ? '+' : '−'}$${fmtNum(Math.abs(uf))}</span>`;
+    return `<div style="color:#9ca3af;font-size:11px;margin-top:2px;">登記 $${fmtNum(a.anchor_balance)}（${esc(String(a.anchor_date || '').substring(0, 10))}）・${tail}</div>`;
 }
 
 /** 股東往來卡：語意跟銀行帳戶相反 —— 數字是**公司欠這位股東多少**，不是公司有多少錢。

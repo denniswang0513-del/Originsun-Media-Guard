@@ -1339,6 +1339,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`core/fortress_logic.py`](core/fortress_logic.py) | 私帳堡壘的**純規則**：五層分類、可撐月數＝(第 1–3 層現金 − 預留)÷生活支出、各層目標、壓力測試五題（含台海戰爭）、設定正規化與上下限 | 無 I/O；現金看 `kind` 不看層別（`cash_in_layers`）；生活支出口徑 `need_category_ok`、分母是有資料的月份數（見「不要動的地方」） |
 | [`routers/api_fortress.py`](routers/api_fortress.py) | 堡壘的資料面：把私帳現有數字（帳戶餘額、證券現值、卡欠款、貸款期別、生活支出）撈出來餵給規則，＋預留清單與設定的寫入 | 不重寫任何金額規則（沿用 `_holding_value`／`_card_numbers`／期初＋流水）；守衛 `_guard` 寫死 mine；主控與 NAS 都掛，但 `/settings` 在 NAS 被 drop |
 | `frontend/tabs/finance/subviews/fortress.js` ＋ `frontend/m/views/ledger-fortress.js`（＋總覽頂卡） | 堡壘的兩個畫面：桌機分頁（可改分層／目標／假設、增刪預留）與手機頁（只能增刪預留） | 兩邊都不自己算，一律拿後端回的整份 payload 重畫；分層自動存要先拍快照（見「不要動的地方」①） |
+| `routers/api_balance_register.py` ＋ `core/finance_logic/_core.py::derive_balance`／`routers/api_finance.py::_balances_by_account` | **登記餘額**（docs/BALANCE_REGISTER.md）：「今天看到多少就先記多少，明細後面補」。帳戶寫基準點（`bank_accounts.anchor_balance／anchor_date`）、證券戶寫「未拆明細」列、每次登記留一筆對帳紀錄 | 餘額規則只有 `derive_balance` 一份，六個算餘額的地方都經 `_balances_by_account`；畫面：桌機 `subviews/register.js`（私帳 nav）、手機 `#register` 隱藏路由 |
 | `core/ledger_project.py` 的分案記帳段 | 私帳案收入**分案**：`BY_PARENT_KEY`／`BY_PARENT_PENDING_KEY`、`parent_shares`、`set_parent_share`（只動差額；`claim` 不動錢）、`drop_parent_share`、`mirror_stale(…, pid)` 逐案判；設計正本 [`docs/LEDGER_BY_PARENT_PLAN.md`](docs/LEDGER_BY_PARENT_PLAN.md) | 不變式 `contract = Σ份額 + owner 自己的`（自己的不存、用差額推）；分身 `contract_amount` 只准接 `set／drop_parent_share` 回的 `new_contract`（`test_ledger_by_parent` 掃 project_links 釘著）；開機 `_m22` 回填舊資料，分不出的 N:1 標待認領、改收款方式會 409 要求逐案「推送→取代」 |
 | 彈性外出（owner 2026-09-15）：[`core/leave_logic.py`](core/leave_logic.py) 的 `FLEX_OUT_*`／`flex_out_check`、`hr_flex_outings`（[`db/models/_workos.py`](db/models/_workos.py)）、[`routers/api_me.py`](routers/api_me.py) 的 `/me/flex_out` | 每人每天 2 小時、**自己登記不用核准**、一筆 ≤2h、同一天合計 ≤2h、不累積。畫面固定寫「每日可彈性外出兩小時」（owner 改的字，不顯示剩多少） | **不走請假單**：不進時數帳、不進休假總表、不上 Google 日曆。事由只給本人看（行事曆事件的 `notes` 一律空，同 `_leave_events`）。超過 2 小時要另外請假 —— 規章那段在 `frontend/leave.html` 的規章卡，排在事假前面 |
 | [`core/leave_logic.py`](core/leave_logic.py) 的 `day_off_fraction`／`leave_days_total` | 一天休了多少（同一天多張單**加總**、上限 1；`range` 照時數換算）／一段期間休幾天（**只算工作日**） | `/me/week_marks` 的 `off[日期]` 與 `leave_days` 都出自這裡；前端不准自己再判一次 `part`（兩份規則會分岔） |
@@ -1403,6 +1404,14 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
      不然會靜靜掉回金額格式（長照的「撐得了 29.5 年」上線時就是印成「29.5 萬」，沒有測試釘）。
   ⑩ **「模擬到 90 歲用不完」是算術上必然的事**（固定報酬減通膨大於提領率就一定算不完），不能寫成一項通過的檢驗；
      真正會咬人的是報酬順序，所以另外算一條「前 10 年報酬 0%」。提領一律**年初先提**（同 Bengen），先長再提會高估 6–7%。
+- **登記餘額（docs/BALANCE_REGISTER.md，2026-09-17）**：帳戶餘額的規則**只有 `core.finance_logic.derive_balance` 一份** ——
+  沒登記＝期初＋全部流水（老公式）；登記過＝登記餘額＋**基準日之後**的流水，基準日當天與之前的明細只當歷史（補了不動今天的數字），
+  `unfilled`＝登記數 − 帳上算到基準日的數字（還沒補的明細，補齊歸 0）。六個算餘額的地方（帳戶清單、對帳月底、資產儀表板、堡壘、
+  對帳單期初、三表 `bank_balances_asof`）都經 `routers/api_finance._balances_by_account`（一趟 SQL 抓「Σ全部」與「Σ基準日之後」），
+  🔴 誰再自己寫「`opening_balance + flows`」就會漏掉基準點（`tests/unit/test_balance_register.py` 掃著）。
+  證券戶沒有新欄位：一家券商一個總市值，差額寫進那家的「未拆明細」持股列（symbol 空），拆明細後再登記一次就歸零。
+  信用卡不走這裡（既有 `PUT /card-summary derive_opening_from` 就是「現在實際欠多少」）。端點只寫 DB、不碰 settings.json（NAS 也掛）。
+  端點在獨立檔 `routers/api_balance_register.py`：`api_finance.py` 已到 2,000 行的單次讀取上限，別再往裡面加端點。
 - **`/api/settings/load` 是匿名端點，機密分兩層**（2026-09-08 稽核）：`_SECRET_KEYS`／`_SECRET_SUBKEYS`（簽得出 admin 的：jwt_secret、database_url、
   google secret）連管理員也不回；`_ADMIN_ONLY_SUBKEYS`（工時同步 token、四個 webhook）只回給管理員 token（設定視窗要顯示才能編）。新增機密欄位要進其中一層。
   內部重啟端點（`/internal/restart`、`/system/restart`）的金鑰字串隨 OTA 包公開，安全靠 `core.auth.via_cloudflare` 把公網那條路擋掉——**別**把金鑰換成 `_get_secret()`，機隊各自的 jwt_secret 不共用，master 會推不動 agent。

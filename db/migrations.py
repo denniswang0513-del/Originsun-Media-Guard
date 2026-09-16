@@ -358,6 +358,9 @@ FINANCE_LEDGER_COLUMNS = [
         "ALTER TABLE hr_benefit_pools ADD COLUMN IF NOT EXISTS valid_from TIMESTAMPTZ",
         "ALTER TABLE hr_benefit_pools ADD COLUMN IF NOT EXISTS valid_to TIMESTAMPTZ",
         "CREATE INDEX IF NOT EXISTS idx_bank_acct_staff ON bank_accounts (staff_id)",
+        # 2026-09-17 登記餘額：最近一次登記的餘額與基準日（core.finance_logic.derive_balance）
+        "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS anchor_balance INTEGER",
+        "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS anchor_date TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE finance_adjustments ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
         "ALTER TABLE finance_loans ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
         "ALTER TABLE finance_month_close ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",

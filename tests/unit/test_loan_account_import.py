@@ -117,9 +117,11 @@ def test_the_preview_actually_passes_the_opening_balance():
         "preview 沒有去算帳戶的期初餘額"
     assert "opening_balance=opening" in body, "算了卻沒傳給解析器"
     helper = code_only(func_body(src, "async def _balance_before("))
-    assert "bank_running_balance" in helper, \
+    # 2026-09-17 起餘額的唯一定義是 api_finance._balances_by_account（→ core.finance_logic.derive_balance，
+    # 含「登記餘額」的基準點）；這裡直接呼叫 bank_running_balance 反而會漏掉基準點
+    assert "_balances_by_account(" in helper and "bank_running_balance" not in helper, \
         "自己又算了一次餘額 —— 定義只能有一份（core.finance_logic）"
-    assert "entry_date < first_day" in helper, \
+    assert "until=first_day" in helper, \
         "沒有限定「對帳單第一列之前」的流水"
 
 

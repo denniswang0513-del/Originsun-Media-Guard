@@ -53,6 +53,7 @@ _ROUTER_MODULES = (
     # 儀表板那幾支 + 手機 BFF。這四支都沒有排程（test_office_surface 的模組圖釘著）。
     "api_finance", "api_finance_projects", "api_finance_assets", "api_ledger_mobile",
     "api_fortress",     # 私帳堡壘（docs/FORTRESS_PLAN.md）：手機在 NAS 上也要能看、能記預留
+    "api_balance_register",   # 登記餘額：手機在 NAS 上也要能登記（只寫 DB，不碰 settings.json）
     "api_paste",
 )
 

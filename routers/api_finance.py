@@ -45,9 +45,8 @@ from core.db_guard import db_factory_or_503 as _factory_or_503
 from core.finance_logic import (is_account_move, BOOKKEEPING_EXTRA_ON_MONTH,
                                 amortization_schedule,
                                 auto_match_statement_lines,
-                                bank_running_balance, cash_entry_flow,
-                                local_day, period_months, reconciliation_diff,
-                                statement_line_status, today_start,
+                                cash_entry_flow, derive_balance,
+                                local_day, period_months, reconciliation_diff, statement_line_status, today_start,
                                 workbench_summary)
 from core.schemas import (BankAccountPayload,
                           BookkeepingFeePut, MarginModelPut, MarginUnifyPayload,
@@ -55,8 +54,7 @@ from core.schemas import (BankAccountPayload,
                           TransferFeeRecognize,
                           FinanceAdjustmentPayload, FinanceCategoryMapPut,
                           FinanceSetupWizardPayload, LoanPayload,
-                          LoanPayPayload, ReconciliationPayload,
-                          StatementAutoMatchPayload,
+                          LoanPayPayload, ReconciliationPayload, StatementAutoMatchPayload,
                           StatementLineCreateEntryPayload,
                           StatementLineMatchPayload,
                           StatementLinesBulkPayload,
@@ -101,35 +99,41 @@ def _guard(request: Request, entity: str = "", level: str = "view") -> str:
     return require_entity(request, entity, level=level)
 
 
-async def _flow_sums_by_account(session, until=None, account_id=None,
-                                entity=None) -> dict:
-    """各帳戶掛帳收支的 SUM 聚合 {bank_account_id: {deposit, expense, bank_fee, claim}}。
+async def _balances_by_account(session, entity=None, until=None, account_id=None) -> dict:
+    """每個帳戶的餘額 {bank_account_id: {"balance", "unfilled"}} —— 🔴 全系統算帳戶餘額只走這一支
+    （帳戶清單、對帳、資產儀表板、堡壘、對帳單解析、三表的月底餘額都是它或它的純函式版）。
 
-    流水公式線性（見 finance_logic.bank_running_balance docstring）→ 聚合值包成
-    一筆 entry 餵 bank_running_balance 即得餘額，免逐筆搬。until 給對帳用
-    （只算 entry_date < until 的流水；未填日期的收支無法定位月份，不計入）。
-    account_id 非 None 時只聚合單一帳戶（對帳只需要一個帳戶，免全表掃）。
-    entity 非 None 時只聚合該帳本（帳戶清單只要自己那本 —— 不加這個過濾的話，
-    /my-ledger.html 每次開銀行帳戶都會把整份母公司收支歷史聚合完再全部丟掉）。"""
-    from sqlalchemy import select, func as safunc
-    from db.models import CrmCashEntry
-    q = (select(CrmCashEntry.bank_account_id,
-                safunc.coalesce(safunc.sum(CrmCashEntry.deposit), 0),
-                safunc.coalesce(safunc.sum(CrmCashEntry.expense), 0),
-                safunc.coalesce(safunc.sum(CrmCashEntry.bank_fee), 0),
-                safunc.coalesce(safunc.sum(CrmCashEntry.claim), 0))
-         .where(CrmCashEntry.bank_account_id.isnot(None),
-                CrmCashEntry.bank_account_id != ""))
+    一趟 SQL 把每個帳戶的兩個聚合抓回來：Σ全部流水、Σ基準日之後的流水（沒填日期的收支算「之後」），
+    規則本身在 core.finance_logic.derive_balance（登記過餘額就從登記起算，否則期初＋流水）。
+    until：只算 entry_date < until 的流水（對帳的月底、對帳單的期初）；基準日不早於 until 的帳戶那時還沒登記 → 老公式。
+    entity／account_id 各自縮小範圍（帳戶清單只要自己那本，對帳只要一個帳戶）。
+    回的 dict 涵蓋範圍內**每一個**帳戶（沒流水的也有一筆），呼叫端不必再 .get(id, 0)。"""
+    from sqlalchemy import case, select, func as safunc
+    from db.models import BankAccount, CrmCashEntry
+    aq = select(BankAccount)
     if entity is not None:
-        q = q.where(CrmCashEntry.entity == entity)
+        aq = aq.where(BankAccount.entity == entity)
+    if account_id is not None:
+        aq = aq.where(BankAccount.id == account_id)
+    accts = (await session.execute(aq)).scalars().all()
+    flow = (safunc.coalesce(CrmCashEntry.deposit, 0) - safunc.coalesce(CrmCashEntry.expense, 0)
+            - safunc.coalesce(CrmCashEntry.bank_fee, 0) - safunc.coalesce(CrmCashEntry.claim, 0))
+    after = case((BankAccount.anchor_date.is_(None), flow), (CrmCashEntry.entry_date.is_(None), flow),
+                 (CrmCashEntry.entry_date > BankAccount.anchor_date, flow), else_=0)
+    q = (select(CrmCashEntry.bank_account_id, safunc.coalesce(safunc.sum(flow), 0),
+                safunc.coalesce(safunc.sum(after), 0))
+         .join(BankAccount, BankAccount.id == CrmCashEntry.bank_account_id))
+    if entity is not None:
+        q = q.where(BankAccount.entity == entity)
     if account_id is not None:
         q = q.where(CrmCashEntry.bank_account_id == account_id)
     if until is not None:
         q = q.where(CrmCashEntry.entry_date < until)
-    q = q.group_by(CrmCashEntry.bank_account_id)
-    return {row[0]: {"deposit": int(row[1] or 0), "expense": int(row[2] or 0),
-                     "bank_fee": int(row[3] or 0), "claim": int(row[4] or 0)}
-            for row in (await session.execute(q)).all()}
+    sums = {r[0]: (int(r[1] or 0), int(r[2] or 0))
+            for r in (await session.execute(q.group_by(CrmCashEntry.bank_account_id))).all()}
+    return {a.id: derive_balance(a.opening_balance, a.anchor_balance, a.anchor_date,
+                                 *sums.get(a.id, (0, 0)), until=until)
+            for a in accts}
 
 
 async def _unassigned_count(session, entity: str = "parent") -> int:
@@ -565,7 +569,11 @@ def _bank_dict(b) -> dict:
         "id": b.id, "name": b.name, "bank_name": b.bank_name or "",
         "account_no": b.account_no or "", "acct_kind": b.acct_kind or "bank",
         "opening_balance": b.opening_balance or 0,
-        "opening_date": b.opening_date.strftime("%Y-%m-%d") if b.opening_date else None,
+        # timestamptz 回讀是 UTC：不過 local_day 的話 9/17 會印成 9/16（存進去的是台北 00:00）
+        "opening_date": local_day(b.opening_date).strftime("%Y-%m-%d") if b.opening_date else None,
+        # 登記餘額（最近一次）：兩欄一起有或一起空（core.finance_logic.derive_balance）
+        "anchor_balance": b.anchor_balance,
+        "anchor_date": local_day(b.anchor_date).strftime("%Y-%m-%d") if b.anchor_date else None,
         "is_default": bool(b.is_default), "active": bool(b.active),
         "sort_order": b.sort_order or 0, "note": b.note or "",
         "entity": b.entity or "parent", "staff_id": b.staff_id or "",
@@ -598,14 +606,14 @@ async def list_bank_accounts(request: Request, with_balances: int = 1,
         rows = (await session.execute(
             select(BankAccount).where(BankAccount.entity == ent)
             .order_by(BankAccount.sort_order, BankAccount.created_at))).scalars().all()
-        sums = await _flow_sums_by_account(session, entity=ent) if with_balances else {}
+        bal = await _balances_by_account(session, entity=ent) if with_balances else {}
         unassigned = await _unassigned_count(session, ent) if with_balances else 0
     items = []
     for b in rows:
         d = _bank_dict(b)
-        d["current_balance"] = (bank_running_balance(b.opening_balance or 0,
-                                                     [sums.get(b.id, {})])
-                                if with_balances else None)
+        r = bal.get(b.id) or {"balance": None, "unfilled": None}
+        d["current_balance"] = r["balance"] if with_balances else None
+        d["unfilled"] = r["unfilled"]        # 登記餘額之後還沒補進帳的明細合計（沒登記＝null）
         items.append(d)
     return {"items": items, "unassigned_count": int(unassigned)}
 
@@ -718,11 +726,10 @@ def _month_window(month: str) -> tuple:
 
 
 async def _system_balance(session, acct, month: str) -> int:
-    """帳戶月底系統餘額 = 期初 + 月底（含）前掛帳流水。
+    """帳戶月底系統餘額（期初 + 月底前流水；登記過餘額且登記日在月底前就從登記起算）。
     餘額核對（create_reconciliation）與工作台共用 — 對帳的核心數字只算一種。"""
     _start, end = _month_window(month)
-    sums = await _flow_sums_by_account(session, until=end, account_id=acct.id)
-    return bank_running_balance(acct.opening_balance or 0, [sums.get(acct.id, {})])
+    return (await _balances_by_account(session, until=end, account_id=acct.id))[acct.id]["balance"]
 
 
 def _recon_dict(r) -> dict:

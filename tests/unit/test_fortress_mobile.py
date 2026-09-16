@@ -107,7 +107,9 @@ def test_overview_fetches_fortress_in_parallel_and_survives_its_failure():
     load = js_func_body(js, "async function load(")
     assert "Promise.all" in load and "mfetch(FORTRESS_API).catch(" in load, "堡壘掛了總覽照畫"
     assert "fortressCard(ft)" in load
-    assert "location.hash = 'fortress'" in js_func_body(js, "export async function render(")
+    # 2026-09-17 起總覽有兩個隱藏路由入口（堡壘卡、登記餘額列），用同一個 data-go 委派
+    render = js_func_body(js, "export async function render(")
+    assert "location.hash = go.dataset.go" in render and "closest('[data-go]')" in render
 
 
 def test_fortress_css_block_uses_shell_tokens():
