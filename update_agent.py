@@ -168,6 +168,32 @@ def _pip_install(req_file: str):
     )
 
 
+MAX_HEALS = 8   # 一次更新最多救幾個沒 RECORD 的套件（ai_2 重灌後 pillow、requests… 一連好幾個）
+
+
+def _pip_with_self_heal(req_file: str):
+    """`pip install -r`，遇到「Cannot uninstall X None（no RECORD）」就對 X --force-reinstall --no-deps 清單上釘的版本，
+    再整份重跑；**一個接一個救**（2026-09-16 ai_2：只救一個的話 pillow 好了換 requests 擋，每推一輪才多好一個）。
+    同一個套件救過還是同樣的錯就停（不無限迴圈）；最多 MAX_HEALS 個。"""
+    result = _pip_install(req_file)
+    healed: set = set()
+    while result.returncode != 0:
+        pkg = _no_record_pkg(result)
+        if not pkg or pkg.lower() in healed or len(healed) >= MAX_HEALS:
+            break
+        healed.add(pkg.lower())
+        pin = _pinned(req_file, pkg) or pkg
+        log(f"pip: {pkg} has no RECORD (half-installed) -> force-reinstall {pin} ({len(healed)}/{MAX_HEALS})")
+        write_status(5, 62, f"修復半套的套件 {pkg}（第 {len(healed)} 個）...")
+        fix = subprocess.run(
+            [PYTHON, "-m", "pip", "install", "-q", "--force-reinstall", "--no-deps", pin, "--no-warn-script-location"],
+            capture_output=True, text=True, timeout=PIP_TIMEOUT,
+        )
+        log(f"force-reinstall exit {fix.returncode}:\n{fix.stdout}\n{fix.stderr}")
+        result = _pip_install(req_file)
+    return result
+
+
 def _no_record_pkg(result) -> str:
     """pip 抱怨「Cannot uninstall X None … no RECORD file」→ 回 X；不是這種錯回空字串。"""
     text = (result.stderr or "") + "\n" + (result.stdout or "")
@@ -348,21 +374,7 @@ def run_update(master_url: str) -> int:
         log("Phase 5: Installing requirements...")
         write_status(5, 60, "正在安裝套件...")
         try:
-            result = _pip_install(req_file)
-            if result.returncode != 0 and _no_record_pkg(result):
-                # 🔴 上一次更新 pip 裝到一半被殺（例如 2026-09-15 那批：Pillow 12.3.0 下載超過 300 秒逾時），套件剩半套、
-                #    沒有 RECORD → 之後每一次 `pip install -r` 都在「Cannot uninstall X None」這裡死掉，機器永遠停在舊版。
-                #    自救：對那個套件 --force-reinstall --no-deps 裝回清單上釘的版本，再把整份清單跑一次。
-                pkg = _no_record_pkg(result)
-                pin = _pinned(req_file, pkg) or pkg
-                log(f"pip: {pkg} has no RECORD (half-installed) -> force-reinstall {pin}")
-                write_status(5, 62, f"修復半套的套件 {pkg}...")
-                fix = subprocess.run(
-                    [PYTHON, "-m", "pip", "install", "-q", "--force-reinstall", "--no-deps", pin, "--no-warn-script-location"],
-                    capture_output=True, text=True, timeout=PIP_TIMEOUT,
-                )
-                log(f"force-reinstall exit {fix.returncode}:\n{fix.stdout}\n{fix.stderr}")
-                result = _pip_install(req_file)
+            result = _pip_with_self_heal(req_file)
             if result.returncode != 0:
                 # 🔴 取**尾段**、stderr 沒東西就看 stdout：pip 的 ERROR 在最後、前面常只有「pip 有新版」那條 notice，
                 #    取頭 300 字只會看到 notice（2026-09-15 五台機器回滾時原因全被吃掉）。完整輸出在 update_agent.log。

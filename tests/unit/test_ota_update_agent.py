@@ -183,3 +183,35 @@ def test_signing_key_never_ships_but_public_key_does():
     assert os.path.isfile(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "ota_signing_pub.pem")), "公鑰要在 repo 裡"
     src = repo_src("routers/api_ota.py")
     assert "sign(raw, os.path.join(base_dir, PRIVATE_KEY_FILE))" in src
+
+
+def test_pip_self_heal_loops_over_every_half_installed_package(tmp_path, monkeypatch):
+    """2026-09-16 ai_2 重灌後 python_embed 裡 pillow、requests… 好幾個套件都沒 RECORD：只救一個的話每推一輪才多好一個。
+    要一個接一個救到 pip 過為止；同一個套件救過還擋就停、最多 MAX_HEALS 個。"""
+    import importlib.util, types
+    spec = importlib.util.spec_from_file_location("update_agent_mod2", "update_agent.py")
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    req = tmp_path / "req.txt"; req.write_text("Pillow==12.3.0\nrequests==2.33.0\nxxhash==4.0.1\n", encoding="utf-8")
+    fails = ["pillow", "requests", "xxhash"]          # 依序擋三個，之後過
+    healed = []
+    def fake_pip(_req):
+        if fails:
+            return types.SimpleNamespace(returncode=1, stdout="", stderr=f"error: uninstall-no-record-file\nCannot uninstall {fails[0]} None\nno RECORD file")
+        return types.SimpleNamespace(returncode=0, stdout="ok", stderr="")
+    def fake_run(cmd, **kw):
+        healed.append(cmd[cmd.index("--no-deps") + 1]); fails.pop(0)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(mod, "_pip_install", fake_pip)
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod, "log", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "write_status", lambda *a, **k: None)
+    r = mod._pip_with_self_heal(str(req))
+    assert r.returncode == 0 and healed == ["Pillow==12.3.0", "requests==2.33.0", "xxhash==4.0.1"], healed
+    # 同一個救過還擋 → 停，不無限迴圈
+    fails[:] = ["pillow"]; healed.clear()
+    def stuck_run(cmd, **kw):
+        healed.append(cmd[cmd.index("--no-deps") + 1]); return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(mod.subprocess, "run", stuck_run)
+    r = mod._pip_with_self_heal(str(req))
+    assert r.returncode == 1 and healed == ["Pillow==12.3.0"]
+    assert "result = _pip_with_self_heal(req_file)" in repo_src("update_agent.py")
