@@ -165,3 +165,11 @@ def test_desktop_chart_guards_against_zero_or_negative_max():
     from tests.unit._srcscan import js_func_body
     chart = js_func_body(js_code_only(repo_src("frontend/tabs/finance/subviews/report.js")), "function _chart(trend) {")
     assert "if (!(max > 0)) return" in chart
+
+
+def test_desktop_register_keeps_report_banner_when_card_is_saved_too():
+    """BUG-3（polish 2026-09-17）：帳戶＋信用卡一起存，卡那段把 d 洗成 null 再 GET，GET 沒有 report_month → 入口不見。"""
+    from tests.unit._srcscan import js_func_body
+    body = js_func_body(js_code_only(repo_src("frontend/tabs/finance/subviews/register.js")), "_rg.saveAll = async (btn) => {")
+    assert "const reportMonth = d && d.report_month;" in body and "if (reportMonth) _reportBanner(reportMonth);" in body
+    assert body.index("const reportMonth") < body.index("if (card !== null)"), "要在卡那段之前留下來"

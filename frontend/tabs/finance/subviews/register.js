@@ -208,6 +208,8 @@ _rg.saveAll = async (btn) => {
         if (accounts.length || brokers.length || holdings.length) {
             d = await finFetchMine('/balance-register', { method: 'PUT', body: JSON.stringify({ date, accounts, holdings, brokers }) });
         }
+        // 月報入口只有 PUT 的回應帶 report_month（GET 沒有）：先留下來，下面重抓整包不會把它洗掉
+        const reportMonth = d && d.report_month;
         if (card !== null) {
             // 信用卡走既有那支：derive_opening_from ＝「現在實際欠多少」反推期初
             await finFetchMine('/card-summary', { method: 'PUT', body: JSON.stringify({ derive_opening_from: card }) });
@@ -217,7 +219,7 @@ _rg.saveAll = async (btn) => {
         _d = d || await finFetchMine('/balance-register');
         _render();
         // 月報（docs/MONTHLY_REPORT.md）：登記完後端已經把當月那份算好，這裡給一條路過去
-        if (d && d.report_month) _reportBanner(d.report_month);
+        if (reportMonth) _reportBanner(reportMonth);
         finToast(`已登記：${accounts.length} 個帳戶、${holdings.length} 檔持股、${brokers.length} 家券商${card !== null ? '、信用卡' : ''}`);
     } catch (e) {
         finToast('儲存失敗：' + e.message, true);
