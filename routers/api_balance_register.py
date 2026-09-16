@@ -94,13 +94,104 @@ async def get_balance_register(request: Request, entity: str = ""):
         return await _register_payload(session, ent)
 
 
+async def _register_accounts(session, ent: str, lines: list, day, date_str: str, username: str) -> None:
+    """帳戶那段：寫基準點（balance=null ＝ 取消登記），再每個帳戶留一筆對帳紀錄（同帳戶同月覆蓋）。"""
+    from sqlalchemy import select
+    from db.models import BankAccount, BankReconciliation
+    ids = [ln.id for ln in lines]
+    rows = {b.id: b for b in (await session.execute(
+        select(BankAccount).where(BankAccount.entity == ent, BankAccount.id.in_(ids)))).scalars().all()}
+    for ln in lines:
+        b = rows.get(ln.id)
+        if not b:
+            raise HTTPException(status_code=404, detail=f"帳戶不存在或不在這本帳：{ln.id}")
+        if (b.acct_kind or "bank") not in REGISTER_KINDS:
+            raise HTTPException(status_code=422, detail=f"{b.name} 不是銀行／現金帳戶，不能登記餘額")
+        # null ＝ 取消登記：兩欄一起清空，餘額回到期初＋全部流水（derive_balance 沒有基準點那條）
+        b.anchor_balance = int(ln.balance) if ln.balance is not None else None
+        b.anchor_date = day if ln.balance is not None else None
+        b.updated_at = datetime.now()
+    await session.flush()
+    # 歷史：每次登記留一筆對帳紀錄（system_balance＝帳上算到基準日的數字、diff＝還沒補的明細）
+    bal = await _balances_by_account(session, entity=ent, accounts=list(rows.values()))
+    month = day.strftime("%Y-%m")        # 不用 date[:7]：'2026-9-7' 會切成 '2026-9-'，對帳月份永遠對不上
+    existing = {r.bank_account_id: r for r in (await session.execute(
+        select(BankReconciliation).where(BankReconciliation.bank_account_id.in_(ids),
+                                         BankReconciliation.month == month))).scalars().all()}
+    for ln in lines:
+        if ln.balance is None:
+            continue
+        system = int(ln.balance) - int(bal[ln.id]["unfilled"] or 0)
+        rd = reconciliation_diff(system, int(ln.balance))
+        row = existing.get(ln.id)
+        if not row:
+            row = BankReconciliation(id=uuid.uuid4().hex, bank_account_id=ln.id, month=month,
+                                     statement_balance=0, system_balance=0, diff=0, status="diff")
+            session.add(row)
+        row.statement_balance = int(ln.balance)
+        row.system_balance = system
+        row.diff, row.status = rd["diff"], rd["status"]
+        row.note = f"登記餘額 {date_str}"
+        row.reconciled_by = username
+        row.reconciled_at = datetime.now()
+
+
+async def _register_holdings(session, holdings: list, lines: list) -> None:
+    """逐檔那段：套股數／現價／成本；給了股數或現價、且算得出股數 × 現價，就清掉手填市值。"""
+    by_id = {h.id: h for h in holdings}
+    for hl in lines:
+        h = by_id.get(hl.id)
+        if not h or _is_plug(h):
+            raise HTTPException(status_code=404, detail=f"持股不存在或不在這本帳：{hl.id}")
+        data = hl.model_dump(exclude_unset=True, exclude={"id"})
+        for k in ("shares", "last_price", "cost_total"):
+            if k in data and data[k] is not None and float(data[k]) < 0:
+                raise HTTPException(status_code=422, detail=f"{h.name} 的 {k} 不能是負數")
+        if "manual_value" in data:
+            h.manual_value = data["manual_value"]
+        for k in ("shares", "last_price", "cost_total"):
+            if data.get(k) is not None:
+                setattr(h, k, float(data[k]))
+        if data.get("last_price") is not None:
+            h.price_at = datetime.now()
+        # 給了股數或現價、而且算得出股數 × 現價 → 手填市值讓位（不然登記了股數市值卻不動）
+        if "manual_value" not in data and (data.get("shares") is not None or data.get("last_price") is not None) \
+                and h.shares and h.last_price:
+            h.manual_value = None
+        h.updated_at = datetime.now()
+    await session.flush()
+
+
+async def _register_brokers(session, ent: str, holdings: list, brokers: list, fx: float, date_str: str) -> None:
+    """券商那段：總市值 − 已拆明細 → 那家的「未拆明細」列（負的 422；沒有列且差 0 就不建）。"""
+    from db.models import FinanceHolding
+    from routers.api_finance_assets import _holding_value
+    for br in brokers:
+        name = (br.broker or "").strip()
+        plug = _plug_of(holdings, name)
+        detail = sum(_holding_value(h, fx) for h in holdings
+                     if (h.broker or "") == name and h is not plug)
+        gap = int(br.total) - detail
+        if gap < 0:
+            # 未拆明細不能是負的（證券現值會無聲變少）：總市值比已拆明細還少＝明細裡有一檔的股數或現價過時
+            raise HTTPException(status_code=422, detail=f"{name or '（未指定券商）'} 的總市值 {int(br.total):,} 比已拆明細 {detail:,} 還少，先改那家的持股股數或更新報價")
+        if plug is None:
+            if gap == 0:
+                continue
+            plug = FinanceHolding(id=uuid.uuid4().hex, entity=ent, broker=name, symbol="", name=PLUG_NAME,
+                                  currency="TWD", quote_symbol="", sort_order=9999, active=True)
+            session.add(plug)
+        plug.manual_value = gap
+        plug.note = f"登記於 {date_str}：總市值 {int(br.total):,} − 已拆明細 {detail:,}"
+        plug.updated_at = datetime.now()
+
+
 @router.put("/balance-register")
 async def put_balance_register(payload: BalanceRegisterPayload, request: Request, entity: str = ""):
     """登記餘額：帳戶寫基準點、證券戶寫「未拆明細」列、每個帳戶留一筆對帳紀錄（同帳戶同月覆蓋）。
-    只動送來的帳戶／券商；回 GET 那一整包。"""
+    只動送來的帳戶／券商；回 GET 那一整包（多一個 report_month：登記完自動產生的月報）。"""
     from sqlalchemy import select
-    from db.models import BankAccount, BankReconciliation, FinanceHolding
-    from routers.api_finance_assets import _holding_value
+    from db.models import FinanceHolding
     ent = _guard(request, entity, level="full")
     day = _parse_day(payload.date)
     if day is None:
@@ -110,91 +201,17 @@ async def put_balance_register(payload: BalanceRegisterPayload, request: Request
     factory = _factory_or_503()
     async with factory() as session:
         if payload.accounts:
-            ids = [ln.id for ln in payload.accounts]
-            rows = {b.id: b for b in (await session.execute(
-                select(BankAccount).where(BankAccount.entity == ent, BankAccount.id.in_(ids)))).scalars().all()}
-            for ln in payload.accounts:
-                b = rows.get(ln.id)
-                if not b:
-                    raise HTTPException(status_code=404, detail=f"帳戶不存在或不在這本帳：{ln.id}")
-                if (b.acct_kind or "bank") not in REGISTER_KINDS:
-                    raise HTTPException(status_code=422, detail=f"{b.name} 不是銀行／現金帳戶，不能登記餘額")
-                # null ＝ 取消登記：兩欄一起清空，餘額回到期初＋全部流水（derive_balance 沒有基準點那條）
-                b.anchor_balance = int(ln.balance) if ln.balance is not None else None
-                b.anchor_date = day if ln.balance is not None else None
-                b.updated_at = datetime.now()
-            await session.flush()
-            # 歷史：每次登記留一筆對帳紀錄（system_balance＝帳上算到基準日的數字、diff＝還沒補的明細）
-            bal = await _balances_by_account(session, entity=ent, accounts=list(rows.values()))
-            month = day.strftime("%Y-%m")        # 不用 date[:7]：'2026-9-7' 會切成 '2026-9-'，對帳月份永遠對不上
-            existing = {r.bank_account_id: r for r in (await session.execute(
-                select(BankReconciliation).where(BankReconciliation.bank_account_id.in_(ids),
-                                                 BankReconciliation.month == month))).scalars().all()}
-            for ln in payload.accounts:
-                if ln.balance is None:
-                    continue
-                r = bal[ln.id]
-                system = int(ln.balance) - int(r["unfilled"] or 0)
-                rd = reconciliation_diff(system, int(ln.balance))
-                row = existing.get(ln.id)
-                if not row:
-                    row = BankReconciliation(id=uuid.uuid4().hex, bank_account_id=ln.id, month=month,
-                                             statement_balance=0, system_balance=0, diff=0, status="diff")
-                    session.add(row)
-                row.statement_balance = int(ln.balance)
-                row.system_balance = system
-                row.diff, row.status = rd["diff"], rd["status"]
-                row.note = f"登記餘額 {payload.date}"
-                row.reconciled_by = _username(request)
-                row.reconciled_at = datetime.now()
+            await _register_accounts(session, ent, payload.accounts, day, payload.date, _username(request))
         if payload.brokers or payload.holdings:
             fx = float((load_settings().get("my_ledger") or {}).get("usd_twd") or 0)
             holdings = (await session.execute(
                 select(FinanceHolding).where(FinanceHolding.entity == ent,
                                              FinanceHolding.active.is_(True)))).scalars().all()
-            by_id = {h.id: h for h in holdings}
             # 同一家券商送兩次只算最後一次（不然第二次找不到剛建的未拆明細列，會再建一列）
             brokers = list({(b.broker or "").strip(): b for b in payload.brokers}.values())
             # 先套逐檔的股數／現價／成本，券商總市值的「未拆明細」要用更新後的已拆明細算
-            for hl in payload.holdings:
-                h = by_id.get(hl.id)
-                if not h or _is_plug(h):
-                    raise HTTPException(status_code=404, detail=f"持股不存在或不在這本帳：{hl.id}")
-                data = hl.model_dump(exclude_unset=True, exclude={"id"})
-                for k in ("shares", "last_price", "cost_total"):
-                    if k in data and data[k] is not None and float(data[k]) < 0:
-                        raise HTTPException(status_code=422, detail=f"{h.name} 的 {k} 不能是負數")
-                if "manual_value" in data:
-                    h.manual_value = data["manual_value"]
-                for k in ("shares", "last_price", "cost_total"):
-                    if data.get(k) is not None:
-                        setattr(h, k, float(data[k]))
-                if data.get("last_price") is not None:
-                    h.price_at = datetime.now()
-                # 給了股數或現價、而且算得出股數 × 現價 → 手填市值讓位（不然登記了股數市值卻不動）
-                if "manual_value" not in data and (data.get("shares") is not None or data.get("last_price") is not None) \
-                        and h.shares and h.last_price:
-                    h.manual_value = None
-                h.updated_at = datetime.now()
-            await session.flush()
-            for br in brokers:
-                name = (br.broker or "").strip()
-                plug = _plug_of(holdings, name)
-                detail = sum(_holding_value(h, fx) for h in holdings
-                             if (h.broker or "") == name and h is not plug)
-                gap = int(br.total) - detail
-                if gap < 0:
-                    # 未拆明細不能是負的（證券現值會無聲變少）：總市值比已拆明細還少＝明細裡有一檔的股數或現價過時
-                    raise HTTPException(status_code=422, detail=f"{name or '（未指定券商）'} 的總市值 {int(br.total):,} 比已拆明細 {detail:,} 還少，先改那家的持股股數或更新報價")
-                if plug is None:
-                    if gap == 0:
-                        continue
-                    plug = FinanceHolding(id=uuid.uuid4().hex, entity=ent, broker=name, symbol="", name=PLUG_NAME,
-                                          currency="TWD", quote_symbol="", sort_order=9999, active=True)
-                    session.add(plug)
-                plug.manual_value = gap
-                plug.note = f"登記於 {payload.date}：總市值 {int(br.total):,} − 已拆明細 {detail:,}"
-                plug.updated_at = datetime.now()
+            await _register_holdings(session, holdings, payload.holdings)
+            await _register_brokers(session, ent, holdings, brokers, fx, payload.date)
         await session.commit()
         out = await _register_payload(session, ent)
     # 月報（docs/MONTHLY_REPORT.md）：登記完就把當月那份算好存起來；產不出來只記 log，登記本身不受影響

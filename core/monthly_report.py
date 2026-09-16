@@ -140,6 +140,7 @@ def accounts_block(register: dict, prev: Optional[dict], month: str) -> list:
 
 
 def brokers_block(register: dict, prev: Optional[dict]) -> list:
+    """證券分券商：本月合計、上月（上一份月報同名券商）、差、未拆明細、幾檔。大的先排。"""
     prev_by = {b["broker"]: b for b in ((prev or {}).get("brokers") or [])}
     out = []
     for b in register.get("brokers") or []:
@@ -175,6 +176,7 @@ def concentration(fortress: dict) -> dict:
 
 
 def fortress_block(fortress: dict) -> dict:
+    """堡壘摘要：可撐月數與顏色、必要支出（樣本月數／手填）、六題狀態與幾綠幾黃幾紅、五層（由上到下）。"""
     tests = [{"key": t.get("key"), "title": t.get("title"), "state": t.get("state"), "verdict": t.get("verdict")}
              for t in fortress.get("tests") or []]
     cnt = {"ok": 0, "warn": 0, "bad": 0, "na": 0}
@@ -191,6 +193,7 @@ def fortress_block(fortress: dict) -> dict:
 
 
 def ladder_fire_block(fortress: dict) -> dict:
+    """財富階梯與財富自由摘要：第幾階、下一階、每月可花／現在花、達成率、是否稅前、10 年後資產。"""
     lad = fortress.get("ladder") or {}
     fire = fortress.get("fire") or {}
     pj = fortress.get("projection") or {}
@@ -208,6 +211,7 @@ def ladder_fire_block(fortress: dict) -> dict:
 
 # ── 體檢（四個面向）───────────────────────────────────────────────────
 def health_block(ft: dict, conc: dict, accounts: list, flow: dict) -> list:
+    """體檢四格：流動性（可撐月數，堡壘同一套顏色）、韌性（台海戰爭題）、集中度（單一股票穿透後）、收支紀錄（明細／登記齊不齊）。"""
     runway = ft.get("runway")
     tone = ft.get("tone") or runway_tone(runway)      # 跟堡壘同一套顏色（那頁綠的話這裡不能寫「普通」）
     if runway is None or tone == "na":
@@ -416,6 +420,7 @@ def _rule_strengths(totals: dict, ft: dict, lf: dict):
 
 def advice_block(fortress: dict, ft: dict, conc: dict, accounts: list, brokers: list, flow: dict,
                  totals: dict, lf: dict, register: dict) -> list:
+    """建議：跑一遍規則（回 None 的不出現），照急迫度 bad → warn → info → ok 排、編號。"""
     items = [x for x in (
         _rule_war(fortress, ft), _rule_layers(ft), _rule_concentration(conc), _rule_records(accounts, brokers, flow),
         _rule_card(register, ft), _rule_savings(flow, ft), _rule_receivable(totals, ft), _rule_fire(lf),
@@ -428,6 +433,7 @@ def advice_block(fortress: dict, ft: dict, conc: dict, accounts: list, brokers: 
 
 
 def todo_block(accounts: list, brokers: list, advice: list) -> list:
+    """待辦：補明細、還沒登記的帳戶、未拆證券明細、bad／warn 建議的標題（records 那條不重複列）。"""
     out = []
     unfilled = [a for a in accounts if _open_unfilled(a)]
     if unfilled:

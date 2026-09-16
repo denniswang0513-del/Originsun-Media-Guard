@@ -10,7 +10,7 @@
 import re
 
 from core.finance_logic import bank_balances_asof, day_key, derive_balance
-from tests.unit._srcscan import js_code_only, migration_sql, models_src, repo_src
+from tests.unit._srcscan import func_body, js_code_only, migration_sql, models_src, repo_src
 
 _EMOJI = re.compile("[\U0001F300-\U0001FAFF]|[✓✔✗]")
 
@@ -149,8 +149,9 @@ def test_holdings_can_be_registered_share_by_share():
     先套持股再算未拆明細；給了股數或現價且算得出股數 × 現價，就清掉手填市值。"""
     src = repo_src("routers/api_balance_register.py")
     assert 'g["holdings"].append(' in src and "value = _holding_value(h, fx)" in src and '"value_twd": value' in src
-    assert "for hl in payload.holdings:" in src
-    assert src.index("for hl in payload.holdings:") < src.index("for br in brokers:"), "先套持股再算未拆明細（brokers 是去重後的清單）"
+    assert "for hl in lines:" in func_body(src, "async def _register_holdings(")
+    put = func_body(src, "async def put_balance_register(")
+    assert put.index("await _register_holdings(") < put.index("await _register_brokers("), "先套持股再算未拆明細（brokers 是去重後的清單）"
     assert "h.manual_value = None" in src and "h.price_at = datetime.now()" in src
     sch = repo_src("core/schemas/_finance.py")
     assert "class BalanceRegisterHolding(BaseModel):" in sch and "holdings: List[BalanceRegisterHolding] = []" in sch
@@ -211,9 +212,9 @@ def test_report_month_window_is_naive_like_the_cash_entries():
 def test_register_and_generate_reject_the_edge_inputs():
     """BUG-6（polish 2026-09-17）：對帳月份用 strftime；同券商去重；未拆明細不能是負的；月報只能產生本月。"""
     from tests.unit._srcscan import func_body
-    put = func_body(repo_src("routers/api_balance_register.py"), "async def put_balance_register(")
-    assert 'month = day.strftime("%Y-%m")' in put and "payload.date[:7]" not in put
-    assert "brokers = list({(b.broker or \"\").strip(): b for b in payload.brokers}.values())" in put
-    assert "if gap < 0:" in put and "還少，先改那家的持股股數或更新報價" in put
+    reg = repo_src("routers/api_balance_register.py")
+    assert 'month = day.strftime("%Y-%m")' in reg and "payload.date[:7]" not in reg
+    assert "brokers = list({(b.broker or \"\").strip(): b for b in payload.brokers}.values())" in reg
+    assert "if gap < 0:" in reg and "還少，先改那家的持股股數或更新報價" in reg
     gen = func_body(repo_src("routers/api_monthly_report.py"), "async def generate_report(")
     assert "if month != this_month:" in gen and "月報只能用現在的數字產生本月" in gen

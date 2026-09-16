@@ -1413,6 +1413,12 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   證券戶沒有新欄位：一家券商一個總市值，差額寫進那家的「未拆明細」持股列（symbol 空），拆明細後再登記一次就歸零。
   信用卡不走這裡（既有 `PUT /card-summary derive_opening_from` 就是「現在實際欠多少」）。端點只寫 DB、不碰 settings.json（NAS 也掛）。
   端點在獨立檔 `routers/api_balance_register.py`：`api_finance.py` 已到 2,000 行的單次讀取上限，別再往裡面加端點。
+  /polish（2026-09-17）學到三條：① **手機 `shell.js` 的 `mfetch` 自己會 `JSON.stringify(opts.body)`**，body 傳物件；桌機 `finFetch` 相反
+  （原樣丟給 fetch，要自己 stringify）。再包一層就是送字串字面值 → pydantic 422，畫面只看到「Input should be a valid dictionary」。
+  ② **timestamptz 的日界線**：`_parse_day` 存的是台北 00:00，讀回是前一天 16:00Z —— 要當「哪一天」用一律先過 `local_day`
+  （`day_key`、`_bank_dict`），本月視窗用 naive 邊界（`api_finance._month_window`），不要 `tzinfo=timezone.utc`（1 日的明細會掉到上個月）。
+  ③ 一個請求裡 `_balances_by_account`／`_card_outstanding` 各算一次：把手上已有的帳戶列（`accounts=`）與卡費（`card=`）傳進去，
+  不然登記一次會掃五次流水表、三次整張收支表。
 - **私帳月報（docs/MONTHLY_REPORT.md，2026-09-17）**：`core/monthly_report.py::build_report` 是純函式，吃的是別的模組**已經算好**的東西
   （堡壘 payload、登記餘額 payload、資產儀表板的桶、本月收支、淨值快照、上一份月報）—— 🔴 不要在月報裡再算一次餘額／必要支出／階梯，
   數字對不上時改來源不改月報。建議（advice）是**規則**：每條有門檻（`CONCENTRATION_WARN`、`RECEIVABLE_MONTHS`…），回 None 就不出現；
