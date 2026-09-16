@@ -98,6 +98,21 @@ NEED_BOOKS = ("家用", "個人", "貸款繳款")
 NEED_SKIP_ITEMS = ("主動收入", "被動收入", "投資支出", "借款支出", "其他支出")
 
 
+def _clamped(raw_section, defaults: dict, bounds: dict, int_keys=()) -> dict:
+    """設定的一段 → 補齊預設、逐鍵夾在 bounds 裡（war／care／growth／fire 四段都是這個形狀）。
+    不認得的鍵丟掉；不是數字／NaN／Infinity 的沿用預設（見 _num）。"""
+    out = dict(defaults)
+    for k, v in (raw_section or {}).items():
+        if k not in defaults:
+            continue
+        n = _num(v, as_int=k in int_keys)
+        if n is None:
+            continue
+        lo, hi = bounds[k]
+        out[k] = max(lo, min(hi, n))
+    return out
+
+
 def _num(v, as_int: bool = False):
     """設定值 → 數字；不是數字、NaN、Infinity 一律回 None（讓呼叫端沿用預設）。
     🔴 `int(float("Infinity"))` 丟的是 **OverflowError**，不是 ValueError ——
@@ -186,36 +201,15 @@ def normalize_settings(raw) -> dict:
         if n in DEFAULT_TARGET_MONTHS and m >= 0:
             targets[n] = min(m, MAX_TARGET_MONTHS)      # 夾住（同 war 的做法），不是丟掉使用者填的
     # 假設要有上下限：months=0 會讓「撐得過」變成必然、fx=0 會讓美元資產整批歸零 —— 兩個都是無聲的假答案
-    war = dict(DEFAULT_WAR)
-    bounds = {"months": (1, 120), "bank_freeze_weeks": (0, 520), "tw_drop": (0.0, 1.0), "us_drop": (0.0, 1.0), "fx": (0.1, 10.0)}
-    for k, v in (raw.get("war") or {}).items():
-        if k not in DEFAULT_WAR:
-            continue
-        n = _num(v, as_int=k in ("months", "bank_freeze_weeks"))
-        if n is None:
-            continue
-        lo, hi = bounds[k]
-        war[k] = max(lo, min(hi, n))
-    care = dict(DEFAULT_CARE)
-    care_bounds = {"monthly": (0, 1_000_000), "years": (1, 40), "insurance_monthly": (0, 1_000_000)}
-    for k, v in (raw.get("care") or {}).items():
-        if k not in DEFAULT_CARE:
-            continue
-        n = _num(v, as_int=True)
-        if n is None:
-            continue
-        lo, hi = care_bounds[k]
-        care[k] = max(lo, min(hi, n))
-    growth = dict(DEFAULT_GROWTH)
-    growth_bounds = {"rate": (-0.5, 0.5), "inflation": (0.0, 0.5), "annual_add": (0, 100_000_000)}
-    for k, v in (raw.get("growth") or {}).items():
-        if k not in DEFAULT_GROWTH:
-            continue
-        n = _num(v, as_int=k == "annual_add")
-        if n is None:
-            continue
-        lo, hi = growth_bounds[k]
-        growth[k] = max(lo, min(hi, n))
+    war = _clamped(raw.get("war"), DEFAULT_WAR,
+                   {"months": (1, 120), "bank_freeze_weeks": (0, 520), "tw_drop": (0.0, 1.0),
+                    "us_drop": (0.0, 1.0), "fx": (0.1, 10.0)}, int_keys=("months", "bank_freeze_weeks"))
+    care = _clamped(raw.get("care"), DEFAULT_CARE,
+                    {"monthly": (0, 1_000_000), "years": (1, 40), "insurance_monthly": (0, 1_000_000)},
+                    int_keys=DEFAULT_CARE)
+    growth = _clamped(raw.get("growth"), DEFAULT_GROWTH,
+                      {"rate": (-0.5, 0.5), "inflation": (0.0, 0.5), "annual_add": (0, 100_000_000)},
+                      int_keys=("annual_add",))
     ladder = dict(DEFAULT_LADDER)
     raw_l = raw.get("ladder") or {}
     th = raw_l.get("thresholds")
@@ -237,18 +231,11 @@ def normalize_settings(raw) -> dict:
             n = _num((raw["plan"])[k], as_int=True)
             if n is not None:
                 plan[k] = max(lo, min(hi, n))
-    fire = dict(DEFAULT_FIRE)
-    fire_bounds = {"withdrawal_rate": (0.01, 0.10), "birth_year": (0, 2100), "until_age": (40, 120),
-                   "extra_monthly": (0, 10_000_000), "extra_from_age": (0, 120),
-                   "self_pay_monthly": (0, 1_000_000), "tax_monthly": (0, 10_000_000)}
-    for k, v in (raw.get("fire") or {}).items():
-        if k not in DEFAULT_FIRE:
-            continue
-        n = _num(v, as_int=k != "withdrawal_rate")
-        if n is None:
-            continue
-        lo, hi = fire_bounds[k]
-        fire[k] = max(lo, min(hi, n))
+    fire = _clamped(raw.get("fire"), DEFAULT_FIRE,
+                    {"withdrawal_rate": (0.01, 0.10), "birth_year": (0, 2100), "until_age": (40, 120),
+                     "extra_monthly": (0, 10_000_000), "extra_from_age": (0, 120),
+                     "self_pay_monthly": (0, 1_000_000), "tax_monthly": (0, 10_000_000)},
+                    int_keys=tuple(k for k in DEFAULT_FIRE if k != "withdrawal_rate"))
     prop = dict(DEFAULT_PROPERTY)
     raw_p = raw.get("property") or {}
     n = _num(raw_p.get("value") or 0, as_int=True)
@@ -602,11 +589,12 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     current_rate = spend * 12 / float(financial)
     fi25, fi33 = spend * 12 * 25, spend * 12 * 100 / 3
     r, infl = float(growth["rate"]), float(growth["inflation"])
-    runs_out, left = fire_simulate(financial, spend, r, infl, horizon, fire["extra_monthly"], extra_from)
-    runs_out0, _ = fire_simulate(financial, spend, 0.0, infl, horizon, fire["extra_monthly"], extra_from)
+    def sim(rate, **kw):
+        return fire_simulate(financial, spend, rate, infl, horizon, fire["extra_monthly"], extra_from, **kw)
+    runs_out, left = sim(r)
+    runs_out0, _ = sim(0.0)
     # 真正會咬人的不是平均報酬，是**前十年的順序**：同樣的平均，先跌後漲會把錢提早花完
-    runs_out_shock, _ = fire_simulate(financial, spend, r, infl, horizon, fire["extra_monthly"], extra_from,
-                                      shock_years=FIRE_SHOCK_YEARS, shock_rate=0.0)
+    runs_out_shock, _ = sim(r, shock_years=FIRE_SHOCK_YEARS, shock_rate=0.0)
     # 🔴 扣掉預留，跟同一頁上面的可撐月數同口徑 —— 不扣的話兩個數字會互相矛盾
     cash_years = round(max(0.0, float(cash3) - float(earmark_total or 0)) / spend / 12, 1)
     end_txt = f"{int(fire['until_age'])} 歲" if age is not None else f"第 {horizon} 年"
@@ -640,7 +628,7 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
         **base, "current_rate": round(current_rate, 4),
         "fi25": _m(fi25), "fi33": _m(fi33), "ratio25": round(float(financial) / fi25, 2), "ratio33": round(float(financial) / fi33, 2),
         "runs_out_year": runs_out, "runs_out_age": (age + runs_out - 1) if (age is not None and runs_out) else None,
-        "left_at_end": left, "runs_out_year_zero": runs_out0, "runs_out_year_shock": runs_out_shock,
+        "runs_out_year_zero": runs_out0, "runs_out_year_shock": runs_out_shock,
         "cash_years": cash_years, "state": st, "verdict": vd,
         "lines": [["每月支出（含不工作後自付的健保、國保）", _m(spend), "twd"],
                   ["你現在的花法對應提領率", round(current_rate * 100, 2), "pct"],
@@ -668,10 +656,9 @@ def _ladder_block(have: dict, settings: dict, liabilities: dict) -> dict:
         "liabilities": {"total": _m(debt), **{k: _m(v) for k, v in liabilities.items()}},
         "property": {"value": _m(prop), "note": settings["property"]["note"]},
         "financial": _m(sum(have.values())),
-        "percentile": percentile_note(net, ladder),
+        "percentile": percentile_note(net, ladder),      # 階梯的設定在 payload["settings"]["ladder"]，這裡不重複一份
         "plan": {**plan, **plan_result(have[5], target, plan["target_years"], growth)},
         "focus": effort_focus(have[5], growth),
-        "settings": ladder,
     }
 
 

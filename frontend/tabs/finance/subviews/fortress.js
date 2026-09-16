@@ -198,7 +198,6 @@ function _injectCss() {
 .ft .fire-k.on { border-color: #86efac; background: #1f3a30; }
 .ft .fire-k .t { font-size: 11.5px; color: #9ca3af; } .ft .fire-k .v { font-size: 18px; font-weight: 600; color: #eee; margin-top: 2px; } .ft .fire-k .s { font-size: 11px; color: #6b7280; margin-top: 2px; }
 .ft .fire-lines { margin-top: 14px; padding-top: 10px; border-top: 1px dashed #3a3a3a; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 24px; }
-.ft .fire-lines .line { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: #9ca3af; padding: 3px 0; }
 .ft .fire-lines .line span:last-child { color: #e0e0e0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ft .ft-strip.fire .verdict { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #3a3a3a; font-size: 13.5px; line-height: 1.7; }
 @media (max-width: 900px) { .ft .fire-head { grid-template-columns: 1fr; } .ft .fire-lines { grid-template-columns: 1fr; } }
@@ -470,7 +469,7 @@ function _ladder(d) {
     const rows = [...L.rungs].reverse().map((r) => `
         <div class="lad-rung${r.you ? ' you' : ''}" style="width:${58 + r.no * 7}%">
             <div class="no">${fmtNum(r.no)}</div>
-            <div class="mid"><div class="nm">${esc(r.name)}<span>${esc(r.desc)}</span>${r.you ? '<b class="here">你在這裡</b>' : ''}</div>
+            <div><div class="nm">${esc(r.name)}<span>${esc(r.desc)}</span>${r.you ? '<b class="here">你在這裡</b>' : ''}</div>
                 <div class="rg">${money(r.floor)} – ${money(r.ceiling)}${r.you ? `　·　你 <span class="ft-num">${fmtWan(L.net_worth)}</span>，這階走了 ${fmtNum(L.pct_in_rung)}%` : ''}</div></div>
             <div class="free">不用想就能花<b class="ft-num">${r.free_to == null ? fmtNum(r.free_from) + ' 元以上' : fmtNum(r.free_from) + '–' + fmtNum(r.free_to) + ' 元'}</b></div>
         </div>`).join('');
@@ -495,7 +494,7 @@ function _ladder(d) {
             <div class="line"><span>房產（手填估值${prop.note ? '：' + esc(prop.note) : ''}）</span><span class="ft-num">$${fmtNum(prop.value)}</span></div>
             <div class="line"><span>負債（卡債＋貸款剩餘本金）</span><span class="ft-num">$${fmtNum(lia.total)}</span></div>
             <div class="ft-war" style="margin:8px 0 0;">
-                <label>房產估值（沒有就留 0）<input class="crm-input" id="ft-prop-value" type="number" min="0" step="100000" value="${fmtNum(prop.value || 0).replace(/,/g, '')}"></label>
+                <label>房產估值（沒有就留 0）<input class="crm-input" id="ft-prop-value" type="number" min="0" step="100000" value="${Number(prop.value) || 0}"></label>
                 <label>備註<input class="crm-input" id="ft-prop-note" type="text" maxlength="80" value="${esc(prop.note || '')}" placeholder="例：台北自住"></label>
                 <div class="full"><button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finFortress.saveProperty(this)">存房產</button>
                     <span class="ft-src" style="align-self:center;">只算進階梯的淨值；不進五層、不進可撐月數（房子不是能拿來付帳的錢）</span></div>
@@ -558,12 +557,12 @@ function _fire(d) {
         <div class="verdict"><span class="pill ${st}">${STATE_PILL[st]}</span> ${esc(f.verdict || '')}</div>
         <div class="ft-war" style="margin-top:12px;">
             <label>提領率 %<input class="crm-input" id="ft-f-rate" type="number" min="1" max="10" step="0.25" value="${fmtPctInput(cfg.withdrawal_rate ?? 0.035)}"></label>
-            <label>出生年<input class="crm-input" id="ft-f-birth" type="number" min="1900" max="2100" step="1" value="${fmtNum(cfg.birth_year || 0).replace(/,/g, '')}"></label>
+            <label>出生年<input class="crm-input" id="ft-f-birth" type="number" min="1900" max="2100" step="1" value="${Number(cfg.birth_year) || 0}"></label>
             <label>撐到幾歲<input class="crm-input" id="ft-f-until" type="number" min="40" max="120" step="1" value="${fmtNum(cfg.until_age || 90)}"></label>
-            <label>退休後每月其他收入（勞保年金、租金）<input class="crm-input" id="ft-f-extra" type="number" min="0" step="1000" value="${fmtNum(cfg.extra_monthly || 0).replace(/,/g, '')}"></label>
+            <label>退休後每月其他收入（勞保年金、租金）<input class="crm-input" id="ft-f-extra" type="number" min="0" step="1000" value="${Number(cfg.extra_monthly) || 0}"></label>
             <label>從幾歲開始<input class="crm-input" id="ft-f-from" type="number" min="0" max="120" step="1" value="${fmtNum(cfg.extra_from_age || 65)}"></label>
-            <label>不工作多出來的每月固定支出（健保、國保）<input class="crm-input" id="ft-f-self" type="number" min="0" step="100" value="${fmtNum(cfg.self_pay_monthly ?? 2155).replace(/,/g, '')}"></label>
-            <label>每月稅與補充保費（估）<input class="crm-input" id="ft-f-tax" type="number" min="0" step="1000" value="${fmtNum(cfg.tax_monthly || 0).replace(/,/g, '')}"></label>
+            <label>不工作多出來的每月固定支出（健保、國保）<input class="crm-input" id="ft-f-self" type="number" min="0" step="100" value="${Number(cfg.self_pay_monthly ?? 2155)}"></label>
+            <label>每月稅與補充保費（估）<input class="crm-input" id="ft-f-tax" type="number" min="0" step="1000" value="${Number(cfg.tax_monthly) || 0}"></label>
             <div class="full"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finFortress.saveFire(this)">重算</button>
                 <span class="ft-src" style="align-self:center;">報酬率與通膨沿用「資產預期成長」那段的假設；每月支出沿用「必要支出」</span></div>
         </div>
@@ -593,7 +592,7 @@ function _growth(d) {
     <div class="ft-war" style="margin-top:10px;max-width:520px;">
         <label>年報酬 %<input class="crm-input" id="ft-g-rate" type="number" step="0.5" value="${fmtPctInput(g.rate)}"></label>
         <label>通膨 %<input class="crm-input" id="ft-g-infl" type="number" min="0" step="0.5" value="${fmtPctInput(g.inflation)}"></label>
-        <label>每年再投入<input class="crm-input" id="ft-g-add" type="number" min="0" step="10000" value="${fmtNum(g.annual_add || 0).replace(/,/g, '')}"></label>
+        <label>每年再投入<input class="crm-input" id="ft-g-add" type="number" min="0" step="10000" value="${Number(g.annual_add) || 0}"></label>
         <div class="full"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finFortress.saveGrowth(this)">重算</button>
             <span class="ft-src" style="align-self:center;">起點是現在的第 5 層 ${fmtWan(g.base)}；報酬與通膨都是假設，不是保證。</span></div>
     </div>`;

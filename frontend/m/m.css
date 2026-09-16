@@ -217,9 +217,9 @@
   .ft-big { display:flex; align-items:baseline; gap:8px; }
   .ft-big .n { font-size:40px; font-weight:700; line-height:1.05; color:#fff; font-variant-numeric:tabular-nums; }
   .ft-big .u { font-size:15px; color:var(--sub); }
-  .ft-big .n.g, .ft-layer .g { color:var(--ok); }
+  .ft-big .n.g { color:var(--ok); }
   .ft-big .n.a, .ft-layer .a { color:var(--warn); }
-  .ft-big .n.r, .ft-layer .r { color:var(--bad); }
+  .ft-big .n.r { color:var(--bad); }
   /* 🔴 scope 住：`.lg-sub .num` 沒前綴的話，其他六頁任何 .lg-sub 裡的 .num 都會被染色 */
   .ft-card .num, #tab-fortress .num { font-variant-numeric:tabular-nums; color:var(--ink); }
   .ft-warn { margin-bottom:10px; }

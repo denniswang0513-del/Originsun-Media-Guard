@@ -145,7 +145,15 @@ async def _accounts(session, ent: str) -> tuple:
     return out, warnings
 
 
-async def _auto_earmarks(session, ent: str, today: date) -> list:
+async def _card_outstanding(ent: str) -> int:
+    """信用卡未繳。🔴 一個請求只算一次：_card_numbers 會自己開 session 掃整張收支表，
+    而預留清單與負債兩邊都要用它 —— 各算一次等於每次開頁多掃一遍全表。"""
+    from routers.api_finance_card import _card_cfg, _card_numbers, _card_view
+    cfg = _card_cfg(ent)
+    return max(0, int(_card_view(cfg, await _card_numbers(ent, cfg)).get("outstanding") or 0))
+
+
+async def _auto_earmarks(session, ent: str, today: date, card: int) -> list:
     """自動帶入的預留：貸款該付的那幾期（逾期全留＋未來最近一期，見 pick_loan_dues）＋信用卡目前欠款（>0 才列）。"""
     out = []
     horizon = datetime(today.year, today.month, today.day, tzinfo=timezone.utc) + timedelta(days=LOAN_HORIZON_DAYS)
@@ -161,20 +169,14 @@ async def _auto_earmarks(session, ent: str, today: date) -> list:
         p, name = by_key[(loan_id, due)]
         out.append({"id": f"loan:{p.id}", "label": f"{name} {'逾期未繳' if overdue else '下一期'}", "amount": amount,
                     "due_date": due, "source": "loan", "source_ref": loan_id, "paid": False, "note": ""})
-    from routers.api_finance_card import _card_cfg, _card_numbers, _card_view
-    cfg = _card_cfg(ent)
-    outstanding = int(_card_view(cfg, await _card_numbers(ent, cfg)).get("outstanding") or 0)
-    if outstanding > 0:
-        out.append({"id": "card:outstanding", "label": "信用卡目前欠款", "amount": outstanding, "due_date": "",
+    if card > 0:
+        out.append({"id": "card:outstanding", "label": "信用卡目前欠款", "amount": card, "due_date": "",
                     "source": "card", "source_ref": "", "paid": False, "note": ""})
     return out
 
 
-async def _liabilities(session, ent: str) -> dict:
+async def _liabilities(session, ent: str, card: int) -> dict:
     """負債：信用卡未繳＋貸款剩餘本金（未繳期別的本金合計）。財富階梯的淨值要扣掉它們。"""
-    from routers.api_finance_card import _card_cfg, _card_numbers, _card_view
-    cfg = _card_cfg(ent)
-    card = max(0, int(_card_view(cfg, await _card_numbers(ent, cfg)).get("outstanding") or 0))
     loan = int((await session.execute(
         select(fn.coalesce(fn.sum(FinanceLoanPayment.principal_due), 0))
         .select_from(FinanceLoanPayment)
@@ -215,9 +217,10 @@ async def _payload(ent: str) -> dict:
     factory = _factory_or_503()
     async with factory() as session:
         accounts, warnings = await _accounts(session, ent)
-        earmarks = await _auto_earmarks(session, ent, today) + await _manual_earmarks(session, ent)
+        card = await _card_outstanding(ent)            # 一次算完，兩邊共用
+        earmarks = await _auto_earmarks(session, ent, today, card) + await _manual_earmarks(session, ent)
         need, need_months = await _monthly_need_auto(session, ent, today)
-        liabilities = await _liabilities(session, ent)
+        liabilities = await _liabilities(session, ent, card)
     out = build(accounts, earmarks, need, _load_cfg(ent), today.isoformat(),
                 need_months=need_months, warnings=warnings, liabilities=liabilities)
     out["entity"] = ent
