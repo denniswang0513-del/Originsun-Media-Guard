@@ -97,8 +97,9 @@ _SRC = repo_src("routers/api_fortress.py")
 
 
 def test_every_endpoint_requires_the_ledger_in_full():
+    """守衛集中在 _guard（見 test_endpoints_are_pinned_to_the_private_ledger）；每支端點都要走它。"""
     for fn in ("async def get_fortress(", "async def put_settings(", "async def add_earmark(", "async def edit_earmark(", "async def delete_earmark("):
-        assert 'require_entity(request, entity, level="full")' in code_only(func_body(_SRC, fn)), fn
+        assert "_guard(request, entity)" in code_only(func_body(_SRC, fn)), fn
 
 
 def test_router_reuses_existing_money_rules_and_mounts_everywhere():
@@ -141,3 +142,38 @@ def test_router_date_helpers():
             raise AssertionError(f"{bad} 應該 422")
     assert _fmt_day(None) == "" and _fmt_day(datetime(2026, 9, 16, tzinfo=timezone.utc)) == "2026-09-16"
     assert _today_tw().isoformat() >= "2026-01-01", "以台北為準（NAS 容器跑 UTC）"
+
+
+# ── /polish 階段一：私密性與守衛 ────────────────────────────────────────
+def test_fortress_settings_never_reach_the_anonymous_settings_endpoint():
+    """🔴 `/api/settings/load` 是**匿名**端點（routers/api_system.py，master 走 Cloudflare 對外）。
+    堡壘的設定裡有 owner 每月必要支出、實際銀行帳戶 id 與分層 —— 私帳靠 finance_mine 指名制擋住的東西，
+    不能從那條路整包流出去。設定視窗不顯示這段，堡壘頁自己的 GET 也帶著它，全抹掉沒有副作用。"""
+    from routers.api_system import _redact_settings
+    s = {"finance": {"fortress": {"mine": {"monthly_need_override": 80000,
+                                           "account_layers": {"acct-abc": 3}}},
+                     "baseline_month": "2026-01"}}
+    for admin in (False, True):
+        fin = _redact_settings(s, admin=admin).get("finance") or {}
+        assert "fortress" not in fin, f"admin={admin} 也不該回（堡壘頁不靠這條路拿設定）"
+        assert fin.get("baseline_month") == "2026-01", "同一把 key 底下其他子鍵照舊"
+
+
+def test_endpoints_are_pinned_to_the_private_ledger():
+    """entity 是 query 參數、`require_entity` 空字串會落到 parent —— 沒鎖的話，
+    有帳務鑰匙但沒有 finance_mine 的管理員可以拿到一個「母公司版堡壘」，還會把 finance.fortress.parent 寫進設定。
+    這功能整個是私帳的（docs/FORTRESS_PLAN.md §0.3），所以一律鎖 mine。"""
+    src = repo_src("routers/api_fortress.py")
+    guard = code_only(func_body(src, "def _guard(request: Request, entity: str = \"\") -> str:"))
+    assert "MINE" in guard and "status_code=422" in guard, "entity 不是 mine 就 422，不要靜默落到 parent"
+    assert 'require_entity(request, MINE, level="full")' in guard
+    for fn in ("async def get_fortress(", "async def put_settings(", "async def add_earmark(",
+               "async def edit_earmark(", "async def delete_earmark("):
+        assert "_guard(request, entity)" in code_only(func_body(src, fn)), fn
+
+
+def test_settings_write_is_not_mounted_on_the_nas():
+    """NAS 那台的 settings.json 是**唯讀副本**（publish 會整份覆蓋回去）。
+    在那邊存分層會靜默消失，所以那支路徑不掛上去；預留清單（寫 DB）照掛。"""
+    office = repo_src("main_office.py")
+    assert '"/api/v1/finance/fortress/settings"' in office

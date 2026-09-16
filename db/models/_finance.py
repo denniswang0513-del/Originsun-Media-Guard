@@ -378,7 +378,9 @@ class FinanceFortressEarmark(Base):
     __tablename__ = "finance_fortress_earmarks"
 
     id = Column(String(32), primary_key=True)
-    entity = Column(String(16), nullable=False, server_default="mine", index=True)
+    # server_default 照兄弟表一律 "parent"（tests/unit/test_ledger_entity.py 對七張錢表釘的規矩）：
+    # 漏帶 entity 的插入要掉進母公司帳、不能靜默掉進私帳，不然它會混進堡壘的預留合計。
+    entity = Column(String(16), nullable=False, server_default="parent", index=True)
     label = Column(String(128), nullable=False)
     amount = Column(Integer, nullable=False, default=0)
     due_date = Column(DateTime(timezone=True), nullable=True)

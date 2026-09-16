@@ -75,6 +75,9 @@ _DROP_PREFIXES = (
     "/api/v1/auth/users",
     "/api/v1/auth/rbac/templates",
     "/api/v1/auth/denials",
+    # 堡壘的分層／目標／戰爭假設存在 settings.json，而這台的那份是**唯讀副本**（publish 會整份覆蓋回去）：
+    # 在這裡存會靜默消失。預留清單（寫 DB）照掛 —— 手機在外面要記得下來。
+    "/api/v1/finance/fortress/settings",
 )
 
 # 🔴 **刻意接受的漂移**：`/auth/register`、`/auth/reset`、`/auth/google/login` 有掛，

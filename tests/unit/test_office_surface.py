@@ -194,10 +194,16 @@ def test_drop_prefixes_actually_drops_something():
     一條都比不中 —— 排除照樣「成功」，帳號管理端點就整組上線了。所以除了斷言那些路徑
     不在 app 上（上面那條），也要確認它們**在來源 router 上真的存在**。
     """
-    from routers.api_auth import router as auth_router
-    from main_office import _DROP_PREFIXES
+    import importlib
 
-    src_paths = {getattr(r, "path", "") or "" for r in auth_router.routes}
+    from main_office import _DROP_PREFIXES, _ROUTER_MODULES
+
+    # 掛上去的每一支 router 的路徑聯集 —— 排除清單已經不只有帳號管理那幾條
+    #（2026-09-16 起還有 /finance/fortress/settings：NAS 的 settings.json 是唯讀副本）
+    src_paths = set()
+    for name in _ROUTER_MODULES:
+        mod = importlib.import_module(f"routers.{name}")
+        src_paths |= {getattr(r, "path", "") or "" for r in getattr(mod, "router").routes}
     for pref in _DROP_PREFIXES:
         assert any(p.startswith(pref) for p in src_paths), (
             f"_DROP_PREFIXES 的 {pref!r} 在 api_auth 上一條都比不中 —— "

@@ -4,7 +4,7 @@
 規則全在 core/fortress_logic.py；這裡只負責把私帳現有的數字撈出來：
   帳戶餘額＝期初＋掛帳流水（同 /bank-accounts 與 /assets/overview 那條式子）、證券現值（同 _holding_value）、
   信用卡欠款（同 /card-summary）、貸款下一期（同 /loans/upcoming 的查詢）、必要支出＝近 6 個月家用＋個人固定支出的月平均。
-守衛：每支 `require_entity(request, entity, level="full")`（私帳＝finance_mine 指名制）。
+守衛：每支 `_guard`＝`require_entity(request, "mine", level="full")`（私帳＝finance_mine 指名制；entity 一律鎖 mine，空字串會落到 parent）。
 跟 NAS office-api 一起掛（main_office._ROUTER_MODULES）：主控關機手機照看、照記預留。沒有排程、不 import notifier。
 """
 from __future__ import annotations
@@ -30,6 +30,8 @@ except ImportError:  # DB 套件不存在的 agent 環境 — 同其他 router �
     pass
 
 router = APIRouter(prefix="/api/v1/finance/fortress", tags=["私帳堡壘"])
+#: 這功能整個是私帳的（docs/FORTRESS_PLAN.md §0.3）—— entity 一律鎖 mine
+MINE = "mine"
 _TW = ZoneInfo("Asia/Taipei")
 #: 貸款下一期往前看多遠（只取每筆貸款最近的一期）
 LOAN_HORIZON_DAYS = 400
@@ -58,6 +60,15 @@ class FortressSettingsPatch(BaseModel):
     targets: Optional[dict] = None
     monthly_need_override: Optional[int] = None
     war: Optional[dict] = None
+
+
+def _guard(request: Request, entity: str = "") -> str:
+    """一律鎖私帳。🔴 不能直接把 query 的 entity 丟給 require_entity：空字串會落到 parent
+    （core/ledger.require_entity），於是有帳務鑰匙但沒有 finance_mine 的管理員會拿到一個
+    「母公司版堡壘」，還會把 finance.fortress.parent 寫進設定 —— 那是沒人要的東西。"""
+    if entity and entity != MINE:
+        raise HTTPException(status_code=422, detail="堡壘只有私帳有")
+    return require_entity(request, MINE, level="full")
 
 
 def _today_tw() -> date:
@@ -181,21 +192,21 @@ async def _payload(ent: str) -> dict:
 # ── 端點 ──────────────────────────────────────────────────────────
 @router.get("")
 async def get_fortress(request: Request, entity: str = ""):
-    ent = require_entity(request, entity, level="full")
+    ent = _guard(request, entity)
     return await _payload(ent)
 
 
 @router.put("/settings")
 async def put_settings(payload: FortressSettingsPatch, request: Request, entity: str = ""):
     """帳戶分層／旗標、證券層別、目標倍數、必要支出覆寫、戰爭假設。桌機改；回整頁。"""
-    ent = require_entity(request, entity, level="full")
+    ent = _guard(request, entity)
     _save_cfg(ent, merge_settings(_load_cfg(ent), payload.model_dump(exclude_unset=True)))
     return await _payload(ent)
 
 
 @router.post("/earmarks")
 async def add_earmark(payload: EarmarkPayload, request: Request, entity: str = ""):
-    ent = require_entity(request, entity, level="full")
+    ent = _guard(request, entity)
     factory = _factory_or_503()
     async with factory() as session:
         session.add(FinanceFortressEarmark(id=uuid.uuid4().hex, entity=ent, label=payload.label.strip(),
@@ -207,7 +218,7 @@ async def add_earmark(payload: EarmarkPayload, request: Request, entity: str = "
 
 @router.put("/earmarks/{earmark_id}")
 async def edit_earmark(earmark_id: str, payload: EarmarkPatch, request: Request, entity: str = ""):
-    ent = require_entity(request, entity, level="full")
+    ent = _guard(request, entity)
     factory = _factory_or_503()
     data = payload.model_dump(exclude_unset=True)
     async with factory() as session:
@@ -231,7 +242,7 @@ async def edit_earmark(earmark_id: str, payload: EarmarkPatch, request: Request,
 
 @router.delete("/earmarks/{earmark_id}")
 async def delete_earmark(earmark_id: str, request: Request, entity: str = ""):
-    ent = require_entity(request, entity, level="full")
+    ent = _guard(request, entity)
     factory = _factory_or_503()
     async with factory() as session:
         row = (await session.execute(select(FinanceFortressEarmark).where(
