@@ -210,3 +210,49 @@ def test_sick_leave_can_be_offset_by_credits_per_rule():
     assert 'sick_offset = (any(t.get("kind") == "病假" and t.get("take")' in svc
     js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
     assert "d.sick_offset" in js
+
+
+def test_sick_leave_over_one_day_must_be_offset_when_credits_exist():
+    """owner 2026-09-16「病假兩天要有一天扣的是特休或補假」：病假超過 1 天，第 2 天起要用特休／補休折抵（總時數的一半），
+    有額度卻沒勾就擋；沒額度或只請 1 天不要求。"""
+    from core.leave_logic import fit_items, sick_offset_required
+    sick = {"id": "type:病假", "kind": "病假", "credit_id": None, "available": 240.0}
+    te = {"id": "c1", "kind": "特休", "credit_id": "c1", "available": 40.0}
+    # 兩天只挑病假、手上有 40h 特休 → 要折抵 8h、目前 0 → 擋
+    takes, _ = fit_items([sick], 16)
+    assert sick_offset_required(16, takes, 40.0) == (8.0, 0.0)
+    # 勾了特休 → 8h 扣到特休 → 過
+    takes, _ = fit_items([sick, te], 16)
+    assert sick_offset_required(16, takes, 40.0) == (8.0, 8.0)
+    # 一天以內不要求
+    takes, _ = fit_items([sick], 8)
+    assert sick_offset_required(8, takes, 40.0) == (0.0, 0.0)
+    # 沒有任何特休／補休額度 → 不要求（照病假半薪）
+    takes, _ = fit_items([sick], 16)
+    assert sick_offset_required(16, takes, 0.0) == (0.0, 0.0)
+    # 額度不夠一半：只要求到手上有的（4h），勾了就過
+    small = dict(te, available=4.0)
+    takes, _ = fit_items([sick, small], 24)
+    assert sick_offset_required(24, takes, 4.0) == (4.0, 4.0)
+    # 沒挑病假不管
+    takes, _ = fit_items([te], 16)
+    assert sick_offset_required(16, takes, 40.0) == (0.0, 0.0)
+    svc = repo_src("services/leave_application.py")
+    assert 'errors.append(_err("sick_offset_required",' in svc
+
+
+def test_sick_proof_can_be_supplied_after_submit_and_source_url_is_hidden():
+    """病假是補件（owner 2026-09-16）：沒附證明也能先送，清單那列有「缺證明，補傳」，後端核准時才擋。
+    匯入的事由尾巴「來源：https://…」員工那邊不顯示（「這個不用」）。"""
+    js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
+    apply = js_func_body(js, "async function applyLeave(")
+    assert "這種假要附證明" not in apply and "const proofLater = _lvProofNeeded && !proofFile && !hasProof;" in apply
+    assert "核准前補證明" in apply
+    assert "可以先送單、核准前再補" in js
+    assert "缺證明，補傳" in js_func_body(js, "function _lvAppProofCell(")
+    assert "const _lvReasonText = (s) =>" in js
+    for f in ("frontend/js/my/cards-hr.js", "frontend/js/my/leave-host.js"):
+        assert "來源[:：]" in repo_src(f), f
+    assert "_lvReasonText" not in js_code_only(repo_src("frontend/js/my/leave-host.js")), "不跨檔引用（各留一份；註解提到沒關係）"
+    # 後端：核准仍要證明
+    assert "proof" in func_body(repo_src("services/leave_application.py"), "async def approve(")

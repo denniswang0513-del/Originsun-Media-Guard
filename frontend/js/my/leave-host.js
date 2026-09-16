@@ -67,7 +67,9 @@ function _histRow(r) {
     const tm = r.part === "range" && r.start_time ? ` ${esc(r.start_time)}–${esc(r.end_time || "")}` : "";
     const period = r.start_date === r.end_date ? esc(r.start_date) : `${esc(r.start_date)} ~ ${esc(r.end_date)}`;
     const dim = r.status === "已退回" || r.status === "已撤回";
-    const notes = [r.reason, r.status === "已退回" && r.reject_note ? `退回：${r.reject_note}` : "",
+    // 同 cards-hr.js 的 _lvReasonText：故意各留一份，不跨檔引用（4 小時快取的地雷）
+    const reasonText = String(r.reason || "").replace(/\s*~?\s*來源[:：]\s*\S+/g, "").trim();
+    const notes = [reasonText, r.status === "已退回" && r.reject_note ? `退回：${r.reject_note}` : "",
                    r.status === "消假待審" && r.cancel_note ? `消假：${r.cancel_note}` : ""].filter(Boolean).map(esc).join("　");
     return `<tr${dim ? ' class="dim"' : ""}>
         <td>${period}</td><td>${esc(r.leave_type)}</td><td>${esc(part)}${tm}</td>
@@ -104,7 +106,7 @@ function _isoShift(days) { const d = new Date(); d.setDate(d.getDate() + days); 
 function _teamLeaveLine(r, withName) {
     const period = r.start_date === r.end_date ? esc(r.start_date) : `${esc(r.start_date)} ~ ${esc(r.end_date)}`;
     const part = ((_lvNow && _lvNow.vocab && _lvNow.vocab.part_labels) || {})[r.part] || (r.part === "all" ? "" : r.part || "");
-    return `<div class="row"><div class="grow"><div class="title">${withName ? esc(r.staff_name) + "　" : ""}${period}　${esc(r.leave_type)}${part ? `（${esc(part)}）` : ""}　${fmtH(r.hours)} h</div>${r.reason ? `<div class="meta">${esc(r.reason)}</div>` : ""}</div><span class="pill${r.status === "待審" || r.status === "消假待審" ? " hot" : ""}">${esc(r.status)}</span></div>`;
+    return `<div class="row"><div class="grow"><div class="title">${withName ? esc(r.staff_name) + "　" : ""}${period}　${esc(r.leave_type)}${part ? `（${esc(part)}）` : ""}　${fmtH(r.hours)} h</div>${String(r.reason || "").replace(/\s*~?\s*來源[:：]\s*\S+/g, "").trim() ? `<div class="meta">${esc(String(r.reason || "").replace(/\s*~?\s*來源[:：]\s*\S+/g, "").trim())}</div>` : ""}</div><span class="pill${r.status === "待審" || r.status === "消假待審" ? " hot" : ""}">${esc(r.status)}</span></div>`;
 }
 async function loadTeamLeave() {
     const body = $("team-body");

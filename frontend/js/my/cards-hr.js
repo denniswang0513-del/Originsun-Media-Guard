@@ -182,7 +182,7 @@ function renderLeave(body) {
         <div class="lv-step"><span class="lv-n">3</span>送出</div>
         <div class="field"><textarea id="lv-reason" rows="2" placeholder="事由（必填）"></textarea></div>
         <div class="field" id="lv-proof-wrap" style="display:none;">
-            <label style="display:block;font-size:11px;color:var(--sub);margin-bottom:4px;">證明（必附：診斷證明／掛號單／相關文件的照片或 PDF）</label>
+            <label style="display:block;font-size:11px;color:var(--sub);margin-bottom:4px;">證明（診斷證明／掛號單的照片或 PDF。可以先送單、核准前再補；沒補主管不能核准）</label>
             <input type="file" id="lv-proof" accept=".jpg,.jpeg,.png,.heic,.webp,.pdf">
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -224,11 +224,13 @@ function _lvDatesLabel(dates) {
     return consecutive && dates.length > 2 ? `${md(dates[0])}～${md(dates[dates.length - 1])}（${dates.length} 天）`
         : dates.slice(0, 6).map(md).join("、") + (dates.length > 6 ? `…共 ${dates.length} 天` : "");
 }
+// 匯入的假事由尾巴帶「來源：https://…」（Notion 連結，給管理端追查用）——員工這邊不顯示（owner 2026-09-16「這個不用」）
+const _lvReasonText = (s) => String(s || "").replace(/\s*~?\s*來源[:：]\s*\S+/g, "").trim();
 function _lvAppRow(a) {
     const hot = a.status === "待審" || a.status === "消假待審";
     const items = (a.items || []).map(i => `${esc(i.label || i.kind)} ${_lvH(i.hours)}h`).join("、");
     const metas = [`扣：${items || "—"}`];
-    if (a.reason) metas.push(esc(a.reason));
+    if (_lvReasonText(a.reason)) metas.push(esc(_lvReasonText(a.reason)));
     if (a.status === "已退回" && a.reject_note) metas.push(`退回理由：${esc(a.reject_note)}`);
     if (a.status === "消假待審" && a.cancel_note) metas.push(`消假理由：${esc(a.cancel_note)}`);
     if (a.status === "已核准" && a.approved_by) metas.push(`核可：${esc(a.approved_by)}`);
@@ -255,7 +257,7 @@ function _lvRow(r) {
     const tm = r.part === "range" && r.start_time ? ` ${esc(r.start_time)}–${esc(r.end_time || "")}` : "";
     const period = r.start_date === r.end_date ? esc(r.start_date) : `${esc(r.start_date)} ~ ${esc(r.end_date)}`;
     const metas = [];
-    if (r.reason) metas.push(esc(r.reason));
+    if (_lvReasonText(r.reason)) metas.push(esc(_lvReasonText(r.reason)));
     if (r.status === "已退回" && r.reject_note) metas.push(`退回理由：${esc(r.reject_note)}`);
     if (r.status === "消假待審" && r.cancel_note) metas.push(`消假理由：${esc(r.cancel_note)}`);
     if (r.status === "已核准" && r.approved_by) metas.push(`核可：${esc(r.approved_by)}`);
@@ -410,7 +412,8 @@ async function applyLeave() {
     const proofFile = ($("lv-proof").files || [])[0];
     const editing = _lvEditing;
     const hasProof = editing && (LV.applications || []).some(a => a.id === editing && a.proof_path);
-    if (_lvProofNeeded && !proofFile && !hasProof) { show("這種假要附證明（照片或 PDF）"); return; }
+    // 病假是補件（owner 2026-09-16）：沒附證明也能先送，清單那列會有「缺證明，補傳」；後端核准時才擋
+    const proofLater = _lvProofNeeded && !proofFile && !hasProof;
     // 送出中鎖住：連點兩下會建出兩張一模一樣的待審單
     const btn = $("lv-submit");
     if (btn) { if (btn.dataset.busy) return; btn.dataset.busy = "1"; btn.disabled = true; }
@@ -429,6 +432,9 @@ async function applyLeave() {
             const created = await r.json().catch(() => ({}));
             const up = created.id ? await _lvUploadAppProof(created.id, proofFile).catch(() => null) : null;
             if (!up || !up.ok) alert("申請單已送出，但證明上傳失敗，請在清單裡補傳。");
+        }
+        if (proofLater) {
+            alert("申請單已送出。這種假要在核准前補證明：在下面的單子按「缺證明，補傳」。");
         }
         _lvEditing = ""; _lvPicks = [];
         _resetTodayStrip();   // 今天那條「請假待審 N 件」下次重抓

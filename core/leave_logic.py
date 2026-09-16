@@ -302,6 +302,21 @@ def record_item_id(kind: str) -> str:
     return "type:" + kind
 
 
+def sick_offset_required(needed_hours: float, takes: list, credit_available: float) -> tuple[float, float]:
+    """病假超過 1 天時，第 2 天起**要**用特休／補休折抵（owner 2026-09-16「病假兩天要有一天扣的是特休或補假」）。
+    回 (required, taken)：required＝這張單該從特休／補休扣的小時（總時數的一半，但最多只到員工手上可用的額度），
+    taken＝目前挑的特休／補休實際扣到的小時。taken < required ＝ 還沒勾夠，evaluate 回錯誤擋送出。
+    沒挑病假、或病假只有 1 天以內、或員工沒有任何特休／補休額度 → required 0（照病假半薪走）。"""
+    if not any(t.get("kind") == SICK_TYPE and not t.get("credit_id") and t.get("take") for t in takes or []):
+        return 0.0, 0.0
+    needed = round(float(needed_hours or 0), 2)
+    if needed <= float(SICK_FREE_HOURS):
+        return 0.0, 0.0
+    required = round(min(needed / 2.0, max(float(credit_available or 0), 0.0)), 2)
+    taken = round(sum(float(t.get("take") or 0) for t in takes if t.get("credit_id")), 2)
+    return required, taken
+
+
 def fit_items(picks: list, needed_hours: float) -> tuple:
     """員工挑的假依順序把「需要的小時」填滿：picks＝[{id, kind, credit_id, available（None＝不限）, …}]。
     回 (takes, remain)：takes＝每筆多帶 take（真的扣幾小時），挑超過的最後那一筆只扣還需要的部分、後面的不扣（take 0）；

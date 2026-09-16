@@ -70,7 +70,9 @@ def test_workspace_card_and_mobile_form_take_the_proof_file():
     render = js_func_body(js, "function renderLeave(")
     assert 'id="lv-proof"' in render and 'id="lv-proof-wrap"' in render
     apply = js_func_body(js, "async function applyLeave(")
-    assert '"這種假要附證明（照片或 PDF）"' in apply and "_lvUploadAppProof(created.id, proofFile)" in apply, "申請單一份證明"
+    # 2026-09-16 owner「病假是補件」：沒附證明也能先送（核准時後端才擋），送出後提醒去清單那列「缺證明，補傳」
+    assert '"這種假要附證明（照片或 PDF）"' not in apply and "_lvUploadAppProof(created.id, proofFile)" in apply, "申請單一份證明"
+    assert "const proofLater = _lvProofNeeded && !proofFile && !hasProof;" in apply and "核准前補證明" in apply
     assert "_lvProofNeeded = !!d.proof_required;" in js_func_body(js, "async function lvPreview("), "要不要附證明由試算（挑到的假別）決定"
     assert 'fetch("/api/v1/me/leave/applications/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd })' in js, "multipart 不走 mfetch"
     assert 'fetch("/api/v1/me/leave/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd })' in js, "舊單的補傳照舊"

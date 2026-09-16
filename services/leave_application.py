@@ -17,6 +17,7 @@ from sqlalchemy import select  # type: ignore
 from core.hr_logic import day_iso, midnight_of
 from core.leave_logic import (ACTIVE_STATUSES, HOURS_PER_DAY, LEDGER_TYPES, PICKABLE_RECORD_TYPES, RECORD_META, SICK_CAP_DAYS,
                               as_date, cancel_mode, fit_items, hours_to_days, normalize_dates, notice_warning, plan_children,
+                              sick_offset_required,
                               record_item_id, usable_credits, workdays_between, working_hours)
 from db.models import HrLeaveAllocation, HrLeaveApplication, HrLeaveRequest
 from services import leave_service
@@ -205,6 +206,13 @@ async def evaluate(session, staff, body, today: date | None = None, holidays=Non
         errors.append(_err("no_items", "還沒挑要扣的假"))
     elif remain > 0:
         errors.append(_err("insufficient", f"挑的假只夠 {needed - remain:g} 小時，還差 {remain:g} 小時，再挑一筆"))
+    else:
+        # 病假超過 1 天：第 2 天起要用特休／補休折抵（有額度才要求；沒額度就照病假半薪）
+        credit_avail = sum(float(i.get("available") or 0) for i in inv if i.get("credit_id"))
+        required, taken = sick_offset_required(needed, takes, credit_avail)
+        if taken + 1e-6 < required:
+            errors.append(_err("sick_offset_required",
+                               f"病假超過 1 天，第 2 天起要用特休或補休折抵 {required:g} 小時（你還有 {credit_avail:g} 小時可用）—— 請在上面勾選特休或補休"))
     children = plan_children([s for s in slots if not s["errors"]], takes) if not errors else []
     # 警告：不到一週、撞拍攝、病假年上限
     if dates:
