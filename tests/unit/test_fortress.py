@@ -460,3 +460,45 @@ def test_line_units_render_on_both_frontends():
     for u in ("'months'", "'years'", "'pct'", "'year_or_never'"):
         assert u in js_func_body(mob, "const lineVal = (v, unit, ctx) => {"), u
     assert "fireHtml(d)" in mob and "不工作每月可花" in mob, "堡壘頁有卡、總覽頂卡有一行"
+
+
+# ── 特徵測試（/polish 階段零）：這次動到、但沒有被直接釘住的行為 ────────────────
+def test_fire_simulate_characterisation():
+    """把 fire_simulate 現在的行為釘下來：先長再提、第 1 年的生活費**不加**通膨（指數是 y-1）、
+    其他收入從 extra_from_year 那一年（含）開始扣、資產轉負就回那一年。"""
+    from core.fortress_logic import fire_simulate
+    # 100 萬、0 報酬 0 通膨、一年花 12 萬 → 第 8 年底剩 4 萬，第 9 年見底
+    assert fire_simulate(1_000_000, 10_000, 0.0, 0.0, 8) == (None, 1_000_000 - 8 * 120_000)
+    assert fire_simulate(1_000_000, 10_000, 0.0, 0.0, 20) == (9, 0), "撐不住那一年回 (年, 0)，後面不再算"
+    # 通膨指數：第 1 年原價、第 2 年 ×1.1
+    assert fire_simulate(1_000_000, 10_000, 0.0, 0.1, 2)[1] == 1_000_000 - 120_000 - 132_000
+    # 報酬先算：100 萬 ×1.06 − 12 萬
+    assert fire_simulate(1_000_000, 10_000, 0.06, 0.0, 1)[1] == round(1_000_000 * 1.06 - 120_000)
+    # 其他收入：第 3 年起每月 1 萬 → 那三年不用動本金
+    assert fire_simulate(500_000, 10_000, 0.0, 0.0, 5, extra_monthly=10_000, extra_from_year=3)[1] == 500_000 - 2 * 120_000
+    assert fire_simulate(100, 100, 0.0, 0.0, 0) == (None, 100), "years=0 不模擬"
+
+
+def test_fire_settings_bounds_each_key():
+    """六格都有上下限；亂填不會讓整頁炸掉或給出假答案。"""
+    from core.fortress_logic import DEFAULT_FIRE
+    lo = normalize_settings({"fire": {"withdrawal_rate": 0, "birth_year": -5, "until_age": 10,
+                                      "extra_monthly": -1, "extra_from_age": -3, "self_pay_monthly": -9}})["fire"]
+    assert lo == {"withdrawal_rate": 0.01, "birth_year": 0, "until_age": 40,
+                  "extra_monthly": 0, "extra_from_age": 0, "self_pay_monthly": 0}
+    hi = normalize_settings({"fire": {"withdrawal_rate": 9, "birth_year": 9999, "until_age": 999,
+                                      "extra_monthly": 10 ** 9, "extra_from_age": 999, "self_pay_monthly": 10 ** 9}})["fire"]
+    assert hi == {"withdrawal_rate": 0.10, "birth_year": 2100, "until_age": 120,
+                  "extra_monthly": 10_000_000, "extra_from_age": 120, "self_pay_monthly": 1_000_000}
+    assert normalize_settings({"fire": {"withdrawal_rate": "x", "until_age": None}})["fire"] == DEFAULT_FIRE, "不是數字就用預設"
+    assert normalize_settings({})["fire"] == DEFAULT_FIRE and DEFAULT_FIRE["birth_year"] == 1989
+
+
+def test_fire_without_a_birth_year_or_date():
+    """沒有出生年（或 build 沒給日期）→ 不寫歲數、模擬 FIRE_DEFAULT_HORIZON 年。"""
+    from core.fortress_logic import FIRE_DEFAULT_HORIZON
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 30_000_000}]
+    for today, cfg in (("", {}), ("2026-09-16", {"fire": {"birth_year": 0}}), ("不是日期", {})):
+        f = build(accts, [], 50_000, cfg, today, need_months=6)["fire"]
+        assert f["age"] is None and f["horizon_years"] == FIRE_DEFAULT_HORIZON, (today, cfg)
+        assert f["runs_out_age"] is None and "歲" not in f["verdict"]
