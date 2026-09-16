@@ -40,6 +40,7 @@ async function load(host) {
         body.innerHTML = `
             ${fortressCard(ft)}
             <div class="m-card tap rg-go" data-go="register" role="button"><span>登記餘額：今天看到多少就先記多少，明細以後補</span><span>›</span></div>
+            <div class="m-card tap rg-go" data-go="report" role="button"><span>月報：這個月的錢、體檢、財務建議</span><span>›</span></div>
             <div class="lg-sub" style="margin:-4px 0 8px">${esc(rng)}・${pj.count || 0} 案（結案日在區間內）</div>
             <div class="m-strip">${card(pj.contract, '營收')}${card(pj.received, '實收')}${card(pj.receivable, '應收')}${card(pj.net, '淨收')}</div>
             <div class="m-h">現金流（收支明細）</div>

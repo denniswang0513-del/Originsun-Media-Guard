@@ -18,16 +18,17 @@ import * as overviewView from './views/ledger-overview.js';
 import * as assetsView from './views/ledger-assets.js';
 import * as fortressView from './views/ledger-fortress.js';
 import * as registerView from './views/ledger-register.js';
+import * as reportView from './views/ledger-report.js';
 
 export const TABS = ['cash', 'projects', 'receivable', 'household', 'overview', 'assets'];
 export const DEFAULT_TAB = 'cash';
 /** 有畫面但不在分頁列的路由 → 頂欄名稱；HIDDEN_PARENT＝在那一頁時 tabbar 亮哪一顆。 */
-export const HIDDEN_ROUTES = { fortress: '堡壘', register: '登記餘額' };
-const HIDDEN_PARENT = { fortress: 'overview', register: 'overview' };
+export const HIDDEN_ROUTES = { fortress: '堡壘', register: '登記餘額', report: '月報' };
+const HIDDEN_PARENT = { fortress: 'overview', register: 'overview', report: 'overview' };
 export const ROUTES = [...TABS, ...Object.keys(HIDDEN_ROUTES)];
 const VIEWS = { cash: cashView, projects: projectsView, receivable: receivableView,
                 household: householdView, overview: overviewView, assets: assetsView, fortress: fortressView,
-                register: registerView };
+                register: registerView, report: reportView };
 
 // 指名制：直接看 modules，不走 isAdmin（後端 grant_admin_all_modules 把 finance_mine 列為「指名才有」）
 const gate = (me) => ((me || {}).modules || []).includes('finance_mine');

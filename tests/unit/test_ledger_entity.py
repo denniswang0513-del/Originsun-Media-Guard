@@ -39,7 +39,7 @@ from core.schemas import (BankAccountPayload, CashEntryPayload,
                           LoanPayload, PaymentRequestPayload)
 from db.models import (BankAccount, CrmCashEntry, CrmInvoice,
                        CrmPaymentRequest, FinanceAdjustment, FinanceFortressEarmark, FinanceLoan,
-                       FinanceMonthClose)
+                       FinanceMonthClose, FinanceMonthlyReport)
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -218,7 +218,8 @@ def test_admin_enrichment_excludes_explicit_only():
 
 ENTITY_MODELS = [CrmInvoice, CrmPaymentRequest, CrmCashEntry, BankAccount,
                  FinanceAdjustment, FinanceLoan, FinanceMonthClose,
-                 FinanceFortressEarmark]      # 2026-09-16 私帳堡壘的預留清單（docs/FORTRESS_PLAN.md）
+                 FinanceFortressEarmark,      # 2026-09-16 私帳堡壘的預留清單（docs/FORTRESS_PLAN.md）
+                 FinanceMonthlyReport]        # 2026-09-17 私帳月報（docs/MONTHLY_REPORT.md）
 
 
 @pytest.mark.parametrize("model", ENTITY_MODELS,

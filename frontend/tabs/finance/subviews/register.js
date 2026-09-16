@@ -51,6 +51,7 @@ function _injectCss() {
               display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .rg .rg-bar .hint { color: #9ca3af; font-size: 12.5px; }
 .rg .rg-empty { color: #6b7280; text-align: center; padding: 14px; }
+.rg .rg-report { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: #14532d; border: 1px solid #166534; color: #dcfce7; border-radius: 8px; padding: 10px 14px; margin: 0 0 14px; }
 `;
     document.head.appendChild(st);
 }
@@ -163,6 +164,17 @@ function _val(el) {
     return Number.isFinite(v) ? v : null;
 }
 
+/** 登記存完：頁頂一條「X 月月報已更新 → 看月報」，點了切到月報分頁（nav 鈕在 finance.html） */
+function _reportBanner(month) {
+    const top = _c.querySelector('.rg-top');
+    if (!top) return;
+    const el = document.createElement('div');
+    el.className = 'rg-report';
+    el.innerHTML = `<b>${esc(month.replace('-', ' 年 '))} 月的月報已經用剛登記的數字更新了。</b>
+        <button type="button" class="crm-btn crm-btn-primary crm-btn-sm" onclick="document.querySelector('[data-subview=report]')?.click()">看月報</button>`;
+    top.insertAdjacentElement('afterend', el);
+}
+
 const _rg = (window._finRegister = window._finRegister || {});
 
 _rg.reload = () => { if (_c) render(_c, { isCurrent: _isCurrent }); };
@@ -204,6 +216,8 @@ _rg.saveAll = async (btn) => {
         if (!_isCurrent()) return;
         _d = d || await finFetchMine('/balance-register');
         _render();
+        // 月報（docs/MONTHLY_REPORT.md）：登記完後端已經把當月那份算好，這裡給一條路過去
+        if (d && d.report_month) _reportBanner(d.report_month);
         finToast(`已登記：${accounts.length} 個帳戶、${holdings.length} 檔持股、${brokers.length} 家券商${card !== null ? '、信用卡' : ''}`);
     } catch (e) {
         finToast('儲存失敗：' + e.message, true);

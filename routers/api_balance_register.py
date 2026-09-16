@@ -194,4 +194,8 @@ async def put_balance_register(payload: BalanceRegisterPayload, request: Request
                 plug.note = f"登記於 {payload.date}：總市值 {int(br.total):,} − 已拆明細 {detail:,}"
                 plug.updated_at = datetime.now()
         await session.commit()
-        return await _register_payload(session, ent)
+        out = await _register_payload(session, ent)
+    # 月報（docs/MONTHLY_REPORT.md）：登記完就把當月那份算好存起來；產不出來只記 log，登記本身不受影響
+    from routers.api_monthly_report import generate_quietly
+    out["report_month"] = await generate_quietly(ent, _username(request))
+    return out

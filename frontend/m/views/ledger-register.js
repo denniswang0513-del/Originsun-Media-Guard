@@ -21,6 +21,8 @@ export async function render(host, { first }) {
     if (first) {
         host.innerHTML = skeleton(4);
         host.addEventListener('click', (ev) => {
+            const go = ev.target.closest('[data-go]');
+            if (go) { location.hash = go.dataset.go; return; }
             const b = ev.target.closest('#rg-save');
             if (b) saveAll(host, b);
         });
@@ -119,6 +121,10 @@ async function saveAll(host, btn) {
         try {
             _data = await mfetch(REGISTER_API, { method: 'PUT', body: JSON.stringify({ date, accounts, holdings, brokers }) });
             host.innerHTML = draw(_data);
+            // 月報：登記完後端已經把當月那份算好，頁頂給一條路過去（#report 隱藏路由）
+            if (_data && _data.report_month) {
+                host.insertAdjacentHTML('afterbegin', `<div class="m-card tap rg-go rg-report" data-go="report" role="button"><span>${esc(_data.report_month.replace('-', ' 年 '))} 月的月報已經更新，點這裡看</span><span>›</span></div>`);
+            }
             markStale('overview', 'assets');     // 總覽的堡壘卡與資產頁下次要重抓
             toast(`已登記 ${accounts.length} 個帳戶、${holdings.length} 檔持股、${brokers.length} 家券商`);
             window.scrollTo(0, 0);

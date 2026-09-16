@@ -1339,6 +1339,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`core/fortress_logic.py`](core/fortress_logic.py) | 私帳堡壘的**純規則**：五層分類、可撐月數＝(第 1–3 層現金 − 預留)÷生活支出、各層目標、壓力測試五題（含台海戰爭）、設定正規化與上下限 | 無 I/O；現金看 `kind` 不看層別（`cash_in_layers`）；生活支出口徑 `need_category_ok`、分母是有資料的月份數（見「不要動的地方」） |
 | [`routers/api_fortress.py`](routers/api_fortress.py) | 堡壘的資料面：把私帳現有數字（帳戶餘額、證券現值、卡欠款、貸款期別、生活支出）撈出來餵給規則，＋預留清單與設定的寫入 | 不重寫任何金額規則（沿用 `_holding_value`／`_card_numbers`／期初＋流水）；守衛 `_guard` 寫死 mine；主控與 NAS 都掛，但 `/settings` 在 NAS 被 drop |
 | `frontend/tabs/finance/subviews/fortress.js` ＋ `frontend/m/views/ledger-fortress.js`（＋總覽頂卡） | 堡壘的兩個畫面：桌機分頁（可改分層／目標／假設、增刪預留）與手機頁（只能增刪預留） | 兩邊都不自己算，一律拿後端回的整份 payload 重畫；分層自動存要先拍快照（見「不要動的地方」①） |
+| `core/monthly_report.py` ＋ `routers/api_monthly_report.py` ＋ `subviews/report.js`／`m/views/ledger-report.js` | **私帳月報**（docs/MONTHLY_REPORT.md）：登記餘額儲存後自動產生當月那份（同月覆蓋）：這個月的錢、錢從哪來、走勢、各帳戶、堡壘、階梯與財富自由、四格體檢、財務建議（規則）、待辦 | 規則全在 core（純函式、可測），router 只撈別的模組算好的數字；建議是門檻不是文案；上月＝上一份月報 |
 | `routers/api_balance_register.py` ＋ `core/finance_logic/_core.py::derive_balance`／`routers/api_finance.py::_balances_by_account` | **登記餘額**（docs/BALANCE_REGISTER.md）：「今天看到多少就先記多少，明細後面補」。帳戶寫基準點（`bank_accounts.anchor_balance／anchor_date`）、證券戶寫「未拆明細」列、每次登記留一筆對帳紀錄 | 餘額規則只有 `derive_balance` 一份，六個算餘額的地方都經 `_balances_by_account`；畫面：桌機 `subviews/register.js`（私帳 nav）、手機 `#register` 隱藏路由 |
 | `core/ledger_project.py` 的分案記帳段 | 私帳案收入**分案**：`BY_PARENT_KEY`／`BY_PARENT_PENDING_KEY`、`parent_shares`、`set_parent_share`（只動差額；`claim` 不動錢）、`drop_parent_share`、`mirror_stale(…, pid)` 逐案判；設計正本 [`docs/LEDGER_BY_PARENT_PLAN.md`](docs/LEDGER_BY_PARENT_PLAN.md) | 不變式 `contract = Σ份額 + owner 自己的`（自己的不存、用差額推）；分身 `contract_amount` 只准接 `set／drop_parent_share` 回的 `new_contract`（`test_ledger_by_parent` 掃 project_links 釘著）；開機 `_m22` 回填舊資料，分不出的 N:1 標待認領、改收款方式會 409 要求逐案「推送→取代」 |
 | 彈性外出（owner 2026-09-15）：[`core/leave_logic.py`](core/leave_logic.py) 的 `FLEX_OUT_*`／`flex_out_check`、`hr_flex_outings`（[`db/models/_workos.py`](db/models/_workos.py)）、[`routers/api_me.py`](routers/api_me.py) 的 `/me/flex_out` | 每人每天 2 小時、**自己登記不用核准**、一筆 ≤2h、同一天合計 ≤2h、不累積。畫面固定寫「每日可彈性外出兩小時」（owner 改的字，不顯示剩多少） | **不走請假單**：不進時數帳、不進休假總表、不上 Google 日曆。事由只給本人看（行事曆事件的 `notes` 一律空，同 `_leave_events`）。超過 2 小時要另外請假 —— 規章那段在 `frontend/leave.html` 的規章卡，排在事假前面 |
@@ -1412,6 +1413,11 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   證券戶沒有新欄位：一家券商一個總市值，差額寫進那家的「未拆明細」持股列（symbol 空），拆明細後再登記一次就歸零。
   信用卡不走這裡（既有 `PUT /card-summary derive_opening_from` 就是「現在實際欠多少」）。端點只寫 DB、不碰 settings.json（NAS 也掛）。
   端點在獨立檔 `routers/api_balance_register.py`：`api_finance.py` 已到 2,000 行的單次讀取上限，別再往裡面加端點。
+- **私帳月報（docs/MONTHLY_REPORT.md，2026-09-17）**：`core/monthly_report.py::build_report` 是純函式，吃的是別的模組**已經算好**的東西
+  （堡壘 payload、登記餘額 payload、資產儀表板的桶、本月收支、淨值快照、上一份月報）—— 🔴 不要在月報裡再算一次餘額／必要支出／階梯，
+  數字對不上時改來源不改月報。建議（advice）是**規則**：每條有門檻（`CONCENTRATION_WARN`、`RECEIVABLE_MONTHS`…），回 None 就不出現；
+  集中度只看單一公司的股票（`is_broad_fund` 把 VWRA／0050 這種指數型基金排除）。`generate_quietly` 產不出來只記 log，登記餘額不能因此失敗。
+  「上月」＝上一份月報的 payload（表 `finance_monthly_reports`，同帳本同月覆蓋）；第一份只拿最近一次淨值快照比總資產。
 - **`/api/settings/load` 是匿名端點，機密分兩層**（2026-09-08 稽核）：`_SECRET_KEYS`／`_SECRET_SUBKEYS`（簽得出 admin 的：jwt_secret、database_url、
   google secret）連管理員也不回；`_ADMIN_ONLY_SUBKEYS`（工時同步 token、四個 webhook）只回給管理員 token（設定視窗要顯示才能編）。新增機密欄位要進其中一層。
   內部重啟端點（`/internal/restart`、`/system/restart`）的金鑰字串隨 OTA 包公開，安全靠 `core.auth.via_cloudflare` 把公網那條路擋掉——**別**把金鑰換成 `_get_secret()`，機隊各自的 jwt_secret 不共用，master 會推不動 agent。

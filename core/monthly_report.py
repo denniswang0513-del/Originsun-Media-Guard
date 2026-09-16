@@ -1,0 +1,416 @@
+"""私帳月報的純規則（docs/MONTHLY_REPORT.md）—— owner 2026-09-17「我希望你在我更新帳戶後 自動提供一份月報給我」
+「我希望月報可以給我財務建議與財務分析」。
+
+輸入是別的模組已經算好的東西（堡壘 payload、登記餘額 payload、資產儀表板的桶、本月收支、淨值快照、上一份月報），
+這裡只做三件事：**排成一份月報的形狀、跟上個月比、依規則產生體檢與建議**。沒有 I/O，可直接測。
+
+建議是**規則**不是文案：每一條有門檻（例如單一持股佔證券 25% 以上才出現集中度那條），數字變了建議就變、消失。
+金額一律整數元；畫面自己換成「萬」。
+"""
+from __future__ import annotations
+
+from typing import Optional
+
+#: 建議的等級順序（畫面照這個排；bad 最前）
+LEVEL_ORDER = {"bad": 0, "warn": 1, "info": 2, "ok": 3}
+#: 集中度門檻：單一持股佔證券現值多少算「偏高」／「高」
+CONCENTRATION_WARN = 0.25
+CONCENTRATION_BAD = 0.35
+#: 名字裡有這些字的持股視為**指數型／分散的基金**，不算「一檔股票」（集中度那條只盯單一公司）
+BROAD_FUND_WORDS = ("vanguard", "ishares", "spdr", "etf", "all-world", "total ", "world", "s&p", "0050", "006208", "vti", "vwra", "vt ",
+                    "台灣50", "臺灣50", "台灣 50", "指數", "全球", "全世界", "市場", "高股息", "定存", "活存", "保險", "壽", "未拆明細", "複委託")
+
+
+def is_broad_fund(name: str) -> bool:
+    n = (name or "").strip().lower()
+    return any(w in n for w in BROAD_FUND_WORDS)
+
+
+#: 應收超過幾個月的必要支出才提醒
+RECEIVABLE_MONTHS = 2
+#: 必要支出的樣本月數低於這個就標「樣本少」
+NEED_SAMPLE_OK = 6
+#: 走勢最多帶幾個快照點
+TREND_POINTS = 24
+
+
+def _wan(n) -> str:
+    """元 → 「12.3 萬」／「1.2 億」（負數前面加 −）。跟兩個前端的 fmtWan／wan 同一個口徑。"""
+    v = float(n or 0)
+    a = abs(v)
+    if a >= 1e8:
+        s = f"{a / 1e8:.2f}".rstrip("0").rstrip(".") + " 億"
+    else:
+        s = f"{a / 1e4:.1f}".rstrip("0").rstrip(".") + " 萬"
+    return ("−" if v < 0 else "") + s
+
+
+def _pct(a, b) -> Optional[float]:
+    return round(float(a) / float(b), 4) if b else None
+
+
+def _i(v) -> int:
+    try:
+        return int(round(float(v or 0)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+# ── 各段 ──────────────────────────────────────────────────────────────
+def totals_block(buckets: dict, liabilities: dict) -> dict:
+    """總資產＝銀行現金＋證券＋應收＋器材淨值；負債＝卡費＋貸款；淨值＝總資產−負債。
+    另給 financial（現金＋證券）—— 財富階梯與財富自由看的是這個，不含應收與器材。"""
+    cash = _i(buckets.get("銀行現金"))
+    sec = _i(buckets.get("證券現值"))
+    recv = _i(buckets.get("應收帳款"))
+    eq = _i(buckets.get("固定資產淨值"))
+    liab = _i((liabilities or {}).get("total"))
+    assets = cash + sec + recv + eq
+    return {"cash": cash, "securities": sec, "receivable": recv, "equipment": eq, "assets": assets,
+            "liabilities": liab, "card": _i((liabilities or {}).get("card")), "loan": _i((liabilities or {}).get("loan")),
+            "net_worth": assets - liab, "financial": cash + sec}
+
+
+def compare(now: dict, prev: Optional[dict]) -> dict:
+    """{key: 差額}；prev 沒有那個 key 就不比（None）。"""
+    if not prev:
+        return {k: None for k in now}
+    return {k: (now[k] - _i(prev[k]) if prev.get(k) is not None else None) for k in now}
+
+
+def flow_block(month_cash: dict, delta: dict) -> dict:
+    """多出來的錢從哪來：本月收入／支出／家用（收支明細）＋證券漲跌＋應收增減＋剩下解釋不了的。
+    only 有上一份月報的分項時才算得出「證券漲跌」與「解釋不了的」；沒有就 None。"""
+    dep, exp, house = _i(month_cash.get("deposit")), _i(month_cash.get("expense")), _i(month_cash.get("household_expense"))
+    net = dep - exp
+    sec = delta.get("securities")
+    recv = delta.get("receivable")
+    assets = delta.get("assets")
+    unexplained = None
+    if assets is not None and sec is not None and recv is not None:
+        unexplained = assets - net - sec - recv - _i(delta.get("equipment"))
+    return {"deposit": dep, "expense": exp, "household": house, "net": net, "has_entries": bool(dep or exp),
+            "securities_change": sec, "receivable_change": recv, "unexplained": unexplained,
+            "savings_rate": _pct(net, dep) if dep > 0 else None}
+
+
+def accounts_block(register: dict, prev: Optional[dict], month: str) -> list:
+    """各帳戶：本月數字、上月數字（上一份月報同名帳戶）、差、這個月登記了沒、還沒補的明細。變動大的先排。"""
+    prev_by = {a["name"]: a for a in ((prev or {}).get("accounts") or [])}
+    out = []
+    for a in register.get("accounts") or []:
+        p = prev_by.get(a["name"])
+        pv = _i(p["balance"]) if p and p.get("balance") is not None else None
+        out.append({"id": a.get("id"), "name": a["name"], "kind": a.get("acct_kind") or "bank",
+                    "balance": _i(a.get("balance")), "prev": pv,
+                    "delta": (_i(a.get("balance")) - pv) if pv is not None else None,
+                    "anchor_date": a.get("anchor_date"), "unfilled": a.get("unfilled"),
+                    "registered_this_month": bool(a.get("anchor_date") and str(a["anchor_date"]).startswith(month))})
+    out.sort(key=lambda x: (-(abs(x["delta"]) if x["delta"] is not None else -1), -x["balance"]))
+    return out
+
+
+def brokers_block(register: dict, prev: Optional[dict]) -> list:
+    prev_by = {b["broker"]: b for b in ((prev or {}).get("brokers") or [])}
+    out = []
+    for b in register.get("brokers") or []:
+        p = prev_by.get(b["broker"])
+        pv = _i(p["total"]) if p and p.get("total") is not None else None
+        out.append({"broker": b["broker"], "total": _i(b.get("total")), "prev": pv,
+                    "delta": (_i(b.get("total")) - pv) if pv is not None else None,
+                    "plug": _i(b.get("plug")), "count": int(b.get("count") or 0)})
+    out.sort(key=lambda x: -x["total"])
+    return out
+
+
+def concentration(fortress: dict) -> dict:
+    """集中度：**單一公司的股票**佔證券現值的比重（最大的一檔＋前三檔）。指數型基金（VWRA、0050…）本身就是幾百
+    幾千家公司，不算「一檔股票」—— 不然全球股 ETF 佔 42% 會被寫成「一檔股票決定你四成資產」。
+    用堡壘的 accounts（kind=holding，已換台幣）。"""
+    hs = sorted([(a.get("name") or "", _i(a.get("balance"))) for a in fortress.get("accounts") or []
+                 if a.get("kind") == "holding" and _i(a.get("balance")) > 0], key=lambda x: -x[1])
+    total = sum(v for _, v in hs)
+    stocks = [(n, v) for n, v in hs if not is_broad_fund(n)]
+    top = stocks[0] if stocks else ("", 0)
+    funds_pct = _pct(sum(v for n, v in hs if is_broad_fund(n)), total)
+    return {"total": total, "top_name": top[0], "top_value": top[1], "top_pct": _pct(top[1], total) if stocks else None,
+            "top3_pct": _pct(sum(v for _, v in stocks[:3]), total) if stocks else None,
+            "top3": [{"name": n, "value": v} for n, v in stocks[:3]], "funds_pct": funds_pct,
+            "biggest_name": hs[0][0] if hs else "", "biggest_pct": _pct(hs[0][1], total) if hs else None}
+
+
+def fortress_block(fortress: dict) -> dict:
+    tests = [{"key": t.get("key"), "title": t.get("title"), "state": t.get("state"), "verdict": t.get("verdict")}
+             for t in fortress.get("tests") or []]
+    cnt = {"ok": 0, "warn": 0, "bad": 0, "na": 0}
+    for t in tests:
+        cnt[t["state"] if t["state"] in cnt else "na"] += 1
+    layers = sorted([{"no": L.get("no"), "name": L.get("name"), "have": _i(L.get("have")), "target": L.get("target"),
+                      "gap": L.get("gap"), "pct": L.get("pct")} for L in fortress.get("layers") or []], key=lambda x: -(x["no"] or 0))
+    r = fortress.get("runway") or {}
+    need = fortress.get("monthly_need") or {}
+    return {"runway": r.get("months"), "runway_with_l4": r.get("with_l4"), "tone": r.get("tone"),
+            "need": _i(need.get("used")), "need_sample_months": int(need.get("sample_months") or 0),
+            "need_override": need.get("override") is not None,
+            "tests": tests, "counts": cnt, "layers": layers, "earmark_total": _i(fortress.get("earmark_total"))}
+
+
+def ladder_fire_block(fortress: dict) -> dict:
+    lad = fortress.get("ladder") or {}
+    fire = fortress.get("fire") or {}
+    pj = fortress.get("projection") or {}
+    y10 = next((r for r in pj.get("rows") or [] if int(r.get("year") or 0) == 10), None)
+    rungs = lad.get("rungs") or []
+    nxt = next((r for r in rungs if int(r.get("no") or r.get("rung") or 0) == int(lad.get("rung") or 0) + 1), None)
+    return {"rung": lad.get("rung"), "rung_name": lad.get("name"), "net_worth": _i(lad.get("net_worth")),
+            "to_next": lad.get("to_next"), "next_name": (nxt or {}).get("name"),
+            "fire_allowed": _i(fire.get("allowed")), "fire_spend": _i(fire.get("spend")),
+            "fire_ratio33": fire.get("ratio33"), "fire_ratio25": fire.get("ratio25"),
+            "fire_rate": fire.get("current_rate"), "fire_state": fire.get("state"), "fire_pretax": bool(fire.get("pretax")),
+            "y10_nominal": _i(y10.get("nominal")) if y10 else None, "y10_real": _i(y10.get("real")) if y10 else None,
+            "growth_rate": pj.get("rate"), "inflation": pj.get("inflation")}
+
+
+# ── 體檢（四個面向）───────────────────────────────────────────────────
+def health_block(ft: dict, conc: dict, accounts: list, brokers: list, flow: dict) -> list:
+    runway = ft.get("runway")
+    if runway is None:
+        liq = ("na", "算不出來", "必要支出還沒有資料")
+    elif runway >= 12:
+        liq = ("ok", "好", f"現金撐 {runway:g} 個月")
+    elif runway >= 6:
+        liq = ("warn", "普通", f"現金撐 {runway:g} 個月，目標 12")
+    else:
+        liq = ("bad", "弱", f"現金只撐 {runway:g} 個月")
+    war = next((t for t in ft.get("tests") or [] if t.get("key") == "war"), None) or {}
+    ws = war.get("state") or "na"
+    res = {"ok": ("ok", "好", "極端情境撐得住"), "warn": ("warn", "緊", "極端情境撐得住但很緊"),
+           "bad": ("bad", "弱", "極端情境會被迫賣資產"), "na": ("na", "算不出來", "資料不足")}[ws if ws in ("ok", "warn", "bad") else "na"]
+    tp = conc.get("top_pct")
+    if tp is None:
+        con = ("ok", "分散", f"都是分散的基金（最大 {conc.get('biggest_name') or '—'} 佔 {float(conc.get('biggest_pct') or 0) * 100:.0f}%）") \
+            if conc.get("total") else ("na", "沒有持股", "")
+    elif tp >= CONCENTRATION_BAD:
+        con = ("bad", "高", f"{conc['top_name']} 佔證券 {tp * 100:.0f}%")
+    elif tp >= CONCENTRATION_WARN:
+        con = ("warn", "偏高", f"{conc['top_name']} 佔證券 {tp * 100:.0f}%")
+    else:
+        con = ("ok", "分散", f"最大的單一股票 {conc['top_name']} 佔 {tp * 100:.0f}%")
+    unfilled = [a for a in accounts if a.get("unfilled") not in (None, 0)]
+    unreg = [a for a in accounts if not a.get("registered_this_month")]
+    if not flow.get("has_entries") and unreg and len(unreg) == len(accounts):
+        rec = ("bad", "缺", "本月沒有收支明細，也沒登記餘額")
+    elif unfilled or not flow.get("has_entries"):
+        rec = ("warn", "缺", (f"{len(unfilled)} 個帳戶登記後還沒補明細" if unfilled else "本月還沒有收支明細"))
+    elif unreg:
+        rec = ("warn", "不全", f"{len(unreg)} 個帳戶這個月還沒登記")
+    else:
+        rec = ("ok", "齊", "明細補齊、帳戶都登記了")
+    return [{"key": "liquidity", "label": "流動性", "state": liq[0], "grade": liq[1], "text": liq[2]},
+            {"key": "resilience", "label": "韌性（極端情境）", "state": res[0], "grade": res[1], "text": res[2]},
+            {"key": "concentration", "label": "集中度", "state": con[0], "grade": con[1], "text": con[2]},
+            {"key": "records", "label": "收支紀錄", "state": rec[0], "grade": rec[1], "text": rec[2]}]
+
+
+# ── 建議（規則）─────────────────────────────────────────────────────
+def _rule_war(fortress: dict, ft: dict):
+    war = next((t for t in ft["tests"] if t["key"] == "war"), None)
+    if not war or war["state"] != "bad":
+        return None
+    fx_unflagged = [a["name"] for a in fortress.get("accounts") or []
+                    if (a.get("currency") or "TWD") != "TWD" and not (a.get("flags") or {}).get("offshore")]
+    if fx_unflagged:
+        names = "、".join(fx_unflagged[:4]) + ("…" if len(fx_unflagged) > 4 else "")
+        return {"level": "bad", "key": "war_flags", "title": "台海戰爭題是紅的，但可能只是沒標海外。",
+                "text": f"這題只認標了「實體」或「海外」的錢。{names} 是外幣部位，卻沒標「海外」。",
+                "how": "到堡壘的帳戶分層，把海外券商的持股勾「海外」＋「美元」；標完再看這題。另外真的放一個月生活費的現金在家，銀行停擺四週也不怕。"}
+    return {"level": "bad", "key": "war", "title": "台海戰爭題是紅的：頭一個月拿得到的錢不夠。",
+            "text": war.get("verdict") or "", "how": "把一個月生活費放成實體現金或海外帳戶，這題就過。"}
+
+
+def _rule_layers(ft: dict):
+    by = {L["no"]: L for L in ft["layers"]}
+    l1 = by.get(1)
+    if not l1:
+        return None
+    gaps = [(L["no"], L["name"], _i(L["gap"])) for L in ft["layers"] if L["no"] in (2, 3, 4) and _i(L["gap"]) > 0]
+    if not gaps:
+        return None
+    need = sum(g for _, _, g in gaps)
+    surplus = l1["have"] - _i(l1["target"])
+    where = "、".join(f"第 {no} 層{name}差 {_wan(g)}" for no, name, g in gaps)
+    if surplus >= need:
+        return {"level": "warn", "key": "layers", "title": f"第 1 層多了 {_wan(surplus)}，第 2 到 4 層卻還沒填滿。",
+                "text": f"{where}。錢是夠的（第 1 層目標只要 {_wan(l1['target'])}），只是全部掛在第 1 層，分層等於沒做。",
+                "how": f"到堡壘的帳戶分層，把 {_wan(need)} 的帳戶改標到第 2 到 4 層（例如把儲蓄戶、定存標到第 3 層），第 1 層留 {_wan(l1['have'] - need)} 還是夠用。"}
+    return {"level": "warn", "key": "layers", "title": f"第 2 到 4 層合計還差 {_wan(need)}。",
+            "text": f"{where}。第 1 層只多 {_wan(max(0, surplus))}，分完還不夠。",
+            "how": "先把第 1 層多的分過去，剩下的差額用每月結餘補；應收收回來優先進第 3 層。"}
+
+
+def _rule_concentration(conc: dict):
+    tp = conc.get("top_pct")
+    if tp is None or tp < CONCENTRATION_WARN:
+        return None
+    lvl = "bad" if tp >= CONCENTRATION_BAD else "warn"
+    return {"level": lvl, "key": "concentration",
+            "title": f"{conc['top_name']} 一檔佔證券 {tp * 100:.0f}%，一檔股票決定你 {tp * 100:.0f}% 的投資。",
+            "text": f"{conc['top_name']} {_wan(conc['top_value'])}；單一股票前三檔合計佔 {float(conc.get('top3_pct') or 0) * 100:.0f}%，"
+                    f"指數型基金佔 {float(conc.get('funds_pct') or 0) * 100:.0f}%（那些本身就是分散的，不算）。",
+            "how": f"不必賣，先訂上限：之後的新資金優先進別的標的；如果它漲到超過證券的 {int(CONCENTRATION_BAD * 100) + 10}%，賣一部分換分散的 ETF。這條每月月報會自動盯。"}
+
+
+def _rule_records(accounts: list, brokers: list, flow: dict):
+    unfilled = [a for a in accounts if a.get("unfilled") not in (None, 0)]
+    unreg = [a for a in accounts if not a.get("registered_this_month")]
+    plugs = [b for b in brokers if b.get("plug")]
+    if not unfilled and not unreg and not plugs and flow.get("has_entries"):
+        return None
+    parts = []
+    if unfilled:
+        tot = sum(_i(a["unfilled"]) for a in unfilled)
+        parts.append(f"{len(unfilled)} 個帳戶登記後還沒補明細（合計 {_wan(tot)}）")
+    if not flow.get("has_entries"):
+        parts.append("本月收支明細是空的，「存了多少」算不出來")
+    if unreg:
+        parts.append(f"{len(unreg)} 個帳戶這個月還沒登記餘額")
+    if plugs:
+        parts.append("、".join(f"{b['broker']}未拆明細 {_wan(b['plug'])}" for b in plugs))
+    names = "、".join(a["name"] for a in unfilled[:3]) or "、".join(a["name"] for a in unreg[:3])
+    return {"level": "warn", "key": "records", "title": "帳還沒記齊，這份月報有幾格是空的。",
+            "text": "；".join(parts) + "。",
+            "how": f"先補{names}這幾戶的明細，補到「還沒補的明細」歸 0；每月登記一次全部帳戶，下個月就能算出存款率。"}
+
+
+def _rule_receivable(totals: dict, ft: dict):
+    need = ft.get("need") or 0
+    if not need or totals["receivable"] < need * RECEIVABLE_MONTHS:
+        return None
+    months = totals["receivable"] / need
+    return {"level": "info", "key": "receivable",
+            "title": f"應收 {_wan(totals['receivable'])}，等於 {months:.1f} 個月的支出還在外面。",
+            "text": "這些是帳面上的錢，收回來才算數。",
+            "how": "每月固定催一次逾期最久的案；收回一半就能把第 3、4 層補滿，不用動任何投資。"}
+
+
+def _rule_fire(lf: dict):
+    if lf.get("fire_state") == "na":
+        return None
+    if lf.get("fire_pretax"):
+        return {"level": "info", "key": "fire_tax", "title": "財富自由那格是稅前數字。",
+                "text": f"每月可花 {_wan(lf['fire_allowed'])} 沒扣股利所得稅與二代健保補充保費。",
+                "how": "到堡壘的財富自由段填「每月稅與補充保費」的估計，數字才是真的。"}
+    return None
+
+
+def _rule_card(register: dict, ft: dict):
+    card = _i(register.get("card_outstanding"))
+    need = ft.get("need") or 0
+    if not need or card < need * 0.5:
+        return None
+    return {"level": "warn", "key": "card", "title": f"信用卡未繳 {_wan(card)}，超過半個月的生活費。",
+            "text": "卡費在堡壘裡算預留，會先扣掉可撐月數。", "how": "帳單日前把它繳掉，或確認是不是有大筆刷卡還沒對到。"}
+
+
+def _rule_savings(flow: dict, ft: dict):
+    if not flow.get("has_entries"):
+        return None
+    if flow["net"] < 0:
+        return {"level": "warn", "key": "savings", "title": f"本月支出比收入多 {_wan(-flow['net'])}。",
+                "text": f"收入 {_wan(flow['deposit'])}、支出 {_wan(flow['expense'])}，其中家用 {_wan(flow['household'])}。",
+                "how": "看一下支出裡有沒有投資或轉帳被記成支出；如果是真的入不敷出，下個月先盯家用。"}
+    rate = flow.get("savings_rate")
+    if rate is not None:
+        return {"level": "ok", "key": "savings", "title": f"本月存下 {_wan(flow['net'])}，存款率 {rate * 100:.0f}%。",
+                "text": f"收入 {_wan(flow['deposit'])}、支出 {_wan(flow['expense'])}。", "how": ""}
+    return None
+
+
+def _rule_need_sample(ft: dict):
+    if ft.get("need_override") or ft.get("need_sample_months", 0) >= NEED_SAMPLE_OK:
+        return None
+    return {"level": "info", "key": "need_sample",
+            "title": f"必要支出只有 {ft.get('need_sample_months', 0)} 個月的樣本。",
+            "text": f"可撐月數與財富自由都用這個數字（{_wan(ft.get('need'))}／月）算，樣本少就不準。",
+            "how": "補齊明細到 6 個月，或到堡壘直接填一個你認定的每月必要支出。"}
+
+
+def _rule_strengths(totals: dict, ft: dict, lf: dict):
+    good = []
+    if not totals["loan"]:
+        good.append("沒有貸款")
+    if (ft.get("runway") or 0) >= 12:
+        good.append(f"現金撐 {ft['runway']:g} 個月")
+    if ft["counts"]["bad"] == 0 and ft["counts"]["ok"] >= 4:
+        good.append("壓力測試沒有紅燈")
+    if lf.get("fire_state") == "ok":
+        good.append("已達財富自由門檻")
+    if not good:
+        return None
+    return {"level": "ok", "key": "strengths", "title": "做得好的地方：" + "、".join(good) + "。",
+            "text": "在這個基礎上把上面幾件做完，六題壓力測試可以全綠。", "how": ""}
+
+
+def advice_block(fortress: dict, ft: dict, conc: dict, accounts: list, brokers: list, flow: dict,
+                 totals: dict, lf: dict, register: dict) -> list:
+    items = [x for x in (
+        _rule_war(fortress, ft), _rule_layers(ft), _rule_concentration(conc), _rule_records(accounts, brokers, flow),
+        _rule_card(register, ft), _rule_savings(flow, ft), _rule_receivable(totals, ft), _rule_fire(lf),
+        _rule_need_sample(ft), _rule_strengths(totals, ft, lf),
+    ) if x]
+    items.sort(key=lambda x: LEVEL_ORDER.get(x["level"], 9))
+    for i, x in enumerate(items, 1):
+        x["no"] = i
+    return items
+
+
+def todo_block(accounts: list, brokers: list, advice: list) -> list:
+    out = []
+    unfilled = [a for a in accounts if a.get("unfilled") not in (None, 0)]
+    if unfilled:
+        out.append("補明細：" + "、".join(f"{a['name']}（差 {_wan(a['unfilled'])}）" for a in unfilled[:5]))
+    unreg = [a["name"] for a in accounts if not a.get("registered_this_month")]
+    if unreg:
+        out.append(f"登記餘額：{len(unreg)} 個帳戶這個月還沒登記（{'、'.join(unreg[:4])}{'…' if len(unreg) > 4 else ''}）")
+    plugs = [b for b in brokers if b.get("plug")]
+    if plugs:
+        out.append("拆證券明細：" + "、".join(f"{b['broker']} {_wan(b['plug'])}" for b in plugs))
+    for a in advice:
+        if a["level"] in ("bad", "warn") and a["key"] in ("war_flags", "war", "layers", "concentration", "card"):
+            out.append(a["title"].rstrip("。"))
+    return out
+
+
+# ── 組裝 ──────────────────────────────────────────────────────────────
+def build_report(month: str, basis_date: str, fortress: dict, register: dict, buckets: dict, month_cash: dict,
+                 snapshots: list, prev: Optional[dict] = None, generated_at: str = "") -> dict:
+    """一份月報。prev＝上一份月報的 payload（沒有＝第一份；那時只拿最近一次淨值快照當總資產的比較基準）。"""
+    liabilities = (fortress.get("ladder") or {}).get("liabilities") or {}
+    totals = totals_block(buckets, liabilities)
+    prev_totals = (prev or {}).get("totals")
+    prev_label = (prev or {}).get("month")
+    if not prev_totals and snapshots:
+        # 第一份：快照只有總數（＝總資產），其他分項不比
+        last = [s for s in snapshots if str(s.get("date") or "") < basis_date]
+        if last:
+            prev_totals = {"assets": _i(last[-1].get("total"))}
+            prev_label = f"快照 {str(last[-1].get('date'))[:10]}"
+    delta = compare(totals, prev_totals)
+    flow = flow_block(month_cash, delta)
+    accounts = accounts_block(register, prev, month)
+    brokers = brokers_block(register, prev)
+    conc = concentration(fortress)
+    ft = fortress_block(fortress)
+    lf = ladder_fire_block(fortress)
+    health = health_block(ft, conc, accounts, brokers, flow)
+    advice = advice_block(fortress, ft, conc, accounts, brokers, flow, totals, lf, register)
+    trend = [{"date": str(s.get("date"))[:10], "total": _i(s.get("total"))} for s in snapshots][-TREND_POINTS:]
+    trend.append({"date": basis_date, "total": totals["assets"], "now": True})
+    return {
+        "month": month, "basis_date": basis_date, "generated_at": generated_at, "first": prev is None,
+        "totals": totals, "prev": {"label": prev_label, "totals": prev_totals} if prev_totals else None, "delta": delta,
+        "flow": flow, "trend": trend, "accounts": accounts, "brokers": brokers, "concentration": conc,
+        "fortress": ft, "ladder_fire": lf, "health": health, "advice": advice,
+        "todo": todo_block(accounts, brokers, advice),
+        "card_outstanding": _i(register.get("card_outstanding")),
+    }

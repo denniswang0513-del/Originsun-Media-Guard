@@ -271,6 +271,17 @@
   .rg-hold .t { font-size:13px; }
   .rg-hold .t .nm span { color:var(--sub); font-size:11px; margin-left:4px; }
   .rg-go { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--pri); font-size:13px; }
+  .rg-go.rg-report { border-color:var(--ok); }
+  /* 月報（views/ledger-report.js）：大數字、建議卡的左邊色條 */
+  .mr-big { display:flex; align-items:baseline; gap:8px; }
+  .mr-big .n { font-size:34px; font-weight:700; line-height:1.05; color:#fff; font-variant-numeric:tabular-nums; }
+  .mr-big .n.g { color:var(--ok); } .mr-big .n.a { color:var(--warn); } .mr-big .n.r { color:var(--bad); }
+  .mr-big .u { font-size:14px; color:var(--sub); }
+  .mr-a { border-left:3px solid var(--line); }
+  .mr-a.mr-bad { border-left-color:var(--bad); } .mr-a.mr-warn { border-left-color:var(--warn); } .mr-a.mr-ok { border-left-color:var(--ok); }
+  .mr-a .mr-how { margin-top:4px; color:var(--ink); }
+  .m-btn-secondary { width:100%; min-height:40px; background:var(--field); color:var(--ink); border:1px solid var(--line); border-radius:10px; font-size:14px; }
+  .m-btn-secondary:disabled { opacity:.5; }
   .rg-go span:first-child { color:var(--sub); min-width:0; }
   /* 預留清單：手填的可點；已付的金額變淡 */
   .ft-tap-row { cursor:pointer; }

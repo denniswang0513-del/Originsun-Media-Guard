@@ -375,6 +375,23 @@ class FinanceLoanPayment(Base):
                                        name="uq_loanpay_loan_period"),)
 
 
+class FinanceMonthlyReport(Base):
+    """私帳月報（docs/MONTHLY_REPORT.md）：登記餘額儲存後自動產生的那一份，同帳本同月覆蓋。
+    payload 是 core.monthly_report.build_report 的整包（各分項數字、體檢、建議），下個月的月報拿它當「上月」。
+    為什麼是表不是 settings：手機在 NAS 上也要能看、能產生（settings 在 NAS 是唯讀副本）。"""
+    __tablename__ = "finance_monthly_reports"
+
+    id = Column(String(32), primary_key=True)
+    # server_default 照兄弟表一律 "parent"（tests/unit/test_ledger_entity.py 釘的規矩）
+    entity = Column(String(16), nullable=False, server_default="parent", index=True)
+    month = Column(String(7), nullable=False)                    # 'YYYY-MM'
+    basis_date = Column(String(10), nullable=True)               # 'YYYY-MM-DD' 數字是哪一天的
+    payload = Column(JSONB, nullable=False, default=dict)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now())
+    generated_by = Column(String(64), nullable=True)
+    __table_args__ = (UniqueConstraint("entity", "month", name="uq_monthly_report_entity_month"),)
+
+
 class FinanceFortressEarmark(Base):
     """私帳「堡壘」的預留清單（docs/FORTRESS_PLAN.md §2.2）：已經知道要付、還沒付的錢，手動那部分。
     貸款下一期與信用卡欠款是**算的時候自動帶入**，不落這張表。paid_at 非空＝已付：不進合計、留紀錄。
