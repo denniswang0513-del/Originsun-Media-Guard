@@ -125,8 +125,9 @@ def test_health_and_todo_reflect_records():
     assert any("補明細" in t and "富邦-收入戶" in t for t in r["todo"])
     assert any("台新" in t and "還沒登記" in t for t in r["todo"])
     assert any("富邦證券 5 萬" in t for t in r["todo"])
+    # BUG-10：流動性跟堡壘同一套顏色（3 個月是黃不是紅）
     fresh = health_block({"runway": 3, "tests": [{"key": "war", "state": "ok"}]}, {"top_pct": None, "total": 0}, [], [], {"has_entries": True})
-    assert fresh[0]["state"] == "bad" and fresh[3]["state"] == "ok"
+    assert fresh[0]["state"] == "warn" and fresh[3]["state"] == "ok"
 
 
 # ── 接線 ──
@@ -219,3 +220,33 @@ def test_headline_net_worth_matches_the_ladder_and_snapshots_compare_like_for_li
         code = js_code_only(repo_src(rel))
         assert "t.net_financial" in code and "t.cash_usable" in code, rel
     assert "FinanceNetSnapshot.auto" in repo_src("routers/api_monthly_report.py")
+
+
+def test_rule_thresholds_and_wording_after_domain_review():
+    """BUG-10（領域審查）：卡費一個月才提、應收講佔比不講「38 個月」、韌性用戰爭題判語、沒登記的叫他登記、
+    閒置零帳戶不算沒登記、財富自由 ok 帶前提、不 ok 給 warn、「六題全綠」→「台海那題可以轉綠」。"""
+    from core.monthly_report import CARD_MONTHS, _unregistered, _open_unfilled
+    ft = _fortress(tests=[{"key": k, "title": k, "state": ("bad" if k == "war" else "ok"),
+                           "verdict": "頭一個月拿得到的錢只有 0 萬，不夠 1 個月支出。先把實體現金補上。" if k == "war" else ""}
+                          for k in ("income", "market", "shock", "combined", "war", "care")])
+    reg = {**REGISTER, "card_outstanding": 60_000,
+           "accounts": REGISTER["accounts"] + [{"id": "z", "name": "玉山（個人）", "acct_kind": "bank", "balance": 0, "anchor_date": None, "unfilled": None},
+                                               {"id": "y", "name": "零頭戶", "acct_kind": "bank", "balance": 10, "anchor_date": "2026-09-17", "unfilled": -3}]}
+    r = build_report("2026-09", "2026-09-17", ft, reg, BUCKETS, {"deposit": 0, "expense": 0}, SNAPS)
+    keys = {a["key"]: a for a in r["advice"]}
+    assert CARD_MONTHS == 1.0 and "card" not in keys, "6 萬未繳 < 一個月必要支出 10.1 萬：正常帳單，不提"
+    assert "個月的支出還在外面" not in keys["receivable"]["title"] and "佔金融資產約 8%" in keys["receivable"]["text"]
+    assert "補滿" not in keys["receivable"]["how"]
+    h = {x["key"]: x for x in r["health"]}
+    assert h["resilience"]["text"].startswith("頭一個月拿得到的錢只有 0 萬"), "用那題自己的判語"
+    assert not _open_unfilled({"unfilled": -3}) and _open_unfilled({"unfilled": -100})
+    assert [a["name"] for a in _unregistered(r["accounts"])] == ["台新（個人）"], "玉山餘額 0 又沒登記過＝閒置，不算"
+    assert keys["records"]["how"].startswith("先補富邦-收入戶"), "有沒補的明細：先叫他補明細"
+    only_unreg = {**reg, "accounts": [{**a, "unfilled": (0 if a.get("unfilled") else a.get("unfilled"))} for a in reg["accounts"]]}
+    k3 = {a["key"]: a for a in build_report("2026-09", "2026-09-17", ft, only_unreg, BUCKETS, {"deposit": 0, "expense": 0}, SNAPS)["advice"]}
+    assert k3["records"]["how"].startswith("到「登記餘額」把台新（個人）") and "補到" not in k3["records"]["how"], "只有沒登記的：叫他登記，不是補明細"
+    assert "（稅前、4 個月樣本）" in keys["strengths"]["title"] and "台海那題可以轉綠" in keys["strengths"]["text"]
+    assert "第 4 層的錢不算可撐月數" in keys["layers"]["how"]
+    not_fi = _fortress(fire={"allowed": 50_000, "spend": 103_267, "ratio33": 0.45, "ratio25": 0.6, "current_rate": 0.07, "state": "bad", "pretax": True})
+    k2 = {a["key"]: a for a in build_report("2026-09", "2026-09-17", not_fi, REGISTER, BUCKETS, {}, SNAPS)["advice"]}
+    assert k2["fire_gap"]["level"] == "warn" and "差 5.3 萬／月" in k2["fire_gap"]["text"] and "fire_tax" not in k2

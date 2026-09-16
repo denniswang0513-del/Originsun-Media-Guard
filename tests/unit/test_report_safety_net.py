@@ -55,9 +55,10 @@ def test_ladder_fire_block_finds_next_rung_and_year_10():
 
 
 def test_todo_block_lists_unfilled_unregistered_plugs_and_urgent_advice():
-    accounts = [{"name": "A", "unfilled": -100, "registered_this_month": True},
-                {"name": "B", "unfilled": None, "registered_this_month": False},
-                {"name": "C", "unfilled": 0, "registered_this_month": True}]
+    accounts = [{"name": "A", "balance": 5, "unfilled": -100, "registered_this_month": True},
+                {"name": "B", "balance": 9, "unfilled": None, "registered_this_month": False},
+                {"name": "C", "balance": 1, "unfilled": 0, "registered_this_month": True},
+                {"name": "D", "balance": 0, "unfilled": None, "registered_this_month": False}]      # 閒置：不算沒登記（BUG-10）
     brokers = [{"broker": "X", "plug": 50_000}, {"broker": "Y", "plug": 0}]
     advice = [{"level": "bad", "key": "war", "title": "紅。"}, {"level": "info", "key": "fire_tax", "title": "稅"},
               {"level": "warn", "key": "records", "title": "帳沒記齊"}]

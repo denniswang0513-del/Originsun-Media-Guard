@@ -30,6 +30,24 @@ def is_broad_fund(name: str) -> bool:
 
 #: 應收超過幾個月的必要支出才提醒
 RECEIVABLE_MONTHS = 2
+#: 信用卡未繳超過幾個月的必要支出才提醒（半個月是正常的帳單週期，不是警訊）
+CARD_MONTHS = 1.0
+#: |還沒補的明細| 小於這個就當補齊（幾十元的零頭不值得叫）
+UNFILLED_IGNORE = 100
+#: 可撐月數的顏色門檻，跟堡壘同一套（core.fortress_logic.RUNWAY_GREEN／RUNWAY_AMBER）
+RUNWAY_GREEN, RUNWAY_AMBER = 6, 3
+
+
+def _open_unfilled(a: dict) -> bool:
+    """這個帳戶登記後還有沒補的明細（零頭不算）。"""
+    u = a.get("unfilled")
+    return u is not None and abs(int(u)) >= UNFILLED_IGNORE
+
+
+def _unregistered(accounts: list) -> list:
+    """這個月還沒登記的帳戶；餘額 0 又從沒登記過的閒置帳戶不算（玉山、樂天那種）。"""
+    return [a for a in accounts if not a.get("registered_this_month")
+            and not (int(a.get("balance") or 0) == 0 and a.get("unfilled") is None)]
 #: 必要支出的樣本月數低於這個就標「樣本少」
 NEED_SAMPLE_OK = 6
 #: 走勢最多帶幾個快照點
@@ -188,18 +206,21 @@ def ladder_fire_block(fortress: dict) -> dict:
 # ── 體檢（四個面向）───────────────────────────────────────────────────
 def health_block(ft: dict, conc: dict, accounts: list, brokers: list, flow: dict) -> list:
     runway = ft.get("runway")
-    if runway is None:
+    # 跟堡壘同一套顏色（那頁綠的話這裡不能寫「普通」）
+    tone = ft.get("tone") or ("na" if runway is None else ("g" if runway >= RUNWAY_GREEN else ("a" if runway >= RUNWAY_AMBER else "r")))
+    if runway is None or tone == "na":
         liq = ("na", "算不出來", "必要支出還沒有資料")
-    elif runway >= 12:
+    elif tone == "g":
         liq = ("ok", "好", f"現金撐 {runway:g} 個月")
-    elif runway >= 6:
-        liq = ("warn", "普通", f"現金撐 {runway:g} 個月，目標 12")
+    elif tone == "a":
+        liq = ("warn", "緊", f"現金撐 {runway:g} 個月，{RUNWAY_GREEN} 個月以上才算穩")
     else:
         liq = ("bad", "弱", f"現金只撐 {runway:g} 個月")
     war = next((t for t in ft.get("tests") or [] if t.get("key") == "war"), None) or {}
     ws = war.get("state") or "na"
-    res = {"ok": ("ok", "好", "極端情境撐得住"), "warn": ("warn", "緊", "極端情境撐得住但很緊"),
-           "bad": ("bad", "弱", "極端情境會被迫賣資產"), "na": ("na", "算不出來", "資料不足")}[ws if ws in ("ok", "warn", "bad") else "na"]
+    verdict = (war.get("verdict") or "").split("。")[0]      # 用那題自己的判語（沒標海外時不是「會被迫賣資產」）
+    res = {"ok": ("ok", "好", "極端情境撐得住"), "warn": ("warn", "緊", verdict or "極端情境撐得住但很緊"),
+           "bad": ("bad", "弱", verdict or "極端情境撐不住"), "na": ("na", "算不出來", "資料不足")}[ws if ws in ("ok", "warn", "bad") else "na"]
     tp = conc.get("top_pct")
     lt = conc.get("lookthrough")
     eff = float(lt["pct"]) if (lt and tp is not None) else tp
@@ -213,9 +234,10 @@ def health_block(ft: dict, conc: dict, accounts: list, brokers: list, flow: dict
         con = ("warn", "偏高", f"{conc['top_name']} 佔證券約 {eff * 100:.0f}%{via}")
     else:
         con = ("ok", "分散", f"最大的單一股票 {conc['top_name']} 佔 {tp * 100:.0f}%")
-    unfilled = [a for a in accounts if a.get("unfilled") not in (None, 0)]
-    unreg = [a for a in accounts if not a.get("registered_this_month")]
-    if not flow.get("has_entries") and unreg and len(unreg) == len(accounts):
+    unfilled = [a for a in accounts if _open_unfilled(a)]
+    unreg = _unregistered(accounts)
+    active = [a for a in accounts if not (int(a.get("balance") or 0) == 0 and a.get("unfilled") is None)]
+    if not flow.get("has_entries") and unreg and len(unreg) == len(active):
         rec = ("bad", "缺", "本月沒有收支明細，也沒登記餘額")
     elif unfilled or not flow.get("has_entries"):
         rec = ("warn", "缺", (f"{len(unfilled)} 個帳戶登記後還沒補明細" if unfilled else "本月還沒有收支明細"))
@@ -259,7 +281,8 @@ def _rule_layers(ft: dict):
     if surplus >= need:
         return {"level": "warn", "key": "layers", "title": f"第 1 層多了 {_wan(surplus)}，第 2 到 4 層卻還沒填滿。",
                 "text": f"{where}。錢是夠的（第 1 層目標只要 {_wan(l1['target'])}），只是全部掛在第 1 層，分層等於沒做。",
-                "how": f"到堡壘的帳戶分層，把 {_wan(need)} 的帳戶改標到第 2 到 4 層（例如把儲蓄戶、定存標到第 3 層），第 1 層留 {_wan(l1['have'] - need)} 還是夠用。"}
+                "how": f"到堡壘的帳戶分層，把 {_wan(need)} 的帳戶改標到第 2 到 4 層（例如把儲蓄戶、定存標到第 3 層），第 1 層留 {_wan(l1['have'] - need)} 還是夠用。"
+                       "帳戶是整個標的，湊不齊就實際轉一筆到獨立帳戶再標；分到第 4 層的錢不算可撐月數，那個數字會變小一點。"}
     return {"level": "warn", "key": "layers", "title": f"第 2 到 4 層合計還差 {_wan(need)}。",
             "text": f"{where}。第 1 層只多 {_wan(max(0, surplus))}，分完還不夠。",
             "how": "先把第 1 層多的分過去，剩下的差額用每月結餘補；應收收回來優先進第 3 層。"}
@@ -284,8 +307,8 @@ def _rule_concentration(conc: dict):
 
 
 def _rule_records(accounts: list, brokers: list, flow: dict):
-    unfilled = [a for a in accounts if a.get("unfilled") not in (None, 0)]
-    unreg = [a for a in accounts if not a.get("registered_this_month")]
+    unfilled = [a for a in accounts if _open_unfilled(a)]
+    unreg = _unregistered(accounts)
     plugs = [b for b in brokers if b.get("plug")]
     if not unfilled and not unreg and not plugs and flow.get("has_entries"):
         return None
@@ -296,29 +319,40 @@ def _rule_records(accounts: list, brokers: list, flow: dict):
     if not flow.get("has_entries"):
         parts.append("本月收支明細是空的，「存了多少」算不出來")
     if unreg:
-        parts.append(f"{len(unreg)} 個帳戶這個月還沒登記餘額")
+        last = max((str(a.get("anchor_date") or "") for a in unreg), default="")
+        parts.append(f"{len(unreg)} 個帳戶這個月還沒登記餘額" + (f"（上次 {last[5:].replace('-', '/')}）" if last else ""))
     if plugs:
         parts.append("、".join(f"{b['broker']}未拆明細 {_wan(b['plug'])}" for b in plugs))
-    names = "、".join(a["name"] for a in unfilled[:3]) or "、".join(a["name"] for a in unreg[:3])
+    if unfilled:
+        how = f"先補{'、'.join(a['name'] for a in unfilled[:3])}這幾戶的明細，補到「還沒補的明細」歸 0。"
+    elif unreg:
+        how = f"到「登記餘額」把{'、'.join(a['name'] for a in unreg[:3])}這幾戶今天的餘額登記一次。"
+    else:
+        how = "把本月的收支明細記進去。"
     return {"level": "warn", "key": "records", "title": "帳還沒記齊，這份月報有幾格是空的。",
             "text": "；".join(parts) + "。",
-            "how": f"先補{names}這幾戶的明細，補到「還沒補的明細」歸 0；每月登記一次全部帳戶，下個月就能算出存款率。"}
+            "how": how + "每月登記一次全部帳戶、明細補齊，下個月就能算出存款率。"}
 
 
 def _rule_receivable(totals: dict, ft: dict):
     need = ft.get("need") or 0
     if not need or totals["receivable"] < need * RECEIVABLE_MONTHS:
         return None
-    months = totals["receivable"] / need
+    share = _pct(totals["receivable"], totals["financial"])
     return {"level": "info", "key": "receivable",
-            "title": f"應收 {_wan(totals['receivable'])}，等於 {months:.1f} 個月的支出還在外面。",
-            "text": "這些是帳面上的錢，收回來才算數。",
-            "how": "每月固定催一次逾期最久的案；收回一半就能把第 3、4 層補滿，不用動任何投資。"}
+            "title": f"應收 {_wan(totals['receivable'])} 還在外面（稅前帳面數）。",
+            "text": f"佔金融資產約 {float(share or 0) * 100:.0f}%。這是案子的帳面數字，收回來才算數；未逾期的不用催。",
+            "how": "每月固定催一次逾期最久的案；月報下個版本會把逾期最久的五案列出來。"}
 
 
 def _rule_fire(lf: dict):
     if lf.get("fire_state") == "na":
         return None
+    if lf.get("fire_state") != "ok":
+        gap = lf["fire_spend"] - lf["fire_allowed"]
+        return {"level": "warn", "key": "fire_gap", "title": f"還沒到財富自由：不工作每月可花 {_wan(lf['fire_allowed'])}，現在每月花 {_wan(lf['fire_spend'])}。",
+                "text": f"差 {_wan(gap)}／月；達成率 {float(lf.get('fire_ratio33') or 0) * 100:.0f}%（33 倍法則）。",
+                "how": "兩條路：支出降到可花的數字以下，或金融資產再長；每月月報會盯這個比例。"}
     if lf.get("fire_pretax"):
         return {"level": "info", "key": "fire_tax", "title": "財富自由那格是稅前數字。",
                 "text": f"每月可花 {_wan(lf['fire_allowed'])} 沒扣股利所得稅與二代健保補充保費。",
@@ -329,9 +363,9 @@ def _rule_fire(lf: dict):
 def _rule_card(register: dict, ft: dict):
     card = _i(register.get("card_outstanding"))
     need = ft.get("need") or 0
-    if not need or card < need * 0.5:
+    if not need or card < need * CARD_MONTHS:
         return None
-    return {"level": "warn", "key": "card", "title": f"信用卡未繳 {_wan(card)}，超過半個月的生活費。",
+    return {"level": "warn", "key": "card", "title": f"信用卡未繳 {_wan(card)}，超過一個月的生活費。",
             "text": "卡費在堡壘裡算預留，會先扣掉可撐月數。", "how": "帳單日前把它繳掉，或確認是不是有大筆刷卡還沒對到。"}
 
 
@@ -367,11 +401,17 @@ def _rule_strengths(totals: dict, ft: dict, lf: dict):
     if ft["counts"]["bad"] == 0 and ft["counts"]["ok"] >= 4:
         good.append("壓力測試沒有紅燈")
     if lf.get("fire_state") == "ok":
-        good.append("已達財富自由門檻")
+        caveat = []
+        if lf.get("fire_pretax"):
+            caveat.append("稅前")
+        if not ft.get("need_override") and ft.get("need_sample_months", 0) < NEED_SAMPLE_OK:
+            caveat.append(f"{ft.get('need_sample_months', 0)} 個月樣本")
+        good.append("已達財富自由門檻" + (f"（{'、'.join(caveat)}）" if caveat else ""))
     if not good:
         return None
+    war_bad = any(t["key"] == "war" and t["state"] == "bad" for t in ft.get("tests") or [])
     return {"level": "ok", "key": "strengths", "title": "做得好的地方：" + "、".join(good) + "。",
-            "text": "在這個基礎上把上面幾件做完，六題壓力測試可以全綠。", "how": ""}
+            "text": "在這個基礎上把上面幾件做完，" + ("台海那題可以轉綠。" if war_bad else "體檢四格可以全綠。"), "how": ""}
 
 
 def advice_block(fortress: dict, ft: dict, conc: dict, accounts: list, brokers: list, flow: dict,
@@ -389,10 +429,10 @@ def advice_block(fortress: dict, ft: dict, conc: dict, accounts: list, brokers: 
 
 def todo_block(accounts: list, brokers: list, advice: list) -> list:
     out = []
-    unfilled = [a for a in accounts if a.get("unfilled") not in (None, 0)]
+    unfilled = [a for a in accounts if _open_unfilled(a)]
     if unfilled:
         out.append("補明細：" + "、".join(f"{a['name']}（差 {_wan(a['unfilled'])}）" for a in unfilled[:5]))
-    unreg = [a["name"] for a in accounts if not a.get("registered_this_month")]
+    unreg = [a["name"] for a in _unregistered(accounts)]
     if unreg:
         out.append(f"登記餘額：{len(unreg)} 個帳戶這個月還沒登記（{'、'.join(unreg[:4])}{'…' if len(unreg) > 4 else ''}）")
     plugs = [b for b in brokers if b.get("plug")]
