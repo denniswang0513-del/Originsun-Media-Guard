@@ -66,7 +66,7 @@ async function pick(host, month) {
 async function regen(host, btn) {
     await withBusy(btn, async () => {
         try {
-            const d = await mfetch(`${REPORT_API}/generate${Q}`, { method: 'POST', body: JSON.stringify({}) });
+            const d = await mfetch(`${REPORT_API}/generate${Q}`, { method: 'POST', body: {} });   // mfetch 自己 stringify
             _months = (await mfetch(REPORT_API + Q)).items || [];
             _month = d.month;
             _r = d.report;

@@ -119,7 +119,8 @@ async function saveAll(host, btn) {
     if (!accounts.length && !brokers.length && !holdings.length) { toast('還沒填任何數字', 'err'); return; }
     await withBusy(btn, async () => {
         try {
-            _data = await mfetch(REGISTER_API, { method: 'PUT', body: JSON.stringify({ date, accounts, holdings, brokers }) });
+            // mfetch 自己會 JSON.stringify(opts.body)（shell.js）：這裡傳物件，再包一層就是送字串字面值 → 422
+            _data = await mfetch(REGISTER_API, { method: 'PUT', body: { date, accounts, holdings, brokers } });
             host.innerHTML = draw(_data);
             // 月報：登記完後端已經把當月那份算好，頁頂給一條路過去（#report 隱藏路由）
             if (_data && _data.report_month) {

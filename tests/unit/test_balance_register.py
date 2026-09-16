@@ -160,7 +160,8 @@ def test_holdings_can_be_registered_share_by_share():
     assert 'data-k="last_price"' not in desk and 'data-k="cost_total"' not in desk
     assert "JSON.stringify({ date, accounts, holdings, brokers })" in desk
     mob = js_code_only(repo_src("frontend/m/views/ledger-register.js"))
-    assert 'data-holding="${esc(h.id)}"' in mob and "JSON.stringify({ date, accounts, holdings, brokers })" in mob
+    # 手機 mfetch 自己會 stringify（BUG-1）：body 傳物件
+    assert 'data-holding="${esc(h.id)}"' in mob and "body: { date, accounts, holdings, brokers }" in mob
     assert 'data-k="last_price"' not in mob
     assert ":scope > .m-form > input.rg-in" in mob, "券商總市值那格不能把持股的格子一起讀走"
 
@@ -177,3 +178,12 @@ def test_works_list_hides_private_ledger_projects_that_are_linked_to_a_crm_proje
     assert 'CrmProject.entity != "mine"' in cond, "母帳案一律列；只有私帳案才看連結"
     assert "_not_a_linked_mine_project()" in func_body(src, "async def list_admin_projects(")
     assert "_not_a_linked_mine_project()" in func_body(src, "def _published_works_base():")
+
+
+def test_mobile_views_pass_objects_to_mfetch_not_strings():
+    """🔴 BUG-1（polish 2026-09-17）：shell.js 的 mfetch 會自己 JSON.stringify(opts.body)。登記頁與月報頁又先
+    stringify 一次 → 送出去的是 JSON **字串字面值** → pydantic 422「Input should be a valid dictionary」——
+    手機按「儲存有填的」與「重新產生本月」永遠失敗。桌機的 finFetch 相反（原樣丟給 fetch），兩邊慣例不同。"""
+    for rel in ("frontend/m/views/ledger-register.js", "frontend/m/views/ledger-report.js", "frontend/m/views/ledger-fortress.js"):
+        code = js_code_only(repo_src(rel))
+        assert "body: JSON.stringify(" not in code, f"{rel}：手機 mfetch 的 body 要傳物件"
