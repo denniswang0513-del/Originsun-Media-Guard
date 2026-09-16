@@ -15,6 +15,10 @@ let _isCurrent = () => true;
 let _d = null;
 let _warOpen = false;
 let _layerTimer = null;
+//: 分層那張表「還沒存成功」的快照。🔴 change 當下就讀（不能等計時器）——
+//  400ms 內切到別的子視圖，finance.js 已經把 container.innerHTML 換掉，那時才讀會讀到 0 列，
+//  送出 `{account_layers:{}}`，而後端 merge_settings 是整份取代 → 全部分層被清空。
+let _pendingLayers = null;
 
 const CSS_ID = 'fortress-css';
 const KIND_LABEL = { bank: '銀行', cash: '現金', holding: '證券', card: '信用卡' };
@@ -26,7 +30,8 @@ const FLAG_KEYS = ['physical', 'offshore', 'usd'];
 function fmtWan(n) {
     if (n == null || isNaN(n)) return '—';
     const v = Math.round(Math.abs(n) / 1000) / 10;
-    return (n < 0 ? '−' : '') + v.toLocaleString('zh-TW', { maximumFractionDigits: 1 }) + ' 萬';
+    // 四捨五入到 0 的負數不要寫成「−0 萬」
+    return (n < 0 && v > 0 ? '−' : '') + v.toLocaleString('zh-TW', { maximumFractionDigits: 1 }) + ' 萬';
 }
 /** 月數 → 「9.1 個月」；null → — */
 function fmtMonths(m) {
@@ -183,6 +188,11 @@ function _injectCss() {
 export default async function render(container, ctx = {}) {
     _c = container;
     if (ctx.isCurrent) _isCurrent = ctx.isCurrent;
+    // 重新進這一頁：上一次掛載留下的計時器／待存快照／展開狀態都不要帶過來
+    clearTimeout(_layerTimer);
+    _layerTimer = null;
+    _pendingLayers = null;
+    _warOpen = false;
     _injectCss();
     const r = await finSubviewBoot(_c, {
         title: '堡壘', isCurrent: _isCurrent,
@@ -221,7 +231,9 @@ function _render() {
         </div>
     </div>`;
     _c.querySelector('#ft-acct-body')?.addEventListener('change', _onLayerChange);
+    _c.querySelector('#ft-em-body')?.addEventListener('click', _onEarmarkClick);
     _c.querySelectorAll('.ft-target-mult').forEach((el) => el.addEventListener('change', () => _ff.saveTargets()));
+    _applyPending();
     restore();
 }
 
@@ -302,9 +314,10 @@ function _earmarks(d) {
     const srcLabel = (e) => e.source === 'loan' ? '自動 · 貸款表' : e.source === 'card' ? '自動 · 卡帳' : '手動';
     const rows = (d.earmarks || []).map((e) => {
         const manual = e.source === 'manual';
+        // 用 data 屬性＋委派監聯，不把 id 內插進 onclick 的 JS 字串（esc 是 HTML escape，不是 JS escape）
         const ops = manual ? `<span class="ft-ops">
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finFortress.togglePaid('${esc(e.id)}', ${e.paid ? 'false' : 'true'}, this)">${e.paid ? '未付' : '已付'}</button>
-                <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._finFortress.delEarmark('${esc(e.id)}', this)">刪除</button></span>`
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" data-em="${esc(e.id)}" data-em-act="${e.paid ? 'unpaid' : 'paid'}">${e.paid ? '未付' : '已付'}</button>
+                <button class="crm-btn crm-btn-danger crm-btn-sm" data-em="${esc(e.id)}" data-em-act="del">刪除</button></span>`
             : '<span class="ft-src">自動</span>';
         return `<tr class="${e.paid ? 'paid' : ''}">
             <td>${esc(e.label)}${e.note ? `<div class="ft-src">${esc(e.note)}</div>` : ''}</td>
@@ -323,7 +336,7 @@ function _earmarks(d) {
     <div class="ft-tblwrap" style="margin-top:12px;">
     <table class="ft-tbl">
         <thead><tr><th>項目</th><th>到期</th><th>來源</th><th class="n">金額</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody id="ft-em-body">${rows}</tbody>
         <tfoot><tr><td colspan="3">未付合計，也就是第 2 層的目標</td><td class="n ft-num">$${fmtNum(d.earmark_total)}</td><td></td></tr></tfoot>
     </table>
     </div>
@@ -432,26 +445,81 @@ function _accounts(d) {
     <div class="ft-src" id="ft-layer-status" style="margin-top:6px;">改層別或勾標記後半秒內自動儲存。</div>`;
 }
 
+/** 目前這張表的分層與標記；表格不在畫面上（已切到別的子視圖）就回 null。 */
+function _readLayers() {
+    const rows = _c ? _c.querySelectorAll('#ft-acct-body tr[data-id]') : [];
+    if (!rows.length) return null;
+    const account_layers = {}, account_flags = {};
+    rows.forEach((tr) => {
+        const id = tr.dataset.id;
+        account_layers[id] = parseInt(tr.querySelector('.ft-layer').value, 10) || 1;
+        const flags = {};
+        FLAG_KEYS.forEach((k) => { flags[k] = !!tr.querySelector(`.ft-flag[data-flag="${k}"]`)?.checked; });
+        account_flags[id] = flags;
+    });
+    return { account_layers, account_flags };
+}
+
+/** 重畫後把「還沒存成功」的勾選貼回去 —— 在途的 PUT 回來會整頁重畫，不貼回去使用者的第二次修改會不見。 */
+function _applyPending() {
+    if (!_pendingLayers || !_c) return;
+    _c.querySelectorAll('#ft-acct-body tr[data-id]').forEach((tr) => {
+        const id = tr.dataset.id;
+        const lv = _pendingLayers.account_layers[id];
+        if (lv) tr.querySelector('.ft-layer').value = String(lv);
+        const f = _pendingLayers.account_flags[id] || {};
+        FLAG_KEYS.forEach((k) => {
+            const box = tr.querySelector(`.ft-flag[data-flag="${k}"]`);
+            if (box) box.checked = !!f[k];
+        });
+    });
+}
+
+function _layerStatus(msg) {
+    const st = document.getElementById('ft-layer-status');
+    if (st) st.textContent = msg;
+}
+
 function _onLayerChange(ev) {
     if (!ev.target.matches('.ft-layer, .ft-flag')) return;
-    const st = document.getElementById('ft-layer-status');
-    if (st) st.textContent = '儲存中…';
+    _pendingLayers = _readLayers();       // 🔴 現在就讀，不要等計時器（見 _pendingLayers 的註解）
+    _layerStatus('儲存中…');
     clearTimeout(_layerTimer);
     _layerTimer = setTimeout(() => _ff.saveLayers(), 400);
+}
+
+function _onEarmarkClick(ev) {
+    const b = ev.target.closest('[data-em]');
+    if (!b) return;
+    if (b.dataset.emAct === 'del') _ff.delEarmark(b.dataset.em, b);
+    else _ff.togglePaid(b.dataset.em, b.dataset.emAct === 'paid', b);
 }
 
 // ── 寫入（每次都拿回整份 payload 重畫） ────────────────────────
 async function _put(path, body, okMsg, btn) {
     if (btn) btn.disabled = true;
+    const wasPending = _pendingLayers;
     try {
         _d = await finFetchMine(path, { method: 'PUT', body: JSON.stringify(body) });
+        // 送出後才改到的那幾格還留在 _pendingLayers 裡（下一次計時器會補送）；這次送掉的就清掉
+        if (_pendingLayers === wasPending) _pendingLayers = null;
         if (!_isCurrent()) return;
         _render();
         if (okMsg) finToast(okMsg);
     } catch (e) {
         finToast('儲存失敗：' + e.message, true);
+        _layerStatus('上次儲存失敗，改一下任何一格會再試一次。');
         if (btn) btn.disabled = false;
     }
+}
+
+/** 目前存著的設定（後端正規化過的那份）。空白的輸入格以它為底，才不會被整份取代洗成預設。 */
+const _cfg = () => (_d && _d.settings) || { targets: {}, war: {} };
+/** 輸入格的數字；空白或非數字 → fallback（不要當成 0） */
+function _num(id, fallback) {
+    const el = document.getElementById(id);
+    const v = el && el.value.trim() !== '' ? Number(el.value) : NaN;
+    return isNaN(v) ? fallback : v;
 }
 
 const _ff = (window._finFortress = window._finFortress || {});
@@ -466,7 +534,8 @@ _ff.saveMonthly = (btn) => {
 _ff.autoMonthly = (btn) => _put('/fortress/settings', { monthly_need_override: 0 }, '改回自動平均', btn);
 
 _ff.saveTargets = () => {
-    const targets = {};
+    // 🔴 後端是整份取代：清空一格就會讓那一層掉回預設。以目前存著的那份為底，只覆蓋真的有填的格子。
+    const targets = { ..._cfg().targets };
     _c.querySelectorAll('.ft-target-mult').forEach((el) => {
         const v = parseFloat(el.value);
         if (v >= 0) targets[el.dataset.layer] = v;
@@ -477,28 +546,24 @@ _ff.saveTargets = () => {
 
 _ff.toggleWar = () => { _warOpen = !_warOpen; _render(); };
 _ff.saveWar = (btn) => {
-    const g = (id) => Number(document.getElementById(id).value) || 0;
+    // 空白格保留原本存著的值（整份取代，當成 0 會把假設洗掉：months 0 → 戰爭題永遠「撐得住」）
+    const w = _cfg().war || {};
     const war = {
-        months: Math.max(1, Math.round(g('ft-war-months'))),
-        bank_freeze_weeks: Math.max(0, Math.round(g('ft-war-freeze'))),
-        tw_drop: g('ft-war-tw') / 100,
-        us_drop: g('ft-war-us') / 100,
-        fx: 1 + g('ft-war-fx') / 100,
+        ...w,
+        months: Math.max(1, Math.round(_num('ft-war-months', w.months ?? 12))),
+        bank_freeze_weeks: Math.max(0, Math.round(_num('ft-war-freeze', w.bank_freeze_weeks ?? 4))),
+        tw_drop: _num('ft-war-tw', (w.tw_drop ?? 0) * 100) / 100,
+        us_drop: _num('ft-war-us', (w.us_drop ?? 0) * 100) / 100,
+        fx: 1 + _num('ft-war-fx', ((w.fx ?? 1) - 1) * 100) / 100,
     };
     _warOpen = false;
     _put('/fortress/settings', { war }, '已改戰爭假設', btn);
 };
 
 _ff.saveLayers = () => {
-    const account_layers = {}, account_flags = {};
-    _c.querySelectorAll('#ft-acct-body tr[data-id]').forEach((tr) => {
-        const id = tr.dataset.id;
-        account_layers[id] = parseInt(tr.querySelector('.ft-layer').value, 10) || 1;
-        const flags = {};
-        FLAG_KEYS.forEach((k) => { flags[k] = !!tr.querySelector(`.ft-flag[data-flag="${k}"]`)?.checked; });
-        account_flags[id] = flags;
-    });
-    _put('/fortress/settings', { account_layers, account_flags }, '已存分層');
+    // 🔴 只送 change 當下拍的那份快照；沒有快照（已切走、或剛存完）就不要送 —— 空的會把設定清光
+    if (!_pendingLayers) return;
+    _put('/fortress/settings', _pendingLayers, '已存分層');
 };
 
 _ff.addEarmark = async (btn) => {
