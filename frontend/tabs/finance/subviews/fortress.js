@@ -45,8 +45,17 @@ function fmtDue(s) {
     if (!s) return '本期';
     return s.slice(5, 7) + '/' + s.slice(8, 10);
 }
-function fmtLine(l) {
-    return l[2] === 'months' ? fmtMonths(l[1]) : fmtWan(l[1]);
+function fmtLine(l, ctx) {
+    const unit = l[2], v = l[1];
+    if (unit === 'months') return fmtMonths(v);
+    if (unit === 'years') return v == null || isNaN(v) ? '—' : (Math.round(v * 10) / 10).toLocaleString('zh-TW') + ' 年';
+    if (unit === 'pct') return v == null || isNaN(v) ? '—' : Number(v).toFixed(2) + '%';
+    if (unit === 'year_or_never') {
+        if (v == null) return '用不完';
+        const age = ctx && ctx.age != null ? `（${fmtNum(ctx.age + Number(v))} 歲）` : '';
+        return `第 ${fmtNum(v)} 年${age}`;
+    }
+    return fmtWan(v);
 }
 
 // ── 樣式（只注入一次） ────────────────────────────────────────
@@ -175,6 +184,18 @@ function _injectCss() {
 .ft .lad-note { font-size: 12.5px; color: #9ca3af; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #3a3a3a; line-height: 1.7; }
 .ft .lad-note b { color: #e0e0e0; }
 @media (max-width: 760px) { .ft .lad-rung { width: 100% !important; grid-template-columns: 28px 1fr; } .ft .lad-rung .free { grid-column: 2; text-align: left; } }
+.ft .ft-strip.fire { border-top: 4px solid #86efac; }
+.ft .ft-strip.fire.warn { border-top-color: #fbbf24; } .ft .ft-strip.fire.bad { border-top-color: #f87171; } .ft .ft-strip.fire.na { border-top-color: #6b7280; }
+.ft .fire-head { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 1.4fr); gap: 20px; align-items: end; }
+.ft .fire-rates { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ft .fire-k { background: #222; border: 1px solid #3a3a3a; border-radius: 6px; padding: 10px 12px; }
+.ft .fire-k.on { border-color: #86efac; background: #1f3a30; }
+.ft .fire-k .t { font-size: 11.5px; color: #9ca3af; } .ft .fire-k .v { font-size: 18px; font-weight: 600; color: #eee; margin-top: 2px; } .ft .fire-k .s { font-size: 11px; color: #6b7280; margin-top: 2px; }
+.ft .fire-lines { margin-top: 14px; padding-top: 10px; border-top: 1px dashed #3a3a3a; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 24px; }
+.ft .fire-lines .line { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: #9ca3af; padding: 3px 0; }
+.ft .fire-lines .line span:last-child { color: #e0e0e0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ft .ft-strip.fire .verdict { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #3a3a3a; font-size: 13.5px; line-height: 1.7; }
+@media (max-width: 900px) { .ft .fire-head { grid-template-columns: 1fr; } .ft .fire-lines { grid-template-columns: 1fr; } }
 .ft .ft-growth { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; align-items: end; height: 150px; }
 .ft .ft-growth .g-col { display: flex; flex-direction: column; justify-content: flex-end; height: 100%; gap: 4px; min-width: 0; }
 .ft .ft-growth .g-amt { font-size: 11.5px; color: #e0e0e0; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -255,6 +276,7 @@ function _render() {
         </div>
         <div class="ft-sec"><h3>壓力測試</h3><span class="why">每季看一次，六題都用上面的數字自動回答；台海戰爭與長期照護的假設可以自己調</span></div>
         <div class="ft-tests">${(d.tests || []).map((t, i) => _tower(t, i, d)).join('')}</div>
+        ${_fire(d)}
         ${_growth(d)}
         ${_ladder(d)}
         <div class="ft-sec"><h3>帳戶分層</h3><span class="why">一次設好就不用再動；證券預設第 5 層。改了會自動儲存</span></div>
@@ -500,6 +522,45 @@ function _ladder(d) {
 }
 
 
+/** 財富自由：此刻不工作、沒收入，每月可以花多少；照現在的花法錢什麼時候用完。 */
+function _fire(d) {
+    const f = d.fire;
+    if (!f || !f.by_rate) return '';
+    const st = STATE_PILL[f.state] ? f.state : 'na';
+    const cfg = _cfg().fire || {};
+    const pct = (v) => (Math.round((Number(v) || 0) * 1000) / 10).toFixed(1);
+    const rates = Object.entries(f.by_rate).map(([r, v]) => `
+        <div class="fire-k${Number(r) === Number(f.withdrawal_rate) ? ' on' : ''}">
+            <div class="t">提領率 ${pct(r)}%${Number(r) === Number(f.withdrawal_rate) ? '（判定用）' : ''}</div>
+            <div class="v ft-num">$${fmtNum(v)}</div>
+            <div class="s">${Number(r) <= 0.03 ? '撐 50 年以上、股票比重高' : (Number(r) < 0.04 ? '提早退休常用' : '經典 4% 法則，30 年')}</div>
+        </div>`).join('');
+    const ageTxt = f.age != null ? `你 ${fmtNum(f.age)} 歲，撐到 ${fmtNum(f.until_age)} 歲＝${fmtNum(f.horizon_years)} 年` : `沒填出生年，先模擬 ${fmtNum(f.horizon_years)} 年`;
+    return `
+    <div class="ft-sec"><h3>財富自由</h3><span class="why">此刻不工作、沒收入，每月可以花多少。${esc(ageTxt)}</span></div>
+    <div class="ft-strip fire ${st}">
+        <div class="fire-head">
+            <div><div class="ft-eyebrow">每月可以花</div>
+                <div class="ft-big"><span class="n tone-${st === 'ok' ? 'g' : st === 'warn' ? 'a' : st === 'bad' ? 'r' : 'na'}">${fmtWan(f.allowed).replace(' 萬', '')}</span><span class="u">萬</span></div>
+                <div class="ft-formula">你現在每月花 <span class="ft-num">$${fmtNum(f.spend)}</span>（含不工作後自付的健保、國保 $${fmtNum(f.self_pay)}）</div></div>
+            <div class="fire-rates">${rates}</div>
+        </div>
+        <div class="fire-lines">${(f.lines || []).map((l) => `<div class="line"><span>${esc(l[0])}</span><span>${fmtLine(l, f)}</span></div>`).join('')}</div>
+        <div class="verdict"><span class="pill ${st}">${STATE_PILL[st]}</span> ${esc(f.verdict || '')}</div>
+        <div class="ft-war" style="margin-top:12px;">
+            <label>提領率 %<input class="crm-input" id="ft-f-rate" type="number" min="1" max="10" step="0.25" value="${pct(cfg.withdrawal_rate ?? 0.035)}"></label>
+            <label>出生年<input class="crm-input" id="ft-f-birth" type="number" min="1900" max="2100" step="1" value="${fmtNum(cfg.birth_year || 0).replace(/,/g, '')}"></label>
+            <label>撐到幾歲<input class="crm-input" id="ft-f-until" type="number" min="40" max="120" step="1" value="${fmtNum(cfg.until_age || 90)}"></label>
+            <label>退休後每月其他收入（勞保年金、租金）<input class="crm-input" id="ft-f-extra" type="number" min="0" step="1000" value="${fmtNum(cfg.extra_monthly || 0).replace(/,/g, '')}"></label>
+            <label>從幾歲開始<input class="crm-input" id="ft-f-from" type="number" min="0" max="120" step="1" value="${fmtNum(cfg.extra_from_age || 65)}"></label>
+            <label>不工作多出來的每月固定支出<input class="crm-input" id="ft-f-self" type="number" min="0" step="100" value="${fmtNum(cfg.self_pay_monthly ?? 2000).replace(/,/g, '')}"></label>
+            <div class="full"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finFortress.saveFire(this)">重算</button>
+                <span class="ft-src" style="align-self:center;">報酬率與通膨沿用「資產預期成長」那段的假設；每月支出沿用「必要支出」</span></div>
+        </div>
+    </div>`;
+}
+
+
 /** 資產預期成長：第 5 層複利資本往後推，名目與「今天的購買力」各一條。 */
 function _growth(d) {
     const g = d.projection || {};
@@ -661,7 +722,7 @@ async function _put(path, body, okMsg, btn) {
 }
 
 /** 目前存著的設定（後端正規化過的那份）。空白的輸入格以它為底，才不會被整份取代洗成預設。 */
-const _cfg = () => (_d && _d.settings) || { targets: {}, war: {}, care: {}, growth: {}, plan: {}, ladder: {}, property: {}, account_layers: {}, account_flags: {} };
+const _cfg = () => (_d && _d.settings) || { targets: {}, war: {}, care: {}, growth: {}, plan: {}, ladder: {}, property: {}, fire: {}, account_layers: {}, account_flags: {} };
 /** 輸入格的數字；空白或非數字 → fallback（不要當成 0） */
 function _num(id, fallback) {
     const el = document.getElementById(id);
@@ -722,6 +783,18 @@ _ff.saveProperty = (btn) => {
         value: Math.max(0, Math.round(_num('ft-prop-value', 0))),
         note: String(note).trim().slice(0, 80),
     } }, '已存房產', btn);
+};
+
+_ff.saveFire = (btn) => {
+    const c = _cfg().fire || {};
+    _put('/fortress/settings', { fire: {
+        withdrawal_rate: _num('ft-f-rate', (c.withdrawal_rate ?? 0.035) * 100) / 100,
+        birth_year: Math.round(_num('ft-f-birth', c.birth_year ?? 0)),
+        until_age: Math.round(_num('ft-f-until', c.until_age ?? 90)),
+        extra_monthly: Math.max(0, Math.round(_num('ft-f-extra', c.extra_monthly ?? 0))),
+        extra_from_age: Math.round(_num('ft-f-from', c.extra_from_age ?? 65)),
+        self_pay_monthly: Math.max(0, Math.round(_num('ft-f-self', c.self_pay_monthly ?? 2000))),
+    } }, '已重算', btn);
 };
 
 _ff.savePlan = (btn) => {

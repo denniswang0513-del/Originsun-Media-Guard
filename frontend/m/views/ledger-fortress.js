@@ -81,6 +81,7 @@ export function fortressCardHtml(d) {
         ${bigHtml(d)}
         <div class="lg-sub">第 1 到 3 層 <span class="num">${esc(wan(cash.l1_3))}</span> − 預留 <span class="num">${esc(wan(d.earmark_total))}</span> ÷ 必要支出 <span class="num">${esc(wan(need))}</span></div>
         ${miniHtml(d)}
+        ${d.fire && d.fire.by_rate ? `<div class="lg-sub" style="margin-top:6px">不工作每月可花 <span class="num">${esc(wan(d.fire.allowed))}</span>，你現在花 <span class="num">${esc(wan(d.fire.spend))}</span></div>` : ''}
         <div class="ft-tap"><span>${esc(summaryLine(d))}</span><span>看堡壘 ›</span></div>
     </div>`;
 }
@@ -140,11 +141,32 @@ function draw(d) {
                 <span class="v amt">${money(need.used)}</span></div>
             <div class="lg-sub" style="margin-top:6px">要改請到桌機的堡壘分頁</div>
         </div>
+        ${fireHtml(d)}
         ${ladderHtml(d)}
         ${growthHtml(d)}
         <div class="m-h">壓力測試</div>
         <div class="m-card ft-tests">${(d.tests || []).map(testHtml).join('') || emptyBox('還沒有壓力測試')}</div>`;
 }
+
+/** 財富自由：此刻不工作、沒收入，每月可以花多少。唯讀，假設到桌機改。 */
+export function fireHtml(d) {
+    const f = d.fire;
+    if (!f || !f.by_rate) return '';
+    const rates = Object.entries(f.by_rate).map(([r, v]) => `<div class="lg-row"><span class="k">提領率 ${esc(String(Math.round(Number(r) * 1000) / 10))}%${Number(r) === Number(f.withdrawal_rate) ? '（判定用）' : ''}</span><span class="v num">${esc(money(v))}</span></div>`).join('');
+    const lines = (f.lines || []).map(l => `<div class="lg-row"><span class="k">${esc(l[0])}</span><span class="v num">${esc(lineVal(l[1], l[2], f))}</span></div>`).join('');
+    const who = f.age != null ? `你 ${esc(String(f.age))} 歲，撐到 ${esc(String(f.until_age))} 歲` : `模擬 ${esc(String(f.horizon_years))} 年`;
+    return `<div class="m-h">財富自由</div>
+        <div class="m-card">
+            <div class="lg-sub">此刻不工作、沒收入，每月可以花（${who}）</div>
+            <div class="ft-big"><span class="n ${({ ok: 'g', warn: 'a', bad: 'r' })[f.state] || ''}">${esc(wan(f.allowed))}</span></div>
+            <div class="lg-sub">你現在每月花 ${esc(money(f.spend))}（含不工作後自付的健保、國保）</div>
+            <div style="margin-top:8px">${rates}</div>
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--line)">${lines}</div>
+            <div class="lg-sub" style="margin-top:8px;color:var(--ink)">${esc(f.verdict || '')}</div>
+            <div class="lg-sub" style="margin-top:6px">提領率、出生年、退休後其他收入到桌機改</div>
+        </div>`;
+}
+
 
 /** 財富階梯：你在第幾階、不用想能花多少、距離下一階、贏過台灣多少家庭。唯讀，規劃欄位在桌機。 */
 function ladderHtml(d) {
@@ -214,7 +236,13 @@ function earmarkHtml(e) {
         <span class="v amt${e.paid ? ' ft-paid' : ''}">${money(e.amount)}</span></div>`;
 }
 
-const lineVal = (v, unit) => (unit === 'months' ? `${months(v)} 個月` : money(v));
+const lineVal = (v, unit, ctx) => {
+    if (unit === 'months') return `${months(v)} 個月`;
+    if (unit === 'years') return v == null ? '—' : `${months(v)} 年`;          // 一位小數同 months()
+    if (unit === 'pct') return v == null ? '—' : `${Number(v).toFixed(2)}%`;
+    if (unit === 'year_or_never') return v == null ? '用不完' : `第 ${v} 年${ctx && ctx.age != null ? `（${ctx.age + Number(v)} 歲）` : ''}`;
+    return money(v);
+};
 
 function testHtml(t) {
     const lines = (t.lines || []).map(([k, v, u]) => `<div class="line"><span>${esc(k)}</span><span>${esc(lineVal(v, u))}</span></div>`).join('');

@@ -57,6 +57,15 @@ LADDER_RUNGS = (
 )
 #: 規劃欄位的預設：想爬到第幾階（5＝6 億）、幾年內到
 DEFAULT_PLAN = {"target_rung": 5, "target_years": 20}
+#: 財富自由評估（owner 2026-09-16「此刻如果我不工作沒收入 我每個月可以花多少錢」；1989 年生；提領率依建議）。
+#: 提領率預設 3.5%：4% 法則（Bengen／Trinity）是 30 年退休期、50–75% 股票的研究；owner 要撐 50 年以上、
+#: 股票比重九成，Early Retirement Now 那派建議 3.25–3.5%。三個提領率都會顯示，這格只決定「判定用哪一個」。
+#: self_pay_monthly：不工作後要自付的健保第六類（約 826）＋國民年金（約 1,186），2024–25 費率的約數，可改。
+DEFAULT_FIRE = {"withdrawal_rate": 0.035, "birth_year": 1989, "until_age": 90,
+                "extra_monthly": 0, "extra_from_age": 65, "self_pay_monthly": 2000}
+FIRE_RATES = (0.03, 0.035, 0.04)
+#: 沒有出生年時模擬幾年
+FIRE_DEFAULT_HORIZON = 50
 #: 房產（owner 2026-09-16「可以新增房產的選項 但我現在沒有」）：手填估值，只算進**財富階梯的淨值**，
 #: 不進五層、不進可撐月數、不進長照題 —— 房子不是能拿來付帳的錢。有房貸的話貸款那邊本來就會扣。
 DEFAULT_PROPERTY = {"value": 0, "note": ""}
@@ -211,6 +220,18 @@ def normalize_settings(raw) -> dict:
                 plan[k] = max(lo, min(hi, int(float((raw["plan"])[k]))))
             except (TypeError, ValueError):
                 pass
+    fire = dict(DEFAULT_FIRE)
+    fire_bounds = {"withdrawal_rate": (0.01, 0.10), "birth_year": (0, 2100), "until_age": (40, 120),
+                   "extra_monthly": (0, 10_000_000), "extra_from_age": (0, 120), "self_pay_monthly": (0, 1_000_000)}
+    for k, v in (raw.get("fire") or {}).items():
+        if k not in DEFAULT_FIRE:
+            continue
+        try:
+            n = float(v) if k == "withdrawal_rate" else int(float(v))
+        except (TypeError, ValueError):
+            continue
+        lo, hi = fire_bounds[k]
+        fire[k] = max(lo, min(hi, n))
     prop = dict(DEFAULT_PROPERTY)
     raw_p = raw.get("property") or {}
     try:
@@ -233,14 +254,14 @@ def normalize_settings(raw) -> dict:
         hl = 5
     return {"account_layers": layers, "account_flags": flags, "holdings_layer": hl if 1 <= hl <= 5 else 5,
             "targets": targets, "monthly_need_override": override, "war": war, "care": care, "growth": growth,
-            "ladder": ladder, "plan": plan, "property": prop}
+            "ladder": ladder, "plan": plan, "property": prop, "fire": fire}
 
 
 def merge_settings(current: dict, patch: dict) -> dict:
     """PUT 設定：淺層合併（account_layers／account_flags／targets／war 各自整份取代；其餘逐鍵）。"""
     out = normalize_settings(current)
     patch = patch if isinstance(patch, dict) else {}
-    for k in ("account_layers", "account_flags", "targets", "war", "care", "growth", "ladder", "plan", "property"):
+    for k in ("account_layers", "account_flags", "targets", "war", "care", "growth", "ladder", "plan", "property", "fire"):
         if k in patch and isinstance(patch[k], dict):
             out[k] = patch[k]
     for k in ("holdings_layer", "monthly_need_override"):
@@ -520,6 +541,76 @@ def effort_focus(base: float, growth: dict) -> dict:
     return {"passive": _m(gain), "added": _m(add), "passive_wins": gain > add}
 
 
+def fire_simulate(assets: float, monthly: float, rate: float, inflation: float, years: int,
+                  extra_monthly: float = 0, extra_from_year: int = 10 ** 6) -> tuple:
+    """逐年模擬：資產先長、再提領（今年的生活費隨通膨調、扣掉那一年開始有的其他收入）。
+    回 (第幾年用完 或 None, 終點還剩多少)。"""
+    a = float(assets)
+    for y in range(1, int(years) + 1):
+        a *= 1 + float(rate)
+        need = float(monthly) * 12 * (1 + float(inflation)) ** (y - 1)
+        if y >= extra_from_year:
+            need -= float(extra_monthly) * 12 * (1 + float(inflation)) ** (y - 1)
+        a -= max(0.0, need)
+        if a < 0:
+            return y, 0
+    return None, _m(a)
+
+
+def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict, fire: dict, this_year: int) -> dict:
+    """財富自由：此刻不工作、沒收入，每月可以花多少；照現在的花法錢什麼時候用完。
+    資產＝金融資產（五層合計）；支出＝必要支出＋不工作後要自付的固定支出（健保、國保）。
+    提領率的研究都是美國市場資料、30 年退休期、50–75% 股票；要撐 50 年以上又股票比重高的人用 3.25–3.5%。"""
+    spend = float(monthly_used or 0) + float(fire["self_pay_monthly"])
+    by_rate = {f"{r:g}": _m(float(financial) * r / 12) for r in FIRE_RATES}
+    chosen = float(fire["withdrawal_rate"])
+    allowed = _m(float(financial) * chosen / 12)
+    age = (this_year - int(fire["birth_year"])) if fire["birth_year"] and this_year else None
+    horizon = max(1, int(fire["until_age"]) - age) if age is not None else FIRE_DEFAULT_HORIZON
+    extra_from = max(1, int(fire["extra_from_age"]) - age) if age is not None else 10 ** 6
+    base = {"spend": _m(spend), "self_pay": _m(fire["self_pay_monthly"]), "allowed": allowed, "by_rate": by_rate,
+            "withdrawal_rate": chosen, "age": age, "until_age": int(fire["until_age"]), "horizon_years": horizon}
+    if spend <= 0 or financial <= 0:
+        return {**base, "state": "na", "verdict": "先設定每月必要支出才算得出來。", "lines": []}
+    current_rate = spend * 12 / float(financial)
+    fi25, fi33 = spend * 12 * 25, spend * 12 * 100 / 3
+    r, infl = float(growth["rate"]), float(growth["inflation"])
+    runs_out, left = fire_simulate(financial, spend, r, infl, horizon, fire["extra_monthly"], extra_from)
+    runs_out0, _ = fire_simulate(financial, spend, 0.0, infl, horizon, fire["extra_monthly"], extra_from)
+    cash_years = round(float(cash3) / spend / 12, 1)
+    end_txt = f"{int(fire['until_age'])} 歲" if age is not None else f"第 {horizon} 年"
+    when = lambda y: f"第 {y} 年" + (f"（{age + y} 歲）" if age is not None and y else "")  # noqa: E731
+    within = current_rate <= chosen
+    if within and runs_out is None:
+        st = STATE_OK
+        vd = (f"已達財富自由。照現在的花法（{_wan(spend)}／月）只用到資產的 {current_rate:.2%}，低於 {chosen:.1%} 的安全提領率；"
+              f"模擬到 {end_txt}用不完。要注意的不是錢夠不夠，是股票比重與現金層：現金只撐 {cash_years:g} 年不賣股票。")
+    elif runs_out is None:
+        st = STATE_WARN
+        vd = (f"模擬到底用不完，但現在的花法用到資產的 {current_rate:.2%}，高於你設的 {chosen:.1%}。"
+              f"這代表答案很依賴報酬率假設（{r:.0%}）；報酬差一點就撐不到。")
+    elif within:
+        st = STATE_WARN
+        vd = (f"提領率 {current_rate:.2%} 在安全範圍內，但照 {r:.0%} 報酬模擬，{when(runs_out)}會用完 —— "
+              f"通膨與年數把它吃掉了。把「退休後其他收入」填進來再看。")
+    else:
+        st = STATE_BAD
+        vd = (f"還沒到。現在的花法用到資產的 {current_rate:.2%}，{when(runs_out)}會用完。"
+              f"要嘛每月支出降到 {_wan(allowed)} 以下，要嘛資產再多 {_wan(max(0.0, fi25 - financial))} 到 25 倍門檻。")
+    return {
+        **base, "current_rate": round(current_rate, 4),
+        "fi25": _m(fi25), "fi33": _m(fi33), "ratio25": round(float(financial) / fi25, 2), "ratio33": round(float(financial) / fi33, 2),
+        "runs_out_year": runs_out, "runs_out_age": (age + runs_out) if (age is not None and runs_out) else None,
+        "left_at_end": left, "runs_out_year_zero": runs_out0, "cash_years": cash_years, "state": st, "verdict": vd,
+        "lines": [["每月支出（含不工作後自付的健保、國保）", _m(spend), "twd"],
+                  ["你現在的花法對應提領率", round(current_rate * 100, 2), "pct"],
+                  ["25 倍法則的門檻", _m(fi25), "twd"], ["33 倍法則的門檻", _m(fi33), "twd"],
+                  ["只靠現金不賣股票可以撐", cash_years, "years"],
+                  [f"報酬 {r:.0%}、通膨 {infl:.0%}，錢用完在", runs_out, "year_or_never"],
+                  ["報酬 0% 的話用完在", runs_out0, "year_or_never"]],
+    }
+
+
 def _ladder_block(have: dict, settings: dict, liabilities: dict) -> dict:
     """財富階梯那一段：你在第幾階、贏過台灣多少家庭、規劃欄位的答案、這一階該把力氣放哪。
     淨值＝五層合計 ＋ 房產（手填估值）− 負債（卡債＋貸款剩餘本金）。不含應收帳款與器材
@@ -628,6 +719,8 @@ def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: di
         "projection": {"base": _m(have[5]), **settings["growth"],
                        "rows": project_growth(have[5], settings["growth"])},
         "ladder": _ladder_block(have, settings, liabilities or {}),
+        "fire": fire_block(sum(have.values()), cash3, used, settings["growth"], settings["fire"],
+                           int(str(today)[:4]) if str(today)[:4].isdigit() else 0),
         "accounts": [{"id": a.get("id"), "name": a.get("name"), "kind": a.get("kind"), "balance": int(a.get("balance") or 0),
                       "currency": a.get("currency") or "TWD", "layer": a["layer"], "flags": a["flags"]} for a in accts],
         "settings": settings,

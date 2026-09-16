@@ -1,7 +1,7 @@
 """私帳「堡壘」（docs/FORTRESS_PLAN.md）：純規則用 demo 的範例數字釘；端點契約與掛載掃原始碼。"""
 from core.fortress_logic import (DEFAULT_TARGET_MONTHS, DEFAULT_WAR, STATE_BAD, STATE_OK, STATE_WARN, assign_layers, build, layer_sums,
                                  merge_settings, normalize_settings, runway_months, stress_tests, tone)
-from tests.unit._srcscan import code_only, func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, js_code_only, js_func_body, repo_src
 
 # 桌機 demo v3 的範例：層 1 = 玉山 18 萬＋實體 8 萬；層 2 = 國泰 22 萬；層 3 = 中信 55 萬；層 4 = 永豐 30 萬＋美元現金 15 萬；
 # 層 5 = 台股 120 萬＋美股 90 萬。信用卡 4.5 萬走預留（不再當負餘額，demo 那樣會算兩次）。
@@ -408,3 +408,54 @@ def test_property_only_counts_toward_the_ladder():
     assert care_b == care_w, "長照題也不變"
     assert normalize_settings({"property": {"value": -5}})["property"]["value"] == 0
     assert normalize_settings({})["property"] == {"value": 0, "note": ""}, "預設沒有房產"
+
+
+# ── 財富自由（owner 2026-09-16「此刻如果我不工作沒收入 我每個月可以花多少錢」；1989 年生；提領率 3.5%）──
+def test_fire_block_with_the_owners_numbers():
+    """三個提領率都給；判定用 3.5%（要撐 50 年以上、股票比重九成，4% 太樂觀）。
+    支出＝必要支出＋不工作後自付的健保、國保。模擬含通膨、算到 90 歲。"""
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 2_883_940},
+             {"id": "e", "name": "證券", "kind": "holding", "balance": 47_063_708}]
+    d = build(accts, [], 94206, {"account_layers": {"e": 5}}, "2026-09-16", need_months=6)
+    f = d["fire"]
+    assert f["age"] == 37 and f["until_age"] == 90 and f["horizon_years"] == 53, "1989 年生，2026 年 37 歲"
+    assert f["spend"] == 94206 + 2000 and f["self_pay"] == 2000
+    assert f["by_rate"] == {"0.03": 124869, "0.035": 145681, "0.04": 166492}
+    assert f["allowed"] == 145681 and f["withdrawal_rate"] == 0.035
+    assert f["current_rate"] == 0.0231 and f["ratio25"] == 1.73 and f["ratio33"] == 1.3
+    assert f["runs_out_year"] is None and f["runs_out_year_zero"] == 32, "6% 用不完；0% 第 32 年用完"
+    assert f["cash_years"] == 2.5 and f["state"] == STATE_OK and "已達財富自由" in f["verdict"]
+    units = {l[2] for l in f["lines"]}
+    assert units == {"twd", "pct", "years", "year_or_never"}
+
+
+def test_fire_states_and_extra_income():
+    """花太多 → 會用完 → 還沒到；65 歲後有年金 → 撐更久。沒填出生年 → 模擬 50 年、不寫歲數。"""
+    from core.fortress_logic import fire_simulate
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 2_883_940},
+             {"id": "e", "name": "證券", "kind": "holding", "balance": 47_063_708}]
+    bad = build(accts, [], 250_000, {"account_layers": {"e": 5}}, "2026-09-16", need_months=6)["fire"]
+    assert bad["state"] == STATE_BAD and bad["runs_out_year"] == 29 and bad["runs_out_age"] == 66 and "還沒到" in bad["verdict"]
+    with_pension = build(accts, [], 250_000, {"account_layers": {"e": 5}, "fire": {"extra_monthly": 60_000, "extra_from_age": 65}},
+                         "2026-09-16", need_months=6)["fire"]
+    assert (with_pension["runs_out_year"] or 999) > bad["runs_out_year"], "65 歲後每月多 6 萬，撐更久"
+    noage = build(accts, [], 94206, {"account_layers": {"e": 5}, "fire": {"birth_year": 0}}, "2026-09-16", need_months=6)["fire"]
+    assert noage["age"] is None and noage["horizon_years"] == 50 and "歲" not in noage["verdict"]
+    # 純函式：不長也不領 → 一年就見底；有其他收入從第 3 年起 → 之後不再減
+    assert fire_simulate(100, 100, 0.0, 0.0, 5) == (1, 0)
+    assert fire_simulate(1000, 10, 0.0, 0.0, 5, extra_monthly=10, extra_from_year=3)[1] == 1000 - 240
+    s = normalize_settings({"fire": {"withdrawal_rate": 0.5, "until_age": 30, "birth_year": "1989"}})["fire"]
+    assert s["withdrawal_rate"] == 0.10 and s["until_age"] == 40 and s["birth_year"] == 1989, "有上下限"
+
+
+def test_line_units_render_on_both_frontends():
+    """🔴 長照那題的 'years' 單位上線時兩邊都被當成金額印成「13.1 萬」（沒有測試釘）。
+    現在四種單位都要有自己的寫法：months／years／pct／year_or_never（null＝用不完）。"""
+    desk = js_func_body(js_code_only(repo_src("frontend/tabs/finance/subviews/fortress.js")), "function fmtLine(l, ctx) {")
+    for u in ("'months'", "'years'", "'pct'", "'year_or_never'"):
+        assert u in desk, u
+    assert "'用不完'" in desk
+    mob = js_code_only(repo_src("frontend/m/views/ledger-fortress.js"))
+    for u in ("'months'", "'years'", "'pct'", "'year_or_never'"):
+        assert u in js_func_body(mob, "const lineVal = (v, unit, ctx) => {"), u
+    assert "fireHtml(d)" in mob and "不工作每月可花" in mob, "堡壘頁有卡、總覽頂卡有一行"
