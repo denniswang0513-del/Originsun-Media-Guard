@@ -436,9 +436,10 @@ def test_fire_states_and_extra_income():
              {"id": "e", "name": "證券", "kind": "holding", "balance": 47_063_708}]
     bad = build(accts, [], 250_000, {"account_layers": {"e": 5}}, "2026-09-16", need_months=6)["fire"]
     assert bad["state"] == STATE_BAD and bad["runs_out_year"] == 29 and bad["runs_out_age"] == 66 and "還沒到" in bad["verdict"]
-    with_pension = build(accts, [], 250_000, {"account_layers": {"e": 5}, "fire": {"extra_monthly": 60_000, "extra_from_age": 65}},
+    # 年金從 65 歲起只比「用完那年」（66 歲）早一年，推不動；從 50 歲起就看得出差別
+    with_pension = build(accts, [], 250_000, {"account_layers": {"e": 5}, "fire": {"extra_monthly": 60_000, "extra_from_age": 50}},
                          "2026-09-16", need_months=6)["fire"]
-    assert (with_pension["runs_out_year"] or 999) > bad["runs_out_year"], "65 歲後每月多 6 萬，撐更久"
+    assert (with_pension["runs_out_year"] or 999) > bad["runs_out_year"], "50 歲後每月多 6 萬，撐更久"
     noage = build(accts, [], 94206, {"account_layers": {"e": 5}, "fire": {"birth_year": 0}}, "2026-09-16", need_months=6)["fire"]
     assert noage["age"] is None and noage["horizon_years"] == 50 and "歲" not in noage["verdict"]
     # 純函式：不長也不領 → 一年就見底；有其他收入從第 3 年起 → 之後不再減
