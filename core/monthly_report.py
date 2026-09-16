@@ -18,7 +18,9 @@ CONCENTRATION_WARN = 0.25
 CONCENTRATION_BAD = 0.35
 #: 名字裡有這些字的持股視為**指數型／分散的基金**，不算「一檔股票」（集中度那條只盯單一公司）
 BROAD_FUND_WORDS = ("vanguard", "ishares", "spdr", "etf", "all-world", "total ", "world", "s&p", "0050", "006208", "vti", "vwra", "vt ",
-                    "台灣50", "臺灣50", "台灣 50", "指數", "全球", "全世界", "市場", "高股息", "定存", "活存", "保險", "壽", "未拆明細", "複委託")
+                    "台灣50", "臺灣50", "台灣 50", "台50", "指數", "高股息", "定存", "活存", "現金", "外幣", "保險", "壽", "未拆明細", "複委託")
+#: 這些指數型基金裡台積電佔一半左右（2024 起 >50%，這裡用約數）：最大的單一股票是台積電時，穿透後的曝險要提一句
+TSMC_LOOKTHROUGH = {"0050": 0.55, "006208": 0.55, "台灣50": 0.55, "臺灣50": 0.55, "台50": 0.55}
 
 
 def is_broad_fund(name: str) -> bool:
@@ -138,10 +140,17 @@ def concentration(fortress: dict) -> dict:
     stocks = [(n, v) for n, v in hs if not is_broad_fund(n)]
     top = stocks[0] if stocks else ("", 0)
     funds_pct = _pct(sum(v for n, v in hs if is_broad_fund(n)), total)
+    # 穿透：台積電直接持有＋台灣50 類基金裡的那一半（約數）
+    lookthrough = None
+    if "台積電" in top[0]:
+        via = sum(v * w for n, v in hs for k, w in TSMC_LOOKTHROUGH.items() if k in n.lower())
+        if via > 0:
+            lookthrough = {"value": int(round(top[1] + via)), "pct": _pct(top[1] + via, total)}
     return {"total": total, "top_name": top[0], "top_value": top[1], "top_pct": _pct(top[1], total) if stocks else None,
             "top3_pct": _pct(sum(v for _, v in stocks[:3]), total) if stocks else None,
             "top3": [{"name": n, "value": v} for n, v in stocks[:3]], "funds_pct": funds_pct,
-            "biggest_name": hs[0][0] if hs else "", "biggest_pct": _pct(hs[0][1], total) if hs else None}
+            "biggest_name": hs[0][0] if hs else "", "biggest_pct": _pct(hs[0][1], total) if hs else None,
+            "lookthrough": lookthrough}
 
 
 def fortress_block(fortress: dict) -> dict:
@@ -192,13 +201,16 @@ def health_block(ft: dict, conc: dict, accounts: list, brokers: list, flow: dict
     res = {"ok": ("ok", "好", "極端情境撐得住"), "warn": ("warn", "緊", "極端情境撐得住但很緊"),
            "bad": ("bad", "弱", "極端情境會被迫賣資產"), "na": ("na", "算不出來", "資料不足")}[ws if ws in ("ok", "warn", "bad") else "na"]
     tp = conc.get("top_pct")
+    lt = conc.get("lookthrough")
+    eff = float(lt["pct"]) if (lt and tp is not None) else tp
+    via = "（含台灣50 裡的）" if lt else ""
     if tp is None:
         con = ("ok", "分散", f"都是分散的基金（最大 {conc.get('biggest_name') or '—'} 佔 {float(conc.get('biggest_pct') or 0) * 100:.0f}%）") \
             if conc.get("total") else ("na", "沒有持股", "")
-    elif tp >= CONCENTRATION_BAD:
-        con = ("bad", "高", f"{conc['top_name']} 佔證券 {tp * 100:.0f}%")
-    elif tp >= CONCENTRATION_WARN:
-        con = ("warn", "偏高", f"{conc['top_name']} 佔證券 {tp * 100:.0f}%")
+    elif eff >= CONCENTRATION_BAD:
+        con = ("bad", "高", f"{conc['top_name']} 佔證券約 {eff * 100:.0f}%{via}")
+    elif eff >= CONCENTRATION_WARN:
+        con = ("warn", "偏高", f"{conc['top_name']} 佔證券約 {eff * 100:.0f}%{via}")
     else:
         con = ("ok", "分散", f"最大的單一股票 {conc['top_name']} 佔 {tp * 100:.0f}%")
     unfilled = [a for a in accounts if a.get("unfilled") not in (None, 0)]
@@ -257,12 +269,18 @@ def _rule_concentration(conc: dict):
     tp = conc.get("top_pct")
     if tp is None or tp < CONCENTRATION_WARN:
         return None
-    lvl = "bad" if tp >= CONCENTRATION_BAD else "warn"
+    lt = conc.get("lookthrough")
+    eff = float(lt["pct"]) if lt else tp                     # 穿透後的比重（有的話）決定等級
+    lvl = "bad" if eff >= CONCENTRATION_BAD else "warn"
+    via = f"；加上台灣50 類基金裡的那一半，實際約 {float(lt['pct']) * 100:.0f}%（{_wan(lt['value'])}）" if lt else ""
+    how = (f"已經超過 {int(CONCENTRATION_BAD * 100)}%：考慮分批賣到 30% 以下（賣出會有稅與二代健保，分年賣），新資金一律進別的標的。"
+           if lvl == "bad" else
+           f"不必賣，先訂上限：新資金優先進別的標的；超過 {int(CONCENTRATION_BAD * 100)}% 再賣一部分換分散的 ETF。")
     return {"level": lvl, "key": "concentration",
-            "title": f"{conc['top_name']} 一檔佔證券 {tp * 100:.0f}%，一檔股票決定你 {tp * 100:.0f}% 的投資。",
-            "text": f"{conc['top_name']} {_wan(conc['top_value'])}；單一股票前三檔合計佔 {float(conc.get('top3_pct') or 0) * 100:.0f}%，"
+            "title": f"{conc['top_name']} 一檔佔證券 {tp * 100:.0f}%，一檔股票決定你 {eff * 100:.0f}% 的投資。",
+            "text": f"{conc['top_name']} {_wan(conc['top_value'])}{via}；單一股票前三檔合計佔 {float(conc.get('top3_pct') or 0) * 100:.0f}%，"
                     f"指數型基金佔 {float(conc.get('funds_pct') or 0) * 100:.0f}%（那些本身就是分散的，不算）。",
-            "how": f"不必賣，先訂上限：之後的新資金優先進別的標的；如果它漲到超過證券的 {int(CONCENTRATION_BAD * 100) + 10}%，賣一部分換分散的 ETF。這條每月月報會自動盯。"}
+            "how": how + "這條每月月報會自動盯。"}
 
 
 def _rule_records(accounts: list, brokers: list, flow: dict):

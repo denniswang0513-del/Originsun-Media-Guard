@@ -83,9 +83,17 @@ def test_concentration_ignores_broad_index_funds():
     c = concentration(_fortress())
     assert c["top_name"] == "台積電" and abs(c["top_pct"] - 0.344) < 0.001
     assert abs(c["funds_pct"] - 0.656) < 0.001 and c["biggest_name"] == "Vanguard FTSE All-World"
+    # BUG-9：0050 裡約一半是台積電 → 穿透後 14.4M + 0.55×7.45M ≈ 44%，等級照穿透後的算（bad），做法不再說「等到 45% 再賣」
+    assert c["lookthrough"] and abs(c["lookthrough"]["pct"] - 0.442) < 0.002
     r = build_report("2026-09", "2026-09-17", _fortress(), REGISTER, BUCKETS, {}, SNAPS)
     conc_adv = next(a for a in r["advice"] if a["key"] == "concentration")
-    assert "台積電" in conc_adv["title"] and conc_adv["level"] == "warn"
+    assert "台積電" in conc_adv["title"] and conc_adv["level"] == "bad" and "45%" not in conc_adv["how"]
+    assert "分批賣" in conc_adv["how"] and "實際約 44%" in conc_adv["text"]
+    h = next(x for x in r["health"] if x["key"] == "concentration")
+    assert h["state"] == "bad" and "約 44%" in h["text"]
+    # 外幣現金列、台50 不是一檔股票；市場先生、全球晶片不是基金（人壽本來就算非股票）
+    assert is_broad_fund("美元現金") and is_broad_fund("日圓現金") and is_broad_fund("富邦台50")
+    assert not is_broad_fund("市場先生") and not is_broad_fund("全球晶片")
     only_funds = _fortress(accounts=[a for a in _fortress()["accounts"] if a["name"] != "台積電"])
     h = next(x for x in build_report("2026-09", "2026-09-17", only_funds, REGISTER, BUCKETS, {}, SNAPS)["health"] if x["key"] == "concentration")
     assert h["state"] == "ok" and "分散的基金" in h["text"]
