@@ -61,7 +61,8 @@ def test_build_returns_the_whole_page():
     assert by[5]["target"] is None and by[5]["pct"] == 100 and by[5]["target_rule"] == "沒有上限"
     assert [a["id"] for a in by[1]["accounts"]] == ["esun", "safe"]
     assert [e["id"] for e in d["earmarks"]][-1] == "e3", "已付的排最後"
-    assert [t["key"] for t in d["tests"]] == ["income", "market", "shock", "combined", "war"]
+    assert [t["key"] for t in d["tests"]] == ["income", "market", "shock", "combined", "war", "care"]
+    assert d["projection"]["rows"] and d["projection"]["base"] == 2100000, "資產預期成長的起點＝第 5 層"
     # 沒有必要支出：算不出來，不是無限
     z = build(ACCOUNTS, EARMARKS, 0, {}, "")
     assert z["runway"]["months"] is None and all(t["state"] == "na" for t in z["tests"])
@@ -289,3 +290,42 @@ def test_targets_have_an_upper_bound():
     assert s["targets"][1] == 120 and s["targets"][4] == 120, "上限 120 個月（10 年）"
     assert s["targets"][3] == DEFAULT_TARGET_MONTHS[3], "負數不收，用預設"
     assert build([], [], 50000, s, "")["layers"], "算得出來，不會 OverflowError"
+
+
+# ── 長照與資產預期成長（owner 2026-09-16「把長照考慮進去」「還有資產預期成長」）────────
+def test_care_test_uses_long_term_capital_and_reacts_to_insurance():
+    """長照跟其他五題不一樣：它不是一次衝擊，是把每月支出抬高好幾年 → 動用的是長期資本（第 5 層），
+    所以「撐得了幾年」要把複利資本算進來；保險月給付直接扣在照護費上。"""
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 2_000_000},
+             {"id": "e", "name": "ETF", "kind": "holding", "balance": 20_000_000}]
+    d = build(accts, [], 100000, {"account_layers": {"e": 5}}, "2026-09-16", need_months=6)
+    care = {t["key"]: t for t in d["tests"]}["care"]
+    assert [x[0] for x in care["lines"]][-2:] == ["撐得了幾年", "只用現金撐得了幾年"]
+    assert care["lines"][3] == ["現金＋投資合計", 22_000_000, "twd"], "現金＋投資，不是只有現金"
+    assert care["lines"][4][2] == "years" and care["lines"][4][1] == 13.1
+    assert care["lines"][5][1] == 1.2, "只用現金撐不了幾年 —— 這句話才是重點"
+    # 保險月給付 2 萬 → 照護費剩 2 萬 → 撐更久
+    d2 = build(accts, [], 100000, {"account_layers": {"e": 5}, "care": {"insurance_monthly": 20000}}, "", need_months=6)
+    c2 = {t["key"]: t for t in d2["tests"]}["care"]
+    assert c2["lines"][0][1] == 20000 and c2["lines"][4][1] > care["lines"][4][1]
+    # 假設有上下限（years 0 會讓「撐得過」變成必然）
+    s = normalize_settings({"care": {"years": 0, "monthly": -5, "insurance_monthly": 10 ** 9}})
+    assert s["care"]["years"] >= 1 and s["care"]["monthly"] == 0 and s["care"]["insurance_monthly"] <= 1_000_000
+
+
+def test_growth_projection_gives_nominal_and_todays_purchasing_power():
+    """只看名目會高估未來買得起什麼：30 年後的 1000 萬不是今天的 1000 萬。兩個數字都要給。"""
+    from core.fortress_logic import GROWTH_YEARS, project_growth
+    rows = project_growth(1_000_000, {"rate": 0.06, "inflation": 0.02, "annual_add": 0})
+    assert [r["year"] for r in rows] == list(GROWTH_YEARS)
+    ten = [r for r in rows if r["year"] == 10][0]
+    assert ten["nominal"] == round(1_000_000 * 1.06 ** 10)
+    assert ten["real"] == round(ten["nominal"] / 1.02 ** 10) and ten["real"] < ten["nominal"]
+    # 每年再投入：年底投入的年金
+    with_add = project_growth(0, {"rate": 0.06, "inflation": 0.0, "annual_add": 100_000})
+    assert [r for r in with_add if r["year"] == 5][0]["nominal"] == round(100_000 * ((1.06 ** 5 - 1) / 0.06))
+    # 報酬 0% 不能除以零
+    flat = project_growth(0, {"rate": 0.0, "inflation": 0.0, "annual_add": 100_000})
+    assert [r for r in flat if r["year"] == 10][0]["nominal"] == 1_000_000
+    d = build([], [], 50000, {}, "", need_months=6)
+    assert [r["year"] for r in d["projection"]["rows"]] == list(GROWTH_YEARS) and d["projection"]["base"] == 0

@@ -6,7 +6,8 @@
 
 五層：1 營運現金／2 預留現金／3 緊急預備／4 機會資金／5 複利資本。
 可撐月數＝（第 1–3 層現金 − 預留）÷ 每月必要支出；另給「含第 4 層」的版本。
-壓力測試五題：收入斷 6 個月、股票跌 40%、突發 40 萬、三件同時、台海戰爭（假設可調）。
+壓力測試六題：收入斷 6 個月、股票跌 40%、突發 40 萬、三件同時、台海戰爭、長期照護（假設都可調）。
+另給「資產預期成長」：第 5 層複利資本往後 5／10／15／20／30 年，名目與今天的購買力各一個數字。
 """
 from __future__ import annotations
 
@@ -19,6 +20,17 @@ DEFAULT_TARGET_MONTHS = {1: 1, 3: 6, 4: 3}
 MAX_TARGET_MONTHS = 120
 #: 台海戰爭題的預設假設（owner 可在桌機改）
 DEFAULT_WAR = {"months": 12, "tw_drop": 0.6, "us_drop": 0.2, "fx": 1.3, "bank_freeze_weeks": 4}
+#: 長照題的預設假設（owner 可在桌機改）。
+#: 月費 4 萬＝外籍看護（薪資＋健保＋仲介）或一般安養機構的常見水準；本國照服員或養護型機構會更高。
+#: 7 年＝台灣長照需求期間常被引用的平均值；重度失能可能十年以上。保險給付是每月實拿，直接扣掉月費。
+#: 🔴 長照跟其他五題不一樣：它不是一次性衝擊，是把**每月必要支出整個抬高好幾年**——
+#:    攻擊的是可撐月數的分母，所以它動用的是長期資本（第 5 層）而不只是現金。
+DEFAULT_CARE = {"monthly": 40000, "years": 7, "insurance_monthly": 0}
+#: 資產預期成長的預設假設：年報酬 6%（台股＋美股 ETF 的長期名目報酬常用值）、通膨 2%、每年再投入 0。
+#: 一律同時給名目與「換算成今天的購買力」兩個數字 —— 只看名目會高估未來買得起什麼。
+DEFAULT_GROWTH = {"rate": 0.06, "inflation": 0.02, "annual_add": 0}
+#: 預期成長要看哪幾年
+GROWTH_YEARS = (5, 10, 15, 20, 30)
 #: 第 3 題「突發支出」的金額
 SHOCK_AMOUNT = 400_000
 #: 第 2 題股票跌幅
@@ -59,7 +71,7 @@ def monthly_need_from_rows(rows) -> tuple:
 
 
 STATE_OK, STATE_WARN, STATE_BAD = "ok", "warn", "bad"
-#: 五題的 key／題名／小標。na 路（沒有必要支出、算不出來）與正常路共用這一份，
+#: 六題的 key／題名／小標。na 路（沒有必要支出、算不出來）與正常路共用這一份，
 #: 不然改了 MARKET_DROP／SHOCK_AMOUNT，只有其中一條路的題名會跟著變。
 TEST_TITLES = (
     ("income", "收入中斷 6 個月", "現金夠嗎？要賣股票嗎？"),
@@ -67,6 +79,7 @@ TEST_TITLES = (
     ("shock", f"突然多 {SHOCK_AMOUNT // 10000} 萬支出", "錢從哪裡來？會打亂投資計畫嗎？"),
     ("combined", "三件同時發生", "失業、市場下跌、突發支出一起來，還有選擇權嗎？"),
     ("war", "台海戰爭", "銀行停擺、台幣貶值、收入斷一年，撐得過去嗎？"),
+    ("care", "長期照護", "家裡有人需要長照，這筆錢從哪裡出？撐得了幾年？"),
 )
 _TITLE = {k: (t, q) for k, t, q in TEST_TITLES}
 
@@ -85,7 +98,8 @@ def _card(key: str, state: str, lines: list, verdict: str, assume: str = "") -> 
 def normalize_settings(raw) -> dict:
     """settings.finance.fortress[entity] → 補齊預設的完整設定（複本）。
     account_layers：{帳戶id: 1..5}；account_flags：{帳戶id: {physical, offshore, usd}}；
-    holdings_layer：證券整批的層別（預設 5）；targets：{層: 倍數}；monthly_need_override：None＝用自動；war：假設。"""
+    holdings_layer：證券整批的層別（預設 5）；targets：{層: 倍數}；monthly_need_override：None＝用自動；
+    war／care：壓力測試假設；growth：資產預期成長的假設。各段都夾在合理範圍內（見各自的 bounds）。"""
     raw = raw if isinstance(raw, dict) else {}
     layers = {}
     for k, v in (raw.get("account_layers") or {}).items():
@@ -121,6 +135,28 @@ def normalize_settings(raw) -> dict:
             continue
         lo, hi = bounds[k]
         war[k] = max(lo, min(hi, n))
+    care = dict(DEFAULT_CARE)
+    care_bounds = {"monthly": (0, 1_000_000), "years": (1, 40), "insurance_monthly": (0, 1_000_000)}
+    for k, v in (raw.get("care") or {}).items():
+        if k not in DEFAULT_CARE:
+            continue
+        try:
+            n = int(float(v))
+        except (TypeError, ValueError):
+            continue
+        lo, hi = care_bounds[k]
+        care[k] = max(lo, min(hi, n))
+    growth = dict(DEFAULT_GROWTH)
+    growth_bounds = {"rate": (-0.5, 0.5), "inflation": (0.0, 0.5), "annual_add": (0, 100_000_000)}
+    for k, v in (raw.get("growth") or {}).items():
+        if k not in DEFAULT_GROWTH:
+            continue
+        try:
+            n = int(v) if k == "annual_add" else float(v)
+        except (TypeError, ValueError):
+            continue
+        lo, hi = growth_bounds[k]
+        growth[k] = max(lo, min(hi, n))
     override = raw.get("monthly_need_override")
     try:
         override = int(override) if override not in (None, "", 0, "0") else None
@@ -134,14 +170,14 @@ def normalize_settings(raw) -> dict:
     except (TypeError, ValueError):
         hl = 5
     return {"account_layers": layers, "account_flags": flags, "holdings_layer": hl if 1 <= hl <= 5 else 5,
-            "targets": targets, "monthly_need_override": override, "war": war}
+            "targets": targets, "monthly_need_override": override, "war": war, "care": care, "growth": growth}
 
 
 def merge_settings(current: dict, patch: dict) -> dict:
     """PUT 設定：淺層合併（account_layers／account_flags／targets／war 各自整份取代；其餘逐鍵）。"""
     out = normalize_settings(current)
     patch = patch if isinstance(patch, dict) else {}
-    for k in ("account_layers", "account_flags", "targets", "war"):
+    for k in ("account_layers", "account_flags", "targets", "war", "care", "growth"):
         if k in patch and isinstance(patch[k], dict):
             out[k] = patch[k]
     for k in ("holdings_layer", "monthly_need_override"):
@@ -215,9 +251,9 @@ def _m(x) -> int:
 
 
 # ── 壓力測試 ──────────────────────────────────────────────────────
-def stress_tests(have: dict, accounts: list, monthly_need: float, earmark_total: float, war: dict) -> list:
-    """五題。每題 {key, title, question, state, assume, lines:[[label, value, unit]], verdict}；
-    unit：'twd'（金額）或 'months'。必要支出 ≤0 → 每題 state='na'、只回一句話。"""
+def stress_tests(have: dict, accounts: list, monthly_need: float, earmark_total: float, war: dict, care: dict = None) -> list:
+    """六題。每題 {key, title, question, state, assume, lines:[[label, value, unit]], verdict}；
+    unit：'twd'（金額）、'months'、'years'。必要支出 ≤0 → 每題 state='na'、只回一句話。"""
     m = float(monthly_need or 0)
     ear = float(earmark_total or 0)
     cash3 = cash_in_layers(accounts, 3)
@@ -297,6 +333,58 @@ def stress_tests(have: dict, accounts: list, monthly_need: float, earmark_total:
                      assume=(f"假設：收入斷 {months} 個月、台股跌 {int(round(float(war['tw_drop']) * 100))}%、"
                              f"美股跌 {int(round(float(war['us_drop']) * 100))}%、台幣貶 {int(round((fx - 1) * 100))}%、"
                              f"銀行前 {freeze} 週領不到錢")))
+    # 6. 長期照護：不是一次衝擊，是把每月支出抬高好幾年 → 本來就該動用長期資本，所以現金與投資一起算
+    out.append(_care_test(cash4, holdings_total, m, ear, care or DEFAULT_CARE))
+    return out
+
+
+def _care_test(cash4: float, holdings_total: float, m: float, ear: float, care: dict) -> dict:
+    care_net = max(0.0, float(care["monthly"]) - float(care["insurance_monthly"]))
+    years = int(care["years"])
+    per_month = m + care_net                       # 長照期間每月總支出＝原本的生活支出＋照護費
+    per_year = per_month * 12
+    need = per_year * years + ear
+    have = cash4 + holdings_total
+    covered = (have - ear) / per_year if per_year > 0 else None
+    cash_only = (cash4 - ear) / per_year if per_year > 0 else None
+    st = _state(covered is not None and covered >= years + 1, covered is not None and covered >= years)
+    if st == STATE_OK:
+        vd = (f"撐得過 {years} 年，還多 {covered - years:.1f} 年緩衝。現金先頂著，長期的部分由第 5 層複利資本支應 —— "
+              "這正是它存在的理由，不用因為長照就停掉投資。")
+    elif st == STATE_WARN:
+        vd = (f"剛好撐得過 {years} 年（{covered:.1f} 年），沒什麼緩衝。長照常常比預估久，"
+              f"把每月照護費往上調一成再看一次，或把第 4 層機會資金補厚。")
+    else:
+        short = need - have
+        vd = (f"撐不到 {years} 年，只撐得了 {covered:.1f} 年，差 {_wan(short)}。"
+              "這一題差的通常不是存款而是保險：長照險或失能扶助險的月給付直接扣在照護費上，比存同樣的錢有效率。")
+    return _card("care", st,
+                 [["每月照護費（已扣保險給付）", _m(care_net), "twd"],
+                  ["長照期間每月總支出", _m(per_month), "twd"],
+                  [f"{years} 年總共要（含預留）", _m(need), "twd"],
+                  ["現金＋投資合計", _m(have), "twd"],
+                  ["撐得了幾年", round(covered, 1) if covered is not None else None, "years"],
+                  ["只用現金撐得了幾年", round(cash_only, 1) if cash_only is not None else None, "years"]], vd,
+                 assume=(f"假設：每月照護費 {_wan(float(care['monthly']))}"
+                         + (f"、保險每月給付 {_wan(float(care['insurance_monthly']))}" if float(care["insurance_monthly"]) else "")
+                         + f"、需要 {years} 年。這題把第 5 層複利資本也算進來（長照是長期支出，本來就該由它支應）。"
+                           "沒有算「照顧者離職少一份收入」—— 那一段看第 1 題。"))
+
+
+def project_growth(base: float, growth: dict, years=GROWTH_YEARS) -> list:
+    """第 5 層複利資本往後推。回 [{year, nominal, real, added}]。
+    名目＝複利＋每年再投入（年底投入）；real＝換算成今天的購買力（除以通膨）。
+    🔴 兩個都要給：只看名目會高估未來買得起什麼 —— 30 年後的 1000 萬不是今天的 1000 萬。"""
+    r = float(growth["rate"])
+    infl = float(growth["inflation"])
+    add = float(growth["annual_add"])
+    out = []
+    for y in years:
+        grown = float(base) * (1 + r) ** y
+        contrib = add * (((1 + r) ** y - 1) / r if r else y)
+        nominal = grown + contrib
+        out.append({"year": y, "nominal": _m(nominal), "real": _m(nominal / ((1 + infl) ** y)),
+                    "added": _m(add * y)})
     return out
 
 
@@ -363,7 +451,9 @@ def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: di
         "runway": {"months": rw, "with_l4": rw4, "tone": tone(rw)},
         "layers": layers,
         "earmarks": sorted(earmarks, key=lambda e: (bool(e.get("paid")), str(e.get("due_date") or ""))),
-        "tests": stress_tests(have, accts, used, ear_total, settings["war"]),
+        "tests": stress_tests(have, accts, used, ear_total, settings["war"], settings["care"]),
+        "projection": {"base": _m(have[5]), **settings["growth"],
+                       "rows": project_growth(have[5], settings["growth"])},
         "accounts": [{"id": a.get("id"), "name": a.get("name"), "kind": a.get("kind"), "balance": int(a.get("balance") or 0),
                       "currency": a.get("currency") or "TWD", "layer": a["layer"], "flags": a["flags"]} for a in accts],
         "settings": settings,

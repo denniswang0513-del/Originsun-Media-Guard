@@ -13,7 +13,7 @@ import { finFetchMine, finSubviewBoot, esc, fmtNum, finToast } from '../fin-util
 let _c = null;
 let _isCurrent = () => true;
 let _d = null;
-let _warOpen = false;
+let _openAssume = '';      // 哪一題的「改假設」展開著（'war'／'care'；空＝都收起來）
 let _layerTimer = null;
 //: 分層那張表「還沒存成功」的快照。🔴 change 當下就讀（不能等計時器）——
 //  400ms 內切到別的子視圖，finance.js 已經把 container.innerHTML 換掉，那時才讀會讀到 0 列，
@@ -146,7 +146,7 @@ function _injectCss() {
 .ft .ft-form label { color: #9ca3af; font-size: 11px; display: flex; flex-direction: column; gap: 3px; }
 .ft .ft-form .crm-input { width: 130px; padding: 5px 8px; }
 
-.ft .ft-tests { display: grid; grid-template-columns: repeat(5, 1fr); background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px; overflow: hidden; }
+.ft .ft-tests { display: grid; grid-template-columns: repeat(6, 1fr); background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px; overflow: hidden; }
 .ft .ft-test { padding: 14px; display: flex; flex-direction: column; gap: 7px; border-top: 4px solid #86efac; border-right: 1px solid #3a3a3a; min-width: 0; }
 .ft .ft-test:last-child { border-right: none; }
 .ft .ft-test.bad { border-top-color: #f87171; } .ft .ft-test.warn { border-top-color: #fbbf24; } .ft .ft-test.na { border-top-color: #555; }
@@ -156,6 +156,17 @@ function _injectCss() {
 .ft .ft-test .line span:last-child { color: #e0e0e0; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ft .ft-test .assume { font-size: 11.5px; color: #6b7280; line-height: 1.5; }
 .ft .ft-test .verdict { margin-top: auto; padding-top: 9px; border-top: 1px dashed #3a3a3a; font-size: 12.5px; color: #e0e0e0; }
+.ft .ft-growth { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; align-items: end; height: 150px; }
+.ft .ft-growth .g-col { display: flex; flex-direction: column; justify-content: flex-end; height: 100%; gap: 4px; min-width: 0; }
+.ft .ft-growth .g-amt { font-size: 11.5px; color: #e0e0e0; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ft .ft-growth .g-bars { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 100%; }
+.ft .ft-growth .g-bars i { display: block; width: 16px; border-radius: 2px 2px 0 0; }
+.ft .ft-growth .g-bars i.n { background: #86efac; }
+.ft .ft-growth .g-bars i.r { background: #4b5563; }
+.ft .ft-growth .g-yr { font-size: 11px; color: #9ca3af; text-align: center; white-space: nowrap; }
+.ft .ft-glegend { display: flex; gap: 16px; font-size: 12px; color: #9ca3af; margin-top: 10px; padding-top: 8px; border-top: 1px solid #3a3a3a; }
+.ft .ft-glegend i { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin-right: 5px; border-radius: 2px; }
+.ft .ft-glegend .n { background: #86efac; } .ft .ft-glegend .r { background: #4b5563; }
 .ft .ft-war { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11.5px; color: #9ca3af; margin-top: 4px; }
 .ft .ft-war label { display: flex; flex-direction: column; gap: 2px; }
 .ft .ft-war .crm-input { padding: 3px 6px; font-size: 12px; width: 100%; }
@@ -193,7 +204,7 @@ export default async function render(container, ctx = {}) {
     clearTimeout(_layerTimer);
     _layerTimer = null;
     _pendingLayers = null;
-    _warOpen = false;
+    _openAssume = '';
     _injectCss();
     const r = await finSubviewBoot(_c, {
         title: '堡壘', isCurrent: _isCurrent,
@@ -223,8 +234,9 @@ function _render() {
             <div>${_earmarks(d)}</div>
             <div>${_monthly(d)}${_targets(d)}</div>
         </div>
-        <div class="ft-sec"><h3>壓力測試</h3><span class="why">每季看一次，五題都用上面的數字自動回答；第 5 題的假設可以自己調</span></div>
+        <div class="ft-sec"><h3>壓力測試</h3><span class="why">每季看一次，六題都用上面的數字自動回答；台海戰爭與長期照護的假設可以自己調</span></div>
         <div class="ft-tests">${(d.tests || []).map((t, i) => _tower(t, i, d)).join('')}</div>
+        ${_growth(d)}
         <div class="ft-sec"><h3>帳戶分層</h3><span class="why">一次設好就不用再動；證券預設第 5 層。改了會自動儲存</span></div>
         ${_accounts(d)}
         <div class="ft-foot">
@@ -401,29 +413,68 @@ function _targets(d) {
 }
 
 // ── 壓力測試：五座塔同一個框 ──────────────────────────────────
+/** 資產預期成長：第 5 層複利資本往後推，名目與「今天的購買力」各一條。 */
+function _growth(d) {
+    const g = d.projection || {};
+    const rows = g.rows || [];
+    if (!rows.length) return '';
+    const pct = (v) => Math.round((Number(v) || 0) * 1000) / 10;
+    const max = Math.max(...rows.map((r) => Number(r.nominal) || 0), 1);
+    const bars = rows.map((r) => {
+        const hN = Math.max(2, (Number(r.nominal) || 0) / max * 100);
+        const hR = Math.max(2, (Number(r.real) || 0) / max * 100);
+        return `<div class="g-col"><div class="g-amt">${fmtWan(r.nominal)}</div>
+            <div class="g-bars"><i class="n" style="height:${hN}%"></i><i class="r" style="height:${hR}%"></i></div>
+            <div class="g-yr">${fmtNum(r.year)} 年後</div></div>`;
+    }).join('');
+    return `
+    <div class="ft-sec"><h3>資產預期成長</h3><span class="why">第 5 層複利資本照假設往後推；灰色那條是換算成今天的購買力</span></div>
+    <div class="ft-strip">
+        <div class="ft-growth">${bars}</div>
+        <div class="ft-glegend"><span><i class="n"></i>名目金額</span><span><i class="r"></i>今天的購買力（扣通膨）</span></div>
+    </div>
+    <div class="ft-war" style="margin-top:10px;max-width:520px;">
+        <label>年報酬 %<input class="crm-input" id="ft-g-rate" type="number" step="0.5" value="${pct(g.rate)}"></label>
+        <label>通膨 %<input class="crm-input" id="ft-g-infl" type="number" min="0" step="0.5" value="${pct(g.inflation)}"></label>
+        <label>每年再投入<input class="crm-input" id="ft-g-add" type="number" min="0" step="10000" value="${fmtNum(g.annual_add || 0).replace(/,/g, '')}"></label>
+        <div class="full"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finFortress.saveGrowth(this)">重算</button>
+            <span class="ft-src" style="align-self:center;">起點是現在的第 5 層 ${fmtWan(g.base)}；報酬與通膨都是假設，不是保證。</span></div>
+    </div>`;
+}
+
+
 function _tower(t, i, d) {
     const state = STATE_PILL[t.state] ? t.state : 'na';
-    const war = t.key === 'war';
-    const w = (d.settings || {}).war || {};
+    const cfg = d.settings || {};
+    const w = cfg.war || {}, c = cfg.care || {};
     const pct = (v) => Math.round((Number(v) || 0) * 100);
-    const warForm = war && _warOpen ? `<div class="ft-war">
+    const tunable = t.key === 'war' || t.key === 'care';       // 這兩題的假設可以自己調
+    const open = _openAssume === t.key;
+    const fields = t.key === 'war' ? `
         <label>收入斷幾個月<input class="crm-input" id="ft-war-months" type="number" min="1" step="1" value="${Number(w.months) || 12}"></label>
         <label>銀行幾週領不到錢<input class="crm-input" id="ft-war-freeze" type="number" min="0" step="1" value="${Number(w.bank_freeze_weeks) || 0}"></label>
         <label>台股跌 %<input class="crm-input" id="ft-war-tw" type="number" min="0" max="100" step="5" value="${pct(w.tw_drop)}"></label>
         <label>美股跌 %<input class="crm-input" id="ft-war-us" type="number" min="0" max="100" step="5" value="${pct(w.us_drop)}"></label>
-        <label>台幣貶 %<input class="crm-input" id="ft-war-fx" type="number" min="0" max="200" step="5" value="${pct((Number(w.fx) || 1) - 1)}"></label>
-        <div class="full"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finFortress.saveWar(this)">儲存假設</button>
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finFortress.toggleWar()">收起</button></div>
+        <label>台幣貶 %<input class="crm-input" id="ft-war-fx" type="number" min="0" max="200" step="5" value="${pct((Number(w.fx) || 1) - 1)}"></label>` : `
+        <label>每月照護費<input class="crm-input" id="ft-care-monthly" type="number" min="0" step="5000" value="${Number(c.monthly) || 0}"></label>
+        <label>需要幾年<input class="crm-input" id="ft-care-years" type="number" min="1" max="40" step="1" value="${Number(c.years) || 7}"></label>
+        <label>保險每月給付<input class="crm-input" id="ft-care-ins" type="number" min="0" step="5000" value="${Number(c.insurance_monthly) || 0}"></label>`;
+    const form = tunable && open ? `<div class="ft-war">${fields}
+        <div class="full"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finFortress.saveAssume('${esc(t.key)}', this)">儲存假設</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finFortress.toggleAssume('')">收起</button></div>
     </div>` : '';
+    const editBtn = tunable && !open
+        ? ` <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:1px 7px;font-size:11px;" onclick="window._finFortress.toggleAssume('${esc(t.key)}')">改假設</button>` : '';
     return `<div class="ft-test ${state === 'ok' ? '' : state}">
         <div class="h"><span class="pill ${state}">${STATE_PILL[state]}</span><span>${i + 1}. ${esc(t.title)}</span></div>
         <div class="q">${esc(t.question || '')}</div>
-        ${t.assume ? `<div class="assume">${esc(t.assume)}${war && !_warOpen ? ' <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:1px 7px;font-size:11px;" onclick="window._finFortress.toggleWar()">改假設</button>' : ''}</div>` : ''}
-        ${warForm}
+        ${t.assume ? `<div class="assume">${esc(t.assume)}${editBtn}</div>` : ''}
+        ${form}
         ${(t.lines || []).map((l) => `<div class="line"><span>${esc(l[0])}</span><span>${fmtLine(l)}</span></div>`).join('')}
         <div class="verdict">${esc(t.verdict || '')}</div>
     </div>`;
 }
+
 
 // ── 帳戶分層 ─────────────────────────────────────────────────
 function _accounts(d) {
@@ -523,7 +574,7 @@ async function _put(path, body, okMsg, btn) {
 }
 
 /** 目前存著的設定（後端正規化過的那份）。空白的輸入格以它為底，才不會被整份取代洗成預設。 */
-const _cfg = () => (_d && _d.settings) || { targets: {}, war: {}, account_layers: {}, account_flags: {} };
+const _cfg = () => (_d && _d.settings) || { targets: {}, war: {}, care: {}, growth: {}, account_layers: {}, account_flags: {} };
 /** 輸入格的數字；空白或非數字 → fallback（不要當成 0） */
 function _num(id, fallback) {
     const el = document.getElementById(id);
@@ -553,20 +604,38 @@ _ff.saveTargets = () => {
     _put('/fortress/settings', { targets }, '已改目標倍數');
 };
 
-_ff.toggleWar = () => { _warOpen = !_warOpen; _render(); };
-_ff.saveWar = (btn) => {
+_ff.toggleAssume = (key) => { _openAssume = _openAssume === key ? '' : key; _render(); };
+_ff.saveAssume = (key, btn) => {
     // 空白格保留原本存著的值（整份取代，當成 0 會把假設洗掉：months 0 → 戰爭題永遠「撐得住」）
-    const w = _cfg().war || {};
-    const war = {
-        ...w,
-        months: Math.max(1, Math.round(_num('ft-war-months', w.months ?? 12))),
-        bank_freeze_weeks: Math.max(0, Math.round(_num('ft-war-freeze', w.bank_freeze_weeks ?? 4))),
-        tw_drop: _num('ft-war-tw', (w.tw_drop ?? 0) * 100) / 100,
-        us_drop: _num('ft-war-us', (w.us_drop ?? 0) * 100) / 100,
-        fx: 1 + _num('ft-war-fx', ((w.fx ?? 1) - 1) * 100) / 100,
-    };
-    _warOpen = false;
-    _put('/fortress/settings', { war }, '已改戰爭假設', btn);
+    if (key === 'war') {
+        const w = _cfg().war || {};
+        _put('/fortress/settings', { war: {
+            ...w,
+            months: Math.max(1, Math.round(_num('ft-war-months', w.months ?? 12))),
+            bank_freeze_weeks: Math.max(0, Math.round(_num('ft-war-freeze', w.bank_freeze_weeks ?? 4))),
+            tw_drop: _num('ft-war-tw', (w.tw_drop ?? 0) * 100) / 100,
+            us_drop: _num('ft-war-us', (w.us_drop ?? 0) * 100) / 100,
+            fx: 1 + _num('ft-war-fx', ((w.fx ?? 1) - 1) * 100) / 100,
+        } }, '已改戰爭假設', btn);
+    } else {
+        const c = _cfg().care || {};
+        _put('/fortress/settings', { care: {
+            ...c,
+            monthly: Math.max(0, Math.round(_num('ft-care-monthly', c.monthly ?? 0))),
+            years: Math.max(1, Math.round(_num('ft-care-years', c.years ?? 7))),
+            insurance_monthly: Math.max(0, Math.round(_num('ft-care-ins', c.insurance_monthly ?? 0))),
+        } }, '已改長照假設', btn);
+    }
+    _openAssume = '';
+};
+
+_ff.saveGrowth = (btn) => {
+    const g = _cfg().growth || {};
+    _put('/fortress/settings', { growth: {
+        rate: _num('ft-g-rate', (g.rate ?? 0) * 100) / 100,
+        inflation: _num('ft-g-infl', (g.inflation ?? 0) * 100) / 100,
+        annual_add: Math.max(0, Math.round(_num('ft-g-add', g.annual_add ?? 0))),
+    } }, '已重算', btn);
 };
 
 _ff.saveLayers = () => {

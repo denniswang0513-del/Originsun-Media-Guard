@@ -63,6 +63,8 @@ class FortressSettingsPatch(BaseModel):
     targets: Optional[dict] = None
     monthly_need_override: Optional[int] = None
     war: Optional[dict] = None
+    care: Optional[dict] = None       # 長照假設：每月照護費／年數／保險每月給付
+    growth: Optional[dict] = None     # 資產預期成長：年報酬／通膨／每年再投入
 
 
 def _guard(request: Request, entity: str = "") -> str:

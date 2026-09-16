@@ -48,7 +48,8 @@ export function summaryLine(d) {
     const cnt = { ok: 0, warn: 0, bad: 0 };
     for (const t of tests) if (t.state in cnt) cnt[t.state] += 1;
     const parts = [[cnt.ok, '綠'], [cnt.warn, '黃'], [cnt.bad, '紅']].filter(x => x[0] > 0).map(x => `${x[0]} ${x[1]}`);
-    const line = tests.length ? `${tests.length === 5 ? '五題' : tests.length + ' 題'}壓力測試 ${parts.join(' ')}` : '';
+    const CN = { 5: '五題', 6: '六題' };
+    const line = tests.length ? `${CN[tests.length] || tests.length + ' 題'}壓力測試 ${parts.join(' ')}` : '';
     return [first, line].filter(Boolean).join(' · ');
 }
 
@@ -137,9 +138,27 @@ function draw(d) {
                 <span class="v amt">${money(need.used)}</span></div>
             <div class="lg-sub" style="margin-top:6px">要改請到桌機的堡壘分頁</div>
         </div>
+        ${growthHtml(d)}
         <div class="m-h">壓力測試</div>
         <div class="m-card ft-tests">${(d.tests || []).map(testHtml).join('') || emptyBox('還沒有壓力測試')}</div>`;
 }
+
+/** 資產預期成長：第 5 層複利資本往後推（名目／今天的購買力）。假設要改到桌機。 */
+function growthHtml(d) {
+    const g = d.projection || {};
+    const rows = g.rows || [];
+    if (!rows.length) return '';
+    const pc = (v) => Math.round((Number(v) || 0) * 1000) / 10;
+    const list = rows.map(r => `<div class="lg-row"><span class="k">${esc(String(r.year))} 年後<div class="lg-sub">今天的購買力 ${esc(wan(r.real))}</div></span>
+        <span class="v num">${esc(wan(r.nominal))}</span></div>`).join('');
+    return `<div class="m-h">資產預期成長</div>
+        <div class="m-card">
+            <div class="lg-sub" style="margin-bottom:6px">起點是現在的第 5 層 ${esc(wan(g.base))}・年報酬 ${esc(String(pc(g.rate)))}%・通膨 ${esc(String(pc(g.inflation)))}%${Number(g.annual_add) ? `・每年再投入 ${esc(wan(g.annual_add))}` : ''}</div>
+            ${list}
+            <div class="lg-sub" style="margin-top:6px">報酬與通膨都是假設，不是保證；要改到桌機的堡壘分頁</div>
+        </div>`;
+}
+
 
 function layerHtml(l) {
     const pct = Math.max(0, Math.min(100, Number(l.pct) || 0));

@@ -44,8 +44,11 @@ def test_write_paths_rerender_from_payload():
     put = js_func_body(js, "async function _put(path, body, okMsg, btn) {")
     assert "method: 'PUT'" in put and "_d = await finFetchMine(" in put and "_render()" in put
     assert "monthly_need_override: 0" in js, "「用自動」送 0 回到自動平均"
-    war = js_func_body(js, "_ff.saveWar = (btn) => {")
+    war = js_func_body(js, "_ff.saveAssume = (key, btn) => {")
     assert "/ 100" in war and "fx: 1 +" in war, "戰爭假設送小數（60% → 0.6；貶 30% → fx 1.3）"
+    assert "care: {" in war and "insurance_monthly:" in war, "長照假設（月費／年數／保險月給付）同一支存"
+    g = js_func_body(js, "_ff.saveGrowth = (btn) => {")
+    assert "rate:" in g and "inflation:" in g and "annual_add:" in g, "資產預期成長的三個假設"
 
 
 # ── /polish 階段一：review 抓到的四個地雷，各釘一條 ──────────────────────
@@ -76,8 +79,9 @@ def test_blank_boxes_keep_the_saved_value():
     js = js_code_only(repo_src(JS))
     tg = js_func_body(js, "_ff.saveTargets = () => {")
     assert "..._cfg().targets" in tg, "以目前設定為底"
-    war = js_func_body(js, "_ff.saveWar = (btn) => {")
+    war = js_func_body(js, "_ff.saveAssume = (key, btn) => {")
     assert "_num(" in war and "_cfg().war" in war and "...w," in war, "空白格保留原值，不要變成 0"
+    assert "_cfg().care" in war and "...c," in war, "長照那半也一樣"
 
 
 def test_earmark_row_buttons_use_data_attributes():
