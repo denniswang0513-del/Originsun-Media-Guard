@@ -425,7 +425,8 @@ def test_fire_block_with_the_owners_numbers():
     assert f["allowed"] == 145681 and f["withdrawal_rate"] == 0.035
     assert f["current_rate"] == 0.0231 and f["ratio25"] == 1.73 and f["ratio33"] == 1.3
     assert f["runs_out_year"] is None and f["runs_out_year_zero"] == 32, "6% 用不完；0% 第 32 年用完"
-    assert f["cash_years"] == 2.5 and f["state"] == STATE_OK and "已達財富自由" in f["verdict"]
+    assert f["runs_out_year_shock"] is None, "前 10 年報酬掛零也還撐得住（他的提領率只有 2.31%）"
+    assert f["cash_years"] == 2.5 and f["state"] == STATE_OK and "低於 3.5% 的安全提領率" in f["verdict"]
     units = {l[2] for l in f["lines"]}
     assert units == {"twd", "pct", "years", "year_or_never"}
 
@@ -436,7 +437,7 @@ def test_fire_states_and_extra_income():
     accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 2_883_940},
              {"id": "e", "name": "證券", "kind": "holding", "balance": 47_063_708}]
     bad = build(accts, [], 250_000, {"account_layers": {"e": 5}}, "2026-09-16", need_months=6)["fire"]
-    assert bad["state"] == STATE_BAD and bad["runs_out_year"] == 29 and bad["runs_out_age"] == 65 and "還沒到" in bad["verdict"]
+    assert bad["state"] == STATE_BAD and bad["runs_out_year"] == 26 and bad["runs_out_age"] == 62 and "還沒到" in bad["verdict"]
     # 年金從 65 歲起只比「用完那年」（66 歲）早一年，推不動；從 50 歲起就看得出差別
     with_pension = build(accts, [], 250_000, {"account_layers": {"e": 5}, "fire": {"extra_monthly": 60_000, "extra_from_age": 50}},
                          "2026-09-16", need_months=6)["fire"]
@@ -465,16 +466,16 @@ def test_line_units_render_on_both_frontends():
 
 # ── 特徵測試（/polish 階段零）：這次動到、但沒有被直接釘住的行為 ────────────────
 def test_fire_simulate_characterisation():
-    """把 fire_simulate 現在的行為釘下來：先長再提、第 1 年的生活費**不加**通膨（指數是 y-1）、
-    其他收入從 extra_from_year 那一年（含）開始扣、資產轉負就回那一年。"""
+    """把 fire_simulate 的行為釘下來：**年初先提、剩下的才有報酬**（同 Bengen 的 4% 法則）、
+    第 1 年的生活費不加通膨（指數是 y-1）、其他收入從 extra_from_year 那一年（含）開始扣、資產轉負就回那一年。"""
     from core.fortress_logic import fire_simulate
     # 100 萬、0 報酬 0 通膨、一年花 12 萬 → 第 8 年底剩 4 萬，第 9 年見底
     assert fire_simulate(1_000_000, 10_000, 0.0, 0.0, 8) == (None, 1_000_000 - 8 * 120_000)
     assert fire_simulate(1_000_000, 10_000, 0.0, 0.0, 20) == (9, 0), "撐不住那一年回 (年, 0)，後面不再算"
     # 通膨指數：第 1 年原價、第 2 年 ×1.1
     assert fire_simulate(1_000_000, 10_000, 0.0, 0.1, 2)[1] == 1_000_000 - 120_000 - 132_000
-    # 報酬先算：100 萬 ×1.06 − 12 萬
-    assert fire_simulate(1_000_000, 10_000, 0.06, 0.0, 1)[1] == round(1_000_000 * 1.06 - 120_000)
+    # 年初先提：(100 萬 − 12 萬) ×1.06 —— 當年要花掉的錢不該再多賺一年報酬
+    assert fire_simulate(1_000_000, 10_000, 0.06, 0.0, 1)[1] == round((1_000_000 - 120_000) * 1.06)
     # 其他收入：第 3 年起每月 1 萬 → 那三年不用動本金
     assert fire_simulate(500_000, 10_000, 0.0, 0.0, 5, extra_monthly=10_000, extra_from_year=3)[1] == 500_000 - 2 * 120_000
     assert fire_simulate(100, 100, 0.0, 0.0, 0) == (None, 100), "years=0 不模擬"
@@ -548,13 +549,13 @@ def test_pension_starts_in_the_right_year():
     d = build(accts, [], 250_000, cfg, "2026-09-16", need_months=6)
     f = d["fire"]
     assert f["age"] == 37
-    # 用完那年的歲數：第 y 年跨的是 age+y-1 歲（37 歲的人第 29 年是 65 歲，不是 66）
-    assert f["runs_out_year"] == 29 and f["runs_out_age"] == 65
+    # 用完那年的歲數：第 y 年跨的是 age+y-1 歲
+    assert f["runs_out_age"] == f["age"] + f["runs_out_year"] - 1
     # 年金的起始年：60 歲開始＝第 24 年（60-37+1），早一年會多領一年、把用完那年往後推
     from core.fortress_logic import fire_simulate
     right = fire_simulate(50_000_000, 252_000, 0.06, 0.02, 53, 150_000, 24)[0]
     early = fire_simulate(50_000_000, 252_000, 0.06, 0.02, 53, 150_000, 23)[0]
-    assert (early, right) == (42, 39), "差一年差三年壽命（所以 off-by-one 會影響結論）"
+    assert (early, right) == (32, 30), "差一年差兩年壽命（所以 off-by-one 會影響結論）"
     g = build(accts, [], 250_000, {"fire": {"extra_monthly": 150_000, "extra_from_age": 60}}, "2026-09-16", need_months=6)["fire"]
     assert g["runs_out_year"] == right, "用的是 60-37+1＝第 24 年，不是第 23 年"
 
@@ -591,3 +592,20 @@ def test_age_sanity():
     old = build(accts, [], 94_206, {"fire": {"birth_year": 1920}}, "2026-09-16", need_months=6)["fire"]
     assert old["age"] == 106 and old["horizon_years"] == 1
     assert "已超過你設的 90 歲" in old["verdict"], "要說出來，不能假裝模擬到 90 歲"
+
+
+def test_sequence_risk_line_is_the_honest_one():
+    """🔴 「模擬到 90 歲用不完」是固定報酬的算術：只要 報酬−通膨 > 提領率，它必然算不完 ——
+    不能把它寫成一項通過的檢驗。所以要多一行真正會咬人的：前 10 年報酬掛零、之後正常。"""
+    from core.fortress_logic import FIRE_SHOCK_YEARS, fire_simulate
+    assert FIRE_SHOCK_YEARS == 10
+    # 同樣的平均報酬，先跌後漲會提早見底（提領率 2.8%，固定報酬看起來永遠用不完）
+    normal = fire_simulate(30_000_000, 70_000, 0.06, 0.02, 53)[0]
+    shocked = fire_simulate(30_000_000, 70_000, 0.06, 0.02, 53, shock_years=10, shock_rate=0.0)[0]
+    assert (normal, shocked) == (None, 48), "平均一樣，順序不一樣，結論就不一樣"
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 30_000_000}]
+    f = build(accts, [], 68_000, {}, "2026-09-16", need_months=6)["fire"]
+    assert f["runs_out_year"] is None and f["runs_out_year_shock"] == 48
+    assert [x[0] for x in f["lines"]][-2].startswith("前 10 年報酬 0%")
+    assert "固定報酬的算術，不是壓力測試" in f["verdict"], "不能把算術上必然的事寫成通過的檢驗"
+    assert "第 48 年就會用完" in f["verdict"], "要把真正會咬人的那個數字講出來"

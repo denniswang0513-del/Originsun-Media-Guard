@@ -66,6 +66,8 @@ DEFAULT_FIRE = {"withdrawal_rate": 0.035, "birth_year": 1989, "until_age": 90,
 FIRE_RATES = (0.03, 0.035, 0.04)
 #: 沒有出生年時模擬幾年
 FIRE_DEFAULT_HORIZON = 50
+#: 序列風險那一行：退休初期幾年報酬當 0%（真正會咬人的不是平均報酬，是前十年的順序）
+FIRE_SHOCK_YEARS = 10
 #: 房產（owner 2026-09-16「可以新增房產的選項 但我現在沒有」）：手填估值，只算進**財富階梯的淨值**，
 #: 不進五層、不進可撐月數、不進長照題 —— 房子不是能拿來付帳的錢。有房貸的話貸款那邊本來就會扣。
 DEFAULT_PROPERTY = {"value": 0, "note": ""}
@@ -540,18 +542,22 @@ def effort_focus(base: float, growth: dict) -> dict:
 
 
 def fire_simulate(assets: float, monthly: float, rate: float, inflation: float, years: int,
-                  extra_monthly: float = 0, extra_from_year: int = 10 ** 6) -> tuple:
-    """逐年模擬：資產先長、再提領（今年的生活費隨通膨調、扣掉那一年開始有的其他收入）。
-    回 (第幾年用完 或 None, 終點還剩多少)。"""
+                  extra_monthly: float = 0, extra_from_year: int = 10 ** 6,
+                  shock_years: int = 0, shock_rate: float = 0.0) -> tuple:
+    """逐年模擬：**年初先提領、剩下的才有報酬**（同 Bengen 的 4% 法則）。
+    今年的生活費隨通膨調（第 1 年是今天的價），扣掉那一年開始有的其他收入。
+    shock_years：前幾年的報酬改用 shock_rate —— 退休初期大跌（序列風險）用這個看。
+    回 (第幾年用完 或 None, 終點還剩多少)。
+    🔴 先長再提會讓「當年就要花掉的錢」也多賺一年報酬，53 年下來終值高估約 6–7%，方向是樂觀的。"""
     a = float(assets)
     for y in range(1, int(years) + 1):
-        a *= 1 + float(rate)
         need = float(monthly) * 12 * (1 + float(inflation)) ** (y - 1)
         if y >= extra_from_year:
             need -= float(extra_monthly) * 12 * (1 + float(inflation)) ** (y - 1)
         a -= max(0.0, need)
         if a < 0:
             return y, 0
+        a *= 1 + (float(shock_rate) if y <= int(shock_years) else float(rate))
     return None, _m(a)
 
 
@@ -584,6 +590,9 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     r, infl = float(growth["rate"]), float(growth["inflation"])
     runs_out, left = fire_simulate(financial, spend, r, infl, horizon, fire["extra_monthly"], extra_from)
     runs_out0, _ = fire_simulate(financial, spend, 0.0, infl, horizon, fire["extra_monthly"], extra_from)
+    # 真正會咬人的不是平均報酬，是**前十年的順序**：同樣的平均，先跌後漲會把錢提早花完
+    runs_out_shock, _ = fire_simulate(financial, spend, r, infl, horizon, fire["extra_monthly"], extra_from,
+                                      shock_years=FIRE_SHOCK_YEARS, shock_rate=0.0)
     # 🔴 扣掉預留，跟同一頁上面的可撐月數同口徑 —— 不扣的話兩個數字會互相矛盾
     cash_years = round(max(0.0, float(cash3) - float(earmark_total or 0)) / spend / 12, 1)
     end_txt = f"{int(fire['until_age'])} 歲" if age is not None else f"第 {horizon} 年"
@@ -593,12 +602,17 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     within = current_rate <= chosen
     if within and runs_out is None:
         st = STATE_OK
-        vd = (f"已達財富自由。照現在的花法（{_wan(spend)}／月）只用到資產的 {current_rate:.2%}，低於 {chosen:.1%} 的安全提領率；"
-              f"模擬到 {end_txt}用不完。要注意的不是錢夠不夠，是股票比重與現金層：現金只撐 {cash_years:g} 年不賣股票。")
+        shock_txt = ("就算前 10 年報酬掛零也用不完" if runs_out_shock is None
+                     else f"但前 10 年報酬掛零的話，第 {runs_out_shock} 年就會用完")
+        vd = (f"照現在的花法（{_wan(spend)}／月）只用到資產的 {current_rate:.2%}，低於 {chosen:.1%} 的安全提領率。"
+              f"「模擬到 {end_txt}用不完」是固定報酬的算術，不是壓力測試 —— 只要報酬減通膨大於你的提領率，它一定算不完；"
+              f"{shock_txt}。真正的考驗是退休前十年就跌四成，而你現金只撐 {cash_years:g} 年不賣股票。")
     elif runs_out is None:
         st = STATE_WARN
+        shock_txt = ("前 10 年報酬掛零也還撐得住" if runs_out_shock is None
+                     else f"前 10 年報酬掛零的話第 {runs_out_shock} 年就見底")
         vd = (f"模擬到底用不完，但現在的花法用到資產的 {current_rate:.2%}，高於你設的 {chosen:.1%}。"
-              f"這代表答案很依賴報酬率假設（{r:.0%}）；報酬差一點就撐不到。")
+              f"這代表答案很依賴報酬率假設（{r:.0%}）：{shock_txt}。")
     elif within:
         st = STATE_WARN
         vd = (f"提領率 {current_rate:.2%} 在安全範圍內，但照 {r:.0%} 報酬模擬，{when(runs_out)}會用完 —— "
@@ -611,13 +625,15 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
         **base, "current_rate": round(current_rate, 4),
         "fi25": _m(fi25), "fi33": _m(fi33), "ratio25": round(float(financial) / fi25, 2), "ratio33": round(float(financial) / fi33, 2),
         "runs_out_year": runs_out, "runs_out_age": (age + runs_out - 1) if (age is not None and runs_out) else None,
-        "left_at_end": left, "runs_out_year_zero": runs_out0, "cash_years": cash_years, "state": st, "verdict": vd,
+        "left_at_end": left, "runs_out_year_zero": runs_out0, "runs_out_year_shock": runs_out_shock,
+        "cash_years": cash_years, "state": st, "verdict": vd,
         "lines": [["每月支出（含不工作後自付的健保、國保）", _m(spend), "twd"],
                   ["你現在的花法對應提領率", round(current_rate * 100, 2), "pct"],
                   ["25 倍法則的門檻", _m(fi25), "twd"], ["33 倍法則的門檻", _m(fi33), "twd"],
                   ["只靠現金不賣股票可以撐", cash_years, "years"],
                   [f"報酬 {r:.0%}、通膨 {infl:.0%}，錢用完在", runs_out, "year_or_never"],
-                  ["報酬 0% 的話用完在", runs_out0, "year_or_never"]],
+                  [f"前 {FIRE_SHOCK_YEARS} 年報酬 0%、之後 {r:.0%}，用完在", runs_out_shock, "year_or_never"],
+                  ["一路 0% 報酬的話用完在", runs_out0, "year_or_never"]],
     }
 
 
