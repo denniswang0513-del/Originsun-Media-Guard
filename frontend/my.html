@@ -113,7 +113,9 @@ main { max-width: 1100px; margin: 0 auto; padding: 104px 20px 80px; }
 .card-body.flush { padding: 6px 0 0; }   /* 內嵌 iframe 用：內容自帶留白 */
 .row { display: flex; gap: 12px; align-items: flex-start; padding: 13px 0; border-bottom: 1px solid #f5f5f5; font-size: 13px; }
 .row:last-child { border-bottom: none; }
-.row .grow { flex: 1; min-width: 0; }
+.row .grow { flex: 1 1 200px; min-width: 0; }
+.row { flex-wrap: wrap; }
+.row .acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
 .row .title { color: var(--ink); line-height: 1.5; }
 .row .meta { font-size: 11px; color: var(--sub); margin-top: 3px; letter-spacing: 0.05em; }
 .pill {

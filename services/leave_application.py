@@ -275,13 +275,10 @@ async def save(session, staff, username: str, body, ev: dict, app: HrLeaveApplic
 
 
 async def approve(session, app: HrLeaveApplication, actor: str, today: date | None = None) -> list:
-    """待審 → 已核准（整張）：每張子單照 alloc_plan 從指定的那幾筆扣（不夠 422，一筆都不扣）；要附證明的沒附 422。回子單 id 清單（給日曆同步）。"""
+    """待審 → 已核准（整張）：每張子單照 alloc_plan 從指定的那幾筆扣（不夠 422，一筆都不扣）。回子單 id 清單（給日曆同步）。
+    證明不擋核准（owner 2026-09-16「要先可以核准，證明後補」）：proof_path 空也照核，員工事後在清單那列「缺證明，補傳」；管理端卡片只標「缺證明」。"""
     if app.status != "待審":
         raise HTTPException(status_code=409, detail=f"此單狀態是「{app.status}」，只有待審可核准")
-    items = _loads(app.items, [])
-    if any(RECORD_META.get(i.get("kind"), {}).get("proof") for i in items) and not (app.proof_path or "").strip():
-        kinds = "／".join(sorted({i["kind"] for i in items if RECORD_META.get(i.get("kind"), {}).get("proof")}))
-        raise HTTPException(status_code=422, detail=f"{kinds}要先附上證明（員工在假勤頁上傳）才能核准")
     children = await children_of(session, app.id)
     all_credits = (await leave_service.credits_for(session, [app.staff_id])).get(app.staff_id, [])
     credits = {c["id"]: c for c in all_credits}

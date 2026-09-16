@@ -88,7 +88,7 @@ def test_service_saves_only_taken_items_and_rebuilds_children():
 def test_service_approve_checks_proof_and_specified_credits():
     svc = repo_src("services/leave_application.py")
     ap = func_body(svc, "async def approve(")
-    assert "要先附上證明（員工在假勤頁上傳）才能核准" in ap
+    assert "才能核准" not in ap and "status_code=422" in ap, "owner 2026-09-16「要先可以核准，證明後補」：缺證明不擋核准，不夠扣才 422"
     assert "for cid, h in _loads(ch.alloc_plan, [])" in ap and "HrLeaveAllocation(" in ap, "照員工指定的那幾筆扣"
     assert 'round(c["remaining"], 2) + 1e-9 < h' in ap and "status_code=422" in ap, "不夠 422、一筆都不扣"
     assert ap.index("status_code=422") < ap.index("HrLeaveAllocation("), "先驗完再寫"
@@ -126,7 +126,7 @@ def test_card_is_three_steps_with_inventory_and_edit():
     assert render.index('id="lv-need"') < render.index('id="lv-inv"') < render.index('id="lv-reason"'), "1 日期 → 2 挑假 → 3 送出"
     assert "_lvListHtml()" in render
     lst = js_func_body(js, "function _lvListHtml(")
-    assert "LV.applications" in lst and "filter(r => !r.application_id)" in lst, "申請單一列一張；子單不重複列，沒申請單的舊單照舊"
+    assert "LV.applications" in lst and "!r.application_id && _lvCardKeep(" in lst and "_lvCardKeep(a.status" in lst, "申請單一列一張；子單不重複列，沒申請單的舊單照舊"
     row = js_func_body(js, "function _lvAppRow(")
     assert 'lvEditApp(' in row and "cancelLeaveApp(" in row and 'a.status === "待審"' in row, "待審可編輯／撤回"
     assert "cancel_mode" in row, "已核准依 cancel_mode 撤回／申請消假"
@@ -144,7 +144,7 @@ def test_admin_queue_shows_applications_with_one_approve():
     assert "'/leave/applications?status=待審'" in load and "filter(x => !x.application_id)" in load, "申請單一張卡；子單不再各自一卡"
     card = js_func_body(js_code_only(src), "function _appCard(")
     assert "核准（整張）" in card and 'data-approve-app=' in card and 'data-reject-app=' in card
-    assert "缺證明（不能核准）" in card and 'data-proof-app=' in card
+    assert "缺證明（可先核准，之後補）" in card and "不能核准" not in card and 'data-proof-app=' in card
     assert "/leave/applications/${id}/approve" in src and "/leave/applications/${id}/reject" in src and "/leave/applications/${id}/cancel_decide" in src
 
 
@@ -247,12 +247,12 @@ def test_sick_proof_can_be_supplied_after_submit_and_source_url_is_hidden():
     js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
     apply = js_func_body(js, "async function applyLeave(")
     assert "這種假要附證明" not in apply and "const proofLater = _lvProofNeeded && !proofFile && !hasProof;" in apply
-    assert "核准前補證明" in apply
-    assert "可以先送單、核准前再補" in js
+    assert "核准後也可以" in apply and "核准前" not in apply, "owner 2026-09-16「要先可以核准，證明後補」"
+    assert "可以先送單、核准後再補都行" in js
     assert "缺證明，補傳" in js_func_body(js, "function _lvAppProofCell(")
     assert "const _lvReasonText = (s) =>" in js
     for f in ("frontend/js/my/cards-hr.js", "frontend/js/my/leave-host.js"):
         assert "來源[:：]" in repo_src(f), f
     assert "_lvReasonText" not in js_code_only(repo_src("frontend/js/my/leave-host.js")), "不跨檔引用（各留一份；註解提到沒關係）"
-    # 後端：核准仍要證明
-    assert "proof" in func_body(repo_src("services/leave_application.py"), "async def approve(")
+    # 後端：核准不再等證明（缺證明照核，之後補）
+    assert "才能核准" not in func_body(repo_src("services/leave_application.py"), "async def approve(")

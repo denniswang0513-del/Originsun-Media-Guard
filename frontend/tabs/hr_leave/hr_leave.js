@@ -144,7 +144,7 @@ function _appCard(a) {
     const days = (a.children || []).map(c => `${md(c.start_date)} ${esc(c.leave_type)} ${fmtH(c.hours)}h${c.part && c.part !== 'all' ? `（${esc((_vocab.part_labels || {})[c.part] || c.part)}）` : ''}`).join('　·　');
     const items = (a.items || []).map(i => `${esc(i.label || i.kind)} ${fmtH(i.hours)}h`).join('、');
     const proof = a.proof_required
-        ? (a.proof_path ? `<button class="hl-btn" data-proof-app="${esc(a.id)}">看證明</button>` : '<span style="color:var(--warn, #f59e0b)">缺證明（不能核准）</span>')
+        ? (a.proof_path ? `<button class="hl-btn" data-proof-app="${esc(a.id)}">看證明</button>` : '<span style="color:var(--warn, #f59e0b)">缺證明（可先核准，之後補）</span>')
         : '';
     return `<div class="hl-qcard" data-app="${esc(a.id)}">
         <div class="hl-qhead"><b>${esc(a.staff_name)}</b><span>請假單 ${(a.kinds || []).map(esc).join('／')}</span>${_pill(a.status)}</div>
@@ -279,7 +279,7 @@ const _needsProof = (t) => (_vocab.proof_required_types || []).includes(t);
 function _proofHtml(it) {
     return it.proof_path
         ? `<button class="hl-btn" data-proof="${esc(it.id)}">看證明</button>`
-        : '<span style="color:var(--warn, #f59e0b)">缺證明（不能核准）</span>';
+        : '<span style="color:var(--warn, #f59e0b)">缺證明（可先核准，之後補）</span>';
 }
 const _openProof = (id) => authDownload(API + `/leave/${id}/proof`, `證明_${id}`, '開啟證明');
 

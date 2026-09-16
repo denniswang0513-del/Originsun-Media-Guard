@@ -182,7 +182,7 @@ function renderLeave(body) {
         <div class="lv-step"><span class="lv-n">3</span>送出</div>
         <div class="field"><textarea id="lv-reason" rows="2" placeholder="事由（必填）"></textarea></div>
         <div class="field" id="lv-proof-wrap" style="display:none;">
-            <label style="display:block;font-size:11px;color:var(--sub);margin-bottom:4px;">證明（診斷證明／掛號單的照片或 PDF。可以先送單、核准前再補；沒補主管不能核准）</label>
+            <label style="display:block;font-size:11px;color:var(--sub);margin-bottom:4px;">證明（診斷證明／掛號單的照片或 PDF。可以先送單、核准後再補都行）</label>
             <input type="file" id="lv-proof" accept=".jpg,.jpeg,.png,.heic,.webp,.pdf">
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -207,12 +207,20 @@ function renderLeave(body) {
     lvPreviewSoon();
 }
 // ── 清單（申請單為主；沒有申請單的舊單／手機單照舊一列一筆）──
+const _lvHot = (s) => s === "待審" || s === "消假待審";
+// 工作台卡只留「待審」和「已核准、還沒休完」的；已退回、已休過的去 /leave.html 休假總表看（owner 2026-09-16「留未來要休假、以及待審休假就好」）
+function _lvCardKeep(status, lastDate) {
+    return _lvFullHost() || _lvHot(status) || (status === "已核准" && String(lastDate || "") >= _localToday());
+}
 function _lvListHtml() {
     const n = _lvFullHost() ? LV_RECENT_MAX : LV_CARD_RECENT;
-    const apps = (LV.applications || []).slice(0, n).map(_lvAppRow).join("");
-    const legacy = (LV.requests || []).filter(r => !r.application_id).slice(0, n).map(_lvRow).join("");
-    const more = !_lvFullHost() && ((LV.applications || []).length > n || (LV.requests || []).filter(r => !r.application_id).length > n)
-        ? `<div style="padding:10px 0 2px;"><button class="mini-btn" type="button" onclick="openActionModal('/leave.html', '假勤')">看全部／休假總表</button></div>` : "";
+    const appsAll = (LV.applications || []).filter(a => _lvCardKeep(a.status, (a.dates || [])[(a.dates || []).length - 1]));
+    const legacyAll = (LV.requests || []).filter(r => !r.application_id && _lvCardKeep(r.status, r.end_date || r.start_date));
+    const apps = appsAll.slice(0, n).map(_lvAppRow).join("");
+    const legacy = legacyAll.slice(0, n).map(_lvRow).join("");
+    const more = !_lvFullHost()
+        ? `<div style="padding:10px 0 2px;"><button class="mini-btn" type="button" onclick="openActionModal('/leave.html', '假勤')">${appsAll.length > n || legacyAll.length > n ? "還有更多／" : ""}休假總表</button></div>` : "";
+    if (!_lvFullHost() && !apps && !legacy) return `<div class="empty">沒有待審或還沒休的假</div>` + more;
     return apps + legacy + more;
 }
 function _lvDatesLabel(dates) {
@@ -247,8 +255,7 @@ function _lvAppRow(a) {
             <div class="title">請假單　${_lvDatesLabel(a.dates)}${a.part && a.part !== "all" ? `（${esc(LV_PART_LABEL(a.part))}）` : ""}　${_lvH(a.hours)} 小時／${_lvDays(a.hours)} 天</div>
             <div class="meta">${metas.join("　")}</div>
         </div>
-        <span class="pill${hot ? " hot" : ""}">${esc(a.status)}</span>
-        ${_lvAppProofCell(a)}${act}
+        <div class="acts"><span class="pill${hot ? " hot" : ""}">${esc(a.status)}</span>${_lvAppProofCell(a)}${act}</div>
     </div>`;
 }
 function _lvRow(r) {
@@ -274,8 +281,7 @@ function _lvRow(r) {
             <div class="title">${esc(r.leave_type)}　${period}${partLbl ? `（${partLbl}${tm}）` : ""}　${_lvH(r.hours)} 小時／${_lvDays(r.hours)} 天</div>
             ${metas.length ? `<div class="meta">${metas.join("　")}</div>` : ""}
         </div>
-        <span class="pill${hot ? " hot" : ""}">${esc(r.status)}</span>
-        ${_lvProofCell(r)}${act}
+        <div class="acts"><span class="pill${hot ? " hot" : ""}">${esc(r.status)}</span>${_lvProofCell(r)}${act}</div>
     </div>`;
 }
 // ── 第 1 步：日期 ──
@@ -434,7 +440,7 @@ async function applyLeave() {
             if (!up || !up.ok) alert("申請單已送出，但證明上傳失敗，請在清單裡補傳。");
         }
         if (proofLater) {
-            alert("申請單已送出。這種假要在核准前補證明：在下面的單子按「缺證明，補傳」。");
+            alert("申請單已送出。證明之後再補就好（核准後也可以）：在下面的單子按「缺證明，補傳」。");
         }
         _lvEditing = ""; _lvPicks = [];
         _resetTodayStrip();   // 今天那條「請假待審 N 件」下次重抓

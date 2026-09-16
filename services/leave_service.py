@@ -17,7 +17,7 @@ from sqlalchemy import func, select  # type: ignore
 from core.hr_logic import day_iso, leave_to_dict, midnight_of, parse_ymd, tw_day
 from core.leave_logic import (ACTIVE_STATUSES, ALL_LEAVE_TYPES, HOURS_PER_DAY, LEDGER_TYPES,
                               PARTS, SICK_CAP_DAYS, InsufficientHours, allocate, annual_days_for,
-                              PROOF_REQUIRED_TYPES, SELF_SERVICE_TYPES,
+                              SELF_SERVICE_TYPES,
                               as_date, balance, cancel_mode, check_hours_step, hours_to_days, in_crew, notice_warning,
                               overlaps, working_hours)
 from core.shoot_logic import CANCELLED as SHOOT_CANCELLED
@@ -253,8 +253,7 @@ async def approve_request(session, obj: HrLeaveRequest, actor: str, today: date 
     today = today or date.today()
     if obj.status != "待審":
         raise HTTPException(status_code=409, detail=f"此單狀態是「{obj.status}」，只有待審可核准")
-    if obj.leave_type in PROOF_REQUIRED_TYPES and not (getattr(obj, "proof_path", None) or "").strip():
-        raise HTTPException(status_code=422, detail=f"{obj.leave_type}要先附上證明（員工在假勤頁上傳）才能核准")
+    # 證明不擋核准（owner 2026-09-16「要先可以核准，證明後補」）；缺的只在卡片上標「缺證明」
     hours = float(obj.hours if obj.hours is not None else (obj.days or 0) * HOURS_PER_DAY)
     parts = []
     if obj.leave_type in LEDGER_TYPES:

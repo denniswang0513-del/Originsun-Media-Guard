@@ -35,11 +35,17 @@ def test_employee_endpoints_evaluate_as_self_service_but_admin_does_not():
     assert '_err("bad_type"' in ev
 
 
-def test_approve_is_blocked_without_proof():
-    svc = repo_src("services/leave_service.py")
-    body = func_body(svc, "async def approve_request(")
-    assert 'if obj.leave_type in PROOF_REQUIRED_TYPES and not (getattr(obj, "proof_path", None) or "").strip():' in body
-    assert "status_code=422" in body.split("PROOF_REQUIRED_TYPES")[1][:300]
+def test_approve_no_longer_waits_for_proof():
+    """owner 2026-09-16「要先可以核准，證明後補」：兩條核准路徑（舊單 approve_request、申請單 approve）都不再因缺證明 422。"""
+    body = func_body(repo_src("services/leave_service.py"), "async def approve_request(")
+    assert "PROOF_REQUIRED_TYPES and not" not in body and "才能核准" not in body
+    app_body = func_body(repo_src("services/leave_application.py"), "async def approve(")
+    assert "才能核准" not in app_body
+    # 員工那列：已核准但缺證明仍能補傳
+    js = js_code_only(repo_src("frontend/js/my/cards-hr.js"))
+    for fn in ("function _lvProofCell(", "function _lvAppProofCell("):
+        cell = js_func_body(js, fn)
+        assert '"已核准"' in cell and "缺證明，補傳" in cell, fn
 
 
 def test_proof_upload_is_own_only_and_reuses_the_receipt_pipeline():
@@ -72,7 +78,7 @@ def test_workspace_card_and_mobile_form_take_the_proof_file():
     apply = js_func_body(js, "async function applyLeave(")
     # 2026-09-16 owner「病假是補件」：沒附證明也能先送（核准時後端才擋），送出後提醒去清單那列「缺證明，補傳」
     assert '"這種假要附證明（照片或 PDF）"' not in apply and "_lvUploadAppProof(created.id, proofFile)" in apply, "申請單一份證明"
-    assert "const proofLater = _lvProofNeeded && !proofFile && !hasProof;" in apply and "核准前補證明" in apply
+    assert "const proofLater = _lvProofNeeded && !proofFile && !hasProof;" in apply and "核准後也可以" in apply
     assert "_lvProofNeeded = !!d.proof_required;" in js_func_body(js, "async function lvPreview("), "要不要附證明由試算（挑到的假別）決定"
     assert 'fetch("/api/v1/me/leave/applications/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd })' in js, "multipart 不走 mfetch"
     assert 'fetch("/api/v1/me/leave/" + id + "/proof", { method: "POST", headers: _lvAuthHeaders(), body: fd })' in js, "舊單的補傳照舊"
@@ -87,7 +93,7 @@ def test_workspace_card_and_mobile_form_take_the_proof_file():
 def test_admin_tab_shows_proof_and_missing_marker():
     src = repo_src("frontend/tabs/hr_leave/hr_leave.js")
     assert "const _needsProof = (t) => (_vocab.proof_required_types || []).includes(t);" in src
-    assert "缺證明（不能核准）" in src and "data-proof=" in src
+    assert "缺證明（可先核准，之後補）" in src and "不能核准" not in src and "data-proof=" in src
     assert src.count("if (t.dataset.proof) return _openProof(t.dataset.proof);") == 2, "待核佇列與請假紀錄兩邊都要接"
     assert "authDownload(API + `/leave/${id}/proof`" in src, "<a href> 帶不了 Authorization，走 authDownload"
 
