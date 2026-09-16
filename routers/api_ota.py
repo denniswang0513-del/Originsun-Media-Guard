@@ -181,6 +181,22 @@ async def download_agent():
     return {"error": "系統尚未打包 Originsun_Agent.zip，請聯絡管理員放置此檔案於伺服器根目錄。"}
 
 
+@router.get("/download_updater_py")
+async def download_updater_py():
+    """目前主控這份 update_agent.py 的原文（updater-first，owner 2026-09-16）。
+    機器要更新時，core/process_spawn 先來這裡拿**新的**更新程式來跑，而不是跑自己硬碟上那支 ——
+    2026-09-15／16 十台機器卡在 2.5.30 就是因為舊的那支有 bug、而新版只有它自己跑成功才會被換上，鎖匠把自己鎖在門外。
+    跟 /download_update 一樣不用登入（那個 ZIP 本來就含這支檔）。"""
+    from fastapi.responses import PlainTextResponse  # type: ignore
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(base_dir, "update_agent.py")
+    if not os.path.isfile(path):
+        return JSONResponse({"detail": "update_agent.py not found"}, 404)
+    with open(path, "r", encoding="utf-8") as f:
+        src = f.read()
+    return PlainTextResponse(src, media_type="text/x-python; charset=utf-8", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/download_update")
 async def download_update(background_tasks: BackgroundTasks):
     """Serve a lightweight code-only ZIP for OTA updates.

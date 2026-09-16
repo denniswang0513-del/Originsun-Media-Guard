@@ -9,9 +9,10 @@ import re
 import sys
 
 # ── Individual files synced to Agent ──
+# 🔴 只放根目錄的檔名，**不放子路徑**：舊版 update_agent 的備份步驟對子路徑不會先建目錄，會在那裡倒下、整個更新中止
+#    （2.5.30 過渡時放過 "python_embed/pip.ini"，就是 2026-09-15 十台機器卡住的原因之一；機器上那份由 update_agent._drop_transitional_pip_ini 刪）。
+#    有 test 釘著（test_agent_files_have_no_subpaths）。
 AGENT_FILES = [
-    # （2.5.30 過渡時這裡帶過 "python_embed/pip.ini"（pip no-deps）讓舊 update_agent 不碰半套的 pillow；2.5.31 拿掉，
-    #   機器上那份由新 update_agent._drop_transitional_pip_ini 刪。）
     "main.py",
     "config.py",
     "core_engine.py",

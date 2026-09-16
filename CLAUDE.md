@@ -1355,6 +1355,10 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   權限管理的 `PERM_PARENT`（子鑰匙縮排、總開關沒開子鑰匙灰掉）都是鏡射。
   兩次一次性回填在 `main.py`（settings 旗標 `rbac.me_zone_split_backfilled`、`rbac.me_today_zone_backfilled`），跑過之後 owner 收掉的鑰匙**不會**被補回來。
   要放寬先讀「放寬守衛不能收回原本的鑰匙」那條。
+- **機隊更新是 updater-first**（2026-09-16，owner「之後可以不發生」）：`core/process_spawn.py --ota` 先向主控 `/download_updater_py`
+  拿**目前**那支 `update_agent.py`（存成 `update_agent.fresh.py`、`py_compile` 過才跑），拿不到才退回硬碟上那支。
+  所以修 `update_agent.py` 的 bug 等於修全機隊；但 **`process_spawn.py` 自己要保持極簡**，它壞了沒有人救它（改它一定走 publish.md 的兩跳金絲雀）。
+  `ota_manifest.AGENT_FILES` **只放根目錄檔名、不放子路徑**（有 test 釘），舊版更新程式的備份對子路徑會倒。
 - **`ts-zone`／`my` 那幾支不要跨檔 import 新名字**（2026-09-15 /polish 抓到）：每支 `.js` 各自被 Cloudflare 快取 4 小時，
   新 `plan.js` 配舊 `team-week.js` ＝**具名匯入失敗**（不是 `undefined`，是整張模組圖掛掉）→ `index.js` 不執行、`_tsReady` 不來，
   「今天與這週」四個視圖一起停在載入中、畫面上**沒有任何錯誤字**。所以 `_partWord` 在 `plan.js` 與 `team-week.js` 各留一份（五行的純字串函式，

@@ -1,3 +1,5 @@
+import os
+from tests.unit._srcscan import func_body, repo_src  # noqa: F401
 # -*- coding: utf-8 -*-
 """OTA 更新端（update_agent.py）失敗時的可診斷性。"""
 
@@ -55,3 +57,65 @@ def test_backup_and_rollback_create_parent_dirs():
     ua = repo_src("update_agent.py")
     assert "os.makedirs(os.path.dirname(dst), exist_ok=True)" in func_body(ua, "def backup_current(")
     assert "os.makedirs(os.path.dirname(dst), exist_ok=True)" in func_body(ua, "def rollback(")
+
+
+# ── updater-first（owner 2026-09-16「之後可以不發生 要設計一個方法」）──
+
+def test_agent_files_have_no_subpaths():
+    """2026-09-15 十台機器卡在 2.5.30 的地雷之一：AGENT_FILES 放了 "python_embed/pip.ini"，舊版更新程式的備份步驟對子路徑不先建目錄，
+    每次推都倒在那裡。只准根目錄檔名。"""
+    from ota_manifest import AGENT_FILES
+    bad = [f for f in AGENT_FILES if "/" in f or "\\" in f]
+    assert not bad, bad
+
+
+def test_master_serves_the_current_updater():
+    src = repo_src("routers/api_ota.py")
+    assert '@router.get("/download_updater_py")' in src
+    body = src.split('@router.get("/download_updater_py")')[1].split("@router.get(")[0]
+    assert 'os.path.join(base_dir, "update_agent.py")' in body and '"Cache-Control": "no-store"' in body
+
+
+def test_restart_helper_prefers_a_fresh_updater_and_falls_back(tmp_path, monkeypatch):
+    """更新前先跟主控拿新的 update_agent.py 來跑；拿不到／不像／編譯不過 → None（退回本機那支），絕不跑一支壞的。"""
+    import urllib.request
+    from core import process_spawn as ps
+
+    base = str(tmp_path)
+    (tmp_path / "settings.json").write_text('{"master_server": "http://master.test:8000/"}', encoding="utf-8")
+    good = b'"""Originsun Agent OTA Updater v2"""\ndef run_update(master_url):\n    return 0\n'
+
+    class _Resp:
+        def __init__(self, data): self._d = data
+        def read(self): return self._d
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    seen = {}
+    def fake_open(url, timeout=0):
+        seen["url"] = url
+        return _Resp(seen.get("payload", good))
+    monkeypatch.setattr(urllib.request, "urlopen", fake_open)
+
+    # 1) 正常：抓到、像更新程式、編譯過 → 回新檔的路徑（放在 base_dir，它的 INSTALL_DIR 才會對）
+    p = ps._fresh_updater(base)
+    assert p == os.path.join(base, ps.FRESH_UPDATER) and os.path.isfile(p)
+    assert seen["url"] == "http://master.test:8000/download_updater_py", "settings.json 的 master_server 要去掉尾巴的 /"
+    # 2) 內容不像更新程式（例如主控回了登入頁）→ None
+    seen["payload"] = b"<html>login</html>"
+    assert ps._fresh_updater(base) is None
+    # 3) 像、但編譯不過 → None（不能跑一支壞的）
+    seen["payload"] = b'"""OTA Updater"""\ndef run_update(:\n'
+    assert ps._fresh_updater(base) is None
+    # 4) 主控不在 → None
+    def down(url, timeout=0): raise OSError("unreachable")
+    monkeypatch.setattr(urllib.request, "urlopen", down)
+    assert ps._fresh_updater(base) is None
+    log = (tmp_path / "update_agent.log").read_text(encoding="utf-8")
+    assert "fetch failed" in log and "compile failed" in log and "does not look like" in log
+    # 沒 settings.json → 預設主控
+    (tmp_path / "settings.json").unlink()
+    assert ps._master_url(base) == ps.DEFAULT_MASTER
+    # _restart_main 真的先用 fresh、退回 local
+    src = repo_src("core/process_spawn.py")
+    assert 'updater = _fresh_updater(base_dir) or os.path.join(base_dir, "update_agent.py")' in src

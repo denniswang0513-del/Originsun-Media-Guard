@@ -213,22 +213,78 @@ def trigger_detached_restart(base_dir: Optional[str] = None, run_ota: bool = Fal
     )
 
 
+DEFAULT_MASTER = "http://192.168.1.107:8000"      # 同 update_agent.DEFAULT_MASTER
+FRESH_UPDATER = "update_agent.fresh.py"              # 從主控抓下來的那支；放同一層，它的 INSTALL_DIR 才會對
+
+
+def _ota_log(base_dir: str, msg: str) -> None:
+    """寫進 update_agent.log（/api/v1/update_log 會吐尾段），讓「為什麼用哪一支更新程式」查得到。"""
+    try:
+        with open(os.path.join(base_dir, "update_agent.log"), "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [spawn] {msg}\n")
+    except OSError:
+        pass
+
+
+def _master_url(base_dir: str) -> str:
+    try:
+        import json
+        with open(os.path.join(base_dir, "settings.json"), "r", encoding="utf-8") as f:
+            return str(json.load(f).get("master_server") or DEFAULT_MASTER).rstrip("/")
+    except Exception:
+        return DEFAULT_MASTER
+
+
+def _fresh_updater(base_dir: str) -> Optional[str]:
+    """跟主控拿**目前**那支 update_agent.py 來跑（updater-first，owner 2026-09-16「之後可以不發生」）。
+
+    🔴 為什麼：機器上那支更新程式只有在它自己跑成功之後才會被換成新版。2026-09-15／16 十台機器卡在 2.5.30，
+    就是舊的那支在備份那一步有 bug、每次推都在同一步倒下，而修好 bug 的新版永遠到不了 —— 鎖匠把自己鎖在門外，
+    最後得有人到每一台雙擊修復檔。改成先向主控拿新的來跑，主控修好＝全機隊修好。
+
+    拿不到（主控不在／網路斷）、內容不像更新程式、或編譯不過 → 回 None，呼叫端退回本機那支。**絕不**跑一支編譯不過的。
+    """
+    import py_compile
+    import urllib.request
+    url = _master_url(base_dir) + "/download_updater_py"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            src = resp.read()
+    except Exception as e:
+        _ota_log(base_dir, f"fresh updater: fetch failed ({e.__class__.__name__}: {e}) -> local")
+        return None
+    if b"def run_update(" not in src or b"OTA Updater" not in src:
+        _ota_log(base_dir, "fresh updater: response does not look like update_agent.py -> local")
+        return None
+    path = os.path.join(base_dir, FRESH_UPDATER)
+    try:
+        with open(path, "wb") as f:
+            f.write(src)
+        py_compile.compile(path, doraise=True)
+    except Exception as e:
+        _ota_log(base_dir, f"fresh updater: compile failed ({e.__class__.__name__}) -> local")
+        return None
+    _ota_log(base_dir, f"fresh updater: using {FRESH_UPDATER} from {url}")
+    return path
+
+
 def _restart_main(args: argparse.Namespace) -> None:
     """CLI entry: kill port → optional OTA → rotate logs → spawn uvicorn."""
     base_dir = _base_dir()
     time.sleep(args.wait)
     kill_port(args.port)
     if args.ota:
-        updater = os.path.join(base_dir, "update_agent.py")
+        # updater-first：先跑主控給的那支；拿不到才退回硬碟上這支
+        updater = _fresh_updater(base_dir) or os.path.join(base_dir, "update_agent.py")
         if os.path.isfile(updater):
             try:
                 subprocess.run(
                     [find_python(), updater],
-                    cwd=base_dir, timeout=300,
+                    cwd=base_dir, timeout=900,   # 更新程式自己的 pip 上限是 600 秒，這層要比它長
                     creationflags=CREATE_NO_WINDOW,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                _ota_log(base_dir, f"updater run failed: {e.__class__.__name__}: {e}")
     rotate_log(os.path.join(base_dir, "uvicorn_out.log"))
     rotate_log(os.path.join(base_dir, "uvicorn_err.log"))
     spawn_uvicorn_detached(base_dir, args.port)

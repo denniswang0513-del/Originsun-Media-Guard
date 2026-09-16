@@ -74,6 +74,15 @@ E:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe publish_update.py --versio
 
 > 🔴 **dev 機關鍵**：這步**只**驗證 + bump `E:\Dev` version.json + 同步 NAS 官網 —— 它**不**把碼部署到生產主控 `C:\OriginsunAgent`（機隊 OTA 的碼來源）。它重啟 8000，但 8000 跑的是 `C:\OriginsunAgent` 舊碼 → 重啟後仍是舊碼舊版。所以 dev 機**必須**接著跑 Step 2.5，否則機隊拿到舊碼。乾淨生產環境（跑的就是本地碼）→ **跳過 Step 2.5**，直接 Step 3。
 
+### Step 2.4：動到更新機制時 —— 兩跳金絲雀（2026-09-16 起強制）
+
+`update_agent.py`／`core/process_spawn.py`／`ota_manifest.py`／`requirements_agent.txt` 任一有改，推機隊前先：
+1. 推到**一台**代理（`fleet_push.py` 只放一個 id），等它 done。
+2. **再發一版**（版號 +1、notes 寫「兩跳金絲雀」）推到**同一台**。第二跳才證明「裝上去的那套更新機制自己還更新得動」——
+   2.5.30 就是第一跳成功、第二跳從此每次倒在備份那一步，十台機器要人到場雙擊才救得回來。
+3. 第二跳也 done 才推全機隊。
+updater-first（`process_spawn._fresh_updater`）上機後這條仍要跑：它保護的是 `update_agent.py`，`process_spawn.py` 自己壞了它救不了。
+
 ### Step 2.5：deploy_to_prod（**僅 dev 機**；跳過＝機隊拿舊碼靜默壞掉）
 
 在 **dev 8001** 上呼叫 —— 它把 `E:\Dev` 碼複製進 `C:\OriginsunAgent`、bump 兩邊 version.json、**自動備份舊碼到 `_deploy_backup`**、重啟 8000、smoke check（版本+健康，最長約 2 分鐘），**失敗自動回滾舊碼**：

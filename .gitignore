@@ -42,6 +42,7 @@ watcher_config.json
 watcher_history.json
 update_status.json
 update_agent.log
+update_agent.fresh.py
 
 # OS
 .DS_Store
