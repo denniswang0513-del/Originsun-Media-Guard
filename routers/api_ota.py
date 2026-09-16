@@ -192,9 +192,15 @@ async def download_updater_py():
     path = os.path.join(base_dir, "update_agent.py")
     if not os.path.isfile(path):
         return JSONResponse({"detail": "update_agent.py not found"}, 404)
-    with open(path, "r", encoding="utf-8") as f:
-        src = f.read()
-    return PlainTextResponse(src, media_type="text/x-python; charset=utf-8", headers={"Cache-Control": "no-store"})
+    with open(path, "rb") as f:
+        raw = f.read()
+    # 簽章（owner 2026-09-16「這樣風險偏高」）：私鑰只在主控（不進 git／ZIP），機器用公鑰驗、驗不過不跑。簽的是 bytes 原文。
+    from core.ota_sign import PRIVATE_KEY_FILE, SIGNATURE_HEADER, sign
+    headers = {"Cache-Control": "no-store"}
+    sig = sign(raw, os.path.join(base_dir, PRIVATE_KEY_FILE))
+    if sig:
+        headers[SIGNATURE_HEADER] = sig
+    return PlainTextResponse(raw, media_type="text/x-python; charset=utf-8", headers=headers)
 
 
 @router.get("/download_update")

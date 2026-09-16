@@ -13,6 +13,7 @@ import sys
 #    （2.5.30 過渡時放過 "python_embed/pip.ini"，就是 2026-09-15 十台機器卡住的原因之一；機器上那份由 update_agent._drop_transitional_pip_ini 刪）。
 #    有 test 釘著（test_agent_files_have_no_subpaths）。
 AGENT_FILES = [
+    "ota_signing_pub.pem",   # OTA 簽章公鑰（core/ota_sign）；私鑰 ota_signing_key.pem **絕不**放進來
     "main.py",
     "config.py",
     "core_engine.py",

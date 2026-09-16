@@ -1358,6 +1358,9 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 - **機隊更新是 updater-first**（2026-09-16，owner「之後可以不發生」）：`core/process_spawn.py --ota` 先向主控 `/download_updater_py`
   拿**目前**那支 `update_agent.py`（存成 `update_agent.fresh.py`、`py_compile` 過才跑），拿不到才退回硬碟上那支。
   所以修 `update_agent.py` 的 bug 等於修全機隊；但 **`process_spawn.py` 自己要保持極簡**，它壞了沒有人救它（改它一定走 publish.md 的兩跳金絲雀）。
+  **有簽章**（owner「這樣風險偏高」）：主控用 `C:\OriginsunAgent\ota_signing_key.pem`（私鑰，**不進 git、不進 ZIP**）簽，回應帶
+  `X-Originsun-Signature`；機器用隨 OTA 出去的 `ota_signing_pub.pem` 驗，沒簽章／驗不過／沒公鑰一律不跑（fail closed）。
+  私鑰不見＝機器全部退回本機那支（等於今天以前的行為），不會壞；私鑰外洩＝換鑰（先用舊鑰簽一版帶新公鑰的推出去，再換）。
   `ota_manifest.AGENT_FILES` **只放根目錄檔名、不放子路徑**（有 test 釘），舊版更新程式的備份對子路徑會倒。
 - **`ts-zone`／`my` 那幾支不要跨檔 import 新名字**（2026-09-15 /polish 抓到）：每支 `.js` 各自被 Cloudflare 快取 4 小時，
   新 `plan.js` 配舊 `team-week.js` ＝**具名匯入失敗**（不是 `undefined`，是整張模組圖掛掉）→ `index.js` 不執行、`_tsReady` 不來，

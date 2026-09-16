@@ -43,6 +43,7 @@ watcher_history.json
 update_status.json
 update_agent.log
 update_agent.fresh.py
+ota_signing_key.pem
 
 # OS
 .DS_Store

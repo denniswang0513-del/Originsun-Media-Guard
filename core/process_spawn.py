@@ -215,6 +215,7 @@ def trigger_detached_restart(base_dir: Optional[str] = None, run_ota: bool = Fal
 
 DEFAULT_MASTER = "http://192.168.1.107:8000"      # 同 update_agent.DEFAULT_MASTER
 FRESH_UPDATER = "update_agent.fresh.py"              # 從主控抓下來的那支；放同一層，它的 INSTALL_DIR 才會對
+SIGNATURE_HEADER = "X-Originsun-Signature"           # 同 core.ota_sign.SIGNATURE_HEADER（這裡不 import，小幫手要越少依賴越好）
 
 
 def _ota_log(base_dir: str, msg: str) -> None:
@@ -242,7 +243,8 @@ def _fresh_updater(base_dir: str) -> Optional[str]:
     就是舊的那支在備份那一步有 bug、每次推都在同一步倒下，而修好 bug 的新版永遠到不了 —— 鎖匠把自己鎖在門外，
     最後得有人到每一台雙擊修復檔。改成先向主控拿新的來跑，主控修好＝全機隊修好。
 
-    拿不到（主控不在／網路斷）、內容不像更新程式、或編譯不過 → 回 None，呼叫端退回本機那支。**絕不**跑一支編譯不過的。
+    拿不到（主控不在／網路斷）、**簽章不對**、內容不像更新程式、或編譯不過 → 回 None，呼叫端退回本機那支。
+    **絕不**跑一支沒驗過簽章或編譯不過的（owner 2026-09-16「這樣風險偏高」→ 加 Ed25519 簽章，core/ota_sign）。
     """
     import py_compile
     import urllib.request
@@ -250,8 +252,18 @@ def _fresh_updater(base_dir: str) -> Optional[str]:
     try:
         with urllib.request.urlopen(url, timeout=15) as resp:
             src = resp.read()
+            sig = resp.headers.get(SIGNATURE_HEADER)
     except Exception as e:
         _ota_log(base_dir, f"fresh updater: fetch failed ({e.__class__.__name__}: {e}) -> local")
+        return None
+    try:
+        from core.ota_sign import PUBLIC_KEY_FILE, verify
+        ok = verify(src, sig, os.path.join(base_dir, PUBLIC_KEY_FILE))
+    except Exception as e:      # 沒 cryptography／core 壞了：一樣不跑
+        _ota_log(base_dir, f"fresh updater: verify unavailable ({e.__class__.__name__}) -> local")
+        return None
+    if not ok:
+        _ota_log(base_dir, "fresh updater: signature missing or invalid -> local (refusing unsigned code)")
         return None
     if b"def run_update(" not in src or b"OTA Updater" not in src:
         _ota_log(base_dir, "fresh updater: response does not look like update_agent.py -> local")

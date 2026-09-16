@@ -82,6 +82,7 @@ E:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe publish_update.py --versio
    2.5.30 就是第一跳成功、第二跳從此每次倒在備份那一步，十台機器要人到場雙擊才救得回來。
 3. 第二跳也 done 才推全機隊。
 updater-first（`process_spawn._fresh_updater`）上機後這條仍要跑：它保護的是 `update_agent.py`，`process_spawn.py` 自己壞了它救不了。
+主控要有 `C:\OriginsunAgent\ota_signing_key.pem`（私鑰，不進 git／ZIP）才簽得出來；沒有的話機器會拒收新更新程式、退回本機那支（不壞，但等於沒有 updater-first）。
 
 ### Step 2.5：deploy_to_prod（**僅 dev 機**；跳過＝機隊拿舊碼靜默壞掉）
 
