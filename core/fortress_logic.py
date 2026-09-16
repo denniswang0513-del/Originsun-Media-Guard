@@ -57,6 +57,9 @@ LADDER_RUNGS = (
 )
 #: 規劃欄位的預設：想爬到第幾階（5＝6 億）、幾年內到
 DEFAULT_PLAN = {"target_rung": 5, "target_years": 20}
+#: 房產（owner 2026-09-16「可以新增房產的選項 但我現在沒有」）：手填估值，只算進**財富階梯的淨值**，
+#: 不進五層、不進可撐月數、不進長照題 —— 房子不是能拿來付帳的錢。有房貸的話貸款那邊本來就會扣。
+DEFAULT_PROPERTY = {"value": 0, "note": ""}
 #: 第 3 題「突發支出」的金額
 SHOCK_AMOUNT = 400_000
 #: 第 2 題股票跌幅
@@ -208,6 +211,14 @@ def normalize_settings(raw) -> dict:
                 plan[k] = max(lo, min(hi, int(float((raw["plan"])[k]))))
             except (TypeError, ValueError):
                 pass
+    prop = dict(DEFAULT_PROPERTY)
+    raw_p = raw.get("property") or {}
+    try:
+        prop["value"] = max(0, min(10 ** 12, int(float(raw_p.get("value") or 0))))
+    except (TypeError, ValueError):
+        pass
+    if isinstance(raw_p.get("note"), str):
+        prop["note"] = raw_p["note"].strip()[:80]
     override = raw.get("monthly_need_override")
     try:
         override = int(override) if override not in (None, "", 0, "0") else None
@@ -222,14 +233,14 @@ def normalize_settings(raw) -> dict:
         hl = 5
     return {"account_layers": layers, "account_flags": flags, "holdings_layer": hl if 1 <= hl <= 5 else 5,
             "targets": targets, "monthly_need_override": override, "war": war, "care": care, "growth": growth,
-            "ladder": ladder, "plan": plan}
+            "ladder": ladder, "plan": plan, "property": prop}
 
 
 def merge_settings(current: dict, patch: dict) -> dict:
     """PUT 設定：淺層合併（account_layers／account_flags／targets／war 各自整份取代；其餘逐鍵）。"""
     out = normalize_settings(current)
     patch = patch if isinstance(patch, dict) else {}
-    for k in ("account_layers", "account_flags", "targets", "war", "care", "growth", "ladder", "plan"):
+    for k in ("account_layers", "account_flags", "targets", "war", "care", "growth", "ladder", "plan", "property"):
         if k in patch and isinstance(patch[k], dict):
             out[k] = patch[k]
     for k in ("holdings_layer", "monthly_need_override"):
@@ -511,16 +522,19 @@ def effort_focus(base: float, growth: dict) -> dict:
 
 def _ladder_block(have: dict, settings: dict, liabilities: dict) -> dict:
     """財富階梯那一段：你在第幾階、贏過台灣多少家庭、規劃欄位的答案、這一階該把力氣放哪。
-    淨值＝五層合計 − 負債（卡債＋貸款剩餘本金）—— 純金融資產，不含應收帳款與器材
-    （階梯問的是「不用想就能花多少」，那些不是能隨手花的錢）。"""
+    淨值＝五層合計 ＋ 房產（手填估值）− 負債（卡債＋貸款剩餘本金）。不含應收帳款與器材
+    （階梯問的是「不用想就能花多少」，那些不是能隨手花的錢）。房產只進這裡，不進五層與可撐月數。"""
     ladder, plan, growth = settings["ladder"], settings["plan"], settings["growth"]
     debt = sum(int(v or 0) for v in liabilities.values())
-    net = sum(have.values()) - debt
+    prop = int(settings["property"]["value"] or 0)
+    net = sum(have.values()) + prop - debt          # 房產只在這裡算（見 DEFAULT_PROPERTY）
     pos = ladder_position(net, ladder)
     target = ladder["thresholds"][plan["target_rung"] - 2]
     return {
         **pos,
         "liabilities": {"total": _m(debt), **{k: _m(v) for k, v in liabilities.items()}},
+        "property": {"value": _m(prop), "note": settings["property"]["note"]},
+        "financial": _m(sum(have.values())),
         "percentile": percentile_note(net, ladder),
         "plan": {**plan, **plan_result(have[5], target, plan["target_years"], growth)},
         "focus": effort_focus(have[5], growth),

@@ -67,6 +67,7 @@ class FortressSettingsPatch(BaseModel):
     growth: Optional[dict] = None     # 資產預期成長：年報酬／通膨／每年再投入
     ladder: Optional[dict] = None     # 財富階梯：門檻五個、免思考比例、台灣分位數與註記
     plan: Optional[dict] = None       # 規劃欄位：目標階梯、目標年份
+    property: Optional[dict] = None   # 房產估值（只算進階梯的淨值）：{value, note}
 
 
 def _guard(request: Request, entity: str = "") -> str:

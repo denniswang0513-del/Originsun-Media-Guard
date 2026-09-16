@@ -390,3 +390,21 @@ def test_effort_focus_and_net_worth_in_payload():
     assert L["rung"] == 4 and L["focus"]["passive"] == round(47_063_708 * 0.06) and L["focus"]["passive_wins"] is True
     d2 = build(accts, [], 94206, {"account_layers": {"e": 5}, "growth": {"annual_add": 5_000_000}}, "", need_months=6)
     assert d2["ladder"]["focus"]["passive_wins"] is False, "存得比長得多 → 力氣放在收入"
+
+
+def test_property_only_counts_toward_the_ladder():
+    """owner 2026-09-16「可以新增房產的選項 但我現在沒有」：手填估值只進階梯的淨值 ——
+    不進五層、不進可撐月數、不進長照題（房子不是能拿來付帳的錢）。"""
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 2_883_940},
+             {"id": "e", "name": "證券", "kind": "holding", "balance": 47_063_708}]
+    base = build(accts, [], 94206, {"account_layers": {"e": 5}}, "", need_months=6, liabilities={"card": 2428})
+    withp = build(accts, [], 94206, {"account_layers": {"e": 5}, "property": {"value": 30_000_000, "note": "台北自住"}},
+                  "", need_months=6, liabilities={"card": 2428})
+    assert withp["ladder"]["net_worth"] == base["ladder"]["net_worth"] + 30_000_000
+    assert withp["ladder"]["property"] == {"value": 30_000_000, "note": "台北自住"} and withp["ladder"]["financial"] == base["ladder"]["financial"]
+    assert withp["cash"] == base["cash"] and withp["runway"] == base["runway"], "五層與可撐月數不變"
+    care_b = {t["key"]: t for t in base["tests"]}["care"]["lines"][3]
+    care_w = {t["key"]: t for t in withp["tests"]}["care"]["lines"][3]
+    assert care_b == care_w, "長照題也不變"
+    assert normalize_settings({"property": {"value": -5}})["property"]["value"] == 0
+    assert normalize_settings({})["property"] == {"value": 0, "note": ""}, "預設沒有房產"

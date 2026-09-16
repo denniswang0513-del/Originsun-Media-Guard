@@ -448,6 +448,7 @@ function _ladder(d) {
         </div>`).join('');
     const p = L.plan || {}, f = L.focus || {};
     const lia = L.liabilities || {};
+    const prop = L.property || {};
     const planLine = p.years_at_current == null
         ? `照現在的報酬與投入，${fmtNum(p.years)} 年內到不了 ${fmtWan(p.target)}。`
         : (p.on_track
@@ -461,8 +462,16 @@ function _ladder(d) {
     <div class="ft-grid2" style="margin-top:14px;">
         <div class="ft-strip">
             <div class="lad-h">你現在的位置</div>
-            <div class="line"><span>淨值（五層合計 − 負債）</span><span class="ft-num">$${fmtNum(L.net_worth)}</span></div>
-            <div class="line"><span>其中負債（卡債＋貸款剩餘本金）</span><span class="ft-num">$${fmtNum(lia.total)}</span></div>
+            <div class="line"><span>淨值（金融資產 ＋ 房產 − 負債）</span><span class="ft-num">$${fmtNum(L.net_worth)}</span></div>
+            <div class="line"><span>金融資產（五層合計）</span><span class="ft-num">$${fmtNum(L.financial)}</span></div>
+            <div class="line"><span>房產（手填估值${prop.note ? '：' + esc(prop.note) : ''}）</span><span class="ft-num">$${fmtNum(prop.value)}</span></div>
+            <div class="line"><span>負債（卡債＋貸款剩餘本金）</span><span class="ft-num">$${fmtNum(lia.total)}</span></div>
+            <div class="ft-war" style="margin:8px 0 0;">
+                <label>房產估值（沒有就留 0）<input class="crm-input" id="ft-prop-value" type="number" min="0" step="100000" value="${fmtNum(prop.value || 0).replace(/,/g, '')}"></label>
+                <label>備註<input class="crm-input" id="ft-prop-note" type="text" maxlength="80" value="${esc(prop.note || '')}" placeholder="例：台北自住"></label>
+                <div class="full"><button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finFortress.saveProperty(this)">存房產</button>
+                    <span class="ft-src" style="align-self:center;">只算進階梯的淨值；不進五層、不進可撐月數（房子不是能拿來付帳的錢）</span></div>
+            </div>
             <div class="line"><span>不用想就能花（單筆）</span><span class="ft-num">$${fmtNum(L.free_amount)}</span></div>
             <div class="line"><span>距離第 ${fmtNum(L.rung + 1)} 階</span><span class="ft-num">${L.to_next == null ? '—' : '$' + fmtNum(L.to_next)}</span></div>
             <div class="lad-note">${esc(L.percentile || '')}</div>
@@ -652,7 +661,7 @@ async function _put(path, body, okMsg, btn) {
 }
 
 /** 目前存著的設定（後端正規化過的那份）。空白的輸入格以它為底，才不會被整份取代洗成預設。 */
-const _cfg = () => (_d && _d.settings) || { targets: {}, war: {}, care: {}, growth: {}, plan: {}, ladder: {}, account_layers: {}, account_flags: {} };
+const _cfg = () => (_d && _d.settings) || { targets: {}, war: {}, care: {}, growth: {}, plan: {}, ladder: {}, property: {}, account_layers: {}, account_flags: {} };
 /** 輸入格的數字；空白或非數字 → fallback（不要當成 0） */
 function _num(id, fallback) {
     const el = document.getElementById(id);
@@ -705,6 +714,14 @@ _ff.saveAssume = (key, btn) => {
         } }, '已改長照假設', btn);
     }
     _openAssume = '';
+};
+
+_ff.saveProperty = (btn) => {
+    const note = (document.getElementById('ft-prop-note') || {}).value || '';
+    _put('/fortress/settings', { property: {
+        value: Math.max(0, Math.round(_num('ft-prop-value', 0))),
+        note: String(note).trim().slice(0, 80),
+    } }, '已存房產', btn);
 };
 
 _ff.savePlan = (btn) => {

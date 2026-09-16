@@ -165,6 +165,7 @@ function ladderHtml(d) {
         <div class="m-card">
             ${bars}
             <div class="lg-sub" style="margin-top:8px">${esc(L.percentile || '')}</div>
+            ${Number((L.property || {}).value) ? `<div class="lg-row"><span class="k">其中房產（手填）${(L.property || {}).note ? `<div class="lg-sub">${esc(L.property.note)}</div>` : ''}</span><span class="v num">${esc(wan(L.property.value))}</span></div>` : ''}
             <div class="lg-row"><span class="k">距離第 ${esc(String(L.rung + 1))} 階</span><span class="v num">${esc(L.to_next == null ? '—' : wan(L.to_next))}</span></div>
             <div class="lg-row"><span class="k">資產一年自己長<div class="lg-sub">你一年存 ${esc(wan(f.added))}</div></span><span class="v num">${esc(wan(f.passive))}</span></div>
             <div class="lg-sub" style="margin-top:6px">${plan}・目標與門檻到桌機改</div>
