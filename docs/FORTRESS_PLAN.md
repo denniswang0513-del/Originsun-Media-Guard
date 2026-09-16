@@ -1,6 +1,7 @@
 # 私帳「堡壘」—— 個人版 Fortress Balance Sheet（桌機分頁＋手機版）規劃
 
-> 狀態：**F1–F4 做完、跑過 /polish（2026-09-16）**：純規則＋後端＋桌機分頁＋手機頁都在 dev 8001 驗過，六張 bug 卡已修（見 `git log --grep="polish: BUG"`）。**未發版**（F5 待 owner 說「推」）。
+> 狀態：**已上線 v2.5.43（2026-09-16）**，之後又加了長照／資產預期成長／財富階梯／房產／財富自由五段，跑過兩輪 /polish（共 14 張 bug 卡，見 `git log --grep="polish: BUG"`）。
+> 這五段與第二輪 polish 的修正**尚未發版**（待 owner 說「推」→ 2.5.44）。
 > 來源：owner 2026-09-16 貼的〈把 JPMorgan「堡壘資產負債表」搬進家庭財務〉：五層資金、Liquidity Runway、家庭版壓力測試。
 > 前置：[`docs/MY_LEDGER_MOBILE_PLAN.md`](MY_LEDGER_MOBILE_PLAN.md)（士源帳本手機殼與規矩）、[`docs/LEDGER_ENTITY_PLAN.md`](LEDGER_ENTITY_PLAN.md)（兩本帳）。
 > 視覺 demo：桌機 https://claude.ai/code/artifact/d9748841-3ef4-487e-a82e-780ed006260c（範例數字）。
@@ -46,12 +47,28 @@
 - **表 `finance_fortress_earmarks`**：`id, entity, label, amount, due_date, source('manual'|'loan'|'card'), source_ref, paid_at, note, created_at`。
   自動項不落庫（每次算的時候帶入），只有手動項落庫；`paid_at` 非空＝已付、從合計拿掉（不刪，留紀錄）。
 - **設定 `finance.fortress.mine`**（`config.load_settings/save_settings`，同 `margin_model[entity]` 的樣式）：
-  `{ account_layers: {acct_id: 1..5}, account_flags: {acct_id: {physical, offshore, usd}}, holdings_layer: 5, targets: {1:1, 3:6, 4:3},
-     monthly_need_override: null, war: {months:12, tw_drop:.6, us_drop:.2, fx:1.3, bank_freeze_weeks:4} }`。
+  `{ account_layers: {acct_id: 1..5}, account_flags: {acct_id: {physical, offshore, usd}}, holdings_layer: 5,
+     targets: {1:1, 3:6, 4:3}, monthly_need_override: null,
+     war: {months, tw_drop, us_drop, fx, bank_freeze_weeks},            # 台海戰爭題
+     care: {monthly, years, insurance_monthly},                          # 長照題
+     growth: {rate, inflation, annual_add},                              # 資產預期成長
+     ladder: {thresholds[5], free_rate, median, top20, top10, stat_note},# 財富階梯
+     plan: {target_rung, target_years},                                  # 階梯的規劃欄位
+     property: {value, note},                                            # 房產估值（只進階梯淨值）
+     fire: {withdrawal_rate, birth_year, until_age, extra_monthly, extra_from_age, self_pay_monthly, tax_monthly} }`。
+  🔴 每一段都經過 `normalize_settings`：所有數字走同一個 `_num()`（NaN／±Infinity／非數字一律沿用預設，
+     不然一個 PUT 就 500），再各自夾在 bounds 裡。新增欄位請照這個樣子加，不要自己寫 try/except。
   🔴 要送到 NAS：`core/office_settings.py` `EXPORT_SUBKEYS` 加 `"finance": ("fortress",)`（NAS 唯讀；分層與假設只在桌機改）。
 - **端點**（都 `require_entity(request, "mine", level="full")`）：
-  - `GET /api/v1/finance/fortress` → 一趟回全部：`{runway, runway_with_l4, cash, cash_l1_3, earmark_total, monthly_need{auto, override, used},
-    layers[5]{have, target, accounts[]}, earmarks[], tests[5]{key, state, title, assume, lines[], verdict}, updated_at}`。
+  - `GET /api/v1/finance/fortress` → 一趟回全部（桌機與手機同一份）：
+    `{today, warnings[], monthly_need{auto, override, used, sample_months}, cash{l1_3, l1_4}, earmark_total,
+      runway{months, with_l4, tone}, layers[5]{no, name, desc, have, target, target_rule, gap, pct, accounts[]},
+      earmarks[]{id, label, amount, due_date, source, paid, note}, tests[6]{key, title, question, state, assume, lines[], verdict},
+      projection{base, rate, inflation, annual_add, rows[]}, ladder{rung, name, net_worth, financial, property, liabilities, free_amount,
+      to_next, pct_in_rung, rungs[], percentile, plan{}, focus{}, settings{}}, fire{...}, accounts[], settings{}, entity}`。
+    🔴 `tests[].lines` 的第三欄是**單位**：`twd`／`months`／`years`／`pct`／`year_or_never`（值 null＝用不完）。
+    兩個前端各自有一份對照（`fmtLine`／`lineVal`）—— 加新單位要兩邊一起加，不然會掉回金額格式
+    （長照的 `years` 上線時就是這樣印成「13.1 萬」）。
     桌機與手機同一支；撈數字在 `routers/api_fortress.py`（同 api_ledger_mobile 的做法，lazy import 既有 router 的算法），規則在 `core/fortress_logic.py`。
   - `PUT /api/v1/finance/fortress/settings`（桌機）；`POST/PUT/DELETE /api/v1/finance/fortress/earmarks`（桌機＋手機）。
   - 掛進 `main_office._ROUTER_MODULES`（同 `api_ledger_mobile`）：主控關機手機照看、照記預留。
@@ -63,8 +80,10 @@
 
 - `frontend/tabs/finance/finance.html:40-52` 加 `<button class="finance-nav-btn fin-nav-mine-ok fin-nav-mine-only" data-subview="fortress">堡壘</button>`（按鈕純文字，不加 emoji）。
 - `frontend/tabs/finance/subviews/fortress.js`：`render(container, {isCurrent})`，自動被 `finance.js:185` 的 `createSubviewLoader` 載入。
-- 版面照 demo v3：大數字＋堡壘剖面 → 預留（12 個月時間帶＋表）／必要支出＋各層目標 → 五座塔同框 → 帳戶分層（下拉＋三個勾）。
-  帳戶分層、目標倍數、戰爭假設在這頁直接改（PUT settings）；預留在這頁增刪。
+- 版面（由上到下）：大數字＋堡壘剖面 → 預留（12 個月時間帶＋表）／必要支出＋各層目標 → **六座塔同框**
+  （收入中斷／股票跌 40%／突發 40 萬/三件同時／台海戰爭／長期照護）→ **財富自由** → **資產預期成長** →
+  **財富階梯**（階梯圖＋你的位置＋規劃欄位＋該把力氣放哪）→ 帳戶分層（下拉＋三個勾）。
+  可以在這頁改的：帳戶分層、目標倍數、戰爭與長照假設、成長假設、階梯目標、房產估值、財富自由六格；預留增刪。
 - 樣式：桌機正本是深色 CRM 殼（`crm.css`），demo 的淺色只是提案；實作時用 CRM 深色配色，堡壘剖面的綠／藏藍／石灰換成 `--pri`／`--ok`／`--warn` 那組。
 
 ## 4. 手機：士源帳本（`/m/ledger.html`）
@@ -88,6 +107,7 @@
 | F3 | 桌機分頁 `fortress.js`（照 demo v3，深色配色） | Playwright 桌機截圖給 owner |
 | F4 | 手機：總覽頂卡＋`#fortress` 頁＋預留抽屜 | Playwright iPhone viewport（8001 與 NAS 各一次）截圖給 owner |
 | F5 | 發版（`/publish` 流程；只有主控＋NAS，機隊不需要這功能但 OTA 一起帶） | 8000 真機 |
-| /polish | 六張 bug 卡：分層自動存會清空設定、設定從匿名端點外流＋端點沒鎖私帳、必要支出口徑與分母、壓力測試把證券當現金、匯率沒設無聲算 0＋逾期貸款只留一期、手機顯示過期數字 | 4147 通過 |
+| /polish 第一輪 | 七張卡：分層自動存會清空設定、設定從匿名端點外流＋端點沒鎖私帳、必要支出口徑與分母、壓力測試把證券當現金、匯率沒設無聲算 0＋逾期貸款只留一期、手機顯示過期數字、目標倍數 Infinity 把頁面永久弄壞 | 4149 通過 |
+| /polish 第二輪（財富自由那批） | 七張卡：沒有生活支出資料卻宣告財富自由、兩個現金年數互相矛盾＋年金早一年、設定 Infinity 讓端點 500、提領率 3.25% 存完漂成 3.3%、出生年填未來印出負數歲數、「模擬到 90 歲用不完」是算術上必然卻寫成通過的檢驗、每月可花是稅前數字＋保費過時 | 4171 通過 |
 
 owner 待拍板（沒說就照預設）：證券算第 5 層；必要支出用自動平均、可覆寫；戰爭假設照 §1 預設。
