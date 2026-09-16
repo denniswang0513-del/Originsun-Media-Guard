@@ -57,9 +57,10 @@ def _i(v) -> int:
 
 
 # ── 各段 ──────────────────────────────────────────────────────────────
-def totals_block(buckets: dict, liabilities: dict) -> dict:
-    """總資產＝銀行現金＋證券＋應收＋器材淨值；負債＝卡費＋貸款；淨值＝總資產−負債。
-    另給 financial（現金＋證券）—— 財富階梯與財富自由看的是這個，不含應收與器材。"""
+def totals_block(buckets: dict, liabilities: dict, cash_usable=None) -> dict:
+    """總資產＝銀行現金＋證券＋應收＋器材淨值；負債＝卡費＋貸款；net_worth＝總資產−負債（含應收、器材，帳面）。
+    **標題用的是 net_financial**（現金＋證券−負債）—— 跟財富階梯、財富自由同一個定義；應收是稅前帳面、器材是折舊後帳面，
+    都不是能花的錢，不能跟階梯的淨值長得一樣卻差 400 萬。cash_usable＝堡壘第 1–3 層現金（可撐月數用的那個，含現金類帳戶）。"""
     cash = _i(buckets.get("銀行現金"))
     sec = _i(buckets.get("證券現值"))
     recv = _i(buckets.get("應收帳款"))
@@ -68,7 +69,8 @@ def totals_block(buckets: dict, liabilities: dict) -> dict:
     assets = cash + sec + recv + eq
     return {"cash": cash, "securities": sec, "receivable": recv, "equipment": eq, "assets": assets,
             "liabilities": liab, "card": _i((liabilities or {}).get("card")), "loan": _i((liabilities or {}).get("loan")),
-            "net_worth": assets - liab, "financial": cash + sec}
+            "net_worth": assets - liab, "financial": cash + sec, "net_financial": cash + sec - liab,
+            "cash_usable": _i(cash_usable) if cash_usable is not None else cash}
 
 
 def compare(now: dict, prev: Optional[dict]) -> dict:
@@ -389,7 +391,7 @@ def build_report(month: str, basis_date: str, fortress: dict, register: dict, bu
                  snapshots: list, prev: Optional[dict] = None, generated_at: str = "") -> dict:
     """一份月報。prev＝上一份月報的 payload（沒有＝第一份；那時只拿最近一次淨值快照當總資產的比較基準）。"""
     liabilities = (fortress.get("ladder") or {}).get("liabilities") or {}
-    totals = totals_block(buckets, liabilities)
+    totals = totals_block(buckets, liabilities, cash_usable=(fortress.get("cash") or {}).get("l1_3"))
     prev_totals = (prev or {}).get("totals")
     prev_label = (prev or {}).get("month")
     if not prev_totals and snapshots:

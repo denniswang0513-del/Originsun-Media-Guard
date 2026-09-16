@@ -119,18 +119,18 @@ function _report(r) {
     const t = r.totals, d = r.delta || {}, f = r.flow || {}, ft = r.fortress || {}, lf = r.ladder_fire || {};
     const prevLabel = r.prev ? r.prev.label : '';
     return `
-    <div class="mr-card"><h3>這個月的錢 <span class="why">總資產＝現金＋證券＋應收＋器材淨值；負債＝卡費＋貸款</span></h3>
+    <div class="mr-card"><h3>這個月的錢 <span class="why">淨值＝現金＋證券−負債（跟財富階梯同一個定義）；應收與器材是帳面，另列</span></h3>
         <div class="big">
-            <div class="k"><div class="l">淨值</div><div class="v">${esc(wan(t.net_worth))}</div><div class="d">${d.assets !== null && d.assets !== undefined ? `總資產比${esc(prevLabel)} ${delta(d.assets, { pct: r.prev && r.prev.totals.assets ? d.assets / r.prev.totals.assets : null })}` : '第一份，還沒有上月可比'}</div></div>
-            <div class="k"><div class="l">可動用現金</div><div class="v">${esc(wan(t.cash))}</div><div class="d">可撐 ${esc(String(ft.runway ?? '—'))} 個月必要支出</div></div>
+            <div class="k"><div class="l">淨值（現金＋證券−負債）</div><div class="v">${esc(wan(t.net_financial))}</div><div class="d">${d.assets !== null && d.assets !== undefined ? `總資產比${esc(prevLabel)} ${delta(d.assets, { pct: r.prev && r.prev.totals.assets ? d.assets / r.prev.totals.assets : null })}` : '第一份，還沒有上月可比'}</div></div>
+            <div class="k"><div class="l">可動用現金（第 1–3 層）</div><div class="v">${esc(wan(t.cash_usable))}</div><div class="d">可撐 ${esc(String(ft.runway ?? '—'))} 個月必要支出</div></div>
             <div class="k"><div class="l">證券現值</div><div class="v">${esc(wan(t.securities))}</div><div class="d">佔總資產 ${t.assets ? Math.round(t.securities / t.assets * 100) : 0}%</div></div>
             <div class="k"><div class="l">負債</div><div class="v">${esc(wan(t.liabilities))}</div><div class="d">卡費 ${esc(money(t.card))}${t.loan ? `、貸款 ${esc(money(t.loan))}` : '，沒有貸款'}</div></div>
         </div>
         <div class="tblwrap" style="margin-top:12px"><table>
             <thead><tr><th>項目</th><th class="n">本月（${esc(r.basis_date)}）</th><th class="n">${esc(prevLabel || '上月')}</th><th class="n">變化</th></tr></thead>
             <tbody>
-                ${[['銀行現金', 'cash'], ['證券現值', 'securities'], ['應收帳款', 'receivable'], ['器材淨值', 'equipment'], ['總資產', 'assets'], ['負債', 'liabilities'], ['淨值', 'net_worth']].map(([l, k]) => `<tr>
-                    <td>${k === 'assets' || k === 'net_worth' ? `<b>${l}</b>` : l}</td><td class="n">${esc(money(t[k]))}</td>
+                ${[['銀行現金', 'cash'], ['證券現值', 'securities'], ['淨值（現金＋證券−負債）', 'net_financial'], ['應收帳款（稅前帳面）', 'receivable'], ['器材淨值（折舊後帳面）', 'equipment'], ['總資產（含應收、器材）', 'assets'], ['負債', 'liabilities'], ['總資產−負債', 'net_worth']].map(([l, k]) => `<tr>
+                    <td>${k === 'assets' || k === 'net_financial' ? `<b>${l}</b>` : l}</td><td class="n">${esc(money(t[k]))}</td>
                     <td class="n">${r.prev && r.prev.totals[k] !== undefined && r.prev.totals[k] !== null ? esc(money(r.prev.totals[k])) : '<span class="sub">—</span>'}</td>
                     <td class="n">${delta(d[k])}</td></tr>`).join('')}
             </tbody></table></div>

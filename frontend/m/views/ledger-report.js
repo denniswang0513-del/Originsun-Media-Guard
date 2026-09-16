@@ -93,13 +93,14 @@ function draw() {
     return `${top}
     <div class="m-h">這個月的錢</div>
     <div class="m-card">
-        <div class="mr-big"><span class="n">${esc(wan(t.net_worth))}</span><span class="u">淨值</span></div>
-        <div class="lg-sub">${d.assets !== null && d.assets !== undefined ? `總資產比${esc(prevLabel)} ${delta(d.assets)}` : '第一份，還沒有上月可比'}</div>
-        ${row('可動用現金', `<b>${money(t.cash)}</b>`, `可撐 ${ft.runway ?? '—'} 個月`)}
+        <div class="mr-big"><span class="n">${esc(wan(t.net_financial))}</span><span class="u">淨值（現金＋證券−負債）</span></div>
+        <div class="lg-sub">${d.assets !== null && d.assets !== undefined ? `總資產比${esc(prevLabel)} ${delta(d.assets)}` : '第一份，還沒有上月可比'}・跟財富階梯同一個定義</div>
+        ${row('可動用現金（第 1–3 層）', `<b>${money(t.cash_usable)}</b>`, `可撐 ${ft.runway ?? '—'} 個月`)}
         ${row('證券現值', `<b>${money(t.securities)}</b>`, `佔總資產 ${t.assets ? Math.round(t.securities / t.assets * 100) : 0}%`)}
-        ${row('應收帳款', money(t.receivable), '帳面，收回來才算數')}
+        ${row('應收帳款', money(t.receivable), '稅前帳面，收回來才算數')}
+        ${row('器材淨值', money(t.equipment), '折舊後帳面')}
         ${row('負債', money(t.liabilities), t.loan ? `卡費 ${money(t.card)}、貸款 ${money(t.loan)}` : '只有卡費，沒有貸款')}
-        ${row('總資產', `<b>${money(t.assets)}</b>`, r.prev ? `${prevLabel} ${money(r.prev.totals.assets)}` : '')}
+        ${row('總資產（含應收、器材）', `<b>${money(t.assets)}</b>`, r.prev ? `${prevLabel} ${money(r.prev.totals.assets)}` : '')}
     </div>
     <div class="m-h">多出來的錢從哪來（收支到 ${esc(f.through || r.basis_date)} 為止）</div>
     <div class="m-card">

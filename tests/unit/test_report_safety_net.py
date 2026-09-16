@@ -12,7 +12,9 @@ def test_wan_formats_like_the_two_frontends():
 def test_totals_and_compare():
     t = totals_block({"銀行現金": 100, "證券現值": 200, "應收帳款": 30, "固定資產淨值": 5}, {"total": 7, "card": 7, "loan": 0})
     assert t == {"cash": 100, "securities": 200, "receivable": 30, "equipment": 5, "assets": 335,
-                 "liabilities": 7, "card": 7, "loan": 0, "net_worth": 328, "financial": 300}
+                 "liabilities": 7, "card": 7, "loan": 0, "net_worth": 328, "financial": 300,
+                 "net_financial": 293, "cash_usable": 100}
+    assert totals_block({"銀行現金": 100}, None, cash_usable=120)["cash_usable"] == 120, "BUG-8：可動用現金吃堡壘第 1–3 層"
     assert totals_block({}, None)["assets"] == 0
     assert compare(t, None) == {k: None for k in t}
     d = compare(t, {"assets": 300, "cash": None})

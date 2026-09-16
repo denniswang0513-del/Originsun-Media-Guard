@@ -198,3 +198,16 @@ def test_month_income_and_expense_exclude_cross_account_flows():
     assert "register_gap" in desk and "unexplained" not in desk and "證券增減" in desk
     mob = js_code_only(repo_src("frontend/m/views/ledger-report.js"))
     assert "register_gap" in mob and "證券增減" in mob
+
+
+def test_headline_net_worth_matches_the_ladder_and_snapshots_compare_like_for_like():
+    """BUG-8：標題淨值＝現金＋證券−負債（跟階梯同定義）；可動用現金＝堡壘第 1–3 層；快照比較用 auto 四桶合計。"""
+    from routers.api_monthly_report import _auto_total
+    r = build_report("2026-09", "2026-09-17", _fortress(cash={"l1_3": 2_041_385, "l1_4": 2_041_385}), REGISTER, BUCKETS, {}, SNAPS)
+    assert r["totals"]["net_financial"] == 2_043_813 + 47_924_166 - 2428 and r["totals"]["cash_usable"] == 2_041_385
+    assert _auto_total({"銀行現金": 100, "證券現值": 200, "應收帳款": 30, "固定資產淨值": 5, "usd_twd": 31.8}, 999) == 335
+    assert _auto_total(None, 999) == 999 and _auto_total({}, 7) == 7
+    for rel in ("frontend/tabs/finance/subviews/report.js", "frontend/m/views/ledger-report.js"):
+        code = js_code_only(repo_src(rel))
+        assert "t.net_financial" in code and "t.cash_usable" in code, rel
+    assert "FinanceNetSnapshot.auto" in repo_src("routers/api_monthly_report.py")

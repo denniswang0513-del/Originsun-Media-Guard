@@ -43,6 +43,15 @@ def _month_window(month: str) -> tuple:
     return lo, hi
 
 
+def _auto_total(auto, total) -> int:
+    """快照可比的總資產：auto 四桶合計（key 不含 usd_twd）；沒有 auto 就用 total。"""
+    if isinstance(auto, dict) and auto:
+        vals = [v for k, v in auto.items() if k != "usd_twd" and isinstance(v, (int, float))]
+        if vals:
+            return int(round(sum(vals)))
+    return int(total or 0)
+
+
 def _row_dict(r) -> dict:
     return {"month": r.month, "basis_date": r.basis_date, "generated_at": r.generated_at.isoformat() if r.generated_at else None,
             "generated_by": r.generated_by or ""}
@@ -85,9 +94,11 @@ async def generate_report(ent: str, username: str, month: Optional[str] = None) 
                    fn.coalesce(fn.sum(fn.coalesce(CrmCashEntry.deposit, 0) - fn.coalesce(CrmCashEntry.expense, 0)
                                       - fn.coalesce(CrmCashEntry.bank_fee, 0) - fn.coalesce(CrmCashEntry.claim, 0)), 0))
             .where(CrmCashEntry.entity == ent, CrmCashEntry.entry_date >= lo, CrmCashEntry.entry_date < hi))).one()
+        # 快照的 total 含手填桶（預付款…），月報的總資產只有四顆自動桶：比較與走勢要用快照存的 auto 四桶合計，
+        # 不然「比上次快照 +X」會被手填桶壓低。舊快照沒有 auto 才退回 total。
         snaps = (await session.execute(
-            select(FinanceNetSnapshot.snap_date, FinanceNetSnapshot.total).where(FinanceNetSnapshot.entity == ent)
-            .order_by(FinanceNetSnapshot.snap_date))).all()
+            select(FinanceNetSnapshot.snap_date, FinanceNetSnapshot.total, FinanceNetSnapshot.auto)
+            .where(FinanceNetSnapshot.entity == ent).order_by(FinanceNetSnapshot.snap_date))).all()
         prev_row = (await session.execute(
             select(FinanceMonthlyReport).where(FinanceMonthlyReport.entity == ent, FinanceMonthlyReport.month < month)
             .order_by(FinanceMonthlyReport.month.desc()).limit(1))).scalars().first()
@@ -95,7 +106,7 @@ async def generate_report(ent: str, username: str, month: Optional[str] = None) 
         payload = build_report(
             month, basis, fortress, register, buckets,
             {"deposit": int(dep or 0), "expense": int(exp or 0), "household_expense": int(house or 0), "bank_net": int(bank_net or 0)},
-            [{"date": d.strftime("%Y-%m-%d") if d else "", "total": t} for d, t in snaps],
+            [{"date": d.strftime("%Y-%m-%d") if d else "", "total": _auto_total(a, t)} for d, t, a in snaps],
             prev=(prev_row.payload if prev_row else None), generated_at=now.strftime("%Y-%m-%d %H:%M"))
         row = (await session.execute(
             select(FinanceMonthlyReport).where(FinanceMonthlyReport.entity == ent,
