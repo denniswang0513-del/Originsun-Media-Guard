@@ -287,7 +287,8 @@ def test_targets_have_an_upper_bound():
     之後每次開堡壘頁都在 `_m(inf)` 炸 OverflowError → 500，而且**修不回來**（設定已經存下去了，
     要手改 settings.json）。BUG-5 那輪把 war／金額／標題都加了上下限，漏了 targets。"""
     s = normalize_settings({"targets": {"1": float("inf"), "3": -5, "4": 999}})
-    assert s["targets"][1] == 120 and s["targets"][4] == 120, "上限 120 個月（10 年）"
+    assert s["targets"][1] == DEFAULT_TARGET_MONTHS[1], "Infinity 不是「很大」而是沒填 —— 沿用預設（見 _num）"
+    assert s["targets"][4] == 120, "上限 120 個月（10 年）"
     assert s["targets"][3] == DEFAULT_TARGET_MONTHS[3], "負數不收，用預設"
     assert build([], [], 50000, s, "")["layers"], "算得出來，不會 OverflowError"
 
@@ -556,3 +557,26 @@ def test_pension_starts_in_the_right_year():
     assert (early, right) == (42, 39), "差一年差三年壽命（所以 off-by-one 會影響結論）"
     g = build(accts, [], 250_000, {"fire": {"extra_monthly": 150_000, "extra_from_age": 60}}, "2026-09-16", need_months=6)["fire"]
     assert g["runs_out_year"] == right, "用的是 60-37+1＝第 24 年，不是第 23 年"
+
+
+def test_no_settings_value_can_500_the_endpoint():
+    """🔴 `int(float("Infinity"))` 丟的是 OverflowError，不是 ValueError —— 原本的 except 沒接，
+    一個 PUT 就讓整支端點 500（上一輪只修了 targets 的**值域**，沒處理**轉型本身**）。
+    現在每個數字欄位都走同一個 _num()：不是數字、NaN、Infinity 一律沿用預設。"""
+    from core.fortress_logic import DEFAULT_FIRE, DEFAULT_LADDER, DEFAULT_WAR, normalize_settings
+    poison = ["Infinity", "-Infinity", "NaN", "1e400", float("inf"), float("nan"), None, "", "x", [], {}, True]
+    for bad in poison:
+        s = normalize_settings({
+            "fire": {k: bad for k in DEFAULT_FIRE}, "war": {k: bad for k in DEFAULT_WAR},
+            "care": {"monthly": bad, "years": bad}, "growth": {"rate": bad, "annual_add": bad},
+            "plan": {"target_rung": bad, "target_years": bad}, "property": {"value": bad},
+            "ladder": {"thresholds": [bad] * 5, "free_rate": bad, "median": bad},
+            "targets": {"1": bad}, "account_layers": {"a": bad}, "holdings_layer": bad,
+            "monthly_need_override": bad,
+        })
+        if bad is not True:      # Python 的 True 是合法數字 1，會被值域夾住，不是「沿用預設」
+            assert s["ladder"]["thresholds"] == DEFAULT_LADDER["thresholds"], bad
+            assert s["holdings_layer"] == 5 and s["property"]["value"] == 0, bad
+            for k, v in DEFAULT_FIRE.items():
+                assert s["fire"][k] == v, (bad, k)
+        build([], [], 50_000, s, "2026-09-16", need_months=6)      # 算得出來，不會炸

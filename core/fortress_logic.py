@@ -86,6 +86,22 @@ NEED_BOOKS = ("家用", "個人", "貸款繳款")
 NEED_SKIP_ITEMS = ("主動收入", "被動收入", "投資支出", "借款支出", "其他支出")
 
 
+def _num(v, as_int: bool = False):
+    """設定值 → 數字；不是數字、NaN、Infinity 一律回 None（讓呼叫端沿用預設）。
+    🔴 `int(float("Infinity"))` 丟的是 **OverflowError**，不是 ValueError ——
+    漏接的話一個 PUT 就讓整支端點 500（2026-09-16 /polish 第二輪抓到，第一輪只修了值域）。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if f != f or f in (float("inf"), float("-inf")):      # NaN／±Infinity
+        return None
+    try:
+        return int(f) if as_int else f
+    except (OverflowError, ValueError):
+        return None
+
+
 def need_category_ok(category) -> bool:
     """這一列的分類算不算「每月生活支出」。分類切帳本／項目用 core.cash_taxonomy 那份正本
     （`公司_專案` → ('公司','專案')；只切第一個底線）。"""
@@ -141,11 +157,8 @@ def normalize_settings(raw) -> dict:
     raw = raw if isinstance(raw, dict) else {}
     layers = {}
     for k, v in (raw.get("account_layers") or {}).items():
-        try:
-            n = int(v)
-        except (TypeError, ValueError):
-            continue
-        if 1 <= n <= 5:
+        n = _num(v, as_int=True)
+        if n is not None and 1 <= n <= 5:
             layers[str(k)] = n
     flags = {}
     for k, v in (raw.get("account_flags") or {}).items():
@@ -153,9 +166,8 @@ def normalize_settings(raw) -> dict:
             flags[str(k)] = {f: bool(v.get(f)) for f in ("physical", "offshore", "usd")}
     targets = dict(DEFAULT_TARGET_MONTHS)
     for k, v in (raw.get("targets") or {}).items():
-        try:
-            n, m = int(k), float(v)
-        except (TypeError, ValueError):
+        n, m = _num(k, as_int=True), _num(v)
+        if n is None or m is None:
             continue
         # 🔴 上限不能省：`float('inf') >= 0` 是真的，倍數 Infinity 會被寫進設定檔，
         #    之後每次開頁都在 _m(inf) 炸 OverflowError → 500，而且要手改 settings.json 才救得回來。
@@ -167,9 +179,8 @@ def normalize_settings(raw) -> dict:
     for k, v in (raw.get("war") or {}).items():
         if k not in DEFAULT_WAR:
             continue
-        try:
-            n = int(v) if k in ("months", "bank_freeze_weeks") else float(v)
-        except (TypeError, ValueError):
+        n = _num(v, as_int=k in ("months", "bank_freeze_weeks"))
+        if n is None:
             continue
         lo, hi = bounds[k]
         war[k] = max(lo, min(hi, n))
@@ -178,9 +189,8 @@ def normalize_settings(raw) -> dict:
     for k, v in (raw.get("care") or {}).items():
         if k not in DEFAULT_CARE:
             continue
-        try:
-            n = int(float(v))
-        except (TypeError, ValueError):
+        n = _num(v, as_int=True)
+        if n is None:
             continue
         lo, hi = care_bounds[k]
         care[k] = max(lo, min(hi, n))
@@ -189,9 +199,8 @@ def normalize_settings(raw) -> dict:
     for k, v in (raw.get("growth") or {}).items():
         if k not in DEFAULT_GROWTH:
             continue
-        try:
-            n = int(v) if k == "annual_add" else float(v)
-        except (TypeError, ValueError):
+        n = _num(v, as_int=k == "annual_add")
+        if n is None:
             continue
         lo, hi = growth_bounds[k]
         growth[k] = max(lo, min(hi, n))
@@ -199,58 +208,47 @@ def normalize_settings(raw) -> dict:
     raw_l = raw.get("ladder") or {}
     th = raw_l.get("thresholds")
     if isinstance(th, (list, tuple)) and len(th) == len(DEFAULT_LADDER["thresholds"]):
-        try:
-            cleaned = sorted(max(1, min(10 ** 13, int(float(x)))) for x in th)
-        except (TypeError, ValueError):
-            cleaned = None
+        nums = [_num(x, as_int=True) for x in th]
+        cleaned = sorted(max(1, min(10 ** 13, n)) for n in nums) if all(n is not None for n in nums) else None
         if cleaned and len(set(cleaned)) == len(cleaned):      # 要嚴格遞增，不然「在第幾階」會算不出來
             ladder["thresholds"] = cleaned
     for k, lo, hi in (("free_rate", 1e-6, 0.01), ("median", 0, 10 ** 13), ("top20", 0, 10 ** 13), ("top10", 0, 10 ** 13)):
         if k in raw_l:
-            try:
-                ladder[k] = max(lo, min(hi, float(raw_l[k]) if k == "free_rate" else int(float(raw_l[k]))))
-            except (TypeError, ValueError):
-                pass
+            n = _num(raw_l[k], as_int=k != "free_rate")
+            if n is not None:
+                ladder[k] = max(lo, min(hi, n))
     if isinstance(raw_l.get("stat_note"), str):
         ladder["stat_note"] = raw_l["stat_note"][:80]
     plan = dict(DEFAULT_PLAN)
     for k, lo, hi in (("target_rung", 2, len(LADDER_RUNGS)), ("target_years", 1, 60)):
         if k in (raw.get("plan") or {}):
-            try:
-                plan[k] = max(lo, min(hi, int(float((raw["plan"])[k]))))
-            except (TypeError, ValueError):
-                pass
+            n = _num((raw["plan"])[k], as_int=True)
+            if n is not None:
+                plan[k] = max(lo, min(hi, n))
     fire = dict(DEFAULT_FIRE)
     fire_bounds = {"withdrawal_rate": (0.01, 0.10), "birth_year": (0, 2100), "until_age": (40, 120),
                    "extra_monthly": (0, 10_000_000), "extra_from_age": (0, 120), "self_pay_monthly": (0, 1_000_000)}
     for k, v in (raw.get("fire") or {}).items():
         if k not in DEFAULT_FIRE:
             continue
-        try:
-            n = float(v) if k == "withdrawal_rate" else int(float(v))
-        except (TypeError, ValueError):
+        n = _num(v, as_int=k != "withdrawal_rate")
+        if n is None:
             continue
         lo, hi = fire_bounds[k]
         fire[k] = max(lo, min(hi, n))
     prop = dict(DEFAULT_PROPERTY)
     raw_p = raw.get("property") or {}
-    try:
-        prop["value"] = max(0, min(10 ** 12, int(float(raw_p.get("value") or 0))))
-    except (TypeError, ValueError):
-        pass
+    n = _num(raw_p.get("value") or 0, as_int=True)
+    if n is not None:
+        prop["value"] = max(0, min(10 ** 12, n))
     if isinstance(raw_p.get("note"), str):
         prop["note"] = raw_p["note"].strip()[:80]
     override = raw.get("monthly_need_override")
-    try:
-        override = int(override) if override not in (None, "", 0, "0") else None
-    except (TypeError, ValueError):
-        override = None
+    override = _num(override, as_int=True) if override not in (None, "", 0, "0") else None
     if override is not None and override <= 0:
         override = None      # 負的／零＝沒填，回到自動平均
-    hl = raw.get("holdings_layer", 5)
-    try:
-        hl = int(hl)
-    except (TypeError, ValueError):
+    hl = _num(raw.get("holdings_layer", 5), as_int=True)
+    if hl is None:
         hl = 5
     return {"account_layers": layers, "account_flags": flags, "holdings_layer": hl if 1 <= hl <= 5 else 5,
             "targets": targets, "monthly_need_override": override, "war": war, "care": care, "growth": growth,
