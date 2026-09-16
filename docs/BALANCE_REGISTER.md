@@ -32,6 +32,9 @@
 ## 3. 資料
 
 - `bank_accounts.anchor_balance INTEGER NULL`、`anchor_date TIMESTAMPTZ NULL`（`db/migrations.py` 開機 ADD COLUMN；兩欄一起有或一起空）。
+- 證券逐檔（owner「登記的還有證券的股數等」）：`holdings[]{id, shares, last_price, manual_value, cost_total}` 直接寫 `finance_holdings`
+  的那幾欄（給現價順便更新 `price_at`）。給了股數或現價、且算得出股數 × 現價 → 清掉 `manual_value`（改用算的）；明著送 manual_value 以它為準。
+  PUT 裡**先套持股、再算券商總市值的未拆明細**。
 - 證券戶：沒有新欄位。一家券商登記一個總市值，「總市值 − 已拆明細的市值」寫進那家的**「未拆明細」列**
   （`finance_holdings`：symbol 空、name＝未拆明細、manual_value）。之後把真的持股加進去、再登記一次總市值，它就自己歸零。
 - 信用卡：不在這裡（既有 `PUT /finance/card-summary` 的 `derive_opening_from` 本來就是「現在實際欠多少」；桌機的登記頁直接呼叫它）。
@@ -42,7 +45,8 @@
 
 - `GET /balance-register?entity=` → `{date, accounts[]{id,name,acct_kind,bank_name,balance,booked,anchor_balance,anchor_date,unfilled},
   brokers[]{broker,count,detail,plug,plug_note,total}, card_outstanding, usd_twd, entity}`。只列 bank／cash 帳戶。
-- `PUT /balance-register?entity=` body `{date, accounts[]{id, balance|null}, brokers[]{broker, total}}` → 回 GET 那一整包。
+- `PUT /balance-register?entity=` body `{date, accounts[]{id, balance|null}, holdings[]{id, shares?, last_price?, manual_value?, cost_total?},
+  brokers[]{broker, total}}` → 回 GET 那一整包。GET 的 `brokers[].holdings[]` 帶每檔的 shares／last_price／manual_value／cost_total／value_twd。
   `balance: null` ＝ 取消登記（兩欄清空、回老公式）。基準日不能是未來；信用卡／股東帳戶 422。
 - 只寫 DB、不碰 settings.json（NAS 的 settings.json 是唯讀副本）。
 

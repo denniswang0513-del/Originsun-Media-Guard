@@ -48,7 +48,7 @@ function draw(d) {
         </div>
         <div class="m-h">銀行／現金帳戶</div>
         <div class="m-card">${(d.accounts || []).map(acctHtml).join('') || '<div class="m-empty">還沒有銀行／現金帳戶</div>'}</div>
-        <div class="m-h">證券戶（一家券商一個總市值）</div>
+        <div class="m-h">證券戶（每檔填股數與現價，或一家填一個總市值）</div>
         <div class="m-card">${(d.brokers || []).map(brokerHtml).join('') || '<div class="m-empty">還沒有持股</div>'}</div>
         <div class="m-card">
             <div class="lg-row"><span class="k">信用卡未繳（全部卡合計）</span><span class="v amt">${money(d.card_outstanding)}</span></div>
@@ -69,11 +69,24 @@ function acctHtml(a) {
     </div>`;
 }
 
+const num = (v, dp = 2) => (v === null || v === undefined ? '' : String(Math.round(Number(v) * 10 ** dp) / 10 ** dp));
+
+/** 一家券商一塊：總市值輸入格＋底下每檔一列（股數／現價兩格；成本在桌機填）。 */
 function brokerHtml(b) {
+    const rows = (b.holdings || []).map((h) => `<div class="rg-hold" data-holding="${esc(h.id)}">
+        <div class="t"><span class="nm">${esc(h.name)}${h.currency !== 'TWD' ? ` <span>${esc(h.currency)}</span>` : ''}</span>
+            <span class="v">${money(h.value_twd)}</span></div>
+        <div class="lg-sub">${h.manual_value !== null && h.manual_value !== undefined ? '手填市值' : `${num(h.shares, 4) || '—'} 股 × ${num(h.last_price) || '—'}`}${h.cost_total ? `・成本 ${num(h.cost_total)}` : ''}</div>
+        <div class="m-form rg-two">
+            <input class="rg-h" data-k="shares" type="number" inputmode="decimal" step="any" placeholder="股數 ${esc(num(h.shares, 4) || '0')}">
+            <input class="rg-h" data-k="last_price" type="number" inputmode="decimal" step="any" placeholder="現價 ${esc(num(h.last_price) || '0')}">
+        </div>
+    </div>`).join('');
     return `<div class="rg-row" data-broker="${esc(b.broker)}">
         <div class="t"><span class="nm">${esc(b.broker || '（未指定券商）')}</span><span class="v">合計 <b>${money(b.total)}</b></span></div>
         <div class="lg-sub">已拆明細 ${b.count} 筆 ${money(b.detail)}${b.plug ? `・未拆明細 ${money(b.plug)}` : ''}</div>
         <div class="m-form"><input class="rg-in" type="number" inputmode="numeric" step="1" placeholder="今天總市值（空著＝不動）"></div>
+        ${rows}
     </div>`;
 }
 
@@ -93,16 +106,24 @@ async function saveAll(host, btn) {
     });
     const brokers = [];
     host.querySelectorAll('.rg-row[data-broker]').forEach((r) => {
-        const v = val(r.querySelector('input.rg-in'));
+        const v = val(r.querySelector(':scope > .m-form > input.rg-in'));
         if (v !== null) brokers.push({ broker: r.dataset.broker, total: v });
     });
-    if (!accounts.length && !brokers.length) { toast('還沒填任何數字', 'err'); return; }
+    const holdings = [];
+    host.querySelectorAll('.rg-hold[data-holding]').forEach((r) => {
+        const h = { id: r.dataset.holding };
+        r.querySelectorAll('input.rg-h').forEach((el) => {
+            if (String(el.value).trim() !== '' && Number.isFinite(Number(el.value))) h[el.dataset.k] = Number(el.value);
+        });
+        if (Object.keys(h).length > 1) holdings.push(h);
+    });
+    if (!accounts.length && !brokers.length && !holdings.length) { toast('還沒填任何數字', 'err'); return; }
     await withBusy(btn, async () => {
         try {
-            _data = await mfetch(REGISTER_API, { method: 'PUT', body: JSON.stringify({ date, accounts, brokers }) });
+            _data = await mfetch(REGISTER_API, { method: 'PUT', body: JSON.stringify({ date, accounts, holdings, brokers }) });
             host.innerHTML = draw(_data);
             markStale('overview', 'assets');     // 總覽的堡壘卡與資產頁下次要重抓
-            toast(`已登記 ${accounts.length} 個帳戶、${brokers.length} 家券商`);
+            toast(`已登記 ${accounts.length} 個帳戶、${holdings.length} 檔持股、${brokers.length} 家券商`);
             window.scrollTo(0, 0);
         } catch (err) {
             toast(err.message, 'err');

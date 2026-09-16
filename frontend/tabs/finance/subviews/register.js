@@ -38,6 +38,9 @@ function _injectCss() {
 .rg th.n, .rg td.n { text-align: right; font-variant-numeric: tabular-nums; }
 .rg td.sub { color: #9ca3af; font-size: 12px; }
 .rg td input.rg-in { width: 150px; text-align: right; font-variant-numeric: tabular-nums; }
+.rg td input.rg-h { width: 120px; }
+.rg tr.rg-broker td { background: #202020; }
+.rg tr.rg-holding td { padding-top: 5px; padding-bottom: 5px; }
 .rg .rg-diff { color: #fbbf24; }
 .rg .rg-zero { color: #86efac; }
 .rg .rg-link { color: #93c5fd; cursor: pointer; font-size: 12px; background: none; border: 0; padding: 0; }
@@ -85,7 +88,7 @@ function _render() {
         </div>
         <div class="rg-sec"><h3>銀行／現金帳戶</h3><span class="why">「還沒補的明細」＝登記的數字 − 帳上算到基準日的數字；補齊會歸 0</span></div>
         ${_accountsTable(d)}
-        <div class="rg-sec"><h3>證券戶</h3><span class="why">一家券商填一個總市值；比已拆的明細多出來的部分先記成那家的「未拆明細」，之後拆明細它自然縮小</span></div>
+        <div class="rg-sec"><h3>證券戶</h3><span class="why">每檔可以填今天的股數、現價、成本（市值＝股數 × 現價）；一家券商也可以只填一個總市值，比已拆明細多出來的部分先記成那家的「未拆明細」，之後拆明細它自然縮小</span></div>
         ${_brokersTable(d)}
         <div class="rg-sec"><h3>信用卡</h3><span class="why">全部卡合計的目前未繳；跟信用卡頁是同一個數字</span></div>
         ${_cardTable(d)}
@@ -123,16 +126,26 @@ function _accountsTable(d) {
         <tbody id="rg-acct-body">${rows}</tbody></table></div>`;
 }
 
+/** 一家券商一列（總市值輸入格）＋ 底下每檔持股一列（股數／現價／成本輸入格）。
+ *  市值＝股數 × 現價（外幣再乘匯率）；手填市值的那檔會標「手填」，登記股數與現價後就改用算的。 */
 function _brokersTable(d) {
-    const rows = (d.brokers || []).map((b) => `<tr data-broker="${esc(b.broker)}">
-            <td>${esc(b.broker || '（未指定券商）')}</td>
-            <td class="n">${money(b.detail)} <span class="sub">${b.count} 筆</span></td>
-            <td class="n">${b.plug ? `<span class="rg-diff">${money(b.plug)}</span>` : '<span class="sub">0</span>'}</td>
-            <td class="n">${money(b.total)}</td>
-            <td class="n"><input class="crm-input rg-in" type="number" step="1" inputmode="numeric" placeholder="${esc(String(b.total || 0))}"></td>
-        </tr>`).join('') || '<tr><td colspan="5" class="rg-empty">私帳還沒有持股；先到資產儀表板加券商與持股</td></tr>';
+    const num = (v, dp = 2) => (v === null || v === undefined ? '' : String(Math.round(Number(v) * 10 ** dp) / 10 ** dp));
+    const rows = (d.brokers || []).map((b) => `<tr data-broker="${esc(b.broker)}" class="rg-broker">
+            <td><b>${esc(b.broker || '（未指定券商）')}</b> <span class="sub">${b.count} 檔</span></td>
+            <td class="n sub">已拆 ${money(b.detail)}</td>
+            <td class="n">${b.plug ? `<span class="rg-diff">未拆 ${money(b.plug)}</span>` : '<span class="sub">未拆 0</span>'}</td>
+            <td class="n">合計 ${money(b.total)}</td>
+            <td class="n" colspan="2"><input class="crm-input rg-in" type="number" step="1" inputmode="numeric" placeholder="今天總市值 ${esc(String(b.total || 0))}"></td>
+        </tr>` + (b.holdings || []).map((h) => `<tr data-holding="${esc(h.id)}" class="rg-holding">
+            <td class="sub">　${esc(h.name)}${h.symbol ? ` <span class="sub">${esc(h.symbol)}</span>` : ''}${h.currency !== 'TWD' ? ` <span class="sub">${esc(h.currency)}</span>` : ''}</td>
+            <td class="n sub">${h.manual_value !== null && h.manual_value !== undefined ? '手填市值' : `${num(h.shares, 4) || '—'} 股 × ${num(h.last_price) || '—'}`}</td>
+            <td class="n">${money(h.value_twd)}</td>
+            <td class="n"><input class="crm-input rg-in rg-h" data-k="shares" type="number" step="any" inputmode="decimal" placeholder="股數 ${esc(num(h.shares, 4) || '0')}"></td>
+            <td class="n"><input class="crm-input rg-in rg-h" data-k="last_price" type="number" step="any" inputmode="decimal" placeholder="現價 ${esc(num(h.last_price) || '0')}"></td>
+            <td class="n"><input class="crm-input rg-in rg-h" data-k="cost_total" type="number" step="any" inputmode="decimal" placeholder="成本 ${esc(num(h.cost_total) || '0')}"></td>
+        </tr>`).join('')).join('') || '<tr><td colspan="6" class="rg-empty">私帳還沒有持股；先到資產儀表板加券商與持股</td></tr>';
     return `<div class="rg-tblwrap"><table>
-        <thead><tr><th>券商</th><th class="n">已拆明細</th><th class="n">未拆明細</th><th class="n">現在合計</th><th class="n">今天總市值</th></tr></thead>
+        <thead><tr><th>券商／持股</th><th class="n">現在怎麼算</th><th class="n">現在市值</th><th class="n">今天股數</th><th class="n">今天現價</th><th class="n">成本合計</th></tr></thead>
         <tbody id="rg-broker-body">${rows}</tbody></table></div>`;
 }
 
@@ -167,13 +180,22 @@ _rg.saveAll = async (btn) => {
         const v = _val(tr.querySelector('input.rg-in'));
         if (v !== null) brokers.push({ broker: tr.dataset.broker, total: v });
     });
+    // 逐檔：股數／現價／成本有填哪個送哪個（小數照送，碎股與美股價格都有小數）
+    const holdings = [];
+    _c.querySelectorAll('#rg-broker-body tr[data-holding]').forEach((tr) => {
+        const h = { id: tr.dataset.holding };
+        tr.querySelectorAll('input.rg-h').forEach((el) => {
+            if (el.value.trim() !== '' && Number.isFinite(Number(el.value))) h[el.dataset.k] = Number(el.value);
+        });
+        if (Object.keys(h).length > 1) holdings.push(h);
+    });
     const card = _val(document.getElementById('rg-card'));
-    if (!accounts.length && !brokers.length && card === null) { finToast('還沒填任何數字', true); return; }
+    if (!accounts.length && !brokers.length && !holdings.length && card === null) { finToast('還沒填任何數字', true); return; }
     btn.disabled = true;
     try {
         let d = null;
-        if (accounts.length || brokers.length) {
-            d = await finFetchMine('/balance-register', { method: 'PUT', body: JSON.stringify({ date, accounts, brokers }) });
+        if (accounts.length || brokers.length || holdings.length) {
+            d = await finFetchMine('/balance-register', { method: 'PUT', body: JSON.stringify({ date, accounts, holdings, brokers }) });
         }
         if (card !== null) {
             // 信用卡走既有那支：derive_opening_from ＝「現在實際欠多少」反推期初
@@ -183,7 +205,7 @@ _rg.saveAll = async (btn) => {
         if (!_isCurrent()) return;
         _d = d || await finFetchMine('/balance-register');
         _render();
-        finToast(`已登記：${accounts.length} 個帳戶、${brokers.length} 家券商${card !== null ? '、信用卡' : ''}`);
+        finToast(`已登記：${accounts.length} 個帳戶、${holdings.length} 檔持股、${brokers.length} 家券商${card !== null ? '、信用卡' : ''}`);
     } catch (e) {
         finToast('儲存失敗：' + e.message, true);
         btn.disabled = false;

@@ -142,3 +142,21 @@ def test_mobile_register_is_a_hidden_route_reached_from_overview():
     assert not _EMOJI.search(view), "按鈕純文字，沒有 emoji"
     css = repo_src("frontend/m/m.css")
     assert ".rg-row" in css and ".rg-go" in css
+
+
+def test_holdings_can_be_registered_share_by_share():
+    """owner「登記的還有證券的股數等」：GET 每家券商帶 holdings[]，PUT 收 holdings[]{id, shares, last_price, manual_value, cost_total}，
+    先套持股再算未拆明細；給了股數或現價且算得出股數 × 現價，就清掉手填市值。"""
+    src = repo_src("routers/api_balance_register.py")
+    assert 'g["holdings"].append(' in src and '"value_twd": _holding_value(h, fx)' in src
+    assert "for hl in payload.holdings:" in src
+    assert src.index("for hl in payload.holdings:") < src.index("for br in payload.brokers:"), "先套持股再算未拆明細"
+    assert "h.manual_value = None" in src and "h.price_at = datetime.now()" in src
+    sch = repo_src("core/schemas/_finance.py")
+    assert "class BalanceRegisterHolding(BaseModel):" in sch and "holdings: List[BalanceRegisterHolding] = []" in sch
+    desk = js_code_only(repo_src("frontend/tabs/finance/subviews/register.js"))
+    assert 'data-holding="${esc(h.id)}"' in desk and "data-k=\"cost_total\"" in desk
+    assert "JSON.stringify({ date, accounts, holdings, brokers })" in desk
+    mob = js_code_only(repo_src("frontend/m/views/ledger-register.js"))
+    assert 'data-holding="${esc(h.id)}"' in mob and "JSON.stringify({ date, accounts, holdings, brokers })" in mob
+    assert ":scope > .m-form > input.rg-in" in mob, "券商總市值那格不能把持股的格子一起讀走"

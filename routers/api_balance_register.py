@@ -45,6 +45,7 @@ async def _register_payload(session, ent: str) -> dict:
     from db.models import BankAccount, FinanceHolding
     from routers.api_finance_assets import _holding_value
     from routers.api_fortress import _card_outstanding
+    from routers.crm._shared import _fmt_day
     rows = (await session.execute(
         select(BankAccount).where(BankAccount.entity == ent, BankAccount.active.is_(True))
         .order_by(BankAccount.sort_order, BankAccount.created_at))).scalars().all()
@@ -67,13 +68,19 @@ async def _register_payload(session, ent: str) -> dict:
     brokers = {}
     for h in holdings:
         g = brokers.setdefault(h.broker or "", {"broker": h.broker or "", "count": 0, "detail": 0, "plug": 0,
-                                                 "plug_note": "", "total": 0})
+                                                 "plug_note": "", "total": 0, "holdings": []})
         if _is_plug(h):
             g["plug"] = int(h.manual_value or 0)
             g["plug_note"] = h.note or ""
         else:
             g["count"] += 1
             g["detail"] += _holding_value(h, fx)
+            # 逐檔（owner「登記的還有證券的股數等」）：股數／現價／手填市值／成本都給，畫面才知道哪一格該填
+            g["holdings"].append({"id": h.id, "symbol": h.symbol or "", "name": h.name or h.symbol or "持股",
+                                  "currency": (h.currency or "TWD").upper(), "quote_symbol": h.quote_symbol or "",
+                                  "shares": h.shares, "last_price": h.last_price, "price_at": _fmt_day(h.price_at),
+                                  "manual_value": h.manual_value, "cost_total": h.cost_total,
+                                  "value_twd": _holding_value(h, fx)})
     for g in brokers.values():
         g["total"] = g["detail"] + g["plug"]
     return {"date": datetime.now().strftime("%Y-%m-%d"), "accounts": accounts,
@@ -141,11 +148,36 @@ async def put_balance_register(payload: BalanceRegisterPayload, request: Request
                 row.note = f"登記餘額 {payload.date}"
                 row.reconciled_by = _username(request)
                 row.reconciled_at = datetime.now()
-        if payload.brokers:
+        if payload.brokers or payload.holdings:
             fx = float((load_settings().get("my_ledger") or {}).get("usd_twd") or 0)
             holdings = (await session.execute(
                 select(FinanceHolding).where(FinanceHolding.entity == ent,
                                              FinanceHolding.active.is_(True)))).scalars().all()
+            by_id = {h.id: h for h in holdings}
+            # 先套逐檔的股數／現價／成本，券商總市值的「未拆明細」要用更新後的已拆明細算
+            for hl in payload.holdings:
+                h = by_id.get(hl.id)
+                if not h or _is_plug(h):
+                    raise HTTPException(status_code=404, detail=f"持股不存在或不在這本帳：{hl.id}")
+                data = hl.model_dump(exclude_unset=True, exclude={"id"})
+                for k in ("shares", "last_price", "cost_total"):
+                    if k in data and data[k] is not None and float(data[k]) < 0:
+                        raise HTTPException(status_code=422, detail=f"{h.name} 的 {k} 不能是負數")
+                if "manual_value" in data:
+                    h.manual_value = data["manual_value"]
+                if data.get("shares") is not None:
+                    h.shares = float(data["shares"])
+                if data.get("last_price") is not None:
+                    h.last_price = float(data["last_price"])
+                    h.price_at = datetime.now()
+                if data.get("cost_total") is not None:
+                    h.cost_total = float(data["cost_total"])
+                # 給了股數或現價、而且算得出股數 × 現價 → 手填市值讓位（不然登記了股數市值卻不動）
+                if "manual_value" not in data and (data.get("shares") is not None or data.get("last_price") is not None) \
+                        and h.shares and h.last_price:
+                    h.manual_value = None
+                h.updated_at = datetime.now()
+            await session.flush()
             for br in payload.brokers:
                 name = (br.broker or "").strip()
                 plug = _plug_of(holdings, name)

@@ -82,10 +82,22 @@ class BalanceRegisterBroker(BaseModel):
     total: int
 
 
+class BalanceRegisterHolding(BaseModel):
+    """登記餘額：一檔持股「今天的股數／現價／成本」。沒送的欄位不動；
+    給了股數或現價、而且那檔算得出「股數 × 現價」，就清掉手填市值（改用算的）；明著送 manual_value 則以它為準。"""
+    id: str
+    shares: Optional[float] = None
+    last_price: Optional[float] = None
+    manual_value: Optional[int] = None
+    cost_total: Optional[float] = None
+
+
 class BalanceRegisterPayload(BaseModel):
-    """PUT /finance/balance-register：基準日＋各帳戶餘額＋各證券戶總市值。沒送的帳戶不動。"""
+    """PUT /finance/balance-register：基準日＋各帳戶餘額＋各檔持股＋各證券戶總市值。沒送的都不動。
+    先套持股、再算券商總市值的「未拆明細」（總市值 − 更新後的已拆明細）。"""
     date: str                                   # 'YYYY-MM-DD' 基準日（通常＝今天）
     accounts: List[BalanceRegisterLine] = []
+    holdings: List[BalanceRegisterHolding] = []
     brokers: List[BalanceRegisterBroker] = []
 
 
