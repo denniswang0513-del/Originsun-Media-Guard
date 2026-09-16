@@ -174,14 +174,14 @@ def test_works_list_hides_private_ledger_projects_that_are_linked_to_a_crm_proje
     沒連結的私帳案照列；公開清單的共用基底也套同一個條件。"""
     from tests.unit._srcscan import func_body
     src = repo_src("services/website/project_service.py")
-    cond = func_body(src, "def _not_a_linked_mine_project(published_only: bool = False):")
+    cond = func_body(src, "def _not_a_linked_mine_project():")
     assert "P.mine_link_id.isnot(None)" in cond and "CrmProject.source_project_id.is_(None)" in cond
     assert 'CrmProject.entity != "mine"' in cond, "母帳案一律列；只有私帳案才看連結"
-    # 2026-09-17 調整：母帳那邊要真的有東西才不列（母帳案存在；公開清單還要母帳作品已公開）；子查詢用 aliased 免被 correlate
+    # 2026-09-17 owner：母帳案只要還在（不管作品有沒有公開）私帳就不列；被刪才列。子查詢用 aliased 免被 correlate
     assert "P.id.in_(parent)" in cond and "CrmProject.source_project_id.notin_(parent)" in cond and "aliased(CrmProject)" in cond
-    assert "S.published.is_(True)" in cond and ".correlate(None)" in cond
+    assert "published" not in cond and ".correlate(None)" in cond, "不看公開與否"
     assert "_not_a_linked_mine_project()" in func_body(src, "async def list_admin_projects(")
-    assert "_not_a_linked_mine_project(published_only=True)" in func_body(src, "def _published_works_base():")
+    assert "_not_a_linked_mine_project()" in func_body(src, "def _published_works_base():")
 
 
 def test_mobile_views_pass_objects_to_mfetch_not_strings():
