@@ -819,7 +819,7 @@ CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 
 **新增 CRM 功能 checklist**：
 1. DB Model → `db/models/`（`_crm.py`／`_workos.py`／`_system.py`；新欄位在 `db/migrations.CRM_COLUMNS` 末端加一行 `(table, column, type)`）
-2. Schema → `core/schemas.py`
+2. Schema → `core/schemas/`（套件，2026-08 起拆成 `_finance.py`／`_workos.py`…）
 3. API → `routers/crm/<領域>.py`（共用 helper 進 `_shared.py`；純錢流判定進 `core/crm_logic.py` 並加單元測試）
 4. 前端 → `frontend/tabs/crm/` 對應 `.html` + `.js`
 5. 帳務子視圖用 lazy-load，import 路徑必須用 `location.origin` 絕對路徑
@@ -873,7 +873,7 @@ CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 > `core.auth.check_admin_or_module(request, 'website_admin')`：管理員 OR 擁有官網模組
 > 即可寫入；全域 `check_admin` 仍只認 Lv3。
 
-### 7.12 Pydantic Schema 完整清單 (`core/schemas.py`)
+### 7.12 Pydantic Schema 完整清單 (`core/schemas/`（套件，2026-08 起拆成 `_finance.py`／`_workos.py`…）)
 
 ```python
 class BackupRequest(BaseModel):
@@ -1013,7 +1013,7 @@ class ValidatePathsRequest(BaseModel):
 
 1. **編輯 `core_engine.py` 時**：請務必注意 `_pause_event` 與 `_stop_event` 的檢查頻率。若迴圈太重會導致使用者點擊「強制中止」後要等很久才反應。
 2. **新增 API 時**：
-   - 務必在 `core/schemas.py` 定義 Pydantic Model。
+   - 務必在 `core/schemas/`（套件，2026-08 起拆成 `_finance.py`／`_workos.py`…） 定義 Pydantic Model。
    - 在 `routers/` 下建立新的 `.py` 檔案並在 `main.py` include。
    - 更新本文件第 7 節的端點表格。
 3. **前端修改時**：
@@ -1419,6 +1419,11 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   （`day_key`、`_bank_dict`），本月視窗用 naive 邊界（`api_finance._month_window`），不要 `tzinfo=timezone.utc`（1 日的明細會掉到上個月）。
   ③ 一個請求裡 `_balances_by_account`／`_card_outstanding` 各算一次：把手上已有的帳戶列（`accounts=`）與卡費（`card=`）傳進去，
   不然登記一次會掃五次流水表、三次整張收支表。
+  /health 2026-09-17 第二次再加三條：④ **月報的本月收入／支出吃財務三表同一套分類**（`core.finance_logic.cashflow_lines` 的營業活動），
+  不要再用分類名 LIKE 猜「哪些是轉帳」—— 私帳的對映表把 轉匯與定存／個人_投資支出 都標成 transfer，三表跟月報要同一個答案。
+  ⑤ **office-api 開機只補財務欄位**（`db.startup_migrations.apply_finance_ledger_columns`，`ADD COLUMN IF NOT EXISTS` 冪等），
+  其他建表／回填仍是 master 的事；新加 `bank_accounts` 欄位要進 `db/migrations.FINANCE_LEDGER_COLUMNS` 兩台才都有。
+  ⑥ **「萬」的格式只有 `frontend/js/shared/fmt.js::fmtWan` 一份**（堡壘桌機、月報桌機、士源帳本都 import 它；後端 `core.monthly_report._wan` 同口徑）。
 - **私帳月報（docs/MONTHLY_REPORT.md，2026-09-17）**：`core/monthly_report.py::build_report` 是純函式，吃的是別的模組**已經算好**的東西
   （堡壘 payload、登記餘額 payload、資產儀表板的桶、本月收支、淨值快照、上一份月報）—— 🔴 不要在月報裡再算一次餘額／必要支出／階梯，
   數字對不上時改來源不改月報。建議（advice）是**規則**：每條有門檻（`CONCENTRATION_WARN`、`RECEIVABLE_MONTHS`…），回 None 就不出現；
@@ -1657,12 +1662,12 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   住在哪一支函式裡」，於是被禁止的寫入只要搬進同檔 helper 就再也抓不到（測試安靜地失效），
   而且「把長函式切開」會變成一件弄壞測試的事。`flow_body` 會把它呼叫的 `_` 開頭同檔 helper
   一起帶進來。`tests/unit/test_payouts_router.py` 用的就是它（三條都做過變異驗證）。
-- **拆檔之後舊單檔要進 `ota_manifest.STALE_PATHS`**（2026-09-11 拆 `core/schemas.py` 時加的）：
+- **拆檔之後舊單檔要進 `ota_manifest.STALE_PATHS`**（2026-09-11 拆 `core/schemas/`（套件，2026-08 起拆成 `_finance.py`／`_workos.py`…） 時加的）：
   三條部署路都是「覆蓋、不刪」（NAS scp、deploy_to_prod 逐檔 copy、機隊 OTA 解壓），套件跟同名
   單檔會並存。Python 先找到套件（實測），功能不壞，但下一個人會改到一份沒被載入的程式碼。
   三條路都吃這份清單（deploy_to_prod 先備份、rollback 還得回來；bootstrap 用 regex 從剛解出的
   manifest 讀，維持 stdlib-only）。同日：`test_files_stay_readable` 的掃描加了 `.css`
-  （`crm.css` 2,286 行拆成 `crm.css`＋`crm-project-views.css`，載入順序不能反）、`core/schemas.py`
+  （`crm.css` 2,286 行拆成 `crm.css`＋`crm-project-views.css`，載入順序不能反）、`core/schemas/`（套件，2026-08 起拆成 `_finance.py`／`_workos.py`…）
   拆成六段套件（掃原始碼用 `_srcscan.schemas_src()`）、`_crm_cols` 搬到 `db/migrations.CRM_COLUMNS`。
 - **案源「自接」2026-09-13 起又可選了、意思是「自接（現金收款）」**（owner 指定順序：源日(現金收款)／自接(代開發票)／自接(現金收款)／自接(執行業務所得)）：
   值不變（`SOURCES` 白名單四個都在），字面與順序正本 `core.ledger_project.SOURCE_LABELS`（詳情／換帳本檢查隨 `source_labels` 送；
