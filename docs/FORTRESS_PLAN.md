@@ -92,17 +92,20 @@
 
 1. **總覽頂部一張卡**（`views/ledger-overview.js` 的 `#ov-body` 最上面）：「可撐 N 個月」大字＋一行「第 1–3 層 X 萬 − 預留 Y 萬 ÷ 必要 Z 萬」＋五格迷你水位。點卡 → `#fortress`。
 2. **`#fortress` 隱藏路由**（同 CRM 的 `HIDDEN_ROUTES` 做法：有頁、沒 tabbar 鈕；`ledger.js` 的 `TABS` 不動，`VIEWS` 多一個 `fortress`）：`views/ledger-fortress.js`。
-   由上到下：大數字卡 → 五層（一層一列：名稱、帳戶、水位條、現在／目標）→ 預留清單（一列一筆，「＋記一筆預留」開抽屜：項目、金額、到期日；自動項標「自動」不能刪；付掉可勾「已付」）→ 必要支出（唯讀，註「桌機改」）→ 壓力測試五題（收合列：色點＋題名＋結論；點開看算式各行）。
+   由上到下：大數字卡 → 五層（一層一列）→ 預留清單（「＋記一筆預留」開抽屜；自動項標「自動」不能刪；付掉可勾「已付」）→
+   每月必要支出（唯讀）→ **財富自由**（唯讀卡）→ **財富階梯**（唯讀卡）→ **資產預期成長**（唯讀卡）→ 壓力測試**六題**（收合列）。
+   總覽頂卡另外多一行「不工作每月可花 X 萬」（資料不足時不顯示）。
 3. **資料**：直接打 `GET /api/v1/finance/fortress?entity=mine`（桌機同一支；不另開 BFF）。
 4. **寫入**：只有預留清單（走 §2.2 的 earmarks 端點，NAS 也掛）。分層、目標、假設**不在手機改**。
-5. **規矩**（繼承手機版）：`import './shell.js'`、`mfetch`、`money`、`todayLocal()`；60 秒快取＋`markStale('overview','fortress')`（記了預留兩頁都髒）；按鈕純文字；深色同殼。
+5. **規矩**（繼承手機版）：`import './shell.js'`、`mfetch`、`money`、`todayLocal()`；按鈕純文字、**不准有 emoji**（測試掃原始碼）；深色同殼。
+   🔴 這一頁**不吃 60 秒快取**：數字是從收支明細推出來的，而記帳的那兩頁只 markStale 自己那幾頁、不知道有堡壘 —— 每次進來都重抓。
 6. **不做**：手機不放堡壘剖面圖（窄，改成五列水位條）；不放 12 個月時間帶（預留清單按到期日排就夠）。
 
 ## 5. 階段與驗收
 
 | 階段 | 內容 | 驗收 |
 |---|---|---|
-| F1 | `core/fortress_logic.py`（層合計、可撐月數、目標、五題）＋單元測試（用 demo 的範例數字釘：可撐 9.1、戰爭題「撐得住」；把實體現金移到第 2 層 → 頭一個月 19.5 萬） | pytest |
+| F1 | `core/fortress_logic.py`（層合計、可撐月數、目標、壓力測試）＋單元測試（用 demo 的範例數字釘：可撐 9.1、戰爭題「撐得住」；把實體現金移到第 2 層 → 頭一個月 19.5 萬） | pytest |
 | F2 | 表＋設定＋三支端點＋office-api 掛載＋`office_settings` 送 `finance.fortress`；`test_office_surface` 模組圖不得長出排程 | pytest＋dev 8001 curl |
 | F3 | 桌機分頁 `fortress.js`（照 demo v3，深色配色） | Playwright 桌機截圖給 owner |
 | F4 | 手機：總覽頂卡＋`#fortress` 頁＋預留抽屜 | Playwright iPhone viewport（8001 與 NAS 各一次）截圖給 owner |
