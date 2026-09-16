@@ -420,10 +420,10 @@ def test_fire_block_with_the_owners_numbers():
     d = build(accts, [], 94206, {"account_layers": {"e": 5}}, "2026-09-16", need_months=6)
     f = d["fire"]
     assert f["age"] == 37 and f["until_age"] == 90 and f["horizon_years"] == 53, "1989 年生，2026 年 37 歲"
-    assert f["spend"] == 94206 + 2000 and f["self_pay"] == 2000
+    assert f["spend"] == 94206 + 2155 and f["self_pay"] == 2155, "2026：健保第六類 826＋國保自付 1,329"
     assert f["by_rate"] == {"0.03": 124869, "0.035": 145681, "0.04": 166492}
     assert f["allowed"] == 145681 and f["withdrawal_rate"] == 0.035
-    assert f["current_rate"] == 0.0231 and f["ratio25"] == 1.73 and f["ratio33"] == 1.3
+    assert f["current_rate"] == 0.0232 and f["ratio25"] == 1.73 and f["ratio33"] == 1.3
     assert f["runs_out_year"] is None and f["runs_out_year_zero"] == 32, "6% 用不完；0% 第 32 年用完"
     assert f["runs_out_year_shock"] is None, "前 10 年報酬掛零也還撐得住（他的提領率只有 2.31%）"
     assert f["cash_years"] == 2.5 and f["state"] == STATE_OK and "低於 3.5% 的安全提領率" in f["verdict"]
@@ -484,14 +484,13 @@ def test_fire_simulate_characterisation():
 def test_fire_settings_bounds_each_key():
     """六格都有上下限；亂填不會讓整頁炸掉或給出假答案。"""
     from core.fortress_logic import DEFAULT_FIRE
-    lo = normalize_settings({"fire": {"withdrawal_rate": 0, "birth_year": -5, "until_age": 10,
-                                      "extra_monthly": -1, "extra_from_age": -3, "self_pay_monthly": -9}})["fire"]
+    lo = normalize_settings({"fire": {k: -9 for k in DEFAULT_FIRE}})["fire"]
     assert lo == {"withdrawal_rate": 0.01, "birth_year": 0, "until_age": 40,
-                  "extra_monthly": 0, "extra_from_age": 0, "self_pay_monthly": 0}
-    hi = normalize_settings({"fire": {"withdrawal_rate": 9, "birth_year": 9999, "until_age": 999,
-                                      "extra_monthly": 10 ** 9, "extra_from_age": 999, "self_pay_monthly": 10 ** 9}})["fire"]
+                  "extra_monthly": 0, "extra_from_age": 0, "self_pay_monthly": 0, "tax_monthly": 0}
+    hi = normalize_settings({"fire": {k: 10 ** 9 for k in DEFAULT_FIRE}})["fire"]
     assert hi == {"withdrawal_rate": 0.10, "birth_year": 2100, "until_age": 120,
-                  "extra_monthly": 10_000_000, "extra_from_age": 120, "self_pay_monthly": 1_000_000}
+                  "extra_monthly": 10_000_000, "extra_from_age": 120,
+                  "self_pay_monthly": 1_000_000, "tax_monthly": 10_000_000}
     assert normalize_settings({"fire": {"withdrawal_rate": "x", "until_age": None}})["fire"] == DEFAULT_FIRE, "不是數字就用預設"
     assert normalize_settings({})["fire"] == DEFAULT_FIRE and DEFAULT_FIRE["birth_year"] == 1989
 
@@ -609,3 +608,22 @@ def test_sequence_risk_line_is_the_honest_one():
     assert [x[0] for x in f["lines"]][-2].startswith("前 10 年報酬 0%")
     assert "固定報酬的算術，不是壓力測試" in f["verdict"], "不能把算術上必然的事寫成通過的檢驗"
     assert "第 48 年就會用完" in f["verdict"], "要把真正會咬人的那個數字講出來"
+
+
+def test_fire_is_marked_pretax_and_rates_carry_their_source():
+    """每月可以花多少是**稅前**：股利有綜所稅與二代健保補充保費、海外所得有最低稅負制。
+    系統不猜金額（全美股 ETF 台灣這端接近 0，台股高息部位可能每月上萬），但一定要標出來。
+    另外 4% 那張卡要寫明它是美國 30 年退休期的研究，不能跟另外兩個並排得像同一級。"""
+    from core.fortress_logic import DEFAULT_FIRE, FIRE_RATE_NOTES
+    assert DEFAULT_FIRE["tax_monthly"] == 0 and DEFAULT_FIRE["self_pay_monthly"] == 2155, "2026：健保 826＋國保 1,329"
+    assert "美國 30 年退休期" in FIRE_RATE_NOTES["0.04"]
+    accts = [{"id": "c", "name": "活存", "kind": "bank", "balance": 50_000_000}]
+    f = build(accts, [], 94_206, {}, "2026-09-16", need_months=6)["fire"]
+    assert f["pretax"] is True and f["tax"] == 0 and f["spend"] == 94_206 + 2155
+    assert f["rate_notes"]["0.04"] == FIRE_RATE_NOTES["0.04"]
+    taxed = build(accts, [], 94_206, {"fire": {"tax_monthly": 22_000}}, "2026-09-16", need_months=6)["fire"]
+    assert taxed["pretax"] is False and taxed["spend"] == 94_206 + 2155 + 22_000, "填了就算進支出"
+    assert taxed["current_rate"] > f["current_rate"], "稅讓提領率變高（本來就該）"
+    # 長跑看 33 倍，不是 25 倍
+    bad = build(accts, [], 300_000, {}, "2026-09-16", need_months=6)["fire"]
+    assert "33 倍門檻" in bad["verdict"] and [x[0] for x in bad["lines"]][2].startswith("33 倍")

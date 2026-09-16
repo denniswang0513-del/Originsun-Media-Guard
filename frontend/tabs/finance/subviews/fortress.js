@@ -541,7 +541,7 @@ function _fire(d) {
         <div class="fire-k${Number(r) === Number(f.withdrawal_rate) ? ' on' : ''}">
             <div class="t">提領率 ${fmtPctInput(r)}%${Number(r) === Number(f.withdrawal_rate) ? '（判定用）' : ''}</div>
             <div class="v ft-num">$${fmtNum(v)}</div>
-            <div class="s">${Number(r) <= 0.03 ? '撐 50 年以上、股票比重高' : (Number(r) < 0.04 ? '提早退休常用' : '經典 4% 法則，30 年')}</div>
+            <div class="s">${esc((f.rate_notes || {})[r] || '')}</div>
         </div>`).join('');
     const ageTxt = f.age != null ? `你 ${fmtNum(f.age)} 歲，撐到 ${fmtNum(f.until_age)} 歲＝${fmtNum(f.horizon_years)} 年` : `沒填出生年，先模擬 ${fmtNum(f.horizon_years)} 年`;
     return `
@@ -550,7 +550,8 @@ function _fire(d) {
         <div class="fire-head">
             <div><div class="ft-eyebrow">每月可以花</div>
                 <div class="ft-big"><span class="n tone-${st === 'ok' ? 'g' : st === 'warn' ? 'a' : st === 'bad' ? 'r' : 'na'}">${fmtWan(f.allowed)}</span></div>
-                <div class="ft-formula">你現在每月花 <span class="ft-num">$${fmtNum(f.spend)}</span>（含不工作後自付的健保、國保 $${fmtNum(f.self_pay)}）</div></div>
+                <div class="ft-formula">你現在每月花 <span class="ft-num">$${fmtNum(f.spend)}</span>（含自付的健保、國保 $${fmtNum(f.self_pay)}${Number(f.tax) ? `、稅與補充保費 $${fmtNum(f.tax)}` : ''}）
+                    ${f.pretax ? '<span class="ft-warn" style="display:inline-block;margin:6px 0 0;padding:4px 9px;">這是稅前數字 —— 股利要繳綜所稅與二代健保補充保費，海外所得另有最低稅負制。把估算填進下面那格才會準。</span>' : ''}</div></div>
             <div class="fire-rates">${rates}</div>
         </div>
         <div class="fire-lines">${(f.lines || []).map((l) => `<div class="line"><span>${esc(l[0])}</span><span>${fmtLine(l, f)}</span></div>`).join('')}</div>
@@ -561,7 +562,8 @@ function _fire(d) {
             <label>撐到幾歲<input class="crm-input" id="ft-f-until" type="number" min="40" max="120" step="1" value="${fmtNum(cfg.until_age || 90)}"></label>
             <label>退休後每月其他收入（勞保年金、租金）<input class="crm-input" id="ft-f-extra" type="number" min="0" step="1000" value="${fmtNum(cfg.extra_monthly || 0).replace(/,/g, '')}"></label>
             <label>從幾歲開始<input class="crm-input" id="ft-f-from" type="number" min="0" max="120" step="1" value="${fmtNum(cfg.extra_from_age || 65)}"></label>
-            <label>不工作多出來的每月固定支出<input class="crm-input" id="ft-f-self" type="number" min="0" step="100" value="${fmtNum(cfg.self_pay_monthly ?? 2000).replace(/,/g, '')}"></label>
+            <label>不工作多出來的每月固定支出（健保、國保）<input class="crm-input" id="ft-f-self" type="number" min="0" step="100" value="${fmtNum(cfg.self_pay_monthly ?? 2155).replace(/,/g, '')}"></label>
+            <label>每月稅與補充保費（估）<input class="crm-input" id="ft-f-tax" type="number" min="0" step="1000" value="${fmtNum(cfg.tax_monthly || 0).replace(/,/g, '')}"></label>
             <div class="full"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._finFortress.saveFire(this)">重算</button>
                 <span class="ft-src" style="align-self:center;">報酬率與通膨沿用「資產預期成長」那段的假設；每月支出沿用「必要支出」</span></div>
         </div>
@@ -800,7 +802,8 @@ _ff.saveFire = (btn) => {
         until_age: Math.round(_num('ft-f-until', c.until_age ?? 90)),
         extra_monthly: Math.max(0, Math.round(_num('ft-f-extra', c.extra_monthly ?? 0))),
         extra_from_age: Math.round(_num('ft-f-from', c.extra_from_age ?? 65)),
-        self_pay_monthly: Math.max(0, Math.round(_num('ft-f-self', c.self_pay_monthly ?? 2000))),
+        self_pay_monthly: Math.max(0, Math.round(_num('ft-f-self', c.self_pay_monthly ?? 2155))),
+        tax_monthly: Math.max(0, Math.round(_num('ft-f-tax', c.tax_monthly ?? 0))),
     } }, '已重算', btn);
 };
 

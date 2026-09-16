@@ -60,10 +60,20 @@ DEFAULT_PLAN = {"target_rung": 5, "target_years": 20}
 #: 財富自由評估（owner 2026-09-16「此刻如果我不工作沒收入 我每個月可以花多少錢」；1989 年生；提領率依建議）。
 #: 提領率預設 3.5%：4% 法則（Bengen／Trinity）是 30 年退休期、50–75% 股票的研究；owner 要撐 50 年以上、
 #: 股票比重九成，Early Retirement Now 那派建議 3.25–3.5%。三個提領率都會顯示，這格只決定「判定用哪一個」。
-#: self_pay_monthly：不工作後要自付的健保第六類（約 826）＋國民年金（約 1,186），2024–25 費率的約數，可改。
+#: self_pay_monthly：不工作後要自付的健保第六類（826／月，2026）＋國民年金自付額（1,329／月，2026：
+#: 月投保 21,103 × 10.5% × 60%）＝ 2,155。65 歲以後不再繳國保，但那時也開始領年金（填在 extra_monthly）。
+#: tax_monthly：**稅與補充保費的月攤**，預設 0 要自己填 —— 系統不猜。對台股高息部位它不是小錢：
+#: 股利單筆逾 2 萬要 2.11% 二代健保補充保費，股利所得另有綜所稅（合併計稅 8.5% 可抵減、上限 8 萬，或分開 28%），
+#: 海外所得逾 100 萬要計入基本所得額（超過免稅額部分 20%）。全美股 ETF 的話台灣這端接近 0。
 DEFAULT_FIRE = {"withdrawal_rate": 0.035, "birth_year": 1989, "until_age": 90,
-                "extra_monthly": 0, "extra_from_age": 65, "self_pay_monthly": 2000}
+                "extra_monthly": 0, "extra_from_age": 65, "self_pay_monthly": 2155, "tax_monthly": 0}
+#: 三個提領率各自的出處 —— 4% 是**美國 30 年退休期**的研究，不要讓它看起來跟另外兩個同級
 FIRE_RATES = (0.03, 0.035, 0.04)
+FIRE_RATE_NOTES = {
+    "0.03": "撐 50 年以上、股票比重高時用",
+    "0.035": "提早退休常用；50 年以上的長跑建議 3.25–3.5%",
+    "0.04": "經典 4% 法則，但那是美國 30 年退休期、股票 50–75% 的研究，53 年不適用",
+}
 #: 沒有出生年時模擬幾年
 FIRE_DEFAULT_HORIZON = 50
 #: 序列風險那一行：退休初期幾年報酬當 0%（真正會咬人的不是平均報酬，是前十年的順序）
@@ -229,7 +239,8 @@ def normalize_settings(raw) -> dict:
                 plan[k] = max(lo, min(hi, n))
     fire = dict(DEFAULT_FIRE)
     fire_bounds = {"withdrawal_rate": (0.01, 0.10), "birth_year": (0, 2100), "until_age": (40, 120),
-                   "extra_monthly": (0, 10_000_000), "extra_from_age": (0, 120), "self_pay_monthly": (0, 1_000_000)}
+                   "extra_monthly": (0, 10_000_000), "extra_from_age": (0, 120),
+                   "self_pay_monthly": (0, 1_000_000), "tax_monthly": (0, 10_000_000)}
     for k, v in (raw.get("fire") or {}).items():
         if k not in DEFAULT_FIRE:
             continue
@@ -452,6 +463,7 @@ def _care_test(cash4: float, holdings_total: float, m: float, ear: float, care: 
                  assume=(f"假設：每月照護費 {_wan(float(care['monthly']))}"
                          + (f"、保險每月給付 {_wan(float(care['insurance_monthly']))}" if float(care["insurance_monthly"]) else "")
                          + f"、需要 {years} 年。這題把第 5 層複利資本也算進來（長照是長期支出，本來就該由它支應）。"
+                           "用的是**今天的錢**：真正發生時照護費與資產都會變大，兩邊方向相反、大致抵銷。"
                            "沒有算「照顧者離職少一份收入」—— 那一段看第 1 題。"))
 
 
@@ -569,7 +581,7 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     # 🔴 na 看的是 monthly_used（帳本真的有沒有生活支出資料），不是 spend ——
     #    spend 還加了「不工作後自付的健保、國保」（預設 2,000），永遠 > 0，
     #    於是新帳本會拿那 2,000 當生活費宣告「已達財富自由」。可撐月數那邊同樣情況回 None，兩邊要一致。
-    spend = float(monthly_used or 0) + float(fire["self_pay_monthly"])
+    spend = float(monthly_used or 0) + float(fire["self_pay_monthly"]) + float(fire["tax_monthly"])
     by_rate = {f"{r:g}": _m(float(financial) * r / 12) for r in FIRE_RATES}
     chosen = float(fire["withdrawal_rate"])
     allowed = _m(float(financial) * chosen / 12)
@@ -581,8 +593,10 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     horizon = max(1, int(fire["until_age"]) - age) if age is not None else FIRE_DEFAULT_HORIZON
     # 通膨指數是 y-1 → 第 y 年跨的是 age+y-1 歲；年金從 E 歲開始＝第 (E-age+1) 年
     extra_from = max(1, int(fire["extra_from_age"]) - age + 1) if age is not None else 10 ** 6
-    base = {"spend": _m(spend), "self_pay": _m(fire["self_pay_monthly"]), "allowed": allowed, "by_rate": by_rate,
-            "withdrawal_rate": chosen, "age": age, "until_age": int(fire["until_age"]), "horizon_years": horizon}
+    base = {"spend": _m(spend), "self_pay": _m(fire["self_pay_monthly"]), "tax": _m(fire["tax_monthly"]),
+            "allowed": allowed, "by_rate": by_rate, "rate_notes": dict(FIRE_RATE_NOTES),
+            "withdrawal_rate": chosen, "age": age, "until_age": int(fire["until_age"]), "horizon_years": horizon,
+            "pretax": not float(fire["tax_monthly"])}
     if float(monthly_used or 0) <= 0 or financial <= 0 or spend <= 0:
         return {**base, "state": "na", "verdict": "先設定每月必要支出才算得出來。", "lines": []}
     current_rate = spend * 12 / float(financial)
@@ -620,7 +634,8 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
     else:
         st = STATE_BAD
         vd = (f"還沒到。現在的花法用到資產的 {current_rate:.2%}，{when(runs_out)}會用完。"
-              f"要嘛每月支出降到 {_wan(allowed)} 以下，要嘛資產再多 {_wan(max(0.0, fi25 - financial))} 到 25 倍門檻。")
+              f"要嘛每月支出降到 {_wan(allowed)} 以下，要嘛資產再多 {_wan(max(0.0, fi33 - financial))} 到 33 倍門檻"
+              f"（33 倍是 3% 的倒數；25 倍對應 4%，那是美國 30 年退休期的數字，你要撐的年數長得多）。")
     return {
         **base, "current_rate": round(current_rate, 4),
         "fi25": _m(fi25), "fi33": _m(fi33), "ratio25": round(float(financial) / fi25, 2), "ratio33": round(float(financial) / fi33, 2),
@@ -629,7 +644,8 @@ def fire_block(financial: float, cash3: float, monthly_used: float, growth: dict
         "cash_years": cash_years, "state": st, "verdict": vd,
         "lines": [["每月支出（含不工作後自付的健保、國保）", _m(spend), "twd"],
                   ["你現在的花法對應提領率", round(current_rate * 100, 2), "pct"],
-                  ["25 倍法則的門檻", _m(fi25), "twd"], ["33 倍法則的門檻", _m(fi33), "twd"],
+                  ["33 倍法則的門檻（3% 的倒數，長跑用這個）", _m(fi33), "twd"],
+                  ["25 倍法則的門檻（4% 的倒數，30 年用）", _m(fi25), "twd"],
                   ["只靠現金不賣股票可以撐", cash_years, "years"],
                   [f"報酬 {r:.0%}、通膨 {infl:.0%}，錢用完在", runs_out, "year_or_never"],
                   [f"前 {FIRE_SHOCK_YEARS} 年報酬 0%、之後 {r:.0%}，用完在", runs_out_shock, "year_or_never"],

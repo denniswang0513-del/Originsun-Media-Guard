@@ -159,7 +159,8 @@ export function fireHtml(d) {
         <div class="m-card">
             <div class="lg-sub">此刻不工作、沒收入，每月可以花（${who}）</div>
             <div class="ft-big"><span class="n ${({ ok: 'g', warn: 'a', bad: 'r' })[f.state] || ''}">${esc(wan(f.allowed))}</span></div>
-            <div class="lg-sub">你現在每月花 ${esc(money(f.spend))}（含不工作後自付的健保、國保）</div>
+            <div class="lg-sub">你現在每月花 ${esc(money(f.spend))}（含自付的健保、國保${Number(f.tax) ? '、稅' : ''}）</div>
+            ${f.pretax ? '<div class="lg-sub" style="color:var(--warn)">這是稅前數字；稅與補充保費要到桌機填</div>' : ''}
             <div style="margin-top:8px">${rates}</div>
             <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--line)">${lines}</div>
             <div class="lg-sub" style="margin-top:8px;color:var(--ink)">${esc(f.verdict || '')}</div>
