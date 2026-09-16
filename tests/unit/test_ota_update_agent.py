@@ -39,7 +39,7 @@ def test_pip_self_heals_half_installed_packages():
         os.unlink(path)
     from tests.unit._srcscan import repo_src
     src = repo_src("update_agent.py")
-    assert '"--force-reinstall", "--no-deps", pin' in src and "result = _pip_install(req_file)" in src
+    assert '"--ignore-installed", "--no-deps", pin' in src and "result = _pip_install(req_file)" in src, "force-reinstall 也會先 uninstall，撞同一個錯"
 
 
 def test_transitional_pip_ini_bridge_is_gone():

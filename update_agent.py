@@ -185,8 +185,10 @@ def _pip_with_self_heal(req_file: str):
         pin = _pinned(req_file, pkg) or pkg
         log(f"pip: {pkg} has no RECORD (half-installed) -> force-reinstall {pin} ({len(healed)}/{MAX_HEALS})")
         write_status(5, 62, f"修復半套的套件 {pkg}（第 {len(healed)} 個）...")
+        # 🔴 用 --ignore-installed 不用 --force-reinstall：force-reinstall 也會先 uninstall，撞到同一個「no RECORD」
+        #    （2026-09-16 ai_2 真機：requests 連救 7 輪都在這裡倒）。ignore-installed 直接把新版檔案蓋上去、寫好 RECORD，舊檔留著無害。
         fix = subprocess.run(
-            [PYTHON, "-m", "pip", "install", "-q", "--force-reinstall", "--no-deps", pin, "--no-warn-script-location"],
+            [PYTHON, "-m", "pip", "install", "-q", "--ignore-installed", "--no-deps", pin, "--no-warn-script-location"],
             capture_output=True, text=True, timeout=PIP_TIMEOUT,
         )
         log(f"force-reinstall exit {fix.returncode}:\n{fix.stdout}\n{fix.stderr}")
