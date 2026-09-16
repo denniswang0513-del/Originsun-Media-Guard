@@ -10,7 +10,7 @@
  * 日期一律 todayLocal()（不用 toISOString：那是 UTC，台北早上 8 點前會變昨天）。
  */
 import { mfetch, money, todayLocal, toast, esc } from '../shell.js';
-import { skeleton, errBox, pill, openSheet, closeSheet, withBusy, shouldLoad, markStale } from '../ui.js';
+import { skeleton, errBox, pill, openSheet, closeSheet, withBusy, markStale } from '../ui.js';
 
 export const FORTRESS_API = '/api/v1/finance/fortress?entity=mine';
 const EARMARK_API = '/api/v1/finance/fortress/earmarks';
@@ -90,14 +90,19 @@ export async function render(host, { first }) {
             if (e && (e.source || 'manual') === 'manual') openEditSheet(host, e);
         });
     }
-    // 60 秒內切回來不重抓、寫過的分頁由 markStale 標髒（同 CRM 手機版七個 view 的做法）
-    if (shouldLoad('fortress', { first })) await load(host);
+    // 【重要】這頁每次進來都重抓，不吃 60 秒快取：它的數字是從收支明細推出來的（帳戶餘額、生活支出），
+    //    而記一筆收支的 ledger-cash／ledger-household 只 markStale 自己那幾頁、不知道有堡壘。
+    //    進來的路徑只有「總覽頂卡點一下」，重抓一次不貴，卻能保證不會跟剛剛那張卡對不起來。
+    await load(host);
 }
 
 async function load(host) {
     try {
-        apply(host, await mfetch(FORTRESS_API));
-    } catch (e) { host.innerHTML = errBox(e); }
+        await apply(host, await mfetch(FORTRESS_API));
+    } catch (e) {
+        host.innerHTML = errBox(e);
+        markStale('fortress');     // 失敗不要被當成「剛載過」：退出去再進來要能重試
+    }
 }
 
 /** 拿到整包（GET 或寫入的回應）就重畫；回應長得不像整包（沒有 layers）就再 GET 一次。 */

@@ -47,7 +47,11 @@ def test_ledger_labels_fortress_and_keeps_overview_lit():
 def test_fortress_view_contract():
     assert "export async function render(host, { first })" in _FORT_CODE
     assert f"'{API}'" in _FORT_CODE, "資料走桌機那支，不另開端點"
-    assert "shouldLoad('fortress', { first })" in _FORT_CODE, "60 秒快取同其他分頁"
+    # 這頁不吃 60 秒快取：數字是從收支明細推出來的，而記帳的那兩頁只 markStale 自己那幾頁、不知道有堡壘
+    # （/polish 2026-09-16：進來的路徑只有總覽頂卡點一下，重抓一次不貴，但能保證不會跟剛剛那張卡對不起來）
+    assert "shouldLoad(" not in _FORT_CODE, "不吃快取（見上）"
+    assert "await load(host);" in js_func_body(_FORT_CODE, "export async function render(host, { first }) {")
+    assert "markStale('fortress')" in js_func_body(_FORT_CODE, "async function load(host) {"), "載入失敗不要被當成剛載過，退出去再進來要能重試"
     assert "from '../shell.js'" in _FORT_CODE and "from '../ui.js'" in _FORT_CODE
     imports = re.findall(r"from '([^']+)'", _FORT_CODE)
     assert all(i in ("../shell.js", "../ui.js") or i.startswith("./ledger-") for i in imports), imports

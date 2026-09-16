@@ -268,3 +268,14 @@ def test_auto_earmarks_keep_the_overdue_backlog():
     assert got == [("a", "2026-07-05"), ("a", "2026-08-05"), ("a", "2026-09-05"), ("a", "2026-10-05"), ("b", "2026-10-20")]
     assert [o for _l, _d, _a, o in pick_loan_dues(rows, "2026-09-16")] == [True, True, True, False, False]
     assert pick_loan_dues([], "2026-09-16") == []
+
+
+def test_nas_really_receives_the_fortress_settings():
+    """不要只釘字串：export_settings 對「子鍵本身是 dict」的情況要真的送得出去
+    （送不到＝手機上每個帳戶都掉回第 1 層，而且不會有任何錯誤）。"""
+    from core.office_settings import export_settings
+    out, _dropped = export_settings({"finance": {"fortress": {"mine": {"holdings_layer": 4}},
+                                                 "margin_model": {"mine": {"rows": []}}},
+                                     "jwt_secret": "nope"})
+    assert out["finance"] == {"fortress": {"mine": {"holdings_layer": 4}}}, "只送 fortress、其他子鍵不送"
+    assert "jwt_secret" not in out
