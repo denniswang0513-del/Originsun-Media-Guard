@@ -89,18 +89,25 @@ def normalize_settings(raw) -> dict:
             continue
         if n in DEFAULT_TARGET_MONTHS and m >= 0:
             targets[n] = m
+    # 假設要有上下限：months=0 會讓「撐得過」變成必然、fx=0 會讓美元資產整批歸零 —— 兩個都是無聲的假答案
     war = dict(DEFAULT_WAR)
+    bounds = {"months": (1, 120), "bank_freeze_weeks": (0, 520), "tw_drop": (0.0, 1.0), "us_drop": (0.0, 1.0), "fx": (0.1, 10.0)}
     for k, v in (raw.get("war") or {}).items():
-        if k in DEFAULT_WAR:
-            try:
-                war[k] = float(v) if k != "months" and k != "bank_freeze_weeks" else int(v)
-            except (TypeError, ValueError):
-                pass
+        if k not in DEFAULT_WAR:
+            continue
+        try:
+            n = int(v) if k in ("months", "bank_freeze_weeks") else float(v)
+        except (TypeError, ValueError):
+            continue
+        lo, hi = bounds[k]
+        war[k] = max(lo, min(hi, n))
     override = raw.get("monthly_need_override")
     try:
         override = int(override) if override not in (None, "", 0, "0") else None
     except (TypeError, ValueError):
         override = None
+    if override is not None and override <= 0:
+        override = None      # 負的／零＝沒填，回到自動平均
     hl = raw.get("holdings_layer", 5)
     try:
         hl = int(hl)
@@ -149,6 +156,17 @@ def layer_sums(accounts: list) -> dict:
     return have
 
 
+def is_holding(a) -> bool:
+    return (a or {}).get("kind") == "holding"
+
+
+def cash_in_layers(accounts: list, upto: int) -> int:
+    """第 1..upto 層的**現金**（證券不算）。
+    🔴 看的是「這筆是不是證券」不是第幾層：把一檔 ETF 標成第 4 層機會資金（下拉就能做），
+    它不會因此變成股災裡不會跌的現金。"""
+    return sum(int(a.get("balance") or 0) for a in accounts if a["layer"] <= upto and not is_holding(a))
+
+
 # ── 數字 ──────────────────────────────────────────────────────────
 def runway_months(cash: float, earmark_total: float, monthly_need: float):
     """可撐月數；必要支出 ≤0 → None（算不出來，不是無限）。"""
@@ -179,8 +197,9 @@ def stress_tests(have: dict, accounts: list, monthly_need: float, earmark_total:
     unit：'twd'（金額）或 'months'。必要支出 ≤0 → 每題 state='na'、只回一句話。"""
     m = float(monthly_need or 0)
     ear = float(earmark_total or 0)
-    cash3 = have[1] + have[2] + have[3]
-    cash4 = cash3 + have[4]
+    cash3 = cash_in_layers(accounts, 3)
+    cash4 = cash_in_layers(accounts, 4)
+    holdings_total = sum(int(a.get("balance") or 0) for a in accounts if is_holding(a))
     if m <= 0:
         return [{"key": k, "title": t, "question": "", "state": "na", "assume": "",
                  "lines": [], "verdict": "先設定每月必要支出才算得出來。"}
@@ -203,11 +222,11 @@ def stress_tests(have: dict, accounts: list, monthly_need: float, earmark_total:
     rw = runway_months(cash3, ear, m)
     st = STATE_OK if rw >= RUNWAY_GREEN else (STATE_WARN if rw >= RUNWAY_AMBER else STATE_BAD)
     out.append({"key": "market", "title": f"股票下跌 {int(MARKET_DROP * 100)}%", "question": "生活會受影響嗎？會被迫停損嗎？", "state": st, "assume": "",
-                "lines": [["第 5 層現值", _m(have[5]), "twd"], ["跌完剩", _m(have[5] * (1 - MARKET_DROP)), "twd"], ["可撐月數（不動股票）", rw, "months"]],
+                "lines": [["證券現值", _m(holdings_total), "twd"], ["跌完剩", _m(holdings_total * (1 - MARKET_DROP)), "twd"], ["可撐月數（不動股票）", rw, "months"]],
                 "verdict": "生活資金在第 1 到 3 層，跌了不用賣，等得起。" if st == STATE_OK
                 else "生活資金不到 6 個月，跌的時候可能被迫在低點賣。先補第 3 層。"})
     # 3. 突發 40 萬
-    from4 = min(SHOCK_AMOUNT, max(0, have[4]))
+    from4 = min(SHOCK_AMOUNT, max(0, cash4 - cash3))
     from3 = SHOCK_AMOUNT - from4
     rw3 = runway_months(cash3 - from3, ear, m)
     st = STATE_OK if rw3 >= RUNWAY_GREEN else (STATE_WARN if rw3 >= RUNWAY_AMBER else STATE_BAD)
@@ -225,22 +244,25 @@ def stress_tests(have: dict, accounts: list, monthly_need: float, earmark_total:
                             else f"第 1 到 4 層差 {_wan(-left4)}，會被迫在低點賣股票。")})
     # 5. 台海戰爭
     fx = float(war["fx"])
-    cash_l = [a for a in accounts if a["layer"] <= 4]
+    months = int(war["months"])
+    # 現金只算「不是證券」的（證券照樣跌，不論被放在第幾層）
+    cash_l = [a for a in accounts if a["layer"] <= 4 and not is_holding(a)]
     war_cash = sum(int(a.get("balance") or 0) * (fx if a["flags"].get("usd") else 1) for a in cash_l)
     first = sum(int(a.get("balance") or 0) * (fx if a["flags"].get("usd") else 1)
                 for a in cash_l if a["flags"].get("physical") or a["flags"].get("offshore"))
-    tw = sum(int(a.get("balance") or 0) for a in accounts if a["layer"] == 5 and not a["flags"].get("usd")) * (1 - float(war["tw_drop"]))
-    us = sum(int(a.get("balance") or 0) for a in accounts if a["layer"] == 5 and a["flags"].get("usd")) * (1 - float(war["us_drop"])) * fx
-    need5 = m * int(war["months"]) + ear
+    tw = sum(int(a.get("balance") or 0) for a in accounts if is_holding(a) and not a["flags"].get("usd")) * (1 - float(war["tw_drop"]))
+    us = sum(int(a.get("balance") or 0) for a in accounts if is_holding(a) and a["flags"].get("usd")) * (1 - float(war["us_drop"])) * fx
+    need5 = m * months + ear
     left5 = war_cash - need5
     first_ok = first >= m
+    span = f"{months} 個月"
     if not first_ok:
         st = STATE_BAD
         vd = f"頭一個月拿得到的錢只有 {_wan(first)}，不夠 1 個月支出。先把實體現金或海外帳戶補到 {_wan(m)} 以上。"
     elif left5 >= m * 3:
-        st, vd = STATE_OK, "撐得過一年，不用賣任何股票。美元資產在台幣貶值時反而變厚。"
+        st, vd = STATE_OK, f"撐得過 {span}，不用賣任何股票。美元資產在台幣貶值時反而變厚。"
     elif left5 >= 0:
-        st, vd = STATE_WARN, f"撐得過一年，但只剩 {round(left5 / m, 1):g} 個月緩衝。美股是最後一道，跌完換台幣還有 {_wan(us)}。"
+        st, vd = STATE_WARN, f"撐得過 {span}，但只剩 {round(left5 / m, 1):g} 個月緩衝。美股是最後一道，跌完換台幣還有 {_wan(us)}。"
     elif left5 + us >= 0:
         st, vd = STATE_WARN, f"現金差 {_wan(-left5)}，要賣美股補。台股跌六成先不要動。"
     else:
@@ -273,8 +295,9 @@ def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: di
     have = layer_sums(accts)
     ear_total = sum(int(e.get("amount") or 0) for e in earmarks if not e.get("paid"))
     used = settings["monthly_need_override"] if settings["monthly_need_override"] else int(round(monthly_need_auto or 0))
-    cash3 = have[1] + have[2] + have[3]
-    cash4 = cash3 + have[4]
+    # 可撐月數的分子是**現金**：放在第 1–4 層的證券不算（同 stress_tests，見 cash_in_layers）
+    cash3 = cash_in_layers(accts, 3)
+    cash4 = cash_in_layers(accts, 4)
     rw = runway_months(cash3, ear_total, used)
     rw4 = runway_months(cash4, ear_total, used)
     targets = layer_targets(used, ear_total, settings["targets"])

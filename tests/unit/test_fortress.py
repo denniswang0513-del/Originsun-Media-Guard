@@ -209,3 +209,39 @@ def test_monthly_need_divides_by_the_months_that_have_data():
 def test_payload_says_how_many_months_the_average_came_from():
     d = build([], [], 82300, {}, "2026-09-16", need_months=3)
     assert d["monthly_need"]["sample_months"] == 3, "畫面要能誠實寫出「近 3 個月」"
+
+
+# ── /polish 階段一：壓力測試的誠實度 ────────────────────────────────────
+def test_holdings_take_the_drop_wherever_they_sit():
+    """🔴 跌幅原本只套在「第 5 層」。把一檔 ETF 標成第 4 層機會資金（下拉就能做），
+    它就變成戰爭題裡不會跌的現金 —— 1200 萬股票在台股跌六成的情境下原封不動。
+    正解看的是**這筆是不是證券**（kind），不是它被放在第幾層。"""
+    from core.fortress_logic import assign_layers, layer_sums, stress_tests
+    accts = assign_layers(
+        [{"id": "cash", "name": "活存", "kind": "bank", "balance": 500000},
+         {"id": "etf", "name": "台股 ETF", "kind": "holding", "balance": 1200000}],
+        normalize_settings({"account_layers": {"etf": 4}}))
+    t = {x["key"]: x for x in stress_tests(layer_sums(accts), accts, 80000, 0, dict(DEFAULT_WAR))}
+    war = t["war"]
+    assert war["lines"][2][1] == 500000, "第 1–4 層現金不含證券"
+    assert war["lines"][4][1] == 480000, "放在第 4 層的台股照樣跌六成"
+    assert t["market"]["lines"][0][1] == 1200000, "股票下跌題看的是全部證券，不是只有第 5 層"
+
+
+def test_war_verdict_follows_the_configured_months():
+    """假設改成 6 個月，結論就不該還寫「撐得過一年」。"""
+    from core.fortress_logic import assign_layers, layer_sums, stress_tests
+    accts = assign_layers([{"id": "c", "name": "活存", "kind": "cash", "balance": 3000000}],
+                          normalize_settings({"account_flags": {"c": {"physical": True}}}))
+    war = {**DEFAULT_WAR, "months": 6}
+    v = {x["key"]: x for x in stress_tests(layer_sums(accts), accts, 80000, 0, war)}["war"]["verdict"]
+    assert "6 個月" in v and "一年" not in v
+
+
+def test_settings_bounds():
+    """戰爭假設沒有上下限的話，months=0 會讓「撐得過」變成必然、fx=0 會讓美元資產歸零。"""
+    s = normalize_settings({"war": {"months": 0, "tw_drop": 5, "us_drop": -1, "fx": 0, "bank_freeze_weeks": -3},
+                            "monthly_need_override": -50000})
+    assert s["war"]["months"] >= 1 and 0 <= s["war"]["tw_drop"] <= 1 and 0 <= s["war"]["us_drop"] <= 1
+    assert s["war"]["fx"] >= 0.1 and s["war"]["bank_freeze_weeks"] >= 0
+    assert s["monthly_need_override"] is None, "負的必要支出＝沒填"
