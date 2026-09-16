@@ -220,7 +220,9 @@
   .ft-big .n.g, .ft-layer .g { color:var(--ok); }
   .ft-big .n.a, .ft-layer .a { color:var(--warn); }
   .ft-big .n.r, .ft-layer .r { color:var(--bad); }
-  .ft-card .num, .lg-sub .num { font-variant-numeric:tabular-nums; color:var(--ink); }
+  /* 🔴 scope 住：`.lg-sub .num` 沒前綴的話，其他六頁任何 .lg-sub 裡的 .num 都會被染色 */
+  .ft-card .num, .ft-card .lg-sub .num, #tab-fortress .num { font-variant-numeric:tabular-nums; color:var(--ink); }
+  .ft-warn { margin-bottom:10px; }
   .ft-mini { display:grid; grid-template-columns:repeat(5, 1fr); gap:5px; margin-top:12px; }
   .ft-mini .c { height:34px; background:var(--field); border:1px solid var(--line); border-radius:6px; position:relative; overflow:hidden; }
   .ft-mini .c i { position:absolute; left:0; right:0; bottom:0; background:var(--ok); opacity:.85; }
@@ -230,6 +232,7 @@
   .ft-mini-l { display:grid; grid-template-columns:repeat(5, 1fr); gap:5px; font-size:10px; color:var(--sub); text-align:center; margin-top:4px; }
   .ft-tap { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--pri); font-size:13px; margin-top:12px; }
   .ft-tap span:first-child { color:var(--sub); min-width:0; }
+  .m-err .ft-tap span:first-child, .ft-card.m-err span { color:inherit; }   /* 失敗時的紅字不要被上面那條蓋成灰的 */
   .ft-tap span:last-child { flex:none; }
   /* 五層：一層一列 */
   .ft-layer { padding:9px 0; border-bottom:1px solid var(--line); }

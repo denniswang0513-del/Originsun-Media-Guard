@@ -279,6 +279,21 @@ def stress_tests(have: dict, accounts: list, monthly_need: float, earmark_total:
     return out
 
 
+def pick_loan_dues(rows, today: str) -> list:
+    """貸款期別 [(loan_id, 'YYYY-MM-DD', amount)…] → 要進預留的那幾期 [(loan_id, due, amount, overdue)…]。
+    🔴 逾期的**全部**留著（欠三期就是三期），再加每筆貸款未來最近的一期。
+    只留「最近一期」的話，欠了三期的人看到的預留只有一期 —— 少算的方向是危險的。"""
+    out, seen_future = [], set()
+    for loan_id, due, amount in sorted(rows, key=lambda r: (str(r[1]), str(r[0]))):
+        overdue = str(due) <= str(today)
+        if overdue:
+            out.append((loan_id, due, int(amount or 0), True))
+        elif loan_id not in seen_future:
+            seen_future.add(loan_id)
+            out.append((loan_id, due, int(amount or 0), False))
+    return sorted(out, key=lambda r: (str(r[1]), str(r[0])))
+
+
 def _wan(x: float) -> str:
     """金額 → 「12.5 萬」（結論句用；數字欄位另外回原始整數）。"""
     v = round(float(x) / 10000, 1)
@@ -286,7 +301,8 @@ def _wan(x: float) -> str:
 
 
 # ── 組整份 ────────────────────────────────────────────────────────
-def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: dict, today: str = "", need_months: int = 0) -> dict:
+def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: dict, today: str = "",
+          need_months: int = 0, warnings: list = None) -> dict:
     """整頁要的東西一趟算完。
     accounts：見 assign_layers；earmarks：[{id, label, amount, due_date, source, source_ref, paid, note}]（paid 的不算進合計）；
     monthly_need_auto：近幾個月平均（router 算）；settings：normalize_settings 過的。"""
@@ -318,6 +334,7 @@ def build(accounts: list, earmarks: list, monthly_need_auto: float, settings: di
                                     for a in accts if a["layer"] == n]})
     return {
         "today": today,
+        "warnings": list(warnings or []),
         "monthly_need": {"auto": int(round(monthly_need_auto or 0)), "override": settings["monthly_need_override"],
                          "used": used, "sample_months": int(need_months or 0)},
         "cash": {"l1_3": _m(cash3), "l1_4": _m(cash4)},

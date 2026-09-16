@@ -19,7 +19,8 @@ from pydantic import BaseModel, Field
 
 from config import load_settings, save_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
-from core.fortress_logic import NEED_SAMPLE_MONTHS, build, merge_settings, monthly_need_from_rows, normalize_settings
+from core.fortress_logic import (NEED_SAMPLE_MONTHS, build, merge_settings, monthly_need_from_rows,
+                                 normalize_settings, pick_loan_dues)
 from core.ledger import require_entity
 
 try:
@@ -36,18 +37,20 @@ _TW = ZoneInfo("Asia/Taipei")
 #: 貸款下一期往前看多遠（只取每筆貸款最近的一期）
 LOAN_HORIZON_DAYS = 400
 SETTINGS_KEY = "fortress"
+#: 金額上限：欄位是 32 位元整數，超過會變成資料庫的 500 而不是好好的 422
+MAX_AMOUNT = 2_000_000_000
 
 
 class EarmarkPayload(BaseModel):
     label: str = Field(min_length=1, max_length=128)
-    amount: int = Field(ge=0)
+    amount: int = Field(ge=0, le=MAX_AMOUNT)
     due_date: Optional[str] = None      # YYYY-MM-DD
     note: Optional[str] = None
 
 
 class EarmarkPatch(BaseModel):
     label: Optional[str] = Field(default=None, max_length=128)
-    amount: Optional[int] = Field(default=None, ge=0)
+    amount: Optional[int] = Field(default=None, ge=0, le=MAX_AMOUNT)
     due_date: Optional[str] = None
     note: Optional[str] = None
     paid: Optional[bool] = None
@@ -100,8 +103,8 @@ def _save_cfg(ent: str, cfg: dict) -> None:
 
 
 # ── 撈私帳現有的數字 ─────────────────────────────────────────────
-async def _accounts(session, ent: str) -> list:
-    """銀行／現金帳戶（期初＋流水；信用卡與股東帳戶不算，卡欠款走預留）＋證券（一列一檔）。"""
+async def _accounts(session, ent: str) -> tuple:
+    """銀行／現金帳戶（期初＋流水；信用卡與股東帳戶不算，卡欠款走預留）＋證券（一列一檔）→ (帳戶, 警告)。"""
     from core.finance_logic import CARD_KIND, is_shareholder_kind
     from routers.api_finance_assets import _holding_value
     flows = dict((await session.execute(
@@ -127,11 +130,17 @@ async def _accounts(session, ent: str) -> list:
     for h in holdings:
         out.append({"id": h.id, "name": h.name or h.symbol or "持股", "kind": "holding",
                     "balance": _holding_value(h, fx), "currency": (h.currency or "TWD").upper()})
-    return out
+    # 🔴 沒有匯率時 _holding_value 會把每一筆外幣持股算成 0（api_finance_assets 對這個坑有紅字註解）。
+    #    不能無聲吞掉：第 5 層會少掉整個外幣部位，而畫面上什麼跡象都沒有。
+    warnings = []
+    n_fx = sum(1 for a in out if a["currency"] != "TWD")
+    if n_fx and not fx:
+        warnings.append(f"美元匯率還沒設定，{n_fx} 筆外幣持股現在一律算 0 —— 到資產儀表板按一次「更新報價」就會有。")
+    return out, warnings
 
 
 async def _auto_earmarks(session, ent: str, today: date) -> list:
-    """自動帶入的預留：每筆貸款最近一期未繳＋信用卡目前欠款（>0 才列）。"""
+    """自動帶入的預留：貸款該付的那幾期（逾期全留＋未來最近一期，見 pick_loan_dues）＋信用卡目前欠款（>0 才列）。"""
     out = []
     horizon = datetime(today.year, today.month, today.day, tzinfo=timezone.utc) + timedelta(days=LOAN_HORIZON_DAYS)
     rows = (await session.execute(
@@ -139,13 +148,13 @@ async def _auto_earmarks(session, ent: str, today: date) -> list:
         .join(FinanceLoan, FinanceLoan.id == FinanceLoanPayment.loan_id)
         .where(FinanceLoan.entity == ent, FinanceLoanPayment.status != "paid", FinanceLoanPayment.due_date <= horizon)
         .order_by(FinanceLoanPayment.due_date, FinanceLoanPayment.period_no))).all()
-    seen = set()
-    for p, name in rows:
-        if p.loan_id in seen:
-            continue
-        seen.add(p.loan_id)
-        out.append({"id": f"loan:{p.id}", "label": f"{name} 下一期", "amount": int(p.principal_due or 0) + int(p.interest_due or 0),
-                    "due_date": _fmt_day(p.due_date), "source": "loan", "source_ref": p.loan_id, "paid": False, "note": ""})
+    by_key = {(p.loan_id, _fmt_day(p.due_date)): (p, name) for p, name in rows}
+    dues = pick_loan_dues([(p.loan_id, _fmt_day(p.due_date), int(p.principal_due or 0) + int(p.interest_due or 0))
+                           for p, _name in rows], today.isoformat())
+    for loan_id, due, amount, overdue in dues:
+        p, name = by_key[(loan_id, due)]
+        out.append({"id": f"loan:{p.id}", "label": f"{name} {'逾期未繳' if overdue else '下一期'}", "amount": amount,
+                    "due_date": due, "source": "loan", "source_ref": loan_id, "paid": False, "note": ""})
     from routers.api_finance_card import _card_cfg, _card_numbers, _card_view
     cfg = _card_cfg(ent)
     outstanding = int(_card_view(cfg, await _card_numbers(ent, cfg)).get("outstanding") or 0)
@@ -184,10 +193,11 @@ async def _payload(ent: str) -> dict:
     today = _today_tw()
     factory = _factory_or_503()
     async with factory() as session:
-        accounts = await _accounts(session, ent)
+        accounts, warnings = await _accounts(session, ent)
         earmarks = await _auto_earmarks(session, ent, today) + await _manual_earmarks(session, ent)
         need, need_months = await _monthly_need_auto(session, ent, today)
-    out = build(accounts, earmarks, need, _load_cfg(ent), today.isoformat(), need_months=need_months)
+    out = build(accounts, earmarks, need, _load_cfg(ent), today.isoformat(),
+                need_months=need_months, warnings=warnings)
     out["entity"] = ent
     return out
 
@@ -212,7 +222,10 @@ async def add_earmark(payload: EarmarkPayload, request: Request, entity: str = "
     ent = _guard(request, entity)
     factory = _factory_or_503()
     async with factory() as session:
-        session.add(FinanceFortressEarmark(id=uuid.uuid4().hex, entity=ent, label=payload.label.strip(),
+        label = payload.label.strip()
+        if not label:
+            raise HTTPException(status_code=422, detail="項目名稱不能是空白")
+        session.add(FinanceFortressEarmark(id=uuid.uuid4().hex, entity=ent, label=label,
                                            amount=int(payload.amount), due_date=_parse_day(payload.due_date),
                                            note=(payload.note or "").strip() or None))
         await session.commit()

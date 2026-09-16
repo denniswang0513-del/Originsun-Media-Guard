@@ -245,3 +245,26 @@ def test_settings_bounds():
     assert s["war"]["months"] >= 1 and 0 <= s["war"]["tw_drop"] <= 1 and 0 <= s["war"]["us_drop"] <= 1
     assert s["war"]["fx"] >= 0.1 and s["war"]["bank_freeze_weeks"] >= 0
     assert s["monthly_need_override"] is None, "負的必要支出＝沒填"
+
+
+# ── /polish 階段一：預留的完整性與看得見的警告 ──────────────────────────
+def test_payload_warns_when_the_usd_rate_is_missing():
+    """🔴 `my_ledger.usd_twd` 沒設或是 0 時，_holding_value 會把每一筆美元持股算成 0
+    （routers/api_finance_assets.py 對這個坑有紅字註解）。堡壘不能無聲吞掉：
+    第 5 層會少掉整個外幣部位，而畫面上什麼跡象都沒有。"""
+    accts = [{"id": "us", "name": "美股", "kind": "holding", "balance": 0, "currency": "USD"}]
+    d = build(accts, [], 50000, {}, "2026-09-16", warnings=["美元匯率沒設定，美元資產現在算 0"])
+    assert d["warnings"] == ["美元匯率沒設定，美元資產現在算 0"]
+    assert build([], [], 50000, {}, "")["warnings"] == [], "沒事就是空的"
+
+
+def test_auto_earmarks_keep_the_overdue_backlog():
+    """只留「每筆貸款最近一期」的話，欠了三期的人看到的預留只有一期 —— 少算的方向是危險的。
+    規則：逾期（到期日 ≤ 今天）全部留著，再加未來最近的一期。"""
+    from core.fortress_logic import pick_loan_dues
+    rows = [("a", "2026-07-05", 32000), ("a", "2026-08-05", 32000), ("a", "2026-09-05", 32000),
+            ("a", "2026-10-05", 32000), ("a", "2026-11-05", 32000), ("b", "2026-10-20", 9000)]
+    got = [(loan, due) for loan, due, _amt, _overdue in pick_loan_dues(rows, "2026-09-16")]
+    assert got == [("a", "2026-07-05"), ("a", "2026-08-05"), ("a", "2026-09-05"), ("a", "2026-10-05"), ("b", "2026-10-20")]
+    assert [o for _l, _d, _a, o in pick_loan_dues(rows, "2026-09-16")] == [True, True, True, False, False]
+    assert pick_loan_dues([], "2026-09-16") == []

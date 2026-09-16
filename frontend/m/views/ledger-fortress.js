@@ -110,6 +110,7 @@ async function apply(host, d) {
 function draw(d) {
     const r = d.runway || {}, cash = d.cash || {}, need = d.monthly_need || {};
     return `
+        ${(d.warnings || []).map((w) => `<div class="m-err ft-warn">${esc(w)}</div>`).join('')}
         <div class="m-card">
             ${bigHtml(d)}
             <div class="lg-sub">加上第 4 層機會資金可撐 <span class="num">${esc(months(r.with_l4))} 個月</span>・可動用現金 <span class="num">${esc(wan(cash.l1_4))}</span></div>
@@ -169,7 +170,7 @@ function testHtml(t) {
 const formHtml = (p, e = {}) => `
     <div class="m-form">
         <label class="req">項目</label><input id="${p}-label" value="${esc(e.label || '')}" placeholder="例：年繳保費、綜所稅">
-        <label class="req">金額</label><input id="${p}-amount" type="number" inputmode="decimal" min="0" step="1" value="${e.amount ?? ''}">
+        <label class="req">金額</label><input id="${p}-amount" type="number" inputmode="decimal" min="0" step="1" value="${esc(e.amount ?? '')}">
         <label>到期日</label><input id="${p}-due" type="date" value="${esc(e.due_date || '')}">
         <label>備註</label><textarea id="${p}-note">${esc(e.note || '')}</textarea>
     </div>`;
@@ -177,7 +178,7 @@ const formHtml = (p, e = {}) => `
 function readForm(p) {
     const v = (id) => (document.getElementById(`${p}-${id}`) || {}).value;
     const label = String(v('label') || '').trim();
-    const amount = Number(v('amount'));
+    const amount = Math.round(Number(v('amount')));      // 欄位是整數；送小數會換來後端一句看不懂的 422
     if (!label) throw new Error('項目要填');
     if (!Number.isFinite(amount) || amount <= 0) throw new Error('金額要大於 0');
     return { label, amount, due_date: v('due') || '', note: String(v('note') || '').trim() };

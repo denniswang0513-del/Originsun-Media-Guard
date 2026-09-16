@@ -61,6 +61,7 @@ function _injectCss() {
 .ft .ft-top h2 { margin: 0; font-size: 20px; color: #eee; }
 .ft .ft-top .ft-where { color: #9ca3af; font-size: 12.5px; }
 .ft .ft-top .ft-where b { color: #e0e0e0; font-weight: 500; }
+.ft .ft-warn { background: #3a2f12; border: 1px solid #6b5a1e; color: #fbbf24; border-radius: 6px; padding: 8px 12px; margin: 0 0 12px; font-size: 13px; }
 
 .ft .ft-hero { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(0, 1.5fr); gap: 32px; align-items: end; padding: 26px 0 22px; }
 .ft .ft-lead { font-size: 16px; color: #9ca3af; font-weight: 500; }
@@ -216,6 +217,7 @@ function _render() {
     const d = _d;
     const restore = _scrollKeeper();
     _c.innerHTML = `<div class="ft">
+        ${(d.warnings || []).map((w) => `<div class="ft-warn">${esc(w)}</div>`).join('')}
         ${_hero(d)}
         <div class="ft-grid2">
             <div>${_earmarks(d)}</div>
@@ -451,7 +453,9 @@ function _accounts(d) {
 function _readLayers() {
     const rows = _c ? _c.querySelectorAll('#ft-acct-body tr[data-id]') : [];
     if (!rows.length) return null;
-    const account_layers = {}, account_flags = {};
+    // 以目前存著的那份為底：停用的帳戶不會出現在表格裡，整份取代會把它的層別與標記洗掉，
+    // 哪天重新啟用就掉回第 1 層（後端 merge_settings 是整份取代，見 core/fortress_logic）
+    const account_layers = { ..._cfg().account_layers }, account_flags = { ..._cfg().account_flags };
     rows.forEach((tr) => {
         const id = tr.dataset.id;
         account_layers[id] = parseInt(tr.querySelector('.ft-layer').value, 10) || 1;
@@ -516,7 +520,7 @@ async function _put(path, body, okMsg, btn) {
 }
 
 /** 目前存著的設定（後端正規化過的那份）。空白的輸入格以它為底，才不會被整份取代洗成預設。 */
-const _cfg = () => (_d && _d.settings) || { targets: {}, war: {} };
+const _cfg = () => (_d && _d.settings) || { targets: {}, war: {}, account_layers: {}, account_flags: {} };
 /** 輸入格的數字；空白或非數字 → fallback（不要當成 0） */
 function _num(id, fallback) {
     const el = document.getElementById(id);
