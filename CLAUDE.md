@@ -1395,6 +1395,14 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   ④ **現金 vs 證券看 kind 不看層別**（`cash_in_layers`）：證券被標到第 4 層不該變成股災裡不會跌的現金。
   ⑤ **生活支出的分母是「有資料的月份數」**，口徑 `need_category_ok`；分類樹只搬了一半，別用 `家用%` 這種前綴當全部。
   ⑥ NAS 的 settings.json 是唯讀副本（publish 會覆蓋）：會寫 settings 的路徑要進 `main_office._DROP_PREFIXES`。
+  /polish 第二輪（財富自由那批，2026-09-16）再學到四條：
+  ⑦ **`int(float(v))` 遇到 Infinity 丟的是 OverflowError**，`except (TypeError, ValueError)` 接不到 —— 一個 PUT 就 500。
+     設定的數字一律走 `core.fortress_logic._num()`／`_clamped()`，不要自己寫 try/except（11 處轉型已經收斂到那裡）。
+  ⑧ **輸入框的顯示值就是下一次送出的值**：百分比只留一位小數的話，3.25% 存第二次會變成 3.3%。用 `fmtPctInput()`。
+  ⑨ **`tests[].lines` 的第三欄是單位**（twd／months／years／pct／year_or_never）：新增單位要**兩個前端一起加**，
+     不然會靜靜掉回金額格式（長照的「撐得了 29.5 年」上線時就是印成「29.5 萬」，沒有測試釘）。
+  ⑩ **「模擬到 90 歲用不完」是算術上必然的事**（固定報酬減通膨大於提領率就一定算不完），不能寫成一項通過的檢驗；
+     真正會咬人的是報酬順序，所以另外算一條「前 10 年報酬 0%」。提領一律**年初先提**（同 Bengen），先長再提會高估 6–7%。
 - **`/api/settings/load` 是匿名端點，機密分兩層**（2026-09-08 稽核）：`_SECRET_KEYS`／`_SECRET_SUBKEYS`（簽得出 admin 的：jwt_secret、database_url、
   google secret）連管理員也不回；`_ADMIN_ONLY_SUBKEYS`（工時同步 token、四個 webhook）只回給管理員 token（設定視窗要顯示才能編）。新增機密欄位要進其中一層。
   內部重啟端點（`/internal/restart`、`/system/restart`）的金鑰字串隨 OTA 包公開，安全靠 `core.auth.via_cloudflare` 把公網那條路擋掉——**別**把金鑰換成 `_get_secret()`，機隊各自的 jwt_secret 不共用，master 會推不動 agent。
