@@ -99,7 +99,7 @@ def _guard(request: Request, entity: str = "", level: str = "view") -> str:
     return require_entity(request, entity, level=level)
 
 
-async def _balances_by_account(session, entity=None, until=None, account_id=None) -> dict:
+async def _balances_by_account(session, entity=None, until=None, account_id=None, accounts=None) -> dict:
     """每個帳戶的餘額 {bank_account_id: {"balance", "unfilled"}} —— 🔴 全系統算帳戶餘額只走這一支
     （帳戶清單、對帳、資產儀表板、堡壘、對帳單解析、三表的月底餘額都是它或它的純函式版）。
 
@@ -107,19 +107,22 @@ async def _balances_by_account(session, entity=None, until=None, account_id=None
     規則本身在 core.finance_logic.derive_balance（登記過餘額就從登記起算，否則期初＋流水）。
     until：只算 entry_date < until 的流水（對帳的月底、對帳單的期初）；基準日不早於 until 的帳戶那時還沒登記 → 老公式。
     entity／account_id 各自縮小範圍（帳戶清單只要自己那本，對帳只要一個帳戶）。
-    回的 dict 涵蓋範圍內**每一個**帳戶（沒流水的也有一筆），呼叫端不必再 .get(id, 0)。"""
-    from sqlalchemy import case, select, func as safunc
+    回的 dict 涵蓋範圍內**每一個**帳戶（沒流水的也有一筆），呼叫端不必再 .get(id, 0)。
+    accounts：呼叫端手上已經有的 BankAccount 列（清單頁、對帳、資產、堡壘都先 select 過一次）→ 傳進來就不再查一次。"""
+    from sqlalchemy import case, or_, select, func as safunc
     from db.models import BankAccount, CrmCashEntry
-    aq = select(BankAccount)
-    if entity is not None:
-        aq = aq.where(BankAccount.entity == entity)
-    if account_id is not None:
-        aq = aq.where(BankAccount.id == account_id)
-    accts = (await session.execute(aq)).scalars().all()
+    if accounts is None:
+        aq = select(BankAccount)
+        if entity is not None:
+            aq = aq.where(BankAccount.entity == entity)
+        if account_id is not None:
+            aq = aq.where(BankAccount.id == account_id)
+        accounts = (await session.execute(aq)).scalars().all()
     flow = (safunc.coalesce(CrmCashEntry.deposit, 0) - safunc.coalesce(CrmCashEntry.expense, 0)
             - safunc.coalesce(CrmCashEntry.bank_fee, 0) - safunc.coalesce(CrmCashEntry.claim, 0))
-    after = case((BankAccount.anchor_date.is_(None), flow), (CrmCashEntry.entry_date.is_(None), flow),
-                 (CrmCashEntry.entry_date > BankAccount.anchor_date, flow), else_=0)
+    # 沒登記／沒日期／基準日之後 → 算「之後」；其餘 0
+    after = case((or_(BankAccount.anchor_date.is_(None), CrmCashEntry.entry_date.is_(None),
+                      CrmCashEntry.entry_date > BankAccount.anchor_date), flow), else_=0)
     q = (select(CrmCashEntry.bank_account_id, safunc.coalesce(safunc.sum(flow), 0),
                 safunc.coalesce(safunc.sum(after), 0))
          .join(BankAccount, BankAccount.id == CrmCashEntry.bank_account_id))
@@ -133,7 +136,7 @@ async def _balances_by_account(session, entity=None, until=None, account_id=None
             for r in (await session.execute(q.group_by(CrmCashEntry.bank_account_id))).all()}
     return {a.id: derive_balance(a.opening_balance, a.anchor_balance, a.anchor_date,
                                  *sums.get(a.id, (0, 0)), until=until)
-            for a in accts}
+            for a in accounts}
 
 
 async def _unassigned_count(session, entity: str = "parent") -> int:
@@ -606,7 +609,7 @@ async def list_bank_accounts(request: Request, with_balances: int = 1,
         rows = (await session.execute(
             select(BankAccount).where(BankAccount.entity == ent)
             .order_by(BankAccount.sort_order, BankAccount.created_at))).scalars().all()
-        bal = await _balances_by_account(session, entity=ent) if with_balances else {}
+        bal = await _balances_by_account(session, entity=ent, accounts=rows) if with_balances else {}
         unassigned = await _unassigned_count(session, ent) if with_balances else 0
     items = []
     for b in rows:
@@ -729,7 +732,7 @@ async def _system_balance(session, acct, month: str) -> int:
     """帳戶月底系統餘額（期初 + 月底前流水；登記過餘額且登記日在月底前就從登記起算）。
     餘額核對（create_reconciliation）與工作台共用 — 對帳的核心數字只算一種。"""
     _start, end = _month_window(month)
-    return (await _balances_by_account(session, until=end, account_id=acct.id))[acct.id]["balance"]
+    return (await _balances_by_account(session, until=end, account_id=acct.id, accounts=[acct]))[acct.id]["balance"]
 
 
 def _recon_dict(r) -> dict:

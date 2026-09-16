@@ -148,7 +148,7 @@ def test_holdings_can_be_registered_share_by_share():
     """owner「登記的還有證券的股數等」：GET 每家券商帶 holdings[]，PUT 收 holdings[]{id, shares, last_price, manual_value, cost_total}，
     先套持股再算未拆明細；給了股數或現價且算得出股數 × 現價，就清掉手填市值。"""
     src = repo_src("routers/api_balance_register.py")
-    assert 'g["holdings"].append(' in src and '"value_twd": _holding_value(h, fx)' in src
+    assert 'g["holdings"].append(' in src and "value = _holding_value(h, fx)" in src and '"value_twd": value' in src
     assert "for hl in payload.holdings:" in src
     assert src.index("for hl in payload.holdings:") < src.index("for br in brokers:"), "先套持股再算未拆明細（brokers 是去重後的清單）"
     assert "h.manual_value = None" in src and "h.price_at = datetime.now()" in src
@@ -203,7 +203,8 @@ def test_day_key_uses_local_day_for_aware_datetimes():
 def test_report_month_window_is_naive_like_the_cash_entries():
     """BUG-5：月報本月視窗不能用 UTC-aware 邊界（明細存的是 naive 本地 00:00，1 日的會掉到上個月）。"""
     from tests.unit._srcscan import func_body
-    w = func_body(repo_src("routers/api_monthly_report.py"), "def _month_window(month: str) -> tuple:")
+    assert "from routers.api_finance import _guard, _month_window" in repo_src("routers/api_monthly_report.py"), "共用 api_finance 那支（naive）"
+    w = func_body(repo_src("routers/api_finance.py"), "def _month_window(month: str) -> tuple:")
     assert "timezone" not in w and 'strptime(month + "-01", "%Y-%m-%d")' in w
 
 

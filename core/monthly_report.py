@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+from core.fortress_logic import RUNWAY_GREEN, tone as runway_tone
+
 #: 建議的等級順序（畫面照這個排；bad 最前）
 LEVEL_ORDER = {"bad": 0, "warn": 1, "info": 2, "ok": 3}
 #: 集中度門檻：單一持股佔證券現值多少算「偏高」／「高」
@@ -20,7 +22,8 @@ CONCENTRATION_BAD = 0.35
 BROAD_FUND_WORDS = ("vanguard", "ishares", "spdr", "etf", "all-world", "total ", "world", "s&p", "0050", "006208", "vti", "vwra", "vt ",
                     "台灣50", "臺灣50", "台灣 50", "台50", "指數", "高股息", "定存", "活存", "現金", "外幣", "保險", "壽", "未拆明細", "複委託")
 #: 這些指數型基金裡台積電佔一半左右（2024 起 >50%，這裡用約數）：最大的單一股票是台積電時，穿透後的曝險要提一句
-TSMC_LOOKTHROUGH = {"0050": 0.55, "006208": 0.55, "台灣50": 0.55, "臺灣50": 0.55, "台50": 0.55}
+TSMC_LOOKTHROUGH_NAMES = ("0050", "006208", "台灣50", "臺灣50", "台50")
+TSMC_LOOKTHROUGH_SHARE = 0.55
 
 
 def is_broad_fund(name: str) -> bool:
@@ -34,8 +37,6 @@ RECEIVABLE_MONTHS = 2
 CARD_MONTHS = 1.0
 #: |還沒補的明細| 小於這個就當補齊（幾十元的零頭不值得叫）
 UNFILLED_IGNORE = 100
-#: 可撐月數的顏色門檻，跟堡壘同一套（core.fortress_logic.RUNWAY_GREEN／RUNWAY_AMBER）
-RUNWAY_GREEN, RUNWAY_AMBER = 6, 3
 
 
 def _open_unfilled(a: dict) -> bool:
@@ -44,10 +45,14 @@ def _open_unfilled(a: dict) -> bool:
     return u is not None and abs(int(u)) >= UNFILLED_IGNORE
 
 
+def _is_idle(a: dict) -> bool:
+    """閒置帳戶：餘額 0 又從沒登記過（玉山、樂天那種）—— 不算「沒登記」、也不算進帳戶總數。"""
+    return int(a.get("balance") or 0) == 0 and a.get("unfilled") is None
+
+
 def _unregistered(accounts: list) -> list:
-    """這個月還沒登記的帳戶；餘額 0 又從沒登記過的閒置帳戶不算（玉山、樂天那種）。"""
-    return [a for a in accounts if not a.get("registered_this_month")
-            and not (int(a.get("balance") or 0) == 0 and a.get("unfilled") is None)]
+    """這個月還沒登記的帳戶（閒置的不算）。"""
+    return [a for a in accounts if not a.get("registered_this_month") and not _is_idle(a)]
 #: 必要支出的樣本月數低於這個就標「樣本少」
 NEED_SAMPLE_OK = 6
 #: 走勢最多帶幾個快照點
@@ -126,8 +131,7 @@ def accounts_block(register: dict, prev: Optional[dict], month: str) -> list:
     for a in register.get("accounts") or []:
         p = prev_by.get(a["name"])
         pv = _i(p["balance"]) if p and p.get("balance") is not None else None
-        out.append({"id": a.get("id"), "name": a["name"], "kind": a.get("acct_kind") or "bank",
-                    "balance": _i(a.get("balance")), "prev": pv,
+        out.append({"name": a["name"], "balance": _i(a.get("balance")), "prev": pv,
                     "delta": (_i(a.get("balance")) - pv) if pv is not None else None,
                     "anchor_date": a.get("anchor_date"), "unfilled": a.get("unfilled"),
                     "registered_this_month": bool(a.get("anchor_date") and str(a["anchor_date"]).startswith(month))})
@@ -158,15 +162,14 @@ def concentration(fortress: dict) -> dict:
     stocks = [(n, v) for n, v in hs if not is_broad_fund(n)]
     top = stocks[0] if stocks else ("", 0)
     funds_pct = _pct(sum(v for n, v in hs if is_broad_fund(n)), total)
-    # 穿透：台積電直接持有＋台灣50 類基金裡的那一半（約數）
+    # 穿透：台積電直接持有＋台灣50 類基金裡的那一半（約數；一檔名字對到兩個關鍵字也只算一次）
     lookthrough = None
     if "台積電" in top[0]:
-        via = sum(v * w for n, v in hs for k, w in TSMC_LOOKTHROUGH.items() if k in n.lower())
+        via = sum(v for n, v in hs if any(k in n.lower() for k in TSMC_LOOKTHROUGH_NAMES)) * TSMC_LOOKTHROUGH_SHARE
         if via > 0:
             lookthrough = {"value": int(round(top[1] + via)), "pct": _pct(top[1] + via, total)}
     return {"total": total, "top_name": top[0], "top_value": top[1], "top_pct": _pct(top[1], total) if stocks else None,
-            "top3_pct": _pct(sum(v for _, v in stocks[:3]), total) if stocks else None,
-            "top3": [{"name": n, "value": v} for n, v in stocks[:3]], "funds_pct": funds_pct,
+            "top3_pct": _pct(sum(v for _, v in stocks[:3]), total) if stocks else None, "funds_pct": funds_pct,
             "biggest_name": hs[0][0] if hs else "", "biggest_pct": _pct(hs[0][1], total) if hs else None,
             "lookthrough": lookthrough}
 
@@ -181,10 +184,10 @@ def fortress_block(fortress: dict) -> dict:
                       "gap": L.get("gap"), "pct": L.get("pct")} for L in fortress.get("layers") or []], key=lambda x: -(x["no"] or 0))
     r = fortress.get("runway") or {}
     need = fortress.get("monthly_need") or {}
-    return {"runway": r.get("months"), "runway_with_l4": r.get("with_l4"), "tone": r.get("tone"),
+    return {"runway": r.get("months"), "tone": r.get("tone"),
             "need": _i(need.get("used")), "need_sample_months": int(need.get("sample_months") or 0),
             "need_override": need.get("override") is not None,
-            "tests": tests, "counts": cnt, "layers": layers, "earmark_total": _i(fortress.get("earmark_total"))}
+            "tests": tests, "counts": cnt, "layers": layers}
 
 
 def ladder_fire_block(fortress: dict) -> dict:
@@ -193,21 +196,20 @@ def ladder_fire_block(fortress: dict) -> dict:
     pj = fortress.get("projection") or {}
     y10 = next((r for r in pj.get("rows") or [] if int(r.get("year") or 0) == 10), None)
     rungs = lad.get("rungs") or []
-    nxt = next((r for r in rungs if int(r.get("no") or r.get("rung") or 0) == int(lad.get("rung") or 0) + 1), None)
-    return {"rung": lad.get("rung"), "rung_name": lad.get("name"), "net_worth": _i(lad.get("net_worth")),
+    nxt = next((r for r in rungs if int(r.get("no") or 0) == int(lad.get("rung") or 0) + 1), None)
+    return {"rung": lad.get("rung"), "rung_name": lad.get("name"),
             "to_next": lad.get("to_next"), "next_name": (nxt or {}).get("name"),
             "fire_allowed": _i(fire.get("allowed")), "fire_spend": _i(fire.get("spend")),
-            "fire_ratio33": fire.get("ratio33"), "fire_ratio25": fire.get("ratio25"),
+            "fire_ratio33": fire.get("ratio33"),
             "fire_rate": fire.get("current_rate"), "fire_state": fire.get("state"), "fire_pretax": bool(fire.get("pretax")),
             "y10_nominal": _i(y10.get("nominal")) if y10 else None, "y10_real": _i(y10.get("real")) if y10 else None,
             "growth_rate": pj.get("rate"), "inflation": pj.get("inflation")}
 
 
 # ── 體檢（四個面向）───────────────────────────────────────────────────
-def health_block(ft: dict, conc: dict, accounts: list, brokers: list, flow: dict) -> list:
+def health_block(ft: dict, conc: dict, accounts: list, flow: dict) -> list:
     runway = ft.get("runway")
-    # 跟堡壘同一套顏色（那頁綠的話這裡不能寫「普通」）
-    tone = ft.get("tone") or ("na" if runway is None else ("g" if runway >= RUNWAY_GREEN else ("a" if runway >= RUNWAY_AMBER else "r")))
+    tone = ft.get("tone") or runway_tone(runway)      # 跟堡壘同一套顏色（那頁綠的話這裡不能寫「普通」）
     if runway is None or tone == "na":
         liq = ("na", "算不出來", "必要支出還沒有資料")
     elif tone == "g":
@@ -236,7 +238,7 @@ def health_block(ft: dict, conc: dict, accounts: list, brokers: list, flow: dict
         con = ("ok", "分散", f"最大的單一股票 {conc['top_name']} 佔 {tp * 100:.0f}%")
     unfilled = [a for a in accounts if _open_unfilled(a)]
     unreg = _unregistered(accounts)
-    active = [a for a in accounts if not (int(a.get("balance") or 0) == 0 and a.get("unfilled") is None)]
+    active = [a for a in accounts if not _is_idle(a)]
     if not flow.get("has_entries") and unreg and len(unreg) == len(active):
         rec = ("bad", "缺", "本月沒有收支明細，也沒登記餘額")
     elif unfilled or not flow.get("has_entries"):
@@ -245,10 +247,9 @@ def health_block(ft: dict, conc: dict, accounts: list, brokers: list, flow: dict
         rec = ("warn", "不全", f"{len(unreg)} 個帳戶這個月還沒登記")
     else:
         rec = ("ok", "齊", "明細補齊、帳戶都登記了")
-    return [{"key": "liquidity", "label": "流動性", "state": liq[0], "grade": liq[1], "text": liq[2]},
-            {"key": "resilience", "label": "韌性（極端情境）", "state": res[0], "grade": res[1], "text": res[2]},
-            {"key": "concentration", "label": "集中度", "state": con[0], "grade": con[1], "text": con[2]},
-            {"key": "records", "label": "收支紀錄", "state": rec[0], "grade": rec[1], "text": rec[2]}]
+    return [{"key": k, "label": label, "state": s, "grade": g, "text": t}
+            for k, label, (s, g, t) in (("liquidity", "流動性", liq), ("resilience", "韌性（極端情境）", res),
+                                        ("concentration", "集中度", con), ("records", "收支紀錄", rec))]
 
 
 # ── 建議（規則）─────────────────────────────────────────────────────
@@ -268,8 +269,7 @@ def _rule_war(fortress: dict, ft: dict):
 
 
 def _rule_layers(ft: dict):
-    by = {L["no"]: L for L in ft["layers"]}
-    l1 = by.get(1)
+    l1 = next((L for L in ft["layers"] if L["no"] == 1), None)
     if not l1:
         return None
     gaps = [(L["no"], L["name"], _i(L["gap"])) for L in ft["layers"] if L["no"] in (2, 3, 4) and _i(L["gap"]) > 0]
@@ -465,7 +465,7 @@ def build_report(month: str, basis_date: str, fortress: dict, register: dict, bu
     conc = concentration(fortress)
     ft = fortress_block(fortress)
     lf = ladder_fire_block(fortress)
-    health = health_block(ft, conc, accounts, brokers, flow)
+    health = health_block(ft, conc, accounts, flow)
     advice = advice_block(fortress, ft, conc, accounts, brokers, flow, totals, lf, register)
     trend = [{"date": str(s.get("date"))[:10], "total": _i(s.get("total"))} for s in snapshots][-TREND_POINTS:]
     trend.append({"date": basis_date, "total": totals["assets"], "now": True})
@@ -475,5 +475,4 @@ def build_report(month: str, basis_date: str, fortress: dict, register: dict, bu
         "flow": flow, "trend": trend, "accounts": accounts, "brokers": brokers, "concentration": conc,
         "fortress": ft, "ladder_fire": lf, "health": health, "advice": advice,
         "todo": todo_block(accounts, brokers, advice),
-        "card_outstanding": _i(register.get("card_outstanding")),
     }

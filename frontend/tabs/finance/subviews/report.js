@@ -14,7 +14,6 @@ let _month = '';
 let _r = null;
 
 const CSS_ID = 'report-css';
-const LEVEL_LABEL = { bad: '要處理', warn: '注意', info: '提醒', ok: '做得好' };
 
 function _injectCss() {
     if (document.getElementById(CSS_ID)) return;
@@ -224,7 +223,8 @@ _fr.regen = async (btn) => {
     btn.disabled = true;
     try {
         const d = await finFetchMine('/monthly-reports/generate', { method: 'POST', body: JSON.stringify({}) });
-        _months = (await finFetchMine('/monthly-reports')).items || [];
+        // 只會產生本月，本月一定是最新的一份：清單沒有就往前插，不用再抓一次清單
+        if (!_months.some((m) => m.month === d.month)) _months.unshift({ month: d.month });
         _month = d.month;
         _r = d.report;
         if (!_isCurrent()) return;

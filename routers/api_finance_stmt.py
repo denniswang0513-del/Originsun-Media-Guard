@@ -589,7 +589,7 @@ async def _balance_before(session, acct, first_date: str):
     except Exception:
         return None
     # 餘額的定義只有 _balances_by_account 那一份（期初＋流水；登記過餘額且登記日在期初前就從登記起算）
-    return (await _balances_by_account(session, until=first_day, account_id=acct.id))[acct.id]["balance"]
+    return (await _balances_by_account(session, until=first_day, account_id=acct.id, accounts=[acct]))[acct.id]["balance"]
 
 
 async def _build_statement_preview(session, acct, ent, text):

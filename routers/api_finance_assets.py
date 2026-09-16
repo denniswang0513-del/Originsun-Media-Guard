@@ -69,10 +69,10 @@ async def _auto_buckets(session, ent: str, usd_twd: float) -> dict:
 
     # 銀行現金 = Σ各帳戶餘額（規則只有 api_finance._balances_by_account 那一份：期初＋流水，登記過餘額就從登記起算）
     from routers.api_finance import _balances_by_account
-    bal = await _balances_by_account(session, entity=ent)
     accts = (await session.execute(
         select(BankAccount).where(BankAccount.entity == ent,
                                   BankAccount.active.is_(True)))).scalars().all()
+    bal = await _balances_by_account(session, entity=ent, accounts=accts)
     bank_cash = sum(bal[a.id]["balance"] for a in accts if (a.acct_kind or "bank") == "bank")
 
     receivable = int((await session.execute(

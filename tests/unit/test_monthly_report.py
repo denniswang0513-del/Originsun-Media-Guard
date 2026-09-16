@@ -126,7 +126,7 @@ def test_health_and_todo_reflect_records():
     assert any("台新" in t and "還沒登記" in t for t in r["todo"])
     assert any("富邦證券 5 萬" in t for t in r["todo"])
     # BUG-10：流動性跟堡壘同一套顏色（3 個月是黃不是紅）
-    fresh = health_block({"runway": 3, "tests": [{"key": "war", "state": "ok"}]}, {"top_pct": None, "total": 0}, [], [], {"has_entries": True})
+    fresh = health_block({"runway": 3, "tests": [{"key": "war", "state": "ok"}]}, {"top_pct": None, "total": 0}, [], {"has_entries": True})
     assert fresh[0]["state"] == "warn" and fresh[3]["state"] == "ok"
 
 
@@ -141,7 +141,7 @@ def test_table_router_and_trigger_are_wired():
     assert '@router.get("/monthly-reports")' in router and '@router.get("/monthly-reports/{month}")' in router
     assert '@router.post("/monthly-reports/generate")' in router
     quiet = func_body(router, "async def generate_quietly(")
-    assert "except Exception" in quiet and "log.warning" in quiet, "月報產不出來只記 log"
+    assert "except Exception" in quiet and "log.exception" in quiet, "月報產不出來只記 log（帶 traceback）"
     reg = func_body(repo_src("routers/api_balance_register.py"), "async def put_balance_register(")
     assert "generate_quietly(ent, _username(request))" in reg and 'out["report_month"]' in reg, "登記儲存後自動產生"
     core = repo_src("core/monthly_report.py")
@@ -182,7 +182,7 @@ def test_desktop_register_keeps_report_banner_when_card_is_saved_too():
     from tests.unit._srcscan import js_func_body
     body = js_func_body(js_code_only(repo_src("frontend/tabs/finance/subviews/register.js")), "_rg.saveAll = async (btn) => {")
     assert "const reportMonth = d && d.report_month;" in body and "if (reportMonth) _reportBanner(reportMonth);" in body
-    assert body.index("const reportMonth") < body.index("if (card !== null)"), "要在卡那段之前留下來"
+    assert body.index("if (card !== null)") < body.index("'/balance-register', { method: 'PUT'"), "卡先送，登記那次的回應才看得到新卡費"
 
 
 def test_month_picker_ignores_stale_responses_on_both_pages():

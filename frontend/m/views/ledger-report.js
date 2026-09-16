@@ -6,7 +6,8 @@
  * 數字、體檢、建議全部後端算好（core/monthly_report.py），這頁只畫。頂端可以切月份、可以「重新產生本月」。
  */
 import { mfetch, money, toast, esc } from '../shell.js';
-import { skeleton, errBox, withBusy } from '../ui.js';
+import { skeleton, errBox, withBusy, pill } from '../ui.js';
+import { wan } from './ledger-fortress.js';
 
 export const REPORT_API = '/api/v1/finance/monthly-reports';
 const Q = '?entity=mine';
@@ -15,18 +16,11 @@ let _months = [];
 let _month = '';
 let _r = null;
 
-const wan = (n) => {
-    if (n === null || n === undefined || !Number.isFinite(Number(n))) return '—';
-    const a = Math.abs(Number(n));
-    const s = a >= 1e8 ? `${(a / 1e8).toFixed(2).replace(/\.?0+$/, '')} 億` : `${(a / 1e4).toFixed(1).replace(/\.0$/, '')} 萬`;
-    return (Number(n) < 0 ? '−' : '') + s;
-};
 const delta = (n) => {
     if (n === null || n === undefined) return '<span style="color:var(--sub)">—</span>';
     const cls = n > 0 ? 'in' : (n < 0 ? 'out' : '');
     return `<span class="amt ${cls}">${n > 0 ? '+' : ''}${money(n)}</span>`;
 };
-const pill = (state, text) => `<span class="pill ${esc(state === 'na' ? '' : state)}">${esc(text)}</span>`;
 
 export async function render(host, { first }) {
     if (first) {
@@ -69,7 +63,7 @@ async function regen(host, btn) {
     await withBusy(btn, async () => {
         try {
             const d = await mfetch(`${REPORT_API}/generate${Q}`, { method: 'POST', body: {} });   // mfetch 自己 stringify
-            _months = (await mfetch(REPORT_API + Q)).items || [];
+            if (!_months.some((m) => m.month === d.month)) _months.unshift({ month: d.month });   // 只會產生本月＝最新
             _month = d.month;
             _r = d.report;
             host.innerHTML = draw();
@@ -136,7 +130,7 @@ function draw() {
         ${row('10 年後資產', wan(lf.y10_nominal), `實質購買力 ${wan(lf.y10_real)}`)}
     </div>
     <div class="m-h">財務體檢</div>
-    <div class="m-card">${(r.health || []).map((h) => row(h.label, pill(h.state, h.grade), h.text)).join('')}</div>
+    <div class="m-card">${(r.health || []).map((h) => row(h.label, pill(h.grade, h.state === 'na' ? '' : h.state), h.text)).join('')}</div>
     <div class="m-h">財務建議</div>
     ${(r.advice || []).map((a) => `<div class="m-card mr-a mr-${esc(a.level)}"><div class="t"><span class="name">${a.no}. ${esc(a.title)}</span></div>
         ${a.text ? `<div class="lg-sub" style="margin-top:4px">${esc(a.text)}</div>` : ''}${a.how ? `<div class="lg-sub mr-how">做法：${esc(a.how)}</div>` : ''}</div>`).join('') || '<div class="m-empty">沒有建議</div>'}

@@ -39,17 +39,17 @@ def _plug_of(holdings, broker):
     return next((h for h in holdings if (h.broker or "") == broker and _is_plug(h)), None)
 
 
-async def _register_payload(session, ent: str) -> dict:
-    """GET 的整包：銀行／現金帳戶（帳上算的、上次登記、未補明細）＋證券戶（分券商）＋信用卡未繳。"""
+async def _register_payload(session, ent: str, card=None) -> dict:
+    """GET 的整包：銀行／現金帳戶（帳上算的、上次登記、未補明細）＋證券戶（分券商）＋信用卡未繳。
+    card：呼叫端已經算過的信用卡未繳（_card_outstanding 會掃整張收支表，一個請求只掃一次）。"""
     from sqlalchemy import select
     from db.models import BankAccount, FinanceHolding
     from routers.api_finance_assets import _holding_value
-    from routers.api_fortress import _card_outstanding
-    from routers.crm._shared import _fmt_day
+    from routers.api_fortress import _card_outstanding, _today_tw
     rows = (await session.execute(
         select(BankAccount).where(BankAccount.entity == ent, BankAccount.active.is_(True))
         .order_by(BankAccount.sort_order, BankAccount.created_at))).scalars().all()
-    bal = await _balances_by_account(session, entity=ent)
+    bal = await _balances_by_account(session, entity=ent, accounts=rows)
     accounts = []
     for b in rows:
         if (b.acct_kind or "bank") not in REGISTER_KINDS:
@@ -58,9 +58,7 @@ async def _register_payload(session, ent: str) -> dict:
         r = bal[b.id]
         accounts.append({"id": b.id, "name": b.name, "acct_kind": d["acct_kind"], "bank_name": d["bank_name"],
                          "balance": r["balance"], "unfilled": r["unfilled"],
-                         "anchor_balance": d["anchor_balance"], "anchor_date": d["anchor_date"],
-                         # 帳上算到基準日的數字（登記 − 未補）；沒登記就是現在帳上算的
-                         "booked": (r["balance"] if r["unfilled"] is None else int(b.anchor_balance) - r["unfilled"])})
+                         "anchor_balance": d["anchor_balance"], "anchor_date": d["anchor_date"]})
     fx = float((load_settings().get("my_ledger") or {}).get("usd_twd") or 0)
     holdings = (await session.execute(
         select(FinanceHolding).where(FinanceHolding.entity == ent, FinanceHolding.active.is_(True))
@@ -68,24 +66,24 @@ async def _register_payload(session, ent: str) -> dict:
     brokers = {}
     for h in holdings:
         g = brokers.setdefault(h.broker or "", {"broker": h.broker or "", "count": 0, "detail": 0, "plug": 0,
-                                                 "plug_note": "", "total": 0, "holdings": []})
+                                                 "total": 0, "holdings": []})
         if _is_plug(h):
             g["plug"] = int(h.manual_value or 0)
-            g["plug_note"] = h.note or ""
         else:
+            value = _holding_value(h, fx)
             g["count"] += 1
-            g["detail"] += _holding_value(h, fx)
+            g["detail"] += value
             # 逐檔（owner「登記的還有證券的股數等」）：股數／現價／手填市值／成本都給，畫面才知道哪一格該填
             g["holdings"].append({"id": h.id, "symbol": h.symbol or "", "name": h.name or h.symbol or "持股",
-                                  "currency": (h.currency or "TWD").upper(), "quote_symbol": h.quote_symbol or "",
-                                  "shares": h.shares, "last_price": h.last_price, "price_at": _fmt_day(h.price_at),
+                                  "currency": (h.currency or "TWD").upper(),
+                                  "shares": h.shares, "last_price": h.last_price,
                                   "manual_value": h.manual_value, "cost_total": h.cost_total,
-                                  "value_twd": _holding_value(h, fx)})
+                                  "value_twd": value})
     for g in brokers.values():
         g["total"] = g["detail"] + g["plug"]
-    return {"date": datetime.now().strftime("%Y-%m-%d"), "accounts": accounts,
+    return {"date": _today_tw().isoformat(), "accounts": accounts,
             "brokers": sorted(brokers.values(), key=lambda g: -g["total"]),
-            "card_outstanding": await _card_outstanding(ent), "usd_twd": fx, "entity": ent}
+            "card_outstanding": int(card) if card is not None else await _card_outstanding(ent), "usd_twd": fx}
 
 
 @router.get("/balance-register")
@@ -127,17 +125,18 @@ async def put_balance_register(payload: BalanceRegisterPayload, request: Request
                 b.updated_at = datetime.now()
             await session.flush()
             # 歷史：每次登記留一筆對帳紀錄（system_balance＝帳上算到基準日的數字、diff＝還沒補的明細）
-            bal = await _balances_by_account(session, entity=ent)
+            bal = await _balances_by_account(session, entity=ent, accounts=list(rows.values()))
             month = day.strftime("%Y-%m")        # 不用 date[:7]：'2026-9-7' 會切成 '2026-9-'，對帳月份永遠對不上
+            existing = {r.bank_account_id: r for r in (await session.execute(
+                select(BankReconciliation).where(BankReconciliation.bank_account_id.in_(ids),
+                                                 BankReconciliation.month == month))).scalars().all()}
             for ln in payload.accounts:
                 if ln.balance is None:
                     continue
                 r = bal[ln.id]
                 system = int(ln.balance) - int(r["unfilled"] or 0)
                 rd = reconciliation_diff(system, int(ln.balance))
-                row = (await session.execute(
-                    select(BankReconciliation).where(BankReconciliation.bank_account_id == ln.id,
-                                                     BankReconciliation.month == month))).scalar_one_or_none()
+                row = existing.get(ln.id)
                 if not row:
                     row = BankReconciliation(id=uuid.uuid4().hex, bank_account_id=ln.id, month=month,
                                              statement_balance=0, system_balance=0, diff=0, status="diff")
@@ -167,13 +166,11 @@ async def put_balance_register(payload: BalanceRegisterPayload, request: Request
                         raise HTTPException(status_code=422, detail=f"{h.name} 的 {k} 不能是負數")
                 if "manual_value" in data:
                     h.manual_value = data["manual_value"]
-                if data.get("shares") is not None:
-                    h.shares = float(data["shares"])
+                for k in ("shares", "last_price", "cost_total"):
+                    if data.get(k) is not None:
+                        setattr(h, k, float(data[k]))
                 if data.get("last_price") is not None:
-                    h.last_price = float(data["last_price"])
                     h.price_at = datetime.now()
-                if data.get("cost_total") is not None:
-                    h.cost_total = float(data["cost_total"])
                 # 給了股數或現價、而且算得出股數 × 現價 → 手填市值讓位（不然登記了股數市值卻不動）
                 if "manual_value" not in data and (data.get("shares") is not None or data.get("last_price") is not None) \
                         and h.shares and h.last_price:

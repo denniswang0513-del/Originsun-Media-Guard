@@ -13,18 +13,18 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from pydantic import BaseModel
 
-from config import load_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
-from core.monthly_report import build_report
-from routers.api_finance import _guard
+from core.monthly_report import TREND_POINTS, build_report
+from routers.api_finance import _guard, _month_window
 from routers.crm._shared import _username, _validate_month
 
 log = logging.getLogger(__name__)
@@ -33,14 +33,6 @@ router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
 
 class GeneratePayload(BaseModel):
     month: Optional[str] = None      # 'YYYY-MM'；空＝本月
-
-
-def _month_window(month: str) -> tuple:
-    """'YYYY-MM' → (月初, 次月初) **naive** datetime —— 收支寫入端（_parse_day）存的就是 naive 本地 00:00，
-    邊界也要 naive 才對得齊；用 UTC-aware 的話每月 1 日的明細會掉到上個月（同 api_finance._month_window）。"""
-    lo = datetime.strptime(month + "-01", "%Y-%m-%d")
-    hi = (lo + timedelta(days=32)).replace(day=1)
-    return lo, hi
 
 
 def _auto_total(auto, total) -> int:
@@ -75,12 +67,14 @@ async def generate_report(ent: str, username: str, month: Optional[str] = None) 
     if month != this_month:
         raise HTTPException(status_code=422, detail=f"月報只能用現在的數字產生本月（{this_month}）；{month} 以當時登記時產生的那份為準")
     basis = today.isoformat()
-    fortress = await fortress_payload(ent)
-    fx = float((load_settings().get("my_ledger") or {}).get("usd_twd") or 0)
+    # 堡壘那包自己開 session，跟下面的撈資料互不相依 → 並行；卡費它已經掃過一次（ladder.liabilities.card），登記包沿用
+    fortress_task = asyncio.ensure_future(fortress_payload(ent))
     factory = _factory_or_503()
     async with factory() as session:
-        register = await _register_payload(session, ent)
-        buckets = (await _auto_buckets(session, ent, fx)).get("buckets") or {}
+        fortress = await fortress_task
+        card = ((fortress.get("ladder") or {}).get("liabilities") or {}).get("card")
+        register = await _register_payload(session, ent, card=card)
+        buckets = (await _auto_buckets(session, ent, register["usd_twd"])).get("buckets") or {}
         lo, hi = _month_window(month)
         # 收支明細不是損益表：轉帳（轉匯與定存）兩邊各一筆、刷卡與還款各一筆、買賣股票記成支出／收入 ——
         # 「本月收入／支出」要把這些跨帳流動排掉（core.cash_taxonomy 的兩本＋「投資」項目）；
@@ -96,9 +90,11 @@ async def generate_report(ent: str, username: str, month: Optional[str] = None) 
             .where(CrmCashEntry.entity == ent, CrmCashEntry.entry_date >= lo, CrmCashEntry.entry_date < hi))).one()
         # 快照的 total 含手填桶（預付款…），月報的總資產只有四顆自動桶：比較與走勢要用快照存的 auto 四桶合計，
         # 不然「比上次快照 +X」會被手填桶壓低。舊快照沒有 auto 才退回 total。
-        snaps = (await session.execute(
+        # 只撈走勢要的最後 N 筆（build_report 只用最後 TREND_POINTS 筆＋基準日前最近一筆）
+        snaps = list(reversed((await session.execute(
             select(FinanceNetSnapshot.snap_date, FinanceNetSnapshot.total, FinanceNetSnapshot.auto)
-            .where(FinanceNetSnapshot.entity == ent).order_by(FinanceNetSnapshot.snap_date))).all()
+            .where(FinanceNetSnapshot.entity == ent).order_by(FinanceNetSnapshot.snap_date.desc())
+            .limit(TREND_POINTS + 1))).all()))
         prev_row = (await session.execute(
             select(FinanceMonthlyReport).where(FinanceMonthlyReport.entity == ent, FinanceMonthlyReport.month < month)
             .order_by(FinanceMonthlyReport.month.desc()).limit(1))).scalars().first()
@@ -126,8 +122,8 @@ async def generate_quietly(ent: str, username: str) -> Optional[str]:
     """登記餘額儲存後呼叫：月報產不出來**不能**讓登記失敗（登記才是主角）。回產生的月份或 None。"""
     try:
         return (await generate_report(ent, username))["month"]
-    except Exception as e:      # noqa: BLE001 — 任何錯都只記 log
-        log.warning("[monthly-report] %s 自動產生失敗: %s", ent, e)
+    except Exception:      # noqa: BLE001 — 任何錯都只記 log（帶 traceback，不然 build_report 裡的 KeyError 只剩一行看不懂）
+        log.exception("[monthly-report] %s 自動產生失敗", ent)
         return None
 
 
@@ -138,9 +134,11 @@ async def list_reports(request: Request, entity: str = ""):
     from db.models import FinanceMonthlyReport
     factory = _factory_or_503()
     async with factory() as session:
+        # 清單只要四個欄位：不要把每個月整包 payload（JSONB）都拖回來只為了填下拉
         rows = (await session.execute(
-            select(FinanceMonthlyReport).where(FinanceMonthlyReport.entity == ent)
-            .order_by(FinanceMonthlyReport.month.desc()))).scalars().all()
+            select(FinanceMonthlyReport.month, FinanceMonthlyReport.basis_date,
+                   FinanceMonthlyReport.generated_at, FinanceMonthlyReport.generated_by)
+            .where(FinanceMonthlyReport.entity == ent).order_by(FinanceMonthlyReport.month.desc()))).all()
     return {"items": [_row_dict(r) for r in rows]}
 
 

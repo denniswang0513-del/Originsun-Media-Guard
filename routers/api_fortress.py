@@ -115,10 +115,10 @@ async def _accounts(session, ent: str) -> tuple:
     from routers.api_finance import _balances_by_account
     from routers.api_finance_assets import _holding_value
     # 帳戶餘額的規則只有 _balances_by_account 那一份（期初＋流水；登記過餘額就從登記起算）
-    bal = await _balances_by_account(session, entity=ent)
     accts = (await session.execute(
         select(BankAccount).where(BankAccount.entity == ent, BankAccount.active.is_(True))
         .order_by(BankAccount.sort_order, BankAccount.created_at))).scalars().all()
+    bal = await _balances_by_account(session, entity=ent, accounts=accts)
     out = []
     for a in accts:
         kind = a.acct_kind or "bank"

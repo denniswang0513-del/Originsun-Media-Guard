@@ -118,7 +118,7 @@ function _accountsTable(d) {
             <td class="sub">${KIND_LABEL[a.acct_kind] || esc(a.acct_kind || '')}</td>
             <td class="n">${money(a.balance)}</td>
             <td class="n">${last}</td>
-            <td class="n"><input class="crm-input rg-in" type="number" step="1" inputmode="numeric" placeholder="${esc(fmtNum(a.balance ?? 0).replace(/,/g, ''))}"></td>
+            <td class="n"><input class="crm-input rg-in" type="number" step="1" inputmode="numeric" placeholder="${esc(String(a.balance ?? 0))}"></td>
             <td>${uf}</td>
         </tr>`;
     }).join('') || '<tr><td colspan="6" class="rg-empty">私帳還沒有銀行／現金帳戶</td></tr>';
@@ -204,19 +204,19 @@ _rg.saveAll = async (btn) => {
     if (!accounts.length && !brokers.length && !holdings.length && card === null) { finToast('還沒填任何數字', true); return; }
     btn.disabled = true;
     try {
+        if (card !== null) {
+            // 信用卡先送（既有那支：derive_opening_from ＝「現在實際欠多少」反推期初），
+            // 下面登記那次的回應與它產生的月報才看得到新的卡費
+            await finFetchMine('/card-summary', { method: 'PUT', body: JSON.stringify({ derive_opening_from: card }) });
+        }
         let d = null;
         if (accounts.length || brokers.length || holdings.length) {
             d = await finFetchMine('/balance-register', { method: 'PUT', body: JSON.stringify({ date, accounts, holdings, brokers }) });
         }
-        // 月報入口只有 PUT 的回應帶 report_month（GET 沒有）：先留下來，下面重抓整包不會把它洗掉
+        // 月報入口只有 PUT 的回應帶 report_month（GET 沒有）
         const reportMonth = d && d.report_month;
-        if (card !== null) {
-            // 信用卡走既有那支：derive_opening_from ＝「現在實際欠多少」反推期初
-            await finFetchMine('/card-summary', { method: 'PUT', body: JSON.stringify({ derive_opening_from: card }) });
-            d = null;    // 卡的數字要重抓整包才會對
-        }
         if (!_isCurrent()) return;
-        _d = d || await finFetchMine('/balance-register');
+        _d = d || await finFetchMine('/balance-register');     // 只改了卡：重抓整包
         _render();
         // 月報（docs/MONTHLY_REPORT.md）：登記完後端已經把當月那份算好，這裡給一條路過去
         if (reportMonth) _reportBanner(reportMonth);
