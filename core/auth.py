@@ -222,6 +222,11 @@ ALL_MODULES = [
     # 給人事助理用，不該連薪水都看得到）；合夥範本靠「ALL 扣排除」自動含它，在職／兼職範本不含。
     # 端點整支 check_admin_or_module('hr_payroll')，不走 money_view（薪資本來就是錢，整支 403 比抹欄位乾淨）。
     'hr_payroll',
+    # 知識庫（獨立頁 /knowledge.html；docs/KNOWLEDGE_BASE_PLAN.md §11）。owner 2026-09-18「不要綁在私帳裡，
+    # 之後會拿知識庫做更多衍生使用，未必跟財務有關」：從 finance_mine 拆出來自己一把。非 tab（同 me_petty 的做法）；
+    # 端點整支 check_admin_or_module('knowledge')。身份範本**不**預設配（owner 自己勾，見 core/rbac_templates._OPT_IN）。
+    # ⚠ 一律 append 在尾端 — modules[0] 決定 admin 落地頁。
+    'knowledge',
 ]
 
 
@@ -530,7 +535,7 @@ MODULE_LABELS = {
     'me_todos': '我的待辦', 'me_finance': '我的工時請款', 'hr_leave': '請補修', 'hr_benefits': '福委會', 'me_benefits': '我的福委會',
     'journal': '週誌', 'me_leave': '我的請假', 'me_petty': '零用金', 'me_worklog': '今天的專案紀錄', 'me_team_week': '團隊的一週',
     'me_project_lookup': '專案查詢', 'me_plan_parttime': '兼職排班', 'me_today_zone': '今天與這週', 'me_week_plan': '我的一週',
-    'hr_payroll': '薪資',
+    'hr_payroll': '薪資', 'knowledge': '知識庫',
 }
 
 

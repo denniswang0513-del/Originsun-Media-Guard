@@ -45,6 +45,10 @@
         <button class="finance-nav-btn fin-nav-mine-ok fin-nav-mine-only" data-subview="securities">📈 證券投資</button>
         <!-- 堡壘（docs/FORTRESS_PLAN.md §3）：私帳專屬，五層資金＋可撐月數＋壓力測試 -->
         <button class="finance-nav-btn fin-nav-mine-ok fin-nav-mine-only" data-subview="fortress">🏰 堡壘</button>
+        <!-- 知識庫（docs/KNOWLEDGE_BASE_PLAN.md §11）：獨立頁 /knowledge.html（鑰匙＝模組鍵 knowledge，不綁私帳），
+             這裡只留一顆入口。<a> 也帶 .finance-nav-btn 吃同一份樣式；finance.js 的委派只認 data-inv-view／data-subview，
+             沒有那兩個就原樣放行（不 preventDefault），所以連結照常開新分頁。 -->
+        <a class="finance-nav-btn fin-nav-mine-ok" href="/knowledge.html" target="_blank" rel="noopener" style="text-decoration:none;box-sizing:border-box;">📚 知識庫 ↗</a>
         <button class="finance-nav-btn fin-nav-mine-ok fin-nav-mine-only" data-subview="register">📝 登記餘額</button>
         <button class="finance-nav-btn fin-nav-mine-ok fin-nav-mine-only" data-subview="report">📄 月報</button>
         <button class="finance-nav-btn fin-nav-mine-ok" data-subview="gear">🎥 器材清冊</button>

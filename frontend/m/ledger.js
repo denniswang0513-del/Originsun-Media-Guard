@@ -5,7 +5,8 @@
  * 開頁：boot → GET /api/v1/finance/m/options 一次（分類樹／案源／專案／帳戶）→ 依 hash 畫分頁。
  * 分頁：#cash（預設）／#projects／#receivable／#household／#overview／#assets，畫面在 views/ledger-*.js。
  * 隱藏路由：#fortress（堡壘，docs/FORTRESS_PLAN.md §4）—— 有頁、沒 tabbar 鈕（六顆已滿），從總覽頂卡點進來，
- * tabbar 仍亮「總覽」。同 CRM 手機版 ui.js 的 HIDDEN_ROUTES 做法，TABS 不動。
+ * tabbar 仍亮「總覽」。#register／#report 同一條路。同 CRM 手機版 ui.js 的 HIDDEN_ROUTES 做法，TABS 不動。
+ * 知識庫 2026-09-18 起是獨立頁 /knowledge.html（docs/KNOWLEDGE_BASE_PLAN.md §11），總覽只留一張連過去的卡。
  * ui.js 的 TABS／DEFAULT_TAB／currentTab 是 CRM 那份，這裡自己維護一份（不改 ui.js 的常數）。
  */
 import { boot, mfetch, toast, esc } from './shell.js';

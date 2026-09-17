@@ -23,7 +23,7 @@ def test_keys_are_registered_in_every_place_that_mirrors_them():
     assert ME_ZONE_MASTER_BACKFILL_FROM == ("me_worklog", "me_team_week", "me_project_lookup")
     i = ALL_MODULES.index(NEW[0])
     assert ALL_MODULES[i:i + 6] == list(NEW), "六把連在一起、照這個順序"
-    assert set(ALL_MODULES[i + 6:]) <= {"hr_payroll"}, "後來的新 key（2026-09-17 薪資）也只能 append 在它們後面（modules[0] 決定 admin 落地頁）"
+    assert set(ALL_MODULES[i + 6:]) <= {"hr_payroll", "knowledge"}, "後來的新 key（2026-09-17 薪資、2026-09-18 知識庫）也只能 append 在它們後面（modules[0] 決定 admin 落地頁）"
     labels = repo_src("frontend/js/admin/user-mgmt.js")
     for k, zh in (("me_worklog", "今天的專案紀錄"), ("me_team_week", "團隊的一週"), ("me_project_lookup", "專案查詢"), ("me_plan_parttime", "兼職排班"),
                   ("me_today_zone", "今天與這週"), ("me_week_plan", "我的一週")):

@@ -39,6 +39,11 @@ _DEFAULT_SETTINGS: dict = {
     "finance": {
         "report_remind_hour": 9,
     },
+    # 知識庫（獨立應用 /knowledge.html，docs/KNOWLEDGE_BASE_PLAN.md §11）：上傳的書住在哪（只有 master 看得到的磁碟；
+    # 匿名 /api/settings/load 不回這個鍵，見 api_system._SECRET_SUBKEYS）。2026-09-18 從 finance.knowledge_root 搬出來。
+    "knowledge": {
+        "root": r"D:\Originsun-Knowledge\books",
+    },
     # 公司資訊：報價單 PDF 的抬頭／匯款資訊／交檔條款／章（templates/quotation_pdf.html 讀），設定頁「公司資訊」分頁可編。
     # logo_path／seal_path 是主控端本機路徑或 frontend 相對路徑（空＝logo 用 frontend/img/originsun-logo.webp、章不印）。
     "company": {

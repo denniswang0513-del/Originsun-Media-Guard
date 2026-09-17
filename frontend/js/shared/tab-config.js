@@ -208,6 +208,10 @@ export const PERMISSION_GROUPS = [
     // 順序照員工頁的版面：基本資料 → 今天與這週（總開關）→ 其四顆子視圖 → 請假 → 零用金 → 福委會 → 兼職排班（其餘是還沒放回的卡）
     // 子視圖跟總開關的父子關係在 js/admin/user-mgmt.js 的 PERM_PARENT（畫成縮排、總開關沒開子鑰匙灰掉）
     { id: 'me',         label: '🙋 個人工作台', modules: ['me_profile', 'me_today_zone', 'me_worklog', 'me_week_plan', 'me_team_week', 'me_project_lookup', 'me_leave', 'me_petty', 'me_benefits', 'me_plan_parttime', 'me_projects', 'me_todos', 'me_finance'] },
+    // 知識庫（獨立頁 /knowledge.html，docs/KNOWLEDGE_BASE_PLAN.md §11）：跟 me_petty 一樣非 tab、只管入口，
+    // 但**不是** api_me 的鑰匙（'me' 群組被 test_cross_language_vocab_sync 釘成＝ME_MODULE_KEYS），所以自己一群。
+    // 不綁人員檔案（不在 user-mgmt.STAFF_BOUND_KEYS）、範本不預設配（core/rbac_templates._OPT_IN）。
+    { id: 'knowledge',  label: '📚 知識庫', modules: ['knowledge'] },
 ];
 
 // Flat list of every assignable RBAC module key — derived from PERMISSION_GROUPS

@@ -15,6 +15,7 @@ IDENTITIES = ("合夥", "在職", "兼職")
 
 _PARTNER_EXCLUDE = {"finance_mine", "finance_partner"}   # 私帳：指名才有；母公司報表唯讀鍵與 money_view 互斥（core/ledger §2.3），合夥靠帳務＋金額檢視就是完整
 _HIDDEN = {"me_todos", "me_finance"}          # 員工頁還沒放回的卡，範本不勾
+_OPT_IN = {"knowledge"}                       # 知識庫（獨立頁 /knowledge.html）：三個身份的範本都不預設配，owner 逐帳號自己勾（2026-09-18 §11）
 
 _STAFF = [
     "preprod", "references", "postprod", "comfyui",
@@ -25,7 +26,7 @@ _STAFF = [
 _PARTTIME = ["me_profile", "me_today_zone", "me_worklog", "me_week_plan", "me_team_week", "me_project_lookup", "website_admin"]
 
 DEFAULT_TEMPLATES: Dict[str, List[str]] = {
-    "合夥": [m for m in ALL_MODULES if m not in _PARTNER_EXCLUDE and m not in _HIDDEN],
+    "合夥": [m for m in ALL_MODULES if m not in _PARTNER_EXCLUDE and m not in _HIDDEN and m not in _OPT_IN],
     "在職": [m for m in ALL_MODULES if m in _STAFF],
     "兼職": [m for m in ALL_MODULES if m in _PARTTIME],
 }

@@ -150,8 +150,9 @@ _SECRET_KEYS = ("jwt_secret", "database_url")
 # 🔴 `finance.fortress`＝私帳堡壘的設定（docs/FORTRESS_PLAN.md）：owner 每月必要支出、實際銀行帳戶 id 與分層。
 #    私帳靠 finance_mine 指名制擋住（Lv3 也不 bypass），不能從這條**匿名**路整包流出去。
 #    設定視窗不顯示這段、堡壘頁自己的 GET /finance/fortress 會帶著它 —— 連管理員都抹掉沒有副作用。
+#    `knowledge.root`＝知識庫（owner 的書）住在哪顆磁碟（docs/KNOWLEDGE_BASE_PLAN.md §11）—— 同一條理由。
 _SECRET_SUBKEYS = {"google_oauth": ("client_secret",), "google_calendar": ("service_account_json",),
-                   "finance": ("fortress",)}
+                   "finance": ("fortress",), "knowledge": ("root",)}
 # 2026-09-08 稽核：這些不是「簽得出 admin」等級的機密，但也不該給匿名——工時同步 token 拿到就能對
 # /timesheets/ingest 塞假工時（它本身是管理員限定端點）、webhook URL 拿到就能對團隊 Chat 灌訊息。
 # 設定視窗（管理員、帶 token）要顯示它們才能編輯，所以只對**非管理員**抹。

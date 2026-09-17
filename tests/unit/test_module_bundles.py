@@ -12,7 +12,7 @@ from tests.unit._srcscan import code_only, func_body, repo_src
 def test_bundles_replace_their_members_in_the_assignable_list():
     assert {"postprod", "preprod", "hr"} <= set(ALL_MODULES)
     assert not (set(LEGACY_MODULE_KEYS) & set(ALL_MODULES)), "成員鑰匙不再是可勾選的模組"
-    assert len(ALL_MODULES) == 35   # 2026-09-17 ＋hr_payroll（薪資）
+    assert len(ALL_MODULES) == 36   # 2026-09-17 ＋hr_payroll（薪資）；2026-09-18 ＋knowledge（知識庫）
     for b in MODULE_BUNDLES:
         assert b in MODULE_LABELS
     assert ALL_MODULES[0] == "bulletin", "管理員的 modules[0] 決定 SPA 落地頁，捆不能插到最前面"

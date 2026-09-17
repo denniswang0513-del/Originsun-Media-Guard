@@ -1,0 +1,150 @@
+/* knowledge.css — 知識庫獨立頁（/knowledge.html）的樣式；由 knowledge.html <link> 進來。
+   白底，色票沿用頁殼的 --ink／--sub／--line／--red（跟 calendar.html 同一套）。
+   響應式：>=900px 書頁左窄右寬；<640px 單欄、分頁鈕橫向可捲、討論輸入框貼底。
+   手機也是這一頁：可點的東西一律 >=40px 高。 */
+
+.kb { color: var(--ink); font-size: 14px; }
+.kb .kb-loading { color: var(--sub); padding: 20px 0; }
+.kb .kb-top { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin: 0 0 16px; }
+.kb .kb-top h2 { margin: 0; font-size: 20px; font-weight: 500; letter-spacing: .04em; }
+.kb .kb-top .why { color: var(--sub); font-size: 13px; max-width: 680px; line-height: 1.65; }
+.kb .kb-offline { background: #fff7e6; border: 1px solid #f5d28a; color: #8a5a00; border-radius: 6px; padding: 12px 14px; }
+.kb .kb-error { color: var(--red); padding: 12px 0; }
+.kb .kb-offline .kb-btn, .kb .kb-error .kb-btn { margin-left: 10px; }
+
+/* 控制項 */
+.kb .kb-btn { min-height: 40px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 4px; background: #fff;
+    color: var(--ink); font-size: 14px; font-family: inherit; cursor: pointer; }
+.kb .kb-btn:hover { border-color: var(--ink); }
+.kb .kb-btn.pri { background: var(--ink); border-color: var(--ink); color: #fff; }
+.kb .kb-btn.pri:hover { background: #000; }
+.kb .kb-btn.danger { color: var(--red); }
+.kb .kb-btn.danger:hover { border-color: var(--red); }
+.kb .kb-btn:disabled { opacity: .5; cursor: default; }
+.kb .kb-link { background: none; border: 0; padding: 6px 0; color: var(--red); font-size: 13px; font-family: inherit; cursor: pointer; min-height: 32px; }
+.kb .kb-link:hover { text-decoration: underline; }
+.kb .kb-input, .kb .kb-textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 4px; font-size: 14px; font-family: inherit; color: var(--ink); background: #fff; min-height: 40px; }
+.kb .kb-input:focus, .kb .kb-textarea:focus { outline: none; border-color: var(--ink); }
+.kb .kb-textarea { min-height: 72px; line-height: 1.6; resize: vertical; }
+.kb .pill { display: inline-block; font-size: 11.5px; padding: 2px 9px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
+.kb .pill.ok { color: #15803d; background: #e6f4ea; }
+.kb .pill.warn { color: #b45309; background: #fff3e0; }
+.kb .pill.bad { color: var(--red); background: #fdecea; }
+.kb .pill.na { color: var(--sub); background: #f0f0f0; }
+.kb .kb-tag { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 999px; background: #f3f3f3; color: var(--ink); white-space: nowrap; }
+.kb .kb-chip { min-height: 36px; padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; background: #fff;
+    color: var(--sub); font-size: 13px; font-family: inherit; cursor: pointer; }
+.kb .kb-chip.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.kb .note { color: var(--sub); font-size: 12.5px; line-height: 1.5; }
+.kb .note.bad { color: var(--red); }
+
+/* 書架 */
+.kb .kb-drop { border: 2px dashed var(--line); border-radius: 8px; padding: 22px; text-align: center; color: var(--sub); margin: 0 0 16px; }
+.kb .kb-drop .kb-btn { margin-left: 6px; }
+.kb .kb-drop .note { margin-top: 8px; }
+.kb .kb-prog { height: 6px; background: #eee; border-radius: 999px; overflow: hidden; margin-top: 10px; }
+.kb .kb-prog i { display: block; height: 100%; width: 0; background: var(--ink); transition: width .2s; }
+.kb .kb-tagbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
+.kb .kb-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.kb .kb-card { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; min-height: 104px; background: #fff; }
+.kb .kb-card:hover, .kb .kb-card:focus { border-color: var(--ink); outline: none; }
+.kb .kb-card .t { font-weight: 500; font-size: 15px; line-height: 1.4; }
+.kb .kb-card .a { color: var(--sub); font-size: 12.5px; }
+.kb .kb-card .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.kb .kb-card .m { color: var(--sub); font-size: 12px; margin-top: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.kb .kb-empty { color: var(--sub); padding: 20px; text-align: center; grid-column: 1 / -1; line-height: 1.7; }
+.kb .kb-guide { text-align: left; max-width: 640px; margin: 0 auto; border: 1px solid var(--line); border-radius: 8px; padding: 18px 22px; color: var(--ink); }
+.kb .kb-guide h3 { margin: 0 0 8px; font-size: 15px; font-weight: 500; }
+.kb .kb-guide ol { margin: 0; padding-left: 22px; }
+.kb .kb-guide li { margin: 4px 0; }
+.kb .kb-foot { margin-top: 26px; font-size: 12.5px; color: var(--sub); border-top: 1px solid var(--line); padding-top: 12px; line-height: 1.7; }
+
+/* 書頁：左窄右寬 */
+.kb .kb-book { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 28px; align-items: start; }
+.kb .kb-side { position: sticky; top: 70px; display: flex; flex-direction: column; gap: 10px; }
+.kb .kb-side .kb-back { align-self: flex-start; }
+.kb .kb-side h3 { margin: 0; font-size: 18px; font-weight: 500; line-height: 1.4; }
+.kb .kb-side .a { color: var(--sub); font-size: 13px; }
+.kb .kb-side .st { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kb .kb-side .stage { color: #b45309; font-size: 12.5px; }
+.kb .kb-side .err { color: var(--red); font-size: 12.5px; line-height: 1.5; }
+.kb .kb-tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.kb .kb-tags .none { color: var(--sub); font-size: 12.5px; }
+.kb .kb-tags-edit { display: flex; flex-direction: column; gap: 8px; }
+.kb .kb-tags-edit .row { display: flex; gap: 8px; }
+.kb .kb-tabs { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 0; margin: 4px 0; }
+.kb .kb-tabs button { min-height: 40px; text-align: left; background: none; border: 0; border-left: 3px solid transparent; padding: 8px 12px;
+    color: var(--sub); font-size: 14px; font-family: inherit; cursor: pointer; }
+.kb .kb-tabs button.on { color: var(--ink); border-left-color: var(--red); font-weight: 500; }
+.kb .kb-actions { display: flex; flex-direction: column; gap: 8px; }
+.kb .kb-main { min-width: 0; }
+
+/* 討論 */
+.kb .kb-chat { display: flex; flex-direction: column; gap: 12px; max-height: 62vh; overflow-y: auto; padding: 4px 2px; }
+.kb .kb-msg { display: flex; flex-direction: column; gap: 3px; max-width: 86%; }
+.kb .kb-msg.me { align-self: flex-end; }
+.kb .kb-msg .who { font-size: 11px; color: var(--sub); }
+.kb .kb-msg.me .who { text-align: right; }
+.kb .kb-msg .body { background: #f5f5f5; border-radius: 10px; padding: 10px 13px; line-height: 1.65; }
+.kb .kb-msg.me .body { background: #fdf1f0; white-space: pre-wrap; }
+.kb .kb-msg .act { text-align: right; }
+.kb .kb-msg .act button { background: none; border: 0; color: var(--red); font-size: 12.5px; cursor: pointer; padding: 6px 0; min-height: 32px; font-family: inherit; }
+.kb .kb-msg .act button:hover { text-decoration: underline; }
+.kb .kb-msg .wait { color: var(--sub); font-size: 13px; }
+.kb .kb-msg .stream { white-space: pre-wrap; }
+.kb .kb-msg .caret { display: inline-block; width: 7px; height: 14px; margin-left: 2px; background: var(--sub); vertical-align: text-bottom; animation: kb-blink 1s steps(2) infinite; }
+@keyframes kb-blink { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
+.kb .kb-chat-foot { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; background: #fff; }
+.kb .kb-chat-foot .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* md 渲染 */
+.kb .kb-md { line-height: 1.75; overflow-wrap: anywhere; }
+.kb .kb-md h1, .kb .kb-md h2, .kb .kb-md h3, .kb .kb-md h4 { margin: 18px 0 6px; line-height: 1.35; font-weight: 500; }
+.kb .kb-md h1 { font-size: 19px; } .kb .kb-md h2 { font-size: 17px; } .kb .kb-md h3 { font-size: 15.5px; } .kb .kb-md h4 { font-size: 14.5px; }
+.kb .kb-md p { margin: 0 0 8px; }
+.kb .kb-md ul, .kb .kb-md ol { margin: 0 0 8px; padding-left: 22px; }
+.kb .kb-md li { margin: 2px 0; }
+.kb .kb-md code { background: #f5f5f5; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 13px; }
+.kb .kb-md pre { background: #f7f7f7; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-size: 13px; }
+.kb .kb-md pre code { background: none; border: 0; padding: 0; }
+.kb .kb-md table { border-collapse: collapse; margin: 0 0 10px; display: block; overflow-x: auto; max-width: 100%; }
+.kb .kb-md th, .kb .kb-md td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; vertical-align: top; }
+.kb .kb-md th { color: var(--sub); font-weight: 500; background: #fafafa; }
+.kb .kb-md a { color: var(--red); }
+
+/* 結論／筆記／骨架／章節 */
+.kb .kb-doc .tools { display: flex; gap: 10px; align-items: center; margin: 0 0 12px; flex-wrap: wrap; }
+.kb .kb-doc .kb-textarea { min-height: 380px; font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 13px; }
+.kb .kb-sec { display: flex; align-items: baseline; gap: 14px; margin: 18px 0 8px; flex-wrap: wrap; }
+.kb .kb-sec h4 { font-size: 15px; margin: 0; font-weight: 500; }
+.kb .kb-sec .why { font-size: 12.5px; color: var(--sub); }
+.kb .kb-chapters { display: flex; flex-direction: column; gap: 4px; }
+.kb .kb-chapters button { min-height: 44px; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px;
+    color: var(--ink); cursor: pointer; font-size: 14px; font-family: inherit; }
+.kb .kb-chapters button:hover { border-color: var(--ink); }
+.kb .kb-chapters button .n { color: var(--sub); margin-right: 8px; font-variant-numeric: tabular-nums; }
+
+/* 窄一點：書頁單欄 */
+@media (max-width: 899px) {
+    .kb .kb-book { grid-template-columns: 1fr; gap: 16px; }
+    .kb .kb-side { position: static; }
+    .kb .kb-tabs { flex-direction: row; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 0; padding: 0; margin: 4px 0 0; border-top: 0; }
+    .kb .kb-tabs button { border-left: 0; border-bottom: 3px solid transparent; white-space: nowrap; padding: 10px 14px; }
+    .kb .kb-tabs button.on { border-bottom-color: var(--red); }
+    .kb .kb-actions { flex-direction: row; flex-wrap: wrap; }
+}
+
+/* 手機：討論輸入框貼底、泡泡跟著頁面捲 */
+@media (max-width: 640px) {
+    .kb .kb-top .why { font-size: 12.5px; }
+    .kb .kb-drop { padding: 16px 12px; }
+    .kb .kb-shelf { grid-template-columns: 1fr; }
+    .kb .kb-chat { max-height: none; overflow: visible; }
+    .kb .kb-msg { max-width: 94%; }
+    /* 貼底的輸入區要有底色，不然捲動時泡泡會從它後面透出來 */
+    .kb .kb-chat-foot { position: sticky; bottom: 0; padding: 10px 0 8px; border-top: 1px solid var(--line); background: #fff; }
+    .kb .kb-chat-foot .kb-textarea.chat { min-height: 56px; }
+    .kb .kb-chat-foot .note.tip { display: none; }
+    .kb .kb-doc .kb-textarea { min-height: 50vh; }
+}

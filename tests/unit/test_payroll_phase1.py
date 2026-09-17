@@ -10,7 +10,7 @@ _EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿]")
 
 def test_module_key_registered_everywhere():
     from core.auth import ALL_MODULES, MODULE_BUNDLES, MODULE_LABELS
-    assert "hr_payroll" in ALL_MODULES and ALL_MODULES[-1] == "hr_payroll", "新鑰匙一律 append 在尾端"
+    assert "hr_payroll" in ALL_MODULES and ALL_MODULES.index("hr_payroll") > ALL_MODULES.index("me_week_plan"), "新鑰匙一律 append 在尾端（2026-09-18 之後 knowledge 排在它後面）"
     assert MODULE_LABELS["hr_payroll"] == "薪資"
     assert "hr_payroll" not in MODULE_BUNDLES["hr"], "薪資不進 hr 捆（人事助理不該連薪水都看得到）"
     from core.rbac_templates import DEFAULT_TEMPLATES
