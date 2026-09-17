@@ -7,11 +7,12 @@ import { authFetch } from '../shared/utils.js';
 
 // key 集合必須 == core/auth.py ALL_MODULES == tab-config.js PERMISSION_GROUPS
 // （tests/unit/test_rbac_module_sync.py 三方同步測試把關，漏 key 會 fail）
-const MODULE_LABELS = {bulletin:'公布欄',references:'片庫',comfyui:'ComfyUI',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'財務管理',money_view:'金額檢視',finance_approve:'零用金審核',finance_partner:'母公司報表',finance_mine:'我的帳',timesheets:'工時檢核',portal:'審批門戶',media_log:'影像紀錄',website_admin:'官網',me_projects:'我的專案',me_profile:'我的資料',me_todos:'我的待辦',me_finance:'我的工時請款',me_benefits:'我的福委會',journal:'工作日誌',me_leave:'我的請假',me_petty:'我的請款',me_worklog:'今天的專案紀錄',me_team_week:'團隊的一週',me_project_lookup:'專案查詢',me_plan_parttime:'兼職排班',me_today_zone:'今天與這週',me_week_plan:'我的一週',preprod:'前期製作（拍攝企劃／場景庫／提案庫／產業情報／器材庫）',postprod:'後期製作（備份／比對／轉檔／串帶／空拍／報表／逐字稿／語音／素材庫）',hr:'人事（請補修＋福委會管理）'};
+const MODULE_LABELS = {bulletin:'公布欄',references:'片庫',comfyui:'ComfyUI',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'財務管理',money_view:'金額檢視',finance_approve:'零用金審核',finance_partner:'母公司報表',finance_mine:'我的帳',timesheets:'工時檢核',portal:'審批門戶',media_log:'影像紀錄',website_admin:'官網',me_projects:'我的專案',me_profile:'我的資料',me_todos:'我的待辦',me_finance:'我的工時請款',me_benefits:'我的福委會',journal:'工作日誌',me_leave:'我的請假',me_petty:'我的請款',me_worklog:'今天的專案紀錄',me_team_week:'團隊的一週',me_project_lookup:'專案查詢',me_plan_parttime:'兼職排班',me_today_zone:'今天與這週',me_week_plan:'我的一週',preprod:'前期製作（拍攝企劃／場景庫／提案庫／產業情報／器材庫）',postprod:'後期製作（備份／比對／轉檔／串帶／空拍／報表／逐字稿／語音／素材庫）',hr:'人事（請補修＋福委會管理）',hr_payroll:'薪資'};
 
 // 每把鑰匙的相依說明（階段 3，2026-09-08）：畫面上一行灰字＋滑過的 title，管理員不用記。
 // 只寫「勾了會怎樣／還要配什麼」，不寫功能介紹（那是 MODULE_LABELS 的事）。
 const MODULE_HINTS = {
+    hr_payroll: '看得到、改得了大家的薪水；預設合夥以上，勾了就看得到',
     money_view: '看得到金額；帳務、報價都要配它', crm_invoices: '要配「金額檢視」', crm_quotes: '要配「金額檢視」',
     finance_partner: '母公司報表唯讀；不要跟「金額檢視」同給', finance_mine: '指名才有，管理員也要明勾', finance_approve: '零用金審核；要配「金額檢視」',
     crm_projects: '含建案、推進階段、雜支、歸檔；刪除與匯入仍限管理員', crm_staff: '含編輯履歷；刪除與匯入仍限管理員',

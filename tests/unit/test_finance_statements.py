@@ -511,7 +511,7 @@ class TestDrillFields:
         assert [g["drill"] for g in pnl["cost"]["groups"]] == [
             "cost.料", "cost.工", "cost.費"]
         assert [g["drill"] for g in pnl["opex"]["groups"]] == [
-            "opex.銷售", "opex.管理", "opex.研發"]
+            "opex.銷售", "opex.管理", "opex.人事", "opex.研發"]
         # 收入明細行不帶 drill（invoiced/cash 不是合法 kind）
         assert all("drill" not in ln for ln in pnl["revenue"]["lines"])
 

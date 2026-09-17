@@ -202,8 +202,17 @@ _OWN_SCOPE = {
     "petty_float": "crm_staff 上的備用金額度；/petty/me 只回本人的",
 }
 
+# 薪資模組（db/models/_payroll.py；docs/PAYROLL_OVERTIME_PLAN.md §4）：routers/api_payroll.py 整支
+# check_admin_or_module('hr_payroll')，沒鑰匙 403，回應不經 MoneyRedactRoute。欄名刻意不用
+# amount/rate 那些泛字（gross_pay/net_pay…），靠中文尾註「金額」被掃描器接住、在這裡表態。
+_PAYROLL_ONLY = {k: "薪資單／主檔的金額欄 —— /hr/payroll 整支 hr_payroll 檔" for k in (
+    "base_amount", "meal_allowance", "labor_grade", "health_grade", "base_pay", "overtime_pay", "bonus_pay",
+    "leave_deduction", "other_deduction", "labor_self", "health_self", "pension_self", "labor_employer",
+    "health_employer", "pension_employer", "gross_pay", "net_pay", "employer_total")}
+_PAYROLL_ONLY["pension_self_rate"] = "勞退自提比例（%），不是金額 —— 同上整支檔"
+
 REGISTRY_EXEMPT = {**_NOT_MONEY, **_ONLY_ON_BLOCKED_ROUTES,
-                   **_PENDING_OWNER, **_FREE_TEXT, **_OWN_SCOPE}
+                   **_PENDING_OWNER, **_FREE_TEXT, **_OWN_SCOPE, **_PAYROLL_ONLY}
 
 # 掃描器（測試）除了 `_PREFILTER` 的詞彙之外，還要認得的**完整同名**欄位。
 # 這幾個名字本身就是金額，但都在豁免表裡表態，所以不進 `_PREFILTER` ——

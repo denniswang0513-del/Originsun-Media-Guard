@@ -21,6 +21,7 @@ export const TAB_MAP = {
     portal: 'tab_portal', media_log: 'tab_media_log',
     hr_leave: 'tab_hr_leave',
     hr_benefits: 'tab_hr_benefits',
+    hr_payroll: 'tab_hr_payroll',
     journal: 'tab_journal',
     website_admin: 'tab_website',
 };
@@ -58,6 +59,7 @@ export const TAB_LOADERS = [
     ['timesheets',    './tabs/timesheets/timesheets.html',   './tabs/timesheets/timesheets.js',   'initTimesheetsTab'],
     ['hr_leave',      './tabs/hr_leave/hr_leave.html',       './tabs/hr_leave/hr_leave.js',       'initHrLeaveTab'],
     ['hr_benefits',   './tabs/hr_benefits/hr_benefits.html', './tabs/hr_benefits/hr_benefits.js', 'initHrBenefitsTab'],
+    ['hr_payroll',    './tabs/hr_payroll/hr_payroll.html',   './tabs/hr_payroll/hr_payroll.js',   'initHrPayrollTab'],
     ['journal',       './tabs/journal/journal.html',         './tabs/journal/journal.js',         'initJournalTab'],
     ['portal',        './tabs/portal/portal.html',           './tabs/portal/portal.js',           'initPortalTab'],
     ['media_log',     './tabs/crm/crm-media-log.html',       './tabs/crm/crm-media-log.js',       'initCrmMediaLogTab'],
@@ -133,6 +135,7 @@ export const TAB_GROUPS = [
         { key: 'timesheets',   label: '專案工時' },
         { key: 'hr_leave',     label: '請補修' },
         { key: 'hr_benefits',  label: '福委會' },
+        { key: 'hr_payroll',   label: '薪資' },
         { key: 'journal',      label: '工作日誌' },
     ] },
     // 財務管理（2026-07 起）：帳務六視圖自業務管理搬入；沿用 crm_invoices 單一
@@ -190,7 +193,7 @@ export const PERMISSION_GROUPS = [
     { id: 'preprod',    label: '📝 前期製作', modules: ['preprod', 'references'] },
     { id: 'production', label: '🎬 後期製作', modules: ['postprod', 'comfyui'] },
     { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'portal', 'media_log'] },
-    { id: 'hr',         label: '人事管理', modules: ['crm_staff', 'timesheets', 'hr', 'journal'] },
+    { id: 'hr',         label: '人事管理', modules: ['crm_staff', 'timesheets', 'hr', 'journal', 'hr_payroll'] },
     // money_view 不是 tab，是橫切的能力鍵（有它才看得到合約金額／日費／成本）。
     // 放在財務群只是為了讓勾選的人一眼知道它管什麼 —— groupKeys 會因 TAB_MAP
     // 沒有這個 key 而自動不進側欄。政策正本 core/money.py。

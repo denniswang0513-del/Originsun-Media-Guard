@@ -1,0 +1,74 @@
+<!--
+    hr_payroll.html — 人事管理 › 薪資 Tab 殼（docs/PAYROLL_OVERTIME_PLAN.md 第一批：主檔／每月薪資單／費率表）
+    三塊由 hr_payroll.js render。設計鐵則：UI 無 emoji（owner 2026-07-17）。鑰匙 hr_payroll（預設合夥以上）。
+-->
+<div id="hp-root">
+    <h2>薪資</h2>
+    <div class="hp-sub">先在「薪資主檔」填每個人領多少、投保多少；每月按「產生薪資單」，數字對了按「確認」，請款單就自動長出來走匯款流程。</div>
+    <div class="hp-nav" id="hp-nav">
+        <button type="button" data-hp-view="runs" class="active">每月薪資單</button>
+        <button type="button" data-hp-view="profiles">薪資主檔<span class="cnt" id="hp-nav-profiles-cnt"></span></button>
+        <button type="button" data-hp-view="rates">費率表</button>
+    </div>
+    <div id="hp-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+</div>
+
+<style>
+    #hp-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #hp-root .hp-sub { color: #777; font-size: 12px; margin-bottom: 12px; }
+    #hp-root .hp-nav { display: flex; gap: 4px; border-bottom: 1px solid #333; margin-bottom: 14px; flex-wrap: wrap; }
+    #hp-root .hp-nav button {
+        background: #1e1e1e; border: 1px solid #333; border-bottom: 0; color: #888;
+        font-size: 13px; font-weight: 600; padding: 8px 18px; cursor: pointer; border-radius: 6px 6px 0 0;
+    }
+    #hp-root .hp-nav button:hover { color: #ddd; }
+    #hp-root .hp-nav button.active { background: #232323; color: #fff; position: relative; top: 1px; }
+    #hp-root .hp-nav .cnt { font-weight: 400; color: #fbbf24; margin-left: 6px; font-size: 12px; }
+    #hp-root .hp-nav .cnt:empty { display: none; }
+    #hp-root .hp-card { background: #232323; border: 1px solid #333; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; }
+    #hp-root .hp-card h3 { color: #ddd; font-size: 14px; margin: 0 0 10px 0; font-weight: 600; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    #hp-root .hp-card h3 .sp { flex: 1; }
+    #hp-root .hp-wrap { overflow-x: auto; }
+    #hp-root table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    #hp-root th { text-align: left; color: #888; font-weight: 500; padding: 6px 8px; border-bottom: 1px solid #333; white-space: nowrap; }
+    #hp-root td { padding: 5px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc; vertical-align: middle; white-space: nowrap; }
+    #hp-root td.num, #hp-root th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    #hp-root tr.total td { color: #fff; font-weight: 600; border-top: 2px solid #444; }
+    #hp-root tr.hp-row-click { cursor: pointer; }
+    #hp-root tr.hp-row-click:hover td { background: #262626; }
+    #hp-root tr.on td { background: #2a2a2a; }
+    #hp-root .hp-btn { background: #3b82f6; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    #hp-root .hp-btn:hover { background: #2563eb; }
+    #hp-root .hp-btn:disabled { opacity: .45; cursor: default; }
+    #hp-root .hp-btn.ok { background: #16a34a; }
+    #hp-root .hp-btn.ok:hover { background: #15803d; }
+    #hp-root .hp-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    #hp-root .hp-btn.ghost:hover { background: #333; }
+    #hp-root .hp-btn.danger { background: transparent; border: 1px solid rgba(239,68,68,.4); color: #f87171; }
+    #hp-root .hp-btn.danger:hover { background: rgba(239,68,68,.08); }
+    #hp-root .hp-pill { display: inline-block; font-size: 11px; border-radius: 999px; padding: 2px 10px; border: 1px solid #444; color: #aaa; white-space: nowrap; }
+    #hp-root .hp-pill.draft { border-color: #a16207; color: #fbbf24; }
+    #hp-root .hp-pill.done { border-color: #166534; color: #4ade80; }
+    #hp-root .hp-pill.proxy { border-color: #6b21a8; color: #c084fc; }
+    #hp-root .hp-pill.none { border-color: #7f1d1d; color: #f87171; }
+    #hp-root select, #hp-root input, #hp-root textarea {
+        background: #1a1a1a; border: 1px solid #333; color: #ddd; border-radius: 4px; padding: 5px 8px; font-size: 12.5px; font-family: inherit;
+    }
+    #hp-root input[type="number"] { width: 92px; text-align: right; }
+    #hp-root input.cell { width: 84px; text-align: right; padding: 3px 6px; background: #1c1c1c; }
+    #hp-root input.cell.manual { border-color: #a16207; }
+    #hp-root input.cell:disabled { background: transparent; border-color: transparent; color: #ccc; }
+    #hp-root textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+    #hp-root .hp-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 12px; align-items: end; }
+    #hp-root .hp-form label { display: flex; flex-direction: column; gap: 3px; color: #888; font-size: 11.5px; }
+    #hp-root .hp-form label > * { width: 100%; box-sizing: border-box; }
+    #hp-root .hp-form .full { grid-column: 1 / -1; }
+    #hp-root .hp-acts { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+    #hp-root .hp-note { color: #777; font-size: 11.5px; margin-top: 8px; line-height: 1.6; }
+    #hp-root .hp-empty { color: #666; padding: 14px 0; text-align: center; font-size: 12.5px; }
+    #hp-root .hp-msg { color: #fbbf24; font-size: 12px; margin-left: 8px; }
+    #hp-root .hp-msg.err { color: #f87171; }
+    #hp-root .hp-hist { background: #1c1c1c; padding: 8px 12px; }
+    #hp-root .hp-hist table { width: auto; }
+    #hp-root .hp-levels { width: 100%; box-sizing: border-box; min-height: 70px; font-family: ui-monospace, monospace; font-size: 12px; }
+</style>

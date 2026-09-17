@@ -32,6 +32,7 @@ EXPECTED = [
     "_m20_seed_mine_cash_taxonomy",
     "_m21_seed_work_stages",
     "_m22_ledger_by_parent_backfill",
+    "_m23_personnel_pnl_group",
 ]
 
 

@@ -10,6 +10,7 @@
   _finance   財務管理（api_finance）
   _workos    書籤、週記、工作階段、影像紀錄分塊上傳、福委會
   _mobile    CRM 手機版 BFF
+  _payroll   薪資（主檔／費率表／薪資單）
 要找定義用 grep，不要靠記憶猜檔名。掃原始碼的測試用 `tests/unit/_srcscan.schemas_src()`。
 """
 from ._jobs import *  # noqa: F401,F403
@@ -18,3 +19,4 @@ from ._crm import *  # noqa: F401,F403
 from ._finance import *  # noqa: F401,F403
 from ._workos import *  # noqa: F401,F403
 from ._mobile import *  # noqa: F401,F403
+from ._payroll import *  # noqa: F401,F403

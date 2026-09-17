@@ -25,6 +25,25 @@ MILESTONE_STATUSES = ["未到期", "待請款", "已請款", "已收款"]
 _DEFAULT_TEMPLATE = [("訂金", 30), ("期中款", 40), ("尾款", 30)]
 
 
+async def _payroll_monthly_cost(factory) -> int:
+    """最近一張「已確認」薪資單的公司總成本合計（應發＋雇主勞健保勞退）；沒有就 0。"""
+    from sqlalchemy import func as _f, select as _sel
+
+    from db.models import PayrollLine, PayrollRun
+    try:
+        async with factory() as session:
+            run_id = (await session.execute(
+                _sel(PayrollRun.id).where(PayrollRun.status == "已確認", PayrollRun.entity == "parent")
+                .order_by(PayrollRun.month.desc()).limit(1))).scalar()
+            if not run_id:
+                return 0
+            total = (await session.execute(
+                _sel(_f.coalesce(_f.sum(PayrollLine.employer_total), 0)).where(PayrollLine.run_id == run_id))).scalar()
+            return int(total or 0)
+    except Exception:
+        return 0
+
+
 def _guard(request: Request, entity: str = "", level: str = "view") -> str:
     """財務域守衛 v2：回傳解析後的帳本 entity（docs/LEDGER_ENTITY_PLAN.md §2.4）。
 
@@ -190,6 +209,8 @@ async def forecast(request: Request, days: int = 90):
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     horizon = today + timedelta(days=days)
     fixed_monthly = int((load_settings().get("finance") or {}).get("monthly_fixed_costs") or 0)
+    if not fixed_monthly:
+        fixed_monthly = await _payroll_monthly_cost(factory)   # 薪資單做起來之後不用再手打（docs/PAYROLL_OVERTIME_PLAN.md §2.3）
 
     async with factory() as session:
         ms = (await session.execute(

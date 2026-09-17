@@ -755,6 +755,26 @@ async def _m22_ledger_by_parent_backfill() -> None:
             print(f"[migrate] 私帳分案記帳回填略過: {_e_bp}")
 
 
+async def _m23_personnel_pnl_group() -> None:
+    """三表把薪資／勞健保／獎金抽成「營業費用-人事」（docs/PAYROLL_OVERTIME_PLAN.md §2.3）。
+    種子只插不改，既有 DB 的 6100／6110／6120 還掛在「管理」→ 這裡搬一次（只搬還在管理組的，owner 改過的不動）。"""
+    if state.db_online:
+        try:
+            factory = get_session_factory()
+            if factory:
+                async with factory() as session:
+                    from sqlalchemy import text as _t
+                    r = await session.execute(_t(
+                        "UPDATE finance_accounts SET pnl_group = '營業費用-人事' "
+                        "WHERE code IN ('6100', '6110', '6120') AND pnl_group = '營業費用-管理'"))
+                    await session.commit()
+                    n = getattr(r, "rowcount", 0) or 0
+                    if n:
+                        print(f"[migrate] 三表人事費用分組：搬了 {n} 個科目")
+        except Exception as _e_pg:
+            print(f"[migrate] 三表人事費用分組略過: {_e_pg}")
+
+
 _POST_DB = [
     _m01_google_oauth_columns,
     _m02_me_zone_split_backfill,
@@ -778,6 +798,7 @@ _POST_DB = [
     _m20_seed_mine_cash_taxonomy,
     _m21_seed_work_stages,
     _m22_ledger_by_parent_backfill,
+    _m23_personnel_pnl_group,
 ]
 
 

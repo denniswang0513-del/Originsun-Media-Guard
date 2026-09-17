@@ -56,9 +56,9 @@ SEED_ACCOUNTS: list[tuple] = [
     # ── 費用（營業成本=製作直接成本 料/工/費；營業費用分 銷售/管理/研發）──
     ("5100", "外包成本", None, "expense", "operating", "營業成本-工"),
     ("5200", "專案雜支", None, "expense", "operating", "營業成本-費"),
-    ("6100", "薪資費用", None, "expense", "operating", "營業費用-管理"),
-    ("6110", "勞健保", None, "expense", "operating", "營業費用-管理"),
-    ("6120", "獎金", None, "expense", "operating", "營業費用-管理"),
+    ("6100", "薪資費用", None, "expense", "operating", "營業費用-人事"),
+    ("6110", "勞健保", None, "expense", "operating", "營業費用-人事"),
+    ("6120", "獎金", None, "expense", "operating", "營業費用-人事"),
     ("6200", "房租", None, "expense", "operating", "營業費用-管理"),
     ("6210", "水電網路", None, "expense", "operating", "營業費用-管理"),
     ("6220", "軟體網路服務", None, "expense", "operating", "營業費用-管理"),

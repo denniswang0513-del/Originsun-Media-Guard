@@ -217,6 +217,11 @@ ALL_MODULES = [
     'me_worklog', 'me_team_week', 'me_project_lookup', 'me_plan_parttime',
     # 同日晚：「今天與這週」總開關＋「我的一週」拆出來（說明同上）。⚠ append 在尾端。
     'me_today_zone', 'me_week_plan',
+    # 薪資（人事管理 › 薪資：主檔／費率表／每月薪資單；docs/PAYROLL_OVERTIME_PLAN.md §4）。
+    # owner 2026-09-17「誰能看薪資 讓管理員勾選 預設合夥以上」：獨立一把、不進 hr 捆（hr 捆是請補修＋福委會，
+    # 給人事助理用，不該連薪水都看得到）；合夥範本靠「ALL 扣排除」自動含它，在職／兼職範本不含。
+    # 端點整支 check_admin_or_module('hr_payroll')，不走 money_view（薪資本來就是錢，整支 403 比抹欄位乾淨）。
+    'hr_payroll',
 ]
 
 
@@ -525,6 +530,7 @@ MODULE_LABELS = {
     'me_todos': '我的待辦', 'me_finance': '我的工時請款', 'hr_leave': '請補修', 'hr_benefits': '福委會', 'me_benefits': '我的福委會',
     'journal': '週誌', 'me_leave': '我的請假', 'me_petty': '零用金', 'me_worklog': '今天的專案紀錄', 'me_team_week': '團隊的一週',
     'me_project_lookup': '專案查詢', 'me_plan_parttime': '兼職排班', 'me_today_zone': '今天與這週', 'me_week_plan': '我的一週',
+    'hr_payroll': '薪資',
 }
 
 

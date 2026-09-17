@@ -49,6 +49,9 @@ from ._finance import (  # noqa: F401
     FinanceFortressEarmark, FinanceHolding, FinanceLoan, FinanceLoanPayment, FinanceMonthlyReport,
     FinanceNetSnapshot)
 
+# 薪資：主檔／費率表／每月薪資單（docs/PAYROLL_OVERTIME_PLAN.md）
+from ._payroll import PayrollLine, PayrollRateTable, PayrollRun, StaffPayProfile  # noqa: F401
+
 # 媒體紀錄 ＋ 週誌 ＋ 福委會 ＋ 收支分類樹
 from ._workspace import (  # noqa: F401
     CashTaxonomyNode, CrmExpenseLink, HrBenefitAllowance, HrBenefitEntry,

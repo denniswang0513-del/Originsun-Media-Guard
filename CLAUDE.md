@@ -1341,6 +1341,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | `frontend/tabs/finance/subviews/fortress.js` ＋ `frontend/m/views/ledger-fortress.js`（＋總覽頂卡） | 堡壘的兩個畫面：桌機分頁（可改分層／目標／假設、增刪預留）與手機頁（只能增刪預留） | 兩邊都不自己算，一律拿後端回的整份 payload 重畫；分層自動存要先拍快照（見「不要動的地方」①） |
 | `core/monthly_report.py` ＋ `routers/api_monthly_report.py` ＋ `subviews/report.js`／`m/views/ledger-report.js` | **私帳月報**（docs/MONTHLY_REPORT.md）：登記餘額儲存後自動產生當月那份（同月覆蓋）：這個月的錢、錢從哪來、走勢、各帳戶、堡壘、階梯與財富自由、四格體檢、財務建議（規則）、待辦 | 規則全在 core（純函式、可測），router 只撈別的模組算好的數字；建議是門檻不是文案；上月＝上一份月報 |
 | `routers/api_balance_register.py` ＋ `core/finance_logic/_core.py::derive_balance`／`routers/api_finance.py::_balances_by_account` | **登記餘額**（docs/BALANCE_REGISTER.md）：「今天看到多少就先記多少，明細後面補」。帳戶寫基準點（`bank_accounts.anchor_balance／anchor_date`）、證券戶寫「未拆明細」列、每次登記留一筆對帳紀錄 | 餘額規則只有 `derive_balance` 一份，六個算餘額的地方都經 `_balances_by_account`；畫面：桌機 `subviews/register.js`（私帳 nav）、手機 `#register` 隱藏路由 |
+| `core/payroll_logic.py` ＋ `db/models/_payroll.py` ＋ `routers/api_payroll.py` ＋ `tabs/hr_payroll/` | **薪資**（docs/PAYROLL_OVERTIME_PLAN.md 第一批，2026-09-17）：薪資主檔（一人一段，調薪新增一段）、費率表（一年一份 JSON，2026 版內建）、每月薪資單（草稿 → 手填 → 確認 → 每列自動長請款單 category 薪資／代發薪資、匯出印領清冊）；三表多「營業費用-人事」一組；現金流固定成本沒手填就用最近一張已確認薪資單的公司總成本 | 鑰匙 `hr_payroll`（獨立一把、不進 hr 捆；合夥範本預設含）整支 403，不走 money_view 抹欄位；金額欄在 core/money.py `_PAYROLL_ONLY` 表態；只有母公司帳；加班費倍率是公司規定（工作日 ×1、假日 ×2，費率表可改） |
 | `core/ledger_project.py` 的分案記帳段 | 私帳案收入**分案**：`BY_PARENT_KEY`／`BY_PARENT_PENDING_KEY`、`parent_shares`、`set_parent_share`（只動差額；`claim` 不動錢）、`drop_parent_share`、`mirror_stale(…, pid)` 逐案判；設計正本 [`docs/LEDGER_BY_PARENT_PLAN.md`](docs/LEDGER_BY_PARENT_PLAN.md) | 不變式 `contract = Σ份額 + owner 自己的`（自己的不存、用差額推）；分身 `contract_amount` 只准接 `set／drop_parent_share` 回的 `new_contract`（`test_ledger_by_parent` 掃 project_links 釘著）；開機 `_m22` 回填舊資料，分不出的 N:1 標待認領、改收款方式會 409 要求逐案「推送→取代」 |
 | 彈性外出（owner 2026-09-15）：[`core/leave_logic.py`](core/leave_logic.py) 的 `FLEX_OUT_*`／`flex_out_check`、`hr_flex_outings`（[`db/models/_workos.py`](db/models/_workos.py)）、[`routers/api_me.py`](routers/api_me.py) 的 `/me/flex_out` | 每人每天 2 小時、**自己登記不用核准**、一筆 ≤2h、同一天合計 ≤2h、不累積。畫面固定寫「每日可彈性外出兩小時」（owner 改的字，不顯示剩多少） | **不走請假單**：不進時數帳、不進休假總表、不上 Google 日曆。事由只給本人看（行事曆事件的 `notes` 一律空，同 `_leave_events`）。超過 2 小時要另外請假 —— 規章那段在 `frontend/leave.html` 的規章卡，排在事假前面 |
 | [`core/leave_logic.py`](core/leave_logic.py) 的 `day_off_fraction`／`leave_days_total` | 一天休了多少（同一天多張單**加總**、上限 1；`range` 照時數換算）／一段期間休幾天（**只算工作日**） | `/me/week_marks` 的 `off[日期]` 與 `leave_days` 都出自這裡；前端不准自己再判一次 `part`（兩份規則會分岔） |
@@ -1405,6 +1406,9 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
      不然會靜靜掉回金額格式（長照的「撐得了 29.5 年」上線時就是印成「29.5 萬」，沒有測試釘）。
   ⑩ **「模擬到 90 歲用不完」是算術上必然的事**（固定報酬減通膨大於提領率就一定算不完），不能寫成一項通過的檢驗；
      真正會咬人的是報酬順序，所以另外算一條「前 10 年報酬 0%」。提領一律**年初先提**（同 Bengen），先長再提會高估 6–7%。
+- **薪資（docs/PAYROLL_OVERTIME_PLAN.md，2026-09-17）**：薪資單的錢**只在確認那一刻**變成請款單（`confirm_run`），之後改數字去請款單那邊，薪資單不回頭改（已確認 409）；
+  重算（refresh）不覆蓋 `manual_fields` 裡的手改欄與手填時數；新表欄名刻意避開 amount／rate 這些字（`table_year` 不叫 `rates_year`），
+  因為 `test_money_visibility` 的掃描器會逼每個像錢的欄位表態 —— 加欄位先看 core/money.py 的 `_PAYROLL_ONLY`。NAS office-api 刻意不掛 `api_payroll`。
 - **登記餘額（docs/BALANCE_REGISTER.md，2026-09-17）**：帳戶餘額的規則**只有 `core.finance_logic.derive_balance` 一份** ——
   沒登記＝期初＋全部流水（老公式）；登記過＝登記餘額＋**基準日之後**的流水，基準日當天與之前的明細只當歷史（補了不動今天的數字），
   `unfilled`＝登記數 − 帳上算到基準日的數字（還沒補的明細，補齊歸 0）。六個算餘額的地方（帳戶清單、對帳月底、資產儀表板、堡壘、

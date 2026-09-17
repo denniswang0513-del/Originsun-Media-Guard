@@ -21,7 +21,9 @@ def test_keys_are_registered_in_every_place_that_mirrors_them():
     assert "me_plan_parttime" not in ME_ZONE1_KEYS and ME_ZONE_MASTER not in ME_ZONE1_KEYS, "兼職排班與總開關都不是子視圖"
     assert set(ME_ZONE1_BACKFILL_FROM) == {"me_projects", "me_todos", "me_finance", "me_leave", "me_petty", "me_benefits"}
     assert ME_ZONE_MASTER_BACKFILL_FROM == ("me_worklog", "me_team_week", "me_project_lookup")
-    assert ALL_MODULES[-6:] == list(NEW), "新 key 一律 append 在尾端（modules[0] 決定 admin 落地頁）"
+    i = ALL_MODULES.index(NEW[0])
+    assert ALL_MODULES[i:i + 6] == list(NEW), "六把連在一起、照這個順序"
+    assert set(ALL_MODULES[i + 6:]) <= {"hr_payroll"}, "後來的新 key（2026-09-17 薪資）也只能 append 在它們後面（modules[0] 決定 admin 落地頁）"
     labels = repo_src("frontend/js/admin/user-mgmt.js")
     for k, zh in (("me_worklog", "今天的專案紀錄"), ("me_team_week", "團隊的一週"), ("me_project_lookup", "專案查詢"), ("me_plan_parttime", "兼職排班"),
                   ("me_today_zone", "今天與這週"), ("me_week_plan", "我的一週")):

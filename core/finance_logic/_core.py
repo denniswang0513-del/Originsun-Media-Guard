@@ -288,7 +288,7 @@ def today_start():
 
 # 損益表分組（順序 = 前端呈現順序；值域對齊 db/seed_finance.py pnl_group）
 COST_GROUPS = ("營業成本-料", "營業成本-工", "營業成本-費")
-OPEX_GROUPS = ("營業費用-銷售", "營業費用-管理", "營業費用-研發")
+OPEX_GROUPS = ("營業費用-銷售", "營業費用-管理", "營業費用-人事", "營業費用-研發")   # 人事＝薪資／勞健保／獎金（docs/PAYROLL_OVERTIME_PLAN.md §2.3）
 
 # drilldown kind 單一來源：報表行的 drill 欄位（_finalize_pnl / build_balance_sheet
 # / build_cashflow）、/statements/drilldown 的 kind 驗證、單元測試三邊共用同一組值
