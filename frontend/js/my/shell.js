@@ -292,6 +292,7 @@ function renderWorkspace() {
     const on = (k) => ME_ZONE_ON.has(k);
     if (on("me_todos") && ws.allowed.includes("me_todos"))    grid.appendChild(cardTodos(ws.todos || []));
     if (on("me_leave") && ws.allowed.includes("me_leave"))    grid.appendChild(cardLeave(ws.bound));
+    if (on("me_leave") && ws.allowed.includes("me_leave"))    grid.appendChild(cardOvertime(ws.bound));   // 加班申請（同一把鑰匙；cards-ot.js）
     if (on("me_finance") && ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
     if (on("me_petty") && ws.allowed.includes("me_petty"))    grid.appendChild(cardPettyCash());
     if (on("me_benefits") && ws.allowed.includes("me_benefits")) grid.appendChild(cardBenefits(ws.bound));

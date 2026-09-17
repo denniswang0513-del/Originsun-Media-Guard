@@ -10,6 +10,7 @@
         <button type="button" data-hl-view="records">請假紀錄</button>
         <button type="button" data-hl-view="balances">時數帳</button>
         <button type="button" data-hl-view="holidays">假日表</button>
+        <button type="button" data-hl-view="overtime">加班佇列<span class="cnt" id="hl-nav-ot-cnt"></span></button>
     </div>
     <div id="hl-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
 </div>
@@ -84,4 +85,7 @@
     #hl-root .hl-ctx .amber { color: #fbbf24; }
     #hl-root .hl-ctx .dim { color: #777; }
     #hl-root .hl-qacts { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+    #hl-root .hl-pill.ot-warn { border-color: #a16207; color: #fbbf24; }
+    #hl-root .hl-pill.ot-bad { border-color: #7f1d1d; color: #f87171; }
+    #hl-root .hl-pill.ot-ok { border-color: #166534; color: #4ade80; }
 </style>

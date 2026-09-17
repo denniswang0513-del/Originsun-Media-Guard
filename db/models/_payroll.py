@@ -4,7 +4,7 @@
 金額欄全部在 core/money.py 的 `_PAYROLL_ONLY` 表態：薪資端點整支 check_admin_or_module('hr_payroll') 檔，
 不走 CRM 的抹除層。
 """
-from ._base import (Base, Column, DateTime, Float, Index, Integer, JSONB, String, Text, UniqueConstraint, func)
+from ._base import (Base, Column, Date, DateTime, Float, Index, Integer, JSONB, String, Text, UniqueConstraint, func)
 
 
 class StaffPayProfile(Base):
@@ -105,3 +105,36 @@ class PayrollLine(Base):
 
     __table_args__ = (Index("idx_payroll_line_run", "run_id"),
                       UniqueConstraint("run_id", "staff_id", name="uq_payroll_line_staff"))
+
+
+class HrOvertimeRequest(Base):
+    """加班申請（docs/PAYROLL_OVERTIME_PLAN.md §2.4）— 員工報、管理員核准；核准後補休進時數帳、加班費掛進薪資單。"""
+    __tablename__ = "hr_overtime_requests"
+
+    id = Column(String(32), primary_key=True)
+    staff_id = Column(String(32), nullable=False)                 # soft FK → crm_staff.id
+    staff_name = Column(String(64), nullable=False, default="")
+    date = Column(Date, nullable=False)                           # 加班日
+    start_time = Column(String(5), nullable=False)                # 'HH:MM'
+    end_time = Column(String(5), nullable=False)
+    hours = Column(Float, nullable=False, default=0.0)            # 由起訖算，0.5 一格
+    day_kind = Column(String(8), nullable=False, default="工作日")  # 工作日／假日（依假日表；core.overtime_logic.day_kind_for）
+    payout = Column(String(8), nullable=False, default="補休")     # 補休／加班費
+    project_id = Column(String(32), nullable=True)                # 選填；從場次帶入時自動填
+    project_name = Column(String(128), nullable=True)
+    shoot_id = Column(String(32), nullable=True)
+    reason = Column(Text, nullable=True)
+    status = Column(String(8), nullable=False, default="待審")     # 待審／已核准／已退回／已撤回
+    approved_by = Column(String(64), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    reject_note = Column(Text, nullable=True)
+    credit_hours = Column(Float, nullable=False, default=0.0)     # 換補休的時數（平日 1:1、假日 1:2）
+    credit_id = Column(String(32), nullable=True)                 # 核准後長出的 hr_leave_credits.id（補休）
+    pay_month = Column(String(7), nullable=True)                  # 換加班費的：掛哪個月的單（YYYY-MM）
+    pay_amount = Column(Integer, nullable=True)                   # 加班費金額（核准時算定）
+    payroll_line_id = Column(String(32), nullable=True)           # 已經進了 payroll_lines 的哪一列
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("idx_ot_staff_date", "staff_id", "date"), Index("idx_ot_status", "status"))

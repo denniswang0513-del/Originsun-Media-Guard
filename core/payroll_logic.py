@@ -36,7 +36,7 @@ DEFAULT_RATES: Dict = {
     "labor_rate": 0.125,            # 勞保普通事故 11.5% ＋ 就業保險 1%
     "labor_employee_share": 0.2,    # 勞工 20%／雇主 70%／政府 10%
     "labor_employer_share": 0.7,
-    "accident_rate": 0.0011,        # 職災保險費率（依行業別，雇主全額；勞保局通知多少就填多少）
+    "accident_rate": 0.0013,        # 職災保險費率（雇主全額）：影片及電視節目業 0.06% ＋ 上下班 0.07%（114 年公告，115 年沿用）
     "health_rate": 0.0517,          # 健保費率 5.17%
     "health_employee_share": 0.3,   # 本人 30%（眷屬每人再加一份）／雇主 60%／政府 10%
     "health_employer_share": 0.6,

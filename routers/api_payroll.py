@@ -240,8 +240,11 @@ async def _lines_of(session, run_id: str):
 
 
 async def _fill_lines(session, run: PayrollRun, keep: dict) -> list:
-    """把主檔在 run.month 適用的人全部算成列。keep＝{staff_id: 既有列}：手改欄保留，其餘照主檔重算。回寫到的 staff_id。"""
+    """把主檔在 run.month 適用的人全部算成列。keep＝{staff_id: 既有列}：手改欄保留，其餘照主檔重算。回寫到的 staff_id。
+    加班費：已核准、換加班費、掛這個月的加班單合計（routers.api_overtime.approved_pay_by_staff）；手改過 overtime_pay 的列不蓋。"""
+    from routers.api_overtime import approved_pay_by_staff, mark_lines   # 懶 import：那邊核准時也會回頭呼叫這裡
     rates = await _rates_for(session, int(run.month[:4]))
+    ot_pay = await approved_pay_by_staff(session, run.month)
     staff_rows = (await session.execute(select(CrmStaff).where(_ACTIVE_STAFF).order_by(CrmStaff.name))).scalars().all()
     profs = (await session.execute(select(StaffPayProfile))).scalars().all()
     by_staff: dict = {}
@@ -257,6 +260,8 @@ async def _fill_lines(session, run: PayrollRun, keep: dict) -> list:
         extras = {k: getattr(old, k) for k in manual} if old else {}
         if old and "work_hours" not in manual:
             extras["work_hours"] = old.work_hours       # 手填的時數不是「手改」，但也不該被重算洗掉
+        if "overtime_pay" not in manual:
+            extras["overtime_pay"] = ot_pay.get(s.id, 0)
         line = build_line(prof, rates, extras=extras)
         ln = old or PayrollLine(id=uuid.uuid4().hex, run_id=run.id, staff_id=s.id, created_at=_now())
         ln.staff_name, ln.profile_id = s.name, prof["id"]
@@ -268,7 +273,37 @@ async def _fill_lines(session, run: PayrollRun, keep: dict) -> list:
         if not old:
             session.add(ln)
         written.append(s.id)
+    await session.flush()
+    await mark_lines(session, run.month, {ln.staff_id: ln.id for ln in await _lines_of(session, run.id)})
     return written
+
+
+async def refresh_staff_line(session, staff_id: str, month: str) -> bool:
+    """加班核准後：`month` 的薪資單是草稿 → 只重算那個人那一列（手改欄照舊）。沒草稿或已確認 → False（下次產生時會帶）。"""
+    run = (await session.execute(select(PayrollRun).where(PayrollRun.entity == ENTITY, PayrollRun.month == month))).scalar_one_or_none()
+    if run is None or run.status != "草稿":
+        return False
+    old = {ln.staff_id: ln for ln in await _lines_of(session, run.id) if ln.staff_id == staff_id}
+    rates = await _rates_for(session, int(month[:4]))
+    from routers.api_overtime import approved_pay_by_staff, mark_lines
+    ot_pay = await approved_pay_by_staff(session, month)
+    ln = old.get(staff_id)
+    if ln is None:
+        return False
+    prof = await session.get(StaffPayProfile, ln.profile_id) if ln.profile_id else None
+    if prof is None:
+        return False
+    manual = list(ln.manual_fields or [])
+    extras = {k: getattr(ln, k) for k in manual}
+    extras["work_hours"] = ln.work_hours
+    if "overtime_pay" not in manual:
+        extras["overtime_pay"] = ot_pay.get(staff_id, 0)
+    line = build_line(_profile_dict(prof), rates, extras=extras)
+    for k in _LINE_FIELDS:
+        setattr(ln, k, line[k])
+    ln.updated_at = run.updated_at = _now()
+    await mark_lines(session, month, {staff_id: ln.id})
+    return True
 
 
 @router.get("/runs")

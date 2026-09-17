@@ -19,11 +19,11 @@ def test_grade_picks_first_level_at_or_above_and_caps():
 
 def test_insurance_2026_monthly_40100():
     """月薪 40,000 → 級距 40,100：勞保自負 40100×12.5%×20% ＝ 1,003；健保自負 40100×5.17%×30% ＝ 622；
-    雇主勞保 40100×12.5%×70% ＝ 3,509 ＋ 職災 44；雇主健保 40100×5.17%×60%×1.56 ＝ 1,940；勞退 6% ＝ 2,406。"""
+    雇主勞保 40100×12.5%×70% ＝ 3,509 ＋ 職災 52（0.13%）；雇主健保 40100×5.17%×60%×1.56 ＝ 1,940；勞退 6% ＝ 2,406。"""
     ins = insurance_for(40100, 40100, 0, 0, DEFAULT_RATES)
     assert ins["labor_self"] == 1003
     assert ins["health_self"] == 622
-    assert ins["labor_employer"] == 3509 + 44
+    assert ins["labor_employer"] == 3509 + 52
     assert ins["health_employer"] == 1940
     assert ins["pension_employer"] == 2406
     assert ins["pension_self"] == 0

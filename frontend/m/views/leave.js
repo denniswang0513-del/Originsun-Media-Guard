@@ -327,6 +327,120 @@ function openForm(host) {
     });
 }
 
+// ── 加班申請（docs/PAYROLL_OVERTIME_PLAN.md 第二批；/api/v1/me/overtime*）──
+// 員工只填日期、起訖、換補休或加班費、事由；時數與工作日／假日由後端 preview 算。清單畫在請假清單上面一小段。
+let _ot = null;
+let _otTimer = null;
+let _otSeq = 0;
+let _otBlocked = true;
+const OT = (id) => document.getElementById('ot-' + id);
+
+function otFormHtml() {
+    const v = (_ot && _ot.vocab) || {};
+    const payouts = v.payouts || ['補休', '加班費'];
+    const today = todayLocal();
+    return `
+      <div class="ttl">報加班</div>
+      <form class="m-form" id="ot-form" autocomplete="off">
+        <label class="req">加班日</label><input type="date" id="ot-date" value="${today}" max="${today}">
+        <div class="row2">
+          <div><label class="req">起</label><input type="time" id="ot-start_time" step="1800" value="18:00"></div>
+          <div><label class="req">訖</label><input type="time" id="ot-end_time" step="1800" value="20:00"></div>
+        </div>
+        <label class="req">換成</label>${segHtml('ot-payout', payouts, payouts[0])}
+        <div class="m-card" id="ot-preview" style="padding:10px 12px"><span class="sub">填好起訖就會算</span></div>
+        <div id="ot-warn" class="m-notice" style="background:#2a2410;border-color:#92400e;color:var(--warn);font-size:13px;line-height:1.6" hidden></div>
+        <div id="ot-errs" class="m-err" hidden></div>
+        <label>案子（選填）</label><input type="text" id="ot-project" placeholder="哪個案子">
+        <label class="req">事由</label><textarea id="ot-reason" rows="2" placeholder="做了什麼"></textarea>
+        <button type="submit" class="m-btn-primary" id="ot-submit" disabled>送出加班申請</button>
+      </form>`;
+}
+
+function otSchedulePreview() { clearTimeout(_otTimer); _otTimer = setTimeout(otRunPreview, PREVIEW_DEBOUNCE_MS); }
+
+async function otRunPreview() {
+    const seq = ++_otSeq;
+    const d = OT('date'), a = OT('start_time'), b = OT('end_time');
+    if (!d || !a || !b) return;
+    if (!d.value || !a.value || !b.value) { _otBlocked = true; if (OT('submit')) OT('submit').disabled = true; return; }
+    try {
+        const p = await mfetch('/api/v1/me/overtime/preview', { method: 'POST', body: { date: d.value, start_time: a.value, end_time: b.value, payout: OT('payout').value } });
+        if (seq !== _otSeq) return;
+        const errs = p.errors || [], warns = p.warnings || [];
+        const what = OT('payout').value === '補休' ? `補休 ${fmtH(p.credit_hours)} 小時` : (p.pay_amount != null ? `加班費 ${Number(p.pay_amount).toLocaleString('zh-TW')} 元` : '加班費（金額核准時算）');
+        OT('preview').innerHTML = `<b>${fmtH(p.hours)} 小時</b>（${esc(p.day_kind)}）→ ${what}<div class="sub">本月累計 ${fmtH(p.month_total)} 小時</div>`;
+        OT('warn').hidden = !warns.length; OT('warn').textContent = warns.map(w => w.msg).join('；');
+        OT('errs').hidden = !errs.length; OT('errs').textContent = errs.map(e => e.msg).join('；');
+        _otBlocked = errs.length > 0;
+    } catch (e) {
+        if (seq !== _otSeq) return;
+        OT('errs').hidden = false; OT('errs').textContent = (e && e.message) || '算不出來'; _otBlocked = true;
+    }
+    if (OT('submit')) OT('submit').disabled = _otBlocked;
+}
+
+function openOtForm(host) {
+    const body = openSheet(otFormHtml());
+    mountSeg('ot-payout', otSchedulePreview);
+    ['date', 'start_time', 'end_time'].forEach(k => OT(k).addEventListener('change', otSchedulePreview));
+    otSchedulePreview();
+    body.querySelector('#ot-form').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const reason = OT('reason').value.trim();
+        if (!reason) { toast('請填事由', 'err'); OT('reason').focus(); return; }
+        if (_otBlocked) { toast('還有錯誤沒解決，不能送出', 'err'); return; }
+        await withBusy(OT('submit'), async () => {
+            try {
+                await mfetch('/api/v1/me/overtime', { method: 'POST', body: { date: OT('date').value, start_time: OT('start_time').value, end_time: OT('end_time').value,
+                                                                       payout: OT('payout').value, reason, project_name: OT('project').value.trim() || null } });
+                toast('已送出，等主管核准');
+                closeSheet();
+                await loadOt(host);
+            } catch (e) {
+                const msgs = errorMessages(e);
+                OT('errs').hidden = false; OT('errs').textContent = msgs.join('；');
+                toast(msgs[0], 'err');
+            }
+        });
+        if (OT('submit')) OT('submit').disabled = _otBlocked;
+    });
+}
+
+function otCardHtml(i) {
+    const what = i.payout === '補休' ? `補休 ${fmtH(i.credit_hours)} h` : (i.pay_amount != null ? `加班費 ${Number(i.pay_amount).toLocaleString('zh-TW')} 元` : '加班費');
+    return `<div class="m-card" style="padding:10px 12px">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b>${esc(fmtDate(i.date))} ${esc(i.start_time)}–${esc(i.end_time)}</b>${pill(i.status, statusPillCls(i.status))}</div>
+      <div class="sub">${fmtH(i.hours)} h（${esc(i.day_kind)}）→ ${what}${i.project_name ? '・' + esc(i.project_name) : ''}</div>
+      ${i.reason ? `<div class="sub">${esc(i.reason)}</div>` : ''}
+      ${i.status === '已退回' && i.reject_note ? `<div class="sub" style="color:var(--warn)">退回：${esc(i.reject_note)}</div>` : ''}
+      ${i.status === '待審' ? `<div class="m-actions" style="margin-top:6px"><button type="button" class="m-btn" data-ot-cancel="${esc(i.id)}">撤回</button></div>` : ''}
+    </div>`;
+}
+
+async function loadOt(host) {
+    const box = host.querySelector('#lv-ot-box');
+    if (!box) return;
+    try {
+        _ot = await mfetch('/api/v1/me/overtime');
+    } catch (e) {
+        box.innerHTML = ''; return;   // 沒鑰匙／沒綁人員：請假那段已經畫了提示，這裡不重複
+    }
+    const m = _ot.month || {};
+    const items = (_ot.items || []).slice(0, 5);
+    box.innerHTML = `<div class="m-h" style="font-size:15px;margin-top:6px">加班 <span class="sub">本月 ${fmtH(m.hours)} h・補休 +${fmtH(m.credit_hours)} h・加班費 ${Number(m.pay_amount || 0).toLocaleString('zh-TW')} 元</span></div>
+      ${items.length ? items.map(otCardHtml).join('') : '<div class="sub" style="padding:4px 0 8px">今年還沒報過加班</div>'}`;
+    const btn = host.querySelector('#lv-ot-new'); if (btn) btn.disabled = false;
+}
+
+async function cancelOt(btn, host) {
+    if (!confirm('撤回這張加班單？')) return;
+    await withBusy(btn, async () => {
+        try { await mfetch('/api/v1/me/overtime/' + btn.dataset.otCancel + '/cancel', { method: 'POST', body: {} }); toast('已撤回'); await loadOt(host); }
+        catch (e) { toast(errorMessages(e)[0], 'err'); }
+    });
+}
+
 export async function render(host, { first }) {
     if (first) {
         host.innerHTML = `
@@ -334,13 +448,18 @@ export async function render(host, { first }) {
           <div id="lv-stats-box"></div>
           <div class="m-actions" style="margin:0 0 12px">
             <button type="button" class="m-btn pri" id="lv-new" disabled>請假</button>
+            <button type="button" class="m-btn" id="lv-ot-new" disabled>報加班</button>
           </div>
+          <div id="lv-ot-box"></div>
           <div id="lv-list"></div>`;
         host.addEventListener('click', (ev) => {
             if (ev.target.closest('#lv-new')) { openForm(host); return; }
+            if (ev.target.closest('#lv-ot-new')) { openOtForm(host); return; }
+            const oc = ev.target.closest('button[data-ot-cancel]');
+            if (oc) { cancelOt(oc, host); return; }
             const c = ev.target.closest('button[data-cancel]');
             if (c) cancelRequest(c, host);
         });
     }
-    if (shouldLoad('leave', { first })) await load(host);   // 切回來 60 秒內沒改過就不重抓（同其他分頁）
+    if (shouldLoad('leave', { first })) { await load(host); await loadOt(host); }   // 切回來 60 秒內沒改過就不重抓（同其他分頁）
 }

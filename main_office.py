@@ -46,7 +46,7 @@ logger = logging.getLogger("office-api")
 # 要掛的 router 模組。順序照 main.py 的 _ROUTER_MODULES（先註冊先贏，CRM 內部有順序相依）。
 _ROUTER_MODULES = (
     "api_auth",
-    "api_me", "api_timesheets", "api_hr", "api_journal", "api_milestones",
+    "api_me", "api_timesheets", "api_hr", "api_overtime", "api_journal", "api_milestones",   # 加班申請：員工手機在 NAS 上也要能報
     "api_crm",          # 薄殼，re-export routers/crm 的 composition root
     "api_crm_mobile",
     # 士源帳本（私帳手機版，owner 2026-09-12「主機關機手機也要能用」）：執行專案／資產／

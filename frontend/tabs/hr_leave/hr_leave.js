@@ -117,6 +117,7 @@ async function _show(view) {
         return _renderBalances();
     }
     if (view === 'holidays') return _loadHolidays();
+    if (view === 'overtime') { if (await _loadOvertime()) _renderOvertime(); return; }
 }
 
 // ══════════════════════════ 1. 待核佇列 ══════════════════════════
@@ -652,6 +653,113 @@ function _bindHolidays() {
 }
 
 // ── 進入點 ──
+// ══════════════════════════ 5. 加班佇列（docs/PAYROLL_OVERTIME_PLAN.md 第二批） ══════════════════════════
+// 員工在工作台／假勤頁／手機報加班（/api/v1/me/overtime），這裡簽核（/api/v1/hr/overtime）。
+// 核准＝補休進時數帳（平日 1:1、假日 1:2）或加班費掛進那個月的薪資單草稿；退回要寫理由。核准／退回只在 Lv3 畫。
+let _ot = [];                 // 目前篩選的加班單
+let _otFilter = { status: '待審', staff_id: '' };
+let _otVocab = { month_warn_hours: 46, month_max_hours: 54 };
+const OT_PILL = { '待審': 'pending', '已核准': 'approved', '已退回': 'rejected', '已撤回': 'cancelled' };
+const _otH = (h) => fmtH(h);
+
+async function _loadOvertime() {
+    const q = new URLSearchParams();
+    if (_otFilter.status) q.set('status', _otFilter.status);
+    if (_otFilter.staff_id) q.set('staff_id', _otFilter.staff_id);
+    const r = await hget('/overtime?' + q.toString());
+    if (!r.ok) { el('hl-content').innerHTML = `<div class="hl-empty">${tabLoadError(r.status, '請補修')}</div>`; return false; }
+    const d = await r.json();
+    _ot = d.items || [];
+    if (d.vocab) _otVocab = Object.assign({}, _otVocab, d.vocab);
+    return true;
+}
+
+async function _refreshOtCount() {
+    const r = await hget('/overtime?status=待審&limit=200');
+    const cnt = el('hl-nav-ot-cnt');
+    if (r.ok && cnt) { const n = ((await r.json()).items || []).length; cnt.textContent = n ? String(n) : ''; }
+}
+
+function _otMonthPill(it) {
+    const t = Number(it.month_total || 0);
+    const cls = t > _otVocab.month_max_hours ? 'ot-bad' : (t > _otVocab.month_warn_hours ? 'ot-warn' : 'ot-ok');
+    return `<span class="hl-pill ${cls}" title="這個人這個月（待審＋已核准）的加班累計；46 小時標黃、54 小時擋下">${_otH(t)} / ${_otVocab.month_warn_hours} h</span>`;
+}
+
+function _otWhat(it) {
+    if (it.payout === '補休') return `補休 ${_otH(it.credit_hours)} 小時`;
+    if (it.pay_amount == null) return '加班費（核准時算金額）';
+    return `加班費 ${Number(it.pay_amount).toLocaleString('zh-TW')} 元${it.pay_month ? `（掛 ${esc(it.pay_month)} 薪資單）` : ''}`;
+}
+
+function _otCard(it) {
+    const acts = !isAdmin() || it.status !== '待審' ? ''
+        : `<button class="hl-btn ok" data-ot-approve="${esc(it.id)}">核准</button>
+           <button class="hl-btn warn" data-ot-reject="${esc(it.id)}">退回</button>`;
+    const md = (d) => esc(String(d || '').slice(5).replace('-', '/'));
+    return `<div class="hl-qcard" data-ot="${esc(it.id)}">
+        <div class="hl-qhead"><b>${esc(it.staff_name)}</b><span>${esc(it.day_kind)}加班</span><span class="hl-pill ${OT_PILL[it.status] || ''}">${esc(it.status)}</span>${_otMonthPill(it)}</div>
+        <div class="hl-qline"><span class="k">時間</span>${md(it.date)} ${esc(it.start_time)}～${esc(it.end_time)}（${_otH(it.hours)} 小時）</div>
+        <div class="hl-qline"><span class="k">換成</span>${_otWhat(it)}</div>
+        ${it.project_name ? `<div class="hl-qline"><span class="k">案子</span>${esc(it.project_name)}</div>` : ''}
+        <div class="hl-qline"><span class="k">事由</span>${esc(it.reason) || '—'}</div>
+        ${it.status === '已退回' ? `<div class="hl-qline"><span class="k">退回理由</span>${esc(it.reject_note) || '—'}</div>` : ''}
+        ${it.approved_by ? `<div class="hl-qline"><span class="k">${it.status === '已退回' ? '退回' : '核准'}</span>${esc(it.approved_by)} ${esc((it.approved_at || '').slice(0, 16).replace('T', ' '))}</div>` : ''}
+        <div class="hl-qline"><span class="k">送出</span>${esc((it.created_at || '').slice(0, 16).replace('T', ' ')) || '—'}</div>
+        <div class="hl-qacts">${acts}</div>
+    </div>`;
+}
+
+function _renderOvertime() {
+    const statuses = ['待審', '已核准', '已退回', '已撤回'];
+    el('hl-content').innerHTML = `<div class="hl-card">
+        <h3>加班佇列（${_ot.length}）</h3>
+        <div class="hl-form" style="margin-bottom:10px;">
+            <select id="hl-ot-status"><option value="">全部狀態</option>${statuses.map(s => `<option value="${s}" ${_otFilter.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select>
+            <select id="hl-ot-staff"><option value="">全部人員</option>${_staff.map(s => `<option value="${esc(s.staff_id)}" ${_otFilter.staff_id === s.staff_id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+            <button class="hl-btn ghost" id="hl-ot-reload">重新整理</button>
+        </div>
+        ${_ot.length ? `<div class="hl-grid">${_ot.map(_otCard).join('')}</div>` : '<div class="hl-empty">沒有加班單</div>'}
+        <div class="hl-note">核准後：換補休的直接進時數帳（工作日 1:1、假日 1:2，當年 12/31 到期）；換加班費的算定金額掛進加班日那個月的薪資單草稿（那個月已確認就掛下個月），
+        沒有薪資主檔的人算不出金額、核准會被擋下。每月累計超過 46 小時標黃，超過 54 小時員工端送不出來。退回要寫理由，會通知申請人。</div>
+    </div>`;
+    _bindOvertime();
+}
+
+function _bindOvertime() {
+    const host = el('hl-content');
+    host.onclick = async (ev) => {
+        const t = ev.target.closest('button');
+        if (!t) return;
+        if (t.id === 'hl-ot-reload') { await _loadOvertime(); _renderOvertime(); return; }
+        if (t.dataset.otApprove) return _otApprove(t.dataset.otApprove);
+        if (t.dataset.otReject) return _otReject(t.dataset.otReject);
+    };
+    host.onchange = async (ev) => {
+        if (ev.target.id === 'hl-ot-status') _otFilter.status = ev.target.value;
+        else if (ev.target.id === 'hl-ot-staff') _otFilter.staff_id = ev.target.value;
+        else return;
+        await _loadOvertime(); _renderOvertime();
+    };
+}
+
+async function _otApprove(id) {
+    const it = _ot.find(x => x.id === id);
+    if (!it || !confirm(`核准 ${it.staff_name} ${it.date} 的加班（${_otWhat(it)}）？`)) return;
+    const r = await hpost(`/overtime/${id}/approve`);
+    if (!r.ok) { alert(await _fail(r, '核准失敗')); return; }
+    await _loadOvertime(); _renderOvertime(); _refreshOtCount();
+}
+
+async function _otReject(id) {
+    const note = prompt('退回理由（會通知申請人）：');
+    if (note === null) return;
+    if (!note.trim()) { alert('退回要寫理由'); return; }
+    const r = await hpost(`/overtime/${id}/reject`, { note: note.trim() });
+    if (!r.ok) { alert(await _fail(r, '退回失敗')); return; }
+    await _loadOvertime(); _renderOvertime(); _refreshOtCount();
+}
+
 export async function initHrLeaveTab() {
     const nav = el('hl-nav');
     if (nav && !nav.dataset.bound) {
@@ -662,4 +770,5 @@ export async function initHrLeaveTab() {
         };
     }
     await _load();
+    _refreshOtCount();   // 加班佇列的待審數（best-effort）
 }

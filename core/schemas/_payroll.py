@@ -46,6 +46,31 @@ class PayrollRunCreate(BaseModel):
     note: Optional[str] = None
 
 
+class MeOvertimeCreate(BaseModel):
+    """POST /me/overtime（本人）：時數由起訖算、種類由假日表判，這兩個不收（同請假：自助端不收客戶端算好的數字）。"""
+    date: str
+    start_time: str
+    end_time: str
+    payout: str = "補休"                     # 補休／加班費
+    reason: str = ""
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
+    shoot_id: Optional[str] = None
+
+
+class MeOvertimePreview(BaseModel):
+    """POST /me/overtime/preview：同 create 但事由可空、不寫入。"""
+    date: str
+    start_time: str
+    end_time: str
+    payout: str = "補休"
+    exclude_id: Optional[str] = None
+
+
+class OvertimeReject(BaseModel):
+    note: str
+
+
 class PayrollLineUpdate(BaseModel):
     """PUT /hr/payroll/runs/{id}/lines/{line_id}：只收手填欄（core.payroll_logic.LINE_EDITABLE）。"""
     work_hours: Optional[float] = Field(None, ge=0, le=744)

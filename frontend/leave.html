@@ -221,6 +221,7 @@
     <div class="lv-layout">
       <div class="lv-left">
       <div id="lv-card-host"></div>
+      <div id="lv-ot-host"></div>
       <!-- 請補休規章（owner 2026-09-15「這裡多一個請補修規章」；內容抄自 Notion「請補修規章」資料庫，
            https://app.notion.com/p/95bcbee3622a40b98b6d3d70af5e9763 —— 規章改了要來這裡同步改，
            程式裡對應的數字：core/leave_logic.NOTICE_DAYS（一週前）、SICK_CAP_DAYS（30 天）、cancel_mode（兩天前消假）） -->
@@ -309,6 +310,7 @@ try { if (localStorage.getItem("lv_rules_open") === "1") document.getElementById
 </script>
 <script src="./js/my/leave-host.js"></script>
 <script src="./js/my/cards-hr.js"></script>
+<script src="./js/my/cards-ot.js"></script>
 
 <script type="module">
 import { authFetch } from "/js/shared/utils.js";
@@ -380,6 +382,9 @@ async function boot() {
         const host = $("lv-card-host");
         host.innerHTML = "";
         host.appendChild(cardLeave(true));
+        const otHost = $("lv-ot-host");
+        otHost.innerHTML = "";
+        otHost.appendChild(cardOvertime(true));   // 加班申請卡（cards-ot.js）
     }
     if (canTeam) { $("lv-team").style.display = ""; loadTeamLeave(); }
 }
