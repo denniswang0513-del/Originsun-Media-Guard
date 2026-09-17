@@ -10,6 +10,7 @@ owner 2026-09-18「請讓所有的設定吻合勞基法」：
 種類由假日表判 —— 員工不填時數也不選種類（同請假：自助端點不收客戶端算好的數字）。
 """
 from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Iterable, List, Optional, Tuple
 
 from core.leave_logic import as_date, holiday_kind
@@ -38,7 +39,8 @@ def ot_hours(start_time: str, end_time: str, max_hours: float = 12.0) -> float:
     a, b = _minutes(start_time), _minutes(end_time)
     if b <= a:
         raise ValueError("結束要晚於開始")
-    h = round((b - a) / 60 * 2) / 2
+    # 四捨五入到 0.5：Python 的 round 是四捨六入五成雙，45 分與 75 分會一起變成 1.0 小時
+    h = float(Decimal((b - a) / 60 * 2).quantize(Decimal("1"), rounding=ROUND_HALF_UP)) / 2
     if h < MIN_HOURS:
         raise ValueError("至少 0.5 小時")
     if h > max_hours:
@@ -75,7 +77,19 @@ def month_cap_for(rates: Optional[dict] = None) -> float:
 
 
 def overlaps(a_start: str, a_end: str, b_start: str, b_end: str) -> bool:
+    """兩個時段有沒有疊到（端點相接不算疊）。"""
     return _minutes(a_start) < _minutes(b_end) and _minutes(b_start) < _minutes(a_end)
+
+
+def span_hours(pairs: Iterable[Tuple[str, str]]) -> float:
+    """一串 (起, 訖) 的時數合計（同 ot_hours 的 0.5 進位）。壞掉的時段跳過。"""
+    total = 0.0
+    for s, e in pairs:
+        try:
+            total += ot_hours(s, e, max_hours=24)
+        except ValueError:
+            continue
+    return round(total, 2)
 
 
 def expires_on_for(d) -> date:
@@ -107,6 +121,11 @@ def evaluate(on, start_time: str, end_time: str, payout: str, *, month_hours: fl
         errors.append({"code": "bad_range", "msg": str(e)})
     if hours and any(overlaps(start_time, end_time, s, e) for s, e in same_day):
         errors.append({"code": "overlap", "msg": "這天已經報過重疊的時段"})
+    day_max = daily_max_for(kind, r)
+    day_total = round(span_hours(same_day) + hours, 2)
+    if hours and day_total > day_max:
+        errors.append({"code": "day_max", "msg": f"這天加班會到 {day_total:g} 小時，超過{kind}的 {day_max:g} 小時"
+                                                 "（勞基法：一天正常＋延長工時不超過 12 小時）"})
     cap = month_cap_for(r)
     total = round(float(month_hours or 0) + hours, 2)
     if hours and total > cap:
@@ -126,7 +145,7 @@ def evaluate(on, start_time: str, end_time: str, payout: str, *, month_hours: fl
         else:
             pay = overtime_pay(hourly, hours, kind, r)
     return {"hours": hours, "day_kind": kind, "credit_hours": credit, "pay_amount": pay, "month_total": total, "month_cap": cap,
-            "errors": errors, "warnings": warnings}
+            "day_total": day_total, "day_max": day_max, "errors": errors, "warnings": warnings}
 
 
 def month_of(d) -> str:

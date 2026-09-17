@@ -109,3 +109,21 @@ def test_vocab_keys():
     for k in ("payouts", "statuses", "day_kinds", "month_cap", "month_warn_hours", "month_max_hours", "daily_max", "credit_multiplier", "overtime", "rule_text", "today"):
         assert k in v
     assert v["day_kinds"] == ["工作日", "休息日", "國定假日", "例假日"]
+
+
+def test_daily_cap_counts_every_request_on_that_day():
+    """BUG-3：每日上限只擋單張，同一天分兩張不重疊的單就繞過去了（工作日 4 h、休息日 12 h 是勞基法一天 12 小時那條）。"""
+    ev = evaluate(FRI, "22:00", "23:30", "補休", same_day=[("18:00", "22:00")])
+    assert any(e["code"] == "day_max" for e in ev["errors"]), "工作日已報 4 h，再 1.5 h 就超過"
+    ev2 = evaluate(SAT, "20:00", "23:00", "補休", same_day=[("08:00", "20:00")])
+    assert any(e["code"] == "day_max" for e in ev2["errors"]), "休息日已報 12 h"
+    ok = evaluate(FRI, "20:00", "22:00", "補休", same_day=[("18:00", "20:00")])
+    assert not ok["errors"], "同一天合計剛好 4 h 可以"
+
+
+def test_ot_hours_rounds_half_up_not_bankers():
+    """BUG-4：Python 的 round 是四捨六入五成雙 —— 45 分與 75 分都變 1.0 小時。改成四捨五入到 0.5。"""
+    assert ot_hours("18:00", "18:45") == 1.0
+    assert ot_hours("18:00", "19:15") == 1.5
+    assert ot_hours("18:00", "20:45") == 3.0
+    assert ot_hours("18:00", "18:15") == 0.5
