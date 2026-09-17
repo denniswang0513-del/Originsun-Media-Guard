@@ -62,3 +62,29 @@ def test_workspace_mobile_css_touch_targets():
     blk = blk[:blk.index("}\n</style>")]
     assert ".zone1 .btn { min-height: 44px; }" in blk and ".view-btn { padding: 10px 14px; min-height: 44px; }" in blk
     assert not _EMOJI.search(blk)
+
+
+def test_batch2_plan_find_remind_narrow_branches():
+    """第二批：我的一週一天一列（今天展開、點標題展開）、專案查詢一案一卡＋篩選收成一顆＋再載、要補填一行摘要。
+    都是窄螢幕分支；寬螢幕的板／表／那條一個字不變。"""
+    plan = js_code_only(repo_src("frontend/js/shared/ts-zone/plan.js"))
+    assert 'from "./narrow.js"' in plan and 'board.classList.add("tsn-plan")' in plan
+    assert 'if (d === today || s.planOpen.has(d)) col.classList.add("open")' in plan, "今天與點開過的展開"
+    assert "if (!dh || e.target.closest(\"button\")) return;" in plan, "點標題才展開，鈕不算"
+    find = js_code_only(repo_src("frontend/js/shared/ts-zone/find.js"))
+    assert 'from "./narrow.js"' in find and 'det.className = "tsn-filters"' in find and "bar.replaceWith(det); det.appendChild(bar);" in find
+    assert 'classList.add("tsn-on-find")' in find and "findCardsHtml(rows, z.s.findPage || 1)" in find and "[data-tsn-more]" in find
+    assert "s.findPage = 1; _redrawFindBody();" in find, "改篩選回第一頁"
+    for i in ("z1-find-q", "z1-f-status", "z1-f-type", "z1-f-pct", "z1-f-from", "z1-f-to"):
+        assert f'id="{i}"' in find, "篩選欄位的 id 不變（收進 details 而已）"
+    narrow = js_code_only(repo_src(NARROW))
+    cards = js_func_body(narrow, "export function findCardsHtml(rows, page = 1) {")
+    assert 'data-ts-action="open-project"' in cards and "FIND_PAGE" in cards, "點卡走原本的 open-project 委派；一次 30 案"
+    assert "export const FIND_PAGE = 30" in narrow
+    rm = repo_src("frontend/js/shared/ts-zone/remind.js")
+    rmc = js_code_only(rm)
+    assert "remindNarrowHtml(r) : remindHtml(r)" in rmc
+    nb = js_func_body(rmc, "export function remindNarrowHtml(r) {")
+    assert "const full = remindHtml(r);" in nb and 'if (!full) return "";' in nb, "完整那條還是同一份；填完一樣消失"
+    assert 'data-z1="day-goto"' in nb and "先補" in nb
+    assert not _EMOJI.search(rmc) and not _EMOJI.search(plan) and not _EMOJI.search(find)

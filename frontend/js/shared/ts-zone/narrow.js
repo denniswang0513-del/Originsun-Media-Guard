@@ -80,6 +80,38 @@ const CSS = `
 .tsn-week .c.ms.done { opacity: .6; text-decoration: line-through; }
 .tsn-week .none, .tsn-week .blank-day { opacity: .5; font-size: 13px; padding-top: 6px; display: block; }
 .tsn-week .blank-day { color: #b26a00; opacity: 1; }
+/* 我的一週：一天一列，今天展開、其他天點標題展開 */
+.tsn-plan { grid-template-columns: 1fr !important; }
+.tsn-plan .pcol { min-height: 0 !important; }
+.tsn-plan .pcol .dh { min-height: 44px; cursor: pointer; align-items: center; }
+.tsn-plan .pcol .dh .cnt { margin-left: auto; font-weight: 500; opacity: .75; }
+.tsn-plan .pcol:not(.open) .cards, .tsn-plan .pcol:not(.open) .add { display: none; }
+.tsn-plan .pcard { font-size: 14px; }
+.tsn-plan .pcol .addbtn { min-height: 44px; font-size: 14px; }
+/* 專案查詢：篩選收成一顆、一案一卡 */
+details.tsn-filters > summary { list-style: none; cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 14px; }
+details.tsn-filters > summary::-webkit-details-marker { display: none; }
+details.tsn-filters > summary .pill { border: 1px solid rgba(128,128,128,.45); border-radius: 999px; padding: 2px 10px; }
+details.tsn-filters .find-bar { flex-direction: column; align-items: stretch; }
+details.tsn-filters .find-bar .in, details.tsn-filters .find-bar .sel { width: 100%; min-width: 0; min-height: 44px; font-size: 16px; box-sizing: border-box; }
+.tsn-on-find > table { display: none; }
+.tsn-find { display: grid; gap: 8px; }
+.tsn-find .fc { border: 1px solid rgba(128,128,128,.35); border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+.tsn-find .fc .r1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.tsn-find .fc .r1 b { font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+.tsn-find .fc .r1 .pct { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; font-size: 13px; }
+.tsn-find .fc .r1 .pct.hi { color: #b26a00; } .tsn-find .fc .r1 .pct.over { color: #b3261e; }
+.tsn-find .fc .r2 { font-size: 13px; opacity: .75; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.tsn-find .fc .badge { font-size: 11px; border: 1px solid #fed7aa; color: #b45309; background: #fff7ed; border-radius: 999px; padding: 0 6px; }
+.tsn-find .fc .meter { height: 6px; background: rgba(128,128,128,.18); border-radius: 999px; overflow: hidden; margin-top: 6px; }
+.tsn-find .fc .meter i { display: block; height: 100%; background: #1f7a4d; }
+.tsn-find .fc .meter i.hi { background: #b26a00; } .tsn-find .fc .meter i.over { background: #b3261e; }
+.tsn-find .fc .r3 { font-size: 12.5px; opacity: .7; margin-top: 4px; }
+.tsn-find .more { text-align: center; }
+/* 要補填：一行摘要，點開才列全部日期 */
+details.tsn-remind > summary { list-style: none; cursor: pointer; min-height: 44px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+details.tsn-remind > summary::-webkit-details-marker { display: none; }
+details.tsn-remind > .today-strip { margin-top: 8px; }
 `;
 export function ensureNarrowCss() { ensureStyle("ts-zone-narrow-css", CSS); }
 
@@ -102,6 +134,25 @@ export function weekNarrowHtml({ cols, names, day, today, labelOf, cellHtml, sum
         return `<div class="p"><div class="who">${esc(n)}${sum}</div><div>${cellHtml(n, day)}</div></div>`;
     }).join("");
     return `<div class="tsn-week"><div class="tsn-seg">${seg}</div>${rows || '<div class="none">這一天沒有人。</div>'}</div>`;
+}
+
+// ── 專案查詢（窄）：一案一卡（點卡＝走原本的 open-project 委派開專案檔案）；一次 PAGE 張，再載 ──
+export const FIND_PAGE = 30;
+const pctCls = (p) => (p == null ? "" : (p > 100 ? "over" : (p >= 90 ? "hi" : "")));
+export function findCardsHtml(rows, page = 1) {
+    const shown = rows.slice(0, page * FIND_PAGE);
+    const cards = shown.map(p => {
+        const budget = p.budget_hours ?? p.base_hours ?? p.suggested_hours;
+        const pct = p.pct == null ? null : Number(p.pct);
+        return `<div class="fc" data-ts-action="open-project" data-name="${esc(p.project_name || "")}" data-pid="${esc(p.project_id)}">
+            <div class="r1"><b>${esc(p.project_name || p.project_id)}${p.stale ? ' <span class="badge">停滯</span>' : ""}</b>${pct == null ? "" : `<span class="pct ${pctCls(pct)}">${pct}%</span>`}</div>
+            <div class="r2">${p.client ? `<span>${esc(p.client)}</span>` : ""}${p.status || p.project_type ? `<span>${esc([p.status, p.project_type].filter(Boolean).join(" · "))}</span>` : ""}</div>
+            ${pct == null ? "" : `<div class="meter"><i class="${pctCls(pct)}" style="width:${Math.max(2, Math.min(100, pct))}%"></i></div>`}
+            <div class="r3">已投入 ${esc(p.hours_used ?? 0)}h${budget != null ? `／預算 ${esc(budget)}h` : ""}${p.last_entry ? ` · 最後填報 ${esc(p.last_entry)}` : ""}</div>
+        </div>`;
+    }).join("");
+    const rest = rows.length - shown.length;
+    return `<div class="tsn-find">${cards || '<div class="tsn-card add">沒有符合的</div>'}${rest > 0 ? `<button type="button" class="tsn-btn more" data-tsn-more>再載 ${Math.min(rest, FIND_PAGE)} 案（還有 ${rest}）</button>` : ""}</div>`;
 }
 
 // ── 今天的專案紀錄（窄）：卡片＋編輯面板，鏡射同一張表 ──

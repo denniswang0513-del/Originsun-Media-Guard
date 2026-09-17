@@ -6,6 +6,7 @@
 // 畫在分頁鈕列**上面**（mountZone 插的 #z1-remind），哪個視圖都看得到；填完重抓就消失。
 // ────────────────────────────────────────────────────────────────────────────
 import { z, _mdLabel } from "./ctx.js";
+import { isNarrow, ensureNarrowCss } from "./narrow.js";
 
 /** 重抓＋重畫。宿主在週記送出後、格子存了列之後也可以叫（window.TSZ.refreshReminders）。 */
 export async function loadReminders() {
@@ -15,7 +16,22 @@ export async function loadReminders() {
     if (!url) { host.innerHTML = ""; return; }            // 管理視角看別人／全部：沒有「我的」提醒
     let r;
     try { r = await z.mjson(url); } catch (_) { host.innerHTML = ""; return; }   // 提醒只是提醒，拿不到不擋整區
-    host.innerHTML = remindHtml(r);
+    host.innerHTML = isNarrow(host.parentElement || host) ? remindNarrowHtml(r) : remindHtml(r);
+}
+
+/** 窄螢幕（docs/WORKSPACE_RWD_PLAN.md 第二批）：一行摘要「專案紀錄沒填 N 天、週記沒送 M 週 → 先補最近那天」，點開才是完整那條。 */
+export function remindNarrowHtml(r) {
+    const full = remindHtml(r);
+    if (!full) return "";
+    ensureNarrowCss();
+    const esc = z.esc;
+    const parts = [];
+    if ((r.log_missing || []).length) parts.push(`專案紀錄沒填 ${r.log_missing.length} 天`);
+    if ((r.log_pending || []).length) parts.push(`草稿沒時數 ${r.log_pending.length} 天`);
+    if ((r.journals || []).length) parts.push(`週記沒送 ${r.journals.length} 週`);
+    const latest = [...(r.log_missing || []), ...(r.log_pending || [])].sort().pop();
+    const go = latest ? `<button type="button" class="linkish warn" data-z1="day-goto" data-day="${esc(latest)}">先補 ${esc(_mdLabel(latest))}</button>` : "";
+    return `<details class="tsn-remind"><summary><span class="k" style="color:#c9372c;font-weight:600">要補填</span><span>${parts.join("、")}</span>${go}<span class="meta">點開看全部</span></summary>${full}</details>`;
 }
 
 /** 純畫（測試用）。三段：專案紀錄沒填的日子／存了草稿沒填時數的日子／週記還沒送出的週。都空＝什麼都不畫。 */

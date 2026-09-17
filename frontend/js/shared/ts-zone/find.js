@@ -4,6 +4,7 @@
 import { createBurnSorter, burnTbodyHtml, burnTableHtml, projectFileHtml } from "/js/shared/ts-projects.js";
 import { openProjectPicker } from "/js/shared/project-picker.js";
 import { z, _POST, _PUT } from "./ctx.js";
+import { isNarrow, ensureNarrowCss, findCardsHtml } from "./narrow.js";
 
 /** 管理視角而且 /summary 給了錢欄位（私帳 scope）才多畫四欄。 */
 const _money = () => z.manage && (z.s.findRows || []).some(p => "contract_net" in p);
@@ -50,8 +51,18 @@ function _findFiltered() {
 function _findActive() { const st = z.s.findState; return !!(st.q || st.status || st.type || st.pct || st.from || st.to); }
 function _redrawFindBody() {
     const tb = document.querySelector("#my-burn-table tbody");
-    if (tb) { tb.innerHTML = burnTbodyHtml(z.s.findSorter.sorted(_findFiltered()), { editable: false, money: _money(), emptyText: "沒有符合的" }); z.s.findSorter.attach(); }
-    const c = z.$("z1-find-count"); if (c) c.textContent = `${_findFiltered().length} 案`;
+    const rows = z.s.findSorter.sorted(_findFiltered());
+    if (tb) { tb.innerHTML = burnTbodyHtml(rows, { editable: false, money: _money(), emptyText: "沒有符合的" }); z.s.findSorter.attach(); }
+    const c = z.$("z1-find-count"); if (c) c.textContent = `${rows.length} 案`;
+    // 窄螢幕：表格藏起來、同一批列畫成卡片（點卡＝open-project，跟表格的案名同一個委派）；一次 30 案，再載
+    const body = z.$("z1-find-body");
+    if (body && body.classList.contains("tsn-on-find")) {
+        let list = body.querySelector(":scope > .tsn-find");
+        const html = findCardsHtml(rows, z.s.findPage || 1);
+        if (list) list.outerHTML = html; else body.insertAdjacentHTML("beforeend", html);
+    }
+    const sum = z.$("z1-find-sum");
+    if (sum) { const n = ["status", "type", "pct", "from", "to", "q"].filter(k => z.s.findState[k]).length; sum.innerHTML = `<span class="pill">篩選${n ? `・${n}` : ""}</span><span>${rows.length} 案</span>`; }
 }
 /** 管理視角：專案查詢下方的「未對映 Sheet 案名」（/summary.unmatched；私帳 scope 才有 candidates／suggestions）。 */
 function _unmatchedHtml() {
@@ -135,9 +146,24 @@ export function _renderFindTable() {
             ${z.manage && z.hooks.isAdmin() && (s.findRows || []).some(p => p.suggested_hours != null) ? '<span class="sp" style="flex:1"></span><button type="button" class="btn" data-z1="suggest" title="合約未稅 ×（1−預期毛利）÷ 日成本 × 每日工時；只填沒設的案，已設的不動">套用建議預算（只填沒設的）</button>' : ""}</div>
         <div class="tsp" id="z1-find-body" style="overflow-x:auto;">${burnTableHtml("", "my-burn-table", { money: _money() })}</div>
         ${_unmatchedHtml()}`;
+    if (isNarrow(host)) {
+        // 窄螢幕（docs/WORKSPACE_RWD_PLAN.md 第二批）：篩選列收進 details（欄位的 id 都還在，監聽照掛）；表身改畫卡片
+        ensureNarrowCss();
+        const bar = host.querySelector(".find-bar");
+        const det = document.createElement("details");
+        det.className = "tsn-filters";
+        det.innerHTML = '<summary id="z1-find-sum"></summary>';
+        bar.replaceWith(det); det.appendChild(bar);
+        $("z1-find-body").classList.add("tsn-on-find");
+        s.findPage = 1;
+        if (!host.dataset.tsnWired) {
+            host.dataset.tsnWired = "1";
+            host.addEventListener("click", (e) => { if (e.target.closest("[data-tsn-more]")) { s.findPage = (s.findPage || 1) + 1; _redrawFindBody(); } });
+        }
+    }
     _redrawFindBody();          // 表身、排序、計數只有它一份（殼先畫空的 tbody）
     const clear = $("z1-f-clear");
-    const sync = () => { clear.hidden = !_findActive(); _redrawFindBody(); };
+    const sync = () => { clear.hidden = !_findActive(); s.findPage = 1; _redrawFindBody(); };
     $("z1-find-q").addEventListener("input", (e) => { s.findState.q = e.target.value; sync(); });
     [["z1-f-status", "status"], ["z1-f-type", "type"], ["z1-f-pct", "pct"], ["z1-f-from", "from"], ["z1-f-to", "to"]].forEach(([id, key]) =>
         $(id).addEventListener("change", (e) => { s.findState[key] = e.target.value; sync(); }));

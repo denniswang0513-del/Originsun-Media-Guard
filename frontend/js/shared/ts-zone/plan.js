@@ -6,6 +6,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 import { z, _z1MarkStale, _shiftDays, _dow, _mondayOf, _mdLabel, _isPlan, _POST, _PUT, whoIsMe } from "./ctx.js";
 import { _logProjectOptions } from "./log.js";
+import { isNarrow, ensureNarrowCss } from "./narrow.js";
 
 /** 半天／時段的字（team-week.js 有一份一樣的）。
  *  🔴 故意重複、不跨檔 import：每支 .js 各自被 Cloudflare 快取 4 小時，新這支配舊那支 ＝ 具名匯入失敗，
@@ -87,6 +88,28 @@ export function _renderMyWeek() {
                 <div class="add" data-add="${d}">${offKind(d) === "full" ? '<span class="addbtn off">休假日不排</span>' : `<button type="button" class="addbtn" data-z1="plan-add" data-day="${d}">加一項${otherHalf(d) ? `（只能排${otherHalf(d)}）` : ""}</button>`}</div>
             </div>`).join("")}</div>
         <div class="sheet-note">拖卡片到別的日子；卡片右上的 × 刪；還沒填時數的卡可以「挪到隔天」。當天的卡會自動出現在「今天的專案紀錄」的格子裡（藍底、狀態「計畫」），時數在那裡填。</div>`;
+    // 窄螢幕（docs/WORKSPACE_RWD_PLAN.md 第二批）：一天一列——今天（與點開過的）展開，其他天只留標題＋幾項幾小時；點標題展開
+    if (isNarrow(host)) {
+        ensureNarrowCss();
+        s.planOpen = s.planOpen || new Set();
+        const board = host.querySelector(".pboard");
+        board.classList.add("tsn-plan");
+        board.querySelectorAll(".pcol").forEach(col => {
+            const d = col.dataset.day, items = byDay(d), h = Math.round(items.reduce((a, i) => a + (i.hours || 0), 0) * 10) / 10;
+            col.querySelector(".dh").insertAdjacentHTML("beforeend", `<small class="cnt">${items.length ? `${items.length} 項${h ? ` · ${h} h` : ""}` : (offKind(d) === "full" ? "休假" : "沒排")}</small>`);
+            if (d === today || s.planOpen.has(d)) col.classList.add("open");
+        });
+        if (!host.dataset.tsnWired) {
+            host.dataset.tsnWired = "1";
+            host.addEventListener("click", (e) => {
+                const dh = e.target.closest(".tsn-plan .pcol .dh");
+                if (!dh || e.target.closest("button")) return;
+                const col = dh.closest(".pcol"), d = col.dataset.day;
+                col.classList.toggle("open");
+                if (col.classList.contains("open")) s.planOpen.add(d); else s.planOpen.delete(d);
+            });
+        }
+    }
 }
 export async function _planOpenAdd(day) {
     const esc = z.esc;
