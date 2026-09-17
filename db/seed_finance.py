@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 # 3xxx/6500 none。pnl_group=None 表示不進損益表（資產/負債/權益科目）。
 # pnl_group 值域對齊 owner 現行內部三表 Excel（2026-07-11 定案）：
 #   營業收入 / 營業成本-料 / 營業成本-工 / 營業成本-費 /
-#   營業費用-銷售 / 營業費用-管理 / 營業費用-研發 / 業外收入 / 業外支出 / 稅
+#   營業費用-銷售 / 營業費用-管理 / 營業費用-人事 / 營業費用-研發 / 業外收入 / 業外支出 / 稅
+#   （人事 2026-09-17 加：薪資／勞健保／獎金從管理拆出來，正本 core.finance_logic.OPEX_GROUPS）
 SEED_ACCOUNTS: list[tuple] = [
     # ── 資產 ──
     ("1100", "銀行存款", "公司銀行帳戶裡的錢", "asset", "operating", None),

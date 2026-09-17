@@ -67,11 +67,13 @@ def day_kind_for(d, holidays=None) -> str:
 
 
 def daily_max_for(day_kind: str, rates: Optional[dict] = None) -> float:
+    """這種日子一天最多能加幾小時（工作日 4、其餘 12 —— 勞基法一天正常＋延長 ≤ 12）。"""
     ot = (rates or DEFAULT_RATES)["overtime"]
     return float(ot["daily_max"].get(day_kind, 12))
 
 
 def month_cap_for(rates: Optional[dict] = None) -> float:
+    """每月延長工時上限：46；費率表勾了「經勞資會議同意」才是 54。"""
     ot = (rates or DEFAULT_RATES)["overtime"]
     return float(ot["month_cap_extended"] if ot.get("extended") else ot["month_cap"])
 
@@ -149,6 +151,7 @@ def evaluate(on, start_time: str, end_time: str, payout: str, *, month_hours: fl
 
 
 def month_of(d) -> str:
+    """日期 → 'YYYY-MM'。"""
     dd = as_date(d)
     return f"{dd.year}-{dd.month:02d}"
 
@@ -182,6 +185,7 @@ def summarize_month(items: Iterable[dict], month: str) -> dict:
 
 
 def vocab(rates: Optional[dict] = None) -> dict:
+    """給前端的字彙（鍵名是契約，加不刪）：換成什麼、狀態、四種日子、上限、倍率、規則白話。"""
     r = rates or DEFAULT_RATES
     ot = r["overtime"]
     return {"payouts": list(PAYOUTS), "statuses": list(OT_STATUSES), "day_kinds": list(DAY_KINDS),

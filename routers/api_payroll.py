@@ -128,6 +128,7 @@ async def list_profiles(request: Request, month: str = ""):
 
 @router.post("/profiles")
 async def create_profile(req: PayProfileCreate, request: Request):
+    """新增一段主檔（一人一個 effective_from 只能有一段）；投保級距留空就照底薪＋伙食費帶。"""
     payload = _guard(request)
     eff = _month_or_422(req.effective_from)
     _check_profile_enums(req.pay_type, req.payroll_entity)
@@ -156,6 +157,7 @@ async def create_profile(req: PayProfileCreate, request: Request):
 
 @router.put("/profiles/{profile_id}")
 async def update_profile(profile_id: str, req: PayProfileUpdate, request: Request):
+    """改一段主檔（只收給的欄位；staff_id 不能改）。回傳帶基本工資提醒。"""
     _guard(request)
     factory = db_factory_or_503()
     async with factory() as session:
@@ -182,6 +184,7 @@ async def update_profile(profile_id: str, req: PayProfileUpdate, request: Reques
 
 @router.delete("/profiles/{profile_id}")
 async def delete_profile(profile_id: str, request: Request):
+    """刪一段主檔。已產生的薪資單是快照，不受影響。"""
     _guard(request)
     factory = db_factory_or_503()
     async with factory() as session:
@@ -197,6 +200,7 @@ async def delete_profile(profile_id: str, request: Request):
 
 @router.get("/rates")
 async def get_rates(request: Request, year: int = 0):
+    """某年的費率表；沒存過就回系統預設（DEFAULT_RATES）並標 saved=False。"""
     _guard(request)
     year = year or datetime.now().year
     factory = db_factory_or_503()
@@ -209,6 +213,7 @@ async def get_rates(request: Request, year: int = 0):
 
 @router.put("/rates/{year}")
 async def put_rates(year: int, req: RateTablePut, request: Request):
+    """存某年的費率表（形狀由 normalize_rates 收斂：法定倍率與上限不給改）。"""
     payload = _guard(request)
     if not 2020 <= year <= 2100:
         raise HTTPException(status_code=422, detail="年份不對")
@@ -309,6 +314,7 @@ async def refresh_staff_line(session, staff_id: str, month: str) -> bool:
 
 @router.get("/runs")
 async def list_runs(request: Request):
+    """薪資單清單（新的月份在前）＋每張的人數、實發合計、公司總成本。"""
     _guard(request)
     factory = db_factory_or_503()
     async with factory() as session:
@@ -348,6 +354,7 @@ async def create_run(req: PayrollRunCreate, request: Request):
 
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str, request: Request):
+    """一張薪資單的明細（每人一列）＋合計。"""
     _guard(request)
     factory = db_factory_or_503()
     async with factory() as session:
@@ -446,6 +453,7 @@ async def confirm_run(run_id: str, request: Request):
 
 @router.delete("/runs/{run_id}")
 async def delete_run(run_id: str, request: Request):
+    """刪掉草稿（已確認的不給刪 —— 請款單已經長出去了）。"""
     _guard(request)
     factory = db_factory_or_503()
     async with factory() as session:

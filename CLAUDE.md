@@ -1407,6 +1407,13 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
      不然會靜靜掉回金額格式（長照的「撐得了 29.5 年」上線時就是印成「29.5 萬」，沒有測試釘）。
   ⑩ **「模擬到 90 歲用不完」是算術上必然的事**（固定報酬減通膨大於提領率就一定算不完），不能寫成一項通過的檢驗；
      真正會咬人的是報酬順序，所以另外算一條「前 10 年報酬 0%」。提領一律**年初先提**（同 Bengen），先長再提會高估 6–7%。
+- **加班申請（docs/PAYROLL_OVERTIME_PLAN.md 第二批，2026-09-18）**：`routers/api_overtime.py` 的 `router` 是 me＋hr 兩支**合成**的 ——
+  `include_router` 複製的是當下的路由，那三行一定要放在所有端點**之後**（放檔頭會得到一支空的，端點靜默 404）。
+  加班佇列的 `pay_amount` 一定要經 `redact_pay(items, can_see_money(request))`：金額 ÷ 時數 ÷ 倍率就回推得出月薪，
+  而看得到佇列的人（hr_leave／finance_partner）依鐵則不該看到薪水。`mark_lines` 只准動傳進來的那幾個 staff_id ——
+  核准單筆時只傳一個人，照掃整個月會把別人已接好的 `payroll_line_id` 清成 None。
+  法規數字（倍率、每日／每月／三個月上限、補休下限、基本工資、健保眷屬三口）全部只有 `core/payroll_logic.DEFAULT_OVERTIME`
+  一份，費率表頁只能改「假日倍率／勞資會議同意延長／補休換算」——別在別處再寫一組。
 - **薪資（docs/PAYROLL_OVERTIME_PLAN.md，2026-09-17）**：薪資單的錢**只在確認那一刻**變成請款單（`confirm_run`），之後改數字去請款單那邊，薪資單不回頭改（已確認 409）；
   重算（refresh）不覆蓋 `manual_fields` 裡的手改欄與手填時數；新表欄名刻意避開 amount／rate 這些字（`table_year` 不叫 `rates_year`），
   因為 `test_money_visibility` 的掃描器會逼每個像錢的欄位表態 —— 加欄位先看 core/money.py 的 `_PAYROLL_ONLY`。NAS office-api 刻意不掛 `api_payroll`。

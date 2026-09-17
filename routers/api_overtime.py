@@ -29,7 +29,8 @@ me_router = APIRouter(prefix="/api/v1/me/overtime", tags=["me"])
 hr_router = APIRouter(prefix="/api/v1/hr/overtime", tags=["hr"])
 
 VIEWERS = ("hr_leave", "finance_partner")
-LIST_LIMIT = 300
+LIST_LIMIT = 300        # 員工端與管理端的預設筆數
+LIST_LIMIT_MAX = 1000   # 管理端 ?limit= 的天花板
 
 
 def _now() -> datetime:
@@ -41,6 +42,7 @@ def _actor(payload) -> str:
 
 
 def ot_dict(o: HrOvertimeRequest) -> dict:
+    """一張加班單的對外形狀（員工端與管理端同一份；日期轉 ISO、沒算定的 pay_amount 留 None）。"""
     return {"id": o.id, "staff_id": o.staff_id, "staff_name": o.staff_name or "",
             "date": o.date.isoformat() if o.date else None, "start_time": o.start_time or "", "end_time": o.end_time or "",
             "hours": float(o.hours or 0), "day_kind": o.day_kind or "工作日", "payout": o.payout or "補休",
@@ -140,6 +142,7 @@ async def my_shoots_on(request: Request, date: str = ""):
 
 @me_router.post("/preview")
 async def preview_my_overtime(body: MeOvertimePreview, request: Request):
+    """試算：時數、工作日／假日、換到多少補休或加班費、當天與當月累計、擋下與提醒。不寫入。"""
     ident = await require_bound_staff(request, "me_leave")
     factory = db_factory_or_503()
     async with factory() as session:
@@ -148,6 +151,7 @@ async def preview_my_overtime(body: MeOvertimePreview, request: Request):
 
 @me_router.post("")
 async def apply_my_overtime(body: MeOvertimeCreate, request: Request):
+    """本人送加班單（固定進待審）。時數與日子種類由後端算；errors 非空 → 422。"""
     ident = await require_bound_staff(request, "me_leave")
     if not (body.reason or "").strip():
         raise HTTPException(status_code=422, detail="事由必填（做了什麼、哪個案子）")
@@ -227,7 +231,7 @@ async def list_overtime(request: Request, status: str = "", staff_id: str = "", 
             y, mo = int(month[:4]), int(month[5:7])
             q = q.where(HrOvertimeRequest.date >= as_date(f"{y}-{mo:02d}-01"),
                         HrOvertimeRequest.date < (as_date(f"{y + 1}-01-01") if mo == 12 else as_date(f"{y}-{mo + 1:02d}-01")))
-        rows = (await session.execute(q.order_by(HrOvertimeRequest.date.desc(), HrOvertimeRequest.created_at.desc()).limit(max(1, min(int(limit), 1000))))).scalars().all()
+        rows = (await session.execute(q.order_by(HrOvertimeRequest.date.desc(), HrOvertimeRequest.created_at.desc()).limit(max(1, min(int(limit), LIST_LIMIT_MAX))))).scalars().all()
         items = [ot_dict(r) for r in rows]
         totals = {}
         for it in items:
@@ -253,6 +257,7 @@ async def _get_pending(session, ot_id: str) -> HrOvertimeRequest:
 
 @hr_router.post("/{ot_id}/approve")
 async def approve_overtime(ot_id: str, request: Request):
+    """核准：換補休 → 時數帳長一列；換加班費 → 算定金額掛那個月的薪資單草稿（沒主檔算不出 → 409）。"""
     payload = check_admin(request)
     factory = db_factory_or_503()
     async with factory() as session:
@@ -294,6 +299,7 @@ async def approve_overtime(ot_id: str, request: Request):
 
 @hr_router.post("/{ot_id}/reject")
 async def reject_overtime(ot_id: str, body: OvertimeReject, request: Request):
+    """退回（理由必填，會通知申請人）。"""
     payload = check_admin(request)
     if not (body.note or "").strip():
         raise HTTPException(status_code=422, detail="退回要寫理由")

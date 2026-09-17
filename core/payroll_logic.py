@@ -312,6 +312,7 @@ def profile_as_of(profiles: Iterable[dict], month: str) -> Optional[dict]:
 
 
 def check_month(month: str) -> str:
+    """月份字串驗證：必須是 'YYYY-MM'。錯 raise ValueError（呼叫端轉 422）。"""
     if not isinstance(month, str) or len(month) != 7 or month[4] != "-" or not (month[:4] + month[5:]).isdigit():
         raise ValueError("月份要像 2026-09")
     if not 1 <= int(month[5:]) <= 12:
@@ -320,6 +321,7 @@ def check_month(month: str) -> str:
 
 
 def next_month(month: str) -> str:
+    """'2026-09' → '2026-10'；12 月跨年。"""
     y, m = int(month[:4]), int(month[5:])
     return f"{y + 1}-01" if m == 12 else f"{y}-{m + 1:02d}"
 
