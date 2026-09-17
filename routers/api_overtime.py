@@ -65,18 +65,21 @@ async def _hourly_for(session, staff_id: str, month: str):
 
 
 async def _others(session, staff_id: str, d, exclude_id: str = ""):
-    """同月其他單的時數合計、同一天其他單的 (start, end)。"""
+    """同月其他單的時數合計、同一天其他單的 (start, end)、含這個月往前三個月的合計（勞基法 138 小時那條）。"""
     m = month_of(d)
     y, mo = int(m[:4]), int(m[5:])
     d0 = as_date(f"{y}-{mo:02d}-01")
     d1 = as_date(f"{y + 1}-01-01") if mo == 12 else as_date(f"{y}-{mo + 1:02d}-01")
+    q0 = as_date(f"{y - 1}-{mo + 10:02d}-01") if mo <= 2 else as_date(f"{y}-{mo - 2:02d}-01")
     rows = (await session.execute(
         select(HrOvertimeRequest).where(HrOvertimeRequest.staff_id == staff_id, HrOvertimeRequest.status.in_(ACTIVE_STATUSES),
-                                        HrOvertimeRequest.date >= d0, HrOvertimeRequest.date < d1))).scalars().all()
+                                        HrOvertimeRequest.date >= q0, HrOvertimeRequest.date < d1))).scalars().all()
     rows = [r for r in rows if r.id != exclude_id]
-    month_hours = sum(float(r.hours or 0) for r in rows)
-    same_day = [(r.start_time, r.end_time) for r in rows if r.date == as_date(d)]
-    return month_hours, same_day
+    month_rows = [r for r in rows if r.date >= d0]
+    month_hours = sum(float(r.hours or 0) for r in month_rows)
+    quarter_hours = sum(float(r.hours or 0) for r in rows)
+    same_day = [(r.start_time, r.end_time) for r in month_rows if r.date == as_date(d)]
+    return month_hours, same_day, quarter_hours
 
 
 async def _evaluate(session, staff_id: str, body, exclude_id: str = "") -> dict:
@@ -84,9 +87,9 @@ async def _evaluate(session, staff_id: str, body, exclude_id: str = "") -> dict:
     if d is None:
         raise HTTPException(status_code=422, detail="加班日要像 2026-10-03")
     holidays = await leave_service.holidays_map(session)
-    month_hours, same_day = await _others(session, staff_id, d, exclude_id)
+    month_hours, same_day, quarter_hours = await _others(session, staff_id, d, exclude_id)
     hourly, rates = await _hourly_for(session, staff_id, month_of(d))
-    ev = evaluate(d, body.start_time, body.end_time, body.payout, month_hours=month_hours, same_day=same_day,
+    ev = evaluate(d, body.start_time, body.end_time, body.payout, month_hours=month_hours, quarter_hours=quarter_hours, same_day=same_day,
                   holidays=holidays, hourly=hourly, rates=rates)
     ev["date"] = d.isoformat()
     return ev
@@ -214,12 +217,12 @@ async def list_overtime(request: Request, status: str = "", staff_id: str = "", 
         for it in items:
             key = (it["staff_id"], it["date"][:7])
             if key not in totals:
-                mh, _sd = await _others(session, it["staff_id"], as_date(it["date"]))
+                mh, _sd, _q = await _others(session, it["staff_id"], as_date(it["date"]))
                 totals[key] = round(mh, 2)
         for it in items:
             it["month_total"] = totals[(it["staff_id"], it["date"][:7])]
         _h, rates = await _hourly_for(session, "", datetime.now().strftime("%Y-%m"))
-    return {"items": items, "vocab": vocab(rates), "statuses": list(OT_STATUSES)}
+    return {"items": items, "vocab": vocab(rates), "statuses": list(OT_STATUSES), "month_cap": vocab(rates)["month_cap"]}
 
 
 async def _get_pending(session, ot_id: str) -> HrOvertimeRequest:
@@ -237,12 +240,12 @@ async def approve_overtime(ot_id: str, request: Request):
     factory = db_factory_or_503()
     async with factory() as session:
         o = await _get_pending(session, ot_id)
-        holidays = await leave_service.holidays_map(session)
         now = _now()
         detail = ""
         if o.payout == "補休":
-            from core.leave_logic import overtime_credit_hours
-            hours = overtime_credit_hours(o.hours, o.date, holidays)
+            from core.payroll_logic import credit_hours_for
+            _h, rates = await _hourly_for(session, o.staff_id, month_of(o.date))
+            hours = credit_hours_for(o.hours, o.day_kind, rates)
             c = HrLeaveCredit(id=uuid.uuid4().hex, staff_id=o.staff_id, staff_name=o.staff_name, kind="補休", hours=hours,
                               granted_on=o.date, expires_on=expires_on_for(o.date), source="overtime",
                               reason=f"加班補休 {o.date.isoformat()} {o.start_time}–{o.end_time}" + (f"（{o.project_name}）" if o.project_name else ""),

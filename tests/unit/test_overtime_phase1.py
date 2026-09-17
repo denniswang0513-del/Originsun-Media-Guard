@@ -37,7 +37,7 @@ def test_manager_guards_and_approval_effects():
     ap = func_body(src, "async def approve_overtime(")
     assert "payload = check_admin(request)" in ap and "payload = check_admin(request)" in func_body(src, "async def reject_overtime(")
     assert 'kind="補休"' in ap and 'source="overtime"' in ap and "expires_on=expires_on_for(o.date)" in ap, "補休 → 時數帳一列、當年 12/31 到期"
-    assert "hours = overtime_credit_hours(o.hours, o.date, holidays)" in ap, "換算沿用 leave_logic（平日 1:1、假日 1:2）"
+    assert "hours = credit_hours_for(o.hours, o.day_kind, rates)" in ap, "補休換算照費率表（法定 1:1，公司給假日 1:2）"
     assert "o.pay_month = pay_month_for(o.date, confirmed)" in ap and "o.pay_amount = overtime_pay(hourly, o.hours, o.day_kind, rates)" in ap
     assert "還沒有薪資主檔" in ap, "沒主檔算不出加班費要擋"
     assert "await refresh_staff_line(session, o.staff_id, o.pay_month)" in ap

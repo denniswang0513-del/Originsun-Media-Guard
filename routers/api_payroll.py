@@ -18,7 +18,7 @@ from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503
 from core.hr_logic import active_staff_where
 from core.payroll_logic import (DEFAULT_RATES, LINE_EDITABLE, PAY_TYPES, PAYROLL_ENTITIES, build_line, check_month, default_grades,
-                                next_month, normalize_rates, profile_as_of, vocab)
+                                min_wage_warnings, next_month, normalize_rates, profile_as_of, vocab)
 from core.schemas import PayProfileCreate, PayProfileUpdate, PayrollLineUpdate, PayrollRunCreate, RateTablePut
 from db.models import CrmPaymentRequest, CrmStaff, PayrollLine, PayrollRateTable, PayrollRun, StaffPayProfile
 
@@ -151,7 +151,7 @@ async def create_profile(req: PayProfileCreate, request: Request):
                             created_by=_actor(payload), created_at=_now(), updated_at=_now())
         session.add(p)
         await session.commit()
-        return {"status": "ok", "profile": _profile_dict(p)}
+        return {"status": "ok", "profile": _profile_dict(p), "warnings": min_wage_warnings(p.pay_type, p.base_amount, rates)}
 
 
 @router.put("/profiles/{profile_id}")
@@ -176,7 +176,8 @@ async def update_profile(profile_id: str, req: PayProfileUpdate, request: Reques
                 setattr(p, k, data[k])
         p.updated_at = _now()
         await session.commit()
-        return {"status": "ok", "profile": _profile_dict(p)}
+        rates = await _rates_for(session, int(p.effective_from[:4]))
+        return {"status": "ok", "profile": _profile_dict(p), "warnings": min_wage_warnings(p.pay_type, p.base_amount, rates)}
 
 
 @router.delete("/profiles/{profile_id}")

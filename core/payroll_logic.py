@@ -7,8 +7,10 @@
 勞健保、勞退全部從「費率表」查（一年一份，DEFAULT_RATES 是系統帶的 2026 版；管理員在畫面改），
 不再手算。時薪制 base_pay ＝ 時薪 × 手填時數；月薪制 base_pay ＝ 底薪。
 
-加班費（owner：「照公司規定」）：工作日 ×1、假日 ×2，基數＝每小時工資（月薪 ÷ 240 或時薪）。
-倍率放費率表 overtime_multiplier，管理員可改；法定最低（1.34／1.67）只在畫面旁提醒，不擋。
+加班費照勞基法（owner 2026-09-18「請讓所有的設定吻合勞基法」）：§24 工作日前 2 小時 ×1.34、再 2 小時 ×1.67；
+休息日前 2 小時 ×1.34、第 3–8 小時 ×1.67、第 9–12 小時 ×2.67；§39 國定假日／例假日 8 小時內加發一日工資、超過的比照工作日延長。
+基數＝每小時工資（月薪 ÷ 240 或時薪）。每日正常＋延長 ≤ 12 小時、每月 ≤ 46（勞資會議同意可到 54、三個月 ≤ 138）。
+倍率與上限放費率表 `overtime`（DEFAULT_OVERTIME），管理員只能改「是否經勞資會議同意延長」與補休換算（法定 1:1，公司給假日 1:2）。
 """
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Dict, Iterable, List, Optional
@@ -16,7 +18,9 @@ from typing import Dict, Iterable, List, Optional
 PAY_TYPES = ("月薪", "時薪", "日薪")
 PAYROLL_ENTITIES = ("公司", "代發")          # 代發＝股東自己的人，公司只是過帳（docs/CASHBOOK_CLASSIFICATION.md）
 RUN_STATUSES = ("草稿", "已確認")
-DAY_KINDS = ("工作日", "假日")                 # 加班日種類：假日＝休息日／國定假日／例假／颱風假有上班
+DAY_KINDS = ("工作日", "休息日", "國定假日", "例假日")   # §36／§37：週六休息日、週日例假日、假日表的國定假日；颱風假比照休息日
+MIN_WAGE_MONTHLY_2026 = 29500                # 基本工資（2026）：月薪 29,500、時薪 196 —— 主檔低於這個只提醒不擋
+MIN_WAGE_HOURLY_2026 = 196
 LINE_EDITABLE = ("work_hours", "overtime_pay", "bonus_pay", "leave_deduction", "other_deduction", "note")
 HOURS_PER_MONTH = 240                       # 勞動部算法：30 天 × 8 小時
 MEAL_TAX_FREE = 3000                        # 伙食費免稅上限
@@ -48,10 +52,30 @@ DEFAULT_RATES: Dict = {
     "levels": LEVELS_2026,
     "hours_per_month": HOURS_PER_MONTH,
     "meal_tax_free": MEAL_TAX_FREE,
-    "overtime_multiplier": {"工作日": 1.0, "假日": 2.0},   # 公司規定；法定最低 1.34／1.67 只提醒
+    "min_wage_monthly": MIN_WAGE_MONTHLY_2026,
+    "min_wage_hourly": MIN_WAGE_HOURLY_2026,
 }
 
-_RATE_KEYS = tuple(k for k in DEFAULT_RATES if k not in ("year", "levels", "overtime_multiplier"))
+# 勞基法 §24／§32／§39 的加班規則（2026 現行）。tiers＝[[小時數, 倍率], …] 依序吃完，超過最後一段用最後一段的倍率。
+DEFAULT_OVERTIME: Dict = {
+    "workday_tiers": [[2, 1.34], [2, 1.67]],            # §24-1 工作日：前 2 h ×1.34、再 2 h ×1.67
+    "restday_tiers": [[2, 1.34], [6, 1.67], [4, 2.67]], # §24-2 休息日：前 2 h ×1.34、3–8 h ×1.67、9–12 h ×2.67
+    "holiday_day_wage_hours": 8,                        # §39 國定假日／例假日：8 h 內加發一日工資
+    "holiday_over_tiers": [[2, 1.34], [2, 1.67]],       # 超過 8 h 的部分比照工作日延長工時
+    "daily_max": {"工作日": 4, "休息日": 12, "國定假日": 12, "例假日": 12},   # §32-2 一日正常＋延長 ≤ 12 h
+    "month_cap": 46,                                    # §32-2 每月延長工時 ≤ 46
+    "month_cap_extended": 54,                           # 經勞資會議同意 → 54
+    "quarter_cap": 138,                                 # 且三個月 ≤ 138
+    "extended": False,                                  # 公司有勞資會議同意才勾（費率表頁）
+    "holiday_multiplier": 2.0,                          # 公司規定：假日（休息日／國定假日／例假日）加班費一律 ×2（owner 2026-09-18「假日×2 要留著」）；
+                                                        # 系統取「×2」與「法定」較高者，所以永遠不低於勞基法
+    "credit_multiplier": {"工作日": 1, "休息日": 2, "國定假日": 2, "例假日": 2},   # §32-1 補休法定 1:1；假日 1:2 是公司給的（owner 2026-09-07）
+}
+DEFAULT_RATES["overtime"] = DEFAULT_OVERTIME
+RULE_TEXT = "加班費：工作日照勞基法（前 2 小時 ×1.34、再 2 小時 ×1.67）；假日一律 ×2（公司規定；勞基法標準是休息日 ×1.34／1.67／2.67、國定假日加發一日工資，法定較高時取法定）。補休：工作日 1:1、假日 1:2。"
+DEFAULT_RATES["rule_text"] = RULE_TEXT
+
+_RATE_KEYS = tuple(k for k in DEFAULT_RATES if k not in ("year", "levels", "overtime", "rule_text"))
 
 
 def _r(x) -> int:
@@ -77,19 +101,44 @@ def normalize_rates(raw: Optional[dict], year: int = 0) -> dict:
         clean = sorted({int(float(x)) for x in lv if str(x).strip() and float(x) > 0})
         if clean:
             out["levels"] = clean
-    om = src.get("overtime_multiplier")
-    if isinstance(om, dict):
-        mult = dict(DEFAULT_RATES["overtime_multiplier"])
+    out["overtime"] = _normalize_overtime(src.get("overtime"))
+    out["rule_text"] = RULE_TEXT
+    return out
+
+
+def _tiers(raw, default):
+    if not isinstance(raw, list):
+        return [list(t) for t in default]
+    tiers = []
+    for t in raw:
+        try:
+            h, m = float(t[0]), float(t[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if h > 0 and m > 0:
+            tiers.append([h, m])
+    return tiers or [list(t) for t in default]
+
+
+def _normalize_overtime(raw) -> dict:
+    """費率表的 overtime 段：法定倍率與上限一律從 DEFAULT_OVERTIME 帶（畫面不給改）；只收 extended 與補休換算。"""
+    src = raw if isinstance(raw, dict) else {}
+    ot = {k: (dict(v) if isinstance(v, dict) else ([list(t) for t in v] if isinstance(v, list) else v)) for k, v in DEFAULT_OVERTIME.items()}
+    ot["extended"] = bool(src.get("extended", False))
+    try:
+        hm = float(src.get("holiday_multiplier", ot["holiday_multiplier"]))
+        ot["holiday_multiplier"] = hm if hm >= 1 else ot["holiday_multiplier"]
+    except (TypeError, ValueError):
+        pass
+    cm = src.get("credit_multiplier")
+    if isinstance(cm, dict):
         for k in DAY_KINDS:
             try:
-                if om.get(k) is not None:
-                    mult[k] = float(om[k])
+                if cm.get(k) is not None and float(cm[k]) >= 1:   # §32-1：補休不得低於 1:1
+                    ot["credit_multiplier"][k] = float(cm[k])
             except (TypeError, ValueError):
                 pass
-        out["overtime_multiplier"] = mult
-    else:
-        out["overtime_multiplier"] = dict(DEFAULT_RATES["overtime_multiplier"])
-    return out
+    return ot
 
 
 def grade_for(amount: int, max_level: int, levels: Iterable[int]) -> int:
@@ -139,10 +188,64 @@ def hourly_wage(pay_type: str, base_amount: int, rates: Optional[dict] = None) -
     return base / float((rates or DEFAULT_RATES).get("hours_per_month") or HOURS_PER_MONTH)
 
 
+def _tier_pay(hourly: float, hours: float, tiers: list) -> float:
+    """依序吃各段：[[2, 1.34], [2, 1.67]] → 前 2 小時 ×1.34、再 2 小時 ×1.67；超過最後一段的用最後一段倍率。"""
+    left, total, last = float(hours or 0), 0.0, 1.0
+    for span, mult in tiers:
+        take = min(left, float(span))
+        total += take * float(mult)
+        left -= take
+        last = float(mult)
+        if left <= 0:
+            break
+    if left > 0:
+        total += left * last
+    return hourly * total
+
+
+def legal_overtime_pay(hourly: float, hours: float, day_kind: str, rates: Optional[dict] = None) -> int:
+    """勞基法標準（§24／§39）：工作日與休息日分段倍率；國定假日／例假日 8 小時內加發一日工資（每小時工資 × 8），
+    超過 8 小時的部分比照工作日延長工時。回整數元。"""
+    ot = (rates or DEFAULT_RATES)["overtime"]
+    h = float(hours or 0)
+    if h <= 0:
+        return 0
+    if day_kind == "休息日":
+        return _r(_tier_pay(hourly, h, ot["restday_tiers"]))
+    if day_kind in ("國定假日", "例假日"):
+        day_hours = float(ot["holiday_day_wage_hours"])
+        base = hourly * day_hours
+        over = max(0.0, h - day_hours)
+        return _r(base + (_tier_pay(hourly, over, ot["holiday_over_tiers"]) if over else 0))
+    return _r(_tier_pay(hourly, h, ot["workday_tiers"]))
+
+
 def overtime_pay(hourly: float, hours: float, day_kind: str, rates: Optional[dict] = None) -> int:
-    """加班費＝每小時工資 × 時數 × 公司倍率（工作日 1、假日 2）。"""
-    mult = (rates or DEFAULT_RATES)["overtime_multiplier"]
-    return _r(float(hourly) * float(hours or 0) * float(mult.get(day_kind, mult["工作日"])))
+    """實際發的加班費：工作日照勞基法；假日（休息日／國定假日／例假日）公司規定一律 ×2（owner 2026-09-18「假日×2 要留著」），
+    但取「×2」與「法定」較高者 —— 永遠不低於勞基法（休息日第 9–12 小時法定 ×2.67、國定假日只做 3 小時法定仍給一日工資，這兩種法定較高）。"""
+    ot = (rates or DEFAULT_RATES)["overtime"]
+    legal = legal_overtime_pay(hourly, hours, day_kind, rates)
+    if day_kind == "工作日":
+        return legal
+    company = _r(float(hourly) * float(hours or 0) * float(ot.get("holiday_multiplier") or 2))
+    return max(company, legal)
+
+
+def credit_hours_for(hours: float, day_kind: str, rates: Optional[dict] = None) -> float:
+    """加班換補休的時數：法定 1:1（§32-1），公司給假日 1:2（費率表 credit_multiplier）。"""
+    cm = (rates or DEFAULT_RATES)["overtime"]["credit_multiplier"]
+    return round(float(hours or 0) * float(cm.get(day_kind, 1)), 2)
+
+
+def min_wage_warnings(pay_type: str, base_amount: int, rates: Optional[dict] = None) -> list:
+    """主檔低於基本工資 → 一句提醒（不擋：兼職工時制另有算法，owner 自己判斷）。"""
+    r = rates or DEFAULT_RATES
+    base = int(base_amount or 0)
+    if pay_type == "月薪" and 0 < base < int(r.get("min_wage_monthly") or 0):
+        return [f"月薪 {base:,} 低於 {r['year']} 年基本工資 {int(r['min_wage_monthly']):,}"]
+    if pay_type == "時薪" and 0 < base < int(r.get("min_wage_hourly") or 0):
+        return [f"時薪 {base} 低於 {r['year']} 年基本時薪 {int(r['min_wage_hourly'])}"]
+    return []
 
 
 def base_pay_for(pay_type: str, base_amount: int, work_hours: float) -> int:
@@ -219,5 +322,5 @@ def vocab(rates: Optional[dict] = None) -> dict:
     return {"pay_types": list(PAY_TYPES), "payroll_entities": list(PAYROLL_ENTITIES), "run_statuses": list(RUN_STATUSES),
             "day_kinds": list(DAY_KINDS), "line_editable": list(LINE_EDITABLE),
             "hours_per_month": r.get("hours_per_month", HOURS_PER_MONTH), "meal_tax_free": r.get("meal_tax_free", MEAL_TAX_FREE),
-            "overtime_multiplier": dict(r.get("overtime_multiplier") or DEFAULT_RATES["overtime_multiplier"]),
-            "legal_overtime_min": {"工作日前2小時": 1.34, "工作日第3-4小時": 1.67, "休息日前2小時": 1.34, "休息日第3-8小時": 1.67}}
+            "overtime": dict(r.get("overtime") or DEFAULT_OVERTIME), "rule_text": r.get("rule_text", RULE_TEXT),
+            "min_wage_monthly": r.get("min_wage_monthly"), "min_wage_hourly": r.get("min_wage_hourly")}

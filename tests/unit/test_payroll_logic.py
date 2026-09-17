@@ -2,9 +2,9 @@
 """core/payroll_logic 純規則（docs/PAYROLL_OVERTIME_PLAN.md §3）：級距、勞健保勞退、應發實發、加班費倍率、主檔生效段。"""
 import pytest
 
-from core.payroll_logic import (DEFAULT_RATES, LEVELS_2026, LINE_EDITABLE, base_pay_for, build_line, check_month, default_grades,
-                                grade_for, hourly_wage, insurance_for, line_totals, next_month, normalize_rates, overtime_pay,
-                                profile_as_of, vocab)
+from core.payroll_logic import (DEFAULT_RATES, LEVELS_2026, LINE_EDITABLE, base_pay_for, build_line, check_month, credit_hours_for,
+                                default_grades, grade_for, hourly_wage, insurance_for, legal_overtime_pay, line_totals, min_wage_warnings,
+                                next_month, normalize_rates, overtime_pay, profile_as_of, vocab)
 
 
 def test_grade_picks_first_level_at_or_above_and_caps():
@@ -56,13 +56,31 @@ def test_hourly_wage_and_base_pay():
     assert base_pay_for("日薪", 1800, 16) == 3600
 
 
-def test_overtime_company_rule_workday_x1_holiday_x2():
+def test_overtime_pay_workday_by_law_holiday_x2_never_below_law():
+    """工作日照 §24（前 2 h ×1.34、再 2 h ×1.67）；假日公司 ×2，但取「×2」與法定較高者。月薪 40,000 → 每小時 166.67。"""
     h = hourly_wage("月薪", 40000)
-    assert overtime_pay(h, 2, "工作日") == 333
-    assert overtime_pay(h, 8, "假日") == 2667
-    custom = normalize_rates({"overtime_multiplier": {"工作日": 1.34}})
-    assert overtime_pay(h, 2, "工作日", custom) == 447, "倍率可改（法定 1.34）"
-    assert custom["overtime_multiplier"]["假日"] == 2.0
+    assert overtime_pay(h, 2, "工作日") == 447
+    assert overtime_pay(h, 4, "工作日") == 1003
+    assert legal_overtime_pay(h, 8, "休息日") == 2117 and overtime_pay(h, 8, "休息日") == 2667, "休息日 8 h：公司 ×2 高於法定"
+    assert legal_overtime_pay(h, 12, "休息日") == 3897 and overtime_pay(h, 12, "休息日") == 4000, "12 h：×2 ＝ 4,000 仍高於法定 3,897"
+    assert legal_overtime_pay(h, 3, "國定假日") == 1333 and overtime_pay(h, 3, "國定假日") == 1333, "只做 3 h：法定一日工資較高，取法定"
+    assert overtime_pay(h, 9, "國定假日") == 3000, "9 h：×2 ＝ 3,000 高於法定 1,556"
+    assert overtime_pay(h, 0, "工作日") == 0
+    assert credit_hours_for(2, "工作日") == 2 and credit_hours_for(8, "休息日") == 16 and credit_hours_for(8, "國定假日") == 16
+
+
+def test_normalize_overtime_only_accepts_extended_and_credit():
+    r = normalize_rates({"overtime": {"workday_tiers": [[8, 0.5]], "extended": "yes", "credit_multiplier": {"工作日": 0.5, "休息日": 3}}})
+    assert r["overtime"]["workday_tiers"] == [[2, 1.34], [2, 1.67]], "法定倍率不給改"
+    assert r["overtime"]["extended"] is True
+    assert r["overtime"]["credit_multiplier"]["工作日"] == 1, "補休不得低於 1:1"
+    assert r["overtime"]["credit_multiplier"]["休息日"] == 3
+    assert normalize_rates(None)["overtime"]["extended"] is False
+
+
+def test_min_wage_warnings():
+    assert min_wage_warnings("月薪", 28000) and not min_wage_warnings("月薪", 29500)
+    assert min_wage_warnings("時薪", 190) and not min_wage_warnings("時薪", 196) and not min_wage_warnings("日薪", 1000)
 
 
 def test_line_totals_and_build_line_monthly():
@@ -111,6 +129,6 @@ def test_profile_as_of_and_months():
 
 def test_vocab_contract_keys():
     v = vocab()
-    for k in ("pay_types", "payroll_entities", "run_statuses", "day_kinds", "line_editable", "overtime_multiplier", "legal_overtime_min"):
+    for k in ("pay_types", "payroll_entities", "run_statuses", "day_kinds", "line_editable", "overtime", "rule_text", "min_wage_monthly"):
         assert k in v
     assert v["line_editable"] == list(LINE_EDITABLE)

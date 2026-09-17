@@ -57,7 +57,7 @@ function renderOvertime(body) {
         <div class="ot-stat"><b>${Number(m.pay_amount || 0).toLocaleString("zh-TW")}<small> 元</small></b><span>換到的加班費</span></div>
       </div>
       <div class="fo-box">
-        <div class="fo-head"><b>報加班</b><span class="fo-rule">工作日換補休 1:1、假日 1:2；加班費工作日 ×1、假日 ×2</span></div>
+        <div class="fo-head"><b>報加班</b><span class="fo-rule">${esc(v.rule_text || "")}</span></div>
         <div class="inline-row fo-times">
           <input type="date" id="ot-date" value="${esc(today)}" max="${esc(today)}" onchange="otDateChanged()">
           <input type="time" id="ot-a" step="1800" value="18:00" onchange="otPreview()">

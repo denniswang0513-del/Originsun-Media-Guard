@@ -13,7 +13,7 @@ const pput = (path, body) => authFetch(API + path, { method: 'PUT', body: body ?
 const pdel = (path) => authFetch(API + path, { method: 'DELETE' });
 
 let _view = 'runs';
-let _vocab = { pay_types: ['月薪', '時薪', '日薪'], payroll_entities: ['公司', '代發'], line_editable: [], overtime_multiplier: {}, legal_overtime_min: {} };
+let _vocab = { pay_types: ['月薪', '時薪', '日薪'], payroll_entities: ['公司', '代發'], line_editable: [], overtime: {}, rule_text: '' };
 let _runs = [];
 let _run = null;               // 目前打開的薪資單（含 lines）
 let _profiles = null;          // /profiles 的 staff 陣列
@@ -287,7 +287,10 @@ async function _saveProfile() {
     if (isEdit) { if (body.labor_grade === null) delete body.labor_grade; if (body.health_grade === null) delete body.health_grade; }
     const r = isEdit ? await pput('/profiles/' + _editProfile.profile.id, body) : await ppost('/profiles', body);
     if (!r.ok) { const m = el('hp-pmsg'); if (m) { m.textContent = await _fail(r, '存不了'); m.className = 'hp-msg err'; } return; }
-    _editProfile = null; _openHist.add(body.staff_id || _editProfile?.staff_id);
+    const saved = await r.json().catch(() => ({}));
+    if ((saved.warnings || []).length) alert('已存，但請注意：' + saved.warnings.join('；'));
+    const sid = _editProfile.staff_id;
+    _editProfile = null; _openHist.add(sid);
     await _loadProfiles(); _renderProfiles();
 }
 
@@ -308,7 +311,8 @@ async function _loadRates(year) {
 }
 
 function _renderRates() {
-    const R = _rates.rates; const om = R.overtime_multiplier || {};
+    const R = _rates.rates; const ot = R.overtime || {}; const cm = ot.credit_multiplier || {};
+    const tiers = (t) => (t || []).map(([h, m]) => `${h} h ×${m}`).join('、');
     const years = new Set([..._rates.years, _rates.year, new Date().getFullYear(), new Date().getFullYear() + 1]);
     el('hp-content').innerHTML = `<div class="hp-card">
         <h3>費率表 <select id="hp-ry">${[...years].sort().map(y => `<option value="${y}" ${y === _rates.year ? 'selected' : ''}>${y} 年${_rates.years.includes(y) ? '' : '（未存，用預設）'}</option>`).join('')}</select>
@@ -316,12 +320,19 @@ function _renderRates() {
             <span class="sp"></span><button class="hp-btn ok" data-act="rsave">儲存這一年</button><span class="hp-msg" id="hp-msg"></span></h3>
         <div class="hp-form">
             ${RATE_FIELDS.map(([k, label, step]) => `<label>${label}<input type="number" step="${step}" min="0" data-r="${k}" value="${R[k]}"></label>`).join('')}
-            <label>加班倍率：工作日<input type="number" step="0.01" min="0" data-om="工作日" value="${om['工作日'] ?? 1}"></label>
-            <label>加班倍率：假日<input type="number" step="0.01" min="0" data-om="假日" value="${om['假日'] ?? 2}"></label>
+            <label class="full" style="color:#aaa;">加班費規則（工作日照勞基法寫死；假日 ×2 是公司規定，系統取公司與法定較高者）
+                <div style="background:#1a1a1a;border:1px solid #333;border-radius:4px;padding:8px 10px;line-height:1.7;font-size:12.5px;color:#ccc;">
+                    工作日：${tiers(ot.workday_tiers)}（一天最多 4 小時）<br>
+                    假日（休息日／國定假日／例假日）：公司規定 ×${ot.holiday_multiplier}。勞基法標準：休息日 ${tiers(ot.restday_tiers)}；國定假日／例假日 ${ot.holiday_day_wage_hours} 小時內加發一日工資、超過的 ${tiers(ot.holiday_over_tiers)}<br>
+                    每月延長工時上限 ${ot.month_cap} 小時；經勞資會議同意可到 ${ot.month_cap_extended} 小時、三個月合計 ${ot.quarter_cap} 小時
+                </div></label>
+            <label>假日加班費倍率（公司規定；低於法定時系統自動取法定）<input type="number" step="0.1" min="1" data-ot="holiday_multiplier" value="${ot.holiday_multiplier}"></label>
+            <label><span>經勞資會議同意延長每月上限到 ${ot.month_cap_extended} 小時</span><select data-ot="extended"><option value="0" ${ot.extended ? '' : 'selected'}>沒有（上限 ${ot.month_cap}）</option><option value="1" ${ot.extended ? 'selected' : ''}>有（上限 ${ot.month_cap_extended}）</option></select></label>
+            ${['工作日', '休息日', '國定假日', '例假日'].map(k => `<label>補休換算：${k}（法定最低 1）<input type="number" step="0.5" min="1" data-cm="${k}" value="${cm[k] ?? 1}"></label>`).join('')}
             <label class="full">投保級距（一行一個或用逗號隔開；勞保、勞退、健保共用這一串，各取到自己的上限）<textarea class="hp-levels" data-r="levels">${(R.levels || []).join(', ')}</textarea></label>
         </div>
-        <div class="hp-note">每年 1 月照勞保局、健保署公告改一次就好。加班倍率是公司規定（工作日 ×1、假日 ×2）；法定最低是工作日前 2 小時 ×1.34、之後 ×1.67，這裡只提醒不擋。
-        自負額＝級距 × 費率 × 負擔比例，四捨五入到元；雇主健保另乘（1＋平均眷口數）。</div>
+        <div class="hp-note">每年 1 月照勞保局、健保署公告改一次就好。工作日加班費與每日／每月上限照勞基法寫死；能改的是假日倍率（公司 ×2，不會低於法定）、「有沒有經勞資會議同意延長」和補休換算（法定 1:1，公司目前給假日 1:2）。
+        自負額＝級距 × 費率 × 負擔比例，四捨五入到元；雇主健保另乘（1＋平均眷口數）。基本工資：月薪 ${fmt(R.min_wage_monthly)}、時薪 ${R.min_wage_hourly}，主檔低於這個會提醒。</div>
     </div>`;
     const host = el('hp-content');
     host.onchange = async (ev) => { if (ev.target.id === 'hp-ry') { await _loadRates(Number(ev.target.value)); _renderRates(); } };
@@ -330,7 +341,8 @@ function _renderRates() {
         const data = {};
         for (const [k] of RATE_FIELDS) data[k] = Number(host.querySelector(`[data-r="${k}"]`).value);
         data.levels = host.querySelector('[data-r="levels"]').value.split(/[\s,，]+/).filter(Boolean).map(Number);
-        data.overtime_multiplier = { '工作日': Number(host.querySelector('[data-om="工作日"]').value), '假日': Number(host.querySelector('[data-om="假日"]').value) };
+        const cmOut = {}; host.querySelectorAll('[data-cm]').forEach(i => { cmOut[i.dataset.cm] = Number(i.value); });
+        data.overtime = { extended: host.querySelector('[data-ot="extended"]').value === '1', holiday_multiplier: Number(host.querySelector('[data-ot="holiday_multiplier"]').value), credit_multiplier: cmOut };
         const r = await pput('/rates/' + _rates.year, { data });
         if (!r.ok) { _say(await _fail(r, '存不了'), true); return; }
         await _loadRates(_rates.year); _renderRates(); _say('已存');

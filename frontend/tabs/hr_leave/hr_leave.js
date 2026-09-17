@@ -658,7 +658,7 @@ function _bindHolidays() {
 // 核准＝補休進時數帳（平日 1:1、假日 1:2）或加班費掛進那個月的薪資單草稿；退回要寫理由。核准／退回只在 Lv3 畫。
 let _ot = [];                 // 目前篩選的加班單
 let _otFilter = { status: '待審', staff_id: '' };
-let _otVocab = { month_warn_hours: 46, month_max_hours: 54 };
+let _otVocab = { month_warn_hours: 38, month_max_hours: 46 };
 const OT_PILL = { '待審': 'pending', '已核准': 'approved', '已退回': 'rejected', '已撤回': 'cancelled' };
 const _otH = (h) => fmtH(h);
 
@@ -683,7 +683,7 @@ async function _refreshOtCount() {
 function _otMonthPill(it) {
     const t = Number(it.month_total || 0);
     const cls = t > _otVocab.month_max_hours ? 'ot-bad' : (t > _otVocab.month_warn_hours ? 'ot-warn' : 'ot-ok');
-    return `<span class="hl-pill ${cls}" title="這個人這個月（待審＋已核准）的加班累計；46 小時標黃、54 小時擋下">${_otH(t)} / ${_otVocab.month_warn_hours} h</span>`;
+    return `<span class="hl-pill ${cls}" title="這個人這個月（待審＋已核准）的加班累計；離每月上限不到 8 小時標黃、超過擋下">${_otH(t)} / ${_otVocab.month_max_hours} h</span>`;
 }
 
 function _otWhat(it) {
@@ -720,8 +720,8 @@ function _renderOvertime() {
             <button class="hl-btn ghost" id="hl-ot-reload">重新整理</button>
         </div>
         ${_ot.length ? `<div class="hl-grid">${_ot.map(_otCard).join('')}</div>` : '<div class="hl-empty">沒有加班單</div>'}
-        <div class="hl-note">核准後：換補休的直接進時數帳（工作日 1:1、假日 1:2，當年 12/31 到期）；換加班費的算定金額掛進加班日那個月的薪資單草稿（那個月已確認就掛下個月），
-        沒有薪資主檔的人算不出金額、核准會被擋下。每月累計超過 46 小時標黃，超過 54 小時員工端送不出來。退回要寫理由，會通知申請人。</div>
+        <div class="hl-note">核准後：換補休的直接進時數帳（工作日 1:1、假日 1:2，當年 12/31 到期）；換加班費的算定金額（工作日照勞基法 ×1.34／1.67；假日公司規定 ×2，法定較高時取法定）
+        掛進加班日那個月的薪資單草稿（那個月已確認就掛下個月），沒有薪資主檔的人算不出金額、核准會被擋下。每月累計離法定 46 小時不到 8 小時標黃、超過就送不出來（費率表勾「勞資會議同意延長」才到 54）。退回要寫理由，會通知申請人。</div>
     </div>`;
     _bindOvertime();
 }
