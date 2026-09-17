@@ -24,6 +24,7 @@ MIN_WAGE_HOURLY_2026 = 196
 LINE_EDITABLE = ("work_hours", "overtime_pay", "bonus_pay", "leave_deduction", "other_deduction", "note")
 HOURS_PER_MONTH = 240                       # 勞動部算法：30 天 × 8 小時
 MEAL_TAX_FREE = 3000                        # 伙食費免稅上限
+MAX_DEPENDENTS = 3                          # 健保法 §18：眷屬超過三口者，以三口計
 
 # 2026（民國 115 年）投保金額分級：勞保 11 級到 45,800、勞退到 150,000、健保到 313,000。
 # 三張表共用同一串級距（勞保／勞退只是取前段），跟勞保局公告的表一致；每年 1 月在費率表頁貼新表。
@@ -98,9 +99,16 @@ def normalize_rates(raw: Optional[dict], year: int = 0) -> dict:
             continue
     lv = src.get("levels")
     if isinstance(lv, list):
-        clean = sorted({int(float(x)) for x in lv if str(x).strip() and float(x) > 0})
+        clean = set()
+        for x in lv:                      # 貼進來的級距可能夾雜空字串、null、打錯的字 —— 跳過，不要 500
+            try:
+                n = int(float(x))
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                clean.add(n)
         if clean:
-            out["levels"] = clean
+            out["levels"] = sorted(clean)
     out["overtime"] = _normalize_overtime(src.get("overtime"))
     out["rule_text"] = RULE_TEXT
     return out
@@ -166,7 +174,7 @@ def insurance_for(labor_grade: int, health_grade: int, dependents: int, pension_
     勞退提繳工資另有上限（150,000），級距同健保那串取前段。"""
     lg, hg = int(labor_grade or 0), int(health_grade or 0)
     pg = grade_for(hg, rates["pension_max_level"], rates["levels"]) if hg else 0
-    dep = max(0, int(dependents or 0))
+    dep = min(max(0, int(dependents or 0)), MAX_DEPENDENTS)   # §18 超過三口以三口計
     labor_self = _r(lg * rates["labor_rate"] * rates["labor_employee_share"])
     labor_employer = _r(lg * rates["labor_rate"] * rates["labor_employer_share"]) + _r(lg * rates["accident_rate"])
     health_self = _r(hg * rates["health_rate"] * rates["health_employee_share"]) * (1 + dep)

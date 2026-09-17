@@ -132,3 +132,18 @@ def test_vocab_contract_keys():
     for k in ("pay_types", "payroll_entities", "run_statuses", "day_kinds", "line_editable", "overtime", "rule_text", "min_wage_monthly"):
         assert k in v
     assert v["line_editable"] == list(LINE_EDITABLE)
+
+
+def test_health_dependents_capped_at_three():
+    """BUG-5：健保法 §18「眷屬超過三口者，以三口計」。眷屬 5 口不該扣 6 份。"""
+    one = insurance_for(45800, 45800, 0, 0, DEFAULT_RATES)["health_self"]
+    assert insurance_for(45800, 45800, 3, 0, DEFAULT_RATES)["health_self"] == one * 4
+    assert insurance_for(45800, 45800, 5, 0, DEFAULT_RATES)["health_self"] == one * 4, "超過三口以三口計"
+    assert insurance_for(45800, 45800, 9, 0, DEFAULT_RATES)["health_self"] == one * 4
+
+
+def test_normalize_rates_survives_a_bad_level_token():
+    """BUG-6：級距貼到非數字（或前端 Number('') → null）不該 500。"""
+    r = normalize_rates({"levels": [29500, "abc", None, "", 30300, -5]})
+    assert r["levels"] == [29500, 30300]
+    assert normalize_rates({"levels": ["abc"]})["levels"] == DEFAULT_RATES["levels"], "全壞就退回預設"
