@@ -106,8 +106,9 @@ def test_summarize_month():
 
 def test_vocab_keys():
     v = vocab()
-    for k in ("payouts", "statuses", "day_kinds", "month_cap", "month_warn_hours", "month_max_hours", "daily_max", "credit_multiplier", "overtime", "rule_text", "today"):
+    for k in ("payouts", "statuses", "day_kinds", "month_cap", "warn_before_cap", "daily_max", "credit_multiplier", "overtime", "rule_text", "today"):
         assert k in v
+    assert "month_max_hours" not in v and "month_warn_hours" not in v, "同一個上限不給三個鍵；黃字門檻＝month_cap − warn_before_cap"
     assert v["day_kinds"] == ["工作日", "休息日", "國定假日", "例假日"]
 
 

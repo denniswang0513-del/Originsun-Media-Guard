@@ -47,8 +47,8 @@ function renderOvertime(body) {
     const v = OT.vocab || {};
     const m = OT.month || {};
     const today = v.today || new Date().toISOString().slice(0, 10);
-    const warn = v.month_warn_hours || 46, max = v.month_max_hours || 54;
-    const monthCls = m.hours > max ? "bad" : (m.hours > warn ? "warn" : "");
+    const cap = v.month_cap || 46, warn = cap - (v.warn_before_cap || 8);
+    const monthCls = m.hours > cap ? "bad" : (m.hours > warn ? "warn" : "");
     const payouts = v.payouts || ["補休", "加班費"];
     body.innerHTML = `
       <div class="ot-stats">

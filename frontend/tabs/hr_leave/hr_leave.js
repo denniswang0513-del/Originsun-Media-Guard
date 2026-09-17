@@ -658,7 +658,7 @@ function _bindHolidays() {
 // 核准＝補休進時數帳（平日 1:1、假日 1:2）或加班費掛進那個月的薪資單草稿；退回要寫理由。核准／退回只在 Lv3 畫。
 let _ot = [];                 // 目前篩選的加班單
 let _otFilter = { status: '待審', staff_id: '' };
-let _otVocab = { month_warn_hours: 38, month_max_hours: 46 };
+let _otVocab = { month_cap: 46, warn_before_cap: 8 };
 const OT_PILL = { '待審': 'pending', '已核准': 'approved', '已退回': 'rejected', '已撤回': 'cancelled' };
 const _otH = (h) => fmtH(h);
 
@@ -682,8 +682,9 @@ async function _refreshOtCount() {
 
 function _otMonthPill(it) {
     const t = Number(it.month_total || 0);
-    const cls = t > _otVocab.month_max_hours ? 'ot-bad' : (t > _otVocab.month_warn_hours ? 'ot-warn' : 'ot-ok');
-    return `<span class="hl-pill ${cls}" title="這個人這個月（待審＋已核准）的加班累計；離每月上限不到 8 小時標黃、超過擋下">${_otH(t)} / ${_otVocab.month_max_hours} h</span>`;
+    const cap = _otVocab.month_cap || 46;
+    const cls = t > cap ? 'ot-bad' : (t > cap - (_otVocab.warn_before_cap || 8) ? 'ot-warn' : 'ot-ok');
+    return `<span class="hl-pill ${cls}" title="這個人這個月（待審＋已核准）的加班累計；離每月上限不到 8 小時標黃、超過擋下">${_otH(t)} / ${cap} h</span>`;
 }
 
 function _otWhat(it) {

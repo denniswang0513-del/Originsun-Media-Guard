@@ -185,7 +185,6 @@ def vocab(rates: Optional[dict] = None) -> dict:
     r = rates or DEFAULT_RATES
     ot = r["overtime"]
     return {"payouts": list(PAYOUTS), "statuses": list(OT_STATUSES), "day_kinds": list(DAY_KINDS),
-            "month_cap": month_cap_for(r), "month_warn_hours": month_cap_for(r) - WARN_BEFORE_CAP_HOURS,
-            "month_max_hours": month_cap_for(r), "daily_max": dict(ot["daily_max"]),
+            "month_cap": month_cap_for(r), "warn_before_cap": WARN_BEFORE_CAP_HOURS, "daily_max": dict(ot["daily_max"]),
             "credit_multiplier": dict(ot["credit_multiplier"]), "overtime": ot, "rule_text": r.get("rule_text", ""),
             "today": datetime.now().date().isoformat()}
