@@ -26,7 +26,7 @@ _DEFAULT_TEMPLATE = [("訂金", 30), ("期中款", 40), ("尾款", 30)]
 
 
 async def _payroll_monthly_cost(factory) -> int:
-    """最近一張「已確認」薪資單的公司總成本合計（應發＋雇主勞健保勞退）；沒有就 0。"""
+    """最近一張「已確認」薪資單、`payroll_entity='公司'` 那幾列的公司總成本合計（應發＋雇主勞健保勞退）；沒有就 0。"""
     from sqlalchemy import func as _f, select as _sel
 
     from db.models import PayrollLine, PayrollRun
@@ -37,8 +37,10 @@ async def _payroll_monthly_cost(factory) -> int:
                 .order_by(PayrollRun.month.desc()).limit(1))).scalar()
             if not run_id:
                 return 0
+            # 只算「公司」那幾列：代發（股東自己的人）是過帳，api_payroll 開的請款單就記成「代發薪資」不算費用
             total = (await session.execute(
-                _sel(_f.coalesce(_f.sum(PayrollLine.employer_total), 0)).where(PayrollLine.run_id == run_id))).scalar()
+                _sel(_f.coalesce(_f.sum(PayrollLine.employer_total), 0))
+                .where(PayrollLine.run_id == run_id, PayrollLine.payroll_entity == "公司"))).scalar()
             return int(total or 0)
     except Exception:
         return 0

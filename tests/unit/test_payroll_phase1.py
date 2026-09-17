@@ -92,3 +92,9 @@ def test_frontend_tab_no_emoji_and_uses_auth_helpers():
     assert "authDownload(`${API}/runs/${_run.id}/export`" in code, "匯出要帶 token"
     assert "/*" not in code, "跟 hr_leave.js 一樣只用雙斜線註解"
     assert "confirm(`確認 ${_run.month} 薪資單" in code, "確認前要問一次"
+
+
+def test_cashflow_fallback_excludes_proxy_payroll():
+    """BUG-7：代發薪資是過帳（股東自己的人），不是公司費用 —— 現金流的固定月成本不該把它算進去。"""
+    body = func_body(repo_src("routers/api_cashflow.py"), "async def _payroll_monthly_cost(")
+    assert 'PayrollLine.payroll_entity == "公司"' in body, "只算公司要付的那幾列"
