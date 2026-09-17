@@ -91,3 +91,15 @@ def test_manager_queue_view():
     assert "if (view === 'overtime')" in js
     assert "hpost(`/overtime/${id}/approve`)" in js and "hpost(`/overtime/${id}/reject`, { note: note.trim() })" in js
     assert "!isAdmin() || it.status !== '待審'" in js, "核准／退回只在 Lv3 畫"
+
+
+def test_queue_hides_pay_amount_without_money_key():
+    """BUG-1：加班費金額回推得出月薪；人事（hr_leave）與合夥人（finance_partner）看得到佇列但不該看到金額。"""
+    from routers.api_overtime import redact_pay
+    items = [{"id": "a", "payout": "加班費", "pay_amount": 2667}, {"id": "b", "payout": "補休", "pay_amount": None}]
+    assert redact_pay([dict(x) for x in items], True)[0]["pay_amount"] == 2667, "有金額鑰匙照回"
+    out = redact_pay([dict(x) for x in items], False)
+    assert "pay_amount" not in out[0] and "pay_amount" not in out[1], "沒鑰匙就刪鍵（不是歸零）"
+    assert out[0]["payout"] == "加班費", "其他欄位不動"
+    src = repo_src("routers/api_overtime.py")
+    assert "redact_pay(items, can_see_money(request))" in func_body(src, "async def list_overtime("), "清單一定要經過它"

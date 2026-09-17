@@ -210,7 +210,8 @@ _PAYROLL_ONLY = {k: "薪資單／主檔的金額欄 —— /hr/payroll 整支 hr
     "leave_deduction", "other_deduction", "labor_self", "health_self", "pension_self", "labor_employer",
     "health_employer", "pension_employer", "gross_pay", "net_pay", "employer_total")}
 _PAYROLL_ONLY["pension_self_rate"] = "勞退自提比例（%），不是金額 —— 同上整支檔"
-_PAYROLL_ONLY["pay_amount"] = "加班申請核准時算定的加班費 —— /me/overtime 只回本人的；/hr/overtime 整支 hr_leave／管理員檔"
+_PAYROLL_ONLY["pay_amount"] = ("加班申請核准時算定的加班費 —— /me/overtime 只回本人的；/hr/overtime 的清單由 "
+                               "routers.api_overtime.redact_pay 用 can_see_money 刪鍵（人事與合夥人看得到佇列，但看不到金額）")
 
 REGISTRY_EXEMPT = {**_NOT_MONEY, **_ONLY_ON_BLOCKED_ROUTES,
                    **_PENDING_OWNER, **_FREE_TEXT, **_OWN_SCOPE, **_PAYROLL_ONLY}

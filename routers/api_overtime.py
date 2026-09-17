@@ -15,6 +15,7 @@ from sqlalchemy import select  # type: ignore
 
 from core.auth import check_admin, check_admin_or_module
 from core.db_guard import db_factory_or_503
+from core.money import can_see_money
 from core.identity import require_bound_staff
 from core.leave_logic import as_date
 from core.overtime_logic import (ACTIVE_STATUSES, OT_STATUSES, PAYOUTS, evaluate, expires_on_for, month_of, pay_month_for, summarize_month,
@@ -196,9 +197,24 @@ async def cancel_my_overtime(ot_id: str, request: Request):
 
 # ── 管理端 ────────────────────────────────────────────────────────────────
 
+def redact_pay(items: list, can_see: bool) -> list:
+    """沒有金額鑰匙就把 `pay_amount` 整個鍵刪掉（不是歸零 —— 同 core/money.py 抹除層的慣例）。
+
+    🔴 加班費金額回推得出時薪：`pay_amount ÷ 時數 ÷ 倍率` ＝ 每小時工資 × 240 ＝ 月薪。清單看得到的人
+    （人事那把 hr_leave、合夥人那把 finance_partner）本來就**不該**看到別人的薪水，合夥人更是絕不給 money_view
+    （core/ledger.py 的鐵則）。核准的人是管理員（Lv3），can_see_money 對他一律 True，看得到金額。
+    前端兩處（hr_leave.js `_otWhat`）判的是 `pay_amount == null`，鍵不在時是 undefined，正好走同一條「核准時算金額」。
+    """
+    if can_see:
+        return items
+    for it in items:
+        it.pop("pay_amount", None)
+    return items
+
+
 @hr_router.get("")
 async def list_overtime(request: Request, status: str = "", staff_id: str = "", month: str = "", limit: int = LIST_LIMIT):
-    """加班單清單（新的在前）＋每張單所屬月的累計小時（畫 46／54 的黃紅 pill）。"""
+    """加班單清單（新的在前）＋每張單所屬月的累計小時（畫上限的黃紅 pill）。沒有金額鑰匙的人看不到加班費金額。"""
     check_admin_or_module(request, *VIEWERS)
     factory = db_factory_or_503()
     async with factory() as session:
@@ -221,6 +237,7 @@ async def list_overtime(request: Request, status: str = "", staff_id: str = "", 
                 totals[key] = round(mh, 2)
         for it in items:
             it["month_total"] = totals[(it["staff_id"], it["date"][:7])]
+        redact_pay(items, can_see_money(request))
         _h, rates = await _hourly_for(session, "", datetime.now().strftime("%Y-%m"))
     return {"items": items, "vocab": vocab(rates), "statuses": list(OT_STATUSES), "month_cap": vocab(rates)["month_cap"]}
 
