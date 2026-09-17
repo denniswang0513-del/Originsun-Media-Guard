@@ -415,6 +415,12 @@ table.week .c.ms.done { color: var(--sub); background: #f6f6f6; border-color: va
     .grid { grid-template-columns: 1fr; gap: 20px; }
     .brand-name { display: none; }
     .zone1 .view { padding: 12px 10px; overflow-x: auto; }
+    /* 手機版（docs/WORKSPACE_RWD_PLAN.md）：鈕 44px 好按、視圖標題列直排、表格藏起來時面板字 16px 不會被 iOS 放大 */
+    .zone1 .btn { min-height: 44px; }
+    .view-btn { padding: 10px 14px; min-height: 44px; }
+    .vhead { flex-direction: column; align-items: stretch; }
+    .sheet-foot .vrow { width: 100%; }
+    .sheet-foot .vrow .btn { flex: 1 1 auto; }
 }
 </style>
 </head>

@@ -3,6 +3,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 import { z, _shiftDays, _dow, _mondayOf, _mdLabel, _POST } from "./ctx.js";
 import { _logProjectOptions, resetToday } from "./log.js";
+import { isNarrow, ensureNarrowCss, weekNarrowHtml } from "./narrow.js";
 
 /** 半天／時段的字：上午休假、下午休假、10:00–12:00 休假；整天空字。
  *  🔴 **不要 export 給別支用**：每支 .js 各自被 Cloudflare 快取 4 小時，新 plan.js 配舊 team-week.js ＝ 具名匯入失敗，
@@ -27,8 +28,20 @@ export async function loadTeamWeek() {
     ]);
     const nConf = conflicts && conflicts.items ? conflicts.items.length : 0;
     if (dRes && dRes.__err) { host.innerHTML = `<div class="notice">${esc(dRes.__err)}</div>`; return; }
-    const d = dRes;
     s.msWeek = ms;
+    s.weekCache = { d: dRes, ms, nConf };
+    if (!host.dataset.wkWired) {
+        // 窄螢幕的日鈕（data-wk-day，不是 data-z1：index.js 的委派只認 data-z1／data-ts-action，這裡自己接）：換天只重畫、不重抓
+        host.dataset.wkWired = "1";
+        host.addEventListener("click", (e) => { const b = e.target.closest("[data-wk-day]"); if (b) { s.weekDay = b.dataset.wkDay; _renderWeek(); } });
+    }
+    _renderWeek();
+}
+/** 畫這一週（表格或一天一頁）：資料在 s.weekCache（loadTeamWeek 抓的）。 */
+function _renderWeek() {
+    const { $, esc, s } = z;
+    const host = $("z1-week");
+    const { d, ms, nConf } = s.weekCache;
     const msOf = (name, iso) => ms ? ms.projects.flatMap(p => p.milestones.filter(m => m.assignee_name === name && m.due_date === iso).map(m => ({ ...m, project_name: p.name }))) : [];
     const days = d.days || [];
     const today = z.today();
@@ -78,6 +91,11 @@ export async function loadTeamWeek() {
     const sumTh = z.manage ? '<th class="num sum">週合計</th>' : "";
     const sumTd = (n) => { if (!z.manage) return ""; const h = weekHours(n); return `<td class="num sum${nagged(n) && h < 20 ? " low" : ""}">${h}</td>`; };
 
+    // 窄螢幕（docs/WORKSPACE_RWD_PLAN.md）：一天一頁。預設今天（不在這週就第一天）；翻週後原本選的日子不在新的一週也回第一天
+    const narrow = isNarrow(host);
+    if (narrow) ensureNarrowCss();
+    const wkDay = cols.includes(s.weekDay) ? s.weekDay : (cols.includes(today) ? today : cols[0]);
+    s.weekDay = wkDay;
     const range = cols.length ? `${_mdLabel(cols[0]).slice(0, -3)} – ${_mdLabel(cols[cols.length - 1]).slice(0, -3)}` : "";
     host.innerHTML = `
         <div class="vhead"><span class="ey">Team Week<b>團隊的一週 ${esc(range)}</b></span>
@@ -88,10 +106,13 @@ export async function loadTeamWeek() {
                 <button type="button" class="btn pri" data-z1="ms-open">設定專案里程碑</button>
                 ${nConf ? `<button type="button" class="btn sm warn" data-ts-action="view" data-view="ledger" title="Sheet 與總表改過的同一列內容不同，到總表選要留哪邊">衝突待決 ${nConf}</button>` : ""}</span></div>
         ${ms ? _msBandHtml(ms) : ""}
-        ${names.length ? `<div style="overflow-x:auto;"><table class="week">
+        ${names.length && narrow ? weekNarrowHtml({ cols, names, day: wkDay, today, labelOf: _mdLabel, cellHtml: cell,
+            sumOf: z.manage ? weekHours : null, lowSum: (n, h) => nagged(n) && h < 20 }) : ""}
+        ${names.length && !narrow ? `<div style="overflow-x:auto;"><table class="week">
             <thead><tr><th style="width:84px;">人員</th>${cols.map(iso => `<th class="${iso === today ? "today" : ""}">${esc(_mdLabel(iso))}</th>`).join("")}${sumTh}</tr></thead>
             <tbody>${names.map(n => `<tr><td class="who">${esc(n)}</td>${cols.map(iso => `<td>${cell(n, iso)}</td>`).join("")}${sumTd(n)}</tr>`).join("")}</tbody>
-        </table></div>` : `<div class="empty">這一週還沒有人填。</div>`}`;
+        </table></div>` : ""}
+        ${names.length ? "" : `<div class="empty">這一週還沒有人填。</div>`}`;
 }
 
 // ── 本週里程碑（owner 2026-09-07；示範 /demo/milestones.html 定稿）：週表上方的帶＋「設定專案里程碑」彈窗 ──

@@ -5,6 +5,7 @@
 import { renderSheet, wireAutosave } from "/js/shared/ts-sheet.js";
 import { z, _z1MarkStale, _shiftDays, _dow, _mdLabel, _isPlan, _POST, whoIsMe } from "./ctx.js";
 import { loadReminders } from "./remind.js";
+import { isNarrow, mountLogCards } from "./narrow.js";
 
 /** 專案清單：工時的 project_options（timesheets 模組拿整份；綁定人員檔案的員工也給，多帶本人最近填過的）。 */
 export async function _logProjectOptions() {
@@ -121,7 +122,7 @@ export async function loadLog() {
         <div id="z1-sheet"></div>
         <div class="sheet-foot">
             <span class="vrow"><button type="button" class="btn" data-z1="stages">工作階段設定</button>
-                ${canEdit ? `<button type="button" class="btn" data-z1="row-add">＋ 加五列</button>
+                ${canEdit ? `<button type="button" class="btn" data-z1="row-add"${isNarrow(host) ? ' hidden' : ''}>＋ 加五列</button>
                 <button type="button" class="btn pri" data-z1="save">儲存草稿</button>` : ""}
                 ${z.api.merge() ? `<button type="button" class="btn" data-z1="merge" title="同案、同分類、同階段的列併成一列：時數相加、內容去重">合併同案</button>
                 <button type="button" class="btn" data-z1="unmerge" id="z1-unmerge" hidden title="把最近一次合併退回去">復原合併</button>` : ""}
@@ -140,6 +141,8 @@ export async function loadLog() {
         onSaved: () => _z1MarkStale("z1-plan", "z1-week"),
         onUnmatched: (names) => { const el = $("z1-log-msg"); if (el) el.textContent = `「${names.join("、")}」對不到案（已存下來，管理員會指定）`; } });
     _logProjectOptions();   // 先抓好，專案格一點就有得選
+    // 窄螢幕（docs/WORKSPACE_RWD_PLAN.md）：表格藏起來、鏡射成一列一卡＋編輯面板；存檔還是走表格那條自動存
+    if (isNarrow(host)) mountLogCards(sheet, { projects: () => s.logProjects || [], stages: () => s.logStages || {} });
     _refreshMergeBtn();
 }
 /** 「復原合併」只在這一天有還沒復原的合併紀錄時才出現（owner 2026-09-07：合併要能復原）。 */
