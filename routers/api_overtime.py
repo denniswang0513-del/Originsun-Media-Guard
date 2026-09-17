@@ -319,11 +319,19 @@ async def approved_pay_by_staff(session, month: str) -> dict:
 
 
 async def mark_lines(session, month: str, line_ids_by_staff: dict) -> None:
-    """薪資單重算後回寫 payroll_line_id（哪一列吃了這筆加班費）。"""
+    """薪資單重算後回寫 payroll_line_id（哪一列吃了這筆加班費）。
+
+    🔴 只動 `line_ids_by_staff` 裡有的人：`refresh_staff_line` 核准單筆時只傳**一個人**，
+    照掃整個月會把其他人已經接好的連結用 `.get()` 的 None 清掉。
+    """
+    if not line_ids_by_staff:
+        return
     rows = (await session.execute(select(HrOvertimeRequest).where(
-        HrOvertimeRequest.status == "已核准", HrOvertimeRequest.payout == "加班費", HrOvertimeRequest.pay_month == month))).scalars().all()
+        HrOvertimeRequest.status == "已核准", HrOvertimeRequest.payout == "加班費", HrOvertimeRequest.pay_month == month,
+        HrOvertimeRequest.staff_id.in_(list(line_ids_by_staff))))).scalars().all()
     for r in rows:
-        r.payroll_line_id = line_ids_by_staff.get(r.staff_id)
+        if r.staff_id in line_ids_by_staff:
+            r.payroll_line_id = line_ids_by_staff[r.staff_id]
 
 
 # main.py 的載入器只認 `router`：兩支合成一支。include_router 是複製當下的路由，所以一定放在所有端點之後（放檔頭會得到一支空的）。

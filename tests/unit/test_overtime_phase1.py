@@ -103,3 +103,11 @@ def test_queue_hides_pay_amount_without_money_key():
     assert out[0]["payout"] == "加班費", "其他欄位不動"
     src = repo_src("routers/api_overtime.py")
     assert "redact_pay(items, can_see_money(request))" in func_body(src, "async def list_overtime("), "清單一定要經過它"
+
+
+def test_mark_lines_only_touches_the_staff_it_was_given():
+    """BUG-2：refresh_staff_line 只傳一個人的 {staff_id: line_id}，mark_lines 卻掃整個月的單，
+    其他人的 payroll_line_id 會被 .get() 的 None 清掉。"""
+    body = func_body(repo_src("routers/api_overtime.py"), "async def mark_lines(")
+    assert "if r.staff_id in line_ids_by_staff" in body, "沒在 map 裡的人不准動"
+    assert "r.payroll_line_id = line_ids_by_staff.get(r.staff_id)" not in body or "if r.staff_id in line_ids_by_staff" in body
