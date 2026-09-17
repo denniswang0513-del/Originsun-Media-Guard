@@ -88,3 +88,24 @@ def test_batch2_plan_find_remind_narrow_branches():
     assert "const full = remindHtml(r);" in nb and 'if (!full) return "";' in nb, "完整那條還是同一份；填完一樣消失"
     assert 'data-z1="day-goto"' in nb and "先補" in nb
     assert not _EMOJI.search(rmc) and not _EMOJI.search(plan) and not _EMOJI.search(find)
+
+
+def test_batch3_leave_and_modals():
+    """第三批：假勤頁頭一行放得下、總表窄螢幕一列一卡（欄位跟表格列共用 _histParts）；里程碑彈窗一欄直排；兼職排班一天一列。"""
+    lh = repo_src("frontend/leave.html")
+    blk = lh[lh.index("@media (max-width: 640px) {\n    header { padding: 10px 12px"):]
+    assert "header .brand-name { letter-spacing: .12em; font-size: 12px; white-space: nowrap; }" in blk
+    assert ".hist-cards { display: grid; gap: 8px; }" in lh and ".hist-card .r1 .h" in lh
+    host = js_code_only(repo_src("frontend/js/my/leave-host.js"))
+    assert 'matchMedia("(max-width: 640px)").matches' in host and "function _histCard(r) {" in host
+    assert "narrow ? `<div class=\"hist-cards\">${list.map(_histCard).join(\"\")}</div>` : `<div class=\"tbl-wrap\"><table class=\"hist\">" in host, "寬螢幕表格照舊"
+    assert "const p = _histParts(r);" in js_func_body(host, "function _histRow(r) {")
+    card = js_func_body(host, "function _histCard(r) {")
+    for k in ("const p = _histParts(r);", "r.leave_type", "fmtH(r.hours)", "fmtD(r.hours)", "p.who", "_calTag(r)", "p.notes", "p.pill"):
+        assert k in card, f"卡片要有表格列的每一欄：{k}"
+    assert not _EMOJI.search(host)
+    my = repo_src("frontend/my.html")
+    m = my[my.index("@media (max-width: 640px) {\n    main { padding-top: 92px; }"):]
+    m = m[:m.index("}\n</style>")]
+    assert ".msm-cols { display: none; }" in m and ".msm-item { grid-template-columns: 24px 1fr; }" in m and ".msm-item > :nth-child(n+3) { grid-column: 2; }" in m
+    assert "#ws-pt-modal .pboard { grid-template-columns: 1fr !important; }" in m

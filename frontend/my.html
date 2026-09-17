@@ -421,6 +421,23 @@ table.week .c.ms.done { color: var(--sub); background: #f6f6f6; border-color: va
     .vhead { flex-direction: column; align-items: stretch; }
     .sheet-foot .vrow { width: 100%; }
     .sheet-foot .vrow .btn { flex: 1 1 auto; }
+    /* 里程碑設定彈窗：六欄 grid 最窄 470px → 一欄直排（勾選框在左、其餘欄位一行一個） */
+    .msm-cols { display: none; }
+    .msm-hd { flex-direction: column; align-items: stretch; }
+    .msm-row .rh { flex-wrap: wrap; }
+    .msm-item > span:last-child .btn.sm { min-height: 36px; min-width: 44px; }
+    .msm-item { grid-template-columns: 24px 1fr; }
+    .msm-item > :nth-child(n+3) { grid-column: 2; }
+    .msm-item input[type=text], .msm-item select, .msm-item input[type=date] { min-height: 40px; font-size: 16px; }
+    .msm-add { flex-wrap: wrap; }
+    .msm-addproj input { min-width: 0; width: 100%; font-size: 16px; }
+    .msm-ft { flex-direction: column; align-items: stretch; }
+    .msm-ft .vrow .btn { flex: 1 1 auto; }
+    /* 兼職排班彈窗：跟我的一週一樣一天一列（全部展開） */
+    #ws-pt-modal .pboard { grid-template-columns: 1fr !important; }
+    #ws-pt-modal .pcol { min-height: 0; }
+    #ws-pt-modal .pcol .dh { min-height: 40px; align-items: center; }
+    #ws-pt-modal .vhead .vrow .sel { max-width: 100%; }
 }
 </style>
 </head>

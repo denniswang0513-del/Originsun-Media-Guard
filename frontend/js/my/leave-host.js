@@ -62,7 +62,8 @@ function _calTag(r) {
     if (r.status !== "已核准") return "";
     return r.google_event_id ? `<span class="cal-tag">已上日曆</span>` : `<span class="cal-tag off">日曆未同步</span>`;
 }
-function _histRow(r) {
+/** 總表一列要顯示的欄位（已跳脫）：表格列 _histRow 跟手機卡片 _histCard 共用，兩邊永遠同一份。 */
+function _histParts(r) {
     const part = ((_lvNow && _lvNow.vocab && _lvNow.vocab.part_labels) || {})[r.part] || (r.part === "all" ? "整天" : r.part || "");
     const tm = r.part === "range" && r.start_time ? ` ${esc(r.start_time)}–${esc(r.end_time || "")}` : "";
     const period = r.start_date === r.end_date ? esc(r.start_date) : `${esc(r.start_date)} ~ ${esc(r.end_date)}`;
@@ -71,13 +72,28 @@ function _histRow(r) {
     const reasonText = String(r.reason || "").replace(/\s*~?\s*來源[:：]\s*\S+/g, "").trim();
     const notes = [reasonText, r.status === "已退回" && r.reject_note ? `退回：${r.reject_note}` : "",
                    r.status === "消假待審" && r.cancel_note ? `消假：${r.cancel_note}` : ""].filter(Boolean).map(esc).join("　");
-    return `<tr${dim ? ' class="dim"' : ""}>
-        <td>${period}</td><td>${esc(r.leave_type)}</td><td>${esc(part)}${tm}</td>
+    const pill = `<span class="pill${r.status === "待審" || r.status === "消假待審" ? " hot" : ""}">${esc(r.status)}</span>`;
+    return { period, part: esc(part) + tm, dim, notes, pill, who: r.approved_by ? esc(r.approved_by) : "" };
+}
+function _histRow(r) {
+    const p = _histParts(r);
+    return `<tr${p.dim ? ' class="dim"' : ""}>
+        <td>${p.period}</td><td>${esc(r.leave_type)}</td><td>${p.part}</td>
         <td class="num">${fmtH(r.hours)}</td><td class="num">${fmtD(r.hours)}</td>
-        <td><span class="pill${r.status === "待審" || r.status === "消假待審" ? " hot" : ""}">${esc(r.status)}</span></td>
-        <td class="why">${notes}</td>
-        <td>${r.approved_by ? esc(r.approved_by) : ""} ${_calTag(r)}</td>
+        <td>${p.pill}</td>
+        <td class="why">${p.notes}</td>
+        <td>${p.who} ${_calTag(r)}</td>
     </tr>`;
+}
+/** 窄螢幕（≤640px）的總表：一列一卡——日期＋假別、右邊小時（天）、時段、狀態、核可／日曆，事由另起一行。 */
+const _histNarrow = () => typeof matchMedia === "function" && matchMedia("(max-width: 640px)").matches;
+function _histCard(r) {
+    const p = _histParts(r);
+    return `<div class="hist-card${p.dim ? " dim" : ""}">
+        <div class="r1"><b>${p.period}　${esc(r.leave_type)}</b><span class="h">${fmtH(r.hours)} h <small>${fmtD(r.hours)} 天</small></span></div>
+        <div class="r2"><span>${p.part}</span>${p.pill}${p.who ? `<span>核可 ${p.who}</span>` : ""}${_calTag(r)}</div>
+        ${p.notes ? `<div class="r3">${p.notes}</div>` : ""}
+    </div>`;
 }
 function onLeaveRendered(lv, err) {
     _lvNow = lv;
@@ -91,12 +107,13 @@ function onLeaveRendered(lv, err) {
     if (!rows.length) { $("hist-body").innerHTML = `<div class="empty">還沒有任何請假紀錄</div>`; return; }
     const byYear = new Map();
     for (const r of rows) { const y = (r.start_date || "").slice(0, 4) || "未定"; if (!byYear.has(y)) byYear.set(y, []); byYear.get(y).push(r); }
+    const narrow = _histNarrow();
     $("hist-body").innerHTML = [...byYear.entries()].map(([y, list]) => `<div class="hist-year">
         <h3>${esc(y)} 年 <span class="tot">已核准合計：${totLine(list)}</span></h3>
-        <div class="tbl-wrap"><table class="hist">
+        ${narrow ? `<div class="hist-cards">${list.map(_histCard).join("")}</div>` : `<div class="tbl-wrap"><table class="hist">
             <thead><tr><th>日期</th><th>假別</th><th>時段</th><th class="num">小時</th><th class="num">天</th><th>狀態</th><th>事由</th><th>核可／日曆</th></tr></thead>
             <tbody>${list.map(_histRow).join("")}</tbody>
-        </table></div></div>`).join("");
+        </table></div>`}</div>`).join("");
 }
 window.onLeaveRendered = onLeaveRendered;
 

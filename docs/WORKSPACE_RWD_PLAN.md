@@ -1,7 +1,7 @@
 # 員工工作台手機版（RWD）規劃
 
 > owner 2026-09-17（手機截圖：團隊的一週五欄擠成直排字）：「幫我整理與規劃員工網站的 RWD」。
-> 狀態：**規劃中，未動工**。示範畫面見 artifact「工作台手機版示範」；owner 點頭後照 §4 分三批做。
+> 狀態：**三批都做完了（2026-09-17，dev 8001）**，等 owner 看截圖後說「推」。做法：`js/shared/ts-zone/narrow.js`（今天的紀錄、團隊的一週、我的一週、專案查詢、要補填）、`js/my/leave-host.js` 的 `_histCard`（假勤總表）、`my.html` 640px 的 CSS（里程碑彈窗、兼職排班）；驗證用 `tests/unit/test_ts_zone_narrow.py`。示範畫面見 artifact「工作台手機版示範」。
 
 ## 1. 現況（2026-09-17，tester_staff 在 390px 真機走一遍）
 

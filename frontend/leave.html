@@ -163,6 +163,24 @@
   table.hist tr.dim td { color: #a3a3a3; }
   .cal-tag { font-size: 10px; letter-spacing: .1em; color: var(--ok); }
   .cal-tag.off { color: var(--warn); }
+  /* 手機版（docs/WORKSPACE_RWD_PLAN.md 第三批）：頁頭一行放得下、總表一列一卡（leave-host.js 窄螢幕改畫 .hist-card）*/
+  .hist-cards { display: grid; gap: 8px; }
+  .hist-card { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 14px; }
+  .hist-card.dim { color: #a3a3a3; }
+  .hist-card .r1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .hist-card .r1 b { min-width: 0; overflow-wrap: anywhere; }
+  .hist-card .r1 .h { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .hist-card .r1 .h small { font-weight: 400; color: var(--sub); }
+  .hist-card .r2 { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; color: var(--sub); font-size: 13px; margin-top: 3px; }
+  .hist-card .r3 { color: var(--sub); font-size: 13px; margin-top: 3px; overflow-wrap: anywhere; }
+  @media (max-width: 640px) {
+    header { padding: 10px 12px; gap: 8px; }
+    header .brand-name { letter-spacing: .12em; font-size: 12px; white-space: nowrap; }
+    header .hdr-right { gap: 6px; }
+    header .hdr-user { display: none !important; }      /* 名字在頁面卡片裡看得到；頁頭留給兩顆鈕 */
+    .btn-ghost { padding: 8px 10px; white-space: nowrap; min-height: 40px; }
+    main { padding: 14px 12px 40px; }
+  }
 </style>
 </head>
 <body>
