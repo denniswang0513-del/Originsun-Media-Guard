@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>知識庫｜ORIGINSUN</title>
+<title>Knowledge 知識庫</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/img/knowledge-icon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/img/knowledge-icon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/img/knowledge-icon-180.png">
+<meta name="theme-color" content="#0B1B34">
 <!-- 知識庫「獨立網址」（owner 2026-09-18「不要綁在私帳裡，之後會拿知識庫做更多衍生使用，未必跟財務有關」；
      docs/KNOWLEDGE_BASE_PLAN.md §11）：同一台伺服器上的獨立頁，殼抄 calendar.html（登入卡／noperm／app-view，白底）。
      內容＝js/knowledge/（書架＋書頁：討論／結論／筆記／骨架／章節），桌機手機同一份、響應式。
@@ -25,7 +29,15 @@
   header { position: sticky; top: 0; z-index: 50; display: flex; align-items: center;
     justify-content: space-between; padding: 14px 20px; background: rgba(255,255,255,0.96);
     backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
-  header .brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300; }
+  header .brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300;
+    display: inline-flex; align-items: center; gap: 9px; white-space: nowrap; }
+  /* 記號是「三道浪」（frontend/img/knowledge-icon.svg，owner 2026-09-18 拍板）：源日本家那三道橫線起伏而成，
+     午夜藍底、天藍到淡紫藍的漸層。PNG 各尺寸同資料夾，給分頁圖示與手機主畫面用。 */
+  header .brand-mark { display: block; border-radius: 6px; flex: none; }
+  @media (max-width: 640px) {
+    header .brand-name { letter-spacing: 0.1em; gap: 7px; }
+    header .brand-mark { width: 22px; height: 22px; }
+  }
   header .hdr-right { display: flex; align-items: center; gap: 12px; }
   header .hdr-user { font-size: 12px; color: var(--sub); }
   .btn-ghost { background: none; border: 1px solid var(--line); border-radius: 2px;
@@ -62,7 +74,7 @@
 <body>
 
 <header>
-  <span class="brand-name">ORIGINSUN <span class="accent">知識庫</span></span>
+  <span class="brand-name"><img class="brand-mark" src="/img/knowledge-icon.svg" alt="" width="26" height="26">Knowledge <span class="accent">知識庫</span></span>
   <div class="hdr-right">
     <a class="btn-ghost" href="/my.html">個人工作台</a>
     <span class="hdr-user" id="hdr-user" style="display:none;"></span>

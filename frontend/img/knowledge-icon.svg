@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Knowledge 知識庫">
+  <!-- 知識庫的記號「三道浪」（owner 2026-09-18 拍板：三道浪＋午夜藍，風格照士源帳本那張 app icon）。
+       源日本家 logo 是紅太陽壓在三道橫線上，那三道線讀起來就是海；這裡把太陽拿掉、讓線條起伏，
+       所以還留著家族血緣，但一眼分得出是另一支。三道由上到下透明度遞減，做出水的深度。
+       只有兩組顏色（底色漸層、浪的漸層），縮到 16px 仍然認得出是三道浪。 -->
+  <defs>
+    <linearGradient id="kb-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#12294D"/>
+      <stop offset="1" stop-color="#070F22"/>
+    </linearGradient>
+    <linearGradient id="kb-wave" x1="0" y1="0" x2="1" y2="0.35">
+      <stop offset="0" stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#A5B4FC"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#kb-bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="2"/>
+  <g fill="none" stroke="url(#kb-wave)" stroke-width="38" stroke-linecap="round">
+    <path d="M112 176c48-48 96-48 144 0s96 48 144 0"/>
+    <path d="M112 256c48-48 96-48 144 0s96 48 144 0" opacity="0.82"/>
+    <path d="M112 336c48-48 96-48 144 0s96 48 144 0" opacity="0.62"/>
+  </g>
+</svg>
