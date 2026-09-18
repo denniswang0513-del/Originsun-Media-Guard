@@ -161,6 +161,8 @@ IMPORT_TO_PIP = {
     "faster_whisper": "faster-whisper",
     "docx": "python-docx",   # ⚠ PyPI 上的 `docx` 是廢棄套件，正確名稱是 python-docx
     "pptx": "python-pptx",   # ⚠ 同型陷阱：模組叫 pptx，發行套件叫 python-pptx
+    "fitz": "pymupdf",       # ⚠ 同型陷阱（2026-09-18 咬到機隊）：模組叫 fitz，發行套件叫 pymupdf；
+                             #    PyPI 上那個 `fitz` 是別人的壞套件，pip 會 build 失敗 → OTA 整包回滾
     "tkinterdnd2": "",  # optional desktop-only
     "croniter": "croniter",
     "jwt": "PyJWT",
