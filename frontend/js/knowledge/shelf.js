@@ -71,6 +71,7 @@ export function renderShelf() {
         : '';
     S.root.innerHTML = `
         <div class="kb-top"><h2>知識庫</h2>
+            <button type="button" class="kb-link kb-reports" data-kact="reports">研究報告 →</button>
             <div class="why">上傳一本書的 PDF，主控主機把它讀成骨架（心智模型、決策規則、名詞、模式、速查表）與每章的重點；
                 之後在書頁跟 AI 討論，把講定的原則存成結論 —— 之後每次討論、顧問每次回答都先讀結論。</div></div>
         <div class="kb-drop" id="kb-drop">把 PDF 拖到這裡（一次幾本都可以），或

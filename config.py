@@ -7,6 +7,8 @@ _DEFAULT_SETTINGS: dict = {
     # 既有 settings.json 殘留的鍵無害（notifier 已不讀）
     "notifications": {
         "google_chat_webhook": "",
+        # Discord（owner 2026-09-18：研究週報／月報走這條）。頻道設定 → 整合 → Webhook → 複製網址。
+        "discord_webhook": "",
         # 🔴 級告警專用；留空 → fallback 回 google_chat_webhook（見 notifier.CRITICAL_ALERTS）
         "alert_webhook": "",
         "custom_webhook_url": "",
@@ -47,6 +49,9 @@ _DEFAULT_SETTINGS: dict = {
         # 這一條會叫 claude 上網，跟 intel／social 同一個規矩：owner 自己開。
         # weekday 照 Python 的 0=週一…6=週日；hour 是 24 小時制。
         "watch": {"enabled": False, "weekday": 6, "hour": 21},
+        # 研究週報／月報（§9.5）：週一發上一週、每月一號發上個月，推 Discord。
+        # 預設開 —— 沒有新收錄的那一期會整個跳過，不會發空報告來吵人。
+        "report": {"enabled": True, "weekday": 0, "hour": 9},
     },
     # 公司資訊：報價單 PDF 的抬頭／匯款資訊／交檔條款／章（templates/quotation_pdf.html 讀），設定頁「公司資訊」分頁可編。
     # logo_path／seal_path 是主控端本機路徑或 frontend 相對路徑（空＝logo 用 frontend/img/originsun-logo.webp、章不印）。

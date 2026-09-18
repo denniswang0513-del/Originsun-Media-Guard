@@ -17,12 +17,14 @@ import {
     openBook, renderPane, refetchBook, switchPane, editTags, saveTags, saveDoc, openChapter, compile, rename, remove, toggleSheet, jumpToSection,
 } from './book.js';
 import { send, saveConclusion, openConclusionEdit, cancelConclusionEdit, conclude } from './chat.js';
+import { loadReports, openReport, openFromHash, leaveReports } from './report.js';
 import { runExtend, collectOne, rateExtend, toggleWatch, toggleWatchAll,
     editFocus, saveFocus } from './extend.js';
 
 export async function mountKnowledge({ host, fetch, toast }) {
     hooks.host = host; hooks.fetch = fetch; hooks.toast = toast;
     nav.openBook = openBook; nav.renderPane = renderPane; nav.refetchBook = refetchBook;
+    nav.renderShelf = renderShelf;
     stopTimers();
     S.root = document.createElement('div');
     S.root.className = 'kb';
@@ -32,16 +34,20 @@ export async function mountKnowledge({ host, fetch, toast }) {
     S.root.addEventListener('click', _onClick);
     S.root.addEventListener('keydown', _onKey);
     window.addEventListener('pagehide', stopTimers, { once: true });
+    // Discord 推的報告連結（#report/<id>）：貼進網址列或在同一頁換一份都要能開
+    window.addEventListener('hashchange', () => { if (!S.book) openFromHash(); });
     await loadShelf();
+    openFromHash();
 }
 
 /** 卡片是 div[role=button]：鍵盤 Enter／Space 也要能開 */
 function _onKey(ev) {
     if (ev.key !== 'Enter' && ev.key !== ' ') return;
-    const el = ev.target.closest('.kb-card[data-kact="open"]');
+    const el = ev.target.closest('.kb-card[data-kact="open"], .kb-card[data-kact="report"]');
     if (!el) return;
     ev.preventDefault();
-    openBook(el.dataset.id);
+    if (el.dataset.kact === 'report') openReport(el.dataset.id);
+    else openBook(el.dataset.id);
 }
 
 function _onClick(ev) {
@@ -53,7 +59,9 @@ function _onClick(ev) {
     if (act === 'new-pending') { createPending(); return; }
     if (act === 'tag') { setTag(el.dataset.tag); return; }
     if (act === 'open') { openBook(el.dataset.id); return; }
-    if (act === 'back') { stopTimers(); renderShelf(); refreshShelfQuietly(); return; }
+    if (act === 'back') { stopTimers(); leaveReports(); refreshShelfQuietly(); return; }
+    if (act === 'reports') { stopTimers(); loadReports(); return; }
+    if (act === 'report') { openReport(el.dataset.id); return; }
     if (act === 'pane') { toggleSheet(false); switchPane(el.dataset.pane); return; }
     if (act === 'more') { toggleSheet(true); return; }
     if (act === 'sheet-close') { toggleSheet(false); return; }

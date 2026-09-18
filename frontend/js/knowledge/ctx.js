@@ -53,6 +53,7 @@ export const S = {
     extendNote: '',    // 上一輪沒收到東西時的那句人話（失敗的理由／沒找到）
     watchConf: null,   // 研究助理的全域開關 { enabled, weekday, hour, can_edit }；null＝還沒讀到
     focusEdit: false,  // 「研究方向」那一格在編輯中
+    reports: [],       // 研究週報／月報的清單（§9.5）
     extendTimer: null,
     editing: false,    // 結論／筆記分頁：在編輯（textarea）還是在看（md 渲染）
     editingTags: false,
@@ -64,7 +65,7 @@ export const S = {
 
 /** 跨檔呼叫表（index.js 填）：shelf → book（上傳完開書）、chat → book（重畫分頁／重抓書）。
  *  import 方向是 ctx ← shelf ← book ← index、ctx ← chat ← book；反方向的呼叫走這張表。 */
-export const nav = { openBook: null, renderPane: null, refetchBook: null };
+export const nav = { openBook: null, renderPane: null, refetchBook: null, renderShelf: null };
 
 /** 主控主機不在（cloudflared 打到 NAS、或 master 關機）：路由不存在的 404／代理層的 503。
  *  自家 router 丟的 404 帶自己的 detail（如「找不到這本書」），不會被當成離線。 */

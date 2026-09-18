@@ -296,6 +296,33 @@ books/<id>/
 - `POST /{id}/watch` `{on: bool}`；`POST /{id}/watch/run`（現在跑一次，不管星期幾）。
 - 設定：`finance.knowledge_watch.{enabled, weekday, hour}`（桌機知識庫分頁上方一行開關；不進 settings modal）。
 
+### 9.5 研究週報／月報（owner 2026-09-18）
+
+owner：「我想要有個週報或月報」→「研究助理找到什麼」「兩個都要」；
+「這些生產的資料都用 md 檔整理起來」；「不用送 google chat 送 discord」；「這些報表可以使用連結」。
+
+一份報告三個面貌，同一份內容：
+
+| 面貌 | 在哪 |
+| --- | --- |
+| md 檔（正本） | `<書架根目錄>\..\reports\weekly-2026-W38.md`；跟書一樣不進 DB、不進 git |
+| 連結 | `/knowledge.html#report/weekly-2026-W38`（書架右上角也有「研究報告 →」） |
+| Discord | 一則摘要（每本最多 3 則、帶網址）＋ 那個連結 |
+
+- **週報**每週一發上一週（`knowledge.report.weekday`，0＝週一）；**月報**每月一號發上個月。
+  一號剛好是週一就兩份都發。時刻 `knowledge.report.hour`（預設 9）。
+- **預設是開的**（跟 `watch` 不同）—— 它不花 claude 額度，而且沒有新收錄的那一期會整個跳過，
+  不會發空報告來吵人。
+- 同一期不重發：**報告檔存在就等於發過了**，不另外記狀態。
+- 🔴 Discord 一則超過 2000 字元是**整則被退掉**（不是截斷），所以 `report_push_text` 在組字時
+  就收尾，`notifier.send_discord` 再擋一次。
+- Discord webhook 在 `settings notifications.discord_webhook`（環境變數 `DISCORD_WEBHOOK` 優先）。
+  沒設就只是不推，報告檔照樣產生。
+- 連結用**絕對網址**（`knowledge_report.PUBLIC_BASE`）—— `core/office_assets.PAGES` 沒有
+  knowledge.html，辦公室那一面對相對路徑回 503。
+
+**還沒做**：報告裡沒有「這個月你把哪幾則存進結論」那一段（要先有「從延伸存成結論」的按鈕）。
+
 ### 9.6 不做的事／風險
 - 網頁內容是**不可信輸入**（提示注入）：收錄那支只准 WebSearch／WebFetch，不給 Read／Bash，cwd 在 temp；回來的東西只當資料寫檔，不執行、不進任何設定。
 - 不抓 YouTube 逐字稿、不抓付費牆後的內容；podcast 只收有文字稿的頁面。

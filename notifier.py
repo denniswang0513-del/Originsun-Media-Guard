@@ -183,6 +183,35 @@ def send_google_chat(text: str) -> bool:
     return bool(url) and _post_gchat(url, text, "direct")
 
 
+# ── Discord（owner 2026-09-18：研究週報／月報走這條）──────────────
+#: Discord 一則的硬上限。超過會被**整則退掉**（不是截斷），所以寧可在組字時就收尾。
+DISCORD_MAX_CHARS = 2000
+
+
+def discord_webhook_url(settings: dict | None = None) -> str:
+    """環境變數優先，其次 settings.json notifications.discord_webhook。"""
+    notif = (settings or _load_settings()).get("notifications") or {}
+    return os.environ.get("DISCORD_WEBHOOK") or notif.get("discord_webhook", "")
+
+
+def send_discord(text: str) -> bool:
+    """推一段文字到 Discord 頻道。沒設 webhook 回 False，不炸（同 send_google_chat）。
+
+    太長就先截 —— Discord 對超長的 payload 是整則回 400，寧可少幾行也要送得出去。
+    """
+    url = discord_webhook_url()
+    if not url or not (text or "").strip():
+        return False
+    body = text if len(text) <= DISCORD_MAX_CHARS else text[:DISCORD_MAX_CHARS - 2] + "…"
+    try:
+        import requests  # type: ignore — 精簡 agent 可能沒裝
+        requests.post(url, json={"content": body}, timeout=10).raise_for_status()
+        return True
+    except Exception as e:
+        print(f"notifier: Discord failed: {e}")
+        return False
+
+
 def _relay_alert_email(template_key: str, msg: str, settings: dict) -> None:
     """重大告警轉寄 email：POST 給 master 的 internal endpoint，由 master 寄出。
 

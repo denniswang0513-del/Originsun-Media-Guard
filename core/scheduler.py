@@ -681,6 +681,12 @@ async def run_scheduler():
             await weekly_check()
         except Exception:
             _log.exception("知識庫研究助理排程異常")
+        # 研究週報／月報：週一發上一週、一號發上個月，寫成 md 檔並推 Discord
+        try:
+            from services.knowledge_report import daily_check
+            await daily_check()
+        except Exception:
+            _log.exception("知識庫研究報告排程異常")
         # 參考影片封存 runner（master gate + enabled 開關都在 service 內；
         # tick 只負責「該跑就丟背景任務」，長時下載絕不阻塞這個迴圈）
         try:

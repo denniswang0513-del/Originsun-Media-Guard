@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+from datetime import date, timedelta
 from typing import Any, Optional
 
 # ── 常數 ─────────────────────────────────────────────────────
@@ -883,3 +884,161 @@ def extend_digest(items: list, *, limit: int = 20) -> str:
         lines.append("- {}{}｜{}｜{}".format(i.get("title_zh", ""), tail, i.get("source", ""),
                                             i.get("summary_zh", "")))
     return "\n".join(lines)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 研究週報／月報（owner 2026-09-18：「我想要有個週報或月報」）
+# 報告本身寫成 md 檔（「這些生產的資料都用 md 檔整理起來」），Discord 推摘要。
+# 這裡只組字，不碰檔案也不發通知（I/O 在 services/knowledge_report.py）。
+# ══════════════════════════════════════════════════════════════════════════
+
+#: Discord 一則的長度上限是 2000 字元；留點餘裕，超過就收尾說「完整的在報告裡」
+PUSH_MAX_CHARS = 1900
+#: 推播摘要每本書最多列幾則（其餘只講數量）
+PUSH_PER_BOOK = 3
+
+
+def week_span(monday: date) -> tuple:
+    """那一週的 `(週一, 週日)`（兩端都含）。"""
+    return monday, monday + timedelta(days=6)
+
+
+def last_week(today: date) -> tuple:
+    """上一個完整的一週：`(標籤, 週一, 週日)`。週一早上跑的話講的就是剛過完的那週。"""
+    monday = today - timedelta(days=today.weekday() + 7)
+    start, end = week_span(monday)
+    y, w, _ = start.isocalendar()
+    return f"{y}-W{w:02d}", start, end
+
+
+def last_month(today: date) -> tuple:
+    """上一個完整的月：`(標籤, 一號, 月底)`。"""
+    first_this = today.replace(day=1)
+    end = first_this - timedelta(days=1)
+    start = date(end.year, end.month, 1)
+    return f"{end.year}-{end.month:02d}", start, end
+
+
+def in_span(item: dict, start: date, end: date) -> bool:
+    """這一則是不是落在區間內（`date` 是收錄日，不是原文發表日）。壞日期一律不算。"""
+    try:
+        y, m, d = (int(x) for x in str(item.get("date") or "").split("-"))
+        return start <= date(y, m, d) <= end
+    except (TypeError, ValueError):
+        return False
+
+
+def _item_lines(it: dict) -> list:
+    """一則在 md 裡長這樣：標題（連結）＋出處那行＋摘要＋為什麼值得看。"""
+    lang = it.get("lang") or ""
+    tail = f"（{lang}）" if lang and not lang.startswith("zh") else ""
+    head = f"### [{it.get('title_zh') or '（無標題）'}]({it.get('url', '')}){tail}"
+    meta = "｜".join(x for x in (it.get("source"), it.get("published"), it.get("chapter_guess")) if x)
+    out = [head]
+    if tail and it.get("title_original"):
+        out.append(f"原文標題：{it['title_original']}")
+    if meta:
+        out.append(meta)
+    if it.get("summary_zh"):
+        out += ["", it["summary_zh"]]
+    if it.get("why_it_matters"):
+        out += ["", f"**為什麼值得看**：{it['why_it_matters']}"]
+    return out + [""]
+
+
+def _totals(groups: list) -> tuple:
+    """`(總則數, 還沒評的則數)`。`groups` 是 `[(書名, [則])]`。"""
+    items = [i for _, rows in groups for i in rows]
+    return len(items), sum(1 for i in items if not i.get("rating"))
+
+
+def weekly_report_md(label: str, start, end, groups: list) -> str:
+    """一週的完整報告（md 檔的內容）。`groups` 照書分組，空的書不會進來。"""
+    n, unrated = _totals(groups)
+    out = [f"# 研究週報 {label}", "",
+           f"{start:%Y-%m-%d} 到 {end:%Y-%m-%d}｜{len(groups)} 本書｜{n} 則"]
+    if unrated:
+        out.append(f"其中 {unrated} 則還沒評過「有用／沒用」—— 評過的會影響下一輪要找什麼。")
+    out += ["", "> 這些是網路上的東西，**不是書的作者說的**。引用時要講清楚是誰說的。", ""]
+    for title, rows in groups:
+        out += [f"## {title}（{len(rows)} 則）", ""]
+        for it in rows:
+            out += _item_lines(it)
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _count_by(items: list, key: str, top: int = 5) -> list:
+    """`[(值, 幾則)]`，多的排前面；空值不算。"""
+    tally = {}
+    for i in items:
+        v = (i.get(key) or "").strip()
+        if v:
+            tally[v] = tally.get(v, 0) + 1
+    return sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))[:top]
+
+
+def monthly_report_md(label: str, start, end, groups: list) -> str:
+    """一個月的總結：數字、你覺得有用的那幾則、還沒評的有多少、來源排行。"""
+    items = [i for _, rows in groups for i in rows]
+    good = [i for i in items if i.get("rating") == "useful"]
+    bad = [i for i in items if i.get("rating") == "useless"]
+    unrated = [i for i in items if not i.get("rating")]
+    out = [f"# 研究月報 {label}", "",
+           f"{start:%Y-%m-%d} 到 {end:%Y-%m-%d}｜{len(groups)} 本書｜{len(items)} 則", "",
+           f"- 你覺得有用：{len(good)} 則",
+           f"- 你覺得沒用：{len(bad)} 則",
+           f"- 還沒評：{len(unrated)} 則"]
+    srcs = _count_by(items, "source")
+    if srcs:
+        out += ["", "**這個月的來源**：" + "、".join(f"{k}（{v}）" for k, v in srcs)]
+    langs = _count_by(items, "lang", top=6)
+    if langs:
+        out.append("**語言**：" + "、".join(f"{k}（{v}）" for k, v in langs))
+    if good:
+        out += ["", "## 你覺得有用的", ""]
+        for it in good:
+            out += _item_lines(it)
+    if unrated:
+        out += ["", f"## 還沒評的（{len(unrated)} 則）", "",
+                "評過之後，下一輪就會照這個調整要找什麼。", ""]
+        for it in unrated:
+            out.append(f"- [{it.get('title_zh') or '（無標題）'}]({it.get('url', '')})"
+                       f"｜{it.get('source', '')}")
+    if bad:
+        out += ["", f"## 你刷掉的（{len(bad)} 則，之後不會再找這類）", ""]
+        for it in bad:
+            out.append(f"- {it.get('title_zh') or ''}｜{it.get('source', '')}")
+    return "\n".join(out).rstrip() + "\n"
+
+
+def report_push_text(title: str, groups: list, *, tail: str = "",
+                     per_book: int = PUSH_PER_BOOK, max_chars: int = PUSH_MAX_CHARS) -> str:
+    """推到 Discord 的那一則：他在手機上看，所以連結要直接放進來（點得到）。
+
+    太長就收尾說剩下幾則在報告檔裡 —— Discord 超過 2000 字元會整則被退掉，不是截斷。
+    """
+    n, unrated = _totals(groups)
+    lines = [title, f"{len(groups)} 本書、{n} 則。"]
+    if unrated:
+        lines.append(f"{unrated} 則還沒評過有用或沒用。")
+    lines.append("")
+    left = 0
+    for book, rows in groups:
+        lines.append(f"[{book}]")
+        for it in rows[:per_book]:
+            lines.append(f"・{it.get('title_zh') or ''}｜{it.get('source', '')}")
+            if it.get("url"):
+                lines.append(f"  {it['url']}")
+        if len(rows) > per_book:
+            left += len(rows) - per_book
+            lines.append(f"  （這本還有 {len(rows) - per_book} 則）")
+        lines.append("")
+    if left:
+        lines.append(f"沒列出來的 {left} 則在完整報告裡。")
+    if tail:
+        lines.append(tail)
+    text = "\n".join(lines).rstrip()
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars].rsplit("\n", 1)[0]
+    return cut + "\n…（太長了，完整的在報告檔裡）"

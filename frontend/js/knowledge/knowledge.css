@@ -236,6 +236,15 @@
 .kb .kb-focus .act { display: flex; gap: 8px; margin-top: 8px; }
 .kb .kb-focus .act button { min-height: 40px; }
 
+/* 研究報告（§9.5）：書架旁邊一顆入口，內容就是後端那份 md 畫出來。 */
+.kb .kb-top .kb-reports { float: right; margin-top: 2px; min-height: 44px; }
+.kb .kb-report { margin-top: 14px; padding-bottom: 60px; }
+.kb .kb-report h1 { font-size: 20px; margin: 0 0 10px; }
+.kb .kb-report h2 { font-size: 16px; margin: 26px 0 8px; padding-top: 14px; border-top: 1px solid var(--line); }
+.kb .kb-report h3 { font-size: 15px; margin: 18px 0 4px; line-height: 1.5; }
+.kb .kb-report blockquote { margin: 12px 0; padding: 8px 12px; border-left: 3px solid var(--line);
+    color: var(--sub); font-size: 13px; }
+
 /* 窄一點：書頁單欄 */
 @media (max-width: 899px) {
     .kb .kb-book { grid-template-columns: 1fr; gap: 16px; }

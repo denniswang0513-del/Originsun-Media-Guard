@@ -20,6 +20,7 @@ from core.auth import check_admin, check_admin_or_module, payload_grants
 from core.bg_task import fire
 from core.knowledge_logic import FOCUS_MAX, TAGS_MAX
 from services import knowledge_service as ks
+from services import knowledge_report as kr
 from services import knowledge_watch as kw
 from services.knowledge_claude import claude_available
 
@@ -90,6 +91,8 @@ def _book_or_404(fn, *args, **kwargs):
         raise HTTPException(status_code=404, detail="找不到這本書")
     except ks.ChapterNotFound:
         raise HTTPException(status_code=404, detail="這本書沒有這一章（還沒編到，或編譯失敗了）")
+    except kr.ReportNotFound:
+        raise HTTPException(status_code=404, detail="找不到這份報告")
     except ks.ExtendNotFound:
         raise HTTPException(status_code=404, detail="延伸裡沒有這一則（畫面可能舊了，重新整理看看）")
     except ks.BookBusy:
@@ -186,6 +189,24 @@ async def watch_put(body: WatchPayload, request: Request):
     _guard(request)
     check_admin(request)
     return kw.save_watch(enabled=body.enabled, weekday=body.weekday, hour=body.hour)
+
+
+# ── 研究週報／月報（§9.5）────────────────────────────────────
+# owner 2026-09-18：「這些報表可以使用連結」—— Discord 推的那則帶 `#report/<id>`，
+# 點進來由前端打這兩支把 md 撈回來畫。
+# 🔴 同 `/watch`，這兩支要排在 `/{book_id}` **前面**。
+@router.get("/reports")
+async def reports_list(request: Request):
+    """`[{id, title, kind, bytes}]`，新的排前面。"""
+    _guard(request)
+    return kr.list_reports()
+
+
+@router.get("/reports/{report_id}")
+async def report_get(report_id: str, request: Request):
+    """`{id, title, md}`。id 不合規或檔案不在都是 404（同書的規矩）。"""
+    _guard(request)
+    return _book_or_404(kr.read_report, report_id)
 
 
 @router.get("/{book_id}")
