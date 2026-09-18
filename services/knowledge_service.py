@@ -1005,7 +1005,10 @@ async def run_extend(book_id: str, model: str = "", url: str = "") -> None:
         else:
             fresh = kl.parse_extend(text, today, start_n=kl.next_extend_n(old), seen_urls=seen)
         if fresh:
-            _write_extend(book_id, old + fresh)
+            # 🔴 寫入前**重讀**，不是用開頭讀的 `old`：claude 跑了幾分鐘，期間他在畫面上按的
+            # 「有用／沒用」（rate_extend）已經寫進檔了，拿 old 蓋回去等於把那幾下洗掉、而且沒有徵兆
+            # （2026-09-19 /polish BUG-3）。同一本同時只會有一輪（_extending 擋著），流水號不會撞。
+            _write_extend(book_id, read_extend(book_id) + fresh)
         _update_meta(book_id, extended_at=_now_iso(),
                      extend_note="" if fresh else "（這一輪沒有找到新的東西）")
     except BookNotFound:

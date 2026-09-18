@@ -199,3 +199,24 @@ def test_parse_captions_takes_every_caption_section_not_just_the_first():
     assert caps == {"p001-1.jpg": "甲", "p002-1.jpg": "乙"}
     assert "第一段" in body and "第二段" in body and "---" in body
     assert "## 圖說" not in body and "甲" not in body
+
+
+def test_a_rating_made_while_searching_survives_the_run(kb):
+    """BUG-3：找資料要跑幾分鐘，畫面上的「有用／沒用」沒鎖；那一輪跑完寫檔時不能把期間按的評分洗掉。"""
+    from services import knowledge_service as ks
+    bid = kb.upload(pages=1)["id"]
+    kb.claude["reply"] = _extend_reply
+    kb.client.post(f"{URL}/{bid}/extend", json={})
+    kb.run_fired()
+    assert [i["n"] for i in ks.read_extend(bid)] == [1, 2]
+
+    def _rate_then_reply(prompt: str):
+        ks.rate_extend(bid, 1, "useful")            # claude 還在跑的時候他按了「有用」
+        return ('[{"url":"https://a.tw/three","title_zh":"第三篇","title_original":"Three",'
+                '"lang":"en","source":"x","published":"","summary_zh":"s","why_it_matters":"","chapter_guess":""}]', "")
+
+    kb.claude["reply"] = _rate_then_reply
+    kb.client.post(f"{URL}/{bid}/extend", json={})
+    kb.run_fired()
+    items = ks.read_extend(bid)
+    assert [(i["n"], i["rating"]) for i in items] == [(1, "useful"), (2, ""), (3, "")], items
