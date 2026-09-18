@@ -278,6 +278,7 @@ def _summary(meta: dict, book_id: str) -> dict:
         "compiled_at": meta.get("compiled_at") or "",
         "has_conclusion": bool(_read_text(os.path.join(d, CONCLUSION_FILE)).strip()),
         "has_notes": bool(_read_text(os.path.join(d, NOTES_FILE)).strip()),
+        "watch": bool(meta.get("watch")),
         "has_extend": _extend_counts(d)[0] > 0,
         "extend_new": _extend_counts(d)[1],
         "stage": _stage.get(book_id, ""),
@@ -338,8 +339,10 @@ def read_chapter(book_id: str, n: int) -> dict:
 
 
 def update_book(book_id: str, *, title: Optional[str] = None, author: Optional[str] = None,
-                tags: Optional[list] = None) -> dict:
+                tags: Optional[list] = None, watch: Optional[bool] = None) -> dict:
     fields = {}
+    if watch is not None:
+        fields["watch"] = bool(watch)      # 研究助理每週要不要管這本（§9.3；預設沒有這個鍵＝關）
     if title is not None and title.strip():
         fields["title"] = title.strip()
     if author is not None:
@@ -660,6 +663,15 @@ def rate_extend(book_id: str, n: int, rating: str) -> dict:
     return hit
 
 
+def set_watch_last(book_id: str, week: str) -> None:
+    """研究助理跑過這本了（`2026-W38`）—— 同一週不再重跑（services/knowledge_watch.py）。"""
+    _update_meta(book_id, watch_last=week)
+
+
+def watch_last(book_id: str) -> str:
+    return read_meta(book_id).get("watch_last") or ""
+
+
 def start_extend(book_id: str, url: str = "") -> None:
     """端點呼叫：標 queued，真正的工作交給 `run_extend`（背景）。`url` 有給＝手動收錄那一篇。"""
     if book_id in _extending:
@@ -735,6 +747,8 @@ __all__ = [
     "ADVISOR_LATEST", "BookBusy", "BookNotFound", "ChapterNotFound", "ExtendNotFound", "MAX_UPLOAD_BYTES", "add_chat_message",
     "advisor_snapshot", "append_conclusion", "book_detail", "book_dir", "chat_state", "compile_book", "delete_book",
     "extend_state", "extract_text", "is_pdf", "list_books", "pick_model", "rate_extend", "read_chapter", "read_chat",
-    "read_extend", "read_meta", "root", "run_chat", "run_conclude", "run_extend", "save_upload", "start_chat",
-    "start_compile", "start_conclude", "start_extend", "update_book", "write_conclusion", "write_meta", "write_notes",
+    "read_extend", "read_meta", "root", "run_chat", "run_conclude", "run_extend", "save_upload", "set_watch_last",
+    "start_chat",
+    "start_compile", "start_conclude", "start_extend", "update_book", "watch_last", "write_conclusion", "write_meta",
+    "write_notes",
 ]

@@ -2,7 +2,12 @@
  * extend.js — 書頁的「延伸」分頁（研究助理；docs/KNOWLEDGE_BASE_PLAN.md §9）。
  *
  * 定期或手動去網路上找跟這本書有關的新研究，一則一行存在書資料夾的 `延伸.md`。
- * 這裡只管畫面：清單、兩顆「去找新的／收錄這篇」、每則的「有用／沒用」，以及在找的時候輪詢。
+ * 這裡只管畫面：清單、兩顆「去找新的／收錄這篇」、每則的「有用／沒用」、每週自動找的開關，
+ * 以及在找的時候輪詢。
+ *
+ * 「每週自動找」有兩道開關，兩道都開才會自動跑（services/knowledge_watch.py）：
+ *   這本書的 `meta.watch`（誰都能改）＋ 全域的 `knowledge.watch.enabled`（只有管理員）。
+ * 兩道都畫在這裡 —— 「要去設定頁打開」對不寫程式的人等於這個功能永遠開不起來。
  *
  * 🔴 每一則的文字都來自**網頁**（不可信輸入）。畫面上一律 `esc()` 之後才放進 HTML，
  *    連結一律 `rel="noopener noreferrer"`，而且只認 http／https —— 別的協定只顯示文字不做成連結。
@@ -14,6 +19,7 @@ import { S, api, esc, errText, stageText, alive, toast } from './ctx.js';
 export const EXTEND_POLL_MS = 3000;
 
 const RATING_LABEL = { useful: '有用', useless: '沒用' };
+const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
 
 /** 只有 http／https 才做成連結（網址是網頁給的，javascript: 之類一律不碰）。 */
 function _safeHref(url) {
@@ -57,10 +63,25 @@ export function extendHtml() {
         </div>
         <div class="note">網路上跟這本書有關的東西，附出處、翻譯與摘要。<b>不是作者說的</b>，是別人後來寫的。
             按「沒用」之後，那一則下次討論就不會再帶進去。</div>
+        <label class="kb-watch"><input type="checkbox" data-kact="watch"${S.book && S.book.watch ? ' checked' : ''}${busy}>
+            這本書每週自動找一次</label>
+        ${_globalWatchHtml()}
         ${stage ? '<div class="kb-ext-busy">正在找資料…這會跑幾分鐘，可以先去做別的事，回來再看。</div>'
         : (S.extendNote ? `<div class="kb-ext-busy">${esc(S.extendNote)}</div>` : '')}
         ${items.length ? `<ul class="kb-ext-list">${items.map(_itemHtml).join('')}</ul>`
         : '<div class="kb-empty">還沒找過。按「去找新的」讓它依這本書的主題去搜，或用「收錄這篇」貼一個網址進來。</div>'}`;
+}
+
+/** 全域那一道（只有管理員看得到、也只有管理員改得動）。 */
+function _globalWatchHtml() {
+    const w = S.watchConf;
+    if (!w) return '';
+    const when = `每週${WEEKDAYS[w.weekday] || '日'} ${String(w.hour).padStart(2, '0')}:00`;
+    if (!w.can_edit) {
+        return w.enabled ? '' : '<div class="note sub">研究助理的總開關目前是關的，要請管理員打開。</div>';
+    }
+    return `<label class="kb-watch"><input type="checkbox" data-kact="watch-all"${w.enabled ? ' checked' : ''}>
+        研究助理總開關（全部的書）<span class="sub">${esc(when)}，一本最多 8 則</span></label>`;
 }
 
 function _rerender() {
@@ -82,6 +103,13 @@ export async function loadExtend() {
     } catch (e) {
         if (alive()) toast('讀延伸失敗：' + errText(e), true);
     }
+    if (S.watchConf) return;                           // 全域開關讀一次就好（一個 session 內不會變）
+    try {
+        const w = await api('/watch');
+        if (!alive()) return;
+        S.watchConf = w || null;
+        _rerender();
+    } catch (_) { /* 讀不到就不畫那一行，不要用錯誤蓋掉清單 */ }
 }
 
 /** 找資料要跑幾分鐘：每 3 秒問一次，跑完自動重畫並把新的幾則帶出來。 */
@@ -129,6 +157,44 @@ export async function runExtend(url = '') {
 export function collectOne() {
     const url = window.prompt('貼一個網址，它會打開來讀完，整理成中文摘要收進這本書的延伸。');
     if (url && url.trim()) runExtend(url.trim());
+}
+
+/** 全域那一道：關著的話，每本書自己開了也不會動。 */
+export async function toggleWatchAll(on) {
+    const before = S.watchConf ? S.watchConf.enabled : false;
+    if (S.watchConf) S.watchConf.enabled = !!on;
+    _rerender();
+    try {
+        const w = await api('/watch', { method: 'PUT', body: { enabled: !!on } });
+        if (!alive()) return;
+        if (S.watchConf) S.watchConf = { ...S.watchConf, ...w };
+        _rerender();
+        toast(on ? '研究助理開了' : '研究助理關了');
+    } catch (e) {
+        if (!alive()) return;
+        if (S.watchConf) S.watchConf.enabled = before;
+        _rerender();
+        toast('改不動：' + errText(e), true);
+    }
+}
+
+/** 每週自動找：這本書的開關（另一道是上面的全域開關）。 */
+export async function toggleWatch(on) {
+    if (!S.book) return;
+    const bookId = S.book.id;
+    const before = !!S.book.watch;
+    S.book.watch = !!on;
+    _rerender();
+    try {
+        await api(`/${encodeURIComponent(bookId)}`, { method: 'PUT', body: { watch: !!on } });
+        if (!alive()) return;
+        toast(on ? '之後每週會自動找一次' : '已關掉每週自動找');
+    } catch (e) {
+        if (!alive() || !S.book || S.book.id !== bookId) return;
+        S.book.watch = before;
+        _rerender();
+        toast('改不動：' + errText(e), true);
+    }
 }
 
 /** 評「有用／沒用」；`n` 是檔內流水號（不是第幾筆）。再按一次同一顆＝收回評分。 */

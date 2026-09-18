@@ -217,6 +217,13 @@
 .kb .kb-conc-edit .act { display: flex; gap: 8px; margin-top: 8px; }
 .kb .kb-conc-edit .act button { min-height: 40px; }
 
+/* 每週自動找的開關（§9.3）：兩道開關的其中一道，另一道在設定頁 */
+.kb .kb-watch { display: flex; align-items: center; gap: 8px; margin-top: 10px;
+    font-size: 13px; color: var(--sub); cursor: pointer; min-height: 44px; }
+.kb .kb-watch input { width: 18px; height: 18px; flex: none; cursor: pointer; }
+.kb .kb-watch .sub { color: var(--sub); font-size: 12px; }
+.kb .note.sub { color: var(--sub); font-size: 12.5px; margin-top: 8px; }
+
 /* 窄一點：書頁單欄 */
 @media (max-width: 899px) {
     .kb .kb-book { grid-template-columns: 1fr; gap: 16px; }

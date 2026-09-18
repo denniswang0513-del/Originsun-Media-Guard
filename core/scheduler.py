@@ -433,7 +433,7 @@ def _check_and_dispatch() -> int:
 _daily_fired: dict = {}  # {task_key: 'YYYY-MM-DD'} in-process 每日一次去重
 
 
-async def _run_daily_master_task(task_key: str, hour_key: str, body) -> None:
+async def _run_daily_master_task(task_key: str, hour_key: str, body, hour_getter=None) -> None:
     """每日一次、只在 master 跑的排程任務底座（_loan_due_check /
     _finance_calendar_check 共用；drone_watcher 另有自己的樣板）。
 
@@ -443,6 +443,8 @@ async def _run_daily_master_task(task_key: str, hour_key: str, body) -> None:
       否則同一份提醒天天各機各發 N 份）
     - topology 例外 / DB 未上線 / factory 缺 → **不**標記，下一 tick 重試
     - settings finance.<hour_key>（預設 9）之前 → **不**標記，稍後同日重試
+      （`hour_getter` 給了就改叫它拿那個鐘點 —— 不是每個功能的設定都住在 finance 底下，
+      例如知識庫的在 knowledge.watch.hour。既有呼叫端不給就照舊讀 finance.<hour_key>。）
     - 過關 → await body(factory, now)；body 成功回來才標記當日完成
       （body 拋例外 → 不標記、下一 tick 重試）
     body 收 (factory, now)，自理 session 與事件。
@@ -466,7 +468,8 @@ async def _run_daily_master_task(task_key: str, hour_key: str, body) -> None:
         return
     try:
         from config import load_settings
-        remind_hour = int((load_settings().get("finance") or {}).get(hour_key) or 9)
+        s = load_settings()
+        remind_hour = int(hour_getter(s) if hour_getter else ((s.get("finance") or {}).get(hour_key) or 9))
     except Exception:
         remind_hour = 9
     if now.hour < remind_hour:  # 上班時間才提醒
@@ -671,6 +674,13 @@ async def run_scheduler():
             await _quote_chat_image_sweep()
         except Exception:
             _log.exception("報價截圖兜底清理異常")
+        # 研究助理：每週一次，幫有開 watch 的書去網路上找新研究（master gate 在 _run_daily_master_task 裡；
+        # 全域與每本書兩道開關預設關，見 knowledge_watch.py）
+        try:
+            from services.knowledge_watch import weekly_check
+            await weekly_check()
+        except Exception:
+            _log.exception("知識庫研究助理排程異常")
         # 參考影片封存 runner（master gate + enabled 開關都在 service 內；
         # tick 只負責「該跑就丟背景任務」，長時下載絕不阻塞這個迴圈）
         try:

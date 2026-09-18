@@ -16,10 +16,11 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
-from core.auth import check_admin_or_module
+from core.auth import check_admin, check_admin_or_module, payload_grants
 from core.bg_task import fire
 from core.knowledge_logic import TAGS_MAX
 from services import knowledge_service as ks
+from services import knowledge_watch as kw
 from services.knowledge_claude import claude_available
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["知識庫"])
@@ -34,6 +35,8 @@ class BookPatch(BaseModel):
     # 標籤：自由字串；正規化（去空白／去重／每個 ≤ 20 字／最多 TAGS_MAX 個）在 knowledge_logic.normalize_tags，
     # 這裡只擋離譜的（一次送超過 50 個）—— 超過正規化上限的不是 422，是靜默截掉。
     tags: Optional[list[str]] = Field(default=None, max_length=TAGS_MAX * 5)
+    # 研究助理每週要不要管這本（§9.3）。全域還有一道 settings knowledge.watch.enabled，兩道都開才會跑。
+    watch: Optional[bool] = None
 
 
 class CompilePayload(BaseModel):
@@ -58,6 +61,12 @@ class ExtendPayload(BaseModel):
     # 有給網址＝手動「收錄這篇」那一篇；沒給＝讓它自己依這本書的主題去搜
     url: str = Field(default="", max_length=2000)
     model: Optional[str] = None
+
+
+class WatchPayload(BaseModel):
+    enabled: Optional[bool] = None
+    weekday: Optional[int] = Field(default=None, ge=0, le=6)     # 0＝週一…6＝週日
+    hour: Optional[int] = Field(default=None, ge=0, le=23)
 
 
 class RatePayload(BaseModel):
@@ -153,6 +162,29 @@ async def attach_file(book_id: str, request: Request, file: UploadFile = File(..
         raise HTTPException(status_code=422, detail=f"讀不了這個 PDF：{str(e)[:200]}")
 
 
+# ── 研究助理的全域開關（§9.3）────────────────────────────────
+# 🔴 這兩支要排在 `/{book_id}` **前面** —— FastAPI 照註冊順序比對，排在後面的話
+#    「watch」會先被當成 book_id 吃掉（回「找不到這本書」）。
+@router.get("/watch")
+async def watch_get(request: Request):
+    """`{enabled, weekday, hour, can_edit}`：每本書的開關在書頁，這是全域那一道。"""
+    payload = _guard(request)
+    conf = dict(kw.settings_watch())
+    conf["can_edit"] = payload_grants(payload)      # 零把鑰匙＝只有管理員過得了（單一正本）
+    return conf
+
+
+@router.put("/watch")
+async def watch_put(body: WatchPayload, request: Request):
+    """改全域開關（管理員）。兩道開關都開，週排程才會自己跑。"""
+    # 先過整組端點那把尺，再加一道管理員 —— `_guard` 看起來多餘（管理員本來就過得了），
+    # 但 test_every_endpoint_calls_the_guard 掃的是「每一支都有 _guard」這個不變量，
+    # 少了它就等於在這組裡開了一個例外，下一支忘了守的就不會被抓到。
+    _guard(request)
+    check_admin(request)
+    return kw.save_watch(enabled=body.enabled, weekday=body.weekday, hour=body.hour)
+
+
 @router.get("/{book_id}")
 async def get_book(book_id: str, request: Request):
     _guard(request)
@@ -163,7 +195,8 @@ async def get_book(book_id: str, request: Request):
 async def patch_book(book_id: str, body: BookPatch, request: Request):
     """`{title?, author?, tags?}`：沒帶的欄位不動（Optional＋None，舊分頁的 PUT 不會洗掉別人剛填的）。"""
     _guard(request)
-    return _book_or_404(ks.update_book, book_id, title=body.title, author=body.author, tags=body.tags)
+    return _book_or_404(ks.update_book, book_id, title=body.title, author=body.author,
+                        tags=body.tags, watch=body.watch)
 
 
 @router.delete("/{book_id}")

@@ -43,6 +43,10 @@ _DEFAULT_SETTINGS: dict = {
     # 匿名 /api/settings/load 不回這個鍵，見 api_system._SECRET_SUBKEYS）。2026-09-18 從 finance.knowledge_root 搬出來。
     "knowledge": {
         "root": r"D:\Originsun-Knowledge\books",
+        # 研究助理（§9）：每週幫「有開的書」去網路上找新研究。兩道開關都預設關 ——
+        # 這一條會叫 claude 上網，跟 intel／social 同一個規矩：owner 自己開。
+        # weekday 照 Python 的 0=週一…6=週日；hour 是 24 小時制。
+        "watch": {"enabled": False, "weekday": 6, "hour": 21},
     },
     # 公司資訊：報價單 PDF 的抬頭／匯款資訊／交檔條款／章（templates/quotation_pdf.html 讀），設定頁「公司資訊」分頁可編。
     # logo_path／seal_path 是主控端本機路徑或 frontend 相對路徑（空＝logo 用 frontend/img/originsun-logo.webp、章不印）。

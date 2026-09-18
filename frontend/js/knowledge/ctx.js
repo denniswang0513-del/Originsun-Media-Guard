@@ -51,6 +51,7 @@ export const S = {
     extend: [],        // 「延伸」分頁：研究助理找到的清單（舊到新，同 `延伸.md` 的順序）
     extendStage: '',   // 正在找資料時的進度字串；空＝沒在找
     extendNote: '',    // 上一輪沒收到東西時的那句人話（失敗的理由／沒找到）
+    watchConf: null,   // 研究助理的全域開關 { enabled, weekday, hour, can_edit }；null＝還沒讀到
     extendTimer: null,
     editing: false,    // 結論／筆記分頁：在編輯（textarea）還是在看（md 渲染）
     editingTags: false,

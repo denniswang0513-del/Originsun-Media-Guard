@@ -238,6 +238,37 @@ books/<id>/
 - `main_office.py` 不掛任何東西（規則：office 不長排程）；手機端看得到延伸、評分、貼網址收錄，都是打 master 的端點。
 - 沒 claude CLI／不是 master → 不跑不記，下週再看（同 seo_runner 的 gate）。
 
+### 9.3.1 實作紀錄（2026-09-18）
+
+**兩道開關，都預設關**（會叫 claude 上網，同 `intel.enabled`／`social.enabled` 的規矩）：
+
+| 開關 | 住哪 | 誰能改 | 在哪按 |
+| --- | --- | --- | --- |
+| 全域 | `settings knowledge.watch`（`enabled`／`weekday`／`hour`） | 管理員 | 書頁的「延伸」分頁 |
+| 每本書 | `meta.watch` | 有知識庫鑰匙的人 | 同一頁，上面那一行 |
+
+全域那一道**不走 `/api/settings/save`**：`/api/settings/load` 會把 `knowledge.root` 抹掉
+（`api_system._SECRET_SUBKEYS`），前端拿不到 root 又整塊送回去，書架的路徑就沒了。
+所以給它自己的 `GET`／`PUT /api/v1/knowledge/watch`，只寫 `knowledge.watch` 這一格，形狀在後端夾好。
+這兩支**必須排在 `/{book_id}` 前面**（FastAPI 照註冊順序比對），有測試釘著。
+
+**跑的時候**（`services/knowledge_watch.py`）
+
+- 底座是 `core.scheduler._run_daily_master_task`：master gate、當日去重、時刻都在那裡。
+  它原本只讀 `finance.<hour_key>`，這次加了可選的 `hour_getter` —— 知識庫的鐘點不在 finance 底下。
+  沒給 `hour_getter` 的既有呼叫端行為不變（有測試釘著）。
+- 星期幾在 `weekly_check` 裡判；每本書另記 `meta.watch_last`（ISO 週），同一週不重跑。
+- 🔴 tick 只負責「該跑就丟背景任務」（同 `reference_archiver`）—— 六本書各跑七分鐘就是四十分鐘，
+  在 tick 裡 await 下去會把貸款提醒、財務行事曆那些一起停掉。
+- 一輪最多 `MAX_BOOKS_PER_RUN`（6）本；待補的書跳過；一本失敗記 log 換下一本，
+  失敗的也記這一週（不要同一晚重打同一本）。
+- 沒有 claude CLI 就跳過這週。
+
+**沒做「現在跑一次」的專用端點** —— 手動的 `POST /{id}/extend`（「去找新的」）做的就是同一件事，
+再開一支只是兩條路做同一件事。
+
+**還沒做**：早報帶「昨晚收錄 N 則」那一段（在 `~/.claude/nightly` 那邊，不在 repo 裡）。
+
 ### 9.4 學習者那一面
 - 書頁多一個分頁「延伸」：每則有 連結／摘要／關聯章／「有用」「沒用」兩顆（評分回寫 `延伸.md`；「沒用」的下次提示裡列成負面樣本，讓收錄越來越準）。
 - 私帳總覽「今天的一條」偶爾抽一則未評的延伸（「這本書最近有人這樣用：…」），看完順手評。
