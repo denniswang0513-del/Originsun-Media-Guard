@@ -341,3 +341,25 @@ def test_the_tab_strip_is_the_only_thing_allowed_past_the_edge():
     narrow = css[i:css.index("\n}", i)]
     tabs = narrow[narrow.index(".kb .kb-tabs {"):]
     assert "overflow-x: auto" in tabs[:tabs.index("}")]
+
+# ── 8. 格線不准被內容撐破 ───────────────────────────────────
+def test_a_grid_track_can_never_be_wider_than_its_container():
+    """🔴 `1fr` 其實是 `minmax(auto, 1fr)`，而 `auto` 的下限是**內容的最小寬**。
+    子項裡只要有一個最小寬比容器大（長書名、分頁列…），欄位就會被撐開，
+    內容被推出畫面而且沒有橫向捲軸 —— 就是被切掉。
+
+    2026-09-18 owner 回報「手機會吃到左右兩邊」：實測他那本「台灣菜」的第 1 章，
+    `.kb-book` 容器 358px，欄位卻被算成 503px。下限一律要釘回 0。
+    """
+    css = repo_src(CSS)
+    tracks = re.findall(r"grid-template-columns:\s*([^;]+);", css)
+    assert tracks, "找不到任何格線設定"
+    for t in tracks:
+        assert "1fr" not in t or "minmax(0" in t, (
+            "這條的下限沒釘住，內容夠長就會撐破：grid-template-columns: " + t.strip())
+
+
+def test_grid_children_cannot_refuse_to_shrink():
+    """除了欄位的下限，子項自己也要 `min-width: 0` —— 兩道一起才擋得住任何書的內容。"""
+    css = repo_src(CSS)
+    assert ".kb .kb-book > * { min-width: 0; }" in css

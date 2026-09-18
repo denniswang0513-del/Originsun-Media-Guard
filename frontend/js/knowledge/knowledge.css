@@ -86,6 +86,11 @@
 
 /* 書頁：左窄右寬 */
 .kb .kb-book { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 28px; align-items: start; }
+/* 🔴 格線欄位一律 `minmax(0, …)`、子項一律 `min-width: 0`。
+   `1fr` 其實是 `minmax(auto, 1fr)`，而 `auto` 的下限是**內容的最小寬** —— 只要有一個子項
+   （標題那行、分頁列、很長的原文書名…）最小寬比容器大，欄位就會被撐開，內容直接被推出畫面。
+   2026-09-18 手機上就是這樣被切掉的：容器 358px，欄位卻被算成 503px。 */
+.kb .kb-book > * { min-width: 0; }
 .kb .kb-side { position: sticky; top: 70px; display: flex; flex-direction: column; gap: 10px; }
 .kb .kb-side .kb-back { align-self: flex-start; }
 .kb .kb-side h3 { margin: 0; font-size: 18px; font-weight: 500; line-height: 1.4; }
@@ -254,7 +259,7 @@
 
 /* 窄一點：書頁單欄 */
 @media (max-width: 899px) {
-    .kb .kb-book { grid-template-columns: 1fr; gap: 16px; }
+    .kb .kb-book { grid-template-columns: minmax(0, 1fr); gap: 16px; }
     .kb .kb-side { position: static; }
     .kb .kb-tabs { flex-direction: row; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 0; padding: 0; margin: 4px 0 0; border-top: 0; }
     .kb .kb-tabs button { border-left: 0; border-bottom: 3px solid transparent; white-space: nowrap; padding: 10px 14px; }
