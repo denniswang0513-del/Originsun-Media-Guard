@@ -879,3 +879,38 @@ def test_missing_chapter_is_404_about_the_chapter_not_the_book(kb):
     r = kb.client.get(f"{URL}/{meta['id']}/chapters/7")
     assert r.status_code == 404
     assert "章" in r.json()["detail"] and "找不到這本書" not in r.json()["detail"]
+
+
+# ── 編譯三個 pass 不給 claude 任何工具（2026-09-18 實測：plan mode＋Read 會讓它寫計畫、問要不要建檔，四個檔一個都不出）──
+
+def test_compile_passes_call_claude_without_tools_and_chat_with_read_only(kb):
+    """行為層：結構／章／骨架三個 pass 的 allowed_tools 都是空（用預設）；討論才是 Read。"""
+    from services import knowledge_service as ks
+    bid = kb.upload(pages=2)["id"]
+    kb.client.post(f"{URL}/{bid}/compile", json={})
+    kb.run_fired()
+    assert kb.client.get(f"{URL}/{bid}").json()["status"] == "compiled"
+    compile_calls = list(kb.prompts)
+    assert len(compile_calls) >= 3
+    for _prompt, kw in compile_calls:
+        assert not kw.get("allowed_tools"), "編譯 pass 不准帶工具（帶了 claude 會寫計畫不輸出）"
+    kb.prompts.clear()
+    kb.client.post(f"{URL}/{bid}/chat", json={"text": "hi"})
+    kb.run_fired()
+    assert kb.prompts and kb.prompts[-1][1].get("allowed_tools") == "Read"
+    assert bid not in ks._stage
+
+
+def test_call_claude_default_is_no_tools_and_empty_means_tools_flag_off():
+    """原始碼層：`call_claude` 預設 allowed_tools=""；空字串走 `--tools ""`，只有非空才進 plan mode＋allowedTools。"""
+    import inspect
+    from services import knowledge_claude as kc
+    assert inspect.signature(kc.call_claude).parameters["allowed_tools"].default == ""
+    src = code_only(repo_src("services/knowledge_claude.py"))
+    body = func_body(src, "call_claude")
+    assert 'if allowed_tools:' in body
+    assert '"--tools", ""' in body, "沒工具那條路要明確 --tools \"\"（不是只省略旗標：預設工具集會整包打開）"
+    plan_branch = body.split("if allowed_tools:", 1)[1].split("else:", 1)[0]
+    assert '"--permission-mode", "plan"' in plan_branch and '"--allowedTools"' in plan_branch
+    no_tools_branch = body.split("else:", 1)[1]
+    assert "--permission-mode" not in no_tools_branch
