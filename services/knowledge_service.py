@@ -931,12 +931,18 @@ def now_iso() -> str:
 
 
 def update_meta_share(book_id: str, share: Optional[dict]) -> None:
-    """開關公開分享（§9.9）。`None`＝關掉，連鍵一起拿掉。走 `_update_meta` 才吃得到那把鎖。"""
-    meta = read_meta(book_id)
-    meta.pop("share", None)
-    if share:
-        meta["share"] = share
-    write_meta(book_id, meta)
+    """開關公開分享（§9.9）。`None`＝關掉，連鍵一起拿掉。
+
+    🔴 要拿鍵所以走不了 `_update_meta`，但鎖一樣要拿：這是讀-改-寫，跟編譯／補圖那條
+    （別的執行緒的 `_update_meta`）對撞會把對方剛寫的鍵（asset_captions、toc…）或這裡的
+    share 塊靜默蓋掉（2026-09-19 /polish BUG-6：第一版 docstring 說有鎖、實作沒有）。
+    """
+    with _meta_lock(book_id):
+        meta = read_meta(book_id)
+        meta.pop("share", None)
+        if share:
+            meta["share"] = share
+        write_meta(book_id, meta)
 
 
 def set_watch_last(book_id: str, week: str) -> None:

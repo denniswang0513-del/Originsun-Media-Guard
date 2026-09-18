@@ -220,3 +220,32 @@ def test_a_rating_made_while_searching_survives_the_run(kb):
     kb.run_fired()
     items = ks.read_extend(bid)
     assert [(i["n"], i["rating"]) for i in items] == [(1, "useful"), (2, ""), (3, "")], items
+
+
+def test_toggling_the_share_is_serialized_with_other_meta_writes(kb):
+    """BUG-6：update_meta_share 的 docstring 說走那把鎖，實作卻是裸的讀-改-寫。
+    跟編譯那條的 _update_meta 對撞（同 test_update_meta_is_serialized_per_book 的 barrier 手法），
+    最後 share 塊與另一個鍵都要在。"""
+    import threading
+    from services import knowledge_service as ks
+    bid = kb.upload(pages=1)["id"]
+    orig_read = ks.read_meta
+    gate = threading.Barrier(2, timeout=1)   # 有鎖時第二個等不到 barrier，逾時就放行
+
+    def slow_read(book_id):
+        m = orig_read(book_id)
+        try:
+            gate.wait()
+        except threading.BrokenBarrierError:
+            pass
+        return m
+
+    ks.read_meta = slow_read
+    try:
+        t1 = threading.Thread(target=ks.update_meta_share, args=(bid, {"id": "a" * 32, "at": "x", "parts": ["tags"]}))
+        t2 = threading.Thread(target=ks._update_meta, args=(bid,), kwargs={"asset_captions": {"p001-1.jpg": "圖"}})
+        t1.start(); t2.start(); t1.join(5); t2.join(5)
+    finally:
+        ks.read_meta = orig_read
+    m = ks.read_meta(bid)
+    assert m.get("share", {}).get("id") == "a" * 32 and m.get("asset_captions") == {"p001-1.jpg": "圖"}, m
