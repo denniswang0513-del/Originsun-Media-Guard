@@ -19,6 +19,7 @@ CSS = "frontend/js/knowledge/knowledge.css"
 INDEX = "frontend/js/knowledge/index.js"
 SHELF = "frontend/js/knowledge/shelf.js"
 CTX = "frontend/js/knowledge/ctx.js"
+PAGE = "frontend/knowledge.html"
 
 
 def _media(width):
@@ -212,3 +213,79 @@ def test_the_read_button_unlocks_the_moment_the_file_lands():
     body = js_func_body(repo_src(BOOK), "export async function attachFile(")
     assert "S.book.status = meta.status" in body
     assert "renderBook();" in body
+
+# ── 6. 手機深色（owner 2026-09-18：「手機 RWD 希望是深色配色 和 logo 匹配」）──
+def _page_style():
+    src = repo_src(PAGE)
+    return src[src.index("<style>"):src.index("</style>")]
+
+
+#: 深色那一段的開頭（也是淺色色票的結尾）。第一個 `@media` 是上面那個 640 的 brand-mark，不能用。
+_DARK_AT = "@media (max-width: 899px)"
+
+
+def _dark_block():
+    """深色 @media 的**內容**，不含 `@media (max-width: 899px)` 那一行本身 ——
+    那行自己就有 `width:`，會誤觸下面「不准出現版面規則」那一條。"""
+    css = _page_style()
+    i = css.index(_DARK_AT) + len(_DARK_AT)
+    return css[i:css.index("\n  }", i)]
+
+
+def test_the_phone_palette_comes_from_the_logo():
+    """色票要跟 logo（frontend/img/knowledge-icon.svg）是同一組，不是隨便挑的深藍。"""
+    svg = repo_src("frontend/img/knowledge-icon.svg")
+    dark = _dark_block()
+    assert "#38BDF8" in svg and "#38BDF8" in dark, "強調色＝浪的天藍"
+    assert "#12294D" in svg and "#12294D" in dark, "面板＝logo 底的午夜藍"
+
+
+def test_the_browser_chrome_matches_the_page():
+    """捲動時手機瀏覽器上下那條的顏色要跟頁面一樣，不然會露出一塊白。"""
+    src = repo_src(PAGE)
+    assert 'name="theme-color" content="#0B1B34"' in src
+    assert "--bg: #0B1B34;" in _dark_block()
+
+
+def test_dark_only_swaps_tokens_never_layout():
+    """深色那一段只換色票 —— 版面規則共用同一份，不要養出第二套版面。"""
+    block = _dark_block()
+    for layout in ("display:", "flex", "grid", "position:", "width:", "margin:", "padding:"):
+        assert layout not in block, f"深色那段不該出現 {layout}"
+
+
+def test_danger_is_not_the_accent():
+    """🔴 `--red` 在深色底下變成天藍（強調）；刪除那類要是紅的，所以拆成 `--danger`。
+    忘了拆的話「刪除這本書」會變成藍字。"""
+    css = repo_src(CSS)
+    for rule in (".kb .kb-btn.danger", ".kb .note.bad", ".kb .kb-error", ".kb .pill.bad"):
+        line = next(ln for ln in css.splitlines() if ln.startswith(rule + " "))
+        assert "var(--danger)" in line, rule + " 要用危險色不是強調色"
+    dark = _dark_block()
+    assert "--danger: #FCA5A5" in dark and "--red: #38BDF8" in dark
+
+
+def test_no_colour_is_hard_coded_in_the_stylesheet():
+    """寫死的顏色換不了 —— 深色底下就會留一塊白。"""
+    css = repo_src(CSS)
+    code = "\n".join(ln for ln in css.splitlines() if not ln.lstrip().startswith(("/*", "*", "不要")))
+    bad = re.findall(r":[^;{}]*?(#[0-9a-fA-F]{3,6}|rgba?\([^)]*\))", code)
+    assert not bad, "這些要改走色票：" + str(sorted(set(bad))[:8])
+
+
+def test_every_token_exists_in_both_palettes():
+    """淺色有、深色沒有的話，手機上那一格會掉回淺色的值（例如白底白字）。"""
+    css = _page_style()
+    used = set(re.findall(r"var\((--[a-z0-9-]+)\)", repo_src(CSS)))
+    light = css[css.index(":root {"):css.index(_DARK_AT)]
+    dark = _dark_block()
+    for token in sorted(used):
+        assert token + ":" in light, token + " 淺色沒定義"
+        assert token + ":" in dark, token + " 深色沒定義（手機上會掉回淺色的值）"
+
+
+def test_the_desktop_stays_light():
+    """owner 只要手機深色；桌機那份不要跟著變。"""
+    css = _page_style()
+    assert "--bg: #fff;" in css[:css.index(_DARK_AT)]
+    assert css.count(_DARK_AT) == 1, "只有一個深色斷點"
