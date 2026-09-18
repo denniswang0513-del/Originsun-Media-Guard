@@ -9,70 +9,124 @@
 <!-- 🔴 這是知識庫**唯一不需要登入**的頁面（docs/KNOWLEDGE_BASE_PLAN.md §9.9）。
      只讀 /api/v1/knowledge/public/<share id>，只畫他**勾選**的那幾段。
      這裡**不准**出現任何指回系統的連結或按鈕（owner 2026-09-19：「但是點不到我其他的地方」）。
-     搜尋引擎也不要收（noindex）—— 分享連結是給他自己傳給特定的人的。
-     樣式與程式全部內嵌：這一頁沒有模組圖，也就不吃 §9.6 那個「新 html ＋ 舊 js」的快取問題。 -->
+     搜尋引擎也不要收（noindex）—— 分享連結是他傳給特定的人的。
+     樣式與程式全部內嵌：沒有模組圖，也就不吃 §9.6 那個「新 html ＋ 舊 js」的快取問題。
+
+     版面照他自己的書頁做（owner 2026-09-19：「版面規劃上可以和我的差不多，只是標題變成書名」）：
+     跨整頁的表頭 → 左欄分頁 → 右欄內容；窄螢幕分頁變成可橫捲的一列並黏在上緣。
+     色票也照 knowledge.html：桌機白底、≤899px 換成 logo 那組午夜藍。 -->
 <meta name="robots" content="noindex, nofollow">
 <style>
   :root {
-    --ink: #E8EEF8; --sub: #8FA6C6; --line: #1E3557; --accent: #38BDF8;
-    --bg: #070F22; --panel: #0E1F3A;
+    --red: #c9372c; --ink: #262626; --sub: #737373; --line: #e5e5e5;
+    --bg: #fff; --panel: #fff; --soft: #f3f3f3; --soft-2: #fafafa; --on-ink: #fff;
+  }
+  @media (max-width: 899px) {
+    :root {
+      --red: #38BDF8; --ink: #E8EEF8; --sub: #8FA6C6; --line: #1E3557;
+      --bg: #070F22; --panel: #0E1F3A; --soft: #13294B; --soft-2: #0A1730; --on-ink: #071324;
+    }
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--ink);
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-size: 14px;
     font-family: "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif; line-height: 1.7; }
-  a { color: var(--accent); }
-  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 72px;
-    padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
-  .mark { display: flex; align-items: center; gap: 9px; color: var(--sub); font-size: 12px;
-    letter-spacing: .22em; margin-bottom: 28px; }
-  .mark img { width: 22px; height: 22px; border-radius: 5px; }
-  h1 { font-size: 22px; line-height: 1.45; margin: 0 0 6px; font-weight: 600; }
-  .who { color: var(--sub); font-size: 14px; margin-bottom: 14px; }
-  .facts { color: var(--sub); font-size: 13px; }
-  .facts span + span::before { content: "・"; margin: 0 6px; }
-  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 0; }
-  .tags i { font-style: normal; font-size: 12px; padding: 2px 10px; border-radius: 999px;
-    background: var(--panel); color: var(--sub); }
-  .lead { margin: 30px 0 6px; padding-top: 22px; border-top: 1px solid var(--line);
-    font-size: 15px; font-weight: 600; }
-  .note { color: var(--sub); font-size: 13px; margin: 0 0 16px; }
-  ol { list-style: none; margin: 0; padding: 0; }
-  ol li { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
-    background: var(--panel); }
-  ol li .t { font-size: 15.5px; line-height: 1.5; }
-  ol li .t a { text-decoration: underline; text-underline-offset: 3px; }
-  ol li .orig { color: var(--sub); font-size: 12.5px; margin-top: 3px; }
-  ol li .src { color: var(--sub); font-size: 12.5px; margin-top: 6px; }
-  ol li .sum { font-size: 14px; margin-top: 9px; }
-  ol li .why { color: var(--sub); font-size: 13.5px; margin-top: 7px; }
-  .md h2 { font-size: 16px; margin: 20px 0 6px; }
+  a { color: var(--red); }
+
+  .bar { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 9px;
+    padding: 13px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
+    color: var(--sub); font-size: 11px; letter-spacing: .24em;
+    padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
+  .bar img { width: 22px; height: 22px; border-radius: 5px; }
+  .bar .tail { margin-left: auto; letter-spacing: 0; font-size: 11.5px; }
+
+  main { max-width: 1240px; margin: 0 auto; padding: 24px 24px 72px;
+    padding-left: max(24px, env(safe-area-inset-left)); padding-right: max(24px, env(safe-area-inset-right)); }
+  .wrap { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
+  .wrap > * { min-width: 0; }
+
+  .head { grid-column: 1 / -1; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+  .head h1 { margin: 0 0 4px; font-size: 21px; font-weight: 600; line-height: 1.45; }
+  .head .who { color: var(--sub); font-size: 13.5px; }
+  .head .facts { color: var(--sub); font-size: 12.5px; margin-top: 4px; }
+  .head .facts span + span::before { content: "・"; margin: 0 6px; }
+  .head .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .head .tags i { font-style: normal; font-size: 12px; padding: 2px 10px; border-radius: 999px;
+    background: var(--soft); color: var(--sub); }
+
+  nav { position: sticky; top: 62px; display: flex; flex-direction: column; gap: 2px; }
+  nav button { text-align: left; background: none; border: 0; border-left: 2px solid transparent;
+    padding: 9px 12px; min-height: 40px; font-size: 14px; font-family: inherit; color: var(--sub);
+    cursor: pointer; }
+  nav button.on { color: var(--ink); border-left-color: var(--red); font-weight: 500; }
+  nav button:hover { color: var(--ink); }
+  nav button .n { float: right; font-size: 12px; opacity: .7; }
+
+  .pane h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+  .pane .note { color: var(--sub); font-size: 12.5px; margin: 0 0 16px; line-height: 1.6; }
+
+  ol.items { list-style: none; margin: 0; padding: 0; }
+  ol.items li { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px;
+    margin-bottom: 14px; background: var(--panel); }
+  ol.items .t { font-size: 15px; line-height: 1.5; }
+  ol.items .t a { text-decoration: underline; text-underline-offset: 3px; }
+  ol.items .orig { color: var(--sub); font-size: 12.5px; margin-top: 3px; }
+  ol.items .src { color: var(--sub); font-size: 12.5px; margin-top: 6px; }
+  ol.items .sum { font-size: 13.5px; margin-top: 9px; }
+  ol.items .why { color: var(--sub); font-size: 13px; margin-top: 7px; }
+
+  .md h2 { font-size: 16px; margin: 22px 0 6px; }
   .md h3 { font-size: 14.5px; margin: 16px 0 4px; }
   .md ul { padding-left: 20px; margin: 8px 0; }
   .md li { margin: 3px 0; }
   .md p { margin: 8px 0; }
-  .md code { background: var(--panel); border-radius: 4px; padding: 0 4px; font-size: 13px; }
+  .md code { background: var(--soft); border-radius: 4px; padding: 0 4px; font-size: 13px; }
+  .chap { margin-bottom: 26px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+  .chap:last-child { border-bottom: 0; }
+
   figure { margin: 0 0 22px; }
   figure img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
   figcaption { color: var(--sub); font-size: 12.5px; margin-top: 6px; line-height: 1.6; }
   figcaption .src { display: block; opacity: .75; margin-top: 2px; }
-  footer { color: var(--sub); font-size: 12px; margin-top: 34px; padding-top: 18px;
-    border-top: 1px solid var(--line); line-height: 1.8; }
+  .grp { margin-bottom: 22px; }
+  .grp h3 { margin: 0 0 12px; font-size: 13px; font-weight: 500; color: var(--sub);
+    padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+
+  footer { grid-column: 1 / -1; color: var(--sub); font-size: 12px; margin-top: 34px;
+    padding-top: 18px; border-top: 1px solid var(--line); line-height: 1.8; }
   .state { color: var(--sub); padding: 60px 0; text-align: center; }
+
+  @media (max-width: 899px) {
+    main { padding: 16px 16px 48px;
+      padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+    .wrap { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+    /* 分頁變成可橫捲的一列並黏在上緣（同他書頁窄螢幕的做法） */
+    nav { position: sticky; top: 49px; z-index: 20; flex-direction: row; gap: 2px;
+      overflow-x: auto; -webkit-overflow-scrolling: touch; background: var(--bg);
+      border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 2px 0; }
+    nav button { white-space: nowrap; border-left: 0; border-bottom: 2px solid transparent;
+      min-height: 44px; padding: 9px 13px; }
+    nav button.on { border-bottom-color: var(--red); }
+    nav button .n { float: none; margin-left: 5px; }
+    .head { padding-bottom: 10px; }
+    .head h1 { font-size: 18px; }
+  }
+  @media print {
+    .bar, nav { display: none; }
+    .wrap { display: block; }
+    ol.items li, figure { break-inside: avoid; }
+  }
 </style>
 </head>
 <body>
-<main>
-  <div class="mark"><img src="/img/knowledge-icon-32.png" alt="">KNOWLEDGE</div>
-  <div id="host"><div class="state">載入中…</div></div>
-</main>
+<div class="bar"><img src="/img/knowledge-icon-32.png" alt="">KNOWLEDGE<span class="tail" id="bar-tail"></span></div>
+<main id="host"><div class="state">載入中…</div></main>
 <script>
 // 🔴 這一頁不帶 token、不寫任何東西、不連回系統的其他地方。
 // 分享 id 放在 hash：不會進伺服器的存取紀錄，也不會被 referer 帶到別的網站去。
+// hash 形狀：`#<32 hex>` 或 `#<32 hex>/<分頁>`（分頁可以直接貼給別人）。
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const host = document.getElementById("host");
-
-/** 這一份分享有沒有包含某一段 —— 後端沒勾的連鍵都不會有。 */
 const has = (d, k) => Object.prototype.hasOwnProperty.call(d, k);
 
 const inline = (s) => s
@@ -99,12 +153,6 @@ function md(text) {
   return out.join("");
 }
 
-function section(title, body, note) {
-  if (!body) return "";
-  return '<div class="lead">' + esc(title) + "</div>"
-    + (note ? '<p class="note">' + esc(note) + "</p>" : "") + body;
-}
-
 function extendRow(it) {
   const zh = (it.lang || "").toLowerCase().startsWith("zh");
   const safe = /^https?:\/\//i.test(it.url || "") ? it.url : "";
@@ -123,53 +171,112 @@ function extendRow(it) {
 }
 
 function figuresHtml(d, id) {
-  if (!has(d, "gallery") || !(d.gallery || []).length) return "";
+  const rows = d.gallery || [];
   const who = [d.title ? "《" + d.title + "》" : "", d.author].filter(Boolean).join("　");
-  const body = d.gallery.map((a) => "<figure>"
+  const chs = has(d, "chapters") ? d.chapters : [];
+  const one = (a) => "<figure>"
     + '<img src="/api/v1/knowledge/public/' + encodeURIComponent(id) + "/assets/" + encodeURIComponent(a.name)
     + '" alt="' + esc(a.caption || "") + '" loading="lazy">'
     + "<figcaption>" + esc(a.caption || "（原書沒有圖說）")
     + '<span class="src">' + esc("出自" + who + "，第 " + a.page + " 頁") + "</span></figcaption>"
-    + "</figure>").join("");
-  return section("書裡的圖（" + d.gallery.length + "）", body, "圖出自原書，僅供閱讀筆記參考。");
+    + "</figure>";
+  // 有章節就照章分組（同他自己的「圖輯」分頁）
+  const used = new Set();
+  const groups = [];
+  for (const c of chs) {
+    const a = Number(c.start_page) || 0;
+    const b = Number(c.end_page) || 0;
+    if (!a && !b) continue;
+    const mine = rows.filter((x) => x.page >= a && x.page <= b);
+    mine.forEach((x) => used.add(x.name));
+    if (mine.length) groups.push(["第 " + c.n + " 章 " + (c.title || "") + "（p." + a + "–" + b + "）", mine]);
+  }
+  const rest = rows.filter((x) => !used.has(x.name));
+  if (rest.length) groups.push([groups.length ? "其他頁" : "全書", rest]);
+  return groups.map(([t, rs]) => '<div class="grp"><h3>' + esc(t) + "</h3>" + rs.map(one).join("") + "</div>").join("");
+}
+
+/** 有哪些分頁可以看 —— 只有他勾了而且真的有內容的才出現。 */
+function panesOf(d, id) {
+  const p = [];
+  const add = (key, label, n, note, body) => { if (body) p.push({ key, label, n, note, body }); };
+  if (has(d, "extend")) {
+    const rows = d.extend || [];
+    add("extend", "延伸研究", rows.length,
+      "讀這本書之後在網路上找到的資料，每一則都附原始出處與連結。這些是公開資料，不是這本書的作者說的。",
+      rows.length ? '<ol class="items">' + rows.map(extendRow).join("") + "</ol>" : "");
+  }
+  if (has(d, "conclusion") && d.conclusion) {
+    add("conclusion", "結論", 0, "讀完這本書之後認同、打算照著做的原則。", '<div class="md">' + md(d.conclusion) + "</div>");
+  }
+  if (has(d, "notes") && d.notes) {
+    add("notes", "筆記", 0, "", '<div class="md">' + md(d.notes) + "</div>");
+  }
+  if (has(d, "skill") && d.skill) {
+    add("skill", "骨架", 0, "這本書的核心心智模型與決策規則。以下是整理的筆記，不是原文。",
+      '<div class="md">' + md(d.skill) + (d.cheatsheet ? md(d.cheatsheet) : "") + "</div>");
+  }
+  if (has(d, "chapters") && (d.chapters || []).length) {
+    add("chapters", "章節重點", d.chapters.length, "以下是針對原書內容整理的筆記，不是原文。",
+      d.chapters.map((c) => '<div class="chap"><div class="md">' + md(c.md) + "</div></div>").join(""));
+  }
+  if (has(d, "gallery") && (d.gallery || []).length) {
+    add("gallery", "圖輯", d.gallery.length, "從原書抽出來的圖，括號是頁數。僅供閱讀筆記參考。", figuresHtml(d, id));
+  }
+  return p;
+}
+
+let STATE = null;
+
+function show(key) {
+  const { panes } = STATE;
+  const pane = panes.find((p) => p.key === key) || panes[0];
+  if (!pane) return;
+  STATE.key = pane.key;
+  for (const b of host.querySelectorAll("nav button")) b.classList.toggle("on", b.dataset.k === pane.key);
+  const box = host.querySelector(".pane");
+  box.innerHTML = "<h2>" + esc(pane.label) + "</h2>"
+    + (pane.note ? '<p class="note">' + esc(pane.note) + "</p>" : "") + pane.body;
+  const want = "#" + STATE.id + "/" + pane.key;
+  if (location.hash !== want) history.replaceState(null, "", want);
 }
 
 function render(d, id) {
   const info = has(d, "info") ? (d.info || {}) : {};
-  const facts = ["publisher", "published", "translator", "isbn"]
+  const facts = ["publisher", "published", "translator", "edition", "isbn"]
     .map((k) => info[k]).filter(Boolean).map((v) => "<span>" + esc(v) + "</span>").join("");
-  const extend = has(d, "extend") ? (d.extend || []) : null;
+  const panes = panesOf(d, id);
+  STATE = { id, panes, key: "" };
   document.title = (d.title || "研究筆記") + "｜Knowledge";
+  document.getElementById("bar-tail").textContent = d.shared_at ? "分享於 " + String(d.shared_at).slice(0, 10) : "";
 
-  const parts = [
-    "<h1>" + esc(d.title || "") + "</h1>",
-    d.author ? '<div class="who">' + esc(d.author) + "</div>" : "",
-    facts ? '<div class="facts">' + facts + "</div>" : "",
-    info.subtitle ? '<div class="facts" style="margin-top:6px">' + esc(info.subtitle) + "</div>" : "",
-    has(d, "tags") && (d.tags || []).length
-      ? '<div class="tags">' + d.tags.map((t) => "<i>" + esc(t) + "</i>").join("") + "</div>" : "",
-    extend ? section("讀這本書之後找到的延伸資料（" + extend.length + "）",
-      extend.length ? "<ol>" + extend.map(extendRow).join("") + "</ol>" : '<p class="note">這一段還沒有內容。</p>',
-      "每一則都附原始出處與連結。這些是網路上的公開資料，不是這本書的作者說的。") : "",
-    section("我的結論", has(d, "conclusion") && d.conclusion ? '<div class="md">' + md(d.conclusion) + "</div>" : ""),
-    section("我的筆記", has(d, "notes") && d.notes ? '<div class="md">' + md(d.notes) + "</div>" : ""),
-    section("這本書的骨架",
-      has(d, "skill") && d.skill ? '<div class="md">' + md(d.skill) + (d.cheatsheet ? md(d.cheatsheet) : "") + "</div>" : "",
-      "以下是針對原書內容整理的筆記，不是原文。"),
-    section("章節重點",
-      has(d, "chapters") && (d.chapters || []).length
-        ? d.chapters.map((c) => '<div class="md">' + md(c.md) + "</div>").join("") : "",
-      "以下是針對原書內容整理的筆記，不是原文。"),
-    figuresHtml(d, id),
-    "<footer>以上是針對《" + esc(d.title || "") + "》整理的資料。要看原書請支持原作者與出版社。<br>"
-      + "由 Knowledge 知識庫整理"
-      + (d.shared_at ? "・分享於 " + esc(String(d.shared_at).slice(0, 10)) : "") + "</footer>",
-  ];
-  host.innerHTML = parts.join("");
+  host.innerHTML = '<div class="wrap">'
+    + '<div class="head"><h1>' + esc(d.title || "") + "</h1>"
+      + (d.author ? '<div class="who">' + esc(d.author) + "</div>" : "")
+      + (info.subtitle ? '<div class="facts">' + esc(info.subtitle) + "</div>" : "")
+      + (facts ? '<div class="facts">' + facts + "</div>" : "")
+      + (has(d, "tags") && (d.tags || []).length
+        ? '<div class="tags">' + d.tags.map((t) => "<i>" + esc(t) + "</i>").join("") + "</div>" : "")
+    + "</div>"
+    + (panes.length
+      ? "<nav>" + panes.map((p) => '<button type="button" data-k="' + p.key + '">' + esc(p.label)
+        + (p.n ? '<span class="n">' + p.n + "</span>" : "") + "</button>").join("") + "</nav>"
+        + '<section class="pane"></section>'
+      : '<section class="pane"><div class="state">這份分享還沒有內容。</div></section>')
+    + "<footer>以上是針對《" + esc(d.title || "") + "》整理的資料，書本身的內容不在這裡。"
+      + "要看原書請支持原作者與出版社。<br>由 Knowledge 知識庫整理</footer>"
+    + "</div>";
+
+  host.addEventListener("click", (ev) => {
+    const b = ev.target.closest("nav button");
+    if (b) show(b.dataset.k);
+  });
+  const want = (location.hash.split("/")[1] || "").trim();
+  show(panes.some((p) => p.key === want) ? want : (panes[0] && panes[0].key));
 }
 
 (async () => {
-  const id = (location.hash || "").replace(/^#/, "").trim();
+  const id = (location.hash || "").replace(/^#/, "").split("/")[0].trim();
   if (!/^[0-9a-f]{32}$/.test(id)) {
     host.innerHTML = '<div class="state">這個連結不完整。請跟分享給你的人再要一次。</div>';
     return;
@@ -182,7 +289,6 @@ function render(d, id) {
     host.innerHTML = '<div class="state">這個分享連結不存在或已經關閉。</div>';
   }
 })();
-window.addEventListener("hashchange", () => location.reload());
 </script>
 </body>
 </html>

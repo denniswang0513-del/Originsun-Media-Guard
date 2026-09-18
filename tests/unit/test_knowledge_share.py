@@ -177,9 +177,10 @@ def test_the_public_page_has_no_way_back_in():
             continue      # 程式組出來的：那一格只放 /^https?:\/\// 過關的外部網址（下面另外釘）
         assert h.startswith(("http", "/img/")), "公開頁不該連到 " + h
     assert r"/^https?:\/\//i.test(it.url" in src, "外部連結要先驗過協定才敢放"
-    # 技術性的那幾個才是重點（「登入」兩個字出現在說明文字裡是在解釋這頁不需要登入）
-    for word in ("knowledge.html", "my.html", "auth_token", "localStorage", "sessionStorage"):
-        assert word not in src, "公開頁不該出現 " + word
+    # 註解拿掉再看 —— 說明文字裡提到 knowledge.html 是在解釋色票照它做，不是連過去
+    code = re.sub(r"<!--.*?-->", "", src, flags=re.S)
+    for word in ("knowledge.html", "my.html", "auth_token", "localStorage", "sessionStorage", "window.open"):
+        assert word not in code, "公開頁不該出現 " + word
 
 
 def test_the_public_page_is_not_indexed():

@@ -124,7 +124,9 @@ def public_view(share_id: str) -> Optional[dict]:
         out["skill"] = ks.read_doc(book_id, "skill")
         out["cheatsheet"] = ks.read_doc(book_id, "cheatsheet")
     if kl.shares(parts, "chapters"):
+        # 頁碼一起給：公開頁的「圖輯」要靠它把圖分到各章（同他自己的書頁）
         out["chapters"] = [{"n": c["n"], "title": c.get("title") or "",
+                            "start_page": c.get("start_page"), "end_page": c.get("end_page"),
                             "md": ks.read_chapter(book_id, c["n"]).get("md") or ""}
                            for c in ks.chapter_rows_public(book_id)]
     if kl.shares(parts, "gallery"):
