@@ -566,13 +566,13 @@ def sync_docs_version(version: str) -> None:
              f"現在 (v{version}) ← 你在這裡"),
         ],
         # 🔴 破快取：Cloudflare 把 js/css 的 no-cache 改寫成 max-age=14400（見 docker/nginx
-        # /originsun.conf 第 36 行），發版後最久四小時使用者是「新 html ＋ 舊 css」——
+        # /originsun.conf 第 36 行），發版後最久四小時使用者是「新 html ＋ 舊 css／js」——
         # 2026-09-18 owner 的手機就是這樣：顏色對了但版面被切、分頁列還是白的。
-        # 版本一變網址就變，快取自然失效。（ES module 的 import 不繼承查詢字串，JS 解不了，
-        # 那一半要靠 CF 後台 Browser Cache TTL 改成 Respect Existing Headers。）
+        # 版本一變網址就變，快取自然失效。css 是 <link> 的 href，js 是 import map 裡的十三個
+        # （模組圖整張都要換；漏一支那支就是舊的，tests/unit/test_knowledge_cache_bust.py 盯著）。
+        # 這一條把那一整頁的 `?v=` 一次換掉，不用列每一個檔名。
         "frontend/knowledge.html": [
-            (re.compile(r'href="/js/knowledge/knowledge\.css\?v=[\d.]+"'),
-             f'href="/js/knowledge/knowledge.css?v={version}"'),
+            (re.compile(r"\?v=[\d.]+"), f"?v={version}"),
         ],
     }
     for fname, frules in rules.items():
@@ -586,7 +586,8 @@ def sync_docs_version(version: str) -> None:
             changed = False
             for i, line in enumerate(lines):
                 for pattern, repl in frules:
-                    new_line, n = pattern.subn(repl, line, count=1)
+                    # count=0＝這一行全部換（import map 一行一個 `?v=`，但 css 那行也可能有兩個）
+                    new_line, n = pattern.subn(repl, line)
                     if n:
                         lines[i] = new_line
                         changed = True

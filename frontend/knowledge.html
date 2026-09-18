@@ -132,6 +132,32 @@
     input, textarea { caret-color: var(--red); }
   }
 </style>
+<!-- import map：JS 的破快取。`import './ctx.js'` 先解析成 `/js/knowledge/ctx.js`，
+     再過這張表換成帶 ?v= 的那一個 —— 整張模組圖都被換掉，不只進入點
+     （HTML 規格自己列的 cache-busting 用途）。
+     🔴 **每一支會被 import 的檔都要在這裡**，漏一支那支就還是舊的。
+     tests/unit/test_knowledge_cache_bust.py 會從進入點走一次模組圖比對。
+     版號同 css 那個 ?v=，由 publish_update.sync_docs_version 自動維護，勿手改。 -->
+<script type="importmap">
+{
+  "imports": {
+    "/js/knowledge/book.js": "/js/knowledge/book.js?v=2.5.53",
+    "/js/knowledge/chat.js": "/js/knowledge/chat.js?v=2.5.53",
+    "/js/knowledge/ctx.js": "/js/knowledge/ctx.js?v=2.5.53",
+    "/js/knowledge/extend.js": "/js/knowledge/extend.js?v=2.5.53",
+    "/js/knowledge/index.js": "/js/knowledge/index.js?v=2.5.53",
+    "/js/knowledge/report.js": "/js/knowledge/report.js?v=2.5.53",
+    "/js/knowledge/shelf.js": "/js/knowledge/shelf.js?v=2.5.53",
+    "/js/shared/chunked-upload.js": "/js/shared/chunked-upload.js?v=2.5.53",
+    "/js/shared/clip_utils.js": "/js/shared/clip_utils.js?v=2.5.53",
+    "/js/shared/dom.js": "/js/shared/dom.js?v=2.5.53",
+    "/js/shared/google-signin.js": "/js/shared/google-signin.js?v=2.5.53",
+    "/js/shared/md-lite.js": "/js/shared/md-lite.js?v=2.5.53",
+    "/js/shared/quote-wait.js": "/js/shared/quote-wait.js?v=2.5.53",
+    "/js/shared/utils.js": "/js/shared/utils.js?v=2.5.53"
+  }
+}
+</script>
 </head>
 <body>
 
