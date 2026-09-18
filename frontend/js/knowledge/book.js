@@ -2,6 +2,7 @@
  * book.js — 知識庫書頁：左欄（標題／狀態／標籤／分頁鈕／動作）＋右欄（分頁內容）。
  * 分頁：討論（chat.js）／結論／筆記（整檔編輯）／骨架（SKILL.md＋速查表）／章節（清單 → 單章）。
  * 編譯：POST compile → 每 3 秒抓 GET /{id} 直到 status 離開 compiling（分頁在背景就跳過那一拍）。
+ * 待補（pending）＝先建了書名還沒有檔：這裡用「補上 PDF」取代「讀這本書」，補完 status 變 uploaded。
  */
 import { mdToHtml } from '../shared/md-lite.js';
 import { S, PANES, COMPILE_POLL_MS, api, esc, errText, stageText, alive, toast, stopTimers, normBook,
@@ -45,6 +46,7 @@ function _tagsRowHtml(b) {
 export function renderBook() {
     const b = S.book;
     const compiling = b.status === 'compiling';
+    const pending = b.status === 'pending';
     // 窄螢幕：整個 aside 收成「一行標題列＋黏著的分頁」，其餘動作進 ⋯ 抽屜（kb-sheet）。
     // 寬螢幕的左欄維持原樣 —— 同一份 HTML，差別全在 knowledge.css 的 @media。
     S.root.innerHTML = `
@@ -62,15 +64,52 @@ export function renderBook() {
             <div id="kb-tags-row">${_tagsRowHtml(b)}</div>
             <nav class="kb-tabs">${PANES.map(([k, l]) => `<button type="button" data-kact="pane" data-pane="${k}" class="${k === S.pane ? 'on' : ''}">${l}</button>`).join('')}</nav>
             <div class="kb-actions">
-                <button type="button" class="kb-btn pri" data-kact="compile" ${compiling ? 'disabled' : ''}>${b.status === 'compiled' ? '重新讀這本書' : (compiling ? '編譯中' : '讀這本書')}</button>
+                ${pending
+        ? '<button type="button" class="kb-btn pri" data-kact="attach">補上 PDF</button>'
+        : `<button type="button" class="kb-btn pri" data-kact="compile" ${compiling ? 'disabled' : ''}>${b.status === 'compiled' ? '重新讀這本書' : (compiling ? '編譯中' : '讀這本書')}</button>`}
                 <button type="button" class="kb-btn" data-kact="rename">改名</button>
                 <button type="button" class="kb-btn danger" data-kact="delete">刪除</button>
             </div>
         </aside>
         <section class="kb-main" id="kb-pane"></section>
       </div>
+      <input type="file" id="kb-book-file" accept=".pdf,application/pdf" hidden>
       <div id="kb-sheet-host"></div>`;
+    const input = S.root.querySelector('#kb-book-file');
+    input.addEventListener('change', () => {
+        const f = input.files && input.files[0];
+        input.value = '';
+        if (f) attachFile(f);
+    });
     renderPane();
+}
+
+/** 待補的書補上檔案：抽文字要幾秒，期間把鈕鎖起來並講在做什麼。 */
+export async function attachFile(file) {
+    const b = S.book;
+    if (!file || !b) return;
+    const bookId = b.id;
+    const stage = S.root.querySelector('#kb-stage');
+    if (stage) stage.textContent = `上傳中：${file.name}`;
+    S.root.querySelectorAll('[data-kact="attach"]').forEach((el) => { el.disabled = true; });
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    try {
+        const meta = await api(`/${encodeURIComponent(bookId)}/file`, { method: 'POST', body: fd });
+        if (!alive() || !S.book || S.book.id !== bookId) return;
+        // 先吃回傳的 status（pending -> uploaded），「讀這本書」那顆立刻解開，不用等重抓
+        if (meta && meta.status) S.book.status = meta.status;
+        renderBook();
+        toast('已補上檔案' + (meta && meta.pages ? `，共 ${meta.pages} 頁` : ''));
+        await refetchBook();
+        if (!alive() || !S.book) return;
+        if (confirm('現在就讓主控主機「讀這本書」？（10–20 分鐘，會在背景跑）')) compile();
+    } catch (e) {
+        if (!alive()) return;
+        if (stage) stage.textContent = '';
+        S.root.querySelectorAll('[data-kact="attach"]').forEach((el) => { el.disabled = false; });
+        toast('補檔失敗：' + errText(e), true);
+    }
 }
 
 /** ⋯ 的底部抽屜（只在窄螢幕出現；寬螢幕左欄本來就看得到這些）。危險動作排最後、紅字。 */
@@ -85,7 +124,9 @@ export function toggleSheet(on) {
         <div class="grab"></div>
         <button type="button" class="item" data-kact="conclude-from-sheet" ${compiling ? 'disabled' : ''}>整理這段討論成結論</button>
         <button type="button" class="item" data-kact="tags-edit">編輯標籤<span class="sub">${esc(bookTags(b).join('、') || '沒有標籤')}</span></button>
-        <button type="button" class="item" data-kact="compile" ${compiling ? 'disabled' : ''}>${b.status === 'compiled' ? '重新讀這本書' : '讀這本書'}<span class="sub">約 10–20 分鐘</span></button>
+        ${b.status === 'pending'
+        ? '<button type="button" class="item" data-kact="attach">補上 PDF<span class="sub">這本書還沒有檔案</span></button>'
+        : `<button type="button" class="item" data-kact="compile" ${compiling ? 'disabled' : ''}>${b.status === 'compiled' ? '重新讀這本書' : '讀這本書'}<span class="sub">約 10–20 分鐘</span></button>`}
         <button type="button" class="item" data-kact="rename">改名</button>
         <button type="button" class="item danger" data-kact="delete">刪除這本書</button>
       </div>`;

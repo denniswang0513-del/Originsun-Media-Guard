@@ -75,6 +75,7 @@ function _onClick(ev) {
     if (act === 'doc-save') { saveDoc(el.dataset.key, el); return; }
     if (act === 'chapter') { openChapter(el.dataset.n); return; }
     if (act === 'chapter-back') { S.chapter = null; renderPane(); return; }
+    if (act === 'attach') { toggleSheet(false); const f = S.root.querySelector('#kb-book-file'); if (f) f.click(); return; }
     if (act === 'compile') { toggleSheet(false); compile(); return; }
     if (act === 'rename') { toggleSheet(false); rename(); return; }
     if (act === 'delete') { toggleSheet(false); remove(); }

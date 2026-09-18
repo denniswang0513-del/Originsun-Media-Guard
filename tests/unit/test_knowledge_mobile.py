@@ -192,3 +192,23 @@ def test_the_front_end_knows_the_same_statuses_as_the_back_end():
     ctx = repo_src(CTX)
     for st in STATUSES:
         assert ("%s: '" % st) in ctx, st + " 前端沒有對應的字"
+
+def test_a_pending_book_has_somewhere_to_put_the_file():
+    """先建了書名卻沒有補檔的入口，那個狀態就卡死了。左欄與 ⋯ 抽屜都要有。"""
+    src = repo_src(BOOK)
+    assert "export async function attachFile(" in src
+    assert "'/file'" in src or "/file`" in src
+    book = js_func_body(src, "export function renderBook(")
+    sheet = js_func_body(src, "export function toggleSheet(")
+    for where, body in (("左欄", book), ("抽屜", sheet)):
+        assert 'data-kact="attach"' in body, where + "沒有補檔入口"
+        assert "補上 PDF" in body, where
+    line = next(ln for ln in repo_src(INDEX).splitlines() if "act === 'attach'" in ln)
+    assert "kb-book-file" in line
+
+
+def test_the_read_button_unlocks_the_moment_the_file_lands():
+    """補完檔要馬上能按「讀這本書」—— 等重抓那一拍會讓他以為沒補成功。"""
+    body = js_func_body(repo_src(BOOK), "export async function attachFile(")
+    assert "S.book.status = meta.status" in body
+    assert "renderBook();" in body
