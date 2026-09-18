@@ -76,6 +76,19 @@ class BookBusy(Exception):
     """這本書正在編譯／討論中（端點回 409）。"""
 
 
+class BookHasNoFile(Exception):
+    """「待補」的書還沒有 PDF，不能編（端點回 409）。"""
+
+
+class BookHasFile(Exception):
+    """這本已經有檔，不能再補（端點回 409；要換檔＝刪掉重上）。"""
+
+
+#: meta.status 的值集合：pending（待補：只有書名，還沒 PDF）→ uploaded → compiling → compiled｜failed
+STATUS_PENDING = "pending"
+STATUSES = (STATUS_PENDING, "uploaded", "compiling", "compiled", "failed")
+
+
 class ExtendNotFound(Exception):
     """書在、那一則延伸不在（端點回 404）。刪過的流水號不重用，所以這通常代表畫面舊了。"""
 
@@ -163,34 +176,70 @@ def extract_text(content: bytes) -> tuple:
         doc.close()
 
 
-def save_upload(content: bytes, source_name: str, title: str = "") -> dict:
-    """存原檔＋全文＋meta；回 meta。文字抽取在這裡做（呼叫端用 to_thread 包）。"""
-    text, pages = extract_text(content)
-    book_id = kl.new_id()
-    d = book_dir(book_id, must_exist=False)
-    os.makedirs(os.path.join(d, CHAPTERS_DIR), exist_ok=True)
-    with open(os.path.join(d, SOURCE_FILE), "wb") as f:
-        f.write(content)
-    _write_text(os.path.join(d, FULLTEXT_FILE), text)
-    base = os.path.splitext(os.path.basename(str(source_name or "").replace("\\", "/")))[0]
-    meta = {
+def _new_meta(book_id: str, title: str, *, author: str = "", tags=None) -> dict:
+    """一本新書的 meta 骨架（還沒有檔：pages 0、status pending）。"""
+    return {
         "id": book_id,
-        "title": (title or "").strip() or base or "未命名",
-        "author": "",
-        "source_name": os.path.basename(str(source_name or "").replace("\\", "/")),
-        "pages": pages,
-        "chars": len(text),
+        "title": (title or "").strip() or "未命名",
+        "author": (author or "").strip(),
+        "source_name": "",
+        "pages": 0,
+        "chars": 0,
         "uploaded_at": _now_iso(),
-        "status": "uploaded",
+        "status": STATUS_PENDING,
         "error": "",
         "compiled_at": "",
         "chapters": 0,
         "toc": [],
         "model": "",
-        "tags": [],
+        "tags": kl.normalize_tags(tags),
     }
-    write_meta(book_id, meta)
-    return meta
+
+
+def _write_source(book_id: str, content: bytes, source_name: str, extracted: Optional[tuple] = None) -> dict:
+    """把 PDF 放進這本書：source.pdf＋full_text.txt，meta 補頁數／字數／原檔名、status→uploaded。
+    文字抽取在這裡做（呼叫端用 to_thread 包）；`extracted=(text, pages)` 是先抽好的（save_upload 要在建資料夾前抽）。"""
+    text, pages = extracted if extracted is not None else extract_text(content)
+    d = book_dir(book_id, must_exist=False)
+    os.makedirs(os.path.join(d, CHAPTERS_DIR), exist_ok=True)
+    with open(os.path.join(d, SOURCE_FILE), "wb") as f:
+        f.write(content)
+    _write_text(os.path.join(d, FULLTEXT_FILE), text)
+    name = os.path.basename(str(source_name or "").replace("\\", "/"))
+    return _update_meta(book_id, source_name=name, pages=pages, chars=len(text),
+                        status="uploaded", error="", uploaded_at=_now_iso())
+
+
+def create_pending(title: str, *, author: str = "", tags=None) -> dict:
+    """「待補」：先建書名（＋作者／標籤），PDF 之後用 `attach_file` 補。回 summary。"""
+    if not (title or "").strip():
+        raise ValueError("書名不能空白")
+    book_id = kl.new_id()
+    d = book_dir(book_id, must_exist=False)
+    os.makedirs(os.path.join(d, CHAPTERS_DIR), exist_ok=True)
+    write_meta(book_id, _new_meta(book_id, title, author=author, tags=tags))
+    return _summary(read_meta(book_id), book_id)
+
+
+def attach_file(book_id: str, content: bytes, source_name: str) -> dict:
+    """給「待補」的書補 PDF；已經有檔的書丟 BookHasFile（要換檔＝刪掉重上，不做覆蓋——
+    覆蓋會讓已編的章節對不上新的頁碼而且沒人知道）。回 summary。"""
+    meta = read_meta(book_id)
+    if meta.get("status") != STATUS_PENDING or os.path.isfile(os.path.join(book_dir(book_id), SOURCE_FILE)):
+        raise BookHasFile(book_id)
+    meta = _write_source(book_id, content, source_name)
+    return _summary(meta, book_id)
+
+
+def save_upload(content: bytes, source_name: str, title: str = "") -> dict:
+    """上傳一本新書（一步到位：建 meta＋放檔）；回 meta。"""
+    extracted = extract_text(content)       # 先抽：壞檔在這裡就丟，不留一個沒檔的空資料夾在書架上
+    book_id = kl.new_id()
+    base = os.path.splitext(os.path.basename(str(source_name or "").replace("\\", "/")))[0]
+    d = book_dir(book_id, must_exist=False)
+    os.makedirs(os.path.join(d, CHAPTERS_DIR), exist_ok=True)
+    write_meta(book_id, _new_meta(book_id, (title or "").strip() or base))
+    return _write_source(book_id, content, source_name, extracted)
 
 
 # ── 讀 ───────────────────────────────────────────────────────
@@ -381,10 +430,12 @@ def start_compile(book_id: str, model: str = "", *, force: bool = False) -> dict
     """端點呼叫：檢查沒在跑 → 標 compiling → 回 meta。真正的工作交給 `compile_book`（背景）。"""
     if book_id in _stage:
         raise BookBusy(book_id)
+    if read_meta(book_id).get("status") == STATUS_PENDING:      # 先確認書在（不在丟 404）
+        raise BookHasNoFile(book_id)                              # 待補：還沒 PDF，沒東西可編
     if force:
         reset_compiled(book_id)
     model = pick_model(model)
-    meta = _update_meta(book_id, status="compiling", error="", model=model)   # 先確認書在（不在丟 404）
+    meta = _update_meta(book_id, status="compiling", error="", model=model)
     _stage[book_id] = "準備中"        # 再佔位，不然合法 id 但資料夾不在時 _stage 會留一個永遠 409 的鬼
     return meta
 

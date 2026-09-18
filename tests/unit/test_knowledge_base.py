@@ -914,3 +914,44 @@ def test_call_claude_default_is_no_tools_and_empty_means_tools_flag_off():
     assert '"--permission-mode", "plan"' in plan_branch and '"--allowedTools"' in plan_branch
     no_tools_branch = body.split("else:", 1)[1]
     assert "--permission-mode" not in no_tools_branch
+
+
+# ── 「待補」：先建書名、之後補 PDF（owner 2026-09-18 手機版第二批）──────────────
+
+def test_pending_book_is_created_by_title_and_completed_by_file(kb):
+    from services import knowledge_service as ks
+    r = kb.client.post(f"{URL}/pending", json={"title": "  還沒買的書 ", "author": "某人", "tags": ["財務", "財務", " 經營 "]})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["status"] == "pending" and b["title"] == "還沒買的書" and b["pages"] == 0 and b["tags"] == ["財務", "經營"]
+    assert "has_extend" in b and b["extend_new"] == 0
+    bid = b["id"]
+    assert not os.path.exists(kb.book_path(bid, ks.SOURCE_FILE))
+    # 書架看得到、pill 是 pending；筆記／結論照常
+    assert any(x["id"] == bid and x["status"] == "pending" for x in kb.client.get(URL).json())
+    assert kb.client.put(f"{URL}/{bid}/notes", json={"text": "先記一筆"}).status_code == 200
+    # 沒檔不能編：409，而且不留 _stage 的鬼
+    r = kb.client.post(f"{URL}/{bid}/compile", json={})
+    assert r.status_code == 409 and "PDF" in r.json()["detail"]
+    assert bid not in ks._stage and kb.fired == []
+    # 補檔：檔頭檢查同上傳
+    r = kb.client.post(f"{URL}/{bid}/file", files={"file": ("x.pdf", b"nope", "application/pdf")})
+    assert r.status_code == 422
+    r = kb.client.post(f"{URL}/{bid}/file", files={"file": ("real.pdf", _make_pdf(3), "application/pdf")})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["status"] == "uploaded" and b["pages"] == 3 and b["id"] == bid and b["title"] == "還沒買的書"
+    assert os.path.isfile(kb.book_path(bid, ks.SOURCE_FILE))
+    assert "[[p.1]]" in kb.read(bid, ks.FULLTEXT_FILE)
+    assert kb.read(bid, ks.NOTES_FILE).strip() == "先記一筆", "補檔不能洗掉他先寫的筆記"
+    # 已有檔的書再補 → 409
+    r = kb.client.post(f"{URL}/{bid}/file", files={"file": ("again.pdf", _make_pdf(1), "application/pdf")})
+    assert r.status_code == 409
+    # 補完就能編
+    assert kb.client.post(f"{URL}/{bid}/compile", json={}).status_code == 200
+
+
+def test_pending_requires_a_title_and_bad_id_is_404(kb):
+    assert kb.client.post(f"{URL}/pending", json={"title": "   "}).status_code == 422
+    r = kb.client.post(f"{URL}/zzzz/file", files={"file": ("x.pdf", _make_pdf(1), "application/pdf")})
+    assert r.status_code == 404

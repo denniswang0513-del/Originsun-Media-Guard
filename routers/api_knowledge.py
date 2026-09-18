@@ -82,6 +82,10 @@ def _book_or_404(fn, *args, **kwargs):
         raise HTTPException(status_code=404, detail="延伸裡沒有這一則（畫面可能舊了，重新整理看看）")
     except ks.BookBusy:
         raise HTTPException(status_code=409, detail="這本書正在處理中，等它跑完")
+    except ks.BookHasNoFile:
+        raise HTTPException(status_code=409, detail="這本書還沒有檔案，先補 PDF 再讀")
+    except ks.BookHasFile:
+        raise HTTPException(status_code=409, detail="這本書已經有檔了；要換檔請刪掉重上")
 
 
 def _require_claude() -> None:
@@ -104,15 +108,49 @@ async def upload_book(request: Request, file: UploadFile = File(...), title: str
     """上傳 PDF：看檔頭 `%PDF`（不看副檔名）、上限 300MB、抽文字＋頁數 → 建資料夾＋meta；回 meta。"""
     _guard(request)
     content = await file.read()
-    if len(content) > ks.MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail=f"檔案超過 {ks.MAX_UPLOAD_BYTES // (1024 * 1024)}MB")
-    if not ks.is_pdf(content):
-        raise HTTPException(status_code=422, detail="只收 PDF（看的是檔頭，不是副檔名）")
+    _check_pdf_upload(content)
     try:
         meta = await asyncio.to_thread(ks.save_upload, content, file.filename or "", title)
     except Exception as e:                      # noqa: BLE001 — pymupdf 對壞檔丟的型別不一
         raise HTTPException(status_code=422, detail=f"讀不了這個 PDF：{str(e)[:200]}")
     return meta
+
+
+class PendingPayload(BaseModel):
+    title: str
+    author: str = ""
+    tags: Optional[list] = None
+
+
+def _check_pdf_upload(content: bytes) -> None:
+    """上傳與補檔共用的檔案檢查：大小上限、檔頭 `%PDF`（不看副檔名）。"""
+    if len(content) > ks.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"檔案超過 {ks.MAX_UPLOAD_BYTES // (1024 * 1024)}MB")
+    if not ks.is_pdf(content):
+        raise HTTPException(status_code=422, detail="只收 PDF（看的是檔頭，不是副檔名）")
+
+
+@router.post("/pending")
+async def create_pending(body: PendingPayload, request: Request):
+    """「待補」：先建書名（可帶作者／標籤），PDF 之後用 POST /{id}/file 補。回 summary（status=pending）。"""
+    _guard(request)
+    if not (body.title or "").strip():
+        raise HTTPException(status_code=422, detail="書名不能空白")
+    return await asyncio.to_thread(ks.create_pending, body.title, author=body.author, tags=body.tags)
+
+
+@router.post("/{book_id}/file")
+async def attach_file(book_id: str, request: Request, file: UploadFile = File(...)):
+    """給「待補」的書補 PDF（檔頭／大小檢查同上傳）；已有檔 → 409。回 summary（status=uploaded）。"""
+    _guard(request)
+    content = await file.read()
+    _check_pdf_upload(content)
+    try:
+        return await asyncio.to_thread(_book_or_404, ks.attach_file, book_id, content, file.filename or "")
+    except HTTPException:
+        raise
+    except Exception as e:                      # noqa: BLE001 — pymupdf 對壞檔丟的型別不一
+        raise HTTPException(status_code=422, detail=f"讀不了這個 PDF：{str(e)[:200]}")
 
 
 @router.get("/{book_id}")
