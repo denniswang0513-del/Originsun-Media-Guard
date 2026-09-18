@@ -164,6 +164,31 @@
 .kb .kb-chapnav { display: flex; justify-content: space-between; gap: 10px; margin-top: 20px;
     padding-top: 14px; border-top: 1px solid var(--line); }
 
+/* 「延伸」分頁（研究助理；2026-09-18）。一則一張，網址開新分頁。
+   評成「沒用」的那則整張淡掉但留著 —— 他要看得到自己刷掉了什麼。 */
+.kb .kb-ext-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.kb .kb-ext-head .n { flex: 1; color: var(--sub); font-size: 13px; }
+.kb .kb-ext-head .b { display: flex; gap: 8px; flex-wrap: wrap; }
+.kb .kb-ext-busy { border: 1px solid var(--line); border-left: 3px solid var(--red); border-radius: 6px;
+    padding: 9px 12px; margin: 10px 0; font-size: 13px; color: var(--sub); }
+.kb .kb-ext-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.kb .kb-ext { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.kb .kb-ext.off { opacity: .45; }
+.kb .kb-ext .t { font-size: 15px; line-height: 1.5; }
+.kb .kb-ext .t a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.kb .kb-ext .t a:hover { color: var(--red); }
+.kb .kb-ext .lang { display: inline-block; border: 1px solid var(--line); border-radius: 4px;
+    padding: 1px 5px; font-size: 11px; color: var(--sub); vertical-align: 2px; }
+.kb .kb-ext .orig { font-size: 12.5px; color: var(--sub); margin-top: 3px; }
+.kb .kb-ext .meta { font-size: 12.5px; color: var(--sub); margin-top: 5px; }
+.kb .kb-ext .sum { font-size: 13.5px; line-height: 1.7; margin-top: 8px; }
+.kb .kb-ext .why { font-size: 13px; line-height: 1.7; margin-top: 6px; color: var(--sub); }
+.kb .kb-ext .act { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.kb .kb-ext .act button { background: none; border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 12px; min-height: 36px; font-size: 12.5px; font-family: inherit; color: var(--sub); cursor: pointer; }
+.kb .kb-ext .act button.on { border-color: var(--ink); color: var(--ink); }
+.kb .kb-ext .act .on-date { flex: 1; text-align: right; font-size: 12px; color: var(--sub); }
+
 /* 窄一點：書頁單欄 */
 @media (max-width: 899px) {
     .kb .kb-book { grid-template-columns: 1fr; gap: 16px; }
@@ -182,6 +207,8 @@
     .kb .kb-doc .tools .kb-link { min-height: 44px; }
     .kb .kb-chapnav .kb-btn { min-height: 44px; }
     .kb .kb-msg .act button { min-height: 44px; }
+    .kb .kb-ext .act button { min-height: 44px; }
+    .kb .kb-ext-head .kb-btn { min-height: 44px; }
 }
 
 /* 手機：討論輸入框貼底、泡泡跟著頁面捲 */

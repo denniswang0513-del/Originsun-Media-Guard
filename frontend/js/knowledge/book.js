@@ -8,6 +8,7 @@ import { S, PANES, COMPILE_POLL_MS, api, esc, errText, stageText, alive, toast, 
          chapterList, bookTags, parseTags, statusPill, tagsHtml } from './ctx.js';
 import { loadShelf, refreshShelfQuietly } from './shelf.js';
 import { chatHtml, scrollChat, loadChat } from './chat.js';
+import { extendHtml, loadExtend } from './extend.js';
 
 export async function openBook(id, { compile: thenCompile = false } = {}) {
     stopTimers();
@@ -98,6 +99,7 @@ export function renderPane() {
     else if (S.pane === 'conclusion') pane.innerHTML = _docHtml('conclusion');
     else if (S.pane === 'notes') pane.innerHTML = _docHtml('notes');
     else if (S.pane === 'skeleton') pane.innerHTML = _skeletonHtml();
+    else if (S.pane === 'extend') pane.innerHTML = extendHtml();
     else pane.innerHTML = _chaptersHtml();
     if (S.pane === 'chat') scrollChat();
 }
@@ -108,6 +110,7 @@ export function switchPane(next) {
     S.pane = next; S.editing = false; S.chapter = null;
     renderPane();
     if (next === 'chat' && !S.chat.length && !S.wait) loadChat();
+    if (next === 'extend' && !S.extendStage) loadExtend();
 }
 
 // ── 標籤 ────────────────────────────────────────────────────

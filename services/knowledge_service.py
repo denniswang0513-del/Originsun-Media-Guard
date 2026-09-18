@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -36,6 +37,8 @@ MAX_UPLOAD_BYTES = 300 * 1024 * 1024
 #: 每次 claude 呼叫的逾時：編譯（一章可能上萬字）與討論／整理結論
 COMPILE_TIMEOUT_SEC = 20 * 60
 CHAT_TIMEOUT_SEC = 10 * 60
+#: 研究助理（要上網搜好幾輪，比討論久一點，但別久到卡住閘門）
+EXTEND_TIMEOUT_SEC = 12 * 60
 # 編譯到一半行程重啟（發版、dev reload）：meta 停在 compiling 沒 error，畫面要講得出來
 INTERRUPTED_MSG = "編譯被中斷（主機重啟過）。再按一次「讀這本書」會從缺的章接著補，已產的不會重做。"
 #: 預設模型（settings `ai.models.knowledge` 可覆蓋；都要過 quote_chat.pick_model 白名單）
@@ -47,6 +50,7 @@ FULLTEXT_FILE = "full_text.txt"
 CHAT_FILE = "chat.json"
 CONCLUSION_FILE = "結論.md"
 NOTES_FILE = "筆記.md"
+EXTEND_FILE = "延伸.md"
 CHAPTERS_DIR = "chapters"
 SUPPORT_RAW_FILE = "_support_raw.txt"     # 骨架 pass 解不出四個檔時留的原文（除錯用）
 
@@ -57,6 +61,7 @@ _stage: dict = {}            # id → 編譯進度字串（'第 3/12 章' 之類
 _chat_partial: dict = {}     # id → 這一輪串到目前的回覆
 _chat_stage: dict = {}       # id → 'queued'｜'running'；不在裡面＝沒在跑
 _concluding: set = set()     # 正在整理結論的 id
+_extending: dict = {}        # id → 'queued'｜'searching'…；不在裡面＝沒在找資料
 
 
 class BookNotFound(Exception):
@@ -69,6 +74,10 @@ class ChapterNotFound(Exception):
 
 class BookBusy(Exception):
     """這本書正在編譯／討論中（端點回 409）。"""
+
+
+class ExtendNotFound(Exception):
+    """書在、那一則延伸不在（端點回 404）。刪過的流水號不重用，所以這通常代表畫面舊了。"""
 
 
 # ── 路徑 ─────────────────────────────────────────────────────
@@ -220,6 +229,8 @@ def _summary(meta: dict, book_id: str) -> dict:
         "compiled_at": meta.get("compiled_at") or "",
         "has_conclusion": bool(_read_text(os.path.join(d, CONCLUSION_FILE)).strip()),
         "has_notes": bool(_read_text(os.path.join(d, NOTES_FILE)).strip()),
+        "has_extend": _extend_counts(d)[0] > 0,
+        "extend_new": _extend_counts(d)[1],
         "stage": _stage.get(book_id, ""),
         "tags": kl.normalize_tags(meta.get("tags")),
     }
@@ -506,6 +517,7 @@ async def run_chat(book_id: str, model: str = "") -> None:
             history=chat[:-1] if chat and chat[-1] is last_user else chat,
             text=last_user.get("text") or "",
             finance=finance,
+            extend=kl.extend_digest(read_extend(book_id)),
         )
 
         def _partial(s: str) -> None:
@@ -550,9 +562,128 @@ async def run_conclude(book_id: str, model: str = "") -> None:
         _concluding.discard(book_id)
 
 
+# ── 研究助理（docs/KNOWLEDGE_BASE_PLAN.md §9）────────────────
+# 定期／手動去網路上找跟這本書有關的新研究，整理成 `延伸.md` 一則一行。
+#
+# 🔴 安全：這一發是**唯一**會讀網頁的地方，網頁內容是不可信輸入（prompt injection）。
+#    因此：(1) 只給 WebSearch／WebFetch，不給 Read／Bash／Write；(2) cwd 用臨時空目錄，
+#    讓它連這本書的檔案都看不到，跑完刪掉；(3) 回來的東西只當資料寫檔，不執行、不寫設定。
+_EXTEND_TOOLS = "WebSearch,WebFetch"
+_EXTEND_HEAD = ("# 延伸（研究助理找到的）\n"
+                "# 一則一行，欄位：" + "｜".join(kl.EXTEND_FIELDS) + "\n"
+                "# 這些是網路上的東西，不是書的作者說的。\n")
+
+
+def read_extend(book_id: str) -> list:
+    """`延伸.md` → 清單（舊到新）。"""
+    return kl.parse_extend_md(_read_text(os.path.join(book_dir(book_id), EXTEND_FILE)))
+
+
+def _write_extend(book_id: str, items: list) -> None:
+    body = "\n".join(kl.extend_line(i) for i in items)
+    _write_text(os.path.join(book_dir(book_id), EXTEND_FILE), _EXTEND_HEAD + body + ("\n" if body else ""))
+
+
+def _extend_counts(d: str) -> tuple:
+    """`(總則數, 還沒評分的則數)`。書架清單每本都會叫一次，所以只讀檔、不叫 claude。"""
+    items = kl.parse_extend_md(_read_text(os.path.join(d, EXTEND_FILE)))
+    return len(items), sum(1 for i in items if not i.get("rating"))
+
+
+def extend_state(book_id: str) -> dict:
+    """「延伸」分頁那包：整份清單＋現在有沒有在找＋上一輪沒收到東西時的那句人話。"""
+    return {"items": read_extend(book_id), "stage": _extending.get(book_id, ""),
+            "note": read_meta(book_id).get("extend_note") or ""}
+
+
+def rate_extend(book_id: str, n: int, rating: str) -> dict:
+    """給第 n 則評「有用／沒用」。n 是**檔內流水號**，不是第幾筆。"""
+    if rating not in kl.EXTEND_RATINGS:
+        raise ValueError("評分只能是 useful／useless／空白")
+    items = read_extend(book_id)
+    hit = next((i for i in items if i.get("n") == int(n)), None)
+    if hit is None:
+        raise ExtendNotFound(f"{book_id}#{n}")
+    hit["rating"] = rating
+    _write_extend(book_id, items)
+    return hit
+
+
+def start_extend(book_id: str, url: str = "") -> None:
+    """端點呼叫：標 queued，真正的工作交給 `run_extend`（背景）。`url` 有給＝手動收錄那一篇。"""
+    if book_id in _extending:
+        raise BookBusy(book_id)
+    if url:
+        if not url.strip().lower().startswith(("http://", "https://")):
+            raise ValueError("網址要以 http:// 或 https:// 開頭")
+        # 先比對再花錢：同一篇再貼一次的話，叫 claude 讀完兩分鐘之後也只是被丟掉
+        if kl.norm_url(url) in {kl.norm_url(i.get("url")) for i in read_extend(book_id)}:
+            raise ValueError("這篇已經收過了")
+    _extending[book_id] = "queued"
+
+
+async def run_extend(book_id: str, model: str = "", url: str = "") -> None:
+    """背景：組提示 → 叫 claude 上網 → 新的幾則追加到 `延伸.md`（重複的網址不會再進來）。"""
+    tmp = ""
+    try:
+        meta = read_meta(book_id)
+        d = book_dir(book_id)
+        old = read_extend(book_id)
+        conclusion = _read_text(os.path.join(d, CONCLUSION_FILE))
+        if url:
+            prompt = kl.extend_one_prompt(url, meta, conclusion=conclusion)
+        else:
+            prompt = kl.extend_prompt(
+                meta,
+                skill=_read_text(os.path.join(d, "SKILL.md")),
+                conclusion=conclusion,
+                notes=_read_text(os.path.join(d, NOTES_FILE)),
+                seen_urls=[i.get("url") for i in old],
+            )
+
+        def _stage_cb(s: str) -> None:
+            _extending[book_id] = s or "searching"
+
+        _extending[book_id] = "searching"
+        # 臨時空目錄：跑這一發時它連書的資料夾都看不到（跟 §9 的安全規則一致）
+        tmp = tempfile.mkdtemp(prefix="kb_extend_")
+        text, err = await call_claude(prompt, model=pick_model(model), cwd=tmp,
+                                      allowed_tools=_EXTEND_TOOLS, timeout_sec=EXTEND_TIMEOUT_SEC,
+                                      on_stage=_stage_cb)
+        if text is None:
+            _extend_note(book_id, "（找資料失敗：" + (err or "未知錯誤") + "）")
+            return
+        today = datetime.now(_TW).strftime("%Y-%m-%d")
+        seen = [i.get("url") for i in old]
+        if url:
+            item, why = kl.parse_extend_one(text, today, n=kl.next_extend_n(old))
+            if item is None:
+                _extend_note(book_id, "（這篇收不進來：" + why + "）")
+                return
+            fresh = [] if kl.norm_url(item["url"]) in {kl.norm_url(u) for u in seen} else [item]
+        else:
+            fresh = kl.parse_extend(text, today, start_n=kl.next_extend_n(old), seen_urls=seen)
+        if fresh:
+            _write_extend(book_id, old + fresh)
+        _update_meta(book_id, extended_at=_now_iso(),
+                     extend_note="" if fresh else "（這一輪沒有找到新的東西）")
+    except BookNotFound:
+        pass
+    finally:
+        _extending.pop(book_id, None)
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _extend_note(book_id: str, msg: str) -> None:
+    """找不到東西時給一句人話 —— 不然畫面上只是安靜地什麼都沒發生。"""
+    _update_meta(book_id, extend_note=msg, extended_at=_now_iso())
+
+
 __all__ = [
-    "ADVISOR_LATEST", "BookBusy", "BookNotFound", "MAX_UPLOAD_BYTES", "add_chat_message", "advisor_snapshot", "append_conclusion",
-    "book_detail", "book_dir", "chat_state", "compile_book", "delete_book", "extract_text", "is_pdf", "list_books",
-    "pick_model", "read_chapter", "read_chat", "read_meta", "root", "run_chat", "run_conclude", "save_upload",
-    "start_chat", "start_compile", "start_conclude", "update_book", "write_conclusion", "write_meta", "write_notes",
+    "ADVISOR_LATEST", "BookBusy", "BookNotFound", "ChapterNotFound", "ExtendNotFound", "MAX_UPLOAD_BYTES", "add_chat_message",
+    "advisor_snapshot", "append_conclusion", "book_detail", "book_dir", "chat_state", "compile_book", "delete_book",
+    "extend_state", "extract_text", "is_pdf", "list_books", "pick_model", "rate_extend", "read_chapter", "read_chat",
+    "read_extend", "read_meta", "root", "run_chat", "run_conclude", "run_extend", "save_upload", "start_chat",
+    "start_compile", "start_conclude", "start_extend", "update_book", "write_conclusion", "write_meta", "write_notes",
 ]

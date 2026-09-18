@@ -54,6 +54,17 @@ class TextPayload(BaseModel):
     text: str = Field(default="", max_length=200000)
 
 
+class ExtendPayload(BaseModel):
+    # 有給網址＝手動「收錄這篇」那一篇；沒給＝讓它自己依這本書的主題去搜
+    url: str = Field(default="", max_length=2000)
+    model: Optional[str] = None
+
+
+class RatePayload(BaseModel):
+    # 空字串＝收回評分
+    rating: str = Field(default="", max_length=10)
+
+
 def _guard(request: Request) -> dict:
     """管理員 OR 持有「知識庫」鑰匙（回 token payload）。整組端點一把尺，不分讀寫。"""
     return check_admin_or_module(request, MODULE_KEY)
@@ -67,6 +78,8 @@ def _book_or_404(fn, *args, **kwargs):
         raise HTTPException(status_code=404, detail="找不到這本書")
     except ks.ChapterNotFound:
         raise HTTPException(status_code=404, detail="這本書沒有這一章（還沒編到，或編譯失敗了）")
+    except ks.ExtendNotFound:
+        raise HTTPException(status_code=404, detail="延伸裡沒有這一則（畫面可能舊了，重新整理看看）")
     except ks.BookBusy:
         raise HTTPException(status_code=409, detail="這本書正在處理中，等它跑完")
 
@@ -197,3 +210,39 @@ async def put_notes(book_id: str, body: TextPayload, request: Request):
     _guard(request)
     _book_or_404(ks.write_notes, book_id, body.text)
     return {"status": "ok"}
+
+
+# ── 延伸（研究助理）─────────────────────────────────────────
+# 🔴 這三支背後是**唯一**會讀網頁的一發。網頁是不可信輸入：service 只把回來的東西
+#    當資料寫進 `延伸.md`，不執行、不寫設定、不觸發任何動作（見 knowledge_service._EXTEND_TOOLS）。
+@router.get("/{book_id}/extend")
+async def extend_get(book_id: str, request: Request):
+    """`{items, stage}`（「延伸」分頁；在找資料時前端輪詢這支）。"""
+    _guard(request)
+    return _book_or_404(ks.extend_state, book_id)
+
+
+@router.post("/{book_id}/extend")
+async def extend_run(book_id: str, request: Request, body: Optional[ExtendPayload] = None):
+    """背景去網路上找 —— 給 `url` 就只收那一篇，不給就依這本書的主題自己搜。409 上一輪還沒跑完。"""
+    _guard(request)
+    _require_claude()
+    url = ((body.url if body else "") or "").strip()
+    try:
+        _book_or_404(ks.start_extend, book_id, url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    fire(ks.run_extend(book_id, (body.model if body else "") or "", url),
+         label=f"knowledge extend {book_id}")
+    return {"status": "searching"}
+
+
+@router.put("/{book_id}/extend/{n}")
+async def extend_rate(book_id: str, n: int, body: RatePayload, request: Request):
+    """給第 n 則評「有用／沒用」；n 是檔內流水號（刪過的號碼不重用，所以不會對錯人）。
+    評成沒用的下次討論就不再帶進提示。"""
+    _guard(request)
+    try:
+        return {"status": "ok", "item": _book_or_404(ks.rate_extend, book_id, n, (body.rating or "").strip())}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

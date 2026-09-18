@@ -3,12 +3,13 @@
  *
  * owner 上傳 PDF → 主控主機把它編譯成骨架（SKILL.md／cheatsheet／glossary／patterns）＋每章 md →
  * 在這裡跟 AI 討論、把講定的原則「存成結論」；標了「財務」的書，顧問 agent 每次都先讀它的結論。
- * 兩個畫面：書架（shelf.js）、書頁（book.js ＋ chat.js）；狀態與小工具在 ctx.js。桌機手機同一份（響應式）。
+ * 另外有個研究助理（extend.js）：定期或手動去網路上找跟這本書有關的新研究，一則一行存 `延伸.md`。
+ * 兩個畫面：書架（shelf.js）、書頁（book.js ＋ chat.js ＋ extend.js）；狀態與小工具在 ctx.js。桌機手機同一份（響應式）。
  *
  * 宿主契約：`mountKnowledge({ host, fetch, esc, toast })`
  *   fetch(path, {method, body}) → json；FormData 原樣送；!ok 丟 Error 帶 `.status`／`.detail`
  *   toast(msg, 'ok' | 'err')
- * 所有點擊走 .kb 上的一個委派（data-kact），重畫不會疊監聽；離開頁面（pagehide）把三條輪詢收掉。
+ * 所有點擊走 .kb 上的一個委派（data-kact），重畫不會疊監聽；離開頁面（pagehide）把四條輪詢收掉。
  */
 import { S, hooks, nav, stopTimers } from './ctx.js';
 import { loadShelf, renderShelf, setTag, refreshShelfQuietly } from './shelf.js';
@@ -16,6 +17,7 @@ import {
     openBook, renderPane, refetchBook, switchPane, editTags, saveTags, saveDoc, openChapter, compile, rename, remove, toggleSheet, jumpToSection,
 } from './book.js';
 import { send, saveConclusion, conclude } from './chat.js';
+import { runExtend, collectOne, rateExtend } from './extend.js';
 
 export async function mountKnowledge({ host, fetch, toast }) {
     hooks.host = host; hooks.fetch = fetch; hooks.toast = toast;
@@ -56,6 +58,9 @@ function _onClick(ev) {
     if (act === 'conclude-from-sheet') { toggleSheet(false); switchPane('chat'); conclude(); return; }
     if (act === 'jump') { jumpToSection(el.dataset.i); return; }
     if (act === 'to-top') { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    if (act === 'extend-run') { runExtend(); return; }
+    if (act === 'extend-one') { collectOne(); return; }
+    if (act === 'extend-rate') { rateExtend(el.dataset.n, el.dataset.v); return; }
     if (act === 'tags-edit') { toggleSheet(false); editTags(true); return; }
     if (act === 'tags-cancel') { editTags(false); return; }
     if (act === 'tags-save') { saveTags(el); return; }

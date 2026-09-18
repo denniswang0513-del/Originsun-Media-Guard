@@ -25,7 +25,7 @@ export const CHAT_TYPICAL = [20, 60];
 
 export const STATUS_LABEL = { uploaded: '未編譯', compiling: '編譯中', compiled: '已編譯', failed: '失敗' };
 export const STATUS_CLS = { uploaded: 'na', compiling: 'warn', compiled: 'ok', failed: 'bad' };
-export const PANES = [['chat', '討論'], ['conclusion', '結論'], ['notes', '筆記'], ['skeleton', '骨架'], ['chapters', '章節']];
+export const PANES = [['chat', '討論'], ['conclusion', '結論'], ['notes', '筆記'], ['skeleton', '骨架'], ['chapters', '章節'], ['extend', '延伸']];
 
 /** 宿主給的東西（mount 時填） */
 export const hooks = { host: null, fetch: null, toast: null };
@@ -41,6 +41,10 @@ export const S = {
     chat: [],
     wait: null,        // 等 AI 回覆：{ since, stage, partial, expect }
     chapter: null,     // 章節分頁打開的那一章 { n, title, md }
+    extend: [],        // 「延伸」分頁：研究助理找到的清單（舊到新，同 `延伸.md` 的順序）
+    extendStage: '',   // 正在找資料時的進度字串；空＝沒在找
+    extendNote: '',    // 上一輪沒收到東西時的那句人話（失敗的理由／沒找到）
+    extendTimer: null,
     editing: false,    // 結論／筆記分頁：在編輯（textarea）還是在看（md 渲染）
     editingTags: false,
     chatTimer: null,
@@ -84,6 +88,7 @@ export function stopTimers() {
     clearInterval(S.chatTimer); S.chatTimer = null;
     clearInterval(S.concludeTimer); S.concludeTimer = null;
     clearInterval(S.compileTimer); S.compileTimer = null;
+    clearInterval(S.extendTimer); S.extendTimer = null;
     S.wait = null;
 }
 

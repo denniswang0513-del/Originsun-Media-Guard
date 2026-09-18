@@ -352,7 +352,8 @@ _CHAT_ROLE_GENERAL = f"""你讀過下面這本書。你在跟 {_OWNER_LINE}討�
 
 def chat_prompt(meta: dict, *, skill: str = "", cheatsheet: str = "", chapters: Optional[list] = None,
                 notes: str = "", conclusion: str = "", snapshot: Optional[list] = None,
-                history: Optional[list] = None, text: str = "", finance: bool = False) -> str:
+                history: Optional[list] = None, text: str = "", finance: bool = False,
+                extend: str = "") -> str:
     """討論提示：角色框架＋骨架＋章節索引＋筆記＋結論＋最近對話＋這一則。
 
     `finance=True`（meta.tags 含 FINANCE_TAG）＝財務顧問角色＋帶顧問快照的四個數；
@@ -388,7 +389,7 @@ def chat_prompt(meta: dict, *, skill: str = "", cheatsheet: str = "", chapters: 
 ===== 他的筆記 =====
 {notes or "（還沒有）"}
 
-{snap_block}===== 最近的對話 =====
+{(extend + chr(10) + chr(10)) if extend.strip() else ""}{snap_block}===== 最近的對話 =====
 {hist}
 
 ===== 他這一則 =====
@@ -572,3 +573,273 @@ def conclusion_lines(reply: str) -> list:
         if s:
             out.append(s)
     return out
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 研究助理（docs/KNOWLEDGE_BASE_PLAN.md §9）—— 定期依這本書的主題找網路上的研究
+# owner 2026-09-18：「不限制中文，如果是英文或其他語言也可以，附上出處、翻譯與摘要給我」
+#
+# 🔴 這一段產出的每個欄位都來自**網頁**（不可信輸入，會有 prompt injection）。
+#    規則：只當資料寫進 `延伸.md` 與回給前端，永遠不執行、不寫進設定、不觸發任何動作。
+# ══════════════════════════════════════════════════════════════════════════
+
+#: 一次最多收幾則（§9.2：一本一週一次、一次 ≤ 8 則）
+EXTEND_MAX_ITEMS = 8
+#: 評分的三個值（空字串＝還沒評）
+EXTEND_RATINGS = ("", "useful", "useless")
+#: `延伸.md` 的欄位分隔符。內容裡出現同一個字元時寫入前換成半形，讀回來才不會被切錯。
+EXTEND_SEP = "｜"
+#: 每行的欄位順序。第一欄 `n` 是**這本書裡的流水號**（只增不重用）——評分的端點靠它認人，
+#: 用陣列位置的話刪掉一則後面全部錯位。
+EXTEND_FIELDS = ("n", "date", "title_zh", "url", "title_original", "lang", "source",
+                 "published", "summary_zh", "chapter_guess", "why_it_matters", "rating")
+#: 給提示看的「他的情境」——研究要貼著這個人，不是泛泛的主題搜尋
+EXTEND_READER = "台灣、影像製作公司負責人、自己記一本私帳"
+#: 只找最近多久的東西（太舊的書裡通常就有了）
+EXTEND_RECENT_DAYS = 30
+
+
+def _esc_cell(v) -> str:
+    """一格的內容：壓成單行、把分隔符換成半形，避免把一行切壞。"""
+    return " ".join(str(v or "").split()).replace(EXTEND_SEP, "|")
+
+
+def extend_line(item: dict) -> str:
+    """一則 → `延伸.md` 的一行（機器寫、人也讀得懂）。"""
+    return "- " + EXTEND_SEP.join(_esc_cell(item.get(k)) for k in EXTEND_FIELDS)
+
+
+def parse_extend_md(md: str) -> list:
+    """`延伸.md` → `[{…}]`。欄位數不對的行直接跳過（人手改壞一行不該讓整頁掛掉）。"""
+    out = []
+    for ln in str(md or "").splitlines():
+        ln = ln.strip()
+        if not ln.startswith("- "):
+            continue
+        cells = ln[2:].split(EXTEND_SEP)
+        if len(cells) != len(EXTEND_FIELDS):
+            continue
+        item = {k: cells[i].strip() for i, k in enumerate(EXTEND_FIELDS)}
+        n = _int_or_none(item.get("n"))
+        if not item.get("url") or not n or n < 1:
+            continue
+        item["n"] = n
+        if item.get("rating") not in EXTEND_RATINGS:
+            item["rating"] = ""
+        out.append(item)
+    return out
+
+
+def next_extend_n(items: list) -> int:
+    """下一個流水號：現有最大值 +1（刪過的號碼不重用）。"""
+    return max([_int_or_none(i.get("n")) or 0 for i in (items or [])] or [0]) + 1
+
+
+def norm_url(url: str) -> str:
+    """去重用的正規化：小寫網域、去掉 #片段 與常見的追蹤參數、去掉結尾斜線。"""
+    u = " ".join(str(url or "").split())
+    if not u:
+        return ""
+    u = u.split("#", 1)[0]
+    if "?" in u:
+        base, q = u.split("?", 1)
+        keep = [kv for kv in q.split("&")
+                if kv and not kv.split("=", 1)[0].lower().startswith(("utm_", "fbclid", "gclid", "spm"))]
+        u = base + ("?" + "&".join(keep) if keep else "")
+    if "://" in u:
+        scheme, rest = u.split("://", 1)
+        host, _, path = rest.partition("/")
+        u = scheme.lower() + "://" + host.lower() + ("/" + path if path else "")
+    return u.rstrip("/")
+
+
+_EXTEND_SHAPE = (
+    '{"url":"", "title_original":"原文標題", "title_zh":"中譯標題", "lang":"原文語言（zh-TW／en／ja…）", '
+    '"source":"出處（媒體或機構名）", "published":"YYYY-MM-DD 或空", '
+    '"summary_zh":"繁體中文三到五句的摘要", '
+    '"why_it_matters":"一句話說為什麼值得他看（要扣住他的原則或情境）", '
+    '"chapter_guess":"最相關的章（沒把握就空）"}'
+)
+
+_EXTEND_RULES = """- `summary_zh` 與 `title_zh` 一律**繁體中文**（台灣用語）。不是中文的原文也照翻，不要只給原文。
+- `title_original` 保留原文標題原樣（他要對得回去）。
+- 只給你**真的打開看過**的網址；不要生成看起來像的連結。
+- 不要付費牆後面的內容、不要只有影片沒有文字的東西。
+- 摘要用自己的話寫，不要整段照抄原文。
+- 不推薦任何具體金融商品、不預測行情。
+- 不用 emoji。"""
+
+
+def extend_prompt(meta: dict, *, skill: str = "", conclusion: str = "", notes: str = "",
+                  seen_urls: Optional[list] = None, max_items: int = EXTEND_MAX_ITEMS) -> str:
+    """定期研究那一發的提示。主題不由程式 parse —— 三份原文一起餵，讓它自己出查詢。
+
+    順序有意義：`結論` 是他認同過的原則（最能代表他關心什麼）＞ 骨架的核心框架 ＞ 標籤。
+    """
+    parts = [
+        f"你是這個人的研究助理。他讀了下面這本書，你要去網路上找**最近 {EXTEND_RECENT_DAYS} 天內**值得他看的新資料。",
+        "",
+        _book_line(meta),
+        f"他的情境：{EXTEND_READER}。",
+    ]
+    if conclusion.strip():
+        parts += ["", "## 他已經認同的原則（最重要，研究要貼著這些走）", conclusion.strip()[:3000]]
+    if notes.strip():
+        parts += ["", "## 他自己的筆記", notes.strip()[:1500]]
+    if skill.strip():
+        parts += ["", "## 這本書的骨架（核心心智模型與決策規則）", skill.strip()[:4000]]
+    parts += [
+        "",
+        "## 要找什麼",
+        "先自己想 3 到 5 個查詢，再去搜。優先序：",
+        "1. 同行評審論文、工作報告（working paper）、官方統計與研究機構報告",
+        "2. 作者本人的新文章、訪談、有文字稿的 podcast",
+        "3. 對這本書框架的實際應用，或有根據的批評",
+        "4. 跟他情境相關的討論",
+        "",
+        "**語言不限**：繁中、英文、日文或其他都可以。同一個主題用不同語言各搜一輪 —— "
+        "好東西常常只有英文有，不要因為是外文就跳過。",
+        "",
+        "## 怎麼回",
+        f"回一個 JSON 陣列，最多 {max(1, int(max_items))} 則，每則：",
+        _EXTEND_SHAPE,
+        "",
+        "規矩：",
+        _EXTEND_RULES,
+    ]
+    seen = [u for u in (norm_url(x) for x in (seen_urls or [])) if u]
+    if seen:
+        parts += ["", "## 已經收錄過的，不要再回（共 %d 筆）" % len(seen)] + ["- " + u for u in seen[:200]]
+    parts += ["", "找不到就回 `[]`。**不要為了湊數把不相關或舊的東西放進來。**",
+              "只輸出 JSON 陣列，前後不要別的字。"]
+    return "\n".join(parts)
+
+
+def extend_one_prompt(url: str, meta: dict, *, conclusion: str = "") -> str:
+    """手動「收錄這篇」：他貼一個網址，打開來整理成同一個形狀（§9.2 第一條路）。"""
+    parts = [
+        "打開下面這個網址，讀完它，整理成一則筆記給這本書的讀者。",
+        "",
+        "網址：" + " ".join(str(url or "").split()),
+        _book_line(meta),
+        f"他的情境：{EXTEND_READER}。",
+    ]
+    if conclusion.strip():
+        parts += ["", "## 他已經認同的原則（判斷「為什麼值得他看」時扣住這些）", conclusion.strip()[:2000]]
+    parts += [
+        "",
+        "回**一個** JSON 物件（不是陣列，形狀跟定期研究那批一樣）：",
+        _EXTEND_SHAPE,
+        "",
+        "規矩：",
+        _EXTEND_RULES,
+        "",
+        '打不開或是要訂閱才看得到，就回 `{"error":"打不開或需要訂閱"}`。只輸出 JSON，前後不要別的字。',
+    ]
+    return "\n".join(parts)
+
+
+def _first_json_object(text: str):
+    """跟 `_first_json_array` 同款，但抓第一個平衡的 `{}`。"""
+    i = text.find("{")
+    while i != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        for j in range(i, len(text)):
+            c = text[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[i:j + 1])
+                    except ValueError:
+                        break
+        i = text.find("{", i + 1)
+    return None
+
+
+def _one_extend(raw, today: str, n: int) -> Optional[dict]:
+    """一則的正規化。網址是必要的；兩個標題至少要有一個。"""
+    if not isinstance(raw, dict):
+        return None
+    url = norm_url(raw.get("url"))
+    if not url.startswith(("http://", "https://")):
+        return None
+    zh = _esc_cell(raw.get("title_zh"))
+    orig = _esc_cell(raw.get("title_original"))
+    if not zh and not orig:
+        return None
+    return {
+        "n": int(n),
+        "date": _esc_cell(today),
+        "url": url,
+        "title_zh": zh or orig,
+        "title_original": orig or zh,
+        "lang": _esc_cell(raw.get("lang")) or "?",
+        "source": _esc_cell(raw.get("source")),
+        "published": _esc_cell(raw.get("published")),
+        "summary_zh": _esc_cell(raw.get("summary_zh")),
+        "why_it_matters": _esc_cell(raw.get("why_it_matters")),
+        "chapter_guess": _esc_cell(raw.get("chapter_guess")),
+        "rating": "",
+    }
+
+
+def parse_extend(text: str, today: str, *, start_n: int = 1, seen_urls: Optional[list] = None,
+                 max_items: int = EXTEND_MAX_ITEMS) -> list:
+    """研究那一發的回覆 → 乾淨的清單，流水號從 `start_n` 接著發。
+
+    壞的、重複的、已收錄過的都丟掉；超過上限就截斷。
+    """
+    arr = _first_json_array(text)
+    if not isinstance(arr, list):
+        return []
+    seen = {u for u in (norm_url(x) for x in (seen_urls or [])) if u}
+    out = []
+    for raw in arr:
+        item = _one_extend(raw, today, int(start_n) + len(out))
+        if not item or item["url"] in seen:
+            continue
+        seen.add(item["url"])
+        out.append(item)
+        if len(out) >= max(1, int(max_items)):
+            break
+    return out
+
+
+def parse_extend_one(text: str, today: str, *, n: int = 1) -> tuple:
+    """手動收錄那一發 → `(item 或 None, 錯誤字串)`。"""
+    obj = _first_json_object(text)
+    if not isinstance(obj, dict):
+        return None, "看不懂回覆"
+    if obj.get("error"):
+        return None, _esc_cell(obj["error"])[:80]
+    item = _one_extend(obj, today, n)
+    return (item, "") if item else (None, "回覆缺少網址或標題")
+
+
+def extend_digest(items: list, *, limit: int = 20) -> str:
+    """討論提示要帶的那一段：只帶「有用」與「還沒評」的最近幾則（評成沒用的不再出現）。"""
+    keep = [i for i in (items or []) if i.get("rating") != "useless"][-max(1, int(limit)):]
+    if not keep:
+        return ""
+    lines = ["## 這本書的延伸（後來網路上出現的東西；**不是作者說的**，引用時要講清楚是誰說的）"]
+    for i in keep:
+        lang = i.get("lang") or ""
+        tail = f"（{lang}）" if lang and not lang.startswith("zh") else ""
+        lines.append("- {}{}｜{}｜{}".format(i.get("title_zh", ""), tail, i.get("source", ""),
+                                            i.get("summary_zh", "")))
+    return "\n".join(lines)

@@ -195,6 +195,44 @@ books/<id>/
    → 去重（URL 正規化＋標題近似）→ 追加 `收錄/<日期>.md`＋`延伸.md`（評分＝未評）。
    一次最多 8 則；一本一週一次；全部走 `_KNOWLEDGE_GATE`（跟編譯排隊，不搶報價助理）。
 
+### 9.2.1 實作紀錄（2026-09-18，owner 說「執行」）
+
+**做好了（9.2 的第 1 條路＋手動觸發的第 2 條路，已在 dev 8001 跑過真的網路）**
+
+| 層 | 檔 | 內容 |
+| --- | --- | --- |
+| 純規則 | `core/knowledge_logic.py` | `extend_prompt`／`extend_one_prompt`／`parse_extend`／`parse_extend_one`／`extend_line`／`parse_extend_md`／`next_extend_n`／`norm_url`／`extend_digest` |
+| I/O | `services/knowledge_service.py` | `read_extend`／`_write_extend`／`_extend_counts`／`extend_state`／`rate_extend`／`start_extend`／`run_extend` |
+| 端點 | `routers/api_knowledge.py` | `GET`／`POST /{id}/extend`、`PUT /{id}/extend/{n}`（每支都過 `_guard`） |
+| 畫面 | `frontend/js/knowledge/extend.js` | 書頁第六個分頁「延伸」；兩顆鈕「去找新的／收錄這篇」、每則「有用／沒用」 |
+| 測試 | `tests/unit/test_knowledge_extend.py` | 28 條 |
+
+**跟原本規劃不一樣的三處**
+
+1. **不寫 `收錄/<日期>.md`**。`延伸.md` 每行第二欄就是日期，再存一份同樣的東西只是兩邊會不一致。
+2. **每則有「檔內流水號」`n`**（第一欄，只增不重用）。評分的端點認的是 `n`，不是第幾筆 ——
+   刪掉中間一則之後，用陣列位置會評到別人身上。
+3. **沒有「他改一改再進檔」那一步**。實測回來的摘要直接可用，先讓它進去；要改的話 `延伸.md` 是純文字，
+   他自己開來改也行。之後嫌需要再加編輯。
+
+**安全（🔴 這是整個知識庫唯一會讀網頁的一發）**
+
+- `allowed_tools="WebSearch,WebFetch"` —— 不給 `Read`／`Write`／`Bash`。
+- `cwd` 是 `tempfile.mkdtemp()` 開的空目錄，跑完 `shutil.rmtree`；它連這本書的檔案都看不到。
+- 回來的每個欄位只當資料寫進 `延伸.md` 與回給前端，不執行、不寫設定、不觸發動作；
+  畫面上一律 `esc()`，連結只認 `http`／`https`、一律 `rel="noopener noreferrer"`。
+- 這三條各有一條測試釘著（`test_knowledge_extend.py` 的「安全」那段）。
+
+**實測（dev 8001，2026-09-18）**
+
+- 手動收錄一篇英文維基（Margin of safety）：讀完、翻成繁中、扣回他的結論與第 3 章，一次成功。
+- 自動搜尋一輪約 7 分鐘，回 8 則（剛好是上限）：中英文都有，日期都在最近三週，
+  來源含 arXiv 工作論文、綠角財經筆記、A Wealth of Common Sense、Empower 調查。
+- 同一個網址再貼一次 → `400 這篇已經收過了`（在花掉一次 claude 呼叫之前就擋下來）。
+
+**還沒做**：9.3 的週排程（`meta.watch` 與 `finance.knowledge_watch.enabled` 兩個開關都還沒有），
+以及把「延伸」收進早報。手動那條路先用著，確定找回來的東西他真的要看，再開自動的。
+
 ### 9.3 排程與機器
 - 掛 `core/scheduler.py` 的 `_run_daily(task_key="knowledge_watch", hour_key=..., body)`（**只 master**、DB 不用但守衛沿用）；body 內判「今天是設定的那一天且這本 `meta.watch_last` 不是本週」才跑。
 - `main_office.py` 不掛任何東西（規則：office 不長排程）；手機端看得到延伸、評分、貼網址收錄，都是打 master 的端點。
