@@ -237,14 +237,15 @@ def test_the_phone_palette_comes_from_the_logo():
     svg = repo_src("frontend/img/knowledge-icon.svg")
     dark = _dark_block()
     assert "#38BDF8" in svg and "#38BDF8" in dark, "強調色＝浪的天藍"
-    assert "#12294D" in svg and "#12294D" in dark, "面板＝logo 底的午夜藍"
+    # owner 2026-09-18：「書的藍色再深一點」→ 背景用 logo 漸層最深的那一端
+    assert "#070F22" in svg and "--bg: #070F22;" in dark, "底色＝logo 漸層最深那一端"
 
 
 def test_the_browser_chrome_matches_the_page():
     """捲動時手機瀏覽器上下那條的顏色要跟頁面一樣，不然會露出一塊白。"""
     src = repo_src(PAGE)
-    assert 'name="theme-color" content="#0B1B34"' in src
-    assert "--bg: #0B1B34;" in _dark_block()
+    assert 'name="theme-color" content="#070F22"' in src
+    assert "--bg: #070F22;" in _dark_block()
 
 
 def test_dark_only_swaps_tokens_never_layout():

@@ -8,7 +8,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/img/knowledge-icon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/img/knowledge-icon-16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/img/knowledge-icon-180.png">
-<meta name="theme-color" content="#0B1B34">
+<meta name="theme-color" content="#070F22">
 <!-- 知識庫「獨立網址」（owner 2026-09-18「不要綁在私帳裡，之後會拿知識庫做更多衍生使用，未必跟財務有關」；
      docs/KNOWLEDGE_BASE_PLAN.md §11）：同一台伺服器上的獨立頁，殼抄 calendar.html（登入卡／noperm／app-view，白底）。
      內容＝js/knowledge/（書架＋書頁：討論／結論／筆記／骨架／章節），桌機手機同一份、響應式。
@@ -94,14 +94,16 @@
     :root {
       --red: #38BDF8;           /* 強調色＝浪的天藍 */
       --danger: #FCA5A5;        /* 危險色在深底上要提亮，不然紅字會糊掉 */
-      --ink: #E8EEF8; --sub: #93A9C8; --line: #24406B;
-      --bg: #0B1B34;            /* 同 <meta name="theme-color">，捲動時手機瀏覽器的框才不會跳色 */
-      --panel: #12294D; --soft: #16325C; --soft-2: #0F2445;
+      --ink: #E8EEF8; --sub: #8FA6C6; --line: #1E3557;
+      /* owner 2026-09-18：「書的藍色再深一點」。背景直接用 logo 漸層最深的那一端，
+         書卡那層跟著壓下來 —— 層次還在（背景 < 書卡 < 淡底），只是整體更沉。 */
+      --bg: #070F22;            /* 同 <meta name="theme-color">，捲動時手機瀏覽器的框才不會跳色 */
+      --panel: #0E1F3A; --soft: #13294B; --soft-2: #0A1730;
       --on-ink: #071324;        /* 深色底下 --ink 是淺的，壓在上面的字要反過來 */
       /* 你說的那則用偏青的藍，跟 AI 那則的 --soft（偏靛）分得開 */
-      --mine: #0E3C4E; --dim: rgba(0,0,0,.6);
-      --bg-soft: #0F2445; --ok: #6EE7B7; --warn: #FCD34D;
-      --ok-bg: #123A2E; --warn-bg: #3A2E12; --bad-bg: #3A1A1A; --na-bg: #16325C;
+      --mine: #0B3243; --dim: rgba(0,0,0,.65);
+      --bg-soft: #0A1730; --ok: #6EE7B7; --warn: #FCD34D;
+      --ok-bg: #0E3226; --warn-bg: #32270F; --bad-bg: #331616; --na-bg: #13294B;
       --shadow: rgba(0,0,0,.5); --shadow-soft: rgba(0,0,0,.45);
     }
     header { background: var(--bg); }
