@@ -958,12 +958,12 @@ def start_extend(book_id: str, url: str = "") -> None:
     """端點呼叫：標 queued，真正的工作交給 `run_extend`（背景）。`url` 有給＝手動收錄那一篇。"""
     if book_id in _extending:
         raise BookBusy(book_id)
-    if url:
-        if not url.strip().lower().startswith(("http://", "https://")):
-            raise ValueError("網址要以 http:// 或 https:// 開頭")
-        # 先比對再花錢：同一篇再貼一次的話，叫 claude 讀完兩分鐘之後也只是被丟掉
-        if kl.norm_url(url) in {kl.norm_url(i.get("url")) for i in read_extend(book_id)}:
-            raise ValueError("這篇已經收過了")
+    if url and not url.strip().lower().startswith(("http://", "https://")):
+        raise ValueError("網址要以 http:// 或 https:// 開頭")       # 壞網址跟書在不在無關，先擋
+    book_dir(book_id)       # 再確認書在（不在丟 404）—— 不帶網址那條原本完全不碰書，端點回 200 才在背景 BookNotFound
+    # 先比對再花錢：同一篇再貼一次的話，叫 claude 讀完兩分鐘之後也只是被丟掉
+    if url and kl.norm_url(url) in {kl.norm_url(i.get("url")) for i in read_extend(book_id)}:
+        raise ValueError("這篇已經收過了")
     _extending[book_id] = "queued"
 
 

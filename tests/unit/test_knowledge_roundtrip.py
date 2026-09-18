@@ -357,3 +357,13 @@ def test_the_truncated_push_still_carries_the_report_link():
     text = kl.report_push_text("研究週報 2026-W38", groups, tail="完整報告：" + kr.report_url("weekly-2026-W38"))
     assert "完整的在報告檔裡" in text and len(text) <= kl.PUSH_MAX_CHARS
     assert "#report/weekly-2026-W38" in text, "截斷的那一則更需要連結"
+
+
+def test_extend_on_a_missing_book_is_404(kb):
+    """BUG-8：不帶網址的「去找新的」完全不碰書就標 queued，端點回 200「searching」；
+    要到背景才 BookNotFound。合法形狀但不存在的 id 也一樣。"""
+    from services import knowledge_service as ks
+    assert kb.client.post(f"{URL}/zzzz/extend", json={}).status_code == 404
+    assert kb.client.post(f"{URL}/{'0' * 16}/extend", json={}).status_code == 404
+    assert "zzzz" not in ks._extending and "0" * 16 not in ks._extending, "不存在的書不能留一個排隊中的鬼"
+    assert kb.fired == [], "沒有書就不該起背景工作"
