@@ -14,7 +14,6 @@
       "Bash(python -c \"from main import app; print\\(''''main.py imports OK''''\\)\")",
       "Bash(ls -la D:/Antigravity/OriginsunTranscode/*.py D:/Antigravity/OriginsunTranscode/*.mp3 D:/Antigravity/OriginsunTranscode/*.wav D:/Antigravity/OriginsunTranscode/*.txt D:/Antigravity/OriginsunTranscode/*.log)",
       "Bash(ls -la \"D:/Antigravity/OriginsunTranscode/\"test*.mp3 \"D:/Antigravity/OriginsunTranscode/\"20260311*.txt)",
-      "Bash(ls \"D:/Antigravity/OriginsunTranscode/\"*.mp3 \"D:/Antigravity/OriginsunTranscode/\"*.wav \"D:/Antigravity/OriginsunTranscode/\"test_*.py \"D:/Antigravity/OriginsunTranscode/\"cmd_*.txt \"D:/Antigravity/OriginsunTranscode/\"stderr.log)",
       "Bash(grep -E \"\\\\.py$|^d\")",
       "Bash(.venvScriptspython.exe -c \"import numpy; print\\(''numpy available:'', numpy.__version__\\)\")",
       "Bash(./.venv/Scripts/python.exe -c \"import numpy; print\\(''numpy available:'', numpy.__version__\\)\")",
