@@ -33,14 +33,17 @@ PUBLIC_BASE = "https://foundry.originsun-studio.com/share.html"
 
 
 def is_valid_share_id(share_id) -> bool:
+    """分享 id 是 32 hex（跟 16 hex 的書 id 刻意不同長度）。"""
     return bool(_SHARE_RE.match(str(share_id or "")))
 
 
 def new_share_id() -> str:
+    """隨機 32 hex，猜不到。"""
     return secrets.token_hex(16)
 
 
 def share_url(share_id: str) -> str:
+    """公開頁的絕對網址（id 放在 hash，不進伺服器紀錄）。"""
     return f"{PUBLIC_BASE}#{share_id}"
 
 
@@ -86,6 +89,7 @@ def _find_book(share_id: str) -> Optional[str]:
 
 
 def shared_parts(book_id: str) -> list:
+    """這本書目前勾了哪幾項要分享（沒設定過＝預設那組）。"""
     return share_of(book_id)["parts"]
 
 

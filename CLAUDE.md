@@ -1349,6 +1349,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | [`core/leave_logic.py`](core/leave_logic.py) 的 `day_off_fraction`／`leave_days_total` | 一天休了多少（同一天多張單**加總**、上限 1；`range` 照時數換算）／一段期間休幾天（**只算工作日**） | `/me/week_marks` 的 `off[日期]` 與 `leave_days` 都出自這裡；前端不准自己再判一次 `part`（兩份規則會分岔） |
 | [`routers/api_me.py`](routers/api_me.py) 的 `/me/week_marks` ＋ `/me/team_week` 的 `leave_detail`／`flex_out` | 「有人休假要標示」（owner 2026-09-15）：團隊的一週寫假別、半天只塗半格；我的一週整天鎖整欄、半天鎖半天、統計列「休假 X 天」 | `week_marks` 只回**自己的**（`staff_id == sid` 兩道查詢）；`team_week` 的 `leave` 舊欄位保留給舊前端退化用 |
 | [`frontend/calendar.html`](frontend/calendar.html) | 行事曆的獨立網址＝工作台最上排第三顆鈕的浮動視窗內容（owner 2026-09-15「行事曆用彈出的 跟零用金一樣」） | 只是 [`js/shared/calendar/`](frontend/js/shared/calendar/index.js) 的**第四個宿主**（`light: true` 白底、手機寬預設 `day`）；規則與資料全在 `/api/v1/calendar`，這頁不自己算東西。登入殼抄 `leave.html`（第三份了，要動先看「收尾」那條） |
+| 知識庫第二批（2026-09-18～19）：[`services/knowledge_watch.py`](services/knowledge_watch.py)（研究助理每週排程）、[`knowledge_report.py`](services/knowledge_report.py)（週報／月報 md ＋ Discord）、[`knowledge_share.py`](services/knowledge_share.py)（公開分享的白名單投影 `_build`：公開頁與 PDF 同一份）、[`knowledge_pdf.py`](services/knowledge_pdf.py)（整本／分享的 PDF）、[`routers/api_knowledge_public.py`](routers/api_knowledge_public.py)（**唯一**免登入的三支 GET）、`routers/api_backup.py` 的 `/api/v1/projects/picker`（知識庫「掛案子」用的通用清單）、`frontend/js/knowledge/{extend,report,info,gallery}.js` | 延伸＝研究助理找到的東西，一則一行存 `延伸.md`（流水號只增不重用，評分靠它認人）；書裡的圖＝上傳時從 PDF 抽到 `assets/`（`pNNN-k.jpg` 白名單）、章節提示只給頁碼與旁邊的字（claude 看不到圖）；公開分享只認 `meta.share.id`（32 hex），沒勾的項目連鍵都不回 | 研究助理那一發是**唯一**會讀網頁的地方：只給 WebSearch／WebFetch、cwd 是臨時空目錄、回來的東西只當資料寫檔；討論（chat.json）與全文任何情況都不分享；`api_knowledge.py` 每一支都要 `_guard`（測試釘著），公開的東西只准長在 `api_knowledge_public.py`；報告「檔案存在＝那一期發過了」是設計決定（Discord 那一發失敗不會重送，要改得另記狀態）；`/api/v1/projects/picker` 走 `prefer="parent"`＋`core.ledger.mine_project_ids` 藏私帳 —— 🔴 **不要用 `extra=("entity",)` 去拿 MINE 標記**（list_options 的規則是「私帳那筆在 extra 欄位上有值就留私帳」，entity 對每一列都有值 → 有連結私帳的案整個消失，2026-09-19 /polish 第一版就這樣改而沒修到） |
 
 
 ## 不要動的地方
@@ -1423,6 +1424,15 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
   只有 `meta.tags` 含「財務」的書才讀 `D:\Originsun-Advisor\latest.json` 的四個數（`run_chat` 裡
   `advisor_snapshot() if finance else []`，兩層測試釘著）；顧問 agent 也只讀標「財務」的書。
   書 id 一律先過 `^[0-9a-f]{16}$` 再拼路徑（擋 `..`）。編譯中重啟會顯示「編譯被中斷，再按一次接著補」，是預期行為。
+- **知識庫第二批的地雷（2026-09-19 /polish 抓到、都有測試釘著）**：① `parse_captions` 要逐段取 `## 圖說`（一章切成幾段時每段末尾都有一段；
+  只認第一個並把後面切掉＝第二段起的章文靜默消失）。② `run_extend` 寫回 `延伸.md` 前要**重讀**（claude 跑幾分鐘，期間他按的「有用／沒用」
+  已經寫進檔，拿開頭讀的 old 蓋回去就洗掉了）。③ `openBook` 要把每本書自己的分頁狀態歸零並走 `_loadPaneData`（`S.pane` 跨書持久；
+  少清一個就是把 A 的延伸清單畫在 B 上、評分打到 B 的流水號）。④ 公開分享／PDF／週報的讀檔與 `requests.post` 一律 `asyncio.to_thread`
+  （公開頁一張圖一個請求、每個請求掃整個書架；Discord 慢一次就把 8000 全部 HTTP 卡住）。⑤ `report_push_text` 先切本文再接報告連結
+  （截斷的那一則正是唯一說「完整的在報告檔裡」的）。⑥ `update_meta_share` 自己拿 `_meta_lock`（要拿鍵所以走不了 `_update_meta`；
+  `test_knowledge_share` 釘著那支要有 `read_meta`／`write_meta` 字面，別改走 `_update_meta(_drop=)`）。
+  🔴 這一批有很多**掃原始碼字面**的測試（`kl.parse_captions(body`、`kshare.public_view(share_id)`、`read_meta(`…）——改呼叫形狀前先 grep tests/unit 那個字串，
+  不然合法的重構會紅一片；要繞就用不改字面的寫法（例如 `asyncio.to_thread(lambda: kshare.public_view(share_id))`），不要改測試。
 - **加班申請（docs/PAYROLL_OVERTIME_PLAN.md 第二批，2026-09-18）**：`routers/api_overtime.py` 的 `router` 是 me＋hr 兩支**合成**的 ——
   `include_router` 複製的是當下的路由，那三行一定要放在所有端點**之後**（放檔頭會得到一支空的，端點靜默 404）。
   加班佇列的 `pay_amount` 一定要經 `redact_pay(items, can_see_money(request))`：金額 ÷ 時數 ÷ 倍率就回推得出月薪，

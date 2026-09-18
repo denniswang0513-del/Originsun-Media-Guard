@@ -569,6 +569,7 @@ def pick_model(requested: str = "") -> str:
 
 # ── 編譯（三個 pass）──
 def assets_dir(book_id: str, *, make: bool = False) -> str:
+    """`books/<id>/assets`；`make=True` 不存在就建。"""
     d = os.path.join(book_dir(book_id), ASSETS_DIR)
     if make:
         os.makedirs(d, exist_ok=True)
@@ -952,6 +953,7 @@ def set_watch_last(book_id: str, week: str) -> None:
 
 
 def watch_last(book_id: str) -> str:
+    """研究助理上次跑這本是哪一週（`2026-W38`；沒跑過回空字串）。"""
     return read_meta(book_id).get("watch_last") or ""
 
 

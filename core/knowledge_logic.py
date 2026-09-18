@@ -1104,6 +1104,7 @@ def asset_name(page: int, k: int, ext: str) -> str:
 
 
 def asset_page(name: str) -> int:
+    """`p042-1.jpg` → 42；不合白名單回 0。"""
     m = _ASSET_RE.match(str(name or ""))
     return int(m.group(1)) if m else 0
 
@@ -1129,6 +1130,7 @@ def table_block(page: int, k: int, md: str) -> str:
 
 
 def keep_table(rows: int, cols: int) -> bool:
+    """表格夠大才算表（小於 MIN_TABLE_ROWS×MIN_TABLE_COLS 多半是排版格線）。"""
     return int(rows or 0) >= MIN_TABLE_ROWS and int(cols or 0) >= MIN_TABLE_COLS
 
 

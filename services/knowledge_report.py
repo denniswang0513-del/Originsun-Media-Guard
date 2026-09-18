@@ -68,6 +68,7 @@ def reports_dir() -> str:
 
 
 def is_valid_report_id(name) -> bool:
+    """`weekly-2026-W38`／`monthly-2026-09` 兩種形狀；別的一律不認。"""
     return bool(_ID_RE.match(str(name or "")))
 
 
@@ -97,6 +98,7 @@ def list_reports() -> list:
 
 
 def read_report(report_id: str) -> dict:
+    """`{id, title, md}`；id 不合規或檔不在都 ReportNotFound。"""
     path = report_path(report_id)
     if not os.path.exists(path):
         raise ReportNotFound(report_id)
@@ -105,6 +107,7 @@ def read_report(report_id: str) -> dict:
 
 
 def report_url(report_id: str) -> str:
+    """Discord 推的那個連結：書架頁＋`#report/<id>`。"""
     return f"{PUBLIC_BASE}#report/{report_id}"
 
 
