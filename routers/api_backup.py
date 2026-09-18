@@ -173,15 +173,19 @@ async def list_project_options(request: Request):
     if not factory:
         return {"status": "db_offline", "projects": []}
     try:
-        from core.ledger import MINE, hide_mine_projects  # type: ignore
+        from core.ledger import hide_mine_projects, mine_project_ids  # type: ignore
         from services.project_picker import list_options  # type: ignore
         async with factory() as session:
-            # prefer="parent"：母私帳成對時留母帳那筆（同備份頁那支）。留私帳的話，下一行的
-            # hide 對沒有私帳權限的人把它濾掉 → 有連結私帳的案**整個消失**；owner 自己則是把書掛到
-            # 私帳分身的 id 上（2026-09-19 /polish BUG-2）。
-            opts = await list_options(session, extra=("entity",), prefer="parent")
+            # prefer="parent"：母私帳成對時留母帳那筆（同備份頁那支）。
+            # 🔴 **不要用 `extra=("entity",)` 去拿 MINE 標記**：list_options 的規則是「私帳那筆在
+            # extra 欄位上有值就留私帳」，而 entity 對每一列都有值 → 永遠留私帳分身、母帳被 shadow，
+            # 下一行再把私帳濾掉 → 有連結私帳的案對沒有私帳權限的人**整個消失**；owner 則把書掛到
+            # 分身的 id 上（2026-09-19 /polish BUG-2，第一版就是這樣改而沒修到）。
+            # 私帳 id 走 core.ledger.mine_project_ids（60 秒快取，「候選清單要藏私帳案」都吃這一份）。
+            opts = await list_options(session, prefer="parent")
         hide = hide_mine_projects(request)
-        rows = [o for o in opts if not (hide and o.get("entity") == MINE)]
+        mine_ids = await mine_project_ids(factory) if hide else set()
+        rows = [o for o in opts if o["id"] not in mine_ids]
         # 白名單投影（同 _picker_view 的理由）：寫死這幾格，以後 crm_projects 加欄位不會跟著漏
         return {"status": "ok", "projects": [
             {k: o[k] for k in ("id", "name", "client", "year", "closed", "label")}

@@ -311,41 +311,51 @@ def test_the_report_body_runs_off_the_event_loop(monkeypatch):
 
 
 def test_a_linked_project_is_still_pickable_when_private_ledgers_are_hidden(monkeypatch):
-    """BUG-2：/api/v1/projects/picker 用 list_options 預設的 prefer=mine（母私帳成對時留私帳那筆），
-    接著 hide_mine_projects 又把私帳那筆濾掉 → 有連結私帳的案對沒有私帳權限的人**整個消失**；
-    owner 自己則是把書掛到私帳分身的 id 上。備份頁那支明確 prefer="parent"，這支要一樣。"""
+    """BUG-2：/api/v1/projects/picker 對「有連結私帳的母帳案」要留**母帳**那筆。
+
+    第一版寫 `list_options(extra=("entity",), prefer="parent")`，但 list_options 的規則是
+    「私帳那筆在 extra 欄位上有值就留私帳」—— entity 對每一列都有值，所以永遠留私帳，
+    接著 hide_mine_projects 又把它濾掉 → 那個案對沒有私帳權限的人整個消失；owner 則把書掛到分身 id 上。
+    這裡跑**真的** list_options（同 test_project_backup_roots 的 _FakeQuerySession），不用假的。"""
     import asyncio
     import core.ledger as ledger
     import routers.api_backup as ab
-    import services.project_picker as picker
+    from tests.unit.test_project_backup_roots import _FakeQuerySession, _p
 
     monkeypatch.setattr(ab, "check_lan_or_logged_in", lambda _r: None)
     monkeypatch.setattr(ledger, "hide_mine_projects", lambda _r: True)
 
-    async def _fake_options(session, extra=(), prefer="mine"):
-        # 一對連結的母私帳：留哪一筆由 prefer 決定（真的 list_options 就是這樣 shadow 的）
-        parent = {"id": "p-parent", "name": "案", "client": "源日", "year": "2026", "closed": False,
-                  "label": "2026 源日 案", "entity": "parent"}
-        mine = {**parent, "id": "p-mine", "entity": "mine"}
-        return [parent if prefer == "parent" else mine]
+    async def _mine_ids(_factory):
+        return {"p-mine", "p-solo-mine"}
 
-    monkeypatch.setattr(picker, "list_options", _fake_options)
+    monkeypatch.setattr(ledger, "mine_project_ids", _mine_ids)
+    rows = [_p("p-parent", "連結案", mine_link_id="p-mine"),
+            _p("p-mine", "連結案", entity="mine", source_project_id="p-parent"),
+            _p("p-solo-mine", "只有私帳的案", entity="mine"),
+            _p("p-plain", "普通案")]
+
+    class _Factory:
+        def __call__(self):
+            return _Ctx(_FakeQuerySession(rows, []))
+
+    class _Ctx:
+        def __init__(self, s):
+            self.s = s
+
+        async def __aenter__(self):
+            return self.s
+
+        async def __aexit__(self, *a):
+            return False
 
     async def _factory():
-        return lambda: _NullSession()
+        return _Factory()
 
     monkeypatch.setattr(ab, "_factory", _factory)
     out = asyncio.run(ab.list_project_options(None))
-    assert out["status"] == "ok"
-    assert [p["id"] for p in out["projects"]] == ["p-parent"], out
-
-
-class _NullSession:
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *a):
-        return False
+    assert out["status"] == "ok", out
+    assert sorted(p["id"] for p in out["projects"]) == ["p-parent", "p-plain"], out
+    assert set(out["projects"][0]) == {"id", "name", "client", "year", "closed", "label"}
 
 
 def test_the_truncated_push_still_carries_the_report_link():
