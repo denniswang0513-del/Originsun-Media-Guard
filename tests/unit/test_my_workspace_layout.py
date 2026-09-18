@@ -79,8 +79,8 @@ def test_action_bar_is_petty_cash_and_leave():
     """owner 2026-09-05：「先只留下零用金」；owner 2026-09-15：放回第二顆「假勤」（開 /leave.html 寬頁）。
 
     原本七顆（零用金／請款／請開發票／登記拍攝／領用器材／請假／福委會），
-    一次擺七顆等於沒有重點。要放回來就一顆一顆放，不要整排長回去 —— 目前兩顆。
-    連結各指獨立頁、各受自己那把鑰匙（me_petty／me_leave）閘門。
+    一次擺七顆等於沒有重點。要放回來就一顆一顆放，不要整排長回去 —— 目前四顆。
+    連結各指獨立頁、各受自己那把鑰匙（me_petty／me_leave／行事曆那兩把／knowledge）閘門。
     """
     html = my_page_src()
     fn = html.split("function renderActions(")[1].split("\n}")[0]
@@ -89,7 +89,13 @@ def test_action_bar_is_petty_cash_and_leave():
     assert 'has("me_petty")' in fn and 'has("me_leave")' in fn, "閘門不能一起拿掉"
     # owner 2026-09-15「零用金旁有個按鈕，可以展開行事曆」→「行事曆用彈出的 跟零用金一樣」：第三顆，鑰匙同 api_calendar.READ_KEYS 員工那兩把
     assert '{ label: "行事曆", href: "/calendar.html" }' in fn and '(has("me_today_zone") || has("me_team_week"))' in fn
-    assert fn.count("label:") == 3, "最上排三顆：零用金、假勤、行事曆（再放要有 owner 的話）"
+    # owner 2026-09-18：第四顆「知識庫」。鑰匙不是 api_me 的，所以走 grants()；
+    # 🔴 連結是絕對網址 —— office_assets.PAGES 沒有 knowledge.html，辦公室那一面對相對路徑回 503。
+    assert '{ label: "知識庫", href: KNOWLEDGE_URL, external: true }' in fn
+    assert 'grants().has("knowledge")' in fn, "閘門不能用 ws.allowed（knowledge 不是 api_me 的鑰匙）"
+    assert fn.count("label:") == 4, "最上排四顆：零用金、假勤、行事曆、知識庫（再放要有 owner 的話）"
+    assert 'const KNOWLEDGE_URL = "https://foundry.originsun-studio.com/knowledge.html";' in html
+    assert 'target="_blank" rel="noopener"' in fn, "跨網域的那一顆不能塞進 iframe，要另開分頁"
     # owner 2026-09-15：點了開寬的浮動視窗（iframe＋叉叉／Esc／背景），不跳頁；href 留著給「另開」與中鍵
     assert "openActionModal('${it.href}', '${it.label}'); return false;" in fn
     modal = html.split("function openActionModal(")[1].split("\n}")[0]

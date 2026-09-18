@@ -331,6 +331,12 @@ function grants() {
 // 自己的休假總表＋送請假單；核准後自動上 Google 日曆（api_hr._calendar_sync_leave）。
 // owner 2026-09-15：點了開**寬的浮動視窗**（iframe 載同一頁、右上叉叉／Esc／點背景關），不跳頁；
 // 頁面帶 ?embed=1 會把自己的頁首藏起來。關掉時把假勤卡重抓（在視窗裡送了單，卡片要跟上）。
+// owner 2026-09-18：第四顆「知識庫」。它跟前三顆有兩處不同：
+//   鑰匙是 `knowledge`（不是 api_me 的鑰匙，見 tab-config.js 那段「自己一群」）→ 走 grants()；
+//   🔴 連結是絕對網址 —— core/office_assets.PAGES 沒有 knowledge.html，NAS 的辦公室容器對它回 503，
+//   相對路徑在辦公室那一面會開不起來。跨網域也不能塞進 iframe，所以這一顆直接另開分頁。
+const KNOWLEDGE_URL = "https://foundry.originsun-studio.com/knowledge.html";
+
 function renderActions(ws) {
     const has = k => ws.allowed.includes(k);
     const items = [
@@ -338,9 +344,11 @@ function renderActions(ws) {
         has("me_leave") && { label: "假勤", href: "/leave.html" },
         // 行事曆（owner 2026-09-15）：看的鑰匙同後端 api_calendar.READ_KEYS 裡員工那兩把（今天與這週總開關／團隊的一週）
         (has("me_today_zone") || has("me_team_week")) && { label: "行事曆", href: "/calendar.html" },
+        grants().has("knowledge") && { label: "知識庫", href: KNOWLEDGE_URL, external: true },
     ].filter(Boolean);
-    $("ws-actions").innerHTML = items.map(it =>
-        `<a class="act" href="${it.href}" onclick="openActionModal('${it.href}', '${it.label}'); return false;">${it.label}</a>`).join("");
+    $("ws-actions").innerHTML = items.map(it => (it.external
+        ? `<a class="act" href="${it.href}" target="_blank" rel="noopener">${it.label} ↗</a>`
+        : `<a class="act" href="${it.href}" onclick="openActionModal('${it.href}', '${it.label}'); return false;">${it.label}</a>`)).join("");
 }
 function openActionModal(href, label) {
     closeActionModal();
