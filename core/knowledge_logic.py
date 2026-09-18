@@ -212,8 +212,13 @@ def structure_prompt(index_rows: list, first_chars: str, meta: Optional[dict] = 
 """
 
 
-def chapter_prompt(meta: dict, ch: dict, text: str, part_i: int = 1, part_n: int = 1) -> str:
-    """章節 pass：一章（或一章的一段）→ 固定七段的 markdown。"""
+def chapter_prompt(meta: dict, ch: dict, text: str, part_i: int = 1, part_n: int = 1,
+                   assets: Optional[list] = None) -> str:
+    """章節 pass：一章（或一章的一段）→ 固定七段的 markdown。
+
+    `assets`＝這一章頁碼範圍內、從 PDF 抽出來的圖（owner 2026-09-18：「如果章節有重要圖片
+    或表格 我希望你也可以截取出來」）。表格不走這裡 —— 它已經在 `text` 裡（見 `table_block`）。
+    """
     part = f"（這是本章第 {part_i}/{part_n} 段，只整理這一段的內容；段落標題照樣用七段）" if part_n > 1 else ""
     return f"""你在把一本書的一章整理成之後每次討論、或顧問回答前要讀的筆記。讀的人會拿它對照自己的處境做決定，
 所以要把作者的**規則與判斷方式**寫清楚，不是寫讀後感。
@@ -239,9 +244,14 @@ def chapter_prompt(meta: dict, ch: dict, text: str, part_i: int = 1, part_n: int
 篇幅：整章 1,500–3,000 字；引用原文的地方標頁碼（p.N）。不要重述整章，只留規則、判斷與例子。
 
 {_COMMON_RULES}
+{asset_lines(assets_in_range(assets, _int_or_none(ch.get("start_page")) or 0,
+                             _int_or_none(ch.get("end_page")) or 10 ** 6))}
 
 ===== 章文 =====
 {text}
+
+（章文裡的 `[[表 p.N-k]]` 是從 PDF 抽出來的表格。用得到就照抄進「框架」或「實例」那一段，
+標明是第幾頁的表；用不到就不要提。）
 """
 
 
@@ -1042,3 +1052,94 @@ def report_push_text(title: str, groups: list, *, tail: str = "",
         return text
     cut = text[:max_chars].rsplit("\n", 1)[0]
     return cut + "\n…（太長了，完整的在報告檔裡）"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 章節裡的圖與表（owner 2026-09-18：「如果章節有重要圖片 或表格 我希望你也可以截取出來」）
+#
+# 圖：上傳時從 PDF 抽出來存成檔（`assets/p042-1.jpg`），章節提示只告訴 claude
+#     「第幾頁有一張圖、旁邊的字是什麼」，由它決定要不要在章節 md 裡引用。
+#     🔴 claude **看不到圖**，所以它寫的說明只能根據頁碼與附近的文字 —— 提示裡要講明這件事，
+#     不然它會開始描述一張它沒看過的圖。
+# 表：抽成 markdown **直接塞進全文**，這樣切章時自動跟著走，claude 看得到內容也引用得到。
+# ══════════════════════════════════════════════════════════════════════════
+
+#: 圖檔名：`p042-1.jpg`。頁碼三位以上、同頁第幾張、副檔名白名單。
+_ASSET_RE = re.compile(r"^p(\d{3,5})-(\d{1,2})\.(png|jpg)$")
+#: 比這個小的當裝飾（頁首小圖示、線條），不留。實測那本書的 40x40 就是這種。
+MIN_ASSET_PX = 200
+#: 一本書最多留幾張（PDF 有時整頁都是掃描圖，那樣留下來沒有意義也很佔空間）
+MAX_ASSETS = 80
+#: 一頁最多留幾張
+MAX_ASSETS_PER_PAGE = 4
+#: 圖說：取圖下方這麼多字當線索（通常是「圖 1-1 …」那一行）
+CAPTION_CHARS = 60
+#: 這一頁的本文少於這麼多字，就當它是封面或整頁掃描 —— 那種圖沒有上下文，claude 也無從說明
+MIN_PAGE_CHARS = 80
+#: 圖佔掉這麼多版面就是整頁的底圖／掃描，不是插圖
+MAX_PAGE_COVER = 0.9
+#: 表格小於這個規模就不算表（多半是排版用的格線）
+MIN_TABLE_ROWS = 2
+MIN_TABLE_COLS = 2
+
+
+def is_valid_asset(name) -> bool:
+    """🔴 任何拼路徑前先過這裡（同書 id 的規矩）。"""
+    return bool(_ASSET_RE.match(str(name or "")))
+
+
+def asset_name(page: int, k: int, ext: str) -> str:
+    """`(42, 1, 'jpeg')` → `p042-1.jpg`。副檔名不在白名單就回空字串（呼叫端跳過那張）。"""
+    e = {"jpeg": "jpg", "jpg": "jpg", "png": "png"}.get(str(ext or "").lower(), "")
+    return f"p{int(page):03d}-{int(k)}.{e}" if e else ""
+
+
+def asset_page(name: str) -> int:
+    m = _ASSET_RE.match(str(name or ""))
+    return int(m.group(1)) if m else 0
+
+
+def keep_image(width: int, height: int) -> bool:
+    """留不留這張：兩邊都要夠大。頁首小圖示、分隔線、色塊一律丟掉。"""
+    return int(width or 0) >= MIN_ASSET_PX and int(height or 0) >= MIN_ASSET_PX
+
+
+def keep_page_image(page_chars: int, cover: float) -> bool:
+    """這一頁的這張圖算不算「重要的圖」。
+
+    實測（「台灣菜」503 頁）：封面與整頁掃描那幾頁本文是 0 字、圖佔 52%～100%，
+    而真正的插圖都在有本文的頁面上、佔兩成版面，而且抓得到「圖2.1 …」那種圖說。
+    """
+    return int(page_chars or 0) >= MIN_PAGE_CHARS and float(cover or 0) < MAX_PAGE_COVER
+
+
+def table_block(page: int, k: int, md: str) -> str:
+    """表格塞進全文時的樣子。標題那行讓 claude 知道它是第幾頁的第幾個表。"""
+    body = (md or "").strip()
+    return f"\n[[表 p.{int(page)}-{int(k)}]]\n{body}\n" if body else ""
+
+
+def keep_table(rows: int, cols: int) -> bool:
+    return int(rows or 0) >= MIN_TABLE_ROWS and int(cols or 0) >= MIN_TABLE_COLS
+
+
+def assets_in_range(assets: Optional[list], start_page: int, end_page: int) -> list:
+    """這一章頁碼範圍內的圖。"""
+    return [a for a in (assets or [])
+            if start_page <= int(a.get("page") or 0) <= end_page]
+
+
+def asset_lines(assets: list) -> str:
+    """章節提示裡「這一章有哪些圖」那一段。沒有圖就回空字串（整段不出現）。"""
+    if not assets:
+        return ""
+    out = ["", "===== 這一章有這幾張圖（已經從 PDF 抽出來了）=====",
+           "🔴 **你看不到圖**。下面只有頁碼與圖旁邊的文字 —— 說明要照那些字與本文寫，",
+           "不要描述你沒看過的畫面（不要寫「圖中可見…」）。",
+           "覺得某張圖對讀這一章有幫助，就在**相關的段落後面**插一行：",
+           "`![你寫的說明](assets/檔名)`。用不到的就不要放，不要為了每張圖都提一句。"]
+    for a in assets:
+        cap = (a.get("caption") or "").strip()
+        out.append(f"- `assets/{a.get('name')}`（第 {a.get('page')} 頁"
+                   + (f"，附近的字：{cap}）" if cap else "）"))
+    return "\n".join(out)

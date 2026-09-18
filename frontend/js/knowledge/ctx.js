@@ -53,6 +53,7 @@ export const S = {
     extendNote: '',    // 上一輪沒收到東西時的那句人話（失敗的理由／沒找到）
     watchConf: null,   // 研究助理的全域開關 { enabled, weekday, hour, can_edit }；null＝還沒讀到
     focusEdit: false,  // 「研究方向」那一格在編輯中
+    assetUrls: [],     // 這一輪借出去的圖片 blob 網址（重畫前要 revoke）
     reports: [],       // 研究週報／月報的清單（§9.5）
     extendTimer: null,
     editing: false,    // 結論／筆記分頁：在編輯（textarea）還是在看（md 渲染）

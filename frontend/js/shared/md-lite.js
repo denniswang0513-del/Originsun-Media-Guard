@@ -7,7 +7,12 @@
  * 🔴 **先對整段 esc 再套規則**：進來的字是 claude 回的或 owner 打的，裡面任何 `<script>` 在套規則前
  * 已經變成 `&lt;script&gt;`，之後每一條規則只會產生我們自己寫死的標籤。連結的 href 只放
  * `https?://` 開頭的字串（`javascript:` 這種不會變成 <a>，原樣留著當文字）。
- * 沒有 HTML 直通、沒有圖片、沒有巢狀清單 —— 要更多再加，不要換成第三方套件（外網載不到）。
+ * 圖片：`![說明](相對路徑)` 會變成 `<img data-md-src="相對路徑">`，**故意不給 src** ——
+ * 這支不知道也不該知道怎麼取那個檔（知識庫的圖要帶 token 去拿）。呼叫端自己決定怎麼填
+ * （知識庫是 fetch 成 blob 再填）。沒人填就只顯示 alt 文字，永遠不會自己連外。
+ * 相對路徑白名單：英數與 `._-/`，不准 `..`、不准開頭斜線、不准協定 —— 外部圖片一律不收。
+ *
+ * 沒有 HTML 直通、沒有巢狀清單 —— 要更多再加，不要換成第三方套件（外網載不到）。
  */
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
@@ -20,6 +25,11 @@ function inline(s) {
             return `<code>${part.slice(1, -1)}</code>`;
         }
         return part
+            // 圖片要排在連結前面（`![x](y)` 也符合連結的樣子）
+            .replace(/!\[([^\]\n]*)\]\(([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*)\)/g,
+                (m, alt, src) => (src.includes('..')
+                    ? m
+                    : `<img data-md-src="${src}" alt="${alt}" loading="lazy">`))
             .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
                 '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
             .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')

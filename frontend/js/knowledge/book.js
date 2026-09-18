@@ -3,10 +3,14 @@
  * 分頁：討論（chat.js）／結論／筆記（整檔編輯）／骨架（SKILL.md＋速查表）／章節（清單 → 單章）。
  * 編譯：POST compile → 每 3 秒抓 GET /{id} 直到 status 離開 compiling（分頁在背景就跳過那一拍）。
  * 待補（pending）＝先建了書名還沒有檔：這裡用「補上 PDF」取代「讀這本書」，補完 status 變 uploaded。
+ *
+ * 章節裡的圖（§9.7）：md-lite 只產 `<img data-md-src="assets/pNNN-k.jpg">`（**沒有 src**），
+ * 這裡 fetch 成 blob 再填 —— `<img src>` 送不了 Authorization，圖是私有的。
  */
 import { mdToHtml } from '../shared/md-lite.js';
-import { S, PANES, COMPILE_POLL_MS, api, esc, errText, stageText, alive, toast, stopTimers, normBook,
+import { API, S, PANES, COMPILE_POLL_MS, api, esc, errText, stageText, alive, toast, stopTimers, normBook,
          chapterList, bookTags, parseTags, statusPill, tagsHtml } from './ctx.js';
+import { bearerHeader } from '../shared/utils.js';
 import { loadShelf, refreshShelfQuietly } from './shelf.js';
 import { chatHtml, scrollChat, loadChat } from './chat.js';
 import { extendHtml, loadExtend } from './extend.js';
@@ -132,9 +136,46 @@ export function toggleSheet(on) {
       </div>`;
 }
 
+/** 這一輪畫面借出去的 blob 網址：重畫前要收回來，不然翻幾十章會一直吃記憶體。 */
+function _revokeAssets() {
+    for (const u of S.assetUrls || []) URL.revokeObjectURL(u);
+    S.assetUrls = [];
+}
+
+/** 把 md-lite 留下的 `<img data-md-src>` 填起來（帶 token 去拿，拿到的是 blob）。
+ *  拿不到就讓它留著 alt 文字 —— 一張圖掛掉不該讓整章看不了。 */
+async function _fillAssets(host) {
+    const imgs = [...host.querySelectorAll('img[data-md-src]')];
+    if (!imgs.length || !S.book) return;
+    const bookId = S.book.id;
+    for (const img of imgs) {
+        const rel = img.dataset.mdSrc || '';
+        if (!/^assets\/[A-Za-z0-9._-]+$/.test(rel)) continue;     // 只認我們自己產的那種
+        try {
+            const r = await fetch(`${API}/${encodeURIComponent(bookId)}/${rel}`, { headers: bearerHeader() });
+            if (!r.ok) continue;
+            const url = URL.createObjectURL(await r.blob());
+            if (!alive() || !S.book || S.book.id !== bookId) { URL.revokeObjectURL(url); return; }
+            (S.assetUrls = S.assetUrls || []).push(url);
+            img.src = url;
+            img.classList.add('on');
+            // 圖說：claude 寫在 alt 裡（提示叫它寫 `![說明](…)`）。alt 只有讀螢幕看得到，
+            // 書裡的圖沒有說明等於看不懂，所以再畫一行出來。
+            const alt = (img.alt || '').trim();
+            if (alt && !(img.nextElementSibling || {}).classList?.contains('kb-cap')) {
+                const cap = document.createElement('div');
+                cap.className = 'kb-cap';
+                cap.textContent = alt;
+                img.insertAdjacentElement('afterend', cap);
+            }
+        } catch (_) { /* 一張拿不到就算了，alt 還在 */ }
+    }
+}
+
 export function renderPane() {
     const pane = S.root.querySelector('#kb-pane');
     if (!pane) return;
+    _revokeAssets();
     S.root.querySelectorAll('.kb-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.pane === S.pane));
     if (S.pane === 'chat') pane.innerHTML = chatHtml();
     else if (S.pane === 'conclusion') pane.innerHTML = _docHtml('conclusion');
@@ -143,6 +184,7 @@ export function renderPane() {
     else if (S.pane === 'extend') pane.innerHTML = extendHtml();
     else pane.innerHTML = _chaptersHtml();
     if (S.pane === 'chat') scrollChat();
+    else _fillAssets(pane);
 }
 
 /** 切分頁（點分頁鈕）：同一頁且不在編輯就不動；討論分頁第一次進來才抓 */

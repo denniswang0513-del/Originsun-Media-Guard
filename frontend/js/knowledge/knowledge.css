@@ -257,6 +257,12 @@
 .kb .kb-report blockquote { margin: 12px 0; padding: 8px 12px; border-left: 3px solid var(--line);
     color: var(--sub); font-size: 13px; }
 
+/* 章節裡的圖（§9.7）：claude 引用的那幾張。拿到 blob 前只有 alt 文字，拿到才顯示（.on）。 */
+.kb .kb-md img { display: none; max-width: 100%; height: auto; border-radius: 6px;
+    border: 1px solid var(--line); margin: 10px 0 2px; }
+.kb .kb-md img.on { display: block; }
+.kb .kb-md .kb-cap { color: var(--sub); font-size: 12.5px; line-height: 1.6; margin: 0 0 12px; }
+
 /* 窄一點：書頁單欄 */
 @media (max-width: 899px) {
     .kb .kb-book { grid-template-columns: minmax(0, 1fr); gap: 16px; }

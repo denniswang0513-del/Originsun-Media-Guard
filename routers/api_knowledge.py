@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -240,6 +241,27 @@ async def compile_book(book_id: str, request: Request, body: Optional[CompilePay
     meta = _book_or_404(ks.start_compile, book_id, body.model or "", force=body.force)
     fire(ks.compile_book(book_id, meta.get("model") or ""), label=f"knowledge compile {book_id}")
     return {"status": "compiling", "model": meta.get("model") or ""}
+
+
+# ── 章節裡的圖（§9.7；owner 2026-09-18：「如果章節有重要圖片 或表格 我希望你也可以截取出來」）──
+# 表格不走這裡 —— 它是文字，已經在章節 md 裡面了。
+@router.get("/{book_id}/assets")
+async def assets_list(book_id: str, request: Request):
+    """`[{name, page, caption}]`：這本書從 PDF 抽出來的圖。"""
+    _guard(request)
+    return _book_or_404(ks.list_assets, book_id)
+
+
+@router.get("/{book_id}/assets/{name}")
+async def asset_get(book_id: str, name: str, request: Request):
+    """回那張圖的檔案。🔴 檔名過白名單才拼路徑（同章節檔名的規矩）。"""
+    _guard(request)
+    from core.no_store import no_store_file
+    path = _book_or_404(ks.asset_path, book_id, name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="找不到這張圖")
+    # 🔴 書是私有的，圖也是：走 no_store，不要讓中間的代理或瀏覽器留一份在磁碟上
+    return no_store_file(path, media_type=("image/png" if name.endswith(".png") else "image/jpeg"))
 
 
 @router.get("/{book_id}/chapters/{n}")

@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -52,6 +53,7 @@ CONCLUSION_FILE = "結論.md"
 NOTES_FILE = "筆記.md"
 EXTEND_FILE = "延伸.md"
 CHAPTERS_DIR = "chapters"
+ASSETS_DIR = "assets"                     # 從 PDF 抽出來的圖（§9.7）
 SUPPORT_RAW_FILE = "_support_raw.txt"     # 骨架 pass 解不出四個檔時留的原文（除錯用）
 
 _TW = ZoneInfo("Asia/Taipei")
@@ -160,20 +162,126 @@ def is_pdf(content: bytes) -> bool:
     return bool(content) and content[:4] == b"%PDF"
 
 
-def extract_text(content: bytes) -> tuple:
-    """pymupdf 抽全文：回 `(text, pages)`，每頁前加 `[[p.N]]`。同步、吃 CPU —— 呼叫端丟 to_thread。"""
+def _pymupdf():
     try:
         import pymupdf as _mu
     except ImportError:  # 舊版只有 fitz（會印 deprecation warning）
         import fitz as _mu
-    doc = _mu.open(stream=content, filetype="pdf")
+    return _mu
+
+
+def extract_text(content: bytes) -> tuple:
+    """pymupdf 抽全文：回 `(text, pages)`，每頁前加 `[[p.N]]`。同步、吃 CPU —— 呼叫端丟 to_thread。"""
+    text, pages, _ = extract_all(content, assets_to=None)
+    return text, pages
+
+
+def extract_all(content: bytes, *, assets_to: Optional[str] = None) -> tuple:
+    """抽全文＋表格＋圖：回 `(text, pages, assets)`。同步、吃 CPU —— 呼叫端丟 to_thread。
+
+    owner 2026-09-18：「如果章節有重要圖片 或表格 我希望你也可以截取出來」。
+      表：抽成 markdown **直接塞進全文**那一頁後面 —— 切章時自動跟著走，claude 看得到內容。
+      圖：存成檔案（`assets_to` 給資料夾才存），只回清單；claude 看不到圖，
+          章節提示只帶頁碼與旁邊的文字（見 knowledge_logic.asset_lines）。
+    一頁抽圖／找表都可能對怪 PDF 拋例外 —— 那一頁跳過就好，不要讓整本書進不來。
+    """
+    doc = _pymupdf().open(stream=content, filetype="pdf")
+    if assets_to:
+        os.makedirs(assets_to, exist_ok=True)
+    assets: list = []
     try:
         parts = []
         for i, page in enumerate(doc, start=1):
             parts.append(kl.PAGE_MARK.format(n=i) + "\n" + (page.get_text() or "") + "\n")
-        return "".join(parts), doc.page_count
+            parts.extend(_page_tables(page, i))
+            if assets_to and len(assets) < kl.MAX_ASSETS:
+                assets.extend(_page_images(doc, page, i, assets_to))
+        return "".join(parts), doc.page_count, assets
     finally:
         doc.close()
+
+
+def save_images(content: bytes, dest: str) -> list:
+    """只走圖的那一趟（不抽文字，比 `extract_all` 快很多）。回 `[{name, page, caption}]`。"""
+    doc = _pymupdf().open(stream=content, filetype="pdf")
+    os.makedirs(dest, exist_ok=True)
+    out: list = []
+    try:
+        for i, page in enumerate(doc, start=1):
+            if len(out) >= kl.MAX_ASSETS:
+                break
+            out.extend(_page_images(doc, page, i, dest))
+        return out
+    finally:
+        doc.close()
+
+
+def _page_tables(page, n: int) -> list:
+    """這一頁的表格 → 塞進全文的那幾段。"""
+    out = []
+    try:
+        tables = page.find_tables().tables
+    except Exception:
+        return out
+    for k, t in enumerate(tables, start=1):
+        try:
+            if not kl.keep_table(t.row_count, t.col_count):
+                continue
+            out.append(kl.table_block(n, k, t.to_markdown()))
+        except Exception:
+            continue
+    return out
+
+
+def _caption_near(page, bbox) -> str:
+    """圖下方那一行字（多半是圖說）。抓不到就回空。"""
+    try:
+        import pymupdf as _mu
+    except ImportError:
+        import fitz as _mu
+    try:
+        below = _mu.Rect(bbox.x0 - 20, bbox.y1, bbox.x1 + 20, bbox.y1 + 80)
+        return " ".join((page.get_text("text", clip=below) or "").split())[:kl.CAPTION_CHARS]
+    except Exception:
+        return ""
+
+
+def _page_images(doc, page, n: int, dest: str) -> list:
+    """這一頁值得留的圖 → 寫檔，回 `[{name, page, caption}]`。
+
+    先看這一頁本身：沒有本文（封面、整頁掃描）就整頁跳過 —— 那種圖沒有上下文，
+    claude 看不到圖也說不出什麼，留著只是佔空間（見 knowledge_logic.keep_page_image）。
+    """
+    out = []
+    try:
+        imgs = page.get_images(full=True)
+        if not imgs:
+            return out
+        page_chars = len((page.get_text() or "").strip())
+        page_area = float(page.rect.width * page.rect.height) or 1.0
+    except Exception:
+        return out
+    for k, info in enumerate(imgs, start=1):
+        if len(out) >= kl.MAX_ASSETS_PER_PAGE:
+            break
+        try:
+            d = doc.extract_image(info[0])
+            if not kl.keep_image(d.get("width"), d.get("height")):
+                continue
+            rects = page.get_image_rects(info[0])
+            cover = (rects[0].width * rects[0].height / page_area) if rects else 0.0
+            if not kl.keep_page_image(page_chars, cover):
+                continue
+            name = kl.asset_name(n, k, d.get("ext"))
+            if not name:
+                continue
+            with open(os.path.join(dest, name), "wb") as f:
+                f.write(d["image"])
+            out.append({"name": name, "page": n,
+                        "caption": _caption_near(page, rects[0]) if rects else ""})
+        except Exception:
+            continue
+    return out
 
 
 def _new_meta(book_id: str, title: str, *, author: str = "", tags=None) -> dict:
@@ -206,7 +314,14 @@ def _write_source(book_id: str, content: bytes, source_name: str, extracted: Opt
         f.write(content)
     _write_text(os.path.join(d, FULLTEXT_FILE), text)
     name = os.path.basename(str(source_name or "").replace("\\", "/"))
+    # 圖：資料夾這時才存在。抽不出來不該讓整本書進不來（掃描檔、壞的內嵌圖都可能炸）
+    captions = {}
+    try:
+        captions = {a["name"]: a["caption"] for a in save_images(content, os.path.join(d, ASSETS_DIR))}
+    except Exception:
+        logger.exception("知識庫：抽圖失敗 %s（書照樣收下）", book_id)
     return _update_meta(book_id, source_name=name, pages=pages, chars=len(text),
+                        asset_captions=captions,
                         status="uploaded", error="", uploaded_at=_now_iso())
 
 
@@ -416,6 +531,53 @@ def pick_model(requested: str = "") -> str:
 
 
 # ── 編譯（三個 pass）──
+def assets_dir(book_id: str, *, make: bool = False) -> str:
+    d = os.path.join(book_dir(book_id), ASSETS_DIR)
+    if make:
+        os.makedirs(d, exist_ok=True)
+    return d
+
+
+def asset_path(book_id: str, name: str) -> str:
+    """🔴 檔名一律先過白名單，再拼路徑（同章節檔名的規矩）。
+    id 直接走 `book_dir()`，不經過 `assets_dir()` —— 包一層也不行（見
+    test_ids_only_become_paths_through_book_dir，那條刻意只認 `book_dir(`）。"""
+    if not kl.is_valid_asset(name):
+        raise ChapterNotFound(f"{book_id}/{name}")
+    return os.path.join(book_dir(book_id), ASSETS_DIR, name)
+
+
+def list_assets(book_id: str) -> list:
+    """`[{name, page, caption}]`，照頁碼排。圖說存在 meta（檔案本身不帶字）。"""
+    d = assets_dir(book_id)
+    if not os.path.isdir(d):
+        return []
+    caps = (read_meta(book_id).get("asset_captions") or {})
+    rows = [{"name": n, "page": kl.asset_page(n), "caption": caps.get(n, "")}
+            for n in os.listdir(d) if kl.is_valid_asset(n)]
+    return sorted(rows, key=lambda a: (a["page"], a["name"]))
+
+
+def ensure_assets(book_id: str) -> list:
+    """舊書補抽圖（2026-09-18 之前上傳的沒有這一步）。已經有就直接回。
+
+    🔴 **只抽圖，不碰 full_text.txt**。表格是在上傳時就塞進全文的（見 `extract_all`），
+    這裡重抽全文等於把現在那一份整個蓋掉 —— 誰在那裡放了什麼都會不見。
+    舊書要有表格，就把那本重新上傳一次。
+    """
+    have = list_assets(book_id)
+    if have:
+        return have
+    src = os.path.join(book_dir(book_id), SOURCE_FILE)
+    if not os.path.exists(src):
+        return []
+    with open(src, "rb") as f:
+        content = f.read()
+    assets = save_images(content, assets_dir(book_id, make=True))
+    _update_meta(book_id, asset_captions={a["name"]: a["caption"] for a in assets})
+    return list_assets(book_id)
+
+
 def _support_missing(d: str) -> list:
     return [n for n in kl.SUPPORT_FILES if not os.path.isfile(os.path.join(d, n))]
 
@@ -462,6 +624,13 @@ async def compile_book(book_id: str, model: str) -> None:
 
 
 async def _compile(book_id: str, model: str) -> None:
+    # 圖：2026-09-18 之前上傳的書還沒抽過，編譯前補一次（已經有就直接回，不重跑）。
+    # 抽不出來不該擋住編譯 —— 沒有圖的章節照樣有用。
+    try:
+        assets = await asyncio.to_thread(ensure_assets, book_id)
+    except Exception:
+        logger.exception("知識庫：補抽圖失敗 %s（編譯照跑）", book_id)
+        assets = []
     meta = read_meta(book_id)
     d = book_dir(book_id)
     full_text = _read_text(os.path.join(d, FULLTEXT_FILE))
@@ -503,7 +672,7 @@ async def _compile(book_id: str, model: str) -> None:
         for pi, part in enumerate(parts, start=1):
             if len(parts) > 1:
                 _stage[book_id] = f"第 {i}/{total} 章（{pi}/{len(parts)} 段）"
-            text, err = await call_claude(kl.chapter_prompt(meta, ch, part, pi, len(parts)),
+            text, err = await call_claude(kl.chapter_prompt(meta, ch, part, pi, len(parts), assets=assets),
                                           model=model, cwd=d, timeout_sec=COMPILE_TIMEOUT_SEC)
             if text is None:
                 raise RuntimeError(f"第 {ch['n']} 章：{err}")
@@ -753,8 +922,10 @@ __all__ = [
     "ADVISOR_LATEST", "BookBusy", "BookNotFound", "ChapterNotFound", "ExtendNotFound", "MAX_UPLOAD_BYTES", "add_chat_message",
     "advisor_snapshot", "append_conclusion", "book_detail", "book_dir", "chat_state", "compile_book", "delete_book",
     "extend_state", "extract_text", "is_pdf", "list_books", "pick_model", "rate_extend", "read_chapter", "read_chat",
-    "read_extend", "read_meta", "root", "run_chat", "run_conclude", "run_extend", "save_upload", "set_watch_last",
+    "read_extend", "read_meta", "root", "run_chat", "run_conclude", "run_extend", "save_images", "save_upload",
+    "set_watch_last",
     "start_chat",
+    "asset_path", "assets_dir", "ensure_assets", "extract_all", "list_assets",
     "start_compile", "start_conclude", "start_extend", "update_book", "watch_last", "write_conclusion", "write_meta",
     "write_notes",
 ]
