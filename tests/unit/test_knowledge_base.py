@@ -955,3 +955,32 @@ def test_pending_requires_a_title_and_bad_id_is_404(kb):
     assert kb.client.post(f"{URL}/pending", json={"title": "   "}).status_code == 422
     r = kb.client.post(f"{URL}/zzzz/file", files={"file": ("x.pdf", _make_pdf(1), "application/pdf")})
     assert r.status_code == 404
+
+
+# ── meta.json 的讀-改-寫要有每本書一把鎖（2026-09-18：dev 上補圖時正式站正在編譯，兩個寫入者對撞會互相蓋掉）──
+
+def test_update_meta_is_serialized_per_book(kb):
+    """兩個執行緒同時對同一本書 _update_meta 不同的鍵，最後兩個鍵都要在（沒鎖＝後寫的把先寫的蓋掉）。"""
+    import threading
+    from services import knowledge_service as ks
+    bid = kb.upload(pages=1)["id"]
+    orig_read = ks.read_meta
+    gate = threading.Barrier(2, timeout=1)   # 有鎖時第二個讀不到 barrier，逾時就放行
+
+    def slow_read(book_id):
+        m = orig_read(book_id)
+        try:
+            gate.wait()          # 兩邊都讀完舊值才繼續 → 沒鎖的話一定互相蓋掉
+        except threading.BrokenBarrierError:
+            pass
+        return m
+
+    ks.read_meta = slow_read
+    try:
+        t1 = threading.Thread(target=ks._update_meta, args=(bid,), kwargs={"author": "甲"})
+        t2 = threading.Thread(target=ks._update_meta, args=(bid,), kwargs={"tags": ["財務"]})
+        t1.start(); t2.start(); t1.join(5); t2.join(5)
+    finally:
+        ks.read_meta = orig_read
+    m = ks.read_meta(bid)
+    assert m.get("author") == "甲" and m.get("tags") == ["財務"], m

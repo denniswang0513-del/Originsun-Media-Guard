@@ -21,6 +21,7 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -149,11 +150,23 @@ def write_meta(book_id: str, meta: dict) -> None:
     _write_text(os.path.join(d, META_FILE), json.dumps(meta, ensure_ascii=False, indent=2))
 
 
+# 每本書一把鎖：_update_meta 是讀-改-寫，編譯（事件迴圈那條）與端點（to_thread 那條）會同時改同一份 meta，
+# 沒鎖＝後寫的把先寫的鍵蓋掉（toc／status／tags 任何一個），而且完全靜默。只擋同一行程；跨行程靠 dev／prod 分 root。
+_META_LOCKS: dict = {}
+_META_LOCKS_GUARD = threading.Lock()
+
+
+def _meta_lock(book_id: str) -> threading.Lock:
+    with _META_LOCKS_GUARD:
+        return _META_LOCKS.setdefault(book_id, threading.Lock())
+
+
 def _update_meta(book_id: str, **fields) -> dict:
-    meta = read_meta(book_id)
-    meta.update(fields)
-    write_meta(book_id, meta)
-    return meta
+    with _meta_lock(book_id):
+        meta = read_meta(book_id)
+        meta.update(fields)
+        write_meta(book_id, meta)
+        return meta
 
 
 # ── 上傳 ─────────────────────────────────────────────────────
