@@ -17,7 +17,10 @@
      鑰匙＝模組鍵 knowledge（管理員或有該鍵；同後端 api_knowledge 的守衛）。
      API 只掛 master（檔案住 D:\、編譯與討論要 claude CLI）：走 NAS 那條路或 master 關機時畫面寫「書架需要主控主機在線」。 -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<link rel="stylesheet" href="/js/knowledge/knowledge.css">
+<!-- ?v= 是破快取用的：Cloudflare 把 js/css 的 no-cache 改寫成 max-age=14400，
+     發版後最久四小時使用者會是「新 html ＋ 舊 css」（版面會整個壞掉）。
+     版號由 publish_update.py 自動維護，勿手改。 -->
+<link rel="stylesheet" href="/js/knowledge/knowledge.css?v=2.5.52">
 <style>
   /* 色票是一組語彙，不是寫死的顏色 —— 窄螢幕整組換成深色（見檔尾的 @media）。
      🔴 `--red` 原本同時當強調色與危險色；深色底下強調色要換成 logo 的天藍，
@@ -32,7 +35,8 @@
     --on-ink: #fff;             /* 壓在 --ink 實心色塊上的字 */
     --mine: #fdf1f0;            /* 討論裡「你說的」那一則的底 */
     --dim: rgba(0,0,0,.3);      /* 抽屜後面壓暗的那層 */
-    --bg-soft: #fafafa; --ok: #15803d; --warn: #b45309;
+    /* --ok 原本 #15803d 在 --ok-bg 上只有 4.42（AA 要 4.5）——「已編譯」那顆 pill 差一點點 */
+    --bg-soft: #fafafa; --ok: #136c34; --warn: #b45309;
     --ok-bg: #e6f4ea; --warn-bg: #fff3e0; --bad-bg: #fdecea; --na-bg: #f0f0f0;
     --shadow: rgba(0,0,0,.14); --shadow-soft: rgba(0,0,0,.12);
   }

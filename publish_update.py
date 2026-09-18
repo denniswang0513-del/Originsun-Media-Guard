@@ -544,7 +544,8 @@ def sync_redirects_to_nas() -> bool:
 # ────────────────────────────────────────
 
 def sync_docs_version(version: str) -> None:
-    """發版時同步 CLAUDE.md / ROADMAP.md 的版本標記（文件漂移防治）。
+    """發版時同步 CLAUDE.md / ROADMAP.md 的版本標記（文件漂移防治），
+    以及前端 CSS 網址上的破快取版號。
 
     只改「版本標記行」，不碰其他內容；pattern 找不到就跳過，
     任何失敗只 WARN 不擋發版。回滾 version.json 的兩條路徑也要呼叫，
@@ -563,6 +564,15 @@ def sync_docs_version(version: str) -> None:
              f"## 現況 (v{version}) 基準線"),
             (re.compile(r"^現在 \(v[\d.]+\) ← 你在這裡"),
              f"現在 (v{version}) ← 你在這裡"),
+        ],
+        # 🔴 破快取：Cloudflare 把 js/css 的 no-cache 改寫成 max-age=14400（見 docker/nginx
+        # /originsun.conf 第 36 行），發版後最久四小時使用者是「新 html ＋ 舊 css」——
+        # 2026-09-18 owner 的手機就是這樣：顏色對了但版面被切、分頁列還是白的。
+        # 版本一變網址就變，快取自然失效。（ES module 的 import 不繼承查詢字串，JS 解不了，
+        # 那一半要靠 CF 後台 Browser Cache TTL 改成 Respect Existing Headers。）
+        "frontend/knowledge.html": [
+            (re.compile(r'href="/js/knowledge/knowledge\.css\?v=[\d.]+"'),
+             f'href="/js/knowledge/knowledge.css?v={version}"'),
         ],
     }
     for fname, frules in rules.items():
