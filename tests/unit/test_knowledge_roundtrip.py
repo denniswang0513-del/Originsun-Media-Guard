@@ -308,3 +308,41 @@ def test_the_report_body_runs_off_the_event_loop(monkeypatch):
     asyncio.run(kr.daily_check())
     assert seen and seen["on_loop"] is False, "同步 I/O 要丟到執行緒，不能在事件迴圈上跑"
     assert seen["thread"] is not threading.main_thread()
+
+
+def test_a_linked_project_is_still_pickable_when_private_ledgers_are_hidden(monkeypatch):
+    """BUG-2：/api/v1/projects/picker 用 list_options 預設的 prefer=mine（母私帳成對時留私帳那筆），
+    接著 hide_mine_projects 又把私帳那筆濾掉 → 有連結私帳的案對沒有私帳權限的人**整個消失**；
+    owner 自己則是把書掛到私帳分身的 id 上。備份頁那支明確 prefer="parent"，這支要一樣。"""
+    import asyncio
+    import core.ledger as ledger
+    import routers.api_backup as ab
+    import services.project_picker as picker
+
+    monkeypatch.setattr(ab, "check_lan_or_logged_in", lambda _r: None)
+    monkeypatch.setattr(ledger, "hide_mine_projects", lambda _r: True)
+
+    async def _fake_options(session, extra=(), prefer="mine"):
+        # 一對連結的母私帳：留哪一筆由 prefer 決定（真的 list_options 就是這樣 shadow 的）
+        parent = {"id": "p-parent", "name": "案", "client": "源日", "year": "2026", "closed": False,
+                  "label": "2026 源日 案", "entity": "parent"}
+        mine = {**parent, "id": "p-mine", "entity": "mine"}
+        return [parent if prefer == "parent" else mine]
+
+    monkeypatch.setattr(picker, "list_options", _fake_options)
+
+    async def _factory():
+        return lambda: _NullSession()
+
+    monkeypatch.setattr(ab, "_factory", _factory)
+    out = asyncio.run(ab.list_project_options(None))
+    assert out["status"] == "ok"
+    assert [p["id"] for p in out["projects"]] == ["p-parent"], out
+
+
+class _NullSession:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False

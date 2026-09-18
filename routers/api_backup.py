@@ -176,7 +176,10 @@ async def list_project_options(request: Request):
         from core.ledger import MINE, hide_mine_projects  # type: ignore
         from services.project_picker import list_options  # type: ignore
         async with factory() as session:
-            opts = await list_options(session, extra=("entity",))
+            # prefer="parent"：母私帳成對時留母帳那筆（同備份頁那支）。留私帳的話，下一行的
+            # hide 對沒有私帳權限的人把它濾掉 → 有連結私帳的案**整個消失**；owner 自己則是把書掛到
+            # 私帳分身的 id 上（2026-09-19 /polish BUG-2）。
+            opts = await list_options(session, extra=("entity",), prefer="parent")
         hide = hide_mine_projects(request)
         rows = [o for o in opts if not (hide and o.get("entity") == MINE)]
         # 白名單投影（同 _picker_view 的理由）：寫死這幾格，以後 crm_projects 加欄位不會跟著漏
