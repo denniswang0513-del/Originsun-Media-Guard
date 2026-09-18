@@ -59,11 +59,12 @@ async function _projectOptions() {
     if (S.projects) return S.projects;
     try {
         const r = await hooks.fetch('/api/v1/projects/picker');
-        S.projects = (r && r.projects) || [];
+        // 抓失敗（DB 斷線）不要記起來 —— 記了的話這一頁到關掉為止都只會看到空清單
+        if (r && r.projects && r.projects.length) S.projects = r.projects;
+        return (r && r.projects) || [];
     } catch (_) {
-        S.projects = [];
+        return [];
     }
-    return S.projects;
 }
 
 function _rowHtml(b, [key, label, hint]) {

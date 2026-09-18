@@ -123,6 +123,13 @@ def test_every_chapter_gets_its_own_heading():
     assert "第 1 章 甲" in html and "第 2 章 乙" in html
 
 
+def test_the_chapter_title_is_not_printed_twice():
+    """每章的 md 第一行本來就是 `# 第 N 章 …`（2026-09-19 在 dev 的 PDF 上看到重複）。"""
+    html = kpdf.build_html(_full(chapters=[{"n": 1, "title": "圖與表",
+                                            "md": "# 第 1 章 圖與表\n\n內容"}]))
+    assert html.count("第 1 章 圖與表") == 1
+
+
 def test_the_title_is_escaped():
     html = kpdf.build_html(_full(title="<script>x</script>"))
     assert "<script>x</script>" not in html and "&lt;script&gt;" in html
@@ -273,6 +280,19 @@ def test_the_info_tab_picks_a_project_with_the_shared_popup():
     assert "data-proj-pick" in js
     body = js_func_body(js, "async function _projectOptions(")
     assert "'/api/v1/projects/picker'" in body
+
+
+def test_the_popup_gets_this_pages_palette_and_wins_the_cascade():
+    """🔴 `js/shared/project-pop.js` 用 `ensureStyle` 在**執行時**把自己的 <style> 附到
+    head 最後面（預設是內部系統的深色皮）。這一頁的覆寫如果只寫 `.proj-pop`，分數一樣、
+    它後到就贏 —— 桌機白底上會冒出一塊黑的（2026-09-19 截圖才看到）。"""
+    css = repo_src("frontend/js/knowledge/knowledge.css")
+    assert "body .proj-pop {" in css, "分數要比元件自己那份高"
+    block = css[css.index("body .proj-pop {"):]
+    block = block[:block.index("}") + 1]
+    for token in ("--pp-bg", "--pp-ink", "--pp-head", "--pp-on"):
+        assert token in block, token + " 沒重塗"
+    assert "#" not in block, "色票走 var()，不要寫死（手機是深藍、桌機是白）"
 
 
 def test_the_popup_module_is_in_the_import_map():

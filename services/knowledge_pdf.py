@@ -190,8 +190,12 @@ def build_html(d: dict, images: Optional[dict] = None) -> str:
         parts += ['<h2 class="sec">章節重點</h2>',
                   '<p class="note">以下是針對原書內容整理的筆記，不是原文。</p>']
         for c in d["chapters"]:
-            parts.append(f'<h3 class="ch">第 {_esc(c.get("n"))} 章 {_esc(c.get("title"))}</h3>')
-            parts.append(_md(c.get("md") or "", images))
+            md = c.get("md") or ""
+            # 每章的 md 第一行本來就是 `# 第 N 章 …`（編譯時寫進去的）。再補一個標題
+            # 會變成同一行印兩次 —— 只有那一行不見了才由我們補。
+            if not md.lstrip().startswith("#"):
+                parts.append(f'<h3 class="ch">第 {_esc(c.get("n"))} 章 {_esc(c.get("title"))}</h3>')
+            parts.append(_md(md, images))
     if d.get("gallery"):
         parts.append(f'<h2 class="sec">圖輯（{len(d["gallery"])}）</h2>')
         for a in d["gallery"]:

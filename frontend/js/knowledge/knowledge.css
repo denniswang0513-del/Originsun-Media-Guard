@@ -346,8 +346,11 @@
 
 /* 專案浮層（js/shared/project-pop.js）的預設皮是內部系統的深色；這一頁桌機是白底，
    手機是深藍（同 knowledge.html 的 tokens）—— 兩邊都用這一頁自己的變數重塗一次，
-   不然桌機會冒出一塊黑的（owner 2026-09-18：「全面檢查有沒有這種 rwd 配色錯誤的」）。 */
-.proj-pop { --pp-bg: var(--panel); --pp-line: var(--line); --pp-head: var(--bg-soft); --pp-head-ink: var(--sub);
+   不然桌機會冒出一塊黑的（owner 2026-09-18：「全面檢查有沒有這種 rwd 配色錯誤的」）。
+   🔴 選擇器要寫成 `body .proj-pop`：那支元件是用 `ensureStyle` 在**執行時**把自己的
+   <style> 附到 head 最後面，同分數的話它後到、它贏 —— 2026-09-19 第一版寫成
+   `.proj-pop`，桌機白底上照樣冒出一塊黑的（截圖看到才發現）。 */
+body .proj-pop { --pp-bg: var(--panel); --pp-line: var(--line); --pp-head: var(--bg-soft); --pp-head-ink: var(--sub);
     --pp-ink: var(--ink); --pp-sub: var(--sub); --pp-on: var(--soft); --pp-on-ink: var(--ink);
     --pp-toggle: var(--red); --pp-empty: var(--sub); --pp-shadow: 0 8px 24px var(--shadow); }
 
