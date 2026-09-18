@@ -337,6 +337,20 @@
 .kb .kb-bookhead .err { color: var(--danger); font-size: 12.5px; line-height: 1.5; }
 .kb .kb-bookhead #kb-tags-row { margin-top: 10px; }
 
+/* 表頭那一列：整本的 PDF ＋ 這本書掛在哪個案子（owner 2026-09-19） */
+.kb .kb-headlinks { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.kb .kb-headlinks .kb-link { font-size: 13px; }
+.kb .kb-headlinks a.kb-link { text-decoration: none; }
+.kb .kb-headlinks a.kb-link:hover { text-decoration: underline; }
+.kb .kb-info-row .v .none { color: var(--sub); }
+
+/* 專案浮層（js/shared/project-pop.js）的預設皮是內部系統的深色；這一頁桌機是白底，
+   手機是深藍（同 knowledge.html 的 tokens）—— 兩邊都用這一頁自己的變數重塗一次，
+   不然桌機會冒出一塊黑的（owner 2026-09-18：「全面檢查有沒有這種 rwd 配色錯誤的」）。 */
+.proj-pop { --pp-bg: var(--panel); --pp-line: var(--line); --pp-head: var(--bg-soft); --pp-head-ink: var(--sub);
+    --pp-ink: var(--ink); --pp-sub: var(--sub); --pp-on: var(--soft); --pp-on-ink: var(--ink);
+    --pp-toggle: var(--red); --pp-empty: var(--sub); --pp-shadow: 0 8px 24px var(--shadow); }
+
 /* 標籤一顆一顆加 */
 .kb .kb-tags-edit .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .kb .kb-tags-edit .chips .none { color: var(--sub); font-size: 12.5px; }

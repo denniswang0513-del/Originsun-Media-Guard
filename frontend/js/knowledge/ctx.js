@@ -58,6 +58,7 @@ export const S = {
     assets: [],        // 「圖輯」分頁：整本書抽出來的圖
     assetsLoading: false,
     share: null,       // 公開分享 { on, id, url, at }；null＝還沒讀到
+    projects: null,    // 「掛在哪個案子」的清單（抓過就留著，浮層每次打開都會問一次）
     assetUrls: [],     // 這一輪借出去的圖片 blob 網址（重畫前要 revoke）
     reports: [],       // 研究週報／月報的清單（§9.5）
     extendTimer: null,
@@ -71,7 +72,7 @@ export const S = {
 
 /** 跨檔呼叫表（index.js 填）：shelf → book（上傳完開書）、chat → book（重畫分頁／重抓書）。
  *  import 方向是 ctx ← shelf ← book ← index、ctx ← chat ← book；反方向的呼叫走這張表。 */
-export const nav = { openBook: null, renderPane: null, refetchBook: null, renderShelf: null };
+export const nav = { openBook: null, renderPane: null, refetchBook: null, renderShelf: null, renderBook: null };
 
 /** 主控主機不在（cloudflared 打到 NAS、或 master 關機）：路由不存在的 404／代理層的 503。
  *  自家 router 丟的 404 帶自己的 detail（如「找不到這本書」），不會被當成離線。 */

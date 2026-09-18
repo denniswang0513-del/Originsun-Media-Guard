@@ -10,7 +10,7 @@
 import { mdToHtml } from '../shared/md-lite.js';
 import { API, S, PANES, TAGS_MAX, COMPILE_POLL_MS, api, esc, errText, stageText, alive, toast, stopTimers, normBook,
          chapterList, bookTags, parseTags, statusPill, tagsHtml, figureSource } from './ctx.js';
-import { bearerHeader } from '../shared/utils.js';
+import { authDownload, bearerHeader } from '../shared/utils.js';
 import { loadShelf, refreshShelfQuietly } from './shelf.js';
 import { chatHtml, scrollChat, loadChat } from './chat.js';
 import { extendHtml, loadExtend } from './extend.js';
@@ -56,6 +56,26 @@ function _tagsRowHtml(b) {
         <button type="button" class="kb-link" data-kact="tags-edit">編輯標籤</button></div>`;
 }
 
+/** 表頭右下那一列：整本的 PDF ＋ 這本書掛在哪個案子（owner 2026-09-19 那兩句）。 */
+function _headLinksHtml(b) {
+    const proj = b.project && b.project.id ? b.project : null;
+    return `<button type="button" class="kb-link" data-kact="pdf">下載 PDF</button>
+        ${proj
+        ? `<a class="kb-link" href="/project.html?id=${encodeURIComponent(proj.id)}"
+              target="_blank" rel="noopener">案子：${esc(proj.label || proj.id)}</a>`
+        : '<button type="button" class="kb-link" data-kact="pane" data-pane="info">掛一個案子</button>'}`;
+}
+
+/** 整本的研究筆記 PDF（owner 2026-09-19：「這裡多一個 pdf 下載，讓大家可以下載資料」）。
+ *  🔴 走 authDownload —— 書是私有的，`<a href>` 送不了 Authorization。 */
+export function downloadPdf() {
+    const b = S.book;
+    if (!b) return;
+    toast('正在做 PDF，十幾秒');
+    authDownload(`${API}/${encodeURIComponent(b.id)}/pdf`,
+        `${(b.title || '書').replace(/[\\/:*?"<>|]+/g, '_')}-研究筆記.pdf`, '下載 PDF');
+}
+
 export function renderBook() {
     const b = S.book;
     const compiling = b.status === 'compiling';
@@ -78,6 +98,7 @@ export function renderBook() {
             <div class="st"><span class="stage" id="kb-stage">${compiling ? esc(stageText(b.stage)) : ''}</span></div>
             ${b.status === 'failed' && b.error ? `<div class="err" title="${esc(b.error)}">編譯失敗：${esc(String(b.error).slice(0, 80))}</div>` : ''}
             <div id="kb-tags-row">${_tagsRowHtml(b)}</div>
+            <div class="kb-headlinks">${_headLinksHtml(b)}</div>
         </div>
         <aside class="kb-side">
             <nav class="kb-tabs">${PANES.map(([k, l]) => `<button type="button" data-kact="pane" data-pane="${k}" class="${k === S.pane ? 'on' : ''}">${l}</button>`).join('')}</nav>
@@ -145,6 +166,7 @@ export function toggleSheet(on) {
         ${b.status === 'pending'
         ? '<button type="button" class="item" data-kact="attach">補上 PDF<span class="sub">這本書還沒有檔案</span></button>'
         : `<button type="button" class="item" data-kact="compile" ${compiling ? 'disabled' : ''}>${b.status === 'compiled' ? '重新讀這本書' : '讀這本書'}<span class="sub">約 10–20 分鐘</span></button>`}
+        <button type="button" class="item" data-kact="pdf">下載 PDF<span class="sub">整本的研究筆記</span></button>
         <button type="button" class="item" data-kact="rename">改名</button>
         <button type="button" class="item danger" data-kact="delete">刪除這本書</button>
       </div>`;

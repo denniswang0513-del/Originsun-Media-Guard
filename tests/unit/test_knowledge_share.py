@@ -13,7 +13,7 @@ import pytest
 
 from core import knowledge_logic as kl
 from services import knowledge_share as kshare
-from tests.unit._srcscan import func_body, repo_src
+from tests.unit._srcscan import code_only, func_body, repo_src
 
 PUBLIC_ROUTER = "routers/api_knowledge_public.py"
 SHARE = "services/knowledge_share.py"
@@ -27,7 +27,9 @@ def test_the_public_surface_is_one_small_file():
     src = repo_src(PUBLIC_ROUTER)
     routes = re.findall(r"@router\.(\w+)\(", src)
     assert set(routes) == {"get"}, "公開的那一面只能有 GET：" + str(routes)
-    assert len(routes) <= 2, "公開的端點只有兩支（那一本、那一本的圖）：" + str(routes)
+    # 2026-09-19 多了 PDF（owner：「這裡多一個 pdf 下載，讓大家可以下載資料」）。
+    # 上限往上調是有意識的決定，不是順手放寬 —— 這三支都只回**同一份 public_view**。
+    assert len(routes) <= 3, "公開的端點只有三支（那一本、那一本的圖、那一本的 PDF）：" + str(routes)
     # 只看程式碼 —— 說明文字裡提到 `_guard` 是在解釋為什麼這支要獨立，不算違規
     code = src[src.index('"""', src.index('"""') + 3) + 3:]
     assert "_guard(" not in code and "check_admin(" not in code, "這支本來就不需要登入"
@@ -118,16 +120,19 @@ def test_the_figure_endpoint_checks_the_tick_too(monkeypatch):
 def test_discussion_and_full_text_can_never_be_shared():
     """那兩樣連選項都沒有 —— 討論是私下的對話，全文是整本書。"""
     assert "chat" not in kl.SHARE_PART_KEYS and "full_text" not in kl.SHARE_PART_KEYS
-    body = func_body(repo_src(SHARE), "def public_view(")
+    # 組資料的是 `_build`（公開頁與 PDF 共用它；`public_view` 只負責找書與算勾選）
+    body = code_only(func_body(repo_src(SHARE), "def _build("))
     for name in ("read_chat", "CHAT_FILE", "FULLTEXT_FILE", "full_text"):
-        assert name not in body, "public_view 不該碰 " + name
+        assert name not in body, "_build 不該碰 " + name
 
 
 def test_every_optional_part_sits_behind_its_tick():
     """每一段都要在 `kl.shares(...)` 底下 —— 少一個 if 就是預設外洩。"""
-    body = func_body(repo_src(SHARE), "def public_view(")
+    body = func_body(repo_src(SHARE), "def _build(")
     for key in kl.SHARE_PART_KEYS:
         assert f'kl.shares(parts, "{key}")' in body, key + " 沒有檢查勾選"
+    # 而且公開那條真的是照 meta 裡的勾選算出來的，不是傳全部進去
+    assert "kl.normalize_parts(" in func_body(repo_src(SHARE), "def public_view(")
     # 書名與作者不在選項裡（一定會出去），所以不用檢查
     assert "out[\"title\"]" not in body or True
 
@@ -175,7 +180,9 @@ def test_the_public_page_has_no_way_back_in():
     for h in hrefs:
         if h.startswith(("${", "' +", '" +')):
             continue      # 程式組出來的：那一格只放 /^https?:\/\// 過關的外部網址（下面另外釘）
-        assert h.startswith(("http", "/img/")), "公開頁不該連到 " + h
+        # `/api/v1/knowledge/public/…` 是公開那一面自己的端點（PDF 下載）——
+        # 它跟這一頁看到的是同一份資料，不是「連回系統的其他地方」。
+        assert h.startswith(("http", "/img/", "/api/v1/knowledge/public/")), "公開頁不該連到 " + h
     assert r"/^https?:\/\//i.test(it.url" in src, "外部連結要先驗過協定才敢放"
     # 註解拿掉再看 —— 說明文字裡提到 knowledge.html 是在解釋色票照它做，不是連過去
     code = re.sub(r"<!--.*?-->", "", src, flags=re.S)

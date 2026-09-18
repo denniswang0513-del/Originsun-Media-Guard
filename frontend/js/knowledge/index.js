@@ -14,7 +14,7 @@
 import { S, hooks, nav, stopTimers } from './ctx.js';
 import { loadShelf, renderShelf, setTag, refreshShelfQuietly, createPending } from './shelf.js';
 import {
-    openBook, renderPane, refetchBook, switchPane, editTags, saveTags, addTags, removeTag, saveDoc, openChapter, compile, rename, remove, toggleSheet, jumpToSection,
+    openBook, renderBook, renderPane, refetchBook, switchPane, editTags, saveTags, addTags, removeTag, saveDoc, openChapter, compile, rename, remove, toggleSheet, jumpToSection, downloadPdf,
 } from './book.js';
 import { send, saveConclusion, openConclusionEdit, cancelConclusionEdit, conclude } from './chat.js';
 import { loadReports, openReport, openFromHash, leaveReports } from './report.js';
@@ -25,6 +25,7 @@ import { runExtend, collectOne, rateExtend, toggleWatch, toggleWatchAll,
 export async function mountKnowledge({ host, fetch, toast }) {
     hooks.host = host; hooks.fetch = fetch; hooks.toast = toast;
     nav.openBook = openBook; nav.renderPane = renderPane; nav.refetchBook = refetchBook;
+    nav.renderBook = renderBook;
     nav.renderShelf = renderShelf;
     stopTimers();
     S.root = document.createElement('div');
@@ -107,6 +108,7 @@ function _onClick(ev) {
     if (act === 'chapter-back') { S.chapter = null; renderPane(); return; }
     if (act === 'attach') { toggleSheet(false); const f = S.root.querySelector('#kb-book-file'); if (f) f.click(); return; }
     if (act === 'compile') { toggleSheet(false); compile(); return; }
+    if (act === 'pdf') { toggleSheet(false); downloadPdf(); return; }
     if (act === 'rename') { toggleSheet(false); rename(); return; }
     if (act === 'delete') { toggleSheet(false); remove(); }
 }

@@ -1224,6 +1224,34 @@ def normalize_info(raw: Any) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# 這本書掛在哪一個案子（owner 2026-09-19：「這裡也要可以連結現有的專案列表」）
+#
+# 存在 `meta.project` = `{id, label}`。**label 是拍下來的那一刻的字**，不是每次去查 ——
+# 書在知識庫這邊，案子在 CRM 的資料庫那邊；NAS 與離線的機器讀得到書卻讀不到 DB，
+# 每次都要查的話那個連結會在一半的機器上是空白的。案名改了就下次重選一次。
+#
+# 🔴 清單怎麼列**不在這裡** —— owner 2026-09-19：「列表的列出來的方式，和工作時數
+#    填寫的規則相同」，那份規則住在 `services/project_picker.list_options`（工時補登與
+#    備份頁共用的同一支）。這裡只管存下來的形狀。
+# ══════════════════════════════════════════════════════════════════════════
+
+#: 專案 id 的樣子（CRM 是 uuid 字串）。白名單比「什麼都收」安全：這個值會被拼進網址。
+PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+PROJECT_LABEL_MAX = 120
+
+
+def normalize_project(raw: Any) -> dict:
+    """`{id, label}`；不合格式、或送 `None`／空的都回 `{}`（＝沒有掛案子）。"""
+    if not isinstance(raw, dict):
+        return {}
+    pid = str(raw.get("id") or "").strip()
+    if not PROJECT_ID_RE.match(pid):
+        return {}
+    label = " ".join(str(raw.get("label") or "").split())[:PROJECT_LABEL_MAX].strip()
+    return {"id": pid, "label": label or pid}
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # 公開分享要放哪些東西（§9.9；owner 2026-09-19：「公開分享的內容讓我勾選」）
 #
 # 書名與作者**一定**會出去 —— 那是這份分享在講哪一本書，不能匿名。其餘全部由他勾。

@@ -45,6 +45,8 @@ class BookPatch(BaseModel):
     focus: Optional[str] = Field(default=None, max_length=FOCUS_MAX * 5)
     # 書籍基本資訊（§9.8）：白名單與長度在 knowledge_logic.normalize_info，這裡只擋離譜的整包大小
     info: Optional[dict] = None
+    # 掛在哪一個案子（§9.11）：`{id, label}`，送 `{}` 就是取消掛案。形狀在 knowledge_logic.normalize_project
+    project: Optional[dict] = None
 
 
 class CompilePayload(BaseModel):
@@ -235,6 +237,18 @@ async def share_put(book_id: str, body: SharePayload, request: Request):
     return _book_or_404(kshare.set_share, book_id, bool(body.on), body.parts)
 
 
+@router.get("/{book_id}/pdf")
+async def book_pdf(book_id: str, request: Request):
+    """整本的研究筆記 PDF（owner 2026-09-19：「這裡多一個 pdf 下載，讓大家可以下載資料」）。
+
+    他自己的那一份是整本 —— 東西都是他的，沒有勾選那回事。公開頁那份在
+    `api_knowledge_public.py`，只印他勾的那幾項。
+    """
+    _guard(request)
+    from services import knowledge_pdf as kpdf
+    return await kpdf.pdf_response(book_id, _book_or_404(kshare.full_view, book_id))
+
+
 @router.get("/{book_id}")
 async def get_book(book_id: str, request: Request):
     _guard(request)
@@ -246,7 +260,8 @@ async def patch_book(book_id: str, body: BookPatch, request: Request):
     """`{title?, author?, tags?}`：沒帶的欄位不動（Optional＋None，舊分頁的 PUT 不會洗掉別人剛填的）。"""
     _guard(request)
     return _book_or_404(ks.update_book, book_id, title=body.title, author=body.author,
-                        tags=body.tags, watch=body.watch, focus=body.focus, info=body.info)
+                        tags=body.tags, watch=body.watch, focus=body.focus, info=body.info,
+                        project=body.project)
 
 
 @router.delete("/{book_id}")

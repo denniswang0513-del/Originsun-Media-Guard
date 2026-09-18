@@ -39,6 +39,20 @@ async def shared_book(share_id: str):
     return data
 
 
+@router.get("/{share_id}/pdf")
+async def shared_pdf(share_id: str):
+    """收到連結的人也可以把資料帶走（owner 2026-09-19：「讓大家可以下載資料」）。
+
+    🔴 印的是 `public_view` 回的那一包 —— **他沒勾的東西不會出現在 PDF 裡**。
+    圖只有勾了「書裡的圖」才會被內嵌（沒勾的話 `public_view` 連 gallery 鍵都沒有）。
+    """
+    data = kshare.public_view(share_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="這個分享連結不存在或已經關閉")
+    from services import knowledge_pdf as kpdf
+    return await kpdf.pdf_response(kshare.book_of(share_id), data)
+
+
 @router.get("/{share_id}/assets/{name}")
 async def shared_asset(share_id: str, name: str):
     """公開頁的圖。**只有勾了「書裡的圖」才給**（`knowledge_share.public_asset` 把關）。

@@ -89,17 +89,38 @@ def shared_parts(book_id: str) -> list:
     return share_of(book_id)["parts"]
 
 
+def book_of(share_id: str) -> Optional[str]:
+    """分享 id → 書 id。PDF 那支要拿它去讀圖檔（圖要內嵌進 PDF）。"""
+    return _find_book(share_id)
+
+
+def full_view(book_id: str) -> dict:
+    """整本（他自己的書頁與他自己的 PDF 用）。沒有勾選這回事 —— 東西都是他的。
+
+    討論與全文一樣不在裡面（`_build` 根本沒有那兩個分支）。
+    """
+    return _build(book_id, list(kl.SHARE_PART_KEYS))
+
+
 def public_view(share_id: str) -> Optional[dict]:
     """公開頁要的那一包。查不到就回 None（端點一律回同一句 404）。
 
     🔴 **沒勾的項目連鍵都不會出現**。書名與作者一定在（那是在講哪一本書）。
-    討論與全文任何情況都不出去 —— 這裡沒有那兩個分支。
     """
     book_id = _find_book(share_id)
     if not book_id:
         return None
     meta = ks.read_meta(book_id)
-    parts = kl.normalize_parts((meta.get("share") or {}).get("parts"))
+    return _build(book_id, kl.normalize_parts((meta.get("share") or {}).get("parts")), meta=meta)
+
+
+def _build(book_id: str, parts: list, meta: Optional[dict] = None) -> dict:
+    """照 `parts` 組一本書的內容。公開頁與 PDF 都走這裡，兩邊看到的東西才會一樣。
+
+    🔴 **沒勾的項目連鍵都不會出現**。討論（chat.json）與全文（full_text.txt）
+    任何情況都不出去 —— 這裡沒有那兩個分支，也不要加。
+    """
+    meta = meta if meta is not None else ks.read_meta(book_id)
     out = {
         "title": meta.get("title") or "",
         "author": meta.get("author") or "",

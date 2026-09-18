@@ -412,6 +412,7 @@ def _summary(meta: dict, book_id: str) -> dict:
         "watch": bool(meta.get("watch")),
         "focus": meta.get("focus") or "",
         "info": meta.get("info") or {},
+        "project": kl.normalize_project(meta.get("project")),
         "has_extend": _extend_counts(d)[0] > 0,
         "extend_new": _extend_counts(d)[1],
         "stage": _stage.get(book_id, ""),
@@ -485,8 +486,12 @@ def read_chapter(book_id: str, n: int) -> dict:
 
 def update_book(book_id: str, *, title: Optional[str] = None, author: Optional[str] = None,
                 tags: Optional[list] = None, watch: Optional[bool] = None,
-                focus: Optional[str] = None, info: Optional[dict] = None) -> dict:
+                focus: Optional[str] = None, info: Optional[dict] = None,
+                project: Optional[dict] = None) -> dict:
     fields = {}
+    if project is not None:
+        # 掛在哪一個案子（§9.11）。送 `{}` 就是取消掛案 —— 跟 info 一樣整包換掉。
+        fields["project"] = kl.normalize_project(project)
     if info is not None:
         fields["info"] = kl.normalize_info(info)      # 書籍基本資訊（§9.8；整包換掉，不逐鍵合併）
     if focus is not None:

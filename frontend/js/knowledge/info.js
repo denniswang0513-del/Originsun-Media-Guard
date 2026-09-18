@@ -10,7 +10,8 @@
  *
  * 只 import ctx（葉節點）；同 chat.js／extend.js 的規矩。
  */
-import { S, api, esc, errText, alive, toast } from './ctx.js';
+import { S, nav, hooks, api, esc, errText, alive, toast } from './ctx.js';
+import { attachProjectPop } from '../shared/project-pop.js';
 
 /** `[鍵, 顯示的標籤, 提示]`，順序就是畫面上的順序（同後端 INFO_FIELDS 的順序）。 */
 export const INFO_FIELDS = [
@@ -27,6 +28,43 @@ export const INFO_FIELDS = [
 ];
 
 const _val = (b, k) => ((b && b.info) || {})[k] || '';
+
+/**
+ * 「掛在哪個案子」（owner 2026-09-19：「這裡也要可以連結現有的專案列表」）。
+ *
+ * 🔴 清單怎麼列與怎麼挑，兩邊都跟工時補登的那一格**同一支** —— owner 同一天說
+ *    「列表的列出來的方式，和工作時數填寫的規則相同」：
+ *      · 列法：後端 `services/project_picker.list_options`（不篩狀態、母私帳只列一個、
+ *        最近有動的排前面、label＝年份 客戶 案名）
+ *      · 挑法：`js/shared/project-pop.js` 那個打字浮層（進行中展開／已結案收著）
+ *    自己再寫一個下拉的話，兩邊會慢慢長歪。
+ */
+function _projectRowHtml(b) {
+    const proj = (b && b.project) || {};
+    if (!S.infoEdit) {
+        return `<div class="kb-info-row"><span class="k">案子</span><span class="v">${proj.id
+            ? `<a href="/project.html?id=${esc(proj.id)}" target="_blank" rel="noopener">${esc(proj.label || proj.id)}</a>`
+            : '<span class="none">還沒掛案子</span>'}</span></div>`;
+    }
+    return `<label class="kb-info-row edit"><span class="k">案子</span>
+        <span class="v"><input type="text" class="kb-input" id="kb-proj" data-proj-pick
+            value="${esc(proj.label || '')}" data-pid="${esc(proj.id || '')}" data-pname="${esc(proj.label || '')}"
+            placeholder="打幾個字找案子（清空就是不掛）"></span></label>`;
+}
+
+/** 浮層每次打開都問一次；抓過就留著（同一頁不會一直打）。DB 不通就是空清單。
+ *  🔴 這支**不在知識庫的 API 底下**（知識庫那支 router 不碰 DB）—— 它是專案清單
+ *  通用的那一支，備份頁與工時補登用的是同一份規則。 */
+async function _projectOptions() {
+    if (S.projects) return S.projects;
+    try {
+        const r = await hooks.fetch('/api/v1/projects/picker');
+        S.projects = (r && r.projects) || [];
+    } catch (_) {
+        S.projects = [];
+    }
+    return S.projects;
+}
 
 function _rowHtml(b, [key, label, hint]) {
     const v = _val(b, key);
@@ -59,6 +97,7 @@ export function infoHtml() {
         b.uploaded_at ? `加入於 ${esc(String(b.uploaded_at).slice(0, 10))}` : '',
     ].filter(Boolean).join('　');
     return `${head}
+        ${_projectRowHtml(b)}
         ${rows || (S.infoEdit ? '' : '<div class="kb-empty">還沒填。按「編輯」把這本書的出版資訊記下來。</div>')}
         ${facts ? `<div class="note">${facts}（自動帶的，改不了）</div>` : ''}
         ${_shareHtml()}`;
@@ -164,6 +203,8 @@ export function editInfo(on) {
     S.infoEdit = !!on;
     const pane = S.root && S.root.querySelector('#kb-pane');
     if (pane) pane.innerHTML = infoHtml();
+    // 委派掛在 S.root 上，重畫不用重掛（attachProjectPop 自己記得掛過了）
+    if (S.root) attachProjectPop(S.root, { options: _projectOptions });
 }
 
 export async function saveInfo() {
@@ -174,19 +215,28 @@ export async function saveInfo() {
         const v = el.value.trim();
         if (v) info[el.dataset.info] = v;
     }
+    // 案子：`data-pid` 是浮層選到的那一筆；把字清掉（或手打改過）就是不掛案子
+    const el = S.root.querySelector('#kb-proj');
+    const pid = el && el.value.trim() ? (el.dataset.pid || '') : '';
+    const project = pid ? { id: pid, label: el.value.trim() } : {};
     const before = S.book.info || {};
+    const beforeProj = S.book.project || {};
     S.book.info = info;
+    S.book.project = project;
     S.infoEdit = false;
     editInfo(false);
     try {
-        const b = await api(`/${encodeURIComponent(bookId)}`, { method: 'PUT', body: { info } });
+        const b = await api(`/${encodeURIComponent(bookId)}`, { method: 'PUT', body: { info, project } });
         if (!alive() || !S.book || S.book.id !== bookId) return;
         if (b && b.info) S.book.info = b.info;      // 後端會截長、丟掉不合規的連結
+        S.book.project = (b && b.project) || {};
         editInfo(false);
+        if (typeof nav.renderBook === 'function') nav.renderBook();   // 表頭那一列的「案子：…」跟著換
         toast('已儲存');
     } catch (e) {
         if (!alive() || !S.book || S.book.id !== bookId) return;
         S.book.info = before;
+        S.book.project = beforeProj;
         editInfo(false);
         toast('存不起來：' + errText(e), true);
     }

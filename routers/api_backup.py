@@ -149,6 +149,45 @@ async def list_backup_roots(request: Request):
         return {"status": "db_offline", "projects": [], "detail": str(e)[:200]}
 
 
+@router.get("/api/v1/projects/picker")
+async def list_project_options(request: Request):
+    """「選一個案子」的**通用**清單 —— 跟上面那支、跟專案工時補登是同一份
+    （`services/project_picker.list_options`：不篩狀態、母私帳只列一個、最近有動的排前面、
+    `label`＝年份 客戶 案名、`closed` 給前端分「進行中／已結案」兩段）。
+
+    第一個呼叫端是知識庫的「這本書掛在哪個案子」（owner 2026-09-19：「這裡也要可以連結
+    現有的專案列表」「列表的列出來的方式，和工作時數填寫的規則相同」）。
+
+    🔴 為什麼不開在 `routers/api_knowledge.py`：那支 router 有「不碰 DB、不碰 core.ledger」
+    的不變量（書住在 D:\，跟 Postgres 沒關係；tests/unit/test_knowledge_base.py 釘著）。
+    專案清單對外的口本來就在這個檔，第二個呼叫端就放第二支，不要在知識庫那邊複製一份。
+
+    跟上面那支的兩個差別，都是**收緊**不是放寬：
+      · 不帶備份三根（那是備份頁的事），只有畫面上要顯示的那幾格。
+      · 私帳案照 `core.ledger.hide_mine_projects` 決定給不給看（沒有 mine scope 的人
+        看不到，同 owner 2026-08-28「連專案都看不到」）。上面那支的例外是為了備份
+        **實體資料夾**才成立的，不會自動延伸到別的呼叫端。
+    """
+    check_lan_or_logged_in(request)
+    factory = await _factory()
+    if not factory:
+        return {"status": "db_offline", "projects": []}
+    try:
+        from core.ledger import MINE, hide_mine_projects  # type: ignore
+        from services.project_picker import list_options  # type: ignore
+        async with factory() as session:
+            opts = await list_options(session, extra=("entity",))
+        hide = hide_mine_projects(request)
+        rows = [o for o in opts if not (hide and o.get("entity") == MINE)]
+        # 白名單投影（同 _picker_view 的理由）：寫死這幾格，以後 crm_projects 加欄位不會跟著漏
+        return {"status": "ok", "projects": [
+            {k: o[k] for k in ("id", "name", "client", "year", "closed", "label")}
+            for o in rows[:_PROJECTION_LIMIT]]}
+    except Exception as e:
+        # 讀不到清單不該讓呼叫端整頁壞掉（同上面那支）
+        return {"status": "db_offline", "projects": [], "detail": str(e)[:200]}
+
+
 @router.get("/api/v1/projects/backup-roots/{project_id}")
 async def get_backup_roots(project_id: str, request: Request):
     check_lan_or_logged_in(request)

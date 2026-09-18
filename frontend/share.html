@@ -52,6 +52,11 @@
   .head .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
   .head .tags i { font-style: normal; font-size: 12px; padding: 2px 10px; border-radius: 999px;
     background: var(--soft); color: var(--sub); }
+  .head .dl { margin-top: 12px; }
+  .head .dl a { display: inline-block; border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px 14px; min-height: 38px; font-size: 13px; color: var(--ink); background: var(--panel); }
+  .head .dl a:hover { border-color: var(--red); color: var(--red); }
+  .head .dl .w { color: var(--sub); font-size: 12px; margin-left: 10px; }
 
   nav { position: sticky; top: 62px; display: flex; flex-direction: column; gap: 2px; }
   nav button { text-align: left; background: none; border: 0; border-left: 2px solid transparent;
@@ -80,8 +85,26 @@
   .md li { margin: 3px 0; }
   .md p { margin: 8px 0; }
   .md code { background: var(--soft); border-radius: 4px; padding: 0 4px; font-size: 13px; }
-  .chap { margin-bottom: 26px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
-  .chap:last-child { border-bottom: 0; }
+  /* 表格：窄螢幕自己橫捲，不要把整頁撐破 */
+  .tw { overflow-x: auto; margin: 12px 0; }
+  .md table { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+  .md th, .md td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  .md th { background: var(--soft); font-weight: 500; white-space: nowrap; }
+  .md figure { margin: 14px 0; }
+  .md figcaption { margin-top: 5px; }
+
+  /* 章節：清單 → 單章 */
+  ul.chlist { list-style: none; margin: 0; padding: 0; }
+  ul.chlist button { display: flex; width: 100%; align-items: baseline; gap: 10px; text-align: left;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 11px 14px;
+    margin-bottom: 8px; min-height: 44px; font-size: 14px; font-family: inherit; color: var(--ink); cursor: pointer; }
+  ul.chlist button:hover { border-color: var(--red); }
+  ul.chlist .t { flex: 1; min-width: 0; }
+  ul.chlist .p { flex: none; color: var(--sub); font-size: 12px; }
+  .chnav { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+  .chnav button { background: none; border: 0; color: var(--red); font-size: 13.5px; font-family: inherit;
+    cursor: pointer; padding: 6px 0; min-height: 40px; }
+  .chnav .now { color: var(--sub); font-size: 13px; }
 
   figure { margin: 0 0 22px; }
   figure img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
@@ -111,7 +134,7 @@
     .head h1 { font-size: 18px; }
   }
   @media print {
-    .bar, nav { display: none; }
+    .bar, nav, .head .dl { display: none; }
     .wrap { display: block; }
     ol.items li, figure { break-inside: avoid; }
   }
@@ -133,21 +156,56 @@ const inline = (s) => s
   .replace(/`([^`]+)`/g, "<code>$1</code>")
   .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 
-/** 最小的 markdown（標題／粗體／清單／段落）。先整段 esc，所以只會產出我們自己寫的標籤。 */
-function md(text) {
+const isSep = (l) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
+const cells = (l) => {
+  let t = l.trim();
+  if (t.startsWith("|")) t = t.slice(1);
+  if (t.endsWith("|")) t = t.slice(0, -1);
+  return t.split("|").map((c) => c.trim());
+};
+
+/** markdown → HTML（標題／粗體／行內 code／清單／**表格**／**圖片**／段落）。
+ *  能力對齊他自己頁面用的 js/shared/md-lite.js —— 章節筆記裡有表格，少了就整片變文字。
+ *  先整段 esc，所以只會產出我們自己寫的標籤。 */
+function md(text, id, withImages) {
   const lines = esc(text || "").replace(/\r\n?/g, "\n").split("\n");
   const out = [];
-  let ul = false;
+  let i = 0, ul = false;
   const closeUl = () => { if (ul) { out.push("</ul>"); ul = false; } };
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) { closeUl(); continue; }
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (!line) { closeUl(); i += 1; continue; }
+    // 整行就是一張圖：`![說明](assets/pNNN-k.jpg)`
+    const img = /^!\[([^\]]*)\]\((assets\/[A-Za-z0-9._-]+)\)$/.exec(line);
+    if (img) {
+      closeUl(); i += 1;
+      if (!withImages) continue;      // 沒勾「書裡的圖」就整張不放（那支端點也會擋）
+      out.push('<figure><img src="/api/v1/knowledge/public/' + encodeURIComponent(id) + "/"
+        + img[2] + '" alt="' + img[1] + '" loading="lazy">'
+        + (img[1] ? "<figcaption>" + img[1] + "</figcaption>" : "") + "</figure>");
+      continue;
+    }
     const h = /^(#{1,4})\s+(.+)$/.exec(line);
-    if (h) { closeUl(); const n = Math.min(h[1].length + 1, 4); out.push("<h" + n + ">" + inline(h[2]) + "</h" + n + ">"); continue; }
+    if (h) { closeUl(); const n = Math.min(h[1].length + 1, 4); out.push("<h" + n + ">" + inline(h[2]) + "</h" + n + ">"); i += 1; continue; }
+    // 表格：這一列有 |，下一列是 --- 分隔列
+    if (line.includes("|") && i + 1 < lines.length && isSep(lines[i + 1])) {
+      closeUl();
+      const head = cells(line);
+      const rows = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) { rows.push(cells(lines[i])); i += 1; }
+      out.push('<div class="tw"><table><thead><tr>'
+        + head.map((c) => "<th>" + inline(c) + "</th>").join("")
+        + "</tr></thead><tbody>"
+        + rows.map((r) => "<tr>" + head.map((_, k) => "<td>" + inline(r[k] || "") + "</td>").join("") + "</tr>").join("")
+        + "</tbody></table></div>");
+      continue;
+    }
     const li = /^[-*]\s+(.+)$/.exec(line);
-    if (li) { if (!ul) { out.push("<ul>"); ul = true; } out.push("<li>" + inline(li[1]) + "</li>"); continue; }
+    if (li) { if (!ul) { out.push("<ul>"); ul = true; } out.push("<li>" + inline(li[1]) + "</li>"); i += 1; continue; }
     closeUl();
     out.push("<p>" + inline(line) + "</p>");
+    i += 1;
   }
   closeUl();
   return out.join("");
@@ -199,6 +257,7 @@ function figuresHtml(d, id) {
 /** 有哪些分頁可以看 —— 只有他勾了而且真的有內容的才出現。 */
 function panesOf(d, id) {
   const p = [];
+  const pics = has(d, "gallery");      // 沒勾「書裡的圖」就連文章裡的圖也不放
   const add = (key, label, n, note, body) => { if (body) p.push({ key, label, n, note, body }); };
   if (has(d, "extend")) {
     const rows = d.extend || [];
@@ -207,18 +266,19 @@ function panesOf(d, id) {
       rows.length ? '<ol class="items">' + rows.map(extendRow).join("") + "</ol>" : "");
   }
   if (has(d, "conclusion") && d.conclusion) {
-    add("conclusion", "結論", 0, "讀完這本書之後認同、打算照著做的原則。", '<div class="md">' + md(d.conclusion) + "</div>");
+    add("conclusion", "結論", 0, "讀完這本書之後認同、打算照著做的原則。", '<div class="md">' + md(d.conclusion, id, pics) + "</div>");
   }
   if (has(d, "notes") && d.notes) {
-    add("notes", "筆記", 0, "", '<div class="md">' + md(d.notes) + "</div>");
+    add("notes", "筆記", 0, "", '<div class="md">' + md(d.notes, id, pics) + "</div>");
   }
   if (has(d, "skill") && d.skill) {
     add("skill", "骨架", 0, "這本書的核心心智模型與決策規則。以下是整理的筆記，不是原文。",
-      '<div class="md">' + md(d.skill) + (d.cheatsheet ? md(d.cheatsheet) : "") + "</div>");
+      '<div class="md">' + md(d.skill, id, pics) + (d.cheatsheet ? md(d.cheatsheet, id, pics) : "") + "</div>");
   }
   if (has(d, "chapters") && (d.chapters || []).length) {
-    add("chapters", "章節重點", d.chapters.length, "以下是針對原書內容整理的筆記，不是原文。",
-      d.chapters.map((c) => '<div class="chap"><div class="md">' + md(c.md) + "</div></div>").join(""));
+    // 一章一章讀（owner 2026-09-19：「章節重點也要可以分章節閱讀」）——
+    // 清單 → 單章 → 返回，跟他自己的書頁一樣。
+    add("chapters", "章節重點", d.chapters.length, "以下是針對原書內容整理的筆記，不是原文。", "CHAPTERS");
   }
   if (has(d, "gallery") && (d.gallery || []).length) {
     add("gallery", "圖輯", d.gallery.length, "從原書抽出來的圖，括號是頁數。僅供閱讀筆記參考。", figuresHtml(d, id));
@@ -228,17 +288,37 @@ function panesOf(d, id) {
 
 let STATE = null;
 
-function show(key) {
+/** 章節分頁：沒帶章號就列清單，帶了就只看那一章。 */
+function chaptersBody(n) {
+  const { data, id } = STATE;
+  const chs = data.chapters || [];
+  const pics = has(data, "gallery");
+  if (!n) {
+    return '<ul class="chlist">' + chs.map((c) => '<li><button type="button" data-ch="' + c.n + '">'
+      + "<span class=\"t\">第 " + c.n + " 章 " + esc(c.title || "") + "</span>"
+      + (c.start_page ? '<span class="p">p.' + c.start_page + "–" + c.end_page + "</span>" : "")
+      + "</button></li>").join("") + "</ul>";
+  }
+  const c = chs.find((x) => String(x.n) === String(n));
+  if (!c) return chaptersBody(0);
+  return '<div class="chnav"><button type="button" data-ch="0">← 章節清單</button>'
+    + '<span class="now">第 ' + c.n + " 章 " + esc(c.title || "") + "</span></div>"
+    + '<div class="md">' + md(c.md, id, pics) + "</div>";
+}
+
+function show(key, sub) {
   const { panes } = STATE;
   const pane = panes.find((p) => p.key === key) || panes[0];
   if (!pane) return;
   STATE.key = pane.key;
-  for (const b of host.querySelectorAll("nav button")) b.classList.toggle("on", b.dataset.k === pane.key);
+  for (const b of host.querySelectorAll("nav button[data-k]")) b.classList.toggle("on", b.dataset.k === pane.key);
   const box = host.querySelector(".pane");
-  box.innerHTML = "<h2>" + esc(pane.label) + "</h2>"
-    + (pane.note ? '<p class="note">' + esc(pane.note) + "</p>" : "") + pane.body;
-  const want = "#" + STATE.id + "/" + pane.key;
+  const body = pane.body === "CHAPTERS" ? chaptersBody(sub) : pane.body;
+  box.innerHTML = (pane.key === "chapters" && sub ? "" : "<h2>" + esc(pane.label) + "</h2>"
+    + (pane.note ? '<p class="note">' + esc(pane.note) + "</p>" : "")) + body;
+  const want = "#" + STATE.id + "/" + pane.key + (sub ? "/" + sub : "");
   if (location.hash !== want) history.replaceState(null, "", want);
+  window.scrollTo(0, 0);
 }
 
 function render(d, id) {
@@ -246,7 +326,7 @@ function render(d, id) {
   const facts = ["publisher", "published", "translator", "edition", "isbn"]
     .map((k) => info[k]).filter(Boolean).map((v) => "<span>" + esc(v) + "</span>").join("");
   const panes = panesOf(d, id);
-  STATE = { id, panes, key: "" };
+  STATE = { id, panes, key: "", data: d };
   document.title = (d.title || "研究筆記") + "｜Knowledge";
   document.getElementById("bar-tail").textContent = d.shared_at ? "分享於 " + String(d.shared_at).slice(0, 10) : "";
 
@@ -257,6 +337,10 @@ function render(d, id) {
       + (facts ? '<div class="facts">' + facts + "</div>" : "")
       + (has(d, "tags") && (d.tags || []).length
         ? '<div class="tags">' + d.tags.map((t) => "<i>" + esc(t) + "</i>").join("") + "</div>" : "")
+      // 下載一份帶走（owner 2026-09-19：「這裡多一個 pdf 下載，讓大家可以下載資料」）。
+      // 這一頁不帶 token，所以是普通的連結；後端印的內容跟這一頁一樣，沒勾的不會在裡面。
+      + '<div class="dl"><a href="/api/v1/knowledge/public/' + encodeURIComponent(id)
+        + '/pdf" download>下載這份研究（PDF）</a><span class="w">要做十幾秒</span></div>'
     + "</div>"
     + (panes.length
       ? "<nav>" + panes.map((p) => '<button type="button" data-k="' + p.key + '">' + esc(p.label)
@@ -268,11 +352,14 @@ function render(d, id) {
     + "</div>";
 
   host.addEventListener("click", (ev) => {
-    const b = ev.target.closest("nav button");
-    if (b) show(b.dataset.k);
+    const nb = ev.target.closest("nav button[data-k]");
+    if (nb) { show(nb.dataset.k); return; }
+    const cb = ev.target.closest("[data-ch]");
+    if (cb) show("chapters", cb.dataset.ch === "0" ? "" : cb.dataset.ch);
   });
-  const want = (location.hash.split("/")[1] || "").trim();
-  show(panes.some((p) => p.key === want) ? want : (panes[0] && panes[0].key));
+  const bits = location.hash.split("/");
+  const want = (bits[1] || "").trim();
+  show(panes.some((p) => p.key === want) ? want : (panes[0] && panes[0].key), (bits[2] || "").trim());
 }
 
 (async () => {

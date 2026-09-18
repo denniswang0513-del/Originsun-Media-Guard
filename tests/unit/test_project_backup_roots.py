@@ -12,7 +12,7 @@ import types
 from core.drive_map import to_canonical
 import pytest
 
-from tests.unit._srcscan import js_code_only, repo_src
+from tests.unit._srcscan import func_body, js_code_only, repo_src
 from routers.api_backup import _root_view
 from routers.crm.projects import BACKUP_ROOT_FIELDS, normalize_backup_roots
 
@@ -118,11 +118,16 @@ class TestProjectionVisibility:
     def test_mine_projects_are_listed_and_selectable(self):
         """owner 2026-09-10 拍板：私帳的案子一樣要備份，選不到等於功能對它失效。
         這是對 2026-08-28「連專案都看不到」的**局部例外**，只在這支投影成立 ——
-        成立的前提是這支不帶錢（見 test_money_never_leaks）。"""
+        成立的前提是這支不帶錢（見 test_money_never_leaks）。
+
+        🔴 斷言指名 `list_backup_roots` 而不是整個檔：2026-09-19 這個檔多了一支通用的
+        `/api/v1/projects/picker`（知識庫的「掛在哪個案子」用），**那支有** hide_mine_projects
+        —— 例外只在備份三根這一支成立，不會自動延伸給下一個呼叫端。"""
         src = self._src()
-        assert "hide_mine_projects" not in src
-        assert 'CrmProject.entity != "mine"' not in src
-        assert "owner 2026-09-10 明確拍板" in src, "例外要留得下理由，否則下次會被當 bug 修掉"
+        body = func_body(src, "async def list_backup_roots(")
+        assert "hide_mine_projects" not in body
+        assert 'CrmProject.entity != "mine"' not in body
+        assert "owner 2026-09-10 明確拍板" in body, "例外要留得下理由，否則下次會被當 bug 修掉"
 
     def test_the_guard_is_lan_not_the_crm_module_key(self):
         """備檔電腦沒人登入 —— 用 crm_projects 模組守它等於鎖死備份頁。"""
