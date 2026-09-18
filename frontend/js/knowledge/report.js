@@ -13,6 +13,10 @@ import { mdToHtml } from '../shared/md-lite.js';
 import { S, nav, api, esc, errText, alive, toast } from './ctx.js';
 
 const KIND_LABEL = { weekly: '週報', monthly: '月報' };
+/** 正在畫的那份報告 id。openReport 自己設 location.hash 也會觸發 index.js 的 hashchange 監聽
+ *  （那時 S.book 已經是 null）→ openFromHash → 又 openReport 同一份 → 抓兩次、畫兩次
+ *  （2026-09-19 /polish BUG-11）。看到同一份就不再開；回清單／回書架時清掉。 */
+let _open = '';
 
 function _shell(inner) {
     S.root.innerHTML = `
@@ -39,6 +43,7 @@ export function renderReports() {
 }
 
 export async function loadReports() {
+    _open = '';
     if (location.hash.startsWith('#report/')) location.hash = '';
     try {
         S.reports = await api('/reports');
@@ -55,6 +60,7 @@ export async function openReport(id) {
         const d = await api(`/reports/${encodeURIComponent(id)}`);
         if (!alive()) return;
         S.book = null; S.chapter = null;
+        _open = id;
         location.hash = '#report/' + id;
         _shell(`<div class="kb-report kb-md">${mdToHtml(d.md || '')}</div>
             <button type="button" class="kb-totop" data-kact="to-top" aria-label="回到頂端">↑</button>`);
@@ -69,12 +75,14 @@ export async function openReport(id) {
 export function openFromHash() {
     const m = /^#report\/([A-Za-z0-9-]+)$/.exec(location.hash || '');
     if (!m) return false;
+    if (m[1] === _open) return true;        // 就是正在畫的這份（自己設 hash 觸發的那一下）
     openReport(m[1]);
     return true;
 }
 
 /** 從報告回書架時把 hash 清掉，不然重新整理又跳回報告。 */
 export function leaveReports() {
+    _open = '';
     if (location.hash.startsWith('#report/')) location.hash = '';
     if (nav.renderShelf) nav.renderShelf();
 }

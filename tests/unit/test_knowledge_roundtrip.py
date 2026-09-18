@@ -411,3 +411,18 @@ def test_public_share_endpoints_read_files_off_the_event_loop(kb, public_client,
 async def _fake_pdf_response(book_id, d):
     from fastapi.responses import JSONResponse
     return JSONResponse({"ok": True, "title": d.get("title")})
+
+
+def test_opening_a_report_does_not_fetch_it_twice_via_hashchange():
+    """BUG-11：openReport 先把 S.book 清成 null、再設 location.hash → index.js 的 hashchange 監聽
+    看到 !S.book 就 openFromHash → 又 openReport(id) → 同一份 fetch＋畫兩次。
+    要求：正在畫的那份 id 記下來，hashchange 回頭問到同一份就不再開。"""
+    from tests.unit._srcscan import js_code_only, js_func_body, repo_src
+    js = js_code_only(repo_src("frontend/js/knowledge/report.js"))
+    open_body = js_func_body(js, "export async function openReport(")
+    hash_body = js_func_body(js, "export function openFromHash(")
+    assert "_open = " in open_body, "openReport 要記住正在畫哪一份"
+    guard, _, rest = hash_body.partition("openReport(")
+    assert "=== _open" in guard and "return" in guard, "同一份已經開著 → 不再抓（判斷要在 openReport 之前）"
+    assert "_open = ''" in js_func_body(js, "export function leaveReports(") or \
+        "_open = ''" in js_func_body(js, "export async function loadReports("), "回書架／回清單要清掉"
