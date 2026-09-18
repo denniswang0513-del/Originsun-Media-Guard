@@ -279,6 +279,7 @@ def _summary(meta: dict, book_id: str) -> dict:
         "has_conclusion": bool(_read_text(os.path.join(d, CONCLUSION_FILE)).strip()),
         "has_notes": bool(_read_text(os.path.join(d, NOTES_FILE)).strip()),
         "watch": bool(meta.get("watch")),
+        "focus": meta.get("focus") or "",
         "has_extend": _extend_counts(d)[0] > 0,
         "extend_new": _extend_counts(d)[1],
         "stage": _stage.get(book_id, ""),
@@ -339,8 +340,11 @@ def read_chapter(book_id: str, n: int) -> dict:
 
 
 def update_book(book_id: str, *, title: Optional[str] = None, author: Optional[str] = None,
-                tags: Optional[list] = None, watch: Optional[bool] = None) -> dict:
+                tags: Optional[list] = None, watch: Optional[bool] = None,
+                focus: Optional[str] = None) -> dict:
     fields = {}
+    if focus is not None:
+        fields["focus"] = kl.normalize_focus(focus)    # 研究助理要往哪邊找（§9；空字串＝沒設定）
     if watch is not None:
         fields["watch"] = bool(watch)      # 研究助理每週要不要管這本（§9.3；預設沒有這個鍵＝關）
     if title is not None and title.strip():
@@ -701,6 +705,8 @@ async def run_extend(book_id: str, model: str = "", url: str = "") -> None:
                 skill=_read_text(os.path.join(d, "SKILL.md")),
                 conclusion=conclusion,
                 notes=_read_text(os.path.join(d, NOTES_FILE)),
+                focus=meta.get("focus") or "",
+                rated=old,                              # 他評過「有用／沒用」的那幾則當正反例
                 seen_urls=[i.get("url") for i in old],
             )
 

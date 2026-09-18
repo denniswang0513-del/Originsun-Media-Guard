@@ -2,8 +2,11 @@
  * extend.js — 書頁的「延伸」分頁（研究助理；docs/KNOWLEDGE_BASE_PLAN.md §9）。
  *
  * 定期或手動去網路上找跟這本書有關的新研究，一則一行存在書資料夾的 `延伸.md`。
- * 這裡只管畫面：清單、兩顆「去找新的／收錄這篇」、每則的「有用／沒用」、每週自動找的開關，
- * 以及在找的時候輪詢。
+ * 這裡只管畫面：清單、兩顆「去找新的／收錄這篇」、每則的「有用／沒用」、研究方向那一格、
+ * 每週自動找的開關，以及在找的時候輪詢。
+ *
+ * 「研究方向」是他自己寫的一兩句，權重排在結論之前（core/knowledge_logic.extend_prompt）。
+ * 「有用／沒用」除了決定討論要不要帶那一則，也會當成下一次搜尋的正反例。
  *
  * 「每週自動找」有兩道開關，兩道都開才會自動跑（services/knowledge_watch.py）：
  *   這本書的 `meta.watch`（誰都能改）＋ 全域的 `knowledge.watch.enabled`（只有管理員）。
@@ -63,6 +66,7 @@ export function extendHtml() {
         </div>
         <div class="note">網路上跟這本書有關的東西，附出處、翻譯與摘要。<b>不是作者說的</b>，是別人後來寫的。
             按「沒用」之後，那一則下次討論就不會再帶進去。</div>
+        ${_focusHtml()}
         <label class="kb-watch"><input type="checkbox" data-kact="watch"${S.book && S.book.watch ? ' checked' : ''}${busy}>
             這本書每週自動找一次</label>
         ${_globalWatchHtml()}
@@ -70,6 +74,57 @@ export function extendHtml() {
         : (S.extendNote ? `<div class="kb-ext-busy">${esc(S.extendNote)}</div>` : '')}
         ${items.length ? `<ul class="kb-ext-list">${items.map(_itemHtml).join('')}</ul>`
         : '<div class="kb-empty">還沒找過。按「去找新的」讓它依這本書的主題去搜，或用「收錄這篇」貼一個網址進來。</div>'}`;
+}
+
+/** 研究方向：他用自己的話寫一兩句，比標籤精準得多（權重排在結論之前）。 */
+function _focusHtml() {
+    const cur = (S.book && S.book.focus) || '';
+    if (!S.focusEdit) {
+        return `<div class="kb-focus">
+            <span class="v">${cur ? esc(cur) : '還沒指定方向 —— 它會照你的結論與筆記自己判斷。'}</span>
+            <button type="button" class="kb-link" data-kact="focus-edit">${cur ? '改' : '指定方向'}</button>
+        </div>`;
+    }
+    return `<div class="kb-focus editing">
+        <div class="hint">用一兩句話說你要它往哪邊找，例如「多找台灣本地的稅務與勞健保實務，少找美股」。
+            這段的權重比結論還高。留白＝讓它自己判斷。</div>
+        <textarea class="kb-textarea" id="kb-focus-text" maxlength="300">${esc(cur)}</textarea>
+        <div class="act">
+            <button type="button" class="kb-btn" data-kact="focus-save">存起來</button>
+            <button type="button" class="kb-btn ghost" data-kact="focus-cancel">取消</button>
+        </div>
+    </div>`;
+}
+
+export function editFocus(on) {
+    if (S.focusEdit && !on) S.focusEdit = false;
+    else S.focusEdit = !!on;
+    _rerender();
+    const ta = S.root && S.root.querySelector('#kb-focus-text');
+    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+
+export async function saveFocus() {
+    const ta = S.root && S.root.querySelector('#kb-focus-text');
+    if (!ta || !S.book) return;
+    const focus = ta.value.trim();
+    const bookId = S.book.id;
+    const before = S.book.focus || '';
+    S.book.focus = focus;
+    S.focusEdit = false;
+    _rerender();
+    try {
+        const b = await api(`/${encodeURIComponent(bookId)}`, { method: 'PUT', body: { focus } });
+        if (!alive() || !S.book || S.book.id !== bookId) return;
+        if (b && typeof b.focus === 'string') S.book.focus = b.focus;   // 後端會截到 300 字
+        _rerender();
+        toast(focus ? '下次找的時候會照這個方向' : '已清掉，之後它自己判斷');
+    } catch (e) {
+        if (!alive() || !S.book || S.book.id !== bookId) return;
+        S.book.focus = before;
+        _rerender();
+        toast('存不起來：' + errText(e), true);
+    }
 }
 
 /** 全域那一道（只有管理員看得到、也只有管理員改得動）。 */

@@ -595,6 +595,10 @@ EXTEND_FIELDS = ("n", "date", "title_zh", "url", "title_original", "lang", "sour
                  "published", "summary_zh", "chapter_guess", "why_it_matters", "rating")
 #: 給提示看的「他的情境」——研究要貼著這個人，不是泛泛的主題搜尋
 EXTEND_READER = "台灣、影像製作公司負責人、自己記一本私帳"
+#: 「研究方向」一本一句話（他自己寫的，權重排在結論之前）。一兩句就夠，太長會蓋掉書本身。
+FOCUS_MAX = 300
+#: 評過的例子各帶幾則進提示（太多會把提示灌滿，也沒必要）
+EXTEND_EXAMPLES = 8
 #: 只找最近多久的東西（太舊的書裡通常就有了）
 EXTEND_RECENT_DAYS = 30
 
@@ -670,11 +674,44 @@ _EXTEND_RULES = """- `summary_zh` 與 `title_zh` 一律**繁體中文**（台灣
 - 不用 emoji。"""
 
 
-def extend_prompt(meta: dict, *, skill: str = "", conclusion: str = "", notes: str = "",
-                  seen_urls: Optional[list] = None, max_items: int = EXTEND_MAX_ITEMS) -> str:
-    """定期研究那一發的提示。主題不由程式 parse —— 三份原文一起餵，讓它自己出查詢。
+def normalize_focus(text: Any) -> str:
+    """「研究方向」：去頭尾空白、壓掉連續空行、切到 `FOCUS_MAX`。空字串＝沒設定。"""
+    lines = [ln.rstrip() for ln in str(text or "").strip().splitlines()]
+    out = []
+    for ln in lines:
+        if not ln and (not out or not out[-1]):
+            continue
+        out.append(ln)
+    return "\n".join(out).strip()[:FOCUS_MAX]
 
-    順序有意義：`結論` 是他認同過的原則（最能代表他關心什麼）＞ 骨架的核心框架 ＞ 標籤。
+
+def _rated_examples(items: Optional[list]) -> list:
+    """他評過的那幾則 → 提示裡的正反例。
+
+    2026-09-18 之前「有用／沒用」只決定討論要不要帶那一則，**下一次搜尋完全看不到** ——
+    同一類東西還是會再找回來（只是換個網址）。標題比網址更能講清楚他要什麼。
+    """
+    good = [i for i in (items or []) if i.get("rating") == "useful"][-EXTEND_EXAMPLES:]
+    bad = [i for i in (items or []) if i.get("rating") == "useless"][-EXTEND_EXAMPLES:]
+    if not good and not bad:
+        return []
+    out = ["", "## 他看過之後的回饋（照這個調整你要找什麼）"]
+    if good:
+        out += ["他覺得**有用**的（多找這種）："] + [
+            "- {}｜{}".format(i.get("title_zh", ""), i.get("source", "")) for i in good]
+    if bad:
+        out += ["他覺得**沒用**的（不要再找這種）："] + [
+            "- {}｜{}".format(i.get("title_zh", ""), i.get("source", "")) for i in bad]
+    return out
+
+
+def extend_prompt(meta: dict, *, skill: str = "", conclusion: str = "", notes: str = "",
+                  focus: str = "", rated: Optional[list] = None,
+                  seen_urls: Optional[list] = None, max_items: int = EXTEND_MAX_ITEMS) -> str:
+    """定期研究那一發的提示。主題不由程式 parse —— 原文一起餵，讓它自己出查詢。
+
+    權重由高到低：`focus`（他自己寫的一句話，最直接）＞ `結論`（他認同過的原則）
+    ＞ 骨架的核心框架 ＞ 標籤；再加上他對前幾輪的評分當正反例。
     """
     parts = [
         f"你是這個人的研究助理。他讀了下面這本書，你要去網路上找**最近 {EXTEND_RECENT_DAYS} 天內**值得他看的新資料。",
@@ -682,6 +719,8 @@ def extend_prompt(meta: dict, *, skill: str = "", conclusion: str = "", notes: s
         _book_line(meta),
         f"他的情境：{EXTEND_READER}。",
     ]
+    if focus.strip():
+        parts += ["", "## 他指定的研究方向（**最優先**，跟下面衝突時以這段為準）", focus.strip()[:FOCUS_MAX]]
     if conclusion.strip():
         parts += ["", "## 他已經認同的原則（最重要，研究要貼著這些走）", conclusion.strip()[:3000]]
     if notes.strip():
@@ -707,6 +746,7 @@ def extend_prompt(meta: dict, *, skill: str = "", conclusion: str = "", notes: s
         "規矩：",
         _EXTEND_RULES,
     ]
+    parts += _rated_examples(rated)
     seen = [u for u in (norm_url(x) for x in (seen_urls or [])) if u]
     if seen:
         parts += ["", "## 已經收錄過的，不要再回（共 %d 筆）" % len(seen)] + ["- " + u for u in seen[:200]]

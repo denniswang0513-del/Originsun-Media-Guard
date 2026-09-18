@@ -17,7 +17,8 @@ import {
     openBook, renderPane, refetchBook, switchPane, editTags, saveTags, saveDoc, openChapter, compile, rename, remove, toggleSheet, jumpToSection,
 } from './book.js';
 import { send, saveConclusion, openConclusionEdit, cancelConclusionEdit, conclude } from './chat.js';
-import { runExtend, collectOne, rateExtend, toggleWatch, toggleWatchAll } from './extend.js';
+import { runExtend, collectOne, rateExtend, toggleWatch, toggleWatchAll,
+    editFocus, saveFocus } from './extend.js';
 
 export async function mountKnowledge({ host, fetch, toast }) {
     hooks.host = host; hooks.fetch = fetch; hooks.toast = toast;
@@ -64,6 +65,9 @@ function _onClick(ev) {
     if (act === 'extend-rate') { rateExtend(el.dataset.n, el.dataset.v); return; }
     if (act === 'watch') { toggleWatch(el.checked); return; }
     if (act === 'watch-all') { toggleWatchAll(el.checked); return; }
+    if (act === 'focus-edit') { editFocus(true); return; }
+    if (act === 'focus-cancel') { editFocus(false); return; }
+    if (act === 'focus-save') { saveFocus(); return; }
     if (act === 'tags-edit') { toggleSheet(false); editTags(true); return; }
     if (act === 'tags-cancel') { editTags(false); return; }
     if (act === 'tags-save') { saveTags(el); return; }

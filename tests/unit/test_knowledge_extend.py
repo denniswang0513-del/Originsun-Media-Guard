@@ -213,3 +213,77 @@ def test_the_pane_never_prints_a_raw_stage_token():
     js = repo_src("frontend/js/knowledge/extend.js")
     assert "esc(stage)" not in js
     assert "正在找資料" in js
+
+# ── 研究方向（owner 2026-09-18：「研究主題找的方向可以設定嗎」）────
+def test_the_focus_line_outranks_everything_else():
+    """他自己寫的一句話要排在結論前面 —— 那是最直接的指定，不該被書的內容蓋過去。"""
+    p = kl.extend_prompt({"title": "書"}, conclusion="先付自己", skill="骨架的字",
+                         focus="多找台灣本地的稅務實務，少找美股")
+    assert "多找台灣本地的稅務實務" in p
+    assert p.index("多找台灣本地的稅務實務") < p.index("先付自己") < p.index("骨架的字")
+    assert "最優先" in p
+
+
+def test_no_focus_means_no_section():
+    assert "研究方向" not in kl.extend_prompt({"title": "書"}, conclusion="先付自己")
+
+
+def test_the_focus_is_trimmed_and_capped():
+    assert kl.normalize_focus("  一段  \n\n\n\n 二段 \n\n ") == "一段\n\n 二段"
+    assert len(kl.normalize_focus("字" * 500)) == kl.FOCUS_MAX
+    assert kl.normalize_focus(None) == ""
+    assert kl.normalize_focus("   ") == ""
+
+
+def test_a_long_focus_is_truncated_not_rejected():
+    """420 的上限擋離譜的，真正的截斷在 normalize_focus —— 打太多字不該是 422。"""
+    src = repo_src("routers/api_knowledge.py")
+    assert "focus: Optional[str] = Field(default=None, max_length=FOCUS_MAX * 5)" in src
+    assert 'fields["focus"] = kl.normalize_focus(focus)' in repo_src("services/knowledge_service.py")
+
+
+def test_the_focus_only_changes_when_it_is_sent():
+    """舊分頁送一個 PUT 不該把剛寫好的方向洗掉（同 title／tags 的規矩）。"""
+    body = func_body(repo_src("services/knowledge_service.py"), "def update_book(")
+    assert "if focus is not None:" in body
+
+
+# ── 評分要回饋到下一次搜尋 ──────────────────────────────────
+def test_ratings_steer_the_next_search():
+    """2026-09-18 之前「有用／沒用」只影響討論要不要帶那一則，下一次搜尋完全看不到 ——
+    同一類東西還是會再找回來（只是換個網址）。"""
+    items = [_one(n=1, title_zh="要這種", source="NBER", rating="useful"),
+             _one(n=2, title_zh="不要這種", source="某內容農場", rating="useless"),
+             _one(n=3, title_zh="還沒評的", rating="")]
+    p = kl.extend_prompt({"title": "書"}, rated=items)
+    assert "要這種" in p and "不要這種" in p
+    assert "還沒評的" not in p, "沒評過的不是例子，不要當成偏好"
+    assert p.index("要這種") < p.index("不要這種"), "先講要什麼再講不要什麼"
+
+
+def test_no_ratings_means_no_feedback_section():
+    assert "回饋" not in kl.extend_prompt({"title": "書"}, rated=[_one(rating="")])
+    assert "回饋" not in kl.extend_prompt({"title": "書"})
+
+
+def test_only_the_most_recent_ratings_go_in():
+    """評久了會有幾百則；全塞進提示會把書本身擠掉。"""
+    items = [_one(n=i, url="https://a.tw/%d" % i, title_zh="第%d則" % i, rating="useless") for i in range(30)]
+    p = kl.extend_prompt({"title": "書"}, rated=items)
+    assert p.count("內容農場") == 0
+    assert len([ln for ln in p.splitlines() if ln.startswith("- 第")]) == kl.EXTEND_EXAMPLES
+
+
+def test_the_research_pass_actually_passes_them():
+    body = func_body(repo_src("services/knowledge_service.py"), "async def run_extend(")
+    assert 'focus=meta.get("focus") or ""' in body
+    assert "rated=old" in body
+
+
+def test_the_focus_box_is_on_the_extend_pane():
+    js = repo_src("frontend/js/knowledge/extend.js")
+    for act in ("focus-edit", "focus-save", "focus-cancel"):
+        assert act in js, act
+    assert "export async function saveFocus(" in js
+    idx = repo_src("frontend/js/knowledge/index.js")
+    assert "saveFocus()" in idx and "editFocus(true)" in idx

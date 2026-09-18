@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from core.auth import check_admin, check_admin_or_module, payload_grants
 from core.bg_task import fire
-from core.knowledge_logic import TAGS_MAX
+from core.knowledge_logic import FOCUS_MAX, TAGS_MAX
 from services import knowledge_service as ks
 from services import knowledge_watch as kw
 from services.knowledge_claude import claude_available
@@ -37,6 +37,9 @@ class BookPatch(BaseModel):
     tags: Optional[list[str]] = Field(default=None, max_length=TAGS_MAX * 5)
     # 研究助理每週要不要管這本（§9.3）。全域還有一道 settings knowledge.watch.enabled，兩道都開才會跑。
     watch: Optional[bool] = None
+    # 研究助理要往哪邊找（owner 自己寫的一兩句；正規化與截斷在 knowledge_logic.normalize_focus，
+    # 這裡只擋離譜的長度 —— 超過 FOCUS_MAX 的不是 422，是靜默截掉）
+    focus: Optional[str] = Field(default=None, max_length=FOCUS_MAX * 5)
 
 
 class CompilePayload(BaseModel):
@@ -196,7 +199,7 @@ async def patch_book(book_id: str, body: BookPatch, request: Request):
     """`{title?, author?, tags?}`：沒帶的欄位不動（Optional＋None，舊分頁的 PUT 不會洗掉別人剛填的）。"""
     _guard(request)
     return _book_or_404(ks.update_book, book_id, title=body.title, author=body.author,
-                        tags=body.tags, watch=body.watch)
+                        tags=body.tags, watch=body.watch, focus=body.focus)
 
 
 @router.delete("/{book_id}")

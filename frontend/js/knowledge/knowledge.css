@@ -224,6 +224,18 @@
 .kb .kb-watch .sub { color: var(--sub); font-size: 12px; }
 .kb .note.sub { color: var(--sub); font-size: 12.5px; margin-top: 8px; }
 
+/* 研究方向（owner 2026-09-18：「研究主題找的方向可以設定嗎」）：他自己寫的一兩句，
+   權重排在結論之前。平常只是一行字＋一顆「改」，按了才長出輸入框。 */
+.kb .kb-focus { display: flex; align-items: baseline; gap: 8px; margin-top: 10px;
+    padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
+.kb .kb-focus .v { flex: 1; min-width: 0; line-height: 1.6; }
+.kb .kb-focus .kb-link { flex: none; min-height: 44px; }
+.kb .kb-focus.editing { display: block; }
+.kb .kb-focus .hint { color: var(--sub); font-size: 12.5px; line-height: 1.6; margin-bottom: 6px; }
+.kb .kb-focus .kb-textarea { width: 100%; min-height: 72px; }
+.kb .kb-focus .act { display: flex; gap: 8px; margin-top: 8px; }
+.kb .kb-focus .act button { min-height: 40px; }
+
 /* 窄一點：書頁單欄 */
 @media (max-width: 899px) {
     .kb .kb-book { grid-template-columns: 1fr; gap: 16px; }
@@ -245,6 +257,7 @@
     .kb .kb-ext .act button { min-height: 44px; }
     .kb .kb-ext-head .kb-btn { min-height: 44px; }
     .kb .kb-conc-edit .act button { min-height: 44px; }
+    .kb .kb-focus .act button { min-height: 44px; }
     .kb .kb-drop .kb-btn { min-height: 44px; }
 }
 
