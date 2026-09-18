@@ -162,7 +162,10 @@
 /* ⋯ 的底部抽屜 */
 .kb .kb-sheet-dim { position: fixed; inset: 0; background: var(--dim); z-index: 40; }
 .kb .kb-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; background: var(--panel);
-    border-radius: 16px 16px 0 0; box-shadow: 0 -12px 34px var(--shadow); padding: 10px 14px calc(14px + env(safe-area-inset-bottom)); }
+    border-radius: 16px 16px 0 0; box-shadow: 0 -12px 34px var(--shadow);
+    padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right)); }
 .kb .kb-sheet .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 10px; }
 .kb .kb-sheet .item { display: block; width: 100%; text-align: left; background: none; border: 0;
     border-bottom: 1px solid var(--line); padding: 13px 4px; min-height: 48px; font-size: 15px;
@@ -180,7 +183,8 @@
 .kb .kb-jump button:hover { border-color: var(--ink); }
 
 /* 回到頂端；長頁面才用得到，桌機也留著 */
-.kb .kb-totop { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 30;
+.kb .kb-totop { position: fixed; right: max(16px, env(safe-area-inset-right));
+    bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 30;
     width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel);
     color: var(--ink); font-size: 17px; cursor: pointer; box-shadow: 0 3px 12px var(--shadow); }
 

@@ -290,3 +290,54 @@ def test_the_desktop_stays_light():
     css = _page_style()
     assert "--bg: #fff;" in css[:css.index(_DARK_AT)]
     assert css.count(_DARK_AT) == 1, "只有一個深色斷點"
+
+# ── 7. 安全區（owner 2026-09-18：「我的手機好像會吃到左右兩邊」）──
+def test_the_page_paints_under_the_notch():
+    """沒有 `viewport-fit=cover` 的話，iPhone 會把整頁縮在安全區裡、瀏海那邊留一條邊。
+    有了它底色才鋪滿整個螢幕，內容再靠下面那條推回安全區。"""
+    src = repo_src(PAGE)
+    assert "viewport-fit=cover" in src
+    assert 'name="viewport"' in src
+
+
+def test_the_side_gutters_step_aside_for_the_notch():
+    """左右一律 `max(留白, env(safe-area-inset-*))`：桌機就是留白，手機遇到瀏海自己讓開。
+    寫死 padding 的話橫放時最外緣那幾個字會被圓角吃掉。"""
+    css = _page_style()
+    for sel in ("main", "header"):
+        block = css[css.index("\n  %s {" % sel):]
+        block = block[:block.index("}")]
+        assert "max(" in block and "env(safe-area-inset-left)" in block, sel + " 左邊沒讓開"
+        assert "env(safe-area-inset-right)" in block, sel + " 右邊沒讓開"
+
+
+def test_the_phone_gutter_is_at_least_16px():
+    """圓角本身就會壓到最外緣；12px 在手機上不夠。"""
+    css = _page_style()
+    # 第一個 640 的 @media 是上面那個 brand-mark，要找**最後**那個（版面那份）
+    i = css.rindex("@media (max-width: 640px)")
+    assert "max(16px, env(safe-area-inset-left))" in css[i:i + 600]
+
+
+def test_the_floating_bits_step_aside_too():
+    """抽屜與回頂鈕是 fixed，不吃 main 的留白，各自要處理（橫放時瀏海在側邊）。"""
+    css = repo_src(CSS)
+    sheet = css[css.index(".kb .kb-sheet {"):]
+    sheet = sheet[:sheet.index("}")]
+    assert "env(safe-area-inset-left)" in sheet and "env(safe-area-inset-right)" in sheet
+    totop = css[css.index(".kb .kb-totop {"):]
+    totop = totop[:totop.index("}")]
+    assert "env(safe-area-inset-right)" in totop
+    assert "env(safe-area-inset-left)" in _page_style()[_page_style().index("#kb-toast {"):][:400], (
+        "浮在底部的提示寬度也要扣掉兩側安全區")
+
+
+def test_the_tab_strip_is_the_only_thing_allowed_past_the_edge():
+    """實測在 320px 寬時「延伸」那顆會超出畫面 —— 那是刻意的，分頁列本來就能橫捲。
+    其他地方不准這樣（那才是真的被切掉）。"""
+    # `.kb .kb-tabs` 第一個是桌機左欄那份（直排）；橫捲是窄螢幕才覆蓋上去的
+    css = repo_src(CSS)
+    i = css.index("@media (max-width: 899px)")
+    narrow = css[i:css.index("\n}", i)]
+    tabs = narrow[narrow.index(".kb .kb-tabs {"):]
+    assert "overflow-x: auto" in tabs[:tabs.index("}")]

@@ -2,7 +2,9 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- viewport-fit=cover：讓底色鋪滿整個螢幕（不然 iPhone 會在瀏海／圓角那邊留邊），
+     內容再用 max(留白, env(safe-area-inset-*)) 推回安全區裡（owner 2026-09-18：「會吃到左右兩邊」）。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <title>Knowledge 知識庫</title>
 <link rel="icon" type="image/png" sizes="32x32" href="/img/knowledge-icon-32.png">
@@ -43,6 +45,8 @@
 
   header { position: sticky; top: 0; z-index: 50; display: flex; align-items: center;
     justify-content: space-between; padding: 14px 20px; background: var(--panel);
+    padding-left: max(20px, env(safe-area-inset-left));
+    padding-right: max(20px, env(safe-area-inset-right));
     backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
   header .brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300;
     display: inline-flex; align-items: center; gap: 9px; white-space: nowrap; }
@@ -59,7 +63,10 @@
     padding: 6px 14px; font-size: 12px; color: var(--sub); cursor: pointer; }
   .btn-ghost:hover { color: var(--red); border-color: var(--red); }
 
-  main { max-width: 1240px; margin: 0 auto; padding: 20px 16px 60px; }
+  /* 左右一律走 max(留白, 安全區)：桌機就是留白，手機遇到瀏海／圓角會自己讓開 */
+  main { max-width: 1240px; margin: 0 auto; padding: 20px 16px 60px;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right)); }
 
   .center-wrap { max-width: 380px; margin: 8vh auto 0; }
   .login-card { border: 1px solid var(--line); padding: 36px 32px; }
@@ -77,14 +84,24 @@
   html.embed header { display: none; }
   html.embed main { padding-top: 14px; }
 
-  main { max-width: 1240px; margin: 0 auto; padding: 28px 24px 60px; }
+  main { max-width: 1240px; margin: 0 auto; padding: 28px 24px 60px;
+    padding-left: max(24px, env(safe-area-inset-left));
+    padding-right: max(24px, env(safe-area-inset-right)); }
   #kb-host { min-height: 60vh; }
   /* 提示浮在底部（書頁很長、手機上看不到頁尾）；顏色照 kind */
   #kb-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60;
     background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 24px var(--shadow-soft); border-radius: 6px;
-    padding: 10px 16px; font-size: 13px; max-width: calc(100vw - 32px); }
+    padding: 10px 16px; font-size: 13px;
+    max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right)); }
   html.embed main { padding: 14px 18px 40px; }
-  @media (max-width: 640px) { main { padding: 16px 12px 40px; } header { padding: 12px 14px; } }
+  @media (max-width: 640px) {
+    main { padding: 16px 12px 40px;
+      padding-left: max(16px, env(safe-area-inset-left));
+      padding-right: max(16px, env(safe-area-inset-right)); }
+    header { padding: 12px 14px;
+      padding-left: max(14px, env(safe-area-inset-left));
+      padding-right: max(14px, env(safe-area-inset-right)); }
+  }
 
   /* 手機／直式：整頁換成 logo 那組午夜藍（owner 2026-09-18：「手機 RWD 希望是深色配色 和 logo 匹配」）。
      色票就是 frontend/img/knowledge-icon.svg 裡的：底 #12294D→#070F22、浪 #38BDF8→#A5B4FC。
