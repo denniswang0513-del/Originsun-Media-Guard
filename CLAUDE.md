@@ -1343,6 +1343,7 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
 | `routers/api_balance_register.py` ＋ `core/finance_logic/_core.py::derive_balance`／`routers/api_finance.py::_balances_by_account` | **登記餘額**（docs/BALANCE_REGISTER.md）：「今天看到多少就先記多少，明細後面補」。帳戶寫基準點（`bank_accounts.anchor_balance／anchor_date`）、證券戶寫「未拆明細」列、每次登記留一筆對帳紀錄 | 餘額規則只有 `derive_balance` 一份，六個算餘額的地方都經 `_balances_by_account`；畫面：桌機 `subviews/register.js`（私帳 nav）、手機 `#register` 隱藏路由 |
 | `core/payroll_logic.py` ＋ `db/models/_payroll.py` ＋ `routers/api_payroll.py` ＋ `tabs/hr_payroll/` | **薪資**（docs/PAYROLL_OVERTIME_PLAN.md 第一批，2026-09-17）：薪資主檔（一人一段，調薪新增一段）、費率表（一年一份 JSON，2026 版內建）、每月薪資單（草稿 → 手填 → 確認 → 每列自動長請款單 category 薪資／代發薪資、匯出印領清冊）；三表多「營業費用-人事」一組；現金流固定成本沒手填就用最近一張已確認薪資單的公司總成本 | 鑰匙 `hr_payroll`（獨立一把、不進 hr 捆；合夥範本預設含）整支 403，不走 money_view 抹欄位；金額欄在 core/money.py `_PAYROLL_ONLY` 表態；只有母公司帳；加班費：工作日照勞基法寫死、假日 max(公司 ×2, 法定)（`DEFAULT_OVERTIME`／`overtime_pay`；owner 2026-09-18），費率表能改假日倍率、「勞資會議同意延長」與補休換算 |
 | `core/overtime_logic.py` ＋ `routers/api_overtime.py` ＋ `js/my/cards-ot.js`／`m/views/leave.js`／`tabs/hr_leave`（加班佇列） | **加班申請**（docs/PAYROLL_OVERTIME_PLAN.md 第二批，2026-09-18）：員工填日期、起訖、換補休或加班費、事由；時數與工作日／假日後端算；核准 → 補休進時數帳（平日 1:1 假日 1:2、當年 12/31 到期）或加班費（工作日照勞基法 §24 ×1.34／1.67；假日公司 ×2 與法定 §24／§39 取較高）掛加班日那個月的薪資單草稿（已確認就往後找） | 員工端 `require_bound_staff(request,'me_leave')`、不收客戶端時數；管理端清單 hr_leave／finance_partner、核准退回 check_admin；每日 12 h／每月 46 h 擋（費率表勾勞資會議同意才 54、三個月 138）；四種日子：工作日／休息日（六）／例假日（日）／國定假日；`api_overtime.router` 是兩支合成的，include 一定在端點之後；NAS office-api 也掛（手機要能報） |
+| `routers/api_knowledge.py` ＋ `services/knowledge_service.py`／`knowledge_claude.py` ＋ `frontend/knowledge.html` | **知識庫**（docs/KNOWLEDGE_BASE_PLAN.md，2026-09-18）：上傳 PDF → 主控用 claude CLI 編譯成骨架（心智模型／決策規則／名詞／模式／速查表）與每章重點 → 在書頁跟 AI 討論 → 把講定的原則存成「結論」。顧問 agent 讀的順序：結論 → 筆記 → 骨架 → 章節 | 檔案住 `D:\Originsun-Knowledge\books`（settings `knowledge.root` 可改），**不進 DB、不進 git**；**只掛 main.py 不掛 main_office.py**（D 槽與 claude CLI 都只有主控有，`test_office_surface` 釘著）；鑰匙 `knowledge` 三個身份範本都不預設配，Lv3 直接過 |
 | `core/ledger_project.py` 的分案記帳段 | 私帳案收入**分案**：`BY_PARENT_KEY`／`BY_PARENT_PENDING_KEY`、`parent_shares`、`set_parent_share`（只動差額；`claim` 不動錢）、`drop_parent_share`、`mirror_stale(…, pid)` 逐案判；設計正本 [`docs/LEDGER_BY_PARENT_PLAN.md`](docs/LEDGER_BY_PARENT_PLAN.md) | 不變式 `contract = Σ份額 + owner 自己的`（自己的不存、用差額推）；分身 `contract_amount` 只准接 `set／drop_parent_share` 回的 `new_contract`（`test_ledger_by_parent` 掃 project_links 釘著）；開機 `_m22` 回填舊資料，分不出的 N:1 標待認領、改收款方式會 409 要求逐案「推送→取代」 |
 | 彈性外出（owner 2026-09-15）：[`core/leave_logic.py`](core/leave_logic.py) 的 `FLEX_OUT_*`／`flex_out_check`、`hr_flex_outings`（[`db/models/_workos.py`](db/models/_workos.py)）、[`routers/api_me.py`](routers/api_me.py) 的 `/me/flex_out` | 每人每天 2 小時、**自己登記不用核准**、一筆 ≤2h、同一天合計 ≤2h、不累積。畫面固定寫「每日可彈性外出兩小時」（owner 改的字，不顯示剩多少） | **不走請假單**：不進時數帳、不進休假總表、不上 Google 日曆。事由只給本人看（行事曆事件的 `notes` 一律空，同 `_leave_events`）。超過 2 小時要另外請假 —— 規章那段在 `frontend/leave.html` 的規章卡，排在事假前面 |
 | [`core/leave_logic.py`](core/leave_logic.py) 的 `day_off_fraction`／`leave_days_total` | 一天休了多少（同一天多張單**加總**、上限 1；`range` 照時數換算）／一段期間休幾天（**只算工作日**） | `/me/week_marks` 的 `off[日期]` 與 `leave_days` 都出自這裡；前端不准自己再判一次 `part`（兩份規則會分岔） |
@@ -1407,6 +1408,15 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
      不然會靜靜掉回金額格式（長照的「撐得了 29.5 年」上線時就是印成「29.5 萬」，沒有測試釘）。
   ⑩ **「模擬到 90 歲用不完」是算術上必然的事**（固定報酬減通膨大於提領率就一定算不完），不能寫成一項通過的檢驗；
      真正會咬人的是報酬順序，所以另外算一條「前 10 年報酬 0%」。提領一律**年初先提**（同 Bengen），先長再提會高估 6–7%。
+- **知識庫（docs/KNOWLEDGE_BASE_PLAN.md，2026-09-18）**：編譯那三個 pass（結構／章／骨架）**一定不給 claude 工具** ——
+  `services/knowledge_claude.call_claude` 的 `allowed_tools` 預設就是空字串，空字串走 `--tools ""`，只有非空才進
+  plan mode ＋ `--allowedTools`。給了 Read＋plan mode，claude 會改成「寫一份計畫問你要不要建檔」，四個產物一個都不出，
+  而且**測試不會紅**——所以 2026-09-18 補了 `test_compile_passes_call_claude_without_tools_and_chat_with_read_only`
+  與 `test_call_claude_default_is_no_tools_and_empty_means_tools_flag_off` 兩條釘住（本 session 另做過變異驗證：
+  預設改 `"Read"` → 立刻紅）。討論那一發才是 `allowed_tools="Read"`、cwd 限定那本書的資料夾。
+  只有 `meta.tags` 含「財務」的書才讀 `D:\Originsun-Advisor\latest.json` 的四個數（`run_chat` 裡
+  `advisor_snapshot() if finance else []`，兩層測試釘著）；顧問 agent 也只讀標「財務」的書。
+  書 id 一律先過 `^[0-9a-f]{16}$` 再拼路徑（擋 `..`）。編譯中重啟會顯示「編譯被中斷，再按一次接著補」，是預期行為。
 - **加班申請（docs/PAYROLL_OVERTIME_PLAN.md 第二批，2026-09-18）**：`routers/api_overtime.py` 的 `router` 是 me＋hr 兩支**合成**的 ——
   `include_router` 複製的是當下的路由，那三行一定要放在所有端點**之後**（放檔頭會得到一支空的，端點靜默 404）。
   加班佇列的 `pay_amount` 一定要經 `redact_pay(items, can_see_money(request))`：金額 ÷ 時數 ÷ 倍率就回推得出月薪，
