@@ -7,9 +7,10 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/img/knowledge-icon-32.png">
 <meta name="theme-color" content="#070F22">
 <!-- 🔴 這是知識庫**唯一不需要登入**的頁面（docs/KNOWLEDGE_BASE_PLAN.md §9.9）。
-     只讀 /api/v1/knowledge/public/<share id>，只畫那一本書的延伸（研究助理找到的網路資料）。
+     只讀 /api/v1/knowledge/public/<share id>，只畫他**勾選**的那幾段。
      這裡**不准**出現任何指回系統的連結或按鈕（owner 2026-09-19：「但是點不到我其他的地方」）。
-     搜尋引擎也不要收（noindex）—— 分享連結是給他自己傳給特定的人的。 -->
+     搜尋引擎也不要收（noindex）—— 分享連結是給他自己傳給特定的人的。
+     樣式與程式全部內嵌：這一頁沒有模組圖，也就不吃 §9.6 那個「新 html ＋ 舊 js」的快取問題。 -->
 <meta name="robots" content="noindex, nofollow">
 <style>
   :root {
@@ -32,18 +33,28 @@
   .tags { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 0; }
   .tags i { font-style: normal; font-size: 12px; padding: 2px 10px; border-radius: 999px;
     background: var(--panel); color: var(--sub); }
-  .lead { margin: 26px 0 6px; padding-top: 22px; border-top: 1px solid var(--line);
+  .lead { margin: 30px 0 6px; padding-top: 22px; border-top: 1px solid var(--line);
     font-size: 15px; font-weight: 600; }
-  .lead + .note { color: var(--sub); font-size: 13px; margin: 0 0 18px; }
+  .note { color: var(--sub); font-size: 13px; margin: 0 0 16px; }
   ol { list-style: none; margin: 0; padding: 0; }
-  li { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
+  ol li { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
     background: var(--panel); }
-  li .t { font-size: 15.5px; line-height: 1.5; }
-  li .t a { text-decoration: underline; text-underline-offset: 3px; }
-  li .orig { color: var(--sub); font-size: 12.5px; margin-top: 3px; }
-  li .src { color: var(--sub); font-size: 12.5px; margin-top: 6px; }
-  li .sum { font-size: 14px; margin-top: 9px; }
-  li .why { color: var(--sub); font-size: 13.5px; margin-top: 7px; }
+  ol li .t { font-size: 15.5px; line-height: 1.5; }
+  ol li .t a { text-decoration: underline; text-underline-offset: 3px; }
+  ol li .orig { color: var(--sub); font-size: 12.5px; margin-top: 3px; }
+  ol li .src { color: var(--sub); font-size: 12.5px; margin-top: 6px; }
+  ol li .sum { font-size: 14px; margin-top: 9px; }
+  ol li .why { color: var(--sub); font-size: 13.5px; margin-top: 7px; }
+  .md h2 { font-size: 16px; margin: 20px 0 6px; }
+  .md h3 { font-size: 14.5px; margin: 16px 0 4px; }
+  .md ul { padding-left: 20px; margin: 8px 0; }
+  .md li { margin: 3px 0; }
+  .md p { margin: 8px 0; }
+  .md code { background: var(--panel); border-radius: 4px; padding: 0 4px; font-size: 13px; }
+  figure { margin: 0 0 22px; }
+  figure img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+  figcaption { color: var(--sub); font-size: 12.5px; margin-top: 6px; line-height: 1.6; }
+  figcaption .src { display: block; opacity: .75; margin-top: 2px; }
   footer { color: var(--sub); font-size: 12px; margin-top: 34px; padding-top: 18px;
     border-top: 1px solid var(--line); line-height: 1.8; }
   .state { color: var(--sub); padding: 60px 0; text-align: center; }
@@ -61,41 +72,100 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const host = document.getElementById("host");
 
-function row(it) {
+/** 這一份分享有沒有包含某一段 —— 後端沒勾的連鍵都不會有。 */
+const has = (d, k) => Object.prototype.hasOwnProperty.call(d, k);
+
+const inline = (s) => s
+  .replace(/`([^`]+)`/g, "<code>$1</code>")
+  .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+
+/** 最小的 markdown（標題／粗體／清單／段落）。先整段 esc，所以只會產出我們自己寫的標籤。 */
+function md(text) {
+  const lines = esc(text || "").replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let ul = false;
+  const closeUl = () => { if (ul) { out.push("</ul>"); ul = false; } };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { closeUl(); continue; }
+    const h = /^(#{1,4})\s+(.+)$/.exec(line);
+    if (h) { closeUl(); const n = Math.min(h[1].length + 1, 4); out.push("<h" + n + ">" + inline(h[2]) + "</h" + n + ">"); continue; }
+    const li = /^[-*]\s+(.+)$/.exec(line);
+    if (li) { if (!ul) { out.push("<ul>"); ul = true; } out.push("<li>" + inline(li[1]) + "</li>"); continue; }
+    closeUl();
+    out.push("<p>" + inline(line) + "</p>");
+  }
+  closeUl();
+  return out.join("");
+}
+
+function section(title, body, note) {
+  if (!body) return "";
+  return '<div class="lead">' + esc(title) + "</div>"
+    + (note ? '<p class="note">' + esc(note) + "</p>" : "") + body;
+}
+
+function extendRow(it) {
   const zh = (it.lang || "").toLowerCase().startsWith("zh");
   const safe = /^https?:\/\//i.test(it.url || "") ? it.url : "";
   const title = esc(it.title_zh || it.title_original || "（無標題）");
   const src = [it.source, it.published].filter(Boolean).map(esc).join("　");
-  return `<li>
-    <div class="t">${safe ? `<a href="${esc(safe)}" target="_blank" rel="noopener noreferrer nofollow">${title}</a>` : title}</div>
-    ${!zh && it.title_original ? `<div class="orig">${esc(it.title_original)}${it.lang ? `（${esc(it.lang)}）` : ""}</div>` : ""}
-    ${src ? `<div class="src">出處：${src}</div>` : ""}
-    ${it.summary_zh ? `<div class="sum">${esc(it.summary_zh)}</div>` : ""}
-    ${it.why_it_matters ? `<div class="why">為什麼值得看：${esc(it.why_it_matters)}</div>` : ""}
-  </li>`;
+  return "<li>"
+    + '<div class="t">' + (safe
+      ? '<a href="' + esc(safe) + '" target="_blank" rel="noopener noreferrer nofollow">' + title + "</a>"
+      : title) + "</div>"
+    + (!zh && it.title_original
+      ? '<div class="orig">' + esc(it.title_original) + (it.lang ? "（" + esc(it.lang) + "）" : "") + "</div>" : "")
+    + (src ? '<div class="src">出處：' + src + "</div>" : "")
+    + (it.summary_zh ? '<div class="sum">' + esc(it.summary_zh) + "</div>" : "")
+    + (it.why_it_matters ? '<div class="why">為什麼值得看：' + esc(it.why_it_matters) + "</div>" : "")
+    + "</li>";
 }
 
-function render(d) {
-  const info = d.info || {};
+function figuresHtml(d, id) {
+  if (!has(d, "gallery") || !(d.gallery || []).length) return "";
+  const who = [d.title ? "《" + d.title + "》" : "", d.author].filter(Boolean).join("　");
+  const body = d.gallery.map((a) => "<figure>"
+    + '<img src="/api/v1/knowledge/public/' + encodeURIComponent(id) + "/assets/" + encodeURIComponent(a.name)
+    + '" alt="' + esc(a.caption || "") + '" loading="lazy">'
+    + "<figcaption>" + esc(a.caption || "（原書沒有圖說）")
+    + '<span class="src">' + esc("出自" + who + "，第 " + a.page + " 頁") + "</span></figcaption>"
+    + "</figure>").join("");
+  return section("書裡的圖（" + d.gallery.length + "）", body, "圖出自原書，僅供閱讀筆記參考。");
+}
+
+function render(d, id) {
+  const info = has(d, "info") ? (d.info || {}) : {};
   const facts = ["publisher", "published", "translator", "isbn"]
-    .map((k) => info[k]).filter(Boolean).map((v) => `<span>${esc(v)}</span>`).join("");
-  const n = (d.extend || []).length;
-  document.title = `${d.title || "研究筆記"}｜Knowledge`;
-  host.innerHTML = `
-    <h1>${esc(d.title || "")}</h1>
-    ${d.author ? `<div class="who">${esc(d.author)}</div>` : ""}
-    ${facts ? `<div class="facts">${facts}</div>` : ""}
-    ${info.subtitle ? `<div class="facts" style="margin-top:6px">${esc(info.subtitle)}</div>` : ""}
-    ${(d.tags || []).length ? `<div class="tags">${d.tags.map((t) => `<i>${esc(t)}</i>`).join("")}</div>` : ""}
-    <div class="lead">讀這本書之後找到的延伸資料（${n}）</div>
-    <p class="note">每一則都附原始出處與連結。這些是網路上的公開資料，<b>不是這本書的作者說的</b>。</p>
-    ${n ? `<ol>${d.extend.map(row).join("")}</ol>`
-    : `<div class="state">這份分享還沒有內容。</div>`}
-    <footer>
-      以上是針對《${esc(d.title || "")}》整理的延伸資料，書本身的內容不在這裡。
-      要看原書請支持原作者與出版社。<br>
-      由 Knowledge 知識庫整理${d.shared_at ? `・分享於 ${esc(String(d.shared_at).slice(0, 10))}` : ""}
-    </footer>`;
+    .map((k) => info[k]).filter(Boolean).map((v) => "<span>" + esc(v) + "</span>").join("");
+  const extend = has(d, "extend") ? (d.extend || []) : null;
+  document.title = (d.title || "研究筆記") + "｜Knowledge";
+
+  const parts = [
+    "<h1>" + esc(d.title || "") + "</h1>",
+    d.author ? '<div class="who">' + esc(d.author) + "</div>" : "",
+    facts ? '<div class="facts">' + facts + "</div>" : "",
+    info.subtitle ? '<div class="facts" style="margin-top:6px">' + esc(info.subtitle) + "</div>" : "",
+    has(d, "tags") && (d.tags || []).length
+      ? '<div class="tags">' + d.tags.map((t) => "<i>" + esc(t) + "</i>").join("") + "</div>" : "",
+    extend ? section("讀這本書之後找到的延伸資料（" + extend.length + "）",
+      extend.length ? "<ol>" + extend.map(extendRow).join("") + "</ol>" : '<p class="note">這一段還沒有內容。</p>',
+      "每一則都附原始出處與連結。這些是網路上的公開資料，不是這本書的作者說的。") : "",
+    section("我的結論", has(d, "conclusion") && d.conclusion ? '<div class="md">' + md(d.conclusion) + "</div>" : ""),
+    section("我的筆記", has(d, "notes") && d.notes ? '<div class="md">' + md(d.notes) + "</div>" : ""),
+    section("這本書的骨架",
+      has(d, "skill") && d.skill ? '<div class="md">' + md(d.skill) + (d.cheatsheet ? md(d.cheatsheet) : "") + "</div>" : "",
+      "以下是針對原書內容整理的筆記，不是原文。"),
+    section("章節重點",
+      has(d, "chapters") && (d.chapters || []).length
+        ? d.chapters.map((c) => '<div class="md">' + md(c.md) + "</div>").join("") : "",
+      "以下是針對原書內容整理的筆記，不是原文。"),
+    figuresHtml(d, id),
+    "<footer>以上是針對《" + esc(d.title || "") + "》整理的資料。要看原書請支持原作者與出版社。<br>"
+      + "由 Knowledge 知識庫整理"
+      + (d.shared_at ? "・分享於 " + esc(String(d.shared_at).slice(0, 10)) : "") + "</footer>",
+  ];
+  host.innerHTML = parts.join("");
 }
 
 (async () => {
@@ -105,9 +175,9 @@ function render(d) {
     return;
   }
   try {
-    const r = await fetch(`/api/v1/knowledge/public/${id}`);
+    const r = await fetch("/api/v1/knowledge/public/" + id);
     if (!r.ok) throw new Error(String(r.status));
-    render(await r.json());
+    render(await r.json(), id);
   } catch (e) {
     host.innerHTML = '<div class="state">這個分享連結不存在或已經關閉。</div>';
   }

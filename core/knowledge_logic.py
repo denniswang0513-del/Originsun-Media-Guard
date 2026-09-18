@@ -1221,3 +1221,47 @@ def normalize_info(raw: Any) -> dict:
         if val:
             out[key] = val
     return out
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 公開分享要放哪些東西（§9.9；owner 2026-09-19：「公開分享的內容讓我勾選」）
+#
+# 書名與作者**一定**會出去 —— 那是這份分享在講哪一本書，不能匿名。其餘全部由他勾。
+# 預設只開三項（基本資訊、標籤、延伸）：那三項要嘛是他填的書目資料，要嘛是網路上的公開資料。
+# 其他預設關，因為不是他自己的私事就是原書的內容。
+# ══════════════════════════════════════════════════════════════════════════
+
+#: `(鍵, 預設開不開, 這是誰的東西)`。順序就是畫面上的順序。
+SHARE_PARTS = (
+    ("info", True, "你填的書目資料"),
+    ("tags", True, "你自己下的標籤"),
+    ("extend", True, "網路上的公開資料，每則附出處"),
+    ("conclusion", False, "你自己寫的"),
+    ("notes", False, "你自己寫的"),
+    ("skill", False, "原書的內容整理，公開要注意版權"),
+    ("chapters", False, "原書的內容整理，公開要注意版權"),
+    ("gallery", False, "原書裡的圖，公開要注意版權"),
+)
+SHARE_PART_KEYS = tuple(k for k, _, _ in SHARE_PARTS)
+#: 沒設定過的舊分享用這一組（＝2026-09-19 之前那版的行為）
+SHARE_DEFAULT = tuple(k for k, on, _ in SHARE_PARTS if on)
+
+
+def normalize_parts(raw: Any) -> list:
+    """只收白名單的鍵、去重、照 `SHARE_PARTS` 的順序排。
+
+    `None`＝沒帶（呼叫端自己決定要不要沿用舊的）；空清單＝真的一項都不分享。
+    """
+    if raw is None:
+        return list(SHARE_DEFAULT)
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple, set)):
+        return list(SHARE_DEFAULT)
+    picked = {str(x) for x in raw}
+    return [k for k in SHARE_PART_KEYS if k in picked]
+
+
+def shares(parts: Optional[list], key: str) -> bool:
+    """這一項有沒有被勾。`parts` 是 None（舊的分享還沒設定過）就用預設那組。"""
+    return key in (list(parts) if parts is not None else list(SHARE_DEFAULT))

@@ -48,7 +48,8 @@ def _narrow_css():
 def test_the_header_is_one_line_on_a_phone():
     css = _narrow_css()
     assert "text-overflow: ellipsis" in css, "書名要截斷，不能換行把分頁推下去"
-    for hidden in (".kb .kb-side .a", ".kb .kb-side #kb-tags-row", ".kb .kb-actions"):
+    # 書名那一塊 2026-09-19 搬到跨整頁的 .kb-bookhead（owner：「紅框處滿寬，他是表頭」）
+    for hidden in (".kb .kb-bookhead .a", ".kb .kb-bookhead #kb-tags-row", ".kb .kb-actions"):
         assert hidden in css, hidden + " 要收進抽屜"
     assert ".kb .kb-head .kb-more { display: block" in css, "⋯ 只在手機出現"
 
@@ -314,7 +315,8 @@ def test_the_side_gutters_step_aside_for_the_notch():
     """左右一律 `max(留白, env(safe-area-inset-*))`：桌機就是留白，手機遇到瀏海自己讓開。
     寫死 padding 的話橫放時最外緣那幾個字會被圓角吃掉。"""
     css = _page_style()
-    for sel in ("main", "header"):
+    # 頁首那條 2026-09-19 收斂成 `body > header`（不然頁面內容裡任何 <header> 都會被套到）
+    for sel in ("main", "body > header"):
         block = css[css.index("\n  %s {" % sel):]
         block = block[:block.index("}")]
         assert "max(" in block and "env(safe-area-inset-left)" in block, sel + " 左邊沒讓開"

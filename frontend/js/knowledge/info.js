@@ -66,21 +66,60 @@ export function infoHtml() {
 
 /** 公開分享（§9.9）。owner 2026-09-19：「可以有一個公開分享的連結，讓我把這本書的研究分享出去
  *  （但是點不到我其他的地方）」。開關放這裡 —— 這一頁本來就是這本書的後設資料。 */
+/** 可以勾的那幾項。鍵以後端 `knowledge_logic.SHARE_PARTS` 為正本（測試會比對）。 */
+export const SHARE_PARTS = [
+    ['info', '書的基本資訊', '出版社、ISBN 那些，你填的'],
+    ['tags', '標籤', ''],
+    ['extend', '延伸研究', '網路上的公開資料，每則附出處與連結'],
+    ['conclusion', '我的結論', '你自己寫的原則'],
+    ['notes', '我的筆記', '你自己寫的'],
+    ['skill', '骨架與速查表', '原書的內容整理，公開要注意版權'],
+    ['chapters', '章節重點', '原書的內容整理，公開要注意版權'],
+    ['gallery', '書裡的圖', '原書的圖，公開要注意版權'],
+];
+
 function _shareHtml() {
     const sh = S.share;
     if (!sh) return '';
+    const on = new Set(sh.parts || []);
     return `<div class="kb-share">
         <label class="kb-watch"><input type="checkbox" data-kact="share-toggle"${sh.on ? ' checked' : ''}>
-            開一個公開連結，把這本書的延伸分享出去</label>
-        <div class="note">分享出去的<b>只有</b>：書名、作者、你填的基本資訊、標籤，以及「延伸」裡的研究資料
-            （每一則都附原始出處與連結）。<b>不含</b>你的筆記、結論、討論、章節重點與書裡的圖 ——
-            那些是你自己的東西或原書的內容。收到連結的人也連不回這個系統的其他地方。</div>
-        ${sh.on ? `<div class="kb-share-link">
+            開一個公開連結，把這本書分享出去</label>
+        <div class="note">書名與作者一定會出去（那是在講哪一本書）。其餘自己勾。
+            收到連結的人連不回這個系統的其他地方，討論內容與書的全文任何情況都不會出去。</div>
+        ${sh.on ? `
+        <div class="kb-share-parts">
+            ${SHARE_PARTS.map(([k, label, why]) => `<label>
+                <input type="checkbox" data-kact="share-part" data-k="${esc(k)}"${on.has(k) ? ' checked' : ''}>
+                <span class="l">${esc(label)}</span>${why ? `<span class="w">${esc(why)}</span>` : ''}
+            </label>`).join('')}
+        </div>
+        <div class="kb-share-link">
             <input type="text" class="kb-input" id="kb-share-url" value="${esc(sh.url)}" readonly>
             <button type="button" class="kb-btn" data-kact="share-copy">複製</button>
         </div>
-        <div class="note">關掉再開會換一組新網址，舊的立刻失效。</div>` : ''}
+        <div class="note">改勾選不會換網址；關掉再開才會換一組新的，舊的立刻失效。</div>` : ''}
     </div>`;
+}
+
+/** 勾／取消一項要分享的內容。 */
+export async function togglePart(key, on) {
+    if (!S.book || !S.share) return;
+    const bookId = S.book.id;
+    const before = S.share.parts || [];
+    const next = on ? [...new Set([...before, key])] : before.filter((k) => k !== key);
+    S.share = { ...S.share, parts: next };
+    editInfo(S.infoEdit);
+    try {
+        S.share = await api(`/${encodeURIComponent(bookId)}/share`, { method: 'PUT', body: { on: true, parts: next } });
+        if (!alive() || !S.book || S.book.id !== bookId) return;
+        editInfo(S.infoEdit);
+    } catch (e) {
+        if (!alive()) return;
+        S.share = { ...S.share, parts: before };
+        editInfo(S.infoEdit);
+        toast('改不動：' + errText(e), true);
+    }
 }
 
 export async function loadShare() {
@@ -101,7 +140,8 @@ export async function toggleShare(on) {
     S.share = { ...(S.share || {}), on: !!on };
     editInfo(S.infoEdit);
     try {
-        S.share = await api(`/${encodeURIComponent(bookId)}/share`, { method: 'PUT', body: { on: !!on } });
+        S.share = await api(`/${encodeURIComponent(bookId)}/share`,
+            { method: 'PUT', body: { on: !!on, parts: (S.share && S.share.parts) || null } });
         if (!alive() || !S.book || S.book.id !== bookId) return;
         editInfo(S.infoEdit);
         toast(on ? '公開連結開好了' : '已關掉，舊連結失效');

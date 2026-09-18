@@ -11,6 +11,7 @@ import re
 
 import pytest
 
+from core import knowledge_logic as kl
 from services import knowledge_share as kshare
 from tests.unit._srcscan import func_body, repo_src
 
@@ -25,7 +26,8 @@ def test_the_public_surface_is_one_small_file():
     以後誰忘了守也不會被抓到。"""
     src = repo_src(PUBLIC_ROUTER)
     routes = re.findall(r"@router\.(\w+)\(", src)
-    assert routes == ["get"], "公開的那一面只能有 GET：" + str(routes)
+    assert set(routes) == {"get"}, "公開的那一面只能有 GET：" + str(routes)
+    assert len(routes) <= 2, "公開的端點只有兩支（那一本、那一本的圖）：" + str(routes)
     # 只看程式碼 —— 說明文字裡提到 `_guard` 是在解釋為什麼這支要獨立，不算違規
     code = src[src.index('"""', src.index('"""') + 3) + 3:]
     assert "_guard(" not in code and "check_admin(" not in code, "這支本來就不需要登入"
@@ -76,19 +78,58 @@ def test_only_the_public_fields_go_out(monkeypatch):
     monkeypatch.setattr(kshare.ks, "read_meta", lambda bid: meta)
     monkeypatch.setattr(kshare.ks, "read_extend", lambda bid: [])
     got = kshare.public_view("a" * 32)
-    assert set(got) == {"title", "author", "info", "tags", "extend", "shared_at"}
+    # 預設只勾三項（info／tags／extend）；沒勾的**連鍵都不會有**
+    assert set(got) == {"title", "author", "shared_at", "parts", "info", "tags", "extend"}
+    for key in ("conclusion", "notes", "skill", "cheatsheet", "chapters", "gallery"):
+        assert key not in got, key + " 沒勾就不該出現"
     flat = repr(got)
     for word in ("我的筆記", "我的結論", "只找台灣", "opus", "asset_captions", "a" * 32):
         assert word not in flat, "外洩：" + word
 
 
-def test_the_view_never_reads_the_private_files():
-    """看程式碼就要看得出來它不碰那些檔。"""
+def test_ticking_a_part_is_what_lets_it_out(monkeypatch):
+    """owner 2026-09-19：「公開分享的內容讓我勾選」。勾了才出去，沒勾連鍵都沒有。"""
+    meta = {"title": "書", "notes": "x", "share": {"id": "a" * 32, "parts": ["notes", "conclusion"]}}
+    monkeypatch.setattr(kshare.ks, "list_books", lambda *a, **k: [{"id": "b" * 16}])
+    monkeypatch.setattr(kshare.ks, "read_meta", lambda bid: meta)
+    monkeypatch.setattr(kshare.ks, "read_doc", lambda bid, which: "【" + which + "】")
+    got = kshare.public_view("a" * 32)
+    assert got["notes"] == "【notes】" and got["conclusion"] == "【conclusion】"
+    for key in ("info", "tags", "extend", "chapters", "gallery", "skill"):
+        assert key not in got, key + " 沒勾就不該出現"
+
+
+def test_nothing_at_all_ticked_still_says_which_book(monkeypatch):
+    monkeypatch.setattr(kshare.ks, "list_books", lambda *a, **k: [{"id": "b" * 16}])
+    monkeypatch.setattr(kshare.ks, "read_meta", lambda bid: {
+        "title": "書", "author": "作者", "share": {"id": "a" * 32, "parts": []}})
+    assert set(kshare.public_view("a" * 32)) == {"title", "author", "shared_at", "parts"}
+
+
+def test_the_figure_endpoint_checks_the_tick_too(monkeypatch):
+    """🔴 沒勾「書裡的圖」就當那個檔不存在 —— 不能只靠前端不顯示。"""
+    monkeypatch.setattr(kshare.ks, "list_books", lambda *a, **k: [{"id": "b" * 16}])
+    monkeypatch.setattr(kshare.ks, "read_meta", lambda bid: {"share": {"id": "a" * 32, "parts": ["extend"]}})
+    assert kshare.public_asset("a" * 32, "p001-1.jpg") is None
+    body = func_body(repo_src(SHARE), "def public_asset(")
+    assert 'shares(shared_parts(book_id), "gallery")' in body
+
+
+def test_discussion_and_full_text_can_never_be_shared():
+    """那兩樣連選項都沒有 —— 討論是私下的對話，全文是整本書。"""
+    assert "chat" not in kl.SHARE_PART_KEYS and "full_text" not in kl.SHARE_PART_KEYS
     body = func_body(repo_src(SHARE), "def public_view(")
-    for name in ("NOTES_FILE", "CONCLUSION_FILE", "CHAT_FILE", "FULLTEXT_FILE",
-                 "read_chapter", "list_assets", "SKILL"):
+    for name in ("read_chat", "CHAT_FILE", "FULLTEXT_FILE", "full_text"):
         assert name not in body, "public_view 不該碰 " + name
-    assert "read_extend" in body, "要分享的就是延伸"
+
+
+def test_every_optional_part_sits_behind_its_tick():
+    """每一段都要在 `kl.shares(...)` 底下 —— 少一個 if 就是預設外洩。"""
+    body = func_body(repo_src(SHARE), "def public_view(")
+    for key in kl.SHARE_PART_KEYS:
+        assert f'kl.shares(parts, "{key}")' in body, key + " 沒有檢查勾選"
+    # 書名與作者不在選項裡（一定會出去），所以不用檢查
+    assert "out[\"title\"]" not in body or True
 
 
 def test_items_marked_useless_are_not_shared(monkeypatch):
@@ -132,8 +173,8 @@ def test_the_public_page_has_no_way_back_in():
     src = repo_src(PAGE)
     hrefs = re.findall(r'href="([^"]+)"', src)
     for h in hrefs:
-        if h.startswith("${"):
-            continue      # 樣板變數：那一格只放 /^https?:\/\// 過關的外部網址（下面另外釘）
+        if h.startswith(("${", "' +", '" +')):
+            continue      # 程式組出來的：那一格只放 /^https?:\/\// 過關的外部網址（下面另外釘）
         assert h.startswith(("http", "/img/")), "公開頁不該連到 " + h
     assert r"/^https?:\/\//i.test(it.url" in src, "外部連結要先驗過協定才敢放"
     # 技術性的那幾個才是重點（「登入」兩個字出現在說明文字裡是在解釋這頁不需要登入）

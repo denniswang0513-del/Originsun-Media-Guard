@@ -903,6 +903,23 @@ def rate_extend(book_id: str, n: int, rating: str) -> dict:
     return hit
 
 
+_PUBLIC_DOCS = {"conclusion": CONCLUSION_FILE, "notes": NOTES_FILE,
+                "skill": "SKILL.md", "cheatsheet": "cheatsheet.md"}
+
+
+def read_doc(book_id: str, which: str) -> str:
+    """讀這本書的某一份文件（給 knowledge_share 用）。名字只認白名單，不拼外面來的字。"""
+    fname = _PUBLIC_DOCS.get(str(which or ""))
+    if not fname:
+        raise ChapterNotFound(which)
+    return _read_text(os.path.join(book_dir(book_id), fname))
+
+
+def chapter_rows_public(book_id: str) -> list:
+    """章節清單（給 knowledge_share 用）。"""
+    return _chapter_rows(book_id, read_meta(book_id))
+
+
 def now_iso() -> str:
     """給 services/knowledge_share.py 用（那支不該碰私有的 `_now_iso`）。"""
     return _now_iso()

@@ -6,13 +6,19 @@ owner 2026-09-19：「可以有一個公開分享的連結，讓我把這本書�
 
 🔴 這支決定「外面的人看得到什麼」。改它之前先想清楚：那一頁**不需要登入**。
 
-分享出去的是 **延伸**（研究助理從網路上找到的資料）＋ 這本書是哪一本。
-理由：延伸每一則本來就是公開發表的東西、而且附出處與連結，轉給別人看沒有問題。
-**不分享**筆記、結論、討論（那是他自己的），也不分享章節重點、骨架、全文、書裡的圖
-（那是原書的內容，公開有版權問題）。
+**哪些東西出去由他自己勾**（owner 2026-09-19：「公開分享的內容讓我勾選」）——
+清單與預設在 `knowledge_logic.SHARE_PARTS`。書名與作者一定會出去（那是在講哪一本書），
+其餘沒勾就不在回傳裡，連鍵都不會有。
+
+預設只開三項：基本資訊、標籤、延伸。延伸每一則本來就是公開發表的東西、附出處與連結，
+轉給別人看沒有問題。筆記與結論是他自己的；章節重點、骨架、書裡的圖是原書的內容
+（公開有版權問題）—— 那幾項預設關，勾了才出去，畫面上也寫著那是誰的東西。
+
+**討論（chat.json）與全文（full_text.txt）任何情況都不分享**，沒有那個選項。
 """
 from __future__ import annotations
 
+import os
 import re
 import secrets
 from typing import Optional
@@ -39,22 +45,30 @@ def share_url(share_id: str) -> str:
 
 
 def share_of(book_id: str) -> dict:
-    """這本書的分享狀態：`{on, id, url, at}`。沒開就 `on=False`。"""
+    """這本書的分享狀態：`{on, id, url, at, parts}`。沒開就 `on=False`。"""
     sh = ks.read_meta(book_id).get("share") or {}
     sid = sh.get("id") if is_valid_share_id(sh.get("id")) else ""
-    return {"on": bool(sid), "id": sid, "url": share_url(sid) if sid else "", "at": sh.get("at") or ""}
+    return {"on": bool(sid), "id": sid, "url": share_url(sid) if sid else "",
+            "at": sh.get("at") or "",
+            # 舊的分享沒有 parts（2026-09-19 之前開的）→ 用預設那組，行為不變
+            "parts": kl.normalize_parts(sh.get("parts"))}
 
 
-def set_share(book_id: str, on: bool) -> dict:
-    """開或關。關掉再開會換一組新的 id —— 舊連結立刻失效（那才是「關掉」該有的意思）。"""
+def set_share(book_id: str, on: bool, parts=None) -> dict:
+    """開或關、順便改要分享哪幾項。
+
+    關掉再開會換一組新的 id —— 舊連結立刻失效（那才是「關掉」該有的意思）。
+    已經開著的話只換 `parts`，id 不動（他調整勾選不該讓已經發出去的連結失效）。
+    """
     if not on:
         ks.update_meta_share(book_id, None)
-        return {"on": False, "id": "", "url": "", "at": ""}
+        return {"on": False, "id": "", "url": "", "at": "", "parts": list(kl.SHARE_DEFAULT)}
     cur = share_of(book_id)
+    picked = kl.normalize_parts(parts if parts is not None else cur["parts"])
     if cur["on"]:
-        return cur
-    sid = new_share_id()
-    ks.update_meta_share(book_id, {"id": sid, "at": ks.now_iso()})
+        ks.update_meta_share(book_id, {"id": cur["id"], "at": cur["at"], "parts": picked})
+    else:
+        ks.update_meta_share(book_id, {"id": new_share_id(), "at": ks.now_iso(), "parts": picked})
     return share_of(book_id)
 
 
@@ -71,24 +85,60 @@ def _find_book(share_id: str) -> Optional[str]:
     return None
 
 
+def shared_parts(book_id: str) -> list:
+    return share_of(book_id)["parts"]
+
+
 def public_view(share_id: str) -> Optional[dict]:
     """公開頁要的那一包。查不到就回 None（端點一律回同一句 404）。
 
-    🔴 這裡列出來的就是外面看得到的**全部**。不要加 notes／conclusion／chapters／skill／full_text。
+    🔴 **沒勾的項目連鍵都不會出現**。書名與作者一定在（那是在講哪一本書）。
+    討論與全文任何情況都不出去 —— 這裡沒有那兩個分支。
     """
     book_id = _find_book(share_id)
     if not book_id:
         return None
     meta = ks.read_meta(book_id)
-    rows = [i for i in ks.read_extend(book_id) if i.get("rating") != "useless"]
-    return {
+    parts = kl.normalize_parts((meta.get("share") or {}).get("parts"))
+    out = {
         "title": meta.get("title") or "",
         "author": meta.get("author") or "",
-        "info": kl.normalize_info(meta.get("info")),
-        "tags": kl.normalize_tags(meta.get("tags")),
-        "extend": [{k: i.get(k, "") for k in
-                    ("date", "title_zh", "title_original", "url", "lang", "source",
-                     "published", "summary_zh", "why_it_matters", "chapter_guess")}
-                   for i in rows],
         "shared_at": (meta.get("share") or {}).get("at") or "",
+        "parts": parts,
     }
+    if kl.shares(parts, "info"):
+        out["info"] = kl.normalize_info(meta.get("info"))
+    if kl.shares(parts, "tags"):
+        out["tags"] = kl.normalize_tags(meta.get("tags"))
+    if kl.shares(parts, "extend"):
+        rows = [i for i in ks.read_extend(book_id) if i.get("rating") != "useless"]
+        out["extend"] = [{k: i.get(k, "") for k in
+                          ("date", "title_zh", "title_original", "url", "lang", "source",
+                           "published", "summary_zh", "why_it_matters", "chapter_guess")}
+                         for i in rows]
+    if kl.shares(parts, "conclusion"):
+        out["conclusion"] = ks.read_doc(book_id, "conclusion")
+    if kl.shares(parts, "notes"):
+        out["notes"] = ks.read_doc(book_id, "notes")
+    if kl.shares(parts, "skill"):
+        out["skill"] = ks.read_doc(book_id, "skill")
+        out["cheatsheet"] = ks.read_doc(book_id, "cheatsheet")
+    if kl.shares(parts, "chapters"):
+        out["chapters"] = [{"n": c["n"], "title": c.get("title") or "",
+                            "md": ks.read_chapter(book_id, c["n"]).get("md") or ""}
+                           for c in ks.chapter_rows_public(book_id)]
+    if kl.shares(parts, "gallery"):
+        out["gallery"] = ks.list_assets(book_id)
+    return out
+
+
+def public_asset(share_id: str, name: str) -> Optional[str]:
+    """公開頁要看圖時的檔案路徑。**沒勾「書裡的圖」就一律回 None**（連檔名對不對都不用談）。"""
+    book_id = _find_book(share_id)
+    if not book_id or not kl.shares(shared_parts(book_id), "gallery"):
+        return None
+    try:
+        path = ks.asset_path(book_id, name)
+    except Exception:
+        return None
+    return path if os.path.isfile(path) else None

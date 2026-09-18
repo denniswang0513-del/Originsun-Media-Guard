@@ -50,8 +50,20 @@ def test_the_link_field_only_takes_http(bad):
 def test_the_form_matches_the_back_end_field_list():
     """前端的標籤與後端的鍵要對得起來 —— 少一個那一格就永遠存不進去。"""
     js = repo_src(INFO)
-    keys = re.findall(r"^\s*\['([a-z_]+)',", js, re.M)
+    # 只看 INFO_FIELDS 那一段 —— 同一個檔裡還有 SHARE_PARTS，長得一樣
+    block = js[js.index("export const INFO_FIELDS"):]
+    block = block[:block.index("];")]
+    keys = re.findall(r"\['([a-z_]+)',", block)
     assert keys == list(kl.INFO_KEYS), f"前端 {keys} ≠ 後端 {list(kl.INFO_KEYS)}"
+
+
+def test_the_share_checkboxes_match_the_back_end_list():
+    """勾選的鍵也要對得起來 —— 多一個前端勾了沒用，少一個那項永遠分享不出去。"""
+    js = repo_src(INFO)
+    block = js[js.index("export const SHARE_PARTS"):]
+    block = block[:block.index("];")]
+    keys = re.findall(r"\['([a-z_]+)',", block)
+    assert keys == list(kl.SHARE_PART_KEYS), f"前端 {keys} ≠ 後端 {list(kl.SHARE_PART_KEYS)}"
 
 
 def test_info_replaces_the_whole_block_not_key_by_key():

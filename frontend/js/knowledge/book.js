@@ -8,7 +8,7 @@
  * 這裡 fetch 成 blob 再填 —— `<img src>` 送不了 Authorization，圖是私有的。
  */
 import { mdToHtml } from '../shared/md-lite.js';
-import { API, S, PANES, COMPILE_POLL_MS, api, esc, errText, stageText, alive, toast, stopTimers, normBook,
+import { API, S, PANES, TAGS_MAX, COMPILE_POLL_MS, api, esc, errText, stageText, alive, toast, stopTimers, normBook,
          chapterList, bookTags, parseTags, statusPill, tagsHtml, figureSource } from './ctx.js';
 import { bearerHeader } from '../shared/utils.js';
 import { loadShelf, refreshShelfQuietly } from './shelf.js';
@@ -38,11 +38,18 @@ export async function openBook(id, { compile: thenCompile = false } = {}) {
 function _tagsRowHtml(b) {
     const tags = bookTags(b);
     if (S.editingTags) {
+        // 一顆一顆加（owner 2026-09-19：「標籤我需要的是可以增加很多個」）——
+        // 原本是一個逗號分隔的輸入框，塞在窄欄裡很難加到第五個以後。
         return `<div class="kb-tags-edit">
-            <input type="text" id="kb-tags-input" class="kb-input" value="${esc(tags.join(', '))}" placeholder="逗號分隔，例如：財務, 投資">
+            <div class="chips">${tags.map((t, i) => `<span class="kb-tag on">${esc(t)}
+                <button type="button" data-kact="tag-del" data-i="${i}" aria-label="移除 ${esc(t)}">×</button></span>`).join('')}
+                ${tags.length ? '' : '<span class="none">還沒有標籤</span>'}</div>
+            <input type="text" id="kb-tags-input" class="kb-input"
+                placeholder="打一個標籤按 Enter 就加一個（也可以一次貼多個，用逗號分隔）">
             <div class="row">
-                <button type="button" class="kb-btn pri" data-kact="tags-save">儲存標籤</button>
-                <button type="button" class="kb-btn" data-kact="tags-cancel">取消</button>
+                <button type="button" class="kb-btn pri" data-kact="tags-add">加進去</button>
+                <button type="button" class="kb-btn" data-kact="tags-done">完成</button>
+                <span class="note">${tags.length}／${TAGS_MAX} 個</span>
             </div></div>`;
     }
     return `<div class="kb-tags" id="kb-tags">${tags.length ? tagsHtml(tags) : '<span class="none">沒有標籤</span>'}
@@ -57,7 +64,10 @@ export function renderBook() {
     // 寬螢幕的左欄維持原樣 —— 同一份 HTML，差別全在 knowledge.css 的 @media。
     S.root.innerHTML = `
       <div class="kb-book">
-        <aside class="kb-side">
+        <!-- 表頭跨整個寬度（owner 2026-09-19：「紅框處滿寬，他是表頭」）——
+             書名不用在 300px 的欄位裡折行，標籤也才有地方一顆一顆加。
+             窄螢幕它收成一行（見 knowledge.css 的 @media），⋯ 抽屜在那時才出現。 -->
+        <div class="kb-bookhead">
             <div class="kb-head">
                 <button type="button" class="kb-link kb-back" data-kact="back" aria-label="回書架">← <span class="w">書架</span></button>
                 <h3 id="kb-title">${esc(b.title || b.source_name || '（未命名）')}</h3>
@@ -68,6 +78,8 @@ export function renderBook() {
             <div class="st"><span class="stage" id="kb-stage">${compiling ? esc(stageText(b.stage)) : ''}</span></div>
             ${b.status === 'failed' && b.error ? `<div class="err" title="${esc(b.error)}">編譯失敗：${esc(String(b.error).slice(0, 80))}</div>` : ''}
             <div id="kb-tags-row">${_tagsRowHtml(b)}</div>
+        </div>
+        <aside class="kb-side">
             <nav class="kb-tabs">${PANES.map(([k, l]) => `<button type="button" data-kact="pane" data-pane="${k}" class="${k === S.pane ? 'on' : ''}">${l}</button>`).join('')}</nav>
             <div class="kb-actions">
                 ${pending
@@ -214,6 +226,44 @@ export function editTags(on) {
     _rerenderTags();
     const input = S.root.querySelector('#kb-tags-input');
     if (input) input.focus();
+}
+
+/** 把輸入框裡的字加成標籤（逗號或 Enter 都可以），立刻存。 */
+export async function addTags() {
+    const input = S.root.querySelector('#kb-tags-input');
+    if (!input || !S.book) return;
+    const add = parseTags(input.value);
+    if (!add.length) return;
+    input.value = '';
+    await _putTags([...bookTags(S.book), ...add]);
+    const again = S.root.querySelector('#kb-tags-input');
+    if (again) again.focus();
+}
+
+/** 移除第 i 個標籤。 */
+export async function removeTag(i) {
+    if (!S.book) return;
+    const next = bookTags(S.book).filter((_, k) => k !== Number(i));
+    await _putTags(next);
+}
+
+async function _putTags(tags) {
+    const bookId = S.book.id;
+    const before = bookTags(S.book);
+    S.book.tags = tags;
+    _rerenderTags();
+    try {
+        const d = await api(`/${encodeURIComponent(bookId)}`, { method: 'PUT', body: { tags } });
+        if (!alive() || !S.book || S.book.id !== bookId) return;
+        S.book.tags = (d && Array.isArray(d.tags)) ? d.tags : tags;   // 後端會去重、截長、擋上限
+        _rerenderTags();
+        refreshShelfQuietly();
+    } catch (e) {
+        if (!alive() || !S.book || S.book.id !== bookId) return;
+        S.book.tags = before;
+        _rerenderTags();
+        toast('標籤存不起來：' + errText(e), true);
+    }
 }
 
 export async function saveTags(btn) {

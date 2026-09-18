@@ -47,24 +47,26 @@
   .eyebrow { font-size: 11px; letter-spacing: 0.35em; text-transform: uppercase; color: var(--sub); }
   .accent { color: var(--red); }
 
-  header { position: sticky; top: 0; z-index: 50; display: flex; align-items: center;
+  /* 只限最外層那個頁首 —— 不加 body > 的話，頁面內容裡任何一個 <header> 都會變成
+     sticky 的 flex 列（2026-09-19 書頁表頭就這樣被撞到）。 */
+  body > header { position: sticky; top: 0; z-index: 50; display: flex; align-items: center;
     justify-content: space-between; padding: 14px 20px; background: var(--panel);
     padding-left: max(20px, env(safe-area-inset-left));
     padding-right: max(20px, env(safe-area-inset-right));
     backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
-  header .brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300;
+  body > header .brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300;
     display: inline-flex; align-items: center; gap: 9px; white-space: nowrap;
     color: inherit; cursor: pointer; padding: 4px 6px; margin: -4px -6px; border-radius: 6px; }
-  header .brand-name:hover { background: var(--soft); }
+  body > header .brand-name:hover { background: var(--soft); }
   /* 記號是「三道浪」（frontend/img/knowledge-icon.svg，owner 2026-09-18 拍板）：源日本家那三道橫線起伏而成，
      午夜藍底、天藍到淡紫藍的漸層。PNG 各尺寸同資料夾，給分頁圖示與手機主畫面用。 */
-  header .brand-mark { display: block; border-radius: 6px; flex: none; }
+  body > header .brand-mark { display: block; border-radius: 6px; flex: none; }
   @media (max-width: 640px) {
-    header .brand-name { letter-spacing: 0.1em; gap: 7px; }
-    header .brand-mark { width: 22px; height: 22px; }
+    body > header .brand-name { letter-spacing: 0.1em; gap: 7px; }
+    body > header .brand-mark { width: 22px; height: 22px; }
   }
-  header .hdr-right { display: flex; align-items: center; gap: 12px; }
-  header .hdr-user { font-size: 12px; color: var(--sub); }
+  body > header .hdr-right { display: flex; align-items: center; gap: 12px; }
+  body > header .hdr-user { font-size: 12px; color: var(--sub); }
   .btn-ghost { background: none; border: 1px solid var(--line); border-radius: 2px;
     padding: 6px 14px; font-size: 12px; color: var(--sub); cursor: pointer; }
   .btn-ghost:hover { color: var(--red); border-color: var(--red); }
@@ -87,7 +89,7 @@
   .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   .err { display: none; color: var(--danger); font-size: 12px; margin-top: 14px; line-height: 1.6; }
   .state-msg { color: var(--sub); font-size: 13px; padding: 24px 0; text-align: center; }
-  html.embed header { display: none; }
+  html.embed body > header { display: none; }
   html.embed main { padding-top: 14px; }
 
   main { max-width: 1240px; margin: 0 auto; padding: 28px 24px 60px;
@@ -104,7 +106,7 @@
     main { padding: 16px 12px 40px;
       padding-left: max(16px, env(safe-area-inset-left));
       padding-right: max(16px, env(safe-area-inset-right)); }
-    header { padding: 12px 14px;
+    body > header { padding: 12px 14px;
       padding-left: max(14px, env(safe-area-inset-left));
       padding-right: max(14px, env(safe-area-inset-right)); }
   }
@@ -129,7 +131,7 @@
       --ok-bg: #0E3226; --warn-bg: #32270F; --bad-bg: #331616; --na-bg: #13294B;
       --shadow: rgba(0,0,0,.5); --shadow-soft: rgba(0,0,0,.45);
     }
-    header { background: var(--bg); }
+    body > header { background: var(--bg); }
     /* 深色底下的輸入框游標與自動填入 */
     input, textarea { caret-color: var(--red); }
   }

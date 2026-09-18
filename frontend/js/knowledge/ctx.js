@@ -16,6 +16,7 @@ export { esc };
 
 export const API = '/api/v1/knowledge';
 export const OFFLINE_MSG = '書架需要主控主機在線';
+export const TAGS_MAX = 24;      // 同後端 core/knowledge_logic.TAGS_MAX（測試會比對）
 export const CHAT_POLL_MS = 1000;
 export const CHAT_GIVE_UP_MS = 10 * 60 * 1000;
 export const CONCLUDE_POLL_MS = 2000;

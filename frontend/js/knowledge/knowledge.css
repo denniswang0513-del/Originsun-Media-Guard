@@ -92,12 +92,9 @@
    2026-09-18 手機上就是這樣被切掉的：容器 358px，欄位卻被算成 503px。 */
 .kb .kb-book > * { min-width: 0; }
 .kb .kb-side { position: sticky; top: 70px; display: flex; flex-direction: column; gap: 10px; }
-.kb .kb-side .kb-back { align-self: flex-start; }
-.kb .kb-side h3 { margin: 0; font-size: 18px; font-weight: 500; line-height: 1.4; }
-.kb .kb-side .a { color: var(--sub); font-size: 13px; }
-.kb .kb-side .st { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.kb .kb-side .stage { color: var(--warn); font-size: 12.5px; }
-.kb .kb-side .err { color: var(--red); font-size: 12.5px; line-height: 1.5; }
+/* 書名那幾行 2026-09-19 搬到跨整頁的 .kb-bookhead 了；這裡只剩分頁與動作 */
+.kb .kb-bookhead .kb-back { align-self: flex-start; }
+.kb .kb-bookhead h3 { margin: 0; font-size: 19px; font-weight: 500; line-height: 1.4; }
 .kb .kb-tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .kb .kb-tags .none { color: var(--sub); font-size: 12.5px; }
 .kb .kb-tags-edit { display: flex; flex-direction: column; gap: 8px; }
@@ -318,6 +315,37 @@
 .kb .kb-share-link .kb-input { flex: 1; min-width: 0; font-size: 12.5px; }
 .kb .kb-share-link .kb-btn { flex: none; }
 
+/* 分享要放哪些東西，他自己勾（owner 2026-09-19）。 */
+.kb .kb-share-parts { margin: 12px 0 4px; display: flex; flex-direction: column; gap: 2px; }
+.kb .kb-share-parts label { display: flex; align-items: baseline; gap: 9px; padding: 7px 0;
+    min-height: 40px; cursor: pointer; font-size: 13.5px; }
+.kb .kb-share-parts input { width: 17px; height: 17px; flex: none; cursor: pointer; align-self: center; }
+.kb .kb-share-parts .l { flex: none; }
+.kb .kb-share-parts .w { color: var(--sub); font-size: 12.5px; line-height: 1.5; }
+
+@media (max-width: 640px) {
+    .kb .kb-share-parts label { flex-wrap: wrap; min-height: 44px; }
+    .kb .kb-share-parts .w { flex-basis: 100%; padding-left: 26px; }
+}
+
+/* 書頁表頭跨整個寬度（owner 2026-09-19：「紅框處滿寬，他是表頭」）。
+   書名不用在 300px 的欄位裡折行，標籤也才有地方一顆一顆加。 */
+.kb .kb-bookhead { grid-column: 1 / -1; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.kb .kb-bookhead .a { color: var(--sub); font-size: 13px; margin-top: 2px; }
+.kb .kb-bookhead .st { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kb .kb-bookhead .stage { color: var(--warn); font-size: 12.5px; }
+.kb .kb-bookhead .err { color: var(--danger); font-size: 12.5px; line-height: 1.5; }
+.kb .kb-bookhead #kb-tags-row { margin-top: 10px; }
+
+/* 標籤一顆一顆加 */
+.kb .kb-tags-edit .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.kb .kb-tags-edit .chips .none { color: var(--sub); font-size: 12.5px; }
+.kb .kb-tag.on { display: inline-flex; align-items: center; gap: 4px; padding-right: 4px; }
+.kb .kb-tag.on button { background: none; border: 0; color: var(--sub); cursor: pointer;
+    font-size: 15px; line-height: 1; padding: 2px 4px; font-family: inherit; }
+.kb .kb-tag.on button:hover { color: var(--danger); }
+.kb .kb-tags-edit .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+
 /* 窄一點：書頁單欄 */
 @media (max-width: 899px) {
     .kb .kb-book { grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -331,6 +359,7 @@
        捲過去就一起走了。窄螢幕把 .kb-side 變成 display:contents，子元素直接成為 .kb-book
        的格線項，容器變成整個書頁（夠高），DOM 不用動。 */
     .kb .kb-side { display: contents; }
+    .kb .kb-bookhead { padding-bottom: 0; border-bottom: 0; }
     .kb .kb-tabs { position: sticky; top: 56px; z-index: 20; background: var(--bg); }
     .kb .kb-tabs button { min-height: 44px; }
     .kb .kb-doc .tools .kb-link { min-height: 44px; }
@@ -365,11 +394,11 @@
     .kb .kb-head .kb-back .w { display: none; }
     .kb .kb-head .kb-more { display: block; flex: none; width: 44px; min-height: 44px; background: none;
         border: 1px solid var(--line); border-radius: 8px; color: var(--sub); font-size: 17px; cursor: pointer; font-family: inherit; }
-    .kb .kb-side .a,
-    .kb .kb-side #kb-tags-row,
+    .kb .kb-bookhead .a,
+    .kb .kb-bookhead #kb-tags-row,
     .kb .kb-actions,
     .kb .kb-chat-foot .row.wide-only { display: none; }
-    .kb .kb-side .st:empty, .kb .kb-side .st { min-height: 0; }
+    .kb .kb-bookhead .st:empty, .kb .kb-bookhead .st { min-height: 0; }
     .kb .kb-book { gap: 10px; }
     /* .kb-side 變成 display:contents 之後，它的 gap 不再作用，剩下的子元素自己留間距 */
     .kb .kb-head { padding-top: 4px; }
@@ -378,5 +407,5 @@
     .kb .kb-chat { padding-bottom: 8px; }
     .kb .kb-chat-foot { padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); }
     /* 編輯標籤是從抽屜叫出來的，叫出來就要看得到 */
-    .kb .kb-side #kb-tags-row:has(.kb-tags-edit) { display: block; }
+    .kb .kb-bookhead #kb-tags-row:has(.kb-tags-edit) { display: block; }
 }

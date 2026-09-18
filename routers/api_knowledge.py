@@ -79,6 +79,8 @@ class WatchPayload(BaseModel):
 
 class SharePayload(BaseModel):
     on: bool
+    # 要分享哪幾項（§9.9）。白名單在 knowledge_logic.normalize_parts；None＝沿用現在的設定
+    parts: Optional[list[str]] = None
 
 
 class RatePayload(BaseModel):
@@ -230,7 +232,7 @@ async def share_get(book_id: str, request: Request):
 async def share_put(book_id: str, body: SharePayload, request: Request):
     """開或關。關掉再開會換一組新的 id —— 舊連結立刻失效。"""
     _guard(request)
-    return _book_or_404(kshare.set_share, book_id, bool(body.on))
+    return _book_or_404(kshare.set_share, book_id, bool(body.on), body.parts)
 
 
 @router.get("/{book_id}")

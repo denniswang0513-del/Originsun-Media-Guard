@@ -14,11 +14,11 @@
 import { S, hooks, nav, stopTimers } from './ctx.js';
 import { loadShelf, renderShelf, setTag, refreshShelfQuietly, createPending } from './shelf.js';
 import {
-    openBook, renderPane, refetchBook, switchPane, editTags, saveTags, saveDoc, openChapter, compile, rename, remove, toggleSheet, jumpToSection,
+    openBook, renderPane, refetchBook, switchPane, editTags, saveTags, addTags, removeTag, saveDoc, openChapter, compile, rename, remove, toggleSheet, jumpToSection,
 } from './book.js';
 import { send, saveConclusion, openConclusionEdit, cancelConclusionEdit, conclude } from './chat.js';
 import { loadReports, openReport, openFromHash, leaveReports } from './report.js';
-import { editInfo, saveInfo, toggleShare, copyShare } from './info.js';
+import { editInfo, saveInfo, toggleShare, copyShare, togglePart } from './info.js';
 import { runExtend, collectOne, rateExtend, toggleWatch, toggleWatchAll,
     editFocus, saveFocus } from './extend.js';
 
@@ -43,6 +43,12 @@ export async function mountKnowledge({ host, fetch, toast }) {
 
 /** 卡片是 div[role=button]：鍵盤 Enter／Space 也要能開 */
 function _onKey(ev) {
+    // 標籤輸入框：Enter 就加一個（不要送出整頁，也不要跟卡片的 Enter 混在一起）
+    if (ev.key === 'Enter' && ev.target && ev.target.id === 'kb-tags-input') {
+        ev.preventDefault();
+        addTags();
+        return;
+    }
     if (ev.key !== 'Enter' && ev.key !== ' ') return;
     const el = ev.target.closest('.kb-card[data-kact="open"], .kb-card[data-kact="report"]');
     if (!el) return;
@@ -82,9 +88,13 @@ function _onClick(ev) {
     if (act === 'info-save') { saveInfo(); return; }
     if (act === 'share-toggle') { toggleShare(el.checked); return; }
     if (act === 'share-copy') { copyShare(); return; }
+    if (act === 'share-part') { togglePart(el.dataset.k, el.checked); return; }
     if (act === 'tags-edit') { toggleSheet(false); editTags(true); return; }
     if (act === 'tags-cancel') { editTags(false); return; }
     if (act === 'tags-save') { saveTags(el); return; }
+    if (act === 'tags-add') { addTags(); return; }
+    if (act === 'tags-done') { editTags(false); return; }
+    if (act === 'tag-del') { removeTag(el.dataset.i); return; }
     if (act === 'send') { send(); return; }
     if (act === 'save-conclusion') { openConclusionEdit(Number(el.dataset.idx)); return; }
     if (act === 'conc-save') { saveConclusion(Number(el.dataset.idx)); return; }
