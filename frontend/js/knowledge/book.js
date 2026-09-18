@@ -200,12 +200,13 @@ async function _fillAssets(host) {
     const imgs = [...host.querySelectorAll('img[data-md-src]')];
     if (!imgs.length || !S.book) return;
     const bookId = S.book.id;
-    for (const img of imgs) {
+    // 每張各自抓、一起等：一章幾十張圖一張一張排隊會等很久，而彼此之間沒有先後
+    const one = async (img) => {
         const rel = img.dataset.mdSrc || '';
-        if (!/^assets\/[A-Za-z0-9._-]+$/.test(rel)) continue;     // 只認我們自己產的那種
+        if (!/^assets\/[A-Za-z0-9._-]+$/.test(rel)) return;     // 只認我們自己產的那種
         try {
             const r = await fetch(`${API}/${encodeURIComponent(bookId)}/${rel}`, { headers: bearerHeader() });
-            if (!r.ok) continue;
+            if (!r.ok) return;
             const url = URL.createObjectURL(await r.blob());
             if (!alive() || !S.book || S.book.id !== bookId) { URL.revokeObjectURL(url); return; }
             (S.assetUrls = S.assetUrls || []).push(url);
@@ -222,7 +223,8 @@ async function _fillAssets(host) {
                 img.insertAdjacentElement('afterend', cap);
             }
         } catch (_) { /* 一張拿不到就算了，alt 還在 */ }
-    }
+    };
+    await Promise.all(imgs.map(one));
 }
 
 export function renderPane() {

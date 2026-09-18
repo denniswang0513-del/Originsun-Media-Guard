@@ -37,19 +37,26 @@ class ReportNotFound(Exception):
     """id 不合規或那一期的檔不在（端點回 404）。跟書分開，訊息才講得對東西。"""
 
 
-def settings_report() -> dict:
-    """`settings.knowledge.report`（讀不到就用預設：開、週一、9 點）。"""
-    try:
-        from config import load_settings
-        raw = ((load_settings().get("knowledge") or {}).get("report") or {})
-    except Exception:
-        raw = {}
+def settings_report(settings: dict | None = None) -> dict:
+    """`settings.knowledge.report`（讀不到就用預設：開、週一、9 點）。`settings` 給了就不再讀檔。"""
+    if settings is None:
+        try:
+            from config import load_settings
+            settings = load_settings()
+        except Exception:
+            settings = {}
+    raw = ((settings.get("knowledge") or {}).get("report") or {})
     from services.knowledge_watch import _int_in
     return {
         "enabled": True if raw.get("enabled") is None else bool(raw.get("enabled")),
         "weekday": _int_in(raw.get("weekday"), 0, 0, 6),      # 0＝週一
         "hour": _int_in(raw.get("hour"), 9, 0, 23),
     }
+
+
+def report_hour(settings: dict) -> int:
+    """給 `_run_daily_master_task` 的 `hour_getter`（同 knowledge_watch.watch_hour）：吃底座已經讀好的那份設定，不再讀一次檔。"""
+    return settings_report(settings)["hour"]
 
 
 # ── 檔案 ─────────────────────────────────────────────────────
@@ -181,7 +188,7 @@ async def daily_check() -> None:
         for rep in await asyncio.to_thread(daily_check_sync, now.date()):
             if rep.get("n"):
                 logger.info("研究報告 %s：%d 則，Discord %s",
-                            rep["id"], rep["n"], "推了" if rep.get("pushed") else "沒推（沒設 webhook）")
+                            rep["id"], rep["n"], "推了" if rep.get("pushed") else "沒推（沒設 webhook，或 Discord 那一發失敗）")
 
     await _run_daily_master_task(TASK_KEY, "", _body,
-                                 hour_getter=lambda s: settings_report()["hour"])
+                                 hour_getter=report_hour)

@@ -110,20 +110,35 @@ export async function saveFocus() {
     const focus = ta.value.trim();
     const bookId = S.book.id;
     const before = S.book.focus || '';
-    S.book.focus = focus;
-    S.focusEdit = false;
+    await _optimistic({
+        set: () => { S.book.focus = focus; S.focusEdit = false; },
+        undo: () => { S.book.focus = before; },
+        call: () => api(`/${encodeURIComponent(bookId)}`, { method: 'PUT', body: { focus } }),
+        onOk: (b) => { if (b && typeof b.focus === 'string') S.book.focus = b.focus; },   // 後端會截到 300 字
+        ok: focus ? '下次找的時候會照這個方向' : '已清掉，之後它自己判斷',
+        fail: '存不起來：',
+    });
+}
+
+/** 先動畫面再存、存不起來就改回去 —— 研究方向、兩道開關、評分四個地方同一套。
+ *  `set`／`undo` 改 S；`call` 打 API；`onOk(res)` 成功後要不要拿後端的值再改一次（可省）；
+ *  `ok` 成功的 toast（可省）；`fail` 失敗 toast 的前綴。切走這本書之後回來的結果一律丟掉。 */
+async function _optimistic({ set, undo, call, onOk, ok, fail }) {
+    const bookId = S.book ? S.book.id : '';
+    const stale = () => !alive() || (bookId && (!S.book || S.book.id !== bookId));
+    set();
     _rerender();
     try {
-        const b = await api(`/${encodeURIComponent(bookId)}`, { method: 'PUT', body: { focus } });
-        if (!alive() || !S.book || S.book.id !== bookId) return;
-        if (b && typeof b.focus === 'string') S.book.focus = b.focus;   // 後端會截到 300 字
+        const r = await call();
+        if (stale()) return;
+        if (onOk) onOk(r);
         _rerender();
-        toast(focus ? '下次找的時候會照這個方向' : '已清掉，之後它自己判斷');
+        if (ok) toast(ok);
     } catch (e) {
-        if (!alive() || !S.book || S.book.id !== bookId) return;
-        S.book.focus = before;
+        if (stale()) return;
+        undo();
         _rerender();
-        toast('存不起來：' + errText(e), true);
+        toast(fail + errText(e), true);
     }
 }
 
@@ -217,20 +232,14 @@ export function collectOne() {
 /** 全域那一道：關著的話，每本書自己開了也不會動。 */
 export async function toggleWatchAll(on) {
     const before = S.watchConf ? S.watchConf.enabled : false;
-    if (S.watchConf) S.watchConf.enabled = !!on;
-    _rerender();
-    try {
-        const w = await api('/watch', { method: 'PUT', body: { enabled: !!on } });
-        if (!alive()) return;
-        if (S.watchConf) S.watchConf = { ...S.watchConf, ...w };
-        _rerender();
-        toast(on ? '研究助理開了' : '研究助理關了');
-    } catch (e) {
-        if (!alive()) return;
-        if (S.watchConf) S.watchConf.enabled = before;
-        _rerender();
-        toast('改不動：' + errText(e), true);
-    }
+    await _optimistic({
+        set: () => { if (S.watchConf) S.watchConf.enabled = !!on; },
+        undo: () => { if (S.watchConf) S.watchConf.enabled = before; },
+        call: () => api('/watch', { method: 'PUT', body: { enabled: !!on } }),
+        onOk: (w) => { if (S.watchConf) S.watchConf = { ...S.watchConf, ...w }; },
+        ok: on ? '研究助理開了' : '研究助理關了',
+        fail: '改不動：',
+    });
 }
 
 /** 每週自動找：這本書的開關（另一道是上面的全域開關）。 */
@@ -238,18 +247,13 @@ export async function toggleWatch(on) {
     if (!S.book) return;
     const bookId = S.book.id;
     const before = !!S.book.watch;
-    S.book.watch = !!on;
-    _rerender();
-    try {
-        await api(`/${encodeURIComponent(bookId)}`, { method: 'PUT', body: { watch: !!on } });
-        if (!alive()) return;
-        toast(on ? '之後每週會自動找一次' : '已關掉每週自動找');
-    } catch (e) {
-        if (!alive() || !S.book || S.book.id !== bookId) return;
-        S.book.watch = before;
-        _rerender();
-        toast('改不動：' + errText(e), true);
-    }
+    await _optimistic({
+        set: () => { S.book.watch = !!on; },
+        undo: () => { S.book.watch = before; },
+        call: () => api(`/${encodeURIComponent(bookId)}`, { method: 'PUT', body: { watch: !!on } }),
+        ok: on ? '之後每週會自動找一次' : '已關掉每週自動找',
+        fail: '改不動：',
+    });
 }
 
 /** 評「有用／沒用」；`n` 是檔內流水號（不是第幾筆）。再按一次同一顆＝收回評分。 */
@@ -258,15 +262,12 @@ export async function rateExtend(n, rating) {
     const hit = (S.extend || []).find((i) => String(i.n) === String(n));
     if (!hit) return;
     const before = hit.rating || '';
-    hit.rating = rating;                                   // 先動畫面，失敗再改回來
-    _rerender();
-    try {
-        await api(`/${encodeURIComponent(S.book.id)}/extend/${encodeURIComponent(n)}`,
-            { method: 'PUT', body: { rating } });
-    } catch (e) {
-        if (!alive()) return;
-        hit.rating = before;
-        _rerender();
-        toast('存評分失敗：' + errText(e), true);
-    }
+    const bookId = S.book.id;
+    await _optimistic({
+        set: () => { hit.rating = rating; },               // 先動畫面，失敗再改回來
+        undo: () => { hit.rating = before; },
+        call: () => api(`/${encodeURIComponent(bookId)}/extend/${encodeURIComponent(n)}`,
+            { method: 'PUT', body: { rating } }),
+        fail: '存評分失敗：',
+    });
 }

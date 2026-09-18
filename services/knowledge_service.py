@@ -396,6 +396,7 @@ def _chapter_rows(book_id: str, meta: dict) -> list:
 def _summary(meta: dict, book_id: str) -> dict:
     d = book_dir(book_id)
     status = _effective_status(meta, book_id)
+    extend_total, extend_new = _extend_counts(d)      # 讀一次就好（書架每本都會叫）
     return {
         "id": book_id,
         "title": meta.get("title") or "",
@@ -413,8 +414,8 @@ def _summary(meta: dict, book_id: str) -> dict:
         "focus": meta.get("focus") or "",
         "info": meta.get("info") or {},
         "project": kl.normalize_project(meta.get("project")),
-        "has_extend": _extend_counts(d)[0] > 0,
-        "extend_new": _extend_counts(d)[1],
+        "has_extend": extend_total > 0,
+        "extend_new": extend_new,
         "stage": _stage.get(book_id, ""),
         "tags": kl.normalize_tags(meta.get("tags")),
     }
