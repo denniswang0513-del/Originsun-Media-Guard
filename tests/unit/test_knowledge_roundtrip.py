@@ -426,3 +426,12 @@ def test_opening_a_report_does_not_fetch_it_twice_via_hashchange():
     assert "=== _open" in guard and "return" in guard, "同一份已經開著 → 不再抓（判斷要在 openReport 之前）"
     assert "_open = ''" in js_func_body(js, "export function leaveReports(") or \
         "_open = ''" in js_func_body(js, "export async function loadReports("), "回書架／回清單要清掉"
+
+
+def test_asset_name_never_produces_a_name_the_whitelist_rejects():
+    """BUG-12：_page_images 的 k 是「所有內嵌圖」的列舉序號；k ≥ 100 時 asset_name 回 `p001-100.jpg`，
+    _ASSET_RE 只認一到兩位 → 檔寫進 assets/ 但永遠列不出來、也清不掉。產出的名字自己要過白名單。"""
+    assert kl.asset_name(1, 100, "jpg") == ""
+    assert kl.asset_name(123456, 1, "png") == ""
+    ok = kl.asset_name(42, 3, "jpeg")
+    assert ok == "p042-3.jpg" and kl.is_valid_asset(ok)

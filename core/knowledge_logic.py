@@ -1092,9 +1092,15 @@ def is_valid_asset(name) -> bool:
 
 
 def asset_name(page: int, k: int, ext: str) -> str:
-    """`(42, 1, 'jpeg')` → `p042-1.jpg`。副檔名不在白名單就回空字串（呼叫端跳過那張）。"""
+    """`(42, 1, 'jpeg')` → `p042-1.jpg`。副檔名不在白名單就回空字串（呼叫端跳過那張）。
+
+    產出的名字自己也要過 `is_valid_asset`：k 是「這一頁所有內嵌圖」的列舉序號，第 100 張起
+    會拼出 `p001-100.jpg` 這種白名單不認的名字 —— 檔寫進 assets/ 但永遠列不出來、也清不掉
+    （2026-09-19 /polish BUG-12）。
+    """
     e = {"jpeg": "jpg", "jpg": "jpg", "png": "png"}.get(str(ext or "").lower(), "")
-    return f"p{int(page):03d}-{int(k)}.{e}" if e else ""
+    name = f"p{int(page):03d}-{int(k)}.{e}" if e else ""
+    return name if is_valid_asset(name) else ""
 
 
 def asset_page(name: str) -> int:
