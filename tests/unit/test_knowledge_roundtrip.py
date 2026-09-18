@@ -346,3 +346,14 @@ class _NullSession:
 
     async def __aexit__(self, *a):
         return False
+
+
+def test_the_truncated_push_still_carries_the_report_link():
+    """BUG-5：太長的那一則正是唯一會說「完整的在報告檔裡」的，但連結（tail）接在切斷點之後 → 被切掉。"""
+    from services import knowledge_report as kr
+    from tests.unit.test_knowledge_report import _item
+    groups = [("書%d" % b, [_item(n=i, title_zh="標題" * 20, url="https://a.tw/%d-%d" % (b, i))
+                            for i in range(20)]) for b in range(10)]
+    text = kl.report_push_text("研究週報 2026-W38", groups, tail="完整報告：" + kr.report_url("weekly-2026-W38"))
+    assert "完整的在報告檔裡" in text and len(text) <= kl.PUSH_MAX_CHARS
+    assert "#report/weekly-2026-W38" in text, "截斷的那一則更需要連結"

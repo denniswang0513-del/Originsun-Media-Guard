@@ -1045,13 +1045,16 @@ def report_push_text(title: str, groups: list, *, tail: str = "",
         lines.append("")
     if left:
         lines.append(f"沒列出來的 {left} 則在完整報告裡。")
-    if tail:
-        lines.append(tail)
     text = "\n".join(lines).rstrip()
-    if len(text) <= max_chars:
-        return text
-    cut = text[:max_chars].rsplit("\n", 1)[0]
-    return cut + "\n…（太長了，完整的在報告檔裡）"
+    foot = ("\n" + tail) if tail else ""
+    if len(text) + len(foot) <= max_chars:
+        return text + foot
+    # 🔴 先切本文、最後才接 tail（報告連結）：截斷的那一則正是唯一會說「完整的在報告檔裡」的，
+    # 連結接在切斷點之後就一起被切掉（2026-09-19 /polish BUG-5）。
+    suffix = "\n…（太長了，完整的在報告檔裡）"
+    room = max(0, max_chars - len(suffix) - len(foot))
+    cut = text[:room].rsplit("\n", 1)[0]
+    return cut + suffix + foot
 
 
 # ══════════════════════════════════════════════════════════════════════════
