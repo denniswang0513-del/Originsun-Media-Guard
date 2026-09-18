@@ -60,7 +60,64 @@ export function infoHtml() {
     ].filter(Boolean).join('　');
     return `${head}
         ${rows || (S.infoEdit ? '' : '<div class="kb-empty">還沒填。按「編輯」把這本書的出版資訊記下來。</div>')}
-        ${facts ? `<div class="note">${facts}（自動帶的，改不了）</div>` : ''}`;
+        ${facts ? `<div class="note">${facts}（自動帶的，改不了）</div>` : ''}
+        ${_shareHtml()}`;
+}
+
+/** 公開分享（§9.9）。owner 2026-09-19：「可以有一個公開分享的連結，讓我把這本書的研究分享出去
+ *  （但是點不到我其他的地方）」。開關放這裡 —— 這一頁本來就是這本書的後設資料。 */
+function _shareHtml() {
+    const sh = S.share;
+    if (!sh) return '';
+    return `<div class="kb-share">
+        <label class="kb-watch"><input type="checkbox" data-kact="share-toggle"${sh.on ? ' checked' : ''}>
+            開一個公開連結，把這本書的延伸分享出去</label>
+        <div class="note">分享出去的<b>只有</b>：書名、作者、你填的基本資訊、標籤，以及「延伸」裡的研究資料
+            （每一則都附原始出處與連結）。<b>不含</b>你的筆記、結論、討論、章節重點與書裡的圖 ——
+            那些是你自己的東西或原書的內容。收到連結的人也連不回這個系統的其他地方。</div>
+        ${sh.on ? `<div class="kb-share-link">
+            <input type="text" class="kb-input" id="kb-share-url" value="${esc(sh.url)}" readonly>
+            <button type="button" class="kb-btn" data-kact="share-copy">複製</button>
+        </div>
+        <div class="note">關掉再開會換一組新網址，舊的立刻失效。</div>` : ''}
+    </div>`;
+}
+
+export async function loadShare() {
+    if (!S.book) return;
+    const bookId = S.book.id;
+    try {
+        const sh = await api(`/${encodeURIComponent(bookId)}/share`);
+        if (!alive() || !S.book || S.book.id !== bookId) return;
+        S.share = sh || null;
+        if (S.pane === 'info') editInfo(S.infoEdit);
+    } catch (_) { /* 讀不到就不畫那一段 */ }
+}
+
+export async function toggleShare(on) {
+    if (!S.book) return;
+    const bookId = S.book.id;
+    const before = S.share;
+    S.share = { ...(S.share || {}), on: !!on };
+    editInfo(S.infoEdit);
+    try {
+        S.share = await api(`/${encodeURIComponent(bookId)}/share`, { method: 'PUT', body: { on: !!on } });
+        if (!alive() || !S.book || S.book.id !== bookId) return;
+        editInfo(S.infoEdit);
+        toast(on ? '公開連結開好了' : '已關掉，舊連結失效');
+    } catch (e) {
+        if (!alive()) return;
+        S.share = before;
+        editInfo(S.infoEdit);
+        toast('改不動：' + errText(e), true);
+    }
+}
+
+export function copyShare() {
+    const el = S.root && S.root.querySelector('#kb-share-url');
+    if (!el) return;
+    el.select();
+    navigator.clipboard?.writeText(el.value).then(() => toast('複製好了'), () => toast('複製不了，請手動選取', true));
 }
 
 export function editInfo(on) {

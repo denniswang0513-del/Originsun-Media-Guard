@@ -22,6 +22,7 @@ from core.bg_task import fire
 from core.knowledge_logic import FOCUS_MAX, TAGS_MAX
 from services import knowledge_service as ks
 from services import knowledge_report as kr
+from services import knowledge_share as kshare
 from services import knowledge_watch as kw
 from services.knowledge_claude import claude_available
 
@@ -74,6 +75,10 @@ class WatchPayload(BaseModel):
     enabled: Optional[bool] = None
     weekday: Optional[int] = Field(default=None, ge=0, le=6)     # 0＝週一…6＝週日
     hour: Optional[int] = Field(default=None, ge=0, le=23)
+
+
+class SharePayload(BaseModel):
+    on: bool
 
 
 class RatePayload(BaseModel):
@@ -210,6 +215,22 @@ async def report_get(report_id: str, request: Request):
     """`{id, title, md}`。id 不合規或檔案不在都是 404（同書的規矩）。"""
     _guard(request)
     return _book_or_404(kr.read_report, report_id)
+
+
+# ── 公開分享（§9.9）────────────────────────────────────────
+# 這兩支是**私有**的（開關由他自己按）；公開讀的那一支在 routers/api_knowledge_public.py。
+@router.get("/{book_id}/share")
+async def share_get(book_id: str, request: Request):
+    """`{on, id, url, at}`。"""
+    _guard(request)
+    return _book_or_404(kshare.share_of, book_id)
+
+
+@router.put("/{book_id}/share")
+async def share_put(book_id: str, body: SharePayload, request: Request):
+    """開或關。關掉再開會換一組新的 id —— 舊連結立刻失效。"""
+    _guard(request)
+    return _book_or_404(kshare.set_share, book_id, bool(body.on))
 
 
 @router.get("/{book_id}")

@@ -903,6 +903,20 @@ def rate_extend(book_id: str, n: int, rating: str) -> dict:
     return hit
 
 
+def now_iso() -> str:
+    """給 services/knowledge_share.py 用（那支不該碰私有的 `_now_iso`）。"""
+    return _now_iso()
+
+
+def update_meta_share(book_id: str, share: Optional[dict]) -> None:
+    """開關公開分享（§9.9）。`None`＝關掉，連鍵一起拿掉。走 `_update_meta` 才吃得到那把鎖。"""
+    meta = read_meta(book_id)
+    meta.pop("share", None)
+    if share:
+        meta["share"] = share
+    write_meta(book_id, meta)
+
+
 def set_watch_last(book_id: str, week: str) -> None:
     """研究助理跑過這本了（`2026-W38`）—— 同一週不再重跑（services/knowledge_watch.py）。"""
     _update_meta(book_id, watch_last=week)

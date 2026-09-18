@@ -14,12 +14,12 @@ import { bearerHeader } from '../shared/utils.js';
 import { loadShelf, refreshShelfQuietly } from './shelf.js';
 import { chatHtml, scrollChat, loadChat } from './chat.js';
 import { extendHtml, loadExtend } from './extend.js';
-import { infoHtml } from './info.js';
+import { infoHtml, loadShare } from './info.js';
 import { galleryHtml, loadGallery } from './gallery.js';
 
 export async function openBook(id, { compile: thenCompile = false } = {}) {
     stopTimers();
-    S.chapter = null; S.editing = false; S.editingTags = false; S.chat = []; S.assets = [];
+    S.chapter = null; S.editing = false; S.editingTags = false; S.chat = []; S.assets = []; S.share = null;
     try {
         S.book = normBook(await api(`/${encodeURIComponent(id)}`));
     } catch (e) {
@@ -200,6 +200,7 @@ export function switchPane(next) {
     if (next === 'chat' && !S.chat.length && !S.wait) loadChat();
     if (next === 'extend' && !S.extendStage) loadExtend();
     if (next === 'gallery' && !S.assets.length) loadGallery().then(() => { if (S.pane === 'gallery') renderPane(); });
+    if (next === 'info' && !S.share) loadShare();
 }
 
 // ── 標籤 ────────────────────────────────────────────────────

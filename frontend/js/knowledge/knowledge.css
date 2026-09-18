@@ -311,6 +311,13 @@
     padding-bottom: 6px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 8px; }
 .kb .kb-gallery .grp h5 .n { margin-left: auto; font-size: 12px; }
 
+/* 公開分享（§9.9）：開關與網址，放在「資訊」分頁最後面。 */
+.kb .kb-share { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
+.kb .kb-share .note { margin-top: 4px; }
+.kb .kb-share-link { display: flex; gap: 8px; margin-top: 10px; }
+.kb .kb-share-link .kb-input { flex: 1; min-width: 0; font-size: 12.5px; }
+.kb .kb-share-link .kb-btn { flex: none; }
+
 /* 窄一點：書頁單欄 */
 @media (max-width: 899px) {
     .kb .kb-book { grid-template-columns: minmax(0, 1fr); gap: 16px; }

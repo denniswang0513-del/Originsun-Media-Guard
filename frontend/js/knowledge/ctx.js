@@ -56,6 +56,7 @@ export const S = {
     infoEdit: false,   // 「資訊」分頁在編輯中
     assets: [],        // 「圖輯」分頁：整本書抽出來的圖
     assetsLoading: false,
+    share: null,       // 公開分享 { on, id, url, at }；null＝還沒讀到
     assetUrls: [],     // 這一輪借出去的圖片 blob 網址（重畫前要 revoke）
     reports: [],       // 研究週報／月報的清單（§9.5）
     extendTimer: null,
