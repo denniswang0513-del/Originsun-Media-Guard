@@ -89,7 +89,7 @@
 .kb .kb-msg .body { background: #f5f5f5; border-radius: 10px; padding: 10px 13px; line-height: 1.65; }
 .kb .kb-msg.me .body { background: #fdf1f0; white-space: pre-wrap; }
 .kb .kb-msg .act { text-align: right; }
-.kb .kb-msg .act button { background: none; border: 0; color: var(--red); font-size: 12.5px; cursor: pointer; padding: 6px 0; min-height: 32px; font-family: inherit; }
+.kb .kb-msg .act button { background: none; border: 1px solid var(--line); border-radius: 6px; color: var(--red); font-size: 12.5px; cursor: pointer; padding: 6px 12px; min-height: 36px; font-family: inherit; }
 .kb .kb-msg .act button:hover { text-decoration: underline; }
 .kb .kb-msg .wait { color: var(--sub); font-size: 13px; }
 .kb .kb-msg .stream { white-space: pre-wrap; }
@@ -97,6 +97,9 @@
 @keyframes kb-blink { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
 .kb .kb-chat-foot { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; background: #fff; }
 .kb .kb-chat-foot .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.kb .kb-chat-foot .row.send { flex-wrap: nowrap; align-items: flex-end; }
+.kb .kb-chat-foot .row.send .kb-textarea.chat { flex: 1; min-width: 0; }
+.kb .kb-chat-foot .row.send .kb-btn { flex: none; min-height: 44px; }
 
 /* md 渲染 */
 .kb .kb-md { line-height: 1.75; overflow-wrap: anywhere; }
@@ -125,6 +128,42 @@
 .kb .kb-chapters button:hover { border-color: var(--ink); }
 .kb .kb-chapters button .n { color: var(--sub); margin-right: 8px; font-variant-numeric: tabular-nums; }
 
+/* 書頁標題列（2026-09-18 手機版）：寬螢幕這排只是左欄的第一行；窄螢幕它就是整個頭。
+   ⋯ 與抽屜只在窄螢幕出現（見下面的 @media），寬螢幕那些動作本來就在左欄看得到。 */
+.kb .kb-head { display: flex; align-items: center; gap: 8px; }
+.kb .kb-head h3 { flex: 1; min-width: 0; }
+.kb .kb-head .kb-more { display: none; }
+.kb .kb-back { min-height: 44px; }
+
+/* ⋯ 的底部抽屜 */
+.kb .kb-sheet-dim { position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 40; }
+.kb .kb-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; background: #fff;
+    border-radius: 16px 16px 0 0; box-shadow: 0 -12px 34px rgba(0,0,0,.18); padding: 10px 14px calc(14px + env(safe-area-inset-bottom)); }
+.kb .kb-sheet .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 10px; }
+.kb .kb-sheet .item { display: block; width: 100%; text-align: left; background: none; border: 0;
+    border-bottom: 1px solid var(--line); padding: 13px 4px; min-height: 48px; font-size: 15px;
+    font-family: inherit; color: var(--ink); cursor: pointer; }
+.kb .kb-sheet .item:last-child { border-bottom: 0; }
+.kb .kb-sheet .item:disabled { opacity: .45; cursor: default; }
+.kb .kb-sheet .item.danger { color: var(--red); }
+.kb .kb-sheet .item .sub { display: block; font-size: 12.5px; color: var(--sub); margin-top: 2px; }
+
+/* 骨架頂端的段落跳轉（實測一本三章的書骨架就 7,480px 長） */
+.kb .kb-jump { display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    padding: 0 0 10px; margin: 0 0 6px; border-bottom: 1px solid var(--line); }
+.kb .kb-jump button { white-space: nowrap; background: #f5f5f5; border: 1px solid var(--line); border-radius: 6px;
+    padding: 7px 11px; min-height: 36px; font-size: 13px; font-family: inherit; color: var(--ink); cursor: pointer; }
+.kb .kb-jump button:hover { border-color: var(--ink); }
+
+/* 回到頂端；長頁面才用得到，桌機也留著 */
+.kb .kb-totop { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 30;
+    width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: #fff;
+    color: var(--ink); font-size: 17px; cursor: pointer; box-shadow: 0 3px 12px rgba(0,0,0,.14); }
+
+/* 讀單章時的上一章／下一章 */
+.kb .kb-chapnav { display: flex; justify-content: space-between; gap: 10px; margin-top: 20px;
+    padding-top: 14px; border-top: 1px solid var(--line); }
+
 /* 窄一點：書頁單欄 */
 @media (max-width: 899px) {
     .kb .kb-book { grid-template-columns: 1fr; gap: 16px; }
@@ -133,6 +172,16 @@
     .kb .kb-tabs button { border-left: 0; border-bottom: 3px solid transparent; white-space: nowrap; padding: 10px 14px; }
     .kb .kb-tabs button.on { border-bottom-color: var(--red); }
     .kb .kb-actions { flex-direction: row; flex-wrap: wrap; }
+    /* 分頁列黏在頁面上緣（header 高 56）：長頁面捲到一半也能直接換分頁。
+       🔴 sticky 的作用範圍是它的容器 —— 放在 .kb-side 裡沒有用，那個容器只有內容那麼高，
+       捲過去就一起走了。窄螢幕把 .kb-side 變成 display:contents，子元素直接成為 .kb-book
+       的格線項，容器變成整個書頁（夠高），DOM 不用動。 */
+    .kb .kb-side { display: contents; }
+    .kb .kb-tabs { position: sticky; top: 56px; z-index: 20; background: #fff; }
+    .kb .kb-tabs button { min-height: 44px; }
+    .kb .kb-doc .tools .kb-link { min-height: 44px; }
+    .kb .kb-chapnav .kb-btn { min-height: 44px; }
+    .kb .kb-msg .act button { min-height: 44px; }
 }
 
 /* 手機：討論輸入框貼底、泡泡跟著頁面捲 */
@@ -144,7 +193,28 @@
     .kb .kb-msg { max-width: 94%; }
     /* 貼底的輸入區要有底色，不然捲動時泡泡會從它後面透出來 */
     .kb .kb-chat-foot { position: sticky; bottom: 0; padding: 10px 0 8px; border-top: 1px solid var(--line); background: #fff; }
-    .kb .kb-chat-foot .kb-textarea.chat { min-height: 56px; }
+    .kb .kb-chat-foot .kb-textarea.chat { min-height: 44px; }
     .kb .kb-chat-foot .note.tip { display: none; }
     .kb .kb-doc .kb-textarea { min-height: 50vh; }
+    /* 頭收成一行：書名截斷、狀態縮成一顆 pill、其餘動作進 ⋯ 的抽屜。
+       原本這一段（返回／書名／作者／狀態／標籤／五個分頁／三顆鈕）疊起來要 580px，
+       一支手機看得到的高度才 844 —— 內容等於被推到螢幕外。 */
+    .kb .kb-head h3 { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .kb .kb-head .kb-back .w { display: none; }
+    .kb .kb-head .kb-more { display: block; flex: none; width: 44px; min-height: 44px; background: none;
+        border: 1px solid var(--line); border-radius: 8px; color: var(--sub); font-size: 17px; cursor: pointer; font-family: inherit; }
+    .kb .kb-side .a,
+    .kb .kb-side #kb-tags-row,
+    .kb .kb-actions,
+    .kb .kb-chat-foot .row.wide-only { display: none; }
+    .kb .kb-side .st:empty, .kb .kb-side .st { min-height: 0; }
+    .kb .kb-book { gap: 10px; }
+    /* .kb-side 變成 display:contents 之後，它的 gap 不再作用，剩下的子元素自己留間距 */
+    .kb .kb-head { padding-top: 4px; }
+    .kb .kb-main { margin-top: 6px; }
+    /* 最後一則泡泡不要被貼底的輸入區蓋住（輸入區約 64px 高） */
+    .kb .kb-chat { padding-bottom: 8px; }
+    .kb .kb-chat-foot { padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); }
+    /* 編輯標籤是從抽屜叫出來的，叫出來就要看得到 */
+    .kb .kb-side #kb-tags-row:has(.kb-tags-edit) { display: block; }
 }

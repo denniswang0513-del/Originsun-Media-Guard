@@ -12,8 +12,9 @@
  */
 import { S, hooks, nav, stopTimers } from './ctx.js';
 import { loadShelf, renderShelf, setTag, refreshShelfQuietly } from './shelf.js';
-import { openBook, renderPane, refetchBook, switchPane, editTags, saveTags, saveDoc, openChapter,
-         compile, rename, remove } from './book.js';
+import {
+    openBook, renderPane, refetchBook, switchPane, editTags, saveTags, saveDoc, openChapter, compile, rename, remove, toggleSheet, jumpToSection,
+} from './book.js';
 import { send, saveConclusion, conclude } from './chat.js';
 
 export async function mountKnowledge({ host, fetch, toast }) {
@@ -49,8 +50,13 @@ function _onClick(ev) {
     if (act === 'tag') { setTag(el.dataset.tag); return; }
     if (act === 'open') { openBook(el.dataset.id); return; }
     if (act === 'back') { stopTimers(); renderShelf(); refreshShelfQuietly(); return; }
-    if (act === 'pane') { switchPane(el.dataset.pane); return; }
-    if (act === 'tags-edit') { editTags(true); return; }
+    if (act === 'pane') { toggleSheet(false); switchPane(el.dataset.pane); return; }
+    if (act === 'more') { toggleSheet(true); return; }
+    if (act === 'sheet-close') { toggleSheet(false); return; }
+    if (act === 'conclude-from-sheet') { toggleSheet(false); switchPane('chat'); conclude(); return; }
+    if (act === 'jump') { jumpToSection(el.dataset.i); return; }
+    if (act === 'to-top') { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    if (act === 'tags-edit') { toggleSheet(false); editTags(true); return; }
     if (act === 'tags-cancel') { editTags(false); return; }
     if (act === 'tags-save') { saveTags(el); return; }
     if (act === 'send') { send(); return; }
@@ -61,7 +67,7 @@ function _onClick(ev) {
     if (act === 'doc-save') { saveDoc(el.dataset.key, el); return; }
     if (act === 'chapter') { openChapter(el.dataset.n); return; }
     if (act === 'chapter-back') { S.chapter = null; renderPane(); return; }
-    if (act === 'compile') { compile(); return; }
-    if (act === 'rename') { rename(); return; }
-    if (act === 'delete') remove();
+    if (act === 'compile') { toggleSheet(false); compile(); return; }
+    if (act === 'rename') { toggleSheet(false); rename(); return; }
+    if (act === 'delete') { toggleSheet(false); remove(); }
 }

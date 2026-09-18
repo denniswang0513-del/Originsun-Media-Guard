@@ -27,14 +27,13 @@ export function chatHtml() {
     const empty = !msgs && !S.wait ? `<div class="kb-empty">還沒有討論。${S.book.status === 'compiled' ? '問它這本書的核心規則怎麼套在你身上。' : '這本書還沒編譯，AI 只看得到你的筆記與結論；先按「讀這本書」比較有料。'}</div>` : '';
     return `<div class="kb-chat" id="kb-chat-log">${empty}${msgs}${waiting}</div>
         <div class="kb-chat-foot">
-            <div class="row">
+            <div class="row wide-only">
                 <button type="button" class="kb-btn" data-kact="conclude" ${S.wait || !(S.chat || []).length ? 'disabled' : ''}>整理結論</button>
                 <span class="note" id="kb-conclude-note">${S.book.concluding ? '上一次的「整理結論」還在跑，稍後到「結論」分頁看' : '把這段討論收成幾條原則，追加到「結論」'}</span>
             </div>
-            <textarea id="kb-chat-text" class="kb-textarea chat" placeholder="跟它討論這本書怎麼用在你身上" ${S.wait ? 'disabled' : ''}></textarea>
-            <div class="row">
+            <div class="row send">
+                <textarea id="kb-chat-text" class="kb-textarea chat" placeholder="跟它討論這本書怎麼用在你身上" ${S.wait ? 'disabled' : ''}></textarea>
                 <button type="button" class="kb-btn pri" data-kact="send" ${S.wait ? 'disabled' : ''}>送出</button>
-                <span class="note tip">選取 AI 回覆裡的一段字再按「存成結論」只存那一段；沒選就存整則。</span>
             </div>
         </div>`;
 }
@@ -123,18 +122,13 @@ function _startChatPoll() {
     }, CHAT_POLL_MS);
 }
 
-/** 存成結論：有選到那則泡泡裡的字就只存選取，否則整則。 */
+/** 存成結論：存那一則的整則內容。
+ *  2026-09-18 拿掉「先選取一段字就只存那段」那條路 —— 每則泡泡右下角本來就有自己的按鈕，
+ *  而在手機上用手指精準選字幾乎做不到，留著等於一條沒人走的死路（兩種行為看起來還一樣）。 */
 export async function saveConclusion(idx) {
     const m = (S.chat || [])[idx];
     if (!m || !S.book) return;
-    let text = '';
-    const sel = window.getSelection && window.getSelection();
-    if (sel && !sel.isCollapsed) {
-        const bubble = S.root.querySelector(`.kb-msg .body[data-idx="${idx}"]`);
-        const picked = sel.toString().trim();
-        if (picked && bubble && bubble.contains(sel.anchorNode)) text = picked;
-    }
-    if (!text) text = m.text || '';
+    const text = m.text || '';
     if (!text.trim()) return;
     const bookId = S.book.id;
     try {

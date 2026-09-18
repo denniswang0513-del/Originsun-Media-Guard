@@ -44,14 +44,19 @@ function _tagsRowHtml(b) {
 export function renderBook() {
     const b = S.book;
     const compiling = b.status === 'compiling';
+    // 窄螢幕：整個 aside 收成「一行標題列＋黏著的分頁」，其餘動作進 ⋯ 抽屜（kb-sheet）。
+    // 寬螢幕的左欄維持原樣 —— 同一份 HTML，差別全在 knowledge.css 的 @media。
     S.root.innerHTML = `
       <div class="kb-book">
         <aside class="kb-side">
-            <button type="button" class="kb-link kb-back" data-kact="back">← 書架</button>
-            <h3 id="kb-title">${esc(b.title || b.source_name || '（未命名）')}</h3>
+            <div class="kb-head">
+                <button type="button" class="kb-link kb-back" data-kact="back" aria-label="回書架">← <span class="w">書架</span></button>
+                <h3 id="kb-title">${esc(b.title || b.source_name || '（未命名）')}</h3>
+                <span id="kb-status">${statusPill(b)}</span>
+                <button type="button" class="kb-more" data-kact="more" aria-label="更多動作">⋯</button>
+            </div>
             <div class="a" id="kb-author">${esc(b.author || '')}</div>
-            <div class="st"><span id="kb-status">${statusPill(b)}</span>
-                <span class="stage" id="kb-stage">${compiling ? esc(stageText(b.stage)) : ''}</span></div>
+            <div class="st"><span class="stage" id="kb-stage">${compiling ? esc(stageText(b.stage)) : ''}</span></div>
             ${b.status === 'failed' && b.error ? `<div class="err" title="${esc(b.error)}">編譯失敗：${esc(String(b.error).slice(0, 80))}</div>` : ''}
             <div id="kb-tags-row">${_tagsRowHtml(b)}</div>
             <nav class="kb-tabs">${PANES.map(([k, l]) => `<button type="button" data-kact="pane" data-pane="${k}" class="${k === S.pane ? 'on' : ''}">${l}</button>`).join('')}</nav>
@@ -62,8 +67,27 @@ export function renderBook() {
             </div>
         </aside>
         <section class="kb-main" id="kb-pane"></section>
-      </div>`;
+      </div>
+      <div id="kb-sheet-host"></div>`;
     renderPane();
+}
+
+/** ⋯ 的底部抽屜（只在窄螢幕出現；寬螢幕左欄本來就看得到這些）。危險動作排最後、紅字。 */
+export function toggleSheet(on) {
+    const host = S.root.querySelector('#kb-sheet-host');
+    if (!host) return;
+    if (!on) { host.innerHTML = ''; return; }
+    const b = S.book;
+    const compiling = b.status === 'compiling';
+    host.innerHTML = `<div class="kb-sheet-dim" data-kact="sheet-close"></div>
+      <div class="kb-sheet" role="dialog" aria-label="更多動作">
+        <div class="grab"></div>
+        <button type="button" class="item" data-kact="conclude-from-sheet" ${compiling ? 'disabled' : ''}>整理這段討論成結論</button>
+        <button type="button" class="item" data-kact="tags-edit">編輯標籤<span class="sub">${esc(bookTags(b).join('、') || '沒有標籤')}</span></button>
+        <button type="button" class="item" data-kact="compile" ${compiling ? 'disabled' : ''}>${b.status === 'compiled' ? '重新讀這本書' : '讀這本書'}<span class="sub">約 10–20 分鐘</span></button>
+        <button type="button" class="item" data-kact="rename">改名</button>
+        <button type="button" class="item danger" data-kact="delete">刪除這本書</button>
+      </div>`;
 }
 
 export function renderPane() {
@@ -182,27 +206,57 @@ export async function saveDoc(key, btn) {
 }
 
 // ── 骨架／章節 ──────────────────────────────────────────────
+/** 骨架很長（實測一本三章的書就 7,480px），頂端給一排段落跳轉。
+ *  段落標題直接從 markdown 的 `## ` 行取（不用正則猜內容），取不到就不畫這排。 */
+function _skeletonJumpHtml(md) {
+    const heads = String(md || '').split('\n')
+        .filter((ln) => ln.startsWith('## '))
+        .map((ln) => ln.slice(3).trim())
+        .filter(Boolean);
+    if (heads.length < 2) return '';
+    return `<div class="kb-jump">${heads.map((h, i) => `<button type="button" data-kact="jump" data-i="${i}">${esc(h)}</button>`).join('')}</div>`;
+}
+
 function _skeletonHtml() {
     const b = S.book;
     if (!b.skill && !b.cheatsheet) {
-        return `<div class="kb-empty">${b.status === 'compiling' ? '編譯中，骨架還沒產出來。' : '還沒編譯。按左邊的「讀這本書」，主控主機會產出骨架與章節。'}</div>`;
+        return `<div class="kb-empty">${b.status === 'compiling' ? '編譯中，骨架還沒產出來。' : '還沒編譯。按「讀這本書」，主控主機會產出骨架與章節。'}</div>`;
     }
     return `
+        ${_skeletonJumpHtml(b.skill)}
         <div class="kb-sec"><h4>SKILL.md</h4><span class="why">核心心智模型、決策規則（當你 X 就 Y，因為 Z）、章節索引</span></div>
-        <div class="kb-md">${b.skill ? mdToHtml(b.skill) : '<div class="kb-empty">（空）</div>'}</div>
+        <div class="kb-md" id="kb-skill-md">${b.skill ? mdToHtml(b.skill) : '<div class="kb-empty">（空）</div>'}</div>
         <div class="kb-sec"><h4>速查表</h4><span class="why">cheatsheet.md</span></div>
-        <div class="kb-md">${b.cheatsheet ? mdToHtml(b.cheatsheet) : '<div class="kb-empty">（空）</div>'}</div>`;
+        <div class="kb-md">${b.cheatsheet ? mdToHtml(b.cheatsheet) : '<div class="kb-empty">（空）</div>'}</div>
+        <button type="button" class="kb-totop" data-kact="to-top" aria-label="回到頂端">↑</button>`;
+}
+
+/** 跳到骨架的第 i 個 `## ` 段（渲染後的第 i 個 h2）。 */
+export function jumpToSection(i) {
+    const md = S.root.querySelector('#kb-skill-md');
+    if (!md) return;
+    const h = md.querySelectorAll('h2')[Number(i)];
+    if (h && h.scrollIntoView) h.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 function _chaptersHtml() {
     const list = chapterList(S.book);
     if (S.chapter) {
+        const idx = list.findIndex((c) => String(c.n) === String(S.chapter.n));
+        const prev = idx > 0 ? list[idx - 1] : null;
+        const next = idx >= 0 && idx < list.length - 1 ? list[idx + 1] : null;
+        const nav = `<div class="kb-chapnav">
+            ${prev ? `<button type="button" class="kb-btn" data-kact="chapter" data-n="${esc(String(prev.n))}">← 第 ${esc(String(prev.n))} 章</button>` : '<span></span>'}
+            ${next ? `<button type="button" class="kb-btn" data-kact="chapter" data-n="${esc(String(next.n))}">第 ${esc(String(next.n))} 章 →</button>` : '<span></span>'}
+        </div>`;
         return `<div class="kb-doc">
             <div class="tools">
                 <button type="button" class="kb-link" data-kact="chapter-back">← 章節清單</button>
                 <span class="note">第 ${esc(String(S.chapter.n))} 章 ${esc(S.chapter.title || '')}</span>
             </div>
             <div class="kb-md">${S.chapter.md ? mdToHtml(S.chapter.md) : '<div class="kb-empty">這章沒有內容。</div>'}</div>
+            ${nav}
+            <button type="button" class="kb-totop" data-kact="to-top" aria-label="回到頂端">↑</button>
         </div>`;
     }
     if (!list.length) {
