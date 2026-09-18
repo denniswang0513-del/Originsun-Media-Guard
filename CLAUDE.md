@@ -1408,6 +1408,12 @@ polish.test: .venv\Scripts\python.exe -m pytest tests/unit -q
      不然會靜靜掉回金額格式（長照的「撐得了 29.5 年」上線時就是印成「29.5 萬」，沒有測試釘）。
   ⑩ **「模擬到 90 歲用不完」是算術上必然的事**（固定報酬減通膨大於提領率就一定算不完），不能寫成一項通過的檢驗；
      真正會咬人的是報酬順序，所以另外算一條「前 10 年報酬 0%」。提領一律**年初先提**（同 Bengen），先長再提會高估 6–7%。
+- **OTA 依賴掃描的「模組名 ≠ 發行名」陷阱（2026-09-18 咬到機隊）**：`publish_update.py` 掃原始碼的 import，
+  沒見過的名字**直接**寫進 `requirements_agent.txt`，那份會裝到整個機隊。遇到 PyPI 上同名是廢棄或被佔走的套件，
+  機器 pip 失敗 → `update_agent` 整包回滾 → 那台永遠停在舊版（2.5.49：知識庫的 `import fitz` 讓三台回滾，
+  正確發行名是 `pymupdf`）。對照表在 `ota_manifest.IMPORT_TO_PIP`（已有 docx／pptx／pil／cv2…），
+  新增這類套件時先補一條，`tests/unit/test_ota_import_aliases.py` 兩條會擋。
+  🔴 引入新套件後，**推機隊前先看一台的 `update_status`**：回滾的訊息只在那裡，`fleet_push` 的 `done` 不代表版本有進。
 - **知識庫（docs/KNOWLEDGE_BASE_PLAN.md，2026-09-18）**：編譯那三個 pass（結構／章／骨架）**一定不給 claude 工具** ——
   `services/knowledge_claude.call_claude` 的 `allowed_tools` 預設就是空字串，空字串走 `--tools ""`，只有非空才進
   plan mode ＋ `--allowedTools`。給了 Read＋plan mode，claude 會改成「寫一份計畫問你要不要建檔」，四個產物一個都不出，
