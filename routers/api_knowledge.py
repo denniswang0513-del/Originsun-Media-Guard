@@ -227,14 +227,14 @@ async def report_get(report_id: str, request: Request):
 async def share_get(book_id: str, request: Request):
     """`{on, id, url, at}`。"""
     _guard(request)
-    return _book_or_404(kshare.share_of, book_id)
+    return await asyncio.to_thread(_book_or_404, kshare.share_of, book_id)
 
 
 @router.put("/{book_id}/share")
 async def share_put(book_id: str, body: SharePayload, request: Request):
     """開或關。關掉再開會換一組新的 id —— 舊連結立刻失效。"""
     _guard(request)
-    return _book_or_404(kshare.set_share, book_id, bool(body.on), body.parts)
+    return await asyncio.to_thread(_book_or_404, kshare.set_share, book_id, bool(body.on), body.parts)
 
 
 @router.get("/{book_id}/pdf")
@@ -246,7 +246,8 @@ async def book_pdf(book_id: str, request: Request):
     """
     _guard(request)
     from services import knowledge_pdf as kpdf
-    return await kpdf.pdf_response(book_id, _book_or_404(kshare.full_view, book_id))
+    # 讀整本（每一章）丟執行緒，不在事件迴圈上（2026-09-19 /polish BUG-9）
+    return await kpdf.pdf_response(book_id, await asyncio.to_thread(_book_or_404, kshare.full_view, book_id))
 
 
 @router.get("/{book_id}")

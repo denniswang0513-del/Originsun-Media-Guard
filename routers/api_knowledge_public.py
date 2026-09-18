@@ -19,12 +19,17 @@ owner 2026-09-19：「可以有一個公開分享的連結，讓我把這本書�
 """
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 
 from core.no_store import no_store_file
 from services import knowledge_share as kshare
 
 router = APIRouter(prefix="/api/v1/knowledge/public", tags=["knowledge-public"])
+# 🔴 這三支的讀檔一律 `asyncio.to_thread`：`_find_book` 每個請求都掃整個書架（每本讀 meta）、
+#    `public_view` 讀每一章；公開頁一張圖一個請求，80 張圖＝80 次整架掃描 —— 同步跑等於
+#    在 8000 的事件迴圈上卡住所有 HTTP（2026-09-19 /polish BUG-9，同 BUG-7 那一類）。
 
 
 @router.get("/{share_id}")
@@ -33,7 +38,7 @@ async def shared_book(share_id: str):
 
     沒開分享、id 不合格式、或那本書不在 —— 一律 404 同一句話（不透露差別）。
     """
-    data = kshare.public_view(share_id)
+    data = await asyncio.to_thread(lambda: kshare.public_view(share_id))
     if data is None:
         raise HTTPException(status_code=404, detail="這個分享連結不存在或已經關閉")
     return data
@@ -46,11 +51,11 @@ async def shared_pdf(share_id: str):
     🔴 印的是 `public_view` 回的那一包 —— **他沒勾的東西不會出現在 PDF 裡**。
     圖只有勾了「書裡的圖」才會被內嵌（沒勾的話 `public_view` 連 gallery 鍵都沒有）。
     """
-    data = kshare.public_view(share_id)
+    data = await asyncio.to_thread(lambda: kshare.public_view(share_id))
     if data is None:
         raise HTTPException(status_code=404, detail="這個分享連結不存在或已經關閉")
     from services import knowledge_pdf as kpdf
-    return await kpdf.pdf_response(kshare.book_of(share_id), data)
+    return await kpdf.pdf_response(await asyncio.to_thread(kshare.book_of, share_id), data)
 
 
 @router.get("/{share_id}/assets/{name}")
@@ -59,7 +64,7 @@ async def shared_asset(share_id: str, name: str):
 
     不走快取（同私有那支）—— 這是原書的內容，不要讓中間的代理留一份。
     """
-    path = kshare.public_asset(share_id, name)
+    path = await asyncio.to_thread(kshare.public_asset, share_id, name)
     if not path:
         raise HTTPException(status_code=404, detail="找不到這張圖")
     return no_store_file(path, media_type=("image/png" if name.endswith(".png") else "image/jpeg"))

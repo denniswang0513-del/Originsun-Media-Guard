@@ -377,3 +377,37 @@ def test_extend_on_a_missing_book_is_404(kb):
     assert kb.client.post(f"{URL}/{'0' * 16}/extend", json={}).status_code == 404
     assert "zzzz" not in ks._extending and "0" * 16 not in ks._extending, "不存在的書不能留一個排隊中的鬼"
     assert kb.fired == [], "沒有書就不該起背景工作"
+
+
+def test_public_share_endpoints_read_files_off_the_event_loop(kb, public_client, monkeypatch):
+    """BUG-9：公開頁一張圖一個請求，每個請求 _find_book 都掃整個書架（每本讀 meta）；public_view
+    再讀每一章 —— 全部同步在 8000 的事件迴圈上（同 BUG-7 那一類）。要求：這些讀檔在執行緒上跑。"""
+    import asyncio
+    from services import knowledge_share as kshare
+    seen = {}
+
+    def _spy(name, real):
+        def _f(*a, **k):
+            try:
+                asyncio.get_running_loop()
+                seen[name] = "loop"
+            except RuntimeError:
+                seen[name] = "thread"
+            return real(*a, **k)
+        return _f
+
+    for name in ("public_view", "public_asset", "full_view", "share_of"):
+        monkeypatch.setattr(kshare, name, _spy(name, getattr(kshare, name)))
+    bid = kb.upload(pages=1)["id"]
+    sh = kb.client.put(f"{URL}/{bid}/share", json={"on": True, "parts": ["tags", "gallery"]}).json()
+    assert kb.client.get(f"{URL}/{bid}/share").status_code == 200
+    assert public_client.get(f"/api/v1/knowledge/public/{sh['id']}").status_code == 200
+    public_client.get(f"/api/v1/knowledge/public/{sh['id']}/assets/p001-1.jpg")
+    monkeypatch.setattr("services.knowledge_pdf.pdf_response", _fake_pdf_response)
+    assert kb.client.get(f"{URL}/{bid}/pdf").status_code == 200
+    assert seen == {"public_view": "thread", "public_asset": "thread", "full_view": "thread", "share_of": "thread"}, seen
+
+
+async def _fake_pdf_response(book_id, d):
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"ok": True, "title": d.get("title")})
