@@ -19,7 +19,12 @@ import { galleryHtml, loadGallery } from './gallery.js';
 
 export async function openBook(id, { compile: thenCompile = false } = {}) {
     stopTimers();
+    // 每本書自己的分頁狀態全部歸零 —— S.pane 是跨書持久的（站在 A 的延伸分頁回書架再開 B，
+    // 進來就是 B 的延伸分頁），少清一個就是把 A 的東西畫在 B 上：A 的延伸清單（評分會打到 B 的 n）、
+    // A 還在找資料時的 extendStage（B 就永遠不會 loadExtend）、A 那則「存成結論」的編輯框
+    // （2026-09-19 /polish BUG-4）。
     S.chapter = null; S.editing = false; S.editingTags = false; S.chat = []; S.assets = []; S.share = null;
+    S.extend = []; S.extendStage = ''; S.extendNote = ''; S.concEdit = null; S.focusEdit = false; S.infoEdit = false;
     try {
         S.book = normBook(await api(`/${encodeURIComponent(id)}`));
     } catch (e) {
@@ -32,7 +37,18 @@ export async function openBook(id, { compile: thenCompile = false } = {}) {
     renderBook();
     if (thenCompile) await compile();                       // 剛上傳完、使用者說現在就讀（compile 自己會 watch）
     else if (S.book.status === 'compiling') watchCompile();
-    if (alive() && S.book && (S.pane === 'chat' || S.book.chatting)) loadChat();   // chatting＝上一輪還在回，進來就接著等
+    if (!alive() || !S.book) return;
+    _loadPaneData(S.pane);                                  // 落地的分頁要抓的東西，跟 switchPane 同一支
+    if (S.pane !== 'chat' && S.book.chatting) loadChat();   // chatting＝上一輪還在回，不在討論分頁也接著等
+}
+
+/** 切到（或開書時落在）某個分頁要抓什麼：討論第一次進來才抓；延伸沒在找才抓；圖輯沒抓過才抓；分享沒讀過才讀。
+ *  🔴 openBook 與 switchPane 都走這裡 —— 只掛在 switchPane 的話，開書時落在延伸／圖輯／資訊分頁就沒人抓。 */
+function _loadPaneData(pane) {
+    if (pane === 'chat' && !S.chat.length && !S.wait) loadChat();
+    if (pane === 'extend' && !S.extendStage) loadExtend();
+    if (pane === 'gallery' && !S.assets.length) loadGallery().then(() => { if (S.pane === 'gallery') renderPane(); });
+    if (pane === 'info' && !S.share) loadShare();
 }
 
 function _tagsRowHtml(b) {
@@ -231,10 +247,7 @@ export function switchPane(next) {
     if (next === S.pane && !S.editing) return;
     S.pane = next; S.editing = false; S.chapter = null; S.infoEdit = false;
     renderPane();
-    if (next === 'chat' && !S.chat.length && !S.wait) loadChat();
-    if (next === 'extend' && !S.extendStage) loadExtend();
-    if (next === 'gallery' && !S.assets.length) loadGallery().then(() => { if (S.pane === 'gallery') renderPane(); });
-    if (next === 'info' && !S.share) loadShare();
+    _loadPaneData(next);
 }
 
 // ── 標籤 ────────────────────────────────────────────────────

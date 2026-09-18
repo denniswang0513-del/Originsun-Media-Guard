@@ -249,3 +249,29 @@ def test_toggling_the_share_is_serialized_with_other_meta_writes(kb):
         ks.read_meta = orig_read
     m = ks.read_meta(bid)
     assert m.get("share", {}).get("id") == "a" * 32 and m.get("asset_captions") == {"p001-1.jpg": "圖"}, m
+
+
+def test_opening_a_book_resets_pane_state_and_loads_the_pane():
+    """BUG-4：S.pane 跨書持久，但 openBook 只清 chat 那組狀態、也只在 chat 分頁才抓資料。
+    站在 A 的延伸／圖輯／資訊分頁回書架開 B：畫 A 的延伸清單（評分打到 B 的 n）、
+    A 在找資料時 extendStage 卡住 → B 永遠不 loadExtend、圖輯與分享區也不抓。
+    要求：openBook 把每本書自己的分頁狀態歸零，而且用**跟 switchPane 同一支** loader 抓當前分頁。"""
+    from tests.unit._srcscan import js_code_only, js_func_body
+    js = js_code_only(repo_src_js("frontend/js/knowledge/book.js"))
+    body = js_func_body(js, "export async function openBook(")
+    for key in ("S.extend = []", "S.extendStage = ''", "S.extendNote = ''", "S.concEdit = null",
+                "S.focusEdit = false", "S.infoEdit = false"):
+        assert key in body, "openBook 要歸零：" + key
+    sw = js_func_body(js, "export function switchPane(")
+    loader = next((name for name in ("_loadPaneData(",) if name in body and name in sw), None)
+    assert loader, "openBook 與 switchPane 要共用同一支「這個分頁要抓什麼」的函式"
+    loader_body = js_func_body(js, "function " + loader)
+    for call in ("loadChat(", "loadExtend(", "loadGallery(", "loadShare("):
+        assert call in loader_body, call
+    for call in ("loadExtend(", "loadGallery(", "loadShare("):
+        assert call not in sw, "switchPane 不該自己再抓一份：" + call
+
+
+def repo_src_js(rel: str) -> str:
+    from tests.unit._srcscan import repo_src
+    return repo_src(rel)
