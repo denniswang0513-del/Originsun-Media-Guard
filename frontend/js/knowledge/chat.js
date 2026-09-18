@@ -8,17 +8,18 @@
 import { mdToHtml } from '../shared/md-lite.js';
 import { waitingText } from '../shared/quote-wait.js';
 import { S, nav, CHAT_POLL_MS, CHAT_GIVE_UP_MS, CONCLUDE_POLL_MS, CONCLUDE_MAX_TRIES, CHAT_TYPICAL,
-         api, esc, errText, fmtWhen, alive, toast, normBook } from './ctx.js';
+         api, esc, errText, fmtWhen, alive, toast, normBook, CONCLUSION_MARK } from './ctx.js';
 
 const _renderPane = () => { if (nav.renderPane) nav.renderPane(); };
 
 export function chatHtml() {
+    _captureConcEdit();
     const msgs = (S.chat || []).map((m, i) => {
         const me = m.role === 'user';
         return `<div class="kb-msg ${me ? 'me' : 'ai'}">
             <div class="who">${me ? '你' : 'AI'}${m.at ? ` · ${esc(fmtWhen(m.at))}` : ''}</div>
             <div class="body ${me ? '' : 'kb-md'}" data-idx="${i}">${me ? esc(m.text) : mdToHtml(m.text)}</div>
-            ${me ? '' : `<div class="act"><button type="button" data-kact="save-conclusion" data-idx="${i}">存成結論</button></div>`}
+            ${me ? '' : _concHtml(i)}
         </div>`;
     }).join('');
     const waiting = S.wait ? `<div class="kb-msg ai" id="kb-wait"><div class="who">AI</div>
@@ -122,15 +123,66 @@ function _startChatPoll() {
     }, CHAT_POLL_MS);
 }
 
-/** 存成結論：存那一則的整則內容。
- *  2026-09-18 拿掉「先選取一段字就只存那段」那條路 —— 每則泡泡右下角本來就有自己的按鈕，
- *  而在手機上用手指精準選字幾乎做不到，留著等於一條沒人走的死路（兩種行為看起來還一樣）。 */
-export async function saveConclusion(idx) {
+/** 「可存成結論：」之後的那幾行（提示要求 AI 這樣收尾）。沒有那段就回空。 */
+function _pickLines(text) {
+    const i = String(text || '').indexOf(CONCLUSION_MARK);
+    if (i === -1) return '';
+    return String(text).slice(i + CONCLUSION_MARK.length).split('\n')
+        .map((ln) => ln.trim().replace(/^[-*\u2022]\s*/, '').trim())
+        .filter(Boolean).map((ln) => '- ' + ln).join('\n');
+}
+
+/** 那一則泡泡下面的東西：平常是一顆「存成結論」，開著編輯時是一格加兩顆鈕。 */
+function _concHtml(i) {
+    if (!S.concEdit || S.concEdit.idx !== i) {
+        return `<div class="act"><button type="button" data-kact="save-conclusion" data-idx="${i}">存成結論</button></div>`;
+    }
+    return `<div class="kb-conc-edit">
+        <div class="hint">改成你自己的話再存。結論是給顧問與以後的討論優先讀的，越短越好。</div>
+        <textarea class="kb-textarea" id="kb-conc-text">${esc(S.concEdit.text)}</textarea>
+        <div class="act">
+            <button type="button" class="kb-btn" data-kact="conc-save" data-idx="${i}">存進結論</button>
+            <button type="button" class="kb-btn ghost" data-kact="conc-cancel">取消</button>
+        </div>
+    </div>`;
+}
+
+/** 重畫之前先把他正在打的字收回 S，不然輪詢一跳就整段不見。 */
+function _captureConcEdit() {
+    if (!S.concEdit || !S.root) return;
+    const ta = S.root.querySelector('#kb-conc-text');
+    if (ta) S.concEdit.text = ta.value;
+}
+
+/** 按「存成結論」：先開一格讓他改。
+ *  2026-09-18 之前是按下去就把整則原封不動塞進結論 —— AI 一則常常五六百字，
+ *  結論檔很快就變成第二份聊天紀錄，反而讓顧問每次要讀的東西越來越長。
+ *  預設帶「可存成結論：」那幾行，沒有那段才帶整則。 */
+export function openConclusionEdit(idx) {
     const m = (S.chat || [])[idx];
     if (!m || !S.book) return;
-    const text = m.text || '';
-    if (!text.trim()) return;
+    const text = _pickLines(m.text) || (m.text || '').trim();
+    if (!text) return;
+    S.concEdit = { idx, text };
+    _renderPane();
+    const ta = S.root && S.root.querySelector('#kb-conc-text');
+    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+
+export function cancelConclusionEdit() {
+    S.concEdit = null;
+    _renderPane();
+}
+
+/** 存進結論（他改過的那一格）。 */
+export async function saveConclusion(idx) {
+    if (!S.book || !S.concEdit || S.concEdit.idx !== idx) return;
+    _captureConcEdit();
+    const text = (S.concEdit.text || '').trim();
+    if (!text) { toast('內容是空的', true); return; }
     const bookId = S.book.id;
+    S.concEdit = null;
+    _renderPane();
     try {
         const r = await api(`/${encodeURIComponent(bookId)}/conclusions`, { method: 'POST', body: { text } });
         if (!alive() || !S.book || S.book.id !== bookId) return;

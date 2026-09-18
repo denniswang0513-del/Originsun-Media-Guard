@@ -22,9 +22,13 @@ export const CONCLUDE_POLL_MS = 2000;
 export const CONCLUDE_MAX_TRIES = 20;
 export const COMPILE_POLL_MS = 3000;
 export const CHAT_TYPICAL = [20, 60];
+//: AI 收尾那一句（同後端 core/knowledge_logic.py 的 CONCLUSION_MARK）——「存成結論」預設帶它後面那幾行
+export const CONCLUSION_MARK = '可存成結論：';
 
-export const STATUS_LABEL = { uploaded: '未編譯', compiling: '編譯中', compiled: '已編譯', failed: '失敗' };
-export const STATUS_CLS = { uploaded: 'na', compiling: 'warn', compiled: 'ok', failed: 'bad' };
+export const STATUS_LABEL = { pending: '待補', uploaded: '未編譯', compiling: '編譯中', compiled: '已編譯', failed: '失敗' };
+export const STATUS_CLS = { pending: 'warn', uploaded: 'na', compiling: 'warn', compiled: 'ok', failed: 'bad' };
+//: 一次同時傳幾個檔。每支上傳都把整包讀進記憶體（上限 300MB），五本厚書同時傳就是 1GB。
+export const UPLOAD_PARALLEL = 2;
 export const PANES = [['chat', '討論'], ['conclusion', '結論'], ['notes', '筆記'], ['skeleton', '骨架'], ['chapters', '章節'], ['extend', '延伸']];
 
 /** 宿主給的東西（mount 時填） */
@@ -35,6 +39,9 @@ export const S = {
     root: null,        // 這次 mount 長出的 .kb 節點（監聽掛它身上）
     books: [],         // 書架清單（目前篩選下的）
     allTags: [],       // 篩選列用：沒篩時抓到的全部標籤
+    uploads: [],       // 這一批在傳的檔 [{ name, state, cls, pct }]；傳完重抓書架也要留著，
+                       // 不然失敗的那本原因閃一下就沒了
+    uploadNote: '',    // 那一批的總結（完成幾本、失敗幾本）
     tag: '',           // 書架目前的標籤篩選（空＝全部）
     book: null,        // 打開的書（GET /{id} 整包）
     pane: 'chat',
@@ -47,6 +54,7 @@ export const S = {
     extendTimer: null,
     editing: false,    // 結論／筆記分頁：在編輯（textarea）還是在看（md 渲染）
     editingTags: false,
+    concEdit: null,    // 「存成結論」開著的那一格 { idx, text }；null＝沒開
     chatTimer: null,
     concludeTimer: null,
     compileTimer: null,

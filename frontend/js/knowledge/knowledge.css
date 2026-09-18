@@ -46,13 +46,34 @@
 .kb .kb-prog { height: 6px; background: #eee; border-radius: 999px; overflow: hidden; margin-top: 10px; }
 .kb .kb-prog i { display: block; height: 100%; width: 0; background: var(--ink); transition: width .2s; }
 .kb .kb-tagbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
-.kb .kb-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-.kb .kb-card { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; min-height: 104px; background: #fff; }
-.kb .kb-card:hover, .kb .kb-card:focus { border-color: var(--ink); outline: none; }
+/* 書架是清單不是卡片格子（owner 2026-09-18：「我想要有一個書的清單，然後我可以匯入」）。
+   卡片一本占 104px＋間距，手機上十本就要捲很久；一本兩行的話一眼看得到十幾本。 */
+.kb .kb-shelf { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+.kb .kb-card { display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer;
+    border-bottom: 1px solid var(--line); background: #fff; }
+.kb .kb-card:last-child { border-bottom: 0; }
+.kb .kb-card:hover, .kb .kb-card:focus { background: #fafafa; outline: none; }
+.kb .kb-card:focus { box-shadow: inset 3px 0 0 var(--ink); }
+.kb .kb-card .l { flex: 1; min-width: 0; }
 .kb .kb-card .t { font-weight: 500; font-size: 15px; line-height: 1.4; }
+.kb .kb-card .s { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 3px; }
 .kb .kb-card .a { color: var(--sub); font-size: 12.5px; }
-.kb .kb-card .tags { display: flex; gap: 6px; flex-wrap: wrap; }
-.kb .kb-card .m { color: var(--sub); font-size: 12px; margin-top: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.kb .kb-card .r { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.kb .kb-card .m { color: var(--sub); font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap;
+    justify-content: flex-end; align-items: center; }
+/* 書架的空狀態本來是格線的一格，改清單之後要自己撐開 */
+.kb .kb-shelf .kb-empty { padding: 18px 16px; }
+
+/* 一次拖幾本進來：每本自己一列、自己的進度條 */
+.kb .kb-uploads { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.kb .kb-uploads:empty { display: none; }
+.kb .kb-uploads li { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--sub); }
+.kb .kb-uploads li .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-align: left; }
+.kb .kb-uploads li .st { flex: none; }
+.kb .kb-uploads li .kb-prog { flex: none; width: 72px; margin-top: 0; }
+.kb .kb-uploads li.ok .st { color: var(--ink); }
+.kb .kb-uploads li.bad .st { color: var(--red); }
 .kb .kb-empty { color: var(--sub); padding: 20px; text-align: center; grid-column: 1 / -1; line-height: 1.7; }
 .kb .kb-guide { text-align: left; max-width: 640px; margin: 0 auto; border: 1px solid var(--line); border-radius: 8px; padding: 18px 22px; color: var(--ink); }
 .kb .kb-guide h3 { margin: 0 0 8px; font-size: 15px; font-weight: 500; }
@@ -189,6 +210,13 @@
 .kb .kb-ext .act button.on { border-color: var(--ink); color: var(--ink); }
 .kb .kb-ext .act .on-date { flex: 1; text-align: right; font-size: 12px; color: var(--sub); }
 
+/* 「存成結論」先開一格可以改（2026-09-18）：原本按下去就整則塞進結論，結論檔會變成第二份聊天紀錄。 */
+.kb .kb-conc-edit { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+.kb .kb-conc-edit .hint { font-size: 12.5px; color: var(--sub); margin-bottom: 6px; }
+.kb .kb-conc-edit .kb-textarea { min-height: 96px; width: 100%; }
+.kb .kb-conc-edit .act { display: flex; gap: 8px; margin-top: 8px; }
+.kb .kb-conc-edit .act button { min-height: 40px; }
+
 /* 窄一點：書頁單欄 */
 @media (max-width: 899px) {
     .kb .kb-book { grid-template-columns: 1fr; gap: 16px; }
@@ -209,13 +237,18 @@
     .kb .kb-msg .act button { min-height: 44px; }
     .kb .kb-ext .act button { min-height: 44px; }
     .kb .kb-ext-head .kb-btn { min-height: 44px; }
+    .kb .kb-conc-edit .act button { min-height: 44px; }
+    .kb .kb-drop .kb-btn { min-height: 44px; }
 }
 
 /* 手機：討論輸入框貼底、泡泡跟著頁面捲 */
 @media (max-width: 640px) {
     .kb .kb-top .why { font-size: 12.5px; }
     .kb .kb-drop { padding: 16px 12px; }
-    .kb .kb-shelf { grid-template-columns: 1fr; }
+    /* 窄螢幕一本還是一列，但右邊的狀態與數字換到書名底下（不然書名被擠成兩三個字） */
+    .kb .kb-card { flex-direction: column; align-items: stretch; gap: 6px; }
+    .kb .kb-card .r { flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; }
+    .kb .kb-card .m { justify-content: flex-start; }
     .kb .kb-chat { max-height: none; overflow: visible; }
     .kb .kb-msg { max-width: 94%; }
     /* 貼底的輸入區要有底色，不然捲動時泡泡會從它後面透出來 */

@@ -288,6 +288,8 @@ export async function openChapter(n) {
 
 // ── 編譯 ────────────────────────────────────────────────────
 export async function compile() {
+    // 待補的書還沒有檔 —— 後端會回 409，但讓他按下去才知道不好；這裡先擋並講原因
+    if (S.book && S.book.status === 'pending') { toast('這本書還沒有檔案，先補 PDF 再讀', true); return; }
     if (!S.book) return;
     // 已編譯的書再按＝整本重來（force）；失敗／沒編過的＝接著補缺的章節（後端預設）
     const force = S.book.status === 'compiled';

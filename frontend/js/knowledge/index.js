@@ -12,11 +12,11 @@
  * 所有點擊走 .kb 上的一個委派（data-kact），重畫不會疊監聽；離開頁面（pagehide）把四條輪詢收掉。
  */
 import { S, hooks, nav, stopTimers } from './ctx.js';
-import { loadShelf, renderShelf, setTag, refreshShelfQuietly } from './shelf.js';
+import { loadShelf, renderShelf, setTag, refreshShelfQuietly, createPending } from './shelf.js';
 import {
     openBook, renderPane, refetchBook, switchPane, editTags, saveTags, saveDoc, openChapter, compile, rename, remove, toggleSheet, jumpToSection,
 } from './book.js';
-import { send, saveConclusion, conclude } from './chat.js';
+import { send, saveConclusion, openConclusionEdit, cancelConclusionEdit, conclude } from './chat.js';
 import { runExtend, collectOne, rateExtend } from './extend.js';
 
 export async function mountKnowledge({ host, fetch, toast }) {
@@ -49,6 +49,7 @@ function _onClick(ev) {
     const act = el.dataset.kact;
     if (act === 'reload') { loadShelf(); return; }
     if (act === 'pick') { const f = S.root.querySelector('#kb-file'); if (f) f.click(); return; }
+    if (act === 'new-pending') { createPending(); return; }
     if (act === 'tag') { setTag(el.dataset.tag); return; }
     if (act === 'open') { openBook(el.dataset.id); return; }
     if (act === 'back') { stopTimers(); renderShelf(); refreshShelfQuietly(); return; }
@@ -65,7 +66,9 @@ function _onClick(ev) {
     if (act === 'tags-cancel') { editTags(false); return; }
     if (act === 'tags-save') { saveTags(el); return; }
     if (act === 'send') { send(); return; }
-    if (act === 'save-conclusion') { saveConclusion(Number(el.dataset.idx)); return; }
+    if (act === 'save-conclusion') { openConclusionEdit(Number(el.dataset.idx)); return; }
+    if (act === 'conc-save') { saveConclusion(Number(el.dataset.idx)); return; }
+    if (act === 'conc-cancel') { cancelConclusionEdit(); return; }
     if (act === 'conclude') { conclude(); return; }
     if (act === 'doc-edit') { S.editing = true; renderPane(); return; }
     if (act === 'doc-cancel') { S.editing = false; renderPane(); return; }
