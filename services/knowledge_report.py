@@ -174,7 +174,11 @@ async def daily_check() -> None:
     from core.scheduler import _run_daily_master_task
 
     async def _body(factory, now: datetime):
-        for rep in daily_check_sync(now.date()):
+        # 🔴 丟到執行緒：掃書架、讀每本的延伸、requests.post(timeout=10) 打 Discord 都是同步 I/O，
+        # 直接在這裡跑＝在排程迴圈（主事件迴圈）上跑，Discord 慢一次就把 8000 的所有 HTTP 一起卡住
+        # （2026-09-19 /polish BUG-7）。body 回來才標當日完成的語意不變。
+        import asyncio
+        for rep in await asyncio.to_thread(daily_check_sync, now.date()):
             if rep.get("n"):
                 logger.info("研究報告 %s：%d 則，Discord %s",
                             rep["id"], rep["n"], "推了" if rep.get("pushed") else "沒推（沒設 webhook）")

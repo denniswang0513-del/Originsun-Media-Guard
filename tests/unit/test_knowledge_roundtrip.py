@@ -275,3 +275,36 @@ def test_opening_a_book_resets_pane_state_and_loads_the_pane():
 def repo_src_js(rel: str) -> str:
     from tests.unit._srcscan import repo_src
     return repo_src(rel)
+
+
+def test_the_report_body_runs_off_the_event_loop(monkeypatch):
+    """BUG-7：daily_check 的 body 掃書架、讀每本延伸、requests.post(timeout=10) 打 Discord ——
+    這些同步 I/O 直接在排程迴圈（＝主事件迴圈）上跑，Discord 慢一次就把 8000 的所有 HTTP 卡住。
+    要求：真正的工作在事件迴圈以外的執行緒跑。"""
+    import asyncio
+    import datetime as dt
+    import threading
+    from services import knowledge_report as kr
+    import core.scheduler as sched
+
+    monkeypatch.setattr(kr, "settings_report", lambda: {"enabled": True, "weekday": 0, "hour": 9})
+    seen = {}
+
+    def _sync(today):
+        seen["thread"] = threading.current_thread()
+        try:
+            asyncio.get_running_loop()
+            seen["on_loop"] = True
+        except RuntimeError:
+            seen["on_loop"] = False
+        return []
+
+    monkeypatch.setattr(kr, "daily_check_sync", _sync)
+
+    async def _fake_base(task_key, hour_key, body, hour_getter=None):
+        await body(None, dt.datetime(2026, 9, 21, 9, 5))
+
+    monkeypatch.setattr(sched, "_run_daily_master_task", _fake_base)
+    asyncio.run(kr.daily_check())
+    assert seen and seen["on_loop"] is False, "同步 I/O 要丟到執行緒，不能在事件迴圈上跑"
+    assert seen["thread"] is not threading.main_thread()
