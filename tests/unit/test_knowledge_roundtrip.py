@@ -161,3 +161,41 @@ def test_discord_webhook_url_prefers_the_environment(monkeypatch):
     assert notifier.discord_webhook_url({"notifications": {}}) == ""
     monkeypatch.setenv("DISCORD_WEBHOOK", "https://env/y")
     assert notifier.discord_webhook_url({"notifications": {"discord_webhook": "https://d/x"}}) == "https://env/y"
+
+
+# ── /polish 2026-09-19 階段一（每張卡一條紅→綠）────────────────────
+def _part_reply(prompt: str):
+    """假 claude：章節 pass 每一段都照提示在末尾寫 `## 圖說`；其餘走預設。"""
+    import re as _re
+    from tests.unit.test_knowledge_base import _default_reply
+    if "===== 章文 =====" in prompt:
+        m = _re.search(r"這是本章第 (\d+)/(\d+) 段", prompt)
+        pi = m.group(1) if m else "1"
+        return f"## 內容\n段落{pi}的筆記\n\n## 圖說\n- p001-1.jpg｜第{pi}段寫的圖說\n", ""
+    return _default_reply(prompt)
+
+
+def test_a_chapter_split_into_parts_keeps_every_part(kb, monkeypatch):
+    """BUG-1：章太長切成兩段時，每段末尾都有 `## 圖說`；取走圖說那一段不能把第二段整個吃掉。"""
+    from services import knowledge_service as ks
+    bid = kb.upload(pages=1)["id"]
+    monkeypatch.setattr(ks.kl, "chunk_text", lambda text, max_chars=0: [text[: len(text) // 2], text[len(text) // 2:]])
+    kb.claude["reply"] = _part_reply
+    assert kb.client.post(f"{URL}/{bid}/compile", json={}).status_code == 200
+    kb.run_fired()
+    meta = ks.read_meta(bid)
+    assert meta["status"] == "compiled", meta.get("error")
+    md = kb.read(bid, ks.CHAPTERS_DIR, meta["toc"][0]["file"])
+    assert "段落1的筆記" in md and "段落2的筆記" in md, md
+    assert "## 圖說" not in md, "圖說那一段要被取走，不留在文章裡"
+    assert meta.get("asset_captions", {}).get("p001-1.jpg", "").startswith("第"), meta.get("asset_captions")
+
+
+def test_parse_captions_takes_every_caption_section_not_just_the_first():
+    """BUG-1 的純函式面：兩段各有一段 `## 圖說`，兩段的章文都要留、兩段的圖說都要收。"""
+    md = ("## 內容\n第一段\n\n## 圖說\n- p001-1.jpg｜甲\n\n---\n\n"
+          "## 內容\n第二段\n\n## 圖說\n- p002-1.jpg｜乙\n")
+    body, caps = kl.parse_captions(md, ["p001-1.jpg", "p002-1.jpg"])
+    assert caps == {"p001-1.jpg": "甲", "p002-1.jpg": "乙"}
+    assert "第一段" in body and "第二段" in body and "---" in body
+    assert "## 圖說" not in body and "甲" not in body

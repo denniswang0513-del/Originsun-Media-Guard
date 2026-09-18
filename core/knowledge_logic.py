@@ -1134,27 +1134,41 @@ CAPTION_HEADING = "圖說"
 
 
 def parse_captions(md: str, known: Optional[list] = None) -> tuple:
-    """把章節 md 最後的 `## 圖說` 取走：回 `(拿掉那一段的 md, {檔名: 圖說})`。
+    """把章節 md 裡的 `## 圖說` 段取走：回 `(拿掉那幾段的 md, {檔名: 圖說})`。
 
     `known` 給了就只認在清單裡的檔名（claude 亂掰一個檔名不該進 meta）。
+
+    🔴 一章切成好幾段時，**每一段**末尾都有自己的 `## 圖說`（提示對每段都這樣要求），
+    合併後的 md 裡就有好幾段。每一段從標題起算、到下一個 `---`（段與段的分隔）或下一個
+    標題為止；只認第一段並把後面整個切掉的話，第二段起的章文會跟著消失
+    （2026-09-19 /polish BUG-1：一章 > 60,000 字的厚書實際只剩第一段，而且沒有任何徵兆）。
     """
     text = str(md or "")
-    m = re.search(r"^##\s*" + re.escape(CAPTION_HEADING) + r"\s*$", text, re.M)
-    if not m:
+    heading = re.compile(r"^##\s*" + re.escape(CAPTION_HEADING) + r"\s*$", re.M)
+    if not heading.search(text):
         return text, {}
-    body = text[m.end():]
     allow = {str(n) for n in (known or [])}
     caps = {}
-    for ln in body.splitlines():
-        ln = ln.strip().lstrip("-*•").strip()
-        if "｜" not in ln and "|" not in ln:
+    kept: list = []
+    in_caps = False
+    for ln in text.splitlines():
+        if heading.match(ln):
+            in_caps = True
             continue
-        name, _, cap = ln.replace("|", "｜").partition("｜")
+        if in_caps and (ln.strip() == "---" or ln.startswith("#")):
+            in_caps = False              # 這一段的圖說到此為止；分隔線／下一個標題照樣留在文章裡
+        if not in_caps:
+            kept.append(ln)
+            continue
+        row = ln.strip().lstrip("-*•").strip()
+        if "｜" not in row and "|" not in row:
+            continue
+        name, _, cap = row.replace("|", "｜").partition("｜")
         name = name.strip().strip("`").removeprefix("assets/")
         cap = " ".join(cap.split())
         if cap and is_valid_asset(name) and (not allow or name in allow):
             caps[name] = cap[:200]
-    return text[:m.start()].rstrip() + "\n", caps
+    return "\n".join(kept).rstrip() + "\n", caps
 
 
 def asset_lines(assets: list) -> str:
