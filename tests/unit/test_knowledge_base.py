@@ -984,3 +984,33 @@ def test_update_meta_is_serialized_per_book(kb):
         ks.read_meta = orig_read
     m = ks.read_meta(bid)
     assert m.get("author") == "甲" and m.get("tags") == ["財務"], m
+
+
+# ── 開機自動接回被重啟打斷的編譯（2026-09-18 發 2.5.52 時三本編到一半被砍，人工一本一本 POST /compile 接回）──
+
+def test_resume_interrupted_compiles_picks_up_only_orphaned_compiling_books(kb, monkeypatch):
+    from services import knowledge_service as ks
+    a = kb.upload(pages=2)["id"]           # 上一個行程編到一半（meta 停 compiling、沒人在跑）
+    b = kb.upload(pages=2)["id"]           # 編好的
+    c = kb.upload(pages=2)["id"]           # 正在跑（在 _stage 裡）
+    ks._update_meta(a, status="compiling", model="sonnet")
+    ks._update_meta(b, status="compiled")
+    ks._update_meta(c, status="compiling"); ks._stage[c] = "第 1/3 章"
+    started: list = []
+    monkeypatch.setattr(ks, "fire", lambda coro, label="": (started.append(label), coro.close()))
+    resumed = ks.resume_interrupted()
+    assert resumed == [a], resumed
+    assert a in ks._stage and started and a in started[0]
+    ks._stage.pop(a, None); ks._stage.pop(c, None)
+    # 沒 claude CLI → 什麼都不接，也不動狀態（下次開機再看）
+    ks._update_meta(a, status="compiling"); ks._stage.pop(a, None)
+    monkeypatch.setattr(ks, "claude_available", lambda: False)
+    assert ks.resume_interrupted() == [] and a not in ks._stage
+
+
+def test_main_startup_resumes_interrupted_compiles_on_master_only():
+    src = code_only(repo_src("main.py"))
+    body = func_body(src, "_on_startup")
+    assert "resume_interrupted" in body, "開機要把被重啟打斷的編譯接回去（只在 master：書架與 claude 都在那台）"
+    seg = body.split("resume_interrupted", 1)[0][-600:]
+    assert "is_master_machine" in seg

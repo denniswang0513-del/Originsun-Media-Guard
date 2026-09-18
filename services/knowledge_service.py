@@ -27,7 +27,8 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from core import knowledge_logic as kl
-from services.knowledge_claude import call_claude
+from core.bg_task import fire
+from services.knowledge_claude import call_claude, claude_available
 
 logger = logging.getLogger(__name__)
 
@@ -606,6 +607,36 @@ def reset_compiled(book_id: str) -> None:
         except OSError:
             pass
     _update_meta(book_id, toc=[], chapters=0, compiled_at="", error="", status="uploaded")
+
+
+def resume_interrupted() -> list:
+    """開機把被重啟打斷的編譯接回去：meta 停在 compiling、但這支行程沒在跑的 → 重新 fire（從缺的章接著補，不重做）。
+
+    2026-09-18 發 2.5.52 時三本正在編的書被 8000 重啟砍掉，得人工一本一本 POST /compile；這裡自動做。
+    沒 claude CLI（機隊、NAS）什麼都不動——狀態留著，畫面照樣顯示「被中斷」，下次有 CLI 的行程再接。
+    呼叫端（main 開機）只在 master 叫；dev 的書架已分 root，各接各的。
+    """
+    if not claude_available():
+        return []
+    base = root()
+    if not os.path.isdir(base):
+        return []
+    resumed = []
+    for name in sorted(os.listdir(base)):
+        if not kl.is_valid_id(name) or name in _stage:
+            continue
+        try:
+            meta = read_meta(name)
+        except BookNotFound:
+            continue
+        if meta.get("status") != "compiling":
+            continue
+        _stage[name] = "接回中斷的編譯"
+        fire(compile_book(name, meta.get("model") or ""), label=f"knowledge resume {name}")
+        resumed.append(name)
+    if resumed:
+        logger.info("[knowledge] 接回 %d 本被中斷的編譯：%s", len(resumed), "、".join(resumed))
+    return resumed
 
 
 def start_compile(book_id: str, model: str = "", *, force: bool = False) -> dict:

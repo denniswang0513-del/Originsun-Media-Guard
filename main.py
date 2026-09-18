@@ -445,6 +445,14 @@ async def _on_startup():
     except Exception as _e:
         print(f"[WARN] 維運背景工未啟動: {_e}")
     asyncio.create_task(_loop_heartbeat())
+    # 知識庫：上一次重啟（發版）把編到一半的書砍掉的，開機接回去（只 master：書架與 claude CLI 都在那台）
+    try:
+        from core.topology import is_master_machine
+        if is_master_machine():
+            from services import knowledge_service as _ks
+            _ks.resume_interrupted()
+    except Exception as _e:
+        print(f"[WARN] 知識庫接回中斷編譯失敗: {_e}")
     import threading as _wd_threading
     _wd_threading.Thread(target=_wedge_watchdog, daemon=True, name="wedge-watchdog").start()
     from core.scheduler import run_scheduler  # type: ignore
