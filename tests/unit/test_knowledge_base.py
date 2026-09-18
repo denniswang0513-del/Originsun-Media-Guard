@@ -241,7 +241,8 @@ def test_normalize_tags_trims_dedupes_and_caps():
     long = "x" * 25
     assert kl.normalize_tags([long]) == ["x" * kl.TAG_MAX_LEN] and kl.TAG_MAX_LEN == 20
     many = [f"t{i}" for i in range(30)]
-    assert kl.normalize_tags(many) == many[:kl.TAGS_MAX] and kl.TAGS_MAX == 10
+    # owner 2026-09-19：「標籤可以很多個」—— 從 10 放寬到 24
+    assert kl.normalize_tags(many) == many[:kl.TAGS_MAX] and kl.TAGS_MAX == 24
     assert kl.normalize_tags(["a"] * 30 + ["b"]) == ["a", "b"], "去重之後才數上限"
     assert kl.has_tag({"tags": [" 財務 "]}, "財務") and not kl.has_tag({"tags": ["投資"]}, "財務")
     assert not kl.has_tag({}, "財務") and not kl.has_tag({"tags": "財務"}, "財務")
@@ -644,9 +645,11 @@ def test_patch_title_author_and_delete_removes_the_folder(kb):
     assert r.status_code == 200 and r.json()["title"] == "新書名", "空白標題不覆蓋"
     assert kb.client.put(f"{URL}/{bid}", json={"title": "x" * 201}).status_code == 422
     assert kb.client.put(f"{URL}/{bid}", json={}).json()["author"] == "作者"
-    # 標籤：正規化（去空白／去重／截 20 字／最多 10 個）；沒帶 tags 就不動；空清單＝清掉
+    # 標籤：正規化（去空白／去重／截 20 字／最多 kl.TAGS_MAX 個）；沒帶 tags 就不動；空清單＝清掉
     r = kb.client.put(f"{URL}/{bid}", json={"tags": [" 財務 ", "財務", "", "y" * 30] + [f"t{i}" for i in range(20)]})
-    assert r.status_code == 200 and r.json()["tags"] == ["財務", "y" * 20] + [f"t{i}" for i in range(8)]
+    # owner 2026-09-19「標籤可以很多個」把上限放寬到 24；別寫死數字，照 kl.TAGS_MAX 算
+    assert r.status_code == 200 and r.json()["tags"] == (["財務", "y" * 20]
+                                                        + [f"t{i}" for i in range(20)])[:kl.TAGS_MAX]
     assert kb.client.put(f"{URL}/{bid}", json={"author": "改名"}).json()["tags"][:2] == ["財務", "y" * 20], "沒帶 tags 不洗掉"
     assert json.loads(kb.read(bid, "meta.json"))["tags"][0] == "財務"
     assert kb.client.put(f"{URL}/{bid}", json={"tags": []}).json()["tags"] == []

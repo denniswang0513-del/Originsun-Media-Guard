@@ -9,15 +9,17 @@
  */
 import { mdToHtml } from '../shared/md-lite.js';
 import { API, S, PANES, COMPILE_POLL_MS, api, esc, errText, stageText, alive, toast, stopTimers, normBook,
-         chapterList, bookTags, parseTags, statusPill, tagsHtml } from './ctx.js';
+         chapterList, bookTags, parseTags, statusPill, tagsHtml, figureSource } from './ctx.js';
 import { bearerHeader } from '../shared/utils.js';
 import { loadShelf, refreshShelfQuietly } from './shelf.js';
 import { chatHtml, scrollChat, loadChat } from './chat.js';
 import { extendHtml, loadExtend } from './extend.js';
+import { infoHtml } from './info.js';
+import { galleryHtml, loadGallery } from './gallery.js';
 
 export async function openBook(id, { compile: thenCompile = false } = {}) {
     stopTimers();
-    S.chapter = null; S.editing = false; S.editingTags = false; S.chat = [];
+    S.chapter = null; S.editing = false; S.editingTags = false; S.chat = []; S.assets = [];
     try {
         S.book = normBook(await api(`/${encodeURIComponent(id)}`));
     } catch (e) {
@@ -161,7 +163,8 @@ async function _fillAssets(host) {
             img.classList.add('on');
             // 圖說：claude 寫在 alt 裡（提示叫它寫 `![說明](…)`）。alt 只有讀螢幕看得到，
             // 書裡的圖沒有說明等於看不懂，所以再畫一行出來。
-            const alt = (img.alt || '').trim();
+            // 🔴 相簿裡的圖不用 —— 那邊每張本來就有 <figcaption>，再補一行會變成圖說出現兩次。
+            const alt = img.closest('figure') ? '' : (img.alt || '').trim();
             if (alt && !(img.nextElementSibling || {}).classList?.contains('kb-cap')) {
                 const cap = document.createElement('div');
                 cap.className = 'kb-cap';
@@ -182,6 +185,8 @@ export function renderPane() {
     else if (S.pane === 'notes') pane.innerHTML = _docHtml('notes');
     else if (S.pane === 'skeleton') pane.innerHTML = _skeletonHtml();
     else if (S.pane === 'extend') pane.innerHTML = extendHtml();
+    else if (S.pane === 'info') pane.innerHTML = infoHtml();
+    else if (S.pane === 'gallery') pane.innerHTML = galleryHtml();
     else pane.innerHTML = _chaptersHtml();
     if (S.pane === 'chat') scrollChat();
     else _fillAssets(pane);
@@ -190,10 +195,11 @@ export function renderPane() {
 /** 切分頁（點分頁鈕）：同一頁且不在編輯就不動；討論分頁第一次進來才抓 */
 export function switchPane(next) {
     if (next === S.pane && !S.editing) return;
-    S.pane = next; S.editing = false; S.chapter = null;
+    S.pane = next; S.editing = false; S.chapter = null; S.infoEdit = false;
     renderPane();
     if (next === 'chat' && !S.chat.length && !S.wait) loadChat();
     if (next === 'extend' && !S.extendStage) loadExtend();
+    if (next === 'gallery' && !S.assets.length) loadGallery().then(() => { if (S.pane === 'gallery') renderPane(); });
 }
 
 // ── 標籤 ────────────────────────────────────────────────────
@@ -317,6 +323,24 @@ function _skeletonHtml() {
         <button type="button" class="kb-totop" data-kact="to-top" aria-label="回到頂端">↑</button>`;
 }
 
+/** 章末的圖：那一章頁碼範圍內的**每一張**，附圖說與頁數。
+ *  2026-09-19：原本靠提示叫 claude 自己插，實測三本書只引用了 3/50、0/10、0/35 ——
+ *  靠模型挑，大部分的圖永遠不會出現。現在由程式一律列出。
+ *  owner 同日補充「能插入的就插入，但是有抽出來的圖片就放相簿」：文中插過的**照樣**列在這裡，
+ *  相簿是這一章的完整索引，不是「剩下的」。 */
+function _galleryHtml(ch) {
+    const rows = (ch && ch.assets) || [];
+    if (!rows.length) return '';
+    return `<div class="kb-gallery">
+        <h4>本章的圖（${rows.length}）<span class="why">從 PDF 原書抽出來的，括號是頁數</span></h4>
+        ${rows.map((a) => `<figure>
+            <img data-md-src="assets/${esc(a.name)}" alt="${esc(a.caption || '')}" loading="lazy">
+            <figcaption>${a.caption ? esc(a.caption) : '（原書沒有圖說）'}
+                <span class="src">${esc(figureSource(S.book, a.page))}</span></figcaption>
+        </figure>`).join('')}
+    </div>`;
+}
+
 /** 跳到骨架的第 i 個 `## ` 段（渲染後的第 i 個 h2）。 */
 export function jumpToSection(i) {
     const md = S.root.querySelector('#kb-skill-md');
@@ -341,6 +365,7 @@ function _chaptersHtml() {
                 <span class="note">第 ${esc(String(S.chapter.n))} 章 ${esc(S.chapter.title || '')}</span>
             </div>
             <div class="kb-md">${S.chapter.md ? mdToHtml(S.chapter.md) : '<div class="kb-empty">這章沒有內容。</div>'}</div>
+            ${_galleryHtml(S.chapter)}
             ${nav}
             <button type="button" class="kb-totop" data-kact="to-top" aria-label="回到頂端">↑</button>
         </div>`;
@@ -360,7 +385,8 @@ export async function openChapter(n) {
         const d = await api(`/${encodeURIComponent(bookId)}/chapters/${encodeURIComponent(n)}`);
         if (!alive() || !S.book || S.book.id !== bookId) return;
         const md = typeof d === 'string' ? d : (d && (d.md || d.text || d.content)) || '';
-        S.chapter = { n: meta.n, title: (d && d.title) || meta.title || '', md };
+        S.chapter = { n: meta.n, title: (d && d.title) || meta.title || '', md,
+            assets: (d && d.assets) || [], start_page: d && d.start_page, end_page: d && d.end_page };
         renderPane();
         window.scrollTo(0, 0);
     } catch (e) {

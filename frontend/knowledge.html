@@ -53,7 +53,9 @@
     padding-right: max(20px, env(safe-area-inset-right));
     backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
   header .brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300;
-    display: inline-flex; align-items: center; gap: 9px; white-space: nowrap; }
+    display: inline-flex; align-items: center; gap: 9px; white-space: nowrap;
+    color: inherit; cursor: pointer; padding: 4px 6px; margin: -4px -6px; border-radius: 6px; }
+  header .brand-name:hover { background: var(--soft); }
   /* 記號是「三道浪」（frontend/img/knowledge-icon.svg，owner 2026-09-18 拍板）：源日本家那三道橫線起伏而成，
      午夜藍底、天藍到淡紫藍的漸層。PNG 各尺寸同資料夾，給分頁圖示與手機主畫面用。 */
   header .brand-mark { display: block; border-radius: 6px; flex: none; }
@@ -145,7 +147,9 @@
     "/js/knowledge/chat.js": "/js/knowledge/chat.js?v=2.5.54",
     "/js/knowledge/ctx.js": "/js/knowledge/ctx.js?v=2.5.54",
     "/js/knowledge/extend.js": "/js/knowledge/extend.js?v=2.5.54",
+    "/js/knowledge/gallery.js": "/js/knowledge/gallery.js?v=2.5.54",
     "/js/knowledge/index.js": "/js/knowledge/index.js?v=2.5.54",
+    "/js/knowledge/info.js": "/js/knowledge/info.js?v=2.5.54",
     "/js/knowledge/report.js": "/js/knowledge/report.js?v=2.5.54",
     "/js/knowledge/shelf.js": "/js/knowledge/shelf.js?v=2.5.54",
     "/js/shared/chunked-upload.js": "/js/shared/chunked-upload.js?v=2.5.54",
@@ -162,7 +166,9 @@
 <body>
 
 <header>
-  <span class="brand-name"><img class="brand-mark" src="/img/knowledge-icon.svg" alt="" width="26" height="26">Knowledge <span class="accent">知識庫</span></span>
+  <!-- 品牌可以點回書架（owner 2026-09-19）。用 <a> 不用委派：頁首在 .kb 外面，
+       那個委派只掛在 .kb 上；而且整頁重載回書架本來就是對的行為。 -->
+  <a class="brand-name" href="/knowledge.html" title="回書架"><img class="brand-mark" src="/img/knowledge-icon.svg" alt="" width="26" height="26">Knowledge <span class="accent">知識庫</span></a>
   <div class="hdr-right">
     <a class="btn-ghost" href="/my.html">個人工作台</a>
     <span class="hdr-user" id="hdr-user" style="display:none;"></span>

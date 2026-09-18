@@ -42,6 +42,8 @@ class BookPatch(BaseModel):
     # 研究助理要往哪邊找（owner 自己寫的一兩句；正規化與截斷在 knowledge_logic.normalize_focus，
     # 這裡只擋離譜的長度 —— 超過 FOCUS_MAX 的不是 422，是靜默截掉）
     focus: Optional[str] = Field(default=None, max_length=FOCUS_MAX * 5)
+    # 書籍基本資訊（§9.8）：白名單與長度在 knowledge_logic.normalize_info，這裡只擋離譜的整包大小
+    info: Optional[dict] = None
 
 
 class CompilePayload(BaseModel):
@@ -221,7 +223,7 @@ async def patch_book(book_id: str, body: BookPatch, request: Request):
     """`{title?, author?, tags?}`：沒帶的欄位不動（Optional＋None，舊分頁的 PUT 不會洗掉別人剛填的）。"""
     _guard(request)
     return _book_or_404(ks.update_book, book_id, title=body.title, author=body.author,
-                        tags=body.tags, watch=body.watch, focus=body.focus)
+                        tags=body.tags, watch=body.watch, focus=body.focus, info=body.info)
 
 
 @router.delete("/{book_id}")

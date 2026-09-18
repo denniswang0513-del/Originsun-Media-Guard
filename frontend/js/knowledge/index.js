@@ -18,6 +18,7 @@ import {
 } from './book.js';
 import { send, saveConclusion, openConclusionEdit, cancelConclusionEdit, conclude } from './chat.js';
 import { loadReports, openReport, openFromHash, leaveReports } from './report.js';
+import { editInfo, saveInfo } from './info.js';
 import { runExtend, collectOne, rateExtend, toggleWatch, toggleWatchAll,
     editFocus, saveFocus } from './extend.js';
 
@@ -76,6 +77,9 @@ function _onClick(ev) {
     if (act === 'focus-edit') { editFocus(true); return; }
     if (act === 'focus-cancel') { editFocus(false); return; }
     if (act === 'focus-save') { saveFocus(); return; }
+    if (act === 'info-edit') { editInfo(true); return; }
+    if (act === 'info-cancel') { editInfo(false); return; }
+    if (act === 'info-save') { saveInfo(); return; }
     if (act === 'tags-edit') { toggleSheet(false); editTags(true); return; }
     if (act === 'tags-cancel') { editTags(false); return; }
     if (act === 'tags-save') { saveTags(el); return; }

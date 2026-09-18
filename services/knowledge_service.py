@@ -387,7 +387,9 @@ def _chapter_rows(book_id: str, meta: dict) -> list:
     for c in meta.get("toc") or []:
         fname = c.get("file") or kl.chapter_filename(c.get("n") or 0, c.get("title") or "")
         if os.path.isfile(os.path.join(d, CHAPTERS_DIR, fname)):
-            out.append({"n": c.get("n"), "title": c.get("title") or "", "file": fname})
+            # 頁碼一起給：前端的「圖輯」要靠它把圖分到各章（owner 2026-09-19）
+            out.append({"n": c.get("n"), "title": c.get("title") or "", "file": fname,
+                        "start_page": c.get("start_page"), "end_page": c.get("end_page")})
     return out
 
 
@@ -409,6 +411,7 @@ def _summary(meta: dict, book_id: str) -> dict:
         "has_notes": bool(_read_text(os.path.join(d, NOTES_FILE)).strip()),
         "watch": bool(meta.get("watch")),
         "focus": meta.get("focus") or "",
+        "info": meta.get("info") or {},
         "has_extend": _extend_counts(d)[0] > 0,
         "extend_new": _extend_counts(d)[1],
         "stage": _stage.get(book_id, ""),
@@ -460,18 +463,32 @@ def book_detail(book_id: str) -> dict:
 
 
 def read_chapter(book_id: str, n: int) -> dict:
-    """第 n 章的 md（照 toc 找檔，不拼使用者給的名字）。"""
+    """第 n 章的 md（照 toc 找檔，不拼使用者給的名字）＋**這一章頁碼範圍內的圖**。
+
+    圖一律回 —— 章末的相簿由前端畫（owner 2026-09-19：「不用一定要插入頁面，
+    可以在文章底部用相簿、圖說方式（標注頁數）呈現」）。
+    """
     meta = read_meta(book_id)
+    toc = {int(c.get("n") or 0): c for c in (meta.get("toc") or [])}
     for c in _chapter_rows(book_id, meta):
-        if int(c.get("n") or 0) == int(n):
-            return {**c, "md": _read_text(os.path.join(book_dir(book_id), CHAPTERS_DIR, c["file"]))}
+        if int(c.get("n") or 0) != int(n):
+            continue
+        t = toc.get(int(n)) or {}
+        assets = kl.assets_in_range(list_assets(book_id),
+                                    int(t.get("start_page") or 0),
+                                    int(t.get("end_page") or 10 ** 6))
+        return {**c, "start_page": t.get("start_page"), "end_page": t.get("end_page"),
+                "assets": assets,
+                "md": _read_text(os.path.join(book_dir(book_id), CHAPTERS_DIR, c["file"]))}
     raise ChapterNotFound(n)
 
 
 def update_book(book_id: str, *, title: Optional[str] = None, author: Optional[str] = None,
                 tags: Optional[list] = None, watch: Optional[bool] = None,
-                focus: Optional[str] = None) -> dict:
+                focus: Optional[str] = None, info: Optional[dict] = None) -> dict:
     fields = {}
+    if info is not None:
+        fields["info"] = kl.normalize_info(info)      # 書籍基本資訊（§9.8；整包換掉，不逐鍵合併）
     if focus is not None:
         fields["focus"] = kl.normalize_focus(focus)    # 研究助理要往哪邊找（§9；空字串＝沒設定）
     if watch is not None:
@@ -723,8 +740,14 @@ async def _compile(book_id: str, model: str) -> None:
             outs.append(text.strip())
         head = f"# 第 {ch['n']} 章 {ch['title']}（p.{ch['start_page']}–{ch['end_page']}）\n\n"
         body = "\n\n---\n\n".join(outs) if len(outs) > 1 else (outs[0] if outs else "")
+        # AI 寫的圖說（owner 2026-09-19「可以製作圖說」）：取走那一段、蓋掉從 PDF 刮下來的原文。
+        # 它沒寫或寫錯檔名就維持原文 —— 圖說不會變成空的。
+        body, caps = kl.parse_captions(body, [a["name"] for a in assets])
         _write_text(path, head + body + "\n")
-        _update_meta(book_id, chapters=len(_chapter_rows(book_id, read_meta(book_id))))
+        fields = {"chapters": len(_chapter_rows(book_id, read_meta(book_id)))}
+        if caps:
+            fields["asset_captions"] = {**(read_meta(book_id).get("asset_captions") or {}), **caps}
+        _update_meta(book_id, **fields)
 
     # pass 3：骨架（四個檔一次產；缺任何一個就重產整組）
     if _support_missing(d):

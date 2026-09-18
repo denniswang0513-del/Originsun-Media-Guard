@@ -23,10 +23,20 @@ PAGE = "frontend/knowledge.html"
 
 
 def _media(width):
-    """那一段 @media 的內容（媒體區塊的結尾是第一個頂格的 `}`）。"""
+    """這個寬度的 @media 區塊 —— **全部**串起來，不是第一個。
+
+    一個寬度可以有好幾塊（版面一塊、「資訊」分頁一塊…）。只取第一個的話，
+    以後誰在前面多加一塊，這裡就會突然看不到原本那塊（2026-09-19 踩過）。
+    """
     src = repo_src(CSS)
-    i = src.index("@media (max-width: %dpx)" % width)
-    return src[i:src.index("\n}", i)]
+    head, out, i = "@media (max-width: %dpx)" % width, [], 0
+    while True:
+        i = src.find(head, i)
+        if i == -1:
+            return "\n".join(out)
+        end = src.index("\n}", i)
+        out.append(src[i:end])
+        i = end
 
 
 def _narrow_css():

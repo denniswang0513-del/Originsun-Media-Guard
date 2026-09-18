@@ -85,7 +85,7 @@
 .kb .kb-foot { margin-top: 26px; font-size: 12.5px; color: var(--sub); border-top: 1px solid var(--line); padding-top: 12px; line-height: 1.7; }
 
 /* 書頁：左窄右寬 */
-.kb .kb-book { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 28px; align-items: start; }
+.kb .kb-book { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 28px; align-items: start; }
 /* 🔴 格線欄位一律 `minmax(0, …)`、子項一律 `min-width: 0`。
    `1fr` 其實是 `minmax(auto, 1fr)`，而 `auto` 的下限是**內容的最小寬** —— 只要有一個子項
    （標題那行、分頁列、很長的原文書名…）最小寬比容器大，欄位就會被撐開，內容直接被推出畫面。
@@ -157,10 +157,19 @@
 .kb .kb-chapters button:hover { border-color: var(--ink); }
 .kb .kb-chapters button .n { color: var(--sub); margin-right: 8px; font-variant-numeric: tabular-nums; }
 
-/* 書頁標題列（2026-09-18 手機版）：寬螢幕這排只是左欄的第一行；窄螢幕它就是整個頭。
-   ⋯ 與抽屜只在窄螢幕出現（見下面的 @media），寬螢幕那些動作本來就在左欄看得到。 */
+/* 書頁標題列（2026-09-18 手機版）：窄螢幕它就是整個頭（一行：返回／書名／狀態／⋯）。
+   ⋯ 與抽屜只在窄螢幕出現（見下面的 @media），寬螢幕那些動作本來就在左欄看得到。
+   🔴 桌機**不要**用這排 flex —— 左欄只有 300px，書名被擠成一條窄柱、四個字就換行
+   （owner 2026-09-19 實測：一個中文長書名被折成六行）。桌機改回垂直堆疊，見下面的 min-width。 */
 .kb .kb-head { display: flex; align-items: center; gap: 8px; }
 .kb .kb-head h3 { flex: 1; min-width: 0; }
+
+@media (min-width: 900px) {
+    /* 桌機：返回在上、書名佔滿整個左欄、狀態在書名下面 */
+    .kb .kb-head { display: block; }
+    .kb .kb-head h3 { margin: 8px 0 6px; }
+    .kb .kb-head .kb-back { min-height: 0; padding: 0 0 2px; }
+}
 .kb .kb-head .kb-more { display: none; }
 .kb .kb-back { min-height: 44px; }
 
@@ -262,6 +271,45 @@
     border: 1px solid var(--line); margin: 10px 0 2px; }
 .kb .kb-md img.on { display: block; }
 .kb .kb-md .kb-cap { color: var(--sub); font-size: 12.5px; line-height: 1.6; margin: 0 0 12px; }
+
+/* 「資訊」分頁（§9.8）：一本書的出版資料。看的時候是兩欄的定義列，編輯時同一排變成輸入框。 */
+.kb .kb-info-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px;
+    padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.kb .kb-info-head .n { flex: 1; min-width: 0; font-size: 15px; font-weight: 500; line-height: 1.5; }
+.kb .kb-info-head .b { flex: none; display: flex; gap: 8px; }
+.kb .kb-info-row { display: flex; gap: 14px; align-items: baseline; padding: 7px 0; font-size: 13.5px; }
+.kb .kb-info-row .k { flex: none; width: 96px; color: var(--sub); font-size: 13px; }
+.kb .kb-info-row .v { flex: 1; min-width: 0; line-height: 1.6; word-break: break-word; }
+.kb .kb-info-row .v a { color: var(--red); text-decoration: underline; text-underline-offset: 3px; }
+.kb .kb-info-row.edit { cursor: text; }
+.kb .kb-info-row.edit .k { padding-top: 10px; }
+.kb .kb-info + .note, .kb .kb-info-row + .note { margin-top: 12px; }
+
+@media (max-width: 640px) {
+    /* 手機：標籤放上面、輸入框整行 */
+    .kb .kb-info-row { display: block; padding: 6px 0; }
+    .kb .kb-info-row .k { width: auto; display: block; margin-bottom: 2px; }
+    .kb .kb-info-row.edit .k { padding-top: 0; }
+}
+
+/* 章末的圖（owner 2026-09-19：「可以在文章底部用相簿、圖說方式（標注頁數）呈現」）。
+   不靠 claude 自己插 —— 那一章頁碼範圍內的圖一律列在這裡。 */
+.kb .kb-gallery { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line); }
+.kb .kb-gallery h4 { margin: 0 0 14px; font-size: 14px; font-weight: 500; }
+.kb .kb-gallery h4 .why { color: var(--sub); font-size: 12.5px; font-weight: 400; margin-left: 8px; }
+.kb .kb-gallery figure { margin: 0 0 20px; }
+.kb .kb-gallery img { display: none; max-width: 100%; height: auto; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--soft-2); }
+.kb .kb-gallery img.on { display: block; }
+.kb .kb-gallery figcaption { color: var(--sub); font-size: 12.5px; line-height: 1.6; margin-top: 6px; }
+.kb .kb-gallery figcaption .src { display: block; margin-top: 3px; font-size: 11.5px; opacity: .75; }
+
+/* 「圖輯」分頁：整本書的圖，照章分組（owner 2026-09-19）。樣式沿用章末相簿那組。 */
+.kb .kb-gallery.all { margin-top: 0; padding-top: 0; border-top: 0; }
+.kb .kb-gallery .grp { margin-top: 22px; }
+.kb .kb-gallery .grp h5 { margin: 0 0 12px; font-size: 13px; font-weight: 500; color: var(--sub);
+    padding-bottom: 6px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 8px; }
+.kb .kb-gallery .grp h5 .n { margin-left: auto; font-size: 12px; }
 
 /* 窄一點：書頁單欄 */
 @media (max-width: 899px) {

@@ -29,7 +29,7 @@ export const STATUS_LABEL = { pending: '待補', uploaded: '未編譯', compilin
 export const STATUS_CLS = { pending: 'warn', uploaded: 'na', compiling: 'warn', compiled: 'ok', failed: 'bad' };
 //: 一次同時傳幾個檔。每支上傳都把整包讀進記憶體（上限 300MB），五本厚書同時傳就是 1GB。
 export const UPLOAD_PARALLEL = 2;
-export const PANES = [['chat', '討論'], ['conclusion', '結論'], ['notes', '筆記'], ['skeleton', '骨架'], ['chapters', '章節'], ['extend', '延伸']];
+export const PANES = [['chat', '討論'], ['conclusion', '結論'], ['notes', '筆記'], ['skeleton', '骨架'], ['chapters', '章節'], ['extend', '延伸'], ['gallery', '圖輯'], ['info', '資訊']];
 
 /** 宿主給的東西（mount 時填） */
 export const hooks = { host: null, fetch: null, toast: null };
@@ -53,6 +53,9 @@ export const S = {
     extendNote: '',    // 上一輪沒收到東西時的那句人話（失敗的理由／沒找到）
     watchConf: null,   // 研究助理的全域開關 { enabled, weekday, hour, can_edit }；null＝還沒讀到
     focusEdit: false,  // 「研究方向」那一格在編輯中
+    infoEdit: false,   // 「資訊」分頁在編輯中
+    assets: [],        // 「圖輯」分頁：整本書抽出來的圖
+    assetsLoading: false,
     assetUrls: [],     // 這一輪借出去的圖片 blob 網址（重畫前要 revoke）
     reports: [],       // 研究週報／月報的清單（§9.5）
     extendTimer: null,
@@ -127,6 +130,16 @@ export function parseTags(text) {
         if (t && !out.includes(t)) out.push(t);
     }
     return out;
+}
+
+/** 一張圖的出處：`出自《書名》陳玉箴，第 76 頁`（owner 2026-09-19：「要標明出處」）。
+ *  圖是從原書抽出來的，出處就是那本書 —— 公開分享時更需要，沒有出處的圖等於來路不明。 */
+export function figureSource(book, page) {
+    const b = book || {};
+    const title = b.title || b.source_name || '';
+    const who = b.author ? `　${b.author}` : '';
+    const p = page ? `，第 ${page} 頁` : '';
+    return title ? `出自《${title}》${who}${p}` : (page ? `第 ${page} 頁` : '');
 }
 
 export function statusPill(b) {

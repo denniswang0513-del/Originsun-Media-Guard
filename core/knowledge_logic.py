@@ -53,7 +53,7 @@ CONCLUSION_MARK = "可存成結論："
 FINANCE_TAG = "財務"
 #: 標籤上限：每個 ≤ 20 字、最多 10 個
 TAG_MAX_LEN = 20
-TAGS_MAX = 10
+TAGS_MAX = 24        # owner 2026-09-19：「標籤可以很多個」（原本 10）
 
 _FILE_SEP_RE = re.compile(r"^=====\s*FILE:\s*(.+?)\s*=====\s*$", re.M)
 _PATH_CHARS_RE = re.compile(r'[\\/:*?"<>|\[\]#%\x00-\x1f]')
@@ -1129,17 +1129,95 @@ def assets_in_range(assets: Optional[list], start_page: int, end_page: int) -> l
             if start_page <= int(a.get("page") or 0) <= end_page]
 
 
+#: 章節 md 最後那一段圖說的標題（產完會被取走，不留在文章裡）
+CAPTION_HEADING = "圖說"
+
+
+def parse_captions(md: str, known: Optional[list] = None) -> tuple:
+    """把章節 md 最後的 `## 圖說` 取走：回 `(拿掉那一段的 md, {檔名: 圖說})`。
+
+    `known` 給了就只認在清單裡的檔名（claude 亂掰一個檔名不該進 meta）。
+    """
+    text = str(md or "")
+    m = re.search(r"^##\s*" + re.escape(CAPTION_HEADING) + r"\s*$", text, re.M)
+    if not m:
+        return text, {}
+    body = text[m.end():]
+    allow = {str(n) for n in (known or [])}
+    caps = {}
+    for ln in body.splitlines():
+        ln = ln.strip().lstrip("-*•").strip()
+        if "｜" not in ln and "|" not in ln:
+            continue
+        name, _, cap = ln.replace("|", "｜").partition("｜")
+        name = name.strip().strip("`").removeprefix("assets/")
+        cap = " ".join(cap.split())
+        if cap and is_valid_asset(name) and (not allow or name in allow):
+            caps[name] = cap[:200]
+    return text[:m.start()].rstrip() + "\n", caps
+
+
 def asset_lines(assets: list) -> str:
-    """章節提示裡「這一章有哪些圖」那一段。沒有圖就回空字串（整段不出現）。"""
+    """章節提示裡「這一章有哪些圖」那一段。沒有圖就回空字串（整段不出現）。
+
+    2026-09-19 改：**不再叫它插圖**。實測三本書，模型引用的比例是 3/50、0/10、0/35 ——
+    靠它自己選，大部分的圖永遠不會出現。現在圖由程式一律列在章末（附圖說與頁數），
+    這一段只是讓它知道有哪些圖、可以在文中提到。
+    """
     if not assets:
         return ""
     out = ["", "===== 這一章有這幾張圖（已經從 PDF 抽出來了）=====",
-           "🔴 **你看不到圖**。下面只有頁碼與圖旁邊的文字 —— 說明要照那些字與本文寫，",
-           "不要描述你沒看過的畫面（不要寫「圖中可見…」）。",
-           "覺得某張圖對讀這一章有幫助，就在**相關的段落後面**插一行：",
-           "`![你寫的說明](assets/檔名)`。用不到的就不要放，不要為了每張圖都提一句。"]
+           "🔴 **你看不到圖**。下面只有頁碼與圖旁邊的文字。不要描述你沒看過的畫面（不要寫「圖中可見…」）。",
+           "這幾張**一定**會列在你這篇的最後面（附圖說與頁數），所以漏掉哪一張都不要緊。",
+           "如果某張圖明顯對得上你正在寫的段落，就在那一段後面插一行 `![說明](assets/檔名)`，讀起來比較順；",
+           "對不上就不要硬插。本文提到某張圖時，照它的編號與頁碼寫（例如「圖3-1（p.76）」）。",
+           "",
+           f"另外在**整篇的最後面**加一段 `## {CAPTION_HEADING}`，每張圖一行：",
+           "`檔名｜一句圖說`（用半形直線分隔）。圖說照原書的圖說與本文寫成通順的一句，",
+           "把原文黏到的頁碼、下一段開頭那種雜訊去掉。這一段會被程式取走，不會留在文章裡。"]
     for a in assets:
         cap = (a.get("caption") or "").strip()
         out.append(f"- `assets/{a.get('name')}`（第 {a.get('page')} 頁"
                    + (f"，附近的字：{cap}）" if cap else "）"))
     return "\n".join(out)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 書籍基本資訊（owner 2026-09-19：「我希望有個 tab 可以填書的基本資訊」）
+# 存在 `meta.info`。全部選填、全部純文字；書名與作者不在這裡（那兩個是 meta 的正本）。
+# 🔴 欄位表是正本，前端 `frontend/js/knowledge/info.js` 的標籤要跟這裡對得起來
+#    （test_knowledge_info 會比對兩邊的鍵）。
+# ══════════════════════════════════════════════════════════════════════════
+
+#: `(鍵, 幾個字的上限)`。順序就是畫面上的順序。
+INFO_FIELDS = (
+    ("subtitle", 200),          # 副書名
+    ("original_title", 200),    # 原文書名
+    ("translator", 100),        # 譯者
+    ("publisher", 100),         # 出版社
+    ("published", 40),          # 出版年
+    ("edition", 40),            # 版次
+    ("isbn", 40),
+    ("link", 500),              # 購買或借閱的連結
+    ("why", 500),               # 我為什麼讀這本
+    ("read_at", 40),            # 讀完的日期
+)
+INFO_KEYS = tuple(k for k, _ in INFO_FIELDS)
+_INFO_MAX = dict(INFO_FIELDS)
+
+
+def normalize_info(raw: Any) -> dict:
+    """只收白名單的鍵、壓成單行、各自截長。空字串的鍵不留（meta 不要堆一堆空值）。
+
+    `link` 另外擋掉非 http／https —— 那一格會被畫成可以點的連結（同延伸那邊的規矩）。
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for key in INFO_KEYS:
+        val = " ".join(str(raw.get(key) or "").split())[:_INFO_MAX[key]].strip()
+        if key == "link" and val and not val.lower().startswith(("http://", "https://")):
+            val = ""
+        if val:
+            out[key] = val
+    return out
