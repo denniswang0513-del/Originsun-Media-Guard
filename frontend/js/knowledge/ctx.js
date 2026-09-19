@@ -145,6 +145,19 @@ export function figureSource(book, page) {
     return title ? `出自《${title}》${who}${p}` : (page ? `第 ${page} 頁` : '');
 }
 
+/**
+ * 圖片先佔位子用的 style（`aspect-ratio: 寬 / 高`）。
+ *
+ * 🔴 沒有它，`loading="lazy"` 的圖在載入前**不佔高度** —— 整頁的長度會邊捲邊變
+ * （2026-09-19 實測分享頁的圖輯：7,106px 一路長到 13,935px），手指底下的東西會跳，
+ * 切到別的分頁時 iOS 還會把人留在一片空白裡。長寬由後端 `list_assets` 給。
+ */
+export function sizeStyle(a) {
+    const w = Number(a && a.w) || 0;
+    const h = Number(a && a.h) || 0;
+    return w > 0 && h > 0 ? ` style="aspect-ratio:${w}/${h}"` : '';
+}
+
 export function statusPill(b) {
     const st = b.status || 'uploaded';
     let label = STATUS_LABEL[st] || st;

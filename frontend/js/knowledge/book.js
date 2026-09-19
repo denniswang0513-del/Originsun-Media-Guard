@@ -9,7 +9,7 @@
  */
 import { mdToHtml } from '../shared/md-lite.js';
 import { API, S, PANES, TAGS_MAX, COMPILE_POLL_MS, api, esc, errText, stageText, alive, toast, stopTimers, normBook,
-         chapterList, bookTags, parseTags, statusPill, tagsHtml, figureSource } from './ctx.js';
+         chapterList, bookTags, parseTags, statusPill, tagsHtml, figureSource, sizeStyle } from './ctx.js';
 import { authDownload, bearerHeader } from '../shared/utils.js';
 import { loadShelf, refreshShelfQuietly } from './shelf.js';
 import { chatHtml, scrollChat, loadChat } from './chat.js';
@@ -438,7 +438,7 @@ function _galleryHtml(ch) {
     return `<div class="kb-gallery">
         <h4>本章的圖（${rows.length}）<span class="why">從 PDF 原書抽出來的，括號是頁數</span></h4>
         ${rows.map((a) => `<figure>
-            <img data-md-src="assets/${esc(a.name)}" alt="${esc(a.caption || '')}" loading="lazy">
+            <img data-md-src="assets/${esc(a.name)}" alt="${esc(a.caption || '')}" loading="lazy"${sizeStyle(a)}>
             <figcaption>${a.caption ? esc(a.caption) : '（原書沒有圖說）'}
                 <span class="src">${esc(figureSource(S.book, a.page))}</span></figcaption>
         </figure>`).join('')}

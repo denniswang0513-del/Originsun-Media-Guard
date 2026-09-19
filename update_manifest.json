@@ -1,5 +1,5 @@
 {
-  "version": "2.5.60",
+  "version": "2.5.61",
   "pip_install": [],
   "note": "Agent OTA safety net — update_agent.py also installs these"
 }

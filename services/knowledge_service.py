@@ -592,14 +592,46 @@ def asset_path(book_id: str, name: str) -> str:
     return os.path.join(book_dir(book_id), ASSETS_DIR, name)
 
 
+#: 圖檔的長寬（`路徑 -> (w, h)`）。檔案寫下去就不會再變，所以記著就好。
+_ASSET_SIZE: dict = {}
+
+
+def asset_size(path: str) -> tuple:
+    """`(寬, 高)`；讀不出來回 `(0, 0)`。
+
+    只讀檔頭（PIL 的 `.size` 不會把整張圖解開），35 張也只有幾毫秒。
+    """
+    if path in _ASSET_SIZE:
+        return _ASSET_SIZE[path]
+    wh = (0, 0)
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            wh = (int(im.width), int(im.height))
+    except Exception:
+        wh = (0, 0)
+    _ASSET_SIZE[path] = wh
+    return wh
+
+
 def list_assets(book_id: str) -> list:
-    """`[{name, page, caption}]`，照頁碼排。圖說存在 meta（檔案本身不帶字）。"""
+    """`[{name, page, caption, w, h}]`，照頁碼排。圖說存在 meta（檔案本身不帶字）。
+
+    `w`／`h` 是給畫面**先把位置佔好**用的（`aspect-ratio`）——
+    沒有它，`loading="lazy"` 的圖在載入前不佔高度，整頁的長度會邊捲邊變
+    （2026-09-19 實測：圖輯從 7,106px 一路長到 13,935px）。
+    """
     d = assets_dir(book_id)
     if not os.path.isdir(d):
         return []
     caps = (read_meta(book_id).get("asset_captions") or {})
-    rows = [{"name": n, "page": kl.asset_page(n), "caption": caps.get(n, "")}
-            for n in os.listdir(d) if kl.is_valid_asset(n)]
+    rows = []
+    for n in os.listdir(d):
+        if not kl.is_valid_asset(n):
+            continue
+        w, h = asset_size(os.path.join(d, n))
+        rows.append({"name": n, "page": kl.asset_page(n), "caption": caps.get(n, ""),
+                     "w": w, "h": h})
     return sorted(rows, key=lambda a: (a["page"], a["name"]))
 
 

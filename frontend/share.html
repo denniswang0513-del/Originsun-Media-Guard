@@ -233,9 +233,13 @@ function figuresHtml(d, id) {
   const rows = d.gallery || [];
   const who = [d.title ? "《" + d.title + "》" : "", d.author].filter(Boolean).join("　");
   const chs = has(d, "chapters") ? d.chapters : [];
+  // 先把位置佔好：沒有 aspect-ratio 的話 lazy 圖在載入前不佔高度，整頁長度會邊捲邊變
+  // （2026-09-19 實測 7,106px → 13,935px），iOS 上切分頁還會留下一片空白。
+  const ratio = (a) => (Number(a.w) > 0 && Number(a.h) > 0
+    ? ' style="aspect-ratio:' + Number(a.w) + "/" + Number(a.h) + '"' : "");
   const one = (a) => "<figure>"
     + '<img src="/api/v1/knowledge/public/' + encodeURIComponent(id) + "/assets/" + encodeURIComponent(a.name)
-    + '" alt="' + esc(a.caption || "") + '" loading="lazy">'
+    + '" alt="' + esc(a.caption || "") + '" loading="lazy"' + ratio(a) + ">"
     + "<figcaption>" + esc(a.caption || "（原書沒有圖說）")
     + '<span class="src">' + esc("出自" + who + "，第 " + a.page + " 頁") + "</span></figcaption>"
     + "</figure>";

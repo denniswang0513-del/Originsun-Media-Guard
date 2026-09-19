@@ -11,7 +11,7 @@
  *
  * 只 import ctx（葉節點）。
  */
-import { S, api, esc, errText, alive, toast, chapterList, figureSource } from './ctx.js';
+import { S, api, esc, errText, alive, toast, chapterList, figureSource, sizeStyle } from './ctx.js';
 
 /** 照章分組：`[[章標題, [圖…]], …]`，落在任何一章之外的收在最後。 */
 function _byChapter(assets) {
@@ -33,7 +33,7 @@ function _byChapter(assets) {
 
 function _figure(a) {
     return `<figure>
-        <img data-md-src="assets/${esc(a.name)}" alt="${esc(a.caption || '')}" loading="lazy">
+        <img data-md-src="assets/${esc(a.name)}" alt="${esc(a.caption || '')}" loading="lazy"${sizeStyle(a)}>
         <figcaption>${a.caption ? esc(a.caption) : '（原書沒有圖說）'}
             <span class="src">${esc(figureSource(S.book, a.page))}</span></figcaption>
     </figure>`;
