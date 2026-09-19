@@ -482,9 +482,13 @@ def read_chapter(book_id: str, n: int) -> dict:
         assets = kl.assets_in_range(list_assets(book_id),
                                     int(t.get("start_page") or 0),
                                     int(t.get("end_page") or 10 ** 6))
+        # 標題去重（§9.12）：我們寫的那行 ＋ 模型自己又寫一次，四個畫面都會看到兩次。
+        # 修在這裡一次 —— 書頁、公開頁、PDF 都是走這一支拿 md 的。檔案本身不動。
+        md = kl.drop_repeated_heading(
+            _read_text(os.path.join(book_dir(book_id), CHAPTERS_DIR, c["file"])),
+            c.get("title") or "")
         return {**c, "start_page": t.get("start_page"), "end_page": t.get("end_page"),
-                "assets": assets,
-                "md": _read_text(os.path.join(book_dir(book_id), CHAPTERS_DIR, c["file"]))}
+                "assets": assets, "md": md}
     raise ChapterNotFound(n)
 
 

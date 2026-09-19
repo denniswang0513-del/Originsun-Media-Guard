@@ -1248,6 +1248,81 @@ def normalize_info(raw: Any) -> dict:
     return out
 
 
+#: 標題尾巴的頁碼：`（p.9）`／`（p.9-12）`／`（p.9–12）`（半形與全形括號、連字號與 en dash）
+_TITLE_PAGES_RE = re.compile(r"[（(]\s*p\.?\s*[\d\s,.\-–—]*[）)]\s*$", re.I)
+#: 開頭的 markdown 標題行
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+
+
+#: 比對標題時要丟掉的東西：空白與所有標點（全形半形都算）。
+#: 模型抄標題時常常換一種寫法 —— `第二章 : 從…` vs `第二章：從…`、
+#: `-` vs `—`。只留文字與數字來比，那幾種寫法就是同一個標題。
+_PUNCT_RE = re.compile(r"[^\w一-鿿]+", re.U)
+#: 「第二個標題是不是在重複章名」時，短的那一邊至少要這麼長才算數
+_TITLE_MIN_OVERLAP = 6
+
+
+def _squash(s: str) -> str:
+    return _PUNCT_RE.sub("", str(s or ""))
+
+
+def _title_key(line: str) -> str:
+    """標題行 → 拿來比對「是不是同一個標題」的字：去掉 #、去掉尾巴的頁碼、只留文字。"""
+    m = _HEADING_RE.match(line.strip())
+    if not m:
+        return ""
+    return _squash(_TITLE_PAGES_RE.sub("", m.group(2)))
+
+
+def drop_repeated_heading(md: str, title: str = "") -> str:
+    """一章開頭連著兩個**同一個標題**時，把第二個拿掉（owner 2026-09-19：「做去重」）。
+
+    編譯時我們寫了 `# 第 N 章 章名（p.X–Y）`，模型的正文又寫了一次
+    `# 第 N 章 章名（p.X）` —— 頁碼寫法不同，但講的是同一章。
+
+    只看**開頭連著的那兩行**，兩種情況才動手：
+      1. 去掉頁碼之後一模一樣
+      2. 第二行是 `#`（最上層），而且**整章的章名在裡面**
+         —— 模型有時候會多寫幾個字或把頁碼抄錯，例如
+         `# 第 8 章 第五章 結論（p.169–173）` 後面接
+         `# 第五章 結論（p.160–164）筆記`。章名是 toc 給的，不是猜的。
+
+    其餘原樣不動：第二行是 `## 核心概念` 那種次級標題、或根本是內容，都留著。
+    寧可少去重一次，也不要把真的有兩層標題的那種章節吃掉一行。
+    """
+    text = str(md or "")
+    lines = text.split("\n")
+    first = next((i for i, ln in enumerate(lines) if ln.strip()), None)
+    if first is None:
+        return text
+    key = _title_key(lines[first])
+    if not key:
+        return text
+    second = next((i for i in range(first + 1, len(lines)) if lines[i].strip()), None)
+    if second is None:
+        return text
+    second_key = _title_key(lines[second])
+    tkey = _squash(title)
+    same = second_key == key
+    # 只有最上層的 `#` 算「又寫了一次章名」——`## 核心概念` 不算。
+    # 兩邊互相包含都算：模型有時候多寫幾個字，有時候把長章名縮短
+    #（`第十七章 : 天皇吃牛肉了！…- 蛋包飯、咖哩飯…` → `第十七章：天皇吃牛肉了！…`）。
+    # 🔴 兩個方向的寬鬆程度不一樣：
+    #    · 第二行**整個章名都在裡面** → 一定是重複，章名再短也算（「作者簡介」「序言」）。
+    #    · 反過來，第二行只是章名的一小段 → 要至少 6 個字才算。不然章名叫
+    #      「第一章 前言與背景」時，底下真的有一節 `# 前言` 會被誤刪。
+    overlap = bool(tkey) and second_key != "" and (
+        tkey in second_key or (second_key in tkey and len(second_key) >= _TITLE_MIN_OVERLAP))
+    repeats_title = overlap and lines[second].strip().startswith("# ")
+    if not (same or repeats_title):
+        return text
+    head, tail = lines[:second], lines[second + 1:]
+    # 兩個標題之間與之後各有一個空行，只拿掉標題會剩下兩個空行疊在一起
+    if head and not head[-1].strip() and tail and not tail[0].strip():
+        head = head[:-1]
+    return "\n".join(head + tail).lstrip("\n")
+
+
 def safe_filename(name: str, fallback: str = "book.pdf") -> str:
     """要送去當下載檔名的字：把路徑分隔與 Windows 不收的字換掉、砍掉過長的。
 
