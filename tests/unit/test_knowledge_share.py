@@ -47,10 +47,25 @@ def test_the_private_endpoints_still_all_have_the_guard():
 
 # ── 2. 網址猜不到、書 id 不能當網址 ────────────────────────
 def test_the_share_id_is_random_and_not_the_book_id():
+    """2026-09-19 起是 12 個字（owner：「我希望網址短一點」），約 70 bits。"""
     a, b = kshare.new_share_id(), kshare.new_share_id()
     assert a != b
-    assert re.fullmatch(r"[0-9a-f]{32}", a), a
+    assert re.fullmatch(r"[a-zA-Z2-9]{12}", a), a
     assert not kshare.is_valid_share_id("0" * 16), "書 id 是 16 hex —— 長度刻意不同，不能互相當成對方"
+    # 字母表拿掉了看起來一樣的那幾個（他可能要唸給別人聽）
+    assert not set("0Oo1lI") & set(kshare._SHARE_ALPHABET)
+
+
+def test_links_shared_before_today_still_open():
+    """🔴 2026-09-19 之前發出去的是 32 hex。那些連結已經在別人手上，不能死。"""
+    assert kshare.is_valid_share_id("f36d2b7e285c201c9747881030c1cf48")
+
+
+def test_the_whole_link_is_short_enough_to_paste():
+    """改前 78 字（/share.html# ＋ 32 hex），現在 51。"""
+    url = kshare.share_url(kshare.new_share_id())
+    assert len(url) <= 55, url
+    assert url.startswith("https://") and "#" in url, "碼還是放 hash —— 不進存取紀錄、不被 referer 帶走"
 
 
 @pytest.mark.parametrize("bad", ["", None, "zz", "0" * 31, "0" * 33, "../x", "0" * 16, "A" * 32])

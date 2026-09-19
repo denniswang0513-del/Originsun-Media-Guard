@@ -26,10 +26,16 @@ from typing import Optional
 from core import knowledge_logic as kl
 from services import knowledge_service as ks
 
-#: 分享網址上的那一段：32 hex（隨機，猜不到）。跟書 id（16 hex）刻意不同長度，一眼分得出來。
-_SHARE_RE = re.compile(r"^[0-9a-f]{32}$")
-#: 公開頁的網址（office-api 那一面不供這頁，要絕對網址）
-PUBLIC_BASE = "https://foundry.originsun-studio.com/share.html"
+#: 現在發的分享 id：12 個字、約 70 bits（owner 2026-09-19「我希望網址短一點」）。
+#: 字母表拿掉 0/O/o、1/l/I 那幾組看起來一樣的 —— 他可能要唸給別人聽或手打。
+SHARE_ID_LEN = 12
+_SHARE_ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+#: 認得的兩種格式：新的（12 字）與 **2026-09-19 之前發出去的 32 hex**。
+#: 🔴 舊的那條一定要留著 —— 已經寄給別人的連結不能死。
+_SHARE_RE = re.compile(r"^(?:[0-9a-f]{32}|[a-zA-Z2-9]{%d})$" % SHARE_ID_LEN)
+#: 公開頁的網址（office-api 那一面不供這頁，要絕對網址）。
+#: `/b` 是 main.py 上的短路徑，跟 `/e/`、`/p/`、`/q/` 同一種做法（掛根路徑就是為了短）。
+PUBLIC_BASE = "https://foundry.originsun-studio.com/b"
 
 
 def is_valid_share_id(share_id) -> bool:
@@ -38,8 +44,8 @@ def is_valid_share_id(share_id) -> bool:
 
 
 def new_share_id() -> str:
-    """隨機 32 hex，猜不到。"""
-    return secrets.token_hex(16)
+    """隨機 12 個字（約 70 bits），猜不到。"""
+    return "".join(secrets.choice(_SHARE_ALPHABET) for _ in range(SHARE_ID_LEN))
 
 
 def share_url(share_id: str) -> str:

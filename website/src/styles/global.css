@@ -6,3 +6,23 @@
 @layer base {
     h1, h2, h3, h4 { color: var(--text-strong, #111); }
 }
+
+/* 手機的字放大一階（owner 2026-09-19：「我希望手機版的文字可以大一些」「RWD」）。
+   實測改前：作品頁 33% 的字是 10px、51% 是 14px；關於頁還有 12px。
+   iOS 內建的閱讀字是 17px。
+
+   🔴 為什麼是在這裡蓋 utility，而不是把每個 `text-sm` 都改成 `text-base sm:text-sm`：
+   那要動幾十個檔、每一處都是一次手改的機會。這一段只在手機生效、只動字級，
+   一個地方看得完。**不要在這裡動間距** —— 間距同一天才為了「手機版都會很長」
+   縮過一輪（43 處 py-20 → py-12 sm:py-20），兩邊會互相抵銷。
+
+   放在 @import 之後：同分數、後到的贏。 */
+@media (max-width: 640px) {
+    .text-\[10px\] { font-size: 11.5px; }
+    .text-\[11px\] { font-size: 12.5px; }
+    .text-xs { font-size: 13.5px; }
+    .text-sm { font-size: 15px; }
+    .text-base { font-size: 16.5px; }
+    .text-\[15px\] { font-size: 16px; }
+    .prose { font-size: 16.5px; }
+}

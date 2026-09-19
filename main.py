@@ -678,6 +678,24 @@ async def _short_payout_note(code: str, request: Request):
     return no_store_file(os.path.join("frontend", "payout.html"), media_type="text/html")
 
 
+@app.get("/b", include_in_schema=False)
+async def _short_book_share():
+    """一本書的公開研究短網址：`/b#{12 碼}` → 分享頁（免登入，憑證就是那串碼）。
+
+    掛在根路徑是為了**短**（owner 2026-09-19：「我希望網址短一點」）——
+    `/share.html#…` 整條 78 字，現在 51。同 `/e/`、`/p/`、`/q/` 那幾條的做法。
+
+    🔴 碼在 **hash** 不在路徑（所以這支沒有 `{code}` 參數）：hash 不會進伺服器的
+    存取紀錄，也不會被 referer 帶到「延伸研究」連出去的那些網站。頁面自己從
+    `location.hash` 取碼，再打 `/api/v1/knowledge/public/{id}`；驗證在那支。
+
+    `/share.html` 照樣活著（靜態檔），已經發出去的舊連結不會死。
+
+    註冊在 `app.mount("/")` 之前才會贏 —— StaticFiles 掛在根，順序決定誰接。
+    """
+    return no_store_file(os.path.join("frontend", "share.html"), media_type="text/html")
+
+
 @app.get("/q/{code}", include_in_schema=False)
 async def _short_quote_view(code: str, request: Request):
     """報價單線上檢視短網址：`/q/{12 碼}` → HTML（免登入，憑證就是那串碼；頁上有「下載 PDF」）。

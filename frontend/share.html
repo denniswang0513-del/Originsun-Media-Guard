@@ -134,6 +134,20 @@
     .head { padding-bottom: 10px; }
     .head h1 { font-size: 18px; }
   }
+  /* 手機的字放大一階（owner 2026-09-19：「我希望手機版的文字可以大一些」）。
+     改前 86% 的字是 14px。只動字級，不動間距。 */
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    .pane .note, .head .facts { font-size: 14px; }
+    ol.items .t { font-size: 16px; }
+    ol.items .sum { font-size: 15px; }
+    ol.items .orig, ol.items .src, ol.items .why { font-size: 13.5px; }
+    nav button { font-size: 15.5px; }
+    .md, .md p, .md li { font-size: 16px; }
+    figcaption { font-size: 13.5px; }
+    .chlist button .t { font-size: 15.5px; }
+  }
+
   /* 手機：圖輯改兩欄（owner 2026-09-19「手機版都會很長」）。
      實測那本鯨豚 35 張圖：一排一張 14,090px → 兩欄 5,944px（−58%）。
      桌機一排一張不動。 */

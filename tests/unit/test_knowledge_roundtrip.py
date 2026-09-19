@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core import knowledge_logic as kl
+from services import knowledge_share as kshare
 from tests.unit.test_knowledge_base import URL, _make_pdf, kb  # noqa: F401 — fixture 由 pytest 依名字注入
 
 _EXTEND_REPLY = ('[{"url":"https://a.tw/one","title_original":"One","title_zh":"第一篇","lang":"en",'
@@ -88,7 +89,9 @@ def test_share_round_trip_private_switch_and_public_view(kb, public_client):
     assert r.json() == {"on": False, "id": "", "url": "", "at": "", "parts": list(kl.SHARE_DEFAULT)}
 
     sh = kb.client.put(f"{URL}/{bid}/share", json={"on": True}).json()
-    assert sh["on"] and len(sh["id"]) == 32 and sh["url"].endswith("#" + sh["id"]) and sh["at"]
+    # 2026-09-19 起 id 是 12 個字（owner「我希望網址短一點」）；長度以 knowledge_share 為準
+    assert (sh["on"] and len(sh["id"]) == kshare.SHARE_ID_LEN
+            and sh["url"].endswith("#" + sh["id"]) and sh["at"])
     assert sh["parts"] == list(kl.SHARE_DEFAULT)
 
     pub = public_client.get(f"/api/v1/knowledge/public/{sh['id']}")
