@@ -16,6 +16,7 @@ import { chatHtml, scrollChat, loadChat } from './chat.js';
 import { extendHtml, loadExtend } from './extend.js';
 import { infoHtml, loadShare } from './info.js';
 import { galleryHtml, loadGallery } from './gallery.js';
+import { loadPodcast, podcastHtml, podcastTag, podcastAllHtml, fillPodcastAudio } from './podcast.js';
 
 export async function openBook(id, { compile: thenCompile = false } = {}) {
     stopTimers();
@@ -40,6 +41,7 @@ export async function openBook(id, { compile: thenCompile = false } = {}) {
     if (!alive() || !S.book) return;
     _loadPaneData(S.pane);                                  // 落地的分頁要抓的東西，跟 switchPane 同一支
     if (S.pane !== 'chat' && S.book.chatting) loadChat();   // chatting＝上一輪還在回，不在討論分頁也接著等
+    loadPodcast();          // 每一章有沒有 podcast（章節清單要標、單章要放播放器）
 }
 
 /** 切到（或開書時落在）某個分頁要抓什麼：討論第一次進來才抓；延伸沒在找才抓；圖輯沒抓過才抓；分享沒讀過才讀。
@@ -257,7 +259,7 @@ export function renderPane() {
     else if (S.pane === 'gallery') pane.innerHTML = galleryHtml();
     else pane.innerHTML = _chaptersHtml();
     if (S.pane === 'chat') scrollChat();
-    else _fillAssets(pane);
+    else { _fillAssets(pane); fillPodcastAudio(pane); }
 }
 
 /** 切分頁（點分頁鈕）：同一頁且不在編輯就不動；討論分頁第一次進來才抓 */
@@ -470,6 +472,7 @@ function _chaptersHtml() {
             </div>
             <div class="kb-md">${S.chapter.md ? mdToHtml(S.chapter.md) : '<div class="kb-empty">這章沒有內容。</div>'}</div>
             ${_galleryHtml(S.chapter)}
+            ${podcastHtml(S.chapter.n)}
             ${nav}
             <button type="button" class="kb-totop" data-kact="to-top" aria-label="回到頂端">↑</button>
         </div>`;
@@ -478,7 +481,7 @@ function _chaptersHtml() {
         const st = stageText(S.book.stage);
         return `<div class="kb-empty">${S.book.status === 'compiling' ? `編譯中${st ? `（${esc(st)}）` : ''}，章節一章一章長出來。` : '還沒編譯，沒有章節。'}</div>`;
     }
-    return `<div class="kb-chapters">${list.map((c) => `<button type="button" data-kact="chapter" data-n="${esc(String(c.n))}"><span class="n">${esc(String(c.n)).padStart(2, '0')}</span>${esc(c.title || c.file || '')}</button>`).join('')}</div>`;
+    return `${podcastAllHtml()}<div class="kb-chapters">${list.map((c) => `<button type="button" data-kact="chapter" data-n="${esc(String(c.n))}"><span class="n">${esc(String(c.n)).padStart(2, '0')}</span>${esc(c.title || c.file || '')}${podcastTag(c.n)}</button>`).join('')}</div>`;
 }
 
 export async function openChapter(n) {

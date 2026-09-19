@@ -1336,6 +1336,178 @@ def safe_filename(name: str, fallback: str = "book.pdf") -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# 每一章一集 podcast（§9.13；owner 2026-09-19：「每一章一個podcast」「內容深度深一點」）
+#
+# 兩個人對談：主持人（提問、翻成白話）＋來賓（講內容）。聲音是 owner 挑的。
+#
+# 🔴 **兩趟**，不是一次寫完。實測第一版一次寫完整集：3,711 字、13.8 分鐘，而且把那一章
+#    大量的具體東西（人名、年份、頁碼、外文原詞）整批跳過 —— 模型要在一個回合裡顧到整章，
+#    只能挑幾個點講。改成「先拆段列出具體素材 → 再一段一段寫」之後：5,565 字、19.8 分鐘，
+#    12 個抽查的具體項目全部出現。深度是被那份清單逼出來的，不是叫它「寫長一點」。
+# ══════════════════════════════════════════════════════════════════════════
+
+#: 音檔與逐字稿放這裡（在那本書自己的資料夾底下 → 跟著書架的根目錄走、刪書一起刪）
+PODCAST_DIR = "podcast"
+#: 主持人／來賓的聲音（owner 2026-09-19 聽過六個樣本後挑的：雲希＋曉臻）
+PODCAST_HOST = ("zh-CN-YunxiNeural", "主持人")
+PODCAST_GUEST = ("zh-TW-HsiaoChenNeural", "來賓")
+#: 語速（+0% 太慢，聽起來像在念稿）
+PODCAST_RATE = "+6%"
+#: 一章拆幾段
+PODCAST_SECTIONS = (6, 8)
+#: 整集的目標字數上限（中文約 4.5 字／秒 → 6,200 字≈23 分鐘）
+PODCAST_TARGET_CHARS = 6200
+#: 稿子最多是原章節的幾倍。🔴 沒有這條的話短章節會被硬撐：2026-09-19 實測一個 173 字的
+#: 測試章節被寫成 5,815 字（**33 倍**）—— 那種長度的內容只可能是掰的或重複的。
+#: 鯨豚第二章 5,045 字 → 5,565 字（1.1 倍）才是正常的比例。
+PODCAST_EXPAND_MAX = 1.5
+#: 稿子的下限（太短的話一集三分鐘也還能聽）
+PODCAST_MIN_CHARS = 1200
+#: 章節短於這個字數就不做 —— 硬做只會生出掰的內容
+PODCAST_MIN_CHAPTER = 600
+#: 一句最多幾個字（太長聽起來像念稿，也不好斷句）
+PODCAST_LINE_MAX = 60
+_POD_RE = re.compile(r"^ch(\d{2})\.(mp3|json)$")
+
+
+def podcast_name(n: int, ext: str = "mp3") -> str:
+    """`(5, 'mp3')` → `ch05.mp3`。章號不合理或副檔名不對就回空字串。"""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return ""
+    name = f"ch{n:02d}.{ext}" if 1 <= n <= 99 and ext in ("mp3", "json") else ""
+    return name if _POD_RE.match(name) else ""
+
+
+def is_valid_podcast(name: str) -> bool:
+    """🔴 檔名一律先過白名單再拼路徑（同 `is_valid_asset` 的規矩）。"""
+    return bool(_POD_RE.match(str(name or "")))
+
+
+def podcast_chapter(name: str) -> int:
+    """`ch05.mp3` → 5；不合白名單回 0。"""
+    m = _POD_RE.match(str(name or ""))
+    return int(m.group(1)) if m else 0
+
+
+def parse_podcast_script(text: str) -> list:
+    """claude 回的那一坨 → `[{who, text}]`。找不到 JSON 陣列、或形狀不對就回空清單。
+
+    只收 `who` 是主持人或來賓的那幾句 —— 模型偶爾會自己多發明一個角色。
+    """
+    raw = str(text or "")
+    a, b = raw.find("["), raw.rfind("]")
+    if a < 0 or b <= a:
+        return []
+    try:
+        rows = json.loads(raw[a:b + 1])
+    except ValueError:
+        return []
+    if not isinstance(rows, list):
+        return []
+    who_ok = {PODCAST_HOST[1], PODCAST_GUEST[1]}
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        who = str(r.get("who") or "").strip()
+        line = " ".join(str(r.get("text") or "").split()).strip()
+        if who in who_ok and line:
+            out.append({"who": who, "text": line})
+    return out
+
+
+def podcast_minutes(lines) -> float:
+    """這份稿大概幾分鐘（中文約 4.5 字／秒）。"""
+    chars = sum(len(r.get("text") or "") for r in (lines or []))
+    return round(chars / 4.5 / 60, 1)
+
+
+def podcast_budget(chapter_chars: int, sections: int) -> int:
+    """一段要寫幾個字。總長跟著**原章節的長度**走，不是固定值。
+
+    🔴 固定 6,200 字的話，短章節會被硬撐到二十分鐘（實測 173 字的章節被寫成 5,815 字）。
+    規則只說「不准掰」，但一直逼它產字，它就會開始重複或延伸 —— 從源頭限長比較實在。
+    """
+    total = max(PODCAST_MIN_CHARS, min(PODCAST_TARGET_CHARS,
+                                       int(max(0, chapter_chars) * PODCAST_EXPAND_MAX)))
+    # 每段的下限壓低（150）：下限訂太高的話，段數一多總長就被墊回去，
+    # 「跟著章節長度走」那件事就失效了（實測 6 段 × 300 = 1,800，比上面算的總長還大）。
+    return max(150, int(total / max(1, sections)))
+
+
+def podcast_outline_prompt(body: str) -> str:
+    """第一趟：把一章拆成幾段，每段列出**那一段裡真的有的具體東西**。"""
+    lo, hi = PODCAST_SECTIONS
+    return f"""把下面這一章的整理筆記拆成 {lo} 到 {hi} 段，給我一份大綱。
+
+每一段要列出**那一段裡真的有的具體東西**：人名、機構名、地名、年份、數字、書名、頁碼、
+作者說的原話。這是要拿來做 podcast 的素材清單，所以越具體越好 —— 抽象的形容詞不要。
+
+🔴 只能寫筆記裡有的。筆記沒有的一個字都不要補。
+
+輸出**只有一個 JSON 陣列**，不要任何其他文字、不要 markdown 程式碼框。每個元素：
+{{"title": "這一段在講什麼（10 字以內）",
+  "point": "這一段的核心主張（一句話）",
+  "facts": ["具體的東西 1", "具體的東西 2"]}}
+
+────── 這一章的整理筆記 ──────
+{body}
+"""
+
+
+def podcast_section_prompt(section: dict, *, body: str, budget: int,
+                           opening: str, closing: str) -> str:
+    """第二趟：把其中一段寫成對談。`opening`／`closing` 由呼叫端決定（第一段要報開場白）。"""
+    facts = "\n".join("・" + str(f) for f in (section.get("facts") or []))
+    return f"""你是中文 podcast 的編劇。把下面這一段素材寫成**兩個人的對談**。
+
+角色：
+- 「{PODCAST_HOST[1]}」：好奇、會追問「根據是什麼」「作者怎麼知道」「那這代表什麼」。負責翻成白話。
+- 「{PODCAST_GUEST[1]}」：講內容的人。會給**具體的**名字、年份、數字，會說明前因後果。
+
+硬規則：
+1. **只能講下面素材裡有的東西**，一個字都不准自己補。素材沒有的就不要提。
+2. 下面列的「要講到的具體內容」**每一項都要出現在對談裡**，而且要講清楚它是什麼、為什麼重要 ——
+   不是報菜名。這一段的深度就靠這個。
+3. {PODCAST_HOST[1]}至少**追問三次**（不是附和，是真的問下去：為什麼、憑什麼、那反過來呢）。
+4. 每一句不超過 {PODCAST_LINE_MAX} 個字；長的拆開，中間讓對方接話。
+5. 繁體中文、台灣用語。年份用阿拉伯數字。
+6. 這一段的總字數 **{budget} 字上下**。
+7. {opening}
+8. {closing}
+
+輸出**只有一個 JSON 陣列**，不要任何其他文字、不要程式碼框。
+元素：{{"who": "{PODCAST_HOST[1]}" 或 "{PODCAST_GUEST[1]}", "text": "那句話"}}
+
+────── 這一段在講什麼 ──────
+{section.get("point", "")}
+
+────── 要講到的具體內容（每一項都要） ──────
+{facts}
+
+────── 這一段的原始筆記（只能從這裡取材） ──────
+{body}
+"""
+
+
+def podcast_opening(title: str, chapter_label: str, first: bool) -> str:
+    """第一段要先講「這不是原書內容」那一句（同 PDF、分享頁的版權界線）。"""
+    if not first:
+        return "直接從這一段的內容開始，不用再自我介紹。"
+    return (f'第一句固定由{PODCAST_HOST[1]}說：'
+            f'「以下是針對《{title}》{chapter_label}整理的討論，不是原書內容。」')
+
+
+def podcast_closing(next_hint: str, last: bool) -> str:
+    if not last:
+        return f"這一段結束時，讓{PODCAST_HOST[1]}用一句話小結，然後帶到下一個話題。"
+    tail = f"，並預告下一集要聊{next_hint}" if next_hint else ""
+    return f"最後由{PODCAST_HOST[1]}收尾{tail}。"
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # 這本書掛在哪一個案子（owner 2026-09-19：「這裡也要可以連結現有的專案列表」）
 #
 # 存在 `meta.project` = `{id, label}`。**label 是拍下來的那一刻的字**，不是每次去查 ——
@@ -1386,11 +1558,13 @@ SHARE_PARTS = (
     # · 原書預設關著 —— 那是整本書，公開等於把書放上網。要開是他的決定，但不預設替他開。
     ("pdf", True, "讓對方把上面勾的東西印成一份 PDF 帶走"),
     ("source", False, "讓對方下載整本原書的 PDF；那是整本書，公開要注意版權"),
+    # owner 2026-09-19 那一批 podcast：預設關著（跟原書同一個理由 —— 內容是原書的整理）
+    ("podcast", False, "讓對方線上聽每一章的 podcast"),
 )
 SHARE_PART_KEYS = tuple(k for k, _, _ in SHARE_PARTS)
 #: 「能力」型的勾（不是內容的一段）：沒有對應的資料鍵，由端點自己認。
 #: 分這兩組是為了讓「每一段都要在 `kl.shares(...)` 底下」那條測試繼續看得懂自己在檢查什麼。
-SHARE_ABILITIES = ("pdf", "source")
+SHARE_ABILITIES = ("pdf", "source", "podcast")
 #: 「內容」型的勾：勾了才會在 `knowledge_share._build` 的回傳裡出現那個鍵。
 SHARE_CONTENT_KEYS = tuple(k for k in SHARE_PART_KEYS if k not in SHARE_ABILITIES)
 #: 沒設定過的舊分享用這一組（＝2026-09-19 之前那版的行為）

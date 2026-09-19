@@ -321,6 +321,21 @@
   .kb .kb-info-row .k { font-size: 14px; }
 }
 
+/* 每一章一集 podcast（owner 2026-09-19）。單章底下的播放器＋逐字稿。 */
+.kb .kb-pod { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
+.kb .kb-pod .h { font-size: 14px; font-weight: 500; letter-spacing: .08em; margin-bottom: 10px; }
+.kb .kb-pod .h .m { color: var(--sub); font-size: 12.5px; font-weight: 400; margin-left: 10px; letter-spacing: 0; }
+.kb .kb-pod audio { width: 100%; }
+.kb .kb-pod .row { display: flex; gap: 16px; margin-top: 6px; }
+.kb .kb-pod .note { margin-bottom: 10px; }
+.kb .kb-pod-script { margin-top: 12px; max-height: 320px; overflow-y: auto; }
+.kb .kb-pod-script p { margin: 0 0 8px; font-size: 13.5px; line-height: 1.7; }
+.kb .kb-pod-script b { color: var(--red); font-weight: 500; margin-right: 4px; }
+.kb .kb-pod-all { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+.kb .kb-pod-tag { margin-left: auto; font-size: 11.5px; color: var(--sub); flex: none; }
+.kb .kb-pod-tag.on { color: var(--warn); }
+
 /* 點開的大圖（owner 2026-09-19「手機的圖輯 點開跳大圖」）。
    蓋滿整個畫面、深底，圖說與出處放下面。深底是固定的 —— 這一層就是要把畫面讓給圖。 */
 .kb-lb { position: fixed; inset: 0; z-index: 60; background: var(--lb-bg);

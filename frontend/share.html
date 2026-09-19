@@ -52,6 +52,9 @@
   .head .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
   .head .tags i { font-style: normal; font-size: 12px; padding: 2px 10px; border-radius: 999px;
     background: var(--soft); color: var(--sub); }
+  .pod { margin: 0 0 18px; padding: 12px 0 16px; border-bottom: 1px solid var(--line); }
+  .pod audio { width: 100%; }
+  .pod .w { display: block; color: var(--sub); font-size: 12.5px; margin-top: 6px; }
   .head .dl { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .head .dl a { display: inline-block; border: 1px solid var(--line); border-radius: 6px;
     padding: 8px 14px; min-height: 38px; font-size: 13px; color: var(--ink); background: var(--panel);
@@ -420,8 +423,17 @@ function chaptersBody(n) {
   }
   const c = chs.find((x) => String(x.n) === String(n));
   if (!c) return chaptersBody(0);
+  // 這一章的 podcast（只有他勾了「可以聽 podcast」才畫）。沒有那一集的話 <audio> 會 error，
+  // 那時候把整塊收起來 —— 不用另外問伺服器哪幾章有。
+  const pod = (data.parts || []).includes("podcast")
+    ? '<div class="pod"><audio controls preload="none" src="/api/v1/knowledge/public/'
+      + encodeURIComponent(id) + "/podcast/" + encodeURIComponent(c.n) + '.mp3"'
+      + ' onerror="this.closest('.pod').style.display='none'"></audio>'
+      + '<span class="w">這一章的 podcast（兩個人對談，內容是針對原書的整理）</span></div>'
+    : "";
   return '<div class="chnav"><button type="button" data-ch="0">← 章節清單</button>'
     + '<span class="now">第 ' + c.n + " 章 " + esc(c.title || "") + "</span></div>"
+    + pod
     + '<div class="md">' + md(c.md, id, pics) + "</div>";
 }
 

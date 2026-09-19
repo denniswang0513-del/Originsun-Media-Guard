@@ -20,6 +20,7 @@ import { send, saveConclusion, openConclusionEdit, cancelConclusionEdit, conclud
 import { loadReports, openReport, openFromHash, leaveReports } from './report.js';
 import { editInfo, saveInfo, toggleShare, copyShare, togglePart } from './info.js';
 import { openBigImage, closeBigImage } from './gallery.js';
+import { makePodcast, makeAllPodcast, showScript } from './podcast.js';
 import { runExtend, collectOne, rateExtend, toggleWatch, toggleWatchAll,
     editFocus, saveFocus } from './extend.js';
 
@@ -109,6 +110,9 @@ function _onClick(ev) {
     if (act === 'doc-edit') { S.editing = true; renderPane(); return; }
     if (act === 'doc-cancel') { S.editing = false; renderPane(); return; }
     if (act === 'doc-save') { saveDoc(el.dataset.key, el); return; }
+    if (act === 'pod-one') { makePodcast(el.dataset.n); return; }
+    if (act === 'pod-all') { makeAllPodcast(); return; }
+    if (act === 'pod-script') { showScript(el.dataset.n); return; }
     if (act === 'chapter') { openChapter(el.dataset.n); return; }
     if (act === 'chapter-back') { S.chapter = null; renderPane(); return; }
     if (act === 'attach') { toggleSheet(false); const f = S.root.querySelector('#kb-book-file'); if (f) f.click(); return; }

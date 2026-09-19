@@ -30,7 +30,8 @@ def test_the_public_surface_is_one_small_file():
     # 2026-09-19 多了兩支：研究筆記 PDF、原書 PDF（owner：「這裡多一個 pdf 下載」
     # 「研究報告與書籍都可以」）。上限往上調是有意識的決定，不是順手放寬 ——
     # 每一支都只認 `knowledge_share` 算出來的勾選，沒有任何一支自己決定給什麼。
-    assert len(routes) <= 4, ("公開的端點只有四支（那一本、圖、研究筆記 PDF、原書 PDF）："
+    # 2026-09-19 再多一支：每一章的 podcast（owner「每一章一個podcast」）。
+    assert len(routes) <= 5, ("公開的端點只有五支（那一本、圖、研究筆記 PDF、原書 PDF、podcast）："
                               + str(routes))
     # 只看程式碼 —— 說明文字裡提到 `_guard` 是在解釋為什麼這支要獨立，不算違規
     code = src[src.index('"""', src.index('"""') + 3) + 3:]
@@ -162,9 +163,12 @@ def test_every_optional_part_sits_behind_its_tick():
 def test_being_able_to_take_a_copy_is_its_own_tick():
     """owner 2026-09-19：「公開連結的公開設定 也讓我勾要不要讓人下載 pdf」
     「研究報告與書籍都可以」—— 兩顆各自一個勾，各自一支端點認。"""
-    assert kl.SHARE_ABILITIES == ("pdf", "source")
+    assert kl.SHARE_ABILITIES == ("pdf", "source", "podcast")
     assert "pdf" in kl.SHARE_DEFAULT, "研究筆記預設給下載（那顆鈕當初就是為了這個做的）"
     assert "source" not in kl.SHARE_DEFAULT, "🔴 整本原書預設**不**給 —— 要他自己按下去"
+    assert "podcast" not in kl.SHARE_DEFAULT, "🔴 podcast 也是原書的整理，預設不給"
+    assert 'shares(kshare.shared_parts(book_id), "podcast")' in func_body(
+        repo_src("services/knowledge_podcast.py"), "def public_podcast(")
     assert 'kl.shares(data.get("parts"), "pdf")' in func_body(repo_src(SHARE), "def public_pdf(")
     assert 'shares(shared_parts(book_id), "source")' in func_body(repo_src(SHARE), "def public_source(")
 

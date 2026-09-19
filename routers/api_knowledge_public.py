@@ -76,6 +76,19 @@ async def shared_source(share_id: str):
     return no_store_file(path, media_type="application/pdf", filename=name)
 
 
+@router.get("/{share_id}/podcast/{n}.mp3")
+async def shared_podcast(share_id: str, n: int):
+    """那一集的音檔。**只有勾了「可以聽 podcast」才給**（`knowledge_podcast.public_podcast` 把關）。
+
+    不走快取（同圖那一支）—— 內容是針對原書整理的，不要讓中間的代理留一份。
+    """
+    from services import knowledge_podcast as kpod
+    path = await asyncio.to_thread(kpod.public_podcast, share_id, n)
+    if not path:
+        raise HTTPException(status_code=404, detail="這個分享連結不存在或已經關閉")
+    return no_store_file(path, media_type="audio/mpeg")
+
+
 @router.get("/{share_id}/assets/{name}")
 async def shared_asset(share_id: str, name: str):
     """公開頁的圖。**只有勾了「書裡的圖」才給**（`knowledge_share.public_asset` 把關）。

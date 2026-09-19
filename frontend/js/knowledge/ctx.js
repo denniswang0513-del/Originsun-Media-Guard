@@ -59,6 +59,8 @@ export const S = {
     assetsLoading: false,
     share: null,       // 公開分享 { on, id, url, at }；null＝還沒讀到
     projects: null,    // 「掛在哪個案子」的清單（抓過就留著，浮層每次打開都會問一次）
+    podcast: null,     // 每一章的 podcast 狀態 { items, done, total, making }；null＝還沒讀到
+    podcastTimer: null,
     assetUrls: [],     // 這一輪借出去的圖片 blob 網址（重畫前要 revoke）
     reports: [],       // 研究週報／月報的清單（§9.5）
     extendTimer: null,
@@ -107,6 +109,7 @@ export function stopTimers() {
     clearInterval(S.concludeTimer); S.concludeTimer = null;
     clearInterval(S.compileTimer); S.compileTimer = null;
     clearInterval(S.extendTimer); S.extendTimer = null;
+    clearInterval(S.podcastTimer); S.podcastTimer = null;
     S.wait = null;
 }
 

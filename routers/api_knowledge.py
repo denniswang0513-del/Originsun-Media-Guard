@@ -22,6 +22,7 @@ from core.bg_task import fire
 from core.knowledge_logic import FOCUS_MAX, TAGS_MAX
 from services import knowledge_service as ks
 from services import knowledge_report as kr
+from services import knowledge_podcast as kpod
 from services import knowledge_share as kshare
 from services import knowledge_watch as kw
 from services.knowledge_claude import claude_available
@@ -282,6 +283,7 @@ async def patch_book(book_id: str, body: BookPatch, request: Request):
 @router.delete("/{book_id}")
 async def delete_book(book_id: str, request: Request):
     _guard(request)
+    kpod.cancel_all(book_id)          # 還掛著的 podcast 進度一起清掉，不然那本書的鍵永遠留著
     _book_or_404(ks.delete_book, book_id)
     return {"status": "ok"}
 
@@ -296,6 +298,59 @@ async def compile_book(book_id: str, request: Request, body: Optional[CompilePay
     meta = _book_or_404(ks.start_compile, book_id, body.model or "", force=body.force)
     fire(ks.compile_book(book_id, meta.get("model") or ""), label=f"knowledge compile {book_id}")
     return {"status": "compiling", "model": meta.get("model") or ""}
+
+
+# ── 每一章一集 podcast（§9.13；owner 2026-09-19：「每一章一個podcast」）──
+# 產一集要十幾分鐘（兩趟 claude ＋ 200 句配音），所以是背景工作＋輪詢進度，同編譯。
+@router.get("/{book_id}/podcast")
+async def podcast_state(book_id: str, request: Request):
+    """`{items: [{n, title, has, mb, minutes, stage}], done, total, making}`。"""
+    _guard(request)
+    return _book_or_404(kpod.podcast_state, book_id)
+
+
+@router.post("/{book_id}/podcast")
+async def podcast_make_all(book_id: str, request: Request, body: Optional[ModelPayload] = None):
+    """整本：把還沒有的那幾章排進去（一次一集，claude 那邊本來就有閘）。"""
+    _guard(request)
+    _require_claude()
+    state = _book_or_404(kpod.podcast_state, book_id)
+    todo = [c["n"] for c in state["items"] if not c["has"] and not c["stage"]]
+    model = (body.model if body else "") or ""
+    for n in todo:
+        _book_or_404(kpod.start_podcast, book_id, n)
+        fire(kpod.run_podcast(book_id, n, model), label=f"knowledge podcast {book_id}/{n}")
+    return {"status": "making", "queued": len(todo)}
+
+
+@router.post("/{book_id}/podcast/{n}")
+async def podcast_make_one(book_id: str, n: int, request: Request,
+                           body: Optional[ModelPayload] = None):
+    """單章：重產會直接蓋掉舊的那一集。"""
+    _guard(request)
+    _require_claude()
+    _book_or_404(kpod.start_podcast, book_id, n)
+    fire(kpod.run_podcast(book_id, n, (body.model if body else "") or ""),
+         label=f"knowledge podcast {book_id}/{n}")
+    return {"status": "making", "n": n}
+
+
+@router.get("/{book_id}/podcast/{n}.mp3")
+async def podcast_audio(book_id: str, n: int, request: Request):
+    """那一集的音檔。🔴 書是私有的 → no_store（同章節的圖）。"""
+    _guard(request)
+    from core.no_store import no_store_file
+    path = _book_or_404(kpod.podcast_path, book_id, n)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="這一章還沒有 podcast")
+    return no_store_file(path, media_type="audio/mpeg")
+
+
+@router.get("/{book_id}/podcast/{n}/script")
+async def podcast_script(book_id: str, n: int, request: Request):
+    """那一集的逐字稿（畫面上可以跟著讀）。"""
+    _guard(request)
+    return {"items": _book_or_404(kpod.read_script, book_id, n)}
 
 
 # ── 章節裡的圖（§9.7；owner 2026-09-18：「如果章節有重要圖片 或表格 我希望你也可以截取出來」）──

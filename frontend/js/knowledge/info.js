@@ -118,11 +118,12 @@ export const SHARE_PARTS = [
     ['gallery', '書裡的圖', '原書的圖，公開要注意版權'],
     ['pdf', '可以下載研究筆記', '讓對方把上面勾的東西印成一份 PDF 帶走；不勾就只能在網頁上看'],
     ['source', '可以下載原書', '把整本原書的 PDF 給對方。那是整本書，公開要注意版權'],
+    ['podcast', '可以聽 podcast', '讓對方線上聽每一章的 podcast（不提供下載）'],
 ];
 
 /** 這幾個不是「內容的一段」，是「准不准對方把檔案帶走」——畫面上另外分一段。
  *  鍵以後端 `knowledge_logic.SHARE_ABILITIES` 為正本（測試會比對）。 */
-export const SHARE_ABILITIES = ['pdf', 'source'];
+export const SHARE_ABILITIES = ['pdf', 'source', 'podcast'];
 
 const _partRows = (rows, on) => rows.map(([k, label, why]) => `<label>
         <input type="checkbox" data-kact="share-part" data-k="${esc(k)}"${on.has(k) ? ' checked' : ''}>
