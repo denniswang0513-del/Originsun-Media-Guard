@@ -1248,6 +1248,18 @@ def normalize_info(raw: Any) -> dict:
     return out
 
 
+def safe_filename(name: str, fallback: str = "book.pdf") -> str:
+    """要送去當下載檔名的字：把路徑分隔與 Windows 不收的字換掉、砍掉過長的。
+
+    🔴 這是**唯一**一份 —— 研究筆記那份（`knowledge_pdf.filename_for`）與原書那份
+    共用它，不然兩邊各寫一次正則，哪天漏了 `\\` 就變成「檔名裡帶路徑」。
+    """
+    # 分隔符**換成底線**而不是取最後一段：書名裡真的有斜線時（「甲/乙」）整段留著才看得懂，
+    # 而只要一個分隔符都不剩，就爬不出資料夾。上傳時存的 source_name 本來就已經是純檔名。
+    base = re.sub(r'[\\/:*?"<>|\r\n\t]+', "_", str(name or "")).strip(" .")
+    return base[:80] or fallback
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # 這本書掛在哪一個案子（owner 2026-09-19：「這裡也要可以連結現有的專案列表」）
 #
@@ -1294,8 +1306,18 @@ SHARE_PARTS = (
     ("skill", False, "原書的內容整理，公開要注意版權"),
     ("chapters", False, "原書的內容整理，公開要注意版權"),
     ("gallery", False, "原書裡的圖，公開要注意版權"),
+    # owner 2026-09-19：「公開連結的公開設定 也讓我勾要不要讓人下載 pdf」「研究報告與書籍都可以」
+    # · 研究筆記預設開著 —— 當初做那顆鈕就是為了「讓大家可以下載資料」。
+    # · 原書預設關著 —— 那是整本書，公開等於把書放上網。要開是他的決定，但不預設替他開。
+    ("pdf", True, "讓對方把上面勾的東西印成一份 PDF 帶走"),
+    ("source", False, "讓對方下載整本原書的 PDF；那是整本書，公開要注意版權"),
 )
 SHARE_PART_KEYS = tuple(k for k, _, _ in SHARE_PARTS)
+#: 「能力」型的勾（不是內容的一段）：沒有對應的資料鍵，由端點自己認。
+#: 分這兩組是為了讓「每一段都要在 `kl.shares(...)` 底下」那條測試繼續看得懂自己在檢查什麼。
+SHARE_ABILITIES = ("pdf", "source")
+#: 「內容」型的勾：勾了才會在 `knowledge_share._build` 的回傳裡出現那個鍵。
+SHARE_CONTENT_KEYS = tuple(k for k in SHARE_PART_KEYS if k not in SHARE_ABILITIES)
 #: 沒設定過的舊分享用這一組（＝2026-09-19 之前那版的行為）
 SHARE_DEFAULT = tuple(k for k, on, _ in SHARE_PARTS if on)
 

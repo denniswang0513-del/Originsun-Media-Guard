@@ -50,12 +50,30 @@ async def shared_pdf(share_id: str):
 
     🔴 印的是 `public_view` 回的那一包 —— **他沒勾的東西不會出現在 PDF 裡**。
     圖只有勾了「書裡的圖」才會被內嵌（沒勾的話 `public_view` 連 gallery 鍵都沒有）。
+    而且整支要勾了**「可以下載研究筆記」**才開（`public_pdf` 把關）—— 他可以讓人在
+    網頁上讀完，但不給帶一份走（owner 2026-09-19：「也讓我勾要不要讓人下載 pdf」）。
     """
-    data = await asyncio.to_thread(lambda: kshare.public_view(share_id))
-    if data is None:
+    got = await asyncio.to_thread(kshare.public_pdf, share_id)
+    if got is None:
         raise HTTPException(status_code=404, detail="這個分享連結不存在或已經關閉")
     from services import knowledge_pdf as kpdf
-    return await kpdf.pdf_response(await asyncio.to_thread(kshare.book_of, share_id), data)
+    book_id, data = got
+    return await kpdf.pdf_response(book_id, data)
+
+
+@router.get("/{share_id}/source")
+async def shared_source(share_id: str):
+    """整本原書的 PDF 原檔（owner 2026-09-19：「研究報告與書籍都可以」）。
+
+    🔴 這是整支公開介面裡**唯一給得出整本原書**的端點，而且**預設是關的** ——
+    要他在分享設定裡勾了「可以下載原書」才開（`knowledge_share.public_source` 把關）。
+    那是他買的書，不是他整理的研究；要不要公開是他的決定，不是預設值。
+    """
+    path = await asyncio.to_thread(kshare.public_source, share_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="這個分享連結不存在或已經關閉")
+    name = await asyncio.to_thread(kshare.public_source_name, share_id)
+    return no_store_file(path, media_type="application/pdf", filename=name)
 
 
 @router.get("/{share_id}/assets/{name}")

@@ -52,7 +52,7 @@
   .head .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
   .head .tags i { font-style: normal; font-size: 12px; padding: 2px 10px; border-radius: 999px;
     background: var(--soft); color: var(--sub); }
-  .head .dl { margin-top: 12px; }
+  .head .dl { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .head .dl a { display: inline-block; border: 1px solid var(--line); border-radius: 6px;
     padding: 8px 14px; min-height: 38px; font-size: 13px; color: var(--ink); background: var(--panel);
     text-decoration: none; }
@@ -322,6 +322,18 @@ function show(key, sub) {
   window.scrollTo(0, 0);
 }
 
+/** 可以帶走的檔案。兩顆各自要他勾過才出現（後端那兩支也各自再認一次）。 */
+function downloads(d, id) {
+  const on = d.parts || [];
+  const base = "/api/v1/knowledge/public/" + encodeURIComponent(id);
+  const links = [];
+  if (on.includes("pdf")) links.push('<a href="' + base + '/pdf" download>下載這份研究（PDF）</a>');
+  if (on.includes("source")) links.push('<a href="' + base + '/source" download>下載原書（PDF）</a>');
+  if (!links.length) return "";
+  return '<div class="dl">' + links.join("")
+    + (on.includes("pdf") ? '<span class="w">研究那份要做十幾秒</span>' : "") + "</div>";
+}
+
 function render(d, id) {
   const info = has(d, "info") ? (d.info || {}) : {};
   const facts = ["publisher", "published", "translator", "edition", "isbn"]
@@ -340,8 +352,7 @@ function render(d, id) {
         ? '<div class="tags">' + d.tags.map((t) => "<i>" + esc(t) + "</i>").join("") + "</div>" : "")
       // 下載一份帶走（owner 2026-09-19：「這裡多一個 pdf 下載，讓大家可以下載資料」）。
       // 這一頁不帶 token，所以是普通的連結；後端印的內容跟這一頁一樣，沒勾的不會在裡面。
-      + '<div class="dl"><a href="/api/v1/knowledge/public/' + encodeURIComponent(id)
-        + '/pdf" download>下載這份研究（PDF）</a><span class="w">要做十幾秒</span></div>'
+      + downloads(d, id)
     + "</div>"
     + (panes.length
       ? "<nav>" + panes.map((p) => '<button type="button" data-k="' + p.key + '">' + esc(p.label)

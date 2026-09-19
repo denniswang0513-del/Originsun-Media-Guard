@@ -258,13 +258,18 @@ async def pdf_response(book_id: str, d: dict):
     `d` 就是 `knowledge_share.full_view` / `public_view` 那一包 —— 公開那條已經照勾選
     篩過了，這裡不會再多拿任何東西。
     """
+    import asyncio
+
     from fastapi import HTTPException
     from starlette.background import BackgroundTask
 
     from core.no_store import no_store_file
     from services.html_pdf import html_to_pdf, unlink_later
     try:
-        html = build_html(d, images_for(book_id, wanted_images(d)))
+        # 🔴 這一段是**同步的重工**：最多 60 張圖各讀一次檔再轉 base64，再組出幾百 KB 的 HTML。
+        #    留在事件迴圈上的話，一個人按下載會讓整台主控停住好幾秒（2026-09-19 /polish
+        #    BUG-9 把讀檔搬進執行緒，但這一段當時在我手上、它沒動到）。
+        html = await asyncio.to_thread(lambda: build_html(d, images_for(book_id, wanted_images(d))))
         tmp_pdf = await html_to_pdf(html, prefix="knowledge_")
     except (ImportError, ModuleNotFoundError) as exc:
         raise HTTPException(status_code=503, detail=PDF_UNAVAILABLE) from exc
@@ -276,6 +281,6 @@ async def pdf_response(book_id: str, d: dict):
 
 
 def filename_for(d: dict) -> str:
-    """下載時的檔名：`書名-研究筆記.pdf`（把檔名不能用的字換掉）。"""
-    base = re.sub(r'[\\/:*?"<>|]+', "_", str(d.get("title") or "knowledge")).strip() or "knowledge"
-    return f"{base[:60]}-研究筆記.pdf"
+    """下載時的檔名：`書名-研究筆記.pdf`（不能用的字在 `kl.safe_filename` 統一換掉）。"""
+    return kl.safe_filename(f"{str(d.get('title') or 'knowledge')[:60]}-研究筆記.pdf",
+                            "knowledge-研究筆記.pdf")

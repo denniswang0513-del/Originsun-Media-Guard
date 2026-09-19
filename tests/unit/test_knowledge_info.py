@@ -66,6 +66,15 @@ def test_the_share_checkboxes_match_the_back_end_list():
     assert keys == list(kl.SHARE_PART_KEYS), f"前端 {keys} ≠ 後端 {list(kl.SHARE_PART_KEYS)}"
 
 
+def test_the_two_kinds_of_tick_are_shown_apart():
+    """「讓人看得到什麼」與「讓人拿得走什麼」後果差很多，混在同一串裡看不出來。"""
+    js = repo_src(INFO)
+    block = js[js.index("export const SHARE_ABILITIES"):]
+    keys = re.findall(r"'([a-z_]+)'", block[:block.index("];")])
+    assert keys == list(kl.SHARE_ABILITIES), f"前端 {keys} ≠ 後端 {list(kl.SHARE_ABILITIES)}"
+    assert "可以帶走的檔案" in js, "那一段要有自己的小標"
+
+
 def test_info_replaces_the_whole_block_not_key_by_key():
     """清空一格要真的清掉；逐鍵合併的話舊值會留著。"""
     body = func_body(repo_src(SERVICE), "def update_book(")

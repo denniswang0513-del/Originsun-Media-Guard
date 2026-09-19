@@ -275,7 +275,7 @@ def _page_images(doc, page, n: int, dest: str) -> list:
         page_area = float(page.rect.width * page.rect.height) or 1.0
     except Exception:
         return out
-    for k, info in enumerate(imgs, start=1):
+    for info in imgs:
         if len(out) >= kl.MAX_ASSETS_PER_PAGE:
             break
         try:
@@ -286,7 +286,10 @@ def _page_images(doc, page, n: int, dest: str) -> list:
             cover = (rects[0].width * rects[0].height / page_area) if rects else 0.0
             if not kl.keep_page_image(page_chars, cover):
                 continue
-            name = kl.asset_name(n, k, d.get("ext"))
+            # 🔴 編號用「這一頁**留下來**的第幾張」，不是「內嵌的第幾張」：一頁有上百張
+            #    小裝飾圖時，後面那張真的圖會拿到 `p001-137` 這種名字，而 `asset_name`
+            #    不認（白名單只到兩位數）→ 整張被靜默跳過（2026-09-19 /polish 收尾 review）。
+            name = kl.asset_name(n, len(out) + 1, d.get("ext"))
             if not name:
                 continue
             with open(os.path.join(dest, name), "wb") as f:
@@ -614,6 +617,26 @@ def ensure_assets(book_id: str) -> list:
     assets = save_images(content, assets_dir(book_id, make=True))
     _update_meta(book_id, asset_captions={a["name"]: a["caption"] for a in assets})
     return list_assets(book_id)
+
+
+def source_path(book_id: str) -> str:
+    """這本書的原檔（`source.pdf`）。還沒有檔的書丟 `BookHasNoFile`（端點回 409）。
+
+    id 直接走 `book_dir()`（同 `asset_path` 的規矩：id 只能從那一支變成路徑）。
+    """
+    p = os.path.join(book_dir(book_id), SOURCE_FILE)
+    if not os.path.isfile(p):
+        raise BookHasNoFile(book_id)
+    return p
+
+
+def source_filename(book_id: str) -> str:
+    """下載時看到的檔名：優先用他上傳時的原檔名，沒有就用書名。"""
+    meta = read_meta(book_id)
+    name = (meta.get("source_name") or "").strip()
+    if not name.lower().endswith(".pdf"):
+        name = (meta.get("title") or "book").strip() + ".pdf"
+    return kl.safe_filename(name)
 
 
 def _support_missing(d: str) -> list:

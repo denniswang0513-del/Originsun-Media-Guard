@@ -51,7 +51,7 @@ def test_the_pdf_never_asks_the_disk_for_anything_by_itself():
 def test_the_public_pdf_prints_exactly_what_the_public_page_shows():
     src = repo_src(PUBLIC_ROUTER)
     body = func_body(src, "async def shared_pdf(")
-    assert "kshare.public_view(share_id)" in body, "要走公開頁那一包（已經照勾選篩過）"
+    assert "kshare.public_pdf" in body, "要走公開頁那一包（已經照勾選篩過、也認過能不能下載）"
     assert "full_view" not in body, "🔴 公開那條絕不可以用整本那一包"
     assert "404" in body or "HTTPException" in body
 
@@ -186,6 +186,108 @@ def test_a_machine_without_playwright_says_so_instead_of_crashing():
     assert "503" in body and "ImportError" in body
 
 
+def test_making_the_pdf_does_not_block_everyone_else():
+    """🔴 最多 60 張圖各讀一次檔再轉 base64 —— 留在事件迴圈上，一個人按下載
+    就讓整台主控停住好幾秒（2026-09-19 /polish BUG-9 的另一半）。"""
+    body = func_body(repo_src(PDF), "async def pdf_response(")
+    assert "asyncio.to_thread" in body
+    assert "build_html(" in body[body.index("to_thread"):], "組版面那一段要在執行緒裡"
+
+
+def test_a_page_full_of_decorations_does_not_swallow_the_real_figure():
+    """編號要用「留下來的第幾張」。用「內嵌的第幾張」的話，一頁上百張小圖之後
+    那張真的圖會拿到 `p001-137`，白名單不認 → 整張靜默消失。"""
+    body = func_body(repo_src("services/knowledge_service.py"), "def _page_images(")
+    assert "kl.asset_name(n, len(out) + 1," in body
+    assert "enumerate(imgs" not in body, "不要再用內嵌序號"
+    # 留下來的最多就是每頁上限，所以名字一定在白名單裡
+    assert kl.is_valid_asset(kl.asset_name(1, kl.MAX_ASSETS_PER_PAGE, "jpeg"))
+
+
+def test_a_late_answer_never_paints_the_wrong_book():
+    """開 B 書時 A 書遲到的延伸資料不可以蓋上來（loadGallery／loadShare 早就有這道）。"""
+    body = js_func_body(repo_src("frontend/js/knowledge/extend.js"), "export async function loadExtend(")
+    assert "const bookId = S.book.id" in body
+    assert body.count("S.book.id !== bookId") >= 2, "兩次 await 之後都要判一次"
+
+
+# ── 3.5 原書的 PDF 原檔 ────────────────────────────────────
+# owner 2026-09-19：「我的 pdf 希望放上書的 pdf」→ 他選「兩顆鈕分開下載」。
+def test_the_private_side_always_has_the_original():
+    """他自己那一面不用勾 —— 那本書是他上傳的。"""
+    assert "_guard(request)" in func_body(repo_src(ROUTER), "async def book_source(")
+
+
+def test_the_public_side_needs_a_tick_for_the_original():
+    """owner 2026-09-19：「研究報告與書籍都可以」—— 所以公開那一面也有這支，
+    但 🔴 **預設是關的**（`SHARE_PARTS` 的 source＝False），要他自己勾。"""
+    body = func_body(repo_src(PUBLIC_ROUTER), "async def shared_source(")
+    assert "kshare.public_source" in body, "要不要給由 knowledge_share 決定"
+    assert "no_store_file(" in body
+    assert "source" not in kl.SHARE_DEFAULT
+
+
+def test_the_original_download_is_not_cached_anywhere():
+    """整本原書：不要讓中間的代理或瀏覽器在磁碟上留一份。"""
+    body = func_body(repo_src(ROUTER), "async def book_source(")
+    assert "no_store_file(" in body
+
+
+def test_a_book_with_no_file_yet_says_so_instead_of_500():
+    body = func_body(repo_src("services/knowledge_service.py"), "def source_path(")
+    assert "BookHasNoFile" in body, "待補的書要回 409，不是爆掉"
+    assert "book_dir(" in body, "id 只能從 book_dir 變成路徑"
+
+
+def test_the_download_keeps_the_name_he_uploaded_it_with():
+    body = func_body(repo_src("services/knowledge_service.py"), "def source_filename(")
+    assert "source_name" in body and "title" in body, "沒有原檔名就退回書名"
+    assert "kl.safe_filename(" in body
+
+
+def test_one_place_cleans_up_download_names():
+    """兩份 PDF 共用同一支 —— 兩邊各寫一次正則，哪天漏了反斜線就變成檔名裡帶路徑。"""
+    assert "kl.safe_filename(" in func_body(repo_src(PDF), "def filename_for(")
+
+
+@pytest.mark.parametrize("bad, worry", [
+    ("../../etc/passwd", "/"),
+    (r"C:\\Users\\x\\book.pdf", "\\"),
+    ("a:b*c?.pdf", ":"),
+    ("線上讀\r\n.pdf", "\n"),
+])
+def test_a_nasty_filename_never_survives(bad, worry):
+    got = kl.safe_filename(bad)
+    assert worry not in got, got
+    assert got and not got.startswith(".")
+
+
+def test_an_empty_name_still_gets_something():
+    assert kl.safe_filename("") == "book.pdf"
+    assert kl.safe_filename("   ...   ") == "book.pdf"
+
+
+def test_a_very_long_name_is_trimmed():
+    assert len(kl.safe_filename("書" * 300)) <= 80
+
+
+def test_the_header_offers_both_files_separately():
+    """owner 2026-09-19 選的是「兩顆鈕分開下載」，不是合成一份。"""
+    body = js_func_body(repo_src(BOOK_JS), "function _headLinksHtml(")
+    assert "下載研究筆記" in body and "下載原書" in body
+
+
+def test_a_book_with_no_file_does_not_offer_the_original():
+    """待補的書按下去只會拿到 409 —— 那顆鈕不要出現。"""
+    body = js_func_body(repo_src(BOOK_JS), "function _headLinksHtml(")
+    assert "'pending'" in body
+
+
+def test_the_original_download_also_carries_the_token():
+    body = js_func_body(repo_src(BOOK_JS), "export function downloadSource(")
+    assert "authDownload(" in body and "/source" in body
+
+
 # ── 4. 掛在哪個案子 ────────────────────────────────────────
 def test_the_project_link_keeps_the_label_it_was_picked_with():
     got = kl.normalize_project({"id": "abc12345", "label": "  2026  好客戶  某某案 "})
@@ -263,7 +365,7 @@ def test_the_picker_endpoint_is_guarded_and_survives_a_dead_database():
 # ── 6. 畫面 ────────────────────────────────────────────────
 def test_the_book_header_offers_both_the_pdf_and_the_project():
     body = js_func_body(repo_src(BOOK_JS), "function _headLinksHtml(")
-    assert "下載 PDF" in body
+    assert "下載研究筆記" in body
     assert "/project.html?id=" in body
 
 

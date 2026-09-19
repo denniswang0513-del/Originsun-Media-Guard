@@ -72,10 +72,13 @@ function _tagsRowHtml(b) {
         <button type="button" class="kb-link" data-kact="tags-edit">編輯標籤</button></div>`;
 }
 
-/** 表頭右下那一列：整本的 PDF ＋ 這本書掛在哪個案子（owner 2026-09-19 那兩句）。 */
+/** 表頭右下那一列：研究筆記 PDF ／ 原書 PDF ／ 這本書掛在哪個案子（owner 2026-09-19 那幾句）。
+ *  兩份 PDF 分開兩顆鈕（他選的）：一顆是我們整理出來的、一顆是他當初上傳的那個檔。 */
 function _headLinksHtml(b) {
     const proj = b.project && b.project.id ? b.project : null;
-    return `<button type="button" class="kb-link" data-kact="pdf">下載 PDF</button>
+    return `<button type="button" class="kb-link" data-kact="pdf">下載研究筆記</button>
+        ${b.status === 'pending' ? ''
+        : '<button type="button" class="kb-link" data-kact="source">下載原書</button>'}
         ${proj
         ? `<a class="kb-link" href="/project.html?id=${encodeURIComponent(proj.id)}"
               target="_blank" rel="noopener">案子：${esc(proj.label || proj.id)}</a>`
@@ -89,8 +92,19 @@ export function downloadPdf() {
     if (!b) return;
     toast('正在做 PDF，十幾秒');
     authDownload(`${API}/${encodeURIComponent(b.id)}/pdf`,
-        `${(b.title || '書').replace(/[\\/:*?"<>|]+/g, '_')}-研究筆記.pdf`, '下載 PDF');
+        _fileName(b, '-研究筆記.pdf'), '下載研究筆記');
 }
+
+/** 他當初上傳的那個 PDF 原檔（owner 2026-09-19：「我的 pdf 希望放上書的 pdf」）。
+ *  🔴 只有這裡拿得到整本原書；分享出去的那一頁沒有這顆鈕，也不該有。 */
+export function downloadSource() {
+    const b = S.book;
+    if (!b) return;
+    authDownload(`${API}/${encodeURIComponent(b.id)}/source`,
+        b.source_name || _fileName(b, '.pdf'), '下載原書');
+}
+
+const _fileName = (b, tail) => `${(b.title || '書').replace(/[\\/:*?"<>|]+/g, '_')}${tail}`;
 
 export function renderBook() {
     const b = S.book;
@@ -182,7 +196,9 @@ export function toggleSheet(on) {
         ${b.status === 'pending'
         ? '<button type="button" class="item" data-kact="attach">補上 PDF<span class="sub">這本書還沒有檔案</span></button>'
         : `<button type="button" class="item" data-kact="compile" ${compiling ? 'disabled' : ''}>${b.status === 'compiled' ? '重新讀這本書' : '讀這本書'}<span class="sub">約 10–20 分鐘</span></button>`}
-        <button type="button" class="item" data-kact="pdf">下載 PDF<span class="sub">整本的研究筆記</span></button>
+        <button type="button" class="item" data-kact="pdf">下載研究筆記<span class="sub">整理出來的那一份（PDF）</span></button>
+        ${b.status === 'pending' ? ''
+        : `<button type="button" class="item" data-kact="source">下載原書<span class="sub">${esc(b.source_name || '你上傳的那個 PDF')}</span></button>`}
         <button type="button" class="item" data-kact="rename">改名</button>
         <button type="button" class="item danger" data-kact="delete">刪除這本書</button>
       </div>`;

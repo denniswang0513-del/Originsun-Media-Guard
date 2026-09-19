@@ -337,6 +337,8 @@
 .kb .kb-bookhead .err { color: var(--danger); font-size: 12.5px; line-height: 1.5; }
 .kb .kb-bookhead #kb-tags-row { margin-top: 10px; }
 
+.kb .kb-share .sub { color: var(--sub); font-size: 12.5px; margin: 14px 0 2px; }
+
 /* 表頭那一列：整本的 PDF ＋ 這本書掛在哪個案子（owner 2026-09-19） */
 .kb .kb-headlinks { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 .kb .kb-headlinks .kb-link { font-size: 13px; }

@@ -673,6 +673,58 @@ def _master_running():
         return None
 
 
+CHANGELOG_FILE = "CHANGELOG.md"
+#: 自動接上去的那一段的標題。找不到就建一個（放在檔頭那條 `---` 後面）。
+CHANGELOG_HEADING = "## 發版紀錄（publish_update.py 自動接上）"
+
+
+def changelog_line(version: str, notes: str, build_date: str) -> str:
+    """一版一行，格式同 /health 生成的那一段：`- **2.5.58**（2026-09-19）— …`。
+
+    notes 可能有好幾行（--notes-file），這裡壓成一行 —— 那一段是清單，不是文件。
+    """
+    one = "；".join(x.strip() for x in str(notes or "").splitlines() if x.strip())
+    return f"- **{version}**（{build_date}）— {one or '微幅更新'}"
+
+
+def append_changelog(version: str, notes: str, build_date: str) -> bool:
+    """把這一版接到 CHANGELOG 最前面。已經有這個版號就不重複寫（重發同一版、
+    或 /health 已經生成過）。
+
+    🔴 **永遠不要因為這一步讓發版失敗** —— 版號、ZIP、機隊都已經好了，
+    為了一行工作日誌把整個發版判定成失敗是本末倒置。寫不進去就印一行 WARN。
+    """
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CHANGELOG_FILE)
+        if not os.path.isfile(path):
+            print(f"[WARN] 找不到 {CHANGELOG_FILE}，跳過工作日誌")
+            return False
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+        if f"**{version}**" in text:
+            print(f"[OK] CHANGELOG 已經有 v{version}，不重複寫")
+            return True
+        line = changelog_line(version, notes, build_date)
+        if CHANGELOG_HEADING in text:
+            head = text.index(CHANGELOG_HEADING) + len(CHANGELOG_HEADING)
+            rest = text[head:]
+            # 已經有清單了就緊貼著插在第一筆前面（一版一行、中間不留空行，
+            # 同下面 /health 生成的那一段）；還沒有就留一個空行起頭。
+            text = text[:head] + "\n\n" + line + (rest[1:] if rest.startswith("\n\n- ") else rest)
+        else:
+            # 第一次：把整段放在檔頭那條 `---` 後面（在「自動生成」那段之前）
+            mark = "\n---\n"
+            at = text.index(mark) + len(mark) if mark in text else 0
+            text = text[:at] + f"\n{CHANGELOG_HEADING}\n\n{line}\n" + text[at:]
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        print(f"[OK] CHANGELOG 已接上 v{version}")
+        return True
+    except Exception as e:
+        print(f"[WARN] 寫 CHANGELOG 失敗（不影響發版）：{e}")
+        return False
+
+
 def notes_look_mangled(notes: str) -> bool:
     """這段 release notes 看起來是不是「中文被 codepage 吃成 `?` 」了？
 
@@ -1008,6 +1060,10 @@ def main():
     # ── NAS nginx 硬 301 redirects sync（從 DB 拉 → 寫 nginx snippet → reload）──
     # website-api 重啟後 DB / endpoint 才穩，再來 query redirects 才不會 race。
     redirects_ok = sync_redirects_to_nas() if nas_ok else False
+
+    # ── 工作日誌：這一版接到 CHANGELOG 最前面 ──
+    # 🔴 放在最後：中途任何一道 gate 沒過都會把版號回滾，那時候不該留下一行說它發過。
+    append_changelog(new_version, notes, v_data.get("build_date", ""))
 
     print(f"\n{'='*60}")
     print(f"[OK] v{new_version} 發布完成！")

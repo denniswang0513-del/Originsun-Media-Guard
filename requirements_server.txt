@@ -22,6 +22,14 @@ SQLAlchemy==2.0.50
 asyncpg==0.31.0
 
 # ── server-only：音訊 / IO（多為相依，明列避免漏裝）──
+# 🔴 這三個是**綁在一起**的（2026-09-19 /health 的漏洞收尾）：
+#    starlette 的 10 條 CVE 一直修不掉，是因為 f5-tts 1.1.20 要 gradio<6.11、
+#    而 gradio 6.10 要 starlette<1.0。f5-tts 1.1.22 改成 gradio>=6.15，
+#    6.15 起接受 starlette<2.0 —— 整條才通。要動其中一個，三個一起看。
+#    （機隊沒有這個問題：requirements_agent.txt 本來就不裝 TTS。）
+f5-tts>=1.1.22
+gradio>=6.15.0
+starlette==1.6.0
 soundfile==0.14.0          # tts_engine.py torchaudio.load patch 用
 aiofiles==25.1.0
 python-multipart==0.0.32

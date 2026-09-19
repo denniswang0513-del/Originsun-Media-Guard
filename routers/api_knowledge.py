@@ -250,6 +250,20 @@ async def book_pdf(book_id: str, request: Request):
     return await kpdf.pdf_response(book_id, await asyncio.to_thread(_book_or_404, kshare.full_view, book_id))
 
 
+@router.get("/{book_id}/source")
+async def book_source(book_id: str, request: Request):
+    """原書的 PDF 原檔（owner 2026-09-19：「我的 pdf 希望放上書的 pdf」）。
+
+    🔴 **只有這一支私有的端點給得出整本原書**。公開分享那一面沒有對應的東西，
+    也不要加 —— 分享出去的是他的研究，不是他買的那本書（版權）。
+    """
+    _guard(request)
+    from core.no_store import no_store_file
+    path = _book_or_404(ks.source_path, book_id)
+    return no_store_file(path, media_type="application/pdf",
+                         filename=_book_or_404(ks.source_filename, book_id))
+
+
 @router.get("/{book_id}")
 async def get_book(book_id: str, request: Request):
     _guard(request)

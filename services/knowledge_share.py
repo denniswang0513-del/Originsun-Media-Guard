@@ -159,6 +159,40 @@ def _build(book_id: str, parts: list, meta: Optional[dict] = None) -> dict:
     return out
 
 
+def public_pdf(share_id: str) -> Optional[tuple]:
+    """公開頁那顆「下載研究筆記」要的東西：`(book_id, 那一包)`。
+
+    **沒勾「可以下載 PDF」就回 None**（端點回 404，同一句話）——
+    他可以讓人在網頁上讀，但不給帶走（owner 2026-09-19）。
+    """
+    data = public_view(share_id)
+    if data is None or not kl.shares(data.get("parts"), "pdf"):
+        return None
+    return _find_book(share_id), data
+
+
+def public_source(share_id: str) -> Optional[str]:
+    """公開頁那顆「下載原書」要的檔案路徑。
+
+    🔴 **預設是關的**，勾了才給（`SHARE_PARTS` 的 `source`）—— 這一顆給出去的是
+    **整本原書**，不是他整理的研究。owner 2026-09-19 明講「研究報告與書籍都可以」，
+    所以這個選項存在；但它永遠是一個要他自己按下去的決定。
+    """
+    book_id = _find_book(share_id)
+    if not book_id or not kl.shares(shared_parts(book_id), "source"):
+        return None
+    try:
+        return ks.source_path(book_id)
+    except Exception:
+        return None
+
+
+def public_source_name(share_id: str) -> str:
+    """原書下載時看到的檔名（同他自己那一面）。"""
+    book_id = _find_book(share_id)
+    return ks.source_filename(book_id) if book_id else "book.pdf"
+
+
 def public_asset(share_id: str, name: str) -> Optional[str]:
     """公開頁要看圖時的檔案路徑。**沒勾「書裡的圖」就一律回 None**（連檔名對不對都不用談）。"""
     book_id = _find_book(share_id)

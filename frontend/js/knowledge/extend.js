@@ -162,9 +162,12 @@ function _rerender() {
 /** 進「延伸」分頁時抓一次；正在找就順便開始輪詢。 */
 export async function loadExtend() {
     if (!S.book) return;
+    // 🔴 記下這一輪問的是哪一本：抓回來時人可能已經開了別本書，
+    //    沒有這道判斷的話 A 書遲到的資料會蓋掉 B 書的畫面（同 loadGallery／loadShare）。
+    const bookId = S.book.id;
     try {
-        const d = await api(`/${encodeURIComponent(S.book.id)}/extend`);
-        if (!alive() || !S.book) return;
+        const d = await api(`/${encodeURIComponent(bookId)}/extend`);
+        if (!alive() || !S.book || S.book.id !== bookId) return;
         S.extend = (d && Array.isArray(d.items)) ? d.items : [];
         S.extendStage = (d && d.stage) || '';
         S.extendNote = (d && d.note) || '';
@@ -176,7 +179,7 @@ export async function loadExtend() {
     if (S.watchConf) return;                           // 全域開關讀一次就好（一個 session 內不會變）
     try {
         const w = await api('/watch');
-        if (!alive()) return;
+        if (!alive() || !S.book || S.book.id !== bookId) return;
         S.watchConf = w || null;
         _rerender();
     } catch (_) { /* 讀不到就不畫那一行，不要用錯誤蓋掉清單 */ }

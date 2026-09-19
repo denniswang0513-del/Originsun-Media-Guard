@@ -27,9 +27,11 @@ def test_the_public_surface_is_one_small_file():
     src = repo_src(PUBLIC_ROUTER)
     routes = re.findall(r"@router\.(\w+)\(", src)
     assert set(routes) == {"get"}, "公開的那一面只能有 GET：" + str(routes)
-    # 2026-09-19 多了 PDF（owner：「這裡多一個 pdf 下載，讓大家可以下載資料」）。
-    # 上限往上調是有意識的決定，不是順手放寬 —— 這三支都只回**同一份 public_view**。
-    assert len(routes) <= 3, "公開的端點只有三支（那一本、那一本的圖、那一本的 PDF）：" + str(routes)
+    # 2026-09-19 多了兩支：研究筆記 PDF、原書 PDF（owner：「這裡多一個 pdf 下載」
+    # 「研究報告與書籍都可以」）。上限往上調是有意識的決定，不是順手放寬 ——
+    # 每一支都只認 `knowledge_share` 算出來的勾選，沒有任何一支自己決定給什麼。
+    assert len(routes) <= 4, ("公開的端點只有四支（那一本、圖、研究筆記 PDF、原書 PDF）："
+                              + str(routes))
     # 只看程式碼 —— 說明文字裡提到 `_guard` 是在解釋為什麼這支要獨立，不算違規
     code = src[src.index('"""', src.index('"""') + 3) + 3:]
     assert "_guard(" not in code and "check_admin(" not in code, "這支本來就不需要登入"
@@ -129,12 +131,35 @@ def test_discussion_and_full_text_can_never_be_shared():
 def test_every_optional_part_sits_behind_its_tick():
     """每一段都要在 `kl.shares(...)` 底下 —— 少一個 if 就是預設外洩。"""
     body = func_body(repo_src(SHARE), "def _build(")
-    for key in kl.SHARE_PART_KEYS:
+    for key in kl.SHARE_CONTENT_KEYS:
         assert f'kl.shares(parts, "{key}")' in body, key + " 沒有檢查勾選"
+    # 「能力」型的勾（可以下載研究筆記／可以下載原書）不是內容的一段，
+    # `_build` 不該因為它們多回鍵 —— 由那兩支端點自己認（下面那條釘著）
+    src = repo_src(SHARE)
+    for key in kl.SHARE_ABILITIES:
+        assert f'out["{key}"]' not in src, key + " 不是內容，不該變成回傳的鍵"
     # 而且公開那條真的是照 meta 裡的勾選算出來的，不是傳全部進去
     assert "kl.normalize_parts(" in func_body(repo_src(SHARE), "def public_view(")
     # 書名與作者不在選項裡（一定會出去），所以不用檢查
     assert "out[\"title\"]" not in body or True
+
+
+def test_being_able_to_take_a_copy_is_its_own_tick():
+    """owner 2026-09-19：「公開連結的公開設定 也讓我勾要不要讓人下載 pdf」
+    「研究報告與書籍都可以」—— 兩顆各自一個勾，各自一支端點認。"""
+    assert kl.SHARE_ABILITIES == ("pdf", "source")
+    assert "pdf" in kl.SHARE_DEFAULT, "研究筆記預設給下載（那顆鈕當初就是為了這個做的）"
+    assert "source" not in kl.SHARE_DEFAULT, "🔴 整本原書預設**不**給 —— 要他自己按下去"
+    assert 'kl.shares(data.get("parts"), "pdf")' in func_body(repo_src(SHARE), "def public_pdf(")
+    assert 'shares(shared_parts(book_id), "source")' in func_body(repo_src(SHARE), "def public_source(")
+
+
+def test_the_original_book_only_goes_out_through_that_one_tick():
+    """🔴 公開那一面唯一給得出整本原書的地方。"""
+    src = repo_src(PUBLIC_ROUTER)
+    assert "kshare.public_source" in src
+    assert "ks.source_path" not in src and "SOURCE_FILE" not in src, "路徑只從 knowledge_share 拿"
+    assert "knowledge_service" not in src, "公開那一面不直接碰書架的檔案層"
 
 
 def test_items_marked_useless_are_not_shared(monkeypatch):

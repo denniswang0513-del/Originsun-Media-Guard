@@ -14,7 +14,7 @@
 import { S, hooks, nav, stopTimers } from './ctx.js';
 import { loadShelf, renderShelf, setTag, refreshShelfQuietly, createPending } from './shelf.js';
 import {
-    openBook, renderBook, renderPane, refetchBook, switchPane, editTags, saveTags, addTags, removeTag, saveDoc, openChapter, compile, rename, remove, toggleSheet, jumpToSection, downloadPdf,
+    openBook, renderBook, renderPane, refetchBook, switchPane, editTags, saveTags, addTags, removeTag, saveDoc, openChapter, compile, rename, remove, toggleSheet, jumpToSection, downloadPdf, downloadSource,
 } from './book.js';
 import { send, saveConclusion, openConclusionEdit, cancelConclusionEdit, conclude } from './chat.js';
 import { loadReports, openReport, openFromHash, leaveReports } from './report.js';
@@ -109,6 +109,7 @@ function _onClick(ev) {
     if (act === 'attach') { toggleSheet(false); const f = S.root.querySelector('#kb-book-file'); if (f) f.click(); return; }
     if (act === 'compile') { toggleSheet(false); compile(); return; }
     if (act === 'pdf') { toggleSheet(false); downloadPdf(); return; }
+    if (act === 'source') { toggleSheet(false); downloadSource(); return; }
     if (act === 'rename') { toggleSheet(false); rename(); return; }
     if (act === 'delete') { toggleSheet(false); remove(); }
 }
