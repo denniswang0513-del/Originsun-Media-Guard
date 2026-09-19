@@ -173,6 +173,21 @@
   .hist-card .r1 .h small { font-weight: 400; color: var(--sub); }
   .hist-card .r2 { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; color: var(--sub); font-size: 13px; margin-top: 3px; }
   .hist-card .r3 { color: var(--sub); font-size: 13px; margin-top: 3px; overflow-wrap: anywhere; }
+  /* 就地核准／退回（owner 2026-09-19「我希望我可以審核」）。只有管理員看得到。 */
+  .lv-act { display: flex; gap: 8px; flex: none; }
+  .lv-act button { min-height: 36px; padding: 6px 14px; border-radius: 2px; font-size: 13px;
+    font-family: inherit; cursor: pointer; border: 1px solid var(--line); background: #fff; }
+  .lv-act button:disabled { opacity: .45; cursor: default; }
+  .lv-act .lv-ok { border-color: var(--ink); background: var(--ink); color: #fff; }
+  .lv-act .lv-no { color: var(--red); }
+  .lv-act .lv-no:hover:not(:disabled) { border-color: var(--red); }
+  @media (max-width: 640px) {
+    /* 待審那幾列在手機上要能折行 —— 名字＋日期＋兩顆鈕擠在一行會把版面推出去 */
+    .hist-year .row { flex-wrap: wrap; }
+    .hist-year .row .grow { flex: 1 1 100%; }
+    .lv-act { width: 100%; }
+    .lv-act button { flex: 1; }
+  }
   @media (max-width: 640px) {
     header { padding: 10px 12px; gap: 8px; }
     header .brand-name { letter-spacing: .12em; font-size: 12px; white-space: nowrap; }
@@ -386,7 +401,13 @@ async function boot() {
         otHost.innerHTML = "";
         otHost.appendChild(cardOvertime(true));   // 加班申請卡（cards-ot.js）
     }
-    if (canTeam) { $("lv-team").style.display = ""; loadTeamLeave(); }
+    if (canTeam) {
+        // 🔴 只有管理員按得動：/leave/applications/{id}/approve|reject 後端守 check_admin。
+        //    合夥人與 hr_leave 仍然是唯讀（看得到待審，但沒有那兩顆鈕）。
+        window.setTeamCanDecide(isAdmin);
+        $("lv-team").style.display = "";
+        loadTeamLeave();
+    }
 }
 
 boot();

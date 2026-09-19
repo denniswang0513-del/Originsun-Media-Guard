@@ -117,23 +117,80 @@ function onLeaveRendered(lv, err) {
 }
 window.onLeaveRendered = onLeaveRendered;
 
-// ── 大家的休假（管理層唯讀）────────────────────────────────────────────────
+// ── 大家的休假 ────────────────────────────────────────────────────────────
+// 唯讀給 hr_leave／合夥人看；**管理員多了就地核准／退回**（owner 2026-09-19：
+// 「我希望我可以審核」「審核讓假通過」）—— 原本要跑去 CRM 人事管理才按得到。
 const TEAM_AHEAD_DAYS = 60;   // 「接下來」看多遠
+//: 核准／退回的後端守 check_admin，按鈕只給管理員（leave.html boot 時填）
+let _teamCanDecide = false;
+window.setTeamCanDecide = (v) => { _teamCanDecide = !!v; };
 function _isoShift(days) { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); }
 function _teamLeaveLine(r, withName) {
     const period = r.start_date === r.end_date ? esc(r.start_date) : `${esc(r.start_date)} ~ ${esc(r.end_date)}`;
     const part = ((_lvNow && _lvNow.vocab && _lvNow.vocab.part_labels) || {})[r.part] || (r.part === "all" ? "" : r.part || "");
     return `<div class="row"><div class="grow"><div class="title">${withName ? esc(r.staff_name) + "　" : ""}${period}　${esc(r.leave_type)}${part ? `（${esc(part)}）` : ""}　${fmtH(r.hours)} h</div>${String(r.reason || "").replace(/\s*~?\s*來源[:：]\s*\S+/g, "").trim() ? `<div class="meta">${esc(String(r.reason || "").replace(/\s*~?\s*來源[:：]\s*\S+/g, "").trim())}</div>` : ""}</div><span class="pill${r.status === "待審" || r.status === "消假待審" ? " hot" : ""}">${esc(r.status)}</span></div>`;
 }
+/** 待審的一張**申請單**（整張，不是子單）。管理員才看得到那兩顆鈕。 */
+function _teamAppLine(a) {
+    const kinds = (a.kinds || []).map(esc).join("／") || "-";
+    const period = a.start_date === a.end_date ? esc(a.start_date) : `${esc(a.start_date)} ~ ${esc(a.end_date)}`;
+    const note = String(a.reason || "").replace(/\s*~?\s*來源[:：]\s*\S+/g, "").trim();
+    const cancelling = a.status === "消假待審";
+    return `<div class="row" data-app="${esc(a.id)}">
+        <div class="grow">
+            <div class="title">${esc(a.staff_name)}　${period}　${kinds}　${fmtH(a.days)} 天</div>
+            ${note ? `<div class="meta">${esc(note)}</div>` : ""}
+        </div>
+        <span class="pill hot">${esc(a.status)}</span>
+        ${_teamCanDecide ? `<span class="lv-act">
+            <button type="button" class="lv-ok" data-act="${cancelling ? "cancel-ok" : "ok"}" data-id="${esc(a.id)}">${cancelling ? "准消假" : "核准"}</button>
+            <button type="button" class="lv-no" data-act="${cancelling ? "cancel-no" : "no"}" data-id="${esc(a.id)}">${cancelling ? "不准" : "退回"}</button>
+        </span>` : ""}
+    </div>`;
+}
+
+/** 按下核准／退回。做完重畫整區（數字、待審筆數、接下來都會變）。 */
+async function decideLeave(id, act, btn) {
+    const ask = { no: "退回的理由（員工看得到）", "cancel-no": "不准消假的理由（員工看得到）" }[act];
+    let note = "";
+    if (ask) {
+        note = (prompt(ask) || "").trim();
+        if (!note) return;                       // 取消或沒填 → 不送（後端也會擋）
+    } else if (!confirm(act === "ok" ? "確定核准這張假單？扣的時數會照員工挑的那幾筆走。"
+                                     : "確定讓這張消假通過？時數會放回去、日曆的事件會拿掉。")) {
+        return;
+    }
+    const span = btn.closest(".lv-act");
+    if (span) span.querySelectorAll("button").forEach(b => { b.disabled = true; });
+    const base = `/api/v1/hr/leave/applications/${encodeURIComponent(id)}`;
+    const call = {
+        ok: [base + "/approve", {}],
+        no: [base + "/reject", { note }],
+        "cancel-ok": [base + "/cancel_decide", { approve: true, note }],
+        "cancel-no": [base + "/cancel_decide", { approve: false, note }],
+    }[act];
+    try {
+        // mfetch 直接把 opts 丟給 fetch —— body 要自己 stringify（同 cards-hr.js 的寫法）
+        await mjson(call[0], { method: "POST", body: JSON.stringify(call[1]) });
+    } catch (e) {
+        alert("沒有成功：" + (e.message || e));
+        if (span) span.querySelectorAll("button").forEach(b => { b.disabled = false; });
+        return;
+    }
+    await loadTeamLeave();
+    if (typeof window.reloadLeaveCard === "function") window.reloadLeaveCard();   // 自己那張卡的數字也會變
+}
+window.decideLeave = decideLeave;
+
 async function loadTeamLeave() {
     const body = $("team-body");
-    let bal, approved, pending, cancelling;
+    let bal, approved, apps;
     try {
-        [bal, approved, pending, cancelling] = await Promise.all([
+        [bal, approved, apps] = await Promise.all([
             mjson("/api/v1/hr/balances"),
             mjson("/api/v1/hr/leave?status=" + encodeURIComponent("已核准")),
-            mjson("/api/v1/hr/leave?status=" + encodeURIComponent("待審")),
-            mjson("/api/v1/hr/leave?status=" + encodeURIComponent("消假待審")),
+            // 🔴 待審走**申請單**那支（整張核准）：子單那組單獨核准會讓兩邊狀態對不上
+            mjson("/api/v1/hr/leave/applications"),
         ]);
     } catch (e) { body.innerHTML = `<div class="empty">${esc(e.message || "載入失敗")}</div>`; return; }
     if (!_lvNow) _lvNow = { vocab: bal.vocab || {} };   // 自己那張卡沒畫（純管理層）時，時段字彙從這裡拿
@@ -141,7 +198,8 @@ async function loadTeamLeave() {
     const horizon = _isoShift(TEAM_AHEAD_DAYS);
     const upcoming = (approved.items || []).filter(r => r.end_date >= today && r.start_date <= horizon)
         .sort((a, b) => a.start_date.localeCompare(b.start_date));
-    const hot = [...(pending.items || []), ...(cancelling.items || [])].sort((a, b) => a.start_date.localeCompare(b.start_date));
+    const hot = (apps.items || []).filter(a => a.status === "待審" || a.status === "消假待審")
+        .sort((a, b) => String(a.start_date).localeCompare(String(b.start_date)));
     const nextOf = {};
     for (const r of upcoming) if (!nextOf[r.staff_id]) nextOf[r.staff_id] = r;
     const staff = bal.staff || [];
@@ -153,10 +211,36 @@ async function loadTeamLeave() {
             <td class="num">${fmtH(s.sick_used_days)} 天</td><td class="num">${s.pending_count ? `<span class="pill hot">${s.pending_count}</span>` : ""}</td>
             <td>${nx ? `${esc(nx.start_date)}${nx.end_date !== nx.start_date ? " ~ " + esc(nx.end_date) : ""}　${esc(nx.leave_type)}` : `<span style="color:#a3a3a3">—</span>`}</td></tr>`;
     }).join("");
-    body.innerHTML = `<div class="tbl-wrap"><table class="hist">
+    // 🔴 手機改畫卡片：6 欄 nowrap 的表在 390px 上比螢幕寬，捲起來人名那欄會跑出畫面
+    //    ——看到「病假 1 天、待審 1」卻不知道是誰的（owner 2026-09-19 截圖）。
+    //    同個人總表那條路（_histNarrow ＋ _histCard）。
+    const cards = staff.map(s => {
+        const an = (s.balances || {})["特休"] || {}, comp = (s.balances || {})["補休"] || {};
+        const nx = nextOf[s.staff_id];
+        return `<div class="hist-card">
+            <div class="r1"><b>${esc(s.name)}</b>${s.pending_count ? `<span class="pill hot">待審 ${s.pending_count}</span>` : ""}</div>
+            <div class="r2"><span>特休 ${hd(an.available)}</span><span>補休 ${hd(comp.available)}</span><span>病假已用 ${fmtH(s.sick_used_days)} 天</span></div>
+            <div class="r3">${nx ? `下一次休假　${esc(nx.start_date)}${nx.end_date !== nx.start_date ? " ~ " + esc(nx.end_date) : ""}　${esc(nx.leave_type)}` : "接下來沒有排假"}</div>
+        </div>`;
+    }).join("");
+    body.innerHTML = `${_histNarrow()
+        ? `<div class="hist-cards">${cards || `<div class="empty">沒有在職人員</div>`}</div>`
+        : `<div class="tbl-wrap"><table class="hist">
         <thead><tr><th>人員</th><th class="num">特休剩餘</th><th class="num">補休剩餘</th><th class="num">病假已用</th><th class="num">待審</th><th>下一次休假</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty">沒有在職人員</td></tr>`}</tbody></table></div>
-      <div class="hist-year"><h3>待審中 <span class="tot">${hot.length} 筆（核准在 CRM 人事管理）</span></h3>${hot.map(r => _teamLeaveLine(r, true)).join("") || `<div class="empty">沒有待審的單</div>`}</div>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">沒有在職人員</td></tr>`}</tbody></table></div>`}
+      <div class="hist-year"><h3>待審中 <span class="tot">${hot.length} 筆${_teamCanDecide ? "" : "（核准要管理員）"}</span></h3>${hot.map(_teamAppLine).join("") || `<div class="empty">沒有待審的單</div>`}</div>
       <div class="hist-year"><h3>接下來 ${TEAM_AHEAD_DAYS} 天 <span class="tot">已核准 ${upcoming.length} 筆</span></h3>${upcoming.map(r => _teamLeaveLine(r, true)).join("") || `<div class="empty">接下來沒有人排假</div>`}</div>`;
 }
 window.loadTeamLeave = loadTeamLeave;
+
+// 核准／退回的點擊：委派在 #team-body 上掛一次 —— 那一區每次都整塊重畫，
+// 掛在按鈕身上的監聽會跟著被丟掉。
+document.addEventListener("DOMContentLoaded", () => {
+    const host = $("team-body");
+    if (!host || host.dataset.wired) return;
+    host.dataset.wired = "1";
+    host.addEventListener("click", (ev) => {
+        const b = ev.target.closest("button[data-act][data-id]");
+        if (b && !b.disabled) decideLeave(b.dataset.id, b.dataset.act, b);
+    });
+});

@@ -54,18 +54,57 @@ def test_gate_is_me_leave_everywhere():
 
 
 def test_partners_see_everyone_read_only():
-    """owner 2026-09-15「合夥人是管理層級可以看到大家的休假狀態」：管理員／hr_leave／合夥人（finance_partner）
-    在 /leave.html 多一區「大家的休假」—— 只讀 /hr/balances 與 /hr/leave，不放核准鈕；後端兩支唯讀端點同一組鑰匙。"""
+    """owner 2026-09-15「合夥人是管理層級可以看到大家的休假狀態」：管理員／hr_leave／合夥人
+    在 /leave.html 多一區「大家的休假」；後端兩支唯讀端點同一組鑰匙。
+
+    2026-09-19 起**管理員**可以在這一頁直接核准（owner：「我希望我可以審核」），
+    所以這裡釘的不再是「這個檔不准出現 /approve」，而是**誰按得到**。
+    """
     p, h = _page(), _host()
     assert 'const canTeam = isAdmin || mods.includes("hr_leave") || mods.includes("finance_partner");' in p
-    assert 'if (canTeam) { $("lv-team").style.display = ""; loadTeamLeave(); }' in p
     assert 'if (!canMine && !canTeam) { _show("noperm-view"); return; }' in p, "只有管理層鑰匙、沒有 me_leave 的合夥人也進得來"
     assert '"/api/v1/hr/balances"' in h and '"/api/v1/hr/leave?status="' in h
-    assert "/approve" not in h and "/reject" not in h and "/hr/leave/" not in h and 'method: "POST"' not in h, "合夥人頁只看不動"
+
+    # 🔴 三道一起看 —— 任何一道破了，合夥人就按得到了
+    # 1. 那兩顆鈕只在旗標底下畫
+    line = h[h.index("function _teamAppLine("):]
+    line = line[:line.index("\n}")]
+    assert "_teamCanDecide ?" in line, "核准／退回的鈕要在旗標底下"
+    # 2. 旗標只從 isAdmin 來（不是 canTeam）
+    assert "window.setTeamCanDecide(isAdmin);" in p
+    assert "setTeamCanDecide(canTeam)" not in p, "🔴 合夥人與 hr_leave 不可以按"
+    # 3. 後端守管理員
     api = repo_src("routers/api_hr.py")
+    for fn in ("async def approve_application(", "async def reject_application(",
+               "async def decide_application_cancel("):
+        assert "check_admin(request)" in func_body(api, fn), fn
+
     assert 'LEAVE_VIEWERS = ("hr_leave", "finance_partner")' in api
     for fn in ("async def list_leave(", "async def all_balances("):
         assert "check_admin_or_module(request, *LEAVE_VIEWERS)" in func_body(api, fn), fn
+
+
+def test_approving_here_goes_through_the_whole_application():
+    """🔴 核准要走**整張申請單**那組端點。
+
+    子單那組（`/hr/leave/{id}/approve`）單獨核准會讓申請單與子單的狀態對不上
+    —— api_hr 檔頭寫著這件事，2026-09-15 的 /polish BUG-1 就是它。
+    """
+    h = _host()
+    assert "/hr/leave/applications/" in h
+    body = h[h.index("async function decideLeave("):]
+    body = body[:body.index("\nwindow.decideLeave")]
+    assert "/approve" in body and "/reject" in body and "/cancel_decide" in body
+    assert "退回的理由" in body, "退回要填理由（後端 422，先在畫面上問）"
+
+
+def test_everyone_table_becomes_cards_on_a_phone():
+    """6 欄、每格 nowrap 的表在 390px 上比螢幕寬；捲起來**人名那一欄會跑出畫面**
+    —— 看到「病假 1 天、待審 1」卻不知道是誰的（owner 2026-09-19 截圖）。"""
+    h = _host()
+    body = h[h.index("async function loadTeamLeave("):]
+    assert "_histNarrow()" in body, "窄螢幕要改畫卡片（同個人總表那條路）"
+    assert "hist-cards" in body
 
 
 def test_summary_limit_is_clamped():
