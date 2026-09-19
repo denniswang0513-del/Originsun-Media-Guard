@@ -20,7 +20,7 @@
 <!-- ?v= 是破快取用的：Cloudflare 把 js/css 的 no-cache 改寫成 max-age=14400，
      發版後最久四小時使用者會是「新 html ＋ 舊 css」（版面會整個壞掉）。
      版號由 publish_update.py 自動維護，勿手改。 -->
-<link rel="stylesheet" href="/js/knowledge/knowledge.css?v=2.5.66">
+<link rel="stylesheet" href="/js/knowledge/knowledge.css?v=2.5.67">
 <style>
   /* 色票是一組語彙，不是寫死的顏色 —— 窄螢幕整組換成深色（見檔尾的 @media）。
      🔴 `--red` 原本同時當強調色與危險色；深色底下強調色要換成 logo 的天藍，
@@ -65,13 +65,24 @@
      午夜藍底、天藍到淡紫藍的漸層。PNG 各尺寸同資料夾，給分頁圖示與手機主畫面用。 */
   body > header .brand-mark { display: block; border-radius: 6px; flex: none; }
   @media (max-width: 640px) {
-    body > header .brand-name { letter-spacing: 0.1em; gap: 7px; }
+    /* 390px 上四樣東西塞不下（品牌 150 ＋ 工作台 85 ＋ 帳號 70 ＋ 登出 50 ＋ 間距 36 = 391）。
+       Latin 那半在手機上是裝飾（圖示已經在旁邊），帳號名在工作台裡看得到 —— 兩個都收起來。 */
+    body > header { padding-top: 10px; padding-bottom: 10px; }
+    body > header .brand-name { letter-spacing: 0.08em; gap: 7px; font-size: 14px; }
+    body > header .brand-name .latin { display: none; }
     body > header .brand-mark { width: 22px; height: 22px; }
+    body > header .hdr-right { gap: 8px; }
+    body > header .hdr-user { display: none !important; }
+    body > header .btn-ghost { padding: 6px 11px; font-size: 12.5px; }
+    body > header .btn-ghost .latin { display: none; }
   }
   body > header .hdr-right { display: flex; align-items: center; gap: 12px; }
   body > header .hdr-user { font-size: 12px; color: var(--sub); }
+  /* 🔴 `white-space: nowrap` 是根治：沒有它，flex 放不下時會把每一顆鈕壓到一個字寬，
+     「個人工作台」就變成三行（owner 2026-09-19 手機截圖）。 */
   .btn-ghost { background: none; border: 1px solid var(--line); border-radius: 2px;
-    padding: 6px 14px; font-size: 12px; color: var(--sub); cursor: pointer; }
+    padding: 6px 14px; font-size: 12px; color: var(--sub); cursor: pointer;
+    white-space: nowrap; flex: none; }
   .btn-ghost:hover { color: var(--red); border-color: var(--red); }
 
   /* 左右一律走 max(留白, 安全區)：桌機就是留白，手機遇到瀏海／圓角會自己讓開 */
@@ -151,24 +162,24 @@
 <script type="importmap">
 {
   "imports": {
-    "/js/knowledge/book.js": "/js/knowledge/book.js?v=2.5.66",
-    "/js/knowledge/chat.js": "/js/knowledge/chat.js?v=2.5.66",
-    "/js/knowledge/ctx.js": "/js/knowledge/ctx.js?v=2.5.66",
-    "/js/knowledge/extend.js": "/js/knowledge/extend.js?v=2.5.66",
-    "/js/knowledge/gallery.js": "/js/knowledge/gallery.js?v=2.5.66",
-    "/js/knowledge/index.js": "/js/knowledge/index.js?v=2.5.66",
-    "/js/knowledge/info.js": "/js/knowledge/info.js?v=2.5.66",
-    "/js/knowledge/podcast.js": "/js/knowledge/podcast.js?v=2.5.66",
-    "/js/knowledge/report.js": "/js/knowledge/report.js?v=2.5.66",
-    "/js/knowledge/shelf.js": "/js/knowledge/shelf.js?v=2.5.66",
-    "/js/shared/chunked-upload.js": "/js/shared/chunked-upload.js?v=2.5.66",
-    "/js/shared/clip_utils.js": "/js/shared/clip_utils.js?v=2.5.66",
-    "/js/shared/dom.js": "/js/shared/dom.js?v=2.5.66",
-    "/js/shared/google-signin.js": "/js/shared/google-signin.js?v=2.5.66",
-    "/js/shared/md-lite.js": "/js/shared/md-lite.js?v=2.5.66",
-    "/js/shared/project-pop.js": "/js/shared/project-pop.js?v=2.5.66",
-    "/js/shared/quote-wait.js": "/js/shared/quote-wait.js?v=2.5.66",
-    "/js/shared/utils.js": "/js/shared/utils.js?v=2.5.66"
+    "/js/knowledge/book.js": "/js/knowledge/book.js?v=2.5.67",
+    "/js/knowledge/chat.js": "/js/knowledge/chat.js?v=2.5.67",
+    "/js/knowledge/ctx.js": "/js/knowledge/ctx.js?v=2.5.67",
+    "/js/knowledge/extend.js": "/js/knowledge/extend.js?v=2.5.67",
+    "/js/knowledge/gallery.js": "/js/knowledge/gallery.js?v=2.5.67",
+    "/js/knowledge/index.js": "/js/knowledge/index.js?v=2.5.67",
+    "/js/knowledge/info.js": "/js/knowledge/info.js?v=2.5.67",
+    "/js/knowledge/podcast.js": "/js/knowledge/podcast.js?v=2.5.67",
+    "/js/knowledge/report.js": "/js/knowledge/report.js?v=2.5.67",
+    "/js/knowledge/shelf.js": "/js/knowledge/shelf.js?v=2.5.67",
+    "/js/shared/chunked-upload.js": "/js/shared/chunked-upload.js?v=2.5.67",
+    "/js/shared/clip_utils.js": "/js/shared/clip_utils.js?v=2.5.67",
+    "/js/shared/dom.js": "/js/shared/dom.js?v=2.5.67",
+    "/js/shared/google-signin.js": "/js/shared/google-signin.js?v=2.5.67",
+    "/js/shared/md-lite.js": "/js/shared/md-lite.js?v=2.5.67",
+    "/js/shared/project-pop.js": "/js/shared/project-pop.js?v=2.5.67",
+    "/js/shared/quote-wait.js": "/js/shared/quote-wait.js?v=2.5.67",
+    "/js/shared/utils.js": "/js/shared/utils.js?v=2.5.67"
   }
 }
 </script>
@@ -178,9 +189,9 @@
 <header>
   <!-- 品牌可以點回書架（owner 2026-09-19）。用 <a> 不用委派：頁首在 .kb 外面，
        那個委派只掛在 .kb 上；而且整頁重載回書架本來就是對的行為。 -->
-  <a class="brand-name" href="/knowledge.html" title="回書架"><img class="brand-mark" src="/img/knowledge-icon.svg" alt="" width="26" height="26">Knowledge <span class="accent">知識庫</span></a>
+  <a class="brand-name" href="/knowledge.html" title="回書架"><img class="brand-mark" src="/img/knowledge-icon.svg" alt="" width="26" height="26"><span class="latin">Knowledge </span><span class="accent">知識庫</span></a>
   <div class="hdr-right">
-    <a class="btn-ghost" href="/my.html">個人工作台</a>
+    <a class="btn-ghost" href="/my.html"><span class="latin">個人</span>工作台</a>
     <span class="hdr-user" id="hdr-user" style="display:none;"></span>
     <button class="btn-ghost" id="btn-logout" style="display:none;" onclick="doLogout()">登出</button>
   </div>
