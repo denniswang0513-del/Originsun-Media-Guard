@@ -22,7 +22,7 @@ const cp = meta.copy?.contact ?? {};
 ---
 
 <BaseLayout {...seo} meta={meta}>
-    <section class="pt-32 pb-16 bg-white">
+    <section class="pt-24 sm:pt-32 pb-16 bg-white">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
             <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">{cp.hero_eyebrow ?? "Contact"}</p>
             <h1 class="text-4xl sm:text-6xl font-light tracking-tight mb-6">
@@ -35,7 +35,7 @@ const cp = meta.copy?.contact ?? {};
         </div>
     </section>
 
-    <section class="bg-white pb-20">
+    <section class="bg-white pb-12 sm:pb-20">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <ContactForm meta={meta} />
         </div>

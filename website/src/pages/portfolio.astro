@@ -124,7 +124,7 @@ const seo = buildBasicPageSeo(Astro, {
     </section>
 
     {hasAwards && (
-        <section class="bg-white pb-20">
+        <section class="bg-white pb-12 sm:pb-20">
             <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
                 {/* inline color：BaseLayout 的全域 h1-h4 規則是 unlayered,
                     會蓋過 Tailwind layered utility,故用 inline style 強制 */}
@@ -154,7 +154,7 @@ const seo = buildBasicPageSeo(Astro, {
     )}
 
     <!-- 時間軸主體（單欄、純文字） -->
-    <section class="bg-white pb-20">
+    <section class="bg-white pb-12 sm:pb-20">
         <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
             {years.map(yg => (
                 <div class="mb-12">

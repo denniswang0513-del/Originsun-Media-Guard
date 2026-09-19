@@ -41,10 +41,10 @@ const shownStats: StatItem[] = provided.length > 0 ? provided : DEFAULT_STATS;
 const gridCols = GRID_COLS[shownStats.length] || "grid-cols-3";
 ---
 
-<section class="bg-white py-24 sm:py-32">
+<section class="bg-white py-14 sm:py-24 sm:py-32">
 
     <!-- 1. 自介文字（窄置中） -->
-    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center mb-16 sm:mb-20">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center mb-10 sm:mb-16 sm:mb-20">
         <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-6">{copy.whoweare_eyebrow ?? "About Us"}</p>
 
         <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-[1.15] mb-8 whitespace-pre-line">

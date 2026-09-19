@@ -87,7 +87,7 @@ const seo = buildBasicPageSeo(Astro, {
     <section class="bg-white pb-24">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             {posts.length === 0 ? (
-                <div class="py-20 text-center text-neutral-500">
+                <div class="py-12 sm:py-20 text-center text-neutral-500">
                     <Tr zh="尚無文章" en="No posts yet" />
                 </div>
             ) : (
@@ -119,7 +119,7 @@ const seo = buildBasicPageSeo(Astro, {
                 </div>
             )}
 
-            <div id="news-empty" class="py-20 text-center text-neutral-500 hidden">
+            <div id="news-empty" class="py-12 sm:py-20 text-center text-neutral-500 hidden">
                 <Tr zh="此分類尚無文章" en="No posts in this category yet" />
             </div>
         </div>

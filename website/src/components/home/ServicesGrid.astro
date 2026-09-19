@@ -12,9 +12,9 @@ const { services } = Astro.props;
 warnUnknownIcons(services.map(s => s.icon), "ServicesGrid");
 ---
 
-<section class="bg-neutral-50 py-24 sm:py-32 border-y border-neutral-200">
+<section class="bg-neutral-50 py-14 sm:py-24 sm:py-32 border-y border-neutral-200">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="text-center mb-16">
+        <div class="text-center mb-10 sm:mb-16">
             <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-2">Services</p>
             <h2 class="text-3xl sm:text-4xl font-light tracking-tight text-neutral-900">
                 <Tr k="services_title" />
@@ -40,7 +40,7 @@ warnUnknownIcons(services.map(s => s.icon), "ServicesGrid");
                 ))}
             </div>
         ) : (
-            <div class="py-20 text-center text-neutral-500">
+            <div class="py-12 sm:py-20 text-center text-neutral-500">
                 <Tr zh="服務項目載入中…" en="Loading services…" />
             </div>
         )}

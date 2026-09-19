@@ -61,11 +61,13 @@ const awardGroups = Array.from(_awardGroups.values())
         <table class="w-full border-collapse">
             <tbody>
                 {awardGroups.map(g => (
-                    <tr class="align-top">
-                        <td class="py-4 pr-4 sm:pr-6 text-neutral-900 font-medium tracking-wide whitespace-nowrap">
+                    <tr class="align-top block sm:table-row border-b border-neutral-100 last:border-0 sm:border-0">
+                        {/* 🔴 手機上改成上下堆疊：左欄原本 `whitespace-nowrap`，在 390px 會把
+                            右欄擠成一條，每一列都變得很高（2026-09-19 實測整張表 2,733px）。 */}
+                        <td class="block sm:table-cell pt-4 pb-1 sm:py-4 pr-0 sm:pr-6 text-neutral-900 font-medium tracking-wide sm:whitespace-nowrap">
                             <Tr zh={filmHeadingParts(g).zh} en={filmHeadingParts(g).en} />
                         </td>
-                        <td class="py-4">
+                        <td class="block sm:table-cell pb-4 sm:py-4">
                             {g.items.map(a => (
                                 <div class="py-1 first:pt-0 last:pb-0">
                                     <span class="text-sm sm:text-[15px] text-neutral-600 tracking-wide leading-relaxed"><Tr zh={a.name_zh} en={a.name_en || a.name_zh} /></span>
@@ -79,14 +81,17 @@ const awardGroups = Array.from(_awardGroups.values())
     </div>
 )}
 
-<div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
-    {years.map(yg => (
-        <div class="mb-12">
-            <div class="flex items-center gap-4 mb-6">
+{/* 歷年作品在手機上 9,990px（約 15 個螢幕）—— 依年份收合，只留最新那一年展開。
+    桌機維持全部攤開（底下那段 script 會把 details 全部打開），版面不變。 */}
+<div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8" id="portfolio-years">
+    {years.map((yg, yi) => (
+        <details class="mb-8 sm:mb-12 group/yr" open={yi === 0}>
+            <summary class="flex items-center gap-4 mb-0 group-open/yr:mb-6 sm:mb-6 cursor-pointer list-none sm:cursor-default">
                 <span class="text-3xl sm:text-4xl font-bold tracking-tight text-[#c9372c]">{yg.year ?? "—"}</span>
                 <span class="flex-1 h-px bg-neutral-200"></span>
                 <span class="text-xs tracking-[0.25em] uppercase text-neutral-400">{yg.works.length} <Tr zh="件" en="works" /></span>
-            </div>
+                <span class="sm:hidden text-neutral-400 text-xs transition-transform group-open/yr:rotate-180">▼</span>
+            </summary>
             <ul class="space-y-2.5">
                 {yg.works.map(w => (
                     <li class="flex items-baseline gap-x-4 text-[15px] leading-relaxed">
@@ -95,6 +100,17 @@ const awardGroups = Array.from(_awardGroups.values())
                     </li>
                 ))}
             </ul>
-        </div>
+        </details>
     ))}
 </div>
+
+<script>
+    // 桌機把年份全部打開（手機才收合）—— `details` 的開合瀏覽器管，CSS 打不開它。
+    const openAll = () => {
+        if (window.innerWidth < 640) return;
+        document.querySelectorAll<HTMLDetailsElement>("#portfolio-years details")
+            .forEach(d => { d.open = true; });
+    };
+    openAll();
+    window.addEventListener("resize", openAll);
+</script>

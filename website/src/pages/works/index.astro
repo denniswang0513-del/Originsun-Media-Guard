@@ -109,7 +109,7 @@ const seo = buildBasicPageSeo(Astro, {
     <!-- Pagefind 搜尋（靜態站全站索引），CSS 從 npm 包載 -->
     <link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
 
-    <section class="pt-32 pb-20 bg-white">
+    <section class="pt-24 sm:pt-32 pb-12 sm:pb-20 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center mb-12">
                 <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Portfolio</p>
@@ -153,7 +153,7 @@ const seo = buildBasicPageSeo(Astro, {
                  data-active-category={activeCategory || ""}
                  data-active-tag={activeTag || ""}
                  data-fold-tag={SERIES_FOLD_TAG}
-                 class="mt-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10">
+                 class="mt-10 sm:mt-16 grid grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-8 sm:gap-10">
                 {gridEntries.map(entry => (
                     <div class="work-item"
                          data-categories={entry.cats.join(",")}
@@ -173,7 +173,7 @@ const seo = buildBasicPageSeo(Astro, {
                 </button>
             </div>
 
-            <div id="works-empty" class="py-20 text-center text-neutral-500 hidden">
+            <div id="works-empty" class="py-12 sm:py-20 text-center text-neutral-500 hidden">
                 <Tr k="works_no_items" />
             </div>
         </div>

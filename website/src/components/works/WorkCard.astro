@@ -19,7 +19,7 @@ const thumb = work.card_image || resolveThumbnail(work.youtube_id, work.slug, "h
 ---
 
 <a href={`/works/${work.slug}`} class="group block">
-    <div class="relative overflow-hidden aspect-video bg-neutral-100 mb-4">
+    <div class="relative overflow-hidden aspect-video bg-neutral-100 mb-2 sm:mb-4">
         <SmartImage src={thumb}
                     alt={work.title}
                     width={1280} height={720}
@@ -48,7 +48,7 @@ const thumb = work.card_image || resolveThumbnail(work.youtube_id, work.slug, "h
                 )}
             </div>
         )}
-        <h3 class="text-base sm:text-lg font-medium text-neutral-900 tracking-wide leading-snug group-hover:text-[#c9372c] transition-colors">
+        <h3 class="text-sm sm:text-lg font-medium text-neutral-900 tracking-wide leading-snug group-hover:text-[#c9372c] transition-colors">
             <Tr zh={work.title} en={work.title_en || work.title} />
         </h3>
         {work.tags && work.tags.length > 0 && (

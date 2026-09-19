@@ -32,9 +32,9 @@ const cp = meta.copy?.services ?? {};
 ---
 
 <BaseLayout {...seo} meta={meta}>
-    <section class="pt-32 pb-20 bg-white">
+    <section class="pt-24 sm:pt-32 pb-12 sm:pb-20 bg-white">
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="text-center mb-16">
+            <div class="text-center mb-10 sm:mb-16">
                 <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">{cp.hero_eyebrow ?? "Services"}</p>
                 <h1 class="text-4xl sm:text-5xl font-light tracking-tight mb-6">
                     <Tr zh={cp.hero_title_zh ?? "我們能為您做的"} en={cp.hero_title_en ?? "What We Can Do"} />
@@ -46,7 +46,7 @@ const cp = meta.copy?.services ?? {};
             </div>
 
             {services.length === 0 ? (
-                <div class="py-20 text-center text-neutral-500">
+                <div class="py-12 sm:py-20 text-center text-neutral-500">
                     <Tr zh="服務項目載入中…" en="Loading services…" />
                 </div>
             ) : (
@@ -84,7 +84,7 @@ const cp = meta.copy?.services ?? {};
     </section>
 
     <!-- CTA 區塊 -->
-    <section class="bg-neutral-50 py-20">
+    <section class="bg-neutral-50 py-12 sm:py-20">
         <div class="max-w-3xl mx-auto px-4 text-center">
             <h2 class="text-2xl sm:text-3xl font-light tracking-tight mb-6">
                 <Tr zh={cp.cta_heading_zh ?? "有影像製作需求？"} en={cp.cta_heading_en ?? "Have a Project in Mind?"} />
