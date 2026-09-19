@@ -20,7 +20,7 @@
 <!-- ?v= 是破快取用的：Cloudflare 把 js/css 的 no-cache 改寫成 max-age=14400，
      發版後最久四小時使用者會是「新 html ＋ 舊 css」（版面會整個壞掉）。
      版號由 publish_update.py 自動維護，勿手改。 -->
-<link rel="stylesheet" href="/js/knowledge/knowledge.css?v=2.5.62">
+<link rel="stylesheet" href="/js/knowledge/knowledge.css?v=2.5.63">
 <style>
   /* 色票是一組語彙，不是寫死的顏色 —— 窄螢幕整組換成深色（見檔尾的 @media）。
      🔴 `--red` 原本同時當強調色與危險色；深色底下強調色要換成 logo 的天藍，
@@ -39,6 +39,9 @@
     --bg-soft: #fafafa; --ok: #136c34; --warn: #b45309;
     --ok-bg: #e6f4ea; --warn-bg: #fff3e0; --bad-bg: #fdecea; --na-bg: #f0f0f0;
     --shadow: rgba(0,0,0,.14); --shadow-soft: rgba(0,0,0,.12);
+    /* 點開的大圖那一層：**兩套一樣**（看圖時畫面讓給圖，淺色底會搶）。
+       放進色票是為了「顏色一律走色票」那條規則仍然成立，不是為了之後換色。 */
+    --lb-bg: rgba(2,8,20,.96); --lb-ink: #E8EEF8; --lb-btn: rgba(255,255,255,.12);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--ink);
@@ -130,6 +133,9 @@
       --bg-soft: #0A1730; --ok: #6EE7B7; --warn: #FCD34D;
       --ok-bg: #0E3226; --warn-bg: #32270F; --bad-bg: #331616; --na-bg: #13294B;
       --shadow: rgba(0,0,0,.5); --shadow-soft: rgba(0,0,0,.45);
+    /* 點開的大圖那一層：**兩套一樣**（看圖時畫面讓給圖，淺色底會搶）。
+       放進色票是為了「顏色一律走色票」那條規則仍然成立，不是為了之後換色。 */
+    --lb-bg: rgba(2,8,20,.96); --lb-ink: #E8EEF8; --lb-btn: rgba(255,255,255,.12);
     }
     body > header { background: var(--bg); }
     /* 深色底下的輸入框游標與自動填入 */
@@ -145,23 +151,23 @@
 <script type="importmap">
 {
   "imports": {
-    "/js/knowledge/book.js": "/js/knowledge/book.js?v=2.5.62",
-    "/js/knowledge/chat.js": "/js/knowledge/chat.js?v=2.5.62",
-    "/js/knowledge/ctx.js": "/js/knowledge/ctx.js?v=2.5.62",
-    "/js/knowledge/extend.js": "/js/knowledge/extend.js?v=2.5.62",
-    "/js/knowledge/gallery.js": "/js/knowledge/gallery.js?v=2.5.62",
-    "/js/knowledge/index.js": "/js/knowledge/index.js?v=2.5.62",
-    "/js/knowledge/info.js": "/js/knowledge/info.js?v=2.5.62",
-    "/js/knowledge/report.js": "/js/knowledge/report.js?v=2.5.62",
-    "/js/knowledge/shelf.js": "/js/knowledge/shelf.js?v=2.5.62",
-    "/js/shared/chunked-upload.js": "/js/shared/chunked-upload.js?v=2.5.62",
-    "/js/shared/clip_utils.js": "/js/shared/clip_utils.js?v=2.5.62",
-    "/js/shared/dom.js": "/js/shared/dom.js?v=2.5.62",
-    "/js/shared/google-signin.js": "/js/shared/google-signin.js?v=2.5.62",
-    "/js/shared/md-lite.js": "/js/shared/md-lite.js?v=2.5.62",
-    "/js/shared/project-pop.js": "/js/shared/project-pop.js?v=2.5.62",
-    "/js/shared/quote-wait.js": "/js/shared/quote-wait.js?v=2.5.62",
-    "/js/shared/utils.js": "/js/shared/utils.js?v=2.5.62"
+    "/js/knowledge/book.js": "/js/knowledge/book.js?v=2.5.63",
+    "/js/knowledge/chat.js": "/js/knowledge/chat.js?v=2.5.63",
+    "/js/knowledge/ctx.js": "/js/knowledge/ctx.js?v=2.5.63",
+    "/js/knowledge/extend.js": "/js/knowledge/extend.js?v=2.5.63",
+    "/js/knowledge/gallery.js": "/js/knowledge/gallery.js?v=2.5.63",
+    "/js/knowledge/index.js": "/js/knowledge/index.js?v=2.5.63",
+    "/js/knowledge/info.js": "/js/knowledge/info.js?v=2.5.63",
+    "/js/knowledge/report.js": "/js/knowledge/report.js?v=2.5.63",
+    "/js/knowledge/shelf.js": "/js/knowledge/shelf.js?v=2.5.63",
+    "/js/shared/chunked-upload.js": "/js/shared/chunked-upload.js?v=2.5.63",
+    "/js/shared/clip_utils.js": "/js/shared/clip_utils.js?v=2.5.63",
+    "/js/shared/dom.js": "/js/shared/dom.js?v=2.5.63",
+    "/js/shared/google-signin.js": "/js/shared/google-signin.js?v=2.5.63",
+    "/js/shared/md-lite.js": "/js/shared/md-lite.js?v=2.5.63",
+    "/js/shared/project-pop.js": "/js/shared/project-pop.js?v=2.5.63",
+    "/js/shared/quote-wait.js": "/js/shared/quote-wait.js?v=2.5.63",
+    "/js/shared/utils.js": "/js/shared/utils.js?v=2.5.63"
   }
 }
 </script>

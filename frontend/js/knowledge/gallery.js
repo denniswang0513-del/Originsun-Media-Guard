@@ -13,6 +13,78 @@
  */
 import { S, api, esc, errText, alive, toast, chapterList, figureSource, sizeStyle } from './ctx.js';
 
+/**
+ * 點開的大圖（只在手機；桌機本來就是整排大圖）。
+ *
+ * owner 2026-09-19：「手機的圖輯 點開跳大圖」—— 兩欄的縮圖只有 170px 寬，
+ * 書裡的地圖與表格那種圖在那個尺寸等於看不到。
+ *
+ * 🔴 大圖直接沿用縮圖已經換好的 blob（`_fillAssets` 帶 token 抓的）——
+ * 再打一次 `<img src="/api/…">` 會 401，圖是私有的。
+ */
+let _lb = null;
+
+const _figs = () => [...(S.root ? S.root.querySelectorAll('.kb-gallery.all figure') : [])];
+
+export function openBigImage(img) {
+    const i = _figs().indexOf(img.closest('figure'));
+    if (i < 0) return;
+    if (!_lb) {
+        _lb = document.createElement('div');
+        _lb.className = 'kb-lb';
+        _lb.innerHTML = `<span class="n-of"></span><img alt="">
+            <button type="button" class="nav p" aria-label="上一張">\u2039</button>
+            <button type="button" class="nav n" aria-label="下一張">\u203a</button>
+            <button type="button" class="x" aria-label="關閉">\u00d7</button>
+            <div class="cap"></div>`;
+        _lb.addEventListener('click', (ev) => {
+            if (ev.target.closest('.nav.p')) { stepBigImage(-1); return; }
+            if (ev.target.closest('.nav.n')) { stepBigImage(1); return; }
+            if (!ev.target.closest('img')) closeBigImage();
+        });
+        document.body.appendChild(_lb);
+        document.addEventListener('keydown', _lbKey);
+    }
+    _lb.dataset.i = String(i);
+    _paintBigImage();
+    document.body.style.overflow = 'hidden';
+}
+
+function _paintBigImage() {
+    const figs = _figs();
+    const i = Number(_lb.dataset.i) || 0;
+    const fig = figs[i];
+    if (!fig) { closeBigImage(); return; }
+    const src = fig.querySelector('img');
+    _lb.querySelector('img').src = src.currentSrc || src.src;
+    _lb.querySelector('.cap').innerHTML = fig.querySelector('figcaption').innerHTML;
+    _lb.querySelector('.n-of').textContent = `${i + 1} / ${figs.length}`;
+    _lb.querySelector('.nav.p').disabled = i <= 0;
+    _lb.querySelector('.nav.n').disabled = i >= figs.length - 1;
+}
+
+export function stepBigImage(d) {
+    if (!_lb) return;
+    const i = (Number(_lb.dataset.i) || 0) + d;
+    if (i < 0 || i >= _figs().length) return;
+    _lb.dataset.i = String(i);
+    _paintBigImage();
+}
+
+export function closeBigImage() {
+    if (_lb) _lb.remove();
+    _lb = null;
+    document.removeEventListener('keydown', _lbKey);
+    document.body.style.overflow = '';
+}
+
+function _lbKey(ev) {
+    if (!_lb) return;
+    if (ev.key === 'Escape') closeBigImage();
+    else if (ev.key === 'ArrowLeft') stepBigImage(-1);
+    else if (ev.key === 'ArrowRight') stepBigImage(1);
+}
+
 /** 照章分組：`[[章標題, [圖…]], …]`，落在任何一章之外的收在最後。 */
 function _byChapter(assets) {
     const chs = chapterList(S.book || {});

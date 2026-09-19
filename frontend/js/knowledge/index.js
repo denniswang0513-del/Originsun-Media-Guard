@@ -19,6 +19,7 @@ import {
 import { send, saveConclusion, openConclusionEdit, cancelConclusionEdit, conclude } from './chat.js';
 import { loadReports, openReport, openFromHash, leaveReports } from './report.js';
 import { editInfo, saveInfo, toggleShare, copyShare, togglePart } from './info.js';
+import { openBigImage, closeBigImage } from './gallery.js';
 import { runExtend, collectOne, rateExtend, toggleWatch, toggleWatchAll,
     editFocus, saveFocus } from './extend.js';
 
@@ -59,6 +60,10 @@ function _onKey(ev) {
 }
 
 function _onClick(ev) {
+    // 手機的圖輯是兩欄縮圖：點一下看大的（桌機本來就是整排大圖，不攔）。
+    // 圖片沒有 data-kact —— 它不是按鈕，是內容，所以走這一條。
+    const im = ev.target.closest('.kb-gallery.all figure img');
+    if (im && window.matchMedia('(max-width: 640px)').matches) { openBigImage(im); return; }
     const el = ev.target.closest('[data-kact]');
     if (!el || !S.root.contains(el)) return;
     const act = el.dataset.kact;
@@ -70,7 +75,7 @@ function _onClick(ev) {
     if (act === 'back') { stopTimers(); leaveReports(); refreshShelfQuietly(); return; }
     if (act === 'reports') { stopTimers(); loadReports(); return; }
     if (act === 'report') { openReport(el.dataset.id); return; }
-    if (act === 'pane') { toggleSheet(false); switchPane(el.dataset.pane); return; }
+    if (act === 'pane') { toggleSheet(false); closeBigImage(); switchPane(el.dataset.pane); return; }
     if (act === 'more') { toggleSheet(true); return; }
     if (act === 'sheet-close') { toggleSheet(false); return; }
     if (act === 'conclude-from-sheet') { toggleSheet(false); switchPane('chat'); conclude(); return; }
